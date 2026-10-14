@@ -24318,7 +24318,7 @@
       // Terminal schloss ihn nach Sekunden, und der Aufruf am Lauf-Ende öffnete einen ZWEITEN — der Riegel oben kannte 'geschlossen'
       // nicht). Ein Hedge mit Ticket, der vor < 10 min geöffnet wurde, gilt auch geschlossen als „dieser Start hatte seinen Hedge".
       const geoeffnetMs = hz ? (Date.parse(hz.opened_at || '') || 0) : 0
-      if(hz && hz.ticket && hz.status === 'geschlossen' && geoeffnetMs && Date.now() - geoeffnetMs < 10 * 60000){
+      if(hz && hz.ticket && hz.status === 'geschlossen' && geoeffnetMs && Date.now() - geoeffnetMs < 10 * 60000 && !(r && r.rueckkehr)){   // .1560: Rückkehr-Wache darf wieder öffnen
         console.warn('[hedgeSolo] nicht erneut geöffnet — dieser Start hatte schon einen Hedge (Ticket', hz.ticket, ', geschlossen)')
         return hz
       }
@@ -26208,6 +26208,12 @@
     // Konto seit ≥ 10 s stabil (Gegenprüfung 25.09.2026): nach dem Zurückschalten von Konto B auf A ist die Tabelle kurz leer —
     // ohne diese Regel hätte eine einzige Lesung „Konto A, leer" den Hedge geschlossen, obwohl der Master läuft.
     if(!(o.kontoStabilMs >= (o.schnell ? 2000 : 10000))) return false
+    // RUHE NACH DEM KONTO-WECHSEL (.1560, Vorfall Mike pc-l5o8bv 15.10.2026 02:38 Dubai): 21 s nach dem Fill auf …1311 — direkt nach dem
+    // Tradovate-Login-Wechsel vom Apex-Login — meldete das Puls-Chrome das Konto mit Leer-Text, ≥ 1 s, Master vorher gesehen → Fusion zu,
+    // der Master lief weiter (Reader 02:42: Long 3 NQZ6, −1.785 $), Pascal musste von Hand nachhedgen. TradingViews Panel baut die
+    // Positionstabelle nach einem Login/Konto-Wechsel neu auf und zeigt dabei kurz „no open positions". Deshalb gilt die 1-s-Regel erst,
+    // wenn der Reader das Plan-Konto ≥ 60 s ununterbrochen zeigt; davor muss die Liste ≥ 10 s leer sein (wie die langsame Regel).
+    const ruhig = o.kontoStabilMs >= 60000
     const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
     const zeilen = o.liste.filter(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || '')); return xw === w })
     // Position im Plan-Symbol MIT Plan-Richtung (Tradovate nettet je Symbol): Menge 0 = weg, Teilmenge = nur Hinweis, nie schließen
@@ -26218,7 +26224,7 @@
       return true
     })
     if(offen) return false
-    return o.leerSeitMs >= (o.schnell ? 1000 : 10000)
+    return o.leerSeitMs >= ((o.schnell && ruhig) ? 1000 : 10000)
   }
   // Teilschluss (nur Hinweis am Chip, nie schließen): Menge in der Plan-Wurzel/-Richtung kleiner als die Kontrakte des Plans
   function hedgeMasterTeilweise(liste, wurzel, richtung, kontrakte){
@@ -26414,6 +26420,46 @@
   }   // je Plan höchstens ein Nachhol-Versuch pro Tab (25.09.2026)   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
   let _hedgeWacheBusy = false
   const _hedgePcUmgezogen = new Set()   // Pläne, deren hedge.pc dieser Tab schon auf die gültige Kennung umgeschrieben hat
+  /* RÜCKKEHR-WACHE (.1560, Finn 15.10.2026 nach Mike …1311: „kannst du das fixen, dass mir die Scheiße nicht mehr passiert"): hat der
+   * Reader-Weg den Hedge geschlossen (master_ende_reader / master_nie_da) und zeigt der Reader binnen 3 min danach die Master-Position
+   * dieses Plans doch wieder (Konto passt, frisch, Symbol-Wurzel + Richtung, zwei Lesungen ≥ 2 s auseinander), dann war das Ende falsch:
+   * Plan zurück auf „open" (Guard status review, Ende-Stempel weg), Fusion-Hedge mit den Leveln aus dem Puls-Fill wieder öffnen, Toast +
+   * Handy. Einmal je Plan und Tab; nur am PC mit Copier-Backend. Nie bei Enden über Level/Feed/Hand (andere Gründe) — die haben Beweise. */
+  const _hedgeRueckkehrGesehen = new Map()   // plan-id → Zeit der ersten Wieder-Sichtung
+  const _hedgeRueckkehrFertig = new Set()
+  async function hedgeRueckkehrWache(_tp){
+    for(const p of (_tp || [])){
+      try{
+        const hx = p && p.mt5Baseline && p.mt5Baseline.hedge
+        if(!p || p.route !== 'tvv2' || p.status !== 'review' || !hx || hx.status !== 'geschlossen') continue
+        if(hx.grund !== 'master_ende_reader' && hx.grund !== 'master_nie_da') continue
+        const pid = String(p.id)
+        if(_hedgeRueckkehrFertig.has(pid)) continue
+        const seitZu = Date.now() - (Date.parse(hx.closed_at || '') || 0)
+        if(!(seitZu > 0 && seitZu <= 180000)) continue
+        if(hedgeReaderMasterDa(p) !== true){ _hedgeRueckkehrGesehen.delete(pid); continue }
+        const erst = _hedgeRueckkehrGesehen.get(pid)
+        if(!erst){ _hedgeRueckkehrGesehen.set(pid, Date.now()); continue }
+        if(Date.now() - erst < 2000) continue
+        _hedgeRueckkehrFertig.add(pid)
+        if(!(await hedgeSperre(p.id, 'rueckkehr', 30))) continue
+        const { data, error } = await supabase.from('trade_plans').update({ status: 'open', ended_at: null })
+          .eq('id', p.id).eq('status', 'review').select('*').single()
+        if(error || !data){ console.warn('[hedge] Rückkehr: Plan nicht zurück auf open', p.id, error); continue }
+        try{ await baselinePatch(p.id, { final: null, live: { offen: true, at: new Date().toISOString() } }, 'open') }catch(_){}
+        const i = tradePlans.findIndex(x => String(x.id) === pid); if(i >= 0) tradePlans[i] = rowToPlan(data)
+        const pf = (i >= 0 ? tradePlans[i] : null) || rowToPlan(data)
+        const ein = pf.mt5Baseline && pf.mt5Baseline.tv && Number(pf.mt5Baseline.tv.einstieg_nq)
+        const txt = `${pf.masterName || 'Plan'}: Reader zeigt den Master wieder (${seitZu > 0 ? Math.round(seitZu / 1000) : '?'} s nach „${hx.grund === 'master_nie_da' ? 'Master nie da' : 'Master zu laut Reader'}") — Plan wieder offen, Fusion-Hedge wird neu geöffnet`
+        if(typeof atToast === 'function') atToast('⟲ ' + txt, 'end')
+        try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Hedge wieder geöffnet', txt, 'https://prophos.pages.dev/prophos#trades', 'hedge-rueckkehr-' + pid.slice(0, 8)) }catch(_){}
+        try{ await hedgeSoloOeffnen(pf, { klick_at: new Date().toISOString(), nachgeholt: true, rueckkehr: true, rueckkehr_grund: hx.grund,
+          einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (pf.mt5Baseline && pf.mt5Baseline.tv && pf.mt5Baseline.tv.einstieg_symbol) || null }) }
+        catch(e){ console.warn('[hedge] Rückkehr: Hedge nicht geöffnet', e) }
+        try{ renderTradePlans() }catch(_){}
+      }catch(e){ console.warn('[hedge] Rückkehr-Wache', e) }
+    }
+  }
   async function hedgeWacheTick(){
     if(_hedgeWacheBusy) return
     // Am PC (Terminal dort): voller Wächter. Am Mac (Backend .475): nur der Ring-Abgleich aus mt5_live, damit die Karte
@@ -26427,6 +26473,7 @@
       // zeigt der frische Stand eine Solo-Position, die keinem sichtbaren Plan gehört, wird NICHT geöffnet (könnte genau der
       // verlorene Hedge sein) — Status 'unklar' mit Ticket, Mensch prüft. Liste nicht lesbar → nichts tun.
       if(amPc){
+        try{ await hedgeRueckkehrWache(_tp) }catch(e){ console.warn('[hedge] Rückkehr-Wache', e) }   // .1560: falsches Reader-Ende heilen
         const liste0 = hedgeSoloListeFrisch()
         // Copier b30d580: plan_id (aus dem open-Auftrag) oder plan8 (aus dem Kommentar 'PXsolo:<plan8>')
         const kennung = q => (q && q.plan_id) ? String(q.plan_id).slice(0, 8) : (q && q.plan8) ? String(q.plan8).slice(0, 8) : null
@@ -26599,7 +26646,8 @@
               schnell, gesehen: _hedgeMasterGesehen.has(pidK) })
             // Hedge öffnete beim Senden-Klick, die Master-Position tauchte aber nie auf (Order abgelehnt / nicht gefüllt): Puls-Chrome-Reader
             // (Beweis-Modus) zeigt das Plan-Konto ≥ 10 s flach, Konto ≥ 10 s stabil, Open ≥ 30 s her → Fusion wieder zu (01.10.2026)
-            if(schnell && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 10000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 10000
+            // .1560: Konto ≥ 60 s stabil und ≥ 30 s leer (vorher 10/10 — Apex-Hedge Mike 02:36 Dubai nach dem Zurückschalten vom Hand-Konto zu)
+            if(schnell && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 60000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 30000
                && (Date.now() - (Date.parse(h.opened_at || h.at || '') || Date.now())) >= 30000){
               _hedgeLeerSeit.delete(pidK)
               await hedgeSoloSchliessen(p, 'master_nie_da', kurs)
@@ -43972,7 +44020,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1559'
+  const OS_TAB_BUILD = '2026-09-22.1560'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
