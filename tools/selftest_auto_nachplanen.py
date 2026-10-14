@@ -29,11 +29,12 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S", "AP_TZ_TAG", "AP_NACHPLAN_REST_RE", "AP_REST_MIN_CFD")]
+    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S", "AP_TZ_TAG", "AP_NACHPLAN_REST_RE", "AP_REST_MIN_CFD", "AP_HB_TZ")]
+                   + [re.search(r"^AP_NEU_BIS_STANDARD = .*$", src, re.M).group(0)]
                    + [re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
                       for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
                    + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
-                                         "ap_nachplan_ziel_frei", "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
+                                         "ap_nachplan_ziel_frei", "ap_nachplan_neu_bis", "ap_konto_neu_zu_spaet", "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
                                          # 09.10.2026 Countdown/Knopf: gemeinsame Strecke + Sperre, reine Helfer
                                          "ap_nachplan_naechster", "ap_nachplan_planungstag", "ap_bal_gelesen", "_ap_nachplan_rechnen",
                                          "ap_nachplan_tick")]), a)
@@ -87,6 +88,23 @@ def main():
            {"tag": tag, "ausgelassen": [{"konto_id": "k-9", "grund": "vom Auto-Planer ausgenommen (Haken im Konto aus)"},
                                         {"konto_id": "k-10", "grund": "vom Auto-Planer ausgenommen (Haken im Konto aus)"}]}, set())
     check(k3 == ["k-9"], f"Haken wieder an → k-9 wird nachgeplant, k-10 (Haken aus) bleibt draußen ({k3})")
+
+    # 15.10.2026 (Finn, Faustregel): heute nach 16:00 Dubai angelegte Konten (Neukauf / Nachfolger aus Überprüfen) erst morgen —
+    # davor angelegte heute noch; gestern angelegte immer; ohne jetzt/neu_bis (alte Aufrufe) unverändert
+    NB = a["ap_nachplan_neu_bis"]
+    check(NB(None) == ("Asia/Dubai", 16 * 60) and NB({"neu_bis": {"tz": "Europe/Berlin", "uhr": "14:30"}}) == ("Europe/Berlin", 14 * 60 + 30)
+          and NB({"neu_bis": "kaputt"}) == ("Asia/Dubai", 16 * 60), "neu_bis: Standard 16:00 Dubai, aus zeiten lesbar, Murks → Standard")
+    jetzt_n = datetime(2026, 10, 15, 13, 0, tzinfo=timezone.utc)          # 17:00 Dubai
+    kn = [{"id": "n-1", "account_type": "phase2", "created_at": "2026-10-15T11:50:00+00:00"},   # 15:50 Dubai → heute noch
+          {"id": "n-2", "account_type": "phase2", "created_at": "2026-10-15T12:00:00+00:00"},   # 16:00 Dubai → erst morgen
+          {"id": "n-3", "account_type": "phase2", "created_at": "2026-10-14T18:00:00+00:00"},   # gestern 22:00 Dubai → heute
+          {"id": "n-4", "account_type": "phase2"}]                                             # ohne created_at → heute
+    kn_out = K(kn, [], "2026-10-15", tz, None, set(), jetzt=jetzt_n, neu_bis=NB(None))
+    check(kn_out == ["n-1", "n-3", "n-4"], f"16-Uhr-Regel: 15:50 Dubai ja, 16:00 Dubai nein, gestern ja, ohne created_at ja ({kn_out})")
+    check(K(kn, [], "2026-10-15", tz, None, set()) == ["n-1", "n-2", "n-3", "n-4"], "ohne jetzt/neu_bis: alle Kandidaten wie bisher")
+    Z = a["ap_konto_neu_zu_spaet"]
+    check(not Z(kn[1], datetime(2026, 10, 16, 3, 0, tzinfo=timezone.utc), NB(None)), "am nächsten Tag (07:00 Dubai) ist das 16:00-Konto nicht mehr zu spät")
+    check(not Z({"created_at": "Murks"}, jetzt_n, NB(None)), "kaputtes created_at → nicht zu spät")
 
     # 08.10.2026 (Finn: Chris' Konten nach Regeländerung sofort neu planen): Regeln NACH dem Lauf geändert → Regel-Gründe nicht mehr
     # fest, Konto-Gründe bleiben fest. Zeitformen wie live: Lauf-at aus dem Ergebnis (ISO), updated_at in Postgres-Form („ +00")

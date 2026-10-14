@@ -19875,6 +19875,11 @@ AP_ID_MISCH_MAX = 0.67
 AP_FIRMA_MISCH_AB = 3
 AP_FIRMA_MISCH_MIN = 0.30
 AP_START_BIS_STANDARD = "16:30"      # Finn 07.10.2026: alle Trades bis spätestens 16:30 dt gestartet (zeiten.start_bis)
+# NEUE KONTEN NUR BIS 16:00 DUBAI (Finn 15.10.2026, Faustregel): ein Konto, das heute dazukommt — „Neuen Account kaufen" oder der
+# Nachfolger aus „Überprüfen" — wird vom Nachplan-Takt nur noch für heute eingeplant, wenn es VOR 16:00 Dubai angelegt wurde; danach ist
+# es zu spät für den Tag (Fenster bis 18:30 Dubai, Laufzeit ~3 h), und der Nachtlauf plant es für den nächsten Handelstag.
+# Einstellbar über auto_plan_regeln.zeiten.neu_bis = {"tz": "Asia/Dubai", "uhr": "16:00"} (sql/2026-10-15_nachplan_neu_bis.sql).
+AP_NEU_BIS_STANDARD = {"tz": "Asia/Dubai", "uhr": "16:00"}
 AP_TZ_TAG = "Europe/Berlin"          # Nachtlauf 00:00 und Bot-Takt in deutscher Zeit (Vertrag §2/§3)
 # Bot-Takt rund um die Uhr (08.10.2026, Finn über Master: „Der Bot soll quasi die ganze Zeit schauen — 24/7"): früher nur Mo–Fr
 # 00:00–19:30 dt (AP_BOT_ENDE_MIN). Jetzt läuft er im Takt, solange es geplante (Start ab jetzt − AP_BOT_ARBEIT_VORLAUF_MIN) oder
@@ -24374,7 +24379,33 @@ def ap_nachplan_ziel_frei(letzter_erg, tag, schon=None):
     return out
 
 
-def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None, regeln_at=None, ziel_frei=None):
+def ap_nachplan_neu_bis(zeiten):
+    """REIN RECHNEND: (tz-Name, Minute des Tages) für die 16-Uhr-Regel neuer Konten — zeiten.neu_bis, sonst AP_NEU_BIS_STANDARD."""
+    nb = (zeiten or {}).get("neu_bis")
+    nb = nb if isinstance(nb, dict) else {}
+    try:
+        return str(nb.get("tz") or AP_NEU_BIS_STANDARD["tz"]), _ap_hhmm(nb.get("uhr") or AP_NEU_BIS_STANDARD["uhr"])
+    except (ValueError, AttributeError, TypeError):
+        return AP_NEU_BIS_STANDARD["tz"], _ap_hhmm(AP_NEU_BIS_STANDARD["uhr"])
+
+
+def ap_konto_neu_zu_spaet(a, jetzt, neu_bis):
+    """REIN RECHNEND (Finn 15.10.2026, Faustregel): heute angelegtes Konto (accounts.created_at, Tag in neu_bis-Zeitzone = Tag von jetzt)
+    ab der Grenze (z. B. 16:00 Dubai) → True = heute nicht mehr einplanen, der Nachtlauf nimmt es morgen. Ohne created_at oder ohne jetzt
+    nie zu spät (alte Aufrufe/Tests unverändert)."""
+    if not jetzt or not neu_bis or not (a or {}).get("created_at"):
+        return False
+    try:
+        tzn, grenze = neu_bis
+        z = _ap_tz(tzn)
+        c = datetime.fromisoformat(str(a.get("created_at")).replace("Z", "+00:00")).astimezone(z)
+        j = jetzt.astimezone(z)
+        return c.strftime("%Y-%m-%d") == j.strftime("%Y-%m-%d") and c.hour * 60 + c.minute >= grenze
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=None, regeln_at=None, ziel_frei=None, jetzt=None, neu_bis=None):
     """REIN RECHNEND (testbar): Konto-IDs, die heute nachgeplant werden sollen — Typ in AP_TYPEN, nicht archiviert, Haken nicht aus,
     ohne Plan am Tag (planned/open/review, _ap_plan_am_tag) und im letzten Lauf des Tages nicht aus einem festen Grund ausgelassen
     (AP_NACHPLAN_FEST_GRUENDE). regeln_at = auto_plan_regeln.updated_at (08.10.2026): liegt es nach letzter_erg['at'], zählen die
@@ -24403,6 +24434,8 @@ def ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter_erg=None, archiv=Non
             continue
         if aid in belegt or aid in fest:
             continue
+        if ap_konto_neu_zu_spaet(a, jetzt, neu_bis):
+            continue        # heute nach 16:00 Dubai angelegt → erst der Nachtlauf (Finn 15.10.2026)
         out.append(aid)
     return out
 
@@ -24564,7 +24597,13 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
     for t in [t for t in ziel_m if t != tag]:
         ziel_m.pop(t, None)
     ziel_frei = ap_nachplan_ziel_frei(letzter, tag, ziel_m.get(tag))
-    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at, ziel_frei=ziel_frei)
+    neu_bis = ap_nachplan_neu_bis(reg.get("zeiten"))
+    kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at, ziel_frei=ziel_frei,
+                                  jetzt=jetzt, neu_bis=neu_bis)
+    spaet = [str(a.get("id")) for a in konten if ap_konto_neu_zu_spaet(a, jetzt, neu_bis)]
+    if spaet:
+        print(f"[auto-plan] Nachplanen {tag}: {len(spaet)} heute nach {_ap_hhmm_txt(neu_bis[1])} {neu_bis[0]} angelegte Konten erst morgen "
+              f"({', '.join(x[:8] for x in spaet[:6])})", flush=True)
     if not kand:
         ap_nachplan_regeln_merken(merker, tag, regeln_at)
         return None, kand
