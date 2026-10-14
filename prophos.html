@@ -43968,7 +43968,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1548'
+  const OS_TAB_BUILD = '2026-09-22.1549'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48326,7 +48326,10 @@
       try{ renderTradePlans() }catch(_){}
       // FEHLER-MUSTER (07.10.2026, Finn: „wenn es öfter die gleichen sind, genau diese Fehler eliminieren"): start_fehler wird je Plan
       // überschrieben — deshalb jede rote Meldung zusätzlich als Zeile in puls_fehlstarts (Auswertung: View puls_fehler_muster)
-      supabase.from('puls_fehlstarts').insert({ plan_id: String(plan.id), route: plan.route || null, firma: plan.masterFirm || null,
+      // Kein Minuten-Spam (14.10.2026: 25 Zeilen „zu_spaet" für zwei gelöschte Chris-Pläne in 20 min) — derselbe Schritt binnen 10 min
+      // kommt nur einmal ins Protokoll; das Flag am Plan ist trotzdem frisch
+      const doppelt = !!(alt && alt.schritt === flag.schritt && Date.now() - (Date.parse(alt.at) || 0) < 10 * 60000)
+      if(!doppelt) supabase.from('puls_fehlstarts').insert({ plan_id: String(plan.id), route: plan.route || null, firma: plan.masterFirm || null,
         konto: plan.masterName || null, pc: flag.pc, login: flag.login, schritt: flag.schritt, msg: flag.msg, unklar: flag.unklar })
         .then(({ error }) => { if(error) console.warn('[start-fehler] Protokoll', error.message) }, () => {})
       // Handy-Meldung (07.10.2026, Finn: Fehlstarts sofort sehen und selbst beheben) — Ziel erreicht meldet tpStartUmTick selbst
@@ -48498,6 +48501,26 @@
    *       bleiben unberührt in der Schlange; je Plan und Tag genau eine Meldung „unbestätigt, nicht gestartet" (Merker im
    *       localStorage, kein Toast-Spam). */
   const SU_PAUSE_MIN_MS = 5000, SU_PAUSE_STREU_MS = 25000, SU_CLAIM_PAUSE_MS = 30000, SU_HAENGER_MS = 10 * 60000
+  const _suTabSeit = Date.now()        // seit wann dieser Tab läuft — die zu_spaet-Meldung darf „Tab lief nicht" nur sagen, wenn es stimmt (14.10.2026)
+  const _suClaimGrund = new Map()      // planId → { grund, um }: jüngste Claim-Verweigerung eines DB-Triggers (auto_plan_umplanung)
+  const _suClaimGrundGemeldet = new Map()   // planId → grund, schon als Toast gemeldet
+  /* CLAIM VERWEIGERT — GRUND ZEIGEN (14.10.2026, Befund Chris/Jacob 13.–14.10.: die Claim-Trigger auf trade_plans — [Big Trade],
+   * [Gegenrichtung gleiche ID], [Firmen-Abstand 1 min], [Gegenhedge 90 s] — geben return null; der Tab sah nur „0 Zeilen" und schwieg,
+   * auto_plan_umplanung bekam 373 + 163 Einträge, nach 60 min hieß es fälschlich „Prophos-Tab am PC lief nicht"). Jetzt: nach jedem
+   * leeren Claim den jüngsten Eintrag des Plans (≤ 10 min) lesen → Toast einmal je Grund, Merker für die zu_spaet-Meldung. */
+  async function suClaimGrundLesen(plan){
+    try{
+      const { data } = await supabase.from('auto_plan_umplanung').select('grund,um').eq('plan_id', plan.id)
+        .gte('um', new Date(Date.now() - 10 * 60000).toISOString()).like('grund', '[%').order('um', { ascending: false }).limit(1)
+      const z = data && data[0]; if(!z) return
+      const kurz = String(z.grund || '').slice(0, 220)
+      _suClaimGrund.set(String(plan.id), { grund: kurz, um: z.um })
+      if(_suClaimGrundGemeldet.get(String(plan.id)) !== kurz){
+        _suClaimGrundGemeldet.set(String(plan.id), kurz)
+        if(typeof atToast === 'function') atToast(`⛔ „${plan.masterName || '—'}" wartet — Claim verweigert: ${kurz}`, 'end')
+      }
+    }catch(e){ console.warn('[start-um] Claim-Grund', (e && e.message) || e) }
+  }
   let _suPauseBis = 0, _suLetzterLauf = 0, _suLauf = 0, _suLaufSeit = 0
   const _suSperreGemeldet = new Map()   // planId → start_sperre.at, schon als Toast gemeldet (13.10.2026)
   const _suClaimPause = new Map()   // planId → frühester nächster Claim-Versuch (ms) nach einem Fehlgriff
@@ -48563,6 +48586,8 @@
         if(i >= 0) tradePlans.splice(i, 1)
         console.warn('[start-um] Plan gibt es nicht mehr — aus der lokalen Liste genommen', plan.id, plan.masterName || '')
       } else if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+      // Claim-Trigger (14.10.2026): Plan weiter geplant und ungeclaimt → der Trigger hat verweigert, Grund aus auto_plan_umplanung zeigen
+      if(data && data.length && data[0].status === 'planned' && !data[0].start_um_gestartet_at) await suClaimGrundLesen(plan)
       // Richtungsschutz (13.10.2026): einmal je Sperr-Versuch melden — Toast auf diesem PC, Chip auf der Karte überall
       if(data && data.length){ const ss = tpStartSperre(rowToPlan(data[0]))
         if(ss && _suSperreGemeldet.get(String(plan.id)) !== ss.at){ _suSperreGemeldet.set(String(plan.id), ss.at)
@@ -48709,7 +48734,15 @@
         if(typeof atToast === 'function') atToast('⏰ ' + t, 'end')
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Startzeit verpasst', t, 'https://prophos.pages.dev/prophos#trades', 'startum-' + String(plan.id).slice(0, 8)) }catch(_){}
         // auch Topstep V2 (08.10.2026): sonst verfiel ein verpasster tsv2-Plan still — sfTick holt ihn mit Regeln nach (nachholen)
-        if(rkGilt(plan) || (plan.route === 'tsv2' && !tpIstWdPlan(plan) && (plan.richtung === 'buy' || plan.richtung === 'sell'))) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — der Prophos-Tab am PC lief nicht` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
+        // URSACHE EHRLICH (14.10.2026): „Tab lief nicht" stimmte bei Chris/Jacob 13.–14.10. nie — der Tab lief, die Claim-Trigger verweigerten
+        // (Big Trade / Gegenrichtung). Drei Fälle: Grund vom Trigger bekannt → der Grund; Tab lief schon vor der Startzeit → „lief, kein Claim";
+        // Tab erst nach der Startzeit geöffnet → „lief nicht (offen seit …)". Schritt bleibt zu_spaet (sfTick holt mit Regeln nach).
+        const startMs0 = new Date(plan.startUm).getTime(), g0 = _suClaimGrund.get(String(plan.id))
+        const gFrisch = !!(g0 && (Date.parse(g0.um) || 0) >= startMs0 - 60000)
+        const ursache = gFrisch ? `der Start wurde ${Math.round(verspaetet / 60000)} min lang verweigert: ${g0.grund.slice(0, 200)}`
+          : _suTabSeit <= startMs0 ? 'der Prophos-Tab lief, bekam aber keinen Claim (Grund nicht gemeldet — Umplanungs-Protokoll des Plans lesen)'
+          : `der Prophos-Tab am PC lief nicht (offen erst seit ${tpStartUmText(new Date(_suTabSeit).toISOString())})`
+        if(rkGilt(plan) || (plan.route === 'tsv2' && !tpIstWdPlan(plan) && (plan.richtung === 'buy' || plan.richtung === 'sell'))) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — ${ursache}` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
         return
       }
       // Pünktlich statt Zufall (23.09.2026 04:1x, Finn: „wenn ich den Trade auf 4:30 plane, soll er auch um 4:30 starten, wenn gerade
@@ -50360,7 +50393,7 @@
       case 'werte': return 'Im Order-Popup des Plans Richtung, Menge, Symbol oder TP ergänzen und speichern.'
       case 'zeitlimit': case 'puls_beschaeftigt': return `Puls am PC${pc} war belegt oder zu langsam — nichts tun, der Bot wiederholt von selbst.`
       case 'unklar': return `Erst in ${/Topstep/i.test(m) ? 'TopstepX' : 'TradingView'} nachsehen, ob die Order liegt — dann auf der Karte „⚠ UNKLAR" lösen; nie blind erneut starten.`
-      case 'zu_spaet': return `Prophos-Tab am PC${pc} offen lassen.`
+      case 'zu_spaet': return `Puls holt den Start von selbst nach — steht ein Grund dabei (Claim verweigert), gilt der; sonst Prophos-Tab am PC${pc} offen lassen.`
       case 'master_nie': return 'Nichts tun — die Order kam in TradingView nie an (Fusion wieder zu, Konto 60 s flach bewiesen); Prophos plant 15 min später neu ein, wenn das Konto dann noch flach ist.'
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       case 'manuelle_arbeit': return 'Konto steht in Manueller Arbeit — erst im Radar erledigen, dann neu planen.'
@@ -55269,6 +55302,19 @@
   // Startzeiten je Konto im Block: Blockstart, dann je weiterem aktiven Konto + Abstand (einmal gewürfelt,
   // dann am Konto gemerkt — sonst spränge die Zeit bei jedem Abgleich). → Map id → ISO, .geaendert
   const WD_KONTO_ABSTAND_MS = 80000   // 1:20 min je Konto innerhalb einer ID (Finn 05.10.2026)
+  /* STARTZEIT NIE ZURÜCKZIEHEN (14.10.2026, Befund Chris 14.10. 10:19 / Jacob 13.10. 05:09): die Folge-Konten einer ID bekamen keinen
+   * Claim (DB-Trigger [Big Trade] bzw. [Gegenrichtung gleiche ID], 373 + 163 Einträge in auto_plan_umplanung), sfTick holte sie nach
+   * (jetzt + 2–6 min), aber wdAbgleich (PC, 30 s) und wdPlaeneNachziehen (Mac) zogen start_um sofort auf „Blockstart + 80 s × Position"
+   * zurück → wieder „60 min verpasst", Versuche 3/3, Tagesende, Trade nie gefahren. Regel: ein Plan folgt seinem Block nur, solange der
+   * Block noch vor uns liegt (Umsortieren) oder der Plan FRÜHER steht als sein Block. Ist die Blockzeit vorbei und der Plan steht später
+   * (Nachholen, Hand, Richtungsschutz), bleibt seine Zeit. Rein rechnend, Test-Haken window._wdStartUmNachziehbar. */
+  function wdStartUmNachziehbar(planIso, sollIso, jetztMs){
+    const p = Date.parse(planIso || '') || 0, s = Date.parse(sollIso || '') || 0, j = jetztMs || Date.now()
+    if(!s || Math.abs(p - s) <= 30000) return false
+    if(s >= j - 60000) return true     // Block noch vor uns → Plan folgt dem Block
+    return p < s                       // Block vorbei: nur ein Plan VOR seinem Block wird nachgezogen, ein späterer bleibt
+  }
+  window._wdStartUmNachziehbar = wdStartUmNachziehbar
   function wdKontoZeiten(konten, startUm, r){
     const aMin = Math.max(0, +((r || {}).abstand_min) || 0), aMax = Math.max(aMin, +((r || {}).abstand_max) || 0)
     let t = new Date(startUm).getTime(), i = 0
@@ -55381,7 +55427,7 @@
         }
         const upd = {}, soll = zeiten.get(String(k.id)), kd = wdKontoDaten(k.id)
         if(row.richtung && p.richtung !== row.richtung) upd.richtung = row.richtung
-        if(soll && Math.abs(new Date(p.start_um || 0).getTime() - new Date(soll).getTime()) > 30000) upd.start_um = soll
+        if(soll && wdStartUmNachziehbar(p.start_um, soll)) upd.start_um = soll   // nie in die Vergangenheit zurückziehen (14.10.2026)
         if(kd && kd.tp_vorgabe > 0 && Number(p.master_tp) !== kd.tp_vorgabe) upd.master_tp = kd.tp_vorgabe
         if(p.master_sl != null) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen
         if(!Object.keys(upd).length) continue
@@ -55560,7 +55606,7 @@
         }else if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
           const upd = {}, z = zVon.get(String(k.id))
           if(plan.richtung !== row.richtung) upd.richtung = row.richtung
-          if(Math.abs(new Date(plan.startUm || 0).getTime() - new Date(startIso).getTime()) > 30000) upd.start_um = startIso
+          if(wdStartUmNachziehbar(plan.startUm, startIso)) upd.start_um = startIso   // nie in die Vergangenheit zurückziehen (14.10.2026)
           // Slave nach Live-Balance: der Mac kannte beim Anlegen evtl. keinen Live-Stand (kleinste Stufe)
           if(plan.route === 'tvv2'){
             // V2 (24.09.2026 abends): kein Slave mehr — nachgezogen wird nur der Fusion-Gegenhedge-Betrag (hedge_eur),
