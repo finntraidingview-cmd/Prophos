@@ -45,3 +45,19 @@ update public.wd_tagesplan
 --    set konten = (select jsonb_agg((k - 'puls_pause') || '{"aktiv": true, "hinweis": ""}'::jsonb) from jsonb_array_elements(konten) k),
 --        status = 'geplant', start_um = '2026-10-15 02:07:00+00', updated_at = now()
 --  where user_id = '368076fd-67c1-460c-aa86-38d81ae69350' and tag = '2026-10-15' and status <> 'laeuft';
+
+-- NACHTRAG 15.10.2026 ~04:50 Dubai (Finn: „warum sehe ich nix" — Admin-Reiter „Trade-Planer" zeigte nur AP_NUR_PLANER_TXT):
+-- der Admin-Reiter gibt Nicht-ADMIN_EMAILS-Logins alle IDs NUR, wenn die ID in auto_plan_regeln.user_ids steht (ap_eingriff_sicht,
+-- Option A 08.10.2026). „Finn + Pascal" aus user_ids zu nehmen hat Finn also den Admin-Planer weggenommen. Deshalb: ID zurück in
+-- user_ids, und die Pause stattdessen über den Auto-Planer-Haken je Konto (accounts.auto_planer = false) — der Nachtlauf/Nachplan-Takt
+-- lässt solche Konten sichtbar aus („vom Auto-Planer ausgenommen (Haken im Konto aus)"). Jacob bleibt draußen (braucht keinen Admin).
+-- 12 Konten von Finn + Pascal hatten den Haken an (nicht archiviert), alle auf aus gesetzt:
+update public.accounts set auto_planer = false, updated_at = now()
+ where id in ('85b1b2a1-8bf1-4c09-8bb1-b3e9520b8896','6599c953-8212-4047-8280-6dcfc46e3fd0','62b824a2-b4bb-43f9-90cd-c93e995cfd49',
+              '7e0b32ce-659c-49c2-98b1-77279ea3319d','a1c49326-da3e-4b38-bd1a-4373787e3d1a','453f5f37-6d6c-4b0b-996a-4a40c448d761',
+              'b329a48c-63c0-4091-9222-ed3864160b75','cf9e8e34-fa49-42bf-b092-cc64084aea0a','917a57ca-045b-47d2-84dd-cdf20f24116b',
+              'cf4824e5-bd33-42e2-8902-9af33a58bb65','7cd83686-1fb2-481f-8eea-4759346ccffb','103c974d-b311-4ac4-9175-93eb6faaa32a')
+   and user_id = '48f272b4-913e-4598-a06a-1dcc3d5679fb' and auto_planer = true;
+update public.auto_plan_regeln set user_ids = array_append(user_ids, '48f272b4-913e-4598-a06a-1dcc3d5679fb'::uuid), updated_at = now()
+ where id = 1 and not ('48f272b4-913e-4598-a06a-1dcc3d5679fb'::uuid = any(user_ids));
+-- RÜCKWEG dazu (mit der Freigabe): die 12 Konten wieder auf auto_planer = true (selbe id-Liste), user_ids-Zeile oben dann nur für Jacob.
