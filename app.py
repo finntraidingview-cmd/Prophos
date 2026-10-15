@@ -15437,6 +15437,15 @@ AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
 AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
 AP_KLEIN_TP_PKT_HINWEIS = 60         # TP weiter als 60 Pkt (Mindest-Lot zu groß) → trotzdem planen, Hinweis in der Notiz
 AP_PUFFER_PKT = 10                   # normaler letzter CFD-Trade: Puffer = 10 Pkt × Lots × $/Pkt ÷ 3 (statt fester Firmen-Puffer, ÷ 3 seit 12.10.2026)
+# PUNKTE-PUFFER FUTURES (Master 15.10.2026): der letzte Futures-Trade (Orbit V2 / Topstep) bekam nur den festen Firmen-Puffer aus
+# puffer_je_menge (2 NQ: 15–25 $). TradingView rechnet den Dollar-TP aber vom Kurs BEIM TIPPEN, nicht vom Fill — läuft der Kurs bis
+# zum Fill weg, liegt der TP entsprechend näher am Einstieg. Vorfall ed3c376b (FundedNext Futures 150k …0682, 14.10.2026): Rest 1.829
+# + 20 = TP 1.849 $ bei 2 NQ = 46,2 Pkt gewollt, TV setzte 41 Pkt → +1.628 $, Konto 200 $ unter dem Ziel 158.000, Finn rollte von Hand
+# nach. Gemessen über 318 tvv2-Pläne der letzten 14 Tage (Fill-Einstieg vs. gesetztes TP-Level): Median −0,25 Pkt, p90 +1,0,
+# p95 +2,3, Maximum +5,2 Pkt (genau der Vorfall) — 6 Pkt × Kontrakte × $/Pkt (NQ 20, MNQ 2) deckt alles Gemessene ab (2 NQ → 240 $).
+# Nur Stufe „letzter Trade (Rest bis Ziel)", und nur so weit, wie der Tageshöchstwert tp_max es zulässt; Etappen bleiben unberührt.
+AP_PUFFER_PKT_FUT = 6
+AP_PUNKTWERT_FUT = {"NQ": 20.0, "MNQ": 2.0}   # $ je Punkt und Kontrakt (wie WD_HEUTE_PPL)
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
 # Gegenhedge-Konten, auf ihnen wird nie ein Trade geplant — „Echo Demo (Master)" stand als phase1 jede Nacht im Protokoll
@@ -15875,6 +15884,15 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
         stufe = klein["stufe"]
     elif not tp_sp or rest + puffer <= ober:
         tp, stufe = rest + puffer, "letzter Trade (Rest bis Ziel)"
+        if (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN:
+            # PUNKTE-PUFFER FUTURES (AP_PUFFER_PKT_FUT, 15.10.2026): zusätzlich zum Firmen-Puffer, aber nie über den Deckel tp_max —
+            # was nicht mehr unter den Deckel passt, fällt weg (heutiger Weg bleibt). Symbol wie ap_planen: regel.symbol, sonst NQ
+            pw = AP_PUNKTWERT_FUT.get(str(ph.get("symbol") or regel.get("symbol") or "NQ").upper(), 20.0)
+            zusatz = AP_PUFFER_PKT_FUT * float(menge) * pw
+            if ober is not None:
+                zusatz = max(0.0, min(zusatz, ober - tp))
+            if zusatz > 0:
+                puffer, tp = round(puffer + zusatz), tp + zusatz
     elif rest < ober:
         tp, stufe = ober, "letzter Trade (auf Tageshöchstwert gedeckelt)"
     else:
