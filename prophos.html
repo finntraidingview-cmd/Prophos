@@ -44022,7 +44022,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1571'
+  const OS_TAB_BUILD = '2026-09-22.1572'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54422,11 +54422,14 @@
    *                      Topstep 220-240 als Vorgabe, alles editierbar), Risiko Slave nach Puffer-Staffel.
    *  Puffer = Live-Balance − Startbalance + Max-Drawdown (was das Konto noch verlieren kann); ohne
    *  Live-Stand = Max-Drawdown (frisches Konto). Der Betrag steht je Zeile editierbar im Popup. */
-  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], apex: [55, 75], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
-  const TP_VP_FIRMEN = ['tradeify', 'apex', 'topstep', 'sonst']
+  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], fnfutures: [270, 290], apex: [55, 75], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  // fnfutures = FundedNext Futures (Finn 16.10.2026: „genau gleich wie bei Tradeify“, Gewinntag 250 $) — eigener Schlüssel, damit
+  // die CFD-Konten von FundedNext weiter unter „sonst“ laufen
+  const TP_VP_FIRMEN = ['tradeify', 'fnfutures', 'apex', 'topstep', 'sonst']
 
   function tpVorplanFirmaKey(firm){
     const f = String(firm || '').toLowerCase()
+    if(f.includes('fundednext') && f.includes('futur')) return 'fnfutures'   // vor den anderen: „FundedNext Futures“ (16.10.2026)
     return f.includes('tradeify') ? 'tradeify' : f.includes('apex') ? 'apex' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
@@ -55908,7 +55911,7 @@
     box.querySelectorAll('[data-wd-se]').forEach(el => el.addEventListener('change', () => { wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
   }
   // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
-  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], apex: ['Apex', '#0984e3', 'Gewinntag 53 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'FundedNext Futures, MFFU, Lucid …'] }
+  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex', '#0984e3', 'Gewinntag 53 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'MFFU, Lucid …'] }
   // „3 im Farm · 1 aus" — wird nach dem Laden der Konten nachgezogen (wdRender), ohne die Zeilen neu zu bauen
   function wdFirmaKurz(k, konten){
     const ges = konten.filter(q => tpVorplanFirmaKey(q.firm) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
@@ -57690,7 +57693,7 @@
   /* Good Day (01.10.2026, Finn: „wenn der P&L bei Tradeify über 250 ist und der Account Winning Day ist, automatisch als
    * Winning Day anhaken"): gleiche Regel wie _wd_good_day im Backend. tcRecompute ruft das bei jeder P&L-Änderung (Hand,
    * Vorbelegung, Auto-Nachlader); hat Finn den Haken selbst angefasst, bleibt er, wie er ist. */
-  const TC_GOOD_DAY_MIN = { tradeify: 250, topstep: 150 }   // Topstep 150 $ (Finn 14.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
+  const TC_GOOD_DAY_MIN = { tradeify: 250, 'fundednext futures': 250, topstep: 150 }   // Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
   let _tcGoodDayHand = false
   function tcGoodDayAuto(p, mPl){
     const cb = document.getElementById('tc-winning-day'), wrap = document.getElementById('tc-winning-day-wrap'), hint = document.getElementById('tc-winning-day-hint')
