@@ -51013,7 +51013,9 @@
       const stand = z.balance && z.balance !== 'keine Balance' ? z.balance + ' · ' : ''
       if(tun && !/^↻/.test(tun)) return stand + tun
       const satz = l.w === 'nicht live' ? 'seit dem letzten Trade nicht gelesen — einmal lesen, dann rutscht der Plan nach „Zu bestätigen"'
-        : l.w === 'nie gelesen' ? 'Ergebnis nie gelesen — einmal lesen genügt' : 'einmal lesen genügt, dann plant der Bot das Konto ein'
+        : l.w === 'nie gelesen' ? 'Ergebnis nie gelesen — einmal lesen genügt'
+        // 15.10.2026 (Finn, Marcs fünf Apex-Konten): der Balance-Takt liest nie gelesene Konten jetzt von selbst, auch außerhalb des Nachplan-Fensters
+        : 'der Bot liest von selbst nach (alle 10 min, höchstens 3×/Tag) und plant das Konto dann ein — ein Klick holt die Lesung sofort'
       return stand + satz + (fremd ? ` · am PC von ${wer || 'der ID'}` : '')
     }
     if(l.w === 'Ziel erreicht') return 'Phase unter Accounts umstellen — danach plant der Bot weiter'
@@ -65892,7 +65894,10 @@
     const nichtLive = z => z.balance_live === false || (() => { const t = apIdsTrade(z); return !!t && !tplPlanLive(t) })()
     const o = apIdsOffenSicht().filter(z => !nichtLive(z)).slice().sort((a, b) => String(a.user || '').localeCompare(String(b.user || '')) || String(a.start_um || '').localeCompare(String(b.start_um || '')))
     const wer = apSichtUid() ? escapeHtml(String((_apIds.rows.find(r => String(r.user_id) === apSichtUid()) || {}).name || '')) : 'alle IDs'
-    const kopfO = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>heute und morgen · ${wer} · Zeiten Dubai</span>
+    // Von selbst bestätigen (15.10.2026, Finn: „Das ist ein Knopf, den man drücken muss. Das kann auch der Bot machen."): app.py ap_auto_best_tick
+    // bestätigt alle 2 min jeden Vorschlag mit lebender Balance — der Block bleibt für den Blick dazwischen, der Satz sagt, dass niemand klicken muss
+    const ab = _ap.info && _ap.info.auto_bestaetigen, abTxt = ab && ab.aktiv ? ' · der Bot bestätigt von selbst (alle 2 min, sobald die Balance live ist)' : ''
+    const kopfO = `<div class="ap-adm-kopf"><b>Zu bestätigen · ${o.length}</b><span>heute und morgen · ${wer} · Zeiten Dubai${abTxt}</span>
         ${o.length ? `<button type="button" class="ap-adm-ok" id="ap-ids-alle-ok" style="margin-left:auto">✓ Alle ${o.length} bestätigen</button>` : ''}</div>`
     let wl = { warten: [], laeuft: [] }; try{ wl = apIdsWartenLaeuft() }catch(e){ console.warn('[ap-ids] Wartet/Läuft', e) }
     const kopfW = `<div class="ap-adm-kopf"><b>Wartet auf Start · ${wl.warten.length}</b><span>bestätigt · ${wer}</span></div>`

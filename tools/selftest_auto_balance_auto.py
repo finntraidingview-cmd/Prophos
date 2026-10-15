@@ -14,9 +14,10 @@ APP = os.path.join(os.path.dirname(HIER), "app.py")
 def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "datetime": datetime, "timezone": timezone,
-          # acc_balance_wahl als Attrappe: Stand = Feld „stand" am Konto
-          "acc_balance_wahl": lambda a, e, d: (1, "USD", "TV", (a or {}).get("stand") or "")}
-    for k in ("AP_BAL_FEHLT",):
+          # acc_balance_wahl als Attrappe: Stand = Feld „stand" am Konto; ohne Stand keine Balance (nie gelesen, Quelle C 15.10.2026)
+          "acc_balance_wahl": lambda a, e, d: ((1 if (a or {}).get("stand") else None), "USD", "TV", (a or {}).get("stand") or ""),
+          "ist_topstep_express": lambda a, relativ=None: bool((a or {}).get("express"))}
+    for k in ("AP_BAL_FEHLT", "AP_LESE_FELDER", "AP_TYPEN"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for fn in ("_ap_ts", "ap_balance_live", "ap_letzt_je_konto"):
         i = src.index(f"def {fn}(")
@@ -65,6 +66,26 @@ def main():
     check(out2 == {}, "Lauf von gestern zählt nicht")
     out3 = kand(lauf, "2026-10-13", plaene, accs, letzt, {}, {}, archiv={"k-1", "k-5"})
     check("k-1" not in out3 and "k-5" not in out3, "archivierte Konten nie")
+    # QUELLE C — nie gelesene Konten (15.10.2026, Marcs fünf Apex-Konten nach 16:00 Dubai angelegt, kein Lauf kannte sie)
+    nie = ns["ap_bal_auto_nie_gelesen"]
+    neu = [{"id": "n-1", "user_id": "u", "name": "150k APEX…0001", "account_type": "challenge", "external_id": "APEX0001"},
+           {"id": "n-2", "user_id": "u", "name": "150k APEX…0002", "account_type": "challenge", "external_id": "APEX0002", "auto_planer": False},
+           {"id": "n-3", "user_id": "u", "name": "150k APEX…0003", "account_type": "challenge", "external_id": ""},
+           {"id": "n-4", "user_id": "u", "name": "150k APEX…0004", "account_type": "challenge", "external_id": "APEX0004", "tv_balance_at": "2026-10-15T10:00:00+00:00", "stand": "2026-10-15T10:00:00+00:00"},
+           {"id": "n-5", "user_id": "u", "name": "150k Express", "account_type": "challenge", "external_id": "EXP5", "express": True},
+           {"id": "n-6", "user_id": "u", "name": "50k Funded", "account_type": "funded", "external_id": "F6"},
+           {"id": "n-7", "user_id": "u", "name": "150k APEX…0007", "account_type": "phase1", "external_id": "APEX0007"},
+           {"id": "n-8", "user_id": "u", "name": "150k APEX…0008", "account_type": "challenge", "external_id": "APEX0008"}]
+    outc = nie(neu, {"n-7"}, {}, {}, archiv={"n-8"})
+    check("n-1" in outc and "nie gelesen" in outc["n-1"], "C: neues Konto ohne jede Lesung → lesen")
+    check("n-2" not in outc, "C: Planer-Haken aus → nicht")
+    check("n-3" not in outc, "C: ohne External ID → nicht (Lesung bringt nichts)")
+    check("n-4" not in outc, "C: schon einmal gelesen → Sache von A/B, nicht C")
+    check("n-5" not in outc, "C: Topstep Express → nie")
+    check("n-6" not in outc, "C: Kontotyp außerhalb AP_TYPEN → nicht")
+    check("n-7" not in outc, "C: schon von A/B in diesem Takt → nicht doppelt")
+    check("n-8" not in outc, "C: archiviert → nicht")
+    check(nie([], set(), {}, {}) == {}, "C: ohne Konten leer")
     j = 1_000_000.0
     check(darf(None, j) == (True, ""), "noch kein Auftrag → darf")
     check(darf([j - 6000], j)[0] is True, "letzter Auftrag vor 100 min → darf")
