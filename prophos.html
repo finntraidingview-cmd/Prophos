@@ -3581,6 +3581,11 @@
   #dashboard-view .pz-radar .pz-z:not(.pz-z-kopf) > .pz-ri{display:flex;align-items:center;font-weight:400;color:var(--sub);overflow:visible}
   #dashboard-view .pz-radar .pz-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
   #dashboard-view .pz-radar .pz-ri em.is-buy{background:rgba(18,183,106,.12);color:#047857} #dashboard-view .pz-radar .pz-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
+  /* Richtung per Klick im Admin-Planer (16.10.2026): derselbe Chip, nur klickbar — Rand beim Hover, gesperrt gestrichelt */
+  #dashboard-view .pz-radar .ap-ri-flip{border:0;background:none;padding:0;margin:0;font:inherit;cursor:pointer}
+  #dashboard-view .pz-radar .ap-ri-flip:hover:not(:disabled) em{box-shadow:inset 0 0 0 1px currentColor}
+  #dashboard-view .pz-radar .ap-ri-flip:disabled{cursor:default;opacity:.6}
+  #dashboard-view .pz-radar .ap-ri-flip.is-gesperrt em{outline:1px dashed currentColor;outline-offset:-1px;opacity:.75}
   #dashboard-view .pz-radar .pz-ri .pz-gr{text-align:left;color:var(--sub)}
   #dashboard-view .pz-radar .pz-ri .pz-w{cursor:pointer;border-radius:5px;margin:-2px -5px;padding:2px 5px;transition:background .12s}
   #dashboard-view .pz-radar .pz-ri .pz-w:hover,#dashboard-view .pz-radar .pz-ri .pz-w.pz-w-an{background:var(--surface-tint);box-shadow:inset 0 0 0 1px var(--border)}
@@ -39747,7 +39752,7 @@
     if(o.stil === 'radar'){
       const firmaR = escapeHtml(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(p.masterFirm) : String(p.masterFirm || '–'))
       const k2 = nummer ? `${groesse ? (groesse / 1000) + 'k ' : ''}…${escapeHtml(nummer.slice(-4))}` : escapeHtml(String(o.name || '–'))
-      const em = `<em class="${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? 'BUY' : p.richtung === 'sell' ? 'SELL' : '?'}</em>`
+      const em = o.riHtml || `<em class="${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? 'BUY' : p.richtung === 'sell' ? 'SELL' : '?'}</em>`   // o.riHtml: Klick-Chip im Admin-Planer (16.10.2026)
       const grR = !menge ? '–' : p.route === 'mt5v2' ? menge.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' × Lot'
         : menge.toLocaleString('de-DE') + ' × ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'NQ')
       return `
@@ -65576,6 +65581,7 @@
    * im letzten Lauf geplant/ausgelassen. Nur Anzeige + Haken, keine Bewertung. Nur Admin. ══ */
   const _apIds = { rows: [], aktiv: null, tag: null, laeuft: false, fehler: '', offen: [], offenTag: null, offenFehler: '', weitereAuf: false, tagWahl: null, D: null,
     okWeg: new Map(), okLaeuft: new Set(), okFehler: new Map(), nochmal: false,
+    riLaeuft: new Set(), riGrund: new Map(), riLokal: new Map(),   // Richtung per Klick (16.10.2026): siehe apIdsRichtung
     warteLokal: new Map(), zurLokal: new Map(), bestaetigt: null, bestaetigtT0: 0, notizJe: new Map() }   // Wartet auf Start / ↩ zurück (08.10.2026): siehe apIdsWartenLaeuft, apIdsZurueck   // Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): siehe apIdsOk   // tagWahl: 'heute' | 'morgen' (Hand), sonst Standard = Tag mit offenen Vorschlägen
   /* NOTES-GEDÄCHTNIS (08.10.2026, Slave-Terminal 7 — Finn-Screenshot .1247 „Wartet auf Start · 34": Balance → Ziel „–", Schritt leer): bestätigte
    * Pläne fremder IDs kommen nur über das Delta, und das hat weder notes noch Balance/Rest. Jeder Plan stand aber vorher in /ids offen[] — dort
@@ -65655,6 +65661,32 @@
       if(Array.isArray(_apIds.bestaetigt)) _apIds.bestaetigt = _apIds.bestaetigt.filter(x => String(x.plan_id) !== id)
     }catch(e){ _apIds.okFehler.set(id, String((e && e.message) || e)) }
     finally{ _apIds.okLaeuft.delete(id); apIdsRender(); apIdsLaden() }
+  }
+  /* RICHTUNG PER KLICK (16.10.2026, Auftrag Master — Finn 14.10.2026 ~05:00 Dubai wollte Aurels Tradeify-Short vor dem Start auf BUY
+   * drehen; einen Chip gab es nur im WD-Tagesplan, der Master drehte per SQL): EIN Plan, nicht die Tranche (Richtung je Trade frei seit
+   * .1401). POST /admin/auto-plan/plan {aktion:'richtung_plan'} — das Backend prüft prophos_gegenrichtung_frei (läuft/review bei derselben
+   * ID × Firma in der Gegenrichtung = gesperrt, nicht lesbar = gesperrt), dreht mit Guard (planned, ungeclaimt) und schreibt die Zeile in
+   * auto_plan_umplanung (quelle hand). Gesperrt → Chip „⛔" mit Grund im Tooltip + Zeile unter dem Knopf. Der Saldo-Riegel bleibt am Start. */
+  function apIdsRiLokal(z){   // eben gedreht: neue Richtung zeigen, bis ein Nachladen sie bringt (höchstens 3 min)
+    const l = _apIds.riLokal.get(String(z.plan_id))
+    if(!l) return z.richtung
+    if(z.richtung === l.r || Date.now() - l.at > 180000){ _apIds.riLokal.delete(String(z.plan_id)); return z.richtung }
+    return l.r
+  }
+  async function apIdsRichtung(id){
+    id = String(id); if(_apIds.riLaeuft.has(id)) return
+    _apIds.riLaeuft.add(id); _apIds.riGrund.delete(id); _apIds.okFehler.delete(id); apIdsRender()
+    try{
+      const sichtP = (typeof window._tplSichtParam === 'function' && window._tplSichtParam()) ? { sicht: 'admin' } : {}
+      const d = await apdApi('POST', '/plan', Object.assign({ plan_id: id, aktion: 'richtung_plan' }, sichtP))
+      _apIds.riLokal.set(id, { r: d.richtung, at: Date.now() })
+      if(typeof atToast === 'function') atToast(`⇅ Richtung jetzt ${String(d.richtung || '').toUpperCase()}${d.msg ? ' · ' + d.msg : ''}`, 'start')
+    }catch(e){
+      const msg = String((e && e.message) || e)
+      if(e && e.daten && e.daten.gesperrt) _apIds.riGrund.set(id, msg)
+      _apIds.okFehler.set(id, msg)
+      if(typeof atToast === 'function') atToast('⇅ Nicht gedreht: ' + msg.slice(0, 160), 'end')
+    }finally{ _apIds.riLaeuft.delete(id); apIdsRender(); apIdsLaden() }
   }
   async function apIdsOk(ids){
     ids = [...new Set((ids || []).map(String))].filter(id => !_apIds.okLaeuft.has(id)); if(!ids.length) return
@@ -65849,7 +65881,7 @@
       const t = Object.assign({}, g, tz, { balance: tz.balance ?? tplNum(z.balance) ?? g.balance ?? nz.balance ?? null, rest: tz.rest ?? g.rest ?? nz.rest ?? null,
         stufe: tz.stufe || z.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || z.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
       const p = { id: String(z.plan_id), status: art === 'laeuft' ? 'open' : 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
-        masterAccountId: t.konto_id || null, richtung: z.richtung, startUm: z.start_um || null, startUmGestartetAt: art === 'laeuft' ? (z.start_um || 'ja') : null,
+        masterAccountId: t.konto_id || null, richtung: art === 'laeuft' ? z.richtung : apIdsRiLokal(z), startUm: z.start_um || null, startUmGestartetAt: art === 'laeuft' ? (z.start_um || 'ja') : null,
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge, masterSymbol: (z.route || t.route) === 'mt5v2' ? '' : 'NQ',
         autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null }
       jeZ.set(p.id, { z, t, pl: e.pl }); return p })
@@ -65884,7 +65916,15 @@
       } else if(art === 'warten'){
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
       } else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar' })
+      // RICHTUNG PER KLICK (16.10.2026, Auftrag Master — Finn 14.10.: Aurels Tradeify-Short vor dem Start auf BUY drehen ging nur per SQL):
+      // nur geplant und ungestartet (Zu bestätigen / Wartet auf Start), Prüfung + Drehen im Backend (apIdsRichtung). Gesperrt → ⛔ mit Grund.
+      let riHtml
+      if(art !== 'laeuft' && (p.richtung === 'buy' || p.richtung === 'sell')){
+        const riL = _apIds.riLaeuft.has(id), riG = _apIds.riGrund.get(id), ziel = p.richtung === 'buy' ? 'SELL' : 'BUY'
+        riHtml = `<button type="button" class="ap-ri-flip${riG ? ' is-gesperrt' : ''}" data-ap-ri="${escapeHtml(id)}"${riL ? ' disabled' : ''}
+          title="${escapeHtml(riG ? riG + ' — Klick prüft erneut' : `anklicken: nur diesen Plan auf ${ziel} drehen (Richtungsschutz ID × Firma wird vorher geprüft)`)}"><em class="${p.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${riL ? '…' : (riG ? '⛔ ' : '') + (p.richtung === 'buy' ? 'BUY' : 'SELL')}</em></button>`
+      }
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar' })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
@@ -66247,6 +66287,7 @@
     for(const id of _apIds.okLaeuft) root.querySelector(`.pz-z[data-plan-id="${CSS.escape(id)}"]`)?.classList.add('ap-ok-laeuft')
     root.querySelectorAll('[data-ap-ok]').forEach(b => b.addEventListener('click', () => ok([b.dataset.apOk], b)))
     root.querySelectorAll('[data-ap-zur]').forEach(b => b.addEventListener('click', () => { b.disabled = true; apIdsZurueck(b.dataset.apZur) }))   // Wartet auf Start → ↩ zurück
+    root.querySelectorAll('[data-ap-ri]').forEach(b => b.addEventListener('click', () => { b.disabled = true; apIdsRichtung(b.dataset.apRi) }))   // Richtung per Klick (16.10.2026)
     root.querySelectorAll('[data-ap-ok-id]').forEach(b => b.addEventListener('click', () => ok(_apIds.offen.filter(z => String(z.user_id) === b.dataset.apOkId && !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), b)))
     root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(apIdsOffenSicht().filter(z => !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), e.currentTarget))
     root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {

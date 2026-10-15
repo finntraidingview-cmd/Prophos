@@ -24126,10 +24126,12 @@ def admin_auto_plan_eingriff():
                 darf = False
         if not darf:
             return jsonify({"ok": False, "msg": AP_NUR_PLANER_TXT}), 403
-    if aktion not in ("richtung_tauschen", "start", "neu_starten"):
-        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | start | neu_starten | werte"}), 400
+    if aktion not in ("richtung_tauschen", "richtung_plan", "start", "neu_starten"):
+        return jsonify({"ok": False, "msg": "aktion = richtung_tauschen | richtung_plan | start | neu_starten | werte"}), 400
     if aktion == "neu_starten":
         return _ap_neu_starten(pid)
+    if aktion == "richtung_plan":
+        return _ap_richtung_plan(pid)
     try:
         stand = _ap_stand_laden(reg)
         neu_min = None
@@ -24187,6 +24189,75 @@ def _ap_neu_starten(pid):
     except Exception as e:
         print(f"[auto-plan] ⚠️ neu_starten Flag {pid}: {type(e).__name__}: {e}", flush=True)
     return jsonify({"ok": True, "start": neu.isoformat()})
+
+
+def ap_richtung_plan_pruefen(plan, frei, jetzt):
+    """REIN RECHNEND — RICHTUNG PER KLICK IM ADMIN-PLANER (Finn 14.10.2026, Aurels Tradeify-Short …9883 sollte vor dem Start BUY werden,
+    ging nur per SQL): EIN geplanter, ungeclaimter Auto-Plan wird umgedreht — nicht die ganze Tranche wie richtung_tauschen, denn die
+    Richtung ist seit .1401 je Trade frei. plan = trade_plans-Zeile, frei = Antwort von prophos_gegenrichtung_frei(plan, neue Richtung)
+    (None = nicht lesbar). → (neu, None) oder (None, Klartext). Fail-closed: ohne lesbare Antwort wird nicht gedreht."""
+    if not plan:
+        return None, "Plan nicht gefunden"
+    if plan.get("status") != "planned":
+        return None, f"Plan ist nicht mehr geplant (Status {plan.get('status') or '?'}) — Richtung nicht änderbar"
+    if plan.get("auto_plan") is not True:
+        return None, "kein Auto-Plan — Hand-Pläne im Plan selbst ändern"
+    if plan.get("start_um_gestartet_at") or plan.get("started_at") or plan.get("orbit_gesendet_at"):
+        return None, "Start läuft schon (Plan geclaimt) — Richtung nicht mehr änderbar"
+    alt = str(plan.get("richtung") or "").lower()
+    if alt not in ("buy", "sell"):
+        return None, "Plan hat keine Richtung"
+    # bestätigt und in ≤ AP_FAELLIG_MIN fällig: der PC-Tab kann gerade claimen — derselbe Riegel wie bei Bot und richtung_tauschen
+    if plan.get("auto_bestaetigt_at") and plan.get("start_um"):
+        try:
+            s = datetime.fromisoformat(str(plan["start_um"]).replace("Z", "+00:00"))
+            if s <= jetzt + timedelta(minutes=AP_FAELLIG_MIN):
+                return None, f"startet in ≤ {AP_FAELLIG_MIN} min und ist bestätigt — erst ↩ zurück, dann drehen"
+        except (TypeError, ValueError):
+            pass
+    if not isinstance(frei, dict):
+        return None, "Richtungsschutz nicht lesbar — nichts gedreht, gleich nochmal versuchen"
+    if frei.get("frei") is not True:
+        return None, "Gesperrt: " + str(frei.get("grund") or "Gegenrichtung bei derselben ID × Firma läuft")
+    return ("sell" if alt == "buy" else "buy"), None
+
+
+def _ap_richtung_plan(pid):
+    """Admin-Planer „Zu bestätigen"/„Wartet auf Start": einen Plan umdrehen (ap_richtung_plan_pruefen), Guard in derselben PATCH-Anfrage
+    (planned, Auto-Plan, alte Richtung, nichts geclaimt/gesendet), Protokoll in auto_plan_umplanung mit quelle 'hand'. Der Saldo-Riegel
+    bleibt am Start (rkVorStart im PC-Tab, ap_richtung_konflikte im Bot) — er wird hier weder geprüft noch ausgehebelt."""
+    plan = (sb_select("trade_plans", {"select": "id,user_id,status,auto_plan,richtung,master_firm,start_um,auto_bestaetigt_at,"
+                                      "start_um_gestartet_at,started_at,orbit_gesendet_at", "id": f"eq.{pid}"}) or [None])[0]
+    alt = str((plan or {}).get("richtung") or "").lower()
+    frei = None
+    if plan and alt in ("buy", "sell"):
+        try:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_gegenrichtung_frei", headers=_sb_headers(), timeout=(5, 15),
+                            json={"p_plan": pid, "p_richtung": "sell" if alt == "buy" else "buy"})
+            frei = r.json() if r.status_code == 200 else None
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ richtung_plan Riegel {pid}: {type(e).__name__}: {e}", flush=True)
+    jetzt = datetime.now(timezone.utc)
+    neu, fehler = ap_richtung_plan_pruefen(plan, frei, jetzt)
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler, "gesperrt": isinstance(frei, dict) and frei.get("frei") is False}), 409
+    faellig = (jetzt + timedelta(minutes=AP_FAELLIG_MIN)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "auto_plan": "eq.true", "richtung": f"eq.{alt}",
+                                     "start_um_gestartet_at": "is.null", "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                                     "or": f"(auto_bestaetigt_at.is.null,start_um.gt.{faellig})"}, {"richtung": neu})
+    if not rows:
+        return jsonify({"ok": False, "msg": "Plan hat sich inzwischen geändert (gestartet/gedreht) — nichts geändert"}), 409
+    zeile = {"um": jetzt.isoformat(), "plan_id": pid, "user_id": str(plan.get("user_id")), "firma": plan.get("master_firm"),
+             "von_richtung": alt, "nach_richtung": neu, "von_start": plan.get("start_um"), "nach_start": plan.get("start_um"),
+             "grund": f"von Hand (Admin-Planer): {AP_RICHTUNG_TXT[alt]} → {AP_RICHTUNG_TXT[neu]}", "quelle": "hand"}
+    msg = None
+    try:
+        _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=[zeile],
+                                headers=_sb_headers("return=minimal"), timeout=(5, 20)))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ richtung_plan Protokoll {pid}: {type(e).__name__}: {e}", flush=True)
+        msg = f"gedreht, Protokoll nicht geschrieben ({type(e).__name__})"
+    return jsonify({"ok": True, "plan_id": pid, "richtung": neu, "msg": msg})
 
 
 def ap_start_protokoll_zeile(plan, body, jetzt_iso):
