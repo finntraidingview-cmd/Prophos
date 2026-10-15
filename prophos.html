@@ -44144,7 +44144,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1576'
+  const OS_TAB_BUILD = '2026-09-22.1577'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48746,7 +48746,7 @@
       }
     }catch(e){ console.warn('[start-um] Claim-Grund', (e && e.message) || e) }
   }
-  let _suPauseBis = 0, _suLetzterLauf = 0, _suLauf = 0, _suLaufSeit = 0
+  let _suPauseBis = 0, _suLetzterLauf = 0, _suLauf = 0, _suLaufSeit = 0, _suLaufName = '', _suLaufId = ''
   const _suSperreGemeldet = new Map()   // planId → start_sperre.at, schon als Toast gemeldet (13.10.2026)
   const _suClaimPause = new Map()   // planId → frühester nächster Claim-Versuch (ms) nach einem Fehlgriff
   const suKettenTag = p => String((p && p.plannedFor) || '') || (p && p.startUm ? String(p.startUm).slice(0, 10) : '')
@@ -48820,6 +48820,67 @@
       try{ renderTradePlans() }catch(_){}
     }catch(e){ console.warn('[start-um] Plan nach Fehlgriff nicht lesbar', plan.id, (e && e.message) || e) }
   }
+  /* WARTE-GRUND JE PLAN (16.10.2026, Master-Auftrag CLAIM-GRUND — Befund 15.10.: pc-xxxxxx „94 min verpasst", pc-xxxxxx zwei Winning
+   * Days „289/290 min verpasst", jedes Mal „der Prophos-Tab lief, bekam aber keinen Claim (Grund nicht gemeldet)", auto_plan_umplanung
+   * leer — kein Trigger hatte verweigert. Der Tick hatte den fälligen Plan selbst liegen lassen: Farmer/Topstep nicht scharf, Slave-
+   * Vorprüfung rot, Winning-Day-Kette wartet auf einen früheren Plan, anderer Plan zuerst, PC beschäftigt, Lauf hängt, Plan erst spät
+   * im Tab. Jetzt merkt sich jeder Tick je fälligem, ungeclaimtem Plan, woran er hängt (Zeit je Grund); die zu_spaet-Meldung nennt den
+   * Grund, der am längsten hielt — eine Meldung, eine Ursache (Finn /Goal 09.10.2026). Nur Merker im Tab, keine DB. */
+  const _suWarte = new Map()        // planId → { erst, letzt, gruende: Map grund → ms }
+  const _suGesehen = new Map()      // planId → ms, seit wann der Plan (geplant, ungeclaimt) in der Liste dieses Tabs steht
+  const _suVorcheckGrund = new Map()   // planId → letzter Grund der Slave-Vorprüfung
+  const suPulsWeg = p => !!p && (routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')
+  // Grund für EINEN fälligen Plan — global (PC beschäftigt …) gewinnt, sonst der erste Riegel in der Reihenfolge von suKandidaten
+  function suWarteGrundFuer(p, o){
+    if(_suLaeuft && String(p.id) === _suLaufId) return ''   // der eigene Lauf dieses Plans (Vorprüfung, Richtung) — kein Warten
+    if(o.global) return o.global
+    const nicht = suStartetNichtWeil(p, o.scharf)
+    if(nicht === 'Farmer nicht scharf') return 'Winning-Days-Farmer nicht scharf → Admin → Winning Days → Ablauf auf „scharf"'
+    if(/Puls für Topstep nicht scharf/.test(nicht)) return nicht + ' → Admin → Winning Days → Ablauf „Puls für Topstep" auf „scharf"'
+    if(nicht === 'startet erst nach Bestätigung') return 'Auto-Vorschlag unbestätigt → im Trade-Planer bestätigen'
+    if(nicht) return nicht
+    const id = String(p.id)
+    if((_vorcheckNaechst.get(id) || 0) > o.now) return 'Slave-Vorprüfung nicht bereit' + (_suVorcheckGrund.get(id) ? ': ' + _suVorcheckGrund.get(id) : '')
+    if((_suClaimPause.get(id) || 0) > o.now){
+      const g = _suClaimGrund.get(id)
+      return g ? 'Claim verweigert: ' + g.grund : 'Claim traf keine Zeile (Plan in der DB anders als im Tab)'
+    }
+    if(tpIstFarmerPlan(p) && !suKetteFrei(p, o.plaene, o.now)){
+      const tag = suKettenTag(p)
+      const vor = (o.plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag && suNichtGestartet(x)
+        && String(x.id) !== id && new Date(x.startUm) <= new Date(p.startUm))
+        .sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
+      return vor ? `Winning-Day-Kette wartet auf „${vor.masterName || '—'}" (${tpStartUmText(vor.startUm)}, noch nicht gestartet)` : 'Winning-Day-Kette: Kopf noch nicht fällig'
+    }
+    if(o.erster && String(o.erster.id) !== id) return `Warteschlange — zuerst „${o.erster.masterName || '—'}"`
+    return ''
+  }
+  // Ein Tick: alle fälligen, ungeclaimten Puls-Pläne mit ihrem Grund verbuchen (Zeit seit dem letzten Tick, höchstens 60 s je Tick)
+  function suWarteTick(o){
+    const now = o.now
+    let plaene; try{ plaene = tradePlans || [] }catch(_){ plaene = [] }
+    o.plaene = plaene
+    for(const p of plaene){
+      if(!suNichtGestartet(p) || !suPulsWeg(p)) continue
+      const id = String(p.id)
+      if(!_suGesehen.has(id)) _suGesehen.set(id, now)
+      if(!p.startUm || new Date(p.startUm).getTime() > now) continue
+      const grund = suWarteGrundFuer(p, o)
+      let w = _suWarte.get(id)
+      if(!w){ w = { erst: now, letzt: now, gruende: new Map() }; _suWarte.set(id, w) }
+      const dt = Math.min(60000, Math.max(0, now - w.letzt)); w.letzt = now
+      if(grund) w.gruende.set(grund, (w.gruende.get(grund) || 0) + dt)
+    }
+    if(_suWarte.size > 300) for(const [k, w] of [..._suWarte.entries()]) if(now - w.letzt > 24 * 3600000) _suWarte.delete(k)
+  }
+  // Längster Grund seit der Startzeit → { grund, ms } oder null
+  function suWarteHaupt(planId){
+    const w = _suWarte.get(String(planId)); if(!w) return null
+    let best = null
+    for(const [g, ms] of w.gruende) if(!best || ms > best.ms) best = { grund: g, ms }
+    return best && best.ms >= 1000 ? best : null
+  }
+  window._suWarte = { tick: suWarteTick, haupt: suWarteHaupt, grundFuer: suWarteGrundFuer, karte: _suWarte, gesehen: _suGesehen }   // Test-Haken
   // Punkt 7: überfällige unbestätigte Vorschläge melden — je Plan und Tag genau einmal (Merker planId → Tag im localStorage, damit ein
   // Neuladen des Tabs nicht erneut meldet; der Plan selbst bleibt unberührt: kein Claim, kein Start, Startzeit steht)
   const SU_VORSCHLAG_LS = 'prophos_su_vorschlag_gemeldet'
@@ -48848,15 +48909,22 @@
   async function tpStartUmTick(){
     if(!MT5_LOCAL) return
     let orbitLaeuft = false; try{ orbitLaeuft = !!_tpOrbitLaeuft || !!_osActive }catch(_){ orbitLaeuft = true }
+    // Warte-Grund (16.10.2026): jeder frühe Ausstieg verbucht für alle fälligen Pläne, woran es hängt
+    const warte = g => { try{ suWarteTick({ now: Date.now(), global: g, scharf: !!(_suScharf && _suScharf.an) }) }catch(_){} }
+    const orbitText = () => { let os = false; try{ os = !!_osActive }catch(_){}
+      return os ? 'PC beschäftigt: ein Signal vom Mac/Handy läuft gerade auf diesem PC' : 'PC beschäftigt: ein anderer Orbit-Start läuft gerade auf diesem PC' }
     if(_suLaeuft){
-      if(orbitLaeuft || Date.now() - _suLaufSeit < SU_HAENGER_MS) return
+      if(orbitLaeuft || Date.now() - _suLaufSeit < SU_HAENGER_MS){
+        warte(orbitLaeuft ? orbitText() : `ein anderer Start dieses Tabs lief noch („${_suLaufName || '—'}", seit ${Math.round((Date.now() - _suLaufSeit) / 1000)} s)`)
+        return
+      }
       console.warn('[start-um] Lauf ohne Ende seit', Math.round((Date.now() - _suLaufSeit) / 60000), 'min — Riegel frei')
       _suLaeuft = false
     }
-    if(orbitLaeuft) return                    // PC beschäftigt (Orbit-Start, Signal vom Mac/Handy): fällige Pläne warten in der Schlange
-    if(Date.now() < _suPauseBis) return       // Zufalls-Abstand nach dem letzten Lauf
+    if(orbitLaeuft){ warte(orbitText()); return }   // PC beschäftigt (Orbit-Start, Signal vom Mac/Handy): fällige Pläne warten in der Schlange
+    if(Date.now() < _suPauseBis){ warte('Zufalls-Abstand nach dem letzten Start'); return }   // Zufalls-Abstand nach dem letzten Lauf
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
-    if(!uid) return
+    if(!uid){ warte('Tab nicht angemeldet → am PC in Prophos anmelden'); return }
     let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
     let now = Date.now()
     // Schalter frisch (≤ 60 s) nur, wenn ein Farmer-Plan in ≤ 10 min fällig ist oder schon fällig wartet — sonst ≤ 5 min (01.10.2026).
@@ -48869,10 +48937,11 @@
     now = Date.now()
     const faellig = suKandidaten(_tp, { scharf, now })
     try{ suVorschlaegeMelden(_tp, now) }catch(e){ console.warn('[start-um] Vorschlag-Meldung', (e && e.message) || e) }
+    try{ suWarteTick({ now, scharf, erster: faellig[0] || null }) }catch(e){ console.warn('[start-um] Warte-Grund', (e && e.message) || e) }
     if(!faellig.length) return
     let plan = faellig[0]
     const lauf = ++_suLauf
-    _suLaeuft = true; _suLaufSeit = Date.now()
+    _suLaeuft = true; _suLaufSeit = Date.now(); _suLaufName = plan.masterName || ''; _suLaufId = String(plan.id)
     let gelaufen = false
     try{
       const verspaetet = now - new Date(plan.startUm).getTime()
@@ -48961,6 +49030,7 @@
             return
           }
           _vorcheckNaechst.set(String(plan.id), Date.now() + 20000 + Math.floor(Math.random() * 20000))
+          _suVorcheckGrund.set(String(plan.id), String(vc.grund || '').slice(0, 200))
           await vorcheckMelden(plan, 'slave_nicht_bereit', vc.grund, vc.checks)
           vorcheckKarteZeigen(plan, vc, 'wartet')
           return
@@ -48990,9 +49060,14 @@
         // Tab erst nach der Startzeit geöffnet → „lief nicht (offen seit …)". Schritt bleibt zu_spaet (sfTick holt mit Regeln nach).
         const startMs0 = new Date(plan.startUm).getTime(), g0 = _suClaimGrund.get(String(plan.id))
         const gFrisch = !!(g0 && (Date.parse(g0.um) || 0) >= startMs0 - 60000)
+        // WARTE-GRUND (16.10.2026): sonst der Grund, an dem der Tick den Plan am längsten liegen ließ; kam der Plan erst nach der
+        // Startzeit in die Liste dieses Tabs, das; „kein Claim, Grund unbekannt" nur noch, wenn wirklich nichts verbucht ist
+        const wh = suWarteHaupt(plan.id), gesehen = _suGesehen.get(String(plan.id)) || 0
         const ursache = gFrisch ? `der Start wurde ${Math.round(verspaetet / 60000)} min lang verweigert: ${g0.grund.slice(0, 200)}`
-          : _suTabSeit <= startMs0 ? 'der Prophos-Tab lief, bekam aber keinen Claim (Grund nicht gemeldet — Umplanungs-Protokoll des Plans lesen)'
-          : `der Prophos-Tab am PC lief nicht (offen erst seit ${tpStartUmText(new Date(_suTabSeit).toISOString())})`
+          : _suTabSeit > startMs0 ? `der Prophos-Tab am PC lief nicht (offen erst seit ${tpStartUmText(new Date(_suTabSeit).toISOString())})`
+          : wh ? `${Math.max(1, Math.round(wh.ms / 60000))} min lang: ${wh.grund.slice(0, 220)}`
+          : gesehen > startMs0 + 60000 ? `der Plan kam erst ${tpStartUmText(new Date(gesehen).toISOString())} in die Liste dieses Tabs (Startzeit ${tpStartUmText(plan.startUm)}) → Pläne neu laden lassen`
+          : 'der Prophos-Tab lief, bekam aber keinen Claim (Grund nicht gemeldet — Umplanungs-Protokoll des Plans lesen)'
         if(rkGilt(plan) || (plan.route === 'tsv2' && !tpIstWdPlan(plan) && (plan.richtung === 'buy' || plan.richtung === 'sell'))) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — ${ursache}` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
         return
       }
