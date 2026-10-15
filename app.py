@@ -7685,7 +7685,8 @@ def muster_portfolio_zeilen(zellen, ziele):
         e_pct = round(100 * min(1.0, float(abd)), 1) if (soll > 0 and isinstance(abd, (int, float))) else None
         if g_pct is not None and e_pct is not None and e_pct < g_pct:
             e_pct = g_pct                      # erwartet enthält den Bestand — nie unter gesichert anzeigen
-        out.append({"firma": z.get("firma"), "status": z.get("status") or "frei", "art": ziel.get("art"),
+        # Finn 16.10.2026: nur aktiv/gesperrt — alte „pausiert"-Zeilen der Vorrat-Seite zeigt der Tacho als aktiv
+        out.append({"firma": z.get("firma"), "status": "gesperrt" if z.get("status") == "gesperrt" else "frei", "art": ziel.get("art"),
                     "typen": ziel.get("typen") or [], "einheit": "Stück" if ziel.get("art") == "stueck" else "USD", "soll": soll, "gesichert": round(ges, 2),
                     "gesichert_pct": g_pct, "erwartet_pct": e_pct, "unterwegs_n": z.get("unterwegs_n"), "sperre": z.get("sperre"),
                     "reihe": ziel.get("reihe")})
@@ -16786,37 +16787,25 @@ AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 AP_GRUND_EXT = "External ID fehlt (Tradovate-Unterkonto) — unter Accounts eintragen"
 AP_GRUND_GESPERRT = "Firma bei dieser ID gesperrt (Muster-Portfolio) — unter Accounts am Tacho freischalten"
-AP_GRUND_PAUSIERT = "Firma bei dieser ID pausiert (Muster-Portfolio) — unter Accounts am Tacho auf Aktiv stellen"
-# EIN Schalter (Master 16.10.2026, offen bei Finn): pausiert stoppt standardmäßig nur den Nachkauf (Vorrat), laufende Konten werden weiter
-# geplant. True = pausiert stoppt auch neue Auto-Pläne für ALLE Konten der Firma bei dieser ID (gesperrt wirkt nur auf neue Konten).
-MP_PAUSIERT_STOPPT_TRADES = False
 
 
 def _ap_sperren():
-    """Muster-Portfolio (16.10.2026): gesperrte (mit MP_PAUSIERT_STOPPT_TRADES auch pausierte) Zellen der Sperr-Matrix →
-    {(user_id, firma_norm): (status, geaendert_at datetime|None)}. Fehler/Tabelle fehlt → {} (der Planer läuft wie bisher, nie stehen bleiben)."""
+    """Muster-Portfolio (16.10.2026): gesperrte Zellen der Sperr-Matrix → {(user_id, firma_norm)}. Fehler/Tabelle fehlt → leer (der
+    Planer läuft wie bisher, nie stehen bleiben)."""
     try:
-        rows = _sb_all("vorrat_matrix", {"select": "user_id,firma,status,geaendert_at",
-                                         "status": "in.(gesperrt,pausiert)" if MP_PAUSIERT_STOPPT_TRADES else "eq.gesperrt"})
+        rows = _sb_all("vorrat_matrix", {"select": "user_id,firma", "status": "eq.gesperrt"})
     except Exception as e:
         print(f"[auto-plan] ⚠️ Sperr-Matrix: {type(e).__name__}: {e}", flush=True)
-        return {}
-    return {(str(r.get("user_id")), _firm_norm(r.get("firma"))): (r.get("status"), _ap_ts(r.get("geaendert_at"))) for r in rows}
+        return set()
+    return {(str(r.get("user_id")), _firm_norm(r.get("firma"))) for r in rows}
 
 
 def ap_firma_gesperrt(a, sperren):
-    """REIN RECHNEND: Grund, warum der Planer das Konto wegen der Sperr-Matrix auslässt, sonst None. Master-Entscheid 16.10.2026:
-    gesperrt = kein Auto-Plan für NEUE Konten dieser Firma — Konten, die vor der Sperre schon da waren, laufen weiter (ein Klick am Tacho
-    soll keinen laufenden Weg abschneiden; ohne Zeitstempel an Sperre oder Konto: gesperrt). pausiert steht nur mit
-    MP_PAUSIERT_STOPPT_TRADES in sperren und hält dann jedes Konto der Firma an."""
-    e = sperren.get((str(a.get("user_id")), _firm_norm(a.get("firm"))))
-    if not e:
-        return None
-    status, seit = e
-    if status == "pausiert":
-        return AP_GRUND_PAUSIERT
-    neu = _ap_ts(a.get("created_at"))
-    return None if (seit and neu and neu < seit) else AP_GRUND_GESPERRT
+    """REIN RECHNEND: ist die Firma des Kontos bei seiner ID gesperrt? Finn 16.10.2026 (über den Master): nur zwei Zustände — aktiv (handelt
+    ganz normal) und gesperrt (die ID kann bei der Firma nicht mehr handeln: Firma hat gesperrt oder andere Restriction) → für KEIN Konto
+    dieser Firma bei dieser ID ein neuer Plan. Laufende/offene Trades fasst der Planer hier ohnehin nicht an. „pausiert" (Vorrat-Seite)
+    zählt als aktiv."""
+    return (str(a.get("user_id")), _firm_norm(a.get("firm"))) in sperren
 AP_GRUND_BAL_LIVE = "Balance nicht live — erst lesen"
 AP_GRUND_BAL_FEHLER = "Balance-Prüfung gerade nicht möglich — gleich noch mal versuchen"
 
@@ -19097,9 +19086,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if a.get("auto_planer") is False:              # Haken im Konto aus (Finn 08.10.2026, accounts.auto_planer) — sichtbar ausgelassen
             ausgelassen.append(dict(zeile, grund="vom Auto-Planer ausgenommen (Haken im Konto aus)"))
             continue
-        _sp = ap_firma_gesperrt(a, sperren)           # Muster-Portfolio (16.10.2026): Firma bei der ID gesperrt/pausiert — sichtbar ausgelassen
-        if _sp:
-            ausgelassen.append(dict(zeile, grund=_sp))
+        if ap_firma_gesperrt(a, sperren):              # Muster-Portfolio (16.10.2026): Firma bei der ID gesperrt — sichtbar ausgelassen
+            ausgelassen.append(dict(zeile, grund=AP_GRUND_GESPERRT))
             continue
         # ZIEL ERREICHT = NIE PLANEN (Finn 12.10.2026: „Wenn ein Account als Ziel erreicht ist, dann soll dort nie im Leben ein Trade geplant
         # werden"): Markierung der Ziel-Wache zählt vor jeder Balance-Rechnung — ein falscher Startwert oder eine alte Lesung kann sie nicht

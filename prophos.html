@@ -2201,7 +2201,7 @@
   /* Prop-Baum im Admin (03.10.2026, Auftrag von Pascal): je Firma eine Karte, Spalten = Stufen, Zeilen = IDs, Zellen = Account-Chips.
      Erledigte bleiben in ihrer Stufe und leuchten grün, heute archivierte stehen rot bis zum Handelstag-Wechsel (17:45 New York). */
   /* Muster-Portfolio (16.10.2026): Tacho je Firma oben unter Accounts — Bogen in Firmenfarbe = gesichert, heller Bogen + Strich = mit
-     Funnel erwartet; pausiert grau, gesperrt nur als Chip. Firmenfarben dezent (Finn 12.10.2026: „Farben dezent") an EINER Stelle. */
+     Funnel erwartet; gesperrt nur als Chip (Finn 16.10.2026: nur aktiv/gesperrt). Firmenfarben dezent (Finn 12.10.2026: „Farben dezent") an EINER Stelle. */
   #mp-karte{--mp-tradeify:#4f5bd5;--mp-topstep:#1f93c9;--mp-apex:#e8892b;--mp-ftmo:#2a3f8f;--mp-fundednext:#a14fc9;--mp-fundingpips:#1f9e8f;--mp-the5ers:#3a9d5d;
     margin-bottom:14px;padding:10px 16px 12px}
   #mp-karte .mp-kopf{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 6px}
@@ -2222,8 +2222,6 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #mp-karte .mp-firma i{width:7px;height:7px;border-radius:50%;background:var(--mp-f);flex:none}
   #mp-karte .mp-sub{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #mp-karte .mp-tacho.pausiert{--mp-f:var(--sub-2)}
-  #mp-karte .mp-tacho.pausiert .mp-zahl{fill:var(--sub)}
   #mp-karte .mp-gesperrt{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--sub-2)}
   #mp-karte .mp-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;
     padding:2px 9px;font:inherit;font-size:11.5px;cursor:pointer}
@@ -66661,28 +66659,26 @@
   // Halbkreis 180° → 0°, Mittelpunkt (60,60), Radius 46; pathLength 100 → Prozent direkt als Strichlänge
   const MP_BOGEN = 'M14 60 A46 46 0 0 1 106 60'
   function mpTacho(f){
-    const pausiert = f.status === 'pausiert'
     const g = Math.max(0, Math.min(100, Number(f.gesichert_pct) || 0))
     const e = f.erwartet_pct == null ? null : Math.max(g, Math.min(100, Number(f.erwartet_pct)))
     let strich = ''
-    if(e != null && e > g + 0.5 && !pausiert){
+    if(e != null && e > g + 0.5){
       const w = Math.PI * (1 - e / 100), x1 = 60 + 38 * Math.cos(w), y1 = 60 - 38 * Math.sin(w), x2 = 60 + 54 * Math.cos(w), y2 = 60 - 54 * Math.sin(w)
       strich = `<line class="mp-strich" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`
     }
     const zahl = f.gesichert_pct == null ? '–' : Math.round(g)
-    const tip = pausiert ? `${f.firma} pausiert — kein Nachkauf, laufende Konten laufen weiter. Klick: Status ändern`
-      : `${f.firma}: ${Math.round(g)} % gesichert${e != null ? `, mit Funnel erwartet ${Math.round(e)} %` : ''} · ${mpSub(f)}${f.unterwegs_n ? ` · ${f.unterwegs_n} unterwegs` : ''}. Klick: Status ändern`
-    return `<button type="button" class="mp-tacho${pausiert ? ' pausiert' : ''}${_mp.offen === f.firma ? ' offen' : ''}" data-mp-firma="${mpEsc(f.firma)}"
-        style="--mp-f:${pausiert ? 'var(--sub-2)' : mpFarbe(f.firma)}" title="${mpEsc(tip)}">
+    const tip = `${f.firma}: ${Math.round(g)} % gesichert${e != null ? `, mit Funnel erwartet ${Math.round(e)} %` : ''} · ${mpSub(f)}${f.unterwegs_n ? ` · ${f.unterwegs_n} unterwegs` : ''}. Klick: Status ändern`
+    return `<button type="button" class="mp-tacho${_mp.offen === f.firma ? ' offen' : ''}" data-mp-firma="${mpEsc(f.firma)}"
+        style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
       <svg viewBox="0 0 120 68" aria-hidden="true">
         <path class="mp-bahn" d="${MP_BOGEN}" pathLength="100"/>
-        ${e != null && !pausiert ? `<path class="mp-erw" d="${MP_BOGEN}" pathLength="100" stroke-dasharray="${e} 100"/>` : ''}
+        ${e != null ? `<path class="mp-erw" d="${MP_BOGEN}" pathLength="100" stroke-dasharray="${e} 100"/>` : ''}
         ${g > 0 ? `<path class="mp-ges" d="${MP_BOGEN}" pathLength="100" stroke-dasharray="${g} 100"/>` : ''}
         ${strich}
         <text class="mp-zahl" x="60" y="58" text-anchor="middle">${zahl}${f.gesichert_pct == null ? '' : '<tspan dx="1">%</tspan>'}</text>
       </svg>
       <div class="mp-firma"><i></i>${mpEsc(f.firma)}</div>
-      <div class="mp-sub">${pausiert ? 'pausiert' : mpEsc(mpSub(f))}</div>
+      <div class="mp-sub">${mpEsc(mpSub(f))}</div>
     </button>`
   }
   function mpRender(){
@@ -66695,7 +66691,7 @@
     leiste.innerHTML = sichtbar.map(mpTacho).join('') + (_mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : '')
     ges.hidden = !gesperrt.length
     ges.innerHTML = gesperrt.length ? 'Gesperrt: ' + gesperrt.map(f => `<button type="button" class="mp-chip${_mp.offen === f.firma ? ' offen' : ''}" data-mp-firma="${mpEsc(f.firma)}"
-      title="${mpEsc(f.firma)} ist bei dieser ID gesperrt — kein Nachkauf, kein Auto-Plan für neue Konten. Klick: Status ändern">${MP_SCHLOSS}${mpEsc(f.firma)}</button>`).join('') : ''
+      title="${mpEsc(f.firma)} ist bei dieser ID gesperrt — kein Nachkauf, kein neuer Auto-Plan für Konten dieser Firma (laufende Trades bleiben). Klick: Status ändern">${MP_SCHLOSS}${mpEsc(f.firma)}</button>`).join('') : ''
     const st = document.getElementById('mp-stand')
     if(st){ const t = d.gerechnet_um ? new Date(d.gerechnet_um) : null
       st.textContent = t && isFinite(t) ? 'Stand ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '' }
@@ -66703,7 +66699,8 @@
     wahl.hidden = !f
     if(f){
       const knopf = (s, t) => `<button type="button" data-mp-status="${s}" class="${f.status === s ? 'an' : ''}"${d.darf_schalten === false || _mp.sendet ? ' disabled' : ''}>${t}</button>`
-      wahl.innerHTML = `<span>${mpEsc(f.firma)}:</span>${knopf('frei', 'Aktiv')}${knopf('pausiert', 'Pausiert')}${knopf('gesperrt', 'Gesperrt')}`
+      // Finn 16.10.2026: nur zwei Zustände — aktiv (handelt normal) · gesperrt (Firma hat gesperrt/Restriction → keine neuen Pläne)
+      wahl.innerHTML = `<span>${mpEsc(f.firma)}:</span>${knopf('frei', 'Aktiv')}${knopf('gesperrt', 'Gesperrt')}`
         + (d.darf_schalten === false ? '<span>— nur Admin oder Verwalter der Gruppe</span>' : '')
     }
   }
