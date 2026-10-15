@@ -34470,7 +34470,7 @@
         tip = `Eingeplant · Start ${txt} Dubai${g.richtung ? ' · ' + String(g.richtung).toUpperCase() : ''} (Lauf ${tag})` }
       else if(x){
         const bald = _apNachplanBald.get(id), g2 = String(x.grund || '')
-        if(bald && Date.now() - bald < 12 * 60000 && /Balance/i.test(g2)){ txt = 'nächster Lauf ≤ 10 min'; cls = 'bald'; tip = `Balance gerade gelesen — der Nachplan-Takt plant das Konto beim nächsten Lauf (alle 10 min). Vorher: ${g2} (Lauf ${tag})` }
+        if(bald && Date.now() - bald < 12 * 60000 && /Balance/i.test(g2)){ txt = 'nächster Lauf ≤ 5 min'; cls = 'bald'; tip = `Balance gerade gelesen — der Nachplan-Takt plant das Konto beim nächsten Lauf (alle 10 min). Vorher: ${g2} (Lauf ${tag})` }
         else { txt = 'ausgelassen · ' + apGrundKurz(g2); cls = 'raus'; tip = `Ausgelassen: ${apBlowText(g2)} (Lauf ${tag})` }
       }
       else { txt = '–'; tip = l ? `Im letzten Lauf (${tag}) nicht dabei` : 'Noch kein Planer-Lauf geladen' }
@@ -44022,7 +44022,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1567'
+  const OS_TAB_BUILD = '2026-09-22.1568'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51039,7 +51039,7 @@
         }).join('') + `</div>`
     }).join('')
     const cd = tplCdText(_ap.info)
-    const knopf = _ap.admin === true ? `<button type="button" class="btn btn-ghost tpl-bd-np" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt anstoßen — dieselbe Rechnung wie der 10-min-Takt, für den Tag des letzten Nachtlaufs; bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : escapeHtml(_tpl.nachplanFehler || 'Jetzt neu berechnen')}</button>` : ''
+    const knopf = _ap.admin === true ? `<button type="button" class="btn btn-ghost tpl-bd-np" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt anstoßen — dieselbe Rechnung wie der 5-min-Takt, für den Tag des letzten Nachtlaufs; bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : escapeHtml(_tpl.nachplanFehler || 'Jetzt neu berechnen')}</button>` : ''
     const kopfR = (cd || knopf) ? `<span class="tpl-bd-cd">${cd ? `${_ap.aktiv === false ? '' : 'Nachplanen '}<span data-tpl-cd>${escapeHtml(cd)}</span>` : ''}${knopf}</span>` : ''
     const gelZ = gel ? `<div class="tpl-bd-gel">✓ ${gel} ${gel === 1 ? 'Konto' : 'Konten'} gelesen · ${gel === 1 ? 'wird' : 'werden'} beim nächsten Nachplanen eingeplant${cd ? ` (<span data-tpl-cd>${escapeHtml(cd)}</span>)` : ''}</div>` : ''
     return `<div class="tpl-karte tpl-bd"><div class="tpl-h">Braucht dich <b>${n}</b>${kopfR}</div>${gelZ}${bloecke}</div>`
@@ -52080,7 +52080,7 @@
         .catch(err => { _tpl.nachplanFehler = String((err && err.message) || err).slice(0, 60); throw err })   // 409 „Auto-Planer ist aus" / „läuft schon" steht im Knopf bis zum nächsten Klick (Master 09.10.2026)
         .then(d => { if(typeof atToast === 'function') atToast(`🤖 Nachplanen ${d.tag || ''}: ${d.geplant || 0} geplant für ${d.kandidaten || 0} ${d.kandidaten === 1 ? 'Konto' : 'Konten'} ohne Plan`, 'start') })
         .catch(err => { if(typeof atToast === 'function') atToast('Nachplanen: ' + ((err && err.message) || err), 'end') })
-        .finally(() => { _tpl.nachplanLaeuft = false; _ap.laufAt = 0; _ap.lauf = null; tplSpaeter(); Promise.resolve(apLetztenHolen()).catch(() => {}).finally(() => { try{ apdLaden(true) }catch(_){}; tplSpaeter() }) })
+        .finally(() => { _tpl.nachplanLaeuft = false; _ap.laufAt = 0; _ap.lauf = null; tplSpaeter(); Promise.resolve(apLetztenHolen()).catch(() => {}).finally(() => { try{ apdLaden(true) }catch(_){}; tplSpaeter(); try{ if(document.getElementById('ap-ids-root')?.offsetParent) window._apIdsLaden?.() }catch(_){} }) })   // Admin-Reiter „Nachplanen“ (15.10.2026): danach den Reiter neu laden
       return }
     const ba = e.target.closest('[data-tpl-blowarch]')
     if(ba){ e.stopPropagation(); ba.disabled = true; ba.textContent = 'archiviert …'
@@ -66190,7 +66190,7 @@
         <button type="button" class="ap-idr-m${_apIds.menu === 'verw' ? ' auf' : ''}" data-ap-menu="verw" title="Planer-Haken aller IDs">⚙<span class="lang"> IDs verwalten</span> ▾</button></div>`
     const kopf = `<div class="ap-ids-kopf"><b>IDs im Trade-Planer · ${drin.length} von ${rows.length}</b>
         <span title="Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.">Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${lzAt ? ' · letzter Lauf ' + escapeHtml(lzAt) : _apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
-        <button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:auto;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
+        ${(_ap.admin === true || _ap.imPlaner) ? `<button type="button" class="btn btn-ghost" data-tpl-nachplan="1" style="margin-left:auto;padding:3px 9px;font-size:12px"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute (neu gekauft, Phase umgestellt, Haken gesetzt) sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}<button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:${(_ap.admin === true || _ap.imPlaner) ? '6px' : 'auto'};padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
     const leiste = kopf + (rows.length ? `<div class="ap-idr-wrap"><div class="ap-idr" role="tablist">${alle}${im.map(reiter).join('')}${raus.filter(z => z.uid === u).map(reiter).join('')}</div>${rechts}${menu}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
       // ID-Details (apIdDetailRender) seit 08.10.2026 nicht mehr unter der Leiste: die ganze Seite filtert nach der ID (Finns Reihenfolge)
     root.style.padding = '6px 0'; root.style.color = ''

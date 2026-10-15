@@ -24311,7 +24311,7 @@ def ap_nacht_tick(jetzt, zustand):
 # Jetzt: alle 10 min (ap_loop) zwischen 00:00 dt und start_bis − 15 min prüft Railway, welche Konten der Planer-IDs HEUTE noch
 # keinen Plan haben, und stößt für GENAU diese ap_planen(nur_konten=…) an — dieselbe Rechenstrecke (Tranchen, Fenster, Delta,
 # Richtungsschutz), bestehende Pläne bleiben, Protokoll nur bei Treffer. Rein rechnende Teile (Fenster, Kandidaten) sind testbar.
-AP_NACHPLAN_TAKT_S = 600
+AP_NACHPLAN_TAKT_S = 300                 # 5 min (Finn 15.10.2026, vorher 10): neue/umgestellte Konten sollen schneller im Plan stehen
 # Gründe des letzten Laufs, die sich innerhalb des Tages nicht von selbst ändern — solche Konten werden nicht alle 10 min neu gerechnet
 # „vom Auto-Planer ausgenommen" ist seit 08.10.2026 KEIN fester Grund mehr: der Haken wird je Konto live geprüft (auto_planer is False) —
 # vorher blieb ein Konto, dessen Haken Finn wieder gesetzt hatte, bis zum nächsten Tag draußen (Grund aus dem letzten Lauf)
@@ -25508,8 +25508,10 @@ def admin_auto_plan():
     if body.get("nachplanen"):
         # „JETZT NEU BERECHNEN" (Finn 09.10.2026): nur Admin (ADMIN_EMAILS, kein Verwalter) — dieselbe Strecke wie der 10-min-Takt
         # (_ap_nachplan_rechnen) für den Planungstag des letzten Nachtlaufs; bestehende Pläne bleiben (nur_konten). Läuft schon → 409.
-        if not admin:
-            return jsonify({"ok": False, "msg": "Jetzt neu berechnen nur für Admins"}), 403
+        # seit 15.10.2026 auch für IDs im Planer (Finn bedient den Admin-Reiter auch aus Marcs/Chris' Login): dieselbe Hürde wie der
+        # Admin-Reiter selbst (Option A) — geplant werden ohnehin nur Konten der user_ids
+        if not (admin or im_planer):
+            return jsonify({"ok": False, "msg": "Nachplanen nur für Admins oder IDs im Trade-Planer"}), 403
         if not reg.get("aktiv"):
             # Not-Aus gilt auch für den Knopf — der Takt prüft aktiv ebenfalls (Prüfer Slave 2, 09.10.2026)
             return jsonify({"ok": False, "msg": "Auto-Planer ist aus"}), 409

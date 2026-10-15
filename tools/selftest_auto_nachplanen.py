@@ -29,9 +29,24 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    exec("\n".join([re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("AP_NACHPLAN_VORLAUF_MIN", "AP_NACHPLAN_TAKT_S", "AP_TZ_TAG", "AP_NACHPLAN_REST_RE", "AP_REST_MIN_CFD", "AP_HB_TZ")]
-                   + [re.search(r"^AP_NEU_BIS_STANDARD = .*$", src, re.M).group(0)]
-                   + [re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
+    # alle EINZEILIGEN AP_-Konstanten aus app.py (15.10.2026): vorher eine Handliste, die bei jeder neuen Konstante (AP_HB_TZ,
+    # AP_PUNKTWERT_FUT, AP_PUFFER_PKT_FUT …) mit NameError abbrach — jetzt jede Zeile „AP_X = …", die für sich kompiliert
+    def _einzeilig(src):
+        out = []
+        for m in re.finditer(r"^(AP_[A-Z0-9_]+) = .*$", src, re.M):
+            zeile = m.group(0)
+            try:
+                compile(zeile, "<ap>", "exec")
+            except SyntaxError:
+                continue
+            out.append(zeile)
+        return out
+    for zeile in _einzeilig(src):
+        try:
+            exec(zeile, a)
+        except Exception:
+            pass        # verweist auf etwas Mehrzeiliges (z. B. AP_KONTO_FELDER) — braucht dieser Test nicht
+    exec("\n".join([re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
                       for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
                    + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
                                          "ap_nachplan_ziel_frei", "ap_nachplan_neu_bis", "ap_konto_neu_zu_spaet", "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
@@ -249,13 +264,13 @@ def main():
     zeiten = {"start_bis": "18:00"}
     N, P, G = a["ap_nachplan_naechster"], a["ap_nachplan_planungstag"], a["ap_bal_gelesen"]
     jetzt = _dt(2026, 10, 8, 8, 3, tzinfo=tzb).astimezone(_tz.utc)                       # Do 08:03 dt, im Fenster
-    t, art = N(jetzt, (jetzt - _td(minutes=7)).timestamp(), zeiten, tzb)
-    check(art == "takt" and abs((t - jetzt).total_seconds() - 180) < 1, f"im Fenster: nächster Takt = letzter + 10 min (in 3 min) → {art} {t}")
+    t, art = N(jetzt, (jetzt - _td(minutes=2)).timestamp(), zeiten, tzb)
+    check(art == "takt" and abs((t - jetzt).total_seconds() - 180) < 1, f"im Fenster: nächster Takt = letzter + 5 min (in 3 min; Takt 5 min seit 15.10.2026) → {art} {t}")
     abend = _dt(2026, 10, 8, 22, 15, tzinfo=tzb).astimezone(_tz.utc)                       # Do 22:15 dt, Fenster zu
     t2, art2 = N(abend, (abend - _td(minutes=4)).timestamp(), zeiten, tzb)
     t2d = t2.astimezone(tzb)
     check(art2 == "fenster" and t2d.date().isoformat() == "2026-10-09" and t2d.hour == 0 and t2d.minute < 10,
-          f"abends nach dem Fenster: ab 00:00 dt des nächsten Werktags, auf den 10-min-Rhythmus → {art2} {t2d.isoformat()}")
+          f"abends nach dem Fenster: ab 00:00 dt des nächsten Werktags, auf den 5-min-Rhythmus → {art2} {t2d.isoformat()}")
     sa = _dt(2026, 10, 10, 12, 0, tzinfo=tzb).astimezone(_tz.utc)                          # Sa 12:00 dt
     t3, art3 = N(sa, None, zeiten, tzb)
     check(art3 == "fenster" and t3.astimezone(tzb).strftime("%a %H:%M") == "Mon 00:00", f"Wochenende: Mo 00:00 dt → {t3.astimezone(tzb)}")
