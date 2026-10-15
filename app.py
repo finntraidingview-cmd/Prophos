@@ -7670,6 +7670,7 @@ def admin_vorrat():
 # 60 s je ID gemerkt — die Accounts-Seite fragt bei jedem Öffnen, die Rechnung holt alle Konten; ein Status-Klick leert den Merker.
 _mp_cache = {}
 MP_CACHE_S = 60
+MP_TYP_RANG = {"challenge": 0, "phase1": 1, "phase2": 2, "funded": 3, "funded_cfd": 4, "winning_days": 5}
 
 
 def muster_portfolio_zeilen(zellen, ziele):
@@ -7688,8 +7689,13 @@ def muster_portfolio_zeilen(zellen, ziele):
         # Finn 16.10.2026: nur aktiv/gesperrt — alte „pausiert"-Zeilen der Vorrat-Seite zeigt der Tacho als aktiv
         out.append({"firma": z.get("firma"), "status": "gesperrt" if z.get("status") == "gesperrt" else "frei", "art": ziel.get("art"),
                     "typen": ziel.get("typen") or [], "einheit": "Stück" if ziel.get("art") == "stueck" else "USD", "soll": soll, "gesichert": round(ges, 2),
-                    "gesichert_pct": g_pct, "erwartet_pct": e_pct, "unterwegs_n": z.get("unterwegs_n"), "sperre": z.get("sperre"),
-                    "reihe": ziel.get("reihe")})
+                    "gesichert_pct": g_pct, "erwartet_pct": e_pct, "unterwegs_n": z.get("unterwegs_n"),
+                    "reihe": ziel.get("reihe"),
+                    # Klick auf den Tacho klappt die Konten dieser ID bei der Firma auf (Finn 16.10.2026) — Balance = Server-Wahl
+                    # (acc_balance_wahl wie Planer/Vorrat), archivierte und Live-Konten sind schon draußen
+                    "konten": sorted([{k_: k.get(k_) for k_ in ("account_id", "name", "typ", "groesse", "balance", "ccy", "balance_at", "waiting")}
+                                      for k in (z.get("konten") or [])],
+                                     key=lambda k: (MP_TYP_RANG.get(k.get("typ"), 9), str(k.get("name") or "")))})
     return sorted(out, key=lambda x: (float(x.get("reihe") or 0), str(x["firma"])))
 
 
@@ -8382,7 +8388,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
         z = {"account_id": k.get("account_id"), "name": k.get("name"), "typ": typ, "stufe": typ, "groesse": gr, "balance": bal,
              "balance_at": k.get("balance_at"), "alter_tage": alter, "im_bestand": im_bestand, "chance": None,
              "chance_stufe": None, "wert": None, "gefaehrdet": False, "unsicher": uns, "daten_fehlen": df, "hinweis": "",
-             "wert_eur": None, "waiting": bool(k.get("waiting"))}
+             "wert_eur": None, "waiting": bool(k.get("waiting")), "ccy": k.get("ccy")}
         # Consistency des Kontos (07.10.2026): Challenge-Etappe = consistency_pct × Ziel-$ für Kontowert und Chance
         stufen_k, kw_k = stufen, kw
         cp_et = ap_consistency_etappe(((stufen.get("challenge") or {}).get("ziel_pct")), k, gr) if typ == "challenge" else None
@@ -9219,14 +9225,14 @@ def vorrat2_rechnen_lauf(quelle, nur_uid=None):
         firma = _firm_norm(a.get("firm"))
         if firma not in ziele:
             continue
-        bal, _ccy, _src, at = acc_balance_wahl(a, echo_bal, dup_bal)
+        bal, ccy, _src, at = acc_balance_wahl(a, echo_bal, dup_bal)
         express = ist_topstep_express(a)
         typ = a.get("account_type") or ""
         je.setdefault((uid, firma), []).append({
             "account_id": aid, "name": a.get("name"), "typ": typ if typ in VORRAT_TYPEN else "challenge",
             "groesse": vorrat_groesse(_wd_konto_groesse(a), None if express else bal,
                                       firma in cfd_firmen or typ in VORRAT_CFD_TYPEN),
-            "balance": bal, "balance_at": at or None, "alter_tage": vorrat_alter_handelstage(at, jetzt) if at else None,
+            "balance": bal, "ccy": ccy, "balance_at": at or None, "alter_tage": vorrat_alter_handelstage(at, jetzt) if at else None,
             "express": express, "waiting": bool(a.get("waiting_payout_since")), "created_at": a.get("created_at"),
             "consistency_pct": a.get("consistency_pct"), "_a": a})
     # Höchststand je Kettenkonto (Topstep mit DLL, 09.10.2026) für MLL in Chance und Kontowert — eine Abfrage, Fehler → ohne Höchststand
@@ -12937,6 +12943,7 @@ def admin_wd_plaene():
         if not isinstance(rows, list) or not rows:
             return jsonify({"error": "plaene fehlt"}), 400
         angelegt, uebersprungen, verknuepft = [], [], []
+        sperren = _ap_sperren()   # Muster-Portfolio (16.10.2026): gesperrte Firma je ID → kein neuer Farmer-Plan; Lesefehler → leer (wie bisher)
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -12950,6 +12957,8 @@ def admin_wd_plaene():
                 acc = sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
+                if ap_firma_gesperrt(acc[0], sperren):
+                    uebersprungen.append({"master_account_id": mid, "grund": AP_GRUND_GESPERRT}); continue
                 offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
                                                   "status": "in.(planned,open)", "limit": "5"})
                 # 23.09.2026 (Finn: „alle Accounts sind einfach off — hat schon einen Plan"): ein Farmer-Plan eines
@@ -19684,6 +19693,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
     kauf_kette = None
     tps_je = {}
     ausgelassen, kandidaten = [], []
+    sperren = _ap_sperren()        # Muster-Portfolio (16.10.2026): gesperrte Firma je ID; Lesefehler → leer (wie bisher)
     for a in konten:
         aid, uid = str(a["id"]), str(a["user_id"])
         zeile_k = {"user": namen.get(uid, uid[:8]), "user_id": uid, "konto_id": aid, "konto": a.get("name"), "firma": a.get("firm"),
@@ -19696,6 +19706,9 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
         aus = lambda grund, **x: ausgelassen.append(dict(zeile_k, grund=grund, **x))   # noqa: E731
         if a.get("auto_planer") is False:
             aus("vom Auto-Planer ausgenommen (Haken im Konto aus)")
+            continue
+        if ap_firma_gesperrt(a, sperren):
+            aus(AP_GRUND_GESPERRT)
             continue
         if a.get("ziel_erreicht_at"):
             aus("Ziel erreicht (Ziel-Wache) — Phase umstellen, der Bot plant hier nie")
@@ -23340,12 +23353,17 @@ def ap_kette_tick(jetzt=None, rnd=None):
     param = ap_ausgleich_param(reg.get("regeln"))
     stand = None
     neu, gruende = [], {}
+    sperren = _ap_sperren()        # Muster-Portfolio (16.10.2026): gesperrte Firma je ID → kein Trade 2; Lesefehler → leer (wie bisher)
     for t1 in offen_t1:
         pid = str(t1["id"])
         regel = ap_regel_finden(firmen, t1.get("master_firm"))
         kette = ap_kette_regel(regel)
         if not kette:
             gruende[pid] = "Firma ohne Kettenregel"
+            continue
+        if ap_firma_gesperrt({"user_id": t1.get("user_id"), "firm": t1.get("master_firm")}, sperren):
+            gruende[pid] = AP_GRUND_GESPERRT
+            _ap_kette_grund(t1, AP_GRUND_GESPERRT)
             continue
         bal, grund = ap_kette_t1_fertig(t1)
         if not grund:

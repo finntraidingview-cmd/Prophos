@@ -215,6 +215,8 @@ def main():
     gruende_db = []
     a["_ap_kette_grund"] = lambda t1_, g: gruende_db.append((t1_["id"], g))
     a["_ap_stand_laden"] = stand_laden
+    a["_ap_sperren"] = lambda: set()          # Muster-Portfolio (16.10.2026): keine gesperrte Firma im Fixture
+    a.setdefault("_firm_norm", lambda n: str(n or ""))
     erg = a["ap_kette_tick"](jetzt, random.Random(3))
     z = zustand["ins"][0] if zustand["ins"] else {}
     st = datetime.fromisoformat(z.get("start_um", "2000-01-01T00:00:00+00:00")).astimezone(BER) if z else None
