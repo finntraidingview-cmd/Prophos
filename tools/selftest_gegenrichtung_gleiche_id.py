@@ -54,8 +54,10 @@ check("gh && d.laeuft" in fa and "gegen laufenden Trade gesperrt" in fa and "war
 # (2b) Hand-Werte nie drehen (Master 09.10.2026) — nur verschieben, wie der Bot (AP_FEST_HAND)
 i = HTML.index("  async function rkVorStart(plan){")
 rv = HTML[i:HTML.index("\n  }\n", i)]
-check("if(plan.autoPlan && !plan.handWerteAt){" in rv and "update({ richtung: ziel })" in rv.split("if(plan.autoPlan && !plan.handWerteAt){")[1],
-      "rkVorStart: Plan mit Hand-Werten wird nie gedreht (nur verschoben)")
+# .1503 (2165eb12, Finn 13.10.2026: „Winning Days müssen immer gemacht werden … einfach so umdrehen"): WD dreht immer, auch mit Hand-Werten
+DREH = "if((plan.autoPlan && !plan.handWerteAt) || tpIstWdPlan(plan)){"
+check(DREH in rv and "update({ richtung: ziel })" in rv.split(DREH)[1],
+      "rkVorStart: Auto-Plan mit Hand-Werten wird nie gedreht (nur verschoben), Winning Day dreht immer (.1503)")
 check("handWerteAt: row.hand_werte_at || null," in HTML, "rowToPlan liest hand_werte_at")
 
 # (2c) Plan-Popup zählt geplante Hand-/WD-/Orbit-V3-Pläne von heute mit (Finn über Master 09.10.2026, Jacob: zweiter WD gegenläufig);

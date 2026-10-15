@@ -56,8 +56,12 @@ def main():
     check(echt(orbit("puls")) == (90180.0, 89940.0, "puls"), "Orbit V2: Puls-Endlesung zählt")
     check(all(echt(orbit(q)) is None for q in ("demo", "hand", "level", "reader_leer", "close", None)),
           "Orbit V2: Demo/Hand/Level/Reader/close → nie")
-    check(echt({"route": "tsv2", "mt5_baseline": {"tv": {"balance_start": 1}, "final": {"quelle": "puls", "balance_end": 1}}}) is None,
-          "Topstep V2 → nicht hier (eigene MLL-Kette)")
+    # seit .1494 (eaaf84d8, 13.10.2026 WD auf Topstep mit Fusion-Hedge) liest ap_echte_balancen auch tsv2 — der Blow-Takt lässt
+    # Topstep trotzdem aus: AP_BLOW_AUTO_ROUTEN kennt tsv2 nicht (Topstep-Blows nur über Dropdown/Meldung, .1535)
+    ts = {"id": "p9", "route": "tsv2", "status": "review", "blown": False, "master_account_id": "k1", "konto_typ": "phase2",
+          "mt5_baseline": {"tv": {"balance_start": 100000.0}, "final": {"quelle": "puls", "balance_end": 80000.0}}}
+    check(echt(ts) == (100000.0, 80000.0, "puls") and pr(ts, acc, regel) is None,
+          "Topstep V2: Puls-Endlesung zählt als echt, Blow-Takt bleibt aber aus (eigene MLL-Kette)")
 
     k = pr(echo(), acc, regel)
     check(k is not None and k["boden"] == 90000.0 and k["pl"] == -240.0 and k["nachher"] == 89940.0,

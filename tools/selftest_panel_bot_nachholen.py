@@ -78,7 +78,8 @@ def umgebung(ordner, dateien, shas, sleep_log, runden, version=b"2026-09-22.9999
           "os": os_attrappe, "re": re, "random": random, "time": zeit, "print": lambda *a, **k: log["print"].append(" ".join(map(str, a))), "HERE": ordner,
           "BOT_STAND": {"sha": None, "version": None, "geholt_sha": None}, "repo_datei": repo_datei,
           "repo_sha": lambda timeout=8: sha_folge.pop(0) if sha_folge else "b" * 40,
-          "PROV_JOB": None, "TV_ORDER_LOCK": __import__("threading").Lock(), "MASTER_ORDER_LOCKS": {}}
+          "PROV_JOB": None, "TV_ORDER_LOCK": __import__("threading").Lock(), "MASTER_ORDER_LOCKS": {},
+          "polar_panel": None}   # Polar (.1531, 138095d3): panel.py importiert polar_panel optional — None = PC ohne Polar, wie bisher
     exec(compile(CODE, "panel_ausschnitt", "exec"), ns)
     return ns, abrufe
 

@@ -145,7 +145,13 @@ def main():
     g = src[src.index("\ndef _lq_gate("):src.index("\n\n\n", src.index("\ndef _lq_gate("))]
     check("_admin_auth()" in g and "admin_sicht_lesen(" in g and "if sicht is not None:" in g and "403" in g,
           "Gate: ADMIN_EMAILS + nur Voll-Admins (eingeschränkt → 403)")
-    check(src.count("err = _lq_gate()") == 5, "alle fünf Routen hinter dem Gate")
+    # je Route statt Gesamtzahl: seit .1542 (58f2d313) hängen auch die drei /admin/kunden-zahlungen-Routen am _lq_gate (16.10.2026)
+    def _route_rumpf(r_):
+        i = src.index(f"@app.route({r_}, methods=")
+        return src[i:src.find("\n\n\n", i)]
+    check(all("err = _lq_gate()" in _route_rumpf(r_) for r_ in ('"/admin/liquide"', '"/admin/liquide/abruf"', '"/admin/liquide/sheet"',
+                                                               '"/admin/liquide/sheet/aktiv"', '"/admin/liquide/kunde"')),
+          "alle fünf Routen hinter dem Gate")
     check("LQ_TAKT_S = 6 * 3600" in src and "start_liquide()\n" in src and 'os.environ.get("PROPHOS_FRONTEND")' in src[src.index("def start_liquide"):],
           "Takt alle 6 h, nur auf Railway")
 

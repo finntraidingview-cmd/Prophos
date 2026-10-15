@@ -4,6 +4,7 @@
 die Neustart-Entscheidung (kein Chrome-Neustart bei Einheit-Fehler) und den augen.js-Quelltext (kein Node auf dem Mac).
 Aufruf: python3 tools/selftest_tp_einheit.py"""
 import os
+import re
 import sys
 
 HIER = os.path.dirname(os.path.abspath(__file__))
@@ -47,8 +48,9 @@ def main():
     check("--start-maximized" in arg, "Puls-Chrome startet maximiert")
 
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
-    check("VERSION = '0.8.1'" in js and "bt2.match(/,\\s*(.+)$/) || bt2.match(/\\s(\\$|" in js and "/^usd$/i.test" in js,
-          "augen.js 0.8.1: Einheit mit Komma ODER Leerzeichen, USD → $")
+    ver = re.search(r"VERSION = '(\d+)\.(\d+)\.(\d+)'", js)
+    check(ver is not None and tuple(map(int, ver.groups())) >= (0, 8, 1) and "bt2.match(/,\\s*(.+)$/) || bt2.match(/\\s(\\$|" in js and "/^usd$/i.test" in js,
+          "augen.js ≥ 0.8.1: Einheit mit Komma ODER Leerzeichen, USD → $")
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
 

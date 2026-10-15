@@ -70,7 +70,7 @@ def lade():
              "admin_gruppe_ist_ht", "admin_gruppen_tabelle_fehlt", "_admin_ansicht", "_admin_filter_ist_ht", "_admin_filter_aus_anfrage", "_admin_nur_uid", "_admin_sicht", "_admin_eingeschraenkt",
              "_admin_darf_uid", "_admin_verwalter", "_admin_standard_aus", "_wd_login", "_wd_personen", "_admin_basis", "_ap_namen",
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
-             "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "ap_stand_sicht", "ap_lauf_ohne_summen",
+             "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "_wd_num", "ap_hb_gewicht", "ap_tages_saldo", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "admin_wd_plaene", "admin_auto_plan_ids"]
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
                                 "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S")]
@@ -351,8 +351,11 @@ def main():
     check(r.status_code == 403, "/ids GET: Mitglied ohne Admin → 403")
 
     # B: Summen im Trade-Planer nur über die Sicht
-    stand = {"offen": [{"user_id": HT1, "delta_eur_pkt": 10.0, "einsatz_eur": 500.0}, {"user_id": MITGL, "delta_eur_pkt": -4.0, "einsatz_eur": -200.0},
-                       {"user_id": VERW, "delta_eur_pkt": 1.0, "einsatz_eur": 50.0}],
+    # richtung je Zeile: seit .1552 (718e3ef6, Tages-Saldo) rechnet ap_tages_saldo die Basis aus richtung + Einsatz neu, sobald
+    # heute_beendet dabei ist — echte offen-Zeilen tragen richtung immer (16.10.2026)
+    stand = {"offen": [{"user_id": HT1, "delta_eur_pkt": 10.0, "einsatz_eur": 500.0, "richtung": "buy"},
+                       {"user_id": MITGL, "delta_eur_pkt": -4.0, "einsatz_eur": -200.0, "richtung": "sell"},
+                       {"user_id": VERW, "delta_eur_pkt": 1.0, "einsatz_eur": 50.0, "richtung": "buy"}],
              "geplant": [{"user_id": HT2}, {"user_id": VERW}], "folgetag": [{"user_id": HT1}], "hinweise": [{"grund": "global"}, {"user_id": MITGL}],
              "heute_beendet": [{"user_id": HT1}, {"user_id": MITGL}], "fremd": [{"user_id": HT2}],
              "basis_netto": 7.0, "basis_brutto": 15.0, "basis_einsatz": 350.0, "brutto_einsatz": 750.0, "zeiten": {}}

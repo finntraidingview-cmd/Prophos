@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_ap_plan_am_tag", "ap_nachplan_kandidaten")
+FUNKTIONEN = ("_ap_plan_am_tag", "_ap_tz", "ap_konto_neu_zu_spaet", "ap_nachplan_kandidaten")   # neu_bis (.1564, c6a832c8)
 KONSTANTEN = ("AP_TYPEN", "AP_GRUND_HEUTE_GEHANDELT", "AP_NACHPLAN_FEST_GRUENDE")
 
 

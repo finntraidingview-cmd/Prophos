@@ -124,10 +124,11 @@ def main():
           "Richtungs-Prüfungen: nur laufende und FRISCH geclaimte ohne Start-Fehler zählen, bloß geplante und Leichen nie (außer Plan-Popup: Hand/WD/V3 von heute)")
     check("RK_WECHSEL_MIN" not in html and "rkPlanNah" not in html, "kein 90-min-Fenster mehr im Frontend")
     vs = html[html.index("  async function rkVorStart(plan){"):html.index("  window._rk = {")]
-    check("if(plan.autoPlan && k.quelle === 'lauf'){" in vs
-          and vs.index("await rkVerschieben(plan, k, false, 'start')") < vs.index(".update({ richtung: ziel })")
-          and "n < RK_VERSCHIEBEN_MAX" in vs and "const RK_VERSCHIEBEN_MAX = 3" in html,
-          "Start-Wächter: Auto-Plan bei laufender Gegenrichtung erst bis 3× verschieben, dann drehen")
+    # .1483 (02514f15, Finn 13.10.2026: „läuft schon Tradeify long, wird der Winning Day einfach auch long gestartet … beide Trades
+    # kommen durch"): das Erst-Verschieben (bis 3×) vom 09.10. ist aus — ein laufender Trade derselben ID × Firma dreht sofort
+    check("if(false && plan.autoPlan && k.quelle === 'lauf'){" in vs and "if(plan.autoPlan && k.quelle === 'lauf'){" not in vs
+          and ".update({ richtung: ziel })" in vs,
+          "Start-Wächter: Auto-Plan bei laufender Gegenrichtung dreht sofort (Erst-Verschieben seit .1483 aus)")
 
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
     return 0 if not FEHLER else 1
