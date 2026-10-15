@@ -6,6 +6,7 @@ später kann z. B. einer short gehen"; ~03:45 nachgeschärft: „Mach diese 90-M
 nie gleichzeitig sein"). Regel: Richtung je Trade frei (AP_RICHTUNG_WECHSEL_MIN = 0), Strafe „ID × Firma ganz einseitig" mischt; nur
 laufende bzw. geclaimte Trades legen Teile in den 90 min nach ihrem Start fest; geplante nie. Platzhalter-IDs, ohne Netz. Aufruf: python3 tools/selftest_richtung_wechsel.py"""
 import os
+import re
 import random
 import sys
 
@@ -126,8 +127,8 @@ def main():
     vs = html[html.index("  async function rkVorStart(plan){"):html.index("  window._rk = {")]
     # .1483 (02514f15, Finn 13.10.2026: „läuft schon Tradeify long, wird der Winning Day einfach auch long gestartet … beide Trades
     # kommen durch"): das Erst-Verschieben (bis 3×) vom 09.10. ist aus — ein laufender Trade derselben ID × Firma dreht sofort
-    check("if(false && plan.autoPlan && k.quelle === 'lauf'){" in vs and "if(plan.autoPlan && k.quelle === 'lauf'){" not in vs
-          and ".update({ richtung: ziel })" in vs,
+    # ohne Bindung an die tote Zeile „if(false && …)" (Hinweis Slave 2, 16.10.2026): darf beim Aufräumen wegfallen
+    check(not re.search(r"if\(\s*plan\.autoPlan && k\.quelle === 'lauf'\)", vs) and ".update({ richtung: ziel })" in vs,
           "Start-Wächter: Auto-Plan bei laufender Gegenrichtung dreht sofort (Erst-Verschieben seit .1483 aus)")
 
     print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")

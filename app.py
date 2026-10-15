@@ -12551,6 +12551,77 @@ def admin_pc_stand():
     return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "stand": stand})
 
 
+# PC-NAMEN (Finn 16.10.2026: „In Zukunft beschrifte die PCs jeweils mit dem Namen"): überall, wo eine Kennung pc-xxxxxx steht, zeigt
+# das Frontend „Name · pc-xxxxxx" (pcLabel). Quelle (1) Tabelle pc_namen (sql/2026-10-16_pc_namen.sql, von Hand gepflegt — für PCs, an
+# denen mehrere IDs einloggen), (2) Rückfall: die ID, deren Login der PC-Tab zuletzt in mt5_live.status.user_id gemeldet hat — so trägt
+# jeder neue PC seinen Namen von selbst. Nur Namen, keine Konten; 60 s gemerkt.
+PC_NAMEN_CACHE_S = 60
+_pc_namen_cache = {"bis": 0.0, "daten": None}
+
+
+def pc_namen_zuordnen(tabelle, live, namen):
+    """REIN RECHNEND (testbar): {pc_id: {name, quelle}} — tabelle = pc_namen-Zeilen {pc_id, name} (gewinnt), live = mt5_live-Zeilen
+    {pc_name, updated_at, user_id} (jüngste Meldung je PC → Name der ID, quelle 'login'), namen = user_id → Anzeigename."""
+    out, zuletzt = {}, {}
+    for z in live or ():
+        pc, uid = str(z.get("pc_name") or "").strip(), str(z.get("user_id") or "").strip()
+        if not pc or not uid or not namen.get(uid):
+            continue
+        at = str(z.get("updated_at") or "")
+        if pc not in zuletzt or at > zuletzt[pc][0]:
+            zuletzt[pc] = (at, uid)
+    for pc, (_at, uid) in zuletzt.items():
+        out[pc] = {"name": namen[uid], "quelle": "login"}
+    for z in tabelle or ():
+        pc, name = str(z.get("pc_id") or "").strip(), str(z.get("name") or "").strip()
+        if pc and name:
+            out[pc] = {"name": name, "quelle": "tabelle"}
+    return out
+
+
+@app.route("/pc-namen", methods=["GET", "OPTIONS"])
+def pc_namen_route():
+    """GET → {ok, namen: {pc_id: {name, quelle}}}. Gate: eingeloggt (wie /admin/pc-stand). Fehlt die Tabelle pc_namen noch, nur der Login-Rückfall."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _me, err = _wd_login()
+    if err:
+        return err
+    return jsonify({"ok": True, "namen": _pc_namen_daten()})
+
+
+def _pc_namen_daten():
+    """{pc_id: {name, quelle}} mit 60 s Cache — für /pc-namen und _rw_pc_namen (Reader-Meldungen). Lesefehler → letzter Stand bzw. {}."""
+    jetzt = time.time()
+    if _pc_namen_cache["daten"] is not None and jetzt < _pc_namen_cache["bis"]:
+        return _pc_namen_cache["daten"]
+    try:
+        try:
+            tabelle = sb_select("pc_namen", {"select": "pc_id,name"}) or []
+        except Exception as e:                      # Tabelle noch nicht eingespielt → nur Login-Rückfall
+            print(f"[pc-namen] ⚠️ pc_namen nicht lesbar: {type(e).__name__}: {e}", flush=True)
+            tabelle = []
+        live = sb_select("mt5_live", {"select": "pc_name,updated_at,user_id:status->>user_id", "order": "updated_at.desc", "limit": "1000"}) or []
+        disp = {}
+        for u in (_auth_liste_anfrage().json() or {}).get("users", []):   # Namen wie _wd_personen, ohne Sicht-Filter (nur Anzeige)
+            mail = str(u.get("email") or "")
+            disp[str(u.get("id"))] = str((u.get("user_metadata") or {}).get("name") or "").strip() or (mail.split("@")[0] if "@" in mail else "")
+        daten = pc_namen_zuordnen(tabelle, live, disp)
+    except Exception as e:
+        print(f"[pc-namen] ⚠️ {type(e).__name__}: {e}", flush=True)
+        daten = _pc_namen_cache["daten"] or {}
+    _pc_namen_cache.update(bis=jetzt + PC_NAMEN_CACHE_S, daten=daten)
+    return daten
+
+
+def _rw_pc_namen():
+    """{pc_id: name} für reader_wacht_schritt — aus dem /pc-namen-Cache, Fehler → {} (Meldung dann mit Kennung allein)."""
+    try:
+        return {k: v.get("name") for k, v in (_pc_namen_daten() or {}).items() if v and v.get("name")}
+    except Exception:
+        return {}
+
+
 # HANDARBEIT (Finn 09.10.2026 ~01:30 Dubai: „eine Liste mit allen Accounts, die gepasst wurden oder irgendwas manuell Hilfe brauchen … in einem
 # Popup: welche Accounts brauchen genau die Hilfe? Wo muss ich die Phase hinzufügen?"). Vier Gruppen, nur aktive Konten (Archiv wie _admin_basis):
 #   bestanden    accounts.ziel_erreicht_at (Ziel-Wache), Kontoart Challenge/Phase → Phase alt → neu (wie WDL_ZIEL_TYP im Radar), neues Konto nötig
@@ -13971,7 +14042,7 @@ def _rw_kurs_text(kurs, wurzel):
 
 def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s=None,
                          kerzen_alter_s=None, kerzen_wurzel=None, letzter_kurs=None,
-                         kurs_wurzel=None, pc=None, kerzen_je=None, haupt_kerzen=None):
+                         kurs_wurzel=None, pc=None, kerzen_je=None, haupt_kerzen=None, pc_namen=None):
     """REIN RECHNEND (testbar, ohne Netz): ein 30-s-Schritt der Zustandsmaschine.
 
     zustand: {"feed": None | {von, gemeldet, naechste, letzter_kurs, wurzel, pc, id},
@@ -13989,6 +14060,8 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
     ist die schlechteste andere laut wie bisher. Ohne kerzen_je gilt der alte Weg (kerzen_alter_s/kerzen_wurzel laut).
     haupt_kerzen (29.09.2026): [(Minute Unix-s, quelle)] der jüngsten Hauptwurzel-Kerzen, jüngste zuerst, None = unbekannt →
     Zustand 'naeherung' (naeherung_beginn/_ende laut, naeherung_still leise), s. READER_WACHT_NAEHERUNG_N."""
+    # PC-Namen (16.10.2026): Texte „PC Name · pc-xxxxxx"; pc_namen = {pc_id: name} reicht der Aufrufer herein (ohne Netz hier)
+    _lbl = lambda x: (f"{pc_namen[x]} · {x}" if x and pc_namen and pc_namen.get(x) else x)   # noqa: E731
     alt_f = (zustand or {}).get("feed")
     alt_k = (zustand or {}).get("kerzen")
     alt_l = (zustand or {}).get("kerzen_leise")
@@ -14043,7 +14116,7 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
             ev.append({"art": "feed_beginn", "push": True, "renotify": True,
                        "titel": f"Reader-Ausfall: Kurs-Feed steht seit {minuten} min",
                        "text": (f"Letzter frischer Kurs {_rw_kurs_text(letzter_kurs, kurs_wurzel)} um "
-                                f"{_rw_uhr(von)} (Dubai) · PC {pc or '—'}"),
+                                f"{_rw_uhr(von)} (Dubai) · PC {_lbl(pc) or '—'}"),
                        "von": von, "bis": None, "dauer_s": None, "id": None})
         elif jetzt >= float(f.get("naechste") or 0):
             f["gemeldet"] = int(f.get("gemeldet") or 1) + 1
@@ -14052,7 +14125,7 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
             ev.append({"art": "feed_erinnerung", "push": True, "renotify": False,
                        "titel": f"Reader-Ausfall dauert an: {minuten} min",
                        "text": (f"Seit {_rw_uhr(f['von'])} (Dubai) kein frischer Kurs · letzter "
-                                f"{_rw_kurs_text(f.get('letzter_kurs'), f.get('wurzel'))} · PC {f.get('pc') or '—'}"),
+                                f"{_rw_kurs_text(f.get('letzter_kurs'), f.get('wurzel'))} · PC {_lbl(f.get('pc')) or '—'}"),
                        "von": f["von"], "bis": None, "dauer_s": None, "id": f.get("id")})
         return neu, ev
 
@@ -14062,7 +14135,7 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
         minuten = max(1, int(round((jetzt - f["von"]) / 60.0)))
         ende("feed_ende", f, True,
              titel=f"Reader wieder da — Ausfall von {_rw_uhr(f['von'])} bis {_rw_uhr(jetzt)} ({minuten} min)",
-             text=f"Kurs-Feed läuft wieder · {_rw_kurs_text(letzter_kurs, kurs_wurzel)} · PC {pc or f.get('pc') or '—'}",
+             text=f"Kurs-Feed läuft wieder · {_rw_kurs_text(letzter_kurs, kurs_wurzel)} · PC {_lbl(pc or f.get('pc')) or '—'}",
              renotify=True)
         neu["feed"] = None
         neu["feed_zurueck"] = jetzt
@@ -14114,7 +14187,7 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
             ev.append({"art": "kerzen_beginn", "push": True, "renotify": True,
                        "titel": f"Reader: {laut_w + '-' if laut_w else ''}Kerzen fehlen seit {_rw_uhr(von)}",
                        "text": (f"Kurs-Feed frisch, aber keine Minutenkerze {laut_w or ''} in tv_kurs_1m seit "
-                                f"{_rw_uhr(von)} (Dubai) · PC {pc or '—'}").replace("  ", " "),
+                                f"{_rw_uhr(von)} (Dubai) · PC {_lbl(pc) or '—'}").replace("  ", " "),
                        "von": von, "bis": None, "dauer_s": None, "id": None})
     elif ka is not None and neu["kerzen"]:
         ende("kerzen_ende", neu["kerzen"], False)
@@ -14128,7 +14201,7 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
             ev.append({"art": "kerzen_leise_beginn", "push": False, "renotify": False,
                        "titel": f"Reader: {leise_w}-Kerzen fehlen seit {_rw_uhr(von)} (Hinweis)",
                        "text": (f"{leise_w}-Kurs frisch, aber keine {leise_w}-Minutenkerze seit {_rw_uhr(von)} (Dubai) — "
-                                f"{READER_WACHT_KERZEN_HAUPT} läuft · PC {pc or '—'}"),
+                                f"{READER_WACHT_KERZEN_HAUPT} läuft · PC {_lbl(pc) or '—'}"),
                        "von": von, "bis": None, "dauer_s": None, "id": None})
     elif neu["kerzen_leise"] and (kl is not None or not (isinstance(kerzen_je, dict) and kerzen_je)):
         ende("kerzen_leise_ende", neu["kerzen_leise"], False)
@@ -14156,13 +14229,13 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
                            "titel": f"Reader: {hw} nur noch Näherung seit {_rw_uhr(von)}",
                            "text": (f"{hw}-Kerzen kommen nicht mehr aus dem TradingView-Chart, nur noch aus Einzelkursen — "
                                     f"ganz kurze Ausschläge können im Radar fehlen. {hw} im Reader-Chrome wieder als Chart "
-                                    f"öffnen · PC {pc or '—'}"),
+                                    f"öffnen · PC {_lbl(pc) or '—'}"),
                            "von": von, "bis": None, "dauer_s": None, "id": None})
         elif hk[0][1] == "ws" and n_alt:
             minuten = max(1, int(round((jetzt - n_alt["von"]) / 60.0)))
             ende("naeherung_ende", n_alt, True,
                  titel=f"Reader: {hw} wieder exakt — Näherung von {_rw_uhr(n_alt['von'])} bis {_rw_uhr(jetzt)} ({minuten} min)",
-                 text=f"{hw}-Kerzen kommen wieder aus dem TradingView-Chart · PC {pc or n_alt.get('pc') or '—'}",
+                 text=f"{hw}-Kerzen kommen wieder aus dem TradingView-Chart · PC {_lbl(pc or n_alt.get('pc')) or '—'}",
                  renotify=True)
             neu["naeherung"] = None
     return neu, ev
@@ -14408,7 +14481,7 @@ def reader_wacht_tick(jetzt=None):
                                    seit_offen_s=seit, kerzen_alter_s=m.get("kerzen_alter_s"),
                                    kerzen_wurzel=m.get("kerzen_wurzel"), letzter_kurs=m.get("letzter_kurs"),
                                    kurs_wurzel=m.get("kurs_wurzel"), pc=m.get("pc"), kerzen_je=m.get("kerzen_je"),
-                                   haupt_kerzen=m.get("haupt_kerzen"))
+                                   haupt_kerzen=m.get("haupt_kerzen"), pc_namen=_rw_pc_namen())
     _reader_wacht_zustand = neu
     hk = m.get("haupt_kerzen") or []
     _reader_wacht_info.update({"feed_alter_s": m.get("feed_alter_s"), "kerzen_alter_s": m.get("kerzen_alter_s"),

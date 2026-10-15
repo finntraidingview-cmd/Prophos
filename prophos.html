@@ -21519,6 +21519,30 @@
     }
     return id
   }
+  /* PC-NAMEN (Finn 16.10.2026: „In Zukunft beschrifte die PCs jeweils mit dem Namen"): EINE Stelle für jede Anzeige einer PC-Kennung —
+   * pcLabel(pc) → „Marc · pc-xxxxxx" (Text, Toasts, title), pcLabelHtml(pc) → Name + Kennung klein/mono dahinter. Namen aus GET /pc-namen
+   * (app.py: Tabelle pc_namen, sonst die ID, deren Login der PC-Tab meldet — neue PCs tragen den Namen von selbst). Geladen bei Bedarf,
+   * höchstens alle 10 min; bis dahin bzw. ohne Namen steht die Kennung allein wie bisher. Schlüssel, Vergleiche und DB-Werte bleiben pc-xxxxxx. */
+  const _pcNamen = { daten: new Map(), at: 0, laedt: false }
+  async function pcNamenLaden(){
+    if(_pcNamen.laedt || Date.now() - _pcNamen.at < 600000 || typeof WATCHER_HOME === 'undefined') return
+    _pcNamen.laedt = true
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/pc-namen`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const d = r.ok ? await r.json().catch(() => null) : null
+      _pcNamen.at = Date.now()
+      if(d && d.ok && d.namen) _pcNamen.daten = new Map(Object.entries(d.namen).map(([k, v]) => [k, String((v && v.name) || '')]).filter(([, n]) => n))
+    }catch(e){ _pcNamen.at = Date.now(); console.warn('[pc-namen]', (e && e.message) || e) }
+    finally{ _pcNamen.laedt = false }
+  }
+  function pcName(pc){ const k = String(pc || '').trim(); if(!k) return ''; pcNamenLaden(); return _pcNamen.daten.get(k) || '' }
+  function pcLabel(pc){ const k = String(pc || '').trim(), n = pcName(k); return n ? `${n} · ${k}` : k }
+  function pcLabelHtml(pc){
+    const k = String(pc || '').trim(), n = pcName(k)
+    return n ? `${escapeHtml(n)} <span class="mono" style="font-size:.85em;color:var(--sub)">${escapeHtml(k)}</span>` : `<span class="mono">${escapeHtml(k || '?')}</span>`
+  }
+  window.pcLabel = pcLabel; window.pcLabelHtml = pcLabelHtml
   /* PC-KENNUNG VOM PANEL (25.09.2026, Koordination: zwei Chrome-Profile auf pc-usq1i6 erzeugten zwei Kennungen — pc-usq1i6 und
    * pc-4bx8nm; ein Hedge galt nur im Profil, das ihn geöffnet hatte, und blieb unbewacht, sobald dessen Tab zu war). Das Panel
    * (Backend .570, GET/POST /api/pc-id) VERWAHRT die Kennung, erfindet sie nicht: hat es eine → dieses Profil übernimmt sie;
@@ -22322,7 +22346,7 @@
           lege(echoKonten, pKey, { login: String(r.master_login || ''), inst: String(r.instance || '').trim().toLowerCase() })
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, ohneHedge ? 'ohne Hedge' : 'Hedge ' + r.hedge_login,
-            subPerson(pKey) + `<b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
+            subPerson(pKey) + `<b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(pcLabel(r.pc_name))}`,
             lotChip('MASTER', Number(p.volume), p.type === 0 ? 'LONG' : 'SHORT') + (ohneHedge ? '' : lotChip('SLAVE', hedgeLots(p.ident), hDir)) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
             frisch, ohneHedge ? 'mt5v2' : 'mt5'))
         }
@@ -22389,7 +22413,7 @@
           const inner = (h.status === 'offen' || h.status === 'schliesst')
             ? `${esc(String(h.richtung || '').toUpperCase())} ${f(h.lots || 0)} Lot${Number(h.schliesst_bei_nq) > 0 ? ` · schließt bei NQ ${f(h.schliesst_bei_nq)}` : ''}`
             : (h.status === 'geschlossen' ? 'zu' : esc(String(h.status)))
-          fusion = `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="Fusion-Gegenhedge${h.pc ? ' · PC ' + esc(String(h.pc)) : ''}">`
+          fusion = `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="Fusion-Gegenhedge${h.pc ? ' · PC ' + esc(pcLabel(h.pc)) : ''}">`
             + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span><span style="font-size:11px;color:var(--sub)">${inner}</span></span>`
         }
         const startEp = p.started_at ? Date.parse(p.started_at) / 1000 : NaN
@@ -24610,7 +24634,7 @@
     const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
     if(!h || !(h.status === 'offen' || h.status === 'schliesst') || !h.ticket) return { ok: false, msg: 'kein offener Hedge am Plan' }
     if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, msg: 'nur am PC' }
-    if(h.pc && h.pc !== hedgePcId()) return { ok: false, msg: `Hedge liegt auf ${h.pc}, nicht auf diesem PC` }
+    if(h.pc && h.pc !== hedgePcId()) return { ok: false, msg: `Hedge liegt auf ${pcLabel(h.pc)}, nicht auf diesem PC` }
     const pid = String(plan.id)
     if(_hedgeBusy.has(pid)) return { ok: false, msg: 'läuft schon' }
     // Backoff nach abgelehntem Close (Gegenprüfung 25.09.2026): 10 / 20 / 40 / 60 s — sonst hämmert der 1-s-Wächter Aufträge ins Panel
@@ -26821,16 +26845,17 @@
   // -> { aktiv, kurz, grund }
   function hedgeMasterWegStatus(pc, row, extId, jetztMs){
     const jetzt = jetztMs || Date.now(), uhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    const pcT = pcLabel(pc)   // Anzeige „Name · pc-xxxxxx“ (16.10.2026), Vergleiche bleiben auf pc
     if(!pc) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: 'Hedge ohne PC-Zuordnung — kein Wächter weiß, welcher Reader zählt' }
-    if(!row) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `kein Reader auf ${pc} — ohne Positionsliste schließt Fusion nicht, wenn der Master von Hand zu ist oder blowt (nur am TP über den Kurs-Feed)` }
+    if(!row) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `kein Reader auf ${pcT} — ohne Positionsliste schließt Fusion nicht, wenn der Master von Hand zu ist oder blowt (nur am TP über den Kurs-Feed)` }
     const upd = Date.parse(row.updated_at || '') || 0
-    if(jetzt - upd > 60000) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Reader auf ${pc} meldet sich nicht (zuletzt ${upd ? uhr(upd) : '—'}) — ohne Positionsliste schließt Fusion nicht, wenn der Master weg ist` }
-    if(row.positionen_ok !== true) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `keine Positionsliste vom Reader auf ${pc} (TradingView-Konto-Tab liefert keine Positionen) — blowt der Master, bleibt Fusion offen` }
+    if(jetzt - upd > 60000) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Reader auf ${pcT} meldet sich nicht (zuletzt ${upd ? uhr(upd) : '—'}) — ohne Positionsliste schließt Fusion nicht, wenn der Master weg ist` }
+    if(row.positionen_ok !== true) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `keine Positionsliste vom Reader auf ${pcT} (TradingView-Konto-Tab liefert keine Positionen) — blowt der Master, bleibt Fusion offen` }
     const pts = Date.parse(row.positionen_ts || '') || 0
-    if(pts && jetzt - pts > 30000) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Positionsliste auf ${pc} veraltet (Stand ${uhr(pts)})` }
+    if(pts && jetzt - pts > 30000) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Positionsliste auf ${pcT} veraltet (Stand ${uhr(pts)})` }
     if(extId && row.konto && typeof hedgeKontoPasst === 'function' && !hedgeKontoPasst(row.konto, extId))
-      return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Reader auf ${pc} zeigt gerade Konto „${String(row.konto).slice(0, 40)}", der Plan braucht ${extId}` }
-    return { aktiv: true, kurz: 'Master-weg-Schutz aktiv', grund: `Reader auf ${pc} liefert die Positionsliste${extId ? (row.konto ? ` für ${extId}` : ' (Konto im Reader nicht gemeldet)') : ' (Konto nicht geprüft)'} — ist der Master ≥ 10 s weg, schließt der Wächter Fusion` }
+      return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Reader auf ${pcT} zeigt gerade Konto „${String(row.konto).slice(0, 40)}", der Plan braucht ${extId}` }
+    return { aktiv: true, kurz: 'Master-weg-Schutz aktiv', grund: `Reader auf ${pcT} liefert die Positionsliste${extId ? (row.konto ? ` für ${extId}` : ' (Konto im Reader nicht gemeldet)') : ' (Konto nicht geprüft)'} — ist der Master ≥ 10 s weg, schließt der Wächter Fusion` }
   }
   window._hedgeMasterWegStatus = hedgeMasterWegStatus
   function hedgeMasterWegHtml(p, h){
@@ -26878,7 +26903,7 @@
                    const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
                    const mwTxt = (() => { const m = hedgeMasterWegHtml(p, h); return m ? '✓ Master-weg-Schutz aktiv — ' : '' })()
                    return lTxt + mwTxt + (lvlTitel ? lvlTitel + ' — ' : '') + hedgeMasterWegTitel(p, h) + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
-          + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? (h.sl_art === 'liquidation' ? ` · Liquidation ≈ NQ ${h.sl_level_nq} (Balance ${h.liq_balance ?? '?'} $, Start-Balance aus ${h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : h.liq_quelle === 'konto_balance' ? 'dem Konto' : '?'})` : ` · Master-SL ≈ NQ ${h.sl_level_nq}`) : (h.sl_hinweis ? ` · ${h.sl_hinweis}` : '')} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
+          + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? (h.sl_art === 'liquidation' ? ` · Liquidation ≈ NQ ${h.sl_level_nq} (Balance ${h.liq_balance ?? '?'} $, Start-Balance aus ${h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : h.liq_quelle === 'konto_balance' ? 'dem Konto' : '?'})` : ` · Master-SL ≈ NQ ${h.sl_level_nq}`) : (h.sl_hinweis ? ` · ${h.sl_hinweis}` : '')} · PC ${h.pc ? pcLabel(h.pc) : '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
       }
       if(h.status === 'geschlossen'){
         const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
@@ -27251,7 +27276,7 @@
       const letzteMs = Date.now() - k.alter_ms
       q.textContent = (zu && k.alter_ms > 60000) ? `Markt geschlossen · letzter Kurs ${new Date(letzteMs).toLocaleString('de-DE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
         : steht ? `⚠ Feed steht seit ${dauer} — ${mklFeedDiagnose(k.pc, mklFeedLageCache(k.pc)).zeile}`
-        : !frisch ? `⚠ kein Live-Kurs — letzter Stand vor ${alt} s (PC ${k.pc})`
+        : !frisch ? `⚠ kein Live-Kurs — letzter Stand vor ${alt} s (PC ${pcLabel(k.pc)})`
         : `live · vor ${alt} s`   // PC/Socket/„Tab verdeckt" raus (30.09.2026, Finn: Texte „nur für uns"), Details im title
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
       q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : (frisch || zu) ? '' : '#B45309'
@@ -27879,7 +27904,7 @@
   }
   // REIN RECHNEND (testbar über window._mklFeedDiagnose): Fall + Text für Kopfzeile und Push
   function mklFeedDiagnose(pc, lage){
-    const p = pc || '?'
+    const p = pcLabel(pc) || '?'
     if(!lage) return { fall: null, zeile: `Lage auf ${p} wird geprüft …` }
     const readerFrisch = !!(lage.readerAt && Date.now() - lage.readerAt < 60000)
     // Tab lebt (Flotten-Push < 2 min), erreicht den Reader aber nicht (epLokal-Backoff, 25.09.2026)
@@ -28937,7 +28962,7 @@
       feedWache.alter_s = isFinite(alter) ? Math.round(alter) : null; feedWache.pc = r ? String(r.pc_name || '') : ''
       const steht = offen && alter > 120
       if(steht && !feedWache.gemeldet && typeof atToast === 'function'){
-        atToast(`Kurs-Feed steht seit ${isFinite(alter) ? Math.round(alter / 60) + ' min' : 'unbekannt'}${feedWache.pc ? ' (' + feedWache.pc + ')' : ''} — Reader am 24/7-PC prüfen`, 'feed')
+        atToast(`Kurs-Feed steht seit ${isFinite(alter) ? Math.round(alter / 60) + ' min' : 'unbekannt'}${feedWache.pc ? ' (' + pcLabel(feedWache.pc) + ')' : ''} — Reader am 24/7-PC prüfen`, 'feed')
         feedWache.gemeldet = true
       }
       if(!steht) feedWache.gemeldet = false
@@ -28947,7 +28972,7 @@
         b.hidden = !steht
         if(steht){
           b.textContent = `Kurs-Feed steht · ${isFinite(alter) ? Math.round(alter / 60) + ' min' : '?'}`
-          b.title = `Letzter NQ/MNQ-Kurs in tv_kurse ${isFinite(alter) ? 'vor ' + Math.round(alter) + ' s' : 'nie'}${feedWache.pc ? ' von ' + feedWache.pc : ''} — der CME-Markt ist offen. Reader-Fenster und TradingView-Tab am 24/7-PC prüfen. Klick öffnet Winning Days.`
+          b.title = `Letzter NQ/MNQ-Kurs in tv_kurse ${isFinite(alter) ? 'vor ' + Math.round(alter) + ' s' : 'nie'}${feedWache.pc ? ' von ' + pcLabel(feedWache.pc) : ''} — der CME-Markt ist offen. Reader-Fenster und TradingView-Tab am 24/7-PC prüfen. Klick öffnet Winning Days.`
         }
       }
       if(mklAktiv() && Date.now() - feedWache.lueckenAt > 60000) feedLueckenLaden()
@@ -28978,7 +29003,7 @@
     const uhr = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     const tag = t => new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
     const zeit = t => (new Date(t).toDateString() === new Date().toDateString() ? '' : tag(t) + ' ') + uhr(t)
-    if(feedWache.steht) return `<div class="mwd-feed is-alarm">Kurs-Feed steht seit ${feedWache.alter_s != null ? Math.round(feedWache.alter_s / 60) + ' min' : '?'}${feedWache.pc ? ' (' + escapeHtml(feedWache.pc) + ')' : ''} — Reader am 24/7-PC prüfen</div>`
+    if(feedWache.steht) return `<div class="mwd-feed is-alarm">Kurs-Feed steht seit ${feedWache.alter_s != null ? Math.round(feedWache.alter_s / 60) + ' min' : '?'}${feedWache.pc ? ' (' + escapeHtml(pcLabel(feedWache.pc)) + ')' : ''} — Reader am 24/7-PC prüfen</div>`
     const l = feedWache.luecken
     if(!l || l.erste == null) return ''
     const letzte = l.luecken.length ? l.luecken[l.luecken.length - 1] : null
@@ -29443,7 +29468,7 @@
     const alt = Number(z.alt_s) || 0, lebt = !!z.lebt
     const eigen = pcsBuildNr(eigenBuild), bot = pcsBuildNr(z.bot_version), cop = pcsBuildNr(z.copier_version)
     const hinter = Math.max(eigen != null && bot != null ? eigen - bot : 0, eigen != null && cop != null ? eigen - cop : 0)
-    const pc = z.pc_name ? ` (${z.pc_name})` : ''
+    const pc = z.pc_name ? ` (${pcLabel(z.pc_name)})` : ''
     if(!lebt){
       const dauer = alt < 3600 ? `${Math.max(1, Math.round(alt / 60))} min` : alt < 48 * 3600 ? `${Math.round(alt / 3600)} h` : `${Math.round(alt / 86400)} T`
       return { farbe: 'grau', text: `Seit ${dauer} kein Prophos-Tab am PC${pc} — Prophos am PC dieser ID öffnen: Nachlesung und Starts laufen nur dort.` }
@@ -29532,8 +29557,8 @@
       const key = `${q.uid}|${q.pc_name || ''}`, ges = _admPcs.gesendet.get(key)
       const knopf = !q.pc_name || !q.lebt ? '' : ges && jetzt - ges < 3 * 60000
         ? '<span style="color:var(--sub)">gesendet ✓</span>'
-        : `<button type="button" class="btn btn-ghost tc2-btn" data-adm-pcs-neu="${escapeHtml(key)}" title="Signal an ${escapeHtml(q.pc_name)}: Prophos-Tab im nächsten ruhigen Moment neu laden (kein Neuladen während Start, Puls, Hedge oder offenem Popup)">Tab neu laden</button>`
-      return `<tr><td class="mono">${escapeHtml(q.pc_name || '–')}</td><td>${escapeHtml(q.name)}</td><td class="mono">${escapeHtml(String(q.tab_build || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td>`
+        : `<button type="button" class="btn btn-ghost tc2-btn" data-adm-pcs-neu="${escapeHtml(key)}" title="Signal an ${escapeHtml(pcLabel(q.pc_name))}: Prophos-Tab im nächsten ruhigen Moment neu laden (kein Neuladen während Start, Puls, Hedge oder offenem Popup)">Tab neu laden</button>`
+      return `<tr><td>${q.pc_name ? pcLabelHtml(q.pc_name) : '–'}</td><td>${escapeHtml(q.name)}</td><td class="mono">${escapeHtml(String(q.tab_build || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td>`
         + `<td class="mono">${escapeHtml(String(q.bot_version || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td><td>${uhr(q.zuletzt)}</td>`
         + `<td title="${escapeHtml(u.titel)}"><span class="pcs-dot pcs-${u.farbe}"></span>${escapeHtml(u.text)}</td>${admPcsMt5UpdZelle(q.mt5_update)}<td>${knopf}</td></tr>`
     }).join('') || '<tr><td colspan="8" style="color:var(--sub)">Kein PC-Tab bekannt.</td></tr>'
@@ -30195,7 +30220,7 @@
         await new Promise(res => setTimeout(res, 4000))
         const { d: st } = await ruf({ aktion: 'endlesung_stand', signal_id: d.signal_id })
         const s = st && st.status, msg = String((st && st.ergebnis && (st.ergebnis.msg || st.ergebnis.grund)) || '')
-        if(s === 'fertig'){ ende(`👁 ${wer}: ${msg || (echoArt ? 'Terminal offen' : 'Konto angezeigt')}${st.pc ? ` (PC ${st.pc})` : ''}`, 'ok'); try{ wdlLaden(true) }catch(_){} return }
+        if(s === 'fertig'){ ende(`👁 ${wer}: ${msg || (echoArt ? 'Terminal offen' : 'Konto angezeigt')}${st.pc ? ` (PC ${pcLabel(st.pc)})` : ''}`, 'ok'); try{ wdlLaden(true) }catch(_){} return }
         if(['fehler', 'verfallen', 'verworfen'].includes(s)){ ende(`👁 ${wer}: ${msg || s}`, 'end'); try{ wdlLaden(true) }catch(_){} return }
       }
       ende(`👁 ${wer}: kein PC hat geantwortet — läuft Prophos am PC dieser ID?`, 'end')
@@ -34687,7 +34712,7 @@
     const z = ort && ort.zuletzt
     const wann = z ? new Date(z.at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
     return `Login ${login} ist auf keinem laufenden PC dieser ID als Echo-Instanz eingerichtet`
-      + (z ? ` — zuletzt „${z.instanz}" auf ${z.pc} (${wann}). Dort im Echo-Panel die Instanz wieder anlegen bzw. „Direkt in Echo einrichten".`
+      + (z ? ` — zuletzt „${z.instanz}" auf ${pcLabel(z.pc)} (${wann}). Dort im Echo-Panel die Instanz wieder anlegen bzw. „Direkt in Echo einrichten".`
            : ' — am PC dieser ID „Direkt in Echo einrichten" (bzw. Instanz im Echo-Panel anlegen).')
   }
   async function accBalSignaleAufraeumen(id){
@@ -34747,19 +34772,19 @@
       if(row && row.status === 'fertig'){
         const e = row.ergebnis || {}
         if(typeof e.balance === 'number'){ acc.tvBalance = e.balance; acc.tvBalanceAt = e.balance_at || new Date().toISOString(); acc.tvBalanceQuelle = mt5 ? 'mt5' : 'puls'; if(mt5 && e.ccy) acc.mt5BalCcy = e.ccy }
-        setz({ laeuft: false, text: (wer && typeof e.balance === 'number' ? `gelesen ${e.balance.toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` : 'gerade gelesen') + (row.pc ? ` (PC ${row.pc})` : '') }); apNachplanBald(id); return
+        setz({ laeuft: false, text: (wer && typeof e.balance === 'number' ? `gelesen ${e.balance.toLocaleString('de-DE', { maximumFractionDigits: 2 })} $` : 'gerade gelesen') + (row.pc ? ` (PC ${pcLabel(row.pc)})` : '') }); apNachplanBald(id); return
       }
       if(row && ['fehler', 'verfallen', 'verworfen'].includes(row.status)){ setz({ laeuft: false, fehler: true, text: String((row.ergebnis || {}).msg || row.status) }); return }
       // 'laeuft' > 4 min seit der letzten Bewegung = PC-Tab weg (Fenster zu, neu geladen) → fehler, Konto frei für einen neuen Versuch
       if(row && row.status === 'laeuft' && Date.now() - (Date.parse(row.updated_at || '') || 0) > 240000){
         try{ await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' } }).eq('id', sig.id).eq('status', 'laeuft') }catch(_){}
-        setz({ laeuft: false, fehler: true, text: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' + (row.pc ? ` (PC ${row.pc})` : '') }); return
+        setz({ laeuft: false, fehler: true, text: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' + (row.pc ? ` (PC ${pcLabel(row.pc)})` : '') }); return
       }
       if(sek > 180 && (!row || row.status === 'wartet')){
         try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
         setz({ laeuft: false, fehler: true, text: mt5 ? `kein PC dieser ID hat ein MT5-Terminal für Login ${mt5Login} gemeldet (Prophos-Tab + start-alles.bat offen?)` : wer ? `${pcVon} antwortet nicht — offline? (Prophos-Tab + Copier dort offen?)` : 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
       }
-      if(row && row.status === 'laeuft'){ const pl = Number(((row.ergebnis || {}).warteschlange)) || 0; const t = mt5 ? `MT5 wird geöffnet · liest … (PC ${row.pc || '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${row.pc || '?'})` : `wird gelesen … (PC ${row.pc || '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
+      if(row && row.status === 'laeuft'){ const pl = Number(((row.ergebnis || {}).warteschlange)) || 0; const t = mt5 ? `MT5 wird geöffnet · liest … (PC ${row.pc ? pcLabel(row.pc) : '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${row.pc ? pcLabel(row.pc) : '?'})` : `wird gelesen … (PC ${row.pc ? pcLabel(row.pc) : '?'})`; if(_accBalLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
       setTimeout(tick, 2000)
     }
     setTimeout(tick, 1500)
@@ -34837,7 +34862,7 @@
     const t0 = Date.now()
     const tick = async () => {
       let row = null; try{ const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle(); row = data }catch(_){}
-      if(row && row.status === 'fertig'){ fertig('Terminal offen' + (row.pc ? ` (PC ${row.pc})` : '')); return }
+      if(row && row.status === 'fertig'){ fertig('Terminal offen' + (row.pc ? ` (PC ${pcLabel(row.pc)})` : '')); return }
       if(row && ['fehler', 'verfallen', 'verworfen'].includes(row.status)){
         let m = String((row.ergebnis || {}).msg || row.status)
         // Ein PC-Tab mit älterem Build kennt 'mt5_terminal' nicht und schließt es über den Plan-Zweig ab — ehrlich sagen, was los ist
@@ -34846,13 +34871,13 @@
       }
       if(row && row.status === 'laeuft' && Date.now() - (Date.parse(row.updated_at || '') || 0) > 180000){
         try{ await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' } }).eq('id', sig.id).eq('status', 'laeuft') }catch(_){}
-        setz({ laeuft: false, fehler: true, text: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' + (row.pc ? ` (PC ${row.pc})` : '') }); return
+        setz({ laeuft: false, fehler: true, text: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' + (row.pc ? ` (PC ${pcLabel(row.pc)})` : '') }); return
       }
       if((Date.now() - t0) / 1000 > 180 && (!row || row.status === 'wartet')){
         try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
         setz({ laeuft: false, fehler: true, text: `kein PC dieser ID hat ein MT5-Terminal für Login ${login || '?'} gemeldet (Prophos-Tab + start-alles.bat offen?)` }); return
       }
-      if(row && row.status === 'laeuft'){ const t = `Terminal wird geöffnet … (PC ${row.pc || '?'})`; if(_accTermLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
+      if(row && row.status === 'laeuft'){ const t = `Terminal wird geöffnet … (PC ${row.pc ? pcLabel(row.pc) : '?'})`; if(_accTermLauf.get(id)?.text !== t) setz({ laeuft: true, text: t }) }
       setTimeout(tick, 2000)
     }
     setTimeout(tick, 1500)
@@ -35582,7 +35607,7 @@
       let row = null; try{ const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle(); row = data }catch(_){}
       if(row && ['fertig', 'fehler', 'verfallen', 'verworfen'].includes(row.status)) return fertig(Object.assign({ ok: row.status === 'fertig' }, row.ergebnis || { msg: row.status }))
       if(Date.now() - t0 > 240000) return fertig({ ok: false, msg: 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC offen?)' })
-      if(row && row.status === 'laeuft' && st) st.textContent = `liest … (PC ${row.pc || '?'})`
+      if(row && row.status === 'laeuft' && st) st.textContent = `liest … (PC ${row.pc ? pcLabel(row.pc) : '?'})`
       setTimeout(tick, 2000)
     }
     setTimeout(tick, 1500)
@@ -37632,7 +37657,7 @@
     const list = document.getElementById('ts-englog-list'), sub = document.getElementById('ts-englog-sub')
     if(!list || !sub) return
     const n = engLog.snap.reduce((a, b) => a + b.sessions.length, 0)
-    sub.textContent = `${n} Session${n === 1 ? '' : 's'} · Frontend ${OS_TAB_BUILD} · ${mt5FleetPcId()}`
+    sub.textContent = `${n} Session${n === 1 ? '' : 's'} · Frontend ${OS_TAB_BUILD} · ${pcLabel(mt5FleetPcId())}`
     // Scroll-Stand je Konsole merken — sonst springt das Log alle 5 s ans Ende
     const scroll = {}
     list.querySelectorAll('[data-englog-body]').forEach(b => {
@@ -37666,7 +37691,7 @@
       b.scrollTop = (st === undefined || st === -1) ? b.scrollHeight : st })
   }
   function engLogText(){
-    const z = [`PROPHOS MIRROR-LOG · ${new Date().toLocaleString('de-DE')} · Frontend ${OS_TAB_BUILD} · ${mt5FleetPcId()} · Seite ${location.origin}`]
+    const z = [`PROPHOS MIRROR-LOG · ${new Date().toLocaleString('de-DE')} · Frontend ${OS_TAB_BUILD} · ${pcLabel(mt5FleetPcId())} · Seite ${location.origin}`]
     for(const b of engLog.snap){
       z.push('', `== Backend ${b.base} · ${b.erreichbar ? 'Build ' + b.build : 'NICHT ERREICHBAR'}${engLog.sollBuild ? ' · ausgeliefert ' + engLog.sollBuild : ''} · ${b.sessions.length} Session(s)`)
       for(const x of b.sessions){
@@ -40448,7 +40473,7 @@
       else if(!g) teile.push('Nachlesung fällig')
     }
     const spur = [fin.lesen_trail ? 'Endlesung: ' + fin.lesen_trail : '', tv.lesen_trail ? 'Start-Lesung: ' + tv.lesen_trail : '',
-      sp && (sp.trail || sp.msg) ? `Puls ${uhr(sp.at)}${sp.pc ? ' · ' + sp.pc : ''}${sp.s != null ? ' · ' + sp.s + ' s' : ''}: ${sp.msg ? sp.msg + ' ' : ''}${sp.trail || ''}` : '',
+      sp && (sp.trail || sp.msg) ? `Puls ${uhr(sp.at)}${sp.pc ? ' · ' + pcLabel(sp.pc) : ''}${sp.s != null ? ' · ' + sp.s + ' s' : ''}: ${sp.msg ? sp.msg + ' ' : ''}${sp.trail || ''}` : '',
       sf && sf.msg ? 'Start-Fehler: ' + sf.msg : ''].filter(Boolean).join('\n\n')
     // „🎯 bestanden · Phase 1 → Phase 2" auch hier (Master 09.10.2026 ~20:41): eigenes Konto mit Ziel-Wache-Markierung, Plan noch nicht erledigt
     const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
@@ -44126,7 +44151,7 @@
         if(!txt) txt = k.startsWith('claim') ? 'übernimmt gerade' : (k.startsWith('db-fehler') || k.startsWith('tick-fehler')) ? st.rx
                 : k === 'ok-leer' ? (Number(sec) > 12 ? 'sieht kein wartendes Signal — anderes Profil am PC eingeloggt?' : 'lebt, nächster Blick in ≤ 5 s')
                 : st.rx
-        teile.push(`<span class="mono">${escapeHtml(pc)}</span>: ${escapeHtml(txt)}`)
+        teile.push(`${pcLabelHtml(pc)}: ${escapeHtml(txt)}`)
       }
       _osRxCache.html = '<br><span style="opacity:.8">PC meldet — ' + teile.join(' · ') + '</span>'
     }catch(_){ _osRxCache.html = '' }
@@ -44144,7 +44169,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1578'
+  const OS_TAB_BUILD = '2026-09-22.1579'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44236,7 +44261,7 @@
       }
       tpOrderRemoteBox(`📡 Signal gesendet — warte auf den PC dieser ID… <span class="mono">(${sec}s)</span><br>Abbrechen: dieses Popup einfach schließen.` + await osPcStandHtml(sec), 'wait')
     } else if(row.status === 'laeuft'){
-      tpOrderRemoteBox(`🖥 PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen — Trade-Start-Check läuft, bei Grün platziert Puls… <span class="mono">(${sec}s)</span>`, 'wait')
+      tpOrderRemoteBox(`🖥 PC ${pcLabelHtml(row.pc)} hat übernommen — Trade-Start-Check läuft, bei Grün platziert Puls… <span class="mono">(${sec}s)</span>`, 'wait')
     } else if(row.status === 'fertig'){
       tpOrderRemoteBox('✓ ' + escapeHtml(String(erg.msg || 'Order platziert.')) + ' — Auto-Erkennung übernimmt, der Plan springt auf „Läuft".', 'ok')
       tpOrderRemoteDone(erg, 'fertig')
@@ -45213,7 +45238,7 @@
           _rsAktiv.cancel = false
           if(typeof atToast === 'function') atToast('PC hat schon übernommen — dieser Trade läuft zu Ende.', 'end')
         }
-        _rsqStep('claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _rsqStep('claim', 'ok', `PC ${pcLabelHtml(row.pc)} hat übernommen.`)
         _rsqStep('order', 'warn', `⏳ Puls klickt in TradingView: Konto → Asset → Order-Panel → ${escapeHtml(w.dir.toUpperCase())}… (${sec}s) — HÄNDE WEG am PC!`)
       } else if(row.status === 'fertig'){
         _rsqStep('claim', 'ok', null)
@@ -45796,7 +45821,7 @@
     if(letzt.status !== 'fertig' || !erg.ok || alter > 10 * 60 * 1000) return null
     const um = new Date(letzt.updated_at || letzt.created_at).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
     _pfSet('cs-sig', 'ok', `kein neues Signal — Close <span class="mono">#${escapeHtml(String(letzt.id).slice(0, 8))}</span> war um ${um} schon fertig`)
-    _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(letzt.pc || '?'))}</span>`)
+    _pfSet('cs-claim', 'ok', `PC ${pcLabelHtml(letzt.pc)}`)
     _pfSet('cs-close', 'ok', escapeHtml(String(erg.msg || 'Position geschlossen.')))
     if(typeof fertigUi === 'function') fertigUi(true, `✓ Puls hat die Position um ${um} schon geschlossen — nichts erneut gesendet, die Ende-Erkennung übernimmt.`)
     try{ loadTradePlansFromSupabase() }catch(_){}
@@ -45938,10 +45963,10 @@
         }
         _pfSet('cs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.` + await osPcStandHtml(sec))
       } else if(row.status === 'laeuft'){
-        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _pfSet('cs-claim', 'ok', `PC ${pcLabelHtml(row.pc)} hat übernommen.`)
         _pfSet('cs-close', 'warn', `⏳ Puls klickt im Terminal — Position schließen… (${sec}s) — HÄNDE WEG am PC!`)
       } else if(row.status === 'fertig'){
-        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
+        _pfSet('cs-claim', 'ok', `PC ${pcLabelHtml(row.pc)}`)
         _pfSet('cs-close', 'ok', escapeHtml(String(erg.msg || 'Position geschlossen.')))
         fertigUi(true, '✓ Position geschlossen — Auto-Erkennung übernimmt, der Plan wandert zu „Beendet".')
         try{ loadTradePlansFromSupabase() }catch(_){}
@@ -46369,10 +46394,10 @@
         }
         _pfSet('cs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.` + await osPcStandHtml(sec))
       } else if(row.status === 'laeuft'){
-        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _pfSet('cs-claim', 'ok', `PC ${pcLabelHtml(row.pc)} hat übernommen.`)
         _pfSet('cs-close', 'warn', `⏳ Puls schließt die Position… (${sec}s) — HÄNDE WEG am PC!`)
       } else if(row.status === 'fertig'){
-        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
+        _pfSet('cs-claim', 'ok', `PC ${pcLabelHtml(row.pc)}`)
         _pfSet('cs-close', 'ok', escapeHtml(String(erg.msg || 'Position geschlossen.')))
         fertigUi(true, okText(erg))
         try{ loadTradePlansFromSupabase() }catch(_){}
@@ -47468,7 +47493,7 @@
           <span style="flex:0 0 46px">${weg}</span>
           <span style="flex:1;min-width:0"><b>${escapeHtml(r.master_name || r.plan_id)}</b>${r.symbol ? ' · ' + escapeHtml(r.symbol) : ''}
             <span style="color:${r.ok ? 'var(--good)' : 'var(--danger)'}"> ${r.ok ? '✓' : '✗'} ${escapeHtml(String(r.msg || ''))}</span></span>
-          <span class="mono" style="color:var(--sub)">${escapeHtml(String(r.pc || ''))}</span></div>`
+          <span style="color:var(--sub)">${r.pc ? pcLabelHtml(r.pc) : ''}</span></div>`
       }).join('')
     }catch(e){ box.textContent = 'Log nicht ladbar: ' + (e.message || e) }
   }
@@ -48276,7 +48301,7 @@
       if(pushJetzt){
         const text = status === 'verpasst_slave'
           ? `„${plan.masterName || 'Plan'}" (Start ${start}) NICHT gestartet — das Slave-Terminal (Fusion-Copier) war im ganzen Start-Fenster nicht bereit. Plan bleibt Geplant.`
-          : `„${plan.masterName || 'Plan'}" (Start ${start}) wartet — Slave-Terminal (Fusion-Copier) auf ${pc || 'diesem PC'} nicht bereit: ${grund}. Puls klickt erst, wenn es läuft.`
+          : `„${plan.masterName || 'Plan'}" (Start ${start}) wartet — Slave-Terminal (Fusion-Copier) auf ${pc ? pcLabel(pc) : 'diesem PC'} nicht bereit: ${grund}. Puls klickt erst, wenn es läuft.`
         if(typeof atToast === 'function') atToast('⚠ ' + text, 'end')
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('Slave-Terminal nicht bereit', text, 'https://prophos.pages.dev/prophos#trades', 'vorcheck-' + String(plan.id).slice(0, 8)) }catch(_){}
       }
@@ -50710,7 +50735,7 @@
   /* WAS TUN (Finn 07.10.2026 15:07: „ich weiß ja nicht, was ich machen soll — das muss da stehen"): je Zeile ein Satz, was zu tun ist,
    * aus dem Start-Fehler (mt5_baseline.start_fehler, START-FEHLER-Sektion) bzw. der Balance-Quelle. Keine Prüfung, nur Anleitung. */
   function tplSfTun(sf, wer){
-    const pc = sf.pc ? ` ${sf.pc}` : wer ? ` von ${wer}` : '', login = sf.login ? ` ${sf.login}` : '', m = String(sf.msg || '')
+    const pc = sf.pc ? ` ${pcLabel(sf.pc)}` : wer ? ` von ${wer}` : '', login = sf.login ? ` ${sf.login}` : '', m = String(sf.msg || '')
     switch(sf.schritt){
       case 'v2link': return /nicht erreichbar/i.test(m) ? `Am PC${pc} start-alles.bat ausführen (Copier-Backend).`
         : /Terminal-Pfad/i.test(m) && !/Kein Master-Terminal/i.test(m) ? `Am PC${pc}: Echo → Instanz → Terminal-Pfad eintragen.`
@@ -51793,11 +51818,11 @@
         const s = st && st.status, e = (st && st.ergebnis) || {}
         if(s === 'fertig'){
           const txt = typeof e.balance === 'number' ? `gelesen ${tplBalFmt(e.balance)}` : String(e.msg || 'gelesen')
-          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${st.pc})` : ''), balance: typeof e.balance === 'number' ? e.balance : null, at: Date.now() }); tplNachLesung(); return
+          setz({ laeuft: false, text: txt + (st.pc ? ` (PC ${pcLabel(st.pc)})` : ''), balance: typeof e.balance === 'number' ? e.balance : null, at: Date.now() }); tplNachLesung(); return
         }
-        if(['fehler', 'verfallen', 'verworfen'].includes(s)){ setz({ laeuft: false, fehler: true, text: String(e.msg || s) + (st.pc ? ` (PC ${st.pc})` : '') }); return }
+        if(['fehler', 'verfallen', 'verworfen'].includes(s)){ setz({ laeuft: false, fehler: true, text: String(e.msg || s) + (st.pc ? ` (PC ${pcLabel(st.pc)})` : '') }); return }
         if(s === 'laeuft'){ const pl = Number(e.warteschlange) || 0
-          setz({ laeuft: true, text: mt5 ? `MT5 wird geöffnet · liest … (PC ${st.pc || '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${st.pc || '?'})` : `liest … (PC ${st.pc || '?'})` }) }
+          setz({ laeuft: true, text: mt5 ? `MT5 wird geöffnet · liest … (PC ${st.pc ? pcLabel(st.pc) : '?'})` : pl > 1 ? `in der Warteschlange · Platz ${pl} (PC ${st.pc ? pcLabel(st.pc) : '?'})` : `liest … (PC ${st.pc ? pcLabel(st.pc) : '?'})` }) }
       }
       setz({ laeuft: false, fehler: true, text: `PC von ${wer} offline? kein PC hat übernommen`, html: `PC von ${escapeHtml(wer)} offline? Kein PC hat übernommen (Prophos-Tab dort offen?) ` + pcs() })
     }catch(err){ setz({ laeuft: false, fehler: true, text: 'nicht gesendet: ' + String((err && err.message) || err).slice(0, 80) }) }
@@ -56231,7 +56256,7 @@
     if(g('wd-hedge-puffer')) g('wd-hedge-puffer').value = Math.round((Number(vp.hedge_puffer) || 0) / HEDGE_TICK)   // Punkte → Ticks (bestehende 3 Pkt = 12 Ticks)
     if(g('wd-hedge-notfall')) g('wd-hedge-notfall').value = Math.round((Number(vp.hedge_notfall) || HEDGE_NOTFALL_STD) * 100)
     if(g('wd-staffel-card')) g('wd-staffel-card').hidden = !vp.hedge_an && (typeof admOhneHedge === 'function' ? admOhneHedge() : false)
-    if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el){ el.classList.toggle('aus', !k); el.classList.remove('leer') } if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${k.pc}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
+    if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el){ el.classList.toggle('aus', !k); el.classList.remove('leer') } if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${pcLabel(k.pc)}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
     wdStaffelArbeitInit(vp.regeln); wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
     wdFirmenRender(fu, vp)
     wdStatus()
@@ -65327,7 +65352,7 @@
     return `<div class="mtc-card" style="${frisch ? '' : 'opacity:.55'}">
       <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
         <span class="mtc-dot ${dot}"></span>
-        <b>${epEsc(z.pc_name || z.id)}</b>
+        <b>${epEsc((z.pc_name && window.pcLabel ? window.pcLabel(z.pc_name) : z.pc_name) || z.id)}</b>
         ${istLokal ? '<span class="mtc-chip" title="Dieses Gerät — Daten direkt vom lokalen reader-server">💻 dieses Gerät</span>' : ''}
         <span style="font-size:12px;color:var(--sub)">${epEsc(statusText)}</span>
         <button class="btn ${an ? 'btn-ghost' : 'btn-primary'}" data-ep-schalter="${epEsc(z.id)}" data-ep-an="${an ? '0' : '1'}"
