@@ -23317,7 +23317,9 @@
       if(r && (r.konto_geblowt || r.konto_verletzungen || r.code === 'konto_geblowt')){ try{ await tsxGeblowtFolge(acc.id, r, 'balance') }catch(_){} }
       if(r && !r.ok && r.code === 'konto_geblowt') return { ok: false, konto_geblowt: true, trail, msg: String(r.msg || 'TopstepX: Konto geblowt').slice(0, 200) }
       const b = tvBalanceAus(r && r.summary)
-      if(b.balance == null) return { ok: false, trail, msg: (r && (r.msg || r.code)) ? String(r.msg || r.code).slice(0, 200) : 'keine Account Balance im Panel' }
+      // 500 statt 200 Zeichen (16.10.2026, Muster „konto_balance: … kein Tradovate-Username hinterlegt"): bei 200 brach die Bot-Meldung
+      // genau vor dem Fix ab („hinterlegt (") — der Weg „Einstellungen > Prop Firms > …" kam nie in Braucht dich / order_signale an
+      if(b.balance == null) return { ok: false, trail, msg: (r && (r.msg || r.code)) ? String(r.msg || r.code).slice(0, 500) : 'keine Account Balance im Panel' }
       if(r.konto_aktiv && !String(r.konto_aktiv).includes(konto)) return { ok: false, trail, msg: `Puls stand auf einem anderen Konto (${String(r.konto_aktiv).slice(0, 40)})` }
       const at = new Date().toISOString()
       b.relativ = tsxBalanceRelativ(r)
@@ -44022,7 +44024,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1572'
+  const OS_TAB_BUILD = '2026-09-22.1573'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

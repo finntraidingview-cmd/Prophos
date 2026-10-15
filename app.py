@@ -24836,6 +24836,38 @@ def ap_bal_auto_darf(versuche, jetzt_s, max_tag=AP_BAL_AUTO_MAX_TAG, abstand_s=A
     return True, ""
 
 
+AP_BAL_AUTO_OHNE_USERNAME = "kein Tradovate-Username hinterlegt"   # Bot-Text aus order_bot _cdp_konto_mit_login
+
+
+def ap_bal_auto_db_stand(rows, tag_start_s):
+    """REIN RECHNEND (testbar): heutige Balance-Aufträge je Konto aus order_signale → {konto_id: {"versuche": [epoche…],
+    "ohne_username": bool}}. rows = order_signale-Zeilen (plan_id konto:<id>, created_at, status, params, ergebnis), neueste zuerst
+    oder beliebig. versuche = Aufträge von 'auto_planer' seit tag_start_s. ohne_username = der NEUESTE abgeschlossene Auftrag des
+    Kontos (egal von wem) scheiterte, weil für die Firma kein Tradovate-Username hinterlegt ist.
+    Anlass 16.10.2026 (Muster „konto_balance: konto # steht im dropdown # … kein Tradovate-Username hinterlegt", 35× in 24 h, ein PC,
+    fünf Apex-Konten): die Bremse (3/Tag, 90 min) stand nur im Speicher — jeder Railway-Neustart (jeder app.py-Push) leerte sie, und
+    die Konten bekamen 7 Aufträge in 8 h (22:03 und 23:00 UTC nur 57 min auseinander). Außerdem kann keine weitere Lesung gelingen,
+    solange der Username fehlt — erst ein neuer Auftrag (↻ Balance lesen nach dem Eintragen) hebt die Sperre auf."""
+    out, neu = {}, {}
+    for r in rows or []:
+        kid = str((r or {}).get("plan_id") or "")
+        if not kid.startswith("konto:"):
+            continue
+        kid = kid[6:]
+        t = _ap_ts(r.get("created_at"))
+        if not t:
+            continue
+        s = out.setdefault(kid, {"versuche": [], "ohne_username": False})
+        if t.timestamp() >= tag_start_s and str((r.get("params") or {}).get("von") or "") == "auto_planer":
+            s["versuche"].append(t.timestamp())
+        if str(r.get("status") or "") in ("fertig", "fehler") and (kid not in neu or t > neu[kid][0]):
+            msg = str((r.get("ergebnis") or {}).get("msg") or "") if isinstance(r.get("ergebnis"), dict) else ""
+            neu[kid] = (t, str(r.get("status")) == "fehler" and AP_BAL_AUTO_OHNE_USERNAME in msg)
+    for kid, (_, ohne) in neu.items():
+        out[kid]["ohne_username"] = ohne
+    return out
+
+
 def ap_bal_auto_tick(jetzt, reg=None):
     """Ein Takt (aus ap_loop, jede Minute): alle AP_BAL_AUTO_TAKT_S, nur wenn auto_plan_regeln.aktiv. (A)/(B) nur im Nachplan-Fenster
     wie bisher; (C) nie gelesene Konten (15.10.2026) zu jeder Zeit — ein um 18:24 Dubai angelegtes Konto soll vor dem Nachtlauf gelesen sein.
@@ -24882,11 +24914,33 @@ def ap_bal_auto_tick(jetzt, reg=None):
         return None
     lebt = _ap_pc_lebt()
     jetzt_s = time.time()
+    # Bremse aus der DB statt nur aus dem Speicher (16.10.2026): ein Railway-Neustart darf den Tageszähler nicht leeren.
+    # Klappt die Abfrage nicht, gilt der Speicher wie bisher.
+    db_stand = None
+    try:
+        tag_start = d.replace(hour=0, minute=0, second=0, microsecond=0)
+        ids = sorted(kand)
+        rows = []
+        for i in range(0, len(ids), 100):
+            rows += sb_select("order_signale", {"select": "plan_id,created_at,status,params,ergebnis",
+                                                "plan_id": "in.(" + ",".join("konto:" + k for k in ids[i:i + 100]) + ")",
+                                                "created_at": "gte." + (tag_start - timedelta(days=3)).astimezone(timezone.utc).isoformat(),
+                                                "order": "created_at.desc", "limit": "1000"}) or []
+        db_stand = ap_bal_auto_db_stand(rows, tag_start.timestamp())
+    except Exception as e:
+        print(f"[balance-auto] Tagesstand aus order_signale nicht gelesen ({type(e).__name__}: {e}) — Bremse nur aus dem Speicher", flush=True)
     gesendet, ueber = [], []
     for kid, grund in kand.items():
         a = accs[kid]
         zeile = {"konto_id": kid, "konto": a.get("name"), "user_id": str(a.get("user_id") or ""), "grund": grund}
-        ok, warum = ap_bal_auto_darf(_ap_bal_auto["versuche"].get(kid), jetzt_s)
+        st_db = (db_stand or {}).get(kid) or {}
+        if st_db.get("ohne_username"):
+            ueber.append(dict(zeile, warum=f"letzte Lesung scheiterte: für {a.get('firm') or 'die Firma'} ist kein Tradovate-Username hinterlegt "
+                                           "→ Einstellungen > Prop Firms > Firma bearbeiten > 'Tradovate-Username für TradingView' eintragen, "
+                                           "dann einmal ↻ Balance lesen"))
+            continue
+        versuche = st_db.get("versuche") if db_stand is not None else _ap_bal_auto["versuche"].get(kid)
+        ok, warum = ap_bal_auto_darf(versuche, jetzt_s)
         if not ok:
             ueber.append(dict(zeile, warum=warum))
             continue
@@ -24922,7 +24976,7 @@ def ap_bal_auto_tick(jetzt, reg=None):
             neu = sb_insert("order_signale", sig)
             _ap_bal_auto["versuche"].setdefault(kid, []).append(jetzt_s)
             gesendet.append(dict(zeile, art=sig["params"]["aktion"], signal_id=str((neu or {}).get("id") or ""),
-                                 at=datetime.now(timezone.utc).isoformat(), nr=len(_ap_bal_auto["versuche"][kid])))
+                                 at=datetime.now(timezone.utc).isoformat(), nr=len(versuche or ()) + 1))
         except Exception as e:
             ueber.append(dict(zeile, warum=f"{type(e).__name__}: {e}"[:160]))
     _ap_bal_auto["gesendet"] = (gesendet + _ap_bal_auto.get("gesendet", []))[:60]

@@ -91,6 +91,29 @@ def main():
     check(darf([j - 6000], j)[0] is True, "letzter Auftrag vor 100 min → darf")
     check(darf([j - 600], j)[0] is False and "min" in darf([j - 600], j)[1], "letzter Auftrag vor 10 min → Abstand")
     check(darf([j - 20000, j - 15000, j - 10000], j)[0] is False and "Deckel" in darf([j - 20000, j - 15000, j - 10000], j)[1], "3 Aufträge heute → Deckel")
+    # TAGESSTAND AUS DER DB (16.10.2026, Muster „… kein Tradovate-Username hinterlegt" 35× in 24 h: Speicher-Bremse nach Neustart leer)
+    dbs = ns["ap_bal_auto_db_stand"]
+    t0 = datetime(2026, 10, 15, 20, 0, tzinfo=timezone.utc).timestamp()
+    ohne = {"ok": False, "msg": "Konto X steht im Dropdown 0x … Puls kann nicht selbst verbinden: für die Firma ist kein Tradovate-Username hinterlegt ("}
+    rows = [{"plan_id": "konto:a", "created_at": "2026-10-15 23:00:08.3+00", "status": "fehler", "params": {"von": "auto_planer"}, "ergebnis": ohne},
+            {"plan_id": "konto:a", "created_at": "2026-10-15 22:03:32+00", "status": "fehler", "params": {"von": "auto_planer"}, "ergebnis": ohne},
+            {"plan_id": "konto:a", "created_at": "2026-10-15 18:28:13+00", "status": "fehler", "params": {"von": "auto_planer"}, "ergebnis": ohne},
+            {"plan_id": "konto:b", "created_at": "2026-10-15 21:00:00+00", "status": "fertig", "params": {"von": "auto_planer"}, "ergebnis": {"ok": True}},
+            {"plan_id": "konto:b", "created_at": "2026-10-15 20:30:00+00", "status": "fehler", "params": {"von": "besitzer"}, "ergebnis": ohne},
+            {"plan_id": "konto:c", "created_at": "2026-10-15 22:00:00+00", "status": "fehler", "params": {"von": "besitzer"}, "ergebnis": {"ok": False, "msg": "Signal älter als 3 Minuten"}},
+            {"plan_id": "konto:c", "created_at": "2026-10-15 21:00:00+00", "status": "fehler", "params": {"von": "auto_planer"}, "ergebnis": ohne},
+            {"plan_id": "konto:d", "created_at": "2026-10-15 23:30:00+00", "status": "wartet", "params": {"von": "auto_planer"}, "ergebnis": None},
+            {"plan_id": "konto:d", "created_at": "2026-10-15 21:00:00+00", "status": "fehler", "params": {"von": "auto_planer"}, "ergebnis": ohne},
+            {"plan_id": "plan-xyz", "created_at": "2026-10-15 21:00:00+00", "status": "fehler", "params": {}, "ergebnis": ohne}]
+    st = dbs(rows, t0)
+    check(len(st["a"]["versuche"]) == 2, "DB: nur heutige Auto-Aufträge zählen (18:28 UTC = gestern Dubai)")
+    check(st["a"]["ohne_username"] is True, "DB: letzte Lesung ohne Username → Sperre")
+    check(darf(st["a"]["versuche"], datetime(2026, 10, 15, 23, 30, tzinfo=timezone.utc).timestamp())[0] is False, "DB: Abstand gilt auch nach Neustart")
+    check(st["b"]["ohne_username"] is False and len(st["b"]["versuche"]) == 1, "DB: neuere erfolgreiche Lesung hebt Sperre auf, Hand-Auftrag zählt nicht")
+    check(st["c"]["ohne_username"] is False, "DB: neuerer Hand-Auftrag (anderer Grund) hebt Sperre auf")
+    check(st["d"]["ohne_username"] is True, "DB: wartender Auftrag zählt nicht als Ergebnis")
+    check("plan-xyz" not in st and "xyz" not in st, "DB: Plan-Signale ignoriert")
+    check(dbs([], t0) == {} and dbs(None, t0) == {}, "DB: leer")
     print(f"\n{sum(f)} Fehler von {len(f)}")
     return sum(f)
 
