@@ -14,11 +14,17 @@ def lade():
     i = src.index("\ndef ap_richtung_plan_pruefen(") + 1
     ns = {"datetime": datetime, "timedelta": timedelta, "AP_FAELLIG_MIN": 5}
     exec(src[i:src.find("\n\n\n", i)], ns)
-    return ns["ap_richtung_plan_pruefen"]
+    j = src.index("\ndef ap_richtung_hand_fest(") + 1
+    exec(src[j:src.find("\n\n\n", j)], ns)
+    # Hand-Merker muss im Stand als fest zählen und für Finns eigene Eingriffe wieder frei sein (Master 16.10.2026)
+    assert "elif ap_richtung_hand_fest(p):\n            fest = AP_FEST_RICHTUNG_HAND" in src, "Stand wertet richtung_hand nicht als fest"
+    assert "AP_FEST_TSV2, AP_FEST_RICHTUNG_HAND) else x" in src, "ap_eingriff_pruefen gibt AP_FEST_RICHTUNG_HAND nicht frei"
+    assert "rh:mt5_baseline->richtung_hand" in src, "Stand liest richtung_hand nicht"
+    return ns["ap_richtung_plan_pruefen"], ns["ap_richtung_hand_fest"]
 
 
 def main():
-    f = lade()
+    f, hand = lade()
     jetzt = datetime(2026, 10, 16, 6, 0, tzinfo=timezone.utc)
     iso = lambda m: (jetzt + timedelta(minutes=m)).isoformat()
     basis = {"status": "planned", "auto_plan": True, "richtung": "sell", "start_um": iso(30)}
@@ -45,6 +51,13 @@ def main():
     soll("unbestätigt + fällig → gedreht", dict(basis, start_um=iso(3)), frei, "buy")
     soll("ohne Richtung → nichts", dict(basis, richtung=None), frei, None, "keine Richtung")
     soll("Plan fehlt → nichts", None, frei, None, "nicht gefunden")
+    for name, p, soll_fest in (("Merker = Richtung → fest", {"richtung": "buy", "rh": {"nach": "buy"}}, True),
+                               ("Riegel hat danach gedreht → frei", {"richtung": "sell", "rh": {"nach": "buy"}}, False),
+                               ("ohne Merker → frei", {"richtung": "buy", "rh": None}, False),
+                               ("Merker kaputt → frei", {"richtung": "buy", "rh": "buy"}, False)):
+        ok = hand(p) is soll_fest
+        print(("ok   " if ok else "FEHL ") + name)
+        fehler += 0 if ok else 1
     print("ALLE OK" if not fehler else f"{fehler} FEHLER")
     sys.exit(1 if fehler else 0)
 

@@ -21987,7 +21987,7 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
     Firma/Pause über IDs. → (aenderungen [wie ap_umplanen], None) oder (None, Klartext für 400)."""
     id_fest = id_fest or {}
     # Werte von Hand (AP_FEST_HAND) sperren nur den Bot — Finns eigene Eingriffe (Richtung/Start) bleiben möglich (08.10.2026)
-    plaene = [dict(x, aenderbar=True, fest_durch=None) if x.get("fest_durch") in (AP_FEST_HAND, AP_FEST_KETTE, AP_FEST_TSV2) else x for x in plaene or ()]
+    plaene = [dict(x, aenderbar=True, fest_durch=None) if x.get("fest_durch") in (AP_FEST_HAND, AP_FEST_KETTE, AP_FEST_TSV2, AP_FEST_RICHTUNG_HAND) else x for x in plaene or ()]
     p = next((x for x in plaene if str(x.get("plan_id")) == str(plan_id)), None)
     if not p:
         return None, "Plan ist kein geplanter Plan von heute"
@@ -22189,6 +22189,9 @@ def _ap_bewerten(ctx, a, bal, menge, route, symbol, richtung, tp, sl, gehedgt=Fa
 AP_FEST_HAND = "Werte von Hand geändert"
 AP_FEST_KETTE = "Topstep-Kette (fest)"
 AP_FEST_TSV2 = "Topstep V2 startet nur von Hand"
+# RICHTUNG VON HAND (Master 16.10.2026 nach Prüfung Slave 2): Klick im Admin-Planer (richtung_plan) setzt mt5_baseline.richtung_hand —
+# Bot-Richtungsschutz und Ausgleich drehen Finns Klick nicht still zurück. Harte Riegel (Saldo am Start, DB-Claim-Trigger) bleiben.
+AP_FEST_RICHTUNG_HAND = "Richtung von Hand gedreht"
 AP_FEST_FOLGETAG = "Folgetag (zählt nur für Abstände, Gegenhedge und Szenario)"
 
 
@@ -22290,7 +22293,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
              if str(p.get("user_id")) not in ausgeblendet]
     geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
                                                                  "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler,"
-                                                                 "kt:mt5_baseline->kette",
+                                                                 "kt:mt5_baseline->kette,rh:mt5_baseline->richtung_hand",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
                     if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p) and not ap_ist_waise(p)]   # Waise (09.10.2026)
@@ -22454,6 +22457,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
             fest = "schon gestartet"
         elif p.get("hand_werte_at"):
             fest = AP_FEST_HAND                    # TP/SL/Größe von Hand — der Bot fasst ihn nicht mehr an (08.10.2026)
+        elif ap_richtung_hand_fest(p):
+            fest = AP_FEST_RICHTUNG_HAND           # Richtung im Admin-Planer gedreht — Bot dreht/schiebt nicht zurück (16.10.2026)
         elif isinstance(p.get("kt"), dict):
             fest = AP_FEST_KETTE                   # Topstep-Kette: Zeiten/Werte aus der Kettenregel, der Bot fasst sie nicht an (08.10.2026)
         elif p.get("route") == "tsv2":
@@ -24222,6 +24227,13 @@ def ap_richtung_plan_pruefen(plan, frei, jetzt):
     return ("sell" if alt == "buy" else "buy"), None
 
 
+def ap_richtung_hand_fest(p):
+    """REIN: gilt der Hand-Merker (mt5_baseline.richtung_hand) noch? Nur solange die Richtung des Plans die von Hand gesetzte ist —
+    hat ein harter Riegel am Start (Saldo/rkVorStart) inzwischen gedreht, ist der Merker überholt und der Plan wieder normal."""
+    rh = p.get("rh") if isinstance(p, dict) else None
+    return isinstance(rh, dict) and rh.get("nach") in ("buy", "sell") and rh.get("nach") == str(p.get("richtung") or "").lower()
+
+
 def _ap_richtung_plan(pid):
     """Admin-Planer „Zu bestätigen"/„Wartet auf Start": einen Plan umdrehen (ap_richtung_plan_pruefen), Guard in derselben PATCH-Anfrage
     (planned, Auto-Plan, alte Richtung, nichts geclaimt/gesendet), Protokoll in auto_plan_umplanung mit quelle 'hand'. Der Saldo-Riegel
@@ -24251,12 +24263,19 @@ def _ap_richtung_plan(pid):
              "von_richtung": alt, "nach_richtung": neu, "von_start": plan.get("start_um"), "nach_start": plan.get("start_um"),
              "grund": f"von Hand (Admin-Planer): {AP_RICHTUNG_TXT[alt]} → {AP_RICHTUNG_TXT[neu]}", "quelle": "hand"}
     msg = None
+    try:                                           # Hand-Merker: Bot wertet den Plan als fest (AP_FEST_RICHTUNG_HAND)
+        _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                                json={"p_plan": pid, "p_patch": {"richtung_hand": {"um": jetzt.isoformat(), "von": alt, "nach": neu}},
+                                      "p_status": "planned"}))
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ richtung_plan Merker {pid}: {type(e).__name__}: {e}", flush=True)
+        msg = f"gedreht, Hand-Merker nicht gesetzt ({type(e).__name__}) — der Bot könnte zurückdrehen"
     try:
         _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=[zeile],
                                 headers=_sb_headers("return=minimal"), timeout=(5, 20)))
     except Exception as e:
         print(f"[auto-plan] ⚠️ richtung_plan Protokoll {pid}: {type(e).__name__}: {e}", flush=True)
-        msg = f"gedreht, Protokoll nicht geschrieben ({type(e).__name__})"
+        msg = (msg + " · " if msg else "") + f"gedreht, Protokoll nicht geschrieben ({type(e).__name__})"
     return jsonify({"ok": True, "plan_id": pid, "richtung": neu, "msg": msg})
 
 

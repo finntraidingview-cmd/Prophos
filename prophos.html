@@ -48185,6 +48185,9 @@
     return !!p && (p.route === 'tvv2' || p.route === 'mt5v2' || p.route === 'tsv2') && (p.richtung === 'buy' || p.richtung === 'sell')
   }
   const rkFlag = p => (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || null
+  // RICHTUNG VON HAND (16.10.2026, Master nach Prüfung Slave 2): im Admin-Planer gedreht (mt5_baseline.richtung_hand) — der Bot fasst den Plan
+  // nicht mehr an, die harten Riegel hier am Start dürfen weiter drehen, sagen dann aber sichtbar, dass sie Finns Klick überstimmen
+  const rkHandTxt = p => { const h = p && p.mt5Baseline && p.mt5Baseline.richtung_hand; return h && h.nach === p.richtung ? ' — Richtung war von Hand im Admin-Planer gesetzt, überstimmt' : '' }
   // aufgegeben gilt nur für genau die Startzeit, bei der aufgegeben wurde — eine neue Uhrzeit von Hand startet wieder normal
   const rkAufgegeben = p => { const f = rkFlag(p); return !!(f && f.status === 'aufgegeben' && p.startUm && Date.parse(f.start) === Date.parse(p.startUm)) }
   /* START-SPERRE SICHTBAR (13.10.2026, Finn nach Emins Tradeify-Longs, die 7× geschoben wurden und nie starteten: „Bitte in Zukunft hinschreiben
@@ -48291,10 +48294,11 @@
       .eq('id', plan.id).eq('status', 'planned').eq('richtung', alt).is('start_um_gestartet_at', null).select('*')
     if(error || !data || !data.length){ console.warn('[richtung-start] Saldo-Drehen nicht möglich', plan.id, error); return null }
     rkPlanErsetzen(data[0])
-    try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: alt, nach: ziel, saldo: true, text: grundTxt } }, 'planned') }catch(_){}
-    if(typeof atToast === 'function') atToast(`⇅ Saldo — „${plan.masterName || 'Plan'}": ${grundTxt} → Auto-Plan auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
+    const hand = rkHandTxt(plan)
+    try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: alt, nach: ziel, saldo: true, text: grundTxt + hand } }, 'planned') }catch(_){}
+    if(typeof atToast === 'function') atToast(`⇅ Saldo — „${plan.masterName || 'Plan'}": ${grundTxt} → Auto-Plan auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert)${hand}.`, 'start')
     rkProtokoll(plan, { von_richtung: alt, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
-      grund: `Saldo am Start: ${grundTxt} — Auto-Plan ${alt} → ${ziel} gedreht` })
+      grund: `Saldo am Start: ${grundTxt} — Auto-Plan ${alt} → ${ziel} gedreht${hand}` })
     try{ renderTradePlans() }catch(_){}
     return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
   }
@@ -48384,11 +48388,11 @@
         .eq('id', plan.id).eq('status', 'planned').eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
       if(!error && data && data.length){
         rkPlanErsetzen(data[0])
-        const durch = k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon'
-        try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: plan.richtung, nach: ziel, text: k.text } }, 'planned') }catch(_){}
-        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert).`, 'start')
+        const durch = k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon', hand = rkHandTxt(plan)
+        try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: plan.richtung, nach: ziel, text: k.text + hand } }, 'planned') }catch(_){}
+        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert)${hand}.`, 'start')
         rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
-          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} gedreht` })
+          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} gedreht${hand}` })
         try{ renderTradePlans() }catch(_){}
         return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
       }
