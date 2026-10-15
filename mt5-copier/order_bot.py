@@ -1449,6 +1449,123 @@ _UAC_HINWEIS = ("Evtl. steht am PC eine Windows-Abfrage offen (MT5-Update / "
                 "abnehmen (Windows-Sicherheitsabfrage).")
 
 
+def verbindung_ursache(path, prozesse, fenster):
+    """REIN RECHNEND (testbar): die EINE festgestellte Ursache, warum das Terminal über die Schnittstelle nicht antwortet → (code, text).
+    ANLASS (Routine Puls-Fehler 16.10.2026, Muster „v2order: terminal-verbindung fehlgeschlagen: (-# 'ipc timeout') — evtl. steht am pc
+    eine windows-ab…", 16× in 7 Tagen auf 4 PCs): jeder Fall bekam dieselbe Vermutung „Evtl. Windows-Abfrage offen" — seit .930/.1337
+    spielt Prophos MT5-Updates aber still ein, und derselbe Plan scheiterte 4–5× im 20-min-Takt, bis er 1–5 h später doch startete.
+    Was am PC wirklich los war, stand nirgends. Jetzt prüft der Bot nach dem Fehlschlag die Lage und nennt sie mit dem Handgriff.
+    prozesse = [{"pid", "name", "pfad"}] (pfad leer = nicht lesbar), fenster = [{"pid", "titel", "klasse", "sichtbar", "haengt"}]."""
+    ziel = os.path.normcase(os.path.abspath(path or "")) if path else ""
+    ordner = os.path.dirname(ziel)
+    namen = {str(p.get("name") or "").lower() for p in prozesse or ()}
+    if "consent.exe" in namen:
+        return "uac_offen", ("Am PC ist eine Windows-Sicherheitsabfrage offen (consent.exe läuft) — solange antwortet kein Terminal → "
+                             "am PC auf 'Ja' klicken")
+    upd = [p for p in prozesse or () if "\\liveupdate\\" in os.path.normcase(str(p.get("pfad") or "")).replace("/", "\\")]
+    if upd:
+        return "update_laeuft", (f"MT5 spielt gerade ein Update ein ({str(upd[0].get('pfad'))[-60:]}, PID {upd[0].get('pid')}) → "
+                                 "warten, bis es fertig ist; Prophos startet neu, sobald das Terminal antwortet")
+    eigen = [p for p in prozesse or () if ziel and p.get("pfad") and os.path.normcase(os.path.abspath(str(p["pfad"]))) == ziel]
+    if not eigen:
+        if any(str(p.get("name") or "").lower() == "terminal64.exe" and not p.get("pfad") for p in prozesse or ()):
+            return "unbekannt", (f"Terminal {ordner} nicht eindeutig gefunden (Pfade der laufenden terminal64.exe nicht lesbar) → "
+                                 "am PC prüfen, ob dieses Terminal offen ist")
+        return "terminal_aus", (f"Terminal {ordner} läuft nicht — auch der Startversuch des Bots brachte es nicht hoch → "
+                                "im Panel die Instanz starten bzw. am PC terminal64.exe in diesem Ordner öffnen und die Fehlermeldung lesen")
+    pids = {int(p.get("pid") or 0) for p in eigen}
+    seine = [f for f in fenster or () if int(f.get("pid") or 0) in pids]
+    haupt = [f for f in seine if f.get("klasse") == MT5_KLASSE]
+    if any(f.get("haengt") for f in haupt):
+        t = str(next(f for f in haupt if f.get("haengt")).get("titel") or "")[:50]
+        return "haengt", (f"Terminal reagiert nicht (Windows: „Keine Rückmeldung“, Fenster '{t}', PID {sorted(pids)[0]}) → am PC das "
+                          "Terminal schließen (Task-Manager), Prophos startet es beim nächsten Versuch neu")
+    # nur echte Dialoge (#32770) — ein abgedocktes Chart/Navigator-Fenster des Terminals blockiert nichts (Prüfung Slave 2, 16.10.2026)
+    dialoge = [f for f in seine if f.get("sichtbar") and f.get("klasse") == "#32770" and str(f.get("titel") or "").strip()]
+    if dialoge:
+        t = str(dialoge[0].get("titel") or "").strip()[:50]
+        return "dialog_offen", f"Im Terminal steht ein Fenster '{t}' offen und blockiert → am PC lesen und schließen"
+    if not any(f.get("sichtbar") for f in haupt):
+        return "ohne_fenster", (f"Terminal läuft (PID {sorted(pids)[0]}), hat aber kein sichtbares Hauptfenster — der Start hängt → "
+                                "am PC das Terminal schließen, Prophos startet es neu")
+    t = str(next(f for f in haupt if f.get("sichtbar")).get("titel") or "")[:50]
+    return "antwortet_nicht", (f"Terminal läuft und reagiert unter Windows (Fenster '{t}', PID {sorted(pids)[0]}), antwortet aber nicht über "
+                               "die Schnittstelle → am PC Terminal einmal schließen, Prophos startet es neu")
+
+
+def _verbindung_lage():
+    """Prozesse (Name + voller Pfad) und Fenster (Prozess, Titel, Klasse, sichtbar, hängt) unter Windows — nur lesen, wirft nie.
+    → (prozesse, fenster) oder ([], []) ohne Windows. Ohne wmic (manche PCs Win 11 24H2+): ctypes EnumProcesses + tasklist für Namen."""
+    prozesse, fenster = [], []
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        import subprocess
+        k32, u32, psapi = ctypes.windll.kernel32, ctypes.windll.user32, ctypes.windll.psapi
+        arr = (wt.DWORD * 4096)()
+        n = wt.DWORD(0)
+        if psapi.EnumProcesses(arr, ctypes.sizeof(arr), ctypes.byref(n)):
+            for pid in list(arr)[: n.value // ctypes.sizeof(wt.DWORD)]:
+                if not pid:
+                    continue
+                pfad = ""
+                h = k32.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+                if h:
+                    try:
+                        buf = ctypes.create_unicode_buffer(1024)
+                        g = wt.DWORD(1024)
+                        if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(g)):
+                            pfad = buf.value
+                    finally:
+                        k32.CloseHandle(h)
+                prozesse.append({"pid": int(pid), "name": os.path.basename(pfad), "pfad": pfad})
+        try:
+            # consent.exe läuft als SYSTEM — sein Pfad ist evtl. nicht lesbar, der Name über tasklist schon
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=8,
+                                 errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout or ""
+            bekannt = {p["pid"]: p for p in prozesse}
+            for z in out.splitlines():
+                teile = [x.strip('"') for x in z.split('","')]
+                if len(teile) >= 2 and teile[1].isdigit():
+                    p = bekannt.get(int(teile[1]))
+                    if p is None:
+                        prozesse.append({"pid": int(teile[1]), "name": teile[0], "pfad": ""})
+                    elif not p["name"]:
+                        p["name"] = teile[0]
+        except Exception:
+            pass
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+        def je(h, _):
+            try:
+                pid = wt.DWORD(0)
+                u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+                t = ctypes.create_unicode_buffer(256)
+                u32.GetWindowTextW(h, t, 256)
+                kl = ctypes.create_unicode_buffer(128)
+                u32.GetClassNameW(h, kl, 128)
+                fenster.append({"pid": int(pid.value), "titel": t.value, "klasse": kl.value,
+                                "sichtbar": bool(u32.IsWindowVisible(h)), "haengt": bool(u32.IsHungAppWindow(h))})
+            except Exception:
+                pass
+            return True
+        u32.EnumWindows(WNDENUMPROC(je), 0)
+    except Exception:
+        return prozesse, fenster
+    return prozesse, fenster
+
+
+def _verbindung_hinweis(path):
+    """Text für den Verbindungsfehler: festgestellte Ursache aus der Lage am PC; ohne lesbare Lage (kein Windows) der alte Hinweis."""
+    try:
+        prozesse, fenster = _verbindung_lage()
+        if not prozesse:
+            return _UAC_HINWEIS
+        return verbindung_ursache(path, prozesse, fenster)[1]
+    except Exception:
+        return _UAC_HINWEIS
+
+
 def _ist_verbindungsfehler(txt):
     """Riecht der Lese-Fehler nach 'Terminal nicht erreichbar' (dann passt der
     UAC/Update-Hinweis) statt nach Konto-/Symbol-Sachfehler (dann waere er
@@ -11129,7 +11246,7 @@ def run(cfg_path, cmd):
     if "fehler" in lese:
         msg = lese["fehler"]
         if _ist_verbindungsfehler(msg):
-            msg += " — " + _UAC_HINWEIS
+            msg += " — " + _verbindung_hinweis(path)   # festgestellte Ursache statt Vermutung (16.10.2026, s. verbindung_ursache)
         return {"ok": False, "retry_ok": True, "msg": msg}
     digits = lese["digits"]
     contract_size = lese["contract_size"]
@@ -11933,7 +12050,7 @@ def run_close(cfg_path, cmd):
     if "fehler" in lese:
         msg = lese["fehler"]
         if _ist_verbindungsfehler(msg):
-            msg += " — " + _UAC_HINWEIS
+            msg += " — " + _verbindung_hinweis(path)   # festgestellte Ursache statt Vermutung (16.10.2026, s. verbindung_ursache)
         return {"ok": False, "retry_ok": True, "msg": msg}
     pos = next((p for p in lese["positionen"] if p["ticket"] == ticket), None)
     if pos is None:

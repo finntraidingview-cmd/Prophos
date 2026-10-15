@@ -1759,6 +1759,32 @@ def main():
         and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 10000001).")
         and not order_bot._ist_verbindungsfehler("Broker kennt Symbol 'NDX100' nicht"))
 
+    # Verbindungsfehler-Ursache (16.10.2026, Muster „v2order: terminal-verbindung fehlgeschlagen: (-# 'ipc timeout')", 16× auf 4 PCs):
+    # eine festgestellte Ursache statt „Evtl. Windows-Abfrage"
+    _vu = order_bot.verbindung_ursache
+    _tp = "C:\\MT5-X\\terminal64.exe"
+    _K = order_bot.MT5_KLASSE
+    _term = {"pid": 7, "name": "terminal64.exe", "pfad": _tp}
+    _haupt = {"pid": 7, "titel": "10000001 - FundedNext", "klasse": _K, "sichtbar": True, "haengt": False}
+    chk("ORDER-BOT: Verbindung — Sicherheitsabfrage offen (consent.exe) geht vor",
+        _vu(_tp, [_term, {"pid": 9, "name": "consent.exe", "pfad": ""}], [_haupt])[0] == "uac_offen")
+    chk("ORDER-BOT: Verbindung — liveupdate läuft → Update",
+        _vu(_tp, [_term, {"pid": 8, "name": "terminal64.exe", "pfad": "C:\\Users\\x\\AppData\\Roaming\\MetaQuotes\\Terminal\\AB\\liveupdate\\terminal64.exe"}], [_haupt])[0] == "update_laeuft")
+    chk("ORDER-BOT: Verbindung — Terminal dieses Pfads läuft nicht",
+        _vu(_tp, [{"pid": 5, "name": "terminal64.exe", "pfad": "C:\\MT5-Y\\terminal64.exe"}], [])[0] == "terminal_aus")
+    chk("ORDER-BOT: Verbindung — Pfade nicht lesbar → unbekannt, nie „läuft nicht“",
+        _vu(_tp, [{"pid": 5, "name": "terminal64.exe", "pfad": ""}], [])[0] == "unbekannt")
+    chk("ORDER-BOT: Verbindung — Hauptfenster hängt",
+        _vu(_tp, [_term], [dict(_haupt, haengt=True)])[0] == "haengt")
+    _vd = _vu(_tp, [_term], [_haupt, {"pid": 7, "titel": "Einloggen", "klasse": "#32770", "sichtbar": True, "haengt": False}])
+    chk("ORDER-BOT: Verbindung — Dialog im Terminal offen, Titel genannt", _vd[0] == "dialog_offen" and "Einloggen" in _vd[1])
+    chk("ORDER-BOT: Verbindung — läuft ohne sichtbares Hauptfenster",
+        _vu(_tp, [_term], [dict(_haupt, sichtbar=False)])[0] == "ohne_fenster")
+    _va = _vu(_tp, [_term], [_haupt, {"pid": 99, "titel": "Fremd", "klasse": "X", "sichtbar": True, "haengt": False},
+                              {"pid": 7, "titel": "NAS100,M1", "klasse": "MetaQuotes::MetaTrader::5.00::Chart", "sichtbar": True, "haengt": False}])
+    chk("ORDER-BOT: Verbindung — läuft, reagiert, antwortet nicht; fremde Fenster zählen nicht",
+        _va[0] == "antwortet_nicht" and "→" in _va[1] and " oder " not in _va[1])
+
     # ── Panel: Terminal-Zu-Entscheidung (03.09.2026) ───────────────────────
     # Geschlossen wird NUR bei frischem, warnungsfreiem Status ohne Position,
     # ohne Hedge und ohne aktiven Plan — jede einzelne Bedingung muss blocken.
