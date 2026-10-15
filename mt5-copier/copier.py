@@ -2479,10 +2479,29 @@ def main():
                         _ml = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, hedge_acc["nas_sym"], 1.0, float(_tm.ask)) \
                             if (_tm is not None and _tm.ask) else None
                         hedge_acc["marge_je_lot"] = float(_ml) if _ml else None
+                    # OFFENE LOTS JE RICHTUNG (15.10.2026, Finn: „die Marge gleicht sich aus, wenn ich in die Gegenrichtung öffne —
+                    # es sind sehr viele Shorts in Fusion, Longs müsste ich öffnen können"): Fusion rechnet die Marge auf den größeren
+                    # Schenkel je Symbol (Hedged Margin), ein Gegen-Trade bis zur Höhe des Überhangs kostet keine neue Marge. Der
+                    # Start-Check (fusionMargePruefen) blockte trotzdem mit „zu wenig" (Vorfall PAAPEX6687940000001, SELL 2 NQ → Hedge
+                    # BUY 7,65 Lot bei frei 1.554 €). ALLE Positionen des NAS-Symbols zählen (jede Magic, jeder PC, auch Hand) — die
+                    # Marge ist je Konto. None = nicht lesbar („Beweis oder leer"), dann rechnet das Frontend wie bisher voll.
+                    _offen = None
+                    if hedge_acc.get("nas_sym"):
+                        try:
+                            _ob = _os = 0.0
+                            for p_ in (mt5.positions_get(symbol=hedge_acc["nas_sym"]) or []):
+                                if int(p_.type) == 0:
+                                    _ob += float(p_.volume)
+                                elif int(p_.type) == 1:
+                                    _os += float(p_.volume)
+                            _offen = {"symbol": hedge_acc["nas_sym"], "buy": round(_ob, 2), "sell": round(_os, 2)}
+                        except Exception:
+                            _offen = None
                     hedge_acc["konto"] = {
                         "balance": float(hai.balance), "equity": float(hai.equity), "margin": float(hai.margin),
                         "margin_free": float(hai.margin_free), "margin_level": float(hai.margin_level or 0) or None,
                         "marge_je_lot": {"NAS100": hedge_acc.get("marge_je_lot")} if hedge_acc.get("marge_je_lot") else {},
+                        "offen": _offen,
                         "waehrung": str(hai.currency) or None, "login": int(hai.login), "at": int(now * 1000)}
                 else:
                     hedge_acc["konto"] = None
