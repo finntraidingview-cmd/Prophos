@@ -6485,6 +6485,21 @@ def admin_build_overview(kapitel_id=None):
     except Exception as e:
         alle_fehler = f"{type(e).__name__}: {e}"
         print(f"[admin] ⚠️ alle-accounts: {alle_fehler}", flush=True)
+    # PAYOUT AB (Finn 16.10.2026: „wann der nächste Payout anfragbar ist … damit ich weiß: hier muss der Trade jetzt gemacht werden"):
+    # das Datum ist Finns Feld payout_ready_at (steht schon in der Zeile); hier nur, ob eine Anfrage offen ist (Chip „angefragt") —
+    # fremde IDs liest das Frontend per RLS nicht. Eigenes try: ohne sie bleibt die Liste heil.
+    try:
+        cfd = [r["id"] for r in rows if r.get("type") == "funded_cfd"]
+        offen_po = set()
+        for j in range(0, len(cfd), 150):
+            for t in _sb_all("pending_payouts", {"select": "account_id", "status": "eq.pending",
+                                                 "account_id": "in.(" + ",".join(cfd[j:j + 150]) + ")"}):
+                offen_po.add(str(t.get("account_id")))
+        for r in rows:
+            if r.get("type") == "funded_cfd":
+                r["po_offen"] = str(r["id"]) in offen_po
+    except Exception as e:
+        print(f"[admin] ⚠️ payout-ab: {type(e).__name__}: {e}", flush=True)
 
     # ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN
     # IDs auf einen Blick … und falls ein Account gerade schon im Trade ist, soll

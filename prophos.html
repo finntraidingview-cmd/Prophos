@@ -3582,6 +3582,9 @@
   #dashboard-view .pz-radar .pz-ri em{display:inline-block;min-width:34px;margin-right:6px;padding:1px 0;border-radius:4px;background:var(--surface-tint);color:var(--ink-2);font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-align:center}
   #dashboard-view .pz-radar .pz-ri em.is-buy{background:rgba(18,183,106,.12);color:#047857} #dashboard-view .pz-radar .pz-ri em.is-sell{background:rgba(240,68,56,.10);color:#b91c1c}
   /* Richtung per Klick im Admin-Planer (16.10.2026): derselbe Chip, nur klickbar — Rand beim Hover, gesperrt gestrichelt */
+  /* Payout ab (16.10.2026): Chip unter dem Kontonamen in Accounts + Admin → Alle Accounts — Farben wie der Payout-Termin daneben */
+  .acc-po{font-weight:600} .acc-po-jetzt{color:var(--good)} .acc-po-tage{color:var(--violet)} .acc-po-sub{color:var(--sub);font-weight:500}
+  .acc-po-fehlt{color:var(--sub);font-weight:500} .acc-po-fehlt.is-klick{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px} .acc-po-fehlt.is-klick:hover{color:var(--ink)}
   #dashboard-view .pz-radar .ap-ri-flip{border:0;background:none;padding:0;margin:0;font:inherit;cursor:pointer}
   #dashboard-view .pz-radar .ap-ri-flip:hover:not(:disabled) em{box-shadow:inset 0 0 0 1px currentColor}
   #dashboard-view .pz-radar .ap-ri-flip:disabled{cursor:default;opacity:.6}
@@ -7337,6 +7340,17 @@
                 <option value="funded_cfd">Funded CFD</option>
                 <option value="winning_days">Winning Days</option>
                 <option value="live">Live</option>
+              </select>
+            </label>
+            <!-- Payout anfragbar (16.10.2026, Finn): nur Funded CFD, sortiert nach Tagen bis anfragbar -->
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
+              <span>Payout:</span>
+              <select id="acc-payout-filter" class="input" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:110px">
+                <option value="">Alle</option>
+                <option value="jetzt">jetzt anfragbar</option>
+                <option value="3">≤ 3 Tage</option>
+                <option value="7">≤ 7 Tage</option>
+                <option value="fehlt">Datum fehlt</option>
               </select>
             </label>
           </div>
@@ -11360,6 +11374,17 @@
                     <option value="review">Review (Ziel erreicht)</option>
                     <option value="payout">Payout anfragbar</option>
                     <option value="wartet">Waiting for Payout</option>
+                  </select>
+                </label>
+                <!-- Payout anfragbar (16.10.2026, Finn): nur Funded CFD, sortiert nach Tagen bis anfragbar (payoutAbInfo) -->
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
+                  <span>Payout:</span>
+                  <select id="adm-k-payout" class="input adm-k-f" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:110px">
+                    <option value="">Alle</option>
+                    <option value="jetzt">jetzt anfragbar</option>
+                    <option value="3">≤ 3 Tage</option>
+                    <option value="7">≤ 7 Tage</option>
+                    <option value="fehlt">Datum fehlt</option>
                   </select>
                 </label>
                 <input id="adm-k-search" class="input" type="search" placeholder="Name, External ID, Firma, ID …" style="padding:5px 10px;font-size:12.5px;height:auto;width:200px">
@@ -15974,7 +15999,7 @@
      * dieselben Chip-Helfer wie renderAccounts zeichnen. Konten der angemeldeten ID kommen aus `accounts` (dort zählt zielFortschritt
      * aus den eigenen Plänen); fremde IDs: Mindesttage = Server-Zählung (ap_tage_ist) als manueller Stand, automatische WD-Zählung
      * weggelassen — das Frontend kennt fremde Pläne nicht, lieber kein Abzeichen als ein falsches „0/5". Reine Anzeige, keine Aktionen. */
-    const admK = { person: '', firm: '', type: '', ziel: '', q: '', arch: false }
+    const admK = { person: '', firm: '', type: '', ziel: '', payout: '', q: '', arch: false }
     function admKontoAusZeile(r){
       const eigen = String(r.user_id) === String(currentUserId) ? (accounts || []).find(x => String(x.id) === String(r.id)) : null
       if(eigen) return eigen
@@ -16013,7 +16038,7 @@
       fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
       fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
       admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
-      admK.ziel = $('adm-k-ziel').value; admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      admK.ziel = $('adm-k-ziel').value; admK.payout = $('adm-k-payout')?.value || ''; admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
       const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
       const qn = norm(admK.q)
       const zeilen = []
@@ -16025,12 +16050,17 @@
         const typ = (a.type === 'funded_cfd' && a.waitingPayoutSince) ? 'waiting_payout' : a.type
         if(admK.type && typ !== admK.type) continue
         if(admK.ziel && admKontoZiel(a) !== admK.ziel) continue
+        // Payout ab (16.10.2026): Datum = payout_ready_at, offene Anfrage liefert /admin/overview je Funded-CFD-Konto (po_offen)
+        let po = null; try{ po = payoutAbInfo(a, { offen: !!r.po_offen }) }catch(_){ po = null }
+        if(admK.payout && !payoutAbPasst(po, admK.payout)) continue
         if(qn && !norm([r.name, r.ext, r.firm, r.person].join(' ')).includes(qn)) continue
-        zeilen.push({ r, a })
+        zeilen.push({ r, a, po })
       }
       // Reihenfolge wie Accounts (accSortiert: Kontoart → Firma), innerhalb gleicher Art/Firma nach ID
       zeilen.sort((x, y) => String(x.r.person || '').localeCompare(String(y.r.person || ''), 'de'))
-      const sortiert = accSortiert(zeilen.map(z => z.a)), zu = new Map(zeilen.map(z => [z.a, z.r]))
+      let sortiert = accSortiert(zeilen.map(z => z.a)), zu = new Map(zeilen.map(z => [z.a, z.r]))
+      if(admK.payout){ const t = new Map(zeilen.map(z => [z.a, (z.po || {}).tage ?? 99]))   // Filter Payout: wer zuerst anfragbar ist, oben
+        sortiert = sortiert.map((a, i) => ({ a, i })).sort((x, y) => t.get(x.a) - t.get(y.a) || x.i - y.i).map(x => x.a) }
       $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}`
       $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
       const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
@@ -16039,7 +16069,8 @@
         const r = zu.get(a)
         const metaParts = []
         try{ const z = zielBadgeHtml(a, false); if(z) metaParts.push(z) }catch(_){}
-        try{ const p = payoutReadyBadgeHtml(a); if(p) metaParts.push(p) }catch(_){}
+        // Payout (16.10.2026): Funded CFD → „Payout ab"-Chip aus payout_ready_at (eigene Konten klickbar), sonst der allgemeine Termin-Chip
+        try{ const eigen = String(r.user_id) === String(currentUserId); const p = a.type === 'funded_cfd' ? payoutAbBadgeHtml(a, { offen: !!r.po_offen }, eigen) : payoutReadyBadgeHtml(a); if(p) metaParts.push(p) }catch(_){}
         const meta = metaParts.length
           ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
         const archBadge = r.archived
@@ -16064,6 +16095,7 @@
             <td style="padding-right:20px">${planer}</td>
           </tr>`
       }).join('')
+      tb.querySelectorAll('[data-acc-po]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); accPayoutFeldOeffnen(el.dataset.accPo) }))   // nur eigene Konten
     }
     document.querySelectorAll('.adm-k-f').forEach(el => el.addEventListener('change', admKontenRender))
     $('adm-k-search')?.addEventListener('input', admKontenRender)
@@ -33960,7 +33992,7 @@
   function persistAccounts(){ /* no-op: Supabase is source of truth */ }
 
   // ── Account-Filter State ──
-  let accFilters = { firm: '', type: '' }
+  let accFilters = { firm: '', type: '', payout: '' }   // payout: Payout anfragbar '' | jetzt | 3 | 7 | fehlt (16.10.2026)
   let accSearch = ''  // Freitext-Suche (Header-Suchbar)
 
   function populateAccountFilters(){
@@ -33979,6 +34011,10 @@
   })
   document.getElementById('acc-type-filter')?.addEventListener('change', e => {
     accFilters.type = e.target.value
+    if(typeof renderAccounts === 'function') renderAccounts()
+  })
+  document.getElementById('acc-payout-filter')?.addEventListener('change', e => {   // Payout anfragbar (16.10.2026)
+    accFilters.payout = e.target.value
     if(typeof renderAccounts === 'function') renderAccounts()
   })
 
@@ -34880,14 +34916,19 @@
     // s. ACC_TYPE_RANG), innerhalb einer Art nach Firma (06.10.2026, Finn: „nicht mal ein FundedNext-Account, mal ein
     // FundedNext-Account" — die Firmen lagen in Funded CFD durcheinander), innerhalb der Firma bisherige Reihenfolge (stabil).
     // Konten ohne Firma ans Ende ihrer Art. Der Vergleich steht seit 06.10.2026 in accSortiert (auch Echo-Prefill-Dropdown).
-    const visible = accSortiert(accounts.filter(a => {
+    // PAYOUT AB (16.10.2026): eigene Anfragen einmal je 5 min laden; Filter „Payout anfragbar" sortiert nach Tagen bis anfragbar
+    try{ poEigenSicherstellen() }catch(_){}
+    const poInfo = a => { try{ return payoutAbInfo(a, _poEigen.je.get(String(a.id))) }catch(_){ return null } }
+    let visible = accSortiert(accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
+      if(filters.payout && !payoutAbPasst(poInfo(a), filters.payout)) return false
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     }))
+    if(filters.payout) visible = visible.map((a, i) => ({ a, i, t: (poInfo(a) || {}).tage ?? 99 })).sort((x, y) => x.t - y.t || x.i - y.i).map(x => x.a)
     kwSt().sichtbar = visible.map(a => a.id)
     kwKachelMalen()
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -35062,7 +35103,10 @@
         const zielHtml = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a, true) : ''
         if(zielHtml) metaParts.push(zielHtml)
         // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
-        const payoutHtml = (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
+        // Funded CFD (16.10.2026): „Payout ab"-Chip aus demselben Feld statt des allgemeinen Termin-Chips — „in 3 T · ab 19.10." / „jetzt" /
+        // „angefragt" / „Datum fehlt" (Klick → Feld im Account-Modal)
+        const payoutHtml = a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
+          : (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
         // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
         // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
@@ -35194,6 +35238,9 @@
           if(ziel) setTimeout(() => ziel.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60)
         })
       })
+      // „Payout-Datum fehlt" → Bearbeiten, direkt am Feld „Payout anfragbar ab" (16.10.2026)
+      accEls.table.querySelectorAll('[data-acc-po]').forEach(el => el.addEventListener('click', e => {
+        e.preventDefault(); e.stopPropagation(); accPayoutFeldOeffnen(el.dataset.accPo) }))
       // Zugangsdaten-Buttons (🔑)
       accEls.table.querySelectorAll('[data-acc-cred]').forEach(btn => {
         btn.addEventListener('click', () => openCredModal(btn.dataset.accCred))
@@ -35268,6 +35315,12 @@
   /* ── Modal control ── */
   let _editingAccountId = null  // null = create mode, otherwise account id being edited
 
+  // „Payout-Datum fehlt" (16.10.2026): Account-Modal öffnen und das Feld „Payout anfragbar ab" fokussieren — nur eigene Konten
+  function accPayoutFeldOeffnen(id){
+    const acc = (accounts || []).find(x => String(x.id) === String(id)); if(!acc) return
+    openAccountModal(null, acc)
+    setTimeout(() => { const f = accEls.payoutReady; if(f && f.offsetParent){ f.scrollIntoView({ block: 'center', behavior: 'smooth' }); f.focus() } }, 80)
+  }
   function openAccountModal(prefillType, editAccount){
     _editingAccountId = editAccount?.id || null
 
@@ -44029,7 +44082,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1573'
+  const OS_TAB_BUILD = '2026-09-22.1574'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57474,6 +57527,51 @@
     const rel = tage === 0 ? 'heute' : tage === 1 ? 'morgen' : tage > 1 ? `in ${tage} Tagen`
       : tage === -1 ? 'seit gestern' : `seit ${-tage} Tagen`
     return { tag, tage, kurz, lang, rel, faellig: tage <= 0 }
+  }
+
+  /* PAYOUT AB (16.10.2026, Finn: „Bei den CFD-Accounts ist der Payout meistens in Tagen anfragbar. Ich will ein Feld/einen Filter, wann der
+   * nächste Payout anfragbar ist, damit ich weiß: hier muss der Trade jetzt gemacht werden"). Nur Funded CFD (auch Waiting for Payout).
+   * Quelle ist AUSSCHLIESSLICH Finns eigenes Feld „Payout anfragbar ab" (payout_ready_at) — Finn-Korrektur 16.10.: keine Rechnung aus
+   * Firmenregeln oder Kontoalter. Fehlt das Feld → „Payout-Datum fehlt" (Klick öffnet das Feld im Account-Modal). Offene Anfrage → „angefragt".
+   * h = { offen: bool } → { stufe: 'angefragt'|'jetzt'|'tage'|'fehlt', tage, kurz, lang } */
+  function payoutAbInfo(a, h){
+    if(!a || a.type !== 'funded_cfd') return null
+    if(h && h.offen) return { stufe: 'angefragt', tage: null }
+    const i = payoutReadyInfo(a)
+    if(!i) return { stufe: 'fehlt', tage: null }
+    return { stufe: i.faellig ? 'jetzt' : 'tage', tage: Math.max(0, i.tage), kurz: i.kurz, lang: i.lang }
+  }
+  // Chip unter dem Namen (ersetzt bei Funded CFD den allgemeinen Termin-Chip). klick = eigenes Konto → Feld im Account-Modal öffnen
+  function payoutAbBadgeHtml(a, h, klick){
+    const i = payoutAbInfo(a, h)
+    if(!i) return ''
+    const ziel = klick ? ` data-acc-po="${escapeHtml(String(a.id))}" role="button" tabindex="0"` : ''
+    if(i.stufe === 'angefragt') return '<span class="acc-po acc-po-sub" title="Payout ist angefragt (Finanzen → offene Anfragen)">💸 Payout angefragt</span>'
+    if(i.stufe === 'fehlt') return `<span class="acc-po acc-po-fehlt${klick ? ' is-klick' : ''}"${ziel} title="Kein „Payout anfragbar ab“ eingetragen${klick ? ' — Klick öffnet das Feld' : ' — im Account-Modal der ID eintragen'}">💸 Payout-Datum fehlt</span>`
+    if(i.stufe === 'jetzt') return `<span class="acc-po acc-po-jetzt" title="Payout anfragbar seit ${escapeHtml(i.lang)}">💸 Payout jetzt</span>`
+    return `<span class="acc-po acc-po-tage" title="Payout anfragbar ab ${escapeHtml(i.lang)}">💸 Payout in ${i.tage} T · ab ${i.kurz}</span>`
+  }
+  // Filter „Payout": '' alle · 'jetzt' · '3' · '7' · 'fehlt' (Datum nachtragen) → passt das Konto?
+  function payoutAbPasst(i, f){
+    if(!f) return true
+    if(!i) return false
+    if(f === 'fehlt') return i.stufe === 'fehlt'
+    if(i.stufe !== 'jetzt' && i.stufe !== 'tage') return false
+    return f === 'jetzt' ? i.stufe === 'jetzt' : i.tage <= Number(f)
+  }
+  // Eigene Konten: offene Payout-Anfragen je Konto (nur für „angefragt"), einmal je 5 min geladen
+  let _poEigen = { je: new Map(), at: 0, laeuft: false }
+  async function poEigenSicherstellen(){
+    if(!currentUserId || _poEigen.laeuft || Date.now() - _poEigen.at < 300000) return
+    _poEigen.laeuft = true
+    try{
+      const { data, error } = await supabase.from('pending_payouts').select('account_id').eq('user_id', currentUserId).eq('status', 'pending')
+      if(error) throw error
+      const je = new Map()
+      for(const x of (data || [])) if(x.account_id) je.set(String(x.account_id), { offen: true })
+      _poEigen = { je, at: Date.now(), laeuft: false }
+      if(typeof renderAccounts === 'function') renderAccounts()
+    }catch(e){ console.warn('[payout-ab] offene Anfragen', (e && e.message) || e); _poEigen.laeuft = false; _poEigen.at = Date.now() - 240000 }
   }
 
   // Zeile für die Accounts-Tabelle (meta unter dem Namen)
