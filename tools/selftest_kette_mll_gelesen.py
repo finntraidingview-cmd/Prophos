@@ -8,7 +8,8 @@ Aufruf:  python3 tools/selftest_kette_mll_gelesen.py
 Geprüft: (1) Mikes Fall → MLL 145.500 aus der Lesung, Konto lebt, Reparatur-Tag; (2) ohne Lesung: Zwischenstand zählt nicht, nur der
 Tagesschluss (150.000 → 145.500); (3) ohne Lesung, Tagesschluss 152.000 an einem beendeten Tag → 147.500; (4) Tagesschluss 152.000 NACH
 einer älteren Lesung 145.500 → 147.500; (5) laufender Handelstag zählt nicht; (6) Express-Lesung (0-basiert) fällt raus;
-(7) alte Rechnung ap_kette_mll bleibt für Aufrufer ohne Lesung erhalten."""
+(7) alte Rechnung ap_kette_mll bleibt für Aufrufer ohne Lesung erhalten; (8) ohne Lesung UND ohne Tagesschluss Rückfall auf den
+Hochpunkt max(Größe, peak, balance) − dd, Grund endet auf „— geblowt?" (16.10.2026)."""
 import os
 import sys
 from datetime import datetime, timezone
@@ -81,8 +82,26 @@ def main():
     express = [zeile(1, "2026-10-13T09:00:00+00:00", "2026-10-13T10:00:00+00:00", 0.0, 1200.0, -4500.0)]
     mll, q = f(150000, 4500, KONTO, express, jetzt)
     check(mll == 145500.0 and "Startgröße" in str(q), f"Express-Lesung −4.500 zählt nicht → MLL {mll}")
-    check(f(None, 4500, KONTO, mike, jetzt) == (None, None) and f(150000, 4500, {"id": "x", "account_type": "funded"}, mike, jetzt)[1] is not None,
-          "ohne Größe → (None, None); fremde Phase sieht Mikes Pläne nicht")
+    # fremde Phase: Mikes Lesung 145.500 wäre zahlengleich mit Startgröße − dd → die QUELLE beweist, dass sie nicht gezählt wurde
+    # (vorher „[1] is not None" — immer wahr, Prüfer S2 16.10.2026)
+    mf, qf = f(150000, 4500, {"id": "k-mike", "account_type": "funded"}, mike, jetzt)
+    check(f(None, 4500, KONTO, mike, jetzt) == (None, None) and mf == 145500.0 and "Startgröße" in str(qf) and "Lesung " not in str(qf),
+          f"ohne Größe → (None, None); fremde Phase sieht Mikes Pläne nicht ({qf})")
+
+    # (8) Rückfall ohne Lesung UND ohne Tagesschluss: alter Hochpunkt max(Größe, peak, balance) − dd (Doktrin „MLL lieber zu hoch")
+    mr, qr = f(150000, 4500, KONTO, [], jetzt, peak=152298.66, balance=147123.54)
+    check(mr == 147798.66 and "Hochpunkt" in str(qr), f"Rückfall: peak 152.299 → MLL {mr} ({qr})")
+    mb, qb = f(150000, 4500, KONTO, heute, jetzt, peak=None, balance=151000.0)
+    check(mb == 146500.0 and "Hochpunkt" in str(qb), f"Rückfall nur laufender Tag: Balance 151.000 → MLL {mb} ({qb})")
+    mo, qo = f(150000, 4500, KONTO, [], jetzt, peak=None, balance=149000.0)
+    check(mo == 145500.0 and "Startgröße" in str(qo), f"Rückfall unter der Startgröße → MLL {mo} ({qo})")
+    ml, ql = f(150000, 4500, KONTO, mike, jetzt, peak=152298.66, balance=147123.54)
+    check(ml == 145500.0 and "Lesung" in str(ql), f"Lesung geht dem Hochpunkt vor → MLL {ml}")
+    ms, qs = f(150000, 4500, KONTO, ohne, jetzt, peak=152298.66, balance=147123.54)
+    check(ms == 145500.0 and "Startgröße" in str(qs), f"Tagesschluss 147.124 geht dem Zwischenstand-Hochpunkt vor → MLL {ms}")
+    wr, gr = a["ap_konto_rechnen"](REGEL, "challenge", 147500.0, u, peak=152298.66, mll_belegt=(mr, qr))
+    check(wr is None and str(gr).endswith("— geblowt?") and "Hochpunkt" in str(gr),
+          f"Grund endet auf „— geblowt?“ (tplBdGrau kürzt) → „{gr}“")
 
     # (7) alte Rechnung unverändert
     check(a["ap_kette_mll"](150000, 4500, 152298.66, 147123.54) == 147798.66, "ap_kette_mll (Hochpunkt) rechnet wie bisher")

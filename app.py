@@ -15640,14 +15640,15 @@ def ap_kette_mll(groesse, dd, peak, balance, lock=0.0):
     return round(hoch - float(dd), 2)
 
 
-def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None):
+def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None, peak=None, balance=None):
     """REIN RECHNEND (testbar): MLL eines Topstep-Kettenkontos aus BELEGTEN Werten → (mll, quelle) | (None, None).
     Vorfall Mike …17758280 (Finn 15.10.2026, Screenshot „geblowt? Balance 147.124 auf/unter dem MLL 147.799" — TopstepX zeigt MLL
     145.500): beide Trades liefen am selben Topstep-Handelstag (12.10. 23:39 UTC +2.299 → 152.299, 13.10. 09:41 UTC −5.175), liq_peak
     nahm den ZWISCHENSTAND 152.299 als Hochpunkt. Das MLL zieht aber nur am Tagesschluss (17:00 CT) nach, nie innerhalb des Tages.
     Rangfolge: (1) die jüngste TopstepX-Lesung tv.mll_start derselben Phase (Puls liest sie bei jedem Start — „wir können es ablesen"),
     (2) darüber nur, was NACH dieser Lesung an abgeschlossenen Handelstagen belegt ist: letzter balance_end je Handelstag = Tagesschluss,
-    minus dd. Ohne Lesung: max(Größe, Tagesschlüsse) − dd. Der laufende Handelstag zählt nie (sein Schluss steht noch nicht)."""
+    minus dd. Ohne Lesung: max(Größe, Tagesschlüsse) − dd. Der laufende Handelstag zählt nie (sein Schluss steht noch nicht).
+    Weder Lesung noch Tagesschluss: wie früher ap_kette_mll aus dem Hochpunkt (peak/balance) — lieber zu hoch als zu tief."""
     if not groesse or not dd:
         return None, None
     a = acc or {}
@@ -15685,6 +15686,13 @@ def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None):
         tag, (_en, hoch) = max(schluss.items(), key=lambda x: x[1][1])
         if hoch > float(groesse):
             return round(hoch - float(dd), 2), f"gerechnet ab Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.)"
+        return round(float(groesse) - float(dd), 2), "gerechnet ab Startgröße (keine TopstepX-Lesung)"
+    # 16.10.2026 (Prüfer S2 zu .1570): ohne Lesung UND ohne Tagesschluss fiel das MLL auf Startgröße − dd — tiefer als die alte
+    # Rechnung max(Größe, peak, balance) − dd. Doktrin „MLL lieber zu hoch": SL2 darf nie hinter dem echten MLL enden, also hier
+    # wieder der alte Hochpunkt. Lesung und Tagesschlüsse gehen weiter vor (oben), Zwischenstände zählen dort nie.
+    hoch = max(float(groesse), float(peak or 0), float(balance or 0))
+    if hoch > float(groesse):
+        return round(hoch - float(dd), 2), "gerechnet aus dem Hochpunkt, ohne TopstepX-Lesung und Tagesschluss"
     return round(float(groesse) - float(dd), 2), "gerechnet ab Startgröße (keine TopstepX-Lesung)"
 
 
@@ -15708,7 +15716,8 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None, mll_bele
         mll = ap_kette_mll(groesse, float(regel.get("dd_usd") or 0), peak, balance) if daily else None
         mll_quelle = "gerechnet aus dem Hochpunkt" if mll is not None else None
     if daily and mll is not None and balance - mll <= 0:
-        return None, f"Balance {de(balance)} auf/unter dem MLL {de(mll)} ({mll_quelle}) — geblowt? Balance lesen, dann Nachplanen"
+        # „— geblowt?" muss am Ende stehen: tplBdGrau (prophos.html) schneidet genau dieses Ende ab (16.10.2026, Prüfer S2 zu .1570)
+        return None, f"Balance {de(balance)} auf/unter dem MLL {de(mll)} ({mll_quelle}), Balance lesen, dann Nachplanen — geblowt?"
     # angefressen = Reparatur-Tag (Finn 13.10.2026, Szenarienbaum bestätigt): nach jedem Verlusttag bleibt nur die Luft bis zum MLL
     # (≈ 1.725, bei Mike 1.291) — egal ob die Balance über oder unter der Startgröße liegt. Ein Trade, TP wie ein normaler Tag, SL am MLL.
     # Die alte Bedingung „nur unter der Startgröße + Ziel zurück auf 150.000" (08.10.2026) ist raus: über 150.000 lief sonst ein
@@ -16199,7 +16208,7 @@ def _ap_peaks(konten, streng=False):
         return None if streng else {}
 
 
-def _ap_kette_mlls(tripel, streng=False):
+def _ap_kette_mlls(tripel, streng=False, peaks=None):
     """konto_id → (mll, quelle) aus ap_kette_mll_belegt für die Topstep-Kette (15.10.2026, Mike …8280). tripel = [(konto, regel, balance)].
     Verlauf wie _ap_peaks (60 s Cache). streng=True: Fehler → None (Planer meldet „MLL nicht prüfbar"), sonst {}."""
     try:
@@ -16208,7 +16217,9 @@ def _ap_kette_mlls(tripel, streng=False):
         out = {}
         for a, r, b in tripel:
             groesse = ap_groesse((r or {}).get("groessen"), b) if b is not None else None
-            out[str(a["id"])] = ap_kette_mll_belegt(groesse or liq_konto_groesse(a), (r or {}).get("dd_usd"), a, verlauf)
+            # peaks/b = alter Hochpunkt, nur für den Rückfall ohne Lesung und ohne Tagesschluss (16.10.2026)
+            out[str(a["id"])] = ap_kette_mll_belegt(groesse or liq_konto_groesse(a), (r or {}).get("dd_usd"), a, verlauf,
+                                                    peak=(peaks or {}).get(str(a["id"])), balance=b)
         return out
     except Exception as e:
         print(f"[auto-plan] ⚠️ kette/mll: {type(e).__name__}: {e}", flush=True)
@@ -19195,7 +19206,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     kette_tripel = [(k["a"], k["regel"], k["bal"]) for k in kandidaten if ap_kette_regel(k["regel"])]
     peaks_kette = _ap_peaks([a for a, _r, _b in kette_tripel], streng=True) if kette_tripel else {}
     # 15.10.2026 (Mike …8280 „geblowt?" bei lebendem Konto): MLL aus der TopstepX-Lesung/Tagesschlüssen, nicht aus Zwischenständen
-    mlls_kette = (_ap_kette_mlls(kette_tripel, streng=True) if kette_tripel else {}) if peaks_kette is not None else None
+    mlls_kette = (_ap_kette_mlls(kette_tripel, streng=True, peaks=peaks_kette) if kette_tripel else {}) if peaks_kette is not None else None
     for key, liste in tranchen.items():
         rechnung, tps_tranche = [], set()
         for k in liste:

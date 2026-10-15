@@ -106,7 +106,7 @@ def main():
           and wb["kette"].get("reparatur") is True and wb["sl"] == 2700,
           f"Höchststand 152.000, jetzt 150.000 (MLL 147.500, Luft 2.500) → Reparatur-Tag, SL 2.700 ({gb or wb['kette']})")
     wg, gg = R(KETTE, "challenge", 147400.0, {"tp": 0.5, "sl": 0.5, "menge": 0.0, "puffer": 0.5}, peak=152000.0)
-    check(wg is None and gg == "Balance 147.400 auf/unter dem MLL 147.500 (gerechnet aus dem Hochpunkt) — geblowt? Balance lesen, dann Nachplanen",
+    check(wg is None and gg == "Balance 147.400 auf/unter dem MLL 147.500 (gerechnet aus dem Hochpunkt), Balance lesen, dann Nachplanen — geblowt?",
           f"Balance unter dem nachgezogenen MLL → geblowt, kein Plan ({gg})")
     # KEIN Lock mehr (Finn 13.10.2026: „Das lockt nie, immer 4,5k"): Höchststand 156.000 → MLL 151.500 (vorher 150.000)
     check(a["ap_kette_mll"](150000, 4500, None, 150000) == 145500.0 and a["ap_kette_mll"](150000, 4500, 156000, 151000) == 151500.0
