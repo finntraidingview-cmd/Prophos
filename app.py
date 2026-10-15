@@ -7656,10 +7656,72 @@ def admin_vorrat():
         if r.status_code == 404:
             return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
         _sb_pruefen(r)
+        _mp_cache.pop(ziel_uid, None)          # Muster-Portfolio (16.10.2026): Tacho zeigt den neuen Status sofort
         return jsonify({"ok": True, "user_id": ziel_uid, "firma": firma, "status": status})
     except Exception as e:
         print(f"[vorrat] ⚠️ POST: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
+
+# MUSTER-PORTFOLIO (16.10.2026, Finn: „Ich will, dass es ein Muster-Portfolio gibt — Portfolio an Accounts pro Prop-ID, jedes Portfolio
+# orientiert sich daran … in jeder Gruppe wie ein Tacho im Auto, wie viel man vom Muster-Portfolio bei dieser Firma schon erreicht hat").
+# Kein neues Wissen: Muster = die Vorrat-Ziele (vorrat_ziele, EIN Satz für jede ID), Status = Sperr-Matrix (vorrat_matrix frei/pausiert/
+# gesperrt), Zahlen = vorrat2_zelle für genau diese ID (nur_uid). gesichert = bestand_echt (Funded CFD inkl. Waiting / WD-Plus, ohne
+# anteilig gezählte Futures-Funded) gegen die Untergrenze, gedeckelt 100 %; erwartet = abdeckung (mit dem Funnel nach der Kaufregel).
+# 60 s je ID gemerkt — die Accounts-Seite fragt bei jedem Öffnen, die Rechnung holt alle Konten; ein Status-Klick leert den Merker.
+_mp_cache = {}
+MP_CACHE_S = 60
+
+
+def muster_portfolio_zeilen(zellen, ziele):
+    """REIN RECHNEND (testbar): vorrat2-Zellen EINER ID → Tacho-Zeilen je Firma in Ziel-Reihenfolge.
+    → [{firma, status, art, einheit, soll, gesichert, gesichert_pct, erwartet_pct, unterwegs_n, sperre}] — pct 0–100 oder None ohne Ziel."""
+    out = []
+    for z in zellen:
+        ziel = ziele.get(z.get("firma")) or {}
+        soll = float(z.get("untergrenze") or 0)
+        ges = float(z.get("bestand_echt") or 0)
+        abd = z.get("abdeckung")
+        g_pct = round(100 * min(1.0, ges / soll), 1) if soll > 0 else None
+        e_pct = round(100 * min(1.0, float(abd)), 1) if (soll > 0 and isinstance(abd, (int, float))) else None
+        if g_pct is not None and e_pct is not None and e_pct < g_pct:
+            e_pct = g_pct                      # erwartet enthält den Bestand — nie unter gesichert anzeigen
+        out.append({"firma": z.get("firma"), "status": z.get("status") or "frei", "art": ziel.get("art"),
+                    "typen": ziel.get("typen") or [], "einheit": "Stück" if ziel.get("art") == "stueck" else "USD", "soll": soll, "gesichert": round(ges, 2),
+                    "gesichert_pct": g_pct, "erwartet_pct": e_pct, "unterwegs_n": z.get("unterwegs_n"), "sperre": z.get("sperre"),
+                    "reihe": ziel.get("reihe")})
+    return sorted(out, key=lambda x: (float(x.get("reihe") or 0), str(x["firma"])))
+
+
+@app.route("/admin/muster-portfolio", methods=["GET", "OPTIONS"])
+def admin_muster_portfolio():
+    """GET ?user_id= (Standard: der eigene Login) → Tacho-Zeilen je Firma des Muster-Portfolios für diese ID. Schalten läuft über
+    POST /admin/vorrat {user_id, firma, status} (dieselbe Sperr-Matrix, derselbe Rechte-Check)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _wd_login()
+    if err:
+        return err
+    ziel_uid = str(request.args.get("user_id") or uid).strip().lower()
+    if not re.match(r"^[0-9a-f-]{36}$", ziel_uid):
+        return jsonify({"error": "user_id ungültig"}), 400
+    if ziel_uid != uid and not _admin_darf_uid(ziel_uid):
+        return jsonify({"error": "nur IDs der eigenen Gruppe" if _admin_verwalter() else "nur eigene ID"}), 403
+    darf = ziel_uid == uid or _admin_darf_uid(ziel_uid)
+    c = _mp_cache.get(ziel_uid)
+    if c and time.time() - c[0] < MP_CACHE_S:
+        return jsonify(dict(c[1], darf_schalten=darf))
+    try:
+        ziele, _m, _e, bereit = _vorrat_tabellen()
+        if not bereit:
+            return jsonify({"error": f"SQL noch nicht eingespielt ({VORRAT_SQL})"}), 503
+        erg = vorrat2_rechnen_lauf("hand", nur_uid=ziel_uid)
+        antwort = {"user_id": ziel_uid, "gerechnet_um": erg.get("gerechnet_um"),
+                   "firmen": muster_portfolio_zeilen(erg.get("zellen") or [], ziele)}
+        _mp_cache[ziel_uid] = (time.time(), antwort)
+        return jsonify(dict(antwort, darf_schalten=darf))
+    except Exception as e:
+        print(f"[muster] ⚠️ GET {ziel_uid[:8]}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"{type(e).__name__}: {e}"[:300]}), 500
 
 # ════════════════════════════════════════════════════════════════════════════
 # VORRAT STUFE 2 (06.10.2026, Finn über den Master): Bestehens-Chance je Konto und Kette, sicherer Bestand gewichtet
@@ -9096,8 +9158,10 @@ def _vorrat2_bestellungen():
         raise
 
 
-def vorrat2_rechnen_lauf(quelle):
-    """Ein Lauf: Daten holen, je freier Zelle rechnen, Totband gegen den letzten Lauf, Ergebnis in vorrat_lauf. → Lauf-Zeile."""
+def vorrat2_rechnen_lauf(quelle, nur_uid=None):
+    """Ein Lauf: Daten holen, je freier Zelle rechnen, Totband gegen den letzten Lauf, Ergebnis in vorrat_lauf. → Lauf-Zeile.
+    nur_uid (Muster-Portfolio 16.10.2026): nur die Zellen dieser einen ID, ohne die ohne_ids-Liste der Vorrat-Seite — der Tacho gilt
+    für jede ID (Finn: „jedes Portfolio orientiert sich daran"), auch für die, die aus der Kauf-Rechnung raus sind. Schreibt nichts."""
     jetzt = datetime.now(timezone.utc)
     jetzt_iso = jetzt.isoformat()
     firmen_regeln, param, ohne_ids, bereit = _vorrat2_tabellen()
@@ -9105,7 +9169,7 @@ def vorrat2_rechnen_lauf(quelle):
         raise RuntimeError(f"SQL noch nicht eingespielt ({VORRAT2_SQL})")
     b = _admin_basis()
     accounts, archived, arch_info = b["accounts"], b["archived"], b.get("arch_info") or {}
-    excluded_ids = b["excluded_ids"] | ohne_ids
+    excluded_ids = b["excluded_ids"] | (set() if nur_uid else ohne_ids)
     ziele, matrix, ein, _ = _vorrat_tabellen()
     try:
         ziele_ext = {_firm_norm(z.get("firma")): z for z in sb_select("vorrat_ziele", {"select": "firma,kauf_groesse"})}
@@ -9149,7 +9213,7 @@ def vorrat2_rechnen_lauf(quelle):
     je = {}
     for a in accounts:
         aid, uid = str(a["id"]), str(a.get("user_id"))
-        if (a.get("account_type") or "") == "live" or uid in excluded_ids or aid in archived:
+        if (a.get("account_type") or "") == "live" or uid in excluded_ids or aid in archived or (nur_uid and uid != nur_uid):
             continue
         firma = _firm_norm(a.get("firm"))
         if firma not in ziele:
@@ -9171,7 +9235,7 @@ def vorrat2_rechnen_lauf(quelle):
         for k in l_:
             k["peak"] = peaks.get(str(k["_a"].get("id")))
             k.pop("_a", None)
-    uids = sorted((set(b["names"]) | {u for u, _ in je}) - excluded_ids)
+    uids = [nur_uid] if nur_uid else sorted((set(b["names"]) | {u for u, _ in je}) - excluded_ids)
     # Totband-Vorlauf: letzte fertige Zeile
     try:
         alt = (sb_select("vorrat_lauf", {"select": "id,ergebnis", "ergebnis": "not.is.null", "order": "at.desc,id.desc", "limit": "1"})
@@ -16721,6 +16785,38 @@ AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
 AP_GRUND_EXT = "External ID fehlt (Tradovate-Unterkonto) — unter Accounts eintragen"
+AP_GRUND_GESPERRT = "Firma bei dieser ID gesperrt (Muster-Portfolio) — unter Accounts am Tacho freischalten"
+AP_GRUND_PAUSIERT = "Firma bei dieser ID pausiert (Muster-Portfolio) — unter Accounts am Tacho auf Aktiv stellen"
+# EIN Schalter (Master 16.10.2026, offen bei Finn): pausiert stoppt standardmäßig nur den Nachkauf (Vorrat), laufende Konten werden weiter
+# geplant. True = pausiert stoppt auch neue Auto-Pläne für ALLE Konten der Firma bei dieser ID (gesperrt wirkt nur auf neue Konten).
+MP_PAUSIERT_STOPPT_TRADES = False
+
+
+def _ap_sperren():
+    """Muster-Portfolio (16.10.2026): gesperrte (mit MP_PAUSIERT_STOPPT_TRADES auch pausierte) Zellen der Sperr-Matrix →
+    {(user_id, firma_norm): (status, geaendert_at datetime|None)}. Fehler/Tabelle fehlt → {} (der Planer läuft wie bisher, nie stehen bleiben)."""
+    try:
+        rows = _sb_all("vorrat_matrix", {"select": "user_id,firma,status,geaendert_at",
+                                         "status": "in.(gesperrt,pausiert)" if MP_PAUSIERT_STOPPT_TRADES else "eq.gesperrt"})
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Sperr-Matrix: {type(e).__name__}: {e}", flush=True)
+        return {}
+    return {(str(r.get("user_id")), _firm_norm(r.get("firma"))): (r.get("status"), _ap_ts(r.get("geaendert_at"))) for r in rows}
+
+
+def ap_firma_gesperrt(a, sperren):
+    """REIN RECHNEND: Grund, warum der Planer das Konto wegen der Sperr-Matrix auslässt, sonst None. Master-Entscheid 16.10.2026:
+    gesperrt = kein Auto-Plan für NEUE Konten dieser Firma — Konten, die vor der Sperre schon da waren, laufen weiter (ein Klick am Tacho
+    soll keinen laufenden Weg abschneiden; ohne Zeitstempel an Sperre oder Konto: gesperrt). pausiert steht nur mit
+    MP_PAUSIERT_STOPPT_TRADES in sperren und hält dann jedes Konto der Firma an."""
+    e = sperren.get((str(a.get("user_id")), _firm_norm(a.get("firm"))))
+    if not e:
+        return None
+    status, seit = e
+    if status == "pausiert":
+        return AP_GRUND_PAUSIERT
+    neu = _ap_ts(a.get("created_at"))
+    return None if (seit and neu and neu < seit) else AP_GRUND_GESPERRT
 AP_GRUND_BAL_LIVE = "Balance nicht live — erst lesen"
 AP_GRUND_BAL_FEHLER = "Balance-Prüfung gerade nicht möglich — gleich noch mal versuchen"
 
@@ -18984,6 +19080,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     if _gehandelt is not None and _ohne_bal:
         _zwillinge = _ap_login_zwillinge([a for a in konten if str(a["id"]) in set(map(str, _ohne_bal))])
         _gehandelt = None if _zwillinge is None else (_gehandelt | _zwillinge)
+    sperren = _ap_sperren()
     ausgelassen, kandidaten = [], []
     for a in konten:
         aid, wer = str(a["id"]), namen.get(str(a["user_id"]), str(a["user_id"])[:8])
@@ -18999,6 +19096,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             continue                                   # Topstep Express/XFA (Finn 07.10.2026: nur Combine im Auto-Plan), keine Meldung
         if a.get("auto_planer") is False:              # Haken im Konto aus (Finn 08.10.2026, accounts.auto_planer) — sichtbar ausgelassen
             ausgelassen.append(dict(zeile, grund="vom Auto-Planer ausgenommen (Haken im Konto aus)"))
+            continue
+        _sp = ap_firma_gesperrt(a, sperren)           # Muster-Portfolio (16.10.2026): Firma bei der ID gesperrt/pausiert — sichtbar ausgelassen
+        if _sp:
+            ausgelassen.append(dict(zeile, grund=_sp))
             continue
         # ZIEL ERREICHT = NIE PLANEN (Finn 12.10.2026: „Wenn ein Account als Ziel erreicht ist, dann soll dort nie im Leben ein Trade geplant
         # werden"): Markierung der Ziel-Wache zählt vor jeder Balance-Rechnung — ein falscher Startwert oder eine alte Lesung kann sie nicht
