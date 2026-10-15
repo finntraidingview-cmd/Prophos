@@ -44022,7 +44022,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1564'
+  const OS_TAB_BUILD = '2026-09-22.1565'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44728,6 +44728,21 @@
           ? await window.mtcApi('tsx-konto', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ext_id: extId, firma: firmName, symbol, richtung: dir, volumen: lots,
               tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null, scharf: true, plan_id: String(plan.id) }) })
           : await window.mtcApi('tv-konto', { method:'POST', headers:{'Content-Type':'application/json'}, body: _tvBody })
+        // BACKEND WEG ZUR STARTZEIT (.1565, Routine Puls-Fehler 15.10.2026, Finn 14.10. 23:30 Dubai zu Frage 16 — Muster „pc: lokales backend
+        // nicht erreichbar (typeerror: failed to fetch)", 2 Fälle in 7 min auf einem PC, beide Pläne blieben „planned" mit verstrichener
+        // Startzeit): fetch warf (TypeError → _nichtGesendet), also beweisbar nichts gesendet — das Panel startet gerade neu (~15 s) oder der
+        // Autostart kommt noch. Nur zur Startzeit (vonStartUm): statt den Start sofort als Fehlstart zu verbrauchen (Claim gesetzt, sfTick
+        // erst 15 min später), 2–3 min gestreut warten und erneut anklopfen, höchstens ~5 min seit Beginn; danach wie bisher „Lokales Backend
+        // nicht erreichbar". Karten-Klick und Signal vom Mac bekommen die Meldung sofort (der Mac wartet auf die Antwort, am PC sitzt jemand).
+        // _tpOrbitLaeuft bleibt gesetzt: fällige Pläne dieses PCs warten in der Schlange — ohne Backend könnte ohnehin keiner starten.
+        const backendWeg = !!(r && !r.ok && r._nichtGesendet)
+        if(backendWeg && !fern && opts && opts.vonStartUm && Date.now() - _tvT0 < 240000){
+          const sekW = Math.round((Date.now() - _tvT0) / 1000)
+          console.warn(`[orbit] Lokales Backend nicht erreichbar (${String(r.error || '').slice(0, 80)}) — neuer Versuch in 2–3 min (${sekW}s)`)
+          if(imPopup) _pfSet('ob-order', 'warn', `⏳ Lokales Backend nicht erreichbar — Puls wartet 2–3 min und klopft erneut an… (${sekW}s)`)
+          await new Promise(res => setTimeout(res, 120000 + Math.random() * 60000))
+          continue
+        }
         const beschaeftigt = !!(r && !r.ok && !r._httpFail && (r.code === 'puls_beschaeftigt' || /schon ein TradingView-Lauf/i.test(String(r.msg || ''))))
         if(!beschaeftigt || Date.now() - _tvT0 > 150000) break
         const sek = Math.round((Date.now() - _tvT0) / 1000)

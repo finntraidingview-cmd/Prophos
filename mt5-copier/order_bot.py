@@ -19687,9 +19687,85 @@ def _cdp_ticket_taub_spur(s, el, name, trail):
                  f"Dialoge {d.get('dialoge')}")
 
 
-def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
+def _cdp_ticket_neu_oeffnen(s, opts, trail):
+    """Taubes Ticket per Shift+T ZU und wieder AUF — Beweis ticket.da weg → da. Nur dann (st, "neu"), sonst (None, grund) und der Abbruch
+    bleibt wie er ist. Jede Pause über _warte, Chart-Klick mit Hover-Beweis wie beim Öffnen oben, Shift+T nie in ein Eingabefeld.
+    ANLASS (Routine „Puls-Fehler" 15.10.2026, Finn 14.10.2026 23:30 Dubai zu Frage 17, Antwort (b): „JETZT bauen"): Muster „ticket: seite
+    steht nicht auf sell ('buy # nqz6 market', # versuche)" + „ticket: units stehen nicht auf # (feld: '#')" — 4 Fälle in 24 h auf 4 PCs
+    (13.10. 23:11, 14.10. 05:46, 12:41, 13:10 UTC), alle direkt nach einem Konto-Wechsel: Hover, Fenster und Feld-Fokus bewiesen, Klick und
+    Getipptes kamen nicht an, im Ticket stand jedes Mal der Wert der vorigen Order; derselbe Plan lief Minuten später bzw. nach Shift+T
+    mit frischem Ticket (23:31) durch. Shift+T ist ein UMSCHALTER: schließt es das Ticket nicht (ticket.da bleibt), KEIN zweiter Druck.
+    Broker-Panel maximiert (Konto-Schritt)? Erst „Restore panel", sonst läge unter dem Chart-Punkt die Positions-Tabelle — ohne freien
+    Chart kein Klick und keine Taste (im fokussierten Feld würde Shift+T ein „T" tippen)."""
+    def da(st_):
+        t_ = st_.get("ticket") if isinstance(st_, dict) and isinstance(st_.get("ticket"), dict) else {}
+        return bool(t_.get("da")) or bool(isinstance(st_, dict) and st_.get("kauf_knopf"))
+    if hasattr(s, "werbung_weg"):
+        s.werbung_weg()
+    g = s.lese_js(WIN_GEO_JS) or {}
+    bw, bh = float(g.get("innerWidth") or 0), float(g.get("innerHeight") or 0)
+    pl = s.lese_js(CDP_PANEL_LAGE_JS)
+    mk = pl.get("max_knopf") if isinstance(pl, dict) and isinstance(pl.get("max_knopf"), dict) else None
+    restored = False
+    if mk and cdp_rect(mk) and re.search(r"restore|wiederherst", str(mk.get("aria") or ""), re.I):
+        gedrueckt = bool(s.klick(cdp_rect(mk), "Broker-Panel wiederherstellen (Restore panel) — Chart für Shift+T frei"))
+        for _ in range(5 if gedrueckt else 0):     # Treffer ≠ Wirkung: Knopf heißt wieder „Maximize"?
+            _warte(0.6, 0.3)
+            pl2 = s.lese_js(CDP_PANEL_LAGE_JS) or {}
+            mk2 = pl2.get("max_knopf") if isinstance(pl2, dict) and isinstance(pl2.get("max_knopf"), dict) else {}
+            if re.search(r"maxim", str(mk2.get("aria") or ""), re.I) and not re.search(r"restore|wiederherst", str(mk2.get("aria") or ""), re.I):
+                restored = True
+                break
+        if not restored:
+            trail.append("Ticket neu öffnen: „Restore panel“ " + ("ohne Wirkung" if gedrueckt else "nicht gedrückt") + " — Chart nicht frei, kein Shift+T")
+            return None, "chart_nicht_frei"
+        g = s.lese_js(WIN_GEO_JS) or {}
+        bw, bh = float(g.get("innerWidth") or 0), float(g.get("innerHeight") or 0)
+    if not (bw > 200 and bh > 200):
+        trail.append("Ticket neu öffnen: Fenstergröße nicht lesbar — kein Chart-Klick, kein Shift+T")
+        return None, "fenster_unbekannt"
+    # mittig-links im oberen Chart-Drittel: weit weg von BUY/SELL oben links und vom Broker-Panel unten (wie beim Öffnen)
+    s.klick([bw * 0.35 - 10, bh * 0.35 - 10, 20.0, 20.0], "Chart (Fokus für Shift+T, Ticket zu)")
+    _warte(0.25, 0.15)
+    s.taste("t", 8)
+    st, zu = None, False
+    for _ in range(6):
+        _warte(0.5, 0.25)
+        st = s.stand(opts)
+        if not da(st):
+            zu = True
+            break
+    if not zu:
+        trail.append("Ticket neu öffnen: Shift+T hat das Ticket nicht geschlossen (ticket.da bleibt) — kein zweiter Druck (Umschalter)")
+        return None, "nicht_zu"
+    trail.append("Taubes Ticket per Shift+T geschlossen (bewiesen: ticket.da weg)")
+    s.klick([bw * 0.35 - 10, bh * 0.35 - 10, 20.0, 20.0], "Chart (Fokus für Shift+T, Ticket auf)")
+    _warte(0.25, 0.15)
+    s.taste("t", 8)
+    auf = False
+    for _ in range(8):
+        _warte(0.6, 0.3)
+        st = s.stand(opts)
+        if da(st):
+            auf = True
+            break
+    if restored:
+        # NICHT wieder maximieren (wie beim Öffnen oben, Live-Befund 01.10.2026): höchstens „Open panel" in normaler Höhe
+        s._panel_max_versucht, s._panel_open_versucht = True, False
+        if _cdp_panel_aufklappen(s, trail)[0] == "aufgeklappt":
+            st = s.stand(opts)
+    if not auf:
+        trail.append("Ticket neu öffnen: ging nach Shift+T nicht wieder auf (ticket.da bleibt weg)")
+        return None, "nicht_auf"
+    trail.append("Ticket per Shift+T neu geöffnet (bewiesen: ticket.da weg → da) — genau EIN neuer Durchlauf mit allen Beweisen")
+    return st, "neu"
+
+
+def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
     """Ticket im Puls-Chrome füllen und jeden Wert zurücklesen — K2 und K3 gemeinsam (29.09.2026 unverändert aus
-    modus_tvkette_cdp herausgezogen). KEIN Klick auf den Senden-Knopf. -> (ok, code, msg, schritt, st, knopf)"""
+    modus_tvkette_cdp herausgezogen). KEIN Klick auf den Senden-Knopf. -> (ok, code, msg, schritt, st, knopf)
+    _neu (15.10.2026): zweiter Durchlauf nach _cdp_ticket_neu_oeffnen — nimmt das Ticket die bewiesene Eingabe wieder nicht an, wird nicht
+    noch einmal neu geöffnet (genau EIN neuer Durchlauf, Finn 14.10.2026 23:30)."""
     ziel = tv_symbol_root(symbol)
 
     def ticket():
@@ -19820,7 +19896,13 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
         st = s.stand(opts)
     if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
         _cdp_ticket_taub_spur(s, ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen"), f"Seite {plan['richtung'].upper()}", trail)
-        return False, "ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}', 3 Versuche).", "ticket", st, None
+        # TAUBES TICKET (15.10.2026, Frage 17 (b)): die Seite steht nach drei bewiesenen Klicks noch auf dem Vorgänger → Ticket per Shift+T
+        # zu und wieder auf (Beweis ticket.da weg → da), dann genau EIN neuer Durchlauf. Riegel unverändert: ohne Beweis kein Druck.
+        if not _neu:
+            st_neu, _g = _cdp_ticket_neu_oeffnen(s, opts, trail)
+            if st_neu is not None:
+                return _cdp_ticket_fuellen(s, st_neu, plan, symbol, opts, trail, _neu=True)
+        return False, "ticket", f"Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text') or '-'}', 3 Versuche" + (", auch nach Neu-Öffnen per Shift+T" if _neu else "") + ").", "ticket", st, None
     trail.append(f"Seite = {plan['richtung'].upper()}")
     # --- Order-Typ Market
     m_, aktiv_ = cdp_ticket_typ_market(ticket().get("typen"))
@@ -19834,6 +19916,8 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
             return False, "ticket", "Reiter Market ist nach dem Klick nicht aktiv.", "ticket", st, None
     trail.append("Typ = Market")
 
+    units_vorher = []   # 15.10.2026: Ausgangswert — steht er nach allen Tipps unverändert drin, ist das Ticket taub (Frage 17)
+
     def units_setzen():
         nonlocal st
         mg = ticket().get("menge") if isinstance(ticket().get("menge"), dict) else {}
@@ -19842,6 +19926,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
         if not cdp_rect(mg):
             return False
         trail.append(f"Units vorher: '{mg.get('wert')}'")   # 14.10.2026: Ausgangswert in die Spur (Ursache „soll + 1" finden)
+        units_vorher.append(mg.get("wert"))
         for _v in range(2):
             s.feld_setzen(cdp_rect(mg), str(plan["menge"]), "Units", versuch=_v)
             _warte(0.4, 0.2)
@@ -19870,7 +19955,14 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail):
 
     if not units_setzen():
         _cdp_ticket_taub_spur(s, ticket().get("menge"), "Units", trail)
-        return False, "ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}').", "ticket", st, None
+        # TAUBES TICKET (15.10.2026, Frage 17 (b)): nur wenn im Feld nach allen Tipps noch GENAU der Ausgangswert steht (Vorgänger-Order,
+        # „'5' statt 4") — ein anderer Wert (z. B. angehängte Ziffern) ist kein taubes Ticket und bleibt der Abbruch wie bisher.
+        _wert_jetzt = (ticket().get("menge") or {}).get("wert")
+        if not _neu and units_vorher and cdp_zahl(_wert_jetzt) is not None and cdp_zahl(_wert_jetzt) == cdp_zahl(units_vorher[0]):
+            st_neu, _g = _cdp_ticket_neu_oeffnen(s, opts, trail)
+            if st_neu is not None:
+                return _cdp_ticket_fuellen(s, st_neu, plan, symbol, opts, trail, _neu=True)
+        return False, "ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}'" + (", auch nach Neu-Öffnen per Shift+T" if _neu else "") + ").", "ticket", st, None
     trail.append(f"Units = {plan['menge']}")
     # --- TP / SL: Schalter + Wert (Einheit $)
     for schl, name, soll in (("tp", "Take profit", plan["tp"]), ("sl", "Stop loss", plan["sl"])):

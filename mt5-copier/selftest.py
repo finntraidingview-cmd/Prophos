@@ -3352,6 +3352,107 @@ def test_puls_cdp_login():
     chk(q_tf.count("_cdp_ticket_taub_spur(") == 2 and q_tf.index("_cdp_ticket_taub_spur(s, ticket().get(\"kaufen\"") < q_tf.index("Seite steht nicht auf {plan['richtung'].upper()} ('{knopf().get('text')")
         and q_tf.index("_cdp_ticket_taub_spur(s, ticket().get(\"menge\")") < q_tf.index("Units stehen nicht auf {plan['menge']}"),
         "Ticket: Seite- und Units-Abbruch schreiben vorher die Diagnose-Zeile, Meldungstext unverändert")
+    # 15.10.2026 (Frage 17, Finn (b) „JETZT bauen"): taubes Ticket → per Shift+T zu und wieder auf (Beweis ticket.da weg → da), dann genau
+    # EIN neuer Durchlauf; Shift+T ist Umschalter → schließt es nicht, kein zweiter Druck; ohne freien Chart keine Taste
+    class _SN:
+        def __init__(self, zu=True, auf=True, maxi=False, restore_wirkt=True):
+            self.offen, self.zu, self.auf, self.maxi, self.restore_wirkt = True, zu, auf, maxi, restore_wirkt
+            self.tasten, self.klicks, self.werbung = [], [], 0
+        def werbung_weg(self, zwang=False):
+            self.werbung += 1
+            return 0
+        def lese_js(self, a, timeout=8):
+            if "innerWidth" in a:
+                return {"innerWidth": 1600, "innerHeight": 1000}
+            return {"max_knopf": {"rect": [1240, 0, 38, 38], "aria": "Restore panel" if self.maxi else "Maximize panel"}}
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n.startswith("Broker-Panel wiederherstellen") and self.restore_wirkt:
+                self.maxi = False
+            return True
+        def taste(self, k, modifiers=0):
+            self.tasten.append((k, modifiers))
+            if len(self.tasten) == 1 and self.zu:
+                self.offen = False
+            elif len(self.tasten) == 2 and self.auf:
+                self.offen = True
+        def stand(self, opts=None):
+            return {"ticket": {"da": self.offen}, "kauf_knopf": {"text": "Buy 3 NQZ6 MARKET"} if self.offen else {}}
+    alt_auf = ob._cdp_panel_aufklappen
+    ob._warte = lambda a_, b_: None
+    ob._cdp_panel_aufklappen = lambda s_, t_, **k_: ("ok", None)
+    try:
+        n1, t1 = _SN(), []
+        r1 = ob._cdp_ticket_neu_oeffnen(n1, {}, t1)
+        n2, t2 = _SN(zu=False), []
+        r2 = ob._cdp_ticket_neu_oeffnen(n2, {}, t2)
+        n3, t3 = _SN(auf=False), []
+        r3 = ob._cdp_ticket_neu_oeffnen(n3, {}, t3)
+        n4, t4 = _SN(maxi=True), []
+        r4 = ob._cdp_ticket_neu_oeffnen(n4, {}, t4)
+        n5, t5 = _SN(maxi=True, restore_wirkt=False), []
+        r5 = ob._cdp_ticket_neu_oeffnen(n5, {}, t5)
+    finally:
+        ob._warte, ob._cdp_panel_aufklappen = alt_w, alt_auf
+    chk(r1[1] == "neu" and isinstance(r1[0], dict) and n1.tasten == [("t", 8), ("t", 8)] and n1.werbung == 1
+        and n1.klicks == ["Chart (Fokus für Shift+T, Ticket zu)", "Chart (Fokus für Shift+T, Ticket auf)"]
+        and any("geschlossen (bewiesen: ticket.da weg)" in z for z in t1) and any("neu geöffnet (bewiesen: ticket.da weg → da)" in z for z in t1),
+        f"Ticket neu öffnen: Chart-Klick, Shift+T zu (Beweis), Chart-Klick, Shift+T auf (Beweis) ({n1.klicks}, {n1.tasten})")
+    chk(r2 == (None, "nicht_zu") and n2.tasten == [("t", 8)] and any("kein zweiter Druck" in z for z in t2)
+        and r3 == (None, "nicht_auf") and n3.tasten == [("t", 8), ("t", 8)] and any("nicht wieder auf" in z for z in t3),
+        f"Ticket neu öffnen: schließt Shift+T nicht → EIN Druck, Ende; geht es nicht wieder auf → ehrlich None ({n2.tasten}, {t3[-1][:50]})")
+    chk(r4[1] == "neu" and n4.klicks[0].startswith("Broker-Panel wiederherstellen") and len(n4.tasten) == 2
+        and r5 == (None, "chart_nicht_frei") and n5.tasten == [] and n5.klicks == ["Broker-Panel wiederherstellen (Restore panel) — Chart für Shift+T frei"]
+        and any("Chart nicht frei, kein Shift+T" in z for z in t5),
+        f"Ticket neu öffnen: Panel maximiert → erst Restore; ohne Wirkung kein Chart-Klick und keine Taste ({n4.klicks[:1]}, {n5.tasten})")
+    # Einbau in _cdp_ticket_fuellen: Seite taub → EIN Neu-Öffnen, dann noch einmal alles; danach Abbruch mit Zusatz, nie ein drittes Mal.
+    # Units: nur wenn GENAU der Ausgangswert stehen bleibt (Vorgänger-Order), ein anderer Wert → Abbruch wie bisher, kein Neu-Öffnen
+    class _STaub:
+        def __init__(self, seite_kommt, menge_nach):
+            self.seite, self.menge, self.seite_kommt, self.menge_nach, self.klicks, self.tasten = "buy", "3", seite_kommt, menge_nach, [], []
+        def stand(self, opts=None):
+            return {"ticket": {"da": True, "symbol": "NQZ6", "seite": self.seite, "kaufen": {"rect": [1540, 230, 90, 40]}, "verkaufen": {"rect": [1340, 230, 90, 40]},
+                               "typen": [{"id": "market", "aria-selected": "true"}], "menge": {"wert": self.menge, "rect": [1400, 300, 120, 30]}},
+                    "kauf_knopf": {"symbol": "NQZ6", "seite": self.seite, "text": f"{self.seite.title()} {self.menge} NQZ6 MARKET", "rect": [1340, 820, 280, 50]}}
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n.startswith("Seite SELL") and self.seite_kommt:
+                self.seite = "sell"
+            return True
+        def fokus_im(self, r, n, versuche=3): return True
+        def feld_setzen(self, r, text, name, versuch=0): self.menge = self.menge_nach
+        def taste(self, k, modifiers=0): self.tasten.append(k)
+        def lese_js(self, a, timeout=8): return {}
+    alt_neu = ob._cdp_ticket_neu_oeffnen
+    neu_rufe = []
+    ob._cdp_ticket_neu_oeffnen = lambda s_, o_, t_: (neu_rufe.append(1), (s_.stand(), "neu"))[1]
+    ob._warte = lambda a_, b_: None
+    try:
+        sa, ta = _STaub(False, "3"), []
+        ra = ob._cdp_ticket_fuellen(sa, sa.stand(), {"richtung": "sell", "menge": 2, "tp": None, "sl": None}, "NQZ6", {}, ta)
+        n_a = len(neu_rufe); del neu_rufe[:]
+        sb, tb = _STaub(True, "3"), []
+        rb = ob._cdp_ticket_fuellen(sb, sb.stand(), {"richtung": "sell", "menge": 2, "tp": None, "sl": None}, "NQZ6", {}, tb)
+        n_b = len(neu_rufe); del neu_rufe[:]
+        sc, tc = _STaub(True, "32"), []
+        rc = ob._cdp_ticket_fuellen(sc, sc.stand(), {"richtung": "sell", "menge": 2, "tp": None, "sl": None}, "NQZ6", {}, tc)
+        n_c = len(neu_rufe); del neu_rufe[:]
+    finally:
+        ob._warte, ob._cdp_ticket_neu_oeffnen = alt_w, alt_neu
+    chk(n_a == 1 and ra[0] is False and ra[1] == "ticket" and ra[2].startswith("Seite steht nicht auf SELL (") and "auch nach Neu-Öffnen per Shift+T" in ra[2]
+        and sum(1 for k in sa.klicks if k.startswith("Seite SELL")) == 6 and sum(1 for z in ta if "Ticket nimmt die Eingabe nicht an" in z) == 2,
+        f"Ticket taub (Seite): EIN Neu-Öffnen, zweiter Durchlauf mit 3 neuen Klicks, dann Abbruch mit Zusatz — nie ein drittes Mal ({n_a}, {ra[2][:70]})")
+    chk(n_b == 1 and rb[0] is False and rb[2].startswith("Units stehen nicht auf 2 (Feld: '3'") and "auch nach Neu-Öffnen per Shift+T" in rb[2]
+        and "Tab" in sb.tasten and sum(1 for z in tb if "Units vorher: '3'" in z) == 2,
+        f"Ticket taub (Units bleiben auf dem Vorgänger-Wert): EIN Neu-Öffnen, dann Abbruch mit Zusatz ({n_b}, {rb[2][:70]})")
+    chk(n_c == 0 and rc[0] is False and rc[2] == "Units stehen nicht auf 2 (Feld: '32')." ,
+        f"Units ändern sich auf einen anderen Wert → kein taubes Ticket, kein Neu-Öffnen, Abbruch wie bisher ({n_c}, {rc[2]})")
+    q_tf2 = _i.getsource(ob._cdp_ticket_fuellen)
+    chk(q_tf2.count("_cdp_ticket_neu_oeffnen(s, opts, trail)") == 2 and q_tf2.count("_neu=True)") == 2 and q_tf2.count("if not _neu") == 2
+        and all(q_tf2.index("_cdp_ticket_taub_spur(", i_) < q_tf2.index("_cdp_ticket_neu_oeffnen(s, opts, trail)", i_) for i_ in (0, q_tf2.index("Units stehen nicht auf") - 1200))
+        and "klick(cdp_rect(kk" not in _i.getsource(ob._cdp_ticket_neu_oeffnen) and "_warte(" in _i.getsource(ob._cdp_ticket_neu_oeffnen)
+        and "time.sleep" not in _i.getsource(ob._cdp_ticket_neu_oeffnen),
+        "Ticket taub: Neu-Öffnen nur nach der Diagnose-Zeile, an beiden Abbrüchen, mit _neu-Riegel; Helfer klickt nie Senden, wartet nur über _warte")
     # 14.10.2026 (Muster „konto: konto-umschalter nicht gedrückt (klick ohne beweis, zweimal)" — „Puls-Chrome kommt nicht in den Vordergrund",
     # 3 PCs/14 Tage): die Spur nennt jetzt das Fenster, das vorn liegt; ohne Windows folgenlos
     q_vorn = _i.getsource(ob._AugenSitzung._win_vorn)
