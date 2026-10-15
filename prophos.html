@@ -34487,7 +34487,7 @@
   }
   /* GRUND KURZ (08.10.2026, Finn: „ausgelassen, ohne Grund … ich will alle ausgelassenen Konten mit Grund sehen"): Planer-Grund auf ein
    * Chip-Wort gekürzt, der volle Satz bleibt im Tooltip. Nach einer Balance-Lesung aus Accounts zeigt der Chip „nächster Lauf ≤ 10 min"
-   * (_apNachplanBald), bis der frische Planer-Stand da ist — der Nachplan-Takt wertet nicht feste Gründe alle 10 min neu. */
+   * (_apNachplanBald), bis der frische Planer-Stand da ist — der Nachplan-Takt wertet nicht feste Gründe alle 5 min neu. */
   // apGrundKurz (Grund → Chip-Wort) gibt es weiter unten schon (Auto-Planer-Leiste) — hier mitbenutzt (Funktionsdeklaration, gehoistet)
   const _apNachplanBald = new Map()   // konto_id → Zeitpunkt der Balance-Lesung (Chip „nächster Lauf", 12 min)
   function apNachplanBald(id){
@@ -34513,7 +34513,7 @@
         tip = `Eingeplant · Start ${txt} Dubai${g.richtung ? ' · ' + String(g.richtung).toUpperCase() : ''} (Lauf ${tag})` }
       else if(x){
         const bald = _apNachplanBald.get(id), g2 = String(x.grund || '')
-        if(bald && Date.now() - bald < 12 * 60000 && /Balance/i.test(g2)){ txt = 'nächster Lauf ≤ 5 min'; cls = 'bald'; tip = `Balance gerade gelesen — der Nachplan-Takt plant das Konto beim nächsten Lauf (alle 10 min). Vorher: ${g2} (Lauf ${tag})` }
+        if(bald && Date.now() - bald < 12 * 60000 && /Balance/i.test(g2)){ txt = 'nächster Lauf ≤ 5 min'; cls = 'bald'; tip = `Balance gerade gelesen — der Nachplan-Takt plant das Konto beim nächsten Lauf (alle 5 min). Vorher: ${g2} (Lauf ${tag})` }
         else { txt = 'ausgelassen · ' + apGrundKurz(g2); cls = 'raus'; tip = `Ausgelassen: ${apBlowText(g2)} (Lauf ${tag})` }
       }
       else { txt = '–'; tip = l ? `Im letzten Lauf (${tag}) nicht dabei` : 'Noch kein Planer-Lauf geladen' }
@@ -42988,7 +42988,7 @@
     { const mg = document.getElementById('tp-wd-marge'); if(mg){ let kurs = null
         try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je.NQ || je.MNQ; if(k && hedgeKursAlterJetzt(k) <= 600000 && k.preis > 0) kurs = k.preis }catch(_){}   // echtes Alter (25.09.2026)
         // echte Marge vom Fusion-Terminal (06.10.2026, FUSION-MARGE) — ohne Lesung wie bisher die Schätzung
-        const echt = (typeof fusionMargePopupText === 'function') ? fusionMargePopupText(r.lots) : null
+        const echt = (typeof fusionMargePopupText === 'function') ? fusionMargePopupText(r.lots, (typeof _tpDir !== 'undefined') ? _tpDir : null) : null
         mg.textContent = echt || (kurs ? `braucht ca. ${n(r.lots * kurs * r.slavePpl / 100, 0)} € Marge (1:100)` : '') } }
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
     const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'
@@ -44082,7 +44082,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1574'
+  const OS_TAB_BUILD = '2026-09-22.1575'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48074,11 +48074,17 @@
     if(les.frei < noetig * (1 + FUSION_MARGE_RESERVE)) return { st: 'warn', txt: `${txt} — knapp`, was: '' }
     return { st: 'ok', txt, was: '' }
   }
-  // Infozeile fürs Plan-Popup: „Marge nötig ≈ X € · frei Y €" — null ohne Lesung (dann bleibt die bisherige Schätzung stehen)
-  function fusionMargePopupText(lots){
+  // Infozeile fürs Plan-Popup: „Marge nötig ≈ X € · frei Y €" — null ohne Lesung (dann bleibt die bisherige Schätzung stehen).
+  // richtung = Master-Richtung im Popup (_tpDir): seit 16.10.2026 dieselbe Hedged-Margin-Rechnung wie der Start-Check (fusionMargeNoetig,
+  // .1567) — vorher zeigte das Popup Lots × Marge je Lot, der Start-Check nur den Zuwachs des größeren Schenkels, also zwei Zahlen.
+  // Ohne Richtung oder ohne offen-Lesung bleibt es die volle Rechnung.
+  function fusionMargePopupText(lots, richtung){
     const les = fusionMargeQuelle(); if(!les || !(lots > 0)) return null
     const alt = (les.alterMs != null && les.alterMs > FUSION_MARGE_LESUNG_MAX_MS) ? ` · Lesung vor ${Math.round(les.alterMs / 60000)} min` : ''
-    return les.jeLot ? `Marge nötig ≈ ${fusionMargeEur(lots * les.jeLot, les.w)} · frei ${fusionMargeEur(les.frei, les.w)}${alt}` : `Marge frei ${fusionMargeEur(les.frei, les.w)}${alt}`
+    if(!les.jeLot) return `Marge frei ${fusionMargeEur(les.frei, les.w)}${alt}`
+    const nm = fusionMargeNoetig({ richtung }, lots, les)
+    const gedeckt = nm.ausgleich > 0 ? ` (${Number(nm.ausgleich).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Lot durch Gegenrichtung gedeckt)` : ''
+    return `Marge nötig ≈ ${fusionMargeEur(nm.noetig, les.w)}${gedeckt} · frei ${fusionMargeEur(les.frei, les.w)}${alt}`
   }
   window._fusionMarge = { pruefen: fusionMargePruefen, lesung: fusionMargeLesung, quelle: fusionMargeQuelle, popup: fusionMargePopupText, noetig: fusionMargeNoetig }   // Test-Haken
   /* VORPRÜFLISTE (02.10.2026, Finn: „bevor Puls die Order platziert — Fusion verbunden, MT5-Copier läuft, Algo-Handel an — als visuelle
@@ -50708,7 +50714,7 @@
   const TPL_ZIEL_RE = /Ziel erreicht|bestanden/i
   // External ID fehlt — Text + Fix je Kontoart (Futures: Unterkonto für den Bot; CFD: MT5-Login, Master 09.10.2026)
   function tplExtText(fut){
-    return fut ? { text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' }
+    return fut ? { text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen', tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 5 min).' }
       : { text: 'ohne External ID — MT5-Login fehlt, Prophos kann Balance und Kontowert nicht lesen', tun: 'MT5-Login fehlt → Accounts → Konto → External ID eintragen bzw. in Echo „＋ Account hinzufügen".' }
   }
   // Ende des letzten beendeten Trades (review/completed, jede Route) auf dem Konto, ms — 0 ohne (12.10.2026, s. Balance-alt-Regel in tplBraucht)
@@ -50859,7 +50865,7 @@
         const acc = fremd ? null : (accounts || []).find(q => String(q.id) === String(x.konto_id || '') || String(q.name || '') === String(x.konto || ''))
         add(x.user_id, x.user, { art: 'ausgelassen', firma: x.firma, konto: x.konto, typ: x.typ, balance: '', ende4: '', text: 'ohne External ID — der Bot kann das Unterkonto nicht wählen',
           ext: acc ? String(acc.id) : '', hinweis: fremd ? `am PC von ${x.user || 'der ID'} eintragen` : (acc ? '' : 'Konto nicht in der Liste'),
-          tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 10 min).' })
+          tun: 'External ID (Tradovate-/TopstepX-Unterkonto) unter Accounts eintragen — der Bot plant das Konto dann von selbst nach (alle 5 min).' })
         continue
       }
       // ↻ Balance lesen auch für FREMDE Konten (08.10.2026, Finn: „direkt hier auf Balance-Refresh drücken") — Signal im Namen des
@@ -50872,7 +50878,7 @@
         hinweis: bal && fremd && !balf ? 'am PC der ID lesen' : (hakenAus && fremd ? `Haken unter Accounts von ${x.user || 'der ID'}` : extG && fremd ? `am PC von ${x.user || 'der ID'} eintragen` : ''),
         balf, uid: String(x.user_id || ''), lauf: balf ? (_tplBalFremd.get(balf) || null) : null, haken: accH ? String(accH.id) : '', ext: extK,
         tun: (x.fix ? String(x.fix) : bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user))
-          : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 10 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 10 min).')
+          : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 5 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 5 min).')
           + (bal ? tplBalAutoText(x.konto_id) : '') })
     }
     for(const t of D.trades){
@@ -50986,7 +50992,7 @@
   }
   /* COUNTDOWN „NACHPLANEN" + „JETZT NEU BERECHNEN" (Finn 09.10.2026 ~01:55 Dubai: „dass hier ein Countdown ist, wann die nächste Botlesung kommt …
    * dass ich auf ‚Jetzt neu berechnen' drücken kann, dann tut er das gleich neu rein"). Zeitpunkt vom Backend (GET /admin/auto-plan info.
-   * nachplan_naechster/_art: im Fenster alle 10 min, sonst der erste Takt im nächsten Fenster ab 00:00 dt); Text jede Sekunde neu
+   * nachplan_naechster/_art: im Fenster alle 5 min, sonst der erste Takt im nächsten Fenster ab 00:00 dt); Text jede Sekunde neu
    * (tplCdTick, nur sichtbarer Tab). Knopf nur Admin (ADMIN_EMAILS → _ap.admin), POST {nachplanen:true} = dieselbe Strecke wie der Takt. */
   function tplCdText(info){
     if(_ap.aktiv === false) return 'Auto-Planer aus'   // Not-Aus (Master 09.10.2026): kein Takt, der Knopf antwortet 409 — keine Zeit vortäuschen
@@ -53836,7 +53842,7 @@
     out.textContent = mult.toFixed(3)
     if(slaveQtyEl) slaveQtyEl.textContent = slaveQty.toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
     // Fusion-Marge (06.10.2026): echte Lesung vom Hedge-Terminal, nur wenn der Slave Fusion ist
-    { const mg = document.getElementById('tp-mt5-marge'); if(mg) mg.textContent = (firmToPreset(slave.firm) === 'fusion' && typeof fusionMargePopupText === 'function') ? (fusionMargePopupText(slaveQty) || '') : '' }
+    { const mg = document.getElementById('tp-mt5-marge'); if(mg) mg.textContent = (firmToPreset(slave.firm) === 'fusion' && typeof fusionMargePopupText === 'function') ? (fusionMargePopupText(slaveQty, (typeof _tpDir !== 'undefined') ? _tpDir : null) || '') : '' }
     const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const masterPreset = FIRM_PRESETS[firmToPreset(master.firm)] || FIRM_PRESETS.projectx
     // NQ/MNQ-Toggle: effektives Symbol für Master und Slave anzeigen
