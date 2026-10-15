@@ -47,7 +47,7 @@ REIN = ("_ap_plan_am_tag", "ap_ist_waise", "ap_id_fest", "ap_id_misch", "ap_klas
         "ap_rest_punkte", "ap_verlauf", "_ap_gegen_dicht", "ap_dicht_paare", "ap_richtungen_delta", "ap_fenster_von", "ap_wd_block_starts",
         "_ap_tranchen", "_ap_tranche_frei", "ap_szenario_trade", "ap_szenario_knicke", "ap_szenario_kurve", "ap_szenario_lage", "ap_szenario_trade_aus_zeile", "ap_nachhol_minute", "ap_start_hand_pruefen", "ap_kette_regel", "ap_kette_mll", "ap_tage_mini", "ap_tage_ist", "ap_kette_trade1", "ap_kette_trade2", "ap_kette_angefressen", "ap_kette_t1_fertig", "ap_kette_startwert_veraltet", "ap_nachplan_fenster", "_ap_gegen_partner", "_ap_gegen_firma", "_ap_ts", "ap_plan_verfallen", "ap_verfallen_grenze", "ap_versuche_alt_pl", "_ap_leichen_abschliessen", "_ap_id_konflikt", "_ap_firma_konflikt", "ap_verteil_gruppen", "ap_verteilung", "ap_umplanen", "ap_eingriff_pruefen", "ap_start_bis", "ap_einsatz_lage", "ap_gross_ab", "ap_consistency_etappe", "ap_konto_flex", "ap_regel_flex", "ap_regel_konto", "ist_topstep_express", "ap_cfd_ab",
         "ap_richtung_konflikte", "lt_echo_live_wahl", "lt_echo_felder", "lt_pl_balance", "lt_balance_sprung",
-        "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
+        "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden", "ap_kette_mll_belegt", "_ap_kette_mlls")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "_ap_bot_hat_arbeit", "_ap_bot_tick", "ap_kette_tick", "ap_kette_startwert_neu", "ap_kette_abhaken", "_wd_erledigt_upd", "_cme_handelstag", "_ap_kette_grund", "_ap_kette_takt", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_zug_nach_vorn", "ap_zuege_je_id", "_ap_dubai_versatz", "ap_ausgleichen",
       "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "ap_blow_ausschluss", "_ap_rk_flag",
@@ -75,6 +75,21 @@ def lade():
                   "AP_KW_TYP_FIX", "AP_GRUND_OHNE_BAL",
                   "AP_VORZIEHEN_LAUFEND_AB_EUR", "AP_SALDO_FREI_EUR")   # .1545: nur laufende Trades sind Deckung
     typ_name = re.search(r"^AP_KW_TYP_NAME = \{.*?\}$", src, re.M | re.S).group(0)
+    # 15.10.2026: alle EINZEILIGEN AP_-Konstanten in Quellreihenfolge dazu (wie selftest_auto_nachplanen seit .1568) — der Lader brach
+    # seit AP_HB_TZ/AP_PUNKTWERT_FUT/AP_PUFFER_PKT_FUT mit NameError in ap_planen ab; Zeilen, die allein nicht kompilieren
+    # (erste Zeile eines mehrzeiligen Dicts), bleiben draußen
+    extra = []
+    for m in re.finditer(r"^AP_[A-Z0-9_]+ = .*$", src, re.M):
+        try:
+            compile(m.group(0), "<konst>", "exec")
+            extra.append(m.group(0))
+        except SyntaxError:
+            pass
+    for zeile in extra:
+        try:
+            exec(zeile, ns)
+        except Exception:
+            pass        # verweist auf etwas Mehrzeiliges (z. B. AP_KONTO_FELDER) — brauchen diese Tests nicht
     exec("\n".join([konst(k) for k in konstanten] + [typ_name] + [block(f) for f in REIN + IO]), ns)
     return ns
 

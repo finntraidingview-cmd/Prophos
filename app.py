@@ -11498,7 +11498,8 @@ def _liq_verlauf_laden(acc_ids, streng=False):
         for i in range(0, len(fehlt), 80):
             teil = fehlt[i:i + 80]
             zeilen = _sb_all("trade_plans", {"select": "id,master_account_id,konto_typ,started_at,ended_at,"
-                                                       "bal_end:mt5_baseline->final->balance_end,bal_start:mt5_baseline->tv->balance_start",
+                                                       "bal_end:mt5_baseline->final->balance_end,bal_start:mt5_baseline->tv->balance_start,"
+                                                       "mll_start:mt5_baseline->tv->mll_start",   # MLL-Lesung je Start (15.10.2026, ap_kette_mll_belegt)
                                              "master_account_id": f"in.({','.join(teil)})", "route": "in.(tvv2,tsv2)"})
             je = {a: [] for a in teil}
             for z in zeilen or []:
@@ -15550,7 +15551,55 @@ def ap_kette_mll(groesse, dd, peak, balance, lock=0.0):
     return round(hoch - float(dd), 2)
 
 
-def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
+def ap_kette_mll_belegt(groesse, dd, acc, verlauf, jetzt=None):
+    """REIN RECHNEND (testbar): MLL eines Topstep-Kettenkontos aus BELEGTEN Werten → (mll, quelle) | (None, None).
+    Vorfall Mike …17758280 (Finn 15.10.2026, Screenshot „geblowt? Balance 147.124 auf/unter dem MLL 147.799" — TopstepX zeigt MLL
+    145.500): beide Trades liefen am selben Topstep-Handelstag (12.10. 23:39 UTC +2.299 → 152.299, 13.10. 09:41 UTC −5.175), liq_peak
+    nahm den ZWISCHENSTAND 152.299 als Hochpunkt. Das MLL zieht aber nur am Tagesschluss (17:00 CT) nach, nie innerhalb des Tages.
+    Rangfolge: (1) die jüngste TopstepX-Lesung tv.mll_start derselben Phase (Puls liest sie bei jedem Start — „wir können es ablesen"),
+    (2) darüber nur, was NACH dieser Lesung an abgeschlossenen Handelstagen belegt ist: letzter balance_end je Handelstag = Tagesschluss,
+    minus dd. Ohne Lesung: max(Größe, Tagesschlüsse) − dd. Der laufende Handelstag zählt nie (sein Schluss steht noch nicht)."""
+    if not groesse or not dd:
+        return None, None
+    a = acc or {}
+    typ, aid = str(a.get("account_type") or "").lower(), str(a.get("id") or "")
+
+    def _t(x):
+        try:
+            t = datetime.fromisoformat(str(x).replace("Z", "+00:00").replace(" ", "T"))
+            return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+    heute = _cme_handelstag((jetzt or datetime.now(timezone.utc)).isoformat())
+    lesung, lesung_at = None, None
+    schluss = {}                                            # Handelstag → (ended_at, balance_end) des letzten Endes an diesem Tag
+    for f in verlauf or ():
+        if str(f.get("master_account_id") or "") != aid or not f.get("konto_typ") or str(f["konto_typ"]).lower() != typ:
+            continue
+        m, st = _wd_num(f.get("mll_start")), _t(f.get("started_at"))
+        if m is not None and m > float(groesse) * 0.5 and st and (lesung_at is None or st > lesung_at):   # Express (0-basiert) fällt raus
+            lesung, lesung_at = float(m), st
+        be, en = _wd_num(f.get("bal_end")), _t(f.get("ended_at"))
+        tag = _cme_handelstag(f.get("ended_at")) if en else None
+        if be is not None and be > 0 and tag and heute and tag < heute and (tag not in schluss or en > schluss[tag][0]):
+            schluss[tag] = (en, be)
+    de = lambda v: f"{v:,.0f}".replace(",", ".")   # noqa: E731
+    if lesung is not None:
+        nach = [(tag, be) for tag, (en, be) in schluss.items() if en > lesung_at]
+        quelle = f"TopstepX-Lesung {lesung_at.strftime('%d.%m. %H:%M')} UTC"
+        if nach:
+            tag, hoch = max(nach, key=lambda x: x[1])
+            if hoch - float(dd) > lesung:
+                return round(hoch - float(dd), 2), f"Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.) nach der {quelle}"
+        return round(lesung, 2), quelle
+    if schluss:
+        tag, (_en, hoch) = max(schluss.items(), key=lambda x: x[1][1])
+        if hoch > float(groesse):
+            return round(hoch - float(dd), 2), f"gerechnet ab Tagesschluss {de(hoch)} ({tag[8:10]}.{tag[5:7]}.)"
+    return round(float(groesse) - float(dd), 2), "gerechnet ab Startgröße (keine TopstepX-Lesung)"
+
+
+def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None, mll_belegt=None):
     """REIN RECHNEND: Trade 1 der Kette → (werte wie ap_konto_rechnen + kette{nr, tagesziel, verlust_grenze, …}, None) | (None, grund).
     Tagesziel = Rest bis zum Phasenziel + Puffer, wenn der Rest höchstens tagesziel_usd ist (letzter Tag), sonst tagesziel_usd.
     Mit daily_usd (DLL 3.000, 08.10.2026): MLL aus ap_kette_mll; Verlustgrenze = min(daily_usd, Abstand) + blow_puffer. Abstand
@@ -15561,9 +15610,16 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
     Ohne daily_usd wie bisher: DD + blow_puffer."""
     de = lambda v: f"{v:,.0f}".replace(",", ".")   # noqa: E731 — nur die Zahlen, das Satzkomma bleibt
     daily = float(kette.get("daily_usd") or 0)
-    mll = ap_kette_mll(groesse, float(regel.get("dd_usd") or 0), peak, balance) if daily else None
+    # 15.10.2026 (Mike …8280): mll_belegt = (mll, quelle) aus ap_kette_mll_belegt — die TopstepX-Lesung bzw. echte Tagesschlüsse —
+    # geht der Rechnung aus dem Hochpunkt vor (die zählte Zwischenstände desselben Tages und meldete „geblowt?" für ein lebendes Konto)
+    mll_quelle = None
+    if daily and mll_belegt and mll_belegt[0] is not None:
+        mll, mll_quelle = float(mll_belegt[0]), mll_belegt[1]
+    else:
+        mll = ap_kette_mll(groesse, float(regel.get("dd_usd") or 0), peak, balance) if daily else None
+        mll_quelle = "gerechnet aus dem Hochpunkt" if mll is not None else None
     if daily and mll is not None and balance - mll <= 0:
-        return None, f"Balance {de(balance)} auf/unter dem MLL {de(mll)} — geblowt?"
+        return None, f"Balance {de(balance)} auf/unter dem MLL {de(mll)} ({mll_quelle}) — geblowt? Balance lesen, dann Nachplanen"
     # angefressen = Reparatur-Tag (Finn 13.10.2026, Szenarienbaum bestätigt): nach jedem Verlusttag bleibt nur die Luft bis zum MLL
     # (≈ 1.725, bei Mike 1.291) — egal ob die Balance über oder unter der Startgröße liegt. Ein Trade, TP wie ein normaler Tag, SL am MLL.
     # Die alte Bedingung „nur unter der Startgröße + Ziel zurück auf 150.000" (08.10.2026) ist raus: über 150.000 lief sonst ein
@@ -15617,7 +15673,7 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None):
         tag_typ = "normal"
     k1 = {"nr": 1, "tagesziel": tagesziel, "verlust_grenze": verlust, "tag_typ": tag_typ}
     if daily and mll is not None:
-        k1.update(daily_usd=round(daily), mll=mll, tagesstart_plan=round(balance, 2), angefressen=angefressen)
+        k1.update(daily_usd=round(daily), mll=mll, mll_quelle=mll_quelle, tagesstart_plan=round(balance, 2), angefressen=angefressen)
         if dll_puffer is not None:
             k1["dll_puffer"] = dll_puffer     # Verlustgrenze = DLL − dll_puffer (12.10.2026) — Anzeige + Trade 2
     if angefressen:
@@ -15807,7 +15863,7 @@ def ap_tage_ist(konto, plaene, tz=None):
     return max(0, len(tage) + int(_wd_num(a.get("goal_done_offset")) or 0)), int(_wd_num(a.get("goal_target")))
 
 
-def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
+def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, mll_belegt=None):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     ppl = $ je NAS100-Punkt und Lot der Firma bei dieser ID (firm_specs, ap_cfd_ppl) — nur CFD: Puffer in Punkten + Klein-Trade.
     → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
@@ -15861,7 +15917,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None):
         return None, "Balance auf/unter dem Boden — geblowt?"
     kette = ap_kette_regel(regel) if phase == "challenge" else None
     if kette:                                 # TOPSTEP-KETTE: Trade 1 statt eines Trades ohne SL (Finn 08.10.2026)
-        return ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=peak)   # peak: MLL der Kette (DLL 3.000, 08.10.2026)
+        return ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=peak, mll_belegt=mll_belegt)   # peak: MLL der Kette (DLL 3.000, 08.10.2026); mll_belegt: Lesung/Tagesschluss (15.10.2026)
     menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f), ph.get("menge_schritt") or 1)
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
@@ -16051,6 +16107,22 @@ def _ap_peaks(konten, streng=False):
         return {str(a["id"]): liq_peak({}, a, None, verlauf) for a in konten}
     except Exception as e:
         print(f"[auto-plan] ⚠️ boden/peak: {type(e).__name__}: {e}", flush=True)
+        return None if streng else {}
+
+
+def _ap_kette_mlls(tripel, streng=False):
+    """konto_id → (mll, quelle) aus ap_kette_mll_belegt für die Topstep-Kette (15.10.2026, Mike …8280). tripel = [(konto, regel, balance)].
+    Verlauf wie _ap_peaks (60 s Cache). streng=True: Fehler → None (Planer meldet „MLL nicht prüfbar"), sonst {}."""
+    try:
+        tripel = [(a, r, b) for a, r, b in tripel or () if a and a.get("id")]
+        verlauf = _liq_verlauf_laden([a["id"] for a, _r, _b in tripel], streng=streng)
+        out = {}
+        for a, r, b in tripel:
+            groesse = ap_groesse((r or {}).get("groessen"), b) if b is not None else None
+            out[str(a["id"])] = ap_kette_mll_belegt(groesse or liq_konto_groesse(a), (r or {}).get("dd_usd"), a, verlauf)
+        return out
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ kette/mll: {type(e).__name__}: {e}", flush=True)
         return None if streng else {}
 
 
@@ -19007,7 +19079,10 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # Topstep-Kette mit DLL (08.10.2026): höchster belegter Tagesschluss je Konto für den MLL — nur für Kettenkonten (eine Abfrage, 60 s Cache).
     # Lesefehler (streng → None): Kettenkonten mit DLL bekommen KEINEN Plan („MLL nicht prüfbar", Prüfung Slave 2) — nie mit zu tiefem MLL
     # planen. Ein Konto ohne jeden belegten Stand (frisch) hat peak None → MLL ab Größe/Balance, das ist richtig.
-    peaks_kette = _ap_peaks([k["a"] for k in kandidaten if ap_kette_regel(k["regel"])], streng=True) if any(ap_kette_regel(k["regel"]) for k in kandidaten) else {}
+    kette_tripel = [(k["a"], k["regel"], k["bal"]) for k in kandidaten if ap_kette_regel(k["regel"])]
+    peaks_kette = _ap_peaks([a for a, _r, _b in kette_tripel], streng=True) if kette_tripel else {}
+    # 15.10.2026 (Mike …8280 „geblowt?" bei lebendem Konto): MLL aus der TopstepX-Lesung/Tagesschlüssen, nicht aus Zwischenständen
+    mlls_kette = (_ap_kette_mlls(kette_tripel, streng=True) if kette_tripel else {}) if peaks_kette is not None else None
     for key, liste in tranchen.items():
         rechnung, tps_tranche = [], set()
         for k in liste:
@@ -19021,7 +19096,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 ausgelassen.append(dict(k["zeile"], grund="MLL nicht prüfbar (Verlauf nicht lesbar) — kein Kettenplan"))
                 continue
             w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
-                                        ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"))   # CFD: Punkte-Puffer + Klein-Trade; Tage sammeln (09.10.2026)
+                                        ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"),   # CFD: Punkte-Puffer + Klein-Trade; Tage sammeln (09.10.2026)
+                                        mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))))
             # KEINE ZWEI GLEICHEN TP je ID×Firma (Finn 09.10.2026): eine Spanne wie 3.450–3.550 hat nur ~100 ganze Werte — zwei Konten
             # treffen sich bei 10 Konten in gut jedem dritten Lauf. Bei Gleichstand neu ziehen (höchstens 20×); gekappte TP (Rest bis
             # Ziel) bleiben, wie sie sind
@@ -19030,7 +19106,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                     break
                 u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
                 w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
-                                            ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"))
+                                            ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"),
+                                            mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))))
             if w and not grund:
                 tps_tranche.add(w.get("tp"))
             if grund and "Boden" in grund:
