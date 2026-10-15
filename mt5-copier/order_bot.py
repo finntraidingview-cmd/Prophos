@@ -11043,6 +11043,45 @@ def pywinauto_import_fehler(e):
             "App- & Browsersteuerung → Intelligente App-Steuerung aus).")
 
 
+def _f9_diagnose(w):
+    """Nach F9 ohne Dialog (Routine „Puls-Fehler" 15.10.2026, s. run): WER liegt vorn, und welche Fenster hat das Terminal sonst offen?
+    Liest nur, wirft nie. -> (zeile, vorn): vorn = Kennung des Vordergrund-Fensters, 0 = kein Fenster vorn (gesperrter Desktop /
+    Windows-Sicherheitsabfrage — dort kommt kein F9 an), None = nicht lesbar (kein Windows). Die Zeile nennt Titel, Kennung, Klasse,
+    Prozess und Lage des fremden Fensters (wie _vorn_fremd_hinweis) oder „Terminal selbst vorn" — dann kam F9 an und MT5 öffnete
+    trotzdem nichts (Terminal beschäftigt? Handel am Konto gesperrt?); dazu die weiteren sichtbaren Fenster des Terminal-Prozesses
+    (ein fremder Login-Dialog, ein Update-Hinweis — oder ein Order-Fenster, das der Sucher nicht als solches erkannt hat)."""
+    try:
+        eigen = int(getattr(w, "handle", 0) or 0)
+    except Exception:
+        eigen = 0
+    try:
+        vorn = int(_win_vordergrund() or 0)
+    except Exception:
+        return "", None
+    if not vorn:
+        return "F9 ohne Dialog: kein Fenster vorn (gesperrter Desktop / Windows-Sicherheitsabfrage?)", 0
+    if vorn == eigen:
+        lage = f"Terminal selbst vorn ({eigen})"
+    else:
+        try:
+            lage = f"vorn '{str(_vordergrund_titel() or '')[:40] or '?'}' {vorn}{_win_fenster_steckbrief(vorn)} statt Terminal {eigen}"
+        except Exception:
+            lage = f"vorn {vorn} statt Terminal {eigen}"
+    andere = []
+    try:
+        from pywinauto import Desktop
+        pid = w.element_info.process_id
+        for x in Desktop(backend="uia").windows():
+            try:
+                if x.element_info.process_id == pid and x.is_visible() and int(x.handle or 0) != eigen:
+                    andere.append((x.window_text() or "").strip()[:30] or str(x.element_info.class_name or "?"))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return "F9 ohne Dialog: " + lage + (f"; weitere Terminal-Fenster {andere[:3]}" if andere else ""), vorn
+
+
 def run(cfg_path, cmd):
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -11122,8 +11161,33 @@ def run(cfg_path, cmd):
     with _EchoUnruhe():                # die Maus wandert, während der Dialog gesucht wird (nur lesen)
         dlg = _finde_order_dialog(w)
     if dlg is None:
-        return {"ok": False, "retry_ok": True,
-                "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"}
+        # F9 OHNE DIALOG (Routine „Puls-Fehler" 15.10.2026, Muster „v2order: f9-dialog nicht gefunden — abbruch, nichts gesendet":
+        # 16 Fälle seit 13.10. auf 4 PCs, 9 davon am 15.10. 12:40–15:05 UTC auf 3 PCs). Login/Lesen und API waren jedes Mal in
+        # Ordnung; am selben PC liefen oft zeitgleich „IPC timeout"-Fehlstarts eines ZWEITEN Terminals (Windows-/MT5-Abfrage?),
+        # dreimal stand ein fremder Login-Dialog „Einloggen" offen, einmal brauchte das Lesen 133 s. Die Spur sagte nie, WER nach F9
+        # vorn lag — ohne das ist kein Handgriff ableitbar. Jetzt: EINE Diagnose-Zeile (_f9_diagnose: Vordergrund-Fenster mit
+        # Steckbrief oder „kein Fenster vorn" = gesperrter Desktop/Sicherheitsabfrage, dazu die weiteren Fenster des Terminals) und —
+        # nur wenn überhaupt ein Fenster vorn ist — GENAU EIN zweiter Anlauf: Terminal neu betreten, Fenster-Guard, F9, Suche wie
+        # gehabt; nie ein dritter. F9 öffnet nur den Dialog; gesendet wird weiterhin nichts ohne Dialog, Feld-Beweise und Knopf.
+        # Meldungstext (Muster-Schlüssel der View) bleibt gleich, bei gesperrtem Desktop mit dem UAC-Handgriff.
+        diag, vorn = _f9_diagnose(w)
+        if diag:
+            trail.append(diag)
+        if vorn != 0:
+            _fenster_betreten(w)
+            if str(expected) not in (w.window_text() or ""):
+                return {"ok": False, "retry_ok": True,
+                        "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Tastendruck. [" + _spur(trail) + "]"}
+            trail.append("F9 zweiter Anlauf (Terminal neu betreten)")
+            w.type_keys("{F9}")
+            seit = time.time()
+            _warte(0.4, 0.35)
+            with _EchoUnruhe():
+                dlg = _finde_order_dialog(w)
+        if dlg is None:
+            return {"ok": False, "retry_ok": True,
+                    "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"
+                           + (" — " + _UAC_HINWEIS if vorn == 0 else "")}
     trail.append("F9-Dialog offen")
     # Kurze Setz-Zeit NACH dem Fund (02.09.2026, Finns Fund direkt nach dem
     # Tempo-Umbau: "manchmal vertippt er sich beim Asset und findet es nicht —
@@ -18102,6 +18166,14 @@ CDP_WERBUNG_HART_RX = re.compile(r"take profit|stop loss|tradovate|\bconnect\b|\
                                  r"|\b(buy|sell) \d|session|disconnect|close position|flatten|cancel order", re.I)
 CDP_WERBUNG_X_TABU_RX = re.compile(r"explore|offer|angebot|upgrade|\bbuy\b|kauf|trial|\bget\b|\bstart|subscri|abonn|premium|\bplan|claim"
                                    r"|account manager|panel|maximi|minimi|collapse|chart|layout|watchlist|\btab\b", re.I)
+# FREMDER DIALOG (Routine „Puls-Fehler" 15.10.2026, Muster „konto_balance: tradovate-login '#' nicht geschafft (abmelden): kontextmenü
+# neben 'tradovate' blieb leer: dialog '…' liegt über der seite" — 7 Fälle in 7 Tagen auf 2 PCs, 4× am 15.10. 14:40 UTC): ein
+# TradingView-Nachrichten-Dialog („Michael Burry's Big Short …") lag über der Seite — kein bekannter Werbe-Titel, also blieb er stehen,
+# und der Handgriff in der Meldung hieß „im Puls-Chrome den Dialog schließen". Das macht _werbung_dialog_weg(beliebig=True) jetzt
+# selbst, nur im Fehlerpfad des Abmeldens: ein Dialog OHNE Handels-/Login-Wort (HART_RX) und OHNE diese Wörter (Order, Position,
+# Konto, Marge, Bestätigungen, Verifizierung, Einwilligungen) wird über sein EINES X geschlossen — nie Esc, Verschwinden bewiesen.
+CDP_DIALOG_FREMD_TABU_RX = re.compile(r"\border|position|account|konto|margin|marge|risk|balance|\blimit|\bstop\b|verif|2fa|\bcode\b|agree|accept"
+                                      r"|terms|cookie|consent|confirm|bestätig|delete|löschen|remove", re.I)
 
 
 def _puls_fenster_liste(pid):
@@ -18548,35 +18620,43 @@ class _AugenSitzung:
             weg += self._werbung_dialog_weg()
         return weg
 
-    def _werbung_dialog_weg(self):
+    def _werbung_dialog_weg(self, beliebig=False):
         """Zweiter Weg (12.10.2026, s. CDP_WERBUNG_TITEL_RX): einen von augen.js gemeldeten Dialog (stand().popups: titel/text, x = sein
         eines X oben rechts) schließen, wenn er ein bekannter Werbe-Titel ohne Handels-/Login-Wort ist. Nur das eigene X, nie Esc,
-        Verschwinden bewiesen; jede Entscheidung steht in der Spur. -> Anzahl geschlossener Dialoge (0 oder 1)"""
+        Verschwinden bewiesen; jede Entscheidung steht in der Spur. -> Anzahl geschlossener Dialoge (0 oder 1)
+        beliebig=True (15.10.2026, s. CDP_DIALOG_FREMD_TABU_RX, nur aus dem Fehlerpfad von _cdp_abmelden): auch ein Dialog ohne
+        Werbe-Titel, solange er weder ein Handels-/Login-Wort (HART_RX) noch ein Order-/Konto-/Bestätigungs-Wort trägt — Spur „[Dialog]"."""
+        pf = "[Dialog]" if beliebig else "[Werbung]"
         try:
             st = self.stand()
         except Exception as e_:
-            self.trail.append(f"[Werbung] Dialog-Lesung nicht möglich ({type(e_).__name__})")
+            self.trail.append(f"{pf} Dialog-Lesung nicht möglich ({type(e_).__name__})")
             return 0
         pops = [p for p in (st.get("popups") or []) if isinstance(p, dict)] if isinstance(st, dict) else []
         for p in pops[:3]:
             titel = str(p.get("titel") or "")[:60]
             text = str(p.get("text") or "")[:120]
             wort = (titel + " " + text).strip()
-            if not CDP_WERBUNG_TITEL_RX.search(wort) or CDP_WERBUNG_HART_RX.search(wort):
+            if CDP_WERBUNG_HART_RX.search(wort):
+                continue
+            if beliebig:
+                if not wort or CDP_DIALOG_FREMD_TABU_RX.search(wort):
+                    continue
+            elif not CDP_WERBUNG_TITEL_RX.search(wort):
                 continue
             name = titel or text[:40]
             x = p.get("x") if isinstance(p.get("x"), dict) else None
             if not x or not cdp_rect(x.get("rect")):
-                self.trail.append(f"[Werbung] Dialog '{name}' erkannt, aber kein eindeutiges X ({p.get('x') or 'keins'}) — bleibt stehen, kein Esc")
+                self.trail.append(f"{pf} Dialog '{name}' erkannt, aber kein eindeutiges X ({p.get('x') or 'keins'}) — bleibt stehen, kein Esc")
                 return 0
             x_wort = " ".join(str(x.get(k_) or "") for k_ in ("text", "aria", "dn", "title"))
             if CDP_WERBUNG_X_TABU_RX.search(x_wort):
-                self.trail.append(f"[Werbung] Dialog '{name}': X '{x_wort.strip()[:40]}' ist kein Schließen-Knopf — bleibt stehen, kein Esc")
+                self.trail.append(f"{pf} Dialog '{name}': X '{x_wort.strip()[:40]}' ist kein Schließen-Knopf — bleibt stehen, kein Esc")
                 return 0
             # 13.10.2026 (Routine „Puls-Fehler", 34 Fälle in 24 h „erkannt, aber kein eindeutiges X (keins)"): augen.js 0.8.2 liefert das X
             # jetzt auch an der Karte eines Vollbild-Dialogs und als namenlosen Symbol-Knopf (x.namenlos) — in der Spur sichtbar
-            if not self._win_klick(cdp_rect(x.get("rect")), f"Werbung schließen (X) Dialog '{name}'" + (" (namenloses X)" if x.get("namenlos") else ""), toast_ok=True):
-                self.trail.append(f"[Werbung] Dialog '{name}': X nicht gedrückt (kein Beweis) — bleibt stehen, kein Esc")
+            if not self._win_klick(cdp_rect(x.get("rect")), f"{'Dialog' if beliebig else 'Werbung'} schließen (X) Dialog '{name}'" + (" (namenloses X)" if x.get("namenlos") else ""), toast_ok=True):
+                self.trail.append(f"{pf} Dialog '{name}': X nicht gedrückt (kein Beweis) — bleibt stehen, kein Esc")
                 return 0
             _warte(0.6, 0.3)
             try:
@@ -18586,9 +18666,9 @@ class _AugenSitzung:
             noch = [q for q in ((st2.get("popups") or []) if isinstance(st2, dict) else [])
                     if isinstance(q, dict) and str(q.get("titel") or "")[:60] == titel and str(q.get("text") or "")[:120] == text]
             if noch:
-                self.trail.append(f"[Werbung] Dialog '{name}' bleibt nach dem Klick auf sein X — weiter ohne")
+                self.trail.append(f"{pf} Dialog '{name}' bleibt nach dem Klick auf sein X — weiter ohne")
                 return 0
-            self.trail.append(f"[Werbung] Dialog '{name}' über eigenes X geschlossen (bewiesen, Dialog-Lesung)")
+            self.trail.append(f"{pf} Dialog '{name}' über eigenes X geschlossen (bewiesen, Dialog-Lesung)")
             return 1
         return 0
 
@@ -22792,15 +22872,33 @@ def _cdp_abmelden(s, opts, trail):
     # das Menü blieb dahinter leer, die Meldung sprach aber nur von „kein eindeutiges 'Log out'". .1413 schließt erkannte Werbung vorher;
     # bleibt trotzdem ein Dialog stehen (keine erkannte Werbung, kein eindeutiges X), nennt die Meldung ihn mit Handgriff — und es gibt
     # kein Esc in einen offenen Dialog (wie _cdp_esc, Prüfer 30.09.2026). Nur Fehlerpfad: der Erfolgsweg liest nichts zusätzlich.
-    if not s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate"):
-        fremd = s.fremd_hinweis() if hasattr(s, "fremd_hinweis") else ""
-        dlg = "" if fremd else _cdp_abmelden_dialog(s, opts)
-        if dlg:
-            return False, (f"Kontextmenü neben 'Tradovate' ließ sich nicht klicken: Dialog '{dlg}' liegt über der Seite — nicht abgemeldet. "
-                           "→ im Puls-Chrome den Dialog schließen.")
-        return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet." + fremd
-    b = _cdp_menue_abwarten(ort, trail, "[Login]")
-    e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
+    # FREMDER DIALOG ÜBER DEM MENÜ — EINMAL SEIN X (Routine „Puls-Fehler" 15.10.2026, Muster „konto_balance: tradovate-login '#' nicht
+    # geschafft (abmelden): kontextmenü neben 'tradovate' blieb leer: dialog '…' liegt über der seite" — 7 Fälle in 7 Tagen auf 2 PCs,
+    # 4× am 15.10. 14:40 UTC): ein TradingView-Nachrichten-Dialog („Michael Burry's Big Short …") lag über der Seite; er ist keine
+    # bekannte Werbung (CDP_WERBUNG_TITEL_RX), also ließen .1413/.1530 ihn stehen, und der Handgriff in der Meldung war „im Puls-Chrome
+    # den Dialog schließen" — genau das macht Puls jetzt selbst, nur hier im Fehlerpfad: Menü leer UND ein Dialog gemeldet → sein EINES
+    # X aus der Dialog-Lesung (kein Handels-/Login-/Konto-Wort, X ohne Kauf-/Angebots-Wort, Verschwinden bewiesen, nie Esc), danach der
+    # Kontextmenü-Knopf GENAU ein zweites Mal; bleibt der Dialog oder das Menü leer, dieselbe Meldung wie bisher. Der Knopf wird je
+    # Anlauf weiter nur einmal geklickt (bewiesen), nie ein dritter Anlauf.
+    for anlauf in (1, 2):
+        if not s.klick(cdp_rect(b.get("ctx")), "Kontextmenü neben Tradovate"):
+            fremd = s.fremd_hinweis() if hasattr(s, "fremd_hinweis") else ""
+            dlg = "" if fremd else _cdp_abmelden_dialog(s, opts)
+            if dlg:
+                return False, (f"Kontextmenü neben 'Tradovate' ließ sich nicht klicken: Dialog '{dlg}' liegt über der Seite — nicht abgemeldet. "
+                               "→ im Puls-Chrome den Dialog schließen.")
+            return False, "Kontextmenü neben 'Tradovate' ließ sich nicht klicken — nicht abgemeldet." + fremd
+        b = _cdp_menue_abwarten(ort, trail, "[Login]")
+        e, n = k3_eindeutig(b.get("menue"), K3_RX_ABMELDEN)
+        if e or anlauf == 2 or (b.get("menue") or []):
+            break
+        dlg = _cdp_abmelden_dialog(s, opts)
+        if not dlg or not hasattr(s, "_werbung_dialog_weg") or not s._werbung_dialog_weg(beliebig=True):
+            break
+        trail.append(f"[Login] Dialog '{dlg}' über sein X geschlossen — Kontextmenü ein zweites Mal")
+        b = ort.blick() or {}
+        if not cdp_rect(b.get("ctx")):
+            break
     if not e:
         dlg = _cdp_abmelden_dialog(s, opts) if not (b.get("menue") or []) else ""
         if dlg:

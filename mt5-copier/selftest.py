@@ -1917,6 +1917,7 @@ def main():
     results.append(test_panel_open_zweites_auge())
     results.append(test_cdp_konto_weg())
     results.append(test_cdp_konto_weg_gleicher_login())
+    results.append(test_puls_fehler_1571())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -4600,6 +4601,192 @@ def test_cdp_konto_regression_865():
         "Shift+T: Chart-Klick nur nach gedrücktem Restore, danach NICHT wieder maximiert (höchstens Open panel); Symbol bis ~6 s warten")
     if ok:
         print("✓ Regression .865: fremde Liste kein Beleg, Abmelden nur mit Beleg, unlesbar = ehrlich raus, Umschalter auch maximiert")
+    return ok
+
+
+def test_puls_fehler_1571():
+    """Routine „Puls-Fehler" 15.10.2026 20:30 Dubai (.1571): (1) F9 ohne Dialog — Diagnose-Zeile (wer liegt vorn?) und genau EIN zweiter
+    Anlauf, bei gesperrtem Desktop keiner, Meldungstext unverändert; (2) Abmelden: fremder Dialog über dem leeren Kontextmenü wird
+    einmal über sein X geschlossen (beliebig=True: kein Handels-/Order-/Konto-Wort), dann der Knopf genau ein zweites Mal. Alle
+    Kennungen erfunden, kein Windows nötig."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1571: " + text)
+            ok = False
+
+    # (1a) _f9_diagnose mit Attrappen-Fenster: Terminal selbst vorn / fremdes Fenster vorn / kein Fenster vorn / kein Windows
+    class _W:
+        handle = 777
+
+        class element_info:
+            process_id = 4242
+
+        def window_text(self):
+            return "100000001 — Attrappe"
+    alt_v, alt_t, alt_s = ob._win_vordergrund, ob._vordergrund_titel, ob._win_fenster_steckbrief
+    try:
+        ob._win_vordergrund, ob._vordergrund_titel, ob._win_fenster_steckbrief = (lambda: 777), (lambda: "egal"), (lambda h: "")
+        d1 = ob._f9_diagnose(_W())
+        ob._win_vordergrund, ob._vordergrund_titel = (lambda: 555), (lambda: "Einloggen")
+        ob._win_fenster_steckbrief = lambda h: f", Klasse 'Attrappe', PID 9, Lage 0,0–1,1" if h == 555 else ""
+        d2 = ob._f9_diagnose(_W())
+        ob._win_vordergrund = lambda: 0
+        d3 = ob._f9_diagnose(_W())
+
+        def _wirft():
+            raise AttributeError("kein Windows")
+        ob._win_vordergrund = _wirft
+        d4 = ob._f9_diagnose(_W())
+    finally:
+        ob._win_vordergrund, ob._vordergrund_titel, ob._win_fenster_steckbrief = alt_v, alt_t, alt_s
+    chk(d1 == ("F9 ohne Dialog: Terminal selbst vorn (777)", 777), f"Terminal selbst vorn → Zeile + Kennung ({d1})")
+    chk(d2 == ("F9 ohne Dialog: vorn 'Einloggen' 555, Klasse 'Attrappe', PID 9, Lage 0,0–1,1 statt Terminal 777", 555),
+        f"fremdes Fenster vorn → Titel, Steckbrief, erwartete Kennung ({d2})")
+    chk(d3[1] == 0 and "kein Fenster vorn" in d3[0] and d4 == ("", None), f"kein Fenster vorn → 0 mit Hinweis; kein Windows → leer/None ({d3}, {d4})")
+    # (1b) Einbau in run(): Diagnose vor dem zweiten Anlauf, F9 höchstens zweimal, Fenster-Guard auch vor dem zweiten F9, bei
+    # gesperrtem Desktop (vorn == 0) kein zweiter Anlauf und der UAC-Handgriff; Meldungstext (Muster-Schlüssel) einmal und unverändert
+    q_run = _i.getsource(ob.run)
+    f9 = q_run[q_run.index("dlg = _finde_order_dialog(w)"):q_run.index('trail.append("F9-Dialog offen")')]
+    chk(f9.count('w.type_keys("{F9}")') == 1 and q_run.count('w.type_keys("{F9}")') == 2 and f9.count("_f9_diagnose(w)") == 1
+        and f9.count("F9 zweiter Anlauf") == 1 and "if vorn != 0:" in f9 and f9.index("_f9_diagnose(w)") < f9.index("if vorn != 0:")
+        and f9.index("if vorn != 0:") < f9.index('w.type_keys("{F9}")') and f9.count("_fenster_betreten(w)") == 1
+        and f9.index("_fenster_betreten(w)") < f9.index('"Fenster-Guard: Titelzeile') < f9.index('w.type_keys("{F9}")')
+        and f9.count("_finde_order_dialog(w)") == 2 and "_UAC_HINWEIS if vorn == 0" in f9
+        and q_run.count('"F9-Dialog nicht gefunden — Abbruch, nichts gesendet. ["') == 1 and "for " not in f9 and "while " not in f9,
+        "run(): Diagnose → genau ein zweiter Anlauf (neu betreten, Guard, F9, Suche), keiner bei gesperrtem Desktop, Meldung gleich")
+
+    # (2a) _werbung_dialog_weg(beliebig=True): Nachrichten-Dialog ohne Werbe-Titel wird über sein X geschlossen; ohne beliebig nicht;
+    # Handels-/Order-/Konto-Wort, fehlendes X, Tabu-X, bleibender Dialog, Lese-Fehler → nie
+    class _DS:
+        def __init__(self, popups, bleibt=False, wirft=False):
+            self.popups, self.bleibt, self.wirft, self.trail, self.klicks, self.n = popups, bleibt, wirft, [], [], 0
+
+        def stand(self, opts=None):
+            self.n += 1
+            if self.wirft:
+                raise RuntimeError("weg")
+            return {"popups": self.popups if (self.n == 1 or self.bleibt) else []}
+
+        def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None):
+            self.klicks.append(name)
+            return True
+    W = ob._AugenSitzung._werbung_dialog_weg
+    news = {"titel": "Michael Burry's Big Short Gets Broader: Nvidia-Hea", "text": "Michael Burry's Big Short Gets Broader: Nvidia-Heavy ETF …",
+            "x": {"rect": [900, 120, 14, 14], "aria": "Close"}}
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        s1 = _DS([news]); n1 = W(s1, beliebig=True)
+        s2 = _DS([news]); n2 = W(s2)
+        s3 = _DS([dict(news, text="Log out of Tradovate?")]); n3 = W(s3, beliebig=True)
+        s4 = _DS([dict(news, titel="Order rejected", text="Order rejected: margin")]); n4 = W(s4, beliebig=True)
+        s5 = _DS([dict(news, x=None)]); n5 = W(s5, beliebig=True)
+        s6 = _DS([dict(news, x={"rect": [900, 120, 14, 14], "aria": "Explore plans"})]); n6 = W(s6, beliebig=True)
+        s7 = _DS([news], bleibt=True); n7 = W(s7, beliebig=True)
+        s8 = _DS([news], wirft=True); n8 = W(s8, beliebig=True)
+        s9 = _DS([{"titel": "", "text": "", "x": {"rect": [1, 1, 10, 10], "aria": "Close"}}]); n9 = W(s9, beliebig=True)
+        s10 = _DS([{"titel": "Go ad-free. Everywhere", "text": "", "x": {"rect": [1, 1, 10, 10], "aria": "Close"}}]); n10 = W(s10)
+    finally:
+        ob._warte = alt_w
+    chk(n1 == 1 and s1.klicks == ["Dialog schließen (X) Dialog 'Michael Burry's Big Short Gets Broader: Nvidia-Hea'"]
+        and any(z.startswith("[Dialog] ") and "über eigenes X geschlossen (bewiesen" in z for z in s1.trail) and s1.n == 2,
+        f"beliebig: Nachrichten-Dialog über sein X zu, bewiesen, Spur [Dialog] ({s1.trail})")
+    chk(n2 == 0 and not s2.klicks and n10 == 1 and s10.klicks and s10.trail[-1].startswith("[Werbung] "),
+        f"ohne beliebig nur bekannte Werbe-Titel, Spur [Werbung] wie bisher ({s2.trail}, {s10.trail})")
+    chk(n3 == 0 and not s3.klicks and n4 == 0 and not s4.klicks and n9 == 0 and not s9.klicks,
+        "Login-/Order-/Marge-Wort oder leerer Dialog → nie ein Klick, auch beliebig")
+    chk(n5 == 0 and not s5.klicks and any("kein eindeutiges X" in z for z in s5.trail) and n6 == 0 and not s6.klicks
+        and any("kein Schließen-Knopf" in z for z in s6.trail) and n7 == 0 and len(s7.klicks) == 1 and any("bleibt nach dem Klick" in z for z in s7.trail)
+        and n8 == 0 and not s8.klicks and any("nicht möglich" in z for z in s8.trail),
+        "kein X / Tabu-X / Dialog bleibt / Lese-Fehler → 0, höchstens ein Klick, nie Esc, nie ein Wurf")
+    chk(all(not ob.CDP_DIALOG_FREMD_TABU_RX.search(w_) for w_ in ("Michael Burry's Big Short Gets Broader", "What's new in TradingView", "Welcome back"))
+        and all(ob.CDP_DIALOG_FREMD_TABU_RX.search(w_) for w_ in ("Order rejected", "Close position?", "Account summary", "Verify your email", "Accept cookies", "Delete layout?")),
+        "Tabu-Wörter des fremden Dialogs: Nachrichten/Neuigkeiten frei, Order/Position/Konto/Verifizierung/Einwilligung/Löschen nie")
+
+    # (2b) _cdp_abmelden mit Attrappen: Menü leer + Dialog → X, Knopf ein zweites Mal, dann 'Log out' → abgemeldet; Dialog nicht
+    # schließbar → alte Meldung, Knopf nur einmal; Menü leer ohne Dialog → Esc wie bisher
+    class _Ort2:
+        folgen = []
+
+        def __init__(self, *a, **k):
+            pass
+
+        def blick(self):
+            m = _Ort2.folgen.pop(0) if _Ort2.folgen else []
+            return {"ctx": {"rect": [166, 8, 22, 22]}, "menue": m, "dialoge": []}
+
+    class _Sz:
+        ws = None
+
+        def __init__(self, popups, schliesst):
+            self.popups, self.schliesst, self.trail, self.klicks, self.tasten, self.dw = popups, schliesst, [], [], [], 0
+            self.abgemeldet = False
+
+        def klick(self, rect, name):
+            self.klicks.append(name)
+            return True
+
+        def stand(self, opts=None):
+            return {"popups": self.popups, "konto": {"aktiv": "Konto wählen" if self.abgemeldet else "APEX1234560000001USD"}}
+
+        def _werbung_dialog_weg(self, beliebig=False):
+            self.dw += 1
+            if beliebig and self.schliesst:
+                self.popups = []
+                return 1
+            return 0
+
+        def taste(self, name):
+            self.tasten.append(name)
+
+        def werbung_weg(self, zwang=False):
+            return 0
+    logout = [{"text": "Log out", "rect": [300, 700, 90, 24]}]
+    alt2 = {n: getattr(ob, n) for n in ("_K3Ort", "cdp_abgemeldet", "_warte")}
+    ob._K3Ort, ob._warte = _Ort2, (lambda a_, b_: None)
+    ob.cdp_abgemeldet = lambda st: (st.get("konto") or {}).get("aktiv") == "Konto wählen"
+    try:
+        dlg = [{"titel": "Michael Burry's Big Short Gets Broader", "text": "…", "x": {"rect": [900, 120, 14, 14], "aria": "Close"}}]
+        # a) Blick, Menü 3× leer (Dialog) → X → Blick (ctx) → Knopf nochmal → Menü da → Log out → abgemeldet
+        _Ort2.folgen = [[], [], [], [], [], logout]
+        sa, ta = _Sz(list(dlg), True), []
+
+        def _klick_a(rect, name, _s=sa):
+            _s.klicks.append(name)
+            if name.startswith("Menü "):
+                _s.abgemeldet = True
+            return True
+        sa.klick = _klick_a
+        ra = ob._cdp_abmelden(sa, {}, ta)
+        # b) Dialog nicht schließbar → Meldung wie bisher, ctx nur einmal, kein Esc
+        _Ort2.folgen = [[], [], []]
+        sb, tb = _Sz(list(dlg), False), []
+        rb = ob._cdp_abmelden(sb, {}, tb)
+        # c) Menü leer, kein Dialog → Esc + Meldung wie bisher, kein Dialog-Weg
+        _Ort2.folgen = [[], [], []]
+        sc, tc = _Sz([], True), []
+        rc = ob._cdp_abmelden(sc, {}, tc)
+    finally:
+        for n, f in alt2.items():
+            setattr(ob, n, f)
+    chk(ra == (True, "") and sa.klicks.count("Kontextmenü neben Tradovate") == 2 and sa.dw == 1 and not sa.tasten
+        and any("über sein X geschlossen — Kontextmenü ein zweites Mal" in z for z in ta) and any("Tradovate abgemeldet" in z for z in ta),
+        f"Dialog zu → Knopf ein zweites Mal → Log out → abgemeldet ({ra}, {sa.klicks}, {ta})")
+    chk(rb[0] is False and "blieb leer: Dialog 'Michael Burry's Big Short Gets Broader' liegt über der Seite" in rb[1]
+        and sb.klicks.count("Kontextmenü neben Tradovate") == 1 and sb.dw == 1 and not sb.tasten,
+        f"Dialog bleibt → alte Meldung, Knopf einmal, kein Esc ({rb}, {sb.klicks})")
+    chk(rc[0] is False and "kein eindeutiges 'Log out' (0 Treffer)" in rc[1] and sc.klicks.count("Kontextmenü neben Tradovate") == 1
+        and sc.dw == 0 and sc.tasten == ["Escape"], f"Menü leer ohne Dialog → Esc + Meldung wie bisher, kein Dialog-Weg ({rc}, {sc.tasten})")
+    q_ab = _i.getsource(ob._cdp_abmelden)
+    chk(q_ab.count("for anlauf in (1, 2):") == 1 and q_ab.count("s._werbung_dialog_weg(beliebig=True)") == 1
+        and q_ab.index("_cdp_menue_abwarten(ort, trail") < q_ab.index("s._werbung_dialog_weg(beliebig=True)") < q_ab.index('s.taste("Escape")')
+        and "anlauf == 2" in q_ab, "Abmelden: Dialog-Weg nur nach leerem Menü, genau zwei Anläufe, Esc-Pfad unverändert")
+    if ok:
+        print("✓ Puls-Fehler .1571: F9 ohne Dialog → Diagnose + ein zweiter Anlauf (keiner bei gesperrtem Desktop); Abmelden: fremder Dialog einmal über sein X, Knopf ein zweites Mal")
     return ok
 
 
