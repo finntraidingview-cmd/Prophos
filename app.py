@@ -16866,6 +16866,9 @@ def ap_kw_param(regel):
             "boden": regel.get("boden") or "statisch", "ziel_pct": regel["ziel_pct"],
             "groessen": sorted(float(g) for g in (regel.get("wert_groessen") or regel["groessen"])), "etappe_usd": ch.get("tp_max") or regel.get("tp_max") or regel.get("etappe_usd"),
             "daily_usd": regel.get("daily_usd"), "lock_bei_start": regel.get("lock_bei_start") is True,
+            # Drawdown je Kontogröße (17.10.2026, Apex 100k EOD: 3.000 $ neben 150k mit 4.000 $) aus regel.je_groesse — wie im Planer
+            "dd_je_groesse": {str(g): float(j["dd_usd"]) for g, j in (regel.get("je_groesse") or {}).items()
+                              if isinstance(j, dict) and j.get("dd_usd")},
             # Topstep-Kette mit DLL (09.10.2026): Tagesmodell für Vorrat/Kontowert (kette_dll_chance); Tagesziel-Rückfall = AP_KETTE_STANDARD
             "kette_daily": ((regel.get("kette") or {}).get("daily_usd") if isinstance(regel.get("kette"), dict) else None),
             "kette_tagesziel": ((regel.get("kette") or {}).get("tagesziel_usd") or 4500) if isinstance(regel.get("kette"), dict) else None}
@@ -16927,6 +16930,7 @@ def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
     if not groesse:
         return None
     dd = float(p.get("dd_usd") or 0) * (groesse / min(gr) if p.get("skaliert") else 1) or groesse * float(p.get("dd_pct") or 0) / 100.0
+    dd = float((p.get("dd_je_groesse") or {}).get(str(int(groesse))) or dd)   # eigener DD der Größe geht vor (Apex 100k, 17.10.2026)
     if dd <= 0:
         return None
     kauf = _ap_kw_kauf(p, groesse)
