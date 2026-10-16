@@ -22961,7 +22961,8 @@
       r = await window.mtcApi(_api, { method:'POST', headers:{ 'Content-Type':'application/json' },   // tsx-lesen für Topstep (F23)
         timeoutMs: _api === 'tsx-lesen' ? 175000 : undefined,   // F25: TopstepX wartet bis 20 s auf die Seite + Wachhund 100/110 s; seit 30.09.2026 175 s > Panel-Zeit 150 s (vorher 120 s = Abbruch VOR dem Panel)
         body: _body })
-      const netz = !!(r && r._httpFail && /^TypeError\b/.test(String(r.error || '')))
+      // seit 16.10.2026 (1-s-Grenze in mtcApi) beginnt der Text bei spätem Abriss mit „Verbindung zum Panel brach …“ — Lesen darf weiter erneut
+      const netz = !!(r && r._httpFail && (r._nichtGesendet || r._abrissS != null))
       if(!netz || v === 4) break
       console.warn(`[tv-lesen] Backend nicht erreichbar (${r.error}) — Versuch ${v + 1} gleich`)
       await new Promise(res => setTimeout(res, 12000 + Math.random() * 10000))
@@ -42069,9 +42070,9 @@
       // binnen 1 s (Connection refused kommt in Millisekunden), hat das Panel die Anfrage nie angenommen (Neustart/Update ~15 s, Autostart) →
       // beweisbar nichts gesendet, alle 6 s erneut wie beim heilenden Terminal (gleicher Deckel). Reißt die Verbindung später, kann der Bot-
       // Kindprozess schon laufen — er überlebt ein sterbendes Panel und klickt weiter (Prüfung Slave 2: 5 s wären kein Beweis) → UNKLAR.
-      if(r && !r.ok && r._nichtGesendet){
-        const sReq = Math.round((Date.now() - tReq) / 1000)
-        r = (Date.now() - tReq) < 1000
+      if(r && !r.ok && (r._nichtGesendet || r._abrissS != null)){
+        const sReq = r._abrissS != null ? r._abrissS : Math.round((Date.now() - tReq) / 1000)
+        r = (r._nichtGesendet && (Date.now() - tReq) < 1000)
           ? { ok:false, retry_ok:true, grund:'panel_weg', msg: `Lokales Backend (Panel) am PC nicht erreichbar (${String(r.error || '').slice(0, 60)}) — die Order-Anfrage kam nie an, nichts gesendet → am PC das Panel starten (start-alles.bat), Prophos versucht es weiter` }
           : { ok:false, retry_ok:false, msg: `Verbindung zum Panel brach nach ${sReq} s mitten in der Order ab (das Panel am PC hat die Verbindung geschlossen) — ob Puls geklickt hat, ist offen → im Master-Terminal ${route.masterLogin || ''} nachsehen, NICHT blind erneut starten` }
       }
@@ -44168,7 +44169,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1582'
+  const OS_TAB_BUILD = '2026-09-22.1583'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44881,6 +44882,7 @@
         // erst 15 min später), 2–3 min gestreut warten und erneut anklopfen, höchstens ~5 min seit Beginn; danach wie bisher „Lokales Backend
         // nicht erreichbar". Karten-Klick und Signal vom Mac bekommen die Meldung sofort (der Mac wartet auf die Antwort, am PC sitzt jemand).
         // _tpOrbitLaeuft bleibt gesetzt: fällige Pläne dieses PCs warten in der Schlange — ohne Backend könnte ohnehin keiner starten.
+        // seit 16.10.2026 setzt mtcApi _nichtGesendet nur bei Abriss binnen 1 s (Connection refused); später = _abrissS → UNKLAR-Zweig unten
         const backendWeg = !!(r && !r.ok && r._nichtGesendet)
         if(backendWeg && !fern && opts && opts.vonStartUm && Date.now() - _tvT0 < 240000){
           const sekW = Math.round((Date.now() - _tvT0) / 1000)
@@ -63744,6 +63746,7 @@
     const ctrl = new AbortController()
     const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
     const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)
+    const t0 = Date.now()
     try {
       const r = await fetch(`${MTC_BASE}/${path}`, Object.assign({}, opts || {}, { signal: ctrl.signal }))
       const txt = await r.text()
@@ -63754,9 +63757,16 @@
       return j
     // _nichtGesendet NUR, wenn fetch selbst wirft (TypeError: lokales Backend weg) — dann hat beweisbar niemand geklickt.
     // Zeitlimit (_zeitlimit) oder Proxy-502 sagen darüber NICHTS: der Bot kann weiterklicken (30.09.2026, Topstep-Paket S).
-    } catch(e){ const abb = !!(e && e.name === 'AbortError')
-      return { ok:false, copier_offline:true, _httpFail:true, _zeitlimit: abb, _nichtGesendet: !abb && !!(e && e.name === 'TypeError'),
-               error: abb ? `Zeitlimit ${Math.round(ms / 1000)} s` : String(e) } }
+    // 1-s-GRENZE (16.10.2026, Prüfung Slave 2 + Master-Entscheid „Doppel-Order hat Vorrang"): ein nicht laufendes Panel antwortet mit
+    // Connection refused in Millisekunden. Wirft fetch erst später, hatte das Panel die Anfrage angenommen und kann den Bot schon gestartet
+    // haben — der Kindprozess überlebt ein sterbendes Panel (Neustart/Update) und klickt weiter. Dann NICHT „nichts gesendet", sondern
+    // _abrissS (Sekunden bis zum Abriss) → jeder Aufrufer landet in seinem UNKLAR-Zweig, der Fehlertext nennt den Fakt.
+    } catch(e){ const abb = !!(e && e.name === 'AbortError'), typ = !abb && !!(e && e.name === 'TypeError'), dauer = Date.now() - t0
+      const sofort = typ && dauer < 1000
+      return { ok:false, copier_offline:true, _httpFail:true, _zeitlimit: abb, _nichtGesendet: sofort,
+               _abrissS: (typ && !sofort) ? Math.round(dauer / 1000) : null,
+               error: abb ? `Zeitlimit ${Math.round(ms / 1000)} s`
+                 : (typ && !sofort) ? `Verbindung zum Panel brach nach ${Math.round(dauer / 1000)} s ab (${String(e)})` : String(e) } }
     finally{ clearTimeout(tm) }
   }
 
