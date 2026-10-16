@@ -44176,7 +44176,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1584'
+  const OS_TAB_BUILD = '2026-09-22.1585'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66767,9 +66767,9 @@
 /* ── MUSTER-PORTFOLIO (16.10.2026, Finn: „Ich will, dass es ein Muster-Portfolio gibt — Portfolio an Accounts pro Prop-ID, jedes Portfolio
  * orientiert sich daran … in jeder Gruppe wie ein Tacho im Auto, wie viel man vom Muster-Portfolio bei dieser Firma schon erreicht hat, in den
  * Farben der jeweiligen Propfirm"; „jede ID muss mit derselben Logik Propfirms pausieren oder sperren können") ──
- * Rechnet nichts selbst: GET /admin/muster-portfolio liefert je Firma chance_pct (Monte Carlo der Vorrat-Rechnung OHNE Kauf: Chance, mit den
- * bestehenden Konten die Untergrenze zu erreichen; gesicherte zählen voll) und gesichert_pct. Live-Feedback zu .1576 (Finn, Marc nur mit
- * Challenges → alle Tachos 0 %): große Zahl + Nadel = Chance, Strich am Bogen = schon gesichert, keine Kauf-Sprache. Klick auf einen Tacho
+ * Rechnet nichts selbst: GET /admin/muster-portfolio liefert je Firma fortschritt_pct (erwarteter Fortschritt: gesichert + Σ Chance × Beitrag
+ * der laufenden Konten, ÷ Untergrenze, je Fach gedeckelt) und gesichert_pct. Live-Feedback zu .1576/.1582 (Finn: Challenges allein → 0 %;
+ * „50 von 150k → grob 33 %"): große Zahl + Nadel = erwarteter Fortschritt, Strich am Bogen = schon gesichert, keine Kauf-Sprache. Klick auf einen Tacho
  * setzt unten den Firma-Filter der Tabelle (Reiter „Manuell") und scrollt hin, zweiter Klick → „Alle". Schloss oben rechts = Firma bei dieser
  * ID sperren (nur aktiv/gesperrt, Finn 16.10.2026), gesperrte Firmen nur als Chip; geschaltet über POST /admin/vorrat {user_id, firma, status}
  * (Recht: eigene ID, Verwalter für die Gruppe, Admin für alle — der Server prüft). Gilt für die angemeldete ID (ID-Leiste wechselt den Login).
@@ -66807,7 +66807,8 @@
   const MP_BOGEN = 'M21.9 80 A44 44 0 1 1 98.1 80'
   const mpPunkt = (v, r) => { const w = (210 - 2.4 * v) * Math.PI / 180; return [60 + r * Math.cos(w), 58 - r * Math.sin(w)] }
   const mpWinkel = v => v * 2.4 - 120
-  const mpWert = f => Math.max(0, Math.min(100, Number(f.chance_pct ?? f.gesichert_pct) || 0))
+  // Große Zahl = erwarteter Fortschritt (gesichert + Chance × Beitrag der laufenden Konten), Finn 16.10.2026 — nie unter „gesichert"
+  const mpWert = f => Math.max(Number(f.gesichert_pct) || 0, Math.min(100, Number(f.fortschritt_pct ?? f.gesichert_pct) || 0))
   function mpFilterWert(){ const s = document.getElementById('acc-firm-filter'); return s ? s.value : '' }
   function mpTacho(f, i, aktiv, darf){
     const v = mpWert(f), alt = _mp.zeig[f.firma] ?? 0
@@ -66817,8 +66818,8 @@
     let ges = ''
     if(g > 0.5 && g < 99.5){ const [a1, b1] = mpPunkt(g, 36), [a2, b2] = mpPunkt(g, 50)
       ges = `<line class="mp-ges" x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}"/>` }
-    const zahl = f.chance_pct == null && f.gesichert_pct == null ? '–' : Math.round(v)
-    const tip = `${f.firma}: ${Math.round(v)} % Chance, mit den bestehenden Konten das Muster zu erreichen · gesichert ${mpSub(f)}${g > 0.5 && g < 99.5 ? ' (Strich am Bogen)' : ''}. Klick: Konten unten in der Tabelle zeigen`
+    const zahl = f.fortschritt_pct == null && f.gesichert_pct == null ? '–' : Math.round(v)
+    const tip = `${f.firma}: ${Math.round(v)} % vom Muster erreicht (gesichert + laufende Konten nach ihrer Chance) · gesichert ${mpSub(f)}${g > 0.5 && g < 99.5 ? ' (Strich am Bogen)' : ''}. Klick: Konten unten in der Tabelle zeigen`
     return `<div role="button" tabindex="0" class="mp-tacho${aktiv ? ' aktiv' : ''}" data-mp-firma="${mpEsc(f.firma)}" data-mp-v="${v}" style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
       ${darf ? `<button type="button" class="mp-schloss" data-mp-sperren="${mpEsc(f.firma)}" title="${mpEsc(f.firma)} bei dieser ID sperren (Firma hat gesperrt / Restriction) — keine neuen Pläne, laufende Trades bleiben">${MP_SCHLOSS}</button>` : ''}
       <svg viewBox="0 0 120 96" aria-hidden="true">

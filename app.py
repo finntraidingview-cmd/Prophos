@@ -7690,9 +7690,10 @@ def muster_portfolio_zeilen(zellen, ziele):
         out.append({"firma": z.get("firma"), "status": "gesperrt" if z.get("status") == "gesperrt" else "frei", "art": ziel.get("art"),
                     "typen": ziel.get("typen") or [], "einheit": "Stück" if ziel.get("art") == "stueck" else "USD", "soll": soll, "gesichert": round(ges, 2),
                     "gesichert_pct": g_pct, "erwartet_pct": e_pct, "unterwegs_n": z.get("unterwegs_n"),
-                    # Finn 16.10.2026 (live .1576, alle Tachos 0 % bei reinen Challenges): große Zahl = Chance, mit den BESTEHENDEN Konten
-                    # die Untergrenze zu erreichen — vorrat_mc ohne Kauf (sicherheit), gesicherte zählen voll; ohne Konten ehrlich 0
-                    "chance_pct": (round(100 * float(z["sicherheit"]), 1) if soll > 0 and isinstance(z.get("sicherheit"), (int, float)) else None),
+                    # Große Zahl (Finn 16.10.2026, zweite Runde nach .1582): ERWARTETER FORTSCHRITT = (gesichert + Σ Chance je laufendem Konto
+                    # × Beitrag) ÷ Untergrenze, je Fach gedeckelt (vorrat2_zelle fortschritt) — 50k von 150k ohne Funnel = 33 %, nicht 0 %.
+                    # chance_pct (P, das ganze Ziel zu erreichen) war bei fast fertigen Firmen ohne Funnel 0 % und hat Finn verwirrt.
+                    "fortschritt_pct": (round(100 * min(1.0, float(z["fortschritt"])), 1) if soll > 0 and isinstance(z.get("fortschritt"), (int, float)) else None),
                     "reihe": ziel.get("reihe"),
                     # Klick auf den Tacho klappt die Konten dieser ID bei der Firma auf (Finn 16.10.2026) — Balance = Server-Wahl
                     # (acc_balance_wahl wie Planer/Vorrat), archivierte und Live-Konten sind schon draußen
@@ -8641,6 +8642,10 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     else:
         score = vorrat_score("gedeckt", min(s_eng) if s_eng else 1.0, s_st)
     erwartet = best + sum(sum(p_ * w_ for p_, w_, _ in fa["funnel"]) for fa in faecher)
+    # Muster-Portfolio (Finn 16.10.2026, Screenshot .1582: „50 von 150k → grob 33 %, The5ers 2 von 3 → fast 67 %"): erwarteter Fortschritt =
+    # je Fach min(Soll, gesichert + Σ Chance × Beitrag) ÷ Soll gesamt — je Fach gedeckelt, damit drei 100k kein fehlendes 200k ersetzen
+    _soll_f = sum(fa["soll"] for fa in faecher)
+    fortschritt = (sum(min(fa["soll"], fa["fest"] + sum(p_ * w_ for p_, w_, _ in fa["funnel"])) for fa in faecher) / _soll_f) if _soll_f > 0 else None
     bestfall = best + sum(sum(w_ for _, w_, _ in fa["funnel"]) for fa in faecher)
     soll = sum(fa["soll"] for fa in faecher)
     pn0 = faecher[0]["neu"][0] if faecher else 0.0
@@ -8696,6 +8701,7 @@ def vorrat2_zelle(ziel, stufen, konten, status, param=None, faktoren=None, seed=
     return {"nachkauf": nachkauf, "lage": lage_ges, "score": score, "score_teile": score_teile, "sperre": sperre,
             "sicherheit": round(s_ohne, 4), "sicherheit_nach": round(s_nach, 4), "bestand_gewichtet": round(best, 2),
             "erwartet": round(erwartet, 2), "bestfall": round(bestfall, 2), "hinweise": hinweise,
+            "fortschritt": (round(fortschritt, 4) if fortschritt is not None else None),
             "untergrenze": soll, "unterwegs_n": funnel_n, "unterwegs_stufen": stufen_n, "kauf_regel": regel_kauf,
             "luecke": round(sum(fa.get("luecke_nom", 0.0) for fa in faecher) if regel_kauf in ("nominal", "mitte")
                             else max(0.0, soll - erwartet), 2),

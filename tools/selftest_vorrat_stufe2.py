@@ -177,6 +177,10 @@ def main():
     z = zelleS80(ZIEL_FN, FN, idf, "frei", seed=11)
     erw = 0.95 * 50000 + (2208 / 15000) * 100000 + 3 * (10 / 18) * (10 / 15) * 100000
     pruef("ID F × FundedNext: erwartet ≈ 173k (reine Formel)", z["erwartet"], erw, 1)
+    # Muster-Portfolio (16.10.2026): erwarteter Fortschritt = (gesichert + Σ Chance × Beitrag) ÷ Untergrenze, je Fach gedeckelt
+    pruef("Muster: Fortschritt ID F = erwartet ÷ 200k", z["fortschritt"], round(min(1.0, erw / 200000), 4), 0.0001)
+    zf = zelle(ZIEL_FN, FN, [{"account_id": "f1", "typ": "funded_cfd", "groesse": 100000, "balance": 101000, "alter_tage": 0}], "frei", seed=3)
+    pruef("Muster: 100k Funded allein gegen 200k → 50 % (Ziel-Wahrscheinlichkeit wäre 0)", (zf["fortschritt"], zf["sicherheit"]), (0.5, 0.0))
     pruef("… nach Erwartungswert 1 × 100k", z["nachkauf"]["n_erwartung"], 1)
     pruef("… bei 80 % Sicherheit 4 × 100k", z["nachkauf"]["n_roh"], 4)
     kor = {"phase2": 0.6 / (10 / 15)}
