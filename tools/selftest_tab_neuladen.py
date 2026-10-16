@@ -33,8 +33,9 @@ def bloecke(pfad, namen, konst=()):
 
 def main():
     ns = {"re": re, "datetime": datetime}
-    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["_build_nr", "tab_neuladen_entscheiden"],
-                 ["TAB_NL_HINTER_S", "TAB_NL_STUMM_S", "TAB_NL_IDLE_S", "TAB_NL_ABSTAND_S"]), ns)
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["_build_nr", "tab_neuladen_entscheiden", "tab_oeffnen_entscheiden"],
+                 ["TAB_NL_HINTER_S", "TAB_NL_STUMM_S", "TAB_NL_IDLE_S", "TAB_NL_ABSTAND_S", "TAB_OEFFNEN_FEHLT_S", "TAB_OEFFNEN_ANLAUF_S",
+                  "TAB_OEFFNEN_ABSTAND_S", "TAB_OEFFNEN_MAX_TAG"]), ns)
     f = ns["tab_neuladen_entscheiden"]
     jetzt = datetime(2026, 10, 16, 1, 0, tzinfo=timezone.utc).timestamp()
     iso = lambda s: datetime.fromtimestamp(jetzt - s, timezone.utc).isoformat()   # noqa: E731
@@ -67,6 +68,29 @@ def main():
     check(not l and "nicht lesbar" in g, "Railway nicht lesbar → nichts")
     l, g, h = f({"ok": False, "msg": "x"}, jetzt, None, 0, 999, True)
     check(not l, "Railway ok:false → nichts")
+
+    # lokal still (keine /api/instances-Abfrage) zählt wie stumm — auch ohne mt5_live-Zeile
+    l, g, h = f({"ok": True, "origin": "2026-09-22.1587", "tab_build": None, "tab_at": None, "riegel": ""}, jetzt, None, 0, 999, True, 700)
+    check(l and "keine Abfrage beim Panel" in g, f"lokal still 11 min, ohne mt5_live → laden ({g})")
+    l, g, h = f(st(), jetzt, None, 0, 999, True, 120)
+    check(not l and g == "", "lokal still 2 min → nichts")
+
+    o = ns["tab_oeffnen_entscheiden"]
+    s0 = jetzt - 3600
+    check(o(jetzt, jetzt - 20, s0, False, 0, 0, True, 999) == (False, ""), "Tab fragt → nichts öffnen")
+    check(o(s0 + 60, 0, s0, False, 0, 0, True, 999) == (False, ""), "Panel läuft erst 1 min → nichts")
+    a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 999)
+    check(a and "seit 6 min keine Abfrage" in g, f"6 min still, kein Fenster → öffnen ({g})")
+    a, g = o(jetzt, jetzt - 400, s0, True, 0, 0, True, 999)
+    check(not a and "kein zweiter Tab" in g, "Prophos-Fenster da → nie zweiter Tab")
+    a, g = o(jetzt, jetzt - 400, s0, False, jetzt - 600, 0, True, 999)
+    check(not a and "höchstens 1 je 20 min" in g, "letzter Versuch vor 10 min → warten")
+    a, g = o(jetzt, jetzt - 400, s0, False, 0, 8, True, 999)
+    check(not a and "Deckel 8" in g, "8× heute → Deckel")
+    a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, False, 999)
+    check(not a and "Puls/MT5-Order" in g, "Lock belegt → warten")
+    a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 20)
+    check(not a and "letzte Eingabe vor 20 s" in g, "Eingabe am PC → warten")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)

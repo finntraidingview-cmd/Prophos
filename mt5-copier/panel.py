@@ -1534,6 +1534,44 @@ TAB_NL_STUMM_S = 10 * 60
 TAB_NL_IDLE_S = 120
 TAB_NL_ABSTAND_S = 15 * 60
 TAB_NL = {"grund": "", "at": 0.0, "letzter_versuch": 0.0, "hinter_seit": None, "ergebnis": ""}
+# TAB ÖFFNEN, WENN GAR KEINER LÄUFT (Master 16.10.2026, aus „Braucht dich, Teil 1" 4b367e2 vom 13.10. — der kam nie auf main): der
+# Prophos-Tab fragt das Panel alle 5 s über das lokale app.py (/api/instances, User-Agent python-requests; die Panel-Seite im Browser
+# zählt nicht). Bleibt das TAB_OEFFNEN_FEHLT_S aus UND gibt es kein Chrome-Fenster mit aktivem Prophos-Tab, öffnet das Panel den Tab
+# im Puls-Profil (order_bot.puls_start_profil — nie im Reader-Profil; Profil unklar → nicht öffnen). Nie ein zweiter Tab: steht ein
+# Prophos-Fenster da, lädt der Neulade-Weg oben es neu statt zu öffnen.
+TAB_OEFFNEN_FEHLT_S = 5 * 60
+TAB_OEFFNEN_ANLAUF_S = 5 * 60
+TAB_OEFFNEN_ABSTAND_S = 20 * 60
+TAB_OEFFNEN_MAX_TAG = 8
+TAB_URL = "http://localhost:5000/"
+_TAB_OEFFNEN = {"zuletzt": 0.0, "start": time.time(), "geoeffnet": [], "tag": ""}
+
+
+def tab_gesehen(user_agent):
+    """Aufruf von /api/instances über das lokale app.py (= Prophos-Tab) → Herzschlag merken."""
+    if str(user_agent or "").lower().startswith("python-requests"):
+        _TAB_OEFFNEN["zuletzt"] = time.time()
+
+
+def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, n_heute, lock_frei, idle_s):
+    """REIN RECHNEND (testbar): (öffnen: bool, grund: str). '' = Tab lebt, nichts zu tun."""
+    if jetzt - start < TAB_OEFFNEN_ANLAUF_S:
+        return False, ""
+    still_s = jetzt - max(zuletzt, start)
+    if still_s < TAB_OEFFNEN_FEHLT_S:
+        return False, ""
+    warum = f"kein Prophos-Tab: seit {int(still_s // 60)} min keine Abfrage vom Tab"
+    if fenster_da:
+        return False, f"{warum}, aber ein Prophos-Fenster ist da — kein zweiter Tab (Neulade-Weg)"
+    if n_heute >= TAB_OEFFNEN_MAX_TAG:
+        return False, f"{warum} — heute schon {n_heute}× geöffnet (Deckel {TAB_OEFFNEN_MAX_TAG})"
+    if letzter_versuch and jetzt - letzter_versuch < TAB_OEFFNEN_ABSTAND_S:
+        return False, f"{warum} — zuletzt vor {int((jetzt - letzter_versuch) // 60)} min geöffnet (höchstens 1 je {TAB_OEFFNEN_ABSTAND_S // 60} min)"
+    if not lock_frei:
+        return False, f"{warum} — wartet: Puls/MT5-Order läuft"
+    if idle_s is not None and idle_s < TAB_NL_IDLE_S:
+        return False, f"{warum} — wartet: am PC wird gerade gearbeitet (letzte Eingabe vor {int(idle_s)} s)"
+    return True, warum
 
 
 def _build_nr(v):
@@ -1541,10 +1579,11 @@ def _build_nr(v):
     return (m.group(1), int(m.group(2))) if m else None
 
 
-def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s, lock_frei):
+def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s, lock_frei, lokal_still_s=None):
     """REIN RECHNEND (testbar): (laden: bool, grund: str, hinter_seit_neu). stand = Antwort von /code/tab-stand (oder None),
     jetzt in s (epoch), hinter_seit = seit wann das Panel den Tab hinter origin sieht (s, oder None), letzter_versuch in s,
-    idle_s = Sekunden ohne Eingabe am PC (None = unbekannt), lock_frei = TV_ORDER_LOCK frei."""
+    idle_s = Sekunden ohne Eingabe am PC (None = unbekannt), lock_frei = TV_ORDER_LOCK frei. lokal_still_s = Sekunden ohne Abfrage des
+    Tabs beim Panel (/api/instances) — zählt wie „stumm" (auch auf PCs ohne mt5_live-Zeile), None = Panel läuft erst kurz."""
     if not isinstance(stand, dict) or stand.get("ok") is not True:
         return False, "Tab-Stand von Railway nicht lesbar", hinter_seit
     o, t = _build_nr(stand.get("origin")), _build_nr(stand.get("tab_build"))
@@ -1567,7 +1606,9 @@ def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s,
             pass
     else:
         hinter_seit = None
-    if stumm_s is not None and stumm_s >= TAB_NL_STUMM_S:
+    if lokal_still_s is not None and lokal_still_s >= TAB_NL_STUMM_S:
+        warum = f"Tab stumm seit {int(lokal_still_s // 60)} min (keine Abfrage beim Panel)"
+    elif stumm_s is not None and stumm_s >= TAB_NL_STUMM_S:
         warum = f"Tab stumm seit {int(stumm_s // 60)} min (letztes Lebenszeichen in mt5_live)"
     elif hinter and jetzt - hinter_seit >= TAB_NL_HINTER_S:
         warum = f"Tab {stand.get('tab_build')} seit {int((jetzt - hinter_seit) // 60)} min hinter {stand.get('origin')}"
@@ -1705,6 +1746,54 @@ def _prophos_tab_neu_laden():
         TV_ORDER_LOCK.release()
 
 
+def _chrome_exe():
+    for p in (r"%ProgramFiles%\Google\Chrome\Application\chrome.exe", r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+              r"%LocalAppData%\Google\Chrome\Application\chrome.exe"):
+        p = os.path.expandvars(p)
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+def _puls_profil():
+    """(profil, fehler) aus order_bot.puls_start_profil — frischer Prozess, damit immer der aktuelle Profil-Riegel gilt."""
+    code = ("import json, order_bot; p, f = order_bot.puls_start_profil(); print(json.dumps([p, f]))")
+    try:
+        r = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        p, f = json.loads((r.stdout or "").strip().splitlines()[-1])
+        return str(p or ""), str(f or "")
+    except Exception as e:
+        return "", f"Puls-Profil nicht lesbar ({type(e).__name__})"
+
+
+def _tab_oeffnen():
+    """Öffnet den Prophos-Tab im Puls-Profil → (ok, Klartext)."""
+    import urllib.request
+    try:
+        urllib.request.urlopen("http://127.0.0.1:5000/", timeout=5).close()
+    except Exception as e:
+        return False, f"lokales Backend (localhost:5000) antwortet nicht ({type(e).__name__}) — start-alles.bat"
+    exe = _chrome_exe()
+    if not exe:
+        return False, "chrome.exe nicht gefunden"
+    profil, fehler = _puls_profil()
+    if fehler or not profil:
+        return False, (fehler or "kein Chrome-Profil bekannt") + " — Tab nicht geöffnet (nie im Reader-Profil)"
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "Puls läuft gerade im Browser — nächster Versuch später"
+    try:
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "MT5-Order läuft gerade — nächster Versuch später"
+        subprocess.Popen([exe, f"--profile-directory={profil}", TAB_URL], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        time.sleep(4 + random.random())   # Lock kurz halten: der neue Tab holt sich den Fokus
+        return True, f"Chrome ({profil}) → {TAB_URL}"
+    except Exception as e:
+        return False, f"Öffnen fehlgeschlagen: {type(e).__name__}: {e}"
+    finally:
+        TV_ORDER_LOCK.release()
+
+
 def _browser_und_mt5_frei(tv_eigen=False):
     """Kein Puls im Browser (TV_ORDER_LOCK) und keine MT5-Order (MASTER_ORDER_LOCKS: Echo-V2 /api/master-order klickt im MT5-Fenster
     F9/Felder/Knopf — Prüfer S2 16.10.2026: holt der Wächter dann Chrome nach vorn, landet der Vordergrund mitten im Order-Dialog).
@@ -1736,12 +1825,35 @@ def _tab_neulade_waechter():
                 time.sleep(TAB_NL_TAKT_S * 5)
                 continue
             pc = pc_id_lesen()
+            jetzt0 = time.time()
+            tag = datetime.now().strftime("%Y-%m-%d")
+            if _TAB_OEFFNEN["tag"] != tag:
+                _TAB_OEFFNEN.update(tag=tag, geoeffnet=[])
+            fenster_da = bool(_prophos_fenster())
+            auf, grund_auf = tab_oeffnen_entscheiden(jetzt0, _TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"], fenster_da,
+                                                     TAB_NL["letzter_versuch"], len(_TAB_OEFFNEN["geoeffnet"]),
+                                                     _browser_und_mt5_frei(), _win_leerlauf_s())
+            if auf:
+                TAB_NL["letzter_versuch"] = jetzt0
+                ok, msg = _tab_oeffnen()
+                if ok:
+                    _TAB_OEFFNEN["geoeffnet"].append(datetime.now().isoformat(timespec="seconds"))
+                grund_auf = f"{grund_auf} → {'geöffnet' if ok else 'NICHT geöffnet'}: {msg}"
+            if grund_auf and not fenster_da:
+                if grund_auf != TAB_NL["grund"]:
+                    print(f"[tab-neuladen] {grund_auf}", flush=True)
+                    TAB_NL.update(grund=grund_auf, at=jetzt0)
+                if pc:
+                    _tab_stand_holen(pc, grund_auf)          # nur die Spur an Railway
+                time.sleep(TAB_NL_TAKT_S + random.random() * 10)
+                continue
             if pc:
                 stand = _tab_stand_holen(pc, TAB_NL["grund"])
                 jetzt = time.time()
                 frei = _browser_und_mt5_frei()
+                still = jetzt - max(_TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"]) if jetzt - _TAB_OEFFNEN["start"] >= TAB_OEFFNEN_ANLAUF_S else None
                 laden, grund, TAB_NL["hinter_seit"] = tab_neuladen_entscheiden(stand, jetzt, TAB_NL["hinter_seit"],
-                                                                               TAB_NL["letzter_versuch"], _win_leerlauf_s(), frei)
+                                                                               TAB_NL["letzter_versuch"], _win_leerlauf_s(), frei, still)
                 if laden:
                     TAB_NL["letzter_versuch"] = jetzt
                     ok, msg = _prophos_tab_neu_laden()
@@ -2966,6 +3078,7 @@ class Handler(BaseHTTPRequestHandler):
             code, antwort = polar_panel.behandle_get(path, parse_qs(urlparse(self.path).query))
             return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if path == "/api/instances":
+            tab_gesehen(self.headers.get("User-Agent"))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
             return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
         if path == "/api/puls-klick":
             # Klick-/Fill-Meldung von Puls LOKAL (01.10.2026, Finn: „Fusion sofort beim Knopfdruck, an Supabase vorbei"): order_bot.py
