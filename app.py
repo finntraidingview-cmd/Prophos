@@ -17069,7 +17069,9 @@ def _ap_sperren():
     """Muster-Portfolio (16.10.2026): gesperrte Zellen der Sperr-Matrix → {(user_id, firma_norm)}. Fehler/Tabelle fehlt → leer (der
     Planer läuft wie bisher, nie stehen bleiben)."""
     try:
-        rows = _sb_all("vorrat_matrix", {"select": "user_id,firma", "status": "eq.gesperrt"})
+        # order PFLICHT (Fund Slave 3, 16.10.2026 im Railway-Log: HTTPError 400 bei jedem Lauf → Sperre wirkte nie): _sb_all sortiert sonst
+        # nach id, vorrat_matrix hat keine id-Spalte (Schlüssel user_id + firma) — PostgREST antwortet 400 „column … id does not exist"
+        rows = _sb_all("vorrat_matrix", {"select": "user_id,firma", "status": "eq.gesperrt", "order": "user_id.asc,firma.asc"})
     except Exception as e:
         print(f"[auto-plan] ⚠️ Sperr-Matrix: {type(e).__name__}: {e}", flush=True)
         return set()
@@ -26778,8 +26780,10 @@ def _lq_antwort_laden():
     seit_iso = datetime.fromordinal(seit).strftime("%Y-%m-%d")
     sheets = _sb_all("kunden_sheets", {"select": "id,person_uid,person_name,sheet_id,aktiv", "order": "person_name.asc"})
     staende = _sb_all("bank_staende", {"select": "sheet_id,day,kontostand,einzahlungen,kaeufe,payouts,an_uns,letzte_buchung,diff,fehler,geholt_at",
-                                       "day": f"gte.{seit_iso}"})
-    personen = _sb_all("liq_personen", {"select": "user_id,ist_kunde"})
+                                       "day": f"gte.{seit_iso}", "order": "sheet_id.asc,day.asc"})
+    # order PFLICHT (16.10.2026, gleicher Fund wie die Sperr-Matrix): _sb_all sortiert sonst nach id — bank_staende und liq_personen haben
+    # keine id-Spalte, PostgREST antwortet 400 (mit order=id.asc gegen das echte PostgREST geprüft)
+    personen = _sb_all("liq_personen", {"select": "user_id,ist_kunde", "order": "user_id.asc"})
     nutzer, aus = [], set()
     for u in (_auth_liste_anfrage().json() or {}).get("users", []):
         mail = str(u.get("email") or "").strip().lower()
