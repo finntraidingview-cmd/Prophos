@@ -26433,8 +26433,27 @@
     const t = String(kontoText).trim()
     return t === id || t.split(/[^A-Za-z0-9]+/).includes(id)
   }
+  /* PULS UNTERWEGS = READER BLIND (16.10.2026, Vorfall e6914376 Aurel pc-pw1put, Tradeify-WD …2766: Order 09:53:26 UTC fertig, Position im
+   * Reiter Positions bewiesen; 20 s später Rück-Login ins Orbit-V3-Big-Trade-Konto …3078 (bigTradeHeim, Prio 1) — mitten im Kontowechsel
+   * stand im Reader noch der Konto-Text …2766, die Tabelle war leer bzw. schon die des anderen Kontos → Schnell-Wächter: Konto ≥ 2 s
+   * „stabil", 0,1 s leer, Master vorher gesehen → Fusion 09:53:50 zu, der Master lief weiter (Puls 12:04: Position offen), Finn hedgte von
+   * Hand. Finn: „genau das ist immer schiefgelaufen".) Solange Puls auf diesem PC irgendetwas tut oder gleich tun wird (Order, Rück-Login,
+   * Rundgang/Lesung, Signal, Balance-Lesung), zeigt der Reader nicht beweisbar das Plan-Konto: kein Reader-Ende, und die Konto-Ruhe beginnt
+   * danach neu. Enden laufen dann nur über Level/Kurs oder einen späteren Reader-Blick. Fail-closed: unklarer Zustand = unterwegs.
+   * → '' (ruhig) oder der Grund. */
+  function hedgePulsUnterwegs(){
+    try{
+      if(_bthLaeuft || _bthTimer) return 'Rück-Login ins Big-Trade-Konto'
+      if(_tpOrbitLaeuft) return 'Puls-Order'
+      if(tvV2Poll && tvV2Poll.busy) return 'Rundgang/Lesung'
+      if(_osActive) return 'Signal-Lauf'
+      if(_tvBalLesenLaeuft && _tvBalLesenLaeuft.size) return 'Balance-Lesung'
+      return ''
+    }catch(_){ return 'Zustand nicht lesbar' }
+  }
   function hedgeMasterWegEntscheid(o){
     if(!o || !Array.isArray(o.liste)) return false
+    if(o.unterwegs) return false   // Puls unterwegs auf diesem PC → Reader blind (16.10.2026, s. hedgePulsUnterwegs)
     // Frische (Reader 0.8.5): positionen_ok === true (Script UND Server nicht blind) und positionen_alter_s ≤ 10; altes Script ohne
     // die Felder: Payload-Alter ≤ 10 s. false = kein Urteil (Flatter-Vorfall 01.09.).
     if(o.positionenOk === false) return false
@@ -26516,12 +26535,18 @@
     const meine = (tp || []).filter(p => p && p.route === 'tvv2' && (p.status === 'open' || p.status === 'planned') && p.mt5Baseline && p.mt5Baseline.hedge
       && p.mt5Baseline.hedge.status === 'offen' && p.mt5Baseline.hedge.pc === pc)
     if(!meine.length) return
+    // Konto-Ruhe und Leer-Zeit verwerfen, solange der Reader nichts Beweisbares zeigt (16.10.2026, Vorfall e6914376 + Prüfung Master): VOR
+    // jedem frühen Abbruch — beim Login-Wechsel ist der Stand genau dann blind/alt, sonst überlebte der alte Konto-Zeitstempel den Wechsel
+    // und nach der Rückkehr galten „≥ 90 s Ruhe" + 1 s leer wieder (wie der 1-s-Wächter: nicht frisch = Timer weg)
+    const verwerfen = () => { for(const p of meine){ _hedgeSchnellKonto.delete(String(p.id)); _hedgeSchnellLeer.delete(String(p.id)) } }
+    if(hedgePulsUnterwegs()){ verwerfen(); return }   // Puls unterwegs → Reader blind
     _hedgeSchnellBusy = true
     try{
       if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
       const st = (epLokal && epLokal.stand) ? epLokal.stand : null
-      if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen) || !/^puls-/.test(String(st.positionen_tab || ''))) return
-      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.0)) return
+      if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen) || !/^puls-/.test(String(st.positionen_tab || ''))){ verwerfen(); return }
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.0)){ verwerfen(); return }
+      if(hedgePulsUnterwegs()){ verwerfen(); return }   // während des Holens losgelaufen
       const jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
@@ -26546,11 +26571,12 @@
         if(!_hedgeMasterGesehen.has(pid)) continue
         if(!_hedgeSchnellLeer.has(pid)) _hedgeSchnellLeer.set(pid, jetzt)
         const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
-        // 0,3 s flach (≈ 3 Lesungen bei 0,1-s-Takt); läuft auf diesem PC gerade ein Puls-Lauf/Rundgang (Kontowechsel → die Tabelle kann kurz
-        // leer flackern), vorsichtig 1,5 s
-        let unruhig = false; try{ unruhig = !!_tpOrbitLaeuft || !!(tvV2Poll && tvV2Poll.busy) }catch(_){}
-        const leerMin = unruhig ? 1500 : 100   // 01.10.2026: 0,3 → 0,1 s (Finn: „eine Sekunde ist zu viel"); flach zählt nur mit Beweis
-        if(jetzt - _hedgeSchnellLeer.get(pid) >= leerMin && jetzt - _hedgeSchnellKonto.get(pid) >= 2000 && offenSeit >= 3000 && p.status === 'open'){
+        // DIESELBE REGEL WIE DER 1-s-WÄCHTER (16.10.2026, Vorfall e6914376): bis dahin schloss dieser Weg nach 0,1 s leer + 2 s Konto und
+        // umging .1560/.1563 (30 s leer im Wechsel-Fenster, 1 s erst nach 90 s Ruhe auf dem Plan-Konto) — jetzt entscheidet hedgeMasterWegEntscheid
+        const weg = hedgeMasterWegEntscheid({ liste: st.positionen, positionenOk: st.positionen_ok, alterMs: st.positionen_alter_s * 1000,
+          sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung, kontoPlan, kontoAktiv: st.konto, kontenAnzahl: 99,
+          kontoStabilMs: jetzt - _hedgeSchnellKonto.get(pid), leerSeitMs: jetzt - _hedgeSchnellLeer.get(pid), schnell: true, gesehen: true })
+        if(weg && p.status === 'open'){
           _hedgeSchnellLeer.delete(pid)
           console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid)
           await hedgeMasterWegAusfuehren(p, kontoPlan, null)
@@ -26873,11 +26899,12 @@
             const kontoFrisch = !!(st && (Number(st.konto_ts) > 0 ? Date.now() - Number(st.konto_ts) <= 10000 : frisch))
             const kontoPasst = kontoPlan ? hedgeKontoPasst(kontoAktiv, kontoPlan) : (kontenAnzahl <= 1)
             const pidK = String(p.id)
-            if(kontoFrisch && kontoPasst){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
+            const unterwegs = hedgePulsUnterwegs()   // 16.10.2026: Puls unterwegs → Reader blind, Ruhe beginnt danach neu
+            if(kontoFrisch && kontoPasst && !unterwegs){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
             else { _hedgeKontoSeit.delete(pidK); _hedgeLeerSeit.delete(pidK) }
             const kontoStabilMs = _hedgeKontoSeit.has(pidK) ? Date.now() - _hedgeKontoSeit.get(pidK).seit : 0
             const listeLeer = !!(st && frisch && kontoFrisch && kontoPasst && Array.isArray(st.positionen) && !st.positionen.some(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : ''); if(xw !== wz) return false; if(richtung && x.richtung && x.richtung !== richtung) return false; const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs((typeof tvKursZahl === 'function') ? (tvKursZahl(x.menge) || 0) : (Number(x.menge) || 0)); return m > 0 }))
-            if(listeLeer){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()) } else _hedgeLeerSeit.delete(String(p.id))
+            if(listeLeer && !unterwegs){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()) } else _hedgeLeerSeit.delete(String(p.id))
             // Master seit dem Open im Reader gesehen? (Voraussetzung der schnellen Regel)
             if(st && frisch && kontoFrisch && kontoPasst && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null) _hedgeMasterGesehen.add(pidK)
             const schnell = !!(st && /^puls-/.test(String(st.positionen_tab || '')))
@@ -26889,11 +26916,11 @@
               sekundenSeitOpen: (Date.now() - (Date.parse(h.opened_at || h.at || '') || 0)) / 1000, wurzel: wz, richtung,
               kontoPlan, kontoAktiv, kontenAnzahl, kontoStabilMs,
               leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0,
-              schnell, gesehen: _hedgeMasterGesehen.has(pidK) })
+              schnell, gesehen: _hedgeMasterGesehen.has(pidK), unterwegs })
             // Hedge öffnete beim Senden-Klick, die Master-Position tauchte aber nie auf (Order abgelehnt / nicht gefüllt): Puls-Chrome-Reader
             // (Beweis-Modus) zeigt das Plan-Konto ≥ 10 s flach, Konto ≥ 10 s stabil, Open ≥ 30 s her → Fusion wieder zu (01.10.2026)
             // .1560: Konto ≥ 60 s stabil und ≥ 30 s leer (vorher 10/10 — Apex-Hedge Mike 02:36 Dubai nach dem Zurückschalten vom Hand-Konto zu)
-            if(schnell && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 60000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 30000
+            if(schnell && !unterwegs && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 60000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 30000
                && (Date.now() - (Date.parse(h.opened_at || h.at || '') || Date.now())) >= 30000){
               _hedgeLeerSeit.delete(pidK)
               await hedgeSoloSchliessen(p, 'master_nie_da', kurs)
@@ -44313,7 +44340,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1604'
+  const OS_TAB_BUILD = '2026-09-22.1605'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
