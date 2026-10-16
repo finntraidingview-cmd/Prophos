@@ -8211,7 +8211,8 @@
             </div>
             <div class="vp-zeile"><b>Funded · TP ($)</b>
               <span>Tradeify</span> <input type="number" class="input mono vp-in" data-vp-fu="tradeify-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="tradeify-bis" min="0" step="5" value="290">
-              <span style="margin-left:6px">Apex</span> <input type="number" class="input mono vp-in" data-vp-fu="apex-von" min="0" step="5" value="55"> – <input type="number" class="input mono vp-in" data-vp-fu="apex-bis" min="0" step="5" value="75">
+              <span style="margin-left:6px">Apex 150k</span> <input type="number" class="input mono vp-in" data-vp-fu="apex-von" min="0" step="5" value="370"> – <input type="number" class="input mono vp-in" data-vp-fu="apex-bis" min="0" step="5" value="390">
+              <span style="margin-left:6px">Apex 100k</span> <input type="number" class="input mono vp-in" data-vp-fu="apex100-von" min="0" step="5" value="320"> – <input type="number" class="input mono vp-in" data-vp-fu="apex100-bis" min="0" step="5" value="340">
               <span style="margin-left:6px">Topstep</span> <input type="number" class="input mono vp-in" data-vp-fu="topstep-von" min="0" step="5" value="220"> – <input type="number" class="input mono vp-in" data-vp-fu="topstep-bis" min="0" step="5" value="240">
               <span style="margin-left:6px">andere</span> <input type="number" class="input mono vp-in" data-vp-fu="sonst-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="sonst-bis" min="0" step="5" value="290">
             </div>
@@ -28247,7 +28248,7 @@
       }
       if(!kd){ out.lotsSub = 'noch nicht gewürfelt'; return out }
       const vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE }
-      const [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm), vp), root = vp.instr === 'nq' ? 'NQ' : 'MNQ', ppl = mklPpl(root)
+      const [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm, kd), vp), root = vp.instr === 'nq' ? 'NQ' : 'MNQ', ppl = mklPpl(root)
       const sp = (a, b, f) => a === b ? f(a) : `${f(a)}–${f(b)}`
       out.ktTxt = `${sp(ka, kb, f0)} × ${root}`
       let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: num(kd.live_balance), regeln: vp.regeln, zufall: 0.5 }) }catch(_){}
@@ -44340,7 +44341,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1607'
+  const OS_TAB_BUILD = '2026-09-22.1608'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53311,7 +53312,7 @@
             try{
               const tpEl = document.getElementById('tp-master-tp'), mid = document.getElementById('tp-master')?.value
               const acc = (accounts || []).find(a => String(a.id) === String(mid))
-              if(tpEl && !(parseFloat(tpEl.value) > 0) && acc && typeof wdTpSpanne === 'function'){ const [v, b2] = wdTpSpanne(acc.firm); tpEl.value = Math.round(v + Math.random() * (b2 - v)) }
+              if(tpEl && !(parseFloat(tpEl.value) > 0) && acc && typeof wdTpSpanne === 'function'){ const [v, b2] = wdTpSpanne(acc.firm, acc); tpEl.value = Math.round(v + Math.random() * (b2 - v)) }
             }catch(_){}
             // Risiko Slave aus der Staffel vorbelegen, Multiplikator-Box + Vorschau nachziehen (TP steht jetzt)
             try{ tpWdSlaveRiskVorbelegen(); tpRecompute(); tpWdVorschau() }catch(e){ console.warn('[wd]', e) }
@@ -54824,7 +54825,7 @@
   // Reine Rechnung je Konto auf V2: nur TP aus der Spanne (Challenge/Funded je Firma) — kein Slave, keine Kosten
   function tpVorplanZeileV2(acc, regeln, zufall){
     const funded = tpVorplanIstFunded(acc)
-    const firma = tpVorplanFirmaKey(acc && acc.firm)
+    const firma = tpVorplanFirmaKey(acc && acc.firm, acc)
     const rg = regeln || TP_VP_VORGABE
     const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((rg.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (rg.ch || TP_VP_VORGABE.ch)))
     const r = (typeof zufall === 'number') ? zufall : Math.random()
@@ -54860,15 +54861,27 @@
    *                      Topstep 220-240 als Vorgabe, alles editierbar), Risiko Slave nach Puffer-Staffel.
    *  Puffer = Live-Balance − Startbalance + Max-Drawdown (was das Konto noch verlieren kann); ohne
    *  Live-Stand = Max-Drawdown (frisches Konto). Der Betrag steht je Zeile editierbar im Popup. */
-  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], fnfutures: [270, 290], apex: [55, 75], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], fnfutures: [270, 290], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
   // fnfutures = FundedNext Futures (Finn 16.10.2026: „genau gleich wie bei Tradeify“, Gewinntag 250 $) — eigener Schlüssel, damit
   // die CFD-Konten von FundedNext weiter unter „sonst“ laufen
-  const TP_VP_FIRMEN = ['tradeify', 'fnfutures', 'apex', 'topstep', 'sonst']
+  // Apex nach Kontogröße (17.10.2026, Finn: „Winning Days unterscheiden zwischen 150k und 100k — 100k braucht nur 300 $, 150k 350 $"):
+  // 'apex' = 150k (Schlüssel bleibt, gespeicherte Werte gelten weiter), 'apex100' = 100k
+  const TP_VP_FIRMEN = ['tradeify', 'fnfutures', 'apex', 'apex100', 'topstep', 'sonst']
 
-  function tpVorplanFirmaKey(firm){
+  // konto = Konto-Objekt, Name oder Größe — Größe aus dem Namen („100k …", Namensregel), sonst Startbalance/Balance; unbekannt = 150k wie bisher
+  function tpVpApex100(konto){
+    if(konto == null) return false
+    if(typeof konto === 'number') return Math.abs(konto - 100000) < Math.abs(konto - 150000)
+    const m = String((typeof konto === 'string' ? konto : konto.name) || '').match(/(\d{2,3})\s*k\b/i)
+    if(m) return Number(m[1]) === 100
+    const b = Number(konto.startingBalance || konto.starting_balance || konto.balance)
+    return b > 0 && Math.abs(b - 100000) < Math.abs(b - 150000)
+  }
+  function tpVorplanFirmaKey(firm, konto){
     const f = String(firm || '').toLowerCase()
     if(f.includes('fundednext') && f.includes('futur')) return 'fnfutures'   // vor den anderen: „FundedNext Futures“ (16.10.2026)
-    return f.includes('tradeify') ? 'tradeify' : f.includes('apex') ? 'apex' : f.includes('topstep') ? 'topstep' : 'sonst'
+    if(f.includes('apex')) return tpVpApex100(konto) ? 'apex100' : 'apex'
+    return f.includes('tradeify') ? 'tradeify' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
   function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'funded_cfd' || t === 'live' || t === 'winning_days' }
@@ -54999,7 +55012,7 @@
     if(!(dd > 0)) return { fehler: 'kein Max-Drawdown am Konto' }
     const regeln = o.regeln || TP_VP_VORGABE
     const funded = tpVorplanIstFunded(acc)
-    const firma = tpVorplanFirmaKey(acc && acc.firm)
+    const firma = tpVorplanFirmaKey(acc && acc.firm, acc)
     const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((regeln.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (regeln.ch || TP_VP_VORGABE.ch)))
     let slaveEur, puffer = null, plus = null, live = null, groesse = 0, basis, hinweis = ''
     if(funded){
@@ -55571,7 +55584,7 @@
     const von = Math.max(1, Math.round(+sp[0] || std)); return [von, Math.max(von, Math.round(+sp[1] || von))]
   }
   // Zufällig aus der Spanne, je Konto neu (Jitter-Doktrin: nicht auf allen IDs dieselbe Größe)
-  function wdKontrakteFuer(firma, vp){ const [a, b] = wdKtSpanne(tpVorplanFirmaKey(firma), vp); return a + Math.floor(Math.random() * (b - a + 1)) }
+  function wdKontrakteFuer(firma, vp, konto){ const [a, b] = wdKtSpanne(tpVorplanFirmaKey(firma, konto), vp); return a + Math.floor(Math.random() * (b - a + 1)) }
   /* WÜRFEL JE KONTO (.1487, Finn 13.10.2026 am „Plan heute Nacht“: „ich will hier schon den fertig geplanten Trade sehen — genau, was
    * Take Profit, genau, was die Lots sind, mit Multiplikator“): TP und Kontrakte werden EINMAL je Konto und Tag gewürfelt und am
    * Tagesplan-Eintrag gemerkt (k.wuerfel = {tp, kt}) — wie die Startzeit (wdKontoZeiten). Mac (wdPlaeneAnlegen) und PC-Tab
@@ -55583,11 +55596,11 @@
    * Staffel) oder null. REIN RECHNEND, schreibt nur in k; true = etwas geändert (Aufrufer speichert die Zeile). */
   function wdKontoWuerfel(k, kd, vp, z){
     let ge = false
-    const sp = wdTpSpanne(kd.firm), [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm), vp)
+    const sp = wdTpSpanne(kd.firm, kd), [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm, kd), vp)
     const w = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { tp: Number(k.wuerfel.tp), kt: Number(k.wuerfel.kt) } : null
     const tpVor = Number(kd.tp_vorgabe) > 0 ? Number(kd.tp_vorgabe) : null
     const tp = tpVor != null ? tpVor : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
-    const kt = (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp)
+    const kt = (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp, kd)
     const quelle = tpVor != null ? 'vorgabe' : 'wuerfel'
     if(!w || w.tp !== tp || w.kt !== kt || (k.wuerfel || {}).quelle !== quelle){ k.wuerfel = { tp, kt, quelle, at: new Date().toISOString() }; ge = true }
     let vor = null
@@ -55653,7 +55666,7 @@
     await supabase.from('wd_farmer_regeln').update({ vorplan: v, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
     if(_wd.regeln) _wd.regeln.vorplan = v
   }
-  const wdTpSpanne = firm => { const fu = (wdVorplanRegeln().regeln.fu) || TP_VP_VORGABE.fu; return tpVorplanSpanne(...(fu[tpVorplanFirmaKey(firm)] || TP_VP_VORGABE.fu.sonst)) }
+  const wdTpSpanne = (firm, konto) => { const fu = (wdVorplanRegeln().regeln.fu) || TP_VP_VORGABE.fu, k = tpVorplanFirmaKey(firm, konto); return tpVorplanSpanne(...(fu[k] || TP_VP_VORGABE.fu[k] || TP_VP_VORGABE.fu.sonst)) }
 
   /* ── Daten für den Mac (23.09.2026, Finn: „sobald gewürfelt wird, werden schon alle Trades geplant …
    *    das ist ja kein Verlauf mit geplanten Trades, ich sehe keinen Account" / „ich muss gerade auf jede
@@ -55767,7 +55780,7 @@
     const proId = new Map()
     const add = (uid, person, k) => { const e = proId.get(uid) || { user_id: uid, name: person || uid.slice(0, 8), konten: [] }; e.konten.push(k); proId.set(uid, e) }
     const konto = (r, firm, farm) => {
-      const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm), arch = !!r.archiviert
+      const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm, r), arch = !!r.archiviert
       return { id: String(r.id), name: r.name || '', firm, ext, farm: farm && !arch, aktiv: !!(farm && !arch && ext), tpVon: sp[0], tpBis: sp[1], archiviert: arch,
                hinweis: arch ? WD_HINWEIS_ARCHIV : !farm ? WD_HINWEIS_FARM : ext ? '' : WD_HINWEIS_EXT }
     }
@@ -55839,7 +55852,7 @@
       if(!wdIstWdKonto(k.acc)) continue   // nur Typ Winning Days (26.09.2026)
       const farm = (k.acc.wdFarm === undefined) ? true : !!k.acc.wdFarm   // alter Build ohne Feld: alle
       const basis = { id: String(k.acc.id), name: k.acc.name, firm: k.acc.firm, ext: String(k.acc.externalId || '').trim(), farm }
-      const sp = wdTpSpanne(k.acc.firm)
+      const sp = wdTpSpanne(k.acc.firm, k.acc)
       if(!farm){ konten.push({ ...basis, aktiv: false, tpVon: sp[0], tpBis: sp[1], hinweis: WD_HINWEIS_FARM }); continue }
       if(sl.fehler){ konten.push({ ...basis, aktiv: !!basis.ext, tpVon: sp[0], tpBis: sp[1], hinweis: basis.ext ? '' : WD_HINWEIS_EXT }); continue }
       if(k.belegt){ konten.push({ ...basis, aktiv: false, hinweis: 'hat schon einen geplanten/laufenden Plan' }); continue }
@@ -55959,7 +55972,7 @@
         // .1487: Würfel aus der Zeile (oder jetzt würfeln und merken) — der Plan trägt genau die Werte, die „Plan heute Nacht“ zeigt
         if(wdKontoWuerfel(k, kd, vp, z)) ge = true
         if(k.wuerfel && Number(k.wuerfel.tp) > 0) z.tp = Number(k.wuerfel.tp)
-        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp), symbol, row.richtung, tag)
+        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), symbol, row.richtung, tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
@@ -56057,7 +56070,7 @@
     try{ localStorage.setItem(TP_NQ_MODE_LS, vp.instr) }catch(_){}
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
     const symbol = (vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
-    const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
+    const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp, acc), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
     wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an, [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk])   // wie der Mac: Popup-Rechnung (26.09.2026)
@@ -56128,7 +56141,7 @@
     if(offenFuer){
       for(const c of tpVorplanKandidaten()){
         if(!wdIstWdKonto(c.acc) || konten.some(k => String(k.id) === String(c.acc.id))) continue   // nur Typ Winning Days (26.09.2026)
-        const farm = farmVon(c.acc), sp = wdTpSpanne(c.acc.firm)
+        const farm = farmVon(c.acc), sp = wdTpSpanne(c.acc.firm, c.acc)
         konten.push({ id: String(c.acc.id), name: c.acc.name, firm: c.acc.firm, ext: String(c.acc.externalId || '').trim(), farm, aktiv: farm, tpVon: sp[0], tpBis: sp[1], hinweis: farm ? '' : WD_HINWEIS_FARM })
         geaendert = true
       }
@@ -56349,10 +56362,10 @@
     box.querySelectorAll('[data-wd-se]').forEach(el => el.addEventListener('change', () => { wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
   }
   // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
-  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex', '#0984e3', 'Gewinntag 53 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'MFFU, Lucid …'] }
+  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'MFFU, Lucid …'] }
   // „3 im Farm · 1 aus" — wird nach dem Laden der Konten nachgezogen (wdRender), ohne die Zeilen neu zu bauen
   function wdFirmaKurz(k, konten){
-    const ges = konten.filter(q => tpVorplanFirmaKey(q.firm) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
+    const ges = konten.filter(q => tpVorplanFirmaKey(q.firm, q) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
     return ges.length ? `${n} im Farm${ges.length > n ? ` · ${ges.length - n} aus` : ''}` : 'keine Konten'
   }
   function wdFirmenZaehlen(){
@@ -58240,19 +58253,25 @@
   /* Good Day (01.10.2026, Finn: „wenn der P&L bei Tradeify über 250 ist und der Account Winning Day ist, automatisch als
    * Winning Day anhaken"): gleiche Regel wie _wd_good_day im Backend. tcRecompute ruft das bei jeder P&L-Änderung (Hand,
    * Vorbelegung, Auto-Nachlader); hat Finn den Haken selbst angefasst, bleibt er, wie er ist. */
-  const TC_GOOD_DAY_MIN = { tradeify: 250, 'fundednext futures': 250, topstep: 150 }   // Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
+  const TC_GOOD_DAY_MIN = { tradeify: 250, 'fundednext futures': 250, topstep: 150, apex: { 100000: 300, 150000: 350 } }   // Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), Apex 100k 300 $ / 150k 350 $ (Finn 17.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
+  // Schwelle des Kontos: Zahl je Firma, bei Apex je Größe (unbekannte Größe = 150k-Wert, zählt also nie zu früh)
+  function tcGoodDayGrenze(a){
+    const firma = String((a && a.firm) || '').toLowerCase(), k = Object.keys(TC_GOOD_DAY_MIN).find(x => firma.includes(x))
+    if(!k) return null
+    const g = TC_GOOD_DAY_MIN[k]
+    return typeof g === 'number' ? g : (typeof tpVpApex100 === 'function' && tpVpApex100(a) ? g[100000] : g[150000])
+  }
   let _tcGoodDayHand = false
   function tcGoodDayAuto(p, mPl){
     const cb = document.getElementById('tc-winning-day'), wrap = document.getElementById('tc-winning-day-wrap'), hint = document.getElementById('tc-winning-day-hint')
     if(!cb || !wrap || wrap.hidden || cb.disabled || _tcGoodDayHand) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
     if(!a || a.type !== 'winning_days' || String(a.id) !== String(_tcWinningAccId)) return
-    const firma = String(a.firm || '').toLowerCase()
-    const good = isFinite(mPl) && Object.keys(TC_GOOD_DAY_MIN).some(k => firma.includes(k) && mPl > TC_GOOD_DAY_MIN[k])
+    const grenze = tcGoodDayGrenze(a)
+    const good = isFinite(mPl) && grenze != null && mPl > grenze
     if(good === cb.checked) return
     cb.checked = good
-    const grenze = Object.keys(TC_GOOD_DAY_MIN).find(k => firma.includes(k))
-    if(hint) hint.textContent = good ? `🏆 Good Day — Master-P&L über ${grenze ? TC_GOOD_DAY_MIN[grenze] : 250} $, automatisch angehakt.` : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+    if(hint) hint.textContent = good ? `🏆 Good Day — Master-P&L über ${grenze != null ? grenze : 250} $, automatisch angehakt.` : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
   }
   document.getElementById('tc-winning-day')?.addEventListener('change', () => { _tcGoodDayHand = true })
 

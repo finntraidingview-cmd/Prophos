@@ -12445,7 +12445,7 @@ def _wd_zahl(v):
 # Good Day (01.10.2026, Finn: „wenn der Winning Day abgehakt wird und der P&L bei Tradeify über 250 ist, automatisch als
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
-WD_GOOD_DAY_MIN = {"tradeify": 250.0, "fundednext futures": 250.0, "topstep": 150.0}   # Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
+WD_GOOD_DAY_MIN = {"tradeify": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}}   # Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
 
 
 def _wd_good_day(konto, master_pl):
@@ -12458,7 +12458,16 @@ def _wd_good_day(konto, master_pl):
     except (TypeError, ValueError):
         return False
     firma = str(konto.get("firm") or "").lower()
-    return any(k in firma and pl > grenze for k, grenze in WD_GOOD_DAY_MIN.items())
+    for k, grenze in WD_GOOD_DAY_MIN.items():
+        if k not in firma:
+            continue
+        if isinstance(grenze, dict):
+            # Schwelle je Kontogröße (Apex, 17.10.2026): Größe aus dem Namen („100k …"), unbekannt = 150k-Wert (zählt nie zu früh)
+            m = re.search(r"(\d{2,3})\s*k\b", str(konto.get("name") or ""), re.I)
+            grenze = grenze.get(str(int(m.group(1)) * 1000) if m else "", grenze.get("150000"))
+        if grenze is not None and pl > float(grenze):
+            return True
+    return False
 
 
 def _wd_good_day_konto_upd(konto, heute):
