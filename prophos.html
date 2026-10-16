@@ -44240,7 +44240,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1596'
+  const OS_TAB_BUILD = '2026-09-22.1597'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48664,13 +48664,15 @@
     }catch(e){ console.warn('[start-fehler] schreiben', (e && e.message) || e) }
   }
   // Letzte Startminute des Tages (deutsche Zeit): Ende des letzten Start-Fensters (Delta-Monitor), höchstens start_bis (16:30 dt)
-  function sfTagesEnde(){
+  // route (16.10.2026, Hinweis Slave 2): CFD-Wege (mt5v2/mt5) enden zusätzlich bei d.cfd_bis (18:00 Dubai, vom Backend umgerechnet)
+  function sfTagesEnde(route){
     const d = (typeof _apd !== 'undefined' && _apd && _apd.d) || null
     const fen = (d && Array.isArray(d.fenster) && d.fenster.length) ? d.fenster : AP_DELTA_FENSTER
     let bis = 0
     for(const f of fen){ const b0 = apPrHm(f.bis), b = b0 === 0 ? 1440 : b0; if(b != null && b > bis) bis = b }
     const sb = apPrHm((d && d.start_bis) || '16:30')
-    return Math.min(bis || 1440, sb != null ? sb : 1440)
+    const cb = (route === 'mt5v2' || route === 'mt5') && d && d.cfd_bis ? apPrHm(d.cfd_bis) : null
+    return Math.min(bis || 1440, sb != null ? sb : 1440, cb != null ? cb : 1440)
   }
   // Ist die Ursache weg? → Klartext (warum neu eingeplant) oder null
   async function sfBehoben(plan, f){
@@ -48732,7 +48734,7 @@
       }
     }
     const neuMs = Date.now() + (hand ? 60000 : (2 + Math.random() * 4) * 60000)
-    if(!hand && apPrHm(new Date(neuMs).toISOString()) >= sfTagesEnde()) return 'tagesende'
+    if(!hand && apPrHm(new Date(neuMs).toISOString()) >= sfTagesEnde(plan.route)) return 'tagesende'
     const q = supabase.from('trade_plans').update({ start_um: new Date(neuMs).toISOString(), start_um_gestartet_at: null })
       .eq('id', plan.id).eq('status', 'planned').is('started_at', null).is('orbit_gesendet_at', null)
     const { data, error } = await q.select('*')

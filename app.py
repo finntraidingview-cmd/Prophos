@@ -23217,6 +23217,7 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
                        for f in ap_fenster_liste(stand["zeiten"])],
            # 16.10.2026: das Frontend (sfTagesEnde, Neu-Einplanen) liest d.start_bis — fehlte bisher, der Tab nahm 16:30 dt an
            "start_bis": _ap_hhmm_txt(ap_start_bis(stand["zeiten"])),
+           "cfd_bis": None if ap_cfd_bis(stand["zeiten"]) is None else _ap_hhmm_txt(ap_cfd_bis(stand["zeiten"])),   # CFD-Ende (sfTagesEnde)
            "bot": _ap_bot_stand(stand["param"], stand["jetzt"]), "hinweise": hinweise}
     # SZENARIO (08.10.2026, für Slave 5s Anzeige): Kurve jetzt (laufende) und +60 min (mit den in 60 min startenden), Steigung, schlimmster
     # Fall links/rechts über ±AP_SZENARIO_R; Trades ohne Satz/$ je Pkt zählen 0 und stehen in szenario.ohne
@@ -24360,7 +24361,7 @@ def ap_nachhol_minute(p, plaene, starts, id_fest, jetzt_min, zeiten=None, laufze
     # PC-Regel bleibt (60/20 min sind seit 08.10.2026 weg): nie zwei Puls-Starts derselben ID gleichzeitig — wie ap_verteilung (abstand_id_min + 2)
     gap_pc = float(zeiten.get("abstand_id_min") or 3) + 2
     gap_i, gap_f = max(gap_i, gap_pc), max(gap_f, gap_pc)
-    bis, jm = float(ap_start_bis(zeiten)), float(jetzt_min)
+    bis, jm = float(ap_klasse_bis(zeiten, p.get("route"))), float(jetzt_min)   # CFD nur bis zeiten.cfd_bis (16.10.2026, Hinweis S2)
     kommend = [x for x in plaene or () if str(x.get("plan_id")) != pid and x.get("start_min") is not None and float(x["start_min"]) >= jm]
     eigen = [(float(x["start_min"]), x.get("firma")) for x in kommend if str(x.get("user_id")) == u]
     eigen += [(float(x["start"]), x.get("firma")) for x in starts or () if str(x.get("user_id")) == u and x.get("start") is not None]
