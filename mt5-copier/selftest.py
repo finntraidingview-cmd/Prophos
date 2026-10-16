@@ -1945,6 +1945,7 @@ def main():
     results.append(test_cdp_konto_weg_gleicher_login())
     results.append(test_puls_fehler_1571())
     results.append(test_puls_fehler_1603())
+    results.append(test_puls_fehler_1606())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -4930,6 +4931,86 @@ def test_puls_fehler_1603():
         print("✓ Puls-Fehler .1603: TP/SL-Einheit selbst auf $ — ein Wähler-Klick, ein '$'-Klick, Beweis Beschriftung; ohne Beweis Abbruch wie bisher, Menü per Esc zu")
     return ok
 
+
+
+def test_puls_fehler_1606():
+    """Routine „Puls-Fehler" 16.10.2026 20:30 Dubai (.1606, Muster „f9-dialog nicht gefunden", 30 Fälle seit 13.10. auf 5 PCs, jede Spur
+    „Terminal selbst vorn"): _f9_ursache benennt aus der API, warum MT5 nach F9 nichts öffnete (Handel am Konto gesperrt / Terminal nicht
+    verbunden / Symbol gesperrt), listet die Kind-Fenster des Terminals, wirft nie; nur wenn das Terminal selbst vorn lag. Einbau in run():
+    genau einmal, nach der Diagnose und vor dem zweiten Anlauf, Grund als Zusatz hinter der unveränderten Meldung. Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1606: " + text)
+            ok = False
+
+    class _W:
+        handle = 777
+
+        class element_info:
+            process_id = 4242
+            class_name = "Attrappe"
+
+        def window_text(self):
+            return "100000001 — Attrappe"
+
+    class _K:
+        def __init__(self, t):
+            self._t = t
+            self.element_info = type("EI", (), {"class_name": "Afx"})()
+
+        def window_text(self):
+            return self._t
+
+    alt_api, alt_kind = ob._order_api_zustand, ob._kind_fenster
+    try:
+        ob._kind_fenster = lambda w, voll=False: [_K("EURUSD,H1"), _K("NAS100,M1"), _K("")]
+        ob._order_api_zustand = lambda path, expected, symbol: {"symbol": symbol, "verbunden": True, "handel_konto": False, "balance": 100000.0, "symbol_modus": 4}
+        u1 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+        ob._order_api_zustand = lambda path, expected, symbol: {"symbol": symbol, "verbunden": False, "handel_konto": True, "symbol_modus": 4}
+        u2 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+        ob._order_api_zustand = lambda path, expected, symbol: {"symbol": symbol, "verbunden": True, "handel_konto": True, "symbol_modus": 4}
+        u3 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+        ob._order_api_zustand = lambda path, expected, symbol: {"symbol": symbol, "verbunden": True, "handel_konto": True, "symbol_modus": 0}
+        u4 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+        ob._order_api_zustand = lambda path, expected, symbol: {"symbol": symbol}
+        u5 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+        u6 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 555)
+        u7 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 0)
+
+        def _wirft(path, expected, symbol):
+            raise RuntimeError("kaputt")
+        ob._order_api_zustand = _wirft
+        u8 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+        ob._order_api_zustand = lambda path, expected, symbol: {"symbol": symbol, "verbunden": True, "handel_konto": True, "symbol_modus": 4}
+        ob._kind_fenster = lambda w, voll=False: []
+        u9 = ob._f9_ursache("p", 100000001, "NAS100", _W(), 777)
+    finally:
+        ob._order_api_zustand, ob._kind_fenster = alt_api, alt_kind
+    chk(u1 and u1[0].startswith("F9-Ursache (API): Handel am Konto gesperrt") and "100 000.00" in u1[0] and "Kind-Fenster ['EURUSD,H1', 'NAS100,M1', 'Afx']" in u1[0]
+        and u1[1].startswith(" — Grund: Handel am Konto gesperrt") and "(API)" in u1[1] and "nicht neu starten" in u1[1],
+        f"Handel am Konto gesperrt → Grund mit Kontostand, Kind-Fenster, Zusatz mit Handgriff ({u1})")
+    chk(u2 and "Terminal nicht mit dem Server verbunden" in u2[0] and "Internet/Login" in u2[1], f"nicht verbunden → Grund + Handgriff ({u2})")
+    chk(u3 and "kein Grund aus der API" in u3[0] and "Kind-Fenster" in u3[0] and u3[1] == "", f"alles in Ordnung → nur Spur-Zeile, kein Zusatz ({u3})")
+    chk(u4 and "für den Handel gesperrt" in u4[0] and u4[1].startswith(" — Grund: Symbol NAS100"), f"Symbol gesperrt → Grund ({u4})")
+    chk(u5 and "nicht lesbar" in u5[0] and "keine Verbindung" in u5[0] and u5[1] == "", f"API ohne Werte → nicht lesbar, kein Zusatz ({u5})")
+    chk(u6 is None and u7 is None, f"fremdes Fenster vorn / kein Fenster vorn → None ({u6}, {u7})")
+    chk(u8 and "nicht lesbar (RuntimeError)" in u8[0] and u8[1] == "", f"API wirft → nicht lesbar, wirft nicht weiter ({u8})")
+    chk(u9 and u9[0].endswith("; keine Kind-Fenster"), f"ohne Kind-Fenster → Zeile endet mit keine Kind-Fenster ({u9})")
+    # Einbau in run(): genau einmal, nach _f9_diagnose und vor dem zweiten Anlauf; Zusatz hinter der unveränderten Meldung; keine Schleife
+    q_run = _i.getsource(ob.run)
+    f9 = q_run[q_run.index("dlg = _finde_order_dialog(w)"):q_run.index('trail.append("F9-Dialog offen")')]
+    chk(f9.count("_f9_ursache(path, expected, symbol, w, vorn)") == 1 and f9.index("_f9_diagnose(w)") < f9.index("_f9_ursache(") < f9.index("if vorn != 0:")
+        and f9.count("f9_zusatz") == 2 and f9.index('"F9-Dialog nicht gefunden — Abbruch, nichts gesendet. ["') < f9.rindex("f9_zusatz")
+        and q_run.count('"F9-Dialog nicht gefunden — Abbruch, nichts gesendet. ["') == 1 and "for " not in f9 and "while " not in f9,
+        "run(): _f9_ursache genau einmal zwischen Diagnose und zweitem Anlauf, Zusatz hinter der Meldung, Meldungsanfang gleich")
+    q = _i.getsource(ob._f9_ursache)
+    chk("sleep(" not in q and "type_keys" not in q and "click" not in q.lower(), "_f9_ursache: nur lesen — kein sleep, keine Taste, kein Klick")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1606: F9 ohne Dialog → Ursache aus der API (Handel am Konto / Verbindung / Symbol) + Kind-Fenster, nur lesen, Einbau einmal")
+    return ok
 
 def test_cdp_konto_weg_gleicher_login():
     """KONTO WEG BEI RICHTIGEM LOGIN (08.10.2026, Finn am Radar, Apex-Konto, Nachlesung Versuch 5): derselbe Apex-User ist der Login-

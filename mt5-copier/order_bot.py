@@ -11199,6 +11199,42 @@ def _f9_diagnose(w):
     return "F9 ohne Dialog: " + lage + (f"; weitere Terminal-Fenster {andere[:3]}" if andere else ""), vorn
 
 
+def _f9_ursache(path, expected, symbol, w, vorn):
+    """Nach „F9 ohne Dialog: Terminal selbst vorn" (Routine „Puls-Fehler" 16.10.2026 20:30 Dubai, s. run): WARUM öffnete MT5 nichts?
+    Liest nur, wirft nie. Nur wenn das Terminal selbst vorn lag (vorn == Kennung von w) — F9 kam dann nachweislich an; sonst None.
+    MT5 bietet „Neue Order" (F9) nur an, wenn das Terminal mit dem Server verbunden ist und der Server den Handel am Konto erlaubt —
+    beides steht in der API, dieselbe Lesung wie bei „keine Bestätigung" (_order_api_zustand: verbunden, Handel am Konto, Symbol-Modus),
+    die Einordnung macht order_grund_bestimmen (ohne Journal/Dialog). Dazu die Kind-Fenster des Terminals (Charts, Dialoge): ein
+    Order-Fenster, das _ist_order_dialog nicht erkennt, stünde dort.
+    -> (spur_zeile, meldungs_zusatz): der Zusatz nur mit benanntem Grund („ — Grund: … (API) → Handgriff"), sonst leer."""
+    try:
+        eigen = int(getattr(w, "handle", 0) or 0)
+        if not vorn or not eigen or int(vorn) != eigen:
+            return None
+    except Exception:
+        return None
+    kinder = []
+    try:
+        for k in _kind_fenster(w):
+            try:
+                kinder.append((k.window_text() or "").strip()[:30] or str(k.element_info.class_name or "?"))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    kf = f"; Kind-Fenster {kinder[:4]}" if kinder else "; keine Kind-Fenster"
+    try:
+        api = _order_api_zustand(path, expected, symbol)
+        g = order_grund_bestimmen(None, "", api)
+    except Exception as e:
+        return f"F9-Ursache (API): nicht lesbar ({type(e).__name__})" + kf, ""
+    if g:
+        return f"F9-Ursache (API): {g[0]} → {g[1]}" + kf, f" — Grund: {g[0]} ({g[2]}) → {g[1]}"
+    if api.get("verbunden") is None and api.get("handel_konto") is None:
+        return f"F9-Ursache (API): nicht lesbar ({api.get('fehler') or 'keine Verbindung'})" + kf, ""
+    return "F9-Ursache (API): Terminal verbunden, Handel am Konto erlaubt, Symbol handelbar — kein Grund aus der API" + kf, ""
+
+
 def run(cfg_path, cmd):
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -11290,6 +11326,18 @@ def run(cfg_path, cmd):
         diag, vorn = _f9_diagnose(w)
         if diag:
             trail.append(diag)
+        # TERMINAL SELBST VORN (Routine „Puls-Fehler" 16.10.2026 20:30 Dubai, Muster „v2order/signal: f9-dialog nicht gefunden — abbruch,
+        # nichts gesendet": 30 Fälle seit 13.10. auf 5 PCs, 14 davon am 16.10. auf 3 PCs). JEDE Spur seit .1571 sagt „Terminal selbst
+        # vorn" — F9 kam an, MT5 öffnete trotzdem nichts; keine weiteren Terminal-Fenster. Am selben PC lief Minuten vorher eine Order
+        # in einem ANDEREN Terminal durch, am betroffenen Terminal scheiterte derselbe Plan stundenlang bei jedem Anlauf — also kein
+        # Fokus-, Tempo- oder Desktop-Problem, sondern der Zustand dieses Terminals/Kontos. MT5 bietet „Neue Order" nur an, wenn der
+        # Server den Handel am Konto erlaubt und das Terminal verbunden ist — genau das liest _order_api_zustand schon bei „keine
+        # Bestätigung". Hier dieselbe Lesung (_f9_ursache): Grund in Spur und Meldung, dazu die Kind-Fenster des Terminals. Nur lesen —
+        # zweiter Anlauf und Abbruch bleiben wie bisher, Meldungsanfang (Muster-Schlüssel) unverändert.
+        urs = _f9_ursache(path, expected, symbol, w, vorn)
+        f9_zusatz = urs[1] if urs else ""
+        if urs:
+            trail.append(urs[0])
         if vorn != 0:
             _fenster_betreten(w)
             if str(expected) not in (w.window_text() or ""):
@@ -11304,7 +11352,7 @@ def run(cfg_path, cmd):
         if dlg is None:
             return {"ok": False, "retry_ok": True,
                     "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"
-                           + (" — " + _UAC_HINWEIS if vorn == 0 else "")}
+                           + (" — " + _UAC_HINWEIS if vorn == 0 else "") + f9_zusatz}
     trail.append("F9-Dialog offen")
     # Kurze Setz-Zeit NACH dem Fund (02.09.2026, Finns Fund direkt nach dem
     # Tempo-Umbau: "manchmal vertippt er sich beim Asset und findet es nicht —
