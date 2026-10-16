@@ -21517,7 +21517,8 @@
     tvv3:   ['Orbit',  'Orbit — Puls platziert in TradingView, Fusion-Gegenhedge; schließt über das Userscript im Puls-Chrome, Radar als Backup'],
     tsv2:   ['Topstep V2', 'Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep"), kein Hedge; P&L aus der Balance wie Orbit V2'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
-    tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
+    tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto'],
+    polar:  ['Polar',     'Polar — Funded-Futures gegen Funded-CFD einer anderen ID; manuell: beide Seiten selbst, „Erledigt" mit beiden P&Ls']
   }
   function sysStickerHtml(key){
     const cfg = SYS_STICKER[key]
@@ -21526,6 +21527,7 @@
   }
   function planSysKey(p){
     if(!p) return 'dup'
+    if(p.route === 'polar')  return 'polar'   // 16.10.2026: vorher fiel Polar auf 'dup' — Sticker „Duplikium", Block „Weitere"
     if(p.route === 'mt5')    return 'mt5'
     if(p.route === 'tvplus') return 'tvplus'
     if(tpIstWdPlan(p))       return 'wd'   // Winning Day vor Orbit V2 (25.09.2026)
@@ -29412,7 +29414,7 @@
   // Liste im Radar (09.10.2026): feste Reihenfolge und Akzentfarbe je Modell — „Orbit" ist Orbit V3 (heißt wie im Plan-Popup)
   // Seit 09.10.2026 ~07:45 Dubai (Finn) in zwei Obergruppen wie die Filterleiste oben: „Mit Hedge" (Orbit vor Echo, dann Winning Day),
   // „Ohne Hedge" (Orbit V2, Echo V2, Topstep V2) — Kopf je Obergruppe (wdlObergruppenHtml), gilt für Radar und Trades → Offen
-  const WDL_HEDGE_GRUPPEN = [['Mit Hedge', ['Orbit', 'Echo', 'Winning Day']], ['Ohne Hedge', ['Orbit V2', 'Echo V2', 'Topstep V2']]]
+  const WDL_HEDGE_GRUPPEN = [['Mit Hedge', ['Orbit', 'Echo', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Orbit V2', 'Echo V2', 'Topstep V2']]]   // Polar (16.10.2026): Trades → Offen
   const WDL_LISTE_REIHE = WDL_HEDGE_GRUPPEN.flatMap(([, l]) => l)
   // bloecke = [[Modell, Einträge]] in WDL_LISTE_REIHE-Reihenfolge (+ „Weitere"); blockHtml(k, b) zeichnet einen Modell-Block.
   // Vor dem ersten Block jeder Obergruppe ihr Kopf „Mit Hedge · n" (n = Einträge der Gruppe); „Weitere" ohne Obergruppe am Ende.
@@ -40497,7 +40499,7 @@
   /* OFFEN WIE DAS RADAR (Finn 09.10.2026 ~07:27 Dubai: „richtig hässlich und unübersichtlich, bitte so clean wie Radar"): je Modell ein Block
    * wie im Radar „Läuft" (wdl-mb, Reihenfolge WDL_LISTE_REIHE, Farbe WDL_MODELL_FARBE), darin die unveränderten Karten als Zeilen (CSS .tc-zl).
    * Modell aus planSysKey — dieselben Namen wie die Sticker; Duplikum/Mirror/Orbit (Duplikum) unter „Weitere" mit Sticker in der Zeile. */
-  const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', tvv2: 'Orbit V2', tsv2: 'Topstep V2' }
+  const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', tvv2: 'Orbit V2', tsv2: 'Topstep V2', polar: 'Polar' }
   /* PULS-ZEILE JE TRADE (Finn 09.10.2026 ~20:36 Dubai zu „Überprüfen": „dass ich hier die ganzen Puls- und was passiert ist sehe"): unter
    * jeder Zeile in Warte auf Puls / Überprüfen / Erledigt eine kurze Zeile aus dem, was am Plan schon steht (mt5_baseline: tv Start/Einstieg,
    * start_fehler, final Endlesung/Fehler/Konto weg, Grund der Nachlesung) — aufklappbar mit der Bot-Spur (final.lesen_trail, tv.lesen_trail,
@@ -44238,7 +44240,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1593'
+  const OS_TAB_BUILD = '2026-09-22.1594'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53488,17 +53490,16 @@
       const r = await fetch(`${WATCHER_HOME}/polar/plan`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
-      const fertigText = (d.auto
-        ? `✓ Polar-Plan angelegt (${String(d.plan_id).slice(0, 8)}) — der PC von ${esc(master.person)} startet ihn jetzt, der PC von ${esc(slave.person)} nimmt den Slave an.`
-        : d.status === 'open'
-          ? `✓ Polar-Trade läuft (${String(d.plan_id).slice(0, 8)}) — beide Seiten selbst platzieren und beenden, dann in Trades bei ${esc(master.person)} „Erledigt" mit beiden P&Ls.`
-          : `✓ Polar-Plan gespeichert (${String(d.plan_id).slice(0, 8)}) — in Trades bei ${esc(master.person)} unter Geplant („Läuft" setzt du dort).`)
       // Popup nach Erfolg zu (16.10.2026, Finns Live-Test Plan d51bb46f: Popup blieb offen, Knöpfe wieder frei — ein zweiter Klick
       // hätte einen zweiten Plan angelegt). Der Text geht in den Toast, die Knöpfe bleiben bis zum Schließen gesperrt.
       fertig = true
       polarEl('polarModal').classList.remove('open')
       msg('')
-      if(typeof atToast === 'function') atToast(`🧭 ${fertigText.replace(/^✓ /, '')} · ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
+      // Toast setzt textContent — Namen ohne esc (S2-Hinweis 16.10.2026: sonst „&amp;" im Toast)
+      const toastText = d.auto ? `Polar-Plan angelegt — der PC von ${master.person} startet ihn jetzt`
+        : d.status === 'open' ? `Polar-Trade läuft — beide Seiten selbst platzieren, dann in Trades bei ${master.person} „Erledigt" mit beiden P&Ls`
+        : `Polar-Plan gespeichert — in Trades bei ${master.person} unter Geplant`
+      if(typeof atToast === 'function') atToast(`🧭 ${toastText} (${String(d.plan_id).slice(0, 8)}) · ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
       try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
       try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
     }catch(e){
