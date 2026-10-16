@@ -16438,12 +16438,48 @@ AP_CFD_AB_STANDARD = "00:20"           # Finn 07.10.2026: CFD (Echo V2/mt5v2) er
 AP_CFD_ROUTEN = ("mt5v2", "mt5")
 
 
-def ap_cfd_ab(zeiten):
-    """Früheste Startminute (dt) für CFD-Trades aus zeiten.cfd_ab, Standard 00:20. Futures dürfen ab 00:00."""
+def ap_cfd_ab(zeiten, heute=None):
+    """Früheste Startminute (dt) für CFD-Trades aus zeiten.cfd_ab, Standard 00:20. Futures dürfen ab 00:00. Seit 16.10.2026 auch als
+    {"tz": "Asia/Dubai", "uhr": "02:15"} (Finn: CFD-Fenster 02:15–18:00 Dubai) — je Tag in deutsche Minuten umgerechnet (ap_zeit_dt_min)."""
+    m = ap_zeit_dt_min((zeiten or {}).get("cfd_ab"), heute)
+    return m if m is not None else _ap_hhmm(AP_CFD_AB_STANDARD)
+
+
+def ap_cfd_bis(zeiten, heute=None):
+    """Letzte Startminute (dt) für CFD-Trades (NEUE-KONTEN-SOFORT, Finn 16.10.2026: Challenge-Typen „FUTURES 02:00–20:00 Dubai, CFD
+    02:15–18:00 Dubai"). zeiten.cfd_bis = {"tz": "Asia/Dubai", "uhr": "18:00"} oder "HH:MM" deutscher Zeit (ap_zeit_dt_min).
+    Fehlt der Wert: None = kein eigenes CFD-Ende (wie Futures, start_bis)."""
+    return ap_zeit_dt_min((zeiten or {}).get("cfd_bis"), heute)
+
+
+def ap_zeit_dt_min(cb, heute=None):
+    """REIN RECHNEND: Uhrzeit → Minute des deutschen Tages `heute` (Standard: heute). cb = "HH:MM" (deutsche Zeit) oder {"tz", "uhr"} —
+    dann am Tag `heute` umgerechnet, Sommer-/Winterzeit stimmt so von selbst (18:00 Dubai = 16:00 dt im Sommer, 15:00 im Winter).
+    Leer/ungültig → None."""
+    if not cb:
+        return None
     try:
-        return _ap_hhmm((zeiten or {}).get("cfd_ab") or AP_CFD_AB_STANDARD)
-    except (ValueError, AttributeError):
-        return _ap_hhmm(AP_CFD_AB_STANDARD)
+        if isinstance(cb, dict):
+            de = _ap_tz(AP_TZ_TAG)
+            h = heute or datetime.now(timezone.utc).astimezone(de).date()
+            h = h.date() if isinstance(h, datetime) else h
+            m = _ap_hhmm(cb.get("uhr"))
+            lokal = datetime(h.year, h.month, h.day, m // 60, m % 60, tzinfo=_ap_tz(cb.get("tz") or "Asia/Dubai")).astimezone(de)
+            tage = (lokal.date() - h).days
+            return max(0, min(24 * 60, tage * 24 * 60 + lokal.hour * 60 + lokal.minute))
+        return _ap_hhmm(cb)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def ap_klasse_bis(zeiten, route, heute=None):
+    """Letzte Startminute (dt) je Klasse: CFD-Wege (AP_CFD_ROUTEN) min(start_bis, cfd_bis), sonst start_bis."""
+    bis = ap_start_bis(zeiten)
+    if route in AP_CFD_ROUTEN:
+        cb = ap_cfd_bis(zeiten, heute)
+        if cb is not None:
+            bis = min(bis, cb)
+    return bis
 
 
 # VERTEILEN STATT DURCHRATTERN (08.10.2026, Slave-Terminal 3 — Finn zu Ina: 3× Apex 150k um 03:56/03:57/03:58, 3× FundedNext 100k um
@@ -19579,8 +19615,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             tr_info[ukey] = {"key": ukey, "user": key.split("|")[0], "firma": firm_n, "fest": None, "fest_refs": fest, "gruppe": key,
                              "route": r_teil[0][0]["regel"].get("route") or "mt5v2",          # Klasse CFD/Futures (08.10.2026)
                              "ab_min": ap_cfd_ab(zeiten) if (r_teil[0][0]["regel"].get("route") or "mt5v2") in AP_CFD_ROUTEN else 0,
-                             "bis_min": (_ap_hhmm(ap_kette_regel(r_teil[0][0]["regel"])["t1_bis"])
-                                         if r_teil[0][1].get("kette") else None),          # Topstep-Kette: Trade 1 bis t1_bis dt
+                             "bis_min": min([x for x in (
+                                 _ap_hhmm(ap_kette_regel(r_teil[0][0]["regel"])["t1_bis"]) if r_teil[0][1].get("kette") else None,   # Topstep-Kette: Trade 1 bis t1_bis dt
+                                 ap_klasse_bis(zeiten, r_teil[0][0]["regel"].get("route") or "mt5v2", tag_d.date())) if x is not None]),   # CFD bis zeiten.cfd_bis (16.10.2026)
                              "fest_durch": (("laufender Plan" if fest_p.get("status") == "open" else "geplanter Plan") if fest_p else None),
                              "dauer_min": versatz[-1] / 60.0 + 2, "gewicht": sum(w["tp"] for _, w in r_teil),
                              "fkey": ap_firma_key(firmen, r_teil[0][0]["a"].get("firm")),
@@ -22165,6 +22202,9 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
             lo, hi = int(max(fen[0], jetzt_min + AP_FAELLIG_MIN + 5)) + 1, int(fen[1]) - 1
             if any(je[i].get("route") in AP_CFD_ROUTEN for i in ids):
                 lo = max(lo, ap_cfd_ab(zeiten))           # CFD nie vor zeiten.cfd_ab (07.10.2026)
+                cb = ap_cfd_bis(zeiten)
+                if cb is not None:
+                    hi = min(hi, int(cb) - 1)             # CFD nie nach zeiten.cfd_bis (16.10.2026)
             if hi <= lo:
                 continue
             eng = len(ids) > 1 and any(b_ - a_ < max(AP_ABSTAND_ID_FIRMA_MIN, AP_FIRMA_ABSTAND_MIN) for a_, b_ in zip(sorted(zustand[i]["start"] for i in ids),
@@ -22455,6 +22495,8 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
             return None, f"Start zu früh — frühestens {_ap_hhmm_txt(int(float(jetzt_min)) + AP_FAELLIG_MIN + 1)}"
         if p.get("route") in AP_CFD_ROUTEN and neu < ap_cfd_ab(zeiten):
             return None, f"CFD erst ab {_ap_hhmm_txt(ap_cfd_ab(zeiten))} — vorher ist der CFD-Markt zu"
+        if p.get("route") in AP_CFD_ROUTEN and ap_cfd_bis(zeiten) is not None and neu >= ap_cfd_bis(zeiten):
+            return None, f"CFD nur bis {_ap_hhmm_txt(ap_cfd_bis(zeiten) - 1)} deutscher Zeit (zeiten.cfd_bis) — später startet kein CFD-Trade mehr"
         grund = _ap_tranche_frei(t, neu, tr, zeiten)
         if grund:
             return None, grund
@@ -25210,13 +25252,10 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
     for t in [t for t in ziel_m if t != tag]:
         ziel_m.pop(t, None)
     ziel_frei = ap_nachplan_ziel_frei(letzter, tag, ziel_m.get(tag))
-    neu_bis = ap_nachplan_neu_bis(reg.get("zeiten"))
+    # Die 16-Uhr-Regel für neue Konten (.1564, ap_konto_neu_zu_spaet) ist seit 16.10.2026 aus (Finn: ersetzt durch die Fenster Futures
+    # 02:00–20:00 / CFD 02:00–18:00 Dubai — passt ein neues Konto noch ins Fenster seiner Klasse, startet es heute; sonst plant der Nachtlauf)
     kand = ap_nachplan_kandidaten(konten, plaene, tag, tz, letzter, _ap_archiviert(), regeln_at=regeln_at, ziel_frei=ziel_frei,
-                                  jetzt=jetzt, neu_bis=neu_bis)
-    spaet = [str(a.get("id")) for a in konten if ap_konto_neu_zu_spaet(a, jetzt, neu_bis)]
-    if spaet:
-        print(f"[auto-plan] Nachplanen {tag}: {len(spaet)} heute nach {_ap_hhmm_txt(neu_bis[1])} {neu_bis[0]} angelegte Konten erst morgen "
-              f"({', '.join(x[:8] for x in spaet[:6])})", flush=True)
+                                  jetzt=jetzt, neu_bis=None)
     if not kand:
         ap_nachplan_regeln_merken(merker, tag, regeln_at)
         return None, kand
@@ -25258,6 +25297,7 @@ def ap_nachplan_tick(jetzt, zustand):
     info["geplant"] = len(erg.get("geplant") or [])
     info["ausgelassen"] = len(erg.get("ausgelassen") or [])
     if info["geplant"]:
+        _ap_auto_best["at"] = 0.0          # NEUE KONTEN SOFORT (16.10.2026): frische Vorschläge noch in diesem Schleifendurchlauf bestätigen
         print(f"[auto-plan] Nachplanen {tag} {d.strftime('%H:%M')} dt: {info['geplant']} geplant für {len(kand)} Konten ohne Plan "
               f"({info['ausgelassen']} ausgelassen)", flush=True)
     return erg
@@ -26148,6 +26188,47 @@ def ap_anlauf_rest(start_ts, jetzt_ts, sperre=AP_ANLAUF_S):
     return max(0.0, float(start_ts) + float(sperre) - float(jetzt_ts))
 
 
+_ap_wecker = {"konto": None, "balance": None, "at": 0.0, "geweckt": 0, "bal_at": 0.0}
+AP_WECKER_BAL_MIN_S = 180   # frische Balance weckt höchstens alle 3 min (Prüfer S2 16.10.2026: ~39 Lesungen/h → sonst 1 Nachplan-Lauf je Minute)
+
+
+def ap_wecker_pruefen(stand, alt):
+    """REIN RECHNEND (testbar) — NEUE KONTEN SOFORT (Finn 16.10.2026): Ereignis statt Takt. stand/alt = {"konto": jüngstes
+    accounts.created_at, "balance": jüngstes accounts.tv_balance_at} jetzt / beim letzten Blick. → (konto_neu, balance_neu). Beim ersten
+    Blick (alt None) nie wecken — sonst liefe nach jedem Neustart alles doppelt."""
+    if not alt or alt.get("konto") is None and alt.get("balance") is None:
+        return False, False
+    neu = lambda k: bool(stand.get(k)) and str(stand.get(k)) > str(alt.get(k) or "")   # noqa: E731
+    return neu("konto"), neu("balance")
+
+
+def ap_wecker_tick():
+    """Jede Minute (ap_loop, vor dem Nachplanen): zwei Mini-Abfragen — jüngstes angelegtes Konto, jüngste TV-Balance-Lesung. Ziel (Finn-Korrektur
+    16.10.2026): ein neues Konto ist in ≤ 10 min erkannt, gelesen, eingeplant und bestätigt — die STARTZEIT bleibt normal im Fenster verteilt. Neues Konto
+    (Kauf oder Nachfolger aus „Überprüfen") → Nachplanen, Balance-Takt und Auto-Bestätigen laufen in DIESEM Durchlauf statt nach ihrem
+    Takt (bis 10 min); frische Balance → Nachplanen + Auto-Bestätigen (ein Konto, das auf die Lesung wartete, rutscht sofort nach).
+    Deckel, Abstände, Fenster und Riegel der Takte bleiben unberührt — nur der Zeitpunkt des nächsten Laufs rückt vor."""
+    k = sb_select("accounts", {"select": "created_at", "order": "created_at.desc", "limit": "1"}) or [{}]
+    b = sb_select("accounts", {"select": "tv_balance_at", "tv_balance_at": "not.is.null", "order": "tv_balance_at.desc", "limit": "1"}) or [{}]
+    stand = {"konto": (k[0] or {}).get("created_at"), "balance": (b[0] or {}).get("tv_balance_at")}
+    konto_neu, bal_neu = ap_wecker_pruefen(stand, {"konto": _ap_wecker["konto"], "balance": _ap_wecker["balance"]}
+                                           if _ap_wecker["at"] else None)
+    _ap_wecker.update(stand, at=time.time())
+    if bal_neu and not konto_neu:
+        if time.time() - (_ap_wecker.get("bal_at") or 0) < AP_WECKER_BAL_MIN_S:
+            bal_neu = False                # Supabase-Diät: Balance-Wecker gedrosselt, der Stand oben ist trotzdem gemerkt
+        else:
+            _ap_wecker["bal_at"] = time.time()
+    if konto_neu or bal_neu:
+        _ap_info["nachplan_at"] = 0.0
+        _ap_auto_best["at"] = 0.0
+        if konto_neu:
+            _ap_bal_auto["at"] = 0.0
+        _ap_wecker["geweckt"] = _ap_wecker.get("geweckt", 0) + 1
+        print(f"[auto-plan] ⏰ Wecker: {'neues Konto' if konto_neu else ''}{' + ' if konto_neu and bal_neu else ''}"
+              f"{'frische Balance' if bal_neu else ''} → Nachplanen/Bestätigen jetzt", flush=True)
+
+
 def ap_loop():
     """Nachtlauf nach zeiten.nachtlauf (Standard 01:00 Dubai, 07.10.2026; vorher 00:00 dt) mit Nachholen, nur wenn
     auto_plan_regeln.aktiv; Sa/So gibt es keinen Zieltag. Dazu jede Minute der Takt-Check des Ausgleichs-Bots
@@ -26168,6 +26249,10 @@ def ap_loop():
             print(f"[ziel-wache] ⚠️ {e}", flush=True)
         _schleife_schlafen(rest)
     while True:
+        try:
+            ap_wecker_tick()                  # NEUE KONTEN SOFORT (16.10.2026): neues Konto / frische Balance → Takte jetzt statt später
+        except Exception as e:
+            print(f"[auto-plan] ⚠️ Wecker: {type(e).__name__}: {e}", flush=True)
         try:
             ap_nacht_tick(datetime.now(timezone.utc), _ap_info)
             _ap_info["last_error"] = ""
