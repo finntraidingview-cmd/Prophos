@@ -7398,16 +7398,10 @@
                 <option value="live">Live</option>
               </select>
             </label>
-            <!-- Payout anfragbar (16.10.2026, Finn): nur Funded CFD, sortiert nach Tagen bis anfragbar -->
-            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
-              <span>Payout:</span>
-              <select id="acc-payout-filter" class="input" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:110px">
-                <option value="">Alle</option>
-                <option value="jetzt">jetzt anfragbar</option>
-                <option value="3">≤ 3 Tage</option>
-                <option value="7">≤ 7 Tage</option>
-                <option value="fehlt">Datum fehlt</option>
-              </select>
+            <!-- Nächster Payout zuerst (16.10.2026, Finn: statt Payout-Filter nur sortieren, nichts ausblenden) — Zustand in localStorage -->
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Funded CFD nach „Payout anfragbar ab“ sortieren: anfragbar/überfällig zuerst, dann angefragt, dann ohne Datum">
+              <input type="checkbox" id="acc-payout-sort" style="margin:0">
+              <span>Nächster Payout zuerst</span>
             </label>
           </div>
           <div style="display:flex;align-items:center;gap:14px">
@@ -11432,16 +11426,10 @@
                     <option value="wartet">Waiting for Payout</option>
                   </select>
                 </label>
-                <!-- Payout anfragbar (16.10.2026, Finn): nur Funded CFD, sortiert nach Tagen bis anfragbar (payoutAbInfo) -->
-                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub)">
-                  <span>Payout:</span>
-                  <select id="adm-k-payout" class="input adm-k-f" style="padding:5px 28px 5px 10px;font-size:12.5px;height:auto;width:auto;min-width:110px">
-                    <option value="">Alle</option>
-                    <option value="jetzt">jetzt anfragbar</option>
-                    <option value="3">≤ 3 Tage</option>
-                    <option value="7">≤ 7 Tage</option>
-                    <option value="fehlt">Datum fehlt</option>
-                  </select>
+                <!-- Nächster Payout zuerst (16.10.2026, Finn): nur sortieren, nichts ausblenden — Zustand in localStorage -->
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Funded CFD nach „Payout anfragbar ab“ sortieren: anfragbar/überfällig zuerst, dann angefragt, dann ohne Datum">
+                  <input type="checkbox" id="adm-k-payout" class="adm-k-f" style="margin:0">
+                  <span>Nächster Payout zuerst</span>
                 </label>
                 <input id="adm-k-search" class="input" type="search" placeholder="Name, External ID, Firma, ID …" style="padding:5px 10px;font-size:12.5px;height:auto;width:200px">
               </div>
@@ -16061,7 +16049,7 @@
      * dieselben Chip-Helfer wie renderAccounts zeichnen. Konten der angemeldeten ID kommen aus `accounts` (dort zählt zielFortschritt
      * aus den eigenen Plänen); fremde IDs: Mindesttage = Server-Zählung (ap_tage_ist) als manueller Stand, automatische WD-Zählung
      * weggelassen — das Frontend kennt fremde Pläne nicht, lieber kein Abzeichen als ein falsches „0/5". Reine Anzeige, keine Aktionen. */
-    const admK = { person: '', firm: '', type: '', ziel: '', payout: '', q: '', arch: false }
+    const admK = { person: '', firm: '', type: '', ziel: '', payout: false, q: '', arch: false }
     function admKontoAusZeile(r){
       const eigen = String(r.user_id) === String(currentUserId) ? (accounts || []).find(x => String(x.id) === String(r.id)) : null
       if(eigen) return eigen
@@ -16100,7 +16088,7 @@
       fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
       fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
       admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
-      admK.ziel = $('adm-k-ziel').value; admK.payout = $('adm-k-payout')?.value || ''; admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
       const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
       const qn = norm(admK.q)
       const zeilen = []
@@ -16114,15 +16102,13 @@
         if(admK.ziel && admKontoZiel(a) !== admK.ziel) continue
         // Payout ab (16.10.2026): Datum = payout_ready_at, offene Anfrage liefert /admin/overview je Funded-CFD-Konto (po_offen)
         let po = null; try{ po = payoutAbInfo(a, { offen: !!r.po_offen }) }catch(_){ po = null }
-        if(admK.payout && !payoutAbPasst(po, admK.payout)) continue
         if(qn && !norm([r.name, r.ext, r.firm, r.person].join(' ')).includes(qn)) continue
         zeilen.push({ r, a, po })
       }
       // Reihenfolge wie Accounts (accSortiert: Kontoart → Firma), innerhalb gleicher Art/Firma nach ID
       zeilen.sort((x, y) => String(x.r.person || '').localeCompare(String(y.r.person || ''), 'de'))
       let sortiert = accSortiert(zeilen.map(z => z.a)), zu = new Map(zeilen.map(z => [z.a, z.r]))
-      if(admK.payout){ const t = new Map(zeilen.map(z => [z.a, (z.po || {}).tage ?? 99]))   // Filter Payout: wer zuerst anfragbar ist, oben
-        sortiert = sortiert.map((a, i) => ({ a, i })).sort((x, y) => t.get(x.a) - t.get(y.a) || x.i - y.i).map(x => x.a) }
+      if(admK.payout){ const je = new Map(zeilen.map(z => [z.a, z.po])); sortiert = payoutZuerst(sortiert, a => je.get(a)) }   // „Nächster Payout zuerst" (16.10.2026)
       $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}`
       $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
       const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
@@ -16159,6 +16145,7 @@
       }).join('')
       tb.querySelectorAll('[data-acc-po]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); accPayoutFeldOeffnen(el.dataset.accPo) }))   // nur eigene Konten
     }
+    { const cb = $('adm-k-payout'); if(cb) cb.checked = poSortLesen('prophos_adm_payout_zuerst') }   // Haken gemerkt (16.10.2026)
     document.querySelectorAll('.adm-k-f').forEach(el => el.addEventListener('change', admKontenRender))
     $('adm-k-search')?.addEventListener('input', admKontenRender)
 
@@ -34079,7 +34066,7 @@
   function persistAccounts(){ /* no-op: Supabase is source of truth */ }
 
   // ── Account-Filter State ──
-  let accFilters = { firm: '', type: '', payout: '' }   // payout: Payout anfragbar '' | jetzt | 3 | 7 | fehlt (16.10.2026)
+  let accFilters = { firm: '', type: '' }
   let accSearch = ''  // Freitext-Suche (Header-Suchbar)
 
   function populateAccountFilters(){
@@ -34100,10 +34087,11 @@
     accFilters.type = e.target.value
     if(typeof renderAccounts === 'function') renderAccounts()
   })
-  document.getElementById('acc-payout-filter')?.addEventListener('change', e => {   // Payout anfragbar (16.10.2026)
-    accFilters.payout = e.target.value
-    if(typeof renderAccounts === 'function') renderAccounts()
-  })
+  ;(function(){   // „Nächster Payout zuerst" (16.10.2026): Haken je Browser gemerkt
+    const cb = document.getElementById('acc-payout-sort'); if(!cb) return
+    cb.checked = poSortLesen('prophos_acc_payout_zuerst')
+    cb.addEventListener('change', () => { poSortMerken('prophos_acc_payout_zuerst', cb.checked); if(typeof renderAccounts === 'function') renderAccounts() })
+  })()
 
   /* Header-Suchbar (⌘K) */
   ;(function wireGlobalSearch(){
@@ -35011,11 +34999,10 @@
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
-      if(filters.payout && !payoutAbPasst(poInfo(a), filters.payout)) return false
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     }))
-    if(filters.payout) visible = visible.map((a, i) => ({ a, i, t: (poInfo(a) || {}).tage ?? 99 })).sort((x, y) => x.t - y.t || x.i - y.i).map(x => x.a)
+    if(document.getElementById('acc-payout-sort')?.checked) visible = payoutZuerst(visible, poInfo)   // „Nächster Payout zuerst" (16.10.2026)
     kwSt().sichtbar = visible.map(a => a.id)
     kwKachelMalen()
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -44169,7 +44156,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1579'
+  const OS_TAB_BUILD = '2026-09-22.1580'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57707,7 +57694,7 @@
     if(h && h.offen) return { stufe: 'angefragt', tage: null }
     const i = payoutReadyInfo(a)
     if(!i) return { stufe: 'fehlt', tage: null }
-    return { stufe: i.faellig ? 'jetzt' : 'tage', tage: Math.max(0, i.tage), kurz: i.kurz, lang: i.lang }
+    return { stufe: i.faellig ? 'jetzt' : 'tage', tage: Math.max(0, i.tage), tag: i.tag, kurz: i.kurz, lang: i.lang }
   }
   // Chip unter dem Namen (ersetzt bei Funded CFD den allgemeinen Termin-Chip). klick = eigenes Konto → Feld im Account-Modal öffnen
   function payoutAbBadgeHtml(a, h, klick){
@@ -57719,14 +57706,21 @@
     if(i.stufe === 'jetzt') return `<span class="acc-po acc-po-jetzt" title="Payout anfragbar seit ${escapeHtml(i.lang)}">💸 Payout jetzt</span>`
     return `<span class="acc-po acc-po-tage" title="Payout anfragbar ab ${escapeHtml(i.lang)}">💸 Payout in ${i.tage} T · ab ${i.kurz}</span>`
   }
-  // Filter „Payout": '' alle · 'jetzt' · '3' · '7' · 'fehlt' (Datum nachtragen) → passt das Konto?
-  function payoutAbPasst(i, f){
-    if(!f) return true
-    if(!i) return false
-    if(f === 'fehlt') return i.stufe === 'fehlt'
-    if(i.stufe !== 'jetzt' && i.stufe !== 'tage') return false
-    return f === 'jetzt' ? i.stufe === 'jetzt' : i.tage <= Number(f)
+  /* „Nächster Payout zuerst" (16.10.2026, Finn nach .1574: kein Filter, nur sortieren): Rang je Konto — 0 Datum gesetzt (früheste /
+   * am längsten überfällige zuerst), 1 angefragt, 2 Datum fehlt, 3 kein Funded CFD (bleibt in bisheriger Reihenfolge unten). */
+  function payoutSortRang(i){
+    if(!i) return [3, 0]
+    if(i.stufe === 'jetzt' || i.stufe === 'tage') return [0, Date.parse(i.tag + 'T12:00:00Z') || 0]
+    return [i.stufe === 'angefragt' ? 1 : 2, 0]
   }
+  // list stabil umsortieren; info(a) → payoutAbInfo des Kontos
+  function payoutZuerst(list, info){
+    return list.map((a, n) => ({ a, n, r: payoutSortRang(info(a)) }))
+      .sort((x, y) => x.r[0] - y.r[0] || x.r[1] - y.r[1] || x.n - y.n).map(x => x.a)
+  }
+  // als Funktionsdeklarationen: die Haken werden schon beim Laden des Moduls (weiter oben) gesetzt
+  function poSortLesen(k){ try{ return localStorage.getItem(k) === '1' }catch(_){ return false } }
+  function poSortMerken(k, an){ try{ localStorage.setItem(k, an ? '1' : '0') }catch(_){} }
   // Eigene Konten: offene Payout-Anfragen je Konto (nur für „angefragt"), einmal je 5 min geladen
   let _poEigen = { je: new Map(), at: 0, laeuft: false }
   async function poEigenSicherstellen(){
