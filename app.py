@@ -18978,6 +18978,105 @@ def ap_normal_auto_tick():
     _ap_normal_auto["n"] = n
     return n
 
+# REVIEW OHNE ABHAKEN (Finn 16.10.2026, Radar „Abhaken · 1": Aurel Tradeify 150k …8681, Konto über Accounts → Review → Nachfolger schon
+# umgestellt, der Trade selbst nie abgehakt → stand ewig unter „Abhaken"). Ursache: der Nachfolger-Assistent, Archivieren und Phase-
+# Umstellen fassen die Pläne des alten Kontos nicht an (archivPlaeneEntfernen räumt nur nie gestartete). Jetzt hakt dieser Takt (nach
+# ap_normal_auto_tick, alle 5 min, auch für fremde IDs) einen beendeten Plan in 'review' selbst ab, sobald sein Konto WEITER ist:
+# archiviert als bestanden/manuell oder in einer anderen Phase als der Plan. Gleicher Weg wie der Knopf (_wd_erledigt_upd), P&L in dieser
+# Reihenfolge: echte Lesung (ap_echte_balancen) → Ende − Start aus der Endlesung (auch Demo — genau das hat das Radar vorbelegt; ein
+# bestandenes Konto liest Puls nicht mehr) → master_pl am Plan. Nie: Hedge-Pläne (Fusion-P&L gehört dazu), geblowt archiviert (macht der
+# Blow-Weg bzw. Finn), Pläne mit „Manuelle Arbeit"-Kennzeichen, Pläne ohne jede Zahl — die bleiben im Radar.
+AP_REVIEW_WEITER_GRUENDE = ("passed", "passed_pending", "manual")
+
+
+def ap_review_weiter_pruefen(p, acc, arch):
+    """REIN RECHNEND (testbar): → {pl, quelle, grund} oder None. arch = Archiv-Eintrag des Kontos (dict) oder None."""
+    if p.get("status") != "review" or p.get("blown") is True:
+        return None
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    if bl.get("hedge") or (_wd_num(p.get("hedge_eur")) or 0) > 0:
+        return None
+    m = bl.get("manuell")
+    if isinstance(m, dict) and m.get("at"):
+        return None
+    grund = None
+    if isinstance(arch, dict) and arch.get("archived"):
+        if str(arch.get("reason") or "manual") not in AP_REVIEW_WEITER_GRUENDE:
+            return None
+        grund = "archiviert_" + str(arch.get("reason") or "manual")
+    elif acc and p.get("konto_typ") and acc.get("account_type") and str(p["konto_typ"]) != str(acc["account_type"]):
+        grund = "phase_" + str(acc["account_type"])
+    if not grund:
+        return None
+    echt = ap_echte_balancen(p)
+    if echt:
+        return {"pl": round(echt[1] - echt[0], 2), "quelle": echt[2], "grund": grund}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+    vorher = _wd_num(tv.get("balance_start")) or _wd_num(bl.get("master_balance"))
+    nachher = _wd_num(fin.get("balance_end")) or _wd_num(fin.get("master_balance"))
+    if vorher and nachher and vorher > 0 and nachher > 0:
+        return {"pl": round(nachher - vorher, 2), "quelle": "ende_" + str(fin.get("quelle") or "final"), "grund": grund}
+    if _wd_num(p.get("master_pl")) is not None:
+        return {"pl": round(float(_wd_num(p.get("master_pl"))), 2), "quelle": "plan", "grund": grund}
+    return None
+
+
+def _ap_archiv_eintraege():
+    """{konto_id: Archiv-Eintrag} aus allen archive-Zeilen (Lesart wie _ap_archiviert)."""
+    out = {}
+    for row in _sb_all("user_settings", {"select": "value", "key": "eq.archive"}):
+        v = row.get("value")
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except ValueError:
+                v = None
+        if isinstance(v, dict):
+            for acc_id, info in v.items():
+                if isinstance(info, dict):
+                    out[str(acc_id)] = info
+    return out
+
+
+def ap_review_weiter_tick():
+    """Pläne in 'review', deren Konto weiter ist (Nachfolger/Archiv/andere Phase), selbst abhaken. → Anzahl."""
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,route,status,blown,master_account_id,master_name,konto_typ,mt5_baseline,"
+                                               "hedge_eur,master_pl,ended_at,completed_at,started_at,updated_at",
+                                     "status": "eq.review", "blown": "not.is.true"})
+    plaene = [p for p in plaene or [] if p.get("master_account_id")]
+    if not plaene:
+        return 0
+    ids = sorted({str(p["master_account_id"]) for p in plaene})
+    konten = {str(a["id"]): a for a in sb_select("accounts", {"select": "id,account_type", "id": f"in.({','.join(ids)})"}) or []}
+    archiv = _ap_archiv_eintraege()
+    n = 0
+    for p in plaene:
+        kid = str(p["master_account_id"])
+        try:
+            k = ap_review_weiter_pruefen(p, konten.get(kid), archiv.get(kid))
+            if not k:
+                continue
+            pid = str(p["id"])
+            jetzt_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            upd, fehler = _wd_erledigt_upd(p, k["pl"], None, jetzt_iso, _cme_handelstag())
+            if fehler:
+                print(f"[review-weiter] {pid[:8]} nicht abgehakt: {fehler[1]}", flush=True)
+                continue
+            base = upd.get("mt5_baseline") or (p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {})
+            upd["mt5_baseline"] = dict(base, auto_abgehakt={"at": jetzt_iso, "quelle": k["quelle"], "grund": k["grund"]})
+            filt = {"id": f"eq.{pid}", "status": "eq.review", "blown": "not.is.true"}
+            if p.get("updated_at"):
+                filt["updated_at"] = f"eq.{p['updated_at']}"
+            if sb_update("trade_plans", filt, upd):
+                n += 1
+                print(f"[review-weiter] ✓ Plan {pid[:8]} · {p.get('master_name') or ''} · {k['pl']:+.2f} $ ({k['quelle']}, Konto {k['grund']}) abgehakt",
+                      flush=True)
+        except Exception as e:
+            print(f"[review-weiter] ⚠️ {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+    return n
+
+
 def ap_letzter_trade_geblasen(regel, balance, plaene_konto, bal_stand=None):
     """REIN RECHNEND (Master 07.10.2026, Anlass Tradeify-Challenge 149.046 nach −4.521 $ = Liquidation, Boden aber nicht
     bekannt): hat der LETZTE beendete Trade des Kontos mindestens 95 % des Drawdowns verloren (final.today_pnl, sonst
@@ -26114,6 +26213,7 @@ def ap_loop():
         try:
             if ap_blow_auto_tick() is not None:   # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
                 ap_normal_auto_tick()             # danach im selben Takt: normale Trades (kein Blow, kein Ziel) abhaken (14.10.2026)
+                ap_review_weiter_tick()           # und Trades, deren Konto schon weiter ist (Nachfolger/Archiv/Phase, 16.10.2026)
             _ap_blow_auto["fehler"] = ""
         except Exception as e:
             _ap_blow_auto["fehler"] = f"{type(e).__name__}: {e}"
