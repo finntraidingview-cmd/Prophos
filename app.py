@@ -26360,6 +26360,10 @@ def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
     reg = reg or (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg or not reg.get("aktiv"):
         return None
+    try:
+        ap_menge_wache(jetzt, reg)            # MENGEN-WACHE (16.10.2026) — eigenes try, die Fenster-Wache läuft trotzdem
+    except Exception as e:
+        print(f"[mengen-wache] ⚠️ {type(e).__name__}: {e}", flush=True)
     stand = _ap_stand_laden(reg, jetzt)
     plaene = _ap_stand_plaene(stand)
     zuviel = ap_fenster_ueberhang(plaene, stand.get("zeiten"), stand["jetzt_min"])
@@ -26392,6 +26396,93 @@ def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
             print(f"[fenster-wache] {str(x['plan_id'])[:8]} nicht verschoben: {f2 or 'Guard (gestartet/bestätigt+fällig/geändert)'}", flush=True)
     _ap_fenster_wache["verschoben"] = (fertig + _ap_fenster_wache.get("verschoben", []))[:40]
     return fertig
+
+
+# ══ MENGEN-WACHE (Master 16.10.2026, Finn: „Apex — TP passt immer, aber NQ-Anzahl fix immer 3"; Regel live per SQL, fünf geplante Apex-Pläne
+# hatten noch 4–5 NQ aus dem Nachtlauf). Alle 10 min (im Takt der Fenster-Wache): ungestartete Futures-Auto-Pläne, deren Kontrakt-Zahl
+# außerhalb der Phasen-Regel liegt, bekommen die Menge der Regel und — nur bei „letzter Trade (Rest bis Ziel)", wo der TP von der Menge
+# abhängt (Punkte-Puffer 6 Pkt × Menge) — den TP, wie ap_konto_rechnen ihn heute rechnet. SL, Risiko, Startzeit, Richtung, Bestätigung
+# bleiben. Nicht: CFD (Lots/Punktwert je ID), Topstep-Kette, Tage-Mini, Hand-Werte. Guard planned/ungestartet/alte Menge in derselben
+# PATCH, Protokoll auto_plan_umplanung (quelle bot, „[Mengen-Wache] …"). ══
+_AP_BAL_NOTIZ = re.compile(r"Balance ([\d.]+)")
+
+
+def ap_menge_fix(plan, regel, phase, balance):
+    """REIN RECHNEND (testbar): (patch, text) für einen Plan, dessen master_contracts außerhalb der Regel liegt — sonst (None, grund).
+    patch = {master_contracts[, master_tp]}. Die Grenzen kommen aus ap_konto_rechnen selbst (u_menge 0 bzw. 1), damit je_groesse,
+    Skalierung und Schritt genau wie im Planer gelten."""
+    try:
+        alt = float(plan.get("master_contracts"))
+    except (TypeError, ValueError):
+        return None, "ohne Menge"
+    u = {"tp": 0.5, "sl": 0.5, "puffer": 0.5}
+    w0, g0 = ap_konto_rechnen(regel, phase, balance, dict(u, menge=0.0))
+    w1, g1 = ap_konto_rechnen(regel, phase, balance, dict(u, menge=1.0))
+    if not w0 or not w1:
+        return None, g0 or g1 or "Regel rechnet nicht"
+    if w0.get("kette") or w0.get("tage_mini"):
+        return None, "Kette/Tage-Mini — eigene Mengen"
+    lo, hi = float(w0["menge"]), float(w1["menge"])
+    if lo <= alt <= hi:
+        return None, "Menge passt"
+    w = w0 if alt < lo else w1
+    patch = {"master_contracts": w["menge"]}
+    txt = f"Menge {_ap_de(alt)} → {_ap_de(w['menge'])}"
+    if str(w.get("stufe") or "").startswith("letzter Trade (Rest bis Ziel)") and str(plan.get("notes") or "").find("letzter Trade (Rest bis Ziel)") >= 0:
+        try:
+            tp_alt = float(plan.get("master_tp"))
+        except (TypeError, ValueError):
+            tp_alt = None
+        if w.get("tp") is not None and tp_alt != float(w["tp"]):
+            patch["master_tp"] = w["tp"]
+            de0 = lambda x: f"{float(x or 0):,.0f}".replace(",", ".")   # noqa: E731
+            txt += f", TP {de0(tp_alt)} → {de0(w['tp'])} $"
+    return patch, txt
+
+
+def ap_menge_wache(jetzt, reg):
+    """Ein Lauf (aus ap_fenster_wache_tick): Pläne laden, ap_menge_fix je Plan, guarded schreiben + protokollieren. → Liste."""
+    firmen = ((reg or {}).get("regeln") or {}).get("firmen") or []
+    faellig = (jetzt + timedelta(minutes=AP_FAELLIG_MIN)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,route,master_contracts,master_tp,notes,start_um,"
+                                               "richtung,hand_werte_at,auto_bestaetigt_at,mt5_baseline", "status": "eq.planned",
+                                     "auto_plan": "eq.true", "start_um_gestartet_at": "is.null", "started_at": "is.null",
+                                     "orbit_gesendet_at": "is.null", "start_um": "gt." + faellig})
+    plaene = [p for p in plaene if p.get("route") not in AP_CFD_ROUTEN and not p.get("hand_werte_at")
+              and not ((p.get("mt5_baseline") or {}).get("kette") or (p.get("mt5_baseline") or {}).get("tage_mini"))]
+    if not plaene:
+        return []
+    kids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
+    accs = {str(a.get("id")): a for a in _ap_konten_laden({"id": "in.(" + ",".join(kids) + ")"})} if kids else {}
+    out = []
+    for p in plaene:
+        a = accs.get(str(p.get("master_account_id")))
+        regel = ap_regel_finden(firmen, p.get("master_firm"))
+        m = _AP_BAL_NOTIZ.search(str(p.get("notes") or ""))
+        if not a or not regel or not m:
+            continue
+        bal = float(m.group(1).replace(".", ""))
+        patch, txt = ap_menge_fix(p, ap_regel_konto(regel, a, bal), str(a.get("account_type") or ""), bal)
+        if not patch:
+            continue
+        rows = sb_update("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
+                                         "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                                         "master_contracts": f"eq.{p.get('master_contracts')}",
+                                         "start_um": "gt." + faellig}, patch)   # fällig (≤ 5 min) auch im Guard (Hinweis S2)
+        if not rows:
+            continue
+        zeile = {"um": jetzt.isoformat(), "plan_id": str(p["id"]), "user_id": str(p.get("user_id")), "firma": p.get("master_firm"),
+                 "von_richtung": p.get("richtung"), "nach_richtung": p.get("richtung"), "von_start": p.get("start_um"),
+                 "nach_start": p.get("start_um"), "grund": f"[Mengen-Wache] {txt} — Regel {p.get('master_firm')} {a.get('account_type')}",
+                 "quelle": "bot"}
+        try:
+            _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=[zeile],
+                                    headers=_sb_headers("return=minimal"), timeout=(5, 20)))
+        except Exception as e:
+            print(f"[mengen-wache] ⚠️ Protokoll {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+        out.append({"plan_id": str(p["id"]), "firma": p.get("master_firm"), "txt": txt})
+        print(f"[mengen-wache] {str(p['id'])[:8]} {p.get('master_firm')}: {txt}", flush=True)
+    return out
 
 
 _ap_wecker = {"konto": None, "balance": None, "at": 0.0, "geweckt": 0, "bal_at": 0.0}
