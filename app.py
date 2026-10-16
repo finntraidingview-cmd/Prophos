@@ -16427,7 +16427,13 @@ def _ap_hhmm(s):
 
 def ap_start_bis(zeiten):
     """Letzte erlaubte Startminute (dt) aus zeiten.start_bis, Standard 16:30 (Finn 07.10.2026: „alle Trades bis spätestens
-    16:30 deutscher Zeit gestartet")."""
+    16:30 deutscher Zeit gestartet"). Mit zeiten.fenster_tz (16.10.2026, Finn denkt in Dubai-Zeit) gilt start_bis in DIESER Zone und
+    wird je Tag in deutsche Minuten umgerechnet (ap_zeit_dt_min) — 20:00 Dubai = 18:00 dt im Sommer, 17:00 im Winter."""
+    fz = (zeiten or {}).get("fenster_tz")
+    if fz and (zeiten or {}).get("start_bis"):
+        m = ap_zeit_dt_min({"tz": fz, "uhr": zeiten.get("start_bis")})
+        if m is not None:
+            return m
     try:
         return _ap_hhmm((zeiten or {}).get("start_bis") or AP_START_BIS_STANDARD)
     except (ValueError, AttributeError):
@@ -16436,6 +16442,26 @@ def ap_start_bis(zeiten):
 
 AP_CFD_AB_STANDARD = "00:20"           # Finn 07.10.2026: CFD (Echo V2/mt5v2) erst ab 00:20 dt — vorher ist der CFD-Markt zu
 AP_CFD_ROUTEN = ("mt5v2", "mt5")
+
+
+def ap_fenster_liste(zeiten, heute=None):
+    """Startfenster [[von, bis, gewicht], …] in deutscher Zeit („HH:MM"), wie alle Leser sie erwarten. Mit zeiten.fenster_tz (16.10.2026,
+    Finn: „Futures 02:00–20:00 Dubai", DST-fest wie CFD) stehen von/bis in dieser Zone und werden je Tag umgerechnet; ohne fenster_tz
+    unverändert (deutsche Zeit wie bisher). Leere oder umgekehrte Fenster fallen weg."""
+    roh = (zeiten or {}).get("fenster") or []
+    fz = (zeiten or {}).get("fenster_tz")
+    if not fz:
+        return roh
+    out = []
+    for f in roh:
+        try:
+            a, b = ap_zeit_dt_min({"tz": fz, "uhr": f[0]}, heute), ap_zeit_dt_min({"tz": fz, "uhr": f[1]}, heute)
+        except (TypeError, IndexError):
+            continue
+        if a is None or b is None or b <= a:
+            continue
+        out.append([_ap_hhmm_txt(a), _ap_hhmm_txt(b)] + list(f[2:]))
+    return out
 
 
 def ap_cfd_ab(zeiten, heute=None):
@@ -16544,7 +16570,7 @@ def _ap_zeiten_verteilen_einmal(tranchen, zeiten, rnd, frueheste_min=0, info=Non
     # 07.10.2026: Fenster enden spätestens bei start_bis (16:30 dt); kein Rückfall mehr auf 02:00–20:00 — ist kein Fenster
     # mehr offen, bekommt keine Tranche einen Start („kein freies Zeitfenster mehr")
     bis = ap_start_bis(zeiten)
-    roh_f = zeiten.get("fenster") or [["02:00", "20:00", 1]]
+    roh_f = ap_fenster_liste(zeiten) or [["02:00", "20:00", 1]]
     fenster = [(max(_ap_hhmm(a), frueheste_min), min(_ap_hhmm(b), bis), float(w)) for a, b, w in roh_f]
     fenster = [x for x in fenster if x[1] - x[0] >= 5]
     if not fenster:
@@ -17990,7 +18016,7 @@ def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, st
                if z.get("start_min") is not None and z.get("einsatz_eur") is not None]
     hinweise = list(stand["hinweise"])
 
-    fenster_alle = zeiten.get("fenster") or []
+    fenster_alle = ap_fenster_liste(zeiten)
     w_summe = sum(float(x[2]) for x in fenster_alle) or 1.0
     belegt = {}
     for k in minuten:
@@ -20735,7 +20761,7 @@ AP_KIPP_JE_KLASSE = 2     # Kippen CFD gegen Futures erst, wenn jede Klasse im F
 def _ap_misch_fenster(zeiten):
     """[(von, bis, Text)] der Startfenster in Minuten dt (bis ≤ start_bis) — wie ap_fenster_von."""
     out = []
-    for f in (zeiten or {}).get("fenster") or []:
+    for f in ap_fenster_liste(zeiten):
         a, b = _ap_hhmm(f[0]), min(_ap_hhmm(f[1]), ap_start_bis(zeiten))
         if b > a:
             out.append((a, b, f"{f[0]}–{_ap_hhmm_txt(b)} dt"))
@@ -21102,7 +21128,7 @@ def ap_richtungen_delta(tranchen, basis_netto, basis_brutto, rnd, band_pct, fest
 
 def ap_fenster_von(zeiten, minute):
     """Startfenster (von, bis) in Minuten, in dem `minute` liegt — sonst None."""
-    for f in (zeiten or {}).get("fenster") or []:
+    for f in ap_fenster_liste(zeiten):
         a, b = _ap_hhmm(f[0]), min(_ap_hhmm(f[1]), ap_start_bis(zeiten))
         if a <= float(minute) < b:
             return a, b
@@ -21718,7 +21744,7 @@ def ap_umplanen(plaene, basis_netto, basis_brutto, jetzt_min, zeiten, band_pct, 
     # FENSTER-ANTEIL (Finn 08.10.2026: „es sollten immer noch [so viele] Orders im Opening sein, wie die Zeitfenster das sagen"): ein Plan
     # darf sein Startfenster nur verlassen, wenn dort danach noch mindestens Gewicht ÷ Summe × (heutige Pläne + heutige Starts) liegen
     fen_reg = [(float(_ap_hhmm(f_[0])), float(min(_ap_hhmm(f_[1]), ap_start_bis(zeiten))), float(f_[2] if len(f_) > 2 else 1))
-               for f_ in ((zeiten or {}).get("fenster") or [])]
+               for f_ in ap_fenster_liste(zeiten)]
     fen_reg = [x for x in fen_reg if x[1] > x[0]]
 
     def fen_idx(m):
@@ -22486,7 +22512,7 @@ def ap_eingriff_pruefen(plan_id, aktion, plaene, jetzt_min, zeiten, id_fest=None
         neu = _wd_num(neu_start_min)
         if neu is None:
             return None, "start fehlt (HH:MM deutscher Zeit oder ISO)"
-        fen = [(_ap_hhmm(x[0]), min(_ap_hhmm(x[1]), ap_start_bis(zeiten))) for x in (zeiten or {}).get("fenster") or []]
+        fen = [(_ap_hhmm(x[0]), min(_ap_hhmm(x[1]), ap_start_bis(zeiten))) for x in ap_fenster_liste(zeiten)]
         fen = [x for x in fen if x[1] > x[0]] or [(0, ap_start_bis(zeiten))]
         if fen and not (min(a for a, _ in fen) <= neu < max(b for _, b in fen)):
             return None, (f"Start {_ap_hhmm_txt(neu)} außerhalb der Startfenster "
@@ -23167,7 +23193,7 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
     hinweise = list(stand["hinweise"]) + ([{"grund": h_umpl}] if h_umpl else [])
     # Master 06.10.2026 (Frontend .1084 schon live): band als ZAHL in €/Pkt (± um null, jetzt), Details in band_info; je
     # Verlaufspunkt zusätzlich band (= band_delta); fenster[] aus auto_plan_regeln.zeiten für die Grenzlinien im Chart
-    w_summe = sum(float(f[2]) for f in stand["zeiten"].get("fenster") or []) or 1.0
+    w_summe = sum(float(f[2]) for f in ap_fenster_liste(stand["zeiten"])) or 1.0
     out = {"ok": True, "um": stand["jetzt"].isoformat(), "tag": stand["tag"],
            "band": round(pct / 100.0 * stand["basis_brutto"], 2), "zielband_pct": pct,
            "band_info": {"pct": pct, "eur_pkt": round(pct / 100.0 * stand["basis_brutto"], 2), "gehalten": v["gehalten"],
@@ -23188,7 +23214,9 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
            "offen": offen, "geplant": geplant, "verlauf": [dict(x, band=x["band_delta"], **_ap_eur_bei(ve, x["min"])) for x in v["verlauf"]],
            "umplanungen": umpl,
            "fenster": [{"von": f[0], "bis": f[1], "anteil": round(float(f[2]) / w_summe * 100, 1)}
-                       for f in stand["zeiten"].get("fenster") or []],
+                       for f in ap_fenster_liste(stand["zeiten"])],
+           # 16.10.2026: das Frontend (sfTagesEnde, Neu-Einplanen) liest d.start_bis — fehlte bisher, der Tab nahm 16:30 dt an
+           "start_bis": _ap_hhmm_txt(ap_start_bis(stand["zeiten"])),
            "bot": _ap_bot_stand(stand["param"], stand["jetzt"]), "hinweise": hinweise}
     # SZENARIO (08.10.2026, für Slave 5s Anzeige): Kurve jetzt (laufende) und +60 min (mit den in 60 min startenden), Steigung, schlimmster
     # Fall links/rechts über ±AP_SZENARIO_R; Trades ohne Satz/$ je Pkt zählen 0 und stehen in szenario.ohne
