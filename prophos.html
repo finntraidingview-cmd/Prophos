@@ -42058,12 +42058,24 @@
     let r = null
     const t0 = Date.now()
     for(;;){
+      const tReq = Date.now()
       try{
         r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true }) })
       }catch(e){ r = { ok:false, retry_ok:false, msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) } }
-      const wartbar = !!(r && !r.ok && r.retry_ok && (r.grund === 'terminal_heilt' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
+      // PANEL WEG (16.10.2026, Routine Puls-Fehler, Plan bd20307e pc-pw1put 15.10. 13:24 UTC: Meldung nur „TypeError: Failed to fetch", als
+      // UNKLAR gewertet, kein Neu-Einplanen): mtcApi liefert bei geworfenem fetch nur error + _nichtGesendet, kein msg/retry_ok. Wirft der Aufruf
+      // binnen 1 s (Connection refused kommt in Millisekunden), hat das Panel die Anfrage nie angenommen (Neustart/Update ~15 s, Autostart) →
+      // beweisbar nichts gesendet, alle 6 s erneut wie beim heilenden Terminal (gleicher Deckel). Reißt die Verbindung später, kann der Bot-
+      // Kindprozess schon laufen — er überlebt ein sterbendes Panel und klickt weiter (Prüfung Slave 2: 5 s wären kein Beweis) → UNKLAR.
+      if(r && !r.ok && r._nichtGesendet){
+        const sReq = Math.round((Date.now() - tReq) / 1000)
+        r = (Date.now() - tReq) < 1000
+          ? { ok:false, retry_ok:true, grund:'panel_weg', msg: `Lokales Backend (Panel) am PC nicht erreichbar (${String(r.error || '').slice(0, 60)}) — die Order-Anfrage kam nie an, nichts gesendet → am PC das Panel starten (start-alles.bat), Prophos versucht es weiter` }
+          : { ok:false, retry_ok:false, msg: `Verbindung zum Panel brach nach ${sReq} s mitten in der Order ab (das Panel am PC hat die Verbindung geschlossen) — ob Puls geklickt hat, ist offen → im Master-Terminal ${route.masterLogin || ''} nachsehen, NICHT blind erneut starten` }
+      }
+      const wartbar = !!(r && !r.ok && r.retry_ok && (r.grund === 'terminal_heilt' || r.grund === 'panel_weg' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
       // Heilung 180 s statt 90 s (08.10.2026, Chris FTMO ff8c2412 04:49 UTC: Kaltstart mit Login-Zwang, das Panel wartet bis 45 + 90 s auf den
       // Snapshot und startet das Terminal dann mit EA neu — der Start gab nach 90 s „Terminal wird gerade geprüft" auf, das Terminal lief
       // kurz danach sauber). Solange retry_ok wahr ist, hat der Bot beweisbar nichts gesendet.
@@ -44156,7 +44168,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1580'
+  const OS_TAB_BUILD = '2026-09-22.1581'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
