@@ -26232,13 +26232,17 @@ _ap_fenster_wache = {"at": 0.0, "verschoben": [], "fehler": ""}
 
 def ap_fenster_ueberhang(plaene, zeiten, jetzt_min, heute=None):
     """REIN RECHNEND (testbar): Pläne (Form _ap_stand_plaene) von heute, die ungestartet hinter dem Ende ihrer Klasse starten würden →
-    [(plan, klasse_bis)]. Nur Auto-Pläne, nicht Folgetag, nicht schon gestartet/fällig (fest_durch), Start noch in der Zukunft."""
+    [(plan, klasse_bis)]. Nur Auto-Pläne, nicht Folgetag, nicht schon gestartet/fällig (fest_durch), Start noch in der Zukunft; nie Topstep-
+    Kette/Topstep V2 (Master 16.10.2026: Kette hat ihr eigenes Ende t1_bis). Firmen-Abstand zu anderen IDs (1 min, beide Richtungen) prüft
+    beim Verschieben ap_nachhol_minute → ap_start_hand_pruefen; Pläne mit Hand-Werten/Hand-Richtung: nur die Zeit wandert."""
     out = []
     for x in plaene or ():
         if x.get("folgetag") or not x.get("auto_plan") or x.get("start_min") is None:
             continue
         if x.get("fest_durch") in ("schon gestartet", "bestätigt und fällig") or float(x["start_min"]) < float(jetzt_min):
             continue
+        if x.get("fest_durch") in (AP_FEST_KETTE, AP_FEST_TSV2) or x.get("route") == "tsv2":   # tsv2 auch mit Hand-Werten (fest_durch dann AP_FEST_HAND)
+            continue          # Topstep-Kette (eigenes Ende t1_bis) / Topstep V2 (startet nur von Hand): eigene Zeiten, die Wache fasst sie nie an
         bis = ap_klasse_bis(zeiten, x.get("route"), heute)
         if float(x["start_min"]) >= float(bis):
             out.append((x, bis))

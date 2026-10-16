@@ -77,15 +77,18 @@ def main():
             zu_spaet += 1
     check(zu_spaet == 0, "CFD-Nachplan um 10:00 Dubai: Start verteilt zwischen jetzt + 15 und 18:00 Dubai (200 Seeds)")
     # FENSTER-WACHE (Master 16.10.2026): CFD-Pläne hinter 18:00 Dubai finden; Futures bis 20:00 bleiben; gestartete/fällige/Folgetag nie
+    a["AP_FEST_KETTE"], a["AP_FEST_TSV2"] = "Topstep-Kette (fest)", "Topstep V2 startet nur von Hand"
     ue = a["ap_fenster_ueberhang"]
     ZW = dict(Z, fenster_tz="Asia/Dubai", fenster=[["02:00", "20:00", 100]], start_bis="20:00")
     pl = lambda pid, st, route, **k: dict({"plan_id": pid, "user_id": "u", "firma": "f", "richtung": "buy", "start_min": st, "route": route,
                                            "auto_plan": True, "fest_durch": None, "folgetag": False}, **k)
     plaene = [pl("cfd-spaet", 17 * 60 + 9, "mt5v2"), pl("cfd-gut", 15 * 60, "mt5v2"), pl("fut-spaet-ok", 17 * 60 + 32, "tvv2"),
               pl("cfd-gestartet", 17 * 60, "mt5v2", fest_durch="schon gestartet"), pl("cfd-folgetag", 17 * 60, "mt5v2", folgetag=True),
-              pl("cfd-hand", 17 * 60, "mt5v2", auto_plan=False), pl("fut-zu-spaet", 18 * 60 + 5, "tvv2")]
+              pl("cfd-hand", 17 * 60, "mt5v2", auto_plan=False), pl("fut-zu-spaet", 18 * 60 + 5, "tvv2"),
+              pl("kette", 18 * 60 + 5, "tsv2", fest_durch="Topstep-Kette (fest)"), pl("tsv2", 18 * 60 + 5, "tsv2", fest_durch="Topstep V2 startet nur von Hand"),
+              pl("kette-hand", 18 * 60 + 5, "tsv2", fest_durch="Werte von Hand geändert")]
     gef = [x["plan_id"] for x, _ in ue(plaene, ZW, 3 * 60, date(2026, 10, 16))]
-    check(gef == ["cfd-spaet", "fut-zu-spaet"], f"Fenster-Wache findet CFD ≥ 18:00 Dubai und Futures ≥ 20:00 Dubai, sonst nichts ({gef})")
+    check(gef == ["cfd-spaet", "fut-zu-spaet"], f"Fenster-Wache findet CFD ≥ 18:00 Dubai und Futures ≥ 20:00 Dubai, nie Topstep-Kette/V2 ({gef})")
     check(ue(plaene, ZW, 18 * 60 + 10, date(2026, 10, 16)) == [], "Fenster-Wache: Start schon vorbei → nichts")
     # neue Zeit über ap_nachhol_minute mit zufälligem frühesten Punkt (jetzt + 15 … Ende − 30): immer vor dem CFD-Ende, nie vor jetzt + 15
     nm, raus = a["ap_nachhol_minute"], 0
