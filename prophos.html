@@ -23387,6 +23387,9 @@
       await new Promise(res => setTimeout(res, 1000 + Math.random() * 1500))
     }
   }
+  // BALANCE SELBST (16.10.2026, Finn: „schon richtig oft erwähnt" — Marc trug den Apex-Username ein, der Bot las trotzdem nicht): die
+  // Firmen-Einstellungen lädt der Tab sonst nur beim Login. Fehlt der Tradovate-Username, vor der Lesung einmal frisch holen (höchstens 1×/min).
+  let _tvSpecFrischAt = 0
   async function tvKontoBalanceJetzt(accountId, sigId){
     const acc = (accounts || []).find(a => String(a.id) === String(accountId))
     if(!MT5_LOCAL) return { ok: false, msg: 'Nur am PC mit TradingView möglich' }
@@ -23396,6 +23399,10 @@
     // Futures wie im Backend (WD_BALANCE_FUTURES, Teilwörter) oder tpFirmIstFutures — alles andere ist CFD und kommt über MT5/Echo.
     const istFutures = /tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(String(acc.firm || '')) || (typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(acc.firm))
     if(!istFutures) return { ok: false, cfd: true, msg: `CFD-Konto (${acc.firm || 'Firma unbekannt'}) — die Balance kommt über das MT5-Terminal (Echo), nie über Tradovate. MT5-Verlinkung anlegen bzw. die MT5-Nummer als External ID eintragen.` }
+    try{
+      if(!tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm }).tv_username && Date.now() - _tvSpecFrischAt > 60000
+         && typeof loadFirmSpecsFromSupabase === 'function'){ _tvSpecFrischAt = Date.now(); await loadFirmSpecsFromSupabase() }
+    }catch(_){}
     const konto = String(acc.externalId).trim(), id = String(acc.id)
     if(_tvBalLesenLaeuft.has(id)) return { ok: false, msg: 'Lesung für dieses Konto läuft schon' }
     _tvBalLesenLaeuft.add(id)
@@ -44169,7 +44176,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1583'
+  const OS_TAB_BUILD = '2026-09-22.1584'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -114,6 +114,17 @@ def main():
     check(st["d"]["ohne_username"] is True, "DB: wartender Auftrag zählt nicht als Ergebnis")
     check("plan-xyz" not in st and "xyz" not in st, "DB: Plan-Signale ignoriert")
     check(dbs([], t0) == {} and dbs(None, t0) == {}, "DB: leer")
+    # BALANCE SELBST (16.10.2026, Finn: nie ein Hand-↻ nötig — Marc trug den Apex-Username ein, der Bot las trotzdem nicht)
+    sp = ns["ap_bal_auto_username_sperre"]
+    ts_a = st["a"]["ohne_username_at"]
+    check(ts_a == datetime(2026, 10, 15, 23, 0, 8, 300000, tzinfo=timezone.utc).timestamp(), "DB: Zeitpunkt des Fehlschlags steht mit")
+    check(st["b"]["ohne_username_at"] is None, "DB: ohne Sperre kein Zeitpunkt")
+    check(sp(st["a"], False, ts_a + 3600)[0] is True, "Sperre: Username fehlt weiter, 1 h danach → gesperrt")
+    check("von selbst" in sp(st["a"], False, ts_a + 3600)[1] and "↻" not in sp(st["a"], False, ts_a + 3600)[1], "Sperre: Text verlangt keinen Hand-Klick")
+    check(sp(st["a"], True, ts_a + 60) == (False, ""), "Sperre fällt, sobald der Username eingetragen ist")
+    check(sp(st["a"], False, ts_a + 6 * 3600) == (False, ""), "Sperre: nach 6 h ein Probe-Versuch")
+    check(sp(st["b"], False, ts_a) == (False, ""), "ohne Username-Fehlschlag nie gesperrt")
+    check(sp({}, False, ts_a) == (False, "") and sp(None, False, ts_a) == (False, ""), "leer → frei")
     print(f"\n{sum(f)} Fehler von {len(f)}")
     return sum(f)
 

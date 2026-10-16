@@ -25156,15 +25156,45 @@ def ap_bal_auto_db_stand(rows, tag_start_s):
         t = _ap_ts(r.get("created_at"))
         if not t:
             continue
-        s = out.setdefault(kid, {"versuche": [], "ohne_username": False})
+        s = out.setdefault(kid, {"versuche": [], "ohne_username": False, "ohne_username_at": None})
         if t.timestamp() >= tag_start_s and str((r.get("params") or {}).get("von") or "") == "auto_planer":
             s["versuche"].append(t.timestamp())
         if str(r.get("status") or "") in ("fertig", "fehler") and (kid not in neu or t > neu[kid][0]):
             msg = str((r.get("ergebnis") or {}).get("msg") or "") if isinstance(r.get("ergebnis"), dict) else ""
             neu[kid] = (t, str(r.get("status")) == "fehler" and AP_BAL_AUTO_OHNE_USERNAME in msg)
-    for kid, (_, ohne) in neu.items():
+    for kid, (t, ohne) in neu.items():
         out[kid]["ohne_username"] = ohne
+        out[kid]["ohne_username_at"] = t.timestamp() if ohne else None
     return out
+
+
+AP_BAL_AUTO_PROBE_S = 6 * 3600   # Username-Sperre: spätestens nach 6 h ein Probe-Versuch (Deckel 3/Tag bleibt)
+
+
+def ap_bal_auto_username_sperre(st, username_da, jetzt_s, probe_s=AP_BAL_AUTO_PROBE_S):
+    """REIN RECHNEND (testbar) — BALANCE SELBST (Finn 16.10.2026: „schon richtig oft erwähnt"; Marc trug den Apex-Username ein, der Bot
+    las trotzdem nicht, weil erst ein Hand-↻ die Sperre aufhob): gilt die Sperre nach „kein Tradovate-Username hinterlegt" noch?
+    st = Eintrag aus ap_bal_auto_db_stand, username_da = firm_specs.tv_username der ID × Firma ist JETZT gesetzt.
+    → (gesperrt, warum). Frei, sobald der Username eingetragen ist (firm_specs hat keinen Änderungszeitpunkt — „jetzt gesetzt" heißt
+    nach dem Fehlschlag eingetragen) oder der Fehlschlag älter als probe_s ist (Selbstheilung ohne erkennbare Änderung)."""
+    if not (st or {}).get("ohne_username"):
+        return False, ""
+    if username_da:
+        return False, ""
+    at = (st or {}).get("ohne_username_at")
+    if at and jetzt_s - float(at) >= probe_s:
+        return False, ""
+    rest = int((probe_s - (jetzt_s - float(at))) // 3600) + 1 if at else None
+    return True, ("letzte Lesung scheiterte: kein Tradovate-Username für die Firma hinterlegt → Einstellungen > Prop Firms > Firma "
+                  "bearbeiten > 'Tradovate-Username für TradingView' eintragen — der Bot liest danach von selbst"
+                  + (f" (sonst neuer Versuch in ≤ {rest} h)" if rest else ""))
+
+
+def _ap_tv_username_da(tvu, a):
+    """Ist für ID × Firma des Kontos ein Tradovate-Username hinterlegt? tvu = {(user_id, firma-norm): username} oder None (nicht lesbar)."""
+    if not tvu:
+        return False
+    return bool(tvu.get((str(a.get("user_id") or ""), _ap_norm(_firm_norm(a.get("firm"))))))
 
 
 def ap_bal_auto_tick(jetzt, reg=None):
@@ -25228,15 +25258,23 @@ def ap_bal_auto_tick(jetzt, reg=None):
         db_stand = ap_bal_auto_db_stand(rows, tag_start.timestamp())
     except Exception as e:
         print(f"[balance-auto] Tagesstand aus order_signale nicht gelesen ({type(e).__name__}: {e}) — Bremse nur aus dem Speicher", flush=True)
+    # Tradovate-Username je ID × Firma (firm_specs) nur für Konten mit Username-Sperre — None = nicht lesbar (dann wie bisher sperren)
+    tvu = None
+    try:
+        uids_u = sorted({str(accs[k].get("user_id")) for k, v in ((db_stand or {}).items()) if v.get("ohne_username") and k in accs})
+        if uids_u:
+            tvu = {(str(f.get("user_id")), _ap_norm(_firm_norm(f.get("name")))): str(f.get("tv_username") or "").strip()
+                   for f in sb_select("firm_specs", {"select": "user_id,name,tv_username", "user_id": "in.(" + ",".join(uids_u) + ")"}) or []}
+    except Exception as e:
+        print(f"[balance-auto] firm_specs nicht gelesen ({type(e).__name__}: {e}) — Username-Sperre wie bisher", flush=True)
     gesendet, ueber = [], []
     for kid, grund in kand.items():
         a = accs[kid]
         zeile = {"konto_id": kid, "konto": a.get("name"), "user_id": str(a.get("user_id") or ""), "grund": grund}
         st_db = (db_stand or {}).get(kid) or {}
-        if st_db.get("ohne_username"):
-            ueber.append(dict(zeile, warum=f"letzte Lesung scheiterte: für {a.get('firm') or 'die Firma'} ist kein Tradovate-Username hinterlegt "
-                                           "→ Einstellungen > Prop Firms > Firma bearbeiten > 'Tradovate-Username für TradingView' eintragen, "
-                                           "dann einmal ↻ Balance lesen"))
+        gesperrt, warum_u = ap_bal_auto_username_sperre(st_db, _ap_tv_username_da(tvu, a), jetzt_s)
+        if gesperrt:
+            ueber.append(dict(zeile, warum=f"{a.get('firm') or 'Firma'}: {warum_u}"))
             continue
         versuche = st_db.get("versuche") if db_stand is not None else _ap_bal_auto["versuche"].get(kid)
         ok, warum = ap_bal_auto_darf(versuche, jetzt_s)
