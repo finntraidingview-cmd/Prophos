@@ -7667,9 +7667,9 @@ def admin_vorrat():
 # Kein neues Wissen: Muster = die Vorrat-Ziele (vorrat_ziele, EIN Satz für jede ID), Status = Sperr-Matrix (vorrat_matrix frei/pausiert/
 # gesperrt), Zahlen = vorrat2_zelle für genau diese ID (nur_uid). gesichert = bestand_echt (Funded CFD inkl. Waiting / WD-Plus, ohne
 # anteilig gezählte Futures-Funded) gegen die Untergrenze, gedeckelt 100 %; erwartet = abdeckung (mit dem Funnel nach der Kaufregel).
-# 60 s je ID gemerkt — die Accounts-Seite fragt bei jedem Öffnen, die Rechnung holt alle Konten; ein Status-Klick leert den Merker.
+# MP_CACHE_S je ID gemerkt — die Accounts-Seite fragt bei jedem Öffnen, die Rechnung holt alle Konten; ein Status-Klick leert den Merker.
 _mp_cache = {}
-MP_CACHE_S = 60
+MP_CACHE_S = 300                      # Master 16.10.2026 (Supabase-Last: jede offene Accounts-Seite ~1×/min) → 5 min; Status-Klick leert sofort
 MP_TYP_RANG = {"challenge": 0, "phase1": 1, "phase2": 2, "funded": 3, "funded_cfd": 4, "winning_days": 5}
 
 
@@ -7690,6 +7690,9 @@ def muster_portfolio_zeilen(zellen, ziele):
         out.append({"firma": z.get("firma"), "status": "gesperrt" if z.get("status") == "gesperrt" else "frei", "art": ziel.get("art"),
                     "typen": ziel.get("typen") or [], "einheit": "Stück" if ziel.get("art") == "stueck" else "USD", "soll": soll, "gesichert": round(ges, 2),
                     "gesichert_pct": g_pct, "erwartet_pct": e_pct, "unterwegs_n": z.get("unterwegs_n"),
+                    # Finn 16.10.2026 (live .1576, alle Tachos 0 % bei reinen Challenges): große Zahl = Chance, mit den BESTEHENDEN Konten
+                    # die Untergrenze zu erreichen — vorrat_mc ohne Kauf (sicherheit), gesicherte zählen voll; ohne Konten ehrlich 0
+                    "chance_pct": (round(100 * float(z["sicherheit"]), 1) if soll > 0 and isinstance(z.get("sicherheit"), (int, float)) else None),
                     "reihe": ziel.get("reihe"),
                     # Klick auf den Tacho klappt die Konten dieser ID bei der Firma auf (Finn 16.10.2026) — Balance = Server-Wahl
                     # (acc_balance_wahl wie Planer/Vorrat), archivierte und Live-Konten sind schon draußen

@@ -2200,51 +2200,52 @@
   @media (max-width:960px){#adm-pane-kompass .kp-zeile-bar{grid-template-columns:96px 1fr 80px}}
   /* Prop-Baum im Admin (03.10.2026, Auftrag von Pascal): je Firma eine Karte, Spalten = Stufen, Zeilen = IDs, Zellen = Account-Chips.
      Erledigte bleiben in ihrer Stufe und leuchten grün, heute archivierte stehen rot bis zum Handelstag-Wechsel (17:45 New York). */
-  /* Muster-Portfolio (16.10.2026): Tacho je Firma oben unter Accounts — Bogen in Firmenfarbe = gesichert, heller Bogen + Strich = mit
-     Funnel erwartet; gesperrt nur als Chip (Finn 16.10.2026: nur aktiv/gesperrt). Firmenfarben dezent (Finn 12.10.2026: „Farben dezent") an EINER Stelle. */
+  /* Muster-Portfolio (16.10.2026): Tacho je Firma oben unter Accounts. Seit Finns Live-Feedback zu .1576 („cooler", alle 0 % bei reinen
+     Challenges): Bogen + Nadel = Chance, mit den bestehenden Konten das Ziel zu erreichen; Strich am Bogen = schon gesichert. Bogen mit
+     Verlauf in Firmenfarbe, Nadel fährt beim Laden hoch, Karte hebt sich beim Hover; Raster füllt die volle Breite (auto-fit), am Handy
+     eine wischbare Leiste. Gesperrte Firmen nur als Chip. Firmenfarben dezent (Finn 12.10.2026) an EINER Stelle. */
   #mp-karte{--mp-tradeify:#4f5bd5;--mp-topstep:#1f93c9;--mp-apex:#e8892b;--mp-ftmo:#2a3f8f;--mp-fundednext:#a14fc9;--mp-fundingpips:#1f9e8f;--mp-the5ers:#3a9d5d;
     margin-bottom:14px;padding:10px 16px 12px}
-  #mp-karte .mp-kopf{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 6px}
+  #mp-karte .mp-kopf{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 8px}
   #mp-karte .mp-kopf h3{margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650}
   #mp-karte .mp-kopf span{font-size:11.5px;color:var(--sub-2)}
-  #mp-karte .mp-leiste{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:8px}
-  #mp-karte .mp-tacho{border:1px solid var(--border-soft);border-radius:var(--r-md);background:var(--surface);padding:8px 8px 7px;text-align:center;cursor:pointer;
-    font:inherit;color:inherit;transition:border-color .15s var(--ease)}
-  #mp-karte .mp-tacho:hover,#mp-karte .mp-tacho.offen{border-color:var(--mp-f)}
-  #mp-karte .mp-tacho svg{display:block;width:100%;max-width:120px;height:auto;margin:0 auto}
-  #mp-karte .mp-bahn{stroke:var(--border);fill:none;stroke-width:9;stroke-linecap:round}
-  #mp-karte .mp-erw{stroke:color-mix(in srgb,var(--mp-f) 28%,var(--surface));fill:none;stroke-width:9;stroke-linecap:round}
-  #mp-karte .mp-ges{stroke:var(--mp-f);fill:none;stroke-width:9;stroke-linecap:round}
-  #mp-karte .mp-strich{stroke:var(--mp-f);stroke-width:2;stroke-linecap:round}
-  #mp-karte .mp-zahl{font-size:22px;font-weight:650;fill:var(--ink);font-variant-numeric:tabular-nums}
-  #mp-karte .mp-zahl tspan{font-size:12px;font-weight:500;fill:var(--sub)}
-  #mp-karte .mp-firma{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12.5px;font-weight:600;color:var(--ink);margin-top:2px;
+  #mp-karte .mp-leiste{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px}
+  #mp-karte .mp-tacho{position:relative;border:1px solid var(--border-soft);border-radius:var(--r-lg);padding:8px 8px 9px;text-align:center;cursor:pointer;
+    font:inherit;color:inherit;background:linear-gradient(180deg,color-mix(in srgb,var(--mp-f) 7%,var(--surface)) 0%,var(--surface) 62%);
+    box-shadow:var(--shadow-card);transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s var(--ease)}
+  #mp-karte .mp-tacho:hover{transform:translateY(-2px);box-shadow:var(--shadow-card-hover)}
+  #mp-karte .mp-tacho.aktiv{border-color:var(--mp-f);background:linear-gradient(180deg,color-mix(in srgb,var(--mp-f) 14%,var(--surface)) 0%,var(--surface) 70%)}
+  #mp-karte .mp-tacho svg{display:block;width:100%;max-width:150px;height:auto;margin:0 auto}
+  #mp-karte .mp-bahn{stroke:color-mix(in srgb,var(--mp-f) 10%,var(--border));fill:none;stroke-width:10;stroke-linecap:round}
+  #mp-karte .mp-bogen{fill:none;stroke-width:10;stroke-linecap:round;stroke-dasharray:100 100;transition:stroke-dashoffset .95s cubic-bezier(.3,.9,.3,1)}
+  #mp-karte .mp-skala{stroke:var(--sub-2);stroke-width:1;opacity:.45}
+  #mp-karte .mp-ges{stroke:var(--ink);stroke-width:2;stroke-linecap:round;opacity:.55}
+  #mp-karte .mp-nadel{transform-box:view-box;transform-origin:60px 58px;transition:transform .95s cubic-bezier(.34,1.35,.5,1)}
+  #mp-karte .mp-nadel line{stroke:var(--ink);stroke-width:2.2;stroke-linecap:round}
+  #mp-karte .mp-nadel circle{fill:var(--surface);stroke:var(--ink);stroke-width:2}
+  #mp-karte .mp-zahl{font-size:21px;font-weight:700;fill:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  #mp-karte .mp-zahl tspan{font-size:11px;font-weight:500;fill:var(--sub)}
+  #mp-karte .mp-firma{display:flex;align-items:center;justify-content:center;gap:5px;font-size:12.5px;font-weight:650;color:var(--ink);margin-top:1px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #mp-karte .mp-firma i{width:7px;height:7px;border-radius:50%;background:var(--mp-f);flex:none}
   #mp-karte .mp-sub{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #mp-karte .mp-gesperrt{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11.5px;color:var(--sub-2)}
+  #mp-karte .mp-schloss{position:absolute;top:5px;right:5px;width:22px;height:22px;display:grid;place-items:center;border:0;border-radius:50%;
+    background:transparent;color:var(--sub);cursor:pointer;opacity:0;transition:opacity .15s var(--ease),background .15s var(--ease)}
+  #mp-karte .mp-schloss svg{width:12px;height:12px}
+  #mp-karte .mp-tacho:hover .mp-schloss,#mp-karte .mp-schloss:focus-visible{opacity:.75}
+  #mp-karte .mp-schloss:hover{opacity:1;background:var(--surface-tint);color:var(--ink)}
+  @media (hover:none){#mp-karte .mp-schloss{opacity:.5}}
+  #mp-karte .mp-gesperrt{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:9px;font-size:11.5px;color:var(--sub-2)}
   #mp-karte .mp-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;
     padding:2px 9px;font:inherit;font-size:11.5px;cursor:pointer}
   #mp-karte .mp-chip svg{width:11px;height:11px}
-  #mp-karte .mp-chip.offen{border-color:var(--sub)}
-  #mp-karte .mp-konten{margin-top:8px;border:1px solid var(--border-soft);border-radius:var(--r-md);background:var(--surface);padding:8px 10px}
-  #mp-karte .mp-konten-kopf{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 4px;font-size:12.5px;font-weight:600;color:var(--ink)}
-  #mp-karte .mp-konten-kopf small{font-weight:400;color:var(--sub);margin-left:6px}
-  #mp-karte .mp-konten-kopf button{border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;padding:2px 10px;font:inherit;font-size:11.5px;cursor:pointer}
-  #mp-karte .mp-konten-kopf button:hover{color:var(--ink);border-color:var(--sub)}
-  #mp-karte .mp-konten-kopf button:disabled{opacity:.5;cursor:default}
-  #mp-karte .mp-konto{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border-soft);
-    font-size:12.5px;cursor:pointer}
-  #mp-karte .mp-konto:first-of-type{border-top:0}
-  #mp-karte .mp-konto:hover .mp-k-name{color:var(--violet)}
-  #mp-karte .mp-k-name{color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #mp-karte .mp-k-typ{color:var(--sub);font-size:11.5px;white-space:nowrap}
-  #mp-karte .mp-k-bal{font-variant-numeric:tabular-nums;color:var(--ink-2);text-align:right;white-space:nowrap}
-  #mp-karte .mp-k-leer{font-size:12px;color:var(--sub);padding:4px 0}
+  #mp-karte .mp-chip:hover{color:var(--ink);border-color:var(--sub)}
   #mp-karte .mp-fehler{font-size:12px;color:var(--danger);margin-top:6px}
-  @media (max-width:820px){#mp-karte{padding:10px 12px}#mp-karte .mp-leiste{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
-    #mp-karte .mp-tacho{padding:6px 4px}#mp-karte .mp-zahl{font-size:20px}
-    #mp-karte .mp-sub{white-space:normal;font-size:11px;line-height:1.25}#mp-karte .mp-firma{font-size:12px}}
+  @media (max-width:820px){#mp-karte{padding:10px 12px}
+    #mp-karte .mp-leiste{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:8px;margin:0 -12px;padding:2px 12px 6px;scrollbar-width:none}
+    #mp-karte .mp-leiste::-webkit-scrollbar{display:none}
+    #mp-karte .mp-tacho{flex:0 0 40%;scroll-snap-align:start}#mp-karte .mp-tacho:hover{transform:none}
+    #mp-karte .mp-zahl{font-size:20px}#mp-karte .mp-firma{font-size:12px}}
   #pb-ansicht .pb-kopf{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
   #pb-ansicht .pb-sub{font-weight:400;color:var(--sub);font-size:12px}
   #pb-ansicht .btn-mini,#dashboard-view .view[data-view="propbaum"] .view-head .btn-mini{padding:4px 11px;font-size:12px;height:auto}
@@ -7332,7 +7333,6 @@
         <div class="mp-kopf"><h3>Muster-Portfolio</h3><span id="mp-stand"></span></div>
         <div class="mp-leiste" id="mp-leiste"></div>
         <div class="mp-gesperrt" id="mp-gesperrt" hidden></div>
-        <div class="mp-konten" id="mp-konten" hidden></div>
       </div>
 
       <!-- TODO fuer diese ID (31.08.2026, Finns Wunsch: "mach das es bei der
@@ -44168,7 +44168,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1581'
+  const OS_TAB_BUILD = '2026-09-22.1582'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66750,23 +66750,35 @@
 /* ── MUSTER-PORTFOLIO (16.10.2026, Finn: „Ich will, dass es ein Muster-Portfolio gibt — Portfolio an Accounts pro Prop-ID, jedes Portfolio
  * orientiert sich daran … in jeder Gruppe wie ein Tacho im Auto, wie viel man vom Muster-Portfolio bei dieser Firma schon erreicht hat, in den
  * Farben der jeweiligen Propfirm"; „jede ID muss mit derselben Logik Propfirms pausieren oder sperren können") ──
- * Rechnet nichts selbst: GET /admin/muster-portfolio liefert je Firma gesichert_pct (Funded CFD inkl. Waiting / WD-Plus gegen die Untergrenze
- * der Vorrat-Ziele, gedeckelt 100 %) und erwartet_pct (mit Funnel, Kaufregel der Vorrat-Rechnung). Status = Sperr-Matrix, geschaltet über
- * POST /admin/vorrat {user_id, firma, status} (frei = aktiv). Gilt für die angemeldete ID (ID-Leiste wechselt den Login). Eigene Verdrahtung
- * nur an #mp-leiste, #mp-gesperrt, #mp-wahl — kein Sammel-Handler. ── */
+ * Rechnet nichts selbst: GET /admin/muster-portfolio liefert je Firma chance_pct (Monte Carlo der Vorrat-Rechnung OHNE Kauf: Chance, mit den
+ * bestehenden Konten die Untergrenze zu erreichen; gesicherte zählen voll) und gesichert_pct. Live-Feedback zu .1576 (Finn, Marc nur mit
+ * Challenges → alle Tachos 0 %): große Zahl + Nadel = Chance, Strich am Bogen = schon gesichert, keine Kauf-Sprache. Klick auf einen Tacho
+ * setzt unten den Firma-Filter der Tabelle (Reiter „Manuell") und scrollt hin, zweiter Klick → „Alle". Schloss oben rechts = Firma bei dieser
+ * ID sperren (nur aktiv/gesperrt, Finn 16.10.2026), gesperrte Firmen nur als Chip; geschaltet über POST /admin/vorrat {user_id, firma, status}
+ * (Recht: eigene ID, Verwalter für die Gruppe, Admin für alle — der Server prüft). Gilt für die angemeldete ID (ID-Leiste wechselt den Login).
+ * Eigene Verdrahtung nur an #mp-leiste, #mp-gesperrt und einem zusätzlichen change-Listener am Firma-Select — kein Sammel-Handler. ── */
 ;(() => {
-  const MP_TAKT = 60000
-  const _mp = { d: null, uid: '', at: 0, laedt: false, fehler: '', offen: '', sendet: false }
+  const MP_TAKT = 300000            // wie MP_CACHE_S im Backend (5 min, Master 16.10.2026: Supabase-Last)
+  const _mp = { d: null, uid: '', at: 0, laedt: false, fehler: '', sendet: false, zeig: {} }
   const mpEsc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   // Firmenfarbe als Token aus der CSS (#mp-karte) — unbekannte Firma: Prophos-Violett
   const MP_FARBE = { 'Tradeify': 'tradeify', 'Topstep': 'topstep', 'Apex Trader': 'apex', 'FTMO': 'ftmo', 'FundedNext': 'fundednext',
                      'FundingPips': 'fundingpips', 'The5%ers': 'the5ers' }
   const mpFarbe = f => MP_FARBE[f] ? `var(--mp-${MP_FARBE[f]})` : 'var(--violet)'
   const MP_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>'
-  const MP_TYP = { challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', funded: 'Funded', funded_cfd: 'Funded CFD', winning_days: 'Winning Days', waiting: 'Waiting for Payout' }
-  const mpBetrag = (v, ccy) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + ({ USD: '$', EUR: '€' }[String(ccy || 'USD').toUpperCase()] || ccy)
   const mpK = v => { const n = Number(v) || 0; return Math.abs(n) >= 1000 ? (Math.round(n / 100) / 10).toLocaleString('de-DE') + 'k' : String(Math.round(n)) }
-  // „2/3 Funded" · „+14k / 20k WD" · „120k / 100k Funded" — wie viel vom Muster gesichert ist, in der Einheit des Ziels
+  // Firmenname wie app.py _firm_norm (Schreibweisen im Firma-Select der Tabelle ↔ Firmen der Vorrat-Ziele)
+  function mpNorm(name){
+    const f = String(name || '').trim().toLowerCase()
+    if(/5%?ers|five percent/.test(f)) return 'the5%ers'
+    if(f.includes('futur') && /funded ?next|founded ?next/.test(f)) return 'fundednext futures'
+    if(/funded|founded/.test(f) && f.includes('futur')) return 'myfundedfutures'
+    for(const [n, out] of [['apex', 'apex trader'], ['tradeify', 'tradeify'], ['fundednext', 'fundednext'], ['funded next', 'fundednext'], ['foundednext', 'fundednext'],
+                           ['founded next', 'fundednext'], ['fundingpips', 'fundingpips'], ['funding pips', 'fundingpips'], ['ftmo', 'ftmo'], ['topstep', 'topstep']])
+      if(f.includes(n)) return out
+    return f
+  }
+  // „2/3 Funded" · „+14k / 20k WD" · „120k / 100k Funded" — was davon schon gesichert ist, in der Einheit des Ziels
   function mpSub(f){
     const wd = (f.typen || []).includes('winning_days') && !(f.typen || []).some(t => t === 'funded_cfd')
     const stufe = wd ? 'WD' : 'Funded'
@@ -66774,63 +66786,74 @@
     if(f.art === 'plus_ueber_start') return `+${mpK(f.gesichert)} / ${mpK(f.soll)} ${stufe}`
     return `${mpK(f.gesichert)} / ${mpK(f.soll)} ${stufe}`
   }
-  // Halbkreis 180° → 0°, Mittelpunkt (60,60), Radius 46; pathLength 100 → Prozent direkt als Strichlänge
-  const MP_BOGEN = 'M14 60 A46 46 0 0 1 106 60'
-  function mpTacho(f){
+  // Bogen 240° (210° → −30°) um (60,58), Radius 44; pathLength 100 → Prozent direkt als Strichlänge. Nadel zeigt bei 50 % nach oben.
+  const MP_BOGEN = 'M21.9 80 A44 44 0 1 1 98.1 80'
+  const mpPunkt = (v, r) => { const w = (210 - 2.4 * v) * Math.PI / 180; return [60 + r * Math.cos(w), 58 - r * Math.sin(w)] }
+  const mpWinkel = v => v * 2.4 - 120
+  const mpWert = f => Math.max(0, Math.min(100, Number(f.chance_pct ?? f.gesichert_pct) || 0))
+  function mpFilterWert(){ const s = document.getElementById('acc-firm-filter'); return s ? s.value : '' }
+  function mpTacho(f, i, aktiv, darf){
+    const v = mpWert(f), alt = _mp.zeig[f.firma] ?? 0
     const g = Math.max(0, Math.min(100, Number(f.gesichert_pct) || 0))
-    const e = f.erwartet_pct == null ? null : Math.max(g, Math.min(100, Number(f.erwartet_pct)))
-    let strich = ''
-    if(e != null && e > g + 0.5){
-      const w = Math.PI * (1 - e / 100), x1 = 60 + 38 * Math.cos(w), y1 = 60 - 38 * Math.sin(w), x2 = 60 + 54 * Math.cos(w), y2 = 60 - 54 * Math.sin(w)
-      strich = `<line class="mp-strich" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`
-    }
-    const zahl = f.gesichert_pct == null ? '–' : Math.round(g)
-    // Finn 16.10.2026: nur „so viel erreicht" — keine Kauf-/Nachkauf-Sprache; der helle Bogen ist Fortschritt mit den laufenden Konten
-    const tip = `${f.firma}: ${Math.round(g)} % vom Muster erreicht · ${mpSub(f)}${e != null && e > g + 0.5 ? ` · heller Bogen: mit den laufenden Konten ${Math.round(e)} %` : ''}. Klick: Konten zeigen`
-    return `<button type="button" class="mp-tacho${_mp.offen === f.firma ? ' offen' : ''}" data-mp-firma="${mpEsc(f.firma)}"
-        style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
-      <svg viewBox="0 0 120 68" aria-hidden="true">
+    const skala = [0, 25, 50, 75, 100].map(x => { const [a1, b1] = mpPunkt(x, 51), [a2, b2] = mpPunkt(x, 54)
+      return `<line class="mp-skala" x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}"/>` }).join('')
+    let ges = ''
+    if(g > 0.5 && g < 99.5){ const [a1, b1] = mpPunkt(g, 36), [a2, b2] = mpPunkt(g, 50)
+      ges = `<line class="mp-ges" x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}"/>` }
+    const zahl = f.chance_pct == null && f.gesichert_pct == null ? '–' : Math.round(v)
+    const tip = `${f.firma}: ${Math.round(v)} % Chance, mit den bestehenden Konten das Muster zu erreichen · gesichert ${mpSub(f)}${g > 0.5 && g < 99.5 ? ' (Strich am Bogen)' : ''}. Klick: Konten unten in der Tabelle zeigen`
+    return `<div role="button" tabindex="0" class="mp-tacho${aktiv ? ' aktiv' : ''}" data-mp-firma="${mpEsc(f.firma)}" data-mp-v="${v}" style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
+      ${darf ? `<button type="button" class="mp-schloss" data-mp-sperren="${mpEsc(f.firma)}" title="${mpEsc(f.firma)} bei dieser ID sperren (Firma hat gesperrt / Restriction) — keine neuen Pläne, laufende Trades bleiben">${MP_SCHLOSS}</button>` : ''}
+      <svg viewBox="0 0 120 96" aria-hidden="true">
+        <defs><linearGradient id="mp-verlauf-${i}" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" style="stop-color:color-mix(in srgb,var(--mp-f) 30%,#fff)"/><stop offset="1" style="stop-color:var(--mp-f)"/></linearGradient></defs>
         <path class="mp-bahn" d="${MP_BOGEN}" pathLength="100"/>
-        ${e != null ? `<path class="mp-erw" d="${MP_BOGEN}" pathLength="100" stroke-dasharray="${e} 100"/>` : ''}
-        ${g > 0 ? `<path class="mp-ges" d="${MP_BOGEN}" pathLength="100" stroke-dasharray="${g} 100"/>` : ''}
-        ${strich}
-        <text class="mp-zahl" x="60" y="58" text-anchor="middle">${zahl}${f.gesichert_pct == null ? '' : '<tspan dx="1">%</tspan>'}</text>
+        <path class="mp-bogen" d="${MP_BOGEN}" pathLength="100" stroke="url(#mp-verlauf-${i})" style="stroke-dashoffset:${100 - alt}"/>
+        ${skala}${ges}
+        <g class="mp-nadel" style="transform:rotate(${mpWinkel(alt)}deg)"><line x1="60" y1="62" x2="60" y2="24"/><circle cx="60" cy="58" r="4"/></g>
+        <text class="mp-zahl" x="60" y="90" text-anchor="middle">${zahl}${zahl === '–' ? '' : '<tspan dx="1">%</tspan>'}</text>
       </svg>
       <div class="mp-firma"><i></i>${mpEsc(f.firma)}</div>
       <div class="mp-sub">${mpEsc(mpSub(f))}</div>
-    </button>`
+    </div>`
   }
   function mpRender(){
     const karte = document.getElementById('mp-karte'); if(!karte) return
-    const d = _mp.d, leiste = document.getElementById('mp-leiste'), ges = document.getElementById('mp-gesperrt'), kont = document.getElementById('mp-konten')
-    if(!d){ karte.hidden = !_mp.fehler; leiste.innerHTML = _mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : ''; ges.hidden = kont.hidden = true; return }
+    const d = _mp.d, leiste = document.getElementById('mp-leiste'), ges = document.getElementById('mp-gesperrt')
+    if(!d){ karte.hidden = !_mp.fehler; leiste.innerHTML = _mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : ''; ges.hidden = true; return }
     karte.hidden = false
-    const firmen = d.firmen || []
+    const firmen = d.firmen || [], darf = d.darf_schalten !== false && !_mp.sendet
+    const fw = mpNorm(mpFilterWert())
     const sichtbar = firmen.filter(f => f.status !== 'gesperrt'), gesperrt = firmen.filter(f => f.status === 'gesperrt')
-    leiste.innerHTML = sichtbar.map(mpTacho).join('') + (_mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : '')
+    leiste.innerHTML = sichtbar.map((f, i) => mpTacho(f, i, !!fw && mpNorm(f.firma) === fw, darf)).join('') + (_mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : '')
     ges.hidden = !gesperrt.length
-    ges.innerHTML = gesperrt.length ? 'Gesperrt: ' + gesperrt.map(f => `<button type="button" class="mp-chip${_mp.offen === f.firma ? ' offen' : ''}" data-mp-firma="${mpEsc(f.firma)}"
-      title="${mpEsc(f.firma)} ist bei dieser ID gesperrt — keine neuen Pläne für Konten dieser Firma (laufende Trades bleiben). Klick: Konten zeigen">${MP_SCHLOSS}${mpEsc(f.firma)}</button>`).join('') : ''
+    ges.innerHTML = gesperrt.length ? 'Gesperrt: ' + gesperrt.map(f => `<button type="button" class="mp-chip" data-mp-frei="${mpEsc(f.firma)}"
+      title="${mpEsc(f.firma)} ist bei dieser ID gesperrt — keine neuen Pläne für Konten dieser Firma (laufende Trades bleiben).${darf ? ' Klick: wieder freigeben' : ''}">${MP_SCHLOSS}${mpEsc(f.firma)}</button>`).join('') : ''
     const st = document.getElementById('mp-stand')
     if(st){ const t = d.gerechnet_um ? new Date(d.gerechnet_um) : null
       st.textContent = t && isFinite(t) ? 'Stand ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '' }
-    const f = firmen.find(x => x.firma === _mp.offen)
-    kont.hidden = !f
-    if(f){
-      const gesp = f.status === 'gesperrt'
-      // Status-Knopf oben rechts (Finn 16.10.2026): jede ID für ihre eigenen Firmen, Verwalter für die Gruppe, Admin für alle (Server prüft)
-      const knopf = d.darf_schalten === false ? ''
-        : `<button type="button" data-mp-status="${gesp ? 'frei' : 'gesperrt'}"${_mp.sendet ? ' disabled' : ''}
-            title="${gesp ? 'Firma bei dieser ID wieder freigeben — der Planer plant ihre Konten wieder' : 'Firma bei dieser ID sperren (Firma hat gesperrt/Restriction) — keine neuen Pläne, laufende Trades bleiben'}">${gesp ? 'Freigeben' : 'Sperren'}</button>`
-      const konten = f.konten || []
-      const zeile = k => `<div class="mp-konto" data-mp-konto="${mpEsc(k.account_id)}" title="Konto öffnen">
-          <span class="mp-k-name">${mpEsc(k.name || '–')}</span>
-          <span class="mp-k-typ">${mpEsc(MP_TYP[k.waiting ? 'waiting' : k.typ] || k.typ || '–')}</span>
-          <span class="mp-k-bal">${k.balance == null ? '–' : mpBetrag(k.balance, k.ccy)}</span></div>`
-      kont.innerHTML = `<div class="mp-konten-kopf"><span>${mpEsc(f.firma)}<small>${konten.length} ${konten.length === 1 ? 'Konto' : 'Konten'}${gesp ? ' · gesperrt' : ''}</small></span>${knopf}</div>`
-        + (konten.length ? konten.map(zeile).join('') : '<div class="mp-k-leer">keine aktiven Konten bei dieser Firma</div>')
-    }
+    // Nadel und Bogen fahren vom zuletzt gezeigten Wert auf den neuen (erstes Laden: von 0) — gleiche Werte bewegen sich nicht
+    mpSpalten()
+    // Reflow erzwingen statt requestAnimationFrame: das ruht in Hintergrund-Tabs, die Nadeln blieben dort auf dem Startwert stehen
+    void leiste.offsetWidth
+    leiste.querySelectorAll('.mp-tacho').forEach(el => {
+      const v = Number(el.dataset.mpV) || 0
+      const b = el.querySelector('.mp-bogen'), n = el.querySelector('.mp-nadel')
+      if(b) b.style.strokeDashoffset = String(100 - v)
+      if(n) n.style.transform = `rotate(${mpWinkel(v)}deg)`
+      _mp.zeig[el.dataset.mpFirma] = v
+    })
   }
+  // Gleich volle Reihen über die ganze Breite (Finn: „nicht links gestaucht mit Leerraum rechts"): so viele Spalten, wie Platz ist, dann
+  // die Karten gleichmäßig auf die nötigen Reihen verteilen (6 Karten bei Platz für 4 → 3 + 3). Am Handy wischbare Leiste (CSS).
+  function mpSpalten(){
+    const leiste = document.getElementById('mp-leiste'); if(!leiste) return
+    const n = leiste.querySelectorAll('.mp-tacho').length, w = leiste.clientWidth
+    if(!n || !w || window.matchMedia('(max-width:820px)').matches){ leiste.style.gridTemplateColumns = ''; return }
+    const max = Math.max(1, Math.floor((w + 10) / (132 + 10))), reihen = Math.ceil(n / max)
+    leiste.style.gridTemplateColumns = `repeat(${Math.ceil(n / reihen)}, minmax(0, 1fr))`
+  }
+  try{ const l = document.getElementById('mp-leiste'); if(l && typeof ResizeObserver === 'function') new ResizeObserver(mpSpalten).observe(l) }catch(_){}
   async function mpToken(){
     const { data: { session } } = await supabase.auth.getSession()
     if(!session?.access_token) throw new Error('nicht angemeldet')
@@ -66839,7 +66862,7 @@
   async function mpLaden(){
     const uid = (typeof currentUserId !== 'undefined' && currentUserId) ? String(currentUserId) : ''
     if(!uid || _mp.laedt) return
-    if(_mp.uid !== uid){ _mp.d = null; _mp.offen = '' }        // ID gewechselt: nie die Tachos der vorigen ID zeigen
+    if(_mp.uid !== uid){ _mp.d = null; _mp.zeig = {} }        // ID gewechselt: nie die Tachos der vorigen ID zeigen, Nadeln wieder von 0
     _mp.laedt = true
     try{
       const r = await fetch(`${WATCHER_HOME}/admin/muster-portfolio?user_id=${encodeURIComponent(uid)}`, { headers: { 'sb-token': await mpToken() }, cache: 'no-store' })
@@ -66851,8 +66874,8 @@
     _mp.laedt = false
     mpRender()
   }
-  async function mpSchalten(status){
-    const d = _mp.d, f = d && (d.firmen || []).find(x => x.firma === _mp.offen)
+  async function mpSchalten(firma, status){
+    const d = _mp.d, f = d && (d.firmen || []).find(x => x.firma === firma)
     if(!f || f.status === status || _mp.sendet) return
     const alt = f.status
     f.status = status; _mp.sendet = true; mpRender()
@@ -66866,28 +66889,53 @@
     _mp.sendet = false
     mpRender()
   }
-  const mpKlickFirma = e => { const b = e.target.closest('[data-mp-firma]'); if(!b) return; _mp.offen = _mp.offen === b.dataset.mpFirma ? '' : b.dataset.mpFirma; mpRender() }
-  document.getElementById('mp-leiste')?.addEventListener('click', mpKlickFirma)
-  document.getElementById('mp-gesperrt')?.addEventListener('click', mpKlickFirma)
-  document.getElementById('mp-konten')?.addEventListener('click', e => {
-    const b = e.target.closest('[data-mp-status]')
-    if(b){ if(!b.disabled) mpSchalten(b.dataset.mpStatus); return }
-    const k = e.target.closest('[data-mp-konto]')
-    if(!k || !k.dataset.mpKonto) return
-    // dieselbe Konto-Ansicht wie ein Klick auf die Zeile in der Accounts-Tabelle
-    _detailAccountId = k.dataset.mpKonto
-    switchView('account-detail')
-    if(typeof renderAccountDetail === 'function') renderAccountDetail()
+  // Klick auf einen Tacho: Firma-Filter der Tabelle setzen (Reiter „Manuell"), hinscrollen; derselbe Tacho nochmal → „Alle".
+  // Der Select bekommt den Wert wie bei einer Auswahl von Hand (change-Ereignis → dessen Listener filtert und zeichnet die Tabelle).
+  function mpFiltern(firma){
+    const sel = document.getElementById('acc-firm-filter'); if(!sel) return
+    const an = mpNorm(sel.value) === mpNorm(firma) && !!sel.value
+    let ziel = ''
+    if(!an){
+      const opts = [...sel.options].map(o => o.value).filter(v => v && mpNorm(v) === mpNorm(firma))
+      const n = v => (typeof accounts !== 'undefined' ? (accounts || []).filter(a => a.firm === v).length : 0)
+      ziel = opts.sort((a, b) => n(b) - n(a))[0] || ''
+      if(!ziel){ _mp.fehler = `Keine Konten bei ${firma} in der Tabelle.`; mpRender(); return }
+    }
+    _mp.fehler = ''
+    const manuell = document.querySelector('#dashboard-view section.view[data-view="accounts"] .subtab[data-subtab="manual"]')
+    if(manuell && !manuell.classList.contains('active')) manuell.click()
+    sel.value = ziel
+    sel.dispatchEvent(new Event('change', { bubbles: true }))
+    if(ziel) (sel.closest('.subtabs')?.nextElementSibling || sel.closest('div') || sel).scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  document.getElementById('mp-leiste')?.addEventListener('click', e => {
+    const s = e.target.closest('[data-mp-sperren]')
+    if(s){
+      e.stopPropagation()
+      if(confirm(`${s.dataset.mpSperren} bei dieser ID sperren?\nDer Planer legt für Konten dieser Firma keine neuen Pläne mehr an. Laufende Trades bleiben.`)) mpSchalten(s.dataset.mpSperren, 'gesperrt')
+      return
+    }
+    const t = e.target.closest('.mp-tacho[data-mp-firma]'); if(t) mpFiltern(t.dataset.mpFirma)
   })
+  document.getElementById('mp-leiste')?.addEventListener('keydown', e => {
+    if(e.key !== 'Enter' && e.key !== ' ') return
+    const t = e.target.closest('.mp-tacho[data-mp-firma]'); if(t && e.target === t){ e.preventDefault(); mpFiltern(t.dataset.mpFirma) }
+  })
+  document.getElementById('mp-gesperrt')?.addEventListener('click', e => {
+    const c = e.target.closest('[data-mp-frei]'); if(!c || !_mp.d || _mp.d.darf_schalten === false || _mp.sendet) return
+    if(confirm(`${c.dataset.mpFrei} bei dieser ID wieder freigeben?\nDer Planer plant ihre Konten dann wieder.`)) mpSchalten(c.dataset.mpFrei, 'frei')
+  })
+  // Filter von Hand geändert → markierter Tacho folgt (zusätzlicher Listener, der bestehende filtert weiter die Tabelle)
+  document.getElementById('acc-firm-filter')?.addEventListener('change', () => { if(_mp.d) mpRender() })
   const mpSichtbar = () => !!document.querySelector('#dashboard-view .view[data-view="accounts"].active')
   window._mpOeffnen = () => {
     const uid = (typeof currentUserId !== 'undefined' && currentUserId) ? String(currentUserId) : ''
     if(uid !== _mp.uid || Date.now() - _mp.at >= MP_TAKT) mpLaden(); else mpRender()
   }
-  // Solange Accounts offen ist: jede Minute nachladen (neue Konten, Balance) — der Server merkt sich 60 s, kostet also höchstens einen Lauf
+  // Solange Accounts offen ist: alle 5 min nachladen (neue Konten, Balance) — der Server merkt sich 5 min, kostet also höchstens einen Lauf
   setInterval(() => { if(mpSichtbar() && !document.hidden && !_mp.sendet) window._mpOeffnen() }, 15000)
   if(mpSichtbar()) setTimeout(window._mpOeffnen, 0)
-  window._muster = { zeigen: d => { _mp.d = d; _mp.fehler = ''; mpRender() }, render: mpRender }   // Test-Haken (Stub/Boot-Check)
+  window._muster = { zeigen: d => { _mp.d = d; _mp.fehler = ''; mpRender() }, render: mpRender, norm: mpNorm }   // Test-Haken (Stub/Boot-Check)
 })()
 /* ── VORRAT (05.10.2026, Finn: „je ID und Prop-Firma festlegen, ob die ID dort freigeschaltet oder gesperrt ist … eine schöne Übersicht,
  * wo jede ID bei jeder Firma im Funnel steht und was bis zum Ziel fehlt") ──

@@ -36,7 +36,7 @@ def main():
         print(("✓ " if bed else "✗ ") + text)
         ok = ok and bool(bed)
 
-    zellen = [{"firma": "The5%ers", "status": "frei", "untergrenze": 3, "bestand_echt": 2, "abdeckung": 0.9, "unterwegs_n": 2,
+    zellen = [{"firma": "The5%ers", "status": "frei", "untergrenze": 3, "bestand_echt": 2, "abdeckung": 0.9, "unterwegs_n": 2, "sicherheit": 0.6234,
                "konten": [{"account_id": "k2", "name": "B", "typ": "funded_cfd", "balance": 101000.0, "chance": 0.5},
                           {"account_id": "k1", "name": "A", "typ": "phase1", "balance": 99000.0, "wert_eur": 12.0}]},
               {"firma": "Tradeify", "status": "pausiert", "untergrenze": 20000, "bestand_echt": 30000, "abdeckung": 1.0},
@@ -55,6 +55,8 @@ def main():
     check(je["Apex Trader"]["gesichert_pct"] is None and je["Apex Trader"]["erwartet_pct"] is None, "ohne Untergrenze kein Prozent")
     check(je["Tradeify"]["status"] == "frei", "alte „pausiert“-Zeile zeigt der Tacho als aktiv")
     check(je["FTMO"]["status"] == "gesperrt", "gesperrt bleibt gesperrt")
+    check(je["The5%ers"]["chance_pct"] == 62.3, "Chance = sicherheit (ohne Kauf) in Prozent")
+    check(je["FTMO"]["chance_pct"] is None, "ohne sicherheit keine Chance-Zahl")
     kt = je["The5%ers"]["konten"]
     check([k["account_id"] for k in kt] == ["k1", "k2"], "Konten nach Stufe (Phase 1 vor Funded CFD)")
     check(set(kt[0]) == {"account_id", "name", "typ", "groesse", "balance", "ccy", "balance_at", "waiting"}, "je Konto nur Anzeige-Felder (keine Chance/Kaufwerte)")
