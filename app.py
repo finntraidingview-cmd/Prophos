@@ -26219,6 +26219,75 @@ def ap_anlauf_rest(start_ts, jetzt_ts, sperre=AP_ANLAUF_S):
     return max(0.0, float(start_ts) + float(sperre) - float(jetzt_ts))
 
 
+# ══ FENSTER-WACHE (Master 16.10.2026, Finn: „CFD bis 18:00 Dubai" — sechs CFD-Pläne des Nachtlaufs 02:32 Dubai lagen nach der neuen Regel
+# zwischen 18:18 und 19:55 Dubai). Alle 10 min: ungestartete Auto-Pläne von heute, deren Start am oder hinter dem Ende ihrer Klasse liegt
+# (ap_klasse_bis: CFD zeiten.cfd_bis, sonst start_bis), bekommen über ap_nachhol_minute einen regelkonformen Start davor (Richtungsschutz
+# ID × Firma, Firmen-Abstand, Abstand je ID/PC, gegenläufige Starts anderer IDs) — frühestens an einem zufälligen Punkt zwischen jetzt + 15
+# und 30 min vor dem Ende, damit nicht alle zugleich anlaufen. Geschrieben über _ap_aenderungen_anwenden (Guard planned/ungestartet/alte
+# Richtung, bestätigt nur wenn nicht fällig) mit Protokoll in auto_plan_umplanung (quelle bot, Grund „[Fenster-Wache] …"). Kein Platz → bleibt
+# stehen, Log nennt den Grund. Der Saldo-Riegel prüft wie immer am Start. ══
+AP_FENSTER_WACHE_TAKT_S = 600
+_ap_fenster_wache = {"at": 0.0, "verschoben": [], "fehler": ""}
+
+
+def ap_fenster_ueberhang(plaene, zeiten, jetzt_min, heute=None):
+    """REIN RECHNEND (testbar): Pläne (Form _ap_stand_plaene) von heute, die ungestartet hinter dem Ende ihrer Klasse starten würden →
+    [(plan, klasse_bis)]. Nur Auto-Pläne, nicht Folgetag, nicht schon gestartet/fällig (fest_durch), Start noch in der Zukunft."""
+    out = []
+    for x in plaene or ():
+        if x.get("folgetag") or not x.get("auto_plan") or x.get("start_min") is None:
+            continue
+        if x.get("fest_durch") in ("schon gestartet", "bestätigt und fällig") or float(x["start_min"]) < float(jetzt_min):
+            continue
+        bis = ap_klasse_bis(zeiten, x.get("route"), heute)
+        if float(x["start_min"]) >= float(bis):
+            out.append((x, bis))
+    return out
+
+
+def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
+    """Ein Takt (ap_loop): alle AP_FENSTER_WACHE_TAKT_S, nur wenn auto_plan_regeln.aktiv. → Liste der Umplanungen."""
+    if time.time() - (_ap_fenster_wache.get("at") or 0) < AP_FENSTER_WACHE_TAKT_S:
+        return None
+    _ap_fenster_wache["at"] = time.time()
+    rnd = rnd or random
+    reg = reg or (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg or not reg.get("aktiv"):
+        return None
+    stand = _ap_stand_laden(reg, jetzt)
+    plaene = _ap_stand_plaene(stand)
+    zuviel = ap_fenster_ueberhang(plaene, stand.get("zeiten"), stand["jetzt_min"])
+    if not zuviel:
+        return []
+    laufend = [{"user_id": z["user_id"], "firma": z.get("firma_key"), "richtung": z.get("richtung"), "start": None} for z in stand["offen"]]
+    lz = (stand.get("param") or {}).get("laufzeit_min")
+    tz_d = _ap_tz(AP_7T_TZ)
+    fertig = []
+    for x, bis in zuviel:
+        jm = float(stand["jetzt_min"])
+        spanne = max(0.0, float(bis) - 30 - (jm + 15))
+        ab = jm + 15 + rnd.random() * spanne
+        m, fehler = ap_nachhol_minute(x, plaene, stand["starts_heute"], stand["id_fest"], jm, stand.get("zeiten"), lz, laufend, rnd=rnd, ab_min=ab)
+        if m is None:
+            print(f"[fenster-wache] {str(x['plan_id'])[:8]} {x.get('firma_name') or x.get('firma')} bleibt um {_ap_hhmm_txt(x['start_min'])} dt: {fehler}", flush=True)
+            continue
+        alt_d = (stand["mitternacht"] + timedelta(minutes=float(x["start_min"]))).astimezone(tz_d).strftime("%H:%M")
+        neu_d = (stand["mitternacht"] + timedelta(minutes=float(m))).astimezone(tz_d).strftime("%H:%M")
+        bis_d = (stand["mitternacht"] + timedelta(minutes=float(bis))).astimezone(tz_d).strftime("%H:%M")
+        a = {"plan_id": x["plan_id"], "user_id": x["user_id"], "firma": x.get("firma"), "art": "start", "von_richtung": x.get("richtung"),
+             "nach_richtung": x.get("richtung"), "von_start_min": x["start_min"], "nach_start_min": m,
+             "grund": f"[Fenster-Wache] Start {alt_d} → {neu_d} Dubai — {'CFD' if x.get('route') in AP_CFD_ROUTEN else 'Futures'} nur bis {bis_d} Dubai"}
+        umpl, f2 = _ap_aenderungen_anwenden(stand, [a], "bot")
+        if umpl:
+            x["start_min"] = m                             # nächster Plan dieses Laufs rechnet mit der neuen Zeit
+            fertig.append({"plan_id": x["plan_id"], "firma": x.get("firma_name") or x.get("firma"), "alt": alt_d, "neu": neu_d})
+            print(f"[fenster-wache] {str(x['plan_id'])[:8]} {x.get('firma_name') or x.get('firma')}: {alt_d} → {neu_d} Dubai", flush=True)
+        else:
+            print(f"[fenster-wache] {str(x['plan_id'])[:8]} nicht verschoben: {f2 or 'Guard (gestartet/bestätigt+fällig/geändert)'}", flush=True)
+    _ap_fenster_wache["verschoben"] = (fertig + _ap_fenster_wache.get("verschoben", []))[:40]
+    return fertig
+
+
 _ap_wecker = {"konto": None, "balance": None, "at": 0.0, "geweckt": 0, "bal_at": 0.0}
 AP_WECKER_BAL_MIN_S = 180   # frische Balance weckt höchstens alle 3 min (Prüfer S2 16.10.2026: ~39 Lesungen/h → sonst 1 Nachplan-Lauf je Minute)
 
@@ -26318,6 +26387,12 @@ def ap_loop():
         except Exception as e:
             _ap_bal_auto["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[balance-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
+            ap_fenster_wache_tick(datetime.now(timezone.utc))   # Pläne hinter dem Klassen-Ende vorziehen (16.10.2026)
+            _ap_fenster_wache["fehler"] = ""
+        except Exception as e:
+            _ap_fenster_wache["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[fenster-wache] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             ap_auto_best_tick(datetime.now(timezone.utc))   # Vorschläge von selbst bestätigen, sobald die Balance live ist (15.10.2026)
             _ap_auto_best["fehler"] = ""

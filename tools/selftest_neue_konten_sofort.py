@@ -26,7 +26,8 @@ def check(ok, name):
 
 def lade_extra(ns):
     src = open(os.path.join(os.path.dirname(HIER), "app.py"), encoding="utf-8").read()
-    for fn in ("ap_zeit_dt_min", "ap_fenster_liste", "ap_start_bis", "ap_cfd_ab", "ap_cfd_bis", "ap_klasse_bis", "ap_wecker_pruefen"):
+    for fn in ("ap_zeit_dt_min", "ap_fenster_liste", "ap_start_bis", "ap_cfd_ab", "ap_cfd_bis", "ap_klasse_bis", "ap_wecker_pruefen",
+               "ap_fenster_ueberhang"):
         i = src.index(f"\ndef {fn}(") + 1
         exec(src[i:src.index("\n\n\n", i)], ns)
     return ns
@@ -75,6 +76,27 @@ def main():
         if m.get("c|fn#1") is None or not (8 * 60 + 16 <= m["c|fn#1"] < 16 * 60):
             zu_spaet += 1
     check(zu_spaet == 0, "CFD-Nachplan um 10:00 Dubai: Start verteilt zwischen jetzt + 15 und 18:00 Dubai (200 Seeds)")
+    # FENSTER-WACHE (Master 16.10.2026): CFD-Pläne hinter 18:00 Dubai finden; Futures bis 20:00 bleiben; gestartete/fällige/Folgetag nie
+    ue = a["ap_fenster_ueberhang"]
+    ZW = dict(Z, fenster_tz="Asia/Dubai", fenster=[["02:00", "20:00", 100]], start_bis="20:00")
+    pl = lambda pid, st, route, **k: dict({"plan_id": pid, "user_id": "u", "firma": "f", "richtung": "buy", "start_min": st, "route": route,
+                                           "auto_plan": True, "fest_durch": None, "folgetag": False}, **k)
+    plaene = [pl("cfd-spaet", 17 * 60 + 9, "mt5v2"), pl("cfd-gut", 15 * 60, "mt5v2"), pl("fut-spaet-ok", 17 * 60 + 32, "tvv2"),
+              pl("cfd-gestartet", 17 * 60, "mt5v2", fest_durch="schon gestartet"), pl("cfd-folgetag", 17 * 60, "mt5v2", folgetag=True),
+              pl("cfd-hand", 17 * 60, "mt5v2", auto_plan=False), pl("fut-zu-spaet", 18 * 60 + 5, "tvv2")]
+    gef = [x["plan_id"] for x, _ in ue(plaene, ZW, 3 * 60, date(2026, 10, 16))]
+    check(gef == ["cfd-spaet", "fut-zu-spaet"], f"Fenster-Wache findet CFD ≥ 18:00 Dubai und Futures ≥ 20:00 Dubai, sonst nichts ({gef})")
+    check(ue(plaene, ZW, 18 * 60 + 10, date(2026, 10, 16)) == [], "Fenster-Wache: Start schon vorbei → nichts")
+    # neue Zeit über ap_nachhol_minute mit zufälligem frühesten Punkt (jetzt + 15 … Ende − 30): immer vor dem CFD-Ende, nie vor jetzt + 15
+    nm, raus = a["ap_nachhol_minute"], 0
+    for seed in range(200):
+        r_ = random.Random(seed)
+        jm, bis = 3 * 60.0, float(a["ap_klasse_bis"](ZW, "mt5v2"))
+        ab = jm + 15 + r_.random() * max(0.0, bis - 30 - (jm + 15))
+        m, _f = nm(dict(plaene[0]), plaene, [], {}, jm, ZW, None, [], rnd=r_, ab_min=ab)
+        if m is None or not (jm + 15 <= m < bis):
+            raus += 1
+    check(raus == 0, "Fenster-Wache: neue Zeit immer zwischen jetzt + 15 und 18:00 Dubai (200 Seeds)")
     print(f"\n{'ALLES OK' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
     sys.exit(1 if FEHLER else 0)
 
