@@ -3631,7 +3631,7 @@
   /* Payout ab (16.10.2026): Chip unter dem Kontonamen in Accounts + Admin → Alle Accounts — Farben wie der Payout-Termin daneben */
   .acc-po{font-weight:600} .acc-po-jetzt{color:var(--good)} .acc-po-tage{color:var(--violet)} .acc-po-sub{color:var(--sub);font-weight:500}
   /* Heute traden (16.10.2026): Funded Futures ohne heutigen Trade dezent auffällig (Amber-Punkt), sonst klein grau */
-  .acc-heute{font-weight:600;display:inline-flex;align-items:center;gap:5px} .acc-heute i{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none}
+  .acc-heute{font-weight:600;display:inline-flex;align-items:center;gap:5px;white-space:nowrap} .acc-heute i{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none}
   .acc-heute-offen{color:color-mix(in srgb,var(--warn) 78%,var(--ink))} .acc-heute-ok,.acc-heute-plan{color:var(--sub);font-weight:500}
   .acc-po-fehlt{color:var(--sub);font-weight:500} .acc-po-fehlt.is-klick{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px} .acc-po-fehlt.is-klick:hover{color:var(--ink)}
   #dashboard-view .pz-radar .ap-ri-flip{border:0;background:none;padding:0;margin:0;font:inherit;cursor:pointer}
@@ -16154,7 +16154,6 @@
         try{ const z = zielBadgeHtml(a, false); if(z) metaParts.push(z) }catch(_){}
         // Payout (16.10.2026): Funded CFD → „Payout ab"-Chip aus payout_ready_at (eigene Konten klickbar), sonst der allgemeine Termin-Chip
         try{ const eigen = String(r.user_id) === String(currentUserId); const p = a.type === 'funded_cfd' ? payoutAbBadgeHtml(a, { offen: !!r.po_offen }, eigen) : payoutReadyBadgeHtml(a); if(p) metaParts.push(p) }catch(_){}
-        try{ if(!r.archived && r.heute_traden){ const h = heuteChipHtml(r.heute_traden); if(h) metaParts.push(h) } }catch(_){}   // Heute traden (16.10.2026)
         const meta = metaParts.length
           ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
         const archBadge = r.archived
@@ -16166,6 +16165,8 @@
           : '<span class="mono" style="color:var(--sub-2)">—</span>'
         let typ = ''; try{ typ = accTypChipHtml(a) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
         let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
+        // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
+        try{ if(a.type === 'funded' && !r.archived && r.heute_traden){ const h = heuteKompaktHtml(r.heute_traden); if(h) planer = h } }catch(_){}
         return `
           <tr style="${r.archived ? 'opacity:.55' : ''}">
             <td style="padding-left:20px">
@@ -35251,8 +35252,6 @@
         const payoutHtml = a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
           : (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
-        // Heute traden (16.10.2026): nur Funded Futures, nicht archiviert — „heute noch nicht getradet" / „heute geplant · 14:30" / „✓ heute getradet"
-        if(a.type === 'funded' && !(archive[a.id] && archive[a.id].archived)){ try{ const h = heuteChipHtml(accHeuteInfo(a)); if(h) metaParts.push(h) }catch(_){} }
         // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
         // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
         if(istFut && !String(a.externalId || '').trim() && !(archive[a.id] && archive[a.id].archived)) metaParts.push(`<span class="chip" style="font-size:10.5px;padding:1px 7px;color:var(--sub);border:1px solid var(--line);background:none" title="Ohne External ID kann der Puls das Unterkonto nicht wählen — der Auto-Planer lässt das Konto aus. Bearbeiten → External ID eintragen.">ohne External ID</span>`)
@@ -35301,7 +35300,7 @@
             <td>${escapeHtml(a.firm || '–')}</td>
             <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
-            <td data-stop-row-click="1">${accPlanerZelleHtml(a, isArchived)}</td>
+            <td data-stop-row-click="1">${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived)) : accPlanerZelleHtml(a, isArchived)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
               <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
@@ -44239,7 +44238,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1592'
+  const OS_TAB_BUILD = '2026-09-22.1593'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57870,12 +57869,14 @@
       je.set(String(p.id), { status: p.status, started_at: p.startedAt, ended_at: p.endedAt, completed_at: p.completedAt, start_um: p.startUm })
     return heuteTradenInfo([...je.values()])
   }
-  function heuteChipHtml(i){
+  // Kompakt für die Planer-Spalte (Finn 16.10.2026 nach .1589: „in die Planer-Spalte statt unter den Namen") — voller Text im Tooltip.
+  // Funded Futures stehen nicht in AP_CHIP_TYPEN, ihre Planer-Zelle war bisher nur „—".
+  function heuteKompaktHtml(i){
     if(!i) return ''
-    if(i.getradet) return '<span class="acc-heute acc-heute-ok" title="Heute lief schon ein Trade auf diesem Konto (Planer-Tag, Berliner Zeit)">✓ heute getradet</span>'
+    if(i.getradet) return '<span class="acc-heute acc-heute-ok" title="Heute schon getradet (Planer-Tag, Berliner Zeit)">✓</span>'
     if(i.geplant_um){ const um = new Date(i.geplant_um).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
-      return `<span class="acc-heute acc-heute-plan" title="Heute ist ein Trade geplant (${escapeHtml(um)} Dubai)">◷ heute geplant · ${escapeHtml(um)}</span>` }
-    return '<span class="acc-heute acc-heute-offen" title="Funded Futures: heute noch kein Trade auf diesem Konto — Erinnerung, keine Regel"><i></i>heute noch nicht getradet</span>'
+      return `<span class="acc-heute acc-heute-plan" title="Heute ist ein Trade geplant: ${escapeHtml(um)} Dubai">◷ ${escapeHtml(um)}</span>` }
+    return '<span class="acc-heute acc-heute-offen" title="Funded Futures: heute noch nicht getradet — Erinnerung, keine Regel"><i></i>heute offen</span>'
   }
   function heuteOffen(i){ return !!i && !i.getradet && !i.geplant_um }
   // „Heute offen zuerst": 0 heute noch nicht getradet, 1 heute geplant, 2 heute getradet, 3 kein Funded Futures (bisherige Reihenfolge)
@@ -57883,7 +57884,7 @@
     const rang = i => !i ? 3 : heuteOffen(i) ? 0 : i.getradet ? 2 : 1
     return list.map((a, n) => ({ a, n, r: rang(info(a)) })).sort((x, y) => x.r - y.r || x.n - y.n).map(x => x.a)
   }
-  window._heuteTraden = { info: heuteTradenInfo, chip: heuteChipHtml, zuerst: heuteZuerst }   // Test-Haken (Boot-Check)
+  window._heuteTraden = { info: heuteTradenInfo, kompakt: heuteKompaktHtml, zuerst: heuteZuerst }   // Test-Haken (Boot-Check)
   // Eigene Konten: offene Payout-Anfragen je Konto (nur für „angefragt"), einmal je 5 min geladen
   let _poEigen = { je: new Map(), at: 0, laeuft: false }
   async function poEigenSicherstellen(){
