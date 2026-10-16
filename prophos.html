@@ -12909,6 +12909,7 @@
             <option value="Topstep"></option>
             <option value="Fusion Markets"></option>
             <option value="FundingPips"></option>
+            <option value="FTMO"></option>
             <option value="FundedNext"></option>
             <option value="FundedNext Futures"></option>
             <option value="MyFundedFutures"></option>
@@ -37064,8 +37065,12 @@
         const typ = /funded/i.test(typZeile) ? 'funded_cfd' : /P2/i.test(typZeile) ? 'phase2' : /P1/i.test(typZeile) ? 'phase1' : 'challenge'
         const bi = zl.findIndex(x => /^current balance$/i.test(x)), bal = bi >= 0 && bi + 1 < zl.length ? bulkGeld(zl[bi + 1]) : null
         const nachher = roh.slice(m.index + m[0].length, m.index + m[0].length + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
-        dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma: 'FundedNext', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
-                        typ, balance: bal, trailing: null, tvUebernehmen: false, zugang })
+        // 17.10.2026 (Jacob 511448315): FTMO-Zugangsdaten „Login … Server FTMO-Server" wurden als FundedNext · Challenge · 150k angelegt —
+        // der Block schlug die gewählte FTMO-Vorlage. FundedNext nur noch mit Merkmal (Server/Text), sonst Firma + Typ aus dem Formular.
+        const merkmal = String(zugang && zugang.server || '') + '\n' + teil
+        const firma = /ftmo/i.test(merkmal) ? 'FTMO' : /funded\s*next|stellar/i.test(merkmal) ? 'FundedNext' : ''
+        dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma, groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
+                        typ: (firma === 'FundedNext' || typZeile) ? typ : '', balance: bal, trailing: null, tvUebernehmen: false, zugang })
       })
       // (1c) Apex (27.09.2026, Master): Kennung APEX + Ziffern = Challenge, PAAPEX + Ziffern = Performance Account (funded). Ein Apex-
       //      Dashboard-Format ist noch nicht bekannt — nur die Kennung, keine Balance/Größe aus dem Text.
@@ -37159,7 +37164,7 @@
         if(t) vorh++
         const standard = !sperre && !/failed|breached|passed/i.test(x.status)
         const an = sperre ? false : (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : standard)
-        const typ = (v && v.account_type) || x.typ || bEl.type.value, gr = x.groesse || (v && (v.starting_balance || v.account_size)) || BULK_STD_GROESSE
+        const typ = (v && v.account_type) || x.typ || bEl.type.value, gr = x.groesse || (v && (v.starting_balance || v.account_size)) || (parseFloat(bEl.size.value) || 0) || BULK_STD_GROESSE
         return `<label class="bpv ${an ? '' : 'aus'}"><input type="checkbox" data-bp="${escapeHtml(x.id)}" ${an ? 'checked' : ''} ${sperre ? 'disabled' : ''}>
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
           ${(x.titel || x.status) ? `<span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>` : ''}
@@ -37221,9 +37226,9 @@
       const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
       for(let i = 0; i < wahl.length; i++){
         const x = wahl[i], cred = bulkCredAusZeile(x.id) || (cfdIdx.has(x.id) ? (credList[cfdIdx.get(x.id)] || null) : null)
-        // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > 150.000 (F14)
+        // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > Formular > 150.000 (F14)
         const v = bulkPasteVorlage(x), vv = (k, sonst) => (v && v[k] != null) ? v[k] : sonst
-        const firm = vv('firm', x.firma || firmaForm), gr = x.groesse || vv('starting_balance', null) || vv('account_size', null) || BULK_STD_GROESSE
+        const firm = vv('firm', x.firma || firmaForm), gr = x.groesse || vv('starting_balance', null) || vv('account_size', null) || (parseFloat(bEl.size.value) || 0) || BULK_STD_GROESSE
         // Namensregel .1472 (Finn 12.10.2026): immer „<Größe> <External ID> → <Phase>" — Vorlagen-Text und Dashboard-Titel zählen nicht mehr
         // (vorher ergab „{size} {firm} {ex}" Namen wie „150k FundedNext Futures FNFT…88778" neben „150k FNFT…27926 → Challenge")
         const typRow = vv('account_type', x.typ || typForm)
@@ -39313,7 +39318,7 @@
    * tatsächlich auf Accounts verwendeten Firmennamen — dedupliziert, alphabetisch.
    */
   function refreshFirmDatalist(){
-    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Apex Trader','The5%ers']
+    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FTMO','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Apex Trader','The5%ers']
     const seen = new Map()  // lowercase → Original-Schreibweise (erste gesehene gewinnt)
     const addName = (name) => {
       const n = (name || '').trim()
@@ -44341,7 +44346,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1608'
+  const OS_TAB_BUILD = '2026-09-22.1609'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
