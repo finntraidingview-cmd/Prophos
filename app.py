@@ -6053,6 +6053,30 @@ def _gp_zuwachs_karte(accounts, archived, plans, aktive_ketten):
     return out
 
 
+# HEUTE TRADEN (Finn 16.10.2026: „Ich habe oft Funded Futures rumliegen, die ich nicht trade, weil ich es vergesse … vor allem die
+# Apex-Funnel"): je Funded-Futures-Konto nur eine Erinnerung, ob heute schon ein Trade lief — keine Regel, keine Sperre. „Heute" = der
+# Kalendertag des Planers (AP_TZ_TAG, wie AP_GRUND_HEUTE_GEHANDELT), damit Chip und Planer nie widersprechen. Dieselbe Regel steht im
+# Frontend (accHeuteInfo) für die eigenen Konten.
+HEUTE_TRADEN_TYPEN = ("funded",)
+
+
+def heute_traden_info(plaene, heute, tz):
+    """REIN RECHNEND (testbar): Pläne EINES Kontos → {getradet, geplant_um}. getradet = ein Plan läuft (open) oder wurde heute gestartet/
+    beendet/abgehakt (started_at/ended_at/completed_at am Tag, Status open/review/completed), egal welche Route. geplant_um = früheste
+    heutige Startzeit eines noch nicht gestarteten Plans (nur, wenn noch nicht getradet). heute = 'JJJJ-MM-TT' in tz."""
+    def tag(v):
+        t = _ap_ts(v)
+        return t.astimezone(tz).date().isoformat() if t else None
+    getradet, geplant = False, []
+    for p in plaene or []:
+        st = str(p.get("status") or "")
+        if st == "open" or (st in ("review", "completed") and any(tag(p.get(k)) == heute for k in ("started_at", "ended_at", "completed_at"))):
+            getradet = True
+        elif st == "planned" and not p.get("started_at") and p.get("start_um") and tag(p.get("start_um")) == heute:
+            geplant.append(str(p.get("start_um")))
+    return {"getradet": getradet, "geplant_um": (min(geplant, key=lambda x: _ap_ts(x)) if geplant and not getradet else None)}
+
+
 def admin_build_overview(kapitel_id=None):
     # KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
     # Realmoney … dass wir das Ganze zeitlich trennen können mit den vorherigen
@@ -6500,6 +6524,25 @@ def admin_build_overview(kapitel_id=None):
                 r["po_offen"] = str(r["id"]) in offen_po
     except Exception as e:
         print(f"[admin] ⚠️ payout-ab: {type(e).__name__}: {e}", flush=True)
+    # HEUTE TRADEN (16.10.2026): je Funded-Futures-Konto heute_traden {getradet, geplant_um} — eigenes try, ohne Abfrage bleibt die Liste heil
+    try:
+        from datetime import timedelta
+        fut = [r["id"] for r in rows if r.get("type") in HEUTE_TRADEN_TYPEN]
+        if fut:
+            tz_h = _ap_tz(AP_TZ_TAG)
+            heute_h = datetime.now(tz_h).date().isoformat()
+            ab = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            je_h = {}
+            for j in range(0, len(fut), 150):
+                for p in _sb_all("trade_plans", {"select": "master_account_id,status,started_at,ended_at,completed_at,start_um",
+                                                 "master_account_id": "in.(" + ",".join(fut[j:j + 150]) + ")",
+                                                 "or": f"(status.eq.open,started_at.gte.{ab},start_um.gte.{ab},completed_at.gte.{ab})"}):
+                    je_h.setdefault(str(p.get("master_account_id")), []).append(p)
+            for r in rows:
+                if r.get("type") in HEUTE_TRADEN_TYPEN:
+                    r["heute_traden"] = heute_traden_info(je_h.get(str(r["id"]), []), heute_h, tz_h)
+    except Exception as e:
+        print(f"[admin] ⚠️ heute-traden: {type(e).__name__}: {e}", flush=True)
 
     # ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN
     # IDs auf einen Blick … und falls ein Account gerade schon im Trade ist, soll

@@ -3630,6 +3630,9 @@
   /* Richtung per Klick im Admin-Planer (16.10.2026): derselbe Chip, nur klickbar — Rand beim Hover, gesperrt gestrichelt */
   /* Payout ab (16.10.2026): Chip unter dem Kontonamen in Accounts + Admin → Alle Accounts — Farben wie der Payout-Termin daneben */
   .acc-po{font-weight:600} .acc-po-jetzt{color:var(--good)} .acc-po-tage{color:var(--violet)} .acc-po-sub{color:var(--sub);font-weight:500}
+  /* Heute traden (16.10.2026): Funded Futures ohne heutigen Trade dezent auffällig (Amber-Punkt), sonst klein grau */
+  .acc-heute{font-weight:600;display:inline-flex;align-items:center;gap:5px} .acc-heute i{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none}
+  .acc-heute-offen{color:color-mix(in srgb,var(--warn) 78%,var(--ink))} .acc-heute-ok,.acc-heute-plan{color:var(--sub);font-weight:500}
   .acc-po-fehlt{color:var(--sub);font-weight:500} .acc-po-fehlt.is-klick{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px} .acc-po-fehlt.is-klick:hover{color:var(--ink)}
   #dashboard-view .pz-radar .ap-ri-flip{border:0;background:none;padding:0;margin:0;font:inherit;cursor:pointer}
   #dashboard-view .pz-radar .ap-ri-flip:hover:not(:disabled) em{box-shadow:inset 0 0 0 1px currentColor}
@@ -7402,6 +7405,11 @@
             <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Funded CFD nach „Payout anfragbar ab“ sortieren: anfragbar/überfällig zuerst, dann angefragt, dann ohne Datum">
               <input type="checkbox" id="acc-payout-sort" style="margin:0">
               <span>Nächster Payout zuerst</span>
+            </label>
+            <!-- Heute offen zuerst (16.10.2026, Finn: vergessene Funded Futures) — nur sortieren, Zustand in localStorage; Zahl = heute offen -->
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Funded Futures, die heute noch nicht getradet sind, nach oben (dann heute geplante, dann getradete)">
+              <input type="checkbox" id="acc-heute-sort" style="margin:0">
+              <span>Heute offen zuerst</span><span id="acc-heute-n" class="acc-heute acc-heute-offen" hidden></span>
             </label>
           </div>
           <div style="display:flex;align-items:center;gap:14px">
@@ -11430,6 +11438,11 @@
                 <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Funded CFD nach „Payout anfragbar ab“ sortieren: anfragbar/überfällig zuerst, dann angefragt, dann ohne Datum">
                   <input type="checkbox" id="adm-k-payout" class="adm-k-f" style="margin:0">
                   <span>Nächster Payout zuerst</span>
+                </label>
+                <!-- Heute offen zuerst (16.10.2026, Finn): Funded Futures ohne heutigen Trade nach oben — Zustand in localStorage -->
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Funded Futures, die heute noch nicht getradet sind, nach oben (dann heute geplante, dann getradete)">
+                  <input type="checkbox" id="adm-k-heute" class="adm-k-f" style="margin:0">
+                  <span>Heute offen zuerst</span>
                 </label>
                 <input id="adm-k-search" class="input" type="search" placeholder="Name, External ID, Firma, ID …" style="padding:5px 10px;font-size:12.5px;height:auto;width:200px">
               </div>
@@ -16088,7 +16101,7 @@
       fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
       fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
       admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
-      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
       const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
       const qn = norm(admK.q)
       const zeilen = []
@@ -16109,7 +16122,11 @@
       zeilen.sort((x, y) => String(x.r.person || '').localeCompare(String(y.r.person || ''), 'de'))
       let sortiert = accSortiert(zeilen.map(z => z.a)), zu = new Map(zeilen.map(z => [z.a, z.r]))
       if(admK.payout){ const je = new Map(zeilen.map(z => [z.a, z.po])); sortiert = payoutZuerst(sortiert, a => je.get(a)) }   // „Nächster Payout zuerst" (16.10.2026)
-      $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}`
+      // Heute traden (16.10.2026): heute_traden je Funded-Futures-Zeile kommt fertig aus /admin/overview (heute_traden_info, wie im Planer)
+      const heuteR = a => { const r = zu.get(a); return (r && !r.archived && r.heute_traden) ? r.heute_traden : null }
+      if(admK.heute) sortiert = heuteZuerst(sortiert, heuteR)
+      const heuteN = sortiert.filter(a => heuteOffen(heuteR(a))).length
+      $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}${heuteN ? ` · ${heuteN} Funded Futures heute offen` : ''}`
       $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
       const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
       const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', passed_pending: '🎉 Bestanden · Daten fehlen', manual: '📦 Archiviert' }
@@ -16119,6 +16136,7 @@
         try{ const z = zielBadgeHtml(a, false); if(z) metaParts.push(z) }catch(_){}
         // Payout (16.10.2026): Funded CFD → „Payout ab"-Chip aus payout_ready_at (eigene Konten klickbar), sonst der allgemeine Termin-Chip
         try{ const eigen = String(r.user_id) === String(currentUserId); const p = a.type === 'funded_cfd' ? payoutAbBadgeHtml(a, { offen: !!r.po_offen }, eigen) : payoutReadyBadgeHtml(a); if(p) metaParts.push(p) }catch(_){}
+        try{ if(!r.archived && r.heute_traden){ const h = heuteChipHtml(r.heute_traden); if(h) metaParts.push(h) } }catch(_){}   // Heute traden (16.10.2026)
         const meta = metaParts.length
           ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
         const archBadge = r.archived
@@ -16146,6 +16164,7 @@
       tb.querySelectorAll('[data-acc-po]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); accPayoutFeldOeffnen(el.dataset.accPo) }))   // nur eigene Konten
     }
     { const cb = $('adm-k-payout'); if(cb) cb.checked = poSortLesen('prophos_adm_payout_zuerst') }   // Haken gemerkt (16.10.2026)
+    { const cb = $('adm-k-heute'); if(cb) cb.checked = poSortLesen('prophos_adm_heute_zuerst') }     // Heute offen zuerst (16.10.2026)
     document.querySelectorAll('.adm-k-f').forEach(el => el.addEventListener('change', admKontenRender))
     $('adm-k-search')?.addEventListener('input', admKontenRender)
 
@@ -34107,6 +34126,11 @@
     cb.checked = poSortLesen('prophos_acc_payout_zuerst')
     cb.addEventListener('change', () => { poSortMerken('prophos_acc_payout_zuerst', cb.checked); if(typeof renderAccounts === 'function') renderAccounts() })
   })()
+  ;(function(){   // „Heute offen zuerst" (16.10.2026): Haken je Browser gemerkt
+    const cb = document.getElementById('acc-heute-sort'); if(!cb) return
+    cb.checked = poSortLesen('prophos_acc_heute_zuerst')
+    cb.addEventListener('change', () => { poSortMerken('prophos_acc_heute_zuerst', cb.checked); if(typeof renderAccounts === 'function') renderAccounts() })
+  })()
 
   /* Header-Suchbar (⌘K) */
   ;(function wireGlobalSearch(){
@@ -35018,6 +35042,14 @@
       return true
     }))
     if(document.getElementById('acc-payout-sort')?.checked) visible = payoutZuerst(visible, poInfo)   // „Nächster Payout zuerst" (16.10.2026)
+    // HEUTE TRADEN (16.10.2026): Funded Futures ohne heutigen Trade — Zahl neben dem Haken, auf Wunsch nach oben
+    try{
+      heuteEigenSicherstellen()
+      const heuteInfo = a => (archive[a.id] && archive[a.id].archived) ? null : accHeuteInfo(a)
+      if(document.getElementById('acc-heute-sort')?.checked) visible = heuteZuerst(visible, heuteInfo)
+      const el = document.getElementById('acc-heute-n'); if(el){ const n = accounts.filter(a => heuteOffen(heuteInfo(a))).length
+        el.hidden = !n; el.innerHTML = n ? `<i></i>${n} Funded Futures heute offen` : '' }
+    }catch(_){}
     kwSt().sichtbar = visible.map(a => a.id)
     kwKachelMalen()
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -35197,6 +35229,8 @@
         const payoutHtml = a.type === 'funded_cfd' ? (() => { try{ return payoutAbBadgeHtml(a, _poEigen.je.get(String(a.id)), true) }catch(_){ return '' } })()
           : (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
         if(payoutHtml) metaParts.push(payoutHtml)
+        // Heute traden (16.10.2026): nur Funded Futures, nicht archiviert — „heute noch nicht getradet" / „heute geplant · 14:30" / „✓ heute getradet"
+        if(a.type === 'funded' && !(archive[a.id] && archive[a.id].archived)){ try{ const h = heuteChipHtml(accHeuteInfo(a)); if(h) metaParts.push(h) }catch(_){} }
         // „ohne External ID" (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): Futures-Konto ohne Tradovate-/TopstepX-Unterkonto — der Puls
         // kann es nicht wählen, der Planer lässt es aus. Kleiner grauer Chip, Klick = Bearbeiten (gleiche Aktion wie die Zeile).
         if(istFut && !String(a.externalId || '').trim() && !(archive[a.id] && archive[a.id].archived)) metaParts.push(`<span class="chip" style="font-size:10.5px;padding:1px 7px;color:var(--sub);border:1px solid var(--line);background:none" title="Ohne External ID kann der Puls das Unterkonto nicht wählen — der Auto-Planer lässt das Konto aus. Bearbeiten → External ID eintragen.">ohne External ID</span>`)
@@ -44183,7 +44217,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1588'
+  const OS_TAB_BUILD = '2026-09-22.1589'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57760,6 +57794,61 @@
   // als Funktionsdeklarationen: die Haken werden schon beim Laden des Moduls (weiter oben) gesetzt
   function poSortLesen(k){ try{ return localStorage.getItem(k) === '1' }catch(_){ return false } }
   function poSortMerken(k, an){ try{ localStorage.setItem(k, an ? '1' : '0') }catch(_){} }
+  /* HEUTE TRADEN (16.10.2026, Finn: „Ich habe oft Funded Futures rumliegen, die ich nicht trade, weil ich es vergesse — der Tag geht
+   * schnell rum … vor allem die Apex-Funnel"): je Funded-Futures-Konto nur eine Erinnerung, keine Regel und keine Sperre. Dieselbe Regel
+   * wie app.py heute_traden_info: Tag = Kalendertag Europe/Berlin wie im Planer (AP_TZ_TAG, „heute schon gehandelt"); getradet = ein Plan
+   * läuft (open) oder wurde heute gestartet/beendet/abgehakt (open/review/completed), egal welche Route; geplant = heutige Startzeit eines
+   * noch nicht gestarteten Plans. Admin → Alle Accounts bekommt dasselbe Ergebnis fertig vom Server (heute_traden je Zeile). */
+  // Funktionsdeklarationen + var (gehoben): renderAccounts kann beim Boot laufen, bevor das Modul hier angekommen ist
+  function heuteTag(v){ const t = v == null ? new Date() : new Date(v); return isFinite(t) ? t.toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }) : null }
+  function heuteTradenInfo(plaene){
+    const heute = heuteTag(), geplant = []
+    let getradet = false
+    for(const p of plaene || []){
+      const st = String(p.status || '')
+      if(st === 'open' || ((st === 'review' || st === 'completed') && [p.started_at, p.ended_at, p.completed_at].some(v => v && heuteTag(v) === heute))) getradet = true
+      else if(st === 'planned' && !p.started_at && p.start_um && heuteTag(p.start_um) === heute) geplant.push(p.start_um)
+    }
+    geplant.sort((x, y) => Date.parse(x) - Date.parse(y))
+    return { getradet, geplant_um: (!getradet && geplant.length) ? geplant[0] : null }
+  }
+  // Eigene Konten: heutige Pläne einmal je 5 min aus Supabase (RLS: eigene ID) — tradePlans lädt der Mac nur beim Login; dazu der lokale Stand
+  var _heuteEigen = { plaene: [], at: 0, laeuft: false }
+  async function heuteEigenSicherstellen(){
+    if(!_heuteEigen) return
+    if(!currentUserId || _heuteEigen.laeuft || Date.now() - _heuteEigen.at < 300000) return
+    _heuteEigen.laeuft = true
+    try{
+      const ab = new Date(Date.now() - 2 * 86400000).toISOString()
+      const { data, error } = await supabase.from('trade_plans').select('id,master_account_id,status,started_at,ended_at,completed_at,start_um')
+        .eq('user_id', currentUserId).or(`status.eq.open,started_at.gte.${ab},start_um.gte.${ab},completed_at.gte.${ab}`)
+      if(!error){ _heuteEigen.plaene = data || []; _heuteEigen.at = Date.now(); if(typeof renderAccounts === 'function') renderAccounts() }
+      else _heuteEigen.at = Date.now() - 240000     // Fehler: in ~1 min nochmal
+    }catch(_){ _heuteEigen.at = Date.now() - 240000 }
+    _heuteEigen.laeuft = false
+  }
+  function accHeuteInfo(a){
+    if(!a || a.type !== 'funded') return null
+    const id = String(a.id), je = new Map()
+    for(const p of (_heuteEigen ? _heuteEigen.plaene : [])) if(String(p.master_account_id) === id) je.set(String(p.id), p)
+    for(const p of (typeof tradePlans !== 'undefined' ? tradePlans : []) || []) if(p && String(p.masterAccountId) === id)
+      je.set(String(p.id), { status: p.status, started_at: p.startedAt, ended_at: p.endedAt, completed_at: p.completedAt, start_um: p.startUm })
+    return heuteTradenInfo([...je.values()])
+  }
+  function heuteChipHtml(i){
+    if(!i) return ''
+    if(i.getradet) return '<span class="acc-heute acc-heute-ok" title="Heute lief schon ein Trade auf diesem Konto (Planer-Tag, Berliner Zeit)">✓ heute getradet</span>'
+    if(i.geplant_um){ const um = new Date(i.geplant_um).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })
+      return `<span class="acc-heute acc-heute-plan" title="Heute ist ein Trade geplant (${escapeHtml(um)} Dubai)">◷ heute geplant · ${escapeHtml(um)}</span>` }
+    return '<span class="acc-heute acc-heute-offen" title="Funded Futures: heute noch kein Trade auf diesem Konto — Erinnerung, keine Regel"><i></i>heute noch nicht getradet</span>'
+  }
+  function heuteOffen(i){ return !!i && !i.getradet && !i.geplant_um }
+  // „Heute offen zuerst": 0 heute noch nicht getradet, 1 heute geplant, 2 heute getradet, 3 kein Funded Futures (bisherige Reihenfolge)
+  function heuteZuerst(list, info){
+    const rang = i => !i ? 3 : heuteOffen(i) ? 0 : i.getradet ? 2 : 1
+    return list.map((a, n) => ({ a, n, r: rang(info(a)) })).sort((x, y) => x.r - y.r || x.n - y.n).map(x => x.a)
+  }
+  window._heuteTraden = { info: heuteTradenInfo, chip: heuteChipHtml, zuerst: heuteZuerst }   // Test-Haken (Boot-Check)
   // Eigene Konten: offene Payout-Anfragen je Konto (nur für „angefragt"), einmal je 5 min geladen
   let _poEigen = { je: new Map(), at: 0, laeuft: false }
   async function poEigenSicherstellen(){
