@@ -53424,6 +53424,7 @@
       </table>`
   }
   async function polarOeffnen(){
+    ;['polarStart', 'polarNurSpeichern'].forEach(id => { const k = polarEl(id); if(k) k.disabled = false })   // nach Erfolg gesperrt (16.10.2026)
     polarEl('polarMsg').textContent = 'Lade Konten aller IDs…'
     polarEl('polarModal').classList.add('open')
     const hinweis = await polarKontenLaden()
@@ -53476,7 +53477,9 @@
       // manuell (16.10.2026): starten = gleich laufend; sicht admin = Verwalter plant in seiner Gruppe (wie die übrigen Admin-Reiter)
       starten: !!starten, sicht: 'admin' }
     const knoepfe = ['polarStart', 'polarNurSpeichern'].map(polarEl).filter(Boolean)
+    if(knoepfe.some(k => k.disabled)) return   // läuft schon (Doppelklick)
     knoepfe.forEach(k => { k.disabled = true })
+    let fertig = false
     try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token
@@ -53485,17 +53488,23 @@
       const r = await fetch(`${WATCHER_HOME}/polar/plan`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
-      msg(d.auto
+      const fertigText = (d.auto
         ? `✓ Polar-Plan angelegt (${String(d.plan_id).slice(0, 8)}) — der PC von ${esc(master.person)} startet ihn jetzt, der PC von ${esc(slave.person)} nimmt den Slave an.`
         : d.status === 'open'
           ? `✓ Polar-Trade läuft (${String(d.plan_id).slice(0, 8)}) — beide Seiten selbst platzieren und beenden, dann in Trades bei ${esc(master.person)} „Erledigt" mit beiden P&Ls.`
           : `✓ Polar-Plan gespeichert (${String(d.plan_id).slice(0, 8)}) — in Trades bei ${esc(master.person)} unter Geplant („Läuft" setzt du dort).`)
-      if(typeof atToast === 'function') atToast(`🧭 Polar ${starten ? 'läuft' : 'geplant'}: ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
+      // Popup nach Erfolg zu (16.10.2026, Finns Live-Test Plan d51bb46f: Popup blieb offen, Knöpfe wieder frei — ein zweiter Klick
+      // hätte einen zweiten Plan angelegt). Der Text geht in den Toast, die Knöpfe bleiben bis zum Schließen gesperrt.
+      fertig = true
+      polarEl('polarModal').classList.remove('open')
+      msg('')
+      if(typeof atToast === 'function') atToast(`🧭 ${fertigText.replace(/^✓ /, '')} · ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
       try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
+      try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
     }catch(e){
       msg('⛔ ' + ((e && e.message) || e))
     }finally{
-      knoepfe.forEach(k => { k.disabled = false })
+      if(!fertig) knoepfe.forEach(k => { k.disabled = false })
     }
   }
   async function polarStartenAmPc(plan){
