@@ -71,7 +71,7 @@ def lade():
              "_admin_darf_uid", "_admin_verwalter", "_admin_standard_aus", "_wd_login", "_wd_personen", "_admin_basis", "_ap_namen",
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "_wd_num", "ap_hb_gewicht", "ap_tages_saldo", "ap_stand_sicht", "ap_lauf_ohne_summen",
-             "admin_pc_stand", "admin_prop_baum", "admin_wd_plaene", "admin_auto_plan_ids"]
+             "admin_pc_stand", "admin_prop_baum", "_ap_sperren", "ap_firma_gesperrt", "admin_wd_plaene", "admin_auto_plan_ids"]
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
                                 "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S")]
     teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}']
@@ -375,8 +375,10 @@ def main():
     html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
     i = html.index("async function loadTradePlansFromSupabase(")
     check(".eq('user_id', currentUserId)" in html[i:i + 600], "A: tradePlans (Start/Hedge/Endlesung/sfTick) nur eigene ID (RLS + eq user_id)")
+    # ganzer Funktionsrumpf statt fester 1.200 Zeichen: seit 3128d976 (Warte-Grund, 16.10.2026) steht _tp = tradePlans weiter hinten
     i = html.index("async function tpStartUmTick(")
-    check("_tp = tradePlans" in html[i:i + 1200] and "/admin/" not in html[i:i + 1200], "A: tpStartUmTick startet nur aus tradePlans, nie aus Admin-Antworten")
+    rumpf = html[i:html.index("\n  }\n", i)]
+    check("_tp = tradePlans" in rumpf and "/admin/" not in rumpf, "A: tpStartUmTick startet nur aus tradePlans, nie aus Admin-Antworten")
     check("/admin/live-trades?tage=1&nur_eigene=1&status=open" in html, "A: Endlesung des PC-Tabs fragt live-trades nur_eigene=1 (Server eq.me)")
     check(html.count("ansicht=admin") >= 8 and "wdSichtbar() ? '&ansicht=admin'" in html and "(wdSichtbar() ? ((query ? '&' : '?') + 'ansicht=admin')" in html,
           "A: Admin-Ansicht nur aus Admin-Reitern (Farmer nur bei sichtbarem Reiter)")
