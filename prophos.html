@@ -44183,7 +44183,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1587'
+  const OS_TAB_BUILD = '2026-09-22.1588'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50812,16 +50812,24 @@
     return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
   }
   // BOT LIEST VON SELBST (13.10.2026, Finn: „der Bot soll eigenständig die Balance aktualisieren und dann den Handel starten"): das Backend
-  // (app.py ap_bal_auto_tick, alle 10 min im Nachplan-Fenster) schickt für „Balance fehlt / nicht live"-Konten denselben Auftrag wie
-  // ↻ Balance lesen an den PC der ID — hier steht, wie oft heute (Deckel 3/Tag) und warum er ein Konto gerade auslässt.
-  function tplBalAutoText(kid){
+  // (app.py ap_bal_auto_tick, alle 10 min, seit 16.10.2026 rund um die Uhr) schickt für Konten, die eine Lesung brauchen, denselben Auftrag
+  // wie ↻ Balance lesen an den PC der ID. EHRLICH (16.10.2026, Finn: „was der Bot kann, macht der Bot"): „liest von selbst" nur, wenn das
+  // Konto im letzten Takt Kandidat war (balance_auto.kandidaten) oder heute schon gelesen wurde; sonst EIN Grund, warum nicht, mit Weg.
+  function tplBalAutoText(kid, uid){
     const ba = _ap.info && _ap.info.balance_auto; if(!ba || !kid) return ''
-    const v = (ba.versuche || {})[String(kid)] || [], max = ba.max_tag || 3
-    const ue = (ba.uebersprungen || []).find(z => String(z.konto_id) === String(kid))
+    kid = String(kid)
+    const v = (ba.versuche || {})[kid] || [], max = ba.max_tag || 3
+    const ue = (ba.uebersprungen || []).find(z => String(z.konto_id) === kid)
     const uhr = ms => new Date(ms * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     if(v.length) return ` Der Bot liest von selbst — heute ${v.length}/${max}, zuletzt ${uhr(v[v.length - 1])}${ue ? ` · jetzt übersprungen: ${ue.warum}` : ''}.`
     if(ue) return ` Der Bot liest von selbst, übersprungen: ${ue.warum}.`
-    return ' Der Bot liest von selbst nach (alle 10 min, höchstens 3×/Tag).'
+    if(ba.kandidaten && ba.kandidaten[kid]) return ` Der Bot liest von selbst (nächster Takt in ≤ ${Math.round((ba.takt_s || 600) / 60)} min, höchstens ${max}×/Tag).`
+    if(ba.nicht && ba.nicht[kid]) return ` Der Bot liest es nicht von selbst: ${ba.nicht[kid]}.`
+    if(ba.aktiv === false) return ' Der Bot liest nicht von selbst: der Auto-Planer ist aus → ↻ Balance lesen.'
+    if(uid && Array.isArray(ba.ids) && !ba.ids.includes(String(uid))) return ' Der Bot liest nicht von selbst: die ID ist nicht im Auto-Planer → ↻ Balance lesen.'
+    if(Array.isArray(ba.konten) && !ba.konten.includes(kid)) return ' Der Bot liest es nicht von selbst: Kontoart ohne Auto-Planer (nur Challenge/Phase 1/Phase 2) → ↻ Balance lesen.'
+    if(!Array.isArray(ba.konten)) return ''   // älterer Backend-Stand ohne Kandidatenliste — lieber nichts versprechen
+    return ' Der Bot hat für dieses Konto gerade keinen Lesegrund (kein offener Plan, kein Auslasser des Laufs) → ↻ Balance lesen.'
   }
   function tplBalTun(a, b, fremd, wer){
     if(fremd) return `Am PC von ${wer || 'der ID'}: Prophos → Accounts → ↻ Balance.`
@@ -50966,7 +50974,7 @@
         konten.add(tplKk(currentUserId, a.name))
         const endeUhr = letztesEnde ? new Date(letztesEnde).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
         add(currentUserId, ich, { art: 'balance', firma: a.firm, konto: a.name, typ: a.type, balance: tplBalText(b, jetzt), ende4: String(a.externalId || '').replace(/\D/g, '').slice(-4),
-          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance von vor dem letzten Trade (Ende ${endeUhr}) — ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf, tun: tplBalTun(a, b, false) })
+          text: !b ? 'keine Live-Balance' : !at ? 'Balance ohne Zeitstempel' : `Balance von vor dem letzten Trade (Ende ${endeUhr}) — ${tplAlter(jetzt - at)} alt`, bal: String(a.id), lauf, tun: tplBalTun(a, b, false) + tplBalAutoText(a.id, currentUserId) })
       }
     }
     // BALANCE NACH ECHO-TRADE FEHLT — FREMDE IDs (08.10.2026, Master): delta.heute_beendet[].bal_nach (app.py _ap_hb_laden) meldet, wenn der
@@ -51058,7 +51066,7 @@
         balf, uid: String(x.user_id || ''), lauf: balf ? (_tplBalFremd.get(balf) || null) : null, haken: accH ? String(accH.id) : '', ext: extK,
         tun: (x.fix ? String(x.fix) : bal ? (balf ? `↻ Balance lesen — läuft am PC von ${x.user || 'der ID'} (Prophos-Tab dort offen?).` : tplBalTun(null, null, fremd, x.user))
           : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 5 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 5 min).')
-          + (bal ? tplBalAutoText(x.konto_id) : '') })
+          + (bal ? tplBalAutoText(x.konto_id, x.user_id) : '') })
     }
     for(const t of D.trades){
       if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
@@ -51080,7 +51088,7 @@
           add(t.user_id, t.user, { art: 'balance', firma: t.firma, konto: t.konto, typ: t.typ, balance: '', ende4: t.ende4, key: t.key,
             text: 'Balance nicht live — seit dem letzten Trade nicht gelesen; der Plan wird erst bestätigbar, wenn sie frisch ist',
             bal: (!fremd && kid) ? kid : '', balf: (fremd && kid) ? kid : '', uid: String(t.user_id || ''), lauf: kid ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null,
-            hinweis: kid ? '' : 'am PC der ID lesen', tun: (fremd ? `↻ Balance lesen — läuft am PC von ${t.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".') + tplBalAutoText(kid) }) }
+            hinweis: kid ? '' : 'am PC der ID lesen', tun: (fremd ? `↻ Balance lesen — läuft am PC von ${t.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".') + tplBalAutoText(kid, t.user_id) }) }
       }
       // START-FEHLER (07.10.2026): eigener Plan frisch aus dem Tab, fremder aus dem Delta (app.py start_fehler)
       const sf = (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || t.sf || null, geclaimt = p ? !!p.startUmGestartetAt : !!t.geclaimt
@@ -51119,7 +51127,7 @@
         const kid = t.konto_id ? String(t.konto_id) : '', fremd = !t.eigen && String(t.user_id) !== String(currentUserId), c = t.hinweis_code
         const lesen = c === 'balance_fehlt' && !!kid, ext = c === 'ext_fehlt' && !fremd && kid && (accounts || []).some(a => String(a.id) === kid)
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, typ: t.typ, ende4: t.ende4, key: t.key, code: c,
-          text: String(t.hinweis), tun: String(t.hinweis_fix || ''), bal: lesen && !fremd ? kid : '', balf: lesen && fremd ? kid : '',
+          text: String(t.hinweis), tun: String(t.hinweis_fix || '') + (lesen ? tplBalAutoText(kid, t.user_id) : ''), bal: lesen && !fremd ? kid : '', balf: lesen && fremd ? kid : '',
           uid: String(t.user_id || ''), ext: ext ? kid : '', hinweis: c === 'ext_fehlt' && fremd ? `am PC von ${t.user || 'der ID'} eintragen` : '',
           lauf: lesen ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null })
       } else if(t.hinweis && !TPL_ZIEL_RE.test(String(t.hinweis))) probleme.push(String(t.hinweis))
@@ -51133,7 +51141,8 @@
       add(z.user_id, z.user, { art: 'balance', firma: z.firma, konto: z.konto, typ: z.typ, balance: '', ende4: z.ende4 || '',
         text: 'Balance nicht live — seit dem letzten Trade nicht gelesen; der Plan wird erst bestätigbar, wenn sie frisch ist',
         bal: (!fremd && kid) ? kid : '', balf: (fremd && kid) ? kid : '', uid: String(z.user_id || ''), lauf: kid ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null,
-        hinweis: kid ? '' : 'am PC der ID lesen', tun: fremd ? `↻ Balance lesen — läuft am PC von ${z.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".' })
+        hinweis: kid ? '' : 'am PC der ID lesen', tun: (fremd ? `↻ Balance lesen — läuft am PC von ${z.user || 'der ID'}; danach rutscht der Plan von selbst nach „Zu bestätigen".` : '↻ Balance lesen — danach rutscht der Plan von selbst nach „Zu bestätigen".')
+          + tplBalAutoText(kid, z.user_id) })   // fehlte bis 16.10.2026 (Prüfung Balance selbst)
     }
     if(currentUserId) for(const p of tradePlans || []){
       if(!p || p.status !== 'review' || mt5BaselineLeer(p.mt5Baseline)) continue   // keine Messquelle = nichts nachzulesen (09.10.2026)

@@ -125,6 +125,34 @@ def main():
     check(sp(st["a"], False, ts_a + 6 * 3600) == (False, ""), "Sperre: nach 6 h ein Probe-Versuch")
     check(sp(st["b"], False, ts_a) == (False, ""), "ohne Username-Fehlschlag nie gesperrt")
     check(sp({}, False, ts_a) == (False, "") and sp(None, False, ts_a) == (False, ""), "leer → frei")
+    # BALANCE SELBST 2 (16.10.2026, Finn: „was der Bot kann, macht der Bot")
+    lauf2 = {"tag": "2026-10-13", "at": "2026-10-13T01:30:00+00:00", "ausgelassen": [
+        {"konto_id": "k-1", "grund": "Ergebnis vom 12.10. nie gelesen (Demo-Schätzung -4.000 $) → ↻ Balance lesen"},
+        {"konto_id": "k-5", "grund": "letzter Trade -4.400 $ (≥ 95 % des Drawdowns 4.500 $) — geblowt?"},
+        {"konto_id": "k-6", "grund": "heute schon gehandelt — ein Trade pro Konto und Tag"}]}
+    out4 = kand(lauf2, "2026-10-13", [], accs, {}, {}, {}, archiv=set())
+    check("k-1" in out4, "A: „Ergebnis vom … nie gelesen“ → der Bot liest")
+    check("k-5" in out4, "A: „geblowt?“ → der Bot liest (die Balance klärt es)")
+    check("k-6" not in out4, "A: anderer Grund bleibt draußen")
+    ow = ns["ap_bal_auto_ohne_wert"]
+    kd = [{"id": "d-1", "user_id": "u", "account_type": "challenge", "external_id": "X1", "tv_balance_at": "2026-10-15T10:00:00+00:00"},
+          {"id": "d-2", "user_id": "u", "account_type": "challenge", "external_id": "X2", "tv_balance_at": "2026-10-15T10:00:00+00:00", "stand": "2026-10-15T10:00:00+00:00"},
+          {"id": "d-3", "user_id": "u", "account_type": "challenge", "external_id": "X3"},
+          {"id": "d-4", "user_id": "u", "account_type": "challenge", "external_id": "X4", "tv_balance_at": "2026-10-15T10:00:00+00:00", "auto_planer": False},
+          {"id": "d-5", "user_id": "u", "account_type": "funded", "external_id": "X5", "tv_balance_at": "2026-10-15T10:00:00+00:00"},
+          {"id": "d-6", "user_id": "u", "account_type": "phase1", "external_id": "X6", "tv_balance_at": "2026-10-15T10:00:00+00:00"}]
+    od = ow(kd, {"d-6"}, {}, {}, archiv=set())
+    check("d-1" in od and "ohne Wert" in od["d-1"], "D: gelesen, aber ohne Wert → lesen")
+    check("d-2" not in od, "D: hat einen Wert → nicht")
+    check("d-3" not in od, "D: nie gelesen → Sache von C")
+    check("d-4" not in od and "d-5" not in od, "D: Haken aus / Kontotyp außerhalb → nicht")
+    check("d-6" not in od, "D: schon von A/B/C in diesem Takt → nicht doppelt")
+    wn = ns["ap_bal_auto_warum_nicht"]
+    check(wn({"id": "x", "external_id": "E"}) is None, "warum nicht: normales Konto → None")
+    check("Haken" in wn({"id": "x", "external_id": "E", "auto_planer": False}), "warum nicht: Haken aus")
+    check("External ID" in wn({"id": "x", "external_id": ""}), "warum nicht: ohne External ID")
+    check(wn({"id": "x", "external_id": "E"}, {"x"}) == "archiviert", "warum nicht: archiviert")
+    check("Express" in wn({"id": "x", "external_id": "E", "express": True}), "warum nicht: Topstep Express")
     print(f"\n{sum(f)} Fehler von {len(f)}")
     return sum(f)
 

@@ -25133,6 +25133,9 @@ AP_BAL_AUTO_TAKT_S = 600
 AP_BAL_AUTO_MAX_TAG = 3
 AP_BAL_AUTO_ABSTAND_S = 5400          # 90 min zwischen zwei Aufträgen desselben Kontos
 AP_BAL_AUTO_OHNE_LESUNG = ("ext_fehlt", "express")   # Gründe, bei denen eine Lesung nichts bringt
+# Quelle (A) — BALANCE SELBST 2 (Finn 16.10.2026, „was der Bot kann, macht der Bot"): neben „Balance fehlt/nicht live" auch die Auslasser,
+# die nur eine Lesung klärt — „Ergebnis vom … nie gelesen" und „… geblowt?" (ap_letzter_trade_geblasen); bisher half dort nur ↻ von Hand
+AP_BAL_AUTO_GRUND = re.compile(r"keine Balance|Balance fehlt|nicht live|Ergebnis vom .* nie gelesen|geblowt\?", re.I)
 _ap_bal_auto = {"at": 0.0, "tag": "", "versuche": {}, "gesendet": [], "uebersprungen": [], "fehler": ""}
 
 
@@ -25162,9 +25165,45 @@ def ap_bal_auto_nie_gelesen(konten, schon, echo_bal, dup_bal, archiv=None):
     return out
 
 
+def ap_bal_auto_warum_nicht(a, archiv=None):
+    """REIN RECHNEND (testbar, 16.10.2026): EIN Grund, warum der Balance-Bot ein Planer-Konto grundsätzlich nicht liest — oder None.
+    Für „Braucht dich": dort steht „Der Bot liest von selbst" nur noch, wo er es wirklich tut, sonst dieser Grund mit dem Weg."""
+    if str((a or {}).get("id") or "") in (archiv or set()):
+        return "archiviert"
+    if (a or {}).get("auto_planer") is False:
+        return "Planer-Haken am Konto ist aus → Accounts → Konto → Haken „Auto-Planer\" setzen oder ↻ Balance von Hand"
+    if not str((a or {}).get("external_id") or "").strip():
+        return "keine External ID → Accounts → Konto bearbeiten → External ID eintragen"
+    if ist_topstep_express(a):
+        return "Topstep Express — Balance kommt nicht über die Lesung"
+    return None
+
+
+def ap_bal_auto_ohne_wert(konten, schon, echo_bal, dup_bal, archiv=None):
+    """REIN RECHNEND (testbar): {konto_id: grund} — Quelle (D) LETZTE LESUNG OHNE WERT (Finn 16.10.2026, „was der Bot kann, macht der Bot"):
+    Planer-Konto (AP_TYPEN, External ID, nicht archiviert, Haken nicht aus, kein Topstep Express), das schon gelesen wurde (ein
+    AP_LESE_FELDER gesetzt), aber keinen Wert hat (acc_balance_wahl wirft 0/leer weg) — der Kontowert zeigte „letzte Lesung ohne Wert
+    (0 bzw. leer)" und wartete auf ↻ von Hand. Nie gelesene Konten sind Sache von (C). Deckel 3/Tag + 90 min gelten wie überall:
+    ein wirklich geblowtes Konto (0) bekommt höchstens 3 Lesungen am Tag, bis es archiviert ist."""
+    archiv = archiv or set()
+    out = {}
+    for a in konten or []:
+        kid = str((a or {}).get("id") or "")
+        if not kid or kid in archiv or kid in (schon or ()) or a.get("auto_planer") is False:
+            continue
+        if a.get("account_type") not in AP_TYPEN or not str(a.get("external_id") or "").strip() or ist_topstep_express(a):
+            continue
+        if not any(a.get(f) for f in AP_LESE_FELDER):
+            continue                                       # nie gelesen → (C)
+        if acc_balance_wahl(a, echo_bal, dup_bal)[0] is not None:
+            continue                                       # hat einen Wert
+        out[kid] = "letzte Lesung ohne Wert (0 bzw. leer)"
+    return out
+
+
 def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv=None):
     """REIN RECHNEND (testbar): {konto_id: grund} der Konten, deren Balance der Bot jetzt von selbst lesen soll.
-    (A) ausgelassen des letzten Laufs DES TAGES mit Balance-Grund (AP_BAL_FEHLT), ohne grund_code in AP_BAL_AUTO_OHNE_LESUNG, und die
+    (A) ausgelassen des letzten Laufs DES TAGES mit Lese-Grund (AP_BAL_AUTO_GRUND, seit 16.10.2026 auch „nie gelesen"/„geblowt?"), ohne grund_code in AP_BAL_AUTO_OHNE_LESUNG, und die
     Balance ist seit dem Lauf NICHT gelesen (Stand ≤ Laufzeit; wie ap_bal_gelesen, nur andersherum).
     (B) geplante Pläne (status planned) mit Konto, dessen Balance nicht live ist (ap_balance_live gegen das Ende des letzten Trades).
     (C) nie gelesene Konten: eigene Funktion ap_bal_auto_nie_gelesen (15.10.2026), im Takt auch außerhalb des Nachplan-Fensters.
@@ -25174,7 +25213,7 @@ def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_
     lauf_at = _ap_ts((letzter_erg or {}).get("at")) if isinstance(letzter_erg, dict) else None
     if isinstance(letzter_erg, dict) and str(letzter_erg.get("tag") or "") == str(tag):
         for z in letzter_erg.get("ausgelassen") or []:
-            if not isinstance(z, dict) or not AP_BAL_FEHLT.search(str(z.get("grund") or "")):
+            if not isinstance(z, dict) or not AP_BAL_AUTO_GRUND.search(str(z.get("grund") or "")):
                 continue
             if str(z.get("grund_code") or "") in AP_BAL_AUTO_OHNE_LESUNG:
                 continue
@@ -25273,8 +25312,10 @@ def _ap_tv_username_da(tvu, a):
 
 
 def ap_bal_auto_tick(jetzt, reg=None):
-    """Ein Takt (aus ap_loop, jede Minute): alle AP_BAL_AUTO_TAKT_S, nur wenn auto_plan_regeln.aktiv. (A)/(B) nur im Nachplan-Fenster
-    wie bisher; (C) nie gelesene Konten (15.10.2026) zu jeder Zeit — ein um 18:24 Dubai angelegtes Konto soll vor dem Nachtlauf gelesen sein.
+    """Ein Takt (aus ap_loop, jede Minute): alle AP_BAL_AUTO_TAKT_S, nur wenn auto_plan_regeln.aktiv. Alle Quellen rund um die Uhr
+    (BALANCE SELBST 2, Finn 16.10.2026 — bis dahin (A)/(B) nur im Nachplan-Fenster Mo–Fr 00:00–16:15 dt, abends und am Wochenende blieben
+    Vorschläge mit alter Balance liegen, während das Auto-Bestätigen „der Balance-Takt liest" sagte): (A) Lauf-Auslasser mit Lese-Grund,
+    (B) geplante Pläne mit nicht-lebender Balance, (C) nie gelesene Konten (15.10.2026), (D) letzte Lesung ohne Wert. Deckel/Abstand je Konto bleiben.
     Ergebnis im Speicher (_ap_bal_auto, GET /admin/auto-plan info.balance_auto) und im Log."""
     if time.time() - (_ap_bal_auto.get("at") or 0) < AP_BAL_AUTO_TAKT_S:
         return None
@@ -25286,34 +25327,39 @@ def ap_bal_auto_tick(jetzt, reg=None):
     tag = d.strftime("%Y-%m-%d")
     if _ap_bal_auto.get("tag") != tag:
         _ap_bal_auto.update(tag=tag, versuche={}, gesendet=[], uebersprungen=[])
+    _ap_bal_auto.update(aktiv=bool(reg.get("aktiv")), ids=uids)
     if not reg.get("aktiv") or not uids:
+        _ap_bal_auto.update(kandidaten={}, nicht={}, konten=[])
         return None
     in_uids = "in.(" + ",".join(uids) + ")"
-    im_fenster = ap_nachplan_fenster(d, reg.get("zeiten"))
     accs, kand, letzt, plaene = {}, {}, {}, []
     echo_bal, dup_bal = _ap_balance_karten()
     archiv = _ap_archiviert()
-    if im_fenster:
-        rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
-        letzter = ap_nachplan_letzter(rows)
-        plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,ended_at,completed_at", "user_id": in_uids,
-                                         "status": "in.(planned,review,completed)",
-                                         "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-        kids = sorted({str(z.get("konto_id") or "") for z in ((letzter or {}).get("ausgelassen") or []) if isinstance(z, dict)}
-                      | {str(p.get("master_account_id") or "") for p in plaene if p.get("status") == "planned"})
-        kids = [k for k in kids if re.fullmatch(r"[0-9a-fA-F-]{36}", k)]
-        for i in range(0, len(kids), 150):
-            for a in _ap_konten_laden({"id": "in.(" + ",".join(kids[i:i + 150]) + ")"}):
-                accs[str(a.get("id"))] = a
-        letzt = ap_letzt_je_konto(plaene)
-        kand = ap_bal_auto_kandidaten(letzter, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv)
-    # (C) nie gelesene Planer-Konten — ein Read je Takt über alle Planer-IDs, dafür wartet kein neues Konto mehr auf eine Hand-Lesung
-    konten_neu = _ap_konten_laden({"user_id": in_uids, "account_type": "in.(" + ",".join(AP_TYPEN) + ")",
-                                   "tv_balance_at": "is.null", "topstep_last_check": "is.null", "meta_api_last_check": "is.null"})
+    # (A)/(B) rund um die Uhr (16.10.2026) — vorher nur im Nachplan-Fenster
+    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    letzter = ap_nachplan_letzter(rows)
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,ended_at,completed_at", "user_id": in_uids,
+                                     "status": "in.(planned,review,completed)",
+                                     "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+    kids = sorted({str(z.get("konto_id") or "") for z in ((letzter or {}).get("ausgelassen") or []) if isinstance(z, dict)}
+                  | {str(p.get("master_account_id") or "") for p in plaene if p.get("status") == "planned"})
+    kids = [k for k in kids if re.fullmatch(r"[0-9a-fA-F-]{36}", k)]
+    for i in range(0, len(kids), 150):
+        for a in _ap_konten_laden({"id": "in.(" + ",".join(kids[i:i + 150]) + ")"}):
+            accs[str(a.get("id"))] = a
+    letzt = ap_letzt_je_konto(plaene)
+    kand = ap_bal_auto_kandidaten(letzter, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv)
+    # (C) nie gelesene + (D) ohne Wert gelesene Planer-Konten — ein Read je Takt über alle Planer-Konten, dafür wartet keins mehr auf ↻ von Hand
+    konten_neu = _ap_konten_laden({"user_id": in_uids, "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
     for kid, grund in ap_bal_auto_nie_gelesen(konten_neu, set(kand), echo_bal, dup_bal, archiv).items():
+        kand[kid] = grund
+    for kid, grund in ap_bal_auto_ohne_wert(konten_neu, set(kand), echo_bal, dup_bal, archiv).items():
         kand[kid] = grund
     for a in konten_neu:
         accs.setdefault(str(a.get("id")), a)
+    # Für „Braucht dich" (16.10.2026): wen der Bot jetzt liest, wen grundsätzlich nicht (ein Grund) und welche Konten Planer-Konten sind
+    _ap_bal_auto.update(kandidaten=dict(kand), konten=[str(a.get("id")) for a in konten_neu if str(a.get("id")) not in archiv],
+                        nicht={str(a.get("id")): w for a in konten_neu for w in [ap_bal_auto_warum_nicht(a, archiv)] if w and str(a.get("id")) not in kand})
     if not kand:
         return None
     lebt = _ap_pc_lebt()
@@ -26178,7 +26224,10 @@ def admin_auto_plan():
         # Balance von selbst (13.10.2026): heutige Aufträge je Konto, Übersprungene mit Grund — „Braucht dich" zeigt „Bot liest … n/3"
         info["balance_auto"] = json.loads(json.dumps({"tag": _ap_bal_auto.get("tag"), "at": _ap_bal_auto.get("at"), "fehler": _ap_bal_auto.get("fehler"),
                                                       "max_tag": AP_BAL_AUTO_MAX_TAG, "versuche": _ap_bal_auto.get("versuche"),
-                                                      "gesendet": _ap_bal_auto.get("gesendet"), "uebersprungen": _ap_bal_auto.get("uebersprungen")},
+                                                      "gesendet": _ap_bal_auto.get("gesendet"), "uebersprungen": _ap_bal_auto.get("uebersprungen"),
+                                                      # BALANCE SELBST 2 (16.10.2026): Braucht-dich-Text nur „liest von selbst", wo es stimmt
+                                                      "aktiv": _ap_bal_auto.get("aktiv"), "ids": _ap_bal_auto.get("ids"), "kandidaten": _ap_bal_auto.get("kandidaten"),
+                                                      "nicht": _ap_bal_auto.get("nicht"), "konten": _ap_bal_auto.get("konten"), "takt_s": AP_BAL_AUTO_TAKT_S},
                                                      default=str))
         # Von selbst bestätigen (15.10.2026): Schalter-Stand, heute Bestätigte, Wartende mit Grund — „Zu bestätigen" sagt „der Bot bestätigt"
         info["auto_bestaetigen"] = json.loads(json.dumps({"aktiv": bool(_ap_auto_best.get("aktiv")), "tag": _ap_auto_best.get("tag"),   # Stand des Takts (reg hier ohne regeln)
