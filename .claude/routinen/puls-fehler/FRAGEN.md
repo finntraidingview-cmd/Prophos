@@ -18,6 +18,7 @@ Stand 14.10. 05:45 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 14.10. 20:55 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 15.10. 05:30 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Stand 15.10. 20:30 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
+Stand 16.10. 05:35 (Routine): weiterhin kein neuer Fall seit 07.10. 11:00 UTC.
 Status: offen
 
 ## 2026-10-07 20:43 — konto: konto # steht im dropdown 0× (nicht genau einmal) — anderer tradovate-login?
@@ -36,6 +37,7 @@ Stand 14.10. 05:45 (Routine): kein neuer 0×-Fall. Verwandt, einmal: 14.10. 01:0
 Stand 14.10. 20:55 (Routine): kein neuer 0×-Fall in TradingView. Verwandt, einmal in TopstepX: 14.10. 15:10 UTC pc-l5o8bv, Balance-Lesung EXPRESS-V2-682437-… — Ziel 0× in der Konto-Liste, alle gelisteten Konten dort „MAXIMUM_LOSS Violation“/„Ineligible“ (Geblowt-Auge .1535 greift, kein Puls-Fehler).
 Stand 15.10. 05:30 (Routine): kein neuer 0×-Fall seit 13.10. 13:43 UTC (TopstepX-Einzelfall 14.10. 15:10 UTC pc-l5o8bv war ein geblowtes Konto, nicht dieser Login-Fall).
 Stand 15.10. 20:30 (Routine): neuer PC mit demselben Bild — pc-7ftp5l, 10× bei der Balance-Lesung (14:50 und 16:19 UTC, fünf Apex-Konten „0×, für die Firma ist kein Tradovate-Username hinterlegt“) → eigene Frage 18 unten. Dazu pc-2zc2we 13:41 UTC einmal „0× — kein Login-Beleg: Liste nicht vollständig im Bild (augen.js: Zeile liegt 5 Ebenen unter dem Vorfahren)“ (FundedNext-Konto, Plan b6061de9…) — Einzelfall, nur geführt.
+Stand 16.10. 05:35 (Routine): nur noch pc-7ftp5l (25 Fälle seit dem Abendlauf, 5 Konten × Balance-Takt) → Frage 18. Finn .1584: die Username-Sperre des Balance-Takts fällt von selbst, sobald der Username für ID × Firma eingetragen ist.
 Status: offen
 
 ## 2026-10-08 05:40 — konto_balance: kein Tradovate-Username für die Firma (The5%ers)
@@ -63,6 +65,7 @@ Stand 14.10. 20:55 (Routine): **1 neuer IPC-Fall auf einem weiteren PC**: 14.10.
 Stand 14.10. 20:55 (Routine): pc-c19p2l heute kein F9-Fall (Plan 2070a993… nicht mehr in trade_plans). **Neu auf pc-usq1i6**: 14:26 UTC Plan 6b950730…, 1 min nach dem IPC-Timeout dort (siehe Frage IPC) — gleiche Ursache vermutet: offene Windows-/MT5-Abfrage am Terminal von pc-usq1i6.
 Stand 15.10. 05:30 (Routine): kein neuer IPC-Fall seit 14.10. 14:25 UTC (pc-usq1i6); seit dem Abend 0 Echo-Fehlstarts.
 Stand 15.10. 20:30 (Routine): 9 neue Fälle heute, zwei PCs: pc-pw1put 4× (10:47–12:01 UTC, FundedNext-Plan bd20307e…, steht weiter „planned“, 13:24 UTC dazu ein „TypeError: Failed to fetch“ als unklar) und pc-c19p2l 5× (11:53–13:24 UTC, FundedNext-Plan 16c1377f… — lief 13:36 UTC dann doch durch, „completed“). Auf pc-c19p2l lagen zeitgleich die F9-Fehlstarts eines zweiten Terminals (Frage 11), auf pc-usq1i6 13:34 UTC „Terminal liefert nach 4 Minuten nichts“ und 15:05 UTC Login/Lesen 133 s. Handgriff unverändert: an pc-pw1put und pc-c19p2l die Master-Terminals ansehen — Windows-/MT5-Abfrage offen, Terminal eingeloggt?
+Stand 16.10. 05:35 (Routine): kein neuer Fall seit 15.10. 13:24 UTC. Finn hat .1578 gepusht (order_bot verbindung_ursache): nach dem Fehlschlag liest der Bot Prozesse und Fenster am PC und nennt GENAU EINE Ursache mit Handgriff — Windows-Sicherheitsabfrage offen (consent.exe) / MT5-Update läuft / Terminal dieses Pfads läuft nicht / Hauptfenster hängt / Dialog im Terminal offen / ohne sichtbares Fenster / läuft, antwortet aber nicht über die Schnittstelle. Muster-Anfang bleibt gleich. Beim nächsten Fall steht die Ursache in der Meldung — dann wird diese Frage konkret oder geschlossen. Bots auf .1602 (außer pc-na1q6b .1571).
 Status: offen
 
 ## 2026-10-08 20:39 — orbit: slave-terminal (fusion-copier) nicht bereit — 'Algo Trading' im Hedge-Terminal nicht aktiv
@@ -80,6 +83,7 @@ Stand 14.10. 05:45 (Routine): kein neuer Fall.
 Stand 14.10. 20:55 (Routine): kein neuer Fall.
 Stand 15.10. 05:30 (Routine): kein Fall.
 Stand 15.10. 20:30 (Routine): kein Algo-Trading-Fall (pc-c19p2l 13:45 UTC „Slave-Terminal nicht bereit — Fusion-Marge zu wenig“ ist Marge, nicht dieser Fall).
+Stand 16.10. 05:35 (Routine): kein Fall.
 Status: offen
 
 ## 2026-10-09 05:45 — drei Echo-Pläne stehen „planned“ mit verstrichener Startzeit
@@ -118,6 +122,7 @@ Stand 14.10. 05:45 (Routine): kein neuer Fall.
 Stand 14.10. 20:55 (Routine): kein neuer Fall auf pc-na1q6b (heute 15:37 UTC „pywinauto fehlt“ auf dem NEUEN pc-7ftp5l — eigene Frage unten).
 Stand 15.10. 05:30 (Routine): kein Fall; der PC meldete zuletzt 14.10. 22:10 UTC mit Bot .1559 (alle anderen PCs 01:36 UTC auf .1564) — läuft er gerade nicht?
 Stand 15.10. 20:30 (Routine): der PC meldet wieder frisch (16:36 UTC, Bot .1570); kein DLL-Fall. Dafür 12:40 UTC ein Trade-Start-Check „Copier für diese Instanz GESTOPPT — start-alles.bat ausführen“ → eigene Frage 19 unten.
+Stand 16.10. 05:35 (Routine): kein Fall; der PC meldet zuletzt 22:58 UTC mit .1571 (seit > 2,5 h still — PC aus?).
 Status: offen
 
 ## 2026-10-12 20:35 — Entscheidung: Tab lud während einer Echo-Order neu (pc-i8vyq8, 14:32 UTC) — Neulade-Wächter liegt außerhalb der Puls-Pfade
@@ -139,6 +144,7 @@ Stand 14.10. 05:45 (Routine): kein neuer Versuch, Plan 72f456a4… weiter „pla
 Stand 14.10. 20:55 (Routine): **1 neuer Fall**: 14.10. 08:40 UTC, Plan 9709972c… (pc-xc5c52, FundedNext 100k), steht „planned“; 72f456a4… ist nicht mehr in trade_plans. Einrichtung auf pc-xc5c52 weiter offen.
 Stand 15.10. 05:30 (Routine): kein neuer Fall seit 14.10. 08:40 UTC (Plan 9709972c…).
 Stand 15.10. 20:30 (Routine): kein neuer v2link-Fall seit 14.10. 08:40 UTC; auf pc-xc5c52 heute dreimal F9 ohne Dialog an einem FundingPips-Plan (Frage 11).
+Stand 16.10. 05:35 (Routine): kein neuer Fall seit 14.10. 08:40 UTC.
 Status: offen
 
 ## 2026-10-13 05:45 — close: Schließen in TopstepX gibt es noch nicht (Etappe K5) — Plan b7e026d4…, pc-l5o8bv
@@ -157,6 +163,7 @@ Was ich brauche: Am pc-c19p2l das Master-Terminal ansehen — steht eine Windows
 Stand 14.10. 05:45 (Routine): kein neuer Fall seit 13.10. 12:58 UTC (nachts keine Echo-Starts auf pc-c19p2l); Plan 2070a993… weiter „planned“.
 Stand 15.10. 05:30 (Routine): kein neuer Fall seit 14.10. 14:26 UTC (pc-usq1i6).
 Stand 15.10. 20:30 (Routine): 9 neue Fälle heute auf 3 PCs, alle an FundingPips-Plänen: pc-c19p2l 5× (12:40–13:50 UTC, Plan be95c5f8…, „planned“), pc-xc5c52 3× (13:36–13:51 UTC, Plan b5b087c5…, „planned“), pc-usq1i6 1× (15:05 UTC, Plan 525b1cfe… — 15:29 UTC dann durchgelaufen, „open“). Login/Lesen und API jedes Mal in Ordnung; auf pc-c19p2l zeitgleich IPC-Fehlstarts des zweiten Terminals (Frage 3) und dreimal ein fremder Login-Dialog „Einloggen“ (übergangen, Konto passt nicht). 16 Fälle seit 13.10. auf 4 PCs → Code-Muster. **Fix .1571:** nach F9 ohne Dialog schreibt Puls in die Spur, WER vorn liegt (Fenster mit Titel/Klasse/Prozess, „Terminal selbst vorn“ oder „kein Fenster vorn“ = gesperrter Desktop/Sicherheitsabfrage) und welche weiteren Fenster das Terminal offen hat; liegt überhaupt ein Fenster vorn, betritt er das Terminal EINMAL neu (mit Fenster-Guard) und drückt F9 ein zweites Mal — nie ein drittes. Bei gesperrtem Desktop kein zweiter Anlauf, Meldung mit dem UAC-Handgriff. Handgriff an pc-c19p2l (Frage 3) bleibt sinnvoll. Die erste Spur „F9 ohne Dialog: …“ zeigt die Ursache — dann wird ggf. der eigentliche Fix gebaut.
+Stand 16.10. 05:35 (Routine): kein neuer Fall seit 15.10. 15:05 UTC. .1571 (Diagnose „F9 ohne Dialog: …“ + genau ein zweiter Anlauf) ist seit 16:36 UTC auf den PCs; nachts gab es keine Echo-Starts, also noch keine Spur. Bleibt offen bis zur ersten Diagnose-Zeile.
 Status: offen
 
 ## 2026-10-13 23:07 — Google-Anzeige im Tradovate-Panel (dein Screenshot) — ohne „Close ad“ hat Puls kein X
@@ -184,13 +191,15 @@ Stand 14.10. 20:55 (Routine): kein neuer Fall auf pc-t8wg97 (keine weitere Orbit
 Antwort Master 14.10. 23:30 (Finn: „alle Puls-Fehler beheben"): Puls stellt die Einheit selbst auf $ um — Klick auf den ▾-Wähler neben „Take profit"/„Stop loss", Beweis durch Rücklesung der Beschriftung („Take profit $"), sonst Abbruch wie bisher. Gilt für jeden PC, nicht nur pc-t8wg97.
 Stand 15.10. 05:30 (Routine): Umsetzung steht noch aus — dieser Lauf hatte mit Frage 17 (taubes Ticket) und Frage 16 (Backend-Wartezeit) schon seine zwei Fixes. Der nächste Lauf baut: Klick auf den ▾-Wähler neben Take profit/Stop loss, Beweis durch Rücklesung der Beschriftung („… $“), sonst Abbruch wie bisher. Kein neuer Fall seit 14.10. 00:09 UTC.
 Stand 15.10. 20:30 (Routine): Umsetzung erneut verschoben — die zwei Fixes dieses Laufs gingen an „F9-Dialog nicht gefunden“ (9 Fälle/24 h, 3 PCs) und den fremden Dialog beim Abmelden (7 Fälle/7 d). Kein neuer Fall dieses Musters seit 14.10. 00:09 UTC. Der nächste Lauf baut es, wenn kein Muster mit mehr Fällen vorliegt.
-Status: beantwortet — Umsetzung folgt (nächster Lauf)
+Stand 16.10. 05:35 (Routine): GEBAUT (.1603, order_bot.py cdp_einheit_wahl + _cdp_einheit_auf_dollar, Einbau in _cdp_ticket_fuellen): steht die Einheit nicht auf $, klickt Puls GENAU EINMAL auf den ▾-Wähler (die Beschriftung „Take profit price ▾“), liest das aufgeklappte Menü (eigenes Lese-JS), klickt GENAU EINMAL den eindeutigen Eintrag „$“/„USD“ (nur wenn das Menü auch eine zweite Einheit wie ticks/%/price zeigt — sonst ist es kein Einheiten-Menü) und beweist über die Rücklesung der Beschriftung („… $“). Ohne Beweis derselbe Abbruch wie bisher plus Zusatz, was das Menü zeigte; offenes Menü per Esc zu (nie bei offenem Dialog); nie ein zweiter Anlauf, nie ein Druck auf Senden; Pausen über _warte. Selbsttest 277/277. Gilt für jeden PC. Ob TradingViews Menü so aufgebaut ist wie angenommen (role=menu/popup-menu-container, Eintrag „USD“), zeigt die erste Spur — bei Abweichung ziehe ich nach.
+Status: erledigt
 
 ## 2026-10-14 20:55 — start: pywinauto fehlt (nur auf dem PC lauffähig) — pc-7ftp5l (neuer PC)
 Was passiert: Der erste Echo-Start auf dem neuen pc-7ftp5l (14.10. 15:37 UTC, Plan 38c7a6f1…) brach sofort ab: „pywinauto fehlt (nur auf dem PC lauffaehig)“ — das Python auf diesem PC hat das Paket nicht, der Bot kann dort weder Terminal noch Fenster bedienen. Keine Order, Plan bleibt „planned“. Einrichtung, kein Code.
 Was ich brauche: Auf pc-7ftp5l einmal die Einrichtung nachziehen (start-alles.bat / Paket-Installation wie auf den anderen PCs: pywinauto + MetaTrader5 im Python des Bots), danach den Plan 38c7a6f1… neu starten.
 Stand 15.10. 05:30 (Routine): pc-7ftp5l meldet seit 01:36 UTC frisch mit Bot .1564 (vorher ohne Bot-Lauf); kein neuer Echo-Start-Versuch seit 15:37 UTC — ob pywinauto jetzt da ist, zeigt erst der nächste Start.
 Stand 15.10. 20:30 (Routine): kein Echo-Start-Versuch auf pc-7ftp5l (ob pywinauto da ist, bleibt offen); der PC meldet frisch mit .1570. Orbit auf diesem PC: Tradovate-Login scheitert → Frage 18.
+Stand 16.10. 05:35 (Routine): kein Echo-Start-Versuch auf pc-7ftp5l; der PC meldet frisch mit .1602.
 Status: offen
 
 ## 2026-10-14 20:55 — pc: lokales Backend nicht erreichbar (TypeError: Failed to fetch) — pc-40mali
@@ -210,14 +219,22 @@ Status: erledigt
 ## 2026-10-15 20:30 — pc-7ftp5l (neuer PC): Tradovate im Puls-Chrome nicht verbunden, kein Tradovate-Username für die Firma
 Was passiert: Auf pc-7ftp5l kam Puls heute nicht an Tradovate: 14:43 UTC „Tradovate-Login nicht geschafft (login_formular): Nach 'Connect' keine Tradovate-Anmeldeseite (25 s)“ (Plan 69b2f0d2…), 14:46 UTC „Reiter Market ist nach dem Klick nicht aktiv“ (gleicher Plan), und bei der Balance-Lesung 10× „Konto … steht im Dropdown 0× — Puls kann nicht selbst verbinden: für die Firma ist kein Tradovate-Username hinterlegt“ (14:50 und 16:19 UTC, fünf Apex-Konten derselben Firma). Nur dieser PC, Einrichtung, kein Code-Muster.
 Was ich brauche: (a) In Einstellungen > Prop Firms für die Firma dieser fünf Konten den Tradovate-Username hinterlegen (wie bei den anderen Apex-Firmen). (b) Am pc-7ftp5l im Puls-Chrome Tradovate einmal von Hand verbinden — nach „Connect“ erschien keine Anmeldeseite (Popup-Blocker? anderes Chrome-Profil als das Puls-Profil?). Danach „✓ Behoben“ bzw. die Pläne neu starten.
+Stand 16.10. 05:35 (Routine): 25 weitere Fälle seit dem Abendlauf (5 Konten, Balance-Takt 16:19, 16:55, 18:28, 20:00, 22:03, 23:00 UTC), jede Meldung weiter „kein Tradovate-Username hinterlegt“. Plan 69b2f0d2… steht „completed“. Finn .1584: sobald der Username für die Firma eingetragen ist, liest der Balance-Takt von selbst (kein Hand-↻) — dann endet auch dieses Muster. (b) Tradovate am PC einmal verbinden bleibt.
 Status: offen
 
 ## 2026-10-15 20:30 — pc-na1q6b: Copier für die Instanz gestoppt — start-alles.bat
 Was passiert: 12:40 UTC meldete der Trade-Start-Check für Plan 55761da6… „Copier für diese Instanz GESTOPPT — start-alles.bat auf dem PC ausführen, dann den Trade neu starten — nichts platziert“. Der PC meldet seit 16:36 UTC wieder frisch (Bot .1570), ob der Copier dieser Instanz läuft, sehe ich aus der Cloud nicht.
 Was ich brauche: Am pc-na1q6b start-alles.bat ausführen (bzw. prüfen, ob der Copier der Instanz läuft) und den Plan neu starten.
+Stand 16.10. 05:35 (Routine): kein neuer Fall; Plan 55761da6… steht „completed“ (ohne Start durch Puls). Der PC meldet zuletzt 22:58 UTC mit .1571 (seit > 2,5 h still).
 Status: offen
 
 ## 2026-10-15 20:30 — Entscheidung: pc-i8vyq8, Plan 8896d9e7… — Server lehnt 4 Lot NDX100 dreimal mit „No money“ ab, jede Ablehnung steht als „unklar“
 Was passiert: 13:29 UTC sagte der Trade-Start-Check „frei 874 € · nötig ≈ 2.170 € — zu wenig“ (nichts platziert). Nach deiner Fusion-Marge-Änderung (.1567, 13:51 UTC) ließ der Check den Plan durch, und der Master-Server lehnte die Order dreimal ab: 14:13 und 15:04 UTC „KEINE Bestätigung binnen 12 s — Grund: zu wenig freie Marge für dieses Volumen (Server: No money) — Kontostand 100 000.00“, 16:11 UTC ohne lesbaren Grund. Jedes Mal: Position bewiesen nicht am Konto, Dialog geschlossen — und trotzdem „unklar“ in der Sammlung (3 der 4 offenen Unklar-Fälle heute). Das „unklar“ kommt nicht aus order_bot (der liefert retry_ok=false mit Grund), sondern aus dem Prophos-Tab (prophos.html: unklar = retry_ok false, also jede Order ohne Wiederholungs-Freigabe) — Doppel-Order-Doktrin, nicht meine Baustelle.
 Was ich brauche: (a) Prüfung Volumen/Plan: 4 Lot NDX100 bei 100 000 Kontostand — reicht die Marge des Master-Kontos dafür (Hebel der Firma)? Sonst Plan kleiner stellen oder das Konto aus dem Planer nehmen, sonst versucht Puls es alle ~50 min erneut. (b) Entscheidung: soll eine vom Server belegte Ablehnung (Journal „No money“/„Trade disabled“, Position bewiesen nicht am Konto) weiter als „unklar“ gelten (= du musst jedes Mal selbst nachsehen), oder darf sie als klarer Fehlstart ohne Wiederholung gewertet werden? Ich ändere diese Einstufung nicht ohne dein Ja.
+Stand 16.10. 05:35 (Routine): kein neuer Fall seit 15.10. 16:11 UTC; Plan 8896d9e7… steht „completed“ (ohne Start durch Puls). (b) Einstufung einer vom Server belegten Ablehnung bleibt offen.
+Status: offen
+
+## 2026-10-16 05:35 — pc-40mali: Copier nicht am Leben (mt5_live alive=false, bot_version leer), Tab hängt auf .1589
+Was passiert: Alle vier Instanz-Zeilen von pc-40mali in mt5_live (FundedNext ×2, Fusion, „bestanden“) stehen seit dem Abend auf alive=false mit leerer bot_version — der Copier/Bot dieses PCs schreibt nicht; nur der Prophos-Tab meldet (tab_build .1589, 01:29 UTC — 13 Builds hinter .1602, obwohl der Build-Wächter .1586/.1587 den Tab selbst neu laden sollte, was er ohne laufendes Panel nicht kann). Am 14.10. gab es auf diesem PC schon „lokales Backend nicht erreichbar“ (Frage 16: Panel-Autostart prüfst du). Kein Code-Muster — Einrichtung.
+Was ich brauche: Am pc-40mali start-alles.bat ausführen (Panel + Copier) bzw. den Autostart prüfen; danach sollte mt5_live alive=true und bot_version .1603 zeigen und der Tab von selbst auf den aktuellen Build springen.
 Status: offen

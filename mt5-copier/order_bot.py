@@ -19958,6 +19958,108 @@ def _cdp_ticket_neu_oeffnen(s, opts, trail):
     return st, "neu"
 
 
+# EINHEIT SELBST AUF $ STELLEN (Routine „Puls-Fehler" 16.10.2026, Frage 14 — Antwort Master 14.10.2026 23:30, Finn: „alle Puls-Fehler
+# beheben"): Muster „ticket: 'take profit' steht nicht auf $ (einheit 'price')" — 9 Fälle seit 25.09.2026 auf 4 PCs (02.10. 4× an einem
+# PC, 08.10. 3× auf 2 PCs mit Einheit '?', 14.10. 00:09 UTC neuer PC „Take profit price"), jedes Mal nichts gesendet, 45 s – 2 min
+# später lief derselbe Plan durch, weil jemand die Einheit von Hand auf $ gestellt hatte. TradingView merkt sich die Einheit je
+# Browser-Profil — ein neuer PC bzw. ein frisches Puls-Chrome steht zuerst auf „price"/„ticks". Jetzt: GENAU EIN Klick auf den
+# ▾-Wähler (die Beschriftung „Take profit price ▾" selbst), im aufgeklappten Menü GENAU EIN Eintrag „$"/„USD" (k3_eindeutig; das Menü
+# muss daneben eine zweite Einheit wie ticks/%/price zeigen, sonst ist es nicht der Wähler), Beweis = Rücklesung der Beschriftung über
+# cdp_einheit → „$". Ohne Beweis bleibt der Abbruch wie bisher (plus Zusatz, was das Menü zeigte), ein offenes Menü geht per Esc zu.
+# Nie ein zweiter Anlauf, nie ein Druck auf Senden; Pausen über _warte.
+CDP_RX_EINHEIT_GELD = re.compile(r"^\s*(\$|usd|€|eur|currency|money|geld|w(ä|ae)hrung)\s*$", re.I)
+CDP_RX_EINHEIT_ANDERE = re.compile(r"^\s*(ticks?|pips?|%|percent|prozent|price|kurs|points?|punkte)\s*$", re.I)
+CDP_EINHEIT_MENUE_JS = (
+    "(function(){var S='[role=\"listbox\"],[role=\"menu\"],[data-name=\"menu-inner\"],[data-name=\"popup-menu-container\"]';"
+    "function sb(e){var r=e.getBoundingClientRect();if(!(r.width>0&&r.height>0))return false;var s=getComputedStyle(e);"
+    "return s.visibility!=='hidden'&&s.display!=='none';}"
+    "function tx(e){return String(e.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40);}"
+    "var out=[],seen=[];var mm=Array.prototype.slice.call(document.querySelectorAll(S)).filter(sb);"
+    "mm.forEach(function(m){var items=Array.prototype.slice.call(m.querySelectorAll('[role=\"option\"],[role=\"menuitem\"],"
+    "[role=\"menuitemradio\"],[role=\"menuitemcheckbox\"]')).filter(sb);"
+    "if(!items.length)items=Array.prototype.slice.call(m.children).filter(sb);"
+    "items.forEach(function(e){if(seen.indexOf(e)>=0||out.length>=40)return;seen.push(e);var r=e.getBoundingClientRect();"
+    "out.push({text:tx(e),aria:e.getAttribute('aria-label')||'',title:e.getAttribute('title')||'',"
+    "rect:[r.left,r.top,r.width,r.height],aus:(e.getAttribute('aria-disabled')==='true'||e.hasAttribute('disabled')),"
+    "aktiv:(e.getAttribute('aria-selected')==='true'||e.getAttribute('aria-checked')==='true')});});});"
+    "return {menues:mm.length,eintraege:out};})()")
+
+
+def cdp_einheit_wahl(eintraege):
+    """REIN RECHNEND (testbar): im aufgeklappten Einheiten-Menü der EINE Eintrag „$"/„USD". Das Menü muss eine zweite Einheit zeigen
+    (ticks/%/price/…) — sonst ist es nicht der Wähler (z. B. eine Konto-Liste oder gar kein Menü). -> (eintrag|None, grund, texte)"""
+    el = [e for e in (eintraege or []) if isinstance(e, dict)]
+    texte = [k3_label(e) for e in el][:10]
+    if not el:
+        return None, "kein Menü offen", texte
+    if not any(CDP_RX_EINHEIT_ANDERE.search(str(e.get(f) or "")) for e in el for f in ("text", "aria", "title")):
+        return None, "Menü zeigt keine Einheiten", texte
+    e, n = k3_eindeutig(el, CDP_RX_EINHEIT_GELD)
+    if not e:
+        return None, f"Eintrag '$' {n}× im Menü", texte
+    return e, "", texte
+
+
+def _cdp_einheit_auf_dollar(s, st, schl, name, opts, trail):
+    """Einheit des TP-/SL-Felds im Ticket auf $ stellen: EIN Klick auf den ▾-Wähler (die Beschriftung), EIN Klick auf „$" im Menü,
+    Beweis = Beschriftung liest danach „$" (cdp_einheit). -> (st, ok, zusatz). Ohne Beweis bleibt alles wie vorher — der Aufrufer
+    bricht wie bisher ab, der Zusatz sagt, was das Menü zeigte; ein offenes Menü geht per Esc zu (_cdp_esc, nie bei offenem Dialog)."""
+    def f_von(st_):
+        tk = st_.get("ticket") if isinstance(st_, dict) and isinstance(st_.get("ticket"), dict) else {}
+        return tk.get(schl) if isinstance(tk.get(schl), dict) else {}
+
+    def besch_text(f__):
+        b = f__.get("beschriftung") if isinstance(f__.get("beschriftung"), dict) else {}
+        return str(b.get("text") or "")[:40]
+
+    def menue_eintraege():
+        try:
+            m = s.lese_js(CDP_EINHEIT_MENUE_JS, timeout=4)
+        except Exception:
+            m = None
+        return (m.get("eintraege") or []) if isinstance(m, dict) and isinstance(m.get("eintraege"), list) else []
+
+    f_ = f_von(st)
+    besch = f_.get("beschriftung") if isinstance(f_.get("beschriftung"), dict) else {}
+    r = cdp_rect(besch)
+    if not r:
+        trail.append(f"{name}: Einheit '{cdp_einheit(f_) or '?'}' — Wähler (Beschriftung) ohne Rechteck, nicht umgestellt")
+        return st, False, " Wähler nicht greifbar."
+    if not s.klick(r, f"Einheiten-Wähler {name} ('{besch_text(f_)}')"):
+        trail.append(f"{name}: Einheiten-Wähler nicht gedrückt (kein Beweis) — nicht umgestellt")
+        return st, False, " Wähler nicht gedrückt."
+    _warte(0.5, 0.25)
+    eintraege = menue_eintraege()
+    e, grund, texte = cdp_einheit_wahl(eintraege)
+    if not e:
+        trail.append(f"{name}: nach dem Klick auf den Wähler {grund} ({texte})")
+        st = s.stand(opts)
+        if eintraege:
+            _cdp_esc(s, st, trail, f"Einheiten-Menü {name} ohne '$'")
+            _warte(0.3, 0.2)
+            st = s.stand(opts)
+        return st, False, f" Auch nach Klick auf den ▾-Wähler: {grund} ({texte})."
+    if not s.klick(cdp_rect(e), f"Einheit {name} → $ ('{k3_label(e)}')"):
+        trail.append(f"{name}: Eintrag '$' im Einheiten-Menü nicht gedrückt (kein Beweis)")
+        st = s.stand(opts)
+        _cdp_esc(s, st, trail, f"Einheiten-Menü {name} offen")
+        _warte(0.3, 0.2)
+        st = s.stand(opts)
+        return st, False, " Auch nach Klick auf den ▾-Wähler: Eintrag '$' nicht gedrückt."
+    _warte(0.5, 0.25)
+    st = s.stand(opts)
+    f2 = f_von(st)
+    if "$" in cdp_einheit(f2):
+        trail.append(f"{name}: Einheit auf $ gestellt (bewiesen: Beschriftung '{besch_text(f2) or '?'}')")
+        return st, True, ""
+    trail.append(f"{name}: Einheit nach Klick auf '$' weiter '{cdp_einheit(f2) or '?'}' — nicht bewiesen")
+    if menue_eintraege():
+        _cdp_esc(s, st, trail, f"Einheiten-Menü {name} noch offen")
+        _warte(0.3, 0.2)
+        st = s.stand(opts)
+    return st, False, f" Auch nach Klick auf den ▾-Wähler und '$' (Beschriftung danach '{besch_text(f2) or '?'}')."
+
+
 def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
     """Ticket im Puls-Chrome füllen und jeden Wert zurücklesen — K2 und K3 gemeinsam (29.09.2026 unverändert aus
     modus_tvkette_cdp herausgezogen). KEIN Klick auf den Senden-Knopf. -> (ok, code, msg, schritt, st, knopf)
@@ -20179,9 +20281,16 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
             trail.append(f"{name} AUS")
             continue
         if "$" not in cdp_einheit(f_):
-            return False, "ticket", (f"'{name}' steht nicht auf $ (Einheit '{cdp_einheit(f_) or '?'}', Beschriftung "
-                                     f"'{((f_.get('beschriftung') or {}) if isinstance(f_.get('beschriftung'), dict) else {}).get('text') or '?'}')"
-                                     f" — der Wert {soll:g} wäre etwas anderes."), "ticket", st, None
+            # EINHEIT SELBST AUF $ (Routine „Puls-Fehler" 16.10.2026, Frage 14 — Antwort Master 14.10.2026 23:30; Muster „ticket: 'take
+            # profit' steht nicht auf $ (einheit 'price')", 9 Fälle seit 25.09. auf 4 PCs): genau EIN Versuch über den ▾-Wähler, Beweis
+            # Rücklesung der Beschriftung; ohne Beweis derselbe Abbruch wie bisher (Muster-Anfang bleibt), der Zusatz nennt das Menü.
+            st, ok_e, zusatz_e = _cdp_einheit_auf_dollar(s, st, schl, name, opts, trail)
+            f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+            if not ok_e or "$" not in cdp_einheit(f_):
+                return False, "ticket", (f"'{name}' steht nicht auf $ (Einheit '{cdp_einheit(f_) or '?'}', Beschriftung "
+                                         f"'{((f_.get('beschriftung') or {}) if isinstance(f_.get('beschriftung'), dict) else {}).get('text') or '?'}')"
+                                         f" — der Wert {soll:g} wäre etwas anderes." + zusatz_e), "ticket", st, None
+            an = f_.get("an")
         if an is False:
             if not cdp_rect(f_.get("schalter")):
                 return False, "ticket", f"'{name}' ist AUS, Schalter nicht greifbar.", "ticket", st, None

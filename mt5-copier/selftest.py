@@ -1944,6 +1944,7 @@ def main():
     results.append(test_cdp_konto_weg())
     results.append(test_cdp_konto_weg_gleicher_login())
     results.append(test_puls_fehler_1571())
+    results.append(test_puls_fehler_1603())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -4813,6 +4814,120 @@ def test_puls_fehler_1571():
         and "anlauf == 2" in q_ab, "Abmelden: Dialog-Weg nur nach leerem Menü, genau zwei Anläufe, Esc-Pfad unverändert")
     if ok:
         print("✓ Puls-Fehler .1571: F9 ohne Dialog → Diagnose + ein zweiter Anlauf (keiner bei gesperrtem Desktop); Abmelden: fremder Dialog einmal über sein X, Knopf ein zweites Mal")
+    return ok
+
+
+def test_puls_fehler_1603():
+    """Routine „Puls-Fehler" 16.10.2026 05:35 Dubai (.1603, Frage 14 — Antwort Master 14.10.2026 23:30): Puls stellt die TP-/SL-Einheit im
+    Ticket selbst auf $ — EIN Klick auf den ▾-Wähler (Beschriftung), EIN Klick auf „$" im Menü, Beweis Rücklesung der Beschriftung; ohne
+    Beweis der Abbruch wie bisher (Muster-Anfang gleich) mit Zusatz, offenes Menü per Esc zu, nie ein zweiter Anlauf. Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1603: " + text)
+            ok = False
+
+    # (1) rein rechnend: der EINE Eintrag „$"/„USD" — nur in einem Menü, das auch eine andere Einheit zeigt
+    w1 = ob.cdp_einheit_wahl([{"text": "Ticks", "rect": [10, 10, 80, 30]}, {"text": "USD", "rect": [10, 40, 80, 30]},
+                              {"text": "%", "rect": [10, 70, 80, 30]}, {"text": "Price", "rect": [10, 100, 80, 30]}])
+    w2 = ob.cdp_einheit_wahl([{"text": "Ticks", "rect": [10, 10, 80, 30]}, {"text": "$", "rect": [10, 40, 80, 30]}, {"text": "USD", "rect": [10, 70, 80, 30]}])
+    w3 = ob.cdp_einheit_wahl([{"text": "$", "rect": [10, 10, 80, 30]}])
+    w4 = ob.cdp_einheit_wahl([])
+    w5 = ob.cdp_einheit_wahl([{"text": "Ticks", "rect": [10, 10, 80, 30]}, {"text": "Price", "rect": [10, 40, 80, 30]}])
+    w6 = ob.cdp_einheit_wahl([{"text": "PAAPEX000000000001USD", "rect": [10, 10, 200, 30]}, {"text": "PAAPEX000000000002USD", "rect": [10, 40, 200, 30]}])
+    w7 = ob.cdp_einheit_wahl([{"text": "Ticks", "rect": [10, 10, 80, 30]}, {"text": "USD", "rect": [10, 40, 80, 30], "aus": True}])
+    chk(w1[0] is not None and w1[0]["text"] == "USD" and w1[1] == "" and w2[0] is None and "2×" in w2[1] and w3[0] is None and "keine Einheiten" in w3[1]
+        and w4[0] is None and "kein Menü" in w4[1] and w5[0] is None and "0×" in w5[1] and w6[0] is None and "keine Einheiten" in w6[1]
+        and w7[0] is None and "0×" in w7[1],
+        f"cdp_einheit_wahl: USD eindeutig / zwei Treffer / nur $ / leer / ohne $ / Konto-Liste / gesperrt ({w1[1]!r}, {w2[1]!r}, {w3[1]!r}, {w5[1]!r}, {w6[1]!r}, {w7[1]!r})")
+
+    # (2) Einbau: Attrappe mit TP auf 'price' — Wähler-Klick öffnet das Menü (lese_js), Klick auf 'USD' stellt um (oder nicht)
+    class _SE:
+        def __init__(self, menue=True, wirkt=True, einheiten=True, einheit="price"):
+            self.einheit, self.menue, self.wirkt, self.einheiten, self.menue_offen = einheit, menue, wirkt, einheiten, False
+            self.klicks, self.tasten, self.tp_wert, self.menge, self.seite = [], [], "30651.5", "2", "buy"
+
+        def stand(self, opts=None):
+            return {"ticket": {"da": True, "symbol": "NQZ6", "seite": self.seite, "kaufen": {"rect": [1540, 230, 90, 40]}, "verkaufen": {"rect": [1340, 230, 90, 40]},
+                               "typen": [{"id": "market", "aria-selected": "true"}], "menge": {"wert": self.menge, "rect": [1400, 300, 120, 30]},
+                               "tp": {"da": True, "an": True, "einheit": self.einheit, "beschriftung": {"text": f"Take profit {self.einheit} ▾", "rect": [1340, 380, 120, 20]},
+                                      "schalter": {"rect": [1500, 380, 38, 20]}, "feld": {"rect": [1340, 405, 120, 30]}, "wert": self.tp_wert},
+                               "sl": {"da": True, "an": False, "einheit": "$", "beschriftung": {"text": "Stop loss $ ▾", "rect": [1340, 460, 120, 20]},
+                                      "schalter": {"rect": [1500, 460, 38, 20]}, "feld": {"rect": [1340, 485, 120, 30]}, "wert": None}},
+                    "kauf_knopf": {"symbol": "NQZ6", "seite": self.seite, "text": f"Buy {self.menge} NQZ6 MARKET", "rect": [1340, 820, 280, 50]}}
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n.startswith("Einheiten-Wähler"):
+                self.menue_offen = self.menue
+            elif n.startswith("Einheit ") and "→ $" in n:
+                self.menue_offen = False
+                if self.wirkt:
+                    self.einheit = "$"
+            return True
+
+        def fokus_im(self, r, n, versuche=3):
+            return True
+
+        def feld_setzen(self, r, text, name, versuch=0):
+            if name == "Take profit":
+                self.tp_wert = text
+
+        def taste(self, k, modifiers=0):
+            self.tasten.append(k)
+            if k == "Escape":
+                self.menue_offen = False
+
+        def lese_js(self, a, timeout=8):
+            if "popup-menu-container" in a and self.menue_offen:
+                if not self.einheiten:
+                    return {"menues": 1, "eintraege": [{"text": "PAAPEX000000000001USD", "rect": [1340, 400, 200, 30]}, {"text": "PAAPEX000000000002USD", "rect": [1340, 430, 200, 30]}]}
+                return {"menues": 1, "eintraege": [{"text": "Ticks", "rect": [1340, 400, 120, 30]}, {"text": "USD", "rect": [1340, 430, 120, 30]},
+                                                   {"text": "%", "rect": [1340, 460, 120, 30]}, {"text": "Price", "rect": [1340, 490, 120, 30]}]}
+            return {"menues": 0, "eintraege": []}
+    plan = {"richtung": "buy", "menge": 2, "tp": 2475, "sl": None}
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        sa, ta = _SE(), []
+        ra = ob._cdp_ticket_fuellen(sa, sa.stand(), plan, "NQZ6", {}, ta)
+        sb, tb = _SE(menue=False), []
+        rb = ob._cdp_ticket_fuellen(sb, sb.stand(), plan, "NQZ6", {}, tb)
+        sc, tc = _SE(einheiten=False), []
+        rc = ob._cdp_ticket_fuellen(sc, sc.stand(), plan, "NQZ6", {}, tc)
+        sd, td = _SE(wirkt=False), []
+        rd = ob._cdp_ticket_fuellen(sd, sd.stand(), plan, "NQZ6", {}, td)
+        se, te = _SE(einheit="$"), []
+        re_ = ob._cdp_ticket_fuellen(se, se.stand(), plan, "NQZ6", {}, te)
+    finally:
+        ob._warte = alt_w
+    n_w = lambda s_: sum(1 for k in s_.klicks if k.startswith("Einheiten-Wähler Take profit"))
+    n_d = lambda s_: sum(1 for k in s_.klicks if k.startswith("Einheit Take profit → $"))
+    chk(ra[0] is True and n_w(sa) == 1 and n_d(sa) == 1 and sa.einheit == "$" and sa.tp_wert == "2475" and "Escape" not in sa.tasten
+        and any("Einheit auf $ gestellt (bewiesen: Beschriftung 'Take profit $ ▾')" in z for z in ta) and any("Take profit = 2475 $" in z for z in ta),
+        f"Einheit 'price' → Wähler einmal, '$' einmal, Beschriftung bewiesen, Wert danach getippt, Ticket ok ({ra[:3]}, {sa.klicks})")
+    chk(rb[0] is False and rb[1] == "ticket" and rb[2].startswith("'Take profit' steht nicht auf $ (Einheit 'price', Beschriftung 'Take profit price ▾')")
+        and "Auch nach Klick auf den ▾-Wähler: kein Menü offen" in rb[2] and n_w(sb) == 1 and n_d(sb) == 0 and "Escape" not in sb.tasten,
+        f"Wähler öffnet kein Menü → Abbruch wie bisher (Muster-Anfang gleich) mit Zusatz, kein '$'-Klick, kein Esc ({rb[2][:120]}, {sb.tasten})")
+    chk(rc[0] is False and "Menü zeigt keine Einheiten" in rc[2] and n_w(sc) == 1 and n_d(sc) == 0 and sc.tasten.count("Escape") == 1
+        and any("ohne '$' → Esc" in z for z in tc),
+        f"Menü ohne Einheiten (Konto-Liste) → kein '$'-Klick, Menü per Esc zu, Abbruch mit Zusatz ({rc[2][:120]}, {sc.tasten})")
+    chk(rd[0] is False and "Auch nach Klick auf den ▾-Wähler und '$'" in rd[2] and n_w(sd) == 1 and n_d(sd) == 1 and sd.einheit == "price"
+        and rd[2].startswith("'Take profit' steht nicht auf $ (Einheit 'price'"),
+        f"'$' geklickt, Beschriftung bleibt 'price' → Abbruch mit Zusatz, genau ein Wähler- und ein '$'-Klick, nie ein zweiter Anlauf ({rd[2][:120]}, {sd.klicks})")
+    chk(re_[0] is True and n_w(se) == 0 and n_d(se) == 0 and not any("Wähler" in k for k in se.klicks),
+        f"Einheit schon $ → kein Wähler-Klick, Erfolgsweg unverändert ({se.klicks})")
+    # (3) Quelltext: genau eine Einbaustelle, Pausen über _warte, kein fester Schlaf, kein Senden-Klick; Rücklesung vor dem Senden prüft $ weiter
+    q_tf, q_h = _i.getsource(ob._cdp_ticket_fuellen), _i.getsource(ob._cdp_einheit_auf_dollar)
+    chk(q_tf.count("_cdp_einheit_auf_dollar(s, st, schl, name, opts, trail)") == 1 and q_tf.index("_cdp_einheit_auf_dollar(") < q_tf.index("steht nicht auf $ (Einheit")
+        and "_warte(" in q_h and "time.sleep" not in q_h and "klick(cdp_rect(kk" not in q_h and q_h.count("s.klick(") == 2 and "_cdp_esc(" in q_h
+        and "statt $" in _i.getsource(ob.cdp_ticket_ruecklesung),
+        "Quelltext: eine Einbaustelle vor dem Abbruch, _warte statt sleep, genau zwei Klicks (Wähler, '$'), Esc-Weg, Rücklesung prüft $ weiter")
+    if ok:
+        print("✓ Puls-Fehler .1603: TP/SL-Einheit selbst auf $ — ein Wähler-Klick, ein '$'-Klick, Beweis Beschriftung; ohne Beweis Abbruch wie bisher, Menü per Esc zu")
     return ok
 
 
