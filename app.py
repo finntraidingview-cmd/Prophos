@@ -14981,6 +14981,108 @@ def richtung_frei():
     return out
 
 
+# ══ MAIL-REITER (16.10.2026, Finn: „Jedes Gmail ist ausschließlich für Prophos, ALLE Mails sollen rein. So simpel wie möglich … Jede ID
+# bekommt nur ihre eigenen Mails"). Ein Google-Apps-Script im Gmail-Konto der ID schickt alle 5 min neue Mails (Erst-Lauf: 90 Tage in
+# Portionen) hierher. Der Schlüssel im Header X-Mail-Schluessel wird gehasht und in mail_schluessel gesucht — die ID kommt NIE aus dem Body.
+# Gespeichert wird mit service role in mails (sql/2026-10-16_mail_reiter.sql); lesen tut das Frontend per RLS nur die eigenen Zeilen.
+# Bestehende Mails werden nie überschrieben (ignore-duplicates): „gelesen" in Prophos bleibt, ein doppelter Import schadet nicht.
+# Größen hart gedeckelt, HTML wird hier nur als Text abgelegt und im Browser ausschließlich im sandbox-iframe ohne Skripte gezeigt. ══
+MAIL_MAX_STAPEL = 50
+MAIL_MAX_TEXT = 50_000
+MAIL_MAX_HTML = 200_000
+MAIL_MAX_BODY = 14 * 1024 * 1024          # 50 × (200 KB HTML + 50 KB Text) + JSON-Hülle
+MAIL_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def mail_zeile(roh, uid):
+    """REIN RECHNEND (testbar): eine Mail aus dem Script → Zeile für public.mails oder None (ungültig). Alle Felder gekürzt, nur
+    erlaubte Schlüssel, Datum als ISO (UTC), Anhänge nur Name/Größe/Typ."""
+    if not isinstance(roh, dict):
+        return None
+    mid = str(roh.get("id") or "").strip()
+    if not MAIL_ID_RE.fullmatch(mid):
+        return None
+
+    def s(k, n):
+        v = roh.get(k)
+        return None if v is None else str(v)[:n]
+    datum = None
+    try:
+        d = datetime.fromisoformat(str(roh.get("datum") or "").replace("Z", "+00:00"))
+        datum = (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+    except ValueError:
+        datum = None
+    anh = []
+    for a in (roh.get("anhaenge") if isinstance(roh.get("anhaenge"), list) else [])[:30]:
+        if not isinstance(a, dict):
+            continue
+        try:
+            gr = max(0, int(a.get("groesse") or 0))
+        except (TypeError, ValueError):
+            gr = 0
+        anh.append({"name": str(a.get("name") or "")[:200], "groesse": gr, "typ": str(a.get("typ") or "")[:100]})
+    labels = [str(x)[:60] for x in (roh.get("labels") if isinstance(roh.get("labels"), list) else [])[:30] if x is not None]
+    tid = str(roh.get("thread") or "").strip()
+    return {"user_id": uid, "gmail_msg_id": mid, "thread_id": tid if MAIL_ID_RE.fullmatch(tid) else None,
+            "von": s("von", 500), "an": s("an", 2000), "betreff": s("betreff", 500), "datum": datum,
+            "snippet": s("snippet", 500), "text": s("text", MAIL_MAX_TEXT), "html": s("html", MAIL_MAX_HTML),
+            "anhaenge": anh, "gelesen": bool(roh.get("gelesen")), "labels": labels}
+
+
+def _mail_user_zum_schluessel(token):
+    """Klartext-Schlüssel → user_id über den SHA-256 in mail_schluessel (service role), None wenn unbekannt."""
+    t = str(token or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", t):
+        return None
+    h = hashlib.sha256(t.encode("ascii")).hexdigest()
+    # bewusst ohne Cache: nach „Neu verbinden" ist der alte Schlüssel sofort ungültig (Master 16.10.2026); ein Lookup je 5-min-Lauf und ID
+    rows = sb_select("mail_schluessel", {"select": "user_id", "token_sha256": f"eq.{h}", "limit": "1"}) or []
+    return str(rows[0].get("user_id") or "") or None if rows else None
+
+
+@app.route("/mail/eingang", methods=["POST"])
+def mail_eingang():
+    """POST /mail/eingang, Header X-Mail-Schluessel, Body {mails: [...≤ 50], stand: {fertig, gesendet}} → {ok, angenommen}.
+    403 = Schlüssel unbekannt (neu verbunden → das alte Script hört damit auf)."""
+    if request.content_length is None:          # ohne Längenangabe (chunked) griffe der Deckel nicht (Prüfung Slave 2)
+        return jsonify({"ok": False, "msg": "Content-Length fehlt"}), 411
+    if request.content_length > MAIL_MAX_BODY:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    try:
+        uid = _mail_user_zum_schluessel(request.headers.get("X-Mail-Schluessel"))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"DB nicht erreichbar: {str(e)[:120]}"}), 503
+    if not uid:
+        return jsonify({"ok": False, "msg": "Schlüssel unbekannt — in Prophos unter Mail neu verbinden"}), 403
+    d = request.get_json(silent=True) or {}
+    roh = d.get("mails") if isinstance(d.get("mails"), list) else []
+    if len(roh) > MAIL_MAX_STAPEL:
+        return jsonify({"ok": False, "msg": f"höchstens {MAIL_MAX_STAPEL} Mails je Aufruf"}), 400
+    zeilen, gesehen = [], set()
+    for m in roh:
+        z = mail_zeile(m, uid)
+        if z and z["gmail_msg_id"] not in gesehen:
+            gesehen.add(z["gmail_msg_id"])
+            zeilen.append(z)
+    try:
+        if zeilen:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/mails", params={"on_conflict": "user_id,gmail_msg_id"}, json=zeilen,
+                            headers=_sb_headers("resolution=ignore-duplicates,return=minimal"), timeout=(5, 60))
+            _sb_pruefen(r)
+        st = d.get("stand") if isinstance(d.get("stand"), dict) else {}
+        upd = {"zuletzt_at": datetime.now(timezone.utc).isoformat(),
+               "import_stand": {"fertig": bool(st.get("fertig")), "gesendet": int(st.get("gesendet") or 0) if str(st.get("gesendet") or "0").isdigit() else 0}}
+        neueste = max((z["datum"] for z in zeilen if z.get("datum")), default=None)
+        if neueste:
+            alt = (sb_select("mail_schluessel", {"select": "zuletzt_mail_at", "user_id": f"eq.{uid}"}) or [{}])[0].get("zuletzt_mail_at")
+            if not alt or str(neueste) > str(alt).replace(" ", "T"):
+                upd["zuletzt_mail_at"] = neueste
+        sb_update("mail_schluessel", {"user_id": f"eq.{uid}"}, upd)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Speichern fehlgeschlagen: {str(e)[:160]}"}), 503
+    return jsonify({"ok": True, "angenommen": len(zeilen)})
+
+
 @app.route("/code/datei/<path:pfad>", methods=["GET"])
 def code_datei(pfad):
     """Eine Repo-Datei aus genau dem deployten Stand. ?sha=… muss (falls angegeben) dieser Stand sein, sonst 409 mit dem
