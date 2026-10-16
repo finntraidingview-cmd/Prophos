@@ -1517,6 +1517,245 @@ def pc_id_setzen(neu, pfad=None):
         return neu, True
 
 
+# ══ TAB SELBST NEU LADEN (Finn 16.10.2026: „Wenn man den Tab neu laden muss, mach das als Bot — wie beim Balancelesen. Nie mehr
+# Hand-F5.") Anlass: Chris · pc-c19p2l hing mit tab_bw „Popup offen" auf .1565, Copier/Bot schon .1582 — der Tab startete Pläne mit
+# altem Code (ohne 1-s-Doppelsperre), F5 von Hand war nötig. Der Neulade-Wächter IM Tab kann einen Tab mit altem oder hängendem Code
+# nicht retten; das Panel ist per Code-Sync immer aktuell. Es fragt je Minute Railway GET /code/tab-stand/<pc_id> (Tab-Build aus
+# mt5_live + Server-Riegel) und lädt den VORHANDENEN Tab neu: Chrome-Fenster mit Titel „Prophos …" nach vorn, Strg+F5, das vorige
+# Fenster zurück (minimiert bleibt minimiert). Kein neuer Tab und kein neues Fenster (zwei Tabs mit derselben pc_id claimen beide).
+# Nur wenn: Tab ≥ TAB_NL_HINTER_S hinter origin (nicht inhaltsgleich) oder ≥ TAB_NL_STUMM_S stumm; kein Server-Riegel (Signal läuft,
+# Start geclaimt/≤ 5 min, Hedge öffnet/schließt); Puls hält nicht TV_ORDER_LOCK; ≥ TAB_NL_IDLE_S keine Eingabe am PC; höchstens
+# 1 Versuch je TAB_NL_ABSTAND_S. Jeder Schritt mit genauem Grund ins Panel-Log und als ?panel= in die Railway-Spur. Aus mit
+# „tab_neuladen": false in der Basis-Config. Nur Windows. ══
+TAB_NL_TAKT_S = 60
+TAB_NL_ANLAUF_S = 180
+TAB_NL_HINTER_S = 20 * 60
+TAB_NL_STUMM_S = 10 * 60
+TAB_NL_IDLE_S = 120
+TAB_NL_ABSTAND_S = 15 * 60
+TAB_NL = {"grund": "", "at": 0.0, "letzter_versuch": 0.0, "hinter_seit": None, "ergebnis": ""}
+
+
+def _build_nr(v):
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.(\d+)", str(v or "").strip())
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s, lock_frei):
+    """REIN RECHNEND (testbar): (laden: bool, grund: str, hinter_seit_neu). stand = Antwort von /code/tab-stand (oder None),
+    jetzt in s (epoch), hinter_seit = seit wann das Panel den Tab hinter origin sieht (s, oder None), letzter_versuch in s,
+    idle_s = Sekunden ohne Eingabe am PC (None = unbekannt), lock_frei = TV_ORDER_LOCK frei."""
+    if not isinstance(stand, dict) or stand.get("ok") is not True:
+        return False, "Tab-Stand von Railway nicht lesbar", hinter_seit
+    o, t = _build_nr(stand.get("origin")), _build_nr(stand.get("tab_build"))
+    gleich = _build_nr(stand.get("tab_gleich"))
+    tab_at = None
+    try:
+        tab_at = datetime.fromisoformat(str(stand.get("tab_at")).replace("Z", "+00:00")).timestamp() if stand.get("tab_at") else None
+    except ValueError:
+        tab_at = None
+    stumm_s = (jetzt - tab_at) if tab_at else None
+    hinter = bool(o and t and t < o and not (gleich and gleich >= o))
+    if hinter:
+        hinter_seit = hinter_seit or jetzt
+        bw = stand.get("tab_bw") if isinstance(stand.get("tab_bw"), dict) else {}
+        try:                                         # „hinter seit" des Tab-Wächters (ms) — älter als das eigene Erkennen zählt
+            hs = float(bw.get("hinter_seit")) / 1000.0
+            if 0 < hs < hinter_seit:
+                hinter_seit = hs
+        except (TypeError, ValueError):
+            pass
+    else:
+        hinter_seit = None
+    if stumm_s is not None and stumm_s >= TAB_NL_STUMM_S:
+        warum = f"Tab stumm seit {int(stumm_s // 60)} min (letztes Lebenszeichen in mt5_live)"
+    elif hinter and jetzt - hinter_seit >= TAB_NL_HINTER_S:
+        warum = f"Tab {stand.get('tab_build')} seit {int((jetzt - hinter_seit) // 60)} min hinter {stand.get('origin')}"
+    elif hinter:
+        return False, f"Tab {stand.get('tab_build')} hinter {stand.get('origin')} seit {int((jetzt - hinter_seit) // 60)} min — " \
+                      f"der Tab-Wächter hat bis {TAB_NL_HINTER_S // 60} min Zeit", hinter_seit
+    else:
+        return False, "", hinter_seit                # Tab aktuell (oder inhaltsgleich) und lebt — nichts zu tun
+    riegel = str(stand.get("riegel") or "").strip()
+    if riegel:
+        return False, f"{warum} — wartet: {riegel}", hinter_seit
+    if not lock_frei:
+        return False, f"{warum} — wartet: Puls/MT5-Order läuft (Browser oder MT5 belegt)", hinter_seit
+    if idle_s is not None and idle_s < TAB_NL_IDLE_S:
+        return False, f"{warum} — wartet: am PC wird gerade gearbeitet (letzte Eingabe vor {int(idle_s)} s)", hinter_seit
+    if letzter_versuch and jetzt - letzter_versuch < TAB_NL_ABSTAND_S:
+        return False, f"{warum} — wartet: letzter Neulade-Versuch vor {int((jetzt - letzter_versuch) // 60)} min (höchstens 1 je " \
+                      f"{TAB_NL_ABSTAND_S // 60} min)", hinter_seit
+    return True, warum, hinter_seit
+
+
+def _win_leerlauf_s():
+    """Sekunden seit der letzten Maus-/Tastatureingabe am PC (GetLastInputInfo) oder None."""
+    try:
+        import ctypes
+
+        class _LII(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        lii = _LII()
+        lii.cbSize = ctypes.sizeof(_LII)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return None
+        return max(0.0, ((ctypes.windll.kernel32.GetTickCount() - lii.dwTime) & 0xFFFFFFFF) / 1000.0)
+    except Exception:
+        return None
+
+
+def _prophos_fenster():
+    """Sichtbare Chrome-Fenster, deren aktiver Tab Prophos ist (Titel „Prophos … - Google Chrome") → [(hwnd, titel)]."""
+    import ctypes
+    from ctypes import wintypes
+    u32 = ctypes.windll.user32
+    gefunden = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    def _je(hwnd, _l):
+        try:
+            if not u32.IsWindowVisible(hwnd):
+                return True
+            kb = ctypes.create_unicode_buffer(128)
+            u32.GetClassNameW(hwnd, kb, 128)
+            if kb.value != "Chrome_WidgetWin_1":
+                return True
+            n = u32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(n + 1)
+            u32.GetWindowTextW(hwnd, buf, n + 1)
+            t = buf.value or ""
+            if re.match(r"^Prophos\b", t) and t.endswith("Google Chrome"):
+                gefunden.append((int(hwnd), t))
+        except Exception:
+            pass
+        return True
+    u32.EnumWindows(_je, 0)
+    return gefunden
+
+
+def _fenster_vorn(hwnd):
+    """Fenster nach vorn (AttachThreadInput, Rückfall Alt — wie _konsole_nach_vorn) → True, wenn es danach vorn steht."""
+    import ctypes
+    u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+    vorn = u32.GetForegroundWindow()
+    mein = k32.GetCurrentThreadId()
+    fremd = u32.GetWindowThreadProcessId(vorn, None) if vorn else 0
+    angehaengt = bool(fremd and fremd != mein and u32.AttachThreadInput(fremd, mein, True))
+    try:
+        u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+    finally:
+        if angehaengt:
+            u32.AttachThreadInput(fremd, mein, False)
+    if int(u32.GetForegroundWindow() or 0) != hwnd:
+        u32.keybd_event(0x12, 0, 0, 0); u32.keybd_event(0x12, 0, 2, 0)
+        u32.SetForegroundWindow(ctypes.c_void_p(hwnd))
+    return int(u32.GetForegroundWindow() or 0) == hwnd
+
+
+def _prophos_tab_neu_laden():
+    """Strg+F5 im Prophos-Fenster (unter TV_ORDER_LOCK) → (ok, Klartext). Fenster-Treue: kein neues Fenster/kein neuer Tab, nur
+    Tasten im Prophos-Fenster und nur, wenn es nachweislich vorn steht; danach das vorige Fenster zurück, minimiert bleibt minimiert."""
+    import ctypes
+    u32 = ctypes.windll.user32
+    fenster = _prophos_fenster()
+    if not fenster:
+        return False, ("kein Chrome-Fenster mit aktivem Prophos-Tab gefunden (Prophos-Tab zu oder nicht vorn in seinem Fenster) — "
+                       "am PC Prophos öffnen bzw. den Tab anklicken")
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "Puls läuft gerade im Browser — nächster Versuch später"
+    try:
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "MT5-Order läuft gerade (Echo/Master-Order) — nächster Versuch später"
+        vorher = int(u32.GetForegroundWindow() or 0)
+        erg = []
+        for hwnd, titel in fenster:
+            mini = bool(u32.IsIconic(hwnd))
+            if mini:
+                u32.ShowWindow(ctypes.c_void_p(hwnd), 9)         # SW_RESTORE
+                time.sleep(0.3 + random.random() * 0.2)
+            if not _fenster_vorn(hwnd):
+                erg.append(f"„{titel[:40]}“ kam nicht nach vorn — nichts gedrückt")
+                if mini:
+                    u32.ShowWindow(ctypes.c_void_p(hwnd), 6)     # SW_MINIMIZE
+                continue
+            time.sleep(0.25 + random.random() * 0.25)            # Jitter wie Puls
+            if int(u32.GetForegroundWindow() or 0) != hwnd:      # Beweis direkt vor dem Druck
+                erg.append(f"„{titel[:40]}“ verlor den Vordergrund — nichts gedrückt")
+                continue
+            u32.keybd_event(0x11, 0, 0, 0)                        # Strg
+            time.sleep(0.04 + random.random() * 0.04)
+            u32.keybd_event(0x74, 0, 0, 0); u32.keybd_event(0x74, 0, 2, 0)   # F5
+            time.sleep(0.04 + random.random() * 0.04)
+            u32.keybd_event(0x11, 0, 2, 0)
+            erg.append(f"Strg+F5 in „{titel[:40]}“")
+            time.sleep(1.0 + random.random() * 0.5)
+            if mini:
+                u32.ShowWindow(ctypes.c_void_p(hwnd), 6)
+        if vorher and vorher not in [h for h, _t in fenster]:
+            try:
+                _fenster_vorn(vorher)
+            except Exception:
+                pass
+        ok = any(e.startswith("Strg+F5") for e in erg)
+        return ok, "; ".join(erg)
+    except Exception as e:
+        return False, f"Neuladen fehlgeschlagen: {type(e).__name__}: {e}"
+    finally:
+        TV_ORDER_LOCK.release()
+
+
+def _browser_und_mt5_frei(tv_eigen=False):
+    """Kein Puls im Browser (TV_ORDER_LOCK) und keine MT5-Order (MASTER_ORDER_LOCKS: Echo-V2 /api/master-order klickt im MT5-Fenster
+    F9/Felder/Knopf — Prüfer S2 16.10.2026: holt der Wächter dann Chrome nach vorn, landet der Vordergrund mitten im Order-Dialog).
+    tv_eigen=True: TV_ORDER_LOCK hält der Aufrufer selbst."""
+    try:
+        if not tv_eigen and TV_ORDER_LOCK.locked():
+            return False
+        return not any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))
+    except Exception:
+        return False
+
+
+def _tab_stand_holen(pc, spur):
+    from urllib.parse import quote
+    roh = code_holen(f"/code/tab-stand/{pc}" + (f"?panel={quote(spur[:200])}" if spur else ""), timeout=10)
+    try:
+        return json.loads(roh.decode("utf-8")) if roh else None
+    except Exception:
+        return None
+
+
+def _tab_neulade_waechter():
+    if os.name != "nt":
+        return
+    time.sleep(TAB_NL_ANLAUF_S)
+    while True:
+        try:
+            if (base_config() or {}).get("tab_neuladen") is False:
+                time.sleep(TAB_NL_TAKT_S * 5)
+                continue
+            pc = pc_id_lesen()
+            if pc:
+                stand = _tab_stand_holen(pc, TAB_NL["grund"])
+                jetzt = time.time()
+                frei = _browser_und_mt5_frei()
+                laden, grund, TAB_NL["hinter_seit"] = tab_neuladen_entscheiden(stand, jetzt, TAB_NL["hinter_seit"],
+                                                                               TAB_NL["letzter_versuch"], _win_leerlauf_s(), frei)
+                if laden:
+                    TAB_NL["letzter_versuch"] = jetzt
+                    ok, msg = _prophos_tab_neu_laden()
+                    grund = f"{grund} → {'neu geladen' if ok else 'NICHT neu geladen'}: {msg}"
+                    TAB_NL["ergebnis"] = grund
+                if grund != TAB_NL["grund"]:
+                    if grund:
+                        print(f"[tab-neuladen] {grund}", flush=True)
+                    TAB_NL.update(grund=grund, at=jetzt)
+        except Exception as e:
+            print(f"[tab-neuladen] Fehler: {type(e).__name__}: {e}", flush=True)
+        time.sleep(TAB_NL_TAKT_S + random.random() * 10)
+
+
 def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
     ob der Snapshot wieder fliesst. Tut er es nicht, fehlt das Lese-EA auf dem
@@ -4458,6 +4697,8 @@ def main():
     threading.Thread(target=_boot_terminals, daemon=True).start()   # 01.10.2026: Master mit laufendem Trade nach PC-Start
     # MT5-Update ohne UAC-Abfrage (01.10.2026) — Details bei _mt5_update_waechter
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
+    # Tab selbst neu laden (16.10.2026) — Details bei _tab_neulade_waechter
+    threading.Thread(target=_tab_neulade_waechter, daemon=True).start()
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die

@@ -14963,6 +14963,75 @@ def code_datei(pfad):
     return resp
 
 
+# TAB SELBST NEU LADEN (Finn 16.10.2026: „Wenn man den Tab neu laden muss, mach das als Bot — wie beim Balancelesen. Nie mehr Hand-F5."
+# Anlass Chris · pc-c19p2l: Tab hing mit „Popup offen" auf .1565, Copier/Bot schon .1582, F5 von Hand nötig — auch Tabs mit altem Code
+# müssen wieder nachziehen). Das Panel am PC (per Code-Sync immer aktuell) fragt hier je Minute, wie sein Tab steht, und lädt ihn
+# selbst neu (Strg+F5 im Prophos-Fenster). Hier nur Lesen: Tab-Stand aus mt5_live + Riegel des Servers für diesen PC. ?panel= ist die
+# letzte Entscheidung des Panels — geloggt bei Änderung (Spur im Railway-Log).
+_tab_stand_spur = {}
+
+
+def tab_stand_riegel(signale_laeuft, plaene, pc, jetzt):
+    """REIN RECHNEND (testbar): Server-Grund, der ein Neuladen des Tabs auf diesem PC jetzt verbietet, sonst ''. signale_laeuft =
+    order_signale status laeuft mit pc = dieser PC; plaene = trade_plans der IDs dieses PCs (status, start_um, start_um_gestartet_at,
+    auto_plan, auto_bestaetigt_at, hedge_status, hedge_pc)."""
+    if signale_laeuft:
+        return f"Puls/Signal läuft auf diesem PC ({len(signale_laeuft)})"
+    for p in plaene or ():
+        st = str(p.get("status") or "")
+        if st == "open" and p.get("hedge_status") in ("oeffnet", "schliesst") and (not p.get("hedge_pc") or p.get("hedge_pc") == pc):
+            return "Hedge öffnet/schließt"
+        if st != "planned":
+            continue
+        gest = _ap_ts(p.get("start_um_gestartet_at"))
+        if gest is not None and (jetzt - gest).total_seconds() < 360:
+            return "Start geclaimt (< 6 min)"
+        su = _ap_ts(p.get("start_um"))
+        if gest is None and su is not None and -180 <= (su - jetzt).total_seconds() <= 300 and (not p.get("auto_plan") or p.get("auto_bestaetigt_at")):
+            return "Start in ≤ 5 min"
+    return ""
+
+
+@app.route("/code/tab-stand/<pc>", methods=["GET"])
+def code_tab_stand(pc):
+    """GET (X-Code-Token wie /code/stand) → {ok, origin, tab_build, tab_gleich, tab_bw, tab_at, riegel}. Nur Lesen."""
+    if not _code_zugang():
+        return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
+    pc = str(pc or "").strip().lower()
+    if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
+        return jsonify({"ok": False, "msg": "pc ungültig"}), 400
+    try:
+        with open(os.path.join(_CODE_WURZEL, "mt5-copier", "VERSION"), encoding="utf-8") as f:
+            origin = f.read().strip()
+    except OSError:
+        origin = None
+    jetzt = datetime.now(timezone.utc)
+    try:
+        rows = sb_select("mt5_live", {"select": "updated_at,user_id:status->>user_id,tab_build:status->>tab_build,"
+                                                "tab_gleich:status->>tab_gleich,tab_bw:status->tab_bw",
+                                      "pc_name": f"eq.{pc}", "order": "updated_at.desc", "limit": "20"}) or []
+        r0 = rows[0] if rows else {}
+        uids = sorted({str(r.get("user_id")) for r in rows if r.get("user_id")})
+        sig = sb_select("order_signale", {"select": "id", "status": "eq.laeuft", "pc": f"eq.{pc}", "limit": "5"}) or []
+        plaene = []
+        if uids:
+            plaene = sb_select("trade_plans", {"select": "status,start_um,start_um_gestartet_at,auto_plan,auto_bestaetigt_at,"
+                                                         "hedge_status:mt5_baseline->hedge->>status,hedge_pc:mt5_baseline->hedge->>pc",
+                                               "user_id": "in.(" + ",".join(uids) + ")", "status": "in.(planned,open)",
+                                               # nur bis jetzt + 10 min, jüngste zuerst (Hinweis S2: sonst Folgetage im Limit, ein frischer Claim fehlt)
+                                               "or": f"(start_um.is.null,start_um.lte.{(jetzt + timedelta(minutes=10)).isoformat()})",
+                                               "order": "start_um.desc.nullslast", "limit": "300"}) or []
+        riegel = tab_stand_riegel(sig, plaene, pc, jetzt)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Stand nicht lesbar: {type(e).__name__}"}), 503
+    spur = (request.args.get("panel") or "").strip()[:200]
+    if spur and _tab_stand_spur.get(pc) != spur:
+        _tab_stand_spur[pc] = spur
+        print(f"[tab-stand] {pc}: {spur}", flush=True)
+    return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
+                    "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel})
+
+
 @app.route("/reader-kurs", methods=["POST", "OPTIONS"])
 def reader_kurs_schreiben():
     """POST vom reader-server (Header X-Reader-Token) → tv_kurse + tv_kurs_1m (Upsert, idempotent)."""
