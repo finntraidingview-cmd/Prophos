@@ -8369,7 +8369,7 @@
                 <!-- Polar (13.10.2026, Finn): Funded-Futures gegen Funded-CFD einer ANDEREN ID als Airbag statt Fusion-Live. Eigener
                      Knopf + eigenes Popup (#polarModal) — hängt NICHT an _tpRoute, schließt dieses Popup und öffnet die Vorschau.
                      Erst Frontend zum Verstehen, Start-Logik folgt. -->
-                <button type="button" id="tp-route-polar" title="Polar — Funded-Futures gegen Funded-CFD einer anderen ID, Level gespiegelt beim Broker (Vorschau, noch nicht startbar)">Polar</button>
+                <button type="button" id="tp-route-polar" title="Polar — Funded-Futures gegen Funded-CFD einer anderen ID: planen, speichern, starten und mit beiden P&Ls erledigen (manuell, ohne Bot)">Polar</button>
                 <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten. -->
                 <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
@@ -8779,8 +8779,11 @@
           </div>
           <div class="modal-msg" id="polarMsg"></div>
         </div>
+        <!-- Manuell (16.10.2026, Finn: „jetzt manuell, später automatisch"): kein Bot klickt — „Speichern & starten" legt den Trade als
+             laufend an (du platzierst beide Seiten selbst), „Nur speichern" lässt ihn unter Geplant; beendet wird über „Erledigt" in Trades -->
         <div class="modal-foot" style="justify-content:center">
-          <button class="btn btn-primary" id="polarStart" style="min-width:220px" title="Plan anlegen — der Master-PC startet ihn sofort, der Slave-PC nimmt den Airbag an">Polar planen &amp; starten →</button>
+          <button class="btn btn-ghost" id="polarNurSpeichern" title="Plan unter Geplant speichern — „Läuft" setzt du später in Trades">Nur speichern</button>
+          <button class="btn btn-primary" id="polarStart" style="min-width:220px" title="Trade speichern und als laufend markieren — beide Seiten platzierst du selbst, kein Bot klickt">Speichern &amp; starten →</button>
         </div>
       </div>
     </div>
@@ -42808,7 +42811,7 @@
       // der P&L-Beweis von diesem Plan. Baseline nur aus einem EIGENEN frischen
       // Fetch (mtcState ist auf der Trades-View eingefroren); ohne frische Balances
       // startet der Trade trotzdem, nur ohne Baseline ('Beweis oder leer').
-      if(newStatus === 'open' && typeof planMt5Route === 'function' && planMt5Route(_cur)){
+      if(newStatus === 'open' && _cur?.route !== 'polar' && typeof planMt5Route === 'function' && planMt5Route(_cur)){   // Polar bleibt polar (16.10.2026)
         if(_cur?.route !== 'mt5') updates.route = 'mt5'
         // Nur beim ECHTEN Neustart (kein startedAt) — Reopen aus "Überprüfen"
         // behält Original-Startzeit UND Original-Baseline. Beim Neustart wird die
@@ -44217,7 +44220,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1589'
+  const OS_TAB_BUILD = '2026-09-22.1590'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48835,8 +48838,12 @@
    * und der DB-Guard hielten; nur pulsTermine nahm jeden planned-Plan mit Startzeit und ließ Pille + Overlay herunterzählen.)
    * EIN Prädikat für Start-Kandidaten (suKandidaten) und Ankündigung (pulsTermine): Orbit/Echo, Farmer nur scharf, nie Topstep V2
    * (startet nur von Hand), nie unbestätigt, nie nach aufgegebenem Richtungskonflikt. -> '' = startet von selbst, sonst der Grund. */
+  /* POLAR MANUELL (16.10.2026, Finn: „Bis wir Polar automatisch nutzen, dauert es noch Wochen … jetzt manuell"): aus = kein Bot-Start
+   * (Start-Wächter, /polar/start), der Trade läuft über „Läuft"/„Erledigt" der normalen Hedge-Karte. Gleicher Schalter in polar_app.py. */
+  const POLAR_AUTO = false
   function suStartetNichtWeil(p, scharf){
     if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')) return 'kein Puls-Weg'   // polar (13.10.2026): startet am Master-PC
+    if(p.route === 'polar' && !POLAR_AUTO) return 'Polar manuell — startet nur von Hand („Läuft")'   // 16.10.2026: kein Bot, bis die Logik geprüft ist
     if(!scharf && tpIstFarmerPlan(p)) return 'Farmer nicht scharf'
     // Topstep-Kette (08.10.2026, Finn: „die starten per Topstep-Puls"): Trade 1 und 2 starten zur Zeit über Puls in TopstepX, sobald der
     // Schalter scharf steht; sonstige Topstep-V2-Pläne bleiben Handarbeit
@@ -49160,7 +49167,7 @@
         : `⏰ ${verspaetet > 0 ? 'Geplante Startzeit erreicht' : 'Nächster Winning Day der Kette'} — „${plan.masterName || '—'}" startet jetzt${rest > 0 ? ` (danach noch ${rest} in der Warteschlange)` : ''}.`, 'start')
       if(jitter) await new Promise(r => setTimeout(r, jitter))
       gelaufen = true
-      if(plan.route === 'polar' && typeof polarStartenAmPc === 'function') await polarStartenAmPc(plan)   // POLAR (13.10.2026): Master-PC
+      if(plan.route === 'polar'){ if(POLAR_AUTO && typeof polarStartenAmPc === 'function') await polarStartenAmPc(plan) }   // POLAR (13.10.2026): Master-PC; manuell nie
       else if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
       else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id) }
     }catch(e){ console.warn('[start-um]', e) }
@@ -53424,7 +53431,7 @@
    * der Start-Wächter am Master-PC (tpStartUmTick) ruft dann polarStartenAmPc: Railway /polar/start (Lauf + Auftrag an die Slave-ID als
    * order_signale polar_slave) → lokales Panel /api/polar-start startet polar_bot.py master. Der Slave-PC nimmt sein Signal im
    * orderSignalTick an. Alles neue Dateien/Pfade — Echo/Orbit unverändert. */
-  async function polarPlanAnlegen(){
+  async function polarPlanAnlegen(starten){
     const n = id => Number(polarEl(id)?.value) || 0
     const msg = t => { polarEl('polarMsg').textContent = t }
     const master = polarKonto('pol-fu-konto'), slave = polarKonto('pol-cfd-konto')
@@ -53446,23 +53453,30 @@
       master_risk: riskM, slave_risk: riskS, lots, master_tp: tpM, master_sl: slM,
       polar_pct: Math.round((1 + puffer / Math.max(1, tpPkt)) * 1000) / 10,
       // Slave gespiegelt vom eigenen Fill: SL hinter dem Master-TP, TP vor dem Master-SL (Puffer mit Richtung)
-      sl_pkt: tpPkt + puffer, tp_pkt: Math.max(0.5, slPkt - puffer), master_sl_pkt: slPkt, master_tp_pkt: tpPkt }
-    const knopf = polarEl('polarStart'); if(knopf) knopf.disabled = true
+      sl_pkt: tpPkt + puffer, tp_pkt: Math.max(0.5, slPkt - puffer), master_sl_pkt: slPkt, master_tp_pkt: tpPkt,
+      // manuell (16.10.2026): starten = gleich laufend; sicht admin = Verwalter plant in seiner Gruppe (wie die übrigen Admin-Reiter)
+      starten: !!starten, sicht: 'admin' }
+    const knoepfe = ['polarStart', 'polarNurSpeichern'].map(polarEl).filter(Boolean)
+    knoepfe.forEach(k => { k.disabled = true })
     try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token
       if(!tok) throw new Error('nicht angemeldet')
-      msg('Lege Polar-Plan an…')
+      msg(starten ? 'Speichere und starte Polar-Trade…' : 'Speichere Polar-Plan…')
       const r = await fetch(`${WATCHER_HOME}/polar/plan`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
-      msg(`✓ Polar-Plan angelegt (${String(d.plan_id).slice(0, 8)}) — der PC von ${esc(master.person)} startet ihn jetzt, der PC von ${esc(slave.person)} nimmt den Slave an.`)
-      if(typeof atToast === 'function') atToast(`🧭 Polar geplant: ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
+      msg(d.auto
+        ? `✓ Polar-Plan angelegt (${String(d.plan_id).slice(0, 8)}) — der PC von ${esc(master.person)} startet ihn jetzt, der PC von ${esc(slave.person)} nimmt den Slave an.`
+        : d.status === 'open'
+          ? `✓ Polar-Trade läuft (${String(d.plan_id).slice(0, 8)}) — beide Seiten selbst platzieren und beenden, dann in Trades bei ${esc(master.person)} „Erledigt" mit beiden P&Ls.`
+          : `✓ Polar-Plan gespeichert (${String(d.plan_id).slice(0, 8)}) — in Trades bei ${esc(master.person)} unter Geplant („Läuft" setzt du dort).`)
+      if(typeof atToast === 'function') atToast(`🧭 Polar ${starten ? 'läuft' : 'geplant'}: ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
       try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
     }catch(e){
       msg('⛔ ' + ((e && e.message) || e))
     }finally{
-      if(knopf) knopf.disabled = false
+      knoepfe.forEach(k => { k.disabled = false })
     }
   }
   async function polarStartenAmPc(plan){
@@ -53490,7 +53504,8 @@
       : '⛔ Polar-Master nicht gestartet: ' + ((p && p.msg) || 'Panel nicht erreichbar'), p && p.ok ? 'start' : 'end')
   }
   window.polarStartenAmPc = polarStartenAmPc
-  polarEl('polarStart')?.addEventListener('click', polarPlanAnlegen)
+  polarEl('polarStart')?.addEventListener('click', () => polarPlanAnlegen(true))
+  polarEl('polarNurSpeichern')?.addEventListener('click', () => polarPlanAnlegen(false))   // eigene Verdrahtung (16.10.2026)
 
   // Live Multiplier-Berechnung im Modal
   // ── Reingesteckt / Gesamtkosten: läuft die GESAMTE Vorgänger-Kette ab

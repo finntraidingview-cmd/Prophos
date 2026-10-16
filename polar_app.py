@@ -22,6 +22,11 @@ from flask import request, jsonify, g
 FEUER_VORLAUF_MS = 1500      # Feuerzeit = beide bereit + 1,5 s (Weg Railway → beide Puls → Druck)
 BEREIT_FRIST_S = 75          # eine Seite bereit, die andere nach 75 s nicht → Abbruch (vor jeder Feuerzeit)
 WARTE_MAX_S = 25             # wartende Verbindung höchstens 25 s, der Puls fragt sofort neu (gunicorn-Timeout 120 s)
+# MANUELL ZUERST (16.10.2026, Finn: „Bis wir Polar automatisch nutzen, dauert es noch Wochen — ich will jetzt schon planen, speichern,
+# starten, manuell beenden und bei ‚Erledigen' die P&Ls beider Accounts eingeben. Später automatisch, jetzt manuell."). Aus = kein Bot:
+# /polar/plan setzt keine Startzeit (kein Start-Wächter am PC-Tab), „starten" legt den Plan gleich als laufend an, /polar/start antwortet
+# 409. Der Bot-Weg (start/bereit/warte/melden) bleibt unverändert im Code — an = True setzen, wenn die Logik geprüft ist.
+POLAR_AUTO = False
 ENDE = ("fertig", "abbruch", "fehler")
 _LAEUFE = {}
 _COND = threading.Condition()
@@ -170,16 +175,15 @@ def registrieren(app, ns):
     def polar_plan():
         """Polar-Plan im Namen der Master-ID anlegen. Body: {master_account_id, slave_account_id, richtung, symbol, kontrakte, master_risk,
         slave_risk, lots, master_tp, master_sl, polar_pct, sl_pkt, tp_pkt, master_sl_pkt, master_tp_pkt, start_um?}.
-        Recht: Admin, die Master-ID selbst, oder eine Sicht, die beide IDs enthält."""
+        starten (bool, manuell): Plan gleich als laufend (open) anlegen.
+        Recht (16.10.2026) wie im übrigen Admin über die Sicht des Logins (_wd_login): unbeschränkt (Finn, Hermann Technologies) = alle IDs,
+        Verwalter (Popup schickt sicht=admin) = seine Gruppe, eingeschränkte ID = nur sie selbst. Bis .1577 galt Admin nur über ADMIN_EMAILS
+        (die Rechnungs-Liste) — Finn bekam „keine Berechtigung für diese IDs", sobald Master und Slave nicht ihm gehörten."""
         if request.method == "OPTIONS":
             return "", 200
-        _mail, err = A["_admin_auth"]()
-        admin = err is None
-        me = request.environ.get("prophos.admin_uid") if admin else None
-        if not admin:
-            me, err2 = A["_wd_login"]()
-            if err2:
-                return err2
+        me, err = A["_wd_login"]()
+        if err:
+            return err
         d = request.get_json(silent=True) or {}
         ma, sa = str(d.get("master_account_id") or ""), str(d.get("slave_account_id") or "")
         if not _uuid(ma) or not _uuid(sa):
@@ -195,8 +199,11 @@ def registrieren(app, ns):
             return jsonify({"ok": False, "msg": "Polar: Master = Funded Futures, Slave = Funded CFD"}), 400
         mu, su = str(m_acc["user_id"]), str(s_acc["user_id"])
         sicht = getattr(g, "admin_sicht", None)
-        if not (admin or str(me) == mu or (sicht is not None and mu in sicht and su in sicht)):
-            return jsonify({"ok": False, "msg": "keine Berechtigung für diese IDs"}), 403
+        for uid, seite, acc in ((mu, "Master", m_acc), (su, "Slave", s_acc)):
+            if not A["admin_in_sicht"](uid, sicht):
+                return jsonify({"ok": False, "msg": f"{seite}-Konto „{acc.get('name') or acc['id'][:8]}\" gehört zu einer ID außerhalb deiner Sicht "
+                                                    f"({'deine Gruppe' if getattr(g, 'admin_verwalter', False) else 'nur deine eigene ID'}) "
+                                                    "→ Konto einer ID deiner Sicht wählen oder Finn planen lassen"}), 403
         r = str(d.get("richtung") or "").lower()
         kt, lots = _zahl(d.get("kontrakte")), _zahl(d.get("lots"))
         sl_pkt, tp_pkt = _zahl(d.get("sl_pkt")), _zahl(d.get("tp_pkt"))
@@ -212,20 +219,27 @@ def registrieren(app, ns):
                  "master_tp": _zahl(d.get("master_tp")), "master_sl": _zahl(d.get("master_sl")),
                  "polar_slave_user_id": su, "polar_pct": _zahl(d.get("polar_pct")) or 102.5,
                  "planned_for": datetime.now(timezone.utc).date().isoformat(),
-                 "start_um": d.get("start_um") or A["_wt_now_iso"](),
                  "mt5_baseline": {"polar_auftrag": {"lots": lots, "sl_pkt": sl_pkt, "tp_pkt": tp_pkt, "kontrakte": kt,
                                                     "master_sl_pkt": _zahl(d.get("master_sl_pkt")), "master_tp_pkt": _zahl(d.get("master_tp_pkt"))}}}
+        if POLAR_AUTO:
+            zeile["start_um"] = d.get("start_um") or A["_wt_now_iso"]()
+        elif d.get("starten"):
+            zeile["status"] = "open"                  # manuell: Finn platziert selbst, der Plan läuft ab jetzt (Trades → „Erledigt")
+            zeile["started_at"] = A["_wt_now_iso"]()
         try:
             neu = A["sb_insert"]("trade_plans", zeile)
         except Exception as e:
             return jsonify({"ok": False, "msg": f"Plan nicht angelegt: {str(e)[:200]}"}), 400
-        return jsonify({"ok": True, "plan_id": str((neu or {}).get("id") or ""), "master_uid": mu, "slave_uid": su})
+        return jsonify({"ok": True, "plan_id": str((neu or {}).get("id") or ""), "master_uid": mu, "slave_uid": su,
+                        "status": zeile["status"], "auto": POLAR_AUTO})
 
     @app.route("/polar/start", methods=["POST", "OPTIONS"])
     def polar_start():
         """PC-Tab der Master-ID: Lauf anlegen + Auftrag an die Slave-ID. Body {plan_id}."""
         if request.method == "OPTIONS":
             return "", 200
+        if not POLAR_AUTO:
+            return jsonify({"ok": False, "msg": "Polar läuft manuell (POLAR_AUTO aus) — kein Bot-Start; Plan in Trades von Hand führen"}), 409
         me, err = A["_wd_login"]()
         if err:
             return err
