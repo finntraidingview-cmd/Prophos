@@ -233,6 +233,46 @@ def registrieren(app, ns):
         return jsonify({"ok": True, "plan_id": str((neu or {}).get("id") or ""), "master_uid": mu, "slave_uid": su,
                         "status": zeile["status"], "auto": POLAR_AUTO})
 
+    @app.route("/polar/geblowt", methods=["POST", "OPTIONS"])
+    def polar_geblowt():
+        """Polar manuell (16.10.2026, Finn: „je Seite ein eigener Haken geblowt"): Konten eines Polar-Plans, die einer ANDEREN ID gehören, im
+        Archiv ihres Besitzers als geblowt eintragen (_konto_archiv_eintragen wie das Radar-Abhaken) — der Tab schreibt nur sein eigenes Archiv.
+        Body {plan_id, account_ids}. Nur Master-/Slave-Konto dieses Plans, nur IDs in der Sicht des Logins."""
+        if request.method == "OPTIONS":
+            return "", 200
+        _me, err = A["_wd_login"]()
+        if err:
+            return err
+        d = request.get_json(silent=True) or {}
+        pid = str(d.get("plan_id") or "").strip().lower()
+        ids = [str(x).strip().lower() for x in (d.get("account_ids") or []) if _uuid(x)]
+        if not _uuid(pid) or not ids:
+            return jsonify({"ok": False, "msg": "plan_id oder Konten fehlen"}), 400
+        try:
+            plan = (A["sb_select"]("trade_plans", {"select": "id,route,master_account_id,slave_account_id", "id": f"eq.{pid}", "limit": "1"}) or [None])[0]
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"DB: {str(e)[:120]}"}), 503
+        if not plan or plan.get("route") != "polar":
+            return jsonify({"ok": False, "msg": "kein Polar-Plan"}), 404
+        erlaubt = {str(plan.get("master_account_id") or "").lower(), str(plan.get("slave_account_id") or "").lower()}
+        sicht = getattr(g, "admin_sicht", None)
+        jetzt = A["_wt_now_iso"]()
+        erg = []
+        for aid in ids:
+            if aid not in erlaubt:
+                return jsonify({"ok": False, "msg": f"Konto {aid[:8]} gehört nicht zu diesem Plan"}), 400
+            try:
+                acc = (A["sb_select"]("accounts", {"select": "id,user_id,name", "id": f"eq.{aid}", "limit": "1"}) or [None])[0]
+                if not acc:
+                    return jsonify({"ok": False, "msg": f"Konto {aid[:8]} nicht gefunden"}), 404
+                if not A["admin_in_sicht"](acc.get("user_id"), sicht):
+                    return jsonify({"ok": False, "msg": f"Konto „{acc.get('name') or aid[:8]}\" gehört zu einer ID außerhalb deiner Sicht"}), 403
+                neu_arch = A["_konto_archiv_eintragen"](str(acc["user_id"]), aid, "blown", jetzt, acc.get("name"))
+            except Exception as e:
+                return jsonify({"ok": False, "msg": f"Archiv: {type(e).__name__}: {str(e)[:120]}"}), 502
+            erg.append({"account_id": aid, "neu": bool(neu_arch)})
+        return jsonify({"ok": True, "archiviert": erg})
+
     @app.route("/polar/start", methods=["POST", "OPTIONS"])
     def polar_start():
         """PC-Tab der Master-ID: Lauf anlegen + Auftrag an die Slave-ID. Body {plan_id}."""

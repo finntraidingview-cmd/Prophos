@@ -8821,7 +8821,22 @@
             <div class="field" style="grid-column:span 2">
               <div class="tc-net" id="tc-net-display">Net: —</div>
             </div>
-            <div class="field" style="grid-column:span 2">
+            <!-- Polar (16.10.2026, Finn über den Master: „je Seite ein eigener Haken geblowt"): nur route polar — Master und Slave gehören zwei
+                 IDs, beide Konten können im selben Trade enden. Ersetzt dort die Status-Auswahl darunter; andere Wege unverändert. -->
+            <div class="field" style="grid-column:span 2" id="tc-polar-blown-wrap" hidden>
+              <label style="font-size:11.5px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:block">Account-Status (optional)</label>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+                  <input type="checkbox" id="tc-polar-master-blown" style="width:16px;height:16px;flex-shrink:0">
+                  <span style="color:var(--ink)" id="tc-polar-master-label">💀 Master geblowt — archivieren</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+                  <input type="checkbox" id="tc-polar-slave-blown" style="width:16px;height:16px;flex-shrink:0">
+                  <span style="color:var(--ink)" id="tc-polar-slave-label">💀 Slave geblowt — archivieren</span>
+                </label>
+              </div>
+            </div>
+            <div class="field" style="grid-column:span 2" id="tc-status-wrap">
               <label style="font-size:11.5px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:block">Account-Status (optional)</label>
               <div style="display:flex;flex-direction:column;gap:6px">
                 <label class="tc-status-opt" data-tc-status="none" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .12s">
@@ -44220,7 +44235,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1590'
+  const OS_TAB_BUILD = '2026-09-22.1591'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58311,11 +58326,44 @@
     tcWinningDayPrepare(p)
     tcWdFarmPrepare(p)
     tcWdTradePrepare(p)
+    tcPolarBlownPrepare(p)
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
   }
   let _tcSchonZu = false   // Popup nach dem Plan-Update schon zu, Rest läuft noch (01.10.2026)
+  // Polar (16.10.2026): je Seite ein Haken „geblowt" statt der Status-Auswahl — Konto-Namen im Text, Haken leer (auch beim Bearbeiten)
+  function tcPolarBlownPrepare(p){
+    const polar = !!p && p.route === 'polar'
+    const wrap = document.getElementById('tc-polar-blown-wrap'), st = document.getElementById('tc-status-wrap')
+    if(wrap) wrap.hidden = !polar
+    if(st) st.hidden = polar
+    ;['tc-polar-master-blown', 'tc-polar-slave-blown'].forEach(id => { const cb = document.getElementById(id); if(cb) cb.checked = false })
+    if(!polar) return
+    const ml = document.getElementById('tc-polar-master-label'), sl = document.getElementById('tc-polar-slave-label')
+    if(ml) ml.textContent = `💀 Master geblowt — ${p.masterName || 'Master-Konto'} archivieren`
+    if(sl) sl.textContent = `💀 Slave geblowt — ${p.slaveName || 'Slave-Konto'} archivieren`
+  }
+  window._tcPolarBlownPrepare = tcPolarBlownPrepare   // Test-Haken (Stub)
+  // Polar: geblowte Konten archivieren — eigene über archiveAccount (wie die Status-Auswahl), Konten anderer IDs über Railway
+  // (/polar/geblowt, Service-Key: der Tab darf das Archiv einer fremden ID nicht schreiben)
+  async function tcPolarBlownArchivieren(p, master, slave){
+    const fremd = []
+    for(const [an, aid] of [[master, p.masterAccountId], [slave, p.slaveAccountId]]){
+      if(!an || !aid) continue
+      if((accounts || []).some(a => String(a.id) === String(aid))) archiveAccount(aid, 'blown')
+      else fremd.push(String(aid))
+    }
+    if(fremd.length){
+      const { data: { session } } = await supabase.auth.getSession()
+      const r = await fetch(`${WATCHER_HOME}/polar/geblowt`, { method: 'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: String(p.id), account_ids: fremd, sicht: 'admin' }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error('Konto der anderen ID nicht archiviert: ' + (d.msg || ('HTTP ' + r.status)) + ' → im Account der ID von Hand archivieren')
+    }
+    renderAccounts()
+    if(typeof updateSidebarBadges === 'function') updateSidebarBadges()
+  }
   function closeTradeCompleteModal(){
     _completingPlanId = null
     document.getElementById('tradeCompleteModal').classList.remove('open')
@@ -58982,9 +59030,12 @@
     const tcSlaveLassen = tcGehedgtSave && isNaN(sPlFeld)
     const sPl = tcV2Save ? (tcGehedgtSave && !isNaN(sPlFeld) ? sPlFeld : 0) : sPlFeld
     // Neue Status-Auswahl (3 Radios) + welcher Account
-    const statusChoice = document.querySelector('input[name="tc-status"]:checked')?.value || 'none'
-    const targetAccountId = document.getElementById('tc-status-account')?.value || null
-    const blown = (statusChoice === 'blown')   // für trade_plans-Tabelle (legacy field)
+    const tcPolar = p.route === 'polar'   // Polar (16.10.2026): zwei Haken statt Status-Auswahl
+    const polarMBlown = tcPolar && !!document.getElementById('tc-polar-master-blown')?.checked
+    const polarSBlown = tcPolar && !!document.getElementById('tc-polar-slave-blown')?.checked
+    const statusChoice = tcPolar ? 'none' : (document.querySelector('input[name="tc-status"]:checked')?.value || 'none')
+    const targetAccountId = tcPolar ? null : (document.getElementById('tc-status-account')?.value || null)
+    const blown = tcPolar ? (polarMBlown || polarSBlown) : (statusChoice === 'blown')   // für trade_plans-Tabelle (legacy field)
     const resultNotes = document.getElementById('tc-result-notes').value.trim() || null
 
     if(isNaN(mPl) || isNaN(sPl)){
@@ -59156,6 +59207,7 @@
         // Nachfolger-Wizard öffnen — der archiviert dann automatisch den Vorgänger
         setTimeout(() => openSuccessorWizard(targetAccountId), 200)
       }
+      if(polarMBlown || polarSBlown) await tcPolarBlownArchivieren(p, polarMBlown, polarSBlown)
     }catch(e){
       const el = document.getElementById('tradeCompleteMsg')
       el.textContent = 'Fehler: ' + (e.message || e)
