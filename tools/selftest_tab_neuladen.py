@@ -91,6 +91,23 @@ def main():
     check(not a and "Puls/MT5-Order" in g, "Lock belegt → warten")
     a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 20)
     check(not a and "letzte Eingabe vor 20 s" in g, "Eingabe am PC → warten")
+    a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 999, True)
+    check(not a and "im Hintergrund oder von Chrome verworfen" in g, "Chrome läuft ohne aktiven Prophos-Tab → nie öffnen (S2)")
+
+    # Herzschlag mit Login/URL/Kennung (16.10.2026)
+    import time as _t
+    hz = {"re": re, "time": _t}
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["tab_gesehen"], ["_TAB_OEFFNEN", "TAB_URL_RE"]), hz)
+    hz["tab_gesehen"]("Mozilla/5.0", {"tab": ["1"], "login": ["1"], "url": ["http://localhost:5000/"]})
+    check(hz["_TAB_OEFFNEN"]["zuletzt"] == 0.0, "Panel-Seite im Browser zählt nicht als Tab")
+    hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["0"], "url": ["http://127.0.0.1:5000/"], "tid": ["abc"]})
+    t0 = hz["_TAB_OEFFNEN"]
+    check(t0["zuletzt"] > 0 and t0["url"] == "http://127.0.0.1:5000/" and t0["login"] is False and t0["tid"] == "abc",
+          f"Herzschlag: URL/Login/Kennung gemerkt ({t0['url']}, {t0['login']})")
+    hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["1"], "url": ["https://boese.example/x"]})
+    check(t0["url"] == "http://127.0.0.1:5000/" and t0["login"] is True, "fremde URL wird nie übernommen (nur localhost/127.0.0.1)")
+    hz["tab_gesehen"]("python-requests/2.32", None)
+    check(t0["login"] is True, "alter Tab ohne Angaben: nur Herzschlag")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)

@@ -1544,17 +1544,30 @@ TAB_OEFFNEN_ANLAUF_S = 5 * 60
 TAB_OEFFNEN_ABSTAND_S = 20 * 60
 TAB_OEFFNEN_MAX_TAG = 8
 TAB_URL = "http://localhost:5000/"
-_TAB_OEFFNEN = {"zuletzt": 0.0, "start": time.time(), "geoeffnet": [], "tag": ""}
+_TAB_OEFFNEN = {"zuletzt": 0.0, "start": time.time(), "geoeffnet": [], "tag": "", "url": "", "login": None, "tid": "", "geoeffnet_at": 0.0}
+TAB_URL_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{2,5}/[A-Za-z0-9._/-]*$")
 
 
-def tab_gesehen(user_agent):
-    """Aufruf von /api/instances über das lokale app.py (= Prophos-Tab) → Herzschlag merken."""
-    if str(user_agent or "").lower().startswith("python-requests"):
-        _TAB_OEFFNEN["zuletzt"] = time.time()
+def tab_gesehen(user_agent, query=None):
+    """Aufruf von /api/instances über das lokale app.py (= Prophos-Tab) → Herzschlag merken. Seit 16.10.2026 meldet der Tab dabei
+    login (1/0), url (origin + pathname), build, tid (Kennung je Tab) — ältere Tabs ohne diese Angaben zählen nur als Herzschlag."""
+    if not str(user_agent or "").lower().startswith("python-requests"):
+        return
+    _TAB_OEFFNEN["zuletzt"] = time.time()
+    q = query or {}
+    w = lambda k: str((q.get(k) or [""])[0]).strip()   # noqa: E731 — parse_qs-Form
+    if w("tab") == "1":
+        if TAB_URL_RE.fullmatch(w("url")):
+            _TAB_OEFFNEN["url"] = w("url")
+        _TAB_OEFFNEN["login"] = w("login") == "1"
+        _TAB_OEFFNEN["tid"] = w("tid")[:16]
 
 
-def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, n_heute, lock_frei, idle_s):
-    """REIN RECHNEND (testbar): (öffnen: bool, grund: str). '' = Tab lebt, nichts zu tun."""
+def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, n_heute, lock_frei, idle_s, chrome_offen=False):
+    """REIN RECHNEND (testbar): (öffnen: bool, grund: str). '' = Tab lebt, nichts zu tun. chrome_offen = irgendein Chrome-Hauptfenster
+    läuft: dann NIE öffnen (Prüfer S2 16.10.2026: ein eingefrorener/verworfener Prophos-Tab im Hintergrund — typisch nach einem Puls-Lauf,
+    der TradingView im selben Fenster vorn lässt — fragt nicht mehr; ein neuer Tab gäbe beim nächsten Anklicken zwei Tabs mit derselben
+    pc_id: Claim atomar, aber Fleet-Push, Hedge-Wächter und Signale doppelt)."""
     if jetzt - start < TAB_OEFFNEN_ANLAUF_S:
         return False, ""
     still_s = jetzt - max(zuletzt, start)
@@ -1563,6 +1576,9 @@ def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, 
     warum = f"kein Prophos-Tab: seit {int(still_s // 60)} min keine Abfrage vom Tab"
     if fenster_da:
         return False, f"{warum}, aber ein Prophos-Fenster ist da — kein zweiter Tab (Neulade-Weg)"
+    if chrome_offen:
+        return False, (f"{warum} — Chrome läuft, aber ohne aktiven Prophos-Tab: Prophos-Tab im Hintergrund oder von Chrome verworfen → "
+                       "am PC den Prophos-Tab anklicken (kein zweiter Tab)")
     if n_heute >= TAB_OEFFNEN_MAX_TAG:
         return False, f"{warum} — heute schon {n_heute}× geöffnet (Deckel {TAB_OEFFNEN_MAX_TAG})"
     if letzter_versuch and jetzt - letzter_versuch < TAB_OEFFNEN_ABSTAND_S:
@@ -1675,6 +1691,33 @@ def _prophos_fenster():
     return gefunden
 
 
+def _chrome_hauptfenster_da():
+    """Läuft irgendein sichtbares Chrome-Hauptfenster („… - Google Chrome", Klasse Chrome_WidgetWin_1)? Fehler → True (nie raten)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u32 = ctypes.windll.user32
+        da = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def _je(hwnd, _l):
+            if u32.IsWindowVisible(hwnd):
+                kb = ctypes.create_unicode_buffer(128)
+                u32.GetClassNameW(hwnd, kb, 128)
+                if kb.value == "Chrome_WidgetWin_1":
+                    n = u32.GetWindowTextLengthW(hwnd)
+                    buf = ctypes.create_unicode_buffer(n + 1)
+                    u32.GetWindowTextW(hwnd, buf, n + 1)
+                    if (buf.value or "").endswith("Google Chrome"):
+                        da.append(int(hwnd))
+                        return False
+            return True
+        u32.EnumWindows(_je, 0)
+        return bool(da)
+    except Exception:
+        return True
+
+
 def _fenster_vorn(hwnd):
     """Fenster nach vorn (AttachThreadInput, Rückfall Alt — wie _konsole_nach_vorn) → True, wenn es danach vorn steht."""
     import ctypes
@@ -1767,11 +1810,13 @@ def _puls_profil():
         return "", f"Puls-Profil nicht lesbar ({type(e).__name__})"
 
 
-def _tab_oeffnen():
-    """Öffnet den Prophos-Tab im Puls-Profil → (ok, Klartext)."""
+def _tab_oeffnen(url=TAB_URL):
+    """Öffnet den Prophos-Tab im Puls-Profil unter der Adresse, die der Tab zuletzt selbst gemeldet hat (localhost ≠ 127.0.0.1 = eigener
+    Login), sonst TAB_URL → (ok, Klartext)."""
     import urllib.request
+    url = url if TAB_URL_RE.fullmatch(str(url or "")) else TAB_URL
     try:
-        urllib.request.urlopen("http://127.0.0.1:5000/", timeout=5).close()
+        urllib.request.urlopen(url, timeout=5).close()
     except Exception as e:
         return False, f"lokales Backend (localhost:5000) antwortet nicht ({type(e).__name__}) — start-alles.bat"
     exe = _chrome_exe()
@@ -1785,9 +1830,9 @@ def _tab_oeffnen():
     try:
         if not _browser_und_mt5_frei(tv_eigen=True):
             return False, "MT5-Order läuft gerade — nächster Versuch später"
-        subprocess.Popen([exe, f"--profile-directory={profil}", TAB_URL], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        subprocess.Popen([exe, f"--profile-directory={profil}", url], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         time.sleep(4 + random.random())   # Lock kurz halten: der neue Tab holt sich den Fokus
-        return True, f"Chrome ({profil}) → {TAB_URL}"
+        return True, f"Chrome ({profil}) → {url}"
     except Exception as e:
         return False, f"Öffnen fehlgeschlagen: {type(e).__name__}: {e}"
     finally:
@@ -1830,15 +1875,32 @@ def _tab_neulade_waechter():
             if _TAB_OEFFNEN["tag"] != tag:
                 _TAB_OEFFNEN.update(tag=tag, geoeffnet=[])
             fenster_da = bool(_prophos_fenster())
+            still0 = jetzt0 - max(_TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"])
+            chrome_offen = (not fenster_da) and still0 >= TAB_OEFFNEN_FEHLT_S and _chrome_hauptfenster_da()
             auf, grund_auf = tab_oeffnen_entscheiden(jetzt0, _TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"], fenster_da,
                                                      TAB_NL["letzter_versuch"], len(_TAB_OEFFNEN["geoeffnet"]),
-                                                     _browser_und_mt5_frei(), _win_leerlauf_s())
+                                                     _browser_und_mt5_frei(), _win_leerlauf_s(), chrome_offen)
             if auf:
                 TAB_NL["letzter_versuch"] = jetzt0
-                ok, msg = _tab_oeffnen()
+                ok, msg = _tab_oeffnen(_TAB_OEFFNEN["url"] or TAB_URL)
                 if ok:
                     _TAB_OEFFNEN["geoeffnet"].append(datetime.now().isoformat(timespec="seconds"))
+                    _TAB_OEFFNEN["geoeffnet_at"] = jetzt0
                 grund_auf = f"{grund_auf} → {'geöffnet' if ok else 'NICHT geöffnet'}: {msg}"
+            # LOGIN-BEWEIS (Master 16.10.2026): nach dem Öffnen muss sich der Tab innerhalb von 3 min melden, und zwar angemeldet —
+            # sonst claimt er nichts. Ergebnis einmal in Log/Spur.
+            ga = _TAB_OEFFNEN["geoeffnet_at"]
+            if ga and not auf and jetzt0 - ga >= 180:
+                _TAB_OEFFNEN["geoeffnet_at"] = 0.0
+                if _TAB_OEFFNEN["zuletzt"] < ga:
+                    grund_auf = "Tab geöffnet, meldet sich aber nicht (3 min nach dem Öffnen keine Abfrage) — am PC Chrome/Prophos ansehen"
+                elif _TAB_OEFFNEN["login"] is False:
+                    grund_auf = "Tab offen, aber nicht angemeldet — am PC in Prophos einloggen (sonst claimt der Tab keine Starts)"
+                else:
+                    grund_auf = "Tab geöffnet und meldet sich" + (" angemeldet" if _TAB_OEFFNEN["login"] else " (alter Tab-Stand, Login unbekannt)")
+                print(f"[tab-neuladen] {grund_auf}", flush=True)
+                if pc:
+                    _tab_stand_holen(pc, grund_auf)
             if grund_auf and not fenster_da:
                 if grund_auf != TAB_NL["grund"]:
                     print(f"[tab-neuladen] {grund_auf}", flush=True)
@@ -3078,7 +3140,7 @@ class Handler(BaseHTTPRequestHandler):
             code, antwort = polar_panel.behandle_get(path, parse_qs(urlparse(self.path).query))
             return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if path == "/api/instances":
-            tab_gesehen(self.headers.get("User-Agent"))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
+            tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
             return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
         if path == "/api/puls-klick":
             # Klick-/Fill-Meldung von Puls LOKAL (01.10.2026, Finn: „Fusion sofort beim Knopfdruck, an Supabase vorbei"): order_bot.py

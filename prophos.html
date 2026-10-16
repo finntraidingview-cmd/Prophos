@@ -21611,7 +21611,11 @@
     if(!MT5_LOCAL || _fleetPushBusy || typeof window.mtcApi !== 'function') return
     _fleetPushBusy = true; _fleetPushSeit = Date.now()
     try{
-      const dd = await window.mtcApi('instances')
+      // HERZSCHLAG FÜRS PANEL (16.10.2026, Tab selbst öffnen/neu laden): Login ja/nein, Adresse, Build und eine Kennung je Tab — das Panel
+      // öffnet einen fehlenden Tab unter genau dieser Adresse (localhost ≠ 127.0.0.1 = eigener Login) und beweist danach den Login
+      const herz = new URLSearchParams({ tab: '1', login: currentUserId ? '1' : '0', url: location.origin + location.pathname,
+        build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: (window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)) })
+      const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
       // MT5-Balance dauerhaft am Konto (29.09.2026): frische Master-Balance → accounts.tv_balance (gedrosselt, s. mt5BalanceAusInstanzen)
       try{ mt5BalanceAusInstanzen(dd.instances || []) }catch(e){ console.warn('[mt5-balance]', e) }
@@ -44235,7 +44239,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1591'
+  const OS_TAB_BUILD = '2026-09-22.1592'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50841,7 +50845,8 @@
       case 'werte': return 'Im Order-Popup des Plans Richtung, Menge, Symbol oder TP ergänzen und speichern.'
       case 'zeitlimit': case 'puls_beschaeftigt': return `Puls am PC${pc} war belegt oder zu langsam — nichts tun, der Bot wiederholt von selbst.`
       case 'unklar': return `Erst in ${/Topstep/i.test(m) ? 'TopstepX' : 'TradingView'} nachsehen, ob die Order liegt — dann auf der Karte „⚠ UNKLAR" lösen; nie blind erneut starten.`
-      case 'zu_spaet': return `Puls holt den Start von selbst nach — steht ein Grund dabei (Claim verweigert), gilt der; sonst Prophos-Tab am PC${pc} offen lassen.`
+      // Tab-Bot (16.10.2026, Panel _tab_neulade_waechter): fehlt der Tab 5 min und läuft kein Chrome, öffnet ihn das Panel; hängt er, lädt es ihn neu
+      case 'zu_spaet': return `Puls holt den Start von selbst nach — steht ein Grund dabei (Claim verweigert), gilt der. Fehlt der Prophos-Tab am PC${pc}, öffnet bzw. lädt ihn das Panel dort von selbst; nur wenn Chrome offen ist und der Tab im Hintergrund liegt: dort anklicken.`
       case 'master_nie': return 'Nichts tun — die Order kam in TradingView nie an (Fusion wieder zu, Konto 60 s flach bewiesen); Prophos plant 15 min später neu ein, wenn das Konto dann noch flach ist.'
       case 'ziel_erreicht': return 'Ziel ist erreicht — kein Trade nötig. Konto ansehen (Phasenwechsel/Auszahlung), Plan löschen.'
       case 'manuelle_arbeit': return 'Konto steht in Manueller Arbeit — erst im Radar erledigen, dann neu planen.'
@@ -51169,7 +51174,7 @@
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
           text: `verpasst — Start ${tplUhr(t.start, D.v)} ist vorbei, nie gestartet`,
           tun: geclaimt ? 'Der Check am PC war rot, der Grund wurde damals noch nicht gespeichert — beheben, dann ↻ Erneut versuchen: der Trade startet neu und zeigt ihn, falls es wieder hakt.'
-            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht — Tab öffnen, dann ↻ Erneut versuchen.` })
+            : `Der Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} lief nicht. Das Panel dort öffnet ihn von selbst (ohne Chrome nach 5 min) bzw. lädt einen hängenden neu; liegt er im Hintergrund eines Chrome-Fensters: dort anklicken, dann ↻ Erneut versuchen.` })
       }
       if(b.puls_unklar) probleme.push(`Puls: Ergebnis unklar${b.puls_unklar.msg ? ' — ' + b.puls_unklar.msg : ''}`)
       if(b.tv && b.tv.fehler) probleme.push(`Start-Fehler: ${b.tv.msg || b.tv.fehler}${b.tv.code ? ' (' + b.tv.code + ')' : ''}`)
