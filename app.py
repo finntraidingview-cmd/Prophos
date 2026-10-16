@@ -18979,19 +18979,24 @@ def ap_normal_auto_tick():
     return n
 
 # REVIEW OHNE ABHAKEN (Finn 16.10.2026, Radar „Abhaken · 1": Aurel Tradeify 150k …8681, Konto über Accounts → Review → Nachfolger schon
-# umgestellt, der Trade selbst nie abgehakt → stand ewig unter „Abhaken"). Ursache: der Nachfolger-Assistent, Archivieren und Phase-
-# Umstellen fassen die Pläne des alten Kontos nicht an (archivPlaeneEntfernen räumt nur nie gestartete). Jetzt hakt dieser Takt (nach
-# ap_normal_auto_tick, alle 5 min, auch für fremde IDs) einen beendeten Plan in 'review' selbst ab, sobald sein Konto WEITER ist:
-# archiviert als bestanden/manuell oder in einer anderen Phase als der Plan. Gleicher Weg wie der Knopf (_wd_erledigt_upd), P&L in dieser
-# Reihenfolge: echte Lesung (ap_echte_balancen) → Ende − Start aus der Endlesung (auch Demo — genau das hat das Radar vorbelegt; ein
-# bestandenes Konto liest Puls nicht mehr) → master_pl am Plan. Nie: Hedge-Pläne (Fusion-P&L gehört dazu), geblowt archiviert (macht der
-# Blow-Weg bzw. Finn), Pläne mit „Manuelle Arbeit"-Kennzeichen, Pläne ohne jede Zahl — die bleiben im Radar.
-AP_REVIEW_WEITER_GRUENDE = ("passed", "passed_pending", "manual")
+# umgestellt, der Trade selbst nie abgehakt → stand ewig unter „Abhaken"). Ursache: der Nachfolger-Assistent und das Phase-Umstellen fassen
+# die Pläne des alten Kontos nicht an (archivPlaeneEntfernen räumt nur nie gestartete). Jetzt hakt dieser Takt (nach ap_normal_auto_tick,
+# alle 5 min, auch für fremde IDs) einen beendeten Plan in 'review' selbst ab, sobald sein Konto WEITER ist: per Nachfolger archiviert
+# (passed/passed_pending) oder eine echte Phase weiter als der Plan (challenge → phase1 → phase2 → funded). Gleicher Weg wie der Knopf
+# (_wd_erledigt_upd). Prüfung Slave 2 (16.10.2026, 4 MUSS): nur ECHTE Ergebnisse (ap_echte_balancen, sonst master_pl mit echter pl_quelle,
+# nie mit Balance-Sprung) — Demo/Level/Reader-Schätzungen bleiben im Radar bei Finn; nur Orbit/Echo/Topstep V2 ohne Slave/Fusion-P&L
+# (sonst überschriebe slave_pl None einen echten Fusion-Wert); kein „manual" (der normale Archivieren-Knopf, auch bei geblowten Konten);
+# Winning-Days-Typen nie (WD-Pläne tragen winning_days auch auf funded-Konten). Dazu nie Hedge-Pläne und „Manuelle Arbeit".
+AP_REVIEW_WEITER_GRUENDE = ("passed", "passed_pending")
+AP_REVIEW_WEITER_ROUTEN = AP_NORMAL_AUTO_ROUTEN + ("tsv2",)
+AP_REVIEW_WEITER_RANG = {"challenge": 0, "phase1": 1, "phase2": 2, "funded": 3, "funded_cfd": 3}
 
 
 def ap_review_weiter_pruefen(p, acc, arch):
     """REIN RECHNEND (testbar): → {pl, quelle, grund} oder None. arch = Archiv-Eintrag des Kontos (dict) oder None."""
-    if p.get("status") != "review" or p.get("blown") is True:
+    if p.get("status") != "review" or p.get("blown") is True or str(p.get("route") or "") not in AP_REVIEW_WEITER_ROUTEN:
+        return None
+    if p.get("slave_account_id") or p.get("slave_pl") is not None:
         return None
     bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     if bl.get("hedge") or (_wd_num(p.get("hedge_eur")) or 0) > 0:
@@ -19000,25 +19005,22 @@ def ap_review_weiter_pruefen(p, acc, arch):
     if isinstance(m, dict) and m.get("at"):
         return None
     grund = None
-    if isinstance(arch, dict) and arch.get("archived"):
-        if str(arch.get("reason") or "manual") not in AP_REVIEW_WEITER_GRUENDE:
-            return None
-        grund = "archiviert_" + str(arch.get("reason") or "manual")
-    elif acc and p.get("konto_typ") and acc.get("account_type") and str(p["konto_typ"]) != str(acc["account_type"]):
+    if isinstance(arch, dict) and arch.get("archived") and str(arch.get("reason") or "") in AP_REVIEW_WEITER_GRUENDE:
+        grund = "archiviert_" + str(arch.get("reason"))
+    elif acc and str(p.get("konto_typ") or "") in AP_TYPEN and str(acc.get("account_type") or "") in AP_REVIEW_WEITER_RANG \
+            and AP_REVIEW_WEITER_RANG[str(acc["account_type"])] > AP_REVIEW_WEITER_RANG[str(p["konto_typ"])]:
         grund = "phase_" + str(acc["account_type"])
     if not grund:
         return None
+    tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    if lt_balance_sprung(str(p.get("route") or ""), tv, fin):
+        return None                                # Balance-Differenz ≠ Tages-P&L → Finn
     echt = ap_echte_balancen(p)
     if echt:
         return {"pl": round(echt[1] - echt[0], 2), "quelle": echt[2], "grund": grund}
-    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
-    tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
-    vorher = _wd_num(tv.get("balance_start")) or _wd_num(bl.get("master_balance"))
-    nachher = _wd_num(fin.get("balance_end")) or _wd_num(fin.get("master_balance"))
-    if vorher and nachher and vorher > 0 and nachher > 0:
-        return {"pl": round(nachher - vorher, 2), "quelle": "ende_" + str(fin.get("quelle") or "final"), "grund": grund}
-    if _wd_num(p.get("master_pl")) is not None:
-        return {"pl": round(float(_wd_num(p.get("master_pl"))), 2), "quelle": "plan", "grund": grund}
+    if _wd_num(p.get("master_pl")) is not None and str(p.get("pl_quelle") or "") in AP_HB_ECHT_QUELLEN:
+        return {"pl": round(float(_wd_num(p.get("master_pl"))), 2), "quelle": "plan_" + str(p.get("pl_quelle")), "grund": grund}
     return None
 
 
@@ -19042,8 +19044,8 @@ def _ap_archiv_eintraege():
 def ap_review_weiter_tick():
     """Pläne in 'review', deren Konto weiter ist (Nachfolger/Archiv/andere Phase), selbst abhaken. → Anzahl."""
     plaene = _sb_all("trade_plans", {"select": "id,user_id,route,status,blown,master_account_id,master_name,konto_typ,mt5_baseline,"
-                                               "hedge_eur,master_pl,ended_at,completed_at,started_at,updated_at",
-                                     "status": "eq.review", "blown": "not.is.true"})
+                                               "hedge_eur,master_pl,pl_quelle,slave_account_id,slave_pl,ended_at,completed_at,started_at,updated_at",
+                                     "status": "eq.review", "blown": "not.is.true", "route": f"in.({','.join(AP_REVIEW_WEITER_ROUTEN)})"})
     plaene = [p for p in plaene or [] if p.get("master_account_id")]
     if not plaene:
         return 0
