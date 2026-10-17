@@ -23330,7 +23330,8 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
             o2.zu()
         aktiv = _cdp_verbunden_lesen(s, opts, trail)
         if aktiv:
-            trail.append(f"[Login] ohne Anmeldeseite verbunden ('{aktiv[:40]}') — Tradovate war noch angemeldet")
+            trail.append(f"[Login] ohne Anmeldeseite verbunden ('{aktiv[:40]}') — Tradovate war noch angemeldet (gemerkte Sitzung, "
+                         "kein eigener Login: ob es der richtige ist, zeigt der Konto-Schritt)")
             return "verbunden", ""
         d = cdp_connect_dialog(b)
         f_neu = cdp_connect_fehler(b)
@@ -23646,7 +23647,8 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
 def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
     """Schritte [2]–[5]: einmal Tradovate mit dem Login der Firma verbinden. sitz = [Sitzung], wird beim Tab-Tausch ersetzt.
     -> (code, text, wie) — code '' = TradingView zeigt danach ein Tradovate-Konto (welches, klärt der Aufrufer über das Dropdown);
-    wie 'login' = selbst angemeldet, 'selbst' = eine gemerkte Sitzung hat sich von allein verbunden, 'steht' = ein Konto ist zu
+    wie 'login' = selbst angemeldet (Formular), 'selbst' = eine gemerkte Sitzung hat sich von allein verbunden (nach dem Link oder nach
+    „Connect" ohne Anmeldeseite, 17.10.2026 — welcher Login das ist, klärt erst der Konto-Schritt), 'steht' = ein Konto ist zu
     sehen, aber ohne Beleg für einen fremden Login (nichts abgemeldet, der Aufrufer macht den Konto-Schritt neu).
     beleg = extra des letzten Konto-Schritts (cdp_abmelden_erlaubt). code 'login_unlesbar' = verbunden, Konto nicht lesbar.
     merk (05.10.2026, cdp_konto_weg): bekommt formular=True NUR, wenn die Anmeldung über das Tradovate-Formular mit genau diesem
@@ -23697,7 +23699,15 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
             return code, text, ""
         ort, text = _cdp_login_ort(s, vorher, benutzer, opts, trail)
         if ort == "verbunden":
-            return "", "", "login"
+            # GEMERKTE SITZUNG STATT EIGENEM LOGIN (Routine „Puls-Fehler" 17.10.2026 20:30 Dubai, Muster „konto_balance: konto # steht im
+            # dropdown 0× … — auch nach dem tradovate-login '…'", 1 Fall 17.10. 13:16 UTC auf einem PC mit drei Firmen im selben
+            # Puls-Chrome): „ohne Anmeldeseite verbunden" heißt, Tradovate war noch mit IRGENDEINEM Login angemeldet (hier dem einer anderen
+            # Firma) und TradingView hat ihn ohne Formular übernommen — kein Beweis, dass es der Username der Firma ist. Bisher zählte das
+            # als 'login': der Aufrufer brach nach dem Konto-Schritt ab („Gehört der Username wirklich zu dieser Firma?"), obwohl nie ein
+            # Login lief. Jetzt 'selbst' wie bei der gemerkten Sitzung nach dem Link — der Aufrufer macht den zweiten Durchgang, der die
+            # fremde Sitzung nur mit Beleg (Ziel 0× in der selbst geöffneten Liste, cdp_abmelden_erlaubt) abmeldet und dann wirklich
+            # anmeldet; genau der Weg, der im selben Moment für das Schwester-Konto durchlief. Kein Formular → kein merk["formular"].
+            return "", "", "selbst"
         if ort is None:
             return "login_formular", text + " Tradovate ist NICHT verbunden.", ""
         if ort == "abgebrochen":

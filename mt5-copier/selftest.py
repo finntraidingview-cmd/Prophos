@@ -1946,6 +1946,7 @@ def main():
     results.append(test_puls_fehler_1571())
     results.append(test_puls_fehler_1603())
     results.append(test_puls_fehler_1606())
+    results.append(test_puls_fehler_1611())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -5010,6 +5011,101 @@ def test_puls_fehler_1606():
     q = _i.getsource(ob._f9_ursache)
     chk("sleep(" not in q and "type_keys" not in q and "click" not in q.lower(), "_f9_ursache: nur lesen — kein sleep, keine Taste, kein Klick")
     print(("✓" if ok else "✗") + " Puls-Fehler .1606: F9 ohne Dialog → Ursache aus der API (Handel am Konto / Verbindung / Symbol) + Kind-Fenster, nur lesen, Einbau einmal")
+    return ok
+
+def test_puls_fehler_1611():
+    """Routine „Puls-Fehler" 17.10.2026 20:30 Dubai (.1611, Muster „konto_balance: konto # steht im dropdown 0× … — auch nach dem
+    tradovate-login", 17.10. 13:16 UTC, ein PC mit drei Firmen im selben Puls-Chrome): „Connect" ohne Anmeldeseite übernahm die noch
+    angemeldete Tradovate-Sitzung einer ANDEREN Firma; das galt als eigener Login ('login') → kein zweiter Durchgang, Abbruch mit
+    „Gehört der Username wirklich zu dieser Firma?". Jetzt 'selbst' (gemerkte Sitzung): zweiter Durchgang meldet mit Beleg ab und
+    meldet wirklich an. Attrappen, kein Windows, kein Chrome."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1611: " + text)
+            ok = False
+    APEX, TD = "APEX6843320000003USD", "TDFYSL150500000000"
+    namen = ("_K3Ort", "_cdp_kachel_weg", "cdp_connect_dialog", "_cdp_dialog_verbinden", "_cdp_login_ort", "_cdp_anmelden",
+             "_warte", "_cdp_konto_sichern", "_cdp_tradovate_verbinden", "_cdp_login_sichern", "_cdp_sitzung_zurueck")
+    alt = {n: getattr(ob, n) for n in namen}
+
+    class _Ort:
+        def __init__(self, *a, **k):
+            pass
+
+        def blick(self):
+            return {"dialoge": [{"titel": "Tradovate", "knoepfe": ["Connect"]}], "url": "https://www.tradingview.com/chart/x/"}
+    sz = type("Sz", (), {"ws": None})()
+    gez = {"anmelden": 0}
+
+    def _anm(*a, **k):
+        gez["anmelden"] += 1
+        return "", ""
+    try:
+        ob._K3Ort, ob._cdp_kachel_weg = _Ort, (lambda s, trail: None)
+        ob.cdp_connect_dialog = lambda bl: {"dialog": {}, "connect": {"rect": [1, 1, 10, 10]}, "demo": [], "nicht_merken": None, "netzfehler": False}
+        ob._cdp_dialog_verbinden = lambda s, merken, trail: ("", "", {"ids": set(), "ms": 0.0})
+        ob._cdp_login_ort = lambda s, vorher, benutzer, opts, trail: ("verbunden", "")
+        ob._cdp_anmelden = _anm
+        merk1, tr1 = {}, []
+        v1 = ob._cdp_tradovate_verbinden([sz], {"tv_username": "TDFYU000000000"}, {}, tr1, beleg={}, merk=merk1)
+        # Ende zu Ende durch _cdp_konto_mit_login: kein Broker → 1. Durchgang übernimmt die fremde Sitzung ('selbst'), Ziel 0× mit
+        # Beleg → 2. Durchgang (Attrappe: nur mit Beleg wird abgemeldet und angemeldet) → Konto steht
+        ob._warte = lambda a_, b_: None
+        ob._cdp_login_sichern, ob._cdp_sitzung_zurueck = (lambda res, trail: None), (lambda s, o, t: False)
+        n = {"k": 0, "v": 0, "beleg": []}
+        folge = [(False, "kein_broker", "Kein Konto-Umschalter zu sehen (aktiv '-', )", {}, {}),
+                 (False, "kein_broker", "Kein Konto-Umschalter zu sehen (aktiv '-', )", {}, {}),
+                 (False, "konto_nicht_erreicht", f"Konto {TD} steht im Dropdown 0x (nicht genau einmal) — nichts geklickt", {},
+                  {"konto_treffer": 0, "konto_treffer_roh": 0, "liste_aktiv": APEX, "ziel_im_text": False, "konto_eintraege": [APEX]}),
+                 (True, "", "", {"x": 1}, {"konto_aktiv": TD + "USD"})]
+
+        def _ks(s, ext, opts, trail):
+            n["k"] += 1
+            return folge[min(n["k"], len(folge)) - 1]
+
+        def _tv(sitz, cmd, opts, trail, beleg=None, merk=None):
+            n["v"] += 1
+            n["beleg"].append(dict(beleg or {}))
+            if ob.cdp_abmelden_erlaubt(APEX, beleg)[0]:
+                merk["formular"] = True
+                return "", "", "login"
+            return "", "", "selbst"
+        ob._cdp_konto_sichern, ob._cdp_tradovate_verbinden = _ks, _tv
+        res, tr = {}, []
+        aus = ob._cdp_konto_mit_login([object()], TD, {}, {"tv_username": "TDFYU000000000"}, tr, res)
+        # Gegenprobe: liefert der Login-Weg wie bisher 'login', bleibt es beim einen Durchgang und der alten Meldung
+        n2 = {"k": 0}
+        folge2 = folge[:3] + [folge[2]]
+
+        def _ks2(s, ext, opts, trail):
+            n2["k"] += 1
+            return folge2[min(n2["k"], len(folge2)) - 1]
+        ob._cdp_konto_sichern, ob._cdp_tradovate_verbinden = _ks2, (lambda sitz, cmd, opts, trail, beleg=None, merk=None: ("", "", "login"))
+        res2, tr2 = {}, []
+        aus2 = ob._cdp_konto_mit_login([object()], TD, {}, {"tv_username": "TDFYU000000000"}, tr2, res2)
+    finally:
+        for k_, f_ in alt.items():
+            setattr(ob, k_, f_)
+    chk(v1 == ("", "", "selbst") and "formular" not in merk1 and gez["anmelden"] == 0,
+        f"Connect ohne Anmeldeseite → 'selbst', kein Formular-Beweis, _cdp_anmelden nicht gerufen ({v1}, {merk1})")
+    chk(aus[0] is True and n["v"] == 2 and (res.get("login") or {}).get("durchgaenge") == 2 and (res.get("login") or {}).get("wie") == "login"
+        and n["beleg"][1].get("konto_treffer") == 0 and n["beleg"][1].get("liste_aktiv") == APEX,
+        f"fremde Sitzung übernommen → 2. Durchgang mit Beleg (Ziel 0×, aktiv = fremder Login) → Konto steht ({aus[:3]}, {n})")
+    chk(aus2[0] is False and (res2.get("login") or {}).get("durchgaenge") == 1 and "Gehört der Username" in aus2[2],
+        f"Gegenprobe 'login' → ein Durchgang, alte Meldung ({aus2[2][:80]})")
+    q_tv, q_km, q_lo = _i.getsource(ob._cdp_tradovate_verbinden), _i.getsource(ob._cdp_konto_mit_login), _i.getsource(ob._cdp_login_ort)
+    i_v = q_tv.index('if ort == "verbunden":')
+    chk(q_tv.count('return "", "", "login"') == 0 and q_tv.count('"login"') == 1 and q_tv.index('return code, text, "login"') > q_tv.index("_cdp_anmelden(")
+        and q_tv.count('return "", "", "selbst"') == 2 and q_tv.index('return "", "", "selbst"', i_v) < q_tv.index("if ort is None:")
+        and q_tv.count('merk["formular"] = True') == 1 and q_tv.index('merk["formular"] = True') > q_tv.index("_cdp_anmelden("),
+        "'login' nur nach _cdp_anmelden; nach „verbunden“ ohne Anmeldeseite 'selbst'; Formular-Beweis nur nach _cdp_anmelden")
+    chk('wie not in ("selbst", "steht")' in q_km and "gemerkte Tradovate-Sitzung" in q_km and "kein eigener Login" in q_lo
+        and "sleep(" not in q_tv[i_v:i_v + 1600], "Aufrufer macht nach 'selbst' den zweiten Durchgang; Spur nennt die gemerkte Sitzung; kein sleep")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1611: Connect ohne Anmeldeseite = gemerkte Sitzung ('selbst'), fremder Login wird im 2. Durchgang mit Beleg abgemeldet und wirklich angemeldet")
     return ok
 
 def test_cdp_konto_weg_gleicher_login():
