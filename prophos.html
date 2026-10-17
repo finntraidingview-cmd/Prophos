@@ -44378,7 +44378,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1613'
+  const OS_TAB_BUILD = '2026-09-22.1614'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48935,6 +48935,13 @@
         const st = e && e.status
         if(st === 409 && e.daten && e.daten.tagesende) return 'tagesende'
         if(st === 409 || st >= 500){ console.warn('[start-fehler] nachholen', (e && e.message) || e); return false }   // sfTick versucht es in 60 s wieder
+        // 404 „Plan nicht gefunden" (18.10.2026, Geister-Plan): Backend kennt die Aktion, aber der Plan ist in der DB weg — kein alter
+        // Backend-Stand. Nicht auf den alten Weg fallen (UPDATE trifft 0 Zeilen, nächste Minute dasselbe), sondern Pläne neu laden.
+        if(st === 404 && e.daten && e.daten.msg === 'Plan nicht gefunden'){
+          console.warn('[start-fehler] nachholen: Plan in der DB weg — Pläne neu geladen', plan.id)
+          if(typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase()
+          return false
+        }
         // 400/403/404/405 = alter Backend-Stand kennt „nachholen" nicht (dort Admin-Gate 403), ohne Status = offline → wie bisher
         console.warn('[start-fehler] nachholen nicht verfügbar — wie bisher', (e && e.message) || e)
       }
@@ -48963,12 +48970,19 @@
       // Abgleich (2 min): heutige geplante Pläne dieser ID — Startzeit/Claim/Start-Fehler, die woanders geändert wurden
       if(Date.now() - _sfAbgleichAt >= SF_ABGLEICH_MS){
         _sfAbgleichAt = Date.now()
-        const { data } = await supabase.from('trade_plans').select('id,start_um,start_um_gestartet_at,mt5_baseline')
-          .eq('user_id', uid).eq('status', 'planned').gte('start_um', new Date(Date.now() - 24 * 3600000).toISOString())
+        const ab = Date.now() - 24 * 3600000
+        const { data, error } = await supabase.from('trade_plans').select('id,start_um,start_um_gestartet_at,mt5_baseline')
+          .eq('user_id', uid).eq('status', 'planned').gte('start_um', new Date(ab).toISOString())
         const anders = (data || []).some(r => { const p = (tradePlans || []).find(x => String(x.id) === String(r.id))
           return !p || Date.parse(p.startUm || 0) !== Date.parse(r.start_um || 0) || !!p.startUmGestartetAt !== !!r.start_um_gestartet_at
             || JSON.stringify(sfFlag(p)) !== JSON.stringify((r.mt5_baseline && r.mt5_baseline.start_fehler) || null) })
-        if(anders && typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase()
+        // GEISTER-PLAN (18.10.2026, Health-Check: 16.10. 08:15–12:30 UTC ein PC-Tab 1×/min POST /plan {aktion:'nachholen'} → 404
+        // „Plan nicht gefunden", ~250×): der Abgleich sah nur DB-Zeilen, die lokal fehlen — nie lokal geplante Pläne, die es in der
+        // DB nicht mehr gibt (gelöscht/neu angelegt, nicht mehr planned). Die blieben bis zum Neuladen im Cache, sfTick holte sie
+        // jede Minute nach. Jetzt zählt auch die Gegenrichtung — nur bei lesbarer Antwort, sonst würde jeder Fehler neu laden.
+        const geist = !error && Array.isArray(data) && (tradePlans || []).some(p => p && p.status === 'planned' && p.startUm
+          && Date.parse(p.startUm) >= ab && !data.some(r => String(r.id) === String(p.id)))
+        if((anders || geist) && typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase()
       }
       const kand = (tradePlans || []).filter(p => { const f = sfFlag(p)
         return p && f && f.status === 'rot' && p.status === 'planned' && p.startUmGestartetAt && !p.startedAt && !p.orbitGesendetAt
