@@ -8421,7 +8421,7 @@
             </div>
             <!-- Richtungs-Schutz (25.08.2026): läuft bei der Master-Firma schon
                  ein Trade, wird die Gegenrichtung gesperrt und hier begründet -->
-            <div id="tp-order-dir-hint" style="display:none;margin-top:8px;font-size:12px;color:#B45309;background:rgba(247,144,9,.12);border-radius:6px;padding:7px 10px"></div>
+            <div id="tp-order-dir-hint" style="display:none;margin-top:8px;font-size:12px;color:var(--warn-ink, #b45309);background:color-mix(in srgb, var(--warn) 12%, transparent);border-radius:6px;padding:7px 10px"></div>
             <!-- Letzte 5 Orders (15.09.2026, Finns Wunsch): nur die nackte
                  Richtung der zuletzt GESTARTETEN Pläne, egal welche Route
                  (Duplikum/Echo/Orbit) — reine Anzeige, keine Empfehlung -->
@@ -8637,10 +8637,10 @@
               <div class="tp-wd-hilfe" id="tp-wd-hilfe-slave">auf Fusion · Staffel-Vorschlag</div>
               <!-- Funded-Vorgabe (02.10.2026, Finn: „so ein Feld, von Schablonen nehmen"): fester Gegenhedge je Firma
                    (tpFundedHedgeVorgabe) — nur bei Funded-Mastern mit Satz sichtbar -->
-              <div id="tp-funded-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(18,183,106,.08);border:1px solid rgba(18,183,106,.25);border-radius:6px;font-size:12px;line-height:1.4">
+              <div id="tp-funded-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:color-mix(in srgb, var(--good) 8%, transparent);border:1px solid color-mix(in srgb, var(--good) 25%, transparent);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
-                    <span style="color:#15803d;font-weight:700">🎯 Funded-Vorgabe:</span>
+                    <span style="color:var(--good-ink, #15803d);font-weight:700">🎯 Funded-Vorgabe:</span>
                     <span id="tp-funded-value" style="font-family:var(--mono);font-weight:600">—</span>
                   </div>
                   <button type="button" id="tp-funded-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
@@ -8661,7 +8661,7 @@
 
             <!-- Gesamtkosten (volle Vorgänger-Kette) — flacher Gesamtbetrag, unabhängig vom Risk-Anteil -->
             <div class="field" style="grid-column:span 2">
-              <div id="tp-gesamtkosten-suggest" style="display:none;padding:8px 12px;background:rgba(22,200,198,.08);border:1px solid rgba(22,200,198,.25);border-radius:6px;font-size:12px;line-height:1.4">
+              <div id="tp-gesamtkosten-suggest" style="display:none;padding:8px 12px;background:color-mix(in srgb, var(--teal) 8%, transparent);border:1px solid color-mix(in srgb, var(--teal) 25%, transparent);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
                     <span style="color:#0d9c9a;font-weight:700">📊 Gesamtkosten:</span>
@@ -8695,9 +8695,9 @@
             <!-- Trade-Limits des Masters — volle Breite unter den Vorschlag-Boxen, drei Spalten
                  nebeneinander, Label oben / Zahl drunter (Finn, 28.07.2026). Reiner Hinweis, kein Gate. -->
             <div class="field" style="grid-column:span 2">
-              <div id="tp-master-limits-info" style="display:none;padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:12px;line-height:1.4">
+              <div id="tp-master-limits-info" style="display:none;padding:8px 12px;background:color-mix(in srgb, var(--warn) 7%, transparent);border:1px solid color-mix(in srgb, var(--warn) 25%, transparent);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px">
-                  <span style="color:#d97706;font-weight:700">⚠ Limits</span>
+                  <span style="color:var(--warn-ink, #b45309);font-weight:700">⚠ Limits</span>
                   <span style="font-size:11px;color:var(--sub-2)">Reiner Hinweis, wird nicht geprüft</span>
                 </div>
                 <div id="tp-lim-note" style="display:none;margin-bottom:6px;font-weight:600;color:var(--ink);white-space:pre-wrap"></div>
@@ -8707,12 +8707,12 @@
                     <div id="tp-lim-daily" style="font-family:var(--mono);font-weight:700;font-size:14px;color:var(--ink);margin-top:2px">—</div>
                   </div>
                   <div>
-                    <div style="font-size:11px;color:var(--sub)"><span style="color:#dc2626">▼</span> Max Loss/Trade</div>
+                    <div style="font-size:11px;color:var(--sub)"><span style="color:var(--danger-ink, #b91c1c)">▼</span> Max Loss/Trade</div>
                     <div id="tp-lim-loss" style="font-family:var(--mono);font-weight:700;font-size:14px;color:var(--ink);margin-top:2px">—</div>
                   </div>
                   <div>
-                    <div style="font-size:11px;color:var(--sub)"><span style="color:#16a34a">▲</span> Max Profit/Trade</div>
-                    <div id="tp-lim-profit" style="font-family:var(--mono);font-weight:700;font-size:14px;color:#16a34a;margin-top:2px">—</div>
+                    <div style="font-size:11px;color:var(--sub)"><span style="color:var(--good-ink, #15803d)">▲</span> Max Profit/Trade</div>
+                    <div id="tp-lim-profit" style="font-family:var(--mono);font-weight:700;font-size:14px;color:var(--good-ink, #15803d);margin-top:2px">—</div>
                   </div>
                 </div>
               </div>
@@ -8771,7 +8771,7 @@
             <!-- Kompass-Vorwahl (23.09.2026, Finn: „im V2-Popup ist die Richtung zu 75 % das, was der Kompass gerade sagt,
                  zu 25 % genau das Gegenteil — und ein dickes Feld, was aktuell der Forecast ist"). Nur auf Echo V2 / Orbit V2. -->
             <div class="field" id="tp-kompass-box" style="grid-column:span 2;display:none">
-              <div id="tp-kompass-inner" style="padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:rgba(84,71,206,.05)">
+              <div id="tp-kompass-inner" style="padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:color-mix(in srgb, var(--violet) 5%, transparent)">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
                   <div>
                     <span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em">Kompass aktuell</span>
@@ -8810,7 +8810,7 @@
             </div>
 
             <div class="field" style="grid-column:span 2;display:none">
-              <div style="display:flex;gap:14px;padding:10px 14px;background:rgba(84,71,206,.05);border:1px solid var(--border);border-radius:8px;font-size:12.5px">
+              <div style="display:flex;gap:14px;padding:10px 14px;background:color-mix(in srgb, var(--violet) 5%, transparent);border:1px solid var(--border);border-radius:8px;font-size:12.5px">
                 <div style="flex:1;color:var(--sub)">
                   <span style="font-weight:600;color:var(--accent);text-transform:uppercase;font-size:10.5px;letter-spacing:.08em" title="Wieviel der Slave verliert wenn Master TP trifft">Slave-Verlust bei Master-TP</span>
                   <div class="tnum" id="tp-slave-tp-out" style="margin-top:2px;font-size:14px;color:var(--ink)">—</div>
@@ -9177,7 +9177,7 @@
           </div>
 
           <!-- Trade-Limits — eigener Block, vorbelegt vom Vorgänger -->
-          <div class="modal-divider" style="color:#d97706;margin-top:14px">
+          <div class="modal-divider" style="color:var(--warn-ink, #b45309);margin-top:14px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             Trade-Limits (optional)
           </div>
@@ -9497,7 +9497,7 @@
         <div id="advisor-firm-msg" style="font-size:12px;margin-top:10px;min-height:18px"></div>
 
         <footer class="modal-foot" style="margin-top:10px;justify-content:space-between">
-          <button class="btn btn-ghost" id="advisor-firm-delete" style="color:var(--danger);border-color:rgba(240,68,56,.3);display:none">Löschen</button>
+          <button class="btn btn-ghost" id="advisor-firm-delete" style="color:var(--danger);border-color:color-mix(in srgb, var(--danger) 30%, transparent);display:none">Löschen</button>
           <div style="display:flex;gap:10px">
             <button class="btn btn-ghost" id="advisor-firm-cancel">Abbrechen</button>
             <button class="btn btn-primary" id="advisor-firm-save">Speichern</button>
@@ -9568,7 +9568,7 @@
       </div>
 
       <!-- Zyklus / Abrechnung -->
-      <div class="panel" id="fin-settle-card" style="margin-bottom:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-soft,rgba(84,71,206,.04)) 100%)">
+      <div class="panel" id="fin-settle-card" style="margin-bottom:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-soft,color-mix(in srgb, var(--violet) 4%, transparent)) 100%)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:16px 18px">
           <div style="display:flex;gap:28px;flex-wrap:wrap">
             <div>
@@ -9630,7 +9630,7 @@
             <div class="panel-sub">Angefragt, aber noch nicht auf dem Konto — zählt erst mit ✓ Erhalten</div>
           </div>
           <div style="text-align:right">
-            <div class="tnum" id="fin-pending-sum" style="font-size:20px;font-weight:800;color:#d97706">–</div>
+            <div class="tnum" id="fin-pending-sum" style="font-size:20px;font-weight:800;color:var(--warn-ink, #b45309)">–</div>
             <div style="font-size:11px;color:var(--sub)" id="fin-pending-count">–</div>
           </div>
         </div>
@@ -9960,7 +9960,7 @@
             <input class="input" id="fin-settle-note" placeholder="z.B. Auszahlung Juli 2026" maxlength="120">
           </div>
 
-          <div id="fin-settle-warning" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);color:#b45309"></div>
+          <div id="fin-settle-warning" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;background:color-mix(in srgb, var(--warn) 10%, transparent);border:1px solid color-mix(in srgb, var(--warn) 30%, transparent);color:var(--warn-ink, #b45309)"></div>
 
           <div class="modal-msg" id="finSettleMsg"></div>
         </div>
@@ -10252,7 +10252,7 @@
       </div>
 
       <!-- Zyklus / Abrechnung -->
-      <div class="panel" id="mg-settle-card" style="margin-bottom:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-soft,rgba(84,71,206,.04)) 100%)">
+      <div class="panel" id="mg-settle-card" style="margin-bottom:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-soft,color-mix(in srgb, var(--violet) 4%, transparent)) 100%)">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:16px 18px">
           <div style="display:flex;gap:28px;flex-wrap:wrap">
             <div>
@@ -10369,7 +10369,7 @@
             <input class="input" id="mg-settle-note" placeholder="z.B. Mai 2026, XFA #2" maxlength="120">
           </div>
 
-          <div id="mg-settle-warning" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);color:#b45309"></div>
+          <div id="mg-settle-warning" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;background:color-mix(in srgb, var(--warn) 10%, transparent);border:1px solid color-mix(in srgb, var(--warn) 30%, transparent);color:var(--warn-ink, #b45309)"></div>
 
           <div class="modal-msg" id="mgSettleMsg"></div>
         </div>
@@ -10454,7 +10454,7 @@
       <!-- Nur EIN display im Style: das doppelte display:flex gewann früher
            gegen das display:none davor — der leere Alarm-Banner stand dadurch
            bis zum ersten newsTick (10s) sichtbar da. newsTick setzt flex selbst. -->
-      <div id="news-next-banner" style="display:none;margin-bottom:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(90deg,rgba(239,68,68,.10),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.28);align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div id="news-next-banner" style="display:none;margin-bottom:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(90deg,color-mix(in srgb, var(--danger) 10%, transparent),color-mix(in srgb, var(--danger) 3%, transparent));border:1px solid color-mix(in srgb, var(--danger) 28%, transparent);align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Nächste High-Impact-News (USD)</div>
           <div id="news-next-title" style="font-size:15px;font-weight:700;margin-top:2px">–</div>
@@ -11230,7 +11230,7 @@
                      die Tabelle von Tradeify"): Chips wählen die Tabelle, Klick auf eine Firma links tut dasselbe. Ohne eigene
                      Tabelle gilt Standard. -->
                 <div class="wd-chips" id="wd-staffel-firmen"></div>
-                <div class="kf" id="wd-staffel-aus" style="margin-bottom:8px;color:#B45309" hidden>wirkt erst, wenn links „Fusion-Gegenhedge" an ist</div>
+                <div class="kf" id="wd-staffel-aus" style="margin-bottom:8px;color:var(--warn-ink, #b45309)" hidden>wirkt erst, wenn links „Fusion-Gegenhedge" an ist</div>
                 <div id="wd-staffel-body"></div>
                 <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
                   <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add">+ Zeile</button>
@@ -11872,7 +11872,7 @@
         </div>
 
         <div id="adm-pane-kasse" hidden>
-        <div id="kasse-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
+        <div id="kasse-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent);border:1px solid color-mix(in srgb, var(--danger) 30%, transparent);font-size:12.5px;color:var(--sub)">
           Tabelle <code>kasse_entries</code> fehlt noch — bitte <code>sql/2026-08-11_kasse.sql</code> im Supabase SQL-Editor ausführen.
         </div>
 
@@ -11917,10 +11917,10 @@
         <!-- META WALLET (24.08.2026): Stable-Bestände (USDT + USDC) der MetaMask-Wallets aller Personen.
              Watch-only über die öffentlichen Adressen — hier landen NIE Keys oder Seeds. -->
         <div id="adm-pane-wallet" hidden>
-          <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
+          <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent);border:1px solid color-mix(in srgb, var(--danger) 30%, transparent);font-size:12.5px;color:var(--sub)">
             Tabellen <code>id_wallets</code>/<code>wallet_snapshots</code> fehlen noch — bitte <code>sql/2026-08-24_id_wallets.sql</code> im Supabase SQL-Editor ausführen.
           </div>
-          <div id="wal-excl-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
+          <div id="wal-excl-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent);border:1px solid color-mix(in srgb, var(--danger) 30%, transparent);font-size:12.5px;color:var(--sub)">
             Liste der ausgeblendeten IDs gerade nicht ladbar — es werden alle Wallets gezeigt. Tab gleich noch einmal öffnen, dann fallen ausgeblendete IDs wieder raus.
           </div>
 
@@ -12086,7 +12086,7 @@
               </div>
             </div>
             <!-- Lücken der Gegenprüfung (25.09.2026): nie still fehlen — rot über dem Feed -->
-            <div id="wal-feed-warn" style="font-size:12px;color:var(--danger);background:rgba(240,68,56,.08);border-radius:8px;padding:8px 10px;margin:4px 0 8px" hidden></div>
+            <div id="wal-feed-warn" style="font-size:12px;color:var(--danger);background:color-mix(in srgb, var(--danger) 8%, transparent);border-radius:8px;padding:8px 10px;margin:4px 0 8px" hidden></div>
             <div class="table-wrap">
               <table class="t">
                 <thead><tr>
@@ -12580,7 +12580,7 @@
         </div>
       </div>
 
-      <div class="panel" style="border-color:rgba(240,68,56,.25)">
+      <div class="panel" style="border-color:color-mix(in srgb, var(--danger) 25%, transparent)">
         <div class="panel-head">
           <div class="panel-title" style="color:var(--danger)">Danger Zone</div>
         </div>
@@ -12589,7 +12589,7 @@
             <h4>Account löschen</h4>
             <p>Alle Daten werden entfernt. Das kann nicht rückgängig gemacht werden.</p>
           </div>
-          <button class="btn btn-ghost" style="color:var(--danger);border-color:rgba(240,68,56,.3)">Löschen</button>
+          <button class="btn btn-ghost" style="color:var(--danger);border-color:color-mix(in srgb, var(--danger) 30%, transparent)">Löschen</button>
         </div>
       </div>
     </section>
@@ -13122,7 +13122,7 @@
       </div>
 
       <!-- Trade-Limits — bewusst eigener Block ganz unten, getrennt vom Rest (gilt für ALLE Accounts des Batches) -->
-      <div class="modal-divider" style="color:#d97706">
+      <div class="modal-divider" style="color:var(--warn-ink, #b45309)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         Trade-Limits (optional — gelten für alle Accounts)
       </div>
@@ -14077,7 +14077,7 @@
     }
     window.kasseVergessen = () => kasseFreiSetzen(false)   // beim Abmelden gerufen
 
-    const FINN = 'var(--violet)', PASCAL = '#e0891f', EVEN = '#16a34a'
+    const FINN = 'var(--violet)', PASCAL = '#e0891f', EVEN = 'var(--good-ink, #15803d)'
     let unlocked = kasseFreiLesen(), who = 'finn', entries = []
     const eur = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:2 })
     const $ = id => document.getElementById(id)
@@ -14154,7 +14154,7 @@
       const s = admV2Summe(rows)
       const m = $(idMpl), t = $(idTrades); if(!m || !t) return
       m.textContent = s.da ? admUsdSign(s.mpl) : '—'
-      m.style.color = s.da ? (s.mpl < 0 ? '#b91c1c' : '#15803d') : ''
+      m.style.color = s.da ? (s.mpl < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)') : ''
       const ms = $(idMpl + '-sub'); if(ms) ms.textContent = s.da ? 'USD roh, nur Master' : 'kommt mit dem nächsten Backend'
       t.textContent = s.da ? `${s.trades} · ${s.blown}` : '—'
       const ts = $(idTrades + '-sub'); if(ts) ts.textContent = s.da ? (s.trades ? `Blow-Quote ${Math.round(s.blown / s.trades * 100)} %` : 'noch kein Trade') : 'Trades · Blows'
@@ -14496,7 +14496,7 @@
           b.className = 'adm-vl-chip' + (active ? (String(active) === String(s.key) ? ' is-on' : ' is-off') : '')
           const dotHtml = opts.farbe ? `<span class="adm-dot" style="background:${opts.farbe(s.key) || admPersonColor(s.key)}"></span>` : admDot(s.key)
           b.innerHTML = dotHtml + '<span class="nm"></span>' +
-            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${last < 0 ? '#b91c1c' : '#15803d'}">${fmtSign(last)}</span>`
+            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${last < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}">${fmtSign(last)}</span>`
           b.querySelector('.nm').textContent = opts.labelRoh ? s.label : admShortName(s.label)
           const subTxt = opts.sub ? opts.sub(s.key) : ''
           if(subTxt) b.insertAdjacentHTML('beforeend', `<small style="margin-left:6px;color:var(--sub);font-weight:400">${escapeHtml(subTxt)}</small>`)
@@ -14597,7 +14597,7 @@
       const aktiv = window._kapitel ? String(window._kapitel.aktiv) : ''
       const eur = n => admEur.format(admKapNum(n))
       const sign = n => admVlSign(admKapNum(n))
-      const col = n => admKapNum(n) < 0 ? '#b91c1c' : '#15803d'
+      const col = n => admKapNum(n) < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
       const kpi = (label, value, sub, valStyle) =>
         `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
       for(const k of liste){
@@ -14608,9 +14608,9 @@
         const payoutN = admKapNum(k.payout_n)
         // Hedge-Kachel: im Kapitel ohne Hedge ist „0 €" die gute Nachricht (grün, „kein Gegen-Hedge")
         let hVal, hSub, hStyle
-        if(!k.hedge_aktiv && !hedge){ hVal = '0 €'; hSub = 'kein Gegen-Hedge'; hStyle = 'color:#15803d' }
+        if(!k.hedge_aktiv && !hedge){ hVal = '0 €'; hSub = 'kein Gegen-Hedge'; hStyle = 'color:var(--good-ink, #15803d)' }
         else if(leer){ hVal = '—'; hSub = '—'; hStyle = '' }
-        else { hVal = hedge < 0 ? '−' + eur(-hedge) : eur(hedge); hSub = hedge < 0 ? 'Hedge im Gewinn' : 'Verluste auf Live-Slaves'; hStyle = hedge ? `color:${hedge > 0 ? '#b91c1c' : '#15803d'}` : '' }
+        else { hVal = hedge < 0 ? '−' + eur(-hedge) : eur(hedge); hSub = hedge < 0 ? 'Hedge im Gewinn' : 'Verluste auf Live-Slaves'; hStyle = hedge ? `color:${hedge > 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}` : '' }
         const mpl = admKapNum(k.master_pl)
         // NQ vs MNQ (24.09.2026): Anzahl Trades je Symbolwurzel aus /admin/kapitel (symbole:{NQ,MNQ}) — tolerant,
         // das Feld kommt erst mit dem neuen Backend. Personen (personen:[…]) ebenso.
@@ -14742,7 +14742,7 @@
           const netto = admKapNum(k.netto)
           const b = document.createElement('span'); b.className = 'adm-vl-chip'; b.style.cursor = 'default'
           b.innerHTML = `<span class="adm-dot" style="background:${admKapFarbe(k)}"></span><span class="nm"></span>` +
-            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${netto < 0 ? '#b91c1c' : '#15803d'}">${admKapLeer(k) ? '—' : admVlSign(netto)}</span>`
+            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${netto < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}">${admKapLeer(k) ? '—' : admVlSign(netto)}</span>`
           b.querySelector('.nm').textContent = k.name
           lg.appendChild(b)
         }
@@ -14924,7 +14924,7 @@
       const personen = new Map()
       for(const t of alle){ const u = String(t.user_id); if(!personen.has(u)) personen.set(u, t.person || u) }
       // a) Kacheln
-      const col = n => n < 0 ? '#b91c1c' : '#15803d'
+      const col = n => n < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
       const kpi = (label, value, sub, valStyle) =>
         `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral" title="${String(sub).replace(/<[^>]+>/g, '').replace(/"/g, '&quot;')}">${sub}</div></div>`
       const real = sumP - sumK, mitHedge = real + hyp
@@ -15037,8 +15037,8 @@
         const anteil = sum > 0 && e.v > 0 ? ` · ${admKfDe(100 * e.v / sum, 0)} % vom Vorteil` : ''
         row.innerHTML =
           `<div class="adm-row-name">${admDot(e.u)}<span><span class="nm"></span><small class="kf-q-sub"></small></span></div>` +
-          `<div class="adm-track"><div class="adm-fill" style="width:${(100 * Math.abs(e.v) / maxAbs).toFixed(1)}%;background:${e.v < 0 ? '#b91c1c' : col}"></div></div>` +
-          `<div class="adm-val" style="color:${e.v < 0 ? '#b91c1c' : '#15803d'}">${admVlSign(e.v)}</div>`
+          `<div class="adm-track"><div class="adm-fill" style="width:${(100 * Math.abs(e.v) / maxAbs).toFixed(1)}%;background:${e.v < 0 ? 'var(--danger-ink, #b91c1c)' : col}"></div></div>` +
+          `<div class="adm-val" style="color:${e.v < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}">${admVlSign(e.v)}</div>`
         row.querySelector('.nm').textContent = admShortName(personen.get(e.u) || e.u)
         row.querySelector('.kf-q-sub').textContent = `${e.n} Trade${e.n === 1 ? '' : 's'}${anteil} · Reibung ${admVlSign(e.rr)}`
         row.title = `${e.n} Trades · Vorteil ${admVlSign(e.v)}${anteil} · Reibung gespart ${admVlSign(e.rr)} real / ${admVlSign(e.rg)} gemessen · Master ${admUsdSign(e.mpl)} · Win-Rate ${Math.round(100 * e.w / e.n)} % — ` +
@@ -15069,7 +15069,7 @@
       const mSum = rows.reduce((a, t) => a + (num(t.master_pl) || 0), 0)
       const mitF = rows.filter(t => num(t.fusion_eur) !== null), fSum = mitF.reduce((a, t) => a + num(t.fusion_eur), 0)
       const farmer = rows.filter(t => t.quelle === 'farmer').length
-      const col = v => v < 0 ? '#b91c1c' : '#15803d'
+      const col = v => v < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
       const kpi = (label, value, sub, st) => `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${st || ''}">${value}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
       const sub = $('adm-kf-wd-sub'); if(sub) sub.textContent = `${alle.length} im Kapitel${fa ? ' · ' + fa : ''}${pers ? ' · ' + admShortName(personen.get(pers) || pers) : ''}`
       const kp = $('adm-kf-wd-kpis')
@@ -15242,7 +15242,7 @@
       if(zeigen && !h){ h = document.createElement('div'); h.className = 'adm-empty kf-leer-hinweis'; h.textContent = 'Noch keine Daten für diese Sicht — kommt mit den ersten Trades bzw. dem zweiten Tag.'; wrap.insertAdjacentElement('afterend', h) }
       if(h) h.hidden = !zeigen
     }
-    const admKfGut = '#15803d', admKfRot = '#b91c1c'
+    const admKfGut = 'var(--good-ink, #15803d)', admKfRot = 'var(--danger-ink, #b91c1c)'
     /* Hedge-Quoten aus der Hedge-Ära (24.09.2026, Finn: „Ich will erkennen: Apex Funded, gerade +7.500 $ gemacht,
      * ist so grob ein Tausender wert. Oder von einem 100k-Konto waren die Gesamtkosten grob 2.000 — verliert der
      * Master 2.000, sind es so grob 400 € weniger"). Zeilen = Gruppen A (Firma · Typ · Größe) und B (Firma · Typ)
@@ -16418,14 +16418,14 @@
       const totPo    = list.reduce((a, g) => a + g.payouts, 0)
       const minusL   = list.filter(g => g.saldo < 0)
       const totMinus = minusL.reduce((a, g) => a + g.saldo, 0)
-      const colSaldo = v => v < 0 ? '#b91c1c' : '#15803d'
+      const colSaldo = v => v < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
       const fmtSaldo = v => (v >= 0 ? '+' : '−') + admEur.format(Math.abs(v))
 
       $('adm-f-saldo').textContent = fmtSaldo(totSaldo)
       $('adm-f-saldo').style.color = colSaldo(totSaldo)
       $('adm-f-saldo-sub').textContent = `${admEur.format(totBuy)} Kauf` + (admOhneHedge() ? '' : ` · ${admEur.format(totHedge)} Hedge`)
       $('adm-f-minus').textContent = totMinus ? fmtSaldo(totMinus) : '—'
-      $('adm-f-minus').style.color = totMinus ? '#b91c1c' : 'var(--ink)'
+      $('adm-f-minus').style.color = totMinus ? 'var(--danger-ink, #b91c1c)' : 'var(--ink)'
       $('adm-f-minus-sub').textContent = `${minusL.length} von ${list.length} IDs`
       $('adm-f-po').textContent = admEur.format(totPo)
 
@@ -16434,7 +16434,7 @@
       const pend = admData.pending_payouts || []
       const pendSum = pend.reduce((a, t) => a + (Number(t.amount) || 0), 0)
       $('adm-f-pend').textContent = pend.length ? admEur.format(pendSum) : '—'
-      $('adm-f-pend').style.color = pend.length ? '#d97706' : 'var(--ink)'
+      $('adm-f-pend').style.color = pend.length ? 'var(--warn-ink, #b45309)' : 'var(--ink)'
       $('adm-f-pend-sub').textContent = pend.length
         ? `${pend.length} Anfrage${pend.length === 1 ? '' : 'n'} offen`
         : 'angefragt, noch nicht da'
@@ -16455,7 +16455,7 @@
               (daysStr ? ` <span style="color:${days >= 14 ? 'var(--danger)' : 'var(--sub)'};font-size:11px">· ${daysStr}</span>` : '') + '</td>' +
               '<td><span class="pp-acc" style="font-size:12.5px"></span></td>' +
               '<td><span class="pp-bei"></span></td>' +
-              `<td class="adm-num" style="font-weight:600;color:#d97706">${admEur.format(Number(t.amount) || 0)}</td>` +
+              `<td class="adm-num" style="font-weight:600;color:var(--warn-ink, #b45309)">${admEur.format(Number(t.amount) || 0)}</td>` +
               '<td style="color:var(--sub);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pp-note"></span></td>'
             tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
             tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
@@ -17170,8 +17170,8 @@
     }
     const walKatTint = name => {
       const k = walKats.find(x => x.name === name)
-      return { violet:'var(--violet-tint)', good:'rgba(18,183,106,.1)', danger:'rgba(240,68,56,.1)', sub:'var(--surface-tint)',
-               blue:'rgba(73,150,255,.1)', teal:'rgba(22,200,198,.1)', warn:'rgba(247,144,9,.1)' }[k?.farbe || 'sub'] || 'var(--surface-tint)'
+      return { violet:'var(--violet-tint)', good:'color-mix(in srgb, var(--good) 10%, transparent)', danger:'color-mix(in srgb, var(--danger) 10%, transparent)', sub:'var(--surface-tint)',
+               blue:'color-mix(in srgb, var(--blue) 10%, transparent)', teal:'color-mix(in srgb, var(--teal) 10%, transparent)', warn:'color-mix(in srgb, var(--warn) 10%, transparent)' }[k?.farbe || 'sub'] || 'var(--surface-tint)'
     }
     const walBal = new Map()   // wallet.id → { usdt:Summe aller Stables, coin, coinUsdt:Number|null, parts:{USDT,USDC,…}|null, err:String|null }
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
@@ -17537,7 +17537,7 @@
         tr.dataset.wid = w.id
         tr.style.cursor = 'pointer'
         tr.title = 'Klicken: letzte Transfers dieser Wallet'
-        if(walTxSel === w.id) tr.style.background = 'rgba(84,71,206,.07)'
+        if(walTxSel === w.id) tr.style.background = 'color-mix(in srgb, var(--violet) 7%, transparent)'
         tr.innerHTML =
           '<td class="wal-td-person"></td>' +
           `<td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin-right:7px"></span>${c.label}</td>` +
@@ -20630,10 +20630,10 @@
 
   function dupStateBadge(state){
     const s = (state || '').toUpperCase()
-    if(s === 'CONNECTED')      return '<span class="ts-dot" style="background:#22c55e"></span> Verbunden'
-    if(s === 'DISCONNECTED')   return '<span class="ts-dot" style="background:#ef4444"></span> Getrennt'
+    if(s === 'CONNECTED')      return '<span class="ts-dot" style="background:var(--good)"></span> Verbunden'
+    if(s === 'DISCONNECTED')   return '<span class="ts-dot" style="background:var(--danger)"></span> Getrennt'
     if(s === 'NONE' || !s)     return '<span class="ts-dot" style="background:#94a3b8"></span> —'
-    return `<span class="ts-dot" style="background:#f59e0b"></span> ${s}`
+    return `<span class="ts-dot" style="background:var(--warn)"></span> ${s}`
   }
 
   function dupFmtMoney(v, ccy){
@@ -20691,7 +20691,7 @@
 
       const linkCell = linkedManual
         ? `<div style="display:flex;align-items:center;gap:8px">
-             <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:#22c55e22;color:#16a34a">✓ ${escapeHtml(linkedManual.name)}</span>
+             <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:color-mix(in srgb, var(--good) 13.33%, transparent);color:var(--good-ink, #15803d)">✓ ${escapeHtml(linkedManual.name)}</span>
              <button class="btn btn-ghost" data-dup-unlink="${escapeHtml(a.account_id)}" style="padding:4px 8px;font-size:11px">Trennen</button>
            </div>`
         : `<button class="btn btn-ghost" data-dup-link="${escapeHtml(a.account_id)}" style="padding:4px 10px;font-size:12px">
@@ -20913,7 +20913,7 @@
     const links = mt5GetLinks()
     const linkedManual = links[key] ? (accounts || []).find(m => String(m.id) === String(links[key])) : null
     if(linkedManual) return `<div style="display:flex;align-items:center;gap:8px">
-        <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:#22c55e22;color:#16a34a">✓ ${escapeHtml(linkedManual.name)}</span>
+        <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:color-mix(in srgb, var(--good) 13.33%, transparent);color:var(--good-ink, #15803d)">✓ ${escapeHtml(linkedManual.name)}</span>
         <button class="btn btn-ghost" data-mt5-unlink="${escapeHtml(key)}" style="padding:4px 8px;font-size:11px" type="button">Trennen</button>
       </div>`
     return `<button class="btn btn-ghost" data-mt5-link="${escapeHtml(key)}" data-mt5-name="${escapeHtml(meta.name || '')}" data-mt5-server="${escapeHtml(meta.server || '')}" style="padding:4px 10px;font-size:12px" type="button">
@@ -22344,10 +22344,10 @@
       // Plan-Karten-Version: „bei den Karten drunter genau das Gleiche").
       // dir: 'LONG' | 'SHORT' | 'MIX' | null — null heißt ehrlich kein Tag.
       const dirTag = dir => !dir ? '' :
-        `<b style="font-size:9.5px;font-weight:700;color:${dir === 'MIX' ? '#b45309' : dir === 'SHORT' ? '#b91c1c' : '#15803d'}">${dir}</b>`
+        `<b style="font-size:9.5px;font-weight:700;color:${dir === 'MIX' ? 'var(--warn-ink, #b45309)' : dir === 'SHORT' ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}">${dir}</b>`
       const dirVon = side => /sell|short|^1$/i.test(String(side)) ? 'SHORT' : 'LONG'
       const lotChip = (lbl, lots, dir) => !lots ? '' :
-        `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:rgba(245,158,11,.10)">`
+        `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:color-mix(in srgb, var(--warn) 10%, transparent)">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
         + dirTag(dir)
         + `<b style="font-size:12px;color:var(--ink)">${fmtLots(lots)} Lt</b></span>`
@@ -22549,11 +22549,11 @@
           let sum = 0, beweis = false
           for(const h of hs){ if(h && h.profit != null){ beweis = true; sum += Number(h.profit) || 0 } }
           if(!beweis) return ''
-          return `<span class="tc2-pnl" style="color:${sum >= 0 ? '#15803d' : '#b91c1c'}">H ${sum >= 0 ? '+' : ''}${sum.toFixed(2)} ${esc(s.hedge_currency || '')}</span>`
+          return `<span class="tc2-pnl" style="color:${sum >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">H ${sum >= 0 ? '+' : ''}${sum.toFixed(2)} ${esc(s.hedge_currency || '')}</span>`
         }
         for(const p of pos){
           const pnl = (pos.length === 1 && mPL != null)
-            ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? '#15803d' : '#b91c1c'}">M ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}</span>` : ''
+            ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">M ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}</span>` : ''
           // Symmetrie-Balken auch hier (26.08.2026, Finns Wunsch): die drei
           // Normierungszahlen des Plans pusht der Besitzer-PC als plan_sym mit —
           // gerechnet wird mit demselben Helfer wie auf der Plan-Karte. Nur bei
@@ -22585,13 +22585,13 @@
             lotChip('MASTER', Number(p.volume), p.type === 0 ? 'LONG' : 'SHORT') + (ohneHedge ? '' : lotChip('SLAVE', hedgeLots(p.ident), hDir)) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
             frisch, ohneHedge ? 'mt5v2' : 'mt5'))
         }
-        if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ ${s.note ? 'Hedge bei EINGEFRORENEM Master-Snapshot' : 'Hedge OHNE Master'} (${esc(r.instance)}): `
+        if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:var(--danger-ink, #b91c1c);font-weight:600">⚠ ${s.note ? 'Hedge bei EINGEFRORENEM Master-Snapshot' : 'Hedge OHNE Master'} (${esc(r.instance)}): `
           + waisen.map(([k, v]) => v.map(h =>
               `${Number(h.volume || 0).toFixed(2)} Lots (Ticket ${esc(String(h.ticket ?? '?'))})`).join(', ')).join(' · ')
           + ` — im Hedge-Terminal prüfen!</div>`)
         if(fremdNeu){
           fremdGezeigt.add(r.hedge_login)
-          lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
+          lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:var(--danger-ink, #b91c1c);font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
             + fr.map(f => `${f.type === 0 ? 'BUY' : 'SELL'} ${Number(f.volume || 0).toFixed(2)} ${esc(f.symbol)} (Ticket ${esc(String(f.ticket ?? '?'))})`).join(' · ')
             + ` — gehört zu KEINEM Master!</div>`)
         }
@@ -22603,7 +22603,7 @@
         const frisch = ltAlterS != null && ltAlterS <= 20
         const pKey = meUid ? merken(meUid, profName.get(meUid) || 'Dieses Profil') : merken('hier', 'Dieses Profil')
         const pnl = p.pnl != null
-          ? `<span class="tc2-pnl" style="color:${Number(p.pnl) >= 0 ? '#15803d' : '#b91c1c'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)}</span>` : ''
+          ? `<span class="tc2-pnl" style="color:${Number(p.pnl) >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)}</span>` : ''
         lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, String(p.accountName), null,
           subPerson(pKey) + `<b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
           lotChip('KT', Number(p.size) || 0, dirVon(p.side)) + pnl + zeitChip(null, frisch, ltAlterS == null ? 0 : ltAlterS),
@@ -22685,7 +22685,7 @@
       // Fehler SICHTBAR machen statt schlucken: der Block war am 25.08. im
       // Feld unsichtbar und niemand konnte sagen warum — nie wieder stumm.
       console.warn('[flotte]', e)
-      box.innerHTML = `<div style="border:1px solid var(--border);border-left:3px solid #D92D20;border-radius:10px;padding:10px 12px;font-size:12px;color:#D92D20">Flotte-Fehler: ${esc(String((e && e.message) || e))}</div>`
+      box.innerHTML = `<div style="border:1px solid var(--border);border-left:3px solid var(--danger-ink, #b91c1c);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--danger-ink, #b91c1c)">Flotte-Fehler: ${esc(String((e && e.message) || e))}</div>`
       box.style.display = ''
     }
     finally{ _fleetRenderBusy = false }
@@ -22913,9 +22913,9 @@
   /* Chip „MASTER ±x $" für Echo V2 — EINE Optik für die eigene Plan-Karte und die Flotten-Karte fremder IDs (25.09.2026) */
   function mt5V2PnlChip(v, ccy, lots, titel, schwebend){
     const e = (typeof escapeHtml === 'function') ? escapeHtml : (x => String(x))
-    return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="${e(titel)}">`
+    return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'color-mix(in srgb, var(--good) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 8%, transparent)'}" title="${e(titel)}">`
       + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
-      + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}${schwebend ? ';opacity:.85' : ''}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ccy ? ' ' + ccy : ''}</b>`
+      + `<b style="font-size:12px;color:${v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}${schwebend ? ';opacity:.85' : ''}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ccy ? ' ' + ccy : ''}</b>`
       + (schwebend ? `<span style="font-size:9.5px;color:var(--sub)">schwebend</span>` : '')
       + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lots</span>` : '')   /* Review-Finding K18 (24.09.2026): Echo V2 überall „Lots", Orbit V2 „Kt" */
       + `</span>`
@@ -23027,10 +23027,10 @@
       // Kompakt-Design (18.08.2026, Finns Wunsch: Symmetrie ist zentral, war
       // aber eine Mini-Textwurst): zwei P&L-Chips + Symmetrie-Farbbalken.
       const chip = (lbl, v, lots, dir) =>
-        `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}">`
+        `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'color-mix(in srgb, var(--good) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 8%, transparent)'}">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
         + (dir || '')
-        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b>`
+        + `<b style="font-size:12px;color:${v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b>`
         + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lt</span>` : '')
         + `</span>`
       // Richtung neben den Lots (27.08.2026, Finns Wunsch, Gegenstück zur
@@ -23039,7 +23039,7 @@
       const _dirTag = (hasL, hasS) => {
         if(!hasL && !hasS) return ''
         const d = hasL && hasS ? 'MIX' : hasS ? 'SHORT' : 'LONG'
-        const col = d === 'MIX' ? '#b45309' : d === 'SHORT' ? '#b91c1c' : '#15803d'
+        const col = d === 'MIX' ? 'var(--warn-ink, #b45309)' : d === 'SHORT' ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
         return `<b style="font-size:9.5px;font-weight:700;color:${col}">${d}</b>`
       }
       const mDir = _dirTag(
@@ -24062,12 +24062,12 @@
         const alterTxt = alter < 3600 ? `vor ${Math.round(alter / 60)} min` : `vor ${(alter / 3600).toFixed(1).replace('.', ',')} h`
         return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="Letzter Rundgang-Stand ${alterTxt} — „P&L holen" liest neu">`
           + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
-          + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'};opacity:.75">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
+          + `<b style="font-size:12px;color:${v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'};opacity:.75">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
           + `<span style="font-size:10px;color:var(--sub)">${alterTxt}</span></span>`
       }
-      return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="Live-P&L der Position (Orbit V2): aus dem letzten Rundgang in TradingView, vor ${alter} s">`
+      return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'color-mix(in srgb, var(--good) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 8%, transparent)'}" title="Live-P&L der Position (Orbit V2): aus dem letzten Rundgang in TradingView, vor ${alter} s">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
-        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
+        + `<b style="font-size:12px;color:${v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
         + `</span>`
     }catch(_){ return '' }
   }
@@ -24103,7 +24103,7 @@
     const alterS = Math.max(0, k.alter_ms / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })
     const titel = `${r.formel} = ${sig(r.pl, '$')} · Kurs ${fE(k.preis)} (${k.quelle}, vor ${alterS} s) · Einstieg ${fE(einstieg)} (${eq})`
       + (fus != null ? ` · zusammen ≈ ${sig(r.pl * fx + fus, '€')} (Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/$ + Fusion ${sig(fus, '€')})` : '')
-    return `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${r.pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'};border:1px solid var(--border-soft)" title="${escapeHtml(titel)}">${lbl}<span style="font-size:11px;color:var(--sub)">${escapeHtml(kopf)}</span><b style="font-size:12px;color:${r.pl >= 0 ? '#15803d' : '#b91c1c'}">${sig(r.pl, '$')}</b></span>`
+    return `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${r.pl >= 0 ? 'color-mix(in srgb, var(--good) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 8%, transparent)'};border:1px solid var(--border-soft)" title="${escapeHtml(titel)}">${lbl}<span style="font-size:11px;color:var(--sub)">${escapeHtml(kopf)}</span><b style="font-size:12px;color:${r.pl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${sig(r.pl, '$')}</b></span>`
   }
   window._wdMasterChipInner = wdMasterChipInner
 
@@ -25556,7 +25556,7 @@
     if(!g) return ''
     const um = k.t2_grund_at ? new Date(k.t2_grund_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
     const ok = /^Trade 2 angelegt/.test(g)
-    return `<span class="rsq-card-run" style="color:${ok ? 'var(--good)' : '#B45309'}" title="Topstep-Kette${um ? ' · ' + um : ''}: ${escapeHtml(g)}">⛓ ${escapeHtml(g.length > 70 ? g.slice(0, 69) + '…' : g)}</span>`
+    return `<span class="rsq-card-run" style="color:${ok ? 'var(--good)' : 'var(--warn-ink, #b45309)'}" title="Topstep-Kette${um ? ' · ' + um : ''}: ${escapeHtml(g)}">⛓ ${escapeHtml(g.length > 70 ? g.slice(0, 69) + '…' : g)}</span>`
   }
   window._tpKetteChip = tpKetteChip   // Test-Haken
   /* SCHRITT DER TOPSTEP-KETTE (09.10.2026, Finn kauft neue Topstep-Konten und will heute im Trade Plan sehen, ob alles klappt): statt
@@ -25597,7 +25597,7 @@
       const g = String(k.t2_grund || '')
       const t = g || 'Trade 2 folgt nach Balance-Nachlesung'
       tip.push(t)
-      kette = ` <span class="pz-kette" style="color:${!g ? 'var(--sub)' : /^Trade 2 angelegt/.test(g) ? 'var(--good)' : '#B45309'}" title="${escapeHtml(t)}">⛓</span>`
+      kette = ` <span class="pz-kette" style="color:${!g ? 'var(--sub)' : /^Trade 2 angelegt/.test(g) ? 'var(--good)' : 'var(--warn-ink, #b45309)'}" title="${escapeHtml(t)}">⛓</span>`
     }
     return { text: `Trade ${nr} · ${KETTE_TAG[typ]}`, nr, tag: KETTE_TAG[typ], tip: tip.join(' · '), kette }
   }
@@ -27135,7 +27135,7 @@
       const st = hedgeMasterWegStatus(h.pc || null, _wdReaderLage.rows.get(h.pc) || null, acc ? String(acc.externalId || '').trim() : '', Date.now())
       // Nur „aktiv" sichtbar (Finn 25.09.2026: der Reader liest die Position bewusst nicht — ein Dauer-Grau „aus" wäre Rauschen);
       // der Grund für „aus" steht nur im Tooltip des Chips (hedgeMasterWegTitel)
-      return st.aktiv ? `<span style="font-size:10px;color:#15803d" title="${escapeHtml(st.kurz + ': ' + st.grund)}">· ✓ ${escapeHtml(st.kurz)}</span>` : ''
+      return st.aktiv ? `<span style="font-size:10px;color:var(--good-ink, #15803d)" title="${escapeHtml(st.kurz + ': ' + st.grund)}">· ✓ ${escapeHtml(st.kurz)}</span>` : ''
     }catch(_){ return '' }
   }
   function hedgeMasterWegTitel(p, h){
@@ -27165,9 +27165,9 @@
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
         const pl = live ? Number(live.profit) : NaN
-        const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
-        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}${lvl ? `<span style="font-size:10px;color:#B45309">${lvl}</span>` : ''}`,
-          isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
+        const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
+        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}${lvl ? `<span style="font-size:10px;color:var(--warn-ink, #b45309)">${lvl}</span>` : ''}`,
+          isFinite(pl) ? (pl >= 0 ? 'color-mix(in srgb, var(--good) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 8%, transparent)') : 'var(--bg)',
           (() => { const ws = h.waechter_stand || {}, x = p.richtung === 'sell' ? ws.tief_seit_open : ws.hoch_seit_open
                    const qTxt = ws.kerzen_wurzel ? ` (${ws.kerzen_wurzel} ${ws.kerzen_quelle === 'ws' ? 'Chart-Serie' : ws.kerzen_quelle === 'gemischt' ? 'Chart-Serie + Ticks/andere Wurzel mit Basis-Ausgleich' : ws.kerzen_quelle === 'andere-ohne-basis' ? '— nur andere Wurzel ohne Basis, zählt nicht' : 'aus Ticks — kurze Ausschläge evtl. nicht erfasst'})` : ''
                    const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
@@ -27177,17 +27177,17 @@
       }
       if(h.status === 'geschlossen'){
         const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
-        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:${h.pl_offen === false ? '#B45309' : 'var(--sub)'}">${h.pl_offen === false ? 'zu · P&L ? (Terminal)' : 'zu · P&L folgt'}</span>`,
+        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:${h.pl_offen === false ? 'var(--warn-ink, #b45309)' : 'var(--sub)'}">${h.pl_offen === false ? 'zu · P&L ? (Terminal)' : 'zu · P&L folgt'}</span>`,
           'var(--bg)', `Fusion-Hedge geschlossen: ${hedgeGrundText(h.grund, h)} ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''}${h.fill_close ? ` · zu bei ${f(h.fill_close)}` : ''}${h.schon_zu ? ' · Level im Terminal hat gefüllt' : ''}`)
       }
-      if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
+      if(h.status === 'unklar') return box(`<span style="font-size:11px;color:var(--warn-ink, #b45309)">unklar</span>`, 'color-mix(in srgb, var(--warn) 12%, transparent)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
-      if(h.status === 'wartet') return box(`<span style="font-size:11px;color:#B45309">wartet…</span>`, 'rgba(247,144,9,.12)', `Fusion-Hedge: ${h.msg || 'neuer Versuch gleich'}`)
-      if(h.status === 'uebersprungen') return box(`<span style="font-size:11px;color:#b91c1c">nicht geöffnet</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge übersprungen: ${h.msg || '?'}`)
+      if(h.status === 'wartet') return box(`<span style="font-size:11px;color:var(--warn-ink, #b45309)">wartet…</span>`, 'color-mix(in srgb, var(--warn) 12%, transparent)', `Fusion-Hedge: ${h.msg || 'neuer Versuch gleich'}`)
+      if(h.status === 'uebersprungen') return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">nicht geöffnet</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', `Fusion-Hedge übersprungen: ${h.msg || '?'}`)
       // „Hedge öffnen" (25.09.2026): nur bei sicherem Fehler (nichts gesendet), laufendem Plan, am PC des Plans — eigener Handler
       const oeffnenBtn = (h.status === 'fehler' && hedgeFehlerSicher(h) && p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
         ? ` <button type="button" class="btn btn-ghost tc2-btn" data-plan-hedge-oeffnen="${escapeHtml(String(p.id))}" title="Fusion-Gegenposition jetzt öffnen — beim ersten Versuch wurde sicher nichts gesendet (${escapeHtml(String(h.code || ''))})" style="color:#0E7A78">Hedge öffnen</button>` : ''
-      return box(`<span style="font-size:11px;color:#b91c1c">Fehler</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`) + oeffnenBtn
+      return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">Fehler</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`) + oeffnenBtn
     }catch(_){ return '' }
   }
   window.hedgeSoloSchliessen = hedgeSoloSchliessen
@@ -27510,7 +27510,7 @@
       const je = mkl.kursJe || {}
       beide.innerHTML = ['NQ', 'MNQ'].map(w => { const x = je[w]; if(!x) return `<span style="color:var(--sub-2)"><b>${w}</b> –</span>`
         const a = Math.round(x.alter_ms / 1000), f = x.alter_ms <= HEDGE_KURS_MAX_ALTER_MS, steht = x.alter_ms > 60000 && !(typeof cmeMarktOffen === 'function' && !cmeMarktOffen())
-        return `<span style="${f ? '' : 'opacity:.55'}"><b>${w}</b> ${mklFmt(x.preis)} <span style="color:${steht ? '#b91c1c' : 'var(--sub-2)'}">vor ${a < 120 ? a + ' s' : a < 7200 ? Math.round(a / 60) + ' min' : Math.round(a / 3600) + ' h'}</span></span>` }).join('<span style="color:var(--sub-2)">·</span>')
+        return `<span style="${f ? '' : 'opacity:.55'}"><b>${w}</b> ${mklFmt(x.preis)} <span style="color:${steht ? 'var(--danger-ink, #b91c1c)' : 'var(--sub-2)'}">vor ${a < 120 ? a + ' s' : a < 7200 ? Math.round(a / 60) + ' min' : Math.round(a / 3600) + ' h'}</span></span>` }).join('<span style="color:var(--sub-2)">·</span>')
     }
     if(!k){
       const andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', jeA = (mkl.kursJe || {})[andere]
@@ -27549,7 +27549,7 @@
         : !frisch ? `⚠ kein Live-Kurs — letzter Stand vor ${alt} s (PC ${pcLabel(k.pc)})`
         : `live · vor ${alt} s`   // PC/Socket/„Tab verdeckt" raus (30.09.2026, Finn: Texte „nur für uns"), Details im title
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
-      q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : (frisch || zu) ? '' : '#B45309'
+      q.style.color = steht ? 'var(--danger-ink, #b91c1c)' : delayed ? 'var(--warn-ink, #b45309)' : (frisch || zu) ? '' : 'var(--warn-ink, #b45309)'
       q.style.fontWeight = (steht || delayed) ? '600' : ''
       q.title = `Cloud-Zeile vor ${alt} s geschrieben · letzter Handel (reader_ts) vor ${Math.round((k.handel_ms || 0) / 1000)} s — in ruhigen Minuten liegt der Handel weiter zurück als der Feed. Die Brücke schreibt jede Sekunde bei Änderung; Ausreißer zwischen zwei Anzeigen stecken im High/Low der laufenden Minute, Demo-Orders werten darüber aus.`
     }
@@ -27840,7 +27840,7 @@
       html += `<div style="position:absolute;left:${x0}px;right:0;top:${o}px;height:${u - o}px;background:${farbe}"></div>` }
     if(yE != null){
       zone(yE, yT, 'rgba(22,163,74,.12)')
-      zone(yE, yL, 'rgba(220,38,38,.05)')
+      zone(yE, yL, 'color-mix(in srgb, var(--danger) 5%, transparent)')
       // Live-P&L-Kästchen auf der Entry-Linie (nur laufend, frischer Kurs)
       if(a.offen){
         const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt(a.root === 'NQ' ? 'NQ' : 'MNQ', 15000) : null
@@ -27861,9 +27861,9 @@
     const offen = mkl.orders.filter(o => o.status === 'open'), zu = mkl.orders.filter(o => o.status === 'closed').slice(0, 12)
     const zeile = (o, live) => {
       const pl = live ? (kurs != null ? mklPl(o, kurs) : null) : Number(o.pl_usd)
-      const col = pl == null ? 'var(--sub)' : pl >= 0 ? '#15803d' : '#b91c1c'
+      const col = pl == null ? 'var(--sub)' : pl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
       return `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:12.5px">
-        <b style="color:${o.richtung === 'sell' ? 'var(--danger)' : '#2a9d5c'};min-width:52px">${o.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>
+        <b style="color:${o.richtung === 'sell' ? 'var(--danger)' : 'var(--good-ink, #15803d)'};min-width:52px">${o.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>
         <span class="mono">${o.kt} × ${escapeHtml(o.symbol)}</span>
         <span class="mono" style="color:var(--sub)">@ ${mklFmt(o.entry)}</span>
         <span class="mono" style="font-size:11.5px;color:var(--sub)">TP ${o.tp_level ? mklFmt(o.tp_level) : '—'} · SL ${o.sl_level ? mklFmt(o.sl_level) : '—'}</span>
@@ -27874,7 +27874,7 @@
     }
     offenEl.innerHTML = offen.length ? `<div style="font-size:12px;color:var(--sub);margin-bottom:2px">Offen (${offen.length})</div>` + offen.map(o => zeile(o, true)).join('') : `<div style="font-size:12.5px;color:var(--sub)">Keine offene Demo-Order.</div>`
     const summe = mkl.orders.filter(o => o.status === 'closed').reduce((s, o) => s + (Number(o.pl_usd) || 0), 0)
-    verlaufEl.innerHTML = zu.length ? `<div style="font-size:12px;color:var(--sub);margin-bottom:2px">Zuletzt geschlossen · Summe aller Demo-Trades <b class="mono" style="color:${summe >= 0 ? '#15803d' : '#b91c1c'}">${summe >= 0 ? '+' : '−'}${mklFmt(Math.abs(summe))} $</b></div>` + zu.map(o => zeile(o, false)).join('') : ''
+    verlaufEl.innerHTML = zu.length ? `<div style="font-size:12px;color:var(--sub);margin-bottom:2px">Zuletzt geschlossen · Summe aller Demo-Trades <b class="mono" style="color:${summe >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${summe >= 0 ? '+' : '−'}${mklFmt(Math.abs(summe))} $</b></div>` + zu.map(o => zeile(o, false)).join('') : ''
     // Eigene Handler je Knopf (keine Sammel-Handler)
     offenEl.querySelectorAll('[data-mkl-close]').forEach(b => b.addEventListener('click', () => mklDemoHand(b.getAttribute('data-mkl-close'))))
   }
@@ -27959,7 +27959,7 @@
   // wurde nie gespeichert, also hängt niemand auf 4 h oder 24 h fest
   document.querySelectorAll('#mkl-dir [data-mkl-dir]').forEach(b => b.addEventListener('click', () => {
     mkl.dir = b.getAttribute('data-mkl-dir')
-    document.querySelectorAll('#mkl-dir button').forEach(x => { x.classList.toggle('active', x === b); x.style.color = x === b ? (mkl.dir === 'sell' ? 'var(--danger)' : '#2a9d5c') : '' })
+    document.querySelectorAll('#mkl-dir button').forEach(x => { x.classList.toggle('active', x === b); x.style.color = x === b ? (mkl.dir === 'sell' ? 'var(--danger)' : 'var(--good-ink, #15803d)') : '' })
   }))
   document.querySelectorAll('#mkl-instr [data-mkl-instr]').forEach(b => b.addEventListener('click', () => {
     mkl.instr = b.getAttribute('data-mkl-instr') === 'NQ' ? 'NQ' : 'MNQ'
@@ -28392,23 +28392,23 @@
   }
   function mklWdPlanHtml(){
     const P = mkl.wd.plan
-    if(!P || !P.tag) return P && P.fehler ? `<div class="mwj-naechste" style="color:#B45309">Plan nicht ladbar: ${escapeHtml(P.fehler)}</div>` : ''
+    if(!P || !P.tag) return P && P.fehler ? `<div class="mwj-naechste" style="color:var(--warn-ink, #b45309)">Plan nicht ladbar: ${escapeHtml(P.fehler)}</div>` : ''
     const r = P.regeln || {}, jetzt = Date.now()
     const tr = mklWdPlanTrades(P)
     const ohne = (P.rows || []).filter(x => !(x.konten || []).some(k => k && k.aktiv !== false))
     const nIds = new Set(tr.map(t => t.uid)).size, erster = tr.find(t => t.start_um && t.status === 'planned') || tr.find(t => t.start_um)
     const dauer = ms => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
-    const flag = (name, an) => `<b style="font-weight:600;color:${an ? '#15803d' : 'var(--sub)'}">${name} ${an ? 'an' : 'aus'}</b>`
+    const flag = (name, an) => `<b style="font-weight:600;color:${an ? 'var(--good-ink, #15803d)' : 'var(--sub)'}">${name} ${an ? 'an' : 'aus'}</b>`
     const titel = P.tag === P.heute ? 'Plan heute Nacht' : `Plan für ${mklWdPlanTagTxt(P.tag)}`
     const kopf = `<div class="mwj-kopf" style="margin-top:14px">${titel} <span>${nIds} ${nIds === 1 ? 'ID' : 'IDs'} · ${tr.length} ${tr.length === 1 ? 'Trade' : 'Trades'}${erster ? ` · erster Start ${escapeHtml(wdHhmm(erster.start_um))} Dubai` : ''} · ${flag('SCHARF', !!r.scharf)} · ${flag('Automatik', !!r.aktiv)} · ${flag('Gegenhedge', !!(r.vorplan && r.vorplan.hedge_an))}</span></div>`
     const hinweis = r.scharf ? '' : `<div class="mwj-naechste">Startet nicht, solange SCHARF aus ist.</div>`
-    const ST = { planned: ['geplant', 'var(--violet)'], open: ['läuft', '#15803d'], review: ['Überprüfen', '#B45309'], completed: ['fertig', 'var(--sub)'],
-                 kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['wird neu angelegt', '#B45309'], unbekannt: ['–', 'var(--sub)'] }
+    const ST = { planned: ['geplant', 'var(--violet)'], open: ['läuft', 'var(--good-ink, #15803d)'], review: ['Überprüfen', 'var(--warn-ink, #b45309)'], completed: ['fertig', 'var(--sub)'],
+                 kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['wird neu angelegt', 'var(--warn-ink, #b45309)'], unbekannt: ['–', 'var(--sub)'] }
     const f0 = v => (v == null || v === '' || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     // Farmer-Admin: frischer Stand, sonst der gemerkte (F34 — Stift sofort, der Server prüft beim Speichern)
     const admin = P.farmerAdmin !== undefined ? P.farmerAdmin : mklWdAdminGemerkt()
     const zeilen = tr.map(t => {
-      const st = t.status === 'falscher_weg' ? [`falscher Weg (${t.plan.route})`, '#b91c1c'] : ST[t.status] || [t.status || '–', 'var(--sub)'], a = Date.parse(t.start_um || '') || 0
+      const st = t.status === 'falscher_weg' ? [`falscher Weg (${t.plan.route})`, 'var(--danger-ink, #b91c1c)'] : ST[t.status] || [t.status || '–', 'var(--sub)'], a = Date.parse(t.start_um || '') || 0
       const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(t.uid) : '#667085'
       const lauf = t.plan && t.plan.started_at ? Date.parse(t.plan.started_at) : a
       const cd = t.status === 'open' ? ['läuft', 'seit ' + (lauf ? dauer(jetzt - lauf) : '–')] : (t.status === 'completed' || t.status === 'review') ? ['✓', 'durch']
@@ -28456,7 +28456,7 @@
           <div class="seg" title="Richtung gilt für die ganze ID (alle Konten von ${escapeHtml(t.name)})">${seg('data-mwp-dir', 'buy', 'BUY')}${seg('data-mwp-dir', 'sell', 'SELL')}</div>
           <button type="button" class="btn btn-primary" data-mwp-save style="padding:4px 12px"${e.busy ? ' disabled' : ''}>${e.busy ? 'speichert…' : 'Speichern'}</button>
           <button type="button" class="btn btn-ghost" data-mwp-cancel style="padding:4px 10px"${e.busy ? ' disabled' : ''}>Abbrechen</button>
-          ${e.msg ? `<span style="color:${e.fehler ? '#b91c1c' : 'var(--sub)'}">${escapeHtml(e.msg)}</span>` : ''}
+          ${e.msg ? `<span style="color:${e.fehler ? 'var(--danger-ink, #b91c1c)' : 'var(--sub)'}">${escapeHtml(e.msg)}</span>` : ''}
         </div>
       </div>`
   }
@@ -28705,7 +28705,7 @@
     const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const sig = (v, einheit, d) => { const n = num(v); if(n == null) return '–'; return `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })} ${einheit}` }
-    const col = v => num(v) == null ? 'var(--sub)' : Number(v) >= 0 ? '#15803d' : '#b91c1c'
+    const col = v => num(v) == null ? 'var(--sub)' : Number(v) >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
     const uhr = t => t ? new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–'
     const alter = t => { if(!t) return ''; const sek = Math.round((Date.now() - (Date.parse(t) || 0)) / 1000); return sek < 90 ? `vor ${sek} s` : sek < 5400 ? `vor ${Math.round(sek / 60)} min` : `vor ${(sek / 3600).toFixed(1)} h` }
     const dauer = (von, bis) => { const a = Date.parse(von || '') || 0; if(!a) return ''; const m = Math.max(0, Math.round(((bis ? (Date.parse(bis) || Date.now()) : Date.now()) - a) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
@@ -28736,7 +28736,7 @@
         const lo0 = Math.min(...pts), hi0 = Math.max(...pts), pad = Math.max(2, (hi0 - lo0) * 0.08)
         const lo = lo0 - pad, hi = hi0 + pad, pct = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100))
         const seg = (a, b, c) => (a != null && b != null) ? `, ${c} ${pct(Math.min(a, b))}%, ${c} ${pct(Math.max(a, b))}%` : ''
-        const stops = [] ; if(sl != null) stops.push([Math.min(sl, entry), Math.max(sl, entry), 'rgba(240,68,56,.28)']); if(tp != null) stops.push([Math.min(tp, entry), Math.max(tp, entry), 'rgba(18,183,106,.32)'])
+        const stops = [] ; if(sl != null) stops.push([Math.min(sl, entry), Math.max(sl, entry), 'color-mix(in srgb, var(--danger) 28%, transparent)']); if(tp != null) stops.push([Math.min(tp, entry), Math.max(tp, entry), 'color-mix(in srgb, var(--good) 32%, transparent)'])
         stops.sort((x, y) => x[0] - y[0])
         let grad = 'linear-gradient(90deg, var(--border-soft) 0%'; let cur = 0
         for(const [x, y, c] of stops){ grad += `, var(--border-soft) ${pct(x)}%, ${c} ${pct(x)}%, ${c} ${pct(y)}%, var(--border-soft) ${pct(y)}%` }
@@ -28751,7 +28751,7 @@
           </div>
           <div class="mwd-level-txt mono">${offen ? (kp != null
               ? `Kurs ${f2(kp)}${dTp != null ? ` · <span class="${Math.abs(dTp) <= 5 ? 'mwd-nah' : ''}">TP in ${f0(Math.abs(dTp))} Pkt${dTp < 0 ? ' (überschritten)' : ''}${(() => { const q = { tv_toast: 'TV-Meldung', tv_orders: 'TV-Orders', tv_limit: 'TV-Limit', hand: 'Hand' }[String((h && h.tp_quelle) || '')]; return q ? ' · TP aus ' + q : '' })()}</span>` : ''}${dSl != null ? ` · ${pw.sl_art === 'liquidation' ? 'Liq' : 'SL'} in ${f0(Math.abs(dSl))} Pkt${dSl < 0 ? ' (unterschritten)' : ''}` : ''}`
-              : 'kein frischer Kurs — Abstände folgen mit dem Feed') : `${tp != null ? 'TP ' + f2(tp) : ''}${sl != null ? (pw.sl_art === 'liquidation' ? ' · Liq ' : ' · SL ') + f2(sl) : ''} · Entry ${f2(entry)}`}${pw.sl_art === 'liquidation' && num(pw.liq_balance) != null ? ` <span style="color:var(--sub-2)" title="Liquidations-Level: Balance ${f0(pw.liq_balance)} $ (Kontogröße + 100 $)${h && h.liq_quelle ? ' · Start-Balance aus ' + (h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : 'dem Konto (letzte Lesung)') : ''}">· Liq bei ${f0(pw.liq_balance)} $</span>` : ''}${pw.sl_hinweis ? ` <span style="color:#B45309">· ${escapeHtml(String(pw.sl_hinweis))}</span>` : ''}</div>
+              : 'kein frischer Kurs — Abstände folgen mit dem Feed') : `${tp != null ? 'TP ' + f2(tp) : ''}${sl != null ? (pw.sl_art === 'liquidation' ? ' · Liq ' : ' · SL ') + f2(sl) : ''} · Entry ${f2(entry)}`}${pw.sl_art === 'liquidation' && num(pw.liq_balance) != null ? ` <span style="color:var(--sub-2)" title="Liquidations-Level: Balance ${f0(pw.liq_balance)} $ (Kontogröße + 100 $)${h && h.liq_quelle ? ' · Start-Balance aus ' + (h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : 'dem Konto (letzte Lesung)') : ''}">· Liq bei ${f0(pw.liq_balance)} $</span>` : ''}${pw.sl_hinweis ? ` <span style="color:var(--warn-ink, #b45309)">· ${escapeHtml(String(pw.sl_hinweis))}</span>` : ''}</div>
         </div>`
       } else {
         level = `<div class="mwd-level-txt mono">${geplant ? 'Order noch nicht platziert' : 'kein Einstieg gespeichert'}${num(pw.master_tp) != null ? ` · TP ${f0(pw.master_tp)} $` : ''}${num(pw.master_sl) != null ? ` · SL ${f0(pw.master_sl)} $` : ''}${(kt != null && ppl) ? ` · ${f0(num(pw.master_tp) / (ppl * kt))} Pkt` : ''}</div>`
@@ -28818,7 +28818,7 @@
     // Titel-Datum = Farmer-Tag (F31: /admin/wd-heute liefert den CME-Handelstag — nachts um 01:15 stand da noch der Vortag).
     // Zähler aus dem Plan des Farmer-Tags (F32), sonst wie bisher aus wd-heute
     const pz = mklWdPlanZaehler(), zLauf = pz ? pz.lauf : offenN, zGepl = pz ? pz.geplant : geplantN
-    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${zLauf} ${zLauf === 1 ? 'läuft' : 'laufen'} · ${zGepl} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
+    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${zLauf} ${zLauf === 1 ? 'läuft' : 'laufen'} · ${zGepl} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:var(--warn-ink, #b45309)">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     el.querySelectorAll('[data-mwd-tp]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdTpVonHand(b.dataset.mwdTp) }))
@@ -29052,7 +29052,7 @@
     if(!offen.length && !erl.length) return ''
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
     const sig = (n, e) => (n == null || !isFinite(n)) ? '–' : `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${e}`
-    const col = n => (n == null || !isFinite(n)) ? 'var(--sub)' : n >= 0 ? '#15803d' : '#b91c1c'
+    const col = n => (n == null || !isFinite(n)) ? 'var(--sub)' : n >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
     const uhr = t => t ? new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–'
     const kopf = x => { const k = x.konto || {}, buy = x.richtung === 'buy', sell = x.richtung === 'sell'
       const grund = (x.hedge && x.hedge.grund && typeof hedgeGrundText === 'function') ? hedgeGrundText(x.hedge.grund, x.hedge) : (x.final_quelle || x.grund || '')
@@ -29069,7 +29069,7 @@
       const feld = (art, text, einheit, quelle, hand) => `<label class="mwd-box"><span class="mwd-box-t">${art === 'm' ? 'Master' : 'Fusion'} ${einheit}</span>`
         + `<input type="text" inputmode="decimal" class="input mono mwd-abh-in" data-abh-plan="${escapeHtml(pid)}" data-abh-feld="${art}" value="${escapeHtml(text)}" placeholder="0,00"${busy ? ' disabled' : ''}>`
         + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span>`
-        + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:#B45309;font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '')
+        + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:var(--warn-ink, #b45309);font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '')
         // Handstart (29.09.2026): Start-Balance kam aus der Konto-Lesung vor dem Start, nicht aus Puls beim Platzieren.
         // /admin/wd-plaene liefert tv nur gekürzt — sonst aus dem eigenen Plan-Cache (eigene IDs)
         + ((art === 'm' && tvBs && tvBs.balance_start_quelle === 'konto_balance') ? `<span class="mwd-box-s">Start-Balance aus Konto-Lesung ${tvBs.balance_start_at ? new Date(tvBs.balance_start_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}</span>` : '') + `</label>`
@@ -29106,7 +29106,7 @@
       if(pw && sEl){ const w = mklWdAbhakenWerte(pw), m = mklWdZahlLesen(w.mText), f = mklWdZahlLesen(w.fText), fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
         const s0 = (m != null && !isNaN(m) && f != null && !isNaN(f)) ? m * fx + f : null
         sEl.textContent = s0 == null ? '–' : `≈ ${s0 < 0 ? '−' : '+'}${Math.abs(s0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
-        sEl.style.color = s0 == null ? 'var(--sub)' : s0 >= 0 ? '#15803d' : '#b91c1c' }
+        sEl.style.color = s0 == null ? 'var(--sub)' : s0 >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)' }
     }))
     el.querySelectorAll('[data-mwd-abhaken]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAbhaken(b.dataset.mwdAbhaken) }))
     el.querySelectorAll('[data-mwd-lesen]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); endlesungJetzt(b.dataset.mwdLesen) }))
@@ -29476,7 +29476,7 @@
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
     const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
     const summe = (mpl != null && isFinite(mpl)) ? mpl * fx + ((spl != null && isFinite(spl)) ? spl : 0) : null
-    el.innerHTML = `<span>zusammen ≈ <b class="mono" style="color:${summe == null ? 'var(--sub)' : summe >= 0 ? '#15803d' : '#b91c1c'}">${summe == null ? '–' : fmtE(summe)}</b></span>`
+    el.innerHTML = `<span>zusammen ≈ <b class="mono" style="color:${summe == null ? 'var(--sub)' : summe >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${summe == null ? '–' : fmtE(summe)}</b></span>`
       + `<span class="mwd-erl-buchung">${(spl != null && isFinite(spl)) ? (_mwdErlFusionAmPlan ? 'Fusion-P&amp;L wird am Trade eingetragen' : `wird als WD-Hedge auf ${escapeHtml(_mwdErlKonto)} gebucht`) : 'ohne Fusion-Buchung'}</span>`
   }
   document.getElementById('mwd-erl-master')?.addEventListener('input', mklWdErlSumme)
@@ -29707,7 +29707,7 @@
       const t = (wdl.daten.trades || []).find(x => wdlTid(x) === el.getAttribute('data-wdl-fusion')); if(!t) continue
       const v = wdlFusionWert(t)
       el.textContent = wdlFusionText(t, v)
-      el.style.color = v == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
+      el.style.color = v == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
     }
   }
   /* PC-TAB-LEBENSZEICHEN JE ID (08.10.2026, Master/Finn; Anlass: Mikes Trade stand 20 h auf „wird gelesen", weil der Prophos-Tab an
@@ -30003,7 +30003,7 @@
     return { kp: kp != null ? z(kp, 2) : '–', tp: abst(L.dTp, L.dTpUsd, 'TP'), lq: abst(L.dLq, L.dLqUsd, 'Liq.'), sl: abst(L.dSl, L.dSlUsd, 'SL'),
              pl: L.pl != null ? `${L.pl < 0 ? '−' : '+'}${z(Math.abs(L.pl), 2)} $` : '–',
              bal: L.bal != null ? '≈ ' + z(L.bal, 2) + ' $' : '–',
-             plFarbe: L.pl == null ? 'var(--sub)' : L.pl >= 0 ? '#15803d' : '#b91c1c' }
+             plFarbe: L.pl == null ? 'var(--sub)' : L.pl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)' }
   }
   // LAUFZEIT (30.09.2026, Finn: die Demo-Zeile „Demo läuft · 40 Minuten …" kann weg, „aber die Laufzeit finde ich gut"): ab
   // started_at, nicht aus den Demo-Minuten. „40 min" · ab 60 min „1 h 12 min" · ab 24 h „1 T 3 h"; wdlLiveTick schreibt sie nach.
@@ -30061,7 +30061,7 @@
     const w = t.waehrung === 'EUR' ? '€' : t.waehrung && t.waehrung !== 'USD' ? t.waehrung : '$'
     const alt = t.mt5_alter_s != null ? ` · vor ${t.mt5_alter_s} s` : ''
     return { txt: v == null ? '–' : `≈ ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${w}`,
-             farbe: v == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c',
+             farbe: v == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)',
              tip: v == null ? 'kein frischer MT5-Stand' : `Live-P&L aus MT5 (Equity − Balance beim Start)${alt}` }
   }
   // Spannen-Tooltip Echo: echte Preise der Position, Kurs mit „≈" (aus Equity − Balance gerechnet)
@@ -30087,7 +30087,7 @@
   function wdlSpanneHtml(sp, kurs, farbe, tip, opt){
     const pE = wdlSpPos(sp, sp.ein), pK = wdlSpPos(sp, kurs)
     // blasses Rot bis zum Einstieg, blasses Grün ab dem Einstieg (wie mwd-bar); ohne Einstieg nur der graue Track
-    const bahn = pE != null ? `background:linear-gradient(90deg,rgba(240,68,56,.14) 0 ${pE.toFixed(2)}%,rgba(18,183,106,.22) ${pE.toFixed(2)}% 100%)` : ''
+    const bahn = pE != null ? `background:linear-gradient(90deg,color-mix(in srgb, var(--danger) 14%, transparent) 0 ${pE.toFixed(2)}%,color-mix(in srgb, var(--good) 22%, transparent) ${pE.toFixed(2)}% 100%)` : ''
     const betrag = v => (v != null && isFinite(v)) ? `<b>${wdlSpBetrag(v)}</b>` : ''   // fehlt der Betrag: nur das Label
     return `<span class="${opt && opt.klasse ? opt.klasse : 'wdl-z-mi wdl-sp'}"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small class="wdl-sp-l"><i>${opt && opt.l != null ? opt.l : sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liq'}</i>${betrag(sp.plLinks)}</small><span class="wdl-sp-bahn" style="${bahn}">`
       + (pE != null ? `<i class="wdl-sp-ein" style="left:${pE.toFixed(2)}%"></i>` : '')
@@ -30145,7 +30145,7 @@
     if(kopf) kopf.textContent = d.n ? `· ${d.n}` : ''
     // Letzter guter Stand (09.10.2026: Server erreichte Supabase kurz nicht → stand_alt + stand_at statt 502) — kleine Zeile, nur Anzeige
     const standAt = d.stand_alt ? new Date(d.stand_at || '') : null
-    const standZeile = standAt && !isNaN(standAt) ? `<div style="font-size:12px;color:#B45309;margin-bottom:6px">Stand ${standAt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (Server konnte Datenbank kurz nicht erreichen)</div>` : ''
+    const standZeile = standAt && !isNaN(standAt) ? `<div style="font-size:12px;color:var(--warn-ink, #b45309);margin-bottom:6px">Stand ${standAt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (Server konnte Datenbank kurz nicht erreichen)</div>` : ''
     const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || String(x || '')
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const tagTxt = iso => { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
@@ -30230,7 +30230,7 @@
     const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const usd = v => num(v) == null ? '–' : `${v < 0 ? '−' : '+'}${f2(Math.abs(v))} $`
     const eur = v => num(v) == null ? '' : `${v < 0 ? '−' : '+'}${Math.round(Math.abs(v)).toLocaleString('de-DE')} €`
-    const col = v => num(v) == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
+    const col = v => num(v) == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
     const heute = new Date().toDateString(), kp = num(o.kurs)
     const zeit = s => { const d = new Date(s || ''); if(isNaN(d)) return ''; return d.toDateString() === heute ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) }
     const zeile = e => {
@@ -30270,7 +30270,7 @@
   const lzZahl = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
   const lzUsd = v => lzZahl(v) == null ? '–' : `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
   const lzEur = v => lzZahl(v) == null ? '' : `${v < 0 ? '−' : '+'}${Math.round(Math.abs(v)).toLocaleString('de-DE')} €`
-  const lzFarbe = v => lzZahl(v) == null ? 'var(--sub)' : v >= 0 ? '#15803d' : '#b91c1c'
+  const lzFarbe = v => lzZahl(v) == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
   const lzAlter = ms => ms == null || !isFinite(ms) ? null : ms < 60000 ? Math.max(0, Math.round(ms / 1000)) + ' s' : Math.round(ms / 60000) + ' min'
   function lzStandText(){
     try{
@@ -30410,25 +30410,25 @@
   const wdlLiqIstTag = t => !!(t && t.liq_regel_soft && t.liq_gilt === 'regel')
   // BALANCE-SPRUNG (08.10.2026): Backend lt_balance_sprung → t.balance_sprung; Wort kurz, die Zahlen im Tooltip. P&L-Zelle zeigt den
   // Tages-P&L statt der Balance-Differenz (die enthält z. B. eine Auszahlung)
-  const wdlSprungErg = t => (t && t.balance_sprung) ? `<span style="color:#b45309" title="${escapeHtml(balanceSprungText(t.balance_sprung))}">Balance-Sprung</span>` : ''
+  const wdlSprungErg = t => (t && t.balance_sprung) ? `<span style="color:var(--warn-ink, #b45309)" title="${escapeHtml(balanceSprungText(t.balance_sprung))}">Balance-Sprung</span>` : ''
   const wdlPlTrade = t => (t && t.balance_sprung) ? t.balance_sprung.tages : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? Number(t.pl_balance) : null
   const wdlPlTip = (t, echo, pb) => (t && t.balance_sprung) ? 'Tages-P&L — ' + balanceSprungText(t.balance_sprung)
     : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen'
-  const WDL_TAGESLIMIT_ERG = '<span style="color:#b45309;opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
+  const WDL_TAGESLIMIT_ERG = '<span style="color:var(--warn-ink, #b45309);opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
   // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
   function wdlBlowErg(t){
     // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
-    if(t && t.blown === true) return '<b style="color:#b91c1c">💀 geblowt</b>'
+    if(t && t.blown === true) return '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>'
     // .1522: Demo an der Liquidation + Konto bei der Firma nicht mehr da (tvV2LiqUndWeg) → geblowt, auch ohne gelesene Balance
-    if(t && typeof tvV2LiqUndWeg === 'function' && tvV2LiqUndWeg(t.endlesung)) return `<b style="color:#b91c1c" title="Liquidation erreicht und das Konto ist bei ${escapeHtml(String((t.konto || {}).firma || 'der Firma'))} nicht mehr da (${Number((t.endlesung || {}).puls_versuche) || 0} Leseversuche) — geblowt. Beim Abhaken ist „geblowt" vorbelegt.">💀 geblowt</b>`
+    if(t && typeof tvV2LiqUndWeg === 'function' && tvV2LiqUndWeg(t.endlesung)) return `<b style="color:var(--danger-ink, #b91c1c)" title="Liquidation erreicht und das Konto ist bei ${escapeHtml(String((t.konto || {}).firma || 'der Firma'))} nicht mehr da (${Number((t.endlesung || {}).puls_versuche) || 0} Leseversuche) — geblowt. Beim Abhaken ist „geblowt" vorbelegt.">💀 geblowt</b>`
     const b = wdlBlowStand(t); if(!b) return ''
-    return b.geblowt ? '<b style="color:#b91c1c">💀 geblowt</b>' : b.softBreach ? WDL_TAGESLIMIT_ERG : ''
+    return b.geblowt ? '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>' : b.softBreach ? WDL_TAGESLIMIT_ERG : ''
   }
   // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
   // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
   const wdlKontoWeg = t => !!(t && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026)
-  const WDL_KONTO_WEG_ERG = '<span style="color:#b45309" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
+  const WDL_KONTO_WEG_ERG = '<span style="color:var(--warn-ink, #b45309)" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
   /* Schätzung für den Abhak-Dialog bei „Konto weg": Verlust von der Start-Balance des Trades bis zur Liquidation — dieselbe
    * Liq-Balance wie wdlBlowStand (Regel/Konto-Boden; beim Tageslimit der Konto-Boden). Nur wenn beide Werte an der Zeile stehen
    * und die Liq unter dem Start liegt, sonst null (Feld bleibt leer — nicht raten). */
@@ -30456,7 +30456,7 @@
     const de = v => Math.round(v).toLocaleString('de-DE')
     // seit .1141 Ergebnis-Wort in der Ergebnis-Spalte (Finn 07.10.2026: „links von Ereignis, da wo geblowt/Tageslimit steht …
     // nicht in den Namen reinpacken") — Stil wie wdlBlowErg, der Übergang steht im Tooltip
-    return `<b class="wdl-bestanden" style="color:#15803d;white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden · ${WDL_UEBERGANG[typ]}</b>`
+    return `<b class="wdl-bestanden" style="color:var(--good-ink, #15803d);white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden · ${WDL_UEBERGANG[typ]}</b>`
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
@@ -30464,7 +30464,7 @@
     if(!b) return '<span class="wdl-z-konto" title="noch keine Balance nach dem Trade gelesen">–</span>'
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
-    return `<span class="wdl-z-konto" title="${escapeHtml(tip)}"${b.geblowt ? ' style="color:#b91c1c"' : ''}>${f0(b.bal)} $</span>`
+    return `<span class="wdl-z-konto" title="${escapeHtml(tip)}"${b.geblowt ? ' style="color:var(--danger-ink, #b91c1c)"' : ''}>${f0(b.bal)} $</span>`
   }
   /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
    * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
@@ -30601,7 +30601,7 @@
     const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const sig = (v, e, d) => { const n = num(v); if(n == null) return '–'; return `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })} ${e}` }
-    const col = v => num(v) == null ? 'var(--sub)' : Number(v) >= 0 ? '#15803d' : '#b91c1c'
+    const col = v => num(v) == null ? 'var(--sub)' : Number(v) >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
     // Uhrzeit; an einem anderen Tag mit Datum davor („29.09. 23:40" — toLocaleDateString liefert den Punkt nach dem Monat schon mit)
     const heute = new Date().toDateString()
     const tag = d => d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
@@ -30615,8 +30615,8 @@
     const standAlt = !kopfFehler && wdl.daten && wdl.daten.stand_alt ? new Date(wdl.daten.stand_at || '') : null
     const standTxt = standAlt && !isNaN(standAlt) ? `Stand ${standAlt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (Server konnte Datenbank kurz nicht erreichen)` : ''
     kopf.style.display = (kopfFehler || standTxt) ? '' : 'none'
-    kopf.innerHTML = kopfFehler ? `<span style="font-size:12px;color:#B45309">Nicht aktualisiert: ${escapeHtml(wdl.fehler)}</span>`
-      : standTxt ? `<span style="font-size:12px;color:#B45309">${escapeHtml(standTxt)}</span>` : ''
+    kopf.innerHTML = kopfFehler ? `<span style="font-size:12px;color:var(--warn-ink, #b45309)">Nicht aktualisiert: ${escapeHtml(wdl.fehler)}</span>`
+      : standTxt ? `<span style="font-size:12px;color:var(--warn-ink, #b45309)">${escapeHtml(standTxt)}</span>` : ''
     // ZEILE (30.09.2026, Finn: „Warum Balance vorher, live, Liquidation, Kontogröße unbekannt …? So viele unnötige Sachen"): nur, was
     // man zum Handeln braucht, je Wert EINE Angabe, die Spaltenköpfe einmal je Gruppe. Raus aus der Anzeige: Balance vorher/live/
     // nachher, „beim Start nicht gelesen", Kontogröße, „noch X Pkt", TP in $, Demo-Sätze, Nachlesungs-Zeile. Seit der zweiten Runde
@@ -30754,7 +30754,7 @@
         // Bestanden: wohin das Konto nach dem Abhaken geht (13.10.2026) — „→ Tage sammeln 3/5" oder „→ Review", wie der Typ-Chip in Accounts
         // Mini-Trade (13.10.2026, Finn: „da steht bestanden — kommt der nicht zu Trade abhaken?"): eigenes Etikett „Tage-Mini" statt „🎯 bestanden"
         // — er bringt nur einen Handelstag, das Konto steht schon in Bestanden → Tage sammeln und bleibt dort
-        if(t.tage_mini && !wdlSprungErg(t) && !wdlBlowErg(t)) erg = `<b class="wdl-bestanden" style="color:#B45309;background:#FFFBEB;white-space:nowrap" title="Mini-Trade zum Tage sammeln (0,01 Lot) — Abhaken verbucht nur den Mini; das Konto bleibt in Bestanden → Tage sammeln, bis die Mindesttage voll sind">Tage-Mini</b>`
+        if(t.tage_mini && !wdlSprungErg(t) && !wdlBlowErg(t)) erg = `<b class="wdl-bestanden" style="color:var(--warn-ink, #b45309);background:var(--warn-bg, #FFFBEB);white-space:nowrap" title="Mini-Trade zum Tage sammeln (0,01 Lot) — Abhaken verbucht nur den Mini; das Konto bleibt in Bestanden → Tage sammeln, bis die Mindesttage voll sind">Tage-Mini</b>`
         else if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
@@ -31249,11 +31249,11 @@
       const dirTag = list => {
         if(!list.length) return ''
         const d = dirOf(list)
-        const col = d === 'MIX' ? '#b45309' : d === 'SHORT' ? '#b91c1c' : '#15803d'
+        const col = d === 'MIX' ? 'var(--warn-ink, #b45309)' : d === 'SHORT' ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
         return `<b style="font-size:9.5px;font-weight:700;color:${col}">${d}</b>`
       }
       const chip = (lbl, list) => !list.length ? '' :
-        `<span title="${escapeHtml(tipOf(list))}" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:rgba(245,158,11,.10)">`
+        `<span title="${escapeHtml(tipOf(list))}" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:color-mix(in srgb, var(--warn) 10%, transparent)">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
         + dirTag(list)
         + `<b style="font-size:12px;color:var(--ink)">${fmtLots(lotsOf(list))} Lt</b>`
@@ -31949,8 +31949,8 @@
 
   function ltSideBadge(side){
     const isBuy = /buy|long/i.test(String(side))
-    const color = isBuy ? '#16a34a' : '#dc2626'
-    const bg    = isBuy ? '#22c55e22' : '#ef444422'
+    const color = isBuy ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
+    const bg    = isBuy ? 'color-mix(in srgb, var(--good) 13.33%, transparent)' : 'color-mix(in srgb, var(--danger) 13.33%, transparent)'
     const lbl   = isBuy ? 'BUY' : 'SELL'
     return `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:700;background:${bg};color:${color};letter-spacing:.5px">${lbl}</span>`
   }
@@ -32225,12 +32225,12 @@
 
       // Net-Exposure-Indikator
       const isBalanced = Math.abs(hg.netSize) < Math.min(hg.totalLongSize, hg.totalShortSize) * 0.1
-      const netColor = isBalanced ? '#16a34a' : (Math.abs(hg.netSize) > Math.max(hg.totalLongSize, hg.totalShortSize) * 0.5 ? '#dc2626' : '#f59e0b')
+      const netColor = isBalanced ? 'var(--good-ink, #15803d)' : (Math.abs(hg.netSize) > Math.max(hg.totalLongSize, hg.totalShortSize) * 0.5 ? 'var(--danger-ink, #b91c1c)' : 'var(--warn)')
       const netLabel = isBalanced ? 'Sauber gehedged' : (hg.netSize > 0 ? `Long-bias +${hg.netSize.toFixed(2)}` : `Short-bias ${hg.netSize.toFixed(2)}`)
 
       // Long-Seite
       const longHtml = hg.longs.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#22c55e0d;border-radius:5px;font-size:12px;margin-bottom:3px">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:color-mix(in srgb, var(--good) 5.1%, transparent);border-radius:5px;font-size:12px;margin-bottom:3px">
           <div style="display:flex;gap:8px;align-items:center;min-width:0;flex:1">
             ${ltSrcBadge(p.src)}
             <span style="color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(p.accountName)}">${escapeHtml(p.accountName)}</span>
@@ -32240,7 +32240,7 @@
 
       // Short-Seite
       const shortHtml = hg.shorts.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#ef44440d;border-radius:5px;font-size:12px;margin-bottom:3px">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:color-mix(in srgb, var(--danger) 5.1%, transparent);border-radius:5px;font-size:12px;margin-bottom:3px">
           <div style="display:flex;gap:8px;align-items:center;min-width:0;flex:1">
             ${ltSrcBadge(p.src)}
             <span style="color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(p.accountName)}">${escapeHtml(p.accountName)}</span>
@@ -32263,14 +32263,14 @@
           <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:start">
             <!-- Long-Seite -->
             <div>
-              <div style="font-size:11px;color:#16a34a;font-weight:700;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">▲ Long · ${hg.totalLongSize.toFixed(2)}</div>
+              <div style="font-size:11px;color:var(--good-ink, #15803d);font-weight:700;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">▲ Long · ${hg.totalLongSize.toFixed(2)}</div>
               ${longHtml}
             </div>
             <!-- Pfeile -->
             <div style="display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:18px;padding-top:20px">⇄</div>
             <!-- Short-Seite -->
             <div>
-              <div style="font-size:11px;color:#dc2626;font-weight:700;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">▼ Short · ${hg.totalShortSize.toFixed(2)}</div>
+              <div style="font-size:11px;color:var(--danger-ink, #b91c1c);font-weight:700;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">▼ Short · ${hg.totalShortSize.toFixed(2)}</div>
               ${shortHtml}
             </div>
           </div>
@@ -32310,7 +32310,7 @@
       if(tsState.token) conns.push(`TopstepX (${ltState.positions.tsx.length})`)
       if(dupState.token) conns.push(`Duplikium (${ltState.positions.dup.length})`)
       stat.innerHTML = conns.length
-        ? `<span class="ts-dot" style="background:#22c55e"></span> ${conns.join(' · ')} · letzter Refresh ${t}`
+        ? `<span class="ts-dot" style="background:var(--good)"></span> ${conns.join(' · ')} · letzter Refresh ${t}`
         : '—'
     }
 
@@ -32353,7 +32353,7 @@
       const total = group.positions.length
       const totalPnl = group.positions.reduce((s, p) => s + (Number(p.pnl) || 0), 0)
       const pnlStr = group.positions.some(p => p.pnl != null)
-        ? `<span style="color:${totalPnl >= 0 ? '#16a34a' : '#dc2626'};font-variant-numeric:tabular-nums;font-weight:600">${totalPnl >= 0 ? '+' : ''}${dupFmtMoney(totalPnl, group.positions[0].ccy)}</span>`
+        ? `<span style="color:${totalPnl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'};font-variant-numeric:tabular-nums;font-weight:600">${totalPnl >= 0 ? '+' : ''}${dupFmtMoney(totalPnl, group.positions[0].ccy)}</span>`
         : '<span style="color:var(--sub);font-size:12px">PnL —</span>'
 
       // Dup-Verknüpfung-Hinweis: zeige bei MT-Cards, ob dieser Account auch via Duplikum getrackt wird
@@ -32364,7 +32364,7 @@
         if(linkedDupId){
           const dupAcc = (dupState.accounts || []).find(a => a.account_id === linkedDupId)
           if(dupAcc){
-            dupHint = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:#f59e0b22;color:#d97706;margin-left:6px" title="Auch via Duplikum (${escapeHtml(dupAcc.name)}). Wird hier nicht doppelt gezählt.">↻ via Duplikum</span>`
+            dupHint = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:color-mix(in srgb, var(--warn) 13.33%, transparent);color:var(--warn-ink, #b45309);margin-left:6px" title="Auch via Duplikum (${escapeHtml(dupAcc.name)}). Wird hier nicht doppelt gezählt.">↻ via Duplikum</span>`
           }
         }
       }
@@ -32389,7 +32389,7 @@
             <td style="padding:8px 12px;font-weight:600;color:var(--ink)">${escapeHtml(p.symbol)}${hedgeMarker}</td>
             <td style="padding:8px 12px;font-variant-numeric:tabular-nums;color:var(--ink)">${escapeHtml(String(p.size))}</td>
             <td style="padding:8px 12px;font-variant-numeric:tabular-nums;color:var(--sub);font-size:12px">${p.openPrice != null ? Number(p.openPrice).toFixed(2) : '—'}</td>
-            <td style="padding:8px 12px;font-variant-numeric:tabular-nums;text-align:right;font-weight:600;color:${p.pnl == null ? 'var(--sub)' : (Number(p.pnl) >= 0 ? '#16a34a' : '#dc2626')}">
+            <td style="padding:8px 12px;font-variant-numeric:tabular-nums;text-align:right;font-weight:600;color:${p.pnl == null ? 'var(--sub)' : (Number(p.pnl) >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)')}">
               ${p.pnl == null ? '—' : (Number(p.pnl) >= 0 ? '+' : '') + dupFmtMoney(p.pnl, p.ccy)}
             </td>
           </tr>
@@ -33373,7 +33373,7 @@
       .map(([accId]) => accounts.find(a => String(a.id) === String(accId)))
       .filter(Boolean)
     if(pendingSuccessors.length){
-      html += `<div class="panel" style="margin-bottom:14px;border-color:#f59e0b55">
+      html += `<div class="panel" style="margin-bottom:14px;border-color:color-mix(in srgb, var(--warn) 33.33%, transparent)">
         <div class="panel-head" style="display:flex;justify-content:space-between;align-items:center">
           <div class="panel-title">🎉 Account-Daten nachtragen <span style="color:var(--sub);font-weight:400">(${pendingSuccessors.length})</span></div>
         </div>
@@ -33399,7 +33399,7 @@
     } else {
       html += `<div style="padding:6px 0">${planned.slice(0, 6).map(p => {
         const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'
-        const priorityCol = p.priority === 'high' ? '#ef4444' : (p.priority === 'low' ? '#94a3b8' : '#f59e0b')
+        const priorityCol = p.priority === 'high' ? 'var(--danger)' : (p.priority === 'low' ? '#94a3b8' : 'var(--warn)')
         return `<div style="display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line);gap:14px">
           <div style="width:6px;height:6px;border-radius:50%;background:${priorityCol};flex:none"></div>
           <div style="flex:1;min-width:0">
@@ -33422,7 +33422,7 @@
         <div style="padding:6px 0">${recent.map(p => {
           const dateStr = p.completedAt ? new Date(p.completedAt).toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'
           const totalPl = (Number(p.masterPl||0)) + (Number(p.slavePl||0))
-          const plCol = totalPl >= 0 ? 'var(--good,#10b981)' : 'var(--bad,#ef4444)'
+          const plCol = totalPl >= 0 ? 'var(--good)' : 'var(--bad,var(--danger))'
           return `<div style="display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line);gap:14px">
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:500;color:var(--ink)">${escapeHtml(p.masterName||'–')} → ${escapeHtml(p.slaveName||'–')}</div>
@@ -33684,7 +33684,7 @@
       const radio = opt.querySelector('input[type=radio]')
       if(radio?.checked){
         opt.style.borderColor = 'var(--violet)'
-        opt.style.background = 'rgba(84,71,206,.06)'
+        opt.style.background = 'color-mix(in srgb, var(--violet) 6%, transparent)'
       } else {
         opt.style.borderColor = 'var(--border)'
         opt.style.background = 'transparent'
@@ -34474,7 +34474,7 @@
     const statsEl = document.getElementById('ad-stats')
     if(statsEl) statsEl.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        ${adIsLive ? '' : `<div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,rgba(84,71,206,.10),rgba(22,200,198,.07));border:1px solid rgba(84,71,206,.30)">
+        ${adIsLive ? '' : `<div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,color-mix(in srgb, var(--violet) 10%, transparent),color-mix(in srgb, var(--teal) 7%, transparent));border:1px solid color-mix(in srgb, var(--violet) 30%, transparent)">
           <div class="kpi-label" style="color:var(--violet)">Gesamtkosten</div>
           <div class="kpi-value tnum" style="font-size:20px;color:var(--violet)">${adGkStr}</div>
           ${adGkSub}
@@ -34540,8 +34540,8 @@
       const dupId = Object.entries(dupLinks).find(([_,mId])=>String(mId)===String(acc.id))?.[0]
       if(dupId && dupState?.accounts){
         const dupAcc = dupState.accounts.find(a=>a.account_id===dupId)
-        if(dupAcc) chips.push(`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f59e0b11;border:1px solid #f59e0b33;border-radius:8px">
-          <span style="font-size:11px;font-weight:700;color:#d97706;background:#f59e0b22;padding:2px 6px;border-radius:4px">DUPLIKUM</span>
+        if(dupAcc) chips.push(`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:color-mix(in srgb, var(--warn) 6.67%, transparent);border:1px solid color-mix(in srgb, var(--warn) 20%, transparent);border-radius:8px">
+          <span style="font-size:11px;font-weight:700;color:var(--warn-ink, #b45309);background:color-mix(in srgb, var(--warn) 13.33%, transparent);padding:2px 6px;border-radius:4px">DUPLIKUM</span>
           <div><div style="font-size:12.5px;font-weight:600">${escapeHtml(dupAcc.name||dupId)}</div><div style="font-size:11px;color:var(--sub)">Login: ${escapeHtml(dupAcc.login||dupId)}</div></div>
         </div>`)
       }
@@ -34617,7 +34617,7 @@
           const p = item.obj
           const isMaster = String(p.masterAccountId)===String(acc.id)
           const pl = isMaster ? (p.masterPl||0) : (p.slavePl||0)
-          const plCls = pl>=0?'color:#16a34a':'color:#dc2626'
+          const plCls = pl>=0?'color:var(--good-ink, #15803d)':'color:var(--danger-ink, #b91c1c)'
           const dateLabel = p.completedAt ? new Date(p.completedAt).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'}) : '—'
           // Gegenseite mit anzeigen (die für die Gesamtkosten mitzählt, wenn sie ein Live-Account ist)
           const otherPl = isMaster ? (p.slavePl||0) : (p.masterPl||0)
@@ -34630,7 +34630,7 @@
           const wdHedge = isMaster && planHatWdFusionHedge(p)
           const otherCcy = wdHedge ? '€' : isMaster ? ((FIRM_PRESETS[firmToPreset(p.slaveFirm)]||FIRM_PRESETS.projectx).currency) : '$'
           const otherLabel = wdHedge ? 'Hedge' : isMaster ? 'Slave' : 'Master'
-          const otherCls = otherPl>=0?'color:#16a34a':'color:#dc2626'
+          const otherCls = otherPl>=0?'color:var(--good-ink, #15803d)':'color:var(--danger-ink, #b91c1c)'
           // Klick öffnet „Trade bearbeiten" (16.09.2026, Finn: „auf die Trades
           // drücken und im Nachhinein P&L bearbeiten — Finanzen sollen sich
           // anpassen"). Dasselbe Modal wie der Stift auf der Erledigt-Karte;
@@ -34638,7 +34638,7 @@
           // Kennung im Notiz-Feld nach (upsertAutoTransaction), die Finanzen
           // folgen also von selbst. Eigene Verdrahtung unten, kein Sammel-Handler.
           return `<div data-ad-plan="${escapeHtml(String(p.id))}" title="Klicken: Trade bearbeiten (P&L, Notiz)" style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer">
-            <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'#16a34a':'#dc2626'};margin-top:5px;flex-shrink:0"></span>
+            <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'var(--good-ink, #15803d)':'var(--danger-ink, #b91c1c)'};margin-top:5px;flex-shrink:0"></span>
             <div style="flex:1;min-width:0">
               <div style="font-weight:600;font-size:13px">${escapeHtml(wdHedge ? 'Winning Day' : isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${wdHedge ? 'Fusion-Hedge' : isMaster?'Slave':'Master'}</span> <span style="font-size:11px;color:var(--sub-2);font-weight:400">✎</span></div>
               <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(p.status==='completed'?'Erledigt':'Offen')} · ${dateLabel}</div>
@@ -34651,7 +34651,7 @@
         } else {
           const t = item.obj
           const amt = Number(t.amount||0)
-          const amtCls = amt>=0?'color:#16a34a':'color:#dc2626'
+          const amtCls = amt>=0?'color:var(--good-ink, #15803d)':'color:var(--danger-ink, #b91c1c)'
           const dateLabel = t.date ? new Date(t.date).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'}) : '—'
           return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
             <span style="width:8px;height:8px;border-radius:50%;background:var(--sub-2);margin-top:5px;flex-shrink:0"></span>
@@ -35499,7 +35499,7 @@
         const links = []
         if(a.topstep) links.push(`<span class="link-chip tsx" title="Topstep ${escapeHtml(a.topstep.name||'')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Topstep</span>`)
         if(a.ma)      links.push(`<span class="link-chip ma" title="MetaApi ${escapeHtml(a.ma.login||'')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>MT5</span>`)
-        if(dupAcc)    links.push(`<span class="link-chip" title="Duplikum ${escapeHtml(dupAcc.name||'')}" style="background:#f59e0b22;color:#d97706;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>Duplikum</span>`)
+        if(dupAcc)    links.push(`<span class="link-chip" title="Duplikum ${escapeHtml(dupAcc.name||'')}" style="background:color-mix(in srgb, var(--warn) 13.33%, transparent);color:var(--warn-ink, #b45309);display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>Duplikum</span>`)
         // MT5-Copier-Chip (15.08.2026) — Verlinkung aus mt5_links, teal wie das ma-Idiom
         const _mtcLogin = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(a.id) : null
         if(_mtcLogin) links.push(`<span class="link-chip" title="MT5-Copier ${escapeHtml(String(_mtcLogin))}" style="background:#16c8c622;color:#0d9488;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>MT5-Copier</span>`)
@@ -35572,7 +35572,7 @@
             const row = document.querySelector(`tr[data-acc-id="${targetId}"]`)
             if(row){
               row.scrollIntoView({ behavior:'smooth', block:'center' })
-              row.style.background = 'rgba(84,71,206,.1)'
+              row.style.background = 'color-mix(in srgb, var(--violet) 10%, transparent)'
               setTimeout(() => row.style.background = '', 1500)
             }
           }, 100)
@@ -36797,7 +36797,7 @@
       }
       const extIds = getExtIds()
       if(extIds.length && extIds.length !== count){
-        preview += `<br><span style="color:#b6690a">⚠ ${extIds.length} External IDs für ${count} Accounts — Rest bleibt ohne External ID</span>`
+        preview += `<br><span style="color:var(--warn-ink, #b45309)">⚠ ${extIds.length} External IDs für ${count} Accounts — Rest bleibt ohne External ID</span>`
       }
       bEl.preview.innerHTML = preview
       bEl.preview.style.display = 'block'
@@ -37573,7 +37573,7 @@
               ${ready ? (p.active
                 ? `<button class="btn btn-ghost" data-pair-stop="${p.id}">Stoppen</button>`
                 : `<button class="btn btn-primary" data-pair-start="${p.id}">Starten</button>`) : ''}
-              <button class="btn btn-ghost" data-pair-del="${p.id}" style="color:#c03128">Löschen</button>
+              <button class="btn btn-ghost" data-pair-del="${p.id}" style="color:var(--danger-ink, #b91c1c)">Löschen</button>
             </div>
           </div>
           ${liveAccsWarning}
