@@ -8650,7 +8650,7 @@
               <div id="tp-slave-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
-                    <span style="color:#8b5cf6;font-weight:700">⚖ Auto-Vorschlag:</span>
+                    <span style="color:var(--violet);font-weight:700">⚖ Auto-Vorschlag:</span>
                     <span id="tp-slave-suggest-value" style="font-family:var(--mono);font-weight:600">—</span>
                   </div>
                   <button type="button" id="tp-slave-suggest-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
@@ -8664,7 +8664,7 @@
               <div id="tp-gesamtkosten-suggest" style="display:none;padding:8px 12px;background:color-mix(in srgb, var(--teal) 8%, transparent);border:1px solid color-mix(in srgb, var(--teal) 25%, transparent);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
-                    <span style="color:#0d9c9a;font-weight:700">📊 Gesamtkosten:</span>
+                    <span style="color:var(--teal);font-weight:700">📊 Gesamtkosten:</span>
                     <span id="tp-gesamtkosten-value" style="font-family:var(--mono);font-weight:600">—</span>
                   </div>
                   <button type="button" id="tp-gesamtkosten-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
@@ -8683,7 +8683,7 @@
               <div id="tp-vorgaenger-suggest" style="display:none;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
-                    <span style="color:#7c3aed;font-weight:700">🔒 Fixkosten (bei Phasenwechsel):</span>
+                    <span style="color:var(--violet);font-weight:700">🔒 Fixkosten (bei Phasenwechsel):</span>
                     <span id="tp-vorgaenger-value" style="font-family:var(--mono);font-weight:600">—</span>
                   </div>
                   <button type="button" id="tp-vorgaenger-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
@@ -16354,7 +16354,7 @@
         const meta = metaParts.length
           ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
         const archBadge = r.archived
-          ? `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:#94a3b822;color:#475569;margin-left:8px;vertical-align:middle">${reasonMap[r.arch_reason] || '📦 Archiviert'}</span>` : ''
+          ? `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:color-mix(in srgb, var(--sub-2) 13.33%, transparent);color:var(--ink-2);margin-left:8px;vertical-align:middle">${reasonMap[r.arch_reason] || '📦 Archiviert'}</span>` : ''
         const quelle = r.balance_src === 'TV' && /topstep/i.test(String(r.firm || '')) ? 'TopstepX' : (QUELLE[r.balance_src] || r.balance_src || '')
         const balCell = r.balance != null
           ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
@@ -20632,7 +20632,7 @@
     const s = (state || '').toUpperCase()
     if(s === 'CONNECTED')      return '<span class="ts-dot" style="background:var(--good)"></span> Verbunden'
     if(s === 'DISCONNECTED')   return '<span class="ts-dot" style="background:var(--danger)"></span> Getrennt'
-    if(s === 'NONE' || !s)     return '<span class="ts-dot" style="background:#94a3b8"></span> —'
+    if(s === 'NONE' || !s)     return '<span class="ts-dot" style="background:var(--sub-2)"></span> —'
     return `<span class="ts-dot" style="background:var(--warn)"></span> ${s}`
   }
 
@@ -20679,7 +20679,7 @@
       const name = (a.name || a.login || a.account_id || '—')
       const sub  = `${a.login || ''}${a.server ? ' · '+a.server : ''}`
       const type = dupTypeLabel(a.type)
-      const typeColor = Number(a.type) === 0 ? '#8b5cf6' : '#3b82f6'
+      const typeColor = Number(a.type) === 0 ? 'var(--violet)' : '#3b82f6'
       const broker = dupBrokerLabel(a.broker)
       const env = a.environment ? ` · ${a.environment}` : ''
       const stateBadge = dupStateBadge(a.state)
@@ -20706,7 +20706,7 @@
             <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(sub)}</div>
           </td>
           <td>
-            <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:${typeColor}22;color:${typeColor}">${type}</span>
+            <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:color-mix(in srgb, ${typeColor} 13.33%, transparent);color:${typeColor}">${type}</span>
           </td>
           <td style="color:var(--ink)">${escapeHtml(broker)}<span style="color:var(--sub)">${escapeHtml(env)}</span></td>
           <td style="color:var(--sub)">${stateBadge}</td>
@@ -32256,7 +32256,7 @@
               <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${hg.longAccCount + hg.shortAccCount} Account${(hg.longAccCount + hg.shortAccCount)===1?'':'s'} · ${hg.positions.length} Position${hg.positions.length===1?'':'en'}</div>
             </div>
             <div style="text-align:right">
-              <span style="display:inline-block;padding:3px 9px;border-radius:6px;background:${netColor}22;color:${netColor};font-size:11.5px;font-weight:600">⚖ ${netLabel}</span>
+              <span style="display:inline-block;padding:3px 9px;border-radius:6px;background:color-mix(in srgb, ${netColor} 13.33%, transparent);color:${netColor};font-size:11.5px;font-weight:600">⚖ ${netLabel}</span>
             </div>
           </div>
 
@@ -32380,7 +32380,7 @@
             const tip = counters.length === 1
               ? `Gehedged gegen: ${counterAccs[0]} (${counters[0].size} ${counters[0].symbol})`
               : `Gehedged gegen ${counters.length} Position${counters.length===1?'':'en'}: ${counterAccs.join(', ')}`
-            hedgeMarker = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#8b5cf622;color:#a78bfa;font-size:10px;font-weight:700;cursor:help" title="${escapeHtml(tip)}">⚖ ${hg.symbol}</span>`
+            hedgeMarker = `<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:color-mix(in srgb, var(--violet) 13.33%, transparent);color:var(--violet-soft);font-size:10px;font-weight:700;cursor:help" title="${escapeHtml(tip)}">⚖ ${hg.symbol}</span>`
           }
         }
         return `
@@ -33399,7 +33399,7 @@
     } else {
       html += `<div style="padding:6px 0">${planned.slice(0, 6).map(p => {
         const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'
-        const priorityCol = p.priority === 'high' ? 'var(--danger)' : (p.priority === 'low' ? '#94a3b8' : 'var(--warn)')
+        const priorityCol = p.priority === 'high' ? 'var(--danger)' : (p.priority === 'low' ? 'var(--sub-2)' : 'var(--warn)')
         return `<div style="display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid var(--line);gap:14px">
           <div style="width:6px;height:6px;border-radius:50%;background:${priorityCol};flex:none"></div>
           <div style="flex:1;min-width:0">
@@ -35492,7 +35492,7 @@
         if(isArchived){
           const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', passed_pending: '🎉 Bestanden · Daten fehlen', manual: '📦 Archiviert' }
           const reasonLabel = reasonMap[archInfo.reason] || '📦 Archiviert'
-          archBadge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:#94a3b822;color:#475569;margin-left:8px;vertical-align:middle">${reasonLabel}</span>`
+          archBadge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:color-mix(in srgb, var(--sub-2) 13.33%, transparent);color:var(--ink-2);margin-left:8px;vertical-align:middle">${reasonLabel}</span>`
         }
 
         // Verknüpfungen
@@ -35502,7 +35502,7 @@
         if(dupAcc)    links.push(`<span class="link-chip" title="Duplikum ${escapeHtml(dupAcc.name||'')}" style="background:color-mix(in srgb, var(--warn) 13.33%, transparent);color:var(--warn-ink, #b45309);display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>Duplikum</span>`)
         // MT5-Copier-Chip (15.08.2026) — Verlinkung aus mt5_links, teal wie das ma-Idiom
         const _mtcLogin = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(a.id) : null
-        if(_mtcLogin) links.push(`<span class="link-chip" title="MT5-Copier ${escapeHtml(String(_mtcLogin))}" style="background:#16c8c622;color:#0d9488;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>MT5-Copier</span>`)
+        if(_mtcLogin) links.push(`<span class="link-chip" title="MT5-Copier ${escapeHtml(String(_mtcLogin))}" style="background:#16c8c622;color:var(--teal);display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>MT5-Copier</span>`)
         const linksHtml = links.length ? links.join('') : '<span style="color:var(--sub);font-size:11.5px">—</span>'
 
         // Action-Buttons: archivierte können reaktiviert werden
@@ -44469,7 +44469,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1616'
+  const OS_TAB_BUILD = '2026-09-22.1617'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
