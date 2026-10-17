@@ -753,7 +753,11 @@
      Containing Block für position:fixed-Kinder (Modal-Sheets!) und hält einen
      Compositor-Layer offen. Endet auf transform:none, Desktop-Optik identisch. */
   @keyframes fadeUpView{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-  #dashboard-view .view.active{display:block;animation:fadeUpView .3s var(--ease) forwards}
+  /* 17.10.2026 (Finn: Specs-Popup unter Settings › Prop Firms erscheint „relativ weit unten, nie mittig"): auch mit Ende
+     transform:none hält Chrome die View als Containing Block, solange eine forwards-Animation auf transform hängt — das
+     fixed-Overlay war so hoch wie die ganze Seite (gemessen 4.000 statt 768 px) und das Popup saß in dessen Mitte.
+     Darum opacity:1 direkt an .active und fill backwards: nach 0,3 s ist die Animation weg, Popups hängen am Bildschirm. */
+  #dashboard-view .view.active{display:block;opacity:1;animation:fadeUpView .3s var(--ease) backwards}
 
   #dashboard-view .view-head{
     display:flex;justify-content:space-between;align-items:center;
@@ -6288,7 +6292,7 @@
               calc(28px + var(--m-nav-h) + env(safe-area-inset-bottom))
               calc(var(--m-gut) + env(safe-area-inset-left));
     }
-    #dashboard-view .view.active{animation:mob-view-in .26s var(--m-spring) forwards}
+    #dashboard-view .view.active{animation:mob-view-in .26s var(--m-spring) backwards}   /* backwards statt forwards: s. fadeUpView (17.10.2026) */
 
     /* ============ NAV-BAR ============ */
     #dashboard-view .topbar{
@@ -44346,7 +44350,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1609'
+  const OS_TAB_BUILD = '2026-09-22.1610'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
