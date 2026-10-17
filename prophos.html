@@ -1649,6 +1649,31 @@
   /* NQ gewählt (25.09.2026): vollflächig rot, weiße Schrift — Finn fährt fast immer MNQ */
   #tradePlanModal #tp-v2-nq.active.tp-nq-rot,#tradePlanModal #tp-nq-nq.active.tp-nq-rot{background:var(--danger) !important;color:#fff !important;border-color:var(--danger) !important}
   #tradePlanModal #tp-v2-nq.active.tp-nq-rot small,#tradePlanModal #tp-nq-nq.active.tp-nq-rot span{color:rgba(255,255,255,.9) !important;opacity:1}
+  /* Auswahl sichtbar (18.10.2026, Auftrag Emy über Finn): „Instrument Master" MNQ/NQ sahen gleich aus — .btn-ghost.active hatte
+     keinen Stil, die Wahl sah man nur an der Lot-Zahl unter „Slave kaufen" (NQ = 10× Risiko). Gewählt = Akzent gefüllt, kräftiger
+     Rahmen, fett und ✓ — nicht nur Farbe. Gilt für alle Auswahl-Knöpfe im Planer; Prio, BUY/SELL und NQ-rot behalten ihre
+     Signalfarbe und bekommen nur ✓, Rahmen und fette Schrift. aria-pressed setzt tpAuswahlAria. */
+  #tradePlanModal .seg button.active,
+  #tradePlanModal #tp-nq-toggle-master .btn.active,
+  #tradePlanModal #tp-nq-toggle-slave .btn.active{background:var(--violet);color:#fff;font-weight:700;border-color:var(--violet-dark);box-shadow:0 0 0 1px var(--violet-dark)}
+  #tradePlanModal .seg button.active small,
+  #tradePlanModal #tp-nq-toggle-master .btn.active span,
+  #tradePlanModal #tp-nq-toggle-slave .btn.active span{color:rgba(255,255,255,.9) !important;opacity:1}
+  #tradePlanModal #tp-nq-toggle-master .btn:not(.active),
+  #tradePlanModal #tp-nq-toggle-slave .btn:not(.active){background:var(--surface-tint);color:var(--sub-2)}
+  #tradePlanModal #tp-dir-row .btn.active,
+  #tradePlanModal #tp-priority .prio-btn.active{font-weight:700;box-shadow:0 0 0 1px currentColor}
+  #tradePlanModal #tp-v2-nq.active.tp-nq-rot,#tradePlanModal #tp-nq-nq.active.tp-nq-rot{box-shadow:0 0 0 1px #b42318}
+  #tradePlanModal .seg button.active::before,
+  #tradePlanModal #tp-nq-toggle-master .btn.active::before,
+  #tradePlanModal #tp-nq-toggle-slave .btn.active::before,
+  #tradePlanModal #tp-dir-row .btn.active::before,
+  #tradePlanModal #tp-priority .prio-btn.active::before{content:'✓';margin-right:5px;font-weight:700}
+  /* Instrument-Seg auf V2 stapelt Name und $/pt untereinander — ✓ dort links daneben statt als eigene Zeile */
+  #tradePlanModal .tp-v2-instr button{position:relative}
+  #tradePlanModal .tp-v2-instr button.active::before{position:absolute;left:10px;top:50%;transform:translateY(-50%);margin:0}
+  /* gewähltes Instrument am Feld „Risiko Master ($)" — data-instr setzt tpNqUpdateToggle, nur wenn ein Instrument-Schalter sichtbar ist */
+  #tradePlanModal label[data-instr]::after{content:' · ' attr(data-instr);color:var(--violet);font-weight:700}
   #dashboard-view .tp-nq-warn{margin-top:6px;padding:7px 10px;border-radius:8px;background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);color:#b91c1c;font-size:12px;font-weight:600;line-height:1.4}
   #dashboard-view .tp-nq-warn[hidden]{display:none}
   #tradePlanModal .tp-dir-gesperrt{border:1px dashed var(--danger) !important;color:var(--danger) !important;background:rgba(240,68,56,.06) !important;opacity:.75;cursor:not-allowed}
@@ -43543,6 +43568,7 @@
     if(s){ s.style.background = _tpDir === 'sell' ? 'rgba(240,68,56,.10)' : ''
            s.style.borderColor = _tpDir === 'sell' ? '#F04438' : ''
            s.style.color = _tpDir === 'sell' ? '#D92D20' : '' }
+    b?.classList.toggle('active', _tpDir === 'buy'); s?.classList.toggle('active', _tpDir === 'sell')   // ✓ + aria (18.10.2026)
   }
   document.getElementById('tp-dir-buy')?.addEventListener('click', () => tpDirSet('buy'))
   document.getElementById('tp-dir-sell')?.addEventListener('click', () => tpDirSet('sell'))
@@ -44352,7 +44378,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1612'
+  const OS_TAB_BUILD = '2026-09-22.1613'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53956,7 +53982,22 @@
 
     document.getElementById('tp-nqs-mnq')?.classList.toggle('active', _tpNqsMode === 'mnq')
     document.getElementById('tp-nqs-nq')?.classList.toggle('active',  _tpNqsMode === 'nq')
+
+    // „Risiko Master ($) · NQ" (18.10.2026): gewähltes Instrument direkt am Risikofeld, nur wenn ein Master-Instrument-Schalter
+    // sichtbar ist. Als Attribut (CSS ::after), weil der WD-Weg den Label-Text per textContent neu setzt.
+    { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label')
+      const sichtbar = (rowM && rowM.style.display !== 'none') || (rowV2 && rowV2.style.display !== 'none')
+      if(lbl){ if(sichtbar) lbl.dataset.instr = _tpNqMode === 'nq' ? 'NQ' : 'MNQ'; else delete lbl.dataset.instr } }
   }
+
+  // aria-pressed für alle Auswahl-Knöpfe im Planer (18.10.2026): die Setzer schalten nur die Klasse active — ein Beobachter
+  // nur auf #tradePlanModal spiegelt sie, statt jeden der Setzer (Weg, Instrument, Prio, Richtung) einzeln anzufassen.
+  function tpAuswahlAria(){
+    document.querySelectorAll('#tradePlanModal .seg button, #tp-nq-toggle-master .btn, #tp-nq-toggle-slave .btn, #tp-dir-row .btn, #tp-priority .prio-btn')
+      .forEach(b => { const an = b.classList.contains('active') ? 'true' : 'false'; if(b.getAttribute('aria-pressed') !== an) b.setAttribute('aria-pressed', an) })
+  }
+  { const m = document.getElementById('tradePlanModal')
+    if(m){ tpAuswahlAria(); new MutationObserver(tpAuswahlAria).observe(m, { subtree: true, attributes: true, attributeFilter: ['class'] }) } }
 
   function tpNqGetMasterPpl(firm){
     if(tpNqIsProjectx(firm)) return _tpNqMode  === 'nq' ? 20.0 : 2.0
