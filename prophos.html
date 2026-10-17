@@ -14462,7 +14462,7 @@
       })
       if(opts.gesamt && datasets.length > 1){
         const summe = tage.map((_, i) => +datasets.reduce((a, d) => a + d.data[i], 0).toFixed(2))
-        datasets.push({ label: 'Gesamt', key: '__gesamt', data: summe, borderColor: opts.gesamtFarbe || '#101828',
+        datasets.push({ label: 'Gesamt', key: '__gesamt', data: summe, borderColor: opts.gesamtFarbe || (() => tokFarbe('ink')),
                         borderDash: [5, 4], borderWidth: 1.5, backgroundColor: 'transparent', fill: false,
                         pointRadius: 0, pointHitRadius: 8, cubicInterpolationMode: 'monotone' })
       }
@@ -14477,15 +14477,15 @@
             if(el && onPick && key !== '__gesamt') onPick(key)
           },
           onHover: (ev, els) => { const t = ev.native && ev.native.target; if(t) t.style.cursor = els.length ? 'pointer' : '' },
-          plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
+          plugins: { legend: { display: false }, tooltip: { backgroundColor: () => tokFarbe('ink'), titleColor: () => tokFarbe('surface'), bodyColor: () => tokFarbe('surface'), displayColors: true,
             callbacks: { title: items => items.length ? admVlDatum(tage[items[0].dataIndex]) : '',
                          label: ctx => ` ${ctx.dataset.label}: ${fmtSign(ctx.parsed.y)}`,
                          // opts.sub(key) (24.09.2026, Kontrafakt: „q Ø 0,13 €/$" je Person) — sonst nichts
                          afterLabel: ctx => { const t = opts.sub && ctx.dataset.key !== '__gesamt' ? opts.sub(ctx.dataset.key) : ''; return t ? '   ' + t : '' } } } },
-          scales: { x: { grid: { display: false }, ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, maxTicksLimit: 6, maxRotation: 0 } },
+          scales: { x: { grid: { display: false }, ticks: { color: () => tokFarbe('sub'), font:{ family:'JetBrains Mono', size:9 }, maxTicksLimit: 6, maxRotation: 0 } },
                     // Nulllinie kräftiger — bei Saldo/Verlauf wechseln Personen die Seite.
-                    y: { grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
-                         ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, callback: v => fmtKurz(v) } } } }
+                    y: { grid: { color: ctx => ctx.tick.value === 0 ? tokFarbe('sub', .35) : tokFarbe('sub', .08) },
+                         ticks: { color: () => tokFarbe('sub'), font:{ family:'JetBrains Mono', size:9 }, callback: v => fmtKurz(v) } } } }
       })
       if(lg){
         for(const s of series){
@@ -14729,12 +14729,12 @@
         data: { labels: monate.map(fmtMonat), datasets },
         options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
           interaction: { mode: 'index', intersect: false },
-          plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
+          plugins: { legend: { display: false }, tooltip: { backgroundColor: () => tokFarbe('ink'), titleColor: () => tokFarbe('surface'), bodyColor: () => tokFarbe('surface'), displayColors: true,
             filter: item => item.parsed.y !== 0,
             callbacks: { label: ctx => ` ${ctx.dataset.label}: ${admVlSign(ctx.parsed.y)}` } } },
-          scales: { x: { stacked: true, grid: { display: false }, ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, maxRotation: 0 } },
-                    y: { stacked: true, grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
-                         ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, callback: v => admEurKurz(v) } } } }
+          scales: { x: { stacked: true, grid: { display: false }, ticks: { color: () => tokFarbe('sub'), font:{ family:'JetBrains Mono', size:9 }, maxRotation: 0 } },
+                    y: { stacked: true, grid: { color: ctx => ctx.tick.value === 0 ? tokFarbe('sub', .35) : tokFarbe('sub', .08) },
+                         ticks: { color: () => tokFarbe('sub'), font:{ family:'JetBrains Mono', size:9 }, callback: v => admEurKurz(v) } } } }
       })
       // Chip-Legende wie beim Personen-Verlauf: je Kapitel Farbpunkt, Name, Netto — dahinter die drei Arten
       if(lg){
@@ -15106,7 +15106,7 @@
                   { key: 'f', label: 'Fusion-Hedge', events: mit.map(t => ({ datum: t.datum, eur: num(t.fusion_eur) || 0 })) }]
       const FA = { m: '#15803d', f: farbe }
       const es = $('adm-kf-sum-wdv'); if(es) es.innerHTML = n ? `· Master <b>${admVlSign(mSum * fx)}</b> · Fusion <b>${admVlSign(fSum)}</b>` : ''
-      admVerlauf('kfwdv', 'adm-kf-chart-wdv', 'adm-kf-legend-wdv', sv, '', null, { tage, gesamt: true, gesamtFarbe: '#101828', farbe: k2 => FA[k2], labelRoh: true })
+      admVerlauf('kfwdv', 'adm-kf-chart-wdv', 'adm-kf-legend-wdv', sv, '', null, { tage, gesamt: true, farbe: k2 => FA[k2], labelRoh: true })
       const pm = new Map()
       for(const t of basis){ if(!t.datum || num(t.fusion_eur) === null) continue; const u = String(t.user_id); const sr = pm.get(u) || { key: u, label: personen.get(u) || u, events: [] }; sr.events.push({ datum: t.datum, eur: num(t.fusion_eur) }); pm.set(u, sr) }
       admVerlauf('kfwdp', 'adm-kf-chart-wdp', 'adm-kf-legend-wdp', [...pm.values()].sort((a, b) => a.label.localeCompare(b.label, 'de')), pers, pick, { tage, gesamt: true, gesamtFarbe: farbe })
@@ -18517,7 +18517,8 @@
     /* Charts (28.08.2026): exakt das mgRenderChart-Muster — Sign-Farben
      * #12B76A/#F04438, Violet für Verläufe, Grid rgba(102,112,133,.08),
      * JetBrains-Mono-Ticks, destroy vor jedem Neuaufbau. */
-    const RG_GOOD = '#12B76A', RG_BAD = '#F04438', RG_VIOLET = '#5447CE'
+    // Dark Mode (18.10.2026): Token-NAMEN statt Hex — die Charts lesen die Farbe zur Laufzeit (tokFarbe), damit sie beim Umschalten mitgehen
+    const RG_GOOD = 'good', RG_BAD = 'danger', RG_VIOLET = 'violet'
     const rgCharts = {}
     function rgChart(name, canvasId, cfg){
       const c = document.getElementById(canvasId)
@@ -18525,8 +18526,8 @@
       if(rgCharts[name]){ try { rgCharts[name].destroy() } catch(_){} rgCharts[name] = null }
       rgCharts[name] = new Chart(c.getContext('2d'), cfg)
     }
-    const RG_TICKS = { color:'#667085', font:{ family:'JetBrains Mono', size:9 } }
-    const RG_GRID = 'rgba(102,112,133,.08)'
+    const RG_TICKS = { color: () => tokFarbe('sub'), font:{ family:'JetBrains Mono', size:9 } }
+    const RG_GRID = () => tokFarbe('sub', .08)
     const rgEurKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k €' : Math.round(v) + ' €'
 
     async function rgApi(path, opts = {}){
@@ -18669,11 +18670,11 @@
             rgChart('liste', 'rg-chart-liste', {
               type: 'bar',
               data: { labels: chron.map(r => r.nummer), datasets: [{
-                data: werte, backgroundColor: cols.map(c => c + '30'),
-                borderColor: cols, borderWidth: 1.5, borderRadius: 4
+                data: werte, backgroundColor: ctx => tokFarbe(cols[ctx.dataIndex], 0x30 / 255),
+                borderColor: ctx => tokFarbe(cols[ctx.dataIndex]), borderWidth: 1.5, borderRadius: 4
               }]},
               options: { responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828',
+                plugins: { legend: { display: false }, tooltip: { backgroundColor: () => tokFarbe('ink'), titleColor: () => tokFarbe('surface'), bodyColor: () => tokFarbe('surface'),
                   callbacks: {
                     title: items => { const r = chron[items[0].dataIndex]; return `${r.nummer} · ${r.person_name || ''}` },
                     label: ctx => 'Rechnungsbetrag: ' + rgEur.format(ctx.parsed.y)
@@ -18722,11 +18723,11 @@
         rgChart('verlauf', 'rg-chart-verlauf', {
           type: 'line',
           data: { labels: tage.map(rgDatum), datasets: [{
-            data: verlauf, borderColor: RG_VIOLET, backgroundColor: 'rgba(84,71,206,.10)',
+            data: verlauf, borderColor: () => tokFarbe(RG_VIOLET), backgroundColor: () => tokFarbe(RG_VIOLET, .10),
             fill: true, borderWidth: 2, pointRadius: 0, pointHitRadius: 10, tension: .25
           }]},
           options: { responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828',
+            plugins: { legend: { display: false }, tooltip: { backgroundColor: () => tokFarbe('ink'), titleColor: () => tokFarbe('surface'), bodyColor: () => tokFarbe('surface'),
               callbacks: { label: ctx => 'Saldo bis hier: ' + rgEur.format(ctx.parsed.y) } } },
             scales: { x: { grid: { display: false }, ticks: { ...RG_TICKS, maxTicksLimit: 6, maxRotation: 0 } },
                       y: { grid: { color: RG_GRID }, ticks: { ...RG_TICKS, callback: v => rgEurKurz(v) } } } }
@@ -18741,14 +18742,14 @@
         rgChart('arten', 'rg-chart-arten', {
           type: 'bar',
           data: { labels: arten.map(a => a.lbl), datasets: [{
-            data: arten.map(a => a.v), backgroundColor: artCols.map(c => c + '30'),
-            borderColor: artCols, borderWidth: 1.5, borderRadius: 4
+            data: arten.map(a => a.v), backgroundColor: ctx => tokFarbe(artCols[ctx.dataIndex], 0x30 / 255),
+            borderColor: ctx => tokFarbe(artCols[ctx.dataIndex]), borderWidth: 1.5, borderRadius: 4
           }]},
           options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
-            plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828',
+            plugins: { legend: { display: false }, tooltip: { backgroundColor: () => tokFarbe('ink'), titleColor: () => tokFarbe('surface'), bodyColor: () => tokFarbe('surface'),
               callbacks: { label: ctx => rgEur.format(ctx.parsed.x) } } },
             scales: { x: { grid: { color: RG_GRID }, ticks: { ...RG_TICKS, maxTicksLimit: 5, callback: v => rgEurKurz(v) } },
-                      y: { grid: { display: false }, ticks: { color: '#1D2939', font: { family: 'JetBrains Mono', size: 10, weight: '600' } } } } }
+                      y: { grid: { display: false }, ticks: { color: () => tokFarbe('ink-2'), font: { family: 'JetBrains Mono', size: 10, weight: '600' } } } } }
         })
         // Doppel-Abrechnungs-Schutz: überschneidet sich der Zeitraum mit einer
         // bestehenden Rechnung derselben Person, laut warnen (Info, kein Block —
@@ -27587,6 +27588,15 @@
     const bis = nun - _mklLw.letzte > 600 ? _mklLw.letzte : Math.max(_mklLw.letzte, nun), von = bis - mkl.span * 60
     try{ _mklLw.chart.timeScale().setVisibleRange({ from: Math.max(_mklLw.erste, von), to: bis + 5 * 60 }) }catch(_){}
   }
+  // Dark Mode (18.10.2026): Lightweight-Charts kennt kein var(--x) — beim Umschalten ('prophos:theme') die Hülle neu aus den Tokens
+  // setzen; mklChartZeichnen zieht danach Order-/WD-Linien und Marker mit den neuen Token-Farben nach. Kerzen-/Linienfarbe bleibt fest.
+  function mklThemeNeu(){
+    if(!_mklLw || !_mklLw.chart) return
+    const rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
+    try{ _mklLw.chart.applyOptions({ layout: { background: { type: 'solid', color: mklToken('--bg', '#ffffff') }, textColor: mklToken('--sub', '#667085') },
+      grid: { vertLines: { color: rahmen }, horzLines: { color: rahmen } }, rightPriceScale: { borderColor: rahmen }, timeScale: { borderColor: rahmen } }) }catch(_){}
+    try{ mklChartZeichnen() }catch(_){}
+  }
   function mklChartZeichnen(){
     const box = $mkl('mkl-chart'); if(!box) return
     const leer = $mkl('mkl-leer'), t = $mkl('mkl-leer-titel'), p = $mkl('mkl-leer-text')
@@ -27709,9 +27719,9 @@
     _mklLw.linien = []
     for(const o of mkl.orders.filter(o => o.status === 'open')){
       const linie = (v, col, titel, style) => { if(!(Number(v) > 0)) return; try{ _mklLw.linien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title: titel })) }catch(_){} }
-      linie(o.entry, '#98A2B3', `${String(o.richtung || '').toUpperCase()} ${o.kt}×${o.symbol}`, 2)
-      linie(o.tp_level, '#15803d', 'TP', 1)
-      linie(o.sl_level, '#b91c1c', 'SL', 1)
+      linie(o.entry, mklToken('--sub-2', '#98A2B3'), `${String(o.richtung || '').toUpperCase()} ${o.kt}×${o.symbol}`, 2)
+      linie(o.tp_level, mklToken('--good-ink', '#15803d'), 'TP', 1)
+      linie(o.sl_level, mklToken('--danger-ink', '#b91c1c'), 'SL', 1)
     }
     // Winning Days (25.09.2026, Finn: „Markiere die Winning Days, damit ich weiß, wo sie sind"): Linien nur für LAUFENDE Pläne
     // mit Einstieg — Entry durchgezogen in der Personen-Farbe (Flotte), TP grün / SL rot gestrichelt; die angeklickte Zeile dicker
@@ -27746,7 +27756,7 @@
       const hOffen = !!(pw.hedge && pw.status === 'open' && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(pw.hedge.status || '')) && mklWdSchliesstBei(pw) > 0)
       linie(pw.einstieg_nq, '#2563EB', 0, 3)
       linie(pw.tp_level_nq, '#2563EB', 0, 2)   // Entry und TP in derselben Farbe (Positions-Werkzeug wie in TradingView)
-      linie(pw.sl_level_nq, '#b91c1c', 0, 2)
+      linie(pw.sl_level_nq, mklToken('--danger-ink', '#b91c1c'), 0, 2)
       if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', 2, 2)
     }
     mklWdMarkerSetzen(mklWdMarker())
@@ -28673,7 +28683,7 @@
   window._mklWdPlanStub = p => { mkl.wd.plan = Object.assign({ tag: '', heute: '', rows: [], regeln: {}, plaene: null, at: Date.now(), fehler: '' }, p); mkl.wd.at = mkl.wd.at || Date.now(); mklWdRender() }
   // Kurz-Name fürs Chart-Label: erstes Wort der Firma + Kontonr-Ende
   const mklWdKurz = pw => { const k = pw.konto || {}; const fi = String(k.firma || '').trim().split(/\s+/)[0]; return `${fi || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
-  const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : '#667085' }catch(_){ return '#667085' } }
+  const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : mklToken('--sub', '#667085') }catch(_){ return mklToken('--sub', '#667085') } }
   const mklWdSchliesstBei = pw => (pw.hedge && Number(pw.hedge.schliesst_bei_nq) > 0) ? Number(pw.hedge.schliesst_bei_nq)   // was der Wächter wirklich nimmt; Rechnung nur Rückfall
     : (Number(pw.tp_level_nq) > 0) ? (pw.richtung === 'sell' ? Number(pw.tp_level_nq) - hedgePuffer() : Number(pw.tp_level_nq) + hedgePuffer()) : null
   /* Karte je Winning Day (25.09.2026, Finn: „unübersichtlich, man sieht kein Fusion-Live-P&L, nicht die Anfangsorder, nicht
@@ -29621,11 +29631,11 @@
       const l = (v, farbe, art, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: '', skala: ein == null || Math.abs(p - ein) <= WDL_SKALA_PKT }) }
       const slE = wdlSlEcht(t)
       l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#2563EB', 0, 2)
-      if(slE != null) l(slE, '#b91c1c', 0, 2)
+      if(slE != null) l(slE, mklToken('--danger-ink', '#b91c1c'), 0, 2)
       else {
         // Liq nach liq_regeln vor der alten Rechnung — wie die Spanne (30.09.2026); die alte WD-Liq (= Hedge-Level) nicht zusätzlich zeichnen
         const lqA = num(t.liq_level_nq), lqR = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : lqA, sl = num(t.sl_level_nq)
-        l(lqR, '#b91c1c', 0, 2); if(sl != null && sl !== lqA && sl !== lqR) l(sl, '#b91c1c', 0, 2)
+        const rot = mklToken('--danger-ink', '#b91c1c'); l(lqR, rot, 0, 2); if(sl != null && sl !== lqA && sl !== lqR) l(sl, rot, 0, 2)
       }
       const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
       if(sb != null && t.status === 'open' && h.status && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(h.status))) l(sb, '#7C3AED', 2, 2)
@@ -39173,6 +39183,35 @@
   } catch(_){}
 
   /* ========== TRADE PLANS ========== */
+  // ── Dark Mode für Canvas-Charts (18.10.2026, Auftrag DARK-JS-B) ──
+  // Chart.js zeichnet auf <canvas> und versteht kein var(--x). Darum lesen die Charts ihre Farben zur Laufzeit aus den :root-Tokens —
+  // als skriptbare Option (Funktion), die Chart.js bei jedem update() neu auflöst. Beim Umschalten feuert das Fundament 'prophos:theme'
+  // auf window: Speicher leeren, jedes Chart.js-Diagramm ohne Animation neu auflösen, Markt-Live-Chart nachziehen. Hell = dieselben
+  // Werte wie die früheren festen Farben (Token-Wert, Alpha gleich).
+  const _tokSpeicher = new Map()
+  function tokFarbe(name, alpha){
+    const k = name + '|' + (alpha == null ? '' : alpha)
+    if(_tokSpeicher.has(k)) return _tokSpeicher.get(k)
+    let v = ''
+    try{ v = getComputedStyle(document.documentElement).getPropertyValue('--' + name).trim() }catch(_){}
+    if(!v) return alpha == null ? '#667085' : 'rgba(102,112,133,' + alpha + ')'   // Token fehlt (sollte nie passieren) → --sub
+    const erg = alpha == null ? v : tokAlpha(v, alpha)
+    _tokSpeicher.set(k, erg)
+    return erg
+  }
+  // Hex (#rgb/#rrggbb) und rgb() → rgba mit Alpha; alles andere über color-mix (Canvas versteht das in Chrome/Safari)
+  function tokAlpha(farbe, alpha){
+    let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(farbe)
+    if(m){ let h = m[1]; if(h.length === 3) h = h.replace(/./g, c => c + c); const n = parseInt(h, 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})` }
+    m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(farbe)
+    if(m) return `rgba(${m[1]},${m[2]},${m[3]},${alpha})`
+    return `color-mix(in srgb, ${farbe} ${+(alpha * 100).toFixed(2)}%, transparent)`
+  }
+  window.addEventListener('prophos:theme', () => {
+    _tokSpeicher.clear()
+    try{ if(typeof Chart !== 'undefined') for(const c of Object.values(Chart.instances || {})){ try{ c.update('none') }catch(_){} } }catch(_){}
+    try{ mklThemeNeu() }catch(_){}
+  })
   let tradePlans = []
   // Löschen mit Rückgängig (06.10.2026, Finn: „Wenn ich einen Trade lösche, will ich es nicht immer bestätigen müssen, sondern
   // einfach direkt löschen"): planId → { plan, idx, farmer, timer }. Die Zeile ist sofort weg, gelöscht wird erst nach 5 s.
@@ -39624,7 +39663,7 @@
           const cf = getCustomFirms()
           const match = cf.find(x=>x.name===firmName)
           if(match){ await updateFirmSpec(match.id, { ...match, name:newName }); mergeCustomFirmsIntoPresets() }
-          renameStatus.textContent = '✓ Gespeichert'; renameStatus.style.color = 'var(--success,#10b981)'
+          renameStatus.textContent = '✓ Gespeichert'; renameStatus.style.color = 'var(--good)'
           nameEl.textContent = newName
           if(typeof populateAccountFilters==='function') populateAccountFilters()
           setTimeout(()=>{ renameWrap.style.display='none'; renameStatus.style.display='none'; renderFirmsPanel() }, 1000)
@@ -40145,8 +40184,8 @@
       if(tp == null && sl == null) return ''
       const L = sl || 0, R = tp || 0, spann = L + R
       const ein = spann > 0 ? L / spann * 100 : 0, pos = spann > 0 ? Math.max(0, Math.min(100, ((plL || 0) + L) / spann * 100)) : 0
-      const farbe = plL == null ? 'var(--sub-2)' : plL > 0 ? '#15803d' : plL < 0 ? '#b91c1c' : 'var(--sub-2)'
-      const bahn = L > 0 ? `background:linear-gradient(90deg,rgba(240,68,56,.22) 0 ${ein.toFixed(1)}%,rgba(18,183,106,.28) ${ein.toFixed(1)}% 100%)` : 'background:rgba(18,183,106,.28)'
+      const farbe = plL == null ? 'var(--sub-2)' : plL > 0 ? 'var(--good-ink, #15803d)' : plL < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--sub-2)'
+      const bahn = L > 0 ? `background:linear-gradient(90deg,color-mix(in srgb, var(--danger) 22%, transparent) 0 ${ein.toFixed(1)}%,color-mix(in srgb, var(--good) 28%, transparent) ${ein.toFixed(1)}% 100%)` : 'background:color-mix(in srgb, var(--good) 28%, transparent)'
       const tip = `${sl != null ? 'SL −' + de(L) + ' $' : 'ohne SL'} · ${tp != null ? 'TP +' + de(R) + ' $' : 'ohne TP'}${plL != null ? ' · jetzt ' + (plL >= 0 ? '+' : '−') + de(Math.abs(plL)) + ' $' : ' · Punkt = Einstieg'}`
       return `<span class="pz-risk-b" title="${escapeHtml(tip)}"><small class="l${sl == null ? ' ohne' : ''}">${sl != null ? '−' + de(L) : 'ohne'}</small><span class="bahn" style="${bahn}">${L > 0 ? `<i class="ein" style="left:${ein.toFixed(1)}%"></i>` : ''}<b class="pkt" style="left:${pos.toFixed(1)}%;background:${farbe}"></b></span><small class="r${tp == null ? ' ohne' : ''}">${tp != null ? '+' + de(R) : 'ohne'}</small></span>`
     })()
@@ -40215,7 +40254,7 @@
    * opt (Trade-Planer, 07.10.2026): { zeile(p) → Zeilen-HTML für jeden Plan (keine Karten), mitId: Spalte „ID" vorn, ohneHinweis: kein
    * Richtungs-Platzhalter (der gilt nur für die eingeloggte ID) }. Ohne opt unverändert wie im Reiter Trades → Geplant. */
   /* BUY/SELL-Chip des Firmenkopfs — auch je Zeile im Trade-Planer (GEPLANT-RICHTUNG-JE-ID, 07.10.2026) */
-  const planRichtungChip = (txt, gut) => `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${gut ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}">${txt}</span>`
+  const planRichtungChip = (txt, gut) => `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${gut ? 'background:color-mix(in srgb, var(--good) 12%, transparent);color:var(--good-ink, #15803d)' : 'background:color-mix(in srgb, var(--danger) 10%, transparent);color:var(--danger-ink, #b91c1c)'}">${txt}</span>`
   function planFirmenBloecke(list, opt){
     opt = opt || {}
     const gruppen = []
@@ -40252,7 +40291,7 @@
           <span>${ps.length} Trade${ps.length === 1 ? '' : 's'}</span>${knapp ? '' : ` ${sep} <span>${escapeHtml(wege)}</span>
           ${richtung}`}
           ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
-          ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>` : ''}
+          ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:color-mix(in srgb, var(--warn) 14%, transparent);color:var(--warn-ink, #b45309)"></span>` : ''}
         </div>`
         + (zeilen.length && opt.stil === 'radar' ? `<div class="pz-tab pz-radar">
           <div class="pz-z pz-z-kopf"><span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
@@ -40867,8 +40906,8 @@
       // Instrument, Richtung, TP/SL in $ direkt auf der Karte (23.09.2026, Finn: „wenn so ein Trade geplant ist, immer
       // kurz den Take-Profit in Dollar, den Stop-Loss und die Kontrakte sehen, und ob es MNQ oder NQ ist")
       + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}</b>` : '')
-      + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : '#2a9d5c'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
-      + (p.masterTp > 0 ? ` · TP <b style="color:#2a9d5c">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
+      + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : 'var(--good-ink, #15803d)'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
+      + (p.masterTp > 0 ? ` · TP <b style="color:var(--good-ink, #15803d)">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
       + (((typeof tpIstWdPlan === 'function') && tpIstWdPlan(p)) ? ''   // Winning Days: nie ein SL (25.09.2026)
          : p.masterSl > 0 ? ` · SL <b style="color:var(--danger)">$${Number(p.masterSl).toLocaleString('de-DE')}</b>` : (p.masterTp > 0 ? ` · SL <span style="opacity:.6">—</span>` : ''))
       + (sDup ? ` · <span style="color:var(--violet)">${fmtDupBalance(sDup)}</span>` : '')
@@ -40895,7 +40934,7 @@
       // Auto-Planer (05.10.2026, Finn: „viel zu viele Kästchen, man erkennt gar nichts — einfach nur Grün und Rot"): kein Auto-Chip,
       // kein Datum — der Zustand steht als Farbe am linken Kartenrand (rot = unbestätigt, grün = bestätigt)
       metric = `${mirrorBadge}${pfBadge}`
-        + `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(p.masterFirm || '')}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>`
+        + `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(p.masterFirm || '')}" style="display:none;background:color-mix(in srgb, var(--warn) 14%, transparent);color:var(--warn-ink, #b45309)"></span>`
         + (p.autoPlan ? '' : `<span class="tc2-date">${dateStr}</span>`)
       zeileChips = `${mirrorBadge}${pfBadge}`   // Geplant-Tabelle: der Richtungs-Hinweis steht dort einmal im Firmen-Kopf
       // Richtungskonflikt am Start (07.10.2026): in der Tabelle als kleiner Chip — wartet (Neuversuch) · aufgegeben · vom Bot markiert
@@ -40927,7 +40966,7 @@
     } else if(isReview){
       // Auto-erfasstes P&L zeigen (schon in DB gespeichert) — fehlt es noch, lädt es gerade
       const fmtR = v => (v>=0?'+':'') + v.toLocaleString('de-DE')
-      const colR = v => v>=0 ? '#15803d' : '#b91c1c'
+      const colR = v => v>=0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
       const parts = []
       // Schätzung aus Radar/Level (29.09.2026, Finn: „jetzt schon mal der Profit grob — noch so viele Minuten, bis Puls bestätigt"):
       // ≈ vor dem Betrag, solange master_pl noch die Schätzung ist; nach Puls' Balance-Lesung steht der exakte Wert ohne ≈
@@ -40938,15 +40977,15 @@
       // Fusion-Gegenhedge (24.09.2026): Stand des Hedges auch auf „Überprüfen" (offen = noch nicht zu!)
       { const hc = (typeof hedgeChipSlot === 'function') ? hedgeChipSlot(p) : ''; if(hc) parts.push(hc) }
       metric = parts.length
-        ? parts.join('') + `<span class="tc2-chip" style="background:rgba(245,158,11,.14);color:#b45309">prüfen</span>`
+        ? parts.join('') + `<span class="tc2-chip" style="background:color-mix(in srgb, var(--warn) 14%, transparent);color:var(--warn-ink, #b45309)">prüfen</span>`
         : `<span class="tc2-pending-lbl">🟠 beendet — P&L wird geladen…</span>`
     } else if(isCompleted){
       const mPl = p.masterPl ?? 0, sPl = p.slavePl ?? 0
       const fmt = v => (v>=0?'+':'') + v.toLocaleString('de-DE')
-      const col = v => v>=0 ? '#15803d' : '#b91c1c'
+      const col = v => v>=0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
       const symCat = (typeof calcSymCategory === 'function') ? calcSymCategory(p) : null
-      const symCfg = { perfekt:['#15803d','✓'], ok:['#4d7c0f','✓'], warn:['#b45309','⚠'], bad:['#b91c1c','✕'] }[symCat]
-      const sym = symCfg ? `<span class="tc2-sym" style="color:${symCfg[0]};background:${symCfg[0]}1a" title="Symmetrie">${symCfg[1]}</span>` : ''
+      const symCfg = { perfekt:['var(--good-ink, #15803d)','✓'], ok:['#4d7c0f','✓'], warn:['var(--warn-ink, #b45309)','⚠'], bad:['var(--danger-ink, #b91c1c)','✕'] }[symCat]
+      const sym = symCfg ? `<span class="tc2-sym" style="color:${symCfg[0]};background:color-mix(in srgb, ${symCfg[0]} 10.2%, transparent)" title="Symmetrie">${symCfg[1]}</span>` : ''
       metric = `<span class="tc2-pnl" style="color:${col(mPl)}">$${fmt(mPl)}</span>`
         + `<span class="tc2-pnl" style="color:${col(sPl)}">${sCur}${fmt(sPl)}</span>`
         + sym + (p.blown ? `<span class="tc2-chip tc2-prio-high">⚡</span>` : '')
@@ -40990,7 +41029,7 @@
         : ''
       const _pulsUnklar = (p.route === 'tsv2' || p.route === 'tvv2') && p.status === 'planned' && p.mt5Baseline && p.mt5Baseline.puls_unklar
       const orbitBtn = _pulsUnklar
-        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-puls-unklar="${p.id}" style="color:#B45309" title="Letzter Start endete UNKLAR — die Order liegt vielleicht (${escapeHtml(String(_pulsUnklar.msg || _pulsUnklar.code || ''))}). Erst in ${pulsPlattform(p)} nachsehen — steht sie, „Läuft" setzen; ist nichts offen, Klick hier gibt „Starten" wieder frei.">⚠ UNKLAR · in ${pulsPlattform(p)} nachsehen</button>`
+        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-puls-unklar="${p.id}" style="color:var(--warn-ink, #b45309)" title="Letzter Start endete UNKLAR — die Order liegt vielleicht (${escapeHtml(String(_pulsUnklar.msg || _pulsUnklar.code || ''))}). Erst in ${pulsPlattform(p)} nachsehen — steht sie, „Läuft" setzen; ist nichts offen, Klick hier gibt „Starten" wieder frei.">⚠ UNKLAR · in ${pulsPlattform(p)} nachsehen</button>`
         : (!MT5_LOCAL && qs && qs.laeuft)
         ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
         : (!MT5_LOCAL && qs)
@@ -41007,7 +41046,7 @@
       const _ss = tpStartSperre(p)
       const sperreChip = _ss ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(_ss.voll)}">${escapeHtml(_ss.kurz)}</span>` : ''
       const rkChip = !_rk ? sperreChip
-        : _rk.status === 'wartet' ? `<span class="rsq-card-run" style="color:#B45309" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt · neuer Versuch ${tpStartUmText(p.startUm)} · Versuch ${Number(_rk.versuche) || 1}</span>`
+        : _rk.status === 'wartet' ? `<span class="rsq-card-run" style="color:var(--warn-ink, #b45309)" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt · neuer Versuch ${tpStartUmText(p.startUm)} · Versuch ${Number(_rk.versuche) || 1}</span>`
         : rkAufgegeben(p) ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">✗ nicht gestartet: Richtungskonflikt — von Hand starten oder Uhrzeit ändern</span>`
         : _rk.status === 'konflikt' ? `<span class="rsq-card-run" style="color:var(--danger)" title="${escapeHtml(String(_rk.text || ''))}">⇅ Richtungskonflikt: ${escapeHtml(String(_rk.gegen === 'sell' ? 'SHORT' : _rk.gegen === 'buy' ? 'LONG' : '?'))} ${_rk.durch === 'geplant' ? 'vorher geplant' : 'läuft'}</span>`
         : ''
@@ -41081,14 +41120,14 @@
       // V2 (24.09.2026): eigener Knopf mit eigener Verdrahtung (data-plan-v2-schliessen → tpV2PlanSchliessen):
       // Echo V2 über /api/master-close (ohne_hedge), Orbit V2 über /api/tv-close; vom Mac als close-Signal.
       const closeBtn = (p.route === 'mt5' && !isPending)
-        ? `<button class="btn btn-ghost tc2-btn" data-plan-schliessen="${p.id}" title="Master-Position schließen — Puls klickt im Terminal, der Hedge geht über Echo mit" style="color:#D92D20">Schließen</button>`
+        ? `<button class="btn btn-ghost tc2-btn" data-plan-schliessen="${p.id}" title="Master-Position schließen — Puls klickt im Terminal, der Hedge geht über Echo mit" style="color:var(--danger-ink, #b91c1c)">Schließen</button>`
         : (istV2Karte && !isPending && (p.route !== 'tsv2' || planIstPuls(p)))
-          ? `<button class="btn btn-ghost tc2-btn" data-plan-v2-schliessen="${p.id}" title="${p.route === 'mt5v2' ? 'Master-Position schließen — Puls klickt im MT5-Terminal (ohne Hedge)' : 'Position flatten — Puls schließt in TradingView und liest Today’s P&L'}" style="color:#D92D20">Schließen</button>`
+          ? `<button class="btn btn-ghost tc2-btn" data-plan-v2-schliessen="${p.id}" title="${p.route === 'mt5v2' ? 'Master-Position schließen — Puls klickt im MT5-Terminal (ohne Hedge)' : 'Position flatten — Puls schließt in TradingView und liest Today’s P&L'}" style="color:var(--danger-ink, #b91c1c)">Schließen</button>`
           : ''
       // Fusion-Gegenhedge (24.09.2026): „Hedge zu" nur am PC, der ihn hält (eigener Handler data-plan-hedge-zu)
       const hedgeZuBtn = (p.route === 'tvv2' && MT5_LOCAL && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.status === 'offen'
                           && (!p.mt5Baseline.hedge.pc || (typeof mt5FleetPcId === 'function' && p.mt5Baseline.hedge.pc === mt5FleetPcId())))
-        ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Nur die Fusion-Gegenposition schließen (Master läuft weiter)" style="color:#B45309">Hedge zu</button>` : ''
+        ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Nur die Fusion-Gegenposition schließen (Master läuft weiter)" style="color:var(--warn-ink, #b45309)">Hedge zu</button>` : ''
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
         ${hedgeZuBtn}${closeBtn}
@@ -41096,7 +41135,7 @@
     } else if(isReview){
       const hedgeZuBtnR = (p.route === 'tvv2' && MT5_LOCAL && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.status === 'offen'
                            && (!p.mt5Baseline.hedge.pc || (typeof mt5FleetPcId === 'function' && p.mt5Baseline.hedge.pc === mt5FleetPcId())))
-        ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Fusion-Gegenposition schließen (Master ist schon zu)" style="color:#B45309">Hedge zu</button>` : ''
+        ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Fusion-Gegenposition schließen (Master ist schon zu)" style="color:var(--warn-ink, #b45309)">Hedge zu</button>` : ''
       actions = `
         ${tpKetteChip(p)}
         <button class="btn btn-ghost tc2-btn" data-plan-reopen="${p.id}" title="Zurück zu Offen (Fehlerkennung)">↺</button>
@@ -41125,15 +41164,15 @@
               ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>`
               : ((p.route === 'tvv2' || p.route === 'tsv2') && p.hedgeEur > 0)   // tsv2 seit .1495: Winning Day auf Topstep mit Fusion-Hedge
                 // Winning Days Farm (25.09.2026, Design-Rundgang): „ohne Hedge" stand direkt neben „Fusion-Gegenhedge"
-                ? `<span class="tc2-chip" title="Winning Day: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Fusion-Hedge</span>`
+                ? `<span class="tc2-chip" title="Winning Day: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:color-mix(in srgb, var(--violet) 10%, transparent);color:#6D28D9">Fusion-Hedge</span>`
                 : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
             ${(p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
-              ? `<span class="tc2-chip" style="background:rgba(245,158,11,.12);color:#B45309" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
+              ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--warn) 12%, transparent);color:var(--warn-ink, #b45309)" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
               : ''}
             ${(() => { const ks = tpKetteSchritt(p); return ks ? `<span class="tc2-chip" title="${escapeHtml(ks.tip)}">${escapeHtml(ks.text)}${ks.kette}</span>` : '' })()}
-            ${planIstTageMini(p) ? `<span class="tc2-chip" style="background:rgba(21,128,61,.10);color:#15803d" title="Mini-Trade für die Mindesttage — kleinste Lot-Stufe, wird nach dem Start sofort wieder geschlossen (Tag zählt)">Tage sammeln ${Number(p.mt5Baseline.tage_mini.ist) + 1}/${escapeHtml(String(p.mt5Baseline.tage_mini.soll))}</span>` : ''}
+            ${planIstTageMini(p) ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--good-ink, #15803d) 10%, transparent);color:var(--good-ink, #15803d)" title="Mini-Trade für die Mindesttage — kleinste Lot-Stufe, wird nach dem Start sofort wieder geschlossen (Tag zählt)">Tage sammeln ${Number(p.mt5Baseline.tage_mini.ist) + 1}/${escapeHtml(String(p.mt5Baseline.tage_mini.soll))}</span>` : ''}
             ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
-              ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
+              ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:color-mix(in srgb, var(--good) 12%, transparent);color:var(--good-ink, #15803d)' : 'background:color-mix(in srgb, var(--danger) 10%, transparent);color:var(--danger-ink, #b91c1c)'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
@@ -41164,10 +41203,10 @@
     const symCat = calcSymCategory(p)
     if(symCat){
       const cfg = {
-        perfekt: { bg:'rgba(34,197,94,.12)',  fg:'#15803d', label:'✓ Perfekt' },
+        perfekt: { bg:'color-mix(in srgb, var(--good) 12%, transparent)',  fg:'var(--good-ink, #15803d)', label:'✓ Perfekt' },
         ok:      { bg:'rgba(132,204,22,.14)', fg:'#4d7c0f', label:'✓ Symmetrisch' },
-        warn:    { bg:'rgba(245,158,11,.12)', fg:'#b45309', label:'⚠ Leicht asym' },
-        bad:     { bg:'rgba(239,68,68,.12)',  fg:'#b91c1c', label:'✕ Asymmetrisch' }
+        warn:    { bg:'color-mix(in srgb, var(--warn) 12%, transparent)', fg:'var(--warn-ink, #b45309)', label:'⚠ Leicht asym' },
+        bad:     { bg:'color-mix(in srgb, var(--danger) 12%, transparent)',  fg:'var(--danger-ink, #b91c1c)', label:'✕ Asymmetrisch' }
       }[symCat]
       if(cfg){
         symBadge = `<span style="padding:3px 8px;border-radius:5px;background:${cfg.bg};color:${cfg.fg};font-size:11px;font-weight:600;white-space:nowrap">${cfg.label}</span>`
@@ -41215,8 +41254,8 @@
           </div>
           ${mPl !== null && sPl !== null ? `
             <div style="display:flex;gap:10px;align-items:center;margin-left:auto">
-              <span class="mono" style="font-weight:600;color:${mPl >= 0 ? '#15803d' : '#b91c1c'}">$${fmtSig(mPl)}${masterIsLive ? '<span style="font-size:9px;color:var(--violet);margin-left:2px">L</span>' : ''}</span>
-              <span class="mono" style="font-weight:600;color:${sPl >= 0 ? '#15803d' : '#b91c1c'}">${sCur}${fmtSig(sPl)}${slaveIsLive ? '<span style="font-size:9px;color:var(--violet);margin-left:2px">L</span>' : ''}</span>
+              <span class="mono" style="font-weight:600;color:${mPl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">$${fmtSig(mPl)}${masterIsLive ? '<span style="font-size:9px;color:var(--violet);margin-left:2px">L</span>' : ''}</span>
+              <span class="mono" style="font-weight:600;color:${sPl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${sCur}${fmtSig(sPl)}${slaveIsLive ? '<span style="font-size:9px;color:var(--violet);margin-left:2px">L</span>' : ''}</span>
               ${symBadge}
             </div>
           ` : ''}
@@ -41252,7 +41291,7 @@
     const startIso  = p.startedAt || null
     const pendingBanner = isPending ? `
       <div style="background:#f59e0b1a;border-bottom:2px solid #f59e0b55;padding:10px 18px;margin:-16px -18px 12px -18px;display:flex;align-items:center;justify-content:space-between;border-radius:var(--r-lg) var(--r-lg) 0 0">
-        <span style="font-size:12.5px;font-weight:600;color:#d97706">🔴 Trade beendet erkannt — PnL eintragen</span>
+        <span style="font-size:12.5px;font-weight:600;color:var(--warn-ink, #b45309)">🔴 Trade beendet erkannt — PnL eintragen</span>
         <button class="btn btn-primary" data-plan-complete="${p.id}" style="padding:5px 11px;font-size:12px">Abschließen →</button>
       </div>` : ''
     const liveStrip = isOpen && !isPending ? `
@@ -41381,11 +41420,11 @@
         }
         const diff = Math.abs(Math.abs(mPct) - Math.abs(sPct))
         let symColor, symLabel, symIcon
-        if(diff <= 3){ symColor = '#16a34a'; symLabel = 'Perfekt'; symIcon = '✓' }
+        if(diff <= 3){ symColor = 'var(--good-ink, #15803d)'; symLabel = 'Perfekt'; symIcon = '✓' }
         else if(diff <= 5){ symColor = '#84cc16'; symLabel = 'Symmetrisch'; symIcon = '✓' }
-        else if(diff <= 10){ symColor = '#f59e0b'; symLabel = 'Leicht asym'; symIcon = '⚠' }
-        else { symColor = '#dc2626'; symLabel = 'Asymmetrisch'; symIcon = '✕' }
-        symBadge = `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:5px;background:${symColor}1a;color:${symColor};font-size:11px;font-weight:600" title="Master ${Math.abs(mPct).toFixed(0)}% / Slave ${Math.abs(sPct).toFixed(0)}% · Δ ${diff.toFixed(1)}%">${symIcon} ${symLabel}</span>`
+        else if(diff <= 10){ symColor = 'var(--warn)'; symLabel = 'Leicht asym'; symIcon = '⚠' }
+        else { symColor = 'var(--danger-ink, #b91c1c)'; symLabel = 'Asymmetrisch'; symIcon = '✕' }
+        symBadge = `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:5px;background:color-mix(in srgb, ${symColor} 10.2%, transparent);color:${symColor};font-size:11px;font-weight:600" title="Master ${Math.abs(mPct).toFixed(0)}% / Slave ${Math.abs(sPct).toFixed(0)}% · Δ ${diff.toFixed(1)}%">${symIcon} ${symLabel}</span>`
       }
 
       result = `
@@ -43350,7 +43389,7 @@
     const n = (v, d) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
     const fmtD = v => `${v < 0 ? '−' : '+'}${n(Math.abs(v), 0)} $`
     const fmtE = v => `${v < 0 ? '−' : '+'}${n(Math.abs(v), 2)} €`
-    const col = v => v >= 0 ? '#15803d' : '#b91c1c'
+    const col = v => v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
     const leer = (txt) => `<div class="tp-wd-kachel tp-wd-kachel-leer">${txt}</div>`
     if(!(r.lots > 0)){
       const grund = !r.masterFirm ? 'Master-Konto wählen' : !(r.risk > 0) ? 'Risiko Master eintragen' : !(r.kt > 0) ? 'Kontrakte eintragen' : 'Risiko Slave eintragen'
@@ -43377,7 +43416,7 @@
         const echt = (typeof fusionMargePopupText === 'function') ? fusionMargePopupText(r.lots, (typeof _tpDir !== 'undefined') ? _tpDir : null) : null
         mg.textContent = echt || (kurs ? `braucht ca. ${n(r.lots * kurs * r.slavePpl / 100, 0)} € Marge (1:100)` : '') } }
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
-    const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'
+    const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'color-mix(in srgb, var(--good) 6%, transparent)' : 'color-mix(in srgb, var(--danger) 6%, transparent)'
       return `<div class="tp-wd-kachel" style="background:${bg}">
         <div class="tp-wd-kachel-titel">${titel}</div>
         <div class="tp-wd-kachel-zeile">Master <b style="color:${col(master)}">${fmtD(master)}</b> · Fusion <b style="color:${col(fusion)}">${fmtE(fusion)}</b></div>
@@ -43568,8 +43607,8 @@
       w.textContent = 'Richtung selbst wählen.'; if(inner) inner.style.borderColor = 'var(--border)'; return
     }
     const long = row.bias === 'LONG'
-    b.textContent = long ? '▲ LONG' : '▼ SHORT'; b.style.color = long ? '#0E9757' : 'var(--danger)'
-    if(inner) inner.style.borderColor = long ? 'rgba(14,151,87,.45)' : 'rgba(217,45,32,.45)'
+    b.textContent = long ? '▲ LONG' : '▼ SHORT'; b.style.color = long ? 'var(--good-ink, #15803d)' : 'var(--danger)'
+    if(inner) inner.style.borderColor = long ? 'color-mix(in srgb, var(--good-ink, #15803d) 45%, transparent)' : 'color-mix(in srgb, var(--danger-ink, #b91c1c) 45%, transparent)'
     const t0 = row.t0 ? new Date(row.t0) : null
     const alter = (t0 && isFinite(t0)) ? Math.round((Date.now() - t0.getTime()) / 60000) : null
     const alterTxt = alter == null ? '' : alter < 60 ? `vor ${alter} min` : `vor ${Math.round(alter / 60)} h`
@@ -43623,7 +43662,7 @@
       .sort((a, b) => zeit(b) - zeit(a)).slice(0, 5) : []
     if(kopf){
       const nL = liste.filter(p => p.richtung === 'buy').length, nS = liste.length - nL
-      kopf.innerHTML = liste.length ? ` · <span style="color:#0E9757">${nL} L</span> / <span style="color:var(--danger)">${nS} S</span>` : ''
+      kopf.innerHTML = liste.length ? ` · <span style="color:var(--good-ink, #15803d)">${nL} L</span> / <span style="color:var(--danger)">${nS} S</span>` : ''
     }
     if(!liste.length){ el.innerHTML = `<div style="color:var(--sub);padding:2px 0">${master ? 'Noch keine Orders auf diesem Konto.' : 'Erst ein Master-Konto wählen.'}</div>`; return }
     // Namen wie auf den Weg-Knöpfen (tvplus heißt in SYS_STICKER noch „Orbit" aus der Zeit vor dem 01.10.2026)
@@ -43633,12 +43672,12 @@
     el.innerHTML = liste.map(p => {
       const d = new Date(p.startedAt || p.createdAt || 0)
       const wann = isFinite(d) ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '—'
-      const dir = p.richtung === 'buy' ? '<span class="tp-lo-dir" style="color:#0E9757">▲ BUY</span>'
+      const dir = p.richtung === 'buy' ? '<span class="tp-lo-dir" style="color:var(--good-ink, #15803d)">▲ BUY</span>'
         : '<span class="tp-lo-dir" style="color:var(--danger)">▼ SELL</span>'
       const vorg = String(p.masterAccountId || '') !== master ? `<span style="color:var(--sub-2)" title="${escapeHtml(p.masterName || '')}">Vorgänger</span>` : ''
       const st = statusTxt(p.status)
       const pl = p.masterPl != null && isFinite(p.masterPl)
-        ? `<span class="tnum" style="color:${p.masterPl >= 0 ? '#0E9757' : 'var(--danger)'}">${p.masterPl >= 0 ? '+' : '−'}$${Math.abs(p.masterPl).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</span>` : ''
+        ? `<span class="tnum" style="color:${p.masterPl >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger)'}">${p.masterPl >= 0 ? '+' : '−'}$${Math.abs(p.masterPl).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</span>` : ''
       return `<div class="tp-lo-zeile"><span class="tp-lo-wann tnum">${escapeHtml(wann)}</span>${dir}<span class="tp-lo-weg">${escapeHtml(wegKurz(p))}</span>${vorg}`
         + `<span class="tp-lo-rechts">${st ? `<span style="color:var(--sub)">${escapeHtml(st)}</span>` : ''}${pl}</span></div>`
     }).join('')
@@ -43653,12 +43692,12 @@
     _tpDir = d
     const b = document.getElementById('tp-dir-buy')
     const s = document.getElementById('tp-dir-sell')
-    if(b){ b.style.background = _tpDir === 'buy' ? 'rgba(18,183,106,.12)' : ''
-           b.style.borderColor = _tpDir === 'buy' ? '#12B76A' : ''
-           b.style.color = _tpDir === 'buy' ? '#0E9757' : '' }
-    if(s){ s.style.background = _tpDir === 'sell' ? 'rgba(240,68,56,.10)' : ''
-           s.style.borderColor = _tpDir === 'sell' ? '#F04438' : ''
-           s.style.color = _tpDir === 'sell' ? '#D92D20' : '' }
+    if(b){ b.style.background = _tpDir === 'buy' ? 'color-mix(in srgb, var(--good) 12%, transparent)' : ''
+           b.style.borderColor = _tpDir === 'buy' ? 'var(--good)' : ''
+           b.style.color = _tpDir === 'buy' ? 'var(--good-ink, #15803d)' : '' }
+    if(s){ s.style.background = _tpDir === 'sell' ? 'color-mix(in srgb, var(--danger) 10%, transparent)' : ''
+           s.style.borderColor = _tpDir === 'sell' ? 'var(--danger)' : ''
+           s.style.color = _tpDir === 'sell' ? 'var(--danger-ink, #b91c1c)' : '' }
     b?.classList.toggle('active', _tpDir === 'buy'); s?.classList.toggle('active', _tpDir === 'sell')   // ✓ + aria (18.10.2026)
   }
   document.getElementById('tp-dir-buy')?.addEventListener('click', () => tpDirSet('buy'))
@@ -44001,12 +44040,12 @@
     _tpOrderDir = dir
     const b = document.getElementById('tp-order-buy')
     const s = document.getElementById('tp-order-sell')
-    if(b){ b.style.background = dir === 'buy' ? 'rgba(18,183,106,.12)' : ''
-           b.style.borderColor = dir === 'buy' ? '#12B76A' : ''
-           b.style.color = dir === 'buy' ? '#0E9757' : '' }
-    if(s){ s.style.background = dir === 'sell' ? 'rgba(240,68,56,.10)' : ''
-           s.style.borderColor = dir === 'sell' ? '#F04438' : ''
-           s.style.color = dir === 'sell' ? '#D92D20' : '' }
+    if(b){ b.style.background = dir === 'buy' ? 'color-mix(in srgb, var(--good) 12%, transparent)' : ''
+           b.style.borderColor = dir === 'buy' ? 'var(--good)' : ''
+           b.style.color = dir === 'buy' ? 'var(--good-ink, #15803d)' : '' }
+    if(s){ s.style.background = dir === 'sell' ? 'color-mix(in srgb, var(--danger) 10%, transparent)' : ''
+           s.style.borderColor = dir === 'sell' ? 'var(--danger)' : ''
+           s.style.color = dir === 'sell' ? 'var(--danger-ink, #b91c1c)' : '' }
   }
 
   /* Letzte 10 Orders als Richtungs-Chips — NUR dieser Master-Account samt
@@ -44056,9 +44095,9 @@
     }
     const chip = p => {
       const dir = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
-      const st = dir === 'buy'  ? 'background:rgba(18,183,106,.12);color:#0E9757'
-               : dir === 'sell' ? 'background:rgba(240,68,56,.10);color:#D92D20'
-               : 'background:rgba(120,120,140,.12);color:var(--sub)'
+      const st = dir === 'buy'  ? 'background:color-mix(in srgb, var(--good) 12%, transparent);color:var(--good-ink, #15803d)'
+               : dir === 'sell' ? 'background:color-mix(in srgb, var(--danger) 10%, transparent);color:var(--danger-ink, #b91c1c)'
+               : 'background:color-mix(in srgb, var(--sub) 12%, transparent);color:var(--sub)'
       let wann = ''
       try{ wann = new Date(p.startedAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }catch(_){}
       const tip = [p.masterName || '—', p.masterSymbol || '', wann, dir ? '' : 'Richtung nicht erfasst'].filter(Boolean).join(' · ')
@@ -44469,15 +44508,15 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1617'
+  const OS_TAB_BUILD = '2026-09-22.1618'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
     const box = document.getElementById('tp-order-remote')
     if(!box) return
     box.style.display = ''
-    box.style.background  = art === 'err' ? 'rgba(240,68,56,.08)'  : art === 'ok' ? 'rgba(18,183,106,.08)'  : 'rgba(124,58,237,.08)'
-    box.style.borderColor = art === 'err' ? 'rgba(240,68,56,.35)' : art === 'ok' ? 'rgba(18,183,106,.35)' : 'rgba(124,58,237,.3)'
+    box.style.background  = art === 'err' ? 'color-mix(in srgb, var(--danger) 8%, transparent)'  : art === 'ok' ? 'color-mix(in srgb, var(--good) 8%, transparent)'  : 'color-mix(in srgb, var(--violet) 8%, transparent)'
+    box.style.borderColor = art === 'err' ? 'color-mix(in srgb, var(--danger) 35%, transparent)' : art === 'ok' ? 'color-mix(in srgb, var(--good) 35%, transparent)' : 'color-mix(in srgb, var(--violet) 30%, transparent)'
     box.innerHTML = html
   }
   function tpOrderRemoteStop(){
@@ -53374,7 +53413,7 @@
         // Waiting for Payout (02.10.2026, Finn: „bleibt drin — manchmal braucht man noch Winning Days —, aber sichtbar markiert"):
         // Hinweis direkt hinter dem Status + Bernstein-Ton (Chrome auf Windows färbt Optionen, macOS-Menüs zeigen nur den Text)
         const wartet = !!a.waitingPayoutSince
-        const wartetAttr = wartet ? ' style="color:#b45309"' : ''
+        const wartetAttr = wartet ? ' style="color:var(--warn-ink, #b45309)"' : ''
         const statusTxt = wartet ? `${status} · 💰 Waiting for Payout` : status
         return `<option value="${a.id}"${wartetAttr}>${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(statusTxt)}  ·  ${escapeHtml(balPart)}${escapeHtml(tagesPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}</option>`
       }
@@ -54253,7 +54292,7 @@
         } else {
           // acqCost = 0 (Account hat schon alles ausgezahlt oder Phase-2 ohne Verluste)
           suggestVal.textContent = '—'
-          suggestDet.innerHTML = `<span style="color:#10b981">✓ Account ist bereits ausgeglichen — kein Acquisition-Cost-Hedge nötig</span>`
+          suggestDet.innerHTML = `<span style="color:var(--good)">✓ Account ist bereits ausgeglichen — kein Acquisition-Cost-Hedge nötig</span>`
           suggestEl.dataset.suggestedValue = ''
         }
       }
@@ -54263,13 +54302,13 @@
       if(master && (!master.maxDrawdown || master.maxDrawdown <= 0)){
         suggestEl.style.display = 'block'
         suggestVal.textContent = '—'
-        suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Max Drawdown am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
+        suggestDet.innerHTML = `<span style="color:var(--warn)">⚠ Max Drawdown am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
         suggestEl.dataset.suggestedValue = ''
       } else if(master && master.maxDrawdown > 0 && (!master.purchaseCost || master.purchaseCost <= 0)){
         // Max-DD da, aber Kaufpreis fehlt
         suggestEl.style.display = 'block'
         suggestVal.textContent = '—'
-        suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Kaufpreis am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
+        suggestDet.innerHTML = `<span style="color:var(--warn)">⚠ Kaufpreis am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
         suggestEl.dataset.suggestedValue = ''
       }
     }
@@ -54320,7 +54359,7 @@
         } else {
           gkEl.style.display = 'block'
           gkVal.textContent = '—'
-          gkDet.innerHTML = `<span style="color:#10b981">✓ Kein Kaufpreis / keine Vorgänger-Kette hinterlegt</span>`
+          gkDet.innerHTML = `<span style="color:var(--good)">✓ Kein Kaufpreis / keine Vorgänger-Kette hinterlegt</span>`
           gkEl.dataset.suggestedGkEur = ''
         }
       } else {
@@ -54478,7 +54517,7 @@
       // RR-Verhältnis: TP / SL
       if(rrEl){
         rrEl.textContent = `1 : ${ratio.toFixed(2)}`
-        rrEl.style.color = ratio >= 2 ? '#10b981' : (ratio >= 1 ? '#f59e0b' : '#ef4444')
+        rrEl.style.color = ratio >= 2 ? 'var(--good)' : (ratio >= 1 ? 'var(--warn)' : 'var(--danger)')
       }
     }
 
@@ -55054,7 +55093,7 @@
     const row = _vpKompass.row
     if(!row){ el.textContent = 'Kompass: keine Vorhersage in der Datenbank — Richtung bleibt leer (im Order-Popup wählen).'; return }
     const quote = tpKompassQuote(_vpKompass.q, row.konfidenz)
-    el.innerHTML = `Kompass ${row.bias === 'LONG' ? '<b style="color:#0E9757">▲ LONG</b>' : '<b style="color:var(--danger)">▼ SHORT</b>'}`
+    el.innerHTML = `Kompass ${row.bias === 'LONG' ? '<b style="color:var(--good-ink, #15803d)">▲ LONG</b>' : '<b style="color:var(--danger)">▼ SHORT</b>'}`
       + `${row.konfidenz ? ' · Konfidenz ' + escapeHtml(String(row.konfidenz)) + '/5' : ''} → je Konto ${quote} % wie der Kompass, sonst Gegenteil (gewürfelt beim Anlegen)`
   }
   // Richtung je Konto: fest (buy/sell), nach Kompass gewürfelt, oder null (leer)
@@ -56788,7 +56827,7 @@
       const wer = n => `<span class="${n.st === 'fertig' ? 'ok' : n.st === 'verpasst' ? 'weg' : ''}" title="${escapeHtml(n.st || 'geplant')}">${escapeHtml(n.name)}${n.st === 'fertig' ? ' ✓' : n.st === 'verpasst' ? ' ✗' : ''}</span>`
       const tagTxt = tg => { const d = new Date(tg + 'T12:00:00'); return isNaN(d) ? tg : d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' }) }
       box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th class="zahl">Blöcke</th><th class="zahl">Konten</th><th class="zahl">gestartet</th><th class="zahl">verpasst</th><th class="zahl">P&L</th><th>Wer</th></tr></thead><tbody>` +
-        [...tage.values()].map(t => `<tr><td class="mono" style="white-space:nowrap">${escapeHtml(tagTxt(t.tag))}</td><td class="zahl">${t.ids}${t.verpasst ? ` <span style="color:var(--danger)">(${t.verpasst} verpasst)</span>` : ''}</td><td class="zahl">${t.konten}</td><td class="zahl">${t.ok}</td><td class="zahl">${t.fehler ? `<span style="color:var(--danger);font-weight:600">${t.fehler}</span>` : '0'}</td><td class="zahl mono" style="${t.pl ? `color:${t.pl > 0 ? '#15803d' : '#b91c1c'};font-weight:600` : 'color:var(--sub-2)'}">${t.pl ? (t.pl > 0 ? '+' : '') + t.pl.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : '—'}</td><td><div class="wd-wer">${t.namen.map(wer).join('')}</div></td></tr>`).join('') + '</tbody></table>'
+        [...tage.values()].map(t => `<tr><td class="mono" style="white-space:nowrap">${escapeHtml(tagTxt(t.tag))}</td><td class="zahl">${t.ids}${t.verpasst ? ` <span style="color:var(--danger)">(${t.verpasst} verpasst)</span>` : ''}</td><td class="zahl">${t.konten}</td><td class="zahl">${t.ok}</td><td class="zahl">${t.fehler ? `<span style="color:var(--danger);font-weight:600">${t.fehler}</span>` : '0'}</td><td class="zahl mono" style="${t.pl ? `color:${t.pl > 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'};font-weight:600` : 'color:var(--sub-2)'}">${t.pl ? (t.pl > 0 ? '+' : '') + t.pl.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : '—'}</td><td><div class="wd-wer">${t.namen.map(wer).join('')}</div></td></tr>`).join('') + '</tbody></table>'
     }catch(e){ box.innerHTML = `<div style="color:var(--danger)">Verlauf: ${escapeHtml(String(e.message || e))}</div>` }
   }
   // Zeile mit dem Live-Stand der Pläne aus Railway (Mac sieht fremde Pläne sonst nicht) — Zustand je Konto
@@ -56824,9 +56863,9 @@
     const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
     if(k.vorcheck === 'slave_nicht_bereit') return `<span style="color:var(--danger)">⚠ Slave-Terminal nicht bereit — Puls wartet</span>`
     if(k.vorcheck === 'verpasst_slave') return `<span style="color:var(--danger)">✗ nicht gestartet — Slave-Terminal war nicht bereit</span>`
-    if(k.status === 'planned' || !k.status) return k.gestartet ? `<span style="color:#2a9d5c">▶ startet gerade${um}</span>` : `<span style="color:var(--sub)">⏰ Plan liegt bereit</span>`
-    if(k.status === 'open') return `<span style="color:#2a9d5c">✓ Order raus${um} · läuft</span>`
-    if(k.status === 'review' || k.status === 'completed') return `<span style="color:#2a9d5c">✓ Trade zu Ende${k.ended ? ` · ${wdHhmm(k.ended)}` : ''}${typeof k.pl === 'number' ? ` · P&L ${k.pl > 0 ? '+' : ''}${de(k.pl)} $` : ''}</span>`
+    if(k.status === 'planned' || !k.status) return k.gestartet ? `<span style="color:var(--good-ink, #15803d)">▶ startet gerade${um}</span>` : `<span style="color:var(--sub)">⏰ Plan liegt bereit</span>`
+    if(k.status === 'open') return `<span style="color:var(--good-ink, #15803d)">✓ Order raus${um} · läuft</span>`
+    if(k.status === 'review' || k.status === 'completed') return `<span style="color:var(--good-ink, #15803d)">✓ Trade zu Ende${k.ended ? ` · ${wdHhmm(k.ended)}` : ''}${typeof k.pl === 'number' ? ` · P&L ${k.pl > 0 ? '+' : ''}${de(k.pl)} $` : ''}</span>`
     if(k.status === 'verpasst') return `<span style="color:var(--danger)">✗ Startzeit verpasst — PC-Tab war zu?</span>`
     if(k.status === 'weg') return `<span style="color:var(--danger)">✗ Plan wurde gelöscht</span>`
     return `<span style="color:var(--sub)">${escapeHtml(String(k.status || ''))}</span>`
@@ -56877,7 +56916,7 @@
       const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name || k.name, type: kd.type })   // F27: Basis 0
       const groesse = express ? 0 : kontoGroesseAnzeige(kd.name || k.name, kd.starting_balance, live)   // nie die manuelle Balance (F9); Live-Balance nur als Rückfall (05.10.2026); seit 08.10.2026 Name „100k" vor starting_balance (Anzeige)
       const plus = live != null && (groesse > 0 || express) ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
-      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${express ? '0 (Express)' : groesse ? de(groesse) : '?'}</div>` : ''}` : '<span class="kf">kein Live-Stand</span>'
+      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${express ? '0 (Express)' : groesse ? de(groesse) : '?'}</div>` : ''}` : '<span class="kf">kein Live-Stand</span>'
       const dd = kd.max_drawdown ? `$${de(kd.max_drawdown)}` : '—'
       const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
       const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
@@ -57094,7 +57133,7 @@
           <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>
           <td>${wdRichtungChip(x, erw)}${wdRichtungGrundHtml(x)}</td>
           <td class="mono">${n}<span class="kf"> / ${k.length}</span><span class="wd-bar"><i style="width:${k.length ? Math.round(n / k.length * 100) : 0}%"></i></span></td><td class="mono">${wdSum}</td>
-          <td class="mono">${n ? `<span style="color:${mitPlan >= n ? '#2a9d5c' : 'var(--danger)'};font-weight:600">${mitPlan}</span><span class="kf"> / ${n}</span>` : '<span class="kf">—</span>'}</td>
+          <td class="mono">${n ? `<span style="color:${mitPlan >= n ? 'var(--good-ink, #15803d)' : 'var(--danger)'};font-weight:600">${mitPlan}</span><span class="kf"> / ${n}</span>` : '<span class="kf">—</span>'}</td>
           <td>${chipHtml}${gestartet ? `<span class="kf"> · ${gestartet} gestartet</span>` : ''}${!n && k.length ? `<span class="kf"> · ${escapeHtml(wdGruende(k))}</span>` : ''}</td></tr>`
         return zeile + (offen ? `<tr class="wd-detail"><td colspan="9">${wdKarte(x, erw)}</td></tr>` : '')
       }).join('') + '</tbody></table>'
@@ -57918,7 +57957,7 @@
     p = document.createElement('div'); p.className = 'panel'; p.id = 'wz-panel'; p.style.margin = '0 0 12px'
     p.innerHTML = `<div class="wd-panel-kopf" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
         <div class="panel-title">Zeitstrahl <span style="font-weight:400;color:var(--sub);font-size:12px">· Dubai-Zeit · eine Zeile je ID</span></div>
-        <div style="font-size:11.5px;color:var(--sub)"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--violet);vertical-align:-1px;margin-right:4px"></i>geplant <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#2a9d5c;vertical-align:-1px;margin:0 4px 0 10px"></i>läuft <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#2a9d5c;opacity:.55;vertical-align:-1px;margin:0 4px 0 10px"></i>fertig <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--danger);vertical-align:-1px;margin:0 4px 0 10px"></i>verpasst</div>
+        <div style="font-size:11.5px;color:var(--sub)"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--violet);vertical-align:-1px;margin-right:4px"></i>geplant <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--good-ink, #15803d);vertical-align:-1px;margin:0 4px 0 10px"></i>läuft <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--good-ink, #15803d);opacity:.55;vertical-align:-1px;margin:0 4px 0 10px"></i>fertig <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--danger);vertical-align:-1px;margin:0 4px 0 10px"></i>verpasst</div>
       </div><div id="wz-body"></div>`
     const first = pane.querySelector(':scope > .panel')
     if(first && first.nextSibling) pane.insertBefore(p, first.nextSibling); else pane.appendChild(p)
@@ -59118,8 +59157,8 @@
       const pl = Number((window.hedgePlGesamt || ((b, x) => x))(p.mt5Baseline, h.pl))   // + versuche_alt (08.10.2026): Spread nie gefüllter Vorversuche zählt mit
       return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">· ${escapeHtml(hedgeGrundText(h.grund, h))} · aus der Deal-Historie, wird auf ‚Erledigt' als WD-Hedge in Finanzen gebucht</span></div>`
     }
-    if(h && h.status === 'geschlossen') return '<div style="font-size:12.5px;color:#B45309">Fusion-Gegenhedge zu · P&L folgt — der Slave-P&L bleibt unangetastet, bis der PC ihn nachgeholt hat.</div>'
-    if(h && ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(h.status)) return `<div style="font-size:12.5px;color:#B45309">⚠ Fusion-Hedge noch ${h.status === 'unklar' ? 'unklar' : 'offen'} (${eur} €) — erst im Hedge-Terminal schließen; der Slave-P&L bleibt unangetastet.</div>`
+    if(h && h.status === 'geschlossen') return '<div style="font-size:12.5px;color:var(--warn-ink, #b45309)">Fusion-Gegenhedge zu · P&L folgt — der Slave-P&L bleibt unangetastet, bis der PC ihn nachgeholt hat.</div>'
+    if(h && ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(h.status)) return `<div style="font-size:12.5px;color:var(--warn-ink, #b45309)">⚠ Fusion-Hedge noch ${h.status === 'unklar' ? 'unklar' : 'offen'} (${eur} €) — erst im Hedge-Terminal schließen; der Slave-P&L bleibt unangetastet.</div>`
     return `<div style="color:var(--sub);font-size:12.5px">Fusion-Gegenhedge (${eur} €) wurde nie geöffnet${h && h.msg ? ` — ${escapeHtml(String(h.msg))}` : ''} · nur der Master zählt.</div>`
   }
   function tcRecompute(){
@@ -59231,9 +59270,9 @@
       // Win: ≥90% = grün (Plan getroffen oder besser), 50-89% = orange, <50% = grau
       // Loss: <100% = grün (besser als befürchtet), 100-109% = orange, ≥110% = rot
       if(isWin){
-        return pct >= 90 ? 'var(--good)' : (pct >= 50 ? '#F79009' : 'var(--sub)')
+        return pct >= 90 ? 'var(--good)' : (pct >= 50 ? 'var(--warn)' : 'var(--sub)')
       } else {
-        return pct < 100 ? 'var(--good)' : (pct < 110 ? '#F79009' : 'var(--danger)')
+        return pct < 100 ? 'var(--good)' : (pct < 110 ? 'var(--warn)' : 'var(--danger)')
       }
     }
 
@@ -59284,7 +59323,7 @@
     if(sym !== null){
       let symColor, symLabel, symIcon
       if(sym.diff <= 3){
-        symColor = '#16a34a'   // grün — perfekt
+        symColor = 'var(--good-ink, #15803d)'   // grün — perfekt
         symLabel = 'Perfekt symmetrisch'
         symIcon = '✓'
       } else if(sym.diff <= 5){
@@ -59292,11 +59331,11 @@
         symLabel = 'Symmetrisch'
         symIcon = '✓'
       } else if(sym.diff <= 10){
-        symColor = '#f59e0b'   // orange — leicht asymmetrisch
+        symColor = 'var(--warn)'   // orange — leicht asymmetrisch
         symLabel = 'Leicht asymmetrisch'
         symIcon = '⚠'
       } else {
-        symColor = '#dc2626'   // rot — stark asymmetrisch
+        symColor = 'var(--danger-ink, #b91c1c)'   // rot — stark asymmetrisch
         symLabel = 'Stark asymmetrisch'
         symIcon = '✕'
       }
@@ -59310,10 +59349,10 @@
       const _devSlave = (isNaN(sPl) ? 0 : sPl) - _expSlave       // + = mehr auf Live, − = weniger
       const _devFmt = Math.abs(_devSlave).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
       const _expFmt = _expSlave.toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
-      const _devCol = _devSlave >= 0 ? '#16a34a' : '#dc2626'
+      const _devCol = _devSlave >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
       const _devLbl = `${_devSlave >= 0 ? '+' : '−'}${_devFmt} ${_cur} ${_devSlave >= 0 ? 'mehr' : 'weniger'} auf Live`
       planHtml += `
-        <div style="margin-top:10px;padding:8px 12px;border-radius:6px;background:${symColor}15;border:1px solid ${symColor}33;display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="margin-top:10px;padding:8px 12px;border-radius:6px;background:color-mix(in srgb, ${symColor} 8.24%, transparent);border:1px solid color-mix(in srgb, ${symColor} 20%, transparent);display:flex;justify-content:space-between;align-items:center;gap:10px">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="color:${symColor};font-weight:700;font-size:14px">${symIcon}</span>
             <span style="color:${symColor};font-weight:600;font-size:12.5px">${symLabel}</span>
@@ -61902,7 +61941,7 @@
         </div>
 
         <div class="calib-actions">
-          <button class="btn btn-ghost" type="button" data-calib-action="reset" style="color:#ef4444">
+          <button class="btn btn-ghost" type="button" data-calib-action="reset" style="color:var(--danger)">
             Alle Distanzen zurücksetzen
           </button>
           <button class="btn btn-primary" type="button" data-calib-action="apply">
@@ -62335,7 +62374,7 @@
     if(!inp) return
     const newName = inp.value.trim()
     if(!newName){
-      if(msg){ msg.textContent = '✗ Name darf nicht leer sein'; msg.style.color = '#ef4444' }
+      if(msg){ msg.textContent = '✗ Name darf nicht leer sein'; msg.style.color = 'var(--danger)' }
       return
     }
     const btn = document.getElementById('settingsNameSaveBtn')
@@ -62348,9 +62387,9 @@
       document.getElementById('userNameFull').textContent = newName
       document.getElementById('greetingName').textContent = newName.charAt(0).toUpperCase() + newName.slice(1) + ' 👋'
       document.getElementById('userAvatar').textContent = (newName[0] || 'U').toUpperCase()
-      if(msg){ msg.textContent = '✓ Gespeichert'; msg.style.color = '#10b981' }
+      if(msg){ msg.textContent = '✓ Gespeichert'; msg.style.color = 'var(--good)' }
     }catch(err){
-      if(msg){ msg.textContent = '✗ Fehler: ' + (err.message || err); msg.style.color = '#ef4444' }
+      if(msg){ msg.textContent = '✗ Fehler: ' + (err.message || err); msg.style.color = 'var(--danger)' }
     }finally{
       if(btn){ btn.disabled = false; btn.classList.remove('ts-btn-loading') }
       setTimeout(() => { if(msg) msg.textContent = '' }, 3000)
@@ -62367,7 +62406,7 @@
     if(!isFinite(v) || v <= 0 || v > 5){
       if(status){
         status.textContent = '✗ Ungültiger Wert (zwischen 0 und 5 erwartet)'
-        status.style.color = '#ef4444'
+        status.style.color = 'var(--danger)'
       }
       return
     }
@@ -62381,7 +62420,7 @@
     const ok = await saveFxRate()
     if(status){
       status.textContent = ok ? '✓ Gespeichert' : '⚠ Lokal aktiv, Cloud-Speichern fehlgeschlagen'
-      status.style.color = ok ? '#10b981' : '#f59e0b'
+      status.style.color = ok ? 'var(--good)' : 'var(--warn)'
       setTimeout(() => { if(status) status.textContent = '' }, 3000)
     }
   })
@@ -62748,7 +62787,7 @@
     if (!el) return
     el.textContent = msg
     el.style.color = kind === 'err' ? 'var(--danger)'
-                  : kind === 'ok'  ? '#10b981'
+                  : kind === 'ok'  ? 'var(--good)'
                   : 'var(--sub)'
   }
 
@@ -62818,13 +62857,13 @@
           c.style.cssText = 'padding:6px 10px;border:1px solid var(--border);text-align:left'
         })
         t.querySelectorAll('th').forEach(th => {
-          th.style.background = 'rgba(84,71,206,.08)'
+          th.style.background = 'color-mix(in srgb, var(--violet) 8%, transparent)'
           th.style.fontWeight = '600'
         })
       })
       bubble.querySelectorAll('code').forEach(c => {
         if (!c.parentElement || c.parentElement.tagName !== 'PRE') {
-          c.style.cssText = 'font-family:var(--mono);background:rgba(84,71,206,.08);padding:1px 5px;border-radius:3px;font-size:12px'
+          c.style.cssText = 'font-family:var(--mono);background:color-mix(in srgb, var(--violet) 8%, transparent);padding:1px 5px;border-radius:3px;font-size:12px'
         }
       })
       bubble.querySelectorAll('pre').forEach(p => {
@@ -63028,7 +63067,7 @@
       const data = await r.json()
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`)
       msg.textContent = `✓ Gespeichert (${data.length_chars} Zeichen). Backup als knowledge_base.md.bak`
-      msg.style.color = '#10b981'
+      msg.style.color = 'var(--good)'
       setTimeout(() => {
         document.getElementById('advisor-kb-modal').classList.remove('open')
       }, 1200)
@@ -63096,7 +63135,7 @@
       const date = c.updated_at ? new Date(c.updated_at).toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit'}) : ''
       const time = c.updated_at ? new Date(c.updated_at).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'}) : ''
       return `
-        <div class="advisor-conv-item" data-conv-id="${c.id}" style="padding:8px 10px;margin-bottom:4px;background:${isActive ? 'rgba(139,92,246,.12)' : 'transparent'};border:1px solid ${isActive ? 'rgba(139,92,246,.3)' : 'transparent'};border-radius:6px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:6px;transition:background .1s">
+        <div class="advisor-conv-item" data-conv-id="${c.id}" style="padding:8px 10px;margin-bottom:4px;background:${isActive ? 'color-mix(in srgb, var(--violet) 12%, transparent)' : 'transparent'};border:1px solid ${isActive ? 'color-mix(in srgb, var(--violet) 30%, transparent)' : 'transparent'};border-radius:6px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:6px;transition:background .1s">
           <div style="flex:1;min-width:0">
             <div style="color:${isActive ? 'var(--ink)' : 'var(--ink)'};font-weight:${isActive ? '600' : '400'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</div>
             <div style="color:var(--sub);font-size:10.5px;margin-top:2px">${date} ${time} · ${c.message_count} msgs</div>
@@ -63228,7 +63267,7 @@
       const data = await r.json()
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
       msg.textContent = '✓ Gespeichert'
-      msg.style.color = '#10b981'
+      msg.style.color = 'var(--good)'
       setTimeout(() => {
         document.getElementById('advisor-memory-modal').classList.remove('open')
       }, 600)
@@ -63302,7 +63341,7 @@
       const d2 = await r2.json()
       if (!r2.ok) throw new Error(d2.error || `HTTP ${r2.status}`)
       msg.textContent = '✓ Memory aktualisiert'
-      msg.style.color = '#10b981'
+      msg.style.color = 'var(--good)'
       setTimeout(() => {
         document.getElementById('advisor-extract-modal').classList.remove('open')
       }, 800)
@@ -63369,7 +63408,7 @@
       const total = advisorCurrentFirms.length
       const filled = advisorCurrentFirms.filter(f => f.is_filled).length
       status.textContent = `${filled} von ${total} Firms haben Regeln hinterlegt. Diese Regeln werden bei jedem Chat automatisch mitgegeben.`
-      status.style.color = filled === total ? '#10b981' : 'var(--sub)'
+      status.style.color = filled === total ? 'var(--good)' : 'var(--sub)'
       advisorRenderFirmsGrid()
     } catch (e) {
       status.textContent = 'Fehler: ' + e.message
@@ -63389,9 +63428,9 @@
       card.addEventListener('mouseleave', () => card.style.borderColor = '')
       card.addEventListener('click', () => advisorOpenFirmEditor(firm.id))
 
-      const catBadge = firm.category ? `<span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:10px;background:rgba(84,71,206,.1);color:var(--violet)">${escapeHtml(firm.category)}</span>` : ''
+      const catBadge = firm.category ? `<span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:10px;background:color-mix(in srgb, var(--violet) 10%, transparent);color:var(--violet)">${escapeHtml(firm.category)}</span>` : ''
       const status = firm.is_filled
-        ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#10b981"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Regeln hinterlegt</span>`
+        ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--good)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>Regeln hinterlegt</span>`
         : `<span style="font-size:11px;color:var(--sub)">⚠ Noch leer</span>`
       const updated = firm.updated_at ? new Date(firm.updated_at).toLocaleDateString('de-DE') : '—'
 
@@ -63505,7 +63544,7 @@
       extractedField.value = data.rules_markdown || ''
       const tk = data.tokens || {}
       status.textContent = `✓ Extrahiert · ${tk.input || 0} in / ${tk.output || 0} out · $${data.cost_usd}`
-      status.style.color = '#10b981'
+      status.style.color = 'var(--good)'
     } catch (e) {
       status.textContent = 'Fehler: ' + e.message
       status.style.color = 'var(--danger)'
@@ -63560,7 +63599,7 @@
       const data = await r.json()
       if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`)
       msg.textContent = '✓ Gespeichert'
-      msg.style.color = '#10b981'
+      msg.style.color = 'var(--good)'
       setTimeout(() => {
         document.getElementById('advisor-firm-modal').classList.remove('open')
         advisorLoadFirms()
@@ -63861,7 +63900,7 @@
 
     const labels = mgAccounts.map(a => `#${a.account_number}`)
     const data = mgAccounts.map(a => mgCalcTotals(a).realNetto)
-    const colors = data.map(v => v >= 0 ? '#12B76A' : '#F04438')
+    const colors = data.map(v => v >= 0 ? 'good' : 'danger')   // Token-Namen (Dark Mode 18.10.2026)
 
     if(mgChart){ try { mgChart.destroy() } catch(_){} mgChart = null }
     mgChart = new Chart(canvas.getContext('2d'), {
@@ -63870,8 +63909,8 @@
         labels,
         datasets: [{
           data,
-          backgroundColor: colors.map(c => c + '30'),
-          borderColor: colors,
+          backgroundColor: ctx => tokFarbe(colors[ctx.dataIndex], 0x30 / 255),
+          borderColor: ctx => tokFarbe(colors[ctx.dataIndex]),
           borderWidth: 1.5,
           borderRadius: 4
         }]
@@ -63881,22 +63920,22 @@
         plugins: {
           legend: { display: false },
           tooltip: {
-            backgroundColor: '#101828',
+            backgroundColor: () => tokFarbe('ink'), titleColor: () => tokFarbe('surface'), bodyColor: () => tokFarbe('surface'),
             callbacks: { label: (ctx) => 'Netto: ' + mgFmt(ctx.parsed.x, true) }
           }
         },
         scales: {
           x: {
-            grid: { color: 'rgba(102,112,133,.08)' },
+            grid: { color: () => tokFarbe('sub', .08) },
             ticks: {
-              color: '#667085',
+              color: () => tokFarbe('sub'),
               font: { family: 'JetBrains Mono', size: 10 },
               callback: (v) => mgFmt(v)
             }
           },
           y: {
             grid: { display: false },
-            ticks: { color: '#1D2939', font: { family: 'JetBrains Mono', size: 11, weight: '600' } }
+            ticks: { color: () => tokFarbe('ink-2'), font: { family: 'JetBrains Mono', size: 11, weight: '600' } }
           }
         }
       }
@@ -64723,7 +64762,7 @@
       <td style="padding-right:20px;text-align:right;white-space:nowrap">
         <span class="mtc-msg${mt5RowMsg[d.file] ? ' err' : ''}" data-mt5msg style="margin-right:8px">${esc(mt5RowMsg[d.file] || '')}</span>
         <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" data-mt5det="${esc(d.file)}" type="button" title="Große Ansicht mit Log + Symbol-Mapping">Details</button>
-        <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;color:#dc2626" data-mt5del="${esc(d.file)}" type="button" title="Config + Status auf diesem PC entfernen — der Terminal-Ordner bleibt">Löschen</button>
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;color:var(--danger-ink, #b91c1c)" data-mt5del="${esc(d.file)}" type="button" title="Config + Status auf diesem PC entfernen — der Terminal-Ordner bleibt">Löschen</button>
       </td>
     </tr>`
   }
@@ -66231,7 +66270,7 @@
     const long = String(p.seite || '').toLowerCase() === 'long'
     return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border);flex-wrap:wrap">
       <span class="mono" style="font-weight:700">${epEsc(p.symbol)}</span>
-      <span class="mtc-chip" style="background:${long ? 'rgba(18,183,106,.12)' : 'rgba(240,68,56,.10)'};color:${long ? 'var(--good)' : 'var(--danger)'}">${epEsc(p.seite || '?')}</span>
+      <span class="mtc-chip" style="background:${long ? 'color-mix(in srgb, var(--good) 12%, transparent)' : 'color-mix(in srgb, var(--danger) 10%, transparent)'};color:${long ? 'var(--good)' : 'var(--danger)'}">${epEsc(p.seite || '?')}</span>
       <span class="mono">${epEsc(p.menge)} @ ${epEsc(p.einstieg || '—')}</span>
       <span style="font-size:12px;color:var(--sub)">SL <b class="mono">${epEsc(p.sl || '—')}</b> · TP <b class="mono">${epEsc(p.tp || '—')}</b></span>
       <span style="margin-left:auto">${epPnlHtml(p.pnl)}</span>
@@ -67152,8 +67191,8 @@
       const fin = p.mt5Baseline && p.mt5Baseline.final; liste.push({ at: p.endedAt || p.completedAt || p.startedAt, richtung: p.richtung, menge: p.masterContracts, pl: p.masterPl ?? p.masterRealized ?? (fin && (fin.pnl ?? fin.pl)), hypo: null, plan_id: p.id }) }
     liste.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
     const datum = iso => { const d = new Date(iso || ''); return isNaN(d) ? '–' : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
-    const plTxt = v => v == null || !isFinite(Number(v)) ? '–' : `<span style="color:${Number(v) > 0 ? '#047857' : Number(v) < 0 ? '#b91c1c' : 'inherit'}">${Number(v) > 0 ? '+' : ''}${de(v)} $</span>`
-    const trades = liste.slice(0, 8).map(x => `<tr><td class="mono">${datum(x.at)}</td><td style="color:${x.richtung === 'buy' ? '#047857' : '#b91c1c'}">${x.richtung === 'buy' ? '▲ Long' : x.richtung === 'sell' ? '▼ Short' : '–'}</td><td class="zahl mono">${x.menge != null ? escapeHtml(String(x.menge)) : '–'}</td><td class="zahl mono">${plTxt(x.pl)}</td><td class="zahl mono">${x.pl == null ? '–' : Number(x.pl) > 0 ? 'Gewinn' : Number(x.pl) < 0 ? 'Verlust' : '±0'}${x.hypo != null ? ` <span style="color:var(--sub)">· ${de(x.hypo)} €</span>` : ''}</td></tr>`).join('')
+    const plTxt = v => v == null || !isFinite(Number(v)) ? '–' : `<span style="color:${Number(v) > 0 ? 'var(--good-ink, #15803d)' : Number(v) < 0 ? 'var(--danger-ink, #b91c1c)' : 'inherit'}">${Number(v) > 0 ? '+' : ''}${de(v)} $</span>`
+    const trades = liste.slice(0, 8).map(x => `<tr><td class="mono">${datum(x.at)}</td><td style="color:${x.richtung === 'buy' ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${x.richtung === 'buy' ? '▲ Long' : x.richtung === 'sell' ? '▼ Short' : '–'}</td><td class="zahl mono">${x.menge != null ? escapeHtml(String(x.menge)) : '–'}</td><td class="zahl mono">${plTxt(x.pl)}</td><td class="zahl mono">${x.pl == null ? '–' : Number(x.pl) > 0 ? 'Gewinn' : Number(x.pl) < 0 ? 'Verlust' : '±0'}${x.hypo != null ? ` <span style="color:var(--sub)">· ${de(x.hypo)} €</span>` : ''}</td></tr>`).join('')
     if(titel) titel.textContent = `${apKontoKurz(z).replace(/<[^>]+>/g, '')}`
     body.innerHTML = `<dl class="ak-z">
         <dt>Name</dt><dd>${escapeHtml(String(z.konto || '–'))}</dd>
@@ -68884,7 +68923,7 @@
   }
   #coinflip-modal.open { display: flex; }
   #coinflip-modal .cf-content {
-    background: var(--card, #fff);
+    background: var(--surface, #fff);
     border-radius: 18px;
     padding: 32px 40px 28px;
     text-align: center;
@@ -68985,7 +69024,7 @@
     cursor: pointer;
     transition: background .15s;
   }
-  #coinflip-modal .cf-btn:hover { background: var(--surface-hover, #f0f0f0); }
+  #coinflip-modal .cf-btn:hover { background: var(--surface-tint, #f0f0f0); }
   #coinflip-modal .cf-btn-primary {
     background: linear-gradient(135deg, #fbbf24, #d97706);
     color: white;
@@ -70819,7 +70858,7 @@
 :where([data-theme=dark]) #coinflip-modal .cf-content::before{background-color:var(--border,var(--surface-tint))}
 }
 :where([data-theme=dark]) #coinflip-modal{background-color:rgba(0,0,0,0.7)}
-:where([data-theme=dark]) #coinflip-modal .cf-content{background-color:var(--card, var(--surface));box-shadow:0 20px 60px rgba(0,0,0,0.65)}
+:where([data-theme=dark]) #coinflip-modal .cf-content{background-color:var(--surface, var(--surface));box-shadow:0 20px 60px rgba(0,0,0,0.65)}
 :where([data-theme=dark]) #coinflip-modal .cf-title{color:var(--sub, var(--sub))}
 :where([data-theme=dark]) #coinflip-modal .cf-face{color:#ec9665;background-color:transparent;box-shadow:inset 0 -4px 8px rgba(120,53,15,.4),
       inset 0 4px 8px rgba(255,255,255,0.125),
@@ -70827,7 +70866,7 @@
 :where([data-theme=dark]) #coinflip-modal .cf-face::before{border-color:rgba(229,116,51,0.25)}
 :where([data-theme=dark]) #coinflip-modal .cf-result{color:var(--ink, var(--ink))}
 :where([data-theme=dark]) #coinflip-modal .cf-btn{border-color:var(--border, var(--border));background-color:var(--surface, var(--surface));color:var(--ink, var(--ink))}
-:where([data-theme=dark]) #coinflip-modal .cf-btn:hover{background-color:var(--surface-hover, var(--surface-tint))}
+:where([data-theme=dark]) #coinflip-modal .cf-btn:hover{background-color:var(--surface-tint, var(--surface-tint))}
 :where([data-theme=dark]) #coinflip-modal .cf-btn-primary{background-color:transparent;color:white;border-color:transparent}
 :where([data-theme=dark]) #coinflip-modal .cf-btn-primary:hover{background-color:transparent}
 :where([data-theme=dark]) #coinflip-modal .cf-stats{color:var(--sub, var(--sub-2))}
@@ -70902,7 +70941,7 @@
       coin.classList.add(isKopf ? 'show-kopf' : 'show-zahl')
 
       result.textContent = isKopf ? 'Kopf' : 'Zahl'
-      result.style.color = isKopf ? '#d97706' : '#7c3aed'
+      result.style.color = isKopf ? 'var(--warn-ink, #b45309)' : '#7c3aed'
       result.classList.add('show')
 
       // Update stats
