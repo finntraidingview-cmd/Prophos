@@ -45,6 +45,12 @@
     --good:#12B76A;
     --warn:#F79009;
     --danger:#F04438;
+    /* Status-Texttöne (Dark Mode 18.10.2026): die dunkleren Grün/Rot/Orange, die als Schrift auf Weiß
+       überall fest im JS stehen — als Token, damit der Dark-Block sie aufhellen kann. Hell exakt die alten Werte. */
+    --good-ink:#15803d;
+    --danger-ink:#b91c1c;
+    --warn-ink:#b45309;
+    --warn-bg:#FFFBEB;          /* helle Amber-Fläche (Hinweis-Kästen) */
 
     --r-sm:10px;
     --r-md:12px;
@@ -58,6 +64,38 @@
     --shadow-pop: 0 8px 24px rgba(16,24,40,.12), 0 2px 6px rgba(16,24,40,.06);
     --shadow-input-focus: 0 0 0 4px rgba(84,71,206,.12);
     --ease: cubic-bezier(.4,0,.2,1);
+  }
+  /* Dark Mode (Finn 18.10.2026: „komplett nur Design, sonst nichts"): derselbe Token-Satz dunkel. Hell bleibt Standard
+     und unverändert — gilt nur, wenn <html data-theme="dark"> gesetzt ist (Schalter Topbar/Settings, localStorage). */
+  html[data-theme="dark"]{
+    color-scheme:dark;
+    --violet:#7468F0;
+    --violet-dark:#8A7FF5;
+    --violet-soft:#A79FFF;
+    --violet-tint:rgba(116,104,240,.16);
+    --blue:#5BA3FF;
+    --teal:#2DD4D2;
+    --ink:#F2F4F7;
+    --ink-2:#E4E7EC;
+    --sub:#98A2B3;
+    --sub-2:#6F7A8C;
+    --border:#2A3242;
+    --border-soft:#202836;
+    --surface:#161B26;
+    --surface-tint:#1F2633;
+    --bg:#0C1018;
+    --good:#32D583;
+    --warn:#FDB022;
+    --danger:#F97066;
+    --good-ink:#6CE9A6;
+    --danger-ink:#FDA29B;
+    --warn-ink:#FEC84B;
+    --warn-bg:#2A2111;
+
+    --shadow-card: 0 1px 2px rgba(0,0,0,.35);
+    --shadow-card-hover: 0 4px 14px rgba(0,0,0,.45);
+    --shadow-pop: 0 10px 30px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.35);
+    --shadow-input-focus: 0 0 0 4px rgba(116,104,240,.28);
   }
 
   *{box-sizing:border-box}
@@ -6308,6 +6346,14 @@
 
       /* iOS-Sheet-Kurve: schnell an, weich aus */
       --m-spring:cubic-bezier(.32,.72,0,1);
+    }
+    /* Dark Mode (18.10.2026): Träger dunkler als die Karte, Haarlinie hell statt Tinte */
+    html[data-theme="dark"]{
+      --bg:#090C12;
+      --surface-tint:#232A37;
+      --shadow-mob-card:0 1px 2px rgba(0,0,0,.4);
+      --m-shadow-raised:0 6px 20px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.4);
+      --m-hair:rgba(255,255,255,.08);
     }
 
     @keyframes mob-view-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -44378,7 +44424,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1614'
+  const OS_TAB_BUILD = '2026-09-22.1615'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
