@@ -26399,7 +26399,8 @@ def zw_tick(force=False):
 FP_TAKT_S = 15
 FP_FRISCH_S = 90          # mt5_live-Zeile älter → Konto unbekannt; die Fremd-Zeile verfällt dann nach 3 min still (Aktiv-Merkmal)
 FP_DELTA_CACHE_S = 15
-_fp = {"at": 0.0, "fehler": "", "aktiv": -1, "logins": 0, "tabelle_fehlt": False, "started": False}   # aktiv -1 = unbekannt (Start)
+_fp = {"at": 0.0, "fehler": "", "aktiv": -1, "logins": 0, "tabelle_fehlt": False, "started": False,   # aktiv -1 = unbekannt (Start)
+       "offen": -1, "offen_logins": None}     # offen = Zeilen ohne weg_at, egal wie alt; offen_logins {quelle: [Logins]} (18.10.2026)
 _fp_delta_cache = {"bis": 0.0, "zeilen": None}
 
 
@@ -26596,7 +26597,12 @@ def fp_tick(force=False):
     fremde_tv, bewertet_tv = fp_erkennen_tv(tv, konten_tv, plaene, jetzt)
     fremde = [dict(f, quelle="mt5") for f in fremde] + [dict(f, quelle="tv") for f in fremde_tv]
     _fp["logins"], _fp["tv_konten"] = len(bewertet), len(bewertet_tv)
-    if not fremde and _fp["aktiv"] == 0:
+    # WEG_AT BLIEB LEER (S4, 18.10.2026: 5 TV-Zeilen ohne weg_at, zuletzt gesehen 09.–16.10., u. a. Apex 150k sell 3): hier stand
+    # „aktiv == 0" — aktiv zählt aber nur Zeilen der letzten 3 min. TV liest nur das GERADE AKTIVE Konto, und ein Konto mit laufendem
+    # Orbit-Plan bleibt unbewertet; kam das Konto später flach wieder in die Lesung, war die Zeile längst nicht mehr „aktiv", der Takt
+    # endete hier und das Schließen unten lief nie. Jetzt zählt jede Zeile ohne weg_at (offen) — geschlossen wird weiter nur nach
+    # einer frischen, vollständigen Lesung des Kontos, die die Position nicht mehr zeigt.
+    if not fremde and _fp["offen"] == 0:
         return                                   # nichts gesehen, nichts offen → kein Schreiben, keine Konflikt-Abfrage
     try:
         if fremde:
@@ -26605,14 +26611,23 @@ def fp_tick(force=False):
                             json=[dict(f, zuletzt_gesehen=jetzt_iso, weg_at=None) for f in fremde],
                             headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=(5, 15))
             _sb_pruefen(r)
+        bekannt = _fp["offen_logins"]            # None = unbekannt (Start) → alle bewerteten Logins schließen lassen
         for quelle, bw in (("mt5", bewertet), ("tv", bewertet_tv)):
+            if bekannt is not None:
+                bw = set(bw) & set(bekannt.get(quelle) or ())   # nur Logins mit offener Zeile — sonst ein leerer PATCH je Takt
             if bw:
                 # gültig gelesen, aber nicht mehr dabei → geschlossen
                 sb_update("fremd_positionen", {"quelle": f"eq.{quelle}", "weg_at": "is.null", "zuletzt_gesehen": f"lt.{jetzt_iso}",
                                                "master_login": f"in.({','.join(sorted(bw))})"}, {"weg_at": jetzt_iso})
-        frist = datetime.fromtimestamp(time.time() - 180, timezone.utc).isoformat()
-        aktive = sb_select("fremd_positionen", {"select": "id,user_id,konto_name,firma,richtung,symbol,menge,seit,alarm_keys,gegen",
-                                                "weg_at": "is.null", "zuletzt_gesehen": f"gt.{frist}"}) or []
+        frist = datetime.fromtimestamp(time.time() - 180, timezone.utc)
+        offen = sb_select("fremd_positionen", {"select": "id,quelle,master_login,user_id,konto_name,firma,richtung,symbol,menge,seit,"
+                                                         "alarm_keys,gegen,zuletzt_gesehen", "weg_at": "is.null"}) or []
+        ol = {}
+        for f in offen:
+            ol.setdefault(str(f.get("quelle") or ""), set()).add(str(f.get("master_login") or ""))
+        _fp["offen"], _fp["offen_logins"] = len(offen), {q: sorted(v) for q, v in ol.items()}
+        # aktiv wie bisher: nur Zeilen der letzten 3 min (Konflikte, Push, „Braucht dich") — Altzeilen melden nichts
+        aktive = [f for f in offen if (_fp_ts(f.get("zuletzt_gesehen")) or frist) > frist]
         _fp["aktiv"], _fp["tabelle_fehlt"] = len(aktive), False
         if not aktive:
             return
