@@ -1849,6 +1849,8 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-gut,:is(#tpl-view,#adm-pane-planer) .apd-gut{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-rot,:is(#tpl-view,#adm-pane-planer) .apd-rot{color:var(--danger)} :is(#tpl-view,#adm-pane-planer) .tpl-grau,:is(#tpl-view,#adm-pane-planer) .apd-grau{color:var(--sub-2)}
   :is(#tpl-view,#adm-pane-planer) .tpl-ls{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:6px 0 4px;background:var(--surface-tint)}
   :is(#tpl-view,#adm-pane-planer) .tpl-ls i{display:block;height:100%}
+  :is(#tpl-view,#adm-pane-planer) .tpl-waage-z{display:flex;gap:8px;align-items:baseline;font-size:15px;font-variant-numeric:tabular-nums;margin-top:4px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-waage-z b{font-weight:600;min-width:58px}
   :is(#tpl-view,#adm-pane-planer) .apd-schalter{display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--sub)}
   :is(#tpl-view,#adm-pane-planer) .apd-schalter label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
   :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch{width:28px;height:16px}
@@ -44350,7 +44352,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1611'
+  const OS_TAB_BUILD = '2026-09-22.1612'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48632,12 +48634,80 @@
     try{ renderTradePlans() }catch(_){}
     return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
   }
+  /* ZWEI WAAGEN AM START (Finn 17.10.2026, Formel aus dem Beobachtungstag 16.10.): Futures und CFD gleichen sich je für sich aus,
+   * gewogen wird nur das laufende Buch der eigenen Planer-Trades. Railway (/admin/auto-plan/waage-start) rechnet, wie die Klasse nach
+   * dem Start stünde: passt sie oder wird sie besser, startet der Plan. Sonst zieht Railway Gegentrades derselben Klasse auf
+   * jetzt + 2–3 min vor, und der Plan startet mit ihnen. Geht das nicht: drehen nur, wenn die Gegenrichtung die Klasse besser macht
+   * und der Richtungsschutz frei ist — sonst verschieben (10–20 min, nach Fensterende startet er heute nicht). Nie in die schwerere
+   * Seite drehen (16.10. 15:57: 9 Longs am Start zu Shorts gedreht → 2.000 € Short gegen 300 € Long, Finn schloss 3 Shorts von Hand).
+   * → Antwort | null (Waage aus oder nicht lesbar → alter Weg mit Saldo-Riegel) */
+  async function rkWaage(plan, richtung, ziehen){
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return null
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 20000)
+      const r = await fetch(`${WATCHER_HOME}/admin/auto-plan/waage-start`, { method: 'POST', signal: ctl.signal,
+        headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: plan.id, richtung, ziehen: !!ziehen }) })
+      clearTimeout(t)
+      const d = await r.json().catch(() => ({}))
+      return (r.ok && d && d.ok && d.waage_an && d.lage) ? d : null
+    }catch(e){ console.warn('[waage-start]', (e && e.message) || e); return null }
+  }
+  const rkWaageOk = x => !!(x && (x.passt || x.besser))
+  const rkKlasseTxt = kl => kl === 'futures' ? 'Futures' : 'CFD'
+  // Richtungsschutz: auf die laufende Richtung derselben ID × Firma drehen (Guard: ungestartet, alte Richtung) → { plan } | null
+  async function rkRichtungDrehen(plan, k, ziel, zusatz){
+    const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
+      .eq('id', plan.id).eq('status', 'planned').eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
+    if(error || !data || !data.length) return null
+    rkPlanErsetzen(data[0])
+    const durch = k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon', hand = rkHandTxt(plan)
+    try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: plan.richtung, nach: ziel, text: k.text + (zusatz || '') + hand } }, 'planned') }catch(_){}
+    if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → Auto-Plan auf ${ziel.toUpperCase()} gedreht und gestartet${zusatz || ''}${hand}.`, 'start')
+    rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
+      grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — Auto-Plan gedreht${zusatz || ''}${hand}` })
+    try{ renderTradePlans() }catch(_){}
+    return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
+  }
   async function rkVorStart(plan){
     if(!rkGilt(plan)) return null
     let k = null
     try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){ return null }
     const meine = plan.richtung === 'sell' ? 'short' : 'long', alt = rkFlag(plan)
-    const sd = await rkSaldo()
+    // ZWEI WAAGEN (17.10.2026) für Auto-Pläne (kein WD, keine Hand-Werte) — ersetzt Saldo-Riegel und Tages-Saldo am Start
+    let waageGeprueft = false
+    if(plan.autoPlan && !tpIstWdPlan(plan) && !plan.handWerteAt){
+      const konflikt = !!(k && k.lauf && k.lauf !== meine)
+      const wunsch = konflikt ? (k.lauf === 'short' ? 'sell' : 'buy') : plan.richtung
+      const w = await rkWaage(plan, wunsch, !konflikt)
+      if(w && w.lage.zaehlt){
+        waageGeprueft = true
+        const L = w.lage, kt = rkKlasseTxt(L.klasse), name = plan.masterName || 'Plan'
+        if(konflikt){
+          // Richtungsschutz: drehen nur, wenn die laufende Richtung die Klasse nicht schwerer macht — sonst warten, bis der Gegen-Trade zu ist
+          if(rkWaageOk(L.nachher)){
+            const g = await rkRichtungDrehen(plan, k, wunsch, '')
+            if(g) return g
+          }
+          const kS = { ...k, text: `${k.text} — NICHT auf ${wunsch.toUpperCase()} gedreht: ${kt}-Waage würde schwerer (${L.nachher.grund || 'Schieflage'}), ${plan.richtung.toUpperCase()} bleibt und wartet, bis der Gegen-Trade zu ist` }
+          await rkVerschieben(plan, kS, false, 'start')
+          return 'verschoben'
+        }
+        const gez = Array.isArray(w.gezogen) ? w.gezogen : []
+        if(rkWaageOk(L.nachher) || gez.length){
+          if(gez.length && typeof atToast === 'function') atToast(`⚖ ${kt}-Waage — „${name}" startet, ${gez.length} Gegen-Trade${gez.length === 1 ? '' : 's'} vorgezogen: ${gez.map(g => `${g.user || '?'} ${g.firma || ''}`.trim()).join(', ')}.`, 'start')
+          if(alt && alt.status !== 'konflikt'){ try{ await baselinePatch(plan.id, { richtung_konflikt: null }, 'planned') }catch(_){} }
+          return null
+        }
+        if(rkWaageOk(L.gegen)){
+          const g = await rkSaldoDrehen(plan, k, `${kt}-Waage: ${L.nachher.grund || 'Start würde die Seite schwerer machen'}`)
+          if(g) return g
+        }
+        await rkVerschieben(plan, { lauf: null, saldo: true, text: `${kt}-Waage: ${L.nachher.grund || 'Start würde die Seite schwerer machen'} — kein Gegen-Trade vorziehbar, wartet` }, false, 'start')
+        return 'verschoben'
+      }
+    }
+    const sd = waageGeprueft ? null : await rkSaldo()
     // SALDO-WARTEN (.1507, Finn 13.10.2026 18:05 Dubai, drittes Mal am Tag: 9 Longs / 2 Shorts, +1.406 € long — und die nächsten Starts waren
     // wieder Longs, während die vorgezogenen Shorts hinter frisch gestarteten Longs derselben ID × Firma warteten): ein Auto-Plan (nicht WD,
     // keine Hand-Werte), dessen Richtung den Saldo über das Band hinaus weiter kippt, wartet 10–20 min, solange in den nächsten 60 min
@@ -50334,7 +50404,26 @@
         <span class="kpi-delta umbruch" title="${tag ? `Long heute ${tplEur(Lt)} · Short heute ${tplEur(St)} (Eröffnungs-Gewicht, laufend + beendet)` : 'Netto der laufenden Trades · darunter mit den geplanten bis Tagesende'}${band}">${unterN}</span>${tplSzKachelHtml(D)}</div>`
     const hy = tplHypo(D)
     // Kachel „Heute" statt der Bot-Kachel (Finn 08.10.2026); altes Backend ohne delta.heute_beendet → Bot-Kachel wie bisher
-    return `<div class="kpis tpl-kpis5">${k1}${k2}${k3}${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
+    return `<div class="kpis tpl-kpis5">${k1}${k2}${tplWaageKachelHtml(d) || k3}${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
+  }
+
+  /* ZWEI WAAGEN (Finn 17.10.2026): statt „Netto heute" (Tages-Saldo mit beendeten Trades, den Finn am 16.10. den ganzen Tag ignoriert
+   * hat) die beiden Waagen, nach denen Bot und Start-Prüfung jetzt arbeiten — Futures nach Anzahl (höchstens 2 : 1), CFD nach € (Lücke
+   * ≤ 250 € oder 20 %), nur laufend + Start in ≤ 2 min. Altes Backend / Waage aus → null (alte Kachel). */
+  function tplWaageKachelHtml(d){
+    const kl = d && d.waage_an && d.klassen
+    if(!kl) return null
+    const zeile = (name, w, fut) => {
+      if(!w) return ''
+      const ok = w.passt !== false, leer = !(w.n_long || w.n_short)
+      const wert = leer ? 'nichts läuft' : fut ? `${w.n_long || 0} Long : ${w.n_short || 0} Short` : `${tplEur(w.long_eur || 0)} : ${tplEur(w.short_eur || 0)}`
+      return `<div class="tpl-waage-z"><b>${name}</b><span class="${leer ? '' : ok ? 'tpl-gut' : 'tpl-rot'}">${leer ? '–' : ok ? '✓' : '⚠'}</span><span>${wert}</span></div>`
+        + (!ok && w.grund ? `<span class="kpi-delta umbruch" title="${esc(w.grund)}">${esc(w.grund)}</span>` : '')
+    }
+    const bot = d.waage_bot && d.waage_bot.letztes, gez = bot && Number(bot.gezogen) > 0 ? ` · zuletzt ${bot.gezogen} vorgezogen` : ''
+    return `<div class="kpi"><div class="kpi-label" title="Futures und CFD gleichen sich je für sich aus — nur laufende Trades + Starts in ≤ 2 min (Finn 17.10.2026)">Waage jetzt</div>
+        ${zeile('Futures', kl.futures, true)}${zeile('CFD', kl.cfd, false)}
+        <span class="kpi-delta" title="Fehlt eine Seite, zieht der Bot geplante Gegen-Trades derselben Klasse auf jetzt + 2–3 min vor">Futures ≤ 2 : 1 · CFD ≤ 250 € / 20 %${gez}</span></div>`
   }
 
   /* ZEITSTRAHL V2 (07.10.2026, TPL-UEBERSICHT-2, Finn: „da erkennt man nix, zu viel auf einmal, und da kommt ja nur mehr dazu"):

@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Selbsttest: ZWEI WAAGEN (app.py ap_klassen_waage / ap_waage_passt / ap_waage_nachschub / ap_waage_start_lage, Finn 17.10.2026) —
+rein rechnend, Stand nachgebaut mit den Fällen vom Beobachtungstag 16.10.2026. Aufruf: python3 tools/selftest_zwei_waagen.py"""
+import os
+import random
+import re
+import sys
+
+HIER = os.path.dirname(os.path.abspath(__file__))
+APP = os.path.join(os.path.dirname(HIER), "app.py")
+
+
+def lade():
+    src = open(APP, encoding="utf-8").read()
+    ns = {"re": re, "random": random}
+    teile = []
+    for k in ("WD_FUTURES_FIRMEN", "WD_BALANCE_FUTURES", "AP_TYPEN", "AP_CFD_ROUTEN", "AP_KLASSE_TXT"):
+        teile.append(re.search(rf"^{k} = .*$", src, re.M).group(0).split("  #")[0])
+    for z in re.findall(r"^AP_WAAGE_[A-Z_]+ = .*$", src, re.M):
+        teile.append(z.split("  #")[0])
+    for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
+                 "_ap_eur_txt", "ap_waage_passt", "_ap_waage_note", "ap_klassen_waage", "_ap_waage_kandidat", "_ap_waage_rs_frei",
+                 "_ap_waage_zielminute", "ap_waage_nachschub", "ap_waage_start_lage"):
+        i = src.index(f"\ndef {name}(") + 1
+        teile.append(src[i:src.find("\n\n\n", i)])
+    exec("\n".join(teile), ns)
+    return ns
+
+
+def lauf(pid, uid, firma, fk, route, r, eur, start=100.0):
+    return {"plan_id": pid, "user_id": uid, "user": uid, "firma": firma, "firma_key": fk, "route": route, "richtung": r,
+            "verlust_eur": eur, "typ": "challenge", "gehedgt": False, "start_min": start}
+
+
+def plan(pid, uid, firma, fk, route, r, eur, start, bestaetigt=True, **kw):
+    z = {"plan_id": pid, "user_id": uid, "user": uid, "firma": firma, "firma_key": fk, "route": route, "richtung": r,
+         "verlust_eur": eur, "typ": "challenge", "gehedgt": False, "start_min": start, "auto_plan": True, "bestaetigt": bestaetigt,
+         "aenderbar": True, "geclaimt": False}
+    z.update(kw)
+    return z
+
+
+def main():
+    ns = lade()
+    W, P, N, S = ns["ap_klassen_waage"], ns["ap_waage_passt"], ns["ap_waage_nachschub"], ns["ap_waage_start_lage"]
+    f = []
+
+    def check(ok, name):
+        f.append(0 if ok else 1)
+        print(("OK  " if ok else "FEHL") + " " + name)
+
+    TF, FN, AP, FP = ("Tradeify", "tradeify", "tvv2"), ("FundedNext", "fundednext", "mt5v2"), ("Apex Trader", "apex", "tvv2"), \
+        ("FundingPips", "fundingpips", "mt5v2")
+    jm = 600.0
+
+    # 1) 07:58-Fall: drei Tradeify/Apex-Shorts, kein Futures-Long — CFD-Longs gleichen NICHT aus
+    st = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215), lauf("o2", "marc", *TF, "sell", 215),
+                                      lauf("o3", "moritz", *AP, "sell", 200), lauf("o4", "aurel", *FN, "buy", 300),
+                                      lauf("o5", "chris", *FN, "buy", 300)], "geplant": [], "id_fest": {}, "starts_heute": []}
+    w = W(st)
+    check(w["futures"]["n_short"] == 3 and w["futures"]["n_long"] == 0 and not w["futures"]["passt"] and w["futures"]["leicht"] == "buy",
+          f"Futures 0 : 3 passt nicht, leicht = Long ({w['futures']['grund']})")
+    check(w["cfd"]["n_long"] == 2 and w["cfd"]["leicht"] == "sell", "CFD getrennt gewogen (2 Long, kein Short)")
+
+    # 2) Futures 2 : 1 passt, 3 : 1 nicht
+    check(P("futures", {"n_long": 2, "n_short": 1, "long_eur": 430, "short_eur": 215})[0], "Futures 2 : 1 passt (Anzahl, nicht €)")
+    check(not P("futures", {"n_long": 3, "n_short": 1, "long_eur": 645, "short_eur": 215})[0], "Futures 3 : 1 passt nicht")
+
+    # 3) CFD-Toleranz aus Finns „passt"-Momenten
+    check(P("cfd", {"n_long": 3, "n_short": 2, "long_eur": 562, "short_eur": 630})[0], "CFD 562 : 630 passt (04:52)")
+    check(P("cfd", {"n_long": 3, "n_short": 2, "long_eur": 900, "short_eur": 720})[0], "CFD 900 : 720 passt (06:43, 20 %)")
+    pr = P("cfd", {"n_long": 3, "n_short": 8, "long_eur": 300, "short_eur": 2000})
+    check(not pr[0] and pr[2] == "buy", f"CFD 300 : 2.000 passt nicht, leicht = Long (15:57) — {pr[1]}")
+
+    # 4) Beendete zählen nie, WD/Funded nie, gehedgt nie
+    st2 = {"jetzt_min": jm, "offen": [lauf("o1", "a", *TF, "sell", 215), dict(lauf("w1", "b", *TF, "buy", 215), typ="winning_days"),
+                                       dict(lauf("g1", "c", *TF, "buy", 215), gehedgt=True)], "geplant": []}
+    w2 = W(st2)
+    check(w2["futures"]["n_long"] == 0 and w2["futures"]["n_short"] == 1, "WD und gehedgt zählen nicht in der Waage")
+
+    # 5) Start in ≤ 2 min zählt mit, später nicht, unbestätigt nicht
+    st3 = {"jetzt_min": jm, "offen": [], "geplant": [plan("p1", "a", *TF, "buy", 215, jm + 1.5), plan("p2", "b", *TF, "sell", 215, jm + 10),
+                                                   plan("p3", "c", *TF, "sell", 215, jm + 1, bestaetigt=False)]}
+    w3 = W(st3)
+    check(w3["futures"]["n_long"] == 1 and w3["futures"]["n_short"] == 0, "nur bestätigter Start in ≤ 2 min zählt")
+
+    # 6) Nachschub 07:58: Futures-Long vorziehen, Firma A gegen B zuerst, nie drehen
+    st["geplant"] = [plan("k1", "ina", *TF, "buy", 215, jm + 120), plan("k2", "ezp", *AP, "buy", 200, jm + 200),
+                     plan("k3", "jacob", *TF, "sell", 215, jm + 60), plan("k4", "chris", *FP, "sell", 300, jm + 30)]
+    aend, info = N(st, W(st), random.Random(1))
+    fut = [a for a in aend if a["plan_id"] in ("k1", "k2", "k3")]
+    check(len(fut) >= 1 and all(a["von_richtung"] == a["nach_richtung"] == "buy" for a in fut), f"Futures: nur Longs vorgezogen, nicht gedreht ({[a['plan_id'] for a in fut]})")
+    check(fut and fut[0]["plan_id"] == "k1" and jm + 2 <= fut[0]["nach_start_min"] <= jm + 8, f"Tradeify-Long zuerst (Apex auf der Short-Seite → Firma A gegen B), Start jetzt + 2–8 min ({fut and fut[0]['nach_start_min']})")
+    w_n = dict(W(st)["futures"])
+    for a in fut:
+        w_n["n_long"] += 1
+    check(P("futures", w_n)[0] or len(fut) == 2, f"Futures danach höchstens 2 : 1 ({w_n['n_long']} : {w_n['n_short']})")
+    cfd = [a for a in aend if a["plan_id"] == "k4"]
+    check(len(cfd) == 1 and cfd[0]["nach_richtung"] == "sell", "CFD: Short (FundingPips) gegen die zwei FN-Longs vorgezogen")
+    check(all(a["grund"].startswith("[Waage]") for a in aend), "Protokoll-Grund beginnt mit [Waage]")
+
+    # 7) Richtungsschutz: laufender Short derselben ID × Firma sperrt den Long-Kandidaten (auch WD)
+    st5 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215)], "starts_heute": [],
+           "id_fest": {"ina|tradeify": {"richtung": "sell", "durch": "läuft gerade", "plan_id": "wd1"}},
+           "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 120), plan("k2", "ezp", *TF, "buy", 215, jm + 150)]}
+    aend5, _ = N(st5, W(st5), random.Random(2))
+    check([a["plan_id"] for a in aend5] == ["k2"], f"Ina gesperrt (WD-Short läuft bei Ina × Tradeify) → EzPoker ({[a['plan_id'] for a in aend5]})")
+
+    # 8) Unauffällig: dieselbe Firma, Gegenrichtung startete eben → mindestens 2 min danach
+    st6 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215, start=jm - 0.5)], "starts_heute": [], "id_fest": {},
+           "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 120)]}
+    aend6, _ = N(st6, W(st6), random.Random(3))
+    check(aend6 and aend6[0]["nach_start_min"] >= jm - 0.5 + 2.0, f"Gegenrichtung gleiche Firma ≥ 2 min nach dem Short ({aend6 and aend6[0]['nach_start_min']})")
+
+    # 9) PC belegt: derselbe User startet in ± 3 min → später
+    st7 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215, start=jm - 30)], "id_fest": {},
+           "starts_heute": [{"user_id": "ina", "start": jm + 2.5}], "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 120)]}
+    aend7, _ = N(st7, W(st7), random.Random(4))
+    check(aend7 and aend7[0]["nach_start_min"] >= jm + 5.5, f"PC derselben ID frei (± 3 min) ({aend7 and aend7[0]['nach_start_min']})")
+
+    # 10) CFD 75 %: Lücke 1.700 € → gezogen bis ≥ 1.275 € oder passt
+    st8 = {"jetzt_min": jm, "offen": [lauf("o1", "marc", *FN, "sell", 1000), lauf("o2", "chris", *FN, "sell", 1000), lauf("o3", "aurel", *FP, "buy", 300)],
+           "id_fest": {}, "starts_heute": [],
+           "geplant": [plan(f"c{i}", f"u{i}", *FP, "buy", 500, jm + 30 + i * 20) for i in range(5)]}
+    aend8, info8 = N(st8, W(st8), random.Random(5))
+    check(len(aend8) == 3, f"CFD: 3 × 500 € Long gezogen (≥ 75 % von 1.700 €) — {len(aend8)}")
+
+    # 11) Hand-Werte / unänderbar nie, Folgetag nie
+    st9 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215)], "id_fest": {}, "starts_heute": [],
+           "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 120, aenderbar=False), plan("k2", "ezp", *TF, "buy", 215, jm + 130, folgetag=True)]}
+    check(N(st9, W(st9), random.Random(6))[0] == [], "Hand-Werte/fällig/Folgetag werden nie gezogen")
+
+    # 12) Start-Lage: erster Futures-Trade des Tages → nicht passt, nicht besser; ein Long gegen 2 Shorts → besser
+    st10 = {"jetzt_min": jm, "offen": [], "geplant": [plan("p1", "a", *TF, "buy", 215, jm)]}
+    L = S(st10, "p1", "buy")
+    check(L and not L["nachher"]["passt"] and not L["nachher"]["besser"] and L["zaehlt"], "erster Futures-Trade: Gegentrade nötig")
+    st11 = {"jetzt_min": jm, "offen": [lauf("o1", "m", *TF, "sell", 215), lauf("o2", "n", *TF, "sell", 215)],
+            "geplant": [plan("p1", "a", *TF, "buy", 215, jm)]}
+    L2 = S(st11, "p1", "buy")
+    check(L2["nachher"]["passt"] and L2["vorher"]["n_short"] == 2, "Long gegen 2 laufende Shorts: passt (1 : 2)")
+    check(not L2["gegen"]["passt"] and not L2["gegen"]["besser"], "Drehen auf Short wäre schwerer → nie")
+
+    # 13) Schalter
+    check(ns["ap_waage_an"]({}) and ns["ap_waage_an"]({"ausgleich": {"aktiv": True}}) and not ns["ap_waage_an"]({"ausgleich": {"waage": False}}),
+          "Schalter regeln.ausgleich.waage: Standard an, false = aus")
+
+    n = sum(f)
+    print(f"\n{len(f) - n}/{len(f)} OK")
+    sys.exit(1 if n else 0)
+
+
+if __name__ == "__main__":
+    main()

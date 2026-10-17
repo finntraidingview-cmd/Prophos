@@ -14,7 +14,7 @@ APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_kette_regel", "ap_kette_mll",
               "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl", "ap_notiz")
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS",
-              "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
+              "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
 FEHLER = []
 
 
@@ -116,10 +116,10 @@ def main():
     # 9) Futures unverändert: mit und ohne ppl dasselbe, Challenge-Rest < 100 → Ziel erreicht
     w1, _ = R(TDFY, "challenge", 158000, u)
     w2, _ = R(TDFY, "challenge", 158000, u, ppl=20)
-    # seit 0f88300c (.1566, Master 15.10.2026, Vorfall ed3c376b): letzter Futures-Trade + 6 Pkt × Kontrakte × 20 $ (NQ) zum Firmen-Puffer
-    fut = 6 * float(w1["menge"]) * 20
-    check(w1 == w2 and w1["puffer"] - fut < 50 and w1["puffer"] >= fut and "Klein" not in w1["stufe"],
-          f"Tradeify unverändert ({w1['stufe']}, Puffer {w1['puffer']} = Firma + {fut:.0f} Punkte-Puffer)")
+    # seit 17.10.2026 (Finn: „2 NQ Puffer 40, 3 NQ Puffer 60"): letzter Futures-Trade genau 20 $ je Kontrakt, kein Punkte-Puffer mehr
+    fut = 20 * float(w1["menge"])
+    check(w1 == w2 and w1["puffer"] == fut and "Klein" not in w1["stufe"],
+          f"Tradeify unverändert ({w1['stufe']}, Puffer {w1['puffer']} = 20 $ × {w1['menge']} NQ)")
     w, g = R(TDFY, "challenge", 158950, u, ppl=20)
     check(w is None and g.startswith("Ziel erreicht"), f"Futures Rest 50 → Ziel erreicht wie bisher ({g})")
 

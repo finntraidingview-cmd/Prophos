@@ -32,7 +32,7 @@ def main():
 
     def sb_select(table, params):
         if table == "auto_plan_regeln":
-            return [{"regeln": {"ausgleich": {"aktiv": True, "takt_min": 10}}}]
+            return [{"regeln": {"ausgleich": {"aktiv": True, "takt_min": 10, "waage": False}}}]
         if table == "trade_plans":
             abfragen.append(dict(params))
             if arbeit["fehler"]:
@@ -69,7 +69,7 @@ def main():
     check(len(laeufe) == 1, "Vorab-Abfrage kaputt → Lauf trotzdem")
     arbeit.update(rows=[{"id": "x"}], fehler=False)
     neu()
-    a["sb_select"] = lambda t, p: [{"regeln": {"ausgleich": {"aktiv": False, "takt_min": 10}}}] if t == "auto_plan_regeln" else [{"id": "x"}]
+    a["sb_select"] = lambda t, p: [{"regeln": {"ausgleich": {"aktiv": False, "takt_min": 10, "waage": False}}}] if t == "auto_plan_regeln" else [{"id": "x"}]
     a["_ap_bot_tick"](datetime(2026, 10, 12, 10, 0, tzinfo=BER))
     check(not laeufe, "Schalter aus → kein Lauf")
     jetzt = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)                # Samstag

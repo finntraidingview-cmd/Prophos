@@ -15840,6 +15840,11 @@ AP_PUFFER_PKT = 10                   # normaler letzter CFD-Trade: Puffer = 10 P
 # p95 +2,3, Maximum +5,2 Pkt (genau der Vorfall) — 6 Pkt × Kontrakte × $/Pkt (NQ 20, MNQ 2) deckt alles Gemessene ab (2 NQ → 240 $).
 # Nur Stufe „letzter Trade (Rest bis Ziel)", und nur so weit, wie der Tageshöchstwert tp_max es zulässt; Etappen bleiben unberührt.
 AP_PUFFER_PKT_FUT = 6
+# PUFFER JE KONTRAKT (Finn 16.10.2026 ~04:15 Dubai, Aurels Tradeify …8681 landete 436 $ über dem Ziel 159.000: Rest 2.075 + 400 $ Puffer,
+# davon 360 $ aus den 6 Pkt × 3 NQ × 20 $ oben — „viel zu viel Puffer … 2 NQ: Puffer immer 40, 3 NQ: Puffer immer 60. Fertig."):
+# der letzte Futures-Trade bekommt seit 17.10.2026 GENAU 20 $ je Kontrakt als Gesamt-Puffer — ersetzt Firmen-Puffer (puffer_je_menge)
+# UND den Punkte-Puffer AP_PUFFER_PKT_FUT (bleibt nur als Name für alte Selbsttests stehen, wird nicht mehr gerechnet).
+AP_PUFFER_JE_KT_FUT = 20
 AP_PUNKTWERT_FUT = {"NQ": 20.0, "MNQ": 2.0}   # $ je Punkt und Kontrakt (wie WD_HEUTE_PPL)
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
@@ -16325,6 +16330,8 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
     puffer = round(_ap_spanne(psp, u["puffer"], 1.0 if pjm else f) or 0)
+    if not cfd and (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN:
+        puffer = round(AP_PUFFER_JE_KT_FUT * float(menge))   # Futures: 2 NQ = 40 $, 3 NQ = 60 $ (Finn 16.10.2026)
     tp_sp = ph.get("tp")
     ober = float(ph["tp_max"]) * f if ph.get("tp_max") else (float(tp_sp[1]) * f if tp_sp else None)
     klein = None
@@ -16343,15 +16350,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         stufe = klein["stufe"]
     elif not tp_sp or rest + puffer <= ober:
         tp, stufe = rest + puffer, "letzter Trade (Rest bis Ziel)"
-        if (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN:
-            # PUNKTE-PUFFER FUTURES (AP_PUFFER_PKT_FUT, 15.10.2026): zusätzlich zum Firmen-Puffer, aber nie über den Deckel tp_max —
-            # was nicht mehr unter den Deckel passt, fällt weg (heutiger Weg bleibt). Symbol wie ap_planen: regel.symbol, sonst NQ
-            pw = AP_PUNKTWERT_FUT.get(str(ph.get("symbol") or regel.get("symbol") or "NQ").upper(), 20.0)
-            zusatz = AP_PUFFER_PKT_FUT * float(menge) * pw
-            if ober is not None:
-                zusatz = max(0.0, min(zusatz, ober - tp))
-            if zusatz > 0:
-                puffer, tp = round(puffer + zusatz), tp + zusatz
+        # Der Punkte-Puffer (6 Pkt × Kontrakte × $/Pkt, 15.10.2026) ist seit 17.10.2026 raus — Puffer steht oben (AP_PUFFER_JE_KT_FUT)
     elif rest < ober:
         tp, stufe = ober, "letzter Trade (auf Tageshöchstwert gedeckelt)"
     else:
@@ -19660,7 +19659,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # Verhältnis"): plant dieser Lauf den HEUTIGEN Tag (Nachplan-Takt, „Plan heute", Gruppen-Planer), verteilt ap_richtungen_delta die neuen
     # Tranchen gegen das Eröffnungs-Gewicht aller heute gestarteten Trades (ap_tages_saldo), nicht nur gegen das laufende Buch — sonst
     # hätte der Nachplan-Takt nach toten Longs wieder Longs „zum Ausgleich" verteilt. Nachtlauf für den Folgetag: Tag frisch, nichts beendet.
-    if tag == jetzt.astimezone(_ap_tz(AP_HB_TZ)).strftime("%Y-%m-%d"):
+    # ZWEI WAAGEN (17.10.2026): Finn wiegt nur das laufende Buch — mit regeln.ausgleich.waage (Standard) bleibt die Basis laufend
+    if tag == jetzt.astimezone(_ap_tz(AP_HB_TZ)).strftime("%Y-%m-%d") and not param.get("waage"):
         try:
             stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [], jetzt)
             ap_tages_saldo(stand)
@@ -20618,6 +20618,7 @@ def ap_ausgleich_param(regeln):
     # FENSTER-ÜBERGREIFEND VORZIEHEN (08.10.2026, Master/Finn — nur auf Finns Go per SQL): die Strahlsuche darf Pläne aus späteren
     # Startfenstern in die nächsten 60 min vorziehen; Hinausschieben bleibt im eigenen Fenster. Standard aus = Verhalten wie bisher.
     out["fenster_uebergreifend"] = a.get("fenster_uebergreifend") is True
+    out["waage"] = a.get("waage") is not False   # ZWEI WAAGEN (17.10.2026): Standard an, false = alter Ausgleichs-Bot
     try:
         out["takt_min"] = max(2, min(120, int(float(a.get("takt_min")))))
     except (TypeError, ValueError):
@@ -23217,6 +23218,322 @@ def ap_tages_saldo(stand):
     return stand
 
 
+# ══ ZWEI WAAGEN (Finn 16./17.10.2026 — Beobachtungstag + Formel, Doc „Trade-Planer — wie Finn es will") ══════════════════════════
+# Was Finn am 16.10. den ganzen Tag von Hand gemacht hat, macht ab jetzt der Bot:
+#  - ZWEI getrennte Waagen: Futures (Tradeify, Apex, FundedNext Futures, Topstep) gleichen sich untereinander aus, CFDs untereinander
+#    („Futures sollen sich grob selber gegenhedgen und CFDs auch grob ausgleichen", 16:10). Ein CFD-Long deckt keinen Tradeify-Short
+#    (07:58: drei Tradeify/Apex-Shorts ohne einen Futures-Long — „die Accounts sind 1.000 € wert … das ist einfach nur dumm").
+#  - Gewogen wird NUR das laufende Buch der eigenen Planer-Trades (AP_TYPEN, ohne Hedge) + Starts in ≤ 2 min. Beendete zählen nie
+#    (04:06: Aurels Long im TP → Long im Spiel 0 → „sofort Long nachdrücken"; die Tages-Waage .1553 zählte ihn weiter als Long und
+#    drehte morgens 4 Longs zu Shorts). Winning Days / Funded zählen nie in der Waage, nur im Richtungsschutz je ID × Firma.
+#  - passt = keine Seite 0, solange die andere läuft; Futures höchstens 2 : 1 nach ANZAHL (ein Tradeify-Konto wiegt ~215 €, die
+#    €-Grenze würde schon 2 : 1 verbieten); CFD Lücke ≤ max(250 €, 20 % der schwereren Seite) — Finns „passt"-Momente 04:52 (68 €)
+#    und 06:43 (900 : 720 = 180 €, 20 %); Grenze seit 18.10.2026 auf 250 € (Finn).
+#  - passt es nicht: geplante Gegentrades derselben Klasse auf jetzt + 2–3 min vorziehen, ≈ 75 % der Lücke (04:10: 450 € auf 600 €),
+#    Firma A gegen Firma B zuerst (17.10.: „ein Unternehmen gegen das andere, kein Problem"), gleiche Firma mindestens 2 min nach der
+#    Gegenrichtung (unauffällig, 08:05). Nie in die schwerere Seite drehen (15:57: 9 Longs am Start zu Shorts gedreht →
+#    2.000 € Short gegen 300 € Long, Finn schloss 3 Shorts von Hand). Schalter: regeln.ausgleich.waage (Standard an, false = alter Bot).
+AP_WAAGE_TOL_EUR = 250.0          # CFD: Lücke bis 250 € passt (Finn 18.10.2026: „Toleranz auf 250 anpassen", vorher 180) …
+AP_WAAGE_TOL_PCT = 0.20           # … oder bis 20 % der schwereren Seite
+AP_WAAGE_FUT_MAX = 2.0            # Futures: höchstens 2 : 1 nach Anzahl
+AP_WAAGE_ANTEIL = 0.75            # Nachschub ≈ 75 % der Lücke (Finn 16.10. 04:10)
+AP_WAAGE_BALD_MIN = 2.0           # Starts in ≤ 2 min zählen schon mit
+AP_WAAGE_VORZUG_MIN = (2.0, 3.0)  # vorgezogen auf jetzt + 2–3 min
+AP_WAAGE_SPAET_MIN = 8.0          # ein Zug landet spätestens jetzt + 8 min (sonst nächster Kandidat)
+AP_WAAGE_ZUEGE_MAX = 3            # höchstens so viele Züge je Klasse und Lauf
+AP_WAAGE_PC_ABSTAND_MIN = 3.0     # derselbe PC (ID): kein anderer Start in ± 3 min
+AP_WAAGE_FIRMA_ABSTAND_MIN = 1.0  # dieselbe Firma, andere ID: 1 min (wie der DB-Trigger)
+AP_WAAGE_GEGEN_FIRMA_MIN = 2.0    # dieselbe Firma, Gegenrichtung: mindestens 2 min danach (unauffällig, Finn 16.10. 08:05)
+AP_WAAGE_CLAIM_MAX_MIN = 15.0     # geclaimt, aber noch planned: zählt bis 15 min nach der Startzeit mit
+AP_WAAGE_RS_HORIZONT_MIN = 30.0   # Richtungsschutz: Gegenrichtung derselben ID × Firma, die in ± 30 min startet, sperrt
+AP_WAAGE_VOLL_S = 300             # Takt: voller Lauf bei jeder Änderung des laufenden Buchs, sonst alle 5 min
+
+
+def ap_waage_an(regeln):
+    """Schalter regeln.ausgleich.waage — Standard an; nur ein echtes false schaltet zurück auf den alten Ausgleichs-Bot."""
+    a = (regeln or {}).get("ausgleich") if isinstance(regeln, dict) else None
+    return not (isinstance(a, dict) and a.get("waage") is False)
+
+
+def _ap_waage_gewicht(z):
+    """Eröffnungs-Gewicht € eines Trades (verlust_eur = min(Satz × SL, Kontowert), ohne SL = Kontowert) — voll, kein SL-Rest."""
+    for k in ("verlust_eur", "einsatz_abs"):
+        g = _wd_num(z.get(k))
+        if g is not None:
+            return abs(float(g))
+    e = _wd_num(z.get("einsatz_eur"))
+    return abs(float(e)) if e is not None else 0.0
+
+
+def _ap_waage_startet(z):
+    """Ein geplanter Plan startet wirklich: Hand-Plan, bestätigter Auto-Plan oder schon geclaimt."""
+    return (not z.get("auto_plan")) or bool(z.get("bestaetigt")) or bool(z.get("geclaimt"))
+
+
+def ap_waage_zeile_zaehlt(z, jetzt_min, pc_lebt=None, laufend=False):
+    """REIN RECHNEND: zählt die Zeile in der Waage? Eigene Planer-Trades (AP_TYPEN) ohne Hedge mit Richtung; laufend immer,
+    geplant nur, wenn er in ≤ AP_WAAGE_BALD_MIN startet (oder geclaimt ist und noch nicht 15 min drüber) und sein PC lebt."""
+    if z.get("richtung") not in ("buy", "sell") or z.get("gehedgt") or str(z.get("typ") or "") not in AP_TYPEN:
+        return False
+    if laufend:
+        return True
+    if z.get("folgetag") or z.get("start_min") is None:
+        return False
+    if pc_lebt is not None and str(z.get("user_id")) not in pc_lebt:
+        return False
+    m, jm = float(z["start_min"]), float(jetzt_min)
+    if z.get("geclaimt"):
+        return jm - AP_WAAGE_CLAIM_MAX_MIN <= m <= jm + AP_WAAGE_BALD_MIN
+    return _ap_waage_startet(z) and jm - 1.0 <= m <= jm + AP_WAAGE_BALD_MIN
+
+
+def _ap_eur_txt(x):
+    return f"{float(x):,.0f}".replace(",", ".")
+
+
+def ap_waage_passt(klasse, w):
+    """REIN RECHNEND: (passt, grund, leichte Richtung 'buy'|'sell'|None) einer Klassen-Waage {long_eur, short_eur, n_long, n_short}."""
+    nl, ns = int(w.get("n_long") or 0), int(w.get("n_short") or 0)
+    l, s = float(w.get("long_eur") or 0), float(w.get("short_eur") or 0)
+    if nl == 0 and ns == 0:
+        return True, None, None
+    if nl == 0:
+        return False, f"{ns} Short{'s' if ns != 1 else ''} laufen, kein Long", "buy"
+    if ns == 0:
+        return False, f"{nl} Long{'s' if nl != 1 else ''} laufen, kein Short", "sell"
+    if klasse == "futures":
+        if nl > AP_WAAGE_FUT_MAX * ns:
+            return False, f"{nl} Long : {ns} Short (höchstens 2 : 1)", "sell"
+        if ns > AP_WAAGE_FUT_MAX * nl:
+            return False, f"{nl} Long : {ns} Short (höchstens 1 : 2)", "buy"
+        return True, None, None
+    tol = max(AP_WAAGE_TOL_EUR, AP_WAAGE_TOL_PCT * max(l, s))
+    if abs(l - s) > tol:
+        return False, f"Lücke {_ap_eur_txt(abs(l - s))} € ({_ap_eur_txt(l)} Long : {_ap_eur_txt(s)} Short, höchstens {_ap_eur_txt(tol)} €)", \
+            ("buy" if l < s else "sell")
+    return True, None, None
+
+
+def _ap_waage_note(klasse, w):
+    """Sortierschlüssel: (passt nicht, Schieflage) — kleiner = besser. Futures nach Anzahl, CFD nach €."""
+    ok = ap_waage_passt(klasse, w)[0]
+    if klasse == "futures":
+        return (0 if ok else 1, abs(int(w.get("n_long") or 0) - int(w.get("n_short") or 0)))
+    return (0 if ok else 1, round(abs(float(w.get("long_eur") or 0) - float(w.get("short_eur") or 0)), 1))
+
+
+def ap_klassen_waage(stand, pc_lebt=None, extra=None):
+    """REIN RECHNEND (testbar): {'futures'|'cfd': {long_eur, short_eur, n_long, n_short, delta_eur, passt, grund, leicht,
+    plan_ids, firmen{buy, sell}}} aus stand['offen'] (laufend) + stand['geplant'] (Start in ≤ 2 min). extra = {plan_id, richtung}:
+    dieser Plan zählt zusätzlich mit genau dieser Richtung (Start-Prüfung „was wäre, wenn er jetzt startet")."""
+    out = {k: {"long_eur": 0.0, "short_eur": 0.0, "n_long": 0, "n_short": 0, "plan_ids": [], "firmen": {"buy": [], "sell": []}}
+           for k in ("futures", "cfd")}
+    jm = float(stand.get("jetzt_min") or 0)
+    ex = str((extra or {}).get("plan_id") or "")
+
+    def dazu(z, r):
+        w = out[ap_klasse(z.get("route"), z.get("firma"))]
+        g = _ap_waage_gewicht(z)
+        if r == "buy":
+            w["long_eur"] += g
+            w["n_long"] += 1
+        else:
+            w["short_eur"] += g
+            w["n_short"] += 1
+        w["plan_ids"].append(str(z.get("plan_id")))
+        fk = z.get("firma_key") or ""
+        if fk and fk not in w["firmen"][r]:
+            w["firmen"][r].append(fk)
+
+    gesehen = set()
+    for z in stand.get("offen") or ():
+        pid = str(z.get("plan_id"))
+        if pid != ex and ap_waage_zeile_zaehlt(z, jm, laufend=True):
+            dazu(z, z["richtung"])
+            gesehen.add(pid)
+    for z in stand.get("geplant") or ():
+        pid = str(z.get("plan_id"))
+        if pid in gesehen or pid == ex:
+            continue
+        if ap_waage_zeile_zaehlt(z, jm, pc_lebt=pc_lebt):
+            dazu(z, z["richtung"])
+            gesehen.add(pid)
+    if ex and (extra or {}).get("richtung") in ("buy", "sell"):
+        z = next((x for x in list(stand.get("geplant") or ()) + list(stand.get("offen") or ()) if str(x.get("plan_id")) == ex), None)
+        if z is not None and not z.get("gehedgt") and str(z.get("typ") or "") in AP_TYPEN:
+            dazu(z, extra["richtung"])
+    for k, w in out.items():
+        w["long_eur"], w["short_eur"] = round(w["long_eur"], 1), round(w["short_eur"], 1)
+        w["delta_eur"] = round(w["long_eur"] - w["short_eur"], 1)
+        w["passt"], w["grund"], w["leicht"] = ap_waage_passt(k, w)
+    return out
+
+
+def _ap_waage_kandidat(z, klasse, richtung, jm, pc_lebt, schon):
+    """Darf dieser geplante Plan als Gegentrade vorgezogen werden? Nur änderbare Auto-Pläne (keine Hand-Werte, keine Kette,
+    nicht fällig, keine Hand-Richtung) der eigenen Kontoarten, später als jetzt + 3 min, heute, PC lebt, kein roter Start-Fehler."""
+    if not (z.get("aenderbar") and z.get("auto_plan")) or z.get("gehedgt") or z.get("folgetag"):
+        return False
+    if str(z.get("typ") or "") not in AP_TYPEN or z.get("richtung") != richtung or z.get("start_min") is None:
+        return False
+    m = float(z["start_min"])
+    if not (jm + AP_WAAGE_VORZUG_MIN[1] + 1.0 < m < 24 * 60):
+        return False
+    if ap_klasse(z.get("route"), z.get("firma")) != klasse or str(z.get("plan_id")) in schon:
+        return False
+    if pc_lebt is not None and str(z.get("user_id")) not in pc_lebt:
+        return False
+    sf = z.get("start_fehler")
+    return not (isinstance(sf, dict) and sf.get("status") == "rot")
+
+
+def _ap_waage_rs_frei(stand, z, richtung, ziel):
+    """Richtungsschutz je ID × Firma (alle Wege und Kontoarten, auch WD/Funded): keine laufende Gegenrichtung und keine, die in
+    ± 30 min um die neue Startzeit wirklich startet. Unverändert hart (Finn 17.10.: „ich mich nicht intern gegenhedge")."""
+    key = f"{z.get('user_id')}|{z.get('firma_key')}"
+    f = (stand.get("id_fest") or {}).get(key)
+    if f and f.get("richtung") != richtung and str(f.get("plan_id")) != str(z.get("plan_id")):
+        return False
+    gegen = "sell" if richtung == "buy" else "buy"
+    for g in list(stand.get("geplant") or ()) + list(stand.get("folgetag") or ()):
+        if g is z or f"{g.get('user_id')}|{g.get('firma_key')}" != key or g.get("richtung") != gegen or g.get("start_min") is None:
+            continue
+        if _ap_waage_startet(g) and abs(float(g["start_min"]) - float(ziel)) <= AP_WAAGE_RS_HORIZONT_MIN:
+            return False
+    return True
+
+
+def _ap_waage_zielminute(stand, z, richtung, jm, rnd, belegt):
+    """Neue Startminute für einen vorgezogenen Gegentrade: jetzt + 2–3 min; dieselbe Firma mindestens 2 min nach der Gegenrichtung,
+    1 min zu anderen IDs derselben Firma, derselbe PC ± 3 min frei. → Minute | None (in den nächsten 8 min kein Platz)."""
+    uid, fk = str(z.get("user_id")), z.get("firma_key")
+    gegen = "sell" if richtung == "buy" else "buy"
+    ziel = jm + rnd.uniform(*AP_WAAGE_VORZUG_MIN)
+    for o in stand.get("offen") or ():
+        sm = o.get("start_min")
+        if o.get("firma_key") == fk and o.get("richtung") == gegen and sm is not None and float(sm) > jm - AP_WAAGE_GEGEN_FIRMA_MIN:
+            ziel = max(ziel, float(sm) + AP_WAAGE_GEGEN_FIRMA_MIN + rnd.uniform(0.0, 1.0))
+    andere = [g for g in stand.get("geplant") or () if g is not z and g.get("start_min") is not None and _ap_waage_startet(g)]
+    for g in andere:
+        if g.get("firma_key") == fk and g.get("richtung") == gegen and abs(float(g["start_min"]) - ziel) < AP_WAAGE_GEGEN_FIRMA_MIN:
+            ziel = max(ziel, float(g["start_min"]) + AP_WAAGE_GEGEN_FIRMA_MIN + rnd.uniform(0.0, 1.0))
+
+    def frei(m):
+        for o in stand.get("starts_heute") or ():
+            if str(o.get("user_id")) == uid and o.get("start") is not None and abs(float(o["start"]) - m) < AP_WAAGE_PC_ABSTAND_MIN:
+                return False
+        for g in andere:
+            d = abs(float(g["start_min"]) - m)
+            if str(g.get("user_id")) == uid and d < AP_WAAGE_PC_ABSTAND_MIN:
+                return False
+            if g.get("firma_key") == fk and str(g.get("user_id")) != uid and d < AP_WAAGE_FIRMA_ABSTAND_MIN:
+                return False
+        for u, f_, m2 in belegt:
+            if (u == uid and abs(m2 - m) < AP_WAAGE_PC_ABSTAND_MIN) or (f_ == fk and u != uid and abs(m2 - m) < AP_WAAGE_FIRMA_ABSTAND_MIN):
+                return False
+        return True
+
+    m = ziel
+    while m <= jm + AP_WAAGE_SPAET_MIN:
+        if frei(m):
+            return round(m, 2)
+        m += 0.75
+    return None
+
+
+def ap_waage_nachschub(stand, waage, rnd, pc_lebt=None, dubai_min=0.0, nur_klasse=None, schon=()):
+    """REIN RECHNEND (testbar): Je Klasse, die nicht passt: geplante Auto-Pläne der leichten Richtung derselben Klasse auf
+    jetzt + 2–3 min vorziehen, bis die Klasse passt (Futures: Anzahl) bzw. ≈ 75 % der Lücke gedeckt sind (CFD), mindestens einer,
+    höchstens AP_WAAGE_ZUEGE_MAX. Reihenfolge: bestätigt vor unbestätigt, andere Firma als die schwere Seite vor derselben, früher vor
+    später. Richtung bleibt immer (nie drehen). → (aenderungen für _ap_aenderungen_anwenden, info je Klasse)"""
+    jm = float(stand.get("jetzt_min") or 0)
+    aend, info, belegt, schon = [], [], [], set(str(x) for x in schon or ())
+    for kl in ("futures", "cfd"):
+        if nur_klasse and kl != nur_klasse:
+            continue
+        w = {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v) for k, v in (waage.get(kl) or {}).items()}
+        ok, grund, leicht = ap_waage_passt(kl, w)
+        if ok or not leicht:
+            continue
+        schwer = "sell" if leicht == "buy" else "buy"
+        schwer_firmen = set((w.get("firmen") or {}).get(schwer) or ())
+        luecke = abs(float(w.get("long_eur") or 0) - float(w.get("short_eur") or 0))
+        kand = [z for z in stand.get("geplant") or () if _ap_waage_kandidat(z, kl, leicht, jm, pc_lebt, schon)]
+        kand.sort(key=lambda z: (0 if z.get("bestaetigt") else 1, 0 if z.get("firma_key") not in schwer_firmen else 1,
+                                 float(z["start_min"]), str(z.get("plan_id"))))
+        dazu, n = 0.0, 0
+        for z in kand:
+            if n >= AP_WAAGE_ZUEGE_MAX:
+                break
+            ziel = _ap_waage_zielminute(stand, z, leicht, jm, rnd, belegt)
+            if ziel is None or not _ap_waage_rs_frei(stand, z, leicht, ziel):
+                continue
+            von = float(z["start_min"])
+            seite = "Long" if leicht == "buy" else "Short"
+            aend.append({"plan_id": z["plan_id"], "user_id": z["user_id"], "art": "start", "von_richtung": leicht, "nach_richtung": leicht,
+                         "von_start_min": von, "nach_start_min": ziel,
+                         "grund": (f"[Waage] {AP_KLASSE_TXT.get(kl, kl)}: {grund} — {seite} vorgezogen, {z.get('user')} {z.get('firma')} "
+                                   f"{_ap_hhmm_txt(von + dubai_min)} → {_ap_hhmm_txt(ziel + dubai_min)}{' Dubai' if dubai_min else ''}")})
+            belegt.append((str(z.get("user_id")), z.get("firma_key"), ziel))
+            schon.add(str(z.get("plan_id")))
+            g = _ap_waage_gewicht(z)
+            w["long_eur" if leicht == "buy" else "short_eur"] = float(w.get("long_eur" if leicht == "buy" else "short_eur") or 0) + g
+            w["n_long" if leicht == "buy" else "n_short"] = int(w.get("n_long" if leicht == "buy" else "n_short") or 0) + 1
+            dazu += g
+            n += 1
+            if ap_waage_passt(kl, w)[0] or (kl == "cfd" and dazu >= AP_WAAGE_ANTEIL * luecke):
+                break
+        info.append({"klasse": kl, "grund": grund, "leicht": leicht, "gezogen": n, "kandidaten": len(kand),
+                     "passt_danach": ap_waage_passt(kl, w)[0]})
+    return aend, info
+
+
+_ap_waage = {"sig": None, "voll_at": 0.0, "letzter_lauf": None, "letztes": None, "fehler": ""}
+
+
+def ap_waage_tick(regeln_param=None):
+    """Sofort-Nachschub (Railway, aus _ap_bot_tick jede Minute): ändert sich das laufende Buch (Trade startet/endet), sofort ein voller
+    Lauf, sonst alle 5 min. Zieht Gegentrades vor (ap_waage_nachschub) und protokolliert als quelle 'bot' mit „[Waage]"."""
+    try:
+        offen = sb_select("trade_plans", {"select": "id", "status": "eq.open"}) or []
+    except Exception as e:
+        _ap_waage["fehler"] = f"offene Trades nicht lesbar ({type(e).__name__})"
+        return None
+    sig = tuple(sorted(str(r.get("id")) for r in offen))
+    if sig == _ap_waage["sig"] and time.time() - _ap_waage["voll_at"] < AP_WAAGE_VOLL_S:
+        return None
+    reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    if not reg:
+        return None
+    stand = _ap_stand_laden(reg)
+    pc = _ap_pc_lebt()
+    waage = ap_klassen_waage(stand, pc_lebt=pc)
+    aend, info = ap_waage_nachschub(stand, waage, random.SystemRandom(), pc_lebt=pc, dubai_min=_ap_dubai_versatz(stand["mitternacht"]))
+    umpl, fehler = _ap_aenderungen_anwenden(stand, aend, "bot") if aend else ([], None)
+    _ap_waage.update(sig=sig, voll_at=time.time(), letzter_lauf=datetime.now(timezone.utc).isoformat(), fehler=fehler or "",
+                     letztes={"waage": {k: {f: v.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "passt", "grund")}
+                                        for k, v in waage.items()}, "info": info, "gezogen": len(umpl)})
+    return umpl
+
+
+def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
+    """REIN RECHNEND (testbar): Start-Prüfung eines Plans → {klasse, vorher, nachher {passt, besser, grund}, gegen {passt, besser}}.
+    besser = die Klasse liegt nach dem Start näher an ±0 als vorher (Futures nach Anzahl, CFD nach €)."""
+    z = next((x for x in stand.get("geplant") or () if str(x.get("plan_id")) == str(plan_id)), None)
+    if z is None:
+        return None
+    kl = ap_klasse(z.get("route"), z.get("firma"))
+    vor = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": None})[kl]
+    out = {"klasse": kl, "zaehlt": (not z.get("gehedgt")) and str(z.get("typ") or "") in AP_TYPEN,
+           "vorher": {f: vor.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "passt", "grund")}}
+    gegen = "sell" if richtung == "buy" else "buy"
+    for name, r in (("nachher", richtung), ("gegen", gegen)):
+        w = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": r})[kl]
+        out[name] = {"richtung": r, "passt": bool(w["passt"]), "besser": _ap_waage_note(kl, w) < _ap_waage_note(kl, vor), "grund": w["grund"],
+                     **{f: w.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}
+    return out
+
+
 def _ap_stand_plaene(stand):
     """Geplante Pläne des Stands in der Form für ap_umplanen/ap_eingriff_pruefen (Firma = Schlüssel)."""
     return [{"plan_id": z["plan_id"], "user_id": z["user_id"], "user": z["user"], "firma": z["firma_key"], "firma_name": z["firma"],
@@ -24059,6 +24376,15 @@ def _ap_bot_tick(d):
     param = _ap_bot["param"]
     if not param.get("aktiv"):
         return
+    if param.get("waage"):
+        # ZWEI WAAGEN (17.10.2026): Sofort-Nachschub je Klasse ersetzt den alten Ausgleich (Tages-Saldo, Drehen am Bot) — kein
+        # ap_ausgleichen mehr; der Richtungsschutz am Start (PC-Tab) verschiebt statt zu drehen. Jede Minute, voller Lauf bei Änderung.
+        try:
+            ap_waage_tick(param)
+        except Exception as e:
+            _ap_waage["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[waage] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return
     tag = d.strftime("%Y-%m-%d")
     letzter = _ap_bot.get("letzter_lauf")
     faellig = not letzter or (datetime.now(timezone.utc) - datetime.fromisoformat(letzter)).total_seconds() >= param["takt_min"] * 60 - 5
@@ -24138,6 +24464,14 @@ def admin_auto_plan_delta():
         if sicht_d is not None and ((not admin and nur) or not isinstance(sicht_d, str)):
             stand = ap_stand_sicht(stand, sicht_d)
         antwort = ap_delta_antwort(stand, sicht_d, pc_lebt=_ap_pc_lebt_gecacht())
+        # ZWEI WAAGEN (17.10.2026): Futures/CFD je laufend + Start ≤ 2 min — PC-Tab (Start-Prüfung) und Planer-Kopf lesen es
+        try:
+            antwort["klassen"] = {k: {f: v.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "delta_eur", "passt", "grund", "leicht")}
+                                  for k, v in ap_klassen_waage(stand, pc_lebt=_ap_pc_lebt_gecacht()).items()}
+            antwort["waage_an"] = bool(stand["param"].get("waage"))
+            antwort["waage_bot"] = {k: _ap_waage.get(k) for k in ("letzter_lauf", "letztes", "fehler")}
+        except Exception as e:
+            antwort["klassen_fehler"] = f"{type(e).__name__}: {e}"
         try:
             antwort = ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())   # archivierte Konten (09.10.2026), eigener try
         except Exception as e:
@@ -24953,6 +25287,52 @@ def admin_auto_plan_start_protokoll():
                             headers=_sb_headers("return=minimal"), timeout=(5, 20))
         _sb_pruefen(r)
         return jsonify({"ok": True, "quelle": zeile["quelle"]})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/auto-plan/waage-start", methods=["POST", "OPTIONS"])
+def admin_auto_plan_waage_start():
+    """POST {plan_id, richtung, ziehen} — START-PRÜFUNG DER ZWEI WAAGEN (Finn 17.10.2026) für den PC-Tab (rkVorStart): Lage der
+    Klasse (Futures/CFD), wenn der Plan jetzt in `richtung` startet, und wenn er gedreht startet. ziehen=true und der Start macht die
+    Klasse weder passend noch besser → Gegentrades derselben Klasse sofort auf jetzt + 2–3 min vorziehen (ap_waage_nachschub, der
+    Plan zählt dabei schon als laufend; nur wenn der Ausgleichs-Bot an ist). Nur der Besitzer des Plans.
+    → {ok, waage_an, lage {klasse, zaehlt, vorher, nachher {passt, besser, grund}, gegen {…}}, gezogen [{plan_id, user, firma, nach_start}]}"""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _wd_login()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    pid = str(body.get("plan_id") or "").strip()
+    richtung = str(body.get("richtung") or "").strip()
+    if not re.match(r"^[0-9a-f-]{36}$", pid) or richtung not in ("buy", "sell"):
+        return jsonify({"ok": False, "msg": "plan_id/richtung fehlt"}), 400
+    try:
+        plan = (sb_select("trade_plans", {"select": "id,user_id", "id": f"eq.{pid}"}) or [None])[0]
+        if not plan or str(plan.get("user_id")) != str(uid):
+            return jsonify({"ok": False, "msg": "Plan nicht gefunden oder nicht deiner"}), 404
+        reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+        if not reg:
+            return jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503
+        param = ap_ausgleich_param(reg.get("regeln"))
+        if not param.get("waage"):
+            return jsonify({"ok": True, "waage_an": False})
+        stand = _ap_stand_laden(reg)
+        pc = _ap_pc_lebt_gecacht()
+        lage = ap_waage_start_lage(stand, pid, richtung, pc_lebt=pc)
+        if lage is None:
+            return jsonify({"ok": False, "msg": "Plan steht heute nicht im Planer-Stand"}), 404
+        gezogen, fehler = [], None
+        nh = lage["nachher"]
+        if body.get("ziehen") is True and param.get("aktiv") and lage["zaehlt"] and not (nh["passt"] or nh["besser"]):
+            waage = ap_klassen_waage(stand, pc_lebt=pc, extra={"plan_id": pid, "richtung": richtung})
+            aend, _info = ap_waage_nachschub(stand, waage, random.SystemRandom(), pc_lebt=pc,
+                                             dubai_min=_ap_dubai_versatz(stand["mitternacht"]), nur_klasse=lage["klasse"], schon=[pid])
+            umpl, fehler = _ap_aenderungen_anwenden(stand, aend, "bot") if aend else ([], None)
+            gezogen = [{"plan_id": u.get("plan_id"), "user": u.get("user"), "firma": u.get("firma"), "nach_start": u.get("nach_start")}
+                       for u in umpl]
+        return jsonify({"ok": True, "waage_an": True, "lage": lage, "gezogen": gezogen, "fehler": fehler})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
 
