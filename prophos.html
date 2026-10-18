@@ -1962,6 +1962,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-raster i.jetzt{width:2px;margin-left:-1px;bottom:0;background:var(--ink);opacity:.45}
   :is(#tpl-view,#adm-pane-planer) .tpl-raster .jetzt-t{position:absolute;top:-1px;transform:translateX(-50%);font-size:10px;font-weight:600;color:var(--ink);background:var(--surface);padding:0 4px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
   :is(#tpl-view,#adm-pane-planer) .tpl-ids{margin:0 0 10px;gap:6px 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-firmen{margin-top:-4px}   /* Firmen-Chips (19.10.2026) direkt unter den ID-Chips */
   :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip{padding:3px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:12px;line-height:1.4;color:var(--sub)}
   :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip.is-on{border-color:var(--violet);color:var(--ink)}
   :is(#tpl-view,#adm-pane-planer) .tpl-ids .adm-vl-chip b{margin-left:6px;font-variant-numeric:tabular-nums;font-weight:600}
@@ -44588,7 +44589,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1622'
+  const OS_TAB_BUILD = '2026-09-22.1623'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50437,8 +50438,9 @@
    * Tages (Sommer 2 h, Winter 3 h). Netto-Linie: jeder Trade zählt ab Start laufzeit_min lang (aus dem Lauf, sonst 180 min) mit seinem
    * Einsatz, beendete bis zu ihrem Ende, laufende mindestens bis jetzt; gehedgte zählen 0 — wie ap_verlauf im Backend. */
   const _tpl = { tag: 'heute', wahl: null, edit: null, busy: false, meldung: '', timer: null, geladen: 0, laeuft: false, fehler: '', weg: new Set(), stub: false,
-    sicht: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map(), okLokal: new Set(), bilanz: null, bilanzAt: 0 }   // okLokal: eben einzeln bestätigte Vorschläge (Chip sofort „bestätigt")   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
+    sicht: 'alle', firma: 'alle', abAuf: new Map(), lt: new Map(), ltAt: 0, weitereAuf: false, kerzen: [], kerzenAt: 0, kerzenBis: '', kwAt: 0, hypoJe: new Map(), okLokal: new Set(), bilanz: null, bilanzAt: 0 }   // okLokal: eben einzeln bestätigte Vorschläge (Chip sofort „bestätigt")   // kerzen: tv_kurs_1m NQ heute; hypoJe: Satz/Typ/Einstieg je Plan über Ladevorgänge hinweg (Hypo-P&L)   // sicht: ID-Chip („alle" | user_id), abAuf: Konten-Abdeckung je ID auf/zu, lt: Startzeiten laufender Trades aller IDs (07.10.2026)
   try{ const s = localStorage.getItem('prophos_tpl_sicht'); if(s) _tpl.sicht = s }catch(_){}
+  try{ const s = localStorage.getItem('prophos_tpl_firma'); if(s) _tpl.firma = s }catch(_){}   // FIRMEN-FILTER (Finn 19.10.2026)
   // ALLE IDS (07.10.2026, Finn 03:25 dt: „Es ist nur die ID, von der ich gerade eingeloggt bin. So hässlich, man erkennt gar nichts"):
   // solange diese Seite offen ist, fragen apApi (Lauf) und apdLaden (Delta) mit ?sicht=alle — das Backend liefert dann alle IDs
   // (außer „nur eigene"-Logins, die bleiben bei der eigenen). Gefiltert wird nur noch hier über die ID-Chips.
@@ -52250,6 +52252,33 @@
         <b class="h ${kl(z.hypo_eur)}">${vz(z.hypo_eur)}</b><span class="z">${zeit(z.start)}</span></div>`).join('')
     return `<div class="tpl-hl"><div class="tpl-hl-k">Beendet · letzte 30 Tage <b>${b.length}</b> <span style="text-transform:none;letter-spacing:0;font-weight:500">nur Trades vom Auto-Planer · echter P&amp;L × Kontowert-Satz</span></div>${kacheln}${verlauf}${balken}<details class="tpl-bil-det"${_tpl.bilanzAuf ? ' open' : ''}><summary>${Math.min(30, b.length)} Trade${b.length === 1 ? '' : 's'} einzeln</summary>${zeilen}</details></div>`   // Tabelle aufklappbar (QA 08.10.2026 Punkt 10)
   }
+  /* FIRMEN-FILTER (19.10.2026) — Helfer für Planer-Seite (tplZeichnen) und Admin-Reiter (apIdsKopfHtml), Zustand _tpl.firma */
+  function tplFirmenStand(trades){   // → { firmen: [[name, n] …] nach Häufigkeit, firma: gewählte Firma oder 'alle' }
+    const je = new Map()
+    for(const t of trades || []){ const f = String(t.firma || '').trim(); if(f) je.set(f, (je.get(f) || 0) + 1) }
+    const firmen = [...je.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de'))
+    return { firmen, firma: _tpl.firma && _tpl.firma !== 'alle' && je.has(_tpl.firma) ? _tpl.firma : 'alle' }
+  }
+  function tplFirmenChipsHtml(fs, gesamt){   // zweite Chip-Reihe: „Alle Firmen" · je Firma (Farbe wie im Zeitstrahl, Zahl der Trades); ab 2 Firmen
+    if(!fs || fs.firmen.length < 2) return ''
+    const chip = (f, name, n, on) => `<button type="button" class="adm-vl-chip${on ? ' is-on' : ''}" data-tpl-firma="${escapeHtml(f)}" title="${f === 'alle' ? 'alle Prop-Firmen zusammen' : 'nur diese Prop-Firma — nochmal klicken = alle'}">${f === 'alle' ? '' : `<span class="adm-dot" style="background:${apdFirmaTon(f)}"></span>`}<span class="nm">${escapeHtml(name)}</span>${n ? `<b>${n}</b>` : ''}</button>`
+    return `<div class="adm-vl-legend tpl-ids tpl-firmen">${chip('alle', 'Alle Firmen', gesamt, fs.firma === 'alle')}${fs.firmen.map(([f, n]) => chip(f, f, n, fs.firma === f)).join('')}</div>`
+  }
+  function tplZeilenFirma(zeilen, trades){   // Zeitstrahl-Spuren ohne Trade der gewählten Firma fallen weg (Sammelzeile „Weitere" nur, wenn eine ihrer IDs dabei ist)
+    const fu = new Set((trades || []).map(t => t.user_id))
+    return zeilen.filter(z => z.sammel ? (z.alle || z.ids).some(u => fu.has(u)) : fu.has(z.uid))
+  }
+  function tplFirmaWaehlen(f){   // Klick auf einen Firmen-Chip: gewählte Firma oder „Alle Firmen" = alle; gemerkt in localStorage
+    _tpl.firma = (f === 'alle' || _tpl.firma === f) ? 'alle' : f
+    try{ localStorage.setItem('prophos_tpl_firma', _tpl.firma) }catch(_){}
+  }
+  /* Sicht auf EINE Prop-Firma (Firmen-Chip, 19.10.2026): Trades und Summen nur dieser Firma — läuft nach dem ID-Filter, Band/Netto „jetzt" bleiben */
+  function tplFirmaFilter(D, firma){
+    const trades = D.trades.filter(t => String(t.firma || '').trim() === firma)
+    let L = 0, S = 0
+    for(const t of trades) if(tplAktiv(t) && !t.gehedgt){ if(t.long) L += t.einsatz || 0; else S += t.einsatz || 0 }
+    return { ...D, trades, L, S, firma }   // firma: Karte „Heute beendet" filtert delta.heute_beendet nach derselben Firma
+  }
   /* Sicht auf EINE ID (ID-Chip): Trades und Summen nur dieser ID — Band/Netto „jetzt" aus dem Delta bleiben über alle (so rechnet der Planer) */
   function tplSichtFilter(D, ids){
     const trades = D.trades.filter(t => ids.has(t.user_id))
@@ -52285,7 +52314,13 @@
     const sichtOk = s => s === 'alle' || (s === 'weitere' && weitere.length) || alleIds.some(x => x.uid === s)
     const sicht = sichtOk(_tpl.sicht) ? _tpl.sicht : 'alle'
     const sichtIds = sicht === 'alle' ? null : new Set(sicht === 'weitere' ? weitere.map(x => x.uid) : [sicht])
-    const F = sichtIds ? tplSichtFilter(D, sichtIds) : D
+    const F0 = sichtIds ? tplSichtFilter(D, sichtIds) : D
+    // FIRMEN-FILTER (Finn 19.10.2026 ~02:30 Dubai, Blick auf den Zeitstrahl: „dass ich nach Prop-Firmen auch filtern kann, nur die Details der
+    // jeweiligen Prop-Firma sehen"): zweite Chip-Reihe unter den ID-Chips — „Alle Firmen" · je Firma (Farbe wie im Zeitstrahl, Zahl der Trades
+    // in der aktuellen ID-Sicht). Filtert Kacheln, Zeitstrahl (Spuren ohne Trade dieser Firma fallen weg), Charts, Läuft, Geplant, Heute beendet;
+    // ID-Filter und Firmen-Filter kombinieren sich. Gemerkt in localStorage (prophos_tpl_firma); fehlt die Firma im Stand, gilt „Alle".
+    const fs = tplFirmenStand(F0.trades), firma = fs.firma
+    const F = firma === 'alle' ? F0 : tplFirmaFilter(F0, firma)
     const abF = sichtIds ? ab.filter(o => sichtIds.has(o.uid)) : ab
     const zeile = x => ({ key: x.uid, name: x.name, uid: x.uid, ids: [x.uid], sammel: false })
     let zeilen
@@ -52295,6 +52330,7 @@
       if(wSp.length) zeilen.push(_tpl.weitereAuf ? { key: 'weitere', name: 'Weitere', uid: null, ids: wSp.map(x => x.uid), sammel: true, auf: true, einzeln: wSp } : { key: 'weitere', name: 'Weitere', uid: null, ids: wSp.map(x => x.uid), sammel: true, auf: false })
       if(_tpl.weitereAuf && wSp.length){ const k = zeilen[zeilen.length - 1]; k.alle = k.ids; k.ids = []; zeilen.push(...wSp.map(zeile)) }   // aufgeklappt: Kopfzeile ohne Marker (Zähler aus alle), darunter je ID
     } else zeilen = spuren.filter(x => sichtIds.has(x.uid)).map(zeile)
+    if(firma !== 'alle') zeilen = tplZeilenFirma(zeilen, F.trades)   // Firmen-Filter: nur Spuren mit Trades dieser Firma
     const chip = (uid, name, l, on) => `<button type="button" class="adm-vl-chip${on ? ' is-on' : ''}" data-tpl-id="${escapeHtml(uid)}" title="${uid === 'alle' ? 'alle IDs zusammen' : 'nur diese ID — nochmal klicken = alle'}">${uid === 'alle' ? '' : `<span class="adm-dot" style="background:${idFarbe(uid)}"></span>`}<span class="nm">${escapeHtml(name)}</span>${l.length ? `<b>${l.length}${l.some(t => t.status === 'laeuft') ? ' · ' + l.filter(t => t.status === 'laeuft').length + ' läuft' : ''}</b>` : ''}</button>`
     // „Alle offenen bestätigen" (07.10.2026): offene Auto-Vorschläge der angezeigten IDs — eigene immer, fremde nur für den Admin
     const darfFremd = tplDarfFremd(), echtId = t => !t.ohnePlan && /^[0-9a-f-]{36}$/i.test(t.plan_id)
@@ -52311,7 +52347,8 @@
     const lz = _ap.letzter || {}, lzTxt = lz.tag && lz.at && !lz.trocken ? `${lz.quelle === 'nachplanen' ? 'Nachplanen' : 'Letzter Lauf'} ${tplUhrIso(lz.at)} · ${(lz.geplant || []).length} geplant · ${(lz.ausgelassen || []).length} ausgelassen` : ''
     const kopfRechts = _ap.imPlaner ? `<span class="tpl-kopf-r">${lzTxt ? `<span class="tpl-lauf" title="${escapeHtml(lzTxt)}">${escapeHtml(lzTxt)}</span>` : ''}${_ap.admin === true ? `<label class="ap-alle" title="Probelauf über alle IDs"><input type="checkbox" data-tpl-probe-alle${_apPr.alle ? ' checked' : ''}> alle IDs</label>` : ''}<button type="button" class="btn btn-ghost tc2-btn" data-tpl-probe${_ap.laeuft ? ' disabled' : ''} title="Nur rechnen, nichts anlegen">Probelauf</button><button type="button" class="btn btn-ghost tc2-btn" data-tpl-jetzt${_ap.laeuft ? ' disabled' : ''} title="Jetzt planen (ersetzt unbestätigte Vorschläge)">${_ap.laeuft ? 'plant…' : 'Jetzt planen'}</button></span>` : ''
     _tpl.kopfInChips = !!kopfRechts
-    const chips = (alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : ''
+    const chipsFirmen = chipsErlaubt ? tplFirmenChipsHtml(fs, F0.trades.length) : ''
+    const chips = ((alleIds.length > 1 || alleBest || kopfRechts) ? `<div class="adm-vl-legend tpl-ids">${chipsIds}${alleBest}${kopfRechts}</div>` : '') + chipsFirmen
     const fz = [apLadeFehlerText(), apdLadeFehlerText()].filter(Boolean)   // Ladefehler sichtbar, je Quelle eine Zeile (09.10.2026)
     const html = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
@@ -52875,6 +52912,9 @@
     const c = e.target.closest('[data-tpl-id]')   // ID-Chip: Klick auf die gewählte ID oder „Alle" = alle (07.10.2026)
     if(c){ _tpl.sicht = (c.dataset.tplId === 'alle' || _tpl.sicht === c.dataset.tplId) ? 'alle' : c.dataset.tplId
       try{ localStorage.setItem('prophos_tpl_sicht', _tpl.sicht) }catch(_){}
+      _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
+    const cf = e.target.closest('[data-tpl-firma]')   // Firmen-Chip (19.10.2026): Klick auf die gewählte Firma oder „Alle Firmen" = alle
+    if(cf){ tplFirmaWaehlen(cf.dataset.tplFirma)
       _tpl.wahl = null; _tpl.edit = null; _tpl.meldung = ''; tplZeichnen(); return }
     const ok1 = e.target.closest('[data-tpl-ok1]')   // Geplant-Liste: einen Vorschlag bestätigen (Finn 07.10.2026) — ohne Rückfrage
     if(ok1){ e.stopPropagation(); tplEinzelBestaetigen(ok1.dataset.tplOk1); return }
@@ -67075,12 +67115,17 @@
       const tag = apIdsTag(), seg = `<div class="ap-adm-kopf" style="margin-bottom:10px"><b>${escapeHtml(apPrTagText(D.tag))}</b><span>${u ? escapeHtml(uName) : 'alle IDs'} · Dubai${_apd.d && _apd.d.um && tag === 'heute' ? ' · Stand ' + tplUhrIso(_apd.d.um) : ''}</span>
           <div class="seg" style="margin-left:auto"><button type="button" data-ap-tag="heute" class="${tag === 'heute' ? 'active' : ''}">Heute</button><button type="button" data-ap-tag="morgen" class="${tag === 'morgen' ? 'active' : ''}">Morgen</button></div></div>`
       const alt = _tpl.tag; _tpl.tag = tag
+      // FIRMEN-FILTER (Finn 19.10.2026, Blick auf den Admin-Zeitstrahl): Chip-Reihe „Alle Firmen · je Firma" unter dem Kopf, filtert Kacheln,
+      // Zeitstrahl (Spuren ohne Trade der Firma fallen weg) und Charts; „Braucht dich" und „Heute je ID" bleiben ungefiltert. Klick → apIdsRender.
+      const fs = tplFirmenStand(D.trades), DF = fs.firma === 'alle' ? D : tplFirmaFilter(D, fs.firma)
+      const zeilenF = fs.firma === 'alle' ? zeilen : tplZeilenFirma(zeilen, DF.trades)
+      const firmenChips = tplFirmenChipsHtml(fs, D.trades.length)
       let braucht = ''
       try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function') braucht = tplBrauchtHtml(tplBraucht(D, u ? new Set([u]) : null)) }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
       // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
       let heuteKonten = ''   // Heute je ID (12.10.2026) wie auf der Planer-Seite, mit gewählter ID nur ihre Zeile
       try{ if(typeof tplHeuteKontenHtml === 'function' && typeof tplAbdeckung === 'function'){ const ab = tplAbdeckung(D); heuteKonten = tplHeuteKontenHtml(u ? ab.filter(o => o.uid === String(u)) : ab) } }catch(e){ console.warn('[apIds] Heute je ID', e) }
-      try{ return seg + tplKachelnHtml(D) + tplZeitstrahlHtml(D, zeilen) + heuteKonten + tplChartsUmschalterHtml(D, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
+      try{ return seg + firmenChips + tplKachelnHtml(DF) + tplZeitstrahlHtml(DF, zeilenF) + heuteKonten + tplChartsUmschalterHtml(DF, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return laeuft }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
@@ -67559,6 +67604,7 @@
     if(u && det && detFn){ try{ detFn(u, det) }catch(e){ console.warn('[ap-ids] ID-Details', e) } }
     // Reiter-Klick (auch Name im Menü): Sicht auf diese ID, nochmal = alle; Reiter sind <button>, Enter/Leertaste kommen als click
     root.querySelectorAll('[data-ap-sicht]').forEach(k => k.addEventListener('click', () => { const id = k.dataset.apSicht || null; _apIds.menu = null; apSichtSetzen(id && id !== u ? id : null) }))
+    root.querySelectorAll('[data-tpl-firma]').forEach(k => k.addEventListener('click', e => { e.stopPropagation(); tplFirmaWaehlen(k.dataset.tplFirma); apIdsRender() }))   // Firmen-Chip (19.10.2026)
     // Menüs „+n nicht im Planer" / „IDs verwalten": Zustand in _apIds.menu, damit das Neuzeichnen (Takt, Haken) es offen lässt; zu per
     // Klick daneben oder Esc — eigene Listener nur für dieses Menü, einmal gebunden
     root.querySelectorAll('[data-ap-menu]').forEach(b => b.addEventListener('click', () => { _apIds.menu = _apIds.menu === b.dataset.apMenu ? null : b.dataset.apMenu; apIdsRender() }))
