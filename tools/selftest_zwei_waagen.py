@@ -18,7 +18,7 @@ def lade():
         teile.append(re.search(rf"^{k} = .*$", src, re.M).group(0).split("  #")[0])
     for z in re.findall(r"^AP_WAAGE_[A-Z_]+ = .*$", src, re.M):
         teile.append(z.split("  #")[0])
-    for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
+    for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "ap_waage_ohne_liste", "ap_waage_ohne", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
                  "_ap_eur_txt", "ap_waage_passt", "_ap_waage_note", "ap_klassen_waage", "_ap_waage_kandidat", "_ap_waage_rs_frei",
                  "_ap_waage_zielminute", "ap_waage_nachschub", "ap_waage_start_lage"):
         i = src.index(f"\ndef {name}(") + 1
@@ -58,8 +58,8 @@ def main():
                                       lauf("o3", "moritz", *AP, "sell", 200), lauf("o4", "aurel", *FN, "buy", 300),
                                       lauf("o5", "chris", *FN, "buy", 300)], "geplant": [], "id_fest": {}, "starts_heute": []}
     w = W(st)
-    check(w["futures"]["n_short"] == 3 and w["futures"]["n_long"] == 0 and not w["futures"]["passt"] and w["futures"]["leicht"] == "buy",
-          f"Futures 0 : 3 passt nicht, leicht = Long ({w['futures']['grund']})")
+    check(w["futures"]["n_short"] == 2 and w["futures"]["n_long"] == 0 and not w["futures"]["passt"] and w["futures"]["leicht"] == "buy",
+          f"Futures 0 : 2 passt nicht, leicht = Long — Apex-Short zählt nicht (19.10.2026) ({w['futures']['grund']})")
     check(w["cfd"]["n_long"] == 2 and w["cfd"]["leicht"] == "sell", "CFD getrennt gewogen (2 Long, kein Short)")
 
     # 2) Futures 2 : 1 passt, 3 : 1 nicht
@@ -90,7 +90,8 @@ def main():
     aend, info = N(st, W(st), random.Random(1))
     fut = [a for a in aend if a["plan_id"] in ("k1", "k2", "k3")]
     check(len(fut) >= 1 and all(a["von_richtung"] == a["nach_richtung"] == "buy" for a in fut), f"Futures: nur Longs vorgezogen, nicht gedreht ({[a['plan_id'] for a in fut]})")
-    check(fut and fut[0]["plan_id"] == "k1" and jm + 2 <= fut[0]["nach_start_min"] <= jm + 8, f"Tradeify-Long zuerst (Apex auf der Short-Seite → Firma A gegen B), Start jetzt + 2–8 min ({fut and fut[0]['nach_start_min']})")
+    check(fut and fut[0]["plan_id"] == "k1" and jm + 2 <= fut[0]["nach_start_min"] <= jm + 8, f"Tradeify-Long zuerst, Start jetzt + 2–8 min ({fut and fut[0]['nach_start_min']})")
+    check("k2" not in [a["plan_id"] for a in fut], "Apex-Long wird NIE als Gegengewicht vorgezogen (19.10.2026)")
     w_n = dict(W(st)["futures"])
     for a in fut:
         w_n["n_long"] += 1
@@ -139,6 +140,27 @@ def main():
     L2 = S(st11, "p1", "buy")
     check(L2["nachher"]["passt"] and L2["vorher"]["n_short"] == 2, "Long gegen 2 laufende Shorts: passt (1 : 2)")
     check(not L2["gegen"]["passt"] and not L2["gegen"]["besser"], "Drehen auf Short wäre schwerer → nie")
+
+    # 14) APEX OHNE WAAGE (Finn 19.10.2026): zählt nicht, wird nicht gezogen, startet ohne Prüfung; per regeln.ausgleich.waage_ohne=[] wieder an
+    st12 = {"jetzt_min": jm, "offen": [lauf("a1", "moritz", *AP, "sell", 200), lauf("a2", "ezp", *AP, "sell", 200), lauf("a3", "ina", *AP, "buy", 200)],
+            "id_fest": {}, "starts_heute": [], "geplant": [plan("p1", "mike", *AP, "buy", 200, jm), plan("k1", "jacob", *TF, "buy", 215, jm + 90)]}
+    w12 = W(st12)
+    check(w12["futures"]["n_long"] == 0 and w12["futures"]["n_short"] == 0 and w12["futures"]["passt"], "drei laufende Apex-Trades: Futures-Waage leer, passt")
+    check(N(st12, w12, random.Random(7))[0] == [], "Apex-Schieflage zieht keinen Tradeify-Gegentrade")
+    L3 = S(st12, "p1", "buy")
+    check(L3 and L3.get("ohne_waage") and L3["zaehlt"] and L3["nachher"]["passt"] and L3["gegen"]["passt"] and not L3["nachher"]["besser"],
+          "Apex-Plan am Start: passt (ohne Waage), nichts vorgezogen")
+    st13 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215)], "id_fest": {}, "starts_heute": [],
+            "geplant": [plan("k2", "ezp", *AP, "buy", 200, jm + 90)]}
+    check(N(st13, W(st13), random.Random(8))[0] == [], "Tradeify-Short allein: Apex-Long ist kein Gegengewicht → nichts gezogen")
+    st13["param"] = {"waage_ohne": []}
+    aend13, _ = N(st13, W(st13), random.Random(8))
+    check([a["plan_id"] for a in aend13] == ["k2"], "regeln.ausgleich.waage_ohne = [] → Apex wiegt wieder mit (Rückweg ohne Code)")
+    st14 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215), lauf("a1", "moritz", *AP, "buy", 200)], "id_fest": {}, "starts_heute": [],
+            "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 90)]}
+    aend14, _ = N(st14, W(st14), random.Random(9))
+    check([a["plan_id"] for a in aend14] == ["k1"], "Tradeify-Short + Apex-Long laufen: Apex deckt nicht → Tradeify-Long (andere ID) vorgezogen")
+    check(aend14 and aend14[0]["nach_start_min"] >= jm + 2.0, f"… Tradeify gegen Tradeify ≥ 2 min nach der Gegenrichtung ({aend14 and aend14[0]['nach_start_min']})")
 
     # 13) Schalter
     check(ns["ap_waage_an"]({}) and ns["ap_waage_an"]({"ausgleich": {"aktiv": True}}) and not ns["ap_waage_an"]({"ausgleich": {"waage": False}}),

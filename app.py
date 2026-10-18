@@ -20825,6 +20825,9 @@ def ap_ausgleich_param(regeln):
     # Startfenstern in die nächsten 60 min vorziehen; Hinausschieben bleibt im eigenen Fenster. Standard aus = Verhalten wie bisher.
     out["fenster_uebergreifend"] = a.get("fenster_uebergreifend") is True
     out["waage"] = a.get("waage") is not False   # ZWEI WAAGEN (17.10.2026): Standard an, false = alter Ausgleichs-Bot
+    # APEX OHNE WAAGE (19.10.2026): Liste von Firmen-Teilstrings, Standard AP_WAAGE_OHNE_FIRMEN; [] in der DB = alle wiegen mit
+    wo = a.get("waage_ohne")
+    out["waage_ohne"] = [str(x).strip().lower() for x in wo if str(x).strip()] if isinstance(wo, list) else list(AP_WAAGE_OHNE_FIRMEN)
     try:
         out["takt_min"] = max(2, min(120, int(float(a.get("takt_min")))))
     except (TypeError, ValueError):
@@ -23426,7 +23429,8 @@ def ap_tages_saldo(stand):
 
 # ══ ZWEI WAAGEN (Finn 16./17.10.2026 — Beobachtungstag + Formel, Doc „Trade-Planer — wie Finn es will") ══════════════════════════
 # Was Finn am 16.10. den ganzen Tag von Hand gemacht hat, macht ab jetzt der Bot:
-#  - ZWEI getrennte Waagen: Futures (Tradeify, Apex, FundedNext Futures, Topstep) gleichen sich untereinander aus, CFDs untereinander
+#  - ZWEI getrennte Waagen: Futures (Tradeify, FundedNext Futures, Topstep, Lucid) gleichen sich untereinander aus, CFDs untereinander;
+#    Apex seit 19.10.2026 in keiner Waage (AP_WAAGE_OHNE_FIRMEN, Finn: „50-€-Konto, Daily Loss 2.000 mit 3 NQ sofort weg — kein Gegengewicht")
 #    („Futures sollen sich grob selber gegenhedgen und CFDs auch grob ausgleichen", 16:10). Ein CFD-Long deckt keinen Tradeify-Short
 #    (07:58: drei Tradeify/Apex-Shorts ohne einen Futures-Long — „die Accounts sind 1.000 € wert … das ist einfach nur dumm").
 #  - Gewogen wird NUR das laufende Buch der eigenen Planer-Trades (AP_TYPEN, ohne Hedge) + Starts in ≤ 2 min. Beendete zählen nie
@@ -23453,12 +23457,37 @@ AP_WAAGE_GEGEN_FIRMA_MIN = 2.0    # dieselbe Firma, Gegenrichtung: mindestens 2 
 AP_WAAGE_CLAIM_MAX_MIN = 15.0     # geclaimt, aber noch planned: zählt bis 15 min nach der Startzeit mit
 AP_WAAGE_RS_HORIZONT_MIN = 30.0   # Richtungsschutz: Gegenrichtung derselben ID × Firma, die in ± 30 min startet, sperrt
 AP_WAAGE_VOLL_S = 300             # Takt: voller Lauf bei jeder Änderung des laufenden Buchs, sonst alle 5 min
+# APEX OHNE WAAGE (Finn 19.10.2026 ~02:00 Dubai, nach dem Blick auf den Zeitstrahl): „Apex ist natürlich Future, aber das Daily Loss von
+# 2.000 mit 3 NQ ist richtig schnell gehittet … Apex-Accounts sind so eigentlich fast nichts wert (50 €) … deswegen macht es keinen Sinn,
+# Apex gegen Tradeify zu haben. Dann lieber Tradeify gegen Tradeify, zwei IDs mit 2 min Pause." Konsequenz: Apex-Trades zählen in
+# KEINER Waage mit und werden NIE als Gegentrade vorgezogen; ein Apex-Plan startet am PC-Tab ohne Waage-Prüfung (Richtungsschutz je
+# ID × Firma bleibt hart). Die Futures-Waage wiegt damit nur noch Tradeify, Topstep, Lucid, FNF Futures … gegeneinander — dieselbe
+# Firma bleibt erlaubt (AP_WAAGE_GEGEN_FIRMA_MIN). Überschreibbar ohne Code: regeln.ausgleich.waage_ohne = ["apex", …] (Teilstring
+# auf firma_key/Firmenname, klein); [] = alle Firmen wiegen wieder mit.
+AP_WAAGE_OHNE_FIRMEN = ("apex",)
 
 
 def ap_waage_an(regeln):
     """Schalter regeln.ausgleich.waage — Standard an; nur ein echtes false schaltet zurück auf den alten Ausgleichs-Bot."""
     a = (regeln or {}).get("ausgleich") if isinstance(regeln, dict) else None
     return not (isinstance(a, dict) and a.get("waage") is False)
+
+
+def ap_waage_ohne_liste(stand):
+    """Firmen, die in keiner Waage mitzählen: stand['param']['waage_ohne'] (aus regeln.ausgleich.waage_ohne), sonst AP_WAAGE_OHNE_FIRMEN."""
+    p = (stand or {}).get("param") if isinstance(stand, dict) else None
+    o = p.get("waage_ohne") if isinstance(p, dict) else None
+    if isinstance(o, (list, tuple)):
+        return tuple(str(x).strip().lower() for x in o if str(x).strip())
+    return AP_WAAGE_OHNE_FIRMEN
+
+
+def ap_waage_ohne(z, ohne):
+    """REIN RECHNEND: gehört die Zeile zu einer Firma ohne Waage (Apex, 19.10.2026)? Teilstring auf firma_key oder Firmenname."""
+    if not ohne:
+        return False
+    t = f"{z.get('firma_key') or ''}|{z.get('firma') or ''}".lower()
+    return any(k and k in t for k in ohne)
 
 
 def _ap_waage_gewicht(z):
@@ -23536,8 +23565,11 @@ def ap_klassen_waage(stand, pc_lebt=None, extra=None):
            for k in ("futures", "cfd")}
     jm = float(stand.get("jetzt_min") or 0)
     ex = str((extra or {}).get("plan_id") or "")
+    ohne = ap_waage_ohne_liste(stand)            # Apex zählt in keiner Waage (19.10.2026)
 
     def dazu(z, r):
+        if ap_waage_ohne(z, ohne):
+            return
         w = out[ap_klasse(z.get("route"), z.get("firma"))]
         g = _ap_waage_gewicht(z)
         if r == "buy":
@@ -23575,10 +23607,11 @@ def ap_klassen_waage(stand, pc_lebt=None, extra=None):
     return out
 
 
-def _ap_waage_kandidat(z, klasse, richtung, jm, pc_lebt, schon):
+def _ap_waage_kandidat(z, klasse, richtung, jm, pc_lebt, schon, ohne=()):
     """Darf dieser geplante Plan als Gegentrade vorgezogen werden? Nur änderbare Auto-Pläne (keine Hand-Werte, keine Kette,
-    nicht fällig, keine Hand-Richtung) der eigenen Kontoarten, später als jetzt + 3 min, heute, PC lebt, kein roter Start-Fehler."""
-    if not (z.get("aenderbar") and z.get("auto_plan")) or z.get("gehedgt") or z.get("folgetag"):
+    nicht fällig, keine Hand-Richtung) der eigenen Kontoarten, später als jetzt + 3 min, heute, PC lebt, kein roter Start-Fehler.
+    Firmen ohne Waage (Apex, 19.10.2026) nie — ein 50-€-Konto ist kein Gegengewicht."""
+    if not (z.get("aenderbar") and z.get("auto_plan")) or z.get("gehedgt") or z.get("folgetag") or ap_waage_ohne(z, ohne):
         return False
     if str(z.get("typ") or "") not in AP_TYPEN or z.get("richtung") != richtung or z.get("start_min") is None:
         return False
@@ -23654,6 +23687,7 @@ def ap_waage_nachschub(stand, waage, rnd, pc_lebt=None, dubai_min=0.0, nur_klass
     später. Richtung bleibt immer (nie drehen). → (aenderungen für _ap_aenderungen_anwenden, info je Klasse)"""
     jm = float(stand.get("jetzt_min") or 0)
     aend, info, belegt, schon = [], [], [], set(str(x) for x in schon or ())
+    ohne = ap_waage_ohne_liste(stand)
     for kl in ("futures", "cfd"):
         if nur_klasse and kl != nur_klasse:
             continue
@@ -23664,7 +23698,7 @@ def ap_waage_nachschub(stand, waage, rnd, pc_lebt=None, dubai_min=0.0, nur_klass
         schwer = "sell" if leicht == "buy" else "buy"
         schwer_firmen = set((w.get("firmen") or {}).get(schwer) or ())
         luecke = abs(float(w.get("long_eur") or 0) - float(w.get("short_eur") or 0))
-        kand = [z for z in stand.get("geplant") or () if _ap_waage_kandidat(z, kl, leicht, jm, pc_lebt, schon)]
+        kand = [z for z in stand.get("geplant") or () if _ap_waage_kandidat(z, kl, leicht, jm, pc_lebt, schon, ohne)]
         kand.sort(key=lambda z: (0 if z.get("bestaetigt") else 1, 0 if z.get("firma_key") not in schwer_firmen else 1,
                                  float(z["start_min"]), str(z.get("plan_id"))))
         dazu, n = 0.0, 0
@@ -23733,6 +23767,14 @@ def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
     out = {"klasse": kl, "zaehlt": (not z.get("gehedgt")) and str(z.get("typ") or "") in AP_TYPEN,
            "vorher": {f: vor.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "passt", "grund")}}
     gegen = "sell" if richtung == "buy" else "buy"
+    if ap_waage_ohne(z, ap_waage_ohne_liste(stand)):
+        # APEX OHNE WAAGE (19.10.2026): startet wie geplant, zieht nichts vor, dreht nur der Richtungsschutz — der PC-Tab sieht „passt"
+        g = f"{z.get('firma') or 'Firma'} zählt nicht in der Waage (Apex, Finn 19.10.2026) — startet ohne Waage-Prüfung"
+        out["ohne_waage"] = True
+        for name, r in (("nachher", richtung), ("gegen", gegen)):
+            out[name] = {"richtung": r, "passt": True, "besser": False, "grund": g,
+                         **{f: vor.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}
+        return out
     for name, r in (("nachher", richtung), ("gegen", gegen)):
         w = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": r})[kl]
         out[name] = {"richtung": r, "passt": bool(w["passt"]), "besser": _ap_waage_note(kl, w) < _ap_waage_note(kl, vor), "grund": w["grund"],
