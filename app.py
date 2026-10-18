@@ -23449,11 +23449,14 @@ AP_WAAGE_FUT_MAX = 2.0            # Futures: höchstens 2 : 1 nach Anzahl
 AP_WAAGE_ANTEIL = 0.75            # Nachschub ≈ 75 % der Lücke (Finn 16.10. 04:10)
 AP_WAAGE_BALD_MIN = 2.0           # Starts in ≤ 2 min zählen schon mit
 AP_WAAGE_VORZUG_MIN = (2.0, 3.0)  # vorgezogen auf jetzt + 2–3 min
-AP_WAAGE_SPAET_MIN = 8.0          # ein Zug landet spätestens jetzt + 8 min (sonst nächster Kandidat)
+AP_WAAGE_SPAET_MIN = 13.0         # ein Zug landet spätestens jetzt + 13 min (sonst nächster Kandidat) — Platz für 1–10 min Firmen-Abstand
 AP_WAAGE_ZUEGE_MAX = 3            # höchstens so viele Züge je Klasse und Lauf
 AP_WAAGE_PC_ABSTAND_MIN = 3.0     # derselbe PC (ID): kein anderer Start in ± 3 min
 AP_WAAGE_FIRMA_ABSTAND_MIN = 1.0  # dieselbe Firma, andere ID: 1 min (wie der DB-Trigger)
-AP_WAAGE_GEGEN_FIRMA_MIN = 2.0    # dieselbe Firma, Gegenrichtung: mindestens 2 min danach (unauffällig, Finn 16.10. 08:05)
+# GLEICHE FIRMA, GEGENRICHTUNG (Finn 19.10.2026 ~02:35 Dubai: „mach 1–10 min per Zufallsprinzip", vorher fest 2 min + 0–1): Tradeify-Long
+# einer anderen ID startet 1–10 min nach dem Tradeify-Short — je Zug einmal gezogen, damit es nicht wie ein Takt aussieht (Jitter-Regel).
+AP_WAAGE_GEGEN_FIRMA = (1.0, 10.0)
+AP_WAAGE_GEGEN_FIRMA_MIN = AP_WAAGE_GEGEN_FIRMA[0]   # harter Mindestabstand (Prüfung gegen geplante Gegenrichtung derselben Firma)
 AP_WAAGE_CLAIM_MAX_MIN = 15.0     # geclaimt, aber noch planned: zählt bis 15 min nach der Startzeit mit
 AP_WAAGE_RS_HORIZONT_MIN = 30.0   # Richtungsschutz: Gegenrichtung derselben ID × Firma, die in ± 30 min startet, sperrt
 AP_WAAGE_VOLL_S = 300             # Takt: voller Lauf bei jeder Änderung des laufenden Buchs, sonst alle 5 min
@@ -23462,7 +23465,7 @@ AP_WAAGE_VOLL_S = 300             # Takt: voller Lauf bei jeder Änderung des la
 # Apex gegen Tradeify zu haben. Dann lieber Tradeify gegen Tradeify, zwei IDs mit 2 min Pause." Konsequenz: Apex-Trades zählen in
 # KEINER Waage mit und werden NIE als Gegentrade vorgezogen; ein Apex-Plan startet am PC-Tab ohne Waage-Prüfung (Richtungsschutz je
 # ID × Firma bleibt hart). Die Futures-Waage wiegt damit nur noch Tradeify, Topstep, Lucid, FNF Futures … gegeneinander — dieselbe
-# Firma bleibt erlaubt (AP_WAAGE_GEGEN_FIRMA_MIN). Überschreibbar ohne Code: regeln.ausgleich.waage_ohne = ["apex", …] (Teilstring
+# Firma bleibt erlaubt (AP_WAAGE_GEGEN_FIRMA, 1–10 min Zufall). Überschreibbar ohne Code: regeln.ausgleich.waage_ohne = ["apex", …] (Teilstring
 # auf firma_key/Firmenname, klein); [] = alle Firmen wiegen wieder mit.
 AP_WAAGE_OHNE_FIRMEN = ("apex",)
 
@@ -23643,19 +23646,20 @@ def _ap_waage_rs_frei(stand, z, richtung, ziel):
 
 
 def _ap_waage_zielminute(stand, z, richtung, jm, rnd, belegt):
-    """Neue Startminute für einen vorgezogenen Gegentrade: jetzt + 2–3 min; dieselbe Firma mindestens 2 min nach der Gegenrichtung,
-    1 min zu anderen IDs derselben Firma, derselbe PC ± 3 min frei. → Minute | None (in den nächsten 8 min kein Platz)."""
+    """Neue Startminute für einen vorgezogenen Gegentrade: jetzt + 2–3 min; dieselbe Firma 1–10 min (Zufall je Zug) nach der
+    Gegenrichtung, 1 min zu anderen IDs derselben Firma, derselbe PC ± 3 min frei. → Minute | None (in den nächsten 13 min kein Platz)."""
     uid, fk = str(z.get("user_id")), z.get("firma_key")
     gegen = "sell" if richtung == "buy" else "buy"
     ziel = jm + rnd.uniform(*AP_WAAGE_VORZUG_MIN)
+    abstand = rnd.uniform(*AP_WAAGE_GEGEN_FIRMA)       # 1–10 min, einmal je Zug (Finn 19.10.2026)
     for o in stand.get("offen") or ():
         sm = o.get("start_min")
-        if o.get("firma_key") == fk and o.get("richtung") == gegen and sm is not None and float(sm) > jm - AP_WAAGE_GEGEN_FIRMA_MIN:
-            ziel = max(ziel, float(sm) + AP_WAAGE_GEGEN_FIRMA_MIN + rnd.uniform(0.0, 1.0))
+        if o.get("firma_key") == fk and o.get("richtung") == gegen and sm is not None and float(sm) > jm - AP_WAAGE_GEGEN_FIRMA[1]:
+            ziel = max(ziel, float(sm) + abstand)
     andere = [g for g in stand.get("geplant") or () if g is not z and g.get("start_min") is not None and _ap_waage_startet(g)]
     for g in andere:
         if g.get("firma_key") == fk and g.get("richtung") == gegen and abs(float(g["start_min"]) - ziel) < AP_WAAGE_GEGEN_FIRMA_MIN:
-            ziel = max(ziel, float(g["start_min"]) + AP_WAAGE_GEGEN_FIRMA_MIN + rnd.uniform(0.0, 1.0))
+            ziel = max(ziel, float(g["start_min"]) + abstand)
 
     def frei(m):
         for o in stand.get("starts_heute") or ():

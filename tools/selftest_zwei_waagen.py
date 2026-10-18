@@ -111,7 +111,14 @@ def main():
     st6 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215, start=jm - 0.5)], "starts_heute": [], "id_fest": {},
            "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 120)]}
     aend6, _ = N(st6, W(st6), random.Random(3))
-    check(aend6 and aend6[0]["nach_start_min"] >= jm - 0.5 + 2.0, f"Gegenrichtung gleiche Firma ≥ 2 min nach dem Short ({aend6 and aend6[0]['nach_start_min']})")
+    check(aend6 and jm - 0.5 + 1.0 <= aend6[0]["nach_start_min"] <= jm - 0.5 + 10.0 + 3.0, f"Gegenrichtung gleiche Firma 1–10 min nach dem Short ({aend6 and aend6[0]['nach_start_min']})")
+    # 8b) Zufall 1–10 min: über 40 Seeds streuen die Abstände, nichts unter 1 min, nichts über 10 min (+ PC-/Firmen-Ausweichen bis 13)
+    abst = []
+    for seed in range(40):
+        a6, _ = N(st6, W(st6), random.Random(seed))
+        abst.append(round(a6[0]["nach_start_min"] - (jm - 0.5), 2))
+    check(min(abst) >= 1.0 and max(abst) <= 13.0 and (max(abst) - min(abst)) >= 4.0 and len(set(abst)) >= 20,
+          f"Firmen-Abstand gestreut (Jitter-Regel): {min(abst)}–{max(abst)} min, {len(set(abst))} verschiedene Werte")
 
     # 9) PC belegt: derselbe User startet in ± 3 min → später
     st7 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215, start=jm - 30)], "id_fest": {},
@@ -160,7 +167,7 @@ def main():
             "geplant": [plan("k1", "ina", *TF, "buy", 215, jm + 90)]}
     aend14, _ = N(st14, W(st14), random.Random(9))
     check([a["plan_id"] for a in aend14] == ["k1"], "Tradeify-Short + Apex-Long laufen: Apex deckt nicht → Tradeify-Long (andere ID) vorgezogen")
-    check(aend14 and aend14[0]["nach_start_min"] >= jm + 2.0, f"… Tradeify gegen Tradeify ≥ 2 min nach der Gegenrichtung ({aend14 and aend14[0]['nach_start_min']})")
+    check(aend14 and aend14[0]["nach_start_min"] >= jm + 2.0, f"… Tradeify gegen Tradeify frühestens jetzt + 2 min ({aend14 and aend14[0]['nach_start_min']})")
 
     # 13) Schalter
     check(ns["ap_waage_an"]({}) and ns["ap_waage_an"]({"ausgleich": {"aktiv": True}}) and not ns["ap_waage_an"]({"ausgleich": {"waage": False}}),
