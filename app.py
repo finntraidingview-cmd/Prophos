@@ -14954,6 +14954,180 @@ def code_stand():
     return resp
 
 
+# ══ PULS BLEIBT ZU HAUSE (19.10.2026, Finn ~00:40 Dubai: „Wenn wir relativ knapp am Take Profit oder am Stoploss sind, darf der Puls nicht
+# mehr raus [aus dem Big-Trade-Konto], damit das Tampermonkey-Skript auf keinen Fall was verpasst … fest 2.000 $ vor TP und 2.000 $ vor der
+# Liq, ohne Hälfte-Regel, Werte in der DB"). Regel 5 der Hedge-Kategorien (12.10.) erlaubt dem Puls bei laufendem Big Trade fremde Orders mit
+# Heimweg danach — die Lese-Lücke dazwischen deckt Radar + Terminal-Notfall. In der heißen Zone soll es gar keine Lücke geben: läuft auf
+# DIESEM PC ein Big Trade (open, tvv2/tsv2, Hedge-Weg, kein Winning Day — wie prophos_big_trade), dessen Rest bis zum TP ≤ tp_usd oder bis
+# zur Liq ≤ liq_usd ist, antwortet /richtung/frei „nicht frei" (code big_trade_nah) und das Panel klickt nicht. Nicht prüfbar (kein frischer
+# NQ-Kurs, kein Level) = ebenfalls nicht frei (fail-closed wie der Gegenrichtungs-Riegel) — ohne Kurs ist auch der Radar-Airbag blind.
+# Liq = die ENGSTE der bekannten Grenzen: Bracket/Master-SL (sl_level_nq), Max-Drawdown (liq_level_nq), liq_regeln/Konto-Boden
+# (liq_regel_level_nq) — bei Apex der Daily Loss der Stufe. Werte: Tabelle puls_heim_regel (sql/2026-10-19_puls_heim_regel.sql), 60 s Cache,
+# fehlt die Tabelle → Riegel aus (Gegenrichtung bleibt). ══
+PULS_HEIM_CACHE_S = 60
+PULS_HEIM_KURS_MAX_ALTER_S = 300          # Reader-Minute älter als 5 min = kein frischer Kurs → nicht prüfbar
+PULS_HEIM_CODE_NAH = "big_trade_nah"
+PULS_HEIM_CODE_UNKLAR = "big_trade_unklar"
+_puls_heim_cache = {"at": 0.0, "regel": None, "fehlt": False}
+
+
+def _puls_heim_regel():
+    """puls_heim_regel id=1, höchstens einmal je PULS_HEIM_CACHE_S gelesen. None = Tabelle fehlt/nicht lesbar (Riegel aus, einmal geloggt)."""
+    jetzt = time.time()
+    if jetzt - _puls_heim_cache["at"] < PULS_HEIM_CACHE_S:
+        return _puls_heim_cache["regel"]
+    try:
+        z = (sb_select("puls_heim_regel", {"select": "aktiv,tp_usd,liq_usd,firmen", "id": "eq.1"}) or [None])[0]
+        _puls_heim_cache.update(at=jetzt, regel=z, fehlt=False)
+    except Exception as e:
+        if not _puls_heim_cache["fehlt"]:
+            print(f"[puls-heim] ⚠️ puls_heim_regel nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — Riegel aus, bis die Tabelle da ist", flush=True)
+        _puls_heim_cache.update(at=jetzt, regel=None, fehlt=True)
+    return _puls_heim_cache["regel"]
+
+
+def puls_heim_schwellen(regel, firma):
+    """REIN RECHNEND (testbar): (tp_usd, liq_usd) für die Firma — regel.firmen[<_ap_norm>] vor den Standardwerten. None = Riegel aus."""
+    if not isinstance(regel, dict) or regel.get("aktiv") is False:
+        return None
+    tp, liq = _wd_num(regel.get("tp_usd")), _wd_num(regel.get("liq_usd"))
+    fx = regel.get("firmen") if isinstance(regel.get("firmen"), dict) else {}
+    key = _ap_norm(firma) if firma else ""          # wie die Planer-Regeln: klein, nur a–z0–9 („Apex Trader" → „apextrader")
+    f = fx.get(key) if key else None
+    if isinstance(f, dict):
+        tp = _wd_num(f.get("tp_usd")) if _wd_num(f.get("tp_usd")) is not None else tp
+        liq = _wd_num(f.get("liq_usd")) if _wd_num(f.get("liq_usd")) is not None else liq
+    return (tp or 0.0, liq or 0.0)
+
+
+def puls_heim_nah(zeile, kurs, schwellen):
+    """REIN RECHNEND (testbar): ist der Big Trade (eine /admin/live-trades-Zeile) nah am TP oder an der Liq?
+    kurs = aktueller NQ/MNQ-Kurs (None = unbekannt). → {nah: True|False|None, grund, rest_tp_usd, rest_liq_usd, tp_level, liq_level}.
+    Rest in $ bei den Kontrakten des Trades: BUY (TP − Kurs) · Punktwert · Kt, SELL gespiegelt; schon über dem Level = Rest ≤ 0 = nah.
+    Liq-Level = die engste bekannte Grenze (sl_level_nq Bracket/Master-SL/Liquidation, liq_level_nq, liq_regel_level_nq). None = nicht
+    prüfbar (kein Kurs, keine Kontrakte, kein Level auf einer Seite) — der Aufrufer behandelt das wie nah (fail-closed)."""
+    z = zeile or {}
+    r = str(z.get("richtung") or "").lower()
+    ppl, kt = _wd_num(z.get("punktwert")), _wd_num(z.get("kt"))
+    k = _wd_num(kurs)
+    out = {"nah": None, "grund": "", "rest_tp_usd": None, "rest_liq_usd": None, "tp_level": _wd_num(z.get("tp_level_nq")), "liq_level": None}
+    if r not in ("buy", "sell"):
+        out["grund"] = "Richtung des Big Trades unbekannt"
+        return out
+    if k is None or k <= 0:
+        out["grund"] = "kein frischer NQ-Kurs (Reader-Feed)"
+        return out
+    if not ppl or not kt:
+        out["grund"] = "Kontrakte/Punktwert des Big Trades unbekannt"
+        return out
+    s = 1.0 if r == "buy" else -1.0
+    tp = out["tp_level"]
+    liq_kand = [_wd_num(z.get(f)) for f in ("sl_level_nq", "liq_level_nq", "liq_regel_level_nq")]
+    liq_kand = [x for x in liq_kand if x is not None and x > 1000]
+    if tp is None and not liq_kand:
+        out["grund"] = "weder TP- noch Liq-Level bekannt"
+        return out
+    tp_usd, liq_usd = schwellen
+    teile = []
+    if tp is not None:
+        out["rest_tp_usd"] = round((tp - k) * s * ppl * kt, 2)
+        if out["rest_tp_usd"] <= tp_usd:
+            teile.append(f"{_ap_de(max(0.0, out['rest_tp_usd']), 0)} $ vor dem TP (Grenze {_ap_de(tp_usd, 0)} $)")
+    else:
+        out["grund"] = "TP-Level unbekannt"
+        return out
+    if liq_kand:
+        # engste Grenze auf der Verlustseite = der kleinste Rest; Level jenseits des Kurses (Rest ≤ 0) zählen als erreicht
+        reste = [((k - lv) * s * ppl * kt, lv) for lv in liq_kand]
+        rest, lv = min(reste, key=lambda x: x[0])
+        out["rest_liq_usd"], out["liq_level"] = round(rest, 2), lv
+        if rest <= liq_usd:
+            teile.append(f"{_ap_de(max(0.0, rest), 0)} $ vor der Liq (Grenze {_ap_de(liq_usd, 0)} $)")
+    else:
+        out["grund"] = "Liq-Level unbekannt"
+        return out
+    out["nah"] = bool(teile)
+    out["grund"] = " · ".join(teile) if teile else (f"{_ap_de(out['rest_tp_usd'], 0)} $ bis TP, {_ap_de(out['rest_liq_usd'], 0)} $ bis Liq")
+    return out
+
+
+def puls_heim_kurs_frisch(kurse, wurzel, jetzt=None):
+    """REIN RECHNEND (testbar): Kurs der Wurzel aus kurs_jetzt_wahl, nur wenn die Reader-Minute jünger als PULS_HEIM_KURS_MAX_ALTER_S ist."""
+    e = (kurse or {}).get(str(wurzel or "NQ").upper()) or (kurse or {}).get("NQ")
+    if not e or _wd_num(e.get("kurs")) is None:
+        return None
+    try:
+        m = datetime.fromisoformat(str(e.get("minute")).replace("Z", "+00:00"))
+        if m.tzinfo is None:
+            m = m.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    j = jetzt or datetime.now(timezone.utc)
+    return _wd_num(e.get("kurs")) if (j - m).total_seconds() <= PULS_HEIM_KURS_MAX_ALTER_S + 60 else None
+
+
+def puls_heim_big_trades(plaene, pc, ausser=None):
+    """REIN RECHNEND (testbar): laufende Big Trades DIESES PCs — open, tvv2/tsv2, Hedge-Weg (hedge_eur > 0 oder orbit_v3), kein Winning
+    Day (wie prophos_big_trade), Hedge auf diesem PC (mt5_baseline.hedge.pc), nicht der Plan selbst."""
+    out = []
+    for p in plaene or ():
+        if str(p.get("id")) == str(ausser or ""):
+            continue
+        if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2"):
+            continue
+        if p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days":
+            continue
+        if not ((_wd_num(p.get("hedge_eur")) or 0) > 0 or p.get("orbit_v3") is True):
+            continue
+        h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
+        if not isinstance(h, dict) or str(h.get("pc") or "") != str(pc or ""):
+            continue
+        out.append(p)
+    return out
+
+
+def puls_heim_pruefen(pc, ausser=None):
+    """Darf der Puls auf diesem PC das Konto wechseln? → {frei, code?, grund?, big_trade?}. Riegel aus (Tabelle fehlt, aktiv false, kein PC,
+    kein Big Trade hier) → frei. Big Trade nah oder nicht prüfbar → nicht frei. Fehler beim Rechnen → nicht frei (fail-closed), Grund im Text."""
+    regel = _puls_heim_regel()
+    if not isinstance(regel, dict) or regel.get("aktiv") is False or not pc:
+        return {"frei": True}
+    try:
+        felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
+                  "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,started_at,ended_at,completed_at,"
+                  "planned_for,created_at,mt5_baseline,konto_typ,orbit_v3,winning_day,blown")
+        rows = _sb_all("trade_plans", {"select": felder, "status": "eq.open", "route": "in.(tvv2,tsv2)",
+                                       "mt5_baseline->hedge->>pc": f"eq.{pc}"})
+        big = puls_heim_big_trades(rows, pc, ausser)
+        if not big:
+            return {"frei": True}
+        ids = sorted({str(p.get("master_account_id")) for p in big if p.get("master_account_id")})
+        accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at",
+                                                                     "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
+        fruehere = _wd_fruehere_trades(ids)
+        liq_regeln, liq_verlauf, liq_kw = _liq_regeln_laden(), _liq_verlauf_laden(ids), _liq_kw_laden()
+        kurse = _kurs_jetzt()
+        for p in big:
+            acc = accs.get(str(p.get("master_account_id") or ""))
+            z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+            kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
+            n = puls_heim_nah(z, kurs, puls_heim_schwellen(regel, (acc or {}).get("firm") or p.get("master_firm")))
+            name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Big Trade'} …{str((acc or {}).get('external_id') or '')[-4:]}"
+            art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'NQ'}"
+            info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
+                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"]}
+            if n["nah"] is None:
+                return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "big_trade": info,
+                        "grund": f"Big Trade {name} ({art}) nicht prüfbar: {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
+            if n["nah"]:
+                return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
+                        "grund": f"Big Trade {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
+        return {"frei": True}
+    except Exception as e:
+        print(f"[puls-heim] ⚠️ Prüfung PC {pc}: {type(e).__name__}: {str(e)[:160]}", flush=True)
+        return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "grund": f"Big-Trade-Prüfung gerade nicht möglich ({type(e).__name__}) — Puls bleibt im Konto, nichts gesendet"}
+
+
 @app.route("/richtung/frei", methods=["POST"])
 def richtung_frei():
     """HARTE LINIE FÜR DEN PULS-KLICK (13.10.2026, Finn nach Mikes Topstep-Short + zwei geplanten Longs: „wenn aus irgendeinem Grund
@@ -14984,8 +15158,15 @@ def richtung_frei():
         return jsonify({"ok": False, "msg": "DB-Antwort kein JSON"}), 503
     if not isinstance(erg, dict):
         return jsonify({"ok": False, "msg": "DB-Antwort unerwartet"}), 503
-    out = jsonify({"ok": True, "frei": erg.get("frei") is True, "grund": erg.get("grund"), "firma": erg.get("firma"),
-                   "plan": erg.get("plan"), "uid": wer[0], "pc": wer[1]})
+    antwort = {"ok": True, "frei": erg.get("frei") is True, "code": None if erg.get("frei") is True else "gegenrichtung", "grund": erg.get("grund"),
+               "firma": erg.get("firma"), "plan": erg.get("plan"), "uid": wer[0], "pc": wer[1]}
+    if antwort["frei"]:
+        # PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq → Puls verlässt das Konto nicht (puls_heim_pruefen)
+        heim = puls_heim_pruefen(wer[1], pid)
+        if not heim.get("frei"):
+            antwort.update(frei=False, code=heim.get("code"), grund=heim.get("grund"), big_trade=heim.get("big_trade"))
+            print(f"[puls-heim] ⛔ PC {wer[1]} Plan {pid[:8]}: {heim.get('grund')}", flush=True)
+    out = jsonify(antwort)
     out.headers["Cache-Control"] = "no-store"
     return out
 

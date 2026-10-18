@@ -44562,7 +44562,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1620'
+  const OS_TAB_BUILD = '2026-09-22.1621'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45295,8 +45295,11 @@
       // ausfällt … dass da nie was passieren kann"): das Panel fragt vor jedem scharfen Klick selbst Railway/DB (prophos_gegenrichtung_frei)
       // und klickt ohne „frei" nicht — auch bei Funkstille (riegel_unerreichbar). Beides kommt VOR jedem Bot-Aufruf, also beweisbar
       // nichts gesendet: Plan bleibt Geplant, der Tick/Finn startet später erneut.
-      if(r && !r.ok && !r.gesendet && (r.code === 'gegenrichtung' || r.code === 'riegel_unerreichbar')){
-        await fehler((r.code === 'gegenrichtung' ? '⛔ ' : '⚠ ') + String(r.msg || 'Riegel am PC: nichts gesendet') + ' — Plan bleibt Geplant.', Object.assign({}, r, { retry_ok: true }))
+      // PULS BLEIBT ZU HAUSE (19.10.2026, Finn: „knapp am TP oder an der Liq darf der Puls nicht mehr raus"): Railway meldet über denselben Riegel
+      // big_trade_nah (Big Trade dieses PCs ≤ 2.000 $ vor TP/Liq, puls_heim_regel) bzw. big_trade_unklar (kein frischer Kurs/kein Level) —
+      // kein Kontowechsel, nichts gesendet, der Plan bleibt Geplant; sfTick versucht es 15 min später wieder (Start-Fehler-Weg, schritt = code)
+      if(r && !r.ok && !r.gesendet && (r.code === 'gegenrichtung' || r.code === 'riegel_unerreichbar' || r.code === 'big_trade_nah' || r.code === 'big_trade_unklar')){
+        await fehler((r.code === 'gegenrichtung' || r.code === 'big_trade_nah' ? '⛔ ' : '⚠ ') + String(r.msg || 'Riegel am PC: nichts gesendet') + ' — Plan bleibt Geplant.', Object.assign({}, r, { retry_ok: true }))
         return
       }
       // „nichts gesendet" NUR, wenn es beweisbar ist (30.09.2026, Topstep-Paket S — vorher meldete jeder Proxy-502/Zeitabbruch
@@ -49027,6 +49030,9 @@
    *   Der PC-Tab lädt Pläne sonst nur beim Login — alle 2 min gleicht er deshalb die heutigen geplanten Pläne der ID ab (eine kleine
    *   Abfrage), damit ein „↻ Neu starten" vom Mac/Handy am PC ankommt. ══ */
   const SF_MAX = 3, SF_WARTE_MS = 15 * 60000, SF_TAKT_MS = 60000, SF_ABGLEICH_MS = 2 * 60000
+  // WARTEN IST KEIN FEHLER (19.10.2026, Puls bleibt zu Hause): ein Big Trade kann stundenlang knapp unter dem TP pendeln — diese Schritte
+  // zählen nicht gegen SF_MAX, der Plan wird bis zum Ende des Start-Fensters alle 15 min neu versucht
+  const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar'])
   const sfFlag = p => (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || null
   const sfTagDt = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
   async function sfMelden(plan, f){
@@ -49170,7 +49176,7 @@
       }
       const kand = (tradePlans || []).filter(p => { const f = sfFlag(p)
         return p && f && f.status === 'rot' && p.status === 'planned' && p.startUmGestartetAt && !p.startedAt && !p.orbitGesendetAt
-          && (Number(f.versuche) || 0) < SF_MAX && p.startUm && sfTagDt(p.startUm) === heute })
+          && ((Number(f.versuche) || 0) < SF_MAX || SF_OHNE_DECKEL.has(String(f.schritt || ''))) && p.startUm && sfTagDt(p.startUm) === heute })
       for(const p of kand){
         const f = sfFlag(p), grund = await sfBehoben(p, f)
         if(!grund) continue
@@ -51278,6 +51284,9 @@
       case 'manuelle_arbeit': return 'Konto steht in Manueller Arbeit — erst im Radar erledigen, dann neu planen.'
       // KONTO OFFEN (09.10.2026, Master: Puls sendet seit 63bd2b4 nichts, wenn DIESES Konto schon eine NQ/MNQ-Position hat — Code konto_offen,
       // Text „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet"): bisher nur der allgemeine „Check am PC war rot"-Text
+      // PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq (puls_heim_regel 2.000 $) — Warten ist richtig
+      case 'big_trade_nah': return `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq, Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
+      case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]
         return `Am Konto ist schon eine Position offen${pos ? ` (${pos})` : ''} — Hand-Trade? Am PC${pc} in TradingView nachsehen. Der Plan versucht es in 15 min wieder.`
@@ -51294,6 +51303,7 @@
     const bis = tplUhr(sfTagesEnde(), D.v), n = Number(sf.versuche) || 0
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
+    if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
     if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
     if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
     return `Danach startet der Bot ihn von selbst neu (bis ${bis}${n ? `, Versuch ${n + 1}/${SF_MAX}` : ''}).`
@@ -51707,6 +51717,7 @@
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
       if(/^nicht gestartet/i.test(t) && /offene Position/i.test(t)) return { w: 'Position offen', ton: 'gelb', r: 6 }   // konto_offen (09.10.2026)
+      if(/^nicht gestartet/i.test(t) && /Big Trade .*(vor dem TP|vor der Liq|nicht prüfbar)/i.test(t)) return { w: 'Big Trade nah', ton: 'gelb', r: 6 }   // big_trade_nah (19.10.2026)
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
       if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }
       if(/Endlesung|Ergebnis nie gelesen|Login prüfen/i.test(t)) return { w: 'Endlesung', ton: 'gelb', r: 7 }

@@ -229,7 +229,8 @@ def code_holen(pfad_url, timeout=15):
 def richtung_frei(plan_id, richtung, timeout=6):
     """HARTE LINIE VOR JEDEM SCHARFEN KLICK (13.10.2026, Finn: „wenn der Wächter ausfällt … dass da nie was passieren kann"):
     fragt Railway POST /richtung/frei (X-Code-Token wie /code/stand; dort service role -> DB-Funktion prophos_gegenrichtung_frei):
-    läuft bei derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? -> (frei, msg, code).
+    läuft bei derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? Seit 19.10.2026 auch: ist ein Big Trade
+    DIESES PCs nah am TP/an der Liq (puls_heim_pruefen, code big_trade_nah/big_trade_unklar)? -> (frei, msg, code).
     FAIL-CLOSED: kein Token, kein Netz, 5xx, unklare Antwort = NICHT frei (code riegel_unerreichbar) — der Bot wird dann nicht
     gestartet, es ist beweisbar nichts gesendet, der Tab versucht es später erneut. Ohne Plan-UUID/Richtung (Probe, Konto-Check)
     gibt es nichts zu prüfen -> frei."""
@@ -254,6 +255,11 @@ def richtung_frei(plan_id, richtung, timeout=6):
             if isinstance(d, dict) and d.get("ok") is True:
                 if d.get("frei") is True:
                     return True, "", ""
+                # PULS BLEIBT ZU HAUSE (19.10.2026, Finn): Railway sagt zusaetzlich, ob ein Big Trade DIESES PCs nah am TP/an der Liq ist
+                # (code big_trade_nah / big_trade_unklar, Grund schon vollstaendig) — dann kein Kontowechsel. Ohne code: Gegenrichtung wie bisher.
+                code = str(d.get("code") or "gegenrichtung")
+                if code != "gegenrichtung":
+                    return False, str(d.get("grund") or "Big Trade auf diesem PC nah am TP/an der Liq — Puls bleibt im Konto"), code
                 return False, "Gegenrichtung gesperrt: " + str(d.get("grund") or "bei dieser ID läuft dort ein Trade in Gegenrichtung"), "gegenrichtung"
             fehler = str((d or {}).get("msg") or "unklare Antwort")[:160]
         except Exception as e:
