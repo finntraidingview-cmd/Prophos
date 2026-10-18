@@ -13112,8 +13112,10 @@
             <input type="checkbox" id="bulk-echo-create" checked style="width:16px;height:16px;flex-shrink:0">
             <span>⚡ Direkt in Echo einrichten (MT5-Terminal je Account, am PC dieser ID)</span>
           </label>
-          <textarea class="input" id="bulk-creds" rows="4" placeholder="Eine Zeile pro Account:  Login  Passwort  Server&#10;z.B.  510023456  AbcPwd!23  ThinkMarkets-Live&#10;Trennung per Tab, Semikolon, Komma oder mehreren Leerzeichen" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den neuen CFD-Kennungen zugeordnet (1. Zeile → 1. neue CFD-Kennung, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
+          <!-- Einfügefeld (18.10.2026): Zugangskarte der Firma („Login / Password / Server") oder eine Zeile je Konto — füllt die Zeilen
+               oben je Kennung (Login = Kennung), egal ob Vorlage oder Kennungen zuerst gewählt wurden -->
+          <textarea class="input" id="bulk-creds" rows="4" placeholder="Zugangskarte der Firma hier einfügen (Login / Password / Server, auch mehrere) — oder eine Zeile pro Account:  Login  Passwort  Server" style="font-family:var(--mono);font-size:12.5px;resize:vertical;margin-top:6px" autocomplete="off"></textarea>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird den Kennungen über den Login zugeordnet (sonst der Reihe nach). Zeilen-Format: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
         </div>
         <!-- Checkbox „Direkt in Duplikum anlegen &amp; verknüpfen“ entfernt (Finn 04.10.2026) -->
         <div class="field" style="grid-column:1/-1">
@@ -36743,10 +36745,26 @@
     // Reihenfolge Login → Passwort → Server, getrennt per Tab/;/,/mehrere Leerzeichen.
     // Rückgabe: Array in Zeilenreihenfolge (leere Zeilen bleiben als null-Platzhalter,
     // damit die Zuordnung zur Account-Nummer nicht verrutscht).
+    // 18.10.2026 (Finn: „wähle ich erst die Schablone und gebe dann die External IDs an, erkennt er nie die Zugangsdaten"):
+    // mit gewählter Vorlage (CFD-Firma) ist das Textfeld schon VOR den Kennungen sichtbar, Finn fügt dort die Zugangskarte der
+    // Firma ein („Login / 26771591 / Password / … / Server / FivePercentOnline-Real / Platform / MT5"). Sobald die Kennungen
+    // kommen, erscheinen die Zeilen je Kennung, das Textfeld wurde ausgeblendet und sein Inhalt nie gelesen — und zeilenweise
+    // gelesen wäre „Login" der Login gewesen. Jetzt: Karten-Format je Login-Anker (Passwort/Server über bulkZugangLesen),
+    // sonst wie bisher eine Zeile je Konto; maskierte Passwörter („•••••") zählen als leer.
     function getBulkCreds(){
       const raw = (bEl.creds?.value || '')
       if(!raw.trim()) return []
       const firmServer = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
+      const maskiert = v => /^[•*]+$/.test(String(v || '').trim())
+      const anker = [...raw.matchAll(/\bLogin\b\s*[:#=]?\s*(\d{4,})/gi)]
+      if(anker.length){
+        return anker.map((m, k) => {
+          const rest = raw.slice(m.index + m[0].length, k + 1 < anker.length ? anker[k + 1].index : raw.length)
+          const z = (typeof bulkZugangLesen === 'function' && bulkZugangLesen(rest)) || {}
+          const plat = (/\b(MT[45])\b/i.exec(rest) || [])[1] || 'MT5'
+          return { login: m[1], password: maskiert(z.password) ? '' : (z.password || ''), server: (z.server || firmServer || '').trim(), platform: plat.toUpperCase() }
+        })
+      }
       return raw.split('\n').map(line => {
         const ln = line.trim()
         if(!ln) return null
@@ -37081,23 +37099,33 @@
     function bulkCredZeilenRender(){
       const box = document.getElementById('bulk-creds-rows'); if(!box) return
       const ids = bulkCredZeilenIds()
+      // Nur von Hand getippte Werte überleben den Neuaufbau (data-hand) — alles andere kommt frisch aus den Quellen, damit ein
+      // später eingefügter oder korrigierter Text im Feld unten auch in den Zeilen ankommt (18.10.2026)
       const alt = {}
-      box.querySelectorAll('[data-bcr]').forEach(r => { alt[r.getAttribute('data-bcr')] = { pw: r.querySelector('[data-bcr-pw]').value, srv: r.querySelector('[data-bcr-srv]').value } })
+      box.querySelectorAll('[data-bcr]').forEach(r => { const pw = r.querySelector('[data-bcr-pw]'), srv = r.querySelector('[data-bcr-srv]'); alt[r.getAttribute('data-bcr')] = { pw: pw.dataset.hand ? pw.value : '', srv: srv.dataset.hand ? srv.value : '' } })
       const std = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
-      box.innerHTML = ids.map(id => {
-        const a = alt[id] || {}
+      // Zugangsdaten aus dem Textfeld unten (Zugangskarte oder Zeilen): Login = Kennung; ohne einen einzigen Treffer der Reihe nach
+      const liste = (typeof getBulkCreds === 'function') ? getBulkCreds().filter(Boolean) : []
+      const perLogin = new Map(liste.map(c => [String(c.login || '').trim().toUpperCase(), c]))
+      const irgendein = ids.some(id => perLogin.has(id.toUpperCase()))
+      const ausText = (id, k) => irgendein ? (perLogin.get(id.toUpperCase()) || {}) : (liste[k] || {})
+      box.innerHTML = ids.map((id, k) => {
+        const a = alt[id] || {}, t = ausText(id, k)
         // Passwort/Server aus dem eingefügten Text (FundedNext-Zugangskarte, 14.10.2026) vorfüllen — eigene Eingabe geht vor
         const zg = ((typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []).find(x => String(x.id) === id)?.zugang || {}
+        const pw = a.pw || zg.password || t.password || '', srv = a.srv || zg.server || t.server || std
         return `<div data-bcr="${escapeHtml(id)}" style="display:grid;grid-template-columns:110px 1fr 1fr;gap:6px;align-items:center">`
           + `<span class="mono" style="font-size:12.5px;color:var(--ink)">${escapeHtml(id)}</span>`
-          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.pw || zg.password || '')}">`
-          + `<input class="input mono" data-bcr-srv type="text" placeholder="Server" autocomplete="off" style="font-size:12.5px" value="${escapeHtml(a.srv || zg.server || std)}">`
+          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" style="font-size:12.5px"${a.pw ? ' data-hand="1"' : ''} value="${escapeHtml(pw)}">`
+          + `<input class="input mono" data-bcr-srv type="text" placeholder="Server" autocomplete="off" style="font-size:12.5px"${a.srv ? ' data-hand="1"' : ''} value="${escapeHtml(srv)}">`
           + `</div>`
       }).join('')
+      box.querySelectorAll('[data-bcr-pw],[data-bcr-srv]').forEach(i => i.addEventListener('input', () => { i.dataset.hand = '1' }))
       box.style.display = ids.length ? 'flex' : 'none'
-      if(bEl.creds) bEl.creds.style.display = ids.length ? 'none' : ''
+      // Textfeld bleibt sichtbar: es ist das Einfügefeld für die Zugangskarte, auch wenn die Zeilen schon da sind (18.10.2026)
       const eb = document.getElementById('bulk-echo-box'); if(eb) eb.style.display = ids.length ? 'flex' : 'none'
     }
+    bEl.creds?.addEventListener('input', () => { try{ bulkCredZeilenRender() }catch(_){} })
     function bulkCredAusZeile(id){
       const r = document.querySelector(`#bulk-creds-rows [data-bcr="${CSS.escape(String(id))}"]`); if(!r) return null
       const pw = r.querySelector('[data-bcr-pw]').value.trim(), srv = r.querySelector('[data-bcr-srv]').value.trim()
@@ -44508,7 +44536,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1618'
+  const OS_TAB_BUILD = '2026-09-22.1619'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
