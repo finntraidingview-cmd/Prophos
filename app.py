@@ -19649,6 +19649,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                            "bal_stand": stand if quelle_b != "Nachlesung" else letzt,
                            "tkey": str(a["user_id"]) + "|" + _ap_norm(a.get("firm"))})
 
+    # TAGESDECKEL JE FIRMA (19.10.2026, Finn: Apex 2–3 Trades je ID und Tag, bis er etwas anderes sagt; CFD weiter wie immer):
+    # regel.max_konten_tag, Rest sichtbar ausgelassen — vor dem Delta, damit nur die behaltenen Konten in den Live-Stand gehen
+    kandidaten, _deckel_raus = ap_tagesdeckel(firmen, kandidaten, plaene, tag, tz, rnd)
+    ausgelassen.extend(_deckel_raus)
+
     # DELTA (06.10.2026, Vertrag §2): Live-Stand ALLER IDs — laufende Trades, heute schon geplante Pläne (ohne die Vorschläge,
     # die dieser Lauf ersetzt), Firma × Tag; Kontowert + Punktwert der neuen Konten aus demselben Kontext
     param = ap_ausgleich_param(reg.get("regeln"))
@@ -25528,6 +25533,47 @@ def _ap_plan_am_tag(p, tag, tz):
         return datetime.fromisoformat(str(su).replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d") == tag
     except (TypeError, ValueError):
         return True
+
+
+AP_GRUND_TAGESDECKEL = "Tagesdeckel der Firma — höchstens {n} Konten je ID und Tag, dieses Konto kommt an einem anderen Tag dran"
+
+
+def ap_tagesdeckel(firmen, kandidaten, plaene, tag, tz, rnd):
+    """REIN RECHNEND (testbar): Tagesdeckel je Firma (19.10.2026, Finn: „Es wurden richtig viele Accounts aufgeladen … vor allem bei
+    Apex nicht alle Accounts in einem Tag machen, weil da etwas schiefgeht … 2 bis 3 Trades pro ID bei Apex"). regel.max_konten_tag =
+    [von, bis] (oder eine Zahl): je ID × Firma bekommen an einem Tag höchstens so viele Konten einen Plan. Pläne, die den Tag schon
+    belegen (laufend, heute geplant, heute beendet — _ap_plan_am_tag), zählen mit, damit Nachplan-Takt und Hand-Lauf den Deckel nicht
+    aufstocken. Die Zahl wird je ID × Firma einmal aus der Spanne gezogen (rnd — mit dem Seed wiederholbar, Probelauf = Anlegen),
+    die Konten werden gemischt, der Rest steht sichtbar in ausgelassen[]. Reihenfolge der behaltenen Konten bleibt die der
+    Kandidatenliste. Ohne max_konten_tag (CFD-Firmen, Tradeify …): unverändert. → (kandidaten behalten, ausgelassen[])"""
+    # Schlüssel = ID × Regel (nicht Firmen-Schreibweise): „Apex" und „Apex Trader" einer ID teilen sich EINEN Deckel
+    je, behalten_ids, raus = {}, set(), []
+    for k in kandidaten:
+        regel = ap_regel_finden(firmen, k["a"].get("firm")) or {}
+        namen = tuple(sorted(_ap_norm(x) for x in (regel.get("namen") or [k["a"].get("firm")])))
+        je.setdefault((str(k["a"].get("user_id")), namen), (regel, []))[1].append(k)
+    for (uid, namen), (regel, liste) in je.items():
+        sp = regel.get("max_konten_tag")
+        if sp in (None, "", 0, False):
+            behalten_ids.update(id(k) for k in liste)
+            continue
+        try:
+            lo, hi = (int(sp[0]), int(sp[-1])) if isinstance(sp, (list, tuple)) else (int(sp), int(sp))
+        except (TypeError, ValueError, IndexError):
+            behalten_ids.update(id(k) for k in liste)
+            continue
+        if hi < lo:
+            lo, hi = hi, lo
+        n = rnd.randint(lo, hi) if hi > lo else lo
+        belegt = sum(1 for p in plaene if str(p.get("user_id")) == uid and _ap_norm(p.get("master_firm")) in namen
+                     and _ap_plan_am_tag(p, tag, tz))
+        frei = max(0, n - belegt)
+        misch = list(liste)
+        rnd.shuffle(misch)
+        behalten_ids.update(id(k) for k in misch[:frei])
+        for k in misch[frei:]:
+            raus.append(dict(k["zeile"], grund=AP_GRUND_TAGESDECKEL.format(n=n) + (f" ({belegt} heute schon belegt)" if belegt else "")))
+    return [k for k in kandidaten if id(k) in behalten_ids], raus
 
 
 def ap_nachplan_letzter(rows):
