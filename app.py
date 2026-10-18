@@ -16846,6 +16846,113 @@ AP_FIRMA_ABSTAND_MIN = 1
 AP_FENSTER_WUERFE = 20     # Verteilung je Lauf so oft würfeln, die fenster-treueste gewinnt (Opening-Anteil, 08.10.2026)
 
 
+AP_PAAR_ABSTAND = (2.0, 10.0)          # Paar Long/Short derselben Futures-Firma, zwei IDs: der spätere startet 2–10 min nach dem Anker (Finn 19.10.2026)
+AP_PAAR_PC_MIN = 3.0                   # derselbe PC (ID): kein anderer Start in ± 3 min (wie der Start-Wächter)
+
+
+def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=(), firma_min=None, pc_min=None):
+    """REIN RECHNEND (testbar, Finn 19.10.2026): Paare Long/Short je Futures-Firma (Waage-Firmen, nicht `ohne` = Apex) aus VERSCHIEDENEN IDs.
+    minuten {key: Startminute}, richtung {key: buy|sell}, tr_info[key] = {user, fkey, route, ab_min?, bis_min?, fest_refs?},
+    bestehend = [{user, start, fkey}] (PC-/Firmen-Belegung des Tages), firma_fest = [{user_id, firma (fkey), richtung, start, route}] (schon
+    geplante Trades = feste Anker). Je Firma: jeder neue Trade sucht den zeitlich nächsten Gegen-Trade einer anderen ID, der noch keinen
+    Partner hat (feste zuerst); der SPÄTERE der beiden (nie ein fester) rückt auf Anker + AP_PAAR_ABSTAND. Frei = PC ± 3 min, Firma ≥ 1 min
+    zu anderen IDs, im Fenster der Tranche, Richtungsschutz (fest_refs) am neuen Start nicht dagegen. → (neue minuten, [{firma, user, richtung,
+    key, von, nach, anker}])."""
+    firma_min = float(AP_FIRMA_ABSTAND_MIN if firma_min is None else firma_min)
+    pc_min = float(AP_PAAR_PC_MIN if pc_min is None else pc_min)
+    out = dict(minuten)
+    info = []
+    neu_keys = [k for k in out if k in tr_info and richtung.get(k) in ("buy", "sell")
+                and ap_klasse(tr_info[k].get("route"), tr_info[k].get("fkey")) == "futures"
+                and not ap_waage_ohne({"firma_key": tr_info[k].get("fkey"), "firma": tr_info[k].get("fkey")}, ohne)]
+    if not neu_keys:
+        return out, info
+    # Belegung: je ID alle Starts (bestehend + neue Tranchen), je Firma alle Starts mit ID
+    je_id, je_firma = {}, {}
+    for b in bestehend or ():
+        if b.get("start") is None:
+            continue
+        je_id.setdefault(str(b.get("user")), []).append(float(b["start"]))
+        if b.get("fkey"):
+            je_firma.setdefault(str(b["fkey"]), []).append((str(b.get("user")), float(b["start"])))
+    for k, m in out.items():
+        t = tr_info.get(k) or {}
+        je_id.setdefault(str(t.get("user")), []).append(float(m))
+        if t.get("fkey"):
+            je_firma.setdefault(str(t["fkey"]), []).append((str(t.get("user")), float(m)))
+
+    def frei(k, m):
+        t = tr_info[k]
+        u = str(t.get("user"))
+        if t.get("ab_min") is not None and m < float(t["ab_min"]) - 1e-9:
+            return False
+        if t.get("bis_min") is not None and m > float(t["bis_min"]) - 1e-9:
+            return False
+        alt = float(out[k])
+        if any(abs(x - m) < pc_min for x in je_id.get(u, ()) if abs(x - alt) > 1e-9):
+            return False
+        if any(abs(x - m) < firma_min for u2, x in je_firma.get(str(t.get("fkey")), ()) if u2 != u and abs(x - alt) > 1e-9):
+            return False
+        try:
+            f = ap_fest_am_start(t.get("fest_refs") or (), m) if t.get("fest_refs") else None
+        except Exception:
+            f = None
+        if f and f.get("richtung") and f.get("richtung") != richtung.get(k):
+            return False
+        return True
+
+    def verschieben(k, m_neu):
+        t = tr_info[k]
+        u, alt = str(t.get("user")), float(out[k])
+        je_id[u] = [x for x in je_id.get(u, ()) if abs(x - alt) > 1e-9] + [m_neu]
+        if t.get("fkey"):
+            je_firma[str(t["fkey"])] = [(u2, x) for u2, x in je_firma.get(str(t["fkey"]), ()) if not (u2 == u and abs(x - alt) <= 1e-9)] + [(u, m_neu)]
+        out[k] = round(m_neu, 2)
+
+    vergeben = set()      # Keys und feste Anker ("fest:<i>"), die schon ein Paar haben
+    firmen = sorted({str(tr_info[k].get("fkey")) for k in neu_keys})
+    for fk in firmen:
+        fest = [dict(x, _id=f"fest:{i}") for i, x in enumerate(firma_fest or ())
+                if str(x.get("firma")) == fk and x.get("start") is not None and x.get("richtung") in ("buy", "sell")
+                and ap_klasse(x.get("route"), fk) == "futures"]
+        keys = sorted([k for k in neu_keys if str(tr_info[k].get("fkey")) == fk], key=lambda k: (float(out[k]), str(k)))
+        for k in keys:
+            if k in vergeben:
+                continue
+            r, u, m = richtung[k], str(tr_info[k].get("user")), float(out[k])
+            gegen = "sell" if r == "buy" else "buy"
+            kand = [(abs(float(x["start"]) - m), 0, x["_id"], float(x["start"]), str(x.get("user_id")), None) for x in fest
+                    if x.get("richtung") == gegen and str(x.get("user_id")) != u and x["_id"] not in vergeben]
+            kand += [(abs(float(out[k2]) - m), 1, str(k2), float(out[k2]), str(tr_info[k2].get("user")), k2) for k2 in keys
+                     if k2 != k and k2 not in vergeben and richtung[k2] == gegen and str(tr_info[k2].get("user")) != u]
+            if not kand:
+                continue
+            kand.sort()
+            _d, _art, pid, pm, _pu, pk = kand[0]
+            if abs(pm - m) <= AP_PAAR_ABSTAND[1] and abs(pm - m) >= AP_PAAR_ABSTAND[0]:
+                vergeben.update({k, pid})          # schon ein Paar (2–10 min) — nichts anfassen
+                continue
+            # der spätere rückt an den Anker; ein fester Anker bewegt sich nie
+            if pk is None or pm <= m:
+                mover, anker, anker_id = k, pm, pid
+            else:
+                mover, anker, anker_id = pk, m, k
+            ziel = None
+            for _ in range(24):
+                z = anker + rnd.uniform(*AP_PAAR_ABSTAND)
+                if frei(mover, z):
+                    ziel = z
+                    break
+            if ziel is None:
+                continue
+            von = float(out[mover])
+            verschieben(mover, ziel)
+            vergeben.update({k, pid})
+            info.append({"firma": fk, "user": str(tr_info[mover].get("user")), "richtung": richtung[mover], "key": mover,
+                         "von": von, "nach": float(out[mover]), "anker": anker, "anker_id": anker_id})
+    return out, info
+
+
 def ap_zeiten_verteilen(tranchen, zeiten, rnd, frueheste_min=0, info=None, bestehend=None):
     """FENSTER-TREU (08.10.2026, Finn: Opening-Anteil laut Zeitfenster — der Nachtlauf legte nur 15 von 36 statt 18 ins Opening):
     _ap_zeiten_verteilen_einmal würfelt die Plätze zufällig, eine frühe Tranche verbaut einer späteren oft den Platz im kleinen
@@ -20016,6 +20123,17 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if all(x == 0 for x in wert_w[:6]):
             break                      # kein Malus, Firmen gemischt, ID × Firma gemischt, |Netto| unter einer Stufe, ID-Mischung ok, keine Große-Folge
     _w, minuten, zinfo, richtung, netto_max = bester
+    # PAARE JE FUTURES-FIRMA (Finn 19.10.2026 ~02:50 Dubai, Zeitstrahl: „Ich sehe es immer in Paaren — Tradeify Long und Tradeify Short,
+    # zwei IDs, innerhalb von 10 Minuten. Warum machst du es nicht?"): nach Zeiten und Richtungen legt der Planer je Firma der Futures-Waage
+    # (Tradeify, Topstep, Lucid, FNF Futures …, nicht Apex) Long und Short VERSCHIEDENER IDs zu Paaren — der spätere der beiden rückt auf
+    # Anker + 2–10 min (Zufall je Paar). Schon geplante Trades des Tages sind feste Anker; PC ± 3 min, Firma 1 min zu anderen IDs,
+    # Fenster der Tranche und Richtungsschutz am neuen Start bleiben. Was keinen Partner findet, bleibt stehen.
+    try:
+        minuten, paare_info = ap_paare_legen(minuten, richtung, tr_info, bestehend_pc, firma_fest, rnd, ohne=ap_waage_ohne_liste({"param": param}))
+        if paare_info:
+            print(f"[auto-plan] {tag} Paare: " + " · ".join(f"{p['firma']} {p['user']} {p['richtung']} {_ap_hhmm_txt(p['von'])}→{_ap_hhmm_txt(p['nach'])}" for p in paare_info), flush=True)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Paare: {type(e).__name__}: {e}", flush=True)
     for key in minuten:                # fest am gewählten Start — für Probelauf/Anzeige („Richtung fest: laufender Plan …")
         tr_info[key]["fest"] = ap_fest_am_start(tr_info[key]["fest_refs"], minuten[key])
         if not tr_info[key]["fest"]:
@@ -23684,6 +23802,23 @@ def _ap_waage_zielminute(stand, z, richtung, jm, rnd, belegt):
     return None
 
 
+def ap_waage_folgt(stand, klasse, richtung, jm, pc_lebt=None, ohne=()):
+    """PAARE (Finn 19.10.2026): steht in der Klasse schon ein Gegentrade der leichten Richtung in den nächsten AP_WAAGE_GEGEN_FIRMA[1] min
+    (geplant, startet wirklich, PC lebt, nicht Apex)? → diese Zeile, sonst None. Dann zieht die Waage nichts vor (der Planer hat das Paar
+    mit 2–10 min Abstand gelegt) und der PC-Tab lässt den ersten des Paares starten."""
+    for g in stand.get("geplant") or ():
+        if g.get("richtung") != richtung or g.get("start_min") is None or g.get("gehedgt") or g.get("folgetag"):
+            continue
+        if str(g.get("typ") or "") not in AP_TYPEN or ap_klasse(g.get("route"), g.get("firma")) != klasse or ap_waage_ohne(g, ohne):
+            continue
+        if pc_lebt is not None and str(g.get("user_id")) not in pc_lebt:
+            continue
+        m = float(g["start_min"])
+        if _ap_waage_startet(g) and jm - 0.5 <= m <= jm + AP_WAAGE_GEGEN_FIRMA[1]:
+            return g
+    return None
+
+
 def ap_waage_nachschub(stand, waage, rnd, pc_lebt=None, dubai_min=0.0, nur_klasse=None, schon=()):
     """REIN RECHNEND (testbar): Je Klasse, die nicht passt: geplante Auto-Pläne der leichten Richtung derselben Klasse auf
     jetzt + 2–3 min vorziehen, bis die Klasse passt (Futures: Anzahl) bzw. ≈ 75 % der Lücke gedeckt sind (CFD), mindestens einer,
@@ -23698,6 +23833,11 @@ def ap_waage_nachschub(stand, waage, rnd, pc_lebt=None, dubai_min=0.0, nur_klass
         w = {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v) for k, v in (waage.get(kl) or {}).items()}
         ok, grund, leicht = ap_waage_passt(kl, w)
         if ok or not leicht:
+            continue
+        folgt = ap_waage_folgt(stand, kl, leicht, jm, pc_lebt, ohne)
+        if folgt is not None and str(folgt.get("plan_id")) not in schon:   # Paar liegt schon (19.10.2026): nichts vorziehen
+            info.append({"klasse": kl, "grund": grund, "leicht": leicht, "gezogen": 0, "kandidaten": 0, "passt_danach": False,
+                         "folgt": {"plan_id": folgt.get("plan_id"), "user": folgt.get("user"), "firma": folgt.get("firma"), "start_min": folgt.get("start_min")}})
             continue
         schwer = "sell" if leicht == "buy" else "buy"
         schwer_firmen = set((w.get("firmen") or {}).get(schwer) or ())
@@ -23783,6 +23923,15 @@ def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
         w = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": r})[kl]
         out[name] = {"richtung": r, "passt": bool(w["passt"]), "besser": _ap_waage_note(kl, w) < _ap_waage_note(kl, vor), "grund": w["grund"],
                      **{f: w.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}
+    # PAARE (19.10.2026): der erste eines Paares darf starten, wenn sein Gegentrade (andere ID, gleiche Klasse) in ≤ 10 min folgt
+    if not out["nachher"]["passt"] and out["zaehlt"]:
+        jm = float(stand.get("jetzt_min") or 0)
+        folgt = ap_waage_folgt(dict(stand, geplant=[g for g in stand.get("geplant") or () if str(g.get("plan_id")) != str(plan_id)]),
+                               kl, gegen, jm, pc_lebt, ap_waage_ohne_liste(stand))
+        if folgt is not None:
+            out["nachher"] = dict(out["nachher"], passt=True, folgt={"plan_id": folgt.get("plan_id"), "user": folgt.get("user"), "firma": folgt.get("firma"),
+                                                                     "start_min": folgt.get("start_min")},
+                                  grund=f"Gegentrade folgt: {folgt.get('user')} {folgt.get('firma')} in {max(0.0, float(folgt['start_min']) - jm):.0f} min")
     return out
 
 

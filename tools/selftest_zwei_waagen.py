@@ -18,7 +18,7 @@ def lade():
         teile.append(re.search(rf"^{k} = .*$", src, re.M).group(0).split("  #")[0])
     for z in re.findall(r"^AP_WAAGE_[A-Z_]+ = .*$", src, re.M):
         teile.append(z.split("  #")[0])
-    for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "ap_waage_ohne_liste", "ap_waage_ohne", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
+    for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "ap_waage_ohne_liste", "ap_waage_ohne", "ap_waage_folgt", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
                  "_ap_eur_txt", "ap_waage_passt", "_ap_waage_note", "ap_klassen_waage", "_ap_waage_kandidat", "_ap_waage_rs_frei",
                  "_ap_waage_zielminute", "ap_waage_nachschub", "ap_waage_start_lage"):
         i = src.index(f"\ndef {name}(") + 1
@@ -168,6 +168,22 @@ def main():
     aend14, _ = N(st14, W(st14), random.Random(9))
     check([a["plan_id"] for a in aend14] == ["k1"], "Tradeify-Short + Apex-Long laufen: Apex deckt nicht → Tradeify-Long (andere ID) vorgezogen")
     check(aend14 and aend14[0]["nach_start_min"] >= jm + 2.0, f"… Tradeify gegen Tradeify frühestens jetzt + 2 min ({aend14 and aend14[0]['nach_start_min']})")
+
+    # 15) PAARE (Finn 19.10.2026): Gegentrade einer anderen ID folgt in ≤ 10 min → Waage zieht nichts vor, der erste des Paares darf starten
+    st15 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215, start=jm - 0.2)], "id_fest": {}, "starts_heute": [],
+            "geplant": [plan("p2", "moritz", *TF, "buy", 215, jm + 6.5), plan("k9", "ina", *TF, "buy", 215, jm + 120)]}
+    aend15, info15 = N(st15, W(st15), random.Random(15))
+    check(aend15 == [] and info15 and info15[0].get("folgt", {}).get("plan_id") == "p2", f"Moritz-Long folgt in 6,5 min → nichts vorgezogen ({[a['plan_id'] for a in aend15]})")
+    st16 = {"jetzt_min": jm, "offen": [], "id_fest": {}, "starts_heute": [],
+            "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *TF, "buy", 215, jm + 6.5)]}
+    L16 = S(st16, "p1", "sell")
+    check(L16["nachher"]["passt"] and L16["nachher"].get("folgt", {}).get("plan_id") == "p2", f"erster des Paares startet: {L16['nachher']['grund']}")
+    st17 = {"jetzt_min": jm, "offen": [], "id_fest": {}, "starts_heute": [],
+            "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *TF, "buy", 215, jm + 25)]}
+    check(not S(st17, "p1", "sell")["nachher"]["passt"], "Gegentrade erst in 25 min → wie bisher Gegentrade nötig")
+    st18 = {"jetzt_min": jm, "offen": [], "id_fest": {}, "starts_heute": [],
+            "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *AP, "buy", 215, jm + 5)]}
+    check(not S(st18, "p1", "sell")["nachher"]["passt"], "Apex-Long in 5 min zählt nicht als Partner")
 
     # 13) Schalter
     check(ns["ap_waage_an"]({}) and ns["ap_waage_an"]({"ausgleich": {"aktiv": True}}) and not ns["ap_waage_an"]({"ausgleich": {"waage": False}}),
