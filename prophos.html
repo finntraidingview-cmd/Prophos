@@ -23641,10 +23641,36 @@
   // BALANCE SELBST (16.10.2026, Finn: „schon richtig oft erwähnt" — Marc trug den Apex-Username ein, der Bot las trotzdem nicht): die
   // Firmen-Einstellungen lädt der Tab sonst nur beim Login. Fehlt der Tradovate-Username, vor der Lesung einmal frisch holen (höchstens 1×/min).
   let _tvSpecFrischAt = 0
+  // MITFAHREN STATT „LÄUFT SCHON“ (18.10.2026, Routine Puls-Fehler, Muster „konto_balance: lesung für dieses konto läuft schon“, 5 Fälle
+  // auf 2 PCs, zuletzt 2× 18.10.): kam das Auto-Planer-Signal, während für dasselbe Konto schon eine Lesung dieses Tabs lief (↻ in der
+  // Accounts-Liste, Braucht dich, Payout-Nachlesung), ging das Signal sofort als „fehler“ zurück — die Balance wurde trotzdem gelesen.
+  // Jetzt hängt sich der zweite Aufruf an die laufende Lesung und bekommt deren Ergebnis; weiterhin eine Lesung je Konto, kein zweiter Klick.
+  const _tvBalMitfahrt = new Map()   // Konto-ID → Promise der laufenden Lesung
   async function tvKontoBalanceJetzt(accountId, sigId){
-    const acc = (accounts || []).find(a => String(a.id) === String(accountId))
+    const mitId = String(accountId || '')
+    const lauf = mitId ? _tvBalMitfahrt.get(mitId) : null
+    if(lauf){ const r = await lauf; return Object.assign({}, r || { ok: false, msg: 'keine Antwort' }, { mitgefahren: true }) }
+    const p = _tvKontoBalanceJetztLauf(accountId, sigId)
+    if(mitId) _tvBalMitfahrt.set(mitId, p)
+    try{ return await p }finally{ if(mitId && _tvBalMitfahrt.get(mitId) === p) _tvBalMitfahrt.delete(mitId) }
+  }
+  async function _tvKontoBalanceJetztLauf(accountId, sigId){
+    let acc = (accounts || []).find(a => String(a.id) === String(accountId))
     if(!MT5_LOCAL) return { ok: false, msg: 'Nur am PC mit TradingView möglich' }
-    if(!acc || !acc.externalId) return { ok: false, msg: 'Konto ohne External ID' }
+    // NEUES KONTO NOCH NICHT IM TAB (18.10.2026, Routine Puls-Fehler, Muster „konto_balance: konto ohne external id“, 5 Fälle pc-xxxxxx
+    // 18.10. 13:21 UTC + 17 Fälle 06.10. auf einem zweiten PC): der Auto-Planer schickte die Lesung 40 s nach dem Anlegen der Konten, die
+    // Kontenliste dieses Tabs kannte sie noch nicht → „Konto ohne External ID“, obwohl die ID im Signal stand; 100 min später lief dieselbe
+    // Lesung durch. Jetzt: fehlt das Konto hier oder seine External ID, einmal frisch aus Supabase holen (wie mt5_provision) und erst dann urteilen.
+    if(!acc || !acc.externalId){
+      try{
+        const { data } = await supabase.from('accounts').select('*').eq('id', accountId).maybeSingle()
+        const frisch = data ? rowToAccount(data) : null
+        if(frisch && !acc){ acc = frisch; accounts.unshift(frisch); try{ renderAccounts() }catch(_){} }
+        else if(frisch && frisch.externalId) acc.externalId = frisch.externalId
+      }catch(e){ console.warn('[tv-balance] Konto frisch holen', (e && e.message) || e) }
+    }
+    if(!acc) return { ok: false, msg: 'Konto nicht gefunden — nicht in der Kontenliste dieses Tabs und nicht (mehr) in Supabase' }
+    if(!acc.externalId) return { ok: false, msg: 'Konto ohne External ID' }
     // CFD NIE ÜBER TRADOVATE (08.10.2026, Finn: „Bei The5%ers ist CFD. Da gibt es keinen Tradovate-Nutzernamen.“ — pc-40mali las ein
     // The5%ers-Konto ohne mt5_links-Zeile über Tradovate: „nicht im aktiven Tradovate-Login … kein Tradovate-Username hinterlegt“).
     // Futures wie im Backend (WD_BALANCE_FUTURES, Teilwörter) oder tpFirmIstFutures — alles andere ist CFD und kommt über MT5/Echo.
@@ -44536,7 +44562,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1619'
+  const OS_TAB_BUILD = '2026-09-22.1620'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
