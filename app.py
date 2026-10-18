@@ -15128,6 +15128,26 @@ def puls_heim_pruefen(pc, ausser=None):
         return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "grund": f"Big-Trade-Prüfung gerade nicht möglich ({type(e).__name__}) — Puls bleibt im Konto, nichts gesendet"}
 
 
+@app.route("/admin/puls-heim", methods=["GET", "OPTIONS"])
+def admin_puls_heim():
+    """GET /admin/puls-heim?pc=pc-xxxxxx → {ok, frei, code?, grund?, big_trade?} — derselbe Riegel „Puls bleibt zu Hause" (puls_heim_pruefen)
+    für den PC-Tab (19.10.2026, Finn „wie du denkst": auch Balance-Lesungen ↻ und Rundgang wechseln das Konto im Puls-Chrome und reißen
+    dem Reader die Lese-Lücke — der Tab fragt hier VOR jeder Lesung eines fremden Kontos, solange auf dem PC ein Big Trade läuft).
+    Auth wie /admin/live-trades (eingeloggt reicht, Header sb-token); die Rechnung läuft mit service role, weil fremde Pläne auf dem PC
+    per RLS unsichtbar wären. Kein Big Trade auf dem PC → frei, ohne weitere Reads."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _me, err = _wd_login()
+    if err:
+        return err
+    pc = str(request.args.get("pc") or "").strip()[:40]
+    if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
+        return jsonify({"ok": False, "msg": "pc fehlt (pc-xxxxxx)"}), 400
+    out = jsonify(dict({"ok": True}, **puls_heim_pruefen(pc)))
+    out.headers["Cache-Control"] = "no-store"
+    return out
+
+
 @app.route("/richtung/frei", methods=["POST"])
 def richtung_frei():
     """HARTE LINIE FÜR DEN PULS-KLICK (13.10.2026, Finn nach Mikes Topstep-Short + zwei geplanten Longs: „wenn aus irgendeinem Grund

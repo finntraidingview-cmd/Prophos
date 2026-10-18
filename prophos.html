@@ -23207,6 +23207,11 @@
      * 14:13:45–14:14:00 ausgesetzt), der Tab lief durch. Nur der Verbindungsfehler (fetch wirft → TypeError) wird wiederholt: bis zu
      * 4 Versuche, dazwischen 12–22 s gestreut (≈ 1 min, Neustart dauert ~15 s). Zeitlimit, kein JSON, HTTP-Fehler oder jede echte
      * Puls-Antwort gehen sofort zurück — Puls könnte da schon geklickt haben. */
+    // PULS BLEIBT ZU HAUSE — AUCH BEIM LESEN (19.10.2026, Finn „wie du denkst"): Balance ↻, Rundgang, Nachlesung eines anderen Kontos
+    // wechseln das Konto im Puls-Chrome genauso wie eine Order. Läuft auf diesem PC ein Big Trade nah am TP/an der Liq (Railway
+    // /admin/puls-heim, Regel puls_heim_regel), kommt die Lesung nicht zustande — Aufrufer sehen ok:false + retry_ok und versuchen später.
+    const _heim = await pulsHeimFrei(konto)
+    if(_heim) return _heim
     let r = null
     for(let v = 1; v <= 4; v++){
       r = await window.mtcApi(_api, { method:'POST', headers:{ 'Content-Type':'application/json' },   // tsx-lesen für Topstep (F23)
@@ -23221,6 +23226,27 @@
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
     try{ bigTradeHeimPlanen(konto, 'Lesung ' + String(konto).slice(-4)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026)
     return r
+  }
+  /* PULS BLEIBT ZU HAUSE — LESUNGEN (19.10.2026): vor jeder Puls-Lesung eines FREMDEN Kontos (nicht das Big-Trade-Konto, nicht der Heimweg
+   * selbst) fragt der PC-Tab Railway GET /admin/puls-heim?pc= — derselbe Riegel wie beim Klick (puls_heim_pruefen: Big Trade dieses PCs
+   * ≤ 2.000 $ vor TP/Liq → big_trade_nah; kein Kurs/Level → big_trade_unklar). Ohne laufenden Big Trade auf dem PC: kein Request.
+   * Fail-closed wie am Klick: Railway nicht erreichbar/kein Token → Lesung verschoben (big_trade_unklar). → null = frei, sonst Fehlerobjekt */
+  async function pulsHeimFrei(konto){
+    try{
+      if(_bthSelbst || !MT5_LOCAL) return null
+      const bt = bigTradePlan(); if(!bt) return null
+      if(konto && String(konto).trim() === tvV2Konto(bt)) return null
+      const pc = hedgePcId(); if(!pc) return null
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
+      if(!tok) return { ok:false, code:'big_trade_unklar', retry_ok:true, gesendet:false, msg:'Big Trade läuft auf diesem PC, Riegel nicht prüfbar (kein Login-Token) — Lesung verschoben' }
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 15000)
+      const r = await fetch(`${WATCHER_HOME}/admin/puls-heim?pc=${encodeURIComponent(pc)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = r.ok ? await r.json().catch(() => null) : null
+      if(!d || d.ok !== true) return { ok:false, code:'big_trade_unklar', retry_ok:true, gesendet:false, msg:`Big Trade läuft auf diesem PC, Riegel nicht erreichbar (HTTP ${r.status}) — Lesung verschoben` }
+      if(d.frei === true) return null
+      console.info(`[puls-heim] Lesung …${String(konto).slice(-4)} gesperrt: ${d.grund}`)
+      return { ok:false, code: d.code || 'big_trade_nah', retry_ok:true, gesendet:false, msg: String(d.grund || 'Big Trade nah am TP/an der Liq — Puls bleibt im Konto'), big_trade: d.big_trade || null }
+    }catch(e){ return { ok:false, code:'big_trade_unklar', retry_ok:true, gesendet:false, msg:'Big Trade läuft auf diesem PC, Riegel nicht prüfbar: ' + String((e && e.message) || e) } }
   }
   // External ID des Master-Kontos (Tradovate-Unterkonto) — dieselbe Quelle wie extId in tpOrbitStarten
   function tvV2Konto(plan){
@@ -44562,7 +44588,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1621'
+  const OS_TAB_BUILD = '2026-09-22.1622'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
