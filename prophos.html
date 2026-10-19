@@ -31079,11 +31079,12 @@
         const reiheP = [...jeP.keys()].sort((a, b) => (jeP.get(b).n - jeP.get(a).n) || String(jeP.get(a).name).localeCompare(String(jeP.get(b).name), 'de'))
         const chipsP = reiheP.map(u => { const x = jeP.get(u), an = V.person === u
           return chip(u, V.person ? an : null, `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm">${escapeHtml(String(x.name))}</span><b>${x.n}</b>`, an ? 'Filter aufheben — alle IDs' : `${x.n} abgehakt — nur diese ID zeigen`, 'data-wdl-vl-person') }).join('')
-        // Konto-Chips: Konten der gewählten ID (sonst aller IDs), Punkt in der ID-Farbe, Zahl = Trades dieses Kontos
-        const jeK = new Map(); for(const t of nachPerson){ const k = kontoKey(t); const x = jeK.get(k) || { txt: kontoTxt(t), uid: wdlUid(t), n: 0 }; x.n++; jeK.set(k, x) }
+        // Konto-Chips NUR zur gewählten ID (Finn 19.10.2026 am Live-Radar .1628: 58 Konten in einer Wand aus „… 1"-Chips — „gottlos
+        // hässlich, null strukturiert"): ohne Person keine Konto-Reihe. Kein Punkt (die ID steht schon fest), Zahl nur bei > 1 Trade.
+        const jeK = new Map(); if(V.person) for(const t of nachPerson){ const k = kontoKey(t); const x = jeK.get(k) || { txt: kontoTxt(t), n: 0 }; x.n++; jeK.set(k, x) }
         const reiheK = [...jeK.keys()].sort((a, b) => (jeK.get(b).n - jeK.get(a).n) || jeK.get(a).txt.localeCompare(jeK.get(b).txt, 'de'))
         const chipsK = reiheK.map(k => { const x = jeK.get(k), an = V.konto === k
-          return chip(k, V.konto ? an : null, `<span class="adm-dot" style="background:${idFarbe(x.uid)}"></span><span class="nm">${escapeHtml(x.txt)}</span><b>${x.n}</b>`, an ? 'Filter aufheben — alle Konten' : `${x.n} abgehakt — nur dieses Konto zeigen`, 'data-wdl-vl-konto') }).join('')
+          return chip(k, V.konto ? an : null, `<span class="nm">${escapeHtml(x.txt)}</span>${x.n > 1 ? `<b>${x.n}</b>` : ''}`, an ? 'Filter aufheben — alle Konten dieser ID' : `${x.n} abgehakt — nur dieses Konto zeigen`, 'data-wdl-vl-konto') }).join('')
         const filter = (reiheP.length > 1 || V.person ? `<div class="wdl-vl-filter" data-wdl-kp="verlauf-person"><i>Person</i>${chipsP}</div>` : '')
           + (reiheK.length > 1 || V.konto ? `<div class="wdl-vl-filter" data-wdl-kp="verlauf-konto"><i>Konto</i>${chipsK}</div>` : '')
         // alleArr [] = keine Personen-Chips im Kastenkopf (die stehen oben als eigener Filter); 'verlauf' = Schlüssel für „alle N zeigen"
@@ -44652,7 +44653,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1628'
+  const OS_TAB_BUILD = '2026-09-22.1629'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
