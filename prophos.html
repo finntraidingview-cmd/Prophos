@@ -661,6 +661,14 @@
   #dashboard-view .tb-puls.is-aktiv b{color:#047857}
   #dashboard-view .tb-puls.is-aktiv .tb-puls-dot{background:#10b981;animation:tc2Pulse 1.6s ease-in-out infinite}
   #dashboard-view .tb-puls[hidden]{display:none}
+  /* POLAR-VORRANG (20.10.2026, Finn): Chip „Polar läuft" — solange ein Polar-Lauf diese ID hält, startet dieser Tab nichts
+     (kein Puls, keine Order, keine Balance-Lesung). Dezent violett wie die Polar-Linien, Punkt pulsiert wie bei „Puls arbeitet". */
+  #dashboard-view .tb-polar{height:30px;padding:0 10px;border-radius:999px;border:1px solid rgba(124,58,237,.45);background:rgba(124,58,237,.10);
+    color:#6d28d9;font-size:12px;font-weight:600;white-space:nowrap;cursor:default;margin-right:8px;display:inline-flex;align-items:center;gap:6px}
+  #dashboard-view .tb-polar .tb-polar-dot{width:6px;height:6px;border-radius:50%;background:#7c3aed;animation:tc2Pulse 1.6s ease-in-out infinite}
+  #dashboard-view .tb-polar.is-vor{opacity:.8;font-weight:500}                      /* „bereitet vor": noch keine Order, Sperre noch nicht scharf */
+  #dashboard-view .tb-polar.is-vor .tb-polar-dot{animation:none;background:var(--sub-2)}
+  #dashboard-view .tb-polar[hidden]{display:none}
   /* Hover-Karte (29.09.2026, Finn: „wenn ich mit der Maus drüberfahre, dass ich immer sehe, was da gemacht wird" — am MacBook kam
      vom title-Tooltip nichts an). Optik wie .user-dropdown; nur Anzeige. Die Brücke (::before) hält den Hover beim Weg in die Karte. */
   #dashboard-view .tb-puls-wrap{position:relative;display:inline-flex;margin-right:8px}
@@ -7290,6 +7298,8 @@
       <button type="button" class="tb-puls" id="tb-puls" aria-describedby="tb-puls-karte" hidden></button>
       <div class="tb-puls-karte" id="tb-puls-karte" role="tooltip"></div>
     </div>
+    <!-- POLAR-VORRANG (20.10.2026): polarChipZeichnen zeigt ihn, solange polarLaeuft() einen Lauf dieser ID kennt -->
+    <button type="button" class="tb-polar" id="tb-polar" hidden><span class="tb-polar-dot"></span><span id="tb-polar-text">Polar läuft</span></button>
 
     <!-- HANDARBEIT (09.10.2026, Finn): Konten, die eine Hand brauchen — Zahl im Kopf, Klick öffnet #handModal (handLaden/handRender) -->
     <button type="button" class="tb-btn tb-hand" id="tb-hand" hidden aria-label="Handarbeit" title="Handarbeit — Konten, die eine Hand brauchen">
@@ -19350,6 +19360,7 @@
       if(t(() => _tpOrbitLaeuft)) return 'Puls läuft'
       if(t(() => !!_rsAktiv)) return 'Fern-Lauf aktiv'
       if(t(() => !!_osBusy || !!_osActive)) return 'Signal in Arbeit'
+      if(t(() => !!(typeof polarLaeuft === 'function' && polarLaeuft()))) return 'Polar läuft'   // POLAR-VORRANG (20.10.2026): nie mitten im Polar-Lauf neu laden
       if(t(() => !!(tvV2Poll && tvV2Poll.busy))) return 'Rundgang läuft'
       if(t(() => _hedgeBusy.size > 0)) return 'Hedge-Auftrag unterwegs'
       // Start-Fenster (08.10.2026, Sofort-Update): nie mitten in einen Start oder kurz davor neu laden — läuft gerade ein Start
@@ -23607,6 +23618,7 @@
   }
   async function ebnTick(){
     if(!MT5_LOCAL || _ebnLaeuft || typeof window.mtcApi !== 'function') return
+    if(polarLaeuft()) return   // POLAR-VORRANG (20.10.2026): keine Balance-Lesung, solange Polar diese ID hält
     const jetzt = Date.now(), je = ebnLetzte(jetzt)
     if(!je.size) return
     _ebnLaeuft = true
@@ -23946,6 +23958,7 @@
     const fehler = []   // je Konto: 'code: msg' — für den Toast von „P&L holen" (24.09.2026 abends)
     try{
       if(!MT5_LOCAL || tvV2Poll.busy) return { ok:false, grund: tvV2Poll.busy ? 'laeuft_schon' : 'kein_pc' }
+      { const _pl = polarLaeuft(); if(_pl) return { ok:false, grund:'polar_aktiv', fehler:[polarRiegelText(_pl)] } }   // POLAR-VORRANG (20.10.2026)
       let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
       const plans = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open')
       if(!plans.length) return { ok:false, grund:'keine_plaene' }
@@ -35089,8 +35102,10 @@
   const _accBalLauf = new Map()   // accountId → {laeuft, text, fehler}
   function accBalRefHtml(id, mt5){
     const st = _accBalLauf.get(String(id)), dreht = !!(st && st.laeuft)
-    const titel = mt5 ? 'Balance jetzt lesen — öffnet das MT5-Terminal dieses Logins auf dem PC dieser ID (keine Order)' : 'Balance jetzt über Puls lesen (PC dieser ID)'
-    return `<button type="button" class="acc-balref ${dreht ? 'dreht' : ''}" data-acc-balref="${escapeHtml(String(id))}" data-stop-row-click="1" title="${titel}" ${dreht ? 'disabled' : ''}>↻</button>`
+    const polarPl = (typeof polarLaeuft === 'function') ? polarLaeuft() : null   // POLAR-VORRANG (20.10.2026): Knopf aus, Tooltip nennt den Lauf
+    const titel = polarPl ? polarRiegelText(polarPl) + ' — keine Balance-Lesung, bis der Polar-Trade zu ist'
+      : mt5 ? 'Balance jetzt lesen — öffnet das MT5-Terminal dieses Logins auf dem PC dieser ID (keine Order)' : 'Balance jetzt über Puls lesen (PC dieser ID)'
+    return `<button type="button" class="acc-balref ${dreht ? 'dreht' : ''}" data-acc-balref="${escapeHtml(String(id))}" data-stop-row-click="1" title="${escapeHtml(titel)}" ${(dreht || polarPl) ? 'disabled' : ''}>↻</button>`
   }
   function accBalStatusHtml(id){
     const st = _accBalLauf.get(String(id)); if(!st || !st.text) return ''
@@ -35149,6 +35164,7 @@
     // Lesung fertig und ok → MT5-Cloud-Cache dieses Logins verwerfen und neu laden (08.10.2026, s. mt5BalCacheErneuern)
     const setz = (o) => { _accBalLauf.set(id, o); try{ renderAccounts() }catch(_){}; if(o && o.laeuft === false && !o.fehler && typeof mt5BalCacheErneuern === 'function') mt5BalCacheErneuern(id).catch(() => {}) }
     if(_accBalLauf.get(id)?.laeuft) return
+    { const _pl = polarLaeuft(); if(_pl){ setz({ laeuft: false, fehler: true, text: polarRiegelText(_pl) + ' — keine Balance-Lesung' }); return } }   // POLAR-VORRANG (20.10.2026)
     const acc = (accounts || []).find(a => String(a.id) === id); if(!acc) return
     // MT5-Konto (29.09.2026): Terminal dieses Logins öffnen + Lese-EA-Snapshot lesen. Hier am PC direkt, sofern die Instanz hier liegt —
     // sonst (andere Maschine der ID, Mac, Handy) über das Signal 'mt5_balance'; claimen darf nur der PC, der die Instanz hat.
@@ -41222,7 +41238,9 @@
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
             ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
-            : `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
+            : (typeof polarLaeuft === 'function' && polarLaeuft())   // POLAR-VORRANG (20.10.2026): Knopf aus, solange Polar diese ID hält
+              ? `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" disabled title="${escapeHtml(polarRiegelText(polarLaeuft()))} — kein Start, bis der Polar-Trade zu ist">Starten</button>`
+              : `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
       // V2 (24.09.2026): Bearbeiten, Löschen, Starten/Startzeit — „Läuft" ohne Puls gäbe keinen Beweis
       // und keine Baseline (v2PlanAufOpen läuft nur nach dem bewiesenen Klick). „Erledigt" direkt aus
       // Geplant gibt es seit 24.09.2026 abends doch (Finn: „ich will hier direkt auf Erledigt drücken
@@ -44694,7 +44712,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1635'
+  const OS_TAB_BUILD = '2026-09-22.1636'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45804,6 +45822,7 @@
   async function tpJetztStarten(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'planned') return
+    { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
     const sperre = await planKontoSperre(plan)   // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start
     if(sperre){ if(typeof atToast === 'function') atToast((sperre.art === 'ziel' ? '🎯 ' : '✍ ') + sperre.text, 'end'); return }
     if(await faVorStart(plan)) return       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
@@ -47180,6 +47199,22 @@
           _osStand = 'verfallen-beerdigt'
           continue
         }
+        // POLAR-VORRANG (20.10.2026, Finn: „über die beteiligten IDs keine einzige Order, keine Balance, der Puls-Knopf macht nichts"):
+        // hält ein Polar-Lauf diese ID bzw. diesen PC, nimmt der Tab nur noch polar_slave-Signale. Alles andere (Order, Close, Balance,
+        // Tab neu laden …) wird sofort als fehler/polar_aktiv beantwortet — nicht liegen lassen (das Frische-Gate hieße sonst „verfallen"
+        // ohne Grund), nicht ausführen. Der Absender sieht den Lauf im Text.
+        if(String((sig.params || {}).aktion || '') !== 'polar_slave'){
+          const _pl = polarLaeuft()
+          if(_pl){
+            await supabase.from('order_signale')
+              .update({ status:'fehler', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, code:'polar_aktiv', lauf_id: _pl.lauf_id || null, gesendet:false,
+                                   msg: polarRiegelText(_pl) + ' — nichts ausgeführt (Polar hat Vorrang). Nach dem Polar-Trade neu anstoßen.' } })
+              .eq('id', sig.id).eq('status', 'wartet')
+            _osStand = 'polar-aktiv: ' + String((_pl.lauf_id || _pl.plan_id || '')).slice(0, 8)
+            continue
+          }
+        }
         // TAB NEU LADEN AUF ZURUF (08.10.2026, Admin → Übersicht → PC-Tabs, Finn: „jeder einzelne PC immer die Updates direkt"):
         // plan_id 'tab:<pc>', params {aktion:'tab_neu_laden', pc} — Railway legt es im Namen der ID an (/admin/wd-plaene). Nur der genannte
         // PC claimt, und nur im ruhigen Moment (window._bwGrund; „Signal in Arbeit" ist hier dieser Tick selbst). Unruhig → liegen lassen,
@@ -47303,6 +47338,7 @@
           if(!clP || !clP.length){ _osStand = 'claim-verloren'; continue }
           osClaimMerken(sig)
           _osStand = 'claim-polar: ' + String(sig.id).slice(0, 8)
+          try{ polarRiegelSofort(pm.lauf_id, 'slave', pm.plan_id) }catch(_){}   // POLAR-VORRANG (20.10.2026): ab jetzt startet dieser Tab nichts mehr
           const specP = FIRM_PRESETS[firmToPreset(String(pm.firm || ''))] || {}
           const bodyP = { seite: 'slave', lauf_id: pm.lauf_id, plan_id: pm.plan_id, config_file: instP.config_file, symbol: specP.symbol || 'NAS100',
             richtung: pm.richtung, volumen: pm.volumen, sl_pkt: pm.sl_pkt, tp_pkt: pm.tp_pkt }
@@ -48067,6 +48103,7 @@
     const r = _ac.regel
     acStatusZeile()
     if(!r || !r.aktiv || !MT5_LOCAL || _ac.laeuft) return
+    if(polarLaeuft()) return   // POLAR-VORRANG (20.10.2026): kein Auto-Close, solange Polar diese ID hält (Panel würde ohnehin 409 polar_aktiv antworten)
     const jetzt = acJetztHhmm(r.tz)
     if(!jetzt || !acImFenster(r, jetzt)) return
     const key = acFensterKey(r, r.tz)
@@ -49569,6 +49606,9 @@
       _suLaeuft = false
     }
     if(orbitLaeuft){ warte(orbitText()); return }   // PC beschäftigt (Orbit-Start, Signal vom Mac/Handy): fällige Pläne warten in der Schlange
+    // POLAR-VORRANG (20.10.2026, Finn: „Wenn Polar läuft, darf gar kein einziger Trade mehr gestartet werden"): fällige Pläne bleiben in der
+    // Schlange (nichts wird verworfen); dauert der Lauf länger als das Start-Fenster, greifen zu_spaet + sfTick-Nachholen (gestreut) wie bisher
+    { const _pl = polarLaeuft(); if(_pl){ warte(polarRiegelText(_pl) + ' — kein Start, Plan wartet'); return } }
     if(Date.now() < _suPauseBis){ warte('Zufalls-Abstand nach dem letzten Start'); return }   // Zufalls-Abstand nach dem letzten Lauf
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid){ warte('Tab nicht angemeldet → am PC in Prophos anmelden'); return }
@@ -54170,10 +54210,113 @@
     const p = await window.mtcApi('polar-start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 20000 })
     if(typeof atToast === 'function') atToast(p && p.ok ? `🧭 Polar-Master gestartet (Lauf ${String(d.lauf_id).slice(0, 8)}, PID ${p.pid}) — HÄNDE WEG von beiden PCs!`
       : '⛔ Polar-Master nicht gestartet: ' + ((p && p.msg) || 'Panel nicht erreichbar'), p && p.ok ? 'start' : 'end')
+    if(p && p.ok) try{ polarRiegelSofort(d.lauf_id, 'master', String(plan.id)) }catch(_){}   // POLAR-VORRANG (20.10.2026)
   }
   window.polarStartenAmPc = polarStartenAmPc
   polarEl('polarStart')?.addEventListener('click', () => polarPlanAnlegen(true))
   polarEl('polarNurSpeichern')?.addEventListener('click', () => polarPlanAnlegen(false))   // eigene Verdrahtung (16.10.2026)
+
+  /* POLAR-VORRANG (20.10.2026, Finn: „Polar bekommt höhere Priorität als Orbit. Wenn Polar läuft, darf gar kein einziger Trade mehr
+   * gestartet werden. Läuft ein Polar-Trade über mehrere IDs, darf dort keine einzige Order platziert werden, keine Balance gelesen
+   * werden, und der Puls-Knopf darf nichts machen. Das Tampermonkey-Script (Reader) redet die ganze Zeit weiter.")
+   * EIN Riegel für den ganzen Tab: polarLaeuft() → null | {lauf_id, plan_id, seite, quelle}. Er hängt an zwei Quellen:
+   *   · Panel dieses PCs (GET /api/polar-stand: polar_aktiv.json + lebender Prozess) — alle 5 s, nur am PC;
+   *   · Railway GET /polar/aktiv — Bot-Läufe (polar_lauf, Status nicht fertig/abbruch/fehler) UND offene Hand-Polar-Pläne, bei denen
+   *     diese ID Master ODER Slave ist — alle 30 s (polar_app.py aktiv_liste; Supabase-Diät, Master 20.10.2026: 10 s von jedem Tab wären
+   *     200k+ Service-Selects/Tag). PC-Tabs fragen auch im Hintergrund (sie starten), Mac/Handy nur sichtbar (document.hidden → aussetzen).
+   * Beim eigenen Start/Claim (polarStartenAmPc, polar_slave) wird er sofort gesetzt, bevor der erste Poll ihn sieht. Er gilt nur für
+   * die IDs des Laufs — andere IDs/PCs laufen normal weiter. Wer ihn fragt: tpStartUmTick (Start-Wächter), orderSignalTick (nur noch
+   * polar_slave), tpJetztStarten + Starten-Knopf, accBalanceLesen + ↻, ebnTick, tvV2PollTick, acTick, bwGrund (Build-Wächter) — und
+   * das Panel selbst (409 polar_aktiv auf jeder POST-Route). Der Reader (Port 8790) hängt an nichts davon. Antwort ist immer der letzte
+   * bekannte Stand (nie warten); sind die Stände alt, stößt die Frage selbst einen neuen Poll an. */
+  const POLAR_RIEGEL_PANEL_MS = 5000, POLAR_RIEGEL_RAILWAY_MS = 30000, POLAR_RIEGEL_SOFORT_MS = 90000
+  const _polarRiegel = { panel: null, panelAt: 0, railway: null, railwayAt: 0, sofort: null, sofortBis: 0, versuchAt: 0, busy: false, gezeigt: '' }
+  // SPERRE ERST AB DER ORDER (Finn 20.10.2026 02:30: „Sobald die Order platziert wurde, erst ab dann soll kein Puls mehr kommen"):
+  // Bot-Phasen vor dem Klick (vorbereiten/bereit/feuer — stand.phase des Panels) und Railway-phase „vorbereiten" (start/bereit) zeigen nur
+  // den Chip „Polar bereitet vor"; scharf (hart) wird der Tab-Riegel ab geklickt/gefuellt bzw. Railway „order" (ab Feuerzeit) und bei
+  // Hand-Plänen ab status open (Phasen-Vor-Liste POLAR_PHASEN_VOR, alles andere scharf). AUSNAHME dieser PC: hält das eigene Panel den Polar-Prozess (polar_aktiv.json), antwortet es ohnehin auf
+  // jede POST-Route 409 polar_aktiv — ein Start hier wäre nur ein roter Fehlstart; darum zählt das eigene Panel immer als hart.
+  // VOR-Liste statt Positivliste (S2-Prüfung 20.10.2026): nur diese Phasen gelten als „noch keine Order" — alles andere, auch künftige
+  // Bot-Phasen (S3: geparkt_x, x_geklickt, zu_bestaetigt, nicht_zu) und abbruch/fehler/unklar, ist scharf (fail-closed)
+  const POLAR_PHASEN_VOR = new Set(['vorbereiten', 'bereit', 'feuer'])
+  const polarPhaseVor = pl => !!(pl && pl.phase && POLAR_PHASEN_VOR.has(String(pl.phase)))
+  function polarRiegelText(pl){
+    if(!pl) return ''
+    const id = String(pl.lauf_id || pl.plan_id || '').slice(0, 8)
+    return `${polarPhaseVor(pl) ? 'Polar bereitet vor' : 'Polar läuft'} (${pl.quelle === 'hand' ? 'Hand-Plan' : 'Lauf'} ${id || '?'}${pl.seite ? ' · ' + pl.seite : ''}${pl.quelle === 'panel' ? ' · dieser PC' : ''})`
+  }
+  // Letzter bekannter Stand, egal ob scharf: Panel (eigener PC) vor Railway vor Sofort-Merker — null = kein Polar an dieser ID
+  function polarRiegelStand(){
+    return _polarRiegel.panel || _polarRiegel.railway || ((_polarRiegel.sofort && Date.now() < _polarRiegel.sofortBis) ? _polarRiegel.sofort : null)
+  }
+  function polarLaeuft(){
+    const jetzt = Date.now()
+    const pl = polarRiegelStand()
+    if(_polarRiegel.panel || _polarRiegel.railway) _polarRiegel.sofort = null
+    if(jetzt - Math.max(_polarRiegel.panelAt, _polarRiegel.railwayAt, _polarRiegel.versuchAt) > POLAR_RIEGEL_RAILWAY_MS){ _polarRiegel.versuchAt = jetzt; polarRiegelAktualisieren() }
+    return (pl && pl.hart) ? pl : null
+  }
+  function polarRiegelSofort(laufId, seite, planId){
+    _polarRiegel.sofort = { lauf_id: laufId || null, plan_id: planId || null, seite: seite || null, quelle: 'start', phase: 'vorbereiten', hart: true }   // eigener PC → hart (Panel sperrt gleich)
+    _polarRiegel.sofortBis = Date.now() + POLAR_RIEGEL_SOFORT_MS
+    _polarRiegel.panelAt = 0; _polarRiegel.railwayAt = 0   // nächster Poll sofort
+    polarChipZeichnen(); polarRiegelAktualisieren()
+  }
+  async function polarRiegelAktualisieren(){
+    if(_polarRiegel.busy) return
+    _polarRiegel.busy = true
+    try{
+      const jetzt = Date.now()
+      if(MT5_LOCAL && typeof window.mtcApi === 'function' && jetzt - _polarRiegel.panelAt >= POLAR_RIEGEL_PANEL_MS){
+        const r = await window.mtcApi('polar-stand', { timeoutMs: 4000 })
+        if(r && !r._httpFail && typeof r.aktiv === 'boolean'){
+          const f = r.flag || {}
+          const ph = (r.stand && typeof r.stand === 'object' && r.stand.phase) ? String(r.stand.phase) : null
+          _polarRiegel.panel = r.aktiv ? { lauf_id: f.lauf_id || r.lauf_id || null, plan_id: f.plan_id || null, seite: f.seite || null, quelle: 'panel', phase: ph, hart: true } : null
+          _polarRiegel.panelAt = jetzt
+        }
+      }
+      let uid = null; try{ uid = currentUserId }catch(_){}
+      if(uid && (MT5_LOCAL || !document.hidden) && jetzt - _polarRiegel.railwayAt >= POLAR_RIEGEL_RAILWAY_MS){   // PC immer, Mac/Handy nur sichtbar
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(tok){
+          const ctrl = new AbortController(); const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, 8000)
+          try{
+            const r = await fetch(`${WATCHER_HOME}/polar/aktiv`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+            const d = await r.json().catch(() => null)
+            if(d && d.ok && Array.isArray(d.laeufe)){
+              const l = d.laeufe[0]
+              _polarRiegel.railway = l ? { lauf_id: l.lauf_id || null, plan_id: l.plan_id || null, seite: l.seite || null, quelle: l.quelle || 'bot',
+                                           phase: l.phase || 'order', hart: String(l.phase || 'order') === 'order' } : null   // „vorbereiten" = nur Chip
+              _polarRiegel.railwayAt = jetzt
+            }
+          }finally{ clearTimeout(tm) }
+        }
+      }
+    }catch(e){ console.warn('[polar-riegel]', (e && e.message) || e) }
+    finally{ _polarRiegel.busy = false; polarChipZeichnen() }
+  }
+  function polarChipZeichnen(){
+    const el = document.getElementById('tb-polar'); if(!el) return
+    const pl = polarRiegelStand()
+    const key = pl ? polarRiegelText(pl) + (pl.hart ? '' : ' · frei') : ''
+    el.hidden = !pl
+    el.classList.toggle('is-vor', !!pl && !pl.hart)
+    if(pl){
+      const t = document.getElementById('tb-polar-text'); if(t) t.textContent = key
+      el.title = pl.hart ? polarRiegelText(pl) + ' — diese ID startet nichts: kein Puls, keine Order, keine Balance-Lesung, bis der Polar-Trade zu ist. Der Reader läuft weiter.'
+        : polarRiegelText(pl) + ' — noch keine Order; ab dem Klick (Feuerzeit) sperrt diese ID Puls, Orders und Balance-Lesungen.'
+    }
+    if(key !== _polarRiegel.gezeigt){   // Zustand gekippt → Knöpfe (Starten, ↻) neu zeichnen
+      _polarRiegel.gezeigt = key
+      try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
+      try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
+    }
+  }
+  window._polarLaeuft = polarLaeuft
+  setTimeout(polarRiegelAktualisieren, 3000)
+  setInterval(polarRiegelAktualisieren, POLAR_RIEGEL_PANEL_MS)
 
   // Live Multiplier-Berechnung im Modal
   // ── Reingesteckt / Gesamtkosten: läuft die GESAMTE Vorgänger-Kette ab

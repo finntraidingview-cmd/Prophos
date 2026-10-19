@@ -10,6 +10,7 @@ Funded-Futures (Master, ID A, TradingView, PC A) gegen Funded-CFD (Slave, ID B, 
   /polar/melden  gefuellt / level / geparkt / zu / ende / abbruch / fehler
   /polar/stand   Anzeige (Tab) und Wiederaufnahme nach Railway-Neustart (Zustand aus polar_lauf)
   /polar/zeit    Uhrabgleich der Puls-Prozesse
+  /polar/aktiv   Polar-Vorrang (20.10.2026): hält gerade ein Lauf (Bot oder Hand-Plan) die ID des Aufrufers? → Tab polarLaeuft()
 Abbruch nur VOR der Feuerzeit; danach nur noch „fehler" (dann schließt die andere Seite ihre Position). Am Ende Balance/P&L beider
 Seiten an Plan (review) und Konten — Finn: „im Nachhinein mit Balance ausgelesen, alles automatisch drin"."""
 import re
@@ -30,6 +31,9 @@ POLAR_AUTO = False
 ENDE = ("fertig", "abbruch", "fehler")
 _LAEUFE = {}
 _COND = threading.Condition()
+_AKTIV_CACHE = {}             # uid → (epoch, laeufe) — /polar/aktiv 5 s gecacht (Supabase-Diät, Master 20.10.2026)
+AKTIV_CACHE_S = 5
+AKTIV_FENSTER_H = 36          # Läufe älter als 36 h zählen nicht mehr (Leiche nach Railway-Neustart ohne Ende-Meldung)
 A = {}                        # Namensraum von app.py (sb_select, sb_update, sb_insert, _sb_anfrage, _sb_headers, SUPABASE_URL, …)
 
 
@@ -159,6 +163,97 @@ def _abrechnen(z):
     threading.Thread(target=_los, daemon=True).start()
 
 
+def laeufe_aus_plaenen(rows):
+    """REIN RECHNEND: trade_plans-Zeilen mit eingebettetem polar_lauf (PostgREST über den FK polar_lauf.plan_id, EIN Select) →
+    Lauf-Zeilen im polar_lauf-Format für aktiv_liste (master/slave aus dem Plan, Ende-Status fällt dort raus)."""
+    out = []
+    for p in rows or []:
+        if not isinstance(p, dict):
+            continue
+        for l in (p.get("polar_lauf") or []):
+            if isinstance(l, dict):
+                out.append({"id": l.get("id"), "plan_id": p.get("id"), "master_user_id": p.get("user_id"),
+                            "slave_user_id": p.get("polar_slave_user_id"), "status": l.get("status"), "created_at": l.get("created_at")})
+    return out
+
+
+def aktiv_liste(uid, prozess_laeufe, db_laeufe, plaene):
+    """REIN RECHNEND (testbar, selftest_polar_riegel.py): die Polar-Läufe, die ID uid gerade halten — Bot-Läufe (Prozess + polar_lauf,
+    Status nicht in ENDE) und offene Hand-Polar-Pläne (route polar, status open; Finn 16.10.: „jetzt manuell"). Je Lauf eine Zeile mit
+    seite (master|slave aus Sicht von uid), quelle (bot|hand), lauf_id (hand: None). Dubletten (Prozess + DB) fallen weg."""
+    uid = str(uid or "")
+    out, gesehen = [], set()
+    for z in list(prozess_laeufe or []) + list(db_laeufe or []):
+        if not isinstance(z, dict) or str(z.get("status") or "") in ENDE:
+            continue
+        lid = str(z.get("id") or z.get("lauf_id") or "")
+        mu, su = str(z.get("master_uid") or z.get("master_user_id") or ""), str(z.get("slave_uid") or z.get("slave_user_id") or "")
+        if not lid or lid in gesehen or uid not in (mu, su):
+            continue
+        gesehen.add(lid)
+        st = str(z.get("status") or "start")
+        # SPERRE ERST AB DER ORDER (Finn 20.10.2026 02:30: „Sobald die Order platziert wurde, erst ab dann soll kein Puls mehr kommen"):
+        # phase „vorbereiten" (start/bereit) sperrt im Tab noch nichts, „order" ab der Feuerzeit (feuer: gedrückt 1,5 s später; offen/zu danach)
+        out.append({"lauf_id": lid, "plan_id": str(z.get("plan_id") or "") or None, "status": st,
+                    "phase": "vorbereiten" if st in ("start", "bereit") else "order",
+                    "seite": "master" if uid == mu else "slave", "quelle": "bot", "master_uid": mu, "slave_uid": su})
+    plan_ids = {x["plan_id"] for x in out if x.get("plan_id")}
+    for p in plaene or []:
+        if not isinstance(p, dict) or str(p.get("route") or "") != "polar" or str(p.get("status") or "") != "open":
+            continue
+        pid = str(p.get("id") or "")
+        mu, su = str(p.get("user_id") or ""), str(p.get("polar_slave_user_id") or "")
+        if not pid or pid in plan_ids or uid not in (mu, su):
+            continue
+        plan_ids.add(pid)
+        out.append({"lauf_id": None, "plan_id": pid, "status": "open", "phase": "order", "seite": "master" if uid == mu else "slave",
+                    "quelle": "hand", "master_uid": mu, "slave_uid": su, "seit": p.get("started_at")})
+    return out
+
+
+def richtungsschutz_pruefen(master_erg, slave_erg, master_name="Master-Konto", slave_name="Slave-Konto"):
+    """REIN RECHNEND, fail-closed (Finn 20.10.2026 02:30: Richtungsschutz beim Polar-Start für BEIDE Konten): (frei, grund). frei nur,
+    wenn beide Antworten der DB-Regel {'frei': true} tragen; eine Sperre nennt die Seite + den Grund der Regel, eine fehlende/kaputte
+    Antwort sperrt ebenfalls („nicht prüfbar")."""
+    for seite, erg, name in (("Master", master_erg, master_name), ("Slave", slave_erg, slave_name)):
+        if isinstance(erg, dict) and erg.get("frei") is True:
+            continue
+        if isinstance(erg, dict) and erg.get("frei") is False:
+            return False, f"Richtungsschutz {seite} ({name}): {erg.get('grund') or 'Gegenrichtung läuft'}"
+        fehler = erg.get("fehler") if isinstance(erg, dict) else "keine Antwort"
+        return False, f"Richtungsschutz {seite} ({name}) nicht prüfbar: {fehler or 'unklar'} — nichts gestartet"
+    return True, ""
+
+
+def _richtung_konto(uid, firma, richtung, ausser_plan=None, ausser_konto=None):
+    """DB-Regel prophos_gegenrichtung_frei_konto (sql/2026-10-20_polar_richtungsschutz.sql, service role) → dict der Regel oder
+    {'fehler': text}. Nie Exception — richtungsschutz_pruefen wertet fail-closed."""
+    try:
+        resp = A["_sb_anfrage"]("POST", f"{A['SUPABASE_URL']}/rest/v1/rpc/prophos_gegenrichtung_frei_konto", headers=A["_sb_headers"](),
+                                timeout=(5, 15), json={"p_user": str(uid), "p_firma": firma or "", "p_richtung": richtung or "",
+                                                       "p_ausser_plan": ausser_plan, "p_ausser_konto": ausser_konto})
+    except Exception as e:
+        return {"fehler": f"DB nicht erreichbar ({type(e).__name__})"}
+    if resp.status_code == 404:
+        return {"fehler": "DB-Funktion prophos_gegenrichtung_frei_konto fehlt — sql/2026-10-20_polar_richtungsschutz.sql einspielen"}
+    if resp.status_code != 200:
+        return {"fehler": f"DB-Antwort {resp.status_code}: {(resp.text or '')[:100]}"}
+    try:
+        erg = resp.json()
+    except ValueError:
+        return {"fehler": "DB-Antwort kein JSON"}
+    return erg if isinstance(erg, dict) else {"fehler": "DB-Antwort unerwartet"}
+
+
+def polar_richtungsschutz(plan_id, m_uid, m_firma, m_konto, s_uid, s_firma, s_konto, richtung, m_name="Master-Konto", s_name="Slave-Konto"):
+    """Beide Seiten eines Polar-Starts gegen die Regel: Master-ID × Futures-Firma mit der Master-Richtung, Slave-ID × CFD-Firma mit der
+    Gegenrichtung (der Slave hedgt den Master). → (frei, grund)."""
+    gegen = "sell" if str(richtung).lower() == "buy" else "buy"
+    m = _richtung_konto(m_uid, m_firma, richtung, plan_id, m_konto)
+    sl = _richtung_konto(s_uid, s_firma, gegen, plan_id, s_konto)
+    return richtungsschutz_pruefen(m, sl, m_name, s_name)
+
+
 def registrieren(app, ns):
     """Routen an die Flask-App hängen. ns = globals() von app.py (Supabase-Helfer, Auth)."""
     A.update(ns)
@@ -211,6 +306,13 @@ def registrieren(app, ns):
             return jsonify({"ok": False, "msg": "Richtung, Kontrakte, Lots und Level fehlen"}), 400
         if not _login_von_konto(s_acc):
             return jsonify({"ok": False, "msg": "Slave-Konto ohne MT5-Login (External ID oder Login fehlt)"}), 400
+        # RICHTUNGSSCHUTZ (Finn 20.10.2026 02:30): „Speichern & starten" (manuell → sofort open) und der Bot-Weg (Startzeit jetzt) fragen
+        # vor dem Anlegen für beide Konten die bestehende Regel — gesperrt oder nicht prüfbar → kein Plan, Grund ins Popup (polarMsg)
+        if d.get("starten") or POLAR_AUTO:
+            frei, grund = polar_richtungsschutz(None, mu, m_acc.get("firm"), m_acc["id"], su, s_acc.get("firm"), s_acc["id"], r,
+                                               m_acc.get("name") or "Master-Konto", s_acc.get("name") or "Slave-Konto")
+            if not frei:
+                return jsonify({"ok": False, "code": "richtungsschutz", "msg": grund}), 409
         zeile = {"user_id": mu, "master_account_id": m_acc["id"], "slave_account_id": s_acc["id"],
                  "master_name": m_acc.get("name"), "master_firm": m_acc.get("firm"), "slave_name": s_acc.get("name"), "slave_firm": s_acc.get("firm"),
                  "route": "polar", "status": "planned", "priority": "high", "richtung": r,
@@ -307,6 +409,12 @@ def registrieren(app, ns):
             return jsonify({"ok": False, "msg": f"DB: {str(e)[:120]}"}), 503
         if not s_acc or str(s_acc.get("user_id")) != str(plan.get("polar_slave_user_id")):
             return jsonify({"ok": False, "msg": "Slave-Konto passt nicht zur Slave-ID"}), 400
+        # RICHTUNGSSCHUTZ (Finn 20.10.2026 02:30), serverseitig und fail-closed — auch wenn der Tab schon gefragt hat
+        frei, grund = polar_richtungsschutz(pid, str(plan.get("user_id")), plan.get("master_firm"), plan.get("master_account_id"),
+                                           str(plan.get("polar_slave_user_id")), s_acc.get("firm"), s_acc["id"], plan.get("richtung"),
+                                           plan.get("master_name") or "Master-Konto", plan.get("slave_name") or "Slave-Konto")
+        if not frei:
+            return jsonify({"ok": False, "code": "richtungsschutz", "msg": grund}), 409
         s_richtung = "sell" if plan.get("richtung") == "buy" else "buy"
         slave_auftrag = {"account_id": s_acc["id"], "login": _login_von_konto(s_acc), "firm": s_acc.get("firm"), "richtung": s_richtung,
                          "volumen": auftrag.get("lots"), "sl_pkt": auftrag.get("sl_pkt"), "tp_pkt": auftrag.get("tp_pkt")}
@@ -502,5 +610,52 @@ def registrieren(app, ns):
             if err_a and not (sicht is not None and z["master_uid"] in sicht and z["slave_uid"] in sicht):
                 return jsonify({"ok": False, "msg": "nicht deine Polar-Läufe"}), 403
         out = jsonify({"ok": True, **_sicht(z)})
+        out.headers["Cache-Control"] = "no-store"
+        return out
+
+    # POLAR-VORRANG (20.10.2026, Finn: „Wenn Polar läuft, darf gar kein einziger Trade mehr gestartet werden … über die beteiligten IDs
+    # keine Order, keine Balance-Lesung"): der Tab fragt hier alle 10 s, ob SEINE ID gerade in einem Polar-Lauf steckt (Master- ODER
+    # Slave-Seite) — Bot-Läufe aus dem Prozess + polar_lauf und offene Hand-Polar-Pläne (POLAR_AUTO aus). /polar/stand kennt nur
+    # einen Lauf je lauf_id/plan_id, der Slave-Tab sieht den Plan der Master-ID nicht (RLS) — deshalb diese Liste (service role).
+    # Takt: Tabs alle 30 s, Antwort 5 s im Prozess gecacht, EIN Select (Master 20.10.2026, Supabase-Diät).
+    @app.route("/polar/aktiv", methods=["GET", "OPTIONS"])
+    def polar_aktiv():
+        if request.method == "OPTIONS":
+            return "", 200
+        wer = A["_code_zugang"]()
+        uid = wer[0] if wer else None
+        if not uid:
+            uid, err = A["_wd_login"]()
+            if err:
+                return err
+        uid = str(uid)
+        jetzt = time.time()
+        c = _AKTIV_CACHE.get(uid)
+        if c and jetzt - c[0] < AKTIV_CACHE_S:       # 5 s je ID (workers 1 → ein Prozess, ein Cache)
+            out = jsonify({"ok": True, "laeufe": c[1], "server_ms": _ms(), "cache": True})
+            out.headers["Cache-Control"] = "no-store"
+            return out
+        with _COND:
+            prozess = [dict(z) for z in _LAEUFE.values()]
+        # EIN Select (Supabase-Diät): Polar-Pläne dieser ID (Master oder Slave), die noch planned/open sind, mit den zugehörigen
+        # polar_lauf-Zeilen eingebettet (FK polar_lauf.plan_id → trade_plans.id, sql/2026-10-13_polar.sql). planned deckt die
+        # Bereit-Phase des Bots (der Plan wird erst beim Fill open), open die Hand-Pläne und den laufenden Trade.
+        try:
+            rows = A["sb_select"]("trade_plans", {"select": "id,user_id,polar_slave_user_id,route,status,started_at,polar_lauf(id,status,created_at)",
+                                                  "route": "eq.polar", "status": "in.(planned,open)",
+                                                  "or": f"(user_id.eq.{uid},polar_slave_user_id.eq.{uid})",
+                                                  "order": "created_at.desc", "limit": "20"}) or []
+        except Exception as e:
+            out = jsonify({"ok": False, "msg": f"Stand nicht lesbar: {type(e).__name__}", "laeufe": aktiv_liste(uid, prozess, [], [])})
+            out.headers["Cache-Control"] = "no-store"
+            return out, 503
+        grenze = datetime.fromtimestamp(jetzt - AKTIV_FENSTER_H * 3600, timezone.utc).isoformat()
+        db_laeufe = [l for l in laeufe_aus_plaenen(rows) if str(l.get("created_at") or "9") >= grenze]
+        laeufe = aktiv_liste(uid, prozess, db_laeufe, rows)
+        _AKTIV_CACHE[uid] = (jetzt, laeufe)
+        if len(_AKTIV_CACHE) > 200:                  # nie wachsen lassen
+            for k in [k for k, v in _AKTIV_CACHE.items() if jetzt - v[0] > 60]:
+                _AKTIV_CACHE.pop(k, None)
+        out = jsonify({"ok": True, "laeufe": laeufe, "server_ms": _ms()})
         out.headers["Cache-Control"] = "no-store"
         return out

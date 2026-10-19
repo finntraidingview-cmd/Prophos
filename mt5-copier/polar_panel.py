@@ -6,8 +6,9 @@ Datei-Verteilung); Start, Zustand und Sperre stehen hier. Der alte Puls (order_b
   POST /api/polar-abbruch {lauf_id}                                          → abbruch.json (wirkt nur VOR der Feuerzeit)
 
 PRIORITÄT 1 (Finn: „wenn Polar läuft, darf kein anderer Puls-Bot oder irgendwas diesen PC bedienen — beide PCs nicht anfassen"):
-solange polar_aktiv.json auf einen lebenden Prozess zeigt, antwortet das Panel auf JEDEN anderen Puls-/Maus-Weg mit 409
-puls_beschaeftigt (der Tab wartet dann, wie bei einem laufenden Rundgang), und der Selbst-Neustart des Panels wird vertagt."""
+solange polar_aktiv.json auf einen lebenden Prozess zeigt, antwortet das Panel auf JEDE andere POST-Route mit 409 polar_aktiv
+(seit 20.10.2026 alle Wege außer FREI_PFADE, vorher nur die Maus-Wege; Code vorher puls_beschaeftigt), und der Selbst-Neustart des Panels
+wird vertagt. Der Tab fragt denselben Zustand über GET /api/polar-stand (polarLaeuft() in prophos.html)."""
 import json
 import os
 import subprocess
@@ -76,9 +77,30 @@ def aktiv():
     return False
 
 
+# POLAR-VORRANG (20.10.2026, Finn: „Polar bekommt höhere Priorität als Orbit. Wenn Polar läuft, darf gar kein einziger Trade mehr
+# gestartet werden … keine einzige Order platziert, keine Balance gelesen, der Puls-Knopf darf nichts machen. Der Reader redet weiter.")
+# Vorher sperrte der Riegel nur die 18 Maus-Wege oben; /api/plan, plan-delete, set-hedge (Echo-Hedge-Maschine) und jede künftige Route
+# gingen durch. Jetzt gilt: läuft Polar, bekommt JEDE POST-Route 409 — außer den Polar-Routen selbst, dem Klick-Melder des Puls und den
+# reinen Kennungs-Wegen. GET-Wege (/api/instances, /api/polar-stand) bleiben offen, der Tab muss den Zustand sehen. Der Reader
+# (Tampermonkey, Port 8790) läuft nicht über dieses Panel und wird nie angefasst. Antwort-Code polar_aktiv (nicht mehr puls_beschaeftigt):
+# der Tab weiß damit, dass Warten nichts bringt, und nennt den Lauf.
+FREI_PFADE = ("/api/polar-start", "/api/polar-abbruch", "/api/polar-stand", "/api/puls-klick", "/api/code-token", "/api/pc-id")
+
+
 def gesperrt(pfad):
-    """Riegel für panel.py do_POST: True = diesen Puls-Weg jetzt mit 409 ablehnen."""
-    return pfad in PULS_PFADE and aktiv()
+    """Riegel für panel.py do_POST: True = diesen Weg jetzt mit 409 ablehnen (alles außer FREI_PFADE, solange Polar läuft)."""
+    return pfad not in FREI_PFADE and aktiv()
+
+
+def sperre_antwort(pfad):
+    """-> (409, dict) | None. Nennt lauf_id + Seite, damit Tab und Mensch sehen, WELCHER Polar-Lauf den PC hält."""
+    if not gesperrt(pfad):
+        return None
+    f = _lesen(FLAG) or {}
+    lid = str(f.get("lauf_id") or "")
+    return 409, {"ok": False, "retry_ok": True, "gesendet": False, "code": "polar_aktiv", "lauf_id": lid or None,
+                 "seite": f.get("seite"), "plan_id": f.get("plan_id"), "pfad": pfad,
+                 "msg": f"Polar läuft auf diesem PC (Lauf {lid[:8] or '?'}, {f.get('seite') or '?'}) — kein anderer Weg, bis der Polar-Trade zu ist."}
 
 
 def stand(lauf_id=None):

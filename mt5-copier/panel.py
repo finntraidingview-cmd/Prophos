@@ -1850,6 +1850,8 @@ def _browser_und_mt5_frei(tv_eigen=False):
     F9/Felder/Knopf — Prüfer S2 16.10.2026: holt der Wächter dann Chrome nach vorn, landet der Vordergrund mitten im Order-Dialog).
     tv_eigen=True: TV_ORDER_LOCK hält der Aufrufer selbst."""
     try:
+        if polar_panel and polar_panel.aktiv():   # POLAR-VORRANG (20.10.2026): nie Strg+F5/Tab öffnen, solange Polar den PC hält
+            return False
         if not tv_eigen and TV_ORDER_LOCK.locked():
             return False
         return not any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))
@@ -3176,7 +3178,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, json.dumps({"ok": False, "msg": "Content-Type muss application/json sein"}))
         # POLAR (13.10.2026, Finn: „Priorität 1 — kein anderer Puls-Bot darf diesen PC bedienen"): läuft Polar, bekommt jeder andere
         # Puls-/Maus-Weg 409 puls_beschaeftigt (der Tab wartet wie bei einem laufenden Rundgang). Die Polar-Routen gehen ans Modul.
-        if polar_panel and polar_panel.gesperrt(u.path):
+        # POLAR-VORRANG (20.10.2026, Finn: „wenn Polar läuft, darf gar kein einziger Trade mehr gestartet werden"): alle POST-Routen außer
+        # polar_panel.FREI_PFADE → 409 polar_aktiv mit lauf_id (sperre_antwort); alter Modul-Stand ohne sperre_antwort → wie bisher.
+        if polar_panel and hasattr(polar_panel, "sperre_antwort"):
+            _ps = polar_panel.sperre_antwort(u.path)
+            if _ps:
+                return self._send(_ps[0], json.dumps(_ps[1], ensure_ascii=False, default=str))
+        elif polar_panel and polar_panel.gesperrt(u.path):
             return self._send(409, json.dumps({"ok": False, "retry_ok": True, "code": "puls_beschaeftigt", "gesendet": False,
                                                "msg": "Polar läuft auf diesem PC — kein anderer Puls-Weg, bis der Polar-Trade zu ist."}, ensure_ascii=False))
         if polar_panel and u.path in ("/api/polar-start", "/api/polar-abbruch"):
