@@ -16855,8 +16855,13 @@ AP_PAAR_ABSTAND = (2.0, 10.0)          # Paar Long/Short derselben Futures-Firma
 AP_PAAR_PC_MIN = 3.0                   # derselbe PC (ID): kein anderer Start in ± 3 min (wie der Start-Wächter)
 
 
-def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=(), firma_min=None, pc_min=None):
+def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=(), firma_min=None, pc_min=None, frueh=None):
     """REIN RECHNEND (testbar, Finn 19.10.2026): Paare Long/Short je Futures-Firma (Waage-Firmen, nicht `ohne` = Apex) aus VERSCHIEDENEN IDs.
+    frueh = früheste erlaubte Startminute (Nachplanen: jetzt + AP_NACHPLAN_VORLAUF_MIN). ANKER NUR IN DER ZUKUNFT (19.10.2026, Finn 19:40
+    Dubai „immer Long/Short in Paare, das ist eine gute Regel" — aber: Nachplan 19:27 Dubai legte Aurels Tradeify-Long auf 17:47 und den
+    Short auf 18:16 Dubai, beide sofort verpasst; 17:39 Dubai Marco 17:26→14:47 dt): ein Anker, hinter den der Partner nicht mehr ≥ frueh
+    rücken kann (Anker + 10 min < frueh), wird übersprungen — der Plan sucht dann den nächsten ZUKÜNFTIGEN Gegen-Trade derselben Firma;
+    findet er keinen, bleibt seine normale Startzeit. Nie eine Startzeit < frueh.
     minuten {key: Startminute}, richtung {key: buy|sell}, tr_info[key] = {user, fkey, route, ab_min?, bis_min?, fest_refs?},
     bestehend = [{user, start, fkey}] (PC-/Firmen-Belegung des Tages), firma_fest = [{user_id, firma (fkey), richtung, start, route}] (schon
     geplante Trades = feste Anker). Je Firma: jeder neue Trade sucht den zeitlich nächsten Gegen-Trade einer anderen ID, der noch keinen
@@ -16894,6 +16899,8 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
         if t.get("bis_min") is not None and m > float(t["bis_min"]) - 1e-9:
             return False
         alt = float(out[k])
+        if frueh is not None and m < float(frueh) - 1e-9:
+            return False                                   # nie in die Vergangenheit (19.10.2026)
         if any(abs(x - m) < pc_min for x in je_id.get(u, ()) if abs(x - alt) > 1e-9):
             return False
         if any(abs(x - m) < firma_min for u2, x in je_firma.get(str(t.get("fkey")), ()) if u2 != u and abs(x - alt) > 1e-9):
@@ -16933,28 +16940,33 @@ def ap_paare_legen(minuten, richtung, tr_info, bestehend, firma_fest, rnd, ohne=
             if not kand:
                 continue
             kand.sort()
-            _d, _art, pid, pm, _pu, pk = kand[0]
-            if abs(pm - m) <= AP_PAAR_ABSTAND[1] and abs(pm - m) >= AP_PAAR_ABSTAND[0]:
-                vergeben.update({k, pid})          # schon ein Paar (2–10 min) — nichts anfassen
-                continue
-            # der spätere rückt an den Anker; ein fester Anker bewegt sich nie
-            if pk is None or pm <= m:
-                mover, anker, anker_id = k, pm, pid
-            else:
-                mover, anker, anker_id = pk, m, k
-            ziel = None
-            for _ in range(24):
-                z = anker + rnd.uniform(*AP_PAAR_ABSTAND)
-                if frei(mover, z):
-                    ziel = z
+            # Kandidaten der Reihe nach (zeitlich nächster zuerst); ein Anker in der Vergangenheit (Anker + 10 min < frueh) wird
+            # übersprungen, der nächste zukünftige Gegen-Trade bekommt die Chance (19.10.2026, Aurel/Marco)
+            for _d, _art, pid, pm, _pu, pk in kand:
+                if abs(pm - m) <= AP_PAAR_ABSTAND[1] and abs(pm - m) >= AP_PAAR_ABSTAND[0]:
+                    vergeben.update({k, pid})          # schon ein Paar (2–10 min) — nichts anfassen
                     break
-            if ziel is None:
-                continue
-            von = float(out[mover])
-            verschieben(mover, ziel)
-            vergeben.update({k, pid})
-            info.append({"firma": fk, "user": str(tr_info[mover].get("user")), "richtung": richtung[mover], "key": mover,
-                         "von": von, "nach": float(out[mover]), "anker": anker, "anker_id": anker_id})
+                # der spätere rückt an den Anker; ein fester Anker bewegt sich nie
+                if pk is None or pm <= m:
+                    mover, anker, anker_id = k, pm, pid
+                else:
+                    mover, anker, anker_id = pk, m, k
+                if frueh is not None and anker + AP_PAAR_ABSTAND[1] < float(frueh) - 1e-9:
+                    continue                           # Anker vorbei — Partner könnte nur in die Vergangenheit rücken
+                ziel = None
+                for _ in range(24):
+                    z = anker + rnd.uniform(*AP_PAAR_ABSTAND)
+                    if frei(mover, z):
+                        ziel = z
+                        break
+                if ziel is None:
+                    continue
+                von = float(out[mover])
+                verschieben(mover, ziel)
+                vergeben.update({k, pid})
+                info.append({"firma": fk, "user": str(tr_info[mover].get("user")), "richtung": richtung[mover], "key": mover,
+                             "von": von, "nach": float(out[mover]), "anker": anker, "anker_id": anker_id})
+                break
     return out, info
 
 
@@ -20153,7 +20165,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     # Anker + 2–10 min (Zufall je Paar). Schon geplante Trades des Tages sind feste Anker; PC ± 3 min, Firma 1 min zu anderen IDs,
     # Fenster der Tranche und Richtungsschutz am neuen Start bleiben. Was keinen Partner findet, bleibt stehen.
     try:
-        minuten, paare_info = ap_paare_legen(minuten, richtung, tr_info, bestehend_pc, firma_fest, rnd, ohne=ap_waage_ohne_liste({"param": param}))
+        minuten, paare_info = ap_paare_legen(minuten, richtung, tr_info, bestehend_pc, firma_fest, rnd, ohne=ap_waage_ohne_liste({"param": param}),
+                                             frueh=frueh)      # 19.10.2026: Anker nur in der Zukunft (Nachplanen am Nachmittag)
         if paare_info:
             print(f"[auto-plan] {tag} Paare: " + " · ".join(f"{p['firma']} {p['user']} {p['richtung']} {_ap_hhmm_txt(p['von'])}→{_ap_hhmm_txt(p['nach'])}" for p in paare_info), flush=True)
     except Exception as e:

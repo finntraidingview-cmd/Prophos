@@ -62,6 +62,23 @@ def main():
         _o, i8 = P({"k1": 316.0, "k3": 362.0}, {"k1": "sell", "k3": "buy"}, {"k1": TI("mike"), "k3": TI("moritz")}, [], [], random.Random(seed))
         abst.append(round(i8[0]["nach"] - 316.0, 2))
     check(min(abst) >= 2.0 and max(abst) <= 10.0 and len(set(abst)) >= 20 and max(abst) - min(abst) >= 4, f"Abstände gestreut {min(abst)}–{max(abst)} ({len(set(abst))} Werte)")
+    # 10) ANKER NUR IN DER ZUKUNFT (19.10.2026, Aurel 19:27 Dubai = 17:27 dt, frueh = 17:42 dt = 1062): feste Tradeify-Anker 17:00 / 15:47 / 16:16 dt
+    #     (Short/Long/Short) sind vorbei → kein Paar, die neuen Pläne behalten ihre Startzeit (≥ frueh); nie eine Zeit < frueh
+    fest10 = [{"user_id": "mike", "firma": "tradeify", "richtung": "sell", "start": 1020.0, "route": "tvv2"},
+              {"user_id": "marc", "firma": "tradeify", "richtung": "buy", "start": 947.0, "route": "tvv2"},
+              {"user_id": "ina", "firma": "tradeify", "richtung": "sell", "start": 976.0, "route": "tvv2"}]
+    m10 = {"a1": 1075.0, "a2": 1130.0}
+    out10, info10 = P(m10, {"a1": "buy", "a2": "sell"}, {"a1": TI("aurel"), "a2": TI("aurel")}, [], fest10, random.Random(10), ohne=("apex",), frueh=1062.0)
+    check(info10 == [] and out10 == m10, f"Anker in der Vergangenheit: kein Paar, Startzeiten bleiben ({out10})")
+    # 10b) derselbe Lauf, aber ein ZUKÜNFTIGER fester Gegen-Trade (Moritz Short 18:10 dt = 1090) → Aurels Long rückt auf 1092–1100, nie unter frueh
+    out10b, info10b = P(m10, {"a1": "buy", "a2": "sell"}, {"a1": TI("aurel"), "a2": TI("aurel")}, [], fest10 + [{"user_id": "moritz", "firma": "tradeify", "richtung": "sell", "start": 1090.0, "route": "tvv2"}], random.Random(10), ohne=("apex",), frueh=1062.0)
+    check(len(info10b) == 1 and info10b[0]["key"] == "a1" and 1092.0 <= out10b["a1"] <= 1100.0 and info10b[0]["anker_id"] == "fest:3", f"vergangene Anker übersprungen, Paar mit dem zukünftigen Short ({out10b['a1']})")
+    # 10c) Anker knapp vorbei (frueh − 5): nur Ziele ≥ frueh sind frei → nach rückt auf ≥ frueh, nie darunter
+    treffer = [P({"a1": 1200.0}, {"a1": "buy"}, {"a1": TI("aurel")}, [], [{"user_id": "mike", "firma": "tradeify", "richtung": "sell", "start": 1057.0, "route": "tvv2"}], random.Random(s), frueh=1062.0) for s in range(20)]
+    check(all((not i) or (o["a1"] >= 1062.0 and o["a1"] <= 1067.0) for o, i in treffer) and any(i for _o, i in treffer), "Anker knapp vorbei: Partner rückt nur auf ≥ frueh (jetzt + Vorlauf)")
+    # 10d) ohne frueh (Nachtlauf) alles wie bisher
+    out10d, info10d = P({"k1": 500.0}, {"k1": "buy"}, {"k1": TI("mike")}, [], [{"user_id": "ina", "firma": "tradeify", "richtung": "sell", "start": 300.0, "route": "tvv2"}], random.Random(4))
+    check(len(info10d) == 1 and 302.0 <= out10d["k1"] <= 310.0, "ohne frueh (Nachtlauf) unverändert")
     # 9) gleicher rnd → gleiches Ergebnis (Probelauf = Anlegen)
     a = P(minuten, richtung, tr, [], [], random.Random(9))[0]; b = P(minuten, richtung, tr, [], [], random.Random(9))[0]
     check(a == b, "deterministisch je Seed")
