@@ -4075,8 +4075,22 @@
   #dashboard-view .wdl-og3-erledigt{--wdl-og:#ea580c}
   #dashboard-view .wdl-og3-bestanden{--wdl-og:#15803d}
   #dashboard-view .wdl-og3-leer{padding:10px 4px;font-size:12.5px;color:var(--sub)}
-  #dashboard-view .wdl-verlauf{display:block;width:100%;margin-top:12px;padding:8px;border:1px dashed var(--border);border-radius:10px;background:none;font:inherit;font-size:12px;color:var(--sub);cursor:pointer}
-  #dashboard-view .wdl-verlauf:hover{color:var(--ink-2);border-color:var(--sub)}
+  /* VERLAUF ganz unten (19.10.2026, Finn am Radar .1627: „ganz unten die vergangenen Trades sehen, nach Personen und nach IDs
+     filtern, eher optional, mit einem Schalter alle ausblenden"): vierte Übergruppe unter Bestanden statt des gestrichelten Knopfs
+     am Ende von Erledigt (.1510). Schalter (.switch) rechts im Kopf; aus = nur die Kopfzeile mit der Zahl. Darunter zwei Chip-Reihen
+     (Person · Konto) wie die ID-Leiste, dann der Kasten „Abgehakt" mit den gewohnten Zeilen. */
+  #dashboard-view .wdl-og3-verlauf{--wdl-og:var(--sub)}
+  #dashboard-view .wdl-og3-verlauf.is-zu{padding-bottom:14px}
+  #dashboard-view .wdl-og3-verlauf.is-zu .wdl-og3-kopf{margin-bottom:0}
+  #dashboard-view .wdl-og3-verlauf .wdl-og3-kopf small{margin-left:0}
+  #dashboard-view .wdl-vl-schalter{display:inline-flex;align-items:center;gap:8px;margin-left:auto;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;white-space:nowrap}
+  #dashboard-view .wdl-vl-filter{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:0 2px 8px;font-size:11.5px;color:var(--sub)}
+  #dashboard-view .wdl-vl-filter > i{flex:none;min-width:48px;font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)}
+  #dashboard-view .wdl-vl-filter .adm-vl-chip{padding:1px 6px;white-space:nowrap}
+  #dashboard-view .wdl-vl-filter .adm-vl-chip b{margin-left:5px;font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-vl-filter .adm-dot{width:7px;height:7px;border-radius:50%;margin-right:5px}
+  #dashboard-view .wdl-vl-filter + .wdl-tab,#dashboard-view .wdl-vl-filter + .wdl-og3-leer{margin-top:4px}
+  @media (max-width: 767px){ #dashboard-view .wdl-vl-filter{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none} #dashboard-view .wdl-og3-verlauf .wdl-og3-kopf small{display:none} }
   @media (max-width: 767px){ #dashboard-view .wdl-og3{padding:12px 10px 14px} #dashboard-view .wdl-og3-kopf b{font-size:17px} #dashboard-view .wdl-og3-kopf small{display:none} }
   /* Bestanden/Ziel erreicht als kleiner Chip (09.10.2026) — nur Optik, Knopf „Nächste Phase →" und Handler unverändert */
   #dashboard-view .wdl-bestanden{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;background:rgba(21,128,61,.10);font-size:11.5px;font-weight:600;line-height:1.5}
@@ -29634,7 +29648,8 @@
    * bzw. Liquidationswerte von NQ … der Trade wird als Demo in Prophos genauso ausgeführt … 1–30 min danach liest Puls die neue Live-Balance" — seit 26.09.2026 spät 1–150 min).
    * Daten: GET /admin/live-trades (Railway, alle IDs; Demo rechnet das Backend aus den Reader-Minutenkerzen). Takt 15 s nur, solange die View
    * offen ist; Kurs jetzt = wdKursJetzt, sonst der jüngste tv_kurse-Stand. Eigene Verdrahtung, eigene IDs wdl-*. ========== */
-  const wdl = { tage: 2, daten: null, fehler: '', timer: null, laedt: false, kurs: null, person: null, linien: new Map() }
+  const wdl = { tage: 2, daten: null, fehler: '', timer: null, laedt: false, kurs: null, person: null, linien: new Map(),
+    verlauf: { an: false, person: null, konto: null } }   // Verlauf-Block unten (19.10.2026): Schalter + eigene Filter, nur im Speicher
   /* CHART + ID-LEISTE (26.09.2026, F6, Finn am Screenshot Build .635). Farben: ursprünglich je TRADE eine eigene und je ID die
    * Personen-Farbe — seit 30.09.2026 nur noch Farbe = ID über idFarbe. Linien: Klick auf eine Zeile schaltet um (wdl.auswahl).
    * Level von NQ-Trades gelten auf dem MNQ-Chart 1:1 (gleicher Basiswert). */
@@ -31029,8 +31044,9 @@
     const istBest = t => !wdlGeparkt(t) && !!wdlBestandenChip(t) && !t.tage_mini, ohneBest = arr => arr.filter(t => !istBest(t))   // .1509: Bestanden = eine Gruppe
     // DREI ÜBERGRUPPEN (Finn 13.10.2026 abends, Radar .1510: „zu unübersichtlich, alles auf eine Seite geklatscht"): Läuft (Trades am
     // Markt) · Erledigt (zu, braucht noch einen Handgriff: Abhaken oben, darunter Wartet, Geblowt, Manuelle Arbeit, Geparkt) · Bestanden
-    // (Trade abhaken · Tage sammeln · Review). Die abgehakten Trades (früher „Erledigt · 137") sind aus dem Blick — nur noch ein
-    // zugeklappter „Verlauf" am Ende von Erledigt (wdl.alleZu.verlauf). Zeilen, Knöpfe, Drag-Ziele unverändert.
+    // (Trade abhaken · Tage sammeln · Review). Die abgehakten Trades (früher „Erledigt · 137") sind aus dem Blick — seit 19.10.2026
+    // als vierte Übergruppe „Verlauf" ganz unten mit Schalter (verlaufOg; davor .1510–.1627 ein zugeklappter Knopf am Ende von
+    // Erledigt). Zeilen, Knöpfe, Drag-Ziele unverändert.
     const og3 = (titel, anz, hinweis, cls, inhalt) => !inhalt ? '' : `<section class="wdl-og3 ${cls}"><div class="wdl-og3-kopf"><b>${titel}</b><span>${anz}</span><small>${hinweis}</small></div>${inhalt}</section>`
     const gruppen = (arr, alleArr) => {
       const g = teile(arr), a = teile(alleArr)
@@ -31041,10 +31057,39 @@
       // GEPARKT IST WEG (.1514, Finn 13.10.2026: „das Geparkt brauchen wir nicht mehr, wurde ersetzt"): geparkte Trades (manuell.schritt
       // 'geparkt', Knopf heißt jetzt „→ Review") stehen in Bestanden → Review — dort warten sie auf die neuen Kontodaten der Firma.
       void gepA
-      const verlaufAuf = !!(wdl.alleZu || {}).verlauf
-      const verlauf = !g.er.length ? '' : verlaufAuf
-        ? gruppe('Verlauf · abgehakt', nachEnde(g.er), kopf4, 'wdl-tab-konto wdl-tab-sek-erledigt', 'erledigt', a.er) + `<button type="button" class="wdl-verlauf" data-wdl-mehr="verlauf">Verlauf zuklappen</button>`
-        : `<button type="button" class="wdl-verlauf" data-wdl-mehr="verlauf">Verlauf · ${g.er.length} abgehakte Trades zeigen</button>`
+      // VERLAUF (19.10.2026, Finn am Radar .1627: „ganz unten … die vergangenen Trades sehen, hier nach Personen und nach IDs filtern,
+      // eher optional, mit so einem Slider alle ausblenden"): vierte Übergruppe unter Bestanden. Grundmenge = alle abgehakten Trades
+      // im Zeitraum OHNE den Personen-Filter des Radars (a.er) — die Chips hier sind ein eigener Filter (wdl.verlauf.person/konto),
+      // damit man den Verlauf einer anderen ID sieht, ohne oben umzuschalten. „IDs" = die Konten (…8247): Konto-Chips nur zur
+      // gewählten Person, sonst aller; Punkt in der ID-Farbe. Schalter aus (Standard, nur im Speicher) = nur die Kopfzeile mit der Zahl.
+      const verlaufOg = er => {
+        const V = wdl.verlauf || (wdl.verlauf = { an: false, person: null, konto: null })
+        const kontoKey = t => { const k = t.konto || {}; return String(k.name || `${k.firma || '?'} …${k.kontonr_ende || ''}`) }
+        const kontoTxt = t => { const k = t.konto || {}; return `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
+        if(V.person && !er.some(t => wdlUid(t) === V.person)) V.person = null   // Filter auf eine ID ohne Trades im Zeitraum fällt
+        const nachPerson = V.person ? er.filter(t => wdlUid(t) === V.person) : er
+        if(V.konto && !nachPerson.some(t => kontoKey(t) === V.konto)) V.konto = null
+        const gefiltert = V.konto ? nachPerson.filter(t => kontoKey(t) === V.konto) : nachPerson
+        const schalter = `<label class="wdl-vl-schalter" title="${V.an ? 'Verlauf ausblenden' : 'Verlauf einblenden'}"><span>${V.an ? 'eingeblendet' : 'ausgeblendet'}</span><span class="switch"><input type="checkbox" data-wdl-verlauf-an${V.an ? ' checked' : ''}><span class="switch-slider"></span></span></label>`
+        const kopf = `<div class="wdl-og3-kopf"><b>Verlauf</b><span>${er.length}</span><small>abgehakte Trades im Zeitraum${V.an && gefiltert.length !== er.length ? ` · ${gefiltert.length} im Filter` : ''}</small>${schalter}</div>`
+        if(!V.an) return `<section class="wdl-og3 wdl-og3-verlauf is-zu">${kopf}</section>`
+        const chip = (key, an, html, titel, attr) => `<button type="button" class="adm-vl-chip${an === null ? '' : an ? ' is-on' : ' is-off'}" ${attr}="${escapeHtml(key)}" title="${escapeHtml(titel)}">${html}</button>`
+        // Personen-Chips: jede ID mit abgehakten Trades, Zahl = Trades dieser ID (ohne Filter), nach Anzahl
+        const jeP = new Map(); for(const t of er){ const u = wdlUid(t); const x = jeP.get(u) || { name: t.person || '?', n: 0 }; x.n++; jeP.set(u, x) }
+        const reiheP = [...jeP.keys()].sort((a, b) => (jeP.get(b).n - jeP.get(a).n) || String(jeP.get(a).name).localeCompare(String(jeP.get(b).name), 'de'))
+        const chipsP = reiheP.map(u => { const x = jeP.get(u), an = V.person === u
+          return chip(u, V.person ? an : null, `<span class="adm-dot" style="background:${idFarbe(u)}"></span><span class="nm">${escapeHtml(String(x.name))}</span><b>${x.n}</b>`, an ? 'Filter aufheben — alle IDs' : `${x.n} abgehakt — nur diese ID zeigen`, 'data-wdl-vl-person') }).join('')
+        // Konto-Chips: Konten der gewählten ID (sonst aller IDs), Punkt in der ID-Farbe, Zahl = Trades dieses Kontos
+        const jeK = new Map(); for(const t of nachPerson){ const k = kontoKey(t); const x = jeK.get(k) || { txt: kontoTxt(t), uid: wdlUid(t), n: 0 }; x.n++; jeK.set(k, x) }
+        const reiheK = [...jeK.keys()].sort((a, b) => (jeK.get(b).n - jeK.get(a).n) || jeK.get(a).txt.localeCompare(jeK.get(b).txt, 'de'))
+        const chipsK = reiheK.map(k => { const x = jeK.get(k), an = V.konto === k
+          return chip(k, V.konto ? an : null, `<span class="adm-dot" style="background:${idFarbe(x.uid)}"></span><span class="nm">${escapeHtml(x.txt)}</span><b>${x.n}</b>`, an ? 'Filter aufheben — alle Konten' : `${x.n} abgehakt — nur dieses Konto zeigen`, 'data-wdl-vl-konto') }).join('')
+        const filter = (reiheP.length > 1 || V.person ? `<div class="wdl-vl-filter" data-wdl-kp="verlauf-person"><i>Person</i>${chipsP}</div>` : '')
+          + (reiheK.length > 1 || V.konto ? `<div class="wdl-vl-filter" data-wdl-kp="verlauf-konto"><i>Konto</i>${chipsK}</div>` : '')
+        // alleArr [] = keine Personen-Chips im Kastenkopf (die stehen oben als eigener Filter); 'verlauf' = Schlüssel für „alle N zeigen"
+        const tab = gruppe('Abgehakt', nachEnde(gefiltert), kopf4, 'wdl-tab-konto wdl-tab-sek-erledigt', 'verlauf', []) || '<div class="wdl-og3-leer">Keine abgehakten Trades im Zeitraum.</div>'
+        return `<section class="wdl-og3 wdl-og3-verlauf">${kopf}${filter}${tab}</section>`
+      }
       const erledigtN = norm.length + g.wa.length + blow.length + g.ma.length
       const erledigt = gruppe('Abhaken', nachEnde(norm), kopf4, 'wdl-tab-konto wdl-tab-sek-pruef', null, normA)
         + gruppe('Wartet auf Balance', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
@@ -31052,8 +31097,9 @@
         + manuell(g, a)
       const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep))
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
-        + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt', (erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>') + verlauf)
+        + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
         + og3('Bestanden', best.n, 'Trade abhaken → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
+        + verlaufOg(a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
     const kpScroll = new Map([...liste.querySelectorAll('[data-wdl-kp]')].map(e => [e.getAttribute('data-wdl-kp'), e.scrollLeft]))
@@ -31085,6 +31131,11 @@
     // Personen-Chip im Gruppen-Kopf (05.10.2026): derselbe Filter wie die ID-Leiste oben
     const kp = ev.target.closest('[data-wdl-person]')
     if(kp){ wdlPersonUmschalten(kp.getAttribute('data-wdl-person')); return }
+    // Verlauf-Filter (19.10.2026): eigener Zustand wdl.verlauf, zweiter Klick hebt auf; Konto-Filter, der zur neuen Person nicht passt, fällt in verlaufOg
+    const vp = ev.target.closest('[data-wdl-vl-person]')
+    if(vp){ const u = vp.getAttribute('data-wdl-vl-person'); wdl.verlauf.person = wdl.verlauf.person === u ? null : u; wdlRender(); return }
+    const vk = ev.target.closest('[data-wdl-vl-konto]')
+    if(vk){ const k = vk.getAttribute('data-wdl-vl-konto'); wdl.verlauf.konto = wdl.verlauf.konto === k ? null : k; wdlRender(); return }
     const m = ev.target.closest('[data-wdl-mehr]')
     if(m){ const k = m.getAttribute('data-wdl-mehr'); wdl.alleZu = Object.assign({}, wdl.alleZu, { [k]: !(wdl.alleZu || {})[k] }); wdlRender(); return }
     // „Jetzt lesen" (Wartet) und „Abhaken" (Überprüfen), 30.09.2026 — vorhandene Wege, keine Auswahl der Zeile
@@ -31145,6 +31196,11 @@
         if(slot) window.scrollTo({ top: Math.max(0, slot.getBoundingClientRect().top + window.scrollY - (bar ? bar.getBoundingClientRect().height : 50) - 8), behavior: 'smooth' })
       }, 80)
     }
+  })
+  // Verlauf-Schalter (19.10.2026): eigene Verdrahtung am Listen-Container (kein Sammel-Handler); Zustand nur im Speicher, Seite neu = aus
+  document.getElementById('wdl-liste')?.addEventListener('change', ev => {
+    const s = ev.target.closest && ev.target.closest('[data-wdl-verlauf-an]'); if(!s) return
+    wdl.verlauf.an = !!s.checked; wdlRender()
   })
   // Notiz-Feld (Manuelle Arbeit, 08.10.2026): Enter = speichern (leer erlaubt), Esc = abbrechen — frisch abgelegt heißt Esc: nichts
   // geschrieben, die Zeile steht wieder in „Überprüfen"; bei einer bestehenden Notiz bleibt die alte.
@@ -44596,7 +44652,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1627'
+  const OS_TAB_BUILD = '2026-09-22.1628'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -70523,8 +70579,9 @@
 :where([data-theme=dark]) #dashboard-view .wdl-og3-erledigt{--wdl-og:#f58347}
 :where([data-theme=dark]) #dashboard-view .wdl-og3-bestanden{--wdl-og:#6ae799}
 :where([data-theme=dark]) #dashboard-view .wdl-og3-leer{color:var(--sub)}
-:where([data-theme=dark]) #dashboard-view .wdl-verlauf{border-color:var(--border);background-color:transparent;color:var(--sub)}
-:where([data-theme=dark]) #dashboard-view .wdl-verlauf:hover{color:var(--ink-2);border-color:var(--sub)}
+:where([data-theme=dark]) #dashboard-view .wdl-og3-verlauf{--wdl-og:var(--sub)}
+:where([data-theme=dark]) #dashboard-view .wdl-vl-schalter,:where([data-theme=dark]) #dashboard-view .wdl-vl-filter{color:var(--sub)}
+:where([data-theme=dark]) #dashboard-view .wdl-vl-filter > i{color:var(--sub-2)}
 :where([data-theme=dark]) #dashboard-view .wdl-bestanden,:where([data-theme=dark]) #dashboard-view .wdl-ziel-txt b{background-color:rgba(21,128,61,.10)}
 :where([data-theme=dark]) #dashboard-view .tc-zl{border-color:var(--border-soft);background-color:var(--bg)}
 :where([data-theme=dark]) #dashboard-view .tc-zl > .wdl-mb:first-child{border-top-color:currentcolor}
