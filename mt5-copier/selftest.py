@@ -377,6 +377,25 @@ def main():
         results.append(prov(
             "PROVISION: existierende config-ftmo1.json blockiert das Anlegen",
             lambda: any("bereits angelegt" in p for p in probs2)))
+        # 29a) Gleicher Name, anderer Login (19.10.2026, Marcos FTMO-Fall): kein
+        # "bereits angelegt" mehr, sondern "Name vergeben" — und ein Login, der
+        # schon unter anderem Namen laeuft, wird genannt.
+        _json.dump({"master_expected_login": 14335517},
+                   open(os.path.join(td, "config-100kPhase1.json"), "w"))
+        probs3 = provision.plan_checks(td, "100kPhase1", "511450116", "Srv", None)
+        results.append(prov(
+            "PROVISION: gleicher Name + anderer Login = 'schon vergeben', nicht 'bereits angelegt'",
+            lambda: any("schon vergeben" in p and "14335517" in p for p in probs3)
+                    and not any("bereits angelegt" in p for p in probs3)))
+        probs4 = provision.plan_checks(td, "100kPhase1", "14335517", "Srv", None)
+        results.append(prov(
+            "PROVISION: gleicher Name + gleicher Login = 'bereits angelegt'",
+            lambda: any("bereits angelegt" in p for p in probs4)
+                    and not any("schon angelegt (" in p for p in probs4)))
+        probs5 = provision.plan_checks(td, "FNF17", "14335517", "Srv", None)
+        results.append(prov(
+            "PROVISION: bekannter Login unter neuem Namen nennt die vorhandene Config",
+            lambda: any("schon angelegt (config-100kPhase1.json)" in p for p in probs5)))
 
     # 29b) Trade-Fenster (25.08.2026, Finns Ansage: Copier nicht 24/7 scharf):
     # 'laufend' oeffnet immer, 'geplant' nur frisch (<= 6h), 'beendet' und

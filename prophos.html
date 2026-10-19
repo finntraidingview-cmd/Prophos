@@ -44664,7 +44664,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1631'
+  const OS_TAB_BUILD = '2026-09-22.1632'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -65708,9 +65708,19 @@
     const a = (accounts || []).find(x => String(x.id) === prefillSel.value)
     if(!a || !a.creds) return
     const set = (k, v) => { const el = addBg.querySelector(`[data-mtcp="${k}"]`); if(el) el.value = v }
-    // Leerzeichen bleiben erhalten (display_name) — nur Sonderzeichen fliegen raus
-    const slug = String(a.name || '').replace(/[^A-Za-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24)
-    set('name', slug || String(a.creds.login).replace(/[^A-Za-z0-9]/g, '').slice(0, 24))
+    // Leerzeichen bleiben erhalten (display_name) — nur Sonderzeichen fliegen raus.
+    // Kontonummer gehört in den Namen (19.10.2026, Marcos FTMO-Fall): „100k → Phase 1"
+    // ergab denselben Slug wie das FundedNext-Konto „100k Phase 1" → Panel meldete
+    // „bereits angelegt", obwohl das FTMO-Konto im Echo fehlte. Steht der Login noch
+    // nicht im Namen, kommt er hinter das erste Wort: „100k 511450116 Phase 1".
+    const _login = String(a.creds.login || '').replace(/[^0-9]/g, '')
+    let slug = String(a.name || '').replace(/[^A-Za-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+    if(_login && slug && !slug.includes(_login)){
+      const _w = slug.split(' ')
+      slug = [_w[0], _login, ..._w.slice(1)].join(' ')
+    }
+    slug = slug.slice(0, 24).trim()
+    set('name', slug || _login.slice(0, 24))
     set('login', String(a.creds.login))
     // Gespeichertes Passwort NIE sichtbar auf den Schirm bringen (Review-Fund
     // 15.08.2026): beim Prefill auf type=password stellen — wer von Hand tippt,

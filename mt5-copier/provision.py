@@ -288,6 +288,28 @@ def server_name_variants(server):
     return out
 
 
+def config_login(path):
+    """master_expected_login einer config-Datei, 0 wenn unlesbar/leer."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return int(json.load(f).get("master_expected_login") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+def config_file_for_login(folder, login):
+    """Dateiname der Instanz-Config, die diesen Master-Login schon fuehrt —
+    None, wenn keine. Vorlagen (config.json/config.vorlage.json/config.example.json)
+    zaehlen nicht: sie tragen keinen echten Master."""
+    for fn in sorted(os.listdir(folder)):
+        low = fn.lower()
+        if not (low.startswith("config-") and low.endswith(".json")):
+            continue
+        if config_login(os.path.join(folder, fn)) == int(login):
+            return fn
+    return None
+
+
 def plan_checks(folder, name, login, server, template_exe):
     """Alle Vorbedingungen VOR dem ersten Schreibzugriff. Liste von Problemen."""
     problems = []
@@ -301,10 +323,31 @@ def plan_checks(folder, name, login, server, template_exe):
         problems.append(f"Login '{login}' ist keine Zahl.")
     if not (server or "").strip():
         problems.append("Server fehlt (z.B. FusionMarkets-Demo).")
+    # Doppelt-Pruefung in zwei Richtungen (19.10.2026, Marcos FTMO-Fall): der
+    # Kurzname wird aus dem Prophos-Kontonamen gebaut, und „100k → Phase 1" (FTMO)
+    # ergab denselben Slug wie das FundedNext-Konto „100k Phase 1" — die Meldung
+    # „bereits angelegt" war falsch, das FTMO-Konto gab es im Echo gar nicht.
+    # Deshalb: gleicher Name + GLEICHER Login = wirklich schon da; gleicher Name
+    # + anderer Login = Name vergeben, anderen Namen waehlen; und ein Login, der
+    # schon unter anderem Namen laeuft, wird ebenfalls gemeldet.
+    try:
+        _login_int = int(login)
+    except (TypeError, ValueError):
+        _login_int = 0
     if name_ok(name):
         cfg_path = os.path.join(folder, f"config-{name}.json")
         if os.path.exists(cfg_path):
-            problems.append(f"config-{name}.json existiert schon — Account ist bereits angelegt.")
+            _other = config_login(cfg_path)
+            if _other and _login_int and _other != _login_int:
+                problems.append(f"Name '{name}' ist auf diesem PC schon vergeben "
+                                f"(config-{name}.json gehoert Login {_other}) — "
+                                f"anderen Namen waehlen, z.B. mit Kontonummer.")
+            else:
+                problems.append(f"config-{name}.json existiert schon — Account ist bereits angelegt.")
+    if _login_int:
+        _vorhanden = config_file_for_login(folder, _login_int)
+        if _vorhanden and _vorhanden != f"config-{name}.json":
+            problems.append(f"Login {login} ist auf diesem PC schon angelegt ({_vorhanden}).")
     if not template_exe or os.path.basename(template_exe).lower() != "terminal64.exe":
         problems.append("Vorlage muss eine terminal64.exe sein (master_terminal_path in config.json bzw. config.vorlage.json).")
     elif not os.path.exists(template_exe):
