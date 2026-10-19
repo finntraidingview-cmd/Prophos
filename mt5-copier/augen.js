@@ -23,7 +23,8 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.8.2';   // 0.8.2 (13.10.2026, Routine „Puls-Fehler", „Go ad-free. Everywhere" 34× in 24 h auf 3 PCs): xIn findet das X eines Vollbild-Dialogs an seiner Karte und auch ein namenloses X (nur Symbol) — s. Kommentar an xIn
+  var VERSION = '0.8.3';   // 0.8.3 (19.10.2026, Finn: TradingView-Update, Konto-Umschalter zeigt jetzt „KENNUNG  153,462.72 USD" in eigenen spans, Puls-Fehlstarts auf 4 PCs „der hat nur APEX6687940000016100" / „aktiv APEX670837000000698,115.70USD"): txtK — Konto-Texte aus den Textknoten MIT Leerzeichen zusammensetzen (textContent klebte Kennung und Balance aneinander, der Bot las die Balance-Ziffern als Teil der Kontonummer); aktiv-Abgleich der Listenzeilen nur noch über die Kontonummer; listeVoll erlaubt Zeilen bis 6 Ebenen unter dem Listen-Container (neues Dropdown „ACCOUNTS" verschachtelt tiefer: „Zeile liegt 5 Ebenen unter dem Vorfahren" → kein Login-Beleg); gekürzte Kennung „FTDFYSLX1507984146…" (title/aria-label mit voller Nummer wird bevorzugt)
+    // 0.8.2 (13.10.2026, Routine „Puls-Fehler", „Go ad-free. Everywhere" 34× in 24 h auf 3 PCs): xIn findet das X eines Vollbild-Dialogs an seiner Karte und auch ein namenloses X (nur Symbol) — s. Kommentar an xIn
     // 0.8.1 (08.10.2026, Slave 1, Puls-Fehler pc-2zc2we 13:25 + pc-usq1i6 13:28 UTC „'Take profit' steht nicht auf $ (Einheit '?')"): TradingView rollt je Konto/Browser eine neue Beschriftung aus — „Take profit $" / „Stop loss $" (mit ▾-Wähler) statt „Take profit, $"; tp/sl.einheit liest jetzt beide Formen (Komma ODER Leerzeichen vor der Einheit, ▾ weg, USD → $)   // 0.8.0 (08.10.2026, Slave-Terminal 3, Auftrag Master: Apex-Logins mit vielen Konten, Liste scrollbar): konto_scroll(aktion) — die offene Konto-Liste abschnittsweise lesen: 'anfang' scrollt den Container nach oben, 'schritt' liest die sichtbaren Zeilen und scrollt dann einen Schritt weiter, mit Mitschrift der Scrollposition (vorher/nachher/hoehe/sicht/ende). Scrollt nur den Listen-Container, klickt nie; der Bot führt Abschnitte zusammen und schließt die Liste wie heute mit Esc   // 0.7.9 (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf 4 PCs): maus() — wo die Seite den Zeiger zuletzt sah (mousemove-Mitschrift, einmal je Seite installiert), damit der Bot vor dem Hover-Riegel unterscheiden kann „Bewegung kam nie an" (sofort frisch bewegen) und „Ziel bewegt sich unter dem Zeiger"   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
     // 0.7.7 (05.10.2026): Kontonummern mit nur 4 Endziffern (mindestens 10 Buchstaben davor) zählen als Konto-Zeile und Umschalter (kontoNrAus, RX_KONTO) — vorher „0x im Dropdown“. 0.7.6 (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab"): konto.liste_kurz — eine kurze Liste (≤ 8 Zeilen) mit Platz darüber und darunter ist ganz zu sehen, auch wenn listeVoll am Container scheitert; konto.liste_voll_grund nennt, woran
     // 0.7.5 (02.10.2026, Finn + Pascal): Kontonummern mit 5 End-Ziffern (FundedNext Futures) — Umschalter nach dem Login sonst „kein Konto“
@@ -48,6 +49,18 @@ var PROPHOS_AUGEN = (function () {
   }
   // textContent statt innerText: innerText braucht Layout und liefert in einem verdeckten Tab Leeres (Reader-Fund 01.09.2026)
   function txt(el) { return String((el && el.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  // 0.8.3 (19.10.2026): Text aus den einzelnen Textknoten, MIT Leerzeichen dazwischen. textContent kennt keine Grenzen zwischen
+  // spans — der neue Konto-Umschalter („TDFYSL150570939125" · „153,462.72" · „USD" in drei spans) wurde so zu
+  // 'TDFYSL150570939125153,462.72USD', und der Bot hielt die Balance-Ziffern für das Ende der Kontonummer. Nur für Konto-Texte.
+  function txtK(el) {
+    if (!el) return '';
+    var teile = [];
+    try {
+      var lauf = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), k;
+      while ((k = lauf.nextNode())) { var v = String(k.nodeValue || '').replace(/\s+/g, ' ').trim(); if (v) teile.push(v); }
+    } catch (_) { return txt(el); }
+    return teile.join(' ').replace(/\s+/g, ' ').trim();
+  }
   function wert(el) {
     if (!el) return '';
     if (typeof el.value === 'string') return el.value.trim();
@@ -419,7 +432,10 @@ var PROPHOS_AUGEN = (function () {
         if (pr.bottom > H + 1 || pr.top < -1) return nein('Wrapper ragt aus dem Fenster');
         if (/(auto|scroll|hidden)/.test(ps.overflowY + ' ' + ps.overflow) && p.scrollHeight > p.clientHeight + 2) return nein('Wrapper scrollt (' + p.scrollHeight + ' > ' + p.clientHeight + ')');
       }
-      if (t > 2) return nein('Zeile liegt ' + (t + 1) + ' Ebenen unter dem Vorfahren');                                             // t = Ebenen ZWISCHEN Zeile und Vorfahr (höchstens 3 Schritte)
+      // 0.8.3 (19.10.2026): bis 6 Ebenen — das neue Dropdown „ACCOUNTS" (TradingView-Update) verschachtelt die Zeilen tiefer, 11 Apex-
+      // Zeilen ganz im Bild galten mit „Zeile liegt 5 Ebenen unter dem Vorfahren" als unvollständig → kein Login-Beleg, kein Wechsel.
+      // Die Scroll-/Wrapper-Prüfung je Ebene oben bleibt — sie, nicht die Ebenenzahl, erkennt eine abgeschnittene Liste.
+      if (t > 5) return nein('Zeile liegt ' + (t + 1) + ' Ebenen unter dem Vorfahren');                                             // t = Ebenen ZWISCHEN Zeile und Vorfahr (höchstens 6 Schritte)
     }
     // Prüfer Runde 2 (30.09.2026): nicht beim ersten HOHEN Vorfahren aufhören, sondern auch ihn prüfen — genau der hohe Listen-Container
     // (32 Zeilen, 1024 px, Rand zufällig auf einer Zeilengrenze; virtualisierte Liste) trägt die unsichtbaren Zeilen.
@@ -433,7 +449,7 @@ var PROPHOS_AUGEN = (function () {
         if (ohne && (e === ohne || ohne.contains(e) || e.contains(ohne))) return;
         var rr = e.getBoundingClientRect();
         if (rr.height < 24 || rr.height > 44 || rr.width < 150) return;
-        var m = kontoNrAus(entdoppeln(txt(e)));
+        var m = kontoNrAus(entdoppeln(txtK(e)));
         if (m) nrs[m[0]] = 1;
       });
       if (Object.keys(nrs).length > els.length) return nein(Object.keys(nrs).length + ' Konto-Zeilen im DOM, ' + els.length + ' gemeldet');             // mehr Konto-Zeilen im DOM als gemeldet (auch unsichtbare)
@@ -464,7 +480,7 @@ var PROPHOS_AUGEN = (function () {
       if (e.closest('table,[data-name="order-panel"],#footer-chart-panel,[data-name="symbol-list-wrap"],[data-name="tree"],[data-name^="toast-group-"]')) return;
       var rr = e.getBoundingClientRect();
       if (rr.height < 24 || rr.height > 44 || rr.width < 150 || rr.width > 340) return;
-      var t = entdoppeln(txt(e)); if (t.length > 60 || /[A-Z]\d{4}\d*[.,]\d/.test(t.replace(/\s/g, ''))) return;
+      var t = entdoppeln(txtK(e)); if (t.length > 60 || /[A-Z]\d{4}\d*[.,]\d/.test(t.replace(/\s/g, ''))) return;
       var m = kontoNrAus(t);
       if (m) nrs[m[0]] = 1;
     });
@@ -479,7 +495,7 @@ var PROPHOS_AUGEN = (function () {
       var r = e.getBoundingClientRect();
       if (sr && Math.abs(r.left - sr.left) > 320) return;           // Liste klappt am Umschalter auf, nicht irgendwo im Chart
       if (r.height < 24 || r.height > 44 || r.width < 150 || r.width > 340) return;
-      var t = entdoppeln(txt(e)); if (!RX_KONTO.test(t) || t.length > 60) return;
+      var t = entdoppeln(txtK(e)); if (!RX_KONTO.test(t) || t.length > 60) return;
       if (/[A-Z]\d{4}\d*[.,]\d/.test(t.replace(/\s/g, ''))) return;    // Symbol + Kurs ohne Leerzeichen ('NQZ202630,500.75') ist kein Konto
       kand.push({ el: e, t: t, r: r });
     });
@@ -520,7 +536,7 @@ var PROPHOS_AUGEN = (function () {
     var leiste = document.getElementById('footer-chart-panel');
     var lr = leiste && sichtbar(leiste) ? leiste.getBoundingClientRect() : null;
     var kand = alle('button,[role="button"]').filter(sichtbar).filter(function (e) {
-      if (!RX_KONTO.test(txt(e) + ' ' + attr(e, 'aria-label'))) return false;
+      if (!RX_KONTO.test(txtK(e) + ' ' + attr(e, 'aria-label'))) return false;
       if (e.closest('[data-name="order-panel"],table,[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return false;
       var r = e.getBoundingClientRect();
       return lr ? (r.top >= lr.top - 4 && r.left <= lr.left + 400) : r.top > window.innerHeight * 0.3;
@@ -544,7 +560,7 @@ var PROPHOS_AUGEN = (function () {
     }
     var optEl = alle('[role="listbox"] [role="option"],[role="menu"] [role="menuitem"],[data-name="menu-inner"] [role="option"],[data-name="popup-menu-container"] [role="menuitem"]')
       .filter(sichtbar);
-    var eintraege = optEl.slice(0, 40).map(function (e) { return kurz(e); });
+    var eintraege = optEl.slice(0, 40).map(function (e) { var k = kurz(e); k.text = txtK(e).slice(0, 60); return k; });   // 0.8.3: Text mit Leerzeichen zwischen den spans
     var gruppen = [], voll = optEl.length <= 40 && listeVoll(optEl, s.el), vollGrund = voll ? '' : lvGrund, kurzOk = listeKurz(optEl, s.el);
     if (!eintraege.length) { var kl = kontoZeilen(s.el); eintraege = kl.zeilen; gruppen = kl.gruppen; voll = kl.voll; vollGrund = kl.grund; kurzOk = kl.kurz; }
     // External IDs als Text suchen (Reader-Lehre 21.09.2026: eine 17-stellige Kontonummer kann TradingView nicht umbenennen)
@@ -577,11 +593,25 @@ var PROPHOS_AUGEN = (function () {
     if (!panel) panel = tog || mgr.el ? 'unklar' : null;
     var schalter = s.el ? kurz(s.el, { quelle: s.quelle }) : null;
     // Lesung 00:22: textContent las 'PAAPEX0000000000009USDPAAPEX0000000000009USD' (versteckter Doppel-Text) — entdoppeln, Nummer extra
-    var aktivText = s.el ? entdoppeln(txt(s.el)).slice(0, 60) : '';
+    // 0.8.3 (19.10.2026): txtK statt txt — Kennung, Balance und Währung stehen seit dem TradingView-Update in eigenen spans
+    var aktivText = s.el ? entdoppeln(txtK(s.el)).slice(0, 60) : '';
+    // Gekürzte Kennung („FTDFYSLX1507984146…", 20-stellige Tradeify-Namen, Befund Chris 19.10.2026): trägt der Umschalter oder ein
+    // Kind die volle Nummer in title/aria-label, gilt die — sonst bleibt das „…" im Text stehen, der Bot wertet es dann nie als Beleg.
+    if (s.el && /…|\.\.\./.test(aktivText)) {
+      var vollNr = null;
+      [s.el].concat(alle('*', s.el)).some(function (e) {
+        var a = attr(e, 'title') + ' ' + attr(e, 'aria-label'), mm = kontoNrAus(a);
+        if (mm && !/…|\.\.\./.test(a)) { vollNr = mm[0]; return true; }
+        return false;
+      });
+      if (vollNr) aktivText = (vollNr + ' ' + aktivText.replace(/^\S+/, '')).replace(/\s+/g, ' ').trim().slice(0, 60);
+    }
     var kontonrM = kontoNrAus(aktivText);
     eintraege.forEach(function (e) { e.text = entdoppeln(e.text); });
+    // aktiv-Abgleich nur über die KONTONUMMER (0.8.3): mit der Balance im Umschalter-Text fand sich der Text nie in einer Zeile wieder
+    var n2 = (kontonrM ? kontonrM[0] : aktivText).replace(/[^a-z0-9]/gi, '').toUpperCase();
     eintraege.forEach(function (e) {
-      var n1 = String(e.text || '').replace(/[^a-z0-9]/gi, '').toUpperCase(), n2 = aktivText.replace(/[^a-z0-9]/gi, '').toUpperCase();
+      var m1 = kontoNrAus(String(e.text || '')), n1 = (m1 ? m1[0] : String(e.text || '')).replace(/[^a-z0-9]/gi, '').toUpperCase();
       e.aktiv = e['aria-selected'] === 'true' || e['aria-checked'] === 'true' || (!!n1 && !!n2 && (n1.indexOf(n2) >= 0 || n2.indexOf(n1) >= 0));
     });
     if (schalter) schalter.text = entdoppeln(schalter.text);

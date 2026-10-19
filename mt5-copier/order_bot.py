@@ -19076,13 +19076,25 @@ def cdp_konto_passt(text, ext_id):
         n = _nur_alnum(w)
         if n == e or (n.startswith(e) and n[len(e):] in ("usd", "eur", "gbp", "chf", "aud", "cad", "jpy")):
             return True
+    # 19.10.2026 (TradingView-Update; Chris pc-xxxxxx, drei Tradeify-WD-Pläne 12:07–12:13 UTC je falsch „konto_weg — vermutlich geblowt"):
+    # der Umschalter zeigt 20-stellige Tradeify-Namen gekürzt, 'FTDFYSLX1507984146… 162,850.82 USD'. Ein gekürztes Wort (direkt vor „…")
+    # passt, wenn sein Stück (≥ 14 Zeichen) der ANFANG der External ID ist — mehr zeigt TradingView nicht. augen.js 0.8.3 setzt vorher
+    # die volle Nummer aus title/aria-label ein, wenn es sie gibt; dieser Weg greift nur, wenn das „…" im Text stehen bleibt. Zwei Konten
+    # mit gleichem Stück in EINER Liste fängt cdp_konto_eintrag („nicht genau einmal").
+    for m in re.finditer(r"([A-Za-z0-9_-]+)\s*(?:…|\.{3})", str(text or "")):
+        n = _nur_alnum(m.group(1))
+        if len(n) >= 14 and len(n) < len(e) and e.startswith(n):
+            return True
     return False
 
 
 def cdp_kontonr(text):
     """REIN RECHNEND (testbar): Kontonummer aus einem Umschalter-/Listen-Text ('PAAPEX0000000000008USD' → 'PAAPEX0000000000008') | ''
-    Je Wort (Beiwerk davor wie 'Apex · PAAPEX…' klebt sonst an der Nummer, Prüfer Runde 2)."""
-    for w in re.split(r"[^A-Za-z0-9_-]+", str(text or "")):
+    Je Wort (Beiwerk davor wie 'Apex · PAAPEX…' klebt sonst an der Nummer, Prüfer Runde 2).
+    19.10.2026 (Chris, falsches konto_weg): ein gekürztes Wort ('FTDFYSLX1507984146…') ist KEINE lesbare Nummer — sonst galt das Stück als
+    fremdes Konto (cdp_ein_konto_beleg → Abmelden → nach dem eigenen Formular-Login wieder 0× → konto_weg, Konto lebte)."""
+    t = re.sub(r"[A-Za-z0-9_-]+\s*(?:…|\.{3})", " ", str(text or ""))
+    for w in re.split(r"[^A-Za-z0-9_-]+", t):
         m = k3_nr_treffer(w.upper(), am_anfang=True)
         if m:
             return m.group(0)

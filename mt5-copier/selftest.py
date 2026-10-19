@@ -4233,6 +4233,19 @@ def test_cdp_konto_regression_865():
         and not ob.cdp_ein_konto_beleg("-", "TDFYSL150200000000") and not ob.cdp_ein_konto_beleg("", "TDFYSL150200000000")
         and not ob.cdp_ein_konto_beleg("PAAPEX0000000000007USD", "PAAPEX0000000000008"),
         "Login mit einem Konto: lesbar + anderes Konto = Beleg, gleiches/unlesbares nie")
+    # 19.10.2026 (TradingView-Update, Chris 3× falsches konto_weg): gekürzte Kennung 'FTDFYSLX1507984146… 162,850.82 USD'
+    G = "FTDFYSLX1507984146"
+    chk(ob.cdp_kontonr(G + "…162,850.82USD") == "" and ob.cdp_kontonr(G + "… 162,850.82 USD") == "" and ob.cdp_kontonr(G + "...") == ""
+        and ob.cdp_kontonr("TDFYSL150518963514 150,000.00 USD") == "TDFYSL150518963514",
+        "gekürzte Kennung (…) ist keine lesbare Kontonummer; Balance mit Leerzeichen bleibt getrennt")
+    chk(ob.cdp_konto_passt(G + "… 162,850.82 USD", G + "57") and ob.cdp_konto_passt(G + "…162,850.82USD", G + "57")
+        and not ob.cdp_konto_passt(G + "… 162,850.82 USD", "FTDFYSLX150467455552") and not ob.cdp_konto_passt("FTDFYSLX1507… 1 USD", G + "57")
+        and not ob.cdp_konto_passt(G + "57 162,850.82 USD", G + "99"),
+        "gekürzte Kennung passt nur als Anfang (≥ 14 Zeichen) der External ID")
+    chk(not ob.cdp_ein_konto_beleg(G + "… 162,850.82 USD", "FTDFYSLX150467455552") and not ob.cdp_ein_konto_beleg(G + "…162,850.82USD", G + "57")
+        and ob.cdp_liste_beleg({"liste_voll": True}, G + "… 1 USD", "FTDFYSLX150467455552")[0] is False
+        and ob.cdp_gleicher_login_beleg({"liste_voll": True}, "PAAPEX6687940000001… 1 USD", "PAAPEX6687940000002")[0] is False,
+        "gekürzte Kennung ist nie ein Login-Beleg (kein Abmelden, kein konto_weg)")
     import io as _io, contextlib as _cl, json
     _n = {"n": 0}
     def _lauf_to(c):
@@ -4337,7 +4350,8 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.2'" in js, "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter")
+        and "VERSION = '0.8.3'" in js and "function txtK(el)" in js and "entdoppeln(txtK(s.el))" in js,
+        "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
     # augen.js 0.8.2 (13.10.2026, Routine Puls-Fehler, „Go ad-free. Everywhere" 34× in 24 h: „kein eindeutiges X (keins)"): Dialog-X an der Karte
     # eines Vollbild-Dialogs und namenloses Symbol-X (nur wenn einziges, unverdeckt) — Browser-Probe: node tools/selftest_augen_dialog_x.js
     chk("function karteIn(box)" in js and "function obenAn(e)" in js and "namenlos: true" in js and "{ mehrdeutig: kand.length }" in js
@@ -4484,7 +4498,7 @@ def test_cdp_konto_regression_865():
     chk("liste_voll" in js and "function listeVoll(els, ohne)" in js and "liste_voll: !!(offenListe && voll)" in js
         and "listeVoll(zeilenEl, schalterEl)" in js and js.index("if (ar.bottom > H + 1") < js.index("ab hier kein Listen-Container mehr"),
         "augen.js meldet liste_voll (auch der hohe Container wird geprüft)")
-    chk("c === document.body" in js and "if (t > 2) return nein(" in js, "listeVoll: Ausreißer außerhalb des Listen-Containers → nicht voll")
+    chk("c === document.body" in js and "if (t > 5) return nein(" in js, "listeVoll: Ausreißer außerhalb des Listen-Containers → nicht voll (0.8.3: bis 6 Ebenen)")
     # LOGIN-WECHSEL BEIM LESEN (05.10.2026, Finn: „erkennt das falsche Tradovate-Konto und bricht einfach ab") — zwei Live-Befunde:
     # (A) kurze, ganz sichtbare Liste ohne Ziel galt als „nicht vollständig" (FundedNext↔FundedNext) → kein Beleg → Abbruch;
     # (B) der Pfeil neben „Tradovate" trägt keine Beschriftung mehr → ctx None → „nicht abgemeldet".
@@ -5320,6 +5334,8 @@ def test_cdp_konto_weg():
     ein = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "ein_konto": True, "ziel_im_text": False}
     lst = {"konto_treffer": 0, "liste_aktiv": FN1 + "USD", "konto_eintraege": [FN1 + "USD", FN3 + "USD"], "ziel_im_text": False, "liste_zu": True}
     chk(W(ein, True, FN2) == (True, 1, True) and W(lst, True, FN2) == (True, 2, False), "Einzelkonto und vollständige Liste zählen")
+    chk(not W(dict(ein, liste_aktiv="FTDFYSLX1507984146… 162,850.82 USD"), True, "FTDFYSLX150467455552")[0],
+        "gekürztes aktives Konto (…) belegt nie konto_weg (Chris 19.10.2026)")
     # 09.10.2026 (Mike, hängende Liste): eine Liste zählt nur, wenn sie nach Esc wirklich zuging
     chk(not W(dict(lst, liste_zu=False), True, FN2)[0] and not W(dict(lst, liste_zu=None), True, FN2)[0]
         and not W({k: v for k, v in lst.items() if k != "liste_zu"}, True, FN2)[0], "Liste nach Esc offen/nicht lesbar → nie")
