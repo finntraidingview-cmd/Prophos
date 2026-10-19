@@ -19441,6 +19441,25 @@ def _ap_normal_auto_abhaken(plan, k):
     return True
 
 
+_ap_auto_abhaken_cache = {"bis": 0.0, "an": False}
+
+
+def ap_auto_abhaken_an():
+    """Schalter regeln.abhaken_auto (auto_plan_regeln id 1), 60 s gemerkt. Standard AUS (Finn 19.10.2026: alle Trades selbst abhaken);
+    true = Blow-Takt + Normal-Takt wie bis .1625. Nicht lesbar → aus (nie still abhaken)."""
+    jetzt = time.time()
+    if _ap_auto_abhaken_cache["bis"] > jetzt:
+        return _ap_auto_abhaken_cache["an"]
+    an = False
+    try:
+        reg = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {})
+        an = reg.get("abhaken_auto") is True
+    except Exception as e:
+        print(f"[normal-auto] ⚠️ Schalter nicht lesbar ({type(e).__name__}) — Auto-Abhaken aus", flush=True)
+    _ap_auto_abhaken_cache.update(bis=jetzt + 60, an=an)
+    return an
+
+
 def ap_normal_auto_tick():
     """Pläne in 'review' ohne Blow/Ziel automatisch abhaken (läuft direkt nach ap_blow_auto_tick, dessen Takt). → Anzahl."""
     plaene = _sb_all("trade_plans", {"select": "id,user_id,route,status,blown,master_account_id,master_name,konto_typ,mt5_baseline,"
@@ -27580,9 +27599,18 @@ def ap_loop():
         except Exception as e:
             print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
-            if ap_blow_auto_tick() is not None:   # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
-                ap_normal_auto_tick()             # danach im selben Takt: normale Trades (kein Blow, kein Ziel) abhaken (14.10.2026)
-                ap_review_weiter_tick()           # und Trades, deren Konto schon weiter ist (Nachfolger/Archiv/Phase, 16.10.2026)
+            # AUTO-ABHAKEN AUS (Finn 19.10.2026 13:55: „Bitte in Zukunft so, dass ich alle noch selber manuell abhaken muss … vor allem, wo ich am
+            # Trade-Planer arbeite, möchte ich immer einen Überblick haben"; Anlass: zwei Lucid-Trades, von Railway still abgehakt, nirgends mehr
+            # zu sehen). Blow-Takt und Normal-Takt laufen nur, wenn regeln.abhaken_auto = true (ap_auto_abhaken_an, Standard aus) — später
+            # ohne Code wieder einschaltbar (sql/2026-10-19_abhaken_auto_schalter.sql). Review-weiter bleibt: räumt nur Trades von Konten, die
+            # Finn schon selbst weitergestellt/archiviert hat (sonst hängen sie ewig unter „Abhaken").
+            if ap_auto_abhaken_an():
+                if ap_blow_auto_tick() is not None:   # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
+                    ap_normal_auto_tick()             # danach im selben Takt: normale Trades (kein Blow, kein Ziel) abhaken (14.10.2026)
+                    ap_review_weiter_tick()           # und Trades, deren Konto schon weiter ist (Nachfolger/Archiv/Phase, 16.10.2026)
+            elif time.time() - _ap_blow_auto["at"] >= AP_BLOW_AUTO_S:
+                _ap_blow_auto["at"] = time.time()
+                ap_review_weiter_tick()
             _ap_blow_auto["fehler"] = ""
         except Exception as e:
             _ap_blow_auto["fehler"] = f"{type(e).__name__}: {e}"

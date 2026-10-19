@@ -1,0 +1,9 @@
+-- Auto-Abhaken aus (Finn 19.10.2026 13:55: „alle Trades selber manuell abhaken, solange ich am Trade-Planer arbeite").
+-- Seit diesem Stand läuft der Blow-Takt (ap_blow_auto_tick) und der Normal-Takt (ap_normal_auto_tick) in app.py nur noch,
+-- wenn auto_plan_regeln.regeln.abhaken_auto = true steht. Standard: Schlüssel fehlt = AUS. Nichts auszuführen — die Datei
+-- dokumentiert den Schalter. Review-weiter (Konto schon weitergestellt/archiviert) läuft weiter.
+--
+-- Später wieder einschalten (ohne Code):
+--   update auto_plan_regeln set regeln = coalesce(regeln, '{}'::jsonb) || '{"abhaken_auto": true}'::jsonb where id = 1;
+-- Wieder aus:
+--   update auto_plan_regeln set regeln = regeln - 'abhaken_auto' where id = 1;
