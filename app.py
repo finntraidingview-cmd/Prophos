@@ -12547,6 +12547,10 @@ def _wd_hedge_buchung(plan_id, uid, konto, person, slave_pl, datum):
 # der ID gar nicht lief — niemand sah es). mt5_live wird vom PC-TAB geschrieben (prophos.html Flotten-Push, alle 12 s Lebenszeichen,
 # status.tab_build/bot_version/copier_version/user_id) — updated_at ist also der Herzschlag des Tabs, nicht des Copiers. Nur lesen.
 PC_STAND_LEBT_S = 180
+# PC AUS (19.10.2026, Finn: „wenn der Prophos-Tab nicht erreichbar ist, heißt das meistens, dass der PC aus ist"): ab 10 min ohne Herzschlag
+# gilt der PC als aus — 3 min („lebt" nicht) reißt schon ein Neuladen oder ein kurzer Netz-Hänger. Dieselbe Schwelle für Braucht dich
+# (eine Zeile „PC aus" je ID statt einer je verpasstem Trade), den Handy-Push (pc_aus_tick) und den Riegel in „Erneut versuchen".
+PC_AUS_S = 600
 
 
 def pc_stand_zusammenfassen(rows, jetzt):
@@ -12579,8 +12583,8 @@ def pc_stand_zusammenfassen(rows, jetzt):
         if z is None or alt < z["alt_s"]:
             out[uid] = {"pc_name": pc, "tab_build": r.get("tab_build"), "bot_version": r.get("bot_version"),
                         "copier_version": r.get("copier_version"), "zuletzt": at.isoformat(), "alt_s": alt,
-                        "lebt": alt < PC_STAND_LEBT_S, "pcs": sorted(set((z or {}).get("pcs", []) + ([pc] if pc else []))),
-                        "je_pc": je_pc}
+                        "lebt": alt < PC_STAND_LEBT_S, "aus": alt >= PC_AUS_S,
+                        "pcs": sorted(set((z or {}).get("pcs", []) + ([pc] if pc else []))), "je_pc": je_pc}
         else:
             z["je_pc"] = je_pc
             if pc and pc not in z["pcs"]:
@@ -12609,7 +12613,7 @@ def admin_pc_stand():
     else:   # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter raus
         std_aus = _admin_standard_aus()
         stand = {k: v for k, v in stand.items() if str(k) not in std_aus}
-    return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "stand": stand})
+    return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "aus_s": PC_AUS_S, "stand": stand})
 
 
 # PC-NAMEN (Finn 16.10.2026: „In Zukunft beschrifte die PCs jeweils mit dem Namen"): überall, wo eine Kennung pc-xxxxxx steht, zeigt
@@ -24272,6 +24276,37 @@ def _ap_pc_lebt():
         return None
 
 
+def _ap_pc_stand_je():
+    """{user_id: {aus, alt_s, pc_name, …}} wie /admin/pc-stand (pc_stand_zusammenfassen). Nicht lesbar → None (kein Riegel, kein Push)."""
+    try:
+        rows = sb_select("mt5_live", {"select": "id,pc_name,updated_at,user_id:status->>user_id", "order": "updated_at.desc",
+                                      "limit": "400"}) or []
+        return pc_stand_zusammenfassen(rows, datetime.now(timezone.utc))
+    except Exception as e:
+        print(f"[pc-aus] ⚠️ PC-Stand nicht lesbar ({type(e).__name__})", flush=True)
+        return None
+
+
+def pc_aus_dauer(alt_s):
+    """REIN: Sekunden ohne Herzschlag → „12 min" / „5 h" / „2 T"."""
+    alt = max(0, int(alt_s or 0))
+    return f"{max(1, round(alt / 60))} min" if alt < 3600 else f"{round(alt / 3600)} h" if alt < 48 * 3600 else f"{round(alt / 86400)} T"
+
+
+def _ap_pc_aus_text(uid, stand=None):
+    """Klartext „PC von Ina ist aus (seit 2 T, pc-xc5c52)" oder '' (PC lebt / unbekannt). stand = _ap_pc_stand_je() oder None."""
+    stand = _ap_pc_stand_je() if stand is None else stand
+    z = (stand or {}).get(str(uid)) if stand else None
+    if not z or not z.get("aus"):
+        return ""
+    try:
+        namen, _aus = _ap_namen()
+    except Exception:
+        namen = {}
+    wer = namen.get(str(uid), "der ID")
+    return f"PC von {wer} ist aus (seit {pc_aus_dauer(z.get('alt_s'))}{', ' + z['pc_name'] if z.get('pc_name') else ''})"
+
+
 _ap_pc_lebt_cache = {"bis": 0.0, "ids": None}
 AP_PC_LEBT_CACHE_S = 30
 
@@ -25525,7 +25560,12 @@ def _ap_neu_starten(pid):
     mit allen Prüfungen; er gleicht seine Pläne alle 2 min ab. mt5_baseline.start_fehler → status 'neu' (Anzeige im Planer)."""
     # VERFALLEN (08.10.2026, Prüfer Slave 2): ein Auto-Plan eines früheren Tages, der nie gesendet wurde, zählt im Planer nicht mehr —
     # der Nachtlauf plant das Konto neu. „Neu starten" würde ihn NEBEN den Ersatzplan legen (zwei Trades auf einem Konto) → ablehnen.
-    alt_p = (sb_select("trade_plans", {"select": "id,status,auto_plan,start_um,started_at,orbit_gesendet_at", "id": f"eq.{pid}"}) or [None])[0]
+    alt_p = (sb_select("trade_plans", {"select": "id,user_id,status,auto_plan,start_um,started_at,orbit_gesendet_at", "id": f"eq.{pid}"}) or [None])[0]
+    # PC AUS (19.10.2026, Finn: „so lange der PC aus ist, muss Puls nicht versuchen, in 2 Minuten eine Order reinzudrücken"): kein PC-Tab
+    # seit ≥ PC_AUS_S → nicht neu einplanen, Klartext zurück. Sobald der PC wieder läuft, holt sein Tab den Start von selbst nach (sfTick).
+    pc_aus = _ap_pc_aus_text(alt_p.get("user_id")) if alt_p else ""
+    if pc_aus:
+        return jsonify({"ok": False, "pc_aus": True, "msg": f"{pc_aus} — einschalten, dann holt Puls den Start von selbst nach"}), 409
     _tz = _ap_tz(AP_TZ_TAG)
     _h = datetime.now(timezone.utc).astimezone(_tz)
     if alt_p and ap_plan_verfallen(alt_p, datetime(_h.year, _h.month, _h.day, tzinfo=_tz)):
@@ -27377,6 +27417,88 @@ def ap_wecker_tick():
               f"{'frische Balance' if bal_neu else ''} → Nachplanen/Bestätigen jetzt", flush=True)
 
 
+# ══ PC AUS → HANDY (19.10.2026, Finn: „ich bekomme auch direkt am Handy eine Notification, wenn der PC nicht mehr erreichbar ist").
+# Jede PC_AUS_TAKT_S: PC-Stand je ID (mt5_live-Herzschlag). Ist ein PC aus (≥ PC_AUS_S ohne Prophos-Tab) UND warten heute geplante,
+# ungestartete Trades dieser ID, deren Start in ≤ PC_AUS_PUSH_VORLAUF_MIN liegt oder schon vorbei ist → EINE Meldung je Ausfall an die
+# ID und die Admins (push_an_user, Verwalter hängt dort mit dran). Kommt der PC zurück, ist der Merker frei. Ohne wartende Trades keine
+# Meldung — Inas und EzPokers PCs sind am Wochenende immer aus, das ist gewollt. Erster Takt nach dem Container-Start meldet nichts
+# (markiert nur), sonst käme nach jedem Deploy dieselbe Meldung noch einmal.
+PC_AUS_TAKT_S = 120
+PC_AUS_PUSH_VORLAUF_MIN = 60
+_pc_aus = {"at": 0.0, "merker": {}, "init": False, "fehler": "", "gemeldet": []}
+
+
+def pc_aus_faelle(stand, plaene, merker, jetzt):
+    """REIN RECHNEND (testbar): stand = {uid: {aus, alt_s, pc_name}}, plaene = heutige geplante, ungestartete Pläne [{user_id, start_um,
+    master_firm, master_name}], merker = {uid: {gemeldet}} (wird fortgeschrieben: PC lebt → gemeldet False). → [{uid, pc, alt_s, plaene}]
+    der Fälle, die JETZT zu melden sind (aus, noch nicht gemeldet, wartende Trades mit Start ≤ jetzt + Vorlauf)."""
+    out = []
+    for uid, z in (stand or {}).items():
+        m = merker.setdefault(str(uid), {"gemeldet": False})
+        if not z.get("aus"):
+            m["gemeldet"] = False
+            continue
+        if m.get("gemeldet"):
+            continue
+        warten = []
+        for p in plaene or ():
+            if str(p.get("user_id")) != str(uid):
+                continue
+            s = _ap_ts(p.get("start_um"))
+            if s is None or s > jetzt + timedelta(minutes=PC_AUS_PUSH_VORLAUF_MIN):
+                continue
+            warten.append(p)
+        if not warten:
+            continue
+        m["gemeldet"] = True
+        out.append({"uid": str(uid), "pc": z.get("pc_name") or "", "alt_s": int(z.get("alt_s") or 0), "plaene": warten})
+    return out
+
+
+def pc_aus_tick(jetzt=None):
+    jetzt = jetzt or datetime.now(timezone.utc)
+    if time.time() - _pc_aus["at"] < PC_AUS_TAKT_S:
+        return None
+    _pc_aus["at"] = time.time()
+    stand = _ap_pc_stand_je()
+    if stand is None:
+        return None
+    tz = _ap_tz(AP_TZ_TAG)
+    d = jetzt.astimezone(tz)
+    von = datetime(d.year, d.month, d.day, tzinfo=tz)
+    plaene = sb_select("trade_plans", {"select": "id,user_id,start_um,master_firm,master_name", "status": "eq.planned",
+                                       "started_at": "is.null", "orbit_gesendet_at": "is.null",
+                                       "start_um": f"gte.{von.astimezone(timezone.utc).isoformat()}",
+                                       "or": "(auto_plan.not.is.true,auto_bestaetigt_at.not.is.null)", "limit": "500"}) or []
+    bis = von + timedelta(days=1)
+    plaene = [p for p in plaene if (_ap_ts(p.get("start_um")) or bis) < bis]
+    faelle = pc_aus_faelle(stand, plaene, _pc_aus["merker"], jetzt)
+    if not _pc_aus["init"]:
+        _pc_aus["init"] = True             # Container-Start: nur markieren, nicht melden
+        return []
+    if not faelle:
+        return []
+    try:
+        namen, _aus = _ap_namen()
+    except Exception:
+        namen = {}
+    admins = _zw_admin_uids() or set()
+    for f in faelle:
+        wer = namen.get(f["uid"], f["uid"][:8])
+        konten = ", ".join(f"{p.get('master_firm') or '?'} …{re.sub(r'[^0-9]', '', str(p.get('master_name') or ''))[-4:]}" for p in f["plaene"][:4])
+        n = len(f["plaene"])
+        text = (f"{wer}{' · ' + f['pc'] if f['pc'] else ''}: seit {pc_aus_dauer(f['alt_s'])} kein Prophos-Tab — {n} Trade{'s' if n != 1 else ''} "
+                f"heute warte{'n' if n != 1 else 't'} ({konten}{' …' if n > 4 else ''}). PC einschalten, dann holt Puls die Starts von selbst nach.")
+        for ziel in {f["uid"]} | admins:
+            try:
+                push_an_user(ziel, f"🖥 PC aus · {wer}", text, "https://prophos.pages.dev/prophos#kasse", "pc-aus-" + f["uid"][:8])
+            except Exception as e:
+                print(f"[pc-aus] ⚠️ Push an {str(ziel)[:8]}: {type(e).__name__}: {e}", flush=True)
+        _pc_aus["gemeldet"] = (_pc_aus["gemeldet"] + [{"uid": f["uid"], "at": jetzt.isoformat(), "n": n}])[-20:]
+        print(f"[pc-aus] 🖥 {text}", flush=True)
+    return faelle
+
+
 def ap_loop():
     """Nachtlauf nach zeiten.nachtlauf (Standard 01:00 Dubai, 07.10.2026; vorher 00:00 dt) mit Nachholen, nur wenn
     auto_plan_regeln.aktiv; Sa/So gibt es keinen Zieltag. Dazu jede Minute der Takt-Check des Ausgleichs-Bots
@@ -27424,6 +27546,12 @@ def ap_loop():
         except Exception as e:
             _gp_info["fehler"] = f"Auftrag: {type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ Auftrag: {e}", flush=True)
+        try:
+            pc_aus_tick()                     # PC aus + Trades warten → Handy (19.10.2026)
+            _pc_aus["fehler"] = ""
+        except Exception as e:
+            _pc_aus["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[pc-aus] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             gp_push_tick()                    # Handy-Meldungen an den Verwalter (gestartet / nicht gestartet), 13.10.2026
         except Exception as e:

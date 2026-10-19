@@ -29793,7 +29793,7 @@
       const r = await fetch(`${WATCHER_HOME}/admin/pc-stand`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
       const d = r.ok ? await r.json().catch(() => null) : null
       _pcStand.at = Date.now()
-      if(d && d.ok && d.stand){ _pcStand.daten = d.stand; if(wdlAktiv()) wdlRender() }
+      if(d && d.ok && d.stand){ _pcStand.daten = d.stand; _pcStand.ausS = Number(d.aus_s) || 600; if(wdlAktiv()) wdlRender() }
     }catch(e){ _pcStand.at = Date.now(); console.warn('[pc-stand]', (e && e.message) || e) }
     finally{ _pcStand.laedt = false }
   }
@@ -44589,7 +44589,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1624'
+  const OS_TAB_BUILD = '2026-09-22.1625'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51451,6 +51451,14 @@
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
     let man = null; try{ man = tplManuellKonten() }catch(e){ console.warn('[tpl] Manuelle Arbeit', e) }
+    // PC AUS (19.10.2026, Finn zu vier „verpasst"-Zeilen bei Ina: „wenn der Prophos-Tab nicht erreichbar ist, heißt das meistens, dass der
+    // PC aus ist … dann brauch ich nicht jeden einzelnen Trade"): PC-Stand je ID (mt5_live-Herzschlag, /admin/pc-stand, ≥ aus_s = 10 min
+    // ohne Tab = aus). Verpasste/zu_spaet-Starts einer ID mit PC aus werden unten zu EINER Zeile „PC aus" je ID gebündelt; der Server
+    // meldet den Ausfall aufs Handy (pc_aus_tick) und lehnt „Erneut versuchen" ab, solange der PC aus ist.
+    try{ if(typeof pcStandLaden === 'function') pcStandLaden() }catch(_){}
+    const pcAus = new Map()   // uid → { pc, alt_s, konten: [] }
+    const tplPcAus = uid => { const z = _pcStand.daten ? _pcStand.daten[String(uid)] : null; if(!z) return null
+      const alt = Number(z.alt_s) || 0, aus = z.aus != null ? !!z.aus : alt >= (Number(_pcStand.ausS) || 600); return aus ? { pc: z.pc_name || '', alt_s: alt } : null }
     const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
       if(!je.has(k)) je.set(k, { uid: k, name: name || '', zeilen: [] }); const o = je.get(k); if(!o.name && name) o.name = name; o.zeilen.push(z) }
     const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set(), zielIds = new Set()   // zielIds: Konto-IDs mit erreichtem Ziel
@@ -51632,6 +51640,11 @@
       else if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
         add(t.user_id, t.user, { art: 'neu', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
           text: `neu eingeplant — Start ${tplUhr(t.start, D.v)}${sf.behoben ? ' · ' + sf.behoben : ''}`, tun: `Nichts tun. Vorher: ${String(sf.msg || '').slice(0, 120)}` })
+      } else if(t.status === 'bestaetigt' && D.tag === D.heute && !geclaimt && tplPcAus(t.user_id)
+                && ((sf && sf.schritt === 'zu_spaet' && sf.status !== 'neu') || (D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt))){
+        // PC aus (19.10.2026): kein Prophos-Tab seit ≥ 10 min → nicht „Tab lief nicht" je Trade, sondern eine Zeile je ID (unten)
+        const a = tplPcAus(t.user_id), o = pcAus.get(String(t.user_id)) || { pc: a.pc, alt_s: a.alt_s, konten: [] }
+        o.konten.push(`${t.firma || '?'}${t.ende4 ? ' …' + t.ende4 : ''}`); pcAus.set(String(t.user_id), o)
       } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
         const wer = sf.pc ? '' : t.user
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
@@ -51660,6 +51673,17 @@
           lauf: lesen ? ((fremd ? _tplBalFremd.get(kid) : (typeof _accBalLauf !== 'undefined' && _accBalLauf.get(kid))) || null) : null })
       } else if(t.hinweis && !TPL_ZIEL_RE.test(String(t.hinweis))) probleme.push(String(t.hinweis))
       for(const txt of probleme) add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, text: txt, key: t.key })
+    }
+    // PC AUS — eine Zeile je ID (19.10.2026): welcher PC, seit wann, welche Trades warten. Kein „Erneut versuchen" (der Server lehnt es ab,
+    // solange der PC aus ist); sobald der PC läuft, holt sein Tab die Starts regelkonform nach (sfTick → nachholen).
+    for(const [uid, o] of pcAus){
+      const t0 = (D.trades || []).find(t => String(t.user_id) === uid) || {}
+      const dauer = o.alt_s < 3600 ? `${Math.max(1, Math.round(o.alt_s / 60))} min` : o.alt_s < 48 * 3600 ? `${Math.round(o.alt_s / 3600)} h` : `${Math.round(o.alt_s / 86400)} T`
+      const pc = o.pc ? (typeof pcLabel === 'function' ? pcLabel(o.pc) : o.pc) : 'PC'
+      const n = o.konten.length
+      add(uid, t0.user, { art: 'pc_aus', firma: 'PC', konto: pc, typ: '', ende4: '', hinweis: 'einschalten — Puls holt nach',
+        text: `PC aus — seit ${dauer} kein Prophos-Tab · ${n} Trade${n === 1 ? '' : 's'} warte${n === 1 ? 't' : 'n'}: ${o.konten.join(', ')}`,
+        tun: `PC von ${t0.user || 'der ID'} einschalten und Prophos dort öffnen — der Tab holt die verpassten Starts von selbst regelkonform nach. Die Handy-Meldung kam beim Abschalten, sobald Trades warteten.` })
     }
     // Offene Vorschläge mit nicht-live Balance aus /admin/auto-plan/ids (Admin-Reiter, auch morgen; 08.10.2026) — dieselbe Zeile wie oben
     for(const z of (window._apOffenNichtLive || [])){
@@ -51744,6 +51768,7 @@
     if(z.art === 'balance') return /nicht live/i.test(t) ? { w: 'nicht live', ton: 'vio', r: 1 } : /nie gelesen/i.test(t) ? { w: 'nie gelesen', ton: 'vio', r: 1 }
       : /\balt$/.test(t) ? { w: 'Balance alt', ton: 'vio', r: 1 } : { w: 'Balance fehlt', ton: 'vio', r: 1 }
     if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
+    if(z.art === 'pc_aus') return { w: 'PC aus', ton: 'rot', r: 0 }   // ganz oben: ohne PC startet dort nichts (19.10.2026)
     if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
@@ -51796,6 +51821,7 @@
   function tplBdGrau(z, l, wer){
     const t = String(z.text || ''), tun = String(z.tun || ''), fremd = !!(z.balf || (z.hinweis && /PC/.test(z.hinweis)))
     if(z.code) return [t.replace(/^kein Kontowert — /, ''), tun].filter(Boolean).join(' → ')   // genauer Grund → So fixt du's (09.10.2026)
+    if(z.art === 'pc_aus') return t   // PC aus: welcher PC, seit wann, welche Trades — das „was tun" steht im Tooltip (19.10.2026)
     if(z.art === 'balance'){
       const stand = z.balance && z.balance !== 'keine Balance' ? z.balance + ' · ' : ''
       if(tun && !/^↻/.test(tun)) return stand + tun
