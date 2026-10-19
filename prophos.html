@@ -44664,7 +44664,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1632'
+  const OS_TAB_BUILD = '2026-09-22.1633'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49680,10 +49680,13 @@
         // WARTE-GRUND (16.10.2026): sonst der Grund, an dem der Tick den Plan am längsten liegen ließ; kam der Plan erst nach der
         // Startzeit in die Liste dieses Tabs, das; „kein Claim, Grund unbekannt" nur noch, wenn wirklich nichts verbucht ist
         const wh = suWarteHaupt(plan.id), gesehen = _suGesehen.get(String(plan.id)) || 0
+        const suUhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
         const ursache = gFrisch ? `der Start wurde ${Math.round(verspaetet / 60000)} min lang verweigert: ${g0.grund.slice(0, 200)}`
-          : _suTabSeit > startMs0 ? `der Prophos-Tab am PC lief nicht (offen erst seit ${tpStartUmText(new Date(_suTabSeit).toISOString())})`
+          // Uhrzeit statt tpStartUmText (Routine „Puls-Fehler" 19.10.2026, Muster „zu_spaet … (offen erst seit #)" 7× auf 5 PCs: der Text
+          // kam als „offen erst seit verpasst (17:13)" an — tpStartUmText ist für Startzeiten gedacht und stempelt alles > 10 min als „verpasst")
+          : _suTabSeit > startMs0 ? `der Prophos-Tab am PC lief nicht (offen erst seit ${suUhr(_suTabSeit)})`
           : wh ? `${Math.max(1, Math.round(wh.ms / 60000))} min lang: ${wh.grund.slice(0, 220)}`
-          : gesehen > startMs0 + 60000 ? `der Plan kam erst ${tpStartUmText(new Date(gesehen).toISOString())} in die Liste dieses Tabs (Startzeit ${tpStartUmText(plan.startUm)}) → Pläne neu laden lassen`
+          : gesehen > startMs0 + 60000 ? `der Plan kam erst ${suUhr(gesehen)} in die Liste dieses Tabs (Startzeit ${tpStartUmText(plan.startUm)}) → Pläne neu laden lassen`
           : 'der Prophos-Tab lief, bekam aber keinen Claim (Grund nicht gemeldet — Umplanungs-Protokoll des Plans lesen)'
         if(rkGilt(plan) || (plan.route === 'tsv2' && !tpIstWdPlan(plan) && (plan.richtung === 'buy' || plan.richtung === 'sell'))) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — ${ursache}` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
         return

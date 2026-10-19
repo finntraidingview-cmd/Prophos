@@ -8809,8 +8809,37 @@ def test_puls_heim():
         for k, v in alt.items():
             setattr(ob, k, v)
         ob._PULS_HEIM.update(w=None, gewechselt=False, aus=False)
+    # Absturz-Fänger im Echo-Weg von main() (Routine „Puls-Fehler" 19.10.2026, „keine Antwort vom Bot: … ElementNotEnabled"):
+    # ein unerwarteter Fehler in run()/run_close() endet mit JSON-Zeile (retry_ok False, Ort), Traceback nach stderr, Heimweg läuft
+    import io as _io, contextlib as _ctx, sys as _sys, json as _jsn
+    class _Kaputt(Exception):
+        pass
+
+    def _boom(*_a):
+        raise _Kaputt()
+    alt2 = {k: getattr(ob, k) for k in ("run", "run_close", "_zurueck_zu_prophos", "_api_trennen")}
+    argv_alt = list(_sys.argv)
+    try:
+        ob.run = _boom; ob.run_close = _boom; ob._api_trennen = lambda: None
+        ob._zurueck_zu_prophos = lambda: "zurück (Test)"
+        for cmd, erw in (({"symbol": "NDX100", "richtung": "buy", "volumen": 1, "sl_usd": 1, "tp_usd": 2}, "Echo-Order abgebrochen: _Kaputt @ main:"),
+                         ({"aktion": "close", "ticket": 1, "symbol": "NDX100"}, "Echo-Close abgebrochen: _Kaputt @ main:")):
+            _sys.argv = ["order_bot.py", "/nicht/da.json", _jsn.dumps(cmd)]
+            out, err = _io.StringIO(), _io.StringIO()
+            with _ctx.redirect_stdout(out), _ctx.redirect_stderr(err):
+                rc = ob.main()
+            zeilen = out.getvalue().strip().splitlines()
+            r = _jsn.loads(zeilen[-1]) if zeilen else {}
+            chk(f"Absturz in main(): JSON statt stummem Traceback ({erw[:10]})",
+                rc == 1 and r.get("ok") is False and r.get("retry_ok") is False and r.get("schritt") == "absturz"
+                and str(r.get("msg", "")).startswith(erw) and "nachsehen" in str(r.get("msg", ""))
+                and r.get("trail", "").endswith("zurück (Test)") and "_Kaputt" in err.getvalue())
+    finally:
+        for k, v in alt2.items():
+            setattr(ob, k, v)
+        _sys.argv = argv_alt
     if ok:
-        print("✓ Puls-Heim: Prophos-Tab (links der Mitte) oder Fenster, nur nach eigenem Wechsel, einmal je Lauf, nie im Zwischenschritt")
+        print("✓ Puls-Heim: Prophos-Tab (links der Mitte) oder Fenster, nur nach eigenem Wechsel, einmal je Lauf, nie im Zwischenschritt; Absturz-Fänger im Echo-Weg")
     return ok
 
 

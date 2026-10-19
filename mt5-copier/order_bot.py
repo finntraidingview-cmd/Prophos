@@ -24801,6 +24801,21 @@ def main():
             res = run_close(sys.argv[1], cmd)
         else:
             res = run(sys.argv[1], cmd)
+    except Exception as e:
+        # Muster „signal: keine antwort vom bot: … pywinauto … ElementNotEnabled" (Routine „Puls-Fehler" 19.10.2026, 1 Fall
+        # 14:03 UTC, Echo-Order nach drei sauberen Orders am selben PC): ein unerwarteter Fehler in run()/run_close() lief als
+        # Traceback nach stderr, der Prozess endete ohne JSON-Zeile — das Panel meldete nur die letzten 200 Zeichen des
+        # Tracebacks („keine Antwort vom Bot"), ohne Schritt, ohne Ort, ohne Spur; der Heimweg unten fiel aus, der PC blieb im
+        # Terminal. Die TV-/TSX-Wege oben fangen das seit 15.08.2026 („ein stummer Bot ist der Diagnose-Killer"), der Echo-Weg
+        # nicht. Dieselbe Doktrin: retry_ok False (ob der Knopf schon gedrückt war, weiß nach einem Absturz niemand), Ort aus
+        # dem Traceback, Traceback trotzdem nach stderr (Panel-Log), Heimweg wie bei jedem Ausgang.
+        traceback.print_exc()
+        close = str(cmd.get("aktion") or "").lower() == "close"
+        was = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        res = {"ok": False, "retry_ok": False, "code": "absturz", "schritt": "absturz",
+               "msg": (f"{'Echo-Close' if close else 'Echo-Order'} abgebrochen: {was} @ {_absturz_ort(e)} — "
+                       + ("erst im Terminal nachsehen, ob die Position noch offen ist." if close else
+                          "erst im Terminal nachsehen, ob eine Position liegt, bevor irgendetwas wiederholt wird."))}
     finally:
         # Die offen gehaltene Terminal-Verbindung sauber loesen (31.08.2026) —
         # hier statt in run(), damit JEDER Ausgang sie loest, auch der Absturz.
