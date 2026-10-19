@@ -25,6 +25,10 @@
  * ist noch nicht belegt (Inventar war flach). inventar(): Overlays (Liste/Dialog) zuerst, SVG-Innereien raus.
  * STAND 0.6.2 (14.10.2026, GEBLOWT-AUGE): dialoge() gibt für Loss-Limit-/Ineligible-Meldungen text_voll (400 Zeichen) mit — der Bot
  * liest daraus die Kennung des geblowten Kontos; konto.liste[].hinweis (Klammertext „MAXIMUM_LOSS Violation" / „Ineligible") gab es schon.
+ * STAND 0.6.3 (19.10.2026, SYMBOL-X DER GEBLOWT-MELDUNG — Finn am Bild von Mikes TopstepX „This account is no longer eligible for
+ * funding"): jeder Knopf eines Dialogs trägt jetzt icon (data-testid/Klasse des SVG darin, MUI „CloseIcon") und ecke (klein und in der Ecke
+ * oben rechts des Dialogs). Die Meldung hat nur „RESET TRADING COMBINE", „USE ACCOUNT TO PRACTICE" und ein X ohne Text/aria — der Bot
+ * fand 16.10. 4× „kein eindeutiger Schließ-Knopf". Nur Merkmale, kein Urteil, kein Klick (das macht tsx_blow_dialog_knopf).
  * STAND 0.6 (05.10.2026, K4 — Finn: „unten auf Position gehen, Doppelklick auf Risk und da eine Zahl eingeben; das ist so viel
  * einfacher"): SL/TP NICHT mehr über das Ziehen im Chart, sondern über die Positions-Tabelle unten. Neu, nur lesend: ticket.reiter
  * (Reiter „Positions"), ticket.gitter (Tabelle mit Symbol, Position, Entry Price, Risk, To Make samt Bearbeiten-Zustand der Zellen),
@@ -32,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.6.2';
+  var VERSION = 'tsx-0.6.3';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -249,15 +253,33 @@ var PROPHOS_AUGEN_TSX = (function () {
   }
 
   // ── Dialoge / Popups (ARIA-Rollen, keine Seiten-Anker) ─────────────────────
+  // SYMBOL-X EINES DIALOGS (tsx-0.6.3, 19.10.2026, Finn am Bild von Mikes TopstepX „This account is no longer eligible for funding"):
+  // das X oben rechts hat weder Text noch aria-label (nur ein Symbol), die Knöpfe darunter heißen „RESET TRADING COMBINE" und
+  // „USE ACCOUNT TO PRACTICE" — der Bot fand so „kein eindeutiger Schließ-Knopf" (16.10. 4× bei Mike) und ließ die Meldung stehen.
+  // Je Knopf nur Merkmale, kein Urteil: icon = data-testid/Klasse/aria des ersten SVG bzw. Icon-Elements darin (MUI: „CloseIcon"),
+  // ecke = klein (6–56 px) und in der Ecke oben rechts des Dialogs (rechter Rand ≤ 72 px vor dem Dialogrand, Oberkante ≤ 72 px unter
+  // der Dialogoberkante). Entscheiden und drücken tut tsx_blow_dialog_knopf (order_bot.py) — mit Ziel-Beweis.
+  function xMerkmale(b, d) {
+    var o = {};
+    try {
+      var sv = b.querySelector('svg,[class*="icon"],[class*="Icon"]');
+      if (sv) { var ic = String(testid(sv) || attr(sv, 'class') || attr(sv, 'aria-label') || '').slice(0, 60); if (ic) o.icon = ic; }
+      var q = b.getBoundingClientRect(), r = d.getBoundingClientRect();
+      o.ecke = q.width >= 6 && q.height >= 6 && q.width <= 56 && q.height <= 56 &&
+               (r.right - q.right) >= -2 && (r.right - q.right) <= 72 && (q.top - r.top) >= -2 && (q.top - r.top) <= 72;
+    } catch (_) {}
+    return o;
+  }
   function dialoge() {
     var out = [];
     alle('[role="dialog"],[role="alertdialog"],[aria-modal="true"]').filter(sichtbar).forEach(function (d) {
       if (out.some(function (o) { return o._el.contains(d); })) return;
-      var kn = alle('button,[role="button"]', d).filter(sichtbar).slice(0, 10).map(function (b) { return kurz(b); });
+      var kn = alle('button,[role="button"]', d).filter(sichtbar).slice(0, 10).map(function (b) { return kurz(b, xMerkmale(b, d)); });
       var o = { _el: d, role: attr(d, 'role'), rect: rect(d), titel: txt(d.querySelector('h1,h2,h3,h4')).slice(0, 60), text: txt(d).slice(0, 160), knoepfe: kn };
       // GEBLOWT-MELDUNG (tsx-0.6.2, 14.10.2026): „You Hit Your Maximum Loss Limit. Account: KENNUNG …" — die Kennung steht hinter den
-      // 160 Zeichen; der Bot (tsx_blow_dialog) liest sie aus text_voll
-      if (/loss limit|ineligible|violation/i.test(o.text)) o.text_voll = txt(d).slice(0, 400);
+      // 160 Zeichen; der Bot (tsx_blow_dialog) liest sie aus text_voll. Seit 19.10.2026 auch die neue Fassung „This account is no longer
+      // eligible for funding · Account: KENNUNG · You hit the Maximum Loss Limit on this account on 10/16/2026" (Mike).
+      if (/loss limit|ineligible|eligible for funding|violation/i.test(o.text)) o.text_voll = txt(d).slice(0, 400);
       out.push(o);
     });
     out.forEach(function (o) { delete o._el; });

@@ -108,6 +108,48 @@ def main():
     check("async function tsxGeblowtFolge(" in html and html.count("tsxGeblowtFolge(") >= 3, "PC-Tab: tsxGeblowtFolge in Balance-Lesen + Endlesung")
     check("grund: 'tsx'" in html and "anlass = " in open(os.path.join(HIER, "..", "app.py"), encoding="utf-8").read(), "Push-Text: TopstepX-Grund statt „nicht in der Liste“")
 
+    # (8) NEUE MELDUNG + SYMBOL-X (19.10.2026, Finn am Bild von Mikes TopstepX nach dem Login — „This account is no longer eligible for
+    # funding", Knöpfe RESET TRADING COMBINE / USE ACCOUNT TO PRACTICE / X ohne Text und aria; 16.10. 4× „kein eindeutiger Schließ-Knopf“)
+    neu = {"role": "dialog", "titel": "This account is no longer eligible for funding",
+           "text": "This account is no longer eligible for funding Account: 150KTC-SKU-V2-DLL-682437-17758280 You hit the Maximum Loss Limit on this account on 10/16/2026, so it's no longer eligib",
+           "text_voll": "This account is no longer eligible for funding Account: 150KTC-SKU-V2-DLL-682437-17758280 You hit the Maximum Loss Limit on this account on 10/16/2026, so it's no longer eligible for funding. It's still yours to trade in practice mode. Reset it whenever you're ready to trade for funding again. Ready to Reset? Reset your Trading Combine and get back to trading with a fresh account. RESET TRADING COMBINE USE ACCOUNT TO PRACTICE Don't remind me again for this account",
+           "knoepfe": [{"tag": "button", "text": "", "aria": "", "icon": "CloseIcon", "ecke": True, "rect": [1180, 218, 24, 24]},
+                       {"tag": "button", "text": "RESET TRADING COMBINE", "aria": "", "ecke": False, "rect": [792, 656, 392, 34]},
+                       {"tag": "button", "text": "USE ACCOUNT TO PRACTICE", "aria": "", "ecke": False, "rect": [776, 732, 424, 40]}]}
+    bd = ob.tsx_blow_dialog([neu])
+    check(bd is not None and bd["art"] == "maximum_loss" and bd["konto"] == "150KTC-SKU-V2-DLL-682437-17758280",
+          "neue Meldung „no longer eligible for funding“ → maximum_loss + volle Kennung (nicht „account is“)")
+    check(ob.tsx_blow_dialog([{"text": "You hit the Maximum Loss Limit on this account on 10/16/2026"}]) is not None, "„hit the … Loss Limit“ erkannt")
+    kn = ob.tsx_blow_dialog_knopf(neu)
+    check(kn is not None and kn.get("icon_x") is True and kn["text"] == "" and kn["rect"][0] == 1180, "Symbol-X (CloseIcon, Ecke) ist der Schließ-Knopf — nie RESET/PRACTICE")
+    kn = ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "", "aria": "", "ecke": True, "rect": [1180, 218, 24, 24]}, {"text": "RESET TRADING COMBINE", "rect": [1, 1, 50, 20]}]})
+    check(kn is not None and kn.get("icon_x") is True, "Symbol-X nur über die Ecke (ohne icon-Namen)")
+    kn = ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "", "aria": "", "icon": "CloseIcon", "ecke": False, "rect": [600, 400, 24, 24]}]})
+    check(kn is not None and kn.get("icon_x") is True, "Symbol-X nur über den icon-Namen (nicht in der Ecke)")
+    check(ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "", "aria": "", "icon": "ExpandMoreIcon", "ecke": True, "rect": [1180, 218, 24, 24]}]}) is None,
+          "Symbol in der Ecke mit Expand-Namen → nichts")
+    check(ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "", "aria": "Reset account", "ecke": True, "rect": [1180, 218, 24, 24]}]}) is None,
+          "Symbol-Knopf mit fremdem aria → nichts")
+    check(ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "", "aria": "", "ecke": True, "rect": [1180, 218, 24, 24]},
+                                                 {"text": "", "aria": "", "ecke": True, "rect": [1150, 218, 24, 24]}]}) is None, "zwei Symbol-X → nichts")
+    kn = ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "OK", "rect": [1, 1, 50, 20]}, {"text": "", "aria": "", "icon": "CloseIcon", "ecke": True, "rect": [1180, 218, 24, 24]}]})
+    check(kn is not None and kn["text"] == "OK" and not kn.get("icon_x"), "Schließ-Wort geht vor dem Symbol-X")
+    check(ob.tsx_blow_dialog_knopf({"knoepfe": [{"text": "", "aria": "", "icon": "CloseIcon", "ecke": True, "rect": [1180, 218, 0, 0]}]}) is None,
+          "Symbol-X ohne Rechteck → nichts")
+    v2 = ob.tsx_blow_dialog_verletzung(bd)
+    check(v2 == {"150KTC-SKU-V2-DLL-682437-17758280": {"art": "maximum_loss", "text": bd["text"][:60], "quelle": "dialog"}},
+          "genanntes Konto (volle Kennung) → konto_verletzungen-Eintrag mit Quelle dialog")
+    check(ob.tsx_blow_dialog_verletzung({"art": "maximum_loss", "konto": "150KTC-SKU-V2-DLL-6", "text": "x"}) == {}, "gekürzte Kennung (16.10.) → kein Eintrag")
+    check(ob.tsx_blow_dialog_verletzung({"art": "maximum_loss", "konto": "", "text": "x"}) == {} and ob.tsx_blow_dialog_verletzung(None) == {}, "ohne Kennung → {}")
+    check(ob.tsx_geblowt_urteil({"konto_verletzungen": v2}, "150KTC-SKU-V2-DLL-682437-17758280")["quelle"] == "dialog", "Urteil nimmt die Quelle des Eintrags (dialog)")
+    check(ob.tsx_geblowt_urteil({"konto_verletzungen": v2}, "EXPRESS-V2-682437-57131691") is None, "Meldung fürs vorgewählte Konto → Ziel EXPRESS nicht geblowt (Finn 19.10.2026)")
+    check(bool(ob.TSX_RX_KENNUNG_VOLL.match("EXPRESS-V2-682437-57131691")) and not ob.TSX_RX_KENNUNG_VOLL.match("150KTC-SKU-V2-682437"), "Kennungs-Form …-USERID-NUMMER")
+    check("tsx-0.6.3" in src and "function xMerkmale" in src and "kurz(b, xMerkmale(b, d))" in src and "eligible for funding" in src,
+          "augen_tsx.js tsx-0.6.3: icon/ecke je Dialog-Knopf, text_voll auch bei „eligible for funding“")
+    check('verletzungen.update(bd_res.get("konto_verletzungen") or {})' in quelle and 'bd_offen = tsx_blow_dialog(' in quelle,
+          "K2: Meldung vor dem Auslöser-Klick (auch ohne „verdeckt“), genanntes Konto in die Antwort")
+    check('"tabu": TSX_DIALOG_TABU}' in quelle and 'if kn.get("icon_x"):' in quelle, "Symbol-X wird mit Rechteck-/Tabu-Beweis gedrückt")
+
     print()
     if FEHLER:
         print(f"{len(FEHLER)} Fehler:")

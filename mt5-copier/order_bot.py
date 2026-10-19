@@ -12480,8 +12480,25 @@ def tsx_konto_treffer(texte, ext_id):
 #   (2) Meldung: „You Hit Your Maximum/Daily Loss Limit … Account: KENNUNG" (stand.popups) — nennt das geblowte Konto selbst.
 # Die Meldung wird EINMAL geschlossen (genau ein sichtbarer Knopf mit reinem Schließ-Wort, Druck mit Ziel-Beweis) — sonst blockiert sie
 # jede Lesung aller Konten dieses Logins, bis jemand am PC klickt. Nie ein Knopf mit Order-/Positions-Wort.
+#
+# NACHTRAG 19.10.2026 (Finn am Bild von Mikes TopstepX, Balance-Lesen nach dem Login): TopstepX zeigt die Meldung jetzt als „This account
+# is no longer eligible for funding · Account: KENNUNG · You hit the Maximum Loss Limit on this account on 10/16/2026 … Reset it whenever
+# you're ready" mit den Knöpfen „RESET TRADING COMBINE", „USE ACCOUNT TO PRACTICE", einem Häkchen „Don't remind me again" und einem X oben
+# rechts OHNE Text und ohne aria-label. Finns Regel: „Wenn man sich einloggt und diese Meldung steht, heißt das NICHT, dass das Konto
+# geblowt ist — nur das Konto, das gerade vorgewählt ist. Einfach aufs X drücken, oben links im Dropdown den richtigen Account auswählen
+# und einmal cross-checken." Befund 16.10. (4 Fehlstarts Mike, EXPRESS …57131691, vorgewählt DLL …17758280): Meldung erkannt, aber
+# „kein eindeutiger Schließ-Knopf" → konto_nicht_erreicht, vier Starts verloren. Darum: (a) auch die neue Fassung erkennen („hit the …
+# loss limit", „no longer eligible for funding"), (b) das Symbol-X zählt als Schließ-Knopf (augen_tsx.js tsx-0.6.3 liefert je Knopf
+# icon/ecke; genau EIN solcher Knopf, nie einer mit Reset-/Practice-/Order-Wort, nie das Häkchen), (c) danach normal Konto wechseln —
+# der Cross-Check ist der vorhandene Wechsel-Beweis (Liste zu, volle Ziel-Kennung im Auslöser, Kopfzeile zweimal gleich). Das von der
+# Meldung GENANNTE Konto (nur bei vollständiger Kennung …-USERID-NUMMER) geht als konto_verletzungen mit — der PC-Tab archiviert es wie
+# einen Listen-Hinweis; das Ziel gilt nur dann als geblowt, wenn die Meldung es selbst nennt. „Don't remind me" wird nie angehakt.
 TSX_RX_VERLETZUNG = re.compile(r"(maximum[_ \-]?loss|daily[_ \-]?loss|ineligible|violation|liquidat)", re.I)
-TSX_RX_BLOW_DIALOG = re.compile(r"you (have )?hit your (maximum|daily|max\.?) ?loss limit|(maximum|daily) loss limit (hit|reached|violat)", re.I)
+TSX_RX_BLOW_DIALOG = re.compile(r"you (have )?hit (your|the) (maximum|daily|max\.?) ?loss limit|(maximum|daily) loss limit (hit|reached|violat)"
+                                r"|no longer eligible for funding", re.I)
+TSX_RX_ICON_X = re.compile(r"close|cross|clear|times|x-?mark|dismiss|cancel-?icon", re.I)        # Symbol-Namen eines X (MUI „CloseIcon")
+TSX_RX_ICON_NIE = re.compile(r"expand|menu|info|help|setting|more|check|arrow|chevron|copy|edit|search|refresh|reset|practice", re.I)
+TSX_RX_KENNUNG_VOLL = re.compile(r"^[A-Z0-9][A-Z0-9-]*-\d{6}-\d{8}$")                           # 150KTC-SKU-V2-DLL-682437-17758280
 TSX_RX_DIALOG_KONTO = re.compile(r"account\s*:?\s*([A-Z0-9][A-Z0-9-]{5,})", re.I)
 TSX_RX_DIALOG_ZU = re.compile(r"^\s*(ok|okay|close|dismiss|got it|continue|i understand|understood|schlie(?:ß|ss)en|verstanden|[×✕✖])\s*$", re.I)
 TSX_DIALOG_TABU = r"\b(buy|sell|flatten|reverse|submit|place|order|position|cancel|kauf|verkauf)\b"
@@ -12537,20 +12554,48 @@ def tsx_blow_dialog(popups):
 
 
 def tsx_blow_dialog_knopf(popup):
-    """REIN RECHNEND (testbar): der EINE Schließ-Knopf der Meldung (knoepfe aus augen_tsx.js dialoge(): {text, aria, rect}) — genau ein
-    sichtbarer Knopf, Beschriftung NUR ein Schließ-Wort (TSX_RX_DIALOG_ZU), Rechteck ≥ 2 px. Mehrere Kandidaten oder einer mit
-    Order-/Positions-Wort → None (nichts drücken)."""
+    """REIN RECHNEND (testbar): der EINE Schließ-Knopf der Meldung (knoepfe aus augen_tsx.js dialoge(): {text, aria, rect, icon, ecke}).
+    Erst ein Knopf mit NUR einem Schließ-Wort (TSX_RX_DIALOG_ZU; genau einer, sonst None); gibt es keinen, das SYMBOL-X (19.10.2026,
+    Finn/Mike: X ohne Text und aria): ohne Text, aria leer oder selbst ein Schließ-Wort, und (icon wie „CloseIcon" ODER ecke = klein in
+    der Ecke oben rechts) — genau eines, Rechteck ≥ 2 px, nie ein Symbol mit Expand-/Menu-/Reset-Namen. Jeder Knopf mit Order-/
+    Positions-Wort ist tabu. Ergebnis trägt icon_x=True, text '' (der Ziel-Beweis prüft dann nur Rechteck, Größe und Tabu)."""
     kn = [b for b in ((popup or {}).get("knoepfe") or []) if isinstance(b, dict)]
-    kand = []
+    wort, symbol = [], []
     for b in kn:
-        t = str(b.get("text") or "").strip() or str(b.get("aria") or "").strip()
+        text = str(b.get("text") or "").strip()
+        aria = str(b.get("aria") or "").strip()
+        t = text or aria
         r = b.get("rect")
-        if not TSX_RX_DIALOG_ZU.match(t) or re.search(TSX_DIALOG_TABU, t + " " + str(b.get("aria") or ""), re.I):
-            continue
         if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
             continue
-        kand.append(dict(b, text=t, aus_aria=not str(b.get("text") or "").strip()))
-    return kand[0] if len(kand) == 1 else None
+        if re.search(TSX_DIALOG_TABU, t + " " + aria, re.I):
+            continue
+        if TSX_RX_DIALOG_ZU.match(t):
+            wort.append(dict(b, text=t, aus_aria=not text))
+            continue
+        if text or (aria and not TSX_RX_DIALOG_ZU.match(aria)):
+            continue                                       # beschrifteter Knopf ohne Schließ-Wort (RESET …, USE ACCOUNT TO PRACTICE)
+        icon = str(b.get("icon") or "")
+        if TSX_RX_ICON_NIE.search(icon):
+            continue
+        if TSX_RX_ICON_X.search(icon) or b.get("ecke") is True:
+            symbol.append(dict(b, text="", aus_aria=False, icon_x=True, name="Symbol-X oben rechts" + (f" ({icon[:20]})" if icon else "")))
+    if len(wort) == 1:
+        return wort[0]
+    if not wort and len(symbol) == 1:
+        return symbol[0]
+    return None
+
+
+def tsx_blow_dialog_verletzung(bd):
+    """REIN RECHNEND (testbar, 19.10.2026): nennt die Meldung (tsx_blow_dialog) eine VOLLSTÄNDIGE Kennung (…-USERID-NUMMER, TSX_RX_KENNUNG_VOLL),
+    → {KENNUNG: {art, text, quelle 'dialog'}} wie ein Listen-Hinweis — der PC-Tab archiviert dieses Konto (das vorgewählte, nicht das Ziel).
+    Gekürzte Kennungen (16.10.: „150KTC-SKU-V2-DLL-6") → {} (nichts archivieren, was nicht eindeutig ist)."""
+    b = bd if isinstance(bd, dict) else {}
+    k = str(b.get("konto") or "").strip().upper()
+    if not TSX_RX_KENNUNG_VOLL.match(k):
+        return {}
+    return {k: {"art": str(b.get("art") or "maximum_loss"), "text": str(b.get("text") or "")[:60], "quelle": "dialog"}}
 
 
 def tsx_geblowt_urteil(res, ext, aktiv=""):
@@ -12567,7 +12612,7 @@ def tsx_geblowt_urteil(res, ext, aktiv=""):
     verl = r.get("konto_verletzungen") if isinstance(r.get("konto_verletzungen"), dict) else {}
     for k, v in verl.items():
         if _nur_alnum(k) == ziel and isinstance(v, dict) and v.get("art"):
-            return {"art": str(v["art"]), "quelle": "liste", "text": str(v.get("text") or "")[:60]}
+            return {"art": str(v["art"]), "quelle": str(v.get("quelle") or "liste"), "text": str(v.get("text") or "")[:60]}
     bd = r.get("blow_dialog") if isinstance(r.get("blow_dialog"), dict) else None
     if bd:
         k = _nur_alnum(bd.get("konto"))
@@ -12583,20 +12628,31 @@ def _tsx_blow_dialog_weg(s, st, trail, res):
     if not bd:
         return st, None
     res["blow_dialog"] = {k: bd[k] for k in ("art", "konto", "text")}
+    # 19.10.2026: das GENANNTE Konto (vollständige Kennung) als Hinweis mitgeben — es ist das vorgewählte Konto, nicht zwingend das Ziel
+    kv = res.get("konto_verletzungen") if isinstance(res.get("konto_verletzungen"), dict) else {}
+    kv.update(tsx_blow_dialog_verletzung(bd))
+    if kv:
+        res["konto_verletzungen"] = kv
     if res.get("_blow_dialog_versucht"):
         return st, bd
     res["_blow_dialog_versucht"] = True
-    trail.append(f"TopstepX-Meldung: '{bd['text'][:70]}'" + (f" — Konto {bd['konto']} geblowt" if bd["konto"] else ""))
+    trail.append(f"TopstepX-Meldung: '{bd['text'][:70]}'" + (f" — Konto {bd['konto']} geblowt (das vorgewählte Konto, nicht zwingend das Ziel)"
+                                                          if bd["konto"] else ""))
     kn = tsx_blow_dialog_knopf(bd["popup"])
     if not kn:
-        trail.append("Meldung: kein eindeutiger Schließ-Knopf — nichts gedrückt")
+        kn_txt = ", ".join(f"'{str(b.get('text') or b.get('aria') or b.get('icon') or '-')[:24]}'"
+                           for b in (bd["popup"].get("knoepfe") or [])[:6] if isinstance(b, dict))
+        trail.append(f"Meldung: kein eindeutiger Schließ-Knopf (Knöpfe {kn_txt or '-'}) — nichts gedrückt")
         return st, bd
     r = list(kn["rect"])[:4]
     try:
         _tsx_pause()
-        ok = s.klick(r, f"Meldung schließen ('{kn['text'][:20]}')",
-                     pruef=dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
-                                 "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]})))
+        if kn.get("icon_x"):                              # Symbol-X ohne Text/aria: Beweis = Rechteck + Größe + kein Tabu-Wort (Finn: „kurz aufs X")
+            pruef = {"rect": r, "text": "", "aria": "", "tabu": TSX_DIALOG_TABU}
+        else:
+            pruef = dict({"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
+                          "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
+        ok = s.klick(r, f"Meldung schließen ({kn.get('name') or repr(kn['text'][:20])})", pruef=pruef)
     except Exception as e_:
         trail.append(f"Meldung schließen: {type(e_).__name__}: {str(e_)[:80]}")
         return st, bd
@@ -16760,19 +16816,28 @@ def _tsx_konto_sichern(s, ext, st, trail):
                                                       "nichts geklickt, gleich erneut."), st, popups=st.get("popups"))
             trail.append(f"K2: Lade-Schirm über dem Konto-Auslöser ist weg ({n_l} s gewartet) — weiter")
             continue
+        # GEBLOWT-MELDUNG über dem Auslöser (14.10.2026, Mike 13.10.: 8 Versuche je Konto scheiterten an „You Hit Your Maximum Loss
+        # Limit. Account: …"): Meldung ist der Beweis (blow_dialog) — einmal schließen, neu lesen, Runde von vorn. Nennt sie das
+        # Zielkonto, ist der Lauf fertig: 'konto_geblowt' (der PC-Tab archiviert, keine weiteren Versuche).
+        # 19.10.2026 (Finn, Mikes Bild „This account is no longer eligible for funding"; 16.10. 4× „kein eindeutiger Schließ-Knopf" →
+        # konto_nicht_erreicht): die Meldung gilt dem VORGEWÄHLTEN Konto, nicht dem Ziel — „aufs X drücken, oben links im Dropdown den
+        # richtigen Account auswählen, cross-checken". Darum jetzt VOR dem Auslöser-Klick und unabhängig von „verdeckt": Meldung lesen
+        # (genanntes Konto → konto_verletzungen), EINMAL schließen (Schließ-Wort oder Symbol-X), neu lesen, Runde von vorn — Auslöser →
+        # Liste → Ziel-Zeile → Beweis (Liste zu, volle Kennung im Auslöser, Kopfzeile zweimal gleich beim Aufrufer = der Cross-Check).
+        bd_offen = tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None)
+        if bd_offen and not bd_res.get("_blow_dialog_versucht"):
+            st, bd = _tsx_blow_dialog_weg(s, st, trail, bd_res)
+            verletzungen.update(bd_res.get("konto_verletzungen") or {})
+            if bd and bd.get("konto") and _nur_alnum(bd["konto"]) == _nur_alnum(ext):
+                return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen.", st,
+                             popups=st.get("popups"))
+            if not tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
+                trail.append("K2: Meldung zu — Konto-Auslöser neu lesen, dann das Zielkonto wählen")
+                continue                               # Meldung zu → Konto-Auslöser neu lesen
+            return _raus("konto_nicht_erreicht", (f"TopstepX-Meldung „{str((bd or {}).get('text') or '')[:60]}“ steht noch (nicht geschlossen) — "
+                                                  "Konto nicht gewechselt, nichts geklickt."), st, popups=st.get("popups"))
         if zu.get("disabled") or zu.get("verdeckt"):
             oben = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
-            # GEBLOWT-MELDUNG über dem Auslöser (14.10.2026, Mike 13.10.: 8 Versuche je Konto scheiterten an „You Hit Your Maximum Loss
-            # Limit. Account: …"): Meldung ist der Beweis (blow_dialog) — einmal schließen, neu lesen, Runde von vorn. Nennt sie das
-            # Zielkonto, ist der Lauf fertig: 'konto_geblowt' (der PC-Tab archiviert, keine weiteren Versuche).
-            if zu.get("verdeckt") and not bd_res.get("_blow_dialog_versucht"):
-                st, bd = _tsx_blow_dialog_weg(s, st, trail, bd_res)
-                if bd:
-                    if bd.get("konto") and _nur_alnum(bd["konto"]) == _nur_alnum(ext):
-                        return _raus("konto_geblowt", f"TopstepX meldet „{bd['text'][:90]}“ — Konto {ext} geblowt, nichts gelesen.", st,
-                                     popups=st.get("popups"))
-                    if not tsx_blow_dialog(st.get("popups") if isinstance(st, dict) else None):
-                        continue                       # Meldung zu → Konto-Auslöser neu lesen
             return _raus("konto_nicht_erreicht", (f"Konto-Auslöser {'gesperrt' if zu.get('disabled') else 'verdeckt'} "
                                                   f"('{str(oben.get('text') or oben.get('tag') or '')[:40]}') — Dialog offen? Nichts geklickt."),
                          st, popups=st.get("popups"))
