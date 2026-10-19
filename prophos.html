@@ -44097,6 +44097,29 @@
   const RK_CLAIM_FRISCH_MS = 15 * 60000
   const rkZaehlt = (status, geclaimt, sf) => status === 'open' || (status === 'planned' && !!geclaimt
     && Date.now() - Date.parse(geclaimt) <= RK_CLAIM_FRISCH_MS && !(sf && sf.status !== 'behoben'))
+  /* REVIEW GELESEN = FREI (Finn 19.10.2026 23:55 Dubai: „Solange der beendete Trade nicht vom Auge gelesen wurde, darf kein Trade in
+   * Gegenrichtung stattfinden. Die Lesung muss ERFOLGREICH sein … Sobald die Lesung erfolgreich war, darf die Gegenrichtung starten.
+   * Ich muss nicht abhaken"). Anlass: abhaken_auto aus seit 13:55 Dubai → beendete Pläne blieben in review und sperrten die
+   * Gegenrichtung ihrer ID × Firma bis zum Abhaken: 199 Umplanungen „noch nicht nachgelesen" an einem Tag (Marc fe1c95ea 58×, Mike
+   * c27bef98 pendelte Long/Short ohne Start). DIESELBE Definition wie prophos_plan_gelesen (sql/2026-10-19_gegenrichtung_review_gelesen.sql)
+   * und app.py ap_echte_balancen (dort zählen Reader-Werte nie — hier seit 20.10. ja, Finns Wort unten) — Demo-, Level-, Folgetrade- und Hand-Werte zählen nie:
+   *   Orbit V2 / TopstepX (tvv2, tsv2): final.quelle 'puls' (schreibt nur die erfolgreiche Puls-Endlesung bzw. der Beendet-Knopf mit
+   *   Puls-Lesung; scheitert die Lesung OHNE vorherigen Erfolg, bleibt quelle demo/level/… und puls_fehler steht) ODER final.balance_quelle
+   *   'reader' (Finn 20.10.2026 01:45: „die gleiche Logik wie vom Orbit-Bot und vom Echo-Bot nehmen … ob flach oder nicht" — der Reader
+   *   schreibt das nur mit dem Flach-Beweis aus hedgeReaderEndBalance: Summary ≤ 2 s, Balance = Equity, zweimal gleich; bei gut der Hälfte
+   *   der Orbit-V2-Pläne die einzige Lesung, weil danach keine Puls-Endlesung mehr angestoßen wird), jeweils + final.balance_end > 0.
+   *   Ein späterer Fehlversuch nach erfolgreicher Lesung setzt nur puls_fehler, quelle 'puls' bleibt → gilt weiter als gelesen (Prüfer S2);
+   *   Echo (mt5, mt5v2): final da (Copier-Schluss) + bal_nach.ok mit bal_nach.balance > 0 (Nachlesung am MT5);
+   *   immer ended_at + master_pl. Andere Routen (tvplus, …) nie → bleiben wie bisher gesperrt, bis Finn abhakt (completed). */
+  function rkPlanGelesen(status, route, endedAt, masterPl, fin, bn){
+    if(status !== 'review' || !endedAt || masterPl == null || !isFinite(Number(masterPl))) return false
+    const zahl = v => v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0
+    const obj = o => !!o && typeof o === 'object'
+    if(route === 'tvv2' || route === 'tsv2') return obj(fin) && (fin.quelle === 'puls' || fin.balance_quelle === 'reader') && zahl(fin.balance_end)
+    if(route === 'mt5' || route === 'mt5v2') return obj(fin) && obj(bn) && bn.ok === true && zahl(bn.balance)
+    return false
+  }
+  window._rkPlanGelesen = rkPlanGelesen   // Entwickler-Haken wie _v2RichtungKonflikt: Definition ohne DB prüfbar
   // „von heute" für das Plan-Popup (09.10.2026): Startzeit in [jetzt − 12 h, jetzt + 24 h]; ohne Startzeit planned_for = heute (Dubai oder
   // Berlin) bzw. ohne beides in den letzten 24 h angelegt
   function rkPlanHeute(p){
@@ -44140,18 +44163,22 @@
     let liste = null
     if(o && o.frisch){
       try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name,start_um_gestartet_at,orbit_gesendet_at,start_fehler:mt5_baseline->start_fehler'
-             + (o.geplanteHand ? ',route,auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : '')).in('status', ['open', 'review', 'planned'])
+             + ',route,ended_at,master_pl,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach'   // für rkPlanGelesen (19.10.2026)
+             + (o.geplanteHand ? ',auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : ''))   // (route steht oben schon)
+             .in('status', ['open', 'review', 'planned'])
            if(!error && Array.isArray(data)) liste = data.map(r => {
              // Plan-Popup (geplanteHand): Hand/WD/Orbit V3 + „von heute" wie aus tradePlans (09.10.2026)
              const pl = o.geplanteHand ? { route: r.route, orbitV3: r.orbit_v3 === true, hedgeEur: r.hedge_eur != null ? Number(r.hedge_eur) : null, notes: r.notes,
                masterAccountId: r.master_account_id, startUm: r.start_um || null, plannedFor: r.planned_for, createdAt: r.created_at } : null
              return { id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name,
                geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null,
+               gelesen: rkPlanGelesen(r.status, r.route, r.ended_at, r.master_pl, r.final, r.bal_nach),
                hand: pl ? (r.auto_plan !== true || tpIstWdPlan(pl) || tpIstOrbitV3(pl)) : false, heute: pl ? rkPlanHeute(pl) : false } }) }catch(_){}
     }
     if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'review' || p.status === 'planned')
       .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName,
         geclaimt: rkClaimAt(p.startUmGestartetAt, p.orbitGesendetAt), sf: (p.mt5Baseline && p.mt5Baseline.start_fehler) || null,
+        gelesen: rkPlanGelesen(p.status, p.route, p.endedAt, p.masterPl, p.mt5Baseline && p.mt5Baseline.final, p.mt5Baseline && p.mt5Baseline.bal_nach),
         hand: !p.autoPlan || tpIstWdPlan(p) || tpIstOrbitV3(p), heute: rkPlanHeute(p) }))
     const lauf = { long: [], short: [] }, gep = { long: [], short: [] }
     for(const p of liste){
@@ -44162,15 +44189,18 @@
       // long ist — es gilt nur, wenn bei der gleichen ID unter der gleichen Firma schon eine Richtung läuft"). Die Koordinations-Regel
       // „laufender Plan sperrt für JEDE Firma" war falsch und ist raus; ohne gewählte Firma sperrt nichts.
       if(!ziel || norm(p.firm) !== ziel) continue
-      const zaehlt = rkZaehlt(p.status, p.geclaimt, p.sf)
+      // review zählt als laufend, SOLANGE die Endlesung fehlt (rkPlanGelesen, 19.10.2026) — vorher stand review hier zwar im Text, fiel
+      // aber durch rkZaehlt (nur open/geclaimt) immer durch; die Sperre kam allein aus der DB (Claim +10 min, ohne Toast im Tab)
+      const zaehlt = rkZaehlt(p.status, p.geclaimt, p.sf) || (p.status === 'review' && !p.gelesen)
       // PLAN-POPUP (o.geplanteHand, 09.10.2026 — Finn über Master, Jacob: zweiter Winning Day derselben ID × Firma gegenläufig geplant,
       // ohne Hinweis): dort zählen auch GEPLANTE Hand-Pläne bzw. Winning Day/Orbit V3 von heute mit (laufen stundenlang = praktisch
       // gleichzeitig) — Auto-Vorschläge nicht (deren Mischung über den Tag bleibt, Finn 03:45). Start-Wächter/DB: weiter nur laufend.
       const geplantHand = !zaehlt && !!(o && o.geplanteHand) && p.status === 'planned' && p.hand && p.heute && !(p.sf && p.sf.status !== 'behoben')
       if(!zaehlt && !geplantHand) continue   // bloß geplant / alter Claim / Start-Fehler sperrt nichts (09.10.2026)
-      // 'review' zählt als LAUFEND (Finn 13.10.2026, Mike: Topstep-Short war zu Ende, aber noch nicht nachgelesen — der Long wurde trotzdem
-      // gestartet): erst die Nachlesung (completed) gibt die Gegenrichtung frei. Dieselbe Regel in der DB (sql/2026-10-13_gegenrichtung_review.sql).
-      if(p.status === 'open' || p.status === 'review') lauf[seite].push({ name: p.name, firm: p.firm, verb: p.status === 'review' ? 'ist zu Ende, aber noch nicht nachgelesen —' : 'läuft gerade' })
+      // 'review' zählt als LAUFEND, solange nicht gelesen (Finn 13.10.2026, Mike: Topstep-Short war zu Ende, aber noch nicht nachgelesen — der
+      // Long wurde trotzdem gestartet; seit 19.10.2026 gibt die erfolgreiche Endlesung frei, nicht erst das Abhaken). Dieselbe Regel in der
+      // DB (sql/2026-10-19_gegenrichtung_review_gelesen.sql); gelesene reviews sind oben schon ausgesiebt.
+      if(p.status === 'open' || p.status === 'review') lauf[seite].push({ name: p.name, firm: p.firm, verb: p.status === 'review' ? 'ist zu Ende, aber noch nicht gelesen —' : 'läuft gerade' })
       else if(zaehlt && p.geclaimt) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'startet gerade' })   // Start läuft = wie laufend
       else if(geplantHand) lauf[seite].push({ name: p.name, firm: p.firm, verb: 'ist schon geplant', geplant: true })
       else gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
@@ -44664,7 +44694,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1634'
+  const OS_TAB_BUILD = '2026-09-22.1635'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

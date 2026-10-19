@@ -15159,7 +15159,10 @@ def richtung_frei():
     der Wächter ausfällt … dass da nie was passieren kann"): das Panel am PC fragt VOR jedem scharfen Klick hier nach — läuft bei
     derselben ID × Firma auf einem anderen Konto ein Trade in Gegenrichtung? Antwort aus der DB-Funktion prophos_gegenrichtung_frei
     (sql/2026-10-13_gegenrichtung_hart.sql, service role — RLS zeigt dem PC fremde Zeilen nicht). Ohne „ok+frei" klickt das Panel
-    nicht (fail-closed). Nur Railway, Header X-Code-Token (derselbe Schlüssel wie /code/stand), Body {plan_id, richtung}."""
+    nicht (fail-closed). Nur Railway, Header X-Code-Token (derselbe Schlüssel wie /code/stand), Body {plan_id, richtung}.
+    REVIEW GELESEN = FREI (Finn 19.10.2026 23:55 Dubai, sql/2026-10-19_gegenrichtung_review_gelesen.sql): ein beendeter Plan in review sperrt
+    nur, solange seine Endlesung fehlt (prophos_plan_gelesen) — gelesen heißt frei, ohne Abhaken. Die Regel steckt in der DB-Funktion, hier
+    ändert sich nichts: Antwort weiter fail-closed, kein „frei" ohne DB-Antwort."""
     if not _code_stand_sha():
         return jsonify({"ok": False, "msg": "nur auf Railway"}), 404
     wer = _code_zugang()
