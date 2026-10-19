@@ -24,6 +24,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag, keine Starts; 29 Signale, alle Balance-Lesungen). Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein neuer Fall (Montagnacht 18./19.10.: 11 Orders (10 Orbit/TradingView + 1 TopstepX, alle mit Fill-Beweis), 8 Echo-Starts, 21 Balance-Lesungen — 0 Fehler-Ereignisse). Antwort fehlt weiterhin.
+Stand 19.10. 20:30 (Routine): kein neuer Fall (Montag: 129 Signale bis 16:30 UTC, keine kein_snapshot-Meldung). Antwort fehlt weiterhin.
 Status: offen
 
 ## 2026-10-07 20:43 — konto: konto # steht im dropdown 0× (nicht genau einmal) — anderer tradovate-login?
@@ -77,6 +78,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall seit 15.10. 13:24 UTC; .1578 (Ursa
 Stand 18.10. 05:35 (Routine): kein neuer Fall seit 15.10. 13:24 UTC; .1578 (Ursache aus Prozessen/Fenstern) wartet weiter auf den ersten Fall — Montag.
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag, kein Echo-Start). .1578 wartet weiter auf den ersten Fall — Montag ab Fenster-Beginn.
 Stand 19.10. 05:36 (Routine): kein neuer Fall seit 15.10. 13:24 UTC. Heute Nacht 8 Echo-Starts (FTMO, FundingPips, FundedNext, The5%ers; 22:53–00:53 UTC) ohne IPC-Fall — .1578 (Ursache aus Prozessen/Fenstern) wartet weiter auf den ersten Fall. Bots auf .1623.
+Stand 19.10. 20:30 (Routine): **10 neue Fälle, erstmals mit Ursache aus .1578**: pc-l5o8bv 8× 02:15–03:38 UTC (Pläne 5d7b762c… FundedNext Phase 2 und c015b269… FundingPips Phase 2 — beide stehen noch „planned") und pc-c19p2l 2× (04:17 UTC Plan 9e7a1f71…, 09:10 UTC Plan 15e8a10a… — beide liefen später durch). Meldung jeweils: „Am PC ist eine Windows-Sicherheitsabfrage offen (consent.exe läuft) — solange antwortet kein Terminal → am PC auf 'Ja' klicken". Dazu passend „F9 ohne Dialog: kein Fenster vorn (gesperrter Desktop / Windows-Sicherheitsabfrage?)" 02:18 UTC pc-l5o8bv und 09:50 UTC pc-c19p2l. Handgriff jetzt konkret: an pc-l5o8bv und pc-c19p2l die offene Windows-Sicherheitsabfrage (UAC, consent.exe) einmal mit „Ja" bestätigen bzw. die MT5-Update-Aufgabe einrichten; danach die zwei Pläne auf pc-l5o8bv neu ansetzen.
 Status: offen
 
 ## 2026-10-08 20:39 — orbit: slave-terminal (fusion-copier) nicht bereit — 'Algo Trading' im Hedge-Terminal nicht aktiv
@@ -100,6 +102,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag, keine Starts). Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein neuer Fall (8 Echo-Starts heute Nacht ohne Startcheck-Fehler). Antwort fehlt weiterhin.
+Stand 19.10. 20:30 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-09 05:45 — drei Echo-Pläne stehen „planned“ mit verstrichener Startzeit
@@ -132,6 +135,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall. Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein neuer Fall. Antwort fehlt weiterhin (war die Position um 14:07 UTC noch offen?).
+Stand 19.10. 20:30 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-12 20:35 — pc-na1q6b: pywinauto lädt nicht (win32ui-DLL) — vermutlich schon behoben, bitte bestätigen
@@ -149,6 +153,7 @@ Stand 17.10. 20:30 (Routine): pc-na1q6b am Leben, Bot .1611; kein DLL-Fall seit 
 Stand 18.10. 05:35 (Routine): pc-na1q6b am Leben, Bot .1618 (01:35 UTC); kein DLL-Fall seit dem 12.10. — bitte bestätigen, dann erledigt.
 Stand 18.10. 20:30 (Routine): PC am Leben (Bot .1619, 16:36 UTC) — bitte bestätigen, dann setze ich den Block auf erledigt.
 Stand 19.10. 05:36 (Routine): kein Fall; der PC meldet frisch (19.10. 01:34 UTC, Bot .1623, alive). Bitte kurz bestätigen.
+Stand 19.10. 20:30 (Routine): pc-na1q6b alive, Bot .1630/.1632 (eine Instanz .1625), zuletzt 16:36 UTC gemeldet — bitte bestätigen, dann schließe ich den Block.
 Status: offen
 
 ## 2026-10-12 20:35 — Entscheidung: Tab lud während einer Echo-Order neu (pc-i8vyq8, 14:32 UTC) — Neulade-Wächter liegt außerhalb der Puls-Pfade
@@ -165,6 +170,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag, keine Orders). Entscheidung weiter offen.
 Stand 19.10. 05:36 (Routine): kein neuer Fall („Tab lud neu“ zuletzt 13.10.). Entscheidung fehlt weiterhin.
+Stand 19.10. 20:30 (Routine): **neuer Fall pc-7ftp5l 14:50 UTC** — Close-Signal (mt5v2, US100.cash, Plan a34d9020… FTMO Phase 1) geclaimt, der Tab lud gegen 14:51:40 UTC neu, das Signal endete „⚠ Stand UNBEKANNT: Der Tab lud während einer Order neu" (unklar); das nächste Close dort (14:51:44 UTC, NDX100) lief sauber per Klick durch. Beide Wächter sperren bei laufendem Signal (Tab-Wächter: „Signal in Arbeit"; Panel-Wächter: MT5-Order-Lock) — zeitlich passen deine Pushes .1629 (14:47 UTC) und .1630 (14:51 UTC), also vermutlich Neuladen von Hand. Plan steht seit 15:20 UTC „completed". Was ich brauche: am pc-7ftp5l im FTMO-Terminal nachsehen, ob die US100.cash-Position wirklich zu ist — und ob du den Tab um ~14:51 UTC von Hand neu geladen hast (dann ist der Fall erklärt, sonst suche ich weiter).
 Status: offen
 
 ## 2026-10-13 05:45 — v2link: Kein Master-Terminal für das FundedNext-100k-Konto auf pc-xc5c52 (Plan 72f456a4…)
@@ -181,6 +187,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall seit 14.10. 08:40 UTC. pc-xc5c52 m
 Stand 18.10. 05:35 (Routine): kein neuer Fall seit 14.10. 08:40 UTC. pc-xc5c52 meldet sich weiter nicht (zuletzt 16.10. 20:05 UTC, Bot .1606, Tab .1605) — PC aus?
 Stand 18.10. 20:30 (Routine): kein neuer Fall seit 14.10. 08:40 UTC. pc-xc5c52 meldet sich weiter nicht (zuletzt 16.10. 20:05 UTC, Bot .1606) — PC aus?
 Stand 19.10. 05:36 (Routine): pc-xc5c52 weiterhin still seit 16.10. 20:05 UTC (Bot .1606, Tab .1605) — kein neuer Fall, kein Lebenszeichen. Läuft der PC?
+Stand 19.10. 20:30 (Routine): pc-xc5c52 meldet sich seit 16.10. 20:05 UTC nicht (Bot .1606); kein neuer Fall.
 Status: offen
 
 ## 2026-10-13 05:45 — close: Schließen in TopstepX gibt es noch nicht (Etappe K5) — Plan b7e026d4…, pc-l5o8bv
@@ -196,6 +203,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag). Entscheidung weiter offen.
 Stand 19.10. 05:36 (Routine): kein neuer Fall. Entscheidung fehlt weiterhin.
+Stand 19.10. 20:30 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-13 23:07 — v2order: F9-Dialog nicht gefunden — Abbruch, nichts gesendet (pc-c19p2l 5×, pc-l5o8bv 1×)
@@ -211,6 +219,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Echo-Starts). .160
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Wochenende, keine Echo-Starts). Bots jetzt .1618 auf 10 PCs (enthält den .1606-Helfer); pc-xc5c52 steht seit 16.10. 20:05 UTC still auf .1606. Pläne 0cbc7e9e… (pc-onkrbk) und 8bbf3f8f… (pc-c19p2l) weiter „planned“ → Montag erste Spur „F9-Ursache (API): …“. Handgriff am NAS100-Terminal bleibt der schnellere Weg.
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag, kein Echo-Start); .1606 steckt in .1620, erste Spur „F9-Ursache (API)“ frühestens Montag.
 Stand 19.10. 05:36 (Routine): kein neuer Fall seit 16.10. 12:31 UTC. Erste Nacht mit Echo-Starts seit .1606: 8 Starts (22:53–00:53 UTC) ohne F9-Fall. Plan 0cbc7e9e… (The5%ers, Start 16.10. 09:11 UTC) steht weiter „planned“ ohne neuen Anlauf — bitte neu starten oder löschen.
+Stand 19.10. 20:30 (Routine): **Plan 0cbc7e9e… hat jetzt seine Ursache** (.1606 „F9-Ursache (API)"): 10:15 UTC pc-onkrbk — „Handel am Konto gesperrt (account_info.trade_allowed = False) — Kontostand 93 325.85 → Konto im Dashboard der Firma prüfen und abschließen bzw. archivieren — nicht neu starten". The5%ers Funded-CFD; der Plan steht weiter „planned" (start_um 09:15 UTC) und wird jeden Tag neu geclaimt. Was ich brauche: das Konto bei The5%ers ansehen (Handel gesperrt = geblowt/pausiert?) und den Plan abschließen oder das Konto archivieren. Die übrigen F9-Fälle heute (02:18 pc-l5o8bv, 09:50 pc-c19p2l „kein Fenster vorn") gehören zur Windows-Abfrage (Frage 3) bzw. zum Login-Dialog (dein Fix ba70cc9).
 Status: offen
 
 ## 2026-10-13 23:07 — Google-Anzeige im Tradovate-Panel (dein Screenshot) — ohne „Close ad“ hat Puls kein X
@@ -225,6 +234,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall. Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein neuer Fall. Antwort fehlt weiterhin.
+Stand 19.10. 20:30 (Routine): in den heutigen Spuren mehrfach „Werbe-Kachel unten links geschlossen (ihr X, weg bewiesen)" (pc-auzre5, pc-7ftp5l) — wenn das die gemeinte Anzeige ist, kann der Block zu; bitte kurz bestätigen.
 Status: offen
 
 ## 2026-10-13 23:07 — zu_spaet: 35 verpasste Starts in 24 h, weil der Prophos-Tab am PC nicht lief (5 PCs)
@@ -257,7 +267,8 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (keine Starts). pc-7ftp5l zuletzt 17.10. 21:23 UTC gemeldet (Bot .1615), seitdem still. Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall; pc-7ftp5l heute aktiv (Bot .1619, 10 Apex-Lesungen 13:21–15:00 UTC über CDP). Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein Fall; pc-7ftp5l platzierte heute Nacht 3 Orders (2 Orbit, 1 TopstepX) mit Fill-Beweis.
-Status: offen
+Stand 19.10. 20:30 (Routine): erledigt — pywinauto läuft auf pc-7ftp5l: 14:51 UTC Echo-Close per Klick („'Position schliessen' geklickt (Anker) → Position zu · P&L +2.697,12"), Bot .1632 alive.
+Status: erledigt
 
 ## 2026-10-14 20:55 — pc: lokales Backend nicht erreichbar (TypeError: Failed to fetch) — pc-40mali
 Was passiert: Zwei Orbit-Starts auf pc-40mali (14.10. 14:16 und 14:23 UTC, Pläne c255d9e7… und 4fdc2c82…) kamen nicht bis zum Bot: der Prophos-Tab erreichte das lokale Backend (panel.py) nicht — „Failed to fetch“. Beide Pläne stehen „planned“ mit verstrichener Startzeit. mt5_live meldete von diesem PC um 16:37 UTC wieder frisch (Bot .1556), das Panel läuft also inzwischen oder wieder. Ein PC, zwei Fälle in 7 min.
@@ -289,6 +300,7 @@ Stand 17.10. 20:30 (Routine): pc-na1q6b weiter am Leben, Bot .1611 um 16:35 UTC 
 Stand 18.10. 05:35 (Routine): pc-na1q6b weiter am Leben, Bot .1618 um 01:35 UTC auf allen 5 Instanzen — bitte nur noch bestätigen, dann setze ich den Block auf erledigt.
 Stand 18.10. 20:30 (Routine): pc-na1q6b alive (Bot .1619, 16:36 UTC) — bitte bestätigen, dann erledigt.
 Stand 19.10. 05:36 (Routine): kein Fall; pc-na1q6b meldet frisch (alive, Bot .1623). Bitte kurz bestätigen.
+Stand 19.10. 20:30 (Routine): alive, Bot .1630/.1632 — bitte bestätigen.
 Status: offen
 
 ## 2026-10-15 20:30 — Entscheidung: pc-i8vyq8, Plan 8896d9e7… — Server lehnt 4 Lot NDX100 dreimal mit „No money“ ab, jede Ablehnung steht als „unklar“
@@ -300,6 +312,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag, keine Starts; nur Balanc
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntagnacht, nur eine Balance-Lesung). Antwort fehlt weiterhin.
 Stand 18.10. 20:30 (Routine): kein neuer Fall seit 15.10. 16:11 UTC. Entscheidung weiter offen.
 Stand 19.10. 05:36 (Routine): kein neuer Fall; Plan 8896d9e7… steht seit 15.10. 18:03 UTC „completed“. Offen bleibt die Entscheidung: zählt eine Server-Ablehnung („No money“, Position nachweislich nicht am Konto) weiter als „unklar“?
+Stand 19.10. 20:30 (Routine): kein neuer Fall.
 Status: offen
 
 ## 2026-10-16 05:35 — pc-40mali: Copier nicht am Leben (mt5_live alive=false, bot_version leer), Tab hängt auf .1589
@@ -316,6 +329,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag). Plan d81dcde7… weiter
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntag). Plan d81dcde7… weiter „planned“ → Montag wieder Fehlstarts, bis Tradovate am pc-40mali verbunden und der Username eingetragen ist. pc-40mali meldet sich seit 17.10. 00:12 UTC nicht mehr in mt5_live (Bot .1609) — PC aus?
 Stand 18.10. 20:30 (Routine): kein neuer Fall; pc-40mali meldet sich weiter nicht (zuletzt 17.10. 00:12 UTC, Bot .1609) — PC aus? Plan d81dcde7… läuft Montag wieder an.
 Stand 19.10. 05:36 (Routine): pc-40mali weiterhin still seit 17.10. 00:12 UTC (Bot .1609) — kein Lebenszeichen; Plan d81dcde7… ist nicht mehr in trade_plans. Läuft der PC?
+Stand 19.10. 20:30 (Routine): pc-40mali meldet sich seit 17.10. 00:12 UTC nicht (Bot .1609); kein neuer Fall.
 Status: offen
 
 ## 2026-10-16 20:30 — pc-l5o8bv: TopstepX „You Hit Your Maximum Loss Limit“ liegt über dem Konto-Wechsler — Plan e3e3652d… läuft alle 20 min erneut an
@@ -326,6 +340,7 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (Samstag). Plan e3e3652d… steht 
 Stand 18.10. 05:35 (Routine): kein neuer Fall (Sonntag). Plan e3e3652d… steht weiter „planned“ → Montag ab Fenster-Beginn wieder ein Fehlstart je ~20 min. Entscheidung offen; ohne Antwort baue ich nichts (Riegel).
 Stand 18.10. 20:30 (Routine): kein neuer Fall (Sonntag). Plan e3e3652d… weiter nicht abgeschlossen → Montag wieder ein Fehlstart je ~20 min.
 Stand 19.10. 05:36 (Routine): Plan e3e3652d… steht weiter „planned“ (Start 16.10. 11:50 UTC), seit 16.10. 11:50 UTC kein neuer Anlauf (der Tab nimmt ihn offenbar nicht mehr auf). pc-l5o8bv heute Nacht 1 Orbit-Order + 2 TopstepX-Lesungen sauber. Bitte Plan abschließen oder umplanen.
+Stand 19.10. 20:30 (Routine): kein neuer Fall (keine Max-Loss-Meldung in 24 h).
 Status: offen
 
 ## 2026-10-16 20:30 — pc-2zc2we: Konto-Liste gilt als „nicht vollständig im Bild“ (augen.js: Zeile liegt 5 Ebenen unter dem Vorfahren) — kein Login-Wechsel
@@ -336,7 +351,8 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall. Heute liest pc-2zc2we Lucid-Konte
 Stand 18.10. 05:35 (Routine): kein neuer Fall seit 16.10. 12:35 UTC. Screenshot der aufgeklappten Tradeify-Konto-Liste fehlt noch.
 Stand 18.10. 20:30 (Routine): kein neuer Fall seit 16.10. 12:35 UTC. Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein neuer Fall; pc-2zc2we heute Nacht 1 Order + 2 Lesungen ok.
-Status: offen
+Stand 19.10. 20:30 (Routine): erledigt durch deinen Fix 253fe64 (augen.js 0.8.3, 17:46 Dubai): listeVoll erlaubt Zeilen bis 6 Ebenen unter dem Listen-Container; seitdem kein „5 Ebenen"-Fall.
+Status: erledigt
 
 ## 2026-10-16 20:30 — pc-7ftp5l (neuer 4K-PC): Fill-Beweis fehlt, weil „Show more“ im Meldungsstapel nie ganz im Bild ist → Ergebnis UNKLAR
 Was passiert: Plan 685d21a7… (Tradeify NQZ6 SELL 3, TP 3.478 $) am 07:23 UTC: Senden geklickt, Meldung nach 1,2 s da (orders 3 Texte, trading-notifications 2 Texte), aber „Show more 1/4 … 4/4: kein Knopf ganz im Bild (Stapel [56,960,416,140], Seite 2195×1100)“ — der Meldungsstapel klebt an der Unterkante des kleinen Browser-Fensters, role=log blieb leer → UNKLAR. Die Order lag (Plan inzwischen „completed“). Einziger Fall seit dem 07.10. (damals pc-xc5c52).
@@ -346,4 +362,15 @@ Stand 17.10. 20:30 (Routine): kein neuer Fall (keine Orders am Samstag). Nebenbe
 Stand 18.10. 05:35 (Routine): kein neuer Fall (keine Orders am Wochenende). .1611 (gemerkte Sitzung) noch ohne Spur — seit dem Push keine Tradeify-Lesung auf pc-7ftp5l; PC zuletzt 17.10. 21:23 UTC auf .1615. Fenster bitte trotzdem größer ziehen.
 Stand 18.10. 20:30 (Routine): kein neuer UNKLAR-Fall; pc-7ftp5l las heute 10 Apex-Konten sauber (nur Lesung, kein Senden). Antwort fehlt weiterhin.
 Stand 19.10. 05:36 (Routine): kein neuer UNKLAR-Fall; pc-7ftp5l heute Nacht 3 Orders mit Fill-Beweis (2× „TradingView-Meldung (Fill)“, 1× TopstepX „Fill-Meldung“).
+Stand 19.10. 20:30 (Routine): erledigt — heute 4 Orbit-Orders auf pc-7ftp5l mit Fill-Beweis, zuletzt 14:53 UTC: „Show more (Meldungen 'orders') geklickt … Fill-Beweis früh gemeldet: Einstieg 29829.5 (fill_toast)".
+Status: erledigt
+
+## 2026-10-19 20:30 — pc-6qnjpu (neuer PC): Echo-Order brach mit pywinauto ElementNotEnabled ab — Ergebnis unklar (Plan 2f3fb543…)
+Was passiert: 14:03 UTC, FundedNext-Phase-1-Plan 2f3fb543…, NDX100 buy 2,9 (SL 3.011 $ / TP 6.254 $): der Bot stürzte mitten im Lauf mit „ElementNotEnabled" ab (Klick oder Tippen auf ein gesperrtes Element im Order-Dialog); das Panel meldete nur den Traceback-Rest „keine Antwort vom Bot" — kein Schritt, kein Ort, Ergebnis unklar, der PC blieb im Terminal. Die drei Orders davor am selben PC (13:52–13:54 UTC, NAS100/NDX100) liefen sauber. Plan steht seit 15:22 UTC auf „review". Fix .1633 (12e4c5d): beim nächsten Absturz nennt die Meldung Schritt + Ort (wie bei Orbit/TopstepX), retry_ok bleibt False, der PC kommt zurück nach Prophos.
+Was ich brauche: am pc-6qnjpu im Terminal des FundedNext-100k-Kontos nachsehen, ob eine Position NDX100 buy 2,9 liegt (mit oder ohne SL/TP) — und ob dort gegen 18:03 Dubai etwas gesperrt war (Handel am Konto, Markt, Dialog „Nur Schließen"). Danach Plan 2f3fb543… abschließen oder neu ansetzen.
+Status: offen
+
+## 2026-10-19 20:30 — pc-t8wg97 (neuer PC): Apex ohne Tradovate-Username, TopstepX-Login abgelehnt
+Was passiert: 13:37 UTC fünf Apex-Balance-Lesungen (Konten vom 16.10.: 4359b049…, efe3230d…, 191ef951…, dbea2871…, f6777f56…): „Kein Konto-Umschalter zu sehen … für die Firma ist kein Tradovate-Username hinterlegt". 15:12 UTC drei Topstep-Lesungen: 2× „TopstepX-Login abgelehnt: Invalid username or password" (696a23c9…, f11bcbfa…), 1× „Konto-Auslöser oben links nicht gefunden" (70a5d617…). Kein Code-Muster — Einrichtung dieser ID/dieses PCs (wie Frage 18 bei pc-7ftp5l: nach dem Eintrag fiel es von selbst weg).
+Was ich brauche: für die ID dieses PCs den Tradovate-Username für Apex Trader eintragen (Einstellungen > Prop Firms > Apex Trader bearbeiten) und die TopstepX-Zugangsdaten dieser ID prüfen (Passwort falsch oder anderer Login).
 Status: offen
