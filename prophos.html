@@ -23225,7 +23225,7 @@
       await new Promise(res => setTimeout(res, 12000 + Math.random() * 10000))
     }
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
-    try{ bigTradeHeimPlanen(konto, 'Lesung ' + String(konto).slice(-4)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026)
+    try{ bigTradeHeimPlanen(konto, 'Lesung ' + String(konto).slice(-4), !(typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026); einzelne Lesung = sofort, Rundgang = 20 s Sammelpause (19.10.2026)
     return r
   }
   /* PULS BLEIBT ZU HAUSE — LESUNGEN (19.10.2026): vor jeder Puls-Lesung eines FREMDEN Kontos (nicht das Big-Trade-Konto, nicht der Heimweg
@@ -23263,7 +23263,10 @@
    * Ruhe nach der letzten fremden Aktion (ein Rundgang über mehrere Konten löst so nur EINEN Heimweg aus), dann loggt Puls über
    * dieselbe Lesung (tv-lesen / tsx-lesen, nur Konto + Balance, keine Order) ins Big-Trade-Konto zurück. Läuft gerade eine Order
    * (_tpOrbitLaeuft) oder der Rundgang (tvV2Poll.busy), wartet der Heimweg 10 s weiter. Nur am PC-Tab (mtcApi). ══ */
-  const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000
+  // 19.10.2026 (Finn, Live-Test Chris: Heimweg kam erst 1–2 min nach der Order — „sobald die Order durch ist, soll der Puls direkt zu dem
+  // Konto zurückswitchen"): nach einer ORDER und nach einer einzelnen Lesung außerhalb des Rundgangs nur 1,5 s Ruhe (sofort), die 20 s
+  // Sammelpause bleibt nur für den Rundgang (tvV2Poll.busy), damit mehrere Konten weiterhin EINEN Heimweg auslösen.
+  const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000, BTH_SOFORT_MS = 1500
   let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false
   function bigTradePlan(){
     // HEIMKONTO MIT RANGFOLGE (14.10.2026 abends, Finn: „läuft ein Weg mit Hedge bei Orbit oder ein Winning Day, platziert Puls die Order
@@ -23276,12 +23279,12 @@
     const big = juengster(offen.filter(p => p.winningDay !== true && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
     return big || juengster(offen.filter(p => p.winningDay === true || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))))
   }
-  function bigTradeHeimPlanen(konto, grund){
+  function bigTradeHeimPlanen(konto, grund, sofort){
     if(typeof window.mtcApi !== 'function' || _bthSelbst) return
     const bt = bigTradePlan(); if(!bt) return
     if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
     if(_bthTimer) clearTimeout(_bthTimer)
-    _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), BTH_RUHE_MS)
+    _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), sofort ? BTH_SOFORT_MS : BTH_RUHE_MS)   // 19.10.2026: sofort nach Order
   }
   async function bigTradeHeim(grund){
     _bthTimer = null
@@ -44589,7 +44592,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1626'
+  const OS_TAB_BUILD = '2026-09-22.1627'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -45496,7 +45499,7 @@
       await fehler('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
     }finally{
       _tpOrbitLaeuft = false
-      try{ bigTradeHeimPlanen(extId, 'Order ' + String(extId).slice(-4)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026, Prio 1)
+      try{ bigTradeHeimPlanen(extId, 'Order ' + String(extId).slice(-4), true) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026, Prio 1) — sofort (19.10.2026)
     }
   }
 
