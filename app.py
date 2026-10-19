@@ -12007,6 +12007,42 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
 # damit PC-Tab-Takt, Winning Days und Live Trades unverändert bleiben (kein Mehr-Read für sie).
 LT_ECHO_MAX_ALTER_S = 90       # ältere mt5_live-Zeilen gelten nicht als live (Position kann längst zu sein)
 LT_ECHO_ROUTEN = ("mt5v2", "mt5")   # Echo V2 und (seit 01.10.2026 abends) das klassische Echo mit Fusion-Hedge
+LT_POLAR_ROUTEN = ("polar",)         # Polar (20.10.2026, Finn: „auch unter Radar hinzufügen") — Master-Futures × Slave-CFD zweier IDs
+
+
+def lt_polar_felder(p, sacc, disp):
+    """REIN RECHNEND (testbar, selftest_polar_radar.py): Polar-Felder einer Radar-Zeile (20.10.2026, Finn 02:45 Dubai: „Frontend ebenfalls
+    noch mal updaten zu Polar, auch unter Radar hinzufügen"). EINE Zeile je Lauf über beide IDs: Master (user_id × Futures-Konto, Rahmen
+    aus _wd_heute_zeile) + hier die Slave-Seite (polar_slave_user_id × CFD-Konto) und das Ergebnis der Abrechnung (mt5_baseline.polar aus
+    polar_app._abrechnen: master_pl, slave_pl, master_fill, slave_fill, zu_quelle, verzug_ms, lauf_id, status). Den laufenden Stand
+    (Phase, Feuerzeit) holt der Tab selbst je Lauf über /polar/stand — hier nur, was am Plan steht. Kein Lauf-Ergebnis am Plan =
+    Hand-Polar (Finn 16.10.: „jetzt manuell") oder noch nicht abgerechnet; den Unterschied entscheidet der Tab an /polar/stand (404)."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    pol = base.get("polar") if isinstance(base.get("polar"), dict) else None
+    auftrag = base.get("polar_auftrag") if isinstance(base.get("polar_auftrag"), dict) else {}
+    su = str(p.get("polar_slave_user_id") or (sacc or {}).get("user_id") or "")
+    sext = str((sacc or {}).get("external_id") or "").strip()
+    kt = _wd_num(p.get("master_contracts"))
+    lots = _wd_num(auftrag.get("lots"))
+    if lots is None and _wd_num(p.get("multiplier")) is not None and kt:
+        lots = round(_wd_num(p.get("multiplier")) * kt, 2)
+    r = str(p.get("richtung") or "").lower()
+    return {"plattform": "polar", "polar": pol, "polar_lauf_id": (pol or {}).get("lauf_id"),
+            "slave_user_id": su or None, "slave_person": disp.get(su, su[:8]) if su else None,
+            "slave_konto": {"name": (sacc or {}).get("name") or p.get("slave_name") or "", "firma": (sacc or {}).get("firm") or p.get("slave_firm") or "",
+                            "groesse": _wd_konto_groesse(sacc) if sacc else None, "kontonr_ende": sext[-4:] if sext else "",
+                            "currency": (sacc or {}).get("currency") or None},
+            "slave_lots": lots, "slave_richtung": ("sell" if r == "buy" else "buy" if r == "sell" else None),
+            "slave_pl": _wd_num(p.get("slave_pl")), "slave_account_id": str(p.get("slave_account_id") or "") or None}
+
+
+def _lt_polar_zeile(p, acc, sacc, disp, vorher=None):
+    """Eine Polar-Zeile im Live-Trades-Format: Rahmen aus _wd_heute_zeile (Master-Seite: Person, Konto, Farbe, Status, master_pl …),
+    dazu lt_polar_felder. NQ-Level bleiben leer — der Polar-Bot schreibt keine tv-Baseline, die Spanne zeigt der Tab aus dem Lauf."""
+    z = _wd_heute_zeile(p, acc, disp, vorher)
+    z.pop("_tsx", None)
+    z.update(lt_polar_felder(p, sacc, disp))
+    return z
 
 
 def lt_fusion_pl_echo(live, jetzt_ts):
@@ -12223,10 +12259,13 @@ def admin_live_trades():
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
-                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3,blown")
+                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3,blown,"
+                  "slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier")   # Polar-Seite (20.10.2026)
         # B16: Topstep V2 wie Orbit V2. Seit 01.10.2026 abends (Finn: „ein Tab je Modell im Radar") mit ?echo=1 auch das klassische
-        # Echo mit Fusion-Hedge (route mt5) — gleiche Felder wie Echo V2 aus mt5_live, dazu der Fusion-P&L (slave_pl_live)
-        basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2,mt5)" if mit_echo else "in.(tvv2,tsv2)"}
+        # Echo mit Fusion-Hedge (route mt5) — gleiche Felder wie Echo V2 aus mt5_live, dazu der Fusion-P&L (slave_pl_live).
+        # Polar (20.10.2026, Finn: „auch unter Radar hinzufügen"): mit ?echo=1 (Radar/Planer) auch route polar — eine Zeile je Lauf
+        # über beide IDs (_lt_polar_zeile); der PC-Tab-Takt (?nur_eigene=1&status=open) bleibt ohne.
+        basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2,mt5,polar)" if mit_echo else "in.(tvv2,tsv2)"}
         if nur_eigene:
             basis_f["user_id"] = f"eq.{me}"
         if nur_offen:
@@ -12245,12 +12284,17 @@ def admin_live_trades():
             plaene.append(p)
         accs = {}
         ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
-        for i in range(0, len(ids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at",
-                                            "id": f"in.({','.join(ids[i:i + 80])})"}):
+        # Polar: auch das Slave-Konto (CFD) der anderen ID laden — nur für die Zeile, nicht für Kerzen/Liq (20.10.2026)
+        slave_ids = sorted({str(p.get("slave_account_id")) for p in plaene if str(p.get("route") or "") in LT_POLAR_ROUTEN and p.get("slave_account_id")} - set(ids))
+        for i in range(0, len(ids) + len(slave_ids), 80):
+            teil = (ids + slave_ids)[i:i + 80]
+            if not teil:
+                break
+            for a in sb_select("accounts", {"select": "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at,currency",
+                                            "id": f"in.({','.join(teil)})"}):
                 accs[str(a["id"])] = a
         # Kerzen je Wurzel ab dem frühesten Start (eine Abfrage je Wurzel)
-        orbit = [p for p in plaene if str(p.get("route") or "") not in LT_ECHO_ROUTEN]      # Echo rechnet keine NQ-Demo
+        orbit = [p for p in plaene if str(p.get("route") or "") not in LT_ECHO_ROUTEN + LT_POLAR_ROUTEN]      # Echo/Polar rechnen keine NQ-Demo
         starts = [str(p.get("started_at")) for p in orbit if p.get("started_at")]
         kerzen = {}
         if starts:
@@ -12302,6 +12346,12 @@ def admin_live_trades():
         trades = []
         for p in plaene:
             acc, vorher = accs.get(str(p.get("master_account_id") or "")), wd_vorher_waehlen(p, fruehere)
+            if str(p.get("route") or "") in LT_POLAR_ROUTEN:
+                try:
+                    trades.append(_lt_polar_zeile(p, acc, accs.get(str(p.get("slave_account_id") or "")), disp, vorher))
+                except Exception as e:     # eine kaputte Polar-Zeile darf den Radar nicht mitreißen (wie Echo)
+                    print(f"[live-trades] ⚠️ Polar-Zeile {str(p.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
+                continue
             if str(p.get("route") or "") in LT_ECHO_ROUTEN:
                 try:
                     z = _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher)
@@ -12343,7 +12393,7 @@ def admin_live_trades():
                 print(f"[live-trades] ⚠️ Kontowerte (Satz): {type(e).__name__}: {e}", flush=True)
         kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
         for z in trades:
-            if z.get("plattform") != "echo":     # Echo trägt seinen eigenen (CFD-)Kurs aus lt_echo_felder
+            if z.get("plattform") not in ("echo", "polar"):     # Echo trägt seinen eigenen (CFD-)Kurs aus lt_echo_felder; Polar braucht keinen
                 z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
         antwort = {"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "kurs_jetzt": kj, "trades": trades}
         stand_alt_merken(lt_schluessel, antwort)

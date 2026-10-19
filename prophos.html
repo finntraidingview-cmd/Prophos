@@ -3944,7 +3944,37 @@
   #dashboard-view .wdl-z-pl{grid-area:pl;text-align:right;font-weight:600}
   /* Konto-Spalte nur in Überprüfen/Erledigt (02.10.2026) */
   /* Ergebnis-Spalte 196 → 256 px (07.10.2026): „🎯 bestanden → Phase 2" + Abhaken wurde mit „…" abgeschnitten */
-  #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:minmax(0,1fr) 150px 256px 110px 150px 136px;grid-template-areas:"wer ri mi konto pl zeit"}
+  /* Konto-Gruppe (Erledigt/Überprüfen, 6 Spalten): die Namensspalte bekam bei 1280 px nur ~33 px (feste Spalten 802 px + Abstände) — Name
+     und Konto wurden „…"/„Jacol" (Prüfer S2 + Master 20.10.2026, Polar-Zeilen mit zwei Namen). Jetzt mindestens 150 px für „wer", dafür
+     Richtung/Konto/P&L/Zu schmaler und der Spaltenabstand 12 statt 16 px (Messung im Stub bei 1280 px: Kasten 947 px, feste Spalten
+     müssen unter ~900 px bleiben, sonst läuft „Zu" rechts über). Handy (≤ 820 px) hat ein eigenes Raster unten. */
+  #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:minmax(150px,1fr) 110px 240px 84px 126px 110px;grid-template-areas:"wer ri mi konto pl zeit";column-gap:12px}
+  /* Polar im Radar (20.10.2026): eine Zeile über beide IDs — Namen/Konten und Richtung/Menge je Seite untereinander, dezent */
+  #dashboard-view .wdl-z-polar .wdl-z-wer{line-height:1.3}
+  #dashboard-view .wdl-z-polar .wdl-z-wer .wdl-pol-s{display:block;color:var(--sub)}
+  #dashboard-view .wdl-z-polar .wdl-z-wer .wdl-pol-s b{font-weight:600;color:var(--ink-2)}
+  #dashboard-view .wdl-z-polar .wdl-z-ri{line-height:1.5}
+  #dashboard-view .wdl-z-polar .wdl-z-ri .wdl-pol-s{display:block}
+  #dashboard-view .wdl-z-polar .wdl-pol-ph{font-weight:600;color:var(--ink-2)}
+  #dashboard-view .wdl-z-polar .wdl-pol-ph.is-zu{color:var(--warn-ink, #b45309)}
+  #dashboard-view .wdl-z-polar .wdl-pol-ph.is-fehler{color:var(--danger-ink, #b91c1c)}
+  #dashboard-view .wdl-z-polar .wdl-z-slave{display:block}
+  /* Phase/Ergebnis der Polar-Zeile in der Aktions-Zelle (Läuft: „Stand", Erledigt: drei Knöpfe): als eigene Zeile ÜBER den Knöpfen — neben
+     ihnen wurde der Text-Span auf 0 px gequetscht (Prüfer S2 20.10.2026, DOM-Messung: width 0). Muster wie .wdl-bestanden (oben). */
+  #dashboard-view .wdl-z-polar .wdl-z-akt{flex-wrap:wrap;row-gap:4px}
+  #dashboard-view .wdl-z-polar .wdl-z-akt > span:first-child{flex-basis:100%;text-align:right;white-space:normal;overflow:visible}
+  #dashboard-view .wdl-z-polar .wdl-pol-sm{display:inline-block;margin-left:6px;color:var(--sub);font-size:11px}   /* bricht als Ganzes in die nächste Zeile, statt rechts abzulaufen */
+  #polarModal .pol-lauf-kopf{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;font-size:13px;margin-bottom:12px}
+  #polarModal .pol-lauf-kopf b{font-size:14px}
+  #polarModal .pol-lauf-kopf .pol-lauf-ph{margin-left:auto;font-weight:600}
+  #polarModal .pol-lauf-seiten{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  #polarModal .pol-seite{border:1px solid var(--border-soft);border-radius:var(--r-sm);padding:10px 12px;font-size:12.5px;line-height:1.45}
+  #polarModal .pol-seite h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.04em}
+  #polarModal .pol-seite dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:0}
+  #polarModal .pol-seite dt{color:var(--sub)}
+  #polarModal .pol-seite dd{margin:0;font-variant-numeric:tabular-nums}
+  #polarModal .pol-seite .pol-log{display:block;margin-top:6px;padding:4px 6px;border-radius:4px;background:var(--surface-tint);font-family:var(--mono, ui-monospace, monospace);font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #polarModal .pol-lauf-fuss{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12px;color:var(--sub)}
   #dashboard-view .wdl-z-konto{grid-area:konto;text-align:right;color:var(--sub);white-space:nowrap}
   /* Balance → Ziel im Radar (08.10.2026): Balken unter dem Endstand (Konto-Spalte) bzw. unter dem Live-P&L (Läuft), darunter „x % · Rest" */
   #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500;white-space:nowrap}
@@ -4247,6 +4277,9 @@
     #dashboard-view .wdl-z-wer small{font-size:12px}
     #dashboard-view .wdl-z-ri em{min-width:28px;margin-right:4px;letter-spacing:0}
     #dashboard-view .wdl-z-ab{display:none}
+    /* Polar (20.10.2026): am Handy die Slave-Zeile der Richtung ausblenden (steht im Popup), Namen bleiben zweizeilig */
+    #dashboard-view .wdl-z-polar .wdl-z-ri .wdl-pol-s{display:none}
+    #polarModal .pol-lauf-seiten{grid-template-columns:1fr}
     #dashboard-view .wdl-z-sym{display:none}   /* Handy: nur „0,5 Lot", das Symbol steht im Tooltip */
     #dashboard-view .wdl-z > .wdl-z-akt{flex-wrap:wrap;row-gap:4px}   /* Handy: passt „in 58 min" + Knopf nicht in eine Zeile, rutscht der Knopf darunter */
     #dashboard-view .wdl-z-akt > .wdl-ziel-txt{flex-basis:100%}   /* Ziel erreicht (08.10.2026): Text volle Breite, „Nächste Phase →" darunter */
@@ -8916,12 +8949,21 @@
     <div class="modal-bg" id="polarModal">
       <div class="modal" style="max-width:620px">
         <div class="modal-head">
-          <h3>Polar planen <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Vorschau</span></h3>
+          <h3 id="polarTitel">Polar planen <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Vorschau</span></h3>
           <button class="modal-x" id="polarClose" aria-label="Schließen">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div class="modal-body">
+          <!-- Polar-Lauf (20.10.2026, Finn: „alles komplett die Konstrukte aufbauen"): dasselbe Popup im Lauf-Modus, geöffnet über „Stand" an
+               der Radar-Zeile (wdlPolarOeffnen) — Phase je Seite, Feuerzeit, Fill, wer zuerst zu war, beide P&L; am PC einer Seite dazu die
+               feine Bot-Phase + letzte Log-Zeile aus stand_<seite>.json (Panel /api/polar-stand); „Abbruch" nur vor der Feuerzeit
+               (Panel /api/polar-abbruch, abbruch.json). Das Plan-Raster darunter ist im Lauf-Modus ausgeblendet. -->
+          <div id="pol-lauf" hidden>
+            <div class="pol-lauf-kopf" id="pol-lauf-kopf"></div>
+            <div class="pol-lauf-seiten" id="pol-lauf-seiten"></div>
+            <div class="pol-lauf-fuss"><span id="pol-lauf-hinweis"></span><button type="button" class="btn btn-ghost" id="pol-lauf-abbruch" hidden title="Lauf abbrechen — wirkt nur VOR der Feuerzeit (abbruch.json am PC dieser Seite)">Abbruch</button></div>
+          </div>
           <div class="pol-grid">
             <div class="field"><label>Master · Funded Futures</label><select class="input" id="pol-fu-konto"></select></div>
             <div class="field"><label>Slave · Funded CFD</label><select class="input" id="pol-cfd-konto"></select></div>
@@ -29701,16 +29743,18 @@
    * kurs_jetzt ≈ aus Equity − Balance, pl_live aus MT5. Eigene Sektion unter Orbit, gleiches Raster, gleiche Spanne. Kein NQ-Chart
    * (CFD-Preise passen nicht auf NQ/MNQ): keine Linien, keine Auswahl; der 2-s-Takt (NQ-Kurs) lässt Echo aus. */
   function wdlIstEcho(t){ return !!t && t.plattform === 'echo' }
+  function wdlIstPolar(t){ return !!t && (t.plattform === 'polar' || t.route === 'polar') }   // Polar (20.10.2026): eine Zeile über beide IDs
   // Plattform fürs Radar (30.09.2026, Finn: „Die Topstep-Trades sollen nicht als Orbit erscheinen, sondern als Topstep"): das Backend
   // liefert für Topstep V2 plattform 'orbit' — hier aus route 'tsv2' abgeleitet. Nur Anzeige (Pille, Block); Chart, Spanne, Liq,
   // Demo und Nachlesen bleiben für Topstep wie für Orbit (NQ/MNQ).
-  const WDL_PF = [['orbit', 'Orbit'], ['topstep', 'Topstep'], ['echo', 'Echo']]   // Reihenfolge der Blöcke je Gruppe
-  function wdlPf(t){ return wdlIstEcho(t) ? 'echo' : (t && t.route === 'tsv2') ? 'topstep' : 'orbit' }
+  const WDL_PF = [['orbit', 'Orbit'], ['topstep', 'Topstep'], ['echo', 'Echo'], ['polar', 'Polar']]   // Reihenfolge der Blöcke je Gruppe
+  function wdlPf(t){ return wdlIstEcho(t) ? 'echo' : wdlIstPolar(t) ? 'polar' : (t && t.route === 'tsv2') ? 'topstep' : 'orbit' }
   // Weg je Zeile (01.10.2026, Finn am Radar: „dass man hier immer sieht, mit welchem Modell der gestartet wurde"): die Pille sagt
   // Orbit V2 / Orbit V3 / Winning Day / Topstep V2 / Echo V2 statt nur der Plattform — Blöcke bleiben nach wdlPf sortiert.
   // orbit_v3/konto_typ liefert /admin/live-trades seit .917; ein älteres Backend ohne die Felder → eigener Plan aus tradePlans
   function wdlWeg(t){
     if(!t) return 'Orbit V2'
+    if(wdlIstPolar(t)) return 'Polar'   // Sticker „Polar" (20.10.2026)
     if(wdlIstEcho(t)) return t.route === 'mt5' ? 'Echo' : 'Echo V2'   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
     // Winning Day auf Topstep (.1496, Finn 13.10.2026: „Winning Day ist der Knopf, Topstep V2 der Weg"): die Pille sagt Winning Day
     if(t.route === 'tsv2') return (Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days' || t.winning_day === true) ? 'Winning Day' : 'Topstep V2'
@@ -29754,7 +29798,7 @@
   }
   // MODELLE (01.10.2026 abends): Schlüssel = Weg-Label (wdlWeg), Gruppen wie im Plan-Popup. Topstep (klassisch) und Duplikum liefert
   // das Backend nicht — sie fehlen hier bewusst statt als ewig leere Reiter.
-  const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Winning Day']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]
+  const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]   // Polar im Radar (20.10.2026)
   // Liste im Radar (09.10.2026): feste Reihenfolge und Akzentfarbe je Modell — „Orbit" ist Orbit V3 (heißt wie im Plan-Popup)
   // Seit 09.10.2026 ~07:45 Dubai (Finn) in zwei Obergruppen wie die Filterleiste oben: „Mit Hedge" (Orbit vor Echo, dann Winning Day),
   // „Ohne Hedge" (Orbit V2, Echo V2, Topstep V2) — Kopf je Obergruppe (wdlObergruppenHtml), gilt für Radar und Trades → Offen
@@ -29778,7 +29822,7 @@
   }
   window._wdlObergruppenHtml = wdlObergruppenHtml   // Trades → Offen (anderer Abschnitt) nutzt dieselbe Gruppierung
   const WDL_MODELL_FARBE = { 'Orbit': 'var(--violet)', 'Orbit V2': 'var(--violet-soft)', 'Winning Day': 'var(--good)', 'Echo': 'var(--teal)',
-                             'Echo V2': 'var(--blue)', 'Topstep V2': 'var(--warn)', 'Weitere': 'var(--sub)' }
+                             'Echo V2': 'var(--blue)', 'Topstep V2': 'var(--warn)', 'Polar': 'var(--teal-soft, var(--teal))', 'Weitere': 'var(--sub)' }
   const wdlModellPasst = t => !wdl.modell || wdlWeg(t) === wdl.modell
   try{ const m = localStorage.getItem('prophos_wdl_modell'); if(m && WDL_MODELLE.some(([, l]) => l.includes(m))) wdl.modell = m }catch(_){}
   function wdlModelleRender(trades){
@@ -30038,6 +30082,7 @@
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       wdl.daten = d; wdl.fehler = ''
       wdlLokalAnwenden()   // eben abgehakte/verschobene Zeilen nie mit einem älteren Backend-Stand zurückholen (08.10.2026)
+      try{ await wdlPolarLaden() }catch(_){}   // Polar (20.10.2026): Stand je laufendem Polar-Plan (/polar/stand), 404 = Hand-Polar
     }catch(e){ wdl.fehler = String((e && e.message) || e) }
     try{
       const { data } = await supabase.from('tv_kurse').select('wurzel,preis,updated_at,stale,modus').order('updated_at', { ascending: false }).limit(12)
@@ -30050,7 +30095,7 @@
     // wdlLiveTick alle 2 s nach; die Minuten-Texte („Nachlesung in n min") hält der Neuaufbau spätestens alle 60 s frisch.
     // Echo-Live-Werte (Kurs ≈, P&L, Alter) ändern sich bei jedem Abruf — sie zählen nicht zur Signatur, wdlEchoLive schreibt sie nach
     const ohneEchoLive = t => Object.assign({}, t, wdlIstEcho(t) ? { kurs_jetzt: null, pl_live: null, mt5_alter_s: null, konto_balance: null, konto_balance_at: null } : {}, { slave_pl_live: null })
-    const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler, (wdl.daten && wdl.daten.stand_alt) ? wdl.daten.stand_at : ''])
+    const sig = JSON.stringify([((wdl.daten && wdl.daten.trades) || []).map(ohneEchoLive), wdl.fehler, (wdl.daten && wdl.daten.stand_alt) ? wdl.daten.stand_at : '', wdlPolarSig()])
     if(!voll && sig === wdl.sig && Date.now() - (wdl.renderAt || 0) < 60000){ wdlEchoLive(); wdlFusionLive(); return }
     // Offenes Notiz-Feld (Manuelle Arbeit, 08.10.2026): der Takt baut die Liste nicht neu, sonst ginge das Getippte verloren
     if(!voll && _wdlManNotiz && document.querySelector('#wdl-liste [data-wdl-man-notiz]')){ wdlEchoLive(); wdlFusionLive(); return }
@@ -30439,6 +30484,7 @@
    * End-Balance / kein Today's P&L / keine Puls-Quelle, nicht aufgegeben, weniger als TV_ENDLESUNG_MAX Versuche. Gelesen oder
    * aufgegeben → Beendet. Nur Anzeige, an der Nachlesung selbst ändert sich nichts. -> {ab, versuche} | null */
   function wdlWartet(t){
+    if(wdlIstPolar(t)) return null   // Polar (20.10.2026): keine Puls-Nachlesung — die Abrechnung des Laufs schreibt beide P&L, Hand-Polar hakt Finn ab
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v), e = (t && t.endlesung) || {}
     if(!t || t.status !== 'review' || n(t.balance_start) == null || n(t.balance_end) != null) return null
     // TopstepX (01.10.2026, TSV2-PNL): today_pnl ist der RP&L des ganzen Tages — dort wartet der Trade, bis balance_end steht
@@ -30705,6 +30751,182 @@
     if(mklWdEigenerPlan(wdlTid(t)) || ['tvv2', 'mt5v2', 'tsv2', 'mt5', 'tvplus'].includes(t.route)) return ''
     return 'Dieser Weg lässt sich hier nicht abhaken — im Trades-Reiter der ID erledigen'
   }
+  /* POLAR IM RADAR (20.10.2026, Finn 02:45 Dubai: „Frontend ebenfalls noch mal updaten zu Polar, auch unter Radar hinzufügen, alles komplett
+   * die Konstrukte aufbauen"): EINE Zeile je Lauf über beide IDs — Master (ID A × Funded Futures, TradingView/Puls) und Slave (ID B ×
+   * Funded CFD, MT5) — mit Sticker „Polar", Phase, Feuerzeit, Fill beider Seiten, wer zuerst zu war (+ ms, bis der andere zu war) und
+   * beiden P&L nach dem Ende. Die Zeile kommt aus /admin/live-trades?echo=1 (route polar, plattform 'polar', app.py lt_polar_felder:
+   * slave_person, slave_konto, slave_lots, slave_pl, polar = Abrechnung aus mt5_baseline.polar). Den LAUFENDEN Stand holt wdlPolarLaden
+   * je offenem Plan über Railway /polar/stand (polar_app._sicht: status start|bereit|feuer|offen|master_zu|slave_zu|fertig|abbruch|
+   * fehler, feuer_ms, bereit[], master/slave-Teile mit gefuellt{fill}, zu_ms/zu_quelle, grund) — 404 „kein Lauf" = Hand-Polar (Finn
+   * 16.10.: beide Seiten selbst). Phase = aus status + Teilen abgeleitet (S1 20.10.: die feine Bot-Phase je Seite gibt es nur am PC der
+   * Seite über Panel /api/polar-stand — die zeigt das Popup, wdlPolarOeffnen). Gruppe wie andere Pläne: open = Läuft, review =
+   * Erledigt/Abhaken, completed = Verlauf; abbruch/fehler/fertig stehen in der Phase. Kein Chart, keine Spanne, kein Wartet. */
+  wdl.polar = wdl.polar || {}   // plan_id → { stand, hand, at, fehler }
+  const WDL_POLAR_ENDE = ['fertig', 'abbruch', 'fehler']
+  const wdlPolarUhr = ms => { const d = new Date(Number(ms) || 0); return isNaN(d) || !ms ? '–' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }
+  const wdlPolarPreis = v => (v == null || v === '' || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // REIN RECHNEND (testbar, tools/selftest_polar_radar.py): Phase aus dem Lauf-Stand → { phase, kurz, text, zu }
+  // zu = wer zuerst zu war + Abstand in ms bis zur zweiten zu-Meldung (polar_app zu_erste_seite / Abrechnung verzug_ms), sonst null
+  function wdlPolarPhase(st, hand, jetzt){
+    if(hand) return { phase: 'hand', kurz: 'von Hand', text: 'von Hand — beide Seiten selbst platziert, „Erledigt" in Trades mit beiden P&L', zu: null }
+    if(!st || typeof st !== 'object') return { phase: 'unbekannt', kurz: '…', text: 'Stand des Laufs noch nicht gelesen', zu: null }
+    const m = st.master || {}, sl = st.slave || {}, status = String(st.status || 'start'), feuer = Number(st.feuer_ms) || null
+    const mz = st.master_zu_ms != null ? Number(st.master_zu_ms) : null, sz = st.slave_zu_ms != null ? Number(st.slave_zu_ms) : null
+    const erste = st.zu_quelle || (mz != null && sz != null ? (mz <= sz ? 'master' : 'slave') : mz != null ? 'master' : sz != null ? 'slave' : null)
+    const zu = erste ? { quelle: erste, ms: (mz != null && sz != null) ? Math.abs(sz - mz) : null, beide: mz != null && sz != null } : null
+    const seite = q => q === 'slave' ? 'Slave' : 'Master', gegen = q => q === 'slave' ? 'Master' : 'Slave'
+    const zuTxt = zu ? `${seite(zu.quelle)} zuerst zu${zu.beide ? ` · ${gegen(zu.quelle)} ${zu.ms} ms später` : ` — ${gegen(zu.quelle)} schließt`}` : ''
+    if(status === 'abbruch') return { phase: 'abbruch', kurz: 'Abbruch', text: 'Abbruch' + (st.grund ? ': ' + st.grund : ' vor der Feuerzeit'), zu }
+    if(status === 'fehler') return { phase: 'fehler', kurz: 'Fehler', text: 'Fehler' + (st.grund ? ': ' + st.grund : ''), zu }
+    if(status === 'fertig') return { phase: 'ende', kurz: 'zu', text: 'zu Ende — abgerechnet' + (zuTxt ? ' · ' + zuTxt : ''), zu }
+    if(zu) return { phase: 'zu', kurz: zu.beide ? 'beide zu' : 'schließt', text: zuTxt, zu }
+    const beide = !!(m.gefuellt && sl.gefuellt)
+    if(status === 'offen' || beide || m.gefuellt || sl.gefuellt) return { phase: 'gefuellt', kurz: beide ? 'gefüllt' : 'teils gefüllt',
+      text: beide ? 'beide Seiten gefüllt — Wache läuft' : m.gefuellt ? 'Master gefüllt, Slave noch nicht' : sl.gefuellt ? 'Slave gefüllt, Master noch nicht' : 'Order gedrückt, Fill fehlt', zu }
+    if(status === 'feuer' || feuer) return feuer && jetzt < feuer ? { phase: 'feuer', kurz: 'Feuer ' + wdlPolarUhr(feuer), text: `Feuer um ${wdlPolarUhr(feuer)} — beide drücken gleichzeitig`, zu }
+      : { phase: 'feuer', kurz: 'gefeuert', text: `gefeuert um ${wdlPolarUhr(feuer)} — wartet auf den Fill`, zu }
+    const b = Array.isArray(st.bereit) ? st.bereit : []
+    if(status === 'bereit' || b.length) return { phase: 'bereit', kurz: b.length >= 2 ? 'beide bereit' : `${seite(b[0])} bereit`, text: b.length >= 2 ? 'beide bereit — Feuerzeit kommt' : `${seite(b[0])} bereit, ${gegen(b[0])} fehlt noch`, zu }
+    return { phase: 'vorbereiten', kurz: 'vorbereiten', text: 'vorbereiten — Ticket, Hover, Konto', zu }
+  }
+  window._wdlPolarPhase = wdlPolarPhase   // Test-Haken (Selftest ohne DB)
+  // Stand je offenem Polar-Plan von Railway holen (im Radar-Takt, nur für Zeilen in „Läuft"); 404 = kein Lauf = Hand-Polar
+  async function wdlPolarLaden(){
+    const offen = ((wdl.daten && wdl.daten.trades) || []).filter(t => wdlIstPolar(t) && t.status === 'open')
+    if(!offen.length) return
+    let tok = null; try{ const { data: { session } } = await supabase.auth.getSession(); tok = session?.access_token }catch(_){}
+    if(!tok) return
+    await Promise.all(offen.map(async t => {
+      const pid = wdlTid(t), alt = wdl.polar[pid]
+      if(alt && alt.hand && Date.now() - alt.at < 120000) return   // Hand-Polar: nur alle 2 min nachfragen (ein Bot-Lauf kann noch dazukommen)
+      try{
+        const ctrl = new AbortController(); const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, 8000)
+        const r = await fetch(`${WATCHER_HOME}/polar/stand?plan_id=${encodeURIComponent(pid)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+        clearTimeout(tm)
+        const d = await r.json().catch(() => ({}))
+        if(r.status === 404) wdl.polar[pid] = { stand: null, hand: true, at: Date.now(), fehler: '' }
+        else if(r.ok && d && d.ok) wdl.polar[pid] = { stand: d, hand: false, at: Date.now(), fehler: '' }
+        else wdl.polar[pid] = Object.assign({}, alt || { stand: null, hand: false }, { at: Date.now(), fehler: (d && d.msg) || ('HTTP ' + r.status) })
+      }catch(e){ wdl.polar[pid] = Object.assign({}, alt || { stand: null, hand: false }, { at: Date.now(), fehler: String((e && e.message) || e) }) }
+    }))
+  }
+  // Signatur des Polar-Stands (ohne Zeiten/Server-Uhr) — ändert sie sich, baut der Takt die Liste neu
+  const wdlPolarSig = () => JSON.stringify(Object.keys(wdl.polar).sort().map(k => { const x = wdl.polar[k] || {}; const st = x.stand || {}; return [k, x.hand, x.fehler || '', st.status, st.feuer_ms, st.zu_quelle, st.master_zu_ms, st.slave_zu_ms, (st.bereit || []).length, !!(st.master || {}).gefuellt, !!(st.slave || {}).gefuellt] }))
+  // Abrechnung am Plan (mt5_baseline.polar) → Ergebnis-Text für Erledigt/Verlauf; vor der Abrechnung der letzte Lauf-Stand
+  function wdlPolarErg(t){
+    const pol = t && t.polar && typeof t.polar === 'object' ? t.polar : null
+    const x = wdl.polar[wdlTid(t)] || null
+    if(pol){
+      const q = pol.zu_quelle || ((x && x.stand && x.stand.zu_quelle) || null), v = pol.verzug_ms != null && isFinite(Number(pol.verzug_ms)) ? Math.abs(Number(pol.verzug_ms)) : null
+      const st = String(pol.status || '')
+      if(st === 'abbruch') return { html: '<span class="wdl-pol-ph is-fehler">Abbruch</span>', tip: 'Lauf abgebrochen' }
+      if(st === 'fehler') return { html: '<span class="wdl-pol-ph is-fehler">Fehler</span>', tip: 'Lauf mit Fehler beendet — master.log/slave.log am PC' }
+      const wer = q ? `${q === 'slave' ? 'Slave' : 'Master'} zuerst` : 'zu'   // kurz — die Spalte teilt sich mit drei Knöpfen
+      return { html: `<span class="wdl-pol-ph is-zu">${escapeHtml(wer)}</span>${v != null ? `<small class="wdl-pol-sm" title="Abstand zwischen den beiden zu-Meldungen">${q === 'slave' ? 'Master' : 'Slave'} +${v.toLocaleString('de-DE')} ms</small>` : ''}`,
+        tip: `Fill Master ${wdlPolarPreis(pol.master_fill)} · Fill Slave ${wdlPolarPreis(pol.slave_fill)}${pol.klick_abstand_ms != null ? ` · Klick-Abstand ${pol.klick_abstand_ms} ms` : ''}` }
+    }
+    if(x && x.hand) return { html: '<span class="wdl-pol-ph">von Hand</span>', tip: 'Hand-Polar — beide Seiten selbst platziert' }
+    if(x && x.stand){ const ph = wdlPolarPhase(x.stand, false, Date.now()); return { html: `<span class="wdl-pol-ph${ph.phase === 'fehler' || ph.phase === 'abbruch' ? ' is-fehler' : ''}">${escapeHtml(ph.kurz)}</span>`, tip: ph.text } }
+    return { html: '<span class="wdl-pol-ph">Polar</span>', tip: 'keine Abrechnung am Plan — Hand-Polar oder Lauf nicht abgerechnet' }
+  }
+  // P&L-Zelle: Master in $ (Plan/Abrechnung), darunter Slave in der Kontowährung des CFD-Kontos
+  function wdlPolarPlZ(t, zelle, sig, col){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const pol = t && t.polar && typeof t.polar === 'object' ? t.polar : {}
+    const mp = n(t.master_pl && t.master_pl.wert) ?? n(pol.master_pl), sp = n(t.slave_pl) ?? n(pol.slave_pl)
+    const cur = (t.slave_konto && t.slave_konto.currency) || '$'
+    return zelle('pl', `<span style="color:${col(mp)}">${sig(mp, '$', 2)}</span><small class="wdl-z-slave" style="color:${col(sp)}" title="Slave (CFD, MT5)">Slave ${sig(sp, cur === 'EUR' ? '€' : cur === 'USD' ? '$' : cur, 2)}</small>`,
+      { tip: mp != null ? 'Master: Balance nachher − vorher (Puls-Endlesung) · Slave: MT5-Wache' : 'noch kein P&L — Abrechnung des Laufs oder beim Abhaken eintragen' })
+  }
+  /* Popup im Lauf-Modus (#polarModal, Block #pol-lauf): Kopf beide Seiten, je Seite Phase/Fill/Log, Feuerzeit, Abbruch vor der Feuerzeit.
+   * Panel-Stand (feine Bot-Phase + letzte Log-Zeile) nur am PC einer Seite (MT5_LOCAL, window.mtcApi 'polar-stand'); vom Mac bleibt es beim
+   * Railway-Stand. Eigene Verdrahtung: Öffnen hier, Schließen über #polarClose (vorhanden) setzt das Popup zurück in den Plan-Modus. */
+  let _wdlPolarPopup = null   // { pid, takt }
+  let _wdlPolarAbbruchBusy = false
+  function wdlPolarPopupZurueck(){
+    const m = document.getElementById('polarModal'); if(!m) return
+    if(_wdlPolarPopup && _wdlPolarPopup.takt) clearInterval(_wdlPolarPopup.takt)
+    _wdlPolarPopup = null
+    const lauf = document.getElementById('pol-lauf'); if(lauf) lauf.hidden = true
+    m.querySelectorAll('.pol-grid, .modal-foot').forEach(e => { e.hidden = false })
+    const h = document.getElementById('polarTitel'); if(h && h.dataset.plan) h.innerHTML = h.dataset.plan
+  }
+  document.getElementById('polarClose')?.addEventListener('click', wdlPolarPopupZurueck)   // zusätzlich zur vorhandenen Verdrahtung (schließt)
+  async function wdlPolarOeffnen(pid){
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)); if(!t) return
+    const m = document.getElementById('polarModal'), lauf = document.getElementById('pol-lauf'); if(!m || !lauf) return
+    wdlPolarPopupZurueck()
+    const h = document.getElementById('polarTitel'); if(h){ if(!h.dataset.plan) h.dataset.plan = h.innerHTML; h.innerHTML = 'Polar-Lauf <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Stand</span>' }
+    m.querySelectorAll('.pol-grid, .modal-foot').forEach(e => { e.hidden = true })
+    lauf.hidden = false
+    m.classList.add('open')
+    _wdlPolarPopup = { pid: String(pid), takt: null }
+    await wdlPolarPopupZeichnen()
+    if(_wdlPolarPopup) _wdlPolarPopup.takt = setInterval(async () => {
+      if(!m.classList.contains('open')){ wdlPolarPopupZurueck(); return }
+      if(t.status === 'open'){ try{ await wdlPolarLaden() }catch(_){} }
+      wdlPolarPopupZeichnen()
+    }, 5000)
+  }
+  async function wdlPolarPopupZeichnen(){
+    if(!_wdlPolarPopup) return
+    const pid = _wdlPolarPopup.pid, t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid); if(!t) return
+    const x = wdl.polar[pid] || null, st = x && x.stand ? x.stand : null, hand = !!(x && x.hand) || (t.status !== 'open' && !t.polar && !st)
+    const ph = t.polar && t.status !== 'open' ? null : wdlPolarPhase(st, hand, Date.now())
+    const erg = wdlPolarErg(t), pol = t.polar && typeof t.polar === 'object' ? t.polar : {}
+    const k = t.konto || {}, sk = t.slave_konto || {}
+    const kontoTxt = (kk, p) => `${escapeHtml(String(p || '?'))} · ${escapeHtml(kk.firma || '?')}${kk.kontonr_ende ? ' …' + escapeHtml(kk.kontonr_ende) : ''}`
+    const kopf = document.getElementById('pol-lauf-kopf')
+    if(kopf) kopf.innerHTML = `<b>${kontoTxt(k, t.person)}</b><span style="color:var(--sub)">⇄</span><b>${kontoTxt(sk, t.slave_person)}</b>`
+      + `<span class="pol-lauf-ph" title="${escapeHtml(ph ? ph.text : erg.tip)}">${ph ? escapeHtml(ph.text) : erg.html}</span>`
+    // Panel-Stand (feine Bot-Phase + letzte Log-Zeile) nur am PC — der Panel kennt nur die eigene Seite (stand_<seite>.json)
+    let panel = null
+    if(MT5_LOCAL && typeof window.mtcApi === 'function' && t.status === 'open' && !hand){
+      try{ const r = await window.mtcApi('polar-stand' + (st && st.lauf_id ? `?lauf_id=${encodeURIComponent(st.lauf_id)}` : ''), { timeoutMs: 4000 }); if(r && r.ok && r.stand) panel = r.stand }catch(_){}
+    }
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const fillTxt = (teil, pf) => { const g = (teil || {}).gefuellt || {}; const v = g.fill != null ? g.fill : pf; return v != null ? wdlPolarPreis(v) : '–' }
+    const seiteHtml = (name, teil, pf, pl, cur, person, kk, menge, richtung) => {
+      const eigen = panel && panel.seite === (name === 'Master' ? 'master' : 'slave') ? panel : null
+      const log = eigen && eigen.trail_ende ? String(eigen.trail_ende).trim().split('\n').pop() : ''
+      const plTxt = n(pl) == null ? '–' : `${n(pl) < 0 ? '−' : '+'}${Math.abs(n(pl)).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`
+      return `<div class="pol-seite"><h4>${name} · ${escapeHtml(String(person || '?'))}</h4><dl>`
+        + `<dt>Konto</dt><dd>${escapeHtml(kk.firma || '?')}${kk.kontonr_ende ? ' …' + escapeHtml(kk.kontonr_ende) : ''}</dd>`
+        + `<dt>Order</dt><dd>${richtung === 'buy' ? 'BUY' : richtung === 'sell' ? 'SELL' : '?'} ${escapeHtml(menge)}</dd>`
+        + (ph ? `<dt>Phase</dt><dd>${eigen ? escapeHtml(String(eigen.phase || '?')) + ' <small style="color:var(--sub)">(Bot am PC)</small>' : escapeHtml(ph.kurz)}</dd>` : '')
+        + `<dt>Fill</dt><dd>${fillTxt(teil, pf)}</dd>`
+        + (t.status !== 'open' || n(pl) != null ? `<dt>P&amp;L</dt><dd>${plTxt}</dd>` : '')
+        + `</dl>${log ? `<span class="pol-log" title="${escapeHtml(log)}">${escapeHtml(log)}</span>` : ''}</div>`
+    }
+    const seiten = document.getElementById('pol-lauf-seiten')
+    const mengeM = `${t.kt != null ? Number(t.kt).toLocaleString('de-DE') : '?'} × ${t.symbol_root || 'NQ'}`
+    const mengeS = `${t.slave_lots != null ? Number(t.slave_lots).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} Lot`
+    const curS = sk.currency === 'EUR' ? '€' : sk.currency === 'USD' || !sk.currency ? '$' : sk.currency
+    if(seiten) seiten.innerHTML = seiteHtml('Master', st && st.master, pol.master_fill, (t.master_pl && t.master_pl.wert) ?? pol.master_pl, '$', t.person, k, mengeM, t.richtung)
+      + seiteHtml('Slave', st && st.slave, pol.slave_fill, t.slave_pl ?? pol.slave_pl, curS, t.slave_person, sk, mengeS, t.slave_richtung)
+    const hin = document.getElementById('pol-lauf-hinweis'), ab = document.getElementById('pol-lauf-abbruch')
+    const feuer = st && Number(st.feuer_ms) || null, vorFeuer = !!(st && t.status === 'open' && !hand && !WDL_POLAR_ENDE.includes(String(st.status || '')) && !feuer)
+    if(hin) hin.textContent = hand ? 'Hand-Polar — kein Bot, kein Abbruch nötig' : x && x.fehler ? `Stand: ${x.fehler}` : feuer ? `Feuerzeit ${wdlPolarUhr(feuer)}` + (st && st.lauf_id ? ` · Lauf ${String(st.lauf_id).slice(0, 8)}` : '')
+      : st && st.lauf_id ? `Lauf ${String(st.lauf_id).slice(0, 8)} · noch keine Feuerzeit` : t.polar && t.polar.lauf_id ? `Lauf ${String(t.polar.lauf_id).slice(0, 8)} · abgerechnet` : ''
+    if(ab){
+      ab.hidden = !vorFeuer
+      const amPc = MT5_LOCAL && typeof window.mtcApi === 'function'
+      ab.disabled = !amPc || _wdlPolarAbbruchBusy
+      ab.title = amPc ? 'Lauf abbrechen — wirkt nur VOR der Feuerzeit (abbruch.json am PC dieser Seite)' : 'Abbruch nur am PC einer Seite (Panel) — hier nur ansehen'
+    }
+  }
+  document.getElementById('pol-lauf-abbruch')?.addEventListener('click', async () => {
+    if(!_wdlPolarPopup || _wdlPolarAbbruchBusy) return
+    const x = wdl.polar[_wdlPolarPopup.pid], st = x && x.stand; if(!st || !st.lauf_id) return
+    if(st.feuer_ms){ if(typeof atToast === 'function') atToast('⛔ Polar: Feuerzeit steht schon — Abbruch wirkt nur davor', 'end'); return }
+    _wdlPolarAbbruchBusy = true
+    try{
+      const r = await window.mtcApi('polar-abbruch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lauf_id: st.lauf_id }), timeoutMs: 8000 })
+      if(typeof atToast === 'function') atToast(r && r.ok ? `🧭 Polar-Lauf ${String(st.lauf_id).slice(0, 8)}: Abbruch gesetzt — der Bot dieser Seite hört vor der Feuerzeit auf` : '⛔ Abbruch nicht gesetzt: ' + ((r && r.msg) || 'Panel nicht erreichbar'), r && r.ok ? 'start' : 'end')
+    }catch(e){ if(typeof atToast === 'function') atToast('⛔ Abbruch: ' + ((e && e.message) || e), 'end') }
+    finally{ _wdlPolarAbbruchBusy = false; try{ await wdlPolarLaden() }catch(_){}; wdlPolarPopupZeichnen() }
+  })
+  window._wdlPolarOeffnen = wdlPolarOeffnen   // Test-Haken (Stub)
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
     wdl.renderAt = Date.now()
@@ -30769,7 +30991,7 @@
     const zeile = (t, extra) => {
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       // Echo (30.09.2026): kein Chart, kein „Wartet" (siehe gruppen), Lots + CFD-Symbol statt „3 × NQ"
-      const echo = wdlIstEcho(t)
+      const echo = wdlIstEcho(t), polar = wdlIstPolar(t)
       const lq = num(t.liq_regel_level_nq) != null ? num(t.liq_regel_level_nq) : num(t.liq_level_nq), slE = wdlSlEcht(t), d = t.demo || {}, an = !echo && wdlLinienAn(t), wt = echo ? null : wdlWartet(t)
       // KONTOGRÖSSE IN DER ZEILE (08.10.2026, Finn am Radar: „schreib dazu, ob es ein 100k- oder 200k-Account war — sieht man hier
       // nie"): groesse kommt vom Backend (starting_balance, sonst „150k" aus dem Namen); fehlt beides, Rückfall wie im Planer auf die
@@ -30778,13 +31000,35 @@
       const grK = (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(k.name, num(k.groesse), t.balance_start) : (num(k.groesse) > 0 ? num(k.groesse) : 0)
       const grTxt = grK > 0 ? ' ' + (grK % 1000 === 0 ? grK / 1000 : (grK / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''
       const konto = `${k.firma || '?'}${grTxt}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
-      const tip = echo ? [k.name || konto, 'Echo (MT5)', t.symbol || ''].filter(Boolean).join(' · ')
+      // Polar (20.10.2026): Slave-Seite (ID B × CFD-Konto) als zweite Zeile unter Namen und Richtung — Fill/Phase stehen in der Mitte
+      const sk = t.slave_konto || {}, skGr = polar && typeof kontoGroesseAnzeige === 'function' ? kontoGroesseAnzeige(sk.name, num(sk.groesse), null) : (num(sk.groesse) > 0 ? num(sk.groesse) : 0)
+      const slaveKonto = polar ? `${sk.firma || '?'}${skGr > 0 ? ' ' + (skGr % 1000 === 0 ? skGr / 1000 : (skGr / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''}${sk.kontonr_ende ? ' …' + sk.kontonr_ende : ''}` : ''
+      const polSlaveWer = polar ? `<span class="wdl-pol-s"><b>${escapeHtml(String(t.slave_person || '?'))}</b> <small title="Slave-Konto (CFD, MT5)">${escapeHtml(slaveKonto)}</small></span>` : ''
+      const tip = polar ? [k.name || konto, 'Master (Futures, TradingView)', '⇄', sk.name || slaveKonto, 'Slave (CFD, MT5)'].filter(Boolean).join(' · ')
+        : echo ? [k.name || konto, 'Echo (MT5)', t.symbol || ''].filter(Boolean).join(' · ')
         : [k.name || konto, slE != null ? 'SL ' + f2(slE) : '', lq != null ? (wdlLiqIstTag(t) ? 'Tageslimit ' : 'Liquidation ') + f2(lq) : ''].filter(Boolean).join(' · ') + ` — klicken: Level im Chart ${an ? 'ausblenden' : 'einblenden'}`
       const lots = v => num(v) == null ? '?' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
-      const ri = echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
+      const sBuy = t.slave_richtung === 'buy', sSell = t.slave_richtung === 'sell'
+      const ri = polar ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || 'NQ')}`
+          + `<span class="wdl-pol-s"><em${sBuy ? ' class="is-buy"' : sSell ? ' class="is-sell"' : ''}>${sBuy ? 'BUY' : sSell ? 'SELL' : '?'}</em>${lots(t.slave_lots)} Lot</span>`, { tip: 'oben Master (Futures), unten Slave (CFD)' })
+        : echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
         : zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
       let art, miZ, plZ, zeitZ, kontoZ = ''
-      if(offen){
+      if(offen && polar){
+        // POLAR LÄUFT (20.10.2026): Phase + Fill beider Seiten aus dem Lauf-Stand (wdl.polar, /polar/stand), „Stand" öffnet das Popup
+        // im Lauf-Modus; kein Live-P&L (der Bot streamt keinen, beide P&L kommen mit der Abrechnung), keine Spanne, kein „Ansehen"
+        art = 'lauf'
+        const x = wdl.polar[wdlTid(t)] || null, st = x && x.stand ? x.stand : null, ph = wdlPolarPhase(st, !!(x && x.hand), jetzt)
+        const fm = st && st.master && st.master.gefuellt ? st.master.gefuellt.fill : null, fs = st && st.slave && st.slave.gefuellt ? st.slave.gefuellt.fill : null
+        const fills = (fm != null || fs != null) ? `<small class="wdl-pol-sm" title="Fill Master · Fill Slave">Fill ${wdlPolarPreis(fm)} · ${wdlPolarPreis(fs)}</small>` : ''
+        const feuer = st && Number(st.feuer_ms) && ph.phase !== 'feuer' ? `<small class="wdl-pol-sm">Feuer ${wdlPolarUhr(st.feuer_ms)}</small>` : ''   // in der Phase „Feuer HH:MM:SS" steht die Zeit schon
+        // Text (Phase · Feuer · Fill) als EIN Span in eigener Zeile, der Knopf darunter (CSS .wdl-z-polar .wdl-z-akt, S2 20.10.2026)
+        miZ = zelle('mi wdl-z-akt', `<span><span class="wdl-pol-ph${ph.phase === 'zu' ? ' is-zu' : (ph.phase === 'fehler' || ph.phase === 'abbruch') ? ' is-fehler' : ''}">${escapeHtml(ph.kurz)}</span>${feuer}${fills}</span>`
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-polar="${escapeHtml(wdlTid(t))}" title="Lauf-Stand: Phase je Seite, Feuerzeit, Fill, Log — Abbruch vor der Feuerzeit">Stand</button>`, { tip: ph.text + (x && x.fehler ? ` — Stand: ${x.fehler}` : '') })
+        plZ = wdlPolarPlZ(t, zelle, sig, col)
+        const ab = new Date(t.started_at || ''), abTxt = isNaN(ab) ? '' : ab.toDateString() === heute ? zeit(t.started_at) : tag(ab)
+        zeitZ = zelle('zeit', `${abTxt ? `<span class="wdl-z-ab">${abTxt} · </span>` : ''}<span class="wdl-z-dauer" data-wdl-lv="dauer">${wdlDauer(t.started_at)}</span>`, { tip: 'läuft seit ' + zeit(t.started_at) })
+      } else if(offen){
         art = 'lauf'
         if(echo){
           // Echo: Spanne SL → TP in CFD-Preisen, Punkt = Kurs ≈ bzw. Lage aus dem Live-P&L; P&L ≈ aus MT5 (wdlEchoLive schreibt nach)
@@ -30870,7 +31114,7 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
-        let erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        let erg = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')   // Polar: wer zuerst zu war (20.10.2026)
         // Bestanden: wohin das Konto nach dem Abhaken geht (13.10.2026) — „→ Tage sammeln 3/5" oder „→ Review", wie der Typ-Chip in Accounts
         // Mini-Trade (13.10.2026, Finn: „da steht bestanden — kommt der nicht zu Trade abhaken?"): eigenes Etikett „Tage-Mini" statt „🎯 bestanden"
         // — er bringt nur einen Handelstag, das Konto steht schon in Bestanden → Tage sammeln und bleibt dort
@@ -30881,8 +31125,16 @@
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach Review — wartet auf die neuen Kontodaten der Firma, nichts wird verbucht (früher „parken\")">→ Review</button>`,
-          { tip: echo ? '' : demoTip(d) })
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
+          { tip: polar ? wdlPolarErg(t).tip : echo ? '' : demoTip(d) })
+        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
+        zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
+      } else if(polar){
+        // Polar erledigt (Verlauf): wer zuerst zu war + beide P&L aus der Abrechnung
+        art = 'zu'
+        const e = wdlPolarErg(t)
+        miZ = zelle('mi', e.html, { tip: e.tip })
+        kontoZ = wdlKontoZ(t)
+        plZ = wdlPolarPlZ(t, zelle, sig, col)
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else {
         art = 'zu'
@@ -30904,8 +31156,8 @@
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
-      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small></span>`
+      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small>${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -31216,9 +31468,11 @@
     if(me){ const pid = me.getAttribute('data-wdl-man-edit'); if(!_wdlManBusy.has(pid)){ _wdlManNotiz = { pid, neu: false }; wdlRender() } return }
     const mz = ev.target.closest('[data-wdl-man-zurueck]')
     if(mz){ if(!mz.disabled){ if(_wdlManNotiz && _wdlManNotiz.pid === mz.getAttribute('data-wdl-man-zurueck')) _wdlManNotiz = null; wdlManuellSchreiben(mz.getAttribute('data-wdl-man-zurueck'), null) } return }
+    const ps = ev.target.closest('[data-wdl-polar]')
+    if(ps){ wdlPolarOeffnen(ps.getAttribute('data-wdl-polar')); return }   // Polar „Stand" (20.10.2026): Popup im Lauf-Modus
     const c = ev.target.closest('[data-wdl-trade]'); if(!c) return
     const id = c.getAttribute('data-wdl-trade'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === id); if(!t) return
-    if(wdlIstEcho(t)) return   // Echo (CFD) hat keine Linien im NQ-Chart — keine Auswahl, kein Hochscrollen
+    if(wdlIstEcho(t) || wdlIstPolar(t)) return   // Echo (CFD) und Polar haben keine Linien im NQ-Chart — keine Auswahl, kein Hochscrollen
     wdl.auswahl = wdl.auswahl === id ? null : id; wdlRender()   // zweiter Klick hebt die Auswahl auf
     // Handy (29.09.2026, Finn: „offene Trades antippen hängt/buggt"): der Chart steht dort weit über der Liste — die Linien erschienen
     // außer Sicht, der Tipp wirkte wie „nichts passiert". Beim Auswählen den Chart sanft ins Bild holen (unter die Kopfzeile).
@@ -44721,7 +44975,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1639'
+  const OS_TAB_BUILD = '2026-09-22.1640'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
