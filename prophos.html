@@ -44721,7 +44721,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1638'
+  const OS_TAB_BUILD = '2026-09-22.1639'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50685,7 +50685,11 @@
         balance: tplNum(x.balance) ?? tplNum(g && g.balance), rest: tplNum(x.rest) ?? tplNum(g && g.rest),
         bal_startwert: tplNum(x.balance) == null && /^Startwert/.test(String((g && g.bal_quelle) || '')),   // frisches Konto (09.10.2026)   // Planer-Balance + Rest bis Ziel (Lauf-Zeile, alle IDs)
         wd: (x.typ || (g && g.typ)) === 'winning_days' || !!(p && (p.notes === 'Winning-Day-Farmer' || (p.route === 'tvv2' && p.hedgeEur > 0 && !p.orbitV3))),   // Winning Day: nur dezent (Finn 07.10.2026)
-        eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true, ...mehr }
+        eigen: !!p, auto: x.auto_plan != null ? !!x.auto_plan : p ? !!p.autoPlan : true,
+        // KANN NICHT STARTEN (20.10.2026, Braucht dich): Richtungsschutz-/Waage-Flag und Puls-Pause — eigene Pläne aus mt5_baseline,
+        // fremde aus dem Delta geplant[] (richtung_konflikt seit 07.10., puls_pause seit 20.10.; älteres Backend → null, keine Zeile)
+        rk: (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || (x.richtung_konflikt && typeof x.richtung_konflikt === 'object' ? x.richtung_konflikt : null) || null,
+        pause: (p && p.mt5Baseline && p.mt5Baseline.puls_pause) || x.puls_pause || null, ...mehr }
       t.long = t.richtung === 'buy'
       t.key = String(t.plan_id)
       if(_tpl.weg.has(t.key)) return null
@@ -51761,6 +51765,47 @@
           : hakenAus ? 'Planer-Haken am Konto setzen — der Bot plant es beim nächsten Lauf (alle 5 min) mit.' : 'Beheben — der Bot plant das Konto dann von selbst nach (alle 5 min).')
           + (bal ? tplBalAutoText(x.konto_id, x.user_id) : '') })
     }
+    // KANN NICHT STARTEN (Finn 20.10.2026 00:15 Dubai: „Wenn Pläne nicht gestartet werden können, wird mir EINMAL der Fehler angezeigt:
+    // Braucht dich"). Befund S3 19.10.: Aurel abca772f (Puls-Pause, dadurch unbestätigt) stand nirgends; Marc fe1c95ea (CFD-Waage, 5× verschoben,
+    // aufgegeben) und Marc/Mike 18:09 Dubai (Deckel voll nach 4 Dropdown-Fehlstarts) standen als „verpasst — Tab lief nicht", obwohl der Tab lief.
+    // Jetzt EINE Zeile je Plan mit dem EINEN festgestellten Grund + Fix, vor den alten Zeilen; sie verschwindet von selbst, sobald der Plan läuft,
+    // archiviert/gelöscht oder neu eingeplant ist (die Zeile wird je Render aus dem heutigen Stand gerechnet, kein Merker).
+    // → { text, tun, neu } | null. Reihenfolge = Rangfolge der Ursachen (Pause schlägt alles, dann Richtungsschutz, Deckel, Konto weg, PC lebt).
+    const tplPcLebt = uid => { const z = _pcStand.daten ? _pcStand.daten[String(uid)] : null; if(!z || tplPcAus(uid)) return null
+      return { pc: z.pc_name || '', alt_s: Number(z.alt_s) || 0 } }
+    const tplKannNicht = (t, sf, geclaimt, ueberfaellig) => {
+      if(D.tag !== D.heute || !(t.status === 'bestaetigt' || t.status === 'offen')) return null
+      const uhr = tplUhr(t.start, D.v), rk = t.rk || null, n = Number(sf && sf.versuche) || 0, kurz = x => String(x || '').replace(/\s+/g, ' ').trim()
+      // 1) Puls-Pause: Marke mt5_baseline.puls_pause — Bestätigen gesperrt (app.py ap_eingriff_filter), der Tab startet ihn nie; Rückweg nur SQL
+      if(t.pause) return { text: `kann nicht starten (${uhr}) — Puls-Pause „${kurz(t.pause).slice(0, 60)}"${t.status === 'offen' ? ', Bestätigen ist gesperrt' : ''}`,
+        tun: 'Pause per SQL aufheben (mt5_baseline.puls_pause entfernen, Muster sql/…_ende.sql) — danach bestätigen bzw. der PC-Tab startet ihn.', neu: false }
+      if(t.status !== 'bestaetigt') return null   // unbestätigte Vorschläge warten auf Finn, das ist kein Fehler
+      // 2) Richtungsschutz / Waage (rkVerschieben): bis Fensterende verschoben und aufgegeben — oder „wartet" über die Startzeit hinaus (Tab weg)
+      if(rk && !geclaimt && (rk.status === 'aufgegeben' || (rk.status === 'wartet' && ueberfaellig))){
+        const v = Number(rk.versuche) || 0, um = rk.um ? tplUhrIso(rk.um) : ''
+        return { text: `kann nicht starten (${uhr}) — ${rk.status === 'aufgegeben' ? 'aufgegeben' : 'wartet'}${v ? ` nach ${v} Versuch${v === 1 ? '' : 'en'}` : ''}${um ? ` (${um} Dubai)` : ''}: ${kurz(rk.text || 'Richtungsschutz').slice(0, 220)}`,
+          tun: rk.gegen ? `Wartet auf das Ende des laufenden ${String(rk.gegen).toUpperCase()}-Trades derselben ID × Firma — dann ↻ Erneut versuchen (oder im Plan die Richtung drehen).`
+            : 'Sobald die Waage passt (ein Gegen-Trade der Klasse läuft) ↻ Erneut versuchen — oder von Hand starten.', neu: true }
+      }
+      // 3) Deckel voll: SF_MAX Fehlstarts → sfTick plant nicht mehr neu (Memory prophos-nachholen-luecke-claim-zu-spaet, Marc/Mike 19.10.)
+      if(sf && sf.status === 'rot' && n >= SF_MAX && !SF_OHNE_DECKEL.has(String(sf.schritt || '')))
+        return { text: `kann nicht starten (${uhr}) — ${n} Fehlstarts, der Bot versucht es nicht mehr; zuletzt: ${kurz(sf.msg || sf.schritt || 'Check rot').slice(0, 200)}`,
+          // zu_spaet: der Standard-Text „Puls holt von selbst nach" wäre hier falsch — genau das tut sfTick bei vollem Deckel nicht mehr
+          tun: (sf.schritt === 'zu_spaet' ? 'Der Tab plant ihn nicht mehr von selbst neu.' : tplSfTun(sf, sf.pc ? '' : t.user))
+            + ' Von Hand: ↻ Erneut versuchen (neuer Start in 1–3 min, mit allen Prüfungen) oder im Plan starten — sonst plant erst der Nachtlauf neu.', neu: true }
+      // 4) Konto weg: Puls fand das Unterkonto nicht mehr (Tradovate/TopstepX) — Neuversuche bringen nichts
+      if(sf && sf.status === 'rot' && /konto_weg|konto_nicht_erreicht|^konto$/.test(String(sf.schritt || '')) && /nicht mehr vorhanden|nicht (im Dropdown|in der Liste|gefunden)|steht darin nicht|fehlt/i.test(String(sf.msg || '')))
+        return { text: `kann nicht starten (${uhr}) — Konto weg: ${kurz(sf.msg).slice(0, 200)}`,
+          tun: 'Konto fehlt bei Tradovate/TopstepX — vermutlich geblowt oder weg: unter Accounts prüfen (External ID, Status), ggf. archivieren und den Plan löschen.', neu: false }
+      // 5) Startzeit > 30 min vorbei, kein Claim, kein Start-Fehler — und der PC-Tab lebt: er fasst den Plan nicht an (nicht „Tab lief nicht")
+      if(!sf && !geclaimt && ueberfaellig){
+        const l = tplPcLebt(t.user_id); if(!l) return null   // PC aus → Zeile „PC aus" je ID; unbekannt → alte „verpasst"-Zeile
+        const vor = l.alt_s < 60 ? 'gerade eben' : `vor ${Math.round(l.alt_s / 60)} min`
+        return { text: `kann nicht starten (${uhr}) — Startzeit über ${TPL_VERPASST_MIN} min vorbei, kein Claim, der Prophos-Tab am PC${l.pc ? ' ' + (typeof pcLabel === 'function' ? pcLabel(l.pc) : l.pc) : ''} lebt (Herzschlag ${vor})`,
+          tun: `Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} neu laden (Strg+F5) — er holt den Start als „zu spät" regelkonform nach; sonst ↻ Erneut versuchen.`, neu: true }
+      }
+      return null
+    }
     for(const t of D.trades){
       if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
       // EXTERNAL ID FEHLT an geplanten/laufenden Plänen (Delta ext_fehlt, alle IDs — Master 09.10.2026): eine Zeile je Konto, eigen mit Formular-Knopf
@@ -51793,7 +51838,11 @@
       const neuKnopf = t.status === 'bestaetigt' && !(sf && (sf.unklar || sf.schritt === 'ziel_erreicht')) && (t.eigen || tplDarfFremd()) ? t.key : null
       const ueberfaellig = D.jetzt != null && t.start + TPL_VERPASST_MIN < D.jetzt
       const zielSf = !!sf && (sf.schritt === 'ziel_erreicht' || TPL_ZIEL_RE.test(String(sf.msg || '')))   // Ziel erreicht: kein Start-Fehler/verpasst hier
+      const kn = zielSf ? null : tplKannNicht(t, sf, geclaimt, ueberfaellig)   // 20.10.2026: eine Zeile mit dem einen Grund, vor den alten Zeilen
       if(zielSf){ /* nichts — Accounts/Radar zeigen „bestanden" (Finn 08.10.2026) */ }
+      else if(kn){
+        add(t.user_id, t.user, { art: 'start_nein', firma: t.firma, konto: t.konto, typ: t.typ, ende4: t.ende4, key: t.key, neu: kn.neu ? neuKnopf : null, text: kn.text, tun: kn.tun })
+      }
       else if(t.status === 'bestaetigt' && sf && sf.status === 'neu' && D.tag === D.heute && !ueberfaellig){
         add(t.user_id, t.user, { art: 'neu', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
           text: `neu eingeplant — Start ${tplUhr(t.start, D.v)}${sf.behoben ? ' · ' + sf.behoben : ''}`, tun: `Nichts tun. Vorher: ${String(sf.msg || '').slice(0, 120)}` })
@@ -51926,6 +51975,7 @@
       : /\balt$/.test(t) ? { w: 'Balance alt', ton: 'vio', r: 1 } : { w: 'Balance fehlt', ton: 'vio', r: 1 }
     if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
     if(z.art === 'pc_aus') return { w: 'PC aus', ton: 'rot', r: 0 }   // ganz oben: ohne PC startet dort nichts (19.10.2026)
+    if(z.art === 'start_nein') return { w: 'kann nicht starten', ton: 'rot', r: 6 }   // Plan mit festgestelltem Grund (Finn 20.10.2026)
     if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
@@ -51979,6 +52029,7 @@
     const t = String(z.text || ''), tun = String(z.tun || ''), fremd = !!(z.balf || (z.hinweis && /PC/.test(z.hinweis)))
     if(z.code) return [t.replace(/^kein Kontowert — /, ''), tun].filter(Boolean).join(' → ')   // genauer Grund → So fixt du's (09.10.2026)
     if(z.art === 'pc_aus') return t   // PC aus: welcher PC, seit wann, welche Trades — das „was tun" steht im Tooltip (19.10.2026)
+    if(z.art === 'start_nein') return [t.replace(/^kann nicht starten \([^)]*\) — /, ''), tun].filter(Boolean).join(' → ')   // Grund → Fix sichtbar, nicht nur im Tooltip (20.10.2026)
     if(z.art === 'balance'){
       const stand = z.balance && z.balance !== 'keine Balance' ? z.balance + ' · ' : ''
       if(tun && !/^↻/.test(tun)) return stand + tun

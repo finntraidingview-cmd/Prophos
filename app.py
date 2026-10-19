@@ -23269,6 +23269,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
              if str(p.get("user_id")) not in ausgeblendet]
     geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
                                                                  "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler,"
+                                                                 "pp:mt5_baseline->puls_pause,"   # Puls-Pause (Braucht dich, 20.10.2026)
                                                                  "kt:mt5_baseline->kette,rh:mt5_baseline->richtung_hand",
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
@@ -23455,6 +23456,10 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  # START-FEHLER (Finn 07.10.2026 15:07: „woher soll ich wissen, was ich bei The5ers machen muss?"): Grund eines roten
                  # Auto-Starts, den der PC-Tab in mt5_baseline.start_fehler schreibt — der Planer zeigt ihn auch für fremde IDs
                  start_fehler=p.get("sf") if isinstance(p.get("sf"), dict) else None, geclaimt=bool(p.get("start_um_gestartet_at")),
+                 # PULS-PAUSE (Finn 20.10.2026 00:15 Dubai, „wenn Pläne nicht gestartet werden können, wird mir EINMAL der Fehler angezeigt"):
+                 # die Marke mt5_baseline.puls_pause entschärft den Plan (Bestätigen gesperrt, Puls startet ihn nicht) — stand bisher nur in der
+                 # DB; Aurel abca772f 19.10. hing damit unsichtbar. Hier als Text (Pausen-Name), die Planer-Seite zeigt ihn in „Braucht dich"
+                 puls_pause=(str(p.get("pp")).strip()[:80] or None) if p.get("pp") not in (None, "", False) else None,
                  # TOPSTEP-KETTE (09.10.2026): Block mt5_baseline.kette (nr, tag_typ, tagesziel, verlust_grenze, t2_grund …) — die Planer-
                  # Seite beschriftet damit „Trade 1 · Reparatur-Tag" auch für fremde IDs (nur Anzeige)
                  kette=p.get("kt") if isinstance(p.get("kt"), dict) else None,
@@ -24060,6 +24065,7 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
                                       "balance_live", "boden", "boden_min", "boden_art",
                                       # 08.10.2026: liest tplDaten (Braucht dich: Start-Fehler/geclaimt fremder Pläne, Konto-Zuordnung)
                                       "konto_id", "start_fehler", "geclaimt",
+                                      "puls_pause",   # 20.10.2026: Braucht dich „kann nicht starten — Puls-Pause" auch für fremde IDs
                                       "notes", "balance")}
                for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
     if pc_lebt is not None:
