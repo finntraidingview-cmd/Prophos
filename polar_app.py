@@ -5,9 +5,10 @@ Funded-Futures (Master, ID A, TradingView, PC A) gegen Funded-CFD (Slave, ID B, 
   /polar/plan    Popup legt den Plan im Namen der Master-ID an (service role; der Slave gehört einer ANDEREN ID)
   /polar/start   PC-Tab des Masters startet den Lauf → polar_lauf-Zeile + order_signale an die Slave-ID (aktion polar_slave)
   /polar/bereit  Puls meldet „steht vor dem Klick"; sind BEIDE bereit, gibt es EINE Feuerzeit (jetzt + Vorlauf)
-  /polar/warte   wartende Verbindung (auf=feuer | zu) — Zustand im Prozess (gunicorn --workers 1 --threads 48); „Master zu" geht
-                 ohne Datenbank-Umweg in Millisekunden an die wartende Slave-Verbindung
-  /polar/melden  gefuellt / level / geparkt / zu / ende / abbruch / fehler
+  /polar/warte   wartende Verbindung (auf=feuer | zu) — Zustand im Prozess (gunicorn --workers 1 --threads 48); „zu" der EINEN Seite
+                 geht ohne Datenbank-Umweg in Millisekunden an die wartende Verbindung der ANDEREN Seite (seit 20.10.2026 beidseitig:
+                 Finn „egal ob Master-PC A oder Slave-PC B, egal wer zuerst — schließt, schließt der andere in 1–2 s")
+  /polar/melden  gefuellt / level / geparkt / zu (beide Seiten, erste Meldung gewinnt = zu_quelle, zweite = Bestätigung) / ende / abbruch / fehler
   /polar/stand   Anzeige (Tab) und Wiederaufnahme nach Railway-Neustart (Zustand aus polar_lauf)
   /polar/zeit    Uhrabgleich der Puls-Prozesse
   /polar/aktiv   Polar-Vorrang (20.10.2026): hält gerade ein Lauf (Bot oder Hand-Plan) die ID des Aufrufers? → Tab polarLaeuft()
@@ -80,6 +81,7 @@ def _laden(lid):
          "status": r.get("status") or "start", "feuer_ms": r.get("feuer_ms"), "master_zu_ms": r.get("master_zu_ms"),
          "slave_zu_ms": r.get("slave_zu_ms"), "master": r.get("master") or {}, "slave": r.get("slave") or {}, "grund": r.get("grund"),
          "bereit": {}, "bereit_ms": {}, "angelegt_ms": 0}
+    z.update(zu_erste_seite(z))      # wer zuerst zu war (20.10.2026) — aus den beiden Zeiten, ohne eigene Spalte
     with _COND:
         return _LAEUFE.setdefault(lid, z)
 
@@ -87,6 +89,7 @@ def _laden(lid):
 def _sicht(z):
     return {"lauf_id": z["id"], "plan_id": z["plan_id"], "status": z["status"], "feuer_ms": z.get("feuer_ms"),
             "master_zu_ms": z.get("master_zu_ms"), "slave_zu_ms": z.get("slave_zu_ms"), "grund": z.get("grund"),
+            "zu_ms": z.get("zu_ms"), "zu_quelle": z.get("zu_quelle"),   # erste zu-Meldung (20.10.2026, beidseitiges Schließen)
             "bereit": sorted(z.get("bereit") or {}), "server_ms": _ms(),
             "master": {k: v for k, v in (z.get("master") or {}).items() if k != "auftrag"},
             "slave": {k: v for k, v in (z.get("slave") or {}).items() if k != "auftrag"}}
@@ -110,6 +113,42 @@ def _login_von_konto(acc):
         return ext
     cl = str(acc.get("cred_login") or "").strip()
     return cl if re.fullmatch(r"\d{4,}", cl) else ""
+
+
+def zu_erste_seite(z):
+    """REIN RECHNEND (testbar): aus master_zu_ms/slave_zu_ms die erste zu-Meldung → {zu_ms, zu_quelle} (None/None = noch keine)."""
+    m, s = z.get("master_zu_ms"), z.get("slave_zu_ms")
+    if m is None and s is None:
+        return {"zu_ms": None, "zu_quelle": None}
+    if s is None or (m is not None and int(m) <= int(s)):
+        return {"zu_ms": int(m), "zu_quelle": "master"}
+    return {"zu_ms": int(s), "zu_quelle": "slave"}
+
+
+def zu_eintragen(z, seite, daten, ms):
+    """REIN RECHNEND (testbar): 'zu' einer Seite eintragen (20.10.2026, Finn: „egal wer zuerst — der andere schließt in 1–2 s").
+    Die ERSTE Meldung gewinnt (zu_ms/zu_quelle = Signal an die andere Seite), die zweite ist nur die Bestätigung; eine Wiederholung
+    derselben Seite ändert nichts. -> (db_felder, erste, neu)"""
+    if seite not in ("master", "slave"):
+        return {}, False, False
+    feld = f"{seite}_zu_ms"
+    if z.get(feld) is not None:
+        return {}, False, False
+    z[feld] = int(ms)
+    z.setdefault(seite, {})["zu"] = daten if isinstance(daten, dict) else {}
+    erste = z.get("zu_ms") is None
+    if erste:
+        z["zu_ms"], z["zu_quelle"] = int(ms), seite
+    return {feld: int(ms)}, erste, True
+
+
+def warte_zu_fertig(z, seite):
+    """REIN RECHNEND (testbar): /polar/warte?auf=zu einer Seite ist fertig, sobald die ANDERE Seite zu gemeldet hat (oder der Lauf
+    zu Ende ist). Master wartet auf slave_zu_ms, Slave auf master_zu_ms — das eigene 'zu' weckt die eigene Wache nie."""
+    if z.get("status") in ENDE:
+        return True
+    gegen = "slave" if seite == "master" else "master"
+    return z.get(f"{gegen}_zu_ms") is not None
 
 
 def abrechnung_rechnen(z):
@@ -488,7 +527,7 @@ def registrieren(app, ns):
             if auf == "feuer":
                 return z.get("feuer_ms") is not None
             if auf == "zu":
-                return z.get("master_zu_ms") is not None
+                return warte_zu_fertig(z, seite)      # beidseitig (20.10.2026): die andere Seite ist zu
             return True
         with _COND:
             while not fertig():
@@ -522,15 +561,16 @@ def registrieren(app, ns):
         db, abrechnen, plan_open = {}, False, False
         with _COND:
             teil = z.setdefault(seite, {})
-            if ereignis == "zu" and seite == "master":
-                if z.get("master_zu_ms") is None:
-                    z["master_zu_ms"] = _ms()
-                    teil["zu"] = daten
-                    if z["status"] not in ENDE:
-                        _status(z, "master_zu")
+            if ereignis == "zu":
+                # BEIDE SEITEN (20.10.2026): erste Meldung gewinnt und weckt die wartende Gegenseite (Status master_zu | slave_zu),
+                # die zweite ist die Bestätigung (nur Zeit eintragen, nichts wecken außer /polar/stand-Lesern)
+                db, erste, neu = zu_eintragen(z, seite, daten, _ms())
+                if neu:
+                    if erste and z["status"] not in ENDE:
+                        _status(z, f"{seite}_zu")
                     else:
                         _COND.notify_all()
-                    db = {"master_zu_ms": z["master_zu_ms"], "status": z["status"]}
+                    db["status"] = z["status"]
             elif ereignis == "abbruch":
                 if z.get("feuer_ms") is not None:
                     return jsonify({"ok": False, "msg": "schon gefeuert — nur noch 'fehler'", **_sicht(z)}), 409
