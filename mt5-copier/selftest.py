@@ -1410,6 +1410,23 @@ def main():
         and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392)
         and not order_bot.ist_mt5_login_dialog("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392)
         and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["126692392"], 26692392)
+        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["Abbrechen", "Cancel"], ["26692392"], 26692392))
+    # 19.10.2026 (Finn: „nur auf OK oder auf Login druecken"; Mike pc 02:18 UTC „uebergangen (Konto passt nicht)", Dialog blieb vorn):
+    # Titel als Anfang, Knopf „Login"/„Anmelden", Kontofeld „12345678 - Broker", Spur nennt die eine Haelfte
+    _G = order_bot.mt5_login_dialog_grund
+    chk("LOGIN 19.10.: Titel-Anfang, Login/Anmelden-Knopf, Kontofeld mit Zusatz werden erkannt; Grund in der Spur",
+        order_bot.ist_mt5_login_dialog("Login to Trade Account", ["Login:", "Password:", "Server:"], ["Login", "Cancel"], ["26692392 - Broker-Demo"], 26692392)
+        and order_bot.ist_mt5_login_dialog("Anmeldung bei Handelskonto", _lb, ["Anmelden", "Abbrechen"], ["26692392"], 26692392)
+        and order_bot.ist_mt5_login_titel("Login to Trade Account") and order_bot.ist_mt5_login_titel("Einloggen")
+        and not order_bot.ist_mt5_login_titel("Logintest") and not order_bot.ist_mt5_login_titel("Eigenschaften") and not order_bot.ist_mt5_login_titel("")
+        and order_bot.mt5_login_knopf_waehlen(["Cancel", "Login", "OK"]) == "OK" and order_bot.mt5_login_knopf_waehlen(["Cancel", "Login"]) == "Login"
+        and order_bot.mt5_login_knopf_waehlen(["Cancel", "Abbrechen"]) is None
+        and _G("Einloggen", _lb, ["OK"], ["26692392"], 26692392) == ""
+        and _G("Einloggen", _lb, ["OK"], ["26692393"], 26692392).startswith("Konto passt nicht (Feld 26692393")
+        and _G("Einloggen", _lb, ["Abbrechen"], ["26692392"], 26692392).startswith("kein OK/Login-Knopf")
+        and _G("Einloggen", ["Kontonummer:"], ["OK"], ["26692392"], 26692392) == "Beschriftungen ohne Passwort/Server"
+        and _G("Eigenschaften", _lb, ["OK"], ["26692392"], 26692392).startswith("Titel")
+        and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392 (2)"], 26692392) is False
         and not order_bot.ist_mt5_login_dialog("Einloggen", _lb, ["OK"], ["26692392"], 0))
     chk("CLOSE: Abbrechen/Ablehnen und halbe Treffer sind NIE Zustimmung",
         not order_bot.ist_einklick_akzeptieren_knopf("Abbrechen")

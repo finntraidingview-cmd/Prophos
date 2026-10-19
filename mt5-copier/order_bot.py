@@ -270,26 +270,65 @@ def ist_einklick_akzeptieren_knopf(text):
     return zustimmung and bedingungen
 
 
-def ist_mt5_login_dialog(titel, beschriftungen, knoepfe, konto_werte, expected):
-    """REIN RECHNEND (testbar): ist das MT5s 'Einloggen'-Dialog fuer GENAU
-    dieses Konto? (Finn 07.10.2026, Screenshot HS2-200K: „ab und zu beim
-    Account-Einloggen dieses Pop-up, wo man einfach nur einmal auf OK druecken
-    muesste" — Konto, Passwort (gespeichert) und Server stehen schon drin.)
-    Positiv-Signatur aus allen Haelften: Titel Einloggen/Login, Beschriftungen
-    Passwort UND Server, ein OK-Knopf — und die Kontonummer im Feld ist exakt
-    das erwartete Konto. Ein Login-Dialog fuer ein anderes Konto bleibt
-    unberuehrt."""
+# MT5-EINLOGGEN-DIALOG (07.10.2026, Finn: „ab und zu beim Account-Einloggen dieses Pop-up, wo man einfach nur einmal auf OK
+# druecken muesste"). 19.10.2026 (Finn: „Login-Panel, bei dem man nur auf OK oder auf Login druecken muss" — Mike pc 02:18 UTC:
+# „Login-Dialog 'Einloggen' uebergangen (Konto passt nicht)", danach „F9 ohne Dialog: kein Fenster vorn" = der Dialog blieb vorn):
+# Titel auch als Anfang („Login to Trade Account", „Anmeldung bei …"), Knopf auch „Login"/„Anmelden"/„Einloggen", Kontofeld auch
+# „12345678 - Broker-Demo" (fuehrende Zahl), und die Spur nennt die EINE Haelfte, an der es scheiterte (nie Passwort-Werte).
+MT5_LOGIN_TITEL = ("einloggen", "login", "anmelden", "anmeldung")
+MT5_LOGIN_KNOPF = ("ok", "login", "log in", "anmelden", "einloggen")
+
+
+def ist_mt5_login_titel(titel):
+    """REIN RECHNEND (testbar): Fenstertitel eines MT5-Login-Dialogs? Exakt oder als Anfang („Login to Trade Account")."""
     t = (titel or "").strip().lower()
-    if t not in ("einloggen", "login", "anmelden", "anmeldung"):
-        return False
+    return bool(t) and any(t == x or t.startswith(x + " ") or t.startswith(x + ":") for x in MT5_LOGIN_TITEL)
+
+
+def ist_mt5_login_knopf(text):
+    """REIN RECHNEND (testbar): Bestaetigen-Knopf des Login-Dialogs („OK", „Login", „Anmelden", „Einloggen") — nie Abbrechen/Cancel."""
+    return (text or "").strip().rstrip(".").lower() in MT5_LOGIN_KNOPF
+
+
+def mt5_login_knopf_waehlen(knoepfe, text_von=lambda k: k):
+    """REIN RECHNEND (testbar): GENAU den Bestaetigen-Knopf (OK vor Login/Anmelden) | None."""
+    for soll in MT5_LOGIN_KNOPF:
+        for k in knoepfe:
+            if (str(text_von(k) or "")).strip().rstrip(".").lower() == soll:
+                return k
+    return None
+
+
+def _mt5_konto_wert_passt(wert, expected):
+    nur = re.sub(r"\D", "", str(wert or ""))
+    if nur == str(int(expected)):
+        return True
+    m = re.match(r"\s*(\d{4,})\b", str(wert or ""))
+    return bool(m and m.group(1) == str(int(expected)))
+
+
+def mt5_login_dialog_grund(titel, beschriftungen, knoepfe, konto_werte, expected):
+    """REIN RECHNEND (testbar): '' = MT5-Login-Dialog fuer GENAU dieses Konto, sonst die EINE Haelfte, die nicht passt (fuer die Spur;
+    Passwort-Werte kommen hier nie an, nur Titel/Beschriftungen/Knopftexte/Kontofeld)."""
+    if not ist_mt5_login_titel(titel):
+        return f"Titel '{(titel or '')[:30]}' ist kein Login-Dialog"
     b = " ".join(str(x or "") for x in beschriftungen).lower()
     if not (("passwort" in b or "password" in b) and "server" in b):
-        return False
-    if not any((str(k or "").strip().lower() == "ok") for k in knoepfe):
-        return False
+        return "Beschriftungen ohne Passwort/Server"
+    if not any(ist_mt5_login_knopf(k) for k in knoepfe):
+        return "kein OK/Login-Knopf (Knoepfe: " + ", ".join(str(k or "")[:12] for k in knoepfe)[:60] + ")"
     if not expected:
-        return False
-    return any(re.sub(r"\D", "", str(v or "")) == str(int(expected)) for v in konto_werte)
+        return "kein erwartetes Konto"
+    if not any(_mt5_konto_wert_passt(v, expected) for v in konto_werte):
+        felder = [re.sub(r"\D", "", str(v or ""))[:12] for v in konto_werte if re.search(r"\d{4,}", str(v or ""))]
+        return f"Konto passt nicht (Feld {', '.join(felder) or '-'} ≠ {int(expected)})"
+    return ""
+
+
+def ist_mt5_login_dialog(titel, beschriftungen, knoepfe, konto_werte, expected):
+    """REIN RECHNEND (testbar): ist das MT5s 'Einloggen'-Dialog fuer GENAU dieses Konto? Positiv-Signatur aus allen Haelften
+    (s. mt5_login_dialog_grund). Ein Login-Dialog fuer ein anderes Konto bleibt unberuehrt."""
+    return mt5_login_dialog_grund(titel, beschriftungen, knoepfe, konto_werte, expected) == ""
 
 
 # Fensterklassen der Browser (28.08.2026): alle Chromium-Ableger (Chrome, Edge,
@@ -10428,7 +10467,7 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
     for d in kandidaten:
         try:
             titel = (d.window_text() or "").strip()
-            if titel.lower() not in ("einloggen", "login", "anmelden", "anmeldung"):
+            if not ist_mt5_login_titel(titel):
                 continue
             knoepfe = d.descendants(control_type="Button")
             texte = [t.window_text() for t in d.descendants(control_type="Text")]
@@ -10438,12 +10477,14 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
                     werte += [_uia_wert(e) for e in d.descendants(control_type=typ)]
                 except Exception:
                     pass
-            if not ist_mt5_login_dialog(titel, texte, [b.window_text() for b in knoepfe],
-                                        werte, expected):
+            grund = mt5_login_dialog_grund(titel, texte, [b.window_text() for b in knoepfe], werte, expected)
+            if grund:
                 if trail is not None:
-                    trail.append(f"Login-Dialog '{titel}' uebergangen (Konto passt nicht)")
+                    trail.append(f"Login-Dialog '{titel}' uebergangen ({grund})")
                 continue
-            ok = next(b for b in knoepfe if (b.window_text() or "").strip().lower() == "ok")
+            ok = mt5_login_knopf_waehlen(knoepfe, lambda b: b.window_text())
+            if ok is None:
+                continue
         except Exception:
             continue
 
