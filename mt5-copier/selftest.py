@@ -2938,6 +2938,31 @@ def test_puls_augen_cdp():
                          "today_pnl": {"label": "Total P/L", "text": "-56.96"}, "texte": {"Realized P&L": "0.00"}})
     chk(sm == {"Realized P&L": "0.00", "Account Balance": "153,756.96", "Equity": "153,700.00", "Total P/L": "-56.96"}
         and ob.cdp_summary(None) is None, "Summary → tvlesen-Form (Label: Text), Rückfall-Labels")
+    # 19.10.2026 TradingView-Update (echte Stände: Marc pc 14:19:56 UTC flach, Chris pc 14:15:47 UTC offene Position): Balance nur noch
+    # als 'USD'-Paar bzw. im Umschalter-Text; bei null Positionen keine Tabelle (kein Kopf) mehr — Flach-Beweis ohne Tabelle
+    KS_FLACH = {"texte": {"USD": "159,011.40", "Equity": "159,011.40", "Profit": "0.00"}, "equity": {"text": "159,011.40", "wert": 159011.4, "label": "Equity"},
+                "profit": {"text": "0.00", "wert": 0, "label": "Profit"}, "reiter": "positions", "balance": None, "today_pnl": None}
+    KS_OFFEN = {"texte": {"USD": "155,300.40", "Equity": "157,460.40", "Profit": "−2,160.00", "Net Liq": "155430.40", "Open P/L": "-2030.00", "Total P/L": "-2033.10"},
+                "equity": {"text": "155430.40", "wert": 155430.4, "label": "Net Liq"}, "profit": {"text": "−2,160.00", "wert": -2160, "label": "Profit"},
+                "reiter": "positions", "balance": None, "today_pnl": {"text": "-2033.10", "wert": -2033.1, "label": "Total P/L"}}
+    AK = "APEX6843320000002 159,011.40 USD"
+    FLACH = {"konto": {"aktiv": AK, "panel": "offen", "positionen_sichtbar": False}, "positionen": [], "konto_summary": KS_FLACH}
+    OFFEN = {"konto": {"aktiv": "PAAPEX668794000000… 155,300.40 USD", "panel": "offen", "positionen_sichtbar": False}, "positionen": [], "konto_summary": KS_OFFEN}
+    sm_f = ob.cdp_summary(KS_FLACH, AK)
+    chk(sm_f.get("Account Balance") == "159,011.40" and ob.k3_summary_werte(sm_f)[0] == 159011.4 and ob.cdp_summary_start(sm_f)["equity_start"] == 159011.4
+        and ob.cdp_summary({"texte": {"Equity": "1.00"}}, AK).get("Account Balance") == "159,011.40"
+        and ob.cdp_summary({"texte": {"Account Balance": "1.00", "USD": "2.00"}}, AK).get("Account Balance") == "1.00"
+        and ob.cdp_balance_umschalter(AK) == 159011.4 and ob.cdp_balance_umschalter("PAAPEX668794000000… 155,300.40 USD") == 155300.4
+        and ob.cdp_balance_umschalter("TDFYSL150518963514150,000.00USD") is None and ob.cdp_balance_umschalter("Konto wählen") is None,
+        "TV-Update: Balance aus 'USD'-Paar bzw. Umschalter als 'Account Balance' (nie den alten Klebe-Text)")
+    F = ob.cdp_flach_ohne_tabelle
+    chk(F(FLACH)[0] is True and F(OFFEN)[0] is False and "Profit" in F(OFFEN)[1]
+        and not F(dict(FLACH, positionen=[{"symbol": "MNQZ6", "seite": "sell", "menge": 3}]))[0]
+        and not F(dict(FLACH, konto=dict(FLACH["konto"], panel="zu")))[0]
+        and not F(dict(FLACH, konto_summary=dict(KS_FLACH, reiter="summary")))[0]
+        and not F(dict(FLACH, konto_summary=dict(KS_FLACH, texte={"USD": "159,011.40", "Equity": "159,500.00", "Profit": "0.00"})))[0]
+        and not F(dict(FLACH, konto_summary=dict(KS_FLACH, profit=None)))[0] and not F(None)[0],
+        "TV-Update: flach ohne Tabelle nur mit Panel offen + Reiter positions + keine Zeile + Profit 0 + Balance = Equity")
     pv = ob.cdp_positionen_vertrag([{"symbol": "MNQZ6", "seite": "buy", "menge": 4, "avg": 30594.25, "pl_text": "-12.50"}, "x"])
     chk(len(pv) == 1 and pv[0]["menge_zahl"] == 4 and pv[0]["einstieg_zahl"] == 30594.25 and pv[0]["pnl_zahl"] == -12.5
         and ob.tv_avg_fill_je_wurzel(pv)["MNQ"]["avg_fill"] == 30594.25, "Positionen → Vertragsform + avg_fill_je_wurzel")
@@ -4365,7 +4390,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.3'" in js and "function txtK(el)" in js and "entdoppeln(txtK(s.el))" in js,
+        and "VERSION = '0.8.4'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
         "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
     # augen.js 0.8.2 (13.10.2026, Routine Puls-Fehler, „Go ad-free. Everywhere" 34× in 24 h: „kein eindeutiges X (keins)"): Dialog-X an der Karte
     # eines Vollbild-Dialogs und namenloses Symbol-X (nur wenn einziges, unverdeckt) — Browser-Probe: node tools/selftest_augen_dialog_x.js

@@ -19380,8 +19380,12 @@
     const bwPruefen = async () => {
       if(bwTimer){ clearTimeout(bwTimer); bwTimer = null }
       const vRoh = await holen()
-      // nur eine wirklich neuere SEITE zählt (Backend-VERSION ohne neues prophos.html bzw. gleicher Inhalt → Ruhe)
-      const v = (vRoh && bwNeuer(vRoh, bwEigen())) ? await echtNeu(vRoh) : null
+      // Eine neuere SEITE zählt (Backend-VERSION ohne neues prophos.html → Ruhe). 19.10.2026 (Finn musste Chris' PC-Tab nach dem
+      // Bump .1626 von Hand aktualisieren — „beim Update automatisch neu aktualisiert"): auch eine nur in der Nummer neue Seite lädt
+      // am PC-Tab neu, damit unten immer der Stand steht, den der PC wirklich hat. Streuung je PC, 2-min-Abstand und „ruhiger Moment"
+      // bleiben (08.10.2026: gleichzeitige Neulade-Wellen stellten die Micro-DB); Formular-Riegel und Mac-Pille nutzen weiter echtNeu.
+      const nummerNeu = async vv => { const b = await seiteBuild(vv); return (b && bwNeuerV(b, eigenBuild())) ? b : null }
+      const v = (vRoh && bwNeuer(vRoh, bwEigen())) ? await nummerNeu(vRoh) : null
       if(!v){ bwLsSetz(BW_HINTER_KEY, null); window._bwStatus = { ziel: null, grund: '', hinter_seit: null }; return }
       const jetzt = Date.now()
       let h = bwLs(BW_HINTER_KEY); if(!h || !(h.seit > 0) || h.seit > jetzt){ h = { seit: jetzt }; bwLsSetz(BW_HINTER_KEY, h) }

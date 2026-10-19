@@ -19210,9 +19210,23 @@ def cdp_rect(x):
     return x if isinstance(x, (list, tuple)) else None
 
 
-def cdp_summary(ks):
+CDP_RX_WAEHRUNG = re.compile(r"^(usd|eur|gbp|chf|aud|cad|jpy)$", re.I)
+
+
+def cdp_balance_umschalter(aktiv):
+    """REIN RECHNEND (testbar): Balance aus dem Umschalter-Text seit dem TradingView-Update (19.10.2026): 'APEX6843320000002 159,011.40 USD'
+    → 159011.4, auch gekürzt 'PAAPEX668794000000… 155,300.40 USD'. Nur eine Zahl mit Leerraum DAVOR und Währung dahinter — der alte
+    Klebe-Text 'TDFYSL150518963514150,000.00USD' (augen.js < 0.8.3) liefert bewusst None. | None"""
+    m = re.search(r"(?:^|\s)(-?\d[\d,.]*)\s*(?:USD|EUR|GBP|CHF|AUD|CAD|JPY)\b", str(aktiv or ""), re.I)
+    return tv_geld_lesen(m.group(1)) if m else None
+
+
+def cdp_summary(ks, aktiv=None):
     """REIN RECHNEND (testbar): augen.js konto_summary → tvlesen-'summary' {Label: Text}. texte gewinnt; fehlt es, aus den
-    geparsten Einträgen (label/text) — 'Account Balance'/'Equity' als Rückfall-Label, damit Prophos (tvBalanceAus) sie findet."""
+    geparsten Einträgen (label/text) — 'Account Balance'/'Equity' als Rückfall-Label, damit Prophos (tvBalanceAus) sie findet.
+    19.10.2026 (TradingView-Update, Finn: „Balance nach dem Orbit-Trade wird nicht mehr erkannt"): die Kopfzeile trägt kein
+    'Account Balance' mehr, die Balance steht im Umschalter neben der Kennung und kommt als Paar 'USD': '159,011.40' an —
+    Währungs-Label bzw. der Umschalter-Text (aktiv) werden als 'Account Balance' nachgetragen, wenn kein Balance-Label da ist."""
     if not isinstance(ks, dict):
         return None
     out = {}
@@ -19226,7 +19240,50 @@ def cdp_summary(ks):
             lab = str(e.get("label") or rueck)
             if lab not in out:
                 out[lab] = str(e.get("text"))
+    if not any(re.sub(r"\s+", " ", str(k)).strip().lower() in ("account balance", "balance", "kontostand") for k in out):
+        bal = next((str(v) for k, v in out.items() if CDP_RX_WAEHRUNG.match(str(k).strip()) and tv_geld_lesen(v) is not None), None)
+        if bal is None:
+            b = cdp_balance_umschalter(aktiv)
+            if b is not None:
+                bal = f"{b:,.2f}"
+        if bal is not None:
+            out["Account Balance"] = bal
     return out or None
+
+
+def cdp_flach_ohne_tabelle(st):
+    """REIN RECHNEND (testbar): FLACH OHNE POSITIONS-TABELLE (TradingView-Update 19.10.2026; Endlesungen Marc/Jacob 14:18–14:20 UTC
+    „Positions-Tabelle im Puls-Chrome nicht sichtbar", 5× in 2 min, in 3 Tagen davor nie): bei null Positionen zeigt der Reiter Positions
+    keine Tabelle mehr, nicht einmal den Kopf — bei offenen Positionen weiter Zeilen (Jacob 14:21 UTC, 3 MNQ sichtbar). Flach gilt nur
+    mit allen Belegen: Panel offen, Reiter 'positions' aktiv, keine Positions-Zeile im DOM, Profit 0,00 (offene Positionen) und
+    Balance (USD-Paar bzw. Umschalter) = Equity. Der Aufrufer verlangt das zweimal (Pause dazwischen, Laden abgewartet). -> (ja, grund)"""
+    s = st if isinstance(st, dict) else {}
+    ko = s.get("konto") if isinstance(s.get("konto"), dict) else {}
+    ks = s.get("konto_summary") if isinstance(s.get("konto_summary"), dict) else {}
+    if ko.get("panel") != "offen":
+        return False, f"Panel {ko.get('panel') or '?'}"
+    if ks.get("reiter") != "positions":
+        return False, f"Reiter '{ks.get('reiter') or '?'}' statt positions"
+    if s.get("positionen"):
+        return False, f"{len(s.get('positionen'))} Positions-Zeile(n) im DOM"
+    pr = ks.get("profit") if isinstance(ks.get("profit"), dict) else {}
+    if pr.get("wert") is None:
+        return False, "Profit nicht lesbar"
+    if abs(float(pr.get("wert"))) > 0.004:
+        return False, f"Profit {pr.get('text')} ≠ 0"
+    texte = ks.get("texte") if isinstance(ks.get("texte"), dict) else {}
+    eqw = tv_geld_lesen(texte.get("Equity")) if texte.get("Equity") is not None else None
+    if eqw is None:
+        eq = ks.get("equity") if isinstance(ks.get("equity"), dict) else {}
+        eqw = eq.get("wert") if str(eq.get("label") or "").strip().lower() == "equity" else None
+    bal = next((tv_geld_lesen(v) for k, v in texte.items() if CDP_RX_WAEHRUNG.match(str(k).strip())), None)
+    if bal is None:
+        bal = cdp_balance_umschalter(ko.get("aktiv"))
+    if bal is None or eqw is None:
+        return False, "Balance/Equity nicht lesbar"
+    if bal <= 0 or abs(float(bal) - float(eqw)) > 0.005:
+        return False, f"Balance {bal:,.2f} ≠ Equity {float(eqw):,.2f}"
+    return True, f"Reiter Positions ohne Zeile, Profit 0,00, Balance = Equity {bal:,.2f}"
 
 
 def cdp_positionen_vertrag(pos):
@@ -19746,7 +19803,7 @@ def _cdp_today_aus_reiter(s, opts, trail):
     s.klick(r_sum, "Reiter Account summary")
     _warte(0.7, 0.3)
     st = s.stand(opts)
-    summary = cdp_summary(st.get("konto_summary"))
+    summary = cdp_summary(st.get("konto_summary"), (st.get("konto") or {}).get("aktiv") if isinstance(st.get("konto"), dict) else None)
     today, lab, txt = tv_today_pnl(summary)
     if today is None and isinstance(summary, dict):
         for k_, v_ in summary.items():
@@ -19853,7 +19910,7 @@ def modus_tvlesen_cdp(cmd):
             if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
                 _warte(0.6, 0.3)
                 st = s.stand(opts)
-        summary = cdp_summary(st.get("konto_summary"))
+        summary = cdp_summary(st.get("konto_summary"), (st.get("konto") or {}).get("aktiv") if isinstance(st.get("konto"), dict) else None)
         today, today_label, today_text = tv_today_pnl(summary)
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         if ko.get("positionen_sichtbar") is False:
@@ -19861,8 +19918,27 @@ def modus_tvlesen_cdp(cmd):
                 return raus("panel_zu", "Handelspanel unten ist zugeklappt („Open panel“) und ging nicht auf — kein Stand ohne "
                             "Positions-Tabelle (Grund in der Spur).", "lesen",
                             summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
-            return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle.", "lesen",
-                        summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+            # FLACH OHNE TABELLE (TradingView-Update 19.10.2026, s. cdp_flach_ohne_tabelle): null Positionen = keine Tabelle mehr.
+            # Beweis zweimal mit Pause (Zeilen könnten noch laden), sonst wie bisher ehrlich tabelle_unklar.
+            ja, grund = cdp_flach_ohne_tabelle(st)
+            if not ja:
+                trail.append(f"kein Flach-Beweis ohne Tabelle: {grund}")
+                return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle "
+                            f"(flach nicht bewiesen: {grund}).", "lesen",
+                            summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+            _warte(2.5, 1.0)
+            st2 = s.stand(opts)
+            ja2, grund2 = cdp_flach_ohne_tabelle(st2)
+            if not ja2:
+                trail.append(f"flach ohne Tabelle: zweiter Blick widerspricht ({grund2})")
+                return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle "
+                            f"(zweiter Blick: {grund2}).", "lesen",
+                            summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+            trail.append(f"flach ohne Tabelle (TradingView-Update): {grund2} — zweimal bewiesen")
+            st = st2
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            summary = cdp_summary(st.get("konto_summary"), ko.get("aktiv"))
+            today, today_label, today_text = tv_today_pnl(summary)
         positionen = cdp_positionen_vertrag(st.get("positionen"))
         if today is None:
             try:
