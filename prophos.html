@@ -44589,7 +44589,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1623'
+  const OS_TAB_BUILD = '2026-09-22.1624'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51528,7 +51528,10 @@
         if(!(ids && !ids.has(String(x.user_id || ''))) && !tplManRaus(man, x.user_id, x.konto_id, x.konto)) gelesenN++
         continue
       }
-      if(/geplanten\/laufenden Plan/.test(g)) continue
+      // TAGESDECKEL RAUS (Finn 19.10.2026, Admin-Reiter: 18 Apex-Zeilen „Tagesdeckel der Firma — höchstens 2 Konten je ID und Tag“ — „Ich weiß ja,
+      // dass ich nur zwei bis drei Apex pro Tag machen kann, also brauch ich nicht jeden einzelnen Apex sekundenschreiben“): nichts zu tun, der Bot nimmt
+      // das Konto an einem anderen Tag dran. Bleibt in ausgelassen[] (Konto-Chip „ausgelassen · Tagesdeckel“, ID-Leiste), nur nicht als Braucht-dich-Zeile
+      if(/geplanten\/laufenden Plan|Tagesdeckel der Firma/.test(g)) continue
       // seit dem Lauf archiviert (08.10.2026, Finn: „Den Account habe ich schon längst archiviert … soll selber weggemacht werden"): das Backend
       // filtert beim Ausliefern (app.py ap_ohne_archiv); hier zusätzlich für eigene Konten, falls noch ein alter Lauf im Zwischenspeicher steht
       if(x.konto_id && archEigen[x.konto_id] && archEigen[x.konto_id].archived) continue

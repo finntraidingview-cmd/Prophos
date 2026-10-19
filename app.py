@@ -12697,7 +12697,8 @@ HAND_BLOWN_TAGE = 60                                # Blow-Pläne nur so weit zu
 HAND_NACH = {"challenge": "funded", "phase1": "phase2", "phase2": "funded_cfd"}
 # 5. Gruppe „Planer braucht dich" (Master 09.10.2026): Gründe des letzten Nachtlaufs, die eine Hand brauchen — ohne die, die schon eine andere
 # Gruppe zeigt (Ziel erreicht = bestanden, noch nicht erledigt = Überprüfen) und ohne „hat schon einen geplanten/laufenden Plan" (kein Fall)
-HAND_PLANER_OHNE = re.compile(r"Ziel erreicht|bestanden|noch nicht erledigt|Überprüfen|geplanten/laufenden Plan|Manuelle Arbeit", re.I)
+# Tagesdeckel (19.10.2026, Finn: „ich brauch nicht jeden einzelnen Apex sekundenschreiben“): kein Hand-Fall, der Bot nimmt das Konto an einem anderen Tag dran
+HAND_PLANER_OHNE = re.compile(r"Ziel erreicht|bestanden|noch nicht erledigt|Überprüfen|geplanten/laufenden Plan|Manuelle Arbeit|Tagesdeckel", re.I)
 _hand_cache = {}
 _hand_lock = threading.Lock()
 
