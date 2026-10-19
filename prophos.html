@@ -21839,6 +21839,17 @@
         build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: (window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)) })
       const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
+      // BOT-STAND UNTEN IM TAB (19.10.2026, Finn: „immer unten die neueste Version reinschreiben, damit ich weiß, ob es tatsächlich ein
+      // Update ist" — der Bot wird per Commit getauscht, ohne dass die Seite neu lädt; die Build-Nummer allein sagt also nichts über
+      // den Bot): neben „Build …" steht am PC-Tab „· Bot .1630" aus /api/instances bot_version (VERSION des Bot-Stands, Panel BOT_STAND).
+      try{
+        const f = document.querySelector('#dashboard-view .sb-foot')
+        if(f && dd.bot_version){
+          let sp = f.querySelector('.sb-foot-bot')
+          if(!sp){ sp = document.createElement('span'); sp.className = 'sb-foot-bot'; f.appendChild(sp) }
+          sp.textContent = ' · Bot ' + String(dd.bot_version).replace(/^\d{4}-\d{2}-\d{2}/, '')
+        }
+      }catch(_){}
       // MT5-Balance dauerhaft am Konto (29.09.2026): frische Master-Balance → accounts.tv_balance (gedrosselt, s. mt5BalanceAusInstanzen)
       try{ mt5BalanceAusInstanzen(dd.instances || []) }catch(e){ console.warn('[mt5-balance]', e) }
       // METATRADER5-PAKET (08.10.2026, Jacob The5%ers rot: „MetaTrader5-Paket fehlt" im Order-Bot): das Panel prüft sein Python selbst
@@ -44653,7 +44664,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1630'
+  const OS_TAB_BUILD = '2026-09-22.1631'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
