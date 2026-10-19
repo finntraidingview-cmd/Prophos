@@ -19122,16 +19122,49 @@ def cdp_konto_familie(nr):
     return ""
 
 
+def cdp_konto_stueck(text):
+    """REIN RECHNEND (testbar): das GEKÜRZTE Stück einer Kontonummer ('PAAPEX668794000000… 160,340.40 USD' → 'PAAPEX668794000000') | ''.
+    19.10.2026 (Chris, Hand-Start 13:57 UTC nach 253fe641): TradingView kürzt auch Apex-Namen im Umschalter; das Stück nennt keine
+    genaue Nummer (cdp_kontonr → ''), aber sicher die Firma bzw. den Apex-User — und das reicht für „anderer Tradovate-Login"."""
+    m = re.search(r"([A-Za-z0-9_-]{6,})\s*(?:…|\.{3})", str(text or ""))
+    return _nur_alnum(m.group(1)).upper() if m else ""
+
+
+def cdp_konto_familie_stueck(stueck):
+    """REIN RECHNEND (testbar): Login-Familie aus einem gekürzten Stück — Apex nur mit vollständiger 6-stelliger User-ID
+    ('PAAPEX668794…' → 'apex:668794'), sonst wie cdp_konto_familie über den Anfang. Unbekannt → ''."""
+    u = _nur_alnum(stueck).upper()
+    m = re.match(r"^(?:PA)?APEX(\d{6})\d*$", u)
+    if m:
+        return "apex:" + m.group(1)
+    if re.match(r"^(?:PA)?APEX", u):
+        return ""
+    return cdp_konto_familie(u + "0000000")   # Tradeify/Lucid/FundedNext/MFF erkennt cdp_konto_familie am Anfang
+
+
+def cdp_login_familie(aktiv):
+    """REIN RECHNEND (testbar): Login-Familie des aktiven Kontos — aus der vollen Nummer, sonst aus dem gekürzten Stück. -> (familie, lesbar)
+    lesbar = volle Nummer vorhanden (nur dann sind Tradeify↔Tradeify-Belege möglich)."""
+    nr = cdp_kontonr(aktiv)
+    if nr:
+        return cdp_konto_familie(nr), True
+    st = cdp_konto_stueck(aktiv)
+    return (cdp_konto_familie_stueck(st) if st else ""), False
+
+
 def cdp_ein_konto_beleg(aktiv, ext):
     """REIN RECHNEND (testbar): Umschalter geklickt, keine Liste — belegt das einen anderen Tradovate-Login? Nur wenn das aktive Konto
-    als Kontonummer lesbar ist und NICHT das Ziel (02.10.2026, Login mit nur einem Konto)."""
-    nr = cdp_kontonr(aktiv)
-    if not (nr and ext) or cdp_konto_passt(str(aktiv or ""), ext):
+    als Kontonummer lesbar ist und NICHT das Ziel (02.10.2026, Login mit nur einem Konto). 19.10.2026: ein gekürztes aktives Konto
+    (cdp_konto_stueck) belegt den Wechsel nur, wenn Firma/Apex-User sicher ANDERS sind als beim Ziel."""
+    if not ext or cdp_konto_passt(str(aktiv or ""), ext):
         return False
-    fa, fz = cdp_konto_familie(nr), cdp_konto_familie(ext)
-    if fa and fa == fz and fa.startswith("apex:"):
-        return False   # derselbe Apex-User = derselbe Login (viele Konten) — die Liste wurde nur nicht erkannt
-    return True
+    fa, lesbar = cdp_login_familie(aktiv)
+    fz = cdp_konto_familie(ext)
+    if lesbar:
+        if fa and fa == fz and fa.startswith("apex:"):
+            return False   # derselbe Apex-User = derselbe Login (viele Konten) — die Liste wurde nur nicht erkannt
+        return True
+    return bool(fa and fz and fa != fz)
 
 
 def cdp_konto_eintrag(eintraege, ext):
@@ -19148,14 +19181,15 @@ def cdp_liste_beleg(ko, aktiv, ext=""):
     (das Ziel steht nur außer Sicht). Sonst (Tradeify↔Tradeify, unbekannt) nur mit vollständiger Liste (augen.js liste_voll ≥ 0.7.4
     oder, seit 05.10.2026, liste_kurz ≥ 0.7.6 — auch FundedNext↔FundedNext: die Nummer verrät dort den Login nicht)
     UND dem aktiven Konto selbst als Zeile darin."""
+    fa, lesbar = cdp_login_familie(aktiv)
+    fz = cdp_konto_familie(ext)
+    if fa and fz and fa != fz:
+        return True, ""          # andere Firma / anderer Apex-User — auch aus dem gekürzten Stück sicher (19.10.2026, Chris im Apex-Login)
+    if fa and fa == fz and fa.startswith("apex:"):
+        return False, f"Ziel und aktives Konto gehören zum selben Apex-Login (User {fa[5:]}) — das Ziel steht nur nicht sichtbar in der Liste"
     nr = cdp_kontonr(aktiv)
     if not nr:
         return False, f"aktives Konto nicht lesbar ('{str(aktiv or '')[:40] or '-'}')"
-    fa, fz = cdp_konto_familie(nr), cdp_konto_familie(ext)
-    if fa and fz and fa != fz:
-        return True, ""
-    if fa and fa == fz and fa.startswith("apex:"):
-        return False, f"Ziel und aktives Konto gehören zum selben Apex-Login (User {fa[5:]}) — das Ziel steht nur nicht sichtbar in der Liste"
     # 05.10.2026 (Finn + Pascal, Endlesung zweier FundedNext-Futures-Konten bei verbundenem anderem FundedNext-Login): die Liste hatte
     # drei Zeilen und war ganz zu sehen, liste_voll sagte trotzdem nein → kein Beleg → Abbruch statt Login-Wechsel. Seit augen.js 0.7.6
     # zählt auch liste_kurz (≤ 8 Zeilen, Platz darüber und darunter, keine weitere Konto-Zeile im Dokument); liste_voll_grund nennt,

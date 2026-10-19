@@ -4246,6 +4246,21 @@ def test_cdp_konto_regression_865():
         and ob.cdp_liste_beleg({"liste_voll": True}, G + "… 1 USD", "FTDFYSLX150467455552")[0] is False
         and ob.cdp_gleicher_login_beleg({"liste_voll": True}, "PAAPEX6687940000001… 1 USD", "PAAPEX6687940000002")[0] is False,
         "gekürzte Kennung ist nie ein Login-Beleg (kein Abmelden, kein konto_weg)")
+    # 19.10.2026 13:57 UTC (Chris, Hand-Start nach 253fe641): Chrome im Apex-Login 'PAAPEX668794000000… 160,340.40 USD', Ziel Tradeify
+    # → „kein Login-Beleg: aktives Konto nicht lesbar" — das gekürzte Stück nennt Firma/Apex-User aber sicher → Wechsel erlaubt
+    A = "PAAPEX668794000000… 160,340.40 USD"
+    chk(ob.cdp_konto_stueck(A) == "PAAPEX668794000000" and ob.cdp_konto_stueck("Konto wählen") == "" and ob.cdp_konto_stueck(G + "…162,850.82USD") == G
+        and ob.cdp_konto_familie_stueck("PAAPEX668794000000") == "apex:668794" and ob.cdp_konto_familie_stueck("PAAPEX66879") == ""
+        and ob.cdp_konto_familie_stueck(G) == "tradeify" and ob.cdp_konto_familie_stueck("FNFTCHABC") == "fundednext" and ob.cdp_konto_familie_stueck("XYZ123") == ""
+        and ob.cdp_login_familie(A) == ("apex:668794", False) and ob.cdp_login_familie("TDFYSL150100000000USD") == ("tradeify", True),
+        "gekürztes Stück: Familie/Apex-User sicher, genaue Nummer nicht")
+    chk(ob.cdp_ein_konto_beleg(A, "FTDFYSLX150467455552") and ob.cdp_ein_konto_beleg(A, "PAAPEX6708370000001")
+        and not ob.cdp_ein_konto_beleg(A, "PAAPEX6687940000016") and not ob.cdp_ein_konto_beleg(G + "… 1 USD", "FTDFYSLX150467455552")
+        and ob.cdp_liste_beleg({"liste_voll": False}, A, "FTDFYSLX150467455552") == (True, "")
+        and ob.cdp_liste_beleg({"liste_voll": True}, A, "PAAPEX6687940000016")[0] is False
+        and "selben Apex-Login" in ob.cdp_liste_beleg({"liste_voll": True}, A, "PAAPEX6687940000016")[1]
+        and "nicht lesbar" in ob.cdp_liste_beleg({"liste_voll": True}, G + "… 1 USD", "FTDFYSLX150467455552")[1],
+        "gekürztes aktives Konto: andere Firma/anderer Apex-User = Login-Wechsel, gleiche Firma/gleicher User nie")
     import io as _io, contextlib as _cl, json
     _n = {"n": 0}
     def _lauf_to(c):
