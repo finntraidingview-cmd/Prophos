@@ -48,15 +48,20 @@ VERSION = "0.2.0"   # 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, e
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 class Lauf:
-    def __init__(self, seite, cmd):
+    def __init__(self, seite, cmd, test=None):
         self.seite = seite
         self.cmd = cmd
+        self.test = test
         self.lauf_id = str(cmd.get("lauf_id") or "").strip()
-        self.ordner = os.path.join(POLAR_ORDNER, re.sub(r"[^0-9a-f-]", "", self.lauf_id)[:36] or "ohne")
+        if test:
+            # MAUS-TEST (20.10.2026): kein Lauf, keine Railway-Meldung — Log test_x_<seite>.log und stand_test_<seite>.json direkt unter polar/
+            self.ordner = POLAR_ORDNER
+        else:
+            self.ordner = os.path.join(POLAR_ORDNER, re.sub(r"[^0-9a-f-]", "", self.lauf_id)[:36] or "ohne")
         os.makedirs(self.ordner, exist_ok=True)
         self.trail = ob._StempelSpur()
         self.stand = {"seite": seite, "lauf_id": self.lauf_id, "plan_id": cmd.get("plan_id"), "phase": "start", "pid": os.getpid(),
-                      "version": VERSION, "at_ms": jetzt_ms()}
+                      "version": VERSION, "at_ms": jetzt_ms(), "test": test}
         self.uhr_versatz_ms = 0.0      # Railway-Uhr − eigene Uhr
         self.token = None
         try:
@@ -64,7 +69,8 @@ class Lauf:
                 self.token = f.read().strip() or None
         except OSError:
             self.token = None
-        self.log_datei = os.path.join(self.ordner, f"{seite}.log")
+        self.log_datei = os.path.join(self.ordner, f"{test}_{seite}.log" if test else f"{seite}.log")
+        self.stand_datei = os.path.join(self.ordner, f"stand_test_{seite}.json" if test else f"stand_{seite}.json")
 
     def log(self, text):
         self.trail.append(text)
@@ -79,7 +85,7 @@ class Lauf:
         self.stand["phase"] = name
         self.stand["at_ms"] = jetzt_ms()
         self.stand["trail_ende"] = ob._spur(self.trail)[-600:]
-        schreiben(os.path.join(self.ordner, f"stand_{self.seite}.json"), self.stand)
+        schreiben(self.stand_datei, self.stand)
 
     def abbruch_gewuenscht(self):
         return os.path.exists(os.path.join(self.ordner, "abbruch.json"))
@@ -291,6 +297,8 @@ X_BEWEIS_S = 2.0              # nach dem ×-Klick muss die Position in ≤ 2 s l
 X_TAKT_S = 0.05               # Lesetakt des Beweises (Slave: API, Master: Reader)
 SLAVE_WACHE_TAKT_S = 0.1      # Slave-Wache: eigene Position alle 100 ms lesen (Finn: 1–2 s bis der andere zu ist)
 PROFIT_X_RAND_PX = 14         # MT5-Toolbox „Trade": das × sitzt ~14 px links vom rechten Rand der Profit-Spalte (Finn-Zoom 20.10.2026 „115.38 ×")
+ZELLE_X_RAND_PX = 10          # … bzw. ~10 px links vom rechten Rand der PROFIT-ZELLE der eigenen Zeile (UIA, Master-Entscheid 20.10.2026 03:3x)
+RX_X_TOOLTIP = re.compile(r"schlie(?:ß|ss)|close", re.I)
 RX_CLOSE_TEXT = re.compile(r"position schlie(?:ß|ss)en|close position|schlie(?:ß|ss)en|\bclose\b", re.I)
 RX_NICHT_CLOSE = re.compile(r"close all|alle schlie|reverse|umkehr|protect|settings|einstell|cancel|storn|order", re.I)
 RX_LEVEL_SPALTE = re.compile(r"^\s*(s\s*/\s*l|t\s*/\s*p|sl|tp|stop|take)\b", re.I)
@@ -319,6 +327,47 @@ def profit_x_wahl(zeile_y, rechts, spalten=None, rand=PROFIT_X_RAND_PX):
             return None
         return x, y, f"Spalte '{pr.get('name')}' (rechts {pr.get('right')}) − {rand} px"
     return r - int(rand), y, f"rechter Listenrand {r} − {rand} px (Profit = letzte Spalte)"
+
+
+def profit_x_aus_zelle(zelle, rand=ZELLE_X_RAND_PX):
+    """REIN RECHNEND (testbar, Master-Entscheid 20.10.2026 nach S1s Gegenprüfung): ×-Punkt aus dem Rechteck der PROFIT-ZELLE der eigenen
+    Zeile [x, y, w, h] — rechter Zellenrand − rand, Mitte der Zeilenhöhe; nie „Fensterrand − 14 px" (Rahmen, Scrollbar, Leerraum rechts
+    bei breitem Terminal lagen daneben). Zelle zu schmal/zu flach → None. -> (x, y) | None"""
+    try:
+        x, y, w, h = (float(v) for v in zelle)
+    except (TypeError, ValueError):
+        return None
+    if w < rand + 6 or h < 6:
+        return None
+    return int(round(x + w - rand)), int(round(y + h / 2.0))
+
+
+def x_klick_erlaubt(zelle, tooltip, einzig):
+    """REIN RECHNEND (testbar): der Slave klickt das × NUR mit Beweis — Profit-Zelle per UIA gelesen (Punkt liegt in der Zelle), Tooltip
+    unter der geparkten Maus sagt Schließen/Close UND genau eine (die eigene) Position ist offen. Fehlt eines → sofort der bewährte
+    Rechtsklick-Weg, kein ×-Klick ins Leere (Master-Entscheid 20.10.2026). -> bool"""
+    return bool(einzig) and profit_x_aus_zelle(zelle) is not None and bool(RX_X_TOOLTIP.search(str(tooltip or "")))
+
+
+def uia_profit_zelle(zellen, zeile_rect):
+    """REIN RECHNEND (testbar): aus UIA-Zellen [{text, rect}] derselben Zeile (gleiche Höhe ± 3 px wie zeile_rect) die PROFIT-Zelle =
+    die am weitesten rechts liegende; Zellen außerhalb des Zeilenbands zählen nicht. -> Zelle | None"""
+    try:
+        zy, zh = float(zeile_rect[1]), float(zeile_rect[3])
+    except (TypeError, ValueError, IndexError):
+        return None
+    im_band = []
+    for c in zellen or ():
+        r = c.get("rect") if isinstance(c, dict) else None
+        try:
+            cy, ch = float(r[1]), float(r[3])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if abs(cy - zy) <= 3 and abs(ch - zh) <= 3 and float(r[2]) >= 16:
+            im_band.append(c)
+    if not im_band:
+        return None
+    return max(im_band, key=lambda c: float(c["rect"][0]) + float(c["rect"][2]))
 
 
 def chart_x_wahl(kandidaten):
@@ -443,6 +492,28 @@ TOOLTIP_JS = r"""(function () {
   return Array.prototype.slice.call(document.querySelectorAll('[role="tooltip"],[class*="tooltip"]')).filter(function (e) {
     try { var r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2; } catch (_) { return false; } }).map(T).filter(Boolean).slice(0, 5);
 })()"""
+
+
+def uia_zeile_wahl(zeilen, symbol, ticket=None):
+    """REIN RECHNEND (testbar, Maus-Test ×): Positionszeile aus UIA-Elementen [{text, rect}] — mit Ticket GENAU die Zeile, die die
+    Ticket-Nummer trägt; ohne Ticket die erste Zeile mit dem Symbol. Mehrdeutig (zwei Ticket-Treffer) → None. -> Zeile | None"""
+    z = [x for x in (zeilen or ()) if isinstance(x, dict) and isinstance(x.get("rect"), (list, tuple)) and len(x["rect"]) == 4]
+    if ticket:
+        t = [x for x in z if re.search(r"(?<!\d)" + re.escape(str(ticket)) + r"(?!\d)", str(x.get("text") or ""))]
+        return t[0] if len(t) == 1 else None
+    sym = str(symbol or "").strip().lower()
+    for x in z:
+        if sym and sym in str(x.get("text") or "").lower():
+            return x
+    return None
+
+
+def x_abstand_rechts(punkt, rechts):
+    """REIN RECHNEND (testbar): Abstand des ×-Punkts zum rechten Rand in px (Beweis im Log; negativ = außerhalb)."""
+    try:
+        return int(round(float(rechts) - float(punkt[0])))
+    except (TypeError, ValueError, IndexError):
+        return None
 
 
 # Ändern-Dialog einer offenen TradingView-Order: Modify-Knopf + Eingabefelder mit Beschriftung. Nur lesen.
@@ -611,10 +682,51 @@ def master_x_parken(lauf, s, opts, root, plan):
     return park
 
 
+def master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen):
+    """VOR-KLICK-LESUNG (Prüfer S2 über den Master, 20.10.2026): unmittelbar vor dem ×-Klick lesend prüfen, dass die eigene Position noch
+    offen ist und das geparkte × zu ihr gehört. Reader flach → 'schon_zu' (nicht klicken). Park-Platz Tabelle: die Zeile muss Wurzel,
+    Richtung und Menge des Plans zeigen und der Close-Knopf noch dasselbe Rechteck haben, sonst neu suchen. Chart: das Chart-× muss noch
+    an derselben Stelle (± 3 px) im DOM stehen, sonst neu suchen. -> (park | None, grund)"""
+    if reader_flach(ob._tv_http("/positions", timeout=0.3), ext, root, gesehen) == "flach":
+        return None, "schon_zu"
+    if not park:
+        return None, "kein_park"
+    try:
+        if park.get("art") == "chart":
+            x = chart_x_wahl((s.lese_js(CHART_X_JS) or {}).get("kandidaten") or [])
+            if x is None:
+                return None, "chart_x_weg"
+            if any(abs(float(a) - float(b)) > 3 for a, b in zip(x["rect"], park["rect"])):
+                return dict(park, rect=list(x["rect"])), "chart_x_neu"
+            return park, "ok"
+        zeilen = [z for z in (s.lese_js(ob.K3_ZEILEN_JS) or []) if isinstance(z, dict) and z.get("sichtbar")
+                  and ob.tv_symbol_root(str(z.get("symbol") or "")) == root
+                  and not any(k in (z.get("spalten") or {}) for k in ("Status", "Order ID", "Order-ID"))]
+        if len(zeilen) != 1:
+            return None, f"{len(zeilen)}_zeilen"
+        z = zeilen[0]
+        menge = ob.cdp_zahl(z.get("menge"))
+        if str(z.get("seite") or "").lower() != str(plan["richtung"]).lower() or (menge is not None and abs(float(menge) - float(plan["menge"])) > 0.01):
+            return None, "zeile_fremd"
+        kn, _n = ob.k3_close_knopf(z)
+        if not kn:
+            return None, "knopf_weg"
+        r = list(ob.cdp_rect(kn))
+        return (park if r == list(park["rect"]) else dict(park, rect=r)), ("ok" if r == list(park["rect"]) else "knopf_neu")
+    except Exception as e:
+        return None, f"lesung_{type(e).__name__}"
+
+
 def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
-    """Signal vom Slave: EIN Klick auf das geparkte × → Beweis Reader flach (50 ms) ≤ 2 s (Tabelle als zweiter Blick); Rückfrage-Dialog
-    nur über [data-name=submit-button] mit Close/Schließen; sonst Rückfall Close-Knopf der Tabelle (tvclose-Regel). -> (zu_ms, quelle) | (None, grund)"""
+    """Signal vom Slave: Vor-Klick-Lesung (< 50 ms Reader) → EIN Klick auf das geparkte × → Beweis Reader flach (50 ms) ≤ 2 s (Tabelle als
+    zweiter Blick); Rückfrage-Dialog nur über [data-name=submit-button] mit Close/Schließen; sonst Rückfall Close-Knopf der Tabelle
+    (tvclose-Regel). -> (zu_ms, quelle) | (None, grund)"""
     t0 = time.time()
+    park, grund = master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen)
+    lauf.log(f"Polar: Vor-Klick-Lesung {int((time.time() - t0) * 1000)} ms → {grund}")
+    if grund == "schon_zu":
+        lauf.phase("zu_bestaetigt", zu_quelle="schon_zu")
+        return jetzt_ms(), "schon_zu"
     geklickt = bool(park) and bool(s.klick(park["rect"], f"Schließen-× ({park['art']})"))
     klick_ms = jetzt_ms()
     lauf.phase("x_geklickt", klick_ms=klick_ms, x_art=(park or {}).get("art"), x_ok=geklickt)
@@ -670,6 +782,9 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
             ob._warte(0.5, 0.2)
             z2 = next((x for x in (s.lese_js(ob.K3_ZEILEN_JS) or []) if isinstance(x, dict) and x.get("zeile") == zeilen[0].get("zeile")), zeilen[0])
             kn, _n = ob.k3_close_knopf(z2)
+            if reader_flach(ob._tv_http("/positions", timeout=0.3), ext, root, gesehen) == "flach":   # Vor-Klick-Lesung auch hier (S1-Prüfung 20.10.2026)
+                lauf.log("Polar: Rückfall — Reader meldet inzwischen flach, kein Klick")
+                return jetzt_ms(), "x_spaet"
             if kn and s.klick(ob.cdp_rect(kn), f"Close-Knopf der {root}-Zeile (Rückfall)"):
                 weg2, _d = flach_beweis(6.0)
                 if weg2 is not None:
@@ -1081,15 +1196,62 @@ def lauf_slave(cmd):
         res["trail"] = ob._spur(lauf.trail)
 
 
-def slave_x_punkte(w, anker_pfad):
-    """Punkte der eigenen Positionszeile aus dem Ticket-bewiesenen Anker (x_frac/y_off vom SL/TP-Weg): (zeile, x, fenster).
-    zeile = der alte Park-Punkt (Rechtsklick-Rückfall), x = das Schließen-× ganz rechts in der Profit-Spalte (profit_x_wahl)."""
+def uia_zeilen_lesen(w, ticket, symbol=None):
+    """UIA-Elemente der Toolbox-Liste (DataItem/ListItem/Custom/Text) → [{text, rect, typ}]. Auf vielen MT5-Builds ist die Liste für UIA
+    unsichtbar (Befund 18.08.2026) — dann leer, und der Slave bleibt beim Rechtsklick-Weg. Nur Lesen."""
+    out = []
+    for ct in ("DataItem", "ListItem", "Custom", "Text"):
+        try:
+            els = w.descendants(control_type=ct)
+        except Exception:
+            continue
+        for el in els:
+            try:
+                t = str(el.window_text() or "")
+                r = el.rectangle()
+                if r.right - r.left < 4 or r.bottom - r.top < 4:
+                    continue
+                out.append({"text": t[:80], "rect": [r.left, r.top, r.right - r.left, r.bottom - r.top], "typ": ct})
+            except Exception:
+                continue
+        if len(out) > 2000:
+            break
+    return out
+
+
+def slave_profit_zelle(w, ticket, symbol=None):
+    """PROFIT-ZELLE der eigenen Zeile per UIA (Master-Entscheid 20.10.2026): Zeile = Element mit der Ticket-Nummer (uia_zeile_wahl),
+    Zelle = die am weitesten rechts im Zeilenband (uia_profit_zelle). -> {zeile, zelle, punkt, n} | None"""
+    zellen = uia_zeilen_lesen(w, ticket, symbol)
+    zeile = uia_zeile_wahl(zellen, symbol, ticket)
+    if not zeile:
+        return None
+    zelle = uia_profit_zelle(zellen, zeile["rect"])
+    if not zelle:
+        return None
+    p = profit_x_aus_zelle(zelle["rect"])
+    return {"zeile": zeile, "zelle": zelle, "punkt": p, "n": len(zellen)} if p else None
+
+
+def slave_x_punkte(w, anker_pfad, ticket=None, symbol=None):
+    """Punkte der eigenen Positionszeile: zeile = Park-Punkt des Ticket-bewiesenen Ankers (Rechtsklick-Rückfall, x_frac/y_off vom
+    SL/TP-Weg), x = das Schließen-× aus der PROFIT-ZELLE per UIA (slave_profit_zelle) — ohne lesbare Zelle KEIN ×-Punkt (Master-Entscheid
+    20.10.2026 nach S1s Gegenprüfung: „Fensterrand − 14 px" trifft bei Rahmen/Scrollbar/breitem Terminal daneben).
+    -> (zeile, x | None, fenster, beweis_text, zelle_rect | None)"""
     hr = w.rectangle()
     a = ob._anker_lesen(anker_pfad)
-    ay = hr.bottom - int(a["y_off"])
-    zeile = (hr.left + int((hr.right - hr.left) * float(a["x_frac"])), ay)
-    px = profit_x_wahl(ay, hr.right)
-    return zeile, ((px[0], px[1]) if px else None), (hr.left, hr.top, hr.right, hr.bottom), (px[2] if px else "")
+    zeile = None
+    try:
+        zeile = (hr.left + int((hr.right - hr.left) * float(a["x_frac"])), hr.bottom - int(a["y_off"]))
+    except (KeyError, TypeError, ValueError):
+        pass
+    z = slave_profit_zelle(w, ticket, symbol) if ticket else None
+    if z:
+        if zeile is None:
+            zr = z["zeile"]["rect"]
+            zeile = (int(zr[0] + zr[2] * 0.4), int(zr[1] + zr[3] / 2))
+        return zeile, z["punkt"], (hr.left, hr.top, hr.right, hr.bottom), f"Profit-Zelle {z['zelle']['rect']} '{z['zelle'].get('text')}' − {ZELLE_X_RAND_PX} px ({z['n']} UIA-Elemente)", z["zelle"]["rect"]
+    return zeile, None, (hr.left, hr.top, hr.right, hr.bottom), "Profit-Zelle per UIA nicht lesbar — kein ×, Rechtsklick-Weg", None
 
 
 def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
@@ -1108,17 +1270,27 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
     def offen(st):
         return any(p["ticket"] == ticket for p in (st or {}).get("positionen") or [])
 
+    symbol = str(lauf.cmd.get("symbol") or "").strip() or None
     try:
-        punkt, punkt_x, fenster, x_beweis = slave_x_punkte(w, anker_pfad)
+        punkt, punkt_x, fenster, x_beweis, zelle = slave_x_punkte(w, anker_pfad, ticket, symbol)
     except Exception as e:
-        punkt, punkt_x, fenster, x_beweis = None, None, None, ""
-        lauf.log(f"Wache: kein Zeilen-Anker ({type(e).__name__}) — Schließen läuft dann über den vollen Zeilen-Scan")
+        punkt, punkt_x, fenster, x_beweis, zelle = None, None, None, "", None
+        lauf.log(f"Wache: Zeile/Zelle nicht lesbar ({type(e).__name__}) — Schließen läuft dann über den vollen Zeilen-Scan")
     park = punkt_x or punkt
+    x_tip = ""
     if park:
         ob._maus_fahren(*park, schritte=6)
         erg["geparkt"], erg["x_geparkt"] = True, punkt_x is not None
-        tip = _tooltip_text(1.0) if punkt_x else ""
-        erg["x_beweis"] = (f"{x_beweis}; Tooltip '{tip}'" if tip else f"{x_beweis}; kein Tooltip") if punkt_x else "Zeile (kein ×-Punkt)"
+        x_tip = _tooltip_text(1.5) if punkt_x else ""
+        if punkt_x and not RX_X_TOOLTIP.search(x_tip):
+            # PFLICHT-BEWEIS (Master-Entscheid 20.10.2026): kein Tooltip „Schließen/Close" unter der Maus → das × ist nicht bewiesen,
+            # Maus zurück auf die Zeile, Schließen später über den Rechtsklick-Weg
+            lauf.log(f"Wache: × NICHT bewiesen — Tooltip '{x_tip or '—'}' statt Schließen/Close ({x_beweis}) → Rechtsklick-Weg")
+            punkt_x, erg["x_geparkt"] = None, False
+            park = punkt
+            if park:
+                ob._maus_fahren(*park, schritte=4)
+        erg["x_beweis"] = (f"{x_beweis}; Tooltip '{x_tip}'") if punkt_x else f"Zeile (kein bewiesenes ×: {x_beweis})"
         lauf.log(f"Wache: Maus parkt auf dem {'Schließen-×' if punkt_x else 'Positionszeile'} #{ticket} @{park[0]},{park[1]} — Beweis {erg['x_beweis']}")
     melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt) if punkt else None, "x": list(punkt_x) if punkt_x else None, "beweis": erg.get("x_beweis")})
     lauf.phase("geparkt_x" if punkt_x else "wache", geparkt=erg["geparkt"], x_geparkt=erg["x_geparkt"], x_beweis=erg.get("x_beweis"))
@@ -1152,10 +1324,12 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             try:
                 if ob._win_vordergrund() != int(w.handle):
                     ob._fenster_betreten(w)
-                p_neu, x_neu, f_neu, _bw = slave_x_punkte(w, anker_pfad)
+                p_neu, x_neu, f_neu, _bw, _z = slave_x_punkte(w, anker_pfad, ticket if punkt_x else None, symbol)   # × nur, wenn es bewiesen war
                 neu = x_neu or p_neu
                 if f_neu != fenster or neu != park:
                     punkt, punkt_x, fenster, park = p_neu, x_neu, f_neu, neu
+                    if x_neu:
+                        zelle = _z                                   # Zelle mitziehen — der Klick-Beweis prüft sonst die alte (S2-Hinweis 20.10.2026)
                     lauf.log(f"Wache: Fenster bewegt — neu geparkt @{park[0]},{park[1]}")
                     ob._maus_fahren(*park, schritte=4)
                 elif ob._cursor_pos() != tuple(park):
@@ -1169,8 +1343,22 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
         a = signal["antwort"] or {}
         erg["signal_ms"] = signal["signal_ms"] or jetzt_ms()
         lauf.log(f"Polar: Signal — Master zu ({a.get('master_zu_ms')}, Status {a.get('status')}) → Slave schließt per ×")
-        # 1) EIN Klick aufs geparkte × (Profit-Spalte) — nur, wenn genau EINE Position offen ist (Wache liest mit) und nicht pausiert
-        if punkt_x and einzig and not ob.is_paused():
+        # VOR-KLICK-LESUNG (Prüfer S2 über den Master, 20.10.2026): frisch lesen — eigene Position noch offen und die EINZIGE Zeile
+        # (die MT5-Liste ist für UIA unsichtbar, also ist „genau eine Position = mein Ticket" der Beweis, dass das × meiner Zeile gehört);
+        # schon flach → nicht klicken, 'zu' melden; mehrere Positionen → nie das × (Zeile unklar), nur der Ticket-geprüfte Scan
+        st_v = lesen()
+        if st_v is not None and not offen(st_v):
+            zu_ms = jetzt_ms()
+            melden(lauf, "zu", {"quelle": "slave", "zu_ms": zu_ms, "weg": "schon_zu", "signal_ms": erg["signal_ms"]})
+            lauf.log("Polar: Vor-Klick-Lesung — Position schon zu, kein Klick")
+            erg.update(ok=True, zu_weg="schon_zu", zu_ms=zu_ms, zu_nach_signal_ms=zu_ms - erg["signal_ms"])
+            lauf.phase("zu_bestaetigt", zu_ms=zu_ms, zu_weg="schon_zu")
+            weg = "schon_zu"
+        einzig = bool(st_v) and len(st_v["positionen"]) == 1 and offen(st_v)
+        lauf.log(f"Polar: Vor-Klick-Lesung {int((time.time() - t_sig) * 1000)} ms → {'einzige Position #' + str(ticket) if einzig else ('Position zu' if weg else str(len((st_v or {}).get('positionen') or [])) + ' Positionen — × tabu')}")
+        # 1) EIN Klick aufs geparkte × — nur mit vollem Beweis (x_klick_erlaubt: Profit-Zelle per UIA, Tooltip Schließen/Close, genau
+        #    EINE Position = die eigene, Vor-Klick-Lesung) und nicht pausiert; sonst sofort 2) Rechtsklick-Weg (kein Warten ins Leere)
+        if weg is None and punkt_x and x_klick_erlaubt(zelle, x_tip, einzig) and not ob.is_paused():
             geklickt = bool(ob._klick_absolut(punkt_x[0], punkt_x[1]))
             erg["klick_ms"] = jetzt_ms()
             lauf.phase("x_geklickt", klick_ms=erg["klick_ms"], x_ok=geklickt)
@@ -1242,9 +1430,11 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
         while time.time() < ende and offen(lesen()):
             time.sleep(0.1)
         zu = not offen(lesen())
-        zu_ms = jetzt_ms() if zu else None
+        zu_ms = erg.get("zu_ms") or (jetzt_ms() if zu else None)
         erg.update(ok=zu, zu_weg=(weg or ("scan" if zu else None)), zu_ms=zu_ms, zu_nach_signal_ms=(zu_ms - erg["signal_ms"]) if zu else None)
-        if zu:
+        if zu and weg == "schon_zu":
+            pass                                                         # schon gemeldet
+        elif zu:
             melden(lauf, "zu", {"quelle": "slave", "zu_ms": zu_ms, "weg": erg["zu_weg"], "signal_ms": erg["signal_ms"]})   # Bestätigung ans Railway
             lauf.phase("zu_bestaetigt", zu_ms=zu_ms, zu_weg=erg["zu_weg"], zu_nach_signal_ms=erg["zu_nach_signal_ms"])
         else:
@@ -1264,6 +1454,203 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
     return erg
 
 
+# ── MAUS-TEST × (Finn 20.10.2026 02:45 Dubai: „erst mal ein separater Test, wo es nur darum geht, dass der Mauscursor das X findet") ──
+TEST_PARKEN_S = 10.0
+
+
+def lauf_test_x(seite, cmd):
+    """Trockenlauf: an einer BESTEHENDEN offenen Position das Schließen-× finden, Maus hinfahren, 10 s parken (Finn schaut zu), NIE
+    klicken. Master: Chart-× der Positions-Linie per CDP (sonst Close-Knopf der Positions-Tabelle als Vergleich). Slave: Profit-× der
+    Positionszeile im MT5-Handel-Reiter — Zeile per UIA (Ticket/Symbol), sonst der Zeilen-Anker des letzten SL/TP-Laufs. Beweis ins Log
+    (Tooltip, Rechteck, Abstand zum rechten Rand, Kandidatenzahl) und nach stand_test_<seite>.json."""
+    lauf = Lauf(seite, cmd, test="test_x")
+    res = {"ok": False, "seite": seite, "test": "test_x", "geklickt": False, "gefunden": False}
+    sitz = [None]
+    try:
+        lauf.log(f"Maus-Test × {seite} v{VERSION}: {json.dumps({k: v for k, v in cmd.items() if k != 'geschwister'}, ensure_ascii=False)[:200]}")
+        lauf.phase("suchen")
+        if seite == "master":
+            if ob.augen_modus_lauf() != "cdp":
+                raise RuntimeError("Polar-Master braucht das Puls-Chrome (CDP) auf diesem PC")
+            if ob._handlauf_aktiv():
+                raise RuntimeError("K3-Handlauf läuft im Puls-Chrome")
+            ext = str(cmd.get("ext_id") or "").strip()
+            symbol = str(cmd.get("symbol") or "").strip()
+            root = ob.tv_symbol_root(symbol) if symbol else ""
+            geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(ob._nur_alnum(x)) >= 3][:60]
+            opts = {"kontoTexte": ([ext] if ext else []) + geschwister}
+            s = sitz[0] = ob._cdp_sitzung_holen(cmd, lauf.trail)
+            if ext:
+                ok, code, msg, st, extra = ob._cdp_konto_mit_login(sitz, ext, opts, cmd, lauf.trail, res)
+                s = sitz[0]
+                if not ok:
+                    raise RuntimeError(f"Konto: {msg}")
+            ob._cdp_reiter(s, "positions", lauf.trail)
+            st = s.stand(opts)
+            zeilen = [z for z in (st.get("positionen") or []) if isinstance(z, dict) and z.get("sichtbar") and (not root or ob.tv_symbol_root(str(z.get("symbol") or "")) == root)]
+            res["positionen"] = len(zeilen)
+            lauf.log(f"Positions-Tabelle: {len(zeilen)} sichtbare Zeile(n){' ' + root if root else ''}")
+            d = s.lese_js(CHART_X_JS) or {}
+            kand = d.get("kandidaten") or []
+            im_chart = [k for k in kand if k.get("im_chart")]
+            res.update(kandidaten=len(kand), kandidaten_chart=len(im_chart), tooltips_vorher=d.get("tooltips"))
+            lauf.log(f"Chart-×: {len(kand)} Kandidaten ({len(im_chart)} im Chart): " + "; ".join(f"{k.get('text') or k.get('aria') or k.get('title') or k.get('dn')}@{k.get('rect')}" for k in kand[:8]))
+            x = chart_x_wahl(kand)
+            vw = None
+            try:
+                vw = s.lese_js("innerWidth")
+            except Exception:
+                pass
+            if x is not None:
+                res.update(gefunden=True, art="chart", rect=list(x["rect"]), abstand_rechts=x_abstand_rechts((x["rect"][0] + x["rect"][2], 0), vw) if vw else None)
+                s.hin(x["rect"], "Chart-× der Positions-Linie (Test)")
+                ob._warte(0.5, 0.2)
+                tips = [t for t in (s.lese_js(TOOLTIP_JS) or []) if isinstance(t, str)]
+                res["tooltip"] = next((t for t in tips if RX_CLOSE_TEXT.search(t)), "") or (tips[0] if tips else "")
+                lauf.log(f"GEFUNDEN Chart-× @{x['rect']} · Tooltip '{res['tooltip']}' · Abstand rechter Rand {res['abstand_rechts']} px (innerWidth {vw})")
+            else:
+                lauf.log("Chart-× NICHT eindeutig im DOM (Positions-Linie vermutlich Canvas) — Vergleich: Close-Knopf der Positions-Tabelle")
+                if len(zeilen) == 1:
+                    roh = [z for z in (s.lese_js(ob.K3_ZEILEN_JS) or []) if isinstance(z, dict) and z.get("sichtbar") and (not root or ob.tv_symbol_root(str(z.get("symbol") or "")) == root)]
+                    if len(roh) == 1:
+                        s.hin(roh[0].get("zeile"), "Positions-Zeile (Knöpfe einblenden)")
+                        ob._warte(0.6, 0.3)
+                        roh2 = next((z for z in (s.lese_js(ob.K3_ZEILEN_JS) or []) if isinstance(z, dict) and z.get("zeile") == roh[0].get("zeile")), roh[0])
+                        kn, n = ob.k3_close_knopf(roh2)
+                        res["tabelle_knoepfe"] = n
+                        if kn:
+                            res.update(gefunden=True, art="tabelle", rect=list(ob.cdp_rect(kn)), abstand_rechts=x_abstand_rechts((ob.cdp_rect(kn)[0] + ob.cdp_rect(kn)[2], 0), vw) if vw else None)
+                            s.hin(ob.cdp_rect(kn), "Close-Knopf der Positions-Tabelle (Test)")
+                            lauf.log(f"GEFUNDEN Tabellen-Close '{ob.k3_label(kn)}' @{res['rect']} ({n} Kandidat)")
+            if res["gefunden"]:
+                lauf.phase("geparkt_x", rect=res.get("rect"), art=res.get("art"), tooltip=res.get("tooltip"))
+                ende = time.time() + TEST_PARKEN_S
+                while time.time() < ende:
+                    time.sleep(2.0)
+                    try:
+                        s.hin(res["rect"], "× (parken, Test)")
+                    except Exception:
+                        pass
+                res["ok"] = True
+                res["msg"] = f"× gefunden ({res['art']}) — Maus stand {TEST_PARKEN_S:g} s darauf, nichts geklickt"
+            else:
+                res["msg"] = "× nicht gefunden — nichts bewegt, nichts geklickt"
+        else:
+            cfg_path = os.path.join(HIER, str(cmd.get("config_file") or ""))
+            with open(cfg_path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            path = str(cfg.get("master_terminal_path") or "").strip()
+            expected = int(cfg.get("master_expected_login") or 0)
+            if not path or not os.path.exists(path) or not expected:
+                raise RuntimeError("Config: master_terminal_path/master_expected_login fehlen")
+            import pywinauto  # noqa: F401
+            from pywinauto.timings import Timings
+            Timings.window_find_timeout = 1.0
+            Timings.exists_timeout = 0.3
+            symbol = str(cmd.get("symbol") or "").strip()
+            ticket = cmd.get("ticket")
+            lese = ob._login_dann_lesen(path, expected, trail=lauf.trail, symbol=symbol or None)
+            if "fehler" in lese:
+                raise RuntimeError(lese["fehler"])
+            pos = [p for p in lese["positionen"] if not symbol or str(p.get("symbol") or "").lower() == symbol.lower()]
+            res["positionen"] = len(pos)
+            if ticket:
+                pos = [p for p in pos if str(p.get("ticket")) == str(ticket)]
+            if not pos:
+                raise RuntimeError(f"keine offene Position{' ' + symbol if symbol else ''}{' #' + str(ticket) if ticket else ''} auf Konto {expected}")
+            ticket = pos[0]["ticket"]
+            lauf.log(f"Position #{ticket} {pos[0].get('typ') or ''} {pos[0].get('volumen')} {pos[0].get('symbol')} — {len(lese['positionen'])} offen gesamt")
+            w = ob._finde_terminal(expected)
+            if w is None:
+                raise RuntimeError(f"Kein MT5-Fenster mit Konto {expected}")
+            ob._fenster_betreten(w)
+            hr = w.rectangle()
+            maus_grenze = hr.top + (hr.bottom - hr.top) // 2
+            anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "anker-" + os.path.basename(cfg_path))
+            tab = ob._handel_tab_aktivieren(w, lauf.trail, maus_grenze, anker_pfad=anker_pfad)
+            lauf.log(f"Handel-Reiter: {tab}")
+            # Zeile: zuerst UIA (Ticket im Text), dann der Zeilen-Anker des letzten SL/TP-Laufs
+            uia = []
+            for ct in ("DataItem", "ListItem", "Text"):
+                try:
+                    for el in w.descendants(control_type=ct):
+                        try:
+                            t = el.window_text() or ""
+                            if t and (str(ticket) in t or (symbol and symbol.lower() in t.lower())):
+                                r = el.rectangle()
+                                uia.append({"text": t[:80], "rect": [r.left, r.top, r.right - r.left, r.bottom - r.top], "typ": ct})
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+            res["uia_kandidaten"] = len(uia)
+            zeile = uia_zeile_wahl(uia, symbol, ticket)
+            quelle, zeile_y = None, None
+            if zeile:
+                zeile_y = zeile["rect"][1] + zeile["rect"][3] // 2
+                quelle = f"UIA {zeile.get('typ')} '{zeile.get('text')}'"
+            else:
+                a = ob._anker_lesen(anker_pfad)
+                if a.get("y_off") is not None:
+                    zeile_y = hr.bottom - int(a["y_off"])
+                    quelle = f"Zeilen-Anker (y_off {a['y_off']}, vom letzten SL/TP-Lauf — gilt nur, wenn die Zeile noch dort liegt)"
+            lauf.log(f"Zeile: {quelle or 'NICHT gefunden (UIA zeigt die Liste nicht, kein Anker)'} · UIA-Kandidaten {len(uia)}")
+            # PROFIT-ZELLE (Master-Entscheid 20.10.2026): der scharfe Slave klickt das × nur aus der UIA-Zelle mit Tooltip-Beweis —
+            # genau das zeigt der Test: Zellen-Rect, ×-Punkt, Tooltip. Ohne Zelle nur Vergleichs-Punkt „Fensterrand − 14 px" (NICHT der
+            # Klickpunkt des Bots), damit Finn sieht, wo die alte Rechnung läge.
+            z = slave_profit_zelle(w, ticket, symbol or None)
+            res["uia_elemente"] = z["n"] if z else len(uia)
+            if z:
+                px = z["punkt"]
+                res.update(gefunden=True, art="profit_zelle", punkt=[px[0], px[1]], zelle=list(z["zelle"]["rect"]), zeile=list(z["zeile"]["rect"]),
+                           abstand_rechts=x_abstand_rechts(px, z["zelle"]["rect"][0] + z["zelle"]["rect"][2]), quelle=f"UIA-Zelle '{z['zelle'].get('text')}'",
+                           beweis=f"Profit-Zelle {z['zelle']['rect']} − {ZELLE_X_RAND_PX} px")
+                ob._maus_fahren(px[0], px[1], schritte=6)
+                res["tooltip"] = _tooltip_text(1.5)
+                res["x_bewiesen"] = bool(RX_X_TOOLTIP.search(res["tooltip"]))
+                lauf.log(f"GEFUNDEN Profit-Zelle {z['zelle']['rect']} '{z['zelle'].get('text')}' → × @{px[0]},{px[1]} ({res['abstand_rechts']} px vom Zellenrand) · Tooltip '{res['tooltip'] or '—'}' → {'BEWIESEN (scharf würde klicken)' if res['x_bewiesen'] else 'NICHT bewiesen (scharf: Rechtsklick-Weg)'}")
+                lauf.phase("geparkt_x", punkt=res["punkt"], zelle=res["zelle"], tooltip=res["tooltip"], x_bewiesen=res["x_bewiesen"], quelle=res["quelle"])
+            elif zeile_y is not None and zeile_y >= maus_grenze:
+                px = profit_x_wahl(zeile_y, hr.right)
+                res.update(gefunden=True, art="vergleich_fensterrand", punkt=[px[0], px[1]], abstand_rechts=x_abstand_rechts(px, hr.right), quelle=quelle, beweis=px[2] + " — NUR Vergleich, der Bot klickt hier nie")
+                ob._maus_fahren(px[0], px[1], schritte=6)
+                res["tooltip"] = _tooltip_text(1.5)
+                res["x_bewiesen"] = False
+                lauf.log(f"Profit-Zelle per UIA NICHT lesbar — Vergleichspunkt Fensterrand @{px[0]},{px[1]} · Tooltip '{res['tooltip'] or '—'}' (scharf: Rechtsklick-Weg)")
+                lauf.phase("geparkt_x", punkt=res["punkt"], tooltip=res["tooltip"], x_bewiesen=False, quelle=quelle)
+                ende = time.time() + TEST_PARKEN_S
+                while time.time() < ende:
+                    time.sleep(0.5)
+                    try:
+                        if ob._cursor_pos() != (px[0], px[1]):
+                            ob._maus_fahren(px[0], px[1], schritte=3)
+                    except Exception:
+                        pass
+                res["ok"] = True
+                res["msg"] = (f"× BEWIESEN (Zelle + Tooltip '{res.get('tooltip')}') — Maus stand {TEST_PARKEN_S:g} s darauf, nichts geklickt" if res.get("x_bewiesen")
+                              else f"× NICHT bewiesen ({res.get('art')}, Tooltip '{res.get('tooltip') or '—'}') — scharf nimmt der Slave den Rechtsklick-Weg; nichts geklickt")
+            else:
+                res["msg"] = "Zeile nicht gefunden (UIA zeigt die Liste nicht, kein Anker) — nichts bewegt, nichts geklickt"
+        lauf.phase("fertig" if res["ok"] else "nicht_gefunden", msg=res["msg"], ergebnis=res)
+        lauf.log(res["msg"])
+        return res
+    except Exception as e:
+        res["msg"] = f"{type(e).__name__}: {str(e)[:200]}"
+        lauf.log("ABBRUCH: " + res["msg"])
+        lauf.phase("fehler", msg=res["msg"], ergebnis=res)
+        return res
+    finally:
+        try:
+            if seite == "slave":
+                ob._api_trennen()
+            if sitz[0]:
+                ob._cdp_panel_zurueck(sitz[0], lauf.trail)
+                sitz[0].zu()
+        except Exception:
+            pass
+        res["trail"] = ob._spur(lauf.trail)
+
+
 # ── Start ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def main():
     for _s in (sys.stdout, sys.stderr):
@@ -1271,8 +1658,18 @@ def main():
             _s.reconfigure(errors="replace")
         except Exception:
             pass
+    # test_x master|slave '<json>' (20.10.2026): Maus-Test ×, klickt nie
+    if len(sys.argv) >= 4 and sys.argv[1] == "test_x" and sys.argv[2] in ("master", "slave"):
+        try:
+            cmd = json.loads(sys.argv[3])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "msg": f"Befehl kein gültiges JSON: {e}"}))
+            return 2
+        res = lauf_test_x(sys.argv[2], cmd)
+        print(json.dumps(res, ensure_ascii=False, default=str))
+        return 0 if res.get("ok") else 1
     if len(sys.argv) < 3 or sys.argv[1] not in ("master", "slave"):
-        print(json.dumps({"ok": False, "msg": "Aufruf: polar_bot.py master|slave '<json>'"}))
+        print(json.dumps({"ok": False, "msg": "Aufruf: polar_bot.py master|slave '<json>'  |  polar_bot.py test_x master|slave '<json>'"}))
         return 2
     try:
         cmd = json.loads(sys.argv[2])

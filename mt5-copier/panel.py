@@ -1339,6 +1339,8 @@ def _bot_lauf_aktiv():
     try:
         if polar_panel and polar_panel.aktiv():      # Polar hält die Maus (13.10.2026)
             return True
+        if polar_panel and getattr(polar_panel, "test_aktiv", lambda: False)():   # Maus-Test × parkt die Maus 10 s (20.10.2026, S1-Prüfung)
+            return True
         if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
             return True
         return time.time() - os.path.getmtime(os.path.join(HERE, "puls_handlauf.lock")) < 900
@@ -1851,6 +1853,8 @@ def _browser_und_mt5_frei(tv_eigen=False):
     tv_eigen=True: TV_ORDER_LOCK hält der Aufrufer selbst."""
     try:
         if polar_panel and polar_panel.aktiv():   # POLAR-VORRANG (20.10.2026): nie Strg+F5/Tab öffnen, solange Polar den PC hält
+            return False
+        if polar_panel and getattr(polar_panel, "test_aktiv", lambda: False)():   # Maus-Test × (20.10.2026): nicht in die geparkte Maus fahren
             return False
         if not tv_eigen and TV_ORDER_LOCK.locked():
             return False
@@ -3187,7 +3191,7 @@ class Handler(BaseHTTPRequestHandler):
         elif polar_panel and polar_panel.gesperrt(u.path):
             return self._send(409, json.dumps({"ok": False, "retry_ok": True, "code": "puls_beschaeftigt", "gesendet": False,
                                                "msg": "Polar läuft auf diesem PC — kein anderer Puls-Weg, bis der Polar-Trade zu ist."}, ensure_ascii=False))
-        if polar_panel and u.path in ("/api/polar-start", "/api/polar-abbruch"):
+        if polar_panel and u.path in ("/api/polar-start", "/api/polar-abbruch", "/api/polar-test-x"):   # polar-test-x: Maus-Test × (20.10.2026)
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}

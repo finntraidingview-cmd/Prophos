@@ -8958,6 +8958,15 @@
         </div>
         <!-- Manuell (16.10.2026, Finn: „jetzt manuell, später automatisch"): kein Bot klickt — „Speichern & starten" legt den Trade als
              laufend an (du platzierst beide Seiten selbst), „Nur speichern" lässt ihn unter Geplant; beendet wird über „Erledigt" in Trades -->
+        <!-- Maus-Test × (Finn 20.10.2026 02:45: „erst mal ein separater Test, wo es nur darum geht, dass der Mauscursor das X findet"):
+             Panel POST /api/polar-test-x → polar_bot.py test_x — findet das Schließen-× einer bestehenden Position, parkt die Maus 10 s,
+             klickt NIE. Nur Admin-Sicht, nur am PC mit Panel; Ergebnis aus stand_test_<seite>.json (GET /api/polar-stand test{}) -->
+        <div class="modal-foot" id="polarTestX" hidden style="justify-content:center;gap:8px;border-top:0;padding-top:0">
+          <span style="font-size:11.5px;color:var(--sub)" title="Zum Hinfinden klickt der Bot vorher nur Navigation (Konto-Umschalter, Reiter Positions bzw. Handel-Reiter) — nie das ×, nie eine Order">Maus-Test × (klickt das × nie, parkt 10 s · wechselt vorher ins Konto/den Reiter):</span>
+          <button class="btn btn-ghost" data-polar-test="master" title="Master-PC: im Puls-Chrome ins gewählte Konto wechseln (Konto-Umschalter, ggf. Login), Reiter Positions, dann das Chart-× der Positions-Linie finden und die Maus darauf parken — das × wird nie geklickt">Master</button>
+          <button class="btn btn-ghost" data-polar-test="slave" title="Slave-PC: MT5 des Logins öffnen, Handel-Reiter anklicken, dann die Profit-Zelle der Positionszeile per UIA lesen und die Maus auf das × parken (Tooltip = Beweis) — das × wird nie geklickt">Slave</button>
+          <span id="polarTestMsg" style="font-size:11.5px;color:var(--sub);flex-basis:100%;text-align:center"></span>
+        </div>
         <div class="modal-foot" style="justify-content:center">
           <button class="btn btn-ghost" id="polarNurSpeichern" title="Plan unter Geplant speichern — „Läuft" setzt du später in Trades">Nur speichern</button>
           <button class="btn btn-primary" id="polarStart" style="min-width:220px" title="Trade speichern und als laufend markieren — beide Seiten platzierst du selbst, kein Bot klickt">Speichern &amp; starten →</button>
@@ -44712,7 +44721,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1637'
+  const OS_TAB_BUILD = '2026-09-22.1638'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54108,6 +54117,7 @@
     ;['polarStart', 'polarNurSpeichern'].forEach(id => { const k = polarEl(id); if(k) k.disabled = false })   // nach Erfolg gesperrt (16.10.2026)
     polarEl('polarMsg').textContent = 'Lade Konten aller IDs…'
     polarEl('polarModal').classList.add('open')
+    try{ polarTestXSichtbar(); const m = polarEl('polarTestMsg'); if(m) m.textContent = '' }catch(_){}   // Maus-Test × nur Admin + PC (20.10.2026)
     const hinweis = await polarKontenLaden()
     polarKontoOptionen(polarEl('pol-fu-konto'), 'funded')
     polarKontoOptionen(polarEl('pol-cfd-konto'), 'funded_cfd')
@@ -54128,6 +54138,57 @@
     polarRechnen()
   }))
   window._polarOeffnen = polarOeffnen   // Test-Haken (Stub)
+  /* MAUS-TEST × (Finn 20.10.2026 02:45 Dubai): eigener Trockenlauf vor dem ersten scharfen Close — „Mit dem zum X Hinfahren gibt es
+   * vielleicht noch Probleme". Knopf je Seite im Polar-Popup (nur Admin-Sicht, nur am PC mit Panel): Panel POST /api/polar-test-x
+   * {seite, …} → polar_bot.py test_x <seite>. Master braucht das gewählte Funded-Futures-Konto (External ID + Symbol), Slave die
+   * MT5-Instanz des gewählten CFD-Kontos (config_file wie beim polar_slave-Signal). Der Bot klickt nie; die Ergebnis-Zeile liest 16 s
+   * lang GET /api/polar-stand test{seite} (Phase, Beweis, Tooltip). Eigene Verdrahtung, kein Sammel-Handler. */
+  function polarTestXSichtbar(){
+    const box = polarEl('polarTestX'); if(!box) return
+    const admin = typeof apdAdmin === 'function' ? apdAdmin() : (_ap && _ap.admin === true)
+    box.hidden = !(admin && MT5_LOCAL && typeof window.mtcApi === 'function')
+  }
+  async function polarTestX(seite){
+    const msg = polarEl('polarTestMsg'); if(!msg) return
+    const sym = polarEl('pol-sym')?.querySelector('button.active'), symbol = sym && Number(sym.dataset.ppl) === 2 ? 'MNQ' : 'NQ'
+    let body = { seite }
+    if(seite === 'master'){
+      const k = polarKonto('pol-fu-konto'), acc = k ? (accounts || []).find(a => String(a.id) === String(k.id)) : null
+      const ext = String((acc && acc.externalId) || (k && k.ext) || '').trim()
+      if(!acc || !ext){ msg.textContent = 'Master: ein Funded-Futures-Konto DIESER ID mit External ID wählen (der Test läuft am Master-PC).'; return }
+      let kx = {}; try{ kx = (typeof tvV2KontoKontext === 'function' && tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm, masterName: acc.name })) || {} }catch(_){}
+      body = { seite, ext_id: ext, symbol, tv_username: kx.tv_username || '', firma: kx.firma || acc.firm || '', geschwister: kx.geschwister || [] }
+    } else {
+      // Instanz wie beim polar_slave-Signal: MT5-Login des Kontos → Echo-Instanz dieses Panels (config_file), Symbol aus dem Firmen-Preset
+      const k = polarKonto('pol-cfd-konto')
+      const lg = k ? String((typeof mt5LoginForAccount === 'function' && mt5LoginForAccount(k.id)) || '').trim() : ''
+      let inst = null
+      if(lg){ try{ const dd = await window.mtcApi('instances', { timeoutMs: 6000 }); inst = (dd && dd.instances || []).find(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg) || null }catch(_){} }
+      if(!inst || !inst.config_file){ msg.textContent = lg ? `Slave: keine Echo-Instanz mit Login ${lg} an diesem Panel — der Test läuft am Slave-PC.` : 'Slave: ein Funded-CFD-Konto DIESER ID mit MT5-Login wählen (Echo-Instanz) — der Test läuft am Slave-PC.'; return }
+      const specP = (typeof FIRM_PRESETS !== 'undefined' && typeof firmToPreset === 'function') ? (FIRM_PRESETS[firmToPreset(String(k.firm || ''))] || {}) : {}
+      body = { seite, config_file: inst.config_file, symbol: specP.symbol || 'NAS100' }
+    }
+    msg.textContent = `Maus-Test ${seite} startet … (wechselt vorher ins Konto/den Reiter, klickt das × nie)`
+    polarEl('polarTestX').querySelectorAll('button').forEach(b => b.disabled = true)
+    try{
+      const r = await window.mtcApi('polar-test-x', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 15000 })
+      if(!r || !r.ok){ msg.textContent = '⛔ ' + ((r && r.msg) || (r && r.error) || 'Panel nicht erreichbar'); return }
+      const t0 = Date.now()
+      while(Date.now() - t0 < 16000){
+        await new Promise(res => setTimeout(res, 2000))
+        const st = await window.mtcApi('polar-stand', { timeoutMs: 4000 })
+        const t = st && st.test && st.test[seite]
+        if(t && t.pid === r.pid){
+          const e = t.ergebnis || {}
+          msg.textContent = `${t.phase}${e.art ? ' · ' + e.art : ''}${e.rect ? ' @' + e.rect.join(',') : e.punkt ? ' @' + e.punkt.join(',') : ''}${e.tooltip ? ' · Tooltip „' + e.tooltip + '"' : ''}${e.abstand_rechts != null ? ' · ' + e.abstand_rechts + ' px vom rechten Rand' : ''}${t.msg ? ' — ' + t.msg : ''}`
+          if(t.phase === 'fertig' || t.phase === 'fehler' || t.phase === 'nicht_gefunden') break
+        } else if(t && t.phase){ msg.textContent = `${t.phase} …` }
+      }
+    }catch(e){ msg.textContent = '⛔ ' + ((e && e.message) || e) }
+    finally{ polarEl('polarTestX').querySelectorAll('button').forEach(b => b.disabled = false) }
+  }
+  polarEl('polarTestX')?.querySelectorAll('[data-polar-test]').forEach(b => b.addEventListener('click', () => polarTestX(b.dataset.polarTest)))
+  window._polarTestX = polarTestX   // Test-Haken (Stub)
   /* POLAR STARTEN (13.10.2026, Finn): Knopf legt den Plan über Railway POST /polar/plan im Namen der Master-ID an (start_um = jetzt);
    * der Start-Wächter am Master-PC (tpStartUmTick) ruft dann polarStartenAmPc: Railway /polar/start (Lauf + Auftrag an die Slave-ID als
    * order_signale polar_slave) → lokales Panel /api/polar-start startet polar_bot.py master. Der Slave-PC nimmt sein Signal im

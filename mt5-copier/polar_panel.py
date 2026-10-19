@@ -4,6 +4,10 @@ Datei-Verteilung); Start, Zustand und Sperre stehen hier. Der alte Puls (order_b
   POST /api/polar-start   {seite: master|slave, lauf_id, plan_id, …Auftrag}  → startet polar_bot.py als LANGLEBIGEN Prozess (Popen)
   GET  /api/polar-stand   [?lauf_id=]                                        → Zustand (stand_<seite>.json des Laufs, Prozess lebt?)
   POST /api/polar-abbruch {lauf_id}                                          → abbruch.json (wirkt nur VOR der Feuerzeit)
+  POST /api/polar-test-x  {seite: master|slave, …Befehl}                     → Maus-Test ×: polar_bot.py test_x <seite> — findet das
+                 Schließen-× einer BESTEHENDEN Position, parkt die Maus 10 s, KLICKT NIE (Finn 20.10.2026 02:45: „erst mal ein separater
+                 Test, wo es nur darum geht, dass der Mauscursor das X findet"); Ergebnis in polar/stand_test_<seite>.json + test_x_<seite>.log,
+                 GET /api/polar-stand liefert es unter test{}. Riegel wie polar-start (409, wenn Polar oder ein Puls-Lauf die Maus hält).
 
 PRIORITÄT 1 (Finn: „wenn Polar läuft, darf kein anderer Puls-Bot oder irgendwas diesen PC bedienen — beide PCs nicht anfassen"):
 solange polar_aktiv.json auf einen lebenden Prozess zeigt, antwortet das Panel auf JEDE andere POST-Route mit 409 polar_aktiv
@@ -19,6 +23,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLAR_ORDNER = os.path.join(HERE, "polar")
 FLAG = os.path.join(HERE, "polar_aktiv.json")
+TEST_FLAG = os.path.join(HERE, "polar_test.json")      # Maus-Test × (20.10.2026): eigener Merker, sperrt NICHT den PC (kein polar_aktiv)
 BOT = os.path.join(HERE, "polar_bot.py")
 PROZESSE = {}            # lauf_id → Popen (nur die von DIESEM Panel-Prozess gestarteten)
 _LOCK = threading.Lock()
@@ -103,6 +108,18 @@ def sperre_antwort(pfad):
                  "msg": f"Polar läuft auf diesem PC (Lauf {lid[:8] or '?'}, {f.get('seite') or '?'}) — kein anderer Weg, bis der Polar-Trade zu ist."}
 
 
+def test_aktiv():
+    """Läuft gerade ein Maus-Test × auf diesem PC? (polar_test.json + lebender Prozess)"""
+    f = _lesen(TEST_FLAG)
+    if isinstance(f, dict) and _prozess_lebt(f.get("pid")):
+        return True
+    try:
+        os.remove(TEST_FLAG)
+    except OSError:
+        pass
+    return False
+
+
 def stand(lauf_id=None):
     f = _lesen(FLAG) or {}
     lid = lauf_id or f.get("lauf_id")
@@ -113,7 +130,52 @@ def stand(lauf_id=None):
             s = _lesen(os.path.join(ordner, f"stand_{seite}.json"))
             if s:
                 out["stand"] = s
+    # Maus-Test × (20.10.2026): letzter Stand je Seite + läuft er noch (der Tab zeigt die Ergebnis-Zeile im Polar-Popup)
+    out["test"] = {"aktiv": test_aktiv(), "flag": _lesen(TEST_FLAG) or {},
+                   **{seite: _lesen(os.path.join(POLAR_ORDNER, f"stand_test_{seite}.json")) for seite in ("master", "slave")}}
     return out
+
+
+def start_test(body, beschaeftigt=False):
+    """Maus-Test × (20.10.2026): polar_bot.py test_x <seite> <json> als Popen — nur, wenn weder Polar noch ein Puls-Lauf die Maus hält
+    und kein Test läuft. Der Bot klickt nie; er parkt die Maus 10 s auf dem gefundenen × und schreibt stand_test_<seite>.json."""
+    seite = str(body.get("seite") or "")
+    if seite not in ("master", "slave"):
+        return 400, {"ok": False, "msg": "seite (master|slave) fehlt"}
+    if not os.path.exists(BOT):
+        return 503, {"ok": False, "retry_ok": True, "code": "polar_bot_fehlt", "msg": "polar_bot.py liegt noch nicht auf diesem PC — das Panel holt ihn beim nächsten Takt."}
+    with _LOCK:
+        if aktiv():
+            f = _lesen(FLAG) or {}
+            return 409, {"ok": False, "retry_ok": True, "code": "polar_aktiv", "msg": f"Polar läuft auf diesem PC (Lauf {str(f.get('lauf_id'))[:8]}) — kein Maus-Test."}
+        if beschaeftigt:
+            return 409, {"ok": False, "retry_ok": True, "code": "puls_beschaeftigt", "msg": "Ein Puls-Lauf hält gerade die Maus — Maus-Test später."}
+        if test_aktiv():
+            return 409, {"ok": False, "retry_ok": True, "code": "test_laeuft", "msg": "Ein Maus-Test läuft noch (10 s) — gleich nochmal."}
+        os.makedirs(POLAR_ORDNER, exist_ok=True)
+        cmd = {k: v for k, v in body.items() if k != "seite"}
+        log = open(os.path.join(POLAR_ORDNER, f"test_x_{seite}_prozess.log"), "ab")
+        try:
+            p = subprocess.Popen([sys.executable, BOT, "test_x", seite, json.dumps(cmd, ensure_ascii=False)], stdout=log, stderr=subprocess.STDOUT, cwd=HERE)
+        except Exception as e:
+            log.close()
+            return 500, {"ok": False, "retry_ok": True, "msg": f"Maus-Test nicht gestartet: {type(e).__name__}: {e}"}
+        _schreiben(TEST_FLAG, {"seite": seite, "pid": p.pid, "at": time.time()})
+
+    def _aufraeumen():
+        p.wait()
+        log.close()
+        with _LOCK:
+            f = _lesen(TEST_FLAG) or {}
+            if f.get("pid") == p.pid:
+                try:
+                    os.remove(TEST_FLAG)
+                except OSError:
+                    pass
+        print(f"[polar] Maus-Test × {seite} beendet (Exit {p.returncode})", flush=True)
+    threading.Thread(target=_aufraeumen, daemon=True).start()
+    print(f"[polar] ▶ Maus-Test × {seite} gestartet (PID {p.pid})", flush=True)
+    return 200, {"ok": True, "pid": p.pid, "seite": seite, "test": True}
 
 
 def start(body, beschaeftigt=False):
@@ -185,6 +247,8 @@ def behandle_post(pfad, body, beschaeftigt=False):
         return start(body, beschaeftigt)
     if pfad == "/api/polar-abbruch":
         return abbruch(body)
+    if pfad == "/api/polar-test-x":
+        return start_test(body, beschaeftigt)
     return None
 
 

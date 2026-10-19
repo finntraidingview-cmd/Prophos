@@ -2,7 +2,7 @@
 """Selbsttest: POLAR SCHLIESSEN PER × (20.10.2026, Finn: „egal wer zuerst zu ist, der andere schließt in 1–2 s — einfach auf das X").
 Rein rechnend: polar_app.zu_eintragen/warte_zu_fertig/zu_erste_seite (erste zu-Meldung gewinnt, zweite = Bestätigung, Warten nur auf
 die ANDERE Seite) und polar_bot.profit_x_wahl (nie die × neben S/L, T/P) / chart_x_wahl (genau ein Chart-×) / schliess_urteil /
-zu_signal_urteil. Aufruf: python3 tools/selftest_polar_close.py"""
+zu_signal_urteil; Maus-Test × (20.10.2026): uia_zeile_wahl / x_abstand_rechts. Aufruf: python3 tools/selftest_polar_close.py"""
 import os
 import re
 import sys
@@ -100,6 +100,27 @@ def main():
          "master_zu_ms": 5000, "slave_zu_ms": 3800}
     e = abr(z)
     check(e["verzug_ms"] == -1200 and e["slave_zu_weg"] == "x" and e["master_pl"] == 50 and e["slave_pl"] == -40, f"Slave 1,2 s vor dem Master: verzug −1200, Wege/P&L unverändert ({e['verzug_ms']})")
+    print("9) Maus-Test × — uia_zeile_wahl / x_abstand_rechts")
+    uz, xa = pb.uia_zeile_wahl, pb.x_abstand_rechts
+    zl = [{"text": "12345 2026.10.20 buy 0.50 NAS100", "rect": [10, 700, 900, 18], "typ": "DataItem"}, {"text": "12346 sell 0.50 NAS100", "rect": [10, 718, 900, 18]}]
+    check(uz(zl, "NAS100", 12346)["rect"][1] == 718, "Ticket 12346 → genau diese Zeile")
+    check(uz(zl, "NAS100", 1234) is None and uz(zl, "NAS100", 99999) is None, "Ticket als Teilzahl / unbekannt → None")
+    check(uz(zl, "nas100")["rect"][1] == 700 and uz(zl, "XAUUSD") is None, "ohne Ticket: erste Zeile des Symbols, fremdes Symbol → None")
+    check(uz(zl + [dict(zl[1])], "NAS100", 12346) is None, "zwei Zeilen mit demselben Ticket → None (nie raten)")
+    check(xa((1186, 700), 1200) == 14 and xa((1300, 0), 1200) == -100 and xa(None, 1200) is None, "Abstand zum rechten Rand, außerhalb negativ, unlesbar None")
+    print("10) Slave-× nur aus der Profit-Zelle mit Tooltip-Beweis (Master-Entscheid 20.10.2026)")
+    pz, xk, upz = pb.profit_x_aus_zelle, pb.x_klick_erlaubt, pb.uia_profit_zelle
+    zelle = [760, 700, 140, 18]
+    check(pz(zelle) == (890, 709), f"Zelle 760..900 → × bei 890 (−10 px), Zeilenmitte 709 ({pz(zelle)})")
+    check(pz([760, 700, 12, 18]) is None and pz([760, 700, 140, 4]) is None and pz(None) is None, "zu schmal / zu flach / keine Zelle → None")
+    check(xk(zelle, "Close #12345 buy 0.50", True) is True and xk(zelle, "Position schließen", True) is True, "Zelle + Tooltip Close/Schließen + einzige Position → Klick erlaubt")
+    check(xk(zelle, "", True) is False and xk(zelle, "Take Profit", True) is False, "OHNE passenden Tooltip → kein Klick (Rückfall Rechtsklick)")
+    check(xk(None, "Close", True) is False and xk(zelle, "Close", False) is False, "ohne Zelle / mehrere Positionen → kein Klick")
+    zl = [760, 700, 900, 18]
+    cells = [{"text": "12345", "rect": [10, 700, 80, 18]}, {"text": "S/L 1.0", "rect": [400, 700, 120, 18]}, {"text": "T/P 2.0", "rect": [520, 700, 120, 18]},
+             {"text": "107.07", "rect": [760, 700, 140, 18]}, {"text": "andere Zeile", "rect": [760, 718, 140, 18]}, {"text": "Kopf Profit", "rect": [760, 640, 140, 22]}]
+    check(upz(cells, zl)["text"] == "107.07", "Profit-Zelle = rechteste Zelle im Zeilenband (nicht die Nachbarzeile, nicht der Spaltenkopf)")
+    check(upz([c for c in cells if c["text"] in ("andere Zeile", "Kopf Profit")], zl) is None, "keine Zelle im Band → None")
     print()
     if FEHLER:
         print(f"FEHLER: {len(FEHLER)}")
