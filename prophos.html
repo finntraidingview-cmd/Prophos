@@ -4043,6 +4043,7 @@
   #dashboard-view .wdl-tab-sek-geblowt{--wdl-sek:#b91c1c}
   #dashboard-view .wdl-tab-sek-geparkt{--wdl-sek:#d97706}
   #dashboard-view .wdl-tab-sek-tage{--wdl-sek:#B45309}   /* Tage farmen (13.10.2026): amber wie der Status „Tage sammeln" */
+  #dashboard-view .wdl-tab-sek-rvh{--wdl-sek:#B45309}    /* Rest von Hand (20.10.2026): amber — ein paar Dollar fehlen noch bis zum Ziel */
   /* ÜBERGRUPPEN DEUTLICH (Finn 12.10.2026 am Radar .1458: „sieht alles so ein bisschen gleich aus — man erkennt nicht, wo es läuft,
      wo es wartet"): die 3-px-Oberkante ging neben den Modell-Rändern unter. Jetzt je Abschnitt ein 5-px-Band links in der Akzentfarbe,
      ein kräftig getönter Kopf mit farbigem Etikett (Punkt + Titel in der Akzentfarbe, größer) und 28 px Luft zwischen den Abschnitten.
@@ -4107,6 +4108,11 @@
   #dashboard-view .wdl-z-bst .wdl-z-pl.wdl-bst-ok{color:#15803d} #dashboard-view .wdl-z-bst .wdl-z-pl.wdl-bst-warte{color:#B45309;font-weight:600}
   #dashboard-view .wdl-z-bst .wdl-z-zeit{display:flex;justify-content:flex-end}
   #dashboard-view .wdl-z-bst .wdl-z-pl .type-badge{margin-left:0;font-size:11.5px}   /* Station-Chip (13.10.2026) */
+  /* Rest von Hand (20.10.2026): Chip „fehlen noch 84 $ → Rest von Hand" + zwei Knöpfe passen nicht in Status 126 px + Zeit 110 px —
+     Status über die letzten zwei Spalten, die Knöpfe darunter (gleiche Idee wie .wdl-z-akt:has(.wdl-bestanden)) */
+  #dashboard-view .wdl-tab-konto .wdl-z-rvh{grid-template-areas:"wer ri mi konto pl pl" "wer ri mi zeit zeit zeit";row-gap:5px}   /* Knöpfe über Tage+Status+Zeit (344 px), sonst bricht „Balance lesen" um */
+  #dashboard-view .wdl-z-rvh .wdl-z-zeit{flex-wrap:wrap;gap:4px;justify-content:flex-end}
+  #dashboard-view .wdl-z-rvh .el-knopf{flex:none;min-height:0;height:auto;padding:3px 10px;font-size:11px;font-weight:500;line-height:1.5;border-radius:6px}   /* Knopfmaße fest wie .wdl-z-akt (Handy-.btn hat min-height 39–46 px) */
   #dashboard-view .wdl-bst-mini{display:block;font-size:10.5px;font-weight:400;color:var(--sub);margin-top:2px}
   #dashboard-view .wdl-z-akt .acc-ziel-chip{font-size:11px;padding:1px 7px;vertical-align:middle}
   #dashboard-view .wdl-z-akt > span:has(> .acc-ziel-chip){white-space:normal;overflow:visible;line-height:1.9}
@@ -4253,6 +4259,7 @@
     #dashboard-view .wdl-tab{border:none;border-radius:var(--m-r-card,16px);box-shadow:var(--shadow-mob-card,0 1px 2px rgba(16,24,40,.05))}
     #dashboard-view .wdl-z, #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;grid-template-areas:"wer wer wer pl" "ri mi mi zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
     #dashboard-view .wdl-z-konto{display:none}   /* Handy: kein Platz — Ergebnis-Wort zeigt den Blow */
+    #dashboard-view .wdl-tab-konto .wdl-z-rvh{grid-template-areas:"wer wer wer wer" "ri mi mi mi" "pl pl pl pl" "zeit zeit zeit zeit"}   /* Rest von Hand (20.10.2026): Chip + Knöpfe je eigene Zeile */
     #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:14px}
     #dashboard-view .wdl-z > .wdl-sp{gap:6px;padding:0 4px}
     #dashboard-view .wdl-sp small i:not(:only-child){display:none}   /* Handy: nur der Betrag, das Label nur ohne Betrag */
@@ -31455,13 +31462,65 @@
     // ‚Tage sammeln' und ‚Review'"): in der Übergruppe „Bestanden" je Schritt ein eigener Kasten — Trade abhaken (bestandener Trade, Zeilen
     // wie in Überprüfen) · Tage sammeln (Ziel erreicht, Mindesttage fehlen) · Review (Ziel + Tage voll, bis der Nachfolger angelegt ist).
     // Gleiche Namen wie der Typ-Chip in Accounts/Planer (accZielChipHtml). Ein Konto steht nie doppelt (bstZeilen erst nach dem Abhaken).
-    const bestanden = (bestTr, bestAlle, revTr) => {
+    /* REST VON HAND (Finn 20.10.2026 22:20 Dubai, Trades → Überprüfen zeigte „fehlen noch 84 $ → Rest von Hand" am Lucid-Konto: „Mach das so,
+     * dass bei dieser Meldung im Radar unter ‚Bestanden' eine eigene Station ist … genau solche Accounts da reinpacken, und ein Schalter:
+     * ‚Der ist jetzt bestanden, ich lege den Nachfolger an'"). Vierte Station zwischen Trade abhaken und Tage sammeln: je Konto EINE Zeile,
+     * sobald die jüngste beendete/abgehakte Radar-Zeile des Kontos wdlFehltChip trägt (Balance unter Ziel, Rest < 500 $) und das Konto noch
+     * keinen Ziel-Tag hat (sonst steht es in Tage sammeln/Review). Balance = die jüngste bekannte (Konto-Balance nach dem Trade vor der
+     * Trade-Balance, wdlBlowStand), damit die Zeile nach „Balance lesen" von selbst verschwindet, sobald das Ziel steht (Ziel-Wache taggt,
+     * Konto → Review). Knöpfe (eigene Verdrahtung am #wdl-liste-Handler): „Jetzt bestanden → Nachfolger" (nur eigene Konten — der Assistent
+     * legt nur im eigenen Login an) und „Balance lesen" (eigene: accBalanceLesen, fremde: tplBalanceFremd wie in „Braucht dich"). Nur Zustand + Knopf. */
+    const rvhZeilen = (tr) => {
+      const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+      const ich = String(currentUserId || ''), de = v => Math.round(Number(v)).toLocaleString('de-DE')
+      const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || x
+      let arch = {}; try{ arch = getArchive() || {} }catch(_){}
+      const je = new Map()
+      for(const t of tr || []){
+        if(!t || !(t.status === 'review' || t.status === 'completed') || t.tage_mini) continue
+        const key = wdlUid(t) + '|' + String(t.konto_id || String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4))
+        const ende = Date.parse(t.ended_at || t.completed_at || '') || 0
+        const alt = je.get(key); if(!alt || ende > alt.ende) je.set(key, { t, ende })
+      }
+      const out = []
+      for(const { t } of je.values()){
+        if(wdl.person && wdlUid(t) !== wdl.person) continue
+        const chip = wdlFehltChip(t); if(!chip) continue
+        const kid = String(t.konto_id || ''), uid = wdlUid(t), eigen = uid === ich
+        const a = eigen && kid ? (accounts || []).find(x => x && String(x.id) === kid) : null
+        if(a && (a.zielErreichtAt || (arch[String(a.id)] && arch[String(a.id)].archived))) continue
+        const k = t.konto || {}, typ = String(t.konto_typ || (a && a.type) || ''), ueb = WDL_UEBERGANG[typ] || (typ ? typW(typ) : '')
+        const ziel = n(t.ziel_usd), bal = (wdlBlowStand(t) || {}).bal, zr = zielRest(bal, ziel) || { rest: null }
+        const gr = n(k.groesse) || 0
+        const konto = `${k.firma || (a && a.firm) || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
+        let tf = null; try{ tf = a && typeof zielFortschritt === 'function' ? zielFortschritt(a) : null }catch(_){ tf = null }
+        const mt = tf && tf.kind === 'trading_days' ? tf : null
+        const wer = String(t.person || (eigen ? ((typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich') : '?'))
+        const knopf = a
+          ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-best="${escapeHtml(kid)}" data-wdl-rvh-ziel="${ziel != null ? ziel : ''}" data-wdl-rvh-balw="${bal != null ? bal : ''}" title="Konto von Hand als bestanden markieren (Ziel-Tag wie die Ziel-Wache, Balance ${bal != null ? de(bal) : '–'}) und gleich den Nachfolger anlegen${zr.rest != null ? ` — es fehlen laut Prophos noch ${de(zr.rest)} $` : ''}">Jetzt bestanden → Nachfolger</button>`
+            + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}" title="Balance jetzt lesen (PC dieser ID) — steht sie über dem Ziel, taggt die Ziel-Wache das Konto und es wandert nach Review">Balance lesen</button>`
+          : `${kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" title="Balance über den PC von ${escapeHtml(wer)} lesen lassen">Balance lesen</button>` : ''}`
+            + `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(wer)} stellt um">im Login von ${escapeHtml(wer)}</span>`
+        out.push({ firma: String(k.firma || ''), html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
+          + `<span class="wdl-z-wer" title="${escapeHtml(String(k.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(wer)}</b><small>${escapeHtml(konto)}</small></span>`
+          + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
+          + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel != null ? ` → <b class="wdl-bst-ziel">${de(ziel)}</b>` : ''}`, { tip: `Balance → Ziel${zr.rest != null ? ` · es fehlen ${de(zr.rest)} $` : ''}` })
+          + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (a ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
+          + `<span class="wdl-z-pl wdl-bst-warte" title="Noch nicht bestanden — den Rest von Hand holen, dann Balance lesen; oder „Jetzt bestanden" drücken">${chip}</span>`
+          + `<span class="wdl-z-zeit">${knopf}</span>`
+          + '</div>' })
+      }
+      return out.sort((x, y) => x.firma.localeCompare(y.firma, 'de'))
+    }
+    const bestanden = (bestTr, bestAlle, revTr, alleTr) => {
       // revTr (.1514): Trades „→ Review" (früher Geparkt) — Zeile wie in Abhaken, im selben Kasten über den Konten mit Nachfolger-Knopf
       const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, html: zeile(t, '') }))
+      let rvh = []; try{ rvh = rvhZeilen(alleTr) }catch(e){ console.warn('[radar] Rest von Hand', (e && e.message) || e); rvh = [] }
       const kaesten = gruppe('Trade abhaken', nachEnde(bestTr || []), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-bestanden', null, bestAlle || [])
+        + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. Den Rest von Hand holen und die Balance lesen, oder das Konto von Hand als bestanden markieren und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage')
         + bstTab([...rev, ...zz.filter(z => !z.fehlt)], 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
-      return { html: kaesten, n: (bestTr || []).length + zz.length + rev.length }
+      return { html: kaesten, n: (bestTr || []).length + rvh.length + zz.length + rev.length }
     }
     const manuell = (g, a) => {
       if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
@@ -31529,10 +31588,10 @@
         + gruppe('Wartet auf Balance', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
         + gruppe('Geblowt · archivieren', nachEnde(blow), kopf4, 'wdl-tab-konto wdl-tab-sek-geblowt', null, blowA)
         + manuell(g, a)
-      const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep))
+      const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep), [...g.pr, ...g.er])   // Rest von Hand (20.10.2026): beendete + abgehakte Zeilen
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
         + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
-        + og3('Bestanden', best.n, 'Trade abhaken → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
+        + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
         + verlaufOg(a.er)
     }
     // Wischstand der Chip-Reihen (Handy) über den Neuaufbau retten — die Liste wird im Lade-Takt komplett neu gezeichnet
@@ -31547,6 +31606,17 @@
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
+    // REST VON HAND (20.10.2026): „Jetzt bestanden → Nachfolger" (Ziel-Tag von Hand + Assistent) und „Balance lesen" (eigene/fremde Konten)
+    const rb = ev.target.closest('[data-wdl-rvh-best]')
+    if(rb){ rvhJetztBestanden(rb.getAttribute('data-wdl-rvh-best'), rb.getAttribute('data-wdl-rvh-ziel'), rb.getAttribute('data-wdl-rvh-balw')); return }
+    const rl = ev.target.closest('[data-wdl-rvh-bal]')
+    if(rl){
+      const d = rl.dataset
+      if(d.wdlRvhUid && String(d.wdlRvhUid) !== String(currentUserId || '')){ if(typeof tplBalanceFremd === 'function') tplBalanceFremd(d.wdlRvhBal, d.wdlRvhUid, d.wdlRvhWer || '').catch(err => console.warn('[radar] Balance fremd', err)) }
+      else if(typeof accBalanceLesen === 'function') accBalanceLesen(d.wdlRvhBal, '')
+      if(typeof atToast === 'function') atToast('↻ Balance wird gelesen — steht sie über dem Ziel, taggt die Ziel-Wache das Konto (≤ 5 min) und es wandert nach Review', 'start')
+      return
+    }
     // Ziel erreicht → „Nächste Phase →" (08.10.2026, aus dem früheren Kasten „Zu tun"): vorhandener Nachfolger-Assistent
     const zn = ev.target.closest('[data-wdl-nachfolger]')
     if(zn){ if(typeof openSuccessorWizard === 'function') openSuccessorWizard(zn.getAttribute('data-wdl-nachfolger')); return }
@@ -41057,6 +41127,29 @@
     const miniUhr = mini && mini.startUm ? new Date(mini.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : ''
     return { bal, ziel, mt, fehlt, mini, miniUhr }
   }
+  /* JETZT BESTANDEN → NACHFOLGER (Finn 20.10.2026 22:20 Dubai: „ein Schalter: ‚Der ist jetzt bestanden, ich lege den Nachfolger an'"):
+   * eigenes Konto aus der Radar-Station „Rest von Hand" von Hand als Ziel erreicht markieren — dieselben Felder wie die Ziel-Wache
+   * (ziel_erreicht_at/_bal/ziel_usd; es gibt keine Quellen-Spalte, der Zeitpunkt ist der Beleg) — und sofort den bestehenden
+   * Nachfolger-Assistenten mit dem nächsten Kontotyp öffnen (derselbe Weg wie der Review-Knopf). Bricht Finn den Assistenten ab, kann die
+   * Ziel-Wache (5-min-Takt, Balance < Ziel) den Tag wieder lösen — dann steht das Konto ehrlich wieder in „Rest von Hand". */
+  async function rvhJetztBestanden(kid, zielRoh, balRoh){
+    const a = (accounts || []).find(x => x && String(x.id) === String(kid)); if(!a) return
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const b = (typeof planKontoBalance === 'function' && planKontoBalance(a)) || null
+    const bal = (b && isFinite(b.val)) ? b.val : (n(balRoh) ?? (Number(a.tvBalance) > 0 ? Number(a.tvBalance) : null))
+    const ziel = n(zielRoh) ?? (Number(a.zielUsd) > 0 ? Number(a.zielUsd) : null)
+    const jetzt = new Date().toISOString()
+    try{
+      const { error } = await supabase.from('accounts').update({ ziel_erreicht_at: jetzt, ziel_erreicht_bal: bal, ziel_usd: ziel }).eq('id', a.id)
+      if(error) throw error
+    }catch(e){ if(typeof atToast === 'function') atToast('⛔ Konto nicht markiert: ' + String((e && e.message) || e).slice(0, 120), 'end'); return }
+    a.zielErreichtAt = jetzt; a.zielErreichtBal = bal; a.zielUsd = ziel
+    if(typeof atToast === 'function') atToast(`🎯 „${a.name || 'Konto'}" von Hand als bestanden markiert${bal != null ? ` (Balance ${Math.round(bal).toLocaleString('de-DE')} $)` : ''} — Nachfolger anlegen`, 'start')
+    const neu = bstNaechsterTyp(a)
+    const danach = () => { try{ renderAccounts() }catch(_){}; try{ renderTradePlans() }catch(_){}; try{ if(typeof wdlRender === 'function') wdlRender() }catch(_){} }
+    try{ if(typeof wdlRender === 'function') wdlRender() }catch(_){}
+    if(typeof openSuccessorWizard === 'function') openSuccessorWizard(a.id, danach, neu || undefined)
+  }
   function bestandenRender(){
     const box = document.getElementById('tradeBestanden'), leer = document.getElementById('tradeEmptyBestanden'), zahl = document.getElementById('tradetab-count-passed')
     const liste = bstKonten().sort((a, b) => String(a.firm || '').localeCompare(String(b.firm || ''), 'de') || String(a.zielErreichtAt).localeCompare(String(b.zielErreichtAt)))
@@ -45155,7 +45248,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1646'
+  const OS_TAB_BUILD = '2026-09-22.1647'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
