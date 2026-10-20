@@ -121,6 +121,17 @@ def main():
              {"text": "107.07", "rect": [760, 700, 140, 18]}, {"text": "andere Zeile", "rect": [760, 718, 140, 18]}, {"text": "Kopf Profit", "rect": [760, 640, 140, 22]}]
     check(upz(cells, zl)["text"] == "107.07", "Profit-Zelle = rechteste Zelle im Zeilenband (nicht die Nachbarzeile, nicht der Spaltenkopf)")
     check(upz([c for c in cells if c["text"] in ("andere Zeile", "Kopf Profit")], zl) is None, "keine Zelle im Band → None")
+    # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
+    rb = pb.reader_bereit
+    check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")
+    check(rb(None) == (False, "Reader (Port 8790) antwortet nicht — Tampermonkey-Reader im Puls-Chrome an?"), "keine Antwort → Abbruch mit Grund")
+    check(rb({"an": False})[0] is False and rb({"an": True, "blind": True, "positionen_ok": True})[0] is False
+          and rb({"an": True, "positionen_ok": False})[0] is False, "aus / blind / ohne Positionen → nicht bereit")
+    check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 7})[0] is False and "7.0 s alt" in rb({"an": True, "positionen_ok": True, "positionen_alter_s": 7})[1],
+          "Stand älter als 5 s → nicht bereit, nennt das Alter")
+    srcB = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    lm = srcB[srcB.index("def lauf_master(cmd):"):srcB.index("def lauf_slave(cmd):")]
+    check(0 < lm.index("reader_bereit(ob._tv_http(\"/positions\"") < lm.index("bereit_und_warten("), "Reader-Pflicht vor bereit/Feuer im Master-Lauf (Abbruch-Pfad: nichts gesendet)")
     print()
     if FEHLER:
         print(f"FEHLER: {len(FEHLER)}")

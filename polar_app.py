@@ -12,6 +12,8 @@ Funded-Futures (Master, ID A, TradingView, PC A) gegen Funded-CFD (Slave, ID B, 
   /polar/stand   Anzeige (Tab) und Wiederaufnahme nach Railway-Neustart (Zustand aus polar_lauf)
   /polar/zeit    Uhrabgleich der Puls-Prozesse
   /polar/aktiv   Polar-Vorrang (20.10.2026): hält gerade ein Lauf (Bot oder Hand-Plan) die ID des Aufrufers? → Tab polarLaeuft()
+  /polar/vorpruefung  Prüf-Tabelle vor dem Start (21.10.2026): Richtungsschutz, andere Trades/Signale, andere Polar-Läufe, beide PCs
+  /polar/freigeben    „Polar starten" in der Tabelle: dieselben Prüfungen noch einmal, alles ✓ → Startzeit jetzt (der Master-PC startet)
 Abbruch nur VOR der Feuerzeit; danach nur noch „fehler" (dann schließt die andere Seite ihre Position). Am Ende Balance/P&L beider
 Seiten an Plan (review) und Konten — Finn: „im Nachhinein mit Balance ausgelesen, alles automatisch drin"."""
 import re
@@ -28,7 +30,13 @@ WARTE_MAX_S = 25             # wartende Verbindung höchstens 25 s, der Puls fra
 # starten, manuell beenden und bei ‚Erledigen' die P&Ls beider Accounts eingeben. Später automatisch, jetzt manuell."). Aus = kein Bot:
 # /polar/plan setzt keine Startzeit (kein Start-Wächter am PC-Tab), „starten" legt den Plan gleich als laufend an, /polar/start antwortet
 # 409. Der Bot-Weg (start/bereit/warte/melden) bleibt unverändert im Code — an = True setzen, wenn die Logik geprüft ist.
-POLAR_AUTO = False
+# BOT AN (21.10.2026, Finn über Master: „Finn will Polar per Bot starten können"): True. Ablauf nach Finns Live-Test 23:15 Dubai („Ich hab
+# das Pop-up gespeichert und es hat insta den Account gestartet. Das soll nicht sein. Ich will den Plan speichern und dann ganz normal auf
+# Starten drücken"): das Popup SPEICHERT nur (planned, ohne Startzeit). „Starten" am Plan öffnet die Prüf-Tabelle (/polar/vorpruefung);
+# alles ✓ → „Polar starten" (/polar/freigeben setzt die Startzeit jetzt) → Start-Wächter am Master-PC → /polar/start (prüft fail-closed
+# noch einmal) → Lauf + Auftrag an die Slave-ID. Hand-Polar bleibt: „Läuft" am Plan in Trades. Gleicher Schalter im Tab (prophos.html
+# POLAR_AUTO). Zurück auf False = /polar/start antwortet wieder 409, der Tab startet nichts — Hand-Polar unverändert.
+POLAR_AUTO = True
 ENDE = ("fertig", "abbruch", "fehler")
 _LAEUFE = {}
 _COND = threading.Condition()
@@ -221,11 +229,19 @@ def aktiv_liste(uid, prozess_laeufe, db_laeufe, plaene):
     Status nicht in ENDE) und offene Hand-Polar-Pläne (route polar, status open; Finn 16.10.: „jetzt manuell"). Je Lauf eine Zeile mit
     seite (master|slave aus Sicht von uid), quelle (bot|hand), lauf_id (hand: None). Dubletten (Prozess + DB) fallen weg."""
     uid = str(uid or "")
-    out, gesehen = [], set()
+    out, gesehen, fertig_ids = [], set(), set()
     for z in list(prozess_laeufe or []) + list(db_laeufe or []):
-        if not isinstance(z, dict) or str(z.get("status") or "") in ENDE:
+        if not isinstance(z, dict):
             continue
         lid = str(z.get("id") or z.get("lauf_id") or "")
+        if str(z.get("status") or "") in ENDE:
+            # VORRANG FÄLLT SOFORT MIT DEM LAUFENDE (Master-Nachtrag 21.10.2026, Finn 13.10.: „im Nachhinein mit Balance ausgelesen … alles
+            # schon automatisch drin"): ein beendeter Prozess-Lauf überdeckt die noch nicht nachgezogene DB-Kopie (_db schreibt im Hintergrund)
+            if lid:
+                gesehen.add(lid)
+                if str(z.get("status") or "") == "fertig":
+                    fertig_ids.add(lid)
+            continue
         mu, su = str(z.get("master_uid") or z.get("master_user_id") or ""), str(z.get("slave_uid") or z.get("slave_user_id") or "")
         if not lid or lid in gesehen or uid not in (mu, su):
             continue
@@ -240,6 +256,12 @@ def aktiv_liste(uid, prozess_laeufe, db_laeufe, plaene):
     for p in plaene or []:
         if not isinstance(p, dict) or str(p.get("route") or "") != "polar" or str(p.get("status") or "") != "open":
             continue
+        # Bot-Plan nach SAUBEREM Ende (21.10.2026): ein Lauf „fertig" (beide Seiten gemeldet zu + Ende) gibt den offenen Plan sofort frei, bis
+        # _abrechnen ihn auf review setzt. „fehler" NICHT (Prüfer S2 21.10.2026: der Bot meldet fehler gerade in UNKLAR-Fällen mit möglicher
+        # offener Position — kein Fill-Beweis, „NICHT zu — SOFORT schließen") → der offene Plan hält weiter als Hand-Plan bis „Erledigt".
+        # Laufende Bot-Läufe halten oben über ihren Lauf; nur abgebrochene Läufe (vor der Feuerzeit) ändern nichts.
+        if any(isinstance(l, dict) and (str(l.get("status") or "") == "fertig" or str(l.get("id") or "") in fertig_ids) for l in (p.get("polar_lauf") or [])):
+            continue
         pid = str(p.get("id") or "")
         mu, su = str(p.get("user_id") or ""), str(p.get("polar_slave_user_id") or "")
         if not pid or pid in plan_ids or uid not in (mu, su):
@@ -248,6 +270,115 @@ def aktiv_liste(uid, prozess_laeufe, db_laeufe, plaene):
         out.append({"lauf_id": None, "plan_id": pid, "status": "open", "phase": "order", "seite": "master" if uid == mu else "slave",
                     "quelle": "hand", "master_uid": mu, "slave_uid": su, "seit": p.get("started_at")})
     return out
+
+
+VP_LESUNG_FENSTER_H = 2       # review ohne Lesung, beendet in den letzten 2 h → „wartet auf Lesung" (Puls liest gleich nach)
+VP_SIGNAL_FENSTER_MIN = 15    # order_signale wartet/laeuft der letzten 15 min → „Puls-Signal läuft"
+# READER AM MASTER-PC (Master-Nachtrag 21.10.2026, Finn 13.10.: „Sobald die Order auf dem Master-Account geschlossen wurde, liest das
+# Tampermonkey-Script insta aus … innerhalb von maximal 1 bis 1,5 Sekunden an den zweiten Computer"): das Zu-Signal kommt vom LOKALEN Reader
+# des Master-PCs (Port 8790, polar_bot master_wache liest /positions alle 50 ms) — der schreibt nichts nach tv_kurse, nur der 24/7-Kursfeed
+# eines einzigen PCs tut das (Prüfer S2 21.10.2026, live belegt: tv_kurse frisch nur an einem PC, alle anderen ~19 T alt → die erste Fassung
+# hätte jeden Start gesperrt). Darum hier nur eine Zeile „–" (vom Server nicht prüfbar, sperrt nicht); die PFLICHT-Prüfung macht polar_bot am
+# Master-PC selbst vor dem Klick (reader_bereit): kein Reader → Abbruch vor der Feuerzeit, nichts gesendet.
+
+
+def trades_belegt(rows, pid, jetzt):
+    """REIN RECHNEND (testbar): trade_plans-Zeilen der Master- und Slave-ID → die, die gerade belegen: open = „läuft", review ohne Lesung
+    (kein final/endlesung balance_end, kein today_pnl, nicht aufgegeben) und beendet ≤ VP_LESUNG_FENSTER_H = „wartet auf Lesung".
+    Der Plan selbst und Polar-Pläne fallen raus (die prüft die Zeile „anderer Polar-Lauf"). jetzt = datetime UTC.
+    → [{user_id, id, route, name, art}]"""
+    out = []
+    for r in rows or []:
+        if not isinstance(r, dict) or str(r.get("id") or "") == str(pid) or str(r.get("route") or "") == "polar":
+            continue
+        st = str(r.get("status") or "")
+        art = None
+        if st == "open":
+            art = "läuft"
+        elif st == "review":
+            fin = r.get("final") if isinstance(r.get("final"), dict) else {}
+            el = r.get("endlesung") if isinstance(r.get("endlesung"), dict) else {}
+            gelesen = fin.get("balance_end") is not None or el.get("balance_end") is not None or el.get("today_pnl") is not None \
+                or bool(el.get("puls_aufgegeben"))
+            try:
+                ende = datetime.fromisoformat(str(r.get("ended_at") or "").replace("Z", "+00:00"))
+                frisch = (jetzt - ende).total_seconds() <= VP_LESUNG_FENSTER_H * 3600
+            except ValueError:
+                frisch = False
+            if not gelesen and frisch:
+                art = "wartet auf Lesung"
+        if art:
+            out.append({"user_id": str(r.get("user_id") or ""), "id": str(r.get("id") or ""), "route": str(r.get("route") or ""),
+                        "name": str(r.get("master_name") or r.get("master_firm") or "")[:60], "art": art})
+    return out
+
+
+def _vp_zeile(key, titel, ok, text):
+    return {"key": key, "titel": titel, "ok": ok, "text": text}
+
+
+def vorpruefung_zeilen(d):
+    """REIN RECHNEND (testbar, selftest_polar_riegel.py) — PRÜF-TABELLE VOR DEM POLAR-START (Finn 21.10.2026 ~23:15 Dubai: „Wenn ich den
+    Polar-Trade letztendlich starte, läuft eine Pre-Check-Tabelle, in der Richtungsschutz gecheckt wird … solange dieser Trade läuft, darf
+    Puls nichts anderes machen … während ein Polar-Trade gestartet wird, darf auch kein Orbit-Trade laufen"). Tab-Tabelle, /polar/freigeben
+    und /polar/start rechnen hiermit — die Tabelle ist nur die Anzeige, gestartet wird nur bei frei=True auf dem Server.
+    d: rs_master/rs_slave (Antwort prophos_gegenrichtung_frei_konto oder {'fehler'}), m_name/s_name (Konten), m_wer/s_wer (IDs),
+    mu/su (user_ids), belegt (trades_belegt; None = nicht lesbar), signale ([{user_id, aktion, status}]; None = nicht lesbar),
+    polar ([aktiv_liste-Einträge ohne diesen Plan]; None = nicht lesbar), pc_master/pc_slave ({lebt, alt_s, pc_name} oder None = keine
+    Zeile), pc_lesbar (bool), slave_ort ('da' | 'weg' | None), slave_login. Reader-Zeile immer „–" (prüft der Master-PC selbst).
+    → (frei, zeilen[{key, titel, ok True|False|None, text}]). ok None = nicht prüfbar (zeigt sich, sperrt nur bei Richtung/Trades/Polar nie —
+    die liefern bei Lesefehlern False = fail-closed); frei nur, wenn keine Zeile False ist."""
+    z = []
+    gegen_txt = {"buy": "Long", "sell": "Short"}
+    for key, seite, erg, name in (("rs_master", "Master", d.get("rs_master"), d.get("m_name")), ("rs_slave", "Slave", d.get("rs_slave"), d.get("s_name"))):
+        titel = f"Richtungsschutz {seite} · {name or seite + '-Konto'}"
+        if isinstance(erg, dict) and erg.get("frei") is True:
+            z.append(_vp_zeile(key, titel, True, "frei — keine Gegenrichtung an dieser ID × Firma"))
+        elif isinstance(erg, dict) and erg.get("frei") is False:
+            z.append(_vp_zeile(key, titel, False, str(erg.get("grund") or "Gegenrichtung läuft")[:200]))
+        else:
+            fehler = erg.get("fehler") if isinstance(erg, dict) else "keine Antwort"
+            z.append(_vp_zeile(key, titel, False, f"nicht prüfbar: {fehler or 'unklar'} — nichts gestartet"))
+    belegt, signale = d.get("belegt"), d.get("signale")
+    for key, uid, wer, seite in (("trades_master", d.get("mu"), d.get("m_wer"), "Master"), ("trades_slave", d.get("su"), d.get("s_wer"), "Slave")):
+        titel = f"Keine anderen Trades · {seite}-ID {wer or '?'}"
+        if belegt is None or signale is None:
+            z.append(_vp_zeile(key, titel, False, "nicht lesbar — nichts gestartet"))
+            continue
+        tr = [b for b in belegt if str(b.get("user_id")) == str(uid)]
+        sg = [x for x in signale if str(x.get("user_id")) == str(uid) and str(x.get("aktion") or "") != "polar_slave"]
+        treffer = [f"{b.get('name') or b.get('route') or '?'} ({b.get('route')}, {b.get('art')})" for b in tr] \
+            + [f"Puls-Signal {x.get('aktion') or '?'} ({x.get('status')})" for x in sg]
+        z.append(_vp_zeile(key, titel, not treffer, "frei — nichts läuft, nichts wartet auf Lesung" if not treffer else "belegt: " + "; ".join(treffer)[:240]))
+    pol = d.get("polar")
+    if pol is None:
+        z.append(_vp_zeile("polar", "Kein anderer Polar-Lauf", False, "nicht lesbar — nichts gestartet"))
+    else:
+        z.append(_vp_zeile("polar", "Kein anderer Polar-Lauf", not pol,
+                           "frei" if not pol else "läuft: " + "; ".join(f"{x.get('quelle')} {str(x.get('lauf_id') or x.get('plan_id') or '?')[:8]} ({x.get('seite')})" for x in pol)[:240]))
+    for key, seite, wer, pc in (("pc_master", "Master", d.get("m_wer"), d.get("pc_master")), ("pc_slave", "Slave", d.get("s_wer"), d.get("pc_slave"))):
+        titel = f"PC der {seite}-ID {wer or '?'}"
+        if not d.get("pc_lesbar"):
+            z.append(_vp_zeile(key, titel, None, "nicht prüfbar (PC-Stand nicht lesbar)"))
+            continue
+        if not pc or not pc.get("lebt"):
+            alt = int((pc or {}).get("alt_s") or 0)
+            z.append(_vp_zeile(key, titel, False, "aus — kein Prophos-Tab" + (f" seit {max(1, round(alt / 60))} min" if pc else " bekannt")))
+            continue
+        z.append(_vp_zeile(key, titel, True, f"Tab lebt ({pc.get('pc_name') or '?'})" + (" — Panel + Puls-Chrome prüft der PC selbst beim Start" if seite == "Master" else "")))
+    # Reader am Master-PC (e): vom Server nicht sichtbar (lokaler Port 8790) → „–", sperrt nicht; Pflicht-Prüfung im Bot vor dem Klick
+    z.append(_vp_zeile("reader", f"Reader am Master-PC · {d.get('m_wer') or '?'}", None,
+                       "vom Server nicht prüfbar (lokaler Reader, Port 8790) — der Master-PC prüft ihn vor dem Klick; ohne Reader bricht der Lauf ab, nichts gesendet"))
+    # Slave-MT5 bereit (f): Instanz des Slave-Logins lebt am PC der Slave-ID (wie orderSignalTick polar_slave sie findet)
+    ort, login = d.get("slave_ort"), d.get("slave_login") or "?"
+    titel = f"Slave-MT5 bereit · Login {login}"
+    if ort == "da":
+        z.append(_vp_zeile("mt5_slave", titel, True, "Instanz läuft am PC der Slave-ID — Ein-Klick-Handel prüft der Bot im Terminal selbst (nicht lesbar)"))
+    elif ort == "weg":
+        z.append(_vp_zeile("mt5_slave", titel, False, "auf keinem laufenden PC der Slave-ID als Echo-Instanz eingerichtet bzw. Instanz schreibt nicht mehr"))
+    else:
+        z.append(_vp_zeile("mt5_slave", titel, None, "nicht prüfbar (kein lebender PC mit Login-Stand) — Ein-Klick-Handel ebenfalls nicht lesbar"))
+    return (not any(x["ok"] is False for x in z)), z
 
 
 def richtungsschutz_pruefen(master_erg, slave_erg, master_name="Master-Konto", slave_name="Slave-Konto"):
@@ -284,13 +415,72 @@ def _richtung_konto(uid, firma, richtung, ausser_plan=None, ausser_konto=None):
     return erg if isinstance(erg, dict) else {"fehler": "DB-Antwort unerwartet"}
 
 
-def polar_richtungsschutz(plan_id, m_uid, m_firma, m_konto, s_uid, s_firma, s_konto, richtung, m_name="Master-Konto", s_name="Slave-Konto"):
-    """Beide Seiten eines Polar-Starts gegen die Regel: Master-ID × Futures-Firma mit der Master-Richtung, Slave-ID × CFD-Firma mit der
-    Gegenrichtung (der Slave hedgt den Master). → (frei, grund)."""
-    gegen = "sell" if str(richtung).lower() == "buy" else "buy"
-    m = _richtung_konto(m_uid, m_firma, richtung, plan_id, m_konto)
-    sl = _richtung_konto(s_uid, s_firma, gegen, plan_id, s_konto)
-    return richtungsschutz_pruefen(m, sl, m_name, s_name)
+def _vorpruefung(plan):
+    """Liest alles für vorpruefung_zeilen (service role) → (frei, zeilen). Nie Exception: jede nicht lesbare Quelle wird zur Zeile
+    (Richtung/Trades/Polar fail-closed, PCs „nicht prüfbar")."""
+    pid, mu, su = str(plan.get("id") or ""), str(plan.get("user_id") or ""), str(plan.get("polar_slave_user_id") or "")
+    jetzt_dt = datetime.now(timezone.utc)
+    r = str(plan.get("richtung") or "").lower()
+    gegen = "sell" if r == "buy" else "buy"
+    d = {"mu": mu, "su": su, "m_name": plan.get("master_name"), "s_name": plan.get("slave_name")}
+    try:
+        namen = A["_ap_namen"]()[0]
+    except Exception:
+        namen = {}
+    d["m_wer"], d["s_wer"] = namen.get(mu) or mu[:8], namen.get(su) or su[:8]
+    s_acc = None
+    try:
+        s_acc = (A["sb_select"]("accounts", {"select": "id,user_id,firm,external_id,cred_login", "id": f"eq.{plan.get('slave_account_id')}"}) or [None])[0]
+    except Exception:
+        s_acc = None
+    d["rs_master"] = _richtung_konto(mu, plan.get("master_firm"), r, pid, plan.get("master_account_id"))
+    d["rs_slave"] = _richtung_konto(su, (s_acc or {}).get("firm") or plan.get("slave_firm"), gegen, pid, plan.get("slave_account_id")) \
+        if s_acc and str(s_acc.get("user_id")) == su else {"fehler": "Slave-Konto passt nicht zur Slave-ID"}
+    ids = ",".join(x for x in (mu, su) if _uuid(x))
+    try:
+        rows = A["sb_select"]("trade_plans", {"select": "id,user_id,route,status,master_name,master_firm,ended_at,"
+                                                        "endlesung:mt5_baseline->endlesung,final:mt5_baseline->final",
+                                              "user_id": f"in.({ids})", "status": "in.(open,review)", "limit": "200"}) or []
+        d["belegt"] = trades_belegt(rows, pid, jetzt_dt)
+    except Exception:
+        d["belegt"] = None
+    try:
+        ab = datetime.fromtimestamp(jetzt_dt.timestamp() - VP_SIGNAL_FENSTER_MIN * 60, timezone.utc).isoformat()
+        d["signale"] = A["sb_select"]("order_signale", {"select": "id,user_id,status,created_at,aktion:params->>aktion", "user_id": f"in.({ids})",
+                                                        "status": "in.(wartet,laeuft)", "created_at": f"gte.{ab}", "limit": "50"}) or []
+    except Exception:
+        d["signale"] = None
+    try:
+        prow = A["sb_select"]("trade_plans", {"select": "id,user_id,polar_slave_user_id,route,status,started_at,polar_lauf(id,status,created_at)",
+                                              "route": "eq.polar", "status": "in.(planned,open)",
+                                              "or": f"(user_id.in.({ids}),polar_slave_user_id.in.({ids}))", "order": "created_at.desc", "limit": "40"}) or []
+        prow = [x for x in prow if str(x.get("id") or "") != pid]
+        grenze = datetime.fromtimestamp(time.time() - AKTIV_FENSTER_H * 3600, timezone.utc).isoformat()
+        dbl = [l for l in laeufe_aus_plaenen(prow) if str(l.get("created_at") or "9") >= grenze]
+        with _COND:
+            prozess = [dict(z) for z in _LAEUFE.values() if z.get("plan_id") != pid]
+        gesehen, pol = set(), []
+        for uid in (mu, su):
+            for x in aktiv_liste(uid, prozess, dbl, prow):
+                k = x.get("lauf_id") or x.get("plan_id")
+                if k and k not in gesehen and str(x.get("plan_id") or "") != pid:
+                    gesehen.add(k)
+                    pol.append(x)
+        d["polar"] = pol
+    except Exception:
+        d["polar"] = None
+    stand = A["_ap_pc_stand_je"]()
+    d["pc_lesbar"] = stand is not None
+    d["pc_master"], d["pc_slave"] = (stand or {}).get(mu), (stand or {}).get(su)
+    login = _login_von_konto(s_acc) if s_acc else ""
+    d["slave_login"] = login
+    try:
+        mrows = A["sb_select"]("mt5_live", {"select": "pc_name,instance,master_login,updated_at,master_expected:status->>master_expected",
+                                            "status->>user_id": f"eq.{su}", "limit": "200"})
+        d["slave_ort"] = A["mt5_login_ort"](login, mrows, jetzt_dt)[0]
+    except Exception:
+        d["slave_ort"] = None
+    return vorpruefung_zeilen(d)
 
 
 def registrieren(app, ns):
@@ -309,7 +499,8 @@ def registrieren(app, ns):
     def polar_plan():
         """Polar-Plan im Namen der Master-ID anlegen. Body: {master_account_id, slave_account_id, richtung, symbol, kontrakte, master_risk,
         slave_risk, lots, master_tp, master_sl, polar_pct, sl_pkt, tp_pkt, master_sl_pkt, master_tp_pkt, start_um?}.
-        starten (bool, manuell): Plan gleich als laufend (open) anlegen.
+        Seit 21.10.2026 (Finn: „Ich will den Plan speichern und dann ganz normal auf Starten drücken") NUR speichern: planned, ohne
+        Startzeit — starten/hand im Body werden ignoriert. Start über „Starten" am Plan (Prüf-Tabelle → /polar/freigeben) oder von Hand („Läuft").
         Recht (16.10.2026) wie im übrigen Admin über die Sicht des Logins (_wd_login): unbeschränkt (Finn, Hermann Technologies) = alle IDs,
         Verwalter (Popup schickt sicht=admin) = seine Gruppe, eingeschränkte ID = nur sie selbst. Bis .1577 galt Admin nur über ADMIN_EMAILS
         (die Rechnungs-Liste) — Finn bekam „keine Berechtigung für diese IDs", sobald Master und Slave nicht ihm gehörten."""
@@ -345,13 +536,7 @@ def registrieren(app, ns):
             return jsonify({"ok": False, "msg": "Richtung, Kontrakte, Lots und Level fehlen"}), 400
         if not _login_von_konto(s_acc):
             return jsonify({"ok": False, "msg": "Slave-Konto ohne MT5-Login (External ID oder Login fehlt)"}), 400
-        # RICHTUNGSSCHUTZ (Finn 20.10.2026 02:30): „Speichern & starten" (manuell → sofort open) und der Bot-Weg (Startzeit jetzt) fragen
-        # vor dem Anlegen für beide Konten die bestehende Regel — gesperrt oder nicht prüfbar → kein Plan, Grund ins Popup (polarMsg)
-        if d.get("starten") or POLAR_AUTO:
-            frei, grund = polar_richtungsschutz(None, mu, m_acc.get("firm"), m_acc["id"], su, s_acc.get("firm"), s_acc["id"], r,
-                                               m_acc.get("name") or "Master-Konto", s_acc.get("name") or "Slave-Konto")
-            if not frei:
-                return jsonify({"ok": False, "code": "richtungsschutz", "msg": grund}), 409
+        # Richtungsschutz beim Speichern nicht mehr (21.10.2026): gespeichert wird nur — geprüft wird beim Start (Prüf-Tabelle, /polar/start)
         zeile = {"user_id": mu, "master_account_id": m_acc["id"], "slave_account_id": s_acc["id"],
                  "master_name": m_acc.get("name"), "master_firm": m_acc.get("firm"), "slave_name": s_acc.get("name"), "slave_firm": s_acc.get("firm"),
                  "route": "polar", "status": "planned", "priority": "high", "richtung": r,
@@ -362,17 +547,73 @@ def registrieren(app, ns):
                  "planned_for": datetime.now(timezone.utc).date().isoformat(),
                  "mt5_baseline": {"polar_auftrag": {"lots": lots, "sl_pkt": sl_pkt, "tp_pkt": tp_pkt, "kontrakte": kt,
                                                     "master_sl_pkt": _zahl(d.get("master_sl_pkt")), "master_tp_pkt": _zahl(d.get("master_tp_pkt"))}}}
-        if POLAR_AUTO:
-            zeile["start_um"] = d.get("start_um") or A["_wt_now_iso"]()
-        elif d.get("starten"):
-            zeile["status"] = "open"                  # manuell: Finn platziert selbst, der Plan läuft ab jetzt (Trades → „Erledigt")
-            zeile["started_at"] = A["_wt_now_iso"]()
         try:
             neu = A["sb_insert"]("trade_plans", zeile)
         except Exception as e:
             return jsonify({"ok": False, "msg": f"Plan nicht angelegt: {str(e)[:200]}"}), 400
         return jsonify({"ok": True, "plan_id": str((neu or {}).get("id") or ""), "master_uid": mu, "slave_uid": su,
-                        "status": zeile["status"], "auto": POLAR_AUTO})
+                        "status": zeile["status"], "auto": False})
+
+    def _vp_plan(d):
+        """Plan + Sicht für Prüf-Tabelle und Freigabe → (plan, None) oder (None, antwort)."""
+        pid = str((d or {}).get("plan_id") or "").strip().lower()
+        if not _uuid(pid):
+            return None, (jsonify({"ok": False, "msg": "plan_id fehlt"}), 400)
+        try:
+            plan = (A["sb_select"]("trade_plans", {"select": "*", "id": f"eq.{pid}", "limit": "1"}) or [None])[0]
+        except Exception as e:
+            return None, (jsonify({"ok": False, "msg": f"DB: {str(e)[:120]}"}), 503)
+        if not plan or plan.get("route") != "polar":
+            return None, (jsonify({"ok": False, "msg": "kein Polar-Plan"}), 404)
+        sicht = getattr(g, "admin_sicht", None)
+        for uid in (plan.get("user_id"), plan.get("polar_slave_user_id")):
+            if not A["admin_in_sicht"](str(uid), sicht):
+                return None, (jsonify({"ok": False, "msg": "Master- oder Slave-ID außerhalb deiner Sicht"}), 403)
+        return plan, None
+
+    # PRÜF-TABELLE (Finn 21.10.2026 ~23:15 Dubai: „Wenn ich den Polar-Trade letztendlich starte, läuft eine Pre-Check-Tabelle …"): nur lesen.
+    @app.route("/polar/vorpruefung", methods=["POST", "OPTIONS"])
+    def polar_vorpruefung():
+        if request.method == "OPTIONS":
+            return "", 200
+        _me, err = A["_wd_login"]()
+        if err:
+            return err
+        plan, fehler = _vp_plan(request.get_json(silent=True))
+        if fehler:
+            return fehler
+        frei, zeilen = _vorpruefung(plan)
+        out = jsonify({"ok": True, "frei": frei, "zeilen": zeilen, "status": plan.get("status"), "start_um": plan.get("start_um")})
+        out.headers["Cache-Control"] = "no-store"
+        return out
+
+    # „Polar starten" in der Prüf-Tabelle: dieselben Prüfungen auf dem Server, alles ✓ → Startzeit jetzt; der Start-Wächter am Master-PC
+    # claimt und ruft /polar/start (prüft dort ein drittes Mal). Nur ein geplanter, noch nicht geclaimter Plan.
+    @app.route("/polar/freigeben", methods=["POST", "OPTIONS"])
+    def polar_freigeben():
+        if request.method == "OPTIONS":
+            return "", 200
+        _me, err = A["_wd_login"]()
+        if err:
+            return err
+        if not POLAR_AUTO:
+            return jsonify({"ok": False, "msg": "Polar-Bot ist aus (POLAR_AUTO) — von Hand starten („Läuft“)"}), 409
+        plan, fehler = _vp_plan(request.get_json(silent=True))
+        if fehler:
+            return fehler
+        if plan.get("status") != "planned" or plan.get("start_um_gestartet_at"):
+            return jsonify({"ok": False, "msg": f"Plan steht auf {plan.get('status')}{' · schon gestartet' if plan.get('start_um_gestartet_at') else ''}"}), 409
+        frei, zeilen = _vorpruefung(plan)
+        if not frei:
+            return jsonify({"ok": False, "code": "vorpruefung", "msg": "Vorprüfung nicht grün", "zeilen": zeilen}), 409
+        try:
+            neu = A["sb_update"]("trade_plans", {"id": f"eq.{plan['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
+                                 {"start_um": A["_wt_now_iso"]()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"Startzeit nicht gesetzt: {str(e)[:160]}"}), 502
+        if not neu:
+            return jsonify({"ok": False, "msg": "Plan war nicht mehr geplant — nichts gesetzt"}), 409
+        return jsonify({"ok": True, "frei": True, "zeilen": zeilen, "plan_id": str(plan["id"])})
 
     @app.route("/polar/geblowt", methods=["POST", "OPTIONS"])
     def polar_geblowt():
@@ -448,12 +689,12 @@ def registrieren(app, ns):
             return jsonify({"ok": False, "msg": f"DB: {str(e)[:120]}"}), 503
         if not s_acc or str(s_acc.get("user_id")) != str(plan.get("polar_slave_user_id")):
             return jsonify({"ok": False, "msg": "Slave-Konto passt nicht zur Slave-ID"}), 400
-        # RICHTUNGSSCHUTZ (Finn 20.10.2026 02:30), serverseitig und fail-closed — auch wenn der Tab schon gefragt hat
-        frei, grund = polar_richtungsschutz(pid, str(plan.get("user_id")), plan.get("master_firm"), plan.get("master_account_id"),
-                                           str(plan.get("polar_slave_user_id")), s_acc.get("firm"), s_acc["id"], plan.get("richtung"),
-                                           plan.get("master_name") or "Master-Konto", plan.get("slave_name") or "Slave-Konto")
+        # VORPRÜFUNG (Finn 21.10.2026 ~23:15 Dubai, s. vorpruefung_zeilen): dieselbe Tabelle wie im Tab, hier fail-closed — Richtungsschutz
+        # beider Konten (vorher allein, 20.10.2026 02:30), keine anderen Trades/Signale an beiden IDs, kein anderer Polar-Lauf, beide PCs
+        frei, zeilen = _vorpruefung(plan)
         if not frei:
-            return jsonify({"ok": False, "code": "richtungsschutz", "msg": grund}), 409
+            nein = [z for z in zeilen if z["ok"] is False]
+            return jsonify({"ok": False, "code": "vorpruefung", "msg": "; ".join(f"{z['titel']}: {z['text']}" for z in nein)[:400], "zeilen": zeilen}), 409
         s_richtung = "sell" if plan.get("richtung") == "buy" else "buy"
         slave_auftrag = {"account_id": s_acc["id"], "login": _login_von_konto(s_acc), "firm": s_acc.get("firm"), "richtung": s_richtung,
                          "volumen": auftrag.get("lots"), "sl_pkt": auftrag.get("sl_pkt"), "tp_pkt": auftrag.get("tp_pkt")}
@@ -655,7 +896,8 @@ def registrieren(app, ns):
 
     # POLAR-VORRANG (20.10.2026, Finn: „Wenn Polar läuft, darf gar kein einziger Trade mehr gestartet werden … über die beteiligten IDs
     # keine Order, keine Balance-Lesung"): der Tab fragt hier alle 10 s, ob SEINE ID gerade in einem Polar-Lauf steckt (Master- ODER
-    # Slave-Seite) — Bot-Läufe aus dem Prozess + polar_lauf und offene Hand-Polar-Pläne (POLAR_AUTO aus). /polar/stand kennt nur
+    # Slave-Seite) — Bot-Läufe aus dem Prozess + polar_lauf und offene Hand-Polar-Pläne (gibt es mit und ohne POLAR_AUTO; ein Bot-Plan
+    # wird erst beim Master-Fill open und nach dem Ende von _abrechnen auf review gesetzt — er zählt also nie als Hand-Plan). /polar/stand kennt nur
     # einen Lauf je lauf_id/plan_id, der Slave-Tab sieht den Plan der Master-ID nicht (RLS) — deshalb diese Liste (service role).
     # Takt: Tabs alle 30 s, Antwort 5 s im Prozess gecacht, EIN Select (Master 20.10.2026, Supabase-Diät).
     @app.route("/polar/aktiv", methods=["GET", "OPTIONS"])

@@ -250,6 +250,31 @@ def reader_flach(d, ext, root, gesehen):
     return "flach" if gesehen else "unklar"
 
 
+READER_BEREIT_ALTER_S = 5.0   # lokaler Reader (Port 8790): Positions-Stand höchstens so alt, sonst „nicht bereit"
+
+
+def reader_bereit(d):
+    """REIN RECHNEND (testbar, tools/selftest_polar_close.py) — READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2: das Zu-Signal des Masters
+    kommt vom lokalen Reader /positions, den der Server nicht sehen kann; Finn 13.10.: „liest das Tampermonkey-Script insta aus … an den zweiten
+    Computer"). → (ok, grund). ok nur: Reader antwortet, an, nicht blind, positionen_ok, Stand ≤ READER_BEREIT_ALTER_S. Das Konto prüft die Wache
+    selbst (reader_flach) — es darf hier noch das vorige sein (Rückfall Puls-Chrome-Tabelle bleibt)."""
+    if not isinstance(d, dict):
+        return False, "Reader (Port 8790) antwortet nicht — Tampermonkey-Reader im Puls-Chrome an?"
+    if d.get("an") is False:
+        return False, "Reader ist aus"
+    if d.get("blind"):
+        return False, "Reader ist blind (sieht die Positions-Tabelle nicht)"
+    if not d.get("positionen_ok"):
+        return False, "Reader liefert keine Positionen"
+    try:
+        alt = float(d.get("positionen_alter_s") if d.get("positionen_alter_s") is not None else d.get("alter_s") if d.get("alter_s") is not None else 99)
+    except (TypeError, ValueError):
+        alt = 99.0
+    if alt > READER_BEREIT_ALTER_S:
+        return False, f"Reader-Stand {alt:.1f} s alt (Grenze {READER_BEREIT_ALTER_S:.0f} s)"
+    return True, ""
+
+
 def preisfeld_wahl(felder, art):
     """Genau ein beschreibbares Preisfeld im Ändern-Dialog. art 'tp' = Limit-Order, 'sl' = Stop-Order. -> Feld | None"""
     frei = [f for f in (felder or []) if isinstance(f, dict) and not f.get("aus")]
@@ -901,6 +926,11 @@ def lauf_master(cmd):
         s = sitz[0]
         if not ok:
             raise RuntimeError(f"Konto: {msg}")
+        # READER-PFLICHT (21.10.2026): ohne lokalen Reader kein Zu-Signal → Abbruch VOR bereit/Feuer (melden abbruch, nichts gesendet)
+        r_ok, r_grund = reader_bereit(ob._tv_http("/positions", timeout=2.0))
+        lauf.log(f"Reader-Pflicht: {'ok' if r_ok else r_grund}")
+        if not r_ok:
+            raise RuntimeError(f"Reader: {r_grund}")
         try:
             sm0, _t0, _l0, _x0 = ob._cdp_today_aus_reiter(s, opts, lauf.trail)
             res.update(ob.cdp_summary_start(sm0))

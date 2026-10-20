@@ -1593,6 +1593,13 @@
     min-height:18px;
   }
   #dashboard-view .modal-msg.err{color:#c03128}
+  /* Polar-Prüf-Tabelle (21.10.2026): bestehende table.t, im Popup enger; ✓/✗/– in der ersten Spalte */
+  #dashboard-view #polarCheckModal .t td, #dashboard-view #polarCheckModal .t th{padding:8px 10px;font-size:12.5px;vertical-align:top}
+  #dashboard-view #polarCheckModal .pc-ok{color:var(--good-ink, #15803d);font-weight:700}
+  #dashboard-view #polarCheckModal .pc-nein{color:var(--danger-ink, #b91c1c);font-weight:700}
+  #dashboard-view #polarCheckModal .pc-offen{color:var(--sub);font-weight:700}
+  #dashboard-view #polarCheckModal .pc-text{color:var(--sub)}
+  #dashboard-view #polarCheckModal #polarCheckStart:disabled{opacity:.45;cursor:not-allowed}   /* gesperrt sichtbar blass (wie .wdl-z-akt .el-knopf:disabled) */
   #dashboard-view .modal-msg.ok{color:#058a50}
   #dashboard-view .modal-msg.muted{color:var(--sub)}
 
@@ -8639,7 +8646,7 @@
                 <!-- Polar (13.10.2026, Finn): Funded-Futures gegen Funded-CFD einer ANDEREN ID als Airbag statt Fusion-Live. Eigener
                      Knopf + eigenes Popup (#polarModal) — hängt NICHT an _tpRoute, schließt dieses Popup und öffnet die Vorschau.
                      Erst Frontend zum Verstehen, Start-Logik folgt. -->
-                <button type="button" id="tp-route-polar" title="Polar — Funded-Futures gegen Funded-CFD einer anderen ID: planen, speichern, starten und mit beiden P&Ls erledigen (manuell, ohne Bot)">Polar</button>
+                <button type="button" id="tp-route-polar" title="Polar — Funded-Futures gegen Funded-CFD einer anderen ID: planen und speichern; gestartet wird am Plan in Trades (Prüf-Tabelle → Bot) oder von Hand („Läuft"), erledigt mit beiden P&Ls">Polar</button>
                 <!-- Winning Day (24.09.2026 abends): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge; nur Funded-Futures-Konten. -->
                 <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
@@ -9059,7 +9066,10 @@
           <div class="modal-msg" id="polarMsg"></div>
         </div>
         <!-- Manuell (16.10.2026, Finn: „jetzt manuell, später automatisch"): kein Bot klickt — „Speichern & starten" legt den Trade als
-             laufend an (du platzierst beide Seiten selbst), „Nur speichern" lässt ihn unter Geplant; beendet wird über „Erledigt" in Trades -->
+             laufend an (du platzierst beide Seiten selbst), „Nur speichern" lässt ihn unter Geplant; beendet wird über „Erledigt" in Trades.
+             NUR SPEICHERN (Finn 21.10.2026 ~23:15 Dubai, Live-Test: „Ich hab das Pop-up gespeichert und es hat insta den Account gestartet.
+             Das soll nicht sein. Ich will den Plan speichern und dann ganz normal auf Starten drücken."): ein Knopf „Speichern" = planned ohne
+             Startzeit. Gestartet wird am Plan in Trades: „Starten" → Prüf-Tabelle (#polarCheckModal) → „Polar starten" (Bot), oder „Läuft" (Hand). -->
         <!-- Maus-Test × (Finn 20.10.2026 02:45: „erst mal ein separater Test, wo es nur darum geht, dass der Mauscursor das X findet"):
              Panel POST /api/polar-test-x → polar_bot.py test_x — findet das Schließen-× einer bestehenden Position, parkt die Maus 10 s,
              klickt NIE. Nur Admin-Sicht, nur am PC mit Panel; Ergebnis aus stand_test_<seite>.json (GET /api/polar-stand test{}) -->
@@ -9070,8 +9080,36 @@
           <span id="polarTestMsg" style="font-size:11.5px;color:var(--sub);flex-basis:100%;text-align:center"></span>
         </div>
         <div class="modal-foot" style="justify-content:center">
-          <button class="btn btn-ghost" id="polarNurSpeichern" title="Plan unter Geplant speichern — „Läuft" setzt du später in Trades">Nur speichern</button>
-          <button class="btn btn-primary" id="polarStart" style="min-width:220px" title="Trade speichern und als laufend markieren — beide Seiten platzierst du selbst, kein Bot klickt">Speichern &amp; starten →</button>
+          <button class="btn btn-primary" id="polarNurSpeichern" style="min-width:220px" title="Plan unter Geplant speichern, ohne Startzeit — starten in Trades: „Starten" (Prüf-Tabelle, dann Bot) oder „Läuft" (von Hand)">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- POLAR-PRÜF-TABELLE (Finn 21.10.2026 ~23:15 Dubai: „Wenn ich den Polar-Trade letztendlich starte, läuft eine Pre-Check-Tabelle, in der
+         Richtungsschutz gecheckt wird … solange dieser Trade läuft, darf Puls nichts anderes machen … während ein Polar-Trade gestartet wird,
+         darf auch kein Orbit-Trade laufen"). Öffnet über „Starten" an einem geplanten Polar-Plan; Zeilen kommen vom Server
+         (/polar/vorpruefung — dieselbe Rechnung prüft /polar/freigeben und /polar/start fail-closed). Eigene Verdrahtung (polarCheck*). -->
+    <div class="modal-bg" id="polarCheckModal">
+      <div class="modal" style="max-width:640px">
+        <div class="modal-head">
+          <h3 id="polarCheckTitel">Polar starten — Vorprüfung</h3>
+          <button class="modal-x" id="polarCheckClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="polarCheckInfo" style="font-size:12.5px;color:var(--sub);margin-bottom:10px"></div>
+          <div class="table-wrap">
+            <table class="t">
+              <thead><tr><th style="width:28px"></th><th>Prüfung</th><th>Stand</th></tr></thead>
+              <tbody id="polarCheckRows"></tbody>
+            </table>
+          </div>
+          <div class="modal-msg" id="polarCheckMsg"></div>
+        </div>
+        <div class="modal-foot" style="justify-content:center">
+          <button class="btn btn-ghost" id="polarCheckNeu" title="Alle Prüfungen jetzt neu lesen">Neu prüfen</button>
+          <button class="btn btn-primary" id="polarCheckStart" style="min-width:200px" disabled title="Erst wenn alle Zeilen ✓ sind">Polar starten →</button>
         </div>
       </div>
     </div>
@@ -21999,7 +22037,7 @@
     tsv2:   ['Topstep V2', 'Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep"), kein Hedge; P&L aus der Balance wie Orbit V2'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto'],
-    polar:  ['Polar',     'Polar — Funded-Futures gegen Funded-CFD einer anderen ID; manuell: beide Seiten selbst, „Erledigt" mit beiden P&Ls']
+    polar:  ['Polar',     'Polar — Funded-Futures gegen Funded-CFD einer anderen ID; „Starten" (Prüf-Tabelle → beide PCs feuern gemeinsam) oder „Läuft" von Hand, „Erledigt" mit beiden P&Ls']
   }
   function sysStickerHtml(key){
     const cfg = SYS_STICKER[key]
@@ -41981,7 +42019,13 @@
         : (p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs)
           ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>${neuBtn}`
           : ''
-      const jetztBtn = startUmBtn ? startUmBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
+      // POLAR (21.10.2026, Finn: „Ich will den Plan speichern und dann ganz normal auf Starten drücken"): „Starten" öffnet die Prüf-Tabelle
+      // (polarVorpruefungOeffnen) — eigene Verdrahtung unten (data-plan-polar-start); aus, solange Polar/Vorbereitung diese ID hält
+      let _polarAuto = false; try{ _polarAuto = POLAR_AUTO }catch(_){ _polarAuto = false }   // const steht weiter unten im Modul (TDZ beim frühen Zeichnen)
+      const polarStartBtn = (!_polarAuto || p.route !== 'polar') ? '' : (typeof polarStartSperre === 'function' && polarStartSperre())
+        ? `<button class="btn btn-primary tc2-btn" data-plan-polar-start="${p.id}" disabled title="${escapeHtml(polarRiegelText(polarStartSperre()))} — kein Start, bis der Polar-Trade zu ist">Starten</button>`
+        : `<button class="btn btn-primary tc2-btn" data-plan-polar-start="${p.id}" title="Vorprüfung öffnen: Richtungsschutz, andere Trades, andere Polar-Läufe, beide PCs — bei allen ✓ startet der Bot">Starten</button>`
+      const jetztBtn = startUmBtn ? startUmBtn : p.route === 'polar' ? polarStartBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
@@ -42013,8 +42057,12 @@
         <button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>` : `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
-        ${jetztBtn}
+        ${p.route === 'polar'
+          // POLAR (Master-Nachtrag 21.10.2026 i, Finn 16.10.: „Trades speichern, manuell beenden und bei Erledigen die P&Ls beider Accounts
+          // eingeben"): Hauptknopf ist „Starten" (Prüf-Tabelle → Bot), „Läuft" bleibt als zweiter Rang für den Hand-Weg
+          ? `${jetztBtn} <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" style="font-weight:400" title="Von Hand: Polar-Trade als laufend markieren — beide Seiten platzierst du selbst, kein Bot. Hält Master- und Slave-ID wie ein Bot-Lauf (kein Puls, keine Balance-Lesung), bis „Erledigt" mit beiden P&Ls">Läuft</button>`
+          : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
+        ${jetztBtn}`}
         <button class="btn ${jetztBtn ? 'btn-ghost' : 'btn-primary'} tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
       // Geplant-Tabelle (AP-DESIGN 05.10.2026): die Uhrzeit hat dort ihre eigene Spalte — steht sie noch aus, bleibt hier nur ein
       // etwaiger Vorprüf-Hinweis; sonst derselbe Knopf wie auf der Karte (Starten / Warteschlange / gestartet · Neu starten).
@@ -42514,6 +42562,10 @@
     })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planStart, 'open'))
+    })
+    // POLAR „Starten" → Prüf-Tabelle (21.10.2026), eigene Verdrahtung
+    document.querySelectorAll('[data-plan-polar-start]').forEach(btn => {
+      btn.addEventListener('click', () => { if(!btn.disabled && typeof polarVorpruefungOeffnen === 'function') polarVorpruefungOeffnen(btn.dataset.planPolarStart) })
     })
     document.querySelectorAll('[data-plan-back]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planBack, 'planned'))
@@ -45474,7 +45526,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1658'
+  const OS_TAB_BUILD = '2026-09-22.1659'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50202,8 +50254,11 @@
    * EIN Prädikat für Start-Kandidaten (suKandidaten) und Ankündigung (pulsTermine): Orbit/Echo, Farmer nur scharf, nie Topstep V2
    * (startet nur von Hand), nie unbestätigt, nie nach aufgegebenem Richtungskonflikt. -> '' = startet von selbst, sonst der Grund. */
   /* POLAR MANUELL (16.10.2026, Finn: „Bis wir Polar automatisch nutzen, dauert es noch Wochen … jetzt manuell"): aus = kein Bot-Start
-   * (Start-Wächter, /polar/start), der Trade läuft über „Läuft"/„Erledigt" der normalen Hedge-Karte. Gleicher Schalter in polar_app.py. */
-  const POLAR_AUTO = false
+   * (Start-Wächter, /polar/start), der Trade läuft über „Läuft"/„Erledigt" der normalen Hedge-Karte. Gleicher Schalter in polar_app.py.
+   * BOT AN (21.10.2026, Finn über Master: „Polar per Bot starten können"): true — ein Polar-Plan mit Startzeit startet am PC der Master-ID
+   * (tpStartUmTick → polarStartenAmPc), der Slave-PC nimmt sein polar_slave-Signal wie bisher. Eine Startzeit bekommt ein Polar-Plan nur
+   * über die Prüf-Tabelle (/polar/freigeben, alles ✓); gespeicherte Pläne startet der Wächter nie — Hand-Polar („Läuft") bleibt. */
+  const POLAR_AUTO = true
   function suStartetNichtWeil(p, scharf){
     if(!p || !(routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')) return 'kein Puls-Weg'   // polar (13.10.2026): startet am Master-PC
     if(p.route === 'polar' && !POLAR_AUTO) return 'Polar manuell — startet nur von Hand („Läuft")'   // 16.10.2026: kein Bot, bis die Logik geprüft ist
@@ -50370,7 +50425,9 @@
     if(orbitLaeuft){ warte(orbitText()); return }   // PC beschäftigt (Orbit-Start, Signal vom Mac/Handy): fällige Pläne warten in der Schlange
     // POLAR-VORRANG (20.10.2026, Finn: „Wenn Polar läuft, darf gar kein einziger Trade mehr gestartet werden"): fällige Pläne bleiben in der
     // Schlange (nichts wird verworfen); dauert der Lauf länger als das Start-Fenster, greifen zu_spaet + sfTick-Nachholen (gestreut) wie bisher
-    { const _pl = polarLaeuft(); if(_pl){ warte(polarRiegelText(_pl) + ' — kein Start, Plan wartet'); return } }
+    // Seit 21.10.2026 schon ab der Vorbereitung (Finn: „während ein Polar-Trade gestartet wird, darf auch kein Orbit-Trade laufen") —
+    // polarStartSperre nimmt jede Phase; Balance-Lesungen & Co. fragen weiter polarLaeuft (erst ab der Order)
+    { const _pl = polarStartSperre(); if(_pl){ warte(polarRiegelText(_pl) + ' — kein Start, Plan wartet'); return } }
     if(Date.now() < _suPauseBis){ warte('Zufalls-Abstand nach dem letzten Start'); return }   // Zufalls-Abstand nach dem letzten Lauf
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid){ warte('Tab nicht angemeldet → am PC in Prophos anmelden'); return }
@@ -55021,7 +55078,7 @@
    * der Start-Wächter am Master-PC (tpStartUmTick) ruft dann polarStartenAmPc: Railway /polar/start (Lauf + Auftrag an die Slave-ID als
    * order_signale polar_slave) → lokales Panel /api/polar-start startet polar_bot.py master. Der Slave-PC nimmt sein Signal im
    * orderSignalTick an. Alles neue Dateien/Pfade — Echo/Orbit unverändert. */
-  async function polarPlanAnlegen(starten){
+  async function polarPlanAnlegen(){   // seit 21.10.2026 nur Speichern (Finn: „Ich will den Plan speichern und dann ganz normal auf Starten drücken")
     const n = id => Number(polarEl(id)?.value) || 0
     const msg = t => { polarEl('polarMsg').textContent = t }
     const master = polarKonto('pol-fu-konto'), slave = polarKonto('pol-cfd-konto')
@@ -55044,9 +55101,9 @@
       polar_pct: Math.round((1 + puffer / Math.max(1, tpPkt)) * 1000) / 10,
       // Slave gespiegelt vom eigenen Fill: SL hinter dem Master-TP, TP vor dem Master-SL (Puffer mit Richtung)
       sl_pkt: tpPkt + puffer, tp_pkt: Math.max(0.5, slPkt - puffer), master_sl_pkt: slPkt, master_tp_pkt: tpPkt,
-      // manuell (16.10.2026): starten = gleich laufend; sicht admin = Verwalter plant in seiner Gruppe (wie die übrigen Admin-Reiter)
-      starten: !!starten, sicht: 'admin' }
-    const knoepfe = ['polarStart', 'polarNurSpeichern'].map(polarEl).filter(Boolean)
+      // sicht admin = Verwalter plant in seiner Gruppe (wie die übrigen Admin-Reiter); kein starten mehr (21.10.2026)
+      sicht: 'admin' }
+    const knoepfe = ['polarNurSpeichern'].map(polarEl).filter(Boolean)
     if(knoepfe.some(k => k.disabled)) return   // läuft schon (Doppelklick)
     knoepfe.forEach(k => { k.disabled = true })
     let fertig = false
@@ -55054,7 +55111,7 @@
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token
       if(!tok) throw new Error('nicht angemeldet')
-      msg(starten ? 'Speichere und starte Polar-Trade…' : 'Speichere Polar-Plan…')
+      msg('Speichere Polar-Plan…')
       const r = await fetch(`${WATCHER_HOME}/polar/plan`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
@@ -55064,9 +55121,7 @@
       polarEl('polarModal').classList.remove('open')
       msg('')
       // Toast setzt textContent — Namen ohne esc (S2-Hinweis 16.10.2026: sonst „&amp;" im Toast)
-      const toastText = d.auto ? `Polar-Plan angelegt — der PC von ${master.person} startet ihn jetzt`
-        : d.status === 'open' ? `Polar-Trade läuft — beide Seiten selbst platzieren, dann in Trades bei ${master.person} „Erledigt" mit beiden P&Ls`
-        : `Polar-Plan gespeichert — in Trades bei ${master.person} unter Geplant`
+      const toastText = `Polar-Plan gespeichert — in Trades bei ${master.person} unter Geplant: „Starten" (Prüf-Tabelle, dann Bot) oder „Läuft" (von Hand)`
       if(typeof atToast === 'function') atToast(`🧭 ${toastText} (${String(d.plan_id).slice(0, 8)}) · ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
       try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
       try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
@@ -55085,7 +55140,16 @@
       d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
     }catch(e){
-      if(typeof atToast === 'function') atToast('⛔ Polar: ' + ((e && e.message) || e), 'end')
+      if(typeof atToast === 'function') atToast('⛔ Polar nicht gestartet: ' + ((e && e.message) || e), 'end')
+      // VORPRÜFUNG am Server rot (21.10.2026): Startzeit + Claim lösen, damit am Plan wieder „Starten" (Prüf-Tabelle) steht statt
+      // „gestartet …" — nur bei der Vorprüfungs-Antwort; bei Netz-/Serverfehlern bleibt der Claim (nichts doppelt starten)
+      if(d && d.code === 'vorpruefung'){
+        try{
+          await supabase.from('trade_plans').update({ start_um: null, start_um_gestartet_at: null }).eq('id', plan.id).eq('status', 'planned')
+          const i = (tradePlans || []).findIndex(x => String(x.id) === String(plan.id)); if(i >= 0){ tradePlans[i].startUm = null; tradePlans[i].startUmGestartetAt = null }
+          renderTradePlans()
+        }catch(_){}
+      }
       return
     }
     const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId)) || {}
@@ -55102,8 +55166,95 @@
     if(p && p.ok) try{ polarRiegelSofort(d.lauf_id, 'master', String(plan.id)) }catch(_){}   // POLAR-VORRANG (20.10.2026)
   }
   window.polarStartenAmPc = polarStartenAmPc
-  polarEl('polarStart')?.addEventListener('click', () => polarPlanAnlegen(true))
-  polarEl('polarNurSpeichern')?.addEventListener('click', () => polarPlanAnlegen(false))   // eigene Verdrahtung (16.10.2026)
+  polarEl('polarNurSpeichern')?.addEventListener('click', () => polarPlanAnlegen())   // eigene Verdrahtung (16.10.2026; seit 21.10. der einzige Knopf)
+
+  /* PRÜF-TABELLE (Finn 21.10.2026 ~23:15 Dubai, s. #polarCheckModal): „Starten" an einem geplanten Polar-Plan → POST /polar/vorpruefung
+   * zeigt je Prüfung ✓/✗/– mit Grund; „Polar starten" nur bei allen ✓ → POST /polar/freigeben (prüft auf dem Server noch einmal und setzt
+   * die Startzeit jetzt). Den Rest macht der Start-Wächter am Master-PC (polarStartenAmPc → /polar/start, dort ein drittes Mal fail-closed).
+   * Die Tabelle entscheidet nichts — sie zeigt, was der Server prüft. Eigene Verdrahtung, kein Sammel-Handler. */
+  let _polarCheckPlan = null
+  const polarCheckZeichen = ok => ok === true ? '<span class="pc-ok">✓</span>' : ok === false ? '<span class="pc-nein">✗</span>' : '<span class="pc-offen">–</span>'
+  // MAUS-TEST (Master-Nachtrag 21.10.2026 g): Info-Zeile je Seite, sperrt nie — nur, wenn das Panel DIESES PCs stand_test_<seite>.json liefert
+  // (GET /api/polar-stand test{}); sonst keine Zeile. fertig = × gefunden und Maus geparkt (bewiesen), fehler/nicht_gefunden = nicht bewiesen.
+  let _polarCheckTest = []
+  async function polarCheckTestLesen(){
+    _polarCheckTest = []
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return
+    try{
+      const st = await window.mtcApi('polar-stand', { timeoutMs: 4000 })
+      const t = (st && st.test) || {}
+      for(const seite of ['master', 'slave']){
+        const x = t[seite]
+        if(!x || !x.phase) continue
+        const wann = x.at_ms ? new Date(x.at_ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?'
+        const txt = x.phase === 'fertig' ? `bewiesen (${wann})` : (x.phase === 'fehler' || x.phase === 'nicht_gefunden') ? `nicht bewiesen: ${x.phase} (${wann})` : `${x.phase} (${wann})`
+        _polarCheckTest.push({ key: 'test_' + seite, titel: `Info · letzter Maus-Test × ${seite === 'master' ? 'Master' : 'Slave'} (dieser PC)`, ok: null, text: txt })
+      }
+    }catch(_){ _polarCheckTest = [] }
+  }
+  function polarCheckZeichnen(d){
+    const rows = polarEl('polarCheckRows'), start = polarEl('polarCheckStart')
+    const zz = [...((d && Array.isArray(d.zeilen)) ? d.zeilen : []), ...((d && Array.isArray(d.zeilen) && d.zeilen.length) ? _polarCheckTest : [])]
+    if(rows) rows.innerHTML = zz.map(z => `<tr><td>${polarCheckZeichen(z.ok)}</td><td><b>${escapeHtml(String(z.titel || ''))}</b></td><td class="pc-text">${escapeHtml(String(z.text || ''))}</td></tr>`).join('')
+      || '<tr><td></td><td colspan="2" class="pc-text">keine Antwort</td></tr>'
+    if(start) start.disabled = !(d && d.frei === true)
+  }
+  async function polarCheckRufen(pfad){
+    const { data: { session } } = await supabase.auth.getSession()
+    const tok = session?.access_token
+    if(!tok) throw new Error('nicht angemeldet')
+    const r = await fetch(`${WATCHER_HOME}/polar/${pfad}`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_id: String(_polarCheckPlan && _polarCheckPlan.id) }) })
+    const d = await r.json().catch(() => ({}))
+    return { r, d }
+  }
+  async function polarCheckLaden(){
+    const msg = polarEl('polarCheckMsg'), start = polarEl('polarCheckStart')
+    if(start) start.disabled = true
+    if(msg){ msg.textContent = 'Prüfe…'; msg.classList.remove('err') }
+    try{
+      await polarCheckTestLesen()
+      const { r, d } = await polarCheckRufen('vorpruefung')
+      if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
+      polarCheckZeichnen(d)
+      if(msg) msg.textContent = d.frei ? 'Alles ✓ — „Polar starten" setzt die Startzeit jetzt, der PC der Master-ID startet, Hände weg von beiden PCs.'
+        : 'Start gesperrt — erst die ✗-Zeilen klären, dann „Neu prüfen".'
+    }catch(e){
+      polarCheckZeichnen(null)
+      if(msg){ msg.textContent = '⛔ ' + ((e && e.message) || e); msg.classList.add('err') }
+    }
+  }
+  function polarVorpruefungOeffnen(planId){
+    const p = (tradePlans || []).find(x => String(x.id) === String(planId))
+    if(!p || p.route !== 'polar') return
+    _polarCheckPlan = p
+    const info = polarEl('polarCheckInfo')
+    if(info) info.textContent = `${p.masterName || 'Master-Konto'} ${p.richtung === 'buy' ? 'Long' : p.richtung === 'sell' ? 'Short' : ''} gegen ${p.slaveName || 'Slave-Konto'} · Plan ${String(p.id).slice(0, 8)}`
+    polarCheckZeichnen({ zeilen: [], frei: false })
+    polarEl('polarCheckModal')?.classList.add('open')
+    polarCheckLaden()
+  }
+  window.polarVorpruefungOeffnen = polarVorpruefungOeffnen   // Test-Haken (Stub)
+  async function polarCheckStarten(){
+    const msg = polarEl('polarCheckMsg'), start = polarEl('polarCheckStart')
+    if(!start || start.disabled || !_polarCheckPlan) return
+    start.disabled = true
+    if(msg){ msg.textContent = 'Gebe frei…'; msg.classList.remove('err') }
+    try{
+      const { r, d } = await polarCheckRufen('freigeben')
+      if(d && Array.isArray(d.zeilen)) polarCheckZeichnen(d)
+      if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
+      polarEl('polarCheckModal')?.classList.remove('open')
+      if(typeof atToast === 'function') atToast(`🧭 Polar freigegeben — der PC der Master-ID startet in Kürze („${_polarCheckPlan.masterName || '—'}"), Hände weg von beiden PCs`, 'start')
+      try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
+      try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
+    }catch(e){
+      if(msg){ msg.textContent = '⛔ ' + ((e && e.message) || e); msg.classList.add('err') }
+    }
+  }
+  polarEl('polarCheckClose')?.addEventListener('click', () => polarEl('polarCheckModal')?.classList.remove('open'))
+  polarEl('polarCheckNeu')?.addEventListener('click', () => polarCheckLaden())
+  polarEl('polarCheckStart')?.addEventListener('click', () => polarCheckStarten())
 
   /* POLAR-VORRANG (20.10.2026, Finn: „Polar bekommt höhere Priorität als Orbit. Wenn Polar läuft, darf gar kein einziger Trade mehr
    * gestartet werden. Läuft ein Polar-Trade über mehrere IDs, darf dort keine einzige Order platziert werden, keine Balance gelesen
@@ -55145,6 +55296,14 @@
     if(jetzt - Math.max(_polarRiegel.panelAt, _polarRiegel.railwayAt, _polarRiegel.versuchAt) > POLAR_RIEGEL_RAILWAY_MS){ _polarRiegel.versuchAt = jetzt; polarRiegelAktualisieren() }
     return (pl && pl.hart) ? pl : null
   }
+  // START-SPERRE (21.10.2026, Finn: „während ein Polar-Trade gestartet wird, darf auch kein Orbit-Trade laufen"): für Starts zählt jede
+  // Polar-Phase dieser ID, auch „vorbereiten" — der Start-Wächter und der Starten-Knopf fragen hier, alles andere weiter polarLaeuft()
+  function polarStartSperre(){
+    const pl = polarRiegelStand()
+    if(pl) polarLaeuft()   // stößt bei altem Stand den Poll an (wie polarLaeuft)
+    return pl || null
+  }
+  window.polarStartSperre = polarStartSperre
   function polarRiegelSofort(laufId, seite, planId){
     _polarRiegel.sofort = { lauf_id: laufId || null, plan_id: planId || null, seite: seite || null, quelle: 'start', phase: 'vorbereiten', hart: true }   // eigener PC → hart (Panel sperrt gleich)
     _polarRiegel.sofortBis = Date.now() + POLAR_RIEGEL_SOFORT_MS
