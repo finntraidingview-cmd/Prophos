@@ -40625,12 +40625,15 @@
       return `<span class="pz-risk-b" title="${escapeHtml(tip)}"><small class="l${sl == null ? ' ohne' : ''}">${sl != null ? '−' + de(L) : 'ohne'}</small><span class="bahn" style="${bahn}">${L > 0 ? `<i class="ein" style="left:${ein.toFixed(1)}%"></i>` : ''}<b class="pkt" style="left:${pos.toFixed(1)}%;background:${farbe}"></b></span><small class="r${tp == null ? ' ohne' : ''}">${tp != null ? '+' + de(R) : 'ohne'}</small></span>`
     })()
     const menge = Number(p.masterContracts) || 0
-    const gr = !menge ? '–' : p.route === 'mt5v2'
+    // LOT ODER KONTRAKTE (20.10.2026, Finns Freund im Auto-Planer: „1,5 NQ" rot „Größe in ganzen Kontrakten", manchmal ging es): bis heute galt
+    // nur route mt5v2 als Lot — Echo-Pläne MIT Hedge (route mt5, FTMO/FundedNext/FundingPips/The5%ers) liefen als „NQ" mit Kontrakt-Pflicht.
+    // Jetzt entscheidet pzwIstLot (dieselbe Liste wie app.py AP_CFD_ROUTEN, ohne Route die Firma) — hier, am data-pzw-lot und in den Delta-Zeilen.
+    const gr = !menge ? '–' : pzwIstLot(p)
       ? menge.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' Lot'
       : menge.toLocaleString('de-DE') + ' ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'Kt')
     // TP · SL · GRÖSSE ÄNDERN (Finn 08.10.2026: „Wenn ich auf Take Profit, Stop Loss oder Größe draufklicke, soll immer so ein Mini-Popup kommen,
     // wo ich das anpassen kann"): nur mit o.werte (Aufrufer: noch nicht gestartet + Recht) — Kasten pzwOeffnen, Klick über tplKlick
-    const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${p.route === 'mt5v2' ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}" data-pzw-start="${escapeHtml(String(p.startUm || ''))}"` : ''
+    const pzw = o.werte ? ` data-pzw-plan="${escapeHtml(String(p.id))}" data-pzw-tp="${Number(p.masterTp) > 0 ? Number(p.masterTp) : ''}" data-pzw-sl="${Number(p.masterSl) > 0 ? Number(p.masterSl) : ''}" data-pzw-gr="${menge || ''}" data-pzw-lot="${pzwIstLot(p) ? '1' : ''}" data-pzw-sym="${escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}" data-pzw-ppp="${o.werte.ppp > 0 ? o.werte.ppp : ''}" data-pzw-start="${escapeHtml(String(p.startUm || ''))}"` : ''
     const pzwZ = art => pzw ? ` pz-w"${pzw} data-pzw="${art}" title="Klicken zum Ändern"` : '"'
     // Topstep-Kette (09.10.2026): „Trade 1 · Reparatur-Tag" + Tooltip statt „Topstep-Kette 1/2" (tpKetteSchritt); sonst Schritt wie bisher
     const ks = tpKetteSchritt(p), tm = planIstTageMini(p) ? p.mt5Baseline.tage_mini : null
@@ -44975,7 +44978,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1640'
+  const OS_TAB_BUILD = '2026-09-22.1641'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53001,6 +53004,21 @@
     const n = Number(v); return Number.isFinite(n) ? n : NaN
   }
   const pzwDe = (v, d) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d || 0, maximumFractionDigits: d == null ? 0 : d })
+  // LOT ODER KONTRAKTE — deterministisch (20.10.2026, Finns Freund: „1,5 NQ" meistens rot, manchmal nicht; Ursache: nur mt5v2 galt als Lot,
+  // Echo mit Hedge = route mt5 lief als Futures). Route zuerst (wie app.py AP_CFD_ROUTEN: mt5v2 + mt5 = Lot; tvv2/tsv2/tvplus/dup = Kontrakte),
+  // ohne Route die Firma (tpFirmIstCfd/tpFirmIstFutures) — Admin-Zeilen fremder IDs kommen manchmal ohne Route.
+  function pzwIstLot(p){
+    const r = String((p && p.route) || '').toLowerCase()
+    if(r) return r === 'mt5v2' || r === 'mt5'
+    try{ return typeof tpFirmIstCfd === 'function' && tpFirmIstCfd(p && p.masterFirm) }catch(_){ return false }
+  }
+  // Futures-Meldung mit Ausweg (Master 20.10.2026): „1,5 NQ gibt es nicht — 1 oder 2 NQ, oder 15 MNQ"
+  function pzwKontraktText(gr, sym){
+    const u = Math.floor(gr), o = Math.ceil(gr), s = sym || 'NQ', de = v => pzwDe(v, 2).replace(/,?0+$/, '')   // 2,25 bleibt 2,25 (S2-Hinweis), 1,50 → 1,5
+    const alt = u > 0 ? `${u} oder ${o} ${s}` : `1 ${s}`
+    const mnq = s === 'NQ' && Number.isInteger(Math.round(gr * 10)) && Math.abs(gr * 10 - Math.round(gr * 10)) < 1e-9 ? `, oder ${Math.round(gr * 10)} MNQ` : ''
+    return `${de(gr)} ${s} gibt es nicht — ${alt}${mnq} (ganze Kontrakte)`
+  }
   function pzwDaten(a){
     const d = a.dataset, lot = d.pzwLot === '1', sym = String(d.pzwSym || '').toUpperCase()
     const ppp = Number(d.pzwPpp) > 0 ? Number(d.pzwPpp) : lot ? null : sym === 'MNQ' ? 2 : sym === 'NQ' ? 20 : null   // $ je Punkt und Einheit
@@ -53070,7 +53088,9 @@
     if(!(tp > 0)) return fehler('TP muss größer als 0 sein')
     if(sl !== null && !(sl > 0)) return fehler('SL leer lassen (ohne SL) oder größer als 0')
     const gr = D.lot ? Math.round(gr0 * 100) / 100 : gr0
-    if(!(gr > 0) || (!D.lot && !Number.isInteger(gr))) return fehler(D.lot ? 'Größe in Lot, z. B. 0,50' : 'Größe in ganzen Kontrakten')
+    if(Number.isNaN(gr0)) return fehler(D.lot ? 'Größe in Lot, z. B. 0,50 oder 0.5 (Komma oder Punkt)' : 'Größe in ganzen Kontrakten, z. B. 2')
+    if(!(gr > 0)) return fehler(D.lot ? 'Größe in Lot muss größer als 0 sein (z. B. 0,50)' : 'Größe in ganzen Kontrakten, mindestens 1')
+    if(!D.lot && !Number.isInteger(gr)) return fehler(pzwKontraktText(gr, D.einheit === 'Kt' ? 'NQ' : D.einheit))   // Futures: nur ganze Kontrakte, mit Ausweg
     _pzw.busy = true; msg.textContent = 'speichert …'; msg.classList.remove('rot'); el.querySelectorAll('button,input').forEach(x => x.disabled = true)
     try{
       const d = await apdApi('POST', '/plan', Object.assign({ plan_id: D.plan, aktion: 'werte', tp_usd: tp, sl_usd: sl, groesse: gr }, pzwSicht()))
@@ -67883,7 +67903,8 @@
         stufe: tz.stufe || z.stufe || g.stufe || null, konto_id: tz.konto_id || g.konto_id || z.konto_id || null, wert: tz.wert ?? g.wert ?? g.wert_eur ?? null })
       const p = { id: String(z.plan_id), status: art === 'laeuft' ? 'open' : 'planned', route: z.route || t.route || null, masterFirm: z.firma || '–', masterName: z.konto || '',
         masterAccountId: t.konto_id || null, richtung: art === 'laeuft' ? z.richtung : apIdsRiLokal(z), startUm: z.start_um || null, startUmGestartetAt: art === 'laeuft' ? (z.start_um || 'ja') : null,
-        masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge, masterSymbol: (z.route || t.route) === 'mt5v2' ? '' : 'NQ',
+        masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge,
+        masterSymbol: pzwIstLot({ route: z.route || t.route || null, masterFirm: z.firma }) ? '' : 'NQ',   // 20.10.2026: mt5 (Echo mit Hedge) ist Lot, nicht NQ
         autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null }
       jeZ.set(p.id, { z, t, pl: e.pl }); return p })
       .sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || String(a.startUm || '').localeCompare(String(b.startUm || '')))
