@@ -4112,6 +4112,14 @@
      Status über die letzten zwei Spalten, die Knöpfe darunter (gleiche Idee wie .wdl-z-akt:has(.wdl-bestanden)) */
   #dashboard-view .wdl-tab-konto .wdl-z-rvh{grid-template-areas:"wer ri mi konto pl pl" "wer ri mi zeit zeit zeit";row-gap:5px}   /* Knöpfe über Tage+Status+Zeit (344 px), sonst bricht „Balance lesen" um */
   #dashboard-view .wdl-z-rvh .wdl-z-zeit{flex-wrap:wrap;gap:4px;justify-content:flex-end}
+  /* BESTANDEN-DATUM (Finn 21.10.2026 04:50 Dubai: „das Datum, wann der Account gepasst wurde … welcher heute reingelaufen ist und welcher schon
+     vor Tagen"): siebte Spalte „Bestanden" in allen vier Stationen des Blocks (wdl-tab-bst), zwischen Tage und Status; Rest-von-Hand-Zeile
+     behält ihre zwei Reihen (Knöpfe unten über Tage+Datum+Status+Zeit). Gleiche Spezifität wie .wdl-tab-konto .wdl-z — steht deshalb dahinter. */
+  #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(120px,1fr) 96px 216px 64px 88px 110px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}   /* 862 px bei 120 px Name — passt in den Radar-Kasten ab ~900 px Breite */
+  #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer ri mi konto datum pl pl" "wer ri mi zeit zeit zeit zeit"}
+  #dashboard-view .wdl-z-datum{grid-area:datum;text-align:right;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
+  #dashboard-view .wdl-z-datum b{font-weight:600;color:var(--ink-2)}   /* „heute 17:06" fett — der ist heute reingelaufen */
+  #dashboard-view .wdl-z-kopf .wdl-z-datum{color:inherit;font-size:inherit}
   #dashboard-view .wdl-z-rvh .el-knopf{flex:none;min-height:0;height:auto;padding:3px 10px;font-size:11px;font-weight:500;line-height:1.5;border-radius:6px}   /* Knopfmaße fest wie .wdl-z-akt (Handy-.btn hat min-height 39–46 px) */
   #dashboard-view .wdl-bst-mini{display:block;font-size:10.5px;font-weight:400;color:var(--sub);margin-top:2px}
   #dashboard-view .wdl-z-akt .acc-ziel-chip{font-size:11px;padding:1px 7px;vertical-align:middle}
@@ -4260,6 +4268,11 @@
     #dashboard-view .wdl-z, #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;grid-template-areas:"wer wer wer pl" "ri mi mi zeit";column-gap:4px;row-gap:5px;padding:10px 12px;font-size:12px}
     #dashboard-view .wdl-z-konto{display:none}   /* Handy: kein Platz — Ergebnis-Wort zeigt den Blow */
     #dashboard-view .wdl-tab-konto .wdl-z-rvh{grid-template-areas:"wer wer wer wer" "ri mi mi mi" "pl pl pl pl" "zeit zeit zeit zeit"}   /* Rest von Hand (20.10.2026): Chip + Knöpfe je eigene Zeile */
+    /* Bestanden-Datum am Handy (21.10.2026): eigene Zeile direkt unter dem Konto-Namen, linksbündig */
+    #dashboard-view .wdl-tab-bst .wdl-z{grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit"}
+    #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer wer wer wer" "datum datum datum datum" "ri mi mi mi" "pl pl pl pl" "zeit zeit zeit zeit"}
+    #dashboard-view .wdl-z-datum{text-align:left;padding-left:14px}
+    #dashboard-view .wdl-tab-bst .wdl-z-kopf .wdl-z-datum{display:none}
     #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:14px}
     #dashboard-view .wdl-z > .wdl-sp{gap:6px;padding:0 4px}
     #dashboard-view .wdl-sp small i:not(:only-child){display:none}   /* Handy: nur der Betrag, das Label nur ohne Betrag */
@@ -30811,6 +30824,50 @@
     const geplant = ((wdl.daten && wdl.daten.trades) || []).some(x => x && x !== t && String(x.konto_id || '') === kid && (x.status === 'planned' || x.status === 'open') && !x.tage_mini)
     return { at, geplant }
   }
+  /* BESTANDEN-DATUM (Finn 21.10.2026 04:50 Dubai, Radar → Bestanden · 13: „Hier bitte noch das Datum, wann der Account gepasst wurde, und bei
+   * den Apex-Accounts auch die Uhrzeit — die kann man am nächsten Tag aktivieren, ich will sehen, welcher heute reingelaufen ist und welcher
+   * schon vor Tagen. Und automatisch nach Zeit sortieren: die neuesten ganz oben, die, die am längsten rumliegen, ganz unten.")
+   * Quelle: accounts.ziel_erreicht_at der Ziel-Wache (eigene Konten lokal, fremde über /admin/handarbeit seit), sonst das Ende des Trades, der
+   * das Ziel geholt hat (ended_at/completed_at der Radar-Zeile). Kurzform in Dubai-Zeit: „heute 17:06" · „gestern" · „vor 3 T" · ab 7 Tagen
+   * „14.10."; Apex immer mit Uhrzeit (Aktivierung am Folgetag). Rein rechnend, jetzt-Parameter nur für den Selbsttest (tools/selftest_bestanden_datum.py). */
+  function bstZeitVon(seit, t){
+    if(seit) return { ts: String(seit), quelle: 'Ziel-Wache (ziel_erreicht_at)' }
+    const te = t && (t.ended_at || t.completed_at)
+    return te ? { ts: String(te), quelle: 'Trade-Ende (der Trade, der das Ziel geholt hat)' } : { ts: null, quelle: '' }
+  }
+  function bstZeitKurz(ts, apex, jetztIso){
+    const d = ts ? new Date(ts) : null
+    if(!d || isNaN(d)) return { txt: '–', tip: 'kein Zeitstempel — Ziel-Wache hat das Konto noch nicht getaggt und kein beendeter Trade bekannt', tage: null }
+    const jetzt = jetztIso ? new Date(jetztIso) : new Date()
+    const tagVon = x => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(x)   // „2026-10-21" = Kalendertag Dubai
+    const tage = Math.round((Date.parse(tagVon(jetzt)) - Date.parse(tagVon(d))) / 86400000)
+    const uhr = d.toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })
+    const datum = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
+    const voll = d.toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + uhr + ' Dubai'
+    let txt
+    if(tage <= 0) txt = `<b>heute ${uhr}</b>`
+    else if(tage === 1) txt = 'gestern' + (apex ? ' ' + uhr : '')
+    else if(tage < 7) txt = `vor ${tage} T` + (apex ? ' · ' + uhr : '')
+    else txt = datum + (apex ? ' ' + uhr : '')
+    return { txt, tip: voll, tage }
+  }
+  function bstDatumZelle(seit, t, firma){
+    const z = bstZeitVon(seit, t), apex = /apex/i.test(String(firma || ''))
+    const k = bstZeitKurz(z.ts, apex)
+    return `<span class="wdl-z-datum" title="${escapeHtml(z.ts ? `bestanden ${k.tip} · Quelle: ${z.quelle}${apex ? ' · Apex: Aktivierung am Folgetag, deshalb mit Uhrzeit' : ''}` : k.tip)}">${k.txt}</span>`
+  }
+  // jüngster beendeter/abgehakter Trade eines Kontos in den Radar-Daten (Rückfall für Konten ohne Ziel-Tag)
+  function bstLetzterTrade(uid, kid, e4){
+    let best = null
+    for(const t of ((wdl.daten && wdl.daten.trades) || [])){
+      if(!t || !(t.status === 'review' || t.status === 'completed') || t.tage_mini) continue
+      const passt = (kid && String(t.konto_id || '') === String(kid)) || (e4 && wdlUid(t) === String(uid || '') && String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4) === e4)
+      if(!passt) continue
+      if(!best || String(t.ended_at || t.completed_at || '') > String(best.ended_at || best.completed_at || '')) best = t
+    }
+    return best
+  }
+  const bstTsSort = (x, y) => String((y && y.ts) || '').localeCompare(String((x && x.ts) || ''))   // neueste oben, ohne Zeitstempel ganz unten
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
     if(!b && wdlKontoWeg(t)) return '<span class="wdl-z-konto" title="Konto bei Tradovate nicht mehr vorhanden — keine Balance mehr lesbar">vermutl. geblowt</span>'
@@ -31355,7 +31412,7 @@
     // Beendet nach Ende), zwischen ihnen eine etwas kräftigere Linie (wdl-z-pfneu). Gekürzt wird JE BLOCK — sonst belegten bei
     // „Beendet" die 5 neuesten Orbit-Zeilen alle Plätze und Echo wäre wieder versteckt (der Anlass für die Kürzung).
     // unter (12.10.2026): optionale Untergruppen [[Titel, Zeilen, Klasse, Hinweis]] — Überprüfen teilt sich in normal · bestanden · geblowt
-    const gruppe = (titel, arr, sp, cls, mehr, alleArr, unter) => {
+    const gruppe = (titel, arr, sp, cls, mehr, alleArr, unter, zeileFn) => {   // zeileFn (21.10.2026): Zeile mit Bestanden-Datum
       if(!arr.length) return ''
       // Blöcke je MODELL (01.10.2026 abends, Finn: „die Modelle hier unten in der Liste separieren"): Reihenfolge wie die Leiste oben
       // (Echo · Orbit · Winning Day · Echo V2 · Orbit V2 · Topstep V2), je Block eine kleine Überschrift „Orbit · 2" — nur in „Alle"
@@ -31367,7 +31424,7 @@
       const bloecke = [...reihe, 'Weitere'].map(k => [k, arr.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
       const lang = bloecke.some(([, b]) => b.length > WDL_BEENDET_KURZ)
       const alle = !mehr || (wdl.alleZu || {})[mehr] || !lang
-      const zeilenVon = b => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => zeile(t, '')).join('')
+      const zeilenVon = b => (alle ? b : b.slice(0, WDL_BEENDET_KURZ)).map(t => (zeileFn || zeile)(t, '')).join('')
       // Körper = Modell-Blöcke einer Zeilenmenge; mit Untergruppen (unter, 12.10.2026) je Untergruppe ein Streifen mit eigenem Kopf
       const koerper = a => {
         const bl = a === arr ? bloecke : [...reihe, 'Weitere'].map(k => [k, a.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
@@ -31386,7 +31443,7 @@
         ? `<span class="wdl-z-wer wdl-z-wer-kp"><span class="wdl-kp-t">${titel} · ${arr.length}</span><span class="wdl-kp" data-wdl-kp="${escapeHtml(titel)}">${chips}</span></span>`
         : `<span class="wdl-z-wer">${titel} · ${arr.length}</span><span class="wdl-z-ri"></span>`
       return `<div class="wdl-tab${cls ? ' ' + cls : ''}${wdl.modell ? '' : ' wdl-tab-mb'}"><div class="wdl-z wdl-z-kopf${chips ? ' wdl-z-kopf-kp' : ''}">${kopfLinks}`
-        + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
+        + sp.map((x, i) => `<span class="wdl-z-${(sp.length === 5 ? ['mi', 'konto', 'datum', 'pl', 'zeit'] : sp.length === 4 ? ['mi', 'konto', 'pl', 'zeit'] : ['mi', 'pl', 'zeit'])[i]}">${x}</span>`).join('') + `</div>${zeilen}${fuss}</div>`
     }
     const nachEnde = arr => arr.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')))
     const nachStart = arr => arr.sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')))
@@ -31457,7 +31514,9 @@
       // Tage sammeln bleibt IMMER stehen (13.10.2026, Finn: „die Accounts sollen nicht für ein paar Stunden verschwinden, weil ich den Mini-Trade
       // abgehakt habe") — „nicht doppelt" gilt nur noch für Review
       return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => x.fehlt || !x.e4 || !offen.has(x.uid + '|' + x.e4))
-        .sort((x, y) => String(x.firma || '').localeCompare(String(y.firma || ''), 'de') || String(x.seit).localeCompare(String(y.seit)))
+        // SORTIERUNG NACH ZEIT (Finn 21.10.2026: „die neuesten ganz oben, die, die am längsten rumliegen, ganz unten") — vorher Firma/Datum aufsteigend
+        .map(x => Object.assign(x, { ts: bstZeitVon(x.seit, bstLetzterTrade(x.uid, x.kid, x.e4)).ts }))
+        .sort(bstTsSort)
         .map(x => {
           const konto = `${x.firma || '?'}${x.gr >= 1000 ? ' ' + Math.round(x.gr / 1000) + 'k' : ''}${x.e4 ? ' …' + x.e4 : ''}`
           const typ = x.typ, ueb = WDL_UEBERGANG[typ] || (typ ? typW(typ) : '')
@@ -31470,11 +31529,12 @@
           const knopf = x.eigen
             ? ((neu && !fehlt) ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-bst-um="${escapeHtml(String(x.a.id))}" title="Nachfolger anlegen (${escapeHtml(zielName)}): neues Konto + Login, Echo-Instanz, External ID — das alte Konto wird danach archiviert">→ ${escapeHtml(zielName)}</button>` : '')
             : `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(x.user)} stellt um">im Login von ${escapeHtml(x.user)}</span>`
-          return { fehlt: !!fehlt, kid: x.kid, html: `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
+          return { fehlt: !!fehlt, kid: x.kid, ts: x.ts, html: `<div class="wdl-z wdl-z-bst" style="--wdl-id:${idFarbe(x.uid)}">`
             + `<span class="wdl-z-wer" title="${escapeHtml(String(x.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(x.user)}</b><small>${escapeHtml(konto)}</small></span>`
             + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
             + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel ? ` → <b class="wdl-bst-ziel">${de(ziel)} ✓</b>` : ''}`, { tip: `Balance → Ziel${seit ? ' · Ziel erreicht seit ' + seit : ''}` })
             + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (x.eigen ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
+            + bstDatumZelle(x.seit, bstLetzterTrade(x.uid, x.kid, x.e4), x.firma)
             + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a) : fehlt ? `<span class="type-badge acc-ziel-chip acc-tage-chip">Tage sammeln ${Math.min(mt.count, mt.target)}/${mt.target}</span>` : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
             + '</div>' }
@@ -31484,7 +31544,7 @@
     // die komplett Ready"): Ziel erreicht, Mindesttage fehlen → „Tage farmen" (amber, der Auto-Planer legt je Handelstag einen Mini);
     // Ziel + Tage voll → „Bestanden · Phase umstellen" mit dem Nachfolger-Knopf. Dieselben Zeilen (bstZeilen), nur getrennt nach fehlt.
     const bstTab = (zz, titel, tip, klasse) => !zz.length ? '' : `<div class="wdl-tab wdl-tab-konto wdl-tab-bst ${klasse}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="${tip}">${titel} · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
-        + ['Balance → Ziel', 'Tage', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.map(z => z.html).join('')}</div>`
+        + ['Balance → Ziel', 'Tage', 'Bestanden', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'datum', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.map(z => z.html).join('')}</div>`
     // EINE GRUPPE „BESTANDEN" (.1509, Finn 13.10.2026 18:42 Dubai, Radar in Moritz' Login: „es gibt ‚Bestanden · Phase umstellen' und
     // darüber nochmal eine Gruppe für bestandene Trades — beide in eine Gruppe, nicht zwei, die genau das Gleiche sind"): die
     // Untergruppe „Bestanden" in Überprüfen ist weg. Hier stehen jetzt beide Schritte untereinander: oben die bestandenen Trades zum
@@ -31541,25 +31601,34 @@
         const knopf = (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-planer="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" data-wdl-rvh-rest="${zr.rest != null ? Math.round(zr.rest) : ''}" title="Rest zurück in den Trade-Planer: der Bot plant den Rest${zr.rest != null ? ` (${de(zr.rest)} $)` : ''} als Klein-Trade (CFD: Rest in 20 Pkt; Futures: 1 MNQ, TP = Rest + Puffer) — Nachplanen ≤ 5 min, sonst im Nachtlauf (ggf. morgen). Die Markierung löscht sich am Ziel.">→ Planer</button>` : '')
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || 'Abhaken — der normale Dialog: Nichts ändern / Account geblowt / Phase bestanden → Nachfolger. Den Rest von Hand holen, hier als manuell nachtragen und den Nachfolger anlegen')}">Abhaken</button>`
           + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie über dem Ziel, taggt die Ziel-Wache das Konto und es wandert nach Review' : `Balance über den PC von ${escapeHtml(wer)} lesen lassen`}">Balance lesen</button>` : '')
-        out.push({ firma: String(k.firma || ''), html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
+        const zt = bstZeitVon(a && a.zielErreichtAt, t)   // Rest von Hand hat per Definition keinen Ziel-Tag → Trade-Ende
+        out.push({ firma: String(k.firma || ''), ts: zt.ts, html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
           + `<span class="wdl-z-wer" title="${escapeHtml(String(k.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(wer)}</b><small>${escapeHtml(konto)}</small></span>`
           + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
           + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel != null ? ` → <b class="wdl-bst-ziel">${de(ziel)}</b>` : ''}`, { tip: `Balance → Ziel${zr.rest != null ? ` · es fehlen ${de(zr.rest)} $` : ''}` })
           + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (a ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
+          + bstDatumZelle(a && a.zielErreichtAt, t, k.firma || (a && a.firm))
           + `<span class="wdl-z-pl wdl-bst-warte" title="Noch nicht bestanden — „→ Planer" (der Bot holt den Rest) oder den Rest von Hand holen und „Abhaken" (manuell nachtragen, Nachfolger)">${chip}</span>`
           + `<span class="wdl-z-zeit">${knopf}</span>`
           + '</div>' })
       }
-      return out.sort((x, y) => x.firma.localeCompare(y.firma, 'de'))
+      return out.sort(bstTsSort)   // 21.10.2026: nach Zeit statt Firma
     }
     const bestanden = (bestTr, bestAlle, revTr, alleTr) => {
       // revTr (.1514): Trades „→ Review" (früher Geparkt) — Zeile wie in Abhaken, im selben Kasten über den Konten mit Nachfolger-Knopf
-      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, html: zeile(t, '') }))
+      // BESTANDEN-DATUM (21.10.2026): jede Zeile des Blocks bekommt die Spalte „Bestanden" (bstDatumZelle) — bei Trade-Zeilen (Trade abhaken,
+      // Review-Trades) als zusätzliche Zelle am Zeilenende (Grid-Platz über die Area, nicht über die Reihenfolge); Zeitstempel = Ziel-Tag des
+      // eigenen Kontos, sonst Trade-Ende. Jede Station sortiert danach absteigend.
+      const kontoVon = t => (accounts || []).find(a => a && String(a.id) === String(t.konto_id || '')) || null
+      const tsVon = t => bstZeitVon((kontoVon(t) || {}).zielErreichtAt, t).ts
+      const zeileDatum = t => zeile(t, '').replace(/<\/div>$/, bstDatumZelle((kontoVon(t) || {}).zielErreichtAt, t, (t.konto || {}).firma) + '</div>')
+      const nachZiel = arr => [...arr].map(t => ({ t, ts: tsVon(t) })).sort(bstTsSort).map(x => x.t)
+      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, ts: tsVon(t), html: zeileDatum(t) }))
       let rvh = []; try{ rvh = rvhZeilen(alleTr) }catch(e){ console.warn('[radar] Rest von Hand', (e && e.message) || e); rvh = [] }
-      const kaesten = gruppe('Trade abhaken', nachEnde(bestTr || []), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-bestanden', null, bestAlle || [])
+      const kaesten = gruppe('Trade abhaken', nachZiel(bestTr || []), ['Ergebnis', 'Konto', 'Bestanden', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden', null, bestAlle || [], null, zeileDatum)
         + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage')
-        + bstTab([...rev, ...zz.filter(z => !z.fehlt)], 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
+        + bstTab([...rev, ...zz.filter(z => !z.fehlt)].sort(bstTsSort), 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
       return { html: kaesten, n: (bestTr || []).length + rvh.length + zz.length + rev.length }
     }
     const manuell = (g, a) => {
@@ -45313,7 +45382,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1654'
+  const OS_TAB_BUILD = '2026-09-22.1655'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
