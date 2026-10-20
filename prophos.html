@@ -26344,7 +26344,11 @@
           : unbestaetigt
           ? { grund: 'demo_unklar', demo_status: dm.status, at: dm.at || new Date().toISOString(), preis: null, master_pl_schaetzung: null,
               hinweis: `Demo meldet ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'}, der Einstieg ist aber nur geschätzt (${String((t && t.einstieg_quelle) || 'ohne Einstieg')}) — kein Ergebnis, Balance-Lesung abwarten` }
-          : { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? 'demo_liq' : 'demo_beide', at: dm.at || new Date().toISOString(),
+          // ENDE AM SL HEISST SL (21.10.2026, Master 04:35 Dubai, Topstep 150k BUY 2 NQ: Demo stoppte am Bracket-SL 29.713,25 (−1.746 $), das Ende
+          // stand trotzdem als „demo_liq" am Plan, als wäre es die Liquidation bei −4.500 $). Das Backend (_lt_demo) liefert stop 'sl', wenn ein
+          // echter SL (Bracket/master_sl) die Demo beendete — dann grund 'demo_sl'; 'demo_liq' nur ohne SL bzw. am Liq-Level. Nur Benennung:
+          // Überprüfen, Nachlesung, P&L laufen gleich; tvV2LiqUndWeg („liquidiert + Konto weg") bleibt bewusst auf 'demo_liq'.
+          : { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'demo_sl' : 'demo_liq') : 'demo_beide', at: dm.at || new Date().toISOString(),
               preis: dm.preis != null ? Number(dm.preis) : null, master_pl_schaetzung: (!beide && dm.pl_usd != null && isFinite(Number(dm.pl_usd))) ? Number(dm.pl_usd) : null,
               ...(beide ? { hinweis: 'TP und Liquidation in derselben Minute — Reihenfolge unbekannt, keine Schätzung' } : {}) }
         let ok = false
@@ -30340,18 +30344,32 @@
     // LIQ-REGELN (30.09.2026): Liquidation nach der Tabelle liq_regeln (Backend liq_regel_level_nq, z. B. Apex-Daily-Loss-Stufe) vor der
     // alten Rechnung (Kontogröße + 100 $ bzw. Max-Drawdown); ein echter SL bleibt vorn. Nur Anzeige — der Fusion-Hedge rechnet wie bisher.
     const slE = wdlSlEcht(t), lqR = n(t.liq_regel_level_nq), lqA = n(t.liq_level_nq)
-    const links = slE != null ? slE : lqR != null ? lqR : lqA != null ? lqA : n(t.sl_level_nq), rechts = n(t.tp_level_nq)
-    if(links == null || rechts == null || links === rechts) return null
     // $ beim Erreichen: (Level − Einstieg) × Richtung × Punktwert × Kontrakte (punktwert vom Backend, sonst NQ 20 / MNQ 2)
     const ein = n(t.einstieg_nq), kt = n(t.kt), root = String(t.symbol_root || ''), ri = t.richtung === 'buy' ? 1 : t.richtung === 'sell' ? -1 : 0
     const ppl = n(t.punktwert) || ((root === 'NQ' || root === 'MNQ') ? mklPpl(root) : null)
     const pl = v => (ein != null && kt && ppl && ri) ? Math.round((v - ein) * ri * ppl * kt) : null
+    // SL/TP AUS DEM PLAN (21.10.2026, Master 04:35 Dubai, Radar Topstep 150k BUY 2 NQ, master_tp 2.419 / master_sl 1.746: „hat der Plan ein
+    // master_sl (Topstep-Kette, Orbit mit SL), zeigt die Spanne ‚SL −1.746 $' rot links statt Liq, TP = master_tp; Liq nur, wenn kein SL
+    // gesetzt ist; Tooltip nennt zusätzlich MLL/DLL"): die Beträge an den Enden sind die $ vom Plan, nicht das gerundete Level zurück-
+    // gerechnet ((29.713,25 − 29.757) × 40 $ = −1.750 statt −1.746). Fehlt dem Backend das SL-Level (kein sl_art, z. B. Einstieg erst
+    // später bekannt), trägt der Plan aber master_sl und die Zeile einen Einstieg, rechnet die Spanne das Level selbst (wie _wd_level im
+    // Backend). Winning Days (sl_art 'liquidation', kein master_sl) bleiben bei der Liquidation. Nur Anzeige — Demo, Chart und Hedge
+    // rechnen wie bisher.
+    const slPlan = n(t.master_sl), tpPlan = n(t.master_tp)
+    const slFb = (slE == null && slPlan != null && t.sl_art !== 'liquidation' && ein != null && kt && ppl && ri) ? n(ein - ri * slPlan / (ppl * kt)) : null
+    const links = slE != null ? slE : slFb != null ? slFb : lqR != null ? lqR : lqA != null ? lqA : n(t.sl_level_nq), rechts = n(t.tp_level_nq)
+    if(links == null || rechts == null || links === rechts) return null
+    const istSl = slE != null || slFb != null
     // KONTO-BODEN (30.09.2026): liq_regel_level_nq ist seit dem Backend die ENGERE von Regel und Konto-Boden (Max DD); der Tooltip zeigt
     // beide mit „✓ gilt" (liq_vergleich_text) — sonst nur die eine, ohne „Regel:", wenn allein der Boden gilt
     const vgl = t.liq_vergleich_text ? String(t.liq_vergleich_text) : ''
+    // MLL/DLL des Kontos auch hinter einem SL (21.10.2026): der Vergleich Boden/Regel vom Backend, sonst die eine Grenze — als „Konto: …"
+    const konto = vgl || String(t.liq_regel_text || t.liq_boden_text || '')
     // APEX-EVAL-SOFTBREACH (07.10.2026): gilt der weiche Tagesstopp (Apex Daily Loss), heißt das linke Ende „Tageslimit", nicht „Liq"
-    return { links, rechts, ein, art: slE != null ? 'SL' : (lqR != null && wdlLiqIstTag(t)) ? 'Tag' : 'Liq', plLinks: pl(links), plRechts: pl(rechts),
-             regel: slE == null && lqR != null ? (vgl || String(t.liq_regel_text || '')) : '', regelPur: !!vgl || t.liq_gilt === 'boden' }
+    return { links, rechts, ein, art: istSl ? 'SL' : (lqR != null && wdlLiqIstTag(t)) ? 'Tag' : 'Liq',
+             plLinks: istSl && slPlan != null ? -Math.round(slPlan) : pl(links), plRechts: tpPlan != null ? Math.round(tpPlan) : pl(rechts),
+             regel: istSl ? (konto ? 'Konto: ' + konto : '') : lqR != null ? (vgl || String(t.liq_regel_text || '')) : '',
+             regelPur: istSl || !!vgl || t.liq_gilt === 'boden' }
   }
   // Betrag kompakt für die Enden der Spanne: „−3.000 $", „+272 $", ab 10.000 „−10,5k $"; lang (Tooltip) immer ganze $
   function wdlSpBetrag(v, lang){
@@ -30559,7 +30577,7 @@
       let mi = '<span class="wdl-z-mi" title="kein TP oder keine Liquidation/SL gespeichert">–</span>'
       if(sp && echo){ const pkt = wdlEchoPunkt(t, sp); mi = wdlSpanneHtml(sp, pkt ? pkt.v : null, farbe, wdlEchoSpTip(t, sp, pkt)) }
       else if(sp){ const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
-        mi = wdlSpanneHtml(sp, kp, farbe, `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}`) }
+        mi = wdlSpanneHtml(sp, kp, farbe, `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}`) }   // MLL/DLL hinter dem SL (21.10.2026)
       const pl = `<span class="wdl-z-pl"><span data-lz-usd style="color:${farbe}">${usd(e.pl)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(e.eur)}" title="hypothetisch: Kontowert-Satz × Live-P&amp;L">${eur(e.eur)}</small></span>`
       const ab = zeit(t.started_at || t.start_um)
       const z = `<span class="wdl-z-zeit" title="${escapeHtml(ab ? 'läuft seit ' + ab : 'Startzeit unbekannt')}">${ab ? `<span class="wdl-z-ab">${ab} · </span>` : ''}<span class="wdl-z-dauer" data-lz-dauer>${t.started_at ? wdlDauer(t.started_at) : '–'}</span></span>`
@@ -45382,7 +45400,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1656'
+  const OS_TAB_BUILD = '2026-09-22.1657'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
