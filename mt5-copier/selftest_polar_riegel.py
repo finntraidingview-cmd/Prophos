@@ -173,6 +173,28 @@ def test_aktiv_liste():
     chk("PC-Stand nicht lesbar → beide PC-Zeilen nicht prüfbar, sperrt nicht", f5 is True and [z["ok"] for z in z5 if z["key"].startswith("pc_")] == [None, None])
     chk("Orbit-Treffer namentlich", "150k Orbit" in next(z for z in vz(dict(gruen, belegt=[{"user_id": A, "route": "tvv2", "name": "150k Orbit", "art": "läuft"}]))[1] if z["key"] == "trades_master")["text"])
     chk("Schalter steht an", polar_app.POLAR_AUTO is True)
+    # LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai): Schrittliste je Seite (schritt_eintragen) + Slave-Live-P&L aus mt5_live (slave_live_pl)
+    se = polar_app.schritt_eintragen
+    teil = {}
+    chk("Schritt neu", se(teil, "vorbereiten", "MT5 öffnen", 1000) is True and se(teil, "bereit", "steht", 3000) is True)
+    chk("Dublette (gleiche Phase + Zeit) fällt weg", se(teil, "bereit", "steht", 3000) is False and len(teil["schritte"]) == 2)
+    se(teil, "geklickt", "gedrückt", 2000)
+    chk("nach Zeit sortiert", [x["phase"] for x in teil["schritte"]] == ["vorbereiten", "geklickt", "bereit"])
+    t2 = {}
+    for i in range(50):
+        se(t2, f"p{i}", "x", i)
+    chk("höchstens 40, die jüngsten bleiben", len(t2["schritte"]) == 40 and t2["schritte"][0]["phase"] == "p10" and t2["schritte"][-1]["phase"] == "p49")
+    chk("leere Phase verworfen, Text gekürzt", se({}, "", "x", 1) is False and len((lambda t: (se(t, "a", "x" * 300, 1), t)[1])({})["schritte"][0]["text"]) == 160)
+    sl = polar_app.slave_live_pl
+    rows = [{"updated_at": "2026-10-21T20:00:01Z", "pos": [{"ticket": 77, "profit": -12.5}, {"ticket": 78, "profit": 3}]},
+            {"updated_at": "2026-10-21T20:00:05Z", "pos": [{"ticket": 77, "profit": 40.257}]}]
+    chk("Slave-P&L: jüngste Zeile mit dem Ticket, gerundet", sl(rows, 77) == {"pl": 40.26, "at": "2026-10-21T20:00:05Z"})
+    chk("Slave-P&L: Ticket fehlt → None", sl(rows, 99) is None and sl([], 77) is None and sl(None, 77) is None)
+    srcL = open(os.path.join(os.path.dirname(HERE), "polar_app.py"), encoding="utf-8").read()
+    sr = srcL[srcL.index("def polar_schritt():"):srcL.index("@app.route(\"/polar/aktiv\"")]
+    chk("/polar/schritt: Code-Schlüssel + Seite geprüft, kein Status-Wechsel, kein Wecken, KEIN eigener DB-Write (kein Wettrennen mit melden)",
+        '_code_zugang' in sr and "_seite_ok(z, wer[0], seite)" in sr and "_status(" not in sr and "notify" not in sr and "_db(" not in sr)
+    chk("/polar/stand liefert slave_live", '"slave_live": _slave_live(z)' in srcL)
     # WÄHREND DES LAUFS (Master 21.10.2026, Punkt 3): ein Bot-Lauf hält Master- UND Slave-ID schon ab „start" — der Tab-Start-Wächter
     # sperrt jede Polar-Zeile dieser IDs, auch in der Vorbereitung (polarStartSperre, prophos.html), also startet dort kein Orbit-Plan
     for st in ("start", "bereit", "feuer", "offen"):

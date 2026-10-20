@@ -109,6 +109,32 @@ else:
     print("… osascript fehlt — wdlPolarPhase nur per Text geprüft")
     check("if(status === 'fertig') return { phase: 'ende'" in (m.group(0) if m else ""), "wdlPolarPhase: fertig → ende")
 
+# (2b) LIVE-ABLAUF (21.10.2026, Finn: „rechts Master, links Slave … Live-P&Ls, Take-Profits"): polarLiveWerte echt per JXA
+ml = re.search(r"\n  function polarLiveWerte\(st, o\)\{.*?\n  \}\n", HTML, re.S)
+ende = re.search(r"^  const WDL_POLAR_ENDE = .*$", HTML, re.M)
+check(bool(ml and ende), "polarLiveWerte + WDL_POLAR_ENDE gefunden")
+if ml and ende and shutil.which("osascript"):
+    js = (ende.group(0) + "\n" + ml.group(0) + "\nvar st = {status: 'offen', master: {gefuellt: {fill: 30800}, level: {sl_soll: 30650, tp_soll: 30950}}, "
+          "slave: {gefuellt: {fill: 30801}, level: {sl: 30951, tp: 30649}}, slave_live: {pl: -12.5}};\n"
+          "var o = {richtung: 'buy', kontrakte: 1, symbol: 'MNQZ26', lots: 0.3, slavePpl: 1, kurs: 30810};\n"
+          "JSON.stringify([polarLiveWerte(st, o), polarLiveWerte(Object.assign({}, st, {status: 'fertig'}), o), polarLiveWerte(st, Object.assign({}, o, {symbol: 'NQZ6', kurs: null})), polarLiveWerte(null, {})])")
+    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", js], capture_output=True, text=True)
+    try:
+        v = json.loads(r.stdout.strip())
+    except ValueError:
+        v = None
+    check(isinstance(v, list) and len(v) == 4, f"polarLiveWerte läuft ({(r.stderr or '').strip()[:100]})")
+    if isinstance(v, list) and len(v) == 4:
+        m0, s0 = v[0]["master"], v[0]["slave"]
+        check(m0["pl"] == 20 and m0["tpBetrag"] == 300 and m0["slBetrag"] == -300, "Master MNQ BUY 1: Kurs +10 Pkt = +20 $, TP +300 $, SL −300 $")
+        check(s0["pl"] == -12.5 and s0["dir"] == -1 and s0["tpBetrag"] == 45.6 and s0["slBetrag"] == -45, "Slave Gegenrichtung: P&L aus slave_live, TP/SL-Betrag × Lots × $/Pkt")
+        check(v[1]["master"]["pl"] is None and v[1]["slave"]["pl"] is None and v[1]["ende"] is True, "nach dem Ende kein Live-P&L mehr (Abrechnung zählt)")
+        check(v[2]["master"]["pl"] is None and v[2]["master"]["tpBetrag"] == 3000, "ohne Kurs kein Master-P&L; NQ = 20 $/Pkt")
+        check(v[3]["master"]["fill"] is None and v[3]["slave"]["pl"] is None, "leerer Stand verträglich")
+check("+ spalte('Slave'," in HTML and HTML.index("+ spalte('Slave',") < HTML.index("+ spalte('Master',"), "Live-Ablauf: Slave links, Master rechts")
+check("polarLiveStarten(_polarCheckPlan)" in HTML and "setInterval(polarLiveTick, 2000)" in HTML, "Prüf-Popup wechselt nach „Polar starten\" in den Live-Ablauf (2 s)")
+check("? polarAblaufHtml(st, { richtung: t.richtung" in HTML, "Radar-Popup zeigt denselben Live-Ablauf")
+
 # (3) Radar-Zeile + Popup + Mobil
 check("function wdlIstPolar(t){ return !!t && (t.plattform === 'polar' || t.route === 'polar') }" in HTML, "wdlIstPolar")
 check("if(wdlIstPolar(t)) return 'Polar'" in HTML, "wdlWeg: Sticker „Polar\"")

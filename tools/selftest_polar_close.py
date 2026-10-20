@@ -132,6 +132,50 @@ def main():
     srcB = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
     lm = srcB[srcB.index("def lauf_master(cmd):"):srcB.index("def lauf_slave(cmd):")]
     check(0 < lm.index("reader_bereit(ob._tv_http(\"/positions\"") < lm.index("bereit_und_warten("), "Reader-Pflicht vor bereit/Feuer im Master-Lauf (Abbruch-Pfad: nichts gesendet)")
+    # LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai: „wird geöffnet, platziert, bereit zum Drücken — die ganzen Steps dahin schreiben"):
+    # schritt_text je Phase (ohne Kontonummern/Logins), Sender nie blockierend
+    st = pb.schritt_text
+    cm = {"richtung": "buy", "volumen": 1, "symbol": "MNQZ26", "ext_id": "GEHEIM123", "login": "9999"}
+    check(st("master", "bereit", {}, cm) == "BUY 1 MNQZ26 steht vor dem Klick — wartet auf die Feuerzeit", "bereit: Richtung, Menge, Symbol")
+    check(st("slave", "vorbereiten", {}, {}) == "MT5 öffnen, Ticket vorbereiten" and st("master", "vorbereiten", {}, cm).startswith("Puls-Chrome"), "vorbereiten je Seite")
+    check(st("slave", "gefuellt", {"fill": 30801.5}, {}) == "gefüllt 30.801,50", "gefüllt mit deutschem Preis")
+    check(st("slave", "level", {"sl": 29900, "tp": 31000, "level_ok": False}, {}).endswith("nicht bestätigt, von Hand prüfen"), "Level nicht bestätigt sagt es")
+    check(st("master", "level", {"level": {"sl_soll": 29900.25, "tp_soll": 31000}}, {}) == "SL/TP gesetzt 29.900,25 / 31.000,00", "Master-Level aus sl_soll/tp_soll")
+    check(st("master", "fehler", {"msg": "Fenster weg"}, {}) == "fehler: Fenster weg" and st("x", "neu_phase", {}, {}) == "neu_phase", "Fehler mit Grund, unbekannte Phase = Name")
+    check(all("GEHEIM123" not in st("master", ph, {}, cm) and "9999" not in st("master", ph, {}, cm) for ph in
+              ("vorbereiten", "bereit", "geklickt", "gefuellt", "level", "wache", "ende")), "nie Konto-Kennung/Login im Schritt-Text")
+    class _L:   # Lauf-Attrappe: Sender darf nie warten
+        test, lauf_id, token, seite = None, "l-1", "t", "master"
+        import queue as _q
+        _schritte = _q.Queue(maxsize=2)
+        _sender = object()   # Sender gilt als gestartet
+    lauf = _L()
+    import time as _t
+    t0 = _t.time()
+    for i in range(10):
+        pb.Lauf.schritt(lauf, "p", "x", i)
+    check(_t.time() - t0 < 0.05 and lauf._schritte.qsize() == 2, "Sender-Queue voll → Schritt verworfen, nichts wartet")
+    lauf2 = _L(); lauf2.token = None; lauf2._schritte = _L._q.Queue(maxsize=5)
+    pb.Lauf.schritt(lauf2, "p", "x", 1)
+    check(lauf2._schritte.qsize() == 0, "ohne Schlüssel (oder Maus-Test) wird nichts gemeldet")
+    src = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    ph = src[src.index("    def phase(self, name, **felder):"):src.index("    def schritt(self, name, text, at_ms=None):")]
+    check("self.schritt(name, schritt_text(" in ph and 'railway(lauf, "POST", "/polar/schritt", d, timeout=SCHRITT_TIMEOUT_S)' in src
+          and pb.SCHRITT_TIMEOUT_S <= 5, "jede Phase meldet einen Schritt, Call im eigenen Thread mit kurzem Timeout")
+    sd = src[src.index("def _schritt_sender(lauf):"):src.index("def schritte_abwarten(")]
+    check("lauf._schritte.get(timeout" not in sd and "lauf._schritte.get()" in sd and "task_done()" in sd, "Sender ohne Ruhe-Timeout (stirbt nicht in der stundenlangen Wache), task_done je Schritt")
+    import queue as _qq, threading as _th
+    class _L2:
+        _schritte = _qq.Queue()
+    l2 = _L2(); l2._schritte.put({"x": 1})
+    pb._SCHRITT_LAEUFE.append(l2)
+    t0 = _t.time(); pb.schritte_abwarten(0.4); dt = _t.time() - t0
+    check(0.35 <= dt < 1.0, f"Abwarten am Lauf-Ende hört nach max_s auf, auch wenn nichts gesendet wird ({dt:.2f} s)")
+    l2._schritte.get(); l2._schritte.task_done()
+    t0 = _t.time(); pb.schritte_abwarten(3); dt = _t.time() - t0
+    check(dt < 0.3, f"leere Queue → kein Warten ({dt:.2f} s)")
+    pb._SCHRITT_LAEUFE.remove(l2)
+    check("schritte_abwarten()" in src[src.index("def main():"):], "main wartet nach dem Lauf auf die letzten Schritte")
     print()
     if FEHLER:
         print(f"FEHLER: {len(FEHLER)}")

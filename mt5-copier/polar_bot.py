@@ -34,6 +34,7 @@ import math
 import os
 import re
 import sys
+import queue
 import threading
 import time
 
@@ -43,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.2.0"   # 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist
+VERSION = "0.3.0"   # 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -70,6 +71,11 @@ class Lauf:
         except OSError:
             self.token = None
         self.log_datei = os.path.join(self.ordner, f"{test}_{seite}.log" if test else f"{seite}.log")
+        # LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai: „… was die gerade genau machen: wird geöffnet, platziert, bereit zum Drücken — die ganzen
+        # Steps dahin schreiben"): jede Phase geht als Schritt an Railway (/polar/schritt). Eigener Hintergrund-Sender, Queue ohne Warten —
+        # ein langsamer oder fehlgeschlagener Melde-Call hält den Lauf NIE auf (voll = Schritt verworfen, Fehler nur im Log).
+        self._schritte = queue.Queue(maxsize=SCHRITT_QUEUE_MAX)
+        self._sender = None
         self.stand_datei = os.path.join(self.ordner, f"stand_test_{seite}.json" if test else f"stand_{seite}.json")
 
     def log(self, text):
@@ -86,6 +92,21 @@ class Lauf:
         self.stand["at_ms"] = jetzt_ms()
         self.stand["trail_ende"] = ob._spur(self.trail)[-600:]
         schreiben(self.stand_datei, self.stand)
+        self.schritt(name, schritt_text(self.seite, name, felder, self.cmd), self.stand["at_ms"])
+
+    def schritt(self, name, text, at_ms=None):
+        """Schritt an Railway, nie blockierend (put_nowait; Sender-Thread einmal je Lauf). Maus-Test meldet nichts."""
+        if self.test or not self.lauf_id or not self.token:
+            return
+        try:
+            self._schritte.put_nowait({"lauf_id": self.lauf_id, "seite": self.seite, "phase": name, "text": str(text or "")[:160],
+                                       "at_ms": int(at_ms or jetzt_ms())})
+        except queue.Full:
+            return
+        if self._sender is None:
+            self._sender = threading.Thread(target=_schritt_sender, args=(self,), daemon=True)
+            self._sender.start()
+            _SCHRITT_LAEUFE.append(self)
 
     def abbruch_gewuenscht(self):
         return os.path.exists(os.path.join(self.ordner, "abbruch.json"))
@@ -93,6 +114,86 @@ class Lauf:
 
 def jetzt_ms():
     return int(time.time() * 1000)
+
+
+SCHRITT_QUEUE_MAX = 60        # mehr Schritte hat kein Lauf; voll = verwerfen statt warten
+SCHRITT_TIMEOUT_S = 4         # ein Melde-Call wartet höchstens so lange (im Sender-Thread, nie im Lauf)
+SCHRITT_ABSTAND_S = 0.2       # Drossel zwischen zwei Calls
+SCHRITT_ABWARTEN_S = 6.0      # am Lauf-Ende höchstens so lange warten, bis die letzten Schritte (zu_bestaetigt, ende) draußen sind
+_SCHRITT_LAEUFE = []          # Läufe mit gestartetem Sender (für das Abwarten in main)
+
+
+def _schritt_sender(lauf):
+    """Hintergrund: Schritte nacheinander an /polar/schritt. railway() wirft nie; scheitert ein Call, bleibt der Schritt weg (Log).
+    Läuft bis zum Prozessende (daemon) — KEIN Ruhe-Timeout (Prüfer S2 21.10.2026: mit get(timeout=600) starb er in der stundenlangen
+    Wache, die End-Schritte blieben in der Queue und die Live-Tabelle stand bei „Wache läuft")."""
+    while True:
+        d = lauf._schritte.get()
+        try:
+            railway(lauf, "POST", "/polar/schritt", d, timeout=SCHRITT_TIMEOUT_S)
+        finally:
+            lauf._schritte.task_done()
+        time.sleep(SCHRITT_ABSTAND_S)
+
+
+def schritte_abwarten(max_s=SCHRITT_ABWARTEN_S):
+    """Am Lauf-Ende (main): höchstens max_s warten, bis alle Sender ihre Queue geleert haben — der Prozess endet sonst, bevor „ende" gesendet
+    ist. Wartet nie länger; nichts hier kann den Lauf selbst aufhalten (der ist zu diesem Zeitpunkt schon beendet)."""
+    ende = time.time() + max(0.0, float(max_s))
+    while time.time() < ende and any(getattr(l._schritte, "unfinished_tasks", 0) for l in _SCHRITT_LAEUFE):
+        time.sleep(0.1)
+
+
+def _preis(x):
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return "?"
+    return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def schritt_text(seite, name, felder, cmd):
+    """REIN RECHNEND (testbar, tools/selftest_polar_close.py): kurze Zeile je Phase für die Live-Ablauf-Tabelle (Slave links, Master rechts).
+    Nennt nie Kontonummern oder Logins — nur Richtung, Menge, Symbol, Preise, Gründe."""
+    f, c = felder or {}, cmd or {}
+    ri = str(c.get("richtung") or "").upper() or "?"
+    menge = c.get("volumen") if c.get("volumen") is not None else c.get("kontrakte")
+    sym = str(c.get("symbol") or ("NAS100" if seite == "slave" else "?"))
+    order = f"{ri} {menge if menge is not None else '?'} {sym}"
+    if name == "vorbereiten":
+        return "MT5 öffnen, Ticket vorbereiten" if seite == "slave" else "Puls-Chrome: Konto wählen, Order-Ticket vorbereiten"
+    if name == "bereit":
+        return f"{order} steht vor dem Klick — wartet auf die Feuerzeit"
+    if name == "feuer":
+        ms = f.get("feuer_ms")
+        try:
+            uhr = time.strftime("%H:%M:%S", time.localtime(int(ms) / 1000)) + f".{int(ms) % 1000:03d}"
+        except (TypeError, ValueError):
+            uhr = "?"
+        return f"Feuerzeit {uhr}"
+    if name == "geklickt":
+        return f"{order} gedrückt"
+    if name == "gefuellt":
+        return f"gefüllt {_preis(f.get('fill'))}"
+    if name == "level":
+        lv = f.get("level") if isinstance(f.get("level"), dict) else f
+        sl, tp = lv.get("sl_soll", lv.get("sl")), lv.get("tp_soll", lv.get("tp"))
+        ok = lv.get("level_ok", lv.get("ok"))
+        return f"SL/TP gesetzt {_preis(sl)} / {_preis(tp)}" + (" — nicht bestätigt, von Hand prüfen" if ok is False else "")
+    if name == "geparkt_x":
+        return "Maus auf dem Schließen-×"
+    if name == "wache":
+        return "Wache läuft — Position offen" + ("" if f.get("x_geparkt", True) else " (Maus auf der Zeile, × nicht bewiesen)")
+    if name == "x_geklickt":
+        return "× geklickt" + ("" if f.get("x_ok", True) else " — Beweis fehlt")
+    if name == "zu_bestaetigt":
+        q = f.get("zu_quelle") or f.get("zu_weg") or ""
+        return "zu bestätigt" + (f" ({q})" if q else "")
+    if name in ("fehler", "abbruch", "unklar", "nicht_zu"):
+        return f"{name}: {str(f.get('msg') or '')[:120]}".rstrip(": ")
+    if name == "ende":
+        return "Ende gemeldet — Railway rechnet ab"
+    return name
 
 
 def schreiben(pfad, daten):
@@ -1707,6 +1808,7 @@ def main():
         print(json.dumps({"ok": False, "msg": f"Befehl kein gültiges JSON: {e}"}))
         return 2
     res = lauf_master(cmd) if sys.argv[1] == "master" else lauf_slave(cmd)
+    schritte_abwarten()   # Live-Ablauf (21.10.2026): letzte Schritte noch raus, höchstens 6 s
     print(json.dumps(res, ensure_ascii=False, default=str))
     return 0 if res.get("ok") else 1
 

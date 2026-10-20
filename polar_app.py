@@ -14,6 +14,7 @@ Funded-Futures (Master, ID A, TradingView, PC A) gegen Funded-CFD (Slave, ID B, 
   /polar/aktiv   Polar-Vorrang (20.10.2026): hält gerade ein Lauf (Bot oder Hand-Plan) die ID des Aufrufers? → Tab polarLaeuft()
   /polar/vorpruefung  Prüf-Tabelle vor dem Start (21.10.2026): Richtungsschutz, andere Trades/Signale, andere Polar-Läufe, beide PCs
   /polar/freigeben    „Polar starten" in der Tabelle: dieselben Prüfungen noch einmal, alles ✓ → Startzeit jetzt (der Master-PC startet)
+  /polar/schritt      Live-Ablauf (21.10.2026): jede Bot-Phase je Seite mit Zeit + Zeile → Schrittliste im Lauf, /polar/stand liefert sie mit
 Abbruch nur VOR der Feuerzeit; danach nur noch „fehler" (dann schließt die andere Seite ihre Position). Am Ende Balance/P&L beider
 Seiten an Plan (review) und Konten — Finn: „im Nachhinein mit Balance ausgelesen, alles automatisch drin"."""
 import re
@@ -41,6 +42,9 @@ ENDE = ("fertig", "abbruch", "fehler")
 _LAEUFE = {}
 _COND = threading.Condition()
 _AKTIV_CACHE = {}             # uid → (epoch, laeufe) — /polar/aktiv 5 s gecacht (Supabase-Diät, Master 20.10.2026)
+SCHRITTE_MAX = 40             # Live-Ablauf: höchstens so viele Schritte je Seite (ein Lauf hat ~15)
+SLAVE_LIVE_CACHE_S = 3        # Live-P&L des Slaves aus mt5_live höchstens alle 3 s je Lauf lesen (Supabase-Diät)
+_SLAVE_LIVE = {}              # lauf_id → (epoch, {pl, at})
 AKTIV_CACHE_S = 5
 AKTIV_FENSTER_H = 36          # Läufe älter als 36 h zählen nicht mehr (Leiche nach Railway-Neustart ohne Ende-Meldung)
 A = {}                        # Namensraum von app.py (sb_select, sb_update, sb_insert, _sb_anfrage, _sb_headers, SUPABASE_URL, …)
@@ -92,6 +96,62 @@ def _laden(lid):
     z.update(zu_erste_seite(z))      # wer zuerst zu war (20.10.2026) — aus den beiden Zeiten, ohne eigene Spalte
     with _COND:
         return _LAEUFE.setdefault(lid, z)
+
+
+def schritt_eintragen(teil, phase, text, at_ms, maximal=SCHRITTE_MAX):
+    """REIN RECHNEND (testbar, selftest_polar_riegel.py) — LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai: „… rechts Master, links Slave. Was die
+    gerade genau machen: wird geöffnet, platziert, bereit zum Drücken — die ganzen Steps dahin schreiben"): Schritt an teil['schritte'] hängen,
+    nach Zeit sortiert, Dublette (gleiche Phase + Zeit) weg, höchstens `maximal` (die jüngsten). → True, wenn neu."""
+    liste = teil.setdefault("schritte", [])
+    try:
+        at = int(at_ms)
+    except (TypeError, ValueError):
+        at = _ms()
+    ph = str(phase or "")[:30]
+    if not ph or any(x.get("phase") == ph and x.get("at_ms") == at for x in liste):
+        return False
+    liste.append({"phase": ph, "text": str(text or "")[:160], "at_ms": at})
+    liste.sort(key=lambda x: x.get("at_ms") or 0)
+    if len(liste) > maximal:
+        del liste[:len(liste) - maximal]
+    return True
+
+
+def slave_live_pl(rows, ticket):
+    """REIN RECHNEND (testbar): Live-P&L des Slaves aus mt5_live-Zeilen des Slave-Logins ({updated_at, pos: master_positions}) — die
+    Echo-Instanz meldet profit je Position (copier.py Snapshot). Jüngste Zeile mit dem Ticket → {pl, at} | None."""
+    for r in sorted((x for x in rows or [] if isinstance(x, dict)), key=lambda x: str(x.get("updated_at") or ""), reverse=True):
+        for q in (r.get("pos") or []):
+            if isinstance(q, dict) and str(q.get("ticket")) == str(ticket) and q.get("profit") is not None:
+                try:
+                    return {"pl": round(float(q["profit"]), 2), "at": r.get("updated_at")}
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+def _slave_live(z):
+    """Live-P&L des Slaves für /polar/stand (3 s gecacht je Lauf). Nur, solange der Slave gefüllt und nicht beendet ist."""
+    sl = z.get("slave") or {}
+    ticket = (sl.get("gefuellt") or {}).get("ticket")
+    login = str(((sl.get("auftrag") or {}).get("login")) or "")
+    if not ticket or not login or sl.get("ende") or z.get("status") in ENDE:
+        return None
+    jetzt = time.time()
+    c = _SLAVE_LIVE.get(z["id"])
+    if c and jetzt - c[0] < SLAVE_LIVE_CACHE_S:
+        return c[1]
+    try:
+        rows = A["sb_select"]("mt5_live", {"select": "updated_at,pos:status->master_positions", "master_login": f"eq.{login}",
+                                           "order": "updated_at.desc", "limit": "3"}) or []
+        wert = slave_live_pl(rows, ticket)
+    except Exception:
+        wert = None
+    _SLAVE_LIVE[z["id"]] = (jetzt, wert)
+    if len(_SLAVE_LIVE) > 50:
+        for k in [k for k, v in _SLAVE_LIVE.items() if jetzt - v[0] > 120]:
+            _SLAVE_LIVE.pop(k, None)
+    return wert
 
 
 def _sicht(z):
@@ -298,8 +358,10 @@ def trades_belegt(rows, pid, jetzt):
         elif st == "review":
             fin = r.get("final") if isinstance(r.get("final"), dict) else {}
             el = r.get("endlesung") if isinstance(r.get("endlesung"), dict) else {}
+            bn = r.get("bal_nach") if isinstance(r.get("bal_nach"), dict) else {}
+            # Echo-Lesung steht in mt5_baseline.bal_nach (S2-Prüfung 21.10.2026: nur final zählte → Echo sperrte bis 2 h nach Ende)
             gelesen = fin.get("balance_end") is not None or el.get("balance_end") is not None or el.get("today_pnl") is not None \
-                or bool(el.get("puls_aufgegeben"))
+                or bool(el.get("puls_aufgegeben")) or bool(fin.get("puls_aufgegeben")) or bn.get("ok") is True or bn.get("balance") is not None
             try:
                 ende = datetime.fromisoformat(str(r.get("ended_at") or "").replace("Z", "+00:00"))
                 frisch = (jetzt - ende).total_seconds() <= VP_LESUNG_FENSTER_H * 3600
@@ -439,7 +501,7 @@ def _vorpruefung(plan):
     ids = ",".join(x for x in (mu, su) if _uuid(x))
     try:
         rows = A["sb_select"]("trade_plans", {"select": "id,user_id,route,status,master_name,master_firm,ended_at,"
-                                                        "endlesung:mt5_baseline->endlesung,final:mt5_baseline->final",
+                                                        "endlesung:mt5_baseline->endlesung,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach",
                                               "user_id": f"in.({ids})", "status": "in.(open,review)", "limit": "200"}) or []
         d["belegt"] = trades_belegt(rows, pid, jetzt_dt)
     except Exception:
@@ -890,9 +952,29 @@ def registrieren(app, ns):
             sicht = getattr(g, "admin_sicht", None)
             if err_a and not (sicht is not None and z["master_uid"] in sicht and z["slave_uid"] in sicht):
                 return jsonify({"ok": False, "msg": "nicht deine Polar-Läufe"}), 403
-        out = jsonify({"ok": True, **_sicht(z)})
+        out = jsonify({"ok": True, **_sicht(z), "slave_live": _slave_live(z)})   # Live-P&L des Slaves (21.10.2026, Live-Ablauf)
         out.headers["Cache-Control"] = "no-store"
         return out
+
+    # LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai, s. schritt_eintragen): der Bot meldet jede Phase je Seite. NUR der Prozess-Zustand — kein
+    # eigener DB-Write (Prüfer S2 21.10.2026: ein später ankommender Schritt-Write hätte den gleichzeitigen melden-Write mit z. B. „ende" in
+    # polar_lauf überschreiben können); die Schritte landen über die melden-Writes ({seite: teil}) mit in der DB. Nie ein Status-Wechsel, nie
+    # ein Wecken der wartenden Verbindungen.
+    @app.route("/polar/schritt", methods=["POST", "OPTIONS"])
+    def polar_schritt():
+        if request.method == "OPTIONS":
+            return "", 200
+        wer = A["_code_zugang"]()
+        if not wer:
+            return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
+        d = request.get_json(silent=True) or {}
+        lid, seite = str(d.get("lauf_id") or ""), str(d.get("seite") or "")
+        z = _laden(lid)
+        if not z or not _seite_ok(z, wer[0], seite):
+            return jsonify({"ok": False, "msg": "Lauf/Seite passt nicht"}), 403
+        with _COND:
+            neu = schritt_eintragen(z.setdefault(seite, {}), d.get("phase"), d.get("text"), d.get("at_ms"))
+        return jsonify({"ok": True, "neu": neu})
 
     # POLAR-VORRANG (20.10.2026, Finn: „Wenn Polar läuft, darf gar kein einziger Trade mehr gestartet werden … über die beteiligten IDs
     # keine Order, keine Balance-Lesung"): der Tab fragt hier alle 10 s, ob SEINE ID gerade in einem Polar-Lauf steckt (Master- ODER
