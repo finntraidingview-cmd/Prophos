@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.2"   # 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.3"   # 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1216,8 +1216,16 @@ def lauf_slave(cmd):
         except Exception as e_:
             raise RuntimeError(f"Symbol tippen: {type(e_).__name__}")
         ob._warte(0.5, 0.3)
-        if symbol.lower() not in str(cb.window_text() or "").lower():
-            raise RuntimeError(f"Symbol steht nicht im Dialog ('{cb.window_text()}')")
+        # Symbol über den WERT prüfen, nicht über window_text() — das liefert bei UIA nur die Beschriftung „Symbol:" (Lauf 2a854cb4,
+        # 21.10.2026: NAS100 stand richtig im Feld, der Bot las „Symbol:" und brach ab; derselbe Fund wie order_bot._feld_lesen 18.08.2026).
+        # Kandidaten: Wert der ComboBox, Wert ihres Edit-Kinds, Name als letzter Rest
+        kand = [ob._feld_lesen(cb)]
+        try:
+            kand += [ob._feld_lesen(x) for x in cb.descendants(control_type="Edit")]
+        except Exception:
+            pass
+        if not any(symbol.lower() in str(k or "").lower() for k in kand):
+            raise RuntimeError(f"Symbol steht nicht im Dialog (gelesen: {' | '.join(str(k) for k in kand if k)[:120] or 'leer'})")
         fmap = ob._map_felder(dlg)
         vol_el = fmap.get("volumen") or fmap.get("vol") or fmap.get("volume")
         if vol_el is None or not ob._feld_tippen(vol_el, f"{vol:g}", "Volumen", lauf.trail, rahmen=dlg):
