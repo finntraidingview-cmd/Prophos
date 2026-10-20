@@ -4184,7 +4184,11 @@
   /* BESTANDEN-DATUM (Finn 21.10.2026 04:50 Dubai: „das Datum, wann der Account gepasst wurde … welcher heute reingelaufen ist und welcher schon
      vor Tagen"): siebte Spalte „Bestanden" in allen vier Stationen des Blocks (wdl-tab-bst), zwischen Tage und Status; Rest-von-Hand-Zeile
      behält ihre zwei Reihen (Knöpfe unten über Tage+Datum+Status+Zeit). Gleiche Spezifität wie .wdl-tab-konto .wdl-z — steht deshalb dahinter. */
-  #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(120px,1fr) 96px 200px 80px 88px 110px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}   /* 862 px bei 120 px Name (schmaler als das 6-Spalten-Raster, 880); Konto 80 px, weil in „Trade abhaken" dort die Balance „159.120 $" steht (Prüfer S2) */
+  /* CHIPS GANZ (Finn 21.10.2026 ~00:20 Dubai, Radar → Bestanden → Tage sammeln: „Dieses kleine Feldchen passt gar nicht mehr auf den Screen, wird
+     zur Hälfte abgeschnitten"): Phase 140 px = längste Pille „Challenge → Funded" (137 px), Status 116 px = Rest-von-Hand-Chip über Status+Zeit
+     (220 px) bzw. „Tage sammeln" ohne Zahl (die steht in „Tage"); Mitte 216 px = „🎯 bestanden · Challenge → Funded" in Trade abhaken (215 px);
+     Name ab 100 px — zusammen 908 px statt 862 */
+  #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(100px,1fr) 140px 216px 80px 88px 116px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}
   #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer ri mi konto datum pl pl" "wer ri mi zeit zeit zeit zeit"}
   #dashboard-view .wdl-z-datum{grid-area:datum;text-align:right;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
   #dashboard-view .wdl-z-datum b{font-weight:600;color:var(--ink-2)}   /* „heute 17:06" fett — der ist heute reingelaufen */
@@ -31738,7 +31742,7 @@
             + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel ? ` → <b class="wdl-bst-ziel">${de(ziel)} ✓</b>` : ''}`, { tip: `Balance → Ziel${seit ? ' · Ziel erreicht seit ' + seit : ''}` })
             + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (x.eigen ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
             + bstDatumZelle(x.seit, bstLetzterTrade(x.uid, x.kid, x.e4), x.firma)
-            + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a) : fehlt ? `<span class="type-badge acc-ziel-chip acc-tage-chip">Tage sammeln ${Math.min(mt.count, mt.target)}/${mt.target}</span>` : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
+            + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a).replace(/>Tage sammeln \d+\/\d+</, '>Tage sammeln<') : fehlt ? `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Mindesttage: ${Math.min(mt.count, mt.target)} von ${mt.target}">Tage sammeln</span>` : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
             + '</div>' }
         })
@@ -45599,7 +45603,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1662'
+  const OS_TAB_BUILD = '2026-09-22.1663'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
