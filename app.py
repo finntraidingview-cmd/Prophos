@@ -16116,6 +16116,8 @@ AP_PUFFER_PKT_FUT = 6
 # der letzte Futures-Trade bekommt seit 17.10.2026 GENAU 20 $ je Kontrakt als Gesamt-Puffer — ersetzt Firmen-Puffer (puffer_je_menge)
 # UND den Punkte-Puffer AP_PUFFER_PKT_FUT (bleibt nur als Name für alte Selbsttests stehen, wird nicht mehr gerechnet).
 AP_PUFFER_JE_KT_FUT = 20
+AP_GEBUEHR_JE_KT_FUT = 6                 # $ je Kontrakt und Trade (2 Seiten, Lucid/Tradeify ~2–3 $ je Seite; Beleg 20.10.2026: 2 NQ TP 4.464 → P&L 4.453);
+                                         # der Futures-Puffer (20 $/Kt) liegt darüber — Klein-Trade und letzter Trade rechnen mindestens die Gebühren ein
 AP_PUNKTWERT_FUT = {"NQ": 20.0, "MNQ": 2.0}   # $ je Punkt und Kontrakt (wie WD_HEUTE_PPL)
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
@@ -16581,17 +16583,16 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     cfd = (regel.get("route") or "mt5v2") in AP_CFD_ROUTEN and phase != "challenge"
     if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN):
         # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
-        # 07.10.2026: Futures-Challenge mit Rest < 100 $ zählt als Ziel erreicht (Phase umstellen)
-        if phase == "challenge":
-            if tage_offen:                 # Challenge zählt ab < 100 $ Rest als erreicht — Mini nur mit Luft über dem Ziel (sonst Grund)
-                return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden)
-            return None, f"Ziel erreicht — Phase umstellen (nur noch {rest:.0f} $)"
+        # 07.10.–20.10.2026 zählte eine Futures-Challenge mit Rest < 100 $ als „Ziel erreicht" — vorbei (Finn 20.10.2026 20:35–20:45 Dubai,
+        # Lucid 150k …0001 bei 158.916 von 159.000: „Es ist noch nicht bestanden. Es soll eine Meldung kommen: Es fehlen noch ein paar
+        # Dollar, bitte manuell den Rest machen" — Futures UND CFD). Der Bot plant hier keinen Trade; der Grund steht als Planer-Zeile in
+        # „Braucht dich" (grund_code rest_von_hand) und im Radar als „fehlen noch X $ → Rest von Hand". Tage-Mini geht weiter vor.
         if tage_offen:                     # 12.10.2026 (Finn): Tage fehlen → Mini statt Handarbeit, die Tage laufen jeden Tag weiter
             return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden)
         if cfd:
-            return None, (f"nur noch {rest:.0f} $ bis zum Ziel — unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: "
-                          "erst im Konto prüfen, ob die Firma das Ziel schon zählt (dann Phase umstellen), sonst Mini-Trade von Hand")
-        return None, f"nur noch {rest:.0f} $ bis zum Ziel — von Hand prüfen"
+            return None, (f"Rest {rest:.0f} $ bis Ziel — von Hand (unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: erst im Konto "
+                          "prüfen, ob die Firma das Ziel schon zählt, sonst den Rest von Hand holen)")
+        return None, f"Rest {rest:.0f} $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr)"
     if cfd and rest < AP_REST_MIN and not ppl:
         return None, (f"nur noch {rest:.0f} $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade: "
                       "Punktwert der Firma eintragen, sonst von Hand")
@@ -16605,7 +16606,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
     puffer = round(_ap_spanne(psp, u["puffer"], 1.0 if pjm else f) or 0)
     if not cfd and (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN:
-        puffer = round(AP_PUFFER_JE_KT_FUT * float(menge))   # Futures: 2 NQ = 40 $, 3 NQ = 60 $ (Finn 16.10.2026)
+        puffer = round(max(AP_PUFFER_JE_KT_FUT, AP_GEBUEHR_JE_KT_FUT) * float(menge))   # Futures: 2 NQ = 40 $, 3 NQ = 60 $ (Finn 16.10.2026); nie unter den Gebühren (20.10.2026)
     tp_sp = ph.get("tp")
     ober = float(ph["tp_max"]) * f if ph.get("tp_max") else (float(tp_sp[1]) * f if tp_sp else None)
     klein = None
@@ -16628,6 +16629,9 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     elif rest < ober:
         tp, stufe = ober, "letzter Trade (auf Tageshöchstwert gedeckelt)"
     else:
+        # ETAPPE (Rest ≥ Tagesdeckel tp_max): Lucid …0001 am 20.10.2026 — Rest 4.537 > 4.500 → TP 4.464, danach 84 $ Rest. Rest + Gebühren über
+        # den Deckel zu heben ist hier NIE möglich (Rest liegt schon darüber); was nach der Etappe bleibt, meldet der nächste Lauf als
+        # „Rest … von Hand" (oben). Die Gebühren stecken im Puffer des letzten Trades (AP_PUFFER_JE_KT_FUT ≥ AP_GEBUEHR_JE_KT_FUT).
         tp, stufe = _ap_spanne(tp_sp, u["tp"], f), "Etappe"
     tp = round(tp)
     sl = None
@@ -20146,7 +20150,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 # die Konto-Regel, ap_regel_konto darauf ändert nichts mehr
                 ausgelassen.append(dict(k["zeile"], grund=grund, **ap_boden_zeile(k["regel"], k["a"], k["bal"], k.get("bal_stand"))))
             elif grund:
-                ausgelassen.append(dict(k["zeile"], grund=grund))
+                # „Rest … von Hand" (20.10.2026) bekommt einen grund_code, damit die Zeile in „Braucht dich" auch dann steht, wenn das Konto
+                # dort schon eine Balance-Zeile hat (tplDaten übergeht Planer-Gründe ohne Code)
+                ausgelassen.append(dict(k["zeile"], grund=grund, **({"grund_code": "rest_von_hand"} if str(grund).startswith("Rest ") else {})))
             else:
                 rechnung.append((k, w))
         if not rechnung:
@@ -26898,9 +26904,11 @@ def zw_ziel(regel, phase, balance):
 
 
 def zw_erreicht(ziel, balance, phase):
-    """REIN RECHNEND: wie der Planer — Rest ≤ 0, Challenge schon ab Rest < AP_REST_MIN („Ziel erreicht — Phase umstellen")."""
-    rest = float(ziel) - float(balance)
-    return rest <= 0 or (phase == "challenge" and rest < AP_REST_MIN)
+    """REIN RECHNEND: Ziel erreicht = Balance ≥ Ziel. Bis 20.10.2026 zählte eine Futures-Challenge schon ab Rest < AP_REST_MIN (100 $)
+    als erreicht — Finn 20.10.2026 20:35 Dubai (Lucid 150k …0001, 158.916 vs. 159.000): „Da fehlen noch grob 100 $ — das darf nicht als
+    bestanden markiert werden, sondern: ‚fehlen noch ~84 $'." Den Rest meldet der Planer als „Rest … von Hand" (kein Auto-Trade).
+    phase bleibt in der Signatur (Aufrufer), spielt keine Rolle mehr."""
+    return float(ziel) - float(balance) <= 0
 
 
 def _zw_admin_uids():

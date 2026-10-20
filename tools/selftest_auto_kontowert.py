@@ -57,7 +57,7 @@ def lade():
     def konst(name):
         m = re.search(rf"^{name} = .*$", src, re.M)
         return m.group(0)
-    exec("\n".join([konst(k) for k in ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_FENSTER_WUERFE", "_KETTE_DLL_CACHE", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_KETTE_STANDARD", "AP_KETTE_TXT")] + [block(f) for f in (
+    exec("\n".join([konst(k) for k in ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS", "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_FENSTER_WUERFE", "_KETTE_DLL_CACHE", "AP_KW_FUNDED", "AP_KW_PHASEN", "AP_START_BIS_STANDARD", "AP_CFD_AB_STANDARD", "AP_ABSTAND_ID_FIRMA_MIN", "AP_ABSTAND_ID_MIN", "AP_ABSTAND_STUFEN", "AP_GROSS_NAH_MIN", "AP_FIRMA_ABSTAND_MIN", "AP_KETTE_STANDARD", "AP_KETTE_TXT")] + [block(f) for f in (
         "_ap_norm", "ap_regel_finden", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_kette_regel", "ap_kette_mll", "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_start_bis", "ap_cfd_ab", "ap_fenster_liste", "ap_zeit_dt_min", "ap_cfd_bis", "ap_klasse_bis", "ap_zeiten_verteilen", "_ap_zeiten_verteilen_einmal",
         "ap_kw_param", "_ap_kw_kauf", "_ap_kw_wachsen", "_ap_kw_lock", "kette_dll_chance", "ap_kontowert", "ap_trade_gewicht", "ap_sicht", "_ap_hhmm")]), ns)
     return ns
@@ -156,7 +156,7 @@ def main():
     w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", 146000, u)
     check(grund and "Boden" in grund, "FN Futures auf Boden 146.000 → ausgelassen")
     w, grund = a["ap_konto_rechnen"](regel("FundedNext Futures"), "challenge", 157990, u)
-    check(grund and "Ziel erreicht" in grund, "FN Futures 10 $ vor Ziel → Ziel erreicht (Futures-Challenge, Rest < 100, 07.10.2026)")
+    check(grund and grund.startswith("Rest 10 $ bis Ziel — von Hand"), "FN Futures 10 $ vor Ziel → Meldung „Rest 10 $ … von Hand“, kein Trade (20.10.2026: Toleranz 100 $ raus)")
     # 07.10.2026 (Finn: nur Konten auf Live-Stand, geblasene/fertige raus): Boden aus dd_usd, Futures-Challenge Rest < 100 = Ziel
     w, grund = a["ap_konto_rechnen"](regel("Apex Trader"), "challenge", 146000, u)
     check(grund and "Boden" in grund, "Apex 146.000 = Boden (statisch 150k − 4.000) → geblowt?")
@@ -167,7 +167,7 @@ def main():
     w, grund = a["ap_konto_rechnen"](regel("Tradeify"), "challenge", 146000, u)
     check(w and not grund and w["sl"] is None, "Tradeify 146.000 → geplant, SL bleibt ungekappt (keiner)")
     w, grund = a["ap_konto_rechnen"](regel("Tradeify"), "challenge", 158950, u)
-    check(grund and "Ziel erreicht" in grund, "Tradeify 50 $ vor 159.000 → Ziel erreicht – Phase umstellen")
+    check(grund and grund.startswith("Rest 50 $ bis Ziel — von Hand"), "Tradeify 50 $ vor 159.000 → Meldung „Rest 50 $ … von Hand“, kein Trade (20.10.2026)")
     w, grund = a["ap_konto_rechnen"](regel("FundedNext"), "phase1", 107950, u)
     check(grund and "Hand" in grund, "CFD Phase 1 50 $ vor Ziel → weiter „von Hand prüfen“")
     w, grund = a["ap_konto_rechnen"](regel("FundedNext"), "phase1", 89000, u)

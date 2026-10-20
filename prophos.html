@@ -30730,6 +30730,19 @@
   const WDL_UEBERGANG = { challenge: 'Challenge → Funded', phase1: 'Phase 1 → Phase 2', phase2: 'Phase 2 → Funded' }
   // Ziel des Übergangs sichtbar am Wort (07.10.2026, Finn: „bestanden, ob es Road to Funded ist oder Road to Phase 2")
   const WDL_ZIEL = { challenge: 'Funded', phase1: 'Phase 2', phase2: 'Funded' }
+  // BESTANDEN ERST AM ZIEL (Finn 20.10.2026 20:35 Dubai, Lucid 150k …0001 bei 158.916 von 159.000: „Da fehlen noch grob 100 $ — das darf
+  // nicht als bestanden markiert werden, sondern: ‚fehlen noch ~84 $'"): bis dahin galt eine Challenge schon 100 $ unter dem Ziel als
+  // bestanden (wie der Planer damals). EINE Rechnung für Radar-Chip, Trade-Planer-Chip und Server (app.py zw_erreicht, ohne Toleranz):
+  // erreicht = Balance ≥ Ziel; darunter der Rest. Knapp darunter (unter WDL_FEHLT_ZEIGEN_USD) zeigt der Chip „fehlen noch 84 $ → Rest von
+  // Hand" (amber; Finn 20.10.2026 20:40: „Es soll eine Meldung kommen: Es fehlen noch ein paar Dollar, bitte manuell den Rest machen" —
+  // Futures und CFD); dieselbe Meldung steht als Planer-Zeile in „Braucht dich" (app.py ap_konto_rechnen „Rest … von Hand"). Nichts wird
+  // vorbelegt oder umgestellt, der Bot plant dort keinen Trade.
+  const WDL_FEHLT_ZEIGEN_USD = 500
+  function zielRest(bal, ziel){
+    if(bal == null || ziel == null || !isFinite(Number(bal)) || !isFinite(Number(ziel))) return null
+    const rest = Number(ziel) - Number(bal)
+    return { erreicht: rest <= 0, rest: Math.max(0, rest) }
+  }
   function wdlBestandenChip(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
@@ -30737,11 +30750,27 @@
     if(ziel == null || !WDL_UEBERGANG[typ]) return ''
     let bal = (wdlBlowStand(t) || {}).bal
     if(bal == null){ const bs = n(t.balance_start), pl = n(t.pl_balance) ?? n(t.master_pl && t.master_pl.wert); if(bs != null && pl != null) bal = bs + pl }
-    if(bal == null || bal < ziel - (typ === 'challenge' ? 100 : 0)) return ''
+    const zr = zielRest(bal, ziel)
+    if(!zr || !zr.erreicht) return ''   // unter dem Ziel NIE „bestanden" — der Hinweis „fehlen noch …" ist wdlFehltChip (eigene Funktion, nur Anzeige)
     const de = v => Math.round(v).toLocaleString('de-DE')
     // seit .1141 Ergebnis-Wort in der Ergebnis-Spalte (Finn 07.10.2026: „links von Ereignis, da wo geblowt/Tageslimit steht …
     // nicht in den Namen reinpacken") — Stil wie wdlBlowErg, der Übergang steht im Tooltip
     return `<b class="wdl-bestanden" style="color:var(--good-ink, #15803d);white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} ≥ Ziel ${de(ziel)} — sehr wahrscheinlich bestanden. Phase umstellen und neues Konto anlegen.">🎯 bestanden · ${WDL_UEBERGANG[typ]}</b>`
+  }
+  /* HINWEIS „fehlen noch 84 $ → Rest von Hand" (Finn 20.10.2026) — EIGENE Funktion, bewusst getrennt von wdlBestandenChip: dessen Wahrheit
+   * schaltet den Abhaken-Knopf + Tooltip „Konto bestanden" und den Stations-Chip „→ Tage sammeln/Review" (Prüfer S2); dieser Hinweis
+   * hängt nur an den Anzeige-Stellen (Ergebnis-/Mitte-Zelle, Trade-Planer-Chip) und schaltet nichts. Gleiche Quellen wie der Bestanden-Chip. */
+  function wdlFehltChip(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t || t.status === 'open' || t.status === 'planned') return ''
+    const ziel = n(t.ziel_usd), typ = String(t.konto_typ || '')
+    if(ziel == null || !WDL_UEBERGANG[typ]) return ''
+    let bal = (wdlBlowStand(t) || {}).bal
+    if(bal == null){ const bs = n(t.balance_start), pl = n(t.pl_balance) ?? n(t.master_pl && t.master_pl.wert); if(bs != null && pl != null) bal = bs + pl }
+    const zr = zielRest(bal, ziel)
+    if(!zr || zr.erreicht || zr.rest >= WDL_FEHLT_ZEIGEN_USD) return ''
+    const de = v => Math.round(v).toLocaleString('de-DE')
+    return `<b class="wdl-fehlt" style="color:var(--warn-ink, #b45309);white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} unter Ziel ${de(ziel)} — noch nicht bestanden. Den Rest von Hand holen; der Bot plant hier keinen Trade mehr.">fehlen noch ${de(zr.rest)} $ → Rest von Hand</b>`
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
@@ -31200,7 +31229,7 @@
         // Login-Fehler) oder die Lesung verloren ist. Solange Puls normal liest, bleibt die Zeile wie bisher.
         const abhakenZeigen = !!(wdlBestandenChip(t) || wt.login || wdlLesungVerloren(wt, jetzt)), abSperre = wdlAbhakenSperre(t)
         const abKnopf = abhakenZeigen ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || (wdlBestandenChip(t) ? 'Konto bestanden — bei Tradeify nicht mehr im Dropdown, Puls kann es nicht lesen: ohne Lesung abhaken, P&L von Hand' : 'Ohne Lesung abhaken — P&L von Hand eintragen'))}">Jetzt abhaken</button>` : ''
-        miZ = zelle('mi wdl-z-akt', `${wdlBestandenChip(t) ? `<span>${wdlBestandenChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>${abKnopf}`,
+        miZ = zelle('mi wdl-z-akt', `${(wdlBestandenChip(t) || wdlFehltChip(t)) ? `<span>${wdlBestandenChip(t) || wdlFehltChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>${abKnopf}`,
           { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
               : wdlLesungVerloren(wt, jetzt) ? `Seit ${minTxt(wdlLesungVerloren(wt, jetzt))} kein Leseversuch (${wt.letzte ? 'letzter ' + zeit(wt.letzte) : 'noch keiner'}) — der PC-Tab dieser ID (Puls) antwortet nicht. „Jetzt lesen" stößt neu an; hilft das nicht, Prophos am PC der ID öffnen`
@@ -31233,7 +31262,7 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
-        let erg = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')   // Polar: wer zuerst zu war (20.10.2026)
+        let erg = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')   // Polar: wer zuerst zu war (20.10.2026)
         // Bestanden: wohin das Konto nach dem Abhaken geht (13.10.2026) — „→ Tage sammeln 3/5" oder „→ Review", wie der Typ-Chip in Accounts
         // Mini-Trade (13.10.2026, Finn: „da steht bestanden — kommt der nicht zu Trade abhaken?"): eigenes Etikett „Tage-Mini" statt „🎯 bestanden"
         // — er bringt nur einen Handelstag, das Konto steht schon in Bestanden → Tage sammeln und bleibt dort
@@ -31261,11 +31290,11 @@
         if(echo){
           // Echo: keine Demo → kein Ergebnis-Wort; P&L = MT5-Balance nachher − vorher, sonst der P&L am Plan
           const pb = num(t.pl_balance) != null ? num(t.pl_balance) : num(t.master_pl && t.master_pl.wert)
-          miZ = zelle('mi', wdlBestandenChip(t) || wdlBlowErg(t) || '–', { tip: 'Echo: kein Demo-Ergebnis — der P&L kommt aus der MT5-Balance' })
+          miZ = zelle('mi', wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || '–', { tip: 'Echo: kein Demo-Ergebnis — der P&L kommt aus der MT5-Balance' })
           kontoZ = wdlKontoZ(t)
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
-        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
+        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
         miZ = zelle('mi', erg, { tip: demoTip(d) })
         kontoZ = wdlKontoZ(t)
         // Balance-Sprung (08.10.2026): erledigt zählt der P&L am Plan (von Hand entschieden), sonst der Tages-P&L — nie die Differenz
@@ -41381,7 +41410,7 @@
     let lt = null
     try{ lt = (typeof _tpl !== 'undefined' && _tpl.lt && _tpl.lt.get(String(p.id))) || (((typeof wdl !== 'undefined' && wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id))) || null }catch(_){ lt = null }
     let ltChip = ''
-    try{ ltChip = lt && p.status !== 'completed' ? (wdlBlowErg(lt) || wdlBestandenChip(lt)) : '' }catch(_){ ltChip = '' }
+    try{ ltChip = lt && p.status !== 'completed' ? (wdlBlowErg(lt) || wdlBestandenChip(lt) || wdlFehltChip(lt)) : '' }catch(_){ ltChip = '' }
     const chip = ltChip ? `<span class="tc-puls-chip">${ltChip}</span>`
       : ueb ? `<b class="wdl-bestanden tc-puls-chip" title="Ziel erreicht (Ziel-Wache) — Phase umstellen: Reiter „Bestanden" bzw. Radar">🎯 bestanden · ${escapeHtml(ueb)}</b>` : ''
     if(!teile.length && !spur && !chip) return ''
@@ -45126,7 +45155,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1645'
+  const OS_TAB_BUILD = '2026-09-22.1646'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

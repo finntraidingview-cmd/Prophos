@@ -3,7 +3,8 @@
 Finn: „wenn nur noch ein paar hundert Dollar zum Ziel sind … Lots runterschrauben … Puffer 15–20 … SL wie beim normalen Trade";
 normaler letzter CFD-Trade: Puffer 10 Pkt × Lots × $/Pkt). Rein rechnend, ohne Netz. Regel-Werte wie auto_plan_regeln, Konten erfunden.
 Fälle: die drei Rest-Fälle vom 09.10. (FN Rest 36, FP Rest 56, FN Rest 62), Punkte-Puffer FN 2,8 Lots → 280 $, Schwelle FN 420 $,
-grober Lot-Schritt → Hinweis, Rest 5 $ → Handarbeit, ohne Punktwert → Handarbeit, Futures unverändert.
+grober Lot-Schritt → Hinweis, Rest 5 $ → Handarbeit, ohne Punktwert → Handarbeit, Futures: Rest < 100 → Meldung Rest von Hand, kein Trade (20.10.2026).
+Loader kennt seit 20.10.2026 auch ap_kw_param (ap_konto_rechnen ruft es seit den Kernwerten — der Test lief seitdem auf NameError).
 Aufruf: python3 tools/selftest_klein_trade.py"""
 import os
 import re
@@ -12,9 +13,9 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "ap_groesse", "_ap_spanne", "_ap_runden", "_ap_boden", "ap_kette_regel", "ap_kette_mll",
-              "ap_kette_trade1", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl", "ap_notiz")
+              "ap_kette_trade1", "ap_kw_param", "ap_konto_rechnen", "ap_klein_trade", "_ap_de", "ap_cfd_ppl", "ap_notiz", "zw_erreicht")
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS",
-              "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
+              "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN", "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT")
 FEHLER = []
 
 
@@ -108,7 +109,7 @@ def main():
 
     # 8) Rest 5 $ (CFD) → Handarbeit mit genauem Grund
     w, g = R(FN, "phase1", 107995, u, ppl=10)
-    check(w is None and "nur noch 5 $ bis zum Ziel" in g and "unter 10 $" in g, f"Rest 5 $ → Handarbeit ({g})")
+    check(w is None and g.startswith("Rest 5 $ bis Ziel — von Hand") and "unter 10 $" in g, f"Rest 5 $ → Handarbeit ({g})")
     # Rest 50 ohne Punktwert → Handarbeit mit Fix
     w, g = R(FN, "phase1", 107950, u)
     check(w is None and "kein Punktwert" in g, f"Rest 50 ohne Punktwert → Handarbeit ({g})")
@@ -120,8 +121,33 @@ def main():
     fut = 20 * float(w1["menge"])
     check(w1 == w2 and w1["puffer"] == fut and "Klein" not in w1["stufe"],
           f"Tradeify unverändert ({w1['stufe']}, Puffer {w1['puffer']} = 20 $ × {w1['menge']} NQ)")
+    # BESTANDEN ERST AM ZIEL (Finn 20.10.2026 20:35–20:45 Dubai, Lucid …0001: 158.916 von 159.000 — „Es soll eine Meldung kommen: Es fehlen
+    # noch ein paar Dollar, bitte manuell den Rest machen"): Futures-Rest < 100 ist NICHT mehr „Ziel erreicht" und bekommt KEINEN Trade —
+    # Meldung „Rest … von Hand"; genau am Ziel → erreicht; Rest 4.537 → Etappe wie bisher
     w, g = R(TDFY, "challenge", 158950, u, ppl=20)
-    check(w is None and g.startswith("Ziel erreicht"), f"Futures Rest 50 → Ziel erreicht wie bisher ({g})")
+    check(w is None and g.startswith("Rest 50 $ bis Ziel — von Hand"), f"Futures Rest 50 → kein Trade, Meldung ({g})")
+    LUCID = {"namen": ["lucidtrading", "lucid"], "route": "tvv2", "symbol": "NQ", "boden": "nachziehend", "dd_usd": 4500, "groessen": [150000],
+             "ziel_pct": {"challenge": 6}, "phasen": {"challenge": {"sl": [2500, 2500], "tp": [4450, 4500], "menge": [2, 3], "tp_max": 4500,
+                                                                     "menge_schritt": 1, "puffer_je_menge": {"2": [30, 40], "3": [30, 40]}}}}
+    w, g = R(LUCID, "challenge", 158916, u)
+    check(w is None and g == "Rest 84 $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr)", f"Lucid Rest 84 → kein Trade, Meldung ({g})")
+    w, g = R(LUCID, "challenge", 159000, u)
+    check(w is None and g.startswith("Ziel erreicht"), f"Lucid genau am Ziel → Ziel erreicht ({g})")
+    w, g = R(LUCID, "challenge", 154463, u)
+    check(w is not None and w["stufe"] == "Etappe" and 4450 <= w["tp"] <= 4500, f"Lucid Rest 4.537 → Etappe wie bisher ({(w or {}).get('stufe') or g}, TP {(w or {}).get('tp')})")
+    # Gebühren: der Puffer des letzten Futures-Trades liegt nie unter den Gebühren (20 $ ≥ 6 $ je Kontrakt); knapp unter dem Deckel wird
+    # der Rest komplett zum letzten Trade (4.505 + 40 = 4.545 ≤ 5.000), über dem Deckel bleibt die Etappe
+    check(a["AP_GEBUEHR_JE_KT_FUT"] <= a["AP_PUFFER_JE_KT_FUT"], "Gebühren je Kontrakt liegen unter dem Futures-Puffer")
+    LUCID2 = dict(LUCID, phasen={"challenge": dict(LUCID["phasen"]["challenge"], tp_max=5000, menge=[2, 2])})
+    u_hoch = dict(u, tp=1.0, menge=0.0)
+    w, g = R(LUCID2, "challenge", 154495, u_hoch)
+    check(w is not None and w["tp"] == 4545 and w["puffer"] == 40 and w["stufe"].startswith("letzter Trade"), f"Rest 4.505 unter Deckel 5.000 → letzter Trade mit 40 $ Puffer ({(w or {}).get('stufe') or g}, TP {(w or {}).get('tp')})")
+    w, g = R(LUCID, "challenge", 154495, u_hoch)
+    check(w is not None and w["stufe"] == "Etappe" and w["tp"] == 4500, f"Rest 4.505 über Deckel 4.500 → Etappe ({(w or {}).get('stufe') or g})")
+    # Ziel-Wache ohne Toleranz (zw_erreicht): 84 $ unter dem Ziel = nicht erreicht, genau am Ziel = erreicht, auch bei Challenge
+    ZE = a["zw_erreicht"]
+    check(ZE(159000, 158916, "challenge") is False and ZE(159000, 159000, "challenge") is True and ZE(159000, 159001, "phase1") is True
+          and ZE(159000, 158999.5, "phase1") is False, "zw_erreicht: Rest 84 → nein, Rest 0 → ja (keine 100-$-Toleranz mehr)")
 
     # 10) ap_cfd_ppl: erst die ID, sonst der häufigste Wert der Firma
     P = a["ap_cfd_ppl"]
