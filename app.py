@@ -11730,7 +11730,10 @@ def liq_boden_kernwerte(regel, acc, typ, wd, kw_firmen):
     (auto_plan_regeln.regeln.firmen[], dd_usd + boden) statt accounts.max_drawdown — dieselbe Quelle wie Planer und Vorrat.
     Ohne Kernwerte bzw. für alle anderen Firmen/Phasen (Apex Funded mit Lock, Tradeify, Topstep, CFD) unverändert."""
     a, gr = acc or {}, liq_konto_groesse(acc)
-    if kw_firmen is None or wd or (regel or {}).get("art") not in ("tagesstart", "stufen") or typ not in ("challenge", "phase1", "phase2"):
+    # Apex PA/Funded (Finn 20.10.2026 16:40 über den Master: „Evaluation und PA gleich, Trailing-Schwelle vom Start"): derselbe DD je Größe
+    # aus den Kernwerten/der Apex-Tabelle, die Art der liq_regeln-Zeile (eod_trailing + Lock Größe + 100) bleibt
+    funded = typ == "funded"
+    if kw_firmen is None or wd or (regel or {}).get("art") not in ("tagesstart", "stufen") or typ not in ("challenge", "phase1", "phase2", "funded"):
         return regel, a, gr
     kw = ap_kw_param(ap_regel_finden(kw_firmen, a.get("firm")))
     dd = _wd_num((kw or {}).get("dd_usd"))
@@ -11738,6 +11741,15 @@ def liq_boden_kernwerte(regel, acc, typ, wd, kw_firmen):
         return regel, a, gr
     if not gr and len(kw.get("groessen") or []) == 1:      # Apex nur 150k: Größe aus den Kernwerten, wenn Name/Startwert sie nicht tragen
         gr = float(kw["groessen"][0])
+    # APEX 100k (Finn 20.10.2026 ~05:00 Dubai, Radar „Abhaken · 13": „Apex-Accounts haben 3k Drawdown, also die 100k-Konten. Wenn sie unter
+    # 97k sind, als geblowt markieren"): der Drawdown je Größe aus den Kernwerten (je_groesse, seit 17.10. 100k = 3.000 neben 150k = 4.000)
+    # geht vor dem Firmen-DD — vorher rechnete der Radar-Boden für 100k mit 4.000 (96.000), Chris …0020 und Moritz …0034 standen bei
+    # 96.951,40 (= 97.000 − Gebühren, Apex' eigene Liquidation) als normale Trades unter „Abhaken" statt „💀 geblowt". Dieselbe Rechnung
+    # wie der Planer (ap_boden_konto → _ap_boden) und wie beim Erledigt-Klick (_ap_blow_beim_abhaken → blown) — ein Weg, wie bei Tradeify.
+    if gr:
+        dd = _wd_num((kw.get("dd_je_groesse") or {}).get(str(int(gr)))) or dd
+    if funded:
+        return dict(regel, maxdd_usd=dd), dict(a, max_drawdown=None), gr
     return (dict(regel, maxdd_usd=dd, maxdd_art="statisch" if kw.get("boden") == "statisch" else (regel.get("maxdd_art") or "statisch")),
             dict(a, max_drawdown=None), gr)
 
@@ -16558,7 +16570,10 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     # Kontowert und Vorrat; die alten Felder in phasen{} gelten nur noch, wenn die Firma die Kernwerte nicht hat
     zp = (regel.get("ziel_pct") or {}).get(phase) if isinstance(regel.get("ziel_pct"), dict) else None
     ziel = groesse * (1 + float(zp if zp is not None else (ph.get("ziel_pct") or 0)) / 100.0)
-    boden, boden_blow = _ap_boden(regel, ph, groesse, balance)
+    # DD je Größe aus den Kernwerten (ap_kw_param.dd_je_groesse: DB je_groesse, sonst Apex-Tabelle, 20.10.2026) — derselbe Boden wie
+    # ap_boden_konto (Anzeige, Erledigt-Klick) und der Radar; ohne Eintrag bleibt der Firmen-DD
+    _ddg = (ap_kw_param(regel) or {}).get("dd_je_groesse", {}).get(str(int(groesse)))   # ohne _wd_num: die Selftest-Lader ziehen diesen Block allein
+    boden, boden_blow = _ap_boden(dict(regel, dd_usd=float(_ddg)) if (_ddg and not jg) else regel, ph, groesse, balance)
     rest = ziel - balance
     tage_offen = bool(tage) and int(tage[0]) < int(tage[1])   # Mindesttage fehlen noch → Mini-Trade statt „Ziel erreicht" (09.10.2026)
     if rest <= 0:
@@ -16717,6 +16732,11 @@ def ap_boden_konto(regel, phase, balance, peak=None):
         ph = (jg.get("phasen") or {}).get(phase) or {}
     else:
         ph = (regel.get("phasen") or {}).get(phase) or {}
+    # DD je Größe aus den Kernwerten (ap_kw_param.dd_je_groesse: DB je_groesse, sonst Apex-Tabelle, 20.10.2026) — derselbe Boden wie der
+    # Radar (liq_boden_kernwerte) und der Erledigt-Klick (ap_ende_unter_boden); ohne Eintrag bleibt der Firmen-DD
+    ddg = (ap_kw_param(regel) or {}).get("dd_je_groesse", {}).get(str(int(groesse)))
+    if ddg and not jg:
+        regel = dict(regel, dd_usd=float(ddg))
     boden, blow = _ap_boden(regel, ph, groesse, b)
     art = ("statisch" if regel.get("boden") != "nachziehend" else
            "nachziehend_lock" if regel.get("lock_bei_start") is True else "nachziehend")
@@ -17236,6 +17256,14 @@ def ap_regel_konto(regel, konto, balance):
     return dict(regel, phasen=dict(regel.get("phasen") or {}, challenge=ch2))
 
 
+# APEX MAX-DRAWDOWN JE KONTOGRÖSSE (Finn 20.10.2026 16:40 Dubai: „Wenn ein Account unter dem Maximum Loss liegt, muss er als geblowt gelten —
+# nicht nur 100k → 97k, sondern alle Größen, so wie bei Apex die Regeln sind"; Tabelle über den Master, Evaluation und PA gleich, Trailing-
+# Schwelle vom Start — Trailing wird NICHT nachgebaut, Größe − DD ist die sichere Untergrenze). Rückfall für Größen, die in
+# auto_plan_regeln.regeln.firmen[apex].je_groesse (noch) keinen eigenen dd_usd tragen — ein DB-Eintrag je Größe gewinnt immer
+# (sql/2026-10-20_apex_dd_je_groesse.sql trägt alle sieben nach). Eine Quelle für Planer, Radar-Boden und Erledigt-Klick (ap_kw_param).
+AP_APEX_DD_JE_GROESSE_USD = {25000: 1500.0, 50000: 2500.0, 75000: 2750.0, 100000: 3000.0, 150000: 4000.0, 250000: 6500.0, 300000: 7500.0}   # 150k = 4.000: Finn 20.10.2026 17:35 („ja hast recht, ist 4k Drawdown“), passt zu den 26 Archiven 145.517–145.991 und zu accounts.max_drawdown der 150k-Konten
+
+
 def ap_kw_param(regel):
     """Die vier Werte je Firma (Finn 06.10.2026, verbindlich: „pro Firma müssen nur vier Werte stimmen — Max-Drawdown (Total),
     TP-Ziel Phase 1, TP-Ziel Phase 2, Kaufpreis; alles andere wird daraus gerechnet") aus auto_plan_regeln.regeln.firmen[] —
@@ -17252,9 +17280,12 @@ def ap_kw_param(regel):
             "boden": regel.get("boden") or "statisch", "ziel_pct": regel["ziel_pct"],
             "groessen": sorted(float(g) for g in (regel.get("wert_groessen") or regel["groessen"])), "etappe_usd": ch.get("tp_max") or regel.get("tp_max") or regel.get("etappe_usd"),
             "daily_usd": regel.get("daily_usd"), "lock_bei_start": regel.get("lock_bei_start") is True,
-            # Drawdown je Kontogröße (17.10.2026, Apex 100k EOD: 3.000 $ neben 150k mit 4.000 $) aus regel.je_groesse — wie im Planer
-            "dd_je_groesse": {str(g): float(j["dd_usd"]) for g, j in (regel.get("je_groesse") or {}).items()
-                              if isinstance(j, dict) and j.get("dd_usd")},
+            # Drawdown je Kontogröße (17.10.2026, Apex 100k EOD: 3.000 $ neben 150k mit 4.000 $) aus regel.je_groesse — wie im Planer;
+            # Apex (20.10.2026): AP_APEX_DD_JE_GROESSE_USD als Rückfall je Größe, ein DB-Eintrag gewinnt
+            "dd_je_groesse": {**({str(int(g)): float(d) for g, d in (globals().get("AP_APEX_DD_JE_GROESSE_USD") or {}).items()}
+                                 if any("apex" in str(n).lower() for n in (regel.get("namen") or ())) else {}),   # globals(): die Selftest-Lader ziehen ap_kw_param als Block, nicht jede Konstante
+                              **{str(g): float(j["dd_usd"]) for g, j in (regel.get("je_groesse") or {}).items()
+                                 if isinstance(j, dict) and j.get("dd_usd")}},
             # Topstep-Kette mit DLL (09.10.2026): Tagesmodell für Vorrat/Kontowert (kette_dll_chance); Tagesziel-Rückfall = AP_KETTE_STANDARD
             "kette_daily": ((regel.get("kette") or {}).get("daily_usd") if isinstance(regel.get("kette"), dict) else None),
             "kette_tagesziel": ((regel.get("kette") or {}).get("tagesziel_usd") or 4500) if isinstance(regel.get("kette"), dict) else None}
