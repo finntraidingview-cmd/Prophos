@@ -147,7 +147,9 @@ def main():
     w, _g = a["ap_konto_rechnen"](r50, "challenge", 150000, u)
     check(w and 4350 <= w["tp"] <= 4450 and w["stufe"] == "Etappe", f"50 % frisch: Etappe {w and w['tp']}")
     w, _g = a["ap_konto_rechnen"](r50, "challenge", 154400, u)
-    check(w and 4350 <= w["tp"] <= 4450, f"50 % nach 4.400: Rest 4.600 → noch eine Etappe ({w and w['tp']} · {w and w['stufe']})")
+    # seit 21.10.2026 (Finn 03:20 Dubai: „Bei Futures darf der letzte Trade den TP-Deckel um bis zu 100 $ überschreiten"): Rest 4.600 = Deckel 4.500 + 100
+    # → EIN letzter Trade, TP auf 4.600 gekappt (vorher: noch eine Etappe 4.350–4.450, danach ~200 $ Rest von Hand)
+    check(w and w["tp"] == 4600 and w["stufe"].startswith("letzter Trade (Rest bis Ziel)"), f"50 % nach 4.400: Rest 4.600 = Deckel + 100 → letzter Trade auf 4.600 gekappt ({w and w['tp']} · {w and w['stufe']})")
     w, _g = a["ap_konto_rechnen"](r50, "challenge", 155000, u)
     check(w and w["tp"] > 4000 and w["tp"] <= 4500 and "letzter" in w["stufe"], f"50 % bei 155.000: letzter Trade Rest 4.000 + Puffer ({w and w['tp']})")
     w, _g = a["ap_konto_rechnen"](tdfy, "challenge", 155000, u)

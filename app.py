@@ -16144,6 +16144,11 @@ AP_PUFFER_PKT_FUT = 6
 AP_PUFFER_JE_KT_FUT = 20
 AP_GEBUEHR_JE_KT_FUT = 6                 # $ je Kontrakt und Trade (2 Seiten, Lucid/Tradeify ~2–3 $ je Seite; Beleg 20.10.2026: 2 NQ TP 4.464 → P&L 4.453);
                                          # der Futures-Puffer (20 $/Kt) liegt darüber — Klein-Trade und letzter Trade rechnen mindestens die Gebühren ein
+# DECKEL +100 $ FÜR DEN LETZTEN FUTURES-TRADE (Finn 21.10.2026 03:20 Dubai: „Bei CFDs lassen wie es ist. Bei Futures darf der letzte Trade den
+# TP-Deckel um bis zu 100 $ überschreiten, damit er am Ziel landet — mehr nicht, es soll in meiner Range bleiben."). Vorfall Lucid 150k …0001
+# am 20.10.2026: Rest 4.537 > Deckel 4.500 → Etappe mit TP 4.464 → nach Gebühren 84 $ Rest → „Rest von Hand". Jetzt: Rest + Puffer über dem Deckel,
+# aber Rest höchstens Deckel + 100 → letzter Trade mit TP = Rest + Puffer, gedeckelt auf Deckel + 100; darüber wie bisher Etappe. Nur Futures.
+AP_FUT_DECKEL_PLUS_USD = 100
 AP_PUNKTWERT_FUT = {"NQ": 20.0, "MNQ": 2.0}   # $ je Punkt und Kontrakt (wie WD_HEUTE_PPL)
 AP_GROESSE_TOLERANZ = 0.15           # Balance weiter als 15 % von jeder Regel-Größe weg → „stimmt was nicht"
 # Firmen, die der Planer still auslässt (kein „keine Regel"-Eintrag). Finn 06.10.2026: Fusion-Markets-Konten sind nur
@@ -16668,6 +16673,16 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     elif not tp_sp or rest + puffer <= ober:
         tp, stufe = rest + puffer, "letzter Trade (Rest bis Ziel)"
         # Der Punkte-Puffer (6 Pkt × Kontrakte × $/Pkt, 15.10.2026) ist seit 17.10.2026 raus — Puffer steht oben (AP_PUFFER_JE_KT_FUT)
+    elif (not cfd and (regel.get("route") or "mt5v2") not in AP_CFD_ROUTEN) and ober is not None \
+            and rest <= ober + globals().get("AP_FUT_DECKEL_PLUS_USD", 100):
+        # FUTURES: DECKEL +100 $ (Finn 21.10.2026 03:20 Dubai: „Bei Futures darf der letzte Trade den TP-Deckel um bis zu 100 $ überschreiten,
+        # damit er am Ziel landet — mehr nicht"; Lucid …0001 20.10.2026: Rest 4.537 > 4.500 → Etappe 4.464 → 84 $ Rest von Hand). Rest + Puffer
+        # (20 $/Kt, mindestens die Gebühren) über dem Deckel, Rest selbst höchstens Deckel + 100 → EIN letzter Trade, TP auf Deckel + 100
+        # gekappt (Lucid 2 NQ: 4.537 + 40 = 4.577 ≤ 4.600). Rest über Deckel + 100 → Etappe wie bisher. CFD unverändert (Zweige darunter).
+        # Stufe beginnt mit „letzter Trade (Rest bis Ziel)", damit die Mengen-Wache (ap_menge_fix) den TP wie hier neu rechnet.
+        _plus = float(globals().get("AP_FUT_DECKEL_PLUS_USD", 100))
+        tp = min(rest + puffer, ober + _plus)
+        stufe = f"letzter Trade (Rest bis Ziel) · Deckel +{max(0.0, tp - ober):.0f} $"
     elif rest < ober:
         tp, stufe = ober, "letzter Trade (auf Tageshöchstwert gedeckelt)"
     else:

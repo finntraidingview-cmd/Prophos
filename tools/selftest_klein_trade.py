@@ -134,7 +134,9 @@ def main():
     w, g = R(LUCID, "challenge", 159000, u)
     check(w is None and g.startswith("Ziel erreicht"), f"Lucid genau am Ziel → Ziel erreicht ({g})")
     w, g = R(LUCID, "challenge", 154463, u)
-    check(w is not None and w["stufe"] == "Etappe" and 4450 <= w["tp"] <= 4500, f"Lucid Rest 4.537 → Etappe wie bisher ({(w or {}).get('stufe') or g}, TP {(w or {}).get('tp')})")
+    # seit 21.10.2026 (Finn 03:20 Dubai, genau dieser Vorfall: „Bei Futures darf der letzte Trade den TP-Deckel um bis zu 100 $ überschreiten, damit er am
+    # Ziel landet"): Rest 4.537 ≤ 4.600 → letzter Trade, TP = Rest + Puffer (2 NQ: 40) = 4.577, nicht mehr Etappe 4.464 + 84 $ von Hand
+    check(w is not None and w["stufe"].startswith("letzter Trade (Rest bis Ziel)") and w["tp"] == w["rest"] + w["puffer"] <= 4600, f"Lucid Rest 4.537 → letzter Trade bis 100 $ über dem Deckel ({(w or {}).get('stufe') or g}, TP {(w or {}).get('tp')})")
     # Gebühren: der Puffer des letzten Futures-Trades liegt nie unter den Gebühren (20 $ ≥ 6 $ je Kontrakt); knapp unter dem Deckel wird
     # der Rest komplett zum letzten Trade (4.505 + 40 = 4.545 ≤ 5.000), über dem Deckel bleibt die Etappe
     check(a["AP_GEBUEHR_JE_KT_FUT"] <= a["AP_PUFFER_JE_KT_FUT"], "Gebühren je Kontrakt liegen unter dem Futures-Puffer")
@@ -143,7 +145,7 @@ def main():
     w, g = R(LUCID2, "challenge", 154495, u_hoch)
     check(w is not None and w["tp"] == 4545 and w["puffer"] == 40 and w["stufe"].startswith("letzter Trade"), f"Rest 4.505 unter Deckel 5.000 → letzter Trade mit 40 $ Puffer ({(w or {}).get('stufe') or g}, TP {(w or {}).get('tp')})")
     w, g = R(LUCID, "challenge", 154495, u_hoch)
-    check(w is not None and w["stufe"] == "Etappe" and w["tp"] == 4500, f"Rest 4.505 über Deckel 4.500 → Etappe ({(w or {}).get('stufe') or g})")
+    check(w is not None and w["stufe"].startswith("letzter Trade (Rest bis Ziel)") and 4505 < w["tp"] <= 4600, f"Rest 4.505 über Deckel 4.500 → seit 21.10.2026 letzter Trade bis Deckel + 100 ({(w or {}).get('stufe') or g}, TP {(w or {}).get('tp')})")
     # Ziel-Wache ohne Toleranz (zw_erreicht): 84 $ unter dem Ziel = nicht erreicht, genau am Ziel = erreicht, auch bei Challenge
     ZE = a["zw_erreicht"]
     check(ZE(159000, 158916, "challenge") is False and ZE(159000, 159000, "challenge") is True and ZE(159000, 159001, "phase1") is True
