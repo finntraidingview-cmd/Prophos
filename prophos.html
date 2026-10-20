@@ -29734,10 +29734,9 @@
     _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
     mklWdErlSumme()
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
-    // Blow erkannt (02.10.2026): „geblowt" vorbelegen — Balance nach dem Trade an/unter der Liquidation; Finn kann umstellen
-    const _bl = (typeof wdlBlowStand === 'function') ? wdlBlowStand(pw) : null
-    // Konto weg (05.10.2026): ebenfalls „geblowt" vorbelegen — das Konto gibt es beim Broker nicht mehr
-    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${((_bl && _bl.geblowt) || _kw) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
+    // Blow erkannt (02.10.2026) / Konto weg (05.10.2026): „geblowt" vorbelegen — seit 20.10.2026 dieselbe Wahrheit wie die Radar-Gruppe
+    // „Geblowt · archivieren" (wdlGeblowtUrteil: Balance an/unter der Liquidation, Konto weg, abgehakt geblowt); Finn kann umstellen
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -29755,6 +29754,7 @@
   }
   document.querySelectorAll('input[name="mwd-erl-status"]').forEach(r => r.addEventListener('change', mwdErlStatusUI))
   window._mwdErlStatusUI = mwdErlStatusUI   // Test-Haken (Stub)
+  window._mklWdErledigtOeffnen = mklWdErledigtOeffnen   // Test-Haken (Stub, 20.10.2026: Vorbelegung „geblowt" ohne Login prüfen)
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
   function mklWdErlSumme(){
     const el = document.getElementById('mwd-erl-summe'); if(!el) return
@@ -30721,6 +30721,12 @@
   // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
   // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
   const wdlKontoWeg = t => !!(t && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026)
+  /* EINE WAHRHEIT „GEBLOWT" (20.10.2026, Finn 23:00 Dubai, Radar .1647 „Geblowt · archivieren · 2", Tradeify 150k …1607/…9125: „Der Account ist
+   * eigentlich geblowt. Wenn ich auf Abhaken gehe, steht trotzdem ‚Nichts ändern‘ vorbelegt. Das Radar weiß schon, dass er geblowt ist"):
+   * dieselbe Regel wie die Radar-Gruppe — abgehakt geblowt, Balance nach dem Trade an/unter der Liquidation (wdlBlowStand: Liq-Regel am
+   * Trade, sonst Konto-Boden; das Tageslimit ist kein Blow) oder Konto weg. Gruppe UND beide Abhak-Dialoge (Radar-Dialog für fremde Pläne,
+   * Trades-Dialog für eigene) fragen hier — der Trades-Dialog belegte bisher nur bei „Konto weg" vor. Nur Vorbelegung, Finn bestätigt. */
+  function wdlGeblowtUrteil(t){ return !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t))) }
   const WDL_KONTO_WEG_ERG = '<span style="color:var(--warn-ink, #b45309)" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
   /* Schätzung für den Abhak-Dialog bei „Konto weg": Verlust von der Start-Balance des Trades bis zur Liquidation — dieselbe
    * Liq-Balance wie wdlBlowStand (Regel/Konto-Boden; beim Tageslimit der Konto-Boden). Nur wenn beide Werte an der Zeile stehen
@@ -31554,7 +31560,7 @@
       return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Abhaken" hierher ziehen oder „→ manuell"</span></div></div>`
     }
     // Geblowt = abgehakt/erkannt geblowt oder Konto weg (nicht das Tageslimit — das ist kein Blow); seit 13.10.2026 eigener Kasten in „Erledigt"
-    const istGeblowt = t => !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t)))
+    const istGeblowt = wdlGeblowtUrteil   // 20.10.2026: dieselbe Wahrheit wie die Vorbelegung der Abhak-Dialoge (wdlGeblowtUrteil)
     // arr = was gezeigt wird (Modell + Person), alleArr = dieselbe Liste ohne Personen-Filter — nur für die Chips im Kopf
     // Mini-Trades sind KEIN „Trade abhaken" (13.10.2026, Finn: „nicht mischen") — sie stehen als normaler Trade in Erledigt → Abhaken. Der Trade,
     // der das Ziel erreicht hat, steht in „Trade abhaken" (Finns Ablauf .1518: abhaken → Konto nach Tage sammeln bzw. Review); das Konto mit
@@ -45299,7 +45305,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1648'
+  const OS_TAB_BUILD = '2026-09-22.1649'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59854,6 +59860,19 @@
     // Status-Auswahl initialisieren (3-Radio + Account-Picker)
     if(typeof tcPopulateStatusAccountPicker === 'function'){
       tcPopulateStatusAccountPicker(p)
+    }
+    // Geblowt wie im Radar (20.10.2026, Finn 23:00 Dubai, Tradeify 150k …1607 SELL 3 NQ, Balance 145.438 bei Liq 145.500: „Der Account ist
+    // eigentlich geblowt … steht trotzdem ‚Nichts ändern‘ vorbelegt. Das Radar weiß schon, dass er geblowt ist"): eigene Pläne landen
+    // hier statt im Radar-Dialog, und hier wurde bisher nur „Konto weg" vorbelegt. Jetzt dieselbe Wahrheit wie die Gruppe „Geblowt ·
+    // archivieren" (wdlGeblowtUrteil an der Radar-Zeile dieses Plans, nur wenn der Radar sie geladen hat; nicht für schon abgehakte
+    // Pläne — „Trade bearbeiten" ändert den Kontostatus nie von selbst). Nur Vorbelegung, Finn bestätigt mit Erledigt.
+    if(p.status !== 'completed' && typeof wdlGeblowtUrteil === 'function'){
+      let tr = null
+      try{ tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)) || null }catch(_){}
+      if(tr && wdlGeblowtUrteil(tr)){
+        const rb = document.querySelector('input[name="tc-status"][value="blown"]')
+        if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
+      }
     }
     // Konto weg (05.10.2026): „geblowt" vorbelegen (Finn kann umstellen). Steht kein Master-P&L am Plan, Vorschlag ≈ Start-Balance bis
     // Liquidation aus der Radar-Zeile dieses Plans (nur wenn der Radar sie geladen hat) — sonst bleibt das Feld leer.
