@@ -4115,7 +4115,7 @@
   /* BESTANDEN-DATUM (Finn 21.10.2026 04:50 Dubai: „das Datum, wann der Account gepasst wurde … welcher heute reingelaufen ist und welcher schon
      vor Tagen"): siebte Spalte „Bestanden" in allen vier Stationen des Blocks (wdl-tab-bst), zwischen Tage und Status; Rest-von-Hand-Zeile
      behält ihre zwei Reihen (Knöpfe unten über Tage+Datum+Status+Zeit). Gleiche Spezifität wie .wdl-tab-konto .wdl-z — steht deshalb dahinter. */
-  #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(120px,1fr) 96px 216px 64px 88px 110px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}   /* 862 px bei 120 px Name — passt in den Radar-Kasten ab ~900 px Breite */
+  #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(120px,1fr) 96px 200px 80px 88px 110px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}   /* 862 px bei 120 px Name (schmaler als das 6-Spalten-Raster, 880); Konto 80 px, weil in „Trade abhaken" dort die Balance „159.120 $" steht (Prüfer S2) */
   #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer ri mi konto datum pl pl" "wer ri mi zeit zeit zeit zeit"}
   #dashboard-view .wdl-z-datum{grid-area:datum;text-align:right;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
   #dashboard-view .wdl-z-datum b{font-weight:600;color:var(--ink-2)}   /* „heute 17:06" fett — der ist heute reingelaufen */
@@ -45382,7 +45382,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1655'
+  const OS_TAB_BUILD = '2026-09-22.1656'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
