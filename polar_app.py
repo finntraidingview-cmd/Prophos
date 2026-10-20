@@ -606,7 +606,9 @@ def registrieren(app, ns):
                  "slave_risk": _zahl(d.get("slave_risk")), "multiplier": round(lots / kt, 4),
                  "master_tp": _zahl(d.get("master_tp")), "master_sl": _zahl(d.get("master_sl")),
                  "polar_slave_user_id": su, "polar_pct": _zahl(d.get("polar_pct")) or 102.5,
-                 "planned_for": datetime.now(timezone.utc).date().isoformat(),
+                 # Dubai-Tag statt UTC (21.10.2026, Finn fand seine zwei Polar-Pläne von 03:20 Dubai nicht: planned_for stand auf dem
+                 # UTC-Vortag 20.10. — Karte am falschen Tag, und der Tages-Reset im Nachtlauf räumt planned_for < Zieltag ab)
+                 "planned_for": (A["_kapitel_heute_iso"]() if "_kapitel_heute_iso" in A else datetime.now(timezone.utc).date().isoformat()),
                  "mt5_baseline": {"polar_auftrag": {"lots": lots, "sl_pkt": sl_pkt, "tp_pkt": tp_pkt, "kontrakte": kt,
                                                     "master_sl_pkt": _zahl(d.get("master_sl_pkt")), "master_tp_pkt": _zahl(d.get("master_tp_pkt"))}}}
         try:
