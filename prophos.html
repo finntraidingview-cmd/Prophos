@@ -1332,8 +1332,34 @@
   #dashboard-view .adm-gp-spur{display:flex;height:8px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
   #dashboard-view .adm-gp-spur > span{height:100%}
   #dashboard-view .adm-gp-konten .adm-row.is-plus{opacity:.5}
+  /* SKALA JE KONTO (20.10.2026, Finn: „Wo steht der Account gerade bei der Balance? Gesamtwert? Wo auf dem Strahl befindet er sich?"):
+     eine dünne Spur Boden → Start → Ziel, Farbe nur an der Marke (grün über Start, amber dazwischen, rot nahe Boden), grau ohne Lesung */
+  #dashboard-view .adm-gp-konten .adm-row.adm-sk{grid-template-columns:minmax(150px,1.2fr) minmax(180px,2fr) minmax(150px,auto);align-items:center}
+  #dashboard-view .adm-sk-skala{position:relative;padding:8px 6px 14px}
+  #dashboard-view .adm-sk-spur{position:relative;height:3px;border-radius:999px;background:var(--border)}
+  #dashboard-view .adm-sk-spur.is-grau{background:var(--surface-tint)}
+  #dashboard-view .adm-sk-spur > i{position:absolute;top:-4px;width:1px;height:11px;background:var(--sub-2);transform:translateX(-.5px)}
+  #dashboard-view .adm-sk-spur > i.adm-sk-ziel{right:0;background:var(--ink-2)}
+  #dashboard-view .adm-sk-spur > b{position:absolute;top:50%;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface)}
+  #dashboard-view .adm-sk-spur > b.is-gruen{background:var(--good)}
+  #dashboard-view .adm-sk-spur > b.is-amber{background:var(--warn)}
+  #dashboard-view .adm-sk-spur > b.is-rot{background:var(--danger)}
+  #dashboard-view .adm-sk-lab{position:relative;height:12px;margin-top:5px;font-size:10px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #dashboard-view .adm-sk-lab > span{position:absolute;top:0}
+  #dashboard-view .adm-sk-lab > .l{left:0}
+  #dashboard-view .adm-sk-lab > .r{right:0}
+  #dashboard-view .adm-sk-lab > .m{transform:translateX(-50%)}
+  #dashboard-view .adm-sk-zahlen{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3}
+  #dashboard-view .adm-sk-zahlen b{display:block;font-size:13px;font-weight:600;color:var(--ink)}
+  #dashboard-view .adm-sk-zahlen small{display:block;font-size:11px;color:var(--sub)}
+  #dashboard-view .adm-sk-zahlen small.adm-sk-diff{color:var(--ink-2)}
+  #dashboard-view .adm-sk-zahlen small.is-gruen{color:var(--good-ink, #15803d)}
+  #dashboard-view .adm-sk-zahlen small.is-rot{color:var(--danger-ink, #b91c1c)}
   @media (max-width:640px){#dashboard-view .adm-gp-konten .adm-row{grid-template-columns:minmax(0,1fr) auto;row-gap:6px}
-    #dashboard-view .adm-gp-konten .adm-gp-spur{grid-column:1 / -1;order:3}}
+    #dashboard-view .adm-gp-konten .adm-gp-spur{grid-column:1 / -1;order:3}
+    #dashboard-view .adm-gp-konten .adm-row.adm-sk{grid-template-columns:minmax(0,1fr) auto;row-gap:2px}
+    #dashboard-view .adm-gp-konten .adm-sk-skala{grid-column:1 / -1;order:3;padding:6px 4px 14px}
+    #dashboard-view .adm-sk-zahlen b{font-size:12.5px}}
 
   #dashboard-view .table-wrap{overflow-x:auto}
   #dashboard-view table.t{width:100%;border-collapse:collapse;font-size:13px}
@@ -15713,6 +15739,53 @@
 
     /* Konten der Aufklappung als Balken (07.10.2026): Spur = Wert, grün = gezahlt, violett = Rest (= geparkt). Konten im Plus
      * gedämpft am Ende mit „im Plus" — sie zählen nicht. Herleitung (Kosten, Kontowert-Zuwachs, Trades ohne Hedge) im Tooltip. */
+    /* SKALA JE KONTO (20.10.2026, Finn 03:05 Dubai, Screenshot Admin → Übersicht → „FundedNext · 10 Accounts": „Diese blauen und grünen
+     * Balken (Wert geparkt / im Plus) ersetzen — unübersichtlich, man erkennt gar nichts. Wichtige Daten wären: Wo steht der Account gerade
+     * bei der Balance? Gesamtwert? Wo auf dem Strahl befindet er sich?"). Je Konto EINE dünne Skala Boden → Start → Ziel mit der Balance
+     * als Marke; rechts Balance → Ziel mit Differenz und darunter die Kettenwerte (Wert · gezahlt, unverändert gerechnet, nur nicht mehr
+     * als Balken). Boden/Ziel liefert /admin/overview je Zeile (app.py admin_skala_felder — dieselben Helfer wie der Radar), Balance wie
+     * bisher (acc_balance_wahl), Start = starting_balance bzw. Kontogröße. Nur Zustand, keine Regelprüfung. */
+    // REIN RECHNEND (testbar, tools/selftest_admin_skala.py): Lage auf dem Strahl → { grau, grund, links, rechts, startPos, zielPos, pos,
+    // farbe 'gruen'|'amber'|'rot', zahl, diff, diffFarbe }. Ohne Boden spiegelt die Spanne zum Ziel nach links, ohne Ziel die zum Boden nach
+    // rechts (offenes Ende); Marke rot = innerhalb des letzten Viertels über dem Boden, amber = unter Start, grün = ab Start.
+    function admSkalaInfo(r){
+      const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+      const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+      const bal = n(r && r.balance), start = n(r && r.start) ?? n(r && r.size), boden = n(r && r.boden), ziel = n(r && r.ziel)
+      const out = { bal, start, boden, ziel, grau: false, grund: '', links: null, rechts: null, startPos: null, zielPos: null, pos: null, farbe: null, zahl: '–', diff: '', diffFarbe: '' }
+      if(start == null || start <= 0){ out.grau = true; out.grund = 'Kontogröße unbekannt'; return out }
+      const bodenOk = boden != null && boden < start, zielOk = ziel != null && ziel > start
+      const spL = bodenOk ? start - boden : null, spR = zielOk ? ziel - start : null
+      const links = bodenOk ? boden : start - (spR != null ? spR : start * 0.1)
+      const rechts = zielOk ? ziel : start + (spL != null ? spL : start * 0.1)
+      out.links = links; out.rechts = rechts
+      const p = v => Math.max(1, Math.min(99, 100 * (v - links) / (rechts - links)))
+      out.startPos = Math.round(p(start) * 10) / 10
+      out.zielPos = zielOk ? 100 : null
+      if(bal == null){ out.grau = true; out.grund = 'keine Lesung'; out.zahl = zielOk ? `– → ${f0(ziel)} $` : '–'; return out }
+      out.pos = Math.round(p(bal) * 10) / 10
+      out.farbe = bal >= start ? 'gruen' : (bodenOk && bal <= boden + spL * 0.25) ? 'rot' : 'amber'
+      out.zahl = zielOk ? `${f0(bal)} → ${f0(ziel)} $` : `${f0(bal)} $`
+      if(zielOk && bal >= ziel){ out.diff = `Ziel erreicht · +${f0(bal - ziel)} $`; out.diffFarbe = 'gruen' }
+      else if(zielOk){ out.diff = `fehlen ${f0(ziel - bal)} $` + (bal < start ? ` · ${f0(start - bal)} $ unter Start` : ''); out.diffFarbe = bal < start ? (out.farbe === 'rot' ? 'rot' : '') : '' }
+      else if(bal >= start){ out.diff = `+${f0(bal - start)} $ über Start`; out.diffFarbe = 'gruen' }
+      else { out.diff = `−${f0(start - bal)} $ unter Start` + (bodenOk ? ` · Boden in ${f0(bal - boden)} $` : ''); out.diffFarbe = out.farbe === 'rot' ? 'rot' : '' }
+      return out
+    }
+    window._admSkalaInfo = admSkalaInfo   // Test-Haken (Selftest ohne DB)
+    function admSkalaHtml(r){
+      const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+      const i = admSkalaInfo(r)
+      if(i.start == null) return `<div class="adm-sk-skala" title="${escapeHtml(i.grund)}"><div class="adm-sk-spur is-grau"></div><div class="adm-sk-lab"><span class="l">${escapeHtml(i.grund)}</span></div></div>`
+      const tipp = [i.boden != null ? `Boden ${f0(i.boden)} $${r.boden_text ? ' — ' + r.boden_text : ''}${r.boden_art ? ' (' + r.boden_art + ')' : ''}` : 'Boden unbekannt',
+                    `Start ${f0(i.start)} $`, i.ziel != null ? `Ziel ${f0(i.ziel)} $${r.ziel_quelle === 'konto' ? ' (am Konto)' : r.ziel_quelle === 'regel' ? ' (Kernwerte)' : ''}` : 'kein $-Ziel — Skala nach rechts offen',
+                    i.bal != null ? `Balance ${f0(i.bal)} $${r.balance_src ? ' · ' + r.balance_src : ''}${r.balance_at ? ' · ' + timeAgo(r.balance_at) : ''}` : 'keine Balance-Lesung'].join('\n')
+      return `<div class="adm-sk-skala" title="${escapeHtml(tipp)}"><div class="adm-sk-spur${i.grau ? ' is-grau' : ''}">`
+        + `<i class="adm-sk-start" style="left:${i.startPos}%"></i>${i.zielPos != null ? '<i class="adm-sk-ziel"></i>' : ''}`
+        + (i.pos != null ? `<b class="adm-sk-marke is-${i.farbe}" style="left:${i.pos}%"></b>` : '') + '</div>'
+        + `<div class="adm-sk-lab"><span class="l">${i.boden != null ? f0(i.boden) : '?'}</span><span class="m" style="left:${i.startPos}%">Start ${f0(i.start)}</span>`
+        + `<span class="r">${i.ziel != null ? 'Ziel ' + f0(i.ziel) : (i.grau && i.grund === 'keine Lesung' ? 'keine Lesung' : 'offen')}</span></div></div>`
+    }
     function admGpKonten(accs){
       const box = $('adm-gp-konten'); if(!box) return
       box.innerHTML = ''
@@ -15721,21 +15794,19 @@
         || ((Number(b.gp_wert) || 0) - (Number(a.gp_wert) || 0)))
       for(const r of liste){
         const wert = Number(r.gp_wert) || 0, gez = Number(r.gp_gezahlt) || 0, rest = Number(r.gp_rest) || 0
-        const gezPct = wert > 0 ? Math.min(100, 100 * gez / wert) : (gez > 0 ? 100 : 0)
+        const i = admSkalaInfo(r)
         const row = document.createElement('div')
-        row.className = 'adm-row' + (r.gp_plus ? ' is-plus' : '')
+        row.className = 'adm-row adm-sk' + (r.gp_plus ? ' is-plus' : '')
+        // Skala statt Balken (20.10.2026): Konto + Phase + ID links, Strahl in der Mitte, Balance → Ziel + Kettenwerte rechts
         row.innerHTML =
-          '<div class="adm-row-name"><span class="nm"></span><small></small></div>' +
-          `<div class="adm-gp-spur"><span style="width:${gezPct.toFixed(1)}%;background:var(--good)"></span>` +
-          `<span style="width:${(wert > 0 ? 100 - gezPct : 0).toFixed(1)}%;background:var(--violet)"></span></div>` +
-          '<div class="adm-val"></div><div class="adm-pct"></div>'
+          '<div class="adm-row-name"><span class="nm"></span><small class="pe"></small></div>' +
+          admSkalaHtml(r) +
+          `<div class="adm-sk-zahlen"><b>${escapeHtml(i.zahl)}</b>${i.diff ? `<small class="adm-sk-diff${i.diffFarbe ? ' is-' + i.diffFarbe : ''}">${escapeHtml(i.diff)}</small>` : (i.grau ? `<small class="adm-sk-diff">${escapeHtml(i.grund)}</small>` : '')}` +
+          `<small>Wert ${escapeHtml(admEur.format(wert))} · gezahlt ${escapeHtml(admEur.format(gez))}${r.gp_plus ? ' · im Plus' : rest > 0 ? ` · Rest ${escapeHtml(admEur.format(rest))}` : ''}</small></div>`
         row.querySelector('.nm').textContent = r.name || '—'
-        row.querySelector('small').textContent = `${admShortName(r.person || '—')} · Wert ${admEur.format(wert)} · gezahlt ${admEur.format(gez)}`
-        const val = row.querySelector('.adm-val'), pct = row.querySelector('.adm-pct')
-        if(r.gp_plus){ val.textContent = '—'; pct.textContent = 'im Plus'; pct.style.color = 'var(--good)' }
-        else { val.textContent = admEur.format(Math.max(0, rest)); pct.textContent = gez > 0 ? `${gezPct.toFixed(0)} %` : '' }
+        row.querySelector('.pe').textContent = admShortName(r.person || '—')
         const zuw = Number(r.gp_zuwachs) || 0
-        row.title = `Wert ${admEur.format(wert)} = Kosten ${admEur.format(Number(r.gp_kosten) || 0)}`
+        row.querySelector('.adm-sk-zahlen').title = `Wert ${admEur.format(wert)} = Kosten ${admEur.format(Number(r.gp_kosten) || 0)}`
           + ` (Kauf ${admEur.format(Number(r.c_buy) || 0)} + Hedge ${admEur.format(Number(r.c_hedge) || 0)}${r.preds ? `, ${r.preds} abgelöst` : ''})`
           + ` ${zuw < 0 ? '−' : '+'} Kontowert ohne Hedge ${admEur.format(Math.abs(zuw))} (${r.gp_n || 0} Trade${r.gp_n === 1 ? '' : 's'})`
           + (r.gp_offen ? ` · ${r.gp_offen} ohne Wert: ${r.gp_hinweis || '—'}` : '')
@@ -15859,7 +15930,10 @@
       }
 
       const accs = rows.slice().sort((a,b) => admVals(b).parked - admVals(a).parked)
+      // Skala (20.10.2026): Summe der gelesenen Balances im Kopf, neben dem Gesamtwert (nur im Kontowert-Modus mit den Skala-Zeilen)
+      const balSum = accs.reduce((a, r) => a + (r.balance != null && isFinite(Number(r.balance)) ? Number(r.balance) : 0), 0), balN = accs.filter(r => r.balance != null && isFinite(Number(r.balance))).length
       $('adm-acc-count').textContent = accs.length + (accs.length === 1 ? ' Account' : ' Accounts')
+        + (gp && balN ? ` · Balance ${balSum.toLocaleString('de-DE', { maximumFractionDigits: 0 })} $${balN < accs.length ? ` (${balN} gelesen)` : ''}` : '')
       $('adm-acc-empty').hidden = accs.length > 0
       // Kontowert-Modus (07.10.2026): Konten als Balken (Wert · gezahlt · Rest) statt Tabelle
       $('adm-acc-tabelle').hidden = gp
@@ -45400,7 +45474,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1657'
+  const OS_TAB_BUILD = '2026-09-22.1658'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

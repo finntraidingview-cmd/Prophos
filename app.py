@@ -6077,6 +6077,44 @@ def heute_traden_info(plaene, heute, tz):
     return {"getradet": getradet, "geplant_um": (min(geplant, key=lambda x: _ap_ts(x)) if geplant and not getradet else None)}
 
 
+def admin_skala_felder(a, regeln, kw_firmen):
+    """REIN RECHNEND (testbar, tools/selftest_admin_skala.py): Boden und Ziel eines Kontos für die Skala in Admin → Übersicht → Konten je
+    Firma (20.10.2026, Finn 03:05 Dubai: „Diese blauen und grünen Balken ersetzen … Wo steht der Account gerade bei der Balance?
+    Gesamtwert? Wo auf dem Strahl befindet er sich?"). DIESELBEN Quellen wie der Radar: Boden = liq_regel_waehlen → liq_boden_kernwerte →
+    liq_konto_boden (ohne Peak: der Verlauf der Pläne liegt der Übersicht nicht vor — bei nachziehendem DD steht dann der Boden ab Größe,
+    boden_art sagt es); Ziel = accounts.ziel_usd, sonst Kernwerte-Regel der Firma (ap_regel_konto: ziel_pct_konto geht vor) über zw_ziel
+    für challenge/phase1/phase2; Funded/Winning Days ohne $-Ziel → None (Skala nach rechts offen). Fehler → alles None, nie werfen.
+    → {boden, boden_art, boden_text, ziel, ziel_quelle}"""
+    leer = {"boden": None, "boden_art": None, "boden_text": None, "ziel": None, "ziel_quelle": None}
+    if not isinstance(a, dict) or not a:
+        return leer
+    out = dict(leer)
+    typ = str(a.get("account_type") or "").lower()
+    try:
+        gr = _wd_konto_groesse(a)
+        regel, _weg = liq_regel_waehlen(regeln, a.get("firm"), typ or None, gr)
+        b_regel, b_acc, b_gr = liq_boden_kernwerte(regel, a, typ, False, kw_firmen)
+        start = _wd_num(a.get("starting_balance")) or (float(b_gr) if b_gr else None)
+        boden, text, _dd, art = liq_konto_boden(b_regel, b_acc, b_gr, None, start, None)
+        out.update(boden=round(float(boden), 2) if boden is not None else None, boden_art=art, boden_text=text)
+    except Exception as e:
+        out["boden_text"] = f"Boden nicht rechenbar ({type(e).__name__})"
+    try:
+        z = _wd_num(a.get("ziel_usd"))
+        if z and z > 0:
+            out.update(ziel=round(float(z), 2), ziel_quelle="konto")
+        elif typ in ("challenge", "phase1", "phase2"):
+            kr = ap_regel_finden(kw_firmen, a.get("firm"))
+            bal = _wd_num(a.get("tv_balance")) or _wd_num(a.get("meta_api_balance")) or _wd_num(a.get("balance")) or _wd_num(a.get("starting_balance"))
+            if kr and bal:
+                zz = zw_ziel(ap_regel_konto(kr, a, bal), typ, bal)
+                if zz and zz[0]:
+                    out.update(ziel=round(float(zz[0]), 2), ziel_quelle="regel")
+    except Exception:
+        pass
+    return out
+
+
 def admin_build_overview(kapitel_id=None):
     # KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
     # Realmoney … dass wir das Ganze zeitlich trennen können mit den vorherigen
@@ -6636,8 +6674,16 @@ def admin_build_overview(kapitel_id=None):
                 # Funded CFD „Waiting for Payout" (29.09.2026): wartet nur auf die Auszahlung, braucht keinen Trade
                 "waiting_payout_since": a.get("waiting_payout_since") or None}
 
+    # Skala (20.10.2026): Boden/Ziel je Konto — Regeln/Kernwerte einmal je Abruf (beide 60 s gecacht), Fehler → Felder None
+    try:
+        _sk_regeln, _sk_kw = _liq_regeln_laden(), _liq_kw_laden()
+    except Exception as e:
+        print(f"[admin] ⚠️ Skala-Regeln: {type(e).__name__}: {e}", flush=True)
+        _sk_regeln, _sk_kw = None, None
     for r in rows:
-        r.update(_firma_felder(by_id.get(r["id"]) or {}, r["id"]))
+        a_ = by_id.get(r["id"]) or {}
+        r.update(_firma_felder(a_, r["id"]))
+        r.update(admin_skala_felder(a_, _sk_regeln, _sk_kw))
 
     # Live-Konten (Hedge-Broker) stehen bewusst NICHT in rows — jede Summe der
     # Übersicht würde sie sonst mitzählen. Die Firmen-Ansicht zeigt sie trotzdem
