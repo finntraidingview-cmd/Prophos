@@ -1617,6 +1617,23 @@
   #dashboard-view #polarCheckModal .pc-nein{color:var(--danger-ink, #b91c1c);font-weight:700}
   #dashboard-view #polarCheckModal .pc-offen{color:var(--sub);font-weight:700}
   #dashboard-view #polarCheckModal .pc-text{color:var(--sub)}
+  /* Crosscheck (21.10.2026): Prüfung × Slave | Master, ✗-Zeile zart rot hinterlegt, Zelle = Zeichen + Text */
+  #dashboard-view #polarCheckModal .pc-pruef{font-weight:600;color:var(--ink);white-space:nowrap;width:1%}
+  #dashboard-view #polarCheckModal .pc-zelle{width:44%}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-m{display:inline-block;width:16px}
+  #dashboard-view #polarCheckModal .pc-zelle.is-nein .pc-text{color:var(--danger-ink, #b91c1c)}
+  #dashboard-view #polarCheckModal .pc-zelle.is-ok .pc-text{color:var(--ink-2)}
+  #dashboard-view #polarCheckModal tr.pc-zeile-nein td{background:color-mix(in srgb, var(--danger) 6%, transparent)}
+  /* Handy: Prüfung als Zeile oben, darunter Slave | Master je halbe Breite mit eigenem Spaltennamen (kein Seitwärts-Scrollen) */
+  @media (max-width:600px){
+    #dashboard-view #polarCheckModal table.pc-kreuz thead{display:none}
+    #dashboard-view #polarCheckModal table.pc-kreuz tr{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border-soft)}
+    #dashboard-view #polarCheckModal table.pc-kreuz td{display:block;border:0}
+    #dashboard-view #polarCheckModal table.pc-kreuz td.pc-pruef{width:100%;padding-bottom:0}
+    #dashboard-view #polarCheckModal table.pc-kreuz td.pc-zelle{width:50%;box-sizing:border-box}
+    #dashboard-view #polarCheckModal table.pc-kreuz td.pc-beide{width:100%}
+    #dashboard-view #polarCheckModal table.pc-kreuz td[data-kopf]::before{content:attr(data-kopf);display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);margin-bottom:2px}
+  }
   #dashboard-view #polarCheckModal #polarCheckStart:disabled{opacity:.45;cursor:not-allowed}   /* gesperrt sichtbar blass (wie .wdl-z-akt .el-knopf:disabled) */
   /* LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai: „rechts Master, links Slave"): Prüf-Popup nach „Polar starten" und Radar-Popup, gleiche Bausteine
      wie .pol-seite (Rand, Radius, Kopf), Schritte als schlichte Liste — erledigt ✓ grün, aktuell fett, Fehler rot */
@@ -9132,7 +9149,7 @@
          darf auch kein Orbit-Trade laufen"). Öffnet über „Starten" an einem geplanten Polar-Plan; Zeilen kommen vom Server
          (/polar/vorpruefung — dieselbe Rechnung prüft /polar/freigeben und /polar/start fail-closed). Eigene Verdrahtung (polarCheck*). -->
     <div class="modal-bg" id="polarCheckModal">
-      <div class="modal" style="max-width:640px">
+      <div class="modal" style="max-width:780px">
         <div class="modal-head">
           <h3 id="polarCheckTitel">Polar starten — Vorprüfung</h3>
           <button class="modal-x" id="polarCheckClose" aria-label="Schließen">
@@ -9143,7 +9160,7 @@
           <div id="polarCheckInfo" style="font-size:12.5px;color:var(--sub);margin-bottom:10px"></div>
           <div class="table-wrap">
             <table class="t">
-              <thead><tr><th style="width:28px"></th><th>Prüfung</th><th>Stand</th></tr></thead>
+              <thead id="polarCheckKopf"><tr><th style="width:28px"></th><th>Prüfung</th><th>Stand</th></tr></thead>
               <tbody id="polarCheckRows"></tbody>
             </table>
           </div>
@@ -45618,7 +45635,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1664'
+  const OS_TAB_BUILD = '2026-09-22.1665'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55340,17 +55357,45 @@
         if(!x || !x.phase) continue
         const wann = x.at_ms ? new Date(x.at_ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?'
         const txt = x.phase === 'fertig' ? `bewiesen (${wann})` : (x.phase === 'fehler' || x.phase === 'nicht_gefunden') ? `nicht bewiesen: ${x.phase} (${wann})` : `${x.phase} (${wann})`
-        _polarCheckTest.push({ key: 'test_' + seite, titel: `Info · letzter Maus-Test × ${seite === 'master' ? 'Master' : 'Slave'} (dieser PC)`, ok: null, text: txt })
+        _polarCheckTest.push({ key: 'test_' + seite, titel: `Info · letzter Maus-Test × ${seite === 'master' ? 'Master' : 'Slave'} (dieser PC)`, ok: null, text: txt, gruppe: 'test', seite })
       }
     }catch(_){ _polarCheckTest = [] }
   }
+  /* CROSSCHECK (Finn 21.10.2026 ~03:30 Dubai: „Mach diese Prüfung ein bisschen schöner, sodass man das mehr erkennt … so wie ein Crosscheck"):
+   * eine Zeile je Prüfung, Spalten Slave links / Master rechts (wie der Live-Ablauf), „Kein anderer Polar-Lauf" über beide. Die Zeilen tragen
+   * gruppe + seite vom Server (polar_app.vorpruefung_zeilen); ältere Antworten ohne gruppe fallen auf die Liste zurück. */
+  const POLAR_CHECK_GRUPPEN = [['richtung', 'Richtungsschutz'], ['big', 'Kein Big Trade (Orbit)'], ['puls', 'Puls frei'], ['polar', 'Kein anderer Polar-Lauf'],
+    ['pc', 'PC · Prophos-Tab'], ['geraet', 'Reader / MT5'], ['test', 'Maus-Test × (dieser PC)']]
+  function polarCheckZelle(z, kopfText){   // kopfText = Spaltenname fürs Handy (dort ohne Tabellenkopf, s. CSS)
+    const k = kopfText ? ` data-kopf="${escapeHtml(kopfText)}"` : ''
+    if(!z) return `<td class="pc-zelle"${k}><span class="pc-text">—</span></td>`
+    return `<td class="pc-zelle ${z.ok === true ? 'is-ok' : z.ok === false ? 'is-nein' : 'is-offen'}"${k}><span class="pc-m">${polarCheckZeichen(z.ok)}</span><span class="pc-text">${escapeHtml(String(z.text || ''))}</span></td>`
+  }
   function polarCheckZeichnen(d){
-    const rows = polarEl('polarCheckRows'), start = polarEl('polarCheckStart')
+    const rows = polarEl('polarCheckRows'), kopf = polarEl('polarCheckKopf'), start = polarEl('polarCheckStart')
     const zz = [...((d && Array.isArray(d.zeilen)) ? d.zeilen : []), ...((d && Array.isArray(d.zeilen) && d.zeilen.length) ? _polarCheckTest : [])]
-    if(rows) rows.innerHTML = zz.map(z => `<tr><td>${polarCheckZeichen(z.ok)}</td><td><b>${escapeHtml(String(z.titel || ''))}</b></td><td class="pc-text">${escapeHtml(String(z.text || ''))}</td></tr>`).join('')
-      || '<tr><td></td><td colspan="2" class="pc-text">keine Antwort</td></tr>'
+    const kreuz = zz.length && zz.every(z => z.gruppe)
+    const werRoh = s => { const z = zz.find(x => x.seite === s && x.wer); return z ? ' · ' + String(z.wer) : '' }
+    const tbl = polarEl('polarCheckModal')?.querySelector('table.t'); if(tbl) tbl.classList.toggle('pc-kreuz', !!kreuz)
+    if(kopf){
+      const wer = s => escapeHtml(werRoh(s))
+      kopf.innerHTML = kreuz ? `<tr><th>Prüfung</th><th>Slave${wer('slave')}</th><th>Master${wer('master')}</th></tr>`
+        : '<tr><th style="width:28px"></th><th>Prüfung</th><th>Stand</th></tr>'
+    }
+    if(rows) rows.innerHTML = !zz.length ? '<tr><td></td><td colspan="2" class="pc-text">keine Antwort</td></tr>'
+      : kreuz ? POLAR_CHECK_GRUPPEN.map(([g, label]) => {
+          const zg = zz.filter(z => z.gruppe === g)
+          if(!zg.length) return ''
+          const beide = zg.find(z => !z.seite)
+          const zeilenKlasse = zg.some(z => z.ok === false) ? ' class="pc-zeile-nein"' : ''
+          return beide
+            ? `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(beide).replace('<td ', '<td colspan="2" class="pc-beide" ').replace('class="pc-beide" class="', 'class="pc-beide ')}</tr>`
+            : `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(zg.find(z => z.seite === 'slave'), 'Slave' + werRoh('slave'))}${polarCheckZelle(zg.find(z => z.seite === 'master'), 'Master' + werRoh('master'))}</tr>`
+        }).join('')
+      : zz.map(z => `<tr><td>${polarCheckZeichen(z.ok)}</td><td><b>${escapeHtml(String(z.titel || ''))}</b></td><td class="pc-text">${escapeHtml(String(z.text || ''))}</td></tr>`).join('')
     if(start) start.disabled = !(d && d.frei === true)
   }
+  window._polarCheckZeichnen = polarCheckZeichnen   // Test-Haken (Stub)
   async function polarCheckRufen(pfad){
     const { data: { session } } = await supabase.auth.getSession()
     const tok = session?.access_token

@@ -346,7 +346,8 @@ def trades_belegt(rows, pid, jetzt):
     """REIN RECHNEND (testbar): trade_plans-Zeilen der Master- und Slave-ID → die, die gerade belegen: open = „läuft", review ohne Lesung
     (kein final/endlesung balance_end, kein today_pnl, nicht aufgegeben) und beendet ≤ VP_LESUNG_FENSTER_H = „wartet auf Lesung".
     Der Plan selbst und Polar-Pläne fallen raus (die prüft die Zeile „anderer Polar-Lauf"). jetzt = datetime UTC.
-    → [{user_id, id, route, name, art}]"""
+    big = Orbit-Big-Trade (trade_plans.orbit_v3, Orbit V3 mit Fusion-Hedge) — nur der sperrt den Polar-Start (Finn 21.10.2026).
+    → [{user_id, id, route, name, art, big}]"""
     out = []
     for r in rows or []:
         if not isinstance(r, dict) or str(r.get("id") or "") == str(pid) or str(r.get("route") or "") == "polar":
@@ -371,12 +372,12 @@ def trades_belegt(rows, pid, jetzt):
                 art = "wartet auf Lesung"
         if art:
             out.append({"user_id": str(r.get("user_id") or ""), "id": str(r.get("id") or ""), "route": str(r.get("route") or ""),
-                        "name": str(r.get("master_name") or r.get("master_firm") or "")[:60], "art": art})
+                        "name": str(r.get("master_name") or r.get("master_firm") or "")[:60], "art": art, "big": r.get("orbit_v3") is True})
     return out
 
 
-def _vp_zeile(key, titel, ok, text):
-    return {"key": key, "titel": titel, "ok": ok, "text": text}
+def _vp_zeile(key, titel, ok, text, gruppe=None, seite=None):
+    return {"key": key, "titel": titel, "ok": ok, "text": text, "gruppe": gruppe, "seite": seite}
 
 
 def vorpruefung_zeilen(d):
@@ -390,56 +391,76 @@ def vorpruefung_zeilen(d):
     Zeile), pc_lesbar (bool), slave_ort ('da' | 'weg' | None), slave_login. Reader-Zeile immer „–" (prüft der Master-PC selbst).
     → (frei, zeilen[{key, titel, ok True|False|None, text}]). ok None = nicht prüfbar (zeigt sich, sperrt nur bei Richtung/Trades/Polar nie —
     die liefern bei Lesefehlern False = fail-closed); frei nur, wenn keine Zeile False ist."""
+    # CROSSCHECK (Finn 21.10.2026 ~03:30 Dubai, Screenshot Vorprüfung Ina gegen Finn + Pascal: „Mach diese Prüfung ein bisschen schöner …
+    # so wie ein Crosscheck"): jede Zeile trägt gruppe (Prüfung) + seite (master/slave, None = beide) — der Tab zeichnet Prüfung × Seite
+    # (Slave links, Master rechts wie der Live-Ablauf). titel bleibt für die Fehlermeldung von /polar/start und /polar/freigeben.
     z = []
-    gegen_txt = {"buy": "Long", "sell": "Short"}
-    for key, seite, erg, name in (("rs_master", "Master", d.get("rs_master"), d.get("m_name")), ("rs_slave", "Slave", d.get("rs_slave"), d.get("s_name"))):
-        titel = f"Richtungsschutz {seite} · {name or seite + '-Konto'}"
+    for key, seite, erg, name in (("rs_master", "master", d.get("rs_master"), d.get("m_name")), ("rs_slave", "slave", d.get("rs_slave"), d.get("s_name"))):
+        titel = f"Richtungsschutz {seite.capitalize()} · {name or seite.capitalize() + '-Konto'}"
         if isinstance(erg, dict) and erg.get("frei") is True:
-            z.append(_vp_zeile(key, titel, True, "frei — keine Gegenrichtung an dieser ID × Firma"))
+            z.append(_vp_zeile(key, titel, True, "frei — keine Gegenrichtung an dieser ID × Firma", "richtung", seite))
         elif isinstance(erg, dict) and erg.get("frei") is False:
-            z.append(_vp_zeile(key, titel, False, str(erg.get("grund") or "Gegenrichtung läuft")[:200]))
+            z.append(_vp_zeile(key, titel, False, str(erg.get("grund") or "Gegenrichtung läuft")[:200], "richtung", seite))
         else:
             fehler = erg.get("fehler") if isinstance(erg, dict) else "keine Antwort"
-            z.append(_vp_zeile(key, titel, False, f"nicht prüfbar: {fehler or 'unklar'} — nichts gestartet"))
+            z.append(_vp_zeile(key, titel, False, f"nicht prüfbar: {fehler or 'unklar'} — nichts gestartet", "richtung", seite))
+    # NUR BIG TRADES SPERREN (Finn 21.10.2026 ~03:30 Dubai: „Es soll ja nur kein Big Trade laufen … Es dürfen auf beiden IDs keine Orbit Trades
+    # laufen"; Anlass: Ina hatte nur einen Auto-Planer-Challenge-Trade Orbit V2 45f5359b offen, Finn + Pascal einen Orbit V3 f7906bbe — beide
+    # sperrten). Big Trade = trade_plans.orbit_v3 (läuft oder wartet auf Lesung) → ✗. Andere Trades stehen als Info dabei, sperren nicht.
     belegt, signale = d.get("belegt"), d.get("signale")
-    for key, uid, wer, seite in (("trades_master", d.get("mu"), d.get("m_wer"), "Master"), ("trades_slave", d.get("su"), d.get("s_wer"), "Slave")):
-        titel = f"Keine anderen Trades · {seite}-ID {wer or '?'}"
-        if belegt is None or signale is None:
-            z.append(_vp_zeile(key, titel, False, "nicht lesbar — nichts gestartet"))
+    for key, uid, wer, seite in (("big_master", d.get("mu"), d.get("m_wer"), "master"), ("big_slave", d.get("su"), d.get("s_wer"), "slave")):
+        titel = f"Kein Big Trade (Orbit) · {seite.capitalize()}-ID {wer or '?'}"
+        if belegt is None:
+            z.append(_vp_zeile(key, titel, False, "nicht lesbar — nichts gestartet", "big", seite))
             continue
         tr = [b for b in belegt if str(b.get("user_id")) == str(uid)]
+        big = [b for b in tr if b.get("big")]
+        nebenbei = [b for b in tr if not b.get("big")]
+        info = ("läuft auch: " + "; ".join(f"{b.get('name') or b.get('route') or '?'} ({b.get('art')})" for b in nebenbei) + " — kein Big Trade, sperrt nicht") if nebenbei else ""
+        if big:
+            z.append(_vp_zeile(key, titel, False, ("Big Trade " + "; ".join(f"{b.get('name') or '?'} ({b.get('art')})" for b in big))[:240], "big", seite))
+        else:
+            z.append(_vp_zeile(key, titel, True, ("frei" + (" · " + info if info else ""))[:300], "big", seite))
+    # Puls-Signal in Arbeit (order_signale wartet/laeuft ≤ 15 min): der Puls dieser ID klickt gerade → bleibt Sperre (Panel wäre ohnehin belegt)
+    for key, uid, wer, seite in (("puls_master", d.get("mu"), d.get("m_wer"), "master"), ("puls_slave", d.get("su"), d.get("s_wer"), "slave")):
+        titel = f"Puls frei · {seite.capitalize()}-ID {wer or '?'}"
+        if signale is None:
+            z.append(_vp_zeile(key, titel, False, "nicht lesbar — nichts gestartet", "puls", seite))
+            continue
         sg = [x for x in signale if str(x.get("user_id")) == str(uid) and str(x.get("aktion") or "") != "polar_slave"]
-        treffer = [f"{b.get('name') or b.get('route') or '?'} ({b.get('route')}, {b.get('art')})" for b in tr] \
-            + [f"Puls-Signal {x.get('aktion') or '?'} ({x.get('status')})" for x in sg]
-        z.append(_vp_zeile(key, titel, not treffer, "frei — nichts läuft, nichts wartet auf Lesung" if not treffer else "belegt: " + "; ".join(treffer)[:240]))
+        z.append(_vp_zeile(key, titel, not sg, "frei — kein Puls-Signal in Arbeit" if not sg
+                           else "Puls arbeitet: " + "; ".join(f"{x.get('aktion') or '?'} ({x.get('status')})" for x in sg)[:200], "puls", seite))
     pol = d.get("polar")
     if pol is None:
-        z.append(_vp_zeile("polar", "Kein anderer Polar-Lauf", False, "nicht lesbar — nichts gestartet"))
+        z.append(_vp_zeile("polar", "Kein anderer Polar-Lauf", False, "nicht lesbar — nichts gestartet", "polar", None))
     else:
         z.append(_vp_zeile("polar", "Kein anderer Polar-Lauf", not pol,
-                           "frei" if not pol else "läuft: " + "; ".join(f"{x.get('quelle')} {str(x.get('lauf_id') or x.get('plan_id') or '?')[:8]} ({x.get('seite')})" for x in pol)[:240]))
-    for key, seite, wer, pc in (("pc_master", "Master", d.get("m_wer"), d.get("pc_master")), ("pc_slave", "Slave", d.get("s_wer"), d.get("pc_slave"))):
-        titel = f"PC der {seite}-ID {wer or '?'}"
+                           "frei" if not pol else "läuft: " + "; ".join(f"{x.get('quelle')} {str(x.get('lauf_id') or x.get('plan_id') or '?')[:8]} ({x.get('seite')})" for x in pol)[:240],
+                           "polar", None))
+    for key, seite, wer, pc in (("pc_master", "master", d.get("m_wer"), d.get("pc_master")), ("pc_slave", "slave", d.get("s_wer"), d.get("pc_slave"))):
+        titel = f"PC der {seite.capitalize()}-ID {wer or '?'}"
         if not d.get("pc_lesbar"):
-            z.append(_vp_zeile(key, titel, None, "nicht prüfbar (PC-Stand nicht lesbar)"))
+            z.append(_vp_zeile(key, titel, None, "nicht prüfbar (PC-Stand nicht lesbar)", "pc", seite))
             continue
         if not pc or not pc.get("lebt"):
             alt = int((pc or {}).get("alt_s") or 0)
-            z.append(_vp_zeile(key, titel, False, "aus — kein Prophos-Tab" + (f" seit {max(1, round(alt / 60))} min" if pc else " bekannt")))
+            z.append(_vp_zeile(key, titel, False, "aus — kein Prophos-Tab" + (f" seit {max(1, round(alt / 60))} min" if pc else " bekannt"), "pc", seite))
             continue
-        z.append(_vp_zeile(key, titel, True, f"Tab lebt ({pc.get('pc_name') or '?'})" + (" — Panel + Puls-Chrome prüft der PC selbst beim Start" if seite == "Master" else "")))
+        z.append(_vp_zeile(key, titel, True, f"Tab lebt ({pc.get('pc_name') or '?'})" + (" — Panel + Puls-Chrome prüft der PC selbst beim Start" if seite == "master" else ""), "pc", seite))
     # Reader am Master-PC (e): vom Server nicht sichtbar (lokaler Port 8790) → „–", sperrt nicht; Pflicht-Prüfung im Bot vor dem Klick
     z.append(_vp_zeile("reader", f"Reader am Master-PC · {d.get('m_wer') or '?'}", None,
-                       "vom Server nicht prüfbar (lokaler Reader, Port 8790) — der Master-PC prüft ihn vor dem Klick; ohne Reader bricht der Lauf ab, nichts gesendet"))
+                       "Reader (Port 8790) prüft der Master-PC selbst vor dem Klick — ohne Reader bricht der Lauf ab, nichts gesendet", "geraet", "master"))
     # Slave-MT5 bereit (f): Instanz des Slave-Logins lebt am PC der Slave-ID (wie orderSignalTick polar_slave sie findet)
     ort, login = d.get("slave_ort"), d.get("slave_login") or "?"
     titel = f"Slave-MT5 bereit · Login {login}"
     if ort == "da":
-        z.append(_vp_zeile("mt5_slave", titel, True, "Instanz läuft am PC der Slave-ID — Ein-Klick-Handel prüft der Bot im Terminal selbst (nicht lesbar)"))
+        z.append(_vp_zeile("mt5_slave", titel, True, f"MT5 {login} läuft am PC der Slave-ID — Ein-Klick-Handel prüft der Bot selbst", "geraet", "slave"))
     elif ort == "weg":
-        z.append(_vp_zeile("mt5_slave", titel, False, "auf keinem laufenden PC der Slave-ID als Echo-Instanz eingerichtet bzw. Instanz schreibt nicht mehr"))
+        z.append(_vp_zeile("mt5_slave", titel, False, f"MT5 {login} auf keinem laufenden PC der Slave-ID eingerichtet bzw. Instanz schreibt nicht mehr", "geraet", "slave"))
     else:
-        z.append(_vp_zeile("mt5_slave", titel, None, "nicht prüfbar (kein lebender PC mit Login-Stand) — Ein-Klick-Handel ebenfalls nicht lesbar"))
+        z.append(_vp_zeile("mt5_slave", titel, None, f"MT5 {login} nicht prüfbar (kein lebender PC mit Login-Stand)", "geraet", "slave"))
+    for x in z:   # Spaltenkopf im Tab („Slave · Finn + Pascal")
+        x["wer"] = d.get("m_wer") if x["seite"] == "master" else d.get("s_wer") if x["seite"] == "slave" else None
     return (not any(x["ok"] is False for x in z)), z
 
 
@@ -500,7 +521,7 @@ def _vorpruefung(plan):
         if s_acc and str(s_acc.get("user_id")) == su else {"fehler": "Slave-Konto passt nicht zur Slave-ID"}
     ids = ",".join(x for x in (mu, su) if _uuid(x))
     try:
-        rows = A["sb_select"]("trade_plans", {"select": "id,user_id,route,status,master_name,master_firm,ended_at,"
+        rows = A["sb_select"]("trade_plans", {"select": "id,user_id,route,status,master_name,master_firm,ended_at,orbit_v3,"
                                                         "endlesung:mt5_baseline->endlesung,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach",
                                               "user_id": f"in.({ids})", "status": "in.(open,review)", "limit": "200"}) or []
         d["belegt"] = trades_belegt(rows, pid, jetzt_dt)

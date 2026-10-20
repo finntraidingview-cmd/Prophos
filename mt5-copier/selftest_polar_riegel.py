@@ -110,7 +110,7 @@ def test_aktiv_liste():
     jetzt = datetime(2026, 10, 21, 20, 0, tzinfo=timezone.utc)
     vor = lambda m: (jetzt - timedelta(minutes=m)).isoformat()
     tb = polar_app.trades_belegt([
-        {"id": "o1", "user_id": A, "route": "tvv2", "status": "open", "master_name": "150k Orbit"},
+        {"id": "o1", "user_id": A, "route": "tvv2", "status": "open", "master_name": "150k Orbit", "orbit_v3": True},
         {"id": "r1", "user_id": B, "route": "mt5v2", "status": "review", "master_name": "100k Echo", "ended_at": vor(20), "endlesung": {}, "final": {}},
         {"id": "r2", "user_id": B, "route": "mt5v2", "status": "review", "ended_at": vor(20), "final": {"balance_end": 100123}},
         {"id": "r3", "user_id": B, "route": "tvv2", "status": "review", "ended_at": vor(300), "endlesung": {}},
@@ -118,19 +118,22 @@ def test_aktiv_liste():
         {"id": "ich", "user_id": A, "route": "tvv2", "status": "open"}], "ich", jetzt)
     chk("belegt: open = läuft, review ohne Lesung ≤ 2 h = wartet; gelesen/alt/Polar/eigener Plan fallen raus",
         sorted((x["id"], x["art"]) for x in tb) == [("o1", "läuft"), ("r1", "wartet auf Lesung")])
+    chk("belegt: Big Trade nur mit orbit_v3 (o1 ja, r1 Echo nein)", {x["id"]: x["big"] for x in tb} == {"o1": True, "r1": False})
     gruen = {"mu": A, "su": B, "m_name": "150k FNF", "s_name": "100k FN", "m_wer": "Finn + Pascal", "s_wer": "Chris",
              "rs_master": {"frei": True}, "rs_slave": {"frei": True}, "belegt": [], "signale": [], "polar": [],
              "pc_lesbar": True, "pc_master": {"lebt": True, "pc_name": "pc-a"}, "pc_slave": {"lebt": True, "pc_name": "pc-b"},
              "slave_ort": "da", "slave_login": "123", "reader": {"frisch": True, "pc": "pc-a", "alter_s": 3}}
     vz = polar_app.vorpruefung_zeilen
     frei, zz = vz(gruen)
-    chk("alles grün → frei, 9 Zeilen, alle ✓ außer Reader (–, prüft der Master-PC)", frei is True and len(zz) == 9
+    chk("alles grün → frei, 11 Zeilen, alle ✓ außer Reader (–, prüft der Master-PC)", frei is True and len(zz) == 11
         and all(z["ok"] is True for z in zz if z["key"] != "reader") and next(z for z in zz if z["key"] == "reader")["ok"] is None)
     for name, aend, key in (("Richtung Master gesperrt", {"rs_master": {"frei": False, "grund": "Long läuft"}}, "rs_master"),
                             ("Richtung Slave nicht prüfbar (fail-closed)", {"rs_slave": {"fehler": "DB weg"}}, "rs_slave"),
-                            ("Orbit läuft auf der Slave-ID", {"belegt": [{"user_id": B, "route": "tvv2", "name": "150k Orbit", "art": "läuft"}]}, "trades_slave"),
-                            ("Puls-Signal auf der Master-ID", {"signale": [{"user_id": A, "aktion": "orbit", "status": "laeuft"}]}, "trades_master"),
-                            ("Trades nicht lesbar (fail-closed)", {"belegt": None}, "trades_master"),
+                            ("Big Trade (Orbit V3) läuft auf der Slave-ID", {"belegt": [{"user_id": B, "route": "tvv2", "name": "150k Orbit", "art": "läuft", "big": True}]}, "big_slave"),
+                            ("Big Trade wartet auf Lesung an der Master-ID", {"belegt": [{"user_id": A, "route": "tvv2", "name": "150k Orbit", "art": "wartet auf Lesung", "big": True}]}, "big_master"),
+                            ("Puls-Signal auf der Master-ID", {"signale": [{"user_id": A, "aktion": "orbit", "status": "laeuft"}]}, "puls_master"),
+                            ("Trades nicht lesbar (fail-closed)", {"belegt": None}, "big_master"),
+                            ("Signale nicht lesbar (fail-closed)", {"signale": None}, "puls_slave"),
                             ("anderer Polar-Lauf", {"polar": [{"quelle": "bot", "lauf_id": "x" * 36, "seite": "slave"}]}, "polar"),
                             ("Polar nicht lesbar (fail-closed)", {"polar": None}, "polar"),
                             ("Master-PC aus", {"pc_master": {"lebt": False, "alt_s": 900}}, "pc_master"),
@@ -139,6 +142,12 @@ def test_aktiv_liste():
         f2, z2 = vz(dict(gruen, **aend))
         zeile = next(z for z in z2 if z["key"] == key)
         chk(f"{name} → gesperrt, Zeile {key} ✗", f2 is False and zeile["ok"] is False and zeile["text"])
+    # NUR BIG TRADES SPERREN (Finn 21.10.2026 ~03:30 Dubai): Inas Auto-Planer-Challenge Orbit V2 (ohne orbit_v3) sperrte den Start
+    fk, zk = vz(dict(gruen, belegt=[{"user_id": A, "route": "tvv2", "name": "150k TDFYSL → Challenge", "art": "läuft", "big": False},
+                                    {"user_id": B, "route": "mt5v2", "name": "100k Echo", "art": "wartet auf Lesung", "big": False}]))
+    bm = next(z for z in zk if z["key"] == "big_master")
+    chk("normaler Trade (Orbit V2/Echo) an beiden IDs → frei, als Info „sperrt nicht\"", fk is True and bm["ok"] is True and "TDFYSL" in bm["text"] and "sperrt nicht" in bm["text"])
+    chk("jede Zeile hat gruppe; nur „polar\" ohne Seite", all(z.get("gruppe") for z in zz) and [z["key"] for z in zz if z.get("seite") is None] == ["polar"])
     f3, z3 = vz(dict(gruen, signale=[{"user_id": B, "aktion": "polar_slave", "status": "wartet"}]))
     chk("eigenes polar_slave-Signal belegt nicht", f3 is True)
     f4, z4 = vz(dict(gruen, slave_ort=None))
@@ -171,7 +180,7 @@ def test_aktiv_liste():
         "aktiv_liste" not in ab and "_AKTIV" not in ab and "master_pl" in ab and "slave_pl" in ab and ab.count('"tv_balance"') >= 2)
     f5, z5 = vz(dict(gruen, pc_lesbar=False))
     chk("PC-Stand nicht lesbar → beide PC-Zeilen nicht prüfbar, sperrt nicht", f5 is True and [z["ok"] for z in z5 if z["key"].startswith("pc_")] == [None, None])
-    chk("Orbit-Treffer namentlich", "150k Orbit" in next(z for z in vz(dict(gruen, belegt=[{"user_id": A, "route": "tvv2", "name": "150k Orbit", "art": "läuft"}]))[1] if z["key"] == "trades_master")["text"])
+    chk("Big-Trade-Treffer namentlich", "150k Orbit" in next(z for z in vz(dict(gruen, belegt=[{"user_id": A, "route": "tvv2", "name": "150k Orbit", "art": "läuft", "big": True}]))[1] if z["key"] == "big_master")["text"])
     chk("Schalter steht an", polar_app.POLAR_AUTO is True)
     # LIVE-ABLAUF (Finn 20.10.2026 ~23:55 Dubai): Schrittliste je Seite (schritt_eintragen) + Slave-Live-P&L aus mt5_live (slave_live_pl)
     se = polar_app.schritt_eintragen
