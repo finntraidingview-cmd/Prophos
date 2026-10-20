@@ -76,6 +76,21 @@ def _db(lid, felder):
     threading.Thread(target=_los, daemon=True).start()
 
 
+def _plan_start_loesen(pid):
+    """Nach einem Abbruch (vor der Feuerzeit, nichts platziert) Startzeit + Start-Marke des Plans lösen — im Hintergrund, nur solange er
+    noch planned ist (21.10.2026, Finn nach Lauf 2a854cb4: „da ist kein Start-Knopf" — der Plan trug 15 min lang „gestartet" vom
+    abgebrochenen Lauf, die Karte zeigte Orbit-artig „⏰ gestartet" statt „Starten")."""
+    if not _uuid(pid):
+        return
+    def _los():
+        try:
+            A["sb_update"]("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "route": "eq.polar"},
+                           {"start_um": None, "start_um_gestartet_at": None})
+        except Exception as e:
+            print(f"[polar] ⚠️ Start lösen {str(pid)[:8]}: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    threading.Thread(target=_los, daemon=True).start()
+
+
 def _laden(lid):
     """Zustand aus dem Prozess, sonst aus polar_lauf (nach einem Railway-Neustart). -> dict | None"""
     with _COND:
@@ -862,6 +877,7 @@ def registrieren(app, ns):
                     if _ms() - min(z["bereit_ms"].values()) > BEREIT_FRIST_S * 1000:
                         _status(z, "abbruch", "andere Seite nicht bereit")
                         _db(lid, {"status": "abbruch", "grund": z["grund"]})
+                        _plan_start_loesen(z.get("plan_id"))
                         break
                 rest = ende - time.time()
                 if rest <= 0:
@@ -933,6 +949,8 @@ def registrieren(app, ns):
             sicht = _sicht(z)
         if db:
             _db(lid, db)
+            if db.get("status") == "abbruch":
+                _plan_start_loesen(z.get("plan_id"))
         if plan_open:
             klick = _zahl(daten.get("klick_ms"))
 

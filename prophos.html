@@ -42284,7 +42284,9 @@
       const polarStartBtn = (!_polarAuto || p.route !== 'polar') ? '' : (typeof polarStartSperre === 'function' && polarStartSperre())
         ? `<button class="btn btn-primary tc2-btn" data-plan-polar-start="${p.id}" disabled title="${escapeHtml(polarRiegelText(polarStartSperre()))} — kein Start, bis der Polar-Trade zu ist">Starten</button>`
         : `<button class="btn btn-primary tc2-btn" data-plan-polar-start="${p.id}" title="Vorprüfung öffnen: Richtungsschutz, andere Trades, andere Polar-Läufe, beide PCs — bei allen ✓ startet der Bot">Starten</button>`
-      const jetztBtn = startUmBtn ? startUmBtn : p.route === 'polar' ? polarStartBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
+      // Polar zuerst (21.10.2026, „da ist kein Start-Knopf"): die Orbit-Marke „⏰ gestartet" (15 min) passt nicht — läuft ein Lauf, sperrt
+      // polarStartSperre den Knopf ohnehin; nach einem Abbruch muss „Starten" sofort wieder da sein
+      const jetztBtn = p.route === 'polar' ? polarStartBtn : startUmBtn ? startUmBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
@@ -45810,7 +45812,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1669'
+  const OS_TAB_BUILD = '2026-09-22.1670'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
