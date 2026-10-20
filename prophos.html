@@ -22181,9 +22181,10 @@
     // NEUE ID EINTRAGEN: die ersten 8 Zeichen ihrer user_id (auth.users.id) HINTEN an REIHE anhängen, HINTEN an PALETTE eine noch
     // freie, gedämpfte Farbe (kein Pink, kein Rot, nicht zu nah an den vorhandenen) und den Namen HINTEN in die Namenszeile.
     // Nie umsortieren, nie einen Eintrag löschen (auch nicht für ausgeschiedene IDs) — jede Verschiebung ändert Farben anderer IDs.
-    const REIHE = ['b55d7ab4', '6cceb3f3', 'aff98e60', '728b4d23', '48f272b4', '368076fd', '13905525', '8ad6a2f1', '7b1bc9a3', '46ce0409', '32b854d1', 'd1f5bcae']
-    //              Finn        Emin        Moritz      Pascal      Finn+Pascal Jacob       Aurel       EzPoker     Chris       (o. Name)   Mike        Ina
-    const PALETTE = ['#4C7BD9', '#E08A3C', '#3FA37A', '#8B6FD6', '#D4A72C', '#3BA3B8', '#8B6A4F', '#6B7A90', '#8AA33B', '#2F4A7A', '#7A4E9E', '#7FB3E6']
+    // Simon (21.10.2026, Finn: „neuer PC, Simon gehört zu Hermann Technologies") hinten angehängt — Petrol, frei neben Teal/Grün/Reserve
+    const REIHE = ['b55d7ab4', '6cceb3f3', 'aff98e60', '728b4d23', '48f272b4', '368076fd', '13905525', '8ad6a2f1', '7b1bc9a3', '46ce0409', '32b854d1', 'd1f5bcae', '5409e926']
+    //              Finn        Emin        Moritz      Pascal      Finn+Pascal Jacob       Aurel       EzPoker     Chris       (o. Name)   Mike        Ina         Simon
+    const PALETTE = ['#4C7BD9', '#E08A3C', '#3FA37A', '#8B6FD6', '#D4A72C', '#3BA3B8', '#8B6A4F', '#6B7A90', '#8AA33B', '#2F4A7A', '#7A4E9E', '#7FB3E6', '#1F7A8C']
     const RESERVE = ['#C98A6B', '#5E9E9A', '#1F2937', '#B8A07E']
     const k = String(key || ''); if(!k) return '#98A2B3'
     const i = REIHE.indexOf(k.slice(0, 8).toLowerCase())
@@ -45305,7 +45306,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1652'
+  const OS_TAB_BUILD = '2026-09-22.1653'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
