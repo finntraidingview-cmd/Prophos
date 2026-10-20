@@ -45729,7 +45729,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1666'
+  const OS_TAB_BUILD = '2026-09-22.1667'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55624,6 +55624,14 @@
       const d = await r.json().catch(() => ({}))
       if(r.status === 404){ if(msg) msg.textContent = 'Startzeit gesetzt — wartet auf den PC der Master-ID (Start-Wächter), dann legt Railway den Lauf an…'; return }
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
+      // ALTER LAUF (21.10.2026, zweiter Live-Test Plan e8f7e81a): direkt nach „Polar starten" liefert /polar/stand noch den letzten, längst
+      // abgebrochenen Lauf 407f8efa — der erste Takt sah „abbruch" und stoppte; der neue Lauf 2a854cb4 kam nie ins Bild. Ein beendeter Lauf,
+      // der vor der Freigabe angelegt wurde (angelegt_ms, 0 = aus der DB), ist der alte → weiter warten statt zeichnen und stoppen.
+      if(WDL_POLAR_ENDE.includes(String(d.status || '')) && (Number(d.angelegt_ms) || 0) < _polarLive.startMs - 10000){
+        if(msg) msg.textContent = 'Freigegeben — wartet auf den neuen Lauf (PC der Master-ID startet)…'
+        if(live && !_polarLive.html){ live.innerHTML = polarAblaufHtml({ status: 'start' }, Object.assign({}, _polarLive.o, { ohneKopf: false })); _polarLive.html = '(warten)' }
+        return
+      }
       let kurs = null; try{ const k = typeof wdKursJetzt === 'function' ? wdKursJetzt('NQ', 15000) : null; kurs = k && k.preis > 0 ? k.preis : null }catch(_){}
       const html = polarAblaufHtml(d, Object.assign({}, _polarLive.o, { kurs, neuAb: _polarLive.gesehenMs }))
       // nur neu zeichnen, wenn sich etwas geändert hat — sonst springen Kreisel und Puls alle 2 s auf Anfang
@@ -55649,7 +55657,7 @@
     const ppl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(p.slaveFirm)) || 1
     // Namen der IDs aus der Vorprüfung (Spaltenköpfe „Slave · Finn + Pascal"), sonst neutral
     const wer = s => { const z = (_polarCheckZeilen || []).find(x => x && x.seite === s && x.wer); return z ? String(z.wer) : (s === 'master' ? 'Master-ID' : 'Slave-ID') }
-    _polarLive = { pid: String(p.id), takt: null, uhr: null, html: '', gesehenMs: Date.now(), o: { richtung: p.richtung, kontrakte: kt, symbol: p.masterSymbol, lots, slavePpl: ppl,
+    _polarLive = { pid: String(p.id), takt: null, uhr: null, html: '', gesehenMs: Date.now(), startMs: Date.now(), o: { richtung: p.richtung, kontrakte: kt, symbol: p.masterSymbol, lots, slavePpl: ppl,
       masterKonto: p.masterName, slaveKonto: p.slaveName, masterWer: wer('master'), slaveWer: wer('slave') } }
     polarLiveTick()
     _polarLive.takt = setInterval(polarLiveTick, 2000)

@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.1"   # 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.2"   # 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1161,6 +1161,7 @@ def lauf_slave(cmd):
     lauf = Lauf("slave", cmd)
     res = {"ok": False, "seite": "slave", "gesendet": False, "retry_ok": True}
     cfg_path = os.path.join(HIER, str(cmd.get("config_file") or ""))
+    dlg = None   # F9-Dialog — bei jedem Abbruch vor dem Klick wieder zu (21.10.2026, s. except)
     try:
         # Ohne Instanz-Datei gar nicht erst öffnen (21.10.2026, erster Live-Lauf 407f8efa: leerer Pfad → Ordner C:\mt5-copier\ geöffnet,
         # FileNotFoundError ohne Hinweis) — benannter Abbruch vor jeder Maus-Bewegung, nichts gesendet
@@ -1221,14 +1222,18 @@ def lauf_slave(cmd):
         vol_el = fmap.get("volumen") or fmap.get("vol") or fmap.get("volume")
         if vol_el is None or not ob._feld_tippen(vol_el, f"{vol:g}", "Volumen", lauf.trail, rahmen=dlg):
             raise RuntimeError("Volumen nicht sicher getippt")
-        # grobe SL/TP schon im F9-Dialog (Schutz ab dem Fill, 2 Pkt weiter weg); exakt per Klick vom Fill danach
+        # grobe SL/TP schon im F9-Dialog (Schutz ab dem Fill, 2 Pkt weiter weg); exakt per Klick vom Fill danach.
+        # PFLICHT seit 0.3.2 (Finn 21.10.2026 ~03:50 Dubai nach Lauf 2a854cb4: „Wir wollen ja auch Notfall Take Profit / Stop Loss immer
+        # einstellen, auf jeden Fall"): vorher fiel der Weg bei fehlendem Kurs/Feld oder Tippfehler still auf 0/0 zurück und feuerte ohne
+        # Schutz. Jetzt kein Notfall-Level = kein Druck (Abbruch vor der Feuerzeit, nichts gesendet).
         ref = lese.get("ref_ask") if kauf else lese.get("ref_bid")
-        if ref and fmap.get("sl") is not None and fmap.get("tp") is not None:
-            sl_g, tp_g = level_vom_fill(richtung, ref, sl_pkt + 2.0, tp_pkt + 2.0, digits)
-            if not (ob._feld_tippen(fmap["sl"], ob.fmt_preis(sl_g, digits), "F9-SL", lauf.trail, rahmen=dlg)
-                    and ob._feld_tippen(fmap["tp"], ob.fmt_preis(tp_g, digits), "F9-TP", lauf.trail, rahmen=dlg)):
-                ob._feld_tippen(fmap["sl"], "0", "F9-SL-Reset", lauf.trail, rahmen=dlg)
-                ob._feld_tippen(fmap["tp"], "0", "F9-TP-Reset", lauf.trail, rahmen=dlg)
+        if not ref or fmap.get("sl") is None or fmap.get("tp") is None:
+            raise RuntimeError("Notfall-SL/TP nicht setzbar (" + ("kein Kurs" if not ref else "SL-/TP-Feld im F9-Dialog nicht gefunden") + ") — kein Druck ohne Schutz")
+        sl_g, tp_g = level_vom_fill(richtung, ref, sl_pkt + 2.0, tp_pkt + 2.0, digits)
+        if not (ob._feld_tippen(fmap["sl"], ob.fmt_preis(sl_g, digits), "F9-SL", lauf.trail, rahmen=dlg)
+                and ob._feld_tippen(fmap["tp"], ob.fmt_preis(tp_g, digits), "F9-TP", lauf.trail, rahmen=dlg)):
+            raise RuntimeError(f"Notfall-SL/TP nicht sicher getippt (SL {ob.fmt_preis(sl_g, digits)} / TP {ob.fmt_preis(tp_g, digits)}) — kein Druck ohne Schutz")
+        lauf.log(f"Notfall-Level im F9: SL {ob.fmt_preis(sl_g, digits)} / TP {ob.fmt_preis(tp_g, digits)}")
         muster = "buy" if kauf else "sell"
         knopf = next((b for b in dlg.descendants(control_type="Button")
                       if muster in (b.window_text() or "").lower() and "stop" not in (b.window_text() or "").lower()
@@ -1317,6 +1322,14 @@ def lauf_slave(cmd):
     except Exception as e:
         res["msg"] = f"{type(e).__name__}: {str(e)[:200]}"
         lauf.log("ABBRUCH: " + res["msg"])
+        # F9-Dialog zu, solange nichts gesendet ist (Lauf 2a854cb4, 21.10.2026: Abbruch beim Eintragen, Moritz' MT5 stand danach mit offenem
+        # Order-Fenster „Volumen 23,00", SL/TP 0 — ein Fehlklick hätte 23 Lot gehandelt)
+        if dlg is not None and not res.get("gesendet"):
+            try:
+                dlg.type_keys("{ESC}", set_foreground=False)
+                lauf.log("F9-Dialog geschlossen (Esc)")
+            except Exception:
+                pass
         if res.get("gesendet"):
             melden(lauf, "fehler", {"msg": res["msg"]})
         else:

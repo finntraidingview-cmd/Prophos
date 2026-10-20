@@ -159,6 +159,7 @@ def _sicht(z):
             "master_zu_ms": z.get("master_zu_ms"), "slave_zu_ms": z.get("slave_zu_ms"), "grund": z.get("grund"),
             "zu_ms": z.get("zu_ms"), "zu_quelle": z.get("zu_quelle"),   # erste zu-Meldung (20.10.2026, beidseitiges Schließen)
             "bereit": sorted(z.get("bereit") or {}), "server_ms": _ms(),
+            "angelegt_ms": z.get("angelegt_ms") or 0,   # Live-Ablauf erkennt den alten Lauf eines Plans (0 = aus der DB geladen, 21.10.2026)
             "master": {k: v for k, v in (z.get("master") or {}).items() if k != "auftrag"},
             "slave": {k: v for k, v in (z.get("slave") or {}).items() if k != "auftrag"}}
 
