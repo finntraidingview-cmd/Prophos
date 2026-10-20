@@ -970,6 +970,24 @@
     #dashboard-view .mail-lesen{height:75vh}
     #dashboard-view .mail-suche{min-width:0;width:100%}
   }
+  /* Admin → Mail (21.10.2026): Chip-Reihe je ID über der Mail-Box des Mail-Reiters (dieselben Klassen für Liste und Lesen) */
+  #dashboard-view .adm-mail-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  #dashboard-view .adm-mail-chips{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0}
+  #dashboard-view .adm-mail-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:4px 11px;
+    font:inherit;font-size:12.5px;color:var(--ink);background:var(--surface);cursor:pointer;white-space:nowrap}
+  #dashboard-view .adm-mail-chip:hover{background:var(--surface-tint)}
+  #dashboard-view .adm-mail-chip.an{border-color:var(--violet);background:var(--violet-tint);color:var(--violet)}
+  #dashboard-view .adm-mail-chip.aus{color:var(--sub-2)}
+  #dashboard-view .adm-mail-chip i{width:8px;height:8px;border-radius:50%;flex:none}
+  #dashboard-view .adm-mail-chip em{font-style:normal;font-size:11px;font-weight:700;color:var(--violet)}
+  #dashboard-view .adm-mail-chip.aus em{font-weight:400;color:var(--sub-2)}
+  #dashboard-view .adm-mail-stand{font-size:12px;color:var(--sub)}
+  #dashboard-view .mail-zeile .mz-id{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--sub);margin-right:6px;font-weight:400}
+  #dashboard-view .mail-zeile .mz-id i{width:7px;height:7px;border-radius:50%;flex:none}
+  #dashboard-view .adm-mail-mehr{display:block;width:100%;padding:10px;border:0;background:transparent;font:inherit;font-size:12.5px;color:var(--violet);cursor:pointer}
+  @media (max-width:820px){
+    #dashboard-view .adm-mail-chips{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}   /* eigene Zeile, wischbar; Stand + ↻ darunter */
+  }
   /* Notizzettel */
   #dashboard-view .notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
   #dashboard-view .note-card{
@@ -11083,6 +11101,9 @@
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Alle Accounts (13.10.2026, Finn: „alle Accounts von allen IDs auf einem Bündel, 1:1 wie unter Accounts, nur mit Filter nach Zielen und Typen") -->
           <button class="subtab adm-tab" data-admtab="konten">Alle Accounts</button>
+          <!-- Mail (21.10.2026, Finn: „alle Gmail-Accounts jeder einzelnen ID im Überblick … nach jeder ID filtern oder alles") — nur Hermann Technologies
+               (KASSE_REITER_HT), Server nur ADMIN_EMAILS -->
+          <button class="subtab adm-tab" data-admtab="mail">Mail</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
@@ -11772,6 +11793,20 @@
              genau wie unter Accounts — nur dass man filtern kann nach Zielen und Typen"). Tabelle im Design der Accounts-Tabelle (panel/table.t,
              dieselben Typ-/Ziel-/Planer-Chips), Daten aus /admin/overview (gleiche Sicht + Gruppenfilter wie die Übersicht). Reine Anzeige:
              Bearbeiten/Archivieren bleibt bei der jeweiligen ID. Eigene Verdrahtung admKontenRender im Modul. -->
+        <!-- MAIL ALLER IDs (21.10.2026): Chips „Alle · ID …" mit Ungelesen-Zahl, darunter Liste + Lesen wie im Mail-Reiter (gleiche Klassen
+             und gleiche Mail-Ansicht mailLesenZeigen) — Daten aus /admin/mail, geladen beim Öffnen und auf ↻ -->
+        <div id="adm-pane-mail" hidden>
+          <div class="adm-mail-kopf">
+            <div class="adm-mail-chips" id="adm-mail-chips"></div>
+            <span class="adm-mail-stand" id="adm-mail-stand"></span>
+            <button class="btn btn-ghost" id="adm-mail-alle-gelesen" hidden style="padding:7px 12px;font-size:12.5px">Alle als gelesen</button>
+            <button class="btn btn-ghost" id="adm-mail-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+          </div>
+          <div class="mail-box">
+            <div class="mail-liste" id="adm-mail-liste"></div>
+            <div class="mail-lesen" id="adm-mail-lesen"><div class="mail-lesen-kopf">Mail links anklicken.</div></div>
+          </div>
+        </div>
         <div id="adm-pane-konten" hidden>
           <div id="adm-konten-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-konten-body" hidden>
@@ -14207,7 +14242,7 @@
     // Trade-Planer für Verwalter seit 09.10.2026 aus — seit 13.10.2026 WIEDER AN (Gruppen-Planer, Finn: „genau so soll er in seinem
     // Admin-Panel die Trades bestätigen, genau in der gleichen Ansicht wie Hermann Technologies"): der Server liefert ihm dort nur seine
     // Gruppe (sicht=admin → ap_sicht_uid/ap_eingriff_sicht), Planer-Haken (HT user_ids) bleiben 403
-    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag'])
+    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter
     const admEingeschraenkt = () => !!(admData && Array.isArray(admData.sicht_ids))
     const admIstVerwalter = () => !!(admData && admData.verwalter)
     function kasseReiterErlaubt(name, ec){
@@ -19216,7 +19251,7 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
         const name = t.dataset.admtab
@@ -19231,6 +19266,7 @@
         $('adm-pane-buys').hidden     = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-konten').hidden   = name !== 'konten'   // Alle Accounts (13.10.2026)
+        $('adm-pane-mail').hidden     = name !== 'mail'     // Mail aller IDs (21.10.2026)
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
@@ -19251,6 +19287,7 @@
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
+        if(name === 'mail') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
         if(name === 'overview'){ admVlResize(); window._admPcsOeffnen?.() }   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026); PC-Tabs (08.10.2026)
         if(name === 'rg')   rgOpen()
       }))
@@ -45526,7 +45563,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1659'
+  const OS_TAB_BUILD = '2026-09-22.1660'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62849,12 +62886,16 @@
       el.innerHTML = `<div style="padding:24px 16px;font-size:13px;color:var(--sub)">${_mail.suche ? 'Keine Mail passt zur Suche.' : 'Noch keine Mails da.'}</div>`
       return
     }
-    el.innerHTML = _mail.liste.map(m => `
-      <button type="button" class="mail-zeile${m.gelesen ? '' : ' neu'}${String(m.id) === String(_mail.aktiv) ? ' aktiv' : ''}" data-mail-id="${m.id}">
-        <div class="mz-kopf"><span class="mz-von">${escapeHtml(mailVonKurz(m.von))}</span><span class="mz-zeit">${mailZeit(m.datum)}${(m.anhaenge || []).length ? ' · 📎' : ''}</span></div>
+    el.innerHTML = _mail.liste.map(m => mailZeileHtml(m, String(m.id) === String(_mail.aktiv))).join('')
+  }
+  // Eine Listenzeile — Mail-Reiter und Admin → Mail (21.10.2026) zeichnen dieselbe Zeile; vorne = optionaler Kopf vor dem Absender (ID-Punkt)
+  function mailZeileHtml(m, aktiv, vorne){
+    return `
+      <button type="button" class="mail-zeile${m.gelesen ? '' : ' neu'}${aktiv ? ' aktiv' : ''}" data-mail-id="${m.id}">
+        <div class="mz-kopf"><span class="mz-von">${vorne || ''}${escapeHtml(mailVonKurz(m.von))}</span><span class="mz-zeit">${mailZeit(m.datum)}${(m.anhaenge || []).length ? ' · 📎' : ''}</span></div>
         <div class="mz-betreff">${escapeHtml(m.betreff || '(kein Betreff)')}</div>
         <div class="mz-snip">${escapeHtml(m.snippet || '')}</div>
-      </button>`).join('')
+      </button>`
   }
 
   function mailLesenLeer(){
@@ -62881,8 +62922,19 @@
     const { data: m, error } = await supabase.from('mails').select('id,von,an,betreff,datum,text,html,anhaenge,gelesen,labels').eq('id', id).eq('user_id', uid).maybeSingle()
     if(uid !== currentUserId || String(_mail.aktiv) !== String(id)) return
     if(error || !m){ el.innerHTML = `<div class="mail-lesen-kopf">Mail nicht lesbar: ${escapeHtml((error && error.message) || 'nicht gefunden')}</div>`; return }
+    mailLesenZeigen(el, m, _mail.bilder.has(String(id)))
+    if(!m.gelesen){
+      const { error: eu } = await supabase.from('mails').update({ gelesen: true }).eq('id', m.id).eq('user_id', uid)
+      if(!eu){
+        const z = _mail.liste.find(x => String(x.id) === String(m.id)); if(z) z.gelesen = true
+        mailListeRender(); mailBadgeLaden()
+      }
+    }
+  }
+  // Mail-Ansicht in el (Kopf + Inhalt) — Mail-Reiter und Admin → Mail (21.10.2026) nutzen genau diese Funktion, kein zweiter Renderer.
+  // m = {id, von, an, betreff, datum, text, html, anhaenge}; bilder = externe Bilder erlaubt (Link „Bilder laden" trägt data-mail-bilder)
+  function mailLesenZeigen(el, m, bilder){
     const anh = (m.anhaenge || []).map(a => `<span>📎 ${escapeHtml(a.name || '?')}${a.groesse ? ` · ${Math.max(1, Math.round(a.groesse / 1024)).toLocaleString('de-DE')} KB` : ''}</span>`).join('')
-    const bilder = _mail.bilder.has(String(id))
     el.innerHTML = `<div class="mail-lesen-kopf">
         <h3>${escapeHtml(m.betreff || '(kein Betreff)')}</h3>
         <div>Von <b style="color:var(--ink)">${escapeHtml(m.von || '')}</b></div>
@@ -62902,13 +62954,6 @@
       pre.className = 'mail-lesen-text'
       pre.textContent = m.text || ''
       el.appendChild(pre)
-    }
-    if(!m.gelesen){
-      const { error: eu } = await supabase.from('mails').update({ gelesen: true }).eq('id', m.id).eq('user_id', uid)
-      if(!eu){
-        const z = _mail.liste.find(x => String(x.id) === String(m.id)); if(z) z.gelesen = true
-        mailListeRender(); mailBadgeLaden()
-      }
     }
   }
 
@@ -62986,6 +63031,146 @@
     }, 5 * 60000)
   })()
   /* ══ ENDE MAIL-REITER ══ */
+
+  /* ══ ADMIN → MAIL (21.10.2026, Finn 05:15 Dubai: „Unter Admin noch einmal Gmail hinzufügen, wo ich alle Gmail-Accounts jeder einzelnen ID
+   * im Überblick habe — ganz normales, simples Overview, nach jeder ID filtern oder alles, damit ich einmal am Tag von dort alle Gmails
+   * durchgehen kann"). Daten: /admin/mail (Railway, nur ADMIN_EMAILS — fremde Mails liest das Frontend per RLS nicht). Chips „Alle · ID …"
+   * mit Ungelesen-Zahl in der ID-Farbe, eine Liste neueste oben (mailZeileHtml mit ID-Punkt), Lesen rechts über mailLesenZeigen — genau die
+   * Ansicht des Mail-Reiters. Öffnen setzt gelesen (PATCH, wie der Mail-Reiter), „Alle als gelesen" je gewählter ID. Laden nur beim Öffnen des
+   * Reiters und auf ↻ (kein Takt, Supabase-Diät). Gewählter Chip je Gerät gemerkt (prophos_adm_mail_id), nur Komfort. ══ */
+  const _admMail = { ids: [], mails: [], mehr: false, uid: '', aktiv: null, bilder: new Set(), nr: 0, stub: null, at: 0 }
+  try{ _admMail.uid = localStorage.getItem('prophos_adm_mail_id') || '' }catch(_){}
+  async function admMailFetch(pfad, opt){
+    if(_admMail.stub) return _admMail.stub(pfad, opt || {})
+    const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+    const o = Object.assign({ cache: 'no-store' }, opt || {})
+    o.headers = Object.assign({ 'sb-token': tok }, (opt && opt.headers) || {})
+    const r = await fetch(`${WATCHER_HOME}${pfad}`, o)
+    let d = null; try{ d = await r.json() }catch(_){}
+    if(!r.ok || !d || d.ok === false) throw new Error((d && (d.msg || d.error)) || `HTTP ${r.status}`)
+    return d
+  }
+  function admMailWahl(uid){
+    _admMail.uid = uid || ''
+    try{ _admMail.uid ? localStorage.setItem('prophos_adm_mail_id', _admMail.uid) : localStorage.removeItem('prophos_adm_mail_id') }catch(_){}
+  }
+  async function admMailLaden(mehr){
+    const nr = ++_admMail.nr, stand = document.getElementById('adm-mail-stand')
+    if(stand) stand.textContent = 'Lädt…'
+    const q = new URLSearchParams()
+    if(_admMail.uid) q.set('user_id', _admMail.uid)
+    const letzte = mehr && _admMail.mails.length ? _admMail.mails[_admMail.mails.length - 1].datum : ''
+    if(letzte) q.set('vor', letzte)
+    try{
+      const d = await admMailFetch('/admin/mail' + (q.toString() ? '?' + q.toString() : ''))
+      if(nr !== _admMail.nr) return
+      _admMail.ids = d.ids || []
+      _admMail.mails = mehr ? _admMail.mails.concat(d.mails || []) : (d.mails || [])
+      _admMail.mehr = !!d.mehr
+      _admMail.at = Date.now()
+    }catch(e){
+      if(nr !== _admMail.nr) return
+      // gemerkte ID nicht (mehr) in der Sicht → zurück auf „Alle", einmal neu
+      if(_admMail.uid && /nicht in dieser Sicht/.test(String(e.message))){ admMailWahl(''); return admMailLaden(false) }
+      if(stand) stand.textContent = '✗ ' + String((e && e.message) || e)
+      return
+    }
+    admMailMalen()
+  }
+  function admMailMalen(){ admMailChips(); admMailListe(); admMailKopf() }
+  function admMailChips(){
+    const el = document.getElementById('adm-mail-chips'); if(!el) return
+    const summe = _admMail.ids.reduce((a, x) => a + (Number(x.ungelesen) || 0), 0)
+    const chip = (uid, name, n, farbe, aus, titel) => `<button type="button" class="adm-mail-chip${_admMail.uid === uid ? ' an' : ''}${aus ? ' aus' : ''}" data-adm-mail-id="${escapeHtml(uid)}" title="${escapeHtml(titel)}">`
+      + `${farbe ? `<i style="background:${farbe}"></i>` : ''}${escapeHtml(name)} <em>${escapeHtml(String(n))}</em></button>`
+    el.innerHTML = chip('', 'Alle', summe, '', false, `${summe} ungelesen in allen Postfächern`)
+      + _admMail.ids.map(x => x.verbunden
+        ? chip(x.user_id, x.name, x.ungelesen ?? '?', idFarbe(x.user_id), false, `${x.ungelesen ?? '?'} ungelesen${x.zuletzt_mail_at ? ' · letzte Mail ' + mailVorText(x.zuletzt_mail_at) : ''}`)
+        : chip(x.user_id, x.name, 'nicht verbunden', idFarbe(x.user_id), true, 'Gmail dieser ID ist nicht verbunden — als diese ID unter Mail → „Gmail verbinden"')).join('')
+  }
+  function admMailListe(){
+    const el = document.getElementById('adm-mail-liste'); if(!el) return
+    const name = new Map(_admMail.ids.map(x => [String(x.user_id), x.name]))
+    if(!_admMail.mails.length){
+      const z = _admMail.ids.find(x => x.user_id === _admMail.uid)
+      el.innerHTML = `<div style="padding:24px 16px;font-size:13px;color:var(--sub)">${z && !z.verbunden ? 'Gmail dieser ID ist nicht verbunden.' : 'Keine Mails da.'}</div>`
+      return
+    }
+    el.innerHTML = _admMail.mails.map(m => mailZeileHtml(m, String(m.id) === String(_admMail.aktiv),
+        `<span class="mz-id"><i style="background:${idFarbe(m.user_id)}"></i>${escapeHtml(name.get(String(m.user_id)) || String(m.user_id || '').slice(0, 8))}</span>`)).join('')
+      + (_admMail.mehr ? '<button type="button" class="adm-mail-mehr" data-adm-mail-mehr="1">Ältere laden</button>' : '')
+  }
+  function admMailKopf(){
+    const stand = document.getElementById('adm-mail-stand'), kn = document.getElementById('adm-mail-alle-gelesen')
+    const z = _admMail.ids.find(x => x.user_id === _admMail.uid)
+    if(stand) stand.textContent = `${_admMail.mails.length.toLocaleString('de-DE')} Mails${_admMail.mehr ? ' (neueste)' : ''}`
+      + (_admMail.at ? ` · Stand ${new Date(_admMail.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : '')
+    if(kn) kn.hidden = !(z && Number(z.ungelesen) > 0)
+  }
+  async function admMailOeffnen(id){
+    _admMail.aktiv = id
+    admMailListe()
+    const el = document.getElementById('adm-mail-lesen')
+    el.innerHTML = '<div class="mail-lesen-kopf">Lädt…</div>'
+    let m = null
+    try{ m = (await admMailFetch('/admin/mail/' + encodeURIComponent(id))).mail }
+    catch(e){ if(String(_admMail.aktiv) === String(id)) el.innerHTML = `<div class="mail-lesen-kopf">Mail nicht lesbar: ${escapeHtml(String((e && e.message) || e))}</div>`; return }
+    if(String(_admMail.aktiv) !== String(id) || !m) return
+    mailLesenZeigen(el, m, _admMail.bilder.has(String(id)))
+    if(!m.gelesen){
+      try{
+        await admMailFetch('/admin/mail', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: m.id }) })
+        admMailGelesen(m.user_id, m.id)
+      }catch(_){}   // nicht markiert → bleibt fett, beim nächsten Öffnen neuer Versuch
+    }
+  }
+  // Nach erfolgreichem PATCH: Zeile(n) normal, Chip-Zahl runter; eigene ID → Badge in der Seitenleiste nachziehen
+  function admMailGelesen(uid, id){
+    const z = _admMail.ids.find(x => String(x.user_id) === String(uid))
+    if(id == null){
+      _admMail.mails.forEach(x => { if(String(x.user_id) === String(uid)) x.gelesen = true })
+      if(z && z.ungelesen != null) z.ungelesen = 0
+    } else {
+      const r = _admMail.mails.find(x => String(x.id) === String(id))
+      if(r && !r.gelesen){ r.gelesen = true; if(z && z.ungelesen != null) z.ungelesen = Math.max(0, z.ungelesen - 1) }
+    }
+    admMailMalen()
+    if(String(uid) === String(currentUserId) && typeof mailBadgeLaden === 'function') mailBadgeLaden()
+  }
+  async function admMailAlleGelesen(){
+    const z = _admMail.ids.find(x => x.user_id === _admMail.uid)
+    if(!z || !(Number(z.ungelesen) > 0)) return
+    if(!confirm(`Alle ${Number(z.ungelesen).toLocaleString('de-DE')} ungelesenen Mails von ${z.name} als gelesen markieren?`)) return
+    try{
+      await admMailFetch('/admin/mail', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: z.user_id, alle: true }) })
+      admMailGelesen(z.user_id, null)
+    }catch(e){ const st = document.getElementById('adm-mail-stand'); if(st) st.textContent = '✗ ' + String((e && e.message) || e) }
+  }
+  // Verdrahtung nur an den eigenen Elementen dieses Reiters (kein Sammel-Handler)
+  ;(() => {
+    const chips = document.getElementById('adm-mail-chips'), liste = document.getElementById('adm-mail-liste'), lesen = document.getElementById('adm-mail-lesen')
+    if(!chips || !liste || !lesen) return
+    chips.addEventListener('click', e => {
+      const b = e.target.closest('[data-adm-mail-id]'); if(!b) return
+      const uid = b.dataset.admMailId || ''
+      if(uid === _admMail.uid) return
+      admMailWahl(uid); _admMail.aktiv = null
+      lesen.innerHTML = '<div class="mail-lesen-kopf">Mail links anklicken.</div>'
+      admMailChips(); admMailLaden(false)
+    })
+    liste.addEventListener('click', e => {
+      if(e.target.closest('[data-adm-mail-mehr]')){ admMailLaden(true); return }
+      const b = e.target.closest('[data-mail-id]'); if(b) admMailOeffnen(b.dataset.mailId)
+    })
+    lesen.addEventListener('click', e => {
+      const a = e.target.closest('[data-mail-bilder]'); if(!a) return
+      e.preventDefault(); _admMail.bilder.add(String(a.dataset.mailBilder)); admMailOeffnen(a.dataset.mailBilder)
+    })
+    document.getElementById('adm-mail-refresh')?.addEventListener('click', () => admMailLaden(false))
+    document.getElementById('adm-mail-alle-gelesen')?.addEventListener('click', admMailAlleGelesen)
+  })()
+  window._admMailOeffnen = () => admMailLaden(false)
+  window._admMailStub = fn => { _admMail.stub = typeof fn === 'function' ? fn : null }   // Test-Haken (Stub ohne Login): fn(pfad, opt) → Antwort
 
   // Hook in showDashboard: lade Accounts sobald wir wissen wer eingeloggt ist
   const _origShowDashboard = showDashboard

@@ -15435,6 +15435,166 @@ def mail_eingang():
     return jsonify({"ok": True, "angenommen": len(zeilen)})
 
 
+# ══ ADMIN → MAIL (21.10.2026, Finn 05:15 Dubai: „Unter Admin noch einmal Gmail hinzufügen, wo ich alle Gmail-Accounts jeder einzelnen ID im
+# Überblick habe — ganz normales, simples Overview, nach jeder ID filtern oder alles, damit ich einmal am Tag von dort alle Gmails durchgehen
+# kann"). Quelle ist die vorhandene: public.mails + mail_schluessel (Mail-Reiter oben, Script je ID → /mail/eingang) — keine neue Anbindung.
+# Das Frontend liest mails per RLS nur für die eigene ID, deshalb hier ein Admin-Weg mit Service-Key. Gate: _admin_auth (ADMIN_EMAILS, wie die
+# Rechnungen) — strenger als die Übersicht, weil Mails Login-Codes und Auszahlungs-Bestätigungen enthalten; ein normaler ID-Login sieht hier
+# nie fremde Mails. IDs wie die Standard-Sicht Hermann Technologies (_wd_personen: ADMIN_EXCLUDE + Gruppen mit Verwalter raus — Emins Gruppe
+# bleibt draußen). Nur lesen und „gelesen" setzen; kein Takt, das Frontend lädt beim Öffnen des Reiters und auf ↻. ══
+ADMIN_MAIL_LIMIT = 200
+ADMIN_MAIL_LIMIT_MAX = 500
+ADMIN_MAIL_UID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+ADMIN_MAIL_LISTE_FELDER = "id,user_id,von,betreff,datum,snippet,gelesen,anhaenge"
+ADMIN_MAIL_VOLL_FELDER = "id,user_id,von,an,betreff,datum,text,html,anhaenge,gelesen,labels"
+
+
+def admin_mail_params(args):
+    """REIN RECHNEND (testbar): Query → (user_id | None, limit, vor | None) oder raise ValueError(Text). user_id nur als UUID, limit 1…500
+    (Standard 200), vor = ISO-Zeitpunkt zum Weiterblättern (nur Mails mit datum davor)."""
+    a = args or {}
+    uid = str(a.get("user_id") or "").strip().lower()
+    if uid and not ADMIN_MAIL_UID_RE.fullmatch(uid):
+        raise ValueError("user_id ungültig")
+    try:
+        limit = int(str(a.get("limit") or ADMIN_MAIL_LIMIT).strip())
+    except ValueError:
+        raise ValueError("limit ungültig")
+    limit = max(1, min(ADMIN_MAIL_LIMIT_MAX, limit))
+    vor = str(a.get("vor") or "").strip()
+    if vor:
+        try:
+            d = datetime.fromisoformat(vor.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("vor ungültig")
+        vor = (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+    return uid or None, limit, vor or None
+
+
+def admin_mail_zaehler(content_range):
+    """REIN RECHNEND (testbar): PostgREST Content-Range („0-24/808", „*/0") → Gesamtzahl, sonst None."""
+    m = re.search(r"/(\d+)\s*$", str(content_range or ""))
+    return int(m.group(1)) if m else None
+
+
+def admin_mail_ids(disp, excluded, schluessel, ungelesen):
+    """REIN RECHNEND (testbar): Chip-Liste → [{user_id, name, verbunden, zuletzt_at, zuletzt_mail_at, ungelesen}], sichtbare IDs = disp ohne
+    excluded. verbunden = das Script hat sich mit dem aktuellen Schlüssel gemeldet (zuletzt_at, wie der Mail-Reiter). Reihenfolge: verbundene
+    zuerst, dann nach Name. ungelesen nur für verbundene (None = nicht zählbar)."""
+    ex = {str(x) for x in (excluded or ())}
+    sk = {str(r.get("user_id")): r for r in (schluessel or ()) if isinstance(r, dict) and r.get("user_id")}
+    out = []
+    for uid, name in (disp or {}).items():
+        uid = str(uid)
+        if uid in ex:
+            continue
+        k = sk.get(uid) or {}
+        verb = bool(k.get("zuletzt_at"))
+        out.append({"user_id": uid, "name": str(name or uid[:8]), "verbunden": verb, "zuletzt_at": k.get("zuletzt_at"),
+                    "zuletzt_mail_at": k.get("zuletzt_mail_at"), "ungelesen": (ungelesen or {}).get(uid) if verb else None})
+    out.sort(key=lambda x: (not x["verbunden"], x["name"].lower()))
+    return out
+
+
+def _admin_mail_sicht():
+    """(disp, sichtbare user_ids) der Standard-Sicht Hermann Technologies — wirft bei nicht lesbarer Auth-/Gruppen-Liste (Aufrufer 502)."""
+    disp, excluded = _wd_personen()
+    return disp, {u for u in disp if u not in excluded}
+
+
+def _admin_mail_ungelesen(uid):
+    """Ungelesen-Zahl einer ID (HEAD + count=exact, keine Zeilen) — None, wenn nicht lesbar."""
+    try:
+        r = _sb_anfrage("HEAD", f"{SUPABASE_URL}/rest/v1/mails", params={"select": "id", "user_id": f"eq.{uid}", "gelesen": "eq.false"},
+                        headers=_sb_headers("count=exact"), timeout=(5, 20))
+        _sb_pruefen(r)
+        return admin_mail_zaehler(r.headers.get("Content-Range"))
+    except Exception:
+        return None
+
+
+@app.route("/admin/mail", methods=["GET", "PATCH", "OPTIONS"])
+def admin_mail():
+    """GET /admin/mail[?user_id=&limit=&vor=] → {ok, ids:[…], mails:[{id, user_id, von, betreff, datum, snippet, gelesen, anhaenge}], mehr}
+    (neueste oben, alle sichtbaren IDs oder genau eine). PATCH {id} → eine Mail gelesen; PATCH {user_id, alle: true} → alle Mails dieser ID
+    gelesen. → {ok, n}. Nur ADMIN_EMAILS (_admin_auth)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err:
+        return err
+    try:
+        disp, sicht = _admin_mail_sicht()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"IDs nicht lesbar: {str(e)[:120]}"}), 502
+    if request.method == "PATCH":
+        b = request.get_json(silent=True) or {}
+        try:
+            if b.get("id") is not None:
+                mid = int(b.get("id"))
+                rows = sb_select("mails", {"select": "id,user_id", "id": f"eq.{mid}", "limit": "1"}) or []
+                if not rows or str(rows[0].get("user_id")) not in sicht:
+                    return jsonify({"ok": False, "msg": "Mail nicht gefunden"}), 404
+                n = len(sb_update("mails", {"id": f"eq.{mid}", "gelesen": "eq.false"}, {"gelesen": True}) or [])
+                return jsonify({"ok": True, "n": n})
+            uid = str(b.get("user_id") or "").strip().lower()
+            if b.get("alle") is True and ADMIN_MAIL_UID_RE.fullmatch(uid) and uid in sicht:
+                r = _sb_anfrage("PATCH", f"{SUPABASE_URL}/rest/v1/mails", params={"user_id": f"eq.{uid}", "gelesen": "eq.false"},
+                                json={"gelesen": True}, headers=_sb_headers("return=minimal,count=exact"), timeout=(5, 60))
+                _sb_pruefen(r)
+                return jsonify({"ok": True, "n": admin_mail_zaehler(r.headers.get("Content-Range")) or 0})
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "msg": "id ungültig"}), 400
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"Speichern fehlgeschlagen: {str(e)[:120]}"}), 503
+        return jsonify({"ok": False, "msg": "id oder {user_id, alle: true} nötig"}), 400
+    try:
+        uid, limit, vor = admin_mail_params(request.args)
+    except ValueError as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+    if uid and uid not in sicht:
+        return jsonify({"ok": False, "msg": "ID nicht in dieser Sicht"}), 404
+    try:
+        schluessel = sb_select("mail_schluessel", {"select": "user_id,zuletzt_at,zuletzt_mail_at"}) or []
+        verb = sorted(u for u in sicht if any(str(k.get("user_id")) == u and k.get("zuletzt_at") for k in schluessel))
+        ungelesen = {}
+        if verb:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(verb))) as pool:
+                for u, n in zip(verb, pool.map(_admin_mail_ungelesen, verb)):
+                    ungelesen[u] = n
+        ziel = [uid] if uid else sorted(sicht)
+        mails = []
+        if ziel:
+            p = {"select": ADMIN_MAIL_LISTE_FELDER, "user_id": f"in.({','.join(ziel)})", "order": "datum.desc.nullslast,id.desc",
+                 "limit": str(limit + 1)}
+            if vor:
+                p["datum"] = f"lt.{vor}"
+            mails = sb_select("mails", p) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Mails nicht lesbar: {str(e)[:120]}"}), 503
+    return jsonify({"ok": True, "ids": admin_mail_ids(disp, set(disp) - sicht, schluessel, ungelesen), "mails": mails[:limit],
+                    "mehr": len(mails) > limit})
+
+
+@app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])
+def admin_mail_eine(mid):
+    """GET /admin/mail/<id> → {ok, mail:{id, user_id, von, an, betreff, datum, text, html, anhaenge, gelesen, labels}} — eine Mail zum Lesen
+    (das Frontend darf fremde Zeilen per RLS nicht lesen). Setzt NICHT gelesen (das macht PATCH, wie der Mail-Reiter nach dem Öffnen)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err:
+        return err
+    try:
+        _disp, sicht = _admin_mail_sicht()
+        rows = sb_select("mails", {"select": ADMIN_MAIL_VOLL_FELDER, "id": f"eq.{int(mid)}", "limit": "1"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Mail nicht lesbar: {str(e)[:120]}"}), 503
+    if not rows or str(rows[0].get("user_id")) not in sicht:
+        return jsonify({"ok": False, "msg": "Mail nicht gefunden"}), 404
+    return jsonify({"ok": True, "mail": rows[0]})
+
+
 @app.route("/code/datei/<path:pfad>", methods=["GET"])
 def code_datei(pfad):
     """Eine Repo-Datei aus genau dem deployten Stand. ?sha=… muss (falls angegeben) dieser Stand sein, sonst 409 mit dem
