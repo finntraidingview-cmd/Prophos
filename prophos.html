@@ -978,6 +978,10 @@
     transition:box-shadow .2s var(--ease),border-color .2s var(--ease);
   }
   #dashboard-view .note-card:focus-within{border-color:var(--violet-soft);box-shadow:0 0 0 3px rgba(136,124,252,.12)}
+  /* Account-Status-Zeilen der Erledigt-Dialoge (20.10.2026): Hervorhebung nur an der gewählten Zeile (Inline-Style aus tcUpdateStatusUI /
+     mwdErlStatusUI); der Fokus-Ring des Radios nur bei Tastatur, nie nach einem Maus-Klick */
+  .tc-status-opt input[type=radio]:focus:not(:focus-visible){outline:none}
+  .tc-status-opt input[type=radio]:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
   #dashboard-view .note-ta{
     border:none;resize:vertical;width:100%;min-height:150px;padding:14px 14px 8px;
     font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink);background:transparent;outline:none;
@@ -29655,9 +29659,23 @@
     const _bl = (typeof wdlBlowStand === 'function') ? wdlBlowStand(pw) : null
     // Konto weg (05.10.2026): ebenfalls „geblowt" vorbelegen — das Konto gibt es beim Broker nicht mehr
     const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${((_bl && _bl.geblowt) || _kw) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
+    mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
   }
+  // Rahmen der Account-Status-Zeilen im Radar-Dialog (20.10.2026, Finn …0036: „die Zeile ‚Account wurde geblowt' hat den violetten Rahmen,
+  // als wäre sie vorausgewählt"): bisher malte nur tcUpdateStatusUI des Trades-Dialogs diese Zeilen mit — und zwar nach deren Radios zum
+  // Zeitpunkt irgendeines Trades-Dialog-Aufrufs; beim nächsten Öffnen hier sprang nur der Punkt um, der Inline-Rahmen blieb. Jetzt eigene
+  // Verdrahtung (kein Sammel-Handler): nach der Vorbelegung und bei jedem change der mwd-erl-status-Radios — gefärbt ist genau die gewählte Zeile.
+  function mwdErlStatusUI(){
+    document.querySelectorAll('#mwdErledigtModal .tc-status-opt').forEach(opt => {
+      const r = opt.querySelector('input[type=radio]'), an = !!(r && r.checked)
+      opt.style.borderColor = an ? 'var(--violet)' : 'var(--border)'
+      opt.style.background = an ? 'color-mix(in srgb, var(--violet) 6%, transparent)' : 'transparent'
+    })
+  }
+  document.querySelectorAll('input[name="mwd-erl-status"]').forEach(r => r.addEventListener('change', mwdErlStatusUI))
+  window._mwdErlStatusUI = mwdErlStatusUI   // Test-Haken (Stub)
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
   function mklWdErlSumme(){
     const el = document.getElementById('mwd-erl-summe'); if(!el) return
@@ -34124,9 +34142,12 @@
   }
 
   /* ========== TRADE-COMPLETE: Status-Optionen ========== */
-  // Visuell auswählen (Border highlight)
+  // Visuell auswählen (Border highlight). NUR #tradeCompleteModal (20.10.2026, Finn am Radar-Dialog „Trade erledigt" …0036: Punkt stand richtig
+  // auf „Nichts ändern", aber die Geblowt-Zeile trug den violetten Rahmen — der Selektor malte alle .tc-status-opt im Dokument, also auch die
+  // Zeilen des Radar-Dialogs (#mwdErledigtModal), der selbst nie neu malt; ein alter Anstrich blieb dort kleben). Der Radar-Dialog hat jetzt
+  // seine eigene Malfunktion (mwdErlStatusUI).
   function tcUpdateStatusUI(){
-    document.querySelectorAll('.tc-status-opt').forEach(opt => {
+    document.querySelectorAll('#tradeCompleteModal .tc-status-opt').forEach(opt => {
       const radio = opt.querySelector('input[type=radio]')
       if(radio?.checked){
         opt.style.borderColor = 'var(--violet)'
@@ -45034,7 +45055,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1643'
+  const OS_TAB_BUILD = '2026-09-22.1644'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
