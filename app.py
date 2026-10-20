@@ -20119,6 +20119,161 @@ def _ap_leichen_abschliessen(plan_ids, jetzt):
     return zu
 
 
+# ══ TAGES-RESET LIEGENGEBLIEBENER PLÄNE (21.10.2026, Finn 20.10.2026 ~23:50 Dubai: „Das soll immer daily resetten, also wenn ein Trade
+# gemacht wurde oder geplant wurde und er nicht durchläuft, wird er am Tagesende resetet."). Anlass: Chris WD …0729, Plan d1c5980f
+# (planned_for 19.10.) gab am 19.10. mit falschem „konto_weg" auf, blieb geclaimt auf planned — der WD-Tagesplaner räumt nur
+# ungeclaimte Farmer-Pläne weg und übersprang das Konto zwei Tage („hat schon einen geplanten/laufenden Plan"); das Wegräumen der
+# Auto-Plan-Leichen in ap_planen (14.10.2026) gilt nur für auto_plan und wartet einen deutschen Tag länger. Jetzt räumt der Nachtlauf
+# VOR dem Auto-Planer (und damit vor dem nächsten WD-Tagesplan) jeden Plan jeder Route auf, der an einem früheren Tag nie lief:
+#   weg      — sicher nichts platziert: kein Claim, ODER Puls gab vor jedem Kauf auf (final.puls_aufgegeben ohne Fill-Beleg), ODER der
+#              letzte Start-Fehler sagt selbst „nichts platziert" (start_fehler.unklar = false — dieselbe Marke, mit der sfBehoben einen
+#              Plan von selbst neu startet; „zu_spaet" ohne Versuch fällt auch darunter). Gelöscht wie der Papierkorb (delete … planned).
+#   pruefen  — es KANN eine Order am Konto sein (geclaimt ohne Ergebnis, Unklar-Marke, Fill-/Ticket-/Hedge-/TV-Spur, Puls-Pause, Polar):
+#              nie löschen → „Überprüfen" mit Grund „Plan von gestern nie fertig — Order am Konto prüfen", master_pl leer. Damit
+#              verliert nie eine echte Position ihren Plan; das Konto bleibt bis zum Abhaken belegt (Planer, Gegenrichtung).
+# Keine Regel- oder Risikoprüfung — nur der Zustand des Plans. Nie ein Plan, dessen Start oder Claim < 2 h her ist (wie wd_plan_wegraeumbar).
+TR_FILL_FELDER = ("today_pnl", "balance_end", "exit_fill", "einstieg", "einstieg_nq", "einstieg_fill", "master_pl", "master_pl_schaetzung",
+                  "preis", "ticket")
+TR_GRUND = "tagesende_unklar"
+
+
+def tagesreset_tag(p, tz):
+    """REIN RECHNEND: Handelstag eines Plans als 'JJJJ-MM-TT' — planned_for, sonst das Datum von start_um in tz, sonst None."""
+    pf = str(p.get("planned_for") or "").strip()[:10]
+    if len(pf) == 10:
+        return pf
+    t = _ap_ts(p.get("start_um"))
+    return t.astimezone(tz).strftime("%Y-%m-%d") if t else None
+
+
+def tagesreset_hinweis(p):
+    """REIN RECHNEND: Beleg, dass eine Order am Konto sein KANN (→ nie löschen) — Text oder None. Nur was am Plan steht."""
+    b = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = b.get("final") if isinstance(b.get("final"), dict) else None
+    sf = b.get("start_fehler") if isinstance(b.get("start_fehler"), dict) else None
+    if p.get("orbit_gesendet_at"):
+        return "Order an Orbit gesendet"
+    if b.get("hedge"):
+        return "Fusion-Hedge am Plan"
+    if b.get("puls_unklar"):
+        return "Puls-Ergebnis unklar (Klick kann raus sein)"
+    if sf and (sf.get("unklar") is True or str(sf.get("schritt") or "") == "unklar"):
+        return "Start-Fehler unklar (Order kann raus sein)"
+    if b.get("ticket") or (isinstance(b.get("live"), dict) and b["live"].get("offen")):
+        return "Ticket/Position am Plan"
+    if isinstance(b.get("tv"), dict) and b["tv"]:
+        return "TradingView-Spur am Plan (Puls war bis zur Order)"
+    # Polar (S2-Prüfung 21.10.2026): polar_auftrag schreibt /polar/plan schon beim SPEICHERN — kein Lauf. Ein Lauf steht in polar_lauf
+    # (eingebettet geladen) bzw. als Abrechnung in mt5_baseline.polar
+    if b.get("polar") or p.get("polar_lauf"):
+        return "Polar-Lauf am Plan"
+    if b.get("versuche_alt"):
+        return "Leer-Versuche mit Fusion-Hedge am Plan"
+    if b.get("puls_pause"):
+        return "Puls-Pause-Marke (Trade evtl. von Hand)"
+    if fin is not None:
+        if any(fin.get(k) not in (None, "", 0, False) for k in TR_FILL_FELDER):
+            return "Fill-/Ergebnis-Beleg im Ende-Eintrag"
+        if not fin.get("puls_aufgegeben"):
+            return "Ende-Eintrag ohne Aufgabe"
+    return None
+
+
+def tagesreset_art(p, tag, jetzt, tz):
+    """REIN RECHNEND (testbar, selftest_tagesreset.py): was der Nachtlauf mit Plan p macht, wenn `tag` (JJJJ-MM-TT, Zieltag des
+    Nachtlaufs) beginnt → {"art": 'weg'|'pruefen'|None, "grund": str}. None = nicht betroffen (läuft/lief, heute oder später, Start oder
+    Claim < 2 h her, kein Datum)."""
+    if str(p.get("status") or "") != "planned" or p.get("started_at"):
+        return {"art": None, "grund": "nicht geplant oder schon gestartet"}
+    ptag = tagesreset_tag(p, tz)
+    if not ptag or ptag >= str(tag):
+        return {"art": None, "grund": "Plan ohne Datum oder für heute/später"}
+    st = _ap_ts(p.get("start_um"))                        # _ap_ts statt wd_plan_wegraeumbar: liest auch „ +00"/Nachkommastellen
+    if p.get("start_um") and (not st or st >= jetzt - timedelta(hours=2)):
+        return {"art": None, "grund": "Start < 2 h her oder steht noch bevor"}
+    claim = _ap_ts(p.get("start_um_gestartet_at"))
+    if claim and claim >= jetzt - timedelta(hours=2):
+        return {"art": None, "grund": "Claim < 2 h her"}
+    h = tagesreset_hinweis(p)
+    if h:
+        return {"art": "pruefen", "grund": h}
+    # Gespeicherter Polar-Plan ohne Lauf (S2-Prüfung 21.10.2026; S1 baut „speichern, später starten"): bleibt stehen — Finns Handarbeit,
+    # kein Konto-Blocker des Auto-Planers. Ob er nachts weg soll, entscheidet der Master (dann hier "weg" statt None).
+    if str(p.get("route") or "") == "polar":
+        return {"art": None, "grund": "Polar-Plan ohne Lauf (gespeichert, nie gestartet) — bleibt stehen"}
+    b = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = b.get("final") if isinstance(b.get("final"), dict) else None
+    sf = b.get("start_fehler") if isinstance(b.get("start_fehler"), dict) else None
+    if not claim:
+        return {"art": "weg", "grund": "nie gestartet (kein Claim)"}
+    if fin is not None and fin.get("puls_aufgegeben"):
+        return {"art": "weg", "grund": "Puls gab vor dem Kauf auf: " + str(fin.get("puls_fehler") or fin.get("grund") or "?")[:80]}
+    sf_at = _ap_ts((sf or {}).get("at"))
+    if sf and sf.get("unklar") is False and sf_at and sf_at >= claim:
+        return {"art": "weg", "grund": f"Start-Fehler ohne Order ({sf.get('schritt') or '?'}, Bot: nichts platziert)"}
+    return {"art": "pruefen", "grund": "geclaimt, aber kein Ergebnis am Plan"}
+
+
+def ap_tagesreset(tag, jetzt, trocken=False):
+    """NACHTLAUF (21.10.2026): liegengebliebene Pläne früherer Tage aufräumen — tagesreset_art je Plan, dann löschen bzw. nach
+    „Überprüfen". Guards in derselben Anfrage (noch planned, nie gestartet/gesendet, Claim unverändert alt), Fehler je Plan nur
+    protokolliert. trocken = nur einteilen. → {"weg": [...], "pruefen": [...], "fehler": n}"""
+    tz = _ap_tz("Asia/Dubai")
+    tag0 = datetime.fromisoformat(str(tag)).replace(tzinfo=tz)
+    sel = ("id,user_id,route,status,auto_plan,notes,master_name,planned_for,start_um,start_um_gestartet_at,orbit_gesendet_at,started_at,"
+           "result_notes,mt5_baseline,polar_lauf(id,status)")
+    rows = (_sb_all("trade_plans", {"select": sel, "status": "eq.planned", "started_at": "is.null", "planned_for": f"lt.{tag}", "order": "id.asc"}) or []) \
+        + (_sb_all("trade_plans", {"select": sel, "status": "eq.planned", "started_at": "is.null", "planned_for": "is.null",
+                                   "start_um": f"lt.{tag0.isoformat()}", "order": "id.asc"}) or [])
+    out = {"weg": [], "pruefen": [], "fehler": 0}
+    alt = (jetzt - timedelta(hours=2)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")   # ohne „+"/Nachkommastellen im or-Filter
+    for p in rows:
+        e = tagesreset_art(p, tag, jetzt, tz)
+        if not e["art"]:
+            continue
+        pid = str(p["id"])
+        z = {"plan_id": pid, "user_id": p.get("user_id"), "konto": p.get("master_name"), "tag": tagesreset_tag(p, tz), "grund": e["grund"]}
+        if trocken:
+            out[e["art"]].append(z)
+            continue
+        # Guards (S2-Prüfung 21.10.2026): beide nur „noch planned, nie gestartet, Claim leer oder alt"; „nie an Orbit gesendet" NUR beim
+        # Löschen — ein gesendeter Plan ist gerade ein pruefen-Fall, mit diesem Guard fände das Update ihn nie (blieb still planned liegen)
+        guard = {"id": f"eq.{pid}", "status": "eq.planned", "started_at": "is.null",
+                 "or": f"(start_um_gestartet_at.is.null,start_um_gestartet_at.lt.{alt})"}
+        try:
+            if e["art"] == "weg":
+                if sb_delete("trade_plans", dict(guard, orbit_gesendet_at="is.null")):
+                    out["weg"].append(z)
+                else:
+                    print(f"[tages-reset] {pid[:8]}: nicht gelöscht — Plan hat sich seit dem Lesen geändert (Guard)", flush=True)
+                continue
+            hinweis = f"Plan von {z['tag'] or 'gestern'} nie fertig — Order am Konto prüfen ({e['grund']})"
+            ende = p.get("start_um") or f"{z['tag']}T12:00:00+00:00"
+            alt_n = str(p.get("result_notes") or "").strip()
+            notiz = "Tages-Reset (Nachtlauf): " + hinweis
+            if not sb_update("trade_plans", guard, {"status": "review", "ended_at": ende,
+                                                    "result_notes": (alt_n + "\n" + notiz) if alt_n else notiz}):
+                print(f"[tages-reset] {pid[:8]}: nicht nach Überprüfen — Plan hat sich seit dem Lesen geändert (Guard)", flush=True)
+                continue
+            # Ende am toten Tag (wie _ap_leichen_abschliessen): keine Demo-/Userscript-Nachlese von heute; kein today_pnl = nicht „gelesen"
+            _b = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+            fin = dict(_b["final"]) if isinstance(_b.get("final"), dict) else {}
+            fin.update(grund=TR_GRUND, art="unklar", quelle="tagesreset", hinweis=hinweis, at=ende, datum=z["tag"],
+                       tagesreset_at=jetzt.isoformat())
+            rr = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                             json={"p_plan": pid, "p_patch": {"final": fin}, "p_status": "review"})
+            _sb_pruefen(rr)
+            out["pruefen"].append(z)
+        except Exception as ex:
+            out["fehler"] += 1
+            print(f"[tages-reset] ⚠️ {pid[:8]}: {type(ex).__name__}: {ex}", flush=True)
+    if out["weg"] or out["pruefen"] or out["fehler"]:
+        print(f"[tages-reset] {tag}: {len(out['weg'])} weg ({', '.join(x['plan_id'][:8] for x in out['weg'])}) · "
+              f"{len(out['pruefen'])} → Überprüfen ({', '.join(x['plan_id'][:8] for x in out['pruefen'])})"
+              f"{' · ' + str(out['fehler']) + ' Fehler' if out['fehler'] else ''}{' (trocken)' if trocken else ''}", flush=True)
+    return out
+
+
 def _ap_fest_ref(p, mitternacht, jetzt):
     """Bezug eines festlegenden Plans für ap_fest_am_start (09.10.2026): (Minute ab `mitternacht` | None, Richtung, läuft).
     Laufend: Start (started_at), unbekannt → jetzt; geplant: start_um, ohne Startzeit None (gilt dann vorsichtshalber den ganzen Tag)."""
@@ -26304,6 +26459,14 @@ def ap_nacht_tick(jetzt, zustand):
         if sb_select("auto_plan_lauf", {"select": "id", "tag": f"eq.{tag}", "quelle": "eq.nacht", "limit": "1"}):
             return None
         zustand["letzter_tag"] = None
+    # TAGES-RESET (21.10.2026, Finn: „das soll immer daily resetten") VOR dem Auto-Planer — auch, wenn der Planer aus ist: liegengebliebene
+    # Pläne früherer Tage weg bzw. nach „Überprüfen", damit ihre Konten in derselben Nacht wieder planbar sind (eigener try: ein Fehler
+    # hier hält den Nachtlauf nie auf)
+    try:
+        zustand["tagesreset"] = dict(ap_tagesreset(tag, jetzt), tag=tag, at=jetzt.isoformat())
+    except Exception as e:
+        zustand["tagesreset"] = {"tag": tag, "at": jetzt.isoformat(), "fehler_text": f"{type(e).__name__}: {e}"}
+        print(f"[tages-reset] ⚠️ {type(e).__name__}: {e}", flush=True)
     reg = (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0]
     erg = None
     if reg.get("aktiv"):
