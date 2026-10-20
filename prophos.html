@@ -2351,6 +2351,17 @@
   #dashboard-view .pz-akt .btn:disabled{opacity:.45;cursor:default}
   @media (max-width:1359px){ #dashboard-view .pz-tab.pz-mit-id{grid-template-columns:156px 72px minmax(150px,1fr) 80px 200px 64px 76px 76px 160px} }
   @media (max-width:820px){ #dashboard-view .pz-z > .pz-wer{order:0;flex:0 0 100%} }
+  /* GEPLANTE TRADES FÜR POLAR (21.10.2026): Paar Master/Slave als eine Einheit — Linie nur zwischen den Paaren, Hover über beide Zeilen */
+  #dashboard-view .pol-gz{display:grid;grid-template-columns:subgrid;grid-column:1/-1}
+  #dashboard-view .pz-tab > .pz-z + .pol-gz,#dashboard-view .pol-gz + .pol-gz{border-top:1px solid var(--border-soft)}
+  #dashboard-view .pol-gz > .pz-z + .pz-z{border-top:none;padding-top:2px;min-height:36px} #dashboard-view .pol-gz > .pz-z:first-child{padding-bottom:2px}
+  #dashboard-view .pol-gz:hover > .pz-z{background:var(--bg)}
+  #dashboard-view .pol-gz .pol-gz-wer{display:flex;flex-direction:column;min-width:0;line-height:1.2} #dashboard-view .pol-gz .pol-gz-wer small{font-size:10.5px;color:var(--sub-2)}
+  /* eigenes Raster: ID schmal (Name + Rolle zweizeilig), Knöpfe auf zwei Teilzeilen verteilt → passt neben die Seitenleiste bei 1280 */
+  #dashboard-view .pz-tab.pol-gz-tab{grid-template-columns:88px 64px minmax(190px,1.2fr) 76px minmax(200px,1fr) 92px 64px 72px 72px 150px}
+  @media (max-width:1359px){ #dashboard-view .pz-tab.pol-gz-tab{grid-template-columns:80px 56px minmax(160px,1fr) 68px 160px 60px 64px 64px 156px;column-gap:8px} }
+  @media (max-width:820px){ #dashboard-view .pol-gz{display:block} #dashboard-view .pol-gz .pol-gz-wer{flex-direction:row;align-items:baseline;gap:6px} #dashboard-view .pz-tab > .pz-z + .pol-gz,#dashboard-view .pol-gz + .pol-gz{border-top-color:var(--m-hair,rgba(16,24,40,.07))}
+    #dashboard-view .pol-gz > .pz-z + .pz-z{padding-top:4px} #dashboard-view .pol-gz > .pz-z:first-child{padding-bottom:4px} }
   /* Braucht dich (Neuentwurf 08.10.2026, Finn: „nicht so clean, man erkennt nix"): ID-Karten wie „Zu bestätigen" (ap-id-karte, nicht sticky),
      je Zeile feste Spalten Konto · Label · Klartext · Aktion — alles steht in jeder Zeile an derselben x-Position */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd{border-color:color-mix(in srgb,#B45309 35%,var(--border))}
@@ -41415,6 +41426,62 @@
         + karten.map(p => renderTradePlanCard(p)).join('')
     }).join('')
   }
+  /* ══ GEPLANTE TRADES FÜR POLAR (21.10.2026, Finn: Polar-Pläne liegen bei der Master-ID unter Geplant als normale Karten und sind schwer
+   * zu finden — eigene Ansicht wie die Geplant-Zeile des Auto-Planers, beide Konten je Zeile) ══
+   * Ein Block oben in Trades → Geplant: Kopf „Geplante Trades für Polar · n Trades", darunter die Tabelle der Geplant-Zeilen (planZeileHtml,
+   * Spalte ID vorn wie im Trade-Planer). Je Plan ein Paar: oben Master (Funded Futures, TradingView, Kontrakte, TP/SL am Plan), darunter
+   * Slave (Funded CFD, MT5, Lots aus mt5_baseline.polar_auftrag, Gegenrichtung). Slave-TP/SL in $ wie im Polar-Popup (polarRechnen):
+   * Lots × $/Pkt der Slave-Firma (tpFirmPpl) × Punkte aus dem Auftrag. Balance der Slave-ID (andere ID) aus /admin/overview
+   * (polarKontenLaden, einmal nachgeladen). Ziel/Fortschritt je Seite: noch offen — Finn schickt seine Rechenregeln, bis dahin nur Balance.
+   * Knöpfe (✎ 🗑 Starten Läuft Erledigt) baut renderTradePlanCard mit denselben data-plan-*-Attributen → bindTradePlanCardActions unverändert. */
+  let _polGzLadenAt = 0
+  function polarGzKonten(){ try{ return _polarKonten || [] }catch(_){ return [] } }   // let steht weiter unten im Modul (TDZ beim frühen Zeichnen)
+  function polarGzNachladen(plaene){
+    const ks = polarGzKonten()
+    const fehlt = plaene.some(p => !ks.some(k => String(k.id) === String(p.slaveAccountId)))
+    if(!fehlt || Date.now() - _polGzLadenAt < 60000 || typeof polarKontenLaden !== 'function') return
+    _polGzLadenAt = Date.now()
+    Promise.resolve().then(() => polarKontenLaden()).then(() => { try{ renderTradePlans() }catch(_){} }).catch(() => {})
+  }
+  function polarGzPaarHtml(p, mKonto, o){
+    const ks = polarGzKonten(), ausUe = id => ks.find(k => String(k.id) === String(id)) || null
+    const mUe = ausUe(p.masterAccountId), sUe = ausUe(p.slaveAccountId)
+    const wer = (k, uid, rolle) => `<i style="background:${idFarbe(String(uid || (k && k.user_id) || rolle))}"></i><span class="pol-gz-wer"><b>${escapeHtml((k && k.person) || (rolle === 'Master' ? 'Diese ID' : 'Slave-ID'))}</b><small>${rolle}</small></span>`
+    const ueBal = k => k && k.balance != null ? { val: Number(k.balance), at: 0, tip: 'Balance aus der Admin-Übersicht' } : null
+    // Master: eigenes Konto (Plan-Besitzer = diese ID) → Balance mit Live-Marke wie jede Geplant-Zeile; sonst aus der Übersicht
+    const master = planZeileHtml(p, mKonto, { name: o.name, ext: o.ext, extTitle: o.extTitle, chips: o.chips, akt: o.akt, uid: mUe && mUe.user_id,
+      bal: mKonto ? undefined : ueBal(mUe), wer: wer(mUe, mUe && mUe.user_id, 'Master'),
+      notiz: { art: 'TradingView', stufe: 'Master · Funded Futures · platziert in TradingView' } })
+    // Slave: Lots, Gegenrichtung, TP/SL in $ aus dem gespeicherten Auftrag — als Plan-Kopie in die Master-Felder, damit planZeileHtml sie zeichnet
+    const pa = (p.mt5Baseline && p.mt5Baseline.polar_auftrag) || {}
+    const kt = Number(p.masterContracts) || Number(pa.kontrakte) || 0
+    const lots = Number(pa.lots) > 0 ? Number(pa.lots) : (Number(p.multiplier) > 0 && kt ? Math.round(p.multiplier * kt * 100) / 100 : 0)
+    const sPpl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(p.slaveFirm)) || 1
+    const sTp = lots && Number(pa.tp_pkt) > 0 ? Math.round(lots * sPpl * Number(pa.tp_pkt)) : 0
+    const sSl = lots && Number(pa.sl_pkt) > 0 ? Math.round(lots * sPpl * Number(pa.sl_pkt)) : 0
+    const sKonto = (accounts || []).find(a => String(a.id) === String(p.slaveAccountId))
+      || (sUe ? { id: sUe.id, name: sUe.name, firm: sUe.firm, type: sUe.type, externalId: sUe.ext || '' } : null)
+    const sp = Object.assign({}, p, { masterAccountId: p.slaveAccountId, masterName: p.slaveName, masterFirm: p.slaveFirm,
+      richtung: p.richtung === 'buy' ? 'sell' : p.richtung === 'sell' ? 'buy' : null, masterContracts: lots, masterTp: sTp, masterSl: sSl,
+      masterSymbol: null, route: 'mt5v2', startUm: null, startUmGestartetAt: null, autoPlan: false, notes: '', mt5Baseline: null, kontoTyp: 'funded_cfd' })
+    const slave = planZeileHtml(sp, sKonto, { name: p.slaveName || (sUe && sUe.name) || '— gelöscht —', ext: (sKonto && sKonto.externalId) || '', extTitle: '',
+      chips: '', akt: o.akt2 || '', zeit: ' ', uid: sUe && sUe.user_id, bal: sKonto && (accounts || []).includes(sKonto) ? undefined : ueBal(sUe),
+      wer: wer(sUe, sUe && sUe.user_id, 'Slave'),
+      notiz: { art: 'MT5', stufe: `Slave · Funded CFD · MT5 — TP ${Number(pa.tp_pkt) || '?'} Pkt / SL ${Number(pa.sl_pkt) || '?'} Pkt ab eigenem Fill × ${sPpl} $/Pkt je Lot` } })
+      .replace(' data-plan-id="', ' data-pol-slave="')   // eine Plan-ID je Paar (Wrapper), nicht doppelt
+    return `<div class="pol-gz" data-pol-plan="${escapeHtml(String(p.id))}">${master}${slave}</div>`
+  }
+  function polarGeplantBlock(plaene){
+    if(!plaene.length) return ''
+    polarGzNachladen(plaene)
+    return `<div class="pz-kopf plan-firma-kopf pol-gz-kopf">
+        <span class="pz-firma">Geplante Trades für Polar</span>
+        <span>${plaene.length} Trade${plaene.length === 1 ? '' : 's'}</span> <i>·</i> <span>je Zeile Master (Futures) und Slave (CFD)</span>
+      </div><div class="pz-tab pz-mit-id pol-gz-tab">
+        <div class="pz-z pz-z-kopf"><span>ID</span><span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
+      + plaene.map(p => renderTradePlanCard(p)).join('') + `</div>`
+  }
+  /* ══ ENDE GEPLANTE TRADES FÜR POLAR ══ */
   function fmtDupBalance(info){
     if(!info) return ''
     const sign = info.balance >= 0 ? '' : '-'
@@ -41729,7 +41796,9 @@
         if(empty) empty.style.display = 'none'
         // Geplant in Firmen-Blöcken mit Kopf (05.10.2026, Finn: „erst Firma A alle Trades, dann Firma B, mehr drauf eingehen")
         // Warte auf Puls / Überprüfen / Erledigt wie Radar (09.10.2026, Finn ~20:36 Dubai): Modell-Blöcke + Puls-Zeile je Trade
-        target.innerHTML = lane.status === 'planned' ? planFirmenBloecke(list) : lane.status === 'open' ? offenModellBloecke(list)
+        // Polar-Pläne (21.10.2026) als eigener Block oben — Paar Master/Slave je Zeile statt Karte im Firmen-Block
+        target.innerHTML = lane.status === 'planned' ? polarGeplantBlock(list.filter(p => p.route === 'polar')) + planFirmenBloecke(list.filter(p => p.route !== 'polar'))
+          : lane.status === 'open' ? offenModellBloecke(list)
           : offenModellBloecke(list, { puls: true })
       }
 
@@ -42062,7 +42131,7 @@
 
     // Rechte Metrik je Status
     let metric = ''
-    let zeileChips = '', zeileAkt = ''   // nur für die Geplant-Tabelle (planIstZeile), siehe planZeileHtml
+    let zeileChips = '', zeileAkt = '', zeileAkt2 = ''   // nur für die Geplant-Tabelle (planIstZeile), siehe planZeileHtml; zeileAkt2 = Slave-Teilzeile Polar
     if(isPlanned){
       const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE',{day:'2-digit',month:'short'}) : '—'
       const pf = _pfCheckStatus[String(p.id)]
@@ -42273,6 +42342,16 @@
           : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Von Hand gestartet — nur als laufend markieren (ohne Puls, ohne Baseline: P&L später von Hand)">Läuft</button>${rest}`
             + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>`)
       }
+      // GEPLANTE TRADES FÜR POLAR (21.10.2026): Knöpfe der Paar-Zeile — Master-Teilzeile ✎ 🗑 + „Starten" (Prüf-Tabelle, nur solange keine
+      // Startzeit gesetzt ist: nach der Freigabe zeigt die Start-Spalte die Zeit bzw. „gestartet"), Slave-Teilzeile „Läuft" (Hand-Weg) +
+      // „Erledigt" (beide P&Ls) — so bleiben beide Zeilen einzeilig
+      if(p.route === 'polar'){
+        zeileAkt = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
+          + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
+          + (p.startUm ? '' : polarStartBtn)
+        zeileAkt2 = `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" style="font-weight:400" title="Von Hand: Polar-Trade als laufend markieren — beide Seiten platzierst du selbst, kein Bot. Hält Master- und Slave-ID wie ein Bot-Lauf (kein Puls, keine Balance-Lesung), bis „Erledigt" mit beiden P&Ls">Läuft</button>`
+          + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Abschließen — P&L beider Konten eintragen">Erledigt</button>`
+      }
     } else if(isOpen){
       // Remote-Close (28.08.2026, Finns Feature): „Schließen" nur für Echo-
       // Pläne — lokal schließt Puls direkt im Terminal, am Handy/Mac geht ein
@@ -42310,6 +42389,8 @@
 
     // Geplant-Tabelle (AP-DESIGN 05.10.2026): V2-Plan ohne Hedge als schlanke Zeile statt Karte
     if(planIstZeile(p)) return planZeileHtml(p, _m, { name: masterName, ext: _mTsxName ? '' : mExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAkt })
+    // Polar geplant (21.10.2026): Paar Master/Slave im Block „Geplante Trades für Polar" (polarGeplantBlock)
+    if(isPlanned && p.route === 'polar') return polarGzPaarHtml(p, _m, { name: masterName, ext: _mTsxName ? '' : mExt, extTitle: mExtTitle, chips: zeileChips, akt: zeileAkt, akt2: zeileAkt2 })
     const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}${sysBadge ? ' tc2-has-sys' : ''}`
     // Auto-Plan: Rand links rot (wartet auf Bestätigung) / grün (bestätigt) — 05.10.2026
     const autoRand = (isPlanned && p.autoPlan) ? ` style="box-shadow:inset 4px 0 0 ${p.autoBestaetigtAt ? 'var(--good)' : 'var(--danger)'}"` : ''
@@ -45729,7 +45810,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1668'
+  const OS_TAB_BUILD = '2026-09-22.1669'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55144,7 +55225,7 @@
       const d = await r.json()
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       _polarKonten = (d.accounts || []).filter(a => !a.archived && (a.type === 'funded' || a.type === 'funded_cfd'))
-        .map(a => ({ id: a.id, name: a.name || a.ext || '', firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,
+        .map(a => ({ id: a.id, name: a.name || a.ext || '', ext: a.ext || '', firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,   // ext: Endnummer in „Geplante Trades für Polar" (21.10.2026)
                      balance: (typeof a.balance === 'number' && isFinite(a.balance)) ? a.balance : null }))
       return ''
     }catch(e){
