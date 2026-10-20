@@ -20199,9 +20199,29 @@ def cdp_ticket_taub_js(rect):
             "['disabled','aria-disabled','aria-busy','readonly','inert'].forEach(function(a){if(n.hasAttribute&&n.hasAttribute(a)&&n.getAttribute(a)!=='false')s.push(a+'='+(n.getAttribute(a)||'1'));});"
             "if(s.length)sperre.push(N(n)+':'+s.join(','));n=n.parentElement;}"
             "var a=document.activeElement,st=null;try{st=getComputedStyle(e);}catch(_){}"
+            # STÖRER ÜBER DEM TICKET (20.10.2026, Aurel 13:37 Dubai: oben lag ein <video>): Vorfahren-Kette des obersten Elements (bis 6) und der
+            # nächste Schließ-Knopf in seinen Vorfahren (Text/aria-label/title close|schließen|dismiss|x|×, nie Panel-/Chart-Knöpfe) — nur lesen
+            "var kette=[],p=e;while(p&&p!==document.body&&kette.length<6){kette.push(N(p));p=p.parentElement;}"
+            "var xn=null,q=e;for(var i=0;i<6&&q&&!xn;i++,q=q.parentElement){var bs=q.querySelectorAll('button,[role=\"button\"]');"
+            "for(var j=0;j<bs.length;j++){var b=bs[j],lab=(b.getAttribute('aria-label')||b.getAttribute('title')||b.textContent||'').replace(/\\s+/g,' ').trim();"
+            "if(/close|schlie|dismiss|^x$|\u00d7/i.test(lab)&&!/account manager|panel|collapse|chart|layout|watchlist|tab\\b/i.test(lab)){var r=b.getBoundingClientRect();"
+            "xn=lab.slice(0,30)+' @'+Math.round(r.x)+','+Math.round(r.y)+' '+Math.round(r.width)+'x'+Math.round(r.height);break;}}}"
             "return {oben:N(e)+' \"'+String(e.textContent||'').replace(/\\s+/g,' ').trim().slice(0,30)+'\"',sperre:sperre.join(' | '),"
             "fokus:document.hasFocus(),aktiv:a?N(a):'-',sichtbar:document.visibilityState,zeiger:st?st.pointerEvents:'?',"
-            "dialoge:document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]').length};})()")
+            "dialoge:document.querySelectorAll('[role=\"dialog\"],[aria-modal=\"true\"]').length,kette:kette.join(' < '),xnah:xn||'-'};})()")
+
+
+CDP_TAUB_STOERER_TAGS = ("video", "iframe")   # fremdes Element über dem Ticket (20.10.2026): Werbe-/Promo-Video, eingebettete Werbung
+
+
+def cdp_taub_stoerer(d):
+    """REIN RECHNEND (testbar): liegt laut Taub-Diagnose ein FREMDES Element (Video/iframe) über der Ticket-Kachel? → True/False.
+    Anlass 20.10.2026 13:37 Dubai (Aurel, Plan 919fd3a5): dreimal Sell mit Hover-Beweis geklickt, dreimal „oben am Punkt video \"\"" —
+    ein Werbevideo lag über der Seiten-Kachel, die Störer-Räumung kannte es nicht; 18 min später lief derselbe Plan mit einem Klick."""
+    if not isinstance(d, dict):
+        return False
+    oben = str(d.get("oben") or "").strip().lower()
+    return any(oben == t or oben.startswith(t + " ") or oben.startswith(t + "#") or oben.startswith(t + "[") for t in CDP_TAUB_STOERER_TAGS)
 
 
 def _cdp_ticket_taub_spur(s, el, name, trail):
@@ -20216,7 +20236,43 @@ def _cdp_ticket_taub_spur(s, el, name, trail):
         d = {"oben": "nicht lesbar"}
     trail.append(f"{name}: Ticket nimmt die Eingabe nicht an — oben am Punkt {d.get('oben')}, Sperren {d.get('sperre') or 'keine'}, "
                  f"Seite hat Fokus {d.get('fokus')}, aktiv {d.get('aktiv')}, sichtbar {d.get('sichtbar')}, pointer-events {d.get('zeiger')}, "
-                 f"Dialoge {d.get('dialoge')}")
+                 f"Dialoge {d.get('dialoge')}"
+                 + (f" | Störer-Kette {d.get('kette') or '-'} · Schließ-Knopf {d.get('xnah') or '-'}" if cdp_taub_stoerer(d) else ""))
+    return d
+
+
+def _cdp_seite_stoerer_versuch(s, opts, trail, plan, ticket, knopf, d):
+    """STÖRER ÜBER DER SEITEN-KACHEL (20.10.2026, Aurel pc 13:37 Dubai, Plan 919fd3a5: „Seite steht nicht auf SELL ('Buy 2 NQZ6 MARKET',
+    3 Versuche, auch nach Neu-Öffnen per Shift+T)" — die Taub-Diagnose sah beide Male „oben am Punkt video": ein Werbevideo lag über der
+    Sell-Kachel, die Störer-Räumung (werbung_weg: #charting-ad, Werbe-Modal/-Dialog) kannte es nicht; 13:55 derselbe Plan: erst „Go ad-free"
+    per eigenem X zu, dann Sell mit EINEM Klick). Liegt laut Diagnose ein fremdes Element (Video/iframe) über der Kachel: Störer-Räumung
+    erzwingen (schließt NUR bekannte Werbe-Container über ihr eigenes X mit Beweis — nie ein blindes X), dann genau EIN neuer Klick auf die
+    frisch gelesene Kachel. Hover-Riegel unverändert. -> True = Seite steht jetzt, False = weiter wie bisher (Shift+T / Abbruch)."""
+    if not cdp_taub_stoerer(d):
+        return False
+    try:
+        n = int(s.werbung_weg(zwang=True) or 0) if hasattr(s, "werbung_weg") else 0
+    except Exception as e_:
+        n = 0
+        trail.append(f"Störer-Räumung nicht möglich ({type(e_).__name__})")
+    trail.append(f"Störer über der Seiten-Kachel ({str(d.get('oben') or '')[:30]}): Störer-Räumung erzwungen, {n} Werbung(en) geschlossen → EIN neuer Versuch")
+    try:
+        s.stand(opts)
+    except Exception:
+        pass
+    kachel = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
+    if not cdp_rect(kachel):
+        trail.append("Seiten-Kachel nach der Störer-Räumung nicht gefunden")
+        return False
+    s.klick(cdp_rect(kachel), f"Seite {plan['richtung'].upper()} (nach Störer-Räumung)")
+    _warte(0.6, 0.3)
+    try:
+        s.stand(opts)
+    except Exception:
+        pass
+    ok = str(knopf().get("seite") or ticket().get("seite") or "") == plan["richtung"]
+    trail.append("Seite steht nach der Störer-Räumung" if ok else "Seite steht auch nach der Störer-Räumung nicht — weiter wie bisher")
+    return ok
 
 
 def _cdp_ticket_neu_oeffnen(s, opts, trail):
@@ -20529,7 +20585,11 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
         _warte(0.6, 0.3)
         st = s.stand(opts)
     if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
-        _cdp_ticket_taub_spur(s, ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen"), f"Seite {plan['richtung'].upper()}", trail)
+        _d = _cdp_ticket_taub_spur(s, ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen"), f"Seite {plan['richtung'].upper()}", trail)
+        # STÖRER (20.10.2026): fremdes Element (Video/iframe) über der Kachel → Räumung erzwingen + EIN Klick (_cdp_seite_stoerer_versuch)
+        if _cdp_seite_stoerer_versuch(s, opts, trail, plan, ticket, knopf, _d):
+            st = s.stand(opts)
+    if str(knopf().get("seite") or ticket().get("seite") or "") != plan["richtung"]:
         # TAUBES TICKET (15.10.2026, Frage 17 (b)): die Seite steht nach drei bewiesenen Klicks noch auf dem Vorgänger → Ticket per Shift+T
         # zu und wieder auf (Beweis ticket.da weg → da), dann genau EIN neuer Durchlauf. Riegel unverändert: ohne Beweis kein Druck.
         if not _neu:
@@ -23486,6 +23546,48 @@ def _cdp_abmelden(s, opts, trail):
     return False, "Nach 'Log out' zeigt TradingView weiter ein Konto (14 s) — nicht abgemeldet."
 
 
+def _cdp_tab_neu_laden(s, trail):
+    """Den frischen ?trade-now-Tab einmal neu laden (Page.reload), Seite abwarten, augen.js neu, Werbe-Kachel weg. -> True = neu geladen.
+    Wirft nie, klickt nie."""
+    ws = getattr(s, "ws", None)
+    try:
+        if ws is not None:
+            ws.rufe("Page.reload", {"ignoreCache": False}, timeout=8)
+        elif hasattr(s, "neu_laden"):
+            s.neu_laden()                                # nachgebaute Sitzung (Selbsttests)
+        else:
+            trail.append("[Login] Tab nicht neu ladbar (keine CDP-Verbindung)")
+            return False
+    except Exception as e_:
+        trail.append(f"[Login] Neuladen nicht möglich ({type(e_).__name__})")
+        return False
+    trail.append("[Login] ?trade-now-Tab neu geladen")
+    _warte(2.0, 1.0)
+    try:
+        if hasattr(s, "_seite_abwarten"):
+            s._seite_abwarten(25.0)
+        if hasattr(s, "_augen_laden"):
+            s._augen_laden()
+    except Exception as e_:
+        trail.append(f"[Login] nach dem Neuladen: augen.js nicht geladen ({type(e_).__name__})")
+    _cdp_kachel_weg(s, trail)
+    return True
+
+
+def _cdp_nach_link_mit_neuladen(s, opts, trail):
+    """Nach dem Link warten (_cdp_nach_link); kommt in 40 s weder Connect-Dialog noch Broker-Leiste ('nichts'), genau EIN Page.reload des
+    ?trade-now-Tabs und noch einmal warten. Anlass 20.10.2026 15:42 Dubai (Finn + Pascal, Plan 150621d2): Abmelden sauber, neuer Tab mit
+    ?trade-now=TRADOVATE, dann 40 s „dialoge [], leiste null" → Abbruch „Tradovate-Dialog erscheint nicht"; 15:59 derselbe Weg: Dialog
+    nach 14 s da, verbunden, Order gefüllt. Bis hier wurde nichts geklickt und nichts abgemeldet — ein Neuladen ist risikofrei.
+    -> (art, x) wie _cdp_nach_link."""
+    art, x = _cdp_nach_link(s, opts, trail)
+    if art == "nichts":
+        trail.append("[Login] nach dem Link 40 s weder Connect-Dialog noch Broker-Leiste → EINMAL den ?trade-now-Tab neu laden")
+        if _cdp_tab_neu_laden(s, trail):
+            art, x = _cdp_nach_link(s, opts, trail)
+    return art, x
+
+
 def _cdp_nach_link(s, opts, trail, warten_s=40.0):
     """Nach dem Öffnen mit ?trade-now: Was zeigt TradingView? -> ('dialog', blick) | ('verbunden', kontotext) | ('nichts', blick)"""
     ort = _K3Ort("TradingView-Seite", s.ws, s, "")
@@ -23965,7 +24067,7 @@ def _cdp_tradovate_verbinden(sitz, cmd, opts, trail, beleg=None, merk=None):
                 return "abmelden", f, ""
         _cdp_tab_mit_link(sitz, tv_trade_now_url(bl.get("url") or cmd.get("tv_url")), trail)
         s = sitz[0]
-        art, x = _cdp_nach_link(s, opts, trail)       # trail fehlte seit .828 (NameError → nach Log-out abgebrochen, Prüfer 30.09.2026)
+        art, x = _cdp_nach_link_mit_neuladen(s, opts, trail)   # trail fehlte seit .828 (NameError, Prüfer 30.09.2026); EIN Neuladen bei 'nichts' (20.10.2026)
         if art == "verbunden":
             trail.append(f"[Login] TradingView hat sich von selbst verbunden ('{str(x)[:40]}') — gemerkte Sitzung")
             return "", "", "selbst"

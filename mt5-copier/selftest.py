@@ -4569,8 +4569,11 @@ def test_cdp_konto_regression_865():
         f"Zeitüberschreitung ist kein Abriss: weiter warten, kein Neu-Anhängen, einmal vermerkt ({faelle['e'][3]})")
     chk(faelle["f"][0] == ("", "") and faelle["f"][1] == 1, "CDP-Fehlerantwort (Target crashed) wie ein Abriss: einmal neu anhängen")
     import inspect as _i
-    chk("trail" in _i.signature(ob._cdp_nach_link).parameters and "_cdp_nach_link(s, opts, trail)" in _i.getsource(ob._cdp_tradovate_verbinden),
-        "_cdp_nach_link bekommt die Spur (NameError seit .828)")
+    # 20.10.2026: _cdp_tradovate_verbinden ruft den Neulade-Weg (_cdp_nach_link_mit_neuladen), der die Spur an _cdp_nach_link durchreicht
+    chk("trail" in _i.signature(ob._cdp_nach_link).parameters
+        and ("_cdp_nach_link(s, opts, trail)" in _i.getsource(ob._cdp_tradovate_verbinden) or "_cdp_nach_link_mit_neuladen(s, opts, trail)" in _i.getsource(ob._cdp_tradovate_verbinden))
+        and _i.getsource(ob._cdp_nach_link_mit_neuladen).count("_cdp_nach_link(s, opts, trail)") == 2,
+        "_cdp_nach_link bekommt die Spur (NameError seit .828) — auch über den Neulade-Weg (20.10.2026)")
     chk("liste_voll" in js and "function listeVoll(els, ohne)" in js and "liste_voll: !!(offenListe && voll)" in js
         and "listeVoll(zeilenEl, schalterEl)" in js and js.index("if (ar.bottom > H + 1") < js.index("ab hier kein Listen-Container mehr"),
         "augen.js meldet liste_voll (auch der hohe Container wird geprüft)")
