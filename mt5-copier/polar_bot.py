@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.0"   # 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.1"   # 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1162,6 +1162,10 @@ def lauf_slave(cmd):
     res = {"ok": False, "seite": "slave", "gesendet": False, "retry_ok": True}
     cfg_path = os.path.join(HIER, str(cmd.get("config_file") or ""))
     try:
+        # Ohne Instanz-Datei gar nicht erst öffnen (21.10.2026, erster Live-Lauf 407f8efa: leerer Pfad → Ordner C:\mt5-copier\ geöffnet,
+        # FileNotFoundError ohne Hinweis) — benannter Abbruch vor jeder Maus-Bewegung, nichts gesendet
+        if not str(cmd.get("config_file") or "").strip():
+            raise RuntimeError("Auftrag ohne config_file (Instanz-Datei der MT5-Instanz) — PC-Tab zu alt? Tab neu laden")
         with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
         path = str(cfg.get("master_terminal_path") or "").strip()

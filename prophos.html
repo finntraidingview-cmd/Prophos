@@ -1651,6 +1651,49 @@
   #dashboard-view .pol-ab-schritte li.is-ok .m{color:var(--good-ink, #15803d)}
   #dashboard-view .pol-ab-schritte li.is-akt{color:var(--ink);font-weight:600}
   #dashboard-view .pol-ab-schritte li.is-nein{color:var(--danger-ink, #b91c1c)}
+  /* LIVE-ANIMATION (21.10.2026, Finn nach dem ersten Lauf: „mehr Live-Animation … nur cooler machen"): Phasen-Leiste oben, Chip je Seite
+     mit lebendem Punkt, Kreisel am aktuellen Schritt, neue Schritte gleiten herein. Farben aus dem Bestand (violet = arbeitet, good = live). */
+  #dashboard-view .pol-leiste{list-style:none;margin:0 0 12px;padding:0;display:grid;grid-template-columns:repeat(5,1fr);gap:0}
+  #dashboard-view .pol-leiste li{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--sub);text-align:center}
+  #dashboard-view .pol-leiste li::before{content:'';position:absolute;top:11px;left:-50%;width:100%;height:2px;background:var(--border-soft);z-index:0}
+  #dashboard-view .pol-leiste li:first-child::before{display:none}
+  #dashboard-view .pol-leiste li.is-ok::before,#dashboard-view .pol-leiste li.is-akt::before,#dashboard-view .pol-leiste li.is-nein::before{background:var(--good)}
+  #dashboard-view .pol-leiste li.is-akt::before{background:linear-gradient(90deg,var(--good),var(--violet),var(--good));background-size:200% 100%;animation:polFluss 1.4s linear infinite}
+  #dashboard-view .pol-leiste .pkt{position:relative;z-index:1;width:22px;height:22px;border-radius:999px;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--surface);border:1.5px solid var(--border);color:var(--sub)}
+  #dashboard-view .pol-leiste li.is-ok .pkt{background:var(--good);border-color:var(--good);color:#fff}
+  #dashboard-view .pol-leiste li.is-akt .pkt{border-color:var(--violet);color:var(--violet);animation:polPuls 1.6s ease-out infinite}
+  #dashboard-view .pol-leiste li.is-akt .lbl{color:var(--ink);font-weight:600}
+  #dashboard-view .pol-leiste li.is-nein .pkt{background:var(--danger);border-color:var(--danger);color:#fff}
+  #dashboard-view .pol-leiste li.is-nein .lbl{color:var(--danger-ink, #b91c1c);font-weight:600}
+  #dashboard-view .pol-leiste small{display:block;font-variant-numeric:tabular-nums;color:var(--violet);font-weight:600}
+  #dashboard-view .pol-ab-seite h4{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  #dashboard-view .pol-ab-seite{transition:border-color .3s, box-shadow .3s}
+  #dashboard-view .pol-ab-seite.is-arbeitet{border-color:color-mix(in srgb, var(--violet) 35%, var(--border-soft))}
+  #dashboard-view .pol-ab-seite.is-live{border-color:color-mix(in srgb, var(--good) 45%, var(--border-soft));box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 8%, transparent)}
+  #dashboard-view .pol-ab-seite.is-nein{border-color:color-mix(in srgb, var(--danger) 45%, var(--border-soft))}
+  #dashboard-view .pol-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:600;text-transform:none;letter-spacing:0;border:1px solid var(--border-soft);color:var(--sub);white-space:nowrap}
+  #dashboard-view .pol-chip i{width:7px;height:7px;border-radius:999px;background:currentColor}
+  #dashboard-view .pol-chip.is-arbeitet{color:var(--violet);border-color:color-mix(in srgb, var(--violet) 40%, transparent)}
+  #dashboard-view .pol-chip.is-arbeitet i{animation:polPunkt 1s ease-in-out infinite}
+  #dashboard-view .pol-chip.is-bereit{color:var(--violet);border-color:var(--violet)}
+  #dashboard-view .pol-chip.is-live{color:var(--good-ink, #15803d);border-color:color-mix(in srgb, var(--good) 50%, transparent)}
+  #dashboard-view .pol-chip.is-live i{animation:polPuls 1.6s ease-out infinite}
+  #dashboard-view .pol-chip.is-nein{color:var(--danger-ink, #b91c1c);border-color:color-mix(in srgb, var(--danger) 50%, transparent)}
+  #dashboard-view .pol-kreisel{display:inline-block;width:10px;height:10px;border-radius:999px;border:2px solid color-mix(in srgb, var(--violet) 25%, transparent);border-top-color:var(--violet);animation:polDreh .8s linear infinite;vertical-align:-1px}
+  #dashboard-view .pol-ab-schritte li.is-akt span:last-child{background:linear-gradient(90deg,var(--ink) 40%,var(--violet) 50%,var(--ink) 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:polGlanz 2s linear infinite}
+  #dashboard-view .pol-ab-schritte li.is-neu{animation:polEin .45s ease-out both}
+  @keyframes polPuls{0%{box-shadow:0 0 0 0 color-mix(in srgb, currentColor 45%, transparent)}100%{box-shadow:0 0 0 8px transparent}}
+  @keyframes polPunkt{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+  @keyframes polDreh{to{transform:rotate(360deg)}}
+  @keyframes polFluss{to{background-position:-200% 0}}
+  @keyframes polGlanz{from{background-position:100% 0}to{background-position:-150% 0}}
+  @keyframes polEin{from{opacity:0;transform:translateY(-4px);background:color-mix(in srgb, var(--violet) 12%, transparent)}to{opacity:1;transform:none;background:transparent}}
+  @media (prefers-reduced-motion: reduce){
+    #dashboard-view .pol-leiste li.is-akt::before,#dashboard-view .pol-leiste li.is-akt .pkt,#dashboard-view .pol-chip i,#dashboard-view .pol-kreisel,
+    #dashboard-view .pol-ab-schritte li.is-akt span:last-child,#dashboard-view .pol-ab-schritte li.is-neu{animation:none}
+    #dashboard-view .pol-ab-schritte li.is-akt span:last-child{color:var(--ink);background:none}
+  }
+  @media (max-width:600px){ #dashboard-view .pol-ab{grid-template-columns:1fr} #dashboard-view .pol-leiste li{font-size:10px} }
   @media (max-width:820px){ #dashboard-view .pol-ab{grid-template-columns:1fr} }   /* Handy: untereinander, Slave zuerst */
   #polarModal .pol-lauf-seiten > .pol-ab, #polarModal .pol-lauf-seiten > .pol-ab-kopf{grid-column:1 / -1}   /* im Radar-Popup ist der Container selbst ein Raster */
   #dashboard-view .modal-msg.ok{color:#058a50}
@@ -1716,6 +1759,13 @@
   /* Polar-Vorschau (13.10.2026): zwei Spalten, Handy eine — minmax(0,…), damit lange Kontonamen das Raster nicht über den Rand schieben */
   #polarModal .pol-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
   #polarModal .pol-gruppe{grid-column:1 / -1;font-size:12px;font-weight:600;color:var(--sub);margin-top:4px}
+  /* Eigene Blöcke Multiplikator / TP·SL (21.10.2026): zarter Rahmen, Akzent links (violet = Größe, grün = Ziele), Kopf mit Erklärung */
+  #polarModal .pol-block{grid-column:1 / -1;border:1px solid var(--border-soft);border-left:3px solid var(--violet);border-radius:var(--r-sm);padding:12px 14px 14px;background:color-mix(in srgb, var(--violet) 3%, transparent)}
+  #polarModal .pol-block.is-tpsl{border-left-color:var(--good);background:color-mix(in srgb, var(--good) 3%, transparent)}
+  #polarModal .pol-block-kopf{font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:10px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+  #polarModal .pol-block-kopf small{font-size:11px;font-weight:400;color:var(--sub)}
+  #polarModal .pol-block-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+  #polarModal .pol-block .pol-kachel{background:var(--surface)}
   #polarModal .pol-tab{overflow-x:auto}
   /* Zeile Richtung · Symbol · Kontrakte, Multiplikator-Kacheln, Level-Tabelle (Umbau 13.10.2026) */
   #polarModal .pol-reihe3{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
@@ -1725,7 +1775,7 @@
   #polarModal .pol-kachel b{font-size:17px}
   #polarModal .pol-lv td{padding:7px 10px;border-top:1px solid var(--border-soft)}
   #polarModal .pol-lv tr:first-child td{border-top:0;font-size:11px;color:var(--sub)}
-  @media (max-width:640px){ #polarModal .pol-grid{grid-template-columns:minmax(0,1fr)} #polarModal .pol-reihe3,#polarModal .pol-box{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:640px){ #polarModal .pol-grid,#polarModal .pol-block-grid{grid-template-columns:minmax(0,1fr)} #polarModal .pol-reihe3,#polarModal .pol-box{grid-template-columns:minmax(0,1fr)} }
   /* Winning Days Farm (25.09.2026, Design-Rundgang): das Raster hatte Löcher — Kontrakte halb + leer, Risiko Slave
      volle Breite, TP halb + leer. Jetzt Kontrakte | Risiko Slave, darunter TP volle Breite (der SL-Platz ist auf
      diesem Weg leer, Risiko Master IST der Stop Loss). Klasse tp-wd setzt tpRouteUpdateSeg nur auf diesem Weg. */
@@ -9110,17 +9160,27 @@
               </div>
               <div class="field"><label>Kontrakte</label><input type="number" class="input" id="pol-kt" min="1" step="1" value="3"></div>
             </div>
-            <div class="pol-gruppe">Multiplikator</div>
-            <div class="field"><label>Risiko Master ($)</label><input type="number" class="input" id="pol-risk-m" min="0" step="50" value="4500"></div>
-            <div class="field"><label>Risiko Slave ($)</label><input type="number" class="input" id="pol-risk-s" min="0" step="50" value="1000"></div>
-            <div class="pol-box" id="pol-mult"></div>
-            <div class="pol-gruppe">Take Profit · Stop Loss</div>
-            <div class="pol-reihe3">
-              <div class="field"><label>Take Profit Master ($)</label><input type="number" class="input" id="pol-tp-m" min="0" step="50" value="7500"></div>
-              <div class="field"><label>Stop Loss Master ($)</label><input type="number" class="input" id="pol-sl-m" min="0" step="50" placeholder="= Risiko Master"></div>
-              <div class="field"><label>Puffer Slave (Pkt)</label><input type="number" class="input" id="pol-puffer" min="0" step="0.5" value="4"></div>
-            </div>
-            <div style="grid-column:1 / -1" class="pol-tab" id="pol-level"></div>
+            <!-- Zwei eigene Blöcke (Finn 21.10.2026 ~03:55 Dubai: „Multiplikator und Take Profit / Stop Loss jeweils in eine Gruppe … getrennt,
+                 weil das aktuell überall gleich aussieht, da fällt es nicht auf"): Rahmen + Akzent links, Eingaben und Ergebnis zusammen -->
+            <section class="pol-block is-mult">
+              <div class="pol-block-kopf">Multiplikator <small>Lots Slave = Risiko Slave ÷ Stop-Distanz</small></div>
+              <div class="pol-block-grid">
+                <div class="field"><label>Risiko Master ($)</label><input type="number" class="input" id="pol-risk-m" min="0" step="50" value="4500"></div>
+                <div class="field"><label>Risiko Slave ($)</label><input type="number" class="input" id="pol-risk-s" min="0" step="50" value="1000"></div>
+                <div class="pol-box" id="pol-mult"></div>
+              </div>
+            </section>
+            <section class="pol-block is-tpsl">
+              <div class="pol-block-kopf">Take Profit · Stop Loss <small>Slave gespiegelt vom eigenen Fill, mit Puffer</small></div>
+              <div class="pol-block-grid">
+                <div class="pol-reihe3">
+                  <div class="field"><label>Take Profit Master ($)</label><input type="number" class="input" id="pol-tp-m" min="0" step="50" value="7500"></div>
+                  <div class="field"><label>Stop Loss Master ($)</label><input type="number" class="input" id="pol-sl-m" min="0" step="50" placeholder="= Risiko Master"></div>
+                  <div class="field"><label>Puffer Slave (Pkt)</label><input type="number" class="input" id="pol-puffer" min="0" step="0.5" value="4"></div>
+                </div>
+                <div style="grid-column:1 / -1" class="pol-tab" id="pol-level"></div>
+              </div>
+            </section>
           </div>
           <div class="modal-msg" id="polarMsg"></div>
         </div>
@@ -40246,6 +40306,17 @@
   // einfach direkt löschen"): planId → { plan, idx, farmer, timer }. Die Zeile ist sofort weg, gelöscht wird erst nach 5 s.
   // Poll und Neuladen filtern diese IDs heraus, sonst käme der Plan in den 5 s zurück (und der PC-Tab könnte ihn starten).
   const _tpLoeschOffen = new Map()
+  /* LÖSCHEN ÜBERLEBT DAS NEULADEN (21.10.2026, Finn: „Wenn ich bei Polar Trades lösche und die Seite neu lade, ist er doch wieder da"):
+   * Edge-Logs 20./21.10. — für keinen der gelöschten Polar-Pläne kam je ein DELETE an. Neuladen in den 5 s Rückgängig-Frist: der Abbruch-
+   * Pfad (pagehide → tpLoeschenAusfuehren) startet das async delete, der Browser bricht die Anfrage beim Entladen ab. Jetzt zweifach:
+   * (1) pagehide schickt das DELETE zusätzlich als keepalive-fetch (überlebt das Entladen, Token synchron aus dem Supabase-Speicher),
+   * (2) offene IDs stehen in localStorage und werden beim nächsten Laden der Pläne herausgefiltert und gelöscht. Farmer-Austrag
+   * (tpWdTagesplanAustragen) läuft nur im normalen Weg — geplante Farmer-Pläne sind ohnehin nicht löschbar. */
+  const TP_LOESCH_LS = 'prophos_tp_loesch_offen'
+  function tpLoeschLsLesen(){ try{ return JSON.parse(localStorage.getItem(TP_LOESCH_LS) || '{}') || {} }catch(_){ return {} } }
+  function tpLoeschLsSchreiben(o){ try{ if(Object.keys(o).length) localStorage.setItem(TP_LOESCH_LS, JSON.stringify(o)); else localStorage.removeItem(TP_LOESCH_LS) }catch(_){} }
+  function tpLoeschMerken(id){ const o = tpLoeschLsLesen(); o[String(id)] = { uid: currentUserId || null, at: Date.now() }; tpLoeschLsSchreiben(o) }
+  function tpLoeschVergessen(id){ const o = tpLoeschLsLesen(); if(o[String(id)]){ delete o[String(id)]; tpLoeschLsSchreiben(o) } }
   let _editingPlanId = null    // null = create, else edit
   let _completingPlanId = null // when trade-complete-modal open
 
@@ -40364,7 +40435,17 @@
         .eq('user_id', currentUserId)
         .order('created_at', { ascending: false })
       if(error){ console.error('loadTradePlans:', error); return }
-      tradePlans = (data || []).map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)))
+      // Löschungen, die ein Neuladen abgebrochen hat (21.10.2026, s. TP_LOESCH_LS): ausblenden und jetzt löschen
+      const lsOffen = tpLoeschLsLesen()
+      const nachholen = Object.keys(lsOffen).filter(id => (!lsOffen[id].uid || lsOffen[id].uid === currentUserId) && !_tpLoeschOffen.has(id))
+      tradePlans = (data || []).map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)) && !nachholen.includes(String(p.id)))
+      if(nachholen.length){
+        const da = new Set((data || []).map(r => String(r.id)))
+        supabase.from('trade_plans').delete().in('id', nachholen.filter(id => da.has(id))).then(({ error: e2 }) => {
+          if(e2){ console.warn('[löschen] nachholen', e2); return }
+          for(const id of nachholen) tpLoeschVergessen(id)
+        })
+      }
       renderTradePlans()
       // Fortschritts-Ziel (10.09.2026): die Accounts-Tabelle rendert beim Boot
       // evtl. VOR der Plan-Hydration — dann stünde das 🏆-Badge auf 0. Einmal
@@ -44233,6 +44314,7 @@
     if(_tpLoeschOffen.has(key)) return
     const idx = (tradePlans || []).findIndex(p => String(p.id) === key)
     _tpLoeschOffen.set(key, { plan: p0, idx, farmer, timer: setTimeout(() => tpLoeschenAusfuehren(key), 5000) })
+    tpLoeschMerken(key)
     tradePlans = tradePlans.filter(p => String(p.id) !== key)
     renderTradePlans()
     tpLoeschToast()
@@ -44258,6 +44340,7 @@
       if(x.laeuft) continue   // Request schon unterwegs — nicht mehr rückholbar
       clearTimeout(x.timer)
       _tpLoeschOffen.delete(key)
+      tpLoeschVergessen(key)
       if(x.plan && !tradePlans.some(p => String(p.id) === key)){
         tradePlans.splice(Math.max(0, Math.min(x.idx < 0 ? tradePlans.length : x.idx, tradePlans.length)), 0, x.plan)
         zurueck++
@@ -44268,7 +44351,16 @@
 
   // Beim Verlassen der Seite offene Löschungen sofort ausführen — sonst stünde der Plan nach dem Neuladen wieder da.
   function tpLoeschenAlleJetzt(){
-    for(const [key, x] of [..._tpLoeschOffen]) if(!x.laeuft) tpLoeschenAusfuehren(key)
+    const offen = [..._tpLoeschOffen].filter(([, x]) => !x.laeuft).map(([key]) => key)
+    if(!offen.length) return
+    // keepalive-DELETE zuerst (synchron abgeschickt, überlebt das Entladen) — das normale delete darunter bricht beim Neuladen ab
+    try{
+      const ses = JSON.parse(localStorage.getItem('sb-gxhkannmzpyuepxlepta-auth-token') || 'null')
+      const tok = ses && (ses.access_token || (ses.currentSession && ses.currentSession.access_token))
+      if(tok) fetch(`${SUPABASE_URL}/rest/v1/trade_plans?id=in.(${offen.map(encodeURIComponent).join(',')})`, { method: 'DELETE', keepalive: true,
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + tok, Prefer: 'return=minimal' } }).catch(() => {})
+    }catch(_){}
+    for(const key of offen) tpLoeschenAusfuehren(key)
   }
   window.addEventListener('pagehide', tpLoeschenAlleJetzt)
   document.addEventListener('visibilitychange', () => { if(document.hidden) tpLoeschenAlleJetzt() })
@@ -44317,6 +44409,7 @@
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
       if(error) throw error
       _tpLoeschOffen.delete(key)
+      tpLoeschVergessen(key)
       tradePlans = tradePlans.filter(p => String(p.id) !== String(planId))
       if(farmer) await tpWdTagesplanAustragen(planId, 'Plan von Hand gelöscht')
       // Mirror-Route: scharfgeschaltetes Pair freigeben (stoppt die Engine, falls
@@ -44326,6 +44419,7 @@
     }catch(e){
       // Fehlgeschlagen → Zeile wieder zeigen, sonst wäre der Plan nur optisch weg
       _tpLoeschOffen.delete(key)
+      tpLoeschVergessen(key)
       if(ol.plan && !tradePlans.some(p => String(p.id) === key)){ tradePlans.splice(Math.max(0, Math.min(ol.idx < 0 ? tradePlans.length : ol.idx, tradePlans.length)), 0, ol.plan); renderTradePlans() }
       alert('Löschen fehlgeschlagen: ' + (e.message || e))
       return
@@ -45635,7 +45729,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1665'
+  const OS_TAB_BUILD = '2026-09-22.1666'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48254,7 +48348,10 @@
         if(String((sig.params || {}).aktion || '') === 'polar_slave'){
           const pm = sig.params || {}, lg = String(pm.login || '').trim()
           const instP = lg ? (dd.instances || []).find(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg) : null
-          if(!instP) continue
+          // Instanz-Datei heißt im Panel-Vertrag „file" (wie überall in mtc*); „config_file" gab es dort nie — erster Live-Lauf 407f8efa
+          // (21.10.2026 03:36 Dubai): Slave bekam einen leeren Pfad, polar_bot öffnete den Ordner C:\mt5-copier\ → FileNotFoundError, Abbruch
+          const cfgP = instP ? String(instP.file || instP.config_file || '') : ''
+          if(!instP || !cfgP) continue
           const { data: clP } = await supabase.from('order_signale')
             .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
             .eq('id', sig.id).eq('status', 'wartet').select()
@@ -48263,7 +48360,7 @@
           _osStand = 'claim-polar: ' + String(sig.id).slice(0, 8)
           try{ polarRiegelSofort(pm.lauf_id, 'slave', pm.plan_id) }catch(_){}   // POLAR-VORRANG (20.10.2026): ab jetzt startet dieser Tab nichts mehr
           const specP = FIRM_PRESETS[firmToPreset(String(pm.firm || ''))] || {}
-          const bodyP = { seite: 'slave', lauf_id: pm.lauf_id, plan_id: pm.plan_id, config_file: instP.config_file, symbol: specP.symbol || 'NAS100',
+          const bodyP = { seite: 'slave', lauf_id: pm.lauf_id, plan_id: pm.plan_id, config_file: cfgP, symbol: specP.symbol || 'NAS100',
             richtung: pm.richtung, volumen: pm.volumen, sl_pkt: pm.sl_pkt, tp_pkt: pm.tp_pkt }
           window.mtcApi('polar-start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyP), timeoutMs: 20000 })
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
@@ -55107,20 +55204,38 @@
           <td>${pkt(long, sSlPkt)} <span style="color:var(--danger)">${usd(lots * sPpl * sSlPkt, false)}</span></td></tr>
       </table>`
   }
+  /* SOFORT STATT 2–3 s (Finn 21.10.2026 ~03:50 Dubai: „wenn ich Polar auswähle, dauert es immer 2, 3 Sekunden, bis Master und Slave
+   * ausgewählt sind"): /admin/overview (alle IDs + Live-Balance) brauchte bei jedem Öffnen so lange. Jetzt füllen die Dropdowns sofort aus
+   * dem letzten Stand (Speicher, sonst localStorage), die frische Liste kommt still im Hintergrund und behält die Auswahl. */
+  const POLAR_KONTEN_LS = 'prophos_polar_konten'
+  function polarKontenFuellen(behalten){
+    const fu = polarEl('pol-fu-konto'), cfd = polarEl('pol-cfd-konto')
+    const altFu = behalten ? fu?.value : '', altCfd = behalten ? cfd?.value : ''
+    polarKontoOptionen(fu, 'funded')
+    polarKontoOptionen(cfd, 'funded_cfd')
+    if(altFu && _polarKonten.some(k => String(k.id) === altFu)) fu.value = altFu
+    if(altCfd && _polarKonten.some(k => String(k.id) === altCfd)) cfd.value = altCfd
+    else {
+      // Slave standardmäßig bei einer ANDEREN ID als der Master
+      const m = polarKonto('pol-fu-konto')
+      const anders = _polarKonten.find(k => k.type === 'funded_cfd' && (!m || k.person !== m.person))
+      if(anders) cfd.value = String(anders.id)
+    }
+    polarRechnen()
+  }
   async function polarOeffnen(){
     ;['polarStart', 'polarNurSpeichern'].forEach(id => { const k = polarEl(id); if(k) k.disabled = false })   // nach Erfolg gesperrt (16.10.2026)
-    polarEl('polarMsg').textContent = 'Lade Konten aller IDs…'
     polarEl('polarModal').classList.add('open')
     try{ polarTestXSichtbar(); const m = polarEl('polarTestMsg'); if(m) m.textContent = '' }catch(_){}   // Maus-Test × nur Admin + PC (20.10.2026)
+    if(!_polarKonten.length){ try{ const c = JSON.parse(localStorage.getItem(POLAR_KONTEN_LS) || 'null'); if(c && c.uid === currentUserId && Array.isArray(c.konten)) _polarKonten = c.konten }catch(_){} }
+    const sofort = _polarKonten.length > 0
+    if(sofort) polarKontenFuellen(false)
+    polarEl('polarMsg').textContent = sofort ? '' : 'Lade Konten aller IDs…'
     const hinweis = await polarKontenLaden()
-    polarKontoOptionen(polarEl('pol-fu-konto'), 'funded')
-    polarKontoOptionen(polarEl('pol-cfd-konto'), 'funded_cfd')
-    // Slave standardmäßig bei einer ANDEREN ID als der Master
-    const m = polarKonto('pol-fu-konto')
-    const anders = _polarKonten.find(k => k.type === 'funded_cfd' && (!m || k.person !== m.person))
-    if(anders) polarEl('pol-cfd-konto').value = String(anders.id)
+    if(!hinweis){ try{ localStorage.setItem(POLAR_KONTEN_LS, JSON.stringify({ uid: currentUserId, at: Date.now(), konten: _polarKonten })) }catch(_){} }
+    if(!polarEl('polarModal').classList.contains('open')) return
+    polarKontenFuellen(sofort)   // frische Liste (Balance), Auswahl bleibt
     polarEl('polarMsg').textContent = hinweis
-    polarRechnen()
   }
   polarEl('tp-route-polar')?.addEventListener('click', () => { closeTradePlanModal(); polarOeffnen() })
   polarEl('polarClose')?.addEventListener('click', () => polarEl('polarModal').classList.remove('open'))
@@ -55158,9 +55273,10 @@
       const lg = k ? String((typeof mt5LoginForAccount === 'function' && mt5LoginForAccount(k.id)) || '').trim() : ''
       let inst = null
       if(lg){ try{ const dd = await window.mtcApi('instances', { timeoutMs: 6000 }); inst = (dd && dd.instances || []).find(x => x && String(((x.status || {}).master_login) || x.master_expected || '') === lg) || null }catch(_){} }
-      if(!inst || !inst.config_file){ msg.textContent = lg ? `Slave: keine Echo-Instanz mit Login ${lg} an diesem Panel — der Test läuft am Slave-PC.` : 'Slave: ein Funded-CFD-Konto DIESER ID mit MT5-Login wählen (Echo-Instanz) — der Test läuft am Slave-PC.'; return }
+      const cfgT = inst ? String(inst.file || inst.config_file || '') : ''   // Panel-Feld „file" (s. polar_slave, 21.10.2026)
+      if(!inst || !cfgT){ msg.textContent = lg ? `Slave: keine Echo-Instanz mit Login ${lg} an diesem Panel — der Test läuft am Slave-PC.` : 'Slave: ein Funded-CFD-Konto DIESER ID mit MT5-Login wählen (Echo-Instanz) — der Test läuft am Slave-PC.'; return }
       const specP = (typeof FIRM_PRESETS !== 'undefined' && typeof firmToPreset === 'function') ? (FIRM_PRESETS[firmToPreset(String(k.firm || ''))] || {}) : {}
-      body = { seite, config_file: inst.config_file, symbol: specP.symbol || 'NAS100' }
+      body = { seite, config_file: cfgT, symbol: specP.symbol || 'NAS100' }
     }
     msg.textContent = `Maus-Test ${seite} startet … (wechselt vorher ins Konto/den Reiter, klickt das × nie)`
     polarEl('polarTestX').querySelectorAll('button').forEach(b => b.disabled = true)
@@ -55312,13 +55428,28 @@
     const preis = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const geld = (v, cur) => v == null ? '–' : `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`
     const farbe = v => v == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
+    // LEBENDIGER LIVE-ABLAUF (Finn 21.10.2026 ~03:40 Dubai nach dem ersten Lauf: „mehr Live-Animation … Was wird gerade vorbereitet? Der PC
+    // live, nur cooler machen"): Status-Chip je Seite mit lebendem Punkt, Kreisel am aktuellen Schritt, neue Schritte gleiten herein (neuAb)
+    const endeStatus = WDL_POLAR_ENDE.includes(String(s.status || ''))
+    const bereitL = Array.isArray(s.bereit) ? s.bereit.map(String) : []
+    const seiteChip = (seite, teil) => {
+      const t = teil || {}, zuMs = s[seite + '_zu_ms']
+      if(String(s.status || '') === 'abbruch' || String(s.status || '') === 'fehler')
+        return (Array.isArray(t.schritte) && t.schritte.some(x => POLAR_SCHRITT_NEIN.has(String(x.phase || '')))) ? { k: 'nein', t: 'Abbruch' } : { k: 'still', t: 'gestoppt' }
+      if(zuMs != null) return { k: 'zu', t: 'zu' }
+      if(t.gefuellt) return { k: 'live', t: 'gefüllt · live' }
+      if(bereitL.includes(seite)) return { k: 'bereit', t: 'bereit' }
+      return { k: 'arbeitet', t: s.status ? 'bereitet vor' : 'wartet' }
+    }
     const spalte = (titel, wer, konto, teil, wv, cur, order) => {
-      const sch = Array.isArray((teil || {}).schritte) ? teil.schritte : []
+      const sch =Array.isArray((teil || {}).schritte) ? teil.schritte : []
       const li = sch.map((x, i) => {
-        const nein = POLAR_SCHRITT_NEIN.has(String(x.phase || '')), akt = i === sch.length - 1 && !w.ende && !nein
-        return `<li class="${nein ? 'is-nein' : akt ? 'is-akt' : 'is-ok'}"><span class="t">${uhr(x.at_ms)}</span><span class="m">${nein ? '✗' : akt ? '›' : '✓'}</span><span>${escapeHtml(String(x.text || x.phase || ''))}</span></li>`
-      }).join('') || '<li><span class="t">–</span><span class="m"></span><span>noch keine Schritte gemeldet</span></li>'
-      return `<div class="pol-ab-seite"><h4>${titel} · ${escapeHtml(String(wer || '?'))}</h4><dl class="pol-ab-werte">`
+        const nein = POLAR_SCHRITT_NEIN.has(String(x.phase || '')), akt = i === sch.length - 1 && !w.ende && !nein && !endeStatus
+        const neu = oo.neuAb != null && Number(x.at_ms) > oo.neuAb ? ' is-neu' : ''
+        return `<li class="${nein ? 'is-nein' : akt ? 'is-akt' : 'is-ok'}${neu}"><span class="t">${uhr(x.at_ms)}</span><span class="m">${nein ? '✗' : akt ? '<i class="pol-kreisel"></i>' : '✓'}</span><span>${escapeHtml(String(x.text || x.phase || ''))}</span></li>`
+      }).join('') || `<li class="is-akt"><span class="t">–</span><span class="m">${endeStatus ? '' : '<i class="pol-kreisel"></i>'}</span><span>${endeStatus ? 'keine Schritte gemeldet' : 'wartet auf den ersten Schritt…'}</span></li>`
+      const ch = seiteChip(titel === 'Slave' ? 'slave' : 'master', teil)
+      return `<div class="pol-ab-seite is-${ch.k}"><h4><span>${titel} · ${escapeHtml(String(wer || '?'))}</span><span class="pol-chip is-${ch.k}"><i></i>${ch.t}</span></h4><dl class="pol-ab-werte">`
         + `<dt>Konto</dt><dd>${escapeHtml(String(konto || '?'))}</dd><dt>Order</dt><dd>${escapeHtml(order)}</dd>`
         + `<dt>Fill</dt><dd>${preis(wv.fill)}</dd>`
         + `<dt>P&amp;L live</dt><dd style="color:${farbe(wv.pl)};font-weight:600">${geld(wv.pl, cur)}</dd>`
@@ -55328,7 +55459,17 @@
     }
     const ri = oo.richtung === 'sell' ? 'SELL' : 'BUY', gegen = oo.richtung === 'sell' ? 'BUY' : 'SELL'
     const ph = typeof wdlPolarPhase === 'function' ? wdlPolarPhase(s, false, Date.now()) : { text: String(s.status || '') }
-    const kopf = oo.ohneKopf ? '' : `<div class="pol-ab-kopf"><span><b>${escapeHtml(ph.text || '')}</b></span><span>${s.feuer_ms ? 'Feuerzeit ' + uhr(s.feuer_ms) : 'noch keine Feuerzeit'}${s.lauf_id ? ' · Lauf ' + escapeHtml(String(s.lauf_id).slice(0, 8)) : ''}</span></div>`
+    // Phasen-Leiste: erreichte Phasen ✓, aktuelle pulsiert, bei Abbruch/Fehler die zuletzt erreichte rot
+    const PH = [['vorbereiten', 'Vorbereiten'], ['bereit', 'Bereit'], ['feuer', 'Feuer'], ['gefuellt', 'Gefüllt'], ['zu', 'Zu']]
+    const erreicht = ph.phase === 'ende' ? 5 : ph.phase === 'zu' ? 4 : ph.phase === 'gefuellt' ? 3 : ph.phase === 'feuer' ? 2 : ph.phase === 'bereit' ? 1 : 0
+    const stopp = ph.phase === 'abbruch' || ph.phase === 'fehler'
+    const bisStopp = stopp ? (s.feuer_ms ? 2 : bereitL.length ? 1 : 0) : -1
+    const leiste = `<ol class="pol-leiste${stopp ? ' is-stopp' : ''}">` + PH.map(([k, label], i) => {
+      const cls = stopp ? (i < bisStopp ? 'is-ok' : i === bisStopp ? 'is-nein' : '') : (i < erreicht ? 'is-ok' : i === erreicht ? 'is-akt' : '')
+      const zusatz = k === 'feuer' && s.feuer_ms && !stopp && erreicht <= 2 ? `<small data-pol-countdown="${Number(s.feuer_ms)}"></small>` : ''
+      return `<li class="${cls}"><span class="pkt">${cls === 'is-ok' ? '✓' : cls === 'is-nein' ? '✗' : i + 1}</span><span class="lbl">${label}${zusatz}</span></li>`
+    }).join('') + '</ol>'
+    const kopf = oo.ohneKopf ? '' : leiste + `<div class="pol-ab-kopf"><span><b>${escapeHtml(ph.text || '')}</b></span><span>${s.feuer_ms ? 'Feuerzeit ' + uhr(s.feuer_ms) : 'noch keine Feuerzeit'}${s.lauf_id ? ' · Lauf ' + escapeHtml(String(s.lauf_id).slice(0, 8)) : ''}</span></div>`
     // Slave LINKS, Master RECHTS (Finns Seitenwahl)
     return kopf + `<div class="pol-ab">`
       + spalte('Slave', oo.slaveWer, oo.slaveKonto, s.slave, w.slave, oo.slaveCur || '$', `${gegen} ${oo.lots != null ? Number(oo.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} Lot`)
@@ -55371,8 +55512,10 @@
     if(!z) return `<td class="pc-zelle"${k}><span class="pc-text">—</span></td>`
     return `<td class="pc-zelle ${z.ok === true ? 'is-ok' : z.ok === false ? 'is-nein' : 'is-offen'}"${k}><span class="pc-m">${polarCheckZeichen(z.ok)}</span><span class="pc-text">${escapeHtml(String(z.text || ''))}</span></td>`
   }
+  let _polarCheckZeilen = []   // letzte Vorprüfung (Namen der IDs für den Live-Ablauf)
   function polarCheckZeichnen(d){
     const rows = polarEl('polarCheckRows'), kopf = polarEl('polarCheckKopf'), start = polarEl('polarCheckStart')
+    if(d && Array.isArray(d.zeilen) && d.zeilen.length) _polarCheckZeilen = d.zeilen
     const zz = [...((d && Array.isArray(d.zeilen)) ? d.zeilen : []), ...((d && Array.isArray(d.zeilen) && d.zeilen.length) ? _polarCheckTest : [])]
     const kreuz = zz.length && zz.every(z => z.gruppe)
     const werRoh = s => { const z = zz.find(x => x.seite === s && x.wer); return z ? ' · ' + String(z.wer) : '' }
@@ -55453,7 +55596,15 @@
   }
   // LIVE-MODUS des Prüf-Popups (21.10.2026): Railway /polar/stand alle 2 s; 404 = Lauf noch nicht angelegt (Master-PC claimt gleich)
   let _polarLive = null   // { pid, takt, o }
+  // Countdown zur Feuerzeit (21.10.2026): eigener 200-ms-Takt nur für die Ziffern, der Stand selbst kommt alle 2 s
+  function polarCountdownTick(){
+    document.querySelectorAll('#polarCheckLive [data-pol-countdown]').forEach(el => {
+      const rest = Number(el.dataset.polCountdown) - Date.now()
+      el.textContent = rest > 0 ? ` in ${(rest / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s` : ' jetzt'
+    })
+  }
   function polarLiveStoppen(zuruecksetzen){
+    if(_polarLive && _polarLive.uhr) clearInterval(_polarLive.uhr)
     if(_polarLive && _polarLive.takt) clearInterval(_polarLive.takt)
     _polarLive = null
     if(!zuruecksetzen) return
@@ -55474,8 +55625,16 @@
       if(r.status === 404){ if(msg) msg.textContent = 'Startzeit gesetzt — wartet auf den PC der Master-ID (Start-Wächter), dann legt Railway den Lauf an…'; return }
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
       let kurs = null; try{ const k = typeof wdKursJetzt === 'function' ? wdKursJetzt('NQ', 15000) : null; kurs = k && k.preis > 0 ? k.preis : null }catch(_){}
-      if(live) live.innerHTML = polarAblaufHtml(d, Object.assign({}, _polarLive.o, { kurs }))
-      if(msg) msg.textContent = WDL_POLAR_ENDE.includes(String(d.status || '')) ? 'Lauf beendet — Railway rechnet beide Seiten ab (Trades → Überprüfen).' : ''
+      const html = polarAblaufHtml(d, Object.assign({}, _polarLive.o, { kurs, neuAb: _polarLive.gesehenMs }))
+      // nur neu zeichnen, wenn sich etwas geändert hat — sonst springen Kreisel und Puls alle 2 s auf Anfang
+      if(live && html !== _polarLive.html){ live.innerHTML = html; _polarLive.html = html; polarCountdownTick() }
+      const alle = [...(((d.master || {}).schritte) || []), ...(((d.slave || {}).schritte) || [])].map(x => Number(x.at_ms) || 0)
+      if(alle.length) _polarLive.gesehenMs = Math.max(_polarLive.gesehenMs || 0, ...alle)
+      // Abbruch vor dem Fill: ehrlich sagen, dass nichts platziert ist (erster Lauf 407f8efa zeigte „rechnet beide Seiten ab")
+      const ohneFill = !((d.master || {}).gefuellt || (d.slave || {}).gefuellt)
+      if(msg) msg.textContent = !WDL_POLAR_ENDE.includes(String(d.status || '')) ? ''
+        : (String(d.status) !== 'fertig' && ohneFill) ? 'Abgebrochen — kein Fill auf beiden Seiten, nichts platziert. Der Plan steht wieder unter Geplant.'
+        : 'Lauf beendet — Railway rechnet beide Seiten ab (Trades → Überprüfen).'
       if(WDL_POLAR_ENDE.includes(String(d.status || '')) && _polarLive && _polarLive.takt){ clearInterval(_polarLive.takt); _polarLive.takt = null }
     }catch(e){ if(msg) msg.textContent = 'Stand: ' + ((e && e.message) || e) }
   }
@@ -55488,10 +55647,13 @@
     if(live){ live.hidden = false; live.innerHTML = polarAblaufHtml(null, {}) }
     const kt = Number(p.masterContracts) || null, lots = kt && Number(p.multiplier) ? Math.round(kt * Number(p.multiplier) * 100) / 100 : null
     const ppl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(p.slaveFirm)) || 1
-    _polarLive = { pid: String(p.id), takt: null, o: { richtung: p.richtung, kontrakte: kt, symbol: p.masterSymbol, lots, slavePpl: ppl,
-      masterKonto: p.masterName, slaveKonto: p.slaveName, masterWer: 'Master-ID', slaveWer: 'Slave-ID' } }
+    // Namen der IDs aus der Vorprüfung (Spaltenköpfe „Slave · Finn + Pascal"), sonst neutral
+    const wer = s => { const z = (_polarCheckZeilen || []).find(x => x && x.seite === s && x.wer); return z ? String(z.wer) : (s === 'master' ? 'Master-ID' : 'Slave-ID') }
+    _polarLive = { pid: String(p.id), takt: null, uhr: null, html: '', gesehenMs: Date.now(), o: { richtung: p.richtung, kontrakte: kt, symbol: p.masterSymbol, lots, slavePpl: ppl,
+      masterKonto: p.masterName, slaveKonto: p.slaveName, masterWer: wer('master'), slaveWer: wer('slave') } }
     polarLiveTick()
     _polarLive.takt = setInterval(polarLiveTick, 2000)
+    _polarLive.uhr = setInterval(polarCountdownTick, 200)
   }
   window._polarLiveStarten = polarLiveStarten   // Test-Haken (Stub)
   polarEl('polarCheckClose')?.addEventListener('click', () => { polarLiveStoppen(false); polarEl('polarCheckModal')?.classList.remove('open') })
