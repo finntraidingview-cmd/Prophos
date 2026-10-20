@@ -12630,6 +12630,17 @@ def tsx_geblowt_urteil(res, ext, aktiv=""):
     return None
 
 
+def tsx_k2_meldung_nachgelesen(stand, res):
+    """REIN RECHNEND (testbar, 20.10.2026 Marc pc-… 15:14 UTC, Bot .1650): die Loss-Limit-Meldung kam erst NACH dem Stand-Lesen am Rundenanfang
+    (Puls-Chrome frisch gestartet, TopstepX zeigt sie einige Sekunden nach dem Laden) — der Ziel-Beweis fand sie unter dem Konto-Auslöser
+    („liegt nicht das Ziel"), der Lauf endete mit „Klick ohne Beweis", ohne die Meldung je zu schließen. -> True, wenn im frischen Stand eine
+    Meldung (tsx_blow_dialog) steht und dieser Lauf sie noch nicht zu schließen versucht hat: dann Runde von vorn (der Rundenanfang
+    schließt sie per tsx_blow_dialog_knopf und wechselt danach). Schon versucht → False (nie ein zweiter Druck)."""
+    st = stand if isinstance(stand, dict) else {}
+    r = res if isinstance(res, dict) else {}
+    return bool(tsx_blow_dialog(st.get("popups"))) and not r.get("_blow_dialog_versucht")
+
+
 def _tsx_blow_dialog_weg(s, st, trail, res):
     """TopstepX-Meldung „You Hit Your Maximum Loss Limit" lesen (→ res.blow_dialog) und EINMAL je Lauf schließen (tsx_blow_dialog_knopf,
     Druck mit Ziel-Beweis: am Punkt liegt genau dieser Knopf). -> (stand, meldung | None). Nie bei fremden Dialogen, nie ein zweiter Druck."""
@@ -16885,6 +16896,10 @@ def _tsx_konto_sichern(s, ext, st, trail):
         # STABIL + EIN ZWEITER VERSUCH (09.10.2026, e944cde2): erst auf ruhige Position warten; meldet der Klick „kein Druck" (Ziel nach
         # der Hover-Pause verschoben — es wurde NICHT gedrückt), Ziel neu lesen und genau einmal neu hovern. Ziel-Beweis bleibt.
         st, ko, r, _stabil = _tsx_ausloeser_stabil(s, st, ko, r, trail)
+        if tsx_k2_meldung_nachgelesen(st, bd_res):       # 20.10.2026 Marc: Meldung kam nach dem Rundenanfang — erst schließen, dann wechseln
+            trail.append("K2: TopstepX-Meldung erst jetzt da (vor dem Auslöser-Klick) — Runde von vorn: schließen, dann wechseln")
+            geklickt = False
+            continue
         gedrueckt = False
         for _versuch in range(2):
             n_spur = len(trail)
@@ -16903,6 +16918,11 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 break                                     # inzwischen steht das Konto bzw. eine Liste — die Runde entscheidet neu
         if not gedrueckt:
             if tsx_konto_urteil(ko, ext) == "ja" or ko.get("liste_offen"):
+                geklickt = False
+                continue
+            st = s.stand()                                # 20.10.2026 Marc: lag die Meldung unter dem Punkt, steht sie jetzt im Stand
+            if tsx_k2_meldung_nachgelesen(st, bd_res):
+                trail.append("K2: TopstepX-Meldung lag unter dem Konto-Auslöser — Runde von vorn: schließen, dann wechseln")
                 geklickt = False
                 continue
             return _raus("konto_nicht_erreicht", "Konto-Auslöser nicht gedrückt (Klick ohne Beweis) — nichts gewechselt.", st)
