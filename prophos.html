@@ -13418,38 +13418,68 @@
    * sie frisch nach → bei vollem Speicher zuerst aus den Buckets der ANDEREN IDs werfen, dann notfalls aus dem eigenen.
    * Echte Keys werden nie verworfen; reicht es auch ohne Caches nicht, wirft setItem weiter und nichts ist gelöscht. */
   const PROF_CACHE = 'prophos_cache_'
+  /* PUFFER SIND CACHE (20.10.2026, Finn 15:50 Dubai: „ID-Wechsel gescheitert: … 'prophos_bucket_…' exceeded the quota — was soll der
+   * Error? kann keine ID switchen" / „ich will IMMER ID wechseln können"): der Wurf von .953/.1128 traf nur prophos_cache_*. Zwei dicke
+   * Zwischenspeicher liefen als „echt" in jedem Bucket mit und wurden nie verworfen — prophos_tpl_cache (Trade-Planer: bis 200 Live-
+   * Trades-Zeilen + 300 Bilanz + Delta/Lauf, beim Admin-Login 0,4–0,7 MB) und prophos_wd_cache (WD-Planer: Zeilen + Regeln + alle Konten
+   * der Sicht, 0,1–0,25 MB). 13 IDs × diese Puffer füllten die ~5 MB, der Bucket der alten ID passte ohne jeden Cache nicht mehr rein.
+   * Beide sind reine Sofort-Anzeige (Railway/Supabase laden sie frisch) → gelten jetzt als Puffer wie prophos_cache_*: beim Wegsichern
+   * zuerst aus fremden Buckets, dann aus dem eigenen, zuletzt auch aus dem Ziel-Bucket; beim Einspielen zuletzt und nur, wenn sie passen.
+   * Echte Einstellungen, Pläne und Kassen-Schlüssel werden nie verworfen (user_settings-Keys sind < 25 KB je ID). Dazu harte Deckel
+   * beim Schreiben der Puffer (tplCacheSchreiben, wdCacheSchreiben). */
+  const PROF_PUFFER_KEYS = ['prophos_tpl_cache', 'prophos_wd_cache']
+  const profIstPuffer = k => typeof k === 'string' && (k.startsWith(PROF_CACHE) || PROF_PUFFER_KEYS.includes(k))
   const _profVoll = e => !!e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014)
+  // Puffer aus den Buckets anderer IDs werfen (schonen = IDs, deren Bucket unberührt bleibt) → Anzahl geworfener Einträge
   function _profCachesAusBuckets(schonen){
     const ks = []
     for(let i = 0; i < localStorage.length; i++){ const k = localStorage.key(i); if(k && k.startsWith(PROF_BUCKET) && !schonen.some(u => u && k === PROF_BUCKET + u)) ks.push(k) }
+    let n = 0
     for(const k of ks){
       try{
         const b = JSON.parse(localStorage.getItem(k) || 'null'); if(!b) continue
-        const cs = Object.keys(b).filter(c => c.startsWith(PROF_CACHE)); if(!cs.length) continue
+        const cs = Object.keys(b).filter(profIstPuffer); if(!cs.length) continue
         for(const c of cs) delete b[c]
         localStorage.setItem(k, JSON.stringify(b))   // kleiner als vorher — passt immer
+        n += cs.length
       }catch(_){}
     }
+    return n
   }
-  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen (ziel = ID, deren Cache geschont wird)
+  // Hinweis für NACH dem Neuladen des Wechsels (sessionStorage überlebt location.reload, gehört zu keinem Bucket)
+  const PROF_HINWEIS_SS = 'prophos_profil_hinweis'
+  function profHinweisMerken(text){ try{ sessionStorage.setItem(PROF_HINWEIS_SS, text) }catch(_){} }
+  function profHinweisZeigen(){
+    let t = null; try{ t = sessionStorage.getItem(PROF_HINWEIS_SS); if(t) sessionStorage.removeItem(PROF_HINWEIS_SS) }catch(_){}
+    if(t && typeof atToast === 'function') atToast(t, 'warn')
+  }
+  // REIN RECHNEND (testbar): Bucket schreiben, bei vollem Speicher stufenweise Puffer werfen — nie echte Keys. → { stufe, geworfen }
+  //   0 passt sofort · 1 Puffer fremder Buckets · 2 eigene Puffer · 3 auch Puffer des Ziel-Buckets (werden dort frisch geladen)
+  // Passt der Bucket auch ohne jeden Puffer nicht (nur noch echte Keys), fliegt der Fehler weiter: dann ist nicht der Speicher knapp,
+  // sondern etwas anderes kaputt — die echten Keys werden nicht angetastet.
+  function _profBucketSchreiben(userId, ziel, bucket){
+    const schreiben = () => localStorage.setItem(PROF_BUCKET + userId, JSON.stringify(bucket))
+    const eigene = Object.keys(bucket).filter(profIstPuffer)
+    try{ schreiben(); return { stufe: 0, geworfen: 0 } }catch(e){ if(!_profVoll(e)) throw e }
+    console.warn('[profil] localStorage voll — Puffer anderer IDs werden verworfen')
+    let geworfen = _profCachesAusBuckets([userId, ziel])
+    try{ schreiben(); return { stufe: 1, geworfen } }catch(e){ if(!_profVoll(e)) throw e }
+    for(const k of eigene) delete bucket[k]
+    geworfen += eigene.length
+    try{ schreiben(); return { stufe: 2, geworfen } }catch(e){ if(!_profVoll(e)) throw e }
+    console.warn('[profil] localStorage voll — auch die Puffer der Ziel-ID werden verworfen')
+    geworfen += _profCachesAusBuckets([userId])
+    schreiben()                              // nur noch echte Keys überall — passt das nicht, fliegt der Fehler (nie echte Keys werfen)
+    return { stufe: 3, geworfen }
+  }
+  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen (ziel = ID, deren Puffer am längsten geschont werden)
   function profSnapshotAndClear(userId, ziel){
     const keys = _profAppKeys()
     if(userId){
       const bucket = {}
       for(const k of keys) bucket[k] = localStorage.getItem(k)
-      const schreiben = () => localStorage.setItem(PROF_BUCKET + userId, JSON.stringify(bucket))
-      try{ schreiben() }
-      catch(e){
-        if(!_profVoll(e)) throw e
-        console.warn('[profil] localStorage voll — Boot-Caches anderer IDs werden verworfen')
-        _profCachesAusBuckets([userId, ziel])
-        try{ schreiben() }
-        catch(e2){
-          if(!_profVoll(e2)) throw e2
-          for(const k of Object.keys(bucket)) if(k.startsWith(PROF_CACHE)) delete bucket[k]
-          schreiben()
-        }
-      }
+      const erg = _profBucketSchreiben(userId, ziel, bucket)
+      if(erg.stufe >= 2) profHinweisMerken('ID gewechselt — Speicher war voll, Verlauf/Puffer der alten ID verworfen (laden frisch).')
     }
     for(const k of keys) localStorage.removeItem(k)
   }
@@ -13468,22 +13498,22 @@
      * Einspielen → alte ID schon geleert, Ziel-ID halb drin. Jetzt echte Keys zuerst (bei Quota: Caches der anderen
      * Buckets werfen, nochmal), die prophos_cache_* zuletzt und nur, wenn sie passen — sonst lädt Supabase sie frisch. */
     const eintraege = Object.entries(bucket).filter(([, v]) => v != null)
-    const echte  = eintraege.filter(([k]) => !k.startsWith(PROF_CACHE))
-    const caches = eintraege.filter(([k]) =>  k.startsWith(PROF_CACHE))
+    const echte  = eintraege.filter(([k]) => !profIstPuffer(k))   // Puffer (prophos_cache_*, tpl_cache, wd_cache) zuletzt (20.10.2026)
+    const caches = eintraege.filter(([k]) =>  profIstPuffer(k))
     _profBulkWrite = true
     try{
       for(const [k, v] of echte){
         try{ localStorage.setItem(k, v) }
         catch(e){
           if(!_profVoll(e)) throw e
-          console.warn('[profil] localStorage voll beim Einspielen — Boot-Caches anderer IDs werden verworfen')
+          console.warn('[profil] localStorage voll beim Einspielen — Puffer anderer IDs werden verworfen')
           _profCachesAusBuckets([userId])
-          localStorage.setItem(k, v)
+          localStorage.setItem(k, v)   // echter Key — passt er auch jetzt nicht, fliegt der Fehler (nie stumm verlieren)
         }
       }
       for(const [k, v] of caches){
         try{ localStorage.setItem(k, v) }
-        catch(e){ if(!_profVoll(e)) throw e; console.warn('[profil] Boot-Cache übersprungen (Speicher voll):', k) }
+        catch(e){ if(!_profVoll(e)) throw e; console.warn('[profil] Puffer übersprungen (Speicher voll):', k); profHinweisMerken('ID gewechselt — Speicher war voll, Puffer dieser ID laden frisch.') }
       }
     } finally { _profBulkWrite = false }
   }
@@ -44978,7 +45008,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1641'
+  const OS_TAB_BUILD = '2026-09-22.1642'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53243,6 +53273,7 @@
       return c
     }catch(_){ return null }
   }
+  const TPL_CACHE_MAX_KB = 250   // Deckel je Bucket (20.10.2026) — 13 IDs × Puffer müssen zusammen unter die ~5 MB des localStorage
   function tplCacheSchreiben(){
     try{
       const k = (a, n) => Array.isArray(a) ? a.slice(0, n) : []
@@ -53257,7 +53288,13 @@
       if(_ap.ladeFehler && !apAt) return                 // nie erfolgreich geladen: nichts zu merken
       const c = { uid: String(currentUserId || ''), at: apAt || Date.now(), apAt, letzter: l, imPlaner: !!_ap.imPlaner, admin: _ap.admin, delta: d,
         lt: k([..._tpl.lt.values()], 200), bilanz: k(_tpl.bilanz, 300) }
-      localStorage.setItem(TPL_CACHE_KEY, JSON.stringify(c))
+      // DECKEL (20.10.2026, Finn: ID-Wechsel scheiterte an der Quota — dieser Puffer wog beim Admin-Login 0,4–0,7 MB je Bucket): über
+      // TPL_CACHE_MAX_KB zuerst ohne die Live-Trades-Zeilen (der größte Teil), dann ohne Bilanz; der Rest (Lauf/Delta) bleibt — alles lädt
+      // ohnehin frisch von Railway, der Puffer ist nur die Sofort-Anzeige
+      let s = JSON.stringify(c)
+      if(s.length > TPL_CACHE_MAX_KB * 1024){ c.lt = []; s = JSON.stringify(c) }
+      if(s.length > TPL_CACHE_MAX_KB * 1024){ c.bilanz = []; s = JSON.stringify(c) }
+      localStorage.setItem(TPL_CACHE_KEY, s)
     }catch(_){ try{ localStorage.removeItem(TPL_CACHE_KEY) }catch(__){} }
   }
   function tplAusCache(){
@@ -58055,8 +58092,15 @@
   // Letzter Stand im Browser (23.09.2026, Finn: „der Zeitstrahl und alles lädt immer relativ lang"): beim Öffnen sofort
   // zeichnen, dann frisch laden — Railway braucht mehrere Sekunden, die DB unter einer.
   const WD_CACHE_LS = 'prophos_wd_cache'
+  const WD_CACHE_MAX_KB = 200   // Deckel (20.10.2026, Quota beim ID-Wechsel): über der Grenze ohne die Konten der Sicht, dann ohne Zeilen
   function wdCacheSchreiben(tag){
-    try{ localStorage.setItem(WD_CACHE_LS, JSON.stringify({ tag, at: Date.now(), regeln: _wd.regeln, rows: _wd.rows || [], konten: (_wd.daten && _wd.daten.konten) || [] })) }catch(_){}
+    try{
+      const c = { tag, at: Date.now(), regeln: _wd.regeln, rows: _wd.rows || [], konten: (_wd.daten && _wd.daten.konten) || [] }
+      let s = JSON.stringify(c)
+      if(s.length > WD_CACHE_MAX_KB * 1024){ c.konten = []; s = JSON.stringify(c) }
+      if(s.length > WD_CACHE_MAX_KB * 1024){ c.rows = []; s = JSON.stringify(c) }
+      localStorage.setItem(WD_CACHE_LS, s)
+    }catch(_){}
   }
   function wdCacheLesen(){ try{ return JSON.parse(localStorage.getItem(WD_CACHE_LS) || 'null') }catch(_){ return null } }
   async function wdOpen(){
@@ -61968,6 +62012,7 @@
     // eines anderen Profils im localStorage liegen.
     if(_cacheHydrated) return
     _cacheHydrated = true
+    try{ profHinweisZeigen() }catch(_){}   // „Puffer verworfen" vom ID-Wechsel vor dem Neuladen (20.10.2026)
     try{
       if(!accounts.length){
         const a = JSON.parse(localStorage.getItem(CACHE_ACC_LS) || 'null')
