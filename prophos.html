@@ -34440,6 +34440,9 @@
 
     try {
       // Neuen Account in Supabase anlegen
+      // Mindesttage nach der Firmenregel (20.10.2026, Finn: neue FundedNext-Phasen zählten keine Tage — der Assistent trug bisher
+      // KEINE Ziel-Felder; Phase 2 aus dem Wizard blieb ohne „Tage sammeln x/5"): FundedNext Phase 1/2 → trading_days 5, frisch ab heute
+      const mtSuc = (typeof kontoMindesttage === 'function') ? kontoMindesttage(firm, type) : null
       const newAcc = {
         name, firm,
         type,
@@ -34448,7 +34451,8 @@
         maxDailyDrawdown: !isNaN(sucMaxDailyDd) && sucMaxDailyDd > 0 ? sucMaxDailyDd : null,
         maxLossPerTrade: !isNaN(sucMaxLossTrade) && sucMaxLossTrade > 0 ? sucMaxLossTrade : null,
         maxProfitPerTrade: !isNaN(sucMaxProfitTrade) && sucMaxProfitTrade > 0 ? sucMaxProfitTrade : null,
-        externalId
+        externalId,
+        ...(mtSuc ? { goalKind: mtSuc.kind, goalTarget: mtSuc.target, goalDoneOffset: 0, goalSince: null, goalManual: false } : {})
       }
       // Zugangsdaten aus dem Paste-Block (07.09.2026) — optional; accountToRow
       // trägt sie in die cred_*-Spalten. Mit Login+Server erscheint der neue
@@ -36287,6 +36291,11 @@
     // Funded CFD (29.09.2026) ist ausdrücklich CFD — Payout-Block auch dann, wenn die Firma in der Futures-Liste steht
     const istCfd = typ === 'funded_cfd'
     if(accEls.goalSec)   accEls.goalSec.hidden   = !istPhase   // Mindesttage auch für Futures-Challenges/Phasen (09.10.2026, Finn: Feld „Mindesttage“, zählt automatisch)
+    // Firmenregel vorbelegen (20.10.2026): FundedNext Phase 1/2 → „Trading Days" 5, solange das Feld leer ist (Finn kann es ändern)
+    if(istPhase && accEls.goalKind && !accEls.goalKind.value){
+      const mt = kontoMindesttage(firm, typ)
+      if(mt){ accEls.goalKind.value = mt.kind; if(accEls.goalTarget && !accEls.goalTarget.value) accEls.goalTarget.value = mt.target }
+    }
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures && !istCfd)
     if(accEls.payoutSec) accEls.payoutSec.hidden = !((istFunded && !istFutures) || istCfd)
     if(accEls.wartetPayoutRow) accEls.wartetPayoutRow.hidden = !istCfd
@@ -36448,8 +36457,10 @@
     // Min-Gewinn/Schon-erledigt haben seit 10.09.2026 KEINE Eingabefelder mehr
     // (Finn: "das da weg") — bestehende DB-Werte werden beim Bearbeiten
     // unveraendert weitergetragen, solange der Zieltyp gesetzt bleibt.
-    const goalKindVal   = accEls.goalKind?.value || null
-    const goalTargetNum = parseInt(accEls.goalTarget?.value, 10)
+    // Firmenregel als Rückfall (20.10.2026): bleibt das Ziel-Feld leer, zählt FundedNext Phase 1/2 trotzdem 5 Trading Days
+    const mtFirma       = (!accEls.goalKind?.value && typeof kontoMindesttage === 'function') ? kontoMindesttage(firm, type) : null
+    const goalKindVal   = accEls.goalKind?.value || (mtFirma ? mtFirma.kind : null)
+    const goalTargetNum = mtFirma ? mtFirma.target : parseInt(accEls.goalTarget?.value, 10)
     const goalSinceVal  = accEls.goalSince?.value || null
     // Blöcke (15.09.2026 abends): was ausgeblendet ist, wird NICHT angefasst —
     // Bestandswerte laufen unverändert weiter (Muster Trade-Limits 02.09.).
@@ -37836,7 +37847,8 @@
           purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
           max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
           wd_farm: false,   // nie beim Anlegen, auch wenn die Vorlage wd_farm true hat (F17-Ergänzung, 27.09.2026)
-          ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null } : {}),
+          ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null }
+            : (() => { const mt = kontoMindesttage(firm, typRow); return mt ? { goal_kind: mt.kind, goal_target: mt.target } : {} })()),   // Firmenregel (20.10.2026): FundedNext-Phasen ohne Vorlage
         }
         // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann fehlen)
         if(x.tvUebernehmen !== false && x.balance != null && isFinite(x.balance) && (x.balance > 1000 || kontoIstTopstepExpress({ firm, ext: x.id, name, type: row.account_type }))) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
@@ -43914,6 +43926,20 @@
   // Topstep nicht). Groß/klein egal. Neue Futures-Firma: hier ergänzen oder in firm_specs mit Einheit Kontrakte anlegen.
   // CFD/MT5 sicher erkannt (27.09.2026, F17-Ergänzung, Finn: Zugangsdaten „das nur bei CFD-Propfirms"): Einheit 'Lots' in firm_specs
   // ODER Name in dieser festen Liste. Unbekannt ≠ CFD. Futures-Firmen sind nie CFD.
+  /* MINDESTTAGE JE FIRMA — EINE STELLE (20.10.2026, Finn: „Bei mehreren neuen FundedNext-Konten werden die Tage nicht angezeigt und
+   * nicht gesammelt — bei den alten Konten hat es endlich funktioniert, bei den neuen nicht"; Befund: alle 15 FundedNext-Phasen, die seit
+   * dem 11.10. angelegt wurden, ohne goal_kind — die Regel stand nur in den zwei zentralen Bulk-Vorlagen, Hand-Formular und
+   * Nachfolger-Assistent setzten nichts). FundedNext (CFD) Phase 1/2 = 5 Trading Days (firm_rules.json: „min 5 Trading Days").
+   * Aufrufer: Bulk-Add (Rückfall ohne Vorlage), „＋ Account" (Vorbelegung + Rückfall beim Speichern), Nachfolger-Assistent.
+   * → {kind, target} oder null. Futures-Firmen (auch „FundedNext Futures") und Funded nie. */
+  const MINDESTTAGE_JE_FIRMA = { fundednext: 5 }
+  function kontoMindesttage(firm, typ){
+    const n = String(firm || '').trim().toLowerCase()
+    if(!n || !(typ === 'phase1' || typ === 'phase2')) return null
+    if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(firm)) return null
+    const ziel = MINDESTTAGE_JE_FIRMA[n] || MINDESTTAGE_JE_FIRMA[n.replace(/\s+/g, '')]
+    return ziel > 0 ? { kind: 'trading_days', target: ziel } : null
+  }
   function tpFirmIstCfd(firm){
     const TP_CFD_FIRMEN = ['fundednext', 'ftmo', 'fundingpips', 'the5%ers', 'the5ers', 'fusion markets', 'thinkmarkets', 'icmarkets', 'ic markets']
     const n = String(firm || '').trim().toLowerCase()
@@ -45008,7 +45034,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1642'
+  const OS_TAB_BUILD = '2026-09-22.1643'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
