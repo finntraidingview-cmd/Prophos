@@ -72,8 +72,9 @@ def lade():
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "_wd_num", "ap_hb_gewicht", "ap_tages_saldo", "ap_stand_sicht", "ap_lauf_ohne_summen",
              "admin_pc_stand", "admin_prop_baum", "_ap_sperren", "ap_firma_gesperrt", "admin_wd_plaene", "admin_auto_plan_ids"]
+    # PC_AUS_S (20.10.2026, Prüfer S2): admin_pc_stand nutzt seit e61516c1 („PC aus", 19.10.) die Schwelle PC_AUS_S — ohne sie NameError im Lader
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
-                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S")]
+                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S", "PC_AUS_S")]
     teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}']
     teile += [block(n) for n in namen]
     ns = {"re": re, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
