@@ -12582,7 +12582,16 @@ def tsx_blow_dialog_knopf(popup):
             symbol.append(dict(b, text="", aus_aria=False, icon_x=True, name="Symbol-X oben rechts" + (f" ({icon[:20]})" if icon else "")))
     if len(wort) == 1:
         return wort[0]
-    if not wort and len(symbol) == 1:
+    if len(wort) > 1:
+        # 20.10.2026 (Marc pc-…, 4 Fehlstarts 06:27–13:14 Dubai, Knöpfe 'Close', 'See details', 'Reset Trading Combine', 'Close'): der Text-Knopf
+        # „Close" UND das Symbol-X mit aria „Close" landeten beide hier → „kein eindeutiger Schließ-Knopf", der Symbol-X-Zweig aus .1634 wurde nie
+        # erreicht. Dasselbe Schließ-Wort mehrfach ist EIN Knopf (beide schließen die Meldung): der sichtbare Text-Knopf vor dem aria-X,
+        # sonst der erste. Verschiedene Wörter (OK + Close) bleiben wie bisher mehrdeutig → nichts drücken.
+        kand = [b for b in wort if not b.get("aus_aria")] or wort
+        if len({b["text"].lower() for b in kand}) == 1:
+            return kand[0]
+        return None
+    if len(symbol) == 1:
         return symbol[0]
     return None
 
@@ -14584,6 +14593,10 @@ def puls_chrome_argumente(exe, profil_pfad, port=PULS_CDP_PORT, url=AUGEN_TV_URL
     return [exe, f"--user-data-dir={p}", f"--remote-debugging-port={int(port)}",
             f"--remote-debugging-address={PULS_CDP_HOST}", f"--remote-allow-origins=http://{PULS_CDP_HOST}:{int(port)}",
             "--no-first-run", "--no-default-browser-check", "--disable-features=Translate",
+            # 20.10.2026 (Ina pc-…, 11:14 + 11:33 UTC „Contract-Feld nicht gedrückt"): nach Browser.close + Neustart legt Chrome die Blase
+            # „Seiten wiederherstellen?" (eigenes Fenster Chrome_WidgetWin_1) über die Seite — am Zielpunkt lag sie zweimal, kein Druck. Das Flag
+            # unterdrückt die Blase; die Sitzung wird ohnehin nie wiederhergestellt (jeder Start öffnet die Ziel-URL neu).
+            "--hide-crash-restore-bubble",
             # 08.10.2026 (Finn: „schließt alles und öffnet dann so ein ganz komisches Format"): nach Browser.close + Neustart (minimiert)
             # stellte das erste Wiederherstellen nur die gemerkte Normalgröße her (pc-2zc2we 929×917 statt Vollbild, Klicks bei x 1322
             # statt ~1535). Maximiert gestartet → Windows merkt sich „wiederherstellen = maximiert", Layout + Klickpunkte wie gewohnt
@@ -16589,6 +16602,30 @@ def tsx_offene_positionen(stand):
     return out
 
 
+def tsx_knopf_gesperrt_rohtext(stand):
+    """REIN RECHNEND (testbar, 20.10.2026 Ina pc-… 11:53 + 12:13 UTC): die Vorprüfung meldete NUR „Order-Knopf gesperrt" — Contract, Menge,
+    Konto, flach, Typ passten, und WARUM TopstepX den Knopf sperrt, stand nirgends (kein Augen-Stand, 1. Versuch nur als Summenzeile).
+    Rohwerte desselben Blicks als eine Spur-Zeile: Anzeigen der Order-Karte (order-card-display-value-*), Kopfzeile (Balance/MLL/UPL),
+    aktives Konto mit Hinweis, Knopf-Zustand (disabled/verdeckt/oben). Nur Text, keine Entscheidung."""
+    st = stand if isinstance(stand, dict) else {}
+    t = st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    kopf = st.get("kopf") if isinstance(st.get("kopf"), dict) else {}
+    anz = " | ".join(f"{str(a.get('testid') or '').replace('order-card-display-value-', '')}={str(a.get('text') or '')[:30]}"
+                     for a in (t.get("anzeigen") or [])[:12] if isinstance(a, dict))
+    kz = " · ".join(f"{k} {str((kopf.get(k) or {}).get('text') or '-')[:20]}" for k in ("balance", "mll", "upl", "rpl") if isinstance(kopf.get(k), dict))
+    teile = []
+    for name in ("kauf", "verkauf"):
+        kn = t.get(name) if isinstance(t.get(name), dict) else None
+        if kn:
+            zu = kn.get("zu") if isinstance(kn.get("zu"), dict) else {}
+            ob = zu.get("oben") if isinstance(zu.get("oben"), dict) else {}
+            teile.append(f"{name} '{str(kn.get('text') or '')[:30]}' disabled={bool(zu.get('disabled'))} verdeckt={bool(zu.get('verdeckt'))}"
+                         + (f" oben '{str(ob.get('text') or ob.get('tag') or '')[:30]}'" if ob else ""))
+    konto = f"{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:50]}" + (f" ({str(ko.get('hinweis'))[:40]})" if ko.get("hinweis") else "")
+    return f"Knöpfe {'; '.join(teile) or '-'} · Anzeigen {anz or '-'} · Kopf {kz or '-'} · Konto {konto} · Dialoge {len(st.get('popups') or [])}"
+
+
 def tsx_k3_vor_klick(stand, befehl, code, ext):
     """REIN RECHNEND (testbar): Probe-Urteil aus EINEM frischen Blick — stünde das Ticket so da, dass eine Order genau dem Plan entspräche?
     Nur lesen, klickt nichts. -> (ok, fehler[], knopf, markt_zu). Konto = ext (volle Kennung) und Liste zu · kein Dialog · flach bewiesen („No Active Position" + „Close Position" gesperrt —
@@ -17701,6 +17738,8 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
         if offen:                                     # KONTO OFFEN (08.10.2026): offene Position = eigener Code, Rest wie bisher
             trail.append("Vorprüfung: " + "; ".join(fehler))
             return raus("konto_offen", puls_konto_offen_text(offen), "konto_offen", positionen_offen=offen)
+        if any("Order-Knopf gesperrt" in x for x in fehler):
+            trail.append("Knopf gesperrt — Rohwerte: " + tsx_knopf_gesperrt_rohtext(st))   # 20.10.2026 Ina: der Grund der Sperre stand nirgends
         return raus("vorpruefung", "Ticket gefüllt, aber es passt noch nicht: " + "; ".join(fehler), "probe")
     if befehl.get("scharf") is True and TSX_K4_AKTIV:
         if not ok:                                    # Markt zu: der Knopf trägt nicht „Buy/Sell ±n @ Market" — nie drücken
