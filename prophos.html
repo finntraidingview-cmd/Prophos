@@ -16423,7 +16423,8 @@
         goalSince: r.goal_since || null, goalManual: tage ? true : !!r.goal_manual, goalManualLast: tage ? null : (r.goal_manual_last || null),
         payoutReadyAt: r.payout_ready_at || null, waitingPayoutSince: r.waiting_payout_since || null,
         autoPlaner: r.auto_planer !== false, zielErreichtAt: r.ziel_erreicht_at || null, zielErreichtBal: n(r.ziel_erreicht_bal),
-        zielUsd: n(r.ziel_usd), maxRisikoTrade: n(r.max_risiko_trade), tvBalanceQuelle: r.tv_balance_quelle || null
+        zielUsd: n(r.ziel_usd), maxRisikoTrade: n(r.max_risiko_trade), tvBalanceQuelle: r.tv_balance_quelle || null,
+        restPlanerAt: r.rest_planer_at || null   // Rest zurück im Planer (20.10.2026)
       }
     }
     // Ziel-Stufe eines Kontos für den Filter — dieselben Zustände, die die Typ-Spalte als Chip zeigt
@@ -30777,7 +30778,24 @@
     const zr = zielRest(bal, ziel)
     if(!zr || zr.erreicht || zr.rest >= WDL_FEHLT_ZEIGEN_USD) return ''
     const de = v => Math.round(v).toLocaleString('de-DE')
-    return `<b class="wdl-fehlt" style="color:var(--warn-ink, #b45309);white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} unter Ziel ${de(ziel)} — noch nicht bestanden. Den Rest von Hand holen; der Bot plant hier keinen Trade mehr.">fehlen noch ${de(zr.rest)} $ → Rest von Hand</b>`
+    const rp = wdlRestPlaner(t)
+    if(rp.at){
+      // REST ZURÜCK IM PLANER (Finn 20.10.2026 22:55 Dubai): Feld gesetzt → grau, bis der Planer den Rest-Trade angelegt hat (dann „· geplant")
+      const seit = new Date(rp.at), seitTxt = isNaN(seit) ? '' : seit.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      return `<b class="wdl-fehlt wdl-fehlt-planer" style="color:var(--sub);white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} unter Ziel ${de(ziel)} — Rest zurück im Trade-Planer${seitTxt ? ' seit ' + seitTxt : ''}: der Bot plant den Rest als Klein-Trade${rp.geplant ? ' — Plan liegt an' : ' (Nachplanen ≤ 5 min)'}. Am Ziel löscht die Ziel-Wache die Markierung.">Rest ${de(zr.rest)} $ → Planer${rp.geplant ? ' · geplant' : ''}</b>`
+    }
+    return `<b class="wdl-fehlt" style="color:var(--warn-ink, #b45309);white-space:nowrap" title="${WDL_UEBERGANG[typ]} · Balance ${de(bal)} unter Ziel ${de(ziel)} — noch nicht bestanden. Den Rest von Hand holen, oder im Radar unter Bestanden → Rest von Hand „→ Trade-Planer" drücken (dann plant der Bot den Rest).">fehlen noch ${de(zr.rest)} $ → Rest von Hand</b>`
+  }
+  /* REST ZURÜCK IM PLANER (20.10.2026): accounts.rest_planer_at des Kontos einer Radar-Zeile — eigene Konten aus `accounts` (beim Login
+   * geladen, nach dem Knopf lokal nachgezogen), fremde aus t.konto.rest_planer_at (/admin/live-trades). geplant = für dasselbe Konto liegt
+   * schon ein geplanter/laufender Plan (kein Tage-Mini) in den Radar-Daten. */
+  function wdlRestPlaner(t){
+    const kid = String((t && t.konto_id) || ''); if(!kid) return { at: null, geplant: false }
+    const a = (accounts || []).find(x => x && String(x.id) === kid)
+    const at = (a && a.restPlanerAt) || ((t.konto || {}).rest_planer_at) || null
+    if(!at) return { at: null, geplant: false }
+    const geplant = ((wdl.daten && wdl.daten.trades) || []).some(x => x && x !== t && String(x.konto_id || '') === kid && (x.status === 'planned' || x.status === 'open') && !x.tage_mini)
+    return { at, geplant }
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
@@ -31468,8 +31486,8 @@
      * sobald die jüngste beendete/abgehakte Radar-Zeile des Kontos wdlFehltChip trägt (Balance unter Ziel, Rest < 500 $) und das Konto noch
      * keinen Ziel-Tag hat (sonst steht es in Tage sammeln/Review). Balance = die jüngste bekannte (Konto-Balance nach dem Trade vor der
      * Trade-Balance, wdlBlowStand), damit die Zeile nach „Balance lesen" von selbst verschwindet, sobald das Ziel steht (Ziel-Wache taggt,
-     * Konto → Review). Knöpfe (eigene Verdrahtung am #wdl-liste-Handler): „Jetzt bestanden → Nachfolger" (nur eigene Konten — der Assistent
-     * legt nur im eigenen Login an) und „Balance lesen" (eigene: accBalanceLesen, fremde: tplBalanceFremd wie in „Braucht dich"). Nur Zustand + Knopf. */
+     * Konto → Review). Knöpfe (eigene Verdrahtung am #wdl-liste-Handler, seit 23:05 für eigene UND fremde Konten): „→ Planer" (rest_planer_at),
+     * „Abhaken" (normaler Dialog, mklWdErledigtOeffnen) und „Balance lesen" (eigene: accBalanceLesen, fremde: tplBalanceFremd). Nur Zustand + Knopf. */
     const rvhZeilen = (tr) => {
       const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
       const ich = String(currentUserId || ''), de = v => Math.round(Number(v)).toLocaleString('de-DE')
@@ -31486,6 +31504,7 @@
       for(const { t } of je.values()){
         if(wdl.person && wdlUid(t) !== wdl.person) continue
         const chip = wdlFehltChip(t); if(!chip) continue
+        if(wdlRestPlaner(t).at) continue   // Rest zurück im Planer (20.10.2026): der Bot holt den Rest — raus aus der Station, Chip grau in der Zeile
         const kid = String(t.konto_id || ''), uid = wdlUid(t), eigen = uid === ich
         const a = eigen && kid ? (accounts || []).find(x => x && String(x.id) === kid) : null
         if(a && (a.zielErreichtAt || (arch[String(a.id)] && arch[String(a.id)].archived))) continue
@@ -31496,17 +31515,24 @@
         let tf = null; try{ tf = a && typeof zielFortschritt === 'function' ? zielFortschritt(a) : null }catch(_){ tf = null }
         const mt = tf && tf.kind === 'trading_days' ? tf : null
         const wer = String(t.person || (eigen ? ((typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich') : '?'))
-        const knopf = a
-          ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-best="${escapeHtml(kid)}" data-wdl-rvh-ziel="${ziel != null ? ziel : ''}" data-wdl-rvh-balw="${bal != null ? bal : ''}" title="Konto von Hand als bestanden markieren (Ziel-Tag wie die Ziel-Wache, Balance ${bal != null ? de(bal) : '–'}) und gleich den Nachfolger anlegen${zr.rest != null ? ` — es fehlen laut Prophos noch ${de(zr.rest)} $` : ''}">Jetzt bestanden → Nachfolger</button>`
-            + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}" title="Balance jetzt lesen (PC dieser ID) — steht sie über dem Ziel, taggt die Ziel-Wache das Konto und es wandert nach Review">Balance lesen</button>`
-          : `${kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" title="Balance über den PC von ${escapeHtml(wer)} lesen lassen">Balance lesen</button>` : ''}`
-            + `<span class="wdl-bst-fremd" title="Der Nachfolger-Assistent legt nur im eigenen Login an — ${escapeHtml(wer)} stellt um">im Login von ${escapeHtml(wer)}</span>`
+        // „→ Trade-Planer" (Finn 20.10.2026 22:55 Dubai: „OK, abhaken und zurück in den Trade-Planer — der macht den Rest automatisch fertig"):
+        // eigene Konten direkt (RLS), fremde über /admin/wd-plaene aktion rest_planer (Admin-Login, Besitz/Gruppe prüft der Server)
+        // ZWEI HAUPTKNÖPFE, eigene UND fremde Konten (Finn 20.10.2026 23:05 Dubai, Radar .1647 zeigte bei Chris/Marc nur „Balance lesen" + „im Login
+        // von …": Finn hakt im Admin-Login alle IDs ab, wie im Erledigt-Block): „→ Planer" (rest_planer_at, der Planer holt den Rest — CFD Klein-Trade,
+        // Futures 1 Kontrakt) und „Abhaken" (der NORMALE Abhaken-Dialog wie bei Erledigt-Zeilen: Nichts ändern / Geblowt / Phase bestanden → Nachfolger;
+        // eigene Konten tradeCompleteModal, fremde mwdErledigtModal über /admin/wd-plaene) — Finn holt den Rest von Hand, trägt ihn dort als „manuell"
+        // nach und wählt „Nachfolger"; bis dahin bleibt das Konto hier. „Balance lesen" bleibt als dritter kleiner Knopf. Der Knopf „Jetzt bestanden →
+        // Nachfolger" aus .1647 ist damit weg.
+        const pid = wdlTid(t), abSperre = (typeof wdlAbhakenSperre === 'function' ? wdlAbhakenSperre(t) : '') || ''
+        const knopf = (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-planer="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" data-wdl-rvh-rest="${zr.rest != null ? Math.round(zr.rest) : ''}" title="Rest zurück in den Trade-Planer: der Bot plant den Rest${zr.rest != null ? ` (${de(zr.rest)} $)` : ''} als Klein-Trade (CFD: Rest in 20 Pkt; Futures: 1 MNQ, TP = Rest + Puffer) — Nachplanen ≤ 5 min, sonst im Nachtlauf (ggf. morgen). Die Markierung löscht sich am Ziel.">→ Planer</button>` : '')
+          + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || 'Abhaken — der normale Dialog: Nichts ändern / Account geblowt / Phase bestanden → Nachfolger. Den Rest von Hand holen, hier als manuell nachtragen und den Nachfolger anlegen')}">Abhaken</button>`
+          + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie über dem Ziel, taggt die Ziel-Wache das Konto und es wandert nach Review' : `Balance über den PC von ${escapeHtml(wer)} lesen lassen`}">Balance lesen</button>` : '')
         out.push({ firma: String(k.firma || ''), html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
           + `<span class="wdl-z-wer" title="${escapeHtml(String(k.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(wer)}</b><small>${escapeHtml(konto)}</small></span>`
           + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
           + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel != null ? ` → <b class="wdl-bst-ziel">${de(ziel)}</b>` : ''}`, { tip: `Balance → Ziel${zr.rest != null ? ` · es fehlen ${de(zr.rest)} $` : ''}` })
           + zelle('konto', mt ? `${mt.count}/${mt.target}` : '–', { tip: mt ? `Mindesttage: ${mt.count} von ${mt.target} Tagen mit Trade` : (a ? 'keine Mindesttage hinterlegt' : 'Mindesttage nur im Login des Kontos sichtbar') })
-          + `<span class="wdl-z-pl wdl-bst-warte" title="Noch nicht bestanden — den Rest von Hand holen, dann Balance lesen; oder „Jetzt bestanden" drücken">${chip}</span>`
+          + `<span class="wdl-z-pl wdl-bst-warte" title="Noch nicht bestanden — „→ Planer" (der Bot holt den Rest) oder den Rest von Hand holen und „Abhaken" (manuell nachtragen, Nachfolger)">${chip}</span>`
           + `<span class="wdl-z-zeit">${knopf}</span>`
           + '</div>' })
       }
@@ -31517,7 +31543,7 @@
       const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, html: zeile(t, '') }))
       let rvh = []; try{ rvh = rvhZeilen(alleTr) }catch(e){ console.warn('[radar] Rest von Hand', (e && e.message) || e); rvh = [] }
       const kaesten = gruppe('Trade abhaken', nachEnde(bestTr || []), ['Ergebnis', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-sek-bestanden', null, bestAlle || [])
-        + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. Den Rest von Hand holen und die Balance lesen, oder das Konto von Hand als bestanden markieren und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
+        + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage')
         + bstTab([...rev, ...zz.filter(z => !z.fehlt)], 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
       return { html: kaesten, n: (bestTr || []).length + rvh.length + zz.length + rev.length }
@@ -31606,9 +31632,16 @@
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
-    // REST VON HAND (20.10.2026): „Jetzt bestanden → Nachfolger" (Ziel-Tag von Hand + Assistent) und „Balance lesen" (eigene/fremde Konten)
-    const rb = ev.target.closest('[data-wdl-rvh-best]')
-    if(rb){ rvhJetztBestanden(rb.getAttribute('data-wdl-rvh-best'), rb.getAttribute('data-wdl-rvh-ziel'), rb.getAttribute('data-wdl-rvh-balw')); return }
+    // REST VON HAND (20.10.2026): „→ Planer", „Abhaken" (derselbe Dialog wie die Erledigt-Zeilen, eigene/fremde Konten) und „Balance lesen"
+    const rab = ev.target.closest('[data-wdl-rvh-abhaken]')
+    if(rab){
+      if(rab.disabled) return
+      const pid = rab.getAttribute('data-wdl-rvh-abhaken'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
+      if(t) mklWdErledigtOeffnen(pid, t)
+      return
+    }
+    const rp = ev.target.closest('[data-wdl-rvh-planer]')
+    if(rp){ const d = rp.dataset; rvhZurueckInPlaner(d.wdlRvhPlaner, d.wdlRvhUid, d.wdlRvhWer || '', d.wdlRvhRest); return }
     const rl = ev.target.closest('[data-wdl-rvh-bal]')
     if(rl){
       const d = rl.dataset
@@ -34132,6 +34165,11 @@
       ...(successorId ? { successorId } : {})
     }
     archivSchreibenAbgeglichen(accountId, arch[accountId])
+    // Rest zurück im Planer (20.10.2026): ein archiviertes Konto plant der Bot nie mehr — Markierung weg (best-effort, nur wenn gesetzt)
+    try{
+      const ak = (accounts || []).find(x => x && String(x.id) === String(accountId))
+      if(ak && ak.restPlanerAt){ ak.restPlanerAt = null; supabase.from('accounts').update({ rest_planer_at: null }).eq('id', accountId).then(({ error }) => { if(error) console.warn('[archiv] rest_planer_at', error.message || error) }) }
+    }catch(_){}
     // Geblowter Account → aus Duplikum löschen (Master läuft sonst weiter). Best-effort,
     // asynchron, blockiert das Archivieren nicht. Nur bei 'blown' (nicht bei 'passed'/'manual').
     if(reason === 'blown' && typeof dupDeleteAccountForProphos === 'function'){
@@ -34827,6 +34865,7 @@
       zielErreichtAt: row.ziel_erreicht_at || null,   // Ziel-Wache (07.10.2026, app.py zw_tick)
       zielErreichtBal: row.ziel_erreicht_bal != null ? Number(row.ziel_erreicht_bal) : null,
       zielUsd: row.ziel_usd != null ? Number(row.ziel_usd) : null,
+      restPlanerAt: row.rest_planer_at || null,   // „→ Trade-Planer" aus der Radar-Station „Rest von Hand" (20.10.2026): der Planer holt den Rest
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -41127,28 +41166,40 @@
     const miniUhr = mini && mini.startUm ? new Date(mini.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) : ''
     return { bal, ziel, mt, fehlt, mini, miniUhr }
   }
-  /* JETZT BESTANDEN → NACHFOLGER (Finn 20.10.2026 22:20 Dubai: „ein Schalter: ‚Der ist jetzt bestanden, ich lege den Nachfolger an'"):
-   * eigenes Konto aus der Radar-Station „Rest von Hand" von Hand als Ziel erreicht markieren — dieselben Felder wie die Ziel-Wache
-   * (ziel_erreicht_at/_bal/ziel_usd; es gibt keine Quellen-Spalte, der Zeitpunkt ist der Beleg) — und sofort den bestehenden
-   * Nachfolger-Assistenten mit dem nächsten Kontotyp öffnen (derselbe Weg wie der Review-Knopf). Bricht Finn den Assistenten ab, kann die
-   * Ziel-Wache (5-min-Takt, Balance < Ziel) den Tag wieder lösen — dann steht das Konto ehrlich wieder in „Rest von Hand". */
-  async function rvhJetztBestanden(kid, zielRoh, balRoh){
-    const a = (accounts || []).find(x => x && String(x.id) === String(kid)); if(!a) return
-    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    const b = (typeof planKontoBalance === 'function' && planKontoBalance(a)) || null
-    const bal = (b && isFinite(b.val)) ? b.val : (n(balRoh) ?? (Number(a.tvBalance) > 0 ? Number(a.tvBalance) : null))
-    const ziel = n(zielRoh) ?? (Number(a.zielUsd) > 0 ? Number(a.zielUsd) : null)
-    const jetzt = new Date().toISOString()
+  /* → TRADE-PLANER (Finn 20.10.2026 22:55 Dubai, Radar → Bestanden → Rest von Hand, FundingPips 346 $ / The5ers 119 $ unter dem Ziel: „Vor allem
+   * bei CFDs soll bei so vielen Dollar einfach noch ein Trade automatisch gemacht werden … entweder ich mache den Trade manuell, oder ‚OK,
+   * abhaken und zurück in den Trade-Planer' — der macht den Rest automatisch fertig"): setzt accounts.rest_planer_at (sql/2026-10-20_accounts_
+   * rest_planer.sql). Der Planer (app.py ap_konto_rechnen, rest_planer) plant dann auch unter der Rest-Grenze einen Klein-Trade statt „Rest …
+   * von Hand"; die Braucht-dich-Zeile wird zur normalen Planer-Zeile. Eigene Konten direkt per RLS, fremde (Admin-Login) über /admin/wd-plaene
+   * aktion rest_planer. Das Feld löscht die Ziel-Wache am Ziel und archiveAccount. Steht der letzte Trade noch in „Trade abhaken", plant der
+   * Bot erst nach dem Abhaken (wie immer: „letzter Trade noch nicht erledigt"). */
+  async function rvhZurueckInPlaner(kid, uid, wer, restRoh){
+    kid = String(kid || ''); if(!kid) return
+    const eigen = !uid || String(uid) === String(currentUserId || '')
+    const a = (accounts || []).find(x => x && String(x.id) === kid)
+    const jetzt = new Date().toISOString(), rest = Number(restRoh)
+    const restTxt = isFinite(rest) && rest > 0 ? ` (${Math.round(rest).toLocaleString('de-DE')} $)` : ''
     try{
-      const { error } = await supabase.from('accounts').update({ ziel_erreicht_at: jetzt, ziel_erreicht_bal: bal, ziel_usd: ziel }).eq('id', a.id)
-      if(error) throw error
-    }catch(e){ if(typeof atToast === 'function') atToast('⛔ Konto nicht markiert: ' + String((e && e.message) || e).slice(0, 120), 'end'); return }
-    a.zielErreichtAt = jetzt; a.zielErreichtBal = bal; a.zielUsd = ziel
-    if(typeof atToast === 'function') atToast(`🎯 „${a.name || 'Konto'}" von Hand als bestanden markiert${bal != null ? ` (Balance ${Math.round(bal).toLocaleString('de-DE')} $)` : ''} — Nachfolger anlegen`, 'start')
-    const neu = bstNaechsterTyp(a)
-    const danach = () => { try{ renderAccounts() }catch(_){}; try{ renderTradePlans() }catch(_){}; try{ if(typeof wdlRender === 'function') wdlRender() }catch(_){} }
-    try{ if(typeof wdlRender === 'function') wdlRender() }catch(_){}
-    if(typeof openSuccessorWizard === 'function') openSuccessorWizard(a.id, danach, neu || undefined)
+      if(eigen){
+        const { error } = await supabase.from('accounts').update({ rest_planer_at: jetzt }).eq('id', kid)
+        if(error) throw error
+      }else{
+        const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+        const adm = (typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin')
+        const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${adm ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'rest_planer', account_id: kid }) })
+        const d = await r.json().catch(() => ({}))
+        if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      }
+    }catch(e){
+      const m = String((e && e.message) || e)
+      if(typeof atToast === 'function') atToast('⛔ Nicht in den Planer gegeben: ' + (/rest_planer_at/.test(m) ? 'Spalte accounts.rest_planer_at fehlt — SQL 2026-10-20_accounts_rest_planer.sql einspielen' : m.slice(0, 140)), 'end')
+      return
+    }
+    if(a) a.restPlanerAt = jetzt
+    for(const t of ((wdl.daten && wdl.daten.trades) || [])){ if(t && String(t.konto_id || '') === kid){ t.konto = Object.assign({}, t.konto || {}, { rest_planer_at: jetzt }) } }
+    if(typeof atToast === 'function') atToast(`→ Planer: der Bot holt den Rest${restTxt}${eigen ? '' : ' bei ' + (wer || 'der ID')} — Klein-Trade beim nächsten Nachplanen (≤ 5 min), sonst im Nachtlauf`, 'start')
+    try{ wdlRender() }catch(_){}
+    try{ if(a && typeof renderAccounts === 'function') renderAccounts() }catch(_){}
   }
   function bestandenRender(){
     const box = document.getElementById('tradeBestanden'), leer = document.getElementById('tradeEmptyBestanden'), zahl = document.getElementById('tradetab-count-passed')
@@ -45248,7 +45299,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1647'
+  const OS_TAB_BUILD = '2026-09-22.1648'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -130,7 +130,7 @@ def main():
              "ziel_pct": {"challenge": 6}, "phasen": {"challenge": {"sl": [2500, 2500], "tp": [4450, 4500], "menge": [2, 3], "tp_max": 4500,
                                                                      "menge_schritt": 1, "puffer_je_menge": {"2": [30, 40], "3": [30, 40]}}}}
     w, g = R(LUCID, "challenge", 158916, u)
-    check(w is None and g == "Rest 84 $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr)", f"Lucid Rest 84 → kein Trade, Meldung ({g})")
+    check(w is None and g.startswith("Rest 84 $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr"), f"Lucid Rest 84 → kein Trade, Meldung ({g})")   # seit 20.10.2026 22:55 mit Hinweis „→ Trade-Planer" (tools/selftest_rest_planer.py)
     w, g = R(LUCID, "challenge", 159000, u)
     check(w is None and g.startswith("Ziel erreicht"), f"Lucid genau am Ziel → Ziel erreicht ({g})")
     w, g = R(LUCID, "challenge", 154463, u)

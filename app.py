@@ -6491,9 +6491,14 @@ def admin_build_overview(kapitel_id=None):
     alle_fehler = None
     try:
         ai_info = b.get("arch_info") or {}
-        extra = {str(a["id"]): a for a in _sb_all("accounts", {"select": (
-            "id,goal_kind,goal_target,goal_min_profit,goal_done_offset,goal_since,goal_manual,goal_manual_last,payout_ready_at,"
-            "waiting_payout_since,auto_planer,ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,max_risiko_trade,tv_balance_quelle")})}
+        _ex_sel = ("id,goal_kind,goal_target,goal_min_profit,goal_done_offset,goal_since,goal_manual,goal_manual_last,payout_ready_at,"
+                   "waiting_payout_since,auto_planer,ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,max_risiko_trade,tv_balance_quelle")
+        try:
+            extra = {str(a["id"]): a for a in _sb_all("accounts", {"select": _ex_sel + ",rest_planer_at"})}   # Rest zurück im Planer (20.10.2026)
+        except requests.exceptions.HTTPError as e:
+            if "rest_planer_at" not in str(getattr(e.response, "text", "") or e):
+                raise
+            extra = {str(a["id"]): a for a in _sb_all("accounts", {"select": _ex_sel})}   # Spalte fehlt noch (sql/2026-10-20_accounts_rest_planer.sql)
         kids_tage = [r["id"] for r in rows if not r["archived"] and (extra.get(r["id"]) or {}).get("goal_kind") == "trading_days"]
         kids_set, je_plan = set(kids_tage), {}
         for j in range(0, len(kids_tage), 150):
@@ -11002,6 +11007,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "farbe_key": uid,
         "konto": {"name": (acc or {}).get("name") or p.get("master_name") or "", "firma": (acc or {}).get("firm") or p.get("master_firm") or "",
                   "groesse": _wd_konto_groesse(acc), "kontonr_ende": ext[-4:] if ext else "", "external_id": ext,
+                  "rest_planer_at": (acc or {}).get("rest_planer_at"),   # Rest zurück im Planer (20.10.2026) — nur in /admin/live-trades geladen
                   # B25: Start-Balance eines frischen Kontos — Topstep Express 0 $, sonst die Größe
                   "basis_balance": konto_basis_balance(acc, plan_balance_relativ(p)),
                   "topstep_express": ist_topstep_express(acc, plan_balance_relativ(p))},
@@ -12302,8 +12308,14 @@ def admin_live_trades():
             teil = (ids + slave_ids)[i:i + 80]
             if not teil:
                 break
-            for a in sb_select("accounts", {"select": "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at,currency",
-                                            "id": f"in.({','.join(teil)})"}):
+            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at,currency"
+            try:
+                _lt_rows = sb_select("accounts", {"select": _lt_sel + ",rest_planer_at", "id": f"in.({','.join(teil)})"})   # Rest zurück im Planer (20.10.2026)
+            except requests.exceptions.HTTPError as e:
+                if "rest_planer_at" not in str(getattr(e.response, "text", "") or e):
+                    raise
+                _lt_rows = sb_select("accounts", {"select": _lt_sel, "id": f"in.({','.join(teil)})"})   # Spalte fehlt noch (sql/2026-10-20_accounts_rest_planer.sql)
+            for a in _lt_rows:
                 accs[str(a["id"])] = a
         # Kerzen je Wurzel ab dem frühesten Start (eine Abfrage je Wurzel)
         orbit = [p for p in plaene if str(p.get("route") or "") not in LT_ECHO_ROUTEN + LT_POLAR_ROUTEN]      # Echo/Polar rechnen keine NQ-Demo
@@ -12993,7 +13005,7 @@ def admin_wd_plaene():
                 else:
                     if akt in ("endlesung_stand", "balance_stand"):
                         tab, key = "order_signale", str(d.get("signal_id") or "").strip()
-                    elif akt in ("farm", "balance"):
+                    elif akt in ("farm", "balance", "rest_planer", "rest_planer_weg"):
                         tab, key = "accounts", str(d.get("account_id") or "").strip()
                     elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
                         tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
@@ -13312,6 +13324,20 @@ def admin_wd_plaene():
                 return jsonify({"ok": True, "account_id": aid, "signal_id": str((sig or {}).get("id") or ""), "art": zeile["params"]["aktion"]})
             except Exception as e:
                 return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
+        if daten.get("aktion") in ("rest_planer", "rest_planer_weg"):
+            # „→ Trade-Planer" aus der Radar-Station „Rest von Hand" (Finn 20.10.2026 22:55 Dubai) für FREMDE Konten im Admin-Login — das eigene
+            # Konto schreibt das Frontend direkt (RLS). Besitz/Gruppe oben geprüft. rest_planer_weg nimmt das Feld wieder zurück.
+            aid = str(daten.get("account_id") or "").strip()
+            if len(aid) < 10:
+                return jsonify({"error": "account_id fehlt"}), 400
+            try:
+                at = datetime.now(timezone.utc).isoformat() if daten.get("aktion") == "rest_planer" else None
+                rows = sb_update("accounts", {"id": f"eq.{aid}"}, {"rest_planer_at": at})
+                return jsonify({"ok": True, "account_id": aid, "rest_planer_at": at, "n": len(rows or [])})
+            except Exception as e:
+                if "rest_planer_at" in str(getattr(getattr(e, "response", None), "text", "") or e):
+                    return jsonify({"error": "Spalte accounts.rest_planer_at fehlt — sql/2026-10-20_accounts_rest_planer.sql einspielen"}), 409
+                return jsonify({"error": f"Feld nicht gesetzt ({type(e).__name__})"}), 502
         if daten.get("aktion") in ("endlesung_stand", "balance_stand"):
             # Stand eines Endlesungs-/Balance-Signals (der Mac liest fremde order_signale per RLS nicht)
             sid = str(daten.get("signal_id") or "").strip()
@@ -16544,10 +16570,11 @@ def ap_tage_ist(konto, plaene, tz=None):
     return max(0, len(tage) + int(_wd_num(a.get("goal_done_offset")) or 0)), int(_wd_num(a.get("goal_target")))
 
 
-def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, mll_belegt=None):
+def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, mll_belegt=None, rest_planer=False):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     ppl = $ je NAS100-Punkt und Lot der Firma bei dieser ID (firm_specs, ap_cfd_ppl) — nur CFD: Puffer in Punkten + Klein-Trade.
-    → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe."""
+    rest_planer = accounts.rest_planer_at gesetzt (Knopf „→ Trade-Planer", 20.10.2026): unter der Rest-Grenze Klein-Trade statt „von Hand".
+    → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe[, symbol]."""
     groesse = ap_groesse(regel.get("groessen"), balance)
     # 08.10.2026 EIGENE WERTE JE KONTOGRÖSSE (Finn: FundingPips 50k mit eigenem SL/Lots/Puffer, nicht einfach halbe 100k-Werte):
     # regel.je_groesse = {"50000": {"phasen": {phase1: {...}, phase2: {...}}}} ersetzt für genau diese Größe die Phasen-Werte,
@@ -16581,6 +16608,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     if rest <= 0:
         return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden) if tage_offen else (None, "Ziel erreicht — Phase umstellen")
     cfd = (regel.get("route") or "mt5v2") in AP_CFD_ROUTEN and phase != "challenge"
+    klein = None
     if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN):
         # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
         # 07.10.–20.10.2026 zählte eine Futures-Challenge mit Rest < 100 $ als „Ziel erreicht" — vorbei (Finn 20.10.2026 20:35–20:45 Dubai,
@@ -16589,10 +16617,25 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         # „Braucht dich" (grund_code rest_von_hand) und im Radar als „fehlen noch X $ → Rest von Hand". Tage-Mini geht weiter vor.
         if tage_offen:                     # 12.10.2026 (Finn): Tage fehlen → Mini statt Handarbeit, die Tage laufen jeden Tag weiter
             return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden)
-        if cfd:
+        # REST ZURÜCK IN DEN PLANER (Finn 20.10.2026 22:55 Dubai, Radar → Bestanden → Rest von Hand, FundingPips 100k 346 $ und The5ers 100k
+        # 119 $ unter dem Ziel: „Vor allem bei CFDs soll bei so vielen Dollar einfach noch ein Trade automatisch gemacht werden … entweder
+        # ich mache den Trade manuell, oder ‚OK, abhaken und zurück in den Trade-Planer' — der macht den Rest automatisch fertig"):
+        # NUR mit gesetztem accounts.rest_planer_at (Knopf „→ Trade-Planer") plant der Bot hier weiter — CFD über den Klein-Trade (Rest in
+        # 20 Pkt, auch unter 10 $), Futures über EINEN Kontrakt (ap_klein_trade_fut, MNQ, TP = Rest + Gebühren-Puffer, SL wie die Regel).
+        # Standard ohne Feld bleibt „Rest … von Hand". Das Feld löscht die Ziel-Wache am Ziel bzw. das Archivieren — bis dahin plant der
+        # Bot nach jedem Trade wieder, falls der Rest noch nicht geholt ist.
+        if rest_planer:
+            if cfd and not ppl:
+                return None, (f"nur noch {rest:.0f} $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade: "
+                              "Punktwert der Firma eintragen, sonst von Hand")
+            klein = (ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer")) if cfd
+                     else ap_klein_trade_fut(rest, regel, ph))
+            klein["stufe"] += " · Rest zurück im Planer"
+        elif cfd:
             return None, (f"Rest {rest:.0f} $ bis Ziel — von Hand (unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: erst im Konto "
-                          "prüfen, ob die Firma das Ziel schon zählt, sonst den Rest von Hand holen)")
-        return None, f"Rest {rest:.0f} $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr)"
+                          "prüfen, ob die Firma das Ziel schon zählt, sonst den Rest von Hand holen — oder im Radar „→ Trade-Planer“)")
+        else:
+            return None, f"Rest {rest:.0f} $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr — oder im Radar „→ Trade-Planer“)"
     if cfd and rest < AP_REST_MIN and not ppl:
         return None, (f"nur noch {rest:.0f} $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade: "
                       "Punktwert der Firma eintragen, sonst von Hand")
@@ -16609,8 +16652,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         puffer = round(max(AP_PUFFER_JE_KT_FUT, AP_GEBUEHR_JE_KT_FUT) * float(menge))   # Futures: 2 NQ = 40 $, 3 NQ = 60 $ (Finn 16.10.2026); nie unter den Gebühren (20.10.2026)
     tp_sp = ph.get("tp")
     ober = float(ph["tp_max"]) * f if ph.get("tp_max") else (float(tp_sp[1]) * f if tp_sp else None)
-    klein = None
-    if cfd and ppl:
+    if cfd and ppl and klein is None:
         # PUFFER IN PUNKTEN (Finn 09.10.2026): Spread + Kommission + Schlupf wachsen mit den Lots — der feste Firmen-Puffer (FN 100 $)
         # reichte nicht. Beleg FN 08.10.2026: Rest 2.964 + 100 = TP 3.064 bei 2,8 Lots, Ergebnis +2.928 → 36 $ unter dem Ziel.
         # Gemessen bei TP-Treffern der letzten 14 Tage bis 5,6 Pkt Abweichung, 10 Pkt × Lots × $/Pkt hat Luft (FN 2,8 Lots → 280 $)
@@ -16642,8 +16684,27 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             sl = int(balance - boden) + AP_SL_HINTER_BODEN
             stufe += f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
-    return {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
-            "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}, None
+    out = {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
+           "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}
+    if klein and klein.get("symbol"):
+        out["symbol"] = klein["symbol"]          # Futures-Klein-Trade (MNQ) — ap_planen nimmt w.symbol vor dem Regel-Symbol (wie der Tage-Mini)
+    return out, None
+
+
+def ap_klein_trade_fut(rest, regel, ph):
+    """REIN RECHNEND (testbar): Futures-Klein-Trade kurz vor dem Ziel, NUR mit accounts.rest_planer_at (Finn 20.10.2026 22:55 Dubai: „bei
+    300 $ Rest schiebe ich die einfach zurück in den Planer") → {menge, puffer, tp, tp_punkte, symbol, stufe}. EIN Kontrakt, MNQ bevorzugt
+    (2 $/Pkt, wie der Tage-Mini — alle Futures-Firmen der Flotte haben MNQ; regel.klein_symbol überschreibt), TP = Rest + Puffer
+    (AP_PUFFER_JE_KT_FUT, mindestens AP_GEBUEHR_JE_KT_FUT), SL kommt wie beim normalen Trade aus der Phase (Aufrufer). Rest 84 → TP 104 $
+    = 52 MNQ-Punkte. Bis 20.10.2026 20:35 lief derselbe Trade kurz ohne Feld (30da8799) — Finn wollte das nicht automatisch."""
+    sym = str(regel.get("klein_symbol") or AP_MINI_FUTURES_SYMBOL).upper()
+    ppl = float(AP_PUNKTWERT_FUT.get(sym) or AP_PUNKTWERT_FUT["NQ"])
+    menge = 1
+    puffer = int(max(AP_PUFFER_JE_KT_FUT, AP_GEBUEHR_JE_KT_FUT) * menge)
+    tp = round(float(rest) + puffer)
+    tp_pkt = round(tp / (menge * ppl), 1)
+    stufe = f"Klein-Trade · Rest {float(rest):.0f} $ · {menge} {sym} · TP {tp} $ (Rest + Puffer {puffer} $, ≈ {tp_pkt:g} Pkt)"
+    return {"menge": menge, "puffer": puffer, "tp": tp, "tp_punkte": tp_pkt, "symbol": sym, "stufe": stufe}
 
 
 def ap_notiz(stufe, rest_txt, bal, bal_quelle):
@@ -17584,7 +17645,7 @@ def _ap_konten_mit_trade(konto_ids):
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,starting_balance,account_size,topstep_balance,topstep_last_check,"
                    "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer,"
-                   "goal_kind,goal_target,goal_done_offset,goal_since,ziel_erreicht_at,created_at")   # Mindesttage → Tage sammeln (09.10.2026); Ziel-Wache-Riegel (12.10.2026)
+                   "goal_kind,goal_target,goal_done_offset,goal_since,ziel_erreicht_at,created_at,rest_planer_at")   # Mindesttage → Tage sammeln (09.10.2026); Ziel-Wache-Riegel (12.10.2026); Rest zurück in den Planer (20.10.2026)
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
@@ -17809,8 +17870,10 @@ def _ap_konten_laden(params):
         return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER))
     except requests.exceptions.HTTPError as e:
         txt = str(getattr(e.response, "text", "") or e)
+        if "rest_planer_at" in txt:    # Rest-Spalte fehlt noch (sql/2026-10-20_accounts_rest_planer.sql) → ohne sie, alle Reste bleiben von Hand
+            return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER.replace(",rest_planer_at", "")))
         if "auto_planer" in txt:       # Haken-Spalte fehlt noch (sql/2026-10-08_accounts_auto_planer.sql) → ohne sie, alle gelten als drin
-            return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER.replace(",auto_planer", "")))
+            return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER.replace(",auto_planer", "").replace(",rest_planer_at", "")))
         if "consistency_pct" not in txt:
             raise
         return _sb_all("accounts", dict(params, select=AP_KONTO_FELDER_OHNE_CONS))
@@ -20132,7 +20195,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 continue
             w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
                                         ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"),   # CFD: Punkte-Puffer + Klein-Trade; Tage sammeln (09.10.2026)
-                                        mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))))
+                                        mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))), rest_planer=bool(k["a"].get("rest_planer_at")))
             # KEINE ZWEI GLEICHEN TP je ID×Firma (Finn 09.10.2026): eine Spanne wie 3.450–3.550 hat nur ~100 ganze Werte — zwei Konten
             # treffen sich bei 10 Konten in gut jedem dritten Lauf. Bei Gleichstand neu ziehen (höchstens 20×); gekappte TP (Rest bis
             # Ziel) bleiben, wie sie sind
@@ -20142,7 +20205,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 u_k = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
                 w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
                                             ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"),
-                                            mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))))
+                                            mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))), rest_planer=bool(k["a"].get("rest_planer_at")))
             if w and not grund:
                 tps_tranche.add(w.get("tp"))
             if grund and "Boden" in grund:
@@ -20696,14 +20759,14 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
         regel_k = dict(ap_regel_konto(regel, a, float(bal)), route="mt5")
         mppl = ap_cfd_ppl(ctx_ppl, a)
         u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
-        w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl)
+        w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl, rest_planer=bool(a.get("rest_planer_at")))
         # KEINE ZWEI GLEICHEN TP je ID × Firma — 1:1 wie ap_planen (Finn 09.10.2026); gekappte TP (Rest bis Ziel) bleiben
         _tk = uid + "|" + _ap_norm(_firm_norm(a.get("firm")))
         for _ in range(20):
             if grund or not w or w.get("tp") not in tps_je.get(_tk, ()) or re.search(r"letzter Trade|Rest bis Ziel|Tage sammeln", str(w.get("stufe") or "")):
                 break
             u = {x: rnd.random() for x in ("tp", "sl", "menge", "puffer")}
-            w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl)
+            w, grund = ap_konto_rechnen(regel_k, a["account_type"], float(bal), u, ppl=mppl, rest_planer=bool(a.get("rest_planer_at")))
         if w and not grund:
             tps_je.setdefault(_tk, set()).add(w.get("tp"))
         if grund:
@@ -26931,8 +26994,14 @@ def zw_tick(force=False):
     if not firmen:
         return
     try:
-        flags = {str(r["id"]): r for r in _sb_all("accounts", {"select": "id,ziel_erreicht_at", "order": "id.asc",
-                                                                "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})}
+        try:
+            flags = {str(r["id"]): r for r in _sb_all("accounts", {"select": "id,ziel_erreicht_at,rest_planer_at", "order": "id.asc",
+                                                                    "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})}
+        except requests.exceptions.HTTPError as e:
+            if "rest_planer_at" not in str(getattr(e.response, "text", "") or e):
+                raise
+            flags = {str(r["id"]): r for r in _sb_all("accounts", {"select": "id,ziel_erreicht_at", "order": "id.asc",   # Rest-Spalte fehlt noch (sql/2026-10-20_accounts_rest_planer.sql)
+                                                                    "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})}
         _zw["spalte_fehlt"] = False
     except requests.exceptions.HTTPError as e:
         if "ziel_erreicht_at" in str(getattr(e.response, "text", "") or e):
@@ -26964,6 +27033,9 @@ def zw_tick(force=False):
         erreicht, war = zw_erreicht(ziel, bal, a.get("account_type")), bool((flags.get(aid) or {}).get("ziel_erreicht_at"))
         if erreicht:
             n += 1
+            if (flags.get(aid) or {}).get("rest_planer_at"):
+                # REST ZURÜCK IM PLANER (20.10.2026): am Ziel ist der Rest geholt — Feld weg, sonst plant der Bot nach der Phase weiter
+                sb_update("accounts", {"id": f"eq.{aid}"}, {"rest_planer_at": None})
         if erreicht and not war:
             neu = sb_update("accounts", {"id": f"eq.{aid}", "ziel_erreicht_at": "is.null"},
                             {"ziel_erreicht_at": datetime.now(timezone.utc).isoformat(), "ziel_erreicht_bal": round(float(bal), 2),
