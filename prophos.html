@@ -3519,6 +3519,8 @@
   .type-badge.acc-tage-chip{background:#FFFBEB;border-color:#FDE68A;color:#B45309;white-space:nowrap}   /* Tage sammeln (13.10.2026): amber wie Radar „Tage farmen" */
   #accountsTable .acc-ziel-chip[data-acc-ziel]{cursor:pointer}   /* .1474: Klick öffnet den Nachfolger-Wizard */
   #accountsTable .acc-ziel-chip[data-acc-ziel]:hover{background:#D1FAE5}
+  /* Refund-Chip (21.10.2026): Funded CFD bei FTMO/FundedNext vor dem ersten erhaltenen Payout — Indigo-Outline wie Funded CFD, ohne Tint */
+  #dashboard-view .type-badge.acc-refund-chip{margin-left:6px;background:#fff;border-color:#C9CBFF;color:#5049A2;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
   /* Planer-Spalte (08.10.2026, Finn: „mies hässlich" zum Chip in der Typ-Spalte): eigene schmale Spalte — Haken (accounts.auto_planer)
    * + kleine Zeile daneben: Startzeit grün (geplant), „ausgelassen" amber, „aus"/„–" grau. Klein, keine Pillen. */
@@ -35107,6 +35109,7 @@
 
   /* ========== ACCOUNTS — SUPABASE CRUD ========== */
   let accounts = []   // hydrated from Supabase after login
+  let _txGeladen = false   // Payout-Buchungen geladen (21.10.2026) — Refund-Chip erst danach (accRefundChipHtml)
   let currentUserId = null
   let customFirms = []   // Lot-Rechner-Specs pro Firm, hydrated aus firm_specs (Supabase)
 
@@ -35873,6 +35876,18 @@
     }
     return `<span class="type-badge type-${a.type}">${typeLabel(a.type)}</span>`
   }
+  /* „Refund"-Chip neben dem Typ (21.10.2026, Finn: „Beim ersten Payout bei FTMO und Funded Next bekommt man immer einen Refund …
+   * Sobald wir den ersten Payout bekommen haben, dann das nicht mehr" + „Funded Next CFD und FTMO CFD, sonst nirgendwo").
+   * Nur Funded CFD (auch im Zustand Waiting for Payout) bei FTMO/FundedNext (nicht FundedNext Futures) ohne ERHALTENE Payout-Buchung
+   * (transactions kind payout) — eine offene Anfrage zählt noch nicht, der Refund kommt erst mit dem Geld. Erst zeigen, wenn die
+   * Buchungen geladen sind (_txGeladen, oben bei accounts), sonst stünde der Chip beim Start kurz an jedem Konto. */
+  function accRefundChipHtml(a){
+    if(!_txGeladen || !a || a.type !== 'funded_cfd') return ''
+    const firm = String(a.firm || '')
+    if(!(/ftmo/i.test(firm) || (/f(ou|u)nded\s*next/i.test(firm) && !/futures/i.test(firm)))) return ''
+    if((transactions || []).some(t => t.kind === 'payout' && String(t.accountId) === String(a.id))) return ''
+    return ` <span class="type-badge acc-refund-chip" title="Noch kein Payout erhalten — der erste Payout bei ${escapeHtml(firm)} kommt mit Refund der Gebühr. Verschwindet nach dem ersten erhaltenen Payout.">Refund</span>`
+  }
   /* Ein Klick setzt/leert „Waiting for Payout" (29.09.2026) — eigener Weg neben accWdUmstellen, derselbe Aufbau: sofort in die DB,
    * Zeile aus der Antwort übernehmen, Fehler benannt. Leeren beim Payout-Anfragen macht weiter wartetPayoutClear. */
   async function accWartetUmstellen(accId, an, opts){
@@ -36497,7 +36512,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td data-stop-row-click="1">${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived)) : accPlanerZelleHtml(a, isArchived)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -45603,7 +45618,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1663'
+  const OS_TAB_BUILD = '2026-09-22.1664'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61669,6 +61684,9 @@
       if(e3){ console.error('loadPendingPayouts:', e3); finPending = [] }
       else finPending = (pend || []).map(rowToPending).filter(Boolean)
       transactions = (data || []).map(rowToTransaction).filter(Boolean)
+      // Refund-Chip der Accounts-Tabelle hängt an den Payout-Buchungen (21.10.2026) — erst jetzt zeigen, Tabelle neu zeichnen
+      const _txErstmals = !_txGeladen; _txGeladen = true
+      if(_txErstmals && typeof renderAccounts === 'function') renderAccounts()
       finSettlements = setts || []
       if(finSettlements.length){
         const lastPct = Number(finSettlements[finSettlements.length - 1].profit_share_pct)
@@ -63351,6 +63369,7 @@
     accounts = []
     tradePlans = []
     transactions = []
+    _txGeladen = false
     customFirms = []
     currentUserId = null
     if(typeof renderAccounts === 'function') renderAccounts()
@@ -71899,6 +71918,7 @@
 :where([data-theme=dark]) .type-badge.acc-tage-chip{background-color:var(--surface-tint);border-color:#FDE68A;color:#f69e5a}
 :where([data-theme=dark]) #accountsTable .acc-ziel-chip[data-acc-ziel]:hover{background-color:rgba(54,226,138,0.16)}
 :where([data-theme=dark]) #dashboard-view .type-badge.acc-risk-chip{background-color:var(--surface);border-color:#f3c98b;color:#f69e5a}
+:where([data-theme=dark]) #dashboard-view .type-badge.acc-refund-chip{background-color:var(--surface);border-color:rgba(32,39,223,0.4);color:#7f79c3}
 :where([data-theme=dark]) #dashboard-view .acc-ap-s{color:var(--sub)}
 :where([data-theme=dark]) #dashboard-view .acc-ap-s.drin{color:#5af6ca}
 :where([data-theme=dark]) #dashboard-view .acc-ap-s.raus{color:#f69e5a}
