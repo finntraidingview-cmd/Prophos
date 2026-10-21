@@ -72,7 +72,8 @@ def main():
     check(o["sort"] == ["neu", "mitte", "alt", "leer"], f"Sortierung: neueste oben, ohne Zeitstempel unten ({o['sort']})")
     # Verdrahtung: Spalte in allen vier Stationen + Sortierung je Station
     check(src.count("bstDatumZelle(") >= 4, f"bstDatumZelle an bstZeilen, Rest von Hand, Trade-/Review-Zeilen ({src.count('bstDatumZelle(')}×)")
-    check("'Balance → Ziel', 'Tage', 'Bestanden', 'Status', ''" in src and "['Ergebnis', 'Konto', 'Bestanden', 'P&amp;L', 'Zu']" in src, "Spaltenkopf Bestanden in bstTab und Trade abhaken")
+    # Kopf „Konto" heißt seit 21.10.2026 (1afc7d03, Zeitstrahl im Radar) „Konto · Boden → Ziel"
+    check("'Balance → Ziel', 'Tage', 'Bestanden', 'Status', ''" in src and "['Ergebnis', 'Konto · Boden → Ziel', 'Bestanden', 'P&amp;L', 'Zu']" in src, "Spaltenkopf Bestanden in bstTab und Trade abhaken")
     check(src.count(".sort(bstTsSort)") >= 3 and "nachZiel(bestTr || [])" in src, "Sortierung nach Zeit in Tage sammeln/Review, Rest von Hand, Trade abhaken")
     check('grid-template-areas:"wer ri mi konto datum pl zeit"' in src and '"datum datum datum datum" "ri mi mi zeit"' in src, "CSS: Spalte datum (Desktop) + eigene Zeile unter dem Namen (Handy)")
     print()

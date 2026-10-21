@@ -39,7 +39,11 @@ def main():
     src = open(BOT, encoding="utf-8").read()
     uhr = Uhr()
     ns = {"re": re, "time": uhr}
-    exec(fn(src, "ist_mt5_login_dialog"), ns)
+    # seit 19.10.2026 (.1630, Login-/Anmelden-Knopf, Titel-Anfang, Grund in der Spur) baut die Signatur auf Helfern auf → mit laden
+    for k in ("MT5_LOGIN_TITEL", "MT5_LOGIN_KNOPF"):
+        exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
+    for name in ("ist_mt5_login_titel", "ist_mt5_login_knopf", "_mt5_konto_wert_passt", "mt5_login_dialog_grund", "ist_mt5_login_dialog"):
+        exec(fn(src, name), ns)
     sig = ns["ist_mt5_login_dialog"]
     lb = ["Login:", "Passwort:", "Server:"]
     check(sig("Einloggen", lb, ["OK", "Abbrechen"], ["26747348"], 26747348), "Signatur: eigenes Konto → ja")

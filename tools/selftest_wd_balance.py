@@ -59,7 +59,8 @@ def main():
     check('daten.get("aktion") == "balance"' in src and "_wd_balance_signal(acc[0] if acc else None" in src and '"mt5_login"' in src,
           "Route: aktion 'balance' liest accounts + mt5_links und legt das Signal an")
     check('in ("endlesung_stand", "balance_stand")' in src and '"mt5_balance", "konto_balance")' in src, "balance_stand = endlesung_stand, kennt die Balance-Signale")
-    check(re.search(r'akt in \("endlesung_stand", "balance_stand"\)', src) and re.search(r'akt in \("farm", "balance"\)', src), 'Gate „nur eigene“: balance → accounts, balance_stand → order_signale')
+    # seit 20.10.2026 (6016c405, Rest zurück in den Planer) stehen rest_planer/rest_planer_weg mit im accounts-Zweig → Tupel darf weitergehen
+    check(re.search(r'akt in \("endlesung_stand", "balance_stand"\)', src) and re.search(r'akt in \("farm", "balance"[,)]', src), 'Gate „nur eigene“: balance → accounts, balance_stand → order_signale')
     print("OK" if ok else "FEHLER")
     return 0 if ok else 1
 

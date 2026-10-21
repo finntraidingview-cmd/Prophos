@@ -92,8 +92,13 @@ def main():
     # Routen-Vertrag (Quelltext)
     i = src.index('@app.route("/admin/mail", methods=["GET", "PATCH", "OPTIONS"])')
     blk = src[i:src.index('@app.route("/code/datei/', i)]
-    check(blk.count("_admin_auth()") == 2, "beide Admin-Mail-Routen hinter _admin_auth (ADMIN_EMAILS)")
-    check(blk.index("_admin_auth()") < blk.index("sb_select("), "Gate vor jedem DB-Zugriff")
+    # seit 21.10.2026 (af8c441d, „Finn + Pascal" sah keine Mails): Gate _admin_mail_auth = ADMIN_EMAILS (_admin_auth zuerst) ODER
+    # eingetragener Mail-Leser (admin_mail_leser), der im Admin nicht eingeschränkt ist
+    gate = src[src.index("\ndef _admin_mail_auth("):src.index('@app.route("/admin/mail", methods=')]
+    check(gate.index("_admin_auth()") < gate.index("admin_mail_leser_uids()") and "admin_sicht_lesen(uid)[0] is None" in gate,
+          "_admin_mail_auth: erst ADMIN_EMAILS, sonst nur uneingeschränkter Mail-Leser")
+    check(blk.count("_admin_mail_auth()") == 2, "beide Admin-Mail-Routen hinter _admin_mail_auth")
+    check(blk.index("_admin_mail_auth()") < blk.index("sb_select("), "Gate vor jedem DB-Zugriff")
     check('"ID nicht in dieser Sicht"' in blk and blk.count("not in sicht") >= 3, "fremde/ausgeblendete ID → 404 (Liste, Lesen, PATCH)")
     sb = src[src.index("\ndef _admin_mail_sicht("):src.index("\ndef _admin_mail_ungelesen(")]
     check("_wd_personen()" in sb and blk.count("_admin_mail_sicht()") == 2, "Sicht = Standard-Sicht HT über _wd_personen (Emins Gruppe draußen), beide Routen")

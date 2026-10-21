@@ -19,7 +19,7 @@ FUNKTIONEN = ("_wd_num", "_ap_norm", "ap_groesse", "_ap_spanne", "_ap_runden", "
 KONSTANTEN = ("AP_REST_MIN", "AP_REST_MIN_CFD", "AP_KLEIN_PKT", "AP_KLEIN_PUFFER", "AP_KLEIN_SCHRITT", "AP_KLEIN_TP_PKT_HINWEIS",
               "AP_PUFFER_PKT", "AP_PUFFER_PKT_FUT", "AP_PUFFER_JE_KT_FUT", "AP_GEBUEHR_JE_KT_FUT", "AP_PUNKTWERT_FUT", "AP_CFD_ROUTEN",
               "AP_GROESSE_TOLERANZ", "AP_KETTE_STANDARD", "AP_KETTE_TXT", "AP_SL_HINTER_BODEN", "AP_MINI_FUTURES_SYMBOL", "AP_MINI_PUNKTWERT",
-              "AP_TAGE_CFD_PKT", "AP_TAGE_FUT_PKT", "AP_TAGE_PUFFER", "AP_TAGE_USD")
+              "AP_TAGE_CFD_PKT", "AP_TAGE_FUT_PKT", "AP_TAGE_PUFFER", "AP_TAGE_USD", "AP_FUT_DECKEL_PLUS_USD")
 FEHLER = []
 
 
@@ -86,8 +86,13 @@ def main():
     # 4) Feld ändert nichts über der Grenze und am Ziel
     w, g = R(LUCID, "challenge", 159000, u, rest_planer=True)
     check(w is None and g.startswith("Ziel erreicht"), f"Futures genau am Ziel mit Feld → Ziel erreicht ({g})")
+    # Rest 4.537 war am 20.10.2026 noch Etappe; seit 21.10.2026 (8bdc6098, Deckel +100 $ für den letzten Futures-Trade, genau dieser Fall
+    # Lucid …0001) → EIN letzter Trade, TP = Rest + Puffer (2 NQ × 20 $) = 4.577 ≤ Deckel 4.500 + 100. Etappe erst über Deckel + 100.
     w, g = R(LUCID, "challenge", 154463, u, rest_planer=True)
-    check(w is not None and w["stufe"] == "Etappe" and "symbol" not in w, f"Futures Rest 4.537 mit Feld → Etappe wie bisher ({(w or {}).get('stufe') or g})")
+    check(w is not None and w["stufe"].startswith("letzter Trade (Rest bis Ziel) · Deckel +") and w["tp"] <= 4600 and w["tp"] >= 4537
+          and "symbol" not in w, f"Futures Rest 4.537 mit Feld → letzter Trade über dem Deckel (≤ +100 $) ({(w or {}).get('stufe') or g})")
+    w, g = R(LUCID, "challenge", 154350, u, rest_planer=True)
+    check(w is not None and w["stufe"] == "Etappe" and "symbol" not in w, f"Futures Rest 4.650 mit Feld → Etappe wie bisher ({(w or {}).get('stufe') or g})")
     w, g = R(LUCID, "challenge", 158800, u, rest_planer=True)
     check(w is not None and w["stufe"].startswith("letzter Trade") and w["menge"] >= 2 and "symbol" not in w,
           f"Futures Rest 200 mit Feld → normaler letzter Trade ({(w or {}).get('stufe') or g})")

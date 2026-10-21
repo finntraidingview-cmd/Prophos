@@ -41,6 +41,10 @@ def main():
     check(len(zw) == 2 and zw[0] < warte and zw[1] > schleife, f"Ziel-Wache auch in der Sperre (vor dem Warten) und in der Schleife ({zw})")
     # außerhalb von ap_loop ruft kein Hintergrund-Takt die schreibenden Takte (nur die Hand-Route ausgleichen)
     rest_src = src[:a] + src[b:]
+    # Ausnahme seit 21.10.2026 (013192a7, Radar → Rest von Hand „Balance lesen"): POST /admin/ziel-wache-jetzt stößt per Hand EINEN
+    # zw_tick(force=True) an — gewollt, die Ziel-Wache ist ohnehin in der Sperre erlaubt. Nur diese Route rausnehmen, sonst zählt alles.
+    j = rest_src.index("\ndef admin_ziel_wache_jetzt(")
+    rest_src = rest_src[:j] + rest_src[rest_src.find("\n\n\n", j):]
     for t in ("ap_nacht_tick(", "ap_nachplan_tick(", "_ap_kette_takt(", "_ap_bot_tick(", "zw_tick("):
         n = len([m for m in re.finditer(re.escape(t), rest_src) if not rest_src[max(0, m.start() - 4):m.start()].endswith("def ")])
         check(n == 0, f"{t[:-1]} wird außerhalb von ap_loop nicht aufgerufen ({n})")

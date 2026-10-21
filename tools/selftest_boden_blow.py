@@ -79,7 +79,9 @@ def main():
     check(blow(p, -250) is False, "Abhaken: DB-Fehler → False, Abhaken läuft weiter")
 
     # Erledigt-Route + Planer am Quelltext
-    check("blow_auto = (not blown) and bool(rows) and _ap_blow_beim_abhaken(rows[0], mpl)" in src and "elif blow_auto:" in src
+    # seit 21.10.2026 (4d275e48, Polar fremder IDs abhakbar): Polar-Pläne nie automatisch blown (zwei Konten zweier IDs)
+    check('blow_auto = (not blown) and bool(rows) and str(rows[0].get("route") or "") != "polar" and _ap_blow_beim_abhaken(rows[0], mpl)' in src
+          and "elif blow_auto:" in src
           and src.index("blow_auto = (not blown)") < src.index("for _versuch in range(3):", src.index("blow_auto = (not blown)") - 400),
           "Erledigt-Route: Boden-Prüfung EINMAL vor der Retry-Schleife, setzt blown automatisch")
     check("if ap_blow_ausschluss(eig, _bw[0], _bw[3]):" in src and "master_tp,blown," in src, "Planer nutzt ap_blow_ausschluss")

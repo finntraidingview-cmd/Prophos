@@ -12,7 +12,9 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"datetime": datetime, "timezone": timezone}
     i = src.index("def pc_stand_zusammenfassen(")
-    exec(re.search(r"^PC_STAND_LEBT_S = .*$", src, re.M).group(0) + "\n" + src[i:src.find("\n\n\n", i)], ns)
+    # PC_AUS_S seit 19.10.2026 (PC aus ab 10 min ohne Herzschlag, Feld „aus") → mit laden
+    konst = [re.search(rf"^{k} = .*$", src, re.M).group(0) for k in ("PC_STAND_LEBT_S", "PC_AUS_S")]
+    exec("\n".join(konst) + "\n" + src[i:src.find("\n\n\n", i)], ns)
     return ns
 
 
@@ -38,6 +40,7 @@ def main():
     check(st[u1]["alt_s"] == 40 and st[u1]["lebt"] is True and st[u1]["tab_build"] == "2026-09-22.1177" and st[u1]["pcs"] == ["pc-aaaaaa"],
           "jüngster Herzschlag je ID zählt (40 s, lebt, Build der jüngsten Zeile)")
     check(st[u2]["alt_s"] == 20 * 3600 and st[u2]["lebt"] is False and st[u2]["pc_name"] == "pc-bbbbbb", "20 h alt → lebt nicht (Mikes Fall)")
+    check(st[u2]["aus"] is True and st[u1]["aus"] is False and a["PC_AUS_S"] == 600, "PC aus ab 10 min ohne Herzschlag (19.10.2026), 40 s → nicht aus")
     check(a["pc_stand_zusammenfassen"]([], jetzt) == {} and a["pc_stand_zusammenfassen"](None, jetzt) == {}, "leer/None → {}")
     # MT5-Update je PC (08.10.2026): jüngste Zeile ohne Feld (alter Tab), ältere Instanz mit → Stand der älteren bleibt sichtbar
     mu = {"aufgabe_ok": False, "ausstehend": 1}

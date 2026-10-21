@@ -79,7 +79,9 @@ def main():
         sys.exit(1)
     html = open(HTML, encoding="utf-8").read()
     konto_weg = re.search(r"^\s*const wdlKontoWeg = .*$", html, re.M).group(0)
-    js = "\n".join([konto_weg, js_funktion(html, "wdlBlowStand"), js_funktion(html, "wdlGeblowtUrteil")])
+    # seit 21.10.2026 fragt wdlKontoWeg zuerst wdlTpUndWeg („TP + nicht mehr im Dropdown" = wahrscheinlich bestanden) → mit schneiden
+    weg_min = re.search(r"^\s*const TV_LIQ_WEG_MIN = .*$", html, re.M).group(0)
+    js = "\n".join([weg_min, js_funktion(html, "wdlTpUndWeg"), konto_weg, js_funktion(html, "wdlBlowStand"), js_funktion(html, "wdlGeblowtUrteil")])
     js += JS_TEST % json.dumps([[n, z] for n, z, _s in FAELLE])
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(js)
@@ -96,7 +98,8 @@ def main():
 
     # Quelltext-Vertrag: eine Wahrheit für Gruppe und beide Dialoge
     check("const istGeblowt = wdlGeblowtUrteil" in html, 'Radar-Gruppe „Geblowt · archivieren" fragt wdlGeblowtUrteil')
-    check(re.search(r"mwd-erl-status\"\]\[value=\"\$\{\(typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil\(pw\)\) \? 'blown' : 'none'\}", html) is not None,
+    # seit 21.10.2026: Polar-Pläne ausgenommen (!_mwdErlPolar), dazwischen „TP + weg" → 'passed' (_tw) — geblowt bleibt die erste Wahl
+    check(re.search(r"mwd-erl-status\"\]\[value=\"\$\{\((?:!_mwdErlPolar && )?typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil\(pw\)\) \? 'blown' : (?:_tw \? 'passed' : )?'none'\}", html) is not None,
           "Radar-Dialog (fremde Pläne) belegt mwd-erl-status aus wdlGeblowtUrteil vor")
     i = html.index("function openTradeCompleteModal(")
     block = html[i:html.index("tcWinningDayPrepare(p)", i)]
