@@ -414,7 +414,7 @@ def main():
     check(lmk.index('stoerer_weg(lauf, s, opts, "vor dem Senden-Knopf")') < lmk.index("ob.cdp_ticket_ruecklesung(st, plan)") < lmk.index('s.hin(ob.cdp_rect(kk), "SENDEN-Knopf (Polar scharf)")'),
           "Räumung VOR Rücklesung und Hover-Beweis, danach keine mehr")
     bw = srcK[srcK.index("def bereit_und_warten("):srcK.index("def melden(")]
-    check(bw.index('if ergebnis["fertig"] and ergebnis["feuer"] is not None:') < bw.index('"grund": "vorbereitung_verloren"'),
+    check(bw.index('if ergebnis["fertig"] and ergebnis["feuer"] is not None:') < bw.index('abbruch_vor_feuer(lauf, ergebnis, "vorbereitung_verloren")'),
           "nach gelesener Feuerzeit meldet halten()=False nie abbruch (Slave bliebe sonst allein)")
     vk = srcK[srcK.index("def master_vor_klick("):srcK.index("def master_x_klicken(")]
     mw2 = srcK[srcK.index("def master_wache("):srcK.index("def lauf_master(")]
@@ -447,6 +447,28 @@ def main():
     fb3 = srcL2[srcL2.index("def flach_beweis("):srcL2.index("weg, dialog = (None, False)")]
     check('stoerer_weg(lauf, s, opts, "über der Close-Rückfrage")' in fb3 and "not modal_geraeumt[0]" in fb3 and fb3.count("_close_druck(") == 3,
           "Close verdeckt → EINMAL Störer räumen, dann sofort neu klicken (in derselben 50-ms-Schleife)")
+    print("10m) Abbruch vor der Feuerzeit nur mit Beweis (Prüfung 21.10.2026)")
+    class _LA:
+        lauf_id, seite = "l-9", "master"
+        logs = []
+        def log(self, t):
+            self.logs.append(t)
+    rufe, gemeldet = [], []
+    def rail_409(lauf, m, pfad, d=None, timeout=10):
+        rufe.append((m, pfad.split("?")[0]))
+        return None if m == "POST" else {"ok": True, "feuer_ms": 1792544000000, "status": "feuer"}
+    erg = {"feuer": None, "fertig": False, "status": "bereit"}
+    u = pb.abbruch_vor_feuer(_LA(), erg, "vorbereitung_verloren", rail=rail_409, meld=lambda *a: gemeldet.append(a))
+    check(u == "feuer" and erg["feuer"] == 1792544000000 and erg["fertig"] and rufe == [("POST", "/polar/melden"), ("GET", "/polar/warte")] and not gemeldet,
+          "abbruch → 409 (None) → Feuerzeit nachgelesen → drücken, kein fehler")
+    rufe.clear()
+    u2 = pb.abbruch_vor_feuer(_LA(), {"feuer": None, "fertig": False}, "panel_abbruch", rail=lambda *a, **k: (rufe.append(a[1]) or {"ok": True}), meld=lambda *a: gemeldet.append(a))
+    check(u2 == "abbruch" and rufe == ["POST"] and not gemeldet, "abbruch bestätigt → kein Nachlesen, kein fehler")
+    u3 = pb.abbruch_vor_feuer(_LA(), {"feuer": None, "fertig": False}, "panel_abbruch", rail=lambda *a, **k: None, meld=lambda *a: gemeldet.append(a))
+    check(u3 == "abbruch" and len(gemeldet) == 1 and gemeldet[0][1] == "fehler", "nicht bestätigt und keine Feuerzeit → fehler melden (andere Seite schließt sicher)")
+    srcM2 = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    bw2 = srcM2[srcM2.index("def bereit_und_warten("):srcM2.index("def melden(")]
+    check(bw2.count("abbruch_vor_feuer(lauf, ergebnis,") == 2 and '"ereignis": "abbruch"' not in bw2, "Panel-Abbruch und halten()-Abbruch laufen beide über abbruch_vor_feuer (Master und Slave)")
     print("10j) Lauf 3cc4d9b7: Bild vor UIA beim Parken, Ändern-Spur im slave.log")
     srcJ = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
     xp = srcJ[srcJ.index("def slave_x_punkte("):srcJ.index("def slave_wache(")]

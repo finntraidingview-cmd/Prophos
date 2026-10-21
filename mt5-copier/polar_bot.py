@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.17"   # 0.3.17 (21.10.2026): Close-Rückfrage unter allen Dialogen, verdeckt → Störer weg + neu · 0.3.16 (21.10.2026): Räumen nur vor „bereit", Bereit-Halten ohne Klick, nach Feuerzeit nie zurück, Wache gedrosselt · 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.18"   # 0.3.18 (21.10.2026): Abbruch vor der Feuerzeit nur mit Beweis · 0.3.17 (21.10.2026): Close-Rückfrage unter allen Dialogen, verdeckt → Störer weg + neu · 0.3.16 (21.10.2026): Räumen nur vor „bereit", Bereit-Halten ohne Klick, nach Feuerzeit nie zurück, Wache gedrosselt · 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -264,6 +264,27 @@ def feuerzeit_lokal_s(feuer_ms, versatz_ms):
     return (float(feuer_ms) - float(versatz_ms)) / 1000.0
 
 
+def abbruch_vor_feuer(lauf, ergebnis, grund, rail=None, meld=None):
+    """Abbruch vor der Feuerzeit mit BEWEIS (Prüfung 21.10.2026): der Server kann die Feuerzeit schon gesetzt haben, während ihre
+    Long-Poll-Antwort noch unterwegs ist (100–300 ms). Dann lehnt /polar/melden abbruch mit 409 ab, railway() liefert None — vorher kehrte
+    die Seite still ohne Druck zurück, die andere drückte allein und blieb offen. Jetzt: abbruch nicht bestätigt → EINMAL /polar/warte
+    auf=feuer (max 1 s) nachlesen; Feuerzeit da → ergebnis übernehmen und 'feuer' (drücken wie gehabt); sonst melden(fehler), damit die
+    andere Seite sicher nicht allein offen bleibt. -> 'abbruch' | 'feuer'"""
+    rail = rail or railway
+    meld = meld or melden
+    r = rail(lauf, "POST", "/polar/melden", {"lauf_id": lauf.lauf_id, "seite": lauf.seite, "ereignis": "abbruch", "daten": {"grund": grund}})
+    if r and r.get("ok"):
+        return "abbruch"
+    a = rail(lauf, "GET", f"/polar/warte?lauf_id={lauf.lauf_id}&seite={lauf.seite}&auf=feuer&max_s=1", timeout=5)
+    if a and a.get("feuer_ms") is not None:
+        ergebnis.update(feuer=a["feuer_ms"], fertig=True, status=a.get("status"))
+        lauf.log(f"Polar: Abbruch ({grund}) abgelehnt — Feuerzeit war schon gesetzt → drücken wie gehabt")
+        return "feuer"
+    meld(lauf, "fehler", {"msg": f"Abbruch vor der Feuerzeit nicht bestätigt ({grund}) — nichts gedrückt", "nichts_gesendet": True})
+    lauf.log(f"Polar: Abbruch ({grund}) nicht bestätigt, keine Feuerzeit — fehler gemeldet, nichts gedrückt")
+    return "abbruch"
+
+
 def bereit_und_warten(lauf, halten, extra=None):
     """POST bereit, dann /polar/warte?auf=feuer halten. halten() läuft alle ~0,5 s (Hover/Fenster prüfen); False = Abbruch.
     -> lokale Feuerzeit (Epoch s) | None (Abbruch — NICHT drücken). Nach gelesener Feuerzeit kein Zurück mehr."""
@@ -293,7 +314,8 @@ def bereit_und_warten(lauf, halten, extra=None):
     naechst = time.time() + 0.5
     while not ergebnis["fertig"]:
         if lauf.abbruch_gewuenscht():
-            railway(lauf, "POST", "/polar/melden", {"lauf_id": lauf.lauf_id, "seite": lauf.seite, "ereignis": "abbruch", "daten": {"grund": "panel_abbruch"}})
+            if abbruch_vor_feuer(lauf, ergebnis, "panel_abbruch") == "feuer":
+                break
             stop.set()
             lauf.log("Polar: Abbruch vom Panel vor der Feuerzeit — nichts gedrückt")
             return None
@@ -306,7 +328,8 @@ def bereit_und_warten(lauf, halten, extra=None):
                         # Slave allein und bliebe einseitig offen
                         lauf.log("Polar: halten() meldete Verlust, aber die Feuerzeit ist schon da — kein Abbruch, drücken wie gehabt")
                         break
-                    railway(lauf, "POST", "/polar/melden", {"lauf_id": lauf.lauf_id, "seite": lauf.seite, "ereignis": "abbruch", "daten": {"grund": "vorbereitung_verloren"}})
+                    if abbruch_vor_feuer(lauf, ergebnis, "vorbereitung_verloren") == "feuer":
+                        break
                     stop.set()
                     lauf.log("Polar: Vorbereitung verloren (Hover/Fenster) — Abbruch vor dem Druck")
                     return None
