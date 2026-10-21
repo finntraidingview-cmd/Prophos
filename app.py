@@ -19868,6 +19868,37 @@ def ap_blow_auto_tick(force=False):
 # mt5_baseline.auto_abgehakt. Alles andere bleibt in „Abhaken" für Finn. Kein Push — es ist ja nichts passiert.
 AP_NORMAL_AUTO_ROUTEN = AP_BLOW_AUTO_ROUTEN
 _ap_normal_auto = {"n": 0, "fehler": ""}
+# NUR WENN NICHTS PASSIERT IST (Finn 21.10.2026 ~21:55 Dubai, nach 11 still archivierten Blow-Plänen um 21:48: „Automatisch abhaken nur,
+# wenn ein normaler Orbit- oder normaler Echo-Trade ohne Gegenhedge gelaufen ist und NICHTS passiert ist. Sehen will ich weiter: geblowt,
+# bestanden, Rest/Take-Profit-Fälle, bei denen ich entscheide, ob es zum Planer geht"). Dieselben Grenzen wie der Radar:
+# Rest bis Ziel unter AP_FEHLT_ZEIGEN_USD = Radar-Chip „fehlen noch … → Rest von Hand" (WDL_FEHLT_ZEIGEN_USD) → Finn;
+# Ende nur am TP oder SL — Orbit V2 mit Demo-Ende demo_tp/demo_sl (Vorzeichen passt zum P&L), sonst (Echo V2 schreibt keinen Grund,
+# Orbit nach reader_leer) echter P&L ≈ +master_tp bzw. −master_sl (± AP_NORMAL_TPSL_TOL, mind. AP_NORMAL_TPSL_MIN_USD — Schlupf/Kommission);
+# Schließen-Knopf, Auto-Close, Hand-Ende nie. Konto weg / nicht erreicht / TopstepX-Blow-Beweis an der Endlesung → Finn (so kann auch
+# „wahrscheinlich bestanden · nicht mehr im Dropdown" nie hier landen — dort fehlt ohnehin die echte Endbalance).
+AP_FEHLT_ZEIGEN_USD = 500
+AP_NORMAL_TPSL_TOL = 0.15
+AP_NORMAL_TPSL_MIN_USD = 50.0
+AP_NORMAL_HAND_GRUENDE = ("beendet_knopf", "hand", "close", "demo_beide", "demo_liq", "demo_unklar", "demo_konto_weg", "demo_konto_unklar", "konto_weg", "tsx_geblowt")
+
+
+def ap_normal_tpsl_ende(plan, pl):
+    """REIN RECHNEND (testbar): Endete der Trade am TP oder SL? → 'tp' | 'sl' | None (unklar/von Hand → Finn)."""
+    p = plan or {}
+    bl = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    grund = str(fin.get("grund") or "")
+    if grund in AP_NORMAL_HAND_GRUENDE or str(fin.get("ende_quelle") or "") in ("close", "hand") or str(fin.get("quelle") or "") in ("close", "hand"):
+        return None                                # Schließen-Knopf / Auto-Close / Liquidation / unklares Demo-Ende
+    if grund in ("demo_tp", "demo_sl"):
+        return ("tp" if pl > 0 else None) if grund == "demo_tp" else ("sl" if pl < 0 else None)
+    tp, sl = _wd_num(p.get("master_tp")), _wd_num(p.get("master_sl"))
+    nah = lambda soll: abs(pl - soll) <= max(AP_NORMAL_TPSL_MIN_USD, abs(soll) * AP_NORMAL_TPSL_TOL)
+    if tp and tp > 0 and pl > 0 and nah(tp):
+        return "tp"
+    if sl and abs(sl) > 0 and pl < 0 and nah(-abs(sl)):
+        return "sl"
+    return None
 
 
 def ap_normal_auto_pruefen(plan, acc, regel):
@@ -19909,8 +19940,18 @@ def ap_normal_auto_pruefen(plan, acc, regel):
         return None                                # Blow (macht der Blow-Takt) oder Boden unbekannt
     if not mini and (not zg or zw_erreicht(zg[0], nachher, phase)):
         return None                                # bestanden oder Ziel unbekannt
+    if fin.get("konto_weg") or fin.get("konto_weg_vermutet") or fin.get("konto_geblowt") \
+            or re.match(r"konto_(nicht_erreicht|weg|geblowt)", str(fin.get("puls_fehler") or "")):
+        return None                                # Konto weg / unklare Lesung → Finn (21.10.2026)
+    ende = None
+    if not mini:
+        if float(zg[0]) - nachher < AP_FEHLT_ZEIGEN_USD:
+            return None                            # „fehlen noch … → Rest von Hand / Planer" — Finn entscheidet (21.10.2026)
+        ende = ap_normal_tpsl_ende(p, nachher - vorher)
+        if not ende:
+            return None                            # nicht am TP/SL beendet (von Hand, Auto-Close, unklar) → Finn (21.10.2026)
     return {"vorher": vorher, "nachher": nachher, "pl": round(nachher - vorher, 2), "boden": float(bo),
-            "ziel": zg[0] if zg else None, "quelle": q, "mini": mini}
+            "ziel": zg[0] if zg else None, "quelle": q, "mini": mini, "ende": ende}
 
 
 def _ap_normal_auto_abhaken(plan, k):
@@ -19929,33 +19970,43 @@ def _ap_normal_auto_abhaken(plan, k):
     if not sb_update("trade_plans", filt, upd):
         return False
     print(f"[normal-auto] ✓ Plan {pid[:8]} · {plan.get('master_name') or ''} · {k['pl']:+.2f} $ ({k['vorher']:.2f} → {k['nachher']:.2f}, "
-          f"Boden {k['boden']:.0f}, Ziel {k['ziel'] if k['ziel'] is not None else '–'}{', Tage-Mini' if k['mini'] else ''}) abgehakt", flush=True)
+          f"Boden {k['boden']:.0f}, Ziel {k['ziel'] if k['ziel'] is not None else '–'}{', Tage-Mini' if k['mini'] else ''}"
+          f"{', Ende ' + k['ende'] if k.get('ende') else ''}) abgehakt", flush=True)
     return True
 
 
-_ap_auto_abhaken_cache = {"bis": 0.0, "an": False}
+_ap_auto_abhaken_cache = {"bis": 0.0, "an": {"normal": False, "blow": False}}
+
+
+def ap_auto_abhaken_schalter_lesen(reg):
+    """REIN RECHNEND (testbar): regeln → {normal, blow}. ZWEI SCHALTER (Finn 21.10.2026 ~21:55 Dubai: um 21:48 hakte der Blow-Takt 11
+    geblowte Pläne ab und archivierte sie, weil regeln.abhaken_auto = true beide Takte schaltete — geblowt will Finn immer sehen):
+    abhaken_auto_normal = Normal-Takt, abhaken_auto_blow = Blow-Takt. Der alte abhaken_auto schaltet aus Sicherheit NUR noch den
+    Normal-Takt, nie mehr den Blow-Takt. Nur echtes true zählt."""
+    r = reg if isinstance(reg, dict) else {}
+    return {"normal": r.get("abhaken_auto_normal") is True or r.get("abhaken_auto") is True, "blow": r.get("abhaken_auto_blow") is True}
 
 
 def ap_auto_abhaken_an():
-    """Schalter regeln.abhaken_auto (auto_plan_regeln id 1), 60 s gemerkt. Standard AUS (Finn 19.10.2026: alle Trades selbst abhaken);
-    true = Blow-Takt + Normal-Takt wie bis .1625. Nicht lesbar → aus (nie still abhaken)."""
+    """Schalter aus auto_plan_regeln id 1 (ap_auto_abhaken_schalter_lesen), 60 s gemerkt. Standard AUS (Finn 19.10.2026: alle Trades
+    selbst abhaken). Nicht lesbar → beide aus (nie still abhaken). → {normal, blow}"""
     jetzt = time.time()
     if _ap_auto_abhaken_cache["bis"] > jetzt:
-        return _ap_auto_abhaken_cache["an"]
-    an = False
+        return dict(_ap_auto_abhaken_cache["an"])
+    an = {"normal": False, "blow": False}
     try:
         reg = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {})
-        an = reg.get("abhaken_auto") is True
+        an = ap_auto_abhaken_schalter_lesen(reg)
     except Exception as e:
         print(f"[normal-auto] ⚠️ Schalter nicht lesbar ({type(e).__name__}) — Auto-Abhaken aus", flush=True)
     _ap_auto_abhaken_cache.update(bis=jetzt + 60, an=an)
-    return an
+    return dict(an)
 
 
 def ap_normal_auto_tick():
-    """Pläne in 'review' ohne Blow/Ziel automatisch abhaken (läuft direkt nach ap_blow_auto_tick, dessen Takt). → Anzahl."""
+    """Pläne in 'review' ohne Blow/Ziel automatisch abhaken (im Takt AP_BLOW_AUTO_S, nach dem Blow-Takt). → Anzahl."""
     plaene = _sb_all("trade_plans", {"select": "id,user_id,route,status,blown,master_account_id,master_name,konto_typ,mt5_baseline,"
-                                               "hedge_eur,ended_at,completed_at,started_at,updated_at",
+                                               "hedge_eur,master_tp,master_sl,ended_at,completed_at,started_at,updated_at",
                                      "status": "eq.review", "blown": "not.is.true", "route": f"in.({','.join(AP_NORMAL_AUTO_ROUTEN)})"})
     plaene = [p for p in plaene or [] if p.get("master_account_id")]
     if not plaene:
@@ -28302,16 +28353,21 @@ def ap_loop():
         try:
             # AUTO-ABHAKEN AUS (Finn 19.10.2026 13:55: „Bitte in Zukunft so, dass ich alle noch selber manuell abhaken muss … vor allem, wo ich am
             # Trade-Planer arbeite, möchte ich immer einen Überblick haben"; Anlass: zwei Lucid-Trades, von Railway still abgehakt, nirgends mehr
-            # zu sehen). Blow-Takt und Normal-Takt laufen nur, wenn regeln.abhaken_auto = true (ap_auto_abhaken_an, Standard aus) — später
-            # ohne Code wieder einschaltbar (sql/2026-10-19_abhaken_auto_schalter.sql). Review-weiter bleibt: räumt nur Trades von Konten, die
-            # Finn schon selbst weitergestellt/archiviert hat (sonst hängen sie ewig unter „Abhaken").
-            if ap_auto_abhaken_an():
-                if ap_blow_auto_tick() is not None:   # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
-                    ap_normal_auto_tick()             # danach im selben Takt: normale Trades (kein Blow, kein Ziel) abhaken (14.10.2026)
-                    ap_review_weiter_tick()           # und Trades, deren Konto schon weiter ist (Nachfolger/Archiv/Phase, 16.10.2026)
-            elif time.time() - _ap_blow_auto["at"] >= AP_BLOW_AUTO_S:
-                _ap_blow_auto["at"] = time.time()
-                ap_review_weiter_tick()
+            # zu sehen). Review-weiter bleibt: räumt nur Trades von Konten, die Finn schon selbst weitergestellt/archiviert hat (sonst hängen
+            # sie ewig unter „Abhaken"). ZWEI SCHALTER seit 21.10.2026 (Finn ~21:55 Dubai, nach 11 still archivierten Blow-Plänen um 21:48 —
+            # abhaken_auto schaltete damals beide Takte; s. ap_auto_abhaken_schalter_lesen): Blow-Takt nur mit regeln.abhaken_auto_blow,
+            # Normal-Takt mit regeln.abhaken_auto_normal (oder dem alten abhaken_auto); ohne Code schaltbar (sql/2026-10-21_abhaken_auto_getrennt.sql).
+            sch = ap_auto_abhaken_an()
+            if sch["blow"]:
+                takt = ap_blow_auto_tick() is not None   # geblowt (echte Balance ≤ Boden) automatisch abhaken + archivieren alle 5 min (09.10.2026)
+            else:
+                takt = time.time() - _ap_blow_auto["at"] >= AP_BLOW_AUTO_S
+                if takt:
+                    _ap_blow_auto["at"] = time.time()
+            if takt:
+                if sch["normal"]:
+                    ap_normal_auto_tick()             # normale Trades: nichts passiert — TP/SL, kein Blow, kein Ziel, kein Rest < 500 $ (14./21.10.2026)
+                ap_review_weiter_tick()               # Trades, deren Konto schon weiter ist (Nachfolger/Archiv/Phase, 16.10.2026)
             _ap_blow_auto["fehler"] = ""
         except Exception as e:
             _ap_blow_auto["fehler"] = f"{type(e).__name__}: {e}"
