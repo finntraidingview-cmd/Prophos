@@ -27535,6 +27535,32 @@ def zw_tick(force=False):
     _zw["erreicht"] = n
 
 
+# ZIEL-WACHE JETZT (Finn 21.10.2026, Radar → Rest von Hand: „Rest kurz manuell geholt, dann ‚Balance lesen' — wenn er am Ziel ist, soll er nach
+# Review wandern"): nach einer frischen Balance-Lesung stößt der Tab EINEN Lauf der Ziel-Wache an, statt bis zu 5 min auf den Takt zu warten.
+# Derselbe zw_tick (gleiche Regeln, gleicher Guard ziel_erreicht_at is.null, gleicher Push) — nur früher. Höchstens alle 20 s, nie parallel.
+ZW_JETZT_MIN_S = 20
+_zw_jetzt = {"at": 0.0, "lock": threading.Lock()}
+
+
+@app.route("/admin/ziel-wache-jetzt", methods=["POST", "OPTIONS"])
+def admin_ziel_wache_jetzt():
+    if request.method == "OPTIONS":
+        return "", 200
+    _me, err = _wd_login()
+    if err:
+        return err
+    if time.time() - _zw_jetzt["at"] < ZW_JETZT_MIN_S or not _zw_jetzt["lock"].acquire(blocking=False):
+        return jsonify({"ok": True, "gelaufen": False, "msg": "Ziel-Wache lief gerade"})
+    try:
+        _zw_jetzt["at"] = time.time()
+        zw_tick(force=True)
+        return jsonify({"ok": True, "gelaufen": True, "erreicht": _zw.get("erreicht")})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Ziel-Wache: {type(e).__name__}: {str(e)[:120]}"}), 500
+    finally:
+        _zw_jetzt["lock"].release()
+
+
 # ══ FREMD-POSITIONEN (Slave 1, 08.10.2026, Finn über Master: „alle Sicherheitssachen einbauen" — auch für Trades, die er direkt in
 # TradingView oder MT5 klickt, ohne Plan in Prophos). Prophos kann sie nicht verhindern, also: ERKENNEN (Tabelle fremd_positionen,
 # sql/2026-10-08_fremd_positionen.sql), MELDEN (Gegenhedge → Push + rote Zeile in „Braucht dich", allein → dezente Info-Zeile) und

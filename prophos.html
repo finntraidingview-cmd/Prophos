@@ -32272,7 +32272,13 @@
         const a = eigen && kid ? (accounts || []).find(x => x && String(x.id) === kid) : null
         if(a && (a.zielErreichtAt || (arch[String(a.id)] && arch[String(a.id)].archived))) continue
         const k = t.konto || {}, typ = String(t.konto_typ || (a && a.type) || ''), ueb = WDL_UEBERGANG[typ] || (typ ? typW(typ) : '')
-        const ziel = n(t.ziel_usd), bal = (wdlBlowStand(t) || {}).bal, zr = zielRest(bal, ziel) || { rest: null }
+        // BALANCE LESEN AUS DEM RADAR (Finn 21.10.2026, s. rvhBalLesen): eine frische Lesung zählt vor der Balance des letzten Trades; am Ziel
+        // raus aus „Rest von Hand" (die Ziel-Wache taggt es eben, Tage sammeln/Review holt es). Fremde Konten mit Ziel-Tag (handarbeit) ebenso.
+        const rvhSt = (wdl.rvhBal || {})[kid] || {}, rvhLauf = !!rvhSt.laeuft
+        if(rvhSt.amZiel) continue
+        if(!eigen && kid && (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])
+          .some(z => z && String(z.konto_id) === kid && z.seit))) continue
+        const ziel = n(t.ziel_usd), bal = rvhSt.bal != null ? rvhSt.bal : (wdlBlowStand(t) || {}).bal, zr = zielRest(bal, ziel) || { rest: null }
         const gr = n(k.groesse) || 0
         const konto = `${k.firma || (a && a.firm) || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
         let tf = null; try{ tf = a && typeof zielFortschritt === 'function' ? zielFortschritt(a) : null }catch(_){ tf = null }
@@ -32289,7 +32295,7 @@
         const pid = wdlTid(t), abSperre = (typeof wdlAbhakenSperre === 'function' ? wdlAbhakenSperre(t) : '') || ''
         const knopf = (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-planer="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" data-wdl-rvh-rest="${zr.rest != null ? Math.round(zr.rest) : ''}" title="Rest zurück in den Trade-Planer: der Bot plant den Rest${zr.rest != null ? ` (${de(zr.rest)} $)` : ''} als Klein-Trade (CFD: Rest in 20 Pkt; Futures: 1 MNQ, TP = Rest + Puffer) — Nachplanen ≤ 5 min, sonst im Nachtlauf (ggf. morgen). Die Markierung löscht sich am Ziel.">→ Planer</button>` : '')
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || 'Abhaken — der normale Dialog: Nichts ändern / Account geblowt / Phase bestanden → Nachfolger. Den Rest von Hand holen, hier als manuell nachtragen und den Nachfolger anlegen')}">Abhaken</button>`
-          + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie über dem Ziel, taggt die Ziel-Wache das Konto und es wandert nach Review' : `Balance über den PC von ${escapeHtml(wer)} lesen lassen`}">Balance lesen</button>` : '')
+          + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${ziel != null ? ` data-wdl-rvh-ziel="${ziel}"` : ''}${rvhLauf ? ' disabled' : ''}${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${escapeHtml(rvhLauf ? (rvhSt.text || 'liest …') : eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie am Ziel, wandert das Konto sofort nach Tage sammeln/Review' : `Balance über den PC von ${wer} lesen lassen — steht sie am Ziel, wandert das Konto sofort nach Tage sammeln/Review`)}">${rvhLauf ? 'liest …' : 'Balance lesen'}</button>` : '')
         const zt = bstZeitVon(a && a.zielErreichtAt, t)   // Rest von Hand hat per Definition keinen Ziel-Tag → Trade-Ende
         out.push({ pid, firma: String(k.firma || ''), ts: zt.ts, html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
           + `<span class="wdl-z-wer" title="${escapeHtml(String(k.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(wer)}</b><small>${escapeHtml(konto)}</small></span>`
@@ -32422,10 +32428,9 @@
     if(rp){ const d = rp.dataset; rvhZurueckInPlaner(d.wdlRvhPlaner, d.wdlRvhUid, d.wdlRvhWer || '', d.wdlRvhRest); return }
     const rl = ev.target.closest('[data-wdl-rvh-bal]')
     if(rl){
-      const d = rl.dataset
-      if(d.wdlRvhUid && String(d.wdlRvhUid) !== String(currentUserId || '')){ if(typeof tplBalanceFremd === 'function') tplBalanceFremd(d.wdlRvhBal, d.wdlRvhUid, d.wdlRvhWer || '').catch(err => console.warn('[radar] Balance fremd', err)) }
-      else if(typeof accBalanceLesen === 'function') accBalanceLesen(d.wdlRvhBal, '')
-      if(typeof atToast === 'function') atToast('↻ Balance wird gelesen — steht sie über dem Ziel, taggt die Ziel-Wache das Konto (≤ 5 min) und es wandert nach Review', 'start')
+      if(rl.disabled) return
+      const d = rl.dataset, fremd = !!(d.wdlRvhUid && String(d.wdlRvhUid) !== String(currentUserId || ''))
+      rvhBalLesen(d.wdlRvhBal, fremd ? d.wdlRvhUid : '', d.wdlRvhWer || '', d.wdlRvhZiel, rl)
       return
     }
     // Ziel erreicht → „Nächste Phase →" (08.10.2026, aus dem früheren Kasten „Zu tun"): vorhandener Nachfolger-Assistent
@@ -42053,6 +42058,80 @@
    * von Hand"; die Braucht-dich-Zeile wird zur normalen Planer-Zeile. Eigene Konten direkt per RLS, fremde (Admin-Login) über /admin/wd-plaene
    * aktion rest_planer. Das Feld löscht die Ziel-Wache am Ziel und archiveAccount. Steht der letzte Trade noch in „Trade abhaken", plant der
    * Bot erst nach dem Abhaken (wie immer: „letzter Trade noch nicht erledigt"). */
+  /* BALANCE LESEN AUS „REST VON HAND" (Finn 21.10.2026 ~16:15 Dubai, Marc Apex 100k …0008, 105.966 → 106.000: „Rest kurz manuell geholt, dann
+   * ‚Balance lesen' — wenn er am Ziel ist, soll er nach Review/Bestanden wandern. Aktuell passiert beim Drücken nichts."). URSACHE: der Knopf
+   * stieß die Lesung an (fremd tplBalanceFremd, eigen accBalanceLesen), meldete aber nur einen Start-Toast — Fortschritt, Fehler und Ergebnis
+   * landen in _tplBalFremd/_accBalLauf und werden NUR im Trade-Planer/Admin bzw. in Accounts gezeichnet (tplSpaeter/renderAccounts), nie im
+   * Radar. Selbst nach einer guten Lesung blieb die Zeile: sie rechnet mit der Balance des letzten Trades, und der Ziel-Tag kam erst mit dem
+   * nächsten 5-min-Takt der Ziel-Wache. JETZT: Knopf sofort „liest …" + gesperrt, auf das Ende der Lesung warten (dieselben Wege, nichts
+   * Neues am PC), Ergebnis/Fehler als Toast mit Grund, frische Balance in die Zeile; am Ziel sofort raus aus „Rest von Hand", Ziel-Wache einmal
+   * anstoßen (POST /admin/ziel-wache-jetzt) und Bestanden-Daten neu laden → Tage sammeln/Review. Eigene Konten bekommen den Ziel-Tag lokal
+   * sofort (nur Anzeige, wie handZielAbgleich), die Ziel-Wache schreibt ihn in die DB. */
+  async function rvhBalLesen(kid, uid, wer, zielRoh, knopf){
+    kid = String(kid || ''); if(!kid) return
+    const st = wdl.rvhBal || (wdl.rvhBal = {})
+    if(st[kid] && st[kid].laeuft) return
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const ziel = (zielRoh != null && zielRoh !== '' && isFinite(Number(zielRoh))) ? Number(zielRoh) : null
+    st[kid] = Object.assign({}, st[kid], { laeuft: true, text: 'liest …' })
+    if(knopf){ knopf.disabled = true; knopf.textContent = 'liest …' }   // sofort sichtbar, auch bevor neu gezeichnet wird
+    let bal = null, fehler = '', pcText = ''
+    try{
+      if(uid){
+        await tplBalanceFremd(kid, uid, wer)
+        const r = _tplBalFremd.get(kid) || {}
+        if(r.fehler) fehler = String(r.text || 'nicht gelesen')
+        else if(typeof r.balance === 'number') bal = r.balance
+        else fehler = String(r.text || 'keine Balance gemeldet')
+        pcText = String(r.text || '')
+      } else {
+        const acc = (accounts || []).find(a => String(a.id) === kid)
+        if(!acc) throw new Error('Konto nicht im Login geladen — Seite neu laden')
+        const t0 = Date.now()
+        await accBalanceLesen(kid, wer)
+        while(_accBalLauf.get(kid)?.laeuft && Date.now() - t0 < 250000) await new Promise(res => setTimeout(res, 1500))
+        const r = _accBalLauf.get(kid) || {}
+        pcText = String(r.text || '')
+        if(r.fehler) fehler = String(r.text || 'nicht gelesen')
+        else if(r.laeuft) fehler = 'keine Antwort vom PC in 4 min'
+        else {
+          // frisch aus der DB: jeder Weg (hier am PC, Signal an den PC, MT5) schreibt accounts.tv_balance — lokal nicht jeder
+          const { data: row } = await supabase.from('accounts').select('tv_balance,tv_balance_at').eq('id', kid).maybeSingle()
+          const neu = row && row.tv_balance_at && Date.parse(row.tv_balance_at) >= t0 - 5000
+          if(neu && isFinite(Number(row.tv_balance))){ bal = Number(row.tv_balance); acc.tvBalance = bal; acc.tvBalanceAt = row.tv_balance_at }
+          else fehler = 'Lesung ohne neue Balance (' + (pcText || 'PC meldete nichts') + ')'
+        }
+      }
+    }catch(e){ fehler = String((e && e.message) || e) }
+    if(fehler){
+      st[kid] = Object.assign({}, st[kid], { laeuft: false })
+      if(typeof atToast === 'function') atToast(`Balance${wer ? ' ' + wer : ''} nicht gelesen: ${fehler}`, 'warn')
+      try{ wdlRender() }catch(_){}
+      return
+    }
+    const amZiel = bal != null && ziel != null && bal >= ziel
+    st[kid] = { laeuft: false, bal, at: Date.now(), amZiel }
+    if(bal == null){ if(typeof atToast === 'function') atToast(`Balance gelesen${pcText ? ' · ' + pcText : ''}`, 'ok') }
+    else if(amZiel){
+      if(typeof atToast === 'function') atToast(`✓ Balance ${de(bal)} ≥ Ziel ${de(ziel)} — wandert nach Tage sammeln/Review`, 'ok')
+      if(!uid){   // eigenes Konto: Ziel-Tag lokal sofort (nur Anzeige, wie handZielAbgleich) — die DB setzt die Ziel-Wache
+        const a = (accounts || []).find(x => String(x.id) === kid)
+        if(a && !a.zielErreichtAt){ a.zielErreichtAt = new Date().toISOString(); a.zielErreichtBal = bal; a.zielUsd = ziel }
+      }
+    }
+    else if(typeof atToast === 'function') atToast(`Balance ${de(bal)}${ziel != null ? ` — fehlen noch ${de(ziel - bal)} $ bis ${de(ziel)}` : ''}`, 'ok')
+    try{ wdlRender() }catch(_){}
+    if(amZiel){
+      // Ziel-Wache einmal JETZT (sonst ≤ 5 min), danach Bestanden-Daten (fremde Konten) neu — Fehler hier ändern nichts an der Anzeige oben
+      try{
+        const tok = await _pushTok()
+        if(tok) await fetch(`${WATCHER_HOME}/admin/ziel-wache-jetzt`, { method: 'POST', headers: { 'sb-token': tok } }).catch(() => null)
+      }catch(_){}
+      try{ _hand.at = 0; await handLaden() }catch(_){}
+      try{ wdlRender() }catch(_){}
+    }
+  }
+  window._rvhBalLesen = rvhBalLesen   // Test-Haken (Stub)
   async function rvhZurueckInPlaner(kid, uid, wer, restRoh){
     kid = String(kid || ''); if(!kid) return
     const eigen = !uid || String(uid) === String(currentUserId || '')
