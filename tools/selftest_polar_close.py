@@ -206,6 +206,32 @@ def main():
     check("_kontextmenue_close_lesen(" in sl and "_kontextmenue_close_klicken" not in sl and 'taste="rechts"' in sl and "{ESC}" in sl,
           "Maus-Test belegt den Rechtsklick nur lesend (Menü lesen, Esc, nie auslösen)")
     check(sl.count("_klick_absolut(") == 1, "Maus-Test: einziger Klick ist der Rechtsklick fürs Menü — nie aufs ×")
+    print('10b2) Lage-Wache des Bild-Beweises + Lesefehler ist nie „zu“ (Prüfung 21.10.2026)')
+    bg = pb.bild_noch_gueltig
+    bd = {"hwnd": 4242, "liste": [10, 600, 900, 800], "punkt": (886, 650), "n_x": 1}
+    check(bg(bd, True, [10, 600, 900, 800], 4242) == (True, "Lage unverändert"), "Liste sichtbar, Rechteck gleich, unter dem × die Liste → gültig")
+    check(bg(bd, False, [10, 600, 900, 800], 4242)[0] is False, "Liste unsichtbar (Reiter gewechselt/zu) → ungültig")
+    check(bg(bd, True, [10, 560, 900, 800], 4242)[0] is False and "verändert" in bg(bd, True, [10, 560, 900, 800], 4242)[1], "Toolbox höher gezogen → ungültig")
+    check(bg(bd, True, None, 4242)[0] is False, "Rechteck nicht lesbar → ungültig")
+    check(bg(bd, True, [10, 600, 900, 800], 777)[0] is False and "anderes Fenster" in bg(bd, True, [10, 600, 900, 800], 777)[1],
+          "F9-Dialog/Toast/Browser über dem × → ungültig")
+    check(bg({"liste": [1, 2, 3, 4]}, True, [1, 2, 3, 4], 0)[0] is False and bg(None, True, None, 0)[0] is False, "ohne hwnd/Bild → ungültig")
+    pz = pb.position_zu_bewiesen
+    check(pz(None, 5) is False, "API-Fehler (None) nach dem ×-Klick → NICHT zu (Rückfall läuft)")
+    check(pz({"positionen": [{"ticket": 5}]}, 5) is False and pz({"positionen": [{"ticket": 6}]}, 5) is True and pz({"positionen": []}, 5) is True,
+          "zu nur aus gelungener Lesung ohne das Ticket")
+    check(pz({"fehler": "x"}, 5) is False and pz({"positionen": None}, 5) is False, "Fehler-Antwort / Positionen fehlen → nicht zu")
+    srcL = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    wl = srcL[srcL.index("def slave_wache("):srcL.index("# ── MAUS-TEST ×")]
+    nach = wl[wl.index("stop.set()\n    if signal[\"da\"]"):]
+    check("offen(lesen())" not in wl and nach.count("zu_bewiesen(lesen())") == 6, f"alle sechs Stellen nach dem Signal prüfen zu_bewiesen ({nach.count('zu_bewiesen(lesen())')})")
+    check(nach.index("bild_pruefen(bild, punkt_x)") < nach.index("ob._klick_absolut(punkt_x[0], punkt_x[1])") and "punkt_x and lage_ok and x_klick_erlaubt(" in nach,
+          "Lage-Wache direkt vor dem ×-Klick")
+    blk = wl[wl.index("if park and jetzt >= naechst_blick:"):wl.index("time.sleep(0.004)")]
+    check("bild_pruefen(bild, punkt_x)" in blk and "x_ruht, punkt_x" in blk and "tuple(neu_b[\"punkt\"]) == tuple(x_ruht)" in blk,
+          "Lage-Wache alle 0,5 s; × ruht bei Abweichung, zurück nur mit frischem Foto am selben Punkt")
+    sb = srcL[srcL.index("def slave_x_bild("):srcL.index("def _kontextmenue_close_lesen(")]
+    check('"hwnd": lf["hwnd"]' in sb and "bild_pruefen(out, out[\"punkt\"])" in sb, "Bild-Beweis speichert hwnd und prüft schon beim Foto, dass nichts über dem × liegt")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

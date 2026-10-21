@@ -651,6 +651,13 @@ def chart_x_wahl(kandidaten):
     return list(einzeln.values())[0] if len(einzeln) == 1 else None
 
 
+def position_zu_bewiesen(st, ticket):
+    """REIN RECHNEND (testbar, Prüfung 21.10.2026): „zu" NUR aus einer gelungenen Lesung ohne das Ticket. None (API-Fehler) = unbekannt = nicht zu."""
+    if not isinstance(st, dict) or not isinstance(st.get("positionen"), list):
+        return False
+    return not any(isinstance(p, dict) and p.get("ticket") == ticket for p in st["positionen"])
+
+
 def schliess_urteil(geklickt, weg_nach_s, dialog_knopf=False, limit_s=X_BEWEIS_S):
     """REIN RECHNEND (testbar): nach dem ×-Klick → 'zu' (Position in ≤ limit s weg), 'dialog' (Bestätigungsdialog mit eindeutigem
     Knopf — Ein-Klick-Handel aus, Knopf drücken), 'rueckfall' (nicht geklickt oder nach limit s noch offen → alter Weg)."""
@@ -1553,6 +1560,51 @@ def _liste_fenster(w, punkt):
     return {"hwnd": int(h), "klasse": kl.value, "rect": [p.x, p.y, p.x + rc.right, p.y + rc.bottom]}
 
 
+def bild_noch_gueltig(bild, sichtbar, rect_jetzt, hwnd_unter_x):
+    """REIN RECHNEND (testbar, Prüfung 21.10.2026): gilt der Bild-Beweis noch? Er entsteht EINMAL beim Parken, die Wache läuft bis zu 6 h —
+    in der Zeit kann die Toolbox ihre Höhe ändern, abgedockt werden, ein Toast/Browser/Menü oder ein F9-Dialog über dem × liegen. Dann
+    klickte _klick_absolut blind an die alte Stelle. Gültig nur, solange das Listenfenster sichtbar ist, sein Rechteck gleich dem beim Foto
+    ist UND unter dem ×-Punkt genau dieses Fenster liegt. -> (bool, grund)"""
+    if not isinstance(bild, dict) or not bild.get("hwnd") or not bild.get("liste"):
+        return False, "kein Bild-Beweis"
+    if not sichtbar:
+        return False, "Liste nicht mehr sichtbar"
+    if [int(v) for v in (rect_jetzt or [])] != [int(v) for v in bild["liste"]]:
+        return False, f"Liste verändert {list(bild['liste'])} → {list(rect_jetzt or [])}"
+    if int(hwnd_unter_x or 0) != int(bild["hwnd"]):
+        return False, "über dem × liegt ein anderes Fenster"
+    return True, "Lage unverändert"
+
+
+def _fenster_lage(hwnd, punkt):
+    """Win32, < 1 ms, kein Foto: (sichtbar, Client-Rechteck in Bildschirm-Koordinaten, Fenster unter dem Punkt). Nur lesen."""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    u32.IsWindow.argtypes = [ctypes.c_void_p]
+    u32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+    u32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
+    u32.ClientToScreen.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.POINT)]
+    u32.WindowFromPoint.restype = ctypes.c_void_p
+    u32.WindowFromPoint.argtypes = [wt.POINT]
+    h = ctypes.c_void_p(int(hwnd))
+    sichtbar = bool(u32.IsWindow(h)) and bool(u32.IsWindowVisible(h))
+    rect = None
+    rc, p = wt.RECT(), wt.POINT(0, 0)
+    if sichtbar and u32.GetClientRect(h, ctypes.byref(rc)) and u32.ClientToScreen(h, ctypes.byref(p)):
+        rect = [p.x, p.y, p.x + rc.right, p.y + rc.bottom]
+    unter = u32.WindowFromPoint(wt.POINT(int(punkt[0]), int(punkt[1])))
+    return sichtbar, rect, int(unter or 0)
+
+
+def bild_pruefen(bild, punkt_x):
+    """Lage-Wache vor jedem ×-Klick und alle 0,5 s in der Wache. Fehler beim Lesen = nicht gültig. -> (bool, grund)"""
+    try:
+        return bild_noch_gueltig(bild, *_fenster_lage(bild["hwnd"], punkt_x))
+    except Exception as e:
+        return False, f"Lage nicht lesbar ({type(e).__name__})"
+
+
 def _bildschirm_lesen(x, y, b, h):
     """Bildschirm-Ausschnitt per GDI-BitBlt → Zeilen von 0xRRGGBB (ohne Mauszeiger). Kein PIL nötig. Nur lesen. -> Liste | None"""
     import ctypes
@@ -1613,7 +1665,7 @@ def slave_x_bild(w, zeile_punkt, zeile_pruefen=True):
         return {"grund": lf.get("grund") or "Liste nicht gefunden", "klasse": lf.get("klasse")}
     l, t, r, b = lf["rect"]
     breite, hoehe = min(BILD_STREIFEN_PX, r - l), b - t
-    out = {"klasse": lf["klasse"], "liste": lf["rect"], "ohne_zeile": not zeile_pruefen}
+    out = {"klasse": lf["klasse"], "liste": lf["rect"], "hwnd": lf["hwnd"], "ohne_zeile": not zeile_pruefen}
     if breite < 40 or not (12 <= hoehe <= 1600) or not (t <= zeile_punkt[1] < b):
         out["grund"] = f"Listen-Rechteck unbrauchbar {lf['rect']} ({lf['klasse']})"
         return out
@@ -1632,6 +1684,10 @@ def slave_x_bild(w, zeile_punkt, zeile_pruefen=True):
     ox = r - breite
     out.update(punkt=(ox + g["cx"], t + g["cy"]), glyph=[ox + g["x"], t + g["y"], g["b"], g["h"]], abstand_rechts=r - (ox + g["x"] + g["b"]),
                ascii=maske_ascii(maske, max(0, g["x"] - 4), g["y"] - 3, g["b"] + 8, g["h"] + 6))
+    ok, warum = bild_pruefen(out, out["punkt"])           # schon beim Foto: unter dem × liegt genau die Liste (nichts verdeckt)
+    if not ok:
+        out["grund"] = f"× gesehen, aber {warum}"
+        out.pop("punkt")
     return out
 
 
@@ -1713,6 +1769,11 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
     def offen(st):
         return any(p["ticket"] == ticket for p in (st or {}).get("positionen") or [])
 
+    def zu_bewiesen(st):
+        # Lesefehler (None) ist NIE „zu" (Prüfung 21.10.2026): offen(None) war False — ein API-Aussetzer nach dem ×-Klick galt als
+        # „weg", der Rückfall fiel aus und der Slave meldete „zu", obwohl die Position offen war
+        return position_zu_bewiesen(st, ticket)
+
     symbol = str(lauf.cmd.get("symbol") or "").strip() or None
 
     def parken_mit_beweis():
@@ -1741,6 +1802,7 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
 
     punkt, punkt_x, fenster, zelle, bild, x_tip, x_beweis = parken_mit_beweis()
     park = punkt_x or punkt
+    x_ruht, naechst_foto = None, 0.0                     # × mit verworfener Lage (Lage-Wache), wartet auf ein frisches Foto
     if park:
         erg["geparkt"], erg["x_geparkt"] = True, punkt_x is not None
         erg["x_beweis"] = (f"{x_beweis}; Tooltip '{x_tip or '—'}'") if punkt_x else f"Zeile (kein bewiesenes ×: {x_beweis})"
@@ -1783,9 +1845,33 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                     ob._fenster_betreten(w)
                 # Neu lesen NUR, wenn das Fenster sich bewegt hat (21.10.2026): der Bild-Beweis fotografiert sonst alle 0,5 s unter der
                 # parkenden Maus (Hover-Effekt am ×) und würde das bewiesene × grundlos fallen lassen
+                # LAGE-WACHE (Prüfung 21.10.2026): der Bild-Beweis gilt nur, solange Liste, Rechteck und das Fenster unter dem × gleich
+                # sind (bild_noch_gueltig, Win32, kein Foto). Weicht etwas ab → × ruht, Maus auf die Zeile (Rechtsklick-Rückfall). Steht die
+                # Lage später wieder, zählt das × erst nach einem FRISCHEN Foto am selben Punkt (Maus dabei auf der Zeile, nicht am ×).
+                if punkt_x and bild and not zelle:
+                    ok_l, warum_l = bild_pruefen(bild, punkt_x)
+                    if not ok_l:
+                        x_ruht, punkt_x, erg["x_geparkt"] = punkt_x, None, False
+                        park = punkt
+                        lauf.log(f"Wache: × ruht — {warum_l} → Maus auf die Zeile, Schließen über den Rechtsklick")
+                        melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt) if punkt else None, "x": None, "x_art": None, "tooltip": "",
+                                                 "beweis": f"× ruht: {warum_l}", "neu": True})
+                        if park:
+                            ob._maus_fahren(*park, schritte=4)
+                elif x_ruht and bild and punkt and jetzt >= naechst_foto and bild_pruefen(bild, x_ruht)[0]:
+                    naechst_foto = jetzt + 3.0                   # Foto höchstens alle 3 s (BitBlt + Auswertung ~0,1 s)
+                    neu_b = slave_x_bild(w, punkt)
+                    if neu_b.get("punkt") and tuple(neu_b["punkt"]) == tuple(x_ruht):
+                        punkt_x, bild, x_ruht, erg["x_geparkt"] = x_ruht, neu_b, None, True
+                        park = punkt_x
+                        lauf.log(f"Wache: × wieder bewiesen (frisches Foto, Lage gleich) @{park[0]},{park[1]}")
+                        melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt), "x": list(punkt_x), "x_art": "bild", "tooltip": x_tip,
+                                                 "beweis": f"× wieder bewiesen: {neu_b.get('grund')}", "neu": True})
+                        ob._maus_fahren(*park, schritte=4)
                 hr_n = w.rectangle()
                 if (hr_n.left, hr_n.top, hr_n.right, hr_n.bottom) != fenster:
                     punkt, punkt_x, fenster, zelle, bild, x_tip, x_beweis = parken_mit_beweis()   # Zelle/Bild mitziehen (S2-Hinweis 20.10.2026)
+                    x_ruht = None
                     park = punkt_x or punkt
                     erg["x_geparkt"] = punkt_x is not None
                     melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt) if punkt else None, "x": list(punkt_x) if punkt_x else None,
@@ -1822,14 +1908,17 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
         # 1) EIN Klick aufs geparkte × — nur mit vollem Beweis (x_klick_erlaubt: Profit-Zelle per UIA mit Tooltip Schließen/Close oder
         #    Bild-Beweis, genau EINE Position = die eigene, Vor-Klick-Lesung) und nicht pausiert; sonst sofort 2) Rechtsklick-Weg
         #    (Finn 21.10.2026: „Maus auf dem X, sobald das Signal vom Master kommt, insta schließen")
-        if weg is None and punkt_x and x_klick_erlaubt(zelle, x_tip, einzig, bild) and not ob.is_paused():
+        lage_ok, lage_grund = (True, "Zellen-Weg") if (zelle or not punkt_x) else bild_pruefen(bild, punkt_x)   # direkt vor dem Klick, < 1 ms
+        if punkt_x and not lage_ok:
+            lauf.log(f"Polar: × nicht geklickt — {lage_grund} → Rechtsklick-Rückfall")
+        if weg is None and punkt_x and lage_ok and x_klick_erlaubt(zelle, x_tip, einzig, bild) and not ob.is_paused():
             geklickt = bool(ob._klick_absolut(punkt_x[0], punkt_x[1]))
             erg["klick_ms"] = jetzt_ms()
             lauf.phase("x_geklickt", klick_ms=erg["klick_ms"], x_ok=geklickt)
             lauf.log(f"Polar: × geklickt {int((time.time() - t_sig) * 1000)} ms nach dem Signal" if geklickt else "Polar: × NICHT gedrückt (SendInput)")
             weg_nach, dialog_knopf, ende = None, False, time.time() + X_BEWEIS_S
             while time.time() < ende:
-                if not offen(lesen()):
+                if zu_bewiesen(lesen()):
                     weg_nach = time.time() - t_sig
                     break
                 if not dialog_knopf:
@@ -1855,7 +1944,7 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                 except Exception:
                     pass
         # 2) Rückfall: Rechtsklick auf die geparkte Zeile → „Position schließen" (der bewährte Weg bis 19.10.2026)
-        if weg is None and punkt and einzig and not ob.is_paused() and offen(lesen()):
+        if weg is None and punkt and einzig and not ob.is_paused() and not zu_bewiesen(lesen()):
             ob._maus_fahren(*punkt, schritte=3)
             if ob._klick_absolut(punkt[0], punkt[1], taste="rechts"):
                 st_m = ob._kontextmenue_close_klicken(timeout=0.8)
@@ -1864,7 +1953,7 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                     lauf.log(f"Polar: 'Position schließen' {int((time.time() - t_sig) * 1000)} ms nach dem Signal")
                     ende = time.time() + 3.0
                     while time.time() < ende:
-                        if not offen(lesen()):
+                        if zu_bewiesen(lesen()):
                             weg = "ein_klick"
                             break
                         dlg, knopf = ob._finde_close_dialog(w, ticket)
@@ -1883,17 +1972,19 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                         pass
                     lauf.log(f"Polar: Kontextmenü ohne 'Position schließen' ({st_m}) — voller Zeilen-Scan")
         # 3) Letzter Weg: der volle Zeilen-Scan (nur bei genau einer Position)
-        if weg is None and offen(lesen()):
+        if weg is None and not zu_bewiesen(lesen()):
             st_n = lesen()
             if st_n and len(st_n["positionen"]) == 1:
-                ausgang = ob._close_klicken(w, ticket, lauf.trail, anker_pfad, lambda: not offen(lesen()))
+                ausgang = ob._close_klicken(w, ticket, lauf.trail, anker_pfad, lambda: zu_bewiesen(lesen()))
                 lauf.log(f"Polar: voller Schließ-Scan → {ausgang}")
             else:
                 lauf.log("Polar: mehrere Positionen offen — Zeilen-Scan nicht sicher, Schließen von Hand nötig")
-        ende = time.time() + 8.0
-        while time.time() < ende and offen(lesen()):
+        ende, zu = time.time() + 8.0, False
+        while time.time() < ende:
+            if zu_bewiesen(lesen()):
+                zu = True
+                break
             time.sleep(0.1)
-        zu = not offen(lesen())
         zu_ms = erg.get("zu_ms") or (jetzt_ms() if zu else None)
         erg.update(ok=zu, zu_weg=(weg or ("scan" if zu else None)), zu_ms=zu_ms, zu_nach_signal_ms=(zu_ms - erg["signal_ms"]) if zu else None)
         if zu and weg == "schon_zu":
