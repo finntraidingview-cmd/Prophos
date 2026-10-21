@@ -88,6 +88,8 @@
     --shadow-pop: 0 8px 24px rgba(16,24,40,.12), 0 2px 6px rgba(16,24,40,.06);
     --shadow-input-focus: 0 0 0 4px rgba(84,71,206,.12);
     --ease: cubic-bezier(.4,0,.2,1);
+    /* Markenfarben der vier Kernwege (Finn 21.10.2026, wegSymbol): Farben der Weg-Sticker (.tc2-sys) bzw. vorhandene Tokens */
+    --weg-echo:#0E7A78; --weg-orbit:#7C3AED; --weg-wd:var(--good); --weg-polar:var(--blue);
   }
   /* Dark Mode (Finn 18.10.2026: „komplett nur Design, sonst nichts"): derselbe Token-Satz dunkel. Hell bleibt Standard
      und unverändert — gilt nur, wenn <html data-theme="dark"> gesetzt ist (Schalter Topbar/Settings, localStorage). */
@@ -120,6 +122,7 @@
     --shadow-card-hover: 0 4px 14px rgba(0,0,0,.45);
     --shadow-pop: 0 10px 30px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.35);
     --shadow-input-focus: 0 0 0 4px rgba(116,104,240,.28);
+    --weg-echo:var(--teal); --weg-orbit:var(--violet-soft); --weg-wd:var(--good); --weg-polar:var(--blue);
   }
 
   *{box-sizing:border-box}
@@ -4801,14 +4804,26 @@
     line-height:1.35;white-space:nowrap
   }
   #dashboard-view .tc2-sys::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}
-  /* WEG-SYMBOLE (21.10.2026, wegSymbol): Farbe = Textfarbe (currentColor), im Sticker statt des Punkts, im Radar-Block-Kopf in der Modellfarbe */
-  #dashboard-view .weg-sym{flex:none;display:inline-block;vertical-align:-2px;margin-right:5px}
+  /* WEG-SYMBOLE (21.10.2026, wegSymbol): Markenfarbe je Familie (--weg-*), im Sticker die Sticker-Farbe; klein (16er) still, groß (24er) in
+     Köpfen mit ruhiger Bewegung — Echo-Wellen laufen nach außen, Orbit-Mond kreist (SMIL im SVG), Polar funkelt; ≥ 3 s, reduced-motion = still */
+  #dashboard-view .weg-sym{flex:none;display:inline-block;vertical-align:-2px;margin-right:5px;overflow:visible}
+  #dashboard-view .weg-sym-echo{color:var(--weg-echo)} #dashboard-view .weg-sym-orbit{color:var(--weg-orbit)}
+  #dashboard-view .weg-sym-wd{color:var(--weg-wd)} #dashboard-view .weg-sym-polar{color:var(--weg-polar)}
   #dashboard-view .tc2-sys.has-sym::before{display:none}
-  #dashboard-view .tc2-sys .weg-sym{width:12px;height:12px;margin-right:0}
+  #dashboard-view .tc2-sys .weg-sym{width:12px;height:12px;margin-right:0;color:inherit}
   #dashboard-view .wdl-pf .weg-sym{width:12px;height:12px;margin-right:4px;vertical-align:-2.5px}
-  #dashboard-view .wdl-mb-kopf .weg-sym{color:var(--wdl-m, currentColor);width:15px;height:15px;vertical-align:-2.5px}
-  #dashboard-view .modal-head h3 .weg-sym{width:17px;height:17px;vertical-align:-2.5px;margin-right:7px;color:var(--violet)}
-  #dashboard-view .pol-banner-titel .weg-sym,#dashboard-view .pol-radar-titel .weg-sym{color:var(--violet);width:15px;height:15px;vertical-align:-2.5px}
+  #dashboard-view .weg-gross{width:20px;height:20px;vertical-align:-4.5px;margin-right:7px}
+  #dashboard-view .wdl-mb-kopf .weg-gross{width:18px;height:18px;vertical-align:-3.5px}
+  #dashboard-view .modal-head h3 .weg-gross{width:22px;height:22px;vertical-align:-5px;margin-right:8px}
+  #dashboard-view .weg-bewegt .ws-w{animation:wegWelle 3.6s ease-in-out infinite;animation-delay:var(--ws-e, 0s)}
+  #dashboard-view .weg-bewegt .ws-w2{animation-delay:calc(var(--ws-e, 0s) + .45s)} #dashboard-view .weg-bewegt .ws-w3{animation-delay:calc(var(--ws-e, 0s) + .9s)}
+  #dashboard-view .weg-sym-echo.weg-bewegt .ws-halo{animation:wegHalo 3.6s ease-in-out infinite;animation-delay:var(--ws-e, 0s);transform-box:fill-box;transform-origin:center}
+  #dashboard-view .weg-sym-polar.weg-bewegt .ws-halo{animation:wegHalo 4.2s ease-in-out infinite;animation-delay:var(--ws-p, 0s);transform-box:fill-box;transform-origin:center}
+  #dashboard-view .weg-sym-polar.weg-bewegt .ws-stern{animation:wegFunkel 4.2s ease-in-out infinite;animation-delay:var(--ws-p, 0s);transform-box:fill-box;transform-origin:center}
+  @keyframes wegWelle{0%,100%{opacity:.45}30%{opacity:1}}
+  @keyframes wegHalo{0%,100%{opacity:.08;transform:scale(.9)}50%{opacity:.26;transform:scale(1.12)}}
+  @keyframes wegFunkel{0%,100%{transform:scale(1) rotate(0deg)}50%{transform:scale(1.07) rotate(8deg)}}
+  @media (prefers-reduced-motion: reduce){ #dashboard-view .weg-sym *{animation:none !important} }
   #dashboard-view .tc2.tc2-has-sys{padding-top:21px}
   #dashboard-view .tc2-sys-dup{background:rgba(37,99,235,.12);color:#2563EB}
   #dashboard-view .tc2-sys-mt5{background:rgba(14,151,149,.15);color:#0E7A78}
@@ -22416,16 +22431,42 @@
     if(w === 'polar' || /^polar\b/.test(w)) return 'polar'
     return ''
   }
-  function wegSymbol(weg){   // Deklaration: Karten und Radar zeichnen schon vor dieser Stelle im Modul
+  function wegSymbol(weg, gross){   // Deklaration: Karten und Radar zeichnen schon vor dieser Stelle im Modul
     const f = wegFamilie(weg)
     if(!f) return ''
-    const WEG_SVG = {
-      echo: '<circle cx="3.6" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M6.6 5.4a3.6 3.6 0 0 1 0 5.2"/><path d="M9.2 3.4a6.4 6.4 0 0 1 0 9.2"/><path d="M11.8 1.6a9 9 0 0 1 0 12.8"/>',
-      orbit: '<ellipse cx="8" cy="8" rx="7" ry="2.8" transform="rotate(-35 8 8)"/><circle cx="8" cy="8" r="2.1" fill="currentColor" stroke="none"/><circle cx="11.4" cy="3.45" r="1.4" fill="currentColor" stroke="none"/>',
-      wd: '<path d="M8 1.4 10.1 2.92 12.67 3.33 13.08 5.9 14.6 8 13.08 10.1 12.67 12.67 10.1 13.08 8 14.6 5.9 13.08 3.33 12.67 2.92 10.1 1.4 8 2.92 5.9 3.33 3.33 5.9 2.92Z"/><path d="M5.5 8.2 7.2 9.9 10.6 6.3"/>',
-      polar: '<path d="M8 1.2 9.2 6.8 14.8 8 9.2 9.2 8 14.8 6.8 9.2 1.2 8 6.8 6.8Z"/><path d="M3.7 3.7 5.1 5.1M12.3 3.7 10.9 5.1M3.7 12.3 5.1 10.9M12.3 12.3 10.9 10.9"/>'
+    /* MARKEN-ZEICHEN (Finn 21.10.2026: „Mach gerne coolere Symbole … Das sind die Kernmodelle von allem"): Duotone in der Markenfarbe der
+     * Familie (--weg-echo/-orbit/-wd/-polar, Farbe über .weg-sym-<f>). gross = 24er-Raster mit Lichtkante, Halo und ruhiger Bewegung (nur Köpfe,
+     * ≥ 3 s Zyklus, prefers-reduced-motion = still); klein = 16er-Raster ohne Bewegung, scharf bis 12 px (Pillen, Sticker, Knöpfe). */
+    let still = !gross
+    if(gross){ try{ still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) }catch(_){ still = true } }
+    const KLEIN = {
+      echo: '<g transform="translate(1.2 0)"><circle cx="3.4" cy="8" r="1.7" fill="currentColor" stroke="none"/><path d="M5.88 5.25A3.7 3.7 0 0 1 5.88 10.75" stroke-width="1.6"/><path d="M7.62 3.32A6.3 6.3 0 0 1 7.62 12.68" stroke-width="1.6" stroke-opacity=".66"/><path d="M9.36 1.39A8.9 8.9 0 0 1 9.36 14.61" stroke-width="1.6" stroke-opacity=".36"/></g>',
+      orbit: '<ellipse cx="8" cy="8" rx="7" ry="2.8" transform="rotate(-35 8 8)" stroke-width="1.4" stroke-opacity=".75"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/><circle cx="11.4" cy="3.45" r="1.45" fill="currentColor" stroke="none"/>',
+      wd: '<path d="M8 1.4 10.1 2.92 12.67 3.33 13.08 5.9 14.6 8 13.08 10.1 12.67 12.67 10.1 13.08 8 14.6 5.9 13.08 3.33 12.67 2.92 10.1 1.4 8 2.92 5.9 3.33 3.33 5.9 2.92Z" fill="currentColor" fill-opacity=".18" stroke-width="1.4"/><path d="M5.4 8.2 7.2 10 10.7 6.3" stroke-width="1.7"/>',
+      polar: '<path d="M8 0.6 8.5 6.8 10.55 5.45 9.2 7.5 15.4 8 9.2 8.5 10.55 10.55 8.5 9.2 8 15.4 7.5 9.2 5.45 10.55 6.8 8.5 0.6 8 6.8 7.5 5.45 5.45 7.5 6.8Z" fill="currentColor" stroke="none"/>'
     }
-    return f ? `<svg class="weg-sym weg-sym-${f}" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${WEG_SVG[f]}</svg>` : ''
+    // PHASE DER WELTUHR (negativer Start): Radar und Trades zeichnen ihre Köpfe regelmäßig neu — Wellen, Funkeln und Mond laufen so nahtlos
+    // weiter statt bei jedem Neuzeichnen von vorn (Vergleiche fürs Neuzeichnen ignorieren style="--ws-…" und begin, s. polarOhneCountdown)
+    const t = Date.now() / 1000, ph = z => '-' + (t % z).toFixed(2) + 's'
+    const mond = still ? '<circle cx="20.12" cy="6.63" r="1.8" fill="currentColor" stroke="none"/>'
+      : `<circle r="1.8" fill="currentColor" stroke="none"><animateMotion dur="9s" begin="${ph(9)}" repeatCount="indefinite" path="M2.32 16.31A10.6 3.8 -24 1 0 21.68 7.69A10.6 3.8 -24 1 0 2.32 16.31"/></circle>`
+    const GROSS = {
+      echo: '<g transform="translate(2.6 0)"><circle class="ws-halo" cx="5" cy="12" r="4.2" fill="currentColor" stroke="none" opacity=".16"/><circle cx="5" cy="12" r="2.4" fill="currentColor" stroke="none"/>'
+        + '<path class="ws-w ws-w1" d="M9.01 7.54A6 6 0 0 1 9.01 16.46" stroke-width="2.3"/><path class="ws-w ws-w2" d="M11.42 4.87A9.6 9.6 0 0 1 11.42 19.13" stroke-width="2.1" stroke-opacity=".62"/>'
+        + '<path class="ws-w ws-w3" d="M13.83 2.19A13.2 13.2 0 0 1 13.83 21.81" stroke-width="1.9" stroke-opacity=".32"/></g>',
+      // Bahn hinten (blass) → Mond → Planet mit Lichtkante → Bahn vorne: der Planet sitzt IN der Bahn
+      orbit: '<path d="M2.32 16.31A10.6 3.8 -24 0 1 21.68 7.69" stroke-width="1.6" stroke-opacity=".4"/>' + mond
+        + '<circle cx="12" cy="12" r="4.6" fill="currentColor" stroke="none"/><path d="M8.9 10.87A3.3 3.3 0 0 1 12.85 8.81" style="stroke:var(--surface)" stroke-width="1.3" stroke-opacity=".7"/>'
+        + '<path d="M2.32 16.31A10.6 3.8 -24 0 0 21.68 7.69" stroke-width="1.8"/>',
+      wd: '<path d="M8.4 18.4 7 23.2 9.5 22 10.7 23.8 11.4 19.4Z M15.6 18.4 17 23.2 14.5 22 13.3 23.8 12.6 19.4Z" fill="currentColor" fill-opacity=".55" stroke="none"/>'
+        + '<path class="ws-siegel" d="M12 1 13.58 2.66 15.67 1.73 16.5 3.87 18.79 3.81 18.73 6.1 20.87 6.93 19.94 9.02 21.6 10.6 19.94 12.18 20.87 14.27 18.73 15.1 18.79 17.39 16.5 17.33 15.67 19.47 13.58 18.54 12 20.2 10.42 18.54 8.33 19.47 7.5 17.33 5.21 17.39 5.27 15.1 3.13 14.27 4.06 12.18 2.4 10.6 4.06 9.02 3.13 6.93 5.27 6.1 5.21 3.81 7.5 3.87 8.33 1.73 10.42 2.66Z" fill="currentColor" fill-opacity=".16" stroke-width="1.5"/>'
+        + '<path d="M7.6 10.9 10.6 13.9 16.4 7.9" stroke-width="2.3"/>',
+      polar: '<circle class="ws-halo" cx="12" cy="12" r="7.2" fill="currentColor" stroke="none" opacity=".14"/>'
+        + '<path class="ws-stern" d="M12 0.8 12.73 10.24 15.82 8.18 13.76 11.27 23.2 12 13.76 12.73 15.82 15.82 12.73 13.76 12 23.2 11.27 13.76 8.18 15.82 10.24 12.73 0.8 12 10.24 11.27 8.18 8.18 11.27 10.24Z" fill="currentColor" stroke="none"/>'
+        + '<circle cx="12" cy="12" r="1.3" style="fill:var(--surface)" stroke="none" opacity=".85"/>'
+    }
+    const n = gross ? 24 : 16, px = gross ? 20 : 14
+    return `<svg class="weg-sym weg-sym-${f}${gross ? ' weg-gross' : ''}${still ? '' : ' weg-bewegt'}"${still ? '' : ` style="--ws-e:${ph(3.6)};--ws-p:${ph(4.2)}"`} viewBox="0 0 ${n} ${n}" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${(gross ? GROSS : KLEIN)[f]}</svg>`
   }
   window._wegSymbol = wegSymbol   // Test-Haken (Stub)
   // Weg-Knöpfe im Plan-Popup (21.10.2026): Symbol vor dem Namen — „Duplikum (Puls)" bleibt ohne (heißt nach Duplikum)
@@ -31721,7 +31762,7 @@
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)); if(!t) return
     const m = document.getElementById('polarModal'), lauf = document.getElementById('pol-lauf'); if(!m || !lauf) return
     wdlPolarPopupZurueck()
-    const h = document.getElementById('polarTitel'); if(h){ if(!h.dataset.plan) h.dataset.plan = h.innerHTML; h.innerHTML = wegSymbol('polar') + 'Polar-Lauf <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Stand</span>' }
+    const h = document.getElementById('polarTitel'); if(h){ if(!h.dataset.plan) h.dataset.plan = h.innerHTML; h.innerHTML = wegSymbol('polar', true) + 'Polar-Lauf <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Stand</span>' }
     m.querySelectorAll('.pol-grid, .modal-foot').forEach(e => { e.hidden = true })
     lauf.hidden = false
     m.classList.add('open')
@@ -32059,7 +32100,7 @@
       const koerper = a => {
         const bl = a === arr ? bloecke : [...reihe, 'Weitere'].map(k => [k, a.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
         return wdl.modell ? bl.map(([, b]) => zeilenVon(b)).join('')
-          : wdlObergruppenHtml(bl, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${wegSymbol(k)}${escapeHtml(k)}</b>`
+          : wdlObergruppenHtml(bl, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${wegSymbol(k, true)}${escapeHtml(k)}</b>`
             + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`)
       }
       const zeilen = unter
@@ -42399,7 +42440,7 @@
     const modell = p => OFFEN_MODELL[planSysKey(p)] || 'Weitere'
     const bloecke = [...reihe, 'Weitere'].map(k => [k, list.filter(p => modell(p) === k)]).filter(([, b]) => b.length)
     const block = (k, b) => `<div class="wdl-mb${k === 'Weitere' ? ' tc-mb-weitere' : ''}" style="--wdl-m:${farbe[k] || 'var(--sub)'}">`
-      + `<div class="wdl-mb-kopf"><b>${wegSymbol(k)}${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p) + (opt && opt.puls ? planPulsZeile(p) : '')).join('')}</div>`
+      + `<div class="wdl-mb-kopf"><b>${wegSymbol(k, true)}${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p) + (opt && opt.puls ? planPulsZeile(p) : '')).join('')}</div>`
     // Obergruppen „Mit Hedge" / „Ohne Hedge" wie im Radar (09.10.2026)
     const og = typeof window._wdlObergruppenHtml === 'function' ? window._wdlObergruppenHtml : null
     return `<div class="tc-zl">` + (og ? og(bloecke, block) : bloecke.map(([k, b]) => block(k, b)).join('')) + `</div>`
@@ -55874,7 +55915,7 @@
     _polarEditPlan = (opt && opt.edit) || null
     _polarNurAnsehen = !!_polarEditPlan && !polarEditFrei(_polarEditPlan)
     const titel = polarEl('polarTitel')
-    if(titel) titel.innerHTML = wegSymbol('polar') + (_polarEditPlan ? `Polar bearbeiten <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">${_polarNurAnsehen ? 'läuft — nur ansehen' : 'Plan ' + escapeHtml(String(_polarEditPlan.id).slice(0, 8))}</span>` : _polarTitelNeu)
+    if(titel) titel.innerHTML = wegSymbol('polar', true) + (_polarEditPlan ? `Polar bearbeiten <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">${_polarNurAnsehen ? 'läuft — nur ansehen' : 'Plan ' + escapeHtml(String(_polarEditPlan.id).slice(0, 8))}</span>` : _polarTitelNeu)
     const speichern = polarEl('polarNurSpeichern'); if(speichern) speichern.textContent = _polarEditPlan ? 'Änderungen speichern' : 'Speichern'
     polarEditSperren(false)
     ;['polarStart', 'polarNurSpeichern'].forEach(id => { const k = polarEl(id); if(k) k.disabled = false })   // nach Erfolg gesperrt (16.10.2026)
@@ -56390,7 +56431,7 @@
     if(fuss) fuss.hidden = false
     polarRadarKnopf(false, false)
     if(tw) tw.hidden = false
-    if(h) h.innerHTML = wegSymbol('polar') + 'Polar starten — Vorprüfung'   // Weg-Symbol im Kopf (21.10.2026)
+    if(h) h.innerHTML = wegSymbol('polar', true) + 'Polar starten — Vorprüfung'   // Weg-Symbol im Kopf (21.10.2026)
   }
   // WARTEN AUF DEN LAUF (21.10.2026): verschiebt die DB-Sperre den Start (mt5_baseline.start_sperre), steht hier „Start verschoben — Grund ·
   // neuer Versuch in m:ss · Versuch n" statt nur „wartet …". Dafür liest das Popup NUR während des Wartens die eine Plan-Zeile nach (≤ alle 15 s)
@@ -56440,7 +56481,7 @@
         : 'Lauf beendet — Railway rechnet beide Seiten ab (Trades → Überprüfen).'
       polarRadarKnopf(true, WDL_POLAR_ENDE.includes(String(d.status || '')))   // nach dem Ende ist der Radar der nächste Schritt → Hauptknopf
       const titel = polarEl('polarCheckTitel')
-      if(titel) titel.innerHTML = wegSymbol('polar') + (String(d.status) === 'fertig' ? 'Polar beendet — Ergebnis' : WDL_POLAR_ENDE.includes(String(d.status || '')) ? 'Polar gestoppt' : 'Polar läuft — Live-Ablauf')
+      if(titel) titel.innerHTML = wegSymbol('polar', true) + (String(d.status) === 'fertig' ? 'Polar beendet — Ergebnis' : WDL_POLAR_ENDE.includes(String(d.status || '')) ? 'Polar gestoppt' : 'Polar läuft — Live-Ablauf')
       if(WDL_POLAR_ENDE.includes(String(d.status || '')) && _polarLive && _polarLive.takt){ clearInterval(_polarLive.takt); _polarLive.takt = null }
     }catch(e){ if(msg) msg.textContent = 'Stand: ' + ((e && e.message) || e) }
   }
@@ -56450,7 +56491,7 @@
     if(tw) tw.hidden = true
     if(fuss) fuss.hidden = true
     polarRadarKnopf(true, false)
-    if(h) h.innerHTML = wegSymbol('polar') + 'Polar läuft — Live-Ablauf'
+    if(h) h.innerHTML = wegSymbol('polar', true) + 'Polar läuft — Live-Ablauf'
     const kt = Number(p.masterContracts) || null, lots = kt && Number(p.multiplier) ? Math.round(kt * Number(p.multiplier) * 100) / 100 : null
     const ppl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(p.slaveFirm)) || 1
     // Namen der IDs aus der Vorprüfung (Spaltenköpfe „Slave · Finn + Pascal"), sonst neutral
@@ -56632,7 +56673,7 @@
     return `<span class="rsq-card-run pol-verschoben-chip" title="Start verschoben — ${escapeHtml(v.text)}${v.versuche > 1 ? ' · Versuch ' + v.versuche : ''}">⏸ `
       + (v.bisMs ? `neuer Versuch&nbsp;<span data-pol-bis="${v.bisMs}">${polarRestText(v.bisMs)}</span>` : 'Start verschoben') + '</span>'
   }
-  function polarOhneCountdown(html){ return String(html || '').replace(/(data-pol-bis="\d+">)[^<]*/g, '$1') }
+  function polarOhneCountdown(html){ return String(html || '').replace(/(data-pol-bis="\d+">)[^<]*/g, '$1').replace(/ style="--ws-[^"]*"| begin="-[\d.]+s"/g, '') }   // + Phase der Weg-Symbole
   window._polarStartVerschoben = polarStartVerschoben   // Test-Haken (Stub)
   setInterval(() => { document.querySelectorAll('[data-pol-bis]').forEach(el => { el.textContent = polarRestText(el.dataset.polBis) }) }, 1000)
   const POLAR_BANNER_STAND_MS = 20000, POLAR_BANNER_ZU_SS = 'prophos_polbanner_zu'
@@ -56701,7 +56742,7 @@
       if(m != null || s != null) pl$ = `Slave ${g(s)} · Master ${g(m)}`
     }
     const kontoTxt = k.konto.slave || k.konto.master ? `${k.konto.slave || '?'} ⇄ ${k.konto.master || '?'}` : (k.pid ? 'Plan ' + k.pid.slice(0, 8) : '–')
-    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">${wegSymbol('polar')}${pl.quelle === 'sperre' ? 'Polar-Start verschoben' : 'Polar-Trade läuft'}</span>`
+    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">${wegSymbol('polar', true)}${pl.quelle === 'sperre' ? 'Polar-Start verschoben' : 'Polar-Trade läuft'}</span>`
       + `<span class="pol-banner-prio">Prio 1</span><span class="pol-banner-ph">${escapeHtml(ph)}</span>`
       + `<span class="pol-banner-rechts"><button type="button" class="btn btn-primary" data-pol-banner-auf>Live-Ablauf öffnen</button>`
       + `<button type="button" class="pol-banner-klapp" data-pol-banner-klapp aria-expanded="${!zu}" title="${zu ? 'Aufklappen' : 'Einklappen — bleibt sichtbar, solange der Lauf läuft'}"><i></i></button></span></div>`
@@ -56778,7 +56819,7 @@
     el.innerHTML = offen.map(t => {
       const pid = wdlTid(t), x = wdl.polar[pid] || null
       const ph = wdlPolarPhase(x && x.stand, !!(x && x.hand), Date.now())
-      return `<div class="pol-radar-zeile"><span class="pol-banner-punkt" aria-hidden="true"></span><b class="pol-radar-titel">${wegSymbol('polar')}Polar läuft</b><span class="pol-banner-prio">Prio 1</span>`
+      return `<div class="pol-radar-zeile"><span class="pol-banner-punkt" aria-hidden="true"></span><b class="pol-radar-titel">${wegSymbol('polar', true)}Polar läuft</b><span class="pol-banner-prio">Prio 1</span>`
         + `<span><b>${escapeHtml(String(t.slave_person || '?'))}</b> ${escapeHtml(kk(t.slave_konto))} <small style="color:var(--sub)">Slave</small> ⇄ <b>${escapeHtml(String(t.person || '?'))}</b> ${escapeHtml(kk(t.konto))} <small style="color:var(--sub)">Master</small></span>`
         + `<span class="pol-banner-ph" title="${escapeHtml(ph.text)}">${escapeHtml(ph.kurz)}</span>`
         + `<button type="button" class="btn btn-ghost" data-pol-radar-stand="${escapeHtml(pid)}">Stand</button></div>`
