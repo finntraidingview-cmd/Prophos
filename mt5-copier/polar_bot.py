@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.8"   # 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.9"   # 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -386,11 +386,13 @@ def airbag_holen(lauf, s_richtung, s_fill, digits, warte_s=AIRBAG_WARTE_S):
     while True:
         a = railway(lauf, "GET", f"/polar/stand?lauf_id={lauf.lauf_id}", timeout=5)
         m = (a or {}).get("master") or {}
+        if a and (a.get("master_zu_ms") or a.get("status") in ("fehler", "abbruch", "fertig")):
+            return {"ok": False, "abbruch": True, "grund": "Master schon zu" if a.get("master_zu_ms") else f"Lauf {a.get('status')}"}
         if a and not m.get("liq"):
             return {"ok": False, "grund": "Railway liefert kein master.liq (alter Stand?)"}
         if (m.get("gefuellt") or {}).get("fill") and m.get("level") is not None:
             break
-        if (a or {}).get("status") in ("fehler", "abbruch") or time.time() >= ende:
+        if time.time() >= ende:
             break
         time.sleep(0.4)
     fill = (m.get("gefuellt") or {}).get("fill")
@@ -772,6 +774,20 @@ def close_modal_wahl(modals, root, richtung, menge):
     if len(kn) != 1 or not (isinstance(kn[0].get("rect"), (list, tuple)) and len(kn[0]["rect"]) == 4):
         return None, f"{len(kn)} Knöpfe „Close position\" im Modal"
     return kn[0], "passt"
+
+
+ZU_ZWEITE_LESUNG_S = 0.15     # „zu" erst nach der zweiten Lesung ohne Ticket, ≥ 150 ms später
+
+
+def zu_doppelt(lesen, st, ticket, warte_s=ZU_ZWEITE_LESUNG_S, schlaf=time.sleep):
+    """REIN RECHNEND mit eingereichter Lesung (testbar, Prüfung 21.10.2026): order_bot._api_lesen_einmal macht aus positions_get() == None
+    (Fehler) eine LEERE Liste — eine scheinbar gelungene Lesung ohne Ticket. Ein Aussetzer in der Wache meldete so „zu", der Master schloss
+    per ×, und die Slave-Position blieb offen und unbewacht. Darum: „zu" nur, wenn diese UND eine zweite Lesung ≥ warte_s später das
+    Ticket nicht zeigen (position_zu_bewiesen). -> bool"""
+    if not position_zu_bewiesen(st, ticket):
+        return False
+    schlaf(float(warte_s))
+    return position_zu_bewiesen(lesen(), ticket)
 
 
 def schliess_urteil(geklickt, weg_nach_s, dialog_knopf=False, limit_s=X_BEWEIS_S):
@@ -1634,7 +1650,12 @@ def lauf_slave(cmd):
         # AIRBAG (Finn 21.10.2026, s. airbag_level): exakte Level aus BEIDEN Fills + Liquidation des Masters. Ohne Master-Fill/Liq bleibt
         # es bei den Plan-Abständen vom eigenen Fill (bisheriger Weg); die Notfall-Level aus dem F9 schützen in jedem Fall bis dahin.
         ab = airbag_holen(lauf, richtung, fill, digits)
-        if ab.get("ok"):
+        if ab.get("abbruch"):
+            # Master schon zu / Lauf mit Fehler während der Holphase (Prüfung 21.10.2026): kein Ändern-Dialog mehr — sofort in die Wache,
+            # die parkt und schließt; bis dahin schützen die Notfall-Level aus dem F9
+            sl, tp = sl_g, tp_g
+            lauf.log(f"Airbag übersprungen ({ab.get('grund')}) — kein Ändern, sofort Wache/Schließen; Notfall SL {ob.fmt_preis(sl, digits)} / TP {ob.fmt_preis(tp, digits)}")
+        elif ab.get("ok"):
             sl, tp = ab["sl"], ab["tp"]
             lauf.log(f"Airbag: Master-Fill {ab['master_fill']:g}, TP {ab['master_tp']:g} ({ab['master_tp_quelle']}), Stopp {ab['master_stop']:g} "
                      f"({ab['master_stop_art']}, Liq {ab['master_liq']:g}) → Slave SL {ob.fmt_preis(sl, digits)} (+{ab['slave_sl_pkt']:g} Pkt) / "
@@ -1644,7 +1665,7 @@ def lauf_slave(cmd):
             lauf.log(f"Airbag nicht rechenbar ({ab.get('grund')}) — Plan-Abstände vom eigenen Fill: SL {ob.fmt_preis(sl, digits)} / TP {ob.fmt_preis(tp, digits)}")
         anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "anker-" + os.path.basename(cfg_path))
         bestaetigt = ob.sltp_bestaetigt(p["sl"], p["tp"], sl, tp, digits)
-        if not bestaetigt:
+        if not bestaetigt and not ab.get("abbruch"):
             ob._sltp_klicken(w, ticket, symbol, ob.fmt_preis(sl, digits), ob.fmt_preis(tp, digits), lauf.trail, anker_pfad=anker_pfad)
             ende2 = time.time() + 10
             while time.time() < ende2 and not bestaetigt:
@@ -1656,7 +1677,7 @@ def lauf_slave(cmd):
         res.update(sl=sl, tp=tp, level_ok=bestaetigt)
         # level-Felder (21.10.2026, Live-Ablauf von Slave 2): sl/tp = gesetzte Soll-Werte, ok = per API bestätigt, quelle airbag|plan,
         # notfall = F9-Level; mit Airbag dazu master_fill/master_tp/master_liq/master_stop(_art)/puffer_pct (s. airbag_level), sonst grund
-        lv = {"sl": sl, "tp": tp, "ok": bestaetigt, "quelle": "airbag" if ab.get("ok") else "plan", "notfall": {"sl": sl_g, "tp": tp_g}}
+        lv = {"sl": sl, "tp": tp, "ok": bestaetigt, "quelle": "airbag" if ab.get("ok") else ("notfall" if ab.get("abbruch") else "plan"), "notfall": {"sl": sl_g, "tp": tp_g}}
         lv.update({k: v for k, v in ab.items() if k not in ("ok", "sl", "tp")} if ab.get("ok") else {"grund": ab.get("grund")})
         res["airbag"] = lv
         melden(lauf, "level", lv)
@@ -1973,8 +1994,9 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
 
     def zu_bewiesen(st):
         # Lesefehler (None) ist NIE „zu" (Prüfung 21.10.2026): offen(None) war False — ein API-Aussetzer nach dem ×-Klick galt als
-        # „weg", der Rückfall fiel aus und der Slave meldete „zu", obwohl die Position offen war
-        return position_zu_bewiesen(st, ticket)
+        # „weg", der Rückfall fiel aus und der Slave meldete „zu", obwohl die Position offen war. Dazu die zweite Lesung (zu_doppelt):
+        # eine leere Liste aus einem positions_get-Fehler sieht aus wie „ohne Ticket"
+        return zu_doppelt(lesen, st, ticket)
 
     symbol = str(lauf.cmd.get("symbol") or "").strip() or None
 
@@ -2031,7 +2053,7 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             naechst_lesen = jetzt + SLAVE_WACHE_TAKT_S
             st = lesen()
             if st is not None:
-                if not offen(st):
+                if zu_bewiesen(st):
                     zu_ms = jetzt_ms()
                     melden(lauf, "zu", {"quelle": "slave", "zu_ms": zu_ms})      # ZUERST das Signal — der Master zieht per × nach
                     lauf.log("Wache: Position beim Broker zu (SL/TP oder von Hand) — 'zu' an Railway gemeldet, kein Klick nötig")
@@ -2098,7 +2120,7 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
         # (die MT5-Liste ist für UIA unsichtbar, also ist „genau eine Position = mein Ticket" der Beweis, dass das × meiner Zeile gehört);
         # schon flach → nicht klicken, 'zu' melden; mehrere Positionen → nie das × (Zeile unklar), nur der Ticket-geprüfte Scan
         st_v = lesen()
-        if st_v is not None and not offen(st_v):
+        if zu_bewiesen(st_v):
             zu_ms = jetzt_ms()
             melden(lauf, "zu", {"quelle": "slave", "zu_ms": zu_ms, "weg": "schon_zu", "signal_ms": erg["signal_ms"]})
             lauf.log("Polar: Vor-Klick-Lesung — Position schon zu, kein Klick")

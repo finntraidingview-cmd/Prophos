@@ -24,9 +24,10 @@ def check(ok, text):
 def lade_app():
     """polar_app ohne Flask: nur die reinen Funktionen + ENDE aus dem Quelltext."""
     src = open(os.path.join(STAMM, "polar_app.py"), encoding="utf-8").read()
-    ns = {"re": re}
+    import time as _tm
+    ns = {"re": re, "time": _tm}
     teile = [re.search(r"^ENDE = .*$", src, re.M).group(0), re.search(r"^POLAR_PUFFER_PCT = .*$", src, re.M).group(0)]
-    for name in ("_zahl", "zu_erste_seite", "zu_eintragen", "warte_zu_fertig", "abrechnung_rechnen", "slave_pkt_aus_master", "liq_vorgabe"):
+    for name in ("_zahl", "zu_erste_seite", "zu_eintragen", "warte_zu_fertig", "abrechnung_rechnen", "slave_pkt_aus_master", "liq_vorgabe", "ende_und_balance_zeit"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n".join(teile), ns)
@@ -269,7 +270,7 @@ def main():
     ls = srcS[srcS.index("def lauf_slave(cmd):"):srcS.index("def uia_zeilen_lesen(")]
     check(ls.index("airbag_holen(") < ls.index("ob._sltp_klicken(") and ls.index("Notfall-SL/TP nicht setzbar") < ls.index("airbag_holen("),
           "Slave: Notfall-Level im F9 zuerst, Airbag nach dem Fill, dann Rechtsklick → Ändern (_sltp_klicken)")
-    check("level_vom_fill(richtung, fill, sl_pkt, tp_pkt, digits)" in ls and '"quelle": "airbag" if ab.get("ok") else "plan"' in ls,
+    check("level_vom_fill(richtung, fill, sl_pkt, tp_pkt, digits)" in ls and '"quelle": "airbag" if ab.get("ok") else ("notfall" if ab.get("abbruch") else "plan")' in ls,
           "ohne Airbag die Plan-Abstände vom eigenen Fill; level meldet quelle")
     srcA = open(os.path.join(STAMM, "polar_app.py"), encoding="utf-8").read()
     ps = srcA[srcA.index("def polar_start():"):srcA.index("def polar_bereit():")]
@@ -314,6 +315,36 @@ def main():
           "Level aus dem Orders-Reiter nur lesen, danach zurück auf Positionen")
     lm2 = srcM[srcM.index("def lauf_master(cmd):"):srcM.index("def lauf_slave(cmd):")]
     check(lm2.index("master_level_lesen(") < lm2.index('melden(lauf, "level"'), "Master liest fehlende Level VOR der level-Meldung (der Slave rechnet daraus)")
+    print("10e) „zu“ erst nach zwei Lesungen · Start-Balance nach Polar frisch · Airbag-Abbruch bei Master-zu (Prüfung 21.10.2026)")
+    zd = pb.zu_doppelt
+    schlaf = []
+    leer, mit = {"positionen": []}, {"positionen": [{"ticket": 5}]}
+    check(zd(lambda: mit, leer, 5, schlaf=schlaf.append) is False and schlaf == [0.15],
+          "leere Liste (positions_get-Fehler), zweite Lesung zeigt das Ticket → NICHT zu (150 ms später geprüft)")
+    check(zd(lambda: leer, leer, 5, schlaf=lambda _x: None) is True, "zwei Lesungen ohne Ticket → zu")
+    check(zd(lambda: None, leer, 5, schlaf=lambda _x: None) is False and zd(lambda: leer, None, 5, schlaf=lambda _x: None) is False,
+          "Lesefehler in einer der beiden Lesungen → nicht zu")
+    schlaf2 = []
+    check(zd(lambda: leer, mit, 5, schlaf=schlaf2.append) is False and schlaf2 == [], "Ticket noch da → sofort nicht zu, ohne Wartezeit")
+    srcZ = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    wz = srcZ[srcZ.index("def slave_wache("):srcZ.index("# ── MAUS-TEST ×")]
+    check("return zu_doppelt(lesen, st, ticket)" in wz and "if zu_bewiesen(st):" in wz and "if zu_bewiesen(st_v):" in wz and "not offen(" not in wz,
+          "Wache (broker-zu), schon_zu, ×-/Rechtsklick-Beweis und End-zu laufen alle über die Doppel-Lesung")
+    eb = A["ende_und_balance_zeit"]
+    e1, b1 = eb({"master_zu_ms": 1792541100000, "slave_zu_ms": 1792541099000}, 1792541110.4)
+    check(e1 == "2026-10-21T00:05:00Z" and b1 == "2026-10-21T00:05:10Z" and b1 > e1, f"ended_at = spätere zu-Meldung, Balance-Zeit danach ({e1} < {b1})")
+    e2, b2 = eb({"master_zu_ms": 1792541110000}, 1792541110.2)
+    check(e2 < b2, f"zu in derselben Sekunde wie die Abrechnung → ended_at 1 s davor ({e2} < {b2})")
+    e3, b3 = eb({}, 1792541110.0)
+    check(e3 < b3, "ohne zu-Zeiten → ended_at 1 s vor der Abrechnung")
+    srcAb = open(os.path.join(STAMM, "polar_app.py"), encoding="utf-8").read()
+    ab_ = srcAb[srcAb.index("def _abrechnen(z):"):srcAb.index("def laeufe_aus_plaenen(")]
+    check('patch["final"] = {"balance_end": erg["master_balance_end"]' in ab_ and 'upd = {"ended_at": ende_iso}' in ab_ and '"tv_balance_at": jetzt' in ab_,
+          "Abrechnung schreibt final.balance_end und tv_balance_at nach ended_at → nächster Lauf hat eine frische Start-Balance")
+    ah = srcZ[srcZ.index("def airbag_holen("):srcZ.index("def reader_flach(")]
+    check(ah.index('a.get("master_zu_ms")') < ah.index('m.get("liq")') and '"abbruch": True' in ah, "airbag_holen bricht bei Master-zu/Fehler sofort ab")
+    ls2 = srcZ[srcZ.index("def lauf_slave(cmd):"):srcZ.index("def uia_zeilen_lesen(")]
+    check('if not bestaetigt and not ab.get("abbruch"):' in ls2 and "sl, tp = sl_g, tp_g" in ls2, "Abbruch → kein Ändern-Dialog, Notfall-Level, sofort Wache")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

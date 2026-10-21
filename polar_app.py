@@ -259,6 +259,17 @@ def abrechnung_rechnen(z):
             "klick_abstand_ms": (abs(int(mg.get("klick_ms") or 0) - int(sg.get("klick_ms") or 0)) if mg.get("klick_ms") and sg.get("klick_ms") else None)}
 
 
+def ende_und_balance_zeit(z, jetzt_s):
+    """REIN RECHNEND (testbar, Prüfung 21.10.2026): (ended_at, tv_balance_at) als ISO-Sekunden. Vorher standen beide auf demselben „jetzt" —
+    wd_start_balance verlangt tv_balance_at > ended_at des letzten Trades und ein final.balance_end. Nach jedem Polar-Trade fiel die
+    Start-Balance des Master-Kontos damit als „nicht frisch" weg, und der nächste Polar-Lauf hatte keinen Airbag. Jetzt: ended_at = die
+    spätere zu-Meldung beider Seiten (echtes Ende), höchstens 1 s vor der Abrechnung; die Balance ist um „jetzt" gelesen."""
+    zu = [int(v) for v in (z.get("master_zu_ms"), z.get("slave_zu_ms")) if v]
+    ende_s = min((max(zu) / 1000.0) if zu else jetzt_s - 1, jetzt_s - 1)
+    fmt = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(t)))
+    return fmt(ende_s), fmt(jetzt_s)
+
+
 def _abrechnen(z):
     """Am Ende: Plan → review mit P&L beider Seiten + Ergebnis in mt5_baseline.polar, Balances an beiden Konten. Im Hintergrund."""
     def _los():
@@ -267,10 +278,14 @@ def _abrechnen(z):
             pid = z["plan_id"]
             rows = A["sb_select"]("trade_plans", {"select": "id,status,master_account_id,slave_account_id", "id": f"eq.{pid}", "limit": "1"})
             plan = rows[0] if rows else {}
-            jetzt = A["_wt_now_iso"]()
+            ende_iso, jetzt = ende_und_balance_zeit(z, time.time())
+            patch = {"polar": dict(erg, lauf_id=z["id"], status=z["status"], at=jetzt)}
+            if erg["master_balance_end"] is not None:
+                # final.balance_end wie bei jedem anderen Weg — sonst zählt die Konto-Balance danach nie als frische Start-Balance
+                patch["final"] = {"balance_end": erg["master_balance_end"], "at": ende_iso, "quelle": "polar"}
             A["_sb_anfrage"]("POST", f"{A['SUPABASE_URL']}/rest/v1/rpc/mt5_baseline_patch", headers=A["_sb_headers"](), timeout=(5, 15),
-                             json={"p_plan": pid, "p_patch": {"polar": dict(erg, lauf_id=z["id"], status=z["status"], at=jetzt)}, "p_status": None})
-            upd = {"ended_at": jetzt}
+                             json={"p_plan": pid, "p_patch": patch, "p_status": None})
+            upd = {"ended_at": ende_iso}
             if erg["master_pl"] is not None:
                 upd["master_pl"] = erg["master_pl"]
             if erg["slave_pl"] is not None:
