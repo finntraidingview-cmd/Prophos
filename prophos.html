@@ -4748,6 +4748,14 @@
     line-height:1.35;white-space:nowrap
   }
   #dashboard-view .tc2-sys::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}
+  /* WEG-SYMBOLE (21.10.2026, wegSymbol): Farbe = Textfarbe (currentColor), im Sticker statt des Punkts, im Radar-Block-Kopf in der Modellfarbe */
+  #dashboard-view .weg-sym{flex:none;display:inline-block;vertical-align:-2px;margin-right:5px}
+  #dashboard-view .tc2-sys.has-sym::before{display:none}
+  #dashboard-view .tc2-sys .weg-sym{width:12px;height:12px;margin-right:0}
+  #dashboard-view .wdl-pf .weg-sym{width:12px;height:12px;margin-right:4px;vertical-align:-2.5px}
+  #dashboard-view .wdl-mb-kopf .weg-sym{color:var(--wdl-m, currentColor);width:15px;height:15px;vertical-align:-2.5px}
+  #dashboard-view .modal-head h3 .weg-sym{width:17px;height:17px;vertical-align:-2.5px;margin-right:7px;color:var(--violet)}
+  #dashboard-view .pol-banner-titel .weg-sym,#dashboard-view .pol-radar-titel .weg-sym{color:var(--violet);width:15px;height:15px;vertical-align:-2.5px}
   #dashboard-view .tc2.tc2-has-sys{padding-top:21px}
   #dashboard-view .tc2-sys-dup{background:rgba(37,99,235,.12);color:#2563EB}
   #dashboard-view .tc2-sys-mt5{background:rgba(14,151,149,.15);color:#0E7A78}
@@ -22343,6 +22351,33 @@
     return false
   }
   const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : tpIstOrbitV3(p) ? 'Orbit' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
+  /* WEG-SYMBOLE (Finn 21.10.2026: die Wege bekommen eigene Symbole, passend zum Namen — „visuell cooler"): Inline-SVG, currentColor, eine
+   * Strichstärke, 16er-Raster; der Name bleibt daneben. Familien: Echo (Wiederhall: Quelle + Schallwellen), Orbit (Umlaufbahn mit Punkt),
+   * Winning Day (Siegel mit Häkchen — 🏆 bleibt dem Good Day), Polar (Polarstern). V2/V3 tragen das Symbol ihrer Familie, „V2" bleibt Text.
+   * weg = Label („Echo V2", „Orbit", „Winning Day", „Polar") oder Sticker-Key (mt5, mt5v2, tvplus, tvv2, tvv3, wd, polar); sonst ''. */
+  function wegFamilie(weg){
+    const w = String(weg || '').toLowerCase().trim()
+    if(w === 'mt5' || w === 'mt5v2' || /^echo\b/.test(w)) return 'echo'
+    if(w === 'tvplus' || w === 'tvv2' || w === 'tvv3' || /^orbit\b/.test(w)) return 'orbit'
+    if(w === 'wd' || /^winning\s*days?\b/.test(w)) return 'wd'
+    if(w === 'polar' || /^polar\b/.test(w)) return 'polar'
+    return ''
+  }
+  function wegSymbol(weg){   // Deklaration: Karten und Radar zeichnen schon vor dieser Stelle im Modul
+    const f = wegFamilie(weg)
+    if(!f) return ''
+    const WEG_SVG = {
+      echo: '<circle cx="3.6" cy="8" r="1.5" fill="currentColor" stroke="none"/><path d="M6.6 5.4a3.6 3.6 0 0 1 0 5.2"/><path d="M9.2 3.4a6.4 6.4 0 0 1 0 9.2"/><path d="M11.8 1.6a9 9 0 0 1 0 12.8"/>',
+      orbit: '<ellipse cx="8" cy="8" rx="7" ry="2.8" transform="rotate(-35 8 8)"/><circle cx="8" cy="8" r="2.1" fill="currentColor" stroke="none"/><circle cx="11.4" cy="3.45" r="1.4" fill="currentColor" stroke="none"/>',
+      wd: '<path d="M8 1.4 10.1 2.92 12.67 3.33 13.08 5.9 14.6 8 13.08 10.1 12.67 12.67 10.1 13.08 8 14.6 5.9 13.08 3.33 12.67 2.92 10.1 1.4 8 2.92 5.9 3.33 3.33 5.9 2.92Z"/><path d="M5.5 8.2 7.2 9.9 10.6 6.3"/>',
+      polar: '<path d="M8 1.2 9.2 6.8 14.8 8 9.2 9.2 8 14.8 6.8 9.2 1.2 8 6.8 6.8Z"/><path d="M3.7 3.7 5.1 5.1M12.3 3.7 10.9 5.1M3.7 12.3 5.1 10.9M12.3 12.3 10.9 10.9"/>'
+    }
+    return f ? `<svg class="weg-sym weg-sym-${f}" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${WEG_SVG[f]}</svg>` : ''
+  }
+  window._wegSymbol = wegSymbol   // Test-Haken (Stub)
+  // Weg-Knöpfe im Plan-Popup (21.10.2026): Symbol vor dem Namen — „Duplikum (Puls)" bleibt ohne (heißt nach Duplikum)
+  ;[['tp-route-mt5', 'mt5'], ['tp-route-o3', 'tvv3'], ['tp-route-polar', 'polar'], ['tp-route-wd', 'wd'], ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2']]
+    .forEach(([id, k]) => { const b = document.getElementById(id); if(b && !b.querySelector('.weg-sym')) b.insertAdjacentHTML('afterbegin', wegSymbol(k)) })
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
     mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
@@ -22359,7 +22394,8 @@
   function sysStickerHtml(key){
     const cfg = SYS_STICKER[key]
     if(!cfg) return ''
-    return `<span class="tc2-sys tc2-sys-${key}" title="${esc(cfg[1])}">${esc(cfg[0])}</span>`
+    const sym = wegSymbol(key)   // Weg-Symbol statt Punkt (21.10.2026)
+    return `<span class="tc2-sys tc2-sys-${key}${sym ? ' has-sym' : ''}" title="${esc(cfg[1])}">${sym}${esc(cfg[0])}</span>`
   }
   function planSysKey(p){
     if(!p) return 'dup'
@@ -30415,7 +30451,7 @@
     for(const t of trades){ const k = wdlWeg(t); n.set(k, (n.get(k) || 0) + 1); if(t.status === 'open') lauf.set(k, (lauf.get(k) || 0) + 1) }
     const knopf = (k, label) => {
       const an = (wdl.modell || '') === k, z = lauf.get(k) || 0, alle = k ? (n.get(k) || 0) : trades.length
-      return `<button type="button" data-wdl-modell="${escapeHtml(k)}" class="${an ? 'active' : ''}${k && !alle ? ' is-leer' : ''}" title="${escapeHtml(`${alle} im Zeitraum · ${z} laufen gerade`)}">${escapeHtml(label)}${z ? `<b>${z}</b>` : ''}</button>`
+      return `<button type="button" data-wdl-modell="${escapeHtml(k)}" class="${an ? 'active' : ''}${k && !alle ? ' is-leer' : ''}" title="${escapeHtml(`${alle} im Zeitraum · ${z} laufen gerade`)}">${k ? wegSymbol(k) : ''}${escapeHtml(label)}${z ? `<b>${z}</b>` : ''}</button>`
     }
     bar.innerHTML = `<div class="seg">${knopf('', 'Alle')}</div>`
       + WDL_MODELLE.map(([g, l]) => `<div class="wdl-mg"><span>${g}</span><div class="seg">${l.map(k => knopf(k, k)).join('')}</div></div>`).join('')
@@ -31016,7 +31052,7 @@
       const tip = [t.person, k.name || konto, k.kontonr || '', echo ? 'Echo (MT5)' : ''].filter(Boolean).join(' · ')
       const pid = String((e.z && e.z.plan_id) || t.plan_id || t.id || '')   // Live-Nachschreiben (lzLiveTick) je Zeile
       return `<div class="wdl-z wdl-z-lauf${echo ? ' wdl-z-echo' : ''}" style="--wdl-id:${idFarbe(String(t.user_id || ''))}" ${pid ? `data-lz-plan="${escapeHtml(pid)}" ` : ''}${o.attr ? o.attr(e) : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>${ri}${mi}${pl}${z}</div>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small>${escapeHtml(konto)}</small></span>${ri}${mi}${pl}${z}</div>`
     }
     const s = o.summe, summe = s ? `<div class="wdl-z wdl-z-lauf lz-summe"><span class="wdl-z-wer"><b>Summe</b></span><span class="wdl-z-ri"></span><span class="wdl-z-mi"></span>`
       + `<span class="wdl-z-pl"><span data-lz-usd style="color:${col(s.usd)}">${usd(s.usd)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(s.eur)}">${eur(s.eur)}</small></span><span class="wdl-z-zeit"></span></div>` : ''
@@ -31558,7 +31594,7 @@
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)); if(!t) return
     const m = document.getElementById('polarModal'), lauf = document.getElementById('pol-lauf'); if(!m || !lauf) return
     wdlPolarPopupZurueck()
-    const h = document.getElementById('polarTitel'); if(h){ if(!h.dataset.plan) h.dataset.plan = h.innerHTML; h.innerHTML = 'Polar-Lauf <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Stand</span>' }
+    const h = document.getElementById('polarTitel'); if(h){ if(!h.dataset.plan) h.dataset.plan = h.innerHTML; h.innerHTML = wegSymbol('polar') + 'Polar-Lauf <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">Stand</span>' }
     m.querySelectorAll('.pol-grid, .modal-foot').forEach(e => { e.hidden = true })
     lauf.hidden = false
     m.classList.add('open')
@@ -31868,7 +31904,7 @@
       }
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small>${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small>${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -31896,7 +31932,7 @@
       const koerper = a => {
         const bl = a === arr ? bloecke : [...reihe, 'Weitere'].map(k => [k, a.filter(t => modellVon(t) === k)]).filter(([, b]) => b.length)
         return wdl.modell ? bl.map(([, b]) => zeilenVon(b)).join('')
-          : wdlObergruppenHtml(bl, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b>`
+          : wdlObergruppenHtml(bl, (k, b) => `<div class="wdl-mb" style="--wdl-m:${WDL_MODELL_FARBE[k] || 'var(--sub)'}"><div class="wdl-mb-kopf"><b>${wegSymbol(k)}${escapeHtml(k)}</b>`
             + `<span>${b.length}</span></div>${zeilenVon(b)}</div>`)
       }
       const zeilen = unter
@@ -41575,7 +41611,8 @@
     const hhmm = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
     return gruppen.map(g => {
       const ps = g.plaene
-      const wege = [...new Set(ps.map(p => routeIstV2(p.route) ? wegLabel(p) : (p.route || 'Duplikum')))].join(' + ')   // .1496: Winning Day (auch auf tsv2) heißt Winning Day
+      const wegeL = [...new Set(ps.map(p => routeIstV2(p.route) ? wegLabel(p) : (p.route || 'Duplikum')))], wege = wegeL.join(' + ')
+      const wegeHtml = wegeL.map(w => wegSymbol(w) + escapeHtml(w)).join(' + ')   // Weg-Symbole im Firmen-Kopf (21.10.2026)   // .1496: Winning Day (auch auf tsv2) heißt Winning Day
       const buy = ps.filter(p => p.richtung === 'buy').length, sell = ps.filter(p => p.richtung === 'sell').length
       const chip = planRichtungChip
       const richtung = (buy ? chip(sell ? `BUY ${buy}` : 'BUY', true) : '') + (sell ? chip(buy ? `SELL ${sell}` : 'SELL', false) : '')
@@ -41596,7 +41633,7 @@
       const sep = '<i>·</i>'
       return `<div class="pz-kopf plan-firma-kopf">
           <span class="pz-firma"${knapp ? ` title="${escapeHtml(wege)}"` : ''}>${escapeHtml(g.firma)}</span>
-          <span>${ps.length} Trade${ps.length === 1 ? '' : 's'}</span>${knapp ? '' : ` ${sep} <span>${escapeHtml(wege)}</span>
+          <span>${ps.length} Trade${ps.length === 1 ? '' : 's'}</span>${knapp ? '' : ` ${sep} <span>${wegeHtml}</span>
           ${richtung}`}
           ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:color-mix(in srgb, var(--warn) 14%, transparent);color:var(--warn-ink, #b45309)"></span>` : ''}
@@ -42235,7 +42272,7 @@
     const modell = p => OFFEN_MODELL[planSysKey(p)] || 'Weitere'
     const bloecke = [...reihe, 'Weitere'].map(k => [k, list.filter(p => modell(p) === k)]).filter(([, b]) => b.length)
     const block = (k, b) => `<div class="wdl-mb${k === 'Weitere' ? ' tc-mb-weitere' : ''}" style="--wdl-m:${farbe[k] || 'var(--sub)'}">`
-      + `<div class="wdl-mb-kopf"><b>${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p) + (opt && opt.puls ? planPulsZeile(p) : '')).join('')}</div>`
+      + `<div class="wdl-mb-kopf"><b>${wegSymbol(k)}${escapeHtml(k)}</b><span>${b.length}</span></div>${b.map(p => renderTradePlanCard(p) + (opt && opt.puls ? planPulsZeile(p) : '')).join('')}</div>`
     // Obergruppen „Mit Hedge" / „Ohne Hedge" wie im Radar (09.10.2026)
     const og = typeof window._wdlObergruppenHtml === 'function' ? window._wdlObergruppenHtml : null
     return `<div class="tc-zl">` + (og ? og(bloecke, block) : bloecke.map(([k, b]) => block(k, b)).join('')) + `</div>`
@@ -52443,7 +52480,7 @@
     const quelle1 = (r1 && r1.einstieg_quelle) || (t.auto ? 'Auto-Planer' : 'Hand')
     const zeit1 = t.status === 'laeuft' ? `${tplUhr(t.start, v)} · läuft` : (t.status === 'beendet' || t.status === 'vorbei') ? `${tplUhr(t.start, v)} – ${t.ende != null ? tplUhr(t.ende, v) : '?'}` : `Start ${tplUhr(t.start, v)}`
     const werte1 = [wert('Konto', escapeHtml((r1 && r1.konto && r1.konto.name) || t.konto || '—')), wert('Balance', b1 ? escapeHtml(tplBalText(b1, Date.now())) : '—'),
-      wert('Menge', escapeHtml(symbol1)), wert('Einstieg', einstieg1), wert('Start / Ende', zeit1), wert('Weg', escapeHtml(String(weg1))), wert('Quelle', escapeHtml(String(quelle1)))]
+      wert('Menge', escapeHtml(symbol1)), wert('Einstieg', einstieg1), wert('Start / Ende', zeit1), wert('Weg', wegSymbol(weg1) + escapeHtml(String(weg1))), wert('Quelle', escapeHtml(String(quelle1)))]
     const zwei = (usd, pkt) => [usd != null ? tplUsd(usd) : '', pkt != null ? Math.round(pkt) + ' Pkt' : ''].filter(Boolean).join(' · ') || '—'
     const werte = [wert('Kontowert', t.wert != null ? tplEur(t.wert) : '—'), wert('Einsatz', t.gehedgt ? 'gehedgt' : t.einsatz != null ? tplEur(t.einsatz) : '—'),
       wert('Größe', t.menge != null ? String(t.menge).replace('.', ',') : '—'), wert('TP', zwei(t.tp, t.tp_punkte), 'tpl-gut'), wert('SL', zwei(t.sl, t.sl_punkte), 'tpl-rot'),
@@ -52500,7 +52537,7 @@
     const z = (l, w, kl) => `<dt>${l}</dt><dd${kl ? ` class="${kl}"` : ''}>${w}</dd>`
     const zeilen = [z('ID', `<span class="ap-adm-id"><i style="background:${idFarbe(t.user_id)}"></i>${escapeHtml(t.user || '—')}</span>`),
       z('Start', `${zeit}${t.startUnklar ? ' <small>(unbekannt)</small>' : ''} <small>Dubai</small>`),
-      z('Richtung', t.long ? '▲ Long' : '▼ Short', t.long ? 'gut' : 'rot'), z('Weg', escapeHtml(String(tkWeg(t, r1, p1)))), z('Menge', escapeHtml(menge)),
+      z('Richtung', t.long ? '▲ Long' : '▼ Short', t.long ? 'gut' : 'rot'), z('Weg', wegSymbol(tkWeg(t, r1, p1)) + escapeHtml(String(tkWeg(t, r1, p1)))), z('Menge', escapeHtml(menge)),
       z('TP', zwei(t.tp, t.tp_punkte), 'gut'), z('SL', zwei(t.sl, t.sl_punkte), 'rot'),
       z('Balance → Ziel', `${balTxt}${balUnter ? `<br><small>${escapeHtml(balUnter)}</small>` : ''}`), z('Schritt', escapeHtml(t.stufe || '—'))]
     if(t.status === 'beendet' && t.pnl != null) zeilen.push(z('Ergebnis', (t.pnl > 0 ? '+' : '') + tplUsd(t.pnl), t.pnl > 0 ? 'gut' : t.pnl < 0 ? 'rot' : ''))
@@ -55640,7 +55677,7 @@
     _polarEditPlan = (opt && opt.edit) || null
     _polarNurAnsehen = !!_polarEditPlan && !polarEditFrei(_polarEditPlan)
     const titel = polarEl('polarTitel')
-    if(titel) titel.innerHTML = _polarEditPlan ? `Polar bearbeiten <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">${_polarNurAnsehen ? 'läuft — nur ansehen' : 'Plan ' + escapeHtml(String(_polarEditPlan.id).slice(0, 8))}</span>` : _polarTitelNeu
+    if(titel) titel.innerHTML = wegSymbol('polar') + (_polarEditPlan ? `Polar bearbeiten <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">${_polarNurAnsehen ? 'läuft — nur ansehen' : 'Plan ' + escapeHtml(String(_polarEditPlan.id).slice(0, 8))}</span>` : _polarTitelNeu)
     const speichern = polarEl('polarNurSpeichern'); if(speichern) speichern.textContent = _polarEditPlan ? 'Änderungen speichern' : 'Speichern'
     polarEditSperren(false)
     ;['polarStart', 'polarNurSpeichern'].forEach(id => { const k = polarEl(id); if(k) k.disabled = false })   // nach Erfolg gesperrt (16.10.2026)
@@ -56156,7 +56193,7 @@
     if(fuss) fuss.hidden = false
     polarRadarKnopf(false, false)
     if(tw) tw.hidden = false
-    if(h) h.textContent = 'Polar starten — Vorprüfung'
+    if(h) h.innerHTML = wegSymbol('polar') + 'Polar starten — Vorprüfung'   // Weg-Symbol im Kopf (21.10.2026)
   }
   // WARTEN AUF DEN LAUF (21.10.2026): verschiebt die DB-Sperre den Start (mt5_baseline.start_sperre), steht hier „Start verschoben — Grund ·
   // neuer Versuch in m:ss · Versuch n" statt nur „wartet …". Dafür liest das Popup NUR während des Wartens die eine Plan-Zeile nach (≤ alle 15 s)
@@ -56206,7 +56243,7 @@
         : 'Lauf beendet — Railway rechnet beide Seiten ab (Trades → Überprüfen).'
       polarRadarKnopf(true, WDL_POLAR_ENDE.includes(String(d.status || '')))   // nach dem Ende ist der Radar der nächste Schritt → Hauptknopf
       const titel = polarEl('polarCheckTitel')
-      if(titel) titel.textContent = String(d.status) === 'fertig' ? 'Polar beendet — Ergebnis' : WDL_POLAR_ENDE.includes(String(d.status || '')) ? 'Polar gestoppt' : 'Polar läuft — Live-Ablauf'
+      if(titel) titel.innerHTML = wegSymbol('polar') + (String(d.status) === 'fertig' ? 'Polar beendet — Ergebnis' : WDL_POLAR_ENDE.includes(String(d.status || '')) ? 'Polar gestoppt' : 'Polar läuft — Live-Ablauf')
       if(WDL_POLAR_ENDE.includes(String(d.status || '')) && _polarLive && _polarLive.takt){ clearInterval(_polarLive.takt); _polarLive.takt = null }
     }catch(e){ if(msg) msg.textContent = 'Stand: ' + ((e && e.message) || e) }
   }
@@ -56216,7 +56253,7 @@
     if(tw) tw.hidden = true
     if(fuss) fuss.hidden = true
     polarRadarKnopf(true, false)
-    if(h) h.textContent = 'Polar läuft — Live-Ablauf'
+    if(h) h.innerHTML = wegSymbol('polar') + 'Polar läuft — Live-Ablauf'
     const kt = Number(p.masterContracts) || null, lots = kt && Number(p.multiplier) ? Math.round(kt * Number(p.multiplier) * 100) / 100 : null
     const ppl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(p.slaveFirm)) || 1
     // Namen der IDs aus der Vorprüfung (Spaltenköpfe „Slave · Finn + Pascal"), sonst neutral
@@ -56467,7 +56504,7 @@
       if(m != null || s != null) pl$ = `Slave ${g(s)} · Master ${g(m)}`
     }
     const kontoTxt = k.konto.slave || k.konto.master ? `${k.konto.slave || '?'} ⇄ ${k.konto.master || '?'}` : (k.pid ? 'Plan ' + k.pid.slice(0, 8) : '–')
-    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">${pl.quelle === 'sperre' ? 'Polar-Start verschoben' : 'Polar-Trade läuft'}</span>`
+    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">${wegSymbol('polar')}${pl.quelle === 'sperre' ? 'Polar-Start verschoben' : 'Polar-Trade läuft'}</span>`
       + `<span class="pol-banner-prio">Prio 1</span><span class="pol-banner-ph">${escapeHtml(ph)}</span>`
       + `<span class="pol-banner-rechts"><button type="button" class="btn btn-primary" data-pol-banner-auf>Live-Ablauf öffnen</button>`
       + `<button type="button" class="pol-banner-klapp" data-pol-banner-klapp aria-expanded="${!zu}" title="${zu ? 'Aufklappen' : 'Einklappen — bleibt sichtbar, solange der Lauf läuft'}"><i></i></button></span></div>`
@@ -56544,7 +56581,7 @@
     el.innerHTML = offen.map(t => {
       const pid = wdlTid(t), x = wdl.polar[pid] || null
       const ph = wdlPolarPhase(x && x.stand, !!(x && x.hand), Date.now())
-      return `<div class="pol-radar-zeile"><span class="pol-banner-punkt" aria-hidden="true"></span><b>Polar läuft</b><span class="pol-banner-prio">Prio 1</span>`
+      return `<div class="pol-radar-zeile"><span class="pol-banner-punkt" aria-hidden="true"></span><b class="pol-radar-titel">${wegSymbol('polar')}Polar läuft</b><span class="pol-banner-prio">Prio 1</span>`
         + `<span><b>${escapeHtml(String(t.slave_person || '?'))}</b> ${escapeHtml(kk(t.slave_konto))} <small style="color:var(--sub)">Slave</small> ⇄ <b>${escapeHtml(String(t.person || '?'))}</b> ${escapeHtml(kk(t.konto))} <small style="color:var(--sub)">Master</small></span>`
         + `<span class="pol-banner-ph" title="${escapeHtml(ph.text)}">${escapeHtml(ph.kurz)}</span>`
         + `<button type="button" class="btn btn-ghost" data-pol-radar-stand="${escapeHtml(pid)}">Stand</button></div>`
