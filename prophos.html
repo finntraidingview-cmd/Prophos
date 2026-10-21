@@ -4323,8 +4323,18 @@
      Hand / Tage sammeln / Review steht in der Spalte „Tage" (bleibt 80 px). */
   @media (min-width:821px){   /* Handy-Raster (≤ 820 px, Konto-Spalte aus) bleibt unberührt */
     #dashboard-view .wdl-tab-konto:not(.wdl-tab-bst) .wdl-z{grid-template-columns:minmax(110px,1fr) 92px 240px 212px 104px 90px}   /* Mitte 240: Ergebnis + drei Knöpfe */
-    #dashboard-view .wdl-tab-bst.wdl-tab-sek-bestanden .wdl-z{grid-template-columns:minmax(100px,1fr) 120px 216px 184px 84px 104px 88px}
+    /* Bestanden → Trade abhaken (S4 21.10.2026, Bug-Rundgang): 100+120+216+184+84+104+88 + 6×12 Abstand + Polster = 1004 px bei 947 px Kasten
+       (1280 px) — „Zu" fiel rechts ganz heraus. Richtung wie in Abhaken 92 px, Konto-Spalte elastisch (Strahl schrumpft bis 120 px). */
+    #dashboard-view .wdl-tab-bst.wdl-tab-sek-bestanden .wdl-z{grid-template-columns:minmax(100px,1fr) 92px 216px minmax(120px,184px) 84px 100px 84px}
     #dashboard-view .wdl-z-konto.mit-strahl{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}   /* Handy: Spalte bleibt aus */
+    /* Konto als 2. Zeile unter dem Namen (S4 21.10.2026, Bug-Rundgang): mit dem Zeitstrahl ist die Namensspalte hier 100–117 px breit, Name +
+       Weg-Marke füllen sie allein — „Tradeify 150k …3962" war bei 1280 px komplett weg (vorher 185 px, Konto halb lesbar). Darf umbrechen statt
+       „…" — die Kontonummer am Ende ist das, was man sucht; ein Wortverbinder (U+2060) hinter dem „…" in der Zeile hält „…3962" zusammen. */
+    #dashboard-view .wdl-tab-konto .wdl-z-wer small[data-wdl-konto]{display:block;margin:2px 0 0 17px;white-space:normal;line-height:1.3}
+    /* Gruppentitel über Name + Richtung (S4 21.10.2026): „Geblowt · archivieren · 1", „Manuelle Arbeit · 1" endeten bei 117 px in „…" —
+       die Richtungs-Spalte ist im Kopf leer (Chips-Kopf: keine ri-Zelle; Kopf ohne Chips: leere ri-Zelle) */
+    #dashboard-view .wdl-z-kopf .wdl-kp-t,
+    #dashboard-view .wdl-z-kopf > .wdl-z-wer:has(+ .wdl-z-ri:empty){grid-column:wer-start / ri-end;grid-row:1}
   }
   #dashboard-view .wdl-z-konto.mit-strahl .wdl-strahl{flex:1 1 auto;min-width:80px;max-width:156px}
   #dashboard-view .wdl-z-konto .wdl-k-zahl{flex:none;font-variant-numeric:tabular-nums}
@@ -32292,7 +32302,7 @@
       }
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto)}</small>${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
