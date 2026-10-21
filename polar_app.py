@@ -423,6 +423,36 @@ def trades_belegt(rows, pid, jetzt):
 # Auf dem Slave müsste der Liquidationspreis vom Master automatisch erkannt werden und damit dann der TP und SL ausgestattet werden") ──────
 # Beim Start rechnet Railway die Liquidation des Master-Kontos mit DENSELBEN Helfern wie der Radar (liq_regel_felder: engere von liq_regeln
 # und Konto-Boden, Peak, Tagesstart, Kernwerte) als $-Abstand ab der Start-Balance. Der Slave macht daraus nach beiden Fills den Preis.
+FREIGABE_FRISCH_S = 120   # eine Startmarke jünger als das gilt als frischer Claim/Start — dann keine zweite Freigabe
+
+
+def _iso_ms(v):
+    try:
+        t = datetime.fromisoformat(str(v or "").replace("Z", "+00:00"))
+        return int((t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return None
+
+
+def freigabe_sperre(plan, lauf_aktiv, jetzt_ms, frisch_s=FREIGABE_FRISCH_S):
+    """REIN RECHNEND (testbar, selftest_polar_riegel.py) — DERSELBE PLAN NOCHMAL (Finn 21.10.2026: zum Testen denselben Polar-Plan immer
+    wieder starten; nach Erledigt → Geplant meldete /polar/freigeben „schon gestartet", weil start_um/start_um_gestartet_at vom letzten
+    Lauf stehen blieben). → None = frei (alte Startmarken werden überschrieben), sonst der Grund. Gesperrt bleibt fail-safe: Status nicht
+    planned, ein Lauf dieses Plans aktiv (lauf_aktiv = Lauf-ID, Status nicht fertig/abbruch/fehler) oder eine Startmarke jünger als
+    frisch_s bzw. in der Zukunft (frischer Claim des Start-Wächters / eben freigegeben) — ein Doppelstart ist so nie möglich."""
+    st = str((plan or {}).get("status") or "")
+    if st != "planned":
+        return f"Plan steht auf {st or '?'}"
+    if lauf_aktiv:
+        return f"Polar-Lauf {str(lauf_aktiv)[:8]} läuft noch — erst beenden bzw. abbrechen"
+    for feld, was in (("start_um_gestartet_at", "gestartet"), ("start_um", "freigegeben")):
+        t = _iso_ms((plan or {}).get(feld))
+        if t is not None and jetzt_ms - t < frisch_s * 1000:
+            alt = max(0, int((jetzt_ms - t) / 1000))
+            return f"eben {was} (vor {alt} s) — kein zweiter Start, in {max(1, frisch_s - alt)} s erneut versuchen"
+    return None
+
+
 def slave_pkt_aus_master(master_tp_pkt, master_sl_pkt, pct=POLAR_PUFFER_PCT):
     """REIN RECHNEND (testbar): Plan-Abstände des Slaves aus denen des Masters mit dem festen Puffer → (sl_pkt, tp_pkt) | (None, None).
     sl_pkt = Master-TP × (1 + pct), tp_pkt = Master-SL × (1 − pct). Gilt für den Plan (Notfall im F9 + Rückfall ohne Airbag)."""
@@ -817,14 +847,30 @@ def registrieren(app, ns):
         plan, fehler = _vp_plan(request.get_json(silent=True))
         if fehler:
             return fehler
-        if plan.get("status") != "planned" or plan.get("start_um_gestartet_at"):
-            return jsonify({"ok": False, "msg": f"Plan steht auf {plan.get('status')}{' · schon gestartet' if plan.get('start_um_gestartet_at') else ''}"}), 409
+        # Aktiver Lauf dieses Plans: erst im Prozess, dann in polar_lauf (nach einem Railway-Neustart ist _LAEUFE leer) — nicht lesbar = gesperrt
+        pid = str(plan["id"])
+        with _COND:
+            aktiv = next((z["id"] for z in _LAEUFE.values() if z["plan_id"] == pid and z["status"] not in ENDE), None)
+        if not aktiv:
+            try:
+                rows = A["sb_select"]("polar_lauf", {"select": "id,status", "plan_id": f"eq.{pid}",
+                                                     "status": f"not.in.({','.join(ENDE)})", "limit": "1"}) or []
+                aktiv = rows[0].get("id") if rows else None
+            except Exception as e:
+                return jsonify({"ok": False, "msg": f"Lauf-Stand nicht lesbar ({str(e)[:80]}) — nichts freigegeben"}), 503
+        sperre = freigabe_sperre(plan, aktiv, _ms())
+        if sperre:
+            return jsonify({"ok": False, "msg": sperre}), 409
         frei, zeilen = _vorpruefung(plan)
         if not frei:
             return jsonify({"ok": False, "code": "vorpruefung", "msg": "Vorprüfung nicht grün", "zeilen": zeilen}), 409
+        # Alte Startmarken eines früheren Laufs überschreiben (derselbe Plan nochmal, 21.10.2026); Guard auf genau die gelesene Marke —
+        # hat der Start-Wächter inzwischen neu geclaimt, greift nichts (0 Zeilen → 409)
+        alt_claim = plan.get("start_um_gestartet_at")
         try:
-            neu = A["sb_update"]("trade_plans", {"id": f"eq.{plan['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
-                                 {"start_um": A["_wt_now_iso"]()})
+            neu = A["sb_update"]("trade_plans", {"id": f"eq.{plan['id']}", "status": "eq.planned",
+                                                 "start_um_gestartet_at": f"eq.{alt_claim}" if alt_claim else "is.null"},
+                                 {"start_um": A["_wt_now_iso"](), "start_um_gestartet_at": None, "started_at": None, "ended_at": None})
         except Exception as e:
             return jsonify({"ok": False, "msg": f"Startzeit nicht gesetzt: {str(e)[:160]}"}), 502
         if not neu:

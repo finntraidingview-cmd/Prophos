@@ -246,9 +246,46 @@ def test_aktiv_liste():
     chk("None/kaputt = gesperrt", rp(None, {"frei": True})[0] is False and rp({"frei": True}, "x")[0] is False and rp({}, {"frei": True})[0] is False)
 
 
+def test_freigabe_nochmal():
+    """DERSELBE PLAN NOCHMAL (Finn 21.10.2026): /polar/freigeben überschreibt alte Startmarken — gesperrt bleibt bei aktivem Lauf, frischer
+    Marke (< 120 s oder Zukunft) und Status ≠ planned. Dazu per Quelltext: Lauf-Prüfung (Prozess + polar_lauf, fail-closed) vor dem Update,
+    Update leert start_um_gestartet_at mit Guard auf die gelesene Marke; Frontend leert die Marken beim Zurücksetzen auf Geplant."""
+    try:
+        import polar_app
+    except Exception as e:
+        print(f"· polar_app nicht importierbar ({type(e).__name__}) — Freigabe-Sperre übersprungen")
+        return
+    fs = polar_app.freigabe_sperre
+    jetzt = polar_app._iso_ms("2026-10-21T01:00:00Z")
+    alt = {"status": "planned", "start_um": "2026-10-21T00:30:00Z", "start_um_gestartet_at": "2026-10-21T00:30:05.123+00:00"}
+    chk("Freigabe: alte Marken (30 min) eines beendeten Laufs → frei", fs(alt, None, jetzt) is None)
+    chk("Freigabe: ohne Marken → frei", fs({"status": "planned"}, None, jetzt) is None)
+    g = fs(alt, "11111111-2222-3333-4444-555555555555", jetzt)
+    chk("Freigabe: aktiver Lauf → gesperrt (nennt Lauf)", bool(g) and "11111111" in g and "läuft noch" in g)
+    chk("Freigabe: Claim vor 30 s → gesperrt", "eben gestartet" in (fs(dict(alt, start_um_gestartet_at="2026-10-21T00:59:30Z"), None, jetzt) or ""))
+    chk("Freigabe: eben freigegeben (start_um vor 60 s, kein Claim) → gesperrt",
+        "eben freigegeben" in (fs({"status": "planned", "start_um": "2026-10-21T00:59:00Z"}, None, jetzt) or ""))
+    chk("Freigabe: Startzeit in der Zukunft → gesperrt", bool(fs({"status": "planned", "start_um": "2026-10-21T01:05:00Z"}, None, jetzt)))
+    chk("Freigabe: Marke genau 121 s alt → frei", fs(dict(alt, start_um_gestartet_at="2026-10-21T00:57:59Z", start_um="2026-10-21T00:57:59Z"), None, jetzt) is None)
+    for st in ("open", "review", "completed", ""):
+        chk(f"Freigabe: Status {st or 'leer'} → gesperrt", bool(fs(dict(alt, status=st), None, jetzt)))
+    chk("Freigabe: kaputte Zeit = keine Marke (Status/Lauf sperren weiter)", fs({"status": "planned", "start_um": "kaputt"}, None, jetzt) is None)
+    src = open(os.path.join(os.path.dirname(HERE), "polar_app.py"), encoding="utf-8").read()
+    fg = src[src.index("def polar_freigeben():"):src.index('@app.route("/polar/geblowt"')]
+    chk("/polar/freigeben: Lauf-Prüfung (Prozess + polar_lauf) und freigabe_sperre vor dem Update",
+        0 < fg.index("_LAEUFE.values()") < fg.index('"polar_lauf"') < fg.index("freigabe_sperre(") < fg.index('A["sb_update"]("trade_plans"'))
+    chk("/polar/freigeben: polar_lauf nicht lesbar → 503, nichts freigegeben", "nichts freigegeben\"}), 503" in fg)
+    chk("/polar/freigeben: Update leert start_um_gestartet_at, Guard auf die gelesene Marke",
+        '"start_um_gestartet_at": None' in fg and 'f"eq.{alt_claim}" if alt_claim else "is.null"' in fg)
+    html = open(os.path.join(os.path.dirname(HERE), "prophos.html"), encoding="utf-8").read()
+    chk("Frontend: Polar zurück auf Geplant leert start_um + start_um_gestartet_at",
+        "if(newStatus === 'planned' && _cur?.route === 'polar'){ updates.start_um = null; updates.start_um_gestartet_at = null }" in html)
+
+
 def main():
     test_panel()
     test_aktiv_liste()
+    test_freigabe_nochmal()
     print(("OK — alle Prüfungen grün" if not FEHLER else f"FEHLER: {len(FEHLER)} rot: " + "; ".join(FEHLER)))
     return 0 if not FEHLER else 1
 

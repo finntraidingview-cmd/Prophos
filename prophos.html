@@ -44462,6 +44462,9 @@
       // Trade-Ende (22.09.2026): zurück auf offen/geplant (Fehlerkennung) löscht es, review stempelt es
       if(newStatus === 'open' || newStatus === 'planned') updates.ended_at = null
       if(newStatus === 'review' && !_cur?.endedAt) updates.ended_at = new Date().toISOString()
+      // DERSELBE POLAR-PLAN NOCHMAL (Finn 21.10.2026, zum Testen immer wieder starten): zurück auf Geplant löscht auch die Startmarken des
+      // letzten Laufs — sonst meldete /polar/freigeben „schon gestartet". Railway sperrt trotzdem selbst, solange ein Lauf aktiv ist.
+      if(newStatus === 'planned' && _cur?.route === 'polar'){ updates.start_um = null; updates.start_um_gestartet_at = null }
       // MT5-Route (15.08.2026): klickt Finn manuell "Läuft" und das Paar ist über
       // mt5_links verlinkt (lokaler PC), gehört der Plan der MT5-Zustandsmaschine —
       // route + Baseline mit ins Update, sonst wüsste weder die Ende-Erkennung noch
@@ -45935,7 +45938,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1679'
+  const OS_TAB_BUILD = '2026-09-22.1680'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
