@@ -19863,8 +19863,8 @@ def ap_blow_auto_tick(force=False):
 # ap_loop-Takt (AP_BLOW_AUTO_S) und mit denselben Riegeln: nur echte Lesungen vorher/nachher (ap_echte_balancen, nie Demo/Hand/Schätzung),
 # Routen Orbit V2 / Echo V2 ohne Hedge, Phase des Plans = Phase des Kontos (Challenge/Phase 1/Phase 2), Firmen-Regel ohne Kette. „Normal" =
 # Ende ÜBER dem Boden und UNTER dem Ziel der Phase (zw_ziel, dieselbe Rechnung wie die Ziel-Wache), Konto ohne Ziel-Tag, kein Balance-Sprung
-# (Auszahlung o. Ä.), kein Kennzeichen „Manuelle Arbeit"/Review. Tage-Mini (Konto steht schon in Bestanden → Tage sammeln) zählt als normal,
-# solange es über dem Boden endet. Abhaken = dasselbe Update wie der Knopf (_wd_erledigt_upd, P&L = nachher − vorher), Kennzeichen
+# (Auszahlung o. Ä.), kein Kennzeichen „Manuelle Arbeit"/Review. Tage-Mini zählt seit 21.10.2026 NICHT mehr als
+# normal (sofort von Hand zu, Konto bestanden — Finn: „genau wie ich es gesagt habe“). Abhaken = dasselbe Update wie der Knopf (_wd_erledigt_upd, P&L = nachher − vorher), Kennzeichen
 # mt5_baseline.auto_abgehakt. Alles andere bleibt in „Abhaken" für Finn. Kein Push — es ist ja nichts passiert.
 AP_NORMAL_AUTO_ROUTEN = AP_BLOW_AUTO_ROUTEN
 _ap_normal_auto = {"n": 0, "fehler": ""}
@@ -19874,7 +19874,7 @@ _ap_normal_auto = {"n": 0, "fehler": ""}
 # Rest bis Ziel unter AP_FEHLT_ZEIGEN_USD = Radar-Chip „fehlen noch … → Rest von Hand" (WDL_FEHLT_ZEIGEN_USD) → Finn;
 # Ende nur am TP oder SL — Orbit V2 mit Demo-Ende demo_tp/demo_sl (Vorzeichen passt zum P&L), sonst (Echo V2 schreibt keinen Grund,
 # Orbit nach reader_leer) echter P&L ≈ +master_tp bzw. −master_sl (± AP_NORMAL_TPSL_TOL, mind. AP_NORMAL_TPSL_MIN_USD — Schlupf/Kommission);
-# Schließen-Knopf, Auto-Close, Hand-Ende nie. Konto weg / nicht erreicht / TopstepX-Blow-Beweis an der Endlesung → Finn (so kann auch
+# Schließen-Knopf, Auto-Close, Hand-Ende, Tage-Mini (sofort zu) nie. Konto weg / nicht erreicht / TopstepX-Blow-Beweis an der Endlesung → Finn (so kann auch
 # „wahrscheinlich bestanden · nicht mehr im Dropdown" nie hier landen — dort fehlt ohnehin die echte Endbalance).
 AP_FEHLT_ZEIGEN_USD = 500
 AP_NORMAL_TPSL_TOL = 0.15
@@ -19919,9 +19919,8 @@ def ap_normal_auto_pruefen(plan, acc, regel):
     m = bl.get("manuell")
     if isinstance(m, dict) and m.get("at"):
         return None                                # Finn hat ihn nach „Manuelle Arbeit"/Review gelegt
-    mini = bool(bl.get("tage_mini"))
-    if acc.get("ziel_erreicht_at") and not mini:
-        return None                                # bestanden → Finn will es sehen
+    if acc.get("ziel_erreicht_at"):
+        return None                                # bestanden → Finn will es sehen (auch Tage-Mini, s. u.)
     tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
     fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
     if lt_balance_sprung(str(p.get("route") or ""), tv, fin):
@@ -19938,20 +19937,18 @@ def ap_normal_auto_pruefen(plan, acc, regel):
         return None
     if bo is None or nachher <= float(bo):
         return None                                # Blow (macht der Blow-Takt) oder Boden unbekannt
-    if not mini and (not zg or zw_erreicht(zg[0], nachher, phase)):
+    if not zg or zw_erreicht(zg[0], nachher, phase):
         return None                                # bestanden oder Ziel unbekannt
     if fin.get("konto_weg") or fin.get("konto_weg_vermutet") or fin.get("konto_geblowt") \
             or re.match(r"konto_(nicht_erreicht|weg|geblowt)", str(fin.get("puls_fehler") or "")):
         return None                                # Konto weg / unklare Lesung → Finn (21.10.2026)
-    ende = None
-    if not mini:
-        if float(zg[0]) - nachher < AP_FEHLT_ZEIGEN_USD:
-            return None                            # „fehlen noch … → Rest von Hand / Planer" — Finn entscheidet (21.10.2026)
-        ende = ap_normal_tpsl_ende(p, nachher - vorher)
-        if not ende:
-            return None                            # nicht am TP/SL beendet (von Hand, Auto-Close, unklar) → Finn (21.10.2026)
+    if float(zg[0]) - nachher < AP_FEHLT_ZEIGEN_USD:
+        return None                                # „fehlen noch … → Rest von Hand / Planer" — Finn entscheidet (21.10.2026)
+    ende = ap_normal_tpsl_ende(p, nachher - vorher)
+    if not ende:
+        return None                                # nicht am TP/SL beendet (von Hand, Auto-Close, Tage-Mini sofort zu, unklar) → Finn
     return {"vorher": vorher, "nachher": nachher, "pl": round(nachher - vorher, 2), "boden": float(bo),
-            "ziel": zg[0] if zg else None, "quelle": q, "mini": mini, "ende": ende}
+            "ziel": float(zg[0]), "quelle": q, "ende": ende}
 
 
 def _ap_normal_auto_abhaken(plan, k):
@@ -19970,8 +19967,7 @@ def _ap_normal_auto_abhaken(plan, k):
     if not sb_update("trade_plans", filt, upd):
         return False
     print(f"[normal-auto] ✓ Plan {pid[:8]} · {plan.get('master_name') or ''} · {k['pl']:+.2f} $ ({k['vorher']:.2f} → {k['nachher']:.2f}, "
-          f"Boden {k['boden']:.0f}, Ziel {k['ziel'] if k['ziel'] is not None else '–'}{', Tage-Mini' if k['mini'] else ''}"
-          f"{', Ende ' + k['ende'] if k.get('ende') else ''}) abgehakt", flush=True)
+          f"Boden {k['boden']:.0f}, Ziel {k['ziel']:.0f}, Ende {k['ende']}) abgehakt", flush=True)
     return True
 
 

@@ -2,7 +2,7 @@
 """Selbsttest NORMALE TRADES AUTOMATISCH ABHAKEN (Finn 14.10.2026 am Radar „Erledigt · Abhaken 8“: normale Trades ohne Blow/Bestanden
 nicht mehr zeigen, selbst abhaken). app.py: ap_normal_auto_pruefen (rein rechnend), Verdrahtung im ap_loop nach ap_blow_auto_tick.
 Seit 21.10.2026 (Finn: „automatisch nur, wenn NICHTS passiert ist“): Rest < 500 $, Ende nicht am TP/SL, Konto weg → Finn; zwei Schalter
-(abhaken_auto_normal / abhaken_auto_blow), der alte abhaken_auto schaltet nie mehr den Blow-Takt.
+(abhaken_auto_normal / abhaken_auto_blow), der alte abhaken_auto schaltet nie mehr den Blow-Takt; Tage-Mini nie mehr automatisch.
 Werte frei erfunden, ohne Netz. Aufruf: python3 tools/selftest_normal_auto.py"""
 import os
 import re
@@ -65,7 +65,7 @@ def main():
     check(pr(echo(90000.01, master_sl=10180), acc, regel) is not None, "1 Cent über dem Boden, am SL → normal")
     check(pr(echo(), dict(acc, ziel_erreicht_at="2026-10-13T10:00:00Z"), regel) is None, "Konto mit Ziel-Tag → Finn sieht es")
     mini = echo(106000.0); mini["mt5_baseline"] = dict(mini["mt5_baseline"], tage_mini={"ist": 3, "soll": 5})
-    check(pr(mini, dict(acc, ziel_erreicht_at="2026-10-13T10:00:00Z"), regel) is not None, "Tage-Mini auf bestandenem Konto → normal")
+    check(pr(mini, dict(acc, ziel_erreicht_at="2026-10-13T10:00:00Z"), regel) is None, "Tage-Mini auf bestandenem Konto → bestanden → Finn (seit 21.10.2026)")
     p = echo(); p["mt5_baseline"] = dict(p["mt5_baseline"], hedge={"status": "zu"})
     check(pr(p, acc, regel) is None and pr(echo(hedge_eur=120), acc, regel) is None, "mit Hedge → von Hand")
     p = echo(); p["mt5_baseline"] = dict(p["mt5_baseline"], manuell={"at": "2026-10-13T10:00:00Z", "schritt": "geparkt"})
@@ -109,7 +109,7 @@ def main():
     check(pr(o, acc, regel) is None, "Endlesung „Konto nicht erreicht“ (unklare Lesung) → Finn")
     check(pr(echo(89000.0, master_sl=11180), acc, regel) is None, "geblowt (unter dem Boden, am SL) → Normal-Takt nie")
     mini2 = echo(100190.0, master_tp=500); mini2["mt5_baseline"] = dict(mini2["mt5_baseline"], tage_mini={"ist": 2, "soll": 5})
-    check(pr(mini2, acc, regel) is not None, "Tage-Mini (+10 $, weder TP noch SL, kein Ziel-Tag) → bleibt erlaubt")
+    check(pr(mini2, acc, regel) is None, "Tage-Mini (+10 $, sofort zu — weder TP noch SL) → nicht automatisch (Finn: „genau wie ich es gesagt habe“)")
 
     sl_ = ns["ap_auto_abhaken_schalter_lesen"]
     check(sl_({"abhaken_auto": True}) == {"normal": True, "blow": False}, "alter Schalter abhaken_auto → nur Normal-Takt, nie Blow-Takt")

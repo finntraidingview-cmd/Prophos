@@ -6,7 +6,8 @@
 -- Ab dem app.py-Stand mit ap_auto_abhaken_schalter_lesen (erst nach dem Railway-Deploy wirksam):
 --   regeln.abhaken_auto_normal = true  → Normal-Takt (ap_normal_auto_tick): nur Orbit V2 / Echo V2 ohne Hedge, Challenge/Phase 1/2,
 --                                        echte Lesung, über dem Boden, Rest bis Ziel ≥ 500 $, Ende am TP oder SL (nie Schließen-Knopf,
---                                        Auto-Close, Liquidation), kein Konto weg, kein Ziel-Tag, kein Balance-Sprung, kein manuell/Review
+--                                        Auto-Close, Liquidation, Tage-Mini), kein Konto weg, kein Ziel-Tag, kein Balance-Sprung,
+--                                        kein manuell/Review
 --   regeln.abhaken_auto_blow   = true  → Blow-Takt (ap_blow_auto_tick): geblowt abhaken + archivieren — Standard AUS
 --   regeln.abhaken_auto        = true  → alter Schalter, schaltet aus Sicherheit NUR noch den Normal-Takt, nie mehr den Blow-Takt
 -- Fehlt ein Schlüssel = AUS. Review-weiter (Konto schon weitergestellt/archiviert) läuft immer.
