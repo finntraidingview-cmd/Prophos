@@ -345,6 +345,17 @@ def main():
     check(ah.index('a.get("master_zu_ms")') < ah.index('m.get("liq")') and '"abbruch": True' in ah, "airbag_holen bricht bei Master-zu/Fehler sofort ab")
     ls2 = srcZ[srcZ.index("def lauf_slave(cmd):"):srcZ.index("def uia_zeilen_lesen(")]
     check('if not bestaetigt and not ab.get("abbruch"):' in ls2 and "sl, tp = sl_g, tp_g" in ls2, "Abbruch → kein Ändern-Dialog, Notfall-Level, sofort Wache")
+    print("10f) Orders-Reiter: Rückkehr bewiesen, CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive“ nie aktiv (Prüfung 21.10.2026)")
+    oa2 = pb.order_zeile_arbeitet
+    check(not oa2({"spalten": {"Status": "Inactive"}}) and not oa2({"spalten": {"Status": "Inaktiv"}}) and oa2({"spalten": {"Status": "Active"}})
+          and oa2({"spalten": {"Status": "Aktiv"}}), "Inactive/Inaktiv → nicht aktiv; Active/Aktiv → aktiv")
+    srcF = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    mw = srcF[srcF.index("def master_wache("):]
+    cdp = mw[mw.index("if time.time() >= naechst_cdp:"):mw.index("time.sleep(0.05)")]
+    check(cdp.index("positions_sichtbar(s)") < cdp.index('melden(lauf, "zu", {"quelle": "cdp"') and "continue" not in cdp
+          and "st2 is not None and positions_sichtbar(s)" in cdp, "CDP-Flach nur mit sichtbarem Positions-Reiter (vor und nach dem zweiten Blick)")
+    mlv = srcF[srcF.index("def master_level_lesen("):srcF.index("def positions_sichtbar(")]
+    check('zurueck = bool(ob._cdp_reiter(s, "positions"' in mlv and "Rückkehr auf Positionen NICHT bewiesen" in mlv, "Level-Lesung loggt, ob die Rückkehr auf Positionen gelang")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

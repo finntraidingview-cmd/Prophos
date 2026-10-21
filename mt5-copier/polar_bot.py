@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.9"   # 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.10"   # 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -486,7 +486,9 @@ def order_zeile_arbeitet(zeile):
     nach Filter auch Filled/Cancelled früherer Läufe zeigen); ohne Status-Spalte zählt die Zeile."""
     sp = (zeile or {}).get("spalten") or {}
     st = str(sp.get("Status") or sp.get("Zustand") or "").strip().lower()
-    return not st or bool(re.search(r"working|placed|active|arbeit|aktiv|offen|pending", st))
+    if re.search(r"inactive|inaktiv", st):                # „Inactive" enthält „active" (Prüfung 21.10.2026)
+        return False
+    return not st or bool(re.search(r"working|placed|\bactive\b|arbeit|\baktiv\b|offen|pending", st))
 
 
 def zeilen_preis(zeile):
@@ -1057,12 +1059,25 @@ def master_level_lesen(lauf, s, root, plan):
     except Exception as e:
         erg["teile"].append(f"Lesen: {type(e).__name__}")
     finally:
+        # Rückkehr auf Positionen BEWEISEN (Prüfung 21.10.2026): bleibt Orders aktiv, liefert stand() positionen [] und der CDP-Zweitblick
+        # der Wache hielte den Master für flach. master_wache lässt CDP-Flach ohnehin nur bei sichtbarem Positions-Reiter zu (positions_sichtbar)
         try:
-            ob._cdp_reiter(s, "positions", lauf.trail)
-        except Exception:
-            pass
+            zurueck = bool(ob._cdp_reiter(s, "positions", lauf.trail))
+        except Exception as e:
+            zurueck = False
+            erg["teile"].append(f"Rückkehr: {type(e).__name__}")
+        erg["teile"].append("zurück auf Positionen ✓" if zurueck else "Rückkehr auf Positionen NICHT bewiesen")
     lauf.log("Polar-Level Master aus dem Orders-Reiter (nur lesen): " + " · ".join(erg["teile"]))
     return erg
+
+
+def positions_sichtbar(s):
+    """Ist der Reiter Positionen des Account-Managers nachweislich aktiv (aria-selected)? Nur lesen, Fehler = nein. Ohne diesen Beweis ist
+    eine leere Positions-Liste kein „flach" — Orders-Reiter aktiv (Level-Lesung, Hand-Klick) zeigt ebenfalls keine Position."""
+    try:
+        return bool(ob.cdp_reiter_aktiv(s.lese_js(ob.CDP_REITER_JS) or [], "positions"))
+    except Exception:
+        return False
 
 
 def master_druck(lauf, punkt, hwnd):
@@ -1298,9 +1313,17 @@ def master_wache(lauf, s, opts, ext, root, plan, park=None):
                     if menge > 0:
                         gesehen = True
                     elif gesehen and u != "offen" and st.get("positionen") is not None:
-                        ob._warte(0.3, 0.1)                   # zwei Blicke: der nächste bestätigt
-                        st2 = s.stand(opts)
-                        if ob.cdp_zeilen_menge(ob.k3_zeilen(st2.get("positionen"), root), plan["richtung"]) == 0:
+                        # CDP-Flach nur bei NACHWEISLICH sichtbarem Positions-Reiter (Prüfung 21.10.2026): steht Orders vorn (Level-Lesung
+                        # ohne Rückkehr, Hand-Klick), ist die Liste leer, ohne dass der Master flach ist → Reiter zurückholen, diese Runde nichts
+                        vorn = positions_sichtbar(s)
+                        if not vorn:
+                            ok_r = ob._cdp_reiter(s, "positions", lauf.trail)
+                            lauf.log(f"Wache CDP: Positions-Reiter nicht vorn — zurückgeholt {'✓' if ok_r else 'NICHT bewiesen'}, kein Flach aus dieser Runde")
+                        st2 = None
+                        if vorn:
+                            ob._warte(0.3, 0.1)               # zwei Blicke: der nächste bestätigt
+                            st2 = s.stand(opts)
+                        if st2 is not None and positions_sichtbar(s) and ob.cdp_zeilen_menge(ob.k3_zeilen(st2.get("positionen"), root), plan["richtung"]) == 0:
                             zu_ms = jetzt_ms()
                             melden(lauf, "zu", {"quelle": "cdp", "zu_ms": zu_ms})
                             lauf.log("Polar: Master flach laut Puls-Chrome-Tabelle — 'zu' an Railway gemeldet")
