@@ -2577,6 +2577,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .f{display:inline-flex;align-items:center;gap:5px;min-width:0;font-size:11.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .f i{width:7px;height:7px;border-radius:2px;flex:none}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .k .type-badge{flex:none;font-size:10px;padding:1px 6px}
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l{grid-area:l;justify-self:start;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;background:color-mix(in srgb,currentColor 11%,transparent)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-bd-z.retry,:is(#tpl-view,#adm-pane-planer) .tpl-bd-z.neu{opacity:.72}   /* heilt sich selbst — dezent (21.10.2026) */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.vio{color:var(--violet)} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.rot{color:#b91c1c} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.gelb{color:#b45309} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.gruen{color:#15803d} :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .l.grau{color:var(--sub)}
   /* Klartext höchstens zwei Zeilen (08.10.2026, offener Punkt aus Finns „man erkennt nix" — einzeilig mit „…" war zu knapp), Rest im Tooltip */
   :is(#tpl-view,#adm-pane-planer) .tpl-bd-z .t{grid-area:t;min-width:0;font-size:11.5px;line-height:1.35;color:var(--sub);white-space:normal;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
@@ -42536,8 +42537,10 @@
     if(tv.at) teile.push(`Start ${uhr(tv.at)}${tv.puls === 'tsx' ? ' (TopstepX)' : ''}`)
     const ein = typeof tv.einstieg_nq === 'number' ? tv.einstieg_nq : null
     if(ein) teile.push(`Einstieg ${preis(ein)}${tv.einstieg_quelle ? ' · ' + kurz(tv.einstieg_quelle, 18) : ''}`)
-    if(sf && sf.status !== 'behoben' && (sf.msg || sf.schritt)) teile.push(`⚠ Start-Fehler${sf.at ? ' ' + uhr(sf.at) : ''}: ${kurz(sf.msg || sf.schritt, 70)}`)
-    else if(sf && sf.status === 'behoben') teile.push(`Start-Fehler behoben${sf.behoben ? ': ' + kurz(sf.behoben, 50) : ''}`)
+    // Gestartet = gelöst (21.10.2026, s. sfVersuchtErneut): ein früherer Fehlstart steht nur noch in der aufklappbaren Spur, kein ⚠ mehr
+    const lief = !!(p.startedAt || tv.at || ['open', 'review', 'completed'].includes(String(p.status || '')))
+    let sfErneut = false; try{ sfErneut = sfVersuchtErneut(sf) }catch(_){}   // Konstanten stehen weiter unten im Modul (TDZ beim frühen Zeichnen)
+    if(sf && !lief && sf.status !== 'behoben' && (sf.msg || sf.schritt)) teile.push(`${sfErneut ? 'versucht erneut' : '⚠ Start-Fehler'}${sf.at ? ' ' + uhr(sf.at) : ''}: ${kurz(sf.msg || sf.schritt, 70)}`)
     if(fin.puls_at || fin.konto_weg){
       const v = Number(fin.puls_versuche) || 0
       let erg = ''
@@ -50849,6 +50852,23 @@
   // zählen nicht gegen SF_MAX, der Plan wird bis zum Ende des Start-Fensters alle 15 min neu versucht
   const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar'])
   const sfFlag = p => (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || null
+  /* NUR UNGELÖSTE FEHLSTARTS ZEIGEN (Finn 21.10.2026 ~21:20 Dubai: „Mir sollen nur die Fehlstarts angezeigt werden, die sich NICHT von alleine
+   * gefixt haben … Viele hatten einen Fehlstart, und beim zweiten oder dritten Versuch hat es geklappt. Die will ich nicht mehr sehen. Ich sehe
+   * sonst Fehler, Fehler, Fehler"). Stand heute: 11 Pläne mit Fehlstart, 7 liefen später von selbst durch, 4 hängen wirklich. EINE Regel für
+   * alle Anzeigen (Braucht dich auf Planer-Seite + Admin-Reiter, Puls-Zeile der Plan-Karten, Handy-Meldung): ein roter Fehlstart ist noch kein
+   * Eingreif-Fall, solange sfTick ihn von selbst neu startet — Deckel nicht voll (SF_MAX, außer SF_OHNE_DECKEL), Ergebnis nicht unklar, kein
+   * Schritt ohne Selbstheilung (Ziel erreicht, Manuelle Arbeit) und der letzte Fehlschlag jünger als SF_HAENGT_MS (doppelte Wartezeit von
+   * sfBehoben: wer dann noch nicht neu eingeplant ist, hängt). Nur Anzeige — puls_fehlstarts/start_fehler bleiben unverändert (Routine, Muster). */
+  const SF_HAENGT_MS = 2 * SF_WARTE_MS
+  function sfVersuchtErneut(sf, jetzt){
+    if(!sf || sf.status !== 'rot' || sf.unklar) return false
+    const schritt = String(sf.schritt || '')
+    if(schritt === 'ziel_erreicht' || schritt === 'manuelle_arbeit') return false
+    if((Number(sf.versuche) || 0) >= SF_MAX && !SF_OHNE_DECKEL.has(schritt)) return false
+    const at = Date.parse(sf.at || '') || 0
+    return !!at && (jetzt || Date.now()) - at < SF_HAENGT_MS
+  }
+  window._sfVersuchtErneut = sfVersuchtErneut   // Test-Haken (Stub)
   const sfTagDt = iso => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
   async function sfMelden(plan, f){
     try{
@@ -50871,7 +50891,9 @@
         konto: plan.masterName || null, pc: flag.pc, login: flag.login, schritt: flag.schritt, msg: flag.msg, unklar: flag.unklar })
         .then(({ error }) => { if(error) console.warn('[start-fehler] Protokoll', error.message) }, () => {})
       // Handy-Meldung (07.10.2026, Finn: Fehlstarts sofort sehen und selbst beheben) — Ziel erreicht meldet tpStartUmTick selbst
-      if(flag.schritt !== 'ziel_erreicht'){
+      // Nur, wenn kein Neuversuch folgt (21.10.2026, s. sfVersuchtErneut): Deckel voll, unklar, ohne Selbstheilung. Hängt ein Plan später
+      // (kein Neuversuch binnen SF_HAENGT_MS), meldet sfTick EINMAL nach (sfHaengtMelden)
+      if(flag.schritt !== 'ziel_erreicht' && !sfVersuchtErneut(flag)){
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Trade nicht gestartet', `„${plan.masterName || 'Plan'}": ${flag.msg || 'Check rot'} — Trade-Planer → Braucht dich.`,
           'https://prophos.pages.dev/prophos#trades', 'sf-' + String(plan.id).slice(0, 8)) }catch(_){}
       }
@@ -50997,12 +51019,21 @@
           && ((Number(f.versuche) || 0) < SF_MAX || SF_OHNE_DECKEL.has(String(f.schritt || ''))) && p.startUm && sfTagDt(p.startUm) === heute })
       for(const p of kand){
         const f = sfFlag(p), grund = await sfBehoben(p, f)
-        if(!grund) continue
+        if(!grund){ sfHaengtMelden(p, f); continue }
         const r = await sfNeuEinplanen(p, grund, false)
         if(r === 'tagesende'){ try{ await baselinePatch(p.id, { start_fehler: Object.assign({}, f, { status: 'tagesende' }) }, 'planned') }catch(_){} }
       }
     }catch(e){ console.warn('[start-fehler] tick', (e && e.message) || e) }
     finally{ _sfLaeuft = false }
+  }
+  // Handy-Meldung für einen Fehlstart, der sich NICHT von selbst behebt (21.10.2026): einmal je Plan + Fehler-Zeitpunkt, sobald er länger als
+  // SF_HAENGT_MS ohne Neuversuch steht — vorher meldete sfMelden jeden Fehlstart sofort, auch die, die zwei Minuten später durchliefen
+  function sfHaengtMelden(p, f){
+    if(!f || sfVersuchtErneut(f) || f.status !== 'rot' || f.schritt === 'ziel_erreicht') return
+    const k = 'prophos_sf_gemeldet_' + String(p.id)
+    try{ if(localStorage.getItem(k) === String(f.at || '')) return; localStorage.setItem(k, String(f.at || '')) }catch(_){}
+    try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Trade startet nicht von selbst', `„${p.masterName || 'Plan'}": ${f.msg || f.schritt || 'Check rot'} — seit ${Math.round(SF_HAENGT_MS / 60000)} min kein neuer Versuch. Trade-Planer → Braucht dich.`,
+      'https://prophos.pages.dev/prophos#trades', 'sf-' + String(p.id).slice(0, 8)) }catch(_){}
   }
   setInterval(sfTick, SF_TAKT_MS)
   window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick }   // Test-Haken
@@ -53566,6 +53597,11 @@
         // PC aus (19.10.2026): kein Prophos-Tab seit ≥ 10 min → nicht „Tab lief nicht" je Trade, sondern eine Zeile je ID (unten)
         const a = tplPcAus(t.user_id), o = pcAus.get(String(t.user_id)) || { pc: a.pc, alt_s: a.alt_s, konten: [] }
         o.konten.push(`${t.firma || '?'}${t.ende4 ? ' …' + t.ende4 : ''}`); pcAus.set(String(t.user_id), o)
+      } else if(t.status === 'bestaetigt' && sf && D.tag === D.heute && sfVersuchtErneut(sf)){
+        // Neuversuch folgt (21.10.2026): dezent grau, nicht im Zähler — erst wenn er hängt, wird die Zeile rot
+        add(t.user_id, t.user, { art: 'retry', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
+          text: `versucht erneut — Versuch ${(Number(sf.versuche) || 0) + 1} von ${SF_MAX} gescheitert: ${String(sf.msg || sf.schritt || 'Check rot').replace(/\s+/g, ' ').slice(0, 140)}`,
+          tun: 'Nichts tun — der Bot startet ihn von selbst neu, sobald die Ursache weg ist.' })
       } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
         const wer = sf.pc ? '' : t.user
         add(t.user_id, t.user, { art: 'plan', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key, neu: neuKnopf,
@@ -53684,11 +53720,18 @@
   const TPL_GRUND_WORT = { konto_fehlt: 'Konto gelöscht', live: 'Live-Konto', firma_fehlt: 'Kernwerte fehlen', kernwert_fehlt: 'Kernwerte fehlen',
     phase_ohne_ziel: 'Kernwerte fehlen', ext_fehlt: 'External ID', balance_fehlt: 'keine Balance', typ_ohne_wert: 'Kontotyp', ziel_erreicht: 'Ziel erreicht',
     groesse: 'Größe passt nicht', unbekannt: 'kein Kontowert' }
+  const TPL_BD_LEISE = new Set(['retry', 'neu'])
+  // „n Fälle" je ID nur für Eingreif-Fälle; nur leise Zeilen → „versucht erneut" (21.10.2026)
+  function tplBdFaelle(zeilen){
+    const n = (zeilen || []).filter(z => !TPL_BD_LEISE.has(z.art)).length
+    return n ? `${n} ${n === 1 ? 'Fall' : 'Fälle'}` : 'heilt sich selbst'
+  }
   function tplBdLabel(z){
     const t = String(z.text || '')
     if(z.art === 'balance') return /nicht live/i.test(t) ? { w: 'nicht live', ton: 'vio', r: 1 } : /nie gelesen/i.test(t) ? { w: 'nie gelesen', ton: 'vio', r: 1 }
       : /\balt$/.test(t) ? { w: 'Balance alt', ton: 'vio', r: 1 } : { w: 'Balance fehlt', ton: 'vio', r: 1 }
-    if(z.art === 'neu') return { w: 'neu geplant', ton: 'gruen', r: 9 }
+    if(z.art === 'neu') return { w: 'neu geplant', ton: 'grau', r: 11 }   // Selbstheilung läuft — grau, nicht im Zähler (21.10.2026)
+    if(z.art === 'retry') return { w: 'versucht erneut', ton: 'grau', r: 11 }
     if(z.art === 'pc_aus') return { w: 'PC aus', ton: 'rot', r: 0 }   // ganz oben: ohne PC startet dort nichts (19.10.2026)
     if(z.art === 'start_nein') return { w: 'kann nicht starten', ton: 'rot', r: 6 }   // Plan mit festgestelltem Grund (Finn 20.10.2026)
     if(z.art === 'fremd') return z.konflikt ? { w: '⚠ Gegenhedge', ton: 'rot', r: 0 } : { w: 'Hand-Position', ton: 'grau', r: 10 }   // Fremd-Positionen (08.10.2026)
@@ -53763,13 +53806,16 @@
     if(l.w === 'ausgelassen') return t
     return tun || t
   }
+  window._tplBraucht = (D, ids) => tplBraucht(D, ids)   // Test-Haken (Stub, 21.10.2026)
+  window._tplBrauchtHtml = l => tplBrauchtHtml(l)
   function tplBrauchtHtml(liste){
     const gel = Number(liste.gelesen) || 0
     if(!liste.length && !gel) return ''
-    const n = liste.reduce((a, o) => a + o.zeilen.length, 0)
+    // Zähler nur für Eingreif-Fälle (21.10.2026): „versucht erneut"/„neu geplant" heilen sich selbst
+    const n = liste.reduce((a, o) => a + o.zeilen.filter(z => !TPL_BD_LEISE.has(z.art)).length, 0)
     const bloecke = liste.map(o => {
       const zeilen = o.zeilen.map(z => ({ z, l: tplBdLabel(z) })).sort((a, b) => a.l.r - b.l.r || String(a.z.firma || '').localeCompare(String(b.z.firma || ''), 'de'))
-      return `<div class="ap-id-karte tpl-bd-id" style="--id:${idFarbe(o.uid)}" data-wer="${escapeHtml(o.name || '')}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}</span><span class="n">${o.zeilen.length} ${o.zeilen.length === 1 ? 'Fall' : 'Fälle'}</span></div>`
+      return `<div class="ap-id-karte tpl-bd-id" style="--id:${idFarbe(o.uid)}" data-wer="${escapeHtml(o.name || '')}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(o.uid)}"></i>${escapeHtml(o.name || '—')}</span><span class="n">${tplBdFaelle(o.zeilen)}</span></div>`
         + zeilen.map(({ z, l }) => {
           const grau = tplBdGrau(z, l, o.name)
           return `<div class="tpl-bd-z ${z.art}">${tplBdKonto(z)}<span class="l ${l.ton}" title="${escapeHtml(apBlowText(z.text || ''))}">${escapeHtml(l.w)}</span>`
