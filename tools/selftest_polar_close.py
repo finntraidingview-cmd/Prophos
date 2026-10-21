@@ -310,7 +310,7 @@ def main():
     check("time.time() - t0 > 0.6" not in fb and "close_modal_wahl(s.lese_js(CLOSE_MODAL_JS" in fb and "submit-button" not in fb,
           "Modal ab dem ersten Takt (~50 ms), alter 0,6-s-Weg über submit-button ist raus")
     check('"tabu": r"cancel|abbrechen|reverse|umkehr"' in fb and "pruef=" in fb, "Klick nur mit Ziel-Beweis am Punkt, Cancel/Umkehr tabu")
-    ml = srcM[srcM.index("def master_level_lesen("):srcM.index("def master_druck(")]
+    ml = srcM[srcM.index("def master_level_lesen("):srcM.index("def positions_sichtbar(")]
     check("s.klick(" not in ml and "feld_setzen" not in ml and "taste(" not in ml and '_cdp_reiter(s, "positions"' in ml,
           "Level aus dem Orders-Reiter nur lesen, danach zurück auf Positionen")
     lm2 = srcM[srcM.index("def lauf_master(cmd):"):srcM.index("def lauf_slave(cmd):")]
@@ -372,6 +372,20 @@ def main():
     abr2 = srcH[srcH.index("def _abrechnen(z):"):srcH.index("def laeufe_aus_plaenen(")]
     check('"status": "in.(planned,open,review)"' in abr2 and 'if plan.get("status") == "planned":' in abr2 and "nicht geschrieben" in abr2,
           "Abrechnung nimmt auch einen hängenden planned-Plan mit (→ review, Start vom Master-Klick) und loggt 0 Zeilen")
+    print("10h) Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more“ (Finn 21.10.2026)")
+    srcO = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    fb2 = srcO[srcO.index("def master_fill_beweis("):srcO.index("def master_druck(")]
+    for teil, txt in (("ob.cdp_meldungen_zu(st.get(\"toasts\"))", "eingeklappten Stapel erkennen"), ("ob.cdp_show_more_wahl(s.lese_js(ob.CDP_SHOW_MORE_JS)", "Show-more-Knopf wie Orbit"),
+                      ('mehr["versuche"] < 4', "bis 4 Versuche"), ("ende = max(ende, time.time() + 4.0)", "Frist ≥ 4 s je Versuch"),
+                      ("ob.k3_neue_meldungen(vorher_m,", "neue Meldungen wie Orbit"), ("b_ok = b", "BEWEIS BLEIBT"),
+                      ("time.time() - erst_ok >= 6.0", "nach dem Fill ≤ 6 s auf TP/SL"), ("Show less", "Stapel am Ende zu")):
+        check(teil in fb2, f"master_fill_beweis: {txt}")
+    lm3 = srcO[srcO.index("def lauf_master(cmd):"):srcO.index("def lauf_slave(cmd):")]
+    check("b = master_fill_beweis(lauf, s, opts, plan, root, menge0, vorher_m)" in lm3 and "if b.get(\"bestaetigt\") and b.get(\"einstieg\") is not None:\n                fill" not in lm3,
+          "lauf_master nimmt den Orbit-Ablauf, kein Abbruch beim ersten Beweis mehr")
+    od = open(os.path.join(STAMM, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
+    check(all(f"def {n}(" in od for n in ("cdp_meldungen_zu", "cdp_show_more_wahl", "k3_neue_meldungen", "cdp_order_beweis", "cdp_im_bild", "cdp_toasts_kurz", "cdp_meldung_text"))
+          and "CDP_SHOW_MORE_JS = " in od, "alle Orbit-Bausteine stehen in order_bot (aufgerufen, nicht kopiert)")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

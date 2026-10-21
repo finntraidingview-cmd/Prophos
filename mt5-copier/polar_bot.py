@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.11"   # 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.12"   # 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1080,6 +1080,80 @@ def positions_sichtbar(s):
         return False
 
 
+def master_fill_beweis(lauf, s, opts, plan, root, menge0, vorher_m):
+    """Nach dem Senden-Klick DERSELBE Ablauf wie Orbit (order_bot, CDP-Weg nach „Senden geklickt", Commits 5aa6f0c3/a9b3b671 vom
+    28.09.2026 und die Nachträge 29.09./07.10.): bis 15 s Blicke; den eingeklappten Meldungsstapel per „Show more" aufklappen (genau ein
+    Knopf ganz im Bild, bis 4 Versuche, nach einem echten Druck nie wieder, jeder Versuch verlängert die Frist auf ≥ 4 s); BEWEIS BLEIBT
+    (ein bestätigter Beweis wird nur ergänzt, nie verworfen); nach dem Fill höchstens 6 s auf TP/SL-Meldungen warten; am Ende „Show less".
+    Alle Bausteine aus order_bot (cdp_meldungen_zu, cdp_show_more_wahl, CDP_SHOW_MORE_JS, k3_neue_meldungen, cdp_order_beweis) — die
+    Schleife selbst steht dort inline und ist nicht aufrufbar, darum hier dieselbe Reihenfolge. -> Beweis {bestaetigt, einstieg,
+    einstieg_quelle, tp, sl, …} (+ show_more, meldung_roh)"""
+    b, neu, st, gr = {}, [], {}, None
+    b_ok, erst_ok, erst_toast = None, None, None
+    mehr = {"gedrueckt": False, "versuche": 0, "hin": False}
+    t_klick = time.time()
+    ende = t_klick + 15.0
+    while time.time() < ende:
+        ob._warte(0.5, 0.25)
+        try:
+            st = s.stand(opts)
+        except Exception as e_:
+            lauf.log(f"Blick nach dem Klick: {type(e_).__name__}")
+            continue
+        if erst_toast is None and ob.cdp_toasts_kurz(st.get("toasts")) != "keine Meldungen":
+            erst_toast = time.time() - t_klick
+            lauf.log(f"erste Meldung nach {erst_toast:.1f} s ({ob.cdp_toasts_kurz(st.get('toasts'))})")
+        gr = ob.cdp_meldungen_zu(st.get("toasts"))
+        if gr and not mehr["gedrueckt"] and mehr["versuche"] < 4:
+            mehr["versuche"] += 1
+            k = ob.cdp_show_more_wahl(s.lese_js(ob.CDP_SHOW_MORE_JS) or [], ob.cdp_rect(gr))
+            ende = max(ende, time.time() + 4.0)
+            if not k:
+                lauf.log(f"Show more {mehr['versuche']}/4: kein Knopf ganz im Bild (Stapel {ob.cdp_rect(gr)})")
+                if ob.cdp_rect(gr) and not mehr["hin"]:
+                    mehr["hin"] = True
+                    s.hin(ob.cdp_rect(gr), f"Meldungsstapel '{gr.get('gruppe')}'")   # Hover blendet die Steuerleiste ein
+            elif s.klick(ob.cdp_rect(k), f"Show more (Meldungen '{gr.get('gruppe')}', {k.get('text') or k.get('dn')})", toast_ok=True):
+                mehr["gedrueckt"] = True
+                lauf.log("Show more gedrückt — Stapel aufgeklappt")
+                ob._warte(0.6, 0.3)
+                continue
+            else:
+                lauf.log(f"Show more {mehr['versuche']}/4 nicht gedrückt (Knopf @{k.get('rect')}) — nächster Blick")
+        neu = ob.k3_neue_meldungen(vorher_m, (st.get("toasts") or {}).get("meldungen"))
+        b = ob.cdp_order_beweis(neu, ob.k3_zeilen(st.get("positionen"), root), plan, menge0) or {}
+        if b.get("bestaetigt"):
+            if b_ok:
+                for k_ in ("einstieg", "einstieg_quelle", "tp", "sl", "symbol", "beweis"):
+                    if (b.get(k_) is None or b.get(k_) == "") and b_ok.get(k_) not in (None, ""):
+                        b[k_] = b_ok[k_]
+            b_ok = b
+        elif b_ok:
+            b = b_ok
+        if b.get("bestaetigt"):
+            erst_ok = erst_ok or time.time()
+            alles = (b.get("tp") is not None or not plan.get("tp")) and (b.get("sl") is not None or not plan.get("sl"))
+            mehr_fertig = mehr["gedrueckt"] or mehr["versuche"] >= 4 or gr is None
+            if (alles and mehr_fertig) or time.time() - erst_ok >= 6.0:
+                break
+    if ob.cdp_meldungen_zu(st.get("toasts") if isinstance(st, dict) else None) and not mehr["gedrueckt"]:
+        lauf.log("Show more NICHT gedrückt — Werte aus TradingViews Meldungsprotokoll (role=log)")
+    b = dict(b, show_more=mehr["gedrueckt"], meldung_roh=[ob.cdp_meldung_text(m) for m in neu][:14])
+    lauf.log(f"Fill-Beweis: Einstieg {b.get('einstieg')} ({b.get('einstieg_quelle')}) · TP {b.get('tp')} · SL {b.get('sl')} · Show more "
+             f"{'gedrückt' if mehr['gedrueckt'] else 'nein'} · Meldungen: " + (" | ".join(b["meldung_roh"]) or "nichts")[:400])
+    try:                                                        # Stapel wieder zu (Orbit 29.09.2026: lag sonst über Konto-Umschalter/Reitern)
+        st_z = s.stand(opts)
+        geo_z = st_z.get("geo") if isinstance(st_z.get("geo"), dict) else {}
+        for g_z in ((st_z.get("toasts") or {}).get("gruppen") or []):
+            if isinstance(g_z, dict) and g_z.get("offen") is True and ob.cdp_im_bild(ob.cdp_rect(g_z.get("mehr")), geo_z):
+                s.klick(ob.cdp_rect(g_z.get("mehr")), f"Show less (Meldungen '{g_z.get('gruppe')}' zuklappen)", toast_ok=True)
+                ob._warte(0.4, 0.2)
+                break
+    except Exception as e_:
+        lauf.log(f"Stapel zuklappen: {type(e_).__name__}")
+    return b
+
+
 def master_druck(lauf, punkt, hwnd):
     """Zur Feuerzeit: Vordergrund + Fenster am Punkt (Millisekunden), dann EIN SendInput-Druck. -> (ok, klick_ms)"""
     if not punkt or not hwnd:
@@ -1443,28 +1517,18 @@ def lauf_master(cmd):
             return res
         lauf.log("Senden geklickt — ab hier zählt nur der Beweis")
         lauf.phase("geklickt", klick_ms=klick_ms)
-        # Beweis (bis 15 s): neue Fill-Meldung oder gewachsene Positionsmenge (dieselbe reine Prüfung wie der alte Puls)
-        b, fill = {}, None
-        ende = time.time() + 15.0
-        while time.time() < ende:
-            ob._warte(0.4, 0.2)
-            try:
-                st = s.stand(opts)
-            except Exception:
-                continue
-            alle = [m for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
-            neu = [m for m in alle if ob.k3_meldung_schluessel(m) not in vorher_m]
-            b = ob.cdp_order_beweis(neu, ob.k3_zeilen(st.get("positionen"), root), plan, menge0) or {}
-            if b.get("bestaetigt") and b.get("einstieg") is not None:
-                fill = ob.cdp_zahl(b["einstieg"])
-                break
-        if not b.get("bestaetigt"):
+        # Beweis 1:1 WIE ORBIT inkl. „Show more" (Finn 21.10.2026: „Es ist 1:1-Logik von Orbit, weil Orbit immer funktioniert hat … Radar hat
+        # jedes einzelne Mal die Daten: Entry, Exit"); vorher brach Polar beim ERSTEN Beweis ab — meist tabelle_avg_fill, TP fehlte
+        b = master_fill_beweis(lauf, s, opts, plan, root, menge0, vorher_m)
+        fill = ob.cdp_zahl(b["einstieg"]) if b.get("einstieg") is not None else None
+        if not b.get("bestaetigt") or fill is None:
             melden(lauf, "fehler", {"msg": "Senden geklickt, in 15 s kein Fill-Beweis — UNKLAR, in TradingView nachsehen", "unklar": True})
             res["msg"] = "Ergebnis unklar"
             lauf.phase("unklar", msg=res["msg"])
             return res
         res.update(bestaetigt=True, einstieg=fill, einstieg_quelle=b.get("einstieg_quelle"), tp_limit=b.get("tp"), sl_limit=b.get("sl"))
-        melden(lauf, "gefuellt", {"fill": fill, "quelle": b.get("einstieg_quelle"), "klick_ms": klick_ms, "balance_start": res.get("balance_start")})
+        melden(lauf, "gefuellt", {"fill": fill, "quelle": b.get("einstieg_quelle"), "klick_ms": klick_ms, "balance_start": res.get("balance_start"),
+                                  "show_more": b.get("show_more"), "meldung_roh": b.get("meldung_roh")})
         lauf.phase("gefuellt", fill=fill)
         # Level 1:1 WIE ORBIT (Finn 21.10.2026 ~04:15 Dubai nach dem ersten echten Lauf 8870f1de: „erst mal nichts ändern, einfach nur die
         # 1:1-Sache vom normalen Orbit nehmen, weil der auch immer perfekt ausliest"): die TP/SL-Klammer kommt aus dem Ticket ($-Werte, setzt
