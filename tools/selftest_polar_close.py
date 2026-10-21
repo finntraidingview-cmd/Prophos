@@ -121,6 +121,91 @@ def main():
              {"text": "107.07", "rect": [760, 700, 140, 18]}, {"text": "andere Zeile", "rect": [760, 718, 140, 18]}, {"text": "Kopf Profit", "rect": [760, 640, 140, 22]}]
     check(upz(cells, zl)["text"] == "107.07", "Profit-Zelle = rechteste Zelle im Zeilenband (nicht die Nachbarzeile, nicht der Spaltenkopf)")
     check(upz([c for c in cells if c["text"] in ("andere Zeile", "Kopf Profit")], zl) is None, "keine Zelle im Band → None")
+    print("10b) ×-Beweis per Bild (21.10.2026, Lauf 8870f1de: MT5-Liste ohne UIA-Zellen)")
+    WEISS, GRAU, BLAU, SCHWARZ = 0xFFFFFF, 0x808080, 0x3399FF, 0x000000
+
+    def bild(b, h, hg=WEISS):
+        return [[hg] * b for _ in range(h)]
+
+    def kreuz(p, x0, y0, n, farbe=GRAU, dick=1):
+        for i in range(n):
+            for d in range(dick):
+                for (x, y) in ((x0 + i + d, y0 + i), (x0 + n - 1 - i + d, y0 + i)):
+                    if 0 <= y < len(p) and 0 <= x < len(p[0]):
+                        p[y][x] = farbe
+
+    def kasten(p, x0, y0, b, h, farbe=SCHWARZ):
+        for x in range(x0, x0 + b):
+            p[y0][x] = p[y0 + h - 1][x] = farbe
+        for y in range(y0, y0 + h):
+            p[y][x0] = p[y][x0 + b - 1] = farbe
+
+    tm, ixg, xg, sw = pb.tinte_maske, pb.ist_x_glyphe, pb.x_glyphen, pb.schliess_x_wahl
+    p = bild(160, 60)
+    kreuz(p, 140, 20, 7)
+    m = tm(p)
+    check(sum(map(sum, m)) == 13 and m[20][140] and not m[0][0], f"Tinte = nur das × (13 px), Hintergrund je Pixelzeile ({sum(map(sum, m))})")
+    g = xg(m)
+    check(len(g) == 1 and (g[0]["x"], g[0]["y"], g[0]["b"], g[0]["h"], g[0]["cx"], g[0]["cy"]) == (140, 20, 7, 7, 143, 23), f"7×7-× gefunden, Mitte 143/23 ({g})")
+    p2 = bild(160, 60)
+    kreuz(p2, 100, 10, 10, SCHWARZ, dick=2)                                   # dickes, kantengeglättetes ×
+    kasten(p2, 20, 10, 8, 8)                                                  # Kästchen
+    for i in range(9):                                                        # Plus
+        p2[30][60 + i] = p2[26 + i][64] = SCHWARZ
+    kasten(p2, 120, 30, 6, 9)                                                 # „0" (hoch, Kanten voll)
+    for i in range(5):                                                        # „8" grob: zwei Kästchen übereinander
+        p2[45][20 + i] = p2[49][20 + i] = p2[53][20 + i] = SCHWARZ
+    for y in range(45, 54):
+        p2[y][20] = p2[y][24] = SCHWARZ
+    g2 = xg(tm(p2))
+    check([(x["x"], x["y"]) for x in g2] == [(100, 10)], f"nur das dicke × zählt — nicht Kästchen, Plus, 0, 8 ({[(x['x'], x['y']) for x in g2]})")
+    pk = bild(160, 60)
+    kreuz(pk, 150, 20, 3)
+    check(xg(tm(pk)) == [], "zu kleines × (3 px) → kein ×")
+    check(ixg({(0, 0), (6, 6)}, 0, 0, 7, 7) is False, "zu wenig Tinte → kein ×")
+    # Markierte Zeile (blau hinterlegt, weißes ×): der Hintergrund kommt je Pixelzeile, das × bleibt erkennbar
+    p3 = bild(160, 60)
+    for y in range(16, 32):
+        p3[y] = [BLAU] * 160
+    kreuz(p3, 138, 20, 8, WEISS)
+    for x in range(10, 60):                                                   # Text links in derselben Zeile
+        p3[22][x] = WEISS
+    g3 = xg(tm(p3))
+    check(len(g3) == 1 and g3[0]["x"] == 138, f"markierte Zeile: weißes × auf Blau gefunden ({g3})")
+    # Wahl: nur am rechten Rand, genau eine Zeile, in der Ticket-Zeile
+    ga = {"x": 140, "y": 20, "b": 7, "h": 7, "cx": 143, "cy": 23}
+    gsl = {"x": 30, "y": 20, "b": 7, "h": 7, "cx": 33, "cy": 23}             # × neben S/L — weit links
+    gb = {"x": 141, "y": 40, "b": 7, "h": 7, "cx": 144, "cy": 43}             # zweite Zeile (Order/Position)
+    w1, n1, _ = sw([gsl, ga], 160, 23)
+    check(w1 == ga and n1 == 1, "S/L-× links + Profit-× rechts → das rechte, in der Ticket-Zeile")
+    check(sw([gsl], 160, 23)[0] is None, "nur ein × weit links (S/L/T/P) → kein Beweis")
+    w2, n2, gr2 = sw([ga, gb], 160, 23)
+    check(w2 is None and n2 == 2 and "nicht eindeutig" in gr2, "zwei Zeilen mit × → nicht eindeutig, kein Beweis")
+    w3, _, gr3 = sw([ga], 160, 43)
+    check(w3 is None and "neben der Ticket-Zeile" in gr3, f"× in anderer Zeile als der Anker → kein Beweis ({gr3})")
+    check(sw([ga], 160, None)[0] == ga, "ohne Anker-Zeile (nur Maus-Test-Ansicht) → das eine ×")
+    check(sw([], 160, 23)[0] is None and pb.maske_ascii(m, 139, 20, 9, 2) == [".#.....#.", "..#...#.."], "leer → None; ASCII-Ausschnitt fürs Log")
+    # Klick-Freigabe auf dem Bild-Weg
+    bw = {"punkt": (900, 600), "n_x": 1}
+    check(xk(None, "", True, bw) is (not pb.BILD_TOOLTIP_PFLICHT), "Bild-Beweis ohne Tooltip → Klick nach BILD_TOOLTIP_PFLICHT")
+    check(xk(None, "Close position", True, bw) is True and xk(None, "Take Profit", True, bw) is False, "Close-Tooltip ja; fremder Tooltip = Gegenbeweis")
+    check(xk(None, "", False, bw) is False and xk(None, "", True, {"punkt": (1, 1), "n_x": 2}) is False and xk(None, "", True, {"n_x": 1}) is False,
+          "mehrere Positionen / zwei × / ohne Punkt → kein Klick")
+    check(xk(None, "", True, dict(bw, ohne_zeile=True)) is False, "Maus-Test ohne Ticket-Anker → nie bewiesen")
+    check(xk([760, 700, 140, 18], "", True, bw) is False, "Zellen-Weg bleibt bei Tooltip-Pflicht, auch wenn ein Bild da ist")
+    srcW = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    wa = srcW[srcW.index("def slave_wache("):srcW.index("# ── MAUS-TEST ×")]
+    check("x_klick_erlaubt(zelle, x_tip, einzig, bild)" in wa and "x_klick_erlaubt(z, tip, True, bd)" in wa, "Wache: Parken und Klick prüfen mit dem Bild-Beweis")
+    blick = wa[wa.index("if park and jetzt >= naechst_blick:"):wa.index("time.sleep(0.004)")]
+    check(blick.count("parken_mit_beweis()") == 1 and "!= fenster" in blick and "slave_x_punkte(" not in blick,
+          "Wache liest Zeile/× nur nach Fensterbewegung neu (nie alle 0,5 s unter der parkenden Maus)")
+    check('"x_art":' in wa and '"tooltip":' in wa, "geparkt meldet x, x_art, tooltip, beweis (Live-Anzeige)")
+    tx = srcW[srcW.index("def lauf_test_x("):srcW.index("# ── Start")]
+    sl = tx[tx.index("einzig = len(lese[\"positionen\"]) == 1"):]
+    check('res["ok"] = bool(park)' in sl and 'res["msg"] = ' in sl, "Maus-Test Slave setzt ok/msg in jedem Zweig (vorher KeyError beim Zellen-Treffer)")
+    check("_kontextmenue_close_lesen(" in sl and "_kontextmenue_close_klicken" not in sl and 'taste="rechts"' in sl and "{ESC}" in sl,
+          "Maus-Test belegt den Rechtsklick nur lesend (Menü lesen, Esc, nie auslösen)")
+    check(sl.count("_klick_absolut(") == 1, "Maus-Test: einziger Klick ist der Rechtsklick fürs Menü — nie aufs ×")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

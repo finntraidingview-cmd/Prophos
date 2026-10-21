@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.4"   # 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.5"   # 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -468,11 +468,20 @@ def profit_x_aus_zelle(zelle, rand=ZELLE_X_RAND_PX):
     return int(round(x + w - rand)), int(round(y + h / 2.0))
 
 
-def x_klick_erlaubt(zelle, tooltip, einzig):
+def x_klick_erlaubt(zelle, tooltip, einzig, bild=None):
     """REIN RECHNEND (testbar): der Slave klickt das × NUR mit Beweis — Profit-Zelle per UIA gelesen (Punkt liegt in der Zelle), Tooltip
     unter der geparkten Maus sagt Schließen/Close UND genau eine (die eigene) Position ist offen. Fehlt eines → sofort der bewährte
-    Rechtsklick-Weg, kein ×-Klick ins Leere (Master-Entscheid 20.10.2026). -> bool"""
-    return bool(einzig) and profit_x_aus_zelle(zelle) is not None and bool(RX_X_TOOLTIP.search(str(tooltip or "")))
+    Rechtsklick-Weg, kein ×-Klick ins Leere (Master-Entscheid 20.10.2026). -> bool
+    Seit 21.10.2026 zweiter Beweis-Weg für Builds ohne UIA-Zellen: bild = slave_x_bild mit genau einem × am Listenrand in der
+    Ticket-Zeile. Dort ist ein fremder Tooltip ein Gegenbeweis; ein fehlender nur mit BILD_TOOLTIP_PFLICHT."""
+    if not einzig:
+        return False
+    tip = str(tooltip or "").strip()
+    if zelle is not None and profit_x_aus_zelle(zelle) is not None:
+        return bool(RX_X_TOOLTIP.search(tip))
+    if isinstance(bild, dict) and bild.get("punkt") and bild.get("n_x") == 1 and not bild.get("ohne_zeile"):
+        return bool(RX_X_TOOLTIP.search(tip)) if tip else not BILD_TOOLTIP_PFLICHT
+    return False
 
 
 def uia_profit_zelle(zellen, zeile_rect):
@@ -494,6 +503,127 @@ def uia_profit_zelle(zellen, zeile_rect):
     if not im_band:
         return None
     return max(im_band, key=lambda c: float(c["rect"][0]) + float(c["rect"][2]))
+
+
+# ── ×-BEWEIS PER BILD (21.10.2026, erster echter Lauf 8870f1de: „Profit-Zelle per UIA nicht lesbar") ──────────────────────────────────
+# Ursache: Die Handel-Liste der MT5-Toolbox ist ein selbst gezeichnetes Gitter OHNE UIA-Zellen. Das ist derselbe Befund wie bei
+# order_bot._reihen_scan vom 18.08.2026. Auf diesen Builds kommt die UIA-Zelle nie, das × blieb unbewiesen, der Slave parkte nur auf
+# der Zeile. Jetzt sieht der Bot das × selbst: Listenfenster per Win32 (WindowFromPoint auf der Ticket-Zeile), rechter Streifen per
+# BitBlt, darin das ×-Zeichen als Pixelform (zwei Diagonalen, Mitte gekreuzt, Kantenmitten leer). Beweis = GENAU EIN × am rechten
+# Listenrand (Profit = letzte Spalte, die × neben S/L und T/P liegen weiter links), in der Zeile des Ticket-Ankers, und genau eine
+# offene Position per API. Liest UIA die Zelle doch, gilt weiter der Zellen-Weg.
+BILD_TINTE = 60               # Farbabstand |ΔR|+|ΔG|+|ΔB| zum Hintergrund der Pixelzeile, ab dem ein Pixel „Tinte" ist
+BILD_STREIFEN_PX = 160        # rechter Streifen der Handel-Liste, in dem das Schließen-× gesucht wird
+BILD_RAND_MAX_PX = 40         # das × endet ≤ 40 px vor dem Listenrand (Finn-Zoom 20.10.2026: ~14 px, dazu Platz für eine Scrollleiste)
+BILD_ZEILE_TOL_PX = 14        # × muss in der Zeile des Ticket-Ankers liegen (± halbe Zeile plus Rand)
+# Tooltip beim Bild-Weg: Sagt ein Tooltip unter der Maus etwas anderes als Schließen/Close, ist das ein Gegenbeweis und es gibt keinen
+# Klick. Ob MT5 auf dem × überhaupt einen Tooltip zeigt, ist offen (Finn-Screenshot). Ohne Tooltip reicht der Bild-Beweis oben.
+BILD_TOOLTIP_PFLICHT = False
+
+
+def _rgb_abstand(a, b):
+    return abs((a >> 16) - (b >> 16)) + abs(((a >> 8) & 255) - ((b >> 8) & 255)) + abs((a & 255) - (b & 255))
+
+
+def tinte_maske(pix, schwelle=BILD_TINTE):
+    """REIN RECHNEND (testbar): pix = Zeilen von 0xRRGGBB → Zeilen von bool. Hintergrund je Pixelzeile = ihre häufigste Farbe. Damit
+    zählt eine markierte (blau hinterlegte) Positionszeile genauso wie eine weiße, und Gitterlinien über die volle Breite sind keine Tinte."""
+    out = []
+    for zeile in pix or ():
+        if not zeile:
+            out.append([])
+            continue
+        zahl = {}
+        for p in zeile:
+            zahl[p] = zahl.get(p, 0) + 1
+        hg = max(zahl, key=zahl.get)
+        out.append([_rgb_abstand(p, hg) > schwelle for p in zeile])
+    return out
+
+
+def ist_x_glyphe(punkte, x0, y0, b, h):
+    """REIN RECHNEND (testbar): ist die Tinte-Komponente (Menge von (x, y), Rahmen x0/y0/b/h) ein ×? Quadratisch 5–16 px, beide
+    Diagonalen ≥ 85 % getroffen (±1 px für Kantenglättung), Mitte gekreuzt, die vier Kantenmitten leer. Das unterscheidet das × von
+    Ziffern (0, 8), Kästchen, Plus und Text."""
+    if not (5 <= b <= 16 and 5 <= h <= 16 and abs(b - h) <= 2):
+        return False
+    n = max(b, h)
+    if not (1.6 * n <= len(punkte) <= 5 * n):
+        return False
+    s = punkte if isinstance(punkte, set) else set(punkte)
+
+    def nahe(x, y):
+        return any((x + dx, y + dy) in s for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+    ta = tb = 0
+    for i in range(b):
+        t = i / float(b - 1)
+        ta += nahe(x0 + i, int(round(y0 + t * (h - 1))))
+        tb += nahe(x0 + i, int(round(y0 + (1 - t) * (h - 1))))
+    if ta < 0.85 * b or tb < 0.85 * b:
+        return False
+    cx, cy = int(round(x0 + (b - 1) / 2.0)), int(round(y0 + (h - 1) / 2.0))
+    if not nahe(cx, cy):
+        return False
+    return not any(p in s for p in ((x0, cy), (x0 + b - 1, cy), (cx, y0), (cx, y0 + h - 1)))
+
+
+def x_glyphen(maske):
+    """REIN RECHNEND (testbar): zusammenhängende Tinte (8er-Nachbarschaft) → alle ×-Zeichen [{x, y, b, h, cx, cy}] in Masken-Koordinaten."""
+    hoehe = len(maske or ())
+    gesehen, out = set(), []
+    for y in range(hoehe):
+        for x, ink in enumerate(maske[y]):
+            if not ink or (x, y) in gesehen:
+                continue
+            komp, stapel = set(), [(x, y)]
+            gesehen.add((x, y))
+            while stapel:
+                px, py = stapel.pop()
+                komp.add((px, py))
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        nx, ny = px + dx, py + dy
+                        if 0 <= ny < hoehe and 0 <= nx < len(maske[ny]) and maske[ny][nx] and (nx, ny) not in gesehen:
+                            gesehen.add((nx, ny))
+                            stapel.append((nx, ny))
+            if len(komp) > 400:
+                continue
+            xs, ys = [p[0] for p in komp], [p[1] for p in komp]
+            x0, y0, b, h = min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+            if ist_x_glyphe(komp, x0, y0, b, h):
+                out.append({"x": x0, "y": y0, "b": b, "h": h, "cx": x0 + b // 2, "cy": y0 + h // 2})
+    return out
+
+
+def schliess_x_wahl(glyphen, breite, zeile_y=None, rand_max=BILD_RAND_MAX_PX, tol=BILD_ZEILE_TOL_PX):
+    """REIN RECHNEND (testbar): das Schließen-× aus den ×-Zeichen des rechten Listenstreifens. Zählt nur, was ≤ rand_max px vor dem
+    rechten Rand endet; je Zeile das rechteste. GENAU EINE Zeile mit × in der ganzen Liste (eine Position, keine Order), sonst kein
+    Beweis. Mit zeile_y (Ticket-Anker im Streifen) muss das × in dieser Zeile liegen. -> (glyphe | None, zeilen_mit_x, grund)"""
+    rechts = [g for g in glyphen or () if g["x"] + g["b"] >= breite - rand_max]
+    zeilen = []
+    for g in sorted(rechts, key=lambda g: g["cy"]):
+        if zeilen and abs(g["cy"] - zeilen[-1]["cy"]) < 6:
+            if g["x"] > zeilen[-1]["x"]:
+                zeilen[-1] = g
+        else:
+            zeilen.append(g)
+    if not zeilen:
+        return None, 0, f"kein × am rechten Listenrand ({len(glyphen or ())} ×-Zeichen im Streifen)"
+    if len(zeilen) > 1:
+        return None, len(zeilen), f"{len(zeilen)} Zeilen mit × am Rand — nicht eindeutig (weitere Position/Order?)"
+    g = zeilen[0]
+    if zeile_y is not None and abs(g["cy"] - float(zeile_y)) > tol:
+        return None, 1, f"× liegt {int(round(g['cy'] - float(zeile_y)))} px neben der Ticket-Zeile"
+    return g, 1, "genau ein × am rechten Listenrand" + (" in der Ticket-Zeile" if zeile_y is not None else "")
+
+
+def maske_ascii(maske, x0, y0, b, h):
+    """Ausschnitt der Tinte als Text fürs Log (# = Tinte): zeigt ohne Screenshot, was der Bot am Listenrand gesehen hat."""
+    zeilen = []
+    for y in range(max(0, y0), min(len(maske or ()), y0 + h)):
+        z = maske[y]
+        zeilen.append("".join("#" if 0 <= x < len(z) and z[x] else "." for x in range(max(0, x0), x0 + b)))
+    return zeilen
 
 
 def chart_x_wahl(kandidaten):
@@ -1393,12 +1523,153 @@ def slave_profit_zelle(w, ticket, symbol=None):
     return {"zeile": zeile, "zelle": zelle, "punkt": p, "n": len(zellen)} if p else None
 
 
+def _liste_fenster(w, punkt):
+    """Win32-Fenster der Handel-Liste unter dem Zeilen-Punkt (WindowFromPoint), nur wenn es zum MT5-Prozess gehört und NICHT das
+    Hauptfenster selbst ist. Client-Rechteck in Bildschirm-Koordinaten (ohne native Scrollleiste). Nur lesen.
+    -> {hwnd, klasse, rect [l, t, r, b]} | {grund}"""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32 = ctypes.windll.user32
+    u32.WindowFromPoint.restype = ctypes.c_void_p
+    u32.WindowFromPoint.argtypes = [wt.POINT]
+    u32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.DWORD)]
+    u32.GetClientRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
+    u32.ClientToScreen.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.POINT)]
+    u32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    h = u32.WindowFromPoint(wt.POINT(int(punkt[0]), int(punkt[1])))
+    if not h:
+        return {"grund": "kein Fenster unter der Zeile"}
+    kl = ctypes.create_unicode_buffer(128)
+    u32.GetClassNameW(h, kl, 128)
+    pid = wt.DWORD()
+    u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+    if int(pid.value) != int(w.element_info.process_id):
+        return {"grund": f"Fenster unter der Zeile gehört nicht zu MT5 ({kl.value})", "klasse": kl.value}
+    if int(h) == int(w.handle):
+        return {"grund": "unter der Zeile liegt das MT5-Hauptfenster selbst, keine eigene Liste", "klasse": kl.value}
+    rc, p = wt.RECT(), wt.POINT(0, 0)
+    if not u32.GetClientRect(h, ctypes.byref(rc)) or not u32.ClientToScreen(h, ctypes.byref(p)):
+        return {"grund": "Listen-Rechteck nicht lesbar", "klasse": kl.value}
+    return {"hwnd": int(h), "klasse": kl.value, "rect": [p.x, p.y, p.x + rc.right, p.y + rc.bottom]}
+
+
+def _bildschirm_lesen(x, y, b, h):
+    """Bildschirm-Ausschnitt per GDI-BitBlt → Zeilen von 0xRRGGBB (ohne Mauszeiger). Kein PIL nötig. Nur lesen. -> Liste | None"""
+    import ctypes
+    import ctypes.wintypes as wt
+    u32, g32 = ctypes.windll.user32, ctypes.windll.gdi32
+    vp = ctypes.c_void_p
+    u32.GetDC.restype, u32.GetDC.argtypes = vp, [vp]
+    u32.ReleaseDC.argtypes = [vp, vp]
+    g32.CreateCompatibleDC.restype, g32.CreateCompatibleDC.argtypes = vp, [vp]
+    g32.CreateCompatibleBitmap.restype, g32.CreateCompatibleBitmap.argtypes = vp, [vp, ctypes.c_int, ctypes.c_int]
+    g32.SelectObject.restype, g32.SelectObject.argtypes = vp, [vp, vp]
+    g32.BitBlt.argtypes = [vp, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, vp, ctypes.c_int, ctypes.c_int, wt.DWORD]
+    g32.GetDIBits.argtypes = [vp, vp, wt.UINT, wt.UINT, vp, vp, wt.UINT]
+    g32.DeleteObject.argtypes = [vp]
+    g32.DeleteDC.argtypes = [vp]
+
+    class _BIH(ctypes.Structure):
+        _fields_ = [("biSize", wt.DWORD), ("biWidth", wt.LONG), ("biHeight", wt.LONG), ("biPlanes", wt.WORD), ("biBitCount", wt.WORD),
+                    ("biCompression", wt.DWORD), ("biSizeImage", wt.DWORD), ("biXPelsPerMeter", wt.LONG), ("biYPelsPerMeter", wt.LONG),
+                    ("biClrUsed", wt.DWORD), ("biClrImportant", wt.DWORD)]
+
+    class _BI(ctypes.Structure):
+        _fields_ = [("bmiHeader", _BIH), ("bmiColors", wt.DWORD * 3)]
+    b, h = int(b), int(h)
+    hdc = u32.GetDC(None)
+    mem = g32.CreateCompatibleDC(hdc)
+    bmp = g32.CreateCompatibleBitmap(hdc, b, h)
+    alt = g32.SelectObject(mem, bmp)
+    try:
+        ok = g32.BitBlt(mem, 0, 0, b, h, hdc, int(x), int(y), 0x00CC0020)   # SRCCOPY
+        g32.SelectObject(mem, alt)                                          # GetDIBits will die Bitmap NICHT in einem DC
+        alt = None
+        if not ok:
+            return None
+        bi = _BI()
+        bi.bmiHeader.biSize = ctypes.sizeof(_BIH)
+        bi.bmiHeader.biWidth, bi.bmiHeader.biHeight = b, -h                # negativ = von oben nach unten
+        bi.bmiHeader.biPlanes, bi.bmiHeader.biBitCount = 1, 32
+        buf = ctypes.create_string_buffer(b * h * 4)
+        if g32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bi), 0) != h:
+            return None
+        roh = buf.raw
+        return [[(roh[i + 2] << 16) | (roh[i + 1] << 8) | roh[i] for i in range(z * b * 4, (z + 1) * b * 4, 4)] for z in range(h)]
+    finally:
+        if alt is not None:
+            g32.SelectObject(mem, alt)
+        g32.DeleteObject(bmp)
+        g32.DeleteDC(mem)
+        u32.ReleaseDC(None, hdc)
+
+
+def slave_x_bild(w, zeile_punkt, zeile_pruefen=True):
+    """×-Beweis per Bild (21.10.2026, s. BILD_*): Listenfenster unter der Ticket-Zeile → rechter Streifen → genau ein × am Rand in
+    dieser Zeile. Nur lesen, nie klicken. -> {punkt, glyph, liste, klasse, n_x, abstand_rechts, grund, ascii} (punkt fehlt = kein Beweis)
+    zeile_pruefen=False nur im Maus-Test ohne Ticket-Anker: × zur Ansicht, ohne_zeile=True → x_klick_erlaubt sagt nie ja."""
+    lf = _liste_fenster(w, zeile_punkt)
+    if not lf.get("rect"):
+        return {"grund": lf.get("grund") or "Liste nicht gefunden", "klasse": lf.get("klasse")}
+    l, t, r, b = lf["rect"]
+    breite, hoehe = min(BILD_STREIFEN_PX, r - l), b - t
+    out = {"klasse": lf["klasse"], "liste": lf["rect"], "ohne_zeile": not zeile_pruefen}
+    if breite < 40 or not (12 <= hoehe <= 1600) or not (t <= zeile_punkt[1] < b):
+        out["grund"] = f"Listen-Rechteck unbrauchbar {lf['rect']} ({lf['klasse']})"
+        return out
+    pix = _bildschirm_lesen(r - breite, t, breite, hoehe)
+    if not pix:
+        out["grund"] = "Bildschirm nicht lesbar (BitBlt)"
+        return out
+    maske = tinte_maske(pix)
+    gl = x_glyphen(maske)
+    zy = int(zeile_punkt[1]) - t
+    g, n, grund = schliess_x_wahl(gl, breite, zy if zeile_pruefen else None)
+    out.update(n_x=n, glyphen=len(gl), grund=grund)
+    if g is None:
+        out["ascii"] = maske_ascii(maske, 0, zy - 10, breite, 21)          # Band um die Ticket-Zeile — was lag dort?
+        return out
+    ox = r - breite
+    out.update(punkt=(ox + g["cx"], t + g["cy"]), glyph=[ox + g["x"], t + g["y"], g["b"], g["h"]], abstand_rechts=r - (ox + g["x"] + g["b"]),
+               ascii=maske_ascii(maske, max(0, g["x"] - 4), g["y"] - 3, g["b"] + 8, g["h"] + 6))
+    return out
+
+
+def _kontextmenue_close_lesen(timeout=1.0):
+    """Wie ob._kontextmenue_close_klicken, aber NUR lesen (Maus-Test 21.10.2026): steht im offenen Kontextmenü ein Punkt, der
+    ob.ist_close_menuepunkt besteht, und ist er aktiv? Ausgelöst wird nichts. -> ('aktiv'|'ausgegraut'|'kein_menue', text)"""
+    from pywinauto import Desktop
+    ende = time.time() + timeout
+    while time.time() < ende:
+        try:
+            for m in Desktop(backend="uia").windows():
+                try:
+                    if m.element_info.class_name != "#32768" and m.element_info.control_type != "Menu":
+                        continue
+                    for it in m.descendants(control_type="MenuItem"):
+                        txt = it.window_text()
+                        if ob.ist_close_menuepunkt(txt):
+                            try:
+                                return ("aktiv" if it.is_enabled() else "ausgegraut"), str(txt)[:60]
+                            except Exception:
+                                return "aktiv", str(txt)[:60]
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        time.sleep(0.15)
+    return "kein_menue", ""
+
+
 def slave_x_punkte(w, anker_pfad, ticket=None, symbol=None):
     """Punkte der eigenen Positionszeile: zeile = Park-Punkt des Ticket-bewiesenen Ankers (Rechtsklick-Rückfall, x_frac/y_off vom
     SL/TP-Weg), x = das Schließen-× aus der PROFIT-ZELLE per UIA (slave_profit_zelle) — ohne lesbare Zelle KEIN ×-Punkt (Master-Entscheid
     20.10.2026 nach S1s Gegenprüfung: „Fensterrand − 14 px" trifft bei Rahmen/Scrollbar/breitem Terminal daneben).
-    -> (zeile, x | None, fenster, beweis_text, zelle_rect | None)"""
+    Seit 21.10.2026 (Lauf 8870f1de): ohne UIA-Zelle der Bild-Weg (slave_x_bild) an der Anker-Zeile; die Zeile rückt dann auf die
+    Höhe des gesehenen × (genauer als der gemerkte Anker, auch für den Rechtsklick).
+    -> (zeile, x | None, fenster, beweis_text, zelle_rect | None, bild | None)"""
     hr = w.rectangle()
+    fenster = (hr.left, hr.top, hr.right, hr.bottom)
     a = ob._anker_lesen(anker_pfad)
     zeile = None
     try:
@@ -1410,8 +1681,20 @@ def slave_x_punkte(w, anker_pfad, ticket=None, symbol=None):
         if zeile is None:
             zr = z["zeile"]["rect"]
             zeile = (int(zr[0] + zr[2] * 0.4), int(zr[1] + zr[3] / 2))
-        return zeile, z["punkt"], (hr.left, hr.top, hr.right, hr.bottom), f"Profit-Zelle {z['zelle']['rect']} '{z['zelle'].get('text')}' − {ZELLE_X_RAND_PX} px ({z['n']} UIA-Elemente)", z["zelle"]["rect"]
-    return zeile, None, (hr.left, hr.top, hr.right, hr.bottom), "Profit-Zelle per UIA nicht lesbar — kein ×, Rechtsklick-Weg", None
+        return zeile, z["punkt"], fenster, f"Profit-Zelle {z['zelle']['rect']} '{z['zelle'].get('text')}' − {ZELLE_X_RAND_PX} px ({z['n']} UIA-Elemente)", z["zelle"]["rect"], None
+    if not ticket:
+        return zeile, None, fenster, "ohne Ticket kein ×", None, None
+    if zeile is None:
+        return None, None, fenster, "Profit-Zelle per UIA nicht lesbar, kein Zeilen-Anker — kein ×, Zeilen-Scan", None, None
+    try:
+        bild = slave_x_bild(w, zeile)
+    except Exception as e:
+        bild = {"grund": f"Bild nicht lesbar ({type(e).__name__}: {str(e)[:60]})"}
+    if bild.get("punkt"):
+        zeile = (zeile[0], bild["punkt"][1])
+        return zeile, bild["punkt"], fenster, (f"Bild: {bild['grund']} · × {bild['glyph']} {bild['abstand_rechts']} px vor dem Listenrand "
+                                               f"(Liste {bild['liste']} {bild['klasse']})"), None, bild
+    return zeile, None, fenster, f"Profit-Zelle per UIA nicht lesbar, Bild: {bild.get('grund')} — kein ×, Rechtsklick-Weg", None, bild
 
 
 def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
@@ -1431,28 +1714,42 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
         return any(p["ticket"] == ticket for p in (st or {}).get("positionen") or [])
 
     symbol = str(lauf.cmd.get("symbol") or "").strip() or None
-    try:
-        punkt, punkt_x, fenster, x_beweis, zelle = slave_x_punkte(w, anker_pfad, ticket, symbol)
-    except Exception as e:
-        punkt, punkt_x, fenster, x_beweis, zelle = None, None, None, "", None
-        lauf.log(f"Wache: Zeile/Zelle nicht lesbar ({type(e).__name__}) — Schließen läuft dann über den vollen Zeilen-Scan")
+
+    def parken_mit_beweis():
+        """Zeile/× lesen, Maus hinfahren, × nur mit Beweis behalten (x_klick_erlaubt). Am Start und nach einer Fensterbewegung.
+        -> (punkt, punkt_x, fenster, zelle, bild, tooltip, beweis_text)"""
+        try:
+            p, px, f, bw, z, bd = slave_x_punkte(w, anker_pfad, ticket, symbol)
+        except Exception as e:
+            lauf.log(f"Wache: Zeile/Zelle nicht lesbar ({type(e).__name__}) — Schließen läuft dann über den vollen Zeilen-Scan")
+            return None, None, None, None, None, "", ""
+        if bd and bd.get("ascii") and not px:
+            lauf.log("Wache: Bild um die Ticket-Zeile (# = Tinte):\n  " + "\n  ".join(bd["ascii"]))
+        tip = ""
+        if px or p:
+            ob._maus_fahren(*(px or p), schritte=6)
+        if px:
+            tip = _tooltip_text(1.5)
+            if not x_klick_erlaubt(z, tip, True, bd):
+                # PFLICHT-BEWEIS (Master-Entscheid 20.10.2026): Zellen-Weg ohne Tooltip „Schließen/Close" bzw. Bild-Weg mit fremdem Tooltip
+                # → das × ist nicht bewiesen, Maus zurück auf die Zeile, Schließen später über den Rechtsklick-Weg
+                lauf.log(f"Wache: × NICHT bewiesen — Tooltip '{tip or '—'}' ({bw}) → Rechtsklick-Weg")
+                px = None
+                if p:
+                    ob._maus_fahren(*p, schritte=4)
+        return p, px, f, z, bd, tip, bw
+
+    punkt, punkt_x, fenster, zelle, bild, x_tip, x_beweis = parken_mit_beweis()
     park = punkt_x or punkt
-    x_tip = ""
     if park:
-        ob._maus_fahren(*park, schritte=6)
         erg["geparkt"], erg["x_geparkt"] = True, punkt_x is not None
-        x_tip = _tooltip_text(1.5) if punkt_x else ""
-        if punkt_x and not RX_X_TOOLTIP.search(x_tip):
-            # PFLICHT-BEWEIS (Master-Entscheid 20.10.2026): kein Tooltip „Schließen/Close" unter der Maus → das × ist nicht bewiesen,
-            # Maus zurück auf die Zeile, Schließen später über den Rechtsklick-Weg
-            lauf.log(f"Wache: × NICHT bewiesen — Tooltip '{x_tip or '—'}' statt Schließen/Close ({x_beweis}) → Rechtsklick-Weg")
-            punkt_x, erg["x_geparkt"] = None, False
-            park = punkt
-            if park:
-                ob._maus_fahren(*park, schritte=4)
-        erg["x_beweis"] = (f"{x_beweis}; Tooltip '{x_tip}'") if punkt_x else f"Zeile (kein bewiesenes ×: {x_beweis})"
+        erg["x_beweis"] = (f"{x_beweis}; Tooltip '{x_tip or '—'}'") if punkt_x else f"Zeile (kein bewiesenes ×: {x_beweis})"
         lauf.log(f"Wache: Maus parkt auf dem {'Schließen-×' if punkt_x else 'Positionszeile'} #{ticket} @{park[0]},{park[1]} — Beweis {erg['x_beweis']}")
-    melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt) if punkt else None, "x": list(punkt_x) if punkt_x else None, "beweis": erg.get("x_beweis")})
+    # geparkt-Felder (21.10.2026, Live-Anzeige „Maus auf ×" baut Slave 2): x = Punkt des BEWIESENEN × (sonst null), x_art zelle|bild|null,
+    # tooltip = Text unter der Maus (leer = keiner), beweis = Klartext; punkt = Zeile für den Rechtsklick-Rückfall
+    melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt) if punkt else None, "x": list(punkt_x) if punkt_x else None,
+                             "x_art": ("zelle" if zelle else "bild") if punkt_x else None, "tooltip": x_tip if punkt_x else "",
+                             "beweis": erg.get("x_beweis")})
     lauf.phase("geparkt_x" if punkt_x else "wache", geparkt=erg["geparkt"], x_geparkt=erg["x_geparkt"], x_beweis=erg.get("x_beweis"))
     signal = {"da": False, "ende": False, "status": None, "antwort": None, "signal_ms": None}
     stop = threading.Event()
@@ -1484,14 +1781,20 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             try:
                 if ob._win_vordergrund() != int(w.handle):
                     ob._fenster_betreten(w)
-                p_neu, x_neu, f_neu, _bw, _z = slave_x_punkte(w, anker_pfad, ticket if punkt_x else None, symbol)   # × nur, wenn es bewiesen war
-                neu = x_neu or p_neu
-                if f_neu != fenster or neu != park:
-                    punkt, punkt_x, fenster, park = p_neu, x_neu, f_neu, neu
-                    if x_neu:
-                        zelle = _z                                   # Zelle mitziehen — der Klick-Beweis prüft sonst die alte (S2-Hinweis 20.10.2026)
-                    lauf.log(f"Wache: Fenster bewegt — neu geparkt @{park[0]},{park[1]}")
-                    ob._maus_fahren(*park, schritte=4)
+                # Neu lesen NUR, wenn das Fenster sich bewegt hat (21.10.2026): der Bild-Beweis fotografiert sonst alle 0,5 s unter der
+                # parkenden Maus (Hover-Effekt am ×) und würde das bewiesene × grundlos fallen lassen
+                hr_n = w.rectangle()
+                if (hr_n.left, hr_n.top, hr_n.right, hr_n.bottom) != fenster:
+                    punkt, punkt_x, fenster, zelle, bild, x_tip, x_beweis = parken_mit_beweis()   # Zelle/Bild mitziehen (S2-Hinweis 20.10.2026)
+                    park = punkt_x or punkt
+                    erg["x_geparkt"] = punkt_x is not None
+                    melden(lauf, "geparkt", {"ticket": ticket, "punkt": list(punkt) if punkt else None, "x": list(punkt_x) if punkt_x else None,
+                                             "x_art": ("zelle" if zelle else "bild") if punkt_x else None, "tooltip": x_tip if punkt_x else "",
+                                             "beweis": x_beweis, "neu": True})   # Live-Anzeige bleibt wahr
+                    if park:
+                        lauf.log(f"Wache: Fenster bewegt — neu geparkt @{park[0]},{park[1]} ({'×' if punkt_x else 'Zeile'}: {x_beweis})")
+                    else:
+                        lauf.log("Wache: Fenster bewegt — Zeile nicht mehr lesbar, Schließen über den Zeilen-Scan")
                 elif ob._cursor_pos() != tuple(park):
                     ob._maus_fahren(*park, schritte=4)
             except Exception:
@@ -1516,9 +1819,10 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             weg = "schon_zu"
         einzig = bool(st_v) and len(st_v["positionen"]) == 1 and offen(st_v)
         lauf.log(f"Polar: Vor-Klick-Lesung {int((time.time() - t_sig) * 1000)} ms → {'einzige Position #' + str(ticket) if einzig else ('Position zu' if weg else str(len((st_v or {}).get('positionen') or [])) + ' Positionen — × tabu')}")
-        # 1) EIN Klick aufs geparkte × — nur mit vollem Beweis (x_klick_erlaubt: Profit-Zelle per UIA, Tooltip Schließen/Close, genau
-        #    EINE Position = die eigene, Vor-Klick-Lesung) und nicht pausiert; sonst sofort 2) Rechtsklick-Weg (kein Warten ins Leere)
-        if weg is None and punkt_x and x_klick_erlaubt(zelle, x_tip, einzig) and not ob.is_paused():
+        # 1) EIN Klick aufs geparkte × — nur mit vollem Beweis (x_klick_erlaubt: Profit-Zelle per UIA mit Tooltip Schließen/Close oder
+        #    Bild-Beweis, genau EINE Position = die eigene, Vor-Klick-Lesung) und nicht pausiert; sonst sofort 2) Rechtsklick-Weg
+        #    (Finn 21.10.2026: „Maus auf dem X, sobald das Signal vom Master kommt, insta schließen")
+        if weg is None and punkt_x and x_klick_erlaubt(zelle, x_tip, einzig, bild) and not ob.is_paused():
             geklickt = bool(ob._klick_absolut(punkt_x[0], punkt_x[1]))
             erg["klick_ms"] = jetzt_ms()
             lauf.phase("x_geklickt", klick_ms=erg["klick_ms"], x_ok=geklickt)
@@ -1729,68 +2033,81 @@ def lauf_test_x(seite, cmd):
             anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "anker-" + os.path.basename(cfg_path))
             tab = ob._handel_tab_aktivieren(w, lauf.trail, maus_grenze, anker_pfad=anker_pfad)
             lauf.log(f"Handel-Reiter: {tab}")
-            # Zeile: zuerst UIA (Ticket im Text), dann der Zeilen-Anker des letzten SL/TP-Laufs
-            uia = []
-            for ct in ("DataItem", "ListItem", "Text"):
+            # Zeile + × wie im scharfen Lauf (slave_x_punkte: UIA-Zelle, sonst Bild-Weg an der Ticket-Anker-Zeile), dazu der Rechtsklick-
+            # Rückfall belegt (21.10.2026, Lauf 8870f1de: × unbewiesen, Rechtsklick nie geprüft). Der Bot klickt das × NIE; der Rechtsklick
+            # öffnet nur das Kontextmenü, gelesen wird „Position schließen" (aktiv?), dann Esc — ausgelöst wird nichts.
+            einzig = len(lese["positionen"]) == 1
+            zeile, px, _f, x_beweis, zelle, bild = slave_x_punkte(w, anker_pfad, ticket, symbol or None)
+            if zeile is None and not px:
+                # kein Ticket-Anker auf diesem PC (noch kein SL/TP-Lauf): Liste über den Erfahrungspunkt finden, × nur zur Ansicht
+                probe = (hr.left + int((hr.right - hr.left) * 0.4), max(maus_grenze, hr.bottom - 316))
                 try:
-                    for el in w.descendants(control_type=ct):
-                        try:
-                            t = el.window_text() or ""
-                            if t and (str(ticket) in t or (symbol and symbol.lower() in t.lower())):
-                                r = el.rectangle()
-                                uia.append({"text": t[:80], "rect": [r.left, r.top, r.right - r.left, r.bottom - r.top], "typ": ct})
-                        except Exception:
-                            continue
+                    bild = slave_x_bild(w, probe, zeile_pruefen=False)
+                except Exception as e:
+                    bild = {"grund": f"Bild nicht lesbar ({type(e).__name__})"}
+                if bild.get("punkt"):
+                    zeile = (probe[0], bild["punkt"][1])
+                x_beweis = f"ohne Ticket-Anker (Erfahrungspunkt): {bild.get('grund')}"
+            if bild:
+                res["bild"] = {k: bild.get(k) for k in ("klasse", "liste", "n_x", "glyphen", "glyph", "abstand_rechts", "grund")}
+                if bild.get("ascii"):
+                    lauf.log("Bild am Listenrand (# = Tinte):\n  " + "\n  ".join(bild["ascii"]))
+            lauf.log(f"Zeile {'@' + str(zeile) if zeile else 'NICHT gefunden'} · {x_beweis}")
+            # 1) Rechtsklick-Rückfall belegen (zuerst, damit die Maus am Ende auf dem × steht)
+            if zeile and einzig:
+                ob._maus_fahren(*zeile, schritte=5)
+                if ob._klick_absolut(zeile[0], zeile[1], taste="rechts"):
+                    rk, rk_text = _kontextmenue_close_lesen(1.2)
+                else:
+                    rk, rk_text = "kein_klick", ""
+                try:
+                    w.type_keys("{ESC}", set_foreground=False)
                 except Exception:
-                    continue
-            res["uia_kandidaten"] = len(uia)
-            zeile = uia_zeile_wahl(uia, symbol, ticket)
-            quelle, zeile_y = None, None
-            if zeile:
-                zeile_y = zeile["rect"][1] + zeile["rect"][3] // 2
-                quelle = f"UIA {zeile.get('typ')} '{zeile.get('text')}'"
+                    pass
+                ob._warte(0.2, 0.1)
+                res["rechtsklick"] = {"menue": rk, "text": rk_text, "punkt": list(zeile)}
+                res["rechtsklick_bewiesen"] = rk == "aktiv"
+                lauf.log(f"Rechtsklick-Weg @{zeile[0]},{zeile[1]}: {rk} '{rk_text}' → {'BEWIESEN' if rk == 'aktiv' else 'NICHT bewiesen'} (Menü per Esc zu, nichts ausgelöst)")
+            elif zeile:
+                res["rechtsklick"] = {"menue": "nicht_geprueft", "punkt": list(zeile)}
+                lauf.log(f"Rechtsklick-Weg nicht geprüft: {len(lese['positionen'])} Positionen offen (scharf nur bei genau einer)")
+            # 2) × anfahren und beweisen
+            if px:
+                ob._maus_fahren(px[0], px[1], schritte=6)
+                res["tooltip"] = _tooltip_text(1.5)
+                res["x_bewiesen"] = x_klick_erlaubt(zelle, res["tooltip"], einzig, bild)
+                res.update(gefunden=True, art="profit_zelle" if zelle else "bild", punkt=[px[0], px[1]], beweis=x_beweis,
+                           abstand_rechts=(x_abstand_rechts(px, zelle[0] + zelle[2]) if zelle else (bild or {}).get("abstand_rechts")))
+                lauf.log(f"× @{px[0]},{px[1]} ({res['art']}) · Tooltip '{res['tooltip'] or '—'}' · {res['abstand_rechts']} px vom Rand → "
+                         f"{'BEWIESEN (scharf würde klicken)' if res['x_bewiesen'] else 'NICHT bewiesen (scharf: Rechtsklick-Weg)'}")
+                park = (px[0], px[1])
+            elif zeile and zeile[1] >= maus_grenze:
+                vx = profit_x_wahl(zeile[1], hr.right)
+                res.update(gefunden=False, art="vergleich_fensterrand", punkt=[vx[0], vx[1]], abstand_rechts=x_abstand_rechts(vx, hr.right),
+                           beweis=x_beweis + " — Vergleichspunkt Fensterrand, der Bot klickt hier nie", x_bewiesen=False)
+                ob._maus_fahren(vx[0], vx[1], schritte=6)
+                res["tooltip"] = _tooltip_text(1.5)
+                lauf.log(f"× NICHT gefunden ({x_beweis}) — Vergleichspunkt Fensterrand @{vx[0]},{vx[1]} · Tooltip '{res['tooltip'] or '—'}'")
+                park = (vx[0], vx[1])
             else:
-                a = ob._anker_lesen(anker_pfad)
-                if a.get("y_off") is not None:
-                    zeile_y = hr.bottom - int(a["y_off"])
-                    quelle = f"Zeilen-Anker (y_off {a['y_off']}, vom letzten SL/TP-Lauf — gilt nur, wenn die Zeile noch dort liegt)"
-            lauf.log(f"Zeile: {quelle or 'NICHT gefunden (UIA zeigt die Liste nicht, kein Anker)'} · UIA-Kandidaten {len(uia)}")
-            # PROFIT-ZELLE (Master-Entscheid 20.10.2026): der scharfe Slave klickt das × nur aus der UIA-Zelle mit Tooltip-Beweis —
-            # genau das zeigt der Test: Zellen-Rect, ×-Punkt, Tooltip. Ohne Zelle nur Vergleichs-Punkt „Fensterrand − 14 px" (NICHT der
-            # Klickpunkt des Bots), damit Finn sieht, wo die alte Rechnung läge.
-            z = slave_profit_zelle(w, ticket, symbol or None)
-            res["uia_elemente"] = z["n"] if z else len(uia)
-            if z:
-                px = z["punkt"]
-                res.update(gefunden=True, art="profit_zelle", punkt=[px[0], px[1]], zelle=list(z["zelle"]["rect"]), zeile=list(z["zeile"]["rect"]),
-                           abstand_rechts=x_abstand_rechts(px, z["zelle"]["rect"][0] + z["zelle"]["rect"][2]), quelle=f"UIA-Zelle '{z['zelle'].get('text')}'",
-                           beweis=f"Profit-Zelle {z['zelle']['rect']} − {ZELLE_X_RAND_PX} px")
-                ob._maus_fahren(px[0], px[1], schritte=6)
-                res["tooltip"] = _tooltip_text(1.5)
-                res["x_bewiesen"] = bool(RX_X_TOOLTIP.search(res["tooltip"]))
-                lauf.log(f"GEFUNDEN Profit-Zelle {z['zelle']['rect']} '{z['zelle'].get('text')}' → × @{px[0]},{px[1]} ({res['abstand_rechts']} px vom Zellenrand) · Tooltip '{res['tooltip'] or '—'}' → {'BEWIESEN (scharf würde klicken)' if res['x_bewiesen'] else 'NICHT bewiesen (scharf: Rechtsklick-Weg)'}")
-                lauf.phase("geparkt_x", punkt=res["punkt"], zelle=res["zelle"], tooltip=res["tooltip"], x_bewiesen=res["x_bewiesen"], quelle=res["quelle"])
-            elif zeile_y is not None and zeile_y >= maus_grenze:
-                px = profit_x_wahl(zeile_y, hr.right)
-                res.update(gefunden=True, art="vergleich_fensterrand", punkt=[px[0], px[1]], abstand_rechts=x_abstand_rechts(px, hr.right), quelle=quelle, beweis=px[2] + " — NUR Vergleich, der Bot klickt hier nie")
-                ob._maus_fahren(px[0], px[1], schritte=6)
-                res["tooltip"] = _tooltip_text(1.5)
-                res["x_bewiesen"] = False
-                lauf.log(f"Profit-Zelle per UIA NICHT lesbar — Vergleichspunkt Fensterrand @{px[0]},{px[1]} · Tooltip '{res['tooltip'] or '—'}' (scharf: Rechtsklick-Weg)")
-                lauf.phase("geparkt_x", punkt=res["punkt"], tooltip=res["tooltip"], x_bewiesen=False, quelle=quelle)
+                park = None
+            x_txt = (f"× BEWIESEN ({res.get('art')}, Tooltip '{res.get('tooltip') or '—'}')" if res.get("x_bewiesen")
+                     else f"× NICHT bewiesen ({x_beweis})")
+            rk_txt = ("Rechtsklick BEWIESEN" if res.get("rechtsklick_bewiesen")
+                      else f"Rechtsklick nicht bewiesen ({(res.get('rechtsklick') or {}).get('menue', 'keine Zeile')})")
+            if park:
+                lauf.phase("geparkt_x", punkt=res.get("punkt"), tooltip=res.get("tooltip"), x_bewiesen=bool(res.get("x_bewiesen")),
+                           msg=f"{x_txt} · {rk_txt} — Maus parkt {TEST_PARKEN_S:g} s, nichts geklickt")
                 ende = time.time() + TEST_PARKEN_S
                 while time.time() < ende:
                     time.sleep(0.5)
                     try:
-                        if ob._cursor_pos() != (px[0], px[1]):
-                            ob._maus_fahren(px[0], px[1], schritte=3)
+                        if ob._cursor_pos() != park:
+                            ob._maus_fahren(park[0], park[1], schritte=3)
                     except Exception:
                         pass
-                res["ok"] = True
-                res["msg"] = (f"× BEWIESEN (Zelle + Tooltip '{res.get('tooltip')}') — Maus stand {TEST_PARKEN_S:g} s darauf, nichts geklickt" if res.get("x_bewiesen")
-                              else f"× NICHT bewiesen ({res.get('art')}, Tooltip '{res.get('tooltip') or '—'}') — scharf nimmt der Slave den Rechtsklick-Weg; nichts geklickt")
-            else:
-                res["msg"] = "Zeile nicht gefunden (UIA zeigt die Liste nicht, kein Anker) — nichts bewegt, nichts geklickt"
+            res["ok"] = bool(park)
+            res["msg"] = f"{x_txt} · {rk_txt} — nichts geklickt" if park else f"Zeile nicht gefunden ({x_beweis}) — nichts bewegt, nichts geklickt"
         lauf.phase("fertig" if res["ok"] else "nicht_gefunden", msg=res["msg"], ergebnis=res)
         lauf.log(res["msg"])
         return res
