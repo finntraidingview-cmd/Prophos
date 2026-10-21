@@ -1828,6 +1828,36 @@
   #tradePlanModal .tp-v2 #tp-nq-toggle-slave-placeholder{display:none !important}
   /* Polar-Vorschau (13.10.2026): zwei Spalten, Handy eine — minmax(0,…), damit lange Kontonamen das Raster nicht über den Rand schieben */
   #polarModal .pol-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+  /* Eigene Auswahlliste Master/Slave (Finn 21.10.2026: „plus grün oder minus rot"): Knopf im .input-Look, Liste im Popover-Stil (.user-dropdown) */
+  #polarModal .pol-wahl{position:relative;min-width:0}
+  #polarModal .pol-wahl-knopf{display:flex;align-items:center;gap:8px;text-align:left;cursor:pointer;min-height:38px}
+  #polarModal .pol-wahl-knopf .pol-heute{margin-left:auto}
+  #polarModal .pol-wahl-txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #polarModal .pol-wahl-txt b{font-weight:600;color:var(--ink)}
+  #polarModal .pol-wahl-pfeil{flex:none;width:7px;height:7px;margin:0 2px 3px 2px;border-right:1.5px solid var(--sub);border-bottom:1.5px solid var(--sub);transform:rotate(45deg);transition:transform .15s var(--ease)}
+  #polarModal .pol-wahl-knopf[aria-expanded="true"]{border-color:var(--violet);box-shadow:0 0 0 3px rgba(84,71,206,.1)}
+  #polarModal .pol-wahl-knopf[aria-expanded="true"] .pol-wahl-pfeil{transform:rotate(225deg);margin-bottom:-3px}
+  #polarModal .pol-wahl-liste{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:40;max-height:320px;overflow-y:auto;overscroll-behavior:contain;
+    padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-pop);animation:polWahlEin .14s var(--ease)}
+  #polarModal .pol-wahl-liste[hidden]{display:none}
+  @keyframes polWahlEin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  #polarModal .pol-wahl-gruppe{padding:8px 8px 4px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);position:sticky;top:-6px;background:var(--surface);z-index:1}
+  #polarModal .pol-wahl-opt{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;font-size:13px;color:var(--ink-2);cursor:pointer}
+  #polarModal .pol-wahl-opt .pol-wahl-txt > span,#polarModal .pol-wahl-opt .pol-wahl-txt > small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #polarModal .pol-wahl-opt .pol-wahl-txt > small{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;margin-top:1px}
+  #polarModal .pol-wahl-opt.is-aktiv{background:var(--violet-tint)}
+  #polarModal .pol-wahl-opt.is-gewaehlt .pol-wahl-txt b{color:var(--violet)}
+  #polarModal .pol-wahl-opt.is-gewaehlt{box-shadow:inset 2px 0 0 var(--violet)}
+  /* Heute-Chip: grün +, rot −, grau nicht getradet, violett pulsierend läuft (Punkt wie .pol-chip) */
+  #polarModal .pol-heute{flex:none;display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;
+    font-variant-numeric:tabular-nums;color:var(--sub);background:color-mix(in srgb, var(--sub) 10%, transparent)}
+  #polarModal .pol-heute.is-plus{color:var(--good-ink, #15803d);background:color-mix(in srgb, var(--good) 13%, transparent)}
+  #polarModal .pol-heute.is-minus{color:var(--danger-ink, #b91c1c);background:color-mix(in srgb, var(--danger) 12%, transparent)}
+  #polarModal .pol-heute.is-offen{font-weight:500}
+  #polarModal .pol-heute.is-laeuft{color:var(--violet);background:var(--violet-tint)}
+  #polarModal .pol-heute.is-laeuft i{width:6px;height:6px;border-radius:999px;background:currentColor;animation:polPunkt 1s ease-in-out infinite}
+  @media (prefers-reduced-motion: reduce){ #polarModal .pol-heute.is-laeuft i,#polarModal .pol-wahl-liste{animation:none} }
+  @media (max-width:640px){ #polarModal .pol-wahl-liste{max-height:55vh} }
   #polarModal .pol-gruppe{grid-column:1 / -1;font-size:12px;font-weight:600;color:var(--sub);margin-top:4px}
   /* Eigene Blöcke Multiplikator / TP·SL (21.10.2026): zarter Rahmen, Akzent links (violet = Größe, grün = Ziele), Kopf mit Erklärung */
   #polarModal .pol-block{grid-column:1 / -1;border:1px solid var(--border-soft);border-left:3px solid var(--violet);border-radius:var(--r-sm);padding:12px 14px 14px;background:color-mix(in srgb, var(--violet) 3%, transparent)}
@@ -9223,8 +9253,16 @@
             <div class="pol-lauf-fuss"><span id="pol-lauf-hinweis"></span><button type="button" class="btn btn-ghost" id="pol-lauf-abbruch" hidden title="Lauf abbrechen — wirkt nur VOR der Feuerzeit (abbruch.json am PC dieser Seite)">Abbruch</button></div>
           </div>
           <div class="pol-grid">
-            <div class="field"><label>Master · Funded Futures</label><select class="input" id="pol-fu-konto"></select></div>
-            <div class="field"><label>Slave · Funded CFD</label><select class="input" id="pol-cfd-konto"></select></div>
+            <!-- Eigene Auswahlliste (Finn 21.10.2026: „gerne auch farblich: plus grün oder minus rot") — native <option> lassen sich nicht färben;
+                 die Selects bleiben versteckt die Wertquelle (polarKonto, polarRechnen, Speichern) -->
+            <div class="field"><label id="pol-fu-lbl">Master · Funded Futures</label>
+              <div class="pol-wahl"><button type="button" class="input pol-wahl-knopf" id="pol-fu-wahl" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="pol-fu-lbl"></button>
+                <div class="pol-wahl-liste" role="listbox" aria-labelledby="pol-fu-lbl" hidden></div></div>
+              <select class="input" id="pol-fu-konto" hidden tabindex="-1" aria-hidden="true"></select></div>
+            <div class="field"><label id="pol-cfd-lbl">Slave · Funded CFD</label>
+              <div class="pol-wahl"><button type="button" class="input pol-wahl-knopf" id="pol-cfd-wahl" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="pol-cfd-lbl"></button>
+                <div class="pol-wahl-liste" role="listbox" aria-labelledby="pol-cfd-lbl" hidden></div></div>
+              <select class="input" id="pol-cfd-konto" hidden tabindex="-1" aria-hidden="true"></select></div>
             <div class="pol-reihe3">
               <div class="field">
                 <label>Richtung</label>
@@ -45897,7 +45935,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1676'
+  const OS_TAB_BUILD = '2026-09-22.1677'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55340,16 +55378,102 @@
   }
   window._polarHeuteText = polarHeuteText   // Test-Haken (Stub)
   // Ein Dropdown je Seite, Konten nach ID gruppiert (Finn 13.10.2026: erst ID, dann Konto war „zu viel“)
-  function polarKontoOptionen(sel, typ){
+  // [[ID, [Konten]]] — dieselbe Gruppierung/Reihenfolge für das (versteckte) Select und die eigene Auswahlliste
+  function polarKontoGruppen(typ){
     const l = _polarKonten.filter(k => k.type === typ)
-    const ids = [...new Set(l.map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
-    sel.innerHTML = ids.length ? ids.map(p => `<optgroup label="${esc(p)}">${l.filter(k => k.person === p)
-      .sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))
-      // Balance je Konto im Eintrag (14.10.2026, Finn): Live-Balance aus /admin/overview (balance), sonst „Balance ?"
-      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)} · ${k.balance != null ? Number(k.balance).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : 'Balance ?'}${esc(polarHeuteText(k.heute))}</option>`).join('')}</optgroup>`).join('')
+    return [...new Set(l.map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
+      .map(p => [p, l.filter(k => k.person === p).sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))])
+  }
+  // Balance je Konto im Eintrag (14.10.2026, Finn): Live-Balance aus /admin/overview (balance), sonst „Balance ?"
+  const polarBalanceText = k => k.balance != null ? Number(k.balance).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : 'Balance ?'
+  function polarKontoOptionen(sel, typ){
+    const gr = polarKontoGruppen(typ)
+    sel.innerHTML = gr.length ? gr.map(([p, kk]) => `<optgroup label="${esc(p)}">${kk
+      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)} · ${polarBalanceText(k)}${esc(polarHeuteText(k.heute))}</option>`).join('')}</optgroup>`).join('')
       : '<option value="">— kein Konto —</option>'
   }
   const polarKonto = id => _polarKonten.find(k => String(k.id) === String(polarEl(id)?.value))
+  /* EIGENE AUSWAHLLISTE (Finn 21.10.2026 zum Heute-Zusatz: „gerne auch farblich: ein bisschen Farben, plus grün oder minus rot") — native
+   * <option> lassen sich auf macOS/Chrome nicht färben. Je Seite Knopf + Liste (role listbox) im Popover-Stil (.user-dropdown): Gruppenköpfe
+   * je ID, Eintrag „Firma · Konto · Balance", rechts der Heute-Chip (grün +, rot −, grau nicht getradet, violett pulsierend läuft). Die Selects
+   * bleiben versteckt die Wertquelle — Auswahl setzt sel.value + 'change' → polarRechnen wie bisher. Eigene Verdrahtung nur für #polarModal. */
+  const POLAR_WAHL = [['pol-fu-wahl', 'pol-fu-konto', 'funded'], ['pol-cfd-wahl', 'pol-cfd-konto', 'funded_cfd']]
+  function polarHeuteChip(h){
+    if(!h) return ''
+    const pl = typeof h.pl === 'number' && isFinite(h.pl) ? h.pl : null
+    const betrag = pl != null ? `${pl < 0 ? '−' : '+'}${Math.abs(pl).toLocaleString('de-DE', { maximumFractionDigits: 0 })} $` : ''
+    const tip = ' title="heute (Planer-Tag)"'
+    if(h.laeuft) return `<span class="pol-heute is-laeuft"${tip}><i></i>läuft${betrag ? ' · ' + betrag : ''}</span>`
+    if(!h.getradet) return `<span class="pol-heute is-offen"${tip}>nicht getradet</span>`
+    return `<span class="pol-heute${pl == null ? '' : pl < 0 ? ' is-minus' : ' is-plus'}"${tip}>${pl == null ? 'getradet' : 'heute ' + betrag}</span>`
+  }
+  window._polarHeuteChip = polarHeuteChip   // Test-Haken (Stub)
+  const polarWahlZeile = k => `<span class="pol-wahl-txt"><b>${esc(k.firm)}</b> · ${esc(k.name)} · ${polarBalanceText(k)}</span>${polarHeuteChip(k.heute)}`
+  // In der Liste zweizeilig: Firma · Konto, darunter die Balance — die Liste ist so breit wie beide Felder (polarWahlOeffnen)
+  const polarWahlOptZeile = k => `<span class="pol-wahl-txt"><span><b>${esc(k.firm)}</b> · ${esc(k.name)}</span><small>${polarBalanceText(k)}</small></span>${polarHeuteChip(k.heute)}`
+  function polarWahlKnoepfe(){   // Knopf zeigt die aktuelle Auswahl des Selects
+    for(const [kn, sel] of POLAR_WAHL){
+      const b = polarEl(kn), k = polarKonto(sel)
+      if(b) b.innerHTML = (k ? polarWahlZeile(k) : '<span class="pol-wahl-txt">— kein Konto —</span>') + '<i class="pol-wahl-pfeil" aria-hidden="true"></i>'
+    }
+  }
+  let _polarWahl = null   // offene Liste: { b, liste, sel, opts, aktiv }
+  function polarWahlZu(fokus){
+    if(!_polarWahl) return
+    const { b, liste } = _polarWahl
+    liste.hidden = true; liste.innerHTML = ''
+    b.setAttribute('aria-expanded', 'false'); b.removeAttribute('aria-activedescendant')
+    _polarWahl = null
+    if(fokus) b.focus()
+  }
+  function polarWahlAktiv(i){
+    const w = _polarWahl; if(!w || !w.opts.length) return
+    w.aktiv = Math.max(0, Math.min(w.opts.length - 1, i))
+    w.opts.forEach((o, n) => o.classList.toggle('is-aktiv', n === w.aktiv))
+    const o = w.opts[w.aktiv]; w.b.setAttribute('aria-activedescendant', o.id)
+    try{ o.scrollIntoView({ block: 'nearest' }) }catch(_){}
+  }
+  function polarWahlOeffnen(kn){
+    const eintrag = POLAR_WAHL.find(x => x[0] === kn); if(!eintrag) return
+    polarWahlZu(false)
+    const b = polarEl(kn), liste = b?.nextElementSibling, sel = polarEl(eintrag[1]); if(!b || !liste || !sel) return
+    const gr = polarKontoGruppen(eintrag[2])
+    let n = 0
+    liste.innerHTML = gr.length ? gr.map(([p, kk]) => `<div class="pol-wahl-gruppe" role="presentation">${esc(p)}</div>` + kk.map(k => {
+      const an = String(k.id) === String(sel.value)
+      return `<div class="pol-wahl-opt${an ? ' is-gewaehlt' : ''}" role="option" id="${kn}-o${n++}" aria-selected="${an}" data-pol-wahl="${esc(k.id)}">${polarWahlOptZeile(k)}</div>`
+    }).join('')).join('') : '<div class="pol-wahl-gruppe">kein Konto</div>'
+    liste.hidden = false
+    // Breite = beide Felder (Master + Slave) — einspaltig (Handy) also das eine Feld; Balance und Chip passen so in jede Zeile
+    const grid = b.closest('.pol-grid'), wrap = b.parentElement
+    if(grid && wrap){ const g = grid.getBoundingClientRect(), w = wrap.getBoundingClientRect(); liste.style.left = Math.round(g.left - w.left) + 'px'; liste.style.right = 'auto'; liste.style.width = Math.round(g.width) + 'px' }
+    b.setAttribute('aria-expanded', 'true')
+    const opts = [...liste.querySelectorAll('.pol-wahl-opt')]
+    _polarWahl = { b, liste, sel, opts, aktiv: 0 }
+    polarWahlAktiv(Math.max(0, opts.findIndex(o => o.classList.contains('is-gewaehlt'))))
+  }
+  function polarWahlWaehlen(id){
+    const w = _polarWahl; if(!w) return
+    if(String(w.sel.value) !== String(id)){ w.sel.value = String(id); w.sel.dispatchEvent(new Event('change')) }   // → polarRechnen
+    polarWahlZu(true)
+    polarWahlKnoepfe()
+  }
+  for(const [kn] of POLAR_WAHL){
+    const b = polarEl(kn); if(!b) continue
+    b.addEventListener('click', () => { _polarWahl && _polarWahl.b === b ? polarWahlZu(false) : polarWahlOeffnen(kn) })
+    b.addEventListener('keydown', e => {
+      const offen = _polarWahl && _polarWahl.b === b
+      if(!offen){ if(['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)){ e.preventDefault(); polarWahlOeffnen(kn) } return }
+      if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); polarWahlAktiv(_polarWahl.aktiv + (e.key === 'ArrowDown' ? 1 : -1)) }
+      else if(e.key === 'Home' || e.key === 'End'){ e.preventDefault(); polarWahlAktiv(e.key === 'Home' ? 0 : _polarWahl.opts.length - 1) }
+      else if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); const o = _polarWahl.opts[_polarWahl.aktiv]; if(o) polarWahlWaehlen(o.dataset.polWahl) }
+      else if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); polarWahlZu(true) }
+      else if(e.key === 'Tab') polarWahlZu(false)
+    })
+    b.nextElementSibling?.addEventListener('click', e => { const o = e.target.closest('.pol-wahl-opt'); if(o) polarWahlWaehlen(o.dataset.polWahl) })
+  }
+  // Klick außerhalb schließt — nur, solange eine Polar-Liste offen ist
+  document.addEventListener('pointerdown', e => { if(_polarWahl && !_polarWahl.b.parentElement.contains(e.target)) polarWahlZu(false) }, true)
   function polarSeg(id){ return polarEl(id)?.querySelector('button.active') }
   function polarRechnen(){
     const n = id => Number(polarEl(id)?.value) || 0
@@ -55406,6 +55530,8 @@
       const anders = _polarKonten.find(k => k.type === 'funded_cfd' && (!m || k.person !== m.person))
       if(anders) cfd.value = String(anders.id)
     }
+    polarWahlKnoepfe()
+    if(_polarWahl) polarWahlOeffnen(_polarWahl.b.id)   // still nachgeladene Liste (Balance/Heute) in die offene Auswahl übernehmen
     polarRechnen()
   }
   async function polarOeffnen(){
@@ -55423,7 +55549,7 @@
     polarEl('polarMsg').textContent = hinweis
   }
   polarEl('tp-route-polar')?.addEventListener('click', () => { closeTradePlanModal(); polarOeffnen() })
-  polarEl('polarClose')?.addEventListener('click', () => polarEl('polarModal').classList.remove('open'))
+  polarEl('polarClose')?.addEventListener('click', () => { polarWahlZu(false); polarEl('polarModal').classList.remove('open') })
   ;['pol-fu-konto', 'pol-cfd-konto'].forEach(id => polarEl(id)?.addEventListener('change', polarRechnen))
   ;['pol-kt', 'pol-risk-m', 'pol-risk-s', 'pol-tp-m', 'pol-sl-m'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
   ;['pol-dir', 'pol-sym'].forEach(id => polarEl(id)?.addEventListener('click', e => {
