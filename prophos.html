@@ -44206,6 +44206,23 @@
    * Echo aus mt5PlanPollTick/_autoPnlFetchMt5 (Slave = 0). Remote (Signal vom Mac):
    * _pfRemoteHook/_pfRemoteMelde wie bei Echo. Die Order kommt aus _tpPendingOrder (Klick/Signal), sonst aus
    * dem Plan — so trägt „Erneut versuchen" nach einer Absage (retry_ok) auch ohne neuen Klick. ══ */
+  /* FINAL-URTEIL ECHO V2 (Finn über Master 21.10.2026: „Also nur, wenn es ein finaler Trade ist, dann das Ganze machen … sonst ist ±100
+   * egal"). Der Bot (order_bot nachzieh_seiten) zieht nach dem Fill NUR die Seite exakt nach, die das Konto beendet: 'pass' = der TP lässt
+   * bestehen (TP-$ ≥ Rest bis Ziel laut Auto-Planer-Notiz — letzter Trade / Klein-Trade), 'blow' = der SL blowt (Stufe „SL hinter den Boden"
+   * bzw. „SL auf Boden gekappt", ap_konto_rechnen), 'beide', sonst null = kein Ändern-Klick wie bisher. Handpläne ohne Notiz → null.
+   * Rein rechnend (Selbsttest tools/selftest_cfd_tp_fill.py). -> {final, grund} */
+  function echoV2Final(plan, po){
+    const n = plan ? planAutoNotiz(plan.notes) : null
+    const tp = Number(po && po.tp_usd), sl = Number(po && po.sl_usd)
+    if(!n) return { final: null, grund: 'kein Auto-Plan (Notiz ohne Rest/Ziel)' }
+    if(!(tp > 0)) return { final: null, grund: 'ohne SL/TP' }
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const pass = tp >= n.rest
+    const blow = /SL hinter den Boden|SL auf Boden gekappt/i.test(n.stufe)
+    const grund = (pass ? `TP ${de(tp)} $ ≥ Rest ${de(n.rest)} $ bis Ziel ${de(n.ziel)}` : `TP ${de(tp)} $ < Rest ${de(n.rest)} $ bis Ziel`)
+      + ' · ' + (blow ? `SL ${de(sl)} $ = Blow am Boden` : 'SL nicht am Boden')
+    return { final: pass && blow ? 'beide' : pass ? 'pass' : blow ? 'blow' : null, grund }
+  }
   async function tpPreflightMt5V2(plan){
     _pfMt5StopTimer()
     if(_pfRemoteHook && !_pfRemoteHook.armed && String(_pfRemoteHook.planId) !== String(plan.id)){
@@ -44357,6 +44374,7 @@
     // Bis 90 s: bootet das Terminal noch oder heilt das Panel gerade das EA, kommt retry_ok=true zurück
     // (grund 'terminal_heilt' vom Panel; Verbindungsfehler vom Bot) — dann alle 6 s erneut. Beweisbar nichts
     // gesendet, solange retry_ok wahr ist (Bot-Vertrag seit 15.08.2026).
+    const _fin = echoV2Final(plan, po)   // pass/blow/beide/null — reist als final mit, der Bot schreibt es in die Puls-Spur
     let r = null
     const t0 = Date.now()
     for(;;){
@@ -44364,7 +44382,8 @@
       try{
         r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true }) })
+          body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true,
+            final: _fin.final, final_grund: _fin.grund }) })   // Nachziehen nur bei finalem Trade (21.10.2026, echoV2Final)
       }catch(e){ r = { ok:false, retry_ok:false, msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) } }
       // PANEL WEG (16.10.2026, Routine Puls-Fehler, Plan bd20307e pc-pw1put 15.10. 13:24 UTC: Meldung nur „TypeError: Failed to fetch", als
       // UNKLAR gewertet, kein Neu-Einplanen): mtcApi liefert bei geworfenem fetch nur error + _nichtGesendet, kein msg/retry_ok. Wirft der Aufruf

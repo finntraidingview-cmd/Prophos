@@ -123,6 +123,53 @@ def berechne_sl_tp(richtung, ref_preis, volumen, contract_size, sl_usd, tp_usd, 
     return sl, tp
 
 
+# TP/SL AM ECHTEN FILL NACHZIEHEN (Finn über Master 21.10.2026 ~23:30 Dubai: „Bei Futures landet der letzte Trade dank Puffer immer
+# perfekt auf dem Ziel. Bei CFD mal 200 $ drüber, mal 100 $ drunter … SL/TP grob platzieren und nach der Platzierung genau anpassen, wie
+# bei Polar"). BEFUND Echo V2 (mt5v2), TP-Treffer 14 Tage: der F9-TP rechnet ab ref_ask/ref_bid VOR dem Klick, der Fill liegt 3–5 Pkt
+# daneben — Blue Guardian 5,2 Lot sell, ref 29.394,17 → Fill 29.399,11 = +4,94 Pkt × 5,2 × 10 $ = +257 $ (Plan 6.063 → +6.390);
+# FundedNext 3,2 Lot −3,17 Pkt = −101,28 $ auf den Cent. Ab dem Fill gerechnet trifft der $/Pkt/Lot die Kontraktgröße (BG 10,04 ·
+# FTMO 1,00 · FundingPips 20,05 · The5ers 1,01); Kommission ist bei den Index-CFDs praktisch 0. Jetzt: nach dem Fill exakt vom Fill
+# (+ gelesene Kommission), Ändern-Dialog wie Polar, sonst bleibt der grobe F9-TP stehen. Nur Echo V2 (cmd ohne_hedge) — Echo mit
+# Fusion-Hedge bleibt, wie es ist.
+NACHZIEHEN_AB_USD = 3.0          # kleinere Abweichung (TP oder SL) lohnt keinen Ändern-Dialog
+NACHZIEHEN_VERSUCHE = 2          # Ändern-Dialog höchstens so oft (dazwischen gewürfelte Pause), dann aufgeben — grobe Level bleiben
+# NUR FINALE TRADES (Finn über Master 21.10.2026: „Also nur, wenn es ein finaler Trade ist, dann das Ganze machen … sonst ist ±100 egal"):
+# das Urteil fällt der PC-Tab (echoV2Final: Ziel/Rest/Boden aus der Auto-Planer-Notiz) und reist als cmd.final mit — 'pass' = der TP lässt
+# das Konto bestehen → NUR der TP wird exakt, 'blow' = der SL blowt es → NUR der SL, 'beide', sonst nichts (kein Ändern-Klick, wie bisher).
+
+
+def nachzieh_seiten(final):
+    """REIN RECHNEND (testbar): cmd.final → (tp_nachziehen, sl_nachziehen). Unbekannt/leer (auch altes Frontend) → (False, False)."""
+    f = str(final or "").strip().lower()
+    return f in ("pass", "beide"), f in ("blow", "beide")
+
+
+def sltp_vom_fill(richtung, fill, volumen, contract_size, sl_usd, tp_usd, komm_usd=0.0, digits=2):
+    """REIN RECHNEND (testbar): SL/TP-Preise ab dem ECHTEN Fill, so dass das Netto am TP = tp_usd und am SL = −sl_usd ist.
+    komm_usd = erwartete Kommission der ganzen Runde (positiv, $): der TP liegt um sie weiter weg, der SL um sie näher (nie näher als
+    die Hälfte des SL-Abstands — eine unplausibel hohe Lesung darf den Stop nicht an den Einstieg ziehen)."""
+    k = max(0.0, float(komm_usd or 0))
+    sl_netto = float(sl_usd) - k
+    if sl_netto < float(sl_usd) / 2:
+        sl_netto = float(sl_usd) / 2
+    return berechne_sl_tp(richtung, fill, volumen, contract_size, sl_netto, float(tp_usd) + k, digits)
+
+
+def sltp_abweichung_usd(alt_sl, alt_tp, neu_sl, neu_tp, volumen, contract_size):
+    """REIN RECHNEND (testbar): größte $-Abweichung zwischen gesetzten und exakten Levels (SL oder TP) bei dieser Größe."""
+    je = float(volumen) * float(contract_size)
+    return round(max(abs(float(alt_sl) - float(neu_sl)), abs(float(alt_tp) - float(neu_tp))) * je, 2)
+
+
+def kommission_runde(deals_in):
+    """REIN RECHNEND (testbar): erwartete Kommission der ganzen Runde ($, positiv) aus den Einstiegs-Deals der Position. MT5 bucht die
+    Kommission als negativen Betrag am Deal; die meisten Broker belasten Ein- UND Ausstieg gleich → Einstieg × 2 (bucht einer die
+    ganze Runde schon beim Einstieg, liegt der TP nur um diesen Betrag zu weit — nie zu kurz). Keine Deals → None (nicht gelesen)."""
+    if not deals_in:
+        return None
+    return round(2 * abs(sum(float(d.get("commission") or 0) for d in deals_in)), 2)
+
+
 def finde_neue_position(vorher_tickets, positionen, symbol, richtung, volumen, tol=0.005):
     """Die frisch platzierte Position wiederfinden: neues Ticket, richtiges
     Symbol, richtige Richtung, Volumen im Toleranzfenster (Lot-Raster)."""
@@ -11352,6 +11399,93 @@ def _f9_ursache(path, expected, symbol, w, vorn):
     return "F9-Ursache (API): Terminal verbunden, Handel am Konto erlaubt, Symbol handelbar — kein Grund aus der API" + kf, ""
 
 
+def _kommission_lesen(path, expected, ticket):
+    """Best-Effort, rein LESEND auf der Lauf-Verbindung (21.10.2026, s. sltp_vom_fill): erwartete Kommission der Runde ($, positiv) aus
+    den Einstiegs-Deals der frischen Position | None (nicht lesbar — gerechnet wird dann mit 0, nie geraten)."""
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None
+    try:
+        if not _api_verbinden(mt5, path):
+            return None
+        ai = mt5.account_info()
+        if ai is None or (expected and int(ai.login) != expected):
+            return None
+        deals = mt5.history_deals_get(position=int(ticket)) or []
+        rein = [{"commission": getattr(d, "commission", 0)} for d in deals if int(getattr(d, "entry", -1)) == 0]   # DEAL_ENTRY_IN
+        return kommission_runde(rein)
+    except Exception:
+        return None
+
+
+def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size, digits, sl_alt, tp_alt, trail, anker_pfad):
+    """ECHO V2 NACH DEM FILL, NUR FINALE TRADES (21.10.2026, s. sltp_vom_fill / nachzieh_seiten): die Seite, die das Konto beendet, exakt
+    ab dem echten Fill (+ gelesene Kommission) — 'pass' nur der TP, 'blow' nur der SL (die andere Seite bleibt beim groben F9-Wert und
+    wird im Dialog unverändert mitgetippt). Derselbe Ändern-Dialog wie Polar (_sltp_klicken), Bestätigung NUR lesend (je 10 s), höchstens
+    NACHZIEHEN_VERSUCHE Anläufe mit gewürfelter Pause. Klappt es nicht, bleiben die groben Level an der Position (der Dialog setzt beide
+    zusammen oder bricht per ESC ab), der Grund steht in der Spur.
+    -> {sl, tp, ok, nachgezogen, final, seiten, komm, abw_usd, soll_sl, soll_tp, versuche, grund}; ok False NUR, wenn die Position danach
+    ohne SL oder TP dasteht."""
+    tp_an, sl_an = nachzieh_seiten(cmd.get("final"))
+    seiten = "+".join(s for s, an in (("TP", tp_an), ("SL", sl_an)) if an)
+    erg = {"sl": sl_alt, "tp": tp_alt, "ok": True, "nachgezogen": False, "final": cmd.get("final") or None, "seiten": seiten or None,
+           "komm": None, "abw_usd": 0.0, "soll_sl": sl_alt, "soll_tp": tp_alt, "versuche": 0, "grund": ""}
+    fg = str(cmd.get("final_grund") or "").strip()[:160]
+    if not seiten:
+        trail.append(f"Final: keins{' (' + fg + ')' if fg else ''} — kein Ändern-Klick, grobe F9-Level bleiben")
+        return erg
+    trail.append(f"Final: {cmd.get('final')}{' (' + fg + ')' if fg else ''} → nur {seiten} am Fill nachziehen")
+    komm = _kommission_lesen(path, expected, p["ticket"])
+    sl_ex, tp_ex = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size, cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)
+    sl = sl_ex if sl_an else sl_alt
+    tp = tp_ex if tp_an else tp_alt
+    abw = sltp_abweichung_usd(sl_alt, tp_alt, sl, tp, vol, contract_size)
+    erg.update(komm=komm, abw_usd=abw, soll_sl=sl, soll_tp=tp)
+    ktxt = f"Kommission {komm:g} $" if komm is not None else "Kommission nicht lesbar, 0 $ gerechnet"
+    if abw < NACHZIEHEN_AB_USD:
+        trail.append(f"Nachziehen unnötig: {abw:g} $ daneben (< {NACHZIEHEN_AB_USD:g} $, {ktxt})")
+        return erg
+    trail.append(f"Nachziehen am Fill {fill}: SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} statt "
+                 f"{fmt_preis(sl_alt, digits)} / {fmt_preis(tp_alt, digits)} ({abw:g} $ daneben, {ktxt})")
+    stand, k = None, None
+    for versuch in range(1, NACHZIEHEN_VERSUCHE + 1):
+        erg["versuche"] = versuch
+        if versuch > 1:
+            _warte(1.0, 1.5)                   # gewürfelte Pause vor dem nächsten Anlauf (Jitter-Regel)
+            trail.append(f"Nachziehen Versuch {versuch}/{NACHZIEHEN_VERSUCHE}")
+        k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits), fmt_preis(tp, digits), trail, anker_pfad=anker_pfad)
+        if k is None:                          # Echo pausiert — kein Klick, kein zweiter Anlauf
+            break
+        stand, ende = None, time.time() + 10
+        with _EchoUnruhe():                    # nur lesen — Maus wandert (07.10.2026)
+            while time.time() < ende:
+                st = _api_lesen(path, expected)
+                if "fehler" not in st:
+                    stand = next((q for q in st["positionen"] if q["ticket"] == p["ticket"]), False)
+                    if not stand or sltp_bestaetigt(stand["sl"], stand["tp"], sl, tp, digits):
+                        break
+                _warte(0.15, 0.2)
+        if stand and sltp_bestaetigt(stand["sl"], stand["tp"], sl, tp, digits):
+            erg.update(sl=sl, tp=tp, nachgezogen=True)
+            trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} am Fill nachgezogen ({seiten}, Versuch {versuch})")
+            return erg
+        if stand is False or (stand and (not float(stand["sl"]) or not float(stand["tp"]))):
+            break                              # Position zu oder ein Level fehlt — kein weiterer Anlauf
+    if stand is False:
+        erg["grund"] = "Position schon zu (grobe Level getroffen), nichts mehr nachzuziehen"
+    elif stand and (not float(stand["sl"]) or not float(stand["tp"])):
+        erg.update(ok=False, sl=float(stand["sl"]), tp=float(stand["tp"]),
+                   grund=f"Position trägt SL {stand['sl']} / TP {stand['tp']} — ein Level fehlt")
+    else:
+        traegt = (f"Position trägt SL {stand['sl']} / TP {stand['tp']}" if stand else "Position nicht lesbar")
+        erg["grund"] = ("Echo pausiert — kein Ändern-Klick" if k is None else
+                        f"Ändern nach {erg['versuche']} Versuch(en) nicht bestätigt (Klick: {(k or {}).get('msg') or '?'}; {traegt})") + \
+                       " — grobe F9-Level bleiben"
+    trail.append("Nachziehen: " + erg["grund"])
+    return erg
+
+
 def run(cfg_path, cmd):
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -11831,13 +11965,38 @@ def run(cfg_path, cmd):
                     pass
                 trail.append(f"SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)} "
                              f"direkt im F9-Dialog gesetzt")
-                return {"ok": True, "retry_ok": False, "verified": True, "mode": "f9",
-                        "msg": "per Klick platziert, SL/TP direkt im Order-Dialog "
-                               f"gesetzt · {trail.sekunden():.0f}s",
-                        "trail": _spur(trail),
-                        "symbol": symbol, "richtung": "buy" if kauf else "sell",
-                        "volumen": p["volumen"], "price": fill,
-                        "sl": sl_f9, "tp": tp_f9, "ticket": p["ticket"]}
+                # ECHO V2: grobe F9-Level (ab Kurs VOR dem Klick) am echten Fill nachziehen (21.10.2026, s. sltp_vom_fill). Echo mit
+                # Fusion-Hedge (ohne cmd ohne_hedge, auch altes Panel) bleibt exakt wie bisher.
+                sl_end, tp_end, nz, zusatz = sl_f9, tp_f9, None, ""
+                if cmd.get("ohne_hedge"):
+                    _warte(0.2, 0.25)
+                    anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
+                                              "anker-" + os.path.basename(cfg_path))
+                    nz = _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, float(p["volumen"] or vol), contract_size, digits,
+                                          sl_f9, tp_f9, trail, anker_pfad)
+                    sl_end, tp_end = nz["sl"], nz["tp"]
+                    if not nz["ok"]:
+                        return {"ok": False, "retry_ok": False,
+                                "msg": f"Position ist OFFEN @ {fill}, aber nach dem Nachziehen fehlt ein Level ({nz['grund']}) — im "
+                                       f"Terminal SL {fmt_preis(nz['soll_sl'], digits)} / TP {fmt_preis(nz['soll_tp'], digits)} SOFORT "
+                                       f"von Hand nachtragen! Spur: [" + _spur(trail) + "]",
+                                "trail": _spur(trail), "symbol": symbol, "richtung": "buy" if kauf else "sell",
+                                "volumen": p["volumen"], "price": fill, "sl": nz["soll_sl"], "tp": nz["soll_tp"],
+                                "ticket": p["ticket"], "nachzug": nz}
+                    zusatz = (", am Fill nachgezogen" if nz["nachgezogen"] else
+                              "" if not nz["grund"] else f" — Nachziehen: {nz['grund']}")
+                res = {"ok": True, "retry_ok": False, "verified": True, "mode": "f9",
+                       "msg": "per Klick platziert, SL/TP direkt im Order-Dialog "
+                              f"gesetzt{zusatz} · {trail.sekunden():.0f}s",
+                       "trail": _spur(trail),
+                       "symbol": symbol, "richtung": "buy" if kauf else "sell",
+                       "volumen": p["volumen"], "price": fill,
+                       "sl": sl_end, "tp": tp_end, "ticket": p["ticket"]}
+                if nz is not None:
+                    res["nachzug"] = nz
+                    if nz["grund"]:
+                        res["nachzug_fehler"] = nz["grund"]
+                return res
             if f9_getippt:
                 # SL/TP getippt, aber die Position traegt sie nicht: dieser
                 # Broker nimmt SL/TP in der Markt-Order nicht an (IOC). Einmal
@@ -11848,8 +12007,14 @@ def run(cfg_path, cmd):
             # SL/TP vom echten Fill-Kurs rechnen — eingetragen wird PER KLICK
             # (18.08.2026, Finns Ansage: kein API-Schreibweg mehr). Vorher den
             # F9-Dialog schliessen, er laege sonst vor der Handel-Liste.
-            sl, tp = berechne_sl_tp(cmd["richtung"], fill, vol, contract_size,
-                                    cmd["sl_usd"], cmd["tp_usd"], digits)
+            # Echo V2, finaler Trade (cmd.final): Kommission der Runde mit einrechnen (21.10.2026, s. sltp_vom_fill); sonst 0 $ = exakt
+            # berechne_sl_tp wie bisher. Der Nachtrag setzt ohnehin beide Level vom Fill.
+            komm = _kommission_lesen(path, expected, p["ticket"]) \
+                if cmd.get("ohne_hedge") and any(nachzieh_seiten(cmd.get("final"))) else None
+            if komm:
+                trail.append(f"Kommission {komm:g} $ in SL/TP eingerechnet")
+            sl, tp = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size,
+                                   cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)
             try:
                 dlg.type_keys("{ESC}", set_foreground=False)
             except Exception:

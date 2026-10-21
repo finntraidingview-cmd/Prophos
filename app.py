@@ -16447,7 +16447,12 @@ AP_KLEIN_PKT = 20                    # Rest in so vielen Punkten verdienen
 AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
 AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
 AP_KLEIN_TP_PKT_HINWEIS = 60         # TP weiter als 60 Pkt (Mindest-Lot zu groß) → trotzdem planen, Hinweis in der Notiz
-AP_PUFFER_PKT = 10                   # normaler letzter CFD-Trade: Puffer = 10 Pkt × Lots × $/Pkt ÷ 3 (statt fester Firmen-Puffer, ÷ 3 seit 12.10.2026)
+AP_PUFFER_PKT = 4.5                  # normaler letzter CFD-Trade: Puffer = AP_PUFFER_PKT × Lots × $/Pkt ÷ 3 (statt fester Firmen-Puffer, ÷ 3 seit 12.10.2026)
+# 10 → 4,5 = 3,3 → 1,5 Pkt (Finn über Master 21.10.2026 ~23:30 Dubai: bei CFD „mal 200 $ drüber, mal 100 $ drunter" — „danach soll der
+# CFD-Puffer kleiner werden"). Seit order_bot sltp_vom_fill zieht Echo V2 SL/TP nach dem Fill exakt nach; der Puffer deckte vorher vor allem
+# den Abstand Kurs-vor-dem-Klick → Fill (3–5 Pkt: BG +257 $, FN −101 $). Rest-Fehler ab Fill, TP-Treffer mt5v2 14 Tage (P&L − |TP − Fill| ×
+# Lots × Kontrakt): BG Ø +1,1 Pkt (schlechtester −1,05) · FTMO +0,4 (−0,13) · FundingPips +0,25 · The5ers +0,44 (nie negativ) · FundedNext
+# 0,0 — 1,5 Pkt decken den schlechtesten Fall (BG 5 Lot: 75 $ statt 167 $). Gilt mit dem Bot-Stand, der nachzieht; ein alter Bot liegt bis 5 Pkt daneben.
 # PUNKTE-PUFFER FUTURES (Master 15.10.2026): der letzte Futures-Trade (Orbit V2 / Topstep) bekam nur den festen Firmen-Puffer aus
 # puffer_je_menge (2 NQ: 15–25 $). TradingView rechnet den Dollar-TP aber vom Kurs BEIM TIPPEN, nicht vom Fill — läuft der Kurs bis
 # zum Fill weg, liegt der TP entsprechend näher am Einstieg. Vorfall ed3c376b (FundedNext Futures 150k …0682, 14.10.2026): Rest 1.829
@@ -16982,6 +16987,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         # Gemessen bei TP-Treffern der letzten 14 Tage bis 5,6 Pkt Abweichung, 10 Pkt × Lots × $/Pkt hat Luft (FN 2,8 Lots → 280 $)
         # ÷ 3 (Finn 12.10.2026, Admin „Zu bestätigen": FN 2,1 Lot → TP Rest + 210 $, The5ers 42 Lot → Rest + 420 $ — „viel zu hart berechnet …
         # mach die Formel, nur das Ergebnis durch 3"; .1449 hatte kurz den Firmen-Puffer): FN 2,1 Lot → 70 $, The5ers 42 Lot → 140 $
+        # Seit 21.10.2026 AP_PUFFER_PKT 4,5 statt 10 (Echo V2 zieht SL/TP am Fill nach, s. dort): FN 2,1 Lot → 32 $, The5ers 42 Lot → 63 $
         puffer = round(AP_PUFFER_PKT * float(menge) * float(ppl) / 3)
         lo = float((ph.get("menge") or [0])[0]) * f
         if lo and rest < AP_KLEIN_PKT * lo * float(ppl):

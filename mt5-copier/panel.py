@@ -4262,6 +4262,12 @@ class Handler(BaseHTTPRequestHandler):
             # laufende EA-Selbstheilung fuer dieses Terminal (die killt und startet das Terminal neu — mitten
             # im Order-Dialog waere das ein UNKLAR). Der Bot selbst bleibt unveraendert (Login-Guard, Klick).
             ohne_hedge = bool(body.get("ohne_hedge"))
+            # an den Bot (21.10.2026): nur Echo V2 und nur ein FINALER Trade zieht nach dem Fill exakt nach (order_bot nachzieh_seiten) —
+            # final = 'pass' | 'blow' | 'beide' | None aus dem PC-Tab (echoV2Final), final_grund nur für die Spur; Echo mit Hedge nie
+            cmd["ohne_hedge"] = ohne_hedge
+            _fin = str(body.get("final") or "").strip().lower()
+            cmd["final"] = _fin if ohne_hedge and _fin in ("pass", "blow", "beide") else None
+            cmd["final_grund"] = str(body.get("final_grund") or "").strip()[:160] if ohne_hedge else ""
             if ohne_hedge:
                 fenster = _echo_fenster_offen(inst["config_file"])
                 if fenster:
