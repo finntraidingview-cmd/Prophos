@@ -1605,6 +1605,34 @@ def _verbindung_hinweis(path):
         return _UAC_HINWEIS
 
 
+def desktop_sperre_ursache(prozesse):
+    """REIN RECHNEND (testbar): nach F9 lag KEIN Fenster vorn (GetForegroundWindow = 0) — warum? → (code, text mit Handgriff).
+    ANLASS (Routine „Puls-Fehler" 21.10.2026 05:30 Dubai, Muster „v2order: f9-dialog nicht gefunden — abbruch, nichts gesendet": ein PC 6×
+    am 20./21.10., ein zweiter am 19.10., jede Spur „F9 ohne Dialog: kein Fenster vorn"): die Meldung sagte nur „Evtl. Windows-Abfrage" —
+    der IPC-Pfad kennt die Lage seit .1578 (verbindung_ursache: consent.exe = Sicherheitsabfrage auf dem sicheren Desktop), hier dieselbe
+    Prozess-Lesung, dazu LogonUI.exe = Sperr-/Anmeldebildschirm. Beides erreicht kein SendInput — der Bot benennt es, klickt nichts weg."""
+    namen = {str(p.get("name") or "").lower() for p in prozesse or ()}
+    if "consent.exe" in namen:
+        return "uac_offen", ("Am PC ist eine Windows-Sicherheitsabfrage offen (consent.exe läuft) — auf dem sicheren Desktop kommt kein F9 an → "
+                             "am PC auf 'Ja' klicken")
+    if "logonui.exe" in namen:
+        return "gesperrt", ("Der PC ist gesperrt (LogonUI.exe läuft: Sperr-/Anmeldebildschirm) — dort kommt kein F9 an → am PC anmelden "
+                            "und die Sitzung offen lassen")
+    return "unbekannt", ("kein Fenster vorn, aber weder Sicherheitsabfrage (consent.exe) noch Sperrbildschirm (LogonUI.exe) zu sehen — "
+                         + _UAC_HINWEIS)
+
+
+def _desktop_sperre_hinweis():
+    """(code, text) für „kein Fenster vorn" aus der Prozess-Lage am PC — nur lesen, wirft nie; ohne lesbare Lage der alte Hinweis."""
+    try:
+        prozesse, _fenster = _verbindung_lage()
+        if not prozesse:
+            return "unbekannt", _UAC_HINWEIS
+        return desktop_sperre_ursache(prozesse)
+    except Exception:
+        return "unbekannt", _UAC_HINWEIS
+
+
 def _ist_verbindungsfehler(txt):
     """Riecht der Lese-Fehler nach 'Terminal nicht erreichbar' (dann passt der
     UAC/Update-Hinweis) statt nach Konto-/Symbol-Sachfehler (dann waere er
@@ -9753,11 +9781,23 @@ def order_grund_bestimmen(journal, dialog_text, api):
         return f"Symbol {a.get('symbol') or ''} für den Handel gesperrt (trade_mode DISABLED)".replace("  ", " "), "Symbol/Konto prüfen", "API"
     if a.get("symbol_modus") == 3:
         return f"Symbol {a.get('symbol') or ''} nur Schließen erlaubt (Close only)".replace("  ", " "), "später neu starten", "API"
+    # MARGE GERECHNET (Routine „Puls-Fehler" 21.10.2026 05:30 Dubai, Muster „signal/v2order: keine bestaetigung binnen # s — position nicht am
+    # konto, dialog geschlossen" OHNE Grund: 4 Fälle seit 08.10. auf 4 PCs, 2 davon unklar in 7 Tagen — 20.10. 09:23 UTC scheiterten 4 Lots,
+    # 3 Lots liefen eine Stunde später am selben Terminal durch; am 15.10. stand für denselben Plan zweimal „[No money]" im Journal und beim
+    # dritten Mal nichts). Reicht die freie Marge nachweislich nicht (order_calc_margin, reine Rechnung des Terminals), ist DAS der Grund —
+    # nach Journal, Dialog und den harten Sperren, damit eine Server-Antwort weiter vorgeht.
+    noetig, frei = a.get("marge_noetig"), a.get("marge_frei")
+    if isinstance(noetig, (int, float)) and isinstance(frei, (int, float)) and noetig > 0 and noetig > frei:
+        n_s, f_s = f"{noetig:,.2f}".replace(",", " "), f"{frei:,.2f}".replace(",", " ")
+        return (f"zu wenig freie Marge für dieses Volumen (API: nötig {n_s}, frei {f_s})" + stand,
+                "Volumen senken oder Marge prüfen", "API")
     return None
 
 
-def _order_api_zustand(path, expected, symbol):
-    """Zustand für die Diagnose (nur lesen, nie werfen): verbunden, Handel am Konto, Symbol-Modus, freie Marge, Datenordner."""
+def _order_api_zustand(path, expected, symbol, richtung=None, volumen=None):
+    """Zustand für die Diagnose (nur lesen, nie werfen): verbunden, Handel am Konto, Symbol-Modus, freie Marge, Datenordner.
+    Mit richtung + volumen (21.10.2026, s. order_grund_bestimmen) dazu marge_noetig: order_calc_margin ist eine reine Rechnung des
+    Terminals mit den Symbol-Einstellungen — keine Order, kein Auftrag an den Server."""
     out = {"symbol": symbol}
     try:
         import MetaTrader5 as mt5
@@ -9770,6 +9810,16 @@ def _order_api_zustand(path, expected, symbol):
             out.update(handel_konto=bool(ai.trade_allowed), marge_frei=float(ai.margin_free), balance=float(ai.balance))
         if si is not None:
             out["symbol_modus"] = int(si.trade_mode)
+        if si is not None and richtung and volumen:
+            try:
+                kauf = str(richtung).lower() == "buy"
+                tick = mt5.symbol_info_tick(symbol)
+                kurs = float((tick.ask if kauf else tick.bid) or 0) if tick is not None else 0.0
+                m = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY if kauf else mt5.ORDER_TYPE_SELL, symbol, float(volumen), kurs) if kurs else None
+                if m is not None:
+                    out["marge_noetig"], out["kurs"] = float(m), kurs
+            except Exception:
+                pass
     except Exception as e:
         out["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
     return out
@@ -9797,14 +9847,40 @@ def _mt5_journal_zeilen(data_path, n=400):
     return []
 
 
-def _keine_bestaetigung_grund(path, expected, symbol, richtung, dialog_text):
-    """Grund für „keine Bestätigung" einsammeln (nur lesen, nie werfen). -> (grund, fix, quelle) oder None"""
+def journal_befund(zeilen, symbol, api=None):
+    """REIN RECHNEND (testbar): Befund für die Spur, wenn „keine Bestätigung" keinen Grund hat (21.10.2026, s. order_grund_bestimmen):
+    hat der Server überhaupt etwas zu diesem Symbol gesehen? Letzte Journal-Zeile mit dem Symbol (egal wie alt, egal welche Richtung),
+    sonst „keine Zeile"; dazu Marge nötig/frei, wenn gerechnet. Nur Text, keine Einordnung."""
+    liste = list(zeilen or ())
+    sym = str(symbol or "").lower()
+    letzte = None
+    for z in reversed(liste):
+        if sym and sym in str(z or "").lower():
+            letzte = str(z).strip()
+            break
+    if letzte and len(letzte) > 115:
+        letzte = letzte[:23] + " …" + letzte[-90:]
+    t = f"Journal: {len(liste)} Zeilen, " + (f"letzte {symbol}-Zeile '{letzte}'" if letzte else f"keine Zeile zu {symbol}")
+    a = api if isinstance(api, dict) else {}
+    if isinstance(a.get("marge_noetig"), (int, float)) and isinstance(a.get("marge_frei"), (int, float)):
+        t += " · Marge nötig " + f"{a['marge_noetig']:,.2f}".replace(",", " ") + " / frei " + f"{a['marge_frei']:,.2f}".replace(",", " ")
+    return t
+
+
+def _keine_bestaetigung_grund(path, expected, symbol, richtung, dialog_text, volumen=None, befund=None):
+    """Grund für „keine Bestätigung" einsammeln (nur lesen, nie werfen). -> (grund, fix, quelle) oder None.
+    volumen (21.10.2026): damit rechnet die API die nötige Marge mit; befund = Liste, in die der Journal-/Marge-Befund für die Spur kommt."""
     try:
         import datetime as _dtm
-        api = _order_api_zustand(path, expected, symbol)
+        api = _order_api_zustand(path, expected, symbol, richtung, volumen)
         jetzt = _dtm.datetime.now()
-        journal = order_journal_grund(_mt5_journal_zeilen(api.get("data_path")), symbol, richtung,
-                                      jetzt.hour * 3600 + jetzt.minute * 60 + jetzt.second)
+        zeilen = _mt5_journal_zeilen(api.get("data_path"))
+        journal = order_journal_grund(zeilen, symbol, richtung, jetzt.hour * 3600 + jetzt.minute * 60 + jetzt.second)
+        if befund is not None:
+            try:
+                befund.append(journal_befund(zeilen, symbol, api))
+            except Exception:
+                pass
         return order_grund_bestimmen(journal, dialog_text, api)
     except Exception:
         return None
@@ -11367,6 +11443,12 @@ def run(cfg_path, cmd):
         diag, vorn = _f9_diagnose(w)
         if diag:
             trail.append(diag)
+        # KEIN FENSTER VORN (Routine „Puls-Fehler" 21.10.2026 05:30 Dubai, s. desktop_sperre_ursache): consent.exe (Sicherheitsabfrage) oder
+        # LogonUI.exe (Sperrbildschirm) benennen statt „Evtl." — dieselbe Prozess-Lesung wie der IPC-Pfad, nur lesen, kein Wegklicken.
+        sperre = None
+        if vorn == 0:
+            sperre = _desktop_sperre_hinweis()
+            trail.append("Desktop: " + sperre[0])
         # TERMINAL SELBST VORN (Routine „Puls-Fehler" 16.10.2026 20:30 Dubai, Muster „v2order/signal: f9-dialog nicht gefunden — abbruch,
         # nichts gesendet": 30 Fälle seit 13.10. auf 5 PCs, 14 davon am 16.10. auf 3 PCs). JEDE Spur seit .1571 sagt „Terminal selbst
         # vorn" — F9 kam an, MT5 öffnete trotzdem nichts; keine weiteren Terminal-Fenster. Am selben PC lief Minuten vorher eine Order
@@ -11393,7 +11475,7 @@ def run(cfg_path, cmd):
         if dlg is None:
             return {"ok": False, "retry_ok": True,
                     "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"
-                           + (" — " + _UAC_HINWEIS if vorn == 0 else "") + f9_zusatz}
+                           + (" — " + sperre[1] if sperre else " — " + _UAC_HINWEIS if vorn == 0 else "") + f9_zusatz}
     trail.append("F9-Dialog offen")
     # Kurze Setz-Zeit NACH dem Fund (02.09.2026, Finns Fund direkt nach dem
     # Tempo-Umbau: "manchmal vertippt er sich beim Asset und findet es nicht —
@@ -11835,6 +11917,13 @@ def run(cfg_path, cmd):
                 markt_zu = True
     except Exception:
         pass
+    # BEFUND (Routine „Puls-Fehler" 21.10.2026 05:30 Dubai, Muster „keine bestaetigung … position nicht am konto, dialog geschlossen" OHNE
+    # Grund, s. order_grund_bestimmen): ob der Server die Order überhaupt sah, stand nirgends. War der Knopf überhaupt aktiv? (MT5 sperrt
+    # Buy/Sell bei ungültigem Volumen/Stops) — vor dem ESC gelesen; Journal-Zeile und Marge kommen unten aus _keine_bestaetigung_grund.
+    try:
+        knopf_aktiv = "ja" if knopf.is_enabled() else "NEIN"
+    except Exception:
+        knopf_aktiv = "?"
     struktur = _dialog_struktur(dlg)
     # Dialog nicht offen stehen lassen (18.08.2026, Finns Live-Fund: der Bot
     # war fertig, aber der Dialog blieb minutenlang stehen — halbkonfigurierte
@@ -11857,7 +11946,9 @@ def run(cfg_path, cmd):
                   "moeglich, dass dieser Broker sie in der Markt-Order ablehnt und "
                   "deshalb keine Position kam." if f9_getippt else "")
     # GRUND VORN (09.10.2026): Server-Antwort aus Journal/Dialog/API — steht vor der Spur, damit sie nach dem Kürzen (400 Zeichen) bleibt
-    grund = _keine_bestaetigung_grund(path, expected, symbol, cmd["richtung"], " | ".join(dialog_texte))
+    befund = []
+    grund = _keine_bestaetigung_grund(path, expected, symbol, cmd["richtung"], " | ".join(dialog_texte), vol, befund)
+    trail.append(f"Befund: {muster}-Knopf aktiv {knopf_aktiv}" + ("".join(" · " + b for b in befund)))   # 21.10.2026, nur lesen
     if grund:
         trail.append(f"Grund: {grund[0]} ({grund[2]})")
         return {"ok": False, "retry_ok": False, "grund": grund[0], "grund_fix": grund[1], "grund_quelle": grund[2],

@@ -1983,6 +1983,7 @@ def main():
     results.append(test_puls_fehler_1603())
     results.append(test_puls_fehler_1606())
     results.append(test_puls_fehler_1611())
+    results.append(test_puls_fehler_1682())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -5104,6 +5105,71 @@ def test_puls_fehler_1606():
     q = _i.getsource(ob._f9_ursache)
     chk("sleep(" not in q and "type_keys" not in q and "click" not in q.lower(), "_f9_ursache: nur lesen — kein sleep, keine Taste, kein Klick")
     print(("✓" if ok else "✗") + " Puls-Fehler .1606: F9 ohne Dialog → Ursache aus der API (Handel am Konto / Verbindung / Symbol) + Kind-Fenster, nur lesen, Einbau einmal")
+    return ok
+
+def test_puls_fehler_1682():
+    """Routine „Puls-Fehler" 21.10.2026 05:30 Dubai (.1682). (1) Muster „signal/v2order: keine bestaetigung binnen # s — position nicht am
+    konto, dialog geschlossen" OHNE Grund (4 Fälle seit 08.10. auf 4 PCs, 2 davon unklar in 7 Tagen; 20.10. 09:23 UTC scheiterten 4 Lots,
+    3 Lots liefen eine Stunde später durch): die API rechnet die Marge (order_calc_margin, reine Rechnung) → Grund „zu wenig freie Marge
+    (API)" nach Journal/Dialog/harten Sperren; dazu Befund in der Spur (Knopf aktiv?, letzte Journal-Zeile zum Symbol, Marge nötig/frei).
+    (2) Muster „v2order: f9-dialog nicht gefunden" mit „kein Fenster vorn" (ein PC 6× am 20./21.10.): consent.exe/LogonUI.exe benannt
+    statt „Evtl.". Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1682: " + text)
+            ok = False
+
+    g = ob.order_grund_bestimmen
+    api_ok = {"symbol": "NDX100", "verbunden": True, "handel_konto": True, "symbol_modus": 4, "balance": 107592.16, "marge_frei": 12000.0}
+    m1 = g(None, "", dict(api_ok, marge_noetig=23520.0))
+    chk(m1 and m1[0].startswith("zu wenig freie Marge für dieses Volumen (API: nötig 23 520.00, frei 12 000.00)") and "107 592.16" in m1[0]
+        and m1[1] == "Volumen senken oder Marge prüfen" and m1[2] == "API", f"Marge nötig > frei → Grund aus der API ({m1})")
+    chk(g(None, "", dict(api_ok, marge_noetig=9000.0)) is None, "Marge reicht → kein Grund")
+    chk(g(None, "", dict(api_ok, marge_noetig=None)) is None and g(None, "", api_ok) is None, "Marge nicht gerechnet → kein Grund")
+    m2 = g(("No money", "'1': failed market sell 4.00 NDX100 [No money]"), "", dict(api_ok, marge_noetig=23520.0))
+    chk(m2 and "(Server: No money)" in m2[0] and m2[2].startswith("Journal"), f"Journal geht vor der Marge-Rechnung ({m2})")
+    m3 = g(None, "", dict(api_ok, handel_konto=False, marge_noetig=23520.0))
+    chk(m3 and m3[0].startswith("Handel am Konto gesperrt"), f"Konto gesperrt geht vor der Marge ({m3})")
+    zeilen = ["2026.10.20 13:20:01.000\tTrades\t'1': market buy 1.00 EURUSD done",
+              "2026.10.20 13:23:40.123\tTrades\t'1': failed market sell 4.00 NDX100 sl: 29432.53 tp: 29276.28 [No money]",
+              "2026.10.20 13:23:41.000\tNetwork\tx"]
+    b1 = ob.journal_befund(zeilen, "NDX100", dict(api_ok, marge_noetig=23520.0))
+    chk(b1.startswith("Journal: 3 Zeilen, letzte NDX100-Zeile '") and "[No money]" in b1 and "13:23:40" in b1
+        and b1.endswith(" · Marge nötig 23 520.00 / frei 12 000.00"), f"Befund mit Journal-Zeile + Marge ({b1})")
+    chk(ob.journal_befund(zeilen, "NAS100", api_ok) == "Journal: 3 Zeilen, keine Zeile zu NAS100", "Befund ohne Zeile, ohne Marge")
+    chk(ob.journal_befund([], "NDX100", None) == "Journal: 0 Zeilen, keine Zeile zu NDX100", "Befund leer, api None")
+    lang = ob.journal_befund(["2026.10.20 13:23:40.123\tTrades\t'1': failed market sell 4.00 NDX100 " + "x" * 120 + " [No money]"], "NDX100")
+    chk("2026.10.20 13:23:40.123 …" in lang and lang.endswith("[No money]'"), f"lange Zeile: Uhrzeit vorn, Antwort hinten ({lang})")
+    d = ob.desktop_sperre_ursache
+    c1 = d([{"pid": 1, "name": "consent.exe", "pfad": ""}])
+    chk(c1[0] == "uac_offen" and "'Ja'" in c1[1] and "consent.exe" in c1[1], f"consent.exe → uac_offen mit Handgriff ({c1})")
+    c2 = d([{"pid": 1, "name": "LogonUI.exe", "pfad": ""}])
+    chk(c2[0] == "gesperrt" and "anmelden" in c2[1], f"LogonUI.exe → gesperrt ({c2})")
+    chk(d([{"pid": 1, "name": "consent.exe", "pfad": ""}, {"pid": 2, "name": "LogonUI.exe", "pfad": ""}])[0] == "uac_offen",
+        "beides → Sicherheitsabfrage zuerst")
+    u = d([{"pid": 1, "name": "terminal64.exe", "pfad": "C:\\x\\terminal64.exe"}])
+    chk(u[0] == "unbekannt" and u[1].endswith(ob._UAC_HINWEIS) and "consent.exe" in u[1], f"nichts davon → unbekannt + alter Hinweis ({u})")
+    chk(d([])[0] == "unbekannt" and d(None)[0] == "unbekannt", "leer/None → unbekannt, wirft nicht")
+    q_run = _i.getsource(ob.run)
+    f9 = q_run[q_run.index("dlg = _finde_order_dialog(w)"):q_run.index('trail.append("F9-Dialog offen")')]
+    chk(f9.count("_desktop_sperre_hinweis()") == 1 and f9.index("_f9_diagnose(w)") < f9.index("_desktop_sperre_hinweis()") < f9.index("_f9_ursache(")
+        and "if vorn == 0:" in f9 and '" — " + sperre[1] if sperre else " — " + _UAC_HINWEIS if vorn == 0 else ""' in f9,
+        "run(): Desktop-Sperre genau einmal bei kein Fenster vorn, ihr Text in der Meldung, sonst der alte Hinweis")
+    chk(q_run.count('_keine_bestaetigung_grund(path, expected, symbol, cmd["richtung"], " | ".join(dialog_texte), vol, befund)') == 1
+        and q_run.count("knopf_aktiv") == 3 and q_run.index("knopf_aktiv = ") < q_run.index("struktur = _dialog_struktur(dlg)")
+        and q_run.index('trail.append(f"Befund: {muster}-Knopf aktiv {knopf_aktiv}"') < q_run.index('trail.append(f"Grund: {grund[0]} ({grund[2]})")'),
+        "run(): Grund mit Volumen + Befund, Knopf-Zustand vor dem ESC gelesen, Befund vor dem Grund in der Spur")
+    for fn in (ob.desktop_sperre_ursache, ob.journal_befund, ob.order_grund_bestimmen):
+        q = _i.getsource(fn)
+        chk("sleep(" not in q and "type_keys" not in q and "click" not in q.lower() and "order_send" not in q, f"{fn.__name__}: nur rechnen")
+    q = _i.getsource(ob._order_api_zustand)
+    chk("order_calc_margin" in q and "order_send" not in q and "order_check" not in q and "richtung and volumen" in q,
+        "_order_api_zustand: Marge nur gerechnet (order_calc_margin), keine Order, nur mit Richtung + Volumen")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1682: keine Bestätigung ohne Grund → Marge aus der API + Befund (Knopf, Journal) · F9 kein Fenster vorn → consent.exe/LogonUI benannt")
     return ok
 
 def test_puls_fehler_1611():
