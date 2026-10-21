@@ -12652,9 +12652,12 @@ def _berlin_heute():
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2", "mt5", "tvplus")   # 30.09.2026: Orbit, Echo V2, Topstep V2 — seit 02.10.2026 auch
+WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2", "mt5", "tvplus", "polar")   # 30.09.2026: Orbit, Echo V2, Topstep V2 — seit 02.10.2026 auch
 # Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus), Finn: „natürlich will ich auch Echo-Trades hier abhaken"
-WD_FUSION_AM_PLAN = ("mt5", "tvplus")   # Fusion-P&L nur als slave_pl am Plan — wie das große Erledigt-Popup, KEINE wd_hedge-Buchung
+WD_FUSION_AM_PLAN = ("mt5", "tvplus", "polar")   # Fusion-P&L nur als slave_pl am Plan — wie das große Erledigt-Popup, KEINE wd_hedge-Buchung
+# Polar (21.10.2026, Finn: „Polar-Pläne fremder IDs im Radar abhakbar, mit beiden P&L") — Testtrade 19946e60 lag in Inas Manuelle Arbeit, der
+# Knopf war für fremde Polar-Pläne gesperrt. slave_pl = P&L des Slave-Kontos (CFD, $) am Plan, keine Buchung; Konto-Status nur 'none' — wer
+# geblowt ist (Master- oder Slave-Konto, zwei IDs), entscheidet das große Erledigt-Popup im Login der ID.
 # Fusion-P&L als wd_hedge-Buchung: Orbit V2 / Winning Day (tvv2) und seit 21.10.2026 Topstep-Winning-Day (tsv2) MIT Fusion-Hedge —
 # vorher fiel tsv2 durch (400 bzw. slave_pl null, keine Buchung; 4 Pläne seit 20.10., −271,71 €, sql/2026-10-21_wd_hedge_topstep_nachbuchen.sql).
 WD_HEDGE_BUCHUNG_ROUTEN = ("tvv2", "tsv2")
@@ -13507,7 +13510,9 @@ def admin_wd_plaene():
                     f_kk = None
                     rows = f_plan.result()
                     # Boden-Prüfung EINMAL vor der Retry-Schleife (Hinweis Prüfer T3, 09.10.2026: die Route ist seit 02.10. auf Wellen getrimmt)
-                    blow_auto = (not blown) and bool(rows) and _ap_blow_beim_abhaken(rows[0], mpl)
+                    if rows and str(rows[0].get("route") or "") == "polar" and konto_status != "none":
+                        return jsonify({"error": "Polar: Konto-Status nur im Login der ID (zwei Konten) — hier nur „Nichts ändern\"", "plan_id": pid}), 400
+                    blow_auto = (not blown) and bool(rows) and str(rows[0].get("route") or "") != "polar" and _ap_blow_beim_abhaken(rows[0], mpl)
                     for _versuch in range(3):
                         if _versuch:
                             rows = sb_select("trade_plans", plan_sel)

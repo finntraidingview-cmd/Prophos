@@ -30262,16 +30262,19 @@
    * Buchung auf 'wd_hedge' um); fremder Plan → kompaktes Popup mwdErledigtModal → PATCH /admin/wd-plaene {aktion:'erledigt',
    * plan_id, master_pl, slave_pl} (Backend .541, geht aus open und review; auf completed = Korrektur). Fusion vorbelegt mit hedge.pl
    * aus der Deal-Historie. */
-  let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false, _mwdErlFusionAmPlan = false
+  let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false, _mwdErlFusionAmPlan = false, _mwdErlPolar = false
   let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
   function mklWdErledigtOeffnen(pid, extra){
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
     // Echo/Duplikum (02.10.2026): kein Solo-Hedge am Plan — Fusion-P&L aus dem Live-Wert (slave_pl_live) bzw. dem slave_pl am Plan
     const _fz = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
-    _mwdErlFusionAmPlan = pw.route === 'mt5' || pw.route === 'tvplus'
+    // Polar (21.10.2026, Finn: „Polar-Pläne fremder IDs im Radar abhakbar, mit beiden P&L"): Master-P&L + Slave-P&L (CFD-Konto der zweiten ID, $)
+    // aus der Polar-Abrechnung vorbelegt, slave_pl nur am Plan (keine Buchung, wie Echo/Duplikum), Konto-Status nur „Nichts ändern"
+    _mwdErlPolar = pw.route === 'polar'
+    _mwdErlFusionAmPlan = pw.route === 'mt5' || pw.route === 'tvplus' || _mwdErlPolar
     // slave_pl zuerst, wenn der Hedge zu ist (08.10.2026): dort steht die Summe über alle Versuche (hedgePlGesamt), hedge.pl ist nur der letzte
     const hPl = (pw.hedge && _fz(pw.hedge.pl) != null) ? ((pw.hedge.status === 'geschlossen' && _fz(pw.slave_pl) != null) ? _fz(pw.slave_pl) : _fz(pw.hedge.pl))
-      : _mwdErlFusionAmPlan ? (_fz(pw.slave_pl_live) ?? _fz(pw.slave_pl)) : null
+      : _mwdErlFusionAmPlan ? (_fz(pw.slave_pl_live) ?? _fz(pw.slave_pl) ?? (_mwdErlPolar && pw.polar ? _fz(pw.polar.slave_pl) : null)) : null
     const eigen = mklWdEigenerPlan(pid)
     if(eigen && typeof openTradeCompleteModal === 'function'){ mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined); return }
     _mwdErlId = String(pid)
@@ -30287,6 +30290,7 @@
            : pw.kt != null ? `<span class="mwd-kt mono">${f0(pw.kt)} × ${escapeHtml(String(pw.symbol_root || '?'))}</span>` : '')
         + (pw.master_tp != null ? `<span class="mwd-chip">TP ${f0(pw.master_tp)} $</span>` : '')
         + (pw.master_sl != null ? `<span class="mwd-chip">SL ${f0(pw.master_sl)} $</span>` : '')
+        + (_mwdErlPolar ? `<span class="mwd-chip" title="Slave-Seite (CFD, MT5)">⇄ ${escapeHtml(String(pw.slave_person || '?'))} · ${escapeHtml(String((pw.slave_konto || {}).firma || '?'))}${(pw.slave_konto || {}).kontonr_ende ? ' …' + escapeHtml(String(pw.slave_konto.kontonr_ende)) : ''}</span>` : '')
     }
     // Echo V2 / Topstep V2 (30.09.2026, Abhaken im Radar auch für fremde IDs): kein Fusion-Hedge → Feld weg, slave_pl null;
     // P&L in $ vorbelegt: Balance nachher − vorher (pl_balance), sonst der P&L am Plan (master_pl.wert)
@@ -30299,7 +30303,8 @@
     _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.plattform === 'echo' || ((pw.route === 'tvv2' || pw.route === 'tsv2') && !mitHedge))
     // Balance-Sprung (08.10.2026, Fall ea91e359): Balance-Differenz ≠ Tages-P&L (Auszahlung o. Ä.) → Tages-P&L vorbelegen, nie die Differenz
     const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final) : null)
-    const plVor = _sp ? _sp.tages
+    const plVor = _mwdErlPolar ? (_fz(pw.master_pl_plan) ?? (pw.polar ? _fz(pw.polar.master_pl) : null))
+      : _sp ? _sp.tages
       : (pw.pl_balance != null && isFinite(Number(pw.pl_balance))) ? Number(pw.pl_balance)
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
     // Konto weg (05.10.2026): P&L nicht mehr lesbar — steht keiner am Plan, Vorschlag ≈ Start-Balance bis Liquidation (überschreibbar)
@@ -30308,7 +30313,8 @@
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor != null ? plVor : _kwSch)
     _mwdErlVor = plVor != null ? plVor : _kwSch
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
-    if(mHilfe) mHilfe.textContent = _sp ? `Tages-P&L — Balance-Sprung: ${balanceSprungText(_sp)}`
+    if(mHilfe) mHilfe.textContent = _mwdErlPolar ? (plVor != null ? 'aus der Polar-Abrechnung (TradingView)' : 'aus TradingView eintragen')
+      : _sp ? `Tages-P&L — Balance-Sprung: ${balanceSprungText(_sp)}`
       : _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
       : (_kw && plVor == null) ? 'Konto weg — nichts mehr lesbar, bitte eintragen'
       : pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
@@ -30317,13 +30323,16 @@
     const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = (!_mwdErlOhneHedge && hPl != null) ? plFeldText(hPl) : ''
     plFeldRuhe('mwd-erl-master', 'mwd-erl-master-hinweis'); plFeldRuhe('mwd-erl-fusion', 'mwd-erl-fusion-hinweis')
     const fFeld = f && f.closest('.field'); if(fFeld) fFeld.hidden = _mwdErlOhneHedge
-    const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = hPl != null ? 'aus MetaTrader' : 'im Hedge-Terminal nachsehen'
+    const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = _mwdErlPolar ? (hPl != null ? 'aus der Polar-Abrechnung (MT5)' : 'im MT5 der Slave-ID nachsehen') : hPl != null ? 'aus MetaTrader' : 'im Hedge-Terminal nachsehen'
+    const fLabel = fFeld && fFeld.querySelector('label'); if(fLabel) fLabel.textContent = _mwdErlPolar ? 'Slave ($)' : 'Fusion (€)'
     _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
     mklWdErlSumme()
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     // Blow erkannt (02.10.2026) / Konto weg (05.10.2026): „geblowt" vorbelegen — seit 20.10.2026 dieselbe Wahrheit wie die Radar-Gruppe
     // „Geblowt · archivieren" (wdlGeblowtUrteil: Balance an/unter der Liquidation, Konto weg, abgehakt geblowt); Finn kann umstellen
-    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
+    // Polar: zwei Konten zweier IDs — wer geblowt ist, entscheidet das große Erledigt-Popup im Login der ID (Backend lehnt hier ≠ none ab)
+    const stFeld = document.querySelector('input[name="mwd-erl-status"]')?.closest('.field'); if(stFeld) stFeld.hidden = _mwdErlPolar
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -30348,6 +30357,14 @@
     if(_mwdErlOhneHedge){ el.innerHTML = '<span class="mwd-erl-buchung">P&amp;L in $ — ohne Fusion-Buchung</span>'; return }   // Echo/Topstep/Orbit ohne Hedge
     const zahl = id => plZahl(document.getElementById(id)?.value)   // null = leer, NaN = keine Zahl (30.09.2026: „−", „500-", „1.234,50")
     const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
+    if(_mwdErlPolar){
+      // Polar: beide Seiten in $ — zusammen = Master + Slave, nichts wird gebucht
+      const ps = (mpl != null && isFinite(mpl)) ? mpl + ((spl != null && isFinite(spl)) ? spl : 0) : null
+      const fmtD = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+      el.innerHTML = `<span>zusammen <b class="mono" style="color:${ps == null ? 'var(--sub)' : ps >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'}">${ps == null ? '–' : fmtD(ps)}</b></span>`
+        + '<span class="mwd-erl-buchung">beide P&amp;L am Trade — keine Buchung</span>'
+      return
+    }
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
     const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
     const summe = (mpl != null && isFinite(mpl)) ? mpl * fx + ((spl != null && isFinite(spl)) ? spl : 0) : null
@@ -30367,8 +30384,8 @@
     const zahl = id => plZahl(document.getElementById(id)?.value)
     const mpl = zahl('mwd-erl-master'), spl = _mwdErlOhneHedge ? null : zahl('mwd-erl-fusion')   // ohne Hedge: nie slave_pl
     if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
-    if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
-    const kontoStatus = document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none'
+    if(spl != null && !isFinite(spl)) return say(_mwdErlPolar ? 'Slave-P&L ist keine Zahl.' : 'Fusion-P&L ist keine Zahl.', 'err')
+    const kontoStatus = _mwdErlPolar ? 'none' : (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none')
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
@@ -30400,7 +30417,7 @@
       const ar = d.archiv || null
       if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
       const arTxt = (ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : ''
-      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
+      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : _mwdErlPolar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
@@ -31646,7 +31663,8 @@
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
     // seit 02.10.2026 auch Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) — Finn: „natürlich will ich auch Echo-Trades hier abhaken"
-    if(mklWdEigenerPlan(wdlTid(t)) || ['tvv2', 'mt5v2', 'tsv2', 'mt5', 'tvplus'].includes(t.route)) return ''
+    // seit 21.10.2026 auch Polar (Finn: „Polar-Pläne fremder IDs im Radar abhakbar, mit beiden P&L")
+    if(mklWdEigenerPlan(wdlTid(t)) || ['tvv2', 'mt5v2', 'tsv2', 'mt5', 'tvplus', 'polar'].includes(t.route)) return ''
     return 'Dieser Weg lässt sich hier nicht abhaken — im Trades-Reiter der ID erledigen'
   }
   /* POLAR IM RADAR (20.10.2026, Finn 02:45 Dubai: „Frontend ebenfalls noch mal updaten zu Polar, auch unter Radar hinzufügen, alles komplett
@@ -46209,7 +46227,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1690'
+  const OS_TAB_BUILD = '2026-09-22.1691'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
