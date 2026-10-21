@@ -691,6 +691,15 @@
   #dashboard-view .pol-banner-info small{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);margin-bottom:2px}
   #dashboard-view .pol-banner-info b{display:block;font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
   #dashboard-view .pol-banner-hinweis{grid-column:1 / -1;font-size:11.5px;color:var(--sub)}
+  /* START VERSCHOBEN (21.10.2026): amber wie „Rückfall"/Warten — Banner, Live-Popup (modal-msg) und Chip an der Karte unter Geplant */
+  #dashboard-view .pol-verschoben{display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:8px 10px;border:1px solid color-mix(in srgb, var(--warn) 45%, var(--border-soft));
+    border-radius:var(--r-sm, 10px);background:var(--warn-bg);color:var(--warn-ink);font-size:12.5px;line-height:1.4;text-align:left}
+  #dashboard-view .pol-verschoben .i{flex:none;font-size:12px;line-height:1.4}
+  #dashboard-view .pol-verschoben b{font-weight:700}
+  #dashboard-view .pol-verschoben [data-pol-bis]{font-variant-numeric:tabular-nums}
+  #dashboard-view .modal-msg .pol-verschoben{margin:0 0 10px}
+  #dashboard-view .pol-verschoben-chip{color:var(--warn-ink, #b45309);max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .pol-verschoben-chip [data-pol-bis]{font-variant-numeric:tabular-nums}
   #dashboard-view .pol-radar-leiste{display:grid;gap:8px;margin:0 0 14px}
   #dashboard-view .pol-radar-zeile{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border:1px solid color-mix(in srgb, var(--violet) 35%, var(--border-soft));
     border-left:4px solid var(--violet);border-radius:var(--r-sm, 10px);background:color-mix(in srgb, var(--violet) 6%, var(--surface));font-size:12.5px;color:var(--ink-2)}
@@ -41420,7 +41429,10 @@
     else if(p.startUm && !p.startUmGestartetAt){
       const z = zeitTeile(p.startUm)
       const _ss = tpStartSperre(p)   // Richtungsschutz (13.10.2026): Grund klein unter der Uhrzeit, voller Text im Tooltip
-      const klein = _ss ? `<small class="is-verpasst" title="${escapeHtml(_ss.voll)}">⛔ Richtungsschutz</small>` : z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
+      // Polar (21.10.2026): jede start_sperre-Art, mit Countdown bis zum neuen Versuch (polarStartVerschoben)
+      let _pv = null; try{ _pv = p.route === 'polar' ? polarStartVerschoben(p) : null }catch(_){ _pv = null }
+      const klein = _pv ? `<small class="is-verpasst" title="${escapeHtml('Start verschoben — ' + _pv.text + (_pv.versuche > 1 ? ' · Versuch ' + _pv.versuche : ''))}">⏸ ${_pv.bisMs ? `<span data-pol-bis="${_pv.bisMs}">${polarRestText(_pv.bisMs)}</span>` : 'verschoben'}</small>`
+        : _ss ? `<small class="is-verpasst" title="${escapeHtml(_ss.voll)}">⛔ Richtungsschutz</small>` : z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
       zeit = `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${escapeHtml(z.voll)}${z.verpasst ? ' — verpasst, nicht gestartet' : ''} · ${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${z.uhr}${klein}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
     } else if(p.startUm){
       const z = zeitTeile(p.startUmGestartetAt)
@@ -42452,7 +42464,9 @@
         : `<button class="btn btn-primary tc2-btn" data-plan-polar-start="${p.id}" title="Vorprüfung öffnen: Richtungsschutz, andere Trades, andere Polar-Läufe, beide PCs — bei allen ✓ startet der Bot">Starten</button>`
       // Polar zuerst (21.10.2026, „da ist kein Start-Knopf"): die Orbit-Marke „⏰ gestartet" (15 min) passt nicht — läuft ein Lauf, sperrt
       // polarStartSperre den Knopf ohnehin; nach einem Abbruch muss „Starten" sofort wieder da sein
-      const jetztBtn = p.route === 'polar' ? polarStartBtn : startUmBtn ? startUmBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
+      // Start verschoben (21.10.2026): Grund + Countdown bis zum neuen Versuch vor dem Knopf (mt5_baseline.start_sperre, polarStartVerschoben)
+      let polarVerschoben = ''; try{ polarVerschoben = p.route === 'polar' ? polarVerschobenChip(polarStartVerschoben(p)) : '' }catch(_){ polarVerschoben = '' }
+      const jetztBtn = p.route === 'polar' ? polarVerschoben + polarStartBtn : startUmBtn ? startUmBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
@@ -42516,7 +42530,7 @@
       if(p.route === 'polar'){
         zeileAkt = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
           + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
-          + polarStartBtn
+          + polarStartBtn   // Start verschoben (21.10.2026) steht unter der Uhrzeit („⏸ in m:ss") und im Banner — die Zeile bleibt einzeilig
         zeileAkt2 = `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" style="font-weight:400" title="Von Hand: Polar-Trade als laufend markieren — beide Seiten platzierst du selbst, kein Bot. Hält Master- und Slave-ID wie ein Bot-Lauf (kein Puls, keine Balance-Lesung), bis „Erledigt" mit beiden P&Ls">Läuft</button>`
           + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Abschließen — P&L beider Konten eintragen">Erledigt</button>`
       }
@@ -45981,7 +45995,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1682'
+  const OS_TAB_BUILD = '2026-09-22.1683'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56135,6 +56149,23 @@
     if(tw) tw.hidden = false
     if(h) h.textContent = 'Polar starten — Vorprüfung'
   }
+  // WARTEN AUF DEN LAUF (21.10.2026): verschiebt die DB-Sperre den Start (mt5_baseline.start_sperre), steht hier „Start verschoben — Grund ·
+  // neuer Versuch in m:ss · Versuch n" statt nur „wartet …". Dafür liest das Popup NUR während des Wartens die eine Plan-Zeile nach (≤ alle 15 s)
+  // und legt sie in tradePlans — Karte unter Geplant und Banner sehen denselben Stand.
+  async function polarLiveWarten(text){
+    const msg = polarEl('polarCheckMsg'); if(!_polarLive) return
+    if(Date.now() - (_polarLive.planAt || 0) >= 15000){
+      _polarLive.planAt = Date.now()
+      try{
+        const { data } = await supabase.from('trade_plans').select('*').eq('id', _polarLive.pid).limit(1)
+        if(data && data[0]){ const neu = rowToPlan(data[0]); const i = tradePlans.findIndex(x => String(x.id) === String(neu.id)); if(i >= 0) tradePlans[i] = neu; else tradePlans.push(neu) }
+      }catch(_){}
+    }
+    if(!_polarLive || !msg) return
+    const v = polarStartVerschoben((tradePlans || []).find(x => String(x.id) === String(_polarLive.pid)))
+    if(v){ const h = polarVerschobenHtml(v), hv = polarOhneCountdown(h); if(msg.dataset.verschoben !== hv || !msg.querySelector('.pol-verschoben')){ msg.innerHTML = h; msg.dataset.verschoben = hv } }
+    else { msg.textContent = text; msg.dataset.verschoben = '' }
+  }
   async function polarLiveTick(){
     if(!_polarLive) return
     const live = polarEl('polarCheckLive'), msg = polarEl('polarCheckMsg')
@@ -56143,13 +56174,13 @@
       const { data: { session } } = await supabase.auth.getSession()
       const r = await fetch(`${WATCHER_HOME}/polar/stand?plan_id=${encodeURIComponent(_polarLive.pid)}`, { headers: { 'sb-token': session?.access_token || '' }, cache: 'no-store' })
       const d = await r.json().catch(() => ({}))
-      if(r.status === 404){ if(msg) msg.textContent = 'Startzeit gesetzt — wartet auf den PC der Master-ID (Start-Wächter), dann legt Railway den Lauf an…'; return }
+      if(r.status === 404){ await polarLiveWarten('Startzeit gesetzt — wartet auf den PC der Master-ID (Start-Wächter), dann legt Railway den Lauf an…'); return }
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
       // ALTER LAUF (21.10.2026, zweiter Live-Test Plan e8f7e81a): direkt nach „Polar starten" liefert /polar/stand noch den letzten, längst
       // abgebrochenen Lauf 407f8efa — der erste Takt sah „abbruch" und stoppte; der neue Lauf 2a854cb4 kam nie ins Bild. Ein beendeter Lauf,
       // der vor der Freigabe angelegt wurde (angelegt_ms, 0 = aus der DB), ist der alte → weiter warten statt zeichnen und stoppen.
       if(WDL_POLAR_ENDE.includes(String(d.status || '')) && (Number(d.angelegt_ms) || 0) < _polarLive.startMs - 10000){
-        if(msg) msg.textContent = 'Freigegeben — wartet auf den neuen Lauf (PC der Master-ID startet)…'
+        await polarLiveWarten('Freigegeben — wartet auf den neuen Lauf (PC der Master-ID startet)…')
         if(live && !_polarLive.html){ live.innerHTML = polarAblaufHtml({ status: 'start' }, Object.assign({}, _polarLive.o, { ohneKopf: false })); _polarLive.html = '(warten)' }
         return
       }
@@ -56335,6 +56366,32 @@
    * Lauf kennt (polarRiegelStand — ab Vorbereiten, Master- oder Slave-ID). Inhalt aus dem, was der Tab schon hat: Plan (tradePlans), Radar-
    * Zeile + Lauf-Stand (wdl.daten / wdl.polar), Konten-Cache (_polarKonten). Fehlt der Lauf-Stand, holt das Banner /polar/stand selbst —
    * höchstens alle 20 s, nur sichtbar, nur Bot-Läufe (Hand-Polar 404 → nie wieder). Einklappen statt ausblenden, gemerkt je Lauf. */
+  /* START VERSCHOBEN (Finn 21.10.2026, „Polar starten" wartete ~2 min, weil eine andere ID bei Apex in Gegenrichtung gestartet hatte: „Wir
+   * müssen ganz kurz so und so lange wegen dem und dem warten … ich habe keine Info gehabt"): die DB-Sperre legt ihren Grund an den Plan
+   * (mt5_baseline.start_sperre {at, art, text, versuche, naechster}, s. tpStartSperre) und schiebt start_um auf naechster. Jede Art, solange
+   * der Plan geplant und ungestartet ist und der letzte Versuch ≤ 30 min her ist. → { text, art, versuche, bisMs } | null */
+  function polarStartVerschoben(p){
+    const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
+    if(!s || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    return { text: String(s.text || 'Start gesperrt').replace(/\s+—\s+Start.*$/, ''), art: String(s.art || ''), versuche: Number(s.versuche) || 1,
+      bisMs: Date.parse(s.naechster || '') || Date.parse(p.startUm || '') || null }
+  }
+  function polarRestText(ms){ const r = Math.round((Number(ms) - Date.now()) / 1000); return r > 0 ? `in ${Math.floor(r / 60)}:${String(r % 60).padStart(2, '0')}` : 'jetzt' }   // Deklaration: Karten zeichnen schon vor dieser Stelle
+  // „Start verschoben — <Grund> · neuer Versuch in 1:23 · Versuch 2"; data-pol-bis zählt der 1-s-Takt unten herunter
+  function polarVerschobenHtml(v){
+    if(!v) return ''
+    return `<div class="pol-verschoben" role="status"><span class="i" aria-hidden="true">⏸</span><span><b>Start verschoben</b> — ${escapeHtml(v.text)}`
+      + (v.bisMs ? ` · neuer Versuch <b data-pol-bis="${v.bisMs}">${polarRestText(v.bisMs)}</b>` : '') + (v.versuche > 1 ? ` · Versuch ${v.versuche}` : '') + '</span></div>'
+  }
+  // Zeile unter Geplant (einzeilig, eng): nur „⏸ neuer Versuch in m:ss" vor „Starten" — Grund + Versuch im Tooltip, voll im Banner
+  function polarVerschobenChip(v){
+    if(!v) return ''
+    return `<span class="rsq-card-run pol-verschoben-chip" title="Start verschoben — ${escapeHtml(v.text)}${v.versuche > 1 ? ' · Versuch ' + v.versuche : ''}">⏸ `
+      + (v.bisMs ? `neuer Versuch&nbsp;<span data-pol-bis="${v.bisMs}">${polarRestText(v.bisMs)}</span>` : 'Start verschoben') + '</span>'
+  }
+  function polarOhneCountdown(html){ return String(html || '').replace(/(data-pol-bis="\d+">)[^<]*/g, '$1') }
+  window._polarStartVerschoben = polarStartVerschoben   // Test-Haken (Stub)
+  setInterval(() => { document.querySelectorAll('[data-pol-bis]').forEach(el => { el.textContent = polarRestText(el.dataset.polBis) }) }, 1000)
   const POLAR_BANNER_STAND_MS = 20000, POLAR_BANNER_ZU_SS = 'prophos_polbanner_zu'
   const _polarBanner = { pid: null, stand: null, at: 0, laedt: false, hand: false, html: '' }
   async function polarBannerStandHolen(pid){
@@ -56345,8 +56402,9 @@
       const { data: { session } } = await supabase.auth.getSession()
       const r = await fetch(`${WATCHER_HOME}/polar/stand?plan_id=${encodeURIComponent(pid)}`, { headers: { 'sb-token': session?.access_token || '' }, cache: 'no-store' })
       const d = await r.json().catch(() => ({}))
-      if(r.status === 404) _polarBanner.hand = true
-      else if(r.ok && d && d.ok) _polarBanner.stand = d
+      // 404 = (noch) kein Lauf — direkt nach dem eigenen Start oder beim verschobenen Start: in 20 s wieder fragen, nie dauerhaft aufgeben
+      // (Hand-Polar fragt gar nicht erst, s. polarBannerZeichnen)
+      if(r.ok && d && d.ok) _polarBanner.stand = d
     }catch(_){}
     finally{ _polarBanner.laedt = false; polarBannerZeichnen() }
   }
@@ -56372,16 +56430,24 @@
              slave: (t && t.slave_person) || person(plan && plan.slaveAccountId) || perUid(pl && pl.slave_uid) },
       konto: { master: kk(t && t.konto) || (plan && plan.masterName) || '', slave: kk(t && t.slave_konto) || (plan && plan.slaveName) || '' } }
   }
+  // Was das Banner zeigt: der Riegel-Stand; sonst (noch kein Lauf) ein eigener Polar-Plan, der verschoben wartet (start_sperre, 21.10.2026)
+  function polarBannerLauf(){
+    const pl = polarRiegelStand(); if(pl) return pl
+    let vp = null; try{ vp = (tradePlans || []).find(x => x && x.route === 'polar' && polarStartVerschoben(x)) || null }catch(_){ vp = null }
+    return vp ? { lauf_id: null, plan_id: String(vp.id), quelle: 'sperre', phase: 'vorbereiten', hart: false,
+      seite: (accounts || []).some(a => String(a.id) === String(vp.masterAccountId)) ? 'master' : 'slave' } : null
+  }
   function polarBannerZeichnen(){
     const el = document.getElementById('pol-banner'); if(!el) return
-    const pl = polarRiegelStand()
+    const pl = polarBannerLauf()
     if(!pl){ if(!el.hidden){ el.hidden = true; el.innerHTML = ''; _polarBanner.html = '' } return }
     const k = polarBannerKontext(pl)
-    if(k.pid && pl.quelle !== 'hand' && !k.st) polarBannerStandHolen(k.pid)
+    const verschoben = polarStartVerschoben(k.plan)
+    if(k.pid && pl.quelle !== 'hand' && pl.quelle !== 'sperre' && !k.st) polarBannerStandHolen(k.pid)
     const schluessel = String(pl.lauf_id || k.pid || 'polar')
     let zu = false; try{ zu = sessionStorage.getItem(POLAR_BANNER_ZU_SS) === schluessel }catch(_){}
     const rolle = pl.seite === 'slave' ? 'Slave' : pl.seite === 'master' ? 'Master' : '?', gegen = pl.seite === 'slave' ? 'master' : 'slave'
-    const ph = k.st && typeof wdlPolarPhase === 'function' ? wdlPolarPhase(k.st, false, Date.now()).text
+    const ph = verschoben ? 'wartet auf den neuen Versuch' : k.st && typeof wdlPolarPhase === 'function' ? wdlPolarPhase(k.st, false, Date.now()).text
       : pl.quelle === 'hand' ? 'von Hand — Plan läuft' : !pl.hart ? 'bereitet vor — noch keine Order' : pl.phase && pl.phase !== 'order' ? 'Bot: ' + pl.phase : 'Order läuft'
     let pl$ = '–'
     if(k.st){
@@ -56392,10 +56458,11 @@
       if(m != null || s != null) pl$ = `Slave ${g(s)} · Master ${g(m)}`
     }
     const kontoTxt = k.konto.slave || k.konto.master ? `${k.konto.slave || '?'} ⇄ ${k.konto.master || '?'}` : (k.pid ? 'Plan ' + k.pid.slice(0, 8) : '–')
-    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">Polar-Trade läuft</span>`
+    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">${pl.quelle === 'sperre' ? 'Polar-Start verschoben' : 'Polar-Trade läuft'}</span>`
       + `<span class="pol-banner-prio">Prio 1</span><span class="pol-banner-ph">${escapeHtml(ph)}</span>`
       + `<span class="pol-banner-rechts"><button type="button" class="btn btn-primary" data-pol-banner-auf>Live-Ablauf öffnen</button>`
       + `<button type="button" class="pol-banner-klapp" data-pol-banner-klapp aria-expanded="${!zu}" title="${zu ? 'Aufklappen' : 'Einklappen — bleibt sichtbar, solange der Lauf läuft'}"><i></i></button></span></div>`
+      + polarVerschobenHtml(verschoben)   // Start verschoben (21.10.2026): auch eingeklappt sichtbar
       + `<div class="pol-banner-info"><span><small>Diese ID</small><b>${rolle}</b></span>`
       + `<span><small>Gegen-ID</small><b>${k.wer[gegen] ? escapeHtml(k.wer[gegen]) + ' · ' : ''}${gegen === 'master' ? 'Master' : 'Slave'}-ID</b></span>`
       + `<span><small>Konten Slave ⇄ Master</small><b title="${escapeHtml(kontoTxt)}">${escapeHtml(kontoTxt)}</b></span>`
@@ -56407,7 +56474,9 @@
     el.dataset.schluessel = schluessel
     el.dataset.pid = k.pid
     if(el.hidden) el.hidden = false
-    if(html !== _polarBanner.html){ el.innerHTML = html; _polarBanner.html = html }   // nur bei Änderung — sonst springt der Puls
+    // nur bei Änderung — sonst springt der Puls; die Countdown-Ziffern (data-pol-bis) zählt der 1-s-Takt, sie zählen hier nicht als Änderung
+    const vergleich = polarOhneCountdown(html)
+    if(vergleich !== _polarBanner.html){ el.innerHTML = html; _polarBanner.html = vergleich }
   }
   function polarRadarZeile(pid){   // Radar öffnen und die Polar-Zeile des Plans kurz hervorheben (wie „Im Radar ansehen")
     document.querySelector('#dashboard-view .sb-link[data-view="wdlive"]')?.click()
@@ -56425,7 +56494,7 @@
     setTimeout(suchen, 150)
   }
   function polarBannerOeffnen(){
-    const pl = polarRiegelStand(); if(!pl) return
+    const pl = polarBannerLauf(); if(!pl) return
     const k = polarBannerKontext(pl)
     // eigener Plan im Tab → bestehender Live-Ablauf (Prüf-Popup im Live-Modus); sonst (Plan einer anderen ID) die Polar-Zeile im Radar
     if(k.plan && k.plan.route === 'polar'){
