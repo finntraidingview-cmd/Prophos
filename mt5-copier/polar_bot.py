@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.3"   # 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.4"   # 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1114,14 +1114,18 @@ def lauf_master(cmd):
         res.update(bestaetigt=True, einstieg=fill, einstieg_quelle=b.get("einstieg_quelle"), tp_limit=b.get("tp"), sl_limit=b.get("sl"))
         melden(lauf, "gefuellt", {"fill": fill, "quelle": b.get("einstieg_quelle"), "klick_ms": klick_ms, "balance_start": res.get("balance_start")})
         lauf.phase("gefuellt", fill=fill)
-        # Level exakt vom Fill (Finn: „der Master passt nach dem Platzieren TP und SL noch mal neu an")
+        # Level 1:1 WIE ORBIT (Finn 21.10.2026 ~04:15 Dubai nach dem ersten echten Lauf 8870f1de: „erst mal nichts ändern, einfach nur die
+        # 1:1-Sache vom normalen Orbit nehmen, weil der auch immer perfekt ausliest"): die TP/SL-Klammer kommt aus dem Ticket ($-Werte, setzt
+        # TradingView selbst vom Fill aus), Puls ändert danach nichts mehr und liest nur Fill + TP/SL aus den Meldungen (cdp_order_beweis).
+        # Die eigene Nachkorrektur über Orders → Ändern (master_level_setzen) ist raus — im Lauf 8870f1de fand sie „0 passende Order-Zeilen",
+        # geschützt hat trotzdem die Ticket-Klammer (TP +46,96 $). Funktion bleibt im Modul, wird nicht mehr aufgerufen.
         sl_pkt, tp_pkt = _zahl(cmd.get("sl_pkt")), _zahl(cmd.get("tp_pkt"))
-        if fill and sl_pkt and tp_pkt:
-            sl_s, tp_s = level_vom_fill(plan["richtung"], fill, sl_pkt, tp_pkt, 2, tick=0.25)
-            lv = master_level_setzen(lauf, s, opts, plan, root, sl_s, tp_s)
-            res["level"] = dict(lv, sl_soll=sl_s, tp_soll=tp_s)
-            melden(lauf, "level", res["level"])
-            lauf.phase("level", level=res["level"])
+        sl_s, tp_s = level_vom_fill(plan["richtung"], fill, sl_pkt, tp_pkt, 2, tick=0.25) if (fill and sl_pkt and tp_pkt) else (None, None)
+        tp_t, sl_t = ob.cdp_zahl(b.get("tp")) if b.get("tp") is not None else None, ob.cdp_zahl(b.get("sl")) if b.get("sl") is not None else None
+        res["level"] = {"ok": tp_t is not None, "tp": tp_t, "sl": sl_t, "quelle": "ticket (wie Orbit)", "sl_soll": sl_s, "tp_soll": tp_s}
+        melden(lauf, "level", res["level"])
+        lauf.phase("level", level=res["level"])
+        lauf.log(f"Level wie Orbit aus dem Ticket: TP {tp_t if tp_t is not None else '?'} / SL {sl_t if sl_t is not None else '?'} (Soll vom Fill {tp_s} / {sl_s})")
         # Maus aufs Schließen-× parken (20.10.2026), dann Wache: Master zu → sofort melden; Slave zu zuerst → × klicken
         park = master_x_parken(lauf, s, opts, root, plan)
         zu_ms, quelle = master_wache(lauf, s, opts, ext, root, plan, park)
