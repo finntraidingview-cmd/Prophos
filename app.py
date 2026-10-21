@@ -11106,6 +11106,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "schliesst_bei_nq": _wd_num((hedge or {}).get("schliesst_bei_nq")) or None,
         "level_quelle": ("hedge" if _wd_num((hedge or {}).get("tp_level_nq")) else ("einstieg" if einstieg is not None else None)),
         "master_pl": mpl,
+        "blown": bool(p.get("blown")) if "blown" in p else None,   # Trade-Planer „Heute" je Firma (21.10.2026) — None = Spalte nicht gelesen
         "hedge": hedge,   # KOMPLETT (mt5_baseline.hedge) — das Frontend rendert damit hedgeChipHtml unveraendert
         # Ende-Grund am Plan: final.quelle ('close' = Schliessen/Auto-Close, sonst Rundgang-Ende) — nur wenn ein Ende da ist
         "grund": (final.get("quelle") or ("rundgang" if final else None)) if (final or p.get("ended_at")) else None,

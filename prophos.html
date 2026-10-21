@@ -2263,6 +2263,32 @@
   :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
   :is(#tpl-view,#adm-pane-planer) .apd-schalter .switch input:disabled + .switch-slider{opacity:.55;cursor:default}
   :is(#tpl-view,#adm-pane-planer) .tpl-karte{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:10px 12px 6px;margin:0 0 12px;min-width:0}
+  /* HEUTE JE KLASSE UND FIRMA (Finn 21.10.2026, tplHeuteBilanzHtml): Futures | CFD nebeneinander, je Hälfte Mini-Kacheln + eine Zeile je Firma;
+     Handy untereinander, Firmenzeile zweizeilig (Name + P&L, darunter die Zahlen) */
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb{padding:10px 12px 10px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-titel{font-size:13px;font-weight:700;color:var(--ink);margin:0 0 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-titel small{font-size:11px;font-weight:500;color:var(--sub);margin-left:6px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-h{min-width:0;border:1px solid var(--border-soft);border-radius:var(--r-sm, 10px);padding:8px 10px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-k{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--sub);margin:0 0 6px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 8px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis > span{min-width:0;background:var(--surface-tint);border-radius:8px;padding:5px 7px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis small{display:block;font-size:10px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis b{display:block;font-size:13.5px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis b.tpl-gut{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis b.tpl-rot{color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-z{display:grid;grid-template-columns:minmax(70px,1fr) auto auto;align-items:baseline;gap:10px;padding:4px 2px;border-top:1px solid var(--border-soft);font-size:12px}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .det{display:flex;flex-wrap:wrap;gap:2px 10px;color:var(--sub);font-variant-numeric:tabular-nums;justify-content:flex-end}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .pl{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;min-width:64px;color:var(--ink)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .pl.tpl-gut{color:var(--good)} :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .pl.tpl-rot{color:var(--danger)}
+  :is(#tpl-view,#adm-pane-planer) .tpl-hb-leer{font-size:12px;color:var(--sub);padding:4px 2px}
+  @media (max-width:1100px){ :is(#tpl-view,#adm-pane-planer) .tpl-hb-kpis{grid-template-columns:repeat(3,minmax(0,1fr))} }
+  @media (max-width:820px){
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb-grid{grid-template-columns:minmax(0,1fr)}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb-z{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"nm pl" "det det";row-gap:2px}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .nm{grid-area:nm} :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .pl{grid-area:pl}
+    :is(#tpl-view,#adm-pane-planer) .tpl-hb-z .det{grid-area:det;justify-content:flex-start;font-size:11.5px}
+  }
   :is(#tpl-view,#adm-pane-planer) .tpl-h{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;font-size:11.5px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px}
   :is(#tpl-view,#adm-pane-planer) .tpl-h b{color:var(--ink);font-weight:600}
   :is(#tpl-view,#adm-pane-planer) .tpl-h .leg{display:inline-flex;gap:4px 10px;flex-wrap:wrap;text-transform:none;letter-spacing:0;font-weight:500;color:var(--sub-2)}
@@ -52255,6 +52281,76 @@
     return `<div class="kpis tpl-kpis5">${k1}${k2}${tplWaageKachelHtml(d) || k3}${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
 
+  /* HEUTE JE KLASSE UND FIRMA (Finn 21.10.2026: „Die Werte in den Trade-Planer, damit ich immer sehe, wie viel heute gepasst wurde, wie viel wir
+   * gewonnen und verloren haben; Long, Short und Verhältnis je Prop-Firma; CFDs und Futures getrennt, das ist der größte Unterschied"). Nur Anzeige.
+   * Trades = /admin/live-trades (_tpl.lt — lädt der Planer ohnehin, alle IDs der Sicht) mit started_at am Dubai-Tag, ohne Winning Day, Polar und
+   * Tage-Mini; P&L = master_pl (kein Wert bzw. läuft = offen, zählt extra); geblowt = blown (Radar-Vertrag seit 21.10.2026, älteres Backend → „–").
+   * Bestanden = /admin/handarbeit radar_bestanden (_hand.d, 60-s-Takt) mit ziel_erreicht_at am Dubai-Tag (Ziel-Wache). Klasse wie ap_klasse im
+   * Backend: Echo-Route → CFD, tv…/ts… → Futures, sonst nach Firma (tpFirmIstFutures). REIN (Test-Haken window._tplHeuteBilanz). */
+  function tplHeuteBilanz(trades, bestanden, o){
+    const oo = o || {}
+    const tagD = v => { const d = new Date(v || ''); return !v || isNaN(d) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' }) }
+    const heute = oo.heute || tagD(new Date().toISOString())
+    const klasse = (route, firma) => { const r = String(route || '').toLowerCase()
+      return (r === 'mt5' || r === 'mt5v2') ? 'cfd' : (r.startsWith('tv') || r.startsWith('ts')) ? 'futures' : tpFirmIstFutures(firma) ? 'futures' : 'cfd' }
+    const passt = (uid, firma) => (!oo.uids || oo.uids.has(String(uid))) && (!oo.firma || oo.firma === 'alle' || String(firma) === oo.firma)
+    const leer = () => ({ n: 0, gew: 0, verl: 0, pl: 0, plN: 0, offen: 0, long: 0, short: 0, blown: 0, best: 0 })
+    const out = { futures: Object.assign(leer(), { firmen: new Map() }), cfd: Object.assign(leer(), { firmen: new Map() }), blownBekannt: false }
+    const ziele = (k, firma) => { const kl = out[k]; if(!kl.firmen.has(firma)) kl.firmen.set(firma, leer()); return [kl, kl.firmen.get(firma)] }
+    for(const t of trades || []){
+      if(!t || tagD(t.started_at) !== heute) continue
+      if(t.route === 'polar' || t.plattform === 'polar' || t.tage_mini || (oo.istWd && oo.istWd(t))) continue
+      const firma = String((t.konto && t.konto.firma) || t.firma || '?')
+      if(!passt(t.user_id, firma)) continue
+      const roh = t.master_pl && typeof t.master_pl === 'object' ? t.master_pl.wert : t.master_pl
+      const pl = roh == null || roh === '' || !isFinite(Number(roh)) ? null : Number(roh)
+      const offen = t.status === 'open' || pl == null
+      if(t.blown === true || t.blown === false) out.blownBekannt = true
+      for(const x of ziele(klasse(t.route, firma), firma)){
+        x.n++
+        if(t.richtung === 'buy') x.long++; else if(t.richtung === 'sell') x.short++
+        if(offen) x.offen++; else { x.pl += pl; x.plN++; if(pl > 0) x.gew++; else if(pl < 0) x.verl++ }
+        if(t.blown === true) x.blown++
+      }
+    }
+    for(const z of bestanden || []){
+      if(!z || tagD(z.seit) !== heute) continue
+      const firma = String(z.firma || '?')
+      if(!passt(z.user_id, firma)) continue
+      for(const x of ziele(klasse(null, firma), firma)) x.best++
+    }
+    for(const k of ['futures', 'cfd']){ out[k].pl = Math.round(out[k].pl * 100) / 100; for(const f of out[k].firmen.values()) f.pl = Math.round(f.pl * 100) / 100 }
+    return out
+  }
+  window._tplHeuteBilanz = tplHeuteBilanz
+  // o = { uids: Set | null (ID-Filter), firma: 'alle' | Name (Firmen-Filter) } — nur für „heute", nur wenn die Radar-Zeilen schon da sind
+  function tplHeuteBilanzHtml(o){
+    if(_tpl.tag === 'morgen' || !(_tpl.lt && _tpl.lt.size)) return ''
+    let b
+    try{
+      const best = (typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || []
+      b = tplHeuteBilanz([..._tpl.lt.values()], best, { uids: (o && o.uids) || null, firma: (o && o.firma) || 'alle', istWd: t => typeof wdlWeg === 'function' && wdlWeg(t) === 'Winning Day' })
+    }catch(e){ console.warn('[tpl] Heute-Bilanz', e); return '' }
+    const usd = v => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.round(Math.abs(v)).toLocaleString('de-DE')} $`
+    const farbe = v => v > 0 ? 'tpl-gut' : v < 0 ? 'tpl-rot' : ''
+    const bl = v => b.blownBekannt ? String(v) : '–'
+    const haelfte = (titel, k) => {
+      const firmen = [...k.firmen.entries()].sort((x, y) => y[1].n - x[1].n || y[1].best - x[1].best || x[0].localeCompare(y[0], 'de'))
+      const kpi = (label, wert, cls, tip) => `<span${tip ? ` title="${escapeHtml(tip)}"` : ''}><small>${label}</small><b class="${cls || ''}">${wert}</b></span>`
+      const kopf = `<div class="tpl-hb-kpis">${kpi('Trades', k.n)}${kpi('Gew. · Verl.', `${k.gew} · ${k.verl}`, '', 'Gewinner · Verlierer (beendet, Master-P&L > 0 bzw. < 0)')}`
+        + `${kpi('P&amp;L', k.plN ? usd(k.pl) : '–', farbe(k.pl), 'Summe Master-P&L der heute gestarteten, schon beendeten Trades')}`
+        + `${kpi('Bestanden', k.best, k.best ? 'tpl-gut' : '', 'Ziel heute erreicht (Ziel-Wache)')}${kpi('Geblowt', bl(k.blown), k.blown ? 'tpl-rot' : '')}${kpi('Offen', k.offen, '', 'läuft noch bzw. noch kein P&L')}</div>`
+      const zeilen = firmen.map(([f, x]) => `<div class="tpl-hb-z"><b class="nm" title="${escapeHtml(f)}">${escapeHtml(f)}</b>`
+        + `<span class="det"><span title="Trades">${x.n} Tr.</span><span title="Long · Short · Verhältnis">L ${x.long} · S ${x.short} · ${x.long}:${x.short}</span>`
+        + `<span title="Gewinner · Verlierer">${x.gew} G · ${x.verl} V</span>${x.offen ? `<span title="offen">${x.offen} offen</span>` : ''}`
+        + `<span title="bestanden heute" class="${x.best ? 'tpl-gut' : ''}">✓ ${x.best}</span><span title="geblowt heute" class="${x.blown ? 'tpl-rot' : ''}">✗ ${bl(x.blown)}</span></span>`
+        + `<span class="pl ${farbe(x.pl)}">${x.plN ? usd(x.pl) : '–'}</span></div>`).join('')
+      return `<div class="tpl-hb-h"><div class="tpl-hb-k">${titel}</div>${kopf}${zeilen || '<div class="tpl-hb-leer">heute noch kein Trade</div>'}</div>`
+    }
+    return `<div class="tpl-karte tpl-hb"><div class="tpl-hb-titel">Heute <small>Dubai-Tag · Master-P&amp;L · ohne Winning Day, Polar und Tage-Mini</small></div>`
+      + `<div class="tpl-hb-grid">${haelfte('Futures', b.futures)}${haelfte('CFD', b.cfd)}</div></div>`
+  }
+
   /* ZWEI WAAGEN (Finn 17.10.2026): statt „Netto heute" (Tages-Saldo mit beendeten Trades, den Finn am 16.10. den ganzen Tag ignoriert
    * hat) die beiden Waagen, nach denen Bot und Start-Prüfung jetzt arbeiten — Futures nach Anzahl (höchstens 2 : 1), CFD nach € (Lücke
    * ≤ 250 € oder 20 %), nur laufend + Start in ≤ 2 min. Altes Backend / Waage aus → null (alte Kachel). */
@@ -54018,7 +54114,7 @@
     const fz = [apLadeFehlerText(), apdLadeFehlerText()].filter(Boolean)   // Ladefehler sichtbar, je Quelle eine Zeile (09.10.2026)
     const html = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + (_tpl.fehler ? `<div class="tpl-fehler">⚠ ${escapeHtml(_tpl.fehler)}</div>` : '')
       + (ohne ? `<div class="tpl-karte"><div class="tpl-leer">— nicht im Auto-Planer</div></div>`
-        : chips + tplKachelnHtml(F) + tplZeitstrahlHtml(F, zeilen) + tplHeuteKontenHtml(abF) + tplChartsUmschalterHtml(F, 'p') + tplLaeuftKarteHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplListeHtml(F) + tplHeuteKarteHtml(F) + tplBilanzKarteHtml(F))   // Reihenfolge wie Admin (Finn 08.10.2026, Läuft seit ~11:45 Dubai direkt unter den Charts): Charts-Umschalter · Läuft · Braucht dich · Geplant · Heute beendet   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
+        : chips + tplKachelnHtml(F) + tplHeuteBilanzHtml({ uids: sichtIds, firma }) + tplZeitstrahlHtml(F, zeilen) + tplHeuteKontenHtml(abF) + tplChartsUmschalterHtml(F, 'p') + tplLaeuftKarteHtml(F) + tplBrauchtHtml(tplBraucht(D, sichtIds)) + tplDetailHtml(D) + tplListeHtml(F) + tplHeuteKarteHtml(F) + tplBilanzKarteHtml(F))   // Reihenfolge wie Admin (Finn 08.10.2026, Läuft seit ~11:45 Dubai direkt unter den Charts): Charts-Umschalter · Läuft · Braucht dich · Geplant · Heute beendet   // Heute beendet unter dem Hypo-Chart mit „Läuft" (Finn 08.10.2026)   // Konten-Abdeckung ausgeblendet (Finn 08.10.2026: „mies unnötig, kann visuell weg“) — tplAbdeckungHtml bleibt   // Detail direkt unter dem Zeitstrahl (Finn 07.10.2026)
     // FINGERABDRUCK (08.10.2026): gleiches Markup → nichts anfassen (60-s-Takt, Delta-Takt, Balance-Stände zeichnen sonst alles neu
     // und werfen Scroll/Fokus weg); die Kopfzeile oben wird trotzdem jedes Mal aktualisiert
     if(html === _tpl.htmlAlt && root.firstChild) return
@@ -69983,7 +70079,7 @@
       // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
       let heuteKonten = ''   // Heute je ID (12.10.2026) wie auf der Planer-Seite, mit gewählter ID nur ihre Zeile
       try{ if(typeof tplHeuteKontenHtml === 'function' && typeof tplAbdeckung === 'function'){ const ab = tplAbdeckung(D); heuteKonten = tplHeuteKontenHtml(u ? ab.filter(o => o.uid === String(u)) : ab) } }catch(e){ console.warn('[apIds] Heute je ID', e) }
-      try{ return seg + firmenChips + tplKachelnHtml(DF) + tplZeitstrahlHtml(DF, zeilenF) + heuteKonten + tplChartsUmschalterHtml(DF, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
+      try{ return seg + firmenChips + tplKachelnHtml(DF) + tplHeuteBilanzHtml({ uids: u ? new Set([String(u)]) : null, firma: fs.firma }) + tplZeitstrahlHtml(DF, zeilenF) + heuteKonten + tplChartsUmschalterHtml(DF, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return laeuft }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
