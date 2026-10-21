@@ -30309,12 +30309,15 @@
       : (pw.master_pl && pw.master_pl.wert != null && isFinite(Number(pw.master_pl.wert))) ? Number(pw.master_pl.wert) : null
     // Konto weg (05.10.2026): P&L nicht mehr lesbar — steht keiner am Plan, Vorschlag ≈ Start-Balance bis Liquidation (überschreibbar)
     const _kw = (typeof wdlKontoWeg === 'function') && wdlKontoWeg(pw)
-    const _kwSch = (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : null
+    // TP + nicht mehr im Dropdown (21.10.2026, s. wdlTpUndWeg): P&L = TP-Schätzung, Status „Phase bestanden" (unten)
+    const _tw = (!_mwdErlPolar && typeof wdlTpUndWeg === 'function') ? wdlTpUndWeg(pw) : null
+    const _kwSch = (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : (_tw && plVor == null) ? _tw.pl : null
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor != null ? plVor : _kwSch)
     _mwdErlVor = plVor != null ? plVor : _kwSch
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
     if(mHilfe) mHilfe.textContent = _mwdErlPolar ? (plVor != null ? 'aus der Polar-Abrechnung (TradingView)' : 'aus TradingView eintragen')
       : _sp ? `Tages-P&L — Balance-Sprung: ${balanceSprungText(_sp)}`
+      : (_tw && plVor == null) ? '≈ geschätzt: TP laut Radar-Chart (Konto nicht mehr im Dropdown) — bitte prüfen'
       : _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
       : (_kw && plVor == null) ? 'Konto weg — nichts mehr lesbar, bitte eintragen'
       : pw.route === 'mt5v2' ? (pw.pl_balance != null ? 'MT5-Balance nachher − vorher' : 'aus MetaTrader eintragen')
@@ -30330,7 +30333,7 @@
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     // Blow erkannt (02.10.2026) / Konto weg (05.10.2026): „geblowt" vorbelegen — seit 20.10.2026 dieselbe Wahrheit wie die Radar-Gruppe
     // „Geblowt · archivieren" (wdlGeblowtUrteil: Balance an/unter der Liquidation, Konto weg, abgehakt geblowt); Finn kann umstellen
-    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : 'none'}"]`); if(stVor) stVor.checked = true
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : _tw ? 'passed' : 'none'}"]`); if(stVor) stVor.checked = true
     // Polar: zwei Konten zweier IDs — wer geblowt ist, entscheidet das große Erledigt-Popup im Login der ID (Backend lehnt hier ≠ none ab)
     const stFeld = document.querySelector('input[name="mwd-erl-status"]')?.closest('.field'); if(stFeld) stFeld.hidden = _mwdErlPolar
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
@@ -31306,6 +31309,7 @@
     if(wdlIstPolar(t)) return null   // Polar (20.10.2026): keine Puls-Nachlesung — die Abrechnung des Laufs schreibt beide P&L, Hand-Polar hakt Finn ab
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v), e = (t && t.endlesung) || {}
     if(!t || t.status !== 'review' || n(t.balance_start) == null || n(t.balance_end) != null) return null
+    if(wdlTpUndWeg(t)) return null   // TP + nicht mehr im Dropdown (21.10.2026): nicht mehr warten — Bestanden → Trade abhaken
     // TopstepX (01.10.2026, TSV2-PNL): today_pnl ist der RP&L des ganzen Tages — dort wartet der Trade, bis balance_end steht
     if(t.route === 'tsv2' ? (n(e.balance_end) != null || e.puls_aufgegeben) : (n(e.today_pnl) != null || e.quelle === 'puls' || e.puls_aufgegeben)) return null
     const versuche = Number(e.puls_versuche) || (e.puls_at ? 1 : 0)
@@ -31412,7 +31416,32 @@
   }
   // Konto weg (05.10.2026): Ergebnis-Wort für Überprüfen/Erledigt — kurz, der ganze Satz im Tooltip; die Konto-Spalte daneben
   // sagt „vermutl. geblowt" (wdlKontoZ). Erkennung am endlesung-Auszug der Zeile (tvV2KontoWeg).
-  const wdlKontoWeg = t => !!(t && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026)
+  /* WAHRSCHEINLICH BESTANDEN · NICHT MEHR IM DROPDOWN (Finn 21.10.2026 ~16:40 Dubai: „Wenn man die Balance lesen will und der Account nicht
+   * mehr im Dropdown liegt, ist er meistens schon gepasst. Aktuell denkt das System oft: geblowt."). Fall Marc Topstep …1330 (Plan 5399540c):
+   * Kette 2/2 lief laut Radar-Chart ins TP (final.grund demo_tp, master_pl_schaetzung 1.650), danach 8× „konto_nicht_erreicht … Konto nicht in
+   * der Liste" — Topstep und Tradeify nehmen bestandene Konten wie geblowte aus dem Dropdown; tv_balance blieb alt, die Ziel-Wache sah das Ziel
+   * nie, der Radar zeigte „Konto weg"/geblowt. Gegenstück zu tvV2LiqUndWeg (Liquidation + weg = geblowt). ALLE Belege nötig: (1) Endlesung
+   * fand das Konto nicht (konto_weg / konto_weg_vermutet / puls_fehler konto_nicht_erreicht|konto_weg), (2) Trade-Ende am TP (Demo d.status
+   * 'tp' bzw. final.grund …tp), (3) Start-Balance + TP-Betrag (master_pl_schaetzung, sonst master_tp) ≥ Ziel; dazu NIE eine gelesene Balance
+   * und kein Blow-Beweis (blown, konto_geblowt aus dem TopstepX-Auge). Dann zählt die Zeile als bestanden (Chip, Gruppe Bestanden → Trade
+   * abhaken, Abhaken mit „Phase bestanden" + P&L-Schätzung vorbelegt) statt „Konto weg"/geblowt. Nur Anzeige und Vorbelegung. -> {bal, ziel, pl} | null */
+  function wdlTpUndWeg(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t || t.blown === true || t.status === 'open' || t.status === 'planned') return null
+    const f = (t.endlesung && typeof t.endlesung === 'object') ? t.endlesung : {}
+    if(f.konto_geblowt || n(f.balance_end) != null || n(f.today_pnl) != null) return null
+    // „nicht in der Liste" erst ab TV_LIQ_WEG_MIN Versuchen (wie tvV2LiqUndWeg) — ein einzelner Fehlversuch kann ein Login-Wackler sein
+    const weg = f.konto_weg === true || f.konto_weg_vermutet === true
+      || (/^konto_(nicht_erreicht|weg)\b/.test(String(f.puls_fehler || '')) && (Number(f.puls_versuche) || 0) >= TV_LIQ_WEG_MIN)
+    const tp = (t.demo && t.demo.status === 'tp') || /(^|_)tp$/.test(String(f.grund || ''))
+    if(!weg || !tp) return null
+    const bs = n(t.balance_start), ziel = n(t.ziel_usd), pl = n(f.master_pl_schaetzung) ?? n(t.master_tp)
+    if(bs == null || ziel == null || pl == null || pl <= 0) return null
+    return bs + pl >= ziel ? { bal: Math.round((bs + pl) * 100) / 100, ziel, pl } : null
+  }
+  window._wdlTpUndWeg = wdlTpUndWeg   // Test-Haken (Stub)
+  // „Konto weg" gilt nicht für den Fall oben — dort ist das Konto am TP sehr wahrscheinlich bestanden, nicht verschwunden (21.10.2026)
+  const wdlKontoWeg = t => !!(t && !wdlTpUndWeg(t) && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026)
   /* EINE WAHRHEIT „GEBLOWT" (20.10.2026, Finn 23:00 Dubai, Radar .1647 „Geblowt · archivieren · 2", Tradeify 150k …1607/…9125: „Der Account ist
    * eigentlich geblowt. Wenn ich auf Abhaken gehe, steht trotzdem ‚Nichts ändern‘ vorbelegt. Das Radar weiß schon, dass er geblowt ist"):
    * dieselbe Regel wie die Radar-Gruppe — abgehakt geblowt, Balance nach dem Trade an/unter der Liquidation (wdlBlowStand: Liq-Regel am
@@ -31452,6 +31481,11 @@
   function wdlBestandenChip(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
+    const tw = wdlTpUndWeg(t)   // TP + nicht mehr im Dropdown (21.10.2026): eigener Chip, auch ohne bekannten Kontotyp
+    if(tw){
+      const de = v => Math.round(v).toLocaleString('de-DE'), ueb = WDL_UEBERGANG[String(t.konto_typ || '')]
+      return `<b class="wdl-bestanden" style="color:var(--good-ink, #15803d);white-space:nowrap" title="${ueb ? ueb + ' · ' : ''}TP laut Radar-Chart: Start ${de(n(t.balance_start))} + ${de(tw.pl)} = ${de(tw.bal)} ≥ Ziel ${de(tw.ziel)}. Danach fand Puls das Konto nicht mehr im Dropdown — Topstep/Tradeify nehmen bestandene Konten dort heraus. Sehr wahrscheinlich bestanden, nicht geblowt: prüfen, Phase umstellen, neues Konto anlegen.">🎯 wahrscheinlich bestanden · nicht mehr im Dropdown</b>`
+    }
     const ziel = n(t.ziel_usd), typ = String(t.konto_typ || '')
     if(ziel == null || !WDL_UEBERGANG[typ]) return ''
     let bal = (wdlBlowStand(t) || {}).bal
@@ -31469,6 +31503,7 @@
   function wdlFehltChip(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
+    if(wdlTpUndWeg(t)) return ''   // TP + nicht mehr im Dropdown = wahrscheinlich bestanden (21.10.2026), kein „fehlen noch"
     const ziel = n(t.ziel_usd), typ = String(t.konto_typ || '')
     if(ziel == null || !WDL_UEBERGANG[typ]) return ''
     let bal = (wdlBlowStand(t) || {}).bal
@@ -61766,13 +61801,22 @@
       if(tr && wdlGeblowtUrteil(tr)){
         const rb = document.querySelector('input[name="tc-status"][value="blown"]')
         if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
+      } else if(tr && typeof wdlTpUndWeg === 'function' && wdlTpUndWeg(tr)){
+        // TP + nicht mehr im Dropdown (21.10.2026, s. wdlTpUndWeg): „Phase bestanden" + P&L-Schätzung, Finn bestätigt
+        const tw = wdlTpUndWeg(tr), rb = document.querySelector('input[name="tc-status"][value="passed"]')
+        if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
+        const feld = document.getElementById('tc-master-pl'), msgEl = document.getElementById('tradeCompleteMsg')
+        if(p.masterPl == null && feld && !feld.value) feld.value = plFeldText(tw.pl)
+        if(msgEl){ msgEl.textContent = `🎯 wahrscheinlich bestanden · nicht mehr im Dropdown — TP laut Radar-Chart, Start + ${Math.round(tw.pl).toLocaleString('de-DE')} $ ≥ Ziel ${Math.round(tw.ziel).toLocaleString('de-DE')} $. Bitte prüfen.`; msgEl.className = 'modal-msg' }
       }
     }
     // Konto weg (05.10.2026): „geblowt" vorbelegen (Finn kann umstellen). Steht kein Master-P&L am Plan, Vorschlag ≈ Start-Balance bis
     // Liquidation aus der Radar-Zeile dieses Plans (nur wenn der Radar sie geladen hat) — sonst bleibt das Feld leer.
     { const finKw = (planIstPuls(p) && p.mt5Baseline && p.mt5Baseline.final) || null
       const _kwVerm = tvV2KontoVermutetOffen(finKw)   // 09.10.2026: Konto nicht mehr in der Liste — liquidiert? (nur ohne gelesene Balance)
-      if(p.status === 'review' && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
+      let _tpWeg = null   // TP + nicht mehr im Dropdown (21.10.2026): dann ist „Konto weg → geblowt" hier falsch (oben „Phase bestanden")
+      try{ const tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)); _tpWeg = tr && typeof wdlTpUndWeg === 'function' ? wdlTpUndWeg(tr) : null }catch(_){}
+      if(p.status === 'review' && !_tpWeg && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
         const rb = document.querySelector('input[name="tc-status"][value="blown"]')
         if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
         if(p.masterPl == null){

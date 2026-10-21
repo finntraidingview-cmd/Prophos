@@ -11325,7 +11325,10 @@ def _wd_endlesung_zeile(final):
             "konto_weg_vermutet", "grund",
             # TopstepX-Geblowt-Auge (14.10.2026): Dropdown-Hinweis „(MAXIMUM_LOSS Violation)"/„(Ineligible)" oder Meldung „You Hit Your
             # Maximum Loss Limit" — der PC-Tab archiviert und setzt blown; der Radar fremder IDs sieht den Beweis hier
-            "konto_geblowt")
+            "konto_geblowt",
+            # WAHRSCHEINLICH BESTANDEN (Finn 21.10.2026, Marc Topstep …1330: TP laut Radar-Chart, danach „Konto nicht in der Liste"): die
+            # Schätzung des TP-Betrags — der Radar rechnet Start + Schätzung gegen das Ziel, statt das Konto als weg/geblowt zu zeigen
+            "master_pl_schaetzung")
     out = {k: final.get(k) for k in keys if final.get(k) is not None}
     return out or None
 
