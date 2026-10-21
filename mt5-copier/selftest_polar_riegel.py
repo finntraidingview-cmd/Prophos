@@ -10,6 +10,7 @@ Aufruf:  python3 selftest_polar_riegel.py
 """
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -218,7 +219,13 @@ def test_aktiv_liste():
     fg = src[src.index("def polar_freigeben():"):src.index('@app.route("/polar/geblowt"')]
     chk("/polar/freigeben: _vorpruefung vor dem start_um-Update", 0 < fg.index("_vorpruefung(plan)") < fg.index('"start_um": A["_wt_now_iso"]()'))
     pl = src[src.index("def polar_plan():"):src.index("def _vp_plan(d):")]
-    chk("/polar/plan: keine Startzeit, kein open", '"start_um"' not in pl and '"open"' not in pl)
+    # Seit dem Bearbeiten-Weg (.1678, 21.10.2026) darf polar_plan start_um LESEN (alt.get) und als Guard filtern ("start_um": "is.null") —
+    # verboten bleibt nur, eine Startzeit zu SETZEN (jeder andere Wert hinter "start_um":) oder Status open zu schreiben
+    start_werte = re.findall(r'"start_um"\s*:\s*([^,}\n]+)', pl)
+    chk("/polar/plan: setzt keine Startzeit (nur Guard is.null), kein open",
+        all(w.strip() == '"is.null"' for w in start_werte) and '"open"' not in pl)
+    chk("/polar/plan Bearbeiten: Guard status planned + start_um is.null am Update",
+        '"status": "eq.planned", "start_um": "is.null"' in pl)
     # ALTER TAB-BODY (S2 21.10.2026): ältere Tabs/Mac localhost:5000 schicken starten:true ohne neue Felder — /polar/plan liest starten/hand
     # gar nicht mehr, also wird daraus nie ein Bot-Plan (und nie open); ein Bot-Start geht nur über /polar/freigeben (neuer Tab, Prüf-Tabelle)
     chk("alter Tab-Body (starten:true, kein hand) → nur gespeichert, nie Bot", 'd.get("starten")' not in pl and 'd.get("hand")' not in pl and "plan_startart" not in srcA)
