@@ -60,7 +60,8 @@ def main():
     zl = zeile(dict(fin, puls_diagnose={"reiter": ["Positions@10,500"]}, exit_fill={"preis": 30812.25, "menge": 2, "seite": "sell"},
                     master_pl_schaetzung=273, hedge_pl=-94.29))
     check(zl and zl["puls_versuche"] == 2 and zl["exit_fill"]["preis"] == 30812.25 and "puls_diagnose" in zl
-          and "master_pl_schaetzung" not in zl and "hedge_pl" not in zl and "today_pnl" not in zl, "Zeile: nur puls-Felder, None weggelassen")
+          and zl.get("master_pl_schaetzung") == 273 and "hedge_pl" not in zl and "today_pnl" not in zl,
+          "Zeile: nur puls-Felder (+ master_pl_schaetzung seit 21.10.2026 für „wahrscheinlich bestanden“), None weggelassen")
     check(zeile(None) is None and zeile({}) is None and zeile({"hedge_pl": 1}) is None, "ohne puls-Felder → None")
     zb = zeile(dict(fin, puls_login_fehler=2, puls_login_at="2026-09-30T11:05:00Z", puls_login_code="login_unlesbar"))
     check(zb and zb["puls_login_fehler"] == 2 and zb["puls_login_at"] == "2026-09-30T11:05:00Z" and zb["puls_login_code"] == "login_unlesbar",
