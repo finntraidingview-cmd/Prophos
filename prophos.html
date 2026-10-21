@@ -46355,7 +46355,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1696'
+  const OS_TAB_BUILD = '2026-09-22.1697'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55878,8 +55878,9 @@
   // Ein Dropdown je Seite, Konten nach ID gruppiert (Finn 13.10.2026: erst ID, dann Konto war „zu viel“)
   // [[ID, [Konten]]] — dieselbe Gruppierung/Reihenfolge für das (versteckte) Select und die eigene Auswahlliste
   function polarKontoGruppen(typ){
-    const l = _polarKonten.filter(k => k.type === typ)
-    // Waiting for Payout je ID ans Ende (21.10.2026, Finn: „anzeigen, aber markieren — dass man nicht auf so einen Account tradet")
+    // Waiting for Payout gar nicht (21.10.2026, Finn nach .1696 „markiert": „die ganzen Waiting muss mir gar nicht anzeigen, nur die, die noch
+    // nicht Waiting sind") — Markierung/Sperre bleibt als Rückfall, falls ein Konto doch hineinkommt
+    const l = _polarKonten.filter(k => k.type === typ && !k.warten)
     return [...new Set(l.map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
       .map(p => [p, l.filter(k => k.person === p).sort((a, b) => (Number(!!a.warten) - Number(!!b.warten)) || (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))])
   }
