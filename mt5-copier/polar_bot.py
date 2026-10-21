@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.15"   # 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.16"   # 0.3.16 (21.10.2026): Räumen nur vor „bereit", Bereit-Halten ohne Klick, nach Feuerzeit nie zurück, Wache gedrosselt · 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -301,6 +301,11 @@ def bereit_und_warten(lauf, halten, extra=None):
             naechst = time.time() + 0.5
             try:
                 if halten() is False:
+                    if ergebnis["fertig"] and ergebnis["feuer"] is not None:
+                        # Feuerzeit kam WÄHREND halten() (Prüfung 21.10.2026): nach gelesener Feuerzeit kein Zurück — sonst drückte der
+                        # Slave allein und bliebe einseitig offen
+                        lauf.log("Polar: halten() meldete Verlust, aber die Feuerzeit ist schon da — kein Abbruch, drücken wie gehabt")
+                        break
                     railway(lauf, "POST", "/polar/melden", {"lauf_id": lauf.lauf_id, "seite": lauf.seite, "ereignis": "abbruch", "daten": {"grund": "vorbereitung_verloren"}})
                     stop.set()
                     lauf.log("Polar: Vorbereitung verloren (Hover/Fenster) — Abbruch vor dem Druck")
@@ -1168,7 +1173,11 @@ def master_fill_beweis(lauf, s, opts, plan, root, menge0, vorher_m):
     return b
 
 
-STOERER_TAKT_S = 2.0          # Bereit-Halten/Wache: höchstens alle 2 s ein Blick nach fremden Dialogen
+STOERER_TAKT_S = 2.0          # Bereit-Halten: höchstens alle 2 s ein Blick (OHNE Klick) nach fremden Dialogen
+STOERER_WACHE_S = 5.0         # Wache: höchstens alle 5 s eine Räumung, und nur bei einem NEUEN Dialog-Titel
+# Zusatz-Tabu NUR im Polar-Aufruf (Prüfung 21.10.2026, Orbit unverändert): Dialoge mit diesen Wörtern betreffen Verbindung/Login des
+# Brokers — nie über den beliebig-Weg wegklicken
+POLAR_FREMD_TABU_RX = re.compile(r"sign ?in|anmeld|broker|reconnect|connection|verbindung", re.I)
 
 
 def stoerer_weg(lauf, s, opts, wo):
@@ -1187,6 +1196,10 @@ def stoerer_weg(lauf, s, opts, wo):
         st = s.stand(opts)
         for _ in range(2):
             if not (isinstance(st, dict) and st.get("popups")):
+                break
+            worte = " ".join(f"{p.get('titel') or ''} {p.get('text') or ''}" for p in st["popups"] if isinstance(p, dict))
+            if POLAR_FREMD_TABU_RX.search(worte):
+                lauf.log(f"Störer-Räumung ({wo}): Dialog mit Verbindungs-/Login-Wort — bleibt stehen ({worte.strip()[:60]})")
                 break
             k = int(s._werbung_dialog_weg(beliebig=True) or 0)
             if not k:
@@ -1267,18 +1280,19 @@ def master_x_parken(lauf, s, opts, root, plan):
     return park
 
 
-def master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen):
+def master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen, pops_vor=None):
     """VOR-KLICK-LESUNG (Prüfer S2 über den Master, 20.10.2026): unmittelbar vor dem ×-Klick lesend prüfen, dass die eigene Position noch
     offen ist und das geparkte × zu ihr gehört. Reader flach → 'schon_zu' (nicht klicken). Park-Platz Tabelle: die Zeile muss Wurzel,
     Richtung und Menge des Plans zeigen und der Close-Knopf noch dasselbe Rechteck haben, sonst neu suchen. Chart: das Chart-× muss noch
     an derselben Stelle (± 3 px) im DOM stehen, sonst neu suchen. -> (park | None, grund)"""
     if reader_flach(ob._tv_http("/positions", timeout=0.3), ext, root, gesehen) == "flach":
         return None, "schon_zu"
-    try:
-        if (s.stand(opts) or {}).get("popups"):
+    # kein voller stand() beim Signal (Prüfung 21.10.2026): die Dialoge aus dem letzten Wache-Blick (≤ 1,5 s alt) — nur dann räumen
+    if pops_vor:
+        try:
             stoerer_weg(lauf, s, opts, "vor dem Close-Klick")
-    except Exception:
-        pass
+        except Exception:
+            pass
     if not park:
         return None, "kein_park"
     try:
@@ -1307,12 +1321,12 @@ def master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen):
         return None, f"lesung_{type(e).__name__}"
 
 
-def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
+def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen, pops_vor=None):
     """Signal vom Slave: Vor-Klick-Lesung (< 50 ms Reader) → EIN Klick auf das geparkte × → Beweis Reader flach (50 ms) ≤ 2 s (Tabelle als
     zweiter Blick); Rückfrage-Dialog nur über [data-name=submit-button] mit Close/Schließen; sonst Rückfall Close-Knopf der Tabelle
     (tvclose-Regel). -> (zu_ms, quelle) | (None, grund)"""
     t0 = time.time()
-    park, grund = master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen)
+    park, grund = master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen, pops_vor)
     lauf.log(f"Polar: Vor-Klick-Lesung {int((time.time() - t0) * 1000)} ms → {grund}")
     if grund == "schon_zu":
         lauf.phase("zu_bestaetigt", zu_quelle="schon_zu")
@@ -1400,6 +1414,7 @@ def master_wache(lauf, s, opts, ext, root, plan, park=None):
     flach_seit = None
     ende_max = time.time() + 6 * 3600
     lauf.phase("wache", park=park)
+    letzte = {"popups": [], "at": 0.0, "titel": (), "raeumen_ab": 0.0}   # letzter CDP-Blick der Wache (für den Close-Klick ohne vollen Blick)
     signal = {"da": False, "ende": False, "status": None, "antwort": None, "signal_ms": None}
     stop = threading.Event()
     threading.Thread(target=_warte_signal, args=(lauf, "master", signal, stop), daemon=True).start()
@@ -1408,7 +1423,8 @@ def master_wache(lauf, s, opts, ext, root, plan, park=None):
             if signal["da"]:
                 a = signal["antwort"] or {}
                 lauf.log(f"Polar: Signal — Slave zu ({a.get('slave_zu_ms')}, Status {a.get('status')}) → Master schließt per ×")
-                zu_ms, quelle = master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen)
+                pops_vor = letzte["popups"] if time.time() - letzte["at"] <= 1.5 else []
+                zu_ms, quelle = master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen, pops_vor)
                 if zu_ms:
                     melden(lauf, "zu", {"quelle": quelle, "zu_ms": zu_ms, "signal_ms": signal["signal_ms"]})
                     lauf.phase("zu_bestaetigt", zu_ms=zu_ms, zu_quelle=quelle)
@@ -1434,9 +1450,20 @@ def master_wache(lauf, s, opts, ext, root, plan, park=None):
                 naechst_cdp = time.time() + 1.0
                 try:
                     st = s.stand(opts)
-                    if st.get("popups"):
-                        _n, st_w = stoerer_weg(lauf, s, opts, "in der Wache")       # ein Störer darf den Close-Klick nie verdecken
+                    pops = [p for p in (st.get("popups") or []) if isinstance(p, dict)]
+                    letzte.update(popups=pops, at=time.time())
+                    titel = tuple(sorted(str(p.get("titel") or p.get("text") or "")[:60] for p in pops))
+                    # Räumung höchstens alle 5 s und nur bei einem NEUEN Dialog (Prüfung 21.10.2026: ein stehen gebliebener Tabu-Dialog wurde
+                    # jede Sekunde neu „geräumt" und verzögerte die Signalprüfung); danach die Maus zurück aufs Park-×
+                    if pops and titel != letzte.get("titel") and time.time() >= letzte.get("raeumen_ab", 0):
+                        letzte["titel"], letzte["raeumen_ab"] = titel, time.time() + STOERER_WACHE_S
+                        n_w, st_w = stoerer_weg(lauf, s, opts, "in der Wache")
                         st = st_w if isinstance(st_w, dict) else st
+                        letzte.update(popups=[p for p in ((st or {}).get("popups") or []) if isinstance(p, dict)], at=time.time())
+                        if n_w and park and park.get("rect"):
+                            s.hin(park["rect"], "Schließen-× (neu geparkt nach Störer-Räumung)")
+                    elif not pops:
+                        letzte["titel"] = ()
                     zeilen = ob.k3_zeilen(st.get("positionen"), root)
                     menge = ob.cdp_zeilen_menge(zeilen, plan["richtung"])
                     if menge > 0:
@@ -1531,6 +1558,8 @@ def lauf_master(cmd):
         if not ok:
             raise RuntimeError(f"Ticket: {msg}")
         ob._cdp_positions_reiter_sichern(s, lauf.trail)
+        # Störer weg VOR Rücklesung und Hover-Beweis (Prüfung 21.10.2026): danach wird bis zur Feuerzeit nichts mehr weggeklickt
+        stoerer_weg(lauf, s, opts, "vor dem Senden-Knopf")
         # K4-Prüfungen aus EINEM frischen Blick (wie der alte Puls), dann Maus auf den Knopf + Hover beweisen
         st = s.stand(opts)
         rl_ok, rl_text, rl_fehler = ob.cdp_ticket_ruecklesung(st, plan)
@@ -1544,12 +1573,6 @@ def lauf_master(cmd):
             raise RuntimeError(f"Knopf zeigt '{kk.get('text')}', verlangt '{ob.k3_knopf_soll(plan['richtung'], plan['menge'], sym_k)}'")
         if kk.get("disabled") or ob.cdp_klickpunkt(ob.cdp_rect(kk)) is None:
             raise RuntimeError("Senden-Knopf gesperrt oder ohne Rechteck")
-        if st.get("popups"):
-            _n, st_w = stoerer_weg(lauf, s, opts, "vor dem Senden-Knopf")          # wie Orbit K4: erst weg, frisch lesen, dann urteilen
-            if isinstance(st_w, dict):
-                st = st_w
-                kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
-                ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         if st.get("popups"):
             raise RuntimeError(f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]})")
         if not ob.cdp_konto_passt(str(ko.get("aktiv") or ""), ext):
@@ -1569,20 +1592,15 @@ def lauf_master(cmd):
         def halten():
             if not punkt:
                 return False
-            # STÖRER BIS ZUR FEUERZEIT (21.10.2026): ein Dialog, der beim Warten aufgeht, läge über dem Senden-Knopf — höchstens alle 2 s
-            # schauen; nach einem Wegklick Hover neu beweisen, sonst Abbruch vor dem Druck (nichts gesendet)
+            # STÖRER BIS ZUR FEUERZEIT (Prüfung 21.10.2026): NUR schauen, nie wegklicken — ein Wegklick kostet Sekunden und verschiebt
+            # den Hover. Ein Dialog über der Seite VOR der Feuerzeit = sauberer Abbruch (nichts gesendet); ist die Feuerzeit schon da,
+            # gilt bereit_und_warten: nie zurück, drücken wie gehabt.
             if time.time() >= blick["naechst"]:
                 blick["naechst"] = time.time() + STOERER_TAKT_S
-                st_h = s.stand(opts)
-                if st_h.get("popups"):
-                    n_h, st_h2 = stoerer_weg(lauf, s, opts, "beim Bereit-Halten")
-                    if (st_h2 or {}).get("popups"):
-                        lauf.log("Bereit-Halten: Dialog über dem Senden-Knopf bleibt — Abbruch vor dem Druck")
-                        return False
-                    kk2 = (st_h2 or {}).get("kauf_knopf") if isinstance((st_h2 or {}).get("kauf_knopf"), dict) else {}
-                    if n_h and not (ob.cdp_rect(kk2) and s.hin(ob.cdp_rect(kk2), "SENDEN-Knopf (nach Störer-Räumung)")):
-                        lauf.log("Bereit-Halten: Hover nach der Störer-Räumung nicht bewiesen — Abbruch vor dem Druck")
-                        return False
+                pops = (s.stand(opts) or {}).get("popups")
+                if pops:
+                    lauf.log(f"Bereit-Halten: Dialog über der Seite ({[p.get('titel') or p.get('text') for p in pops if isinstance(p, dict)][:2]}) — Abbruch vor dem Druck")
+                    return False
             if ob._cursor_pos() != tuple(punkt):
                 ob._maus_fahren(*punkt, schritte=3)
             return True

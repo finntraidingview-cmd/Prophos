@@ -405,14 +405,27 @@ def main():
     check("s.werbung_weg(zwang=True)" in sw_ and "s._werbung_dialog_weg(beliebig=True)" in sw_ and "Esc" in sw_ and ".klick(" not in sw_ and "_win_klick" not in sw_.split('"""')[2],
           "stoerer_weg ruft nur Orbits werbung_weg(zwang) + _werbung_dialog_weg(beliebig) — kein eigener Klick, kein Esc")
     lmk = srcK[srcK.index("def lauf_master(cmd):"):srcK.index("def lauf_slave(cmd):")]
-    for wo in ("vor dem Ticket", "nach gescheitertem Ticket", "vor dem Senden-Knopf", "beim Bereit-Halten", "vor dem Parken"):
+    for wo in ("vor dem Ticket", "nach gescheitertem Ticket", "vor dem Senden-Knopf", "vor dem Parken"):
         check(f'stoerer_weg(lauf, s, opts, "{wo}")' in lmk, f"Störer-Räumung {wo}")
     check(lmk.index('"vor dem Ticket"') < lmk.index("ob._cdp_ticket_fuellen(") and "ob._cdp_tabs_spur(e, lauf.trail)" in lmk, "vor dem Ticket geräumt; Fehlerpfad mit Orbits Tabs-Spur")
-    check(lmk.index('"beim Bereit-Halten"') < lmk.index("bereit_und_warten(lauf, halten") and "Abbruch vor dem Druck" in lmk[lmk.index("def halten():"):lmk.index("bereit_und_warten(lauf, halten")],
-          "Bereit-Halten: Dialog über dem Knopf → räumen, Hover neu beweisen, sonst Abbruch vor dem Druck")
+    hk = lmk[lmk.index("def halten():"):lmk.index("bereit_und_warten(lauf, halten")]
+    check("stoerer_weg(" not in hk and ".klick(" not in hk and "s.hin(" not in hk and "Abbruch vor dem Druck" in hk,
+          "Bereit-Halten: nur schauen, NIE wegklicken/neu hovern; Dialog → Abbruch vor dem Druck")
+    check(lmk.index('stoerer_weg(lauf, s, opts, "vor dem Senden-Knopf")') < lmk.index("ob.cdp_ticket_ruecklesung(st, plan)") < lmk.index('s.hin(ob.cdp_rect(kk), "SENDEN-Knopf (Polar scharf)")'),
+          "Räumung VOR Rücklesung und Hover-Beweis, danach keine mehr")
+    bw = srcK[srcK.index("def bereit_und_warten("):srcK.index("def melden(")]
+    check(bw.index('if ergebnis["fertig"] and ergebnis["feuer"] is not None:') < bw.index('"grund": "vorbereitung_verloren"'),
+          "nach gelesener Feuerzeit meldet halten()=False nie abbruch (Slave bliebe sonst allein)")
     vk = srcK[srcK.index("def master_vor_klick("):srcK.index("def master_x_klicken(")]
     mw2 = srcK[srcK.index("def master_wache("):srcK.index("def lauf_master(")]
-    check('stoerer_weg(lauf, s, opts, "vor dem Close-Klick")' in vk and 'stoerer_weg(lauf, s, opts, "in der Wache")' in mw2, "Wache + vor dem Close-Klick: Störer weg")
+    check('stoerer_weg(lauf, s, opts, "vor dem Close-Klick")' in vk and "if pops_vor:" in vk and "s.stand(" not in vk[:vk.index("if not park:")],
+          "vor dem Close-Klick: kein voller stand(), nur Dialoge aus dem letzten Wache-Blick räumen")
+    check('stoerer_weg(lauf, s, opts, "in der Wache")' in mw2 and 'titel != letzte.get("titel")' in mw2 and 'letzte["raeumen_ab"]' in mw2
+          and 's.hin(park["rect"]' in mw2 and pb.STOERER_WACHE_S == 5.0, "Wache: Räumung höchstens alle 5 s, nur neuer Titel, danach zurück aufs Park-×")
+    check(bool(pb.ob.CDP_DIALOG_FREMD_TABU_RX.search("Close position CME_MINI:MNQZ2026 · Long 1 @ 29,983.00")),
+          "„Close position“-Rückfrage trifft Orbits CDP_DIALOG_FREMD_TABU_RX → wird nie weggeräumt")
+    check(bool(pb.POLAR_FREMD_TABU_RX.search("Reconnect to broker")) and bool(pb.POLAR_FREMD_TABU_RX.search("Sign in")) and not pb.POLAR_FREMD_TABU_RX.search("Go ad-free. Everywhere"),
+          "Polar-Zusatz-Tabu: Sign in/Broker/Reconnect bleiben stehen, Werbung nicht")
     od2 = open(os.path.join(STAMM, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
     check("re.compile(r\"\\border|position|" in od2 or "position" in od2[od2.index("CDP_DIALOG_FREMD_TABU_RX ="):od2.index("CDP_DIALOG_FREMD_TABU_RX =") + 200],
           "Orbits Ausschluss trägt „position“ — die Close-position-Rückfrage wird nie weggeräumt")
