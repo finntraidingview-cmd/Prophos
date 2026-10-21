@@ -38,6 +38,10 @@ WARTE_MAX_S = 25             # wartende Verbindung höchstens 25 s, der Puls fra
 # noch einmal) → Lauf + Auftrag an die Slave-ID. Hand-Polar bleibt: „Läuft" am Plan in Trades. Gleicher Schalter im Tab (prophos.html
 # POLAR_AUTO). Zurück auf False = /polar/start antwortet wieder 409, der Tab startet nichts — Hand-Polar unverändert.
 POLAR_AUTO = True
+# PUFFER (Finn 21.10.2026: „Puffer fest 2,5 % vom jeweiligen Abstand, für SL und Airbag-TP, Feld im Popup weg"): EINE Konstante, nur hier.
+# Slave-SL = Abstand des Master-TP × (1 + 2,5 %), Slave-Airbag-TP = Abstand bis zum Master-Stopp/zur Liquidation × (1 − 2,5 %). Der Bot
+# bekommt den Wert über master.liq.puffer_pct, /polar/plan rechnet sl_pkt/tp_pkt daraus selbst (passt zu polar_pct 102,5).
+POLAR_PUFFER_PCT = 2.5
 ENDE = ("fertig", "abbruch", "fehler")
 _LAEUFE = {}
 _COND = threading.Condition()
@@ -396,9 +400,19 @@ def trades_belegt(rows, pid, jetzt):
 # Auf dem Slave müsste der Liquidationspreis vom Master automatisch erkannt werden und damit dann der TP und SL ausgestattet werden") ──────
 # Beim Start rechnet Railway die Liquidation des Master-Kontos mit DENSELBEN Helfern wie der Radar (liq_regel_felder: engere von liq_regeln
 # und Konto-Boden, Peak, Tagesstart, Kernwerte) als $-Abstand ab der Start-Balance. Der Slave macht daraus nach beiden Fills den Preis.
-def liq_vorgabe(start_bal, bal_quelle, liq_bal, liq_text, ppl, kt, sl_pkt, master_tp_pkt):
+def slave_pkt_aus_master(master_tp_pkt, master_sl_pkt, pct=POLAR_PUFFER_PCT):
+    """REIN RECHNEND (testbar): Plan-Abstände des Slaves aus denen des Masters mit dem festen Puffer → (sl_pkt, tp_pkt) | (None, None).
+    sl_pkt = Master-TP × (1 + pct), tp_pkt = Master-SL × (1 − pct). Gilt für den Plan (Notfall im F9 + Rückfall ohne Airbag)."""
+    tp, sl = _zahl(master_tp_pkt), _zahl(master_sl_pkt)
+    if not tp or not sl or tp <= 0 or sl <= 0:
+        return None, None
+    f = float(pct) / 100.0
+    return round(tp * (1 + f), 2), round(sl * (1 - f), 2)
+
+
+def liq_vorgabe(start_bal, bal_quelle, liq_bal, liq_text, ppl, kt, master_tp_pkt, pct=POLAR_PUFFER_PCT):
     """REIN RECHNEND (testbar): Liq-Vorgabe für den Slave → {ok, start_balance, liq_balance, abstand_usd, abstand_pkt, ppl, kontrakte,
-    puffer_pkt, master_tp_pkt, text} | {ok False, grund}. Puffer wie im Polar-Popup gespeichert: sl_pkt = master_tp_pkt + Puffer."""
+    puffer_pct, master_tp_pkt, text} | {ok False, grund}. Puffer = POLAR_PUFFER_PCT vom jeweiligen Abstand (Finn 21.10.2026)."""
     s, l, p, k = _zahl(start_bal), _zahl(liq_bal), _zahl(ppl), _zahl(kt)
     if s is None:
         return {"ok": False, "grund": "Start-Balance des Master-Kontos nicht frisch gelesen"}
@@ -409,15 +423,9 @@ def liq_vorgabe(start_bal, bal_quelle, liq_bal, liq_text, ppl, kt, sl_pkt, maste
     abstand = round(s - l, 2)
     if abstand <= 0:
         return {"ok": False, "grund": f"Balance {s:g} liegt nicht über der Liquidation {l:g}"}
-    sp, mt = _zahl(sl_pkt), _zahl(master_tp_pkt)
-    if sp is None or mt is None or sp < mt:
-        return {"ok": False, "grund": "Puffer nicht lesbar (sl_pkt/master_tp_pkt am Auftrag)"}
-    pkt = round(abstand / (p * k), 4)
-    puffer = round(sp - mt, 4)
-    if pkt <= puffer:
-        return {"ok": False, "grund": f"Liquidation nur {pkt:g} Pkt entfernt, Puffer {puffer:g} Pkt — kein Platz für den Airbag-TP"}
-    return {"ok": True, "start_balance": s, "balance_quelle": bal_quelle, "liq_balance": l, "abstand_usd": abstand, "abstand_pkt": pkt,
-            "ppl": p, "kontrakte": k, "puffer_pkt": puffer, "master_tp_pkt": mt, "text": liq_text}
+    return {"ok": True, "start_balance": s, "balance_quelle": bal_quelle, "liq_balance": l, "abstand_usd": abstand,
+            "abstand_pkt": round(abstand / (p * k), 4), "ppl": p, "kontrakte": k, "puffer_pct": float(pct),
+            "master_tp_pkt": _zahl(master_tp_pkt), "text": liq_text}
 
 
 def _master_liq(plan, auftrag):
@@ -438,7 +446,7 @@ def _master_liq(plan, auftrag):
                                   peak=A["liq_peak"](p, acc, start_bal, A["_liq_verlauf_laden"]([aid])), kw_firmen=A["_liq_kw_laden"]())
     except Exception as e:
         return {"ok": False, "grund": f"Liq nicht rechenbar: {type(e).__name__}: {str(e)[:100]}"}
-    return liq_vorgabe(start_bal, quelle, f.get("liq_regel_balance"), f.get("liq_regel_text"), ppl, kt, auftrag.get("sl_pkt"), auftrag.get("master_tp_pkt"))
+    return liq_vorgabe(start_bal, quelle, f.get("liq_regel_balance"), f.get("liq_regel_text"), ppl, kt, auftrag.get("master_tp_pkt"))
 
 
 def _vp_zeile(key, titel, ok, text, gruppe=None, seite=None):
@@ -680,6 +688,11 @@ def registrieren(app, ns):
         r = str(d.get("richtung") or "").lower()
         kt, lots = _zahl(d.get("kontrakte")), _zahl(d.get("lots"))
         sl_pkt, tp_pkt = _zahl(d.get("sl_pkt")), _zahl(d.get("tp_pkt"))
+        # Fester Puffer (Finn 21.10.2026, s. POLAR_PUFFER_PCT): mit Master-Abständen rechnet Railway die Slave-Punkte selbst — das
+        # Popup-Feld „Puffer Slave (Pkt)" fällt weg, ein alter Tab mit Pkt-Puffer kann nichts Abweichendes mehr speichern
+        sl_r, tp_r = slave_pkt_aus_master(d.get("master_tp_pkt"), d.get("master_sl_pkt"))
+        if sl_r and tp_r:
+            sl_pkt, tp_pkt = sl_r, tp_r
         if r not in ("buy", "sell") or not kt or kt <= 0 or not lots or lots <= 0 or not sl_pkt or not tp_pkt:
             return jsonify({"ok": False, "msg": "Richtung, Kontrakte, Lots und Level fehlen"}), 400
         if not _login_von_konto(s_acc):
@@ -691,7 +704,7 @@ def registrieren(app, ns):
                  "master_symbol": str(d.get("symbol") or "").strip() or None, "master_contracts": kt, "master_risk": _zahl(d.get("master_risk")),
                  "slave_risk": _zahl(d.get("slave_risk")), "multiplier": round(lots / kt, 4),
                  "master_tp": _zahl(d.get("master_tp")), "master_sl": _zahl(d.get("master_sl")),
-                 "polar_slave_user_id": su, "polar_pct": _zahl(d.get("polar_pct")) or 102.5,
+                 "polar_slave_user_id": su, "polar_pct": 100 + POLAR_PUFFER_PCT,
                  # Dubai-Tag statt UTC (21.10.2026, Finn fand seine zwei Polar-Pläne von 03:20 Dubai nicht: planned_for stand auf dem
                  # UTC-Vortag 20.10. — Karte am falschen Tag, und der Tages-Reset im Nachtlauf räumt planned_for < Zieltag ab)
                  "planned_for": (A["_kapitel_heute_iso"]() if "_kapitel_heute_iso" in A else datetime.now(timezone.utc).date().isoformat()),
@@ -846,8 +859,11 @@ def registrieren(app, ns):
             nein = [z for z in zeilen if z["ok"] is False]
             return jsonify({"ok": False, "code": "vorpruefung", "msg": "; ".join(f"{z['titel']}: {z['text']}" for z in nein)[:400], "zeilen": zeilen}), 409
         s_richtung = "sell" if plan.get("richtung") == "buy" else "buy"
+        # Fester Puffer auch für Pläne, die noch mit dem alten Pkt-Puffer gespeichert sind (Finn 21.10.2026, s. POLAR_PUFFER_PCT): aus den
+        # Master-Abständen neu, sonst die gespeicherten Werte
+        s_sl, s_tp = slave_pkt_aus_master(auftrag.get("master_tp_pkt"), auftrag.get("master_sl_pkt"))
         slave_auftrag = {"account_id": s_acc["id"], "login": _login_von_konto(s_acc), "firm": s_acc.get("firm"), "richtung": s_richtung,
-                         "volumen": auftrag.get("lots"), "sl_pkt": auftrag.get("sl_pkt"), "tp_pkt": auftrag.get("tp_pkt")}
+                         "volumen": auftrag.get("lots"), "sl_pkt": s_sl or auftrag.get("sl_pkt"), "tp_pkt": s_tp or auftrag.get("tp_pkt")}
         master_auftrag = {"richtung": plan.get("richtung"), "kontrakte": auftrag.get("kontrakte") or plan.get("master_contracts"),
                           "symbol": plan.get("master_symbol"), "sl_pkt": auftrag.get("master_sl_pkt"), "tp_pkt": auftrag.get("master_tp_pkt"),
                           "tp_usd": plan.get("master_tp"), "sl_usd": plan.get("master_sl")}

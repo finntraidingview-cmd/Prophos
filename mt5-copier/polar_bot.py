@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.6"   # 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.7"   # 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -337,23 +337,24 @@ def level_vom_fill(richtung, fill, sl_pkt, tp_pkt, digits=2, tick=None):
 # Der Master hat meist KEINEN Stop-Loss, sein Stopp ist die Liquidation. Railway rechnet beim Start ihren $-Abstand wie der Radar
 # (polar_app.liq_vorgabe → master.liq). Nach beiden Fills überträgt der Slave die Abstände in Punkten auf den EIGENEN Fill (NQ/MNQ ↔ NAS100
 # = Indexpunkte):
-#   Slave-TP (Airbag)  = dort, wo der Master liquidiert (bzw. sein echter SL, falls näher), Puffer davor
-#   Slave-SL           = hinter dem ECHTEN Master-TP (aus TradingViews Meldung), Puffer dahinter
+#   Slave-TP (Airbag)  = Abstand bis zur Master-Liquidation (bzw. seinem echten SL, falls näher) × (1 − Puffer)
+#   Slave-SL           = Abstand bis zum ECHTEN Master-TP (aus TradingViews Meldung) × (1 + Puffer)
+# Puffer = polar_app.POLAR_PUFFER_PCT (2,5 %, Finn 21.10.2026), kommt mit master.liq.puffer_pct — keine zweite Konstante hier.
 AIRBAG_WARTE_S = 20.0         # so lange wartet der Slave nach dem eigenen Fill auf Master-Fill + Master-Level (Notfall-SL/TP schützen solange)
 
 
 def airbag_level(s_richtung, s_fill, m_fill, m_tp, m_sl, liq, digits=2):
-    """REIN RECHNEND (testbar): exakte Slave-Level aus beiden Fills. liq = master.liq von Railway ({ok, abstand_pkt, puffer_pkt, master_tp_pkt}).
+    """REIN RECHNEND (testbar): exakte Slave-Level aus beiden Fills. liq = master.liq von Railway ({ok, abstand_pkt, puffer_pct, master_tp_pkt}).
     m_tp/m_sl = echte Master-Level aus TradingViews Meldungen (None = keins; ohne TP gilt Fill ± master_tp_pkt).
-    -> {ok, sl, tp, master_liq, master_stop, master_stop_art, master_tp, master_tp_quelle, abstand_tp_pkt, abstand_stop_pkt, puffer_pkt} | {ok False, grund}"""
+    -> {ok, sl, tp, master_liq, master_stop, master_stop_art, master_tp, master_tp_quelle, abstand_tp_pkt, abstand_stop_pkt, puffer_pct} | {ok False, grund}"""
     if not isinstance(liq, dict) or not liq.get("ok"):
         return {"ok": False, "grund": "Liq des Masters fehlt: " + str((liq or {}).get("grund") or "kein master.liq")}
     try:
         sf, mf = float(s_fill), float(m_fill)
-        liq_pkt, puffer = float(liq["abstand_pkt"]), float(liq["puffer_pkt"])
+        liq_pkt, pct = float(liq["abstand_pkt"]), float(liq["puffer_pct"])
     except (TypeError, ValueError, KeyError):
         return {"ok": False, "grund": "Fill/Liq nicht lesbar"}
-    if str(s_richtung).lower() not in ("buy", "sell") or sf <= 0 or mf <= 0 or liq_pkt <= 0 or puffer < 0:
+    if str(s_richtung).lower() not in ("buy", "sell") or sf <= 0 or mf <= 0 or liq_pkt <= 0 or not (0 <= pct < 50):
         return {"ok": False, "grund": "Fill/Liq ungültig"}
     m_kauf = str(s_richtung).lower() == "sell"            # Master steht immer gegen den Slave
     vz = 1.0 if m_kauf else -1.0                          # + = Gewinnseite des Masters
@@ -369,13 +370,13 @@ def airbag_level(s_richtung, s_fill, m_fill, m_tp, m_sl, liq, digits=2):
             return {"ok": False, "grund": "Master-TP weder gemeldet noch im Auftrag"}
         tp_m, tp_q = mf + vz * mtp, "plan"
     d_tp, d_stop = abs(tp_m - mf), abs(stop - mf)
-    tp_pkt, sl_pkt = d_stop - puffer, d_tp + puffer
+    tp_pkt, sl_pkt = d_stop * (1 - pct / 100.0), d_tp * (1 + pct / 100.0)
     if tp_pkt <= 0:
-        return {"ok": False, "grund": f"Master-Stopp nur {d_stop:g} Pkt entfernt, Puffer {puffer:g} — kein Airbag-TP"}
+        return {"ok": False, "grund": f"Master-Stopp {d_stop:g} Pkt — kein Airbag-TP"}
     sl, tp = level_vom_fill(s_richtung, sf, sl_pkt, tp_pkt, digits)
     return {"ok": True, "sl": sl, "tp": tp, "master_fill": mf, "master_liq": round(m_liq, 2), "master_stop": round(stop, 2), "master_stop_art": art,
             "master_tp": round(tp_m, 2), "master_tp_quelle": tp_q, "abstand_tp_pkt": round(d_tp, 2), "abstand_stop_pkt": round(d_stop, 2),
-            "puffer_pkt": puffer, "liq_balance": liq.get("liq_balance"), "slave_sl_pkt": round(sl_pkt, 2), "slave_tp_pkt": round(tp_pkt, 2)}
+            "puffer_pct": pct, "liq_balance": liq.get("liq_balance"), "slave_sl_pkt": round(sl_pkt, 2), "slave_tp_pkt": round(tp_pkt, 2)}
 
 
 def airbag_holen(lauf, s_richtung, s_fill, digits, warte_s=AIRBAG_WARTE_S):
@@ -1447,6 +1448,9 @@ def lauf_slave(cmd):
         ref = lese.get("ref_ask") if kauf else lese.get("ref_bid")
         if not ref or fmap.get("sl") is None or fmap.get("tp") is None:
             raise RuntimeError("Notfall-SL/TP nicht setzbar (" + ("kein Kurs" if not ref else "SL-/TP-Feld im F9-Dialog nicht gefunden") + ") — kein Druck ohne Schutz")
+        # Notfall bewusst 2 Pkt WEITER außen als der Plan (21.10.2026, fester Puffer 2,5 %): sl_pkt/tp_pkt tragen den Puffer schon (Railway),
+        # das F9 steht aber vor dem Fill am Referenzkurs — der Abstand fängt den Kursweg bis zum Fill ab, und das exakte Ändern zieht immer
+        # nach innen statt nach außen. Abschalten darf ihn nichts (Pflicht seit 0.3.2).
         sl_g, tp_g = level_vom_fill(richtung, ref, sl_pkt + 2.0, tp_pkt + 2.0, digits)
         if not (ob._feld_tippen(fmap["sl"], ob.fmt_preis(sl_g, digits), "F9-SL", lauf.trail, rahmen=dlg)
                 and ob._feld_tippen(fmap["tp"], ob.fmt_preis(tp_g, digits), "F9-TP", lauf.trail, rahmen=dlg)):
@@ -1520,7 +1524,7 @@ def lauf_slave(cmd):
             sl, tp = ab["sl"], ab["tp"]
             lauf.log(f"Airbag: Master-Fill {ab['master_fill']:g}, TP {ab['master_tp']:g} ({ab['master_tp_quelle']}), Stopp {ab['master_stop']:g} "
                      f"({ab['master_stop_art']}, Liq {ab['master_liq']:g}) → Slave SL {ob.fmt_preis(sl, digits)} (+{ab['slave_sl_pkt']:g} Pkt) / "
-                     f"TP {ob.fmt_preis(tp, digits)} (−{ab['slave_tp_pkt']:g} Pkt), Puffer {ab['puffer_pkt']:g}")
+                     f"TP {ob.fmt_preis(tp, digits)} (−{ab['slave_tp_pkt']:g} Pkt), Puffer {ab['puffer_pct']:g} %")
         else:
             sl, tp = level_vom_fill(richtung, fill, sl_pkt, tp_pkt, digits)
             lauf.log(f"Airbag nicht rechenbar ({ab.get('grund')}) — Plan-Abstände vom eigenen Fill: SL {ob.fmt_preis(sl, digits)} / TP {ob.fmt_preis(tp, digits)}")
@@ -1537,7 +1541,7 @@ def lauf_slave(cmd):
                     ob._warte(0.15, 0.15)
         res.update(sl=sl, tp=tp, level_ok=bestaetigt)
         # level-Felder (21.10.2026, Live-Ablauf von Slave 2): sl/tp = gesetzte Soll-Werte, ok = per API bestätigt, quelle airbag|plan,
-        # notfall = F9-Level; mit Airbag dazu master_fill/master_tp/master_liq/master_stop(_art)/puffer_pkt (s. airbag_level), sonst grund
+        # notfall = F9-Level; mit Airbag dazu master_fill/master_tp/master_liq/master_stop(_art)/puffer_pct (s. airbag_level), sonst grund
         lv = {"sl": sl, "tp": tp, "ok": bestaetigt, "quelle": "airbag" if ab.get("ok") else "plan", "notfall": {"sl": sl_g, "tp": tp_g}}
         lv.update({k: v for k, v in ab.items() if k not in ("ok", "sl", "tp")} if ab.get("ok") else {"grund": ab.get("grund")})
         res["airbag"] = lv
