@@ -7407,7 +7407,9 @@ def test_tsx_k3a():
     chk("hover_pause = TSX_HOVER_PAUSE if js_datei == \"augen_tsx.js\"" in _i.getsource(ob._AugenSitzung.__init__),
         "Hover-Pause nur für die TopstepX-Sitzung (augen_tsx.js)")
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
-    chk("var VERSION = 'tsx-0.6.2'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
+    # Version 0.6.2 → 0.6.3 nachgezogen (S4 21.10.2026): 4af8c460 (19.10.) hob augen_tsx.js für das Symbol-X der Login-Meldung auf
+    # tsx-0.6.3, ohne diese Prüfung mitzunehmen — seitdem rot, obwohl Contract-/Ticket-Lesung unverändert und weiter klickfrei ist.
+    chk("var VERSION = 'tsx-0.6.3'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
         and "order-card-click-button-buy" in js and "k3: true" in js
         and "filter(function (z) { return RX_CODE.test(z); })" in js    # DOM-Test 01.10.2026: vor dem Code steht „■" — nie nur Zeile 1
         and ".click(" not in js.split("function contractLesen")[1].split("function ticketLesen")[0],
@@ -7863,7 +7865,8 @@ def test_tsx_k4():
         "Hand: Doppelklick nur als Zusatz mit Ziel-Beweis, Standard unverändert ein Klick")
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
     neu_js = js.split("function reiterLesen()")[1].split("function positionAus")[0]
-    chk("var VERSION = 'tsx-0.6.2'" in js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
+    # tsx-0.6.3 seit 4af8c460 (19.10.2026, Symbol-X der Login-Meldung) — Reiter/Positions-Tabelle unberührt (S4 21.10.2026)
+    chk("var VERSION = 'tsx-0.6.3'" in js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
         and "o.ticket.k4 = true" in js and ".click(" not in neu_js and "dispatchEvent" not in neu_js and ".focus(" not in neu_js
         and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
     chk("zuletzt" in js and "15000" in js and "e.zuletzt = jetzt; m.erst_gesehen = e.erst;" in js, "augen_tsx.js 0.6.1: Meldungs-Merker vergisst nach 15 s (Prüfer 06.10.2026)")
