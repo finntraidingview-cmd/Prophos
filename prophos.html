@@ -47093,6 +47093,21 @@
         }
         toast(t, 'end'); return
       }
+      // EIN FINALER TRADEIFY JE ID (Finn 21.10.2026 ~23:45 Dubai: „bei den Tradeify finalen Trades immer nur 1 gleichzeitig pro ID … nicht
+      // dass dann bei Aurel alle 3 gleichzeitig starten und alle blowen"): hart ist der Claim-Trigger (sql/2026-10-21_tradeify_ein_finaler_je_id.sql);
+      // hier dieselbe Prüfung für Starts ohne Claim (Karten-Klick, Neu starten, Fern-Start vom Mac). Weich wie die Richtungs-RPC: Fehler/Funktion
+      // fehlt = frei, die DB-Sperre bleibt die Linie.
+      const ef = await efFrei(plan)
+      if(ef && ef.frei === false){
+        const t = `„${plan.masterName || 'Plan'}": ${ef.grund || 'ein anderer finaler Trade läuft'} — nicht gestartet.`
+        if(fern) return fern.melde({ ok:false, msg: t })
+        if(opts && opts.vonStartUm){
+          const um = await efVerschieben(plan, ef)
+          if(imPopup) pfEnde(false, t + (um ? ` Neuer Versuch ${um}.` : ''))
+          return
+        }
+        toast('⛔ ' + t, 'end'); return
+      }
     }
     // DUPLIKUM-CHECK ZUERST (22.09.2026, Finn: „beim Starten: erst Duplikum, dann Verbindung
     // zum PC, dann die Order — alles in einem Stück"). Nicht im Signal-Lauf am PC: dort hat
@@ -50751,9 +50766,13 @@
    * der Plan geplant und ungestartet ist und der letzte Versuch höchstens 30 min her ist. → { kurz, voll, versuche, naechster } | null */
   function tpStartSperre(p){
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
-    if(!s || s.art !== 'richtung' || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    if(!s || !['richtung', 'ein_finaler'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
+    // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist
+    if(s.art === 'ein_finaler') return { kurz: `⛔ Wartet: nur ein finaler Trade je ID${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
+      voll: `Wartet: ${text}. Startet von selbst, sobald der andere finale Trade zu und gelesen ist; bis dahin versucht der PC-Tab es alle 10–20 min neu.`,
+      versuche: Number(s.versuche) || 1, at: s.at }
     return { kurz: `⛔ Order ging nicht durch wegen Richtungsschutz${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
       voll: `Order ging nicht durch wegen Richtungsschutz: ${text}. Abhaken/Nachlesen des Gegen-Trades löst die Sperre; bis dahin versucht der PC-Tab es alle ~10 min neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }
@@ -50809,6 +50828,34 @@
     }
     try{ renderTradePlans() }catch(_){}
     return aufgeben ? 'aufgegeben' : 'verschoben'
+  }
+  /* EIN FINALER TRADEIFY JE ID (21.10.2026, s. tpOrbitStartenKern): RPC prophos_ein_finaler_frei — Final-Erkennung, Firmen-Schalter und
+   * „läuft" stehen nur in der DB. → { frei, grund, plan } | null (nicht prüfbar = frei) */
+  async function efFrei(plan){
+    try{
+      const { data, error } = await supabase.rpc('prophos_ein_finaler_frei', { p_plan: plan.id })
+      if(error){ console.warn('[ein-finaler] nicht prüfbar', error.message || error); return null }
+      return data && typeof data === 'object' ? data : null
+    }catch(e){ console.warn('[ein-finaler] nicht prüfbar', (e && e.message) || e); return null }
+  }
+  // Start zur Startzeit gesperrt: Claim zurück (nur solange nichts gesendet ist), start_um + 10–20 min gewürfelt (Jitter-Regel), Grund an den
+  // Plan (start_sperre art 'ein_finaler', wie der Trigger) und ins Protokoll. → neue Startzeit als Text | ''
+  async function efVerschieben(plan, ef){
+    const neuMs = Date.now() + (10 + Math.random() * 10) * 60000
+    const { data, error } = await supabase.from('trade_plans').update({ start_um: new Date(neuMs).toISOString(), start_um_gestartet_at: null })
+      .eq('id', plan.id).eq('status', 'planned').is('orbit_gesendet_at', null).select('*')
+    if(error || !data || !data.length){ console.warn('[ein-finaler] Plan nicht mehr verschiebbar', plan.id, error); return '' }
+    const neu = rkPlanErsetzen(data[0]), alt = plan.mt5Baseline && plan.mt5Baseline.start_sperre
+    const versuche = ((alt && alt.art === 'ein_finaler' && Number(alt.versuche)) || 0) + 1
+    const text = `${plan.masterFirm || 'Tradeify'}: ${ef.grund || 'ein anderer finaler Trade läuft'}`
+    try{ await baselinePatch(plan.id, { start_sperre: { art: 'ein_finaler', text, at: new Date().toISOString(), naechster: neu.startUm, plan: ef.plan || null, versuche } }, 'planned') }
+    catch(e){ console.warn('[ein-finaler] Grund', (e && e.message) || e) }
+    rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: plan.richtung, von_start: plan.startUm, nach_start: neu.startUm,
+      grund: `[ein finaler Tradeify je ID] ${text} — Start verschoben (PC-Tab, Versuch ${versuche})` })
+    const um = tpStartUmText(neu.startUm)
+    if(typeof atToast === 'function') atToast(`⛔ „${plan.masterName || 'Plan'}" wartet: ${ef.grund || 'ein anderer finaler Trade läuft'}. Neuer Versuch ${um}.`, 'end')
+    try{ renderTradePlans() }catch(_){}
+    return um
   }
   const RK_VERSCHIEBEN_MAX = 3   // Auto-Plan: so oft 10–20 min warten, bevor gedreht wird (09.10.2026)
   /* (2) frische Prüfung kurz vor dem Start (vor Slave-Vorprüfung und Claim). → null (frei) | { plan } (gedreht, frische Zeile) | 'verschoben' */
