@@ -15513,14 +15513,59 @@ def _admin_mail_ungelesen(uid):
         return None
 
 
+# MAIL-LESER (21.10.2026, Finn ~04:00 Dubai im Reiter Admin → Mail, Build .1670: „Ich bin ja Finn + Admin … Kann ich alle Mails nicht
+# sehen?" — Liste leer, oben „✗ Nur für Admins"). Ursache: das Gate war allein _admin_auth (Railway-Variable ADMIN_EMAILS); Finns Tages-
+# Login „Finn + Pascal" steht dort nicht → jedes GET /admin/mail 403 (Railway-HTTP-Logs ab 20.10. 21:49 UTC), obwohl 3.833 Mails von 7 IDs
+# in public.mails liegen. Ihn in ADMIN_EMAILS aufzunehmen hieße zugleich Rechnungen, Ausgleichen, Bot-Schalter — und in der Liq-Ansicht
+# kippte „Kunde" für diese ID (lq_kunde_flags, keine liq_personen-Zeile). Deshalb eine eigene, enge Freigabe NUR fürs Mail-Lesen: Tabelle
+# admin_mail_leser (sql/2026-10-21_admin_mail_leser.sql, nur Service-Key, keine E-Mail im Repo wie admin_zugang). Zusätzlich darf der
+# Login im Admin nicht eingeschränkt sein (admin_sicht_lesen → None) — ein Verwalter oder Gruppen-Mitglied sieht hier nie Mails.
+_admin_mail_leser_cache = {"bis": 0.0, "uids": None}
+
+
+def admin_mail_leser_uids():
+    """user_ids aus admin_mail_leser (frozenset), 60 s gemerkt. Tabelle fehlt (SQL nicht eingespielt) → leer. Andere Lesefehler werfen
+    (Aufrufer 502) — nie still freigeben."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _admin_mail_leser_cache["uids"] is not None and _admin_mail_leser_cache["bis"] > jetzt:
+            return _admin_mail_leser_cache["uids"]
+    try:
+        rows = sb_select("admin_mail_leser", {"select": "user_id"}) or []
+    except requests.exceptions.HTTPError as e:
+        if not admin_gruppen_tabelle_fehlt(e):
+            raise
+        rows = []
+    uids = frozenset(str(z.get("user_id")) for z in rows if isinstance(z, dict) and z.get("user_id"))
+    with _kurz_cache_lock:
+        _admin_mail_leser_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, uids=uids)
+    return uids
+
+
+def _admin_mail_auth():
+    """Gate von /admin/mail*: ADMIN_EMAILS (_admin_auth) ODER eingetragener Mail-Leser, der im Admin nicht eingeschränkt ist.
+    → None (frei) oder (response, status)."""
+    _, err = _admin_auth()
+    if err is None or err[1] != 403:
+        return err
+    uid = str(request.environ.get("prophos.admin_uid") or "")   # setzt _admin_auth vor dem 403
+    try:
+        frei = bool(uid) and uid in admin_mail_leser_uids() and admin_sicht_lesen(uid)[0] is None
+    except Exception:
+        return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
+    if not frei:
+        return jsonify({"ok": False, "msg": "Nur für Admins — dieser Login ist nicht für Admin → Mail freigegeben"}), 403
+    return None
+
+
 @app.route("/admin/mail", methods=["GET", "PATCH", "OPTIONS"])
 def admin_mail():
     """GET /admin/mail[?user_id=&limit=&vor=] → {ok, ids:[…], mails:[{id, user_id, von, betreff, datum, snippet, gelesen, anhaenge}], mehr}
     (neueste oben, alle sichtbaren IDs oder genau eine). PATCH {id} → eine Mail gelesen; PATCH {user_id, alle: true} → alle Mails dieser ID
-    gelesen. → {ok, n}. Nur ADMIN_EMAILS (_admin_auth)."""
+    gelesen. → {ok, n}. Nur ADMIN_EMAILS oder Mail-Leser (_admin_mail_auth)."""
     if request.method == "OPTIONS":
         return "", 200
-    _, err = _admin_auth()
+    err = _admin_mail_auth()
     if err:
         return err
     try:
@@ -15579,10 +15624,11 @@ def admin_mail():
 @app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])
 def admin_mail_eine(mid):
     """GET /admin/mail/<id> → {ok, mail:{id, user_id, von, an, betreff, datum, text, html, anhaenge, gelesen, labels}} — eine Mail zum Lesen
-    (das Frontend darf fremde Zeilen per RLS nicht lesen). Setzt NICHT gelesen (das macht PATCH, wie der Mail-Reiter nach dem Öffnen)."""
+    (das Frontend darf fremde Zeilen per RLS nicht lesen). Setzt NICHT gelesen (das macht PATCH, wie der Mail-Reiter nach dem Öffnen).
+    Gate wie /admin/mail (_admin_mail_auth)."""
     if request.method == "OPTIONS":
         return "", 200
-    _, err = _admin_auth()
+    err = _admin_mail_auth()
     if err:
         return err
     try:
