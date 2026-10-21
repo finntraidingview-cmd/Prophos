@@ -32029,7 +32029,7 @@
      * Trade-Balance, wdlBlowStand), damit die Zeile nach „Balance lesen" von selbst verschwindet, sobald das Ziel steht (Ziel-Wache taggt,
      * Konto → Review). Knöpfe (eigene Verdrahtung am #wdl-liste-Handler, seit 23:05 für eigene UND fremde Konten): „→ Planer" (rest_planer_at),
      * „Abhaken" (normaler Dialog, mklWdErledigtOeffnen) und „Balance lesen" (eigene: accBalanceLesen, fremde: tplBalanceFremd). Nur Zustand + Knopf. */
-    const rvhZeilen = (tr) => {
+    const rvhZeilen = (tr, allePersonen) => {
       const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
       const ich = String(currentUserId || ''), de = v => Math.round(Number(v)).toLocaleString('de-DE')
       const typW = x => (typeof typeLabel === 'function' && typeLabel(x)) || x
@@ -32043,7 +32043,7 @@
       }
       const out = []
       for(const { t } of je.values()){
-        if(wdl.person && wdlUid(t) !== wdl.person) continue
+        if(!allePersonen && wdl.person && wdlUid(t) !== wdl.person) continue
         const chip = wdlFehltChip(t); if(!chip) continue
         if(wdlRestPlaner(t).at) continue   // Rest zurück im Planer (20.10.2026): der Bot holt den Rest — raus aus der Station, Chip grau in der Zeile
         const kid = String(t.konto_id || ''), uid = wdlUid(t), eigen = uid === ich
@@ -32069,7 +32069,7 @@
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || 'Abhaken — der normale Dialog: Nichts ändern / Account geblowt / Phase bestanden → Nachfolger. Den Rest von Hand holen, hier als manuell nachtragen und den Nachfolger anlegen')}">Abhaken</button>`
           + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie über dem Ziel, taggt die Ziel-Wache das Konto und es wandert nach Review' : `Balance über den PC von ${escapeHtml(wer)} lesen lassen`}">Balance lesen</button>` : '')
         const zt = bstZeitVon(a && a.zielErreichtAt, t)   // Rest von Hand hat per Definition keinen Ziel-Tag → Trade-Ende
-        out.push({ firma: String(k.firma || ''), ts: zt.ts, html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
+        out.push({ pid, firma: String(k.firma || ''), ts: zt.ts, html: `<div class="wdl-z wdl-z-bst wdl-z-rvh" style="--wdl-id:${idFarbe(uid)}">`
           + `<span class="wdl-z-wer" title="${escapeHtml(String(k.name || konto))}"><span class="wdl-z-punkt"></span><b>${escapeHtml(wer)}</b><small>${escapeHtml(konto)}</small></span>`
           + `<span class="wdl-z-ri">${ueb ? `<span class="wdl-bst-phase type-${escapeHtml(typ)}" title="aktueller Kontotyp → nächster">${escapeHtml(ueb)}</span>` : ''}</span>`
           + zelle('mi', `${bal != null ? de(bal) : '–'}${ziel != null ? ` → <b class="wdl-bst-ziel">${de(ziel)}</b>` : ''}`, { tip: `Balance → Ziel${zr.rest != null ? ` · es fehlen ${de(zr.rest)} $` : ''}` })
@@ -32118,7 +32118,13 @@
     const og3 = (titel, anz, hinweis, cls, inhalt) => !inhalt ? '' : `<section class="wdl-og3 ${cls}"><div class="wdl-og3-kopf"><b>${titel}</b><span>${anz}</span><small>${hinweis}</small></div>${inhalt}</section>`
     const gruppen = (arr, alleArr) => {
       const g = teile(arr), a = teile(alleArr)
-      const pr = ohneBest(g.pr), prA = ohneBest(a.pr)
+      // NUR AN EINER STELLE (Finn 21.10.2026 ~14:55 Dubai, Marc Apex 100k …0008, 105.966 von 106.000: „der 008er steht oben bei Abhaken und
+      // einmal bei Bestanden … immer nur entweder bei Bestanden oder bei Abhaken, nicht in beiden"): eine Zeile, die unter Bestanden → Rest von
+      // Hand steht, fällt aus Erledigt → Abhaken heraus — dort hat sie ihre eigenen Knöpfe (→ Planer / Abhaken / Balance lesen). Dieselbe
+      // Auswahl wie die Station (rvhZeilen, ohne Personen-Filter, damit auch die Chip-Zahlen im Kopf stimmen).
+      let rvhIds = new Set(); try{ rvhIds = new Set(rvhZeilen([...a.pr, ...a.er], true).map(z => z.pid)) }catch(_){ rvhIds = new Set() }
+      const ohneRvh = arr => arr.filter(t => !rvhIds.has(wdlTid(t)))
+      const pr = ohneRvh(ohneBest(g.pr)), prA = ohneRvh(ohneBest(a.pr))
       const gep = pr.filter(wdlGeparkt), blow = pr.filter(t => !wdlGeparkt(t) && istGeblowt(t)), norm = pr.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
       const gepA = prA.filter(wdlGeparkt), blowA = prA.filter(t => !wdlGeparkt(t) && istGeblowt(t)), normA = prA.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
       const kopf4 = ['Ergebnis', 'Konto', 'P&amp;L', 'Zu']
@@ -45998,7 +46004,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1685'
+  const OS_TAB_BUILD = '2026-09-22.1686'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
