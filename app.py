@@ -11004,6 +11004,11 @@ def wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher=N
     if wd:
         # Rechnung zuerst (mit balance_start, sobald da), dann das beim Open eingefrorene Hedge-Level
         h_lvl = _wd_num(hedge.get("sl_level_nq"))
+        # DAILY LOSS (21.10.2026, Finn: Fusion schließt 5 Pkt vor dem Daily Loss der Stufe, z. B. Apex): das Hedge-Level rechnet der PC-Tab aus
+        # liq_regeln (hedgeLiqLevel, liq_art 'daily_loss') — hier nicht mit Kontogröße + 100 überschreiben, sonst zeigt der Chart das alte Level
+        if hedge.get("liq_art") == "daily_loss" and h_lvl:
+            return {"sl_level_nq": h_lvl, "sl_art": "liquidation", "liq_balance": _wd_num(hedge.get("liq_balance")) or liq["balance"],
+                    "liq_quelle": hedge.get("liq_quelle") or "hedge", "sl_hinweis": None}
         if liq_quelle == "balance_start" and liq["level"] is not None:
             lvl, q = liq["level"], "balance_start"
         elif h_lvl:

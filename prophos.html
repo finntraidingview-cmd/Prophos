@@ -25533,18 +25533,109 @@
     return { balance: Number(acc.tvBalance), quelle: 'konto_balance', at: acc.tvBalanceAt }
   }
   window._tvKontoBalanceVorStart = tvKontoBalanceVorStart   // Test-Haken
-  // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start} | {hinweis}
+  /* DAILY LOSS AM FUSION-HEDGE (21.10.2026, Finn über den Master: „Ab jetzt sollte die Fusion dann schließen, wenn eben der Loss am Master
+   * reicht … genau bei dem und dem Betrag ist der Account so viele Minus, und dann genau da, kurz davor. Mach einfach 5 Punkte davor, schließt
+   * es."). Anlass: erstes Apex-WD-Konto Marc …0001 bei 165.735 $ — Apex liquidiert in Stufe 5 schon nach 4.000 $ Daily Loss, das alte Level
+   * Kontogröße + 100 (150.100) lag ~15,6k darunter. liq_regeln wird hier gelesen wie in app.py liq_regel_waehlen/liq_aus_regel (Winning Days
+   * über die Zeile „wie funded" → Apex id 4/13 je Größe), 60 s gecacht, nie vor dem Open abgewartet. Nur Zeilen mit Tageslimit (art 'stufen' /
+   * 'tagesstart') zählen; Tradeify-WD (art 'boden') und Firmen ohne Regel bleiben bei Kontogröße + 100. Liq-Balance = die ENGERE von
+   * Tagesstart − Daily Loss (Stufe nach Tagesstart = Schlussbalance der Vorsitzung, wie Apex) und Kontogröße + 100; gewinnt das Daily Loss,
+   * schließt der Hedge HEDGE_DLL_VOR_PKT NQ-Punkte davor (Richtung Einstieg). Regeln (noch) nicht geladen → wie bisher, der Wächter trägt das
+   * Level einmal nach (liq_regeln_geladen). */
+  const HEDGE_DLL_VOR_PKT = 5
+  let _liqRegeln = null, _liqRegelnAt = 0, _liqRegelnLaeuft = false
+  async function liqRegelnLaden(){
+    if(_liqRegelnLaeuft || Date.now() - _liqRegelnAt < 60000) return _liqRegeln
+    _liqRegelnLaeuft = true
+    try{
+      const { data, error } = await supabase.from('liq_regeln').select('id,firma,kontotyp,groesse,art,betrag_usd,stufen,wie_kontotyp')
+      if(error) console.warn('[hedge] liq_regeln:', error.message)
+      else if(Array.isArray(data) && data.length) _liqRegeln = data   // leere Antwort = nicht geladen (Rückfall Kontogröße + 100)
+    }catch(e){ console.warn('[hedge] liq_regeln', e) }
+    finally{ _liqRegelnAt = Date.now(); _liqRegelnLaeuft = false }   // auch nach Fehler 60 s Ruhe, letzter Stand bleibt
+    return _liqRegeln
+  }
+  // REIN RECHNEND (window._liqRegelWaehlen): wie app.py liq_regel_waehlen — spezifischste Zeile (Firma 4, Kontotyp 2, Größe 1; null = alle),
+  // wie_kontotyp EINMAL aufgelöst. Firmen über firmNormRichtung (Apex = Apex Trader wie _firm_norm).
+  function liqRegelWaehlen(regeln, firma, kontotyp, groesse){
+    const f = firmNormRichtung(firma), g = Number(groesse) > 0 ? Number(groesse) : null
+    const beste = typ => {
+      let best = null, score = -1
+      for(const r of (regeln || [])){
+        if(!r) continue
+        const rg = Number(r.groesse) > 0 ? Number(r.groesse) : null
+        if(r.firma && firmNormRichtung(r.firma) !== f) continue
+        if(r.kontotyp && r.kontotyp !== typ) continue
+        if(rg != null && (g == null || Math.abs(rg - g) > 0.5)) continue
+        const s = (r.firma ? 4 : 0) + (r.kontotyp ? 2 : 0) + (rg != null ? 1 : 0)
+        if(s > score){ best = r; score = s }
+      }
+      return best
+    }
+    const z = beste(kontotyp), wie = z && z.wie_kontotyp
+    if(wie && wie !== kontotyp){ const z2 = beste(wie); if(z2) return z2 }
+    return z
+  }
+  window._liqRegelWaehlen = liqRegelWaehlen
+  // REIN RECHNEND (window._liqDailyLoss): Daily Loss einer Tageslimit-Zeile bei dieser Tagesstart-Balance → {dl, stufe, ab} | null
+  function liqDailyLoss(regel, tagesstart){
+    if(!regel || !(tagesstart > 0)) return null
+    if(regel.art === 'tagesstart') return Number(regel.betrag_usd) > 0 ? { dl: Number(regel.betrag_usd), stufe: null, ab: null } : null
+    if(regel.art !== 'stufen' || !Array.isArray(regel.stufen)) return null
+    const st = regel.stufen.filter(s => s && Number(s.ab_balance) > 0).sort((a, b) => Number(a.ab_balance) - Number(b.ab_balance))
+    if(!st.length) return null
+    let nr = 0
+    st.forEach((s, i) => { if(tagesstart >= Number(s.ab_balance)) nr = i })   // darunter: Stufe 1 (Apex: nie unter Level 1)
+    const dl = Number(st[nr].daily_loss_usd)
+    return dl > 0 ? { dl, stufe: nr + 1, ab: Number(st[nr].ab_balance) } : null
+  }
+  window._liqDailyLoss = liqDailyLoss
+  // Tagesstart-Balance wie app.py liq_tagesstart: Start-Balance des FRÜHESTEN Plans dieses Kontos im selben CME-Handelstag, sonst die eigene
+  function hedgeTagesstart(plan, startBal){
+    const st = plan && plan.startedAt, tag = st ? tvV2Handelstag(st) : null
+    if(!tag) return { balance: startBal, quelle: 'start_balance' }
+    let best = null
+    for(const q of (tradePlans || [])){
+      if(!q || String(q.id) === String(plan.id) || String(q.masterAccountId) !== String(plan.masterAccountId) || !q.startedAt) continue
+      if(!(Date.parse(q.startedAt) < Date.parse(st)) || tvV2Handelstag(q.startedAt) !== tag) continue
+      const b = q.mt5Baseline && q.mt5Baseline.tv && q.mt5Baseline.tv.balance_start
+      if(typeof b === 'number' && isFinite(b) && (!best || Date.parse(q.startedAt) < Date.parse(best.at))) best = { at: q.startedAt, b }
+    }
+    return best ? { balance: best.b, quelle: 'erster_trade_tag' } : { balance: startBal, quelle: 'start_balance' }
+  }
+  // Nur Winning Days (Finns Auftrag) — andere Hedge-Pläne behalten Kontogröße + 100. -> {liq_balance, dl, stufe, ab, tagesstart, quelle} | null
+  function hedgeLiqDll(plan, acc, groesse, startBal, regeln){
+    const wd = (acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days'))
+    if(!wd || !Array.isArray(regeln) || !(startBal > 0)) return null
+    const r = liqRegelWaehlen(regeln, (acc && acc.firm) || (plan && plan.masterFirm) || '', 'winning_days', groesse)
+    const ts = hedgeTagesstart(plan, startBal)
+    const d = liqDailyLoss(r, ts.balance)
+    return d ? { liq_balance: Math.round((ts.balance - d.dl) * 100) / 100, dl: d.dl, stufe: d.stufe, ab: d.ab, tagesstart: ts.balance, quelle: ts.quelle, regel_id: r.id } : null
+  }
+  // Daily-Loss-Felder fürs Hedge-Objekt (Open + Wächter-Nachtrag), damit Radar/Spur zeigen, woher das Level kommt
+  const hedgeLiqDllFelder = lq => lq ? { liq_art: lq.liq_art || null, liq_regeln_geladen: !!lq.liq_regeln_geladen, liq_vor_pkt: lq.liq_vor_pkt || null, liq_dll: lq.liq_dll || null } : {}
+  // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start, liq_art, liq_regeln_geladen, …} | {hinweis}
   function hedgeLiqLevel(plan, einstieg, ppl, kt){
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
     const groesse = (acc && Number(acc.startingBalance) > 0) ? Number(acc.startingBalance) : tpKontoGroesseAusName((acc && acc.name) || (plan && plan.masterName) || '')
     if(!(groesse > 0)) return { hinweis: 'Kontogröße unbekannt — Hedge schließt nur am TP' }
-    const liq = groesse + 100, st = hedgeLiqStart(plan)
+    const regeln = _liqRegeln
+    liqRegelnLaden().catch(() => {})   // höchstens alle 60 s, nie abgewartet — fürs nächste Mal; fehlen sie jetzt, trägt der Wächter nach
+    const st = hedgeLiqStart(plan)
+    let liq = groesse + 100, vorPkt = 0, art = 'boden'
     if(!st) return { hinweis: 'keine Start-Balance — Hedge schließt nur am TP', liq_balance: liq }
+    const dll = hedgeLiqDll(plan, acc, groesse, st.balance, regeln)
+    if(dll && dll.liq_balance > liq){ liq = dll.liq_balance; vorPkt = HEDGE_DLL_VOR_PKT; art = 'daily_loss' }
+    const dllFelder = { liq_art: art, liq_regeln_geladen: !!regeln, liq_vor_pkt: vorPkt || null,
+      liq_dll: dll ? { usd: dll.dl, stufe: dll.stufe, ab_balance: dll.ab, tagesstart: dll.tagesstart, quelle: dll.quelle, regel_id: dll.regel_id } : null }
     const usd = Math.round((st.balance - liq) * 100) / 100
-    if(!(usd > 0) || !(ppl > 0) || !(kt > 0)) return { hinweis: 'Start-Balance nicht über dem Liquidations-Level — Hedge schließt nur am TP', liq_balance: liq }
-    const pkt = Math.round(usd / (ppl * kt) * 100) / 100
+    if(!(usd > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Start-Balance nicht über dem Liquidations-Level — Hedge schließt nur am TP', liq_balance: liq }, dllFelder)
+    // Liegt das Daily Loss näher als HEDGE_DLL_VOR_PKT (viele NQ in Stufe 1–3, zweiter Trade nach Verlust), gilt der DLL-Punkt selbst —
+    // nie gar kein Level, sonst liefe die Fusion nach Apex' Liquidation nackt weiter (Prüf-Agent 21.10.2026)
+    if(vorPkt && !(usd / (ppl * kt) - vorPkt > 0)){ vorPkt = 0; dllFelder.liq_vor_pkt = null }
+    const pkt = Math.round((usd / (ppl * kt) - vorPkt) * 100) / 100
     const lvl = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pkt : einstieg + pkt) * 100) / 100 : null
-    return { sl_punkte: pkt, sl_level_nq: lvl, sl_art: 'liquidation', liq_balance: liq, sl_usd_hedge: usd, liq_quelle: st.quelle, liq_balance_start: st.balance }
+    return Object.assign({ sl_punkte: pkt, sl_level_nq: lvl, sl_art: 'liquidation', liq_balance: liq, sl_usd_hedge: usd, liq_quelle: st.quelle, liq_balance_start: st.balance }, dllFelder)
   }
   window._hedgeLiqLevel = hedgeLiqLevel   // Test-Haken
   async function hedgeSoloOeffnenKern(plan, r){
@@ -25637,8 +25728,9 @@
     const liqWd = hedgeIstWd(plan) ? hedgeLiqLevel(plan, einstieg, ppl, kt) : null
     if(liqWd) slPunkte = liqWd.sl_punkte > 0 ? liqWd.sl_punkte : 0
     const slLevel = (einstieg > 0 && slPunkte > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - slPunkte : einstieg + slPunkte) * 100) / 100 : null
-    const liqFelder = liqWd ? (liqWd.sl_art ? { sl_art: 'liquidation', liq_balance: liqWd.liq_balance, sl_usd_hedge: liqWd.sl_usd_hedge, liq_quelle: liqWd.liq_quelle, liq_balance_start: liqWd.liq_balance_start, sl_hinweis: null }
-                                            : { sl_art: 'liquidation', liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis }) : {}
+    const liqFelder = liqWd ? Object.assign(liqWd.sl_art ? { sl_art: 'liquidation', liq_balance: liqWd.liq_balance, sl_usd_hedge: liqWd.sl_usd_hedge, liq_quelle: liqWd.liq_quelle, liq_balance_start: liqWd.liq_balance_start, sl_hinweis: null }
+                                                         : { sl_art: 'liquidation', liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis },
+                                            hedgeLiqDllFelder(liqWd)) : {}
     if(liqWd && liqWd.hinweis && typeof atToast === 'function') atToast(`⚠ Fusion-Hedge: ${liqWd.hinweis} (Wächter trägt das Level nach, sobald die Start-Balance gelesen ist)`, 'end')
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
     // ÖFFNEN ZUERST (01.10.2026, Finn: „instant"): der 'oeffnet'-Merker geht parallel zur Order in die DB, nicht mehr davor (eine
@@ -27872,12 +27964,18 @@
           // (Einstieg = hedge.einstieg_nq); die Copier-Reserve bleibt auf dem alten Wert, maßgeblich ist der Wächter
           try{
             const tvS = p.mt5Baseline && p.mt5Baseline.tv
-            if(hedgeIstWd(p) && h.liq_quelle !== 'balance_start' && tvS && typeof tvS.balance_start === 'number' && Number(h.einstieg_nq) > 0){
+            // Daily Loss (21.10.2026): Level ohne geladene liq_regeln gerechnet (Open vor dem ersten Laden) → einmal neu, sobald sie da sind
+            if(hedgeIstWd(p)) liqRegelnLaden().catch(() => {})   // höchstens alle 60 s
+            const ohneRegeln = h.liq_quelle === 'balance_start' && !h.liq_regeln_geladen && !!_liqRegeln
+            if(hedgeIstWd(p) && (h.liq_quelle !== 'balance_start' || ohneRegeln) && tvS && typeof tvS.balance_start === 'number' && Number(h.einstieg_nq) > 0){
               const wz2 = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
               const lq = hedgeLiqLevel(p, Number(h.einstieg_nq), wz2 === 'MNQ' ? 2 : 20, Number(p.masterContracts) || 0)
               if(lq && lq.sl_level_nq > 0){
-                await hedgeAmPlanSchreiben(p.id, { sl_level_nq: lq.sl_level_nq, sl_punkte: lq.sl_punkte, sl_art: 'liquidation', liq_balance: lq.liq_balance, sl_usd_hedge: lq.sl_usd_hedge, liq_quelle: 'balance_start', liq_balance_start: lq.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString() })
+                await hedgeAmPlanSchreiben(p.id, Object.assign({ sl_level_nq: lq.sl_level_nq, sl_punkte: lq.sl_punkte, sl_art: 'liquidation', liq_balance: lq.liq_balance, sl_usd_hedge: lq.sl_usd_hedge, liq_quelle: 'balance_start', liq_balance_start: lq.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString() },
+                  hedgeLiqDllFelder(lq), ohneRegeln ? { sl_level_vor_dll: Number(h.sl_level_nq) || null } : {}))
                 slL = lq.sl_level_nq
+              } else if(ohneRegeln && lq && lq.liq_regeln_geladen){
+                await hedgeAmPlanSchreiben(p.id, { liq_regeln_geladen: true })   // geprüft, kein neues Level → nicht jede Runde neu rechnen (Art bleibt die des stehenden Levels)
               }
             }
           }catch(e){ console.warn('[hedge] Liq-Level nachtragen', e) }
@@ -28058,7 +28156,7 @@
                    const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
                    const mwTxt = (() => { const m = hedgeMasterWegHtml(p, h); return m ? '✓ Master-weg-Schutz aktiv — ' : '' })()
                    return lTxt + mwTxt + (lvlTitel ? lvlTitel + ' — ' : '') + hedgeMasterWegTitel(p, h) + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
-          + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? (h.sl_art === 'liquidation' ? ` · Liquidation ≈ NQ ${h.sl_level_nq} (Balance ${h.liq_balance ?? '?'} $, Start-Balance aus ${h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : h.liq_quelle === 'konto_balance' ? 'dem Konto' : '?'})` : ` · Master-SL ≈ NQ ${h.sl_level_nq}`) : (h.sl_hinweis ? ` · ${h.sl_hinweis}` : '')} · PC ${h.pc ? pcLabel(h.pc) : '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
+          + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? (h.sl_art === 'liquidation' ? ` · Liquidation ≈ NQ ${h.sl_level_nq}${h.liq_art === 'daily_loss' && h.liq_dll ? ` (Daily Loss ${Number(h.liq_dll.usd).toLocaleString('de-DE')} $${h.liq_dll.stufe ? ` Stufe ${h.liq_dll.stufe}` : ''} ab Tagesstart ${Number(h.liq_dll.tagesstart).toLocaleString('de-DE')} $, ${h.liq_vor_pkt || 0} Pkt davor)` : ''} (Balance ${h.liq_balance ?? '?'} $, Start-Balance aus ${h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : h.liq_quelle === 'konto_balance' ? 'dem Konto' : '?'})` : ` · Master-SL ≈ NQ ${h.sl_level_nq}`) : (h.sl_hinweis ? ` · ${h.sl_hinweis}` : '')} · PC ${h.pc ? pcLabel(h.pc) : '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
       }
       if(h.status === 'geschlossen'){
         const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
