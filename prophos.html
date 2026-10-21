@@ -4318,6 +4318,17 @@
      Richtung/Konto/P&L/Zu schmaler und der Spaltenabstand 12 statt 16 px (Messung im Stub bei 1280 px: Kasten 947 px, feste Spalten
      müssen unter ~900 px bleiben, sonst läuft „Zu" rechts über). Handy (≤ 820 px) hat ein eigenes Raster unten. */
   #dashboard-view .wdl-tab-konto .wdl-z{grid-template-columns:minmax(150px,1fr) 110px 240px 84px 126px 110px;grid-template-areas:"wer ri mi konto pl zeit";column-gap:12px}
+  /* Konto-Spalte mit Zeitstrahl (Finn 21.10.2026 ~21:45 Dubai): Strahl ~150 px + Zahl rechts; dafür Name, Richtung, Mitte, P&L und Zu schmaler —
+     die Mitte rückt nach links. Nur Tabellen mit Trade-Zeilen (Abhaken, Geblowt, Verlauf, Manuelle Arbeit, Bestanden → Trade abhaken); in Rest von
+     Hand / Tage sammeln / Review steht in der Spalte „Tage" (bleibt 80 px). */
+  @media (min-width:821px){   /* Handy-Raster (≤ 820 px, Konto-Spalte aus) bleibt unberührt */
+    #dashboard-view .wdl-tab-konto:not(.wdl-tab-bst) .wdl-z{grid-template-columns:minmax(110px,1fr) 92px 240px 212px 104px 90px}   /* Mitte 240: Ergebnis + drei Knöpfe */
+    #dashboard-view .wdl-tab-bst.wdl-tab-sek-bestanden .wdl-z{grid-template-columns:minmax(100px,1fr) 120px 216px 184px 84px 104px 88px}
+    #dashboard-view .wdl-z-konto.mit-strahl{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}   /* Handy: Spalte bleibt aus */
+  }
+  #dashboard-view .wdl-z-konto.mit-strahl .wdl-strahl{flex:1 1 auto;min-width:80px;max-width:156px}
+  #dashboard-view .wdl-z-konto .wdl-k-zahl{flex:none;font-variant-numeric:tabular-nums}
+  #dashboard-view .pz-bahn2 > .wdl-strahl-boden{background:var(--danger)}
   /* Polar im Radar (20.10.2026): eine Zeile über beide IDs — Namen/Konten und Richtung/Menge je Seite untereinander, dezent */
   #dashboard-view .wdl-z-polar .wdl-z-wer{line-height:1.3}
   #dashboard-view .wdl-z-polar .wdl-z-wer .wdl-pol-s{display:block;color:var(--sub)}
@@ -31580,13 +31591,44 @@
     return best
   }
   const bstTsSort = (x, y) => String((y && y.ts) || '').localeCompare(String((x && x.ts) || ''))   // neueste oben, ohne Zeitstempel ganz unten
+  /* ZEITSTRAHL STATT NUR KONTO-ZAHL (Finn 21.10.2026 ~21:45 Dubai, Radar → Erledigt/Bestanden: „statt Konto einen Zeitstrahl: wo das Konto gerade
+   * steht und was der Trade auf dem Zeitstrahl ausgemacht hat. Rechts daneben die aktuelle Balance"). Optik und Klassen wie der Planer-Zeitstrahl
+   * (pz-bahn2: Sockel, leuchtendes Plus/Minus-Segment, Strich = vorher, Punkt = jetzt in der ID-Farbe). Links der Boden (wdlBlowStand: Liq-Regel
+   * bzw. Konto-Boden — dieselbe Grenze wie „geblowt"), rechts das Ziel (ziel_usd der Ziel-Wache); Funded ohne Ziel: Boden → höherer Stand + 15 %
+   * Luft. Geblowt: Punkt rot an/unter dem Boden. Fehlt Boden oder Start-Balance → null, nur die Zahl wie bisher. Nur Anzeige. -> {html, tip} | null */
+  function wdlStrahl(t, b){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v), de = v => Math.round(v).toLocaleString('de-DE')
+    const nach = b && n(b.bal), vor = n(t.balance_start), boden = b && n(b.liq)
+    if(nach == null || vor == null || boden == null) return null
+    const zielRoh = n(t.ziel_usd), ziel = zielRoh != null && zielRoh > Math.max(boden, vor, nach) * 0.97 && zielRoh > boden ? zielRoh : null
+    const oben = Math.max(vor, nach), hi = ziel != null ? Math.max(ziel, oben) : oben + Math.max(1, (oben - boden) * 0.15), lo = Math.min(boden, nach)
+    if(!(hi > lo)) return null
+    const pct = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100))
+    const pVor = pct(vor), pNach = pct(nach), pBoden = pct(boden), plus = nach >= vor, geblowt = !!b.geblowt
+    const klein = Math.min(pVor, pNach), gross = Math.max(pVor, pNach)
+    const id = (() => { try{ return idFarbe(String(wdlUid(t) || '')) }catch(_){ return 'var(--ink)' } })()
+    const tip = [`Boden ${de(boden)}`, `vor ${de(vor)}`, `nach ${de(nach)}`, ziel != null ? `Ziel ${de(ziel)}` : 'kein Ziel (Funded)'].join(' · ')
+      + ' — ' + [ziel != null ? (nach >= ziel ? `Ziel erreicht (+${de(nach - ziel)} $)` : `noch ${de(ziel - nach)} $ bis Ziel`) : '',
+                 geblowt || nach <= boden ? `${de(boden - nach)} $ unter dem Boden — geblowt` : `${de(nach - boden)} $ über dem Boden`,
+                 `Trade ${plus ? '+' : '−'}${de(Math.abs(nach - vor))} $`].filter(Boolean).join(' · ')
+    const html = `<i class="pz-bahn pz-bahn2 mit-vor mit-liq wdl-strahl" aria-hidden="true">`
+      + (klein > 0 ? `<i class="pz-bahn-fuell is-sockel" style="width:${klein.toFixed(1)}%;background:var(--sub-2)"></i>` : '')
+      + (gross - klein > 0.2 ? `<i class="pz-bahn-fuell ${plus ? 'is-plus' : 'is-minus'}" style="left:${klein.toFixed(1)}%;width:${(gross - klein).toFixed(1)}%"></i>` : '')
+      + (pBoden > 0.5 ? `<i class="pz-bahn-start wdl-strahl-boden" style="left:${pBoden.toFixed(1)}%"></i>` : '')   // Boden liegt im Strahl, wenn der Stand darunter fiel
+      + `<i class="pz-bahn-vor" style="left:${pVor.toFixed(1)}%"></i>`
+      + `<b class="pz-bahn-pkt" style="left:${pNach.toFixed(1)}%;background:${geblowt ? 'var(--danger)' : id}"></b></i>`
+    return { html, tip }
+  }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
     if(!b && wdlKontoWeg(t)) return '<span class="wdl-z-konto" title="Konto bei Tradovate nicht mehr vorhanden — keine Balance mehr lesbar">vermutl. geblowt</span>'
     if(!b) return '<span class="wdl-z-konto" title="noch keine Balance nach dem Trade gelesen">–</span>'
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
-    return `<span class="wdl-z-konto" title="${escapeHtml(tip)}"${b.geblowt ? ' style="color:var(--danger-ink, #b91c1c)"' : ''}>${f0(b.bal)} $</span>`
+    let st = null; try{ st = wdlStrahl(t, b) }catch(_){ st = null }
+    const zahl = `<span class="wdl-k-zahl"${b.geblowt ? ' style="color:var(--danger-ink, #b91c1c)"' : ''}>${f0(b.bal)} $</span>`
+    return st ? `<span class="wdl-z-konto mit-strahl" title="${escapeHtml(st.tip + ' · ' + tip)}">${st.html}${zahl}</span>`
+      : `<span class="wdl-z-konto" title="${escapeHtml(tip)}">${zahl}</span>`
   }
   /* ANSEHEN (02.10.2026, Finn: „Ansehen bei allen laufenden Trades — Puls navigiert am jeweiligen PC zu dem Trade, damit ich ihn
    * visuell sehe; ist er schon zu, wird er direkt abgehakt"). Railway legt das Signal im Namen des Plan-Besitzers an (aktion
@@ -32369,14 +32411,14 @@
       const nachZiel = arr => [...arr].map(t => ({ t, ts: tsVon(t) })).sort(bstTsSort).map(x => x.t)
       const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, ts: tsVon(t), html: zeileDatum(t) }))
       let rvh = []; try{ rvh = rvhZeilen(alleTr) }catch(e){ console.warn('[radar] Rest von Hand', (e && e.message) || e); rvh = [] }
-      const kaesten = gruppe('Trade abhaken', nachZiel(bestTr || []), ['Ergebnis', 'Konto', 'Bestanden', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden', null, bestAlle || [], null, zeileDatum)
+      const kaesten = gruppe('Trade abhaken', nachZiel(bestTr || []), ['Ergebnis', 'Konto · Boden → Ziel', 'Bestanden', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden', null, bestAlle || [], null, zeileDatum)
         + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
         + bstTab(zz.filter(z => z.fehlt), 'Tage sammeln', 'Ziel erreicht, Mindesttage fehlen noch — der Auto-Planer legt je Handelstag einen Mini-Trade, danach wandert das Konto nach Review', 'wdl-tab-sek-tage')
         + bstTab([...rev, ...zz.filter(z => !z.fehlt)].sort(bstTsSort), 'Review', 'Ziel und Mindesttage erfüllt — liegt hier, bis die neuen Daten der Firma da sind und der Nachfolger angelegt ist', 'wdl-tab-sek-review')
       return { html: kaesten, n: (bestTr || []).length + rvh.length + zz.length + rev.length }
     }
     const manuell = (g, a) => {
-      if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
+      if(g.ma.length) return gruppe('Manuelle Arbeit', nachAblage(g.ma), ['Notiz', 'Konto · Boden → Ziel', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell', null, a.ma)
       if(!g.pr.length) return ''
       return `<div class="wdl-tab wdl-tab-konto wdl-tab-manuell wdl-tab-sek-manuell wdl-tab-leer"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer">Manuelle Arbeit · 0</span><span class="wdl-z-ri"></span><span class="wdl-man-hinweis">Zeile aus „Abhaken" hierher ziehen oder „→ manuell"</span></div></div>`
     }
@@ -32404,7 +32446,7 @@
       const pr = ohneRvh(ohneBest(g.pr)), prA = ohneRvh(ohneBest(a.pr))
       const gep = pr.filter(wdlGeparkt), blow = pr.filter(t => !wdlGeparkt(t) && istGeblowt(t)), norm = pr.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
       const gepA = prA.filter(wdlGeparkt), blowA = prA.filter(t => !wdlGeparkt(t) && istGeblowt(t)), normA = prA.filter(t => !wdlGeparkt(t) && !istGeblowt(t))
-      const kopf4 = ['Ergebnis', 'Konto', 'P&amp;L', 'Zu']
+      const kopf4 = ['Ergebnis', 'Konto · Boden → Ziel', 'P&amp;L', 'Zu']
       // GEPARKT IST WEG (.1514, Finn 13.10.2026: „das Geparkt brauchen wir nicht mehr, wurde ersetzt"): geparkte Trades (manuell.schritt
       // 'geparkt', Knopf heißt jetzt „→ Review") stehen in Bestanden → Review — dort warten sie auf die neuen Kontodaten der Firma.
       void gepA
