@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.16"   # 0.3.16 (21.10.2026): Räumen nur vor „bereit", Bereit-Halten ohne Klick, nach Feuerzeit nie zurück, Wache gedrosselt · 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.17"   # 0.3.17 (21.10.2026): Close-Rückfrage unter allen Dialogen, verdeckt → Störer weg + neu · 0.3.16 (21.10.2026): Räumen nur vor „bereit", Bereit-Halten ohne Klick, nach Feuerzeit nie zurück, Wache gedrosselt · 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -760,38 +760,55 @@ RX_MODAL_CLOSE = re.compile(r"^(close position|position schlie(?:ß|ss)en)$", re
 RX_MODAL_SEITE = re.compile(r"\b(long|short)\s+([\d.,]+)", re.I)
 
 
-def close_modal_wahl(modals, root, richtung, menge):
-    """REIN RECHNEND (testbar, Finn 21.10.2026): „Close position"-Rückfrage nach dem ×-Klick → (knopf | None, grund). Gedrückt wird nur,
-    wenn GENAU EIN solches Modal offen ist, darin genau das Symbol (Wurzel), die Richtung (Long = buy, Short = sell) und die Menge der
-    eigenen Position stehen und es genau EINEN Knopf „Close position" gibt. „Cancel" nie. grund: kein_modal | passt | <Klartext>."""
-    # Rückfrage = Kasten mit „Cancel"-Knopf daneben; ein „Close position" in der Positions-Tabelle ist kein Modal und zählt nicht mit
-    ms = [m for m in (modals or ()) if isinstance(m, dict)
-          and any(re.match(r"^(cancel|abbrechen)$", str(k.get("text") or "").strip(), re.I) for k in (m.get("knoepfe") or ()) if isinstance(k, dict))]
-    if not ms:
-        return None, "kein_modal"
-    if len(ms) > 1:
-        return None, f"{len(ms)} Close-Modals offen — nicht eindeutig"
-    m = ms[0]
+def _close_modal_pruefen(m, root, richtung, menge):
+    """REIN RECHNEND (testbar): EINE „Close position"-Rückfrage gegen die eigene Position → (knopf | None, grund). Symbol nur aus
+    Börse:Kontrakt-Wörtern (CME_MINI:MNQZ2026 — Buchstaben vor dem Doppelpunkt, eine Uhrzeit „05:57" ist kein Symbol), Long = buy,
+    Short = sell, Menge, genau EIN Knopf „Close position"."""
     text = str(m.get("text") or "")
-    roots = {ob.tv_symbol_root(t) for t in re.findall(r"[A-Z0-9_]+:[A-Z0-9!]+", text.upper())}
+    roots = {ob.tv_symbol_root(t) for t in re.findall(r"\b[A-Z][A-Z_]*:[A-Z0-9!]+", text.upper())}
     if roots != {str(root or "").upper()}:
-        return None, f"Modal nennt {sorted(roots) or 'kein Symbol'} statt {root}"
+        return None, f"nennt {sorted(roots) or 'kein Symbol'} statt {root}"
     sm = RX_MODAL_SEITE.search(text)
     if not sm:
-        return None, "Modal ohne Long/Short + Menge"
+        return None, "ohne Long/Short + Menge"
     seite = "buy" if sm.group(1).lower() == "long" else "sell"
     if seite != str(richtung).lower():
-        return None, f"Modal {sm.group(1)} statt {'Long' if str(richtung).lower() == 'buy' else 'Short'}"
+        return None, f"{sm.group(1)} statt {'Long' if str(richtung).lower() == 'buy' else 'Short'}"
     try:
         n = float(sm.group(2).replace(",", ""))
     except ValueError:
         return None, f"Menge '{sm.group(2)}' unlesbar"
     if abs(n - float(menge)) > 0.01:
-        return None, f"Modal-Menge {n:g} statt {float(menge):g}"
+        return None, f"Menge {n:g} statt {float(menge):g}"
     kn = [k for k in (m.get("knoepfe") or ()) if isinstance(k, dict) and RX_MODAL_CLOSE.match(str(k.get("text") or "").strip())]
     if len(kn) != 1 or not (isinstance(kn[0].get("rect"), (list, tuple)) and len(kn[0]["rect"]) == 4):
-        return None, f"{len(kn)} Knöpfe „Close position\" im Modal"
+        return None, f"{len(kn)} Knöpfe „Close position\""
     return kn[0], "passt"
+
+
+def close_modal_wahl(modals, root, richtung, menge):
+    """REIN RECHNEND (testbar, Finn 21.10.2026): „Close position"-Rückfrage nach dem ×-Klick → (knopf | None, grund). Seit Lauf 582c58c0
+    (Finn: „Während der Zeit kam das nächste Popup dazu", der Master meldete modal_fremd, Finn drückte von Hand) wird die Rückfrage UNTER
+    ALLEN offenen Dialogen gewählt: gedrückt wird, wenn GENAU EINE Rückfrage (Kasten mit „Cancel" daneben) Symbol, Richtung und Menge der
+    eigenen Position trägt. Andere Dialoge (Werbung, fremde Rückfragen) sind kein Gegenbeweis; ZWEI passende → kein Klick. „Cancel" nie.
+    grund: kein_modal | passt … | <Klartext je Rückfrage>."""
+    # Rückfrage = Kasten mit „Cancel"-Knopf daneben; ein „Close position" in der Positions-Tabelle ist kein Modal und zählt nicht mit
+    ms = [m for m in (modals or ()) if isinstance(m, dict)
+          and any(re.match(r"^(cancel|abbrechen)$", str(k.get("text") or "").strip(), re.I) for k in (m.get("knoepfe") or ()) if isinstance(k, dict))]
+    if not ms:
+        return None, "kein_modal"
+    passend, nein = [], []
+    for m in ms:
+        k, g = _close_modal_pruefen(m, root, richtung, menge)
+        if k is not None:
+            passend.append(k)
+        else:
+            nein.append(f"'{str(m.get('titel') or m.get('text') or '')[:30]}': {g}")
+    if len(passend) > 1:
+        return None, f"{len(passend)} passende Close-Rückfragen — nicht eindeutig"
+    if passend:
+        return passend[0], "passt" + (f" (daneben {len(nein)} andere: {'; '.join(nein)[:120]})" if nein else "")
+    return None, "; ".join(nein)[:200]
 
 
 HAFTUNG_AB_S = 0.2           # Ein-Klick-Haftungsausschluss frühestens 200 ms nach dem Klick suchen …
@@ -922,7 +939,7 @@ CLOSE_MODAL_JS = r"""(function () {
     var kn = Array.prototype.slice.call(box.querySelectorAll('button,[role="button"]')).filter(sb).map(function (k) {
       return { text: T(k).slice(0, 40), rect: R(k), dn: k.getAttribute('data-name') || '' }; });
     var h = box.querySelector('h1,h2,h3,[class*="title"],[data-name*="title"]');
-    out.push({ titel: T(h).slice(0, 60), text: T(box).slice(0, 240), knoepfe: kn.slice(0, 8), rect: R(box) });
+    out.push({ titel: T(h).slice(0, 60), text: T(box).slice(0, 400), knoepfe: kn.slice(0, 8), rect: R(box) });
   });
   return out;
 })()"""
@@ -1337,6 +1354,7 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen, pops_vor=Non
     lauf.log(f"Polar: × geklickt ({(park or {}).get('art')}, {int((time.time() - t0) * 1000)} ms nach dem Signal)" if geklickt else "Polar: × NICHT gedrückt (Maus/Fenster nicht bewiesen)")
 
     modal_fremd = [None]
+    modal_geraeumt = [False]                                 # Störer über der Close-Rückfrage höchstens EINMAL räumen
 
     def flach_beweis(limit_s):
         # „Close position"-Rückfrage (Finn 21.10.2026: „kommt nur manchmal … ganz wichtig: es muss schnell gehen"): ab dem ERSTEN Takt
@@ -1355,10 +1373,21 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen, pops_vor=Non
                 try:
                     kn, mg = close_modal_wahl(s.lese_js(CLOSE_MODAL_JS, timeout=1) or [], root, plan["richtung"], plan["menge"])
                     if kn is not None:
-                        if s.klick(kn["rect"], "Close position (Rückfrage)",
-                                   pruef={"rect": kn["rect"], "text": str(kn.get("text") or "").lower(), "aria": "", "tabu": r"cancel|abbrechen|reverse|umkehr"}):
+                        def _close_druck(k_):
+                            return s.klick(k_["rect"], "Close position (Rückfrage)",
+                                           pruef={"rect": k_["rect"], "text": str(k_.get("text") or "").lower(), "aria": "", "tabu": r"cancel|abbrechen|reverse|umkehr"})
+                        ok_k = _close_druck(kn)
+                        if not ok_k and not modal_geraeumt[0]:
+                            # VERDECKT (Lauf 582c58c0, Finn: „Während der Zeit kam das nächste Popup dazu"): am Knopf liegt etwas anderes →
+                            # EINMAL Orbits Störer-Räumung (Werbe-×, Tabu-Regeln; „Close position" bleibt wegen „position"), dann sofort neu
+                            modal_geraeumt[0] = True
+                            n_r, _st = stoerer_weg(lauf, s, opts, "über der Close-Rückfrage")
+                            kn2, mg2 = close_modal_wahl(s.lese_js(CLOSE_MODAL_JS, timeout=1) or [], root, plan["richtung"], plan["menge"])
+                            lauf.log(f"Polar: Close position verdeckt — {n_r} Störer geschlossen, neu: {mg2}")
+                            ok_k = kn2 is not None and _close_druck(kn2)
+                        if ok_k:
                             dialog_zu = True
-                            lauf.log(f"Polar: Rückfrage 'Close position' bestätigt {int((time.time() - t0) * 1000)} ms nach dem Signal")
+                            lauf.log(f"Polar: Rückfrage 'Close position' bestätigt {int((time.time() - t0) * 1000)} ms nach dem Signal ({mg})")
                     elif mg != "kein_modal" and modal_fremd[0] != mg:
                         modal_fremd[0] = mg
                         lauf.log(f"Polar: Close-Modal NICHT bestätigt — {mg}")

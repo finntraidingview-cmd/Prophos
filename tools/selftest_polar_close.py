@@ -429,6 +429,24 @@ def main():
     od2 = open(os.path.join(STAMM, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
     check("re.compile(r\"\\border|position|" in od2 or "position" in od2[od2.index("CDP_DIALOG_FREMD_TABU_RX ="):od2.index("CDP_DIALOG_FREMD_TABU_RX =") + 200],
           "Orbits Ausschluss trägt „position“ — die Close-position-Rückfrage wird nie weggeräumt")
+    print("10l) Lauf 582c58c0: Close-Rückfrage unter mehreren Dialogen (Finn 21.10.2026)")
+    cmw = pb.close_modal_wahl
+    k_close, k_canc = {"text": "Close position", "rect": [900, 500, 120, 32]}, {"text": "Cancel", "rect": [780, 500, 100, 32]}
+    rf = {"titel": "Close position", "text": "Close position CME_MINI:MNQZ2026 · Long 1 @ 29,993.75 Cancel Close position", "knoepfe": [k_canc, k_close]}
+    werbung = {"titel": "Go ad-free. Everywhere", "text": "Go ad-free. Everywhere Current plan Basic Recommended Essential Upgrade to go ad-free Cancel",
+               "knoepfe": [{"text": "Upgrade to go ad-free", "rect": [1, 1, 50, 20]}, {"text": "Cancel", "rect": [60, 1, 50, 20]}]}
+    k1, g1 = cmw([werbung, rf], "MNQ", "buy", 1)
+    check(k1 is k_close and g1.startswith("passt"), f"Close-Rückfrage + Werbe-Dialog gleichzeitig → Klick auf Close position ({g1})")
+    k2, g2_ = cmw([rf, dict(rf)], "MNQ", "buy", 1)
+    check(k2 is None and "nicht eindeutig" in g2_, "zwei passende Close-Rückfragen → kein Klick")
+    k3_, g3 = cmw([dict(rf, text="05:57 Close position CME_MINI:MNQZ2026 · Long 1 @ 29,993.75 Cancel Close position")], "MNQ", "buy", 1)
+    check(k3_ is k_close, f"Uhrzeit im Text („05:57“) ist kein Symbol ({g3})")
+    k4_, g4 = cmw([dict(rf, text="Close position CME_MINI:NQZ2026 · Long 1 @ 29,993.75"), werbung], "MNQ", "buy", 1)
+    check(k4_ is None and "NQ" in g4, f"nur eine fremde Rückfrage (anderes Symbol) + Werbung → kein Klick, Grund je Dialog ({g4})")
+    srcL2 = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    fb3 = srcL2[srcL2.index("def flach_beweis("):srcL2.index("weg, dialog = (None, False)")]
+    check('stoerer_weg(lauf, s, opts, "über der Close-Rückfrage")' in fb3 and "not modal_geraeumt[0]" in fb3 and fb3.count("_close_druck(") == 3,
+          "Close verdeckt → EINMAL Störer räumen, dann sofort neu klicken (in derselben 50-ms-Schleife)")
     print("10j) Lauf 3cc4d9b7: Bild vor UIA beim Parken, Ändern-Spur im slave.log")
     srcJ = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
     xp = srcJ[srcJ.index("def slave_x_punkte("):srcJ.index("def slave_wache(")]
