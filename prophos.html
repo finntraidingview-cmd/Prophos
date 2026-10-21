@@ -41160,7 +41160,10 @@
   function pzBahnHtml(a){
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const groesse = Number(a.groesse) || 0, ziel = Number(a.ziel) || 0, istV = Number(a.ist) || 0
-    if(!(ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3)) return null
+    // a.zielFrei (Polar, Finn 21.10.2026 ~04:05 Dubai: „Zeitstrahl bei Funded: links der Liq-Boden, rechts Balance + TP dieses Trades, Punkt auf
+    // der aktuellen Balance"): Ziel darf unter der Kontogröße liegen — Pflicht sind dann Boden < Balance < Ziel (sonst null, Zeile ohne Balken)
+    const zielFrei = !!a.zielFrei
+    if(!zielFrei && !(ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3)) return null
     const tpUsd = Number(a.tpUsd) > 0 ? Number(a.tpUsd) : 0, slUsd = Number(a.slUsd) > 0 ? Number(a.slUsd) : 0
     const plL = a.plL != null && isFinite(Number(a.plL)) ? Number(a.plL) : null
     // SKALA LIQ → ZIEL (Finn 08.10.2026, „100k-Account … nach links bis 90k runter, das ist maximal Drawdown, nach rechts bis 108.000"):
@@ -41169,7 +41172,8 @@
     // der Blow der Zeile ist dort Start-Balance des Trades − Max Drawdown bzw. die Liq-Regel und liegt nach Gewinnen ÜBER der Kontogröße — er
     // gilt trotzdem als linker Rand (Skala Blow → Ziel, Start nur als Strich, wenn er im Bereich liegt). Trade-Planer (ohne frei) wie bisher.
     const bodenRoh = a.boden != null && isFinite(Number(a.boden)) && Number(a.boden) > 0 ? Number(a.boden) : null
-    const boden = bodenRoh != null && (bodenRoh <= groesse || (a.frei && bodenRoh < ziel)) ? bodenRoh : null
+    const boden = bodenRoh != null && (zielFrei ? bodenRoh < istV : (bodenRoh <= groesse || (a.frei && bodenRoh < ziel))) ? bodenRoh : null
+    if(zielFrei && (boden == null || !(ziel > istV))) return null
     const lo = boden != null ? boden : groesse
     const sp = ziel - lo, pct = v => Math.max(0, Math.min(100, (v - lo) / sp * 100))
     const pIst = pct(istV), pTp = tpUsd ? pct(Math.min(ziel, istV + tpUsd)) : pIst, pStart = pct(groesse)
@@ -41180,10 +41184,10 @@
       return 'rgb(' + A.map((v, i) => Math.round(v + (B[i] - v) * w)).join(',') + ')' }
     const farbe = istV >= groesse ? misch('#3F7D58', '#12B76A', (istV - groesse) / (ziel - groesse))
       : misch('#E8837B', '#8F1414', boden != null && boden < groesse ? (groesse - istV) / (groesse - boden) : verlB / 12)
-    const prozent = Math.round((istV - groesse) / (ziel - groesse) * 100)
-    const startDa = boden == null || boden <= groesse   // Start-Strich nur, wenn der Start im Bereich Blow → Ziel liegt
+    const prozent = zielFrei ? null : Math.round((istV - groesse) / (ziel - groesse) * 100)   // zielFrei: kein „x % zum Ziel" (Ziel = nur dieser Trade)
+    const startDa = zielFrei ? (groesse > boden && groesse < ziel) : (boden == null || boden <= groesse)   // Start-Strich nur, wenn der Start im Bereich Blow → Ziel liegt
     const balV = a.balVal != null && isFinite(Number(a.balVal)) ? Number(a.balVal) : istV
-    const titel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)}${prozent >= 0 ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(balV) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
+    const titel = `${boden != null ? 'Liq ' + de(boden) + ' · ' : ''}Start ${de(groesse)} · jetzt ${de(istV)}${prozent != null && prozent >= 0 ? ' (' + prozent + ' %)' : ''}${plL != null ? ' = Balance ' + de(balV) + ' ' + (plL >= 0 ? '+' : '−') + ' P&L ' + de(Math.abs(plL)) : ''}${tpUsd ? ' · nach TP ' + de(istV + tpUsd) : ''}${slUsd ? ' · nach SL ' + de(istV - slUsd) : ''} · Ziel ${de(ziel)}`
     const idFarb = a.uid ? idFarbe(String(a.uid)) : 'var(--ink)'
     // VORHER → NACHHER (08.10.2026, Finn zu „Heute beendet": „wo steht der Account gerade, wo ist das Ziel, wo ist der Blow, was hat dieser
     // Trade ausgemacht … kleine leuchtende Farben"): mit a.vor füllt der Sockel bis zum kleineren Stand (gedeckt), der Beitrag des Trades
@@ -41273,7 +41277,8 @@
       const liveZ = !live ? `<i class="pz-live is-leer" title="${escapeHtml(bal.tip || '')}"></i>` : live.live
         ? `<i class="pz-live" title="Balance nach dem letzten Trade gelesen · ${escapeHtml(bal.tip)}">●</i>`
         : `<i class="pz-live is-alt" title="Nicht live: seit dem letzten Trade (Ende ${new Date(live.ende).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}) nicht neu gelesen — TP/SL im Plan können falsch sein · ${escapeHtml(bal.tip)}">⚠</i>`
-      const ziel = notiz ? notiz.ziel : 0
+      // POLAR (o.zielTp, 21.10.2026, Finn: „rechts Balance + TP dieses Trades"): Ziel = Balance + TP, Rest = TP; sonst das Ziel aus der Notiz
+      const ziel = o.zielTp ? (Number(p.masterTp) > 0 ? Math.round(bal.val + Number(p.masterTp)) : 0) : notiz ? notiz.ziel : 0
       // SKALA START → ZIEL (Nachtrag Finn 08.10.2026 ~04:00 Dubai, Screenshot „150.000 → 159.000 · Balken ~35 %": er las den hellen
       // Potenzial-Abschnitt als Ist — der Ist-Anteil war 0 %): Start = Kontogröße bzw. starting_balance (groesse), Ziel aus Balance + Rest.
       // Ist-Anteil = (Balance − Start) ÷ (Ziel − Start) satt grün; Potenzial = heller Abschnitt von Balance bis Balance + TP-$ dieses Trades
@@ -41284,8 +41289,8 @@
       // 108.000"): linker Rand = Liquidations-Level (planZeileBoden), Start als feiner Strich, Start → Balance satt grün (darunter rot),
       // Balance → Ziel hell „offen", Potenzial dieses Trades pulsiert (nur Deckkraft). Ohne Boden bleibt die Skala Start → Ziel von oben.
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0, slUsd = Number(p.masterSl) > 0 ? Number(p.masterSl) : 0
-      const mitBahn = ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3
-      const bz = mitBahn ? pzBahnHtml({ groesse, ziel, boden: planZeileBoden(p, konto, o, groesse), ist: istV, tpUsd, slUsd, uid: o.uid, plL, balVal: bal.val }) : null
+      const mitBahn = o.zielTp ? ziel > istV : (ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3)
+      const bz = mitBahn ? pzBahnHtml({ groesse, ziel, boden: planZeileBoden(p, konto, o, groesse), ist: istV, tpUsd, slUsd, uid: o.uid, plL, balVal: bal.val, zielFrei: !!o.zielTp }) : null
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${bal.startwert ? `<span class="pz-rest" title="${escapeHtml(PLAN_STARTWERT_TIP)}"> Startwert</span>` : ''}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (bz ? bz.html : '')
     } else if(notiz && (notiz.ziel || notiz.rest)){
@@ -41432,7 +41437,7 @@
    * Spalte ID vorn wie im Trade-Planer). Je Plan ein Paar: oben Master (Funded Futures, TradingView, Kontrakte, TP/SL am Plan), darunter
    * Slave (Funded CFD, MT5, Lots aus mt5_baseline.polar_auftrag, Gegenrichtung). Slave-TP/SL in $ wie im Polar-Popup (polarRechnen):
    * Lots × $/Pkt der Slave-Firma (tpFirmPpl) × Punkte aus dem Auftrag. Balance der Slave-ID (andere ID) aus /admin/overview
-   * (polarKontenLaden, einmal nachgeladen). Ziel/Fortschritt je Seite: noch offen — Finn schickt seine Rechenregeln, bis dahin nur Balance.
+   * (polarKontenLaden, einmal nachgeladen). Zeitstrahl je Seite (Finn 21.10.2026): Liq-Boden → Balance + TP, Punkt = Balance (o.zielTp).
    * Knöpfe (✎ 🗑 Starten Läuft Erledigt) baut renderTradePlanCard mit denselben data-plan-*-Attributen → bindTradePlanCardActions unverändert. */
   let _polGzLadenAt = 0
   function polarGzKonten(){ try{ return _polarKonten || [] }catch(_){ return [] } }   // let steht weiter unten im Modul (TDZ beim frühen Zeichnen)
@@ -41449,7 +41454,10 @@
     const wer = (k, uid, rolle) => `<i style="background:${idFarbe(String(uid || (k && k.user_id) || rolle))}"></i><span class="pol-gz-wer"><b>${escapeHtml((k && k.person) || (rolle === 'Master' ? 'Diese ID' : 'Slave-ID'))}</b><small>${rolle}</small></span>`
     const ueBal = k => k && k.balance != null ? { val: Number(k.balance), at: 0, tip: 'Balance aus der Admin-Übersicht' } : null
     // Master: eigenes Konto (Plan-Besitzer = diese ID) → Balance mit Live-Marke wie jede Geplant-Zeile; sonst aus der Übersicht
+    // Zeitstrahl (21.10.2026, Finn: „links der Liq-Boden, rechts Balance + TP dieses Trades, Punkt auf der aktuellen Balance"): zielTp; Boden aus
+    // /admin/overview (app.py admin_skala_felder — dieselben Liq-Helfer wie Radar), sonst planZeileBoden (Größe − Max DD des eigenen Kontos)
     const master = planZeileHtml(p, mKonto, { name: o.name, ext: o.ext, extTitle: o.extTitle, chips: o.chips, akt: o.akt, uid: mUe && mUe.user_id,
+      zielTp: true, boden: mUe && mUe.boden,
       bal: mKonto ? undefined : ueBal(mUe), wer: wer(mUe, mUe && mUe.user_id, 'Master'),
       notiz: { art: 'TradingView', stufe: 'Master · Funded Futures · platziert in TradingView' } })
     // Slave: Lots, Gegenrichtung, TP/SL in $ aus dem gespeicherten Auftrag — als Plan-Kopie in die Master-Felder, damit planZeileHtml sie zeichnet
@@ -41465,7 +41473,7 @@
       richtung: p.richtung === 'buy' ? 'sell' : p.richtung === 'sell' ? 'buy' : null, masterContracts: lots, masterTp: sTp, masterSl: sSl,
       masterSymbol: null, route: 'mt5v2', startUm: null, startUmGestartetAt: null, autoPlan: false, notes: '', mt5Baseline: null, kontoTyp: 'funded_cfd' })
     const slave = planZeileHtml(sp, sKonto, { name: p.slaveName || (sUe && sUe.name) || '— gelöscht —', ext: (sKonto && sKonto.externalId) || '', extTitle: '',
-      chips: '', akt: o.akt2 || '', zeit: ' ', uid: sUe && sUe.user_id, bal: sKonto && (accounts || []).includes(sKonto) ? undefined : ueBal(sUe),
+      chips: '', akt: o.akt2 || '', zeit: ' ', uid: sUe && sUe.user_id, zielTp: true, boden: sUe && sUe.boden, bal: sKonto && (accounts || []).includes(sKonto) ? undefined : ueBal(sUe),
       wer: wer(sUe, sUe && sUe.user_id, 'Slave'),
       notiz: { art: 'MT5', stufe: `Slave · Funded CFD · MT5 — TP ${Number(pa.tp_pkt) || '?'} Pkt / SL ${Number(pa.sl_pkt) || '?'} Pkt ab eigenem Fill × ${sPpl} $/Pkt je Lot` } })
       .replace(' data-plan-id="', ' data-pol-slave="')   // eine Plan-ID je Paar (Wrapper), nicht doppelt
@@ -42344,13 +42352,13 @@
           : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Von Hand gestartet — nur als laufend markieren (ohne Puls, ohne Baseline: P&L später von Hand)">Läuft</button>${rest}`
             + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>`)
       }
-      // GEPLANTE TRADES FÜR POLAR (21.10.2026): Knöpfe der Paar-Zeile — Master-Teilzeile ✎ 🗑 + „Starten" (Prüf-Tabelle, nur solange keine
-      // Startzeit gesetzt ist: nach der Freigabe zeigt die Start-Spalte die Zeit bzw. „gestartet"), Slave-Teilzeile „Läuft" (Hand-Weg) +
-      // „Erledigt" (beide P&Ls) — so bleiben beide Zeilen einzeilig
+      // GEPLANTE TRADES FÜR POLAR (21.10.2026): Knöpfe der Paar-Zeile — Master-Teilzeile ✎ 🗑 + „Starten" (Prüf-Tabelle; immer da wie seit .1670,
+      // gesperrt nur über polarStartSperre — nach einem Abbruch sofort wieder klickbar), Slave-Teilzeile „Läuft" (Hand-Weg) + „Erledigt"
+      // (beide P&Ls) — so bleiben beide Zeilen einzeilig
       if(p.route === 'polar'){
         zeileAkt = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
           + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
-          + (p.startUm ? '' : polarStartBtn)
+          + polarStartBtn
         zeileAkt2 = `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" style="font-weight:400" title="Von Hand: Polar-Trade als laufend markieren — beide Seiten platzierst du selbst, kein Bot. Hält Master- und Slave-ID wie ein Bot-Lauf (kein Puls, keine Balance-Lesung), bis „Erledigt" mit beiden P&Ls">Läuft</button>`
           + `<button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Abschließen — P&L beider Konten eintragen">Erledigt</button>`
       }
@@ -45812,7 +45820,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1670'
+  const OS_TAB_BUILD = '2026-09-22.1671'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55227,7 +55235,7 @@
       const d = await r.json()
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       _polarKonten = (d.accounts || []).filter(a => !a.archived && (a.type === 'funded' || a.type === 'funded_cfd'))
-        .map(a => ({ id: a.id, name: a.name || a.ext || '', ext: a.ext || '', firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,   // ext: Endnummer in „Geplante Trades für Polar" (21.10.2026)
+        .map(a => ({ id: a.id, name: a.name || a.ext || '', ext: a.ext || '', boden: (typeof a.boden === 'number' && isFinite(a.boden)) ? a.boden : null, firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,   // ext: Endnummer in „Geplante Trades für Polar" (21.10.2026)
                      balance: (typeof a.balance === 'number' && isFinite(a.balance)) ? a.balance : null }))
       return ''
     }catch(e){
