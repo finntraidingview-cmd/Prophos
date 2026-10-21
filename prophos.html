@@ -58880,6 +58880,10 @@
    * versetzt wie wdKontoZeiten). Planer-Pläne (ap_wd_block_starts) und den Riegel selbst prüfen Planer und DB. Fenster voll → direkt dahinter.
    * bis_hhmm: sql/2026-10-08_wd_zeitfenster.sql. */
   const WD_VON_STD = '05:00', WD_BIS_STD = '18:00'
+  /* TAGESLAUF (21.10.2026, Finn: „einmal am Tag werden alle Winning Days durchgeplant"): die PC-Tabs würfeln alle offenen Zeilen des
+   * Tages ab WD_TAGESLAUF_HHMM Dubai (Nachlauf für spät eingetragene IDs bis start_hhmm, danach gilt die Zeile von morgen). Konten, die
+   * tagsüber den Haken bekommen oder neu WD werden, fahren erst im nächsten Tageslauf mit (naechster_lauf an der Tageszeile). */
+  const WD_TAGESLAUF_HHMM = '00:10'
   const WD_FIRMA_ABSTAND_MIN = 1   // = Firmen-Abstand von Planer/Bot/DB (app.py AP_FIRMA_ABSTAND_MIN, Finn 08.10.2026: 1 min je Firma)
   const WD_GEGENHEDGE_S = 90 + 40   // = DB prophos_gegenhedge_fenster() 90 s + Jitter bis 40 s, um den der Riegel einen Gegen-Start schiebt
   // Abstand zwischen zwei Block-Starts: Firmen-Minute hinter dem letzten Konto des Blocks (nKonten = meiste aktive Konten eines Blocks),
@@ -59023,11 +59027,11 @@
     for(const x of rows || []){ const e = _wd.umsortiert.get(String(x.user_id)); if(e && !wdFest(x)){ x.reihenfolge = e.reihenfolge; x.start_um = e.start_um } }
     return rows
   }
-  // Rein rechnend: was ist in diesem Tick zu tun? Registrieren ab 00:00 bis zur Startzeit, würfeln ab 00:10.
+  // Rein rechnend: was ist in diesem Tick zu tun? Registrieren ab 00:00 bis zur Startzeit, würfeln ab dem Tageslauf (WD_TAGESLAUF_HHMM).
   function wdTickEntscheidung(j, r, registriertTag){
     const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || WD_VON_STD)
     const startMin = m ? (+m[1]) * 60 + (+m[2]) : 300
-    return { registrieren: registriertTag !== j.tag && j.minuten < startMin, wuerfeln: j.minuten >= 10 }
+    return { registrieren: registriertTag !== j.tag && j.minuten < startMin, wuerfeln: j.minuten >= wdHhmmMin(WD_TAGESLAUF_HHMM, '00:10') }
   }
 
   async function wdLaden(){
@@ -59248,6 +59252,7 @@
   const WD_HINWEIS_FARM = 'nicht im Farm (Haken aus)'
   const WD_HINWEIS_EXT = 'ohne External ID — der Bot kann das Konto nicht wählen'
   const WD_HINWEIS_ARCHIV = 'archiviert (Konto-Archiv) — fährt nicht mit'
+  const WD_HINWEIS_TAGESLAUF = `kommt im nächsten Tageslauf dazu (${WD_TAGESLAUF_HHMM} Dubai)`
   const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden']   // vom Server gesetzt, nicht von Finn
 
   /* ── Erwartete Blöcke (Mac): alle IDs mit Funded/Live-Konten bei Futures-Firmen — aus der RPC/Railway,
@@ -59362,13 +59367,20 @@
     // Richtung übernehmen (08.10.2026) — aber nie aus der Admin-Ansicht eines eingeschränkten Logins (Verwalter: _wd.daten kennt nur seine
     // Gruppe, Nachbesserung A): dann ohne, wie sein PC-Tab bis .1380 würfelte
     const rf = (typeof window._admNurGruppe === 'function' && window._admNurGruppe()) ? {} : (((_wd.daten || {}).richtung_fest) || {})
+    // Bewusst neu würfeln (21.10.2026): Konten, die auf den nächsten Tageslauf warteten (naechster_lauf), fahren jetzt mit
+    const geloest = new Set()
+    if(alleNeu) for(const x of offen) for(const k of (x.konten || [])){
+      if(k && k.naechster_lauf && !k.plan_id){ delete k.naechster_lauf; k.aktiv = !!(k.farm && k.ext && !k.archiviert); k.hinweis = k.ext ? '' : WD_HINWEIS_EXT; geloest.add(String(x.user_id)) }
+    }
     const erg = wdWuerfeln(rows, r, tag, seed, alleNeu, Date.now(), rf)
     let n = 0
     // Prüfer M1 (08.10.2026): gerechnet wird über alle Zeilen (deterministisch wie jeder Tab), geschrieben vom eingeschränkten Login nur die eigene
     const schreibbar = await wdNurErlaubte(offen, true)
     await Promise.all(schreibbar.map(x => {   // parallel statt nacheinander (23.09.2026)
       const e = erg.get(String(x.user_id)); if(!e) return null
-      let q = supabase.from('wd_tagesplan').update({ reihenfolge: e.reihenfolge, start_um: e.start_um, richtung: e.richtung, status: e.status, updated_at: new Date().toISOString() }).eq('tag', tag).eq('user_id', x.user_id)
+      const upd = { reihenfolge: e.reihenfolge, start_um: e.start_um, richtung: e.richtung, status: e.status, updated_at: new Date().toISOString() }
+      if(geloest.has(String(x.user_id))) upd.konten = x.konten
+      let q = supabase.from('wd_tagesplan').update(upd).eq('tag', tag).eq('user_id', x.user_id)
       if(!alleNeu) q = q.is('start_um', null)   // wer zuerst schreibt, gewinnt — das Ergebnis ist ohnehin dasselbe
       return q.then(({ error }) => { if(!error) n++ })
     }))
@@ -59613,12 +59625,15 @@
         for(const z of (fr || [])){ const a = (accounts || []).find(q => String(q.id) === String(z.id)); if(a) a.wdFarm = !!z.wd_farm }
       }
     }catch(e){ console.warn('[wd] wd_farm frisch', (e && e.message) || e) }
-    // (1a) Neue Konten in die Zeile — sonst käme ein frisch angelegtes Funded erst am nächsten Tag an
+    // (1a) Neue Konten in die Zeile. NUR IM TAGESLAUF (21.10.2026, Finn: „Er soll nicht sofort geplant werden, sondern immer zu einer
+    //      festen Uhrzeit"): ist die Zeile schon gewürfelt (start_um), kommt ein neues Konto nur wartend dazu (naechster_lauf, inaktiv) —
+    //      bisher legte (2) 90 s später den Plan an und das Konto hing sich in den fertigen Block
     if(offenFuer){
       for(const c of tpVorplanKandidaten()){
         if(!wdIstWdKonto(c.acc) || konten.some(k => String(k.id) === String(c.acc.id))) continue   // nur Typ Winning Days (26.09.2026)
-        const farm = farmVon(c.acc), sp = wdTpSpanne(c.acc.firm, c.acc)
-        konten.push({ id: String(c.acc.id), name: c.acc.name, firm: c.acc.firm, ext: String(c.acc.externalId || '').trim(), farm, aktiv: farm, tpVon: sp[0], tpBis: sp[1], hinweis: farm ? '' : WD_HINWEIS_FARM })
+        const farm = farmVon(c.acc), sp = wdTpSpanne(c.acc.firm, c.acc), warten = farm && !!row.start_um
+        konten.push({ id: String(c.acc.id), name: c.acc.name, firm: c.acc.firm, ext: String(c.acc.externalId || '').trim(), farm, aktiv: farm && !warten, tpVon: sp[0], tpBis: sp[1],
+                      hinweis: !farm ? WD_HINWEIS_FARM : warten ? WD_HINWEIS_TAGESLAUF : '', ...(warten ? { naechster_lauf: true } : {}) })
         geaendert = true
       }
     }
@@ -59629,6 +59644,7 @@
       for(const k of konten){
         const plan = planVon(k)
         if(k.plan_id && !(plan && plan.status === 'planned' && !plan.startUmGestartetAt)) continue
+        if(k.naechster_lauf && !k.plan_id) continue   // wartet auf den nächsten Tageslauf (21.10.2026) — nicht wieder aktiv schalten
         const acc = (accounts || []).find(a => String(a.id) === String(k.id))
         if(!acc){ if(!k.plan_id){ set(k, 'aktiv', false); set(k, 'hinweis', 'Konto nicht in diesem Profil') } continue }
         const farm = farmVon(acc)
@@ -60092,7 +60108,7 @@
       // Haken zeigt „heute drin" (29.09.2026, Finn bei Chris: Konto dauerhaft im Farm, heute abgewählt → das Kästchen stand ANGEHAKT;
       // „Haken setzen" nahm es in Wahrheit dauerhaft raus, nach dem Würfeln blieb es draußen). Heute abgewählt (mit External ID, nicht
       // archiviert) = leeres Kästchen; ein Tipp → wdKontoHaken(an) setzt es dauerhaft UND für heute rein. „nur heute raus" bleibt Tag-only.
-      const hakenAn = k.farm && (k.aktiv !== false || !k.ext || k.archiviert)
+      const hakenAn = k.farm && (k.aktiv !== false || k.naechster_lauf || !k.ext || k.archiviert)   // wartet auf den Tageslauf = Haken an (21.10.2026)
       const tagKnopf = (!erw && !fest && !nurLesen && !planFest && k.farm && k.ext && !k.archiviert)
         ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-heute="${escapeHtml(String(k.id))}" data-wd-heute-rein="${k.aktiv === false ? '1' : ''}" title="${k.aktiv === false ? 'für diesen Tag wieder mitfahren lassen' : 'nur an diesem Tag auslassen — morgen fährt das Konto wieder mit'}">${k.aktiv === false ? 'heute wieder rein' : 'nur heute raus'}</button>` : ''
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
@@ -60190,6 +60206,13 @@
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
     const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k) return
     k.farm = !!an; k.aktiv = !!(an && k.ext && !k.archiviert); k.hinweis = an ? (k.ext ? '' : WD_HINWEIS_EXT) : WD_HINWEIS_FARM
+    delete k.naechster_lauf
+    /* NUR IM TAGESLAUF (21.10.2026, Finn: „Ich habe den Account heute hinzugefügt … Er soll nicht sofort geplant werden, sondern immer zu
+     * einer festen Uhrzeit, wenn alle Winning Days durchgeplant werden"; Vorfall Marc Apex 150k …0001: Haken 22:03 Dubai → F35
+     * wdSlotEinplanen gab der ID sofort einen eigenen Slot, wdPlaeneAnlegen legte Plan 842453ce an). Der Haken setzt nur noch dauerhaft:
+     * ungewürfelte Zeile → das Konto fährt im Tageslauf (WD_TAGESLAUF_HHMM) mit; schon gewürfelt → es wartet (naechster_lauf) und kommt
+     * nicht in den fertigen Block. Sofort nur über „heute wieder rein" oder bewusstes Würfeln. */
+    if(an && k.aktiv && x.start_um && !k.plan_id){ k.aktiv = false; k.naechster_lauf = true; k.hinweis = WD_HINWEIS_TAGESLAUF }
     const kd = wdKontoDaten(kontoId); if(kd) kd.wd_farm = !!an
     x.status = (x.konten || []).some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
     wdRender()
@@ -60202,13 +60225,8 @@
       }
       const konten = (x.konten || []).map(q => ({ ...q }))
       await supabase.from('wd_tagesplan').update({ konten, status: x.status, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
-      let angelegt = 0, slot = ''
-      // F35: erstes aktives Konto einer ID ohne Startzeit → eigener Slot, ohne neu zu würfeln (bestehende Blöcke bleiben)
-      if(an && !x.start_um && wdAktiv(k)){ try{ slot = await wdSlotEinplanen(x) }catch(e){ slot = 'Einplanen fehlgeschlagen: ' + (e.message || e) } }
-      else if(an && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }   // hängt sich in den bestehenden Block
-      wdSay(slot || (an ? `${k.name || 'Konto'} ist drin — dauerhaft${angelegt ? ', Plan angelegt' : ''}.` : `${k.name || 'Konto'} ist raus — dauerhaft${planWeg ? ', Plan gelöscht' : ''}.`), 'ok')
-      if(slot && typeof atToast === 'function') atToast(slot, /fehlgeschlagen/.test(slot) ? 'end' : 'start')
-      if(slot){ try{ wdRender() }catch(_){} }
+      wdSay(an ? `${k.name || 'Konto'} ist drin — dauerhaft; fährt ab dem Tageslauf ${WD_TAGESLAUF_HHMM} Dubai mit${k.naechster_lauf ? ` (Block ${x.tag} ist schon gewürfelt → nächster Lauf)` : ''}.`
+               : `${k.name || 'Konto'} ist raus — dauerhaft${planWeg ? ', Plan gelöscht' : ''}.`, 'ok')
       wdCacheSchreiben(x.tag)
     }catch(e){ wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
   }
@@ -60230,7 +60248,7 @@
     if(!(await wdDarf(uid))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
     const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k || !k.farm) return
-    k.aktiv = !!(rein && k.ext && !k.archiviert); k.hinweis = ''
+    k.aktiv = !!(rein && k.ext && !k.archiviert); k.hinweis = ''; delete k.naechster_lauf   // „heute wieder rein" = bewusst sofort (21.10.2026)
     x.status = (x.konten || []).some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
     wdRender()
     try{
