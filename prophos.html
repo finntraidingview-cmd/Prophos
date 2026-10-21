@@ -30306,9 +30306,11 @@
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
-    const abArt = abhakArt(pid, kontoStatus), abNach = abhakZeileWandern(pid, abArt)   // Abhak-Rückmeldung (21.10.2026, nur Anzeige)
-    mklWdErledigtZu(); wdlSofortErledigt(pid); abNach()
-    abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '')
+    // Abhak-Rückmeldung (21.10.2026, nur Anzeige) — in try: ein Anzeige-Fehler darf das Abhaken nie unterbrechen
+    let abArt = '', abNach = () => {}
+    try{ abArt = abhakArt(pid, kontoStatus); abNach = abhakZeileWandern(pid, abArt) }catch(_){}
+    mklWdErledigtZu(); wdlSofortErledigt(pid)
+    try{ abNach(); abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '') }catch(_){}
     // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
     if(btn) btn.disabled = false
@@ -46140,7 +46142,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1687'
+  const OS_TAB_BUILD = '2026-09-22.1688'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62317,11 +62319,15 @@
       planKontoTypMerken(idx >= 0 ? tradePlans[idx] : rowToPlan(data))   // Kontotyp zum Zeitpunkt des Trades (25.09.2026)
       if(data && data.status === 'completed'){
         // Abhak-Rückmeldung (21.10.2026, nur Anzeige): Polar zählt geblowt über die zwei Haken
-        const abArt = abhakArt(_completingPlanId, (tcPolar && blown) ? 'blown' : statusChoice), abNach = abhakZeileWandern(_completingPlanId, abArt)
+        // in try: ein Anzeige-Fehler darf Speichern/Buchen danach nie unterbrechen (Master 21.10.2026)
+        let abArt = '', abNach = () => {}
+        try{ abArt = abhakArt(_completingPlanId, (tcPolar && blown) ? 'blown' : statusChoice); abNach = abhakZeileWandern(_completingPlanId, abArt) }catch(_){}
         wdlSofortErledigt(_completingPlanId)   // Live Trades sofort nach „Erledigt" (01.10.2026)
-        abNach()
-        const abAcc = accounts.find(a => String(a.id) === String(targetAccountId || p.masterAccountId))
-        abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(_completingPlanId, abAcc && abAcc.type) : '')
+        try{
+          abNach()
+          const abAcc = (accounts || []).find(a => String(a.id) === String(targetAccountId || p.masterAccountId))
+          abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(_completingPlanId, abAcc && abAcc.type) : '')
+        }catch(_){}
       }
       // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s, bis das Popup schließt"): der Plan ist gespeichert — das Popup geht
       // jetzt schon zu, die Buchungen in Finanzen und Zähler laufen dahinter weiter (Fehler danach als Hinweis, nicht im Popup)
