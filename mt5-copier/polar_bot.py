@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.7"   # 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.8"   # 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -479,6 +479,14 @@ def order_zeile_passt(zeile, gegen, art):
     return ("limit" in typ and "stop" not in typ) if art == "tp" else ("stop" in typ)
 
 
+def order_zeile_arbeitet(zeile):
+    """REIN RECHNEND (testbar): Order-Zeile noch aktiv? Mit Status-Spalte nur Working/Placed/Active/Arbeitet/Aktiv (der Reiter kann je
+    nach Filter auch Filled/Cancelled früherer Läufe zeigen); ohne Status-Spalte zählt die Zeile."""
+    sp = (zeile or {}).get("spalten") or {}
+    st = str(sp.get("Status") or sp.get("Zustand") or "").strip().lower()
+    return not st or bool(re.search(r"working|placed|active|arbeit|aktiv|offen|pending", st))
+
+
 def zeilen_preis(zeile):
     sp = (zeile or {}).get("spalten") or {}
     for k in ("Limit Price", "Limitpreis", "Stop Price", "Stopp-Preis", "Price", "Preis"):
@@ -728,6 +736,44 @@ def position_zu_bewiesen(st, ticket):
     return not any(isinstance(p, dict) and p.get("ticket") == ticket for p in st["positionen"])
 
 
+RX_MODAL_CLOSE = re.compile(r"^(close position|position schlie(?:ß|ss)en)$", re.I)
+RX_MODAL_SEITE = re.compile(r"\b(long|short)\s+([\d.,]+)", re.I)
+
+
+def close_modal_wahl(modals, root, richtung, menge):
+    """REIN RECHNEND (testbar, Finn 21.10.2026): „Close position"-Rückfrage nach dem ×-Klick → (knopf | None, grund). Gedrückt wird nur,
+    wenn GENAU EIN solches Modal offen ist, darin genau das Symbol (Wurzel), die Richtung (Long = buy, Short = sell) und die Menge der
+    eigenen Position stehen und es genau EINEN Knopf „Close position" gibt. „Cancel" nie. grund: kein_modal | passt | <Klartext>."""
+    # Rückfrage = Kasten mit „Cancel"-Knopf daneben; ein „Close position" in der Positions-Tabelle ist kein Modal und zählt nicht mit
+    ms = [m for m in (modals or ()) if isinstance(m, dict)
+          and any(re.match(r"^(cancel|abbrechen)$", str(k.get("text") or "").strip(), re.I) for k in (m.get("knoepfe") or ()) if isinstance(k, dict))]
+    if not ms:
+        return None, "kein_modal"
+    if len(ms) > 1:
+        return None, f"{len(ms)} Close-Modals offen — nicht eindeutig"
+    m = ms[0]
+    text = str(m.get("text") or "")
+    roots = {ob.tv_symbol_root(t) for t in re.findall(r"[A-Z0-9_]+:[A-Z0-9!]+", text.upper())}
+    if roots != {str(root or "").upper()}:
+        return None, f"Modal nennt {sorted(roots) or 'kein Symbol'} statt {root}"
+    sm = RX_MODAL_SEITE.search(text)
+    if not sm:
+        return None, "Modal ohne Long/Short + Menge"
+    seite = "buy" if sm.group(1).lower() == "long" else "sell"
+    if seite != str(richtung).lower():
+        return None, f"Modal {sm.group(1)} statt {'Long' if str(richtung).lower() == 'buy' else 'Short'}"
+    try:
+        n = float(sm.group(2).replace(",", ""))
+    except ValueError:
+        return None, f"Menge '{sm.group(2)}' unlesbar"
+    if abs(n - float(menge)) > 0.01:
+        return None, f"Modal-Menge {n:g} statt {float(menge):g}"
+    kn = [k for k in (m.get("knoepfe") or ()) if isinstance(k, dict) and RX_MODAL_CLOSE.match(str(k.get("text") or "").strip())]
+    if len(kn) != 1 or not (isinstance(kn[0].get("rect"), (list, tuple)) and len(kn[0]["rect"]) == 4):
+        return None, f"{len(kn)} Knöpfe „Close position\" im Modal"
+    return kn[0], "passt"
+
+
 def schliess_urteil(geklickt, weg_nach_s, dialog_knopf=False, limit_s=X_BEWEIS_S):
     """REIN RECHNEND (testbar): nach dem ×-Klick → 'zu' (Position in ≤ limit s weg), 'dialog' (Bestätigungsdialog mit eindeutigem
     Knopf — Ein-Klick-Handel aus, Knopf drücken), 'rueckfall' (nicht geklickt oder nach limit s noch offen → alter Weg)."""
@@ -818,6 +864,31 @@ CHART_X_JS = r"""(function () {
                tooltip: A(e, 'data-tooltip').slice(0, 60), dn: A(e, 'data-name').slice(0, 60), im_chart: imChart, in_tabelle: inTab });
   }
   return { kandidaten: out, tooltips: tips.slice(0, 5) };
+})()"""
+
+# „Close position"-Rückfrage nach dem ×-Klick am Master (Finn 21.10.2026: „… dann muss man einfach noch aufs X drücken und dann noch ganz
+# kurz auf Close Position. Aber das kommt nur manchmal"): Screenshot = Modal mit Titel „Close position", Zeile „CME_MINI:MNQZ2026 · Long 1
+# @ 29,983.00", Knöpfe „Cancel" und „Close position". Nur lesen: je Modal Titel, Text und alle Knöpfe (Text, Rechteck, data-name).
+CLOSE_MODAL_JS = r"""(function () {
+  function sb(e) { try { var r = e.getBoundingClientRect(); if (r.width < 3 || r.height < 3 || r.bottom < 0 || r.top > innerHeight) return false;
+    var s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
+  function R(e) { var r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }
+  function T(e) { return String((e && e.textContent) || '').replace(/\s+/g, ' ').trim(); }
+  var rx = /^(close position|position schlie(ß|ss)en)$/i, boxen = [], out = [];
+  Array.prototype.slice.call(document.querySelectorAll('button,[role="button"]')).filter(function (b) { return sb(b) && rx.test(T(b)); }).forEach(function (b) {
+    var box = b.closest('[role="dialog"],[data-dialog-name]'), p = b.parentElement;
+    for (var i = 0; !box && p && i < 8; i++, p = p.parentElement) {
+      if (p.querySelectorAll('button,[role="button"]').length >= 2 && T(p).length > T(b).length + 8) box = p; }
+    box = box || b;
+    if (boxen.indexOf(box) < 0) boxen.push(box);
+  });
+  boxen.forEach(function (box) {
+    var kn = Array.prototype.slice.call(box.querySelectorAll('button,[role="button"]')).filter(sb).map(function (k) {
+      return { text: T(k).slice(0, 40), rect: R(k), dn: k.getAttribute('data-name') || '' }; });
+    var h = box.querySelector('h1,h2,h3,[class*="title"],[data-name*="title"]');
+    out.push({ titel: T(h).slice(0, 60), text: T(box).slice(0, 240), knoepfe: kn.slice(0, 8), rect: R(box) });
+  });
+  return out;
 })()"""
 
 TOOLTIP_JS = r"""(function () {
@@ -949,6 +1020,35 @@ def master_level_setzen(lauf, s, opts, plan, root, sl_soll, tp_soll, tick=0.25):
     return erg
 
 
+def master_level_lesen(lauf, s, root, plan):
+    """NUR LESEN (21.10.2026, Lauf 3a1cc58e: level {ok:false, tp:null, sl:null}, obwohl in TradingView Sell limit 30.003,50 und Sell stop
+    29.954,00 standen — die Meldungen hatten die Level diesmal nicht): Reiter Orders → je Bracket (TP = Limit, SL = Stop der Gegenseite)
+    GENAU EINE Zeile → Preis. Nichts wird geändert; danach zurück auf Positionen. -> {tp, sl, teile}"""
+    erg = {"tp": None, "sl": None, "teile": []}
+    try:
+        if not ob._cdp_reiter(s, "orders", lauf.trail):
+            erg["teile"].append("Reiter Orders nicht aktiv")
+            return erg
+        ob._warte(0.4, 0.2)
+        gegen = "sell" if plan["richtung"] == "buy" else "buy"
+        zeilen = [z for z in (s.lese_js(ob.K3_ZEILEN_JS) or []) if isinstance(z, dict) and z.get("sichtbar") and ob.tv_symbol_root(str(z.get("symbol") or "")) == root
+                  and order_zeile_arbeitet(z)]
+        for art in ("tp", "sl"):
+            treffer = [z for z in zeilen if order_zeile_passt(z, gegen, art)]
+            if len(treffer) == 1 and zeilen_preis(treffer[0]) is not None:
+                erg[art] = float(zeilen_preis(treffer[0]))
+            erg["teile"].append(f"{art.upper()} {erg[art] if erg[art] is not None else '—'} ({len(treffer)} Zeile(n))")
+    except Exception as e:
+        erg["teile"].append(f"Lesen: {type(e).__name__}")
+    finally:
+        try:
+            ob._cdp_reiter(s, "positions", lauf.trail)
+        except Exception:
+            pass
+    lauf.log("Polar-Level Master aus dem Orders-Reiter (nur lesen): " + " · ".join(erg["teile"]))
+    return erg
+
+
 def master_druck(lauf, punkt, hwnd):
     """Zur Feuerzeit: Vordergrund + Fenster am Punkt (Millisekunden), dann EIN SendInput-Druck. -> (ok, klick_ms)"""
     if not punkt or not hwnd:
@@ -1065,7 +1165,12 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
     lauf.phase("x_geklickt", klick_ms=klick_ms, x_art=(park or {}).get("art"), x_ok=geklickt)
     lauf.log(f"Polar: × geklickt ({(park or {}).get('art')}, {int((time.time() - t0) * 1000)} ms nach dem Signal)" if geklickt else "Polar: × NICHT gedrückt (Maus/Fenster nicht bewiesen)")
 
+    modal_fremd = [None]
+
     def flach_beweis(limit_s):
+        # „Close position"-Rückfrage (Finn 21.10.2026: „kommt nur manchmal … ganz wichtig: es muss schnell gehen"): ab dem ERSTEN Takt
+        # (~50 ms) mitlesen, nicht erst nach 0,6 s. Passt das Modal zur eigenen Position (close_modal_wahl) → EIN Klick auf „Close
+        # position" mit Ziel-Beweis am Punkt (pruef); passt es nicht → nie klicken, Grund ins Log, der Rückfall bzw. „SOFORT schließen" folgt.
         ende, flach_seit, dialog_zu = time.time() + limit_s, None, False
         while time.time() < ende:
             u = reader_flach(ob._tv_http("/positions", timeout=0.5), ext, root, gesehen)
@@ -1075,16 +1180,17 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
                     return time.time() - t0, dialog_zu
             else:
                 flach_seit = None
-            if not dialog_zu and time.time() - t0 > 0.6:
-                try:                                   # Rückfrage (Ein-Klick aus): genau EIN Dialog mit submit-button + Close/Schließen
-                    st = s.stand(opts)
-                    dl = [p for p in st.get("popups") or [] if isinstance(p, dict) and ob.cdp_rect(p.get("submit"))]
-                    if len(dl) == 1:
-                        sub = dl[0].get("submit") or {}
-                        wort = f"{dl[0].get('titel') or ''} {dl[0].get('text') or ''} {sub.get('text') or ''}"
-                        if sub.get("dn") == "submit-button" and re.search(r"close|schlie", wort, re.I) and s.klick(ob.cdp_rect(sub), "Bestätigen (submit-button)"):
+            if not dialog_zu:
+                try:
+                    kn, mg = close_modal_wahl(s.lese_js(CLOSE_MODAL_JS, timeout=1) or [], root, plan["richtung"], plan["menge"])
+                    if kn is not None:
+                        if s.klick(kn["rect"], "Close position (Rückfrage)",
+                                   pruef={"rect": kn["rect"], "text": str(kn.get("text") or "").lower(), "aria": "", "tabu": r"cancel|abbrechen|reverse|umkehr"}):
                             dialog_zu = True
-                            lauf.log("Polar: Rückfrage 'Close position' bestätigt (Ein-Klick aus)")
+                            lauf.log(f"Polar: Rückfrage 'Close position' bestätigt {int((time.time() - t0) * 1000)} ms nach dem Signal")
+                    elif mg != "kein_modal" and modal_fremd[0] != mg:
+                        modal_fremd[0] = mg
+                        lauf.log(f"Polar: Close-Modal NICHT bestätigt — {mg}")
                 except Exception:
                     pass
             time.sleep(X_TAKT_S)
@@ -1100,7 +1206,7 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
         lauf.log(f"Polar: Master flach {weg * 1000:.0f} ms nach dem Signal — × hat geschlossen")
         return zu_ms, f"x_{park['art']}"
     # RÜCKFALL: Close-Knopf der Positions-Tabelle (dieselbe Regel wie tvclose: genau eine Zeile, genau ein Knopf), dann Beweis
-    lauf.log("Polar: × ohne Beweis — Rückfall Close-Knopf der Positions-Tabelle")
+    lauf.log("Polar: × ohne Beweis — Rückfall Close-Knopf der Positions-Tabelle" + (f" (Close-Modal passte nicht: {modal_fremd[0]})" if modal_fremd[0] else ""))
     try:
         if not (park and park.get("art") == "tabelle"):
             ob._cdp_reiter(s, "positions", lauf.trail)
@@ -1125,7 +1231,7 @@ def master_x_klicken(lauf, s, opts, ext, root, plan, park, gesehen):
                     return jetzt_ms(), "rueckfall_tabelle"
     except Exception as e:
         lauf.log(f"Polar: Rückfall ({type(e).__name__})")
-    return None, "nicht_zu"
+    return None, ("modal_fremd" if modal_fremd[0] else "nicht_zu")
 
 
 def master_wache(lauf, s, opts, ext, root, plan, park=None):
@@ -1329,7 +1435,15 @@ def lauf_master(cmd):
         sl_pkt, tp_pkt = _zahl(cmd.get("sl_pkt")), _zahl(cmd.get("tp_pkt"))
         sl_s, tp_s = level_vom_fill(plan["richtung"], fill, sl_pkt, tp_pkt, 2, tick=0.25) if (fill and sl_pkt and tp_pkt) else (None, None)
         tp_t, sl_t = ob.cdp_zahl(b.get("tp")) if b.get("tp") is not None else None, ob.cdp_zahl(b.get("sl")) if b.get("sl") is not None else None
-        res["level"] = {"ok": tp_t is not None, "tp": tp_t, "sl": sl_t, "quelle": "ticket (wie Orbit)", "sl_soll": sl_s, "tp_soll": tp_s}
+        quelle_l = "meldung"
+        if tp_t is None or (sl_t is None and cmd.get("sl_usd")):
+            # Meldungen ohne Level (Lauf 3a1cc58e) → Orders-Reiter nur lesen; der Slave rechnet seinen Airbag-SL aus genau diesem TP
+            nl = master_level_lesen(lauf, s, root, plan)
+            if tp_t is None and nl["tp"] is not None:
+                tp_t, quelle_l = nl["tp"], "orders"
+            if sl_t is None and nl["sl"] is not None:
+                sl_t, quelle_l = nl["sl"], "orders"
+        res["level"] = {"ok": tp_t is not None, "tp": tp_t, "sl": sl_t, "quelle": f"ticket (wie Orbit), gelesen aus {quelle_l}", "sl_soll": sl_s, "tp_soll": tp_s}
         melden(lauf, "level", res["level"])
         lauf.phase("level", level=res["level"])
         lauf.log(f"Level wie Orbit aus dem Ticket: TP {tp_t if tp_t is not None else '?'} / SL {sl_t if sl_t is not None else '?'} (Soll vom Fill {tp_s} / {sl_s})")

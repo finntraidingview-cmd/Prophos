@@ -281,6 +281,39 @@ def main():
     ml = srcA[srcA.index("def _master_liq("):srcA.index("def _vp_zeile(")]
     check('A["liq_regel_felder"]' in ml and 'A["liq_peak"]' in ml and 'A["liq_tagesstart"]' in ml and 'A["wd_start_balance"]' in ml,
           "Master-Liq mit denselben Helfern wie der Radar (liq_regel_felder, Peak, Tagesstart, Start-Balance)")
+    print("10d) Master: „Close position“-Rückfrage nach dem × + Level aus dem Orders-Reiter (Finn 21.10.2026)")
+    cm = pb.close_modal_wahl
+    knz, kna = {"text": "Close position", "rect": [900, 500, 120, 32], "dn": "submit-button"}, {"text": "Cancel", "rect": [780, 500, 100, 32], "dn": ""}
+    mod = {"titel": "Close position", "text": "Close position CME_MINI:MNQZ2026 · Long 1 @ 29,983.00 Cancel Close position", "knoepfe": [kna, knz]}
+    k, g = cm([mod], "MNQ", "buy", 1)
+    check(k is knz and g == "passt", "Modal passt (Symbol, Long, Menge 1) → genau der Knopf „Close position“, nie Cancel")
+    check(cm([], "MNQ", "buy", 1) == (None, "kein_modal") and cm(None, "MNQ", "buy", 1) == (None, "kein_modal"), "kein Modal → nichts (schon zu)")
+    k2, g2 = cm([dict(mod, text="Close position CME_MINI:NQZ2026 · Long 1 @ 29,983.00 Cancel Close position")], "MNQ", "buy", 1)
+    check(k2 is None and "NQ" in g2, f"Modal mit anderem Symbol → kein Klick ({g2})")
+    check(cm([mod], "MNQ", "sell", 1)[0] is None and "Long statt Short" in cm([mod], "MNQ", "sell", 1)[1], "Richtung passt nicht → kein Klick")
+    check(cm([mod], "MNQ", "buy", 2)[0] is None and "Menge" in cm([mod], "MNQ", "buy", 2)[1], "Menge passt nicht → kein Klick")
+    check(cm([dict(mod, text="Close position CME_MINI:MNQZ2026 · Short 3 @ 29,983.00")], "MNQ", "sell", 3)[0] is knz, "Short 3 → sell 3 passt")
+    check(cm([mod, dict(mod)], "MNQ", "buy", 1)[0] is None, "zwei Close-Modals → nicht eindeutig, kein Klick")
+    zeile_tab = {"titel": "", "text": "MNQZ2026 Long 1 29,983.00 Close position", "knoepfe": [knz]}
+    check(cm([zeile_tab, mod], "MNQ", "buy", 1)[0] is knz and cm([zeile_tab], "MNQ", "buy", 1) == (None, "kein_modal"),
+          "„Close position“ in der Positions-Tabelle (ohne Cancel) zählt nicht als Modal")
+    check(cm([dict(mod, knoepfe=[kna])], "MNQ", "buy", 1)[0] is None and cm([dict(mod, knoepfe=[kna, knz, dict(knz)])], "MNQ", "buy", 1)[0] is None,
+          "kein / zwei Knöpfe „Close position“ → kein Klick")
+    check(cm([dict(mod, text="Close position Cancel Close position")], "MNQ", "buy", 1)[0] is None, "Modal ohne Symbol → kein Klick")
+    oa = pb.order_zeile_arbeitet
+    check(oa({"spalten": {"Status": "Working"}}) and oa({"spalten": {}}) and not oa({"spalten": {"Status": "Filled"}}) and not oa({"spalten": {"Status": "Cancelled"}}),
+          "Orders-Reiter: nur aktive Orders (Working/ohne Status), nie Filled/Cancelled früherer Läufe")
+    srcM = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    mx = srcM[srcM.index("def master_x_klicken("):srcM.index("def master_wache(")]
+    fb = mx[mx.index("def flach_beweis("):mx.index("weg, dialog = (None, False)")]
+    check("time.time() - t0 > 0.6" not in fb and "close_modal_wahl(s.lese_js(CLOSE_MODAL_JS" in fb and "submit-button" not in fb,
+          "Modal ab dem ersten Takt (~50 ms), alter 0,6-s-Weg über submit-button ist raus")
+    check('"tabu": r"cancel|abbrechen|reverse|umkehr"' in fb and "pruef=" in fb, "Klick nur mit Ziel-Beweis am Punkt, Cancel/Umkehr tabu")
+    ml = srcM[srcM.index("def master_level_lesen("):srcM.index("def master_druck(")]
+    check("s.klick(" not in ml and "feld_setzen" not in ml and "taste(" not in ml and '_cdp_reiter(s, "positions"' in ml,
+          "Level aus dem Orders-Reiter nur lesen, danach zurück auf Positionen")
+    lm2 = srcM[srcM.index("def lauf_master(cmd):"):srcM.index("def lauf_slave(cmd):")]
+    check(lm2.index("master_level_lesen(") < lm2.index('melden(lauf, "level"'), "Master liest fehlende Level VOR der level-Meldung (der Slave rechnet daraus)")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")
