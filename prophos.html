@@ -8236,6 +8236,8 @@
 
           <!-- Konflikt-Banner (doppelte magic/snapshot) -->
           <div id="mt5tab-notice" style="padding:0 20px"></div>
+          <!-- Firmen-Filter aus dem Muster-Portfolio (Finn 21.10.2026): Chip „FundedNext ×", gesetzt per Tacho-Klick (mpFiltern) -->
+          <div id="mt5tab-firma" style="padding:10px 16px 0;font-size:12.5px" hidden></div>
 
           <!-- Accounts-Tabelle -->
           <div class="table-wrap" id="mt5tab-tablewrap">
@@ -68092,23 +68094,45 @@
     </tr>`
   }
 
+  // Letzter Stand der Echo-Liste: der Firmen-Filter zeichnet sofort neu (ohne auf den nächsten 3-s-Poll zu warten)
+  let _mt5TabD = null
   function renderMt5Tab(d, noticeHtml){
     const tc = $('mt5tab-copier-chip'); if(!tc) return
     const anyAlive = (d.instances || []).some(x => x.alive)
     tc.innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
     const tv = $('mt5tab-version')
     if(tv && d.version){ tv.style.display = ''; tv.textContent = 'v' + d.version + mtcBotStand(d) }
-    const cnt = $('subtab-count-mt5'); if(cnt) cnt.textContent = String((d.instances || []).length)
+    _mt5TabD = { d, noticeHtml }
+    // FIRMEN-FILTER AUS DEM MUSTER-PORTFOLIO (Finn 21.10.2026: „Wenn ich unter Echo bin und oben das Muster-Portfolio als Filter nutzen will,
+    // sollen auch nur die Echo-Accounts dieser Firma angezeigt werden"): Tacho-Klick setzt window._echoFirma (mpFiltern). Firma je Instanz =
+    // verknüpftes Prophos-Konto, sonst der Broker-Server; verglichen mit derselben Normalisierung wie die Tachos (window._mpNorm).
+    const alleInst = d.instances || [], ff = window._echoFirma || null
+    const norm = typeof window._mpNorm === 'function' ? window._mpNorm : (v => String(v || '').trim().toLowerCase())
+    const firmaVon = x => { const s = x.status || {}, login = String(s.master_login || x.master_expected || '')
+      let acc = null; try{ const id = login && typeof window.mt5GetLinks === 'function' ? window.mt5GetLinks()[login] : null; acc = id ? (accounts || []).find(m => String(m.id) === String(id)) : null }catch(_){}
+      return (acc && acc.firm) || s.master_server || x.master_server || '' }
+    const gefiltert = ff ? alleInst.filter(x => norm(firmaVon(x)) === norm(ff)) : alleInst
+    const cnt = $('subtab-count-mt5'); if(cnt) cnt.textContent = ff ? `${gefiltert.length} von ${alleInst.length}` : String(alleInst.length)
+    const fc = $('mt5tab-firma')
+    if(fc){ fc.hidden = !ff; fc.innerHTML = ff ? `<button type="button" class="adm-vl-chip is-on" data-echo-firma-x title="Firmen-Filter aufheben (oder denselben Tacho nochmal klicken)">${esc(ff)} ×</button>`
+      + ` <span style="font-size:12px;color:var(--sub)">${gefiltert.length} von ${alleInst.length} Echo-Accounts</span>` : '' }
     // Job-/Konflikt-Banner gespiegelt — eigener Klick-Anker statt id, sonst
     // stuende dieselbe id zweimal im Dokument (Sidebar-View + Tab).
     const tn = $('mt5tab-notice')
     tn.innerHTML = (noticeHtml || '').replace(/ id="mtc-jobbar"/g, ' data-mt5jobbar="1"')
     const jb = tn.querySelector('[data-mt5jobbar]'); if(jb) jb.addEventListener('click', openAdd)
-    const list = d.instances || []
-    $('mt5tab-tablewrap').style.display = list.length ? '' : 'none'
-    $('mt5tab-empty').style.display = list.length ? 'none' : ''
-    $('mt5AccountsTable').innerHTML = list.map(mt5Row).join('')
+    const list = gefiltert, leerGefiltert = !!ff && !list.length && alleInst.length > 0
+    $('mt5tab-tablewrap').style.display = (list.length || leerGefiltert) ? '' : 'none'
+    $('mt5tab-empty').style.display = (list.length || leerGefiltert) ? 'none' : ''
+    $('mt5AccountsTable').innerHTML = leerGefiltert
+      ? `<tr><td colspan="6" style="padding:18px 20px;color:var(--sub);font-size:13px">Keine Echo-Accounts bei ${esc(ff)} auf diesem PC.</td></tr>`
+      : list.map(mt5Row).join('')
   }
+  window._echoFirmaNeu = () => { if(_mt5TabD) renderMt5Tab(_mt5TabD.d, _mt5TabD.noticeHtml) }
+  $('mt5tab-firma')?.addEventListener('click', e => {
+    if(!e.target.closest('[data-echo-firma-x]')) return
+    window._echoFirma = null; window._echoFirmaNeu(); if(typeof window._mpNeu === 'function') window._mpNeu()
+  })
 
   async function mtcLoad(){
     const d = await mtcApi('instances')
@@ -71099,7 +71123,7 @@
     if(!d){ karte.hidden = !_mp.fehler; leiste.innerHTML = _mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : ''; ges.hidden = true; return }
     karte.hidden = false
     const firmen = d.firmen || [], darf = d.darf_schalten !== false && !_mp.sendet
-    const fw = mpNorm(mpFilterWert())
+    const fw = mpNorm(mpReiter() === 'mt5' ? (window._echoFirma || '') : mpFilterWert())   // hervorgehoben = Filter des offenen Reiters
     const sichtbar = firmen.filter(f => f.status !== 'gesperrt'), gesperrt = firmen.filter(f => f.status === 'gesperrt')
     leiste.innerHTML = sichtbar.map((f, i) => mpTacho(f, i, !!fw && mpNorm(f.firma) === fw, darf)).join('') + (_mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : '')
     ges.hidden = !gesperrt.length
@@ -71167,7 +71191,20 @@
   }
   // Klick auf einen Tacho: Firma-Filter der Tabelle setzen (Reiter „Manuell"), hinscrollen; derselbe Tacho nochmal → „Alle".
   // Der Select bekommt den Wert wie bei einer Auswahl von Hand (change-Ereignis → dessen Listener filtert und zeichnet die Tabelle).
+  // ECHO-REITER (Finn 21.10.2026: „Wenn ich unter Echo bin und oben das Muster-Portfolio als Filter nutzen will, sollen auch nur die
+  // Echo-Accounts dieser Firma angezeigt werden … als kleiner Filter"): ist „Echo" offen, filtert der Tacho die Echo-Liste (window._echoFirma,
+  // renderMt5Tab, Chip „Firma ×") statt auf „Manuell" zu springen; derselbe Tacho nochmal hebt ihn auf. Topstep API (nur Topstep) und
+  // Duplikum (eigene Liste ohne Prophos-Firma) bleiben beim bisherigen Weg.
+  function mpReiter(){ return document.querySelector('#dashboard-view section.view[data-view="accounts"] .subtab.active')?.dataset.subtab || '' }   // Deklaration: mpRender läuft ggf. früher
+  window._mpNorm = mpNorm
   function mpFiltern(firma){
+    if(mpReiter() === 'mt5'){
+      const an = !!window._echoFirma && mpNorm(window._echoFirma) === mpNorm(firma)
+      window._echoFirma = an ? null : firma
+      _mp.fehler = ''; mpRender()
+      if(typeof window._echoFirmaNeu === 'function') window._echoFirmaNeu()
+      return
+    }
     const sel = document.getElementById('acc-firm-filter'); if(!sel) return
     const an = mpNorm(sel.value) === mpNorm(firma) && !!sel.value
     let ziel = ''
@@ -71184,6 +71221,9 @@
     sel.dispatchEvent(new Event('change', { bubbles: true }))
     if(ziel) (sel.closest('.subtabs')?.nextElementSibling || sel.closest('div') || sel).scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+  window._mpNeu = () => mpRender()
+  // Reiterwechsel: Hervorhebung des Tachos folgt dem Filter des jetzt offenen Reiters (Manuell-Select bzw. Echo-Filter)
+  document.querySelectorAll('#dashboard-view section.view[data-view="accounts"] .subtab').forEach(b => b.addEventListener('click', () => setTimeout(mpRender, 0)))
   document.getElementById('mp-leiste')?.addEventListener('click', e => {
     const s = e.target.closest('[data-mp-sperren]')
     if(s){
