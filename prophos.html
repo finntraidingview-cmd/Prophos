@@ -1923,6 +1923,9 @@
   #polarModal .pol-heute.is-minus{color:var(--danger-ink, #b91c1c);background:color-mix(in srgb, var(--danger) 12%, transparent)}
   #polarModal .pol-heute.is-offen{font-weight:500}
   #polarModal .pol-heute.is-laeuft{color:var(--violet);background:var(--violet-tint)}
+  /* Waiting for Payout (21.10.2026): amber markiert, Zeile gedämpft und nicht wählbar */
+  #polarModal .pol-heute.is-warten{color:var(--warn-ink, #b45309);background:color-mix(in srgb, var(--warn, #f59e0b) 15%, transparent)}
+  #polarModal .pol-wahl-opt.is-warten{opacity:.55;cursor:not-allowed}
   #polarModal .pol-heute.is-laeuft i{width:6px;height:6px;border-radius:999px;background:currentColor;animation:polPunkt 1s ease-in-out infinite}
   @media (prefers-reduced-motion: reduce){ #polarModal .pol-heute.is-laeuft i,#polarModal .pol-wahl-liste{animation:none} }
   @media (max-width:640px){ #polarModal .pol-wahl-liste{max-height:55vh} }
@@ -46352,7 +46355,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1695'
+  const OS_TAB_BUILD = '2026-09-22.1696'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55851,7 +55854,8 @@
       _polarKonten = (d.accounts || []).filter(a => !a.archived && (a.type === 'funded' || a.type === 'funded_cfd'))
         .map(a => ({ id: a.id, name: a.name || a.ext || '', ext: a.ext || '', boden: (typeof a.boden === 'number' && isFinite(a.boden)) ? a.boden : null, firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,   // ext: Endnummer in „Geplante Trades für Polar" (21.10.2026)
                      balance: (typeof a.balance === 'number' && isFinite(a.balance)) ? a.balance : null,
-                     heute: a.heute_pl && typeof a.heute_pl === 'object' ? a.heute_pl : null }))   // heute getradet/läuft/P&L (21.10.2026, app.py heute_pl_info)
+                     heute: a.heute_pl && typeof a.heute_pl === 'object' ? a.heute_pl : null,   // heute getradet/läuft/P&L (21.10.2026, app.py heute_pl_info)
+                     warten: a.type === 'funded_cfd' && !!a.waiting_payout_since }))   // Waiting for Payout (21.10.2026): sichtbar, markiert, nicht wählbar
       return ''
     }catch(e){
       // Rückfall: nur die Konten dieses Logins (Overview nicht erreichbar) — die Vorschau rechnet trotzdem
@@ -55875,15 +55879,16 @@
   // [[ID, [Konten]]] — dieselbe Gruppierung/Reihenfolge für das (versteckte) Select und die eigene Auswahlliste
   function polarKontoGruppen(typ){
     const l = _polarKonten.filter(k => k.type === typ)
+    // Waiting for Payout je ID ans Ende (21.10.2026, Finn: „anzeigen, aber markieren — dass man nicht auf so einen Account tradet")
     return [...new Set(l.map(k => k.person))].sort((a, b) => a.localeCompare(b, 'de'))
-      .map(p => [p, l.filter(k => k.person === p).sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))])
+      .map(p => [p, l.filter(k => k.person === p).sort((a, b) => (Number(!!a.warten) - Number(!!b.warten)) || (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))])
   }
   // Balance je Konto im Eintrag (14.10.2026, Finn): Live-Balance aus /admin/overview (balance), sonst „Balance ?"
   const polarBalanceText = k => k.balance != null ? Number(k.balance).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : 'Balance ?'
   function polarKontoOptionen(sel, typ){
     const gr = polarKontoGruppen(typ)
     sel.innerHTML = gr.length ? gr.map(([p, kk]) => `<optgroup label="${esc(p)}">${kk
-      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)} · ${polarBalanceText(k)}${esc(polarHeuteText(k.heute))}</option>`).join('')}</optgroup>`).join('')
+      .map(k => `<option value="${esc(k.id)}"${k.warten ? ' disabled' : ''}>${esc(k.firm)} · ${esc(k.name)} · ${polarBalanceText(k)}${esc(polarHeuteText(k.heute))}${k.warten ? ' · Waiting for Payout' : ''}</option>`).join('')}</optgroup>`).join('')
       : '<option value="">— kein Konto —</option>'
   }
   const polarKonto = id => _polarKonten.find(k => String(k.id) === String(polarEl(id)?.value))
@@ -55906,7 +55911,8 @@
   // In der Liste EINZEILIG (Finn 21.10.2026: „sehr unübersichtlich … mehr Accounts auf einmal sehen als diese drei"): Firma · Konto links
   // (gekürzt, voller Name im title), Balance klein und grau, Heute-Chip ganz rechts — die Liste ist so breit wie beide Felder (polarWahlOeffnen)
   const polarWahlOptZeile = k => `<span class="pol-wahl-txt" title="${esc(k.firm)} · ${esc(k.name)}"><b>${esc(k.firm)}</b> · ${esc(k.name)}</span>`
-    + `<small class="pol-wahl-bal">${polarBalanceText(k)}</small>${polarHeuteChip(k.heute)}`
+    + `<small class="pol-wahl-bal">${polarBalanceText(k)}</small>`
+    + (k.warten ? `<span class="pol-heute is-warten" title="Waiting for Payout — wartet auf die Auszahlung, hier nicht traden">Waiting for Payout</span>` : polarHeuteChip(k.heute))
   function polarWahlKnoepfe(){   // Knopf zeigt die aktuelle Auswahl des Selects
     for(const [kn, sel] of POLAR_WAHL){
       const b = polarEl(kn), k = polarKonto(sel)
@@ -55937,7 +55943,7 @@
     let n = 0
     liste.innerHTML = gr.length ? gr.map(([p, kk]) => `<div class="pol-wahl-gruppe" role="presentation">${esc(p)}</div>` + kk.map(k => {
       const an = String(k.id) === String(sel.value)
-      return `<div class="pol-wahl-opt${an ? ' is-gewaehlt' : ''}" role="option" id="${kn}-o${n++}" aria-selected="${an}" data-pol-wahl="${esc(k.id)}">${polarWahlOptZeile(k)}</div>`
+      return `<div class="pol-wahl-opt${an ? ' is-gewaehlt' : ''}${k.warten ? ' is-warten' : ''}" role="option" id="${kn}-o${n++}" aria-selected="${an}"${k.warten ? ' aria-disabled="true"' : ''} data-pol-wahl="${esc(k.id)}">${polarWahlOptZeile(k)}</div>`
     }).join('')).join('') : '<div class="pol-wahl-gruppe">kein Konto</div>'
     liste.hidden = false
     // Breite = beide Felder (Master + Slave) — einspaltig (Handy) also das eine Feld; Balance und Chip passen so in jede Zeile
@@ -55950,6 +55956,7 @@
   }
   function polarWahlWaehlen(id){
     const w = _polarWahl; if(!w) return
+    if((_polarKonten.find(k => String(k.id) === String(id)) || {}).warten) return   // Waiting for Payout: nicht wählbar (21.10.2026)
     if(String(w.sel.value) !== String(id)){ w.sel.value = String(id); w.sel.dispatchEvent(new Event('change')) }   // → polarRechnen
     polarWahlZu(true)
     polarWahlKnoepfe()
