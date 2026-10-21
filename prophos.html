@@ -164,6 +164,26 @@
   /* Plan gelöscht · Rückgängig (06.10.2026): nur dieser Toast nimmt Klicks an */
   .at-toast.undo{pointer-events:auto}
   .at-toast .at-undo{background:none;border:none;padding:0;margin-left:2px;color:#fff;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer}
+  /* ABHAK-RÜCKMELDUNG (Finn 21.10.2026: beim Abhaken im Radar eine kurze, schöne Rückmeldung — bestanden cool und knapp, geblowt ruhig;
+     kein Klick, blockiert nichts, ≤ 1,4 s). Schwebende Karte unten mittig, Kreis + Haken bzw. Strich zeichnen sich, dann steigt sie weg. */
+  .abhak-rm{position:fixed;left:50%;bottom:96px;z-index:9998;display:flex;align-items:center;gap:10px;padding:9px 16px 9px 11px;
+    border-radius:999px;background:var(--surface);border:1px solid var(--border);box-shadow:0 10px 30px rgba(16,24,40,.14);
+    font-size:13.5px;font-weight:600;color:var(--ink);white-space:nowrap;pointer-events:none;transform:translateX(-50%);
+    animation:abhakRmSchweben 1.35s cubic-bezier(.2,.8,.2,1) forwards}
+  .abhak-rm small{font-size:12.5px;font-weight:500;color:var(--sub)}
+  .abhak-rm svg{width:24px;height:24px;flex:none;fill:none;stroke:currentColor}
+  .abhak-rm.ist-bestanden svg{color:var(--good)}
+  .abhak-rm.ist-geblowt svg{color:var(--sub-2)}
+  .abhak-rm .abhak-kreis{stroke-width:2;stroke-dasharray:63;stroke-dashoffset:63;animation:abhakZiehen .42s ease-out forwards}
+  .abhak-rm .abhak-zeichen{stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:14;stroke-dashoffset:14;animation:abhakZiehen .26s ease-out .3s forwards}
+  @keyframes abhakRmSchweben{0%{opacity:0;transform:translate(-50%,8px)}14%{opacity:1;transform:translate(-50%,0)}78%{opacity:1;transform:translate(-50%,-3px)}100%{opacity:0;transform:translate(-50%,-10px)}}
+  @keyframes abhakRmRuhig{0%{opacity:0}10%,82%{opacity:1}100%{opacity:0}}
+  @keyframes abhakZiehen{to{stroke-dashoffset:0}}
+  @media (prefers-reduced-motion: reduce){
+    .abhak-rm{animation:abhakRmRuhig 1.35s linear forwards}
+    .abhak-rm .abhak-kreis,.abhak-rm .abhak-zeichen{animation:none;stroke-dashoffset:0}
+  }
+  @media (max-width:520px){ .abhak-rm{bottom:84px;max-width:calc(100vw - 32px)} .abhak-rm small{display:none} }
   .at-prompt{
     position:fixed;bottom:28px;right:28px;z-index:9999;
     background:var(--surface);border:1px solid var(--border);border-radius:16px;
@@ -4188,6 +4208,13 @@
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
   #dashboard-view .wdl-z{display:grid;grid-template-columns:minmax(0,1fr) 150px 256px 150px 136px;grid-template-areas:"wer ri mi pl zeit";align-items:center;column-gap:16px;padding:11px 16px;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;cursor:pointer;transition:background .12s}
   #dashboard-view .wdl-z + .wdl-z{border-top:1px solid var(--border-soft)}
+  /* Abgehakte Zeile kommt in ihrer neuen Gruppe kurz hervorgehoben an (Finn 21.10.2026) — Farbe je Ergebnis über --abhak-f */
+  #dashboard-view .wdl-z.abhak-neu,#dashboard-view .wdl-og3-kopf.abhak-neu{position:relative;z-index:1;animation:abhakZeileDa 1.1s ease-out}
+  #dashboard-view .wdl-z.abhak-geist{position:fixed;z-index:30;margin:0;pointer-events:none;background:var(--surface);border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.14)}
+  @keyframes abhakZeileDa{0%{background:color-mix(in srgb,var(--abhak-f,var(--violet)) 13%,var(--surface));box-shadow:inset 3px 0 0 var(--abhak-f,var(--violet))}
+    60%{background:color-mix(in srgb,var(--abhak-f,var(--violet)) 7%,var(--surface));box-shadow:inset 3px 0 0 var(--abhak-f,var(--violet))}
+    100%{background:transparent;box-shadow:inset 3px 0 0 transparent}}
+  @media (prefers-reduced-motion: reduce){ #dashboard-view .wdl-z.abhak-neu,#dashboard-view .wdl-og3-kopf.abhak-neu{animation:none;box-shadow:inset 3px 0 0 var(--abhak-f,var(--violet))} }
   #dashboard-view .wdl-z + .wdl-z.wdl-z-pfneu{border-top:2px solid var(--border)}   /* Wechsel Orbit → Echo in einer Gruppe (30.09.2026, .869) */
   #dashboard-view .wdl-z:not(.wdl-z-kopf):hover{background:var(--bg)}
   #dashboard-view .wdl-z.is-aktiv,#dashboard-view .wdl-z.is-aktiv:hover{background:var(--surface-tint)}
@@ -30279,7 +30306,9 @@
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
-    mklWdErledigtZu(); wdlSofortErledigt(pid)
+    const abArt = abhakArt(pid, kontoStatus), abNach = abhakZeileWandern(pid, abArt)   // Abhak-Rückmeldung (21.10.2026, nur Anzeige)
+    mklWdErledigtZu(); wdlSofortErledigt(pid); abNach()
+    abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(pid) : '')
     // Knopf sofort wieder frei (08.10.2026, Stub-Test „mehrere abhaken"): das Popup ist zu und _mwdErlId leer — ein Doppelklick läuft ins Leere;
     // vorher blieb „Erledigt" bis nach Buchung + mklWdLaden (3–6 s) gesperrt und das NÄCHSTE Abhaken verpuffte still
     if(btn) btn.disabled = false
@@ -30748,6 +30777,76 @@
       if(!offen) _wdlLokal.delete(pid)                                          // Backend meldet es selbst → Merker weg
     }
   }
+  /* ABHAK-RÜCKMELDUNG (Finn 21.10.2026: „beim Abhaken eine kurze, schöne Rückmeldung … die Zeile soll sichtbar in ihre neue Gruppe
+   * wandern"). NUR ANZEIGE: ändert keinen Status, keine Buchung, keine Gruppe — die Gruppe bestimmt weiter wdlRender. Aufgerufen je
+   * Abhak-Weg mit eigener Zeile (tradeCompleteSave, mklWdErledigtSpeichern), kein Sammel-Handler. Höchstens ~1,4 s, kein Klick, blockiert
+   * nichts (pointer-events:none); prefers-reduced-motion → ohne Bewegung (CSS + hier). */
+  function abhakArt(pid, gewaehlt){
+    if(gewaehlt === 'blown') return 'geblowt'
+    if(gewaehlt === 'passed') return 'bestanden'
+    // „Nichts ändern", aber die Balance steht laut Radar schon am Ziel (wdlBestandenChip, dieselbe Wahrheit wie die Ergebnis-Spalte)
+    try{
+      const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid))
+      if(t && wdlBestandenChip(Object.assign({}, t, { status: 'completed' }))) return 'bestanden'
+    }catch(_){}
+    return ''
+  }
+  function abhakUebergang(pid, kontoTyp){
+    if(WDL_UEBERGANG[String(kontoTyp || '')]) return WDL_UEBERGANG[String(kontoTyp)]
+    try{ const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)); return WDL_UEBERGANG[String((t && t.konto_typ) || '')] || '' }catch(_){ return '' }
+  }
+  function abhakRueckmeldung(art, unter){
+    if(art !== 'bestanden' && art !== 'geblowt') return
+    document.querySelectorAll('.abhak-rm').forEach(e => e.remove())
+    const el = document.createElement('div')
+    el.className = 'abhak-rm ist-' + art
+    el.setAttribute('role', 'status')
+    const zeichen = art === 'bestanden' ? 'M7.5 12.3l3 3 6-6.3' : 'M8.5 12h7'
+    el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="abhak-kreis" cx="12" cy="12" r="10"/><path class="abhak-zeichen" d="${zeichen}"/></svg>`
+      + `<span>${art === 'bestanden' ? 'Bestanden' : 'Geblowt'}${unter ? ` <small>· ${escapeHtml(unter)}</small>` : ''}</span>`
+    document.body.appendChild(el)
+    setTimeout(() => el.remove(), 1450)
+  }
+  // Zeile wandert in ihre neue Gruppe (FLIP): Lage VOR dem Neuzeichnen merken, danach gleitet die neue Zeile von dort an ihren Platz und
+  // leuchtet kurz in der Ergebnis-Farbe. Abgehakte Trades landen im „Verlauf" — ist der zugeklappt, gibt es keine neue Zeile: dann fliegt
+  // eine stille Kopie der alten Zeile zum Verlauf-Kopf, und der leuchtet kurz auf. -> Funktion, die NACH wdlSofortErledigt aufgerufen wird
+  function abhakZeileWandern(pid, art){
+    const sel = `#dashboard-view .wdl-z[data-wdl-trade="${String(pid).replace(/["\\]/g, '')}"]`
+    const sichtbar = () => Array.prototype.slice.call(document.querySelectorAll(sel)).find(e => e.offsetParent !== null) || null
+    const alt = sichtbar(), altRect = alt ? alt.getBoundingClientRect() : null, altTop = altRect ? altRect.top : null
+    const geist = alt ? alt.cloneNode(true) : null
+    const farbe = art === 'bestanden' ? 'var(--good)' : art === 'geblowt' ? 'var(--sub-2)' : 'var(--violet)'
+    const ruhig = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    const leuchten = el => { el.style.setProperty('--abhak-f', farbe); el.classList.remove('abhak-neu'); void el.offsetWidth; el.classList.add('abhak-neu'); setTimeout(() => el.classList.remove('abhak-neu'), 1200) }
+    return () => requestAnimationFrame(() => {
+      try{
+        const neu = sichtbar()
+        if(!neu){
+          const kopf = document.querySelector('#dashboard-view .wdl-og3-verlauf .wdl-og3-kopf')
+          const ziel = kopf && kopf.offsetParent !== null ? kopf.getBoundingClientRect() : null
+          const imBild = ziel && ziel.bottom > 0 && ziel.top < window.innerHeight
+          if(geist && altRect && !ruhig && typeof geist.animate === 'function'){
+            geist.removeAttribute('data-wdl-trade'); geist.removeAttribute('data-wdl-drag'); geist.removeAttribute('draggable'); geist.removeAttribute('title')
+            geist.classList.add('abhak-geist')
+            Object.assign(geist.style, { left: altRect.left + 'px', top: altRect.top + 'px', width: altRect.width + 'px', height: altRect.height + 'px' })
+            ;(document.getElementById('dashboard-view') || document.body).appendChild(geist)
+            const dx = imBild ? (ziel.left + 24 - altRect.left) : 24, dy = imBild ? (ziel.top - altRect.top) : 0
+            const ani = geist.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${Math.round(dx)}px,${Math.round(dy)}px) scale(.96)`, opacity: 0 }],
+              { duration: imBild ? 520 : 340, easing: 'cubic-bezier(.4,0,.2,1)' })
+            ani.onfinish = () => geist.remove(); setTimeout(() => geist.remove(), 900)
+          }
+          if(kopf && kopf.offsetParent !== null) setTimeout(() => leuchten(kopf), ruhig ? 0 : 380)
+          return
+        }
+        const d = altTop != null ? altTop - neu.getBoundingClientRect().top : 0
+        if(!ruhig && Math.abs(d) > 2 && typeof neu.animate === 'function')
+          neu.animate([{ transform: `translateY(${Math.round(d)}px)`, opacity: .55 }, { transform: 'translateY(0)', opacity: 1 }], { duration: 420, easing: 'cubic-bezier(.2,.8,.2,1)' })
+        leuchten(neu)
+      }catch(_){}
+    })
+  }
+  window._abhakRueckmeldung = abhakRueckmeldung   // Test-Haken (Stub)
+  window._abhakZeileWandern = abhakZeileWandern
   function wdlSofortErledigt(pid){
     wdlLokalMerken(pid, { status: 'completed' })   // auch, wenn die Zeile gerade nicht in den Daten steht (Abruf läuft)
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid))
@@ -62216,7 +62315,14 @@
       const idx = tradePlans.findIndex(x => String(x.id) === String(_completingPlanId))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
       planKontoTypMerken(idx >= 0 ? tradePlans[idx] : rowToPlan(data))   // Kontotyp zum Zeitpunkt des Trades (25.09.2026)
-      if(data && data.status === 'completed') wdlSofortErledigt(_completingPlanId)   // Live Trades sofort nach „Erledigt" (01.10.2026)
+      if(data && data.status === 'completed'){
+        // Abhak-Rückmeldung (21.10.2026, nur Anzeige): Polar zählt geblowt über die zwei Haken
+        const abArt = abhakArt(_completingPlanId, (tcPolar && blown) ? 'blown' : statusChoice), abNach = abhakZeileWandern(_completingPlanId, abArt)
+        wdlSofortErledigt(_completingPlanId)   // Live Trades sofort nach „Erledigt" (01.10.2026)
+        abNach()
+        const abAcc = accounts.find(a => String(a.id) === String(targetAccountId || p.masterAccountId))
+        abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(_completingPlanId, abAcc && abAcc.type) : '')
+      }
       // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s, bis das Popup schließt"): der Plan ist gespeichert — das Popup geht
       // jetzt schon zu, die Buchungen in Finanzen und Zähler laufen dahinter weiter (Fehler danach als Hinweis, nicht im Popup)
       document.getElementById('tradeCompleteModal')?.classList.remove('open')
