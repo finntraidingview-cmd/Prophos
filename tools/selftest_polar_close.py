@@ -356,6 +356,22 @@ def main():
           and "st2 is not None and positions_sichtbar(s)" in cdp, "CDP-Flach nur mit sichtbarem Positions-Reiter (vor und nach dem zweiten Blick)")
     mlv = srcF[srcF.index("def master_level_lesen("):srcF.index("def positions_sichtbar(")]
     check('zurueck = bool(ob._cdp_reiter(s, "positions"' in mlv and "Rückkehr auf Positionen NICHT bewiesen" in mlv, "Level-Lesung loggt, ob die Rückkehr auf Positionen gelang")
+    print("10g) Lauf 3cc4d9b7: Ein-Klick-Haftungsausschluss im ×-/Rechtsklick-Weg, Plan open mit Beweis, Abrechnung auch aus planned")
+    srcG = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    wg = srcG[srcG.index("def slave_wache("):srcG.index("# ── MAUS-TEST ×")]
+    xw = wg[wg.index("geklickt = bool(ob._klick_absolut(punkt_x[0], punkt_x[1]))"):wg.index("# 2) Rückfall: Rechtsklick")]
+    check("ob._einklick_haftung_annehmen(w, lauf.trail)" in xw and xw.count("ob._klick_absolut(punkt_x[0], punkt_x[1])") == 2
+          and 'offen(st_n) and len(st_n["positionen"]) == 1 and lage_n[0]' in xw, "×-Weg: Ausschluss annehmen, dann GENAU EIN zweiter ×-Klick (eine Position, Lage gültig)")
+    rw = wg[wg.index("# 2) Rückfall: Rechtsklick"):wg.index("# 3) Letzter Weg")]
+    check("ob._einklick_haftung_annehmen(w, lauf.trail)" in rw and 'rk_haftung = "haftung" not in erg' in rw, "Rechtsklick-Weg: Ausschluss annehmen (nur wenn noch nicht beim × gesehen), dann einmal neu")
+    check('erg["x_urteil"] = u' in wg and 'erg["rk_menue"] = st_m' in wg and 'erg["haftung"] = st_h' in wg, "Wache meldet x_urteil, rk_menue, haftung (Diagnose im ende)")
+    srcH = open(os.path.join(STAMM, "polar_app.py"), encoding="utf-8").read()
+    of = srcH[srcH.index("def _offen():"):srcH.index("threading.Thread(target=_offen")]
+    check("for versuch in (1, 2):" in of and "Plan open" in of and "0 Zeilen, Status ist" in of and 'if ist != "planned":' in of,
+          "Plan open: Ergebnis geloggt, bei 0 Zeilen Ist-Status lesen und einmal neu versuchen")
+    abr2 = srcH[srcH.index("def _abrechnen(z):"):srcH.index("def laeufe_aus_plaenen(")]
+    check('"status": "in.(planned,open,review)"' in abr2 and 'if plan.get("status") == "planned":' in abr2 and "nicht geschrieben" in abr2,
+          "Abrechnung nimmt auch einen hängenden planned-Plan mit (→ review, Start vom Master-Klick) und loggt 0 Zeilen")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

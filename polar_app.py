@@ -292,7 +292,15 @@ def _abrechnen(z):
                 upd["slave_pl"] = erg["slave_pl"]
             if plan.get("status") == "open":
                 upd["status"] = "review"
-            A["sb_update"]("trade_plans", {"id": f"eq.{pid}", "status": "in.(open,review)"}, upd)
+            if plan.get("status") == "planned":
+                # Plan hing auf „planned", obwohl der Lauf fertig ist (Lauf 3cc4d9b7, s. _offen) → trotzdem abrechnen, Start vom Master-Klick
+                upd["status"] = "review"
+                km = _zahl(((z.get("master") or {}).get("gefuellt") or {}).get("klick_ms"))
+                if km:
+                    upd["started_at"] = datetime.fromtimestamp(km / 1000.0, tz=timezone.utc).isoformat()
+            n = A["sb_update"]("trade_plans", {"id": f"eq.{pid}", "status": "in.(planned,open,review)"}, upd)
+            if not n:
+                print(f"[polar] ⚠️ Abrechnung {z['id'][:8]}: Plan {pid[:8]} nicht geschrieben (Status {plan.get('status')})", flush=True)
             if plan.get("master_account_id") and erg["master_balance_end"] is not None:
                 A["sb_update"]("accounts", {"id": f"eq.{plan['master_account_id']}"},
                                {"tv_balance": erg["master_balance_end"], "tv_equity": erg["master_equity_end"], "tv_balance_at": jetzt, "tv_balance_quelle": "puls"})
@@ -1068,11 +1076,22 @@ def registrieren(app, ns):
             klick = _zahl(daten.get("klick_ms"))
 
             def _offen():
-                try:
-                    ab = datetime.fromtimestamp(klick / 1000.0, tz=timezone.utc).isoformat() if klick else A["_wt_now_iso"]()
-                    A["sb_update"]("trade_plans", {"id": f"eq.{z['plan_id']}", "status": "eq.planned"}, {"status": "open", "started_at": ab, "ended_at": None})
-                except Exception as e:
-                    print(f"[polar] ⚠️ Plan open {z['plan_id'][:8]}: {type(e).__name__}", flush=True)
+                # BEWEIS STATT STILLE (21.10.2026, Lauf 3cc4d9b7: Plan 78c67baa blieb „planned", kein Log — sb_update liefert bei 0 Zeilen
+                # still []): Ergebnis loggen, bei 0 Zeilen den Ist-Status lesen und nach 1,5 s genau einmal neu versuchen
+                ab = datetime.fromtimestamp(klick / 1000.0, tz=timezone.utc).isoformat() if klick else A["_wt_now_iso"]()
+                for versuch in (1, 2):
+                    try:
+                        n = A["sb_update"]("trade_plans", {"id": f"eq.{z['plan_id']}", "status": "eq.planned"}, {"status": "open", "started_at": ab, "ended_at": None})
+                        if n:
+                            print(f"[polar] Plan open {z['plan_id'][:8]} ✓ (Versuch {versuch})", flush=True)
+                            return
+                        ist = (A["sb_select"]("trade_plans", {"select": "status", "id": f"eq.{z['plan_id']}", "limit": "1"}) or [{}])[0].get("status")
+                        print(f"[polar] ⚠️ Plan open {z['plan_id'][:8]}: 0 Zeilen, Status ist {ist} (Versuch {versuch})", flush=True)
+                        if ist != "planned":
+                            return
+                    except Exception as e:
+                        print(f"[polar] ⚠️ Plan open {z['plan_id'][:8]}: {type(e).__name__}: {str(e)[:120]} (Versuch {versuch})", flush=True)
+                    time.sleep(1.5)
             threading.Thread(target=_offen, daemon=True).start()
         if abrechnen:
             _abrechnen(z)

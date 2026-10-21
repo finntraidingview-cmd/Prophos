@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.10"   # 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.11"   # 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -2160,14 +2160,33 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             lauf.log(f"Polar: × nicht geklickt — {lage_grund} → Rechtsklick-Rückfall")
         if weg is None and punkt_x and lage_ok and x_klick_erlaubt(zelle, x_tip, einzig, bild) and not ob.is_paused():
             geklickt = bool(ob._klick_absolut(punkt_x[0], punkt_x[1]))
-            erg["klick_ms"] = jetzt_ms()
+            erg["klick_ms"] = erg["x_klick_ms"] = jetzt_ms()
             lauf.phase("x_geklickt", klick_ms=erg["klick_ms"], x_ok=geklickt)
             lauf.log(f"Polar: × geklickt {int((time.time() - t_sig) * 1000)} ms nach dem Signal" if geklickt else "Polar: × NICHT gedrückt (SendInput)")
             weg_nach, dialog_knopf, ende = None, False, time.time() + X_BEWEIS_S
+            haftung_offen = True
             while time.time() < ende:
                 if zu_bewiesen(lesen()):
                     weg_nach = time.time() - t_sig
                     break
+                if haftung_offen:
+                    # EIN-KLICK-HAFTUNGSAUSSCHLUSS (Lauf 3cc4d9b7, 21.10.2026: × bewiesen geparkt, trotzdem erst der Zeilen-Scan nach 7,2 s —
+                    # nur _close_klicken nahm den Ausschluss an, den MT5 beim ERSTEN Ein-Klick-Handel eines Terminals zeigt; × und Rechtsklick
+                    # liefen in ihn hinein, das Esc des Rückfalls schloss ihn wieder). Finn 01.09.2026: „okay drücken und dann neu aufs X".
+                    st_h = ob._einklick_haftung_annehmen(w, lauf.trail)
+                    if st_h != "keiner":
+                        haftung_offen = False
+                        erg["haftung"] = st_h
+                        lauf.log(f"Polar: Ein-Klick-Haftungsausschluss nach dem × — {st_h}")
+                    if st_h == "angenommen":
+                        st_n = lesen()
+                        lage_n = (True, "") if zelle else bild_pruefen(bild, punkt_x)
+                        if st_n is not None and offen(st_n) and len(st_n["positionen"]) == 1 and lage_n[0] and not ob.is_paused():
+                            ob._klick_absolut(punkt_x[0], punkt_x[1])
+                            erg["klick_ms"] = erg["x_klick2_ms"] = jetzt_ms()
+                            ende = time.time() + X_BEWEIS_S
+                            lauf.log("Polar: × nach der Zustimmung EIN zweites Mal geklickt")
+                        continue
                 if not dialog_knopf:
                     dlg, knopf = ob._finde_close_dialog(w, ticket)          # Ein-Klick-Handel aus: nur der Knopf mit DIESEM Ticket
                     if knopf is not None:
@@ -2181,6 +2200,7 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                             pass
                 time.sleep(X_TAKT_S)
             u = schliess_urteil(geklickt, weg_nach, dialog_knopf)
+            erg["x_urteil"] = u
             if u == "zu":
                 weg = "x_dialog" if dialog_knopf else "x"
                 lauf.log(f"Polar: Position #{ticket} weg {weg_nach * 1000:.0f} ms nach dem Signal (×)")
@@ -2196,13 +2216,28 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             if ob._klick_absolut(punkt[0], punkt[1], taste="rechts"):
                 st_m = ob._kontextmenue_close_klicken(timeout=0.8)
                 erg["klick_ms"] = jetzt_ms()
+                erg["rk_menue"] = st_m
                 if st_m == "geklickt":
                     lauf.log(f"Polar: 'Position schließen' {int((time.time() - t_sig) * 1000)} ms nach dem Signal")
                     ende = time.time() + 3.0
+                    rk_haftung = "haftung" not in erg       # der Ausschluss kommt pro Terminal nur einmal
                     while time.time() < ende:
                         if zu_bewiesen(lesen()):
                             weg = "ein_klick"
                             break
+                        if rk_haftung:
+                            st_h = ob._einklick_haftung_annehmen(w, lauf.trail)
+                            if st_h != "keiner":
+                                rk_haftung = False
+                                erg["haftung"] = st_h
+                                lauf.log(f"Polar: Ein-Klick-Haftungsausschluss nach dem Rechtsklick — {st_h}")
+                            st_r = lesen() if st_h == "angenommen" else None
+                            if st_r is not None and offen(st_r) and not ob.is_paused():
+                                ob._maus_fahren(*punkt, schritte=2)
+                                if ob._klick_absolut(punkt[0], punkt[1], taste="rechts") and ob._kontextmenue_close_klicken(timeout=0.8) == "geklickt":
+                                    lauf.log("Polar: 'Position schließen' nach der Zustimmung EIN zweites Mal geklickt")
+                                ende = time.time() + 3.0
+                                continue
                         dlg, knopf = ob._finde_close_dialog(w, ticket)
                         if knopf is not None:
                             try:
