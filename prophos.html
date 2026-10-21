@@ -30162,8 +30162,11 @@
     // P&L in $ vorbelegt: Balance nachher − vorher (pl_balance), sonst der P&L am Plan (master_pl.wert)
     // Orbit V2 ohne Gegenhedge (30.09.2026, Finn: „kommt trotzdem das Pop-up, wo ich den Fusion-P&L eingebe, obwohl gar kein Fusion-
     // Account getradet wurde"): tvv2 zählt nur mit Fusion-Hedge (hedge_eur > 0 oder Hedge am Plan = Winning Days) als gehedgt
+    // Topstep-Winning-Day mit Fusion-Hedge (21.10.2026, Finn: „ob alles richtig verbucht wurde"): tsv2 galt hier pauschal als ohne Hedge —
+    // Feld weg, slave_pl null überschrieb den vom Hedge geschriebenen Fusion-P&L, keine wd_hedge-Buchung (4 Pläne seit 20.10., −271,71 €).
+    // Seit .1493 läuft Topstep-WD mit Fusion-Hedge → wie tvv2: nur ohne Hedge (Challenge-Weg) gilt er als ungehedgt.
     const mitHedge = Number(pw.hedge_eur) > 0 || !!pw.hedge
-    _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.route === 'tsv2' || pw.plattform === 'echo' || (pw.route === 'tvv2' && !mitHedge))
+    _mwdErlOhneHedge = !_mwdErlFusionAmPlan && (pw.route === 'mt5v2' || pw.plattform === 'echo' || ((pw.route === 'tvv2' || pw.route === 'tsv2') && !mitHedge))
     // Balance-Sprung (08.10.2026, Fall ea91e359): Balance-Differenz ≠ Tages-P&L (Auszahlung o. Ä.) → Tages-P&L vorbelegen, nie die Differenz
     const _sp = pw.balance_sprung || ((pw.tv && pw.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(pw.route, pw.tv, pw.final) : null)
     const plVor = _sp ? _sp.tages
@@ -45995,7 +45998,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1684'
+  const OS_TAB_BUILD = '2026-09-22.1685'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

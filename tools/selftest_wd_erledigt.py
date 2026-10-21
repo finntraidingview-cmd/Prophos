@@ -27,8 +27,8 @@ def lade():
     # 05.10.2026: die Routen-Konstanten kommen aus app.py statt als Kopie im Test. Seit 02.10.2026 (Abhaken auch für Echo mit
     # Fusion-Hedge und Duplikum) nutzt _wd_erledigt_upd WD_FUSION_AM_PLAN — der Test lud sie nicht und brach mit NameError ab,
     # und die Kopie von WD_ERLEDIGT_ROUTEN kannte die zwei neuen Wege nicht.
-    exec("\n".join(['WD_HEDGE_LOGIN = "488579"', const("WD_ERLEDIGT_ROUTEN"), const("WD_FUSION_AM_PLAN")] + [block(n) for n in (
-        "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_erledigt_upd", "_wd_hedge_buchung",
+    exec("\n".join(['WD_HEDGE_LOGIN = "488579"', const("WD_ERLEDIGT_ROUTEN"), const("WD_FUSION_AM_PLAN"), const("WD_HEDGE_BUCHUNG_ROUTEN")] + [block(n) for n in (
+        "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_plan_mit_hedge", "_wd_erledigt_upd", "_wd_hedge_buchung",
         "_wd_good_day", "_wd_good_day_konto_upd")] + ['WD_GOOD_DAY_MIN = {"tradeify": 250.0}']), ns)
     return ns
 
@@ -66,8 +66,14 @@ def main():
         u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", mt5_baseline={"tv": {}}), -1692.4, None, T, D)
         check(e is None and u["status"] == "completed" and u["master_pl"] == -1692.4 and u["slave_pl"] is None and "mt5_baseline" not in u,
               f"{rt}: erledigt ohne Fusion, Baseline unberührt (Topstep-Handplan)")
-        check(a["_wd_erledigt_upd"](dict(offen, route=rt), 100, -5, T, D)[1] == (400, "Fusion-P&L gibt es nur bei Orbit, Winning Days, Echo und Duplikum"),
-              f"{rt}: Fusion-P&L → 400 (keine falsche wd_hedge-Buchung)")
+        check(a["_wd_erledigt_upd"](dict(offen, route=rt, mt5_baseline={"tv": {}}), 100, -5, T, D)[1] == (400, "Fusion-P&L gibt es nur bei Orbit, Winning Days, Echo und Duplikum"),
+              f"{rt} ohne Hedge: Fusion-P&L → 400 (keine falsche wd_hedge-Buchung)")
+    # 21.10.2026: Topstep-Winning-Day MIT Fusion-Hedge — Fusion-P&L erlaubt (vorher 400 bzw. slave_pl null, keine Buchung)
+    for plan_h in (dict(offen, route="tsv2", status="review", ended_at="x"),
+                   dict(offen, route="tsv2", status="review", ended_at="x", mt5_baseline={"tv": {"puls": "tsx"}, "final": {"quelle": "close"}}, hedge_eur=59.94)):
+        u, e = a["_wd_erledigt_upd"](plan_h, 159.84, -69.09, T, D)
+        check(e is None and u["slave_pl"] == -69.09 and u["status"] == "completed", "tsv2 mit Fusion-Hedge (hedge am Plan / hedge_eur): Fusion-P&L erlaubt")
+    check(a["_wd_erledigt_upd"](dict(offen, route="mt5v2", hedge_eur=50), 100, -5, T, D)[1][0] == 400, "mt5v2 bleibt ohne Fusion-P&L, auch mit hedge_eur")
     # 02.10.2026: Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) abhakbar — Fusion-P&L steht als slave_pl am Plan, Baseline unberührt
     for rt in a["WD_FUSION_AM_PLAN"]:
         u, e = a["_wd_erledigt_upd"](dict(offen, route=rt, status="review", ended_at="x", mt5_baseline={"hedge": hedge}), 120.0, -35.5, T, D)

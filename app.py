@@ -12654,6 +12654,15 @@ def _berlin_heute():
 WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2", "mt5", "tvplus")   # 30.09.2026: Orbit, Echo V2, Topstep V2 — seit 02.10.2026 auch
 # Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus), Finn: „natürlich will ich auch Echo-Trades hier abhaken"
 WD_FUSION_AM_PLAN = ("mt5", "tvplus")   # Fusion-P&L nur als slave_pl am Plan — wie das große Erledigt-Popup, KEINE wd_hedge-Buchung
+# Fusion-P&L als wd_hedge-Buchung: Orbit V2 / Winning Day (tvv2) und seit 21.10.2026 Topstep-Winning-Day (tsv2) MIT Fusion-Hedge —
+# vorher fiel tsv2 durch (400 bzw. slave_pl null, keine Buchung; 4 Pläne seit 20.10., −271,71 €, sql/2026-10-21_wd_hedge_topstep_nachbuchen.sql).
+WD_HEDGE_BUCHUNG_ROUTEN = ("tvv2", "tsv2")
+
+
+def _wd_plan_mit_hedge(plan):
+    """REIN RECHNEND: Plan trägt einen Fusion-Gegenhedge (hedge_eur > 0 oder mt5_baseline.hedge vorhanden) — wie mitHedge im Frontend."""
+    base = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+    return (_wd_zahl(plan.get("hedge_eur")) or 0) > 0 or bool(base.get("hedge"))
 
 
 def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
@@ -12671,7 +12680,7 @@ def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
     route = str(plan.get("route") or "")
     if route not in WD_ERLEDIGT_ROUTEN or st not in ("open", "review", "completed"):
         return None, (409, "nicht offen")
-    if route not in ("tvv2",) + WD_FUSION_AM_PLAN and slave_pl is not None:
+    if slave_pl is not None and route not in ("tvv2",) + WD_FUSION_AM_PLAN and not (route == "tsv2" and _wd_plan_mit_hedge(plan)):
         return None, (400, "Fusion-P&L gibt es nur bei Orbit, Winning Days, Echo und Duplikum")
     upd = {"status": "completed", "master_pl": master_pl, "slave_pl": slave_pl}
     if st != "completed" or not plan.get("completed_at"):
@@ -13484,7 +13493,7 @@ def admin_wd_plaene():
                 # _wd_personen bleibt im Request-Thread (liest g über _admin_nur_uid), die Pool-Threads fassen g nie an.
                 pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
                 try:
-                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,konto_typ,"
+                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,konto_typ,hedge_eur,"
                                           "updated_at,ended_at,completed_at", "id": f"eq.{pid}", "limit": "1"}
                     # Welle 1: nur die plan_id nötig
                     f_plan = pool.submit(sb_select, "trade_plans", plan_sel)
@@ -13524,7 +13533,7 @@ def admin_wd_plaene():
                                 macc = sb_select("accounts", {"select": "user_id", "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
                                 uid = str((macc[0] if macc else {}).get("user_id") or "")
                             person = disp.get(uid, uid[:8])
-                            if spl is not None and str(plan.get("route") or "") == "tvv2":   # Echo/Duplikum: nur slave_pl am Plan
+                            if spl is not None and str(plan.get("route") or "") in WD_HEDGE_BUCHUNG_ROUTEN:   # Echo/Duplikum: nur slave_pl am Plan
                                 h = ((plan.get("mt5_baseline") or {}).get("hedge") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
                                 login = str(h.get("hedge_login") or "").strip()
                                 f_konten = pool.submit(sb_select, "accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at,"
