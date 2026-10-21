@@ -19,7 +19,7 @@ def lade():
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
     ns = {"datetime": datetime, "timezone": timezone, "re": __import__("re")}
-    for f in ("_ap_ts", "heute_traden_info"):
+    for f in ("_ap_ts", "heute_traden_info", "heute_pl_info"):
         exec(block(f), ns)
     return ns
 
@@ -50,6 +50,20 @@ def main():
     check(f([{"status": "planned", "start_um": "2026-10-17T09:30:00Z"}], heute, tz)["geplant_um"] is None, "morgen geplant zählt nicht")
     g2 = f([{"status": "completed", "started_at": "2026-10-16T08:00:00Z"}, {"status": "planned", "start_um": "2026-10-16T15:00:00Z"}], heute, tz)
     check(g2 == {"getradet": True, "geplant_um": None}, "getradet schlägt geplant")
+
+    # HEUTE IM POLAR-DROPDOWN (21.10.2026): heute_pl_info — P&L je Seite, läuft, Anzahl
+    h = ns["heute_pl_info"]
+    check(h([], heute, tz) == {"getradet": False, "laeuft": False, "pl": None, "n": 0}, "heute_pl: ohne Pläne nichts")
+    m1 = {"status": "completed", "started_at": "2026-10-16T08:00:00Z", "completed_at": "2026-10-16T09:00:00Z", "master_pl": 159, "slave_pl": -40}
+    m2 = {"status": "review", "started_at": "2026-10-16T10:00:00Z", "ended_at": "2026-10-16T10:30:00Z", "master_pl": "-42.5"}
+    check(h([(m1, "master"), (m2, "master")], heute, tz) == {"getradet": True, "laeuft": False, "pl": 116.5, "n": 2}, "heute_pl: Master-Summe aus master_pl (auch als Text)")
+    check(h([(m1, "slave")], heute, tz)["pl"] == -40, "heute_pl: als Slave zählt slave_pl")
+    check(h([({"status": "review", "started_at": "2026-10-16T08:00:00Z"}, "master")], heute, tz) == {"getradet": True, "laeuft": False, "pl": None, "n": 1},
+          "heute_pl: getradet ohne Betrag → pl None")
+    check(h([({"status": "open", "started_at": "2026-10-14T10:00:00Z"}, "slave"), (m1, "master")], heute, tz) == {"getradet": True, "laeuft": True, "pl": 159.0, "n": 1},
+          "heute_pl: läuft + heute beendet")
+    check(h([({"status": "completed", "started_at": "2026-10-15T08:00:00Z", "completed_at": "2026-10-15T09:00:00Z", "master_pl": 300}, "master")], heute, tz)["getradet"] is False,
+          "heute_pl: gestern zählt nicht")
 
     print("OK" if ok else "FEHLER")
     sys.exit(0 if ok else 1)

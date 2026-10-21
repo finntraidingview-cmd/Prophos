@@ -6077,6 +6077,33 @@ def heute_traden_info(plaene, heute, tz):
     return {"getradet": getradet, "geplant_um": (min(geplant, key=lambda x: _ap_ts(x)) if geplant and not getradet else None)}
 
 
+# HEUTE IM POLAR-DROPDOWN (Finn 21.10.2026: „Hier auch bitte immer hinschreiben, ob die heute schon plus oder minus gemacht haben, also ob
+# die heute schon getradet wurden, sowohl bei Slave als auch bei Master"): Funded Futures UND Funded CFD, als Master wie als Slave (Polar).
+HEUTE_PL_TYPEN = ("funded", "funded_cfd")
+
+
+def heute_pl_info(eintraege, heute, tz):
+    """REIN RECHNEND (testbar): [(plan, seite)] EINES Kontos (seite 'master' | 'slave') → {getradet, laeuft, pl, n}. Derselbe Tag und dieselbe
+    getradet-Regel wie heute_traden_info; pl = Summe master_pl (Konto als Master) bzw. slave_pl (Konto als Slave) der heute getradeten,
+    nicht mehr laufenden Pläne, None solange keiner davon einen Betrag hat; n = Anzahl dieser Pläne."""
+    def tag(v):
+        t = _ap_ts(v)
+        return t.astimezone(tz).date().isoformat() if t else None
+    laeuft, getradet, pl, n = False, False, None, 0
+    for p, seite in eintraege or []:
+        st = str(p.get("status") or "")
+        if st == "open":
+            laeuft = getradet = True
+        elif st in ("review", "completed") and any(tag(p.get(k)) == heute for k in ("started_at", "ended_at", "completed_at")):
+            getradet, n = True, n + 1
+            try:
+                w = float(p.get("slave_pl" if seite == "slave" else "master_pl"))
+            except (TypeError, ValueError):
+                continue
+            pl = round((pl or 0.0) + w, 2)
+    return {"getradet": getradet, "laeuft": laeuft, "pl": pl, "n": n}
+
+
 def admin_skala_felder(a, regeln, kw_firmen):
     """REIN RECHNEND (testbar, tools/selftest_admin_skala.py): Boden und Ziel eines Kontos für die Skala in Admin → Übersicht → Konten je
     Firma (20.10.2026, Finn 03:05 Dubai: „Diese blauen und grünen Balken ersetzen … Wo steht der Account gerade bei der Balance?
@@ -6568,22 +6595,29 @@ def admin_build_overview(kapitel_id=None):
     except Exception as e:
         print(f"[admin] ⚠️ payout-ab: {type(e).__name__}: {e}", flush=True)
     # HEUTE TRADEN (16.10.2026): je Funded-Futures-Konto heute_traden {getradet, geplant_um} — eigenes try, ohne Abfrage bleibt die Liste heil
+    # Seit 21.10.2026 im selben Lesen auch heute_pl {getradet, laeuft, pl, n} je Funded-/Funded-CFD-Konto (Polar-Dropdown): Master-Seite aus
+    # derselben Abfrage (+ master_pl), Slave-Seite (Polar) aus EINER weiteren über slave_account_id
     try:
         from datetime import timedelta
-        fut = [r["id"] for r in rows if r.get("type") in HEUTE_TRADEN_TYPEN]
-        if fut:
+        konten = [r["id"] for r in rows if r.get("type") in HEUTE_PL_TYPEN]   # ⊇ HEUTE_TRADEN_TYPEN
+        if konten:
             tz_h = _ap_tz(AP_TZ_TAG)
             heute_h = datetime.now(tz_h).date().isoformat()
             ab = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            je_h = {}
-            for j in range(0, len(fut), 150):
-                for p in _sb_all("trade_plans", {"select": "master_account_id,status,started_at,ended_at,completed_at,start_um",
-                                                 "master_account_id": "in.(" + ",".join(fut[j:j + 150]) + ")",
-                                                 "or": f"(status.eq.open,started_at.gte.{ab},start_um.gte.{ab},completed_at.gte.{ab})"}):
-                    je_h.setdefault(str(p.get("master_account_id")), []).append(p)
+            je_h, je_pl = {}, {}
+            for spalte, seite in (("master_account_id", "master"), ("slave_account_id", "slave")):
+                for j in range(0, len(konten), 150):
+                    for p in _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,slave_pl",
+                                                     spalte: "in.(" + ",".join(konten[j:j + 150]) + ")",
+                                                     "or": f"(status.eq.open,started_at.gte.{ab},start_um.gte.{ab},completed_at.gte.{ab})"}):
+                        if seite == "master":
+                            je_h.setdefault(str(p.get("master_account_id")), []).append(p)
+                        je_pl.setdefault(str(p.get(spalte)), []).append((p, seite))
             for r in rows:
                 if r.get("type") in HEUTE_TRADEN_TYPEN:
                     r["heute_traden"] = heute_traden_info(je_h.get(str(r["id"]), []), heute_h, tz_h)
+                if r.get("type") in HEUTE_PL_TYPEN:
+                    r["heute_pl"] = heute_pl_info(je_pl.get(str(r["id"]), []), heute_h, tz_h)
     except Exception as e:
         print(f"[admin] ⚠️ heute-traden: {type(e).__name__}: {e}", flush=True)
 

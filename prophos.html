@@ -1642,7 +1642,19 @@
   #dashboard-view #polarCheckModal .pc-zelle .pc-ok{background:var(--good)}
   #dashboard-view #polarCheckModal .pc-zelle .pc-nein{background:var(--danger)}
   #dashboard-view #polarCheckModal .pc-zelle .pc-offen{background:transparent;border:1.5px solid var(--border);color:var(--sub)}
-  #dashboard-view #polarCheckModal tr.pc-ein td{animation:pcEin .4s ease-out both;animation-delay:calc(var(--i, 0) * 70ms)}
+  #dashboard-view #polarCheckModal tr.pc-ein td{animation:pcEin .4s ease-out both;animation-delay:calc(var(--i, 0) * 110ms)}
+  /* CHECK FÜR CHECK (Finn 21.10.2026: „Check, Check, eins am anderen Check … animiert und cool"): Haken poppt je Zelle (--c × 110 ms),
+     ein, zwei Wörter daneben; ✗-Grund eine Zeile rot (voller Text im Tooltip), Nebenbei-Info als ⓘ; Zusammenfassung nach dem letzten Haken (--d) */
+  #dashboard-view #polarCheckModal tr.pc-ein .pc-zelle .pc-m > span{animation:pcPop .42s cubic-bezier(.3,1.6,.5,1) both;animation-delay:calc(var(--c, 0) * 110ms)}
+  #dashboard-view #polarCheckModal tr.pc-ein .pc-zelle .pc-text,#dashboard-view #polarCheckModal tr.pc-ein .pc-zelle .pc-info{animation:pcEin .3s ease-out both;animation-delay:calc(var(--c, 0) * 110ms + 80ms)}
+  #dashboard-view #polarCheckModal .pc-zelle{white-space:nowrap}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-text{display:inline-block;max-width:calc(100% - 44px);overflow:hidden;text-overflow:ellipsis;vertical-align:top}
+  #dashboard-view #polarCheckModal .pc-zelle.is-nein .pc-text{font-weight:600}
+  #dashboard-view #polarCheckModal .pc-info{display:inline-block;margin-left:5px;color:var(--sub);font-size:12px;cursor:help;vertical-align:top}
+  #dashboard-view #polarCheckModal .pc-summe:not(.is-laden){animation-delay:var(--d, 0ms)}
+  #dashboard-view #polarCheckModal .pc-summe.is-ok .pc-summe-kreis{animation:pcPop .5s cubic-bezier(.3,1.6,.5,1) var(--d, 0ms) both, pcRing 1.8s ease-out calc(var(--d, 0ms) + 500ms) infinite}
+  #dashboard-view #polarCheckModal .pc-summe.is-nein .pc-summe-kreis{animation:pcPop .5s cubic-bezier(.3,1.6,.5,1) var(--d, 0ms) both}
+  @keyframes pcPop{0%{opacity:0;transform:scale(.3)}60%{opacity:1;transform:scale(1.18)}100%{opacity:1;transform:scale(1)}}
   #dashboard-view #polarCheckModal tr.pc-ein:hover td{background:color-mix(in srgb, var(--violet) 4%, transparent)}
   #dashboard-view #polarCheckModal tr.pc-zeile-nein.pc-ein:hover td{background:color-mix(in srgb, var(--danger) 9%, transparent)}
   #dashboard-view #polarCheckModal .pc-schimmer{display:block;height:10px;border-radius:6px;width:80%;background:linear-gradient(90deg,var(--border-soft) 25%,color-mix(in srgb, var(--violet) 18%, var(--border-soft)) 50%,var(--border-soft) 75%);background-size:300% 100%;animation:polFluss 1.2s linear infinite;animation-delay:calc(var(--i, 0) * 90ms)}
@@ -1653,7 +1665,10 @@
   @keyframes pcGlueh{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--violet) 0%, transparent)}50%{box-shadow:0 0 0 6px color-mix(in srgb, var(--violet) 22%, transparent)}}
   @media (prefers-reduced-motion: reduce){
     #dashboard-view #polarCheckModal .pc-summe,#dashboard-view #polarCheckModal .pc-summe-kreis,#dashboard-view #polarCheckModal tr.pc-ein td,
-    #dashboard-view #polarCheckModal .pc-schimmer,#dashboard-view #polarCheckModal #polarCheckStart.pc-start-frei{animation:none}
+    #dashboard-view #polarCheckModal .pc-schimmer,#dashboard-view #polarCheckModal #polarCheckStart.pc-start-frei,
+    #dashboard-view #polarCheckModal tr.pc-ein .pc-zelle .pc-m > span,#dashboard-view #polarCheckModal tr.pc-ein .pc-zelle .pc-text,
+    #dashboard-view #polarCheckModal tr.pc-ein .pc-zelle .pc-info,#dashboard-view #polarCheckModal .pc-summe.is-ok .pc-summe-kreis,
+    #dashboard-view #polarCheckModal .pc-summe.is-nein .pc-summe-kreis{animation:none}
   }
   /* Handy: Prüfung als Zeile oben, darunter Slave | Master je halbe Breite mit eigenem Spaltennamen (kein Seitwärts-Scrollen) */
   @media (max-width:600px){
@@ -1824,13 +1839,14 @@
   #polarModal .pol-tab{overflow-x:auto}
   /* Zeile Richtung · Symbol · Kontrakte, Multiplikator-Kacheln, Level-Tabelle (Umbau 13.10.2026) */
   #polarModal .pol-reihe3{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+  #polarModal .pol-reihe3.is-2{grid-template-columns:repeat(2,minmax(0,1fr))}   /* TP · SL ohne Puffer-Feld (21.10.2026) */
   #polarModal .pol-box{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
   #polarModal .pol-kachel{padding:10px 12px;border:1px solid var(--border-soft);border-radius:var(--r-sm)}
   #polarModal .pol-kachel small{display:block;font-size:11px;color:var(--sub)}
   #polarModal .pol-kachel b{font-size:17px}
   #polarModal .pol-lv td{padding:7px 10px;border-top:1px solid var(--border-soft)}
   #polarModal .pol-lv tr:first-child td{border-top:0;font-size:11px;color:var(--sub)}
-  @media (max-width:640px){ #polarModal .pol-grid,#polarModal .pol-block-grid{grid-template-columns:minmax(0,1fr)} #polarModal .pol-reihe3,#polarModal .pol-box{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:640px){ #polarModal .pol-grid,#polarModal .pol-block-grid{grid-template-columns:minmax(0,1fr)} #polarModal .pol-reihe3,#polarModal .pol-reihe3.is-2,#polarModal .pol-box{grid-template-columns:minmax(0,1fr)} }
   /* Winning Days Farm (25.09.2026, Design-Rundgang): das Raster hatte Löcher — Kontrakte halb + leer, Risiko Slave
      volle Breite, TP halb + leer. Jetzt Kontrakte | Risiko Slave, darunter TP volle Breite (der SL-Platz ist auf
      diesem Weg leer, Risiko Master IST der Stop Loss). Klasse tp-wd setzt tpRouteUpdateSeg nur auf diesem Weg. */
@@ -9237,12 +9253,12 @@
               </div>
             </section>
             <section class="pol-block is-tpsl">
-              <div class="pol-block-kopf">Take Profit · Stop Loss <small>Slave gespiegelt vom eigenen Fill, mit Puffer</small></div>
+              <!-- Puffer fest 2,5 % (Finn 21.10.2026: „Puffer fest 2,5 % vom jeweiligen Abstand, für SL und Airbag-TP, Feld im Popup weg") -->
+              <div class="pol-block-kopf">Take Profit · Stop Loss <small>Slave gespiegelt vom eigenen Fill, Puffer fest 2,5 %</small></div>
               <div class="pol-block-grid">
-                <div class="pol-reihe3">
+                <div class="pol-reihe3 is-2">
                   <div class="field"><label>Take Profit Master ($)</label><input type="number" class="input" id="pol-tp-m" min="0" step="50" value="7500"></div>
                   <div class="field"><label>Stop Loss Master ($)</label><input type="number" class="input" id="pol-sl-m" min="0" step="50" placeholder="= Risiko Master"></div>
-                  <div class="field"><label>Puffer Slave (Pkt)</label><input type="number" class="input" id="pol-puffer" min="0" step="0.5" value="4"></div>
                 </div>
                 <div style="grid-column:1 / -1" class="pol-tab" id="pol-level"></div>
               </div>
@@ -45881,7 +45897,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1674'
+  const OS_TAB_BUILD = '2026-09-22.1675'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55287,6 +55303,11 @@
    * Nur Rechnung + Anzeige: kein Speichern, kein Start, kein trade_plans-Feld. Eigene Verdrahtung, hängt nicht an _tpRoute. */
   let _polarKonten = []   // [{id, name, firm, type, person, user_id}] — Funded/Funded CFD aller sichtbaren IDs, nicht archiviert
   const polarEl = id => document.getElementById(id)
+  // PUFFER FEST 2,5 % (Finn 21.10.2026: „Puffer fest 2,5 % vom jeweiligen Abstand, für SL und Airbag-TP, Feld im Popup weg"): Slave-SL =
+  // Master-TP-Abstand × 1,025 (hinter dem Master-TP), Slave-TP = Master-SL-Abstand × 0,975 (vor dem Master-SL) — Vorschau und Speichern
+  const POLAR_PUFFER_PCT = 2.5
+  const polarSlaveAbstaende = (tpPkt, slPkt) => ({ sl: Math.round(tpPkt * (1 + POLAR_PUFFER_PCT / 100) * 100) / 100,
+    tp: Math.round(slPkt * (1 - POLAR_PUFFER_PCT / 100) * 100) / 100 })
   async function polarKontenLaden(){
     try{
       const { data: { session } } = await supabase.auth.getSession()
@@ -55297,7 +55318,8 @@
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       _polarKonten = (d.accounts || []).filter(a => !a.archived && (a.type === 'funded' || a.type === 'funded_cfd'))
         .map(a => ({ id: a.id, name: a.name || a.ext || '', ext: a.ext || '', boden: (typeof a.boden === 'number' && isFinite(a.boden)) ? a.boden : null, firm: a.firm_raw || a.firm || '', type: a.type, person: a.person || 'ohne Namen', user_id: a.user_id,   // ext: Endnummer in „Geplante Trades für Polar" (21.10.2026)
-                     balance: (typeof a.balance === 'number' && isFinite(a.balance)) ? a.balance : null }))
+                     balance: (typeof a.balance === 'number' && isFinite(a.balance)) ? a.balance : null,
+                     heute: a.heute_pl && typeof a.heute_pl === 'object' ? a.heute_pl : null }))   // heute getradet/läuft/P&L (21.10.2026, app.py heute_pl_info)
       return ''
     }catch(e){
       // Rückfall: nur die Konten dieses Logins (Overview nicht erreichbar) — die Vorschau rechnet trotzdem
@@ -55306,6 +55328,17 @@
       return `Konten anderer IDs nicht geladen (${e.message}) — zeige nur diese ID.`
     }
   }
+  // HEUTE JE KONTO (Finn 21.10.2026: „Hier auch bitte immer hinschreiben, ob die heute schon plus oder minus gemacht haben, also ob die heute
+  // schon getradet wurden, sowohl bei Slave als auch bei Master"): Stand vom Server (/admin/overview heute_pl — Planer-Tag wie „heute offen",
+  // Master-P&L bzw. Slave-P&L der heute beendeten Pläne). Ohne Feld (alter Stand/Rückfall) kein Zusatz.
+  function polarHeuteText(h){
+    if(!h) return ''
+    const pl = typeof h.pl === 'number' && isFinite(h.pl) ? `heute ${h.pl < 0 ? '−' : '+'}${Math.abs(h.pl).toLocaleString('de-DE', { maximumFractionDigits: 0 })} $` : ''
+    if(h.laeuft) return ' · läuft' + (pl ? ' · ' + pl : '')
+    if(!h.getradet) return ' · heute noch nicht getradet'
+    return ' · ' + (pl || 'heute getradet')
+  }
+  window._polarHeuteText = polarHeuteText   // Test-Haken (Stub)
   // Ein Dropdown je Seite, Konten nach ID gruppiert (Finn 13.10.2026: erst ID, dann Konto war „zu viel“)
   function polarKontoOptionen(sel, typ){
     const l = _polarKonten.filter(k => k.type === typ)
@@ -55313,7 +55346,7 @@
     sel.innerHTML = ids.length ? ids.map(p => `<optgroup label="${esc(p)}">${l.filter(k => k.person === p)
       .sort((a, b) => (a.firm + a.name).localeCompare(b.firm + b.name, 'de'))
       // Balance je Konto im Eintrag (14.10.2026, Finn): Live-Balance aus /admin/overview (balance), sonst „Balance ?"
-      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)} · ${k.balance != null ? Number(k.balance).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : 'Balance ?'}</option>`).join('')}</optgroup>`).join('')
+      .map(k => `<option value="${esc(k.id)}">${esc(k.firm)} · ${esc(k.name)} · ${k.balance != null ? Number(k.balance).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : 'Balance ?'}${esc(polarHeuteText(k.heute))}</option>`).join('')}</optgroup>`).join('')
       : '<option value="">— kein Konto —</option>'
   }
   const polarKonto = id => _polarKonten.find(k => String(k.id) === String(polarEl(id)?.value))
@@ -55340,9 +55373,9 @@
       <div class="pol-kachel"><small>Stop-Distanz</small><b>${distM ? de(distM, 1) + ' Pkt' : '–'}</b><small>Risiko Master ÷ (${ppl} $ × ${kt})</small></div>
       ${gleicheId ? `<div style="grid-column:1 / -1;font-size:12px;color:var(--warn)">Master und Slave liegen bei derselben ID — Polar ist für zwei verschiedene IDs gedacht.</div>` : ''}`
     // Level: Master in $ → Punkte; Slave gespiegelt vom eigenen Fill, Puffer mit Richtung (SL hinter dem Master-TP, TP vor dem Master-SL)
-    const tpM = n('pol-tp-m'), slM = n('pol-sl-m') || riskM, puffer = n('pol-puffer')
+    const tpM = n('pol-tp-m'), slM = n('pol-sl-m') || riskM
     const tpPkt = tpM / (ppl * kt), slPkt = slM / (ppl * kt)
-    const sSlPkt = tpPkt > 0 ? tpPkt + puffer : 0, sTpPkt = Math.max(0, slPkt - puffer)
+    const sab = polarSlaveAbstaende(tpPkt, slPkt), sSlPkt = tpPkt > 0 ? sab.sl : 0, sTpPkt = Math.max(0, sab.tp)
     const pkt = (up, p) => p > 0 ? `${up ? '+' : '−'}${de(p, 1)} Pkt` : '–'
     const usd = (v, plus) => v > 0 ? `${plus ? '+' : '−'}${de(v)} $` : ''
     polarEl('pol-level').innerHTML = `
@@ -55392,7 +55425,7 @@
   polarEl('tp-route-polar')?.addEventListener('click', () => { closeTradePlanModal(); polarOeffnen() })
   polarEl('polarClose')?.addEventListener('click', () => polarEl('polarModal').classList.remove('open'))
   ;['pol-fu-konto', 'pol-cfd-konto'].forEach(id => polarEl(id)?.addEventListener('change', polarRechnen))
-  ;['pol-kt', 'pol-risk-m', 'pol-risk-s', 'pol-tp-m', 'pol-sl-m', 'pol-puffer'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
+  ;['pol-kt', 'pol-risk-m', 'pol-risk-s', 'pol-tp-m', 'pol-sl-m'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
   ;['pol-dir', 'pol-sym'].forEach(id => polarEl(id)?.addEventListener('click', e => {
     const b = e.target.closest('button'); if(!b) return
     polarEl(id).querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b))
@@ -55467,17 +55500,17 @@
     const sPpl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(slave.firm)) || 1
     const mult = tpMultiplierAusRisiko(riskM, kt, riskS, ppl, sPpl)
     const lots = mult ? Math.max(0.01, Math.round(mult * kt * 100) / 100) : 0
-    const tpM = n('pol-tp-m'), slM = n('pol-sl-m') || riskM, puffer = n('pol-puffer')
-    const tpPkt = tpM / (ppl * kt), slPkt = slM / (ppl * kt)
+    const tpM = n('pol-tp-m'), slM = n('pol-sl-m') || riskM
+    const tpPkt = tpM / (ppl * kt), slPkt = slM / (ppl * kt), sab = polarSlaveAbstaende(tpPkt, slPkt)
     if(!lots || !(tpPkt > 0) || !(slPkt > 0)) return msg('Lots, Take Profit und Stop Loss müssen > 0 sein.')
     const root = ppl === 20 ? 'NQ' : 'MNQ'
     let sym = root
     try{ if(typeof tpFuturesFrontcode === 'function') sym = tpFuturesFrontcode(root) || root }catch(_){ sym = root }
     const body = { master_account_id: master.id, slave_account_id: slave.id, richtung: long ? 'buy' : 'sell', symbol: sym, kontrakte: kt,
       master_risk: riskM, slave_risk: riskS, lots, master_tp: tpM, master_sl: slM,
-      polar_pct: Math.round((1 + puffer / Math.max(1, tpPkt)) * 1000) / 10,
-      // Slave gespiegelt vom eigenen Fill: SL hinter dem Master-TP, TP vor dem Master-SL (Puffer mit Richtung)
-      sl_pkt: tpPkt + puffer, tp_pkt: Math.max(0.5, slPkt - puffer), master_sl_pkt: slPkt, master_tp_pkt: tpPkt,
+      polar_pct: 100 + POLAR_PUFFER_PCT,
+      // Slave gespiegelt vom eigenen Fill: SL hinter dem Master-TP, TP vor dem Master-SL (Puffer fest 2,5 % je Abstand, 21.10.2026)
+      sl_pkt: sab.sl, tp_pkt: Math.max(0.5, sab.tp), master_sl_pkt: slPkt, master_tp_pkt: tpPkt,
       // sicht admin = Verwalter plant in seiner Gruppe (wie die übrigen Admin-Reiter); kein starten mehr (21.10.2026)
       sicht: 'admin' }
     const knoepfe = ['polarNurSpeichern'].map(polarEl).filter(Boolean)
@@ -55729,10 +55762,25 @@
    * gruppe + seite vom Server (polar_app.vorpruefung_zeilen); ältere Antworten ohne gruppe fallen auf die Liste zurück. */
   const POLAR_CHECK_GRUPPEN = [['richtung', 'Richtungsschutz'], ['big', 'Kein Big Trade (Orbit)'], ['puls', 'Puls frei'], ['polar', 'Kein anderer Polar-Lauf'],
     ['pc', 'PC · Prophos-Tab'], ['geraet', 'Reader / MT5'], ['test', 'Maus-Test × (dieser PC)']]
-  function polarCheckZelle(z, kopfText){   // kopfText = Spaltenname fürs Handy (dort ohne Tabellenkopf, s. CSS)
-    const k = kopfText ? ` data-kopf="${escapeHtml(kopfText)}"` : ''
+  /* WENIGER TEXT (Finn 21.10.2026: „Hier ist sehr viel Text, einfach ein bisschen weniger Text. Einfach so: Check, Check, eins am anderen
+   * Check … dass das ein bisschen animiert und cool aussieht"): je Zelle Badge + ein, zwei Wörter, der volle Server-Text im Tooltip. ✗ zeigt
+   * den Grund kurz (eine Zeile, rot), die Nebenbei-Info der Big-Trade-Zeile („läuft auch: … sperrt nicht") nur als ⓘ. */
+  const POLAR_CHECK_KURZ = { richtung: 'frei', big: 'frei', puls: 'frei', polar: 'frei', pc: 'Tab lebt', geraet: 'MT5 läuft' }
+  function polarCheckKurz(z){
+    const t = String((z && z.text) || '')
+    if(z.ok === false) return { wort: t.replace(/\s+—\s+nichts gestartet$/, '').replace(/^Big Trade /, 'Big Trade: '), info: '' }
+    if(z.gruppe === 'test') return { wort: /^nicht bewiesen/.test(t) ? 'nicht bewiesen' : /^bewiesen/.test(t) ? 'bewiesen' : t.split(' (')[0], info: '' }
+    if(z.ok == null) return { wort: z.key === 'reader' ? 'vom PC geprüft' : 'nicht prüfbar', info: '' }
+    const i = t.indexOf('läuft auch:')
+    return { wort: POLAR_CHECK_KURZ[z.gruppe] || t.split(/\s[—·(]/)[0], info: i >= 0 ? t.slice(i) : '' }
+  }
+  window._polarCheckKurz = polarCheckKurz   // Test-Haken (Stub)
+  function polarCheckZelle(z, kopfText, nr){   // kopfText = Spaltenname fürs Handy (dort ohne Tabellenkopf, s. CSS); nr = Reihenfolge der Checks
+    const k = (kopfText ? ` data-kopf="${escapeHtml(kopfText)}"` : '') + (nr != null ? ` style="--c:${nr}"` : '')
     if(!z) return `<td class="pc-zelle"${k}><span class="pc-text">—</span></td>`
-    return `<td class="pc-zelle ${z.ok === true ? 'is-ok' : z.ok === false ? 'is-nein' : 'is-offen'}"${k}><span class="pc-m">${polarCheckZeichen(z.ok)}</span><span class="pc-text">${escapeHtml(String(z.text || ''))}</span></td>`
+    const kz = polarCheckKurz(z)
+    return `<td class="pc-zelle ${z.ok === true ? 'is-ok' : z.ok === false ? 'is-nein' : 'is-offen'}"${k} title="${escapeHtml(String(z.text || ''))}"><span class="pc-m">${polarCheckZeichen(z.ok)}</span><span class="pc-text">${escapeHtml(kz.wort)}</span>`
+      + (kz.info ? `<span class="pc-info" title="${escapeHtml(kz.info)}">ⓘ</span>` : '') + '</td>'
   }
   let _polarCheckZeilen = []   // letzte Vorprüfung (Namen der IDs für den Live-Ablauf)
   function polarCheckZeichnen(d){
@@ -55758,22 +55806,29 @@
       summe.className = 'pc-summe ' + (d && d.laden ? 'is-laden' : !kreuz ? '' : nein.length ? 'is-nein' : 'is-ok')
       summe.innerHTML = d && d.laden ? `<span class="pc-summe-kreis"><i class="pol-kreisel"></i></span><span><b>Prüfe beide Seiten…</b><small>Richtungsschutz · Big Trade · Puls · Polar · PCs · Reader/MT5</small></span>`
         : !kreuz ? '' : nein.length
-          ? `<span class="pc-summe-kreis">${nein.length}</span><span><b>${nein.length} von ${gr.length} Prüfungen gesperrt</b><small>${escapeHtml(nein.map(([, l]) => l).join(' · '))} — erst klären, dann „Neu prüfen"</small></span><span class="pc-summe-zeit">geprüft ${uhrJetzt}</span>`
-          : `<span class="pc-summe-kreis">✓</span><span><b>Alle ${gr.length} Prüfungen frei</b><small>Slave${escapeHtml(werRoh('slave'))} · Master${escapeHtml(werRoh('master'))} — bereit zum Start</small></span><span class="pc-summe-zeit">geprüft ${uhrJetzt}</span>`
+          ? `<span class="pc-summe-kreis">${nein.length}</span><span><b>${nein.length} von ${gr.length} gesperrt</b><small>${escapeHtml(nein.map(([, l]) => l).join(' · '))}</small></span><span class="pc-summe-zeit">${uhrJetzt}</span>`
+          : `<span class="pc-summe-kreis">✓</span><span><b>Alle ${gr.length} frei</b><small>Slave${escapeHtml(werRoh('slave'))} · Master${escapeHtml(werRoh('master'))}</small></span><span class="pc-summe-zeit">${uhrJetzt}</span>`
     }
-    let _i = 0
+    // Check für Check (21.10.2026): Zeile für Zeile, je Zeile Slave dann Master, je Haken 110 ms (--c), die Zeile selbst ab ihrem ersten
+    // Haken (--i); die Zusammenfassung oben kommt erst nach dem letzten Haken (--d)
+    let _i = 0, _c = 0
     if(rows) rows.innerHTML = (d && d.laden && !zz.length) ? POLAR_CHECK_GRUPPEN.slice(0, 6).map(([, label], i) => `<tr class="pc-skelett" style="--i:${i}"><td class="pc-pruef">${label}</td><td><span class="pc-schimmer"></span></td><td><span class="pc-schimmer"></span></td></tr>`).join('')
       : !zz.length ? '<tr><td></td><td colspan="2" class="pc-text">keine Antwort</td></tr>'
       : kreuz ? POLAR_CHECK_GRUPPEN.map(([g, label]) => {
           const zg = zz.filter(z => z.gruppe === g)
           if(!zg.length) return ''
           const beide = zg.find(z => !z.seite)
-          const zeilenKlasse = ` class="pc-ein${zg.some(z => z.ok === false) ? ' pc-zeile-nein' : ''}" style="--i:${_i++}"`
+          _i++
+          const zeilenKlasse = ` class="pc-ein${zg.some(z => z.ok === false) ? ' pc-zeile-nein' : ''}" style="--i:${_c}"`
           return beide
-            ? `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(beide).replace('<td ', '<td colspan="2" class="pc-beide" ').replace('class="pc-beide" class="', 'class="pc-beide ')}</tr>`
-            : `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(zg.find(z => z.seite === 'slave'), 'Slave' + werRoh('slave'))}${polarCheckZelle(zg.find(z => z.seite === 'master'), 'Master' + werRoh('master'))}</tr>`
+            ? `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(beide, null, _c++).replace('<td ', '<td colspan="2" class="pc-beide" ').replace('class="pc-beide" class="', 'class="pc-beide ')}</tr>`
+            : `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(zg.find(z => z.seite === 'slave'), 'Slave' + werRoh('slave'), _c++)}${polarCheckZelle(zg.find(z => z.seite === 'master'), 'Master' + werRoh('master'), _c++)}</tr>`
         }).join('')
       : zz.map(z => `<tr><td>${polarCheckZeichen(z.ok)}</td><td><b>${escapeHtml(String(z.titel || ''))}</b></td><td class="pc-text">${escapeHtml(String(z.text || ''))}</td></tr>`).join('')
+    if(summe && !(d && d.laden)){   // Zusammenfassung nach dem letzten Haken einblenden — Animation neu anstoßen (dasselbe Element)
+      summe.style.setProperty('--d', (_c * 110 + 150) + 'ms')
+      summe.style.animation = 'none'; void summe.offsetWidth; summe.style.animation = ''
+    }
     if(start) start.disabled = !(d && d.frei === true)
     if(start) start.classList.toggle('pc-start-frei', !!(d && d.frei === true))
   }
@@ -55797,8 +55852,7 @@
       const { r, d } = await polarCheckRufen('vorpruefung')
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
       polarCheckZeichnen(d)
-      if(msg) msg.textContent = d.frei ? 'Alles ✓ — „Polar starten" setzt die Startzeit jetzt, der PC der Master-ID startet, Hände weg von beiden PCs.'
-        : 'Start gesperrt — erst die ✗-Zeilen klären, dann „Neu prüfen".'
+      if(msg) msg.textContent = d.frei ? 'Bereit — Hände weg von beiden PCs.' : 'Gesperrt — ✗ klären, dann „Neu prüfen".'   // kurz (Finn 21.10.2026)
     }catch(e){
       polarCheckZeichnen(null)
       if(msg){ msg.textContent = '⛔ ' + ((e && e.message) || e); msg.classList.add('err') }
@@ -55897,13 +55951,15 @@
     if(fuss) fuss.hidden = true
     polarRadarKnopf(true, false)
     if(h) h.textContent = 'Polar läuft — Live-Ablauf'
-    if(live){ live.hidden = false; live.innerHTML = polarAblaufHtml(null, {}) }
     const kt = Number(p.masterContracts) || null, lots = kt && Number(p.multiplier) ? Math.round(kt * Number(p.multiplier) * 100) / 100 : null
     const ppl = (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl(p.slaveFirm)) || 1
     // Namen der IDs aus der Vorprüfung (Spaltenköpfe „Slave · Finn + Pascal"), sonst neutral
     const wer = s => { const z = (_polarCheckZeilen || []).find(x => x && x.seite === s && x.wer); return z ? String(z.wer) : (s === 'master' ? 'Master-ID' : 'Slave-ID') }
     _polarLive = { pid: String(p.id), takt: null, uhr: null, html: '', gesehenMs: Date.now(), startMs: Date.now(), o: { richtung: p.richtung, kontrakte: kt, symbol: p.masterSymbol, lots, slavePpl: ppl,
       masterKonto: p.masterName, slaveKonto: p.slaveName, masterWer: wer('master'), slaveWer: wer('slave') } }
+    // Erster Stand MIT Konto/IDs/Menge (Finn 21.10.2026, Plan cc261c57: bis zum ersten Lauf-Stand — 404 „wartet auf den PC der Master-ID" —
+    // stand hier polarAblaufHtml(null, {}) → „SLAVE · ?", „Konto ?", „SELL ? Lot")
+    if(live){ live.hidden = false; live.innerHTML = polarAblaufHtml({ status: 'start' }, _polarLive.o) }
     polarLiveTick()
     _polarLive.takt = setInterval(polarLiveTick, 2000)
     _polarLive.uhr = setInterval(polarCountdownTick, 200)
