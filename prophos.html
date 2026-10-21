@@ -32306,6 +32306,9 @@
         const kid = String(t.konto_id || ''), uid = wdlUid(t), eigen = uid === ich
         const a = eigen && kid ? (accounts || []).find(x => x && String(x.id) === kid) : null
         if(a && (a.zielErreichtAt || (arch[String(a.id)] && arch[String(a.id)].archived))) continue
+        // fremdes Konto schon archiviert (21.10.2026, Moritz Tradeify …4572: Nachfolger angelegt, bei Finn stand es weiter hier) — das Archiv
+        // des Besitzers kennt nur der Server: /admin/live-trades konto.archiviert
+        if(!a && (t.konto || {}).archiviert) continue
         const k = t.konto || {}, typ = String(t.konto_typ || (a && a.type) || ''), ueb = WDL_UEBERGANG[typ] || (typ ? typW(typ) : '')
         // BALANCE LESEN AUS DEM RADAR (Finn 21.10.2026, s. rvhBalLesen): eine frische Lesung zählt vor der Balance des letzten Trades; am Ziel
         // raus aus „Rest von Hand" (die Ziel-Wache taggt es eben, Tage sammeln/Review holt es). Fremde Konten mit Ziel-Tag (handarbeit) ebenso.
@@ -32313,7 +32316,12 @@
         if(rvhSt.amZiel) continue
         if(!eigen && kid && (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])
           .some(z => z && String(z.konto_id) === kid && z.seit))) continue
-        const ziel = n(t.ziel_usd), bal = rvhSt.bal != null ? rvhSt.bal : (wdlBlowStand(t) || {}).bal, zr = zielRest(bal, ziel) || { rest: null }
+        // JÜNGERE KONTO-BALANCE (21.10.2026, Moritz Tradeify …4572: Rest von Hand geholt, Puls las 15:29 159.013 — die Zeile rechnete weiter mit
+        // 158.945 vom Trade-Ende 15:04): liegt die Konto-Balance (accounts.tv_balance) zeitlich NACH dem Trade-Ende, gilt sie; am Ziel → raus
+        const kbJ = n(t.konto_balance), kbAt = Date.parse(t.konto_balance_at || '') || 0, endeTs = Date.parse(t.ended_at || t.completed_at || '') || 0
+        const kbNeu = (kbJ != null && kbAt && endeTs && kbAt > endeTs) ? kbJ : null
+        if(kbNeu != null && n(t.ziel_usd) != null && kbNeu >= n(t.ziel_usd)) continue
+        const ziel = n(t.ziel_usd), bal = rvhSt.bal != null ? rvhSt.bal : kbNeu != null ? kbNeu : (wdlBlowStand(t) || {}).bal, zr = zielRest(bal, ziel) || { rest: null }
         const gr = n(k.groesse) || 0
         const konto = `${k.firma || (a && a.firm) || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
         let tf = null; try{ tf = a && typeof zielFortschritt === 'function' ? zielFortschritt(a) : null }catch(_){ tf = null }
@@ -46344,7 +46352,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1694'
+  const OS_TAB_BUILD = '2026-09-22.1695'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

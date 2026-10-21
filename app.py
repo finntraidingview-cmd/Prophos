@@ -12489,9 +12489,19 @@ def admin_live_trades():
         # Weg je Zeile (01.10.2026, Finn am Radar: „immer sehen, mit welchem Modell der gestartet wurde"): Orbit V3 und Winning Day
         # sind beide tvv2 + hedge_eur — unterscheiden lässt sie nur die Kennung orbit_v3; konto_typ für den Winning-Day-Rückfall
         je_id = {str(p.get("id")): p for p in plaene}
+        # ARCHIVIERT je Konto (21.10.2026, Finn im Login „Finn + Pascal": Moritz Tradeify …4572 hatte schon den Nachfolger — Konto im Archiv
+        # 'passed' —, stand bei Finn aber weiter unter Bestanden → Rest von Hand): das Archiv liegt in user_settings des BESITZERS, ein fremder
+        # Login kennt es nicht. Nur mit ?echo=1 (Radar/Planer); scheitert die Abfrage, fehlt nur das Feld.
+        try:
+            _lt_archiv = _ap_archiviert_gemerkt() if mit_echo else set()   # 30-s-Merker, der Radar fragt alle ~50 s
+        except Exception as e:
+            _lt_archiv = set()
+            print(f"[live-trades] ⚠️ Archiv: {type(e).__name__}: {e}", flush=True)
         for z in trades:
             q = je_id.get(str(z.get("id"))) or {}
             z["orbit_v3"], z["konto_typ"] = bool(q.get("orbit_v3")), q.get("konto_typ")
+            if mit_echo and isinstance(z.get("konto"), dict):
+                z["konto"]["archiviert"] = str(q.get("master_account_id") or "") in _lt_archiv
         if mit_echo:
             # SATZ-AN-LIVE-TRADES (07.10.2026): Kontowert-Satz je Zeile für den Hypo-P&L im Trade-Planer — nur mit ?echo=1 (Radar/Planer),
             # der PC-Tab-Takt (?nur_eigene=1&status=open) bleibt ohne. Kontowerte aus dem 60-s-Merker; scheitern sie, fehlt nur der Satz.
