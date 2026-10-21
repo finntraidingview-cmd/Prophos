@@ -56248,12 +56248,14 @@
     const altFu = behalten ? fu?.value : '', altCfd = behalten ? cfd?.value : ''
     polarKontoOptionen(fu, 'funded')
     polarKontoOptionen(cfd, 'funded_cfd')
-    if(altFu && _polarKonten.some(k => String(k.id) === altFu)) fu.value = altFu
-    if(altCfd && _polarKonten.some(k => String(k.id) === altCfd)) cfd.value = altCfd
+    // Waiting for Payout steht seit 21.10.2026 nicht mehr in der Liste — weder behalten noch vorbelegen, sonst zeigt der Slave
+    // „— kein Konto —" (S4 Bug-Rundgang 21.10.2026: erstes CFD-Konto einer anderen ID war „waiting")
+    if(altFu && _polarKonten.some(k => String(k.id) === altFu && !k.warten)) fu.value = altFu
+    if(altCfd && _polarKonten.some(k => String(k.id) === altCfd && !k.warten)) cfd.value = altCfd
     else {
       // Slave standardmäßig bei einer ANDEREN ID als der Master
       const m = polarKonto('pol-fu-konto')
-      const anders = _polarKonten.find(k => k.type === 'funded_cfd' && (!m || k.person !== m.person))
+      const anders = _polarKonten.find(k => k.type === 'funded_cfd' && !k.warten && (!m || k.person !== m.person))
       if(anders) cfd.value = String(anders.id)
     }
     polarWahlKnoepfe()
