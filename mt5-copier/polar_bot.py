@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.13"   # 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.14"   # 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -83,6 +83,17 @@ class Lauf:
         try:
             with open(self.log_datei, "a", encoding="utf-8") as f:
                 f.write(time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d} {text}\n")
+        except OSError:
+            pass
+
+    def spur_ins_log(self, ab, titel):
+        """Spur-Zeilen, die order_bot-Helfer seit Index ab angehängt haben, ins <seite>.log spiegeln (21.10.2026, Lauf 3cc4d9b7: das
+        Ändern brauchte 50 s, und im slave.log stand nur Anfang und Ende — die gestempelte Spur lag allein im Prozess-Log)."""
+        try:
+            neu = [str(t) for t in list(self.trail)[ab:]]
+            if neu:
+                with open(self.log_datei, "a", encoding="utf-8") as f:
+                    f.write(time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d} {titel}:\n" + "".join(f"    {t}\n" for t in neu[-80:]))
         except OSError:
             pass
 
@@ -1759,6 +1770,7 @@ def lauf_slave(cmd):
         anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "anker-" + os.path.basename(cfg_path))
         bestaetigt = ob.sltp_bestaetigt(p["sl"], p["tp"], sl, tp, digits)
         if not bestaetigt and not ab.get("abbruch"):
+            n_spur, t_aendern = len(lauf.trail), time.time()
             ob._sltp_klicken(w, ticket, symbol, ob.fmt_preis(sl, digits), ob.fmt_preis(tp, digits), lauf.trail, anker_pfad=anker_pfad)
             ende2 = time.time() + 10
             while time.time() < ende2 and not bestaetigt:
@@ -1767,6 +1779,7 @@ def lauf_slave(cmd):
                     bestaetigt = any(q["ticket"] == ticket and ob.sltp_bestaetigt(q["sl"], q["tp"], sl, tp, digits) for q in st["positionen"])
                 if not bestaetigt:
                     ob._warte(0.15, 0.15)
+            lauf.spur_ins_log(n_spur, f"Ändern-Spur ({time.time() - t_aendern:.1f} s, {'bestätigt' if bestaetigt else 'NICHT bestätigt'})")
         res.update(sl=sl, tp=tp, level_ok=bestaetigt)
         # level-Felder (21.10.2026, Live-Ablauf von Slave 2): sl/tp = gesetzte Soll-Werte, ok = per API bestätigt, quelle airbag|plan,
         # notfall = F9-Level; mit Airbag dazu master_fill/master_tp/master_liq/master_stop(_art)/puffer_pct (s. airbag_level), sonst grund
@@ -2048,25 +2061,30 @@ def slave_x_punkte(w, anker_pfad, ticket=None, symbol=None):
         zeile = (hr.left + int((hr.right - hr.left) * float(a["x_frac"])), hr.bottom - int(a["y_off"]))
     except (KeyError, TypeError, ValueError):
         pass
-    z = slave_profit_zelle(w, ticket, symbol) if ticket else None
+    if not ticket:
+        return zeile, None, fenster, "ohne Ticket kein ×", None, None
+    # BILD ZUERST (21.10.2026, Lauf 3cc4d9b7: Parken 7 s nach dem Ändern): die UIA-Zellensuche ist ein descendants()-Lauf über das ganze
+    # MT5-Fenster — Sekunden je Aufruf (order_bot-Befund 02.09.2026) und auf den Builds mit SysListView32 ohnehin ohne Zellen. Das Bild
+    # braucht Millisekunden; UIA nur noch, wenn das Bild nichts beweist.
+    bild = None
+    if zeile is not None:
+        try:
+            bild = slave_x_bild(w, zeile)
+        except Exception as e:
+            bild = {"grund": f"Bild nicht lesbar ({type(e).__name__}: {str(e)[:60]})"}
+        if bild.get("punkt"):
+            zeile = (zeile[0], bild["punkt"][1])
+            return zeile, bild["punkt"], fenster, (f"Bild: {bild['grund']} · × {bild['glyph']} {bild['abstand_rechts']} px vor dem Listenrand "
+                                                   f"(Liste {bild['liste']} {bild['klasse']})"), None, bild
+    z = slave_profit_zelle(w, ticket, symbol)
     if z:
         if zeile is None:
             zr = z["zeile"]["rect"]
             zeile = (int(zr[0] + zr[2] * 0.4), int(zr[1] + zr[3] / 2))
         return zeile, z["punkt"], fenster, f"Profit-Zelle {z['zelle']['rect']} '{z['zelle'].get('text')}' − {ZELLE_X_RAND_PX} px ({z['n']} UIA-Elemente)", z["zelle"]["rect"], None
-    if not ticket:
-        return zeile, None, fenster, "ohne Ticket kein ×", None, None
     if zeile is None:
-        return None, None, fenster, "Profit-Zelle per UIA nicht lesbar, kein Zeilen-Anker — kein ×, Zeilen-Scan", None, None
-    try:
-        bild = slave_x_bild(w, zeile)
-    except Exception as e:
-        bild = {"grund": f"Bild nicht lesbar ({type(e).__name__}: {str(e)[:60]})"}
-    if bild.get("punkt"):
-        zeile = (zeile[0], bild["punkt"][1])
-        return zeile, bild["punkt"], fenster, (f"Bild: {bild['grund']} · × {bild['glyph']} {bild['abstand_rechts']} px vor dem Listenrand "
-                                               f"(Liste {bild['liste']} {bild['klasse']})"), None, bild
-    return zeile, None, fenster, f"Profit-Zelle per UIA nicht lesbar, Bild: {bild.get('grund')} — kein ×, Rechtsklick-Weg", None, bild
+        return None, None, fenster, "kein Zeilen-Anker, Profit-Zelle per UIA nicht lesbar — kein ×, Zeilen-Scan", None, None
+    return zeile, None, fenster, f"Bild: {(bild or {}).get('grund')}, Profit-Zelle per UIA nicht lesbar — kein ×, Rechtsklick-Weg", None, bild
 
 
 def slave_wache(lauf, w, path, expected, ticket, anker_pfad):

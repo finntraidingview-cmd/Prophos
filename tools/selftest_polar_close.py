@@ -398,6 +398,20 @@ def main():
     check(wi.count("< HAFTUNG_BLICKE") == 2 and wi.count(">= HAFTUNG_AB_S") == 2 and pb.HAFTUNG_BLICKE == 3 and pb.HAFTUNG_AB_S == 0.2,
           "Ausschluss-Suche höchstens 3× je Weg, frühestens 200 ms nach dem Klick")
     check("zweites × NICHT erlaubt" in wi and "zweiter Rechtsklick NICHT erlaubt" in wi, "Log, wenn nach der Zustimmung kein zweiter Klick erlaubt ist")
+    print("10j) Lauf 3cc4d9b7: Bild vor UIA beim Parken, Ändern-Spur im slave.log")
+    srcJ = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    xp = srcJ[srcJ.index("def slave_x_punkte("):srcJ.index("def slave_wache(")]
+    check(xp.index("slave_x_bild(w, zeile)") < xp.index("slave_profit_zelle(w, ticket, symbol)"), "slave_x_punkte: Bild (ms) vor der UIA-Zellensuche (Sekunden)")
+    ls3 = srcJ[srcJ.index("def lauf_slave(cmd):"):srcJ.index("def uia_zeilen_lesen(")]
+    check(ls3.index("n_spur, t_aendern = len(lauf.trail)") < ls3.index("ob._sltp_klicken(") < ls3.index("lauf.spur_ins_log(n_spur"),
+          "Ändern-Spur (order_bot-Stationen mit Sekunden) landet im slave.log")
+    import tempfile as _tf
+    class _LS:
+        log_datei = os.path.join(_tf.mkdtemp(), "slave.log")
+        trail = ["a", "1.2s·Anker-Schnellweg ohne Treffer", "9.8s·Zeilen-Scan ohne Treffer"]
+    pb.Lauf.spur_ins_log(_LS, 1, "Ändern-Spur (9.9 s, NICHT bestätigt)")
+    txt = open(_LS.log_datei, encoding="utf-8").read()
+    check("Ändern-Spur (9.9 s" in txt and "Anker-Schnellweg ohne Treffer" in txt and "    a\n" not in txt, "spur_ins_log schreibt nur die neuen Spur-Zeilen")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")
