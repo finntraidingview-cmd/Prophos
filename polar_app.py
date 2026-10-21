@@ -392,6 +392,55 @@ def trades_belegt(rows, pid, jetzt):
     return out
 
 
+# ── LIQ DES MASTERS FÜR DEN AIRBAG (Finn 21.10.2026: „Auf dem Master wird meistens kein Stop-Loss eingestellt, weil es eine Liquidation ist.
+# Auf dem Slave müsste der Liquidationspreis vom Master automatisch erkannt werden und damit dann der TP und SL ausgestattet werden") ──────
+# Beim Start rechnet Railway die Liquidation des Master-Kontos mit DENSELBEN Helfern wie der Radar (liq_regel_felder: engere von liq_regeln
+# und Konto-Boden, Peak, Tagesstart, Kernwerte) als $-Abstand ab der Start-Balance. Der Slave macht daraus nach beiden Fills den Preis.
+def liq_vorgabe(start_bal, bal_quelle, liq_bal, liq_text, ppl, kt, sl_pkt, master_tp_pkt):
+    """REIN RECHNEND (testbar): Liq-Vorgabe für den Slave → {ok, start_balance, liq_balance, abstand_usd, abstand_pkt, ppl, kontrakte,
+    puffer_pkt, master_tp_pkt, text} | {ok False, grund}. Puffer wie im Polar-Popup gespeichert: sl_pkt = master_tp_pkt + Puffer."""
+    s, l, p, k = _zahl(start_bal), _zahl(liq_bal), _zahl(ppl), _zahl(kt)
+    if s is None:
+        return {"ok": False, "grund": "Start-Balance des Master-Kontos nicht frisch gelesen"}
+    if l is None:
+        return {"ok": False, "grund": f"Liquidation nicht bestimmbar ({liq_text or 'keine Regel/kein Boden'})"}
+    if not p or not k or p <= 0 or k <= 0:
+        return {"ok": False, "grund": "Punktwert/Kontrakte des Masters fehlen"}
+    abstand = round(s - l, 2)
+    if abstand <= 0:
+        return {"ok": False, "grund": f"Balance {s:g} liegt nicht über der Liquidation {l:g}"}
+    sp, mt = _zahl(sl_pkt), _zahl(master_tp_pkt)
+    if sp is None or mt is None or sp < mt:
+        return {"ok": False, "grund": "Puffer nicht lesbar (sl_pkt/master_tp_pkt am Auftrag)"}
+    pkt = round(abstand / (p * k), 4)
+    puffer = round(sp - mt, 4)
+    if pkt <= puffer:
+        return {"ok": False, "grund": f"Liquidation nur {pkt:g} Pkt entfernt, Puffer {puffer:g} Pkt — kein Platz für den Airbag-TP"}
+    return {"ok": True, "start_balance": s, "balance_quelle": bal_quelle, "liq_balance": l, "abstand_usd": abstand, "abstand_pkt": pkt,
+            "ppl": p, "kontrakte": k, "puffer_pkt": puffer, "master_tp_pkt": mt, "text": liq_text}
+
+
+def _master_liq(plan, auftrag):
+    """Liq-Vorgabe des Master-Kontos wie der Radar (_lt_zeile → liq_regel_felder), zum Startzeitpunkt. Fehler → {ok False, grund}, nie werfen.
+    Topstep V2 mit gelesener MLL (Radar: mll aus der tv-Baseline) gibt es hier noch nicht — dort zählt der Konto-Boden."""
+    try:
+        acc = (A["sb_select"]("accounts", {"select": "*", "id": f"eq.{plan.get('master_account_id')}", "limit": "1"}) or [None])[0]
+        if not acc:
+            return {"ok": False, "grund": "Master-Konto nicht gefunden"}
+        aid = str(acc["id"])
+        p = dict(plan, started_at=A["_wt_now_iso"]())
+        fruehere = A["_wd_fruehere_trades"]([aid])
+        start_bal, quelle, _at = A["wd_start_balance"](p, {}, acc, A["wd_vorher_waehlen"](p, fruehere))
+        tagesstart, _tq = A["liq_tagesstart"](p, start_bal, fruehere)
+        root = "MNQ" if str(plan.get("master_symbol") or "").strip().upper().startswith("MNQ") else "NQ"
+        ppl, kt = A["WD_HEUTE_PPL"].get(root), _zahl(auftrag.get("kontrakte") or plan.get("master_contracts"))
+        f = A["liq_regel_felder"](A["_liq_regeln_laden"](), acc, p, start_bal, tagesstart, None, plan.get("richtung"), ppl, kt,
+                                  peak=A["liq_peak"](p, acc, start_bal, A["_liq_verlauf_laden"]([aid])), kw_firmen=A["_liq_kw_laden"]())
+    except Exception as e:
+        return {"ok": False, "grund": f"Liq nicht rechenbar: {type(e).__name__}: {str(e)[:100]}"}
+    return liq_vorgabe(start_bal, quelle, f.get("liq_regel_balance"), f.get("liq_regel_text"), ppl, kt, auftrag.get("sl_pkt"), auftrag.get("master_tp_pkt"))
+
+
 def _vp_zeile(key, titel, ok, text, gruppe=None, seite=None):
     return {"key": key, "titel": titel, "ok": ok, "text": text, "gruppe": gruppe, "seite": seite}
 
@@ -802,9 +851,12 @@ def registrieren(app, ns):
         master_auftrag = {"richtung": plan.get("richtung"), "kontrakte": auftrag.get("kontrakte") or plan.get("master_contracts"),
                           "symbol": plan.get("master_symbol"), "sl_pkt": auftrag.get("master_sl_pkt"), "tp_pkt": auftrag.get("master_tp_pkt"),
                           "tp_usd": plan.get("master_tp"), "sl_usd": plan.get("master_sl")}
+        # AIRBAG (Finn 21.10.2026): Liquidation des Masters für die Slave-Level, sichtbar unter master.liq in /polar/stand (s. liq_vorgabe)
+        liq = _master_liq(plan, auftrag)
+        print(f"[polar] Liq Master Plan {pid[:8]}: " + (f"{liq['abstand_usd']:g} $ = {liq['abstand_pkt']:g} Pkt bis {liq['liq_balance']:g}" if liq.get("ok") else liq.get("grund", "?")), flush=True)
         try:
             row = A["sb_insert"]("polar_lauf", {"plan_id": pid, "master_user_id": str(me), "slave_user_id": str(plan["polar_slave_user_id"]),
-                                                "master": {"auftrag": master_auftrag}, "slave": {"auftrag": slave_auftrag}})
+                                                "master": {"auftrag": master_auftrag, "liq": liq}, "slave": {"auftrag": slave_auftrag}})
             lid = str(row["id"])
             # plan_id bewusst „polar:<lauf>" (keine UUID): der Gegenrichtungs-Riegel auf order_signale prüft nur Plan-UUIDs derselben ID —
             # der Slave ist eine ANDERE ID bei einer anderen Firma
@@ -813,7 +865,7 @@ def registrieren(app, ns):
         except Exception as e:
             return jsonify({"ok": False, "msg": f"Lauf nicht angelegt: {str(e)[:200]}"}), 503
         z = {"id": lid, "plan_id": pid, "master_uid": str(me), "slave_uid": str(plan["polar_slave_user_id"]), "status": "start",
-             "feuer_ms": None, "master_zu_ms": None, "slave_zu_ms": None, "master": {"auftrag": master_auftrag}, "slave": {"auftrag": slave_auftrag},
+             "feuer_ms": None, "master_zu_ms": None, "slave_zu_ms": None, "master": {"auftrag": master_auftrag, "liq": liq}, "slave": {"auftrag": slave_auftrag},
              "grund": None, "bereit": {}, "bereit_ms": {}, "angelegt_ms": _ms()}
         with _COND:
             _LAEUFE[lid] = z

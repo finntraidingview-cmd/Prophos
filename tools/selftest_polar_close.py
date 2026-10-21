@@ -26,7 +26,7 @@ def lade_app():
     src = open(os.path.join(STAMM, "polar_app.py"), encoding="utf-8").read()
     ns = {"re": re}
     teile = [re.search(r"^ENDE = .*$", src, re.M).group(0)]
-    for name in ("_zahl", "zu_erste_seite", "zu_eintragen", "warte_zu_fertig", "abrechnung_rechnen"):
+    for name in ("_zahl", "zu_erste_seite", "zu_eintragen", "warte_zu_fertig", "abrechnung_rechnen", "liq_vorgabe"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n".join(teile), ns)
@@ -232,6 +232,48 @@ def main():
           "Lage-Wache alle 0,5 s; × ruht bei Abweichung, zurück nur mit frischem Foto am selben Punkt")
     sb = srcL[srcL.index("def slave_x_bild("):srcL.index("def _kontextmenue_close_lesen(")]
     check('"hwnd": lf["hwnd"]' in sb and "bild_pruefen(out, out[\"punkt\"])" in sb, "Bild-Beweis speichert hwnd und prüft schon beim Foto, dass nichts über dem × liegt")
+    print("10c) Airbag: Slave-SL/TP aus beiden Fills + Master-Liquidation (Finn 21.10.2026)")
+    lv = A["liq_vorgabe"]
+    v = lv(150000, "konto_balance", 148000, "Boden", 20, 1, 23, 21)
+    check(v["ok"] and v["abstand_usd"] == 2000 and v["abstand_pkt"] == 100 and v["puffer_pkt"] == 2 and v["master_tp_pkt"] == 21,
+          f"150.000 → Liq 148.000, NQ 1 Kontrakt: 2.000 $ = 100 Pkt, Puffer 23 − 21 = 2 ({v})")
+    check(lv(150000, "x", 149000, "", 2, 5, 23, 21)["abstand_pkt"] == 100, "MNQ 5 Kontrakte: 1.000 $ / (2 × 5) = 100 Pkt")
+    check(not lv(None, None, 148000, "", 20, 1, 23, 21)["ok"] and "Start-Balance" in lv(None, None, 148000, "", 20, 1, 23, 21)["grund"], "ohne Start-Balance → kein Airbag")
+    check(not lv(150000, "x", None, "kein Max-Drawdown", 20, 1, 23, 21)["ok"], "ohne Liquidation → kein Airbag (Grund nennt die Regel)")
+    check(not lv(150000, "x", 150500, "", 20, 1, 23, 21)["ok"] and not lv(150000, "x", 148000, "", None, 1, 23, 21)["ok"], "Balance unter Liq / ohne Punktwert → nein")
+    check(not lv(150000, "x", 148000, "", 20, 1, None, 21)["ok"] and not lv(150000, "x", 148000, "", 20, 1, 20, 21)["ok"], "Puffer nicht lesbar → nein")
+    check(not lv(150000, "x", 149960, "", 20, 1, 23, 21)["ok"], "Liq 2 Pkt entfernt, Puffer 2 → kein Platz für den Airbag-TP")
+    al = pb.airbag_level
+    liq = {"ok": True, "abstand_pkt": 100, "puffer_pkt": 2, "master_tp_pkt": 21, "liq_balance": 148000}
+    a = al("sell", 29678.45, 30000.0, 30046.75, None, liq)
+    check(a["ok"] and a["master_liq"] == 29900 and a["master_stop_art"] == "liq" and a["sl"] == 29727.2 and a["tp"] == 29580.45,
+          f"Master BUY ohne SL: Liq 29.900, Slave SELL SL = Fill + 46,75 + 2, TP = Fill − (100 − 2) ({a.get('sl')} / {a.get('tp')})")
+    check(a["master_tp_quelle"] == "tradingview" and a["abstand_tp_pkt"] == 46.75 and a["slave_tp_pkt"] == 98, "echter Master-TP aus TradingView, nicht der Plan")
+    b = al("sell", 29678.45, 30000.0, 30046.75, 29950.0, liq)
+    check(b["master_stop_art"] == "sl" and b["tp"] == 29630.45, f"echter Master-SL näher als die Liq → Airbag davor ({b.get('tp')})")
+    check(al("sell", 29678.45, 30000.0, 30046.75, 29850.0, liq)["master_stop_art"] == "liq", "Master-SL hinter der Liq zählt nicht")
+    check(al("sell", 29678.45, 30000.0, 30046.75, 30010.0, liq)["master_stop_art"] == "liq", "Master-SL auf der Gewinnseite (unsinnig) zählt nicht")
+    c = al("sell", 29678.45, 30000.0, None, None, liq)
+    check(c["master_tp_quelle"] == "plan" and c["sl"] == 29701.45, f"ohne gemeldeten Master-TP: Plan-Abstand 21 + 2 ({c.get('sl')})")
+    d = al("buy", 29678.45, 30000.0, 29953.25, None, liq)
+    check(d["master_liq"] == 30100 and d["sl"] == 29629.7 and d["tp"] == 29776.45, f"gespiegelt: Master SELL, Slave BUY ({d.get('sl')} / {d.get('tp')})")
+    check(al("buy", 29678.45, 30000.0, 30046.75, None, liq)["master_tp_quelle"] == "plan", "Master-TP auf der falschen Seite → Plan-Abstand")
+    check(not al("sell", 29678.45, 30000.0, 30046.75, None, {"ok": False, "grund": "x"})["ok"] and not al("sell", 29678.45, 30000.0, 30046.75, None, None)["ok"],
+          "ohne master.liq → kein Airbag (Slave bleibt bei den Plan-Abständen)")
+    check(not al("sell", 29678.45, 30000.0, 30046.75, 29999.0, liq)["ok"], "Master-Stopp 1 Pkt entfernt, Puffer 2 → kein Airbag-TP")
+    check(not al("sell", 0, 30000.0, 30046.75, None, liq)["ok"] and not al("hold", 1, 1, 2, None, liq)["ok"], "Fill 0 / Richtung unbekannt → nein")
+    srcS = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    ls = srcS[srcS.index("def lauf_slave(cmd):"):srcS.index("def uia_zeilen_lesen(")]
+    check(ls.index("airbag_holen(") < ls.index("ob._sltp_klicken(") and ls.index("Notfall-SL/TP nicht setzbar") < ls.index("airbag_holen("),
+          "Slave: Notfall-Level im F9 zuerst, Airbag nach dem Fill, dann Rechtsklick → Ändern (_sltp_klicken)")
+    check("level_vom_fill(richtung, fill, sl_pkt, tp_pkt, digits)" in ls and '"quelle": "airbag" if ab.get("ok") else "plan"' in ls,
+          "ohne Airbag die Plan-Abstände vom eigenen Fill; level meldet quelle")
+    srcA = open(os.path.join(STAMM, "polar_app.py"), encoding="utf-8").read()
+    ps = srcA[srcA.index("def polar_start():"):srcA.index("def polar_bereit():")]
+    check("liq = _master_liq(plan, auftrag)" in ps and ps.count('"liq": liq') == 2, "Start rechnet die Master-Liq und legt sie unter master.liq ab (DB + Prozess)")
+    ml = srcA[srcA.index("def _master_liq("):srcA.index("def _vp_zeile(")]
+    check('A["liq_regel_felder"]' in ml and 'A["liq_peak"]' in ml and 'A["liq_tagesstart"]' in ml and 'A["wd_start_balance"]' in ml,
+          "Master-Liq mit denselben Helfern wie der Radar (liq_regel_felder, Peak, Tagesstart, Start-Balance)")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")
