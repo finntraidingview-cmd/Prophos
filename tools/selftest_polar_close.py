@@ -386,6 +386,18 @@ def main():
     od = open(os.path.join(STAMM, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
     check(all(f"def {n}(" in od for n in ("cdp_meldungen_zu", "cdp_show_more_wahl", "k3_neue_meldungen", "cdp_order_beweis", "cdp_im_bild", "cdp_toasts_kurz", "cdp_meldung_text"))
           and "CDP_SHOW_MORE_JS = " in od, "alle Orbit-Bausteine stehen in order_bot (aufgerufen, nicht kopiert)")
+    print("10i) Prüfung 21.10.2026: bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position, Ausschluss sparsam")
+    srcI = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    lm4 = srcI[srcI.index("def lauf_master(cmd):"):srcI.index("def lauf_slave(cmd):")]
+    check('if not b.get("bestaetigt") or fill is None:' not in lm4 and 'if not b.get("bestaetigt"):' in lm4 and "if fill is None:" in lm4
+          and lm4.index("if fill is None:") < lm4.index("master_wache("), "Master: nur ohne Bestätigung „unklar“; ohne Einstieg weiter bis in die Wache")
+    wi = srcI[srcI.index("def slave_wache("):srcI.index("# ── MAUS-TEST ×")]
+    rk = wi[wi.index("# 2) Rückfall: Rechtsklick"):wi.index("# 3) Letzter Weg")]
+    check('offen(st_r) and len(st_r["positionen"]) == 1' in rk and "{ESC}" in rk[rk.index("zweiter Rechtsklick ohne"):] if "zweiter Rechtsklick ohne" in rk else False,
+          "zweiter Rechtsklick nur bei genau einer Position; ohne Menüpunkt Esc")
+    check(wi.count("< HAFTUNG_BLICKE") == 2 and wi.count(">= HAFTUNG_AB_S") == 2 and pb.HAFTUNG_BLICKE == 3 and pb.HAFTUNG_AB_S == 0.2,
+          "Ausschluss-Suche höchstens 3× je Weg, frühestens 200 ms nach dem Klick")
+    check("zweites × NICHT erlaubt" in wi and "zweiter Rechtsklick NICHT erlaubt" in wi, "Log, wenn nach der Zustimmung kein zweiter Klick erlaubt ist")
     # READER-PFLICHT VOR DEM KLICK (21.10.2026, Prüfer S2): reader_bereit — nur ein antwortender, sehender, frischer Reader lässt den Master laufen
     rb = pb.reader_bereit
     check(rb({"an": True, "positionen_ok": True, "positionen_alter_s": 0.4})[0] is True, "Reader an, Positionen 0,4 s → bereit")

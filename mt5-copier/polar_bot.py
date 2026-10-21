@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.12"   # 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.13"   # 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -778,6 +778,8 @@ def close_modal_wahl(modals, root, richtung, menge):
     return kn[0], "passt"
 
 
+HAFTUNG_AB_S = 0.2           # Ein-Klick-Haftungsausschluss frühestens 200 ms nach dem Klick suchen …
+HAFTUNG_BLICKE = 3           # … und höchstens dreimal je Klick-Weg (UIA-Suche ist teuer)
 ZU_ZWEITE_LESUNG_S = 0.15     # „zu" erst nach der zweiten Lesung ohne Ticket, ≥ 150 ms später
 
 
@@ -1521,11 +1523,15 @@ def lauf_master(cmd):
         # jedes einzelne Mal die Daten: Entry, Exit"); vorher brach Polar beim ERSTEN Beweis ab — meist tabelle_avg_fill, TP fehlte
         b = master_fill_beweis(lauf, s, opts, plan, root, menge0, vorher_m)
         fill = ob.cdp_zahl(b["einstieg"]) if b.get("einstieg") is not None else None
-        if not b.get("bestaetigt") or fill is None:
+        if not b.get("bestaetigt"):
             melden(lauf, "fehler", {"msg": "Senden geklickt, in 15 s kein Fill-Beweis — UNKLAR, in TradingView nachsehen", "unklar": True})
             res["msg"] = "Ergebnis unklar"
             lauf.phase("unklar", msg=res["msg"])
             return res
+        if fill is None:
+            # Position bestätigt (Menge gewachsen), aber ohne Avg Fill (Prüfung 21.10.2026): wie Orbit weiter in Level, Parken, Wache — ein
+            # „fehler" hier hieße für den Slave „zu", und der Master bliebe einseitig offen und unbewacht. Der Slave rechnet dann ohne Airbag.
+            lauf.log("Fill-Beweis: Position bestätigt, aber ohne Einstiegspreis — weiter mit Level/Parken/Wache, Slave ohne Airbag")
         res.update(bestaetigt=True, einstieg=fill, einstieg_quelle=b.get("einstieg_quelle"), tp_limit=b.get("tp"), sl_limit=b.get("sl"))
         melden(lauf, "gefuellt", {"fill": fill, "quelle": b.get("einstieg_quelle"), "klick_ms": klick_ms, "balance_start": res.get("balance_start"),
                                   "show_more": b.get("show_more"), "meldung_roh": b.get("meldung_roh")})
@@ -2228,12 +2234,15 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
             lauf.phase("x_geklickt", klick_ms=erg["klick_ms"], x_ok=geklickt)
             lauf.log(f"Polar: × geklickt {int((time.time() - t_sig) * 1000)} ms nach dem Signal" if geklickt else "Polar: × NICHT gedrückt (SendInput)")
             weg_nach, dialog_knopf, ende = None, False, time.time() + X_BEWEIS_S
-            haftung_offen = True
+            haftung_offen, haftung_n, t_x = True, 0, time.time()
             while time.time() < ende:
                 if zu_bewiesen(lesen()):
                     weg_nach = time.time() - t_sig
                     break
-                if haftung_offen:
+                # höchstens HAFTUNG_BLICKE Blicke, frühestens 200 ms nach dem Klick (Prüfung 21.10.2026: die UIA-Suche kostet je Blick
+                # spürbar — jeden Takt gefragt, fiele ein normales × über X_BEWEIS_S)
+                if haftung_offen and time.time() - t_x >= HAFTUNG_AB_S and haftung_n < HAFTUNG_BLICKE:
+                    haftung_n += 1
                     # EIN-KLICK-HAFTUNGSAUSSCHLUSS (Lauf 3cc4d9b7, 21.10.2026: × bewiesen geparkt, trotzdem erst der Zeilen-Scan nach 7,2 s —
                     # nur _close_klicken nahm den Ausschluss an, den MT5 beim ERSTEN Ein-Klick-Handel eines Terminals zeigt; × und Rechtsklick
                     # liefen in ihn hinein, das Esc des Rückfalls schloss ihn wieder). Finn 01.09.2026: „okay drücken und dann neu aufs X".
@@ -2250,6 +2259,11 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                             erg["klick_ms"] = erg["x_klick2_ms"] = jetzt_ms()
                             ende = time.time() + X_BEWEIS_S
                             lauf.log("Polar: × nach der Zustimmung EIN zweites Mal geklickt")
+                        else:
+                            lauf.log("Polar: Ausschluss angenommen, zweites × NICHT erlaubt — "
+                                     + ("Lesung fehlgeschlagen" if st_n is None else "Ticket nicht in der Lesung" if offen(st_n) is False
+                                        else f"{len(st_n['positionen'])} Positionen" if len(st_n["positionen"]) != 1
+                                        else f"Lage: {lage_n[1]}" if not lage_n[0] else "pausiert") + " → Rückfall")
                         continue
                 if not dialog_knopf:
                     dlg, knopf = ob._finde_close_dialog(w, ticket)          # Ein-Klick-Handel aus: nur der Knopf mit DIESEM Ticket
@@ -2285,23 +2299,35 @@ def slave_wache(lauf, w, path, expected, ticket, anker_pfad):
                     lauf.log(f"Polar: 'Position schließen' {int((time.time() - t_sig) * 1000)} ms nach dem Signal")
                     ende = time.time() + 3.0
                     rk_haftung = "haftung" not in erg       # der Ausschluss kommt pro Terminal nur einmal
+                    rk_n, t_rk = 0, time.time()
                     while time.time() < ende:
                         if zu_bewiesen(lesen()):
                             weg = "ein_klick"
                             break
-                        if rk_haftung:
+                        if rk_haftung and time.time() - t_rk >= HAFTUNG_AB_S and rk_n < HAFTUNG_BLICKE:
+                            rk_n += 1
                             st_h = ob._einklick_haftung_annehmen(w, lauf.trail)
                             if st_h != "keiner":
                                 rk_haftung = False
                                 erg["haftung"] = st_h
                                 lauf.log(f"Polar: Ein-Klick-Haftungsausschluss nach dem Rechtsklick — {st_h}")
                             st_r = lesen() if st_h == "angenommen" else None
-                            if st_r is not None and offen(st_r) and not ob.is_paused():
+                            if st_r is not None and offen(st_r) and len(st_r["positionen"]) == 1 and not ob.is_paused():
                                 ob._maus_fahren(*punkt, schritte=2)
                                 if ob._klick_absolut(punkt[0], punkt[1], taste="rechts") and ob._kontextmenue_close_klicken(timeout=0.8) == "geklickt":
                                     lauf.log("Polar: 'Position schließen' nach der Zustimmung EIN zweites Mal geklickt")
+                                else:
+                                    try:
+                                        w.type_keys("{ESC}", set_foreground=False)   # Kontextmenü ohne „Position schließen" nicht offen lassen
+                                    except Exception:
+                                        pass
+                                    lauf.log("Polar: zweiter Rechtsklick ohne 'Position schließen' — Menü per Esc zu")
                                 ende = time.time() + 3.0
                                 continue
+                            if st_h == "angenommen":
+                                lauf.log("Polar: Ausschluss angenommen, zweiter Rechtsklick NICHT erlaubt — "
+                                         + ("Lesung fehlgeschlagen" if st_r is None else "Ticket nicht in der Lesung" if offen(st_r) is False
+                                            else f"{len(st_r['positionen'])} Positionen" if len(st_r["positionen"]) != 1 else "pausiert"))
                         dlg, knopf = ob._finde_close_dialog(w, ticket)
                         if knopf is not None:
                             try:
