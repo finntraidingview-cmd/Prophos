@@ -67,8 +67,8 @@ select left(p.id::text,8) as plan, left(p.user_id::text,8) as id, p.master_firm 
        p.start_um_gestartet_at as claim, p.auto_plan, p.auto_bestaetigt_at is not null as bestaetigt,
        y.sf->>'schritt' as schritt, y.sf->>'status' as sf_status, (y.sf->>'versuche')::int as versuche,
        y.sf->>'pc' as pc, left(y.sf->>'msg',160) as msg,
-       case when x.b ? 'puls_pause' then 'puls_pause: '||(x.b->>'puls_pause')
-            when x.b ? 'richtung_konflikt' then 'richtung_konflikt'
+       case when coalesce(x.b->>'puls_pause','') <> '' then 'puls_pause: '||(x.b->>'puls_pause')
+            when jsonb_typeof(x.b->'richtung_konflikt') = 'object' then 'richtung_konflikt'   -- 21.10.2026: Schlüssel steht oft mit JSON null drin (= kein Konflikt)
             when coalesce((y.sf->>'versuche')::int,0) >= 3 then 'deckel_voll'
             when y.sf->>'status' = 'tagesende' then 'tagesende'
             when p.start_um_gestartet_at is not null and y.sf is null then 'claim_ohne_fehler'

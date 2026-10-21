@@ -1984,6 +1984,7 @@ def main():
     results.append(test_puls_fehler_1606())
     results.append(test_puls_fehler_1611())
     results.append(test_puls_fehler_1682())
+    results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
     results.append(test_tsx_k1_vorbau())
@@ -5170,6 +5171,94 @@ def test_puls_fehler_1682():
     chk("order_calc_margin" in q and "order_send" not in q and "order_check" not in q and "richtung and volumen" in q,
         "_order_api_zustand: Marge nur gerechnet (order_calc_margin), keine Order, nur mit Richtung + Volumen")
     print(("✓" if ok else "✗") + " Puls-Fehler .1682: keine Bestätigung ohne Grund → Marge aus der API + Befund (Knopf, Journal) · F9 kein Fenster vorn → consent.exe/LogonUI benannt")
+    return ok
+
+
+def test_puls_fehler_1698():
+    """Routine „Puls-Fehler" 21.10.2026 20:30 Dubai (.1698, Muster „senden: order-knopf 'buy +# @ market' nicht gedrückt (klick ohne
+    beweis)", 2× an einem PC 06:41/06:57 UTC; 7 Tage: 6× „am Zielpunkt liegt ein anderes Fenster" auf 2 PCs): der Windows-Toast
+    „Neue Benachrichtigung" (Windows.UI.Core.CoreWindow) lag über dem Order-Knopf — „neu nach vorn" half nicht, der 2. Versuch traf ihn
+    0,3 s später wieder. Jetzt: Toast erkannt → warten, bis er sich ausblendet (höchstens ~9 Schritte), dann der 2. Versuch; bleibt er,
+    kein Druck und der Hinweis nennt den Toast. Andere fremde Fenster wie bisher (kein Warten). Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1698: " + text)
+            ok = False
+    t = ob.ist_windows_toast
+    chk(t("Windows.UI.Core.CoreWindow", "Neue Benachrichtigung") and t("windows.ui.core.corewindow", "New notification")
+        and not t("Chrome_WidgetWin_1", "Seiten wiederherstellen?") and not t("Windows.UI.Core.CoreWindow", "Suche")
+        and not t("", "Neue Benachrichtigung") and not t("Windows.UI.Core.CoreWindow", ""), "ist_windows_toast: Klasse UND Titel")
+    q = _i.getsource(ob._windows_toast_abwarten)
+    chk("sleep(" not in q and "_warte(" in q and "click" not in q.lower() and "SendInput" not in q, "_windows_toast_abwarten: nur warten/lesen, kein Klick")
+    alt = {n: getattr(ob, n) for n in ("_WIN_EINGABE", "_puls_fenster_liste", "_puls_chrome_browser_pid", "_win_vordergrund", "_win_minimiert",
+                                       "_win_zeigen", "_win_nach_vorn", "_klient_rechteck", "_maus_fahren", "_klick_absolut", "_dpi_bewusst",
+                                       "_warte", "_win_tasten", "_win_root_am_punkt", "_win_klasse")}
+    z = {"klicks": [], "wurzeln": [], "abfragen": 0, "gewartet": 0}
+
+    class _Ws:
+        def rufe(self, m, par=None, timeout=10.0):
+            a = (par or {}).get("expression", "") if m == "Runtime.evaluate" else ""
+            if a == ob.WIN_GEO_JS:
+                return {"result": {"value": {"innerWidth": 1600, "innerHeight": 773, "dpr": 1, "titel": "TopstepX"}}}
+            if "elementFromPoint" in a:
+                return {"result": {"value": True}}
+            return {"result": {"value": None}}
+
+        def zu(self):
+            pass
+
+    def _wurzel(x, y):
+        z["abfragen"] += 1
+        w = z["wurzeln"].pop(0) if z["wurzeln"] else 11
+        return (w, "Neue Benachrichtigung" if w == 555 else ("Seiten wiederherstellen?" if w == 77 else ""))
+
+    def _warte_(a, b):
+        z["gewartet"] += 1
+    f1 = {"hwnd": 11, "text": "TopstepX - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+    try:
+        ob._WIN_EINGABE = True
+        ob._puls_fenster_liste = lambda pid: [f1]
+        ob._puls_chrome_browser_pid = lambda: 4711
+        ob._win_vordergrund = lambda: 11
+        ob._win_minimiert = lambda h: False
+        ob._win_zeigen = lambda h, b: None
+        ob._win_nach_vorn = lambda h: None
+        ob._klient_rechteck = lambda h: (0, 87, 1600, 773)
+        ob._maus_fahren = lambda x, y, schritte=8: None
+        ob._klick_absolut = lambda x, y, taste="links", doppel=False: (z["klicks"].append((x, y)), True)[1]
+        ob._dpi_bewusst = lambda: True
+        ob._warte = _warte_
+        ob._win_tasten = lambda t_: None
+        ob._win_root_am_punkt = _wurzel
+        ob._win_klasse = lambda h: "Windows.UI.Core.CoreWindow" if int(h) == 555 else "Chrome_WidgetWin_1"
+        s_ = ob._AugenSitzung.__new__(ob._AugenSitzung)
+        s_.trail, s_.ws, s_.js, s_.maus, s_.target_id, s_.tv_riegel = [], _Ws(), "/* augen.js */", (0.0, 0.0), "T", False
+        # (1) Toast liegt am Punkt, blendet sich nach drei Wartschritten aus → 2. Versuch trifft das Puls-Chrome → genau EIN Druck
+        z["wurzeln"] = [555, 555, 555, 11]
+        r1 = s_.klick([1300, 540, 180, 40], "ORDER-Knopf 'Buy +3 @ Market'")
+        chk(r1 is True and len(z["klicks"]) == 1 and any("Windows-Benachrichtigung über dem Ziel — nach" in x and "ausgeblendet" in x for x in s_.trail)
+            and z["gewartet"] >= 3, f"Toast blendet sich aus → gewartet, dann genau ein Druck ({r1}, Klicks {len(z['klicks'])}, Spur {s_.trail[-3:]})")
+        # (2) Toast bleibt (hartnäckig) → höchstens 9 Wartschritte, 2. Versuch trifft ihn wieder → KEIN Druck, Hinweis nennt den Toast
+        s_.trail, z["klicks"], z["gewartet"], z["abfragen"] = [], [], 0, 0
+        z["wurzeln"] = [555] * 40
+        r2 = s_.klick([1300, 540, 180, 40], "ORDER-Knopf 'Buy +3 @ Market'")
+        chk(r2 is False and not z["klicks"] and z["abfragen"] <= 12 and "noch da" in " ".join(s_.trail)
+            and "Windows-Benachrichtigung 'Neue Benachrichtigung' liegt über dem Puls-Chrome" in s_.trail[-1] and "stumm" in s_.trail[-1],
+            f"Toast bleibt → kein Druck, Hinweis nennt den Toast ({r2}, Abfragen {z['abfragen']}, Spur {s_.trail[-1][:160]})")
+        # (3) anderes fremdes Fenster (kein Toast) → wie bisher: kein Warten, sofort 2. Versuch, dann kein Druck + alter Hinweis
+        s_.trail, z["klicks"], z["gewartet"], z["abfragen"] = [], [], 0, 0
+        z["wurzeln"] = [77] * 40
+        r3 = s_.klick([1300, 540, 180, 40], "Contract-Feld")
+        chk(r3 is False and not z["klicks"] and "Windows-Benachrichtigung" not in " ".join(s_.trail) and z["gewartet"] <= 2
+            and "immer im Vordergrund?" in s_.trail[-1], f"fremdes Fenster ohne Toast → kein Warten, kein Druck, alter Hinweis ({s_.trail[-1][:120]})")
+    finally:
+        for n, v in alt.items():
+            setattr(ob, n, v)
+    print(("✓" if ok else "✗") + " Puls-Fehler .1698: Windows-Toast über dem Ziel → warten bis er sich ausblendet, dann 2. Versuch; bleibt er → kein Druck, Hinweis nennt ihn")
     return ok
 
 def test_puls_fehler_1611():

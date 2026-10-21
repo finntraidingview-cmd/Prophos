@@ -18710,6 +18710,51 @@ def _win_fenster_steckbrief(hwnd):
         return ""
 
 
+# WINDOWS-BENACHRICHTIGUNG AM ZIELPUNKT (Routine „Puls-Fehler" 21.10.2026 20:30 Dubai, Muster „senden: order-knopf 'buy +# @ market'
+# nicht gedrückt (klick ohne beweis)", 2× an einem PC 06:41/06:57 UTC, derselbe Plan lief 07:13 durch; in 7 Tagen 6 Fälle „am Zielpunkt
+# liegt ein anderes Fenster" auf 2 PCs): die Spur nannte das Fenster — „Neue Benachrichtigung", Klasse Windows.UI.Core.CoreWindow,
+# Lage unten rechts 1425,621–1920,1020 — der Windows-Toast. Er liegt IMMER über allen Fenstern; „Puls-Chrome neu nach vorn" ändert
+# daran nichts, der 2. Versuch traf 0,3 s später dieselbe Blase → kein Druck, Start verloren. Ein Toast blendet sich nach ~5 s von
+# selbst aus. Darum: ist das fremde Fenster der Toast, wartet der Bot (höchstens ~9 s, mit Streuung) bis der Punkt wieder zum
+# Puls-Chrome gehört, und macht dann den 2. Versuch wie bisher. Nichts wird weggeklickt, der Riegel (nie ein Druck in ein fremdes
+# Fenster) bleibt; andere CoreWindows (Suche, Startmenü, Aktionscenter) zählen nicht — die gehen nicht von selbst weg.
+WIN_TOAST_KLASSE = "windows.ui.core.corewindow"
+WIN_RX_TOAST_TITEL = re.compile(r"^(neue benachrichtigung|new notification)", re.I)
+
+
+def ist_windows_toast(klasse, titel):
+    """REIN RECHNEND (testbar): ist das fremde Fenster am Zielpunkt die Windows-Benachrichtigung (Toast unten rechts)?
+    Klasse Windows.UI.Core.CoreWindow UND Titel „Neue Benachrichtigung"/„New notification" — sonst False."""
+    return str(klasse or "").strip().lower() == WIN_TOAST_KLASSE and bool(WIN_RX_TOAST_TITEL.match(str(titel or "").strip()))
+
+
+def _win_klasse(hwnd):
+    """Fensterklasse (GetClassNameW) — '' wenn nicht lesbar (kein Windows, Attrappe im Test). Liest nur."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        kl = ctypes.create_unicode_buffer(128)
+        ctypes.windll.user32.GetClassNameW(wt.HWND(int(hwnd)), kl, 128)
+        return kl.value or ""
+    except Exception:
+        return ""
+
+
+def _windows_toast_abwarten(punkt, hwnd, schritte=9):
+    """Der Windows-Toast über dem Zielpunkt blendet sich nach ~5 s selbst aus — bis dahin warten (je Schritt 0,6–1,0 s, höchstens
+    `schritte`), nur lesen (_win_root_am_punkt), nie wegklicken. -> Sekunden, bis der Punkt wieder zum Puls-Chrome gehört | None"""
+    t0 = time.time()
+    for _ in range(int(schritte)):
+        _warte(0.6, 0.4)
+        try:
+            w, _t = _win_root_am_punkt(*punkt)
+        except Exception:
+            return None
+        if w == int(hwnd):
+            return time.time() - t0
+    return None
+
+
 def win_fokus_js(rect):
     """Hat das Feld an diesem Rechteck (CSS-px) den Tastatur-Fokus UND die Seite selbst den Fokus? Liest nur."""
     x, y, w, h = [float(v) for v in rect[:4]]
@@ -19115,6 +19160,10 @@ class _AugenSitzung:
         """Lag beim letzten Klick auch im 2. Versuch ein fremdes Fenster am Zielpunkt (_win_klick, 09.10.2026): Zusatz für die Meldung,
         sonst ''."""
         t = str(getattr(self, "_fremd_fenster", "") or "").strip()
+        if t and getattr(self, "_fremd_toast", False):
+            # 21.10.2026 (ist_windows_toast): der Toast ging in ~9 s nicht weg — am PC sind die Benachrichtigungen das Thema, nicht Puls
+            return (f" Windows-Benachrichtigung '{t}' liegt über dem Puls-Chrome (Toast unten rechts, immer über allen Fenstern) — am PC "
+                    "die Benachrichtigungen für diesen Nutzer stumm schalten (Einstellungen → System → Benachrichtigungen bzw. 'Nicht stören').")
         return f" Fenster '{t}' liegt über dem Puls-Chrome — immer im Vordergrund?" if t else ""
 
     def _win_klick(self, rect, name, druck=True, toast_ok=False, pruef=None, doppel=False):
@@ -19142,6 +19191,7 @@ class _AugenSitzung:
         # Neu: das Puls-Chrome EINMAL neu nach vorn (derselbe Weg _win_vorn), Punkt neu rechnen, Zeiger neu hinfahren, neu prüfen.
         # Liegt es dann immer noch davor → Abbruch wie bisher, Titel in self._fremd_fenster (fremd_hinweis() für die Meldung).
         self._fremd_fenster = ""
+        self._fremd_toast = False
         for versuch in (1, 2):
             try:
                 wurzel, w_titel = _win_root_am_punkt(*punkt)
@@ -19157,6 +19207,13 @@ class _AugenSitzung:
                 return False
             self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt ein anderes Fenster ({wurzel} '{w_titel[:40]}'"
                               f"{_win_fenster_steckbrief(wurzel)}, erwartet {hwnd}) — Puls-Chrome neu nach vorn, 2. Versuch")
+            # WINDOWS-TOAST (21.10.2026, Routine „Puls-Fehler", s. ist_windows_toast): der liegt über allen Fenstern — erst warten, bis er
+            # sich selbst ausblendet (höchstens ~9 s), dann der 2. Versuch wie bisher. Nichts wegklicken, Riegel unverändert.
+            if ist_windows_toast(_win_klasse(wurzel), w_titel):
+                self._fremd_toast = True
+                weg = _windows_toast_abwarten(punkt, hwnd)
+                self.trail.append(f"{name}: Windows-Benachrichtigung über dem Ziel — "
+                                  + (f"nach {weg:.1f} s ausgeblendet" if weg is not None else "nach ~9 s noch da"))
             _win_nach_vorn(hwnd)                      # fremdes Fenster war evtl. selbst Vordergrund — Puls-Chrome wieder oben in der Z-Ordnung
             _warte(0.3, 0.2)
             hwnd, grund = self._win_vorn()
@@ -19275,6 +19332,7 @@ class _AugenSitzung:
             return False
         if wurzel != int(hwnd):
             self._fremd_fenster = str(w_titel or "")[:60]
+            self._fremd_toast = ist_windows_toast(_win_klasse(wurzel), w_titel)      # 21.10.2026: Hinweis nennt den Toast
             self.trail.append(f"{name}: vor dem Druck liegt am Zielpunkt @{punkt[0]},{punkt[1]} ein anderes Fenster ({wurzel} "
                               f"'{w_titel[:40]}'{_win_fenster_steckbrief(wurzel)}, erwartet {hwnd}) — kein Druck.{self.fremd_hinweis()}")
             return False

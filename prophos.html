@@ -46355,7 +46355,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1697'
+  const OS_TAB_BUILD = '2026-09-22.1698'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50854,7 +50854,10 @@
     try{
       const alt = sfFlag(plan)
       const login = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(plan.masterAccountId) : null
-      const flag = { schritt: f.schritt || '', msg: String(f.msg || '').slice(0, 400), unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
+      // SPUR-ENDE BEHALTEN (21.10.2026, Routine Puls-Fehler): bei langen Spuren (F9-Dialog nicht gefunden, 400+ Zeichen) fiel genau das
+      // Ende weg — dort steht die Diagnose („F9-Ursache (API): …", „Desktop: consent.exe …"). Jetzt Anfang + „ … " + Ende, zusammen 400
+      const roh = String(f.msg || ''), msgK = roh.length <= 400 ? roh : roh.slice(0, 236) + ' … ' + roh.slice(-161)
+      const flag = { schritt: f.schritt || '', msg: msgK, unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, login: login ? String(login) : null, start: plan.startUm || null,
         versuche: (alt && Number(alt.versuche)) || 0 }
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
