@@ -44,7 +44,7 @@ import order_bot as ob  # noqa: E402  — nur benutzen, nie ändern
 
 RAILWAY = "https://web-production-bec81.up.railway.app"
 POLAR_ORDNER = os.path.join(HIER, "polar")
-VERSION = "0.3.14"   # 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
+VERSION = "0.3.15"   # 0.3.15 (21.10.2026): Störer-Räumung wie Orbit im Polar-Master · 0.3.14 (21.10.2026): Bild vor UIA beim Parken, Ändern-Spur im slave.log · 0.3.13 (21.10.2026): bestätigte Position ohne Fill bleibt bewacht, zweiter Rechtsklick nur bei einer Position · 0.3.12 (21.10.2026): Master-Fill + TP/SL 1:1 wie Orbit inkl. „Show more" · 0.3.11 (21.10.2026): Ein-Klick-Haftungsausschluss im ×- und Rechtsklick-Weg · 0.3.10 (21.10.2026): CDP-Flach nur bei sichtbarem Positions-Reiter, „Inactive" nie aktiv · 0.3.9 (21.10.2026): „zu" erst nach zwei Lesungen, Airbag-Abbruch bei Master-zu · 0.3.8 (21.10.2026): Master bestätigt die „Close position"-Rückfrage, Level aus dem Orders-Reiter · 0.3.7 (21.10.2026): Puffer fest 2,5 % vom Abstand (Railway) · 0.3.6 (21.10.2026): Slave-SL/TP als Airbag aus beiden Fills + Master-Liquidation · 0.3.5 (21.10.2026): Slave-× per Bild bewiesen (MT5-Liste ohne UIA-Zellen), Maus-Test belegt × und Rechtsklick · 0.3.4 (21.10.2026): Master-Level 1:1 wie Orbit (Ticket-Klammer, keine Nachkorrektur) · 0.3.3 (21.10.2026): Symbol-Prüfung über den Feld-Wert · 0.3.2 (21.10.2026): Notfall-SL/TP Pflicht, F9 bei Abbruch zu · 0.3.1 (21.10.2026): Slave bricht ohne config_file benannt ab · 0.2.0 (20.10.2026): Schließen per × auf beiden Seiten, egal wer zuerst zu ist · 0.3.0 (21.10.2026): Schritte an Railway (Live-Ablauf)
 
 
 # ── Zustand / Dateien ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1052,7 +1052,8 @@ def master_level_setzen(lauf, s, opts, plan, root, sl_soll, tp_soll, tick=0.25):
 
 
 def master_level_lesen(lauf, s, root, plan):
-    """NUR LESEN (21.10.2026, Lauf 3a1cc58e: level {ok:false, tp:null, sl:null}, obwohl in TradingView Sell limit 30.003,50 und Sell stop
+    """SEIT 0.3.15 NICHT MEHR AUFGERUFEN — lauf_master nimmt Orbits ob._cdp_endpruefung (Finn 21.10.2026: „alles vom Alten übernehmen").
+    Bleibt im Modul wie master_level_setzen. NUR LESEN (21.10.2026, Lauf 3a1cc58e: level {ok:false, tp:null, sl:null}, obwohl in TradingView Sell limit 30.003,50 und Sell stop
     29.954,00 standen — die Meldungen hatten die Level diesmal nicht): Reiter Orders → je Bracket (TP = Limit, SL = Stop der Gegenseite)
     GENAU EINE Zeile → Preis. Nichts wird geändert; danach zurück auf Positionen. -> {tp, sl, teile}"""
     erg = {"tp": None, "sl": None, "teile": []}
@@ -1167,6 +1168,39 @@ def master_fill_beweis(lauf, s, opts, plan, root, menge0, vorher_m):
     return b
 
 
+STOERER_TAKT_S = 2.0          # Bereit-Halten/Wache: höchstens alle 2 s ein Blick nach fremden Dialogen
+
+
+def stoerer_weg(lauf, s, opts, wo):
+    """STÖRER-RÄUMUNG wie Orbit im CDP-Weg (21.10.2026, Lauf b1628e09: „Go ad-free. Everywhere" lag über Inas TradingView, das Ticket
+    zeigte '-' → „Symbol MNQ nicht einstellbar", Abbruch vor der Feuerzeit; Finn: „Wenn das Auge irgendein fremdes Pop-up, Werbung oder
+    irgendwas erkennt, alle wegklicken."). Nur order_bot-Funktionen, Orbit unverändert:
+      1. s.werbung_weg(zwang=True) — Google-Kachel (#charting-ad), Werbe-Modals (CDP_WERBUNG_JS), Dialoge mit Werbe-Titel
+      2. bleibt ein Dialog stehen: s._werbung_dialog_weg(beliebig=True) — JEDER gemeldete Dialog ohne Handels-/Login-/Order-/Konto-/
+         Bestätigungs-Wort (CDP_WERBUNG_HART_RX, CDP_DIALOG_FREMD_TABU_RX; „Close position" trägt „position" und bleibt stehen)
+    Geklickt wird immer nur das EIGENE × des Dialogs mit Hover-Beweis (_win_klick), nie Esc, nie ein Upgrade-/Kauf-/Plan-Knopf
+    (CDP_WERBUNG_X_TABU_RX); Verschwinden bewiesen. Jeder Wegklick steht mit Titel im <seite>.log. Wirft nie. -> (anzahl, stand | None)"""
+    n0, n = len(lauf.trail), 0
+    st = None
+    try:
+        n += int(s.werbung_weg(zwang=True) or 0)
+        st = s.stand(opts)
+        for _ in range(2):
+            if not (isinstance(st, dict) and st.get("popups")):
+                break
+            k = int(s._werbung_dialog_weg(beliebig=True) or 0)
+            if not k:
+                break
+            n += k
+            st = s.stand(opts)
+    except Exception as e:
+        lauf.log(f"Störer-Räumung ({wo}): {type(e).__name__}")
+    if n or len(lauf.trail) > n0:
+        lauf.spur_ins_log(n0, f"Störer-Räumung {wo}: {n} geschlossen" + (f", offen bleibt {[p.get('titel') or p.get('text') for p in st['popups']][:2]}"
+                                                                         if isinstance(st, dict) and st.get("popups") else ""))
+    return n, st
+
+
 def master_druck(lauf, punkt, hwnd):
     """Zur Feuerzeit: Vordergrund + Fenster am Punkt (Millisekunden), dann EIN SendInput-Druck. -> (ok, klick_ms)"""
     if not punkt or not hwnd:
@@ -1240,6 +1274,11 @@ def master_vor_klick(lauf, s, opts, ext, root, plan, park, gesehen):
     an derselben Stelle (± 3 px) im DOM stehen, sonst neu suchen. -> (park | None, grund)"""
     if reader_flach(ob._tv_http("/positions", timeout=0.3), ext, root, gesehen) == "flach":
         return None, "schon_zu"
+    try:
+        if (s.stand(opts) or {}).get("popups"):
+            stoerer_weg(lauf, s, opts, "vor dem Close-Klick")
+    except Exception:
+        pass
     if not park:
         return None, "kein_park"
     try:
@@ -1395,6 +1434,9 @@ def master_wache(lauf, s, opts, ext, root, plan, park=None):
                 naechst_cdp = time.time() + 1.0
                 try:
                     st = s.stand(opts)
+                    if st.get("popups"):
+                        _n, st_w = stoerer_weg(lauf, s, opts, "in der Wache")       # ein Störer darf den Close-Klick nie verdecken
+                        st = st_w if isinstance(st_w, dict) else st
                     zeilen = ob.k3_zeilen(st.get("positionen"), root)
                     menge = ob.cdp_zeilen_menge(zeilen, plan["richtung"])
                     if menge > 0:
@@ -1477,7 +1519,15 @@ def lauf_master(cmd):
             st = s.stand(opts)
         except Exception as e_:
             lauf.log(f"Start-Werte nicht lesbar ({type(e_).__name__})")
+        n_w, st_w = stoerer_weg(lauf, s, opts, "vor dem Ticket")
+        st = st_w if isinstance(st_w, dict) else st
         ok, code, msg, schritt, st, kk = ob._cdp_ticket_fuellen(s, st, plan, symbol, opts, lauf.trail)
+        if not ok:
+            # Ticket scheiterte — lag (wieder) ein Störer darüber (Lauf b1628e09)? Nur wenn die Räumung wirklich etwas schloss: EIN neuer Versuch
+            n_w, st_w = stoerer_weg(lauf, s, opts, "nach gescheitertem Ticket")
+            if n_w and isinstance(st_w, dict):
+                lauf.log(f"Ticket gescheitert ({msg}) — {n_w} Störer geschlossen, EIN neuer Versuch")
+                ok, code, msg, schritt, st, kk = ob._cdp_ticket_fuellen(s, st_w, plan, symbol, opts, lauf.trail)
         if not ok:
             raise RuntimeError(f"Ticket: {msg}")
         ob._cdp_positions_reiter_sichern(s, lauf.trail)
@@ -1495,7 +1545,13 @@ def lauf_master(cmd):
         if kk.get("disabled") or ob.cdp_klickpunkt(ob.cdp_rect(kk)) is None:
             raise RuntimeError("Senden-Knopf gesperrt oder ohne Rechteck")
         if st.get("popups"):
-            raise RuntimeError("Dialog/Popup offen")
+            _n, st_w = stoerer_weg(lauf, s, opts, "vor dem Senden-Knopf")          # wie Orbit K4: erst weg, frisch lesen, dann urteilen
+            if isinstance(st_w, dict):
+                st = st_w
+                kk = st.get("kauf_knopf") if isinstance(st.get("kauf_knopf"), dict) else {}
+                ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if st.get("popups"):
+            raise RuntimeError(f"Dialog/Popup offen ({[p.get('titel') or p.get('text') for p in st['popups']][:2]})")
         if not ob.cdp_konto_passt(str(ko.get("aktiv") or ""), ext):
             raise RuntimeError(f"Konto vor dem Klick nicht mehr {ext}")
         u_offen = ob._cdp_konto_offen_blick(s, st, root, lauf.trail, res)
@@ -1508,9 +1564,25 @@ def lauf_master(cmd):
         punkt = _punkt_aus_spur(lauf.trail)          # s.hin merkt den Punkt nicht selbst — aus der Spur (ohne order_bot zu ändern)
         hwnd = s._win_vorn()[0] if hasattr(s, "_win_vorn") else None
 
+        blick = {"naechst": time.time() + STOERER_TAKT_S}
+
         def halten():
             if not punkt:
                 return False
+            # STÖRER BIS ZUR FEUERZEIT (21.10.2026): ein Dialog, der beim Warten aufgeht, läge über dem Senden-Knopf — höchstens alle 2 s
+            # schauen; nach einem Wegklick Hover neu beweisen, sonst Abbruch vor dem Druck (nichts gesendet)
+            if time.time() >= blick["naechst"]:
+                blick["naechst"] = time.time() + STOERER_TAKT_S
+                st_h = s.stand(opts)
+                if st_h.get("popups"):
+                    n_h, st_h2 = stoerer_weg(lauf, s, opts, "beim Bereit-Halten")
+                    if (st_h2 or {}).get("popups"):
+                        lauf.log("Bereit-Halten: Dialog über dem Senden-Knopf bleibt — Abbruch vor dem Druck")
+                        return False
+                    kk2 = (st_h2 or {}).get("kauf_knopf") if isinstance((st_h2 or {}).get("kauf_knopf"), dict) else {}
+                    if n_h and not (ob.cdp_rect(kk2) and s.hin(ob.cdp_rect(kk2), "SENDEN-Knopf (nach Störer-Räumung)")):
+                        lauf.log("Bereit-Halten: Hover nach der Störer-Räumung nicht bewiesen — Abbruch vor dem Druck")
+                        return False
             if ob._cursor_pos() != tuple(punkt):
                 ob._maus_fahren(*punkt, schritte=3)
             return True
@@ -1539,6 +1611,18 @@ def lauf_master(cmd):
             res["msg"] = "Ergebnis unklar"
             lauf.phase("unklar", msg=res["msg"])
             return res
+        # ENDPRÜFUNG wie Orbit (ob._cdp_endpruefung: Werbung weg, Avg Fill der Positions-Zeile, TP/SL-Limit aus dem Reiter Orders, zurück auf
+        # Positions; Finn 21.10.2026: „das komplette Modul übernommen … alles vom Alten übernehmen") — ersetzt die eigene Orders-Lesung
+        endp = {"avg": None, "tp": None, "sl": None}
+        try:
+            n_e = len(lauf.trail)
+            endp["avg"], endp["tp"], endp["sl"], _diag = ob._cdp_endpruefung(s, opts, plan, root, lauf.trail)
+            pr = ob.cdp_pruefung(b, endp["avg"] if menge0 == 0 else None, endp["tp"], endp["sl"], plan)
+            lauf.spur_ins_log(n_e, f"Endprüfung wie Orbit: {pr.get('text')}")
+            if fill is None and pr.get("fill_tabelle") is not None:
+                fill, b["einstieg_quelle"] = ob.cdp_zahl(pr["fill_tabelle"]), "tabelle_avg_fill"
+        except Exception as e_:
+            lauf.log(f"Endprüfung abgebrochen ({type(e_).__name__})")
         if fill is None:
             # Position bestätigt (Menge gewachsen), aber ohne Avg Fill (Prüfung 21.10.2026): wie Orbit weiter in Level, Parken, Wache — ein
             # „fehler" hier hieße für den Slave „zu", und der Master bliebe einseitig offen und unbewacht. Der Slave rechnet dann ohne Airbag.
@@ -1556,18 +1640,17 @@ def lauf_master(cmd):
         sl_s, tp_s = level_vom_fill(plan["richtung"], fill, sl_pkt, tp_pkt, 2, tick=0.25) if (fill and sl_pkt and tp_pkt) else (None, None)
         tp_t, sl_t = ob.cdp_zahl(b.get("tp")) if b.get("tp") is not None else None, ob.cdp_zahl(b.get("sl")) if b.get("sl") is not None else None
         quelle_l = "meldung"
-        if tp_t is None or (sl_t is None and cmd.get("sl_usd")):
-            # Meldungen ohne Level (Lauf 3a1cc58e) → Orders-Reiter nur lesen; der Slave rechnet seinen Airbag-SL aus genau diesem TP
-            nl = master_level_lesen(lauf, s, root, plan)
-            if tp_t is None and nl["tp"] is not None:
-                tp_t, quelle_l = nl["tp"], "orders"
-            if sl_t is None and nl["sl"] is not None:
-                sl_t, quelle_l = nl["sl"], "orders"
+        # fehlt ein Level in den Meldungen: das aus Orbits Endprüfung (Reiter Orders, wie res tp_limit_quelle tv_orders bei Orbit)
+        if tp_t is None and endp["tp"] is not None:
+            tp_t, quelle_l = endp["tp"], "orders"
+        if sl_t is None and endp["sl"] is not None:
+            sl_t, quelle_l = endp["sl"], "orders"
         res["level"] = {"ok": tp_t is not None, "tp": tp_t, "sl": sl_t, "quelle": f"ticket (wie Orbit), gelesen aus {quelle_l}", "sl_soll": sl_s, "tp_soll": tp_s}
         melden(lauf, "level", res["level"])
         lauf.phase("level", level=res["level"])
         lauf.log(f"Level wie Orbit aus dem Ticket: TP {tp_t if tp_t is not None else '?'} / SL {sl_t if sl_t is not None else '?'} (Soll vom Fill {tp_s} / {sl_s})")
         # Maus aufs Schließen-× parken (20.10.2026), dann Wache: Master zu → sofort melden; Slave zu zuerst → × klicken
+        stoerer_weg(lauf, s, opts, "vor dem Parken")                             # nichts darf über dem × liegen (21.10.2026)
         park = master_x_parken(lauf, s, opts, root, plan)
         zu_ms, quelle = master_wache(lauf, s, opts, ext, root, plan, park)
         ende_daten = {"zu_ms": zu_ms, "zu_quelle": quelle, "balance_start": res.get("balance_start")}
@@ -1587,6 +1670,11 @@ def lauf_master(cmd):
             melden(lauf, "fehler", {"msg": res["msg"]})
         else:
             melden(lauf, "abbruch", {"grund": res["msg"]})
+        if not res.get("gesendet"):
+            try:
+                ob._cdp_tabs_spur(e, lauf.trail)        # wie Orbit: nur lesen, welche Tabs leben noch
+            except Exception:
+                pass
         lauf.phase("fehler" if res.get("gesendet") else "abbruch", msg=res["msg"])
         return res
     finally:

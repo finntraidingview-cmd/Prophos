@@ -314,7 +314,8 @@ def main():
     check("s.klick(" not in ml and "feld_setzen" not in ml and "taste(" not in ml and '_cdp_reiter(s, "positions"' in ml,
           "Level aus dem Orders-Reiter nur lesen, danach zurück auf Positionen")
     lm2 = srcM[srcM.index("def lauf_master(cmd):"):srcM.index("def lauf_slave(cmd):")]
-    check(lm2.index("master_level_lesen(") < lm2.index('melden(lauf, "level"'), "Master liest fehlende Level VOR der level-Meldung (der Slave rechnet daraus)")
+    check(lm2.index("ob._cdp_endpruefung(s, opts, plan, root, lauf.trail)") < lm2.index('melden(lauf, "gefuellt"') < lm2.index('melden(lauf, "level"')
+          and "master_level_lesen(" not in lm2, "Master: Orbits Endprüfung VOR gefuellt/level (fehlende Level + Avg Fill), keine eigene Orders-Lesung mehr")
     print("10e) „zu“ erst nach zwei Lesungen · Start-Balance nach Polar frisch · Airbag-Abbruch bei Master-zu (Prüfung 21.10.2026)")
     zd = pb.zu_doppelt
     schlaf = []
@@ -398,6 +399,23 @@ def main():
     check(wi.count("< HAFTUNG_BLICKE") == 2 and wi.count(">= HAFTUNG_AB_S") == 2 and pb.HAFTUNG_BLICKE == 3 and pb.HAFTUNG_AB_S == 0.2,
           "Ausschluss-Suche höchstens 3× je Weg, frühestens 200 ms nach dem Klick")
     check("zweites × NICHT erlaubt" in wi and "zweiter Rechtsklick NICHT erlaubt" in wi, "Log, wenn nach der Zustimmung kein zweiter Klick erlaubt ist")
+    print("10k) Störer-Räumung + Orbit-Abgleich im Polar-Master (Lauf b1628e09, Finn 21.10.2026)")
+    srcK = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
+    sw_ = srcK[srcK.index("def stoerer_weg("):srcK.index("def master_druck(")]
+    check("s.werbung_weg(zwang=True)" in sw_ and "s._werbung_dialog_weg(beliebig=True)" in sw_ and "Esc" in sw_ and ".klick(" not in sw_ and "_win_klick" not in sw_.split('"""')[2],
+          "stoerer_weg ruft nur Orbits werbung_weg(zwang) + _werbung_dialog_weg(beliebig) — kein eigener Klick, kein Esc")
+    lmk = srcK[srcK.index("def lauf_master(cmd):"):srcK.index("def lauf_slave(cmd):")]
+    for wo in ("vor dem Ticket", "nach gescheitertem Ticket", "vor dem Senden-Knopf", "beim Bereit-Halten", "vor dem Parken"):
+        check(f'stoerer_weg(lauf, s, opts, "{wo}")' in lmk, f"Störer-Räumung {wo}")
+    check(lmk.index('"vor dem Ticket"') < lmk.index("ob._cdp_ticket_fuellen(") and "ob._cdp_tabs_spur(e, lauf.trail)" in lmk, "vor dem Ticket geräumt; Fehlerpfad mit Orbits Tabs-Spur")
+    check(lmk.index('"beim Bereit-Halten"') < lmk.index("bereit_und_warten(lauf, halten") and "Abbruch vor dem Druck" in lmk[lmk.index("def halten():"):lmk.index("bereit_und_warten(lauf, halten")],
+          "Bereit-Halten: Dialog über dem Knopf → räumen, Hover neu beweisen, sonst Abbruch vor dem Druck")
+    vk = srcK[srcK.index("def master_vor_klick("):srcK.index("def master_x_klicken(")]
+    mw2 = srcK[srcK.index("def master_wache("):srcK.index("def lauf_master(")]
+    check('stoerer_weg(lauf, s, opts, "vor dem Close-Klick")' in vk and 'stoerer_weg(lauf, s, opts, "in der Wache")' in mw2, "Wache + vor dem Close-Klick: Störer weg")
+    od2 = open(os.path.join(STAMM, "mt5-copier", "order_bot.py"), encoding="utf-8").read()
+    check("re.compile(r\"\\border|position|" in od2 or "position" in od2[od2.index("CDP_DIALOG_FREMD_TABU_RX ="):od2.index("CDP_DIALOG_FREMD_TABU_RX =") + 200],
+          "Orbits Ausschluss trägt „position“ — die Close-position-Rückfrage wird nie weggeräumt")
     print("10j) Lauf 3cc4d9b7: Bild vor UIA beim Parken, Ändern-Spur im slave.log")
     srcJ = open(os.path.join(STAMM, "mt5-copier", "polar_bot.py"), encoding="utf-8").read()
     xp = srcJ[srcJ.index("def slave_x_punkte("):srcJ.index("def slave_wache(")]
