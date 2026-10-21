@@ -669,6 +669,41 @@
   #dashboard-view .tb-polar.is-vor{opacity:.8;font-weight:500}                      /* „bereitet vor": noch keine Order, Sperre noch nicht scharf */
   #dashboard-view .tb-polar.is-vor .tb-polar-dot{animation:none;background:var(--sub-2)}
   #dashboard-view .tb-polar[hidden]{display:none}
+  /* POLAR-BANNER (Finn 21.10.2026: „Polar-Trade läuft … Prio 1 … man sieht das auch visuell"): oben in jeder Ansicht, Polar-Violett wie der
+     Chip, pulsierender Punkt; eingeklappt nur die Kopfzeile. Dieselben Bausteine als Zeilen im Radar (.pol-radar-leiste). */
+  #dashboard-view .pol-banner{margin:0 0 16px;border:1px solid color-mix(in srgb, var(--violet) 40%, var(--border-soft));border-left:4px solid var(--violet);
+    border-radius:var(--r-sm, 10px);background:color-mix(in srgb, var(--violet) 7%, var(--surface));padding:10px 14px;animation:polBannerEin .3s var(--ease, ease-out)}
+  #dashboard-view .pol-banner[hidden],#dashboard-view .pol-radar-leiste[hidden]{display:none}
+  @keyframes polBannerEin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  #dashboard-view .pol-banner-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+  #dashboard-view .pol-banner-punkt{flex:none;width:9px;height:9px;border-radius:999px;background:var(--violet);color:var(--violet);animation:polPuls 1.6s ease-out infinite}
+  #dashboard-view .pol-banner.is-vor .pol-banner-punkt{background:var(--sub-2);color:var(--sub-2)}
+  #dashboard-view .pol-banner-titel{font-size:14px;font-weight:700;color:var(--ink);letter-spacing:-.01em}
+  #dashboard-view .pol-banner-prio{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#fff;background:var(--violet);border-radius:999px;padding:2px 7px}
+  #dashboard-view .pol-banner-ph{font-size:12.5px;color:var(--violet);font-weight:600}
+  #dashboard-view .pol-banner-rechts{margin-left:auto;display:flex;align-items:center;gap:6px}
+  #dashboard-view .pol-banner-rechts .btn{padding:6px 12px;font-size:12.5px}
+  #dashboard-view .pol-banner-klapp{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--sub);cursor:pointer;display:grid;place-items:center}
+  #dashboard-view .pol-banner-klapp i{width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(225deg);margin-top:3px;transition:transform .15s}
+  #dashboard-view .pol-banner.is-zu .pol-banner-klapp i{transform:rotate(45deg);margin-top:-3px}
+  #dashboard-view .pol-banner-info{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 14px;margin-top:10px;padding-top:10px;border-top:1px solid color-mix(in srgb, var(--violet) 18%, var(--border-soft))}
+  #dashboard-view .pol-banner.is-zu .pol-banner-info{display:none}
+  #dashboard-view .pol-banner-info small{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);margin-bottom:2px}
+  #dashboard-view .pol-banner-info b{display:block;font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+  #dashboard-view .pol-banner-hinweis{grid-column:1 / -1;font-size:11.5px;color:var(--sub)}
+  #dashboard-view .pol-radar-leiste{display:grid;gap:8px;margin:0 0 14px}
+  #dashboard-view .pol-radar-zeile{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border:1px solid color-mix(in srgb, var(--violet) 35%, var(--border-soft));
+    border-left:4px solid var(--violet);border-radius:var(--r-sm, 10px);background:color-mix(in srgb, var(--violet) 6%, var(--surface));font-size:12.5px;color:var(--ink-2)}
+  #dashboard-view .pol-radar-zeile b{color:var(--ink);font-weight:600}
+  #dashboard-view .pol-radar-zeile .btn{margin-left:auto;padding:5px 11px;font-size:12px}
+  @media (prefers-reduced-motion: reduce){ #dashboard-view .pol-banner,#dashboard-view .pol-banner-punkt{animation:none} }
+  @media (max-width:820px){
+    #dashboard-view .pol-banner{padding:10px 12px}
+    #dashboard-view .pol-banner-info{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #dashboard-view .pol-banner-info > span:nth-child(3),#dashboard-view .pol-banner-info > span:nth-child(4){grid-column:1 / -1}   /* Konten + P&L ganze Breite */
+    #dashboard-view .pol-banner-rechts{margin-left:0;width:100%}
+    #dashboard-view .pol-banner-rechts .btn{flex:1}
+  }
   /* Hover-Karte (29.09.2026, Finn: „wenn ich mit der Maus drüberfahre, dass ich immer sehe, was da gemacht wird" — am MacBook kam
      vom title-Tooltip nichts an). Optik wie .user-dropdown; nur Anzeige. Die Brücke (::before) hält den Hover beim Weg in die Karte. */
   #dashboard-view .tb-puls-wrap{position:relative;display:inline-flex;margin-right:8px}
@@ -1837,14 +1872,15 @@
   #polarModal .pol-wahl-pfeil{flex:none;width:7px;height:7px;margin:0 2px 3px 2px;border-right:1.5px solid var(--sub);border-bottom:1.5px solid var(--sub);transform:rotate(45deg);transition:transform .15s var(--ease)}
   #polarModal .pol-wahl-knopf[aria-expanded="true"]{border-color:var(--violet);box-shadow:0 0 0 3px rgba(84,71,206,.1)}
   #polarModal .pol-wahl-knopf[aria-expanded="true"] .pol-wahl-pfeil{transform:rotate(225deg);margin-bottom:-3px}
-  #polarModal .pol-wahl-liste{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:40;max-height:320px;overflow-y:auto;overscroll-behavior:contain;
+  #polarModal .pol-wahl-liste{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:40;max-height:min(60vh, 600px);overflow-y:auto;overscroll-behavior:contain;
     padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-pop);animation:polWahlEin .14s var(--ease)}
   #polarModal .pol-wahl-liste[hidden]{display:none}
   @keyframes polWahlEin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-  #polarModal .pol-wahl-gruppe{padding:8px 8px 4px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);position:sticky;top:-6px;background:var(--surface);z-index:1}
-  #polarModal .pol-wahl-opt{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;font-size:13px;color:var(--ink-2);cursor:pointer}
-  #polarModal .pol-wahl-opt .pol-wahl-txt > span,#polarModal .pol-wahl-opt .pol-wahl-txt > small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #polarModal .pol-wahl-opt .pol-wahl-txt > small{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;margin-top:1px}
+  #polarModal .pol-wahl-gruppe{padding:5px 8px 2px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);position:sticky;top:-6px;background:var(--surface);z-index:1}
+  #polarModal .pol-wahl-opt{display:flex;align-items:center;gap:8px;min-height:28px;padding:3px 8px;border-radius:6px;font-size:12.5px;color:var(--ink-2);cursor:pointer}
+  /* Kompakt (21.10.2026, Finn: „mehr Accounts auf einmal sehen als diese drei"): einzeilig ~28 px, schmale Gruppenköpfe, Liste bis 60 % hoch */
+  #polarModal .pol-wahl-opt .pol-wahl-bal{flex:none;font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #polarModal .pol-wahl-liste .pol-heute{padding:1px 7px;font-size:10.5px}
   #polarModal .pol-wahl-opt.is-aktiv{background:var(--violet-tint)}
   #polarModal .pol-wahl-opt.is-gewaehlt .pol-wahl-txt b{color:var(--violet)}
   #polarModal .pol-wahl-opt.is-gewaehlt{box-shadow:inset 2px 0 0 var(--violet)}
@@ -7676,6 +7712,10 @@
 
   <main class="main">
 
+    <!-- POLAR-BANNER (Finn 21.10.2026: „Wenn ein Trade bei den jeweiligen IDs mit Polar läuft, steht in Prophos: ‚Yo, Polar-Trade läuft',
+         sowas Prio 1 … man sieht das auch visuell"): über jeder Ansicht, solange der Polar-Riegel dieser ID einen Lauf kennt — polarBannerZeichnen -->
+    <div class="pol-banner" id="pol-banner" role="status" aria-live="polite" hidden></div>
+
     <!-- OVERVIEW -->
     <section class="view" data-view="overview">
       <!-- HEDGE COSMOS SCROLL — kein Bild-in-einer-Box, sondern eine echte, hohe Scroll-
@@ -10985,6 +11025,8 @@
            über wdlChartLinien. -->
       <!-- Modell-Leiste (01.10.2026 abends, Finn: „ein Tab für jedes einzelne Modell … schön geordnet"): Alle · Mit Hedge (Echo, Orbit,
            Winning Day) · Ohne Hedge (Echo V2, Orbit V2, Topstep V2) — filtert Liste und ID-Leiste, gezeichnet in wdlModelleRender -->
+      <!-- Polar über alle IDs (21.10.2026): je laufendem Polar-Lauf eine Zeile oben im Radar — polarRadarLeiste, Daten aus /admin/live-trades -->
+      <div class="pol-radar-leiste" id="wdl-polar-leiste" hidden></div>
       <div class="wdl-modelle" id="wdl-modelle"></div>
       <div class="adm-vl-legend wdl-ids" id="wdl-ids" style="margin:0 0 10px"></div>
       <div id="wdl-chart-slot"></div>
@@ -31591,6 +31633,7 @@
     const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
+    try{ polarRadarLeiste(alleTrades) }catch(_){}   // Polar über alle IDs oben (21.10.2026), unabhängig von Modell-/ID-Filter
     wdlModelleRender(alleTrades)
     const modellTrades = alleTrades.filter(wdlModellPasst)
     wdlIdsRender(modellTrades)
@@ -45938,7 +45981,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1680'
+  const OS_TAB_BUILD = '2026-09-22.1681'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55419,8 +55462,10 @@
   }
   window._polarHeuteChip = polarHeuteChip   // Test-Haken (Stub)
   const polarWahlZeile = k => `<span class="pol-wahl-txt"><b>${esc(k.firm)}</b> · ${esc(k.name)} · ${polarBalanceText(k)}</span>${polarHeuteChip(k.heute)}`
-  // In der Liste zweizeilig: Firma · Konto, darunter die Balance — die Liste ist so breit wie beide Felder (polarWahlOeffnen)
-  const polarWahlOptZeile = k => `<span class="pol-wahl-txt"><span><b>${esc(k.firm)}</b> · ${esc(k.name)}</span><small>${polarBalanceText(k)}</small></span>${polarHeuteChip(k.heute)}`
+  // In der Liste EINZEILIG (Finn 21.10.2026: „sehr unübersichtlich … mehr Accounts auf einmal sehen als diese drei"): Firma · Konto links
+  // (gekürzt, voller Name im title), Balance klein und grau, Heute-Chip ganz rechts — die Liste ist so breit wie beide Felder (polarWahlOeffnen)
+  const polarWahlOptZeile = k => `<span class="pol-wahl-txt" title="${esc(k.firm)} · ${esc(k.name)}"><b>${esc(k.firm)}</b> · ${esc(k.name)}</span>`
+    + `<small class="pol-wahl-bal">${polarBalanceText(k)}</small>${polarHeuteChip(k.heute)}`
   function polarWahlKnoepfe(){   // Knopf zeigt die aktuelle Auswahl des Selects
     for(const [kn, sel] of POLAR_WAHL){
       const b = polarEl(kn), k = polarKonto(sel)
@@ -56257,6 +56302,7 @@
             if(d && d.ok && Array.isArray(d.laeufe)){
               const l = d.laeufe[0]
               _polarRiegel.railway = l ? { lauf_id: l.lauf_id || null, plan_id: l.plan_id || null, seite: l.seite || null, quelle: l.quelle || 'bot',
+                                           master_uid: l.master_uid || null, slave_uid: l.slave_uid || null,   // Namen im Polar-Banner (21.10.2026)
                                            phase: l.phase || 'order', hart: String(l.phase || 'order') === 'order' } : null   // „vorbereiten" = nur Chip
               _polarRiegel.railwayAt = jetzt
             }
@@ -56282,7 +56328,156 @@
       try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
       try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
     }
+    polarBannerZeichnen()
   }
+  /* POLAR-BANNER (Finn 21.10.2026: „Wenn ein Trade bei den jeweiligen IDs mit Polar läuft, steht in Prophos: ‚Yo, Polar-Trade läuft',
+   * sowas Prio 1 … Man kann zwar reingehen, aber man sieht das auch visuell"): oben über jeder Ansicht, solange der Riegel dieser ID einen
+   * Lauf kennt (polarRiegelStand — ab Vorbereiten, Master- oder Slave-ID). Inhalt aus dem, was der Tab schon hat: Plan (tradePlans), Radar-
+   * Zeile + Lauf-Stand (wdl.daten / wdl.polar), Konten-Cache (_polarKonten). Fehlt der Lauf-Stand, holt das Banner /polar/stand selbst —
+   * höchstens alle 20 s, nur sichtbar, nur Bot-Läufe (Hand-Polar 404 → nie wieder). Einklappen statt ausblenden, gemerkt je Lauf. */
+  const POLAR_BANNER_STAND_MS = 20000, POLAR_BANNER_ZU_SS = 'prophos_polbanner_zu'
+  const _polarBanner = { pid: null, stand: null, at: 0, laedt: false, hand: false, html: '' }
+  async function polarBannerStandHolen(pid){
+    if(_polarBanner.pid !== pid) Object.assign(_polarBanner, { pid, stand: null, at: 0, hand: false })
+    if(_polarBanner.laedt || _polarBanner.hand || document.hidden || Date.now() - _polarBanner.at < POLAR_BANNER_STAND_MS) return
+    _polarBanner.laedt = true; _polarBanner.at = Date.now()
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const r = await fetch(`${WATCHER_HOME}/polar/stand?plan_id=${encodeURIComponent(pid)}`, { headers: { 'sb-token': session?.access_token || '' }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(r.status === 404) _polarBanner.hand = true
+      else if(r.ok && d && d.ok) _polarBanner.stand = d
+    }catch(_){}
+    finally{ _polarBanner.laedt = false; polarBannerZeichnen() }
+  }
+  function polarBannerKontext(pl){   // → { pid, plan, t, st, o, wer: {master, slave}, konto: {master, slave} }
+    const pid = pl && pl.plan_id ? String(pl.plan_id) : ''
+    const plan = pid ? (tradePlans || []).find(x => String(x.id) === pid) || null : null
+    let t = null, st = null
+    try{ t = pid && wdl.daten ? ((wdl.daten.trades || []).find(x => wdlTid(x) === pid) || null) : null }catch(_){}
+    try{ const x = pid ? wdl.polar[pid] : null; if(x && x.stand && Date.now() - x.at < 30000) st = x.stand }catch(_){}
+    if(!st && pid && _polarBanner.pid === pid) st = _polarBanner.stand
+    let konten = _polarKonten
+    if(!konten.length){ try{ const c = JSON.parse(localStorage.getItem(POLAR_KONTEN_LS) || 'null'); if(c && Array.isArray(c.konten)) konten = c.konten }catch(_){} }
+    const person = id => { const k = id ? konten.find(x => String(x.id) === String(id)) : null; return k ? k.person : '' }
+    let profile = []; try{ profile = JSON.parse(localStorage.getItem('prophos_profiles') || '[]') || [] }catch(_){}   // IDs dieses Geräts
+    const perUid = uid => { const p = uid && Array.isArray(profile) ? profile.find(x => x && String(x.userId) === String(uid)) : null; return p ? (p.name || p.email || '') : '' }
+    const kk = k => k ? `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` : ''
+    const o = { richtung: (t && t.richtung) || (plan && plan.richtung), kontrakte: (t && t.kt) || (plan && plan.masterContracts),
+      symbol: (t && t.symbol_root) || (plan && plan.masterSymbol) || 'NQ',
+      lots: (t && t.slave_lots) || (plan && plan.masterContracts && plan.multiplier ? Math.round(plan.masterContracts * plan.multiplier * 100) / 100 : null),
+      slavePpl: (typeof window.tpFirmPpl === 'function' && window.tpFirmPpl((t && t.slave_konto && t.slave_konto.firma) || (plan && plan.slaveFirm))) || 1 }
+    return { pid, plan, t, st, o,
+      wer: { master: (t && t.person) || person(plan && plan.masterAccountId) || perUid(pl && pl.master_uid),
+             slave: (t && t.slave_person) || person(plan && plan.slaveAccountId) || perUid(pl && pl.slave_uid) },
+      konto: { master: kk(t && t.konto) || (plan && plan.masterName) || '', slave: kk(t && t.slave_konto) || (plan && plan.slaveName) || '' } }
+  }
+  function polarBannerZeichnen(){
+    const el = document.getElementById('pol-banner'); if(!el) return
+    const pl = polarRiegelStand()
+    if(!pl){ if(!el.hidden){ el.hidden = true; el.innerHTML = ''; _polarBanner.html = '' } return }
+    const k = polarBannerKontext(pl)
+    if(k.pid && pl.quelle !== 'hand' && !k.st) polarBannerStandHolen(k.pid)
+    const schluessel = String(pl.lauf_id || k.pid || 'polar')
+    let zu = false; try{ zu = sessionStorage.getItem(POLAR_BANNER_ZU_SS) === schluessel }catch(_){}
+    const rolle = pl.seite === 'slave' ? 'Slave' : pl.seite === 'master' ? 'Master' : '?', gegen = pl.seite === 'slave' ? 'master' : 'slave'
+    const ph = k.st && typeof wdlPolarPhase === 'function' ? wdlPolarPhase(k.st, false, Date.now()).text
+      : pl.quelle === 'hand' ? 'von Hand — Plan läuft' : !pl.hart ? 'bereitet vor — noch keine Order' : pl.phase && pl.phase !== 'order' ? 'Bot: ' + pl.phase : 'Order läuft'
+    let pl$ = '–'
+    if(k.st){
+      let kurs = null; try{ const kk = typeof wdKursJetzt === 'function' ? wdKursJetzt('NQ', 15000) : null; kurs = kk && kk.preis > 0 ? kk.preis : null }catch(_){}
+      const w = polarLiveWerte(k.st, Object.assign({}, k.o, { kurs }))
+      const g = v => v == null ? '–' : `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+      const m = w.ende ? w.master.ergebnis : w.master.pl, s = w.ende ? w.slave.ergebnis : w.slave.pl
+      if(m != null || s != null) pl$ = `Slave ${g(s)} · Master ${g(m)}`
+    }
+    const kontoTxt = k.konto.slave || k.konto.master ? `${k.konto.slave || '?'} ⇄ ${k.konto.master || '?'}` : (k.pid ? 'Plan ' + k.pid.slice(0, 8) : '–')
+    const html = `<div class="pol-banner-kopf"><span class="pol-banner-punkt" aria-hidden="true"></span><span class="pol-banner-titel">Polar-Trade läuft</span>`
+      + `<span class="pol-banner-prio">Prio 1</span><span class="pol-banner-ph">${escapeHtml(ph)}</span>`
+      + `<span class="pol-banner-rechts"><button type="button" class="btn btn-primary" data-pol-banner-auf>Live-Ablauf öffnen</button>`
+      + `<button type="button" class="pol-banner-klapp" data-pol-banner-klapp aria-expanded="${!zu}" title="${zu ? 'Aufklappen' : 'Einklappen — bleibt sichtbar, solange der Lauf läuft'}"><i></i></button></span></div>`
+      + `<div class="pol-banner-info"><span><small>Diese ID</small><b>${rolle}</b></span>`
+      + `<span><small>Gegen-ID</small><b>${k.wer[gegen] ? escapeHtml(k.wer[gegen]) + ' · ' : ''}${gegen === 'master' ? 'Master' : 'Slave'}-ID</b></span>`
+      + `<span><small>Konten Slave ⇄ Master</small><b title="${escapeHtml(kontoTxt)}">${escapeHtml(kontoTxt)}</b></span>`
+      + `<span><small>${k.st && WDL_POLAR_ENDE.includes(String(k.st.status || '')) ? 'Ergebnis' : 'P&amp;L live'}</small><b>${escapeHtml(pl$)}</b></span>`
+      + `<span class="pol-banner-hinweis">${pl.hart ? 'Diese ID startet nichts: kein Puls, keine Order, keine Balance-Lesung, bis der Polar-Trade zu ist. Der Reader läuft weiter.'
+          : 'Noch keine Order — ab der Feuerzeit sperrt diese ID Puls, Orders und Balance-Lesungen. Keine anderen Trades starten.'}</span></div>`
+    el.classList.toggle('is-zu', zu)
+    el.classList.toggle('is-vor', !pl.hart)
+    el.dataset.schluessel = schluessel
+    el.dataset.pid = k.pid
+    if(el.hidden) el.hidden = false
+    if(html !== _polarBanner.html){ el.innerHTML = html; _polarBanner.html = html }   // nur bei Änderung — sonst springt der Puls
+  }
+  function polarRadarZeile(pid){   // Radar öffnen und die Polar-Zeile des Plans kurz hervorheben (wie „Im Radar ansehen")
+    document.querySelector('#dashboard-view .sb-link[data-view="wdlive"]')?.click()
+    if(!pid) return
+    let n = 0
+    const zeile = () => document.querySelector(`#dashboard-view [data-wdl-trade="${CSS.escape(pid)}"]`)
+    const suchen = () => {
+      const z = zeile()
+      if(!z){ if(++n < 25) setTimeout(suchen, 400); return }
+      try{ z.scrollIntoView({ block: 'center', behavior: 'smooth' }) }catch(_){ z.scrollIntoView() }
+      const bis = Date.now() + 2600
+      const halten = () => { const x = zeile(); if(!x) return; if(Date.now() < bis){ x.classList.add('pol-hin'); setTimeout(halten, 250) } else x.classList.remove('pol-hin') }
+      halten()
+    }
+    setTimeout(suchen, 150)
+  }
+  function polarBannerOeffnen(){
+    const pl = polarRiegelStand(); if(!pl) return
+    const k = polarBannerKontext(pl)
+    // eigener Plan im Tab → bestehender Live-Ablauf (Prüf-Popup im Live-Modus); sonst (Plan einer anderen ID) die Polar-Zeile im Radar
+    if(k.plan && k.plan.route === 'polar'){
+      if(!_polarCheckPlan || String(_polarCheckPlan.id) !== k.pid) _polarCheckZeilen = []   // Namen der Vorprüfung gehören zu einem anderen Plan
+      _polarCheckPlan = k.plan
+      const info = polarEl('polarCheckInfo')
+      if(info) info.textContent = `${k.plan.masterName || 'Master-Konto'} ${k.plan.richtung === 'buy' ? 'Long' : k.plan.richtung === 'sell' ? 'Short' : ''} gegen ${k.plan.slaveName || 'Slave-Konto'} · Plan ${k.pid.slice(0, 8)}`
+      polarEl('polarCheckModal')?.classList.add('open')
+      polarLiveStarten(k.plan)
+      if(_polarLive && _polarLive.o){ if(k.wer.master) _polarLive.o.masterWer = k.wer.master; if(k.wer.slave) _polarLive.o.slaveWer = k.wer.slave }
+      return
+    }
+    polarRadarZeile(k.pid)
+  }
+  // Eigene Verdrahtung nur am Banner (kein Sammel-Handler): Einklappen merkt sich den Lauf, „Live-Ablauf öffnen" wie oben
+  document.getElementById('pol-banner')?.addEventListener('click', e => {
+    const el = e.currentTarget
+    if(e.target.closest('[data-pol-banner-auf]')){ polarBannerOeffnen(); return }
+    if(e.target.closest('[data-pol-banner-klapp]')){
+      const zu = !el.classList.contains('is-zu')
+      try{ if(zu) sessionStorage.setItem(POLAR_BANNER_ZU_SS, el.dataset.schluessel || ''); else sessionStorage.removeItem(POLAR_BANNER_ZU_SS) }catch(_){}
+      _polarBanner.html = ''; polarBannerZeichnen()
+    }
+  })
+  // Chip „Polar läuft" in der Kopfzeile → Banner aufklappen und ins Bild holen
+  document.getElementById('tb-polar')?.addEventListener('click', () => {
+    try{ sessionStorage.removeItem(POLAR_BANNER_ZU_SS) }catch(_){}
+    _polarBanner.html = ''; polarBannerZeichnen()
+    try{ document.getElementById('pol-banner')?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }catch(_){}
+  })
+  /* POLAR ÜBER ALLE IDs IM RADAR (21.10.2026, zum Banner): je laufendem Polar (route polar, status open) eine Zeile oben im Radar — aus den
+   * Radar-Daten (/admin/live-trades, Phase aus wdl.polar), keine eigene Abfrage. „Stand" öffnet das Radar-Popup (wdlPolarOeffnen). */
+  function polarRadarLeiste(trades){
+    const el = document.getElementById('wdl-polar-leiste'); if(!el) return
+    const offen = (trades || []).filter(t => typeof wdlIstPolar === 'function' && wdlIstPolar(t) && t.status === 'open')
+    if(!offen.length){ el.hidden = true; el.innerHTML = ''; return }
+    const kk = k => k ? `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` : '?'
+    el.innerHTML = offen.map(t => {
+      const pid = wdlTid(t), x = wdl.polar[pid] || null
+      const ph = wdlPolarPhase(x && x.stand, !!(x && x.hand), Date.now())
+      return `<div class="pol-radar-zeile"><span class="pol-banner-punkt" aria-hidden="true"></span><b>Polar läuft</b><span class="pol-banner-prio">Prio 1</span>`
+        + `<span><b>${escapeHtml(String(t.slave_person || '?'))}</b> ${escapeHtml(kk(t.slave_konto))} <small style="color:var(--sub)">Slave</small> ⇄ <b>${escapeHtml(String(t.person || '?'))}</b> ${escapeHtml(kk(t.konto))} <small style="color:var(--sub)">Master</small></span>`
+        + `<span class="pol-banner-ph" title="${escapeHtml(ph.text)}">${escapeHtml(ph.kurz)}</span>`
+        + `<button type="button" class="btn btn-ghost" data-pol-radar-stand="${escapeHtml(pid)}">Stand</button></div>`
+    }).join('')
+    el.hidden = false
+  }
+  document.getElementById('wdl-polar-leiste')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-pol-radar-stand]'); if(b && typeof wdlPolarOeffnen === 'function') wdlPolarOeffnen(b.dataset.polRadarStand)
+  })
+  window._polarBannerZeichnen = polarBannerZeichnen   // Test-Haken (Stub)
+  window._polarRiegelTest = r => { Object.assign(_polarRiegel, r); polarChipZeichnen() }   // Test-Haken (Stub): Riegel-Stand setzen
   window._polarLaeuft = polarLaeuft
   setTimeout(polarRiegelAktualisieren, 3000)
   setInterval(polarRiegelAktualisieren, POLAR_RIEGEL_PANEL_MS)
