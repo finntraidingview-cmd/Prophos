@@ -17064,7 +17064,7 @@
           ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
              <div style="font-size:11px;color:var(--sub);margin-top:2px"><span style="font-weight:500">Stand · ${escapeHtml(quelle)}</span>${r.balance_at ? `<span style="margin-left:6px">${escapeHtml(timeAgo(r.balance_at))}</span>` : ''}</div>`
           : '<span class="mono" style="color:var(--sub-2)">—</span>'
-        let typ = ''; try{ typ = accTypChipHtml(a) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
+        let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
         let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
         let trade = ''; try{ trade = admKontoTradeChipHtml(a, r) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026)
         // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
@@ -36407,11 +36407,14 @@
    * Nur Funded CFD (auch im Zustand Waiting for Payout) bei FTMO/FundedNext (nicht FundedNext Futures) ohne ERHALTENE Payout-Buchung
    * (transactions kind payout) — eine offene Anfrage zählt noch nicht, der Refund kommt erst mit dem Geld. Erst zeigen, wenn die
    * Buchungen geladen sind (_txGeladen, oben bei accounts), sonst stünde der Chip beim Start kurz an jedem Konto. */
-  function accRefundChipHtml(a){
-    if(!_txGeladen || !a || a.type !== 'funded_cfd') return ''
+  // payoutsN (21.10.2026, Admin → Alle Accounts, Finn: „ich sehe gar nichts"): fremde IDs haben keine eigenen transactions im Tab — dort zählt
+  // der Server je Konto erhaltene + angefragte Payouts (admin payouts_n, dieselbe Zahl wie der FundedNext-Refund im Payout-Kalender)
+  function accRefundChipHtml(a, payoutsN){
+    if(!a || a.type !== 'funded_cfd') return ''
+    if(payoutsN == null && !_txGeladen) return ''
     const firm = String(a.firm || '')
     if(!(/ftmo/i.test(firm) || (/f(ou|u)nded\s*next/i.test(firm) && !/futures/i.test(firm)))) return ''
-    if((transactions || []).some(t => t.kind === 'payout' && String(t.accountId) === String(a.id))) return ''
+    if(payoutsN != null ? Number(payoutsN) > 0 : (transactions || []).some(t => t.kind === 'payout' && String(t.accountId) === String(a.id))) return ''
     return ` <span class="type-badge acc-refund-chip" title="Noch kein Payout erhalten — der erste Payout bei ${escapeHtml(firm)} kommt mit Refund der Gebühr. Verschwindet nach dem ersten erhaltenen Payout.">Refund</span>`
   }
   /* Ein Klick setzt/leert „Waiting for Payout" (29.09.2026) — eigener Weg neben accWdUmstellen, derselbe Aufbau: sofort in die DB,
@@ -46341,7 +46344,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1693'
+  const OS_TAB_BUILD = '2026-09-22.1694'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
