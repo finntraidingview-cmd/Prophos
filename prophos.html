@@ -1713,6 +1713,30 @@
   #dashboard-view .pol-kreisel{display:inline-block;width:10px;height:10px;border-radius:999px;border:2px solid color-mix(in srgb, var(--violet) 25%, transparent);border-top-color:var(--violet);animation:polDreh .8s linear infinite;vertical-align:-1px}
   #dashboard-view .pol-ab-schritte li.is-akt span:last-child{background:linear-gradient(90deg,var(--ink) 40%,var(--violet) 50%,var(--ink) 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:polGlanz 2s linear infinite}
   #dashboard-view .pol-ab-schritte li.is-neu{animation:polEin .45s ease-out both}
+  /* CLEANER LIVE-ABLAUF (Finn 21.10.2026: „cleaner, mit mehr Live-Daten … Confirmation, dass beide IDs auf dem X zum Schließen sind"):
+     P&L groß je Seite, ×-Zeile je Seite + Summe über beide (grün bewiesen · amber Rückfall · grau parkt), SL─●─TP-Bahn = Radar-Spanne .wdl-sp-* */
+  #dashboard-view .pol-ab-pl{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 8px}
+  #dashboard-view .pol-ab-pl b{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  #dashboard-view .pol-ab-pl small{font-size:11px;color:var(--sub);text-align:right}
+  #dashboard-view .pol-ab-x{display:flex;align-items:flex-start;gap:8px;margin:0 0 8px;padding:6px 8px;border:1px solid var(--border-soft);border-radius:var(--r-sm);font-size:12px;line-height:1.35;color:var(--sub)}
+  #dashboard-view .pol-ab-x b{display:block;font-weight:600}
+  #dashboard-view .pol-ab-x small{display:block;margin-top:1px;font-size:11px;color:var(--sub);overflow-wrap:anywhere}
+  #dashboard-view .pol-ab-x .i{flex:none;display:inline-grid;place-items:center;width:16px;height:16px;margin-top:1px;border-radius:999px;font-size:10px;font-weight:700;color:#fff;background:var(--sub-2)}
+  #dashboard-view .pol-ab-x.is-ok{color:var(--good-ink, #15803d);border-color:color-mix(in srgb, var(--good) 40%, var(--border-soft));background:color-mix(in srgb, var(--good) 6%, transparent)}
+  #dashboard-view .pol-ab-x.is-ok .i{background:var(--good)}
+  #dashboard-view .pol-ab-x.is-rueck{color:var(--warn-ink);border-color:color-mix(in srgb, var(--warn) 45%, var(--border-soft));background:var(--warn-bg)}
+  #dashboard-view .pol-ab-x.is-rueck .i{background:var(--warn)}
+  #dashboard-view .pol-ab-x.is-offen .i{background:transparent;border:1.5px solid var(--border)}
+  #dashboard-view .pol-ab-x.is-offen .i .pol-kreisel{width:8px;height:8px;border-width:1.5px}
+  #dashboard-view .pol-ab-x.is-summe{margin:0 0 10px;padding:8px 10px;font-size:12.5px}
+  #dashboard-view .pol-ab-x.is-summe .i{width:20px;height:20px;font-size:11.5px}
+  #dashboard-view .pol-ab-sp{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #dashboard-view .pol-ab-werte dd small{font-size:11px;color:var(--sub)}
+  #dashboard-view .pol-ab-werte dd small.gut{color:var(--good-ink, #15803d)}
+  #dashboard-view .pol-ab-werte dd small.schlecht{color:var(--danger-ink, #b91c1c)}
+  #dashboard-view .pol-ab-kopf span:last-child b{font-variant-numeric:tabular-nums}
+  #dashboard-view .wdl-z.pol-hin{animation:polHin 2.6s ease-out}   /* „Im Radar ansehen": Polar-Zeile kurz violett */
+  @keyframes polHin{0%,45%{background:color-mix(in srgb, var(--violet) 14%, transparent)}100%{background:transparent}}
   @keyframes polPuls{0%{box-shadow:0 0 0 0 color-mix(in srgb, currentColor 45%, transparent)}100%{box-shadow:0 0 0 8px transparent}}
   @keyframes polPunkt{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
   @keyframes polDreh{to{transform:rotate(360deg)}}
@@ -1726,7 +1750,7 @@
   }
   @media (max-width:600px){ #dashboard-view .pol-ab{grid-template-columns:1fr} #dashboard-view .pol-leiste li{font-size:10px} }
   @media (max-width:820px){ #dashboard-view .pol-ab{grid-template-columns:1fr} }   /* Handy: untereinander, Slave zuerst */
-  #polarModal .pol-lauf-seiten > .pol-ab, #polarModal .pol-lauf-seiten > .pol-ab-kopf{grid-column:1 / -1}   /* im Radar-Popup ist der Container selbst ein Raster */
+  #polarModal .pol-lauf-seiten > .pol-ab, #polarModal .pol-lauf-seiten > .pol-ab-kopf, #polarModal .pol-lauf-seiten > .pol-ab-x{grid-column:1 / -1}   /* im Radar-Popup ist der Container selbst ein Raster */
   #dashboard-view .modal-msg.ok{color:#058a50}
   #dashboard-view .modal-msg.muted{color:var(--sub)}
 
@@ -9275,6 +9299,10 @@
         <div class="modal-foot" id="polarCheckFuss" style="justify-content:center">
           <button class="btn btn-ghost" id="polarCheckNeu" title="Alle Prüfungen jetzt neu lesen">Neu prüfen</button>
           <button class="btn btn-primary" id="polarCheckStart" style="min-width:200px" disabled title="Erst wenn alle Zeilen ✓ sind">Polar starten →</button>
+        </div>
+        <!-- Live-Fuß (Finn 21.10.2026: „… dass ich danach natürlich den Radar sehe"): schließt das Popup und zeigt die Polar-Zeile im Radar -->
+        <div class="modal-foot" id="polarCheckLiveFuss" style="justify-content:center" hidden>
+          <button class="btn btn-ghost" id="polarCheckRadar" style="min-width:200px" title="Popup schließen und den Lauf im Radar zeigen">Im Radar ansehen →</button>
         </div>
       </div>
     </div>
@@ -45853,7 +45881,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1673'
+  const OS_TAB_BUILD = '2026-09-22.1674'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55532,18 +55560,55 @@
     const dirM = oo.richtung === 'sell' ? -1 : 1, dirS = -dirM
     const pplM = /^MNQ/i.test(String(oo.symbol || '')) ? 2 : 20
     const pplS = n(oo.slavePpl) || 1, kt = n(oo.kontrakte) || 0, lots = n(oo.lots) || 0
+    const feuer = n(s.feuer_ms)
     const seite = (teil, dir, menge, ppl, lv) => {
-      const fill = n((teil.gefuellt || {}).fill), slP = n(lv.sl), tpP = n(lv.tp)
+      const g = teil.gefuellt || {}, fill = n(g.fill), slP = n(lv.sl), tpP = n(lv.tp), klick = n(g.klick_ms)
       const betrag = (ziel, vorz) => (fill == null || ziel == null || !menge) ? null : Math.round(vorz * Math.abs(ziel - fill) * menge * ppl * 100) / 100
-      return { fill, sl: slP, tp: tpP, slBetrag: betrag(slP, -1), tpBetrag: betrag(tpP, 1), dir }
+      return { fill, sl: slP, tp: tpP, slBetrag: betrag(slP, -1), tpBetrag: betrag(tpP, 1), dir,
+        klick, klickVersatz: klick != null && feuer != null ? klick - feuer : null }   // Klick-Zeit der Order, Versatz zur gemeinsamen Feuerzeit
     }
     const lvM = m.level || {}, lvS = sl.level || {}
-    const mw = seite(m, dirM, kt, pplM, { sl: lvM.sl_soll ?? lvM.sl, tp: lvM.tp_soll ?? lvM.tp })
+    // Master-Level seit .1673 echt aus dem Ticket (tp/sl „wie Orbit", polar_bot) — das Soll vom Fill nur, wenn das Ticket nichts lieferte
+    const mw = seite(m, dirM, kt, pplM, { sl: lvM.sl ?? lvM.sl_soll, tp: lvM.tp ?? lvM.tp_soll })
     const sw = seite(sl, dirS, lots, pplS, { sl: lvS.sl, tp: lvS.tp })
     const kurs = n(oo.kurs)
     mw.pl = (!ende && mw.fill != null && kurs != null && kt) ? Math.round((kurs - mw.fill) * dirM * kt * pplM * 100) / 100 : null
     sw.pl = (!ende && s.slave_live && n(s.slave_live.pl) != null) ? n(s.slave_live.pl) : null
-    return { master: mw, slave: sw, ende }
+    // ABSTAND ZU TP/SL (Finn 21.10.2026 „mehr Live-Daten"): Master-Kurs = Reader; Slave ≈ aus seinem P&L zurückgerechnet
+    // (Fill + P&L ÷ Lots ÷ $/Pkt) — NAS100 beim CFD-Broker ist nicht der NQ-Kurs des Readers
+    mw.kurs = mw.pl != null ? kurs : null
+    sw.kurs = (sw.pl != null && sw.fill != null && lots) ? Math.round((sw.fill + sw.pl / (dirS * lots * pplS)) * 100) / 100 : null
+    for(const w of [mw, sw]){
+      w.abTp = w.kurs != null && w.tp != null ? Math.round(Math.abs(w.tp - w.kurs) * 100) / 100 : null
+      w.abSl = w.kurs != null && w.sl != null ? Math.round(Math.abs(w.kurs - w.sl) * 100) / 100 : null
+      const breite = w.tp != null && w.sl != null ? w.tp - w.sl : 0   // SL links (0 %), TP rechts (100 %) — gilt für BUY und SELL
+      const pos = v => v == null || !breite ? null : Math.max(0, Math.min(100, Math.round((v - w.sl) / breite * 1000) / 10))
+      w.pos = pos(w.kurs); w.posFill = pos(w.fill)
+    }
+    // ERGEBNIS nach dem Ende wie polar_app.abrechnung_rechnen: Master Balance-Differenz, Slave Deal-Profit bzw. Balance-Differenz
+    const me = m.ende || {}, se = sl.ende || {}, wa = se.wache || {}
+    const mBs = n(me.balance_start || (m.gefuellt || {}).balance_start || (m.bereit || {}).balance_start), mBe = n(me.balance_end)
+    mw.ergebnis = mBs != null && mBe != null ? Math.round((mBe - mBs) * 100) / 100 : null
+    const sBs = n(se.balance_start || wa.balance_start), sBe = n(wa.balance_end)
+    sw.ergebnis = n(wa.profit) != null ? n(wa.profit) : (sBs != null && sBe != null ? Math.round((sBe - sBs) * 100) / 100 : null)
+    mw.zuMs = n(s.master_zu_ms); sw.zuMs = n(s.slave_zu_ms)
+    mw.zuWeg = me.zu_quelle || null; sw.zuWeg = wa.zu_weg || null
+    // MAUS AUF × (Finn 21.10.2026: „… die Confirmation sehe, dass beide IDs auf dem X zum Schließen sind"): aus der geparkt-Meldung des Bots —
+    // Master {art chart|tabelle, rect, beweis}, Slave {punkt, x, beweis}; Slave x = null heißt kein bewiesenes ×, er schließt per Rechtsklick
+    const xStand = (wer, teil, w) => {
+      const g = teil.geparkt
+      if(w.zuMs != null || teil.ende) return { k: 'zu', text: 'geschlossen', beweis: '' }
+      if(!teil.gefuellt || ende) return null
+      if(!g) return { k: 'offen', text: 'parkt die Maus auf dem ×…', beweis: '' }
+      const ok = wer === 'master' ? !!(g.art && Array.isArray(g.rect) && g.rect.length) : Array.isArray(g.x) && g.x.length === 2
+      const wo = wer === 'master' ? (g.art === 'chart' ? 'Chart-×' : g.art === 'tabelle' ? 'Close-Knopf der Positions-Tabelle' : '') : '× in der Profit-Zelle (MT5)'
+      return ok ? { k: 'ok', text: 'Maus auf × — bereit zum Schließen', beweis: [wo, g.beweis].filter(Boolean).join(' · ') }
+        : { k: 'rueck', text: wer === 'master' ? 'nicht auf × — Rückfall Close-Knopf der Tabelle' : g.punkt ? 'nicht auf × — Rückfall Rechtsklick „Position schließen"' : 'nicht geparkt — Rückfall Zeilen-Scan',
+            beweis: String(g.beweis || '') }
+    }
+    mw.x = xStand('master', m, mw); sw.x = xStand('slave', sl, sw)
+    const klickAbstand = mw.klick != null && sw.klick != null ? Math.abs(mw.klick - sw.klick) : null
+    return { master: mw, slave: sw, ende, klickAbstand }
   }
   window._polarLiveWerte = polarLiveWerte
   function polarAblaufHtml(st, o){
@@ -55552,6 +55617,13 @@
     const preis = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const geld = (v, cur) => v == null ? '–' : `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`
     const farbe = v => v == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)'
+    const uhrMs = ms => { const d = new Date(Number(ms) || 0); return !ms || isNaN(d) ? '–' : uhr(ms) + ',' + String(d.getMilliseconds()).padStart(3, '0') }
+    const pkt = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 }) + ' Pkt'
+    const msTxt = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE')} ms`
+    const ZU_WEG = { broker: 'SL/TP beim Broker', schon_zu: 'war schon zu', x_chart: 'Chart-×', x_tabelle: 'Close-Knopf', scan: 'Zeilen-Scan' }
+    // ×-Zeile (Finn 21.10.2026): grün = Maus bewiesen auf dem ×, amber = Rückfall-Weg, grau = parkt noch; is-summe = über beide Seiten
+    const xZeile = (x, summe) => !x || x.k === 'zu' ? '' : `<div class="pol-ab-x is-${x.k}${summe ? ' is-summe' : ''}"><span class="i">${x.k === 'ok' ? '✓' : x.k === 'rueck' ? '!' : '<i class="pol-kreisel"></i>'}</span>`
+      + `<span><b>${escapeHtml(x.text)}</b>${x.beweis ? `<small>${escapeHtml(x.beweis)}</small>` : ''}</span></div>`
     // LEBENDIGER LIVE-ABLAUF (Finn 21.10.2026 ~03:40 Dubai nach dem ersten Lauf: „mehr Live-Animation … Was wird gerade vorbereitet? Der PC
     // live, nur cooler machen"): Status-Chip je Seite mit lebendem Punkt, Kreisel am aktuellen Schritt, neue Schritte gleiten herein (neuAb)
     const endeStatus = WDL_POLAR_ENDE.includes(String(s.status || ''))
@@ -55573,13 +55645,26 @@
         return `<li class="${nein ? 'is-nein' : akt ? 'is-akt' : 'is-ok'}${neu}"><span class="t">${uhr(x.at_ms)}</span><span class="m">${nein ? '✗' : akt ? '<i class="pol-kreisel"></i>' : '✓'}</span><span>${escapeHtml(String(x.text || x.phase || ''))}</span></li>`
       }).join('') || `<li class="is-akt"><span class="t">–</span><span class="m">${endeStatus ? '' : '<i class="pol-kreisel"></i>'}</span><span>${endeStatus ? 'keine Schritte gemeldet' : 'wartet auf den ersten Schritt…'}</span></li>`
       const ch = seiteChip(titel === 'Slave' ? 'slave' : 'master', teil)
-      return `<div class="pol-ab-seite is-${ch.k}"><h4><span>${titel} · ${escapeHtml(String(wer || '?'))}</span><span class="pol-chip is-${ch.k}"><i></i>${ch.t}</span></h4><dl class="pol-ab-werte">`
+      // CLEANER (Finn 21.10.2026): P&L groß oben (nach dem Ende das Ergebnis), darunter die ×-Bestätigung, dann Werte, SL─●─TP-Bahn, Schritte
+      const plWert = w.ende ? wv.ergebnis : wv.pl
+      const plLabel = w.ende ? (wv.ergebnis != null ? 'Ergebnis' : 'Ergebnis folgt (Abrechnung)')
+        : wv.pl != null ? (titel === 'Slave' ? 'P&L live · MT5' : 'P&L live · Reader') : wv.fill != null ? 'P&L live — wartet auf Kurs' : 'P&L ab dem Fill'
+      const ca = titel === 'Slave' ? '≈ ' : ''   // Slave-Abstand aus dem P&L zurückgerechnet (polarLiveWerte)
+      const bahn = wv.sl != null && wv.tp != null ? `<div class="pol-ab-sp"><small>SL${wv.abSl != null && !w.ende ? ' · ' + ca + pkt(wv.abSl) : ''}</small><span class="wdl-sp-bahn">`
+        + (wv.posFill != null ? `<i class="wdl-sp-ein" style="left:${wv.posFill}%" title="Fill"></i>` : '')
+        + (wv.pos != null && !w.ende ? `<b class="wdl-sp-punkt" style="left:${wv.pos}%;background:${farbe(wv.pl)}"></b>` : '')
+        + `</span><small>${wv.abTp != null && !w.ende ? ca + pkt(wv.abTp) + ' · ' : ''}TP</small></div>` : ''
+      const zuTxt = wv.zuMs != null ? uhr(wv.zuMs) + (wv.zuWeg ? ' · ' + escapeHtml(ZU_WEG[wv.zuWeg] || String(wv.zuWeg).replace(/_/g, ' ')) : '') : ''
+      return `<div class="pol-ab-seite is-${ch.k}"><h4><span>${titel} · ${escapeHtml(String(wer || '?'))}</span><span class="pol-chip is-${ch.k}"><i></i>${ch.t}</span></h4>`
+        + `<div class="pol-ab-pl"><b style="color:${farbe(plWert)}">${geld(plWert, cur)}</b><small>${escapeHtml(plLabel)}</small></div>`
+        + xZeile(wv.x)
+        + `<dl class="pol-ab-werte">`
         + `<dt>Konto</dt><dd>${escapeHtml(String(konto || '?'))}</dd><dt>Order</dt><dd>${escapeHtml(order)}</dd>`
-        + `<dt>Fill</dt><dd>${preis(wv.fill)}</dd>`
-        + `<dt>P&amp;L live</dt><dd style="color:${farbe(wv.pl)};font-weight:600">${geld(wv.pl, cur)}</dd>`
-        + `<dt>TP</dt><dd>${preis(wv.tp)}${wv.tpBetrag != null ? ` <small style="color:var(--good-ink, #15803d)">${geld(wv.tpBetrag, cur)}</small>` : ''}</dd>`
-        + `<dt>SL</dt><dd>${preis(wv.sl)}${wv.slBetrag != null ? ` <small style="color:var(--danger-ink, #b91c1c)">${geld(wv.slBetrag, cur)}</small>` : ''}</dd>`
-        + `</dl><ul class="pol-ab-schritte">${li}</ul></div>`
+        + `<dt>Fill</dt><dd>${preis(wv.fill)}${wv.klick != null ? ` <small>Klick ${uhrMs(wv.klick)}${wv.klickVersatz != null ? ' · ' + msTxt(wv.klickVersatz) + ' zum Feuer' : ''}</small>` : ''}</dd>`
+        + `<dt>TP</dt><dd>${preis(wv.tp)}${wv.tpBetrag != null ? ` <small class="gut">${geld(wv.tpBetrag, cur)}</small>` : ''}</dd>`
+        + `<dt>SL</dt><dd>${preis(wv.sl)}${wv.slBetrag != null ? ` <small class="schlecht">${geld(wv.slBetrag, cur)}</small>` : ''}</dd>`
+        + (zuTxt ? `<dt>Zu</dt><dd>${zuTxt}</dd>` : '')
+        + `</dl>${bahn}<ul class="pol-ab-schritte">${li}</ul></div>`
     }
     const ri = oo.richtung === 'sell' ? 'SELL' : 'BUY', gegen = oo.richtung === 'sell' ? 'BUY' : 'SELL'
     const ph = typeof wdlPolarPhase === 'function' ? wdlPolarPhase(s, false, Date.now()) : { text: String(s.status || '') }
@@ -55593,9 +55678,22 @@
       const zusatz = k === 'feuer' && s.feuer_ms && !stopp && erreicht <= 2 ? `<small data-pol-countdown="${Number(s.feuer_ms)}"></small>` : ''
       return `<li class="${cls}"><span class="pkt">${cls === 'is-ok' ? '✓' : cls === 'is-nein' ? '✗' : i + 1}</span><span class="lbl">${label}${zusatz}</span></li>`
     }).join('') + '</ol>'
-    const kopf = oo.ohneKopf ? '' : leiste + `<div class="pol-ab-kopf"><span><b>${escapeHtml(ph.text || '')}</b></span><span>${s.feuer_ms ? 'Feuerzeit ' + uhr(s.feuer_ms) : 'noch keine Feuerzeit'}${s.lauf_id ? ' · Lauf ' + escapeHtml(String(s.lauf_id).slice(0, 8)) : ''}</span></div>`
+    // Kopf: Feuerzeit · Klick-Abstand beider Orders · Netto beider Seiten (nur bei gleicher Währung) · Lauf
+    const plA = w.ende ? w.master.ergebnis : w.master.pl, plB = w.ende ? w.slave.ergebnis : w.slave.pl
+    const netto = plA != null && plB != null && (oo.slaveCur || '$') === '$' ? Math.round((plA + plB) * 100) / 100 : null
+    const info = [s.feuer_ms ? 'Feuer ' + uhr(s.feuer_ms) : 'noch keine Feuerzeit', w.klickAbstand != null ? `Klick-Abstand <b>${w.klickAbstand.toLocaleString('de-DE')} ms</b>` : '',
+      netto != null ? `Netto <b style="color:${farbe(netto)}">${geld(netto, '$')}</b>` : '', s.lauf_id ? 'Lauf ' + escapeHtml(String(s.lauf_id).slice(0, 8)) : ''].filter(Boolean).join(' · ')
+    const kopf = oo.ohneKopf ? '' : leiste + `<div class="pol-ab-kopf"><span><b>${escapeHtml(ph.text || '')}</b></span><span>${info}</span></div>`
+    // BEIDE AUF DEM × (Finn 21.10.2026): eine Zeile über beide Seiten, solange beide gefüllt und offen sind — auch im Radar-Popup (ohneKopf)
+    const xs = [['Slave', w.slave.x], ['Master', w.master.x]]
+    const xKurz = x => x.k === 'ok' ? '✓ auf ×' : x.k === 'rueck' ? '! Rückfall' : '… parkt'
+    const rueck = xs.filter(([, x]) => x && x.k === 'rueck')
+    const xSumme = endeStatus || xs.some(([, x]) => !x || x.k === 'zu') ? ''
+      : xs.every(([, x]) => x.k === 'ok') ? xZeile({ k: 'ok', text: 'Beide IDs auf dem × — bereit zum Schließen', beweis: xs.map(([t, x]) => `${t} ${xKurz(x)}`).join(' · ') }, true)
+      : xZeile({ k: rueck.length ? 'rueck' : 'offen', beweis: xs.map(([t, x]) => `${t} ${xKurz(x)}`).join(' · '),
+          text: rueck.length ? `${rueck.map(([t]) => t).join(' + ')} nicht auf dem × — ${rueck.length === 2 ? 'beide schließen' : 'schließt'} über den Rückfall-Weg` : 'Maus-Park läuft — die Bots fahren aufs ×…' }, true)
     // Slave LINKS, Master RECHTS (Finns Seitenwahl)
-    return kopf + `<div class="pol-ab">`
+    return kopf + xSumme + `<div class="pol-ab">`
       + spalte('Slave', oo.slaveWer, oo.slaveKonto, s.slave, w.slave, oo.slaveCur || '$', `${gegen} ${oo.lots != null ? Number(oo.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '?'} Lot`)
       + spalte('Master', oo.masterWer, oo.masterKonto, s.master, w.master, '$', `${ri} ${oo.kontrakte ?? '?'} × ${oo.symbol || '?'}`)
       + `</div>`
@@ -55753,6 +55851,7 @@
     const live = polarEl('polarCheckLive'), fuss = polarEl('polarCheckFuss'), tw = polarEl('polarCheckRows')?.closest('.table-wrap'), h = polarEl('polarCheckTitel')
     if(live){ live.hidden = true; live.innerHTML = '' }
     if(fuss) fuss.hidden = false
+    polarRadarKnopf(false, false)
     if(tw) tw.hidden = false
     if(h) h.textContent = 'Polar starten — Vorprüfung'
   }
@@ -55785,6 +55884,9 @@
       if(msg) msg.textContent = !WDL_POLAR_ENDE.includes(String(d.status || '')) ? ''
         : (String(d.status) !== 'fertig' && ohneFill) ? 'Abgebrochen — kein Fill auf beiden Seiten, nichts platziert. Der Plan steht wieder unter Geplant.'
         : 'Lauf beendet — Railway rechnet beide Seiten ab (Trades → Überprüfen).'
+      polarRadarKnopf(true, WDL_POLAR_ENDE.includes(String(d.status || '')))   // nach dem Ende ist der Radar der nächste Schritt → Hauptknopf
+      const titel = polarEl('polarCheckTitel')
+      if(titel) titel.textContent = String(d.status) === 'fertig' ? 'Polar beendet — Ergebnis' : WDL_POLAR_ENDE.includes(String(d.status || '')) ? 'Polar gestoppt' : 'Polar läuft — Live-Ablauf'
       if(WDL_POLAR_ENDE.includes(String(d.status || '')) && _polarLive && _polarLive.takt){ clearInterval(_polarLive.takt); _polarLive.takt = null }
     }catch(e){ if(msg) msg.textContent = 'Stand: ' + ((e && e.message) || e) }
   }
@@ -55793,6 +55895,7 @@
     const live = polarEl('polarCheckLive'), fuss = polarEl('polarCheckFuss'), tw = polarEl('polarCheckRows')?.closest('.table-wrap'), h = polarEl('polarCheckTitel')
     if(tw) tw.hidden = true
     if(fuss) fuss.hidden = true
+    polarRadarKnopf(true, false)
     if(h) h.textContent = 'Polar läuft — Live-Ablauf'
     if(live){ live.hidden = false; live.innerHTML = polarAblaufHtml(null, {}) }
     const kt = Number(p.masterContracts) || null, lots = kt && Number(p.multiplier) ? Math.round(kt * Number(p.multiplier) * 100) / 100 : null
@@ -55806,6 +55909,33 @@
     _polarLive.uhr = setInterval(polarCountdownTick, 200)
   }
   window._polarLiveStarten = polarLiveStarten   // Test-Haken (Stub)
+  // IM RADAR ANSEHEN (Finn 21.10.2026): sichtbar im Live-Modus, nach dem Ende Hauptknopf. Popup zu → Radar (data-view="wdlive", wie
+  // [data-hand-radar]) → die Polar-Zeile des Plans (data-wdl-trade = Plan-ID) ins Bild holen und kurz hervorheben, sobald der Radar sie gezeichnet hat
+  function polarRadarKnopf(zeigen, haupt){
+    const f = polarEl('polarCheckLiveFuss'), b = polarEl('polarCheckRadar')
+    if(f) f.hidden = !zeigen
+    if(b){ b.classList.toggle('btn-primary', !!haupt); b.classList.toggle('btn-ghost', !haupt) }
+  }
+  function polarRadarZeigen(){
+    const pid = _polarLive ? _polarLive.pid : (_polarCheckPlan ? String(_polarCheckPlan.id) : '')
+    polarLiveStoppen(false)
+    polarEl('polarCheckModal')?.classList.remove('open')
+    document.querySelector('#dashboard-view .sb-link[data-view="wdlive"]')?.click()
+    if(!pid) return
+    let n = 0
+    const zeile = () => document.querySelector(`#dashboard-view [data-wdl-trade="${CSS.escape(pid)}"]`)
+    const suchen = () => {
+      const z = zeile()
+      if(!z){ if(++n < 25) setTimeout(suchen, 400); return }   // Radar lädt /admin/live-trades erst beim Öffnen — bis 10 s warten
+      try{ z.scrollIntoView({ block: 'center', behavior: 'smooth' }) }catch(_){ z.scrollIntoView() }
+      // Der Radar zeichnet die Liste direkt nach dem Laden neu (wdlRender) — die Markierung darum 2,6 s an der jeweils aktuellen Zeile halten
+      const bis = Date.now() + 2600
+      const halten = () => { const x = zeile(); if(!x) return; if(Date.now() < bis){ x.classList.add('pol-hin'); setTimeout(halten, 250) } else x.classList.remove('pol-hin') }
+      halten()
+    }
+    setTimeout(suchen, 150)
+  }
+  polarEl('polarCheckRadar')?.addEventListener('click', () => polarRadarZeigen())
   polarEl('polarCheckClose')?.addEventListener('click', () => { polarLiveStoppen(false); polarEl('polarCheckModal')?.classList.remove('open') })
   polarEl('polarCheckNeu')?.addEventListener('click', () => polarCheckLaden())
   polarEl('polarCheckStart')?.addEventListener('click', () => polarCheckStarten())
