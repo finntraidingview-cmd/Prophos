@@ -45935,7 +45935,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1677'
+  const OS_TAB_BUILD = '2026-09-22.1678'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54559,6 +54559,13 @@
 
   function openTradePlanModal(editId){
     console.log('[Prophos] openTradePlanModal called, accounts.length =', accounts.length, 'editId =', editId)
+    // POLAR (Finn 21.10.2026, ✎ an einem offenen Polar-Plan öffnete dieses Popup mit „Alte Modelle → Duplikum (manuell)", Slave „— wählen —"):
+    // dieses Popup kennt route polar nicht (Regler fiel auf 'dup') — Polar-Pläne bearbeitet das Polar-Popup, vorbelegt aus dem Plan
+    const _polarPlan = editId ? tradePlans.find(x => String(x.id) === String(editId)) : null
+    if(_polarPlan && _polarPlan.route === 'polar'){
+      if(typeof window.polarBearbeiten === 'function') window.polarBearbeiten(_polarPlan)
+      return
+    }
     if(!accounts.length){
       alert('Bitte erst mindestens einen Account anlegen.')
       switchView('accounts')
@@ -55534,22 +55541,59 @@
     if(_polarWahl) polarWahlOeffnen(_polarWahl.b.id)   // still nachgeladene Liste (Balance/Heute) in die offene Auswahl übernehmen
     polarRechnen()
   }
-  async function polarOeffnen(){
+  /* BEARBEITEN (Finn 21.10.2026: ✎ an einem Polar-Plan öffnete das allgemeine Plan-Popup mit „Duplikum (manuell)"): dasselbe Popup,
+   * vorbelegt aus dem Plan (Konten, Richtung, Symbol, Kontrakte, Risiko, TP/SL); „Speichern" schickt plan_id → /polar/plan ändert den
+   * bestehenden Plan (gleiche ID). Freigegeben (Startzeit gesetzt) oder läuft: nur ansehen — alles gesperrt, Railway lehnt ohnehin mit 409 ab. */
+  let _polarEditPlan = null, _polarNurAnsehen = false
+  const _polarTitelNeu = polarEl('polarTitel')?.innerHTML || 'Polar planen'
+  const polarEditFrei = p => !!p && p.status === 'planned' && !p.startUm && !p.startUmGestartetAt
+  function polarEditSperren(an){   // nur ansehen: Eingaben, Schalter und Auswahl-Knöpfe im Plan-Raster aus
+    polarEl('polarModal')?.querySelectorAll('.pol-grid input, .pol-grid .seg button, .pol-grid .pol-wahl-knopf').forEach(e => { e.disabled = an })
+    const s = polarEl('polarNurSpeichern'); if(s) s.hidden = an
+  }
+  function polarEditVorbelegen(nurKonten){
+    const p = _polarEditPlan; if(!p) return false
+    const setz = (selId, id) => { const s = polarEl(selId); if(!s || !id || ![...s.options].some(o => o.value === String(id))) return false; s.value = String(id); return true }
+    const ok = setz('pol-fu-konto', p.masterAccountId) & setz('pol-cfd-konto', p.slaveAccountId)
+    if(!nurKonten){
+      const seg = (id, pass) => polarEl(id)?.querySelectorAll('button').forEach(b => b.classList.toggle('active', pass(b)))
+      seg('pol-dir', b => b.dataset.dir === (p.richtung === 'sell' ? 'short' : 'long'))
+      seg('pol-sym', b => b.dataset.ppl === (/^MNQ/i.test(String(p.masterSymbol || '')) ? '2' : '20'))
+      const wert = (id, v) => { const e = polarEl(id); if(e) e.value = v != null && isFinite(Number(v)) ? String(Number(v)) : '' }
+      wert('pol-kt', p.masterContracts); wert('pol-risk-m', p.masterRisk); wert('pol-risk-s', p.slaveRisk); wert('pol-tp-m', p.masterTp); wert('pol-sl-m', p.masterSl)
+    }
+    polarWahlKnoepfe(); polarRechnen()
+    return !!ok
+  }
+  async function polarOeffnen(opt){
+    _polarEditPlan = (opt && opt.edit) || null
+    _polarNurAnsehen = !!_polarEditPlan && !polarEditFrei(_polarEditPlan)
+    const titel = polarEl('polarTitel')
+    if(titel) titel.innerHTML = _polarEditPlan ? `Polar bearbeiten <span style="font-size:11px;font-weight:600;color:var(--sub);margin-left:6px">${_polarNurAnsehen ? 'läuft — nur ansehen' : 'Plan ' + escapeHtml(String(_polarEditPlan.id).slice(0, 8))}</span>` : _polarTitelNeu
+    const speichern = polarEl('polarNurSpeichern'); if(speichern) speichern.textContent = _polarEditPlan ? 'Änderungen speichern' : 'Speichern'
+    polarEditSperren(false)
     ;['polarStart', 'polarNurSpeichern'].forEach(id => { const k = polarEl(id); if(k) k.disabled = false })   // nach Erfolg gesperrt (16.10.2026)
     polarEl('polarModal').classList.add('open')
     try{ polarTestXSichtbar(); const m = polarEl('polarTestMsg'); if(m) m.textContent = '' }catch(_){}   // Maus-Test × nur Admin + PC (20.10.2026)
     if(!_polarKonten.length){ try{ const c = JSON.parse(localStorage.getItem(POLAR_KONTEN_LS) || 'null'); if(c && c.uid === currentUserId && Array.isArray(c.konten)) _polarKonten = c.konten }catch(_){} }
     const sofort = _polarKonten.length > 0
-    if(sofort) polarKontenFuellen(false)
-    polarEl('polarMsg').textContent = sofort ? '' : 'Lade Konten aller IDs…'
+    let kontenDa = false
+    if(sofort){ polarKontenFuellen(false); if(_polarEditPlan) kontenDa = polarEditVorbelegen(false) }
+    const hinweisAnsehen = 'Läuft bzw. freigegeben — nur ansehen. Ändern geht nur bei geplanten Polar-Plänen vor „Polar starten".'
+    polarEl('polarMsg').textContent = _polarNurAnsehen ? hinweisAnsehen : sofort ? '' : 'Lade Konten aller IDs…'
+    if(_polarNurAnsehen) polarEditSperren(true)
     const hinweis = await polarKontenLaden()
     if(!hinweis){ try{ localStorage.setItem(POLAR_KONTEN_LS, JSON.stringify({ uid: currentUserId, at: Date.now(), konten: _polarKonten })) }catch(_){} }
     if(!polarEl('polarModal').classList.contains('open')) return
     polarKontenFuellen(sofort)   // frische Liste (Balance), Auswahl bleibt
-    polarEl('polarMsg').textContent = hinweis
+    // Bearbeiten: Konten aus dem Plan, falls der Zwischenstand sie noch nicht kannte (sonst bleibt die Hand-Auswahl); ohne Cache alles
+    if(_polarEditPlan && !kontenDa) polarEditVorbelegen(sofort)
+    if(_polarNurAnsehen) polarEditSperren(true)
+    polarEl('polarMsg').textContent = _polarNurAnsehen ? hinweisAnsehen : hinweis
   }
+  window.polarBearbeiten = p => polarOeffnen({ edit: p })   // openTradePlanModal leitet route polar hierher (21.10.2026)
   polarEl('tp-route-polar')?.addEventListener('click', () => { closeTradePlanModal(); polarOeffnen() })
-  polarEl('polarClose')?.addEventListener('click', () => { polarWahlZu(false); polarEl('polarModal').classList.remove('open') })
+  polarEl('polarClose')?.addEventListener('click', () => { polarWahlZu(false); polarEl('polarModal').classList.remove('open'); polarEditSperren(false) })
   ;['pol-fu-konto', 'pol-cfd-konto'].forEach(id => polarEl(id)?.addEventListener('change', polarRechnen))
   ;['pol-kt', 'pol-risk-m', 'pol-risk-s', 'pol-tp-m', 'pol-sl-m'].forEach(id => polarEl(id)?.addEventListener('input', polarRechnen))
   ;['pol-dir', 'pol-sym'].forEach(id => polarEl(id)?.addEventListener('click', e => {
@@ -55639,6 +55683,12 @@
       sl_pkt: sab.sl, tp_pkt: Math.max(0.5, sab.tp), master_sl_pkt: slPkt, master_tp_pkt: tpPkt,
       // sicht admin = Verwalter plant in seiner Gruppe (wie die übrigen Admin-Reiter); kein starten mehr (21.10.2026)
       sicht: 'admin' }
+    // Bearbeiten (21.10.2026): gleiche ID — Railway ändert nur geplante, nicht freigegebene Pläne ohne Lauf (sonst 409)
+    const edit = _polarEditPlan
+    if(edit){
+      if(_polarNurAnsehen) return msg('Läuft bzw. freigegeben — nur ansehen.')
+      body.plan_id = String(edit.id)
+    }
     const knoepfe = ['polarNurSpeichern'].map(polarEl).filter(Boolean)
     if(knoepfe.some(k => k.disabled)) return   // läuft schon (Doppelklick)
     knoepfe.forEach(k => { k.disabled = true })
@@ -55647,7 +55697,7 @@
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token
       if(!tok) throw new Error('nicht angemeldet')
-      msg('Speichere Polar-Plan…')
+      msg(edit ? 'Speichere Änderungen…' : 'Speichere Polar-Plan…')
       const r = await fetch(`${WATCHER_HOME}/polar/plan`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || !d.ok) throw new Error(d.msg || ('HTTP ' + r.status))
@@ -55657,7 +55707,9 @@
       polarEl('polarModal').classList.remove('open')
       msg('')
       // Toast setzt textContent — Namen ohne esc (S2-Hinweis 16.10.2026: sonst „&amp;" im Toast)
-      const toastText = `Polar-Plan gespeichert — in Trades bei ${master.person} unter Geplant: „Starten" (Prüf-Tabelle, dann Bot) oder „Läuft" (von Hand)`
+      const toastText = edit ? `Polar-Plan geändert — gleicher Plan, in Trades bei ${master.person} unter Geplant`
+        : `Polar-Plan gespeichert — in Trades bei ${master.person} unter Geplant: „Starten" (Prüf-Tabelle, dann Bot) oder „Läuft" (von Hand)`
+      _polarEditPlan = null
       if(typeof atToast === 'function') atToast(`🧭 ${toastText} (${String(d.plan_id).slice(0, 8)}) · ${master.firm} ${long ? 'Long' : 'Short'} ${kt} × ${root} gegen ${slave.firm} ${lots} Lot`, 'start')
       try{ if(typeof loadTradePlans === 'function') await loadTradePlans() }catch(_){}
       try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}

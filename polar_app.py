@@ -725,6 +725,36 @@ def registrieren(app, ns):
                  "planned_for": (A["_kapitel_heute_iso"]() if "_kapitel_heute_iso" in A else datetime.now(timezone.utc).date().isoformat()),
                  "mt5_baseline": {"polar_auftrag": {"lots": lots, "sl_pkt": sl_pkt, "tp_pkt": tp_pkt, "kontrakte": kt,
                                                     "master_sl_pkt": _zahl(d.get("master_sl_pkt")), "master_tp_pkt": _zahl(d.get("master_tp_pkt"))}}}
+        # BEARBEITEN (Finn 21.10.2026: ✎ an einem Polar-Plan öffnete das allgemeine Popup mit „Duplikum (manuell)"): mit plan_id wird der
+        # bestehende Plan geändert (gleiche ID) — nur solange er geplant und nicht freigegeben ist (keine Startzeit) und kein Lauf an ihm
+        # hängt; sonst 409, ein laufender Lauf wird nie gestört. planned_for/Status bleiben, mt5_baseline behält seine übrigen Schlüssel.
+        pid = str(d.get("plan_id") or "").strip().lower()
+        if pid:
+            if not _uuid(pid):
+                return jsonify({"ok": False, "msg": "plan_id ungültig"}), 400
+            try:
+                alt = (A["sb_select"]("trade_plans", {"select": "id,status,route,user_id,polar_slave_user_id,start_um,mt5_baseline",
+                                                      "id": f"eq.{pid}", "limit": "1"}) or [None])[0]
+            except Exception as e:
+                return jsonify({"ok": False, "msg": f"DB: {str(e)[:120]}"}), 503
+            if not alt or alt.get("route") != "polar":
+                return jsonify({"ok": False, "msg": "kein Polar-Plan"}), 404
+            for uid in (alt.get("user_id"), alt.get("polar_slave_user_id")):
+                if uid and not A["admin_in_sicht"](str(uid), sicht):
+                    return jsonify({"ok": False, "msg": "Plan gehört zu einer ID außerhalb deiner Sicht"}), 403
+            with _COND:
+                lauf = any(x.get("plan_id") == pid and x.get("status") not in ENDE for x in _LAEUFE.values())
+            if alt.get("status") != "planned" or alt.get("start_um") or lauf:
+                return jsonify({"ok": False, "msg": "Plan läuft schon bzw. ist freigegeben — nur ansehen, nichts geändert"}), 409
+            upd = {k: v for k, v in zeile.items() if k not in ("status", "priority", "planned_for")}
+            upd["mt5_baseline"] = dict(alt.get("mt5_baseline") or {}, polar_auftrag=zeile["mt5_baseline"]["polar_auftrag"])
+            try:
+                rows = A["sb_update"]("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um": "is.null"}, upd)
+            except Exception as e:
+                return jsonify({"ok": False, "msg": f"Plan nicht geändert: {str(e)[:200]}"}), 400
+            if not rows:
+                return jsonify({"ok": False, "msg": "Plan wurde inzwischen gestartet — nichts geändert"}), 409
+            return jsonify({"ok": True, "plan_id": pid, "master_uid": mu, "slave_uid": su, "status": "planned", "auto": False, "bearbeitet": True})
         try:
             neu = A["sb_insert"]("trade_plans", zeile)
         except Exception as e:
