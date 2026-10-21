@@ -1624,6 +1624,37 @@
   #dashboard-view #polarCheckModal .pc-zelle.is-nein .pc-text{color:var(--danger-ink, #b91c1c)}
   #dashboard-view #polarCheckModal .pc-zelle.is-ok .pc-text{color:var(--ink-2)}
   #dashboard-view #polarCheckModal tr.pc-zeile-nein td{background:color-mix(in srgb, var(--danger) 6%, transparent)}
+  /* SCHÖNER (21.10.2026, Finn: „vom Design her cooler machen"): Zusammenfassung, runde Badges, gestaffeltes Einblenden, Schimmer beim Prüfen,
+     Start-Knopf glüht bei frei — Farben aus dem Bestand (good/danger/violet), reduced-motion ruhig */
+  #dashboard-view #polarCheckModal .pc-summe{display:flex;align-items:center;gap:12px;padding:12px 14px;margin:0 0 12px;border:1px solid var(--border-soft);border-radius:var(--r-sm);animation:polEin .35s ease-out both}
+  #dashboard-view #polarCheckModal .pc-summe b{display:block;font-size:13.5px;color:var(--ink)}
+  #dashboard-view #polarCheckModal .pc-summe small{display:block;font-size:11.5px;color:var(--sub);margin-top:2px}
+  #dashboard-view #polarCheckModal .pc-summe-zeit{margin-left:auto;font-size:11px;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums}
+  #dashboard-view #polarCheckModal .pc-summe-kreis{flex:none;width:34px;height:34px;border-radius:999px;display:grid;place-items:center;font-weight:700;font-size:15px;color:#fff;background:var(--sub)}
+  #dashboard-view #polarCheckModal .pc-summe.is-ok{border-color:color-mix(in srgb, var(--good) 45%, var(--border-soft));background:color-mix(in srgb, var(--good) 6%, transparent)}
+  #dashboard-view #polarCheckModal .pc-summe.is-ok .pc-summe-kreis{background:var(--good);animation:pcRing 1.8s ease-out infinite}
+  #dashboard-view #polarCheckModal .pc-summe.is-nein{border-color:color-mix(in srgb, var(--danger) 45%, var(--border-soft));background:color-mix(in srgb, var(--danger) 6%, transparent)}
+  #dashboard-view #polarCheckModal .pc-summe.is-nein .pc-summe-kreis{background:var(--danger)}
+  #dashboard-view #polarCheckModal .pc-summe.is-laden .pc-summe-kreis{background:transparent;border:1.5px solid var(--border)}
+  #dashboard-view #polarCheckModal .pc-summe.is-laden .pol-kreisel{width:16px;height:16px}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-m{width:22px;vertical-align:1px}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-ok,#dashboard-view #polarCheckModal .pc-zelle .pc-nein,#dashboard-view #polarCheckModal .pc-zelle .pc-offen{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:999px;font-size:10px;line-height:1;color:#fff}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-ok{background:var(--good)}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-nein{background:var(--danger)}
+  #dashboard-view #polarCheckModal .pc-zelle .pc-offen{background:transparent;border:1.5px solid var(--border);color:var(--sub)}
+  #dashboard-view #polarCheckModal tr.pc-ein td{animation:pcEin .4s ease-out both;animation-delay:calc(var(--i, 0) * 70ms)}
+  #dashboard-view #polarCheckModal tr.pc-ein:hover td{background:color-mix(in srgb, var(--violet) 4%, transparent)}
+  #dashboard-view #polarCheckModal tr.pc-zeile-nein.pc-ein:hover td{background:color-mix(in srgb, var(--danger) 9%, transparent)}
+  #dashboard-view #polarCheckModal .pc-schimmer{display:block;height:10px;border-radius:6px;width:80%;background:linear-gradient(90deg,var(--border-soft) 25%,color-mix(in srgb, var(--violet) 18%, var(--border-soft)) 50%,var(--border-soft) 75%);background-size:300% 100%;animation:polFluss 1.2s linear infinite;animation-delay:calc(var(--i, 0) * 90ms)}
+  #dashboard-view #polarCheckModal tr.pc-skelett .pc-pruef{color:var(--sub)}
+  #dashboard-view #polarCheckModal #polarCheckStart.pc-start-frei{animation:pcGlueh 2.2s ease-in-out infinite}
+  @keyframes pcRing{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent)}100%{box-shadow:0 0 0 9px transparent}}
+  @keyframes pcEin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  @keyframes pcGlueh{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--violet) 0%, transparent)}50%{box-shadow:0 0 0 6px color-mix(in srgb, var(--violet) 22%, transparent)}}
+  @media (prefers-reduced-motion: reduce){
+    #dashboard-view #polarCheckModal .pc-summe,#dashboard-view #polarCheckModal .pc-summe-kreis,#dashboard-view #polarCheckModal tr.pc-ein td,
+    #dashboard-view #polarCheckModal .pc-schimmer,#dashboard-view #polarCheckModal #polarCheckStart.pc-start-frei{animation:none}
+  }
   /* Handy: Prüfung als Zeile oben, darunter Slave | Master je halbe Breite mit eigenem Spaltennamen (kein Seitwärts-Scrollen) */
   @media (max-width:600px){
     #dashboard-view #polarCheckModal table.pc-kreuz thead{display:none}
@@ -9229,6 +9260,8 @@
         </div>
         <div class="modal-body">
           <div id="polarCheckInfo" style="font-size:12.5px;color:var(--sub);margin-bottom:10px"></div>
+          <!-- Zusammenfassung (21.10.2026, Finn: „vom Design her cooler machen"): großer Status-Kreis + „Alle n frei" bzw. „k gesperrt: …" -->
+          <div id="polarCheckSumme" class="pc-summe" hidden></div>
           <div class="table-wrap">
             <table class="t">
               <thead id="polarCheckKopf"><tr><th style="width:28px"></th><th>Prüfung</th><th>Stand</th></tr></thead>
@@ -45820,7 +45853,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1671'
+  const OS_TAB_BUILD = '2026-09-22.1672'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55616,18 +55649,35 @@
       kopf.innerHTML = kreuz ? `<tr><th>Prüfung</th><th>Slave${wer('slave')}</th><th>Master${wer('master')}</th></tr>`
         : '<tr><th style="width:28px"></th><th>Prüfung</th><th>Stand</th></tr>'
     }
-    if(rows) rows.innerHTML = !zz.length ? '<tr><td></td><td colspan="2" class="pc-text">keine Antwort</td></tr>'
+    // SCHÖNER (Finn 21.10.2026 ~04:15 Dubai, Vorprüfung Ina gegen Moritz alles ✓: „vom Design her cooler machen"): Zusammenfassung oben,
+    // Haken als runde Badges, Zeilen bauen sich gestaffelt auf (--i), beim Prüfen Schimmer-Zeilen statt leerer Tabelle, Start-Knopf glüht bei frei
+    const summe = polarEl('polarCheckSumme')
+    if(summe){
+      const gr = POLAR_CHECK_GRUPPEN.filter(([g]) => g !== 'test' && zz.some(z => z.gruppe === g))
+      const nein = gr.filter(([g]) => zz.some(z => z.gruppe === g && z.ok === false))
+      const uhrJetzt = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      summe.hidden = !(d && (d.laden || zz.length))
+      summe.className = 'pc-summe ' + (d && d.laden ? 'is-laden' : !kreuz ? '' : nein.length ? 'is-nein' : 'is-ok')
+      summe.innerHTML = d && d.laden ? `<span class="pc-summe-kreis"><i class="pol-kreisel"></i></span><span><b>Prüfe beide Seiten…</b><small>Richtungsschutz · Big Trade · Puls · Polar · PCs · Reader/MT5</small></span>`
+        : !kreuz ? '' : nein.length
+          ? `<span class="pc-summe-kreis">${nein.length}</span><span><b>${nein.length} von ${gr.length} Prüfungen gesperrt</b><small>${escapeHtml(nein.map(([, l]) => l).join(' · '))} — erst klären, dann „Neu prüfen"</small></span><span class="pc-summe-zeit">geprüft ${uhrJetzt}</span>`
+          : `<span class="pc-summe-kreis">✓</span><span><b>Alle ${gr.length} Prüfungen frei</b><small>Slave${escapeHtml(werRoh('slave'))} · Master${escapeHtml(werRoh('master'))} — bereit zum Start</small></span><span class="pc-summe-zeit">geprüft ${uhrJetzt}</span>`
+    }
+    let _i = 0
+    if(rows) rows.innerHTML = (d && d.laden && !zz.length) ? POLAR_CHECK_GRUPPEN.slice(0, 6).map(([, label], i) => `<tr class="pc-skelett" style="--i:${i}"><td class="pc-pruef">${label}</td><td><span class="pc-schimmer"></span></td><td><span class="pc-schimmer"></span></td></tr>`).join('')
+      : !zz.length ? '<tr><td></td><td colspan="2" class="pc-text">keine Antwort</td></tr>'
       : kreuz ? POLAR_CHECK_GRUPPEN.map(([g, label]) => {
           const zg = zz.filter(z => z.gruppe === g)
           if(!zg.length) return ''
           const beide = zg.find(z => !z.seite)
-          const zeilenKlasse = zg.some(z => z.ok === false) ? ' class="pc-zeile-nein"' : ''
+          const zeilenKlasse = ` class="pc-ein${zg.some(z => z.ok === false) ? ' pc-zeile-nein' : ''}" style="--i:${_i++}"`
           return beide
             ? `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(beide).replace('<td ', '<td colspan="2" class="pc-beide" ').replace('class="pc-beide" class="', 'class="pc-beide ')}</tr>`
             : `<tr${zeilenKlasse}><td class="pc-pruef">${label}</td>${polarCheckZelle(zg.find(z => z.seite === 'slave'), 'Slave' + werRoh('slave'))}${polarCheckZelle(zg.find(z => z.seite === 'master'), 'Master' + werRoh('master'))}</tr>`
         }).join('')
       : zz.map(z => `<tr><td>${polarCheckZeichen(z.ok)}</td><td><b>${escapeHtml(String(z.titel || ''))}</b></td><td class="pc-text">${escapeHtml(String(z.text || ''))}</td></tr>`).join('')
     if(start) start.disabled = !(d && d.frei === true)
+    if(start) start.classList.toggle('pc-start-frei', !!(d && d.frei === true))
   }
   window._polarCheckZeichnen = polarCheckZeichnen   // Test-Haken (Stub)
   async function polarCheckRufen(pfad){
@@ -55642,7 +55692,8 @@
   async function polarCheckLaden(){
     const msg = polarEl('polarCheckMsg'), start = polarEl('polarCheckStart')
     if(start) start.disabled = true
-    if(msg){ msg.textContent = 'Prüfe…'; msg.classList.remove('err') }
+    if(msg){ msg.textContent = ''; msg.classList.remove('err') }
+    polarCheckZeichnen({ zeilen: [], frei: false, laden: true })
     try{
       await polarCheckTestLesen()
       const { r, d } = await polarCheckRufen('vorpruefung')
