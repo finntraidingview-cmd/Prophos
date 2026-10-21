@@ -4467,6 +4467,15 @@
   /* „🎯 bestanden · Phase 1 → Phase 2" (09.10.2026) ist länger: in der Ergebnis-Zelle eigene Zeile, Knöpfe darunter */
   #dashboard-view .wdl-z-akt:has(.wdl-bestanden){flex-wrap:wrap;row-gap:4px}
   #dashboard-view .wdl-z-akt > span:has(> .wdl-bestanden){flex-basis:100%;text-align:right}
+  /* ERGEBNIS-WORT IMMER SICHTBAR (Finn/Master 21.10.2026 ~22:00 Dubai, Apex …0008 in „Abhaken": „fehlen noch 34 $" nicht gesehen): neben den drei
+     Knöpfen blieb dem Ergebnis bei 240 px Mitte 0 px — „TP ✓", „SL", „💀 geblowt", „Konto weg", „fehlen noch …", „🎯 …" waren unsichtbar. Jetzt
+     wie der Bestanden-Chip: eigene kleine Zeile über den Knöpfen, rechtsbündig; zu lang → „…", der Chip trägt den vollen Text im Tooltip.
+     Daneben passt auch ein kurzes „TP ✓" nicht — drei Knöpfe + Wort brachen sonst in zwei Knopf-Reihen um. Knöpfe dort etwas schmaler, Abstand 4 px — in Bestanden ist die Mitte nur 216 px breit. */
+  #dashboard-view .wdl-z > .wdl-z-akt:has(> .wdl-erg){flex-wrap:wrap;row-gap:2px;column-gap:4px}
+  #dashboard-view .wdl-z-akt:has(> .wdl-erg) .el-knopf{padding:3px 8px}
+  #dashboard-view .wdl-z-akt:has(> .wdl-erg) .wdl-man-text{flex-basis:0}   /* Manuelle Arbeit: Notiz bricht selbst um, statt die Knöpfe in eine 3. Zeile zu schieben */
+  #dashboard-view .wdl-z-akt > .wdl-erg{flex-basis:100%;text-align:right;font-size:12px;line-height:1.3}
+  #dashboard-view .wdl-z-akt > .wdl-erg > b{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}   /* „…" am Chip selbst; ein angehängtes „→ Review" bricht lieber um, als zu verschwinden */
   /* Radar-Abschnitt „Bestanden" (09.10.2026): Phase-Chip in der ri-Spalte, Balance → Ziel in mi, Tage in konto, Status in pl, Knopf in zeit */
   #dashboard-view .wdl-z-bst .wdl-z-ri .type-badge{font-size:11px;padding:1px 7px}
   #dashboard-view .wdl-z-bst .wdl-z-mi{color:var(--ink-2);font-variant-numeric:tabular-nums}
@@ -32097,7 +32106,7 @@
         // Login-Fehler) oder die Lesung verloren ist. Solange Puls normal liest, bleibt die Zeile wie bisher.
         const abhakenZeigen = !!(wdlBestandenChip(t) || wt.login || wdlLesungVerloren(wt, jetzt)), abSperre = wdlAbhakenSperre(t)
         const abKnopf = abhakenZeigen ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || (wdlBestandenChip(t) ? 'Konto bestanden — bei Tradeify nicht mehr im Dropdown, Puls kann es nicht lesen: ohne Lesung abhaken, P&L von Hand' : 'Ohne Lesung abhaken — P&L von Hand eintragen'))}">Jetzt abhaken</button>` : ''
-        miZ = zelle('mi wdl-z-akt', `${(wdlBestandenChip(t) || wdlFehltChip(t)) ? `<span>${wdlBestandenChip(t) || wdlFehltChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>${abKnopf}`,
+        miZ = zelle('mi wdl-z-akt', `${(wdlBestandenChip(t) || wdlFehltChip(t)) ? `<span class="wdl-erg">${wdlBestandenChip(t) || wdlFehltChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>${abKnopf}`,
           { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
               : wdlLesungVerloren(wt, jetzt) ? `Seit ${minTxt(wdlLesungVerloren(wt, jetzt))} kein Leseversuch (${wt.letzte ? 'letzter ' + zeit(wt.letzte) : 'noch keiner'}) — der PC-Tab dieser ID (Puls) antwortet nicht. „Jetzt lesen" stößt neu an; hilft das nicht, Prophos am PC der ID öffnen`
@@ -32118,7 +32127,9 @@
           ? `<select class="wdl-man-schritt" data-wdl-man-schritt="${escapeHtml(pid)}" title="Nächster Schritt">${WDL_MAN_SCHRITTE.map(([v, l]) => `<option value="${v}"${v === schritt ? ' selected' : ''}>${l}</option>`).join('')}</select>`
             + `<input type="text" class="wdl-man-notiz" data-wdl-man-notiz="${escapeHtml(pid)}" value="${escapeHtml(String(m.notiz || ''))}" maxlength="140" placeholder="Notiz · Enter oder Klick daneben speichert, Esc verwirft" autocomplete="off">`
           : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml((m.notiz ? m.notiz + ' — ' : '') + 'klicken: Schritt/Notiz bearbeiten')}">${schrittTxt ? `<b>${escapeHtml(schrittTxt)}</b>` : ''}${schrittTxt && m.notiz ? ' · ' : ''}${m.notiz ? escapeHtml(String(m.notiz)) : (schrittTxt ? '' : '<i>Notiz …</i>')}</button>`
-        miZ = zelle('mi wdl-z-akt', `${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
+        // Ergebnis-Wort auch hier (Master 21.10.2026): Finn sah bei Apex …0008 „fehlen noch 34 $" nirgends — gleiche Reihenfolge wie Überprüfen
+        const ergM = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
         plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
@@ -32138,7 +32149,7 @@
         else if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
-        miZ = zelle('mi wdl-z-akt', `${erg ? `<span>${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
+        miZ = zelle('mi wdl-z-akt', `${erg ? `<span class="wdl-erg">${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach Review — wartet auf die neuen Kontodaten der Firma, nichts wird verbucht (früher „parken\")">→ Review</button>`,
           { tip: polar ? wdlPolarErg(t).tip : echo ? '' : demoTip(d) })
