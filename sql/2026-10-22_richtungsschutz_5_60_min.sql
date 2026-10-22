@@ -4,7 +4,7 @@
 --   (2) prophos_gegenhedge_konflikt (Neu starten / von Hand über prophos_gegenhedge_halten): ziel jetzt + 10 min → jetzt + 5–60 min
 -- Die 90-s-Sperre gegen ANDERE IDs (Gegenhedge-Fenster) bleibt unverändert. Gegenstück im PC-Tab: rkVerschieben (prophos.html).
 -- Sicher gegen Abschreibfehler: liest die LIVE-Definition, ersetzt genau die eine Stelle, bricht ab, wenn sie nicht (mehr) passt.
--- NOCH NICHT EINGESPIELT — wartet auf Finns OK.
+-- Eingespielt 22.10.2026 ~20:50 Dubai nach Finns OK („kannst du pushen“), zusammen mit .1717 (4a21c7e9).
 do $$
 declare
   d text;
