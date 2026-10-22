@@ -26525,6 +26525,23 @@
   const TV_ENDLESUNG_SCHNELL_CODES = ['puls_beschaeftigt', 'handlauf']   // ohne login-Objekt: wie bisher schnell wiederholen
   const TV_ENDLESUNG_LOGIN_SCHRITT = { cdp_fehler: ['cdp-login'] }   // Codes, die nur in diesen Schritten als Login-Fehler zählen
   const TV_ENDLESUNG_LOGIN_PAUSE_S = 30 * 60, TV_ENDLESUNG_LOGIN_MAX = 2
+  /* PULS BLEIBT ZU HAUSE ≠ FEHLVERSUCH (22.10.2026, Prüf-Agent nach .1718): steht auf dem PC ein Big Trade/Winning Day nah am TP/an der Liq,
+   * kommt die Endlesung gar nicht bis zum Puls (pulsHeimFrei → big_trade_nah/big_trade_unklar, nichts gesendet, kein Login). Bisher zählte
+   * das als Versuch — ein WD, der ein paar Minuten am TP pendelt, fraß so die 8 Versuche. Jetzt wie „belegt": kein Versuch, puls_at bleibt,
+   * eigener Zähler final.puls_heim_n/puls_heim_at; nächster Versuch nach 2–4 min, je Plan + Zähler fest gewürfelt (alle Tabs sehen
+   * dieselbe Zeit, Jitter-Regel). */
+  const TV_ENDLESUNG_HEIM_CODES = ['big_trade_nah', 'big_trade_unklar']
+  function tvV2HeimPauseMs(id, n){
+    let h = 2166136261; for(const ch of String(id || '') + ':' + String(n || 0)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
+    // nachmischen: FNV allein streute bei Zähler 0, 1, 2 … nur über ~15 s (Stub 22.10.2026: 205–220 s)
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b) >>> 0; h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35) >>> 0; h ^= h >>> 16
+    return (120 + ((h >>> 0) % 121)) * 1000
+  }
+  // REIN RECHNEND: ab wann darf die Endlesung nach einer Heim-Sperre wieder? -> ms oder 0 (keine Sperre gemerkt)
+  function tvV2HeimBis(id, fin){
+    const at = Date.parse((fin && fin.puls_heim_at) || '') || 0
+    return at ? at + tvV2HeimPauseMs(id, Number(fin.puls_heim_n) || 0) : 0
+  }
   // REIN RECHNEND: ist die Puls-Antwort ein Login-/Verbindungsfehler? -> '' (nein) | Kennung für puls_login_code
   function tvV2LoginFehlerCode(r){
     if(!r || r.ok) return ''
@@ -26692,6 +26709,8 @@
     // höchstens 24 h ab Ende-Erkennung, danach nur noch „Jetzt lesen" von Hand (nie endlos)
     const offenN = Number(fin.puls_offen_n) || 0
     if(offenN && endeMs && jetzt - endeMs > TV_ENDLESUNG_OFFEN_MAX_MS) return `Position ${offenN}× laut Puls noch offen, 24 h seit dem Ende vorbei — „Jetzt lesen" von Hand`
+    const heimBis = tvV2HeimBis(p.id, fin)   // Heim-Sperre (22.10.2026): kein Versuch, nur 2–4 min Pause — „Pause bis" hält „Warte auf Puls"
+    if(heimBis && jetzt < heimBis) return `Pause bis ${new Date(heimBis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Puls bleibt im Konto eines Big Trades/Winning Days nah am TP/an der Liq, kein Versuch verbraucht`
     const letzte = Date.parse(fin.puls_at || '') || 0
     const stufe = Math.max(versuche - 1, 0) + offenN
     if(letzte && (versuche >= 1 || offenN) && (jetzt - letzte) < TV_ENDLESUNG_PAUSE_S[Math.min(stufe, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000) return 'Pause bis zum nächsten Versuch'
@@ -27022,6 +27041,17 @@
         if(Date.now() - t0 > 180000){ r = r || { ok: false, code: 'puls_belegt', msg: 'Puls/Rundgang 3 min belegt' }; break }
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
       }
+      // Heim-Sperre (22.10.2026, s. TV_ENDLESUNG_HEIM_CODES): nichts gesendet, kein Versuch — nur Zähler + Zeit, nächste Lesung in 2–4 min
+      if(r && !r.ok && !r.gesendet && TV_ENDLESUNG_HEIM_CODES.includes(String(r.code || ''))){
+        const hN = (Number(fin0.puls_heim_n) || 0) + 1, hAt = new Date().toISOString()
+        let neuH = null
+        try{ neuH = await finPatch({ puls_heim_n: hN, puls_heim_at: hAt, puls_heim_grund: String(r.msg || r.code).slice(0, 240) }) }
+        catch(e){ return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
+        if(!neuH) return { ok: false, msg: 'Plan nicht mehr in „Überprüfen" (inzwischen erledigt?) — nichts geschrieben' }
+        try{ renderTradePlans() }catch(_){}
+        const bis = new Date(tvV2HeimBis(pid, { puls_heim_at: hAt, puls_heim_n: hN })).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+        return { ok: false, heim: true, msg: `${String(r.msg || r.code)} — kein Versuch verbraucht, nächste Lesung ab ${bis}` }
+      }
       const p1 = tradePlans.find(x => String(x.id) === pid) || p0
       if(r && r.ok) hedgeEinstiegNachtragen(p1, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
       const erg = tvV2EndlesungAuswerten(r, w.symbol, dir, p0.route === 'tsv2')
@@ -27132,6 +27162,7 @@
     }catch(e){ return { ok: false, msg: String((e && e.message) || e) } }
   }
   window._tvV2EndlesungJetzt = tvV2EndlesungJetzt
+  window._tvHeim = { grund: tvV2EndlesungGrund, bis: tvV2HeimBis, pause: tvV2HeimPauseMs, versuch: tvV2EndlesungVersuch }   // Test-Haken (Stub, 22.10.2026)
   // Nachhol-Takt (60–100 s, gestreut): eine fällige Endlesung je Takt — eine Maus, und die Order geht vor (_tpOrbitLaeuft prüft der Versuch)
   function tvV2EndlesungTakt(){
     try{
@@ -47575,7 +47606,8 @@
       // nichts gesendet: Plan bleibt Geplant, der Tick/Finn startet später erneut.
       // PULS BLEIBT ZU HAUSE (19.10.2026, Finn: „knapp am TP oder an der Liq darf der Puls nicht mehr raus"): Railway meldet über denselben Riegel
       // big_trade_nah (Big Trade dieses PCs ≤ 2.000 $ vor TP/Liq, puls_heim_regel) bzw. big_trade_unklar (kein frischer Kurs/kein Level) —
-      // kein Kontowechsel, nichts gesendet, der Plan bleibt Geplant; sfTick versucht es 15 min später wieder (Start-Fehler-Weg, schritt = code)
+      // kein Kontowechsel, nichts gesendet, der Plan bleibt Geplant; sfTick versucht es 15 min später wieder (Start-Fehler-Weg, schritt = code;
+      // Winning Day seit 22.10.2026 nach 2–4 min, s. sfIstWdSperre)
       if(r && !r.ok && !r.gesendet && (r.code === 'gegenrichtung' || r.code === 'riegel_unerreichbar' || r.code === 'big_trade_nah' || r.code === 'big_trade_unklar')){
         await fehler((r.code === 'gegenrichtung' || r.code === 'big_trade_nah' ? '⛔ ' : '⚠ ') + String(r.msg || 'Riegel am PC: nichts gesendet') + ' — Plan bleibt Geplant.', Object.assign({}, r, { retry_ok: true }))
         return
@@ -50601,7 +50633,8 @@
       // Login-Bremse (30.09.2026): „Login prüfen" kündigt nichts mehr an, die 30-min-Pause verschiebt den Termin
       const lb = tvV2LoginBremse(fin, jetzt)
       if(lb && lb.pruefen) continue
-      const t = lb ? lb.bis : (vers && letzte) ? letzte + TV_ENDLESUNG_PAUSE_S[Math.min(vers - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000 : tvV2NachleseAb(p.id, fin.at || p.endedAt)
+      let t = lb ? lb.bis : (vers && letzte) ? letzte + TV_ENDLESUNG_PAUSE_S[Math.min(vers - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000 : tvV2NachleseAb(p.id, fin.at || p.endedAt)
+      const hb = tvV2HeimBis(p.id, fin); if(t && hb > t) t = hb   // Heim-Sperre (22.10.2026): Countdown nicht auf einen Termin, an dem nichts passiert
       if(t) out.push({ t, art: 'Bestätigung', plan: p })
     }
     return out.sort((a, b) => a.t - b.t)
@@ -50698,6 +50731,7 @@
     const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(vers) info.push(`Versuch ${vers + 1}/${TV_ENDLESUNG_MAX}`)
     if(Number(fin.puls_offen_n) > 0) info.push(`Position laut Puls noch offen (${Number(fin.puls_offen_n)}×) — kein Versuch verbraucht, Balance wird gelesen, sobald sie zu ist`)   // 08.10.2026
+    if(Number(fin.puls_heim_n) > 0) info.push(`Puls blieb ${Number(fin.puls_heim_n)}× im Konto eines Big Trades/Winning Days nah am TP/an der Liq — kein Versuch verbraucht`)   // 22.10.2026
     info.push('entfällt mit „Erledigt"')
     return { was: 'Profit prüfen · Balance in ' + pulsPlattform(p) + ' lesen', info }
   }
@@ -51408,6 +51442,11 @@
   // WARTEN IST KEIN FEHLER (19.10.2026, Puls bleibt zu Hause): ein Big Trade kann stundenlang knapp unter dem TP pendeln — diese Schritte
   // zählen nicht gegen SF_MAX, der Plan wird bis zum Ende des Start-Fensters alle 15 min neu versucht
   const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar'])
+  // WINNING DAY NAH ≠ 15 MIN (22.10.2026, Prüf-Agent nach .1718): seit „Puls bleibt zu Hause" auch für Winning Days gilt, sperrt ein WD
+  // ≤ 100 $ vor TP/Liq den Puls meist nur 1–4 min — mit 15 min + 2–6 min Wartezeit riss das Futures-Paare (2–10 min) auseinander.
+  // Railway schreibt den Grund mit „Winning Day …" an den Anfang (app.py puls_heim_pruefen); fehler() setzt nur „⛔ " davor. Dann
+  // plant sfTick beim nächsten Takt neu ein, das Backend legt den Start auf jetzt + 2–4 min (Zufall, ap_nachhol_minute). Big Trades wie bisher.
+  const sfIstWdSperre = f => !!f && /^\W*Winning Day\b/.test(String(f.msg || ''))
   const sfFlag = p => (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || null
   /* NUR UNGELÖSTE FEHLSTARTS ZEIGEN (Finn 21.10.2026 ~21:20 Dubai: „Mir sollen nur die Fehlstarts angezeigt werden, die sich NICHT von alleine
    * gefixt haben … Viele hatten einen Fehlstart, und beim zweiten oder dritten Versuch hat es geklappt. Die will ich nicht mehr sehen. Ich sehe
@@ -51491,6 +51530,7 @@
     // Orbit V2 / Topstep V2 (08.10.2026): Puls-Schritte (pc, login, konto, asset, ticket, knopf, ruecklesung, popup, werte, zeitlimit …)
     // — keine Prüfung möglich, ob die Ursache weg ist (Puls-Chrome/TradingView sieht nur der Bot): wie bisher 15 min später neuer
     // Versuch, höchstens SF_MAX (sfTick). 'unklar' kommt hier nie an (oben). Gilt auch für Echo-Schritte v2term/v2hedge/v2dir/v2order.
+    if(f.schritt === 'big_trade_nah' && sfIstWdSperre(f)) return 'Winning Day nah am TP/an der Liq — neuer Versuch in 2–4 min'   // s. sfIstWdSperre
     // EA-Selbstheilung lief noch (08.10.2026, ff8c2412): nichts gesendet, das Terminal ist meist Sekunden später gesund → 3 statt 15 min
     const warte = /Selbstheilung|terminal_heilt/i.test(String(f.msg || '')) ? 3 * 60000 : SF_WARTE_MS
     return Date.now() - (Date.parse(f.at) || 0) >= warte ? `${Math.round(warte / 60000)} min später neuer Versuch` : null
@@ -51593,7 +51633,7 @@
       'https://prophos.pages.dev/prophos#trades', 'sf-' + String(p.id).slice(0, 8)) }catch(_){}
   }
   setInterval(sfTick, SF_TAKT_MS)
-  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick }   // Test-Haken
+  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre }   // Test-Haken
   /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
    * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
@@ -53777,7 +53817,9 @@
       // KONTO OFFEN (09.10.2026, Master: Puls sendet seit 63bd2b4 nichts, wenn DIESES Konto schon eine NQ/MNQ-Position hat — Code konto_offen,
       // Text „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet"): bisher nur der allgemeine „Check am PC war rot"-Text
       // PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq (puls_heim_regel 2.000 $) — Warten ist richtig
-      case 'big_trade_nah': return `Nichts tun — auf dem PC${pc} läuft ein Big Trade bzw. Winning Day kurz vor TP/Liq (2.000 $ bzw. 100 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
+      case 'big_trade_nah': return sfIstWdSperre({ msg: m })
+        ? `Nichts tun — auf dem PC${pc} steht ein Winning Day kurz vor TP/Liq (100 $), Puls bleibt in dessen Konto. Der Plan versucht es in 2–4 min wieder.`
+        : `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq (2.000 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
       case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]
