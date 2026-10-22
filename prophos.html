@@ -46653,7 +46653,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1713'
+  const OS_TAB_BUILD = '2026-09-22.1714'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58748,8 +58748,12 @@
     const t = String(name || '')
     const m = /(\d{2,3})\s*k\b/i.exec(t); if(m) return (+m[1]) * 1000
     const td = /TDFY[A-Z]*?(25|50|100|150|200|250|300)\d{9}(?!\d)/i.exec(t); if(td) return (+td[1]) * 1000
+    // TOPSTEP EXPRESS OHNE GRÖSSE (22.10.2026, Finn: „bei Topstep gibt es irgendeinen 25k-Account, was gar keinen Sinn macht" — Radar zeigte
+    // Chris „Topstep 25k …9155" / Mike „…1691"): Express-Konten zählen die Balance in TopstepX ab 0 (3.112 $), die nächste Standardgröße
+    // dazu war 25k. Die Größe bleibt über alle Phasen die gekaufte — aus einer 0-basierten oder kleinen Balance lässt sie sich nicht raten
+    // → keine Größe (0) statt einer erfundenen. Ab 20.000 $ wie bisher (kleinstes Konto 25k minus Drawdown).
     const l = Number(live)
-    if(l > 0){ const std = [25000, 50000, 100000, 150000, 200000, 250000, 300000]; return std.reduce((b, g) => Math.abs(g - l) < Math.abs(b - l) ? g : b, std[0]) }
+    if(l >= 20000 && !/EXPRESS/i.test(t)){ const std = [25000, 50000, 100000, 150000, 200000, 250000, 300000]; return std.reduce((b, g) => Math.abs(g - l) < Math.abs(b - l) ? g : b, std[0]) }
     return 0
   }
   /* KONTOGRÖSSE FÜR DIE ANZEIGE (08.10.2026, Finn am Trade-Planer „Geplant": ein 100k-Funding-Pips-Konto stand als „150k …1733",
