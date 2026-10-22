@@ -61,6 +61,8 @@ self.addEventListener('push', event => {
     renotify: !!d.renotify,
     data: { url: d.url || PROPHOS_URL },
     timestamp: Date.now(),
+    // 🔴-Alarm (prio 1, 22.10.2026): bleibt stehen, bis man draufdrückt — wo das System es kann (Android/Desktop; iOS ignoriert es)
+    requireInteraction: d.prio === 1,
   }
   event.waitUntil(self.registration.showNotification(titel, opts))
 })

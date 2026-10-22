@@ -12985,6 +12985,23 @@
           <span id="pushMsg" style="font-size:12.5px"></span>
         </div>
         <div id="pushGeraete" style="margin-top:14px;font-size:12.5px"></div>
+        <!-- ALARME FÜR DIE MASTER-IDS (22.10.2026, Finn: „Finn + Pascal oder Pascal einloggen, dann bekommen wir alle Notifications von
+             Prophos … mit den Prioritäten"). Nur sichtbar, wenn dieser Login in alarm_empfaenger steht (Railway /alarm/stand). -->
+        <div id="alarmBlock" hidden style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-soft)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-size:13px;font-weight:600">Alarme aller IDs <span style="color:var(--sub);font-weight:400">· Master-ID</span></div>
+            <div class="seg" id="alarmSeg">
+              <button type="button" data-alarm-prio="1" title="Nur wenn Geld in Gefahr ist">🔴 Sofort</button>
+              <button type="button" data-alarm-prio="2" title="Sofort + wenn etwas hängt">🟠 + Wichtig</button>
+              <button type="button" data-alarm-prio="3" title="Auch Trade läuft/beendet, Ziel erreicht, Heimweg ok">Alles</button>
+            </div>
+          </div>
+          <p style="font-size:12px;color:var(--sub);margin:6px 0 10px;line-height:1.5">
+            🔴 Hedge offen ohne Master · Master ohne Hedge · Puls nicht zurück im Big-Trade-Konto · Gegenhedge —
+            🟠 nicht gestartet · Richtungsschutz · PC aus · Konto weg · Geblowt · Radar statt Userscript. Gepusht wird bis zur gewählten Stufe, die Liste zeigt alles.
+          </p>
+          <div id="alarmListe" style="font-size:12.5px;max-height:320px;overflow-y:auto"></div>
+        </div>
       </div>
 
       <!-- AUTO-CLOSE vor Market Close (22.09.2026, Finns Auftrag): Regel + Log.
@@ -24097,7 +24114,7 @@
   // Konto zurückswitchen"): nach einer ORDER und nach einer einzelnen Lesung außerhalb des Rundgangs nur 1,5 s Ruhe (sofort), die 20 s
   // Sammelpause bleibt nur für den Rundgang (tvV2Poll.busy), damit mehrere Konten weiterhin EINEN Heimweg auslösen.
   const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000, BTH_SOFORT_MS = 1500
-  let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false
+  let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false, _bthAnstoss = null
   function bigTradePlan(){
     // HEIMKONTO MIT RANGFOLGE (14.10.2026 abends, Finn: „läuft ein Weg mit Hedge bei Orbit oder ein Winning Day, platziert Puls die Order
     // und geht danach IMMER zurück zu dem Konto, wo der Trade läuft — laufen Orbit-Big-Trade und Winning Day zugleich, immer zurück zum
@@ -24114,7 +24131,19 @@
     const bt = bigTradePlan(); if(!bt) return
     if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
     if(_bthTimer) clearTimeout(_bthTimer)
+    if(!_bthAnstoss) _bthAnstoss = Date.now()   // Heimweg-Dauer ab der ERSTEN fremden Aktion (22.10.2026)
     _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), sofort ? BTH_SOFORT_MS : BTH_RUHE_MS)   // 19.10.2026: sofort nach Order
+  }
+  /* HEIMWEG AN RAILWAY (22.10.2026, Finn: „wie lange hat es gedauert?" + Handy-Alarm, „wenn Puls nach dem Orbit-Trade nicht erfolgreich
+   * zurückkehrt"). Bisher stand der Heimweg nur in der Konsole des PC-Tabs — nichts davon war hinterher auswertbar. Jetzt jeder Heimweg
+   * nach alarm_log (Dauer ab der ersten fremden Aktion + Dauer der Lesung); gescheitert → 🔴 an die Master-IDs. Wirft nie. */
+  async function bigTradeHeimMelden(bt, ok, grund, dauerMs, lesungMs, msg){
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
+      if(!tok || !bt || !bt.id) return
+      await fetch(`${WATCHER_HOME}/alarm/heimweg`, { method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
+        body: JSON.stringify({ plan_id: bt.id, ok, grund, dauer_ms: dauerMs, lesung_ms: lesungMs, msg: msg || '', pc: hedgePcId() || '' }) })
+    }catch(e){ console.warn('[big-trade] Heimweg melden', (e && e.message) || e) }
   }
   async function bigTradeHeim(grund){
     _bthTimer = null
@@ -24123,12 +24152,18 @@
     if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ _bthTimer = setTimeout(() => bigTradeHeim(grund), BTH_WARTE_MS); return }
     const konto = tvV2Konto(bt)
     _bthLaeuft = true; _bthSelbst = true
+    const t0 = Date.now(), anstoss = _bthAnstoss || t0
+    _bthAnstoss = null
     try{
       const r = await tvV2Lesen(konto, 45, bt)
       const ok = !!(r && r.ok && (!r.konto_aktiv || String(r.konto_aktiv).includes(konto)))
-      console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : 'NICHT'} auf „${bt.masterName || konto}"`, ok ? '' : (r && (r.msg || r.code)) || '')
+      console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : 'NICHT'} auf „${bt.masterName || konto}" (${((Date.now() - anstoss) / 1000).toFixed(1)} s)`, ok ? '' : (r && (r.msg || r.code)) || '')
       if(!ok && typeof atToast === 'function') atToast(`Puls nicht zurück im Big-Trade-Konto „${bt.masterName || konto}": ${(r && (r.msg || r.code)) || 'keine Antwort'} — Reader sieht den Hedge-Trade gerade nicht, nächster Versuch nach der nächsten Puls-Aktion.`, 'end')
-    }catch(e){ console.warn('[big-trade] Heimweg', (e && e.message) || e) }
+      bigTradeHeimMelden(bt, ok, grund, Date.now() - anstoss, Date.now() - t0, ok ? '' : String((r && (r.msg || r.code)) || 'keine Antwort'))
+    }catch(e){
+      console.warn('[big-trade] Heimweg', (e && e.message) || e)
+      bigTradeHeimMelden(bt, false, grund, Date.now() - anstoss, Date.now() - t0, String((e && e.message) || e))
+    }
     finally{ _bthLaeuft = false; _bthSelbst = false }
   }
   window._bigTradeHeim = { planen: bigTradeHeimPlanen, plan: bigTradePlan }   // Test-Haken (Stub)
@@ -46592,7 +46627,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1708'
+  const OS_TAB_BUILD = '2026-09-22.1709'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49853,9 +49888,37 @@
     }catch(e){ console.warn('[push] Abgleich', e) }
   }
 
+  /* ALARME FÜR DIE MASTER-IDS (22.10.2026): Stufe wählen + letzte 40 Meldungen aus alarm_log. Railway entscheidet, ob dieser Login
+   * Master-ID ist — sonst bleibt der Block unsichtbar. */
+  const ALARM_PUNKT = { 1: '🔴', 2: '🟠', 3: '⚪' }
+  async function alarmZeichnen(neuePrio){
+    const box = document.getElementById('alarmBlock'), li = document.getElementById('alarmListe')
+    if(!box || !li) return
+    try{
+      const tok = await _pushTok()
+      if(!tok){ box.hidden = true; return }
+      const r = await fetch(`${PUSH_BACKEND}/alarm/stand`, neuePrio
+        ? { method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' }, body: JSON.stringify({ min_prio: neuePrio }) }
+        : { headers:{ 'sb-token':tok }, cache:'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok || !d.master){ box.hidden = true; return }
+      box.hidden = false
+      document.querySelectorAll('#alarmSeg [data-alarm-prio]').forEach(b => b.classList.toggle('active', Number(b.dataset.alarmPrio) === Number(d.min_prio)))
+      const l = d.liste || []
+      li.innerHTML = !l.length ? '<span style="color:var(--sub)">Noch keine Meldung.</span>' : l.map(x => {
+        const t = new Date(x.at).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+        return `<div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--border-soft)">
+          <span>${ALARM_PUNKT[x.prio] || '⚪'}</span>
+          <span style="flex:1;min-width:0"><b style="font-weight:600">${escapeHtml(x.titel || '')}</b> <span style="color:var(--sub)">${escapeHtml(x.text || '')}</span></span>
+          <span class="mono" style="color:var(--sub);white-space:nowrap">${t}</span></div>`
+      }).join('')
+    }catch(e){ box.hidden = true; console.warn('[alarm]', e) }
+  }
+  document.querySelectorAll('#alarmSeg [data-alarm-prio]').forEach(b => b.addEventListener('click', () => alarmZeichnen(Number(b.dataset.alarmPrio))))
+
   // Beim Betreten der Einstellungen neu zeichnen — Status und Geraeteliste
   // sind sonst leer, bis man irgendetwas drueckt. switchView ruft das auf.
-  window.pushOnEnterSettings = pushPanelZeichnen
+  window.pushOnEnterSettings = () => { pushPanelZeichnen(); alarmZeichnen() }
 
   document.getElementById('pushAn')?.addEventListener('click', pushEinschalten)
   document.getElementById('pushAus')?.addEventListener('click', pushAbmelden)

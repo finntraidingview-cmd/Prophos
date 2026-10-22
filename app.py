@@ -3575,17 +3575,20 @@ def _push_an_geraet(row, payload):
         return False, f"{type(e).__name__}: {str(e)[:160]}", False
 
 
-def push_an_user(uid, titel, text, url=None, tag=None, renotify=False):
+def push_an_user(uid, titel, text, url=None, tag=None, renotify=False, prio=None, _weiter=True):
     """An ALLE Geraete dieses Logins. Rueckgabe: (zugestellt, versucht).
 
     Wird sowohl von der Route /push/send (Frontend-Ereignisse) als auch
     direkt vom Waechter-Thread aufgerufen. Wirft nie — eine fehlgeschlagene
     Benachrichtigung darf niemals den Waechter-Zyklus abbrechen; der Zyklus
-    bewegt Geld, die Meldung ist nur Beiwerk."""
+    bewegt Geld, die Meldung ist nur Beiwerk.
+    _weiter=False (22.10.2026): Weiterleitung an Verwalter/Master-IDs — selbst nicht noch einmal weiterreichen (sonst Kreis)."""
     if not push_bereit() or not uid:
         return 0, 0
     # Verwalter zuerst — auch wenn die ID selbst kein Gerät angemeldet hat (13.10.2026)
-    _push_an_verwalter(uid, {"titel": str(titel or "Prophos")[:80], "text": str(text or "")[:220], "url": url, "tag": tag, "renotify": renotify})
+    if _weiter:
+        _push_an_verwalter(uid, {"titel": str(titel or "Prophos")[:80], "text": str(text or "")[:220], "url": url, "tag": tag, "renotify": renotify})
+        _alarm_weiter(uid, str(titel or "Prophos")[:80], str(text or "")[:220], url, tag, renotify)   # Master-IDs (22.10.2026)
     try:
         rows = sb_select("push_geraete", {"select": "*", "user_id": f"eq.{uid}"})
     except Exception as e:
@@ -3597,7 +3600,8 @@ def push_an_user(uid, titel, text, url=None, tag=None, renotify=False):
                "text": str(text or "")[:220],
                "url": url or "https://prophos.pages.dev/prophos",
                "tag": tag or "prophos",
-               "renotify": bool(renotify)}
+               "renotify": bool(renotify),
+               "prio": prio}
     ok_n = 0
     for row in rows:
         ok, meldung, tot = _push_an_geraet(row, payload)
@@ -3635,9 +3639,262 @@ def _push_an_verwalter(uid, payload):
         namen, _aus = _ap_namen()
         wer = namen.get(str(uid), str(uid)[:8])
         push_an_user(verw, f"{wer}: {payload.get('titel') or 'Prophos'}", payload.get("text"), url=payload.get("url"),
-                     tag=f"v-{payload.get('tag') or 'prophos'}", renotify=bool(payload.get("renotify")))
+                     tag=f"v-{payload.get('tag') or 'prophos'}", renotify=bool(payload.get("renotify")), _weiter=False)
     except Exception as e:
         print(f"[push] ⚠️ an Verwalter: {type(e).__name__}: {e}", flush=True)
+
+
+# ══ ALARME AN DIE MASTER-IDS (22.10.2026, Finn: „Ich will mich auf meinem Handy oder Pascal auf seinem Handy mit der Master-ID, also
+# Finn + Pascal oder Pascal, einloggen. Dann bekommen wir alle Notifications von Prophos … mit den Prioritäten, wenn irgendwas
+# schiefgeht" — Beispiel: Puls platziert und kehrt danach nicht ins Orbit-Konto zurück, Radar musste schließen).
+# Empfänger + Schwelle: alarm_empfaenger (sql/2026-10-22_alarme_master.sql); jede Meldung einmal in alarm_log, auch ungepushte.
+#   Prio 1 🔴 sofort  — Geld in Gefahr: Hedge offen ohne Master, Master ohne Hedge, Hedge-Close scheitert, Puls nicht zurück im
+#                        Big-Trade-Konto, Gegenhedge
+#   Prio 2 🟠 wichtig — etwas hängt: nicht gestartet, Richtungsschutz, PC aus, Konto weg, Geblowt, Radar statt Userscript, Reader-Feed
+#   Prio 3 ⚪ Info    — Trade läuft/gestartet/beendet, Ziel erreicht, Heimweg ok (gepusht nur bei Schwelle 3)
+# Zwei Wege hinein: (a) _alarm_weiter — jede bestehende push_an_user-Meldung wird nach ihrem Titel eingestuft und an die Master-IDs
+# weitergereicht (Muster wie der Verwalter-Weg 13.10.2026); (b) alarm_tick — liest je Minute den Zustand der Pläne selbst und meldet,
+# was bisher niemand meldete. Nur Hermann-Technologies-IDs (Standing Order): IDs einer Gruppe mit Verwalter (Emin) bleiben bei ihm.
+# Gleicher tag wie die Original-Meldung: ist ein Master zugleich Inhaber/Admin, faltet das Handy beide Meldungen zu einer. ══
+ALARM_TAKT_S = 60
+ALARM_CACHE_S = 120
+ALARM_LOG_TAGE = 30
+ALARM_LINK = "https://prophos.pages.dev/prophos#trades"
+ALARM_ZEICHEN = {1: "🔴 ", 2: "🟠 ", 3: ""}
+# Titel-Bausteine der bestehenden Meldungen → Stufe (erster Treffer gewinnt; unbekannt = 3)
+ALARM_PRIO_TITEL = (("Gegenhedge", 1), ("Hedge offen", 1), ("ohne Hedge", 1), ("nicht zurück", 1),
+                    ("nicht gestartet", 2), ("Richtungsschutz", 2), ("PC aus", 2), ("Konto weg", 2), ("Geblowt", 2),
+                    ("Radar", 2), ("Feed", 2), ("Kerzen", 2), ("Reader", 2), ("Copier", 2),
+                    ("Ziel erreicht", 3), ("Trade läuft", 3), ("Trade beendet", 3), ("Trade gestartet", 3))
+ALARM_OHNE_TAGS = ("test",)                 # Test-Push aus den Einstellungen bleibt beim Absender
+HEDGE_LEBT = ("offen", "oeffnet", "schliesst")
+ALARM_HEDGE_OFFEN_S = 60                    # Master zu, Hedge nach so vielen s noch offen → 🔴
+ALARM_OHNE_HEDGE_S = 90                     # Master läuft so lange ohne offenen Hedge → 🔴
+ALARM_HEDGE_ZU_MASTER_S = 180               # Hedge zu, Master nach so vielen s noch offen → 🔴 (Level schließt oft ~2–9 s vor dem Reader)
+ALARM_ERINNERN_S = 900                      # anhaltender 🔴-Zustand: alle 15 min erneut, höchstens 3×
+ALARM_RADAR_GRUENDE = {"tp_feed": "am TP", "sl_feed": "am SL", "master_nie_da": "— Master-Position kam nie an"}
+_alarm = {"at": 0.0, "start": time.time(), "gemeldet": {}, "fehler": "", "empf": None, "empf_at": 0.0, "letzt": []}
+
+
+def alarm_prio_aus_titel(titel):
+    """REIN RECHNEND (testbar): Stufe 1–3 einer bestehenden Meldung nach ihrem Titel."""
+    t = str(titel or "")
+    for teil, p in ALARM_PRIO_TITEL:
+        if teil in t:
+            return p
+    return 3
+
+
+def _alarm_empfaenger():
+    """{uid: min_prio} der aktiven Master-IDs, 120 s gecacht. Tabelle fehlt/nicht lesbar → {} (Alarme aus, Pushes an IDs laufen weiter)."""
+    if _alarm["empf"] is not None and time.time() - _alarm["empf_at"] < ALARM_CACHE_S:
+        return _alarm["empf"]
+    try:
+        rows = sb_select("alarm_empfaenger", {"select": "user_id,min_prio", "aktiv": "eq.true"}) or []
+        _alarm["empf"] = {str(r["user_id"]): int(r.get("min_prio") or 2) for r in rows}
+    except Exception as e:
+        print(f"[alarm] ⚠️ Empfänger nicht lesbar: {type(e).__name__}: {e}", flush=True)
+        _alarm["empf"] = _alarm["empf"] or {}
+    _alarm["empf_at"] = time.time()
+    return _alarm["empf"]
+
+
+def _alarm_fremd_verwaltet(uid):
+    """True = ID gehört zu einer Gruppe mit Verwalter (Emin) oder IST ein Verwalter — deren Meldungen gehen nicht an die Master-IDs."""
+    if time.time() > _push_verwalter_cache["bis"]:
+        _push_verwalter_cache.update(karte=gp_verwalter_karte(), bis=time.time() + 300)
+    karte = _push_verwalter_cache["karte"]
+    return str(uid) in karte or str(uid) in set(karte.values())
+
+
+def alarm_senden(prio, art, titel, text, uid=None, plan_id=None, schluessel=None, url=None, tag=None, renotify=False, daten=None,
+                 ausser=()):
+    """Eine Meldung an alle Master-IDs mit min_prio ≥ prio + eine Zeile alarm_log. ausser = Empfänger, die sie schon haben. Wirft nie."""
+    zu = n = 0
+    try:
+        prio = max(1, min(3, int(prio or 3)))
+        titel_m = (ALARM_ZEICHEN[prio] + str(titel or "Prophos"))[:80]
+        for ziel, schwelle in _alarm_empfaenger().items():
+            if ziel in ausser or prio > schwelle:
+                continue
+            a, b = push_an_user(ziel, titel_m, text, url=url or ALARM_LINK, tag=tag or f"alarm-{art}-{plan_id or ''}"[:60],
+                                renotify=renotify or prio == 1, prio=prio, _weiter=False)
+            zu, n = zu + a, n + b
+    except Exception as e:
+        print(f"[alarm] ⚠️ senden {art}: {type(e).__name__}: {e}", flush=True)
+    try:
+        _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/alarm_log",
+                    json={"prio": prio, "art": str(art)[:40], "titel": str(titel or "")[:120], "text": str(text or "")[:400],
+                          "uid": uid if uid and re.fullmatch(r"[0-9a-f-]{36}", str(uid)) else None, "plan_id": plan_id,
+                          "schluessel": schluessel, "daten": daten or {}, "zugestellt": zu, "geraete": n},
+                    headers=_sb_headers("return=minimal"), timeout=10)
+    except Exception as e:
+        print(f"[alarm] ⚠️ alarm_log: {type(e).__name__}: {e}", flush=True)
+    _alarm["letzt"] = (_alarm["letzt"] + [{"at": _wt_now_iso(), "prio": prio, "art": art, "titel": titel, "zugestellt": zu}])[-30:]
+    print(f"[alarm] {ALARM_ZEICHEN.get(prio, '') or '⚪ '}{titel} — {str(text or '')[:160]} ({zu}/{n} Geräte)", flush=True)
+    return zu, n
+
+
+def _alarm_weiter(uid, titel, text, url, tag, renotify):
+    """Weg (a): eine Meldung an eine ID zusätzlich an die Master-IDs (eingestuft nach Titel). Nie an die ID selbst, nie Verwalter-Gruppen."""
+    try:
+        if str(tag or "") in ALARM_OHNE_TAGS or not _alarm_empfaenger() or _alarm_fremd_verwaltet(uid):
+            return
+        namen, _aus = _ap_namen()
+        wer = namen.get(str(uid), "")
+        if wer and wer not in titel and wer not in text:
+            text = f"{wer}: {text}"
+        alarm_senden(alarm_prio_aus_titel(titel), "push", titel, text, uid=str(uid), url=url, tag=tag, renotify=renotify,
+                     ausser={str(uid)})
+    except Exception as e:
+        print(f"[alarm] ⚠️ weiter: {type(e).__name__}: {e}", flush=True)
+
+
+def _alarm_ts(v):
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
+    """REIN RECHNEND (testbar): Plan-Zeilen (id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,started_at,updated_at,
+    hedge,final_at + Felder für gp_push_ereignisse) → [(schluessel, prio, art, titel, text, uid, plan_id)].
+    Zustände (Hedge/Master auseinander) zählen ab Dauer, Übergänge (Start, Start-Fehler, Radar-Schluss) nur nach seit_iso."""
+    out = []
+    for key, titel, text in gp_push_ereignisse(plaene, namen, seit_iso):
+        if key.endswith("|start"):
+            continue                                 # „Trade läuft" meldet schon push_trade_wache (⚪, über _alarm_weiter)
+        art = "richtungsschutz" if key.endswith("|ss") else "nicht_gestartet"
+        out.append((key, 2, art, titel.replace("⚠ ", "").replace("⛔ ", ""), text, None, key.split("|", 1)[0]))
+    for p in plaene or ():
+        pid, uid, st = str(p.get("id")), str(p.get("user_id")), p.get("status")
+        h = p.get("hedge") if isinstance(p.get("hedge"), dict) else {}
+        hst = h.get("status")
+        wer = namen.get(uid, uid[:8])
+        konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip()
+        start = _alarm_ts(p.get("started_at"))
+        mit_hedge = (_wd_num(p.get("hedge_eur")) or 0) > 0 or p.get("orbit_v3") is True
+        lots = f"{h.get('lots')} Lot {h.get('symbol') or ''}".strip() if h.get("lots") else "Fusion-Hedge"
+        if st in ("review", "completed") and hst in HEDGE_LEBT:
+            ende = _alarm_ts(p.get("final_at")) or _alarm_ts(p.get("updated_at"))
+            s = (jetzt - ende).total_seconds() if ende else None
+            if s is not None and s >= ALARM_HEDGE_OFFEN_S:
+                out.append((f"{pid}|hedge_offen|{min(int(s // ALARM_ERINNERN_S), 3)}", 1, "hedge_offen", "Hedge offen, Master zu",
+                            f"{wer} · {konto}: Master ist seit {int(s // 60)} min {int(s % 60)} s zu, {lots} noch offen — im Fusion-Terminal "
+                            f"schließen." + (f" Close-Fehler: {str(h.get('close_fehler'))[:80]}" if h.get("close_fehler") else ""),
+                            uid, pid))
+        elif st == "open" and mit_hedge and p.get("route") in ("tvv2", "tsv2") and start:
+            s = (jetzt - start).total_seconds()
+            zu_at = _alarm_ts(h.get("closed_at"))
+            if hst not in HEDGE_LEBT and hst != "geschlossen" and s >= ALARM_OHNE_HEDGE_S:
+                out.append((f"{pid}|ohne_hedge|{min(int(s // ALARM_ERINNERN_S), 3)}", 1, "ohne_hedge", "Master läuft ohne Hedge",
+                            f"{wer} · {konto}: Trade läuft seit {int(s // 60)} min, kein offener Fusion-Hedge"
+                            + (f" ({hst}: {str(h.get('msg') or h.get('fehler') or '')[:80]})" if hst else "") + " — Hedge von Hand öffnen oder Master schließen.",
+                            uid, pid))
+            elif hst == "geschlossen" and zu_at and (jetzt - zu_at).total_seconds() >= ALARM_HEDGE_ZU_MASTER_S:
+                s2 = (jetzt - zu_at).total_seconds()
+                out.append((f"{pid}|ohne_hedge_zu|{min(int(s2 // ALARM_ERINNERN_S), 3)}", 1, "ohne_hedge", "Master läuft ohne Hedge",
+                            f"{wer} · {konto}: Hedge ist seit {int(s2 // 60)} min zu ({h.get('grund') or '?'}), Master laut Prophos noch offen — "
+                            f"in TradingView prüfen, ggf. abhaken.", uid, pid))
+            elif hst in HEDGE_LEBT and h.get("close_fehler"):
+                out.append((f"{pid}|close_fehler", 1, "hedge_close_fehler", "Hedge-Close scheitert",
+                            f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
+        if hst == "geschlossen" and h.get("grund") in ALARM_RADAR_GRUENDE and str(h.get("closed_at") or "") > seit_iso:
+            out.append((f"{pid}|radar", 2, "radar_schloss", "Radar hat geschlossen",
+                        f"{wer} · {konto}: Radar hat den Hedge {ALARM_RADAR_GRUENDE[h.get('grund')]} geschlossen — das Userscript hat das "
+                        f"Master-Ende nicht zuerst gesehen (Puls im falschen Konto / Tab zu?).", uid, pid))
+    return out
+
+
+def alarm_tick():
+    """Weg (b), Railway-Takt (ap_loop): einmal je Minute die Pläne der HT-IDs lesen und melden, was alarm_ereignisse findet."""
+    if time.time() - _alarm["at"] < ALARM_TAKT_S or not _alarm_empfaenger():
+        return
+    _alarm["at"] = time.time()
+    jetzt = datetime.now(timezone.utc)
+    seit = max(datetime.fromtimestamp(_alarm["start"], timezone.utc), jetzt - timedelta(minutes=20)).isoformat()
+    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,richtung,master_contracts,started_at,updated_at,"
+           "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre")
+    rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
+    namen, aus = _ap_namen()
+    rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
+    for key, prio, art, titel, text, uid, pid in alarm_ereignisse(rows, namen, jetzt, seit):
+        if key in _alarm["gemeldet"]:
+            continue
+        _alarm["gemeldet"][key] = time.time()
+        uid = uid or next((str(r.get("user_id")) for r in rows if str(r.get("id")) == pid), None)
+        alarm_senden(prio, art, titel, text, uid=uid, plan_id=pid, schluessel=key, tag=f"alarm-{art}-{pid[:8]}")
+    _alarm["gemeldet"] = {k: t for k, t in _alarm["gemeldet"].items() if time.time() - t < 86400}
+    if jetzt.minute == 7 and jetzt.hour == 3:          # einmal am Tag aufräumen
+        try:
+            sb_delete("alarm_log", {"at": f"lt.{(jetzt - timedelta(days=ALARM_LOG_TAGE)).isoformat()}"})
+        except Exception as e:
+            print(f"[alarm] ⚠️ aufräumen: {type(e).__name__}: {e}", flush=True)
+
+
+@app.route("/alarm/heimweg", methods=["POST", "OPTIONS"])
+def alarm_heimweg():
+    """PC-Tab meldet jeden Heimweg ins Big-Trade-Konto (bigTradeHeim): ok → Info mit Dauer, nicht ok → 🔴 an die Master-IDs.
+    Der Plan muss dem Aufrufer gehören; Konto/Name kommen aus der DB, vom Tab nur Dauer + kurzer Grund."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    pid = str(d.get("plan_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+        return jsonify({"ok": False, "error": "plan_id fehlt"}), 400
+    try:
+        plan = (sb_select("trade_plans", {"select": "id,user_id,master_name,master_firm", "id": f"eq.{pid}"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    if not plan or str(plan.get("user_id")) != uid:
+        return jsonify({"ok": False, "error": "nicht dein Plan"}), 403
+    num = lambda k: int(d.get(k)) if str(d.get(k) or "").isdigit() else None
+    dauer, lesung = num("dauer_ms"), num("lesung_ms")
+    namen, _aus = _ap_namen()
+    wer = namen.get(uid, uid[:8])
+    konto = f"{plan.get('master_firm') or ''} {plan.get('master_name') or ''}".strip()
+    anlass = re.sub(r"\s+", " ", str(d.get("grund") or ""))[:60]
+    daten = {"dauer_ms": dauer, "lesung_ms": lesung, "anlass": anlass, "pc": str(d.get("pc") or "")[:20]}
+    if d.get("ok") is True:
+        text = f"{wer} · {konto}: Puls zurück nach {anlass or 'fremdem Konto'}" + (f" in {dauer / 1000:.1f} s" if dauer is not None else "")
+        alarm_senden(3, "heimweg_ok", "Puls zurück im Big-Trade-Konto", text, uid=uid, plan_id=pid, daten=daten)
+    else:
+        daten["msg"] = str(d.get("msg") or "")[:160]
+        text = (f"{wer} · {konto}: nach {anlass or 'fremdem Konto'} nicht zurück ({daten['msg'] or 'keine Antwort'}) — das Userscript sieht "
+                f"den Big Trade gerade nicht, nur Radar + Terminal-Level schützen. Am PC ins Konto wechseln.")
+        alarm_senden(1, "heimweg_fehl", "Puls nicht zurück im Big-Trade-Konto", text, uid=uid, plan_id=pid, daten=daten, renotify=True,
+                     tag=f"alarm-heimweg-{pid[:8]}")
+    return jsonify({"ok": True})
+
+
+@app.route("/alarm/stand", methods=["GET", "POST", "OPTIONS"])
+def alarm_stand():
+    """Einstellungen: ist dieser Login Master-ID? Dann Schwelle + letzte Meldungen; POST {min_prio} ändert die eigene Schwelle."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    try:
+        zeile = (sb_select("alarm_empfaenger", {"select": "min_prio,aktiv", "user_id": f"eq.{uid}"}) or [None])[0]
+        if not zeile:
+            return jsonify({"ok": True, "master": False})
+        if request.method == "POST":
+            mp = (request.get_json(silent=True) or {}).get("min_prio")
+            if mp not in (1, 2, 3):
+                return jsonify({"ok": False, "error": "min_prio 1–3"}), 400
+            sb_update("alarm_empfaenger", {"user_id": f"eq.{uid}"}, {"min_prio": mp})
+            zeile["min_prio"] = mp
+            _alarm["empf_at"] = 0.0
+        liste = sb_select("alarm_log", {"select": "at,prio,art,titel,text,zugestellt", "order": "at.desc", "limit": "40"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return jsonify({"ok": True, "master": True, "min_prio": zeile.get("min_prio"), "aktiv": zeile.get("aktiv"), "liste": liste})
 
 
 @app.route("/push/vapid-public", methods=["GET", "OPTIONS"])
@@ -28335,6 +28592,12 @@ def ap_loop():
         except Exception as e:
             _gp_push["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[gruppen-push] ⚠️ {e}", flush=True)
+        try:
+            alarm_tick()                      # Alarme an die Master-IDs (Hedge/Master auseinander, Radar, nicht gestartet), 22.10.2026
+            _alarm["fehler"] = ""
+        except Exception as e:
+            _alarm["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[alarm] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             ap_bal_auto_tick(datetime.now(timezone.utc))   # Balance von selbst nachlesen, wo der Planer sonst wartet (13.10.2026)
             _ap_bal_auto["fehler"] = ""
