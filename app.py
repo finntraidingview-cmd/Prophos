@@ -25322,8 +25322,8 @@ def ap_zuege_je_id(rows):
     out, keys = {}, set()
     for r in rows or ():
         g = str(r.get("grund") or "")
-        if r.get("quelle") != "bot" or not r.get("user_id") or g.startswith("Verteilung:") or "verpufft" in g:
-            continue
+        if r.get("quelle") != "bot" or not r.get("user_id") or g.startswith("Verteilung:") or "verpufft" in g or g.startswith("[Balance-Wache]"):
+            continue                                       # Balance-Wache (22.10.2026) nimmt Pläne heraus — kein Ausgleichs-Zug
         k = (str(r["user_id"]), str(r.get("um") or "")[:16], str(r.get("firma") or ""))
         if k not in keys:
             keys.add(k)
@@ -27678,8 +27678,47 @@ def ap_auto_best_kandidaten(plaene, accs, letzt, echo_bal, dup_bal, archiv=None)
             warten.append(dict(zeile, warum="Planer-Haken am Konto aus")); continue
         if not ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3], (letzt or {}).get(kid)):
             warten.append(dict(zeile, warum="Balance seit dem letzten Trade nicht gelesen — der Balance-Takt liest")); continue
+        ab = ap_plan_bal_abweichung(p, a, echo_bal, dup_bal, (letzt or {}).get(kid))
+        if ab:
+            # BALANCE-WACHE (22.10.2026): geplant mit einer anderen Balance als der frischen Lesung — nicht bestätigen, die Wache plant neu
+            warten.append(dict(zeile, warum=f"geplant mit Balance {_ap_usd_de(ab[0])}, gelesen {_ap_usd_de(ab[1], 2)} — die Balance-Wache plant neu"))
+            continue
         ok.append(pid)
     return ok, warten
+
+
+# BALANCE-WACHE (22.10.2026, Finn am Radar „Was ist hier falsch gelaufen?", Chris Apex 100k …0018): Der Nachtlauf 01:30 Dubai plante mit der
+# Nachlesung des letzten Trades (102.436 vom 19.10.), weil seitdem nicht gelesen war → „letzter Trade" 3 NQ, TP 3.624 $. Um 01:36 las der
+# Balance-Takt von selbst 105.999,50 (+3.563,80 ohne Plan seit dem 19.10.), um 01:37 bestätigte der Bot den Plan trotzdem — er prüfte nur
+# „Balance live", nie, ob sie noch zur Plan-Balance passt. 10:14 startete der volle Trade 50 Cent unter dem Ziel → 109.620. Jetzt: weicht die
+# frische Lesung um mehr als AP_BAL_WACHE_USD von der Balance in den notes ab, wird der ungestartete Plan nicht bestätigt und herausgenommen;
+# das Nachplanen rechnet das Konto mit der echten Balance neu (Rest, Klein-Trade, „von Hand", Ziel-Wache wie immer).
+AP_BAL_WACHE_USD = 50
+_AP_BAL_PLAN = re.compile(r"· Balance ([\d.]+) \(")
+
+
+def _ap_usd_de(x, stellen=0):
+    """Betrag deutsch: 105999.5 → „105.999,50" (stellen=2), 102436 → „102.436" — 105.999,50 darf nicht als „106.000" erscheinen."""
+    return f"{float(x):,.{stellen}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def ap_plan_bal_abweichung(p, a, echo_bal, dup_bal, letzt=None):
+    """REIN RECHNEND (testbar): (plan_balance, live_balance), wenn die Konto-Balance live ist (ap_balance_live gegen das Ende des letzten
+    Trades) und um mehr als AP_BAL_WACHE_USD von der Balance in den notes des Auto-Plans („… · Balance 102.436 (Nachlesung)") abweicht —
+    sonst None. Ohne Balance in den notes, ohne Konto oder ohne lebende Lesung nie."""
+    m = _AP_BAL_PLAN.search(str((p or {}).get("notes") or ""))
+    if not m or not a:
+        return None
+    bal, _ccy, _q, stand = acc_balance_wahl(a, echo_bal, dup_bal)
+    if bal is None or not ap_balance_live(stand, letzt):
+        return None
+    try:
+        plan_bal = float(m.group(1).replace(".", ""))
+    except ValueError:
+        return None
+    if abs(float(bal) - plan_bal) <= AP_BAL_WACHE_USD:
+        return None
+    return plan_bal, float(bal)
 
 
 def ap_auto_best_tick(jetzt, reg=None):
@@ -27698,7 +27737,7 @@ def ap_auto_best_tick(jetzt, reg=None):
     if not aktiv or not reg.get("aktiv") or not uids:
         return None
     in_uids = "in.(" + ",".join(uids) + ")"
-    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,status,auto_plan,auto_bestaetigt_at,"
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,status,auto_plan,auto_bestaetigt_at,notes,"
                                                "start_um_gestartet_at,started_at,orbit_gesendet_at,puls_pause:mt5_baseline->puls_pause",
                                      "user_id": in_uids, "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null",
                                      "created_at": "gte." + (jetzt - timedelta(days=3)).isoformat()})
@@ -28290,6 +28329,10 @@ def ap_fenster_wache_tick(jetzt, reg=None, rnd=None):
         ap_menge_wache(jetzt, reg)            # MENGEN-WACHE (16.10.2026) — eigenes try, die Fenster-Wache läuft trotzdem
     except Exception as e:
         print(f"[mengen-wache] ⚠️ {type(e).__name__}: {e}", flush=True)
+    try:
+        ap_bal_wache(jetzt)                   # BALANCE-WACHE (22.10.2026) — eigenes try wie die Mengen-Wache
+    except Exception as e:
+        print(f"[balance-wache] ⚠️ {type(e).__name__}: {e}", flush=True)
     stand = _ap_stand_laden(reg, jetzt)
     plaene = _ap_stand_plaene(stand)
     zuviel = ap_fenster_ueberhang(plaene, stand.get("zeiten"), stand["jetzt_min"])
@@ -28408,6 +28451,61 @@ def ap_menge_wache(jetzt, reg):
             print(f"[mengen-wache] ⚠️ Protokoll {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
         out.append({"plan_id": str(p["id"]), "firma": p.get("master_firm"), "txt": txt})
         print(f"[mengen-wache] {str(p['id'])[:8]} {p.get('master_firm')}: {txt}", flush=True)
+    return out
+
+
+def ap_bal_wache(jetzt):
+    """Ein Lauf (aus ap_fenster_wache_tick, alle 10 min): ungestartete Auto-Pläne (auch bestätigte), deren Plan-Balance von der frischen
+    Lesung abweicht (ap_plan_bal_abweichung) → Plan guarded löschen (planned, ungestartet, ohne Hand-Werte), Protokoll
+    auto_plan_umplanung („[Balance-Wache] …"), Push an Inhaber + Admins. Das Nachplanen plant das Konto danach mit der echten Balance
+    (Konto ohne Plan, kein fester Grund). Nicht: Topstep-Kette, Tage-Mini (eigene Balance-Logik), Hand-Werte. → Liste."""
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,notes,start_um,richtung,hand_werte_at,"
+                                               "kette:mt5_baseline->kette,tage_mini:mt5_baseline->tage_mini", "status": "eq.planned",
+                                     "auto_plan": "eq.true", "start_um_gestartet_at": "is.null", "started_at": "is.null",
+                                     "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null",
+                                     "created_at": "gte." + (jetzt - timedelta(days=3)).isoformat()})
+    plaene = [p for p in plaene if not p.get("kette") and not p.get("tage_mini") and _AP_BAL_PLAN.search(str(p.get("notes") or ""))]
+    if not plaene:
+        return []
+    kids = sorted({str(p.get("master_account_id")) for p in plaene if re.fullmatch(r"[0-9a-fA-F-]{36}", str(p.get("master_account_id") or ""))})
+    if not kids:
+        return []
+    accs = {str(a.get("id")): a for a in _ap_konten_laden({"id": "in.(" + ",".join(kids) + ")"})}
+    letzt = ap_letzt_je_konto(_sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at", "status": "in.(review,completed)",
+                                                      "master_account_id": "in.(" + ",".join(kids) + ")"}))
+    echo_bal, dup_bal = _ap_balance_karten()
+    out, admins = [], None
+    for p in plaene:
+        kid = str(p.get("master_account_id"))
+        ab = ap_plan_bal_abweichung(p, accs.get(kid), echo_bal, dup_bal, letzt.get(kid))
+        if not ab:
+            continue
+        r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers("return=representation"),
+                        params={"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",
+                                "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null"})
+        r.raise_for_status()
+        if not (r.json() or []):
+            continue                                       # inzwischen geclaimt/gestartet/von Hand geändert — bleibt, wie es ist
+        txt = (f"geplant mit Balance {_ap_usd_de(ab[0])}, frisch gelesen {_ap_usd_de(ab[1], 2)} "
+               f"({'+' if ab[1] >= ab[0] else '−'}{_ap_usd_de(abs(ab[1] - ab[0]), 2)} $) — "
+               f"Plan herausgenommen, das Nachplanen rechnet mit der echten Balance neu")
+        zeile = {"um": jetzt.isoformat(), "plan_id": str(p["id"]), "user_id": str(p.get("user_id")), "firma": p.get("master_firm"),
+                 "von_richtung": p.get("richtung"), "nach_richtung": p.get("richtung"), "von_start": p.get("start_um"),
+                 "nach_start": p.get("start_um"), "grund": f"[Balance-Wache] {p.get('master_name') or kid[:8]}: {txt}", "quelle": "bot"}
+        try:
+            _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/auto_plan_umplanung", json=[zeile],
+                                    headers=_sb_headers("return=minimal"), timeout=(5, 20)))
+        except Exception as e:
+            print(f"[balance-wache] ⚠️ Protokoll {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+        try:
+            admins = _zw_admin_uids() if admins is None else admins
+            for uid in {str(p.get("user_id"))} | admins:
+                push_an_user(uid, "⚖️ Plan neu gerechnet", f"{p.get('master_name') or 'Konto'}: {txt}",
+                             "https://prophos.pages.dev/prophos#trades", "balwache-" + str(p["id"])[:8])
+        except Exception as e:
+            print(f"[balance-wache] ⚠️ Push {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+        out.append({"plan_id": str(p["id"]), "konto": p.get("master_name"), "txt": txt})
+        print(f"[balance-wache] {str(p['id'])[:8]} {p.get('master_name')}: {txt}", flush=True)
     return out
 
 
