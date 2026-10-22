@@ -15629,8 +15629,12 @@ def puls_heim_pruefen(pc, ausser=None):
             z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
             kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
             n = puls_heim_nah(z, kurs, wd_schw)
-            if not n["nah"]:
+            # Liq-Level unbekannt → puls_heim_nah sagt „nicht prüfbar“, obwohl der TP-Rest feststeht: dann zählt der TP allein (Prüfer 22.10.2026)
+            tp_nah = n["nah"] is None and n["rest_tp_usd"] is not None and n["rest_tp_usd"] <= wd_schw[0]
+            if not (n["nah"] or tp_nah):
                 continue
+            if tp_nah:
+                n["grund"] = f"{_ap_de(max(0.0, n['rest_tp_usd']), 0)} $ vor dem TP (Grenze {_ap_de(wd_schw[0], 0)} $)"
             name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Winning Day'} …{str((acc or {}).get('external_id') or '')[-4:]}"
             art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'MNQ'}"
             info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],

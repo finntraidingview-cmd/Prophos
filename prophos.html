@@ -24182,7 +24182,9 @@
       return reste.length ? Math.min(...reste) : null
     }catch(_){ return null }
   }
-  function wdHeimWahl(wds, juengster){
+  function wdHeimWahl(wdsAlle, juengster){
+    // Topstep-WDs (tsv2) nur, wenn kein TradingView-WD läuft: der Reader/die Heim-Wache kennt nur TradingView (Prüfer 22.10.2026)
+    const tv = wdsAlle.filter(p => p.route === 'tvv2'), wds = tv.length ? tv : wdsAlle
     if(wds.length <= 1) return wds[0] || null
     const mit = wds.map(p => ({ p, a: wdHeimAbstand(p) })), bekannt = mit.filter(x => x.a != null).sort((x, y) => x.a - y.a)
     if(!bekannt.length) return juengster(wds)   // kein Kurs → wie bisher der jüngste
@@ -53775,7 +53777,7 @@
       // KONTO OFFEN (09.10.2026, Master: Puls sendet seit 63bd2b4 nichts, wenn DIESES Konto schon eine NQ/MNQ-Position hat — Code konto_offen,
       // Text „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet"): bisher nur der allgemeine „Check am PC war rot"-Text
       // PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq (puls_heim_regel 2.000 $) — Warten ist richtig
-      case 'big_trade_nah': return `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq, Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
+      case 'big_trade_nah': return `Nichts tun — auf dem PC${pc} läuft ein Big Trade bzw. Winning Day kurz vor TP/Liq (2.000 $ bzw. 100 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
       case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]
@@ -54293,7 +54295,7 @@
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
       if(/^nicht gestartet/i.test(t) && /offene Position/i.test(t)) return { w: 'Position offen', ton: 'gelb', r: 6 }   // konto_offen (09.10.2026)
-      if(/^nicht gestartet/i.test(t) && /Big Trade .*(vor dem TP|vor der Liq|nicht prüfbar)/i.test(t)) return { w: 'Big Trade nah', ton: 'gelb', r: 6 }   // big_trade_nah (19.10.2026)
+      if(/^nicht gestartet/i.test(t) && /(Big Trade|Winning Day) .*(vor dem TP|vor der Liq|nicht prüfbar)/i.test(t)) return { w: /Winning Day/i.test(t) ? 'Winning Day nah' : 'Big Trade nah', ton: 'gelb', r: 6 }   // big_trade_nah (19.10.2026; Winning Day seit 22.10.2026)
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
       if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }
       if(/Endlesung|Ergebnis nie gelesen|Login prüfen/i.test(t)) return { w: 'Endlesung', ton: 'gelb', r: 7 }
