@@ -11478,7 +11478,12 @@
           <p style="margin:0 0 16px;color:var(--sub);font-size:13px">Code eingeben, um den Admin-Bereich zu öffnen.</p>
           <input id="kasse-code" type="password" inputmode="numeric" maxlength="8" placeholder="Code" autocomplete="off" style="text-align:center;font-size:20px;letter-spacing:.3em;width:100%;padding:11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
           <div id="kasse-code-err" style="color:var(--danger);font-size:12.5px;height:16px;margin-top:6px"></div>
-          <button class="btn btn-primary" id="kasse-unlock" style="width:100%;margin-top:6px">Öffnen</button>
+          <!-- Gerät merken (Finn 22.10.2026): Freischaltung bleibt auf diesem Browser über ID-Wechsel und Abmelden hinweg, weg nur über „🔒 sperren" -->
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer;margin-top:2px" title="Nur auf deinem eigenen Gerät anhaken — nicht auf den PCs der Flotte">
+            <input type="checkbox" id="kasse-geraet" style="margin:0">
+            <span>Dieses Gerät merken</span>
+          </label>
+          <button class="btn btn-primary" id="kasse-unlock" style="width:100%;margin-top:10px">Öffnen</button>
         </div>
       </div>
 
@@ -13948,7 +13953,8 @@
   const PROF_ACTIVE   = 'prophos_active_profile'   // userId
   const PROF_BUCKET   = 'prophos_bucket_'          // + userId → {key:value}
   const PROF_SESSION  = 'prophos_psession_'        // + userId → {access_token,refresh_token}
-  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE]     // gehören keinem Profil
+  // prophos_kasse_geraet (22.10.2026): Admin „Dieses Gerät merken" gilt dem Browser, nicht der ID — bleibt beim Wechsel liegen
+  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE, 'prophos_kasse_geraet']     // gehören keinem Profil
 
   function profList(){
     try{ return JSON.parse(localStorage.getItem(PROF_LS) || '[]') }catch(_){ return [] }
@@ -14736,8 +14742,34 @@
       if(!$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()
       window._admPcsOeffnen?.()   // PC-Tabs neu zeichnen (Filter über _admGruppeOk)
     })
+    /* Gerät merken (22.10.2026, Finn: „da mein MacBook … drin ist, nicht jedes Mal das Admin-Passwort
+     * reingeben"). Die Freischaltung je Profil oben reichte nicht: jede ID fragte einmal für sich, und
+     * Abmelden warf sie weg. Das Häkchen „Dieses Gerät merken" legt deshalb ein GERÄTE-Flag ab — wieder
+     * nur ein Flag, nie der Code. Der Schlüssel steht in PROF_SYS_KEYS, wandert also beim ID-Wechsel
+     * nicht ins Profil-Bucket, und das Abmelden lässt ihn liegen. Standard-Code → gilt für jede ID ohne
+     * eigenen Code auf diesem Browser; eigener Code (admin_zugang) → nur für genau diese ID. Eine Liste
+     * nach IP ginge nicht: der Browser kennt seine IP nicht, und sie wechselt mit dem Netz (WLAN/Handy).
+     * Weg nur über „🔒 sperren". Admin_zugang nicht lesbar → Gerät zählt nicht (sonst öffnete der
+     * Standard-Flag eine ID mit eigenem Code). */
+    const KASSE_GERAET = 'prophos_kasse_geraet'   // { std: bool, ids: [user_id] }
+    const kasseGeraetLesen = () => {
+      try { const g = JSON.parse(localStorage.getItem(KASSE_GERAET) || 'null'); if(g && typeof g === 'object') return { std: !!g.std, ids: Array.isArray(g.ids) ? g.ids : [] } } catch(_){}
+      return { std: false, ids: [] }
+    }
+    const kasseGeraetFrei = ec => {
+      if(eigenerCodeUnklar) return false
+      const g = kasseGeraetLesen()
+      return ec ? !!currentUserId && g.ids.includes(currentUserId) : g.std
+    }
+    function kasseGeraetSetzen(an, ec){
+      const g = kasseGeraetLesen()
+      if(ec){ g.ids = g.ids.filter(u => u !== currentUserId); if(an && currentUserId) g.ids.push(currentUserId) }
+      else g.std = !!an
+      try { (g.std || g.ids.length) ? localStorage.setItem(KASSE_GERAET, JSON.stringify(g)) : localStorage.removeItem(KASSE_GERAET) } catch(_){}
+    }
     const kasseFreiFuer = ec => {
-      try { return localStorage.getItem(kasseSchluessel()) === (ec ? '2' : '1') } catch(_){ return false }
+      try { if(localStorage.getItem(kasseSchluessel()) === (ec ? '2' : '1')) return true } catch(_){}
+      return kasseGeraetFrei(ec)
     }
     window.kasseVergessen = () => kasseFreiSetzen(false)   // beim Abmelden gerufen
 
@@ -17675,6 +17707,7 @@
       if(($('kasse-code').value || '').trim() === (ec || CODE)){
         unlocked = true
         kasseFreiSetzen(true, ec ? '2' : '1')
+        if($('kasse-geraet')?.checked && !eigenerCodeUnklar) kasseGeraetSetzen(true, ec)
         showContent()
       }
       else { $('kasse-code-err').textContent = 'Falscher Code'; const c = $('kasse-code'); c.value = ''; c.focus() }
@@ -17685,6 +17718,7 @@
     function kasseSperren(){
       unlocked = false
       kasseFreiSetzen(false)
+      kasseGeraetSetzen(false, eigenerCodeUid === currentUserId ? eigenerCode : null)   // Gerät-Merken dieser ID mit weg (22.10.2026)
       showLocked()
     }
 
@@ -46752,7 +46786,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1715'
+  const OS_TAB_BUILD = '2026-09-22.1716'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
