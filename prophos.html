@@ -46592,7 +46592,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1707'
+  const OS_TAB_BUILD = '2026-09-22.1708'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59313,7 +59313,11 @@
       vor = { lots: h.multiplier > 0 ? Math.round(kt * h.multiplier * 100) / 100 : null, mult: h.hedge_faktor ?? null, eur: h.hedge_eur ?? null,
               staffel: z.slaveEur > 0 ? z.slaveEur : null, hinweis: hin || z.hinweis || '' }
     }
-    if(JSON.stringify(vor) !== JSON.stringify(k.vor ?? null)){ k.vor = vor; ge = true }
+    // Vergleich ohne Schlüssel-Reihenfolge (22.10.2026, Finn: „warum wurde nix geplant?"): jsonb speichert k.vor sortiert ({eur, lots, mult,
+    // hinweis, staffel}), hier entsteht {lots, mult, eur, staffel, hinweis} — JSON.stringify war darum IMMER ungleich, jeder PC-Tab schrieb
+    // seine Tageszeile alle 30 s neu, updated_at blieb frisch und der Rückfall in wdAbgleich (Zeile 90 s unberührt) legte nie einen Plan an.
+    const vorText = o => o == null ? 'null' : JSON.stringify(Object.keys(o).sort().map(s => [s, o[s]]))
+    if(vorText(vor) !== vorText(k.vor ?? null)){ k.vor = vor; ge = true }
     return ge
   }
   // Konto aus dem Profil (accounts[]) in die Form von _wd.daten.konten — für den Würfel am PC-Tab (wdAbgleich)
