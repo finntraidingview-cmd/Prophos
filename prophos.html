@@ -35635,6 +35635,46 @@
     if(cb) cb(null)
   })
 
+  /* NACHFOLGER = TRADE ABHAKEN (22.10.2026, Finn am Radar, Aurel Tradeify 150k …4872/…9050: „→ Review" gedrückt, Nachfolger angelegt —
+   * die bestandenen Trades standen trotzdem weiter in „Bestanden → Trade abhaken", weil der Assistent nur das Konto archiviert, der Plan
+   * blieb 'review'. Finn: „wenn ich Review drücke und dann den Nachfolger hinzufüge, wird automatisch der Trade abgehakt"). Nach dem
+   * Anlegen: alle Pläne des Vorgängers in 'review' mit derselben Vorbelegung wie das Abhak-Popup (mklWdErledigtOeffnen: Balance-Sprung →
+   * Tages-P&L, sonst Balance nachher − vorher, sonst P&L am Plan) über PATCH /admin/wd-plaene 'erledigt', konto_status 'none' — das Konto
+   * ist schon archiviert (mit successorId). Nur ohne Hedge und mit echtem Wert: Hedge-Pläne (Fusion-P&L), Polar und geschätzte Werte
+   * (Konto weg, TP + weg) bleiben zum Abhaken von Hand stehen (Toast sagt es). Bewusste Ausnahme von „alles selbst abhaken" (19.10.2026):
+   * Finn legt den Nachfolger selbst an. */
+  async function nachfolgerTradesAbhaken(parentId){
+    const tok = await _pushTok(); if(!tok) return
+    // review-Pläne liefert /admin/live-trades unabhängig von ?tage (nur completed hängt am Zeitfenster)
+    const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&echo=1`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+    const fz = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+    const offen = (d.trades || []).filter(t => t && t.status === 'review' && String(t.konto_id || '') === String(parentId))
+    if(!offen.length) return
+    let ok = 0, vonHand = 0
+    for(const t of offen){
+      const pid = wdlTid(t)
+      const fusionAmPlan = ['mt5', 'tvplus', 'polar'].includes(t.route), mitHedge = Number(t.hedge_eur) > 0 || !!t.hedge
+      const ohneHedge = !fusionAmPlan && (t.route === 'mt5v2' || t.plattform === 'echo' || ((t.route === 'tvv2' || t.route === 'tsv2') && !mitHedge))
+      const sp = t.balance_sprung || ((t.tv && t.final && typeof tvBalanceSprung === 'function') ? tvBalanceSprung(t.route, t.tv, t.final) : null)
+      const pl = sp ? fz(sp.tages) : (fz(t.pl_balance) ?? fz(t.master_pl && t.master_pl.wert))
+      if(!pid || !ohneHedge || pl == null || wdlAbhakenSperre(t)){ vonHand++; continue }
+      try{
+        const rr = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: pl, slave_pl: null, konto_status: 'none' }) })
+        const dd = await rr.json().catch(() => ({}))
+        if(!rr.ok || dd.ok === false) throw new Error(dd.error || ('HTTP ' + rr.status))
+        ok++
+        try{ wdlSofortErledigt(pid) }catch(_){}
+      }catch(e){ vonHand++; console.warn('[nachfolger] Abhaken', pid, (e && e.message) || e) }
+    }
+    if(typeof atToast === 'function'){
+      if(ok) atToast(`✓ ${ok === 1 ? 'Bestandener Trade' : ok + ' bestandene Trades'} des alten Kontos abgehakt`, 'ok')
+      if(vonHand) atToast(`${vonHand === 1 ? 'Ein Trade' : vonHand + ' Trades'} des alten Kontos bitte im Radar von Hand abhaken (Hedge oder P&L nicht sicher)`, 'end')
+    }
+  }
+
   document.getElementById('successorConfirm')?.addEventListener('click', async () => {
     const parentId = _successorParentAccId
     if(!parentId) return
@@ -35798,6 +35838,8 @@
       if(typeof renderOverviewKpis === 'function') renderOverviewKpis()
       if(typeof updateSidebarBadges === 'function') updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
+      // Bestandene Trades des Vorgängers gleich mit abhaken (22.10.2026) — im Hintergrund, blockiert den Assistenten nicht
+      nachfolgerTradesAbhaken(parentId).catch(e => console.warn('[nachfolger] Trades abhaken übersprungen:', (e && e.message) || e))
 
       // Callback VOR dem Schließen sichern (09.10.2026): closeSuccessorWizard setzt _afterSuccessorCallback auf null — der Aufruf
       // danach lief deshalb nie (der „Später eintragen"-Weg sicherte ihn schon so)
@@ -46550,7 +46592,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1706'
+  const OS_TAB_BUILD = '2026-09-22.1707'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
