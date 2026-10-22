@@ -56,6 +56,7 @@ Wo die Gründe stehen (alles in `trade_plans.mt5_baseline`, außer Lebenszeichen
 | `puls_pause` (+ `puls_pause_at`, `best_war`) | Puls-Pause je ID (Memory prophos-puls-pause-lehren) — nur Finn hebt sie auf |
 | `richtung_konflikt` (dict) | Long/Short-Widerspruch am Start (app.py `ap_richtung_konflikte`) — Finn entscheidet |
 | `start_sperre {art, text, …}` | Server-Sperre mit Grund (z. B. Big Trade nah) — nicht anfassen |
+| `vorcheck {status, seit, versuche, grund, pc, verpasst_at}` | Slave-Vorprüfung des PC-Tabs vor Orbit/Topstep-Starts mit Fusion-Hedge (seit 29.09.2026): `slave_nicht_bereit` = Tab prüft alle 20–40 s weiter (Copier/Terminal/Algo/Fusion-Marge), kein Claim; `verpasst_slave` = im ganzen Start-Fenster nicht bereit, Plan bleibt Geplant. `grund` nennt den Check (z. B. „Fusion-Marge: frei … nötig …“) — Hedge/Finanzen, nie anfassen |
 | `start_um_gestartet_at` (Spalte) | Claim des PC-Tabs; Claim + `start_fehler` ohne Start = der Tab hat es versucht |
 | `mt5_live` (`status->>'user_id'`, `updated_at`) | Lebenszeichen des PC-Tabs der ID (≤ 3 min = lebt) |
 | `order_signale` / `puls_diagnose` / `puls_fehlstarts` | Rohdaten des Versuchs (trail, Spur, code `konto_weg`) |
@@ -71,6 +72,8 @@ select left(p.id::text,8) as plan, left(p.user_id::text,8) as id, p.master_firm 
             when jsonb_typeof(x.b->'richtung_konflikt') = 'object' then 'richtung_konflikt'   -- 21.10.2026: Schlüssel steht oft mit JSON null drin (= kein Konflikt)
             when coalesce((y.sf->>'versuche')::int,0) >= 3 then 'deckel_voll'
             when y.sf->>'status' = 'tagesende' then 'tagesende'
+            when x.b->'vorcheck'->>'status' in ('slave_nicht_bereit','verpasst_slave')   -- 22.10.2026: Slave-Vorprüfung (Fusion-Copier/-Marge) hält den Start, kein Claim, kein start_fehler
+                 then 'vorcheck/'||(x.b->'vorcheck'->>'status')||': '||left(coalesce(x.b->'vorcheck'->>'grund',''),90)
             when p.start_um_gestartet_at is not null and y.sf is null then 'claim_ohne_fehler'
             when p.start_um_gestartet_at is not null then 'claim+'||coalesce(y.sf->>'schritt','?')
             when y.sf is not null then coalesce(y.sf->>'status','?')||'/'||coalesce(y.sf->>'schritt','?')
