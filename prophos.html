@@ -4213,6 +4213,16 @@
   #dashboard-view .tc2-hedge > *{white-space:nowrap}
   /* Winning-Days-Karten unter Markt (25.09.2026, Finn: „ich will erstmal eine cleane Order sehen und die unterscheiden können") */
   #dashboard-view .mwd-liste{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:8px}
+  /* Geplante Winning Days als Planer-Zeilen (23.10.2026, mklWdGeplantHtml) — Optik von Trade-Planer → Geplant, nur der Abschnittstitel ist neu */
+  #dashboard-view .mwd-geplant{margin-top:14px}
+  #dashboard-view .mwd-geplant-titel{margin:0 0 10px;font-size:13px;font-weight:600;color:var(--ink)}
+  #dashboard-view .mwd-geplant-titel span{margin-left:6px;font-size:12px;font-weight:400;color:var(--sub)}
+  #dashboard-view .mwd-geplant .pz-z[data-mkl-wd]{cursor:pointer}
+  /* ID-Kopf wie im Trade-Planer (dort nur unter #tpl-view/#adm-pane-planer gesetzt): Punkt · Name · „n geplant", nicht klebend */
+  #dashboard-view .mwd-geplant .ap-id-karte > .ap-adm-grp{position:static;display:flex;align-items:center;gap:10px;padding:6px 0 2px}
+  #dashboard-view .mwd-geplant .ap-id-karte > .ap-adm-grp .ap-adm-id{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:600}
+  #dashboard-view .mwd-geplant .ap-id-karte > .ap-adm-grp .ap-adm-id i{width:9px;height:9px;border-radius:50%;flex:none}
+  #dashboard-view .mwd-geplant .ap-id-karte > .ap-adm-grp > span.n{font-size:12px;color:var(--sub)}
   /* ↻ Balance lesen in der Accounts-Liste (F19) */
   #dashboard-view .acc-balref{border:1px solid var(--border);background:var(--surface,#fff);color:var(--sub);border-radius:6px;width:22px;height:22px;padding:0;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:none}
   #dashboard-view .acc-balref:hover{color:var(--violet);border-color:var(--violet)}
@@ -29961,6 +29971,45 @@
    * Master (live gerechnet aus dem Kurs, darunter der letzte Rundgang) und Fusion (hedge_solo live oder realisiert, Lots, schließt
    * bei, Notfall-Level) plus „zusammen", Fußzeile Quelle · Start · Hedge-Chip. laufend = Personen-Farbe am linken Rand, geplant =
    * gestrichelt/gedämpft mit Startzeit, zu = gedämpft mit Ergebnis. Klick hebt die Linien im Chart hervor (mkl.wd.aktiv). */
+  /* GEPLANTE WINNING DAYS ALS PLANER-ZEILEN (Finn 23.10.2026, Screenshot Winning Days vs. Trades → Geplant: „die geplanten Trades genauso
+   * aussehen lassen wie unter Trades die normalen … so der Style"): statt der großen Karten (Master/Fusion/zusammen standen vor dem Start
+   * leer auf „–") je ID eine Karte in ID-Farbe, darin Firmen-Blöcke mit planZeileHtml-Zeilen — wie Admin → Trade-Planer → Geplant.
+   * Nur Anzeige aus /admin/wd-plaene: Balance live aus dem Farmer-Plan (konten[].live_balance, sonst eigenes Konto), Skala Liq-Boden
+   * (liq_balance) → Balance + TP (zielTp), Schritt „Winning Day", Größe Kontrakte × Wurzel, Hedge-Chip rechts. Laufende bleiben Karten.
+   * Klick auf eine Zeile = derselbe Umschalter wie die Karte (data-mkl-wd → Linien im Chart). */
+  function mklWdGeplantHtml(liste){
+    if(!liste.length) return ''
+    const P = mkl.wd.plan || {}, num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const uhr = t => t ? new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–'
+    const je = new Map(), jeP = new Map()
+    for(const pw of liste){
+      const k = pw.konto || {}, uid = String(pw.user_id || '')
+      const p = { id: String(pw.id), status: 'planned', route: pw.route || null, masterFirm: k.firma || '–', masterName: k.name || '', masterAccountId: pw.konto_id || null,
+        richtung: pw.richtung || null, startUm: pw.start_um || null, startUmGestartetAt: null, masterTp: num(pw.master_tp) || 0, masterSl: num(pw.master_sl) || 0,
+        masterContracts: num(pw.kt) || 0, masterSymbol: pw.symbol_root || 'MNQ', autoPlan: true, autoBestaetigtAt: 'ja', kontoTyp: pw.konto_typ || 'winning_days' }
+      jeP.set(p.id, pw)
+      if(!je.has(uid)) je.set(uid, { uid, name: pw.person || uid.slice(0, 8), farbe: mklWdFarbe(pw), plaene: [] })
+      je.get(uid).plaene.push(p)
+    }
+    const zeile = p => {
+      const pw = jeP.get(String(p.id)), k = pw.konto || {}, kd = (P.konten && pw.konto_id && P.konten[String(pw.konto_id)]) || null
+      const eigen = (accounts || []).find(a => String(a.id) === String(pw.konto_id || '')) || null
+      const konto = eigen || { id: pw.konto_id, name: k.name, firm: k.firma, type: pw.konto_typ || 'winning_days', externalId: k.external_id || '',
+        startingBalance: num(kd && kd.starting_balance) || num(k.groesse) || 0, maxDrawdown: num(kd && kd.max_drawdown) || 0 }
+      const liveV = num(kd && kd.live_balance)
+      const bal = liveV != null && liveV > 0 ? { val: liveV, at: 0, tip: `Live · TradingView${kd.live_at ? ' — gelesen ' + new Date(kd.live_at).toLocaleString('de-DE') : ''}` } : undefined
+      const zeit = `<span class="pz-zeit-t" title="${pw.start_um ? 'Start ' + escapeHtml(new Date(pw.start_um).toLocaleString('de-DE')) + ' — der PC-Tab startet von selbst' : 'Start von Hand'}">${pw.start_um ? uhr(pw.start_um) : '–'}<small>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</small></span>`
+      const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ id: pw.id, route: 'tvv2', status: 'planned', hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: pw.hedge ? { hedge: pw.hedge } : null }) : ''
+      return planZeileHtml(p, konto, { name: k.name || '', ext: k.external_id || k.kontonr_ende || '', extTitle: '', chips: chip, akt: '', zeit, bal, uid: pw.user_id, zielTp: true,
+        boden: num(pw.liq_balance), notiz: { art: 'Winning Day', stufe: 'Winning Day — Ziel = Balance + TP dieses Trades' } })
+        .replace(' data-plan-id="', ` data-mkl-wd="${escapeHtml(String(pw.id))}" data-plan-id="`)
+    }
+    const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+    return `<div class="mwd-geplant"><div class="mwd-geplant-titel">Geplant <span>${liste.length} Trade${liste.length === 1 ? '' : 's'}</span></div>`
+      + gruppen.map(g => `<div class="ap-id-karte" style="--id:${g.farbe}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${g.farbe}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} geplant</span></div>`
+        + planFirmenBloecke(g.plaene.sort((a, b) => String(a.masterFirm).localeCompare(String(b.masterFirm), 'de') || String(a.startUm || '').localeCompare(String(b.startUm || ''))), { zeile, ohneHinweis: true })
+        + '</div>').join('') + '</div>'
+  }
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
     // Tippt Finn gerade in der Abhak-Liste, nicht neu zeichnen — sonst verliert das Feld den Fokus (25.09.2026)
@@ -29990,7 +30039,7 @@
     const dauer = (von, bis) => { const a = Date.parse(von || '') || 0; if(!a) return ''; const m = Math.max(0, Math.round(((bis ? (Date.parse(bis) || Date.now()) : Date.now()) - a) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
     const grundTxt = g => ({ close: 'Schließen', rundgang: 'Rundgang', auto_close: 'Auto-Close', erledigt: 'Erledigt', tp: 'TP', sl: 'SL', hand: 'von Hand', master_ende: 'Master beendet' })[String(g || '')] || (g ? String(g) : '')
     const jetzt = []   // Läuft gerade (26.09.2026): je laufendem Plan die Werte der großen Karte, oben kompakt
-    const karten = pl.map(pw => {
+    const karten = pl.filter(x => x.status !== 'planned').map(pw => {   // geplante als Zeilen (mklWdGeplantHtml, 23.10.2026)
       const farbe = mklWdFarbe(pw), offen = pw.status === 'open', geplant = pw.status === 'planned', zu = !offen && !geplant
       const buy = pw.richtung === 'buy', sell = pw.richtung === 'sell'
       const kt = num(pw.kt), root = String(pw.symbol_root || ''), ppl = mklPpl(root)
@@ -30098,7 +30147,7 @@
     // Zähler aus dem Plan des Farmer-Tags (F32), sonst wie bisher aus wd-heute
     const pz = mklWdPlanZaehler(), zLauf = pz ? pz.lauf : offenN, zGepl = pz ? pz.geplant : geplantN
     el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${zLauf} ${zLauf === 1 ? 'läuft' : 'laufen'} · ${zGepl} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:var(--warn-ink, #b45309)">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
-      ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
+      ${feedWacheZeile()}${leerZeile}${karten.length ? `<div class="mwd-liste">${karten.join('')}</div>` : ''}${mklWdGeplantHtml(pl.filter(x => x.status === 'planned'))}${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     el.querySelectorAll('[data-mwd-tp]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdTpVonHand(b.dataset.mwdTp) }))
     el.querySelectorAll('[data-mwd-entry]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdEntryVonHand(b.dataset.mwdEntry) }))
@@ -46898,7 +46947,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1720'
+  const OS_TAB_BUILD = '2026-09-22.1721'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
