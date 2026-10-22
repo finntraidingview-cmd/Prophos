@@ -24133,6 +24133,7 @@
     if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
     if(_bthTimer) clearTimeout(_bthTimer)
     if(!_bthAnstoss) _bthAnstoss = Date.now()   // Heimweg-Dauer ab der ERSTEN fremden Aktion (22.10.2026)
+    _hwPulsWegAt = Date.now()   // Heim-Wache: Puls selbst war woanders → 3-s-Schwelle (22.10.2026)
     _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), sofort ? BTH_SOFORT_MS : BTH_RUHE_MS)   // 19.10.2026: sofort nach Order
   }
   /* HEIMWEG AN RAILWAY (22.10.2026, Finn: „wie lange hat es gedauert?" + Handy-Alarm, „wenn Puls nach dem Orbit-Trade nicht erfolgreich
@@ -24149,7 +24150,7 @@
   async function bigTradeHeim(grund){
     _bthTimer = null
     if(_bthLaeuft) return
-    const bt = bigTradePlan(); if(!bt) return
+    const bt = bigTradePlan(); if(!bt){ _bthAnstoss = null; return }
     if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ _bthTimer = setTimeout(() => bigTradeHeim(grund), BTH_WARTE_MS); return }
     const konto = tvV2Konto(bt)
     _bthLaeuft = true; _bthSelbst = true
@@ -24158,15 +24159,113 @@
     try{
       const r = await tvV2Lesen(konto, 45, bt)
       const ok = !!(r && r.ok && (!r.konto_aktiv || String(r.konto_aktiv).includes(konto)))
-      console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : 'NICHT'} auf „${bt.masterName || konto}" (${((Date.now() - anstoss) / 1000).toFixed(1)} s)`, ok ? '' : (r && (r.msg || r.code)) || '')
-      if(!ok && typeof atToast === 'function') atToast(`Puls nicht zurück im Big-Trade-Konto „${bt.masterName || konto}": ${(r && (r.msg || r.code)) || 'keine Antwort'} — Reader sieht den Hedge-Trade gerade nicht, nächster Versuch nach der nächsten Puls-Aktion.`, 'end')
-      bigTradeHeimMelden(bt, ok, grund, Date.now() - anstoss, Date.now() - t0, ok ? '' : String((r && (r.msg || r.code)) || 'keine Antwort'))
+      // Puls belegt / Polar hat den PC (Panel 409): kein Fehlschlag, nur „später" — kein Zähler, kein 🔴 (Prüfer 22.10.2026, Punkt 4)
+      const spaeter = !ok && HW_SPAETER_CODES.has(String((r && r.code) || ''))
+      const fehlTxt = ok ? '' : String((r && (r.msg || r.code)) || 'keine Antwort')
+      console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : spaeter ? 'noch nicht (belegt)' : 'NICHT'} auf „${bt.masterName || konto}" (${((Date.now() - anstoss) / 1000).toFixed(1)} s)`, fehlTxt)
+      if(ok){
+        _hwWiederN = 0; _hwFehlN = 0; _hwOkAt = Date.now(); _hwOkPlan = String(bt.id); _hwOkOffen = true
+        if(_hwWiederTimer){ clearTimeout(_hwWiederTimer); _hwWiederTimer = null }   // anderer Weg war schneller → keine überflüssige Wiederholung
+      }else if(!spaeter) _hwFehlN++
+      const wieder = !ok && heimWiederholen(grund, spaeter)   // 22.10.2026: gescheitert → gestreut neu versuchen statt auf die nächste Puls-Aktion zu warten
+      if(!ok && !spaeter && _hwFehlN === 1 && typeof atToast === 'function') atToast(`Puls nicht zurück im Big-Trade-Konto „${bt.masterName || konto}": ${fehlTxt} — Reader sieht den Hedge-Trade gerade nicht, ${wieder ? 'neuer Versuch in ein paar Sekunden' : 'Heim-Wache holt ihn zurück, sobald Puls frei ist'}.`, 'end')
+      if(heimMeldenJetzt(ok, spaeter)) bigTradeHeimMelden(bt, ok, grund, Date.now() - anstoss, Date.now() - t0, fehlTxt)
     }catch(e){
       console.warn('[big-trade] Heimweg', (e && e.message) || e)
-      bigTradeHeimMelden(bt, false, grund, Date.now() - anstoss, Date.now() - t0, String((e && e.message) || e))
+      _hwFehlN++
+      heimWiederholen(grund, false)
+      if(heimMeldenJetzt(false, false)) bigTradeHeimMelden(bt, false, grund, Date.now() - anstoss, Date.now() - t0, String((e && e.message) || e))
     }
-    finally{ _bthLaeuft = false; _bthSelbst = false }
+    finally{ _bthLaeuft = false; _bthSelbst = false; _hwNaechsterHeimweg = Date.now() + hwPause() }
   }
+  /* HEIM-WACHE (Finn 22.10.2026, Aurel pc-pw1put: nach der Orbit-V2-Order 17:40 Dubai auf Tradeify …7608 stand der Puls-Chrome noch ~30 min
+   * dort, bis Finn von Hand ins Orbit-V3-Big-Trade-Konto …8937 zurückschaltete — „es darf nicht 2 oder 3 Minuten dauern … er führt die Aktion
+   * aus und geht direkt zurück zu der Priorität, die am höchsten ist"). Lücke: der Heimweg lief nur EINMAL je fremder Aktion; scheiterte die
+   * Lesung (Puls belegt, Login hing), kam ein neuer Versuch erst mit der nächsten Puls-Aktion. Das passt zur WD-Auswertung 16.–22.10.: in 14
+   * von 18 Notfall-Schließungen sah das Userscript den Master nie, weil der Puls-Chrome auf einem anderen Konto stand.
+   * (1) Wiederholer — ein gescheiterter Heimweg versucht es nach 8–15 s erneut (gestreut, höchstens HW_WIEDER_MAX-mal je Serie); ist Puls
+   *     gerade belegt oder läuft Polar, wird nur verschoben (zählt nicht).
+   * (2) Wache — alle 2–4 s (gestreut), solange bigTradePlan() einen Orbit-Plan (tvv2) DIESES PCs liefert (Rangfolge unverändert: Prio 1 Big
+   *     Trade mit Hedge, Prio 2 Winning Day): zeigt der Puls-Chrome laut Userscript (Tab 'puls-…', Stand ≤ 5 s alt) ein ANDERES Konto und
+   *     Puls ist frei (hedgePulsUnterwegs leer, kein Polar), holt bigTradeHeim ihn zurück — nach 3 s, wenn Puls in den letzten 5 min selbst
+   *     woanders war (das ist der Fall von Aurel), sonst erst nach 90 s (Finn bedient den Puls-Chrome gerade von Hand). Ohne frischen
+   *     Reader-Stand keine Aussage → nichts. Topstep (tsv2) nie: der Reader kennt nur TradingView, das Konto passte nie (Prüfer, Punkt 1).
+   * (3) Bremsen (Prüfer, Punkt 2) — zwischen zwei Heimwegen 10–20 s, nach Fehlschlägen wachsend 15 → 30 → 60 s … bis 5 min; 🔴 an die
+   *     Master-IDs nur beim ersten Fehlschlag einer Serie, danach höchstens alle 10 min. Meldet ein Heimweg „ok", der Reader zeigt danach aber
+   *     zweimal weiter ein fremdes Konto (Konto-Text ohne die External ID, z. B. TV kürzt „FTDFYSLX…"), setzt die Wache für diesen Plan 5 min aus.
+   * Derselbe Heimweg wie bisher (tv-lesen: nur Konto + Balance), nie eine Order. */
+  const HW_TAKT_MIN_MS = 2000, HW_TAKT_MAX_MS = 4000, HW_FREMD_PULS_MS = 3000, HW_FREMD_HAND_MS = 90000, HW_PULS_FENSTER_MS = 5 * 60000
+  const HW_PAUSE_MIN_MS = 10000, HW_PAUSE_MAX_MS = 20000, HW_BACKOFF_START_MS = 15000, HW_BACKOFF_MAX_MS = 5 * 60000
+  const HW_WIEDER_MIN_MS = 8000, HW_WIEDER_MAX_MS = 15000, HW_WIEDER_MAX = 6, HW_MELDEN_FEHL_MS = 10 * 60000, HW_AUS_MS = 5 * 60000
+  const HW_SPAETER_CODES = new Set(['puls_beschaeftigt', 'polar_aktiv', 'puls_belegt'])
+  const hwZufall = (a, b) => a + Math.random() * (b - a)
+  let _hwFremdSeit = 0, _hwNaechsterHeimweg = 0, _hwWiederN = 0, _hwWiederTimer = null, _hwFehlN = 0, _hwPulsWegAt = 0, _hwLetzteFehlMeldung = 0
+  let _hwOkAt = 0, _hwOkPlan = '', _hwOkOffen = false, _hwOkFremdN = 0, _hwAus = { plan: '', bis: 0 }
+  const hwPause = () => _hwFehlN > 0 ? Math.min(HW_BACKOFF_MAX_MS, HW_BACKOFF_START_MS * Math.pow(2, _hwFehlN - 1)) * hwZufall(1, 1.4) : hwZufall(HW_PAUSE_MIN_MS, HW_PAUSE_MAX_MS)
+  function heimMeldenJetzt(ok, spaeter){
+    if(ok) return true
+    if(spaeter) return false
+    const jetzt = Date.now()
+    if(_hwFehlN === 1 || jetzt - _hwLetzteFehlMeldung >= HW_MELDEN_FEHL_MS){ _hwLetzteFehlMeldung = jetzt; return true }
+    return false
+  }
+  // → true, wenn ein neuer Versuch geplant ist. spaeter = Puls war nur belegt → zählt nicht gegen HW_WIEDER_MAX
+  function heimWiederholen(grund, spaeter){
+    if(_hwWiederTimer || !bigTradePlan()) return false
+    if(!spaeter && _hwWiederN >= HW_WIEDER_MAX) return false
+    if(!spaeter) _hwWiederN++
+    const n = _hwWiederN, ursprung = String(grund || 'Heimweg').replace(/^Wiederholung \S+ \((.*)\)$/, '$1')   // Grund nicht verschachteln
+    const takt = () => {
+      _hwWiederTimer = null
+      if(!bigTradePlan()) return
+      // belegt (Order, Rundgang, Signal, Balance-Lesung, Rück-Login) oder Polar → nur verschieben (Prüfer, Punkt 4)
+      if(hedgePulsUnterwegs() || (typeof polarLaeuft === 'function' && polarLaeuft())){ _hwWiederTimer = setTimeout(takt, hwZufall(HW_WIEDER_MIN_MS, HW_WIEDER_MAX_MS)); return }
+      bigTradeHeim(`Wiederholung ${n}/${HW_WIEDER_MAX} (${ursprung})`)
+    }
+    _hwWiederTimer = setTimeout(takt, hwZufall(HW_WIEDER_MIN_MS, HW_WIEDER_MAX_MS))
+    return true
+  }
+  async function heimWacheTick(){
+    try{
+      if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return
+      const bt = bigTradePlan()
+      if(!bt){ _hwFremdSeit = 0; _hwWiederN = 0; _hwFehlN = 0; _bthAnstoss = _bthTimer ? _bthAnstoss : null; return }
+      const pid = String(bt.id)
+      if(bt.route !== 'tvv2'){ _hwFremdSeit = 0; return }                                                    // Topstep: Reader kennt nur TradingView
+      if(typeof tvV2EndlesungPcPasst === 'function' && !tvV2EndlesungPcPasst(bt)){ _hwFremdSeit = 0; return }   // Plan läuft auf einem anderen PC (Punkt 5)
+      if(_hwAus.plan === pid && Date.now() < _hwAus.bis){ _hwFremdSeit = 0; return }
+      const konto = tvV2Konto(bt); if(!konto){ _hwFremdSeit = 0; return }
+      if(_bthLaeuft || _bthTimer || _hwWiederTimer || hedgePulsUnterwegs()){ _hwFremdSeit = 0; return }
+      if(typeof polarLaeuft === 'function' && polarLaeuft()){ _hwFremdSeit = 0; return }   // Polar hat den PC (Prio vor allem)
+      if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
+      const ep = window._epLokal, st = ep && ep.stand
+      if(!st || st.an === false || !/^puls-/.test(String(st.positionen_tab || '')) || !st.konto){ _hwFremdSeit = 0; return }
+      const alterS = (typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s : 99
+      if(!(alterS <= 5)){ _hwFremdSeit = 0; return }
+      const jetzt = Date.now()
+      if(hedgeKontoPasst(st.konto, konto)){ _hwFremdSeit = 0; _hwWiederN = 0; _hwOkOffen = false; _hwOkFremdN = 0; return }   // steht zu Hause
+      // „ok" gemeldet, aber der Reader zeigt weiter ein fremdes Konto, ohne dass Puls seitdem woanders war → Konto-Text passt nie (Punkt 1)
+      if(_hwOkOffen && _hwOkPlan === pid && jetzt - _hwOkAt < 60000 && !(_hwPulsWegAt > _hwOkAt)){
+        _hwOkOffen = false
+        if(++_hwOkFremdN >= 2){
+          _hwAus = { plan: pid, bis: jetzt + HW_AUS_MS }; _hwOkFremdN = 0; _hwFremdSeit = 0
+          console.warn(`[heim-wache] Heimweg meldete ok, Reader zeigt weiter „${String(st.konto).slice(0, 40)}" statt „${konto}" — Wache für „${bt.masterName || konto}" 5 min aus`)
+          return
+        }
+      }
+      if(!_hwFremdSeit){ _hwFremdSeit = jetzt; return }
+      const schwelle = (jetzt - _hwPulsWegAt <= HW_PULS_FENSTER_MS) ? HW_FREMD_PULS_MS : HW_FREMD_HAND_MS   // Puls war woanders → sofort; sonst Hand (Punkt 3)
+      if(jetzt - _hwFremdSeit < schwelle || jetzt < _hwNaechsterHeimweg || hedgePulsUnterwegs()) return
+      const fremdSeit = _hwFremdSeit
+      _hwFremdSeit = 0
+      if(!_bthAnstoss) _bthAnstoss = fremdSeit
+      console.info(`[heim-wache] Puls-Chrome zeigt „${String(st.konto).slice(0, 40)}" statt „${bt.masterName || konto}" (seit ${((jetzt - fremdSeit) / 1000).toFixed(1)} s) — Heimweg`)
+      bigTradeHeim('Heim-Wache')
+    }catch(e){ console.warn('[heim-wache]', (e && e.message) || e) }
+  }
+  ;(function hwLoop(){ setTimeout(async () => { await heimWacheTick(); hwLoop() }, hwZufall(HW_TAKT_MIN_MS, HW_TAKT_MAX_MS)) })()
+  window._heimWache = { tick: heimWacheTick, wiederholen: heimWiederholen, stand: () => ({ fremdSeit: _hwFremdSeit, naechster: _hwNaechsterHeimweg, wiederN: _hwWiederN, wiederGeplant: !!_hwWiederTimer, fehlN: _hwFehlN, pulsWegAt: _hwPulsWegAt, aus: _hwAus, okOffen: _hwOkOffen, okFremdN: _hwOkFremdN,
+    unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()) }) }   // Test-Haken (Stub)
   window._bigTradeHeim = { planen: bigTradeHeimPlanen, plan: bigTradePlan }   // Test-Haken (Stub)
   /* BALANCE STATT TODAY'S P&L (26.09.2026, Finn: „bei jeder Order holen wir uns den Wert Balance … 1–30 min [seit 26.09.2026 spät: 1–150 min] nach dem Trade loggt Puls sich
    * noch mal ein und liest die neue Live-Balance — daraus Take Profit und P&L"). Befund: das Tradovate-Panel in TradingView zeigt in der
@@ -46653,7 +46752,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1714'
+  const OS_TAB_BUILD = '2026-09-22.1715'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
