@@ -27705,9 +27705,10 @@ def _ap_usd_de(x, stellen=0):
 def ap_plan_bal_abweichung(p, a, echo_bal, dup_bal, letzt=None):
     """REIN RECHNEND (testbar): (plan_balance, live_balance), wenn die Konto-Balance live ist (ap_balance_live gegen das Ende des letzten
     Trades) und um mehr als AP_BAL_WACHE_USD von der Balance in den notes des Auto-Plans („… · Balance 102.436 (Nachlesung)") abweicht —
-    sonst None. Ohne Balance in den notes, ohne Konto oder ohne lebende Lesung nie."""
+    sonst None. Ohne Balance in den notes, ohne Konto oder ohne lebende Lesung nie; Topstep-Kette und Tage-Mini (kette/tage_mini aus
+    mt5_baseline) haben ihre eigene Balance-Logik → nie (Prüfer 22.10.2026: sonst warten sie beim Bestätigen, ohne dass die Wache sie anfasst)."""
     m = _AP_BAL_PLAN.search(str((p or {}).get("notes") or ""))
-    if not m or not a:
+    if not m or not a or p.get("kette") or p.get("tage_mini"):
         return None
     bal, _ccy, _q, stand = acc_balance_wahl(a, echo_bal, dup_bal)
     if bal is None or not ap_balance_live(stand, letzt):
@@ -27738,7 +27739,8 @@ def ap_auto_best_tick(jetzt, reg=None):
         return None
     in_uids = "in.(" + ",".join(uids) + ")"
     plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,status,auto_plan,auto_bestaetigt_at,notes,"
-                                               "start_um_gestartet_at,started_at,orbit_gesendet_at,puls_pause:mt5_baseline->puls_pause",
+                                               "start_um_gestartet_at,started_at,orbit_gesendet_at,puls_pause:mt5_baseline->puls_pause,"
+                                               "kette:mt5_baseline->kette,tage_mini:mt5_baseline->tage_mini",
                                      "user_id": in_uids, "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null",
                                      "created_at": "gte." + (jetzt - timedelta(days=3)).isoformat()})
     if not plaene:
@@ -28462,8 +28464,8 @@ def ap_bal_wache(jetzt):
     plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,notes,start_um,richtung,hand_werte_at,"
                                                "kette:mt5_baseline->kette,tage_mini:mt5_baseline->tage_mini", "status": "eq.planned",
                                      "auto_plan": "eq.true", "start_um_gestartet_at": "is.null", "started_at": "is.null",
-                                     "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null",
-                                     "created_at": "gte." + (jetzt - timedelta(days=3)).isoformat()})
+                                     "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null", "mt5_baseline->puls_pause": "is.null",
+                                     "created_at": "gte." + (jetzt - timedelta(days=3)).isoformat()})   # Puls-Pause bleibt unberührt (Prüfer 22.10.2026)
     plaene = [p for p in plaene if not p.get("kette") and not p.get("tage_mini") and _AP_BAL_PLAN.search(str(p.get("notes") or ""))]
     if not plaene:
         return []
@@ -28482,7 +28484,7 @@ def ap_bal_wache(jetzt):
             continue
         r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers("return=representation"),
                         params={"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",
-                                "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null"})
+                                "orbit_gesendet_at": "is.null", "hand_werte_at": "is.null", "mt5_baseline->puls_pause": "is.null"})
         r.raise_for_status()
         if not (r.json() or []):
             continue                                       # inzwischen geclaimt/gestartet/von Hand geändert — bleibt, wie es ist

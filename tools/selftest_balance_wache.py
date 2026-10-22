@@ -52,6 +52,8 @@ def main():
     tv = dict(p, notes="Auto-Planer · Etappe · Rest 9.000 $ bis Ziel · Balance 150.000 (TV)")
     check(ab(tv, {"id": "k", "bal": 150000.0, "stand": "2026-10-22T01:00:00+00:00"}, {}, {}, None) is None, "geplant = gelesen → Plan bleibt")
 
+    check(ab(dict(p, kette={"nr": 1}), frisch, {}, {}, letzt) is None and ab(dict(p, tage_mini={"tag": "x"}), frisch, {}, {}, letzt) is None,
+          "Topstep-Kette / Tage-Mini → nie (eigene Balance-Logik)")
     ok, warten = kand([p], {"k": frisch}, {"k": letzt}, {}, {})
     check(ok == [] and len(warten) == 1 and "Balance-Wache" in warten[0]["warum"] and "102.436" in warten[0]["warum"]
           and "105.999,50" in warten[0]["warum"], f"Auto-Bestätigen wartet beim Vorfall ({warten})")
