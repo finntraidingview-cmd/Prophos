@@ -46652,7 +46652,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1711'
+  const OS_TAB_BUILD = '2026-09-22.1712'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -50688,8 +50688,16 @@
     return best
   }
   // Hedge-Lots am Plan: Kontrakte × Multiplikator (Echo wie Orbit V3/Winning Day) — null, wenn eines fehlt
+  // Orbit V2 / Topstep V2 mit Fusion-Hedge (.1712): genau die Lots, die hedgeSoloOeffnenKern öffnet — frisch aus Risiko Master/Slave und dem
+  // Punktwert des Plan-Symbols (hedgeMultAusRisiko). Vorher Kontrakte × gespeicherter multiplier: der war bei Marc (22.10.2026) mit NQ statt
+  // MNQ gerechnet, der Check sah 32 Lot, obwohl beim Öffnen 3,20 Lot herausgekommen wären.
   function fusionHedgeLots(plan){
     const kt = Number(plan && plan.masterContracts), m = Number(plan && plan.multiplier)
+    if(plan && (plan.route === 'tvv2' || plan.route === 'tsv2') && plan.hedgeEur > 0 && kt > 0){
+      let sym = ''; try{ sym = (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : '') || '' }catch(_){}
+      const frisch = hedgeMultAusRisiko(plan, kt, hedgePplFuer(sym || plan.masterSymbol || ''))
+      if(frisch) return frisch.lots
+    }
     return (kt > 0 && m > 0) ? Math.round(kt * m * 100) / 100 : null
   }
   // Zeile fürs Prüffenster: { st: 'ok'|'warn'|'err', txt, was }. o.echo = Beschriftung „Plan-Lots" (Kontrakte × Multiplikator)
@@ -59431,7 +59439,20 @@
    * nicht still: Hinweis am Konto („Risiko Master fehlt …"). Laufende Pläne fasst das nicht an, nur neue/neu gerechnete. */
   // ddListe = Max DD/Max Tages-DD/Max Loss des Kontos (08.10.2026): ein master_risk am Plan, das einem davon gleicht, ist die Vorbelegung
   // der Farmer-Zeile (tpVorplanZeile masterRisk = Max DD), kein Handwert — sonst gilt der Wert am Plan zuerst (Finn tippt 250 $ ein)
+  /* PUNKTWERT AUS DEM PLAN-SYMBOL (.1712, Vorfall Marc 22.10.2026, Apex 150k …0001, 3 MNQ, TP 386 $, Staffel 175 €): der Plan trug MNQZ6,
+   * aber multiplier 10,6675 → 32,00 Lot statt 3,20 — gerechnet mit 20 $/Pkt (NQ) statt 2 $/Pkt (MNQ): 386 $ ÷ (20 × 3) = 6,43 Pkt statt
+   * 64,33 Pkt, also zehnmal so viele Lots. tpMasterPpl liest den globalen Umschalter _tpNqMode, und der stand an Marcs PC-Tab auf NQ (seine
+   * Apex-Trades vom 20./21.10. liefen mit NQZ6, das Öffnen eines NQ-Plans stellt den Umschalter um). Der Abgleich zieht den Hedge nach
+   * (Staffel nach Live-Balance) ohne den Modus zu setzen. Der Start-Check sah 32 Lot und hielt an („Fusion-Marge … zu wenig").
+   * Jetzt: hat der Plan ein Symbol, gilt DESSEN Punktwert (NQ 20, MNQ 2, wie hedgePplFuer beim Öffnen) — egal, was der Umschalter zeigt. */
   function wdFarmHedge(pr, riskMaster, slaveEur, an, ddListe){
+    const ppl = pr && pr.master_symbol ? hedgePplFuer(pr.master_symbol) : 0
+    if(!(ppl > 0)) return wdFarmHedgeKern(pr, riskMaster, slaveEur, an, ddListe)
+    const modusAlt = _tpNqMode; _tpNqMode = ppl === 20 ? 'nq' : 'mnq'
+    try{ return wdFarmHedgeKern(pr, riskMaster, slaveEur, an, ddListe) }
+    finally{ _tpNqMode = modusAlt }
+  }
+  function wdFarmHedgeKern(pr, riskMaster, slaveEur, an, ddListe){
     const aus = () => { pr.hedge_eur = null; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = null; return '' }
     if(!an || !(slaveEur > 0)) return aus()
     const kt = Number(pr.master_contracts) || 0, tp = Number(pr.master_tp) || 0, ppl = tpMasterPpl(pr.master_firm) || 0
@@ -60015,7 +60036,7 @@
             // seit 26.09.2026 mit der Popup-Rechnung: Multiplikator/hedge_faktor/hedge_eur gemeinsam nachziehen
             if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs((plan.slaveRisk || 0) - z.slaveEur) > 0.5){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
-              const h = { master_firm: plan.masterFirm, master_contracts: plan.masterContracts, master_tp: plan.masterTp, master_risk: plan.masterRisk }
+              const h = { master_firm: plan.masterFirm, master_symbol: plan.masterSymbol, master_contracts: plan.masterContracts, master_tp: plan.masterTp, master_risk: plan.masterRisk }   // Symbol → Punktwert (.1712)
               wdFarmHedge(h, acc ? Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0 : 0, z.slaveEur, true, acc ? [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk] : [z.masterRisk])
               for(const f of ['hedge_eur', 'hedge_faktor', 'multiplier', 'slave_risk']) if(h[f] != null) upd[f] = h[f]
             }
