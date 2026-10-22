@@ -8875,6 +8875,7 @@
             </div>
             <div class="vp-zeile"><b>Funded · TP ($)</b>
               <span>Tradeify</span> <input type="number" class="input mono vp-in" data-vp-fu="tradeify-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="tradeify-bis" min="0" step="5" value="290">
+              <span style="margin-left:6px">Lucid</span> <input type="number" class="input mono vp-in" data-vp-fu="lucid-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="lucid-bis" min="0" step="5" value="290">
               <span style="margin-left:6px">Apex 150k</span> <input type="number" class="input mono vp-in" data-vp-fu="apex-von" min="0" step="5" value="370"> – <input type="number" class="input mono vp-in" data-vp-fu="apex-bis" min="0" step="5" value="390">
               <span style="margin-left:6px">Apex 100k</span> <input type="number" class="input mono vp-in" data-vp-fu="apex100-von" min="0" step="5" value="320"> – <input type="number" class="input mono vp-in" data-vp-fu="apex100-bis" min="0" step="5" value="340">
               <span style="margin-left:6px">Topstep</span> <input type="number" class="input mono vp-in" data-vp-fu="topstep-von" min="0" step="5" value="220"> – <input type="number" class="input mono vp-in" data-vp-fu="topstep-bis" min="0" step="5" value="240">
@@ -29556,7 +29557,7 @@
    * (wdDarf), nie eine laufende Zeile. Einmal je Zeile und Ladung (P.gewuerfelt), damit kein Tab-Takt die Tabelle dauernd beschreibt. */
   async function mklWdWuerfelNachziehen(P){
     if(!P || !P.farmerAdmin || !P.konten || !P.tag) return
-    const v = (P.regeln && P.regeln.vorplan) || {}, vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE, hedge_an: !!v.hedge_an }
+    const v = (P.regeln && P.regeln.vorplan) || {}, vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: tpVpLucidWieTradeify(v.regeln || TP_VP_VORGABE), hedge_an: !!v.hedge_an }
     const fx = window._fxUsdEur || 0.85
     P.gewuerfelt = P.gewuerfelt || new Set()
     let neu = false
@@ -29648,7 +29649,7 @@
         return out
       }
       if(!kd){ out.lotsSub = 'noch nicht gewürfelt'; return out }
-      const vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE }
+      const vp = { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: tpVpLucidWieTradeify(v.regeln || TP_VP_VORGABE) }
       const [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm, kd), vp), root = vp.instr === 'nq' ? 'NQ' : 'MNQ', ppl = mklPpl(root)
       const sp = (a, b, f) => a === b ? f(a) : `${f(a)}–${f(b)}`
       out.ktTxt = `${sp(ka, kb, f0)} × ${root}`
@@ -46897,7 +46898,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1719'
+  const OS_TAB_BUILD = '2026-09-22.1720'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58914,12 +58915,24 @@
    *                      Topstep 220-240 als Vorgabe, alles editierbar), Risiko Slave nach Puffer-Staffel.
    *  Puffer = Live-Balance − Startbalance + Max-Drawdown (was das Konto noch verlieren kann); ohne
    *  Live-Stand = Max-Drawdown (frisches Konto). Der Betrag steht je Zeile editierbar im Popup. */
-  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], fnfutures: [270, 290], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], lucid: [270, 290], fnfutures: [270, 290], apex: [370, 390], apex100: [320, 340], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
   // fnfutures = FundedNext Futures (Finn 16.10.2026: „genau gleich wie bei Tradeify“, Gewinntag 250 $) — eigener Schlüssel, damit
   // die CFD-Konten von FundedNext weiter unter „sonst“ laufen
   // Apex nach Kontogröße (17.10.2026, Finn: „Winning Days unterscheiden zwischen 150k und 100k — 100k braucht nur 300 $, 150k 350 $"):
   // 'apex' = 150k (Schlüssel bleibt, gespeicherte Werte gelten weiter), 'apex100' = 100k
-  const TP_VP_FIRMEN = ['tradeify', 'fnfutures', 'apex', 'apex100', 'topstep', 'sonst']
+  // lucid = Lucid Trading (Finn 23.10.2026: „Lucid ist 1:1 die gleichen Regeln wie Tradeify, alles ganz genau gleich“) — eigener Schlüssel
+  // statt „sonst“ (MFFU & Co. bleiben dort). Solange die gespeicherten Regeln für Lucid nichts tragen, gelten die Tradeify-Werte
+  // (tpVpLucidWieTradeify) — das nächste „Speichern“ im Admin schreibt sie als eigene Lucid-Werte fest.
+  const TP_VP_FIRMEN = ['tradeify', 'lucid', 'fnfutures', 'apex', 'apex100', 'topstep', 'sonst']
+  function tpVpLucidWieTradeify(regeln){
+    if(!regeln || typeof regeln !== 'object') return regeln
+    const r = { ...regeln }
+    for(const feld of ['fu', 'kt', 'staffelFirma']){
+      const o = r[feld]
+      if(o && typeof o === 'object' && o.lucid == null && o.tradeify != null) r[feld] = { ...o, lucid: o.tradeify }
+    }
+    return r
+  }
 
   // konto = Konto-Objekt, Name oder Größe — Größe aus dem Namen („100k …", Namensregel), sonst Startbalance/Balance; unbekannt = 150k wie bisher
   function tpVpApex100(konto){
@@ -58934,6 +58947,7 @@
     const f = String(firm || '').toLowerCase()
     if(f.includes('fundednext') && f.includes('futur')) return 'fnfutures'   // vor den anderen: „FundedNext Futures“ (16.10.2026)
     if(f.includes('apex')) return tpVpApex100(konto) ? 'apex100' : 'apex'
+    if(f.includes('lucid')) return 'lucid'   // 23.10.2026: Lucid wie Tradeify, eigener Schlüssel
     return f.includes('tradeify') ? 'tradeify' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
@@ -59067,7 +59081,7 @@
     const o = opt || {}
     const dd = Number(acc && acc.maxDrawdown) || tpTopstepMll(acc) || 0
     if(!(dd > 0)) return { fehler: 'kein Max-Drawdown am Konto' }
-    const regeln = o.regeln || TP_VP_VORGABE
+    const regeln = tpVpLucidWieTradeify(o.regeln || TP_VP_VORGABE)
     const funded = tpVorplanIstFunded(acc)
     const firma = tpVorplanFirmaKey(acc && acc.firm, acc)
     const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((regeln.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (regeln.ch || TP_VP_VORGABE.ch)))
@@ -59108,7 +59122,7 @@
   function tpVorplanRegelnSetzen(r){
     const setId = (id, v) => { const el = document.getElementById(id); if(el && v != null) el.value = v }
     const setQ = (sel, v) => { const el = document.querySelector(sel); if(el && v != null) el.value = v }
-    const g = r || {}
+    const g = tpVpLucidWieTradeify(r || {})
     const ch = Array.isArray(g.ch) ? g.ch : TP_VP_VORGABE.ch
     setId('tp-vp-ch-von', ch[0]); setId('tp-vp-ch-bis', ch[1])
     for(const k of TP_VP_FIRMEN){
@@ -59632,7 +59646,7 @@
     const v = (_wd.regeln && _wd.regeln.vorplan) || {}
     // hedge_an / hedge_puffer (24.09.2026 abends): Fusion-Gegenhedge für Farmer-Pläne (Betrag = Staffel), Puffer in
     // NQ-Punkten über dem TP-Level, bevor der Wächter schließt. Steht bewusst AUS, bis Finn ihn einschaltet.
-    return { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE,
+    return { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: tpVpLucidWieTradeify(v.regeln || TP_VP_VORGABE),
              hedge_an: !!v.hedge_an, hedge_puffer: (typeof v.hedge_puffer === 'number' && isFinite(v.hedge_puffer) && v.hedge_puffer >= 0) ? v.hedge_puffer : 2,   // Standard 8 Ticks = 2 Pkt (25.09.2026); gespeicherte 3 bleiben (12 Ticks)
              hedge_notfall: (typeof v.hedge_notfall === 'number' && isFinite(v.hedge_notfall) && v.hedge_notfall >= 1 && v.hedge_notfall <= 2) ? v.hedge_notfall : 1.05 }   // Standard 105 % (.1497)
   }
@@ -60452,7 +60466,7 @@
     box.querySelectorAll('[data-wd-se]').forEach(el => el.addEventListener('change', () => { wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
   }
   // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
-  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'MFFU, Lucid …'] }
+  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], lucid: ['Lucid', '#e84393', 'Gewinntag 250 $'], fnfutures: ['FundedNext Futures', '#00b894', 'Gewinntag 250 $'], apex: ['Apex 150k', '#0984e3', 'Gewinntag 350 $'], apex100: ['Apex 100k', '#74b9ff', 'Gewinntag 300 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'MFFU …'] }
   // „3 im Farm · 1 aus" — wird nach dem Laden der Konten nachgezogen (wdRender), ohne die Zeilen neu zu bauen
   function wdFirmaKurz(k, konten){
     const ges = konten.filter(q => tpVorplanFirmaKey(q.firm, q) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
@@ -62352,7 +62366,7 @@
   /* Good Day (01.10.2026, Finn: „wenn der P&L bei Tradeify über 250 ist und der Account Winning Day ist, automatisch als
    * Winning Day anhaken"): gleiche Regel wie _wd_good_day im Backend. tcRecompute ruft das bei jeder P&L-Änderung (Hand,
    * Vorbelegung, Auto-Nachlader); hat Finn den Haken selbst angefasst, bleibt er, wie er ist. */
-  const TC_GOOD_DAY_MIN = { tradeify: 250, 'fundednext futures': 250, topstep: 150, apex: { 100000: 300, 150000: 350 } }   // Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), Apex 100k 300 $ / 150k 350 $ (Finn 17.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
+  const TC_GOOD_DAY_MIN = { tradeify: 250, lucid: 250, 'fundednext futures': 250, topstep: 150, apex: { 100000: 300, 150000: 350 } }   // Lucid 250 $ wie Tradeify (Finn 23.10.2026), Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), Apex 100k 300 $ / 150k 350 $ (Finn 17.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
   // Schwelle des Kontos: Zahl je Firma, bei Apex je Größe (unbekannte Größe = 150k-Wert, zählt also nie zu früh)
   function tcGoodDayGrenze(a){
     const firma = String((a && a.firm) || '').toLowerCase(), k = Object.keys(TC_GOOD_DAY_MIN).find(x => firma.includes(x))

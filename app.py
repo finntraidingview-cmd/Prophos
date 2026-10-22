@@ -5741,6 +5741,7 @@ HQ_VORGABEN = {
     # 25.09.2026, Finn: „bei Winning Day … so grob machen: bei Tradeify 250 $ entsprechen so grob 75 €" — die
     # Messung sagt 0,386 €/$ (171 Trades → 250 $ ≙ 97 €); Finns Zahl gilt, die Messung steht im Tooltip daneben.
     "Tradeify|wd": {"ziel_usd": 250.0, "ziel_eur": 75.0},
+    "Lucid Trading|wd": {"ziel_usd": 250.0, "ziel_eur": 75.0},   # 23.10.2026, Finn: „Lucid ist 1:1 die gleichen Regeln wie Tradeify"
     # 25.09.2026 abends, Finn (Topstep Challenge hat keine Hedge-Messung, Mikes Trade fiel auf die globale Quote
     # 0,55): „Beim ersten Trade sind 4.500 $ da 200 €, beim zweiten Trade 4.500 $ so 450 € — mach genau die Mitte,
     # der erste Trade kommt zu 100 % vor, der zweite zu 50 %." Gewichteter Schnitt: (200 × 1 + 450 × 0,5) / 1,5
@@ -8176,7 +8177,7 @@ VORRAT2_STD = {
         "topstep": {"modell": "trades", "tps_usd": [4500, 14500]},               # ein Trade wie im Combine, dann Big Trade
         "apextrader": {"modell": "siege", "tages_usd": 2500, "tp_tag_usd": 7500, "ziel_usd": 15000, "verlusttage_max": 2},
     },
-    "wd_boden_ueber_start_usd": {"tradeify": 100, "fundednextfutures": 100},    # Liquidation 150.100, sobald zu Winning Days verschoben; FundedNext Futures wie Tradeify (16.10.2026)
+    "wd_boden_ueber_start_usd": {"tradeify": 100, "fundednextfutures": 100, "lucidtrading": 100, "lucid": 100},    # Liquidation 150.100, sobald zu Winning Days verschoben; FundedNext Futures wie Tradeify (16.10.2026), Lucid wie Tradeify (23.10.2026)
     "sl_normal_std_usd": 2500,                         # „normaler SL" je 100k, wo der Planer keine SL-Spanne führt (FTMO)
 }
 VORRAT2_DRINGLICHKEITEN = [
@@ -12875,7 +12876,7 @@ def _wd_zahl(v):
 # Good Day (01.10.2026, Finn: „wenn der Winning Day abgehakt wird und der P&L bei Tradeify über 250 ist, automatisch als
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
-WD_GOOD_DAY_MIN = {"tradeify": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}}   # Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
+WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}}   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
 
 
 def _wd_good_day(konto, master_pl):
