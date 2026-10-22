@@ -45550,7 +45550,8 @@
    * Nachfolger-Assistent setzten nichts). FundedNext (CFD) Phase 1/2 = 5 Trading Days (firm_rules.json: „min 5 Trading Days").
    * Aufrufer: Bulk-Add (Rückfall ohne Vorlage), „＋ Account" (Vorbelegung + Rückfall beim Speichern), Nachfolger-Assistent.
    * → {kind, target} oder null. Futures-Firmen (auch „FundedNext Futures") und Funded nie. */
-  const MINDESTTAGE_JE_FIRMA = { fundednext: 5 }
+  // Blue Guardian (22.10.2026, Finn: „jede Phase hat 3 Mindesttage"): Phase 1/2 = 3 Trading Days
+  const MINDESTTAGE_JE_FIRMA = { fundednext: 5, 'blue guardian': 3 }
   function kontoMindesttage(firm, typ){
     const n = String(firm || '').trim().toLowerCase()
     if(!n || !(typ === 'phase1' || typ === 'phase2')) return null
@@ -46652,7 +46653,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1712'
+  const OS_TAB_BUILD = '2026-09-22.1713'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
