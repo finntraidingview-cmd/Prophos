@@ -186,25 +186,41 @@
     .abhak-rm{animation:abhakRmRuhig 1.35s linear forwards}
     .abhak-rm .abhak-kreis,.abhak-rm .abhak-zeichen{animation:none;stroke-dashoffset:0}
   }
-  /* Handy: über den Toast-Bereich (22.10.2026, Stub 375 px: der Toast sitzt dort ~16 px über der Tab-Leiste, bis ~70 px hoch, und
-     verdeckte die Karte — „Winning Day abgehakt" bzw. „✓ Erledigt · wird gebucht" kommen im selben Augenblick) */
-  @media (max-width:520px){ .abhak-rm{bottom:calc(var(--mob-nav-h, 64px) + env(safe-area-inset-bottom) + 100px);max-width:calc(100vw - 32px)} .abhak-rm small{display:none} }
-  /* Winning-Day-Rückmeldung (Finn 22.10.2026): ✓ gezählt grün, ✗ nichts hinzugefügt ruhig grau — schwebend nach „Erledigt" (.abhak-rm)
-     und als Vorschau unter dem 🏆-Haken im Abschließen-Dialog (.tc-wd-rm), dasselbe Zeichen; das ✗ hat zwei Striche, darum längerer Strich-Weg */
-  .abhak-rm.ist-wd svg,.tc-wd-rm.ist-wd svg{color:var(--good)}
-  .abhak-rm.ist-kein-wd svg,.tc-wd-rm.ist-kein-wd svg{color:var(--sub-2)}
-  .abhak-rm.ist-kein-wd .abhak-zeichen,.tc-wd-rm.ist-kein-wd .abhak-zeichen{stroke-dasharray:24;stroke-dashoffset:24}
+  @media (max-width:520px){ .abhak-rm{bottom:84px;max-width:calc(100vw - 32px)} .abhak-rm small{display:none} }
+  /* Winning-Day-Rückmeldung im Abschließen-Dialog (Finn 22.10.2026: „der Winning Day fliegt quasi so rein in diese 4 von 5"): Vorschau unter
+     dem 🏆-Haken (.tc-wd-rm) und nach dem Speichern die Zähl-Karte über dem Popup (.tc-wd-flug-karte), in die ein ✓ fliegt (.tc-wd-flug-punkt).
+     ✓ gezählt grün, ✗ nichts hinzugefügt ruhig grau; das ✗ hat zwei Striche, darum längerer Strich-Weg */
+  .tc-wd-rm.ist-wd svg,.tc-wd-flug-ziel svg{color:var(--good)}
+  .tc-wd-rm.ist-kein-wd svg,.tc-wd-flug-karte.ist-kein-wd svg{color:var(--sub-2)}
   .tc-wd-rm{display:flex;align-items:center;gap:8px;margin-top:6px;padding-left:2px;font-size:12.5px;font-weight:600;color:var(--ink);animation:tcWdRmEin .22s ease-out}
   .tc-wd-rm[hidden]{display:none}
   .tc-wd-rm.ist-kein-wd{color:var(--sub)}
   .tc-wd-rm small{font-size:11.5px;font-weight:500;color:var(--sub)}
-  .tc-wd-rm svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor}
-  .tc-wd-rm .abhak-kreis{stroke-width:2;stroke-dasharray:63;stroke-dashoffset:63;animation:abhakZiehen .42s ease-out forwards}
-  .tc-wd-rm .abhak-zeichen{stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:14;stroke-dashoffset:14;animation:abhakZiehen .26s ease-out .3s forwards}
+  .tc-wd-rm svg,.tc-wd-flug-karte svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor}
+  .tc-wd-rm .abhak-kreis,.tc-wd-flug-karte .abhak-kreis{stroke-width:2;stroke-dasharray:63;stroke-dashoffset:63;animation:abhakZiehen .42s ease-out forwards}
+  .tc-wd-rm .abhak-zeichen,.tc-wd-flug-karte .abhak-zeichen{stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:14;stroke-dashoffset:14;animation:abhakZiehen .26s ease-out .3s forwards}
+  .tc-wd-rm.ist-kein-wd .abhak-zeichen,.tc-wd-flug-karte.ist-kein-wd .abhak-zeichen{stroke-dasharray:24;stroke-dashoffset:24}
+  #dashboard-view .modal-bg.tc-wd-flug .modal{pointer-events:none}
+  .tc-wd-flug-karte{position:absolute;z-index:2;transform:translate(-50%,-50%);min-width:190px;max-width:calc(100vw - 48px);padding:14px 24px 12px;
+    border-radius:16px;background:var(--surface);border:1px solid var(--border);box-shadow:0 14px 40px rgba(16,24,40,.22);pointer-events:none;
+    display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;animation:tcWdKarteEin .18s ease-out}
+  .tc-wd-flug-titel{font-size:12px;font-weight:600;color:var(--sub)}
+  .tc-wd-flug-zahl{display:flex;align-items:center;font-size:30px;font-weight:700;line-height:1.15;color:var(--ink)}
+  .tc-wd-flug-zahl.ist-neu{color:var(--good);animation:tcWdZahlSprung .34s ease-out}
+  .tc-wd-flug-ziel{display:flex;margin-left:8px}
+  .tc-wd-flug-ziel svg{width:22px;height:22px}
+  .tc-wd-flug-karte small{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;font-weight:500;color:var(--sub-2)}
+  .tc-wd-flug-karte.ist-kein-wd{flex-direction:row;gap:10px;text-align:left;padding:12px 18px}
+  .tc-wd-flug-karte.ist-kein-wd svg{width:24px;height:24px}
+  .tc-wd-flug-karte.ist-kein-wd b{display:block;font-size:14px;color:var(--ink)}
+  .tc-wd-flug-punkt{position:absolute;z-index:3;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    background:var(--good);color:#fff;font-size:13px;font-weight:700;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 4px 12px rgba(16,24,40,.18)}
   @keyframes tcWdRmEin{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+  @keyframes tcWdKarteEin{from{opacity:0;transform:translate(-50%,-50%) scale(.94)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+  @keyframes tcWdZahlSprung{0%{transform:scale(1)}45%{transform:scale(1.18)}100%{transform:scale(1)}}
   @media (prefers-reduced-motion: reduce){
-    .tc-wd-rm{animation:none}
-    .tc-wd-rm .abhak-kreis,.tc-wd-rm .abhak-zeichen{animation:none;stroke-dashoffset:0}
+    .tc-wd-rm,.tc-wd-flug-karte,.tc-wd-flug-zahl.ist-neu{animation:none}
+    .tc-wd-rm .abhak-kreis,.tc-wd-rm .abhak-zeichen,.tc-wd-flug-karte .abhak-kreis,.tc-wd-flug-karte .abhak-zeichen{animation:none;stroke-dashoffset:0}
   }
   .at-prompt{
     position:fixed;bottom:28px;right:28px;z-index:9999;
@@ -31293,15 +31309,14 @@
     const zeichen = (art === 'bestanden' || art === 'wd') ? 'M7.5 12.3l3 3 6-6.3' : art === 'kein-wd' ? 'M9 9l6 6M15 9l-6 6' : 'M8.5 12h7'
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="abhak-kreis" cx="12" cy="12" r="10"/><path class="abhak-zeichen" d="${zeichen}"/></svg>`
   }
-  // titel (22.10.2026, Winning-Day-Rückmeldung): eigener Haupttext, z. B. „Winning Day 4/5"; sonst Bestanden/Geblowt
-  function abhakRueckmeldung(art, unter, titel){
-    if(art !== 'bestanden' && art !== 'geblowt' && art !== 'wd' && art !== 'kein-wd') return
+  function abhakRueckmeldung(art, unter){
+    if(art !== 'bestanden' && art !== 'geblowt') return
     document.querySelectorAll('.abhak-rm').forEach(e => e.remove())
     const el = document.createElement('div')
     el.className = 'abhak-rm ist-' + art
     el.setAttribute('role', 'status')
     el.innerHTML = abhakZeichenSvg(art)
-      + `<span>${escapeHtml(titel || (art === 'bestanden' ? 'Bestanden' : art === 'geblowt' ? 'Geblowt' : art === 'wd' ? 'Winning Day' : 'Kein Winning Day'))}${unter ? ` <small>· ${escapeHtml(unter)}</small>` : ''}</span>`
+      + `<span>${art === 'bestanden' ? 'Bestanden' : 'Geblowt'}${unter ? ` <small>· ${escapeHtml(unter)}</small>` : ''}</span>`
     document.body.appendChild(el)
     setTimeout(() => el.remove(), 1450)
   }
@@ -62360,19 +62375,20 @@
   }
   document.getElementById('tc-winning-day')?.addEventListener('change', () => { _tcGoodDayHand = true; tcWdRmVorschau() })
 
-  /* Winning-Day-Rückmeldung (Finn 22.10.2026: „beim Abhaken sehen, ob der Winning Day gezählt wurde — ✓ mit der neuen Zählung, z. B. 4/5,
-   * sonst ✗ kein Winning Day, nichts hinzugefügt"). NUR ANZEIGE aus genau den Werten, die „Erledigt" danach nimmt (🏆-Haken, nicht gesperrt,
-   * _tcWinningAccId → zielManuellPlus): live als Vorschau unter dem Haken, nach dem Speichern als schwebende Abhak-Rückmeldung — das Popup
-   * schließt weiter sofort (01.10.2026). Zählung und Speichern unverändert. null = Haken nicht sichtbar (kein manuell zählendes Konto). */
+  /* Winning-Day-Rückmeldung (Finn 22.10.2026: „Wir haben jetzt 3 von 5, und wir machen das in 4 von 5. Dann kommt einmal so eine Animation,
+   * und der Winning Day fliegt quasi so rein in diese 4 von 5."). NUR ANZEIGE aus genau den Werten, die „Erledigt" danach nimmt (🏆-Haken,
+   * nicht gesperrt, _tcWinningAccId → zielManuellPlus; Stand = zielFortschritt wie Accounts/Radar): live als Vorschau unter dem Haken
+   * („3/5 → 4/5"), nach dem Speichern als Flug im Popup (tcWdFlug). Zählung und Speichern unverändert. null = Haken nicht sichtbar. */
   function tcWdRmStand(){
     const cb = document.getElementById('tc-winning-day'), wrap = document.getElementById('tc-winning-day-wrap')
     if(!cb || !wrap || wrap.hidden || !_tcWinningAccId) return null
     const a = (accounts || []).find(x => String(x.id) === String(_tcWinningAccId))
     const f = a ? zielFortschritt(a) : null
     if(!f) return null
-    if(cb.disabled) return { art: 'wd', stand: `${Math.min(f.count, f.target)}/${f.target}`, text: 'heute schon gezählt', konto: a.name }
-    if(cb.checked) return { art: 'wd', stand: `${Math.min(f.count + 1, f.target)}/${f.target}`, text: f.count + 1 >= f.target ? 'Ziel erreicht' : '+1', konto: a.name }
-    return { art: 'kein-wd', konto: a.name }
+    const ziel = f.target, vorher = Math.min(f.count, ziel)
+    if(cb.disabled) return { art: 'wd', flug: false, vorher, nachher: vorher, ziel, text: 'heute schon gezählt', konto: a.name }
+    if(cb.checked) return { art: 'wd', flug: true, vorher, nachher: Math.min(f.count + 1, ziel), ziel, text: f.count + 1 >= ziel ? 'Ziel erreicht' : '+1', konto: a.name }
+    return { art: 'kein-wd', flug: false, vorher, nachher: vorher, ziel, konto: a.name }
   }
   function tcWdRmVorschau(){
     const el = document.getElementById('tc-winning-day-rm'); if(!el) return
@@ -62380,16 +62396,77 @@
     if(!s){ el.hidden = true; el.innerHTML = ''; return }
     el.className = 'tc-wd-rm ist-' + s.art
     el.innerHTML = abhakZeichenSvg(s.art)
-      + (s.art === 'wd' ? `<span>Winning Day ${escapeHtml(s.stand)} <small>· ${escapeHtml(s.text)}</small></span>` : '<span>Kein Winning Day <small>— nichts hinzugefügt</small></span>')
+      + (s.art === 'kein-wd' ? '<span>Kein Winning Day <small>— nichts hinzugefügt</small></span>'
+         : s.flug ? `<span>Winning Day ${s.vorher}/${s.ziel} → ${s.nachher}/${s.ziel} <small>· ${escapeHtml(s.text)}</small></span>`
+         : `<span>Winning Day ${s.vorher}/${s.ziel} <small>· ${escapeHtml(s.text)}</small></span>`)
     el.hidden = false
   }
-  // Rückmeldung nach „Erledigt": schwebende Karte mit derselben Aussage wie die Vorschau
-  function tcWdRmNachSpeichern(s){
-    if(!s) return
-    abhakRueckmeldung(s.art, s.konto, s.art === 'wd' ? `Winning Day ${s.stand}` : 'Kein Winning Day — nichts hinzugefügt')
+
+  /* WD-Flug im Popup (Finn 22.10.2026, s. o.): nach erfolgreichem Speichern erscheint über dem Popup die Zählung des Kontos („3/5"), ein ✓
+   * fliegt vom 🏆-Haken hinein, die Zahl springt auf „4/5" (bei Ziel mit Ziel-Häkchen), dann schließt das Popup. Ohne Haken kurz „Kein Winning
+   * Day — nichts hinzugefügt", ohne Flug. Gespeichert und gebucht wird dahinter wie bisher sofort — nur das Zugehen wartet auf das Ende
+   * (≤ 1,35 s; Klicks ins Popup sind solange aus). Scheitert das Speichern, kommt der Aufruf nie (er steht hinter dem Plan-Update).
+   * prefers-reduced-motion: kein Flug, nur der Zahlwechsel. */
+  let _tcWdFlug = null   // { els, timers } — solange gesetzt, schließt die Flug-Anzeige das Popup selbst
+  function tcWdFlugAbbrechen(){
+    const f = _tcWdFlug; _tcWdFlug = null
+    if(!f) return
+    f.timers.forEach(clearTimeout)
+    f.els.forEach(e => { try{ e.remove() }catch(_){} })
+    document.getElementById('tradeCompleteModal')?.classList.remove('tc-wd-flug')
   }
+  function tcWdFlugEnde(){ tcWdFlugAbbrechen(); document.getElementById('tradeCompleteModal')?.classList.remove('open') }
+  function tcWdFlug(s){
+    tcWdFlugAbbrechen()
+    const bg = document.getElementById('tradeCompleteModal'), md = bg && bg.querySelector('.modal')
+    if(!s || !bg || !md || !bg.classList.contains('open')) return
+    const ruhig = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    // Karte im sichtbaren Teil des Popups (Handy: Blatt von unten, oft höher als der Bildschirm): ~150 px über dem 🏆-Haken, damit der ✓
+    // sichtbar hochfliegt; Haken nicht im Bild → mittig
+    const r = md.getBoundingClientRect(), vh = window.innerHeight
+    const sichtOben = Math.max(r.top, 0) + 70, sichtUnten = Math.min(r.bottom, vh) - 70
+    const cb = document.getElementById('tc-winning-day'), cr0 = cb ? cb.getBoundingClientRect() : null
+    const cbImBild = !!(cr0 && cr0.width && cr0.top >= 0 && cr0.bottom <= vh)
+    const karte = document.createElement('div')
+    karte.className = 'tc-wd-flug-karte ist-' + s.art
+    karte.setAttribute('role', 'status')
+    karte.style.left = Math.round(r.left + r.width / 2) + 'px'
+    karte.style.top = Math.round(cbImBild ? Math.min(Math.max(cr0.top - 150, sichtOben), Math.max(sichtOben, sichtUnten)) : (sichtOben + sichtUnten) / 2) + 'px'
+    karte.innerHTML = s.art === 'kein-wd'
+      ? abhakZeichenSvg('kein-wd') + '<div><b>Kein Winning Day</b><small>nichts hinzugefügt</small></div>'
+      : `<div class="tc-wd-flug-titel">🏆 Winning Day</div><div class="tc-wd-flug-zahl mono"><span class="tc-wd-flug-ist">${s.vorher}</span>/${s.ziel}</div><small>${escapeHtml(s.konto || '')}</small>`
+    bg.appendChild(karte); bg.classList.add('tc-wd-flug')
+    const f = _tcWdFlug = { els: [karte], timers: [] }
+    const nach = (ms, fn) => f.timers.push(setTimeout(() => { if(_tcWdFlug === f) fn() }, ms))
+    const sprung = () => {
+      const z = karte.querySelector('.tc-wd-flug-zahl'), ist = karte.querySelector('.tc-wd-flug-ist')
+      if(ist) ist.textContent = String(s.nachher)
+      if(z){ z.classList.add('ist-neu'); if(s.nachher >= s.ziel) z.insertAdjacentHTML('beforeend', `<span class="tc-wd-flug-ziel">${abhakZeichenSvg('wd')}</span>`) }
+    }
+    if(!s.flug){ nach(1000, tcWdFlugEnde); return }
+    if(ruhig){ nach(350, sprung); nach(1100, tcWdFlugEnde); return }
+    nach(170, () => {
+      const zr = karte.querySelector('.tc-wd-flug-zahl').getBoundingClientRect(), cr = cb ? cb.getBoundingClientRect() : null
+      const x1 = zr.left + zr.width / 2, y1 = zr.top + zr.height / 2
+      const x0 = (cr && cr.width) ? cr.left + cr.width / 2 : x1, y0 = Math.min(Math.max((cr && cr.width) ? cr.top + cr.height / 2 : y1 + 80, 12), vh - 12)
+      const punkt = document.createElement('div')
+      punkt.className = 'tc-wd-flug-punkt'; punkt.textContent = '✓'
+      punkt.style.left = Math.round(x0) + 'px'; punkt.style.top = Math.round(y0) + 'px'
+      bg.appendChild(punkt); f.els.push(punkt)
+      const dx = Math.round(x1 - x0), dy = Math.round(y1 - y0)
+      if(typeof punkt.animate === 'function') punkt.animate([
+        { transform: 'translate(-50%,-50%) scale(.6)', opacity: 0 },
+        { transform: `translate(calc(-50% + ${Math.round(dx * .45)}px), calc(-50% + ${Math.round(dy * .45) - 36}px)) scale(1.1)`, opacity: 1, offset: .45 },
+        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.45)`, opacity: .25 }
+      ], { duration: 520, easing: 'cubic-bezier(.45,0,.3,1)', fill: 'forwards' })
+      nach(500, () => { punkt.remove(); sprung() })
+    })
+    nach(1350, tcWdFlugEnde)
+  }
+  window._tcWdFlug = tcWdFlug   // Test-Haken (Stub)
 
   function tcWinningDayPrepare(p){
+    tcWdFlugAbbrechen()   // neues Öffnen während eines WD-Flugs: Flug weg, das Popup bleibt offen
     _tcGoodDayHand = false
     const wrap = document.getElementById('tc-winning-day-wrap')
     const cb = document.getElementById('tc-winning-day')
@@ -62640,6 +62717,7 @@
   }
   function closeTradeCompleteModal(){
     _completingPlanId = null
+    if(_tcWdFlug) return   // WD-Flug läuft noch (22.10.2026): das Popup geht mit seinem Ende zu, nicht mitten im Flug
     document.getElementById('tradeCompleteModal').classList.remove('open')
   }
 
@@ -63369,15 +63447,15 @@
         try{
           abNach()
           const abAcc = (accounts || []).find(a => String(a.id) === String(targetAccountId || p.masterAccountId))
-          // Winning Day (22.10.2026): ohne Bestanden/Geblowt meldet die Karte die WD-Zählung — Stand VOR zielManuellPlus gelesen (+1 im Text)
+          // Winning Day (22.10.2026): ohne Bestanden/Geblowt fliegt die WD-Zählung im Popup — Stand VOR zielManuellPlus gelesen
           const wdRm = abArt ? null : tcWdRmStand()
-          if(wdRm) tcWdRmNachSpeichern(wdRm)
+          if(wdRm) tcWdFlug(wdRm)
           else abhakRueckmeldung(abArt, abArt === 'bestanden' ? abhakUebergang(_completingPlanId, abAcc && abAcc.type) : '')
         }catch(_){}
       }
       // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s, bis das Popup schließt"): der Plan ist gespeichert — das Popup geht
       // jetzt schon zu, die Buchungen in Finanzen und Zähler laufen dahinter weiter (Fehler danach als Hinweis, nicht im Popup)
-      document.getElementById('tradeCompleteModal')?.classList.remove('open')
+      if(!_tcWdFlug) document.getElementById('tradeCompleteModal')?.classList.remove('open')   // WD-Flug läuft: er schließt selbst (≤ 1,35 s)
       _tcSchonZu = true
 
       // pendingFinish erst JETZT löschen — nach erfolgreichem Speichern, nicht schon beim Öffnen des Modals
