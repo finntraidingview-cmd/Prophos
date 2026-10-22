@@ -16273,6 +16273,55 @@ def tsx_login_beweis(lg):
     return bool(u_ok and p_ok and isinstance(lg.get("knopf"), dict)), text
 
 
+# TOPSTEPX-AUTOFILL VON SELBST (22.10.2026, Marco: 16 Fehlstarts 05:39–13:34 Dubai „TopstepX im Puls-Chrome nicht angemeldet (Benutzer
+# LEER, Passwort LEER …)", kein Topstep-Trade lief). Finn: „ins Username-Feld drücken, dann kommt das Chrome-Autofill (E-Mail + Passwort-
+# Punkte, darunter ‚Manage passwords…'), darauf drücken, dann PLATFORM LOGIN — wie beim Tradovate-Login." Zeilen der Liste ohne Login:
+TSX_AUTOFILL_TABU = re.compile(r"manage|verwalt|passkey|password manager|passwort-?manager|generat|generier|show all|alle anzeigen|"
+                               r"other passwords|andere passw|weitere passw|use (a )?(different|other)|settings|einstellung", re.I)
+
+
+def tsx_autofill_zeilen(roh, ohne=None):
+    """REIN RECHNEND (testbar): UIA-Tripel (name, (l,t,r,b), typ) aus Chromes Vorschlagsliste → Zeilen mit einem gespeicherten Login,
+    von oben nach unten. Ein Eintrag besteht in UIA aus mehreren Knoten (ListItem + Text Username + Text ••••): Knoten derselben Höhe
+    sind EINE Zeile; ein Behälter über mehrere Zeilen zählt nicht. Zeilen mit „Manage passwords…" & Co. fallen ganz raus, reine Punkte
+    (maskierte Passwörter) tragen keinen Namen. ohne = Bildschirm-Rechteck des Benutzerfelds (nie anklicken). -> [{text, punkt, r}]"""
+    k = []
+    for e in roh or ():
+        try:
+            name, (l, t, r, b) = " ".join(str(e[0] or "").split()), (int(v) for v in e[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not name or r - l < 3 or b - t < 3:
+            continue
+        if ohne and not (r <= ohne[0] or l >= ohne[2] or b <= ohne[1] or t >= ohne[3]):
+            continue
+        k.append({"name": name, "r": (l, t, r, b), "my": (t + b) / 2.0, "h": b - t})
+    # Behälter raus: enthält die Mitten zweier kleinerer Knoten, die in verschiedenen Zeilen liegen
+    def behaelter(a):
+        drin = [x for x in k if x is not a and x["h"] < a["h"] * 0.7 and a["r"][1] <= x["my"] <= a["r"][3]]
+        return any(abs(x["my"] - y["my"]) > min(x["h"], y["h"]) / 2.0 for x in drin for y in drin)
+    k = sorted((x for x in k if not behaelter(x)), key=lambda x: x["my"])
+    zeilen = []
+    for x in k:
+        z = zeilen[-1] if zeilen else None
+        if z and z["t"] <= x["my"] <= z["b"]:
+            z["knoten"].append(x)
+            z["t"], z["b"] = min(z["t"], x["r"][1]), max(z["b"], x["r"][3])
+        else:
+            zeilen.append({"knoten": [x], "t": x["r"][1], "b": x["r"][3]})
+    out = []
+    for z in zeilen:
+        if any(TSX_AUTOFILL_TABU.search(x["name"]) for x in z["knoten"]):
+            continue
+        namen = [x for x in z["knoten"] if not re.fullmatch(r"[•●*·\s]+", x["name"]) and len(re.sub(r"\W", "", x["name"])) >= 3]
+        if not namen:
+            continue
+        n0 = min(namen, key=lambda x: x["h"] * (x["r"][2] - x["r"][0]))   # der Text selbst (kleinster Knoten) — sein Mittelpunkt liegt sicher im Eintrag
+        l, t, r, b = n0["r"]
+        out.append({"text": n0["name"][:80], "punkt": ((l + r) // 2, (t + b) // 2), "r": n0["r"]})
+    return out
+
+
 def tsx_inventar_deckeln(daten, max_bytes=TSX_INVENTAR_MAX):
     """REIN RECHNEND (testbar): puls_augen-Zeile unter max_bytes — erst Blatt-Texte, dann Elemente von hinten kürzen (Kopf bleibt),
     Zähler inventar.gekuerzt. -> daten (Kopie)"""
@@ -16353,9 +16402,104 @@ def _tsx_k0_lesen(s, trail, zustand, pc, blick=None):
     return {"zustand": zustand, "arts": geschrieben, "elemente": len(inv.get("elemente") or [])}
 
 
+def _tsx_autofill_klick(s, feld_rect, trail, diag=False):
+    """Chromes Vorschlagsliste unter dem TopstepX-Benutzerfeld (titelloses Popup-Fenster des Puls-Chrome, für CDP unsichtbar) per
+    Windows-UIA lesen und die EINE Login-Zeile (tsx_autofill_zeilen) mit der echten Maus anklicken — wie _cdp_autofill_klick, nur ohne
+    bekannten Username (TopstepX kennt keinen tv_username): mehr als eine gespeicherte Zeile = nicht eindeutig, kein Klick. -> True/False"""
+    if not _WIN_EINGABE:
+        trail.append("[Login] TopstepX: Vorschlagsliste nur unter Windows lesbar")
+        return False
+    from pywinauto import Desktop
+    ohne = None
+    try:
+        g, kl = s.lese_js(WIN_GEO_JS) or {}, _klient_rechteck(getattr(s, "_win_hwnd", None))
+        x, y, w, h = [float(v) for v in feld_rect[:4]]
+        a, _g1 = tv_bildschirm_punkt([x, y, 1.0, 1.0], g, kl)
+        b, _g2 = tv_bildschirm_punkt([x + w - 1.0, y + h - 1.0, 1.0, 1.0], g, kl)
+        if a and b:
+            ohne = (int(a[0]), int(a[1]), int(b[0]), int(b[1]))
+    except Exception:
+        ohne = None
+    roh = []
+    for f in _puls_fenster_liste(_puls_chrome_browser_pid()):
+        if str(f.get("text") or "").strip():           # nur titellose Popup-Fenster — das Browserfenster selbst trägt den Seitentitel
+            continue
+        try:
+            w_ = Desktop(backend="uia").window(handle=int(f["hwnd"])).wrapper_object()
+            roh += [x_ for x_ in _tv_uia_roh(w_, CDP_AUTOFILL_TYPEN, 600, muster=(re.compile(r"\S"),)) if x_[1]]
+        except Exception:
+            continue
+    zeilen = tsx_autofill_zeilen(roh, ohne)
+    if len(zeilen) != 1:
+        trail.append(f"[Login] TopstepX: {len(zeilen)} gespeicherte Logins in Chromes Liste"
+                     + (f" ({[z['text'][:30] for z in zeilen][:4]}) — nicht eindeutig, kein Klick" if zeilen else ""))
+        if diag:
+            trail.append(f"[Login] Vorschlagsliste enthält: {cdp_liste_kurz(roh)}")
+        return False
+    x_, y_ = zeilen[0]["punkt"]
+    _maus_fahren(x_, y_)
+    _warte(0.12, 0.1)
+    if not _klick_absolut(x_, y_):
+        trail.append("[Login] TopstepX: Klick auf den Vorschlag von Windows abgelehnt")
+        return False
+    trail.append(f"[Login] TopstepX: Vorschlag '{zeilen[0]['text'][:40]}' geklickt @{x_},{y_} (Windows-Maus)")
+    return True
+
+
+def _tsx_autofill_waehlen(s, lg, trail):
+    """Finns Handweg (22.10.2026): ins Benutzerfeld klicken (Fokus-Beweis) → Chrome zeigt den gespeicherten Login → anklicken → Benutzer
+    UND Passwort tragen danach Chromes Autofill-Markierung (tsx_login_beweis). Zweiter Versuch: Feld leeren + Pfeil runter (öffnet die
+    Liste nur, schickt nie ab). NIE tippen außer Strg+A/Backspace/Pfeil, NIE Enter, Passwort nie gelesen. Den Login-Klick macht der
+    Aufrufer. -> (login-Blick | None = Login-Seite weg, ok, text)"""
+    u = lg.get("user") if isinstance(lg.get("user"), dict) else {}
+    p = lg.get("pw") if isinstance(lg.get("pw"), dict) else {}
+    ok, text = tsx_login_beweis(lg)
+    if u.get("fokus") or p.get("fokus"):
+        trail.append("[Login] TopstepX: ein Login-Feld hat schon den Fokus (Hand-Anmeldung?) — Autofill nicht angefasst")
+        return lg, ok, text
+    if not cdp_rect(u):
+        trail.append("[Login] TopstepX: Benutzerfeld vor dem Passwortfeld nicht gefunden — Autofill nicht möglich")
+        return lg, ok, text
+    if not (s.klick(cdp_rect(u), "TopstepX-Benutzerfeld (Autofill)") and s.fokus_im(cdp_rect(u), "TopstepX-Benutzerfeld")):
+        trail.append("[Login] TopstepX: Klick ins Benutzerfeld kam nicht an (kein Fokus) — nichts gewählt")
+        return lg, ok, text
+    trail.append("[Login] TopstepX: Benutzerfeld geklickt, Fokus bewiesen — warte auf Chromes Vorschlagsliste")
+    for versuch in (1, 2):
+        if versuch == 2:
+            if not s.fokus_im(cdp_rect(u), "TopstepX-Benutzerfeld"):
+                trail.append("[Login] TopstepX: Benutzerfeld ohne Fokus — keine Tasten gedrückt")
+                break
+            s.taste("a", modifiers=2)                     # leer zeigt Chrome alle gespeicherten Logins der Seite
+            s.taste("Backspace")
+            _warte(0.4, 0.2)
+            s.taste("ArrowDown")
+            trail.append("[Login] TopstepX: Benutzerfeld geleert, Liste neu geöffnet")
+        _warte(0.8, 0.4)
+        if not _tsx_autofill_klick(s, cdp_rect(u), trail, diag=(versuch == 1)):
+            continue
+        _warte(0.8, 0.4)
+        lg2 = (s.lese_js(TSX_K0_BLICK_JS) or {}).get("login") or {}
+        if not lg2.get("seite"):
+            return None, True, "Login-Seite weg"
+        ok, text = tsx_login_beweis(lg2)
+        trail.append(f"[Login] TopstepX nach dem Vorschlag: {text}")
+        lg = lg2
+        if ok:
+            return lg, True, text
+        u = lg.get("user") if isinstance(lg.get("user"), dict) else u
+        if versuch == 1 and not s.klick(cdp_rect(u), "TopstepX-Benutzerfeld (Autofill)"):   # Fokus zurück, sonst gingen die Tasten woanders hin
+            break
+    try:
+        s.taste("Escape")                                 # offene Liste zu (auf der Login-Seite ohne Wirkung sonst)
+    except Exception:
+        pass
+    return lg, False, text
+
+
 def _tsx_cdp_login(s, trail):
     """TopstepX-Login-Seite im Puls-Chrome? Dann höchstens EIN Klick auf „PLATFORM LOGIN" — nur mit Autofill-Beweis (tsx_login_beweis),
-    nie tippen, nie Enter, kein zweiter Versuch. -> True (angemeldet) | Fehlertext"""
+    nie tippen, nie Enter, kein zweiter Versuch. Füllt Chrome nicht von selbst, wählt Puls seit 22.10.2026 den gespeicherten Login aus
+    Chromes Liste unter dem Benutzerfeld (_tsx_autofill_waehlen, nur Windows). -> True (angemeldet) | Fehlertext"""
     def blick():
         b = s.lese_js(TSX_K0_BLICK_JS) or {}
         return b.get("login") if isinstance(b.get("login"), dict) else {}
@@ -16431,6 +16575,15 @@ def _tsx_cdp_login(s, trail):
         # Prüfer K0: ein Login-Klick ohne Erfolg darf sich nicht Lauf für Lauf wiederholen (Fehlversuche bis zur Kontosperre)
         return (f"TopstepX zeigt wieder die Login-Seite, der letzte Login-Klick war vor {int(seit // 60)} min — kein neuer Versuch. "
                 "Bitte im Puls-Chrome von Hand anmelden (`python order_bot.py augen start tsx`).")
+    if not ok and _WIN_EINGABE and not lg.get("fehler_text") and not lg.get("zwei_faktor"):
+        # Autofill von selbst (22.10.2026, s. TSX_AUTOFILL_TABU): Chrome füllt erst nach einem Klick ins Feld — wie Finns Handweg
+        lg2, ok, text = _tsx_autofill_waehlen(s, lg, trail)
+        if lg2 is None:
+            s._seite_abwarten(15.0)
+            s._augen_laden()
+            trail.append("TopstepX angemeldet (Login-Seite nach dem Vorschlag weg)")
+            return True
+        lg = lg2
     if not ok:
         return (f"TopstepX im Puls-Chrome nicht angemeldet ({text}; {_puls_chrome_wo()}) — bitte genau in DIESEM Chrome einmal von "
                 "Hand anmelden und das Passwort speichern (`python order_bot.py augen start tsx` holt das Fenster nach vorn).")

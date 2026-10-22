@@ -6106,6 +6106,87 @@ def test_tsx_k0():
     chk(isinstance(r_d, str) and s_d.ws.rufe_n == [] and isinstance(r_e, str) and s_e.ws.rufe_n == [],
         "Feld von Hand gefüllt oder im Fokus → NIE neu laden (Hand-Anmeldung bleibt)")
     chk(isinstance(r_f, str) and s_f.ws.rufe_n == [] and "kein neuer Versuch" in r_f, f"innerhalb der Login-Sperre kein Neuladen ({r_f})")
+    # TOPSTEPX-AUTOFILL VON SELBST (22.10.2026, Marco 16 Fehlstarts „Benutzer LEER, Passwort LEER"): Zeilen der Chrome-Liste
+    Z = ob.tsx_autofill_zeilen
+    liste = [("Passwords", (100, 300, 400, 420), "Group"),                    # Behälter über beide Zeilen
+             ("user@example.com ••••••••", (100, 300, 400, 350), "ListItem"), ("user@example.com", (140, 305, 380, 325), "Text"),
+             ("••••••••", (140, 327, 220, 345), "Text"),
+             ("Manage passwords…", (100, 370, 400, 410), "ListItem"), ("Manage passwords…", (140, 380, 300, 400), "Text")]
+    z1 = Z(liste)
+    chk(len(z1) == 1 and z1[0]["text"] == "user@example.com" and 305 <= z1[0]["punkt"][1] <= 325 and 140 <= z1[0]["punkt"][0] <= 380,
+        f"Autofill-Liste: EIN Login (Text-Mitte), Behälter + ‚Manage passwords…' + Punkte zählen nicht ({z1})")
+    z2 = Z(liste + [("zweiter@example.com", (140, 425, 380, 445), "Text")])
+    chk(len(z2) == 2, f"zwei gespeicherte Logins → zwei Zeilen (Aufrufer klickt dann nicht) ({[z['text'] for z in z2]})")
+    chk(Z(liste[4:]) == [] and Z([("user@example.com", (140, 305, 380, 325), "Text")], ohne=(130, 300, 390, 330)) == []
+        and Z([("x", None, "Text"), ("Passwörter verwalten", (1, 1, 90, 20), "Text"), ("Passwort-Manager", (1, 30, 90, 50), "Text")]) == [],
+        "nur ‚Manage passwords…' / Benutzerfeld selbst / deutsche Verwalten-Zeilen → keine Zeile")
+
+    # Ablauf am Fenster (Windows-Weg als Attrappe): leer → Feld-Klick + Fokus → Vorschlag → beide Felder Autofill → EIN PLATFORM LOGIN
+    leer2 = {"seite": True, "knoepfe": 1, "knopf": {"rect": [700, 500, 200, 40]}, "user": {"rect": [700, 300, 200, 30]},
+             "pw": {"rect": [700, 360, 200, 30]}}
+    voll2 = dict(leer2, user={"rect": [700, 300, 200, 30], "gefuellt": True, "autofill": True},
+                 pw={"rect": [700, 360, 200, 30], "gefuellt": True, "autofill": True})
+
+    class _SA(_SN):
+        def __init__(self, af_ok=True, fokus=False):
+            _SN.__init__(self, leer2)
+            self.phase, self.af_ok, self.tasten, self.fokus = "leer", af_ok, [], fokus
+
+        def lese_js(self, a, timeout=8):
+            if self.phase == "drin":
+                return {"login": {"seite": False}}
+            if self.phase == "voll":
+                return {"login": voll2}
+            return {"login": dict(leer2, user=dict(leer2["user"], fokus=True)) if self.fokus else leer2}
+
+        def klick(self, r, n, toast_ok=False, pruef=None):
+            self.klicks.append(n)
+            if "PLATFORM LOGIN" in n:
+                self.phase = "drin"
+            return True
+
+        def fokus_im(self, r, n, versuche=3):
+            return True
+
+        def taste(self, k, modifiers=0):
+            self.tasten.append(k)
+
+        def _win_vorn(self):
+            return True
+    af_rufe = []
+    d7 = tempfile.mkdtemp()
+    alt7 = (ob._AUGEN_HIER, ob._warte, ob._WIN_EINGABE, ob._tsx_autofill_klick, ob._tsx_pause)
+    try:
+        ob._AUGEN_HIER, ob._warte, ob._WIN_EINGABE, ob._tsx_pause = d7, (lambda a_, b_: None), True, (lambda: None)
+
+        def _af(s_, r_, t_, diag=False):
+            af_rufe.append(list(r_))
+            if s_.af_ok:
+                s_.phase = "voll"
+            return s_.af_ok
+        ob._tsx_autofill_klick = _af
+        s_g, t_g = _SA(), []
+        r_g = ob._tsx_cdp_login(s_g, t_g)
+        merk_g = ob._augen_json_lesen("tsx_login.json") is not None
+        ob._augen_json_schreiben("tsx_login.json", {"at": 0})
+        s_h, t_h = _SA(af_ok=False), []
+        r_h = ob._tsx_cdp_login(s_h, t_h)
+        ob._augen_json_schreiben("tsx_login.json", {"at": 0})
+        s_i, t_i = _SA(fokus=True), []
+        r_i = ob._tsx_cdp_login(s_i, t_i)
+    finally:
+        ob._AUGEN_HIER, ob._warte, ob._WIN_EINGABE, ob._tsx_autofill_klick, ob._tsx_pause = alt7
+    chk(r_g is True and s_g.klicks[0].startswith("TopstepX-Benutzerfeld") and sum("PLATFORM LOGIN" in k for k in s_g.klicks) == 1
+        and af_rufe[:1] == [[700, 300, 200, 30]] and merk_g and "Enter" not in s_g.tasten
+        and any("nach dem Vorschlag: Benutzer von Chrome ausgefüllt, Passwort von Chrome ausgefüllt" in x for x in t_g),
+        f"Autofill: Feld-Klick → Vorschlag → Beweis → genau EIN PLATFORM LOGIN, nie Enter ({s_g.klicks}, {r_g})")
+    chk(isinstance(r_h, str) and "nicht angemeldet" in r_h and not any("PLATFORM LOGIN" in k for k in s_h.klicks)
+        and s_h.tasten[-1] == "Escape" and "ArrowDown" in s_h.tasten and "Enter" not in s_h.tasten,
+        f"kein eindeutiger Vorschlag → 2. Versuch (leeren + Pfeil runter), dann Esc, KEIN Login-Klick ({s_h.tasten}, {r_h})")
+    chk(isinstance(r_i, str) and s_i.klicks == [] and s_i.tasten == [], "Feld schon im Fokus (Hand-Anmeldung) → Autofill nicht angefasst")
+    import inspect
+    q_af = inspect.getsource(ob._tsx_autofill_waehlen) + inspect.getsource(ob._tsx_autofill_klick)
+    chk("tippen(" not in q_af and '"Enter"' not in q_af and ".value" not in q_af, "Autofill-Weg tippt nie, drückt nie Enter, liest keinen Wert")
     blick_gross = {"dialog_inhalt": [{"felder": [{"text": "x" * 60, "aria": "y" * 40}] * 40, "kaestchen": []}] * 2, "menues": [{"eintraege": [{"text": "z" * 80}] * 30}]}
     dk2 = ob.tsx_inventar_deckeln({"zustand": "bracket", "inventar": {"elemente": [{"t": "e" * 150}] * 45, "blatt": [], "stand": {"a": "s" * 3000},
                                                                     "chart": {"c": "k" * 3000}, "k0_blick": blick_gross}}, max_bytes=9000)
