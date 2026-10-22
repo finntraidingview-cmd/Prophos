@@ -9,8 +9,9 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "_ap_norm", "_ap_de", "puls_heim_schwellen", "puls_heim_nah", "puls_heim_kurs_frisch", "puls_heim_big_trades")
-KONSTANTEN = ("PULS_HEIM_KURS_MAX_ALTER_S", "PULS_HEIM_CODE_NAH", "PULS_HEIM_CODE_UNKLAR")
+FUNKTIONEN = ("_wd_num", "_ap_norm", "_ap_de", "puls_heim_schwellen", "puls_heim_nah", "puls_heim_kurs_frisch", "puls_heim_big_trades",
+              "puls_heim_wd_trades", "puls_heim_wd_schwellen")
+KONSTANTEN = ("PULS_HEIM_KURS_MAX_ALTER_S", "PULS_HEIM_CODE_NAH", "PULS_HEIM_CODE_UNKLAR", "PULS_HEIM_WD_USD")
 
 
 def lade():
@@ -91,10 +92,25 @@ def main():
     ok([p["id"] for p in big(pl, "pc-1", ausser="a")] == ["b", "h"], "ausser")
     ok(big(pl, "pc-9") == [], "fremder PC")
 
+    # Winning Days dieses PCs (22.10.2026): eigene 100-$-Grenze
+    wdt, wds = ns["puls_heim_wd_trades"], ns["puls_heim_wd_schwellen"]
+    pl2 = pl + [{"id": "i", "status": "open", "route": "tvv2", "konto_typ": "winning_days", "mt5_baseline": {"hedge": {"pc": "pc-1"}}},
+                {"id": "j", "status": "open", "route": "tvv2", "winning_day": True, "mt5_baseline": {"hedge": {"pc": "pc-2"}}}]
+    ok(sorted(p["id"] for p in wdt(pl2, "pc-1")) == ["c", "i"], f"WDs pc-1: {[p['id'] for p in wdt(pl2, 'pc-1')]}")
+    ok([p["id"] for p in wdt(pl2, "pc-1", ausser="c")] == ["i"], "WD ausser")
+    ok(sorted(p["id"] for p in big(pl2, "pc-1")) == ["a", "b", "h"], "WDs bleiben aus der Big-Trade-Liste")
+    ok(wds({"aktiv": True}) == (100.0, 100.0), "WD-Standard 100/100")
+    ok(wds({"aktiv": True, "wd_tp_usd": 150, "wd_liq_usd": 80}) == (150.0, 80.0), "WD aus der Regel")
+    ok(wds({"aktiv": True, "wd_aktiv": False}) is None and wds({"aktiv": False}) is None and wds(None) is None, "WD aus")
+    # MNQ-WD BUY 3 Kt, TP 29.595,25: 15 Pkt davor = 90 $ → nah; 20 Pkt = 120 $ → frei
+    zw = {"richtung": "buy", "punktwert": 2, "kt": 3, "tp_level_nq": 29595.25, "sl_level_nq": 27337.5}
+    ok(nah(zw, 29580.25, (100.0, 100.0))["nah"] is True, "WD 90 $ vor TP = nah")
+    ok(nah(zw, 29575.25, (100.0, 100.0))["nah"] is False, "WD 120 $ vor TP = frei")
+
     if f:
         print("FEHLER:\n  " + "\n  ".join(f))
         sys.exit(1)
-    print("OK selftest_puls_heim: Schwellen, Nähe BUY/SELL/MNQ, nicht prüfbar, Kurs-Frische, Big Trades je PC")
+    print("OK selftest_puls_heim: Schwellen, Nähe BUY/SELL/MNQ, nicht prüfbar, Kurs-Frische, Big Trades je PC, Winning Days (100 $)")
 
 
 if __name__ == "__main__":

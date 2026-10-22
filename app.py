@@ -15440,7 +15440,7 @@ def _puls_heim_regel():
     if jetzt - _puls_heim_cache["at"] < PULS_HEIM_CACHE_S:
         return _puls_heim_cache["regel"]
     try:
-        z = (sb_select("puls_heim_regel", {"select": "aktiv,tp_usd,liq_usd,firmen", "id": "eq.1"}) or [None])[0]
+        z = (sb_select("puls_heim_regel", {"select": "*", "id": "eq.1"}) or [None])[0]   # „*“: wd_tp_usd/wd_liq_usd (22.10.2026) optional
         _puls_heim_cache.update(at=jetzt, regel=z, fehlt=False)
     except Exception as e:
         if not _puls_heim_cache["fehlt"]:
@@ -15549,6 +15549,43 @@ def puls_heim_big_trades(plaene, pc, ausser=None):
     return out
 
 
+# ══ WINNING DAYS AUCH (Finn 22.10.2026: „PULS verlässt den Winning Day auch kurz vor TP oder SL — wenn es 100 $ vor Take Profit oder SL ist,
+# darf PULS keine Order senden"). Befund 16.–22.10.: 25 von 50 WD-Hedges schloss der Terminal-Notfall statt das Userscript; in 4 Fällen
+# hatte Puls Sekunden vorher eine Order für ein anderes Konto auf demselben PC platziert (Chris 19.10. Order 18:13, WD-TP 18:13:04). Bisher
+# galt der Riegel nur für Big Trades (WD-TP ist mit ~350–400 $ kleiner als die 2.000-$-Grenze — er hätte immer gesperrt). Jetzt eigene,
+# kleine Grenze für Winning Days auf diesem PC: Rest bis TP oder bis zur Liq ≤ wd_tp_usd / wd_liq_usd (Standard 100 $, Spalten in
+# puls_heim_regel, sql/2026-10-22_puls_heim_wd.sql) → nicht frei, code big_trade_nah wie beim Big Trade (Panel/Tab warten und versuchen
+# neu). Nicht prüfbar (kein Kurs/Level) → bei WDs FREI (anders als beim Big Trade): ein WD läuft oft stundenlang, ein toter Feed darf
+# nicht alle Orders des PCs sperren; die Heim-Wache holt den Puls-Chrome danach sofort zurück. ══
+PULS_HEIM_WD_USD = 100.0
+
+
+def puls_heim_wd_trades(plaene, pc, ausser=None):
+    """REIN RECHNEND (testbar): laufende Winning Days DIESES PCs — open, tvv2/tsv2, winning_day bzw. konto_typ winning_days, Hedge auf
+    diesem PC (mt5_baseline.hedge.pc), nicht der Plan selbst."""
+    out = []
+    for p in plaene or ():
+        if str(p.get("id")) == str(ausser or ""):
+            continue
+        if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2"):
+            continue
+        if not (p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days"):
+            continue
+        h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
+        if not isinstance(h, dict) or str(h.get("pc") or "") != str(pc or ""):
+            continue
+        out.append(p)
+    return out
+
+
+def puls_heim_wd_schwellen(regel):
+    """REIN RECHNEND (testbar): (tp_usd, liq_usd) für Winning Days aus der Regel (wd_tp_usd/wd_liq_usd), sonst PULS_HEIM_WD_USD. None = aus."""
+    if not isinstance(regel, dict) or regel.get("aktiv") is False or regel.get("wd_aktiv") is False:
+        return None
+    tp, liq = _wd_num(regel.get("wd_tp_usd")), _wd_num(regel.get("wd_liq_usd"))
+    return (PULS_HEIM_WD_USD if tp is None else tp, PULS_HEIM_WD_USD if liq is None else liq)
+
+
 def puls_heim_pruefen(pc, ausser=None):
     """Darf der Puls auf diesem PC das Konto wechseln? → {frei, code?, grund?, big_trade?}. Riegel aus (Tabelle fehlt, aktiv false, kein PC,
     kein Big Trade hier) → frei. Big Trade nah oder nicht prüfbar → nicht frei. Fehler beim Rechnen → nicht frei (fail-closed), Grund im Text."""
@@ -15562,9 +15599,11 @@ def puls_heim_pruefen(pc, ausser=None):
         rows = _sb_all("trade_plans", {"select": felder, "status": "eq.open", "route": "in.(tvv2,tsv2)",
                                        "mt5_baseline->hedge->>pc": f"eq.{pc}"})
         big = puls_heim_big_trades(rows, pc, ausser)
-        if not big:
+        wd_schw = puls_heim_wd_schwellen(regel)
+        wds = puls_heim_wd_trades(rows, pc, ausser) if wd_schw else []
+        if not big and not wds:
             return {"frei": True}
-        ids = sorted({str(p.get("master_account_id")) for p in big if p.get("master_account_id")})
+        ids = sorted({str(p.get("master_account_id")) for p in big + wds if p.get("master_account_id")})
         accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at",
                                                                      "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
         fruehere = _wd_fruehere_trades(ids)
@@ -15585,6 +15624,19 @@ def puls_heim_pruefen(pc, ausser=None):
             if n["nah"]:
                 return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
                         "grund": f"Big Trade {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
+        for p in wds:   # Winning Days (22.10.2026): eigene 100-$-Grenze, nicht prüfbar = frei (s. oben)
+            acc = accs.get(str(p.get("master_account_id") or ""))
+            z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+            kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
+            n = puls_heim_nah(z, kurs, wd_schw)
+            if not n["nah"]:
+                continue
+            name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Winning Day'} …{str((acc or {}).get('external_id') or '')[-4:]}"
+            art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'MNQ'}"
+            info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
+                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], "winning_day": True}
+            return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
+                    "grund": f"Winning Day {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
         return {"frei": True}
     except Exception as e:
         print(f"[puls-heim] ⚠️ Prüfung PC {pc}: {type(e).__name__}: {str(e)[:160]}", flush=True)

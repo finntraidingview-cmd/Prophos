@@ -24148,18 +24148,54 @@
   // 19.10.2026 (Finn, Live-Test Chris: Heimweg kam erst 1–2 min nach der Order — „sobald die Order durch ist, soll der Puls direkt zu dem
   // Konto zurückswitchen"): nach einer ORDER und nach einer einzelnen Lesung außerhalb des Rundgangs nur 1,5 s Ruhe (sofort), die 20 s
   // Sammelpause bleibt nur für den Rundgang (tvV2Poll.busy), damit mehrere Konten weiterhin EINEN Heimweg auslösen.
-  const BTH_RUHE_MS = 20000, BTH_WARTE_MS = 10000, BTH_SOFORT_MS = 1500
+  const BTH_RUHE_MS = 20000, BTH_WARTE_MIN_MS = 2000, BTH_WARTE_MAX_MS = 4000, BTH_SOFORT_MS = 1500
   let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false, _bthAnstoss = null
   function bigTradePlan(){
     // HEIMKONTO MIT RANGFOLGE (14.10.2026 abends, Finn: „läuft ein Weg mit Hedge bei Orbit oder ein Winning Day, platziert Puls die Order
     // und geht danach IMMER zurück zu dem Konto, wo der Trade läuft — laufen Orbit-Big-Trade und Winning Day zugleich, immer zurück zum
     // Orbit-Trade, Orbit hat mehr Positionen und mehr Größe, Prio 1"). Prio 1 = laufender Orbit/Topstep-Trade MIT Hedge (kein Winning
     // Day), Prio 2 = laufender Winning Day (Mini-Trade mit Fusion-Hedge, der Reader liest ihn genauso mit). Für den Riegel bleibt ein
-    // Winning Day KEIN Big Trade (prophos_big_trade, .1548) — er blockiert nichts und wird nicht blockiert; hier geht es nur ums Heimkommen.
+    // Winning Day KEIN Big Trade (prophos_big_trade, .1548) — seit 22.10.2026 hat er im Riegel eine eigene 100-$-Grenze (app.py puls_heim_wd_trades); hier geht es ums Heimkommen.
+    // MEHRERE WINNING DAYS (Finn 22.10.2026: „PULS immer nur auf dem Konto, das am nächsten am Take Profit ist — sobald der in TP geht, zum
+    // zweitnächsten am Take Profit bzw. am Stop Loss"): bisher der jüngste WD; die anderen sah das Userscript nie (10 von 14 blinden
+    // Notfall-Schließungen 16.–22.10. hatten einen zweiten WD auf derselben ID). Jetzt der WD mit dem kleinsten $-Rest bis TP ODER Liq
+    // (wdHeimWahl). Big Trades (Prio 1) unverändert der jüngste. WD-Erkennung wie das Backend (puls_heim_wd_trades): winning_day,
+    // tpIstWdPlan oder konto_typ winning_days — ein WD mit Hedge ohne winning_day-Flag galt hier sonst als Big Trade.
     const offen = (tradePlans || []).filter(p => p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p))
     const juengster = l => l.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
-    const big = juengster(offen.filter(p => p.winningDay !== true && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
-    return big || juengster(offen.filter(p => p.winningDay === true || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))))
+    const istWd = p => p.winningDay === true || p.kontoTyp === 'winning_days' || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))
+    const big = juengster(offen.filter(p => !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
+    return big || wdHeimWahl(offen.filter(istWd), juengster)
+  }
+  // $-Rest eines Winning Days bis TP oder Liq (der kleinere), aus dem Live-Kurs der Plan-Wurzel → Zahl oder null (kein Kurs/Level)
+  const BTH_WD_WECHSEL_USD = 30, BTH_WD_HALTEN_MS = 60000   // Umschalten nur bei klar näherem WD und nicht öfter als einmal je Minute
+  let _bthWdWahl = { id: '', at: 0 }
+  function wdHeimAbstand(p){
+    try{
+      const h = p && p.mt5Baseline && p.mt5Baseline.hedge; if(!h) return null
+      const sym = (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || p.masterSymbol || ''
+      const w = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(sym)) === 'NQ' ? 'NQ' : 'MNQ'
+      const kurs = (typeof hedgeKursDerWurzel === 'function') ? (hedgeKursDerWurzel(w) || hedgeKursDerWurzel(w === 'MNQ' ? 'NQ' : 'MNQ')) : null
+      if(!(kurs > 0)) return null
+      const ppl = w === 'MNQ' ? 2 : 20, kt = Number(p.masterContracts) || 1
+      const reste = [Number(h.tp_level_nq), Number(h.sl_level_nq)].filter(x => x > 1000).map(x => Math.abs(x - kurs) * ppl * kt)
+      return reste.length ? Math.min(...reste) : null
+    }catch(_){ return null }
+  }
+  function wdHeimWahl(wds, juengster){
+    if(wds.length <= 1) return wds[0] || null
+    const mit = wds.map(p => ({ p, a: wdHeimAbstand(p) })), bekannt = mit.filter(x => x.a != null).sort((x, y) => x.a - y.a)
+    if(!bekannt.length) return juengster(wds)   // kein Kurs → wie bisher der jüngste
+    const best = bekannt[0], akt = mit.find(x => String(x.p.id) === _bthWdWahl.id), jetzt = Date.now()
+    // Hysterese: der bisherige bleibt, solange der andere nicht ≥ 30 $ näher ist bzw. die letzte Wahl < 60 s her ist (kein Hin und Her —
+    // jeder Wechsel ist ein Login im Puls-Chrome und macht den Reader für die Konto-Ruhe blind)
+    if(akt && akt.a != null && String(best.p.id) !== _bthWdWahl.id && (best.a > akt.a - BTH_WD_WECHSEL_USD || jetzt - _bthWdWahl.at < BTH_WD_HALTEN_MS)) return akt.p
+    if(String(best.p.id) !== _bthWdWahl.id){
+      _bthWdWahl = { id: String(best.p.id), at: jetzt }
+      try{ _hwPulsWegAt = jetzt }catch(_){}   // Heim-Wache: der Prio-Wechsel zählt wie eine Puls-Aktion → Umzug nach 3 s, nicht erst nach 90 s
+      console.info(`[big-trade] Heimkonto = Winning Day „${best.p.masterName || best.p.id}" (${Math.round(best.a)} $ bis TP/Liq, ${wds.length} WDs offen)`)
+    }
+    return best.p
   }
   function bigTradeHeimPlanen(konto, grund, sofort){
     if(typeof window.mtcApi !== 'function' || _bthSelbst) return
@@ -24185,7 +24221,8 @@
     _bthTimer = null
     if(_bthLaeuft) return
     const bt = bigTradePlan(); if(!bt){ _bthAnstoss = null; return }
-    if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ _bthTimer = setTimeout(() => bigTradeHeim(grund), BTH_WARTE_MS); return }
+    // 22.10.2026 (Finn: „sobald die Order bestätigt ist, direkt zurück — nicht 1–2 Minuten“): belegt → alle 2–4 s (gestreut) statt fest 10 s nachsehen
+    if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ _bthTimer = setTimeout(() => bigTradeHeim(grund), BTH_WARTE_MIN_MS + Math.random() * (BTH_WARTE_MAX_MS - BTH_WARTE_MIN_MS)); return }
     const konto = tvV2Konto(bt)
     _bthLaeuft = true; _bthSelbst = true
     const t0 = Date.now(), anstoss = _bthAnstoss || t0
