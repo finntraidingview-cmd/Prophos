@@ -44585,7 +44585,7 @@
       // RICHTUNG AM START (07.10.2026): war NUR der Richtungs-Schutz rot und kam der Start von der Startzeit → erneut wie „verschieben"
       if(vonTick && rkSperre && failKeys.every(x => x === 'v2dir') && rkGilt(plan)){
         const w = await rkVerschieben(plan, rkSperre, true, 'puls')
-        abschluss(false, w === 'verschoben' ? '⇅ Richtungskonflikt — nichts platziert, neuer Versuch in 10–20 min.' : w === 'aufgegeben' ? '⇅ Richtungskonflikt bis Fensterende — nicht gestartet, von Hand starten.' : '✗ Nichts platziert — Zeilen oben prüfen.', !w)
+        abschluss(false, w === 'verschoben' ? '⇅ Richtungskonflikt — nichts platziert, neuer Versuch in 5–60 min.' : w === 'aufgegeben' ? '⇅ Richtungskonflikt bis Fensterende — nicht gestartet, von Hand starten.' : '✗ Nichts platziert — Zeilen oben prüfen.', !w)
         return
       }
       if(vonTick) await sfMelden(plan, { schritt: failKeys[0] || '', msg: _pfErrLog.join(' · ') })   // START-FEHLER (07.10.2026)
@@ -46786,7 +46786,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1716'
+  const OS_TAB_BUILD = '2026-09-22.1717'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47321,10 +47321,10 @@
       if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long')){
         const t = k.text + ' — nicht gestartet (Richtungs-Schutz).'
         if(fern) return fern.melde({ ok:false, msg: t })
-        // RICHTUNG AM START (07.10.2026): Start zur Startzeit → Grund an den Plan, Claim zurück, in 10–20 min erneut (wie verschieben)
+        // RICHTUNG AM START (07.10.2026): Start zur Startzeit → Grund an den Plan, Claim zurück, in 5–60 min erneut (seit 22.10.2026, wie verschieben)
         if(opts && opts.vonStartUm && rkGilt(plan)){
           const w = await rkVerschieben(plan, k, true, 'puls')
-          if(imPopup) pfEnde(false, t + (w === 'verschoben' ? ' Neuer Versuch in 10–20 min.' : w === 'aufgegeben' ? ' Bis Fensterende nicht lösbar — von Hand starten.' : ''))
+          if(imPopup) pfEnde(false, t + (w === 'verschoben' ? ' Neuer Versuch in 5–60 min.' : w === 'aufgegeben' ? ' Bis Fensterende nicht lösbar — von Hand starten.' : ''))
           return
         }
         toast(t, 'end'); return
@@ -51046,7 +51046,7 @@
       voll: `Wartet: ${text}. Startet von selbst, sobald der andere finale Trade zu und gelesen ist; bis dahin versucht der PC-Tab es alle 10–20 min neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }
     return { kurz: `⛔ Order ging nicht durch wegen Richtungsschutz${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
-      voll: `Order ging nicht durch wegen Richtungsschutz: ${text}. Abhaken/Nachlesen des Gegen-Trades löst die Sperre; bis dahin versucht der PC-Tab es alle ~10 min neu.`,
+      voll: `Order ging nicht durch wegen Richtungsschutz: ${text}. Abhaken/Nachlesen des Gegen-Trades löst die Sperre; bis dahin versucht der PC-Tab es alle 5–60 min (Zufall) neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }
   }
   /* Ende des Startfensters (deutsche Zeit, auto_plan_regeln.zeiten.fenster aus dem Delta-Monitor, sonst 00:00–14:30 · 14:30–17:30 ·
@@ -51069,15 +51069,22 @@
     }catch(e){ console.warn('[richtung-start] Protokoll', (e && e.message) || e) }
   }
   function rkPlanErsetzen(row){ const neu = rowToPlan(row); const i = tradePlans.findIndex(x => String(x.id) === String(row.id)); if(i >= 0) tradePlans[i] = neu; return neu }
-  /* (2b)/(3): Start verschieben (10–20 min Zufall) oder — nach Fensterende — aufgeben. nachClaim = der Claim ist schon gesetzt
+  /* (2b)/(3): Start verschieben (Gegenrichtung 5–60 min, Saldo/Waage 10–20 min Zufall, seit 22.10.2026) oder — nach Fensterende — aufgeben. nachClaim = der Claim ist schon gesetzt
    * (Sperre direkt vor der Order) und wird zurückgenommen, solange Puls nichts gesendet hat. → 'verschoben' | 'aufgegeben' | false */
   async function rkVerschieben(plan, k, nachClaim, quelle){
     const alt = rkFlag(plan), jetzt = new Date().toISOString(), name = plan.masterName || 'Plan'
     const erst = (alt && alt.status === 'wartet' && alt.erst_start) ? alt.erst_start : plan.startUm
     const versuche = ((alt && alt.status === 'wartet' && Number(alt.versuche)) || 0) + 1
-    const neuMs = Date.now() + (10 + Math.random() * 10) * 60000
+    // RICHTUNGSSCHUTZ 5–60 MIN (Finn 22.10.2026: „nicht immer fix 10 Minuten, sondern 5 bis 60 Minuten“, Zufall): wartet der Plan wegen
+    // einer Gegenrichtung derselben ID × Firma (k.lauf), würfelt der neue Start 5–60 min; Saldo-/Waage-Warten ohne Gegen-Trade (k.saldo)
+    // bleibt 10–20 min. Nach oben auf die Restzeit des Startfensters gedeckelt und aufgegeben wird erst, wenn nicht einmal die Untergrenze
+    // mehr passt — sonst gäbe ein Plan 30 min vor Fensterende schon mit ~55 % auf (Prüfer 22.10.2026).
+    const restRoh = (rkFensterEnde(erst) - Date.now()) / 60000   // ohne Startzeit NaN → wie früher nie aufgeben
+    const gegenLauf = !!(k && k.lauf && !k.saldo), restMin = isFinite(restRoh) ? restRoh : Infinity
+    const untenMin = gegenLauf ? 5 : 10, obenMin = gegenLauf ? Math.min(60, restMin) : 20
+    const aufgeben = restMin < untenMin
+    const neuMs = Date.now() + (untenMin + Math.random() * Math.max(0, obenMin - untenMin)) * 60000
     const gegen = String((k && k.lauf) || '?').toUpperCase(), grundTxt = (k && k.text) || 'Gegenrichtung bei derselben ID+Firma'
-    const aufgeben = neuMs > rkFensterEnde(erst)
     let q = supabase.from('trade_plans').update(aufgeben ? { start_um_gestartet_at: null } : { start_um: new Date(neuMs).toISOString(), start_um_gestartet_at: null })
       .eq('id', plan.id).eq('status', 'planned')
     q = nachClaim ? q.is('orbit_gesendet_at', null) : q.is('start_um_gestartet_at', null)
