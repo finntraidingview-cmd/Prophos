@@ -5155,9 +5155,31 @@ def test_puls_fehler_1682():
     u = d([{"pid": 1, "name": "terminal64.exe", "pfad": "C:\\x\\terminal64.exe"}])
     chk(u[0] == "unbekannt" and u[1].endswith(ob._UAC_HINWEIS) and "consent.exe" in u[1], f"nichts davon → unbekannt + alter Hinweis ({u})")
     chk(d([])[0] == "unbekannt" and d(None)[0] == "unbekannt", "leer/None → unbekannt, wirft nicht")
+    # Auslöser der Sicherheitsabfrage (Routine „Puls-Fehler" 23.10.2026, IPC-timeout 25× auf 3 PCs, jede Nacht beim ersten Kaltstart):
+    # Admin-Häkchen vor wartendem MT5-Build vor „nichts davon"; ohne Lage (kein Windows) bleibt der Text wie bisher
+    _ua = ob.uac_ausloeser_text
+    chk(_ua(None) == "" and _ua({}) .startswith(" · Auslöser: weder") and "Text der Abfrage" in _ua({}), "ohne Lage leer, leere Lage → Text lesen")
+    _h = _ua({"haken": ["HKLM"], "update": ("5.0.5120", "5.0.5260"), "aufgabe_ok": True})
+    chk("'Als Administrator ausführen'" in _h and "HKLM" in _h and "alle Benutzer" in _h and "MT5-Update" not in _h, f"Häkchen geht vor ({_h})")
+    chk("alle Benutzer" not in _ua({"haken": ["HKCU"]}), "HKCU ohne den Für-alle-Benutzer-Knopf")
+    _u1 = _ua({"haken": [], "update": ("5.0.5120", "5.0.5260"), "aufgabe_ok": True})
+    _u2 = _ua({"haken": [], "update": ["5.0.5120", "5.0.5260"], "aufgabe_ok": False})
+    chk("5.0.5120 → 5.0.5260" in _u1 and "nicht gegriffen" in _u1 and "einrichten" in _u2 and "nicht gegriffen" not in _u2,
+        f"MT5-Build: Aufgabe steht vs. fehlt ({_u1} | {_u2})")
+    _c = [{"pid": 1, "name": "consent.exe", "pfad": ""}]
+    chk(d(_c)[1] + _ua({"haken": ["HKCU"]}) == d(_c, uac={"haken": ["HKCU"]})[1] and d(_c, uac=None)[1] == d(_c)[1],
+        "desktop_sperre_ursache: Auslöser hängt hinter dem Handgriff, ohne Lage unverändert")
+    _vc = ob.verbindung_ursache("C:\\MT5-X\\terminal64.exe", _c, [], uac={"update": ("1.0.0.1", "1.0.0.2"), "aufgabe_ok": False})
+    chk(_vc[0] == "uac_offen" and "'Ja'" in _vc[1] and "1.0.0.1 → 1.0.0.2" in _vc[1], f"verbindung_ursache: uac_offen + Auslöser ({_vc})")
+    chk(ob._consent_laeuft(_c) and not ob._consent_laeuft([{"pid": 1, "name": "Consent.exe.bak"}]) and not ob._consent_laeuft(None),
+        "_consent_laeuft: nur der Name consent.exe")
+    chk(ob._uac_lage("C:\\MT5-X\\terminal64.exe") is None and ob._uac_lage("") is None, "_uac_lage: ohne Windows/Pfad None, wirft nicht")
+    _q = _i.getsource(ob._uac_lage) + _i.getsource(ob.uac_ausloeser_text)
+    chk("SetValueEx" not in _q and "DeleteValue" not in _q and "Popen" not in _q and "click" not in _q.lower() and "sleep(" not in _q,
+        "_uac_lage/uac_ausloeser_text: nur lesen — kein Registry-Schreiben, kein Start, kein Klick")
     q_run = _i.getsource(ob.run)
     f9 = q_run[q_run.index("dlg = _finde_order_dialog(w)"):q_run.index('trail.append("F9-Dialog offen")')]
-    chk(f9.count("_desktop_sperre_hinweis()") == 1 and f9.index("_f9_diagnose(w)") < f9.index("_desktop_sperre_hinweis()") < f9.index("_f9_ursache(")
+    chk(f9.count("_desktop_sperre_hinweis(path)") == 1 and f9.index("_f9_diagnose(w)") < f9.index("_desktop_sperre_hinweis(path)") < f9.index("_f9_ursache(")
         and "if vorn == 0:" in f9 and '" — " + sperre[1] if sperre else " — " + _UAC_HINWEIS if vorn == 0 else ""' in f9,
         "run(): Desktop-Sperre genau einmal bei kein Fenster vorn, ihr Text in der Meldung, sonst der alte Hinweis")
     chk(q_run.count('_keine_bestaetigung_grund(path, expected, symbol, cmd["richtung"], " | ".join(dialog_texte), vol, befund)') == 1

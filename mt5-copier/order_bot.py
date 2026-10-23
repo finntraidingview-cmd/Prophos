@@ -1535,19 +1535,20 @@ _UAC_HINWEIS = ("Evtl. steht am PC eine Windows-Abfrage offen (MT5-Update / "
                 "abnehmen (Windows-Sicherheitsabfrage).")
 
 
-def verbindung_ursache(path, prozesse, fenster):
+def verbindung_ursache(path, prozesse, fenster, uac=None):
     """REIN RECHNEND (testbar): die EINE festgestellte Ursache, warum das Terminal über die Schnittstelle nicht antwortet → (code, text).
     ANLASS (Routine Puls-Fehler 16.10.2026, Muster „v2order: terminal-verbindung fehlgeschlagen: (-# 'ipc timeout') — evtl. steht am pc
     eine windows-ab…", 16× in 7 Tagen auf 4 PCs): jeder Fall bekam dieselbe Vermutung „Evtl. Windows-Abfrage offen" — seit .930/.1337
     spielt Prophos MT5-Updates aber still ein, und derselbe Plan scheiterte 4–5× im 20-min-Takt, bis er 1–5 h später doch startete.
     Was am PC wirklich los war, stand nirgends. Jetzt prüft der Bot nach dem Fehlschlag die Lage und nennt sie mit dem Handgriff.
-    prozesse = [{"pid", "name", "pfad"}] (pfad leer = nicht lesbar), fenster = [{"pid", "titel", "klasse", "sichtbar", "haengt"}]."""
+    prozesse = [{"pid", "name", "pfad"}] (pfad leer = nicht lesbar), fenster = [{"pid", "titel", "klasse", "sichtbar", "haengt"}].
+    uac = Lage aus _uac_lage(path) (wer die Abfrage verlangt) oder None → Auslöser hinter dem Handgriff (uac_ausloeser_text)."""
     ziel = os.path.normcase(os.path.abspath(path or "")) if path else ""
     ordner = os.path.dirname(ziel)
     namen = {str(p.get("name") or "").lower() for p in prozesse or ()}
     if "consent.exe" in namen:
         return "uac_offen", ("Am PC ist eine Windows-Sicherheitsabfrage offen (consent.exe läuft) — solange antwortet kein Terminal → "
-                             "am PC auf 'Ja' klicken")
+                             "am PC auf 'Ja' klicken" + uac_ausloeser_text(uac))
     upd = [p for p in prozesse or () if "\\liveupdate\\" in os.path.normcase(str(p.get("pfad") or "")).replace("/", "\\")]
     if upd:
         return "update_laeuft", (f"MT5 spielt gerade ein Update ein ({str(upd[0].get('pfad'))[-60:]}, PID {upd[0].get('pid')}) → "
@@ -1647,12 +1648,87 @@ def _verbindung_hinweis(path):
         prozesse, fenster = _verbindung_lage()
         if not prozesse:
             return _UAC_HINWEIS
-        return verbindung_ursache(path, prozesse, fenster)[1]
+        return verbindung_ursache(path, prozesse, fenster, uac=_uac_lage(path) if _consent_laeuft(prozesse) else None)[1]
     except Exception:
         return _UAC_HINWEIS
 
 
-def desktop_sperre_ursache(prozesse):
+# WER VERLANGT DIE SICHERHEITSABFRAGE? (Routine „Puls-Fehler" 23.10.2026 05:30 Dubai, Muster „v2order: terminal-verbindung fehlgeschlagen:
+# (-# 'ipc timeout') — am pc ist eine windows-sicherheit…": 25× in 7 Tagen auf 3 PCs, seit 19.10. jede Nacht beim ersten Echo-Kaltstart,
+# Frage 4 seit 08.10. offen, weil niemand den Text der Abfrage gelesen hat). consent.exe sagt nur DASS eine Abfrage steht; den Text
+# auf dem sicheren Desktop liest kein Programm. Die zwei bekannten Auslöser stehen aber lesbar am PC: das Kompatibilitäts-Häkchen „Als
+# Administrator ausführen" an genau dieser terminal64.exe (Registry AppCompatFlags\Layers, HKCU oder — ohne Adminrechte unlöschbar —
+# HKLM; provision.uac_haken_entfernen räumt nur HKCU) und ein neuerer MT5-Build im liveupdate-Ordner dieser Installation (MetaQuotes
+# legt ihn ab, das Terminal will ihn beim nächsten Start ERHÖHT einspielen; die stille Aufgaben-Logik in provision/panel greift nur
+# für X:\MT5-…-Ordner mit prophos-update.lock und nur, wenn der Wächter vor dem Start dran war). Nur lesen, nie klicken.
+def _consent_laeuft(prozesse):
+    return any(str(p.get("name") or "").lower() == "consent.exe" for p in prozesse or ())
+
+
+def _uac_lage(path):
+    """Nur lesen, wirft nie: {haken: [Hive…], update: (alt, neu) | None, aufgabe_ok: bool | None} für DIESE terminal64.exe;
+    None ohne Windows/Pfad. aufgabe_ok wird nur ermittelt, wenn ein Update wartet (schtasks-Abfrage)."""
+    if os.name != "nt" or not path:
+        return None
+    lage = {"haken": [], "update": None, "aufgabe_ok": None}
+    ziel = os.path.normcase(os.path.abspath(path))
+    try:
+        import winreg
+        layers = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+        for wurzel, hive in ((winreg.HKEY_CURRENT_USER, "HKCU"), (winreg.HKEY_LOCAL_MACHINE, "HKLM")):
+            try:
+                with winreg.OpenKey(wurzel, layers) as k:
+                    i = 0
+                    while True:
+                        try:
+                            name, wert, typ = winreg.EnumValue(k, i)
+                        except OSError:
+                            break
+                        i += 1
+                        if typ == winreg.REG_SZ and os.path.normcase(os.path.abspath(str(name))) == ziel \
+                                and {t.upper() for t in str(wert).split()} & {"RUNASADMIN", "ELEVATECREATEPROCESS"}:
+                            lage["haken"].append(hive)
+            except OSError:
+                continue
+    except Exception:
+        pass
+    try:
+        import provision          # liegt neben dieser Datei; dieselben Helfer wie die stille Update-Aufgabe des Panels
+        inst = os.path.normcase(os.path.normpath(os.path.dirname(ziel)))
+        data_dir = provision.map_installs(provision.terminals_root()).get(inst)
+        if data_dir:
+            alt = provision._datei_version(ziel)
+            neu = provision._datei_version(os.path.join(data_dir, "liveupdate", "terminal64.exe"))
+            if provision.build_neuer(alt, neu):
+                lage["update"] = (".".join(str(x) for x in alt), ".".join(str(x) for x in neu))
+                lage["aufgabe_ok"] = bool(provision.update_aufgabe_ok())
+    except Exception:
+        pass
+    return lage
+
+
+def uac_ausloeser_text(uac):
+    """REIN RECHNEND (testbar): Nachsatz „ · Auslöser: …" zur offenen Sicherheitsabfrage aus der Lage von _uac_lage — leer ohne Lage.
+    Reihenfolge: Admin-Häkchen (kommt bei JEDEM Kaltstart wieder) vor wartendem MT5-Build vor „nichts davon"."""
+    if not isinstance(uac, dict):
+        return ""
+    haken = [str(h) for h in (uac.get("haken") or ())]
+    if haken:
+        hive = "/".join(haken)
+        return (f" · Auslöser: terminal64.exe ist mit 'Als Administrator ausführen' markiert ({hive}) — kommt bei jedem Kaltstart wieder, "
+                f"bis das Häkchen weg ist: Rechtsklick terminal64.exe > Eigenschaften > Kompatibilität > abwählen"
+                + (" (Knopf 'Einstellungen für alle Benutzer ändern')" if "HKLM" in haken else ""))
+    upd = uac.get("update")
+    if isinstance(upd, (list, tuple)) and len(upd) == 2:
+        aufgabe = uac.get("aufgabe_ok")
+        return (f" · Auslöser: MT5-Update {upd[0]} → {upd[1]} liegt im liveupdate-Ordner und will erhöht eingespielt werden — "
+                + ("die stille Update-Aufgabe steht, hat aber vor diesem Start nicht gegriffen (Ordner/Merker prüfen)" if aufgabe
+                   else "die stille Update-Aufgabe fehlt → im Echo-Panel 'MT5-Update einrichten' klicken"))
+    return (" · Auslöser: weder Admin-Häkchen an dieser terminal64.exe noch ein neuer MT5-Build im liveupdate-Ordner — "
+            "bitte den Text der Abfrage am PC lesen (welches Programm will Adminrechte?)")
+
+
+def desktop_sperre_ursache(prozesse, uac=None):
     """REIN RECHNEND (testbar): nach F9 lag KEIN Fenster vorn (GetForegroundWindow = 0) — warum? → (code, text mit Handgriff).
     ANLASS (Routine „Puls-Fehler" 21.10.2026 05:30 Dubai, Muster „v2order: f9-dialog nicht gefunden — abbruch, nichts gesendet": ein PC 6×
     am 20./21.10., ein zweiter am 19.10., jede Spur „F9 ohne Dialog: kein Fenster vorn"): die Meldung sagte nur „Evtl. Windows-Abfrage" —
@@ -1661,7 +1737,7 @@ def desktop_sperre_ursache(prozesse):
     namen = {str(p.get("name") or "").lower() for p in prozesse or ()}
     if "consent.exe" in namen:
         return "uac_offen", ("Am PC ist eine Windows-Sicherheitsabfrage offen (consent.exe läuft) — auf dem sicheren Desktop kommt kein F9 an → "
-                             "am PC auf 'Ja' klicken")
+                             "am PC auf 'Ja' klicken" + uac_ausloeser_text(uac))
     if "logonui.exe" in namen:
         return "gesperrt", ("Der PC ist gesperrt (LogonUI.exe läuft: Sperr-/Anmeldebildschirm) — dort kommt kein F9 an → am PC anmelden "
                             "und die Sitzung offen lassen")
@@ -1669,13 +1745,14 @@ def desktop_sperre_ursache(prozesse):
                          + _UAC_HINWEIS)
 
 
-def _desktop_sperre_hinweis():
-    """(code, text) für „kein Fenster vorn" aus der Prozess-Lage am PC — nur lesen, wirft nie; ohne lesbare Lage der alte Hinweis."""
+def _desktop_sperre_hinweis(path=None):
+    """(code, text) für „kein Fenster vorn" aus der Prozess-Lage am PC — nur lesen, wirft nie; ohne lesbare Lage der alte Hinweis.
+    path = terminal64.exe des Laufs: bei offener Sicherheitsabfrage wird ihr Auslöser gelesen (_uac_lage, 23.10.2026)."""
     try:
         prozesse, _fenster = _verbindung_lage()
         if not prozesse:
             return "unbekannt", _UAC_HINWEIS
-        return desktop_sperre_ursache(prozesse)
+        return desktop_sperre_ursache(prozesse, uac=_uac_lage(path) if _consent_laeuft(prozesse) else None)
     except Exception:
         return "unbekannt", _UAC_HINWEIS
 
@@ -11581,7 +11658,7 @@ def run(cfg_path, cmd):
         # LogonUI.exe (Sperrbildschirm) benennen statt „Evtl." — dieselbe Prozess-Lesung wie der IPC-Pfad, nur lesen, kein Wegklicken.
         sperre = None
         if vorn == 0:
-            sperre = _desktop_sperre_hinweis()
+            sperre = _desktop_sperre_hinweis(path)
             trail.append("Desktop: " + sperre[0])
         # TERMINAL SELBST VORN (Routine „Puls-Fehler" 16.10.2026 20:30 Dubai, Muster „v2order/signal: f9-dialog nicht gefunden — abbruch,
         # nichts gesendet": 30 Fälle seit 13.10. auf 5 PCs, 14 davon am 16.10. auf 3 PCs). JEDE Spur seit .1571 sagt „Terminal selbst
