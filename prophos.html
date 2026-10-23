@@ -215,9 +215,34 @@
   .tc-wd-flug-karte.ist-kein-wd b{display:block;font-size:14px;color:var(--ink)}
   .tc-wd-flug-punkt{position:absolute;z-index:3;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
     background:var(--good);color:#fff;font-size:13px;font-weight:700;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 4px 12px rgba(16,24,40,.18)}
+  /* frei schwebend (23.10.2026, Radar-Dialog fremder IDs): der Dialog ist schon zu, wenn die Antwort mit dem Stand kommt — Karte + ✓ fest im Bild */
+  .tc-wd-flug-karte.ist-frei,.tc-wd-flug-punkt.ist-frei{position:fixed;z-index:9998}
   @keyframes tcWdRmEin{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
   @keyframes tcWdKarteEin{from{opacity:0;transform:translate(-50%,-50%) scale(.94)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
   @keyframes tcWdZahlSprung{0%{transform:scale(1)}45%{transform:scale(1.18)}100%{transform:scale(1)}}
+  /* Winning Day kompakt (Finn 23.10.2026: „Lesson learned kann komplett weg. ‚Account bestanden, Nachfolger anlegen' macht gar keinen Sinn.
+     Bei einem Winning Day das Pop-up kompakter, kleiner und smoother, den Winning Day cleaner hervorheben"): #tradeCompleteModal.tc-wd-kompakt
+     (tcWdKompaktPrepare). NUR ANZEIGE — ausgeblendete Felder behalten Wert und hidden-Attribut, Speichern/Buchen/Zählen lesen wie vorher.
+     Übrig: Master-/Fusion-P&L, die 🏆-Kachel mit „3/5 → 4/5" und klein „Nichts ändern | 💀 Geblowt" (ein WD-Konto kann blowen). */
+  .tc-st-kurz{display:none}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt .modal{max-width:400px !important}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt .form-grid{gap:10px 12px !important;margin-top:12px !important}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt :is(#tc-net-wrap,#tc-notes-wrap,#tc-wd-trade-wrap,#tc-wd-farm-wrap,#tc-status-account-wrap,.tc-status-opt[data-tc-status="passed"]){display:none !important}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-status-wrap{order:2}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-status-wrap > label{display:none !important}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-status-wrap > div:first-of-type{flex-direction:row !important}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt .tc-status-opt{flex:1;min-width:0;padding:7px 10px !important;gap:8px !important;font-size:12.5px}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt .tc-st-lang{display:none}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt .tc-st-kurz{display:inline}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-winning-day-wrap{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 12px;padding:12px 14px;
+    border-radius:12px;border:1px solid color-mix(in srgb,var(--good) 35%,var(--border));background:color-mix(in srgb,var(--good) 7%,var(--surface))}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-winning-day-wrap[hidden]{display:none}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-winning-day-wrap > label{padding:0 !important;border:0 !important;background:none !important;
+    margin:0;font-size:14px;text-transform:none;letter-spacing:0}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-winning-day-hint{grid-column:1 / -1;grid-row:2;margin-top:2px !important;padding-left:25px !important}
+  #dashboard-view #tradeCompleteModal.tc-wd-kompakt #tc-winning-day-rm{grid-column:2;grid-row:1;margin:0;padding:0;font-size:17px}
+  .tc-wd-rm-zahl b{font-weight:700;color:var(--good)}
+  .tc-wd-rm.ist-kein-wd .tc-wd-rm-zahl{color:var(--sub-2)}
   @media (prefers-reduced-motion: reduce){
     .tc-wd-rm,.tc-wd-flug-karte,.tc-wd-flug-zahl.ist-neu{animation:none}
     .tc-wd-rm .abhak-kreis,.tc-wd-rm .abhak-zeichen,.tc-wd-flug-karte .abhak-kreis,.tc-wd-flug-karte .abhak-zeichen{animation:none;stroke-dashoffset:0}
@@ -4850,6 +4875,14 @@
   #dashboard-view .mwd-erl-hilfe{font-size:11px;color:var(--sub-2);margin-top:4px;line-height:1.35}
   #dashboard-view .mwd-erl-summe{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-top:14px;padding:9px 12px;border-radius:8px;background:var(--bg);font-size:12.5px}
   #dashboard-view .mwd-erl-buchung{font-size:11.5px;color:var(--sub)}
+  /* Winning-Day-Kachel im Radar-Dialog (23.10.2026) — wie die 🏆-Kachel im kompakten Abschließen-Dialog; ohne Good Day ruhig grau */
+  #dashboard-view .mwd-erl-wd{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 12px;margin-top:10px;padding:10px 14px;border-radius:12px;
+    border:1px solid var(--border);background:var(--bg);animation:tcWdRmEin .22s ease-out}
+  #dashboard-view .mwd-erl-wd[hidden]{display:none}
+  #dashboard-view .mwd-erl-wd.ist-wd{border-color:color-mix(in srgb,var(--good) 35%,var(--border));background:color-mix(in srgb,var(--good) 7%,var(--surface))}
+  #dashboard-view .mwd-erl-wd b{font-size:14px;font-weight:600;color:var(--ink)}
+  #dashboard-view .mwd-erl-wd small{grid-column:1;font-size:11px;color:var(--sub-2)}
+  #dashboard-view .mwd-erl-wd .tc-wd-rm{grid-column:2;grid-row:1 / span 2;margin:0;padding:0;font-size:17px;animation:none}
   /* P/L-Felder der Erledigt-Popups (30.09.2026, Finn: „kann man kein Minus reinschreiben" — type=number verwarf „−"/„–"/„500-" still):
      Textfeld + „±"-Knopf daneben, ungültige Eingabe kurz rot mit Hinweis */
   #dashboard-view .pl-feld{display:flex;gap:6px;align-items:stretch}
@@ -9602,14 +9635,14 @@
               <div id="tc-lesung"></div>
             </div>
             <div class="field">
-              <label>P/L Slave (<span id="tc-slave-cur">€</span>)</label>
+              <label>P/L <span id="tc-slave-wort">Slave</span> (<span id="tc-slave-cur">€</span>)</label>
               <div class="pl-feld">
                 <input type="text" inputmode="decimal" autocomplete="off" class="input mono" id="tc-slave-pl" placeholder="±0">
                 <button type="button" class="btn btn-ghost pl-pm" id="tc-slave-pm" title="Vorzeichen umdrehen (Plus ↔ Minus)" aria-label="Vorzeichen umdrehen">±</button>
               </div>
               <div class="pl-hinweis" id="tc-slave-hinweis"></div>
             </div>
-            <div class="field" style="grid-column:span 2">
+            <div class="field" style="grid-column:span 2" id="tc-net-wrap">
               <div class="tc-net" id="tc-net-display">Net: —</div>
             </div>
             <!-- Polar (16.10.2026, Finn über den Master: „je Seite ein eigener Haken geblowt"): nur route polar — Master und Slave gehören zwei
@@ -9636,7 +9669,7 @@
                 </label>
                 <label class="tc-status-opt" data-tc-status="blown" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .12s">
                   <input type="radio" name="tc-status" value="blown">
-                  <span style="color:var(--ink)">💀 Account wurde geblowt — archivieren</span>
+                  <span style="color:var(--ink)"><span class="tc-st-lang">💀 Account wurde geblowt — archivieren</span><span class="tc-st-kurz">💀 Geblowt</span></span>
                 </label>
                 <label class="tc-status-opt" data-tc-status="passed" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .12s">
                   <input type="radio" name="tc-status" value="passed">
@@ -9687,7 +9720,7 @@
               <input type="datetime-local" class="input mono" id="tc-datum">
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-datum-hint">Zum Nachtragen: der Trade zählt in Statistik und Kapitel zu diesem Tag.</div>
             </div>
-            <div class="field" style="grid-column:span 2">
+            <div class="field" style="grid-column:span 2" id="tc-notes-wrap">
               <label>Lesson learned (optional)</label>
               <textarea class="input" id="tc-result-notes" rows="2" placeholder="Was war gut, was schlecht…"></textarea>
             </div>
@@ -13318,6 +13351,9 @@
             </div>
           </div>
           <div class="mwd-erl-summe" id="mwd-erl-summe"></div>
+          <!-- Winning Day (23.10.2026): fremde WDs zählt das Backend nur als Good Day (Master-P&L über der Firmen-Linie) — Vorschau aus
+               derselben Regel, gefüllt von mwdErlWdVorschau; nach dem Speichern fliegt der echte Stand aus der Antwort (abhakWdFlug) -->
+          <div class="mwd-erl-wd" id="mwd-erl-wd" role="status" aria-live="polite" hidden></div>
           <!-- Account-Status wie im großen Erledigt-Popup (02.10.2026, Finn: „muss auch die Möglichkeit haben, Account wurde geblowt");
                das Backend archiviert beim Besitzer der ID (auch fremde Trades) -->
           <div class="field" style="margin-top:12px">
@@ -13331,7 +13367,7 @@
                 <input type="radio" name="mwd-erl-status" value="blown">
                 <span style="color:var(--ink)">💀 Account wurde geblowt — archivieren</span>
               </label>
-              <label class="tc-status-opt" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+              <label class="tc-status-opt" id="mwd-erl-status-passed" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
                 <input type="radio" name="mwd-erl-status" value="passed">
                 <span style="color:var(--ink)">✅ Phase bestanden — Nachfolger anlegen</span>
               </label>
@@ -30745,6 +30781,7 @@
    * aus der Deal-Historie. */
   let _mwdErlId = null, _mwdErlKonto = '', _mwdErlOhneHedge = false, _mwdErlFusionAmPlan = false, _mwdErlPolar = false
   let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
+  let _mwdErlWd = false, _mwdErlWdKonto = null   // Winning-Day-Plan + Konto für die Good-Day-Vorschau (23.10.2026)
   function mklWdErledigtOeffnen(pid, extra){
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
     // Echo/Duplikum (02.10.2026): kein Solo-Hedge am Plan — Fusion-P&L aus dem Live-Wert (slave_pl_live) bzw. dem slave_pl am Plan
@@ -30817,6 +30854,17 @@
     const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : _tw ? 'passed' : 'none'}"]`); if(stVor) stVor.checked = true
     // Polar: zwei Konten zweier IDs — wer geblowt ist, entscheidet das große Erledigt-Popup im Login der ID (Backend lehnt hier ≠ none ab)
     const stFeld = document.querySelector('input[name="mwd-erl-status"]')?.closest('.field'); if(stFeld) stFeld.hidden = _mwdErlPolar
+    // Winning Day (Finn 23.10.2026: „‚Account bestanden, Nachfolger anlegen' macht gar keinen Sinn"): bei einem WD-Konto keine Bestanden-Zeile,
+    // eine Vorbelegung darauf geht zurück auf „Nichts ändern"; Geblowt bleibt. Dazu die Good-Day-Vorschau (mwdErlWdVorschau).
+    _mwdErlWd = !_mwdErlPolar && (String(pw.konto_typ || '').toLowerCase() === 'winning_days' || pw.good_day === true || (typeof wdlWeg === 'function' && wdlWeg(pw) === 'Winning Day'))
+    _mwdErlWdKonto = { firm: k.firma || '', name: k.name || '' }
+    const stPassed = document.getElementById('mwd-erl-status-passed')
+    if(stPassed){
+      stPassed.style.display = _mwdErlWd ? 'none' : 'flex'
+      const rb = stPassed.querySelector('input'), keins = document.querySelector('input[name="mwd-erl-status"][value="none"]')
+      if(_mwdErlWd && rb && rb.checked && keins) keins.checked = true
+    }
+    mwdErlWdVorschau()
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -30833,6 +30881,22 @@
     })
   }
   document.querySelectorAll('input[name="mwd-erl-status"]').forEach(r => r.addEventListener('change', mwdErlStatusUI))
+  // Good-Day-Vorschau im Radar-Dialog (23.10.2026): dieselbe Regel wie _wd_good_day im Backend (tcGoodDayGrenze = TC_GOOD_DAY_MIN, Apex je
+  // Größe aus dem Kontonamen) auf den eingetippten Master-P&L. Den Stand des fremden Kontos kennt erst die Antwort — darum hier nur „+1"/nichts.
+  // Firma ohne Linie (oder kein WD-Plan) → Kachel weg.
+  function mwdErlWdVorschau(){
+    const el = document.getElementById('mwd-erl-wd'); if(!el) return
+    const grenze = (_mwdErlWd && typeof tcGoodDayGrenze === 'function') ? tcGoodDayGrenze(_mwdErlWdKonto) : null
+    if(grenze == null){ el.hidden = true; el.innerHTML = ''; return }
+    const mpl = plZahl(document.getElementById('mwd-erl-master')?.value)
+    const gut = mpl != null && isFinite(mpl) && mpl > grenze
+    el.className = 'mwd-erl-wd' + (gut ? ' ist-wd' : '')
+    el.innerHTML = `<b>🏆 ${gut ? 'Winning Day' : 'Kein Winning Day'}</b>`
+      + `<small>${gut ? `Good Day — Master-P&amp;L über ${grenze} $, zählt automatisch` : `zählt erst über ${grenze} $ Master-P&amp;L`}</small>`
+      + `<span class="tc-wd-rm ist-${gut ? 'wd' : 'kein-wd'}">${gut ? abhakZeichenSvg('wd') + '<span class="tc-wd-rm-zahl mono"><b>+1</b></span>' : '<span class="tc-wd-rm-zahl mono">+0</span>'}</span>`
+    el.hidden = false
+  }
+  document.getElementById('mwd-erl-master')?.addEventListener('input', mwdErlWdVorschau)
   window._mwdErlStatusUI = mwdErlStatusUI   // Test-Haken (Stub)
   window._mklWdErledigtOeffnen = mklWdErledigtOeffnen   // Test-Haken (Stub, 20.10.2026: Vorbelegung „geblowt" ohne Login prüfen)
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
@@ -30871,6 +30935,7 @@
     if(spl != null && !isFinite(spl)) return say(_mwdErlPolar ? 'Slave-P&L ist keine Zahl.' : 'Fusion-P&L ist keine Zahl.', 'err')
     const kontoStatus = _mwdErlPolar ? 'none' : (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none')
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
+    const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
@@ -30902,6 +30967,13 @@
       if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
       const arTxt = (ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : ''
       if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : _mwdErlPolar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
+      // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
+      // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
+      try{
+        const gd = d.good_day || null
+        if(gd && gd.fehler && typeof atToast === 'function') atToast(gd.fehler, 'end')
+        if(!abArt && kontoStatus === 'none') abhakWdFlug(abhakWdStand(gd, wdPlan))
+      }catch(_){}
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
@@ -31419,6 +31491,65 @@
       }catch(_){}
     })
   }
+  /* WD-Flug ohne Dialog (Finn 23.10.2026, als Jacob Mikes Winning Days abgehakt: „nur ein grüner Toast" — er dachte, der Flug sei nicht
+   * gepusht). Radar-Dialog fremder IDs (mklWdErledigtSpeichern): der Dialog geht sofort zu, den Stand kennt erst die Backend-Antwort
+   * (good_day {gezaehlt, stand, ziel, konto}) — dann dieselbe Karte wie tcWdFlug, fest in der Bildmitte, der ✓ steigt von unten (wo der
+   * Dialog war) in die Zahl. s wie tcWdRmStand ({art, flug, vorher, nachher, ziel, konto, text}). Nur Anzeige, ≤ 1,6 s, kein Klick. */
+  function abhakWdFlug(s){
+    if(!s) return
+    document.querySelectorAll('.tc-wd-flug-karte.ist-frei, .tc-wd-flug-punkt.ist-frei').forEach(e => e.remove())
+    const ruhig = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    const vw = window.innerWidth, vh = window.innerHeight
+    const karte = document.createElement('div')
+    karte.className = 'tc-wd-flug-karte ist-frei ist-' + s.art
+    karte.setAttribute('role', 'status')
+    karte.style.left = Math.round(vw / 2) + 'px'; karte.style.top = Math.round(vh * .4) + 'px'
+    const unter = escapeHtml([s.text, s.konto].filter(Boolean).join(' · '))
+    karte.innerHTML = s.art === 'kein-wd'
+      ? abhakZeichenSvg('kein-wd') + '<div><b>Kein Winning Day</b><small>nichts hinzugefügt</small></div>'
+      : `<div class="tc-wd-flug-titel">🏆 Winning Day</div><div class="tc-wd-flug-zahl mono"><span class="tc-wd-flug-ist">${s.vorher}</span>/${s.ziel}</div><small>${unter}</small>`
+    document.body.appendChild(karte)
+    const els = [karte], nach = (ms, fn) => setTimeout(fn, ms)
+    const sprung = () => {
+      const z = karte.querySelector('.tc-wd-flug-zahl'), ist = karte.querySelector('.tc-wd-flug-ist')
+      if(ist) ist.textContent = String(s.nachher)
+      if(z){ z.classList.add('ist-neu'); if(s.nachher >= s.ziel) z.insertAdjacentHTML('beforeend', `<span class="tc-wd-flug-ziel">${abhakZeichenSvg('wd')}</span>`) }
+    }
+    const weg = () => {
+      if(!ruhig && typeof karte.animate === 'function') karte.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, fill: 'forwards' })
+      nach(ruhig ? 0 : 230, () => els.forEach(e => { try{ e.remove() }catch(_){} }))
+    }
+    if(!s.flug){ nach(1200, weg); return }
+    if(ruhig){ nach(350, sprung); nach(1300, weg); return }
+    nach(170, () => {
+      const zr = karte.querySelector('.tc-wd-flug-zahl').getBoundingClientRect()
+      const x1 = zr.left + zr.width / 2, y1 = zr.top + zr.height / 2, x0 = x1, y0 = Math.max(y1 + 60, vh - 110)
+      const punkt = document.createElement('div')
+      punkt.className = 'tc-wd-flug-punkt ist-frei'; punkt.textContent = '✓'
+      punkt.style.left = Math.round(x0) + 'px'; punkt.style.top = Math.round(y0) + 'px'
+      document.body.appendChild(punkt); els.push(punkt)
+      const dy = Math.round(y1 - y0)
+      if(typeof punkt.animate === 'function') punkt.animate([
+        { transform: 'translate(-50%,-50%) scale(.6)', opacity: 0 },
+        { transform: `translate(-50%, calc(-50% + ${Math.round(dy * .55)}px)) scale(1.1)`, opacity: 1, offset: .45 },
+        { transform: `translate(-50%, calc(-50% + ${dy}px)) scale(.45)`, opacity: .25 }
+      ], { duration: 560, easing: 'cubic-bezier(.45,0,.3,1)', fill: 'forwards' })
+      nach(540, () => { punkt.remove(); sprung() })
+    })
+    nach(1600, weg)
+  }
+  // Stand aus der Antwort von PATCH /admin/wd-plaene {aktion:'erledigt'} (good_day, app.py _good_day): gezaehlt → +1 mit Flug (stand ist der
+  // NEUE Stand), gezählt aber heute schon → Stand ohne Flug, kein good_day bei einem WD-Konto → „Kein Winning Day". null = nichts zeigen.
+  function abhakWdStand(gd, istWd){
+    if(gd && gd.fehler) return null
+    if(gd && isFinite(Number(gd.stand))){
+      const ziel = Number(gd.ziel) > 0 ? Number(gd.ziel) : 5, stand = Math.min(Number(gd.stand), ziel)
+      return gd.gezaehlt ? { art: 'wd', flug: true, vorher: Math.max(stand - 1, 0), nachher: stand, ziel, konto: gd.konto || '' }
+                         : { art: 'wd', flug: false, vorher: stand, nachher: stand, ziel, konto: gd.konto || '', text: 'heute schon gezählt' }
+    }
+    return istWd ? { art: 'kein-wd', flug: false } : null
+  }
+  window._abhakWdFlug = abhakWdFlug   // Test-Haken (Stub)
   window._abhakRueckmeldung = abhakRueckmeldung   // Test-Haken (Stub)
   window._abhakZeileWandern = abhakZeileWandern
   function wdlSofortErledigt(pid){
@@ -62531,6 +62662,12 @@
     const s = tcWdRmStand()
     if(!s){ el.hidden = true; el.innerHTML = ''; return }
     el.className = 'tc-wd-rm ist-' + s.art
+    // Kompakt (23.10.2026): rechts in der 🏆-Kachel nur die Zahl — „3/5 → 4/5", heute schon gezählt „4/5", ohne Haken grau „3/5"
+    if(tcWdKompaktAn()){
+      el.innerHTML = (s.art === 'wd' ? abhakZeichenSvg('wd') : '') + `<span class="tc-wd-rm-zahl mono">${s.vorher}/${s.ziel}${s.flug ? ` → <b>${s.nachher}/${s.ziel}</b>` : ''}</span>`
+      el.hidden = false
+      return
+    }
     el.innerHTML = abhakZeichenSvg(s.art)
       + (s.art === 'kein-wd' ? '<span>Kein Winning Day <small>— nichts hinzugefügt</small></span>'
          : s.flug ? `<span>Winning Day ${s.vorher}/${s.ziel} → ${s.nachher}/${s.ziel} <small>· ${escapeHtml(s.text)}</small></span>`
@@ -62601,6 +62738,33 @@
   }
   window._tcWdFlug = tcWdFlug   // Test-Haken (Stub)
 
+  /* Winning Day kompakt (Finn 23.10.2026, s. CSS .tc-wd-kompakt): eigener Plan auf einem Konto vom Typ „Winning Days" (wie der 🌾-Haken,
+   * CFD nie, Polar hat seine eigenen Haken). Setzt nur die Klasse am Popup + Beschriftungen; steht „Phase bestanden" aus einer Vorbelegung
+   * (wdlTpUndWeg) drin, geht sie zurück auf „Nichts ändern" — die Zeile ist ausgeblendet und würde sonst unsichtbar den Nachfolger-Assistenten
+   * öffnen. Normale Trades: Klasse weg, alles wie bisher. */
+  function tcWdKompakt(p){
+    if(!p || p.route === 'polar') return false
+    const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
+    return !!a && String(a.type || '').toLowerCase() === 'winning_days' && !tpFirmIstCfd(a.firm)
+  }
+  function tcWdKompaktAn(){ return !!document.getElementById('tradeCompleteModal')?.classList.contains('tc-wd-kompakt') }
+  function tcWdKompaktPrepare(p){
+    const bg = document.getElementById('tradeCompleteModal'); if(!bg) return
+    const an = tcWdKompakt(p)
+    bg.classList.toggle('tc-wd-kompakt', an)
+    const wort = document.getElementById('tc-slave-wort')
+    if(wort) wort.textContent = (an && routeIstV2(p.route) && p.hedgeEur > 0) ? 'Fusion' : 'Slave'
+    if(!an) return
+    const rb = document.querySelector('input[name="tc-status"][value="passed"]')
+    if(rb && rb.checked){
+      const keins = document.querySelector('input[name="tc-status"][value="none"]'); if(keins) keins.checked = true
+      if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI()
+      const msgEl = document.getElementById('tradeCompleteMsg')
+      if(msgEl && /^🎯/.test(msgEl.textContent || '')){ msgEl.textContent = ''; msgEl.className = 'modal-msg' }
+    }
+  }
+  window._tcWdKompaktPrepare = tcWdKompaktPrepare   // Test-Haken (Stub)
+
   function tcWinningDayPrepare(p){
     tcWdFlugAbbrechen()   // neues Öffnen während eines WD-Flugs: Flug weg, das Popup bleibt offen
     _tcGoodDayHand = false
@@ -62618,7 +62782,13 @@
     const f = zielFortschritt(a)
     const stand = f ? `${Math.min(f.count, f.target)}/${f.target}` : ''
     wrap.hidden = false
-    if(f && f.heuteAbgehakt){
+    if(tcWdKompaktAn()){
+      // Kompakt (23.10.2026): Stand steht rechts als Zahl, das Konto im Kopf — der Haken heißt nur noch „🏆 Winning Day"
+      cb.checked = !!(f && f.heuteAbgehakt); cb.disabled = !!(f && f.heuteAbgehakt)
+      lbl.textContent = cb.disabled ? '🏆 Winning Day · heute schon gezählt' : '🏆 Winning Day'
+      if(hint) hint.textContent = cb.disabled ? 'Ein Tag zählt nur einmal, egal wie viele Trades.'
+        : f && f.count + 1 >= f.target ? 'Damit ist das Ziel erreicht — Payout anfragbar.' : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+    }else if(f && f.heuteAbgehakt){
       cb.checked = true; cb.disabled = true
       lbl.textContent = `🏆 Winning Day heute schon abgehakt — ${stand} · ${a.name}`
       if(hint) hint.textContent = 'Ein Tag zählt nur einmal, egal wie viele Trades.'
@@ -62810,6 +62980,7 @@
 
     // Manueller Winning Day (15.09.2026): Häkchen nur, wenn ein Account des
     // Plans manuell zählt — sonst bleibt die Box unsichtbar.
+    tcWdKompaktPrepare(p)   // Winning Day kompakt (23.10.2026) — vor dem 🏆-Haken, der seine Beschriftung danach richtet
     tcWinningDayPrepare(p)
     tcWdFarmPrepare(p)
     tcWdTradePrepare(p)
