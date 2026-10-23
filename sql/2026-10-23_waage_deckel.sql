@@ -248,10 +248,18 @@ begin
   perform pg_advisory_xact_lock(hashtext('prophos_waage_deckel'));
   lage := public.prophos_waage_deckel_lage(new.id, new.richtung);
   if not coalesce((lage->>'sperrt')::boolean, false) then
+    -- durchgelassen: eigene Uhr weg (Prüfung D′ 23.10.2026) — sonst gälte nach einem Start-Fehler und Nachholen am nächsten Tag das alte erst
+    -- (Fensterende von gestern) und der Plan würde beim nächsten Riegel sofort aufgegeben
+    if new.mt5_baseline ? 'waage_deckel' then
+      new.mt5_baseline := new.mt5_baseline - 'waage_deckel';
+    end if;
     return new;
   end if;
-  -- eigene Uhr in mt5_baseline.waage_deckel (start_sperre überschreiben andere Riegel): erster gesperrter Start, solange er wartet und frisch ist
-  if coalesce(wd->>'status', '') = 'wartet' and (wd->>'erst') is not null and (wd->>'erst')::timestamptz > now() - interval '24 hours' then
+  -- eigene Uhr in mt5_baseline.waage_deckel (start_sperre überschreiben andere Riegel): erster gesperrter Start nur, solange der Plan genau auf
+  -- dem vom Riegel gesetzten Termin wartet (naechster = start_um) und die Uhr frisch ist — jede andere Startzeit (Nachholen, Neu einplanen,
+  -- Verschieben aus einem anderen Grund, von Hand) beginnt eine neue Uhr
+  if coalesce(wd->>'status', '') = 'wartet' and (wd->>'erst') is not null and (wd->>'erst')::timestamptz > now() - interval '24 hours'
+     and (wd->>'naechster') is not null and old.start_um is not null and (wd->>'naechster')::timestamptz = old.start_um then
     erst := (wd->>'erst')::timestamptz;
     n := coalesce((wd->>'versuche')::int, 0) + 1;
   else

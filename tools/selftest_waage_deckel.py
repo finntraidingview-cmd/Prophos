@@ -284,6 +284,26 @@ def main():
     check(all(f"revoke all on function public.{f} from public, anon, authenticated" in sql for f in
               ("prophos_waage_deckel_param()", "prophos_waage_ausgeblendet(uuid)", "prophos_waage_deckel_lage(uuid, text)", "prophos_waage_fenster_ende(timestamptz)"))
           and "to authenticated" not in sql, "Info: Lage/Hilfen nicht für authenticated, nur Trigger + service_role")
+    # D′ (Nachprüfung 23.10.2026): durchgelassen → Uhr weg; erst nur, wenn der Plan genau auf dem Riegel-Termin wartet (naechster = start_um)
+    i_lage2 = trig2.find("lage := public.prophos_waage_deckel_lage(new.id, new.richtung);")
+    i_weg = trig2.find("new.mt5_baseline := new.mt5_baseline - 'waage_deckel';")
+    i_sperr_ret = trig2.find("return new;", i_weg)
+    check(0 < i_lage2 < i_weg < i_sperr_ret < trig2.find("ende := public.prophos_waage_fenster_ende(erst);")
+          and "if new.mt5_baseline ? 'waage_deckel' then" in trig2 and "(wd->>'naechster')::timestamptz = old.start_um" in trig2,
+          "D′: durchgelassener Start löscht mt5_baseline.waage_deckel; erst nur bei naechster = start_um")
+
+    def uhr(wd, alt_start, jetzt):        # Modell der SQL-Wahl → (erst, versuche)
+        if (wd or {}).get("status") == "wartet" and wd.get("erst") and wd["erst"] > jetzt - timedelta(hours=24) \
+                and wd.get("naechster") is not None and alt_start is not None and wd["naechster"] == alt_start:
+            return wd["erst"], int(wd.get("versuche") or 0) + 1
+        return alt_start or jetzt, 1
+    t0 = datetime(2026, 10, 23, 13, 30, tzinfo=dub)
+    wd1 = {"status": "wartet", "erst": t0, "versuche": 1, "naechster": t0 + timedelta(minutes=14)}
+    e_a = uhr(wd1, t0 + timedelta(minutes=14), t0 + timedelta(minutes=14))                     # zweiter Riegel auf dem Riegel-Termin
+    morgen = datetime(2026, 10, 24, 9, 5, tzinfo=dub)                                         # Start-Fehler → nachgeholt am nächsten Tag (< 24 h)
+    e_b = uhr(wd1, morgen, morgen)
+    check(e_a == (t0, 2) and e_b == (morgen, 1) and fenster_ende(e_b[0]).astimezone(dub).strftime("%H:%M") == "20:00",
+          "D′: zweiter Riegel behält die Uhr (Versuch 2); nachgeholt am nächsten Tag → neue Uhr, Fensterende 20:00 desselben Tages statt sofort aufgegeben")
     sp = html[html.index("  function tpStartSperre(p){"):html.index("  function rkFensterEnde(")]
     check("'waage_deckel'" in sp and "Waage-Deckel" in sp, "Info: Chip „Waage-Deckel\" in tpStartSperre (wartet / aufgegeben)")
     print("\n" + ("✓ alles grün" if not FEHLER else f"✗ {len(FEHLER)} Fehler"))
