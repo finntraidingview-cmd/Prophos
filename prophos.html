@@ -38647,27 +38647,81 @@
    * PASTE-PARSER — Prop-Firm-Mail einmal reinpasten → Login/Passwort/Server
    * ziehen sich automatisch in die Felder (danach frei bearbeitbar).
    * ═══════════════════════════════════════════════════════════════════════ */
-  function acParseCredBlob(text){
+  /* LABEL-ZEILEN (23.10.2026, Finn per Screenshot, Bulk „FundedNext 100k Phase 1"): die FundedNext-Mail hat jeden Wert auf eigener
+   * Zeile — „MT5 Login" / „:" / „14348534" / „MT5 Password" / „:" / „…" / „MT5 Server" / „:" / „FundedNext-Server2". Hier fand die
+   * Passwort-Regel „MT5 Password" nicht (Vorsatz „MT5"), ein „Password" ohne Vorsatz nahm den „:" der nächsten Zeile als Passwort, und
+   * stripLabel schnitt aus einem Passwort mit „#" den Anfang ab. credLabelWerte liest NUR beschriftete Werte: Label am Zeilenanfang
+   * (optional „MT5 "/„Trading "/…), Wert dahinter oder in der nächsten Zeile, Trenner-Zeilen („:") übersprungen, Investor-Passwort nie.
+   * Dieselben Regeln nutzt das Bulk-Popup (bulkLoginAnker, bulkZugangVoll) — ein Parser für alle Einfügefelder. */
+  const CRED_LBL = {
+    login:    /^(?:mt[45]\s*|trading\s*)?(?:login(?:\s*(?:id|nr\.?|no\.?|number|nummer))?|account(?:\s*(?:number|no\.?|nr\.?|id|nummer))?|konto(?:nummer|\s*-?\s*nr\.?)?|benutzer(?:name)?|user\s*(?:name|id)?)\s*[:#=]?\s*(.*)$/i,
+    password: /^(?:mt[45]\s*|trading\s*|master\s*|main\s*|haupt\s*|konto\s*|account\s*)?(?:password|passwort|kennwort|pass|pwd)\b\s*[:#=]?\s*(.*)$/i,
+    server:   /^(?:mt[45]\s*|trading\s*|broker\s*)?server(?:\s*name)?\b\s*[:#=]?\s*(.*)$/i,
+    platform: /^(?:trading\s*)?(?:platform|plattform|plateforme)\b\s*[:#=]?\s*(.*)$/i,
+  }
+  const CRED_NIE = /investor|read-?only|nur\s*lese|lesezugriff|change|ändern|generate|vergessen|forgot|reset/i   // Knöpfe/Investor, keine Werte
+  const credTrenner = s => /^[\s:#=\-–—.|]*$/.test(s)
+  // Unsichtbares aus Mail-Kopien (Null-Breite-Zeichen hinter „Login" hielten die Login-Regel auf), geschütztes Leerzeichen, breiter Doppelpunkt
+  const credTextSauber = text => String(text || '').replace(/\r/g, '').replace(/[​-‍⁠﻿­]/g, '').replace(/ /g, ' ').replace(/[：∶]/g, ':')
+  const credIstLabel = s => Object.values(CRED_LBL).some(rx => rx.test(s) && !credTrenner(s))
+  // Wert hinter dem Label (gleiche Zeile) oder in den nächsten Zeilen — Trenner übersprungen, ein weiteres Label = leer
+  function credWertNach(zl, i, rest){
+    const v = String(rest || '').replace(/^[\s:#=\-–—|]+/, '').trim()
+    if(v) return v
+    for(let j = i + 1; j < zl.length && j <= i + 4; j++){
+      const nx = zl[j]
+      if(!nx || credTrenner(nx)) continue
+      return credIstLabel(nx) ? '' : nx
+    }
+    return ''
+  }
+  function credLabelWerte(text){
+    // Mehrere Labels in EINER Zeile („Login: 1 Password: x Server: Y") vorher auf eigene Zeilen — nur mit Trenner dahinter, Fließtext bleibt
+    const t = credTextSauber(text).replace(/[ \t]+(?=(?:mt[45]\s*)?(?:password|passwort|kennwort|server|platform|plattform)\b\s*[:#=])/gi, '\n')
+    const zl = t.split('\n').map(s => s.trim()), out = {}
+    for(let i = 0; i < zl.length; i++){
+      const ln = zl[i]
+      if(!ln || CRED_NIE.test(ln)) continue
+      for(const k of ['login', 'password', 'server', 'platform']){
+        const m = CRED_LBL[k].exec(ln); if(!m) continue
+        if(!out[k]){
+          const v = credWertNach(zl, i, m[1]), w = v.split(/\s+/)[0] || ''
+          if(k === 'login' && /^\d{4,12}$/.test(w)) out.login = w
+          else if(k === 'password' && w.length >= 3) out.password = w
+          else if(k === 'server'){ const sm = /^([A-Za-z0-9][A-Za-z0-9._\-]{2,40}(?:[ ][0-9]{1,4})?)/.exec(v); if(sm) out.server = sm[1] }
+          else if(k === 'platform'){ const p = /\bmt\.?\s*5\b|metatrader\s*5/i.test(v) ? 'MT5' : /\bmt\.?\s*4\b|metatrader\s*4/i.test(v) ? 'MT4' : /ctrader/i.test(v) ? 'cTrader' : ''; if(p) out.platform = p }
+        }
+        break
+      }
+    }
+    return out
+  }
+  window._credLabelWerte = credLabelWerte   // Test-Haken
+
+  // opt.nurLabel (23.10.2026, Bulk-Popup): nur beschriftete Werte, kein Struktur-Raten — ein Abschnitt dort enthält schon den Kopf des nächsten Kontos
+  function acParseCredBlob(text, opt){
     if(!text) return {}
-    const t = String(text).replace(/\r/g, '')
+    const t = credTextSauber(text)
+    const lw = credLabelWerte(t)
+    if(opt && opt.nurLabel) return lw
     const out = {}
     const grab = (patterns) => {
       for(const p of patterns){ const m = t.match(p); if(m && m[1]) return m[1].trim() }
       return null
     }
-    // ── 1. Label-basiert (wenn "Login:"/"Server:"/"Password:" davorsteht, gewinnt das) ──
-    out.login = grab([
+    // ── 1. Label-basiert (wenn "Login:"/"Server:"/"Password:" davorsteht, gewinnt das) — Label am Zeilenanfang (credLabelWerte) zuerst ──
+    out.login = lw.login || grab([
       /(?:mt[45]\s*)?(?:login|account\s*(?:number|no|nr|id)?|konto\-?nr\.?|kontonummer|account)\s*[:#=]?\s*([0-9]{4,12})\b/i,
       /\blogin\b[^\n0-9]*([0-9]{4,12})\b/i
     ])
-    out.server = grab([
+    out.server = lw.server || grab([
       // Optionaler Zahlen-Suffix nach Leerzeichen: "FundedNext-Server 2" ist ein
       // ECHTER Servername (Finns FundedNext-Master) — die Regex stoppte vorher am
       // Leerzeichen und lieferte einen kaputten halben Namen (Fund 15.08.2026).
       // Bewusst NUR Ziffern als Suffix, sonst würde Folgetext mitgefressen.
       /server(?:\s*name)?\s*[:#=]?\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,40}(?:[ ][0-9]{1,4})?)\b/i
     ])
-    out.password = grab([/(?:master|trading|main|haupt)\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(\S+)/i])
+    out.password = lw.password || grab([/(?:master|trading|main|haupt)\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(\S+)/i])
     if(!out.password){
       const tl = t.split('\n')
       for(let i = 0; i < tl.length; i++){
@@ -38679,7 +38733,7 @@
         if(/^\s*\b(?:password|passwort|kennwort|pass|pwd)\b\s*[:#=]?\s*$/i.test(ln)){
           for(let j = i + 1; j < tl.length; j++){
             const nx = tl[j].trim()
-            if(nx){ out.password = nx.split(/\s+/)[0]; break }
+            if(nx && !credTrenner(nx)){ out.password = nx.split(/\s+/)[0]; break }   // „:" auf eigener Zeile ist kein Passwort (23.10.2026)
           }
           if(out.password) break
         }
@@ -38689,7 +38743,9 @@
     // ── 2. Struktur-basiert: greift, wenn KEINE Labels da sind (z.B. Mail mit nur den 3
     //   Werten untereinander). Login = reine Zahlen, Server = Wort-Trenner-Wort ohne
     //   Passwort-Sonderzeichen, Passwort = die "komische" Restzeile. ──
-    const stripLabel = s => s.replace(/^[^:=#]{0,22}[:=#]\s*/, '').trim()
+    // Label nur abschneiden, wenn davor wirklich ein Label steht (mit Leerzeichen oder bekanntes Wort) — vorher wurde aus einem Passwort
+    // „Ab#9…" ein „9…" (Fund 23.10.2026, FundedNext-Mail); Passwörter haben kein Leerzeichen
+    const stripLabel = s => { const m = /^([^:=#]{0,22})[:=#]\s*/.exec(s); return (m && (/\s/.test(m[1].trim()) || /^(login|account|konto\w*|password|passwort|kennwort|pass|pwd|server|platform|plattform|broker|name|e-?mail|user\w*|benutzer\w*|typ|type|balance|leverage)$/i.test(m[1].trim()))) ? s.slice(m[0].length).trim() : s.trim() }
     const isDigits = s => /^[0-9]{4,12}$/.test(s)
     // Server-Namen: BrokerName + Trenner + Suffix (FundingPips-SIM1, FusionMarkets-Live,
     // The5ers-Real, ICMarketsSC-MT5). Kein "Server"-Wort nötig. Keine Passwort-Sonderzeichen.
@@ -39058,13 +39114,15 @@
       if(!raw.trim()) return []
       const firmServer = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
       const maskiert = v => /^[•*]+$/.test(String(v || '').trim())
-      const anker = [...raw.matchAll(/\bLogin\b\s*[:#=]?\s*(\d{4,})/gi)]
+      // 23.10.2026: dieselben Anker + Zugangs-Leser wie im Feld „External IDs" (bulkLoginAnker/bulkZugangVoll) — die FundedNext-Mail
+      // „MT5 Login / : / … / MT5 Password / : / …" wurde hier vorher nicht erkannt (Passwort leer)
+      const sauber = credTextSauber(raw), anker = bulkLoginAnker(sauber, 4)
       if(anker.length){
         return anker.map((m, k) => {
-          const rest = raw.slice(m.index + m[0].length, k + 1 < anker.length ? anker[k + 1].index : raw.length)
-          const z = (typeof bulkZugangLesen === 'function' && bulkZugangLesen(rest)) || {}
+          const rest = sauber.slice(m.ende, k + 1 < anker.length ? anker[k + 1].index : sauber.length)
+          const z = bulkZugangVoll(rest) || {}
           const plat = (/\b(MT[45])\b/i.exec(rest) || [])[1] || 'MT5'
-          return { login: m[1], password: maskiert(z.password) ? '' : (z.password || ''), server: (z.server || firmServer || '').trim(), platform: plat.toUpperCase() }
+          return { login: m.login, password: maskiert(z.password) ? '' : (z.password || ''), server: (z.server || firmServer || '').trim(), platform: plat.toUpperCase() }
         })
       }
       return raw.split('\n').map(line => {
@@ -39418,11 +39476,14 @@
         const pw = a.pw || zg.password || t.password || '', srv = a.srv || zg.server || t.server || std
         return `<div data-bcr="${escapeHtml(id)}" style="display:grid;grid-template-columns:110px 1fr 1fr;gap:6px;align-items:center">`
           + `<span class="mono" style="font-size:12.5px;color:var(--ink)">${escapeHtml(id)}</span>`
-          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" style="font-size:12.5px"${a.pw ? ' data-hand="1"' : ''} value="${escapeHtml(pw)}">`
+          // Passwort verdeckt (23.10.2026, Finn: „das Passwort nie im Klartext") — sichtbar nur, solange das Feld zum Bearbeiten den Fokus hat;
+          // bewusst kein type="password", sonst bietet der Browser an, es zu speichern
+          + `<input class="input mono" data-bcr-pw type="text" placeholder="Passwort" autocomplete="off" spellcheck="false" style="font-size:12.5px;-webkit-text-security:disc"${a.pw ? ' data-hand="1"' : ''} value="${escapeHtml(pw)}">`
           + `<input class="input mono" data-bcr-srv type="text" placeholder="Server" autocomplete="off" style="font-size:12.5px"${a.srv ? ' data-hand="1"' : ''} value="${escapeHtml(srv)}">`
           + `</div>`
       }).join('')
       box.querySelectorAll('[data-bcr-pw],[data-bcr-srv]').forEach(i => i.addEventListener('input', () => { i.dataset.hand = '1' }))
+      box.querySelectorAll('[data-bcr-pw]').forEach(i => { i.addEventListener('focus', () => { i.style.webkitTextSecurity = 'none' }); i.addEventListener('blur', () => { i.style.webkitTextSecurity = 'disc' }) })
       box.style.display = ids.length ? 'flex' : 'none'
       // Textfeld bleibt sichtbar: es ist das Einfügefeld für die Zugangskarte, auch wenn die Zeilen schon da sind (18.10.2026)
       const eb = document.getElementById('bulk-echo-box'); if(eb) eb.style.display = ids.length ? 'flex' : 'none'
@@ -39475,9 +39536,12 @@
     // Zugangsdaten hinter einem Login (14.10.2026): nur mit Label — „Password: x" / „Password" + nächste Zeile, „Server: y" / „Server" +
     // nächste Zeile; Investor-Passwort wird übersprungen; „Change Investor Password" / „Generate Password" sind Knöpfe, keine Werte.
     // Bewusst kein Struktur-Raten wie in acParseCredBlob: der Abschnitt bis zum nächsten Login enthält schon den Kopf des nächsten Kontos.
-    const BULK_ZUGANG_LABEL = /^(?:(?:master|trading|main|haupt|investor|read-?only)?\s*(?:password|passwort|kennwort)|server(?:\s*name)?|change\s+investor\s+password|generate\s+password)\b/i
+    // 23.10.2026: auch mit Vorsatz „MT5 Password"/„MT5 Server" und „Platform" (FundedNext-Mail) — sonst wurden Passwort und Server im
+    // Rückfall (3) je ein eigenes Konto
+    const BULK_ZUGANG_LABEL = /^(?:mt[45]\s*)?(?:(?:master|trading|main|haupt|investor|read-?only)?\s*(?:password|passwort|kennwort)|server(?:\s*name)?|platform|plattform|change\s+investor\s+password|generate\s+password)\b/i
     function bulkZugangLesen(teil){
-      const zl = String(teil || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean), z = {}
+      // Trenner-Zeilen („:" allein, FundedNext-Mail 23.10.2026) raus — sonst war „:" das Passwort
+      const zl = String(teil || '').split(/\r?\n/).map(x => x.trim()).filter(x => x && !credTrenner(x)), z = {}
       const wert = (rest, j) => { const v = (rest || '').trim(); if(v) return v; const nx = zl[j + 1] || ''; return (nx && !BULK_ZUGANG_LABEL.test(nx) && !/^login\b/i.test(nx)) ? nx : '' }
       zl.forEach((x, j) => {
         if(/investor|read-?only|change\s+investor|generate\s+password/i.test(x)) return
@@ -39488,8 +39552,50 @@
       })
       return (z.password || z.server) ? z : null
     }
+    // bulkZugangLesen + der Label-Teil von acParseCredBlob (23.10.2026): „MT5 Password" / „:" / „…" kennt nur der Mail-Parser des
+    // Konto-Popups — bulkZugangLesen gewinnt, der Mail-Parser füllt nur Lücken (kein Struktur-Raten, nurLabel)
+    function bulkZugangVoll(teil){
+      const z = bulkZugangLesen(teil) || {}, l = acParseCredBlob(teil, { nurLabel: true }) || {}, o = {}
+      if(z.password || l.password) o.password = z.password || l.password
+      if(z.server || l.server) o.server = z.server || l.server
+      return (o.password || o.server) ? o : null
+    }
+    /* LOGIN-ANKER (23.10.2026, Finn: FundedNext-Mail im Bulk „MT5 Login / : / 14348534 / MT5 Password / … / MT5 Server / …" ergab drei
+     * Konten — Login, Passwort und Server je eins). Ein Anker = ein Konto: wie bisher „Login" + Zahl (auch mit „:" bzw. Zahl auf der
+     * nächsten Zeile), dazu Label-Zeilen nach dem Mail-Parser des Konto-Popups (CRED_LBL.login: Login ID, Kontonummer, Konto-Nr.,
+     * Account Number, Benutzer …), Wert in derselben oder der nächsten Zeile. Die neuen Labels zählen nur, wenn bis zum nächsten Anker
+     * ein beschriftetes Passwort oder ein Server steht (also eine Zugangs-Mail) — so wird z. B. eine „Account ID" in einem Dashboard-Text
+     * nicht plötzlich zum Konto. Text vorher durch credTextSauber (Null-Breite-Zeichen aus Mail-Kopien). Rückgabe [{index, ende, login}]
+     * nach Position, jede Kennung einmal; index/ende beziehen sich auf den gesäuberten Text. */
+    function bulkLoginAnker(text, minZiffern){
+      const roh = credTextSauber(text), min = minZiffern || 4, a = [], schon = new Set()
+      for(const m of roh.matchAll(new RegExp('\\bLogin\\b\\s*[:#=]?\\s*(\\d{' + min + ',})', 'gi'))){
+        if(schon.has(m[1])) continue
+        schon.add(m[1]); a.push({ index: m.index, ende: m.index + m[0].length, login: m[1] })
+      }
+      const zeilen = [], rx = /[^\n]+/g; let mm
+      while((mm = rx.exec(roh))) zeilen.push({ t: mm[0].trim(), pos: mm.index, ende: mm.index + mm[0].length })
+      const neu = [], zahl = new RegExp('^\\d{' + min + ',12}$')
+      zeilen.forEach((z, i) => {
+        if(!z.t || CRED_NIE.test(z.t)) return
+        const m = CRED_LBL.login.exec(z.t); if(!m) return
+        let v = String(m[1] || '').replace(/^[\s:#=\-–—|]+/, '').trim(), wz = z
+        if(!v){ for(let j = i + 1; j < zeilen.length && j <= i + 4; j++){ const nx = zeilen[j].t; if(credTrenner(nx)) continue; if(!credIstLabel(nx)){ v = nx; wz = zeilen[j] } break } }
+        const w = v.split(/\s+/)[0] || ''
+        if(!zahl.test(w) || schon.has(w)) return
+        // Ende = direkt hinter der Kennung, nicht Zeilenende — „Account Number: 1 Password: x Server: y" in EINER Zeile (Blue Guardian)
+        schon.add(w); neu.push({ index: z.pos, ende: wz.pos + roh.slice(wz.pos, wz.ende).indexOf(w) + w.length, login: w, neu: true })
+      })
+      const alle = a.concat(neu).sort((x, y) => x.index - y.index)
+      return alle.filter((x, k) => {
+        if(!x.neu) return true
+        const bis = k + 1 < alle.length ? alle[k + 1].index : roh.length, l = acParseCredBlob(roh.slice(x.ende, bis), { nurLabel: true }) || {}
+        return !!(l.password || l.server)
+      })
+    }
+    window._bulkLoginAnker = bulkLoginAnker   // Test-Haken
     function bulkDashboardParsen(text){
-      const roh = String(text || ''), out = [], gesehen = new Set()
+      const roh = credTextSauber(text), out = [], gesehen = new Set()   // 23.10.2026: Null-Breite-Zeichen raus (Mail-Kopien), Positionen = bulkLoginAnker
       const firmaVon = id => { const pr = BULK_PRAEFIX.find(([rx]) => rx.test(id)); return pr ? pr[1] : '' }
       const dazu = (pos, b) => { const k = b.id.toUpperCase(); if(gesehen.has(k)) return; gesehen.add(k); out.push(Object.assign({ pos }, b)) }
       // (1) Topstep
@@ -39512,27 +39618,31 @@
       //      14.10.2026 (Finn, FundedNext-Zugangskarte „Login / Password / Change Investor Password / Server"): „Login" auch OHNE
       //      Doppelpunkt bzw. mit der Zahl auf der nächsten Zeile — vorher griff der Rückfall (3) und machte aus Passwort und Server
       //      zwei weitere „Konten". Passwort + Server hinter dem Login werden mitgelesen (zugang) und füllen die Zugangsdaten-Zeile vor.
-      const fnTreffer = [...roh.matchAll(/\bLogin\b\s*[:#=]?\s*(\d{5,})/gi)]
+      //      23.10.2026: Anker über bulkLoginAnker (auch Login ID/Kontonummer/Account Number aus Zugangs-Mails), Zugang über bulkZugangVoll
+      //      (auch „MT5 Password" / „:" / Wert) — jeder Mail-Block = genau ein Konto, Passwort/Server/Plattform nie ein eigenes.
+      const fnTreffer = bulkLoginAnker(roh, 5)
       fnTreffer.forEach((m, k) => {
-        const von = k > 0 ? fnTreffer[k - 1].index + fnTreffer[k - 1][0].length : 0
+        const von = k > 0 ? fnTreffer[k - 1].ende : 0
         const bisNaechster = k + 1 < fnTreffer.length ? fnTreffer[k + 1].index : roh.length
-        const zugang = bulkZugangLesen(roh.slice(m.index + m[0].length, bisNaechster))
+        const zugang = bulkZugangVoll(roh.slice(m.ende, bisNaechster))
         // Anker = letzte Größen-Zeile („$50K") vor dem Login, Titel = Zeile davor — so stört Text anderer Firmen davor nicht (Mischtext)
         const zlAlle = roh.slice(von, m.index).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
         let si = -1; zlAlle.forEach((x, j) => { if(/^\$\s*\d+(?:[.,]\d+)?\s*K$/i.test(x)) si = j })
         const zl = si >= 0 ? zlAlle.slice(si) : zlAlle.slice(-6), teil = zl.join('\n')
         const titel = si > 0 ? zlAlle[si - 1] : ''
         const gm = /\$\s*(\d+(?:[.,]\d+)?)\s*K\b/i.exec(teil)
-        const typZeile = (/(CHALLENGE|FUNDED)[^\n]*/i.exec(teil) || [''])[0]
+        // Typ nur aus einer Dashboard-Karte (Größen-Zeile „$50K" gefunden): in einer Zugangs-Mail steht davor nur Begrüßungstext — ein
+        // „FundedNext" darin hätte über /FUNDED/ „Funded CFD" ergeben; ohne Karte gewinnt Vorlage/Formular (23.10.2026, Vorlage „… Phase 1")
+        const typZeile = si >= 0 ? (/(CHALLENGE|FUNDED)[^\n]*/i.exec(teil) || [''])[0] : ''
         const typ = /funded/i.test(typZeile) ? 'funded_cfd' : /P2/i.test(typZeile) ? 'phase2' : /P1/i.test(typZeile) ? 'phase1' : 'challenge'
         const bi = zl.findIndex(x => /^current balance$/i.test(x)), bal = bi >= 0 && bi + 1 < zl.length ? bulkGeld(zl[bi + 1]) : null
-        const nachher = roh.slice(m.index + m[0].length, m.index + m[0].length + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
+        const nachher = roh.slice(m.ende, m.ende + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
         // 17.10.2026 (Jacob 511448315): FTMO-Zugangsdaten „Login … Server FTMO-Server" wurden als FundedNext · Challenge · 150k angelegt —
         // der Block schlug die gewählte FTMO-Vorlage. FundedNext nur noch mit Merkmal (Server/Text), sonst Firma + Typ aus dem Formular.
         const merkmal = String(zugang && zugang.server || '') + '\n' + teil
         const firma = /ftmo/i.test(merkmal) ? 'FTMO' : /funded\s*next|stellar/i.test(merkmal) ? 'FundedNext' : ''
-        dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma, groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
-                        typ: (firma === 'FundedNext' || typZeile) ? typ : '', balance: bal, trailing: null, tvUebernehmen: false, zugang })
+        dazu(m.index, { id: m.login, titel, status: '', plattform: plat.toUpperCase(), firma, groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
+                        typ: ((firma === 'FundedNext' && si >= 0) || typZeile) ? typ : '', balance: bal, trailing: null, tvUebernehmen: false, zugang })
       })
       // (1c) Apex (27.09.2026, Master): Kennung APEX + Ziffern = Challenge, PAAPEX + Ziffern = Performance Account (funded). Ein Apex-
       //      Dashboard-Format ist noch nicht bekannt — nur die Kennung, keine Balance/Größe aus dem Text.
@@ -39558,6 +39668,7 @@
       if(!out.length){
         let labelDavor = false
         for(const x of zeilen){
+          if(credTrenner(x.t)) continue   // „:" allein (FundedNext-Mail) — das Label davor gilt weiter für den Wert danach (23.10.2026)
           const istLabel = BULK_ZUGANG_LABEL.test(x.t), nurLabel = istLabel && !x.t.replace(BULK_ZUGANG_LABEL, '').replace(/^\s*[:#=]?\s*/, '')
           if(istLabel || labelDavor){ labelDavor = nurLabel; continue }
           const w = (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, '')
@@ -39631,6 +39742,7 @@
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
           ${(x.titel || x.status) ? `<span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>` : ''}
           <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(kontoNameRegel(Math.round(gr / 1000) + 'k', x.id, typ, ''))} · ${escapeHtml(firma)}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
+          ${!sperre && x.zugang && (x.zugang.password || x.zugang.server) ? `<span class="m" style="color:var(--good,#12B76A)">✓ ${[x.zugang.password ? 'Passwort' : '', x.zugang.server ? 'Server' : ''].filter(Boolean).join(' + ')} erkannt</span>` : ''}
           ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkVorlagenGruppiert(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`)}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
