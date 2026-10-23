@@ -1225,6 +1225,115 @@ def _update_vor_start_noetig(install_dir):
         return None
 
 
+# WINDOWS-ABFRAGE GAR NICHT ERST ENTSTEHEN LASSEN (Master 23.10.2026, Finn: „die zwei Fehler, die bei dir liegen — echt versuchen zu
+# eliminieren"; Mike pc-l5o8bv: Windows fragte, ob die Datei geöffnet werden soll — .1722 fand weder Admin-Häkchen noch liveupdate-Build).
+# Dritter Auslöser neben Häkchen und Update: die Download-Kennung (Alternate Data Stream „Zone.Identifier", den Browser an heruntergeladene
+# Dateien hängen) an terminal64.exe & Co. Sie zu löschen braucht keine Adminrechte. Vor jedem Kaltstart (start_terminal, Heil-Neustart)
+# für GENAU diese Installation und beim Panel-Start für ALLE: Kennung weg, HKCU-Häkchen weg (provision.uac_haken_entfernen). Was ohne
+# Admin nicht geht, meldet der Status (mt5_update.windows): Installationen unter „Programme" (dort greift die stille Update-Aufgabe nicht,
+# sie kennt nur X:\MT5-…) und HKLM-Häkchen. _MT5_UPDATE_PS bleibt unberührt (jede Änderung = neue Ja-Abfrage auf jedem PC).
+ZONE_ENDUNGEN = (".exe", ".dll")
+WIN_ABFRAGE = {}   # Stand für den Status: at, zone_entfernt, programme, hklm_haken
+
+
+def zone_kandidat(name):
+    """REIN: trägt diese Datei eine Download-Kennung, die beim Start eine Windows-Frage auslösen kann? Nur Programme/Bibliotheken."""
+    return str(name or "").lower().endswith(ZONE_ENDUNGEN)
+
+
+def unter_programme(install_dir, programme_dirs):
+    """REIN: liegt die Installation unter „Programme" (ProgramFiles/ProgramFiles(x86))? Vergleich ohne Groß/klein, nur ganze Ordner."""
+    d = os.path.normcase(os.path.normpath(str(install_dir or ""))).replace("/", "\\").rstrip("\\") + "\\"
+    for p in programme_dirs or ():
+        if p and d.startswith(os.path.normcase(os.path.normpath(str(p))).replace("/", "\\").rstrip("\\") + "\\"):
+            return True
+    return False
+
+
+def zone_kennung_entfernen(install_dir):
+    """Download-Kennung an *.exe/*.dll im Installationsordner (mit Unterordnern) löschen → Anzahl. Ohne Windows 0; wirft nie.
+    Nur der Datenstrom „:Zone.Identifier" wird gelöscht, die Datei selbst bleibt unberührt."""
+    if os.name != "nt" or not install_dir or not os.path.isdir(install_dir):
+        return 0
+    n = 0
+    try:
+        for wurzel, _ordner, dateien in os.walk(install_dir):
+            for f in dateien:
+                if not zone_kandidat(f):
+                    continue
+                try:
+                    os.remove(os.path.join(wurzel, f) + ":Zone.Identifier")
+                    n += 1
+                except OSError:
+                    pass   # keine Kennung (der Normalfall) oder gesperrt — nie den Start aufhalten
+    except Exception:
+        pass
+    return n
+
+
+def _hklm_admin_haken():
+    """Nur lesen: terminal64.exe-Einträge mit „Als Administrator ausführen" in HKLM (ohne Adminrechte nicht löschbar)."""
+    if os.name != "nt":
+        return []
+    out = []
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers") as k:
+            i = 0
+            while True:
+                try:
+                    name, wert, typ = winreg.EnumValue(k, i)
+                except OSError:
+                    break
+                i += 1
+                if typ == winreg.REG_SZ and str(name).lower().endswith("terminal64.exe") \
+                        and {t.upper() for t in str(wert).split()} & {"RUNASADMIN", "ELEVATECREATEPROCESS"}:
+                    out.append(str(name))
+    except Exception:
+        pass
+    return out
+
+
+def _vor_kaltstart(fname, install_dir):
+    """Vor jedem Kaltstart: Download-Kennung dieser Installation + HKCU-Häkchen weg. Darf einen Start nie verhindern."""
+    try:
+        n = zone_kennung_entfernen(install_dir)
+        if n:
+            print(f"[windows] {fname}: Download-Kennung an {n} Datei(en) entfernt — Windows fragt beim Start nicht mehr „Datei öffnen?“",
+                  flush=True)
+        getattr(provision, "uac_haken_entfernen", lambda: None)()
+    except Exception as e:
+        print(f"[windows] {fname}: Vorbeugen übersprungen ({type(e).__name__}: {e})", flush=True)
+
+
+def _windows_abfrage_vorbeugen():
+    """Einmal beim Panel-Start für ALLE MT5-Installationen (Datenordner-Zuordnung + Instanz-Configs): Kennung weg, Stand für den Status."""
+    if os.name != "nt":
+        return
+    try:
+        dirs = {}
+        try:
+            for inst in provision.map_installs(provision.terminals_root()):
+                dirs[os.path.normcase(os.path.normpath(inst))] = inst
+        except Exception:
+            pass
+        for i in instances():
+            pfad = str((read_json(os.path.join(HERE, i["config_file"]), {}) or {}).get("master_terminal_path") or "").strip()
+            if pfad:
+                d = os.path.dirname(os.path.abspath(pfad))
+                dirs.setdefault(os.path.normcase(os.path.normpath(d)), d)
+        n = sum(zone_kennung_entfernen(d) for d in dirs.values())
+        programme = [os.environ.get("ProgramFiles") or "", os.environ.get("ProgramFiles(x86)") or ""]
+        WIN_ABFRAGE.update(at=datetime.now().isoformat(timespec="seconds"), installationen=len(dirs), zone_entfernt=n,
+                           programme=sorted(d for d in dirs.values() if unter_programme(d, programme))[:20],
+                           hklm_haken=_hklm_admin_haken()[:20])
+        print(f"[windows] {len(dirs)} MT5-Installation(en): Download-Kennung an {n} Datei(en) entfernt"
+              + (f"; unter Programme (ohne stille Updates): {', '.join(WIN_ABFRAGE['programme'])}" if WIN_ABFRAGE["programme"] else "")
+              + (f"; HKLM-Häkchen (braucht Admin): {', '.join(WIN_ABFRAGE['hklm_haken'])}" if WIN_ABFRAGE["hklm_haken"] else ""), flush=True)
+    except Exception as e:
+        WIN_ABFRAGE.update(fehler=f"{type(e).__name__}: {e}"[:120])
+
+
 def _update_einspielen(fname, aus):
     try:
         for zeile in provision.mt5_updates_einspielen(aus, max_s=300):
@@ -1254,7 +1363,8 @@ def _mt5_update_stand():
     if os.name != "nt":
         return None
     if time.time() - _MT5_UPD_STAND["t"] < 300 and _MT5_UPD_STAND["wert"] is not None:
-        return dict(_MT5_UPD_STAND["wert"], paket={k: v for k, v in MT5_PAKET.items() if not k.startswith("_")})
+        return dict(_MT5_UPD_STAND["wert"], paket={k: v for k, v in MT5_PAKET.items() if not k.startswith("_")},
+                    windows=dict(WIN_ABFRAGE) or None)
     try:
         aus = provision.update_ausstehend()
         w = {"aufgabe_ok": bool(provision.update_aufgabe_ok()), "ausstehend": len(aus),
@@ -1264,7 +1374,8 @@ def _mt5_update_stand():
         w = {"fehler": f"{type(e).__name__}: {e}"[:120]}
     _MT5_UPD_STAND.update(t=time.time(), wert=w)
     # MetaTrader5-Paket des Panel-Pythons (08.10.2026) mitliefern — kommt so ohne Backend-Änderung bis Admin → PC-Tabs
-    return dict(w, paket={k: v for k, v in MT5_PAKET.items() if not k.startswith("_")})
+    # windows (23.10.2026): Download-Kennung/Programme/HKLM-Häkchen aus _windows_abfrage_vorbeugen, auf demselben Weg
+    return dict(w, paket={k: v for k, v in MT5_PAKET.items() if not k.startswith("_")}, windows=dict(WIN_ABFRAGE) or None)
 
 
 # MT5-UPDATE PER KLICK EINRICHTEN (08.10.2026, Finn: „Kannst du das vorher bei der Einrichtung einbauen?"): der Wächter fragt
@@ -2031,6 +2142,7 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     if aus:
         _update_einspielen(fname, aus)
     _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
+    _vor_kaltstart(fname, install_dir)   # Download-Kennung + HKCU-Häkchen weg (23.10.2026)
     # Login-Wache auch nach dem Heil-Neustart (23.10.2026): hier startet Echo ebenso kalt — bisher ohne Wache
     exp_heil = int(cfg.get("master_expected_login") or 0)
     if _inject_ea_into_profile(fname, cfg, install_dir):
@@ -2598,6 +2710,7 @@ def start_terminal(fname, creds=None, ohne_update=False):
             threading.Thread(target=_update_dann_start, args=(fname, install_dir, aus, creds), daemon=True).start()
         return True, "Neuer MT5-Build wird still eingespielt (ohne Windows-Abfrage) — das Terminal startet gleich danach"
     _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
+    _vor_kaltstart(fname, install_dir)   # Download-Kennung + HKCU-Häkchen weg (23.10.2026)
     try:
         if creds:
             # Login-Zwang: [Common]-only-ini (KEIN [StartUp] — das wuerde bei jedem
@@ -4990,6 +5103,8 @@ def main():
     # nicht mit AttributeError sterben — der naechste Copier-Zyklus zieht
     # provision.py nach, dann greift der Lauf von selbst.
     getattr(provision, "uac_haken_entfernen", lambda: None)()
+    # Download-Kennung an allen MT5-Installationen weg + Stand für den Status (23.10.2026, s. _windows_abfrage_vorbeugen)
+    threading.Thread(target=_windows_abfrage_vorbeugen, daemon=True).start()
     # Von-Null-Selbstheilung: fehlende Vorlage einmalig aus dem Repo holen
     # (blockiert den Start nicht laenger als den Download-Timeout).
     ensure_vorlage()

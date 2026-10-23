@@ -2006,6 +2006,7 @@ def main():
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
     results.append(test_login_wache())
+    results.append(test_windows_abfrage_vorbeugen())
 
     print()
     ok = sum(1 for r in results if r)
@@ -2281,6 +2282,50 @@ def test_login_wache():
     chk(qs.count("target=_login_ok_wache") == 3, "Wache nach jedem Kaltstart (start_terminal + beide Heil-Starts)")
     if ok:
         print("✓ Login-Wache: Lage warten/suchen/aus, 30 min ohne Abfrage-Zeit, Ende bei stabiler Verbindung, nach jedem Kaltstart")
+    return ok
+
+
+def test_windows_abfrage_vorbeugen():
+    """Windows-Abfrage gar nicht erst entstehen lassen (Master 23.10.2026, Mike: „Datei öffnen?"): Download-Kennung vor jedem Kaltstart und
+    beim Panel-Start weg, Status meldet Programme/HKLM, dritter Auslöser im Bot-Text; /api/windows-abfrage nur lesen."""
+    import order_bot as ob, panel, inspect
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ Windows-Abfrage: " + name); ok = False
+    chk(panel.zone_kandidat("terminal64.exe") and panel.zone_kandidat("MetaEditor64.EXE") and panel.zone_kandidat("x.dll")
+        and not panel.zone_kandidat("terminal.ini") and not panel.zone_kandidat("") and not panel.zone_kandidat(None),
+        "zone_kandidat: nur .exe/.dll")
+    pf = ["C:\\Program Files", "C:\\Program Files (x86)"]
+    chk(panel.unter_programme("C:\\Program Files\\MetaTrader 5", pf) and panel.unter_programme("C:\\Program Files (x86)\\FTMO MT5", pf)
+        and not panel.unter_programme("C:\\MT5-A", pf) and not panel.unter_programme("C:\\Program FilesX\\MT5", pf)
+        and not panel.unter_programme("", pf) and not panel.unter_programme("C:\\Program Files\\x", [""]),
+        "unter_programme: ganze Ordner, leer nie")
+    if os.name != "nt":
+        chk(panel.zone_kennung_entfernen("/tmp") == 0 and panel._hklm_admin_haken() == [] and panel.consent_offen() is None,
+            "ohne Windows: nichts gelöscht, nichts gelesen")
+    q = inspect.getsource(panel.zone_kennung_entfernen)
+    chk(':Zone.Identifier"' in q and "zone_kandidat(f)" in q and "rmtree" not in q and "SetValueEx" not in q,
+        "zone_kennung_entfernen: löscht nur den Datenstrom an .exe/.dll")
+    q = inspect.getsource(panel._hklm_admin_haken) + inspect.getsource(panel.consent_offen)
+    chk("SetValueEx" not in q and "DeleteValue" not in q and "taskkill" not in q, "HKLM-Häkchen/consent: nur lesen")
+    qs = inspect.getsource(panel.start_terminal) + inspect.getsource(panel._heal_ea_inner)
+    chk(qs.count("_vor_kaltstart(fname, install_dir)") == 2, "vor jedem Kaltstart (start_terminal + Heilung)")
+    st = inspect.getsource(panel.start_terminal)
+    chk(st.index("_vor_kaltstart(fname, install_dir)") < st.index("subprocess.Popen([path, f\"/config:{ini}\"]")
+        and st.index("_vor_kaltstart(fname, install_dir)") < st.index("subprocess.Popen([path], cwd=install_dir)"), "Kennung weg VOR dem Popen")
+    chk("_MT5_UPDATE_PS" not in inspect.getsource(panel._vor_kaltstart) + inspect.getsource(panel._windows_abfrage_vorbeugen),
+        "stilles Update-Skript unberührt")
+    _ua = ob.uac_ausloeser_text
+    z = _ua({"haken": [], "update": None, "zone": True})
+    chk("Download-Kennung an terminal64.exe" in z and "Zulassen" in z, f"dritter Auslöser Download-Kennung ({z})")
+    chk("Download-Kennung" not in _ua({"haken": ["HKCU"], "zone": True}) and "MT5-Update" in _ua({"update": ("1", "2"), "zone": True}),
+        "Häkchen und Update gehen vor")
+    chk("noch eine Download-Kennung" in _ua({}), "nichts davon nennt alle drei")
+    if ok:
+        print("✓ Windows-Abfrage: Download-Kennung vor jedem Kaltstart + beim Panel-Start weg, Programme/HKLM im Status, dritter Auslöser")
     return ok
 
 

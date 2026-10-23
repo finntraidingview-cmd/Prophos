@@ -1670,8 +1670,13 @@ def _uac_lage(path):
     None ohne Windows/Pfad. aufgabe_ok wird nur ermittelt, wenn ein Update wartet (schtasks-Abfrage)."""
     if os.name != "nt" or not path:
         return None
-    lage = {"haken": [], "update": None, "aufgabe_ok": None}
+    lage = {"haken": [], "update": None, "aufgabe_ok": None, "zone": False}
     ziel = os.path.normcase(os.path.abspath(path))
+    # Download-Kennung (23.10.2026, Mike pc-l5o8bv: Windows fragte „Datei öffnen?"): Datenstrom Zone.Identifier an GENAU dieser Exe
+    try:
+        lage["zone"] = os.path.exists(ziel + ":Zone.Identifier")
+    except Exception:
+        pass
     try:
         import winreg
         layers = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
@@ -1709,7 +1714,7 @@ def _uac_lage(path):
 
 def uac_ausloeser_text(uac):
     """REIN RECHNEND (testbar): Nachsatz „ · Auslöser: …" zur offenen Sicherheitsabfrage aus der Lage von _uac_lage — leer ohne Lage.
-    Reihenfolge: Admin-Häkchen (kommt bei JEDEM Kaltstart wieder) vor wartendem MT5-Build vor „nichts davon"."""
+    Reihenfolge: Admin-Häkchen (kommt bei JEDEM Kaltstart wieder) vor wartendem MT5-Build vor Download-Kennung (23.10.2026) vor „nichts davon"."""
     if not isinstance(uac, dict):
         return ""
     haken = [str(h) for h in (uac.get("haken") or ())]
@@ -1724,8 +1729,11 @@ def uac_ausloeser_text(uac):
         return (f" · Auslöser: MT5-Update {upd[0]} → {upd[1]} liegt im liveupdate-Ordner und will erhöht eingespielt werden — "
                 + ("die stille Update-Aufgabe steht, hat aber vor diesem Start nicht gegriffen (Ordner/Merker prüfen)" if aufgabe
                    else "die stille Update-Aufgabe fehlt → im Echo-Panel 'MT5-Update einrichten' klicken"))
-    return (" · Auslöser: weder Admin-Häkchen an dieser terminal64.exe noch ein neuer MT5-Build im liveupdate-Ordner — "
-            "bitte den Text der Abfrage am PC lesen (welches Programm will Adminrechte?)")
+    if uac.get("zone"):
+        return (" · Auslöser: Download-Kennung an terminal64.exe (Windows fragt „Datei öffnen?“) — das Echo-Panel entfernt sie vor jedem "
+                "Kaltstart; bleibt sie: Rechtsklick terminal64.exe > Eigenschaften > 'Zulassen' anhaken")
+    return (" · Auslöser: weder Admin-Häkchen an dieser terminal64.exe noch ein neuer MT5-Build im liveupdate-Ordner noch eine "
+            "Download-Kennung — bitte den Text der Abfrage am PC lesen (welches Programm will Adminrechte?)")
 
 
 def desktop_sperre_ursache(prozesse, uac=None):
