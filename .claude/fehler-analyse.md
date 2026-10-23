@@ -69,7 +69,8 @@ select left(p.id::text,8) as plan, left(p.user_id::text,8) as id, p.master_firm 
        y.sf->>'schritt' as schritt, y.sf->>'status' as sf_status, (y.sf->>'versuche')::int as versuche,
        y.sf->>'pc' as pc, left(y.sf->>'msg',160) as msg,
        case when coalesce(x.b->>'puls_pause','') <> '' then 'puls_pause: '||(x.b->>'puls_pause')
-            when jsonb_typeof(x.b->'richtung_konflikt') = 'object' then 'richtung_konflikt'   -- 21.10.2026: Schlüssel steht oft mit JSON null drin (= kein Konflikt)
+            when jsonb_typeof(x.b->'richtung_konflikt') = 'object' and coalesce(x.b->'richtung_konflikt'->>'status','') <> 'gedreht'   -- 21.10.2026: Schlüssel steht oft mit JSON null drin (= kein Konflikt); 23.10.2026: status 'gedreht' = erledigt, der Plan lief mit der neuen Richtung weiter
+                 then 'richtung_konflikt: '||coalesce(x.b->'richtung_konflikt'->>'status','?')
             when coalesce((y.sf->>'versuche')::int,0) >= 3 then 'deckel_voll'
             when y.sf->>'status' = 'tagesende' then 'tagesende'
             when x.b->'vorcheck'->>'status' in ('slave_nicht_bereit','verpasst_slave')   -- 22.10.2026: Slave-Vorprüfung (Fusion-Copier/-Marge) hält den Start, kein Claim, kein start_fehler
