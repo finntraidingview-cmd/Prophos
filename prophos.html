@@ -2756,7 +2756,7 @@
      Challenges): Bogen + Nadel = Chance, mit den bestehenden Konten das Ziel zu erreichen; Strich am Bogen = schon gesichert. Bogen mit
      Verlauf in Firmenfarbe, Nadel fährt beim Laden hoch, Karte hebt sich beim Hover; Raster füllt die volle Breite (auto-fit), am Handy
      eine wischbare Leiste. Gesperrte Firmen nur als Chip. Firmenfarben dezent (Finn 12.10.2026) an EINER Stelle. */
-  #mp-karte{--mp-tradeify:#4f5bd5;--mp-topstep:#1f93c9;--mp-apex:#e8892b;--mp-ftmo:#2a3f8f;--mp-fundednext:#a14fc9;--mp-fundingpips:#1f9e8f;--mp-the5ers:#3a9d5d;
+  #mp-karte{--mp-tradeify:#4f5bd5;--mp-tradeifycfd:#6b8e23;--mp-topstep:#1f93c9;--mp-apex:#e8892b;--mp-ftmo:#2a3f8f;--mp-fundednext:#a14fc9;--mp-fundingpips:#1f9e8f;--mp-the5ers:#3a9d5d;
     margin-bottom:14px;padding:10px 16px 12px}
   #mp-karte .mp-kopf{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 8px}
   #mp-karte .mp-kopf h3{margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650}
@@ -11742,7 +11742,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Wert in Funded-Accounts</div>
-                  <div class="panel-sub">Balance − Größe = Gewinn · × Profit-Share (FundedNext 76,5 %, Tradeify 90 %, Blue Guardian 85 %, sonst 80 %) + FundedNext-Refund 150 % beim ersten Payout = potenziell · anpassen im Payout-Kalender unter Finanzen</div>
+                  <div class="panel-sub">Balance − Größe = Gewinn · × Profit-Share (FundedNext 76,5 %, Tradeify 90 %, Blue Guardian 85 %, sonst 80 % — auch Tradeify CFD) + FundedNext-Refund 150 % beim ersten Payout = potenziell · anpassen im Payout-Kalender unter Finanzen</div>
                 </div>
                 <div id="adm-wert-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
@@ -13415,6 +13415,7 @@
             <option value="FundedNext Futures"></option>
             <option value="MyFundedFutures"></option>
             <option value="Tradeify"></option>
+            <option value="Tradeify CFD"></option>
             <option value="Apex Trader"></option>
             <option value="The5%ers"></option>
             <!-- Custom firms werden hier per JS hinzugefügt (data-custom="1") -->
@@ -13768,6 +13769,7 @@
             <option value="FundedNext Futures"></option>
             <option value="MyFundedFutures"></option>
             <option value="Tradeify"></option>
+            <option value="Tradeify CFD"></option>
             <option value="Apex Trader"></option>
             <option value="The5%ers"></option>
             <option value="AlphaFutures"></option>
@@ -13923,6 +13925,15 @@
     return fetch(url, Object.assign({}, opt || {}, { signal: AbortSignal.timeout(30000) }))
   }
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { fetch: sbFetch } })
+  /* TRADEIFY CFD (23.10.2026, Finn: neue CFD-Firma, Name in Prophos „Tradeify CFD" — MT5 „TradeifyVenturesFX-Server", NAS100 in Lots,
+   * Echo V2 ohne Hedge): „tradeify" UND „cfd" im Namen (klein, nur a–z0–9). Jede Stelle, die mit dem Teilstring „tradeify" Tradeify-
+   * Futures meint (TradingView-Weg, Winning Days, Good Day, Futures-Klasse, Vorplan-Schlüssel, Kürzel, Payout 90 %), schließt sie hierüber
+   * aus — sie verhält sich wie Blue Guardian. Gegenstück app.py _ist_tradeify_cfd, DB prophos_firma_key. Ganz oben im Modul, damit jede
+   * Stelle (auch die IIFE-Blöcke weiter unten) sie sieht. */
+  function istTradeifyCfd(firm){
+    const f = String(firm || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    return f.includes('tradeify') && f.includes('cfd')
+  }
 
   const loginEl     = document.getElementById('login-view')
   const dashboardEl = document.getElementById('dashboard-view')
@@ -16192,7 +16203,8 @@
      * kommen vom Backend (Echo-Snapshot → TSX → Duplikum → manuell). */
     // Blue Guardian 85/15 (2-Step Standard ohne 90-%-Add-on, Finn 04.10.2026) — sonst fiele die Firma auf 80
     // FundedNext 76,5 (Finn 08.10.2026: „FundedNext ist 76,5" — FTMO, FundingPips, The5ers bleiben bei 80); Überschreibung je Konto (payout_pct) gewinnt
-    const admPayoutPctDefault = firm => /tradeify/i.test(String(firm || '')) ? 90 : /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFundedNext(firm) ? 76.5 : 80
+    const admPayoutPctDefault = firm => istTradeifyCfd(firm) ? 80 : /tradeify/i.test(String(firm || '')) ? 90 :   // Tradeify CFD 80 % (23.10.2026)
+      /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFundedNext(firm) ? 76.5 : 80
     const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
     function admAccGroesse(name, balance){
       const m = String(name || '').match(/(\d{2,3})\s*k\b/i)
@@ -23111,6 +23123,7 @@
     if(/5%er|5ers|five percent/.test(l)) return roh('The5%ers')
     if(/futur/.test(l) && /fundednext|funded next|foundednext|founded next/.test(l)) return roh('FundedNext Futures')
     if(/funded|founded/.test(l) && /futur/.test(l)) return roh('MyFundedFutures')
+    if(istTradeifyCfd(l)) return roh('Tradeify CFD')   // eigene Firma (23.10.2026), vor der „tradeify"-Regel
     const regeln = [['apex', 'Apex Trader'], ['tradeify', 'Tradeify'], ['fundednext', 'FundedNext'], ['founded next', 'FundedNext'], ['foundednext', 'FundedNext'],
                     ['fundingpips', 'FundingPips'], ['funding pips', 'FundingPips'], ['topstep', 'Topstep'], ['ftmo', 'FTMO'], ['alpha', 'Alpha Future'],
                     ['fusion', 'Fusion Markets'], ['lucid', 'Lucid Trading']]
@@ -24838,7 +24851,7 @@
     // CFD NIE ÜBER TRADOVATE (08.10.2026, Finn: „Bei The5%ers ist CFD. Da gibt es keinen Tradovate-Nutzernamen.“ — pc-40mali las ein
     // The5%ers-Konto ohne mt5_links-Zeile über Tradovate: „nicht im aktiven Tradovate-Login … kein Tradovate-Username hinterlegt“).
     // Futures wie im Backend (WD_BALANCE_FUTURES, Teilwörter) oder tpFirmIstFutures — alles andere ist CFD und kommt über MT5/Echo.
-    const istFutures = /tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(String(acc.firm || '')) || (typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(acc.firm))
+    const istFutures = (/tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(String(acc.firm || '')) && !istTradeifyCfd(acc.firm)) || (typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(acc.firm))   // Tradeify CFD = MT5 (23.10.2026)
     if(!istFutures) return { ok: false, cfd: true, msg: `CFD-Konto (${acc.firm || 'Firma unbekannt'}) — die Balance kommt über das MT5-Terminal (Echo), nie über Tradovate. MT5-Verlinkung anlegen bzw. die MT5-Nummer als External ID eintragen.` }
     try{
       if(!tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm }).tv_username && Date.now() - _tvSpecFrischAt > 60000
@@ -41710,7 +41723,9 @@
     { name:'Lucid Trading', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'MyFundedFutures', symbol:'MNQ',  unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'The5%ers',      symbol:'',       unit:'Lots',      ppl:1.00,  currency:'$', dupSymbol:'NAS100' },
-    { name:'Tradeify',      symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() }
+    { name:'Tradeify',      symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
+    // Tradeify CFD (23.10.2026): MT5, NAS100 Kontraktgröße 10 = 10 $/Pkt je Lot — wie sql/2026-10-23_tradeify_cfd_firma.sql für bestehende Logins
+    { name:'Tradeify CFD',  symbol:'NAS100', unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NAS100', server:'TradeifyVenturesFX-Server' }
   ]
   function getCustomFirms(){ return customFirms }
   function rowToFirmSpec(row){
@@ -41818,7 +41833,7 @@
    * tatsächlich auf Accounts verwendeten Firmennamen — dedupliziert, alphabetisch.
    */
   function refreshFirmDatalist(){
-    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FTMO','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Apex Trader','The5%ers']
+    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FTMO','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Tradeify CFD','Apex Trader','The5%ers']
     const seen = new Map()  // lowercase → Original-Schreibweise (erste gesehene gewinnt)
     const addName = (name) => {
       const n = (name || '').trim()
@@ -42154,7 +42169,7 @@
       if(!preset?._custom && preset?.label?.toLowerCase() === f) return key
     }
     // Heuristik für Standard-Firms
-    if(f.includes('topstep') || f.includes('tradeify') || f.includes('alpha') || f.includes('apex') || f === 'projectx') return 'projectx'
+    if(f.includes('topstep') || (f.includes('tradeify') && !istTradeifyCfd(f)) || f.includes('alpha') || f.includes('apex') || f === 'projectx') return 'projectx'   // Tradeify CFD: CFD (23.10.2026)
     // 21.09.2026: „FundedNext Futures" enthält „fundednext" — ohne diese Zeile fiele
     // die Firma bei fehlender Custom-Zeile ins CFD-Preset (NDX100, Lots, $10/Pkt)
     // und der Multiplier würde mit Lots statt Kontrakten rechnen. Normalfall bleibt
@@ -46053,6 +46068,7 @@
     const TP_CFD_FIRMEN = ['fundednext', 'ftmo', 'fundingpips', 'the5%ers', 'the5ers', 'fusion markets', 'thinkmarkets', 'icmarkets', 'ic markets']
     const n = String(firm || '').trim().toLowerCase()
     if(!n || tpFirmIstFutures(firm)) return false
+    if(istTradeifyCfd(firm)) return true   // Tradeify CFD (23.10.2026), auch ohne firm_specs-Zeile
     if(TP_CFD_FIRMEN.includes(n)) return true
     try{ return (getCustomFirms() || []).some(f => f && String(f.name || '').trim().toLowerCase() === n && f.unit === 'Lots') }
     catch(_){ return false }
@@ -46061,6 +46077,7 @@
     // Liste IN der Funktion (nicht als const davor): tpFirmIstFutures läuft schon beim ersten Render, bevor das Modul diese Stelle erreicht
     const TP_FUTURES_FIRMEN = ['topstep', 'tradeify', 'apex trader', 'lucid trading', 'fundednext futures', 'myfundedfutures', 'myfoundedfutures', 'alpha future', 'alphafutures', 'alpha futures']
     const n = String(firm || '').trim().toLowerCase()
+    if(istTradeifyCfd(firm)) return false   // Tradeify CFD (23.10.2026) nie Futures — auch nicht über eine falsch gepflegte firm_specs-Einheit
     if(n && TP_FUTURES_FIRMEN.includes(n)) return true
     try{ return (getCustomFirms() || []).some(f => f && String(f.name || '').trim().toLowerCase() === n && f.unit === 'Kontrakte') }
     catch(_){ return false }
@@ -52593,7 +52610,7 @@
   /* Firmen-Kürzel für die Zeitleiste — kurz genug, dass zwei Tranchen nah beieinander lesbar bleiben */
   function apPrKurz(f){
     const t = String(f || '').toLowerCase().replace(/[^a-z0-9%]/g, '')
-    return t.includes('tradeify') ? 'TF' : t.includes('apex') ? 'AP' : t.includes('fundednext') ? 'FN' : t.includes('fundingpips') ? 'FP'
+    return istTradeifyCfd(t) ? 'TC' : t.includes('tradeify') ? 'TF' : t.includes('apex') ? 'AP' : t.includes('fundednext') ? 'FN' : t.includes('fundingpips') ? 'FP'
       : t.includes('5ers') || t.includes('5%ers') ? '5%' : t.includes('ftmo') ? 'FT' : t.includes('blueguardian') ? 'BG' : t.includes('topstep') ? 'TS'
       : t.includes('myfunded') || t.includes('myfounded') ? 'MF' : t.includes('lucid') ? 'LU'   // MFFU/Lucid lesbar (08.10.2026, Zeitstrahl-Pillen)
       : (String(f || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?')
@@ -53517,6 +53534,7 @@
    * Info"): Firmen-Kurzname + Größe („Tradeify 150k", „FNF 150k"); bei Enge Kürzel + Größe („TF 150k"), noch enger nur Kürzel, Rest „+n". */
   function tplFirmaKurz(f){
     const t = String(f || '').toLowerCase().replace(/[^a-z0-9%]/g, '')
+    if(istTradeifyCfd(t)) return 'Tradeify CFD'   // eigene Firma (23.10.2026)
     if(t.includes('tradeify')) return 'Tradeify'
     if(t.includes('apex')) return 'Apex'
     if(t.includes('fundednext')) return t.includes('futures') ? 'FNF' : 'FundedNext'
@@ -53534,7 +53552,7 @@
    * Zwei-Buchstaben-Kürzel FN/FP/BG/5%, die Finn nicht lesen kann */
   function tplFirmaMini(f){
     const k = tplFirmaKurz(f)
-    return ({ FundedNext: 'FNext', FundingPips: 'Pips', 'Blue Guardian': 'Blue G.', The5ers: '5ers' })[k] || k
+    return ({ FundedNext: 'FNext', FundingPips: 'Pips', 'Blue Guardian': 'Blue G.', The5ers: '5ers', 'Tradeify CFD': 'TF CFD' })[k] || k
   }
   const tplGroesseKurz = t => { let g = 0; try{ g = Number(kontoGroesseAnzeige(t.konto, null, t.balance)) || 0 }catch(_){} return g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : '' }
   function tplZeitstrahlHtml(D, zeilen){
@@ -58729,7 +58747,7 @@
     ]
     if(!master || !(master.type === 'funded' || master.type === 'funded_cfd') || !(Number(master.maxDrawdown) > 0)) return null
     if(typeof tpWdAktiv === 'function' && tpWdAktiv()) return null
-    const z = FUNDED_HEDGE_SAETZE.find(([re]) => re.test(String(master.firm || '')))
+    const z = istTradeifyCfd(master.firm) ? null : FUNDED_HEDGE_SAETZE.find(([re]) => re.test(String(master.firm || '')))   // Tradeify CFD: kein Satz (wie Blue Guardian, 23.10.2026)
     if(!z) return null
     const satz = z[1] / z[2]
     return { satz, basisEur: z[1], basisDd: z[2], dd: Number(master.maxDrawdown), eur: Math.round(satz * Number(master.maxDrawdown) * 100) / 100 }
@@ -59224,6 +59242,7 @@
     if(f.includes('fundednext') && f.includes('futur')) return 'fnfutures'   // vor den anderen: „FundedNext Futures“ (16.10.2026)
     if(f.includes('apex')) return tpVpApex100(konto) ? 'apex100' : 'apex'
     if(f.includes('lucid')) return 'lucid'   // 23.10.2026: Lucid wie Tradeify, eigener Schlüssel
+    if(istTradeifyCfd(f)) return 'sonst'   // Tradeify CFD (23.10.2026) ist CFD — nie die Tradeify-Futures-Regeln
     return f.includes('tradeify') ? 'tradeify' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
   // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
@@ -59681,6 +59700,8 @@
    *    (deterministisch aus Tag + Teilnehmern, damit zwei Tabs dasselbe schreiben). Pläne anlegen und
    *    starten passiert IMMER, sobald eine Zeile gewürfelt ist. Sa/So (Dubai) ruht die Automatik. ══ */
   const WD_TZ_STD = 'Asia/Dubai', WD_FUTURES_RX = /tradeify|apex|topstep|futur|mffu|lucid/i
+  // Futures-Firma für Winning Days — Tradeify CFD (23.10.2026) nie, „tradeify" im Muster meint Futures
+  const wdFuturesFirma = f => WD_FUTURES_RX.test(String(f || '')) && !istTradeifyCfd(f)
   const _wd = { regeln: null, geladen: false, laeuft: false, rows: [], tag: null, registriertTag: null, letzteLadung: 0 }
 
   // Deterministischer Zufall (mulberry32) aus einem Text-Seed — zwei Tabs würfeln dasselbe
@@ -60055,7 +60076,7 @@
     const ladeRpc = async () => { try{
       const { data, error } = await supabase.rpc('wd_konten_alle')
       if(error) throw error
-      konten = (data || []).filter(a => WD_FUTURES_RX.test(a.firm || '')).map(a => ({
+      konten = (data || []).filter(a => wdFuturesFirma(a.firm)).map(a => ({
         id: String(a.id), user_id: String(a.user_id), person: a.person || String(a.user_id).slice(0, 8), name: a.name || '', firm: a.firm || '',
         type: a.account_type || '', ext: String(a.external_id || '').trim(), max_drawdown: a.max_drawdown != null ? Number(a.max_drawdown) : null,
         // Kontogröße aus starting_balance (RPC liefert es seit Backend 62aa1c9, F10 26.09.2026); balance (manuell) wird nicht mehr mitgenommen
@@ -60159,7 +60180,7 @@
     }else{
       const a = window._admData; if(!a || !Array.isArray(a.rows)) return null
       for(const r of a.rows){
-        if(aus.has(String(r.user_id)) || r.archived || r.type !== 'winning_days' || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
+        if(aus.has(String(r.user_id)) || r.archived || r.type !== 'winning_days' || !wdFuturesFirma(r.firm_raw || r.firm)) continue
         add(String(r.user_id), r.person, konto(r, r.firm_raw || r.firm || '', r.wd_farm === undefined ? true : !!r.wd_farm))
       }
     }
@@ -60422,7 +60443,7 @@
   function wdPlanAufV2(row){
     if(!row) return row
     // Topstep → tsv2 (.1488, 13.10.2026): Topstep läuft seit 24.09.2026 nicht mehr über TradingView; Puls in TopstepX, master_tp = „To Make"
-    if(row.route !== 'tvv2' && row.route !== 'mt5v2' && row.route !== 'tsv2') row.route = /topstep/i.test(String(row.master_firm || '')) ? 'tsv2' : WD_FUTURES_RX.test(String(row.master_firm || '')) ? 'tvv2' : 'mt5v2'
+    if(row.route !== 'tvv2' && row.route !== 'mt5v2' && row.route !== 'tsv2') row.route = /topstep/i.test(String(row.master_firm || '')) ? 'tsv2' : wdFuturesFirma(String(row.master_firm || '')) ? 'tvv2' : 'mt5v2'
     // tsv2 MIT Fusion-Hedge seit .1493 (Finn 13.10.2026 nach dem ersten Topstep-Winning-Day: „die Order soll gespiegelt werden"); .1488–.1492 war er aus
     const hedge = (row.route === 'tvv2' || row.route === 'tsv2') && Number(row.hedge_eur) > 0
     for(const k of ['slave_account_id', 'slave_name', 'slave_firm', 'slave_risk', 'multiplier']){
@@ -62654,6 +62675,7 @@
   const TC_GOOD_DAY_MIN = { tradeify: 250, lucid: 250, 'fundednext futures': 250, topstep: 150, apex: { 100000: 300, 150000: 350 } }   // Lucid 250 $ wie Tradeify (Finn 23.10.2026), Topstep 150 $ (Finn 14.10.2026), FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026), Apex 100k 300 $ / 150k 350 $ (Finn 17.10.2026), gleiche Tabelle wie WD_GOOD_DAY_MIN im Backend
   // Schwelle des Kontos: Zahl je Firma, bei Apex je Größe (unbekannte Größe = 150k-Wert, zählt also nie zu früh)
   function tcGoodDayGrenze(a){
+    if(istTradeifyCfd(a && a.firm)) return null   // Tradeify CFD (23.10.2026): keine Winning-Day-Linie
     const firma = String((a && a.firm) || '').toLowerCase(), k = Object.keys(TC_GOOD_DAY_MIN).find(x => firma.includes(x))
     if(!k) return null
     const g = TC_GOOD_DAY_MIN[k]
@@ -70995,7 +71017,7 @@
   // „FundedNext Futures" ist ein eigener Topf (andere Plattform) — fällt in „übrige Firmen", nicht unter FundedNext.
   function pbFirmKey(firm){
     const f = String(firm || '').toLowerCase().replace(/\s+/g, '')
-    if(f.includes('futur')) return null
+    if(f.includes('futur') || istTradeifyCfd(f)) return null   // Tradeify CFD (23.10.2026) → übrige Firmen, nicht Tradeify-Futures
     for(const k of Object.keys(PB_FIRMEN)) if(f.includes(k)) return k
     return null
   }
@@ -72176,7 +72198,7 @@
   const _mp = { d: null, uid: '', at: 0, laedt: false, fehler: '', sendet: false, zeig: {} }
   const mpEsc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   // Firmenfarbe als Token aus der CSS (#mp-karte) — unbekannte Firma: Prophos-Violett
-  const MP_FARBE = { 'Tradeify': 'tradeify', 'Topstep': 'topstep', 'Apex Trader': 'apex', 'FTMO': 'ftmo', 'FundedNext': 'fundednext',
+  const MP_FARBE = { 'Tradeify': 'tradeify', 'Tradeify CFD': 'tradeifycfd', 'Topstep': 'topstep', 'Apex Trader': 'apex', 'FTMO': 'ftmo', 'FundedNext': 'fundednext',
                      'FundingPips': 'fundingpips', 'The5%ers': 'the5ers' }
   const mpFarbe = f => MP_FARBE[f] ? `var(--mp-${MP_FARBE[f]})` : 'var(--violet)'
   const MP_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>'
@@ -72187,6 +72209,7 @@
     if(/5%?ers|five percent/.test(f)) return 'the5%ers'
     if(f.includes('futur') && /funded ?next|founded ?next/.test(f)) return 'fundednext futures'
     if(/funded|founded/.test(f) && f.includes('futur')) return 'myfundedfutures'
+    if(istTradeifyCfd(f)) return 'tradeify cfd'   // eigene Firma (23.10.2026), wie app.py _firm_norm
     for(const [n, out] of [['apex', 'apex trader'], ['tradeify', 'tradeify'], ['fundednext', 'fundednext'], ['funded next', 'fundednext'], ['foundednext', 'fundednext'],
                            ['founded next', 'fundednext'], ['fundingpips', 'fundingpips'], ['funding pips', 'fundingpips'], ['ftmo', 'ftmo'], ['topstep', 'topstep']])
       if(f.includes(n)) return out
@@ -74156,7 +74179,7 @@
 :where([data-theme=dark]) #adm-pane-kompass .kp-wochen-titel{color:var(--sub)}
 :where([data-theme=dark]) #adm-pane-kompass .kp-woche .stab{background-color:var(--good)}
 :where([data-theme=dark]) #adm-pane-kompass .kp-woche .kw{color:var(--sub)}
-:where([data-theme=dark]) #mp-karte{--mp-tradeify:#636dda;--mp-topstep:#57b8e5;--mp-apex:#ec9e50;--mp-ftmo:#798dd8;--mp-fundednext:#b06bd1;--mp-fundingpips:#6ee3d5;--mp-the5ers:#80d09d}
+:where([data-theme=dark]) #mp-karte{--mp-tradeify:#636dda;--mp-tradeifycfd:#9cc25a;--mp-topstep:#57b8e5;--mp-apex:#ec9e50;--mp-ftmo:#798dd8;--mp-fundednext:#b06bd1;--mp-fundingpips:#6ee3d5;--mp-the5ers:#80d09d}
 :where([data-theme=dark]) #mp-karte .mp-kopf h3,:where([data-theme=dark]) #mp-karte .mp-kopf span{color:var(--sub-2)}
 :where([data-theme=dark]) #mp-karte .mp-tacho{border-color:var(--border-soft);color:inherit;background-color:transparent;box-shadow:var(--shadow-card)}
 :where([data-theme=dark]) #mp-karte .mp-tacho:hover{box-shadow:var(--shadow-card-hover)}

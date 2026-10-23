@@ -18,8 +18,8 @@ def lade():
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
         return src[i:src.find("\n\n\n", i)]
-    ns = {}
-    for f in ("_firm_norm", "muster_portfolio_zeilen", "ap_firma_gesperrt"):
+    ns = {"re": re}   # _ist_tradeify_cfd (23.10.2026) braucht re
+    for f in ("_ist_tradeify_cfd", "_firm_norm", "muster_portfolio_zeilen", "ap_firma_gesperrt"):
         exec(block(f), ns)
     exec(re.search(r"^MP_TYP_RANG = .*$", src, re.M).group(0), ns)
     i = src.index("\n_FIRM_RULES = [") + 1

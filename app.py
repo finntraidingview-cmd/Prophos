@@ -5341,6 +5341,15 @@ _FIRM_RULES = [
 ]
 
 
+def _ist_tradeify_cfd(firm):
+    """REIN RECHNEND (testbar): Firma „Tradeify CFD" (Finn 23.10.2026, neue CFD-Firma: MT5 „TradeifyVenturesFX-Server", NAS100 in Lots,
+    Echo V2 ohne Hedge) — „tradeify" UND „cfd" im Namen (klein, nur a–z0–9). Jede Stelle, die mit dem Teilstring „tradeify" Tradeify-
+    Futures meint (TradingView-Weg, Winning Days, Good Day, Futures-Klasse, Firmen-Gruppe), schließt sie hierüber aus — sie verhält sich
+    wie Blue Guardian. Gegenstück im Frontend: istTradeifyCfd, in der DB: prophos_firma_key (sql/2026-10-23_tradeify_cfd_firma_key.sql)."""
+    f = re.sub(r"[^a-z0-9]", "", str(firm or "").lower())
+    return "tradeify" in f and "cfd" in f
+
+
 # Personen, die im Admin-Dashboard NICHT auftauchen sollen (16.08.2026).
 # Freunde, die Prophos eigenständig für sich nutzen: ihre Accounts und Kosten
 # gehören ihnen, nicht Finns Kapitalverteilung. Sie arbeiten normal weiter —
@@ -5444,6 +5453,8 @@ def _firm_norm(name):
         return "FundedNext Futures"
     if ("funded" in f or "founded" in f) and "futur" in f:
         return "MyFundedFutures"
+    if _ist_tradeify_cfd(f):
+        return "Tradeify CFD"   # eigene Firma (23.10.2026), nicht unter Tradeify (Futures) — vor der „tradeify"-Nadel
     for needle, out in _FIRM_RULES:
         if needle in f:
             return out
@@ -10981,6 +10992,8 @@ def _wd_v2_route(firm):
     f = (firm or "").strip().lower()
     if "topstep" in f:
         return "tsv2"
+    if _ist_tradeify_cfd(f):
+        return "mt5v2"   # Tradeify CFD (23.10.2026): MT5/Echo V2, nie TradingView — „tradeify" in WD_FUTURES_FIRMEN meint Futures
     return "tvv2" if any(k in f for k in WD_FUTURES_FIRMEN) else "mt5v2"
 
 
@@ -11477,7 +11490,7 @@ def balance_lese_weg(firm, mt5_login="", external_id=""):
     MT5-Terminal; Login aus mt5_links, sonst die External ID, wenn sie eine MT5-Nummer ist (wie mt5KontoLogin im Frontend und
     „Ansehen" in /admin/wd-plaene). CFD ohne Login → (None, Grund) — nie Tradovate."""
     f = str(firm or "").lower()
-    if any(k in f for k in WD_BALANCE_FUTURES):
+    if any(k in f for k in WD_BALANCE_FUTURES) and not _ist_tradeify_cfd(f):   # Tradeify CFD (23.10.2026) = MT5, nie Tradovate
         return "konto_balance", ""
     login = str(mt5_login or "").strip() or str(external_id or "").strip()
     if not re.fullmatch(r"\d{4,}", login):
@@ -12884,6 +12897,8 @@ def _wd_good_day(konto, master_pl):
     WD_GOOD_DAY_MIN und Master-P&L echt darüber. Fehlt etwas → False."""
     if not isinstance(konto, dict) or str(konto.get("account_type") or "") != "winning_days":
         return False
+    if _ist_tradeify_cfd(konto.get("firm")):
+        return False   # Tradeify CFD (23.10.2026): CFD, keine Winning-Day-Linie — „tradeify" darunter meint Futures
     try:
         pl = float(master_pl)
     except (TypeError, ValueError):
@@ -13398,7 +13413,7 @@ def admin_wd_plaene():
                 firm = (a.get("firm") or "").strip()
                 uid = str(a.get("user_id"))
                 # 25.09.2026: nur noch Winning-Days-Konten (vierter Kontotyp) — Finn: „immer nur die Winning Days sehen"
-                if typ != "winning_days" or not any(k in firm.lower() for k in WD_FUTURES_FIRMEN):
+                if typ != "winning_days" or not any(k in firm.lower() for k in WD_FUTURES_FIRMEN) or _ist_tradeify_cfd(firm):   # Tradeify CFD (23.10.2026) ist CFD
                     continue
                 if str(a["id"]) in archiv or uid in excluded:
                     continue
@@ -22242,7 +22257,7 @@ def ap_klasse(route=None, firma=None):
     if r.startswith("tv") or r.startswith("ts"):
         return "futures"
     f = str(firma or "").strip().lower()
-    return "futures" if f and any(k in f for k in WD_BALANCE_FUTURES) else "cfd"
+    return "futures" if f and any(k in f for k in WD_BALANCE_FUTURES) and not _ist_tradeify_cfd(f) else "cfd"   # Tradeify CFD (23.10.2026) = CFD
 
 
 AP_KLASSE_TXT = {"cfd": "CFD", "futures": "Futures"}

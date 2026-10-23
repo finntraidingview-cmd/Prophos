@@ -25,7 +25,7 @@ def lade():
     rules = src[src.index("_FIRM_RULES = ["):]
     rules = rules[:rules.index("]\n") + 1]
     exec("\n".join([konst(k) for k in ("AP_RS_NACHLAUF_MIN", "AP_ID_FEST_HORIZONT_MIN")] + [rules]
-                   + [block(f) for f in ("_firm_norm", "_ap_norm", "ap_regel_finden", "ap_firma_key", "ap_id_fest")]), ns)
+                   + [block(f) for f in ("_ist_tradeify_cfd", "_firm_norm", "_ap_norm", "ap_regel_finden", "ap_firma_key", "ap_id_fest")]), ns)
     return ns
 
 

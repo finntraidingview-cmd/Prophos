@@ -24,6 +24,7 @@ import selftest_auto_delta as sd  # noqa: E402
 
 SQL = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_riegel.sql")       # prophos_firma_key (unverändert)
 SQL_1MIN = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_1min.sql")  # Riegel + RPC seit 08.10.2026
+SQL_KEY = os.path.join(HIER, "..", "sql", "2026-10-23_tradeify_cfd_firma_key.sql")  # prophos_firma_key seit 23.10.2026 (Tradeify CFD eigene Firma)
 FEHLER = []
 
 
@@ -249,15 +250,18 @@ def main():
 
     # ── 3 SQL-Riegel ──────────────────────────────────────────────────────────────────────────────────────────────────────
     sql = open(SQL, encoding="utf-8").read()
-    key, n = sql_firma_key(sql)
+    sql_key = open(SQL_KEY, encoding="utf-8").read()   # neuester Stand der Schlüssel-Funktion (Trigger bleibt in SQL)
+    key, n = sql_firma_key(sql_key)
     namen = ["The5%ers", "The 5%ers", "the5ers", "Five Percent Online", "FundedNext", "FundedNext Futures", "Funded Next Futures",
              "MyFundedFutures", "MyFoundedFutures", "Apex", "Apex Trader", "Tradeify", "FundingPips", "Funding Pips", "Topstep",
-             "TopstepX", "FTMO", "Alpha Futures", "Fusion Markets", "Lucid Trading", "Blue Guardian", "", "  Blue Guardian  "]
+             "TopstepX", "FTMO", "Alpha Futures", "Fusion Markets", "Lucid Trading", "Blue Guardian", "", "  Blue Guardian  ",
+             "Tradeify CFD", "TradeifyCFD", "tradeify cfd"]
     abw = [(x, key(x), a["_firm_norm"](x)) for x in namen if key(x) != a["_firm_norm"](x)]
     check(n >= 12 and not abw, f"prophos_firma_key = app.py _firm_norm für {len(namen)} Schreibweisen ({n} Regeln; Abweichungen {abw})")
     rules = re.search(r"^_FIRM_RULES = \[.*?^\]", src, re.M | re.S).group(0)
     nadeln = re.findall(r'\("([^"]+)",', rules)
-    check(all(f"'{x}'" in sql for x in nadeln), "jede Nadel aus _FIRM_RULES steht im SQL")
+    check(all(f"'{x}'" in sql_key for x in nadeln), "jede Nadel aus _FIRM_RULES steht im SQL")
+    check(key("Tradeify CFD") == "Tradeify CFD" and key("Tradeify") == "Tradeify", "Tradeify CFD eigener DB-Schlüssel, Tradeify bleibt Tradeify")
     check(re.search(r"before update of start_um_gestartet_at on public\.trade_plans", sql) is not None
           and "when (old.start_um_gestartet_at is null and new.start_um_gestartet_at is not null)" in sql,
           "Trigger sitzt genau auf dem Claim (start_um_gestartet_at NULL → gesetzt)")

@@ -29,7 +29,7 @@ def lade():
     # und die Kopie von WD_ERLEDIGT_ROUTEN kannte die zwei neuen Wege nicht.
     exec("\n".join(['WD_HEDGE_LOGIN = "488579"', const("WD_ERLEDIGT_ROUTEN"), const("WD_FUSION_AM_PLAN"), const("WD_HEDGE_BUCHUNG_ROUTEN")] + [block(n) for n in (
         "_wd_ende_upd", "_wd_hedge_schluessel", "_wd_hedge_konto", "_wd_zahl", "_wd_plan_mit_hedge", "_wd_erledigt_upd", "_wd_hedge_buchung",
-        "_wd_good_day", "_wd_good_day_konto_upd")] + ['WD_GOOD_DAY_MIN = {"tradeify": 250.0}']), ns)
+        "_ist_tradeify_cfd", "_wd_good_day", "_wd_good_day_konto_upd")] + ['WD_GOOD_DAY_MIN = {"tradeify": 250.0}']), ns)
     return ns
 
 

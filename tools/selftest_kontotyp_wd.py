@@ -79,8 +79,9 @@ def main():
             j += 1
     ns = {"re": re}
     exec(zuweisung("HQ_VORGABEN") + "\n" + zuweisung("_FIRM_RULES"), ns)
-    i = src.index("def _firm_norm(")
-    exec(src[i:src.find("\n\n\n", i)], ns)
+    for fn in ("_ist_tradeify_cfd", "_firm_norm"):   # _firm_norm fragt seit 23.10.2026 _ist_tradeify_cfd (Tradeify CFD eigene Firma)
+        i = src.index(f"def {fn}(")
+        exec(src[i:src.find("\n\n\n", i)], ns)
     V, FN = ns["HQ_VORGABEN"], ns["_firm_norm"]
     check(V.get("FundedNext|funded") == {"ziel_usd": 4000.0, "ziel_eur": 850.0}, "Vorgabe FundedNext · Funded = 4.000 $ ≙ 850 €")
     check(FN("FundedNext") == "FundedNext" and FN("FundedNext Futures") == "FundedNext Futures"

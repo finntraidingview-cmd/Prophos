@@ -19,6 +19,8 @@ def lade():
     i = src.index("WD_BALANCE_FUTURES = ")
     exec(src[i:src.find("\n", i)], ns)
     ns["re"] = re
+    i = src.index("def _ist_tradeify_cfd(")   # balance_lese_weg fragt seit 23.10.2026 nach Tradeify CFD
+    exec(src[i:src.find("\n\n\n", i)], ns)
     i = src.index("def balance_lese_weg(")
     exec(src[i:src.find("\n\n\n", i)], ns)
     i = src.index("def _wd_balance_signal(")
