@@ -51597,7 +51597,7 @@
     return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
   }
   /* WAAGE-DECKEL BEI HAND-STARTS (Finn 23.10.2026): Pläne mit Werten von Hand und Starts per Knopf sperrt der Deckel nicht (der DB-Riegel
-   * prüft nur automatische Claims ohne hand_werte_at) — würde der Start das Futures-Buch über 3 : 1 bringen, kommt nur ein Hinweis. Ohne
+   * prüft nur automatische Claims ohne hand_werte_at) — läge das Futures-Buch danach mehr als 2 Trades schief, kommt nur ein Hinweis. Ohne
    * Wirkung auf den Start (kein await beim Aufrufer, keine Gegentrades ziehen); CFD und Apex nie (die Lage meldet dort keinen Deckel). */
   async function rkDeckelHinweis(plan){
     try{
@@ -51605,7 +51605,7 @@
       const w = await rkWaage(plan, plan.richtung, false)
       const n = w && w.lage && w.lage.zaehlt ? w.lage.nachher : null
       if(n && n.deckel_sperrt && typeof atToast === 'function')
-        atToast(`⚖ Hinweis Waage-Deckel — „${plan.masterName || 'Plan'}" startet von Hand trotzdem: ${n.deckel_grund || 'Futures-Buch über 3 : 1'}`, 'warn')
+        atToast(`⚖ Hinweis Waage-Deckel — „${plan.masterName || 'Plan'}" startet von Hand trotzdem: ${n.deckel_grund || 'Futures-Abstand über 2'}`, 'warn')
     }catch(_){}
   }
   async function rkVorStart(plan){
@@ -51624,12 +51624,13 @@
         waageGeprueft = true
         const L = w.lage, kt = rkKlasseTxt(L.klasse), name = plan.masterName || 'Plan'
         // WAAGE-DECKEL (Finn 23.10.2026: „3:1 ist nicht so schlimm, aber 4:1 ist too much, 7:1 sowieso. Dann lieber gar keinen Trade starten.
-        // Verschieben geht"): würde der Start das Futures-Buch über regeln.ausgleich.waage_deckel (3 : 1) bringen, startet er nicht — kein
+        // Verschieben geht" — ~14:05: „Nie mehr als 2 darf der Abstand sein"): läge seine Seite danach mehr als regeln.ausgleich.waage_max_abstand
+        // (2) Trades über der anderen (3 : 1 frei, 4 : 1 gesperrt, 2 : 0 frei, 3 : 0 gesperrt), startet er nicht — kein
         // „Gegentrade folgt", kein Drehen in diese Seite (im Konfliktfall ist nachher = die gedrehte Richtung). Erlaubt bleibt wie bisher nur
         // das Drehen in die leichte Seite (Richtungsschutz frei, dort kein Deckel), sonst verschieben. Der DB-Claim-Riegel
         // trade_plans_waage_deckel sperrt dieselbe Lage zusätzlich an jedem Startweg.
         if(L.nachher && L.nachher.deckel_sperrt){
-          const txt = `[Waage-Deckel] ${L.nachher.deckel_grund || 'Futures-Buch würde über 3 : 1'}`
+          const txt = `[Waage-Deckel] ${L.nachher.deckel_grund || 'Futures-Abstand würde über 2'}`
           if(!konflikt && L.gegen && rkWaageOk(L.gegen) && !L.gegen.deckel_sperrt){
             const g = await rkSaldoDrehen(plan, k, txt)
             if(g) return g

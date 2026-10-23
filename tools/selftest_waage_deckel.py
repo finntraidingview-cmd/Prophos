@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Selbsttest WAAGE-DECKEL 3 : 1 (Finn 23.10.2026 ~13:50/13:55 Dubai, live 1 Long : 7 Short: „3:1 ist nicht so schlimm, aber 4:1 ist too much,
-7:1 sowieso. Dann lieber gar keinen Trade starten. Verschieben geht" — „Mach die Regel mit ‚würde‘"). Ohne Netz. Geprüft:
+"""Selbsttest WAAGE-DECKEL (Finn 23.10.2026 ~13:50/13:55 Dubai, live 1 Long : 7 Short: „4:1 ist too much, 7:1 sowieso. Dann lieber gar keinen
+Trade starten. Verschieben geht" — „Mach die Regel mit ‚würde‘" — ~14:05: „Nie mehr als 2 darf der Abstand sein. 3:1 okay, 4:1 nicht okay.
+2:0 okay, 3:0 nicht mehr."). Regel: Seite des Starts − andere Seite > regeln.ausgleich.waage_max_abstand (2) → gesperrt. Ohne Netz. Geprüft:
 (A) app.py ap_waage_deckel rein rechnend — 3 : 1 frei, 4 : 1 gesperrt, beide Seiten; Start in die leichte Seite nie gesperrt; leere andere
     Seite = 1 (3 : 0 frei, 4 : 0 gesperrt); CFD nie; Deckel aus regeln.ausgleich.waage_deckel (ap_ausgleich_param: Standard 3, geklemmt 1–20).
 (B) ap_waage_start_lage (Startweg PC-Tab → /admin/auto-plan/waage-start → rkVorStart) mit den Zeiten vom 23.10. (Dubai):
@@ -44,66 +45,67 @@ def main():
     ns = zw.lade()
     D, S = ns["ap_waage_deckel"], ns["ap_waage_start_lage"]
 
-    # ── (A) Regel ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # ── (A) Regel: Abstand (Finn ~14:05: „3:1 okay, 4:1 nicht okay. 2:0 okay, 3:0 nicht mehr. Immer 2 darf der Abstand sein.") ──────────
     def w(nl, ns_):
         return {"n_long": nl, "n_short": ns_}
-    check(not D("futures", w(1, 3), "sell")[0] and D("futures", w(1, 4), "sell")[0], "Short: 1 : 3 frei, 1 : 4 gesperrt")
-    check(not D("futures", w(3, 1), "buy")[0] and D("futures", w(4, 1), "buy")[0], "Long: 3 : 1 frei, 4 : 1 gesperrt (beide Seiten)")
-    check(not D("futures", w(2, 6), "sell")[0] and D("futures", w(2, 7), "sell")[0] and D("futures", w(1, 7), "sell")[0], "2 : 6 frei, 2 : 7 und 1 : 7 gesperrt")
-    check(not D("futures", w(1, 7), "buy")[0] and not D("futures", w(1, 5), "buy")[0], "Start in die leichte Seite nie gesperrt (Long bei 1 : 7)")
-    check(not D("futures", w(0, 3), "sell")[0] and D("futures", w(0, 4), "sell")[0], "leere andere Seite = 1: 0 : 3 frei, 0 : 4 gesperrt")
+    finn = [((3, 1), "buy", False), ((4, 1), "buy", True), ((2, 0), "buy", False), ((3, 0), "buy", True), ((6, 4), "buy", False), ((7, 4), "buy", True),
+            ((1, 3), "sell", False), ((1, 4), "sell", True), ((0, 2), "sell", False), ((0, 3), "sell", True), ((4, 6), "sell", False), ((4, 7), "sell", True)]
+    falsch = [(lage, r, soll) for lage, r, soll in finn if D("futures", w(*lage), r)[0] != soll]
+    check(not falsch, f"Finns Beispiele, beide Seiten: 3:1 frei, 4:1 gesperrt, 2:0 frei, 3:0 gesperrt, 6:4 frei, 7:4 gesperrt (falsch {falsch})")
+    check(not D("futures", w(1, 7), "buy")[0] and not D("futures", w(0, 5), "buy")[0], "Start in die leichte Seite nie gesperrt (Long bei 1 : 7, 0 : 5)")
     check(not D("cfd", w(0, 9), "sell")[0], "CFD nie (dort die €-Waage)")
-    check(D("futures", w(1, 3), "sell", 2.0)[0] and not D("futures", w(1, 3), "sell", "kaputt")[0], "Deckel aus dem Wert (2 → 1 : 3 gesperrt; kaputt → 3)")
+    check(D("futures", w(2, 4), "sell", 1.0)[0] and not D("futures", w(1, 4), "sell", 3.0)[0] and not D("futures", w(1, 3), "sell", "kaputt")[0]
+          and D("futures", w(0, 3), "sell", "kaputt")[0], "Abstand aus dem Wert (1 → 2 : 4 gesperrt; 3 → 1 : 4 frei; kaputt → 2)")
     sperrt, grund = D("futures", w(1, 4), "sell")
-    check(sperrt and "1 Long : 4 Short" in grund and "höchstens 3 : 1" in grund, f"Grund nennt Lage und Deckel: {grund}")
+    check(sperrt and "1 Long : 4 Short" in grund and "Abstand höchstens 2" in grund, f"Grund nennt Lage und Abstand: {grund}")
     a = {}
     exec("\n".join([re.search(r"^AP_AUSGLEICH_STANDARD = .*$", src, re.M).group(0), re.search(r"^AP_WAAGE_OHNE_FIRMEN = .*$", src, re.M).group(0),
                     src[src.index("\ndef ap_ausgleich_param(") + 1:src.find("\n\n\n", src.index("\ndef ap_ausgleich_param("))]]), a)
     P = a["ap_ausgleich_param"]
-    check(P({})["waage_deckel"] == 3.0 and P({"ausgleich": {"waage_deckel": 4}})["waage_deckel"] == 4.0
-          and P({"ausgleich": {"waage_deckel": 0}})["waage_deckel"] == 1.0 and P({"ausgleich": {"waage_deckel": "x"}})["waage_deckel"] == 3.0,
-          "regeln.ausgleich.waage_deckel: Standard 3, eigener Wert, geklemmt, Unsinn → 3")
+    check(P({})["waage_max_abstand"] == 2.0 and P({"ausgleich": {"waage_max_abstand": 3}})["waage_max_abstand"] == 3.0
+          and P({"ausgleich": {"waage_max_abstand": 0}})["waage_max_abstand"] == 1.0 and P({"ausgleich": {"waage_max_abstand": 99}})["waage_max_abstand"] == 20.0
+          and P({"ausgleich": {"waage_max_abstand": "x"}})["waage_max_abstand"] == 2.0 and "waage_deckel" not in P({}),
+          "regeln.ausgleich.waage_max_abstand: Standard 2, eigener Wert, geklemmt 1–20, Unsinn → 2")
 
-    # ── (B) Start-Lage mit den Fällen vom 23.10. ───────────────────────────────────────────────────────────────────────────
+    # ── (B) Start-Lage mit den Fällen vom 23.10. (Startweg PC-Tab) ───────────────────────────────────────────────────────────
     TF, TS, AP = ("Tradeify", "tradeify", "tvv2"), ("Topstep", "topstep", "tsv2"), ("Apex Trader", "apex", "tvv2")
     jm = 13 * 60 + 30.0
     lauf, plan = zw.lauf, zw.plan
     basis = [lauf("ina", "ina", *TF, "buy", 215), lauf("l2", "chris", *TF, "buy", 215),
              lauf("ez", "ezpoker", *TF, "sell", 215), lauf("mo", "moritz", *TF, "sell", 215),
-             lauf("m1", "marco", *TS, "sell", 150), lauf("m2", "marco2", *TS, "sell", 150)]          # 2 L : 4 S (13:27)
+             lauf("m1", "marco", *TS, "sell", 150), lauf("m2", "marco2", *TS, "sell", 150)]          # 2 L : 4 S nach 13:27
 
     def stand(offen, geplant, **param):
-        return {"jetzt_min": jm, "offen": offen, "geplant": geplant, "id_fest": {}, "starts_heute": [], "param": dict({"waage_deckel": 3.0}, **param)}
-    st = stand(basis, [plan("aurel", "aurel", *TF, "sell", 215, jm), plan("simon", "simon", *TS, "sell", 150, jm + 5)])   # Simon erst später (≤ 2 min zählte schon mit)
+        return {"jetzt_min": jm, "offen": offen, "geplant": geplant, "id_fest": {}, "starts_heute": [], "param": dict({"waage_max_abstand": 2.0}, **param)}
+    st0 = stand(basis[:5], [plan("m2", "marco2", *TS, "sell", 150, jm)])
+    L = S(st0, "m2", "sell")
+    check(not L["nachher"]["deckel_sperrt"] and (L["nachher"]["n_long"], L["nachher"]["n_short"]) == (2, 4), "13:27 Marco Topstep: 2 : 3 → 2 : 4 — frei (Abstand 2)")
+    st = stand(basis, [plan("aurel", "aurel", *TF, "sell", 215, jm), plan("simon", "simon", *TS, "sell", 150, jm + 5)])   # Simon erst später (≤ 2 min zählte mit)
     L = S(st, "aurel", "sell")
-    check(L["zaehlt"] and not L["nachher"]["deckel_sperrt"] and (L["nachher"]["n_long"], L["nachher"]["n_short"]) == (2, 5),
-          "13:30 Aurel Tradeify S: 2 : 4 → 2 : 5 — frei (unter 3 : 1)")
-    st2 = stand(basis + [lauf("aurel", "aurel", *TF, "sell", 215)], [plan("simon", "simon", *TS, "sell", 150, jm)])
+    check(L["zaehlt"] and L["nachher"]["deckel_sperrt"] and (L["nachher"]["n_long"], L["nachher"]["n_short"]) == (2, 5),
+          "13:30 Aurel Tradeify S: 2 : 4 → 2 : 5 — jetzt GESPERRT (Abstand 3), wäre verschoben worden")
+    st2 = stand(basis, [plan("simon", "simon", *TS, "sell", 150, jm)])
     L = S(st2, "simon", "sell")
-    check(L["zaehlt"] and L["klasse"] == "futures" and not L["nachher"]["deckel_sperrt"] and (L["nachher"]["n_long"], L["nachher"]["n_short"]) == (2, 6),
-          "13:30 Simon Topstep S (tsv2): 2 : 5 → 2 : 6 — frei (genau 3 : 1), tsv2 zählt als Futures")
-    st3 = stand(basis + [lauf("aurel", "aurel", *TF, "sell", 215), lauf("simon", "simon", *TS, "sell", 150)],
-                [plan("neu", "jacob", *TS, "sell", 150, jm), plan("neu2", "finn", *TF, "sell", 215, jm + 5)])
+    check(L["zaehlt"] and L["klasse"] == "futures" and L["nachher"]["deckel_sperrt"] and "2 Long : 5 Short" in (L["nachher"]["deckel_grund"] or ""),
+          "13:30 Simon Topstep S (tsv2): 2 : 4 → 2 : 5 gesperrt — tsv2 zählt als Futures, gleicher Riegel")
+    st3 = stand(basis[:4] + [lauf("aurel", "aurel", *TF, "sell", 215)], [plan("neu", "jacob", *TS, "sell", 150, jm)])
     L = S(st3, "neu", "sell")
-    L2 = S(dict(st3, geplant=[dict(st3["geplant"][1], start_min=jm)]), "neu2", "sell")
-    check(L["nachher"]["deckel_sperrt"] and L2["nachher"]["deckel_sperrt"] and "2 Long : 7 Short" in (L["nachher"]["deckel_grund"] or ""),
-          "der nächste Short bei 2 : 6 → 2 : 7 gesperrt — über tsv2 und tvv2 gleich")
+    check(not L["nachher"]["deckel_sperrt"] and (L["nachher"]["n_long"], L["nachher"]["n_short"]) == (2, 4), "2 : 3 + Short → 2 : 4 frei (genau Abstand 2)")
     # nach Inas Ende 1 : 3 + Short, Gegentrade (EzPoker-Long) folgt in 5 min → bleibt gesperrt
     st4 = stand([lauf("l2", "chris", *TF, "buy", 215), lauf("ez", "ezpoker", *TF, "sell", 215), lauf("mo", "moritz", *TF, "sell", 215),
                  lauf("m1", "marco", *TS, "sell", 150)],
                 [plan("aurel", "aurel", *TF, "sell", 215, jm), plan("ezl", "ezpoker", *TF, "buy", 215, jm + 5)])
     L = S(st4, "aurel", "sell")
     check(L["nachher"]["deckel_sperrt"] and not L["nachher"]["passt"] and "folgt" not in L["nachher"],
-          "1 : 3 + Short gesperrt TROTZ „Gegentrade folgt in 5 min\" — kein Paar-Freibrief über den Deckel")
+          "1 : 3 + Short = 1 : 4 gesperrt TROTZ „Gegentrade folgt in 5 min\" — kein Paar-Freibrief über den Deckel")
     st6 = stand([lauf("l2", "chris", *TF, "buy", 215), lauf("ez", "ezpoker", *TF, "sell", 215), lauf("mo", "moritz", *TF, "sell", 215),
                  lauf("m1", "marco", *TS, "sell", 150)], [plan("m3", "marco", *TS, "buy", 150, jm)])
     L = S(st6, "m3", "sell")   # Konfliktfall 13:27: geplant BUY, rkVorStart fragt die gedrehte Richtung SELL ab
     check(L["nachher"]["deckel_sperrt"] and not L["gegen"]["deckel_sperrt"],
-          "Drehen in die schwere Seite gesperrt (Marco Topstep: BUY → SELL bei 1 : 3 wäre 1 : 4), die Gegenrichtung BUY nicht")
+          "Drehen in die schwere Seite gesperrt (Marco Topstep BUY → SELL bei 1 : 3 wäre 1 : 4), die Gegenrichtung BUY nicht")
     st7 = stand([lauf("l2", "chris", *TF, "buy", 215)] + [lauf(f"s{i}", f"u{i}", *TF, "sell", 215) for i in range(5)],
                 [plan("lg", "aurel", *TF, "buy", 215, jm)])
-    L = S(st7, "lg", "buy")
-    check(not L["nachher"]["deckel_sperrt"], "Long bei 1 : 5 frei (macht die Waage leichter)")
+    check(not S(st7, "lg", "buy")["nachher"]["deckel_sperrt"], "Long bei 1 : 5 frei (macht die Waage leichter)")
     st8 = stand([lauf("l2", "chris", *TF, "buy", 215)] + [lauf(f"s{i}", f"u{i}", *TF, "sell", 215) for i in range(4)],
                 [plan("ap", "aurel", *AP, "sell", 200, jm)])
     L = S(st8, "ap", "sell")
@@ -113,8 +115,8 @@ def main():
                 [plan("p", "aurel", *TF, "sell", 215, jm)])
     L = S(st9, "p", "sell")
     check(L["nachher"]["deckel_sperrt"] and (L["nachher"]["n_long"], L["nachher"]["n_short"]) == (1, 4), "WD und gehedgt zählen nicht (1 : 3 + Short = 1 : 4)")
-    st10 = stand(st9["offen"], st9["geplant"], waage_deckel=4.0)
-    check(not S(st10, "p", "sell")["nachher"]["deckel_sperrt"], "Deckel 4 aus regeln.ausgleich: 1 : 4 frei")
+    st10 = stand(st9["offen"], st9["geplant"], waage_max_abstand=3.0)
+    check(not S(st10, "p", "sell")["nachher"]["deckel_sperrt"], "Abstand 3 aus regeln.ausgleich: 1 : 4 frei")
 
     # ── (C) DB-Claim (SQL-Datei) ───────────────────────────────────────────────────────────────────────────────────────────
     sql = open(SQL, encoding="utf-8").read()
@@ -149,9 +151,10 @@ def main():
               (None, "Lucid Trading"), (None, "FundedNext Futures"), (None, "Blue Guardian"), (None, "Alpha Futures"), ("tvplus", "Tradeify")]
     abw = [(r, f) for r, f in faelle if sql_futures(r, f) != (a2["ap_klasse"](r, f) == "futures")]
     check(not abw, f"SQL-Futures-Erkennung = app.py ap_klasse für {len(faelle)} Fälle (Abweichungen {abw})")
-    check("seite > deckel * greatest(andere, 1)" in sql, "Regel wie ap_waage_deckel: Seite > Deckel × max(andere, 1)")
-    check("deckel numeric := 3" in sql and "reg->'ausgleich'->>'waage_deckel'" in sql and "greatest(1, least(20, v::numeric))" in sql,
-          "Wert aus regeln.ausgleich.waage_deckel, Standard 3, geklemmt 1–20 (wie ap_ausgleich_param)")
+    check("seite - andere > max_abstand" in sql and "* greatest(andere" not in sql, "Regel wie ap_waage_deckel: Seite − andere > Abstand (kein Verhältnis mehr)")
+    check("max_abstand numeric := 2" in sql and "reg->'ausgleich'->>'waage_max_abstand'" in sql and "greatest(1, least(20, v::numeric))" in sql
+          and "->>'waage_deckel'" not in sql and "(Abstand höchstens " in sql,
+          "Wert aus regeln.ausgleich.waage_max_abstand, Standard 2, geklemmt 1–20 (wie ap_ausgleich_param), Grund „Abstand höchstens …\"")
     check("(p.status = 'open'" in sql and "'review'" not in sql.split("-- ── 2.")[1].split("-- ── 3.")[0]
           and f"interval '{int(ns['AP_WAAGE_CLAIM_MAX_MIN'])} minutes'" in sql,
           f"gezählt: open + Claim ≤ {int(ns['AP_WAAGE_CLAIM_MAX_MIN'])} min (AP_WAAGE_CLAIM_MAX_MIN), review für beide Seiten gleich nicht")

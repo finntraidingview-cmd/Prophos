@@ -1,11 +1,12 @@
--- WAAGE-DECKEL 3 : 1 (Finn 23.10.2026 ~13:50/13:55 Dubai, live 1 Long : 7 Short im Futures-Buch: „3:1 ist nicht so schlimm, aber 4:1 ist too
--- much, 7:1 sowieso. Dann lieber gar keinen Trade starten. Verschieben geht, kommt ja selten vor." — „Mach die Regel mit ‚würde‘ … Das ist
--- eigentlich die einzige Regel, die hinzugefügt werden soll.")
+-- WAAGE-DECKEL (Finn 23.10.2026 ~13:50/13:55 Dubai, live 1 Long : 7 Short im Futures-Buch: „4:1 ist too much, 7:1 sowieso. Dann lieber gar
+-- keinen Trade starten. Verschieben geht, kommt ja selten vor." — „Mach die Regel mit ‚würde‘" — ~14:05: „Nie mehr als 2 darf der Abstand sein.
+-- 3:1 okay, 4:1 nicht okay. 2:0 okay, 3:0 nicht mehr. Immer 2 darf der Abstand sein.")
 --
--- Regel: Ein AUTOMATISCHER Start, nach dem seine Seite im Futures-Buch mehr als waage_deckel × die andere Seite zählt (leere andere Seite = 1),
--- startet nicht — keine Ausnahme durch „Gegentrade folgt", Paar-Partner, Drehen oder den Topstep-Weg. 3 : 1 geht, 4 : 1 nicht. Ein Start in
--- die leichte Seite ist nie gesperrt. Die weiche Waage bis 2 : 1 (Vorziehen, Drehen in die leichtere Seite) bleibt unverändert darunter.
--- Wert: auto_plan_regeln.regeln.ausgleich.waage_deckel (Standard 3, geklemmt 1–20) — dieselbe Zahl wie app.py ap_ausgleich_param.
+-- Regel: Ein AUTOMATISCHER Start, nach dem seine Seite im Futures-Buch mehr als waage_max_abstand Trades über der anderen liegt, startet
+-- nicht — keine Ausnahme durch „Gegentrade folgt", Paar-Partner, Drehen oder den Topstep-Weg. 3 : 1 / 2 : 0 / 6 : 4 gehen, 4 : 1 / 3 : 0 /
+-- 7 : 4 nicht. Ein Start in die leichte Seite ist nie gesperrt. Die weiche Waage bis 2 : 1 (Vorziehen, Drehen in die leichtere Seite) bleibt
+-- unverändert darunter. Wert: auto_plan_regeln.regeln.ausgleich.waage_max_abstand (Standard 2, geklemmt 1–20) — dieselbe Zahl wie app.py
+-- ap_ausgleich_param.
 --
 -- Zählweise wie die Waage (app.py ap_klassen_waage / ap_waage_deckel): Klasse Futures (Route tv…/ts…, Echo-Routen mt5/mt5v2 nie, sonst
 -- Firmenname wie WD_BALANCE_FUTURES ohne „Tradeify CFD"), ohne Firmen aus regeln.ausgleich.waage_ohne (Standard Apex), nur Konten
@@ -43,7 +44,7 @@ begin
 end $$;
 
 -- ── 2. Lage: würde dieser Start das Futures-Buch über den Deckel bringen? ───────────────────────────────────────────────────────────────
--- -> {zaehlt, sperrt, n_long, n_short (mit diesem Start), deckel, grund}; zaehlt=false (CFD, Apex, WD/Funded, gehedgt) → sperrt=false
+-- -> {zaehlt, sperrt, n_long, n_short (mit diesem Start), max_abstand, grund}; zaehlt=false (CFD, Apex, WD/Funded, gehedgt) → sperrt=false
 create or replace function public.prophos_waage_deckel_lage(p_plan uuid, p_richtung text default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -52,7 +53,7 @@ declare
   r text;
   reg jsonb;
   v text;
-  deckel numeric := 3;
+  max_abstand numeric := 2;
   ohne text[] := array['apex'];
   firm text;
   nl int := 0;
@@ -69,9 +70,9 @@ begin
   end if;
   r := coalesce(p_richtung, pl.richtung);
   select regeln into reg from public.auto_plan_regeln where id = 1;
-  v := btrim(coalesce(reg->'ausgleich'->>'waage_deckel', ''));
+  v := btrim(coalesce(reg->'ausgleich'->>'waage_max_abstand', ''));
   if v ~ '^[0-9]+(\.[0-9]+)?$' then
-    deckel := greatest(1, least(20, v::numeric));
+    max_abstand := greatest(1, least(20, v::numeric));
   end if;
   if jsonb_typeof(reg->'ausgleich'->'waage_ohne') = 'array' then
     select coalesce(array_agg(lower(btrim(x))) filter (where btrim(x) <> ''), array[]::text[]) into ohne
@@ -84,7 +85,7 @@ begin
      or not public.prophos_waage_futures(pl.route, firm)
      or exists (select 1 from unnest(ohne) o
                  where strpos(lower(coalesce(public.prophos_firma_key(firm), '') || '|' || coalesce(firm, '')), o) > 0) then
-    return jsonb_build_object('zaehlt', false, 'sperrt', false, 'deckel', deckel);
+    return jsonb_build_object('zaehlt', false, 'sperrt', false, 'max_abstand', max_abstand);
   end if;
   select count(*) filter (where p.richtung = 'buy'), count(*) filter (where p.richtung = 'sell')
     into nl, ns
@@ -103,8 +104,8 @@ begin
           or (p.status = 'planned' and p.started_at is null and coalesce(p.hedge_eur, 0) <= 0
               and p.start_um_gestartet_at > now() - interval '15 minutes'));
   if r = 'buy' then nl := nl + 1; seite := nl; andere := ns; else ns := ns + 1; seite := ns; andere := nl; end if;
-  return jsonb_build_object('zaehlt', true, 'sperrt', seite > deckel * greatest(andere, 1), 'n_long', nl, 'n_short', ns, 'deckel', deckel,
-    'grund', 'Futures würde ' || nl || ' Long : ' || ns || ' Short (höchstens ' || trim(to_char(deckel, 'FM990.##'), '.') || ' : 1)');
+  return jsonb_build_object('zaehlt', true, 'sperrt', seite - andere > max_abstand, 'n_long', nl, 'n_short', ns, 'max_abstand', max_abstand,
+    'grund', 'Futures würde ' || nl || ' Long : ' || ns || ' Short (Abstand höchstens ' || trim(to_char(max_abstand, 'FM990.##'), '.') || ')');
 end $$;
 grant execute on function public.prophos_waage_futures(text, text) to authenticated, service_role;
 grant execute on function public.prophos_waage_deckel_lage(uuid, text) to authenticated, service_role;
@@ -149,7 +150,7 @@ begin
     erst := coalesce(old.start_um, now());
     n := 1;
   end if;
-  txt := coalesce(lage->>'grund', 'Futures-Buch würde über den Deckel') || ' — der '
+  txt := coalesce(lage->>'grund', 'Futures-Abstand würde über den Deckel') || ' — der '
          || case new.richtung when 'buy' then 'Long' else 'Short' end || ' startet nicht';
   if now() > erst + interval '120 minutes' then
     -- 120 min ohne Platz: aufgeben — Plan bleibt Geplant, ohne Startzeit (Start von Hand), nichts startet still später

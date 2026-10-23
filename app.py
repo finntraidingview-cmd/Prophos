@@ -21923,7 +21923,7 @@ def gp_tick(jetzt=None):
 # geplante, nicht gestartete Auto-Pläne (Richtung einer Tranche / Startzeit im eigenen Fenster) — nie laufende Trades, nie
 # Orders. Standard aus (regeln.ausgleich.aktiv = false, auto_start = false).
 # ════════════════════════════════════════════════════════════════════════════
-AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180, "fenster_uebergreifend": False, "waage_deckel": 3.0}   # waage_deckel: Finn 23.10.2026, kein automatischer Futures-Start über 3 : 1 (ap_waage_deckel); eine Zeile — Selbsttest-Lader lesen sie so
+AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180, "fenster_uebergreifend": False, "waage_max_abstand": 2.0}   # waage_max_abstand: Finn 23.10.2026, kein automatischer Futures-Start mit Abstand > 2 (ap_waage_deckel); eine Zeile — Selbsttest-Lader lesen sie so
 # EINSATZ (Finn 07.10.2026, „einfach, keine 1.000 Regeln"): EINE Kennzahl je Trade = Einsatz € = Kontowert × riskierte $ ÷
 # Polster (ap_trade_gewicht verlust_eur; ohne SL = ganzer Wert, gehedgt = 0), + long / − short. Ziel: kleinstes größtes
 # |Netto-Einsatz| über den Tag (kein hartes Limit, kein Pflicht-Gegenstück). Große Trades (≥ gross_ab_eur bzw. oberes Viertel
@@ -22007,10 +22007,10 @@ def ap_ausgleich_param(regeln):
     # APEX OHNE WAAGE (19.10.2026): Liste von Firmen-Teilstrings, Standard AP_WAAGE_OHNE_FIRMEN; [] in der DB = alle wiegen mit
     wo = a.get("waage_ohne")
     out["waage_ohne"] = [str(x).strip().lower() for x in wo if str(x).strip()] if isinstance(wo, list) else list(AP_WAAGE_OHNE_FIRMEN)
-    # WAAGE-DECKEL (Finn 23.10.2026): regeln.ausgleich.waage_deckel, Standard 3 (= höchstens 3 : 1), geklemmt 1–20; dieselbe Zahl liest der
-    # DB-Claim-Riegel (sql/2026-10-23_waage_deckel.sql)
+    # WAAGE-DECKEL (Finn 23.10.2026 ~14:05: „Nie mehr als 2 darf der Abstand sein"): regeln.ausgleich.waage_max_abstand, Standard 2, geklemmt
+    # 1–20; dieselbe Zahl liest der DB-Claim-Riegel (sql/2026-10-23_waage_deckel.sql)
     try:
-        out["waage_deckel"] = max(1.0, min(20.0, float(a.get("waage_deckel"))))
+        out["waage_max_abstand"] = max(1.0, min(20.0, float(a.get("waage_max_abstand"))))
     except (TypeError, ValueError):
         pass
     try:
@@ -24742,25 +24742,25 @@ def ap_waage_passt(klasse, w):
     return True, None, None
 
 
-def ap_waage_deckel(klasse, w, richtung, deckel=3.0):
-    """REIN RECHNEND (testbar) — WAAGE-DECKEL (Finn 23.10.2026 ~13:50/13:55 Dubai, live 1 Long : 7 Short: „3:1 ist nicht so schlimm, aber 4:1 ist
-    too much, 7:1 sowieso. Dann lieber gar keinen Trade starten. Verschieben geht, kommt ja selten vor." — „Mach die Regel mit ‚würde‘").
+def ap_waage_deckel(klasse, w, richtung, max_abstand=2.0):
+    """REIN RECHNEND (testbar) — WAAGE-DECKEL (Finn 23.10.2026, live 1 Long : 7 Short: „4:1 ist too much, 7:1 sowieso. Dann lieber gar keinen
+    Trade starten. Verschieben geht" — „Mach die Regel mit ‚würde‘" — ~14:05: „Nie mehr als 2 darf der Abstand sein. 3:1 okay, 4:1 nicht okay.
+    2:0 okay, 3:0 nicht mehr. Immer 2 darf der Abstand sein.").
     w = Futures-Waage MIT diesem Start (ap_klassen_waage extra / start_lage nachher). Ein automatischer Start, nach dem seine Seite mehr als
-    deckel × die andere Seite zählt (leere andere Seite = 1), startet nicht — keine Ausnahme durch „Gegentrade folgt", Paar oder Drehen. Nur
-    Futures (CFD hat die €-Waage), nur die Seite, die er schwerer macht: ein Start in die leichte Seite ist nie gesperrt. 3 : 1 geht, 4 : 1 nicht.
-    → (sperrt, grund)"""
+    max_abstand Trades über der anderen liegt, startet nicht — keine Ausnahme durch „Gegentrade folgt", Paar oder Drehen. Nur Futures (CFD hat
+    die €-Waage), nur die Seite, die er schwerer macht: ein Start in die leichte Seite ist nie gesperrt. 3 : 1 / 2 : 0 / 6 : 4 frei,
+    4 : 1 / 3 : 0 / 7 : 4 gesperrt. → (sperrt, grund)"""
     if klasse != "futures" or richtung not in ("buy", "sell"):
         return False, None
     try:
-        d = max(1.0, float(deckel))
+        m = max(1.0, float(max_abstand))
     except (TypeError, ValueError):
-        d = 3.0
+        m = 2.0
     nl, ns = int(w.get("n_long") or 0), int(w.get("n_short") or 0)
     seite, andere = (nl, ns) if richtung == "buy" else (ns, nl)
-    if seite <= d * max(andere, 1):
+    if seite - andere <= m:
         return False, None
-    zahl = f"{d:g}"
-    return True, (f"Futures würde {nl} Long : {ns} Short (höchstens {zahl} : 1) — der {'Long' if richtung == 'buy' else 'Short'} "
+    return True, (f"Futures würde {nl} Long : {ns} Short (Abstand höchstens {m:g}) — der {'Long' if richtung == 'buy' else 'Short'} "
                   f"startet nicht, bis das Buch es zulässt")
 
 
@@ -25015,7 +25015,7 @@ def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
         return out
     for name, r in (("nachher", richtung), ("gegen", gegen)):
         w = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": r})[kl]
-        sperrt, dgrund = ap_waage_deckel(kl, w, r, ((stand.get("param") or {}).get("waage_deckel") or 3.0))
+        sperrt, dgrund = ap_waage_deckel(kl, w, r, ((stand.get("param") or {}).get("waage_max_abstand") or 2.0))
         out[name] = {"richtung": r, "passt": bool(w["passt"]), "besser": _ap_waage_note(kl, w) < _ap_waage_note(kl, vor), "grund": w["grund"],
                      "deckel_sperrt": bool(sperrt and out["zaehlt"]), "deckel_grund": dgrund if out["zaehlt"] else None,   # WAAGE-DECKEL (23.10.2026)
                      **{f: w.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}
