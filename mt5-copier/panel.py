@@ -2031,8 +2031,12 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     if aus:
         _update_einspielen(fname, aus)
     _update_abwarten(install_dir)  # stilles MT5-Update gerade dran? (01.10.2026)
+    # Login-Wache auch nach dem Heil-Neustart (23.10.2026): hier startet Echo ebenso kalt — bisher ohne Wache
+    exp_heil = int(cfg.get("master_expected_login") or 0)
     if _inject_ea_into_profile(fname, cfg, install_dir):
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe")], cwd=install_dir)
+        if exp_heil:
+            threading.Thread(target=_login_ok_wache, args=(fname, exp_heil, install_dir), daemon=True).start()
         return
     name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
     preset = f"prophos-heal-{name}.set"
@@ -2046,6 +2050,8 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     try:
         subprocess.Popen([os.path.join(install_dir, "terminal64.exe"),
                           f"/config:{ini}"], cwd=install_dir)
+        if exp_heil:
+            threading.Thread(target=_login_ok_wache, args=(fname, exp_heil, install_dir), daemon=True).start()
     finally:
         # ini nach dem Start wegraeumen (ein weiterer Start damit haengte das EA
         # auf einen ZWEITEN Chart)
@@ -2389,24 +2395,85 @@ def _ok_dialog_watcher(install_dir, dauer_s=75):
             pass
 
 
-def _login_ok_wache(fname, expected, sekunden=90):
-    """Nach einem Kaltstart (08.10.2026, Master — Moritz 8a05ebaa: das MT5-Einloggen-Fenster blockierte Snapshot und API ~4 min, der
-    _ok_dialog_watcher erkennt es nicht, nur der Bot — und der erst mitten im Order-Lauf): der Bot sucht bis `sekunden` lang NUR das
-    Einloggen-Fenster für GENAU dieses Konto (ist_mt5_login_dialog) und bestätigt es nur per invoke() — keine Maus, kein Tippen,
-    nie ein fremder Dialog. Läuft als eigener Prozess wie /api/mouse-test; Fehler bleiben still (der Order-Weg prüft selbst nach)."""
+# LOGIN-WACHE DAUERHAFT (Master 23.10.2026, Finn: „die zwei Fehler, die bei dir liegen — echt versuchen zu eliminieren"): Chris
+# FundingPips 03:33 + 05:09 — consent.exe hielt den Kaltstart stundenlang fest; als Finn die Abfrage weggeklickt hatte, stand der
+# MT5-Dialog „Einloggen" (Konto, Server, Passwort gespeichert) offen und niemand drückte OK. Die Wache lief nur 90 s nach dem Start.
+# Jetzt: in Runden (LOGIN_WACHE_RUNDE_S je Bot-Aufruf), bis das Konto verbunden ist (Copier-Status frisch, connected, master_login =
+# erwartetes Konto, LOGIN_WACHE_STABIL_S am Stück) oder LOGIN_WACHE_MAX_S vorbei sind — Zeit, in der eine Windows-Abfrage offen war oder
+# MT5 ein Update einspielte, zählt nicht mit (bis LOGIN_WACHE_HART_S). Terminal aus = Ende. Je Installation höchstens EINE Wache.
+LOGIN_WACHE_MAX_S, LOGIN_WACHE_STABIL_S, LOGIN_WACHE_RUNDE_S, LOGIN_WACHE_HART_S = 1800, 120, 120, 12 * 3600
+LOGIN_WACHE = set()   # install_dir mit laufender Wache (unter HEAL_LOCK)
+
+
+def login_wache_weiter(start, jetzt, warten_s, verbunden_seit, ende_bot=None):
+    """REIN RECHNEND (testbar): (weiter, grund). warten_s = Summe der Abfrage-/Update-Wartezeit, verbunden_seit = Zeitpunkt, seit dem
+    das Konto am Stück verbunden ist (None = nicht verbunden), ende_bot = 'terminal_aus' beendet sofort."""
+    if ende_bot == "terminal_aus":
+        return False, "Terminal aus"
+    if verbunden_seit is not None and jetzt - verbunden_seit >= LOGIN_WACHE_STABIL_S:
+        return False, "Konto verbunden"
+    if jetzt - start >= LOGIN_WACHE_HART_S:
+        return False, f"{LOGIN_WACHE_HART_S // 3600} h vorbei"
+    if jetzt - start - max(0.0, float(warten_s or 0)) >= LOGIN_WACHE_MAX_S:
+        return False, f"{LOGIN_WACHE_MAX_S // 60} min ohne Verbindung"
+    return True, ""
+
+
+def _konto_verbunden(fname, expected):
+    """Copier-Status dieser Instanz: frisch (≤ 15 s), Snapshot fließt (connected) und kommt aus GENAU diesem Konto."""
+    st = read_json(os.path.join(HERE, re.sub(r"^config", "status", fname, count=1, flags=re.I)), {}) or {}
     try:
-        bot = os.path.join(HERE, "order_bot.py")
-        if not os.path.exists(bot):
-            ensure_bot_source()
-        p = subprocess.run([sys.executable, bot, "loginok", str(int(expected)), str(int(sekunden))],
-                           capture_output=True, text=True, errors="replace", timeout=sekunden + 30,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        zeilen = (p.stdout or "").strip().splitlines()
-        res = json.loads(zeilen[-1]) if zeilen else {}
-        if "bestätigt" in str(res.get("msg") or ""):
-            print(f"[panel] {fname}: {res.get('msg')}", flush=True)
-    except Exception as e:
-        print(f"[panel] {fname}: Login-OK-Wache {type(e).__name__}: {e}", flush=True)
+        alter = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+    except (ValueError, TypeError):
+        return False
+    return (bool(st.get("running")) and alter <= 15 and bool(st.get("connected")) and not st.get("wrong_login")
+            and str(st.get("master_login") or "") == str(int(expected)))
+
+
+def _login_ok_wache(fname, expected, install_dir=None):
+    """Nach einem Kaltstart (08.10.2026, Master — Moritz 8a05ebaa: das MT5-Einloggen-Fenster blockierte Snapshot und API ~4 min, der
+    _ok_dialog_watcher erkennt es nicht, nur der Bot — und der erst mitten im Order-Lauf): der Bot sucht NUR das Einloggen-Fenster für
+    GENAU dieses Konto (ist_mt5_login_dialog) und bestätigt es nur per invoke() — keine Maus, kein Tippen, nie ein fremder Dialog.
+    Läuft als eigener Prozess wie /api/mouse-test; Fehler bleiben still (der Order-Weg prüft selbst nach). Seit 23.10.2026 dauerhaft
+    bis zur Verbindung (s. LOGIN_WACHE_MAX_S)."""
+    cfg = read_json(os.path.join(HERE, fname), {}) or {}
+    pfad = str(cfg.get("master_terminal_path") or "").strip()
+    install_dir = install_dir or (os.path.dirname(os.path.abspath(pfad)) if pfad else "")
+    if not install_dir or not pfad:
+        return
+    with HEAL_LOCK:
+        if install_dir in LOGIN_WACHE:
+            return
+        LOGIN_WACHE.add(install_dir)
+    try:
+        start, warten_s, verbunden_seit = time.time(), 0.0, None
+        while True:
+            bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                ensure_bot_source()
+            res = {}
+            try:
+                p = subprocess.run([sys.executable, bot, "loginok", str(int(expected)), str(LOGIN_WACHE_RUNDE_S), pfad],
+                                   capture_output=True, text=True, errors="replace", timeout=LOGIN_WACHE_RUNDE_S + 60,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                zeilen = (p.stdout or "").strip().splitlines()
+                res = json.loads(zeilen[-1]) if zeilen else {}
+            except Exception as e:
+                print(f"[panel] {fname}: Login-OK-Wache {type(e).__name__}: {e}", flush=True)
+                time.sleep(LOGIN_WACHE_RUNDE_S / 4 + random.uniform(0, 10))   # Bot kaputt/fehlt: nicht im Kreis drehen
+            if "bestätigt" in str(res.get("msg") or ""):
+                print(f"[panel] {fname}: {res.get('msg')}", flush=True)
+            warten_s += float(res.get("warten_s") or 0)
+            jetzt = time.time()
+            verbunden_seit = (verbunden_seit or jetzt) if _konto_verbunden(fname, expected) else None
+            weiter, grund = login_wache_weiter(start, jetzt, warten_s, verbunden_seit, res.get("ende"))
+            if not weiter:
+                print(f"[panel] {fname}: Login-OK-Wache beendet — {grund} ({round((jetzt - start) / 60)} min"
+                      + (f", davon {round(warten_s / 60)} min Windows-Abfrage/Update" if warten_s >= 60 else "") + ")", flush=True)
+                return
+    finally:
+        with HEAL_LOCK:
+            LOGIN_WACHE.discard(install_dir)
 
 
 def start_terminal(fname, creds=None, ohne_update=False):
@@ -2571,9 +2638,9 @@ def start_terminal(fname, creds=None, ohne_update=False):
         # Start-Dialoge (Login/OK) automatisch bestaetigen — s. _ok_dialog_watcher
         threading.Thread(target=_ok_dialog_watcher, args=(install_dir,),
                          daemon=True).start()
-        # MT5-Einloggen-Fenster dieses Kontos (08.10.2026, s. _login_ok_wache) — nur mit bekanntem Konto
+        # MT5-Einloggen-Fenster dieses Kontos (08.10.2026, s. _login_ok_wache; seit 23.10.2026 bis zur Verbindung) — nur mit bekanntem Konto
         if expected:
-            threading.Thread(target=_login_ok_wache, args=(fname, expected), daemon=True).start()
+            threading.Thread(target=_login_ok_wache, args=(fname, expected, install_dir), daemon=True).start()
         # Fenster nach vorn, sobald es da ist (sonst startet MT5 hinter dem Browser)
         _front_when_up(install_dir)
         return True, msg

@@ -25334,22 +25334,69 @@ def _tsx_order_cdp_mit_neustart(befehl, cmd):
                               None, TSX_URL)
 
 
-def modus_loginok(expected, sekunden="90"):
-    """Panel nach einem Kaltstart (08.10.2026, Master — Fall 8a05ebaa): bis `sekunden` lang alle ~2 s nach dem MT5-Einloggen-Fenster
-    für GENAU dieses Konto suchen (volle Signatur ist_mt5_login_dialog) und es NUR per invoke() bestätigen — keine Maus, kein Fokus,
-    kein Tippen (ein gleichzeitig klickender Puls wird nicht gestört), nie ein fremder Dialog, nie Login-Daten. → {ok, msg, trail}"""
+def loginok_lage(prozesse, pfad):
+    """REIN RECHNEND (testbar): was tut die Login-Wache in dieser Runde? → 'warten' | 'suchen' | 'aus'.
+    ANLASS (Master 23.10.2026, Chris FundingPips 03:33/05:09): consent.exe hielt den Kaltstart stundenlang fest; als Finn die Abfrage
+    weggeklickt hatte, stand der MT5-Dialog „Einloggen" für genau dieses Konto offen — die Wache war nach 90 s längst vorbei.
+    'warten' = Windows-Sicherheitsabfrage offen (consent.exe) oder MT5 spielt gerade ein Update ein (liveupdate-Prozess): still
+    abwarten, die Zeit zählt nicht gegen die Frist — danach kommt das Terminal (neu) hoch. 'suchen' = terminal64.exe GENAU dieser
+    Installation läuft (oder eine terminal64.exe mit unlesbarem Pfad — dann lieber suchen als aufhören). 'aus' = keins davon."""
+    namen = {str(p.get("name") or "").lower() for p in prozesse or ()}
+    if "consent.exe" in namen:
+        return "warten"
+    if any("\\liveupdate\\" in os.path.normcase(str(p.get("pfad") or "")).replace("/", "\\") for p in prozesse or ()):
+        return "warten"
+    ziel = os.path.normcase(os.path.abspath(pfad)) if pfad else ""
+    for p in prozesse or ():
+        if str(p.get("name") or "").lower() != "terminal64.exe":
+            continue
+        if not p.get("pfad") or (ziel and os.path.normcase(os.path.abspath(str(p["pfad"]))) == ziel):
+            return "suchen"
+    return "aus"
+
+
+# „aus" erst nach dieser Zeit am Stück glauben: zwischen Updater-Ende und Neustart des Terminals liegt eine kurze Lücke
+LOGINOK_AUS_S = 60
+
+
+def modus_loginok(expected, sekunden="90", pfad=None):
+    """Panel nach einem Kaltstart (08.10.2026, Master — Fall 8a05ebaa): bis `sekunden` lang nach dem MT5-Einloggen-Fenster für GENAU
+    dieses Konto suchen (volle Signatur ist_mt5_login_dialog) und es NUR per invoke() bestätigen — keine Maus, kein Fokus, kein Tippen
+    (ein gleichzeitig klickender Puls wird nicht gestört), nie ein fremder Dialog, nie Login-Daten. → {ok, msg, trail, ende, warten_s}
+    Mit pfad (terminal64.exe der Instanz, seit 23.10.2026 — das Panel ruft die Wache in Runden bis 30 min auf): je Runde erst die Lage
+    (loginok_lage) — Sicherheitsabfrage/Update = still warten (warten_s meldet die Zeit, das Panel hängt sie an die Frist), Terminal
+    LOGINOK_AUS_S am Stück aus = Ende 'terminal_aus'. Takt gestreut 3–8 s (Jitter-Regel). Ohne pfad wie bisher alle ~2 s."""
     try:
         exp = int(str(expected).strip())
-        dauer = max(5.0, min(180.0, float(sekunden)))
+        dauer = max(5.0, min(600.0, float(sekunden)))
     except (TypeError, ValueError):
         return {"ok": False, "msg": "loginok: Konto/Sekunden ungültig"}
-    trail, ende = [], time.time() + dauer
+    trail, ende, warten_s, aus_seit = [], time.time() + dauer, 0.0, None
     while time.time() < ende:
+        t0 = time.time()
+        if pfad:
+            prozesse, _fenster = _verbindung_lage()
+            lage = loginok_lage(prozesse, pfad) if prozesse else "suchen"   # ohne lesbare Lage: suchen wie bisher
+            if lage == "aus":
+                aus_seit = aus_seit or t0
+                if t0 - aus_seit >= LOGINOK_AUS_S:
+                    return {"ok": True, "msg": "Terminal aus — Login-Wache beendet", "ende": "terminal_aus",
+                            "warten_s": round(warten_s), "trail": trail[-5:]}
+            else:
+                aus_seit = None
+            if lage == "warten":
+                _warte(3.0, 5.0)
+                warten_s += time.time() - t0
+                continue
         st = _mt5_login_bestaetigen(exp, trail, wege=("invoke",))
         if st == "bestaetigt":
-            return {"ok": True, "msg": f"MT5-Login-Dialog für {exp} bestätigt", "trail": trail[-5:]}
-        _warte(2.0, 0.5)
-    return {"ok": True, "msg": "kein Login-Dialog", "trail": trail[-5:]}
+            return {"ok": True, "msg": f"MT5-Login-Dialog für {exp} bestätigt", "ende": "bestaetigt",
+                    "warten_s": round(warten_s), "trail": trail[-5:]}
+        if pfad:
+            _warte(3.0, 5.0)
+        else:
+            _warte(2.0, 0.5)
+    return {"ok": True, "msg": "kein Login-Dialog", "ende": "zeit", "warten_s": round(warten_s), "trail": trail[-5:]}
 
 
 def main():
@@ -25365,7 +25412,8 @@ def main():
         modus_mousetest()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "loginok":
-        print(json.dumps(modus_loginok(sys.argv[2], sys.argv[3] if len(sys.argv) >= 4 else "90"), ensure_ascii=False))
+        print(json.dumps(modus_loginok(sys.argv[2], sys.argv[3] if len(sys.argv) >= 4 else "90",
+                                       sys.argv[4] if len(sys.argv) >= 5 else None), ensure_ascii=False))
         return 0
     if len(sys.argv) >= 2 and sys.argv[1] == "tvfokus":
         # Orbit Schritt 1 (28.08.2026): nur den TradingView-Tab nach vorn —

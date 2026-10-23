@@ -2005,6 +2005,7 @@ def main():
     results.append(test_tv_tp_orders())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
+    results.append(test_login_wache())
 
     print()
     ok = sum(1 for r in results if r)
@@ -2235,6 +2236,51 @@ def test_solo_plan_kennung():
         print(f"✗ Kennung im Abschluss-Ring: {ring}"); ok = False
     if ok:
         print("✓ Solo-Plan-Kennung: Kommentar PXsolo:<plan8> (≤ 31), Parsen mit/ohne Kennung, Kennung im Abschluss-Ring")
+    return ok
+
+
+def test_login_wache():
+    """Login-Wache dauerhaft (Master 23.10.2026, Chris FundingPips: nach der weggeklickten Windows-Abfrage stand „Einloggen" offen,
+    die 90-s-Wache war vorbei): Lage je Runde (warten/suchen/aus), Frist 30 min ohne Abfrage-Zeit, Ende bei stabiler Verbindung."""
+    import order_bot as ob, panel, inspect
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ Login-Wache: " + name); ok = False
+    pfad = "C:\\MT5-A\\terminal64.exe"
+    t = lambda pid, name, p="": {"pid": pid, "name": name, "pfad": p}
+    L = ob.loginok_lage
+    chk(L([t(1, "consent.exe"), t(2, "terminal64.exe", pfad)], pfad) == "warten", "consent.exe → warten (auch wenn das Terminal läuft)")
+    chk(L([t(1, "terminal64.exe", "C:\\Users\\x\\AppData\\Roaming\\MetaQuotes\\Terminal\\ABC\\liveupdate\\terminal64.exe")], pfad) == "warten",
+        "liveupdate-Prozess → warten")
+    chk(L([t(1, "terminal64.exe", pfad)], pfad) == "suchen", "eigenes Terminal → suchen")
+    if os.name == "nt":   # normcase senkt nur unter Windows
+        chk(L([t(1, "Terminal64.EXE", "c:\\mt5-a\\TERMINAL64.exe")], pfad) == "suchen", "Groß/klein egal")
+    chk(L([t(1, "terminal64.exe", "")], pfad) == "suchen", "Pfad unlesbar → lieber suchen")
+    chk(L([t(1, "terminal64.exe", "C:\\MT5-B\\terminal64.exe")], pfad) == "aus" and L([], pfad) == "aus" and L(None, pfad) == "aus",
+        "fremde Installation / nichts → aus")
+    chk(L([t(1, "terminal64.exe", "C:\\MT5-AB\\terminal64.exe")], pfad) == "aus", "ähnlicher Ordnername zählt nicht")
+    W = panel.login_wache_weiter
+    S = 1000.0
+    chk(W(S, S + 60, 0, None) == (True, ""), "frisch → weiter")
+    chk(W(S, S + panel.LOGIN_WACHE_MAX_S, 0, None)[0] is False, "30 min ohne Verbindung → Ende")
+    chk(W(S, S + panel.LOGIN_WACHE_MAX_S + 300, 600, None)[0] is True, "Abfrage-/Update-Zeit zählt nicht gegen die 30 min")
+    chk(W(S, S + panel.LOGIN_WACHE_HART_S, panel.LOGIN_WACHE_HART_S, None)[0] is False, "harte Grenze trotz Warten")
+    chk(W(S, S + 300, 0, S + 250) == (True, "") and W(S, S + 400, 0, S + 400 - panel.LOGIN_WACHE_STABIL_S)[0] is False,
+        "verbunden erst nach Stabil-Zeit → Ende")
+    chk(W(S, S + 10, 0, None, "terminal_aus")[0] is False and W(S, S + 10, 0, None, "bestaetigt")[0] is True,
+        "Terminal aus beendet, bestätigt läuft weiter bis zur Verbindung")
+    q = inspect.getsource(ob.modus_loginok)
+    chk('wege=("invoke",)' in q and "_warte(3.0, 5.0)" in q and "sleep(" not in q and "click" not in q.lower(),
+        "modus_loginok: nur invoke, Takt 3–8 s gestreut, keine Maus")
+    q = inspect.getsource(panel._login_ok_wache)
+    chk("LOGIN_WACHE" in q and "HEAL_LOCK" in q and "discard(install_dir)" in q, "_login_ok_wache: je Installation eine Wache, räumt auf")
+    qs = inspect.getsource(panel.start_terminal) + inspect.getsource(panel._heal_ea_inner)
+    chk(qs.count("target=_login_ok_wache") == 3, "Wache nach jedem Kaltstart (start_terminal + beide Heil-Starts)")
+    if ok:
+        print("✓ Login-Wache: Lage warten/suchen/aus, 30 min ohne Abfrage-Zeit, Ende bei stabiler Verbindung, nach jedem Kaltstart")
     return ok
 
 
