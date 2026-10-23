@@ -19,7 +19,7 @@ def lade():
     for z in re.findall(r"^AP_WAAGE_[A-Z_]+ = .*$", src, re.M):
         teile.append(z.split("  #")[0])
     for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "ap_waage_ohne_liste", "ap_waage_ohne", "ap_waage_folgt", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
-                 "_ap_eur_txt", "ap_waage_passt", "_ap_waage_note", "ap_klassen_waage", "_ap_waage_kandidat", "_ap_waage_rs_frei",
+                 "_ap_eur_txt", "ap_waage_passt", "ap_waage_deckel", "_ap_waage_note", "ap_klassen_waage", "_ap_waage_kandidat", "_ap_waage_rs_frei",
                  "_ap_waage_zielminute", "ap_waage_nachschub", "ap_waage_start_lage"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])

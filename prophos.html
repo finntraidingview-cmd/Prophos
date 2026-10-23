@@ -47577,6 +47577,7 @@
     if(sperre){ toast((sperre.art === 'ziel' ? '🎯 ' : '✍ ') + sperre.text, 'end'); if(fern) fern.melde({ ok:false, msg: sperre.text }); return }
     const fa = await faVorStart(plan)       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     if(fa){ if(fern) fern.melde({ ok:false, msg: fa }); return }
+    if(!plan.startUmGestartetAt && typeof rkDeckelHinweis === 'function') rkDeckelHinweis(plan)   // Start per Knopf/vom Mac: Waage-Deckel nur als Hinweis (23.10.2026)
     // UNKLAR-Marke (B37, 30.09.2026; Topstep V2 und Orbit V2): der letzte Start endete UNKLAR, die Order liegt vielleicht — kein zweiter
     // Klick, egal ob Karte, Startzeit oder Signal vom Mac. Gelöst wird die Marke nur bewusst über den Chip auf der Karte.
     if((plan.route === 'tsv2' || plan.route === 'tvv2') && plan.mt5Baseline && plan.mt5Baseline.puls_unklar){
@@ -51595,6 +51596,18 @@
     try{ renderTradePlans() }catch(_){}
     return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
   }
+  /* WAAGE-DECKEL BEI HAND-STARTS (Finn 23.10.2026): Pläne mit Werten von Hand und Starts per Knopf sperrt der Deckel nicht (der DB-Riegel
+   * prüft nur automatische Claims ohne hand_werte_at) — würde der Start das Futures-Buch über 3 : 1 bringen, kommt nur ein Hinweis. Ohne
+   * Wirkung auf den Start (kein await beim Aufrufer, keine Gegentrades ziehen); CFD und Apex nie (die Lage meldet dort keinen Deckel). */
+  async function rkDeckelHinweis(plan){
+    try{
+      if(!plan || (plan.route !== 'tvv2' && plan.route !== 'tsv2') || tpIstWdPlan(plan) || (plan.richtung !== 'buy' && plan.richtung !== 'sell')) return
+      const w = await rkWaage(plan, plan.richtung, false)
+      const n = w && w.lage && w.lage.zaehlt ? w.lage.nachher : null
+      if(n && n.deckel_sperrt && typeof atToast === 'function')
+        atToast(`⚖ Hinweis Waage-Deckel — „${plan.masterName || 'Plan'}" startet von Hand trotzdem: ${n.deckel_grund || 'Futures-Buch über 3 : 1'}`, 'warn')
+    }catch(_){}
+  }
   async function rkVorStart(plan){
     if(!rkGilt(plan)) return null
     let k = null
@@ -51602,6 +51615,7 @@
     const meine = plan.richtung === 'sell' ? 'short' : 'long', alt = rkFlag(plan)
     // ZWEI WAAGEN (17.10.2026) für Auto-Pläne (kein WD, keine Hand-Werte) — ersetzt Saldo-Riegel und Tages-Saldo am Start
     let waageGeprueft = false
+    if(plan.autoPlan && plan.handWerteAt && !tpIstWdPlan(plan)) rkDeckelHinweis(plan)   // Werte von Hand: Deckel nur als Hinweis (23.10.2026)
     if(plan.autoPlan && !tpIstWdPlan(plan) && !plan.handWerteAt){
       const konflikt = !!(k && k.lauf && k.lauf !== meine)
       const wunsch = konflikt ? (k.lauf === 'short' ? 'sell' : 'buy') : plan.richtung
@@ -51609,6 +51623,20 @@
       if(w && w.lage.zaehlt){
         waageGeprueft = true
         const L = w.lage, kt = rkKlasseTxt(L.klasse), name = plan.masterName || 'Plan'
+        // WAAGE-DECKEL (Finn 23.10.2026: „3:1 ist nicht so schlimm, aber 4:1 ist too much, 7:1 sowieso. Dann lieber gar keinen Trade starten.
+        // Verschieben geht"): würde der Start das Futures-Buch über regeln.ausgleich.waage_deckel (3 : 1) bringen, startet er nicht — kein
+        // „Gegentrade folgt", kein Drehen in diese Seite (im Konfliktfall ist nachher = die gedrehte Richtung). Erlaubt bleibt wie bisher nur
+        // das Drehen in die leichte Seite (Richtungsschutz frei, dort kein Deckel), sonst verschieben. Der DB-Claim-Riegel
+        // trade_plans_waage_deckel sperrt dieselbe Lage zusätzlich an jedem Startweg.
+        if(L.nachher && L.nachher.deckel_sperrt){
+          const txt = `[Waage-Deckel] ${L.nachher.deckel_grund || 'Futures-Buch würde über 3 : 1'}`
+          if(!konflikt && L.gegen && rkWaageOk(L.gegen) && !L.gegen.deckel_sperrt){
+            const g = await rkSaldoDrehen(plan, k, txt)
+            if(g) return g
+          }
+          await rkVerschieben(plan, { lauf: null, saldo: true, text: konflikt ? `${txt} — ${plan.richtung.toUpperCase()} wartet ohnehin auf den Gegen-Trade derselben ID+Firma` : txt }, false, 'start')
+          return 'verschoben'
+        }
         if(konflikt){
           // Richtungsschutz: drehen nur, wenn die laufende Richtung die Klasse nicht schwerer macht — sonst warten, bis der Gegen-Trade zu ist
           if(rkWaageOk(L.nachher)){
