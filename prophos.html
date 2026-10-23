@@ -26396,7 +26396,8 @@
     const login = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(p.masterAccountId) : null
     const flag = { schritt: 'master_nie', msg: `Master nie gefüllt — Hedge geschlossen, nichts offen (Reader ${Math.round((stand.letzte - stand.erste) / 1000)} s flach, ${stand.n} Lesungen)`,
       unklar: false, status: 'rot', at: new Date().toISOString(), pc: hedgePcId() || null, login: login ? String(login) : null, start: p.startUm || null,
-      versuche: ((p.mt5Baseline.start_fehler && Number(p.mt5Baseline.start_fehler.versuche)) || 0) }
+      versuche: ((p.mt5Baseline.start_fehler && Number(p.mt5Baseline.start_fehler.versuche)) || 0),
+      uac_n: ((p.mt5Baseline.start_fehler && Number(p.mt5Baseline.start_fehler.uac_n)) || 0) }   // Windows-Abfragen nicht vergessen (23.10.2026, s. sfFehlversuche)
     let row = null
     try{ const { data, error } = await supabase.rpc('prophos_orbit_nie_da_zurueck', { p_plan: pid, p_flag: flag }); if(error) throw error; row = Array.isArray(data) ? data[0] : data }
     catch(e){ console.warn('[nieDa] zurücksetzen', (e && e.message) || e); setTimeout(() => _nieDaFertig.delete(pid), 60000); return }   // SQL noch nicht eingespielt → höchstens 1×/min neu
@@ -51739,7 +51740,13 @@
    * Solche Starts zählen nicht gegen SF_MAX — eigener Zähler start_fehler.uac_n (Backend-Nachholen zählt versuche weiter hoch, der Deckel
    * rechnet versuche − uac_n). sfTick fragt das Panel (/api/windows-abfrage) und plant neu ein, sobald consent.exe weg ist; die Zeile bleibt
    * in „Braucht dich" sichtbar, damit Finn hingeht (sfVersuchtErneut = false). */
-  const sfIstUac = f => !!f && /consent\.exe|Windows-Sicherheitsabfrage offen/i.test(String(f.msg || ''))
+  // NUR DIE POSITIVEN BOT-TEXTE (Prüf-Agent 23.10.2026): „consent.exe" allein traf auch die Gegen-Meldung aus desktop_sperre_ursache
+  // („… weder Sicherheitsabfrage (consent.exe) noch Sperrbildschirm …") — dann zählte jeder echte Fehlstart als Abfrage, der Deckel wurde nie voll.
+  // Erkannt wird nur am rohen Fehlertext in sfMelden; am Plan steht danach der Merker start_fehler.uac (die gespeicherte msg ist gekürzt).
+  // Höchstens SF_UAC_MAX Abfragen je Plan zählen nicht — wird die Abfrage verneint oder verfällt sie immer wieder, zählt sie danach als Fehlversuch.
+  const SF_UAC_MAX = 6
+  const sfIstUacText = m => /Windows-Sicherheitsabfrage offen|\(consent\.exe läuft\)/i.test(String(m || ''))
+  const sfIstUac = f => !!f && f.uac === true
   const sfFehlversuche = sf => Math.max(0, (Number(sf && sf.versuche) || 0) - (Number(sf && sf.uac_n) || 0))
   const sfDeckelVoll = sf => !!sf && !SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX
   const sfFlag = p => (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || null
@@ -51769,10 +51776,11 @@
       // SPUR-ENDE BEHALTEN (21.10.2026, Routine Puls-Fehler): bei langen Spuren (F9-Dialog nicht gefunden, 400+ Zeichen) fiel genau das
       // Ende weg — dort steht die Diagnose („F9-Ursache (API): …", „Desktop: consent.exe …"). Jetzt Anfang + „ … " + Ende, zusammen 400
       const roh = String(f.msg || ''), msgK = roh.length <= 400 ? roh : roh.slice(0, 236) + ' … ' + roh.slice(-161)
+      // Windows-Abfrage (23.10.2026): am rohen Text erkennen, höchstens SF_UAC_MAX je Plan ohne Fehlversuch
+      const uacAlt = (alt && Number(alt.uac_n)) || 0, uacNeu = sfIstUacText(roh) && uacAlt < SF_UAC_MAX
       const flag = { schritt: f.schritt || '', msg: msgK, unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, login: login ? String(login) : null, start: plan.startUm || null,
-        versuche: (alt && Number(alt.versuche)) || 0,
-        uac_n: ((alt && Number(alt.uac_n)) || 0) + (sfIstUac(f) ? 1 : 0) }   // Windows-Abfrage zählt nicht als Fehlversuch (23.10.2026)
+        versuche: (alt && Number(alt.versuche)) || 0, uac_n: uacAlt + (uacNeu ? 1 : 0), uac: uacNeu }   // Windows-Abfrage ≠ Fehlversuch (23.10.2026)
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
       try{ renderTradePlans() }catch(_){}
       // FEHLER-MUSTER (07.10.2026, Finn: „wenn es öfter die gleichen sind, genau diese Fehler eliminieren"): start_fehler wird je Plan
@@ -51786,7 +51794,8 @@
       // Handy-Meldung (07.10.2026, Finn: Fehlstarts sofort sehen und selbst beheben) — Ziel erreicht meldet tpStartUmTick selbst
       // Nur, wenn kein Neuversuch folgt (21.10.2026, s. sfVersuchtErneut): Deckel voll, unklar, ohne Selbstheilung. Hängt ein Plan später
       // (kein Neuversuch binnen SF_HAENGT_MS), meldet sfTick EINMAL nach (sfHaengtMelden)
-      if(flag.schritt !== 'ziel_erreicht' && !sfVersuchtErneut(flag)){
+      // Windows-Abfrage: Handy-Meldung nur bei der ersten Abfrage je Plan (Prüf-Agent 23.10.2026 — sonst bei jedem Neuversuch eine)
+      if(flag.schritt !== 'ziel_erreicht' && !sfVersuchtErneut(flag) && !(flag.uac && uacAlt > 0)){
         try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Trade nicht gestartet', `„${plan.masterName || 'Plan'}": ${flag.msg || 'Check rot'} — Trade-Planer → Braucht dich.`,
           'https://prophos.pages.dev/prophos#trades', 'sf-' + String(plan.id).slice(0, 8)) }catch(_){}
       }
@@ -51939,7 +51948,7 @@
   }
   setInterval(sfTick, SF_TAKT_MS)
   window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre,
-    uac: sfIstUac, fehl: sfFehlversuche, deckel: sfDeckelVoll, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
+    uac: sfIstUac, uacText: sfIstUacText, fehl: sfFehlversuche, deckel: sfDeckelVoll, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
   /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
    * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
