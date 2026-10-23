@@ -51733,6 +51733,15 @@
   // Railway schreibt den Grund mit „Winning Day …" an den Anfang (app.py puls_heim_pruefen); fehler() setzt nur „⛔ " davor. Dann
   // plant sfTick beim nächsten Takt neu ein, das Backend legt den Start auf jetzt + 2–4 min (Zufall, ap_nachhol_minute). Big Trades wie bisher.
   const sfIstWdSperre = f => !!f && /^\W*Winning Day\b/.test(String(f.msg || ''))
+  /* WINDOWS-ABFRAGE ≠ FEHLVERSUCH (Master 23.10.2026, Finn: „die zwei Fehler, die bei dir liegen — echt versuchen zu eliminieren"; Chris
+   * FundingPips 03:33/05:09 und Mike: consent.exe offen, je 3 Versuche „IPC timeout … Sicherheitsabfrage offen", danach lag der Plan): der
+   * Bot stellt die Abfrage fest (order_bot verbindung_ursache/desktop_sperre_ursache: „Windows-Sicherheitsabfrage offen (consent.exe läuft)").
+   * Solche Starts zählen nicht gegen SF_MAX — eigener Zähler start_fehler.uac_n (Backend-Nachholen zählt versuche weiter hoch, der Deckel
+   * rechnet versuche − uac_n). sfTick fragt das Panel (/api/windows-abfrage) und plant neu ein, sobald consent.exe weg ist; die Zeile bleibt
+   * in „Braucht dich" sichtbar, damit Finn hingeht (sfVersuchtErneut = false). */
+  const sfIstUac = f => !!f && /consent\.exe|Windows-Sicherheitsabfrage offen/i.test(String(f.msg || ''))
+  const sfFehlversuche = sf => Math.max(0, (Number(sf && sf.versuche) || 0) - (Number(sf && sf.uac_n) || 0))
+  const sfDeckelVoll = sf => !!sf && !SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX
   const sfFlag = p => (p && p.mt5Baseline && p.mt5Baseline.start_fehler) || null
   /* NUR UNGELÖSTE FEHLSTARTS ZEIGEN (Finn 21.10.2026 ~21:20 Dubai: „Mir sollen nur die Fehlstarts angezeigt werden, die sich NICHT von alleine
    * gefixt haben … Viele hatten einen Fehlstart, und beim zweiten oder dritten Versuch hat es geklappt. Die will ich nicht mehr sehen. Ich sehe
@@ -51746,7 +51755,8 @@
     if(!sf || sf.status !== 'rot' || sf.unklar) return false
     const schritt = String(sf.schritt || '')
     if(schritt === 'ziel_erreicht' || schritt === 'manuelle_arbeit') return false
-    if((Number(sf.versuche) || 0) >= SF_MAX && !SF_OHNE_DECKEL.has(schritt)) return false
+    if(sfIstUac(sf)) return false   // Windows-Abfrage (23.10.2026): sichtbar lassen — Finn muss hin, auch wenn der Bot danach neu einplant
+    if(sfDeckelVoll(sf)) return false
     const at = Date.parse(sf.at || '') || 0
     return !!at && (jetzt || Date.now()) - at < SF_HAENGT_MS
   }
@@ -51761,7 +51771,8 @@
       const roh = String(f.msg || ''), msgK = roh.length <= 400 ? roh : roh.slice(0, 236) + ' … ' + roh.slice(-161)
       const flag = { schritt: f.schritt || '', msg: msgK, unklar: !!f.unklar, status: 'rot', at: new Date().toISOString(),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, login: login ? String(login) : null, start: plan.startUm || null,
-        versuche: (alt && Number(alt.versuche)) || 0 }
+        versuche: (alt && Number(alt.versuche)) || 0,
+        uac_n: ((alt && Number(alt.uac_n)) || 0) + (sfIstUac(f) ? 1 : 0) }   // Windows-Abfrage zählt nicht als Fehlversuch (23.10.2026)
       await baselinePatch(plan.id, { start_fehler: flag }, 'planned')
       try{ renderTradePlans() }catch(_){}
       // FEHLER-MUSTER (07.10.2026, Finn: „wenn es öfter die gleichen sind, genau diese Fehler eliminieren"): start_fehler wird je Plan
@@ -51817,6 +51828,13 @@
     // — keine Prüfung möglich, ob die Ursache weg ist (Puls-Chrome/TradingView sieht nur der Bot): wie bisher 15 min später neuer
     // Versuch, höchstens SF_MAX (sfTick). 'unklar' kommt hier nie an (oben). Gilt auch für Echo-Schritte v2term/v2hedge/v2dir/v2order.
     if(f.schritt === 'big_trade_nah' && sfIstWdSperre(f)) return 'Winning Day nah am TP/an der Liq — neuer Versuch in 2–4 min'   // s. sfIstWdSperre
+    // Windows-Abfrage (23.10.2026, s. sfIstUac): neu einplanen, sobald consent.exe am PC weg ist — das Backend legt den Start auf jetzt +
+    // 2–4 min (Zufall + Regeln). Kennt das Panel die Frage nicht (alter Stand/offline), bleibt es beim Zeit-Weg unten.
+    if(sfIstUac(f)){
+      const w = (typeof window.mtcApi === 'function') ? await window.mtcApi('windows-abfrage') : null
+      if(w && w.ok && w.consent === true) return null
+      if(w && w.ok && w.consent === false) return 'Windows-Abfrage am PC beantwortet'
+    }
     // EA-Selbstheilung lief noch (08.10.2026, ff8c2412): nichts gesendet, das Terminal ist meist Sekunden später gesund → 3 statt 15 min
     const warte = /Selbstheilung|terminal_heilt/i.test(String(f.msg || '')) ? 3 * 60000 : SF_WARTE_MS
     return Date.now() - (Date.parse(f.at) || 0) >= warte ? `${Math.round(warte / 60000)} min später neuer Versuch` : null
@@ -51899,7 +51917,7 @@
       }
       const kand = (tradePlans || []).filter(p => { const f = sfFlag(p)
         return p && f && f.status === 'rot' && p.status === 'planned' && p.startUmGestartetAt && !p.startedAt && !p.orbitGesendetAt
-          && ((Number(f.versuche) || 0) < SF_MAX || SF_OHNE_DECKEL.has(String(f.schritt || ''))) && p.startUm && sfTagDt(p.startUm) === heute })
+          && !sfDeckelVoll(f) && p.startUm && sfTagDt(p.startUm) === heute })
       for(const p of kand){
         const f = sfFlag(p), grund = await sfBehoben(p, f)
         if(!grund){ sfHaengtMelden(p, f); continue }
@@ -51913,13 +51931,15 @@
   // SF_HAENGT_MS ohne Neuversuch steht — vorher meldete sfMelden jeden Fehlstart sofort, auch die, die zwei Minuten später durchliefen
   function sfHaengtMelden(p, f){
     if(!f || sfVersuchtErneut(f) || f.status !== 'rot' || f.schritt === 'ziel_erreicht') return
+    if(sfIstUac(f) && !sfDeckelVoll(f)) return   // Windows-Abfrage: sfMelden hat schon gemeldet, der Plan startet danach von selbst neu
     const k = 'prophos_sf_gemeldet_' + String(p.id)
     try{ if(localStorage.getItem(k) === String(f.at || '')) return; localStorage.setItem(k, String(f.at || '')) }catch(_){}
     try{ if(typeof pushAnsHandy === 'function') pushAnsHandy('⚠ Trade startet nicht von selbst', `„${p.masterName || 'Plan'}": ${f.msg || f.schritt || 'Check rot'} — seit ${Math.round(SF_HAENGT_MS / 60000)} min kein neuer Versuch. Trade-Planer → Braucht dich.`,
       'https://prophos.pages.dev/prophos#trades', 'sf-' + String(p.id).slice(0, 8)) }catch(_){}
   }
   setInterval(sfTick, SF_TAKT_MS)
-  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre }   // Test-Haken
+  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre,
+    uac: sfIstUac, fehl: sfFehlversuche, deckel: sfDeckelVoll, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
   /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
    * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
@@ -54063,6 +54083,8 @@
    * aus dem Start-Fehler (mt5_baseline.start_fehler, START-FEHLER-Sektion) bzw. der Balance-Quelle. Keine Prüfung, nur Anleitung. */
   function tplSfTun(sf, wer){
     const pc = sf.pc ? ` ${pcLabel(sf.pc)}` : wer ? ` von ${wer}` : '', login = sf.login ? ` ${sf.login}` : '', m = String(sf.msg || '')
+    // Windows-Abfrage (23.10.2026, s. sfIstUac): gilt für jeden Schritt (v2term/v2order/F9) — Grund ist die offene Abfrage, nicht das Terminal
+    if(sfIstUac(sf)) return `Am PC${pc} die Windows-Abfrage beantworten (Ja bzw. Öffnen) — danach plant der Bot den Start von selbst neu ein, das zählt nicht als Fehlversuch.`
     switch(sf.schritt){
       case 'v2link': return /nicht erreichbar/i.test(m) ? `Am PC${pc} start-alles.bat ausführen (Copier-Backend).`
         : /Terminal-Pfad/i.test(m) && !/Kein Master-Terminal/i.test(m) ? `Am PC${pc}: Echo → Instanz → Terminal-Pfad eintragen.`
@@ -54120,9 +54142,10 @@
     }
   }
   function tplSfAuto(sf, D){
-    const bis = tplUhr(sfTagesEnde(), D.v), n = Number(sf.versuche) || 0
+    const bis = tplUhr(sfTagesEnde(), D.v), n = sfFehlversuche(sf)   // Windows-Abfragen zählen nicht (23.10.2026)
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
+    if(sfIstUac(sf) && n < SF_MAX) return `(wartet auf die Windows-Abfrage — kein Fehlversuch, neu bis ${bis}${n ? `, bisher ${n}/${SF_MAX} Fehlversuche` : ''})`
     if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
     if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
     if(n >= SF_MAX) return `${n} Neuversuche gescheitert — von Hand starten.`
@@ -54419,8 +54442,8 @@
             : 'Sobald die Waage passt (ein Gegen-Trade der Klasse läuft) ↻ Erneut versuchen — oder von Hand starten.', neu: true }
       }
       // 3) Deckel voll: SF_MAX Fehlstarts → sfTick plant nicht mehr neu (Memory prophos-nachholen-luecke-claim-zu-spaet, Marc/Mike 19.10.)
-      if(sf && sf.status === 'rot' && n >= SF_MAX && !SF_OHNE_DECKEL.has(String(sf.schritt || '')))
-        return { text: `kann nicht starten (${uhr}) — ${n} Fehlstarts, der Bot versucht es nicht mehr; zuletzt: ${kurz(sf.msg || sf.schritt || 'Check rot').slice(0, 200)}`,
+      if(sf && sf.status === 'rot' && sfDeckelVoll(sf))   // Windows-Abfragen zählen nicht mit (23.10.2026, sfFehlversuche)
+        return { text: `kann nicht starten (${uhr}) — ${sfFehlversuche(sf)} Fehlstarts, der Bot versucht es nicht mehr; zuletzt: ${kurz(sf.msg || sf.schritt || 'Check rot').slice(0, 200)}`,
           // zu_spaet: der Standard-Text „Puls holt von selbst nach" wäre hier falsch — genau das tut sfTick bei vollem Deckel nicht mehr
           tun: (sf.schritt === 'zu_spaet' ? 'Der Tab plant ihn nicht mehr von selbst neu.' : tplSfTun(sf, sf.pc ? '' : t.user))
             + ' Von Hand: ↻ Erneut versuchen (neuer Start in 1–3 min, mit allen Prüfungen) oder im Plan starten — sonst plant erst der Nachtlauf neu.', neu: true }
@@ -54485,7 +54508,7 @@
       } else if(t.status === 'bestaetigt' && sf && D.tag === D.heute && sfVersuchtErneut(sf)){
         // Neuversuch folgt (21.10.2026): dezent grau, nicht im Zähler — erst wenn er hängt, wird die Zeile rot
         add(t.user_id, t.user, { art: 'retry', firma: t.firma, konto: t.konto, ende4: t.ende4, key: t.key,
-          text: `versucht erneut — Versuch ${(Number(sf.versuche) || 0) + 1} von ${SF_MAX} gescheitert: ${String(sf.msg || sf.schritt || 'Check rot').replace(/\s+/g, ' ').slice(0, 140)}`,
+          text: `versucht erneut — Versuch ${sfFehlversuche(sf) + 1} von ${SF_MAX} gescheitert: ${String(sf.msg || sf.schritt || 'Check rot').replace(/\s+/g, ' ').slice(0, 140)}`,
           tun: 'Nichts tun — der Bot startet ihn von selbst neu, sobald die Ursache weg ist.' })
       } else if(t.status === 'bestaetigt' && sf && sf.status !== 'neu' && D.tag === D.heute){
         const wer = sf.pc ? '' : t.user

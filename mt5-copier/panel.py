@@ -2401,6 +2401,19 @@ def _ok_dialog_watcher(install_dir, dauer_s=75):
 # Jetzt: in Runden (LOGIN_WACHE_RUNDE_S je Bot-Aufruf), bis das Konto verbunden ist (Copier-Status frisch, connected, master_login =
 # erwartetes Konto, LOGIN_WACHE_STABIL_S am Stück) oder LOGIN_WACHE_MAX_S vorbei sind — Zeit, in der eine Windows-Abfrage offen war oder
 # MT5 ein Update einspielte, zählt nicht mit (bis LOGIN_WACHE_HART_S). Terminal aus = Ende. Je Installation höchstens EINE Wache.
+def consent_offen():
+    """True/False: läuft consent.exe (Windows-Sicherheitsabfrage auf dem sicheren Desktop)? None ohne Windows oder ohne lesbare Liste.
+    Nur der Name aus tasklist — consent.exe läuft als SYSTEM, sein Pfad ist für uns nicht lesbar (wie order_bot._verbindung_lage)."""
+    if os.name != "nt":
+        return None
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq consent.exe", "/FO", "CSV", "/NH"], capture_output=True, text=True,
+                             timeout=8, errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout or ""
+        return '"consent.exe"' in out.lower()
+    except Exception:
+        return None
+
+
 LOGIN_WACHE_MAX_S, LOGIN_WACHE_STABIL_S, LOGIN_WACHE_RUNDE_S, LOGIN_WACHE_HART_S = 1800, 120, 120, 12 * 3600
 LOGIN_WACHE = set()   # install_dir mit laufender Wache (unter HEAL_LOCK)
 
@@ -3235,6 +3248,10 @@ class Handler(BaseHTTPRequestHandler):
             # PC-Kennung für alle Browser-Profile dieses PCs (25.09.2026) — null, solange keine eingetragen ist
             import socket
             return self._send(200, json.dumps({"ok": True, "pc_id": pc_id_lesen(), "host": socket.gethostname()}, ensure_ascii=False))
+        if path == "/api/windows-abfrage":
+            # Steht eine Windows-Sicherheitsabfrage offen? (23.10.2026, Master: ein Start, der daran scheitert, ist kein Fehlversuch —
+            # sfTick im Prophos-Tab plant neu ein, sobald consent.exe weg ist). Nur lesen; ohne Windows/lesbare Liste consent None.
+            return self._send(200, json.dumps({"ok": True, "consent": consent_offen()}))
         if path == "/api/code-token":
             # Liegt der PC-Schlüssel für die Code-Quelle schon da? (07.10.2026) — nur ja/nein, nie der Schlüssel selbst
             return self._send(200, json.dumps({"ok": True, "da": bool(code_token())}))
