@@ -10629,7 +10629,7 @@ def _uia_wert(el):
     return ""
 
 
-def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter")):
+def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter"), nur_pids=None):
     """Den 'Einloggen'-Dialog von MT5 mit OK bestaetigen (Finn 07.10.2026:
     „Kannst du einstellen, dass … der Bot automatisch hier auf OK drueckt?").
     MT5 schiebt ihn ab und zu beim Konto-Login dazwischen; Konto, gespeichertes
@@ -10645,6 +10645,7 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
     Gesucht in Top-Level-Fenstern der MT5-Prozesse UND Kind-Fenstern der
     MT5-Hauptfenster (gleiche zwei Quellen wie beim Haftungsausschluss).
     Beweis: angenommen erst, wenn der OK-Knopf weg ist.
+    nur_pids (23.10.2026, Prüf-Agent): nur Fenster dieser Prozesse — die Login-Wache kennt ihre Installation.
     Rueckgabe: 'bestaetigt' | 'gescheitert' | 'keiner'."""
     try:
         from pywinauto import Desktop
@@ -10654,7 +10655,7 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
     haupt, pids = [], set()
     for w in alle:
         try:
-            if w.element_info.class_name == MT5_KLASSE:
+            if w.element_info.class_name == MT5_KLASSE and (nur_pids is None or w.element_info.process_id in nur_pids):
                 haupt.append(w)
                 pids.add(w.element_info.process_id)
         except Exception:
@@ -25363,6 +25364,23 @@ def loginok_lage(prozesse, pfad):
     return "aus"
 
 
+def pids_der_installation(prozesse, pfad):
+    """REIN RECHNEND (testbar): PIDs der terminal64.exe GENAU dieser Installation → set, oder None, wenn das nicht sicher feststeht
+    (kein Pfad, oder eine terminal64.exe mit unlesbarem Pfad — dann sucht die Wache wie bisher über alle MT5-Fenster)."""
+    if not pfad:
+        return None
+    ziel = os.path.normcase(os.path.abspath(pfad))
+    out = set()
+    for p in prozesse or ():
+        if str(p.get("name") or "").lower() != "terminal64.exe":
+            continue
+        if not p.get("pfad"):
+            return None
+        if os.path.normcase(os.path.abspath(str(p["pfad"]))) == ziel:
+            out.add(int(p.get("pid") or 0))
+    return out
+
+
 # „aus" erst nach dieser Zeit am Stück glauben: zwischen Updater-Ende und Neustart des Terminals liegt eine kurze Lücke
 LOGINOK_AUS_S = 60
 
@@ -25382,6 +25400,7 @@ def modus_loginok(expected, sekunden="90", pfad=None):
     trail, ende, warten_s, aus_seit = [], time.time() + dauer, 0.0, None
     while time.time() < ende:
         t0 = time.time()
+        nur_pids = None
         if pfad:
             prozesse, _fenster = _verbindung_lage()
             lage = loginok_lage(prozesse, pfad) if prozesse else "suchen"   # ohne lesbare Lage: suchen wie bisher
@@ -25396,7 +25415,8 @@ def modus_loginok(expected, sekunden="90", pfad=None):
                 _warte(3.0, 5.0)
                 warten_s += time.time() - t0
                 continue
-        st = _mt5_login_bestaetigen(exp, trail, wege=("invoke",))
+            nur_pids = pids_der_installation(prozesse, pfad) if prozesse else None
+        st = _mt5_login_bestaetigen(exp, trail, wege=("invoke",), nur_pids=nur_pids)
         if st == "bestaetigt":
             return {"ok": True, "msg": f"MT5-Login-Dialog für {exp} bestätigt", "ende": "bestaetigt",
                     "warten_s": round(warten_s), "trail": trail[-5:]}

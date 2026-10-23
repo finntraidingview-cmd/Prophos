@@ -2273,6 +2273,21 @@ def test_login_wache():
         "verbunden erst nach Stabil-Zeit → Ende")
     chk(W(S, S + 10, 0, None, "terminal_aus")[0] is False and W(S, S + 10, 0, None, "bestaetigt")[0] is True,
         "Terminal aus beendet, bestätigt läuft weiter bis zur Verbindung")
+    _mx = panel.LOGIN_WACHE_MAX_OK
+    chk(W(S, S + 10, 0, None, "bestaetigt", _mx - 1)[0] is True and W(S, S + 10, 0, None, "bestaetigt", _mx)[0] is False
+        and "Login am PC prüfen" in W(S, S + 10, 0, None, "zeit", _mx)[1], f"höchstens {_mx} Bestätigungen je Wache, dann Ende mit Grund")
+    P = ob.pids_der_installation
+    chk(P([t(1, "terminal64.exe", pfad), t(2, "terminal64.exe", "C:\\MT5-B\\terminal64.exe"), t(3, "chrome.exe", "")], pfad) == {1},
+        "PIDs nur der eigenen Installation")
+    chk(P([t(1, "terminal64.exe", "")], pfad) is None and P([t(1, "terminal64.exe", pfad)], "") is None and P([], pfad) == set(),
+        "unlesbarer Pfad/kein Pfad → keine Einschränkung, nichts läuft → leer")
+    q = inspect.getsource(ob._mt5_login_bestaetigen)
+    chk("nur_pids is None or w.element_info.process_id in nur_pids" in q, "_mt5_login_bestaetigen: Kandidaten auf die Installation beschränkt")
+    q = inspect.getsource(ob.modus_loginok)
+    chk("nur_pids=nur_pids" in q and "pids_der_installation(prozesse, pfad)" in q, "modus_loginok gibt die PIDs weiter")
+    q = inspect.getsource(panel._login_ok_wache)
+    chk('not res.get("ende")' in q and q.count("time.sleep(") >= 2 and "LOGIN_WACHE_NACH_OK_S" in q,
+        "_login_ok_wache: leere Antwort = Pause, nach jeder Bestätigung gestreut warten")
     q = inspect.getsource(ob.modus_loginok)
     chk('wege=("invoke",)' in q and "_warte(3.0, 5.0)" in q and "sleep(" not in q and "click" not in q.lower(),
         "modus_loginok: nur invoke, Takt 3–8 s gestreut, keine Maus")

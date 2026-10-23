@@ -2528,13 +2528,18 @@ def consent_offen():
 
 LOGIN_WACHE_MAX_S, LOGIN_WACHE_STABIL_S, LOGIN_WACHE_RUNDE_S, LOGIN_WACHE_HART_S = 1800, 120, 120, 12 * 3600
 LOGIN_WACHE = set()   # install_dir mit laufender Wache (unter HEAL_LOCK)
+# Höchstens so viele Bestätigungen je Wache (Prüf-Agent 23.10.2026): kommt der Dialog nach einem gescheiterten Login immer wieder, wären es
+# sonst 30 min lang Login-Versuche beim Broker. Nach jeder Bestätigung gestreut LOGIN_WACHE_NACH_OK_S Pause.
+LOGIN_WACHE_MAX_OK, LOGIN_WACHE_NACH_OK_S = 3, (20.0, 20.0)
 
 
-def login_wache_weiter(start, jetzt, warten_s, verbunden_seit, ende_bot=None):
+def login_wache_weiter(start, jetzt, warten_s, verbunden_seit, ende_bot=None, bestaetigt_n=0):
     """REIN RECHNEND (testbar): (weiter, grund). warten_s = Summe der Abfrage-/Update-Wartezeit, verbunden_seit = Zeitpunkt, seit dem
-    das Konto am Stück verbunden ist (None = nicht verbunden), ende_bot = 'terminal_aus' beendet sofort."""
+    das Konto am Stück verbunden ist (None = nicht verbunden), ende_bot = 'terminal_aus' beendet sofort, bestaetigt_n = Bestätigungen."""
     if ende_bot == "terminal_aus":
         return False, "Terminal aus"
+    if bestaetigt_n >= LOGIN_WACHE_MAX_OK:
+        return False, f"Login-Dialog {bestaetigt_n}× bestätigt, kommt wieder — Login am PC prüfen (Passwort/Server)"
     if verbunden_seit is not None and jetzt - verbunden_seit >= LOGIN_WACHE_STABIL_S:
         return False, "Konto verbunden"
     if jetzt - start >= LOGIN_WACHE_HART_S:
@@ -2571,7 +2576,7 @@ def _login_ok_wache(fname, expected, install_dir=None):
             return
         LOGIN_WACHE.add(install_dir)
     try:
-        start, warten_s, verbunden_seit = time.time(), 0.0, None
+        start, warten_s, verbunden_seit, ok_n = time.time(), 0.0, None, 0
         while True:
             bot = os.path.join(HERE, "order_bot.py")
             if not os.path.exists(bot):
@@ -2585,13 +2590,18 @@ def _login_ok_wache(fname, expected, install_dir=None):
                 res = json.loads(zeilen[-1]) if zeilen else {}
             except Exception as e:
                 print(f"[panel] {fname}: Login-OK-Wache {type(e).__name__}: {e}", flush=True)
-                time.sleep(LOGIN_WACHE_RUNDE_S / 4 + random.uniform(0, 10))   # Bot kaputt/fehlt: nicht im Kreis drehen
-            if "bestätigt" in str(res.get("msg") or ""):
-                print(f"[panel] {fname}: {res.get('msg')}", flush=True)
+            if not isinstance(res, dict) or not res.get("ende"):
+                # leere/kaputte Antwort (order_bot.py fehlt, Import-Tod, MemoryError — Prüf-Agent 23.10.2026): nie ohne Pause neu starten
+                res = {}
+                time.sleep(LOGIN_WACHE_RUNDE_S / 4 + random.uniform(0, 10))
+            if res.get("ende") == "bestaetigt":
+                ok_n += 1
+                print(f"[panel] {fname}: {res.get('msg')} ({ok_n}/{LOGIN_WACHE_MAX_OK})", flush=True)
+                time.sleep(LOGIN_WACHE_NACH_OK_S[0] + random.uniform(0, LOGIN_WACHE_NACH_OK_S[1]))
             warten_s += float(res.get("warten_s") or 0)
             jetzt = time.time()
             verbunden_seit = (verbunden_seit or jetzt) if _konto_verbunden(fname, expected) else None
-            weiter, grund = login_wache_weiter(start, jetzt, warten_s, verbunden_seit, res.get("ende"))
+            weiter, grund = login_wache_weiter(start, jetzt, warten_s, verbunden_seit, res.get("ende"), ok_n)
             if not weiter:
                 print(f"[panel] {fname}: Login-OK-Wache beendet — {grund} ({round((jetzt - start) / 60)} min"
                       + (f", davon {round(warten_s / 60)} min Windows-Abfrage/Update" if warten_s >= 60 else "") + ")", flush=True)
