@@ -13481,10 +13481,21 @@
              bestehende Werte bleiben in der DB und werden beim Bearbeiten unveraendert
              weitergetragen (gleiches Muster wie die Trade-Limits vom 02.09.); die
              Zaehlung in zielFortschritt beruecksichtigt sie weiterhin, falls gesetzt. -->
-        <div class="field" style="grid-column:1/-1">
+        <!-- Schon erreicht (23.10.2026, Finn: „einfach hingehen, kurz bearbeiten und dann 2 von 3 eingeben" — Blue Guardian
+             Phase 2 von Hand gehandelt ohne Prophos-Plan, Radar zeigte „Tage sammeln 1/3"). Steht als Ausgleich in
+             goal_done_offset (= Eingabe − automatisch gezählte Tage), nur bei Trading Days — Winning Days haben ihren
+             eigenen Block. Vorbelegung + Hinweis acGoalDoneHinweis(), Rechnung in saveAccount. -->
+        <div class="field" id="ac-goal-done-row">
+          <label>Schon erreicht</label>
+          <input class="input mono" id="ac-goal-done" type="number" step="1" min="0" placeholder="0" autocomplete="off">
+        </div>
+        <div class="field">
           <label>Zählt ab (optional)</label>
           <input class="input mono" id="ac-goal-since" type="date" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zählt automatisch: jeder Tag (Berlin), an dem auf diesem Konto ein Trade gestartet wurde — auch ohne eingetragenes P&L.</div>
+        </div>
+        <div style="grid-column:1/-1;font-size:11px;color:var(--sub);margin-top:-6px">
+          <div id="ac-goal-done-hint" style="margin-bottom:4px"></div>
+          Zählt automatisch: jeder Tag (Berlin), an dem auf diesem Konto ein Trade gestartet wurde — auch ohne eingetragenes P&L.
         </div>
       </div>
       </div>
@@ -36384,7 +36395,10 @@
     goalKind:      document.getElementById('ac-goal-kind'),
     goalTarget:    document.getElementById('ac-goal-target'),
     goalSince:     document.getElementById('ac-goal-since'),
-    goalSec:       document.getElementById('ac-goal-section'),
+    goalDone:      document.getElementById('ac-goal-done'),        // „Schon erreicht" (23.10.2026)
+    goalDoneRow:   document.getElementById('ac-goal-done-row'),
+    goalDoneHint:  document.getElementById('ac-goal-done-hint'),
+    goalSec:      document.getElementById('ac-goal-section'),
     wdSec:         document.getElementById('ac-wd-section'),
     wdCount:       document.getElementById('ac-wd-count'),
     wdTarget:      document.getElementById('ac-wd-target'),
@@ -37812,6 +37826,9 @@
       if(accEls.goalKind)   accEls.goalKind.value   = editAccount.goalKind || ''
       if(accEls.goalTarget) accEls.goalTarget.value = editAccount.goalTarget != null ? editAccount.goalTarget : ''
       if(accEls.goalSince)  accEls.goalSince.value  = editAccount.goalSince ? String(editAccount.goalSince).slice(0,10) : ''
+      // „Schon erreicht" (23.10.2026): Stand wie zielFortschritt automatisch (automatisch gezählt + Ausgleich), nur Trading Days
+      if(accEls.goalDone) accEls.goalDone.value = editAccount.goalKind === 'trading_days'
+        ? Math.max(0, zielTageAuto(editAccount.id, editAccount.goalSince).size + (Number(editAccount.goalDoneOffset) || 0)) : ''
       // Winning Days (Futures-Funded): Stand + Ziel aus dem Bestand, leer = 0 / 5
       if(accEls.wdCount)  accEls.wdCount.value  = editAccount.goalDoneOffset != null ? Math.max(0, editAccount.goalDoneOffset) : ''
       if(accEls.wdTarget) accEls.wdTarget.value = editAccount.goalTarget > 0 ? editAccount.goalTarget : ''
@@ -37847,6 +37864,7 @@
       if(accEls.goalKind)   accEls.goalKind.value   = ''
       if(accEls.goalTarget) accEls.goalTarget.value = ''
       if(accEls.goalSince)  accEls.goalSince.value  = ''
+      if(accEls.goalDone)   accEls.goalDone.value   = ''
       if(accEls.wdCount)  accEls.wdCount.value  = ''
       if(accEls.wdTarget) accEls.wdTarget.value = ''
       if(accEls.payoutReady) accEls.payoutReady.value = ''
@@ -37865,6 +37883,8 @@
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
+    // Vorbelegung merken, bevor toggleAcBloecke die Firmenregel einträgt — unberührt trägt saveAccount den alten Ausgleich weiter
+    _acGoalDoneVorbelegt = { wert: accEls.goalDone?.value ?? '', since: accEls.goalSince?.value || '' }
     toggleAcBloecke()
     acNameVorschlag()
     acTvLiveRender(editAccount || null)
@@ -37947,6 +37967,33 @@
     const tvSec = document.getElementById('ac-tvlive-section'); if(tvSec) tvSec.hidden = !(istFutures && _editingAccountId)
     // „Im WD-Farm" nur beim Bearbeiten, nie beim Anlegen (F17-Ergänzung, 27.09.2026); seit 08.10.2026 nur Futures + funded/winning_days (accWdFarmErlaubt)
     const wdRow = document.getElementById('ac-wd-farm-row'); if(wdRow) wdRow.hidden = !(_editingAccountId && accWdFarmErlaubt(firm, typ))
+    acGoalDoneHinweis()
+  }
+  /* „Schon erreicht" (23.10.2026, Finn: Mindesttage von Hand nachtragen — Blue Guardian Phase 2, von Hand gehandelt ohne Prophos-Plan,
+   * Radar „Tage sammeln 1/3", echt 2/3). Das Feld zeigt den Gesamtstand; gespeichert wird nur der Ausgleich goal_done_offset =
+   * Eingabe − automatisch gezählte Tage (zielTageAuto mit dem „Zählt ab" aus dem Formular). Nie negativ: weniger als automatisch
+   * gezählt geht nur über ein späteres „Zählt ab" — saveAccount sagt das, statt still zu kappen. */
+  let _acGoalDoneVorbelegt = null
+  function acGoalDoneHinweis(){
+    if(!accEls.goalDoneRow) return
+    const an = accEls.goalKind?.value === 'trading_days'
+    accEls.goalDoneRow.hidden = !an
+    if(!accEls.goalDoneHint) return
+    accEls.goalDoneHint.hidden = !an
+    if(!an){ accEls.goalDoneHint.textContent = ''; return }
+    const auto = zielTageAuto(_editingAccountId, accEls.goalSince?.value || null)
+    const roh = (accEls.goalDone?.value || '').trim(), ein = roh === '' ? null : parseInt(roh, 10)
+    let txt = ein == null || isNaN(ein) ? `automatisch ${auto.size}`
+      : ein < auto.size ? `⚠ Automatisch sind schon ${auto.size} gezählt — weniger nur über ein späteres „Zählt ab"`
+      : `automatisch ${auto.size} · von Hand +${ein - auto.size}`
+    // Doppelzählung sichtbar machen (Master-Auftrag 23.10.): heute noch kein gestarteter Plan, aber einer geplant — startet er,
+    // zählt der Tag automatisch dazu. Keine Logik dagegen, nur der Hinweis.
+    const heute = _deTodayStr()
+    const geplant = (_editingAccountId && !auto.has(heute)) ? (tradePlans || []).find(p => String(p.masterAccountId) === String(_editingAccountId)
+      && p.status === 'planned' && !p.startedAt && p.startUm
+      && new Date(p.startUm).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) === heute) : null
+    if(geplant) txt += ` · Heute ${new Date(geplant.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} ist ein Plan geplant — startet er, zählt heute automatisch +1. Steckt heute schon in deiner Zahl, danach hier 1 weniger eintragen.`
+    accEls.goalDoneHint.textContent = txt
   }
   // Füllt „Futures · Live" im Bearbeiten-Popup — frisch aus accounts + den letzten Plänen dieses Master-Kontos (nur lesen).
   // _acTvLiveId schützt gegen Überholen, wenn das Popup schnell für ein anderes Konto neu geöffnet wird.
@@ -38115,6 +38162,19 @@
     const wartetPayoutVal = (type === 'funded_cfd' && accEls.wartetPayout?.checked) ? (vorher?.waitingPayoutSince || new Date().toISOString()) : null
     const wdCountNum  = parseInt(accEls.wdCount?.value, 10)
     const wdTargetNum = parseInt(accEls.wdTarget?.value, 10)
+    // „Schon erreicht" (23.10.2026): Ausgleich = Eingabe − automatisch gezählte Tage. Unberührt (gleiche Vorbelegung, gleiches
+    // „Zählt ab") oder leer = Bestand weitertragen wie bisher. Kleiner als automatisch → Meldung, kein stilles Kappen.
+    let goalDoneOffsetNeu = vorher?.goalDoneOffset ?? null
+    if(goalSecOn && goalKindVal === 'trading_days' && accEls.goalDone && !accEls.goalDoneRow?.hidden){
+      const roh = accEls.goalDone.value.trim()
+      const unberuehrt = !!_acGoalDoneVorbelegt && roh === String(_acGoalDoneVorbelegt.wert) && (goalSinceVal || '') === _acGoalDoneVorbelegt.since
+      if(roh !== '' && !unberuehrt){
+        const ein = Number(roh), auto = zielTageAuto(_editingAccountId, goalSinceVal).size
+        if(!Number.isInteger(ein) || ein < 0){ setModalMsg('Schon erreicht: eine ganze Zahl ab 0 eintragen — z. B. 2.', 'err'); accEls.goalDone.focus(); return }
+        if(ein < auto){ setModalMsg(`Schon erreicht: automatisch sind schon ${auto} Tage gezählt — ${ein} ginge nur mit negativem Ausgleich. Weniger Tage → „Zählt ab" auf ein späteres Datum setzen.`, 'err'); accEls.goalDone.focus(); return }
+        goalDoneOffsetNeu = ein - auto
+      }
+    }
     // Zugangsdaten einlesen (optional)
     const credObj = {
       login:    accEls.credLogin?.value.trim()    || '',
@@ -38148,7 +38208,7 @@
         goalKind: goalKindVal,
         goalTarget:     goalKindVal ? (!isNaN(goalTargetNum) && goalTargetNum > 0 ? goalTargetNum : 5) : null,
         goalMinProfit:  goalKindVal && vorher?.goalMinProfit  != null ? vorher.goalMinProfit  : null,
-        goalDoneOffset: goalKindVal && vorher?.goalDoneOffset != null ? vorher.goalDoneOffset : null,
+        goalDoneOffset: goalKindVal ? goalDoneOffsetNeu : null,
         goalSince:      goalKindVal ? goalSinceVal : null,
         goalManual:     false,
         goalManualLast: null
@@ -38416,6 +38476,10 @@
     accEls.consFrei.hidden = accEls.cons.value !== 'frei'
     if(accEls.cons.value === 'frei') accEls.consFrei.focus()
   })
+  // „Schon erreicht" (23.10.2026): Hinweis live zu Zieltyp, „Zählt ab" und Eingabe (eigene Verdrahtung, nur dieses Popup)
+  accEls.goalKind?.addEventListener('change', acGoalDoneHinweis)
+  accEls.goalSince?.addEventListener('change', acGoalDoneHinweis)
+  accEls.goalDone?.addEventListener('input', acGoalDoneHinweis)
 
   /* ── Server automatisch vorausfüllen, sobald die Firma gewählt ist (Punkt 2, 24.07.2026) ──
    * Bleibt frei bearbeitbar: hat der User den Server selbst angefasst, wird nicht überschrieben.
@@ -61972,6 +62036,22 @@
   // DB (und damit im Admin-Kalender) sichtbar wird
   function zielPersistFelder(k){ return { goal_kind: k.kind, goal_manual: true, goal_target: k.target } }
 
+  // Automatisch gezählte Trading Days eines Kontos: Berlin-Tage mit gestartetem Plan (Master) ab „Zählt ab". Eine Quelle für
+  // zielFortschritt und das Feld „Schon erreicht" im Konto-Popup (23.10.2026), damit Anzeige und gespeicherter Ausgleich gleich rechnen.
+  function zielTageAuto(accId, since){
+    const tage = new Set()
+    if(accId == null) return tage
+    const ab = since ? String(since).slice(0,10) : null
+    for(const p of (tradePlans || [])){
+      if(String(p.masterAccountId) !== String(accId) || !p.startedAt) continue
+      let tag = null
+      try{ tag = new Date(p.startedAt).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
+      if(!tag || (ab && tag < ab)) continue
+      tage.add(tag)
+    }
+    return tage
+  }
+
   function zielFortschritt(a){
     const k = zielKonfig(a)
     if(!k) return null
@@ -61986,14 +62066,7 @@
     // Berlin-Tag mit GESTARTETEM Plan (started_at) dieses Kontos als Master — auch laufend, auch ohne P&L. Tagesgrenze wie app.py
     // _ap_plan_am_tag (.1309, zeiten.tz Europe/Berlin). Vorher: erst mit abgeschlossenem Trade + P&L, Master ODER Slave.
     if(k.kind === 'trading_days'){
-      const tage = new Set(), heute = _deTodayStr()
-      for(const p of (tradePlans || [])){
-        if(String(p.masterAccountId) !== String(a.id) || !p.startedAt) continue
-        let tag = null
-        try{ tag = new Date(p.startedAt).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
-        if(!tag || (a.goalSince && tag < String(a.goalSince).slice(0,10))) continue
-        tage.add(tag)
-      }
+      const tage = zielTageAuto(a.id, a.goalSince), heute = _deTodayStr()
       const count = Math.max(0, tage.size + (Number(a.goalDoneOffset) || 0))
       return { count, target: k.target, done: count >= k.target, kind: k.kind, heuteAbgehakt: tage.has(heute), manual: false }
     }
