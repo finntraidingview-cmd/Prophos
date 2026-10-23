@@ -1401,6 +1401,31 @@ class _StempelSpur(list):
         return time.time() - self._t0
 
 
+SPUR_WACHE_S = 240.0   # Sekunden nach Lauf-Start, dann geht die Spur nach puls_diagnose — vor dem 300-s-Deckel des Panels
+
+
+def _spur_wache(trail, schritt, nach_s=None):
+    """SPUR-WACHE (Routine „Puls-Fehler" 23.10.2026, Muster „v2order: order-bot timeout (#) — im terminal pruefen, ob die order
+    platziert wurde": 5 Fälle auf 3 PCs in 7 Tagen, 4 davon an einem Tag, alle UNKLAR, trail jedes Mal leer). Das Panel bricht den
+    Order-Bot nach 300 s ab (subprocess-Timeout in /api/master-order) — der Prozess stirbt mitsamt seiner Stempel-Spur, und welche
+    Station die fünf Minuten fraß, steht nirgends (Frage 37, zweimal gestellt, nie beantwortbar). Jetzt: ein Daemon-Faden schickt
+    die bis dahin gesammelte Spur nach SPUR_WACHE_S Sekunden auf dem B17-Weg an puls_diagnose (2 s, Fehler still). Läuft der Bot
+    schneller durch, feuert die Wache nie — Daemon, stirbt mit dem Prozess. Nur lesen: kein Klick, keine Wartezeit, kein Lock."""
+    try:
+        import threading
+        sek = getattr(trail, "sekunden", None)
+
+        def _feuern():
+            stand = f"{sek():.0f} s" if callable(sek) else "?"
+            _puls_diagnose_senden(list(trail) + [f"⏱ Spur-Wache nach {stand} — der Bot läuft noch (Panel-Deckel 300 s)"], schritt)
+        t = threading.Timer(SPUR_WACHE_S if nach_s is None else nach_s, _feuern)
+        t.daemon = True
+        t.start()
+        return t
+    except Exception:
+        return None
+
+
 def _app_steuerung_sperre(e):
     """Blockt Windows' App-Steuerung (Smart App Control / WDAC, WinError 4551) eine DLL des Pakets? (08.10.2026, Jacobs PC)"""
     t = str(e or "").lower()
@@ -11613,6 +11638,7 @@ def run(cfg_path, cmd):
     # Seit 07.10.2026 VOR Login/Lesen angelegt: diese Station (Login-OK bis ~6 s, Lesen bis 15 s, mt5.initialize ohne Limit) war
     # die einzige ohne Stempel — in der Spur fehlten ihre Sekunden komplett, und „wo bleibt die Zeit?" war nicht zu beantworten.
     trail = _StempelSpur()
+    _spur_wache(trail, "v2order_zeit")   # Spur-Wache (23.10.2026): die Spur überlebt den 300-s-Deckel des Panels, s. _spur_wache
     trail.append(maus_hand_text())
     # 1) LESEND: Kurs + Positionsstand VORHER (+ Login-Kontrolle)
     lese = _login_dann_lesen(path, expected, trail=trail, symbol=symbol)
@@ -12502,6 +12528,7 @@ def run_close(cfg_path, cmd):
                        f"Zeile nicht sicher treffen, im Terminal von Hand schliessen."}
 
     trail = _StempelSpur()
+    _spur_wache(trail, "close_zeit")     # Spur-Wache (23.10.2026): auch /api/master-close hat den 300-s-Deckel, s. _spur_wache
     _warte(0.0, 1.2)   # Start-Versatz wie run() (28.08.2026, Flotten-Streuung)
 
     # 2) Ins Terminal gehen -> Guard

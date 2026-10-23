@@ -1786,6 +1786,32 @@ def main():
         all("s·" in z for z in _sp) and _sp[0].endswith("Terminal betreten")
         and "Terminal betreten → " in order_bot._spur(_sp))
 
+    # Spur-Wache (Routine „Puls-Fehler" 23.10.2026, Muster „v2order: order-bot timeout (#)", 5× auf 3 PCs, trail immer leer):
+    # feuert nach der Frist mit der BIS DAHIN gesammelten Spur (Daemon-Faden, B17-Weg), vorher nie; Echo-Order und Close hängen sie
+    # direkt an die Stempel-Spur, die Frist liegt klar unter dem 300-s-Deckel des Panels.
+    _gesendet = []
+    _alt_ds = order_bot._puls_diagnose_senden
+    order_bot._puls_diagnose_senden = lambda spur=None, schritt="": _gesendet.append((list(spur or []), schritt))
+    try:
+        _sw = order_bot._StempelSpur()
+        _sw.append("Login/Lesen ok")
+        _t = order_bot._spur_wache(_sw, "v2order_zeit", nach_s=0.05)
+        _sw.append("Terminal betreten")
+        _t.join(3.0)
+        chk("ORDER-BOT: Spur-Wache schickt nach der Frist die bis dahin gesammelte Spur (alle Stationen) im Daemon-Faden",
+            _t is not None and _t.daemon and len(_gesendet) == 1 and _gesendet[0][1] == "v2order_zeit"
+            and any(z.endswith("Terminal betreten") for z in _gesendet[0][0]) and any("Spur-Wache" in z for z in _gesendet[0][0]))
+        _t2 = order_bot._spur_wache(order_bot._StempelSpur(), "v2order_zeit", nach_s=60.0)
+        _t2.cancel()
+        import inspect as _insp_sw
+        _src_run, _src_close = _insp_sw.getsource(order_bot.run), _insp_sw.getsource(order_bot.run_close)
+        chk("ORDER-BOT: Spur-Wache feuert nicht vor der Frist; Echo-Order + Close hängen sie an die Spur, Frist unter dem Panel-Deckel",
+            len(_gesendet) == 1 and 120.0 <= order_bot.SPUR_WACHE_S <= 270.0
+            and '_spur_wache(trail, "v2order_zeit")' in _src_run and _src_run.index("_StempelSpur()") < _src_run.index("_spur_wache(trail")
+            and '_spur_wache(trail, "close_zeit")' in _src_close and _src_close.index("_StempelSpur()") < _src_close.index("_spur_wache(trail"))
+    finally:
+        order_bot._puls_diagnose_senden = _alt_ds
+
     # UAC-/Update-Hinweis (02.09.2026): NUR bei Terminal-nicht-erreichbar, nie
     # bei Konto-/Symbol-Sachfehlern — sonst schickt er Finn an den PC, obwohl
     # gar keine Windows-Abfrage offen ist.
