@@ -22,6 +22,8 @@
 -- der zweite sieht den ersten (READ COMMITTED, Prüfung NACH dem Lock). Trigger-Name nach Alphabet als letzter der Claim-Riegel.
 -- Der PC-Tab prüft dieselbe Lage vorher über /admin/auto-plan/waage-start (deckel_sperrt) und verschiebt mit seinem Startfenster — dieser
 -- Riegel ist das Netz für jeden anderen Weg. Idempotent (create or replace / drop trigger if exists).
+-- VORAUSSETZUNG: sql/2026-10-23_start_claim_art.sql ZUERST einspielen (Spalte start_claim_art) — der Trigger liest sie; ohne Spalte scheiterte
+-- jeder Claim. Verbrauchs-Claims (start_claim_art = 'verbrauch': Archiv, Manuelle Arbeit, Ziel erreicht, verpasst) bremst er nie.
 
 -- ── 1. Klasse Futures (wie app.py ap_klasse + _ist_tradeify_cfd) ─────────────────────────────────────────────────────────────────────
 create or replace function public.prophos_waage_futures(p_route text, p_firm text)
@@ -121,6 +123,18 @@ declare
 begin
   if new.status is distinct from 'planned' or new.auto_plan is not true or new.hand_werte_at is not null
      or coalesce(new.richtung, '') not in ('buy', 'sell') then
+    return new;
+  end if;
+  -- VERBRAUCH NIE BREMSEN (Master 23.10.2026): Archiv, Manuelle Arbeit, Ziel erreicht, verpasst schließen den Plan nur ab — „Ziel erreicht =
+  -- kein Start" darf nie in ein Verschieben kippen (sql/2026-10-23_start_claim_art.sql, der Tab schreibt 'verbrauch' im selben Update)
+  if coalesce(new.start_claim_art, '') = 'verbrauch' then
+    return new;
+  end if;
+  -- ÜBERGANG (Tab noch ohne Feld, NULL): ein Claim lange nach der Startzeit ist der „verpasst"-Verbrauch des Tabs (pulsStartFenster 30 min;
+  -- die 60 min des Winning-Days-Farmers zählen hier nicht, WD ist keine AP_TYPEN-Kontoart) — durchlassen, nie verschieben (ein verschobener
+  -- „verpasst" sähe beim nächsten Tick wie ein pünktlicher Start aus). Schwelle 25 statt 30 min: Puffer für eine vorgehende PC-Uhr. Ziel/
+  -- Manuell/Archiv eines alten Tabs werden höchstens verschoben und beim nächsten Tick vom Tab VOR jedem Start neu erkannt (planKontoSperre).
+  if new.start_claim_art is null and old.start_um is not null and old.start_um < now() - interval '25 minutes' then
     return new;
   end if;
   perform pg_advisory_xact_lock(hashtext('prophos_waage_deckel'));

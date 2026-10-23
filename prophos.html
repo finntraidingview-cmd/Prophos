@@ -52100,6 +52100,24 @@
   // DB-Guard für jedes Claim-Update dieser Sektion (Punkt 7): PostgREST-or über die Spalten selbst — ein Vorschlag ohne Bestätigung
   // trifft keine Zeile, der Claim bleibt aus, auch wenn der Tab den Plan für einen Hand-Plan hält
   const SU_CLAIM_GUARD = 'auto_plan.is.null,auto_plan.eq.false,auto_bestaetigt_at.not.is.null'
+  /* CLAIM MIT ART (23.10.2026, Waage-Deckel — Master: „Der Deckel darf Verbrauchs-Claims NIE sperren"): echter Start und Verbrauch (Plan nur
+   * abschließen: Archiv, Manuelle Arbeit, Ziel erreicht, verpasst) schrieben dasselbe Update — der DB-Riegel trade_plans_waage_deckel konnte
+   * sie nicht unterscheiden. Jetzt im selben Update start_claim_art 'start' | 'verbrauch' (sql/2026-10-23_start_claim_art.sql); 'verbrauch'
+   * lässt der Riegel immer durch. Fehlt die Spalte noch, derselbe Claim ohne das Feld (wie bei pl_quelle) — dann bremst der Riegel wie vorher.
+   * → { data, error } wie das Supabase-Update. guard = SU_CLAIM_GUARD (nur bestätigte Auto-/Hand-Pläne) wie bisher an derselben Stelle. */
+  async function suClaimSetzen(planId, art, guard){
+    const mach = upd => {
+      let q = supabase.from('trade_plans').update(upd).eq('id', planId).eq('status', 'planned').is('start_um_gestartet_at', null)
+      if(guard) q = q.or(SU_CLAIM_GUARD)
+      return q.select('*')
+    }
+    let r = await mach({ start_um_gestartet_at: new Date().toISOString(), start_claim_art: art })
+    if(r && r.error && /start_claim_art/i.test(String(r.error.message || '') + String(r.error.details || '') + String(r.error.hint || ''))){
+      console.warn('[start-um] Spalte start_claim_art fehlt noch — Claim ohne Art (sql/2026-10-23_start_claim_art.sql einspielen)')
+      r = await mach({ start_um_gestartet_at: new Date().toISOString() })
+    }
+    return r
+  }
   // Winning-Day-Kette: ist der Farmer-Plan p jetzt dran? (rein, ohne DB — Test-Haken window._su.ketteFrei)
   function suKetteFrei(p, plaene, now){
     const tag = suKettenTag(p)
@@ -52284,16 +52302,14 @@
       if(sperre && (sperre.art === 'archiv' || sperre.art === 'waise')){
         const n = sperre.art === 'archiv' ? await archivPlaeneEntfernen(plan.masterAccountId, 'start') : await waisePlanEntfernen(plan)
         if(!n){
-          const { data: da } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-            .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+          const { data: da } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: nie starten (23.10.2026)
           const ia = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(ia >= 0 && da && da.length) tradePlans[ia] = rowToPlan(da[0])
         }
         if(typeof atToast === 'function') atToast('🗄 ' + sperre.text + (n ? ' Plan entfernt.' : ''), 'end')
         return
       }
       if(sperre && sperre.art === 'manuell'){
-        const { data: dm } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-          .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+        const { data: dm } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Manuelle Arbeit (23.10.2026)
         if(dm && dm.length){
           const im = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(im >= 0) tradePlans[im] = rowToPlan(dm[0])
           if(typeof atToast === 'function') atToast('✍ ' + sperre.text, 'end')
@@ -52302,8 +52318,7 @@
         return
       }
       if(zielOk){
-        const { data: dz } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-          .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+        const { data: dz } = await suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Ziel erreicht = kein Start (23.10.2026)
         if(dz && dz.length){
           const iz = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iz >= 0) tradePlans[iz] = rowToPlan(dz[0])
           const t = planZielText(plan, zielOk)
@@ -52351,8 +52366,7 @@
         const vc = await slaveBereitPruefen(plan)
         if(!vc.ok){
           if(verspaetet > fenster){
-            const { data: dv } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-              .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).or(SU_CLAIM_GUARD).select('*')
+            const { data: dv } = await suClaimSetzen(plan.id, 'verbrauch', true)   // Verbrauch: verpasst (23.10.2026)
             if(dv && dv.length){ const iv = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(iv >= 0) tradePlans[iv] = rowToPlan(dv[0]); await vorcheckMelden(plan, 'verpasst_slave', vc.grund, vc.checks) }
             else await suClaimFehlgriff(plan, null)
             vorcheckKarteZeigen(plan, vc, 'verpasst')
@@ -52371,8 +52385,8 @@
       // Während Vorprüfung/Richtungsprüfung kann ein Orbit-Start/Signal angelaufen sein → nicht claimen, Plan bleibt in der Schlange
       try{ if(_tpOrbitLaeuft || _osActive) return }catch(_){}
       // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
-      const { data, error: eClaim } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
-        .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).or(SU_CLAIM_GUARD).select('*')
+      // Art (23.10.2026): ein verpasster Plan wird hier nur verbraucht (Meldung unten), sonst ist es der echte Start
+      const { data, error: eClaim } = await suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true)
       if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }
       _suClaimPause.delete(String(plan.id))
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])

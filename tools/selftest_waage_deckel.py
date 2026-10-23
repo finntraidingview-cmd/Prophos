@@ -14,6 +14,10 @@
 (D) Startweg Railway: app.py setzt den Claim (start_um_gestartet_at) nie selbst → jeder automatische Start läuft über (C).
 (E) PC-Tab (prophos.html): rkVorStart prüft deckel_sperrt VOR Drehen/„folgt", dreht nur in die leichte Seite, sonst rkVerschieben mit
     „[Waage-Deckel]"; Hand-Starts (hand_werte_at, Knopf) nur Hinweis (rkDeckelHinweis).
+(F) VERBRAUCH NIE BREMSEN (Master 23.10.2026): sql/2026-10-23_start_claim_art.sql (Spalte + Leeren beim Zurücknehmen des Claims), der Trigger
+    lässt 'verbrauch' immer und einen Claim ohne Art > 25 min nach der Startzeit (alter Tab, „verpasst") durch; der Tab claimt Archiv/Manuell/
+    Ziel/verpasst als 'verbrauch', den echten Start als 'start'. Entscheidungsmodell des Triggers mit allen Fällen, auch dem Übergang: ein
+    verschobener Verbrauch wird beim nächsten Tick wieder Verbrauch (planKontoSperre VOR jedem Start), ein Plan rutscht nie als Start durch.
 Aufruf: python3 tools/selftest_waage_deckel.py"""
 import os
 import re
@@ -172,6 +176,57 @@ def main():
     check("plan.autoPlan && plan.handWerteAt && !tpIstWdPlan(plan)) rkDeckelHinweis(plan)" in rk
           and "if(!plan.startUmGestartetAt && typeof rkDeckelHinweis === 'function') rkDeckelHinweis(plan)" in html,
           "Hand-Werte und Start per Knopf: nur Hinweis (rkDeckelHinweis), kein Riegel")
+    # ── (F) Verbrauch nie bremsen ──────────────────────────────────────────────────────────────────────────────────────────
+    ca = open(os.path.join(WURZEL, "sql", "2026-10-23_start_claim_art.sql"), encoding="utf-8").read()
+    check("add column if not exists start_claim_art text" in ca
+          and re.search(r"before update of start_um_gestartet_at on public\.trade_plans\s+for each row when \(old\.start_um_gestartet_at is not null "
+                        r"and new\.start_um_gestartet_at is null\)", ca) is not None and "new.start_claim_art := null" in ca,
+          "start_claim_art: Spalte (idempotent) + Leeren, wenn der Claim zurückgenommen wird (kein alter 'verbrauch' klebt am nächsten Start)")
+    check(sorted(["2026-10-23_start_claim_art.sql", "2026-10-23_waage_deckel.sql"])[0] == "2026-10-23_start_claim_art.sql"
+          and "sql/2026-10-23_start_claim_art.sql ZUERST einspielen" in sql, "eigene SQL-Datei, sortiert und laut Kopf VOR dem Trigger")
+    trig = sql[sql.index("function public.trade_plans_waage_deckel()"):]
+    i_v, i_u, i_lock, i_lage = (trig.find("coalesce(new.start_claim_art, '') = 'verbrauch'"),
+                                trig.find("new.start_claim_art is null and old.start_um is not null and old.start_um < now() - interval '25 minutes'"),
+                                trig.find("pg_advisory_xact_lock"), trig.find("prophos_waage_deckel_lage(new.id"))
+    check(0 < i_v < i_u < i_lock < i_lage, "Trigger: 'verbrauch' und Übergang (ohne Art, > 25 min) VOR Lock und Lage → return new")
+
+    def trigger(art, start_vor_min, sperrt, auto=True, hand=False):
+        """Modell der SQL-Entscheidung (Reihenfolge wie oben geprüft) → 'durch' | 'gebremst'."""
+        if not auto or hand:
+            return "durch"
+        if (art or "") == "verbrauch":
+            return "durch"
+        if art is None and start_vor_min is not None and start_vor_min > 25:
+            return "durch"
+        return "gebremst" if sperrt else "durch"
+    faelle = [("Ziel erreicht (neuer Tab)", trigger("verbrauch", 5, True), "durch"),
+              ("Manuelle Arbeit (neuer Tab)", trigger("verbrauch", 2, True), "durch"),
+              ("Archiv (neuer Tab)", trigger("verbrauch", 0, True), "durch"),
+              ("verpasst (neuer Tab)", trigger("verbrauch", 40, True), "durch"),
+              ("verpasst (alter Tab ohne Art, 31 min, PC-Uhr 10 s vor)", trigger(None, 30.9 - 10 / 60, True), "durch"),
+              ("echter Start, Deckel sperrt", trigger("start", 1, True), "gebremst"),
+              ("echter Start (alter Tab ohne Art), Deckel sperrt", trigger(None, 1, True), "gebremst"),
+              ("echter Start, Deckel frei", trigger("start", 1, False), "durch"),
+              ("Hand-Werte", trigger("start", 1, True, hand=True), "durch")]
+    falsch = [(n, ist) for n, ist, soll in faelle if ist != soll]
+    check(not falsch, f"Trigger-Modell: Verbrauch immer durch, echter Start gebremst — {len(faelle)} Fälle (falsch {falsch})")
+    # Übergang: alter Tab claimt „Ziel erreicht" ohne Art → gebremst und verschoben; nächster Tick (Tab neu geladen) prüft planKontoSperre VOR
+    # Richtung/Claim → claimt 'verbrauch' → durch. Kein Weg führt dabei zum echten Start (der läge erst NACH den Sperre-Zweigen).
+    erst = trigger(None, 3, True)
+    html2 = open(HTML, encoding="utf-8").read()
+    tick = html2[html2.index("      const sperre = await planKontoSperre(plan)\n      const zielOk"):html2.index("      if(eClaim || !data || !data.length){ await suClaimFehlgriff(plan, eClaim); return }")]
+    i_sp, i_rk, i_claim = tick.find("planKontoSperre(plan)"), tick.find("await rkVorStart(plan)"), tick.find("suClaimSetzen(plan.id, verspaetet > fenster ? 'verbrauch' : 'start', true)")
+    zweige = [tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: nie starten"), tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Manuelle Arbeit"),
+              tick.find("suClaimSetzen(plan.id, 'verbrauch', false)   // Verbrauch: Ziel erreicht")]
+    check(erst == "gebremst" and 0 <= i_sp < min(zweige) and all(0 < z < i_rk < i_claim for z in zweige)
+          and trigger("verbrauch", 15, True) == "durch",
+          "Übergang: verschobener Verbrauch → nächster Tick erkennt Archiv/Manuell/Ziel VOR Richtung und Start-Claim, claimt 'verbrauch', geht durch")
+    check(tick.count("return\n") >= 3 and tick.find("suClaimSetzen(plan.id, 'verbrauch', true)   // Verbrauch: verpasst") > 0
+          and tick.count("supabase.from('trade_plans').update({ start_um_gestartet_at") == 0,
+          "alle Claims im Start-Takt über suClaimSetzen mit Art (verpasst nach Vorprüfung = 'verbrauch'), keiner mehr ohne")
+    hilf = html2[html2.index("  async function suClaimSetzen(planId, art, guard){"):html2.index("  async function suClaimSetzen(planId, art, guard){") + 1200]
+    check("start_claim_art: art" in hilf and "/start_claim_art/i.test(" in hilf and "mach({ start_um_gestartet_at: new Date().toISOString() })" in hilf,
+          "suClaimSetzen: Art im selben Update; fehlt die Spalte, derselbe Claim ohne Art (Riegel bremst dann wie vorher)")
     print("\n" + ("✓ alles grün" if not FEHLER else f"✗ {len(FEHLER)} Fehler"))
     sys.exit(1 if FEHLER else 0)
 
