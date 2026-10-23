@@ -9,7 +9,10 @@ Split 80 %). Prophos prüfte an ~25 Stellen nur den Teilstring „tradeify" — 
     tpFirmIstFutures/tpFirmIstCfd (mit und ohne firm_specs-Zeile), tpFundedHedgeVorgabe, apPrKurz, tplFirmaKurz/-Mini, tpVorplanFirmaKey,
     wdFuturesFirma, tcGoodDayGrenze, pbFirmKey, mpNorm.
 (C) „Tradeify" und „Blue Guardian" liefern überall EXAKT dasselbe wie der Stand vor dem Umbau (git HEAD bzw. --alt <commit>).
-Gibt die Belegtabelle „Firmenname → Ergebnis" je Funktion aus. Ohne Netz. Aufruf: python3 tools/selftest_tradeify_cfd.py [--alt <commit>]"""
+Gibt die Belegtabelle „Firmenname → Ergebnis" je Funktion aus. Ohne Netz. Aufruf: python3 tools/selftest_tradeify_cfd.py [--alt <commit>]
+ACHTUNG (C): Ohne --alt wird gegen HEAD verglichen — seit der Umbau auf main liegt (.1726, 13dd5e62), vergleicht das den Umbau mit sich
+selbst und beweist nichts. Für den echten Vorher-Vergleich: --alt da9766e6 (.1724, letzter Stand vor dem Umbau). Enthält der
+Vergleichsstand istTradeifyCfd schon, sagt der Test das (Nachprüfung Master 23.10.2026)."""
 import json
 import os
 import re
@@ -177,6 +180,8 @@ def main():
     alt = sys.argv[sys.argv.index("--alt") + 1] if "--alt" in sys.argv else "HEAD"
     py_neu, py_alt = py_lauf(quelle("app.py", None)), py_lauf(quelle("app.py", alt))
     js_neu, js_alt = js_lauf(quelle("prophos.html", None)), js_lauf(quelle("prophos.html", alt))
+    if "function istTradeifyCfd(" in quelle("prophos.html", alt):
+        print(f"⚠ Vergleichsstand {alt} enthält den Umbau schon — (C) beweist so nichts; Vorher-Vergleich mit --alt da9766e6")
     tabelle("app.py (neu)", py_neu)
     tabelle("prophos.html (neu)", js_neu)
 

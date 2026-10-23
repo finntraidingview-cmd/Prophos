@@ -64,7 +64,8 @@ def js_zeile(src, anfang):
 def main():
     src = open(HTML, encoding="utf-8").read()
     teile = [js_zeile(src, "const HEDGE_DLL_VOR_PKT"), js_zeile(src, "const hedgeLiqDllFelder")]
-    teile += [js_funktion(src, n) for n in ("firmNormRichtung", "tvV2Handelstag", "liqRegelWaehlen", "liqDailyLoss", "hedgeTagesstart",
+    # istTradeifyCfd: firmNormRichtung fragt seit .1726 danach (Tradeify CFD eigene Firma)
+    teile += [js_funktion(src, n) for n in ("istTradeifyCfd", "firmNormRichtung", "tvV2Handelstag", "liqRegelWaehlen", "liqDailyLoss", "hedgeTagesstart",
                                             "hedgeLiqDll", "hedgeLiqStart", "hedgeLiqLevel")]
     acc = [
         {"id": "marc", "name": "150k PAAPEX6843320000001 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": None},
