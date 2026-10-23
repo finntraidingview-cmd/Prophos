@@ -26,4 +26,6 @@ create trigger trade_plans_claim_art_leeren
   for each row when (old.start_um_gestartet_at is not null and new.start_um_gestartet_at is null)
   execute function public.trade_plans_claim_art_leeren();
 
+notify pgrst, 'reload schema';   -- PostgREST kennt die neue Spalte sofort (sonst lehnt die API den Claim mit Art bis zum nächsten Reload ab)
+
 -- Probe (nur lesen):  select start_claim_art, count(*) from public.trade_plans where start_um_gestartet_at > now() - interval '1 day' group by 1;

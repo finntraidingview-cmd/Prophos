@@ -152,15 +152,15 @@ def main():
     abw = [(r, f) for r, f in faelle if sql_futures(r, f) != (a2["ap_klasse"](r, f) == "futures")]
     check(not abw, f"SQL-Futures-Erkennung = app.py ap_klasse für {len(faelle)} Fälle (Abweichungen {abw})")
     check("seite - andere > max_abstand" in sql and "* greatest(andere" not in sql, "Regel wie ap_waage_deckel: Seite − andere > Abstand (kein Verhältnis mehr)")
-    check("max_abstand numeric := 2" in sql and "reg->'ausgleich'->>'waage_max_abstand'" in sql and "greatest(1, least(20, v::numeric))" in sql
+    check("m numeric := 2" in sql and "a->>'waage_max_abstand'" in sql and "greatest(1, least(20, v::numeric))" in sql
           and "->>'waage_deckel'" not in sql and "(Abstand höchstens " in sql,
           "Wert aus regeln.ausgleich.waage_max_abstand, Standard 2, geklemmt 1–20 (wie ap_ausgleich_param), Grund „Abstand höchstens …\"")
-    check("(p.status = 'open'" in sql and "'review'" not in sql.split("-- ── 2.")[1].split("-- ── 3.")[0]
-          and f"interval '{int(ns['AP_WAAGE_CLAIM_MAX_MIN'])} minutes'" in sql,
+    lage_sql = sql[sql.index("function public.prophos_waage_deckel_lage"):sql.index("function public.prophos_waage_fenster_ende")]
+    check("(p.status = 'open'" in lage_sql and "'review'" not in lage_sql and f"interval '{int(ns['AP_WAAGE_CLAIM_MAX_MIN'])} minutes'" in lage_sql,
           f"gezählt: open + Claim ≤ {int(ns['AP_WAAGE_CLAIM_MAX_MIN'])} min (AP_WAAGE_CLAIM_MAX_MIN), review für beide Seiten gleich nicht")
-    check("interval '10 minutes' + make_interval(secs => floor(random() * 600))" in sql and "interval '120 minutes'" in sql
-          and "start_um = null" in sql and sql.count("'[Waage-Deckel] '") == 2 and "pg_advisory_xact_lock(hashtext('prophos_waage_deckel'))" in sql,
-          "verschoben 10–20 min gewürfelt, nach 120 min aufgegeben (Plan bleibt Geplant), Protokoll „[Waage-Deckel]\", Advisory-Lock")
+    check("least(20, rest) - 10" in sql and "random()" in sql and sql.count("'[Waage-Deckel] '") >= 2
+          and "pg_advisory_xact_lock(hashtext('prophos_waage_deckel'))" in sql,
+          "verschoben 10–20 min gewürfelt (oben aufs Fensterende gedeckelt), Protokoll „[Waage-Deckel]\", Advisory-Lock")
     check("waage_ohne" in sql and "array['apex']" in sql, "Firmen ohne Waage aus regeln.ausgleich.waage_ohne, Standard Apex")
 
     # ── (D) Railway claimt nie selbst ──────────────────────────────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ def main():
                         r"and new\.start_um_gestartet_at is null\)", ca) is not None and "new.start_claim_art := null" in ca,
           "start_claim_art: Spalte (idempotent) + Leeren, wenn der Claim zurückgenommen wird (kein alter 'verbrauch' klebt am nächsten Start)")
     check(sorted(["2026-10-23_start_claim_art.sql", "2026-10-23_waage_deckel.sql"])[0] == "2026-10-23_start_claim_art.sql"
-          and "sql/2026-10-23_start_claim_art.sql ZUERST einspielen" in sql, "eigene SQL-Datei, sortiert und laut Kopf VOR dem Trigger")
+          and "Die Spalte start_claim_art legt auch sql/2026-10-23_start_claim_art.sql an" in sql, "eigene SQL-Datei, sortiert VOR dem Trigger (der sichert die Spalte zusätzlich selbst ab)")
     trig = sql[sql.index("function public.trade_plans_waage_deckel()"):]
     i_v, i_u, i_lock, i_lage = (trig.find("coalesce(new.start_claim_art, '') = 'verbrauch'"),
                                 trig.find("new.start_claim_art is null and old.start_um is not null and old.start_um < now() - interval '25 minutes'"),
@@ -230,6 +230,62 @@ def main():
     hilf = html2[html2.index("  async function suClaimSetzen(planId, art, guard){"):html2.index("  async function suClaimSetzen(planId, art, guard){") + 1200]
     check("start_claim_art: art" in hilf and "/start_claim_art/i.test(" in hilf and "mach({ start_um_gestartet_at: new Date().toISOString() })" in hilf,
           "suClaimSetzen: Art im selben Update; fehlt die Spalte, derselbe Claim ohne Art (Riegel bremst dann wie vorher)")
+    # ── (G) Auflagen der Prüfung 23.10.2026 (A1–D) ─────────────────────────────────────────────────────────────────────────
+    i_alter, i_trig = sql.find("alter table public.trade_plans add column if not exists start_claim_art text;"), sql.find("create or replace function public.trade_plans_waage_deckel()")
+    check(0 <= i_alter < i_trig and "notify pgrst, 'reload schema'" in ca and "notify pgrst, 'reload schema'" in sql,
+          "A1: Trigger-Datei legt die Spalte selbst an (vertauschte Reihenfolge bricht keinen Claim), beide Dateien laden das PostgREST-Schema neu")
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    fe_sql = sql[sql.index("function public.prophos_waage_fenster_ende"):sql.index("-- nur der Trigger")]
+    check("coalesce(nullif(z->>'fenster_tz', ''), nullif(z->>'tz', ''), 'Europe/Berlin')" in fe_sql and "p_erst + interval '60 minutes'" in fe_sql
+          and "least(ende, tag_ende)" in fe_sql and "at time zone 'Europe/Berlin') + interval '1 day'" in fe_sql and "if b = 0 then b := 1440" in fe_sql,
+          "A2: Fensterende wie rkFensterEnde (zeiten.fenster in fenster_tz, außerhalb +60 min), höchstens bis zur deutschen Tagesgrenze")
+
+    def fenster_ende(erst, fenster=(("02:00", "20:00", 100),), tz="Asia/Dubai"):     # Nachbau der SQL-Funktion, Live-Stand zeiten 23.10.2026
+        lok = erst.astimezone(ZoneInfo(tz))
+        m = lok.hour * 60 + lok.minute
+        ende = erst + timedelta(minutes=60)
+        for f in fenster:
+            a_ = int(f[0][:2]) * 60 + int(f[0][3:]); b_ = int(f[1][:2]) * 60 + int(f[1][3:]) or 1440
+            if a_ <= m < b_:
+                ende = (lok.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=b_)).astimezone(timezone.utc)
+                break
+        bl = erst.astimezone(ZoneInfo("Europe/Berlin"))
+        tag_ende = (bl.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).astimezone(timezone.utc)
+        return min(ende, tag_ende)
+    dub = ZoneInfo("Asia/Dubai")
+    e1 = fenster_ende(datetime(2026, 10, 23, 13, 30, tzinfo=dub))
+    e2 = fenster_ende(datetime(2026, 10, 23, 21, 0, tzinfo=dub))
+    e3 = fenster_ende(datetime(2026, 10, 24, 1, 30, tzinfo=dub))
+    check(e1.astimezone(dub).strftime("%H:%M") == "20:00" and e2 == datetime(2026, 10, 23, 22, 0, tzinfo=dub) and e3.astimezone(dub).strftime("%H:%M") == "02:00",
+          f"A2: 13:30 Dubai → Ende 20:00 · 21:00 (außerhalb) → +60 · 01:30 Dubai → Tagesgrenze dt 02:00 Dubai ({e1.astimezone(dub):%H:%M}, {e2.astimezone(dub):%H:%M}, {e3.astimezone(dub):%H:%M})")
+    trig2 = sql[sql.index("create or replace function public.trade_plans_waage_deckel()"):]
+    i_rest, i_auf, i_ziel = trig2.find("if rest < 10 then"), trig2.find("'status', 'aufgegeben'"), trig2.find("ziel := now() + make_interval")
+    check(0 < i_rest < i_auf < i_ziel and "start_um = null" not in sql and "120 minutes" not in sql,
+          "A2/A3: kein neues Ziel nach dem Fensterende (Rest < 10 min wie rkVerschieben) → aufgegeben; start_um bleibt (kein NULL, keine 120-min-Uhr)")
+    rk_js = html[html.index("  const rkAufgegeben = p =>"):html.index("\n", html.index("  const rkAufgegeben = p =>"))]
+    check("'richtung_konflikt', jsonb_build_object('quelle', 'start', 'status', 'aufgegeben'" in trig2 and "'start', old.start_um" in trig2
+          and "f.status === 'aufgegeben'" in rk_js and "Date.parse(f.start) === Date.parse(p.startUm)" in rk_js,
+          "A3: aufgegeben = richtung_konflikt {status aufgegeben, start = start_um} wie der Tab — Start-Takt lässt ihn aus (rkAufgegeben), Aufräumen sieht start_um")
+    check(trig2.count("public.prophos_waage_ausgeblendet(new.user_id)") == 1 and "not public.prophos_waage_ausgeblendet(p.user_id)" in sql
+          and "g.verwalter_user_id is not null" in sql,
+          "B1: wie Python ohne Gruppen MIT Verwalter (Plan selbst zählt nicht, Zeilen dieser IDs zählen nicht)")
+    check("coalesce(a->'waage_deckel_an', 'true'::jsonb) <> 'false'::jsonb" in sql and "if not coalesce((pa->>'an')::boolean, true) then" in trig2
+          and P({})["waage_deckel_an"] is True and P({"ausgleich": {"waage_deckel_an": False}})["waage_deckel_an"] is False
+          and P({"ausgleich": {"waage_deckel_an": "nein"}})["waage_deckel_an"] is True,
+          "B3: Not-Aus regeln.ausgleich.waage_deckel_an — Standard an, nur echtes false; SQL und Python lesen denselben Schalter")
+    st_aus = stand(st9["offen"], st9["geplant"], waage_deckel_an=False)
+    check(not S(st_aus, "p", "sell")["nachher"]["deckel_sperrt"] and S(st9, "p", "sell")["nachher"]["deckel_sperrt"], "B3: Schalter aus → Python sperrt nicht (an → sperrt)")
+    i_cfd, i_an, i_typ, i_lock2 = (trig2.find("lower(coalesce(new.route, '')) in ('mt5', 'mt5v2')"), trig2.find("if not coalesce((pa->>'an')::boolean, true)"),
+                                   trig2.find("coalesce(typ, '') not in ('challenge', 'phase1', 'phase2')"), trig2.find("pg_advisory_xact_lock"))
+    check(0 < i_cfd < i_an < i_typ < i_lock2, "C: erst ohne Zählung entscheiden (CFD-Route, Hedge, Schalter, Kontoart, Futures, ohne Waage, Verwalter), DANN Lock und Lage")
+    check("'waage_deckel', jsonb_build_object('status', 'wartet', 'erst', erst" in trig2 and "(wd->>'erst')::timestamptz" in trig2
+          and "alt->>'erst'" not in trig2, "D: eigene Uhr in mt5_baseline.waage_deckel (erst/versuche), nicht in start_sperre")
+    check(all(f"revoke all on function public.{f} from public, anon, authenticated" in sql for f in
+              ("prophos_waage_deckel_param()", "prophos_waage_ausgeblendet(uuid)", "prophos_waage_deckel_lage(uuid, text)", "prophos_waage_fenster_ende(timestamptz)"))
+          and "to authenticated" not in sql, "Info: Lage/Hilfen nicht für authenticated, nur Trigger + service_role")
+    sp = html[html.index("  function tpStartSperre(p){"):html.index("  function rkFensterEnde(")]
+    check("'waage_deckel'" in sp and "Waage-Deckel" in sp, "Info: Chip „Waage-Deckel\" in tpStartSperre (wartet / aufgegeben)")
     print("\n" + ("✓ alles grün" if not FEHLER else f"✗ {len(FEHLER)} Fehler"))
     sys.exit(1 if FEHLER else 0)
 

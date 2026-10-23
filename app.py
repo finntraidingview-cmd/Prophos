@@ -21923,7 +21923,7 @@ def gp_tick(jetzt=None):
 # geplante, nicht gestartete Auto-Pläne (Richtung einer Tranche / Startzeit im eigenen Fenster) — nie laufende Trades, nie
 # Orders. Standard aus (regeln.ausgleich.aktiv = false, auto_start = false).
 # ════════════════════════════════════════════════════════════════════════════
-AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180, "fenster_uebergreifend": False, "waage_max_abstand": 2.0}   # waage_max_abstand: Finn 23.10.2026, kein automatischer Futures-Start mit Abstand > 2 (ap_waage_deckel); eine Zeile — Selbsttest-Lader lesen sie so
+AP_AUSGLEICH_STANDARD = {"aktiv": False, "takt_min": 10, "zielband_pct": 15.0, "auto_start": False, "gross_ab_eur": 300.0, "laufzeit_min": 180, "fenster_uebergreifend": False, "waage_max_abstand": 2.0, "waage_deckel_an": True}   # Waage-Deckel (Finn 23.10.2026): kein automatischer Futures-Start mit Abstand > waage_max_abstand, waage_deckel_an = Not-Aus (ap_waage_deckel); eine Zeile — Selbsttest-Lader lesen sie so
 # EINSATZ (Finn 07.10.2026, „einfach, keine 1.000 Regeln"): EINE Kennzahl je Trade = Einsatz € = Kontowert × riskierte $ ÷
 # Polster (ap_trade_gewicht verlust_eur; ohne SL = ganzer Wert, gehedgt = 0), + long / − short. Ziel: kleinstes größtes
 # |Netto-Einsatz| über den Tag (kein hartes Limit, kein Pflicht-Gegenstück). Große Trades (≥ gross_ab_eur bzw. oberes Viertel
@@ -22013,6 +22013,7 @@ def ap_ausgleich_param(regeln):
         out["waage_max_abstand"] = max(1.0, min(20.0, float(a.get("waage_max_abstand"))))
     except (TypeError, ValueError):
         pass
+    out["waage_deckel_an"] = a.get("waage_deckel_an") is not False   # Not-Aus (Master 23.10.2026): nur ein echtes false, DB liest denselben Schalter
     try:
         out["takt_min"] = max(2, min(120, int(float(a.get("takt_min")))))
     except (TypeError, ValueError):
@@ -25015,7 +25016,8 @@ def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
         return out
     for name, r in (("nachher", richtung), ("gegen", gegen)):
         w = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": r})[kl]
-        sperrt, dgrund = ap_waage_deckel(kl, w, r, ((stand.get("param") or {}).get("waage_max_abstand") or 2.0))
+        _pa = stand.get("param") or {}
+        sperrt, dgrund = ap_waage_deckel(kl, w, r, _pa.get("waage_max_abstand") or 2.0) if _pa.get("waage_deckel_an", True) is not False else (False, None)
         out[name] = {"richtung": r, "passt": bool(w["passt"]), "besser": _ap_waage_note(kl, w) < _ap_waage_note(kl, vor), "grund": w["grund"],
                      "deckel_sperrt": bool(sperrt and out["zaehlt"]), "deckel_grund": dgrund if out["zaehlt"] else None,   # WAAGE-DECKEL (23.10.2026)
                      **{f: w.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}
