@@ -8160,7 +8160,8 @@ def test_puls_win_maus():
             if "elementFromPoint" in a:
                 h_ = zustand["hover"]
                 return {"result": {"value": h_(a) if callable(h_) else h_}}
-            if a == ob.CDP_TOAST_ZU_JS:
+            if a.startswith(ob.CDP_TOAST_ZU_JS[:30]):          # mit oder ohne Zielpunkt (cdp_toast_zu_js, 24.10.2026)
+                zustand.setdefault("zu_js", []).append(a)
                 return {"result": {"value": zustand.get("zu", [])}}
             return {"result": {"value": None}}
 
@@ -8227,6 +8228,47 @@ def test_puls_win_maus():
             ob.cdp_klickpunkt = alt_kp
         chk(ok_v is True and len(zustand["klicks"]) == n0 + 2 and any("von einer TradingView-Meldung verdeckt" in z for z in s_.trail)
             and any("Meldungen schließen (gruppe X)" in z for z in s_.trail), f"verdeckt → Meldungen per X weg → Ziel genau einmal ({zustand['klicks'][n0:]})")
+        # 24.10.2026 (Routine „Puls-Fehler", Muster „kontextmenü neben 'tradovate' ließ sich nicht klicken" / „konto-umschalter: von einer
+        # tradingview-meldung verdeckt", 9× auf 2 PCs): Stapel aus 6 einzelnen Meldungen ohne Gruppen-X, der bis über das Ziel reicht —
+        # bisher 4× das erste X und Schluss (Ziel weiter verdeckt); jetzt bekommt das JS den Zielpunkt, die Meldung darüber kommt zuerst,
+        # nach jedem X wird am Punkt nachgesehen und erst aufgehört, wenn dort keine Meldung mehr liegt (hier nach 5 X), dann EIN Zielklick.
+        chk(ob.cdp_toast_zu_js(None) is ob.CDP_TOAST_ZU_JS and "var P = [190.0, 714.0];" in ob.cdp_toast_zu_js((190.0, 714.0))
+            and "var P = null;" in ob.CDP_TOAST_ZU_JS and ob.cdp_toast_zu_js((1, 2)).startswith(ob.CDP_TOAST_ZU_JS[:30]),
+            "cdp_toast_zu_js: Zielpunkt im JS, ohne Punkt der alte Text")
+        n1 = len(zustand["klicks"])
+        zustand["zu"] = [{"art": "einzeln", "dn": "", "rect": [20, 560 + 30 * i_, 20, 20], "deckt": i_ == 0, "n": 6} for i_ in range(6)]
+        zustand["zu_js"] = []
+        zustand["hover"] = lambda a: {"hover": True, "toast": ("190.0,714.0" in a and len(zustand["zu"]) > 1)}   # Ziel frei, sobald nur noch 1 Meldung steht
+
+        def _klick_x6(x, y, taste="links", doppel=False):
+            zustand["klicks"].append((x, y))
+            if zustand["zu"] and x < 100:
+                zustand["zu"] = zustand["zu"][1:]            # jedes X (links, x < 100) nimmt eine Meldung aus dem Stapel; der Zielklick nicht
+            return True
+        ob._klick_absolut = _klick_x6
+        ob.cdp_klickpunkt = lambda r, rnd=None: (r[0] + r[2] / 2, r[1] + r[3] / 2) if r else None
+        try:
+            ok_6 = s_.klick([100, 700, 180, 28], "Konto-Umschalter")
+        finally:
+            ob.cdp_klickpunkt = alt_kp
+        chk(ok_6 is True and len(zustand["klicks"]) == n1 + 6 and len(zustand["zu"]) == 1
+            and any("Meldungs-Stapel über dem Ziel: 6 Schließen-Knöpfe im Bild — zuerst die Meldung über dem Zielpunkt" in z for z in s_.trail)
+            and zustand["zu_js"] and all("var P = [190.0, 714.0];" in a_ for a_ in zustand["zu_js"]) and len(zustand["zu_js"]) == 5
+            and not any("weiter von Meldungen verdeckt" in z for z in s_.trail[-8:]),
+            f"Stapel aus 6 Meldungen: 5× X (mehr als der alte Deckel 4), Halt sobald das Ziel frei ist, dann EIN Zielklick ({len(zustand['klicks']) - n1} Klicks, {len(zustand['zu'])} übrig)")
+        # Zielpunkt bleibt verdeckt (alle 8 Runden): Spur sagt es, kein Zielklick (der Riegel „verdeckt → kein Druck" steht)
+        n2 = len(zustand["klicks"])
+        zustand["zu"] = [{"art": "einzeln", "dn": "", "rect": [20, 300 + 30 * i_, 20, 20], "deckt": False, "n": 12} for i_ in range(12)]   # alle im Bild (Viewport 773 px)
+        zustand["hover"] = lambda a: {"hover": True, "toast": "190.0,714.0" in a}
+        ob.cdp_klickpunkt = lambda r, rnd=None: (r[0] + r[2] / 2, r[1] + r[3] / 2) if r else None
+        try:
+            ok_8 = s_.klick([100, 700, 180, 28], "Konto-Umschalter")
+        finally:
+            ob.cdp_klickpunkt = alt_kp
+        chk(ok_8 is False and len(zustand["klicks"]) == n2 + 8 and any("Ziel nach dem Schließen weiter von Meldungen verdeckt" in z for z in s_.trail)
+            and any("die nächstgelegene zuerst" in z for z in s_.trail),
+            f"Stapel bleibt über dem Ziel: höchstens 8 X, dann kein Druck aufs Ziel ({len(zustand['klicks']) - n2} Klicks)")
+        zustand["zu"] = []
         zustand["hover"] = True
         ob._klick_absolut = lambda x, y, taste="links", doppel=False: (zustand["klicks"].append((x, y)), True)[1]
         s_.taste("a", modifiers=2)

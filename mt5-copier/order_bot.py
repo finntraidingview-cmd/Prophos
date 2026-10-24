@@ -18818,20 +18818,38 @@ def win_ziel_pruef_js(x, y, pruef):
 
 # Schließen-Knöpfe der Meldungen, die GANZ im Bild liegen: erst das X der Gruppe (toast-group-close-button-*), sonst das X einzelner
 # Meldungen (aria-label/title „Close"/„Schließen", Text ×) innerhalb eines Toast-Containers. Nur lesen.
-CDP_TOAST_ZU_JS = r"""(function () {
+CDP_TOAST_ZU_JS = r"""(function () { /* Meldungen-X */
+  var P = null;   // Zielpunkt [x, y] in Viewport-px — cdp_toast_zu_js(punkt) setzt ihn ein; ohne Punkt die alte Reihenfolge (DOM)
   function drin(r) { return r.width >= 3 && r.height >= 3 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }
   function sb(e) { try { var s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; } catch (_) { return false; } }
   function R(e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
   var gruppe = Array.prototype.slice.call(document.querySelectorAll('[data-name^="toast-group-close-button-"]')).filter(function (e) {
     return sb(e) && drin(e.getBoundingClientRect()); });
-  if (gruppe.length) return gruppe.slice(0, 3).map(function (e) { return { art: 'gruppe', dn: e.getAttribute('data-name'), rect: R(e) }; });
+  if (gruppe.length) return gruppe.slice(0, 3).map(function (e) { return { art: 'gruppe', dn: e.getAttribute('data-name'), rect: R(e), n: gruppe.length }; });
   var box = '[class*="toastGroup-"],[class*="toastListInner-"],[class*="toastItem"]';
   var einzeln = Array.prototype.slice.call(document.querySelectorAll('button,[role="button"]')).filter(function (e) {
     if (!e.closest(box) || !sb(e) || !drin(e.getBoundingClientRect())) return false;
     var w = (e.getAttribute('aria-label') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.textContent || '').trim();
     return /\bclose\b|schlie(ß|ss)en|dismiss|^\s*[×✕✖]\s*$/i.test(w) && !/show (more|less)|mehr|weniger/i.test(w); });
-  return einzeln.slice(0, 6).map(function (e) { return { art: 'einzeln', dn: e.getAttribute('data-name') || '', rect: R(e) }; });
+  // 24.10.2026 (Routine „Puls-Fehler", Muster „kontextmenü neben 'tradovate' ließ sich nicht klicken" + „konto-umschalter: von einer
+  // tradingview-meldung verdeckt", 9× auf 2 PCs 21./23.10.): der Stapel reichte vom oberen Rand bis über den Umschalter/das Kontextmenü;
+  // der Bot schloss 4× das ERSTE X im DOM (oben), das Ziel unten blieb verdeckt. Jetzt zuerst die Meldung, deren Kasten den Zielpunkt
+  // deckt, dann die nächstgelegenen — die oberen dürfen stehen bleiben.
+  function kasten(e) { return e.closest('[class*="toastItem"]') || e.closest('[class*="toastGroup-"]') || e; }
+  function deckt(e) { if (!P) return 0; var r = kasten(e).getBoundingClientRect();
+    return (P[0] >= r.left - 2 && P[0] <= r.right + 2 && P[1] >= r.top - 2 && P[1] <= r.bottom + 2) ? 1 : 0; }
+  function abstand(e) { if (!P) return 0; var r = kasten(e).getBoundingClientRect();
+    return Math.abs(r.top + r.height / 2 - P[1]) + Math.abs(r.left + r.width / 2 - P[0]); }
+  if (P) einzeln.sort(function (a, b) { return (deckt(b) - deckt(a)) || (abstand(a) - abstand(b)); });
+  return einzeln.slice(0, 6).map(function (e) { return { art: 'einzeln', dn: e.getAttribute('data-name') || '', rect: R(e), deckt: !!deckt(e), n: einzeln.length }; });
 })()"""
+
+
+def cdp_toast_zu_js(punkt=None):
+    """CDP_TOAST_ZU_JS mit Zielpunkt (Viewport-px): die Meldung über dem Punkt kommt zuerst. Ohne Punkt der Text unverändert."""
+    if not punkt:
+        return CDP_TOAST_ZU_JS
+    return CDP_TOAST_ZU_JS.replace("var P = null;", f"var P = [{float(punkt[0]):.1f}, {float(punkt[1]):.1f}];", 1)
 
 
 # KLEINE WERBE-KACHEL (05.10.2026, Finn: „jedes Mal, wenn unten eine Ad … kommt, die per X weggeklickt werden kann, soll er auch diese
@@ -19312,7 +19330,7 @@ class _AugenSitzung:
             if pruef:
                 return self._win_klick(rect, name, toast_ok=toast_ok, pruef=pruef, doppel=bool(doppel))
             ok = self._win_klick(rect, name, toast_ok=toast_ok)
-            if tv and not ok and self._verdeckt and not toast_ok and self._toasts_weg():
+            if tv and not ok and self._verdeckt and not toast_ok and self._toasts_weg(getattr(self, "_verdeckt_p", None)):
                 self._verdeckt = False
                 ok = self._win_klick(rect, name)          # Meldungen weg — derselbe Klick genau einmal neu
             if tv and not ok and not toast_ok and self.werbung_weg(zwang=True):
@@ -19569,22 +19587,38 @@ class _AugenSitzung:
             return 1
         return 0
 
-    def _toasts_weg(self):
-        """TradingView-Meldungen über dem Ziel schließen (X der Gruppe, sonst X einzelner Meldungen). -> True, wenn geklickt"""
-        geklickt = False
-        for _ in range(4):
-            kand = self.lese_js(CDP_TOAST_ZU_JS) or []
+    def _toasts_weg(self, punkt=None):
+        """TradingView-Meldungen über dem Ziel schließen (X der Gruppe, sonst X einzelner Meldungen). -> True, wenn geklickt
+        punkt (24.10.2026, Routine „Puls-Fehler", Muster „kontextmenü neben 'tradovate' ließ sich nicht klicken" / „konto-umschalter:
+        von einer tradingview-meldung verdeckt", 9× auf 2 PCs am 21. und 23.10.): der Meldungsstapel reichte vom oberen Rand bis über
+        den Konto-Umschalter bzw. das Kontextmenü unten; die Schleife schloss 4× das erste X im DOM (oben) und das Ziel blieb verdeckt —
+        Lesung und Abmelden scheiterten, der Plan lief in den Deckel. Mit Zielpunkt (Viewport-px, aus _win_klick) kommt zuerst die
+        Meldung, die den Punkt deckt, dann die nächstgelegene; nach jedem X wird am Punkt nachgesehen (win_ziel_js, nur lesen) und
+        aufgehört, sobald dort keine Meldung mehr liegt — höchstens 8 Runden statt 4. Jeder Druck weiter einzeln bewiesen (toast_ok)."""
+        geklickt, frei = False, False
+        for runde in range(8 if punkt else 4):
+            kand = self.lese_js(cdp_toast_zu_js(punkt)) or []
             if not kand:
                 break
             k = kand[0]
+            if runde == 0 and punkt:
+                self.trail.append(f"Meldungs-Stapel über dem Ziel: {k.get('n') or len(kand)} Schließen-Knöpfe im Bild"
+                                  + (" — zuerst die Meldung über dem Zielpunkt" if k.get("deckt") else " — die nächstgelegene zuerst"))
             if not self._win_klick(k.get("rect"), f"Meldungen schließen ({k.get('art')} X)", toast_ok=True):
                 break
             geklickt = True
             _warte(0.5, 0.25)
             if k.get("art") == "gruppe":
                 break                                        # das Gruppen-X räumt den ganzen Stapel
+            if punkt:
+                v = self.lese_js(win_ziel_js(punkt[0], punkt[1]))
+                if isinstance(v, dict) and not v.get("toast"):
+                    frei = True                              # Ziel frei — der Rest des Stapels darf stehen bleiben
+                    break
         if not geklickt:
             self.trail.append("Meldungen über dem Ziel, aber kein Schließen-Knopf im Bild")
+        elif punkt and not frei:
+            self.trail.append("Ziel nach dem Schließen weiter von Meldungen verdeckt")
         return geklickt
 
     def fremd_hinweis(self):
@@ -19694,6 +19728,7 @@ class _AugenSitzung:
                 if isinstance(v, dict) and v.get("toast") and not toast_ok:
                     # das Ziel liegt unter einer TradingView-Meldung — ein Druck träfe die Meldung (Live 16:13 UTC, Konto-Umschalter)
                     self._verdeckt = True
+                    self._verdeckt_p = (p[0], p[1])               # Viewport-Punkt für _toasts_weg (24.10.2026): die Meldung DARÜBER zuerst
                     self.trail.append(f"{name}: von einer TradingView-Meldung verdeckt @{punkt[0]},{punkt[1]} — kein Druck")
                     return False
                 if (v.get("hover") if isinstance(v, dict) else v):
