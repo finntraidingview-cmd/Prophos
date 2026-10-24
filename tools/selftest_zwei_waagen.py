@@ -169,7 +169,7 @@ def main():
     check([a["plan_id"] for a in aend14] == ["k1"], "Tradeify-Short + Apex-Long laufen: Apex deckt nicht → Tradeify-Long (andere ID) vorgezogen")
     check(aend14 and aend14[0]["nach_start_min"] >= jm + 2.0, f"… Tradeify gegen Tradeify frühestens jetzt + 2 min ({aend14 and aend14[0]['nach_start_min']})")
 
-    # 15) PAARE (Finn 19.10.2026): Gegentrade einer anderen ID folgt in ≤ 10 min → Waage zieht nichts vor, der erste des Paares darf starten
+    # 15) PAARE (Finn 19.10.2026, seit 25.10. ≤ 30 min): Gegentrade folgt in ≤ 30 min → Waage zieht nichts vor, der erste des Paares darf starten
     st15 = {"jetzt_min": jm, "offen": [lauf("o1", "mike", *TF, "sell", 215, start=jm - 0.2)], "id_fest": {}, "starts_heute": [],
             "geplant": [plan("p2", "moritz", *TF, "buy", 215, jm + 6.5), plan("k9", "ina", *TF, "buy", 215, jm + 120)]}
     aend15, info15 = N(st15, W(st15), random.Random(15))
@@ -179,8 +179,11 @@ def main():
     L16 = S(st16, "p1", "sell")
     check(L16["nachher"]["passt"] and L16["nachher"].get("folgt", {}).get("plan_id") == "p2", f"erster des Paares startet: {L16['nachher']['grund']}")
     st17 = {"jetzt_min": jm, "offen": [], "id_fest": {}, "starts_heute": [],
-            "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *TF, "buy", 215, jm + 25)]}
-    check(not S(st17, "p1", "sell")["nachher"]["passt"], "Gegentrade erst in 25 min → wie bisher Gegentrade nötig")
+            "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *TF, "buy", 215, jm + 35)]}
+    check(not S(st17, "p1", "sell")["nachher"]["passt"], "Gegentrade erst in 35 min → wie bisher Gegentrade nötig")
+    st17b = {"jetzt_min": jm, "offen": [], "id_fest": {}, "starts_heute": [],
+             "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *TF, "buy", 215, jm + 25)]}
+    check(S(st17b, "p1", "sell")["nachher"].get("folgt", {}).get("plan_id") == "p2", "Paar intern 25 min (≤ 30, Finn 25.10.2026) → Gegentrade folgt")
     st18 = {"jetzt_min": jm, "offen": [], "id_fest": {}, "starts_heute": [],
             "geplant": [plan("p1", "mike", *TF, "sell", 215, jm), plan("p2", "moritz", *AP, "buy", 215, jm + 5)]}
     check(not S(st18, "p1", "sell")["nachher"]["passt"], "Apex-Long in 5 min zählt nicht als Partner")
