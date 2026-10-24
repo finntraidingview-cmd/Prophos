@@ -17133,7 +17133,7 @@
       const eigen = String(r.user_id) === String(currentUserId) ? (accounts || []).find(x => String(x.id) === String(r.id)) : null
       if(eigen) return eigen
       const n = v => v != null && v !== '' && isFinite(Number(v)) ? Number(v) : null
-      const tage = r.goal_kind === 'trading_days'
+      const tage = r.goal_kind === 'trading_days' || (r.goal_kind === 'winning_days' && !r.goal_manual && Number(r.goal_min_profit) > 0)   // + Gewinntage (25.10.2026)
       const autoWd = r.goal_kind && !r.goal_manual && !tage
       return {
         id: r.id, name: r.name, firm: r.firm_raw || r.firm, type: r.type, externalId: r.ext || null,
@@ -17150,9 +17150,9 @@
     function admKontoZiel(a){
       if(a.type === 'funded_cfd' && a.waitingPayoutSince) return 'wartet'
       let tf = null; try{ tf = zielFortschritt(a) }catch(_){ tf = null }
-      if(a.zielErreichtAt) return (tf && tf.kind === 'trading_days' && !tf.done) ? 'tage' : 'review'
+      if(a.zielErreichtAt) return (tf && tf.mindest && !tf.done) ? 'tage' : 'review'
       let pr = null; try{ pr = payoutReadyInfo(a) }catch(_){ pr = null }
-      if((pr && pr.faellig) || (tf && tf.done && tf.kind === 'winning_days')) return 'payout'
+      if((pr && pr.faellig) || (tf && tf.done && tf.kind === 'winning_days' && !tf.mindest)) return 'payout'
       return 'offen'
     }
     /* TRADE-SPALTE (20.10.2026, Finn 20:25 Dubai am Admin → Alle Accounts: „Kannst du hier in der Übersicht hinschreiben, ob der Trade
@@ -33009,7 +33009,7 @@
         const gr = n(k.groesse) || 0
         const konto = `${k.firma || (a && a.firm) || '?'}${gr >= 1000 ? ' ' + Math.round(gr / 1000) + 'k' : ''}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
         let tf = null; try{ tf = a && typeof zielFortschritt === 'function' ? zielFortschritt(a) : null }catch(_){ tf = null }
-        const mt = tf && tf.kind === 'trading_days' ? tf : null
+        const mt = tf && tf.mindest ? tf : null
         const wer = String(t.person || (eigen ? ((typeof _ap !== 'undefined' && _ap && _ap.ich && _ap.ich.name) || 'Ich') : '?'))
         // „→ Trade-Planer" (Finn 20.10.2026 22:55 Dubai: „OK, abhaken und zurück in den Trade-Planer — der macht den Rest automatisch fertig"):
         // eigene Konten direkt (RLS), fremde über /admin/wd-plaene aktion rest_planer (Admin-Login, Besitz/Gruppe prüft der Server)
@@ -36231,7 +36231,7 @@
         maxLossPerTrade: !isNaN(sucMaxLossTrade) && sucMaxLossTrade > 0 ? sucMaxLossTrade : null,
         maxProfitPerTrade: !isNaN(sucMaxProfitTrade) && sucMaxProfitTrade > 0 ? sucMaxProfitTrade : null,
         externalId,
-        ...(mtSuc ? { goalKind: mtSuc.kind, goalTarget: mtSuc.target, goalDoneOffset: 0, goalSince: null, goalManual: false } : {})
+        ...(mtSuc ? { goalKind: mtSuc.kind, goalTarget: mtSuc.target, goalMinProfit: mtSuc.minProfit, goalDoneOffset: 0, goalSince: null, goalManual: false } : {})
       }
       // Zugangsdaten aus dem Paste-Block (07.09.2026) — optional; accountToRow
       // trägt sie in die cred_*-Spalten. Mit Login+Server erscheint der neue
@@ -37049,8 +37049,8 @@
     // (goal_kind trading_days, zielFortschritt), ist das Konto kein „Ziel erreicht →", sondern eigener Typ „Phase 1 · Tage sammeln" —
     // vorher von Hand in den Namen geschrieben. Kein Klick: der Nachfolger kommt erst, wenn die Tage voll sind (wie Radar „Tage farmen").
     let tf = null; try{ tf = (typeof zielFortschritt === 'function') ? zielFortschritt(a) : null }catch(_){ tf = null }
-    if(tf && tf.kind === 'trading_days' && !tf.done)
-      return ` <span class="type-badge acc-ziel-chip acc-tage-chip" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''} — es fehlen noch ${tf.target - tf.count} von ${tf.target} Trading Days; der Auto-Planer legt je Handelstag einen Mini-Trade.">Tage sammeln ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
+    if(tf && tf.mindest && !tf.done)
+      return ` <span class="type-badge acc-ziel-chip acc-tage-chip" title="Ziel erreicht seit ${seit}${a.zielErreichtBal ? ' · Balance ' + de(a.zielErreichtBal) : ''} — es fehlen noch ${tf.target - tf.count} von ${tf.target} ${tf.kind === 'winning_days' ? 'Gewinntagen (≥ ' + de(a.goalMinProfit) + ' $); von Hand' : 'Trading Days; der Auto-Planer legt je Handelstag einen Mini-Trade'}.">Tage sammeln ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
     // Typ „Review" (13.10.2026, Finn — Ina FundingPips …044): Ziel erreicht und Mindesttage voll (oder keine) → das Konto liegt in Review,
     // bis die neuen Daten der Prop-Firm da sind und der Nachfolger per Klick angelegt ist. Vorher hieß der Chip „🎯 Ziel erreicht →".
     const weiter = (typeof bstNaechsterTyp === 'function') ? bstNaechsterTyp(a) : null
@@ -37061,9 +37061,9 @@
   function zielStationChipHtml(a, vor){
     let tf = null; try{ tf = a ? zielFortschritt(a) : null }catch(_){ tf = null }
     const p = vor || ''
-    if(tf && tf.kind === 'trading_days' && !tf.done)
-      return `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Mindesttage: ${tf.count} von ${tf.target} — der Auto-Planer legt je Handelstag einen Mini-Trade, danach Review">${p}Tage sammeln ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
-    return `<span class="type-badge acc-ziel-chip" title="Ziel${tf && tf.kind === 'trading_days' ? ' und Mindesttage' : ''} erfüllt — liegt in Review, bis der Nachfolger angelegt ist">${p}Review</span>`
+    if(tf && tf.mindest && !tf.done)
+      return `<span class="type-badge acc-ziel-chip acc-tage-chip" title="${tf.kind === 'winning_days' ? 'Gewinntage' : 'Mindesttage'}: ${tf.count} von ${tf.target} — ${tf.kind === 'winning_days' ? 'fehlende Tage von Hand' : 'der Auto-Planer legt je Handelstag einen Mini-Trade'}, danach Review">${p}Tage sammeln ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
+    return `<span class="type-badge acc-ziel-chip" title="Ziel${tf && tf.mindest ? ' und Mindesttage' : ''} erfüllt — liegt in Review, bis der Nachfolger angelegt ist">${p}Review</span>`
   }
   // Max-Risiko-Chip (07.10.2026): Konto mit eigener Vorgabe je Trade (z. B. 1-%-Regel) — reine Markierung, keine Prüfung
   function accRisikoChipHtml(a){
@@ -38352,7 +38352,8 @@
       } : goalSecOn ? {
         goalKind: goalKindVal,
         goalTarget:     goalKindVal ? (!isNaN(goalTargetNum) && goalTargetNum > 0 ? goalTargetNum : 5) : null,
-        goalMinProfit:  goalKindVal && vorher?.goalMinProfit  != null ? vorher.goalMinProfit  : null,
+        goalMinProfit:  !goalKindVal ? null : vorher?.goalMinProfit != null ? vorher.goalMinProfit
+          : (() => { const mt = kontoMindesttage(firm, type); return mt && mt.kind === goalKindVal ? mt.minProfit : null })(),   // Blue Guardian 500 $ (25.10.2026)
         goalDoneOffset: goalKindVal ? goalDoneOffsetNeu : null,
         goalSince:      goalKindVal ? goalSinceVal : null,
         goalManual:     false,
@@ -39814,7 +39815,7 @@
           max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
           wd_farm: false,   // nie beim Anlegen, auch wenn die Vorlage wd_farm true hat (F17-Ergänzung, 27.09.2026)
           ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null }
-            : (() => { const mt = kontoMindesttage(firm, typRow); return mt ? { goal_kind: mt.kind, goal_target: mt.target } : {} })()),   // Firmenregel (20.10.2026): FundedNext-Phasen ohne Vorlage
+            : (() => { const mt = kontoMindesttage(firm, typRow); return mt ? { goal_kind: mt.kind, goal_target: mt.target, goal_min_profit: mt.minProfit } : {} })()),   // Firmenregel (20.10.2026): FundedNext-Phasen ohne Vorlage
         }
         // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann fehlen)
         if(x.tvUebernehmen !== false && x.balance != null && isFinite(x.balance) && (x.balance > 1000 || kontoIstTopstepExpress({ firm, ext: x.id, name, type: row.account_type }))) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
@@ -42648,7 +42649,7 @@
     // Mindesttage in der Balance-Zelle (09.10.2026, Finn): „Tage 3/5", grün wenn erfüllt — nur bei Konten mit Ziel trading_days
     try{
       const tf = konto && typeof zielFortschritt === 'function' ? zielFortschritt(konto) : null
-      if(tf && tf.kind === 'trading_days') balHtml += `<span class="pz-rest pz-tage" style="display:block;${tf.done ? 'color:var(--good);font-weight:600' : ''}" title="Mindesttage: Tage mit gestartetem Trade auf diesem Konto (Berlin)">Tage ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
+      if(tf && tf.mindest) balHtml += `<span class="pz-rest pz-tage" style="display:block;${tf.done ? 'color:var(--good);font-weight:600' : ''}" title="${tf.kind === 'winning_days' ? 'Gewinntage: Berlin-Tage mit ≥ ' + Math.round(konto.goalMinProfit) + ' $ geschlossenem Gewinn auf diesem Konto' : 'Mindesttage: Tage mit gestartetem Trade auf diesem Konto (Berlin)'}">Tage ${Math.min(tf.count, tf.target)}/${tf.target}</span>`
     }catch(_){}
     // RISIKO-BALKEN — seit 08.10.2026 ~03:30 Dubai NICHT mehr in der Zeile (Finn: „voll hässlich, sieht spielerisch aus, lieber so wie es
     // bei Trades → Geplant war"); der Helfer bleibt für den Fall, dass er an anderer Stelle gebraucht wird. Ursprung: WD-Karte, SL rot links, TP grün rechts, Punkt = Einstieg;
@@ -42985,7 +42986,7 @@
     const bal = b && isFinite(b.val) ? b.val : (Number(a.zielErreichtBal) > 0 ? Number(a.zielErreichtBal) : null)
     const ziel = Number(a.zielUsd) > 0 ? Number(a.zielUsd) : null
     const zf = typeof zielFortschritt === 'function' ? zielFortschritt(a) : null
-    const mt = zf && zf.kind === 'trading_days' ? zf : null
+    const mt = zf && zf.mindest ? zf : null
     const fehlt = !!(mt && !mt.done)
     // nächster Mini-Trade des Auto-Planers (mt5_baseline.tage_mini) für dieses Konto — Uhrzeit Dubai wie überall im Plan
     const mini = fehlt ? (tradePlans || []).filter(p => String(p.masterAccountId) === String(a.id) && (p.status === 'planned' || p.status === 'open') && planIstTageMini(p))
@@ -46168,13 +46169,19 @@
    * Aufrufer: Bulk-Add (Rückfall ohne Vorlage), „＋ Account" (Vorbelegung + Rückfall beim Speichern), Nachfolger-Assistent.
    * → {kind, target} oder null. Futures-Firmen (auch „FundedNext Futures") und Funded nie. */
   // Blue Guardian (22.10.2026, Finn: „jede Phase hat 3 Mindesttage"): Phase 1/2 = 3 Trading Days
-  const MINDESTTAGE_JE_FIRMA = { fundednext: 5, 'blue guardian': 3 }
+  // → seit 25.10.2026 GEWINNTAGE (Finn: „bei 100k musst du 3 Tage machen, wo du 500 $ machst" — …601805 stand bei uns auf 3/3, bei Blue
+  // Guardian auf 1/3, weil zwei Mini-Tage keine 500 $ brachten): winning_days 3 mit goal_min_profit 500 (0,5 % von 100k, nur 100k im Planer).
+  // Der Planer (app.py ap_tage_ist / ap_konto_rechnen regel.gewinntage) sammelt die Tage mit Trades um 1.000 $ zuerst, dann die Big Trades.
+  const MINDESTTAGE_JE_FIRMA = { fundednext: 5 }
+  const GEWINNTAGE_JE_FIRMA = { 'blue guardian': { target: 3, minProfit: 500 } }
   function kontoMindesttage(firm, typ){
     const n = String(firm || '').trim().toLowerCase()
     if(!n || !(typ === 'phase1' || typ === 'phase2')) return null
     if(typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(firm)) return null
+    const gt = GEWINNTAGE_JE_FIRMA[n] || GEWINNTAGE_JE_FIRMA[n.replace(/\s+/g, ' ')]
+    if(gt) return { kind: 'winning_days', target: gt.target, minProfit: gt.minProfit }
     const ziel = MINDESTTAGE_JE_FIRMA[n] || MINDESTTAGE_JE_FIRMA[n.replace(/\s+/g, '')]
-    return ziel > 0 ? { kind: 'trading_days', target: ziel } : null
+    return ziel > 0 ? { kind: 'trading_days', target: ziel, minProfit: null } : null
   }
   function tpFirmIstCfd(firm){
     const TP_CFD_FIRMEN = ['fundednext', 'ftmo', 'fundingpips', 'the5%ers', 'the5ers', 'fusion markets', 'thinkmarkets', 'icmarkets', 'ic markets']
@@ -47272,7 +47279,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1730'
+  const OS_TAB_BUILD = '2026-09-22.1731'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62397,14 +62404,20 @@
     return tage
   }
 
+  // MINDESTTAGE einer Phase (25.10.2026): trading_days ODER Gewinntage (winning_days mit Mindestgewinn auf einer Challenge/Phase, Blue
+  // Guardian 3 × ≥ 500 $) — für Chips/Radar/Planer-Zelle „Tage sammeln" statt „Winning Days · Payout anfragbar" (das bleibt den Fundeds)
+  function zielIstMindesttage(a, kind){
+    return kind === 'trading_days' || (kind === 'winning_days' && Number(a && a.goalMinProfit) > 0 && /^(challenge|phase1|phase2)$/.test(String(a && a.type || '')))
+  }
   function zielFortschritt(a){
     const k = zielKonfig(a)
     if(!k) return null
+    const mindest = zielIstMindesttage(a, k.kind)
     // Manuelle Zählung (15.09.2026, Futures): Stand ist goal_done_offset, +1
     // kommt über das Häkchen im Trade-Abschluss — trade_plans zählen hier nicht.
     if(k.manual){
       const count = Math.max(0, Number(a.goalDoneOffset) || 0)
-      return { count, target: k.target, done: count >= k.target, kind: k.kind,
+      return { count, target: k.target, done: count >= k.target, kind: k.kind, mindest,
                heuteAbgehakt: !!a.goalManualLast && String(a.goalManualLast).slice(0,10) === _deTodayStr(), manual: true }
     }
     // MINDESTTAGE (09.10.2026, Finn: „jeder Tag, an dem auf dem Konto ein Trade lief, zählt automatisch"): trading_days zählt jeden
@@ -62413,7 +62426,7 @@
     if(k.kind === 'trading_days'){
       const tage = zielTageAuto(a.id, a.goalSince), heute = _deTodayStr()
       const count = Math.max(0, tage.size + (Number(a.goalDoneOffset) || 0))
-      return { count, target: k.target, done: count >= k.target, kind: k.kind, heuteAbgehakt: tage.has(heute), manual: false }
+      return { count, target: k.target, done: count >= k.target, kind: k.kind, mindest, heuteAbgehakt: tage.has(heute), manual: false }
     }
     const proTag = {}   // 'YYYY-MM-DD' (Berlin) → realisierte Tagessumme (winning_days automatisch)
     for(const p of (tradePlans || [])){
@@ -62440,7 +62453,7 @@
       if(tag === heute) heuteAbgehakt = true
     }
     count = Math.max(0, count + (Number(a.goalDoneOffset) || 0))
-    return { count, target: k.target, done: count >= k.target, kind: k.kind, heuteAbgehakt, manual: false }
+    return { count, target: k.target, done: count >= k.target, kind: k.kind, mindest, heuteAbgehakt, manual: false }
   }
 
   function zielLabel(a){ return (zielKonfig(a)?.kind || a.goalKind) === 'winning_days' ? 'Winning Days' : 'Trading Days' }
@@ -62467,10 +62480,10 @@
     const stand = `${Math.min(f.count, f.target)}/${f.target}`
     // Ziel erreicht + Winning Days = Payout-Fenster offen (15.09.2026, Finn:
     // „sobald ich bei 5 angekommen bin, ist der Payout anfragbar")
-    const fertig = f.done ? (f.kind === 'winning_days' ? ' ✓ · Payout anfragbar' : ' ✓') : ''
+    const fertig = f.done ? (f.kind === 'winning_days' && !f.mindest ? ' ✓ · Payout anfragbar' : ' ✓') : ''
     // klickbar (Accounts-Tabelle): öffnet den Account zum Bearbeiten des Stands
     const attr = klickbar ? ` data-acc-wd="${escapeHtml(String(a.id))}" title="Klicken zum Bearbeiten" style="cursor:pointer"` : ''
-    if(f.kind === 'trading_days')   // Mindesttage kompakt (09.10.2026): „Tage 3/5", grün wenn erfüllt
+    if(f.mindest)   // Mindesttage kompakt (+ Gewinntage 25.10.2026) (09.10.2026): „Tage 3/5", grün wenn erfüllt
       return `<span${attr}><span style="color:${farbe};font-weight:600">Tage ${stand}${f.done ? ' ✓' : ''}${!f.done && f.heuteAbgehakt ? ' · heute gehandelt' : ''}</span>${zielDotsHtml(f)}</span>`
     return `<span${attr}><span style="color:${farbe};font-weight:600">🏆 ${stand} ${zielLabel(a)}${fertig}${!f.done && f.heuteAbgehakt ? ' · heute abgehakt' : ''}</span>${zielDotsHtml(f)}</span>`
   }

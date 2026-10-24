@@ -6833,10 +6833,10 @@ def admin_build_overview(kapitel_id=None):
             if "rest_planer_at" not in str(getattr(e.response, "text", "") or e):
                 raise
             extra = {str(a["id"]): a for a in _sb_all("accounts", {"select": _ex_sel})}   # Spalte fehlt noch (sql/2026-10-20_accounts_rest_planer.sql)
-        kids_tage = [r["id"] for r in rows if not r["archived"] and (extra.get(r["id"]) or {}).get("goal_kind") == "trading_days"]
+        kids_tage = [r["id"] for r in rows if not r["archived"] and ap_tage_konto(extra.get(r["id"]))]   # + Gewinntage (25.10.2026)
         kids_set, je_plan = set(kids_tage), {}
         for j in range(0, len(kids_tage), 150):
-            for p in _sb_all("trade_plans", {"select": "master_account_id,started_at", "started_at": "not.is.null",
+            for p in _sb_all("trade_plans", {"select": AP_TAGE_PLAN_SEL, "started_at": "not.is.null",
                                              "master_account_id": "in.(" + ",".join(kids_tage[j:j + 150]) + ")"}):
                 je_plan.setdefault(str(p.get("master_account_id")), []).append(p)
         for r in rows:
@@ -13289,7 +13289,7 @@ def admin_handarbeit():
         ein = _admin_eingeschraenkt()
         uq_ziel = {"user_id": admin_sicht_filter(ein)} if (ein is not None and admin_sicht_filter(ein)) else {}
         ziel_alle = _sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
-                                                          "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,"
+                                                          "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,goal_min_profit,goal_manual,"
                                                           "goal_done_offset,goal_since", ziel_erreicht_at="not.is.null"))
         konten_ziel = [a for a in ziel_alle if sicht is None or str(a.get("user_id") or "") in sicht]
         reviews = _sb_all("trade_plans", dict(uq, select="id,user_id,master_account_id,master_name,master_firm,master_pl,ended_at,"
@@ -13330,10 +13330,10 @@ def admin_handarbeit():
                                           "id": "in.(" + ",".join(kids[j:j + 150]) + ")"}):
                 accs[str(a["id"])] = a
         # Mindesttage der bestandenen Konten (13.10.2026): gestartete Pläne nur dieser Konten, Zählweise ap_tage_ist (= zielFortschritt)
-        kids_tage = sorted({str(a.get("id")) for a in ziel_alle or [] if a.get("goal_kind") == "trading_days" and str(a.get("id")) not in archiv})
+        kids_tage = sorted({str(a.get("id")) for a in ziel_alle or [] if ap_tage_konto(a) and str(a.get("id")) not in archiv})   # + Gewinntage (25.10.2026)
         tage_je, je_plan = {}, {}
         for j in range(0, len(kids_tage), 150):
-            for r in _sb_all("trade_plans", {"select": "master_account_id,started_at", "started_at": "not.is.null",
+            for r in _sb_all("trade_plans", {"select": AP_TAGE_PLAN_SEL, "started_at": "not.is.null",
                                              "master_account_id": "in.(" + ",".join(kids_tage[j:j + 150]) + ")"}):
                 je_plan.setdefault(str(r.get("master_account_id")), []).append(r)
         for a in ziel_alle or []:
@@ -17207,14 +17207,50 @@ def ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, schritt=None, pp
     return out, None
 
 
-def ap_tage_ist(konto, plaene, tz=None):
-    """REIN RECHNEND (testbar): (ist, soll) der Mindesttage eines Kontos oder None (kein goal_kind trading_days). Zählweise wie das Frontend
-    zielFortschritt: jeder Berlin-Tag mit GESTARTETEM Plan dieses Kontos als Master (ab goal_since) + goal_done_offset."""
+def ap_tage_gewinn(konto):
+    """REIN: Mindestgewinn je Tag (goal_min_profit) eines Kontos mit Gewinntagen, sonst None. Gewinntage = goal_kind winning_days MIT
+    goal_min_profit, automatisch gezählt (nicht goal_manual) — Blue Guardian Phase 1/2 (25.10.2026). Die manuellen Winning Days der
+    Futures-Fundeds (goal_manual, ohne Mindestgewinn) bleiben draußen."""
     a = konto or {}
-    if a.get("goal_kind") != "trading_days" or not _wd_num(a.get("goal_target")):
+    m = _wd_num(a.get("goal_min_profit"))
+    return float(m) if a.get("goal_kind") == "winning_days" and m and m > 0 and not a.get("goal_manual") else None
+
+
+def ap_tage_konto(konto):
+    """REIN: Zählt der Planer Tage für dieses Konto? Mindesttage (trading_days) oder Gewinntage (ap_tage_gewinn)."""
+    a = konto or {}
+    return bool(_wd_num(a.get("goal_target"))) and (a.get("goal_kind") == "trading_days" or ap_tage_gewinn(a) is not None)
+
+
+# Plan-Felder, die ap_tage_ist braucht (Gewinntage: Ergebnis + Ende, 25.10.2026)
+AP_TAGE_PLAN_SEL = "master_account_id,started_at,status,master_pl,ended_at,completed_at"
+
+
+def ap_tage_ist(konto, plaene, tz=None):
+    """REIN RECHNEND (testbar): (ist, soll) der Mindesttage eines Kontos oder None (weder trading_days noch Gewinntage). Zählweise wie das
+    Frontend zielFortschritt: jeder Berlin-Tag mit GESTARTETEM Plan dieses Kontos als Master (ab goal_since) + goal_done_offset.
+    GEWINNTAGE (Blue Guardian, Finn 25.10.2026: „bei 100k musst du 3 Tage machen, wo du 500 $ machst" — die zwei Mini-Tage von …601805
+    zählten bei uns, bei Blue Guardian nicht): goal_kind winning_days mit goal_min_profit zählt nur Berlin-Tage (Trade-Ende), an denen die
+    abgeschlossenen Trades des Kontos zusammen ≥ goal_min_profit gemacht haben — wie zielFortschritt (Status completed/review, master_pl)."""
+    a = konto or {}
+    if not ap_tage_konto(a):
         return None
     tz = tz or _ap_tz("Europe/Berlin")
     seit = str(a.get("goal_since") or "")[:10]
+    min_gewinn = ap_tage_gewinn(a)
+    if min_gewinn is not None:
+        je_tag = {}
+        for p in plaene or ():
+            if str(p.get("master_account_id")) != str(a.get("id")) or p.get("status") not in ("completed", "review"):
+                continue
+            pl, t = _wd_num(p.get("master_pl")), _ap_ts(p.get("ended_at") or p.get("started_at") or p.get("completed_at"))
+            if pl is None or t is None:
+                continue
+            d = t.astimezone(tz).date().isoformat()
+            if not seit or d >= seit:
+                je_tag[d] = je_tag.get(d, 0.0) + float(pl)
+        ist = sum(1 for v in je_tag.values() if v >= min_gewinn)
+        return max(0, ist + int(_wd_num(a.get("goal_done_offset")) or 0)), int(_wd_num(a.get("goal_target")))
     tage = set()
     for p in plaene or ():
         if str(p.get("master_account_id")) != str(a.get("id")) or not p.get("started_at"):
@@ -17263,11 +17299,22 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     boden, boden_blow = _ap_boden(dict(regel, dd_usd=float(_ddg)) if (_ddg and not jg) else regel, ph, groesse, balance)
     rest = ziel - balance
     tage_offen = bool(tage) and int(tage[0]) < int(tage[1])   # Mindesttage fehlen noch → Mini-Trade statt „Ziel erreicht" (09.10.2026)
+    # GEWINNTAGE ZUERST (Blue Guardian, Finn 25.10.2026): ein Big Trade am Anfang (bis 3.500 $ in Phase 2) bringt das Konto fast ans Ziel,
+    # dann fehlen noch zwei Tage mit je ≥ 500 $ — „das macht ja gar keinen Sinn". Solange ZWEI oder mehr Gewinntage fehlen, plant der Bot
+    # nur Gewinntag-Trades (regel.gewinntage.tp, ~1.000 $, SL und Lots wie die Regel: „SL genau, wie der sonst auch wäre"); erst wenn höchstens
+    # einer fehlt, kommen die Big Trades — der Trade ans Ziel ist dann selbst der letzte Gewinntag. Liegt der Rest unter dem Gewinntag-TP,
+    # bleibt es beim Gewinntag-Trade (TP über das Ziel hinaus), sonst endet der Tag unter dem Mindestgewinn. Der 0,01-Lot-Mini zählt hier nie.
+    gt = regel.get("gewinntage") if tage else None
+    gt_fehlen = (int(tage[1]) - int(tage[0])) if gt else 0
+    gt_trade = bool(gt) and gt_fehlen > 0 and rest > 0 and (gt_fehlen >= 2 or rest < float(gt["tp"][0]))
+    if gt and rest <= 0:
+        return None, (f"Ziel erreicht, aber Gewinntage {tage[0]}/{tage[1]} — die fehlenden Tage (≥ Mindestgewinn) von Hand"
+                      if gt_fehlen > 0 else "Ziel erreicht — Phase umstellen")
     if rest <= 0:
         return ap_tage_mini(regel, phase, groesse, ziel, balance, u, tage, ph.get("menge_schritt"), ppl, boden=boden) if tage_offen else (None, "Ziel erreicht — Phase umstellen")
     cfd = (regel.get("route") or "mt5v2") in AP_CFD_ROUTEN and phase != "challenge"
     klein = None
-    if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN):
+    if rest < (AP_REST_MIN_CFD if cfd else AP_REST_MIN) and not gt_trade:
         # 05.10.2026: ein Konto 2 $ unter dem Ziel bekäme sonst einen TP von ~20 $ ohne SL (volles Liquidationsrisiko).
         # 07.10.–20.10.2026 zählte eine Futures-Challenge mit Rest < 100 $ als „Ziel erreicht" — vorbei (Finn 20.10.2026 20:35–20:45 Dubai,
         # Lucid 150k …0001 bei 158.916 von 159.000: „Es ist noch nicht bestanden. Es soll eine Meldung kommen: Es fehlen noch ein paar
@@ -17319,9 +17366,13 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         # Seit 21.10.2026 AP_PUFFER_PKT 4,5 statt 10 (Echo V2 zieht SL/TP am Fill nach, s. dort): FN 2,1 Lot → 32 $, The5ers 42 Lot → 63 $
         puffer = round(AP_PUFFER_PKT * float(menge) * float(ppl) / 3)
         lo = float((ph.get("menge") or [0])[0]) * f
-        if lo and rest < AP_KLEIN_PKT * lo * float(ppl):
+        if lo and rest < AP_KLEIN_PKT * lo * float(ppl) and not gt_trade:
             klein = ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"))
-    if klein:
+    if gt_trade:
+        tp, puffer = _ap_spanne(gt["tp"], u["tp"]), 0
+        stufe = (f"Gewinntag {tage[0]}/{tage[1]} sammeln · TP {tp:,.0f} $".replace(",", ".")
+                 + (" (Big Trade erst, wenn nur noch 1 Tag fehlt)" if gt_fehlen >= 2 else " (Rest unter dem Gewinntag-TP)"))
+    elif klein:
         menge, puffer, tp = klein["menge"], klein["puffer"], klein["tp"]
         stufe = klein["stufe"]
     elif not tp_sp or rest + puffer <= ober:
@@ -18356,7 +18407,7 @@ def _ap_konten_mit_trade(konto_ids):
 
 AP_KONTO_FELDER = ("id,user_id,name,firm,account_type,external_id,max_drawdown,starting_balance,account_size,topstep_balance,topstep_last_check,"
                    "meta_api_balance,meta_api_last_check,tv_balance,tv_balance_at,consistency_pct,ziel_pct_konto,auto_planer,"
-                   "goal_kind,goal_target,goal_done_offset,goal_since,ziel_erreicht_at,created_at,rest_planer_at")   # Mindesttage → Tage sammeln (09.10.2026); Ziel-Wache-Riegel (12.10.2026); Rest zurück in den Planer (20.10.2026)
+                   "goal_kind,goal_target,goal_min_profit,goal_manual,goal_done_offset,goal_since,ziel_erreicht_at,created_at,rest_planer_at")   # Gewinntage (25.10.2026); Mindesttage → Tage sammeln (09.10.2026); Ziel-Wache-Riegel (12.10.2026); Rest zurück in den Planer (20.10.2026)
 AP_KONTO_FELDER_OHNE_CONS = AP_KONTO_FELDER.replace(",consistency_pct", "")
 
 
@@ -20918,7 +20969,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
 
     def _liegengeblieben(p):
         return ap_plan_verfallen(p, _grenze, jetzt)
-    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,blown,"
+    roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,master_pl,blown,"
                                                 "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
                                                 "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final,mt5_baseline->start_fehler", "order": "id.asc",
                                       "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
