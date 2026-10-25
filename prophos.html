@@ -39670,15 +39670,32 @@
                               typ: (/funded/i.test(titel) || /^F/.test(id)) ? 'funded' : 'challenge', balance: nach(/^account balance$/i), trailing: nach(/^trailing max drawdown$/i) })
       })
       // (3) reine Liste — Passwort-/Server-Zeilen (Label in der Zeile oder auf der Zeile davor) sind keine Kennungen (14.10.2026)
+      // 25.10.2026 (Finn: Bulk unter CFD, Login / Passwort / Server OHNE Beschriftung untereinander eingefügt → drei Konten — Passwort
+      // „Ab3x!kQ9z" und Server „FundingPips-SIM1" haben auch Ziffern). Beginnt irgendeine Zeile mit einer reinen Zahl (MT5-Login), zählen
+      // nur noch solche Zahlen und bekannte Futures-Kennungen als Konto; der Rest bis zum nächsten Login ist dessen Zugang — gelesen mit
+      // dem Struktur-Raten des Konto-Popups (acParseCredBlob), das dort dieselbe Eingabe schon richtig zerlegt.
       if(!out.length){
+        const ersterTok = t => (t.split(/[\s,;]+/)[0] || '').replace(/^[#"']+|["']+$/g, '')
+        const mt5Login = w => /^\d{4,12}$/.test(w)
+        const nurLogins = zeilen.some(x => mt5Login(ersterTok(x.t)))
         let labelDavor = false
         for(const x of zeilen){
           if(credTrenner(x.t)) continue   // „:" allein (FundedNext-Mail) — das Label davor gilt weiter für den Wert danach (23.10.2026)
           const istLabel = BULK_ZUGANG_LABEL.test(x.t), nurLabel = istLabel && !x.t.replace(BULK_ZUGANG_LABEL, '').replace(/^\s*[:#=]?\s*/, '')
           if(istLabel || labelDavor){ labelDavor = nurLabel; continue }
-          const w = (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, '')
+          const w = nurLogins ? ersterTok(x.t) : (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, '')
+          if(nurLogins && !mt5Login(w) && !firmaVon(w)) continue   // Passwort-/Server-Zeile des Logins davor
           if(w.length >= 4) dazu(x.pos, { id: w, titel: '', status: '', plattform: '', firma: firmaVon(w), groesse: null, typ: '', balance: null, trailing: null })
         }
+        if(nurLogins) out.forEach((b, k) => {
+          if(!mt5Login(b.id)) return
+          // Abschnitt = Login-Zeile bis vor den nächsten Login; Werte in einer Zeile (Tab/;/Leerzeichen) auf eigene Zeilen, „Server 2" bleibt
+          const teil = roh.slice(b.pos, k + 1 < out.length ? out[k + 1].pos : roh.length).replace(/[\t;,]+| {2,}| (?!\d{1,4}\b)/g, '\n')
+          const z = acParseCredBlob(teil) || {}, zg = {}
+          if(z.password && z.password !== b.id) zg.password = z.password
+          if(z.server) zg.server = z.server
+          if(zg.password || zg.server) b.zugang = zg
+        })
       }
       return out.sort((a, b) => a.pos - b.pos).map(({ pos, ...b }) => b)
     }
@@ -47290,7 +47307,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1733'
+  const OS_TAB_BUILD = '2026-09-22.1734'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
