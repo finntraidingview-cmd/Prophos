@@ -24,7 +24,7 @@ import selftest_auto_delta as sd  # noqa: E402
 
 SQL = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_riegel.sql")       # prophos_firma_key (unverändert)
 SQL_1MIN = os.path.join(HIER, "..", "sql", "2026-10-08_firmen_abstand_1min.sql")  # Riegel + RPC seit 08.10.2026
-SQL_KEY = os.path.join(HIER, "..", "sql", "2026-10-23_tradeify_cfd_firma_key.sql")  # prophos_firma_key seit 23.10.2026 (Tradeify CFD eigene Firma)
+SQL_KEY = os.path.join(HIER, "..", "sql", "2026-10-25_ftmo_futures_firma_key.sql")  # prophos_firma_key seit 25.10.2026 (FTMO Futures eigene Firma; davor Tradeify CFD 23.10.)
 FEHLER = []
 
 
@@ -255,7 +255,7 @@ def main():
     namen = ["The5%ers", "The 5%ers", "the5ers", "Five Percent Online", "FundedNext", "FundedNext Futures", "Funded Next Futures",
              "MyFundedFutures", "MyFoundedFutures", "Apex", "Apex Trader", "Tradeify", "FundingPips", "Funding Pips", "Topstep",
              "TopstepX", "FTMO", "Alpha Futures", "Fusion Markets", "Lucid Trading", "Blue Guardian", "", "  Blue Guardian  ",
-             "Tradeify CFD", "TradeifyCFD", "tradeify cfd"]
+             "Tradeify CFD", "TradeifyCFD", "tradeify cfd", "FTMO Futures", "FTMOFutures", "ftmo futures"]
     abw = [(x, key(x), a["_firm_norm"](x)) for x in namen if key(x) != a["_firm_norm"](x)]
     check(n >= 12 and not abw, f"prophos_firma_key = app.py _firm_norm für {len(namen)} Schreibweisen ({n} Regeln; Abweichungen {abw})")
     rules = re.search(r"^_FIRM_RULES = \[.*?^\]", src, re.M | re.S).group(0)

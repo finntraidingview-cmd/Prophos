@@ -5455,6 +5455,8 @@ def _firm_norm(name):
         return "MyFundedFutures"
     if _ist_tradeify_cfd(f):
         return "Tradeify CFD"   # eigene Firma (23.10.2026), nicht unter Tradeify (Futures) — vor der „tradeify"-Nadel
+    if "ftmo" in f and "futur" in f:
+        return "FTMO Futures"   # eigene Firma (25.10.2026), nicht unter FTMO (CFD) — sonst Firmen-Abstand/Gegenrichtung in einem Topf
     for needle, out in _FIRM_RULES:
         if needle in f:
             return out

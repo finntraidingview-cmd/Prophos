@@ -23124,6 +23124,7 @@
     if(/futur/.test(l) && /fundednext|funded next|foundednext|founded next/.test(l)) return roh('FundedNext Futures')
     if(/funded|founded/.test(l) && /futur/.test(l)) return roh('MyFundedFutures')
     if(istTradeifyCfd(l)) return roh('Tradeify CFD')   // eigene Firma (23.10.2026), vor der „tradeify"-Regel
+    if(/ftmo/.test(l) && /futur/.test(l)) return roh('FTMO Futures')   // eigene Firma (25.10.2026), vor der „ftmo"-Regel — wie app.py _firm_norm
     const regeln = [['apex', 'Apex Trader'], ['tradeify', 'Tradeify'], ['fundednext', 'FundedNext'], ['founded next', 'FundedNext'], ['foundednext', 'FundedNext'],
                     ['fundingpips', 'FundingPips'], ['funding pips', 'FundingPips'], ['topstep', 'Topstep'], ['ftmo', 'FTMO'], ['alpha', 'Alpha Future'],
                     ['fusion', 'Fusion Markets'], ['lucid', 'Lucid Trading']]
@@ -41862,6 +41863,8 @@
     { name:'Alpha Future',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'$', dupSymbol:'US100.cash' },
+    // 25.10.2026 (Finn): FTMO Futures eigene Futures-Firma neben FTMO (CFD) — bestehende Logins per sql/2026-10-25_ftmo_futures_firma.sql
+    { name:'FTMO Futures',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'FundedNext',    symbol:'',       unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NDX100' },
     // 21.09.2026 (Finn: „neue Propfirm … FundedNext Futures … Mapping mit NQ/MNQ
     // genau wie bei Tradeify … für alle IDs" + „MyFundedFutures bitte auch"):
@@ -46231,7 +46234,7 @@
   }
   function tpFirmIstFutures(firm){
     // Liste IN der Funktion (nicht als const davor): tpFirmIstFutures läuft schon beim ersten Render, bevor das Modul diese Stelle erreicht
-    const TP_FUTURES_FIRMEN = ['topstep', 'tradeify', 'apex trader', 'lucid trading', 'fundednext futures', 'myfundedfutures', 'myfoundedfutures', 'alpha future', 'alphafutures', 'alpha futures']
+    const TP_FUTURES_FIRMEN = ['topstep', 'tradeify', 'apex trader', 'lucid trading', 'fundednext futures', 'myfundedfutures', 'myfoundedfutures', 'alpha future', 'alphafutures', 'alpha futures', 'ftmo futures']
     const n = String(firm || '').trim().toLowerCase()
     if(istTradeifyCfd(firm)) return false   // Tradeify CFD (23.10.2026) nie Futures — auch nicht über eine falsch gepflegte firm_specs-Einheit
     if(n && TP_FUTURES_FIRMEN.includes(n)) return true
@@ -47316,7 +47319,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1735'
+  const OS_TAB_BUILD = '2026-09-22.1736'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53745,7 +53748,7 @@
     if(t.includes('fundednext')) return t.includes('futures') ? 'FNF' : 'FundedNext'
     if(t.includes('fundingpips')) return 'FundingPips'
     if(t.includes('5ers') || t.includes('5%ers')) return 'The5ers'
-    if(t.includes('ftmo')) return 'FTMO'
+    if(t.includes('ftmo')) return t.includes('futur') ? 'FTMO Futures' : 'FTMO'   // FTMO Futures eigene Firma (25.10.2026)
     if(t.includes('blueguardian')) return 'Blue Guardian'
     if(t.includes('topstep')) return 'Topstep'
     if(t.includes('myfundedfutures') || t.includes('myfoundedfutures')) return 'MFFU'
