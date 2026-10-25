@@ -3380,6 +3380,19 @@ def test_puls_cdp_login():
     chk(ob.tv_trade_now_url("https://www.tradingview.com/chart/AbC123/?symbol=MNQ") == "https://www.tradingview.com/chart/AbC123/?trade-now=TRADOVATE"
         and ob.tv_trade_now_url("https://evil.example/chart/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE",
         "trade-now-Adresse behält das Layout, fremde Seite → Standard")
+    # Routine „Puls-Fehler" 25.10.2026: Befund am Ende von _cdp_login_ort (25 s ohne Anmeldeseite) — nur lesen, nie Formularwerte
+    bef = ob.cdp_login_ort_befund({"dialoge": [{"titel": "Connect broker", "knoepfe": [{"text": "Connect", "rect": [1, 1, 9, 9]}]}],
+                                   "leiste": "", "url": "https://www.tradingview.com/chart/X/", "login": {"user": {"gefuellt": True}}},
+                                  [{"type": "page", "id": "a1", "url": "https://www.tradingview.com/chart/X/"},
+                                   {"type": "page", "id": "b2", "url": "https://trader.tradovate.com/oauth?response_type=code"},
+                                   {"type": "service_worker", "id": "c3", "url": "https://www.tradingview.com/sw.js"}], {"a1"})
+    q_lo_ = _i.getsource(ob._cdp_login_ort)
+    chk('"neu": true' in bef and '"neu": false' in bef and bef.count('"url"') == 3 and '"login": true' in bef and "sw.js" not in bef
+        and "gefuellt" not in bef and len(bef) <= 600
+        and ob.cdp_login_ort_befund(None, None, None) == '{"dialoge": [], "login": false, "leiste": null, "url": "", "tabs": []}'
+        and "cdp_login_ort_befund(" in q_lo_ and q_lo_.index("cdp_login_ort_befund(") > q_lo_.rindex("ende = max(ende")
+        and q_lo_.rstrip().endswith("keine Tradovate-Anmeldeseite ({warten_s:.0f} s).\""),
+        "Befund am Ende der Connect-Wartezeit: Dialoge, Login da?, Adresse, Seiten-Tabs mit „neu seit dem Klick“; Ausgang unverändert")
     # Riegel im Quelltext
     q = "".join(_i.getsource(f) for f in (ob._cdp_anmelden, ob._cdp_dialog_verbinden, ob._cdp_login_ort, ob._cdp_tradovate_verbinden,
                                           ob._cdp_abmelden, ob._cdp_konto_mit_login))

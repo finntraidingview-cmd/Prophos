@@ -23875,6 +23875,20 @@ def cdp_tab_frisch(neu, time_origin_ms, klick_ms, spiel_ms=1500.0):
         return False
 
 
+def cdp_login_ort_befund(blick, tabs, ids_vorher):
+    """REIN RECHNEND (testbar): Was steht nach 25 s ohne Anmeldeseite da? (Routine „Puls-Fehler" 25.10.2026) -> JSON-Text (≤ 600 Zeichen)
+    mit den Dialogen (Titel + Knöpfe), ob ein Login-Formular zu sehen ist, Broker-Leiste, Adresse der TradingView-Seite und allen
+    Seiten-Tabs des Puls-Chrome (Adresse gekürzt, 'neu' = Tab-ID gab es vor dem Connect-Klick nicht). Keine Werte aus Formularen."""
+    bl = blick if isinstance(blick, dict) else {}
+    ids = ids_vorher or set()
+    seiten = [{"url": str(t.get("url") or "")[:70], "neu": str(t.get("id")) not in ids}
+              for t in tabs or [] if isinstance(t, dict) and t.get("type") == "page"]
+    return json.dumps({"dialoge": [{"titel": d_.get("titel"), "knoepfe": [k3_label(k) for k in d_.get("knoepfe") or []][:8]}
+                                   for d_ in bl.get("dialoge") or [] if isinstance(d_, dict)][:3],
+                       "login": bool(bl.get("login")), "leiste": bl.get("leiste"), "url": str(bl.get("url") or "")[:70],
+                       "tabs": seiten[:8]}, ensure_ascii=False)[:600]
+
+
 def cdp_tradovate_tabs(liste, ohne=()):
     """REIN RECHNEND (testbar): Seiten-Tabs auf tradovate.com, die nicht in 'ohne' stehen (IDs vor dem Connect-Klick)."""
     return [t for t in liste or [] if isinstance(t, dict) and t.get("type") == "page" and str(t.get("id")) not in ohne
@@ -24390,6 +24404,15 @@ def _cdp_login_ort(s, vorher, benutzer, opts, trail, warten_s=25.0):
             s.klick(cdp_rect(d["connect"]), f"Connect (nochmal {nochmal_n}/2)")
             _warte(1.5, 0.6)
             ende = max(ende, time.time() + warten_s / 2)
+    # BEFUND AM ENDE (Routine „Puls-Fehler" 25.10.2026, Muster „konto_balance: tradovate-login '#' nicht geschafft (login_formular):
+    # nach 'connect' keine tradovate-anmeldeseite", So 25.10. an zwei PCs, 3× in 30 Tagen): die Spur endete bisher mit „Connect geklickt"
+    # und dann 25 s Stille — ob der Connect-Dialog zu war, ein Tab auf einer fremden Adresse aufging oder TradingView etwas anderes zeigte,
+    # stand nirgends. Jetzt beim Ablauf einmal lesen, was da ist (Dialoge, Broker-Leiste, Adresse, alle Seiten-Tabs mit „neu seit dem
+    # Klick"). Nur lesen; Wartezeit, Klicks und Ausgang unverändert.
+    try:
+        trail.append("[Login] nach dem Connect gesehen: " + cdp_login_ort_befund(ort_tv.blick(), _cdp_http("/json/list"), ids))
+    except Exception as e_:
+        trail.append(f"[Login] Befund am Ende nicht lesbar ({type(e_).__name__})")
     return None, f"Nach 'Connect' keine Tradovate-Anmeldeseite ({warten_s:.0f} s)."
 
 
