@@ -13804,7 +13804,7 @@
         <!-- Consistency (07.10.2026) wie im Konto-Popup — nur sichtbar, wenn Futures-Challenges im Batch sind, und nur auf die
              geschrieben (bulkConsWert in saveBulkAccounts). Leer = Standard 40 %. -->
         <div class="field" style="grid-column:1/-1" id="bulk-cons-row" hidden>
-          <label>Consistency <span style="font-weight:400;color:var(--sub)">(Tradeify-Challenges · optional)</span></label>
+          <label>Consistency <span style="font-weight:400;color:var(--sub)">(Tradeify-Challenges oder aus der Vorlage · optional)</span></label>
           <div style="display:flex;gap:8px;align-items:center">
             <select class="input" id="bulk-cons" style="flex:1">
               <option value="">Standard (40 %)</option>
@@ -39271,6 +39271,8 @@
         if(bEl.maxLossTrade) bEl.maxLossTrade.value = w(v.max_loss_per_trade)
         if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = w(v.max_profit_per_trade)
         bEl.template.value = v.name_template || ''
+        // Consistency aus der Vorlage (25.10.2026, Finn: FTMO Futures Pro 50 %, FundedNext Futures 40 %) — leer = Standard
+        accConsSetzen(document.getElementById('bulk-cons'), document.getElementById('bulk-cons-frei'), v.consistency_pct)
         bulkVorlageAktiv = v   // goal_kind/goal_target stehen nicht im Formular — beim Speichern aus der Vorlage
         updatePreview(); bulkFuturesUmschalten(); return
       }
@@ -39506,7 +39508,9 @@
     function bulkConsTrifft(){
       const firmaForm = bEl.firm.value.trim(), typForm = bEl.type.value
       if(accConsSichtbar(firmaForm, typForm)) return true
-      return (bulkPaste.bloecke || []).some(x => { const v = bulkPasteVorlage(x); return accConsSichtbar((v && v.firm) || x.firma || firmaForm, (v && v.account_type) || x.typ || typForm) })
+      // Vorlage mit Consistency (25.10.2026): Feld auch bei Firmen außerhalb von accConsSichtbar zeigen — der Wert kommt von dort
+      if(bulkVorlageAktiv && bulkVorlageAktiv.consistency_pct != null) return true
+      return (bulkPaste.bloecke || []).some(x => { const v = bulkPasteVorlage(x); return (v && v.consistency_pct != null) || accConsSichtbar((v && v.firm) || x.firma || firmaForm, (v && v.account_type) || x.typ || typForm) })
     }
     function bulkConsUmschalten(){
       const row = document.getElementById('bulk-cons-row'); if(row) row.hidden = !bulkConsTrifft()
@@ -39822,7 +39826,14 @@
         if(cred && (cred.login || cred.password || cred.server)){
           row.cred_login = cred.login || null; row.cred_password = cred.password || null; row.cred_server = cred.server || null; row.cred_platform = cred.platform || 'MT5'
         }
-        if(consB.wert != null && !_accConsSpalteFehlt && accConsSichtbar(firm, row.account_type)) row.consistency_pct = consB.wert
+        // Consistency (25.10.2026): Formular-Wahl, sonst der Wert der Vorlage dieses Kontos (Block-Vorlage, sonst die gewählte
+        // Vorlage bei gleicher Firma) — so bekommen auch FTMO Futures / FundedNext Futures ihre Consistency aus der Schablone
+        const tplCons = (v && v.consistency_pct != null) ? Number(v.consistency_pct)
+          : (bulkVorlageAktiv && bulkVorlageAktiv.consistency_pct != null && bulkVorlageAktiv.firm === firm) ? Number(bulkVorlageAktiv.consistency_pct) : null
+        if(!_accConsSpalteFehlt){
+          if(consB.wert != null && (accConsSichtbar(firm, row.account_type) || tplCons != null)) row.consistency_pct = consB.wert
+          else if(tplCons != null) row.consistency_pct = tplCons
+        }
         if(bEl.saveLabel) bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${wahl.length}`
         try{
           let { data, error } = await supabase.from('accounts').insert(row).select('*').single()
@@ -47279,7 +47290,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1732'
+  const OS_TAB_BUILD = '2026-09-22.1733'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

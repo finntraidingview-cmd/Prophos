@@ -16247,7 +16247,7 @@ def admin_konten_pruefen():
 BULK_VORLAGE_TEXT = ("name", "firm", "account_type", "purchase_ccy", "goal_kind", "name_template", "plattform",
                      "muster_titel", "muster_praefix")
 BULK_VORLAGE_ZAHL = ("account_size", "starting_balance", "max_drawdown", "max_daily_drawdown", "max_loss_per_trade",
-                     "max_profit_per_trade", "purchase_cost")
+                     "max_profit_per_trade", "purchase_cost", "consistency_pct")   # consistency_pct seit 25.10.2026
 BULK_VORLAGE_GANZ = ("goal_target", "sortierung")
 BULK_VORLAGE_BOOL = ("wd_farm", "aktiv")
 
