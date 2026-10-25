@@ -1812,6 +1812,24 @@ def main():
     finally:
         order_bot._puls_diagnose_senden = _alt_ds
 
+    # Abriss im Lesepfad (25.10.2026, Routine Puls-Fehler, Muster „endlesung/konto_balance: cdp_fehler: … ConnectionAbortedError
+    # [WinError 10053]"): zweiter Lesedurchlauf nur im 1. Durchlauf, nur bei einem Abriss, nur rechtzeitig — und modus_tvlesen_cdp
+    # sichert die Spur per B17, bevor sie der Tab auf 2000 Zeichen kürzt
+    _taz = order_bot.tvlesen_abriss_zweiter
+    chk("ORDER-BOT: Lesung — Abriss (WinError 10053) im 1. Durchlauf nach 25 s → zweiter Lesedurchlauf",
+        _taz(1, "ConnectionAbortedError: [WinError 10053] Eine bestehende Verbindung wurde softwaregesteuert abgebrochen", 25.0)[0] is True
+        and _taz(1, "ConnectionResetError: [WinError 10054] x", 60.0)[0] is True)
+    chk("ORDER-BOT: Lesung — kein zweiter Durchlauf im 2. Durchlauf, bei einem Sachfehler oder zu spät (> 120 s)",
+        _taz(2, "ConnectionAbortedError: [WinError 10053]", 40.0)[0] is False
+        and _taz(1, "KeyError: 'konto'", 10.0)[0] is False
+        and _taz(1, "TimeoutError: timed out", 10.0)[0] is False
+        and _taz(1, "ConnectionAbortedError: [WinError 10053]", 130.0)[0] is False)
+    import inspect as _insp_tl
+    _src_tl = _insp_tl.getsource(order_bot.modus_tvlesen_cdp)
+    chk("ORDER-BOT: Lesung — modus_tvlesen_cdp läuft höchstens zweimal (for durchlauf in (1, 2)), B17-Spur 'tvlesen_abriss', neu anhängen statt Chrome-Neustart",
+        "for durchlauf in (1, 2):" in _src_tl and '"tvlesen_abriss"' in _src_tl and "tvlesen_abriss_zweiter(durchlauf" in _src_tl
+        and "_puls_verbindung_neu_anhaengen(trail" in _src_tl and "_puls_chrome_neustart" not in _src_tl)
+
     # UAC-/Update-Hinweis (02.09.2026): NUR bei Terminal-nicht-erreichbar, nie
     # bei Konto-/Symbol-Sachfehlern — sonst schickt er Finn an den PC, obwohl
     # gar keine Windows-Abfrage offen ist.
@@ -4810,7 +4828,7 @@ def test_cdp_konto_regression_865():
     # und vor der Lesung in modus_tvlesen_cdp); der Kachel-Blick meldet bei offener Liste/Menü nichts (ersetzt den alten klick()-Verzicht)
     chk("self.werbung_weg()" in q_kl and q_ww.count("_cdp_kachel_weg(self, self.trail)") == 1
         and q_ww.index("_cdp_kachel_weg(self, self.trail)") < q_ww.index("_werbung_weg_kern(zwang)")
-        and "s.werbung_weg(zwang=True)" in q_tl and q_tl.index("s.werbung_weg(zwang=True)") < q_tl.index("st = s.stand(opts)\n        summary"),
+        and "s.werbung_weg(zwang=True)" in q_tl and q_tl.index("s.werbung_weg(zwang=True)") < q_tl.index("st = s.stand(opts)\n            summary"),   # .1732: Lesepfad in for-Schleife (Abriss → 2. Durchlauf), 12 Stellen
         "Störer-Räumung: Kachel zuerst in werbung_weg (jeder Klick), und vor der Lesung in modus_tvlesen_cdp")
     kj = ob.CDP_KACHEL_JS
     chk("getElementById('charting-ad')" in kj and "xs.length !== 1" in kj and "elementFromPoint" in kj and "q.width > 44" in kj

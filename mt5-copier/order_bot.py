@@ -20666,82 +20666,109 @@ def modus_tvlesen_cdp(cmd):
     trail.append("Weg: Puls-Chrome (CDP)")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): im Puls-Chrome klickt gerade ein Hand-Befehl — nicht dazwischen
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, bitte gleich erneut anstoßen.", "sperre")
-    try:
-        s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
-        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
-        s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
-        res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
-        if not ok:
-            return raus(code, msg, "konto", **cdp_konto_ergebnis_extra(extra, st))   # Konto-Befund gekürzt ins Ergebnis (08.10.2026)
-        _warte(0.6, 0.3)
-        # Störer vor der eigentlichen Lesung weg (14.10.2026, Finn: Google-Anzeige über dem Positions-Bereich beim Balance-Lesen):
-        # Kachel + Werbe-Modal + erkannter Werbe-Dialog — der Konto-Schritt räumte nur zu SEINEM Beginn, eine danach nachgeladene
-        # Anzeige lag beim Reiter-Klick „Account summary" im Weg (Hover-Beweis scheitert → „Tages-G&V nicht gefunden")
-        if hasattr(s, "werbung_weg"):
-            s.werbung_weg(zwang=True)
-        st = s.stand(opts)
-        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-        # HANDELSPANEL ZU VOR DER LESUNG (14.10.2026, Marc pc-7ftp5l, erste Balance-Lesung nach dem Tradovate-Login): Konto-Schritt
-        # „Konto steht", Panel aber zugeklappt („Open panel") → keine Positions-Tabelle → bisher „Positions-Tabelle nicht sichtbar" ohne
-        # Grund. Jetzt: sagt augen.js „zu" (oder sieht keine Tabelle), drückt DIESER Lauf einmal selbst „Open panel" (Zähler des
-        # Konto-Schritts zählt hier nicht) und liest neu; bleibt es zu, steht der Grund in Meldung und Spur.
-        if ko.get("panel") == "zu" or ko.get("positionen_sichtbar") is False:
-            s._panel_open_versucht = False
-            if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
-                _warte(0.6, 0.3)
-                st = s.stand(opts)
-        summary = cdp_summary(st.get("konto_summary"), (st.get("konto") or {}).get("aktiv") if isinstance(st.get("konto"), dict) else None)
-        today, today_label, today_text = tv_today_pnl(summary)
-        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-        if ko.get("positionen_sichtbar") is False:
-            if ko.get("panel") == "zu":
-                return raus("panel_zu", "Handelspanel unten ist zugeklappt („Open panel“) und ging nicht auf — kein Stand ohne "
-                            "Positions-Tabelle (Grund in der Spur).", "lesen",
-                            summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
-            # FLACH OHNE TABELLE (TradingView-Update 19.10.2026, s. cdp_flach_ohne_tabelle): null Positionen = keine Tabelle mehr.
-            # Beweis zweimal mit Pause (Zeilen könnten noch laden), sonst wie bisher ehrlich tabelle_unklar.
-            ja, grund = cdp_flach_ohne_tabelle(st)
-            if not ja:
-                trail.append(f"kein Flach-Beweis ohne Tabelle: {grund}")
-                return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle "
-                            f"(flach nicht bewiesen: {grund}).", "lesen",
-                            summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
-            _warte(2.5, 1.0)
-            st2 = s.stand(opts)
-            ja2, grund2 = cdp_flach_ohne_tabelle(st2)
-            if not ja2:
-                trail.append(f"flach ohne Tabelle: zweiter Blick widerspricht ({grund2})")
-                return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle "
-                            f"(zweiter Blick: {grund2}).", "lesen",
-                            summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
-            trail.append(f"flach ohne Tabelle (TradingView-Update): {grund2} — zweimal bewiesen")
-            st = st2
+    for durchlauf in (1, 2):
+        try:
+            s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
+            ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+            s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
+            res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
+            if not ok:
+                return raus(code, msg, "konto", **cdp_konto_ergebnis_extra(extra, st))   # Konto-Befund gekürzt ins Ergebnis (08.10.2026)
+            _warte(0.6, 0.3)
+            # Störer vor der eigentlichen Lesung weg (14.10.2026, Finn: Google-Anzeige über dem Positions-Bereich beim Balance-Lesen):
+            # Kachel + Werbe-Modal + erkannter Werbe-Dialog — der Konto-Schritt räumte nur zu SEINEM Beginn, eine danach nachgeladene
+            # Anzeige lag beim Reiter-Klick „Account summary" im Weg (Hover-Beweis scheitert → „Tages-G&V nicht gefunden")
+            if hasattr(s, "werbung_weg"):
+                s.werbung_weg(zwang=True)
+            st = s.stand(opts)
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-            summary = cdp_summary(st.get("konto_summary"), ko.get("aktiv"))
+            # HANDELSPANEL ZU VOR DER LESUNG (14.10.2026, Marc pc-7ftp5l, erste Balance-Lesung nach dem Tradovate-Login): Konto-Schritt
+            # „Konto steht", Panel aber zugeklappt („Open panel") → keine Positions-Tabelle → bisher „Positions-Tabelle nicht sichtbar" ohne
+            # Grund. Jetzt: sagt augen.js „zu" (oder sieht keine Tabelle), drückt DIESER Lauf einmal selbst „Open panel" (Zähler des
+            # Konto-Schritts zählt hier nicht) und liest neu; bleibt es zu, steht der Grund in Meldung und Spur.
+            if ko.get("panel") == "zu" or ko.get("positionen_sichtbar") is False:
+                s._panel_open_versucht = False
+                if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
+                    _warte(0.6, 0.3)
+                    st = s.stand(opts)
+            summary = cdp_summary(st.get("konto_summary"), (st.get("konto") or {}).get("aktiv") if isinstance(st.get("konto"), dict) else None)
             today, today_label, today_text = tv_today_pnl(summary)
-        positionen = cdp_positionen_vertrag(st.get("positionen"))
-        if today is None:
-            try:
-                sum2, t2, l2, x2 = _cdp_today_aus_reiter(s, opts, trail)
-                if t2 is not None:
-                    today, today_label, today_text = t2, l2, x2
-                    summary = dict(summary or {}, **(sum2 or {}))
-            except Exception as e_:
-                trail.append(f"Today-Reiter nicht lesbar ({type(e_).__name__})")
-        trail.append(f"gelesen (CDP): {len(positionen)} Pos, {len(summary or {})} Summary-Paare, Today {today} ('{today_label}')")
-        res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
-                    "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen), "summary": summary,
-                    "today_pnl": today, "today_label": today_label, "today_pnl_text": today_text,
-                    "alter_s": 0.0, "gelesen_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "userscript": None,
-                    "sprache_fremd": False, "summary_fehler": None if summary else "keine Zusammenfassung (augen.js)"})
-        if ende:
-            res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K4"}
-        return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en) (CDP)"
-                    + (f", Today's P&L {today:g} ({today_label})" if today is not None else ", Tages-G&V nicht gefunden"),
-                    "fertig")
-    except Exception as e:
-        _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
-        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            if ko.get("positionen_sichtbar") is False:
+                if ko.get("panel") == "zu":
+                    return raus("panel_zu", "Handelspanel unten ist zugeklappt („Open panel“) und ging nicht auf — kein Stand ohne "
+                                "Positions-Tabelle (Grund in der Spur).", "lesen",
+                                summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+                # FLACH OHNE TABELLE (TradingView-Update 19.10.2026, s. cdp_flach_ohne_tabelle): null Positionen = keine Tabelle mehr.
+                # Beweis zweimal mit Pause (Zeilen könnten noch laden), sonst wie bisher ehrlich tabelle_unklar.
+                ja, grund = cdp_flach_ohne_tabelle(st)
+                if not ja:
+                    trail.append(f"kein Flach-Beweis ohne Tabelle: {grund}")
+                    return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle "
+                                f"(flach nicht bewiesen: {grund}).", "lesen",
+                                summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+                _warte(2.5, 1.0)
+                st2 = s.stand(opts)
+                ja2, grund2 = cdp_flach_ohne_tabelle(st2)
+                if not ja2:
+                    trail.append(f"flach ohne Tabelle: zweiter Blick widerspricht ({grund2})")
+                    return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sichtbar — kein Stand ohne Tabelle "
+                                f"(zweiter Blick: {grund2}).", "lesen",
+                                summary=summary, today_pnl=today, today_label=today_label, today_pnl_text=today_text)
+                trail.append(f"flach ohne Tabelle (TradingView-Update): {grund2} — zweimal bewiesen")
+                st = st2
+                ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+                summary = cdp_summary(st.get("konto_summary"), ko.get("aktiv"))
+                today, today_label, today_text = tv_today_pnl(summary)
+            positionen = cdp_positionen_vertrag(st.get("positionen"))
+            if today is None:
+                try:
+                    sum2, t2, l2, x2 = _cdp_today_aus_reiter(s, opts, trail)
+                    if t2 is not None:
+                        today, today_label, today_text = t2, l2, x2
+                        summary = dict(summary or {}, **(sum2 or {}))
+                except Exception as e_:
+                    trail.append(f"Today-Reiter nicht lesbar ({type(e_).__name__})")
+            trail.append(f"gelesen (CDP): {len(positionen)} Pos, {len(summary or {})} Summary-Paare, Today {today} ('{today_label}')")
+            res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
+                        "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen), "summary": summary,
+                        "today_pnl": today, "today_label": today_label, "today_pnl_text": today_text,
+                        "alter_s": 0.0, "gelesen_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "userscript": None,
+                        "sprache_fremd": False, "summary_fehler": None if summary else "keine Zusammenfassung (augen.js)"})
+            if ende:
+                res["exit_diag"] = {"fehler": "Exit-Fill über CDP kommt mit K4"}
+            return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en) (CDP)"
+                        + (f", Today's P&L {today:g} ({today_label})" if today is not None else ", Tages-G&V nicht gefunden"),
+                        "fertig")
+        except Exception as e:
+            _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
+            # ABRISS IM LESEPFAD (25.10.2026, Routine Puls-Fehler, Muster „endlesung/konto_balance: cdp_fehler: puls-chrome/cdp:
+            # connectionabortederror: [winerror 10053]": seit dem Orbit-Fix vom 09.10. noch 4× auf 4 PCs, 3 der 4 Spuren vom Tab auf
+            # 2000 Zeichen gekappt — die Abriss-Stelle fehlte jedes Mal). Ursache wie im Orbit-Pfad (cdp_abriss_erkannt): die Verbindung zum
+            # Tab reißt beim Seitenwechsel (Tradovate-Anmeldung, Neuladen), das Puls-Chrome läuft weiter — die Lesung lief aber ohne den
+            # Neustart-Wrapper und endete beim ersten Abriss. Jetzt: (1) die ganze Spur per B17 nach puls_diagnose (ihr Ende überlebt so
+            # die Kürzung des Tabs), (2) genau EIN zweiter Lesedurchlauf nach sanftem Neu-Anhängen (bestehender Helfer, kein Chrome-
+            # Neustart) — nur lesen, keine Order, kein Riegel berührt; der zweite Durchlauf baut Sitzung und Konto-Schritt frisch auf
+            # wie jeder Lauf. Meldung und Code bleiben unverändert (Muster vergleichbar), der Grund steht in der Spur.
+            _puls_diagnose_senden(list(trail) + [f"cdp_fehler im {durchlauf}. Durchlauf: {type(e).__name__}: {str(e)[:100]}"], "tvlesen_abriss")
+            wieder, grund = tvlesen_abriss_zweiter(durchlauf, f"{type(e).__name__}: {e}", time.time() - _PULS_PROZESS_T0)
+            if wieder:
+                try:
+                    wieder = bool(_puls_verbindung_neu_anhaengen(trail, None))
+                except Exception as e2:
+                    trail.append(f"neu anhängen fehlgeschlagen ({type(e2).__name__})")
+                    wieder = False
+            if wieder:
+                if sitz[0]:
+                    try:
+                        sitz[0].zu()
+                    except Exception:
+                        pass
+                    sitz[0] = None
+                trail.append(f"2. Lesedurchlauf nach dem Abriss ({grund}) — nur lesen")
+                continue
+            trail.append(f"kein weiterer Durchlauf: {grund}")
+            return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -25051,6 +25078,25 @@ def _puls_verbindung_neu_anhaengen(spur, url):
                 f"{', '.join(str(t.get('url'))[:50] for t in tabs[:3])}) → nur neu anhängen, kein Chrome-Neustart")
     _warte(1.5, 1.0)                              # Seite zu Ende wechseln lassen (Jitter-Regel)
     return True
+
+
+def tvlesen_abriss_zweiter(durchlauf, fehler_text, verstrichen_s, max_verstrichen_s=120.0):
+    """REIN RECHNEND (testbar): Darf die Lesung (modus_tvlesen_cdp) nach einer Ausnahme EINMAL neu anlaufen? Nur im 1. Durchlauf, nur
+    bei einem Abriss der CDP-Verbindung (CDP_ABRISS_RX — ConnectionAbortedError/WinError 10053 …, nie bei Sachfehlern wie KeyError) und
+    nur, wenn vom Panel-Deckel genug übrig ist (/api/tv-konto 260 s: der zweite Durchlauf startet spätestens 120 s nach Prozessstart).
+    Muster „endlesung/konto_balance: cdp_fehler: puls-chrome/cdp: connectionabortederror [winerror 10053]" (Routine 25.10.2026,
+    4× seit 09.10. auf 4 PCs). -> (ja, grund)"""
+    try:
+        v = float(verstrichen_s or 0.0)
+    except (TypeError, ValueError):
+        v = 0.0
+    if int(durchlauf or 0) != 1:
+        return False, "schon der 2. Durchlauf"
+    if not CDP_ABRISS_RX.search(str(fehler_text or "")):
+        return False, "kein Abriss der Verbindung (Sachfehler)"
+    if v > float(max_verstrichen_s):
+        return False, f"zu spät ({v:.0f} s seit Prozessstart)"
+    return True, f"Abriss der CDP-Verbindung im 1. Durchlauf nach {v:.0f} s"
 
 
 def neustart_beleg_leer(lesung, erst):
