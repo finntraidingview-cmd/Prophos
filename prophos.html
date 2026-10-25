@@ -39535,7 +39535,8 @@
      *      active/passed/failed, Stage Evaluation → challenge, Express Funded/EXPRESS → funded.
      *  (2) Tradeify-Karten (F11): Kennungs-Zeile F?TDFY…, davor Status + Titel, danach „Account Balance"/„Trailing Max Drawdown".
      *  (3) Rückfall ohne (1)/(2): reine Liste — je Zeile das erste Wort mit Ziffer ist eine Kennung (wie das alte Feld, auch MT5-Logins). */
-    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify'], [/^(\d+KTC-SKU|EXPRESS)-V2-/, 'Topstep'], [/^(PA)?APEX\d/, 'Apex Trader']]
+    // FTMO Futures (25.10.2026, Finn: Kennung im Dashboard „FTMO397898") — FTMO-CFD-Logins sind reine Zahlen, „FTMO" + Ziffern ist immer Futures
+    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify'], [/^(\d+KTC-SKU|EXPRESS)-V2-/, 'Topstep'], [/^(PA)?APEX\d/, 'Apex Trader'], [/^FTMO\d/, 'FTMO Futures']]
     const BULK_STATUS = /^(active|failed|passed|inactive|breached|disabled|closed)$/i
     const BULK_TOPSTEP_RX = /\b(\d+KTC-SKU-V2-\d+-\d+|EXPRESS-V2-\d+-\d+)\b/g
     function bulkGeld(t){ const m = /-?\$?\s*([\d,]+(?:\.\d+)?)/.exec(String(t || '')); if(!m) return null; const v = parseFloat(m[1].replace(/,/g, '')); return isFinite(v) ? v : null }
@@ -39705,6 +39706,10 @@
     // Vorlage eines Blocks: von Hand gewählt (bulkPaste.vorlage) oder automatisch über Präfix/Titel (F12)
     function bulkPasteVorlage(x){
       if(bulkPaste.vorlage.has(x.id)){ const id = bulkPaste.vorlage.get(x.id); return id ? (bulkZentral.find(z => String(z.id) === String(id)) || null) : null }
+      // Oben gewählte Vorlage gewinnt, wenn ihr Präfix zur Kennung passt (25.10.2026: FundedNext Futures 50k Flex und 150k Flex teilen
+      // „FNFTCH", die Kennung verrät die Größe nicht — sonst bekam ein 50k-Konto trotz Wahl „50k Flex" die 150k-Vorlage)
+      const px = String(bulkVorlageAktiv && bulkVorlageAktiv.muster_praefix || '').trim().toUpperCase()
+      if(px && String(x.id || '').toUpperCase().startsWith(px)) return bulkVorlageAktiv
       return bulkVorlageFuer(x, bulkZentral)
     }
     const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null, vorlage: new Map(), reset: new Set() }   // vorlage: Kennung → Vorlagen-id ('' = keine), sonst automatisch; reset: bulkKey der als „geresettet“ freigegebenen Kennungen
@@ -47319,7 +47324,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1737'
+  const OS_TAB_BUILD = '2026-09-22.1738'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
