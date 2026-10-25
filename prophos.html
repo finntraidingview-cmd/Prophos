@@ -47324,7 +47324,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1738'
+  const OS_TAB_BUILD = '2026-09-22.1739'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -71645,9 +71645,13 @@
   // mit 0 Trades in jeder Zeile, obwohl Puls für 05:59 anstand): /ids liefert offene Vorschläge ab jetzt − 12 h — nach 00:00 dt sind das
   // auch die nie bestätigten Vorschläge von GESTERN. Die lagen auf keinem „heute", also sprang der Standard auf „morgen" = nächster
   // Handelstag (16.10.), für den es gar nichts gab. Jetzt: „morgen" nur, wenn genau dieser Tag Vorschläge hat; sonst heute.
+  // AUCH BESTÄTIGTE ZÄHLEN (Finn 26.10.2026 ~02:55 Dubai, .1738: Zeitstrahl 0 → nach F5 alle 91 → wieder 0): seit der Winterzeit
+  // (25.10.) beginnt der deutsche Tag erst 03:00 Dubai, das Planer-Fenster schon 02:00. Davor ist „heute" noch der Vortag; „morgen"
+  // kam nur über UNBESTÄTIGTE Vorschläge — sobald der Bestätigen-Bot (ap_auto_best_tick) die letzten zwei abgehakt hatte, fiel der
+  // Reiter auf den leeren Sonntag zurück. Bestätigte, noch nicht gestartete Pläne (/ids bestaetigt[]) zählen jetzt genauso.
   function apIdsTag(){
     if(_apIds.tagWahl) return _apIds.tagWahl
-    const heute = tplDatum(new Date()), tage = new Set(_apIds.offen.map(z => apIdsTagBerlin(z.start_um)).filter(Boolean))
+    const heute = tplDatum(new Date()), tage = new Set([..._apIds.offen, ...(_apIds.bestaetigt || [])].map(z => apIdsTagBerlin(z.start_um)).filter(Boolean))
     if(tage.has(heute)) return 'heute'
     let morgen = ''; const alt = _tpl.tag; _tpl.tag = 'morgen'; try{ morgen = tplTag() } finally{ _tpl.tag = alt }
     return morgen && tage.has(morgen) ? 'morgen' : 'heute'
