@@ -39407,7 +39407,7 @@
       // WD-Farm-Haken gibt es beim Anlegen nicht mehr (F17-Ergänzung) — neue Konten immer wd_farm = false
       bEl.count.value    = ''
       bEl.startnum.value = '1'
-      bulkPaste.bloecke = []; bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPaste.treffer = new Map()   // F16: Kennungs-Zustand leeren
+      bulkPaste.bloecke = []; bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPaste.treffer = new Map(); bulkPaste.reset = new Set()   // F16: Kennungs-Zustand leeren
       bEl.template.value = ''
       bEl.extids.value   = ''
       if(bEl.creds) bEl.creds.value = ''
@@ -39706,7 +39706,7 @@
       if(bulkPaste.vorlage.has(x.id)){ const id = bulkPaste.vorlage.get(x.id); return id ? (bulkZentral.find(z => String(z.id) === String(id)) || null) : null }
       return bulkVorlageFuer(x, bulkZentral)
     }
-    const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null, vorlage: new Map() }   // vorlage: Kennung → Vorlagen-id ('' = keine), sonst automatisch
+    const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null, vorlage: new Map(), reset: new Set() }   // vorlage: Kennung → Vorlagen-id ('' = keine), sonst automatisch; reset: bulkKey der als „geresettet“ freigegebenen Kennungen
     const bpEl = { box: document.getElementById('bulk-extids'), vs: document.getElementById('bulk-paste-vorschau'), zaehler: document.getElementById('bulk-paste-zaehler') }
     const bulkKey = id => String(id || '').trim().toUpperCase()
     // Dubletten (F11 + F16-Ergänzung, Finn: „immer dran denken, External IDs, die es schon mal gab, ignorieren"): eigene Konten
@@ -39733,7 +39733,10 @@
       bulkPaste.treffer = r.treffer; bulkPaste.alleGeprueft = r.alle
       bulkPasteRender()
     }
-    const bulkIstNeu = x => !bulkPaste.treffer.has(bulkKey(x.id))
+    // Reset-Freigabe (25.10.2026, Finn: CFD-Konto mit Rabatt resettet → Login/External ID bleibt gleich, Prophos sperrte das zweite
+    // Anlegen als Dublette): der Hinweis „schon in Prophos" bleibt stehen, aber je Kennung gibt es den Knopf „Geresettet – trotzdem
+    // anlegen" — danach zählt die Kennung als neu (auch beim Nachprüfen direkt vor dem Anlegen) und wird ein eigenes, neues Konto.
+    const bulkIstNeu = x => { const k = bulkKey(x.id); return !bulkPaste.treffer.has(k) || bulkPaste.reset.has(k) }
     function bulkWahl(){
       const firmaForm = bEl.firm.value.trim()
       return bulkPaste.bloecke.filter(x => { const v = bulkPasteVorlage(x); return bulkIstNeu(x) && ((v && v.firm) || x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached|passed/i.test(x.status)) })
@@ -39755,8 +39758,10 @@
       let vorh = 0
       bpEl.vs.innerHTML = b.map(x => {
         const t = bulkPaste.treffer.get(bulkKey(x.id)), v = bulkPasteVorlage(x), firma = (v && v.firm) || x.firma || firmaForm
-        const sperre = t ? `schon in Prophos · ${t.archiviert ? 'archiviert' : 'aktiv'}${t.person ? ' · ' + t.person : ''}${t.name ? ' · ' + t.name : ''}` : !firma ? 'Firma unbekannt — „Firm" im Formular eintragen' : ''
-        if(t) vorh++
+        const reset = !!t && bulkPaste.reset.has(bulkKey(x.id))
+        const schon = t ? `schon in Prophos · ${t.archiviert ? 'archiviert' : 'aktiv'}${t.person ? ' · ' + t.person : ''}${t.name ? ' · ' + t.name : ''}` : ''
+        const sperre = (t && !reset) ? schon : !firma ? 'Firma unbekannt — „Firm" im Formular eintragen' : ''
+        if(t && !reset) vorh++
         const standard = !sperre && !/failed|breached|passed/i.test(x.status)
         const an = sperre ? false : (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : standard)
         const typ = (v && v.account_type) || x.typ || bEl.type.value, gr = x.groesse || (v && (v.starting_balance || v.account_size)) || (parseFloat(bEl.size.value) || 0) || BULK_STD_GROESSE
@@ -39764,14 +39769,18 @@
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
           ${(x.titel || x.status) ? `<span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>` : ''}
           <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(kontoNameRegel(Math.round(gr / 1000) + 'k', x.id, typ, ''))} · ${escapeHtml(firma)}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
+          ${reset ? `<span class="m" style="color:var(--warn)">↻ Reset · ${escapeHtml(schon)} — wird als neues Konto angelegt</span>` : ''}
+          ${(t && !reset && firma) ? `<button type="button" class="btn btn-ghost btn-xs" data-bpr="${escapeHtml(x.id)}" style="margin-top:4px">↻ Geresettet – trotzdem anlegen</button>` : ''}
           ${!sperre && x.zugang && (x.zugang.password || x.zugang.server) ? `<span class="m" style="color:var(--good,#12B76A)">✓ ${[x.zugang.password ? 'Passwort' : '', x.zugang.server ? 'Server' : ''].filter(Boolean).join(' + ')} erkannt</span>` : ''}
           ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkVorlagenGruppiert(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`)}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
       bpEl.vs.querySelectorAll('[data-bp]').forEach(cb => cb.addEventListener('change', () => { bulkPaste.an.set(cb.dataset.bp, cb.checked); bulkPasteRender() }))
       bpEl.vs.querySelectorAll('[data-bpv]').forEach(sel => { sel.addEventListener('change', () => { bulkPaste.vorlage.set(sel.dataset.bpv, sel.value); bulkPasteRender() }) })
+      bpEl.vs.querySelectorAll('[data-bpr]').forEach(btn => btn.addEventListener('click', e => { e.preventDefault(); bulkPaste.reset.add(bulkKey(btn.dataset.bpr)); bulkPaste.an.set(btn.dataset.bpr, true); bulkPasteRender() }))
       const neu = bulkWahl().length
-      bpEl.zaehler.textContent = `${b.length} erkannt · ${neu} neu · ${vorh} schon vorhanden${bulkPaste.alleGeprueft ? '' : ' (nur eigene Konten geprüft)'}`
+      const nReset = b.filter(x => bulkPaste.treffer.has(bulkKey(x.id)) && bulkPaste.reset.has(bulkKey(x.id))).length
+      bpEl.zaehler.textContent = `${b.length} erkannt · ${neu} neu${nReset ? ` (davon ${nReset} Reset)` : ''} · ${vorh} schon vorhanden${bulkPaste.alleGeprueft ? '' : ' (nur eigene Konten geprüft)'}`
       bulkSpeichernKnopf(neu)
     }
     // „Accounts anlegen": Anzahl = neue, angehakte Kennungen; ohne Kennung gesperrt (External IDs ist Pflicht)
@@ -39785,7 +39794,7 @@
     }
     bpEl.box?.addEventListener('input', () => {
       clearTimeout(bulkPaste.timer)
-      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPasteRender(); bulkPastePruefen() }, 250)
+      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPaste.reset = new Set(); bulkPasteRender(); bulkPastePruefen() }, 250)
     })
     bEl.firm?.addEventListener('input', () => bulkPasteRender())
     bEl.type?.addEventListener('change', () => bulkPasteRender())
@@ -47307,7 +47316,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1734'
+  const OS_TAB_BUILD = '2026-09-22.1735'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
