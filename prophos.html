@@ -47381,7 +47381,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1748'
+  const OS_TAB_BUILD = '2026-09-22.1749'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47562,10 +47562,7 @@
     if(!dir) fehlt.push('Richtung (Buy/Sell)')
     if(!(lots > 0) || Math.abs(lots - Math.round(lots)) > 1e-9) fehlt.push('Lots (ganze Kontrakte)')
     if(!symbol || !/^[A-Za-z0-9!._:-]{1,24}$/.test(symbol)) fehlt.push('Symbol')
-    // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil C): aus dem Signal, sonst vom Plan — null = keine Prüfung
-    const tg0 = (aus && q.tages_grenze_usd != null) ? Number(q.tages_grenze_usd) : plan.tagesGrenzeUsd
-    const tg = (tg0 != null && Number.isFinite(Number(tg0)) && Number(tg0) >= 0) ? Number(tg0) : null
-    return { dir, lots, tp: tp > 0 ? tp : 0, sl: sl > 0 ? sl : 0, symbol, tg, fehlt }
+    return { dir, lots, tp: tp > 0 ? tp : 0, sl: sl > 0 ? sl : 0, symbol, fehlt }
   }
   // fern = { werte, melde } — gesetzt NUR vom Signal-Empfänger am PC (orderSignalTick, Zweig
   // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
@@ -48076,14 +48073,11 @@
       // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
       // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
       // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
-      // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil C): Feld + Brücken-Marke wie tp_usd/sl_usd — null/leer = keine Prüfung
-      const _tg = (w && w.tg != null) ? w.tg : null
       const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true, plan_id: String(plan.id),
-          tages_grenze_usd: _tg,
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen. plan_id (29.09.2026): der Bot meldet sein Ergebnis damit
           // zusätzlich selbst an puls_ergebnisse — geht die Antwort an diesen Tab verloren, übernimmt pulsErgebnisseUebernehmen.
           geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
-            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), '@tages_grenze_usd=' + (_tg != null ? _tg : ''), ...geschwister] })
+            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] })
       // PULS-WARTESCHLEIFE (Cross-Check V2-Kette, 24.09.2026): hält der Rundgang (tv-lesen, bis ~2,5 min je
       // Konto) oder ein tv-close gerade den TV-Lock im Panel, antwortet /api/tv-konto mit 409
       // puls_beschaeftigt — bisher brach der Start hart ab („Nichts platziert"), obwohl nur zu warten war.
@@ -48422,8 +48416,7 @@
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: pid,
                   params: { aktion: 'orbit', orbit: { symbol: w.symbol, richtung: w.dir, volumen: w.lots,
-                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null,
-                                                     tages_grenze_usd: w.tg },   // Tagesgrenze (26.10.2026, Vertrag Teil C)
+                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null },
                             ...(zielTrotzdemAn(pid) ? { ziel_trotzdem: true } : {}) } })   // Trotzdem starten (26.10.2026): Ziel-Sperre am PC aus
         .select('*').single()
       if(error) throw error
