@@ -156,7 +156,7 @@ def lade():
     for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for name in ("fmt_preis", "berechne_sl_tp", "sltp_vom_fill", "sltp_abweichung_usd", "kommission_runde", "nachzieh_seiten",
-                 "tagesgrenze_pruefen", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
+                 "tagesgrenze_pruefen", "sl_tagesgrenze_vom_fill", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
                  "_feld_lesen", "_feld_tippen", "_ist_aendern_dialog", "_dialog_gehoert_zu", "_menuepunkt_ausloesen",
                  "_kontextmenue_aendern_klicken", "_reihen_scan", "_map_felder", "_sltp_klicken", "_sltp_nachziehen"):
         exec(fn(src, name), ns)
@@ -419,6 +419,35 @@ def main():
     e, ka, sp = lauf2({"final": "beide"}, pos(SL_F9, TP_F9), {"ok": False, "dialog": False, "msg": "Aendern-Dialog nach 21 s nicht offen — Frist 20 s erreicht"})
     check(len(ka) == 1 and e["ok"] and "Frist 20 s" in e["grund"] and "grobe F9-Level bleiben" in e["grund"],
           "Dialog ging in der Frist nicht auf → KEIN zweiter blinder Anlauf, Grund in der Spur, grobe Level bleiben")
+
+    # Nacharbeit S2-Befund (Master 26.10.2026): Verlust bis SL ≤ Grenze — Plan-SL größer als die Grenze → SL ab Fill auf die Grenze gedeckelt
+    SG = ns["sl_tagesgrenze_vom_fill"]
+    sg = SG("sell", FILL, VOL, CS, 2948, 2894, 0.0, 2)
+    check(sg == 30436.88 and TG(FILL, sg, VOL, CS, 0.0, 2894) == (2894.0, False),
+          f"Plan-SL 2.948 $ > Grenze 2.894 $ → SL ab Fill {sg} (sell, Verlust genau 2.894 $ ≤ Grenze)")
+    check(SG("buy", 100.0, 3, 1, 50, 10.01, 0.0, 2) == 96.67 and TG(100.0, 96.67, 3, 1, 0.0, 10.01)[1] is False
+          and SG("sell", 100.0, 3, 1, 50, 10.01, 0.0, 2) == 103.33 and TG(100.0, 103.33, 3, 1, 0.0, 10.01)[1] is False,
+          "zum Fill hin gerundet (buy 96,66333 → 96,67 statt 96,66; sell 103,33667 → 103,33) — nie einen halben Tick über der Grenze")
+    check(SG("buy", 100.0, 1, 1, 8, 10, 2.0, 2) == 94.0 and SG("buy", 100.0, 1, 1, 20, 10, 2.0, 2) == 92.0,
+          "Kommission: Abstand = min(sl_usd, Grenze) − Kommission (8 → 6 Pkt, 20 → Grenze 10 → 8 Pkt)")
+    cmd_alt = dict(cmd)
+    cmd.update(sl_usd=2948)
+    SL_ALT_GROSS = round(FILL + 740.0, 2)        # grober F9-SL lag mit Schlupf 2.960 $ weg
+    def lauf3(sl_alt, grenze):
+        ka = []
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or gut
+        ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: pos(float(ka[-1][0]) if ka else sl_alt, TP_F9)
+        sp = []
+        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, final=None, tages_grenze_usd=grenze), "NAS100", FILL, VOL, CS, 2, sl_alt, TP_F9, sp, None)
+        return e, ka, sp
+    e, ka, sp = lauf3(SL_ALT_GROSS, 2894)
+    check(ka == [("30436.88", P(TP_F9, 2))] and e["nachgezogen"] and e["tagesgrenze"]["soll_verlust_usd"] == 2894.0
+          and any("Plan-SL 2948 $ > Grenze 2894 $ → SL ab Fill auf 2894 $ gedeckelt" in x for x in sp),
+          f"Nachziehen: Plan-SL 2.948 > Grenze 2.894 → SL 30436.88 ab Fill (vorher hätte sl_usd ab Fill 2.948 $ gelassen)")
+    e, ka, sp = lauf3(round(30436.88 + 0.5, 2), 2894)        # nur 2 $ daneben (< NACHZIEHEN_AB_USD), aber über der Grenze
+    check(ka == [("30436.88", P(TP_F9, 2))] and not any("Nachziehen unnötig" in x for x in sp),
+          f"Tagesgrenze überschritten bei nur {e['abw_usd']:g} $ Abweichung → trotzdem geklickt (NACHZIEHEN_AB_USD bremst diesen Fall nicht)")
+    cmd.clear(); cmd.update(cmd_alt)
 
     print()
     if FEHLER:

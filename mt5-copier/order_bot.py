@@ -159,6 +159,28 @@ def tagesgrenze_pruefen(fill, sl, volumen, contract_size, komm_usd, grenze_usd):
         return None, None
     verlust = round(abs(float(fill) - float(sl)) * float(volumen) * float(contract_size) + max(0.0, float(komm_usd or 0)), 2)
     return verlust, verlust > g
+
+
+def sl_tagesgrenze_vom_fill(richtung, fill, volumen, contract_size, sl_usd, grenze_usd, komm_usd=0.0, digits=2):
+    """REIN RECHNEND (testbar, Master 26.10.2026 nach S2-Befund zu .1746: „Verlust bis SL ≤ Grenze" wie Orbit): SL-Preis ab dem ECHTEN Fill
+    für den Fall Tagesgrenze überschritten — Abstand = min(sl_usd, grenze_usd) − Kommission, zum Fill hin gerundet (Kauf: SL unter dem Fill
+    → aufrunden, Verkauf: SL darüber → abrunden), damit der Verlust bis SL samt Kommission die Grenze nie um einen halben Tick überschreitet.
+    Wie sltp_vom_fill nie näher als die Hälfte des gedeckelten Abstands (eine unplausibel hohe Kommissions-Lesung zieht den Stop nicht an
+    den Einstieg — nur dann läge der Verlust über der Grenze, bei Index-CFDs mit ~0 $ Kommission praktisch nie)."""
+    deckel = min(float(sl_usd), float(grenze_usd))
+    netto = max(deckel - max(0.0, float(komm_usd or 0)), deckel / 2)
+    je = float(volumen) * float(contract_size)
+    if je <= 0:
+        raise ValueError("volumen*contract_size muss > 0 sein")
+    kauf = str(richtung).lower() == "buy"
+    roh = float(fill) - netto / je if kauf else float(fill) + netto / je
+    tick = 10 ** -int(digits)
+    sl = round(roh, int(digits))
+    if kauf and sl < roh - 1e-9:
+        sl += tick
+    elif not kauf and sl > roh + 1e-9:
+        sl -= tick
+    return round(sl, int(digits))
 # NUR FINALE TRADES (Finn über Master 21.10.2026: „Also nur, wenn es ein finaler Trade ist, dann das Ganze machen … sonst ist ±100 egal"):
 # das Urteil fällt der PC-Tab (echoV2Final: Ziel/Rest/Boden aus der Auto-Planer-Notiz) und reist als cmd.final mit — 'pass' = der TP lässt
 # das Konto bestehen → NUR der TP wird exakt, 'blow' = der SL blowt es → NUR der SL, 'beide', sonst nichts (kein Ändern-Klick, wie bisher).
@@ -11727,12 +11749,20 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     if not gesucht:
         komm = _kommission_lesen(path, expected, p["ticket"])
     sl_ex, tp_ex = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size, cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)
+    # TAGESGRENZE ÜBERSCHRITTEN (Master 26.10.2026 nach S2-Befund): der SL ab Fill auf min(sl_usd, Grenze) — nur sl_usd ab Fill ließ den
+    # Verlust über der Grenze, wenn schon der Plan-SL größer war (Fall: Plan-SL 2.948 $ > Grenze 2.894 $)
+    tg_ueber = bool(tg and tg["ueber"])
+    if tg_ueber:
+        sl_ex = sl_tagesgrenze_vom_fill(cmd["richtung"], fill, vol, contract_size, cmd["sl_usd"], tg["grenze_usd"], komm or 0.0, digits)
+        tg["soll_verlust_usd"] = tagesgrenze_pruefen(fill, sl_ex, vol, contract_size, komm, tg["grenze_usd"])[0]
+        if float(cmd["sl_usd"]) > tg["grenze_usd"]:
+            trail.append(f"Plan-SL {float(cmd['sl_usd']):g} $ > Grenze {tg['grenze_usd']:g} $ → SL ab Fill auf {tg['grenze_usd']:g} $ gedeckelt")
     sl = sl_ex if sl_an else sl_alt
     tp = tp_ex if tp_an else tp_alt
     abw = sltp_abweichung_usd(sl_alt, tp_alt, sl, tp, vol, contract_size)
     erg.update(komm=komm, abw_usd=abw, soll_sl=sl, soll_tp=tp)
     ktxt = f"Kommission {komm:g} $" if komm is not None else "Kommission nicht lesbar, 0 $ gerechnet"
-    if abw < NACHZIEHEN_AB_USD:
+    if abw < NACHZIEHEN_AB_USD and not tg_ueber:   # Tagesgrenze überschritten: auch eine kleine Korrektur wird geklickt (Grenze gilt hart)
         trail.append(f"Nachziehen unnötig: {abw:g} $ daneben (< {NACHZIEHEN_AB_USD:g} $, {ktxt})")
         return erg
     trail.append(f"Nachziehen am Fill {fill}: SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} statt "
