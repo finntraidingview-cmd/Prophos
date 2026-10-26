@@ -20291,6 +20291,113 @@ def ap_blow_auto_tick(force=False):
     return n
 
 
+# ══ GEBLOWTE KONTEN AUS „BRAUCHT DICH" VON SELBST ARCHIVIEREN (26.10.2026, Finn am Admin → Braucht dich, Topstep 150k Challenge, Chip
+# „geblowt", „gelesen 145.447 $ · Boden 145.500 $", rechts „archivieren nur mit Admin-Login": „Der Current Balance unter dem Max Loss.
+# Deswegen einfach hier automatisch wegblowen, fertig. Er muss mir nicht immer noch angezeigt werden."). Der Blow-Takt oben hakt PLÄNE in
+# „Überprüfen" ab (Schalter abhaken_auto_blow, aus — geblowte Trades will Finn im Radar sehen, 21.10.2026); diese Zeilen sind KONTEN, die der
+# Planer mit Grund „geblowt?" auslässt, ihre Trades sind schon abgehakt. Für sie gab es nur den Klick „Als geblowt archivieren" im Tab, beim
+# fremden Konto nur mit Admin-Login. Jetzt alle AP_BLOW_KONTO_S: Geblowt-Zeilen des letzten Laufs (dieselbe Erkennung wie tplBraucht), Boden wie
+# tplBlowBoden (boden → boden_min → Größe − Drawdown aus dem Grund), Lesung = accounts.tv_balance einer echten Lesung (Puls/MT5, keine
+# Dashboard-Übernahme) NACH dem Ende des letzten Trades. Auf/unter dem Boden → Archiv des Besitzers „blown" (_konto_archiv_eintragen wie der
+# Blow-Takt), ap_archiv_sweep räumt die geplanten Trades; GET /admin/auto-plan filtert die Zeile dann weg (ap_ohne_archiv). Läuft auf dem Konto
+# ein Trade oder wartet einer aufs Abhaken (open/review), bleibt alles wie bisher. Kein Push. Aus nur per regeln.blow_konto_auto = false.
+AP_BLOW_KONTO_S = 300
+AP_BLOW_KONTO_RE = re.compile(r"geblasen|geblowt|Polster aufgebraucht", re.I)   # = istBlow in tplBraucht (prophos.html)
+AP_BLOW_KONTO_QUELLEN = (None, "", "puls", "mt5")   # tv_balance_quelle einer eigenen Lesung; null = Puls (vor F11, 27.09.2026)
+_ap_blow_konto = {"at": 0.0, "n": 0, "fehler": "", "letzt": []}
+
+
+def ap_blow_konto_boden(zeile, acc):
+    """REIN RECHNEND (testbar): Boden einer Geblowt-Zeile wie tplBlowBoden — boden → boden_min (ap_boden_zeile) → Kontogröße − Drawdown aus
+    dem Grundtext („… des Drawdowns 4.500 $", Größe wie kontoGroesseAnzeige/_wd_konto_groesse). → float | None (unbekannt)."""
+    z = zeile or {}
+    for k in ("boden", "boden_min"):
+        b = _wd_num(z.get(k))
+        if b is not None and b > 0:
+            return float(b)
+    m = re.search(r"Drawdowns\s+([\d.]+)\s*\$", str(z.get("grund") or ""))
+    if not m:
+        return None
+    dd = float(m.group(1).replace(".", ""))
+    g = _wd_konto_groesse({"name": z.get("konto") or (acc or {}).get("name"), "starting_balance": (acc or {}).get("starting_balance")}) or 0
+    return g - dd if g > dd > 0 else None
+
+
+def ap_blow_konto_pruefen(zeile, acc, plaene_konto, archiviert=False):
+    """REIN RECHNEND (testbar): Konto dieser ausgelassen[]-Zeile jetzt als geblowt archivieren? → {balance, boden, at, quelle} oder None.
+    Nur Geblowt-Grund, Konto nicht archiviert, kein Trade offen/in „Überprüfen", Boden bekannt, Lesung echt (AP_BLOW_KONTO_QUELLEN), jünger
+    als das Ende des letzten Trades und ≤ Boden. Topstep Express liest 0-basiert (ist_topstep_express) → nie."""
+    z = zeile or {}
+    if archiviert or not acc or not AP_BLOW_KONTO_RE.search(str(z.get("grund") or "")):
+        return None
+    if str(acc.get("id") or "") != str(z.get("konto_id") or "") or ist_topstep_express(acc):
+        return None
+    plaene_konto = list(plaene_konto or ())
+    if any(str(p.get("status") or "") in ("open", "review") for p in plaene_konto):
+        return None                                # Trade läuft oder wartet aufs Abhaken → Radar, Finn
+    if acc.get("tv_balance_quelle") not in AP_BLOW_KONTO_QUELLEN:
+        return None                                # Dashboard-Übernahme — keine Lesung nach dem Trade
+    bal, at = _wd_num(acc.get("tv_balance")), acc.get("tv_balance_at")
+    at_ts = _ap_iso_ts(at)
+    if bal is None or bal <= 0 or at_ts is None:
+        return None
+    enden = [t for t in (_ap_iso_ts(p.get("ended_at") or p.get("completed_at")) for p in plaene_konto) if t is not None]
+    if not enden or at_ts <= max(enden):
+        return None                                # kein Wert älter als der letzte Trade (und ohne Trade kein „geblowt?")
+    boden = ap_blow_konto_boden(z, acc)
+    if boden is None or bal > boden:
+        return None
+    return {"balance": round(bal, 2), "boden": round(boden, 2), "at": str(at), "quelle": acc.get("tv_balance_quelle") or "puls"}
+
+
+def ap_blow_konto_tick(force=False):
+    """Alle AP_BLOW_KONTO_S: Geblowt-Zeilen des letzten Planer-Laufs prüfen (ap_blow_konto_pruefen) und das Konto als geblowt archivieren.
+    → Anzahl neu archivierter Konten | None (nicht dran)."""
+    if not force and time.time() - _ap_blow_konto["at"] < AP_BLOW_KONTO_S:
+        return None
+    _ap_blow_konto["at"] = time.time()
+    reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}
+    if reg.get("blow_konto_auto") is False:
+        return 0
+    rows = sb_select("auto_plan_lauf", {"select": "tag,at,ergebnis", "order": "at.desc", "limit": "1"})   # derselbe Lauf wie GET /admin/auto-plan
+    erg = (rows[0].get("ergebnis") if rows else None) or {}
+    zeilen = [z for z in (erg.get("ausgelassen") if isinstance(erg, dict) else None) or []
+              if isinstance(z, dict) and z.get("konto_id") and AP_BLOW_KONTO_RE.search(str(z.get("grund") or ""))]
+    if not zeilen:
+        return 0
+    ids = sorted({str(z["konto_id"]) for z in zeilen})
+    archiv = _ap_archiviert(streng=True)
+    konten = {str(a["id"]): a for a in sb_select("accounts", {
+        "select": "id,user_id,name,firm,account_type,starting_balance,external_id,tv_balance,tv_balance_at,tv_balance_quelle",
+        "id": f"in.({','.join(ids)})"}) or []}
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,ended_at,completed_at",
+                                     "master_account_id": f"in.({','.join(ids)})"}) or []
+    n, letzt = 0, []
+    for z in zeilen:
+        kid = str(z["konto_id"])
+        acc = konten.get(kid)
+        try:
+            k = ap_blow_konto_pruefen(z, acc, [p for p in plaene if str(p.get("master_account_id")) == kid], kid in archiv)
+            if not k:
+                continue
+            uid = str(acc.get("user_id") or z.get("user_id") or "")
+            if not uid:
+                continue
+            jetzt_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            if _konto_archiv_eintragen(uid, kid, "blown", jetzt_iso, acc.get("name")):
+                n += 1
+                archiv.add(kid)
+                letzt.append({"konto_id": kid, "user_id": uid, "konto": acc.get("name"), "firma": acc.get("firm"), **k, "archiviert_at": jetzt_iso})
+                print(f"[blow-konto] 💀 {acc.get('firm') or 'Konto'} {acc.get('name') or kid[:8]} ({uid[:8]}): Lesung {k['balance']:.2f} $ "
+                      f"({k['quelle']}, {k['at']}) ≤ Boden {k['boden']:.2f} $ → als geblowt archiviert", flush=True)
+        except Exception as e:
+            print(f"[blow-konto] ⚠️ {kid[:8]}: {type(e).__name__}: {e}", flush=True)
+    _ap_blow_konto["n"] = n
+    if letzt:
+        _ap_blow_konto["letzt"] = (letzt + _ap_blow_konto["letzt"])[:20]
+    return n
+
+
 
 # ══ NORMALE TRADES AUTOMATISCH ABHAKEN (14.10.2026, Finn am Radar „Erledigt · Abhaken 8": „die ganz normalen Trades, bei denen einfach
 # nichts passiert — kein Blow, nicht bestanden — müsst ihr mir nicht jedes Mal zeigen, die können insta selber abgehakt werden. Bestanden
@@ -28925,6 +29032,13 @@ def ap_loop():
             ap_archiv_sweep()                 # Pläne archivierter Konten / Waisen alle 5 min (09.10.2026)
         except Exception as e:
             print(f"[archiv-sweep] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
+            if ap_blow_konto_tick():          # geblowte Konten aus „Braucht dich" (echte Lesung ≤ Boden) archivieren, alle 5 min (26.10.2026)
+                ap_archiv_sweep(force=True)   # geplante Trades der eben archivierten Konten sofort weg
+            _ap_blow_konto["fehler"] = ""
+        except Exception as e:
+            _ap_blow_konto["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[blow-konto] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             # AUTO-ABHAKEN AUS (Finn 19.10.2026 13:55: „Bitte in Zukunft so, dass ich alle noch selber manuell abhaken muss … vor allem, wo ich am
             # Trade-Planer arbeite, möchte ich immer einen Überblick haben"; Anlass: zwei Lucid-Trades, von Railway still abgehakt, nirgends mehr
