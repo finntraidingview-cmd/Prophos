@@ -5337,6 +5337,31 @@ def test_puls_fehler_1682():
     chk(ob._consent_laeuft(_c) and not ob._consent_laeuft([{"pid": 1, "name": "Consent.exe.bak"}]) and not ob._consent_laeuft(None),
         "_consent_laeuft: nur der Name consent.exe")
     chk(ob._uac_lage("C:\\MT5-X\\terminal64.exe") is None and ob._uac_lage("") is None, "_uac_lage: ohne Windows/Pfad None, wirft nicht")
+    # Alter der Abfrage + frisch gestartete Programme (Routine „Puls-Fehler" 26.10.2026: Login/Lesen 129–144 s → F9 ohne Fenster, 15× auf 2 PCs,
+    # Auslöser-Lesung jedes Mal „nichts davon"): consent.exe-Alter und Programme < 5 min hinter dem Auslöser-Text; ohne Alter kein Nachsatz
+    _pl = [{"pid": 7, "name": "consent.exe", "pfad": ""}, {"pid": 8, "name": "terminal64.exe", "pfad": "C:\\x\\terminal64.exe"},
+           {"pid": 9, "name": "powershell.exe", "pfad": ""}, {"pid": 10, "name": "explorer.exe", "pfad": ""}, {"pid": 11, "name": "terminal64.exe", "pfad": ""},
+           {"pid": 12, "name": "consent.exe", "pfad": ""}]
+    _fr = ob.uac_frische(_pl, {7: 131.4, 8: 133.0, 9: 4.2, 10: 90000.0, 11: 20.0, 12: 3.0})
+    chk(_fr["abfrage_s"] == 3.0 and _fr["jung"] == [("powershell.exe", 4.2), ("terminal64.exe", 20.0)],
+        f"uac_frische: jüngste consent.exe, Programme < 5 min je Name der jüngste, consent/alte raus ({_fr})")
+    chk(ob.uac_frische(_pl, {}) == {"abfrage_s": None, "jung": None} and ob.uac_frische(None, {7: 1.0}) == {"abfrage_s": None, "jung": []},
+        "uac_frische: ohne Alter beides None, ohne Prozesse leer")
+    _ft = _ua(dict(_fr))
+    chk(_ft.startswith(" · Auslöser: weder") and _ft.endswith(" · Abfrage steht seit 3 s · neu seit 5 min: powershell.exe (4 s), terminal64.exe (20 s)"),
+        f"uac_ausloeser_text: Frische hinter dem Auslöser, ganz am Ende (überlebt die Kürzung) ({_ft})")
+    chk(_ua({"haken": ["HKCU"], "jung": []}).endswith(" · kein Programm in den letzten 5 min neu gestartet") and ob.uac_frische_text({}) == ""
+        and ob.uac_frische_text(None) == "" and ob.uac_frische_text({"abfrage_s": None, "jung": None}) == "",
+        "uac_frische_text: leere Liste benannt, ohne Werte leer")
+    chk(ob._prozess_alter(_pl) == {} if os.name != "nt" else isinstance(ob._prozess_alter(_pl), dict), "_prozess_alter: ohne Windows {}, wirft nicht")
+    _q2 = _i.getsource(ob._prozess_alter) + _i.getsource(ob.uac_frische) + _i.getsource(ob.uac_frische_text)
+    chk("TerminateProcess" not in _q2 and "Popen" not in _q2 and "click" not in _q2.lower() and "sleep(" not in _q2 and '"pfad"' not in _q2 and "[\"pfad\"]" not in _q2,
+        "_prozess_alter/uac_frische: nur lesen, keine Pfade im Text")
+    chk(_i.getsource(ob._verbindung_hinweis).count("_uac_lage(path, prozesse)") == 1 and _i.getsource(ob._desktop_sperre_hinweis).count("_uac_lage(path, prozesse)") == 1,
+        "beide Aufrufer geben die Prozessliste an _uac_lage")
+    _ql = _i.getsource(ob._login_dann_lesen)
+    chk("runden > 1" in _ql and "Login/Lesen: {runden} Runden" in _ql and _ql.count("    _runden_stempel()\n") == 2 and "LOGIN_GEDULD_S" in _ql,
+        "_login_dann_lesen: Runden-Stempel vor beiden Ausgängen, Geduld unverändert")
     _q = _i.getsource(ob._uac_lage) + _i.getsource(ob.uac_ausloeser_text)
     chk("SetValueEx" not in _q and "DeleteValue" not in _q and "Popen" not in _q and "click" not in _q.lower() and "sleep(" not in _q,
         "_uac_lage/uac_ausloeser_text: nur lesen — kein Registry-Schreiben, kein Start, kein Klick")

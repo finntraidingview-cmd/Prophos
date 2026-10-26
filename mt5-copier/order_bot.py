@@ -1673,7 +1673,7 @@ def _verbindung_hinweis(path):
         prozesse, fenster = _verbindung_lage()
         if not prozesse:
             return _UAC_HINWEIS
-        return verbindung_ursache(path, prozesse, fenster, uac=_uac_lage(path) if _consent_laeuft(prozesse) else None)[1]
+        return verbindung_ursache(path, prozesse, fenster, uac=_uac_lage(path, prozesse) if _consent_laeuft(prozesse) else None)[1]
     except Exception:
         return _UAC_HINWEIS
 
@@ -1690,12 +1690,83 @@ def _consent_laeuft(prozesse):
     return any(str(p.get("name") or "").lower() == "consent.exe" for p in prozesse or ())
 
 
-def _uac_lage(path):
-    """Nur lesen, wirft nie: {haken: [Hive…], update: (alt, neu) | None, aufgabe_ok: bool | None} für DIESE terminal64.exe;
-    None ohne Windows/Pfad. aufgabe_ok wird nur ermittelt, wenn ein Update wartet (schtasks-Abfrage)."""
+# WIE ALT IST DIE ABFRAGE, WER KAM GERADE NEU? (Routine „Puls-Fehler" 26.10.2026 05:30 Dubai, Muster „v2order: # nicht gefunden — abbruch,
+# nichts gesendet" + „… (-# 'ipc timeout')": 15 Fälle in 7 Tagen auf 2 PCs mit IMMER demselben Ablauf — Login/Lesen 129–144 s, dann „F9
+# ohne Dialog: kein Fenster vorn", consent.exe läuft; die Auslöser-Lesung vom 23.10. sagt jedes Mal „nichts davon". 120 s ist genau die
+# Frist, nach der Windows eine unbeantwortete Sicherheitsabfrage von selbst schließt — also steht sie ab Lauf-Start, und beim F9 steht
+# schon die nächste. Wer sie verlangt, zeigen zwei Zahlen, die am PC lesbar sind: seit wann consent.exe läuft (vor oder nach dem Lauf-
+# Start?) und welche Programme in den letzten 5 min neu gestartet wurden (das Terminal selbst beim Kaltstart, ein Updater, PowerShell …).
+# GetProcessTimes braucht nur PROCESS_QUERY_LIMITED_INFORMATION; nicht lesbar = weggelassen. Nur lesen, nie beenden, nie klicken.
+JUNG_S = 300.0   # „neu gestartet" = jünger als 5 min
+
+
+def _prozess_alter(prozesse):
+    """Nur lesen, wirft nie: {pid: Alter in Sekunden} für die lesbaren Prozesse der Liste; {} ohne Windows."""
+    alter = {}
+    if os.name != "nt":
+        return alter
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        k32 = ctypes.windll.kernel32
+        jetzt = time.time()
+        for p in prozesse or ():
+            try:
+                pid = int(p.get("pid") or 0)
+            except Exception:
+                continue
+            if pid <= 0:
+                continue
+            h = k32.OpenProcess(0x1000, False, pid)            # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                continue
+            try:
+                ft = (wt.FILETIME * 4)()
+                if k32.GetProcessTimes(h, ctypes.byref(ft[0]), ctypes.byref(ft[1]), ctypes.byref(ft[2]), ctypes.byref(ft[3])):
+                    t = ((ft[0].dwHighDateTime << 32) | ft[0].dwLowDateTime) / 1e7 - 11644473600.0   # FILETIME → Unix-Sekunden
+                    if t > 0:
+                        alter[pid] = max(0.0, jetzt - t)
+            finally:
+                k32.CloseHandle(h)
+    except Exception:
+        pass
+    return alter
+
+
+def uac_frische(prozesse, alter):
+    """REIN RECHNEND (testbar): {abfrage_s: Alter der jüngsten consent.exe | None, jung: [(name, alter_s)…] | None} aus Prozessliste und
+    _prozess_alter — jung = Programme jünger als JUNG_S außer consent.exe, je Name der jüngste, höchstens 6; None ohne lesbare Alter."""
+    if not alter:
+        return {"abfrage_s": None, "jung": None}
+    consent, jung = [], {}
+    for p in prozesse or ():
+        try:
+            pid, name = int(p.get("pid") or 0), str(p.get("name") or "")
+        except Exception:
+            continue
+        a = alter.get(pid)
+        if a is None or not name:
+            continue
+        if name.lower() == "consent.exe":
+            consent.append(a)
+        elif a < JUNG_S and (name not in jung or a < jung[name]):
+            jung[name] = a
+    return {"abfrage_s": min(consent) if consent else None,
+            "jung": sorted(jung.items(), key=lambda x: x[1])[:6]}
+
+
+def _uac_lage(path, prozesse=None):
+    """Nur lesen, wirft nie: {haken: [Hive…], update: (alt, neu) | None, aufgabe_ok: bool | None, zone, abfrage_s, jung} für DIESE
+    terminal64.exe; None ohne Windows/Pfad. aufgabe_ok wird nur ermittelt, wenn ein Update wartet (schtasks-Abfrage).
+    prozesse (26.10.2026) = Liste aus _verbindung_lage → abfrage_s/jung aus uac_frische; ohne Liste beides None."""
     if os.name != "nt" or not path:
         return None
-    lage = {"haken": [], "update": None, "aufgabe_ok": None, "zone": False}
+    lage = {"haken": [], "update": None, "aufgabe_ok": None, "zone": False, "abfrage_s": None, "jung": None}
+    if prozesse:
+        try:
+            lage.update(uac_frische(prozesse, _prozess_alter(prozesse)))
+        except Exception:
+            pass
     ziel = os.path.normcase(os.path.abspath(path))
     # Download-Kennung (23.10.2026, Mike pc-l5o8bv: Windows fragte „Datei öffnen?"): Datenstrom Zone.Identifier an GENAU dieser Exe
     try:
@@ -1737,9 +1808,30 @@ def _uac_lage(path):
     return lage
 
 
+def uac_frische_text(uac):
+    """REIN RECHNEND (testbar): Nachsatz zu Alter der Abfrage und frisch gestarteten Programmen (26.10.2026, s. _prozess_alter) — leer,
+    wenn die Lage beides nicht kennt. Nur Programmnamen, keine Pfade."""
+    if not isinstance(uac, dict):
+        return ""
+    t = ""
+    a = uac.get("abfrage_s")
+    if isinstance(a, (int, float)):
+        t += f" · Abfrage steht seit {int(a)} s"
+    jung = uac.get("jung")
+    if isinstance(jung, (list, tuple)):
+        t += (" · neu seit 5 min: " + ", ".join(f"{n} ({int(s)} s)" for n, s in jung)) if jung \
+            else " · kein Programm in den letzten 5 min neu gestartet"
+    return t
+
+
 def uac_ausloeser_text(uac):
     """REIN RECHNEND (testbar): Nachsatz „ · Auslöser: …" zur offenen Sicherheitsabfrage aus der Lage von _uac_lage — leer ohne Lage.
-    Reihenfolge: Admin-Häkchen (kommt bei JEDEM Kaltstart wieder) vor wartendem MT5-Build vor Download-Kennung (23.10.2026) vor „nichts davon"."""
+    Reihenfolge: Admin-Häkchen (kommt bei JEDEM Kaltstart wieder) vor wartendem MT5-Build vor Download-Kennung (23.10.2026) vor „nichts davon".
+    Dahinter (26.10.2026) Alter der Abfrage + frisch gestartete Programme (uac_frische_text), damit der Verlangende benannt werden kann."""
+    return _uac_ausloeser_kern(uac) + uac_frische_text(uac)
+
+
+def _uac_ausloeser_kern(uac):
     if not isinstance(uac, dict):
         return ""
     haken = [str(h) for h in (uac.get("haken") or ())]
@@ -1785,7 +1877,7 @@ def _desktop_sperre_hinweis(path=None):
         prozesse, _fenster = _verbindung_lage()
         if not prozesse:
             return "unbekannt", _UAC_HINWEIS
-        return desktop_sperre_ursache(prozesse, uac=_uac_lage(path) if _consent_laeuft(prozesse) else None)
+        return desktop_sperre_ursache(prozesse, uac=_uac_lage(path, prozesse) if _consent_laeuft(prozesse) else None)
     except Exception:
         return "unbekannt", _UAC_HINWEIS
 
@@ -10769,11 +10861,23 @@ def _login_dann_lesen(path, expected, **kw):
     kw.setdefault("timeout_ms", LOGIN_RUNDE_MS)
     ende = time.time() + LOGIN_GEDULD_S
     st = _mt5_login_bestaetigen(expected, trail)
+    # RUNDEN IN DIE SPUR (Routine „Puls-Fehler" 26.10.2026, s. _prozess_alter: 15× „Login/Lesen ok" erst nach 129–144 s, danach F9 ohne
+    # Fenster): die Spur sagte nur die Sekunde, nicht ob die Verbindung von der ersten Runde an scheiterte (Abfrage steht ab Lauf-Start)
+    # oder erst spät. Jetzt bei mehr als einer Runde eine Zeile mit Rundenzahl und letztem Fehler — nur Spur, Geduld und Ablauf unverändert.
+    runden, letzter = 0, ""
+
+    def _runden_stempel():
+        if trail is not None and runden > 1:
+            trail.append(f"Login/Lesen: {runden} Runden, zuletzt '{letzter[:70]}'")
     while True:
+        runden += 1
         lese = _api_lesen(path, expected, **kw)
         if "fehler" not in lese:
+            _runden_stempel()
             return lese
+        letzter = str(lese.get("fehler") or "")
         if time.time() >= ende:
+            _runden_stempel()
             return lese
         st2 = _mt5_login_bestaetigen(expected, trail)
         if st2 == "bestaetigt":
