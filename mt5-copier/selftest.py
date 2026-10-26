@@ -2047,6 +2047,7 @@ def main():
     results.append(test_tsx_bracket_b36())
     results.append(test_puls_heim())
     results.append(test_tv_tp_orders())
+    results.append(test_orbit_nachziehen())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
     results.append(test_login_wache())
@@ -9370,6 +9371,100 @@ def test_tv_tp_orders():
         and ob.TV_RX_POS_TAB_N.search("Positions") and not ob.TV_RX_ORDERS_TAB_N.search("Order History"))
     if ok:
         print("✓ TV-TP-Orders: Limit-Order Wurzel/Gegenseite/Menge, eindeutig, Reiter mit Zähler")
+    return ok
+
+
+def test_orbit_nachziehen():
+    """Finn über Master 26.10.2026: Orbit zieht TP/SL nach dem Fill nach — TP nur bei final pass/beide und nur, wenn er über das Ziel
+    schießt; SL nur, wenn der Verlust am Stop die Tagesgrenze (bzw. bei blow den Plan-SL) übersteigt. Zeilen-Wahl eindeutig, Preisfeld
+    eindeutig, Brücken-Felder, Einbau nach der Endprüfung."""
+    import order_bot as ob, inspect
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Orbit-Nachziehen: " + name); ok = False
+
+    S = ob.tv_nachzieh_soll
+    # Live-Fall 26.10.2026: SELL 3 NQ @ 29.319,50, TP 3.600 $ → Limit 29.260,75 = 3.525 $ (zu wenig, kein Überschießen)
+    r = S("sell", 3, "NQ", 29319.5, 29260.75, None, 3600, None, None, "pass")
+    chk(f"TP unter Ziel bleibt ({r})", r["tp"] is None and r["sl"] is None)
+    # BUY 3 NQ @ 29.269, TP 3.476 $ → Limit 29.328,25 = 3.555 $ > 3.476 + 3 → neu 29.269 + ceil(57,93/0,25)·0,25 = 29.327
+    r = S("buy", 3, "NQ", 29269, 29328.25, None, 3476, None, None, "pass")
+    chk(f"TP über Ziel → 29327 ({r})", r["tp"] == 29327.0 and (r["tp"] - 29269) * 60 >= 3476)
+    chk("ohne final kein TP", S("buy", 3, "NQ", 29269, 29328.25, None, 3476, None, None, "")["tp"] is None)
+    chk("final blow zieht keinen TP", S("buy", 3, "NQ", 29269, 29328.25, None, 3476, None, None, "blow")["tp"] is None)
+    chk("final beide zieht TP", S("buy", 3, "NQ", 29269, 29328.25, None, 3476, None, None, "beide")["tp"] == 29327.0)
+    # Sell-Seite: TP liegt unter dem Fill, neu vom Fill WEG gerundet (Treffer ≥ Ziel)
+    r = S("sell", 2, "MNQ", 30000, 29900, None, 300, None, None, "pass")
+    chk(f"Sell MNQ TP 400 $ > 300 $ → 29925 ({r})", r["tp"] == 29925.0)
+    r = S("sell", 3, "MNQ", 30000, 29900, None, 301, None, None, "pass")
+    chk(f"Sell MNQ Ziel 301 $ → 29949,75 (Treffer ≥ Ziel) ({r})", r["tp"] == 29949.75 and (30000 - r["tp"]) * 6 >= 301)
+    # SL: Tagesgrenze 1.000 $, BUY 2 NQ @ 29.000, Stop 28.970 = −1.200 $ → neu 29.000 − floor(25/0,25)·0,25 = 28.975
+    r = S("buy", 2, "NQ", 29000, None, 28970, None, 1200, 1000, None)
+    chk(f"SL über Tagesgrenze → 28975 ({r})", r["sl"] == 28975.0 and r["tp"] is None)
+    chk("SL innerhalb der Grenze bleibt", S("buy", 2, "NQ", 29000, None, 28976, None, 1200, 1000, None)["sl"] is None)
+    chk("SL ohne Grenze und ohne blow bleibt", S("buy", 2, "NQ", 29000, None, 28970, None, 1200, None, "pass")["sl"] is None)
+    r = S("sell", 2, "NQ", 29000, None, 29031, None, 1200, 1000, None)
+    chk(f"Sell SL über Grenze → 29025 ({r})", r["sl"] == 29025.0)
+    r = S("buy", 1, "MNQ", 29000, None, 28900, None, 150, 1000, "blow")
+    chk(f"blow: Grenze = min(Tagesgrenze, Plan-SL) 150 $ → 28925 ({r})", r["sl"] == 28925.0)
+    r = S("buy", 1, "MNQ", 29000, None, 28900, None, 150, None, "blow")
+    chk("blow ohne Tagesgrenze: Plan-SL", r["sl"] == 28925.0)
+    r = S("buy", 10, "NQ", 29000, None, 28990, None, None, 40, None)
+    chk(f"Grenze < 1 Tick bleibt ({r})", r["sl"] is None and any("Tick" in t for t in r["teile"]))
+    chk("ohne Stop kein SL (Orbit fast immer ohne SL)", S("buy", 2, "NQ", 29000, 29100, None, 4000, None, 1000, "pass")["sl"] is None)
+    chk("unbekannte Wurzel: nichts", S("buy", 1, "GC", 2000, 2100, 1900, 50, 50, 10, "beide") == {"tp": None, "sl": None,
+        "teile": ["kein Punktwert für 'GC' — nichts nachgezogen"]})
+    chk("ohne Fill: nichts", S("buy", 1, "NQ", None, 29100, None, 50, None, None, "pass")["tp"] is None)
+    chk("Preis-Text ohne :g", ob.tv_nz_preis_text(29260.75) == "29260.75" and ob.tv_nz_preis_text(29261.0) == "29261"
+        and ob.tv_nz_preis_text(29260.5) == "29260.5")
+
+    # Zeilen-Wahl
+    def z(seite, typ, preis, menge="3", status="Working", sym="NQZ2026"):
+        return {"symbol": sym, "seite": seite, "typ": typ, "preis": preis, "menge": menge, "status": status,
+                "preis_zelle": {"rect": [10, 10, 60, 18], "text": preis}, "ziel": {"rect": [10, 10, 60, 18], "tag": "td:zelle"}}
+    W = ob.tv_nz_zeile_wahl
+    zl = [z("sell", "Limit", "29,328.25"), z("sell", "Stop", "28,970.00"), z("buy", "Market", "29,269.00", status="Filled")]
+    chk("TP-Zeile eindeutig", W(zl, "NQ", "buy", "tp", 3, 29328.25)[0] is zl[0])
+    chk("SL-Zeile eindeutig", W(zl, "NQ", "buy", "sl", 3, 28970.0)[0] is zl[1])
+    chk("falscher Preis → keine", W(zl, "NQ", "buy", "tp", 3, 29330.0)[0] is None)
+    chk("falsche Menge → keine", W(zl, "NQ", "buy", "tp", 2, 29328.25)[0] is None)
+    chk("gleiche Seite → keine", W(zl, "NQ", "sell", "tp", 3, 29328.25)[0] is None)
+    chk("andere Wurzel → keine", W(zl, "MNQ", "buy", "tp", 3, 29328.25)[0] is None)
+    chk("Stop-Limit zählt nicht als TP", W([z("sell", "Stop Limit", "29,328.25")], "NQ", "buy", "tp", 3, 29328.25)[0] is None)
+    chk("gefüllt/storniert zählt nicht", W([z("sell", "Limit", "29,328.25", status="Cancelled")], "NQ", "buy", "tp", 3, 29328.25)[0] is None)
+    chk("zwei gleiche → keine", W(zl + [z("sell", "Limit", "29,328.25")], "NQ", "buy", "tp", 3, 29328.25)[0] is None)
+    ohne = dict(zl[0], preis_zelle=None)
+    chk("Zelle ohne Rechteck → keine", W([ohne], "NQ", "buy", "tp", 3, 29328.25)[0] is None)
+
+    # Preisfeld der Ändern-Ansicht
+    P = ob.tv_nz_preisfeld
+    f_lim, f_stp = {"label": "Limit Price", "wert": "29328.25"}, {"label": "Stop Price", "wert": "28970"}
+    chk("TP: Limit-Preis", P([f_lim, {"label": "Quantity"}], "tp") is f_lim)
+    chk("SL: Stop-Preis", P([f_stp, {"label": "Quantity"}], "sl") is f_stp)
+    chk("ein Feld Price", P([{"label": "Price", "wert": "1"}, {"label": "Qty"}], "tp")["label"] == "Price")
+    chk("zwei Price-Felder → None", P([{"label": "Price"}, {"label": "Price"}], "tp") is None)
+    chk("gesperrtes Feld zählt nicht", P([dict(f_lim, aus=True)], "tp") is None)
+
+    # Brücke + Einbau
+    c = ob.tv_bruecke_auspacken({"geschwister": ["@tages_grenze_usd=1000", "@final=pass", "APEX123"]})
+    chk(f"Brücke: tages_grenze_usd + final ({c})", c.get("tages_grenze_usd") == "1000" and c.get("final") == "pass" and c["geschwister"] == ["APEX123"])
+    q = inspect.getsource(ob.modus_tvkette_cdp)
+    chk("Nachziehen nach der Endprüfung, vor 'Order bewiesen'",
+        q.index("_cdp_endpruefung(") < q.index("_cdp_nachziehen(") < q.index("Order bewiesen ("))
+    chk("nur ohne alte Position", "menge0 == 0" in q[q.index("ORBIT-NACHZIEHEN"):q.index("_cdp_nachziehen(")])
+    e = inspect.getsource(ob._cdp_nz_eine_seite)
+    chk("genau ein Doppelklick, mit Zielpunkt-Beweis", e.count("doppel=True") == 1 and "pruef=pruef" in e)
+    chk("altes Level im Feld beweist die Order", e.index("alt = cdp_zahl") < e.index("s.feld_setzen("))
+    chk("Rücklesung vor Modify", e.index("Rücklesung") < e.index("Modify-Knopf"))
+    n = inspect.getsource(ob._cdp_nachziehen)
+    chk("Rückkehr auf Positions im finally", "finally" in n and n.index("finally") < n.index('_cdp_reiter(s, "positions"'))
+    chk("Soll-Rechnung im try (nie UNKLAR durch einen Rechenfehler)", n.index("try:") < n.index("tv_nachzieh_soll("))
+    chk("Spurzeile 'Order bewiesen (…): Einstieg'", "): Einstieg {res['einstieg']" in q)
+    if ok:
+        print("✓ Orbit-Nachziehen: TP nur über Ziel (pass), SL nur über Tagesgrenze/blow, Zeile/Feld eindeutig, Brücke, Einbau")
     return ok
 
 
