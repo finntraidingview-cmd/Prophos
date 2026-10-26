@@ -5,7 +5,7 @@ am 23.10.2026: SL 2.948 $ bei Daily Loss 3 % der Tagesstart-Equity 96.463 = 2.89
 Geprüft: Grenze aus daily_pct (Basis Tagesstart bzw. Größe) oder daily_usd, soft → keine; heute realisierter Verlust zieht ab; SL über
 Grenze − 100 $ wird gekappt (ohne „+50 dahinter"), darunter bleibt er; Boden enger → „SL hinter den Boden" bleibt; Tagesgrenze enger als der
 Boden → sie gewinnt, die Stufe verliert „hinter den Boden"; Rest unter dem Puffer → kein Trade; ohne Grenze unverändert, Feld null;
-Futures ohne SL tragen das Feld trotzdem; ein alter Lader ohne den Helfer rechnet weiter. Dazu Text-Prüfungen des Vertrags
+Futures ohne SL tragen das Feld trotzdem; ein alter Lader ohne den Helfer rechnet weiter. Orbit-Prüf-Marken (Panel reicht nur die Brücke durch). Dazu Text-Prüfungen des Vertrags
 tages_grenze_usd in app.py (Planzeile, Rückfall ohne Spalte), prophos.html (Echo-Body, Orbit-Body + Marke, Signale) und panel.py.
 Aufruf: python3 tools/selftest_auto_tagesgrenze_sl.py"""
 import os
@@ -126,8 +126,12 @@ def main():
     check("tagesGrenzeUsd:  row.tages_grenze_usd != null ? Number(row.tages_grenze_usd) : null" in html, "PC-Tab: rowToPlan liest das Feld")
     check("tages_grenze_usd: po.tages_grenze_usd != null ? po.tages_grenze_usd : (plan.tagesGrenzeUsd" in html,
           "PC-Tab: /api/master-order (Echo V2) trägt tages_grenze_usd")
-    check("tages_grenze_usd: _tg," in html and "'@tages_grenze_usd=' + (_tg != null ? _tg : '')" in html,
-          "PC-Tab: /api/tv-konto (Orbit) trägt Feld + Brücken-Marke")
+    check("tages_grenze_usd: _tg," in html and "...orbitPruefMarken(plan, tp, sl, _tg), ...geschwister]" in html,
+          "PC-Tab: /api/tv-konto (Orbit) trägt Feld + Prüf-Marken")
+    check("orbitPruefMarken(plan, Number(m.tp_usd) || 0, Number(m.sl_usd) || 0, plan.tagesGrenzeUsd)" in html,
+          "PC-Tab: Polar-Master-Start trägt die Prüf-Marken")
+    check("m.push('@tages_grenze_usd=' + Number(tg))" in html and "if(f === 'pass' || f === 'beide') m.push('@final=pass')" in html,
+          "Prüf-Marken: @tages_grenze_usd nur mit Wert, @final=pass nur bei Ziel-Treffer")
     check(html.count("tages_grenze_usd: order.tages_grenze_usd != null") == 2 and "tages_grenze_usd: w.tg }" in html,
           "Signale (Echo-Remote, Order-Popup, Orbit-Remote) tragen das Feld")
     check('cmd["tages_grenze_usd"] = _tg if ohne_hedge and _tg is not None and _tg >= 0 else None' in panel,
