@@ -33021,7 +33021,12 @@
         // nach und wählt „Nachfolger"; bis dahin bleibt das Konto hier. „Balance lesen" bleibt als dritter kleiner Knopf. Der Knopf „Jetzt bestanden →
         // Nachfolger" aus .1647 ist damit weg.
         const pid = wdlTid(t), abSperre = (typeof wdlAbhakenSperre === 'function' ? wdlAbhakenSperre(t) : '') || ''
-        const knopf = (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-planer="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" data-wdl-rvh-rest="${zr.rest != null ? Math.round(zr.rest) : ''}" title="Rest zurück in den Trade-Planer: der Bot plant den Rest${zr.rest != null ? ` (${de(zr.rest)} $)` : ''} als Klein-Trade (CFD: Rest in 20 Pkt; Futures: 1 MNQ, TP = Rest + Puffer) — Nachplanen ≤ 5 min, sonst im Nachtlauf (ggf. morgen). Die Markierung löscht sich am Ziel.">→ Planer</button>` : '')
+        // „Trade planen" (Finn 26.10.2026: „Wenn noch so wenig fehlt, will ich das sicher gegenhedgen … einfach einen Orbit-Trade machen"):
+        // öffnet das normale Trade-planen-Popup mit diesem Konto + Orbit vorgewählt (tpRestHedgeOeffnen). Nur Futures (Orbit = TradingView)
+        // und nur im Login des Kontos — das Popup kennt nur die eigenen Konten.
+        const istFut = typeof tpFirmIstFutures === 'function' ? tpFirmIstFutures(k.firma || (a && a.firm) || '') : true
+        const knopf = (kid && istFut ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-trade="${escapeHtml(kid)}"${a ? '' : ' disabled'} title="${escapeHtml(a ? 'Orbit-Trade mit Fusion-Gegenhedge planen — Konto und Orbit vorgewählt, Multiplikator frei wählbar' : `Trade planen nur im Login von ${wer} — das Popup kennt nur die eigenen Konten`)}">Trade planen</button>` : '')
+          + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-planer="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" data-wdl-rvh-rest="${zr.rest != null ? Math.round(zr.rest) : ''}" title="Rest zurück in den Trade-Planer: der Bot plant den Rest${zr.rest != null ? ` (${de(zr.rest)} $)` : ''} als Klein-Trade (CFD: Rest in 20 Pkt; Futures: 1 MNQ, TP = Rest + Puffer) — Nachplanen ≤ 5 min, sonst im Nachtlauf (ggf. morgen). Die Markierung löscht sich am Ziel.">→ Planer</button>` : '')
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || 'Abhaken — der normale Dialog: Nichts ändern / Account geblowt / Phase bestanden → Nachfolger. Den Rest von Hand holen, hier als manuell nachtragen und den Nachfolger anlegen')}">Abhaken</button>`
           + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${ziel != null ? ` data-wdl-rvh-ziel="${ziel}"` : ''}${rvhLauf ? ' disabled' : ''}${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${escapeHtml(rvhLauf ? (rvhSt.text || 'liest …') : eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie am Ziel, wandert das Konto sofort nach Tage sammeln/Review' : `Balance über den PC von ${wer} lesen lassen — steht sie am Ziel, wandert das Konto sofort nach Tage sammeln/Review`)}">${rvhLauf ? 'liest …' : 'Balance lesen'}</button>` : '')
         const zt = bstZeitVon(a && a.zielErreichtAt, t)   // Rest von Hand hat per Definition keinen Ziel-Tag → Trade-Ende
@@ -33152,6 +33157,8 @@
       if(t) mklWdErledigtOeffnen(pid, t)
       return
     }
+    const rt = ev.target.closest('[data-wdl-rvh-trade]')
+    if(rt){ if(!rt.disabled && typeof window.tpRestHedgeOeffnen === 'function') window.tpRestHedgeOeffnen(rt.getAttribute('data-wdl-rvh-trade')); return }   // Rest von Hand mit Hedge (26.10.2026)
     const rp = ev.target.closest('[data-wdl-rvh-planer]')
     if(rp){ const d = rp.dataset; rvhZurueckInPlaner(d.wdlRvhPlaner, d.wdlRvhUid, d.wdlRvhWer || '', d.wdlRvhRest); return }
     const rl = ev.target.closest('[data-wdl-rvh-bal]')
@@ -41775,6 +41782,7 @@
       // zum Master-TP. Wie hedge_eur bewusst nicht in planToRow — geschrieben nur vom Plan-Popup auf dem Weg WD-Farm.
       hedgeFaktor: row.hedge_faktor != null ? Number(row.hedge_faktor) : null,
       orbitV3: row.orbit_v3 === true,
+      restHedge: row.rest_hedge === true,   // Rest von Hand mit Hedge (26.10.2026, sql/2026-10-26_rest_von_hand_orbit.sql) — nur vom Plan-Popup geschrieben
       kontoTyp: row.konto_typ || null,   // Kontotyp am Plan (nur Lesen — Rückfall für den Phasen-Chip der Geplant-Tabelle, 05.10.2026)
       // Auto-Planer (05.10.2026, sql/2026-10-05_auto_planer.sql): vom Planer angelegt; ohne Bestätigung startet der Plan nie
       // von selbst (tpStartUmTick). Wie hedge_eur bewusst nicht in planToRow — ein Modal-Edit darf die Kennung nicht löschen.
@@ -46024,6 +46032,9 @@
   let _tpWd = false               // Winning Day (24.09.2026 abends): tvv2 + hedge_eur aus der Staffel, nur Funded-Futures
   let _tpChHedge = false          // „Challenges mit Hedge" (09.10.2026): Schalter im Popup-Kopf, je ID, s. tpChHedgeLaden
   let _tpO3 = false               // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge mit der Farm-Rechnung, jedes Futures-Konto, Master-SL = Risiko Master
+  // Rest von Hand mit Hedge (26.10.2026): Konto-ID, für die DIESES Popup Orbit auf einem Challenge-Konto erlaubt — nur über den Radar-Knopf
+  // „Trade planen" (tpRestHedgeOeffnen) bzw. beim Bearbeiten eines solchen Plans; jedes andere Öffnen setzt sie auf null
+  let _tpRestHedge = null, _tpRestHedgeNaechst = null
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
   // Hedge-Betrag für einen Winning-Day-Plan: bestehender Wert bleibt, sonst Staffel (Live-Balance − Kontogröße),
   // ohne Rechenbasis (kein DD am Konto) die kleinste Stufe — ein Winning Day ohne Hedge wäre kein Winning Day.
@@ -47324,7 +47335,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1742'
+  const OS_TAB_BUILD = '2026-09-22.1743'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56285,7 +56296,7 @@
     _tpWdHand.mult = null; _tpWdHand.risk = null; _tpWdHand.slaveGeschrieben = null; _tpWdHand.slaveVorbelegt = false; _tpWdHand.slaveHand = false; _tpWdHand.riskVorbelegt = false   // WD-Farm: Hand-Multiplikator + Staffel-Sperre je Popup neu (25.09.2026)
 
     // Title
-    document.getElementById('tradePlanTitle').textContent = isEdit ? 'Trade-Plan bearbeiten' : 'Trade planen'
+    document.getElementById('tradePlanTitle').textContent = isEdit ? 'Trade-Plan bearbeiten' : _tpRestHedgeNaechst ? 'Trade planen · Rest von Hand' : 'Trade planen'
     document.getElementById('tradePlanSave').textContent  = isEdit ? 'Nur speichern' : 'Nur speichern'
     // "Speichern & Starten" nur für Pläne, die noch gestartet werden können
     const _editPlan = isEdit ? tradePlans.find(x => String(x.id) === String(editId)) : null
@@ -56311,6 +56322,11 @@
     // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
     _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
     if(_tpO3) _tpWd = false
+    // Rest von Hand mit Hedge (26.10.2026): nur der Radar-Knopf (tpRestHedgeOeffnen) bzw. ein so angelegter Plan öffnet die Ausnahme —
+    // vorgewählt Orbit, ohne die gemerkte Weg-Wahl (localStorage) des normalen Popups anzufassen
+    _tpRestHedge = _tpRestHedgeNaechst || (_editPlan && _editPlan.restHedge && _editPlan.masterAccountId ? String(_editPlan.masterAccountId) : null)
+    _tpRestHedgeNaechst = null
+    if(_tpRestHedge && !_editPlan){ _tpRoute = 'tvv2'; _tpO3 = true; _tpWd = false }
     // Schalter „Challenges mit Hedge" (09.10.2026): sofort aus dem Komfort-Speicher, danach frisch aus user_settings
     tpChHedgeLaden()
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
@@ -57009,6 +57025,8 @@
         })
       }
     }else{
+      // Rest von Hand mit Hedge (26.10.2026): das Konto aus der Radar-Zeile ist vorgewählt
+      if(_tpRestHedge && [...masterSel.options].some(o => String(o.value) === _tpRestHedge)) masterSel.value = _tpRestHedge
       if(typeof tpUpdateMasterDailyDdInfo === 'function') tpUpdateMasterDailyDdInfo()
       document.getElementById('tp-master-risk').value = ''
       document.getElementById('tp-master-qty').value  = 1
@@ -59154,7 +59172,7 @@
       const mitH = tpWegMitHedge(), ohneH = routeIstV2(_tpRoute) && !mitH
       if(ohneH && (kt === 'funded' || kt === 'funded_cfd' || kt === 'winning_days')){
         msg(`Funded-Konto „${master.name}" nur mit Hedge — Weg Echo, Orbit V3, Winning Day oder Topstep (mit Hedge) wählen; ${_tpRoute === 'mt5v2' ? 'Echo V2' : _tpRoute === 'tsv2' ? 'Topstep V2' : 'Orbit V2'} ohne Hedge ist für Challenges.`, 'err'); return }
-      if(mitH && routeIstV2(_tpRoute) && (kt === 'challenge' || kt === 'phase1' || kt === 'phase2') && !_tpChHedge){
+      if(mitH && routeIstV2(_tpRoute) && (kt === 'challenge' || kt === 'phase1' || kt === 'phase2') && !_tpChHedge && !tpRestHedgeErlaubt(master)){
         msg(`Challenge-/Phase-Konto „${master.name}" nur ohne Hedge — Echo V2, Orbit V2 oder Topstep V2 wählen, oder oben „Challenges mit Hedge" einschalten.`, 'err'); return } }
     const mult = mitHedge ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, (wd && !o3) ? masterTp : masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026); WD: Basis = TP (05.10.2026)
                : v2 ? null : tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
@@ -59231,6 +59249,9 @@
       // Orbit V3 → hedge_eur MUSS weg, wenn derselbe Plan auf Orbit V2 zurückgestellt wird: sonst wäre er ab jetzt ein Winning Day
       if(!_tpWd && !_tpO3 && _editPlan && _editPlan.orbitV3) v2Extra.hedge_eur = null
       v2Extra.orbit_v3 = !!_tpO3
+      // Rest von Hand mit Hedge (26.10.2026): Kennung für den DB-Riegel trade_plans_kontoart_weg — nur Orbit auf genau dem Radar-Konto;
+      // nur bei true mitschicken, normale Pläne tragen das Feld nicht
+      if(tpRestHedgeErlaubt(master)) v2Extra.rest_hedge = true
     } else if(v2){ v2Extra.hedge_eur = null; v2Extra.hedge_faktor = null; v2Extra.orbit_v3 = false }
     try{
       let savedPlanId = null
@@ -59488,8 +59509,24 @@
    * (+ Alt-Wert challenge). Alte Modelle (Duplikum manuell) bleiben ungefiltert. Live-Konten sind auf keinem Weg Master;
    * der Master eines bearbeiteten Plans bleibt beim Aufrufer wie bisher geschützt. Slave-Dropdown unberührt. */
   function tpWegMitHedge(){ return _tpRoute === 'mt5' || _tpRoute === 'tvplus' || _tpRoute === 'topstep' || (_tpRoute === 'tvv2' && (_tpWd || _tpO3)) }
+  /* REST VON HAND MIT HEDGE (Finn 26.10.2026, Radar → Bestanden → Rest von Hand, Marc Tradeify 150k …1388 „fehlen noch 51 $": „Wenn noch so
+   * wenig fehlt, will ich das sicher gegenhedgen … auf ‚Trade planen' drücken und einfach einen Orbit-Trade machen, bei dem ich das Verhältnis
+   * so auswählen kann, wie ich es will"). Bisher von Hand getradet, gegengehedgt und „Balance lesen" gedrückt — im Popup ging Orbit auf
+   * dem Challenge-Konto nicht: Master-Dropdown (tpKontoartPasstZumWeg), Speichern-Prüfung und DB-Riegel (Hedge-Kategorien-Regel, 12.10.2026)
+   * lassen Challenge/Phase mit Hedge nur mit dem Schalter „Challenges mit Hedge" zu. Ausnahme hier GENAU für das eine Konto aus der
+   * Radar-Zeile und nur auf Orbit (tvv2 + orbit_v3); am Plan rest_hedge = true, die DB lässt ihn damit durch. Das normale Popup bleibt gesperrt.
+   * Verhältnis = der Multiplikator der Orbit-Box (Risiko Master/Slave oder Klick auf die Zahl), wie bei jedem Orbit-Plan. */
+  function tpRestHedgeErlaubt(a){
+    return !!(_tpRestHedge && a && String(a.id) === _tpRestHedge && _tpRoute === 'tvv2' && _tpO3)
+  }
+  window.tpRestHedgeOeffnen = kontoId => {
+    if(!kontoId) return
+    _tpRestHedgeNaechst = String(kontoId)
+    openTradePlanModal()
+  }
   function tpKontoartPasstZumWeg(a){
     const t = String((a && a.type) || '').toLowerCase()
+    if(tpRestHedgeErlaubt(a)) return true   // Rest von Hand mit Hedge (26.10.2026): das Radar-Konto auf Orbit
     // Duplikum (Puls) wieder ohne Kontoart-Filter (07.10.2026, Finn am Screenshot „Kein Funded-/Winning-Days-Konto"):
     // „alles anzeigen, was mit Duplikum verknüpft ist — wie es immer war bei Duplikum", egal ob Challenge oder Funded
     if(_tpRoute === 'tvplus') return true
