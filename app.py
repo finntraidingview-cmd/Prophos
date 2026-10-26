@@ -17443,9 +17443,12 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             stufe += f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
     # TAGESGRENZE (26.10.2026, s. AP_TAGES_PUFFER): eigener Deckel neben dem Boden, ohne „+50 dahinter". Liegt er enger als der Boden-SL,
     # gewinnt er — dann endet der Trade nicht mehr am Boden, die Stufe verliert „SL hinter den Boden" (echoV2Final liest sonst „blow").
-    # tages_grenze_usd reist am Plan mit (Vertrag Teil B/C: Echo/Orbit ziehen den SL am echten Fill nach, wenn er sie reißen würde).
+    # tages_grenze_usd reist am Plan mit (Vertrag Teil B: Echo V2 zieht den SL am echten Fill nach, wenn er sie reißen würde).
+    # NUR CFD/Echo (Route mt5v2/mt5) seit .1750 — Finn 26.10.2026: „Orbit nicht anfassen, genauso wie es war. Never change a running system."
+    # Futures (tvv2/tsv2: Lucid daily_usd 2.700, FTMO Futures 1.000, Apex, Tradeify, Topstep) bleiben wie vor .1747: keine Kappung, Feld null.
     _tgf = globals().get("ap_tagesgrenze")          # get: ältere Selftest-Lader ziehen ap_konto_rechnen ohne den Helfer
-    tg = _tgf(regel, groesse, balance, heute_verlust) if _tgf else None
+    _tg_cfd = (regel.get("route") or "mt5v2") in globals().get("AP_CFD_ROUTEN", ("mt5v2", "mt5"))
+    tg = _tgf(regel, groesse, balance, heute_verlust) if (_tgf and _tg_cfd) else None
     if sl and tg is not None:
         t_puffer = int(globals().get("AP_TAGES_PUFFER", 100))
         deckel = int(tg - t_puffer)

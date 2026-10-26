@@ -5,8 +5,8 @@ am 23.10.2026: SL 2.948 $ bei Daily Loss 3 % der Tagesstart-Equity 96.463 = 2.89
 Geprüft: Grenze aus daily_pct (Basis Tagesstart bzw. Größe) oder daily_usd, soft → keine; heute realisierter Verlust zieht ab; SL über
 Grenze − 100 $ wird gekappt (ohne „+50 dahinter"), darunter bleibt er; Boden enger → „SL hinter den Boden" bleibt; Tagesgrenze enger als der
 Boden → sie gewinnt, die Stufe verliert „hinter den Boden"; Rest unter dem Puffer → kein Trade; ohne Grenze unverändert, Feld null;
-Futures ohne SL tragen das Feld trotzdem; ein alter Lader ohne den Helfer rechnet weiter. Dazu Text-Prüfungen des Vertrags
-tages_grenze_usd in app.py (Planzeile, Rückfall ohne Spalte), prophos.html (Echo-Body, Orbit-Body + Marke, Signale) und panel.py.
+Futures (tvv2/tsv2) nie gekappt, Feld null (seit .1750, Orbit wie vor .1747); ein alter Lader ohne den Helfer rechnet weiter. Dazu Text-Prüfungen des Vertrags
+tages_grenze_usd in app.py (Planzeile, Rückfall ohne Spalte), prophos.html (Echo-Body, Signale, Orbit ohne Feld) und panel.py.
 Aufruf: python3 tools/selftest_auto_tagesgrenze_sl.py"""
 import os
 import re
@@ -105,11 +105,21 @@ def main():
     w, g = rechnen(regel(daily_pct=3, je_groesse=jg), "phase1", 96463.40, U)
     check(not g and w["sl"] == 2700 and w["tages_grenze_usd"] is None, f"Flex-Größe mit daily_pct null: keine Kappung ({w and w['sl']}, {g})")
 
-    # Futures-Challenge ohne SL: Feld aus daily_usd, kein SL
+    # FUTURES WIE VOR .1747 (Finn 26.10.2026: „Orbit nicht anfassen … Never change a running system"): tvv2/tsv2 nie gekappt, Feld null —
+    # auch mit daily_usd (Lucid 2.700) oder daily_pct; Gegenprobe: dieselbe Regel auf mt5v2 kappt
     fut = {"kauf_eur": 100, "boden": "statisch", "dd_usd": 4500, "daily_usd": 2700, "route": "tvv2", "ziel_pct": {"challenge": 6},
            "groessen": [150000], "phasen": {"challenge": {"menge": [2, 2], "tp": [4400, 4500], "tp_max": 4500, "dd_usd": 4500}}}
     w, g = rechnen(fut, "challenge", 151000, U)
-    check(not g and w["sl"] is None and w["tages_grenze_usd"] == 2700.0, f"Futures ohne SL: Feld 2.700, SL null ({w and (w['sl'], w['tages_grenze_usd'])}, {g})")
+    check(not g and w["sl"] is None and w["tages_grenze_usd"] is None, f"Futures ohne SL (tvv2, daily_usd 2.700): Feld null ({w and (w['sl'], w['tages_grenze_usd'])}, {g})")
+    fut_sl = dict(fut, daily_usd=2000, phasen={"challenge": {"menge": [2, 2], "tp": [4400, 4500], "tp_max": 4500, "sl": [2500, 2500], "dd_usd": 4500}})
+    for route in ("tvv2", "tsv2"):
+        w, g = rechnen(dict(fut_sl, route=route), "challenge", 151000, U)
+        check(not g and w["sl"] == 2500 and w["tages_grenze_usd"] is None and "Tagesgrenze" not in w["stufe"],
+              f"Futures {route} mit SL 2.500 > daily 2.000: keine Kappung, Feld null ({w and (w['sl'], w['stufe'])}, {g})")
+    w, g = rechnen(dict(fut_sl, route="tvv2", daily_usd=None, daily_pct=1, daily_basis="groesse"), "challenge", 151000, U)
+    check(not g and w["sl"] == 2500 and w["tages_grenze_usd"] is None, "Futures mit daily_pct: keine Kappung, Feld null")
+    w, g = rechnen(dict(fut_sl, route="mt5v2"), "challenge", 151000, U)
+    check(not g and w["sl"] == 1900 and w["tages_grenze_usd"] == 2000.0, f"Gegenprobe gleiche Regel auf mt5v2: SL 1.900 ({w and w['sl']})")
 
     # alter Lader ohne ap_tagesgrenze (andere Selbsttests): rechnet weiter, Feld null
     alt = lade([n for n in FUNKTIONEN if n != "ap_tagesgrenze"])
@@ -126,10 +136,10 @@ def main():
     check("tagesGrenzeUsd:  row.tages_grenze_usd != null ? Number(row.tages_grenze_usd) : null" in html, "PC-Tab: rowToPlan liest das Feld")
     check("tages_grenze_usd: po.tages_grenze_usd != null ? po.tages_grenze_usd : (plan.tagesGrenzeUsd" in html,
           "PC-Tab: /api/master-order (Echo V2) trägt tages_grenze_usd")
-    check("tages_grenze_usd: _tg," in html and "'@tages_grenze_usd=' + (_tg != null ? _tg : '')" in html,
-          "PC-Tab: /api/tv-konto (Orbit) trägt Feld + Brücken-Marke")
-    check(html.count("tages_grenze_usd: order.tages_grenze_usd != null") == 2 and "tages_grenze_usd: w.tg }" in html,
-          "Signale (Echo-Remote, Order-Popup, Orbit-Remote) tragen das Feld")
+    check("tages_grenze_usd: _tg," not in html and "@tages_grenze_usd=" not in html and "tages_grenze_usd: w.tg" not in html,
+          "Orbit wie vor .1747: kein Feld im tv-konto-Body, keine Marke, nichts in params.orbit")
+    check(html.count("tages_grenze_usd: order.tages_grenze_usd != null") == 2,
+          "Signale (Echo-Remote, Order-Popup) tragen das Feld")
     check('cmd["tages_grenze_usd"] = _tg if ohne_hedge and _tg is not None and _tg >= 0 else None' in panel,
           "panel.py: master-order reicht tages_grenze_usd an den Bot (nur Echo V2)")
 
