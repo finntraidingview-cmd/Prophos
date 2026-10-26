@@ -10,6 +10,9 @@ sind ersetzt — ohne Windows, ohne Netz.
  c) Rücklesen sltp_bestaetigt mit Toleranz; Fall 7f6adf45 nachgestellt (API zeigt weiter die Notfall-Level) → grobe Level bleiben, Grund.
  d) Wiederholung: höchstens NACHZIEHEN_VERSUCHE mit gewürfelter Pause, dann aufgeben; fehlt ein Level → ok False (nie still ohne SL/TP).
  e) Nur finale Trades: pass → nur TP, blow → nur SL, beide, null → kein Ändern-Klick.
+ f) Harte Grenze beim Öffnen (Finn 26.10.2026, „2 Minuten Klicks ins Leere"): je Punkt Rechtsklick-Menü UND Doppelklick, höchstens
+    AENDERN_MAX_PUNKTE Punkte, nie über AENDERN_FRIST_S hinaus, Abbruch mit Grund; kein zweiter blinder Anlauf beim Nachziehen.
+ g) Tagesgrenze: cmd.tages_grenze_usd → SL am Fill nachziehen, wenn der echte Verlust bis SL darüber liegt (auch ohne final).
 Aufruf: python3 tools/selftest_mt5_aendern.py"""
 import os
 import re
@@ -150,10 +153,10 @@ def lade():
     src = open(BOT, encoding="utf-8").read()
     uhr = Uhr()
     ns = {"re": re, "time": uhr, "os": os}
-    for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE"):
+    for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for name in ("fmt_preis", "berechne_sl_tp", "sltp_vom_fill", "sltp_abweichung_usd", "kommission_runde", "nachzieh_seiten",
-                 "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
+                 "tagesgrenze_pruefen", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
                  "_feld_lesen", "_feld_tippen", "_ist_aendern_dialog", "_dialog_gehoert_zu", "_menuepunkt_ausloesen",
                  "_kontextmenue_aendern_klicken", "_reihen_scan", "_map_felder", "_sltp_klicken", "_sltp_nachziehen"):
         exec(fn(src, name), ns)
@@ -331,6 +334,91 @@ def main():
               f"final {fin!r} → kein Ändern-Klick, grobe F9-Level wie bisher")
     check(ns["nachzieh_seiten"]("Pass") == (True, False) and ns["nachzieh_seiten"]("blow") == (False, True)
           and ns["nachzieh_seiten"]("beide") == (True, True) and ns["nachzieh_seiten"](None) == (False, False), "nachzieh_seiten")
+
+    # ── f) Harte Grenze beim Öffnen des Ändern-Dialogs (26.10.2026) ─────────────────────────────────────
+    ns, uhr, _src = lade()
+    w = El("12345678 - Konto", "Window", [], (0, 0, 1600, 900), cls=ns["MT5_KLASSE"])
+    eigen, _st, _s, _t = aendern_dialog(T)
+    klicks = []
+    ns["_klick_absolut"] = lambda x, y, taste="links", doppel=False: klicks.append((x, y, taste, doppel)) or True
+    # pc-t8wg97 26.10. nachgestellt: Menü nie lesbar, der Doppelklick am Erfahrungspunkt -316 px trifft → am 1. Punkt, nicht nach einer
+    # vollen Rechtsklick-Runde
+    ns["_kontextmenue_aendern_klicken"] = lambda timeout=2.0: (uhr.sleep(timeout), "kein_menue")[1]
+    ns["_finde_aendern_dialog"] = lambda w_, timeout=3.0: eigen if klicks and klicks[-1][3] and klicks[-1][1] == 900 - 316 else (uhr.sleep(timeout), None)[1]
+    spur, t0 = [], uhr.t
+    d = ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + ns["AENDERN_FRIST_S"], max_punkte=ns["AENDERN_MAX_PUNKTE"])
+    check(d is eigen and "Doppelklick-Scan @ -316px, Punkt 1" in spur[-1] and uhr.t - t0 < 5,
+          f"Menü nie lesbar: Doppelklick am selben Punkt sofort → Treffer an Punkt 1 nach {uhr.t - t0:.1f} s (vorher 218 s) — {spur[-1]}")
+    # Nie ein Treffer: höchstens AENDERN_MAX_PUNKTE Punkte, dann Abbruch mit Zählern
+    klicks.clear()
+    ns["_finde_aendern_dialog"] = lambda w_, timeout=3.0: (uhr.sleep(0.1), None)[1]
+    ns["_kontextmenue_aendern_klicken"] = lambda timeout=2.0: "kein_menue"
+    spur = []
+    d = ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + 999, max_punkte=ns["AENDERN_MAX_PUNKTE"])
+    punkte = {(x, y) for x, y, _t_, _d in klicks}
+    check(d is None and len(punkte) == ns["AENDERN_MAX_PUNKTE"] and f"abgebrochen (Grenze {ns['AENDERN_MAX_PUNKTE']} Punkte)" in spur[-1]
+          and "kein Menue" in spur[-1], f"kein Treffer → genau {ns['AENDERN_MAX_PUNKTE']} Punkte, Abbruch mit Grund — {spur[-1][:110]}…")
+    check(all(y >= 450 for _x, y, _t_, _d in klicks), "auch mit Grenze nur untere Fensterhälfte")
+    # Frist: jeder Punkt kostet ~6 s → nach der Frist kein weiterer Klick
+    klicks.clear()
+    ns["_finde_aendern_dialog"] = lambda w_, timeout=3.0: (uhr.sleep(5.0), None)[1]
+    spur, t0 = [], uhr.t
+    d = ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + ns["AENDERN_FRIST_S"], max_punkte=99)
+    check(d is None and f"abgebrochen (Grenze {ns['AENDERN_FRIST_S']:g} s)" in spur[-1] and uhr.t - t0 < ns["AENDERN_FRIST_S"] + 7,
+          f"Frist {ns['AENDERN_FRIST_S']:g} s: Abbruch nach {uhr.t - t0:.0f} s, {len({(x, y) for x, y, _a, _b in klicks})} Punkte")
+    # ausgegraut = Klick in der Liste neben der Zeile → kein Doppelklick dort
+    klicks.clear()
+    ns["_kontextmenue_aendern_klicken"] = lambda timeout=2.0: "ausgegraut"
+    spur = []
+    ns["_reihen_scan"](w, T, spur, 450, bis=uhr.t + 999, max_punkte=3)
+    check(not any(dp for _x, _y, _t_, dp in klicks) and "3x ausgegraut" in spur[-1], "ausgegraut → kein Doppelklick an dieser Stelle, Zähler in der Spur")
+    # _sltp_klicken: alle Wege leer → sauberer Abbruch mit dialog False + Grund, kein Klick nach der Frist
+    klicks.clear()
+    ns["_kontextmenue_aendern_klicken"] = lambda timeout=2.0: (uhr.sleep(timeout), "kein_menue")[1]
+    ns["_finde_aendern_dialog"] = lambda w_, timeout=3.0: (uhr.sleep(timeout), None)[1]
+    ns["_anker_lesen"] = lambda p: {"x_frac": 0.4, "y_off": 200}
+    zeiten = []
+    alt_klick = ns["_klick_absolut"]
+    ns["_klick_absolut"] = lambda x, y, taste="links", doppel=False: zeiten.append(uhr.t) or alt_klick(x, y, taste, doppel)
+    spur, t0 = [], uhr.t
+    k = ns["_sltp_klicken"](w, T, "NAS100", "29746.18", "29696.32", spur)
+    check(k["ok"] is False and k.get("dialog") is False and "Frist" in k["msg"] and spur[-1] == k["msg"],
+          f"_sltp_klicken ohne Treffer → dialog False, Grund „{k['msg'][:70]}…“")
+    check(max(zeiten) - t0 <= ns["AENDERN_FRIST_S"] and uhr.t - t0 < ns["AENDERN_FRIST_S"] + 8,
+          f"letzter Klick {max(zeiten) - t0:.1f} s nach Start (Frist {ns['AENDERN_FRIST_S']:g} s), fertig nach {uhr.t - t0:.1f} s statt Minuten")
+
+    # ── g) Tagesgrenze + kein zweiter blinder Anlauf ─────────────────────────────────────────────────────
+    TG = ns["tagesgrenze_pruefen"]
+    check(TG(29713.38, 29758.50, 4.0, 1.0, 0.0, 150) == (180.48, True) and TG(29713.38, 29758.50, 4.0, 1.0, 2.0, 200) == (182.48, False)
+          and TG(29713.38, 29758.50, 4.0, 1.0, 0.0, None) == (None, None) and TG(29713.38, 29758.50, 4.0, 1.0, 0.0, 0) == (None, None)
+          and TG(29713.38, 0.0, 4.0, 1.0, 0.0, 150) == (None, None) and TG(1, 2, 1, 1, 0, "x") == (None, None),
+          "tagesgrenze_pruefen: |Fill − SL| × Lot × Kontrakt + Kommission gegen die Grenze; fehlt/0/kein SL → keine Prüfung")
+
+    def lauf2(cmd_extra, api, klick_erg):
+        ka = []
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or klick_erg
+        ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: api
+        ns["_kommission_lesen"] = lambda path, exp, t: 0.0
+
+        class _U:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        ns["_EchoUnruhe"] = _U
+        sp = []
+        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, **cmd_extra), "NAS100", FILL, VOL, CS, 2, SL_F9, TP_F9, sp, None)
+        return e, ka, sp
+    gut = {"ok": True, "msg": "geklickt"}
+    e, ka, sp = lauf2({"final": None, "tages_grenze_usd": 150}, pos(sl_ex, TP_F9), gut)
+    check(ka == [(P(sl_ex, 2), P(TP_F9, 2))] and e["nachgezogen"] and e["seiten"] == "SL" and e["tagesgrenze"]["ueber"]
+          and any("Tagesgrenze: Verlust bis SL 180.48 $ > 150 $ → SL am Fill" in s for s in sp) and any("(SL wegen Tagesgrenze)" in s for s in sp),
+          f"ohne final, Verlust bis SL 180,48 $ > Grenze 150 $ → NUR SL am Fill ({P(sl_ex, 2)}), TP bleibt")
+    e, ka, sp = lauf2({"final": None, "tages_grenze_usd": 500}, pos(SL_F9, TP_F9), gut)
+    check(ka == [] and any("Tagesgrenze ok (180.48 ≤ 500)" in s for s in sp) and "Final: keins" in sp[-1], "Grenze 500 $ → „Tagesgrenze ok“, kein Ändern-Klick")
+    e, ka, sp = lauf2({"final": "pass", "tages_grenze_usd": 150}, pos(sl_ex, tp_ex), gut)
+    check(ka == [(P(sl_ex, 2), P(tp_ex, 2))] and e["seiten"] == "TP+SL", "final pass + Tagesgrenze → TP und SL am Fill")
+    e, ka, sp = lauf2({"final": "beide"}, pos(SL_F9, TP_F9), {"ok": False, "dialog": False, "msg": "Aendern-Dialog nach 21 s nicht offen — Frist 20 s erreicht"})
+    check(len(ka) == 1 and e["ok"] and "Frist 20 s" in e["grund"] and "grobe F9-Level bleiben" in e["grund"],
+          "Dialog ging in der Frist nicht auf → KEIN zweiter blinder Anlauf, Grund in der Spur, grobe Level bleiben")
 
     print()
     if FEHLER:

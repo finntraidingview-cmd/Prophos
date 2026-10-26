@@ -133,6 +133,32 @@ def berechne_sl_tp(richtung, ref_preis, volumen, contract_size, sl_usd, tp_usd, 
 # Fusion-Hedge bleibt, wie es ist.
 NACHZIEHEN_AB_USD = 3.0          # kleinere Abweichung (TP oder SL) lohnt keinen Ändern-Dialog
 NACHZIEHEN_VERSUCHE = 2          # Ändern-Dialog höchstens so oft (dazwischen gewürfelte Pause), dann aufgeben — grobe Level bleiben
+# ÄNDERN-DIALOG MIT HARTER GRENZE (Finn 26.10.2026: „geh sicher, dass man beim Doppelklick bzw. Rechtsklick auf die Order danach auch
+# wirklich auf ‚Position ändern' klicken kann. Denn oft hat er so viel ins Leere gedrückt und wohl 2 Minuten Klicks ausgeführt").
+# BEFUND aus den Spuren (14 Tage): pc-t8wg97 26.10. 15:53 Dubai „Handel-Tab geklickt" 21,0 s → „Aendern-Dialog offen (Doppelklick-Scan
+# @ -316px)" 239,0 s — 218 s Rechtsklicks über alle ~28 Band-Punkte, das Menü war dort nie lesbar, und der Doppelklick kam erst in der
+# zweiten Runde, am ersten Punkt traf er sofort; Versuch 2 über den dabei gemerkten Anker: 5 s. Close-Scan 16.10. 4K-Fenster: 62 Punkte,
+# 129 s, kein Treffer. Jetzt: je Punkt Rechtsklick-Menü UND (Menü nicht lesbar) Doppelklick an derselben Stelle, und das Öffnen des
+# Dialogs hat eine Grenze — danach Abbruch mit Grund in der Spur, die groben Level bleiben.
+AENDERN_FRIST_S = 20.0           # Ändern-Dialog öffnen: höchstens so lange je _sltp_klicken (Anker, Tab, Band-Scan, UIA-Zeilen, Geometrie)
+AENDERN_MAX_PUNKTE = 10          # Band-Punkte je Scan (je Punkt Rechtsklick-Menü + Doppelklick) — der Anker vom Treffer macht den nächsten Lauf schnell
+# TAGESGRENZE (Finn 26.10.2026: SL/TP nach dem Fill nur nachziehen, wenn „der SL so groß ist, dass das Daily Loss Limit in Gefahr ist"
+# oder der TP übers Ziel schießt): der PC-Tab schickt cmd.tages_grenze_usd = höchstens erlaubter Verlust dieses Trades bis zur Tagesgrenze
+# ($). Liegt der echte Verlust bis zum gesetzten SL (ab dem Fill, + Kommission) darüber, wird der SL am Fill nachgezogen — auch ohne final.
+# Fehlt das Feld (altes Frontend) oder ist es keine positive Zahl: keine Prüfung, alles wie bisher.
+
+
+def tagesgrenze_pruefen(fill, sl, volumen, contract_size, komm_usd, grenze_usd):
+    """REIN RECHNEND (testbar): echter Verlust bis zum gesetzten SL ($, positiv) = |fill − sl| × volumen × contract_size + Kommission,
+    verglichen mit cmd.tages_grenze_usd. → (verlust_usd, ueber) — ueber None = keine Prüfung (Grenze fehlt/≤ 0/keine Zahl, SL 0)."""
+    try:
+        g = float(grenze_usd)
+    except (TypeError, ValueError):
+        return None, None
+    if not g > 0 or not sl or not float(sl):
+        return None, None
+    verlust = round(abs(float(fill) - float(sl)) * float(volumen) * float(contract_size) + max(0.0, float(komm_usd or 0)), 2)
+    return verlust, verlust > g
 # NUR FINALE TRADES (Finn über Master 21.10.2026: „Also nur, wenn es ein finaler Trade ist, dann das Ganze machen … sonst ist ±100 egal"):
 # das Urteil fällt der PC-Tab (echoV2Final: Ziel/Rest/Boden aus der Auto-Planer-Notiz) und reist als cmd.final mit — 'pass' = der TP lässt
 # das Konto bestehen → NUR der TP wird exakt, 'blow' = der SL blowt es → NUR der SL, 'beide', sonst nichts (kein Ändern-Klick, wie bisher).
@@ -10950,7 +10976,7 @@ def _anker_schreiben(pfad, **felder):
         pass
 
 
-def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False):
+def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False, bis=None, max_punkte=None):
     """Finns Weg als Band-Scan, OHNE jeden UIA-Anker (18.08.2026: auf diesem
     Build sind Handel-Liste, Kontostand-Zeile UND der Position-aendern-Reiter
     im frischen F9-Dialog fuer UIA unsichtbar — der .58-Lauf hat den Reiter-
@@ -11006,62 +11032,79 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
                 continue
             punkte.append((f"-{off}px", gx, y))
 
-    grau = 0   # Punkte, deren Menue offen war, aber 'Aendern' ausgegraut = neben der Zeile
-    for runde in ("Rechtsklick-Menue", "Doppelklick"):
-        for pname, px_, py_ in punkte:
-            if is_paused():
-                trail.append("⏸ Echo pausiert — Zeilen-Scan abgebrochen")
-                return None
-            _maus_fahren(px_, py_, schritte=3)
-            # Finns Schritt 1: Zeile markieren, dann erst oeffnen
-            _klick_absolut(px_, py_)
-            _warte(0.15, 0.2)
-            if runde == "Rechtsklick-Menue":
-                if not _klick_absolut(px_, py_, taste="rechts"):
-                    continue
-                _warte(0.25, 0.3)
-                st_menue = _kontextmenue_aendern_klicken(timeout=0.8)
-                if st_menue != "geklickt":
-                    if st_menue == "ausgegraut":
-                        grau += 1
-                    try:
-                        w.type_keys("{ESC}", set_foreground=False)
-                    except Exception:
-                        pass
-                    continue
+    # JE PUNKT BEIDE WEGE + GRENZE (26.10.2026, s. AENDERN_FRIST_S): vorher erst eine volle Rechtsklick-Runde über alle Punkte, dann die
+    # Doppelklick-Runde — war das Kontextmenü auf einem Build nie lesbar, kostete das ~28 × 8 s, bevor der Doppelklick am ersten Punkt
+    # traf (pc-t8wg97 26.10.: 218 s). Jetzt je Punkt: markieren → Rechtsklick → nur einen LESBAREN, aktiven Punkt „Ändern…" klicken;
+    # Menü nicht lesbar → ESC und Doppelklick an derselben Stelle; „ausgegraut" = Klick lag in der Liste, aber neben der Zeile → nächster
+    # Punkt (ein Doppelklick dort öffnet nichts). Höchstens max_punkte Punkte und nie über bis hinaus — dann Abbruch mit Grund.
+    grau = kein = n = 0
+    t0, abbruch = time.time(), ""
+    for pname, px_, py_ in punkte:
+        if is_paused():
+            trail.append("⏸ Echo pausiert — Zeilen-Scan abgebrochen")
+            return None
+        if max_punkte is not None and n >= max_punkte:
+            abbruch = f"Grenze {max_punkte} Punkte"
+            break
+        if bis is not None and time.time() >= bis:
+            abbruch = f"Grenze {AENDERN_FRIST_S:g} s"
+            break
+        n += 1
+        _maus_fahren(px_, py_, schritte=3)
+        # Finns Schritt 1: Zeile markieren, dann erst oeffnen
+        _klick_absolut(px_, py_)
+        _warte(0.15, 0.2)
+        weg, d = "", None
+        if _klick_absolut(px_, py_, taste="rechts"):
+            _warte(0.25, 0.3)
+            st_menue = _kontextmenue_aendern_klicken(timeout=0.8)
+            if st_menue == "geklickt":
+                weg = "Rechtsklick-Menue"
+                d = _finde_aendern_dialog(w, timeout=1.2)
             else:
-                if not _klick_absolut(px_, py_, doppel=True):
-                    continue
-            d = _finde_aendern_dialog(w, timeout=1.2)
-            if d is None:
-                # Menue hat geklickt, aber kein Dialog (Punkt lag neben der
-                # Zeile, Eintrag ausgegraut) — Menue NICHT offen stehen
-                # lassen (Fund aus Finns Screenshot 18.08.)
                 try:
                     w.type_keys("{ESC}", set_foreground=False)
                 except Exception:
                     pass
+                if st_menue == "ausgegraut":
+                    grau += 1
+                    continue
+                kein += 1
+        if not weg:
+            if bis is not None and time.time() >= bis:   # auch mitten im Punkt: nach der Frist kein Klick mehr
+                abbruch = f"Grenze {AENDERN_FRIST_S:g} s"
+                break
+            if not _klick_absolut(px_, py_, doppel=True):
                 continue
-            if _dialog_gehoert_zu(d, ticket):
-                trail.append(f"Aendern-Dialog offen ({runde}-Scan @ {pname})")
-                _anker_schreiben(anker_pfad,
-                                 x_frac=(px_ - hr.left) / max(1, hr.right - hr.left),
-                                 y_off=hr.bottom - py_)
-                return d
+            weg = "Doppelklick"
+            d = _finde_aendern_dialog(w, timeout=1.2)
+        if d is None:
+            # kein Dialog (Punkt lag neben der Zeile) — Menue NICHT offen stehen lassen (Fund aus Finns Screenshot 18.08.)
             try:
-                d.type_keys("{ESC}", set_foreground=False)
+                w.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
-            _fremde_dialoge_schliessen(w)
-    # Selbst-Diagnose in die Spur (30.08.2026): Geometrie + Ausgegraut-Zaehler
-    # sagen beim naechsten Fehlversuch sofort, WORAN es lag — nur ausgegraute
-    # Punkte = alle Klicks lagen neben der Zeile (Geometrie/Band), gar keine
-    # Menues = die Rechtsklicks kommen nicht an (Klick-Weg).
+            continue
+        if _dialog_gehoert_zu(d, ticket):
+            trail.append(f"Aendern-Dialog offen ({weg}-Scan @ {pname}, Punkt {n}, {time.time() - t0:.1f} s)")
+            _anker_schreiben(anker_pfad,
+                             x_frac=(px_ - hr.left) / max(1, hr.right - hr.left),
+                             y_off=hr.bottom - py_)
+            return d
+        try:
+            d.type_keys("{ESC}", set_foreground=False)
+        except Exception:
+            pass
+        _fremde_dialoge_schliessen(w)
+    # Selbst-Diagnose in die Spur (30.08.2026, seit 26.10.2026 mit Zeit, Menü-Zähler und Abbruchgrund): nur ausgegraute Punkte = alle
+    # Klicks lagen in der Liste neben der Zeile; nur „kein Menü" = das Menü ist auf diesem Build nicht lesbar und auch der Doppelklick
+    # öffnete nichts (Klick-Weg/Geometrie)
+    zaehler = f"{n} Punkte in {time.time() - t0:.1f} s, {grau}x ausgegraut, {kein}x kein Menue" + (f" — abgebrochen ({abbruch})" if abbruch else "")
     if nur_anker:
-        trail.append(f"Anker-Schnellweg ohne Treffer ({grau}x ausgegraut)")
+        trail.append(f"Anker-Schnellweg ohne Treffer ({zaehler})")
     else:
         trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
-                     f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
+                     f"Band -60..-{band_max}px, x={gx}, {zaehler})")
     return None
 
 
@@ -11210,14 +11253,17 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     # verschobene Zeile), laeuft die Reparatur: Toolbox auf 'Handel', dann der
     # volle Band-Scan. Sicherheit unveraendert: geklickt wird nie blind, und
     # ob der RICHTIGE Dialog offen ist, entscheidet weiter _dialog_gehoert_zu.
+    # Eine Frist für ALLE Öffnungswege (26.10.2026, s. AENDERN_FRIST_S) — Anker, Tab, Band-Scan, UIA-Zeilen, Geometrie teilen sie sich
+    t_start = time.time()
+    bis = t_start + AENDERN_FRIST_S
     dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad,
-                       nur_anker=True)
+                       nur_anker=True, bis=bis)
     if dlg is None:
         # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar
         # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
         tab_weg = _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
-        dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
-        if dlg is None and tab_weg == "anker":
+        dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad, bis=bis, max_punkte=AENDERN_MAX_PUNKTE)
+        if dlg is None and tab_weg == "anker" and time.time() < bis:
             # Der gemerkte Tab-Punkt hat NICHT in die Handel-Liste gefuehrt
             # (02.09.2026, Finns Fund: der Anker-Klick traf 'Belastung' statt
             # 'Handel', und ab da lief der Scan in der falschen Liste — 'ab
@@ -11231,10 +11277,12 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             trail.append("Tab-Anker verworfen (Scan fand nach Anker-Klick keine Handel-Zeile)")
             if _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad,
                                       anker_nutzen=False) == "suche":
-                dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
+                dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad, bis=bis, max_punkte=AENDERN_MAX_PUNKTE)
 
     kandidaten, ticket_da = [], False
-    if dlg is None:
+    # UIA-Zeilen und Geometrie nur mit Restzeit (26.10.2026): beide durchlaufen den ganzen UIA-Baum und klicken je Kandidat bis zu fünf
+    # Wege — nach abgelaufener Frist kein weiterer Klick, sauberer Abbruch unten
+    if dlg is None and time.time() < bis:
         try:
             for ct in ("DataItem", "ListItem", "TreeItem", "Custom", "Text", None):
                 for el in (w.descendants(control_type=ct) if ct else w.descendants()):
@@ -11263,6 +11311,8 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         # sofort raus statt weiter am Terminal herumzuklicken (28.08.2026).
         if is_paused():
             trail.append("⏸ Echo pausiert — Klick-Versuche abgebrochen")
+            break
+        if time.time() >= bis:
             break
         try:
             r = zeile.rectangle()
@@ -11314,6 +11364,8 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                           ("invoke", _weg_invoke),
                           ("DoDefaultAction", _weg_dodefault),
                           ("Shift-F10-Menue", _weg_menue)):
+            if time.time() >= bis:
+                break
             try:
                 weg()
             except Exception:
@@ -11339,7 +11391,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         if dlg is not None:
             break
 
-    if dlg is None:
+    if dlg is None and time.time() < bis:
         # Geometrie-Fallback (18.08.2026): sieht UIA die Handel-Zeilen nicht,
         # dient die 'Kontostand'-Zeile als Anker — die Positionen stehen im
         # Handel-Tab DIREKT darueber. Blind-Doppelklick in die Zeile(n) ueber
@@ -11369,6 +11421,8 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                     break
                 if is_paused():
                     trail.append("⏸ Echo pausiert — Geometrie-Fallback abgebrochen")
+                    break
+                if time.time() >= bis:
                     break
                 _maus_fahren(gx, gy, schritte=6)
                 # Finns Hand-Weg (18.08.2026, Schritt fuer Schritt vorgemacht):
@@ -11412,7 +11466,12 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
 
     if dlg is None:
         _fremde_dialoge_schliessen(w)
-        return {"ok": False, "msg": "Aendern-Dialog liess sich nicht oeffnen"}
+        # Abbruch MIT Grund (26.10.2026): wie lange, und ob die Frist griff — die Zähler je Scan stehen schon in der Spur
+        dauer = time.time() - t_start
+        grund = (f"Aendern-Dialog nach {dauer:.0f} s nicht offen — Frist {AENDERN_FRIST_S:g} s erreicht, abgebrochen statt weiter blind zu klicken"
+                 if dauer >= AENDERN_FRIST_S else f"Aendern-Dialog liess sich nicht oeffnen ({dauer:.0f} s, alle Wege ohne Treffer)")
+        trail.append(grund)
+        return {"ok": False, "dialog": False, "msg": grund}
 
     # 3) SL/TP-Felder nach Beschriftung, sonst die ersten beiden Edits
     try:
@@ -11643,15 +11702,30 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     -> {sl, tp, ok, nachgezogen, final, seiten, komm, abw_usd, soll_sl, soll_tp, versuche, grund}; ok False NUR, wenn die Position danach
     ohne SL oder TP dasteht."""
     tp_an, sl_an = nachzieh_seiten(cmd.get("final"))
+    # Tagesgrenze (26.10.2026, s. tagesgrenze_pruefen): dritter Auslöser, nur für den SL — die Kommission wird dafür schon hier gelesen
+    komm, gesucht, tg = None, False, None
+    if cmd.get("tages_grenze_usd") is not None:
+        komm, gesucht = _kommission_lesen(path, expected, p["ticket"]), True
+        verlust, ueber = tagesgrenze_pruefen(fill, sl_alt, vol, contract_size, komm, cmd.get("tages_grenze_usd"))
+        if ueber is not None:
+            tg = {"verlust_usd": verlust, "grenze_usd": round(float(cmd["tages_grenze_usd"]), 2), "ueber": ueber}
+            if ueber:
+                trail.append(f"Tagesgrenze: Verlust bis SL {verlust:g} $ > {tg['grenze_usd']:g} $ → SL am Fill")
+                sl_an = True
+            else:
+                trail.append(f"Tagesgrenze ok ({verlust:g} ≤ {tg['grenze_usd']:g})")
     seiten = "+".join(s for s, an in (("TP", tp_an), ("SL", sl_an)) if an)
     erg = {"sl": sl_alt, "tp": tp_alt, "ok": True, "nachgezogen": False, "final": cmd.get("final") or None, "seiten": seiten or None,
-           "komm": None, "abw_usd": 0.0, "soll_sl": sl_alt, "soll_tp": tp_alt, "versuche": 0, "grund": ""}
+           "komm": None, "abw_usd": 0.0, "soll_sl": sl_alt, "soll_tp": tp_alt, "versuche": 0, "grund": "", "tagesgrenze": tg}
     fg = str(cmd.get("final_grund") or "").strip()[:160]
     if not seiten:
         trail.append(f"Final: keins{' (' + fg + ')' if fg else ''} — kein Ändern-Klick, grobe F9-Level bleiben")
         return erg
-    trail.append(f"Final: {cmd.get('final')}{' (' + fg + ')' if fg else ''} → nur {seiten} am Fill nachziehen")
-    komm = _kommission_lesen(path, expected, p["ticket"])
+    nur_tg = sl_an and not nachzieh_seiten(cmd.get("final"))[1]
+    trail.append(f"Final: {cmd.get('final') or 'keins'}{' (' + fg + ')' if fg else ''} → nur {seiten} am Fill nachziehen"
+                 + (" (SL wegen Tagesgrenze)" if nur_tg else ""))
+    if not gesucht:
+        komm = _kommission_lesen(path, expected, p["ticket"])
     sl_ex, tp_ex = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size, cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)
     sl = sl_ex if sl_an else sl_alt
     tp = tp_ex if tp_an else tp_alt
@@ -11671,6 +11745,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
             trail.append(f"Nachziehen Versuch {versuch}/{NACHZIEHEN_VERSUCHE}")
         k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits), fmt_preis(tp, digits), trail, anker_pfad=anker_pfad)
         if k is None:                          # Echo pausiert — kein Klick, kein zweiter Anlauf
+            break
+        if k.get("dialog") is False:           # Dialog ging in der Frist nicht auf (26.10.2026) — ein zweiter Anlauf wäre derselbe blinde Scan
             break
         stand, ende = None, time.time() + 10
         with _EchoUnruhe():                    # nur lesen — Maus wandert (07.10.2026)
@@ -11692,6 +11768,8 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     elif stand and (not float(stand["sl"]) or not float(stand["tp"])):
         erg.update(ok=False, sl=float(stand["sl"]), tp=float(stand["tp"]),
                    grund=f"Position trägt SL {stand['sl']} / TP {stand['tp']} — ein Level fehlt")
+    elif k and k.get("dialog") is False:
+        erg["grund"] = f"{k.get('msg') or 'Ändern-Dialog ging nicht auf'} — grobe F9-Level bleiben"
     else:
         traegt = (f"Position trägt SL {stand['sl']} / TP {stand['tp']}" if stand else "Position nicht lesbar")
         erg["grund"] = ("Echo pausiert — kein Ändern-Klick" if k is None else
