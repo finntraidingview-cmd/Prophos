@@ -41746,6 +41746,8 @@
       multiplier:      row.multiplier       != null ? Number(row.multiplier)       : null,
       masterTp:        row.master_tp        != null ? Number(row.master_tp)        : null,
       masterSl:        row.master_sl        != null ? Number(row.master_sl)        : null,
+      // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Auto-Planer ap_tagesgrenze) — reist als tages_grenze_usd zu Echo/Orbit, null = keine Prüfung
+      tagesGrenzeUsd:  row.tages_grenze_usd != null ? Number(row.tages_grenze_usd) : null,
       // Orbit (22.09.2026): Zeitpunkt des Kauf-Klicks — Karte zeigt „Warte auf Duplikum" (sql/2026-09-22_orbit_gesendet_at.sql)
       orbitGesendetAt: row.orbit_gesendet_at || null,
       startUm: row.start_um || null,                          // geplante Startzeit (sql/2026-09-22_trade_plans_start_um.sql)
@@ -45197,7 +45199,10 @@
         r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true,
-            final: _fin.final, final_grund: _fin.grund }) })   // Nachziehen nur bei finalem Trade (21.10.2026, echoV2Final)
+            final: _fin.final, final_grund: _fin.grund,   // Nachziehen nur bei finalem Trade (21.10.2026, echoV2Final)
+            // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil B): reißt der SL am echten Fill die Grenze, zieht der Bot ihn nach;
+            // aus der Order (Signal/Klick), sonst vom Plan — null = keine Prüfung
+            tages_grenze_usd: po.tages_grenze_usd != null ? po.tages_grenze_usd : (plan.tagesGrenzeUsd != null ? plan.tagesGrenzeUsd : null) }) })
       }catch(e){ r = { ok:false, retry_ok:false, msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) } }
       // PANEL WEG (16.10.2026, Routine Puls-Fehler, Plan bd20307e pc-pw1put 15.10. 13:24 UTC: Meldung nur „TypeError: Failed to fetch", als
       // UNKLAR gewertet, kein Neu-Einplanen): mtcApi liefert bei geworfenem fetch nur error + _nichtGesendet, kein msg/retry_ok. Wirft der Aufruf
@@ -47426,7 +47431,8 @@
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: String(plan.id),
                   params: { symbol: order.symbol, richtung: order.richtung, volumen: order.volumen,
-                            sl_usd: order.sl_usd, tp_usd: order.tp_usd } })
+                            sl_usd: order.sl_usd, tp_usd: order.tp_usd,
+                            tages_grenze_usd: order.tages_grenze_usd != null ? order.tages_grenze_usd : (plan.tagesGrenzeUsd != null ? plan.tagesGrenzeUsd : null) } })   // Tagesgrenze (26.10.2026)
         .select('*').single()
       if(error) throw error
       _tpRemoteSig = { id: data.id, timer: null, t0: Date.now() }
@@ -47514,7 +47520,8 @@
     if(!symbol) fehlt.push(`Firmen-Symbol für „${plan.masterFirm || '—'}" (Settings)`)
     if(fehlt.length) return { order: null, fehlt }
     return { order: { planId: plan.id, symbol, richtung: dir, volumen: lots,
-                      sl_usd: sltpAn ? sl : null, tp_usd: sltpAn ? tp : null }, fehlt: [] }
+                      sl_usd: sltpAn ? sl : null, tp_usd: sltpAn ? tp : null,
+                      tages_grenze_usd: plan.tagesGrenzeUsd != null ? plan.tagesGrenzeUsd : null }, fehlt: [] }   // Tagesgrenze (26.10.2026)
   }
 
   /* ORBIT „Starten" auf der Karte (22.09.2026, Finns Ablauf: „wenn ich dann wie bei Echo
@@ -47555,7 +47562,10 @@
     if(!dir) fehlt.push('Richtung (Buy/Sell)')
     if(!(lots > 0) || Math.abs(lots - Math.round(lots)) > 1e-9) fehlt.push('Lots (ganze Kontrakte)')
     if(!symbol || !/^[A-Za-z0-9!._:-]{1,24}$/.test(symbol)) fehlt.push('Symbol')
-    return { dir, lots, tp: tp > 0 ? tp : 0, sl: sl > 0 ? sl : 0, symbol, fehlt }
+    // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil C): aus dem Signal, sonst vom Plan — null = keine Prüfung
+    const tg0 = (aus && q.tages_grenze_usd != null) ? Number(q.tages_grenze_usd) : plan.tagesGrenzeUsd
+    const tg = (tg0 != null && Number.isFinite(Number(tg0)) && Number(tg0) >= 0) ? Number(tg0) : null
+    return { dir, lots, tp: tp > 0 ? tp : 0, sl: sl > 0 ? sl : 0, symbol, tg, fehlt }
   }
   // fern = { werte, melde } — gesetzt NUR vom Signal-Empfänger am PC (orderSignalTick, Zweig
   // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
@@ -48066,11 +48076,14 @@
       // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
       // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
       // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
+      // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil C): Feld + Brücken-Marke wie tp_usd/sl_usd — null/leer = keine Prüfung
+      const _tg = (w && w.tg != null) ? w.tg : null
       const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true, plan_id: String(plan.id),
+          tages_grenze_usd: _tg,
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen. plan_id (29.09.2026): der Bot meldet sein Ergebnis damit
           // zusätzlich selbst an puls_ergebnisse — geht die Antwort an diesen Tab verloren, übernimmt pulsErgebnisseUebernehmen.
           geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
-            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] })
+            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), '@tages_grenze_usd=' + (_tg != null ? _tg : ''), ...geschwister] })
       // PULS-WARTESCHLEIFE (Cross-Check V2-Kette, 24.09.2026): hält der Rundgang (tv-lesen, bis ~2,5 min je
       // Konto) oder ein tv-close gerade den TV-Lock im Panel, antwortet /api/tv-konto mit 409
       // puls_beschaeftigt — bisher brach der Start hart ab („Nichts platziert"), obwohl nur zu warten war.
@@ -48409,7 +48422,8 @@
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: pid,
                   params: { aktion: 'orbit', orbit: { symbol: w.symbol, richtung: w.dir, volumen: w.lots,
-                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null },
+                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null,
+                                                     tages_grenze_usd: w.tg },   // Tagesgrenze (26.10.2026, Vertrag Teil C)
                             ...(zielTrotzdemAn(pid) ? { ziel_trotzdem: true } : {}) } })   // Trotzdem starten (26.10.2026): Ziel-Sperre am PC aus
         .select('*').single()
       if(error) throw error
@@ -48816,6 +48830,7 @@
         .insert({ plan_id: String(plan.id),
                   params: { symbol: order.symbol, richtung: order.richtung, volumen: order.volumen,
                             sl_usd: order.sl_usd, tp_usd: order.tp_usd,
+                            tages_grenze_usd: order.tages_grenze_usd != null ? order.tages_grenze_usd : (plan.tagesGrenzeUsd != null ? plan.tagesGrenzeUsd : null),   // Tagesgrenze (26.10.2026, Vertrag Teil B)
                             ...(zielTrotzdemAn(plan.id) ? { ziel_trotzdem: true } : {}) } })   // Trotzdem starten (26.10.2026) — Beleg am Signal; der Echo-Weg am PC sperrt Ziel nicht erneut
         .select('*').single()
       if(error) throw error

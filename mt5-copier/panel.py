@@ -4475,6 +4475,13 @@ class Handler(BaseHTTPRequestHandler):
             _fin = str(body.get("final") or "").strip().lower()
             cmd["final"] = _fin if ohne_hedge and _fin in ("pass", "blow", "beide") else None
             cmd["final_grund"] = str(body.get("final_grund") or "").strip()[:160] if ohne_hedge else ""
+            # Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil B, Auto-Planer ap_tagesgrenze): nur Echo V2, Zahl ≥ 0 oder None —
+            # None = keine Prüfung; der Bot zieht den SL am echten Fill nach, wenn er die Grenze reißen würde
+            try:
+                _tg = float(body.get("tages_grenze_usd")) if body.get("tages_grenze_usd") not in (None, "") else None
+            except (TypeError, ValueError):
+                _tg = None
+            cmd["tages_grenze_usd"] = _tg if ohne_hedge and _tg is not None and _tg >= 0 else None
             if ohne_hedge:
                 fenster = _echo_fenster_offen(inst["config_file"])
                 if fenster:

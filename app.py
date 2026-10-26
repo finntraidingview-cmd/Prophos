@@ -16774,7 +16774,15 @@ AP_REST_MIN_CFD = 10                 # CFD: erst unter 10 $ Rest Handarbeit
 # nie als Rest-Konto ein paar $ über dem Boden. Greift nur, wo die Phase einen SL hat (heute CFD/Echo Phase 1/2; Futures-Challenges
 # ohne SL, die Topstep-Kette rechnet ihre Verlustgrenze selbst mit +200). Finn kann den Wert ändern.
 AP_SL_HINTER_BODEN = 50
-AP_KLEIN_PKT = 20                    # Rest in so vielen Punkten verdienen
+# SL UNTER DER TAGESGRENZE (Finn über Master 26.10.2026, Anlass FundingPips 100k …6924 am 23.10.2026: SL 2.948 $ bei Daily Loss 3 % der
+# Tagesstart-Equity 96.463 = 2.894 $ → echter Verlust 2.990 $, Daily gerissen). Der Planer kappte den SL bisher nur am Boden, eine Tagesgrenze
+# kannte er nicht. Jetzt Kernwert je Firma bzw. Größe: daily_pct + daily_basis ('tagesstart' = % der Balance zum Planen, 'groesse' = % der
+# Kontogröße), sonst daily_usd fest (Lucid, FTMO, Tradeify CFD — schon da); soft = true (Apex) heißt weicher Tagesstopp, also keine Grenze.
+# SL ≤ Tagesgrenze-Rest − AP_TAGES_PUFFER (Schlupf am Fill, gemessen ~75 $ bei 1,2 Lot) — OHNE „+50 dahinter": eine gerissene Tagesgrenze
+# ist kein „TP oder geblowt", das Konto soll weiterleben. Rest = Grenze − heute schon realisierter Verlust; der Planer plant je Konto nur
+# einen Trade am Tag (AP_GRUND_HEUTE_GEHANDELT), daher ist der Verlust beim Planen 0 — der Parameter steht für Nachplanen bereit.
+AP_TAGES_PUFFER = 100
+AP_KLEIN_PKT = 20                   # Rest in so vielen Punkten verdienen
 AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
 AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
 AP_KLEIN_TP_PKT_HINWEIS = 60         # TP weiter als 60 Pkt (Mindest-Lot zu groß) → trotzdem planen, Hinweis in der Notiz
@@ -17266,11 +17274,39 @@ def ap_tage_ist(konto, plaene, tz=None):
     return max(0, len(tage) + int(_wd_num(a.get("goal_done_offset")) or 0)), int(_wd_num(a.get("goal_target")))
 
 
-def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, mll_belegt=None, rest_planer=False):
+def ap_tagesgrenze(regel, groesse, balance, heute_verlust=0.0):
+    """REIN RECHNEND (testbar, 26.10.2026): Tagesgrenze-Rest in $ für EINEN Trade = Grenze − heute schon realisierter Verlust, ohne Puffer,
+    oder None (keine harte Grenze bekannt → keine Prüfung). Grenze: daily_pct × Basis (daily_basis 'tagesstart' = Balance, Standard;
+    'groesse' = Kontogröße), sonst daily_usd fest; soft = weicher Tagesstopp (Apex) → None. regel ist schon die Konto-Regel (je_groesse
+    eingemischt), ein Eintrag je Größe mit daily_pct null schaltet die Firmen-Grenze für diese Größe ab (FundingPips Flex: Wert offen).
+    Nie negativ: eine schon gerissene Grenze gibt 0."""
+    if not regel or regel.get("soft"):
+        return None
+
+    def zahl(x):                     # ohne _wd_num: die Selftest-Lader ziehen ap_konto_rechnen samt Helfern allein
+        try:
+            return float(x) if x is not None and str(x).strip() != "" else None
+        except (TypeError, ValueError):
+            return None
+    pct, fest = zahl(regel.get("daily_pct")), zahl(regel.get("daily_usd"))
+    if pct and pct > 0:
+        basis = groesse if str(regel.get("daily_basis") or "tagesstart") == "groesse" else balance
+        if not basis:
+            return None
+        grenze = float(basis) * pct / 100.0
+    elif fest and fest > 0:
+        grenze = fest
+    else:
+        return None
+    return round(max(0.0, grenze - max(0.0, zahl(heute_verlust) or 0.0)), 2)
+
+
+def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, mll_belegt=None, rest_planer=False, heute_verlust=0.0):
     """REIN RECHNEND (testbar): Plan-Werte EINES Kontos. u = Zufallsanteile der Tranche {tp, sl, menge, puffer} (0..1).
     ppl = $ je NAS100-Punkt und Lot der Firma bei dieser ID (firm_specs, ap_cfd_ppl) — nur CFD: Puffer in Punkten + Klein-Trade.
     rest_planer = accounts.rest_planer_at gesetzt (Knopf „→ Trade-Planer", 20.10.2026): unter der Rest-Grenze Klein-Trade statt „von Hand".
-    → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe[, symbol]."""
+    heute_verlust = heute schon realisierter Verlust des Kontos in $ (positiv) für die Tagesgrenze (26.10.2026, ap_tagesgrenze).
+    → (werte, None) oder (None, grund). werte: groesse, ziel, rest, menge, puffer, tp, sl, risiko, stufe, tages_grenze_usd[, symbol]."""
     groesse = ap_groesse(regel.get("groessen"), balance)
     # 08.10.2026 EIGENE WERTE JE KONTOGRÖSSE (Finn: FundingPips 50k mit eigenem SL/Lots/Puffer, nicht einfach halbe 100k-Werte):
     # regel.je_groesse = {"50000": {"phasen": {phase1: {...}, phase2: {...}}}} ersetzt für genau diese Größe die Phasen-Werte,
@@ -17405,9 +17441,24 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             # Finn: „bei 92.000 ist der SL eben nur 2.000" — seit 09.10.2026 + AP_SL_HINTER_BODEN dahinter (TP oder geblowt, kein Rest-Konto)
             sl = int(balance - boden) + AP_SL_HINTER_BODEN
             stufe += f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)"
+    # TAGESGRENZE (26.10.2026, s. AP_TAGES_PUFFER): eigener Deckel neben dem Boden, ohne „+50 dahinter". Liegt er enger als der Boden-SL,
+    # gewinnt er — dann endet der Trade nicht mehr am Boden, die Stufe verliert „SL hinter den Boden" (echoV2Final liest sonst „blow").
+    # tages_grenze_usd reist am Plan mit (Vertrag Teil B/C: Echo/Orbit ziehen den SL am echten Fill nach, wenn er sie reißen würde).
+    _tgf = globals().get("ap_tagesgrenze")          # get: ältere Selftest-Lader ziehen ap_konto_rechnen ohne den Helfer
+    tg = _tgf(regel, groesse, balance, heute_verlust) if _tgf else None
+    if sl and tg is not None:
+        t_puffer = int(globals().get("AP_TAGES_PUFFER", 100))
+        deckel = int(tg - t_puffer)
+        if deckel <= 0:
+            return None, (f"Tagesgrenze erreicht — nur noch {f'{tg:,.0f}'.replace(',', '.')} $ bis zum Daily Loss, weniger als der Puffer "
+                          f"{t_puffer} $: heute kein Trade mehr, morgen plant der Bot wieder")
+        if deckel < sl:
+            sl = deckel
+            stufe = (stufe.replace(f", SL hinter den Boden (+{AP_SL_HINTER_BODEN} $)", "")
+                     + f", SL auf Tagesgrenze gekappt ({f'{tg:,.0f}'.replace(',', '.')} − {t_puffer} $)")
     risiko = sl if sl else (float(ph["dd_usd"]) * f if ph.get("dd_usd") else None)
     out = {"groesse": groesse, "ziel": ziel, "rest": round(rest), "menge": menge, "puffer": puffer,
-           "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe}
+           "tp": tp, "sl": sl, "risiko": risiko, "stufe": stufe, "tages_grenze_usd": tg}
     if klein and klein.get("symbol"):
         out["symbol"] = klein["symbol"]          # Futures-Klein-Trade (MNQ) — ap_planen nimmt w.symbol vor dem Regel-Symbol (wie der Tage-Mini)
     return out, None
@@ -21445,6 +21496,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": w["menge"], "master_risk": w["risiko"] if w["risiko"] is not None else _wd_num(a.get("max_drawdown")),
             "master_tp": w["tp"], "master_sl": w["sl"], "richtung": richtung[key], "route": route,
+            "tages_grenze_usd": w.get("tages_grenze_usd"),   # Tagesgrenze-Rest ohne Puffer (26.10.2026, Vertrag Teil B/C) — null = keine Prüfung
             "master_symbol": (str(w.get("symbol") or regel.get("symbol") or "NQ") + frontcode) if route in ("tvv2", "tsv2") else None,   # tsv2 = Topstep V2 (07.10.2026); Mini: MNQ
             "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "medium",
             "planned_for": tag, "auto_plan": True,
@@ -21459,6 +21511,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         dd = d.get("delta_eur_pkt")
         geplant.append(dict(k["zeile"], start=start.strftime("%H:%M"), richtung=richtung[key], tp=w["tp"], sl=w["sl"],
                             menge=w["menge"], stufe=w["stufe"], rest=w["rest"], balance=round(k["bal"]), bal_quelle=k["bal_quelle"],
+                            tages_grenze_usd=w.get("tages_grenze_usd"),
                             delta_eur_pkt=(round(abs(dd), 3) * (1 if richtung[key] == "buy" else -1)) if dd is not None else None,
                             einsatz_eur=round(float((d.get("g") or {}).get("verlust_eur") or 0)) * (1 if richtung[key] == "buy" else -1),
                             tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]),
@@ -21483,6 +21536,11 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     if zeilen and not trocken:
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,
                         headers=_sb_headers("return=minimal"), timeout=(5, 30))
+        if r.status_code == 400 and "tages_grenze_usd" in (r.text or ""):
+            # Spalte noch nicht da (sql/2026-10-26_tagesgrenze.sql nicht eingespielt) — ohne sie anlegen, der SL ist schon gekappt
+            print("[auto-plan] ⚠️ trade_plans.tages_grenze_usd fehlt — Pläne ohne das Feld angelegt", flush=True)
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=[{x: v for x, v in z.items() if x != "tages_grenze_usd"} for z in zeilen],
+                            headers=_sb_headers("return=minimal"), timeout=(5, 30))
         _sb_pruefen(r)
     erg = {"ok": True, "tag": tag, "quelle": quelle, "trocken": bool(trocken), "at": jetzt.isoformat(), "seed": seed,
            "verfallen": verfallen,   # liegengebliebene Auto-Pläne früherer Tage, die das Konto nicht mehr blockieren (08.10.2026)
