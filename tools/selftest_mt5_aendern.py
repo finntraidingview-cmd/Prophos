@@ -153,10 +153,10 @@ def lade():
     src = open(BOT, encoding="utf-8").read()
     uhr = Uhr()
     ns = {"re": re, "time": uhr, "os": os}
-    for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE"):
+    for k in ("NACHZIEHEN_AB_USD", "NACHZIEHEN_VERSUCHE", "MT5_KLASSE", "AENDERN_FRIST_S", "AENDERN_MAX_PUNKTE", "NACHZIEH_SL_TOLERANZ"):
         exec(re.search(rf"^{k} = .*$", src, re.M).group(0), ns)
     for name in ("fmt_preis", "berechne_sl_tp", "sltp_vom_fill", "sltp_abweichung_usd", "kommission_runde", "nachzieh_seiten",
-                 "tagesgrenze_pruefen", "sl_tagesgrenze_vom_fill", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
+                 "tagesgrenze_pruefen", "sl_ausloeser", "sl_tagesgrenze_vom_fill", "sltp_bestaetigt", "zahl_gleich", "ist_aendern_knopf", "ist_bestaetigen_knopf", "zeile_nennt_ticket", "ist_handelszeile",
                  "_feld_lesen", "_feld_tippen", "_ist_aendern_dialog", "_dialog_gehoert_zu", "_menuepunkt_ausloesen",
                  "_kontextmenue_aendern_klicken", "_reihen_scan", "_map_felder", "_sltp_klicken", "_sltp_nachziehen"):
         exec(fn(src, name), ns)
@@ -281,7 +281,7 @@ def main():
     p = {"ticket": T}
     cmd = {"richtung": "sell", "sl_usd": 4 * 32.8, "tp_usd": 4 * 16.57}
 
-    def lauf(final, api_folge, klick_erg=({"ok": True, "msg": "geklickt"},), grund="test"):
+    def lauf(final, api_folge, klick_erg=({"ok": True, "msg": "geklickt"},), grund="test", sl_usd=None):
         klick_args, pausen, stand = [], [], {"i": 0}
         ergebnisse = list(klick_erg)
         ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: klick_args.append((sl_t, tp_t)) or \
@@ -296,7 +296,10 @@ def main():
             def __exit__(self, *a): return False
         ns["_EchoUnruhe"] = _U
         spur = []
-        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, final=final, final_grund=grund), "NAS100", FILL, VOL, CS, 2, SL_F9, TP_F9, spur, None)
+        c = dict(cmd, final=final, final_grund=grund)
+        if sl_usd is not None:
+            c["sl_usd"] = sl_usd               # Plan-SL so, dass der Notfall-SL (180,48 $) innerhalb Plan + 15 % liegt (Justage 26.10.2026)
+        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, c, "NAS100", FILL, VOL, CS, 2, SL_F9, TP_F9, spur, None)
         ns["_warte"] = alt_warte
         return e, klick_args, pausen, spur
 
@@ -323,13 +326,13 @@ def main():
     check(e["ok"] and "nicht bestätigt" in e["grund"] and len(ka) == 2, "API nicht lesbar → nicht bestätigt, grobe Level bleiben (nie geraten)")
 
     # e) nur die finale Seite
-    e, ka, _pz, spur = lauf("pass", lambda n: pos(SL_F9, tp_ex), grund="TP 3.006 $ ≥ Rest 2.964 $ bis Ziel 108.000")
+    e, ka, _pz, spur = lauf("pass", lambda n: pos(SL_F9, tp_ex), grund="TP 3.006 $ ≥ Rest 2.964 $ bis Ziel 108.000", sl_usd=170)
     check(ka == [(P(SL_F9, 2), P(tp_ex, 2))] and e["nachgezogen"] and e["seiten"] == "TP" and any("Final: pass (TP 3.006" in s for s in spur),
           f"final pass → NUR TP exakt ({P(tp_ex, 2)}), SL bleibt {P(SL_F9, 2)}, Urteil + Grund in der Spur")
     e, ka, _pz, _s = lauf("blow", lambda n: pos(sl_ex, TP_F9))
     check(ka == [(P(sl_ex, 2), P(TP_F9, 2))] and e["nachgezogen"] and e["seiten"] == "SL", f"final blow → NUR SL exakt ({P(sl_ex, 2)}), TP bleibt")
     for fin in (None, "", "etappe", "PASSIV"):
-        e, ka, _pz, spur = lauf(fin, lambda n: pos(SL_F9, TP_F9), grund="TP 4.000 $ < Rest 8.000 $ bis Ziel · SL nicht am Boden")
+        e, ka, _pz, spur = lauf(fin, lambda n: pos(SL_F9, TP_F9), grund="TP 4.000 $ < Rest 8.000 $ bis Ziel · SL nicht am Boden", sl_usd=170)
         check(ka == [] and not e["nachgezogen"] and e["seiten"] is None and "Final: keins" in spur[-1] and "kein Ändern-Klick" in spur[-1],
               f"final {fin!r} → kein Ändern-Klick, grobe F9-Level wie bisher")
     check(ns["nachzieh_seiten"]("Pass") == (True, False) and ns["nachzieh_seiten"]("blow") == (False, True)
@@ -394,7 +397,7 @@ def main():
           and TG(29713.38, 0.0, 4.0, 1.0, 0.0, 150) == (None, None) and TG(1, 2, 1, 1, 0, "x") == (None, None),
           "tagesgrenze_pruefen: |Fill − SL| × Lot × Kontrakt + Kommission gegen die Grenze; fehlt/0/kein SL → keine Prüfung")
 
-    def lauf2(cmd_extra, api, klick_erg):
+    def lauf2(cmd_extra, api, klick_erg, sl_alt=None):
         ka = []
         ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or klick_erg
         ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: api
@@ -405,15 +408,16 @@ def main():
             def __exit__(self, *a): return False
         ns["_EchoUnruhe"] = _U
         sp = []
-        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, **cmd_extra), "NAS100", FILL, VOL, CS, 2, SL_F9, TP_F9, sp, None)
+        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, **cmd_extra), "NAS100", FILL, VOL, CS, 2, SL_F9 if sl_alt is None else sl_alt, TP_F9, sp, None)
         return e, ka, sp
     gut = {"ok": True, "msg": "geklickt"}
     e, ka, sp = lauf2({"final": None, "tages_grenze_usd": 150}, pos(sl_ex, TP_F9), gut)
     check(ka == [(P(sl_ex, 2), P(TP_F9, 2))] and e["nachgezogen"] and e["seiten"] == "SL" and e["tagesgrenze"]["ueber"]
-          and any("Tagesgrenze: Verlust bis SL 180.48 $ > 150 $ → SL am Fill" in s for s in sp) and any("(SL wegen Tagesgrenze)" in s for s in sp),
+          and any("SL: Verlust bis SL 180.48 $ > Tagesgrenze 150 $ → am Fill" in s for s in sp) and any("(SL wegen Tagesgrenze)" in s for s in sp),
           f"ohne final, Verlust bis SL 180,48 $ > Grenze 150 $ → NUR SL am Fill ({P(sl_ex, 2)}), TP bleibt")
-    e, ka, sp = lauf2({"final": None, "tages_grenze_usd": 500}, pos(SL_F9, TP_F9), gut)
-    check(ka == [] and any("Tagesgrenze ok (180.48 ≤ 500)" in s for s in sp) and "Final: keins" in sp[-1], "Grenze 500 $ → „Tagesgrenze ok“, kein Ändern-Klick")
+    e, ka, sp = lauf2({"final": None, "tages_grenze_usd": 500, "sl_usd": 170}, pos(SL_F9, TP_F9), gut)
+    check(ka == [] and any("SL ok (180,48 ≤ 170 × 1,15, ≤ Tagesgrenze 500)" in s for s in sp) and "Final: keins" in sp[-1],
+          "Grenze 500 $, Verlust 180,48 ≤ Plan 170 + 15 % → „SL ok“, kein Ändern-Klick")
     e, ka, sp = lauf2({"final": "pass", "tages_grenze_usd": 150}, pos(sl_ex, tp_ex), gut)
     check(ka == [(P(sl_ex, 2), P(tp_ex, 2))] and e["seiten"] == "TP+SL", "final pass + Tagesgrenze → TP und SL am Fill")
     e, ka, sp = lauf2({"final": "beide"}, pos(SL_F9, TP_F9), {"ok": False, "dialog": False, "msg": "Aendern-Dialog nach 21 s nicht offen — Frist 20 s erreicht"})
@@ -447,6 +451,38 @@ def main():
     e, ka, sp = lauf3(round(30436.88 + 0.5, 2), 2894)        # nur 2 $ daneben (< NACHZIEHEN_AB_USD), aber über der Grenze
     check(ka == [("30436.88", P(TP_F9, 2))] and not any("Nachziehen unnötig" in x for x in sp),
           f"Tagesgrenze überschritten bei nur {e['abw_usd']:g} $ Abweichung → trotzdem geklickt (NACHZIEHEN_AB_USD bremst diesen Fall nicht)")
+    cmd.clear(); cmd.update(cmd_alt)
+
+    # Justage-Regel SL (Finn 26.10.2026): „nachziehen ab 15 % über Plan ODER wenn die Grenze echt reißen würde"
+    A = ns["sl_ausloeser"]
+    check(A(1140, 1000) == (None, "SL ok (1140 ≤ 1000 × 1,15)") and A(1160, 1000)[0] == "plan" and A(1050, 1000, 1040)[0] == "tagesgrenze"
+          and A(None, 1000, 500) == (None, "") and A(1160, None) == (None, "") and A(1160, 1000, 0)[0] == "plan" and A(1140, 1000, None)[0] is None,
+          "sl_ausloeser: 14 % ok, 16 % plan, Grenze gerissen bei 5 % → tagesgrenze, ohne SL/Plan nichts, Grenze 0 = keine")
+    cmd_alt = dict(cmd)
+
+    def lauf4(prozent, grenze=None, mit_sl=True):
+        sl_alt = round(FILL + 1000 * (1 + prozent / 100) / (VOL * CS), 2) if mit_sl else 0.0
+        extra = {"final": None, "sl_usd": 1000}
+        if grenze is not None:
+            extra["tages_grenze_usd"] = grenze
+        ka = []
+        ns["_sltp_klicken"] = lambda w_, t, sym, sl_t, tp_t, tr, anker_pfad=None: ka.append((sl_t, tp_t)) or gut
+        ns["_api_lesen"] = lambda path, exp, symbol=None, timeout_ms=None: pos(float(ka[-1][0]) if ka else sl_alt, TP_F9)
+        sp = []
+        e = ns["_sltp_nachziehen"](w, "pfad", 1, p, dict(cmd, **extra), "NAS100", FILL, VOL, CS, 2, sl_alt, TP_F9, sp, None)
+        return e, ka, sp
+    sl_plan = P(ns["sltp_vom_fill"]("sell", FILL, VOL, CS, 1000, cmd["tp_usd"], 0.0, 2)[0], 2)
+    e, ka, sp = lauf4(14)
+    check(ka == [] and any(x.startswith("SL ok (1140 ≤ 1000 × 1,15)") for x in sp) and "Final: keins" in sp[-1], "14 % über Plan → nichts nachgezogen, „SL ok“")
+    e, ka, sp = lauf4(16)
+    check(ka == [(sl_plan, P(TP_F9, 2))] and e["nachgezogen"] and e["sl_check"]["ausloeser"] == "plan"
+          and any("SL: Verlust bis SL 1160 $ > Plan 1000 $ + 15 % → am Fill" in x for x in sp) and any("(SL wegen Plan + 15 %)" in x for x in sp),
+          f"16 % über Plan → SL am Fill auf Plan ({sl_plan}), auch ohne final und ohne Tagesgrenze")
+    e, ka, sp = lauf4(5, grenze=1040)
+    check(ka == [(sl_plan, P(TP_F9, 2))] and e["tagesgrenze"]["ueber"] and any("> Tagesgrenze 1040 $ → am Fill" in x for x in sp),
+          "5 % über Plan, aber Grenze 1.040 $ gerissen → SL am Fill auf min(Plan 1.000, Grenze) = 1.000")
+    e, ka, sp = lauf4(30, mit_sl=False)
+    check(ka == [] and e["sl_check"] is None and "Final: keins" in sp[-1], "Position ohne SL → kein SL-Auslöser, nichts geklickt")
     cmd.clear(); cmd.update(cmd_alt)
 
     print()

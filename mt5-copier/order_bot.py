@@ -161,6 +161,38 @@ def tagesgrenze_pruefen(fill, sl, volumen, contract_size, komm_usd, grenze_usd):
     return verlust, verlust > g
 
 
+# SL-AUSLÖSER „15 % ÜBER PLAN" (Finn 26.10.2026, Justage: „nachziehen ab 15 % über Plan ODER wenn die Grenze echt reißen würde"): der grobe
+# F9-SL rechnet ab dem Kurs VOR dem Klick — liegt der Fill daneben, ist der echte Verlust bis SL größer als geplant. Bis 15 % darüber
+# bleibt er stehen (normale Etappe), darüber wird er am Fill auf sl_usd gesetzt — für JEDEN Echo-V2-Trade mit SL, auch ohne final und
+# ohne Tagesgrenze. Reißt der Verlust die Tagesgrenze, gilt die schärfere Regel (SL auf min(sl_usd, Grenze), sl_tagesgrenze_vom_fill).
+NACHZIEH_SL_TOLERANZ = 0.15
+
+
+def sl_ausloeser(verlust_usd, sl_usd, grenze_usd=None):
+    """REIN RECHNEND (testbar): → (ausloeser, spur_text). ausloeser 'tagesgrenze' (Verlust > Grenze, Grenze gesetzt und > 0) vor 'plan'
+    (Verlust > sl_usd × (1 + NACHZIEH_SL_TOLERANZ)), sonst None. verlust_usd None (kein SL an der Position) oder sl_usd fehlt → (None, "")."""
+    if verlust_usd is None:
+        return None, ""
+    try:
+        plan = float(sl_usd)
+    except (TypeError, ValueError):
+        return None, ""
+    if not plan > 0:
+        return None, ""
+    try:
+        g = float(grenze_usd) if grenze_usd is not None else None
+    except (TypeError, ValueError):
+        g = None
+    g = g if (g is not None and g > 0) else None
+    v = float(verlust_usd)
+    if g is not None and v > g:
+        return "tagesgrenze", f"SL: Verlust bis SL {v:g} $ > Tagesgrenze {g:g} $ → am Fill"
+    if v > plan * (1 + NACHZIEH_SL_TOLERANZ):
+        return "plan", f"SL: Verlust bis SL {v:g} $ > Plan {plan:g} $ + {NACHZIEH_SL_TOLERANZ * 100:g} % → am Fill"
+    return None, (f"SL ok ({v:g} ≤ {plan:g} × {1 + NACHZIEH_SL_TOLERANZ:g}".replace(".", ",")
+                  + (f", ≤ Tagesgrenze {g:g})" if g is not None else ")"))
+
+
 def sl_tagesgrenze_vom_fill(richtung, fill, volumen, contract_size, sl_usd, grenze_usd, komm_usd=0.0, digits=2):
     """REIN RECHNEND (testbar, Master 26.10.2026 nach S2-Befund zu .1746: „Verlust bis SL ≤ Grenze" wie Orbit): SL-Preis ab dem ECHTEN Fill
     für den Fall Tagesgrenze überschritten — Abstand = min(sl_usd, grenze_usd) − Kommission, zum Fill hin gerundet (Kauf: SL unter dem Fill
@@ -11724,28 +11756,33 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     -> {sl, tp, ok, nachgezogen, final, seiten, komm, abw_usd, soll_sl, soll_tp, versuche, grund}; ok False NUR, wenn die Position danach
     ohne SL oder TP dasteht."""
     tp_an, sl_an = nachzieh_seiten(cmd.get("final"))
-    # Tagesgrenze (26.10.2026, s. tagesgrenze_pruefen): dritter Auslöser, nur für den SL — die Kommission wird dafür schon hier gelesen
-    komm, gesucht, tg = None, False, None
-    if cmd.get("tages_grenze_usd") is not None:
+    # SL-AUSLÖSER (Justage 26.10.2026, s. sl_ausloeser): echter Verlust bis zum gesetzten SL ab dem Fill (+ Kommission) — über Plan + 15 %
+    # oder über der Tagesgrenze → SL am Fill. Gilt für jeden Trade mit SL; die Kommission wird dafür schon hier gelesen.
+    komm, gesucht, tg, slc = None, False, None, None
+    verlust = None
+    if sl_alt and float(sl_alt):
         komm, gesucht = _kommission_lesen(path, expected, p["ticket"]), True
-        verlust, ueber = tagesgrenze_pruefen(fill, sl_alt, vol, contract_size, komm, cmd.get("tages_grenze_usd"))
-        if ueber is not None:
-            tg = {"verlust_usd": verlust, "grenze_usd": round(float(cmd["tages_grenze_usd"]), 2), "ueber": ueber}
-            if ueber:
-                trail.append(f"Tagesgrenze: Verlust bis SL {verlust:g} $ > {tg['grenze_usd']:g} $ → SL am Fill")
-                sl_an = True
-            else:
-                trail.append(f"Tagesgrenze ok ({verlust:g} ≤ {tg['grenze_usd']:g})")
+        verlust = round(abs(float(fill) - float(sl_alt)) * float(vol) * float(contract_size) + max(0.0, float(komm or 0)), 2)
+    ausl, atxt = sl_ausloeser(verlust, cmd.get("sl_usd"), cmd.get("tages_grenze_usd"))
+    if atxt:
+        trail.append(atxt)
+    if verlust is not None:
+        slc = {"verlust_usd": verlust, "plan_usd": round(float(cmd.get("sl_usd") or 0), 2), "ausloeser": ausl}
+        g_ok = tagesgrenze_pruefen(fill, sl_alt, vol, contract_size, komm, cmd.get("tages_grenze_usd"))[1]
+        if g_ok is not None:                   # Rückgabefeld wie seit .1747 (View justage_ereignisse, Panel)
+            tg = {"verlust_usd": verlust, "grenze_usd": round(float(cmd["tages_grenze_usd"]), 2), "ueber": ausl == "tagesgrenze"}
+    if ausl:
+        sl_an = True
     seiten = "+".join(s for s, an in (("TP", tp_an), ("SL", sl_an)) if an)
     erg = {"sl": sl_alt, "tp": tp_alt, "ok": True, "nachgezogen": False, "final": cmd.get("final") or None, "seiten": seiten or None,
-           "komm": None, "abw_usd": 0.0, "soll_sl": sl_alt, "soll_tp": tp_alt, "versuche": 0, "grund": "", "tagesgrenze": tg}
+           "komm": None, "abw_usd": 0.0, "soll_sl": sl_alt, "soll_tp": tp_alt, "versuche": 0, "grund": "", "tagesgrenze": tg, "sl_check": slc}
     fg = str(cmd.get("final_grund") or "").strip()[:160]
     if not seiten:
         trail.append(f"Final: keins{' (' + fg + ')' if fg else ''} — kein Ändern-Klick, grobe F9-Level bleiben")
         return erg
-    nur_tg = sl_an and not nachzieh_seiten(cmd.get("final"))[1]
+    nur_ausl = bool(ausl) and not nachzieh_seiten(cmd.get("final"))[1]
     trail.append(f"Final: {cmd.get('final') or 'keins'}{' (' + fg + ')' if fg else ''} → nur {seiten} am Fill nachziehen"
-                 + (" (SL wegen Tagesgrenze)" if nur_tg else ""))
+                 + ((" (SL wegen Tagesgrenze)" if ausl == "tagesgrenze" else " (SL wegen Plan + 15 %)") if nur_ausl else ""))
     if not gesucht:
         komm = _kommission_lesen(path, expected, p["ticket"])
     sl_ex, tp_ex = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size, cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)
@@ -11762,7 +11799,7 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     abw = sltp_abweichung_usd(sl_alt, tp_alt, sl, tp, vol, contract_size)
     erg.update(komm=komm, abw_usd=abw, soll_sl=sl, soll_tp=tp)
     ktxt = f"Kommission {komm:g} $" if komm is not None else "Kommission nicht lesbar, 0 $ gerechnet"
-    if abw < NACHZIEHEN_AB_USD and not tg_ueber:   # Tagesgrenze überschritten: auch eine kleine Korrektur wird geklickt (Grenze gilt hart)
+    if abw < NACHZIEHEN_AB_USD and not ausl:   # SL-Auslöser griff: auch eine kleine Korrektur wird geklickt (Grenze gilt hart)
         trail.append(f"Nachziehen unnötig: {abw:g} $ daneben (< {NACHZIEHEN_AB_USD:g} $, {ktxt})")
         return erg
     trail.append(f"Nachziehen am Fill {fill}: SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} statt "
