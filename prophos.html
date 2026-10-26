@@ -47324,7 +47324,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1741'
+  const OS_TAB_BUILD = '2026-09-22.1742'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51964,7 +51964,10 @@
   const sfIstUacText = m => /Windows-Sicherheitsabfrage offen|\(consent\.exe läuft\)/i.test(String(m || ''))
   const sfIstUac = f => !!f && f.uac === true
   const sfFehlversuche = sf => Math.max(0, (Number(sf && sf.versuche) || 0) - (Number(sf && sf.uac_n) || 0))
-  const sfDeckelVoll = sf => !!sf && !SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX
+  // GESPERRT = DECKEL SOFORT VOLL (Finn 26.10.2026, „Fehlstarts von heute alles fixen"): Jacob FundingPips …6925/…6924 und Marco FTMO …0116
+  // liefen je 4× in „F9-Dialog nicht gefunden … trade_allowed = False" (13 Fehlstarts) — der Bot schreibt selbst „nicht neu starten", sfTick
+  // plante trotzdem dreimal neu. Ein gesperrtes Konto heilt nicht in 15 min → kein Neuversuch, „Braucht dich" + Handy schon beim ersten Mal.
+  const sfDeckelVoll = sf => !!sf && (!!sfGesperrt(sf.msg) || (!SF_OHNE_DECKEL.has(String(sf.schritt || '')) && sfFehlversuche(sf) >= SF_MAX))
   // URSACHE STATT HAND-SPUR (Finn 26.10.2026): „Braucht dich" zeigte bei Jacob FundingPips …6925/…6924 und Marco FTMO …0116 nur
   // „F9-Dialog nicht gefunden — … [0.0s·Hand: Tempo … Zug …" — 13 Fehlstarts, der Grund (MT5 trade_allowed = False, Firma hat den Handel
   // gesperrt, Balance ~89,8k/93,5k/90,1k) stand abgeschnitten hinten. Die msg ist gekürzt (sfMelden: Anfang + „ … " + Ende), das Ende überlebt.
@@ -54396,6 +54399,7 @@
     const bis = tplUhr(sfTagesEnde(), D.v), n = sfFehlversuche(sf)   // Windows-Abfragen zählen nicht (23.10.2026)
     if(sf.status === 'tagesende') return 'Start-Fenster heute zu — der Nachtlauf plant neu.'
     if(sf.unklar || sf.schritt === 'ziel_erreicht') return ''
+    if(sfGesperrt(sf.msg)) return 'Kein Neuversuch — Handel am Konto gesperrt.'   // Deckel sofort voll (26.10.2026, sfDeckelVoll)
     if(sfIstUac(sf) && n < SF_MAX) return `(wartet auf die Windows-Abfrage — kein Fehlversuch, neu bis ${bis}${n ? `, bisher ${n}/${SF_MAX} Fehlversuche` : ''})`
     if(SF_OHNE_DECKEL.has(String(sf.schritt || ''))) return n ? `(Versuch ${n + 1}, ohne Deckel bis ${bis})` : ''   // Warten auf den Big Trade (19.10.2026)
     if(sf.schritt === 'konto_offen') return n >= SF_MAX ? `${n} Neuversuche gescheitert — von Hand starten.` : n ? `(Versuch ${n + 1}/${SF_MAX})` : ''   // „in 15 min wieder" steht schon im Text
