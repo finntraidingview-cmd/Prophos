@@ -47567,17 +47567,6 @@
     const tg = (tg0 != null && Number.isFinite(Number(tg0)) && Number(tg0) >= 0) ? Number(tg0) : null
     return { dir, lots, tp: tp > 0 ? tp : 0, sl: sl > 0 ? sl : 0, symbol, tg, fehlt }
   }
-  /* PRÜF-MARKEN FÜR ORBIT (26.10.2026, Vertrag Teil C mit S5): /api/tv-konto reicht nur Felder seiner festen Liste durch, neue kommen nur über
-   * die Brücke (geschwister, wie '@plan_id='). '@tages_grenze_usd=<Zahl>' nur mit Wert, '@final=pass' nur, wenn der TP das Ziel trifft
-   * (echoV2Final: TP-$ ≥ Rest bis Ziel laut Auto-Planer-Notiz). Fehlt eine Marke, prüft der Bot den Fall nicht. → Liste der Marken */
-  function orbitPruefMarken(plan, tp, sl, tg){
-    const m = []
-    if(tg != null && tg !== '' && Number.isFinite(Number(tg)) && Number(tg) >= 0) m.push('@tages_grenze_usd=' + Number(tg))
-    let f = null
-    try{ f = echoV2Final(plan, { tp_usd: tp, sl_usd: sl }).final }catch(_){}
-    if(f === 'pass' || f === 'beide') m.push('@final=pass')
-    return m
-  }
   // fern = { werte, melde } — gesetzt NUR vom Signal-Empfänger am PC (orderSignalTick, Zweig
   // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
   // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
@@ -48087,15 +48076,14 @@
       // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
       // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
       // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
-      // Tagesgrenze-Rest in $ ohne Puffer + Ziel-Treffer (26.10.2026, Vertrag Teil C): Feld und Brücken-Marken (orbitPruefMarken) —
-      // das Panel reicht nur die Marken durch; ohne Marke keine Prüfung
+      // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil C): Feld + Brücken-Marke wie tp_usd/sl_usd — null/leer = keine Prüfung
       const _tg = (w && w.tg != null) ? w.tg : null
       const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true, plan_id: String(plan.id),
           tages_grenze_usd: _tg,
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen. plan_id (29.09.2026): der Bot meldet sein Ergebnis damit
           // zusätzlich selbst an puls_ergebnisse — geht die Antwort an diesen Tab verloren, übernimmt pulsErgebnisseUebernehmen.
           geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
-            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...orbitPruefMarken(plan, tp, sl, _tg), ...geschwister] })
+            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), '@tages_grenze_usd=' + (_tg != null ? _tg : ''), ...geschwister] })
       // PULS-WARTESCHLEIFE (Cross-Check V2-Kette, 24.09.2026): hält der Rundgang (tv-lesen, bis ~2,5 min je
       // Konto) oder ein tv-close gerade den TV-Lock im Panel, antwortet /api/tv-konto mit 409
       // puls_beschaeftigt — bisher brach der Start hart ab („Nichts platziert"), obwohl nur zu warten war.
@@ -57562,10 +57550,7 @@
       firma: kx.firma || '', symbol: m.symbol, richtung: m.richtung, volumen: m.kontrakte, tp_usd: m.tp_usd || '', sl_usd: m.sl_usd || '',
       sl_pkt: m.sl_pkt, tp_pkt: m.tp_pkt, scharf: true,
       geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + m.symbol, '@richtung=' + m.richtung, '@volumen=' + m.kontrakte,
-        '@tp_usd=' + (m.tp_usd || ''), '@sl_usd=' + (m.sl_usd || ''),
-        // Prüf-Marken wie beim Orbit-Start (26.10.2026, Vertrag Teil C) — Polar-Pläne sind Handpläne, meist ohne beide Marken
-        ...(typeof orbitPruefMarken === 'function' ? orbitPruefMarken(plan, Number(m.tp_usd) || 0, Number(m.sl_usd) || 0, plan.tagesGrenzeUsd) : []),
-        ...(kx.geschwister || [])] }
+        '@tp_usd=' + (m.tp_usd || ''), '@sl_usd=' + (m.sl_usd || ''), ...(kx.geschwister || [])] }
     const p = await window.mtcApi('polar-start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: 20000 })
     if(typeof atToast === 'function') atToast(p && p.ok ? `🧭 Polar-Master gestartet (Lauf ${String(d.lauf_id).slice(0, 8)}, PID ${p.pid}) — HÄNDE WEG von beiden PCs!`
       : '⛔ Polar-Master nicht gestartet: ' + ((p && p.msg) || 'Panel nicht erreichbar'), p && p.ok ? 'start' : 'end')
