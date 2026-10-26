@@ -3451,6 +3451,9 @@ def test_puls_cdp_login():
     chk(TK(None) == "keine Meldungen" and TK({"gruppen": [], "log": [], "meldungen": []}) == "keine Meldungen"
         and TK({"gruppen": [zu_o], "log": [{"text": "abc"}], "meldungen": [{"art": "fill"}]}) == "gruppen: orders(zu, 1 Texte, Knopf) · log 3 Z · meldungen 1"
         and TK({"gruppen": [dict(zu_o, offen=None, mehr=None)]}) == "gruppen: orders(?, 1 Texte)", "Kurzbild des Meldungsbereichs für die Spur")
+    # augen.js 0.8.5 (26.10.2026): Protokoll je Textknoten — die Knotenzahl steht in der Spur, ohne texte bleibt die Zeile wie vorher
+    chk(TK({"log": [{"text": "Buy 1 at 29,289.50", "texte": [{"text": "Buy 1"}, {"text": "at 29,289.50"}]}, {"text": "x", "texte": [{"text": "x"}]}]}) == "log 19 Z (3 Knoten)"
+        and TK({"log": [{"text": "abc", "texte": []}]}) == "log 3 Z", "Kurzbild zählt die Protokoll-Knoten (augen.js 0.8.5)")
     SW = ob.cdp_show_more_wahl
     dn_k = {"text": "Show more 3", "dn": "toast-group-expand-button-orders", "expanded": "false", "rect": [1500, 800, 90, 22]}
     tx_k = {"text": "Show more", "dn": "", "rect": [1500, 800, 70, 22]}
@@ -4592,8 +4595,13 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.4'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
+        and "VERSION = '0.8.5'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
         "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
+    # augen.js 0.8.5 (26.10.2026, Routine Puls-Fehler, UNKLAR auf 2 PCs mit kleinem Fenster): Meldungsprotokoll (role=log) je Textknoten,
+    # meldungenAus läuft über l.texte — Browser-Probe: node tools/selftest_augen_meldungsprotokoll.js
+    chk("return { text: txtK(l).slice(0, 400), live: attr(l, 'aria-live'), texte: texte };" in js
+        and "meldungenAus(l.texte && l.texte.length ? l.texte : [{ text: l.text, rect: null }])" in js,
+        "augen.js 0.8.5: Protokoll je Textknoten (texte), meldungen aus den Knoten")
     # augen.js 0.8.2 (13.10.2026, Routine Puls-Fehler, „Go ad-free. Everywhere" 34× in 24 h: „kein eindeutiges X (keins)"): Dialog-X an der Karte
     # eines Vollbild-Dialogs und namenloses Symbol-X (nur wenn einziges, unverdeckt) — Browser-Probe: node tools/selftest_augen_dialog_x.js
     chk("function karteIn(box)" in js and "function obenAn(e)" in js and "namenlos: true" in js and "{ mehrdeutig: kand.length }" in js

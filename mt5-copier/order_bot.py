@@ -21826,7 +21826,10 @@ def cdp_toasts_kurz(toasts):
             f"{len(g.get('texte') or [])} Texte{', Knopf' if cdp_rect(g.get('mehr')) else ''})" for g in gr[:4]))
     lg = [l for l in (t.get("log") or []) if isinstance(l, dict) and l.get("text")]
     if lg:
-        teile.append(f"log {sum(len(str(l.get('text') or '')) for l in lg)} Z")
+        # augen.js 0.8.5 (26.10.2026, Routine „Puls-Fehler", UNKLAR auf 2 PCs mit kleinem Fenster): das Protokoll kommt jetzt je
+        # Textknoten (texte) — die Zahl steht mit in der Spur, damit „log 375 Z" nicht wieder ein Rätsel ist; ohne texte wie bisher
+        kn = sum(len(l.get("texte") or []) for l in lg if isinstance(l.get("texte"), list))
+        teile.append(f"log {sum(len(str(l.get('text') or '')) for l in lg)} Z" + (f" ({kn} Knoten)" if kn else ""))
     ms = [m for m in (t.get("meldungen") or []) if isinstance(m, dict)]
     if ms:
         teile.append(f"meldungen {len(ms)}")

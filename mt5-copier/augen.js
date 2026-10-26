@@ -23,7 +23,8 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.8.4';   // 0.8.4 (19.10.2026, Finn: „Balance nach dem Orbit-Trade wird nicht mehr erkannt"): die Kopfzeile des Account Managers trägt seit dem TradingView-Update kein „Account Balance" mehr — die Balance steht im Umschalter neben der Kennung und kommt als Paar 'USD': '159,011.40' an; konto_summary.balance fällt auf das Währungs-Label zurück (der Bot ergänzt zusätzlich aus dem Umschalter-Text)
+  var VERSION = '0.8.5';   // 0.8.5 (26.10.2026, Routine „Puls-Fehler", UNKLAR-Fälle auf 2 PCs mit kleinem Fenster): toasts.log liest das Meldungsprotokoll (role=log) je Textknoten (texte) statt als geklebten textContent-Block — „Buy 1at 29,289.50" fand RX_D_EN nie; meldungen aus dem Protokoll kommen jetzt an, wenn der Stapel unter dem Fensterrand liegt und „Show more" nicht im Bild ist
+    // 0.8.4 (19.10.2026, Finn: „Balance nach dem Orbit-Trade wird nicht mehr erkannt"): die Kopfzeile des Account Managers trägt seit dem TradingView-Update kein „Account Balance" mehr — die Balance steht im Umschalter neben der Kennung und kommt als Paar 'USD': '159,011.40' an; konto_summary.balance fällt auf das Währungs-Label zurück (der Bot ergänzt zusätzlich aus dem Umschalter-Text)
     // 0.8.3 (19.10.2026, Finn: TradingView-Update, Konto-Umschalter zeigt jetzt „KENNUNG  153,462.72 USD" in eigenen spans, Puls-Fehlstarts auf 4 PCs „der hat nur APEX6687940000016100" / „aktiv APEX670837000000698,115.70USD"): txtK — Konto-Texte aus den Textknoten MIT Leerzeichen zusammensetzen (textContent klebte Kennung und Balance aneinander, der Bot las die Balance-Ziffern als Teil der Kontonummer); aktiv-Abgleich der Listenzeilen nur noch über die Kontonummer; listeVoll erlaubt Zeilen bis 6 Ebenen unter dem Listen-Container (neues Dropdown „ACCOUNTS" verschachtelt tiefer: „Zeile liegt 5 Ebenen unter dem Vorfahren" → kein Login-Beleg); gekürzte Kennung „FTDFYSLX1507984146…" (title/aria-label mit voller Nummer wird bevorzugt)
     // 0.8.2 (13.10.2026, Routine „Puls-Fehler", „Go ad-free. Everywhere" 34× in 24 h auf 3 PCs): xIn findet das X eines Vollbild-Dialogs an seiner Karte und auch ein namenloses X (nur Symbol) — s. Kommentar an xIn
     // 0.8.1 (08.10.2026, Slave 1, Puls-Fehler pc-2zc2we 13:25 + pc-usq1i6 13:28 UTC „'Take profit' steht nicht auf $ (Einheit '?')"): TradingView rollt je Konto/Browser eine neue Beschriftung aus — „Take profit $" / „Stop loss $" (mit ▾-Wähler) statt „Take profit, $"; tp/sl.einheit liest jetzt beide Formen (Komma ODER Leerzeichen vor der Einheit, ▾ weg, USD → $)   // 0.8.0 (08.10.2026, Slave-Terminal 3, Auftrag Master: Apex-Logins mit vielen Konten, Liste scrollbar): konto_scroll(aktion) — die offene Konto-Liste abschnittsweise lesen: 'anfang' scrollt den Container nach oben, 'schritt' liest die sichtbaren Zeilen und scrollt dann einen Schritt weiter, mit Mitschrift der Scrollposition (vorher/nachher/hoehe/sicht/ende). Scrollt nur den Listen-Container, klickt nie; der Bot führt Abschnitte zusammen und schließt die Liste wie heute mit Esc   // 0.7.9 (08.10.2026, Slave-Terminal 3, Muster „knopf: senden-knopf nicht gedrückt (maus nicht bewiesen über dem knopf)" 4× auf 4 PCs): maus() — wo die Seite den Zeiger zuletzt sah (mousemove-Mitschrift, einmal je Seite installiert), damit der Bot vor dem Hover-Riegel unterscheiden kann „Bewegung kam nie an" (sofort frisch bewegen) und „Ziel bewegt sich unter dem Zeiger"   // 0.7.8 (05.10.2026, Finn: „auch diese kleinen Ads unten links automatisch wegklicken"): toasts.werbung — kleine Werbe-Kachel #charting-ad mit ihrem Knopf „Close ad" (nur Diagnose, geschlossen wird sie im Bot)
@@ -302,8 +303,24 @@ var PROPHOS_AUGEN = (function () {
         if (texte.length) gruppen.push({ gruppe: 'unbekannt', offen: null, mehr: null, zu: xIn(c), rect: rect(c), texte: texte, quelle: 'klasse:toastGroup' });
       });
     }
-    var log = alle('[role="log"]').map(function (l) { return { text: txt(l).slice(0, 400), live: attr(l, 'aria-live') }; })
-      .filter(function (l) { return l.text; });
+    // 0.8.5 (26.10.2026, Routine „Puls-Fehler", Muster „unklar: ergebnis unklar — … in 15 s weder fill-meldung noch neue position":
+    // 2 PCs (16.10. 2195×1100, 26.10. 1536×730), beide mit Spur „Show more 1/4 … 4/4: kein Knopf ganz im Bild" + „gruppen: orders(zu,
+    // 4 Texte) · log 375 Z" + „Meldungen roh: nichts" — die Order lag). Der Stapel klebt an der Unterkante des kleinen Fensters, die
+    // Preiszeile des obersten Toasts liegt unter dem Rand (nicht sichtbar → nicht in texte), und der Rückfall auf TradingViews
+    // Meldungsprotokoll (role=log) las textContent: „Buy 1" und „at 29,289.50" stehen in eigenen spans, geklebt „Buy 1at 29,289.50"
+    // — RX_D_EN (\bat\b) findet nichts. Jetzt wie bei den Gruppen: die einzelnen Textknoten (texte), meldungenAus setzt „Buy 1" +
+    // „at …" selbst zusammen; text (mit Leerzeichen, txtK) bleibt für die Spur-Zählung „log N Z". Nur lesen, kein Klick, kein Riegel.
+    var log = alle('[role="log"]').map(function (l) {
+      var texte = [];
+      try {
+        var lauf = document.createTreeWalker(l, NodeFilter.SHOW_TEXT), k;
+        while ((k = lauf.nextNode()) && texte.length < 40) {
+          var v = String(k.nodeValue || '').replace(/\s+/g, ' ').trim();
+          if (v) texte.push({ text: v.slice(0, 80), rect: null });
+        }
+      } catch (_) { texte = []; }
+      return { text: txtK(l).slice(0, 400), live: attr(l, 'aria-live'), texte: texte };
+    }).filter(function (l) { return l.text; });
     // Kleine Werbe-Kachel im Meldungsbereich (05.10.2026, Inventar eines Orbit-PCs: div#charting-ad 460×150 unten links, darin eine
     // Google-Anzeige im fremden iframe und EIN Knopf „Close ad" 10×10 px). Nur Diagnose — geschlossen wird sie im Bot (_cdp_kachel_weg).
     // Bewusst NICHT unter popups: ein Eintrag dort unterdrückt im Konto-Schritt das Esc („Dialog offen").
@@ -993,7 +1010,7 @@ var PROPHOS_AUGEN = (function () {
       if (o.toasts) {
         var ms = [];
         (o.toasts.gruppen || []).forEach(function (gr) { meldungenAus(gr.texte || []).forEach(function (m) { m.gruppe = gr.gruppe; ms.push(m); }); });
-        (o.toasts.log || []).forEach(function (l) { meldungenAus([{ text: l.text, rect: null }]).forEach(function (m) { m.gruppe = 'log'; ms.push(m); }); });
+        (o.toasts.log || []).forEach(function (l) { meldungenAus(l.texte && l.texte.length ? l.texte : [{ text: l.text, rect: null }]).forEach(function (m) { m.gruppe = 'log'; ms.push(m); }); });   // 0.8.5: je Textknoten
         // erst_gesehen je Meldung (T3): Merker überlebt mehrfaches Evaluate im selben Tab (globalThis), neu geladen = neu
         var merk = globalThis.__prophosAugenGesehen = globalThis.__prophosAugenGesehen || {};
         var jetzt = Date.now();
@@ -1006,7 +1023,7 @@ var PROPHOS_AUGEN = (function () {
       if (JSON.stringify(o).length > STAND_MAX) {
         if (o.konto) { o.konto.treffer = (o.konto.treffer || []).slice(0, 10); o.konto.eintraege = (o.konto.eintraege || []).slice(0, 15); }
         if (o.toasts && o.toasts.gruppen) o.toasts.gruppen.forEach(function (gr) { gr.texte = (gr.texte || []).slice(0, 8); });
-        if (o.toasts && o.toasts.log) o.toasts.log = o.toasts.log.slice(0, 3);
+        if (o.toasts && o.toasts.log) o.toasts.log = o.toasts.log.slice(0, 3).map(function (l) { if (l && l.texte) l.texte = l.texte.slice(0, 12); return l; });   // 0.8.5: Knoten gekürzt, meldungen sind schon gerechnet
         if (o.ticket && o.ticket.typen) o.ticket.typen = o.ticket.typen.slice(0, 6);
         (o.positionen || []).concat(o.orders || []).forEach(function (z) { delete z.spalten; });
         if (o.konto_summary) delete o.konto_summary.texte;
