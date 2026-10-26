@@ -166,7 +166,7 @@
   .at-toast.mpw{pointer-events:auto;cursor:pointer}
   /* Plan gelöscht · Rückgängig (06.10.2026): nur dieser Toast nimmt Klicks an */
   .at-toast.undo{pointer-events:auto}
-  .at-toast .at-undo{background:none;border:none;padding:0;margin-left:2px;color:#fff;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer}
+  .at-toast .at-undo{background:none;border:none;padding:0;margin-left:2px;color:#fff;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;flex-shrink:0}
   /* ABHAK-RÜCKMELDUNG (Finn 21.10.2026: beim Abhaken im Radar eine kurze, schöne Rückmeldung — bestanden cool und knapp, geblowt ruhig;
      kein Klick, blockiert nichts, ≤ 1,4 s). Schwebende Karte unten mittig, Kreis + Haken bzw. Strich zeichnen sich, dann steigt sie weg. */
   .abhak-rm{position:fixed;left:50%;bottom:96px;z-index:9998;display:flex;align-items:center;gap:10px;padding:9px 16px 9px 11px;
@@ -34852,13 +34852,13 @@
   }
 
   // Toast
-  function atToast(msg, type){
+  function atToast(msg, type, ms){
     document.querySelectorAll('.at-toast').forEach(el => el.remove())
     const el = document.createElement('div')
     el.className = 'at-toast' + (type ? ' ' + type : '')
     el.textContent = msg
     document.body.appendChild(el)
-    setTimeout(() => el.remove(), 5000)
+    setTimeout(() => el.remove(), ms || 5000)   // ms: Toast mit Knopf darf länger stehen (Trotzdem starten, 26.10.2026)
     return el   // für den Rückgängig-Knopf beim Plan-Löschen (06.10.2026)
   }
 
@@ -42495,14 +42495,48 @@
     }catch(_){ return null }
   }
   const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht${z.ziel > 0 ? ` (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')})` : ''} — kein Trade gestartet.`
+  /* TROTZDEM STARTEN (26.10.2026, Finn am Screenshot „100k … → Phase 2", Balance 104.075 ≥ Ziel 104.000: „Die Meldung soll kommen, aber
+   * ich will die Option haben: trotzdem ‚Starten' drücken" — das Ziel war erreicht, die Mindesthandelstage aber nicht; die holt er mit
+   * Gegenhedges nach). Nur beim Hand-Klick: der Knopf im Ziel-Toast merkt die Plan-ID hier 10 min lang, planKontoSperre(plan, { hand: true })
+   * überspringt dann für diesen Plan NUR die Ziel-Sperre — Archiv, Waise, Manuelle Arbeit und alles danach (Claim, Firmen-Abstand,
+   * Richtung, Waage, Riegel) bleiben. Automatische Starts (tpStartUmTick, sfTick, Auto-Planer über start_um) fragen ohne hand und bleiben
+   * gesperrt; kein Dauer-Schalter. Zum PC reist die Freigabe ausdrücklich als params.ziel_trotzdem am Orbit-Signal (→ fern.zielTrotzdem). */
+  const _zielTrotzdem = new Map()   // planId → ms des Klicks
+  const zielTrotzdemAn = id => {
+    const t = _zielTrotzdem.get(String(id))
+    if(t && Date.now() - t < 10 * 60000) return true
+    _zielTrotzdem.delete(String(id)); return false
+  }
+  // Toast einer Konto-Sperre; bei „Ziel erreicht" mit Knopf „Trotzdem starten" (nochmal = derselbe Hand-Start erneut, jetzt mit Freigabe)
+  function planSperreToast(plan, sp, nochmal){
+    if(typeof atToast !== 'function') return
+    if(sp.art !== 'ziel' || typeof nochmal !== 'function') return atToast((sp.art === 'ziel' ? '🎯 ' : '✍ ') + sp.text, 'end')
+    const el = atToast('🎯 ' + sp.text, 'end', 12000)
+    if(!el) return
+    el.classList.add('undo')   // dieselbe Klick-Freigabe wie „Plan gelöscht · Rückgängig"
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'at-undo'; b.textContent = 'Trotzdem starten'
+    b.addEventListener('click', () => {
+      el.remove()
+      _zielTrotzdem.set(String(plan.id), Date.now())
+      console.log(`[ziel-trotzdem] ${plan.masterName || plan.id}: Ziel-Sperre für diesen Hand-Start übersprungen`)
+      nochmal()
+    })
+    el.appendChild(b)
+  }
+  window._planSperreToast = (plan, sp, nochmal) => planSperreToast(plan, sp, nochmal)   // Test-Haken (Stub)
+  window._zielTrotzdemAn = id => zielTrotzdemAn(id)                                    // Test-Haken (Stub)
+  window._planKontoSperre = (plan, opts) => planKontoSperre(plan, opts)                // Test-Haken (Stub)
   /* KONTO-SPERRE VOR JEDEM START (08.10.2026, Slave-Terminal 7 — Finn: „Sobald ein Account bei ‚Ziel erreicht' oder in manueller Arbeit
    * ist, darf auf ihm auf keinen Fall ein Trade gemacht werden"). Bisher sperrte nur planZielErreicht, und das aus dem Konten-Cache des Tabs
    * (eine Ziel-Wache-Markierung nach dem Laden kam dort nicht an); Manuelle Arbeit (mt5_baseline.manuell an einem Plan in „Überprüfen")
    * war laut tplManuellKonten „nur Anzeige — kein Riegel". Jetzt frisch aus der DB: accounts.ziel_erreicht_at des Kontos und Pläne in
    * „review" mit manuell.at auf demselben Konto (RLS: eigene ID = die des PC-Tabs). DB nicht lesbar → Rückfall auf Cache (accounts/
    * tradePlans), nie stumm durchwinken, wenn der Cache etwas weiß. Genutzt von tpStartUmTick, tpOrbitStartenKern, tpJetztStarten,
-   * tpPreflightAndStart. → { art: 'ziel' | 'manuell', text, z? } | null */
-  async function planKontoSperre(plan){
+   * tpPreflightAndStart. → { art: 'ziel' | 'manuell', text, z? } | null
+   * opts.hand (Hand-Start) + Knopf „Trotzdem starten" für diesen Plan bzw. opts.zielTrotzdem (Signal vom Absender) → Ziel-Sperre aus (26.10.2026) */
+  async function planKontoSperre(plan, opts){
+    const zielFrei = !!(opts && (opts.zielTrotzdem || (opts.hand && plan && zielTrotzdemAn(plan.id))))
     const kid = plan && plan.masterAccountId ? String(plan.masterAccountId) : ''
     const name = (plan && plan.masterName) || 'Konto'
     const manuellText = n => `„${name}" steht in Manueller Arbeit${n ? ' (' + n + ')' : ''} — kein Start, bis die Arbeit erledigt ist (Radar → Manuelle Arbeit, Accounts → Zu tun).`
@@ -42527,7 +42561,7 @@
           const konto = (accounts || []).find(a => String(a.id) === kid)
           if(konto){ konto.zielErreichtAt = ra.data.ziel_erreicht_at; konto.zielErreichtBal = ra.data.ziel_erreicht_bal != null ? Number(ra.data.ziel_erreicht_bal) : konto.zielErreichtBal }
           const z = { bal: Number(ra.data.ziel_erreicht_bal) || 0, ziel: Number(ra.data.ziel_usd) || 0 }
-          return { art: 'ziel', z, text: planZielText(plan, z) }
+          if(!zielFrei) return { art: 'ziel', z, text: planZielText(plan, z) }
         }
         const m = !rp.error && (rp.data || []).find(r => String(r.id) !== String(plan.id) && r.manuell && typeof r.manuell === 'object' && r.manuell.at)
         if(m) return { art: 'manuell', text: manuellText(String(m.manuell.notiz || '').slice(0, 60)) }
@@ -42535,7 +42569,7 @@
       finally{ clearTimeout(uhr) }
     }
     if(kid && isAccountArchived(kid)) return { art: 'archiv', text: archivText }
-    const z = planZielErreicht(plan); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
+    const z = zielFrei ? null : planZielErreicht(plan); if(z) return { art: 'ziel', z, text: planZielText(plan, z) }
     const mc = kid && (tradePlans || []).find(p => String(p.masterAccountId) === kid && String(p.id) !== String(plan.id) && p.status === 'review'
       && p.mt5Baseline && p.mt5Baseline.manuell && typeof p.mt5Baseline.manuell === 'object' && p.mt5Baseline.manuell.at)
     return mc ? { art: 'manuell', text: manuellText(String(mc.mt5Baseline.manuell.notiz || '').slice(0, 60)) } : null
@@ -44589,8 +44623,11 @@
   async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
-    { const sp = await planKontoSperre(plan)   // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026)
-      if(sp){ if(typeof atToast === 'function') atToast((sp.art === 'ziel' ? '🎯 ' : '✍ ') + sp.text, 'end'); if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text); return } }
+    { const sp = await planKontoSperre(plan, { hand: true })   // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026); nur Hand-Wege rufen hier (Trotzdem starten, 26.10.2026)
+      if(sp){
+        // Knopf nur ohne Schlangen-Rückruf (fehl/still): die Auto-Start-Schlange hält mit dem Text an, „Starten" auf der Karte bringt den Knopf
+        planSperreToast(plan, sp, (opts && (opts.fehl || opts.still)) ? null : () => tpPreflightAndStart(planId, opts))
+        if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text); return } }
     // FIRMEN-ABSTAND + GEGENHEDGE AUF JEDEM STARTWEG (08.10.2026, Master: Finn fragt, ob der Schutz bei JEDEM Start greift — tpPreflightAndStart
     // lief bisher ohne faVorStart und ohne Claim: „Trade planen → Speichern → sofort starten", „Echo fortsetzen", Duplikum-Resume nach
     // Konto-Edit, Orbit-Warteschlange vom Mac/Handy). Jetzt zentral hier, solange nichts gesendet ist. Ausgenommen die Wege, die nur das
@@ -47335,7 +47372,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1743'
+  const OS_TAB_BUILD = '2026-09-22.1744'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47748,8 +47785,14 @@
       if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
     }catch(_){ /* offline: mit dem Cache weiter */ }
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
-    const sperre = await planKontoSperre(plan)   // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand / vom Mac kein Start
-    if(sperre){ toast((sperre.art === 'ziel' ? '🎯 ' : '✍ ') + sperre.text, 'end'); if(fern) fern.melde({ ok:false, msg: sperre.text }); return }
+    // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand / vom Mac kein Start. Trotzdem starten (26.10.2026): Hand-Klick
+    // = ohne vonStartUm; am PC zählt nur das ausdrückliche ziel_trotzdem des Absenders am Signal
+    const sperre = await planKontoSperre(plan, fern ? { zielTrotzdem: !!fern.zielTrotzdem } : { hand: !(opts && opts.vonStartUm) })
+    if(sperre){
+      if(fern) fern.melde({ ok:false, msg: sperre.text })
+      planSperreToast(plan, sperre, (fern || (opts && opts.vonStartUm)) ? null : () => tpOrbitStarten(planId, null, opts))
+      return
+    }
     const fa = await faVorStart(plan)       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     if(fa){ if(fern) fern.melde({ ok:false, msg: fa }); return }
     if(!plan.startUmGestartetAt && typeof rkDeckelHinweis === 'function') rkDeckelHinweis(plan)   // Start per Knopf/vom Mac: Waage-Deckel nur als Hinweis (23.10.2026)
@@ -48361,7 +48404,8 @@
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: pid,
                   params: { aktion: 'orbit', orbit: { symbol: w.symbol, richtung: w.dir, volumen: w.lots,
-                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null } } })
+                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null },
+                            ...(zielTrotzdemAn(pid) ? { ziel_trotzdem: true } : {}) } })   // Trotzdem starten (26.10.2026): Ziel-Sperre am PC aus
         .select('*').single()
       if(error) throw error
       sig = data
@@ -48463,8 +48507,10 @@
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'planned') return
     { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
-    const sperre = await planKontoSperre(plan)   // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start
-    if(sperre){ if(typeof atToast === 'function') atToast((sperre.art === 'ziel' ? '🎯 ' : '✍ ') + sperre.text, 'end'); return }
+    // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — Toast mit „Trotzdem starten" (26.10.2026).
+    // tpStartUmTick ruft hier erst nach seiner eigenen Sperre ohne hand (Claim verbraucht), die Freigabe greift dort also nie
+    const sperre = await planKontoSperre(plan, { hand: true })
+    if(sperre){ planSperreToast(plan, sperre, () => tpJetztStarten(planId)); return }
     if(await faVorStart(plan)) return       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
@@ -48763,7 +48809,8 @@
       const { data, error } = await supabase.from('order_signale')
         .insert({ plan_id: String(plan.id),
                   params: { symbol: order.symbol, richtung: order.richtung, volumen: order.volumen,
-                            sl_usd: order.sl_usd, tp_usd: order.tp_usd } })
+                            sl_usd: order.sl_usd, tp_usd: order.tp_usd,
+                            ...(zielTrotzdemAn(plan.id) ? { ziel_trotzdem: true } : {}) } })   // Trotzdem starten (26.10.2026) — Beleg am Signal; der Echo-Weg am PC sperrt Ziel nicht erneut
         .select('*').single()
       if(error) throw error
       sig = data
@@ -50184,7 +50231,8 @@
           }, 8 * 60 * 1000)
           if(typeof atToast === 'function') atToast(`📡 Remote-Signal (Orbit): ${plan.masterName || '—'} — Puls übernimmt in TradingView`, 'start')
           // Nicht awaiten: der Tick gibt _osBusy frei, _osActive hält den Riegel bis zum Ergebnis.
-          tpOrbitStarten(plan.id, { werte: (sig.params || {}).orbit || {}, melde: res => _osErgebnis(sig.id, res) })
+          tpOrbitStarten(plan.id, { werte: (sig.params || {}).orbit || {}, melde: res => _osErgebnis(sig.id, res),
+                                    zielTrotzdem: (sig.params || {}).ziel_trotzdem === true })   // nur der Knopf am Absender setzt es (26.10.2026)
             .catch(e => _osErgebnis(sig.id, { ok:false, unklar:true,
               msg:'Orbit-Start am PC abgebrochen: ' + String(e && e.message || e) + ' — in TradingView prüfen, ob die Order liegt.' }))
           break   // ein Signal pro Lauf (dasselbe _osActive-Riegel-Muster)
