@@ -65,8 +65,14 @@ def main():
     check(pruefen(zeile, dict(acc, account_type="funded"), plaene) is None, "Topstep Express/Funded liest 0-basiert → nie")
     check(pruefen(zeile, dict(acc, name="150k XFA-000000"), plaene) is None, "Kennung XFA → nie")
     # Boden wie tplBlowBoden
-    check(boden({"boden": 145500, "boden_min": 145000}, None) == 145500, "boden schlägt boden_min")
+    check(boden({"boden": 145500, "boden_min": 145000}, None) == 145000, "der tiefere aus boden/boden_min zählt (boden_min)")
+    check(boden({"boden": 145000, "boden_min": 145500}, None) == 145000, "der tiefere aus boden/boden_min zählt (boden)")
     check(boden({"boden": None, "boden_min": 145000}, None) == 145000, "ohne boden → boden_min")
+    check(boden({"boden": 145000, "boden_min": None}, None) == 145000, "ohne boden_min → boden")
+    # S2-Befund 26.10.2026: nachziehend geschätzter Boden (sicheres Level) liegt über dem echten — knapp darüber bleibt das Konto
+    z_nach = dict(zeile, boden=146000.0, boden_min=145500.0, boden_art="nachziehend_geschaetzt")
+    check(pruefen(z_nach, dict(acc, tv_balance=145800.0), plaene) is None, "nachziehend geschätzt: 145.800 über boden_min 145.500 → bleibt")
+    check(bool(pruefen(z_nach, dict(acc, tv_balance=145447.2), plaene)), "nachziehend geschätzt: 145.447 unter beiden → archivieren")
     check(boden({"grund": "letzter Trade -4.400 $ (≥ 95 % des Drawdowns 4.500 $) — geblowt?", "konto": "150k Test"}, None) == 145500, "Größe 150k − DD 4.500 aus dem Grund")
     check(boden({"grund": "letzter Trade -2.900 $ (≥ 95 % des Drawdowns 3.000 $) — geblowt?", "konto": "Test"}, {"starting_balance": 100000}) == 97000,
           "Größe aus starting_balance, wenn der Name keine hat")

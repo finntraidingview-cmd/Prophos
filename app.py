@@ -20308,13 +20308,14 @@ _ap_blow_konto = {"at": 0.0, "n": 0, "fehler": "", "letzt": []}
 
 
 def ap_blow_konto_boden(zeile, acc):
-    """REIN RECHNEND (testbar): Boden einer Geblowt-Zeile wie tplBlowBoden — boden → boden_min (ap_boden_zeile) → Kontogröße − Drawdown aus
-    dem Grundtext („… des Drawdowns 4.500 $", Größe wie kontoGroesseAnzeige/_wd_konto_groesse). → float | None (unbekannt)."""
+    """REIN RECHNEND (testbar): Boden einer Geblowt-Zeile — der TIEFERE aus boden/boden_min (ap_boden_zeile), sonst Kontogröße − Drawdown
+    aus dem Grundtext („… des Drawdowns 4.500 $", Größe wie kontoGroesseAnzeige/_wd_konto_groesse). → float | None (unbekannt).
+    Nicht „boden zuerst" wie tplBlowBoden (S2-Befund 26.10.2026): boden ist das sichere Level, bei boden_art „nachziehend_geschaetzt" liegt es
+    ÜBER dem echten Boden — ein Konto knapp darüber würde sonst archiviert (bei MT5 samt Echo-Löschauftrag). Archiviert wird nur unter beiden."""
     z = zeile or {}
-    for k in ("boden", "boden_min"):
-        b = _wd_num(z.get(k))
-        if b is not None and b > 0:
-            return float(b)
+    bs = [float(b) for b in (_wd_num(z.get(k)) for k in ("boden", "boden_min")) if b is not None and b > 0]
+    if bs:
+        return min(bs)
     m = re.search(r"Drawdowns\s+([\d.]+)\s*\$", str(z.get("grund") or ""))
     if not m:
         return None
