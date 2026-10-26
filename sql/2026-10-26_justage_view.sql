@@ -10,7 +10,8 @@
 --                    („…, am Fill nachgezogen" bzw. „— Nachziehen: <Grund>"), Zeiten/Werte aus trail („14.8s·Final: pass (…) → nur TP am
 --                    Fill nachziehen → 14.8s·Nachziehen am Fill <Fill>: SL a / TP b statt c / d (x $ daneben, …) → … Aendern-Dialog offen …
 --                    → 26.2s·SL a / TP b am Fill nachgezogen (TP, Versuch 1)"). trail wird hinten gekürzt — dann fehlt nur dauer_s.
---   Orbit (tvv2)     order_signale (params.aktion = 'orbit').ergebnis.trail, Zeile „<t>s·Nachziehen am Fill: <teile, durch ' · '>"
+--   Orbit (tvv2)     SEIT .1749 OHNE JUSTAGE (Revert) — der Zweig bleibt für die Fälle 26.10. und liefert sonst nichts.
+--                    order_signale (params.aktion = 'orbit').ergebnis.trail, Zeile „<t>s·Nachziehen am Fill: <teile, durch ' · '>"
 --                    (order_bot._cdp_nachziehen, nur mit '@final=pass' / '@tages_grenze_usd='; die Marken selbst stehen nicht in der DB,
 --                    der Auslöser kommt aus den Teilen: „TP … > Ziel" = ziel, „SL … > Grenze" = tagesgrenze). pruefung.nachziehen landet
 --                    nur in puls_ergebnisse (eine Zeile je Plan, wird überschrieben) — deshalb hier die Spur.
@@ -19,7 +20,7 @@
 --
 -- Spalten justage_ereignisse (eine Zeile je Justage-Fall):
 --   at (Dubai, ohne Zone) · at_utc · tag (Dubai-Datum) · wer (Name der ID) · gruppe · user_id · plan_id · route echo|orbit|polar ·
---   ausloeser ziel|blow|tagesgrenze (auch kombiniert mit '+'), Polar airbag|plan|notfall · seite tp|sl|beide ·
+--   ausloeser ziel|blow|tagesgrenze|plan (plan = Echo-SL ab Fill > Plan + 15 %, ab .1751; kombiniert mit '+'), Polar airbag|plan|notfall · seite tp|sl|beide ·
 --   ergebnis nachgezogen|abgebrochen|nicht_noetig|unklar · grund · dauer_s (Beginn der Justage → bestätigt/abgebrochen;
 --   dauer_ca = true: Spur gekürzt, gerechnet bis Lauf-Ende) ·
 --   abweichung_vorher_usd / abweichung_nachher_usd (so weit lagen die groben Level daneben, davor/danach) · levels_vorher/levels_nachher ·
@@ -34,7 +35,9 @@ echo as (
          coalesce(nullif(p.mt5_baseline->'puls_spur'->>'at', '')::timestamptz, p.started_at) as at_utc
   from public.trade_plans p
   where p.route = 'mt5v2'
-    and p.mt5_baseline->'puls_spur'->>'trail' ~ 'Final: (pass|blow|beide)|Tagesgrenze: Verlust bis SL [^→]* > '
+    -- ab .1751 (S1 f4e938d2): SL-Auslöser „SL: Verlust bis SL X $ > Plan Y $ + 15 % → am Fill“ / „… > Tagesgrenze Z $ → am Fill“, auch bei
+    -- Final keins — jeder Klick-Fall hat „→ nur TP|SL|TP+SL am Fill nachziehen“; die Muster bis .1750 bleiben mitgelesen
+    and p.mt5_baseline->'puls_spur'->>'trail' ~ 'Final: (pass|blow|beide)|Tagesgrenze: Verlust bis SL [^→]* > |SL: Verlust bis SL [^→]* > (Plan|Tagesgrenze) |nur (TP\+SL|TP|SL) am Fill nachziehen'
 ),
 echo_z as (
   select e.*,
@@ -43,7 +46,7 @@ echo_z as (
               when e.msg ~ 'Nachziehen: ' or e.tr ~ '·Nachziehen: ' or e.ps->>'ok' = 'false' then 'abgebrochen'
               else 'unklar' end as ergebnis,
          regexp_match(e.tr, 'Nachziehen am Fill [0-9.]+: SL ([0-9.]+) / TP ([0-9.]+) statt ([0-9.]+) / ([0-9.]+) \(([0-9.]+) \$ daneben') as lv,
-         substring(e.tr from '([0-9]+\.[0-9]+)s·(Tagesgrenze: Verlust|Final: )')::numeric as t0,
+         substring(e.tr from '([0-9]+\.[0-9]+)s·(Tagesgrenze: Verlust|SL: Verlust bis SL [^→]* > (Plan|Tagesgrenze) |Final: )')::numeric as t0,
          coalesce(substring(e.tr from '([0-9]+\.[0-9]+)s·SL [^→]* am Fill nachgezogen'),
                   substring(e.tr from '([0-9]+\.[0-9]+)s·Nachziehen: '),
                   substring(e.tr from '([0-9]+\.[0-9]+)s·Nachziehen unnötig'))::numeric as t1
@@ -53,7 +56,8 @@ echo_f as (
   select z.at_utc, z.user_id, z.plan_id::text as plan_id, 'echo'::text as route,
          nullif(concat_ws('+',
            case when z.tr ~ 'Final: beide' then 'ziel+blow' when z.tr ~ 'Final: pass' then 'ziel' when z.tr ~ 'Final: blow' then 'blow' end,
-           case when z.tr ~ 'Tagesgrenze: Verlust bis SL [^→]* > ' then 'tagesgrenze' end), '') as ausloeser,
+           case when z.tr ~ 'Tagesgrenze: Verlust bis SL [^→]* > |SL: Verlust bis SL [^→]* > Tagesgrenze |\(SL wegen Tagesgrenze\)' then 'tagesgrenze'
+                when z.tr ~ 'SL: Verlust bis SL [^→]* > Plan |\(SL wegen Plan \+ 15 %\)' then 'plan' end), '') as ausloeser,
          case substring(z.tr from 'nur (TP\+SL|TP|SL) am Fill nachziehen') when 'TP' then 'tp' when 'SL' then 'sl' when 'TP+SL' then 'beide' end as seite,
          z.ergebnis,
          case z.ergebnis

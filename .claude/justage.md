@@ -8,8 +8,8 @@ bauen. Es geht nur darum, ob die Technik greift.
 
 | Weg | Code | Wann sie greift | Ergebnis steht in |
 |---|---|---|---|
-| Echo V2 (`mt5v2`) | `order_bot._sltp_nachziehen` → `_sltp_klicken` | `final` pass (TP), blow (SL), beide, oder `tages_grenze_usd` überschritten (SL ab Fill auf min(Plan-SL, Grenze)) | `trade_plans.mt5_baseline.puls_spur` (msg + trail) |
-| Orbit (`tvv2`) | `order_bot._cdp_nachziehen` (modus_tvkette_cdp) | Marken `@final=pass` (TP schießt übers Ziel) / `@tages_grenze_usd=` (SL kostet mehr als die Grenze) | `order_signale.ergebnis.trail` (params.aktion = orbit), Zeile „Nachziehen am Fill: …“ |
+| Echo V2 (`mt5v2`) | `order_bot._sltp_nachziehen` → `_sltp_klicken` | `final` pass (TP), blow (SL), beide; ab .1751 für jeden Trade mit SL: echter Verlust bis SL ab Fill > Plan + 15 % (ausloeser `plan`) oder > `tages_grenze_usd` (ausloeser `tagesgrenze`, SL auf min(Plan-SL, Grenze)) | `trade_plans.mt5_baseline.puls_spur` (msg + trail) |
+| Orbit (`tvv2`) — **seit .1749 raus** | `order_bot._cdp_nachziehen` (Revert) | bis .1748: Marken `@final=pass` (TP schießt übers Ziel) / `@tages_grenze_usd=` (SL kostet mehr als die Grenze) | `order_signale.ergebnis.trail` (params.aktion = orbit), Zeile „Nachziehen am Fill: …“ |
 | Polar | `polar_bot` Slave → `_sltp_klicken` | immer nach dem Fill: Airbag aus beiden Fills, sonst Plan-Abstände | `polar_lauf.slave.level` + `slave.schritte` |
 
 Schwellen (order_bot.py): `NACHZIEHEN_AB_USD` 3 $ (kleiner = „nicht_noetig“), `NACHZIEHEN_VERSUCHE` 2, Ändern-Frist
@@ -23,7 +23,7 @@ in der Spur, die Views lesen es per Regex. Wird ein Spurtext im Bot geändert, m
 SQL: `sql/2026-10-26_justage_view.sql` (create or replace, security_invoker, Rückbau am Dateiende).
 
 - `justage_ereignisse`: eine Zeile je Fall. Spalten: at (Dubai), tag, wer, gruppe, plan_id, route echo|orbit|polar,
-  ausloeser ziel|blow|tagesgrenze (kombiniert mit `+`, Polar airbag|plan|notfall), seite tp|sl|beide,
+  ausloeser ziel|blow|tagesgrenze|plan (kombiniert mit `+`, Polar airbag|plan|notfall), seite tp|sl|beide,
   ergebnis nachgezogen|abgebrochen|nicht_noetig|unklar, grund, dauer_s (+ dauer_ca), abweichung_vorher/nachher_usd,
   levels_vorher/nachher, aendern_dialoge, aendern_punkte, versuche, frist_erreicht, pc, quelle_id.
 - `justage_statistik`: je Dubai-Tag × Route × Ergebnis, nur Gruppe „Hermann Technologies“. Spalten: anzahl, trefferquote_pct, Ø/max Dauer,
@@ -58,7 +58,8 @@ Einzelfall nachlesen: Echo `select mt5_baseline->'puls_spur' from trade_plans wh
 
 ## Bewertungsregel
 
-1. **Gegriffen** = es gibt eine Zeile. Echo: Final pass/blow/beide bzw. Tagesgrenze überschritten. Orbit: Marke gesetzt. Polar: jeder Slave-Fill.
+1. **Gegriffen** = es gibt eine Zeile. Echo: Final pass/blow/beide, SL > Plan + 15 % oder Tagesgrenze überschritten (Spur „SL: Verlust bis SL …
+   → am Fill“). „SL ok (…)“ ist kein Fall. Orbit: nur bis .1748. Polar: jeder Slave-Fill.
 2. **Funktioniert** = `nachgezogen` (Level per API bzw. Order-Zeile bestätigt). `nicht_noetig` ist auch in Ordnung: die groben Level lagen
    < 3 $ daneben bzw. das Ziel bzw. die Grenze hält schon. Die Trefferquote zählt nur nachgezogen ÷ (nachgezogen + abgebrochen).
 3. **Ziel**: Trefferquote ≥ 95 % je Route über 7 Tage. Darunter die `grund`-Spalte bündeln. Ein Grund, der ≥ 3× in 7 Tagen oder an
