@@ -42497,7 +42497,8 @@
   const planZielText = (plan, z) => `„${plan.masterName || 'Konto'}" hat das Ziel schon erreicht${z.ziel > 0 ? ` (Balance ${Math.round(z.bal).toLocaleString('de-DE')} ≥ Ziel ${Math.round(z.ziel).toLocaleString('de-DE')})` : ''} — kein Trade gestartet.`
   /* TROTZDEM STARTEN (26.10.2026, Finn am Screenshot „100k … → Phase 2", Balance 104.075 ≥ Ziel 104.000: „Die Meldung soll kommen, aber
    * ich will die Option haben: trotzdem ‚Starten' drücken" — das Ziel war erreicht, die Mindesthandelstage aber nicht; die holt er mit
-   * Gegenhedges nach). Nur beim Hand-Klick: der Knopf im Ziel-Toast merkt die Plan-ID hier 10 min lang, planKontoSperre(plan, { hand: true })
+   * Gegenhedges nach). Nur beim manuellen Start (Finn: „nicht mit dem Radar und so") = „Starten" auf der Trade-Karte im Reiter Trades bzw.
+   * „Speichern & Starten" im Plan (opts.karte): der Knopf im Ziel-Toast merkt die Plan-ID hier 10 min lang, planKontoSperre(plan, { hand: true })
    * überspringt dann für diesen Plan NUR die Ziel-Sperre — Archiv, Waise, Manuelle Arbeit und alles danach (Claim, Firmen-Abstand,
    * Richtung, Waage, Riegel) bleiben. Automatische Starts (tpStartUmTick, sfTick, Auto-Planer über start_um) fragen ohne hand und bleiben
    * gesperrt; kein Dauer-Schalter. Zum PC reist die Freigabe ausdrücklich als params.ziel_trotzdem am Orbit-Signal (→ fern.zielTrotzdem). */
@@ -44281,9 +44282,11 @@
     // "Läuft"-Button: bewusst wieder das alte 1:1-Verhalten (manueller Override auf "offen").
     // Der Preflight-Check läuft nur beim "Speichern & Starten" im Modal — und ändert dort
     // den Status NICHT (Auto-Erkennung übernimmt den planned→open-Übergang).
+    // karte: Klick auf der Trade-Karte im Reiter Trades → Ziel-Toast mit „Trotzdem starten" (26.10.2026, Finn: „nur wenn ich Trades
+    // manuell starte, nicht mit dem Radar und so") — dieselbe Karte an anderer Stelle (Radar …) startet wie bisher ohne Knopf
     document.querySelectorAll('[data-plan-jetzt]').forEach(btn => {
       btn.addEventListener('click', () => {
-        if(typeof tpJetztStarten === 'function') tpJetztStarten(btn.dataset.planJetzt)
+        if(typeof tpJetztStarten === 'function') tpJetztStarten(btn.dataset.planJetzt, { karte: !!btn.closest('section.view[data-view="trades"]') })
       })
     })
     // Orbit-„Starten" (22.09.2026): fährt die Puls-Kette in TradingView. Doppelklick-Schutz
@@ -44317,7 +44320,7 @@
     })
     document.querySelectorAll('[data-plan-orbit-start]').forEach(btn => {
       btn.addEventListener('click', () => {
-        if(typeof tpOrbitStarten === 'function') tpOrbitStarten(btn.dataset.planOrbitStart)
+        if(typeof tpOrbitStarten === 'function') tpOrbitStarten(btn.dataset.planOrbitStart, null, { karte: !!btn.closest('section.view[data-view="trades"]') })   // karte: s. data-plan-jetzt
       })
     })
     // Warteschlangen-Knopf auf der Karte (09.09.2026): Klick = wieder raus,
@@ -44623,10 +44626,11 @@
   async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
-    { const sp = await planKontoSperre(plan, { hand: true })   // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026); nur Hand-Wege rufen hier (Trotzdem starten, 26.10.2026)
+    // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026). Trotzdem starten (26.10.2026): Freigabe zählt beim
+    // Karten-/Plan-Start (karte) und in der Auto-Start-Schlange (still) — dorthin kommt ein Plan mit Freigabe nur über „Starten" auf der Karte
+    { const sp = await planKontoSperre(plan, { hand: !!(opts && (opts.karte || opts.still)) })
       if(sp){
-        // Knopf nur ohne Schlangen-Rückruf (fehl/still): die Auto-Start-Schlange hält mit dem Text an, „Starten" auf der Karte bringt den Knopf
-        planSperreToast(plan, sp, (opts && (opts.fehl || opts.still)) ? null : () => tpPreflightAndStart(planId, opts))
+        planSperreToast(plan, sp, (opts && opts.karte && !opts.fehl && !opts.still) ? () => tpPreflightAndStart(planId, opts) : null)
         if(opts && typeof opts.fehl === 'function') opts.fehl(sp.text); return } }
     // FIRMEN-ABSTAND + GEGENHEDGE AUF JEDEM STARTWEG (08.10.2026, Master: Finn fragt, ob der Schutz bei JEDEM Start greift — tpPreflightAndStart
     // lief bisher ohne faVorStart und ohne Claim: „Trade planen → Speichern → sofort starten", „Echo fortsetzen", Duplikum-Resume nach
@@ -47372,7 +47376,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1744'
+  const OS_TAB_BUILD = '2026-09-22.1745'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -47785,12 +47789,13 @@
       if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
     }catch(_){ /* offline: mit dem Cache weiter */ }
     if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
-    // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand / vom Mac kein Start. Trotzdem starten (26.10.2026): Hand-Klick
-    // = ohne vonStartUm; am PC zählt nur das ausdrückliche ziel_trotzdem des Absenders am Signal
-    const sperre = await planKontoSperre(plan, fern ? { zielTrotzdem: !!fern.zielTrotzdem } : { hand: !(opts && opts.vonStartUm) })
+    // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand / vom Mac kein Start. Trotzdem starten (26.10.2026): nur der
+    // Karten-Klick (opts.karte, auch nach dem Duplikum-Check) — Startzeit, Neu starten, Vorcheck, Radar unverändert; am PC zählt nur das
+    // ausdrückliche ziel_trotzdem des Absenders am Signal
+    const sperre = await planKontoSperre(plan, fern ? { zielTrotzdem: !!fern.zielTrotzdem } : { hand: !!(opts && opts.karte) })
     if(sperre){
       if(fern) fern.melde({ ok:false, msg: sperre.text })
-      planSperreToast(plan, sperre, (fern || (opts && opts.vonStartUm)) ? null : () => tpOrbitStarten(planId, null, opts))
+      planSperreToast(plan, sperre, (!fern && opts && opts.karte) ? () => tpOrbitStarten(planId, null, opts) : null)
       return
     }
     const fa = await faVorStart(plan)       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
@@ -47951,7 +47956,7 @@
     if(!MT5_LOCAL && !fern) return _rsQueueAdd(plan)
     if(!fern && !(opts && opts.nachCheck) && !pv2){
       if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
-      return tpPreflightAndStart(planId, { nurDup: true, weiter: () => tpOrbitStarten(planId, null, { nachCheck: true }) })
+      return tpPreflightAndStart(planId, { nurDup: true, karte: !!(opts && opts.karte), weiter: () => tpOrbitStarten(planId, null, { nachCheck: true, karte: !!(opts && opts.karte) }) })
     }
     if(typeof window.mtcApi !== 'function')
       return fehler('Copier-Backend am PC nicht erreichbar — nichts gestartet.')
@@ -48503,14 +48508,15 @@
     tick()
   }
 
-  async function tpJetztStarten(planId){
+  async function tpJetztStarten(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'planned') return
     { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
-    // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — Toast mit „Trotzdem starten" (26.10.2026).
-    // tpStartUmTick ruft hier erst nach seiner eigenen Sperre ohne hand (Claim verbraucht), die Freigabe greift dort also nie
-    const sperre = await planKontoSperre(plan, { hand: true })
-    if(sperre){ planSperreToast(plan, sperre, () => tpJetztStarten(planId)); return }
+    // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — „Trotzdem starten" nur beim Karten-Klick
+    // (opts.karte, 26.10.2026); Startzeit (tpStartUmTick), Neu starten und Radar rufen ohne karte und bleiben wie bisher
+    const karte = !!(opts && opts.karte)
+    const sperre = await planKontoSperre(plan, { hand: karte })
+    if(sperre){ planSperreToast(plan, sperre, karte ? () => tpJetztStarten(planId, opts) : null); return }
     if(await faVorStart(plan)) return       // FIRMEN-ABSTAND (08.10.2026): andere ID bei derselben Firma eben gestartet → später
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
@@ -59360,7 +59366,7 @@
         } else if(_tpRoute === 'mt5' && typeof openTpOrderModal === 'function'){
           openTpOrderModal(savedPlanId)
         } else {
-          tpPreflightAndStart(savedPlanId)
+          tpPreflightAndStart(savedPlanId, { karte: true })   // „Speichern & Starten" im Plan = manueller Start (Trotzdem starten, 26.10.2026)
         }
       }
     }catch(e){
