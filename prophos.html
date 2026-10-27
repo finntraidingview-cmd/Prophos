@@ -90,6 +90,7 @@
     --ease: cubic-bezier(.4,0,.2,1);
     /* Markenfarben der vier Kernwege (Finn 21.10.2026, wegSymbol): Farben der Weg-Sticker (.tc2-sys) bzw. vorhandene Tokens */
     --weg-echo:#0E7A78; --weg-orbit:#7C3AED; --weg-wd:var(--good); --weg-polar:var(--blue);
+    --weg-nova:#C2410C;   /* Nova (Master 27.10.2026): Topstep-Orange wie der Sticker Topstep V2 */
   }
   /* Dark Mode (Finn 18.10.2026: „komplett nur Design, sonst nichts"): derselbe Token-Satz dunkel. Hell bleibt Standard
      und unverändert — gilt nur, wenn <html data-theme="dark"> gesetzt ist (Schalter Topbar/Settings, localStorage). */
@@ -123,6 +124,7 @@
     --shadow-pop: 0 10px 30px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.35);
     --shadow-input-focus: 0 0 0 4px rgba(116,104,240,.28);
     --weg-echo:var(--teal); --weg-orbit:var(--violet-soft); --weg-wd:var(--good); --weg-polar:var(--blue);
+    --weg-nova:#f5885c;
   }
 
   *{box-sizing:border-box}
@@ -4941,6 +4943,7 @@
   #dashboard-view .weg-sym{flex:none;display:inline-block;vertical-align:-2px;margin-right:5px;overflow:visible}
   #dashboard-view .weg-sym-echo{color:var(--weg-echo)} #dashboard-view .weg-sym-orbit{color:var(--weg-orbit)}
   #dashboard-view .weg-sym-wd{color:var(--weg-wd)} #dashboard-view .weg-sym-polar{color:var(--weg-polar)}
+  #dashboard-view .weg-sym-nova{color:var(--weg-nova)}
   #dashboard-view .tc2-sys.has-sym::before{display:none}
   #dashboard-view .tc2-sys .weg-sym{width:12px;height:12px;margin-right:0;color:inherit}
   #dashboard-view .wdl-pf .weg-sym{width:12px;height:12px;margin-right:4px;vertical-align:-2.5px}
@@ -4952,6 +4955,7 @@
   #dashboard-view .weg-sym-echo.weg-bewegt .ws-halo{animation:wegHalo 3.6s ease-in-out infinite;animation-delay:var(--ws-e, 0s);transform-box:fill-box;transform-origin:center}
   #dashboard-view .weg-sym-polar.weg-bewegt .ws-halo{animation:wegHalo 4.2s ease-in-out infinite;animation-delay:var(--ws-p, 0s);transform-box:fill-box;transform-origin:center}
   #dashboard-view .weg-sym-polar.weg-bewegt .ws-stern{animation:wegFunkel 4.2s ease-in-out infinite;animation-delay:var(--ws-p, 0s);transform-box:fill-box;transform-origin:center}
+  #dashboard-view .weg-sym-nova.weg-bewegt .ws-halo{animation:wegHalo 4.2s ease-in-out infinite;animation-delay:var(--ws-p, 0s);transform-box:fill-box;transform-origin:center}
   @keyframes wegWelle{0%,100%{opacity:.45}30%{opacity:1}}
   @keyframes wegHalo{0%,100%{opacity:.08;transform:scale(.9)}50%{opacity:.26;transform:scale(1.12)}}
   @keyframes wegFunkel{0%,100%{transform:scale(1) rotate(0deg)}50%{transform:scale(1.07) rotate(8deg)}}
@@ -4968,6 +4972,7 @@
   #dashboard-view .tc2-sys-tvv2{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px dashed rgba(124,58,237,.55);outline-offset:-1px}
   #dashboard-view .tc2-sys-tvv3{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px solid rgba(124,58,237,.55);outline-offset:-1px}   /* Orbit V3: wie V2, durchgezogen = mit Hedge (01.10.2026) */
   #dashboard-view .tc2-sys-tsv2{background:rgba(234,88,12,.12);color:#C2410C;outline:1px dashed rgba(234,88,12,.55);outline-offset:-1px}
+  #dashboard-view .tc2-sys-nova{background:rgba(234,88,12,.12);color:#C2410C;outline:1px solid rgba(234,88,12,.55);outline-offset:-1px}   /* Nova: wie Topstep V2, durchgezogen = mit Hedge (27.10.2026) */
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
   #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
   #dashboard-view .tc2-actions .tc2-btn{padding:4px 10px;font-size:12px}
@@ -9113,6 +9118,9 @@
                 <!-- Orbit (= Orbit V3, 01.10.2026): tvv2 + Fusion-Gegenhedge mit der Farm-Rechnung, jedes Futures-Konto, KEIN Winning Day
                      (trade_plans.orbit_v3); Userscript im Puls-Chrome schließt, Radar als Backup. -->
                 <button type="button" id="tp-route-o3" title="Orbit — Puls platziert in TradingView, Fusion-Gegenhedge; schließt, sobald das Userscript im Puls-Chrome die Position nicht mehr sieht, Radar (TP/SL) als Backup">Orbit</button>
+                <!-- Nova (Master 27.10.2026): Name des Topstep Big Trade — technisch derselbe Knopf-Zustand wie Orbit (tvv2 + orbit_v3), auf einem
+                     Topstep-Konto speichert der Orbit-Weg tsv2 + Fusion-Hedge (seit .1763). Leuchtet, wenn ein Topstep-Konto gewählt ist. -->
+                <button type="button" id="tp-route-nova" title="Nova — Topstep Big Trade: Puls platziert in TopstepX, Fusion-Gegenhedge; schließt über das TopstepX-Auge im Puls-Chrome, Radar als Backup. Topstep-Konto mit External ID wählen">Nova</button>
                 <!-- Polar (13.10.2026, Finn): Funded-Futures gegen Funded-CFD einer ANDEREN ID als Airbag statt Fusion-Live. Eigener
                      Knopf + eigenes Popup (#polarModal) — hängt NICHT an _tpRoute, schließt dieses Popup und öffnet die Vorschau.
                      Erst Frontend zum Verstehen, Start-Logik folgt. -->
@@ -17202,7 +17210,7 @@
       const offen = meine.filter(t => t.status === 'open').sort((a, b) => String(a.started_at || '').localeCompare(String(b.started_at || '')))
       if(offen.length){ const t = offen[0]
         return { art: 'lauf', plan_id: String(t.plan_id || t.id || ''), uid: String(t.user_id || ''), text: `läuft · ${menge(t)} · seit ${tagAnders(t.started_at)}${uhr(t.started_at)}`,
-                 tip: `Läuft seit ${uhr(t.started_at)} Dubai — ${t.plattform === 'echo' ? 'Echo (MT5)' : t.plattform === 'polar' ? 'Polar' : 'Orbit (TradingView)'}${offen.length > 1 ? ` · ${offen.length} offene Pläne` : ''} — klicken: Radar mit dieser ID` } }
+                 tip: `Läuft seit ${uhr(t.started_at)} Dubai — ${t.plattform === 'echo' ? 'Echo (MT5)' : t.plattform === 'polar' ? 'Polar' : (t.route === 'tsv2' && t.orbit_v3) ? 'Nova (TopstepX)' : 'Orbit (TradingView)'}${offen.length > 1 ? ` · ${offen.length} offene Pläne` : ''} — klicken: Radar mit dieser ID` } }
       const gepl = meine.filter(t => t.status === 'planned' && t.start_um).sort((a, b) => String(a.start_um).localeCompare(String(b.start_um)))
       const kommend = gepl.find(t => Date.parse(t.start_um) >= Date.parse(jetzt) - 15 * 60000) || gepl[gepl.length - 1]
       if(kommend) return { art: 'plan', plan_id: String(kommend.plan_id || kommend.id || ''), uid: String(kommend.user_id || ''), text: `geplant · ${tagAnders(kommend.start_um)}${uhr(kommend.start_um)}`,
@@ -22684,6 +22692,10 @@
   // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge, aber kein Winning Day — die Kennung gewinnt vor hedge_eur > 0
   // Topstep Big Trade (27.10.2026, Finn: „Big Trade für Topstep, parallel zu Orbit“): Orbit V3 auch auf tsv2 — Puls in TopstepX, Fusion-Hedge wie Orbit
   const tpIstOrbitV3 = p => !!(p && (p.route === 'tvv2' || p.route === 'tsv2') && p.orbitV3)
+  // NOVA (Master 27.10.2026, Finn): eigener Name für den Topstep Big Trade — tsv2 MIT Fusion-Gegenhedge (orbit_v3, seit .1763), wie Echo,
+  // Orbit und Polar. Nur das Etikett: route bleibt tsv2, Riegel, Big-Trade-Erkennung und Heim-Wache unverändert; Topstep V2 ohne Hedge
+  // behält seinen Namen. Nimmt Plan-Objekte (orbitV3) und Zeilen aus Railway (orbit_v3).
+  const tpIstNova = p => !!(p && p.route === 'tsv2' && (p.orbitV3 || p.orbit_v3))
   // P&L aus dem Userscript statt Puls-Nachlesung (01.10.2026 abends, Finn: „bei Winning Days dieselbe Logik wie bei Orbit") —
   // Orbit V3 UND Winning Day (tvv2 + Fusion-Hedge): bis 6 s auf die Reader-Balance warten, Nachtrag, Puls erst nach 10 min
   const planPlUserscript = p => !!(p && p.route === 'tvv2' && (p.orbitV3 || Number(p.hedgeEur) > 0))
@@ -22698,10 +22710,11 @@
     try{ const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); if(a && String(a.type || '').toLowerCase() === 'winning_days') return true }catch(_){}
     return false
   }
-  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : tpIstOrbitV3(p) ? 'Orbit' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
+  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : tpIstNova(p) ? 'Nova' : tpIstOrbitV3(p) ? 'Orbit' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
   /* WEG-SYMBOLE (Finn 21.10.2026: die Wege bekommen eigene Symbole, passend zum Namen — „visuell cooler"): Inline-SVG, currentColor, eine
    * Strichstärke, 16er-Raster; der Name bleibt daneben. Familien: Echo (Wiederhall: Quelle + Schallwellen), Orbit (Umlaufbahn mit Punkt),
-   * Winning Day (Siegel mit Häkchen — 🏆 bleibt dem Good Day), Polar (Polarstern). V2/V3 tragen das Symbol ihrer Familie, „V2" bleibt Text.
+   * Winning Day (Siegel mit Häkchen — 🏆 bleibt dem Good Day), Polar (Polarstern), Nova (aufleuchtender Stern mit Strahlen, 27.10.2026).
+   * V2/V3 tragen das Symbol ihrer Familie, „V2" bleibt Text.
    * weg = Label („Echo V2", „Orbit", „Winning Day", „Polar") oder Sticker-Key (mt5, mt5v2, tvplus, tvv2, tvv3, wd, polar); sonst ''. */
   function wegFamilie(weg){
     const w = String(weg || '').toLowerCase().trim()
@@ -22709,6 +22722,7 @@
     if(w === 'tvplus' || w === 'tvv2' || w === 'tvv3' || /^orbit\b/.test(w)) return 'orbit'
     if(w === 'wd' || /^winning\s*days?\b/.test(w)) return 'wd'
     if(w === 'polar' || /^polar\b/.test(w)) return 'polar'
+    if(w === 'nova' || /^nova\b/.test(w)) return 'nova'   // Topstep Big Trade mit Hedge (27.10.2026)
     return ''
   }
   function wegSymbol(weg, gross){   // Deklaration: Karten und Radar zeichnen schon vor dieser Stelle im Modul
@@ -22723,7 +22737,8 @@
       echo: '<g transform="translate(1.2 0)"><circle cx="3.4" cy="8" r="1.7" fill="currentColor" stroke="none"/><path d="M5.88 5.25A3.7 3.7 0 0 1 5.88 10.75" stroke-width="1.6"/><path d="M7.62 3.32A6.3 6.3 0 0 1 7.62 12.68" stroke-width="1.6" stroke-opacity=".66"/><path d="M9.36 1.39A8.9 8.9 0 0 1 9.36 14.61" stroke-width="1.6" stroke-opacity=".36"/></g>',
       orbit: '<ellipse cx="8" cy="8" rx="7" ry="2.8" transform="rotate(-35 8 8)" stroke-width="1.4" stroke-opacity=".75"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/><circle cx="11.4" cy="3.45" r="1.45" fill="currentColor" stroke="none"/>',
       wd: '<path d="M8 1.4 10.1 2.92 12.67 3.33 13.08 5.9 14.6 8 13.08 10.1 12.67 12.67 10.1 13.08 8 14.6 5.9 13.08 3.33 12.67 2.92 10.1 1.4 8 2.92 5.9 3.33 3.33 5.9 2.92Z" fill="currentColor" fill-opacity=".18" stroke-width="1.4"/><path d="M5.4 8.2 7.2 10 10.7 6.3" stroke-width="1.7"/>',
-      polar: '<path d="M8 0.6 8.5 6.8 10.55 5.45 9.2 7.5 15.4 8 9.2 8.5 10.55 10.55 8.5 9.2 8 15.4 7.5 9.2 5.45 10.55 6.8 8.5 0.6 8 6.8 7.5 5.45 5.45 7.5 6.8Z" fill="currentColor" stroke="none"/>'
+      polar: '<path d="M8 0.6 8.5 6.8 10.55 5.45 9.2 7.5 15.4 8 9.2 8.5 10.55 10.55 8.5 9.2 8 15.4 7.5 9.2 5.45 10.55 6.8 8.5 0.6 8 6.8 7.5 5.45 5.45 7.5 6.8Z" fill="currentColor" stroke="none"/>',
+      nova: '<circle cx="8" cy="8" r="2.6" fill="currentColor" stroke="none"/><path d="M8 1v2.6M8 12.4V15M1 8h2.6M12.4 8H15" stroke-width="1.6"/><path d="M3.05 3.05l1.7 1.7M11.25 11.25l1.7 1.7M3.05 12.95l1.7-1.7M11.25 4.75l1.7-1.7" stroke-width="1.3" stroke-opacity=".6"/>'
     }
     // PHASE DER WELTUHR (negativer Start): Radar und Trades zeichnen ihre Köpfe regelmäßig neu — Wellen, Funkeln und Mond laufen so nahtlos
     // weiter statt bei jedem Neuzeichnen von vorn (Vergleiche fürs Neuzeichnen ignorieren style="--ws-…" und begin, s. polarOhneCountdown)
@@ -22743,14 +22758,18 @@
         + '<path d="M7.6 10.9 10.6 13.9 16.4 7.9" stroke-width="2.3"/>',
       polar: '<circle class="ws-halo" cx="12" cy="12" r="7.2" fill="currentColor" stroke="none" opacity=".14"/>'
         + '<path class="ws-stern" d="M12 0.8 12.73 10.24 15.82 8.18 13.76 11.27 23.2 12 13.76 12.73 15.82 15.82 12.73 13.76 12 23.2 11.27 13.76 8.18 15.82 10.24 12.73 0.8 12 10.24 11.27 8.18 8.18 11.27 10.24Z" fill="currentColor" stroke="none"/>'
-        + '<circle cx="12" cy="12" r="1.3" style="fill:var(--surface)" stroke="none" opacity=".85"/>'
+        + '<circle cx="12" cy="12" r="1.3" style="fill:var(--surface)" stroke="none" opacity=".85"/>',
+      nova: '<circle class="ws-halo" cx="12" cy="12" r="8" fill="currentColor" stroke="none" opacity=".14"/>'
+        + '<circle cx="12" cy="12" r="3.8" fill="currentColor" stroke="none"/>'
+        + '<path d="M12 1.2v3.9M12 18.9v3.9M1.2 12h3.9M18.9 12h3.9" stroke-width="2.2"/>'
+        + '<path d="M4.36 4.36l2.6 2.6M17.04 17.04l2.6 2.6M4.36 19.64l2.6-2.6M17.04 6.96l2.6-2.6" stroke-width="1.8" stroke-opacity=".55"/>'
     }
     const n = gross ? 24 : 16, px = gross ? 20 : 14
     return `<svg class="weg-sym weg-sym-${f}${gross ? ' weg-gross' : ''}${still ? '' : ' weg-bewegt'}"${still ? '' : ` style="--ws-e:${ph(3.6)};--ws-p:${ph(4.2)}"`} viewBox="0 0 ${n} ${n}" width="${px}" height="${px}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${(gross ? GROSS : KLEIN)[f]}</svg>`
   }
   window._wegSymbol = wegSymbol   // Test-Haken (Stub)
   // Weg-Knöpfe im Plan-Popup (21.10.2026): Symbol vor dem Namen — „Duplikum (Puls)" bleibt ohne (heißt nach Duplikum)
-  ;[['tp-route-mt5', 'mt5'], ['tp-route-o3', 'tvv3'], ['tp-route-polar', 'polar'], ['tp-route-wd', 'wd'], ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2']]
+  ;[['tp-route-mt5', 'mt5'], ['tp-route-o3', 'tvv3'], ['tp-route-nova', 'nova'], ['tp-route-polar', 'polar'], ['tp-route-wd', 'wd'], ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2']]
     .forEach(([id, k]) => { const b = document.getElementById(id); if(b && !b.querySelector('.weg-sym')) b.insertAdjacentHTML('afterbegin', wegSymbol(k)) })
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
@@ -22761,6 +22780,7 @@
     wd:     ['Winning Day', 'Winning Days Farm — Puls platziert in TradingView, Fusion-Gegenhedge (intern Orbit V2)'],
     tvv3:   ['Orbit',  'Orbit — Puls platziert in TradingView, Fusion-Gegenhedge; schließt über das Userscript im Puls-Chrome, Radar als Backup'],
     tsv2:   ['Topstep V2', 'Topstep V2 — Puls platziert in TopstepX (Schalter „Puls für Topstep"), kein Hedge; P&L aus der Balance wie Orbit V2'],
+    nova:   ['Nova',      'Nova — Topstep Big Trade: Puls platziert in TopstepX, Fusion-Gegenhedge; schließt über das TopstepX-Auge im Puls-Chrome, Radar als Backup'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto'],
     polar:  ['Polar',     'Polar — Funded-Futures gegen Funded-CFD einer anderen ID; „Starten" (Prüf-Tabelle → beide PCs feuern gemeinsam) oder „Läuft" von Hand, „Erledigt" mit beiden P&Ls']
@@ -22777,6 +22797,7 @@
     if(p.route === 'mt5')    return 'mt5'
     if(p.route === 'tvplus') return 'tvplus'
     if(tpIstWdPlan(p))       return 'wd'   // Winning Day vor Orbit V2 (25.09.2026)
+    if(tpIstNova(p))         return 'nova'   // vor Orbit V3: Topstep Big Trade (27.10.2026)
     if(tpIstOrbitV3(p))      return 'tvv3'
     if(routeIstV2(p.route))  return p.route
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return 'mirror'
@@ -25328,7 +25349,7 @@
         tvV2Poll.wasOpen.delete(pid)
         tvV2Poll.streak.delete(pid)
         const _ohneZahl = plan.route === 'tsv2' ? fin.balance_end == null : fin.today_pnl == null
-        if(_ohneZahl && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'}: Ende erkannt, aber ${plan.route === 'tsv2' ? 'keine Balance gelesen' : 'der Reader nannte kein Today\'s P&L'} — Puls liest nach (${plan.masterName || '—'})`, 'end')
+        if(_ohneZahl && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? (tpIstNova(plan) ? 'Nova' : 'Topstep V2') : 'Orbit V2'}: Ende erkannt, aber ${plan.route === 'tsv2' ? 'keine Balance gelesen' : 'der Reader nannte kein Today\'s P&L'} — Puls liest nach (${plan.masterName || '—'})`, 'end')
         if(_ohneZahl && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(pid)
         // OHNE zweites Argument (wie mt5PlanPollTick): fromServer würde review + Auto-P&L unterdrücken.
         if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshPlan)
@@ -31373,7 +31394,7 @@
     if(wdlIstPolar(t)) return 'Polar'   // Sticker „Polar" (20.10.2026)
     if(wdlIstEcho(t)) return t.route === 'mt5' ? 'Echo' : 'Echo V2'   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
     // Winning Day auf Topstep (.1496, Finn 13.10.2026: „Winning Day ist der Knopf, Topstep V2 der Weg"): die Pille sagt Winning Day
-    if(t.route === 'tsv2' && t.orbit_v3) return 'Orbit'   // Topstep Big Trade (27.10.2026): Orbit-Hedge, kein Winning Day
+    if(t.route === 'tsv2' && t.orbit_v3) return 'Nova'   // Topstep Big Trade (27.10.2026): Orbit-Hedge, kein Winning Day — heißt Nova (Master 27.10.2026)
     if(t.route === 'tsv2') return (Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days' || t.winning_day === true) ? 'Winning Day' : 'Topstep V2'
     let eigen = null; try{ eigen = (tradePlans || []).find(x => String(x.id) === String(wdlTid(t))) }catch(_){}
     if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit'   // früher „Orbit V3" — heißt wie im Plan-Popup (01.10.2026)
@@ -31415,11 +31436,11 @@
   }
   // MODELLE (01.10.2026 abends): Schlüssel = Weg-Label (wdlWeg), Gruppen wie im Plan-Popup. Topstep (klassisch) und Duplikum liefert
   // das Backend nicht — sie fehlen hier bewusst statt als ewig leere Reiter.
-  const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]   // Polar im Radar (20.10.2026)
+  const WDL_MODELLE = [['Mit Hedge', ['Echo', 'Orbit', 'Nova', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Echo V2', 'Orbit V2', 'Topstep V2']]]   // Polar im Radar (20.10.2026)
   // Liste im Radar (09.10.2026): feste Reihenfolge und Akzentfarbe je Modell — „Orbit" ist Orbit V3 (heißt wie im Plan-Popup)
   // Seit 09.10.2026 ~07:45 Dubai (Finn) in zwei Obergruppen wie die Filterleiste oben: „Mit Hedge" (Orbit vor Echo, dann Winning Day),
   // „Ohne Hedge" (Orbit V2, Echo V2, Topstep V2) — Kopf je Obergruppe (wdlObergruppenHtml), gilt für Radar und Trades → Offen
-  const WDL_HEDGE_GRUPPEN = [['Mit Hedge', ['Orbit', 'Echo', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Orbit V2', 'Echo V2', 'Topstep V2']]]   // Polar (16.10.2026): Trades → Offen
+  const WDL_HEDGE_GRUPPEN = [['Mit Hedge', ['Orbit', 'Nova', 'Echo', 'Winning Day', 'Polar']], ['Ohne Hedge', ['Orbit V2', 'Echo V2', 'Topstep V2']]]   // Polar (16.10.2026): Trades → Offen
   const WDL_LISTE_REIHE = WDL_HEDGE_GRUPPEN.flatMap(([, l]) => l)
   // bloecke = [[Modell, Einträge]] in WDL_LISTE_REIHE-Reihenfolge (+ „Weitere"); blockHtml(k, b) zeichnet einen Modell-Block.
   // Vor dem ersten Block jeder Obergruppe ihr Kopf „Mit Hedge · n" (n = Einträge der Gruppe); „Weitere" ohne Obergruppe am Ende.
@@ -31439,7 +31460,7 @@
   }
   window._wdlObergruppenHtml = wdlObergruppenHtml   // Trades → Offen (anderer Abschnitt) nutzt dieselbe Gruppierung
   const WDL_MODELL_FARBE = { 'Orbit': 'var(--violet)', 'Orbit V2': 'var(--violet-soft)', 'Winning Day': 'var(--good)', 'Echo': 'var(--teal)',
-                             'Echo V2': 'var(--blue)', 'Topstep V2': 'var(--warn)', 'Polar': 'var(--teal-soft, var(--teal))', 'Weitere': 'var(--sub)' }
+                             'Echo V2': 'var(--blue)', 'Topstep V2': 'var(--warn)', 'Polar': 'var(--teal-soft, var(--teal))', 'Nova': 'var(--weg-nova)', 'Weitere': 'var(--sub)' }
   const wdlModellPasst = t => !wdl.modell || wdlWeg(t) === wdl.modell
   try{ const m = localStorage.getItem('prophos_wdl_modell'); if(m && WDL_MODELLE.some(([, l]) => l.includes(m))) wdl.modell = m }catch(_){}
   function wdlModelleRender(trades){
@@ -33009,7 +33030,7 @@
     const jetzt = Date.now(), minTxt = ms => { const m = Math.max(1, Math.ceil(ms / 60000)), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}` }   // wie wdlDauer
     // Master + Slave (01.10.2026, Finn: „wenn gegengehedgt wurde, sieht man auch den Slave-P&L"): zweite, kleine Zeile in der P&L-Zelle
     // nur bei Modellen MIT Fusion-Hedge (02.10.2026: Orbit V2 ohne Hedge zeigte „Fusion +0,00 €")
-    const slaveZ = t => { if(!['Echo', 'Orbit', 'Winning Day'].includes(wdlWeg(t))) return ''; const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
+    const slaveZ = t => { if(!['Echo', 'Orbit', 'Nova', 'Winning Day'].includes(wdlWeg(t))) return '';   /* Nova (27.10.2026): Fusion-Hedge wie Orbit */ const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
     // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde —
     // Userscript, Radar oder das 110-%-Level"): aus hedge.grund, kurz; der lange Text (hedgeGrundText) steht im Tooltip
     const ZU_WEG = { master_ende_reader: 'Userscript', tp_feed: 'Radar · TP', sl_feed: 'Radar · SL', level_tp: 'Terminal · Notfall 110 %', level_sl: 'Terminal · Master-SL',
@@ -33022,7 +33043,7 @@
     }
     // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
     const fusionLiveZ = t => {
-      const hedgeModell = ['Echo', 'Orbit', 'Winning Day'].includes(wdlWeg(t)); if(!hedgeModell) return ''
+      const hedgeModell = ['Echo', 'Orbit', 'Nova', 'Winning Day'].includes(wdlWeg(t)); if(!hedgeModell) return ''   // Nova (27.10.2026) wie Orbit
       const v = wdlFusionWert(t)
       return `<small class="wdl-z-slave" data-wdl-fusion="${escapeHtml(wdlTid(t))}" style="color:${v == null ? 'var(--sub)' : col(v)}" title="Fusion-Gegenhedge live (schwebend, aus MT5)">${escapeHtml(wdlFusionText(t, v))}</small>`
     }
@@ -43919,7 +43940,7 @@
   /* OFFEN WIE DAS RADAR (Finn 09.10.2026 ~07:27 Dubai: „richtig hässlich und unübersichtlich, bitte so clean wie Radar"): je Modell ein Block
    * wie im Radar „Läuft" (wdl-mb, Reihenfolge WDL_LISTE_REIHE, Farbe WDL_MODELL_FARBE), darin die unveränderten Karten als Zeilen (CSS .tc-zl).
    * Modell aus planSysKey — dieselben Namen wie die Sticker; Duplikum/Mirror/Orbit (Duplikum) unter „Weitere" mit Sticker in der Zeile. */
-  const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', tvv2: 'Orbit V2', tsv2: 'Topstep V2', polar: 'Polar' }
+  const OFFEN_MODELL = { mt5: 'Echo', mt5v2: 'Echo V2', wd: 'Winning Day', tvv3: 'Orbit', nova: 'Nova', tvv2: 'Orbit V2', tsv2: 'Topstep V2', polar: 'Polar' }
   /* PULS-ZEILE JE TRADE (Finn 09.10.2026 ~20:36 Dubai zu „Überprüfen": „dass ich hier die ganzen Puls- und was passiert ist sehe"): unter
    * jeder Zeile in Warte auf Puls / Überprüfen / Erledigt eine kurze Zeile aus dem, was am Plan schon steht (mt5_baseline: tv Start/Einstieg,
    * start_fehler, final Endlesung/Fehler/Konto weg, Grund der Nachlesung) — aufklappbar mit der Bot-Spur (final.lesen_trail, tv.lesen_trail,
@@ -44053,7 +44074,7 @@
       + (istV2Karte
           // Winning Days Farm (24.09.2026 spät): tvv2 mit hedge_eur ist GEHEDGT — der gestrichelte V2-Rand meint „ohne Hedge",
           // der Untertitel sagt es deshalb ausdrücklich (der 🛡-Chip trägt Betrag und Zustand)
-          ? (((p.route === 'tvv2' || p.route === 'tsv2') && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge: ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.multiplier > 0 ? ` · Multiplikator ${Number(p.multiplier).toFixed(3)}` : ''} — beide Schließ-Level in MetaTrader">${tpIstOrbitV3(p) ? 'Orbit' : 'Winning Days Farm'} · Fusion-Gegenhedge</span>` : '')   // Orbit (V3) ist kein Winning Day (01.10.2026)
+          ? (((p.route === 'tvv2' || p.route === 'tsv2') && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge: ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.multiplier > 0 ? ` · Multiplikator ${Number(p.multiplier).toFixed(3)}` : ''} — beide Schließ-Level in MetaTrader">${tpIstNova(p) ? 'Nova' : tpIstOrbitV3(p) ? 'Orbit' : 'Winning Days Farm'} · Fusion-Gegenhedge</span>` : '')   // Orbit (V3) ist kein Winning Day (01.10.2026)
           : ` <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
             + ` · ×<b style="color:var(--violet)">${mult}</b>`
             + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
@@ -46738,6 +46759,11 @@
     catch(_){ return false }
   }
 
+  // Nova-Anzeige (27.10.2026): gewähltes Master-Konto ist Topstep — dieselbe Prüfung wie o3Ts beim Speichern
+  function tpMasterIstTopstep(){
+    const mid = document.getElementById('tp-master')?.value
+    return /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(mid)) || {}).firm || ''))
+  }
   function tpRouteUpdateSeg(){
     document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus' && _tpRoute !== 'topstep' && !routeIstV2(_tpRoute))
     document.getElementById('tp-route-topstep')?.classList.toggle('active', _tpRoute === 'topstep')
@@ -46745,7 +46771,10 @@
     document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
     document.getElementById('tp-route-mt5v2')?.classList.toggle('active', _tpRoute === 'mt5v2')
     document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2' && !_tpWd && !_tpO3)
-    document.getElementById('tp-route-o3')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3)
+    // Orbit vs. Nova (27.10.2026): derselbe Zustand (tvv2 + _tpO3) — auf einem Topstep-Konto heißt der Weg Nova (wird tsv2 beim Speichern)
+    const _novaKonto = tpMasterIstTopstep()
+    document.getElementById('tp-route-o3')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3 && !_novaKonto)
+    document.getElementById('tp-route-nova')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpO3 && _novaKonto)
     document.getElementById('tp-route-wd')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpWd)
     document.getElementById('tp-route-tsv2')?.classList.toggle('active', _tpRoute === 'tsv2')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
@@ -47815,7 +47844,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1784'
+  const OS_TAB_BUILD = '2026-09-22.1785'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48186,7 +48215,7 @@
     const um = d.ziel ? new Date(d.ziel).toLocaleTimeString('de-DE', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }) + ' Dubai' : '?'
     // Gegen einen LAUFENDEN Trade derselben ID (sql/2026-10-09_gegenhedge_nur_gegenrichtung.sql, d.laeuft): gesperrt, bis er zu ist — kein „90 s"
     const t = bt
-      ? `„${plan.masterName || '—'}" wartet: Big Trade „${d.wer || '?'}" läuft noch in diesem Fenster (Orbit/Topstep: nur einer gleichzeitig) — neue Prüfung ${um}`
+      ? `„${plan.masterName || '—'}" wartet: Big Trade „${d.wer || '?'}" läuft noch in diesem Fenster (Orbit/Nova: nur einer gleichzeitig) — neue Prüfung ${um}`
       : gh && d.laeuft
       ? `„${plan.masterName || '—'}" gegen laufenden Trade gesperrt: ${d.grund || 'dein Konto läuft dort in Gegenrichtung'} (${plan.masterFirm || d.firma || 'gleiche Firma'}) — neue Prüfung ${um}`
       : gh
@@ -48269,7 +48298,7 @@
       const _fin = document.getElementById('pf-final'); if(_fin) _fin.style.display = 'none'
       const _ft = document.getElementById('pf-foot'); if(_ft) _ft.style.display = 'none'
       _pfEchoKnopf(false)
-      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `Topstep V2 · ${plan.masterName || '—'} — Puls in TopstepX${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : tpIstOrbitV3(plan) ? `Orbit · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge, Userscript im Puls-Chrome schließt` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
+      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = plan.route === 'tsv2' ? `${tpIstNova(plan) ? 'Nova' : 'Topstep V2'} · ${plan.masterName || '—'} — Puls in TopstepX${tpIstNova(plan) ? ', Fusion-Gegenhedge' : ''}${tsPulsModus() === 'lesen' ? ' (nur lesen)' : ''}` : tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : tpIstOrbitV3(plan) ? `Orbit · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge, Userscript im Puls-Chrome schließt` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
       document.getElementById('tpPreflightModal')?.classList.add('open')
     }
     const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
@@ -49055,7 +49084,7 @@
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
     if(routeIstOrbit(plan.route) && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
       const w = tpOrbitWerte(plan)
-      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : tpIstOrbitV3(plan) ? 'Orbit · ' : ''
+      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : tpIstNova(plan) ? 'Nova · ' : tpIstOrbitV3(plan) ? 'Orbit · ' : ''
       return w.dir ? `${vor}${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : `${vor}${plan.masterName || '—'}`
     }
     const { order } = _tpOrderAusPlan(plan)
@@ -49724,7 +49753,7 @@
     if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
     const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'}: geschlossen, aber ${plan.route === 'tsv2' ? 'keine Balance' : "kein Today's P&L"} gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.balance_end == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ ${plan.route === 'tsv2' ? (tpIstNova(plan) ? 'Nova' : 'Topstep V2') : 'Orbit V2'}: geschlossen, aber ${plan.route === 'tsv2' ? 'keine Balance' : "kein Today's P&L"} gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
     // JEDES Ende ohne Zahl (Level, Master weg laut Reader, Schließen/Auto-Close ohne Today's P&L) → Puls-Endlesung (25.09.2026)
     if(fin.today_pnl == null && fin.balance_end == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
@@ -51236,7 +51265,7 @@
       if(!rows.length){ box.innerHTML = '<span style="color:var(--sub)">Noch keine Schließ-Versuche.</span>'; return }
       box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Letzte Schließ-Versuche</div>' + rows.map(r => {
         const t = new Date(r.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? (r.orbit_v3 ? 'Orbit' : Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Topstep V2') : (r.route || '—')
+        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? (r.orbit_v3 ? 'Nova' : Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Topstep V2') : (r.route || '—')
         return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line);align-items:baseline">
           <span class="mono" style="color:var(--sub);flex:0 0 92px">${t}</span>
           <span style="flex:0 0 46px">${weg}</span>
@@ -51710,7 +51739,7 @@
     if(x.art === 'Start'){
       let w = null; try{ w = tpOrbitWerte(p) }catch(_){}
       const order = (w && w.dir) ? [w.dir.toUpperCase(), w.lots > 0 ? w.lots : '', w.symbol].filter(Boolean).join(' ') : ''
-      return { was: `${routeIstOrbit(p.route) ? 'Orbit' : 'Echo'}-Order platzieren${order ? ' · ' + order : ''}`,
+      return { was: `${tpIstNova(p) ? 'Nova' : routeIstOrbit(p.route) ? 'Orbit' : 'Echo'}-Order platzieren${order ? ' · ' + order : ''}`,
                info: [p.masterName || 'Konto', tpIstFarmerPlan(p) ? 'Winning-Day-Farmer' : 'geplanter Start'] }
     }
     const info = [p.masterName || 'Konto']
@@ -51999,7 +52028,7 @@
     if(_vcZuFuer && _vcZuFuer !== pid) _vcZuFuer = null
     _vcPlan = plan; _vcPhase = phase
     const start = plan && plan.startUm ? new Date(plan.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''
-    const weg = (typeof tpIstWdPlan === 'function' && tpIstWdPlan(plan)) ? 'Winning Day' : 'Orbit'
+    const weg = (typeof tpIstWdPlan === 'function' && tpIstWdPlan(plan)) ? 'Winning Day' : tpIstNova(plan) ? 'Nova' : 'Orbit'
     document.getElementById('vc-plan-info').textContent = `${weg} · ${(plan && plan.masterName) || '—'}${start ? ' · Start ' + start : ''}`
     const rows = document.getElementById('vc-rows'), fin = document.getElementById('vc-final')
     const checks = (res && res.checks) || []
@@ -54572,7 +54601,7 @@
     const acc1 = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null, b1 = acc1 ? tplKontoBalance(acc1) : null
     const menge1 = t.menge == null ? '—' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     const symbol1 = /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge1} Lot` : `${menge1} × ${(r1 && r1.symbol_root) || (Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ')}`
-    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? 'Topstep V2' : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
+    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2') : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
     const einstieg1 = (r1 && Number(r1.einstieg_nq) > 1000) ? Number(r1.einstieg_nq).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
     const quelle1 = (r1 && r1.einstieg_quelle) || (t.auto ? 'Auto-Planer' : 'Hand')
     const zeit1 = t.status === 'laeuft' ? `${tplUhr(t.start, v)} · läuft` : (t.status === 'beendet' || t.status === 'vorbei') ? `${tplUhr(t.start, v)} – ${t.ende != null ? tplUhr(t.ende, v) : '?'}` : `Start ${tplUhr(t.start, v)}`
@@ -54615,7 +54644,7 @@
    * seine Trades. Bestätigen nur mit Recht (wie im Detail) UND liver Balance (tplPlanLive). Planer-Seite: „Bearbeiten ▸" öffnet das alte
    * Detail darunter (Richtung/Start/Löschen). Schließen: ✕, Klick daneben, Esc, Scrollen, Größe ändern. Eigene Verdrahtung, kein Modal-Handler. */
   const _tk = { el: null, anker: null, root: null, key: null, gruppe: null, busy: false, meldung: '' }
-  const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? 'Topstep V2'
+  const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2')
     : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
   function tkStand(){ const zs = _tk.root && _tpl.zs && _tpl.zs[_tk.root.id]; return zs || { trades: new Map(), v: 0 } }
   function tkEinzelHtml(t, v){
@@ -56833,7 +56862,7 @@
     // Winning Day auf Topstep (.1495, Finn 13.10.2026: „Bearbeiten schlug ‚Topstep V2 ohne Hedge' vor"): ein tsv2-Plan mit Hedge oder
     // Winning-Day-Marke öffnet als Weg „Winning Day" (intern tvv2 + _tpWd); Speichern dreht ihn über wdTs wieder auf tsv2
     if(_editPlan && _editPlan.route === 'tsv2' && !_editPlan.orbitV3 && (_editPlan.hedgeEur > 0 || _editPlan.winningDay === true)){ _tpRoute = 'tvv2'; _tpWd = true }
-    if(_editPlan && _editPlan.route === 'tsv2' && _editPlan.orbitV3){ _tpRoute = 'tvv2'; _tpWd = false }   // Topstep Big Trade (27.10.2026) → Knopf Orbit
+    if(_editPlan && _editPlan.route === 'tsv2' && _editPlan.orbitV3){ _tpRoute = 'tvv2'; _tpWd = false }   // Topstep Big Trade (27.10.2026) → Knopf Nova (Orbit-Zustand)
     // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
     _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
     if(_tpO3) _tpWd = false
@@ -56874,7 +56903,7 @@
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-o3', 'tp-route-wd', 'tp-route-tsv2'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-o3', 'tp-route-nova', 'tp-route-wd', 'tp-route-tsv2'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -57424,13 +57453,14 @@
       tpRecompute()
     }
     ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus'],
-      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-o3', 'tvv2'], ['tp-route-wd', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
+      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-o3', 'tvv2'], ['tp-route-nova', 'tvv2'], ['tp-route-wd', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
           const wd = id === 'tp-route-wd'   // Winning Day = tvv2 + Staffel-Hedge, Dropdown nur Funded-Futures (24.09.2026 abends)
-          const o3 = id === 'tp-route-o3'   // Orbit V3 = tvv2 + Fusion-Hedge, jedes Futures-Konto (01.10.2026)
-          if(_tpRoute === r && _tpWd === wd && _tpO3 === o3) return
+          const o3 = id === 'tp-route-o3' || id === 'tp-route-nova'   // Orbit V3 = tvv2 + Fusion-Hedge, jedes Futures-Konto (01.10.2026); Nova = derselbe Zustand (27.10.2026)
+          if(id === 'tp-route-nova') tpNovaKontoWaehlen()
+          if(_tpRoute === r && _tpWd === wd && _tpO3 === o3){ tpRouteUpdateSeg(); return }
           _tpRoute = r; _tpWd = wd; _tpO3 = o3
           localStorage.setItem(TP_ROUTE_LS, r)
           localStorage.setItem('prophos_tp_wd', wd ? '1' : '0')
@@ -57567,6 +57597,7 @@
     document.getElementById('tradePlanMsg').textContent = ''
     document.getElementById('tradePlanModal').classList.add('open')
     try{ tpLetzteOrdersRender() }catch(_){}   // Letzte Orders: Master ist jetzt gesetzt (auch beim Bearbeiten)
+    try{ tpRouteUpdateSeg() }catch(_){}   // Orbit ↔ Nova: erst jetzt steht das Master-Konto fest (27.10.2026)
     try{ tpWdMasterRiskVorbelegen() }catch(_){}   // WD: erst jetzt stehen die Plan-Werte (Max DD raus, sonst TP als Startwert, 08.10.2026)
     tpVersionRiegel().catch(() => {})   // neuerer Build bereit → Speichern gesperrt, Zeile mit „Jetzt neu laden" (08.10.2026)
     tpNqUpdateToggle()  // initial (evtl. noch kein Slave-Value)
@@ -59065,6 +59096,17 @@
   })
   // Update toggles when accounts change
   document.getElementById('tp-master')?.addEventListener('change', tpNqUpdateToggle)
+  document.getElementById('tp-master')?.addEventListener('change', () => { try{ tpRouteUpdateSeg() }catch(_){} })   // Orbit ↔ Nova je Konto (27.10.2026)
+  // Nova-Knopf (27.10.2026): steht noch kein Topstep-Konto im Master-Feld, das erste Topstep-Konto der Liste wählen — nur die Auswahl im
+  // Popup, der Weg bleibt der Orbit-Zustand; ohne Topstep-Konto in der Liste bleibt alles, wie es ist
+  function tpNovaKontoWaehlen(){
+    const sel = document.getElementById('tp-master'); if(!sel || tpMasterIstTopstep()) return
+    setTimeout(() => {   // nach tpRouteApply: das Dropdown ist dann für den Orbit-Zustand neu befüllt
+      if(tpMasterIstTopstep()) return
+      const opt = [...sel.options].find(o => o.value && /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(o.value)) || {}).firm || '')))
+      if(opt){ sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })) }
+    }, 0)
+  }
   document.getElementById('tp-slave')?.addEventListener('change',  tpNqUpdateToggle)
 
   /* ── END NQ/MNQ Toggle ── */
@@ -59690,7 +59732,7 @@
     { const kt = String((master && master.type) || '').toLowerCase()
       const mitH = tpWegMitHedge(), ohneH = routeIstV2(_tpRoute) && !mitH
       if(ohneH && (kt === 'funded' || kt === 'funded_cfd' || kt === 'winning_days')){
-        msg(`Funded-Konto „${master.name}" nur mit Hedge — Weg Echo, Orbit V3, Winning Day oder Topstep (mit Hedge) wählen; ${_tpRoute === 'mt5v2' ? 'Echo V2' : _tpRoute === 'tsv2' ? 'Topstep V2' : 'Orbit V2'} ohne Hedge ist für Challenges.`, 'err'); return }
+        msg(`Funded-Konto „${master.name}" nur mit Hedge — Weg Echo, Orbit, Nova, Winning Day oder Topstep (mit Hedge) wählen; ${_tpRoute === 'mt5v2' ? 'Echo V2' : _tpRoute === 'tsv2' ? 'Topstep V2' : 'Orbit V2'} ohne Hedge ist für Challenges.`, 'err'); return }
       if(mitH && routeIstV2(_tpRoute) && (kt === 'challenge' || kt === 'phase1' || kt === 'phase2') && !_tpChHedge && !tpRestHedgeErlaubt(master)){
         msg(`Challenge-/Phase-Konto „${master.name}" nur ohne Hedge — Echo V2, Orbit V2 oder Topstep V2 wählen, oder oben „Challenges mit Hedge" einschalten.`, 'err'); return } }
     const mult = mitHedge ? (_tpWdHand.mult > 0 ? _tpWdHand.mult : tpCalcMultiplier(master.firm, TP_WD_SLAVE_FIRM, (wd && !o3) ? masterTp : masterRisk, masterQty, slaveRisk))   // Hand-Multiplikator gewinnt (25.09.2026); WD: Basis = TP (05.10.2026)
@@ -59757,7 +59799,7 @@
       if(wdTs) Object.assign(v2Extra, { route: 'tsv2', winning_day: true })   // Topstep: Weg tsv2 mitschreiben (v2Extra liegt hinter route), Hedge-Felder wie Winning Day
       if(o3Ts) Object.assign(v2Extra, { route: 'tsv2', winning_day: false })   // Topstep Big Trade (27.10.2026): Weg tsv2, orbit_v3 setzt der Block unten
       if(_tpWd || _tpO3){
-        if(!masterTp){ msg(`${_tpO3 ? 'Orbit' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
+        if(!masterTp){ msg(`${_tpO3 ? (tpMasterIstTopstep() ? 'Nova' : 'Orbit') : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
         // Multiplikator-Logik wie bisher (Finn 24.09.2026 spät): hedge_faktor = Multiplikator (Chip/Bearbeiten), hedge_eur =
         // Lots × 0,85 × TP-Punkte = Fusion-Verlust am Master-TP (die Bedeutung, die Copier-Lots und Farmer-Abgleich kennen)
@@ -76180,7 +76222,7 @@
 :where([data-theme=dark]) #dashboard-view .tc2-sys-mt5v2{background-color:rgba(14,151,149,.15);color:#63edeb;outline-color:rgba(49,231,228,0.55)}
 :where([data-theme=dark]) #dashboard-view .tc2-sys-wd{background-color:rgba(0,168,129,.12);color:#5af6c9;outline-color:rgba(37,244,184,0.45)}
 :where([data-theme=dark]) #dashboard-view .tc2-sys-tvv2,:where([data-theme=dark]) #dashboard-view .tc2-sys-tvv3{background-color:rgba(124,58,237,.12);color:#894def;outline-color:rgba(124,58,237,.55)}
-:where([data-theme=dark]) #dashboard-view .tc2-sys-tsv2{background-color:rgba(234,88,12,.12);color:#f5885c;outline-color:rgba(244,108,37,0.55)}
+:where([data-theme=dark]) #dashboard-view .tc2-sys-tsv2,:where([data-theme=dark]) #dashboard-view .tc2-sys-nova{background-color:rgba(234,88,12,.12);color:#f5885c;outline-color:rgba(244,108,37,0.55)}
 :where([data-theme=dark]) #dashboard-view .tc2.tc2-is-pending{border-color:rgba(244,167,37,0.45);background-color:rgba(245,158,11,.05)}
 :where([data-theme=dark]) #dashboard-view .tc2.tc2-open{border-color:rgba(44,237,173,0.3)}
 :where([data-theme=dark]) #dashboard-view .tc2.tc2-review{border-color:rgba(244,167,37,0.4);background-color:rgba(245,158,11,.04)}

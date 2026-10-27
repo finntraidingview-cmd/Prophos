@@ -138,7 +138,7 @@ check("? polarAblaufHtml(st, { richtung: t.richtung" in HTML, "Radar-Popup zeigt
 # (3) Radar-Zeile + Popup + Mobil
 check("function wdlIstPolar(t){ return !!t && (t.plattform === 'polar' || t.route === 'polar') }" in HTML, "wdlIstPolar")
 check("if(wdlIstPolar(t)) return 'Polar'" in HTML, "wdlWeg: Sticker „Polar\"")
-check("['Mit Hedge', ['Echo', 'Orbit', 'Winning Day', 'Polar']]" in HTML and "'Polar': 'var(--teal-soft, var(--teal))'" in HTML, "Modell-Chip + Blockfarbe Polar")
+check("['Mit Hedge', ['Echo', 'Orbit', 'Nova', 'Winning Day', 'Polar']]" in HTML and "'Polar': 'var(--teal-soft, var(--teal))'" in HTML, "Modell-Chip + Blockfarbe Polar")
 check("if(wdlIstPolar(t)) return null   // Polar (20.10.2026): keine Puls-Nachlesung" in HTML, "wdlWartet: Polar kennt kein Wartet")
 check("if(offen && polar){" in HTML and 'data-wdl-polar="${escapeHtml(wdlTid(t))}"' in HTML, "Läuft-Zeile Polar mit „Stand\"-Knopf")
 check("polSlaveWer" in HTML and "<span class=\"wdl-pol-s\"><b>${escapeHtml(String(t.slave_person || '?'))}</b>" in HTML, "Zeile zeigt Slave-ID + Slave-Konto als zweite Zeile")
