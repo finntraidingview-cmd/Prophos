@@ -37,3 +37,7 @@ update public.wd_tagesplan
 -- delete from public.trade_plans where user_id = '6c206a34-c4a7-4352-8097-bb17366bcea1' and status = 'planned'
 --    and auto_plan and mt5_baseline->'puls_pause'->>'at' = '2026-10-27T00:00:00Z';
 -- Der WD-Hand-Plan (auto_plan = false) und der Tagesplan bleiben stillgelegt — Finn entscheidet, ob er neu angelegt wird.
+
+-- RÜCKWEG GEFAHREN 27.10.2026 ~14:25 Dubai (Finn: „Mark wieder zum Trade-Planer hinzugefügt, heute läuft der PC wieder"):
+-- Marc stand schon wieder in user_ids (Finn per Admin); die 7 stillgelegten Auto-Pläne gelöscht (sonst sieht der Planer die Konten
+-- als „Plan liegt noch" und plant nicht neu). WD-Hand-Plan dd3d1a9a + Tagesplan 27.10. bleiben stillgelegt (Finn entscheidet).
