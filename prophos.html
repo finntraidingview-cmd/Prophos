@@ -41893,9 +41893,22 @@
       tradePlans = (data || []).map(rowToPlan).filter(Boolean).filter(p => !_tpLoeschOffen.has(String(p.id)) && !nachholen.includes(String(p.id)))
       if(nachholen.length){
         const da = new Set((data || []).map(r => String(r.id)))
-        supabase.from('trade_plans').delete().in('id', nachholen.filter(id => da.has(id))).then(({ error: e2 }) => {
+        // FARMER-PLÄNE NICHT BLIND (27.10.2026, Prüfer S2 zu .1755): seit geplante Farmer-Pläne löschbar sind, kann ein Neuladen innerhalb der
+        // 5 s einen solchen Plan hier ankommen lassen — ein blindes DELETE ließe seine plan_id im Tagesplan stehen („Plan fehlt"). Darum laufen
+        // Farmer-Pläne einzeln durch tpLoeschenAusfuehren (geplant: erst Tagesplan austragen, dann löschen; scheitert es, kommt die Karte mit
+        // Grund zurück). Das schließt dieselbe Lücke auch für laufende/beendete Farmer-Pläne. Alle anderen wie bisher in einem DELETE.
+        const farmerRows = (data || []).filter(r => nachholen.includes(String(r.id)) && r.notes === 'Winning-Day-Farmer')
+        const farmerIds = new Set(farmerRows.map(r => String(r.id)))
+        const blind = nachholen.filter(id => !farmerIds.has(id))
+        for(const r of farmerRows){
+          const key = String(r.id)
+          if(_tpLoeschOffen.has(key)) continue
+          _tpLoeschOffen.set(key, { plan: rowToPlan(r), idx: -1, farmer: true, timer: null })
+          tpLoeschenAusfuehren(key)
+        }
+        if(blind.length) supabase.from('trade_plans').delete().in('id', blind.filter(id => da.has(id))).then(({ error: e2 }) => {
           if(e2){ console.warn('[löschen] nachholen', e2); return }
-          for(const id of nachholen) tpLoeschVergessen(id)
+          for(const id of blind) tpLoeschVergessen(id)
         })
       }
       renderTradePlans()
@@ -47442,7 +47455,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1755'
+  const OS_TAB_BUILD = '2026-09-22.1756'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
