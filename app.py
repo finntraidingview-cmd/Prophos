@@ -29107,9 +29107,9 @@ def ap_loop():
             _gp_info["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ {e}", flush=True)
         try:
-            fp_tick()                         # FUNDED-PLANER (27.10.2026) — eigener try, nur bei funded_plan_regeln.aktiv
+            fdp_tick()                        # FUNDED-PLANER (27.10.2026) — eigener try, nur bei funded_plan_regeln.aktiv
         except Exception as e:
-            _fp_info["fehler"] = f"{type(e).__name__}: {e}"
+            _fdp_info["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[funded-plan] ⚠️ {e}", flush=True)
         try:
             if time.time() - (_gp_info.get("auftrag_at") or 0) >= 60:
@@ -29202,54 +29202,58 @@ def ap_loop():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-# FUNDED-PLANER (fp_*, 27.10.2026, Finn: „Wir müssen einen Trade-Planer bauen, erst mal für alle Fundeds von Apex, weil die Trades nicht
+# FUNDED-PLANER (fdp_*, 27.10.2026 — Präfix fdp_, weil fp_ schon die Fremd-Positionen sind, Finn: „Wir müssen einen Trade-Planer bauen, erst mal für alle Fundeds von Apex, weil die Trades nicht
 # mehr durchkommen … Die allgemeine Logik soll grob genau gleich sein wie der aktuelle Auto-Planer … Sobald ein Apex-Konto den Typ Funded
-# Futures bekommt, soll es automatisch da reinkommen"). Verbindliche Regeln über den Master (Szenario-Baum, 27.10.2026):
+# Futures bekommt, soll es automatisch da reinkommen"). Verbindliche Regeln über den Master (Szenario-Baum + Nachträge, 27.10.2026):
 #  - Kandidat: Kontoart funded + Firma im Funded-Planer an (Start nur Apex) + auto_planer + nicht archiviert + Balance live + kein Plan
-#    planned/open/review + am CME-Handelstag noch nicht getradet. Ein Trade je Konto und Tag, über das Startfenster verteilt.
-#  - Ziel = Zyklus-Start + ziel_gewinn (150k 15.000 → 165.000, 100k 12.000 → 112.000), je Trade höchstens max_trade (7.500 / 6.000) —
-#    Apex-50-%-Consistency (größter Tag ≤ 50 % des Gesamtgewinns).
+#    planned/open/review + am CME-Handelstag noch nicht getradet. Höchstens 1 Trade je Konto und 2 je ID und Tag (max_je_id_tag).
+#  - Ziel = Zyklus-Start + ziel_gewinn (150k 15.000 → 165.000, 100k 12.000 → 112.000), je Trade höchstens max_trade (7.500 / 6.000).
+#    Keine Consistency-Wache (Finn: „Kleiner Overshoot, nichts Dramatisches … danach kommen eh Winning Days").
 #  - TP: Balance ≥ Start → min(max_trade, Ziel − Balance); Balance < Start → Start − Balance (zurück auf Break-even), danach wieder normal.
 #  - SL = Daily Loss der Stufe (liq_regeln art 'stufen' nach Schlussbalance der Vorsitzung = Balance beim Planen), nie mehr als
-#    Balance − Liq. Kontrakte ≤ Minis der Stufe.
+#    Balance − Liq. Kontrakte je Größe nach Verteilung (100k 1/2 NQ je 50 %, 150k 2 NQ 75 % / 3 NQ 25 %), gedeckelt auf die Minis der Stufe.
 #  - Liq = Konto-Boden EOD-trailing mit Lock wie im Radar (liq_konto_boden): höchste belegte Balance − DD, fest bei Größe + 100.
-#  - Hedge (Fusion): € je $ = offene Kosten ÷ (Balance − Liq); offene Kosten = Kontokosten + Hedge-Verluste − Hedge-Gewinne dieses Kontos
-#    im Zyklus — ein Blow holt so genau die offenen Kosten zurück. Am Plan: master_risk = Balance − Liq, slave_risk = offene Kosten, daraus
-#    Multiplikator und hedge_eur wie das Trade-Popup (tpMultiplierAusRisiko / tpWdHedgeEurAus).
+#  - Hedge (Fusion): € je $ = offene Kosten ÷ (Balance − Liq); offene Kosten = Kontokosten (150k 550 €, 100k 350 €) + Hedge-Verluste −
+#    Hedge-Gewinne dieses Kontos im Zyklus — ein Blow holt so genau die offenen Kosten zurück. Am Plan: master_risk = Balance − Liq,
+#    slave_risk = offene Kosten, daraus Multiplikator und hedge_eur wie das Trade-Popup (tpMultiplierAusRisiko / tpWdHedgeEurAus).
+#  - Startzeiten: Zeitfenster des Challenge-Planers (auto_plan_regeln.zeiten), darin komplett zufällig; passt ein Slot nicht (15 min zu
+#    jedem anderen Start derselben Firma über alle IDs inkl. Challenge-Planer, Big Trade derselben ID), wird neu gewürfelt. Die DB setzt
+#    dieselben 15 min beim Start durch (trade_plans_firmen_abstand, sql/2026-10-27_funded_planer.sql).
 #  - Weg: normaler Orbit Big Trade (tvv2 + orbit_v3 + hedge_eur > 0, DB-Riegel trade_plans_kontoart_weg), die Big-Trade-Grenze je Fenster
 #    (trade_plans_big_trade) schiebt wie bei jedem Orbit-Big-Trade. Auto-bestätigt von Anfang an.
-#  - Ziel erreicht → Konto auf Waiting for Payout (waiting_payout_since), Planer hört auf. Nach dem Payout neuer Zyklus ab neuer Balance
-#    mit wieder den Kontokosten als offene Kosten.
+#  - Ziel erreicht → Konto auf Winning Days (account_type winning_days + wd_farm, wie funded_wege Folge „winning_days"), Planer hört auf.
+#    Nach einem Payout beginnt ein neuer Zyklus ab neuer Balance mit wieder den Kontokosten als offene Kosten.
 # Pläne tragen auto_plan = false (wie ein Orbit-Big-Trade von Hand — Waage, Richtungs-Bot und Nachtlauf des Challenge-Planers fassen nur
 # auto_plan-Pläne an) und mt5_baseline.funded_plan als Kennung. Regeln: public.funded_plan_regeln (sql/2026-10-27_funded_planer.sql).
-FP_TAKT_S = 300                          # alle 5 min Konten ohne Plan nachplanen (wie ap_nachplan_tick)
-FP_NQ_PPL = 20.0                         # $ je NQ-Punkt und Kontrakt
-FP_SLAVE_PPL = GP_SLAVE_PPL              # € je NAS100-Punkt und Lot bei Fusion (wie tpWdSlavePpl)
-FP_SL_MIN_USD = 100                      # darunter kein Trade (Abstand zur Liquidation zu klein)
-FP_ZEITEN_STANDARD = {"tz": "Asia/Dubai", "von": "02:30", "bis": "20:00", "abstand_id_min": [90, 150], "vorlauf_min": 15}
+FDP_TAKT_S = 300                          # alle 5 min Konten ohne Plan nachplanen (wie ap_nachplan_tick)
+FDP_NQ_PPL = 20.0                         # $ je NQ-Punkt und Kontrakt
+FDP_SLAVE_PPL = GP_SLAVE_PPL              # € je NAS100-Punkt und Lot bei Fusion (wie tpWdSlavePpl)
+FDP_SL_MIN_USD = 100                      # darunter kein Trade (Abstand zur Liquidation zu klein)
+# von/bis/tz nur als Rückfall — gilt ist das Fenster des Challenge-Planers (fdp_fenster)
+FDP_ZEITEN_STANDARD = {"tz": "Asia/Dubai", "von": "02:00", "bis": "20:00", "max_je_id_tag": 2, "firma_abstand_min": 15,
+                      "abstand_id_min": 90, "vorlauf_min": 15}
 # Standard-Regeln = Seed aus sql/2026-10-27_funded_planer.sql. Die Vorschau rechnet damit, solange die Tabelle fehlt (dann für alle IDs der
 # Gruppe „Hermann Technologies“); scharf plant nur eine eingespielte Zeile mit aktiv = true.
-FP_FIRMEN_STANDARD = [
-    {"name": "Apex Trader", "namen": ["apextrader", "apex"], "an": True, "symbol": "NQ", "sl_pkt": 60, "lock_usd": 100,
-     "je_groesse": {"150000": {"ziel_gewinn": 15000, "max_trade": 7500, "kosten_eur": 550, "dd": 4000},
-                    "100000": {"ziel_gewinn": 12000, "max_trade": 6000, "kosten_eur": 412.5, "dd": 3000}}},
+FDP_FIRMEN_STANDARD = [
+    {"name": "Apex Trader", "namen": ["apextrader", "apex"], "an": True, "symbol": "NQ", "lock_usd": 100,
+     "je_groesse": {"150000": {"ziel_gewinn": 15000, "max_trade": 7500, "kosten_eur": 550, "dd": 4000, "kontrakte": {"2": 0.75, "3": 0.25}},
+                    "100000": {"ziel_gewinn": 12000, "max_trade": 6000, "kosten_eur": 350, "dd": 3000, "kontrakte": {"1": 0.5, "2": 0.5}}}},
     {"name": "Tradeify", "namen": ["tradeify"], "an": False},
     {"name": "Topstep", "namen": ["topstep"], "an": False},
     {"name": "Lucid Trading", "namen": ["lucidtrading", "lucid"], "an": False},
     {"name": "FundedNext Futures", "namen": ["fundednextfutures"], "an": False},
     {"name": "FTMO Futures", "namen": ["ftmofutures"], "an": False},
 ]
-_fp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
+_fdp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 
-
-def fp_je_groesse(regel, groesse):
+def fdp_je_groesse(regel, groesse):
     """Werte je Kontogröße aus der Firmen-Regel (ziel_gewinn, max_trade, kosten_eur, dd) oder None."""
     if not regel or not groesse:
         return None
     return (regel.get("je_groesse") or {}).get(str(int(groesse)))
 
 
-def fp_liq(groesse, dd, peak, balance, lock=100.0):
+def fdp_liq(groesse, dd, peak, balance, lock=100.0):
     """REIN RECHNEND (testbar): Liquidation des Funded-Kontos → (liq | None, text). Derselbe Konto-Boden wie Radar und Abhaken
     (liq_konto_boden, EOD-trailing): max(Größe, höchste belegte Balance) − DD, fest bei Größe + lock, sobald der Höchststand
     Größe + DD + lock erreicht. None = Balance liegt nicht über dem Boden (geblowt bzw. Datenzweifel)."""
@@ -29258,7 +29262,7 @@ def fp_liq(groesse, dd, peak, balance, lock=100.0):
     return boden, text
 
 
-def fp_stufe(stufen, balance):
+def fdp_stufe(stufen, balance):
     """REIN RECHNEND (testbar): (daily_loss, minis, nr) der Stufe nach dieser Balance (liq_stufe) — (None, None, None) ohne Stufen."""
     nr, st = liq_stufe(stufen, balance)
     if not st:
@@ -29266,7 +29270,7 @@ def fp_stufe(stufen, balance):
     return _wd_num(st.get("daily_loss_usd")), int(_wd_num(st.get("minis")) or 0) or None, nr
 
 
-def fp_tp(balance, start, ziel, max_trade):
+def fdp_tp(balance, start, ziel, max_trade):
     """REIN RECHNEND (testbar): (tp | None, art). Unter dem Start zurück auf Break-even ('break_even'), sonst min(max_trade, Ziel −
     Balance) ('normal'); Ziel erreicht → (None, 'ziel')."""
     if balance < start - 0.005:
@@ -29277,7 +29281,7 @@ def fp_tp(balance, start, ziel, max_trade):
     return round(min(float(max_trade), rest), 2), "normal"
 
 
-def fp_sl(dll, balance, liq):
+def fdp_sl(dll, balance, liq):
     """REIN RECHNEND (testbar): SL in $ = Daily Loss der Stufe, höchstens der Abstand zur Liquidation; ganze Dollar abgerundet."""
     if not dll or liq is None:
         return None
@@ -29285,14 +29289,25 @@ def fp_sl(dll, balance, liq):
     return float(int(sl)) if sl > 0 else None
 
 
-def fp_kontrakte(sl, minis, ppl=FP_NQ_PPL, sl_pkt=60):
-    """REIN RECHNEND (testbar): NQ-Kontrakte, sodass der SL rund sl_pkt Punkte weit liegt (SL 2.500 $ → 2 NQ, 3.000 $ → 3 NQ),
-    mindestens 1, höchstens die Minis der Stufe."""
-    k = int(float(sl) / (float(ppl) * float(sl_pkt)) + 0.5) if sl and ppl and sl_pkt else 1
-    return max(1, min(int(minis or 1), k))
+def fdp_kontrakte(verteilung, minis, rnd=None):
+    """REIN RECHNEND (testbar): NQ-Kontrakte aus der Verteilung je Größe ({"2": 0.75, "3": 0.25}) — gewürfelt mit rnd, ohne rnd der
+    wahrscheinlichste Wert (gleich wahrscheinlich: der kleinere); mindestens 1, höchstens die Minis der Stufe (Finn 27.10.2026)."""
+    paare = sorted((int(k), float(w)) for k, w in (verteilung or {}).items() if _wd_num(w) and float(w) > 0 and int(k) > 0)
+    if not paare:
+        k = 1
+    elif rnd is None:
+        k = max(paare, key=lambda x: (x[1], -x[0]))[0]
+    else:
+        x, k = rnd.random() * sum(w for _k, w in paare), paare[-1][0]
+        for kk, w in paare:
+            if x < w:
+                k = kk
+                break
+            x -= w
+    return max(1, min(int(minis or k), k))
 
 
-def fp_hedge(offen, balance, liq, tp, sl, kt, ppl=FP_NQ_PPL, sppl=FP_SLAVE_PPL):
+def fdp_hedge(offen, balance, liq, tp, sl, kt, ppl=FDP_NQ_PPL, sppl=FDP_SLAVE_PPL):
     """REIN RECHNEND (testbar): Fusion-Gegenhedge → dict | None. Verhältnis € je $ = offene Kosten ÷ (Balance − Liq); am Plan wie das
     Trade-Popup: Risiko Master = Balance − Liq, Risiko Slave = offene Kosten → Multiplikator = Lots ÷ Kontrakte (tpMultiplierAusRisiko),
     hedge_eur = Lots × 0,85 × TP-Punkte (tpWdHedgeEurAus). hedge_sl_eur/hedge_tp_eur = Hedge-Ergebnis am Master-SL/-TP."""
@@ -29310,12 +29325,12 @@ def fp_hedge(offen, balance, liq, tp, sl, kt, ppl=FP_NQ_PPL, sppl=FP_SLAVE_PPL):
             "hedge_tp_eur": round(v * tp, 2), "hedge_sl_eur": round(v * (sl or 0), 2)}
 
 
-def fp_offen(kosten, hedge_pls):
+def fdp_offen(kosten, hedge_pls):
     """REIN RECHNEND (testbar): offene Kosten = Kontokosten − Summe der Hedge-Ergebnisse (Verlust negativ → erhöht, Gewinn senkt)."""
     return round(float(kosten or 0) - sum(float(x) for x in (hedge_pls or ()) if x is not None), 2)
 
 
-def fp_zyklus(groesse, payouts, plaene):
+def fdp_zyklus(groesse, payouts, plaene):
     """REIN RECHNEND (testbar): aktueller Zyklus → {nr, ab, start}. Ohne Payout: Zyklus 1 ab Kontogröße. Mit Payout: ab dem jüngsten
     Payout, Start = Start-Balance des ersten Trades danach (None = noch keiner → der Aufrufer nimmt die aktuelle Balance)."""
     ps = sorted(str(p) for p in (payouts or ()) if p)
@@ -29327,31 +29342,17 @@ def fp_zyklus(groesse, payouts, plaene):
     return {"nr": len(ps) + 1, "ab": ab, "start": _wd_num(nach[0].get("bal_start")) if nach else None}
 
 
-def fp_tage(plaene, ab=None):
-    """REIN RECHNEND (testbar): Ergebnis je CME-Handelstag im Zyklus (beendete Trades, master_pl) → {tag: $}."""
-    out = {}
-    for p in plaene or ():
-        st = str(p.get("started_at") or "")
-        pl = _wd_num(p.get("master_pl"))
-        if not st or pl is None or p.get("status") != "completed" or (ab and st <= str(ab)):
-            continue
-        t = _cme_handelstag(st)
-        if t:
-            out[t] = round(out.get(t, 0.0) + pl, 2)
-    return out
-
-
-def fp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, tage=None, groesse=None):
+def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
-    funded_plan_regeln, jg = fp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
-    offen = fp_offen, start = Zyklus-Start (None = Kontogröße), tage = fp_tage (nur für die Consistency-Angabe)."""
+    funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
+    offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert)."""
     g = float(groesse or 0)
     if not jg or not g:
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-Planer"}
     dd = _wd_num(jg.get("dd"))
     if balance is None:
         return {"aktion": "aus", "grund": "keine Balance"}
-    liq, liq_text = fp_liq(g, dd, peak, balance, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0)
+    liq, liq_text = fdp_liq(g, dd, peak, balance, _wd_num(regel.get("lock_usd")) if regel.get("lock_usd") is not None else 100.0)
     if liq is None:
         return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
     start = float(start) if start else g
@@ -29360,75 +29361,105 @@ def fp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, tage=N
     # mehr als ein Trade über dem Ziel kann der Planer nicht erzeugt haben → Lesung anzweifeln statt „Ziel erreicht" zu melden
     if balance > ziel + float(jg.get("max_trade") or 0):
         return {"aktion": "aus", "grund": f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance neu lesen"}
-    tp, art = fp_tp(balance, start, ziel, jg.get("max_trade") or 0)
-    tg = tage or {}
-    gew = round(balance - start, 2)
-    max_tag = max([v for v in tg.values() if v > 0], default=0.0)
+    tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0)
     basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text,
-             "offen_eur": round(offen, 2), "gewinn": gew, "max_tag": round(max_tag, 2),
-             "consistency_pct": round(max_tag / gew * 100, 1) if gew > 0 and max_tag > 0 else None}
+             "offen_eur": round(offen, 2)}
     if art == "ziel":
-        return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
-    dll, minis, nr = fp_stufe(stufen, balance)
+        return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
+    dll, minis, nr = fdp_stufe(stufen, balance)
     if not dll:
         return dict(basis, aktion="aus", grund="keine Stufe (liq_regeln) für diese Größe")
-    sl = fp_sl(dll, balance, liq)
-    if not sl or sl < FP_SL_MIN_USD:
+    sl = fdp_sl(dll, balance, liq)
+    if not sl or sl < FDP_SL_MIN_USD:
         return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")
-    kt = fp_kontrakte(sl, minis, FP_NQ_PPL, _wd_num(regel.get("sl_pkt")) or 60)
-    h = fp_hedge(offen, balance, liq, tp, sl, kt)
+    kt = fdp_kontrakte(jg.get("kontrakte"), minis, rnd)
+    h = fdp_hedge(offen, balance, liq, tp, sl, kt)
     if not h:
         return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} €)")
     return dict(basis, aktion="planen", grund="", tp=tp, sl=sl, kontrakte=kt, tp_art=art, stufe=nr, dll=dll, minis=minis,
-                tp_pkt=round(tp / (FP_NQ_PPL * kt), 2), sl_pkt=round(sl / (FP_NQ_PPL * kt), 2), **h)
+                tp_pkt=round(tp / (FDP_NQ_PPL * kt), 2), sl_pkt=round(sl / (FDP_NQ_PPL * kt), 2), **h)
 
 
-def fp_zeiten(kandidaten, belegt, tag_start, von_min, bis_min, jetzt_min, abstand, vorlauf, rnd):
-    """REIN RECHNEND (testbar): Startminuten je Konto (Minuten ab tag_start, lokale Zeit) → ({konto_id: minute}, [nicht platziert]).
-    kandidaten = [(user_id, konto_id)], belegt = {user_id: [minute, …]} (schon geplante/laufende Big Trades der ID). Je ID über das Fenster
-    [max(von, jetzt + vorlauf), bis] verteilt (gleiche Lücken + Zufall), zwischen zwei Big Trades derselben ID mindestens abstand[0] min
-    (Big-Trade-Grenze je Fenster: läuft je ID ohnehin nur einer)."""
-    ab = max(float(von_min), float(jetzt_min) + float(vorlauf))
+def fdp_fenster(ap_zeiten):
+    """REIN RECHNEND (testbar): Startfenster des Challenge-Planers (Finn 27.10.2026: „dasselbe Zeitfenster wie der Challenge-Planer") →
+    (tz, von_min, bis_min) in der Zone des Fensters: fenster_tz (sonst tz, sonst deutsche Zeit), frühestes von bis spätestes bis aller
+    Fenster, höchstens start_bis. Ohne Fenster der Rückfall FDP_ZEITEN_STANDARD."""
+    z = ap_zeiten or {}
+    hm = lambda s: int(str(s)[:2]) * 60 + int(str(s)[3:5])
+    tz = z.get("fenster_tz") or z.get("tz") or "Europe/Berlin"
+    try:
+        fen = [f for f in (z.get("fenster") or []) if isinstance(f, (list, tuple)) and len(f) >= 2 and hm(f[1]) > hm(f[0])]
+    except (TypeError, ValueError):
+        fen = []
+    if not fen:
+        return FDP_ZEITEN_STANDARD["tz"], hm(FDP_ZEITEN_STANDARD["von"]), hm(FDP_ZEITEN_STANDARD["bis"])
+    von, bis = min(hm(f[0]) for f in fen), max(hm(f[1]) for f in fen)
+    try:
+        if z.get("start_bis"):
+            bis = min(bis, hm(z["start_bis"]))
+    except (TypeError, ValueError):
+        pass
+    return tz, von, bis
+
+
+def fdp_auswahl(kand, schon, max_je_id, rnd):
+    """REIN RECHNEND (testbar): Tagesdeckel je ID (Finn 27.10.2026: „Höchstens 2 Funded-Trades pro ID und Tag") → (gewählt, über).
+    kand = [(user_id, konto_id)], schon = {user_id: heute schon geplant/gelaufen}. Welche Konten einer ID drankommen, entscheidet der Zufall."""
     je = {}
-    for u, k in kandidaten:
+    for u, k in kand:
         je.setdefault(str(u), []).append(k)
-    out, rest = {}, []
+    gew, ueber = [], []
     for u, konten in je.items():
-        span = float(bis_min) - ab
-        if span <= 0:
-            rest += konten
-            continue
+        konten = list(konten)
         rnd.shuffle(konten)
-        gap = max(float(abstand[0]), span / max(1, len(konten)))
-        frei = sorted(float(x) for x in (belegt.get(u) or ()))
-        t = ab + rnd.uniform(0, min(30.0, gap * 0.3))
-        for k in konten:
-            for _ in range(len(frei) + 1):        # Abstand zu schon belegten Big Trades derselben ID
-                hit = [b for b in frei if abs(t - b) < abstand[0]]
-                if not hit:
+        frei = max(0, int(max_je_id) - int(schon.get(u) or 0))
+        gew += [(u, k) for k in konten[:frei]]
+        ueber += konten[frei:]
+    return gew, ueber
+
+
+def fdp_zeiten(kandidaten, belegt_id, belegt_firma, ab, bis, abstand_id, abstand_firma, rnd, versuche=400, erlaubt=None):
+    """REIN RECHNEND (testbar): Startminuten (Minuten ab Mitternacht der Fenster-Zone) → ({konto_id: minute}, [nicht platziert]).
+    kandidaten = [(user_id, konto_id, firma)]. Jede Startzeit ist ein Zufallswert in [ab, bis] (kein Raster, keine Reihenfolge); passt er
+    nicht — < abstand_firma zu einem anderen Start derselben Firma (alle IDs, auch Challenge-Planer: belegt_firma) oder < abstand_id zu
+    einem Big Trade derselben ID (belegt_id) oder erlaubt(minute) falsch (anderer CME-Handelstag) —, wird neu gewürfelt (Finn 27.10.2026),
+    höchstens versuche-mal."""
+    bid = {str(u): [float(x) for x in v] for u, v in (belegt_id or {}).items()}
+    bfi = {str(f): [float(x) for x in v] for f, v in (belegt_firma or {}).items()}
+    out, rest = {}, []
+    reihe = list(kandidaten)
+    rnd.shuffle(reihe)
+    for u, k, f in reihe:
+        u, f = str(u), str(f)
+        t = None
+        if bis > ab:
+            for _ in range(versuche):
+                x = rnd.uniform(float(ab), float(bis))
+                if (all(abs(x - b) >= abstand_firma for b in bfi.get(f, ())) and all(abs(x - b) >= abstand_id for b in bid.get(u, ()))
+                        and (erlaubt is None or erlaubt(x))):
+                    t = x
                     break
-                t = max(hit) + abstand[0]
-            if t > bis_min:
-                rest.append(k)
-                continue
-            out[k] = round(t, 2)
-            frei.append(t)
-            t += max(gap, rnd.uniform(float(abstand[0]), float(abstand[1])))
+        if t is None:
+            rest.append(k)
+            continue
+        out[k] = round(t, 2)
+        bfi.setdefault(f, []).append(t)
+        bid.setdefault(u, []).append(t)
     return out, rest
 
 
-def _fp_regeln_laden():
+def _fdp_regeln_laden():
     """funded_plan_regeln (id 1) → Zeile | None (Tabelle fehlt = SQL noch nicht eingespielt; Meldung höchstens stündlich)."""
     try:
         return (sb_select("funded_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     except Exception as e:
-        if time.time() - (_fp_info.get("regeln_fehlt_at") or 0) > 3600:
-            _fp_info["regeln_fehlt_at"] = time.time()
+        if time.time() - (_fdp_info.get("regeln_fehlt_at") or 0) > 3600:
+            _fdp_info["regeln_fehlt_at"] = time.time()
             print(f"[funded-plan] funded_plan_regeln nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — SQL eingespielt?", flush=True)
         return None
 
 
-def _fp_ht_ids():
+def _fdp_ht_ids():
     """user_ids der Gruppe „Hermann Technologies“ (nur für die Vorschau ohne eingespielte Regeln)."""
     try:
         g = sb_select("id_gruppen", {"select": "id", "name": "eq.Hermann Technologies"}) or []
@@ -29440,28 +29471,44 @@ def _fp_ht_ids():
         return []
 
 
-def fp_planen(trocken=True, jetzt=None, seed=None):
+def fdp_planen(trocken=True, jetzt=None, seed=None):
     """Ein Lauf des Funded-Planers. trocken=True: nur rechnen (Vorschau, Route GET /admin/funded-plan), sonst Pläne anlegen und Ziel-Konten
-    auf Waiting for Payout stellen. → {ok, geplant[], ziel[], ausgelassen[], …}."""
+    auf Winning Days stellen. → {ok, geplant[], ziel[], ausgelassen[], fenster, …}."""
     jetzt = jetzt or datetime.now(timezone.utc)
-    reg, quelle = _fp_regeln_laden(), "db"
+    reg, quelle = _fdp_regeln_laden(), "db"
     if not reg:
         if not trocken:
             return {"ok": False, "msg": "funded_plan_regeln fehlt — sql/2026-10-27_funded_planer.sql einspielen"}
-        reg, quelle = {"aktiv": False, "user_ids": _fp_ht_ids(), "firmen": FP_FIRMEN_STANDARD, "zeiten": {}}, "standard"
-    zeiten = dict(FP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
+        reg, quelle = {"aktiv": False, "user_ids": _fdp_ht_ids(), "firmen": FDP_FIRMEN_STANDARD, "zeiten": {}}, "standard"
+    zeiten = dict(FDP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
+    try:
+        ap_zeiten = (sb_select("auto_plan_regeln", {"select": "zeiten", "id": "eq.1"}) or [{}])[0].get("zeiten") or {}
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ Fenster des Challenge-Planers nicht gelesen ({type(e).__name__}: {e}) — Rückfall", flush=True)
+        ap_zeiten = {}
+    tzname, von_min, bis_min = fdp_fenster(ap_zeiten)
     firmen = [f for f in (reg.get("firmen") or []) if isinstance(f, dict)]
     an = [f for f in firmen if f.get("an")]
     uids = [str(u) for u in (reg.get("user_ids") or [])]
-    tz = _ap_tz(zeiten["tz"])
+    tz = _ap_tz(tzname)
     lokal = jetzt.astimezone(tz)
     mitternacht = lokal.replace(hour=0, minute=0, second=0, microsecond=0)
-    cme_heute = _cme_handelstag(jetzt.isoformat())
+    # Plan-Tag = CME-Handelstag des Fensters (ab jetzt): nachts vor dem Fenster plant der Lauf schon den kommenden Handelstag
+    jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
+    ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
+    cme_heute = _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat())
+    max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
+    f_abst, id_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15), float(_wd_num(zeiten.get("abstand_id_min")) or 90)
+    hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
     erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "regeln_quelle": quelle, "at": jetzt.isoformat(), "tag": cme_heute,
-           "zeiten": zeiten, "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an"))} for f in firmen],
+           "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
+           "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an"))} for f in firmen],
            "geplant": [], "ziel": [], "ausgelassen": [], "ids": []}
     if not uids or not an:
         erg["msg"] = "keine ID bzw. keine Firma an"
+        return erg
+    if datetime.strptime(cme_heute, "%Y-%m-%d").weekday() >= 5:
+        erg["msg"] = "Wochenende — kein CME-Handelstag"
         return erg
     konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,auto_planer,tv_balance,tv_balance_at,"
                                             "max_drawdown,waiting_payout_since,starting_balance,created_at",
@@ -29481,10 +29528,9 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
             payouts.setdefault(str(z.get("account_id")), []).append(z.get("requested_at") or z.get("created_at"))
         for z in _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []:
             payouts.setdefault(str(z.get("account_id")), []).append(z.get("payout_date") or z.get("created_at"))
-    # alle Big Trades der IDs (auch anderer Firmen) für den Abstand je ID: planned/open mit Hedge auf tvv2/tsv2
-    big = _sb_all("trade_plans", {"select": "user_id,start_um,started_at,status", "user_id": "in.(" + ",".join(uids) + ")",
-                                  "status": "in.(planned,open)", "route": "in.(tvv2,tsv2)", "or": "(orbit_v3.is.true,hedge_eur.gt.0)",
-                                  "winning_day": "not.is.true"}) if ids else []
+    # Geplante/laufende Pläne ALLER IDs der Liste (auch Challenge-Planer, jede Firma): Firmen-Abstand und Big Trades je ID
+    offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,start_um,started_at,status,route,orbit_v3,hedge_eur,winning_day",
+                                         "user_id": "in.(" + ",".join(uids) + ")", "status": "in.(planned,open)"}) if ids else []
     verlauf = _liq_verlauf_laden(ids)
     lregeln = _liq_regeln_laden()
     je_plan = {}
@@ -29494,6 +29540,14 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
         namen = _ap_namen()[0]
     except Exception:
         namen = {}
+    # heute schon geplante/gelaufene Funded-Trades je ID (Tagesdeckel)
+    schon = {}
+    for a in konten:
+        for p in je_plan.get(str(a["id"]), []):
+            t = p.get("started_at") or (p.get("start_um") if p.get("status") in ("planned", "open") else None)
+            if t and _cme_handelstag(t) == cme_heute:
+                schon[str(a.get("user_id"))] = schon.get(str(a.get("user_id")), 0) + 1
+    rnd = random.Random(seed if seed is not None else f"fp-{cme_heute}-{int(jetzt.timestamp() // FDP_TAKT_S)}")
     kand, rech = [], {}
     for a in konten:
         aid, pl = str(a["id"]), je_plan.get(str(a["id"]), [])
@@ -29501,7 +29555,7 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
                  "balance": _wd_num(a.get("tv_balance")), "balance_at": a.get("tv_balance_at")}
         regel = ap_regel_finden(an, a.get("firm"))
         g = _wd_konto_groesse(a)
-        jg = fp_je_groesse(regel, g)
+        jg = fdp_je_groesse(regel, g)
         if a.get("auto_planer") is False:
             erg["ausgelassen"].append(dict(zeile, grund="Haken „Auto-Planer“ am Konto aus")); continue
         if a.get("waiting_payout_since"):
@@ -29517,17 +29571,17 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
         letzt = max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None
         if zeile["balance"] is None or not ap_balance_live(a.get("tv_balance_at"), letzt):
             erg["ausgelassen"].append(dict(zeile, grund="Balance nicht live — ↻ Balance lesen")); continue
-        zy = fp_zyklus(g, payouts.get(aid), pl)
+        zy = fdp_zyklus(g, payouts.get(aid), pl)
         start = zy["start"] if zy["start"] is not None else zeile["balance"]
         ab = zy["ab"]
         hedge_pls = [_wd_num(p.get("slave_pl")) for p in pl if p.get("status") == "completed" and (p.get("orbit_v3") or (_wd_num(p.get("hedge_eur")) or 0) > 0)
                      and (not ab or str(p.get("started_at") or "") > str(ab))]
-        offen = fp_offen(jg.get("kosten_eur"), hedge_pls)
+        offen = fdp_offen(jg.get("kosten_eur"), hedge_pls)
         peak = liq_peak({}, a, zeile["balance"], verlauf)
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
-        r = fp_konto_rechnen(regel, jg, stufen, zeile["balance"], peak, offen, start, fp_tage(pl, ab), g)
-        r.update(zeile, zyklus=zy["nr"], groesse=g)
+        r = fdp_konto_rechnen(regel, jg, stufen, zeile["balance"], peak, offen, start, g, rnd)
+        r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=(regel.get("namen") or [""])[0])
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
         elif r["aktion"] != "planen":
@@ -29535,29 +29589,36 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
         else:
             rech[aid] = (a, r)
             kand.append((str(a.get("user_id")), aid))
-    # Startzeiten (lokal, Minuten ab Mitternacht)
-    hm = lambda s: int(str(s)[:2]) * 60 + int(str(s)[3:5])
-    belegt = {}
-    for b in big or []:
-        t = b.get("start_um") or b.get("started_at")
-        if t:
-            try:
-                d = datetime.fromisoformat(str(t).replace("Z", "+00:00")).astimezone(tz)
-                belegt.setdefault(str(b.get("user_id")), []).append((d - mitternacht).total_seconds() / 60.0)
-            except ValueError:
-                pass
-    rnd = random.Random(seed if seed is not None else f"fp-{cme_heute}-{len(kand)}")
-    jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
-    minuten, ohne = fp_zeiten(kand, belegt, mitternacht, hm(zeiten["von"]), hm(zeiten["bis"]), jetzt_min,
-                              [float(x) for x in zeiten["abstand_id_min"]], float(zeiten["vorlauf_min"]), rnd)
+    # Tagesdeckel je ID, dann Startzeiten zufällig im Fenster (Minuten ab Mitternacht der Fenster-Zone)
+    gewaehlt, ueber = fdp_auswahl(kand, schon, max_je_id, rnd)
+    for aid in ueber:
+        erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund=f"Tagesdeckel {max_je_id} Funded-Trades je ID erreicht — morgen"))
+    belegt_id, belegt_firma = {}, {}
+    for b in offen_alle or []:
+        t = b.get("started_at") if b.get("status") == "open" else b.get("start_um")
+        if not t:
+            continue
+        try:
+            m = (datetime.fromisoformat(str(t).replace("Z", "+00:00")).astimezone(tz) - mitternacht).total_seconds() / 60.0
+        except ValueError:
+            continue
+        rf = ap_regel_finden(an, b.get("master_firm"))
+        if rf:
+            belegt_firma.setdefault((rf.get("namen") or [""])[0], []).append(m)
+        if (b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day")
+                and (b.get("orbit_v3") or (_wd_num(b.get("hedge_eur")) or 0) > 0)):
+            belegt_id.setdefault(str(b.get("user_id")), []).append(m)
+    # nur Startzeiten im Plan-Handelstag (Winterzeit: 02:00–03:00 Dubai ist noch der alte CME-Tag bzw. die Pause)
+    im_tag = lambda m: _cme_handelstag((mitternacht + timedelta(minutes=m)).astimezone(timezone.utc).isoformat()) == cme_heute
+    minuten, ohne = fdp_zeiten([(u, k, rech[k][1]["firma_key"]) for u, k in gewaehlt], belegt_id, belegt_firma,
+                               ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=im_tag)
     frontcode = _wd_futures_frontcode(jetzt)
     zeilen = []
     for aid in ohne:
-        a, r = rech[aid]
-        erg["ausgelassen"].append(dict(r, aktion="aus", grund="kein freies Zeitfenster mehr heute"))
+        erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund="kein freier Slot mehr im Fenster heute (Firmen-Abstand / Big Trade der ID)"))
     for aid, m in sorted(minuten.items(), key=lambda x: x[1]):
         a, r = rech[aid]
-        start = mitternacht + timedelta(minutes=m, seconds=rnd.randint(0, 59))
+        start = mitternacht + timedelta(minutes=m)
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
         notiz = (f"Funded-Planer · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
                  f"(Daily Loss {_liq_de(r['dll'])} $) · offene Kosten {_liq_de(r['offen_eur'])} €")
@@ -29584,10 +29645,14 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
                                            "grund": f"Anlegen fehlgeschlagen: {str(e)[:160]}"})
                 print(f"[funded-plan] ⚠️ Plan {z['master_name']}: {e}", flush=True)
         for r in erg["ziel"]:
+            # Ziel erreicht → Winning Days wie bisher von Hand (Finn 27.10.2026): Kontoart + Farmer-Haken, Name „→ Funded" → „→ Winning Days"
             try:
-                sb_update("accounts", {"id": f"eq.{r['konto_id']}", "waiting_payout_since": "is.null"}, {"waiting_payout_since": jetzt.isoformat()})
+                neu = {"account_type": "winning_days", "wd_farm": True}
+                if "→ Funded" in str(r.get("konto") or ""):
+                    neu["name"] = str(r["konto"]).replace("→ Funded", "→ Winning Days")
+                sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded"}, neu)
             except Exception as e:
-                print(f"[funded-plan] ⚠️ Waiting for Payout {r.get('konto')}: {e}", flush=True)
+                print(f"[funded-plan] ⚠️ Winning Days {r.get('konto')}: {e}", flush=True)
         if zeilen or erg["ziel"]:
             try:
                 sb_insert("auto_plan_lauf", {"tag": cme_heute, "quelle": "funded", "ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen")}})
@@ -29597,29 +29662,24 @@ def fp_planen(trocken=True, jetzt=None, seed=None):
     for k in ("geplant", "ziel", "ausgelassen"):
         for z in erg[k]:
             je_id.setdefault(str(z.get("user_id")), {"geplant": 0, "ziel": 0, "ausgelassen": 0})[k] += 1
-    erg["ids"] = [dict(v, user_id=u, name=namen.get(u) or u[:8]) for u, v in je_id.items()]
+    erg["ids"] = [dict(v, user_id=u, name=namen.get(u) or u[:8], heute_schon=schon.get(u, 0)) for u, v in je_id.items()]
     return erg
 
 
-def fp_tick(jetzt=None):
-    """Takt aus ap_loop: alle FP_TAKT_S, nur wenn funded_plan_regeln.aktiv und innerhalb des Startfensters. Legt Pläne an (scharf)."""
-    if time.time() - (_fp_info.get("at") or 0) < FP_TAKT_S:
+def fdp_tick(jetzt=None):
+    """Takt aus ap_loop: alle FDP_TAKT_S, nur wenn funded_plan_regeln.aktiv. Legt Pläne an (scharf); außerhalb des Fensters plant fdp_planen
+    nichts (kein Slot), Ziel-Konten wechseln trotzdem auf Winning Days."""
+    if time.time() - (_fdp_info.get("at") or 0) < FDP_TAKT_S:
         return None
-    _fp_info["at"] = time.time()
-    reg = _fp_regeln_laden()
+    _fdp_info["at"] = time.time()
+    reg = _fdp_regeln_laden()
     if not reg or not reg.get("aktiv"):
         return None
-    jetzt = jetzt or datetime.now(timezone.utc)
-    zeiten = dict(FP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
-    lokal = jetzt.astimezone(_ap_tz(zeiten["tz"]))
-    m = lokal.hour * 60 + lokal.minute
-    if not (int(zeiten["von"][:2]) * 60 + int(zeiten["von"][3:5]) - 60 <= m <= int(zeiten["bis"][:2]) * 60 + int(zeiten["bis"][3:5])):
-        return None
-    erg = fp_planen(trocken=False, jetzt=jetzt)
-    _fp_info.update(letzter=dict({k: erg.get(k) for k in ("at", "tag")}, geplant=len(erg.get("geplant") or []), ziel=len(erg.get("ziel") or [])),
+    erg = fdp_planen(trocken=False, jetzt=jetzt or datetime.now(timezone.utc))
+    _fdp_info.update(letzter=dict({k: erg.get(k) for k in ("at", "tag")}, geplant=len(erg.get("geplant") or []), ziel=len(erg.get("ziel") or [])),
                     fehler="" if erg.get("ok") else str(erg.get("msg") or ""))
     if erg.get("geplant") or erg.get("ziel"):
-        print(f"[funded-plan] {len(erg['geplant'])} geplant, {len(erg['ziel'])} Ziel erreicht", flush=True)
+        print(f"[funded-plan] {len(erg['geplant'])} geplant, {len(erg['ziel'])} Ziel erreicht → Winning Days", flush=True)
     return erg
 
 
@@ -29640,11 +29700,11 @@ def admin_funded_plan():
         if nur or gruppe:
             return jsonify({"ok": False, "msg": "Funded-Planer nur für Hermann Technologies"}), 403
     try:
-        erg = fp_planen(trocken=True)
+        erg = fdp_planen(trocken=True)
     except Exception as e:
         print(f"[funded-plan] ⚠️ Vorschau: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
-    erg["info"] = {k: _fp_info.get(k) for k in ("letzter", "fehler")}
+    erg["info"] = {k: _fdp_info.get(k) for k in ("letzter", "fehler")}
     return jsonify(erg), (200 if erg.get("ok") else 503)
 
 

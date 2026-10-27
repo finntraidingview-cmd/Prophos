@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Selbsttest: FUNDED-PLANER (fp_*, 27.10.2026, Finn: „einen Auto-Planer für Funded … erst mal für alle Fundeds von Apex"). Rechnet Finns
-Szenario-Baum (über den Master, 27.10.2026) mit den echten Funktionen aus app.py nach — TP/SL/Liq/Stufe/Hedge je Tag für 150k und 100k —
-dazu Zeitverteilung, Zyklus und offene Kosten. Rein rechnend, ohne Netz. Aufruf: python3 tools/selftest_funded_planer.py"""
+"""Selbsttest: FUNDED-PLANER (fdp_*, 27.10.2026, Finn: „einen Auto-Planer für Funded … erst mal für alle Fundeds von Apex"). Rechnet Finns
+Szenario-Baum (über den Master, 27.10.2026; 100k-Kosten 350 €) mit den echten Funktionen aus app.py nach — TP/SL/Liq/Stufe/Hedge je Tag
+für 150k und 100k —, dazu Kontrakt-Verteilung, Fenster des Challenge-Planers, Tagesdeckel je ID, zufällige Startzeiten mit 15 min
+Firmen-Abstand und einen Tag mit allen 13 Apex-Fundeds (Trockenlauf gegen nachgebaute DB). Rein rechnend, ohne Netz.
+Aufruf: python3 tools/selftest_funded_planer.py"""
 import os
 import random
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 WURZEL = os.path.dirname(HIER)
 FEHLER = []
+SRC = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
 
 
 def check(ok, text):
@@ -19,22 +23,21 @@ def check(ok, text):
         FEHLER.append(text)
 
 
+def block(name):
+    i = SRC.index(f"\ndef {name}(") + 1
+    return SRC[i:SRC.find("\n\n\n", i)]
+
+
+HILFEN = ("_wd_num", "_liq_de", "_cme_handelstag", "ist_topstep_express", "liq_konto_boden", "liq_stufe", "_ap_norm", "ap_regel_finden",
+          "_wd_konto_groesse", "ap_balance_live", "liq_peak", "liq_regel_waehlen", "_wd_futures_frontcode", "_ap_tz")
+
+
 def laden():
-    src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
-
-    def block(name):
-        i = src.index(f"\ndef {name}(") + 1
-        return src[i:src.find("\n\n\n", i)]
-
-    def zeile(anfang):
-        i = src.index("\n" + anfang) + 1
-        return src[i:src.index("\n", i)]
-    ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "random": random}
-    code = "\n".join([zeile("GP_SLAVE_PPL = "), zeile("FP_NQ_PPL = "), zeile("FP_SLAVE_PPL = "), zeile("FP_SL_MIN_USD = ")]
-                     + [block(n) for n in ("_wd_num", "_liq_de", "_cme_handelstag", "ist_topstep_express", "liq_konto_boden", "liq_stufe",
-                                           "fp_je_groesse", "fp_liq", "fp_stufe", "fp_tp", "fp_sl", "fp_kontrakte", "fp_hedge", "fp_offen",
-                                           "fp_zyklus", "fp_tage", "fp_konto_rechnen", "fp_zeiten")])
-    exec(code, ns)
+    """Hilfsfunktionen aus app.py + der ganze FUNDED-PLANER-Block (bis zur Route)."""
+    i, j = SRC.index("FDP_TAKT_S = 300"), SRC.index('@app.route("/admin/funded-plan"')
+    ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "random": random, "time": time,
+          "GP_SLAVE_PPL": 0.85, "_firm_norm": lambda x: str(x or "")}
+    exec("\n".join(block(n) for n in HILFEN) + "\n" + SRC[i:j], ns)
     return ns
 
 
@@ -45,176 +48,213 @@ ST150 = [{"minis": 4, "ab_balance": 150000, "daily_loss_usd": 2500}, {"minis": 5
 ST100 = [{"minis": 3, "ab_balance": 100000, "daily_loss_usd": 1750}, {"minis": 4, "ab_balance": 102000, "daily_loss_usd": 1750},
          {"minis": 5, "ab_balance": 103000, "daily_loss_usd": 1750}, {"minis": 6, "ab_balance": 105000, "daily_loss_usd": 2500},
          {"minis": 6, "ab_balance": 110000, "daily_loss_usd": 3500}]
-REGEL = {"namen": ["apextrader", "apex"], "an": True, "sl_pkt": 60,
-         "je_groesse": {"150000": {"ziel_gewinn": 15000, "max_trade": 7500, "kosten_eur": 550, "dd": 4000},
-                        "100000": {"ziel_gewinn": 12000, "max_trade": 6000, "kosten_eur": 412.5, "dd": 3000}}}
 
 
 def szenario(ns):
-    R, jg = ns["fp_konto_rechnen"], ns["fp_je_groesse"]
+    REGEL = ns["FDP_FIRMEN_STANDARD"][0]
+    R, jg = ns["fdp_konto_rechnen"], ns["fdp_je_groesse"]
     j150, j100 = jg(REGEL, 150000), jg(REGEL, 100000)
+    check(j150["kosten_eur"] == 550 and j100["kosten_eur"] == 350, "Kontokosten Seed: 150k 550 €, 100k 350 € (Finn 27.10.2026)")
 
-    def t(r, tp, sl, hsl, htp, extra=""):
-        ok = r["aktion"] == "planen" and r["tp"] == tp and r["sl"] == sl and abs(r["hedge_sl_eur"] - hsl) <= 1 and abs(r["hedge_tp_eur"] - htp) <= 1   # Finns Werte auf ganze € (abgeschnitten)
-        return ok, f"TP {r.get('tp')} / SL {r.get('sl')}, Hedge +{r.get('hedge_sl_eur')} / −{r.get('hedge_tp_eur')} {extra}"
+    def t(r, tp, sl, hsl, htp):
+        # Finns Werte auf ganze € (abgeschnitten) → ±1 €
+        ok = r["aktion"] == "planen" and r["tp"] == tp and r["sl"] == sl and abs(r["hedge_sl_eur"] - hsl) <= 1 and abs(r["hedge_tp_eur"] - htp) <= 1
+        return ok, f"TP {r.get('tp')} / SL {r.get('sl')}, Hedge +{r.get('hedge_sl_eur')} / −{r.get('hedge_tp_eur')}"
 
-    print("150k")
-    r = R(REGEL, j150, ST150, 150000, None, 550, 150000, {}, 150000)
+    print("150k (Kosten 550 €)")
+    r = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000)
     ok, txt = t(r, 7500, 2500, 344, 1031)
     check(ok and r["liq"] == 146000 and r["kontrakte"] == 2 and r["stufe"] == 1, "Tag 1: " + txt + f", Liq {r.get('liq')}, {r.get('kontrakte')} NQ")
-    # Gewinn → 157.500: Liq lockt bei 150.100, offen 550 + 1.031,25
-    offen = ns["fp_offen"](550, [-r["hedge_tp_eur"]])
+    offen = ns["fdp_offen"](550, [-r["hedge_tp_eur"]])
     check(abs(offen - 1581.25) < 0.01, f"Gewinn Tag 1: offene Kosten {offen} € (550 + 1.031,25)")
-    r2 = R(REGEL, j150, ST150, 157500, 157500, offen, 150000, {}, 150000)
+    r2 = R(REGEL, j150, ST150, 157500, 157500, offen, 150000, 150000)
     ok, txt = t(r2, 7500, 3000, 641, 1602)
     check(ok and r2["liq"] == 150100 and r2["ziel"] == 165000, "Tag 2 nach Gewinn: " + txt + f", Liq {r2.get('liq')} (Lock), Ziel {r2.get('ziel')}")
-    z = R(REGEL, j150, ST150, 165000, 165000, 3183.85, 150000, {}, 150000)
-    check(z["aktion"] == "ziel", "165.000 → Ziel erreicht (Waiting for Payout)")
-    # Verlust Tag 1 → 147.500, offen 550 − 343,75
-    offen_v = ns["fp_offen"](550, [r["hedge_sl_eur"]])
-    rv = R(REGEL, j150, ST150, 147500, 150000, offen_v, 150000, {}, 150000)
+    z = R(REGEL, j150, ST150, 165000, 165000, 3183.85, 150000, 150000)
+    check(z["aktion"] == "ziel" and "Winning Days" in z["grund"], "165.000 → Ziel erreicht → Winning Days")
+    rv = R(REGEL, j150, ST150, 147500, 150000, ns["fdp_offen"](550, [r["hedge_sl_eur"]]), 150000, 150000)
     ok, txt = t(rv, 2500, 1500, 206, 344)
     check(ok and rv["tp_art"] == "break_even" and rv["liq"] == 146000, "Verlust Tag 1 → 147.500, Tag 2: " + txt + " (Break-even, SL = Rest bis Liq)")
-    # 157.500 → Verlust (SL 3.000) → 154.500, offen 940
-    offen_3 = ns["fp_offen"](550, [-r["hedge_tp_eur"], r2["hedge_sl_eur"]])
+    offen_3 = ns["fdp_offen"](550, [-r["hedge_tp_eur"], r2["hedge_sl_eur"]])
     check(round(offen_3) == 940, f"157.500 → Verlust → 154.500: offen {offen_3} € (≈ 940)")
-    r3 = R(REGEL, j150, ST150, 154500, 157500, offen_3, 150000, {}, 150000)
+    r3 = R(REGEL, j150, ST150, 154500, 157500, offen_3, 150000, 150000)
     check(r3["sl"] == 2500 and r3["tp"] == 7500 and r3["liq"] == 150100, f"Tag 3 bei 154.500: TP {r3.get('tp')} / SL {r3.get('sl')} (Stufe ab 153.000)")
-    r4 = R(REGEL, j150, ST150, 162000, 162000, offen_3 + r3["hedge_tp_eur"], 150000, {}, 150000)
+    r4 = R(REGEL, j150, ST150, 162000, 162000, offen_3 + r3["hedge_tp_eur"], 150000, 150000)
     check(r4["tp"] == 3000 and r4["sl"] == 4000, f"Gewinn → 162.000, Tag 4: TP {r4.get('tp')} / SL {r4.get('sl')} (Rest bis Ziel, Stufe ab 160.000)")
 
-    print("100k")
-    q = R(REGEL, j100, ST100, 100000, None, 412.5, 100000, {}, 100000)
-    ok, txt = t(q, 6000, 1750, 241, 825)
-    check(ok and q["liq"] == 97000, "Tag 1: " + txt + f", Liq {q.get('liq')}")
-    q2 = R(REGEL, j100, ST100, 106000, 106000, ns["fp_offen"](412.5, [-q["hedge_tp_eur"]]), 100000, {}, 100000)
-    check(q2["sl"] == 2500 and q2["tp"] == 6000 and q2["liq"] == 100100 and q2["ziel"] == 112000,
-          f"Gewinn → 106.000, Tag 2: TP {q2.get('tp')} / SL {q2.get('sl')}, Liq {q2.get('liq')} (Lock) → Ziel 112.000")
-    qv = R(REGEL, j100, ST100, 98250, 100000, ns["fp_offen"](412.5, [q["hedge_sl_eur"]]), 100000, {}, 100000)
-    check(qv["tp"] == 1750 and qv["sl"] == 1250, f"Verlust → 98.250, Tag 2: TP {qv.get('tp')} / SL {qv.get('sl')}")
+    print("100k (Kosten 350 €, Verhältnis 350/3.000)")
+    q = R(REGEL, j100, ST100, 100000, None, 350, 100000, 100000)
+    ok, txt = t(q, 6000, 1750, 204, 700)
+    check(ok and q["liq"] == 97000 and abs(q["verhaeltnis"] - 350 / 3000) < 1e-4, "Tag 1: " + txt + f", Liq {q.get('liq')}")
+    o2 = ns["fdp_offen"](350, [-q["hedge_tp_eur"]])
+    q2 = R(REGEL, j100, ST100, 106000, 106000, o2, 100000, 100000)
+    check(q2["sl"] == 2500 and q2["tp"] == 6000 and q2["liq"] == 100100 and q2["ziel"] == 112000 and abs(o2 - 1050) < 0.01,
+          f"Gewinn → 106.000: offen {o2} €, Tag 2 TP {q2.get('tp')} / SL {q2.get('sl')}, Liq {q2.get('liq')} (Lock) → Ziel 112.000")
+    ov = ns["fdp_offen"](350, [q["hedge_sl_eur"]])
+    qv = R(REGEL, j100, ST100, 98250, 100000, ov, 100000, 100000)
+    check(qv["tp"] == 1750 and qv["sl"] == 1250 and abs(qv["hedge_sl_eur"] - 145.83) < 0.02,
+          f"Verlust → 98.250 (offen {ov} €), Tag 2: TP {qv.get('tp')} / SL {qv.get('sl')}, Hedge +{qv.get('hedge_sl_eur')} / −{qv.get('hedge_tp_eur')}")
 
 
-def einzeln(ns):
+def bausteine(ns):
     print("Bausteine")
-    R = ns["fp_konto_rechnen"]
-    j150 = ns["fp_je_groesse"](REGEL, 150000)
-    b = R(REGEL, j150, ST150, 145990, 150000, 550, 150000, {}, 150000)
+    REGEL = ns["FDP_FIRMEN_STANDARD"][0]
+    R, jg = ns["fdp_konto_rechnen"], ns["fdp_je_groesse"]
+    j150, j100 = jg(REGEL, 150000), jg(REGEL, 100000)
+    b = R(REGEL, j150, ST150, 145990, 150000, 550, 150000, 150000)
     check(b["aktion"] == "aus" and "geblowt" in b["grund"], "Balance unter der Liquidation → aus (geblowt?)")
-    k = R(REGEL, j150, ST150, 146050, 150000, 550, 150000, {}, 150000)
+    k = R(REGEL, j150, ST150, 146050, 150000, 550, 150000, 150000)
     check(k["aktion"] == "aus" and "zu klein" in k["grund"], "50 $ über der Liquidation → aus (Abstand zu klein)")
-    check(R(REGEL, None, ST150, 150000, None, 550, None, {}, 150000)["aktion"] == "aus", "Größe ohne Werte → aus")
-    j100 = ns["fp_je_groesse"](REGEL, 100000)
-    u = R(REGEL, j100, ST100, 150074.4, None, 412.5, 100000, {}, 100000)
+    check(R(REGEL, None, ST150, 150000, None, 550, None, 150000)["aktion"] == "aus", "Größe ohne Werte → aus")
+    u = R(REGEL, j100, ST100, 150074.4, None, 350, 100000, 100000)
     check(u["aktion"] == "aus" and "unplausibel" in u["grund"], "100k mit 150.074 $ (Fehllesung Chris) → aus, nicht „Ziel erreicht“")
-    h = R(REGEL, j150, ST150, 150000, None, 550, 150000, {}, 150000)
-    # Multiplikator wie tpMultiplierAusRisiko: Risiko Master 4.000 $ bei 2 NQ = 100 Punkte, Risiko Slave 550 € → 6,47 Lot
+    h = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000)
     check(h["master_risk"] == 4000 and h["slave_risk"] == 550 and h["lots"] == 6.47 and abs(h["hedge_eur"] - 1031.15) < 0.02,
-          f"Plan-Felder: master_risk {h['master_risk']}, slave_risk {h['slave_risk']}, {h['lots']} Lot, hedge_eur {h['hedge_eur']}")
-    check(ns["fp_kontrakte"](2500, 4) == 2 and ns["fp_kontrakte"](3000, 10) == 3 and ns["fp_kontrakte"](1250, 3) == 1 and ns["fp_kontrakte"](9000, 4) == 4,
-          "Kontrakte ~60 Punkte SL, höchstens Minis der Stufe")
-    z = ns["fp_zyklus"](150000, [], [])
+          f"Plan-Felder wie Trade-Popup: master_risk {h['master_risk']}, slave_risk {h['slave_risk']}, {h['lots']} Lot, hedge_eur {h['hedge_eur']}")
+    # Kontrakte (Finn 27.10.2026): 100k 1/2 je 50 %, 150k 2 mit 75 % / 3 mit 25 %, gedeckelt auf die Minis der Stufe
+    K = ns["fdp_kontrakte"]
+    rnd = random.Random(11)
+    n = 20000
+    z150 = [K(j150["kontrakte"], 4, rnd) for _ in range(n)]
+    z100 = [K(j100["kontrakte"], 3, rnd) for _ in range(n)]
+    a2, a3 = z150.count(2) / n, z150.count(3) / n
+    b1, b2 = z100.count(1) / n, z100.count(2) / n
+    check(set(z150) == {2, 3} and abs(a2 - 0.75) < 0.015 and abs(a3 - 0.25) < 0.015, f"150k: 2 NQ {a2:.1%} / 3 NQ {a3:.1%} (Soll 75/25)")
+    check(set(z100) == {1, 2} and abs(b1 - 0.5) < 0.015 and abs(b2 - 0.5) < 0.015, f"100k: 1 NQ {b1:.1%} / 2 NQ {b2:.1%} (Soll 50/50)")
+    check(K({"3": 1}, 2, rnd) == 2 and K(j150["kontrakte"], 2, random.Random(5)) <= 2, "Deckel: nie mehr als die Minis der Stufe")
+    check(K(j150["kontrakte"], 4) == 2 and K(j100["kontrakte"], 3) == 1 and K(None, 3) == 1, "ohne Würfel: wahrscheinlichster Wert (Gleichstand: kleinerer)")
+    r = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000, random.Random(3))
+    check(r["tp_pkt"] == round(7500 / (20 * r["kontrakte"]), 2) and r["sl_pkt"] == round(2500 / (20 * r["kontrakte"]), 2),
+          f"Punkte = $ ÷ (Kontrakte × 20 $): {r['kontrakte']} NQ → TP {r['tp_pkt']} / SL {r['sl_pkt']} Punkte")
+    z = ns["fdp_zyklus"](150000, [], [])
     check(z == {"nr": 1, "ab": None, "start": 150000.0}, "Zyklus 1 ohne Payout ab Kontogröße")
-    z2 = ns["fp_zyklus"](150000, ["2026-10-20T10:00:00+00:00"], [{"started_at": "2026-10-19T10:00:00+00:00", "bal_start": 160000},
-                                                                  {"started_at": "2026-10-21T10:00:00+00:00", "bal_start": 151200}])
+    z2 = ns["fdp_zyklus"](150000, ["2026-10-20T10:00:00+00:00"], [{"started_at": "2026-10-19T10:00:00+00:00", "bal_start": 160000},
+                                                                   {"started_at": "2026-10-21T10:00:00+00:00", "bal_start": 151200}])
     check(z2["nr"] == 2 and z2["start"] == 151200, "Zyklus 2 ab erstem Trade nach dem Payout")
-    tg = ns["fp_tage"]([{"status": "completed", "started_at": "2026-10-20T14:00:00+00:00", "master_pl": 7384},
-                        {"status": "completed", "started_at": "2026-10-21T14:00:00+00:00", "master_pl": 7500},
-                        {"status": "planned", "started_at": None, "master_pl": None}])
-    check(tg == {"2026-10-20": 7384, "2026-10-21": 7500}, "Ergebnis je CME-Handelstag")
-    c = R(REGEL, j150, ST150, 164884, 164884, 3000, 150000, tg, 150000)
-    check(c["consistency_pct"] == 50.4, f"Consistency-Angabe: größter Tag {c['max_tag']} von {c['gewinn']} = {c['consistency_pct']} % (Marc 20./21.10.)")
 
-    print("Zeitverteilung")
-    rnd = random.Random(7)
-    kand = [("u1", f"k{i}") for i in range(5)] + [("u2", "m1")]
-    m, rest = ns["fp_zeiten"](kand, {"u2": [600.0]}, None, 150, 1200, 100, [90, 150], 15, rnd)
-    u1 = sorted(m[f"k{i}"] for i in range(5) if f"k{i}" in m)
-    check(len(u1) == 5 and all(b - a >= 90 for a, b in zip(u1, u1[1:])) and u1[0] >= 150 and u1[-1] <= 1200,
-          f"5 Konten einer ID über 02:30–20:00 verteilt, ≥ 90 min Abstand ({[int(x) for x in u1]})")
-    check("m1" in m and abs(m["m1"] - 600) >= 90, f"Abstand zu schon geplantem Big Trade derselben ID ({int(m.get('m1', 0))} vs 600)")
-    m2, rest2 = ns["fp_zeiten"]([("u1", "a"), ("u1", "b")], {}, None, 150, 1200, 1150, [90, 150], 15, random.Random(1))
-    check(rest2 == ["a", "b"] or (len(m2) <= 1 and len(rest2) >= 1), "kurz vor Fensterende: was nicht passt, bleibt ausgelassen")
+    print("Fenster, Tagesdeckel, Zeiten")
+    F = ns["fdp_fenster"]
+    ch = {"tz": "Europe/Berlin", "fenster": [["02:00", "20:00", 100]], "fenster_tz": "Asia/Dubai", "start_bis": "20:00"}
+    check(F(ch) == ("Asia/Dubai", 120, 1200), f"Fenster des Challenge-Planers (live-Form): {F(ch)} = 02:00–20:00 Dubai")
+    check(F({"fenster": [["02:00", "14:00", 37], ["14:00", "16:30", 25]], "tz": "Europe/Berlin"}) == ("Europe/Berlin", 120, 990), "mehrere Fenster: frühestes von bis spätestes bis")
+    check(F({}) == ("Asia/Dubai", 120, 1200), "ohne Fenster: Rückfall 02:00–20:00 Dubai")
+    gew, ueber = ns["fdp_auswahl"]([("u1", f"k{i}") for i in range(5)] + [("u2", "m1"), ("u2", "m2"), ("u3", "x")], {"u2": 1}, 2, random.Random(4))
+    je = {}
+    for u, _k in gew:
+        je[u] = je.get(u, 0) + 1
+    check(je == {"u1": 2, "u2": 1, "u3": 1} and len(ueber) == 4, f"Tagesdeckel 2 je ID (u2 hatte heute schon 1): {je}, {len(ueber)} auf morgen")
+    kand = [("u1", "a", "apex"), ("u1", "b", "apex"), ("u2", "c", "apex"), ("u3", "d", "apex"), ("u4", "e", "tradeify")]
+    m, rest = ns["fdp_zeiten"](kand, {"u1": [600.0]}, {"apex": [300.0, 305.0]}, 120, 1200, 90, 15, random.Random(9))
+    neu = sorted(m[k] for k in "abcd")
+    check(not rest and all(abs(x - y) >= 15 for x in neu for y in [300.0, 305.0]) and all(b - a >= 15 for a, b in zip(neu, neu[1:]))
+          and abs(m["a"] - m["b"]) >= 90 and all(abs(m[k] - 600) >= 90 for k in "ab"),
+          f"zufällig im Fenster, ≥ 15 min zu jedem Apex-Start (auch Challenge 05:00/05:05), ≥ 90 min je ID: {[f'{int(x)//60:02d}:{int(x)%60:02d}' for x in neu]}")
+    m2, rest2 = ns["fdp_zeiten"]([("u1", "a", "apex"), ("u2", "b", "apex")], {}, {}, 120, 1200, 90, 15, random.Random(1), erlaubt=lambda x: x >= 180)
+    check(not rest2 and min(m2.values()) >= 180, "nur erlaubte Minuten (CME-Handelstag), sonst neu gewürfelt")
+    m3, rest3 = ns["fdp_zeiten"]([("u1", "a", "apex")], {}, {"apex": [float(x) for x in range(120, 1201, 10)]}, 120, 1200, 90, 15, random.Random(1))
+    check(rest3 == ["a"] and not m3, "kein freier Slot (alle 10 min belegt) → ausgelassen statt hinten angehängt")
+    t1 = ns["fdp_zeiten"]([("u1", "a", "apex"), ("u2", "b", "apex"), ("u3", "c", "apex")], {}, {}, 120, 1200, 90, 15, random.Random(1))[0]
+    t2 = ns["fdp_zeiten"]([("u1", "a", "apex"), ("u2", "b", "apex"), ("u3", "c", "apex")], {}, {}, 120, 1200, 90, 15, random.Random(2))[0]
+    check(t1 != t2, "kein festes Raster: anderer Würfel → andere Zeiten")
 
 
-def lauf_test():
-    """fp_planen als Trockenlauf gegen nachgebaute DB-Antworten (kein Netz): Lader, Ausschlüsse, Plan-Zeile, nichts geschrieben."""
-    print("Trockenlauf (nachgebaute DB)")
-    src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
-
-    def block(name):
-        i = src.index(f"\ndef {name}(") + 1
-        return src[i:src.find("\n\n\n", i)]
-    i, j = src.index("FP_TAKT_S = 300"), src.index('@app.route("/admin/funded-plan"')
-    ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "random": random, "time": __import__("time"),
-          "GP_SLAVE_PPL": 0.85, "_firm_norm": lambda x: str(x or "")}
-    code = "\n".join(block(n) for n in ("_wd_num", "_liq_de", "_cme_handelstag", "ist_topstep_express", "liq_konto_boden", "liq_stufe", "_ap_norm",
-                                        "ap_regel_finden", "_wd_konto_groesse", "ap_balance_live", "liq_peak", "liq_regel_waehlen",
-                                        "_wd_futures_frontcode", "_ap_tz"))
-    exec(code + "\n" + src[i:j], ns)
-    U1, U2 = "00000000-0000-4000-a000-0000000000a1", "00000000-0000-4000-a000-0000000000a2"
-    konten = [
-        {"id": "k1", "user_id": U1, "name": "150k PAAPEX000000000001 → Funded", "firm": "Apex Trader", "account_type": "funded", "auto_planer": True,
-         "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"},
-        {"id": "k2", "user_id": U1, "name": "100k PAAPEX000000000002 → Funded", "firm": "Apex Trader", "account_type": "funded", "auto_planer": True,
-         "tv_balance": None, "tv_balance_at": None},
-        {"id": "k3", "user_id": U2, "name": "100k PAAPEX000000000003 → Funded", "firm": "Apex Trader", "account_type": "funded", "auto_planer": True,
-         "tv_balance": 106000, "tv_balance_at": "2026-10-27T01:00:00+00:00"},
-        {"id": "k4", "user_id": U2, "name": "150k PAAPEX000000000004 → Funded", "firm": "Apex Trader", "account_type": "funded", "auto_planer": True,
-         "tv_balance": 165100, "tv_balance_at": "2026-10-27T01:00:00+00:00"},
-        {"id": "k5", "user_id": U2, "name": "150k TDFY000005 → Funded", "firm": "Tradeify", "account_type": "funded", "auto_planer": True,
-         "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"},
-        {"id": "k6", "user_id": U1, "name": "150k PAAPEX000000000006 → Funded", "firm": "Apex Trader", "account_type": "funded", "auto_planer": True,
-         "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"},
-    ]
-    plaene = [{"id": "p3", "master_account_id": "k3", "status": "completed", "started_at": "2026-10-26T14:00:00+00:00", "ended_at": "2026-10-26T15:00:00+00:00",
-               "master_pl": 6000, "slave_pl": -825, "orbit_v3": True, "hedge_eur": 825, "bal_start": 100000, "konto_typ": "funded"},
-              {"id": "p6", "master_account_id": "k6", "status": "planned", "started_at": None, "orbit_v3": True, "hedge_eur": 1000}]
+def tag_13(ns):
+    """Ein Tag mit allen 13 Apex-Fundeds (Verteilung wie HT 27.10.2026: 5 / 4 / 1 / 1 / 1 / 1 je ID), dazu 3 Apex-Challenge-Starts des
+    Challenge-Planers einer anderen ID. Trockenlauf + scharfer Lauf gegen nachgebaute DB."""
+    print("Tag mit 13 Apex-Fundeds (Trockenlauf, nachgebaute DB)")
+    U = {n: f"00000000-0000-4000-a000-0000000000{i:02d}" for i, n in enumerate(["A", "B", "C", "D", "E", "F", "G"], 1)}
+    verteil = [("A", 5, "100k"), ("B", 2, "100k"), ("B", 2, "150k"), ("C", 1, "100k"), ("D", 1, "150k"), ("E", 1, "100k"), ("F", 1, "150k")]
+    konten, n = [], 0
+    for wer, anz, gr in verteil:
+        for _ in range(anz):
+            n += 1
+            konten.append({"id": f"k{n:02d}", "user_id": U[wer], "name": f"{gr} PAAPEX0000000000{n:02d} → Funded", "firm": "Apex Trader",
+                           "account_type": "funded", "auto_planer": True, "tv_balance": 150000 if gr == "150k" else 100000,
+                           "tv_balance_at": "2026-10-27T01:00:00+00:00"})
+    # Challenge-Planer: Apex-Challenge-Starts von ID G um 06:00, 06:10 und 13:00 Dubai (planned) — der Funded-Planer muss 15 min halten
+    ch = [{"user_id": U["G"], "master_firm": "Apex Trader", "status": "planned", "route": "tvv2", "orbit_v3": False, "hedge_eur": None,
+           "winning_day": None, "start_um": (datetime(2026, 10, 28, 0, 0, tzinfo=timezone.utc) + timedelta(hours=h - 4)).isoformat()}
+          for h in (6.0, 6 + 1 / 6, 13.0)]
     geschrieben = []
 
     def sb_all(tab, par):
         if tab == "accounts":
             return [dict(a) for a in konten]
         if tab == "trade_plans" and "master_account_id" in par:
-            return [dict(p) for p in plaene]
+            return []
+        if tab == "trade_plans" and "user_id" in par:
+            return [dict(c) for c in ch]
         return []
-    ns.update(_sb_all=sb_all, sb_select=lambda t, p: [{"id": 1, "aktiv": False, "user_ids": [U1, U2], "firmen": ns["FP_FIRMEN_STANDARD"], "zeiten": {}}]
-              if t == "funded_plan_regeln" else [],
-              sb_insert=lambda t, b: geschrieben.append((t, b)), sb_update=lambda t, p, b: geschrieben.append((t, b)),
-              _ap_archiviert=lambda: set(), _liq_verlauf_laden=lambda ids: [{"master_account_id": "k3", "konto_typ": "funded", "id": "p3",
-                                                                            "ended_at": "2026-10-26T15:00:00+00:00", "bal_end": 106000}],
+
+    def sb_select(tab, par):
+        if tab == "funded_plan_regeln":
+            return [{"id": 1, "aktiv": False, "user_ids": list(U.values()), "firmen": ns["FDP_FIRMEN_STANDARD"], "zeiten": dict(ns["FDP_ZEITEN_STANDARD"])}]
+        if tab == "auto_plan_regeln":
+            return [{"zeiten": {"tz": "Europe/Berlin", "fenster": [["02:00", "20:00", 100]], "fenster_tz": "Asia/Dubai", "start_bis": "20:00"}}]
+        return []
+    ns.update(_sb_all=sb_all, sb_select=sb_select, sb_insert=lambda t, b: geschrieben.append((t, b)),
+              sb_update=lambda t, p, b: geschrieben.append((t, b)), _ap_archiviert=lambda: set(), _liq_verlauf_laden=lambda ids: [],
               _liq_regeln_laden=lambda: [{"firma": "Apex Trader", "kontotyp": "funded", "groesse": 150000, "art": "stufen", "stufen": ST150},
                                          {"firma": "Apex Trader", "kontotyp": "funded", "groesse": 100000, "art": "stufen", "stufen": ST100}],
-              _ap_namen=lambda: ({U1: "Eins", U2: "Zwei"}, set()))
-    jetzt = datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)   # 08:00 Dubai
-    e = ns["fp_planen"](trocken=True, jetzt=jetzt, seed=3)
-    g = {z["konto_id"]: z for z in e["geplant"]}
-    a = {z["konto_id"]: z for z in e["ausgelassen"]}
-    check(e["ok"] and not geschrieben, "Trockenlauf schreibt nichts")
-    check(set(g) == {"k1", "k3"}, f"geplant: k1 (150k frisch) + k3 (100k nach Gewinn) — {sorted(g)}")
-    check("k2" in a and "nicht live" in a["k2"]["grund"], "ohne Balance → ausgelassen (Balance lesen)")
-    check("k6" in a and a["k6"]["grund"] == "schon geplant", "Konto mit geplantem Plan → ausgelassen")
-    check([z["konto_id"] for z in e["ziel"]] == ["k4"], "165.100 → Ziel erreicht")
-    check("k5" not in g and "k5" not in a, "Tradeify (aus) wird gar nicht betrachtet")
-    k3 = g.get("k3") or {}
-    check(k3.get("liq") == 100100 and k3.get("sl") == 2500 and k3.get("tp") == 6000 and abs((k3.get("offen_eur") or 0) - 1237.5) < 0.01,
-          f"k3: Liq {k3.get('liq')} (Lock aus Höchststand 106.000), SL {k3.get('sl')}, TP {k3.get('tp')}, offen {k3.get('offen_eur')} €")
-    e2 = ns["fp_planen"](trocken=False, jetzt=jetzt, seed=3)
+              _ap_namen=lambda: ({v: k for k, v in U.items()}, set()))
+    jetzt = datetime(2026, 10, 27, 21, 0, tzinfo=timezone.utc)   # 01:00 Dubai, vor dem Fenster → plant den Handelstag 28.10.
+    e = ns["fdp_planen"](trocken=True, jetzt=jetzt, seed=27)
+    je = {}
+    for z in e["geplant"]:
+        je[z["user_id"]] = je.get(z["user_id"], 0) + 1
+    namen = {v: k for k, v in U.items()}
+    check(e["ok"] and not geschrieben and e["tag"] == "2026-10-28", f"Trockenlauf schreibt nichts, plant den Handelstag {e.get('tag')}")
+    check(len(e["geplant"]) == 8 and all(v <= 2 for v in je.values()) and je.get(U["A"]) == 2 and je.get(U["B"]) == 2,
+          f"13 Fundeds → {len(e['geplant'])} geplant (max. 2 je ID): " + ", ".join(f"{namen[u]} {v}" for u, v in sorted(je.items(), key=lambda x: namen[x[0]])))
+    ueber = [z for z in e["ausgelassen"] if "Tagesdeckel" in z.get("grund", "")]
+    check(len(ueber) == 5, f"{len(ueber)} wegen Tagesdeckel auf morgen (A 3, B 2)")
+    hm = lambda iso: datetime.fromisoformat(iso).astimezone(timezone(timedelta(hours=4)))
+    starts = sorted(hm(z["start_um"]) for z in e["geplant"])
+    # jeder Funded-Start zu jedem anderen Apex-Start (Funded + Challenge); Challenge untereinander (06:00/06:10) bleibt bei 1 min
+    andere = starts + [hm(c["start_um"]) for c in ch]
+    gap = min(abs((a - b).total_seconds()) / 60 for i, a in enumerate(starts) for j, b in enumerate(andere) if j != i)
+    check(gap >= 15, f"kleinster Abstand Funded-Start ↔ jeder andere Apex-Start (Funded + Challenge) {gap:.1f} min ≥ 15")
+    check(all((2, 0) <= (s.hour, s.minute) <= (20, 0) for s in starts), "alle Starts im Challenge-Fenster 02:00–20:00 Dubai")
+    print("    Startzeiten (Dubai): " + ", ".join(f"{s:%H:%M} {namen[z['user_id']]}·{z['kontrakte']}NQ"
+                                                  for s, z in sorted(((hm(z['start_um']), z) for z in e['geplant']), key=lambda x: x[0])))
+    print("    Challenge (Dubai):   " + ", ".join(f"{hm(c['start_um']):%H:%M}" for c in ch))
+    je_id_min = []
+    for u in U.values():
+        st = sorted(hm(z["start_um"]) for z in e["geplant"] if z["user_id"] == u)
+        je_id_min += [(b - a).total_seconds() / 60 for a, b in zip(st, st[1:])]
+    check(all(x >= 90 for x in je_id_min), f"zwei Funded derselben ID ≥ 90 min auseinander ({[round(x) for x in je_id_min]})")
+    e2 = ns["fdp_planen"](trocken=False, jetzt=jetzt, seed=27)
     zeilen = [b for t, b in geschrieben if t == "trade_plans"]
-    z1 = next((b for b in zeilen if b["master_account_id"] == "k1"), {})
-    check(len(zeilen) == 2 and z1.get("route") == "tvv2" and z1.get("orbit_v3") is True and (z1.get("hedge_eur") or 0) > 0
-          and z1.get("auto_plan") is False and z1.get("auto_bestaetigt_at") and z1.get("master_symbol", "").startswith("NQ")
-          and z1.get("master_tp") == 7500 and z1.get("master_sl") == 2500 and z1.get("master_contracts") == 2,
-          f"scharf: 2 Pläne tvv2 + orbit_v3 + hedge_eur, auto-bestätigt ({z1.get('hedge_eur')} €, {z1.get('master_symbol')})")
-    check(any(t == "accounts" and b.get("waiting_payout_since") for t, b in geschrieben), "scharf: Ziel-Konto → waiting_payout_since")
-    starts = sorted(datetime.fromisoformat(b["start_um"]) for b in zeilen)
-    check(all(s >= jetzt + timedelta(minutes=15) for s in starts), "Startzeiten frühestens jetzt + 15 min")
+    z1 = zeilen[0] if zeilen else {}
+    check(len(zeilen) == 8 and all(b["route"] == "tvv2" and b["orbit_v3"] is True and b["hedge_eur"] > 0 and b["auto_plan"] is False
+                                   and b["auto_bestaetigt_at"] and b["master_symbol"].startswith("NQ") for b in zeilen),
+          f"scharf: 8 Pläne tvv2 + orbit_v3 + hedge_eur, auto-bestätigt ({z1.get('master_symbol')}, Plan-Tag {e2.get('tag')})")
+
+
+def ziel_wd(ns):
+    print("Ziel erreicht → Winning Days (scharf)")
+    geschrieben = []
+    U1 = "00000000-0000-4000-a000-0000000000a1"
+    konto = {"id": "kz", "user_id": U1, "name": "150k PAAPEX000000000099 → Funded", "firm": "Apex Trader", "account_type": "funded",
+             "auto_planer": True, "tv_balance": 165100, "tv_balance_at": "2026-10-27T01:00:00+00:00"}
+    ns.update(_sb_all=lambda t, p: [dict(konto)] if t == "accounts" else [],
+              sb_select=lambda t, p: ([{"id": 1, "aktiv": True, "user_ids": [U1], "firmen": ns["FDP_FIRMEN_STANDARD"], "zeiten": {}}]
+                                      if t == "funded_plan_regeln" else []),
+              sb_insert=lambda t, b: geschrieben.append((t, {}, b)), sb_update=lambda t, p, b: geschrieben.append((t, p, b)))
+    e = ns["fdp_planen"](trocken=False, jetzt=datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc), seed=1)
+    upd = [x for x in geschrieben if x[0] == "accounts"]
+    ok = (len(e["ziel"]) == 1 and len(upd) == 1 and upd[0][2].get("account_type") == "winning_days" and upd[0][2].get("wd_farm") is True
+          and upd[0][2].get("name") == "150k PAAPEX000000000099 → Winning Days" and upd[0][1].get("account_type") == "eq.funded"
+          and not any("waiting_payout_since" in x[2] for x in geschrieben))
+    check(ok, "165.100 → account_type winning_days + wd_farm, Name „→ Winning Days“, kein Waiting for Payout")
 
 
 if __name__ == "__main__":
     ns = laden()
     szenario(ns)
-    einzeln(ns)
-    lauf_test()
+    bausteine(ns)
+    tag_13(ns)
+    ziel_wd(ns)
     if FEHLER:
         print(f"\n✗ {len(FEHLER)} Fehler")
         sys.exit(1)
