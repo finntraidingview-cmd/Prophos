@@ -103,6 +103,9 @@ def einzeln(ns):
     k = R(REGEL, j150, ST150, 146050, 150000, 550, 150000, {}, 150000)
     check(k["aktion"] == "aus" and "zu klein" in k["grund"], "50 $ über der Liquidation → aus (Abstand zu klein)")
     check(R(REGEL, None, ST150, 150000, None, 550, None, {}, 150000)["aktion"] == "aus", "Größe ohne Werte → aus")
+    j100 = ns["fp_je_groesse"](REGEL, 100000)
+    u = R(REGEL, j100, ST100, 150074.4, None, 412.5, 100000, {}, 100000)
+    check(u["aktion"] == "aus" and "unplausibel" in u["grund"], "100k mit 150.074 $ (Fehllesung Chris) → aus, nicht „Ziel erreicht“")
     h = R(REGEL, j150, ST150, 150000, None, 550, 150000, {}, 150000)
     # Multiplikator wie tpMultiplierAusRisiko: Risiko Master 4.000 $ bei 2 NQ = 100 Punkte, Risiko Slave 550 € → 6,47 Lot
     check(h["master_risk"] == 4000 and h["slave_risk"] == 550 and h["lots"] == 6.47 and abs(h["hedge_eur"] - 1031.15) < 0.02,

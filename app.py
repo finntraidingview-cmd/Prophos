@@ -29356,6 +29356,10 @@ def fp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, tage=N
         return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
     start = float(start) if start else g
     ziel = start + float(jg.get("ziel_gewinn") or 0)
+    # Plausibel? (27.10.2026, Befund Chris 100k …0003 mit 150.074 $ = Endbalance seines 150k-Kontos, gekürzte Kennung in TradingView):
+    # mehr als ein Trade über dem Ziel kann der Planer nicht erzeugt haben → Lesung anzweifeln statt „Ziel erreicht" zu melden
+    if balance > ziel + float(jg.get("max_trade") or 0):
+        return {"aktion": "aus", "grund": f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance neu lesen"}
     tp, art = fp_tp(balance, start, ziel, jg.get("max_trade") or 0)
     tg = tage or {}
     gew = round(balance - start, 2)
