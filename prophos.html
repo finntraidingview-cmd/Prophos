@@ -8161,8 +8161,8 @@
             </label>
           </div>
           <div style="display:flex;align-items:center;gap:14px">
-            <!-- Kontowert-Kachel (07.10.2026): Summe der sichtbaren (gefilterten) Konten, Daten aus /admin/kontowerte -->
-            <div class="acc-kw-kachel" id="accKwGesamt" hidden title="Summe der Kontowerte aller sichtbaren Konten (Filter und Suche gelten)">
+            <!-- Gesamtwert-Kachel (07.10.2026, seit 28.10.2026 = Summe der Gesamtkosten, im Plus 0): sichtbare (gefilterte) aktive Konten -->
+            <div class="acc-kw-kachel" id="accKwGesamt" hidden title="Summe der Gesamtkosten aller sichtbaren aktiven Konten (Filter und Suche gelten) — Konten im Plus zählen 0">
               <span class="acc-kw-k-label">Gesamtwert</span>
               <span class="acc-kw-summe">—</span>
               <span class="acc-kw-n"></span>
@@ -37886,15 +37886,26 @@
       w.balance_usd != null ? `Balance ${Math.round(w.balance_usd).toLocaleString('de-DE')} $` : ''].filter(Boolean).join(' · ')
     return `<div class="acc-kw-wert" title="${escapeHtml(tip)}">${kwEur(w.wert_eur)}</div><div class="acc-kw-stufe">${escapeHtml(w.stufe || '')}</div>`
   }
-  // Kachel „Gesamtwert" = Summe der sichtbaren (gefilterten) Konten mit Wert
+  /* Kachel „Gesamtwert" = Summe der GESAMTKOSTEN der sichtbaren aktiven Konten (28.10.2026, Finn: „Die Gesamtkosten von allen
+   * Accounts sind auch der Gesamtwert … sobald ein Account zu minus geht, geht es zu null"). Je Konto dieselbe Zahl wie oben links
+   * im Account-Detail (calcReingesteckdEur mit Payouts und WD-Hedge, ganze Vorgänger-Kette), im Plus = 0. Vorher Summe der
+   * Kontowerte (Wiederbeschaffung) — die bleiben unverändert in der Spalte und im Planer. Archivierte und Live-Konten zählen nicht. */
   function kwKachelMalen(){
     const el = document.getElementById('accKwGesamt'); if(!el) return
-    if(!kwSt().werte){ el.hidden = true; return }
-    let summe = 0, n = 0
-    for(const id of kwSt().sichtbar){ const w = kwSt().werte[String(id)]; if(w && w.wert_eur != null){ summe += Number(w.wert_eur); n++ } }
+    if(typeof calcReingesteckdEur !== 'function'){ el.hidden = true; return }
+    const archive = (typeof getArchive === 'function') ? getArchive() : {}
+    let summe = 0, n = 0, nPlus = 0
+    for(const id of kwSt().sichtbar){
+      const acc = accounts.find(x => String(x.id) === String(id))
+      if(!acc || acc.type === 'live' || archive[acc.id]?.archived) continue
+      const gk = Number(calcReingesteckdEur(acc, { netPayouts: true, mitWdHedge: true })) || 0
+      if(gk < 0) nPlus++
+      summe += Math.max(0, gk); n++
+    }
     el.hidden = false
+    el.title = 'Summe der Gesamtkosten aller sichtbaren aktiven Konten (Filter und Suche gelten) — Konten im Plus zählen 0'
     el.querySelector('.acc-kw-summe').textContent = kwEur(summe)
-    el.querySelector('.acc-kw-n').textContent = `${n} von ${kwSt().sichtbar.length} Konten`
+    el.querySelector('.acc-kw-n').textContent = `${n} Konten` + (nPlus ? ` · ${nPlus} im Plus = 0` : '')
   }
   function kwNachmalen(){
     document.querySelectorAll('#accountsTable [data-kw-zelle]').forEach(z => { z.innerHTML = kwZelleHtml(z.dataset.kwZelle) })
@@ -47844,7 +47855,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1785'
+  const OS_TAB_BUILD = '2026-09-22.1786'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
