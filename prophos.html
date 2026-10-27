@@ -3601,6 +3601,34 @@
   #adm-pane-planer .ap-idr-menu .z span{font-size:11.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
   #adm-pane-planer .ap-idr-menu .z.aus button{color:var(--sub)}
   @media (max-width:760px){ #adm-pane-planer .ap-idr-t{padding:8px 11px 6px;font-size:13px} #adm-pane-planer .ap-idr-m .lang{display:none} }   /* Handy: Leiste wischbar, Menüs als Symbol */
+  /* FUNDED-PLANER (27.10.2026, Finn: „Visuell die Seite vom Trade-Planer kopieren"): Kopf und ID-Reiter wie der Challenge-Planer (ap-idr),
+     Konten als Kacheln in ID-Farbe — Balken Liquidation → Ziel mit der Balance, darunter TP/SL/Kontrakte/Stufe und der Fusion-Hedge. */
+  #adm-pane-fplaner .fp-kopf{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin:0 0 10px;font-size:12px;color:var(--sub)}
+  #adm-pane-fplaner .fp-kopf b{font-size:14px;color:var(--ink)} #adm-pane-fplaner .fp-kopf .btn{padding:3px 9px;font-size:12px;margin-left:auto}
+  #adm-pane-fplaner .fp-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;background:var(--surface-tint);font-size:11.5px;color:var(--sub)}
+  #adm-pane-fplaner .fp-chip.an{color:var(--ink)} #adm-pane-fplaner .fp-chip.an::before{content:'●';color:#12b76a}
+  #adm-pane-fplaner .fp-chip.vor{color:var(--ink)} #adm-pane-fplaner .fp-chip.vor::before{content:'◐';color:var(--violet)}
+  #adm-pane-fplaner .fp-idr{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--border);margin-bottom:14px}
+  #adm-pane-fplaner .fp-idr::-webkit-scrollbar{display:none}
+  #adm-pane-fplaner .fp-idr button{--id:var(--violet);flex:none;display:flex;align-items:center;gap:6px;padding:9px 14px 8px;margin-bottom:-1px;background:none;border:0;
+    border-bottom:2px solid transparent;font:inherit;font-size:13.5px;font-weight:500;color:var(--sub);cursor:pointer;white-space:nowrap}
+  #adm-pane-fplaner .fp-idr button:hover{color:var(--ink)} #adm-pane-fplaner .fp-idr button.an{color:var(--ink);border-bottom-color:var(--id)}
+  #adm-pane-fplaner .fp-idr i{width:8px;height:8px;border-radius:50%;background:var(--id)} #adm-pane-fplaner .fp-idr em{font-style:normal;font-size:12px;color:var(--sub-2);font-variant-numeric:tabular-nums}
+  #adm-pane-fplaner .fp-h{font-size:12px;font-weight:600;color:var(--sub);margin:14px 0 8px;text-transform:none}
+  #adm-pane-fplaner .fp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+  #adm-pane-fplaner .fp-k{--id:var(--violet);border:1px solid var(--border);border-left:3px solid var(--id);border-radius:10px;padding:10px 12px;background:var(--surface);
+    font-size:12.5px;color:var(--sub);display:flex;flex-direction:column;gap:6px;font-variant-numeric:tabular-nums}
+  #adm-pane-fplaner .fp-k-kopf{display:flex;align-items:center;gap:6px;min-width:0} #adm-pane-fplaner .fp-k-kopf b{color:var(--ink);font-size:13px;white-space:nowrap}
+  #adm-pane-fplaner .fp-k-kopf .wer{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #adm-pane-fplaner .fp-k-kopf .pill{margin-left:auto;flex:none;padding:1px 8px;border-radius:999px;background:var(--surface-tint);color:var(--ink);font-size:11.5px}
+  #adm-pane-fplaner .fp-k-kopf .pill.buy{color:#047857} #adm-pane-fplaner .fp-k-kopf .pill.sell{color:var(--danger)}
+  #adm-pane-fplaner .fp-bar{position:relative;height:4px;border-radius:2px;background:color-mix(in srgb,var(--id) 14%,var(--surface-tint));margin:2px 0}
+  #adm-pane-fplaner .fp-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--id)}
+  #adm-pane-fplaner .fp-bar-t{display:flex;justify-content:space-between;font-size:11px;color:var(--sub-2)}
+  #adm-pane-fplaner .fp-w{display:flex;flex-wrap:wrap;gap:4px 12px} #adm-pane-fplaner .fp-w b{color:var(--ink);font-weight:600}
+  #adm-pane-fplaner .fp-aus{font-size:12px;border-top:1px solid var(--border)} #adm-pane-fplaner .fp-aus div{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)}
+  #adm-pane-fplaner .fp-aus .k{flex:0 0 220px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap} #adm-pane-fplaner .fp-aus .g{color:var(--sub)}
+  @media (max-width:760px){ #adm-pane-fplaner .fp-aus .k{flex-basis:140px} #adm-pane-fplaner .fp-idr button{padding:8px 11px 7px;font-size:13px} }
   /* Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): Zeile gedimmt solange der POST läuft, kurzes Ausblenden nach Erfolg, Grund bei Ablehnung */
   #adm-pane-planer .pz-z.ap-ok-laeuft{opacity:.5} #adm-pane-planer .pz-z.ap-ok-weg{opacity:0;transform:translateX(8px);transition:opacity .16s,transform .16s}
   #adm-pane-planer .ap-ok-bal{margin-top:4px;padding:2px 8px;font-size:11.5px;height:auto;white-space:nowrap}
@@ -11578,7 +11606,9 @@
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <!-- Auftrag ausgeblendet (Finn 08.10.2026: „Admin → Auftrag komplett weg, brauche ich nicht") — Pane, JS (aufLaden/aufRender) und Backend bleiben, nur der Reiter ist weg; der 120-s-Takt startet erst mit _aufTabOeffnen, also nie -->
           <button class="subtab adm-tab" data-admtab="auftrag" style="display:none">Auftrag</button>
-          <button class="subtab adm-tab" data-admtab="planer">Trade-Planer</button>
+          <!-- Challenge-Planer (27.10.2026, Finn: „Im Admin den Reiter Trade-Planer umbenennen … und einen eigenen Reiter für die Funded bauen") -->
+          <button class="subtab adm-tab" data-admtab="planer">Challenge-Planer</button>
+          <button class="subtab adm-tab" data-admtab="fplaner">Funded-Planer</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
           <!-- Kapitel + Acc-Käufe ausgeblendet (Finn 08.10.2026: „Kapitel auch visuell weg und mach das einfach zu Statistik dazu" · „genau wie Acc-Käufe auch zu Statistik hinzufügen") — Inhalte stehen jetzt unter Statistik, Reiter nur display:none -->
@@ -11942,6 +11972,10 @@
         <!-- Trade-Planer (08.10.2026, Finn: „alle IDs zum Trade-Planen zufügen und einen Überblick über alle IDs"): auto_plan_regeln.user_ids -->
         <div id="adm-pane-planer" hidden>
           <div id="ap-ids-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade IDs…</div>
+        </div>
+        <!-- Funded-Planer (27.10.2026): Vorschau des Funded-Auto-Planers (Apex), Inhalt baut das Modul ADMIN „FUNDED-PLANER" -->
+        <div id="adm-pane-fplaner" hidden>
+          <div id="fp-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Funded-Planer…</div>
         </div>
         <div id="adm-pane-kompass" hidden>
           <!-- Kopf (23.09.2026, Finn: „oben den ganzen Quatsch weglassen, kleiner, einfach sagen was der Bot gerade
@@ -19879,7 +19913,7 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Trade-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
         const name = t.dataset.admtab
@@ -19904,7 +19938,9 @@
         $('adm-pane-stat').hidden     = name !== 'stat'
         $('adm-pane-auftrag').hidden  = name !== 'auftrag'
         $('adm-pane-planer').hidden   = name !== 'planer'
+        $('adm-pane-fplaner').hidden  = name !== 'fplaner'   // Funded-Planer (27.10.2026)
         if(name === 'planer') window._apIdsTabOeffnen?.()   // Trade-Planer-IDs (08.10.2026)
+        if(name === 'fplaner') window._fpTabOeffnen?.()
         if(name === 'auftrag') window._aufTabOeffnen?.(); else window._aufTabSchliessen?.()   // Wochenauftrag (05.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
@@ -72853,6 +72889,83 @@
   const _apIdsTabOeffnenOhneTakt = window._apIdsTabOeffnen
   window._apIdsTabOeffnen = () => { _apIdsTabOeffnenOhneTakt(); if(!_apIdsLiveTimer) _apIdsLiveTimer = setInterval(apIdsLiveTick, 20000) }
   /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
+
+  /* ══ ADMIN „FUNDED-PLANER" (27.10.2026, Finn: „zusätzlich einen Auto-Planer für Funded … erst mal für alle Fundeds von Apex … Visuell die
+   * Seite vom Trade-Planer kopieren"). Erste Stufe: nur Vorschau — GET /admin/funded-plan rechnet einen Trockenlauf (app.py fp_planen, nichts
+   * geschrieben): je ID die Funded-Konten mit dem nächsten Trade (Start, Richtung, TP/SL, Kontrakte, Stufe, Liquidation, Fusion-Hedge am
+   * SL/TP, offene Kosten), „Ziel erreicht" (→ Waiting for Payout) und Ausgelassene mit Grund. Reiter wie der Challenge-Planer, Konten als
+   * Kacheln. Scharf plant erst funded_plan_regeln.aktiv auf Railway — hier gibt es dafür (noch) keinen Knopf. ══ */
+  const _fp = { d: null, fehler: '', laeuft: false, sicht: null, at: 0 }
+  async function fpLaden(){
+    if(_fp.laeuft) return
+    _fp.laeuft = true; _fp.fehler = ''; fpRender()
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/funded-plan`, { headers: { 'sb-token': tok } })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || d.ok === false) throw new Error(d.msg || ('HTTP ' + r.status))
+      _fp.d = d; _fp.at = Date.now()
+    }catch(e){ _fp.fehler = (e && e.message) || String(e) }
+    _fp.laeuft = false; fpRender()
+  }
+  const fpUsd = v => (v == null || !isFinite(v)) ? '–' : Math.round(Number(v)).toLocaleString('de-DE') + ' $'
+  const fpEur = v => (v == null || !isFinite(v)) ? '–' : Math.round(Number(v)).toLocaleString('de-DE') + ' €'
+  // „150k PAAPEX6843320000002 → Funded" → „150k …0002"
+  function fpKurz(name){
+    const n = String(name || '').split('→')[0].trim(), m = n.match(/^(\d+k)\s+(\S+)/i)
+    return m ? `${m[1]} …${m[2].slice(-4)}` : n
+  }
+  function fpKachel(z, art, namen){
+    const uid = String(z.user_id || ''), wer = namen[uid] || uid.slice(0, 8)
+    const kopf = art === 'geplant'
+      ? `<span class="pill ${z.richtung === 'buy' ? 'buy' : 'sell'}" title="Start (Dubai) · Richtung">${escapeHtml(z.start || '')} · ${z.richtung === 'buy' ? 'Long' : 'Short'}</span>`
+      : `<span class="pill" title="${escapeHtml(z.grund || '')}">Ziel erreicht</span>`
+    const liq = Number(z.liq), ziel = Number(z.ziel), bal = Number(z.balance)
+    const pct = (isFinite(liq) && isFinite(ziel) && ziel > liq) ? Math.max(0, Math.min(100, (bal - liq) / (ziel - liq) * 100)) : 0
+    const werte = art === 'geplant' ? `<div class="fp-w"><span>TP <b>${fpUsd(z.tp)}</b>${z.tp_art === 'break_even' ? ' (Break-even)' : ''}</span><span>SL <b>${fpUsd(z.sl)}</b></span>
+        <span><b>${escapeHtml(String(z.kontrakte || ''))}</b> NQ</span><span title="Stufe nach Balance (liq_regeln) · Daily Loss · max. Minis">Stufe ${escapeHtml(String(z.stufe || ''))} · DL ${fpUsd(z.dll)}</span></div>
+      <div class="fp-w" title="Fusion-Gegenhedge: € je $ = offene Kosten ÷ (Balance − Liq) · ${escapeHtml(String(z.lots || ''))} Lot · hedge_eur ${escapeHtml(String(z.hedge_eur || ''))} €">
+        <span>Hedge am SL <b>+${fpEur(z.hedge_sl_eur)}</b></span><span>am TP <b>−${fpEur(z.hedge_tp_eur)}</b></span><span>offen ${fpEur(z.offen_eur)}</span></div>` : ''
+    return `<div class="fp-k" style="--id:${idFarbe(uid)}">
+      <div class="fp-k-kopf"><b title="${escapeHtml(z.konto || '')}">${escapeHtml(fpKurz(z.konto))}</b><span class="wer">${escapeHtml(wer)}${z.zyklus > 1 ? ' · Zyklus ' + escapeHtml(String(z.zyklus)) : ''}</span>${kopf}</div>
+      <div class="fp-w"><span>Balance <b>${fpUsd(bal)}</b></span><span>Ziel ${fpUsd(ziel)}${isFinite(ziel - bal) && ziel > bal ? ' · noch ' + fpUsd(ziel - bal) : ''}</span>
+        ${z.consistency_pct != null ? `<span title="größter Tag ÷ Gewinn im Zyklus (Apex: höchstens 50 %)">größter Tag ${escapeHtml(String(z.consistency_pct))} %</span>` : ''}</div>
+      <div class="fp-bar" title="${escapeHtml(z.liq_text || '')}"><i style="width:${pct.toFixed(1)}%"></i></div>
+      <div class="fp-bar-t"><span>Liq ${fpUsd(liq)}</span><span>Ziel ${fpUsd(ziel)}</span></div>${werte}</div>`
+  }
+  function fpRender(){
+    const root = document.getElementById('fp-root'); if(!root) return
+    const d = _fp.d
+    if(!d){ root.innerHTML = _fp.fehler ? `<div style="color:var(--danger)">⚠ ${escapeHtml(_fp.fehler)}</div>` : 'Lade Funded-Planer…'; return }
+    root.style.padding = '6px 0'; root.style.color = ''
+    const namen = {}; (d.ids || []).forEach(x => { namen[String(x.user_id)] = x.name })
+    const u = _fp.sicht, inSicht = z => !u || String(z.user_id) === u
+    const zahl = (uid, k) => ((d[k] || []).filter(z => !uid || String(z.user_id) === uid)).length
+    const ids = (d.ids || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+    const reiter = `<div class="fp-idr" role="tablist"><button type="button" class="${u ? '' : 'an'}" data-fp-sicht="">Alle <em>${zahl(null, 'geplant')}/${zahl(null, 'geplant') + zahl(null, 'ausgelassen') + zahl(null, 'ziel')}</em></button>${ids.map(x => {
+      const id = String(x.user_id), n = zahl(id, 'geplant') + zahl(id, 'ausgelassen') + zahl(id, 'ziel')
+      return `<button type="button" class="${u === id ? 'an' : ''}" style="--id:${idFarbe(id)}" data-fp-sicht="${escapeHtml(id)}" title="${zahl(id, 'geplant')} geplant · ${zahl(id, 'ziel')} Ziel · ${zahl(id, 'ausgelassen')} ausgelassen"><i></i>${escapeHtml(x.name || id.slice(0, 8))}<em>${zahl(id, 'geplant')}/${n}</em></button>` }).join('')}</div>`
+    const firmen = (d.firmen || []).map(f => `<span class="fp-chip${f.an ? ' an' : ''}" title="${f.an ? 'wird geplant' : 'wählbar, aus'}">${escapeHtml(f.name || '')}</span>`).join('')
+    const z = d.zeiten || {}
+    const status = d.aktiv ? '<span class="fp-chip an" title="funded_plan_regeln.aktiv — Railway plant alle 5 min">scharf</span>'
+      : '<span class="fp-chip vor" title="Trockenlauf — nichts wird angelegt, bis Finn freigibt">Vorschau · nichts geplant</span>'
+    const kopf = `<div class="fp-kopf"><b>Funded-Planer</b>${status}${firmen}<span>Start ${escapeHtml(z.von || '')}–${escapeHtml(z.bis || '')} Dubai · ein Trade je Konto und Tag</span>
+      ${d.regeln_quelle === 'standard' ? '<span title="funded_plan_regeln ist noch nicht eingespielt — gerechnet mit den Standard-Regeln (Seed)">Regeln: Standard (SQL fehlt)</span>' : ''}
+      <span>${_fp.at ? 'gerechnet ' + new Date(_fp.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+      <button type="button" class="btn btn-ghost" data-fp-neu="1"${_fp.laeuft ? ' disabled' : ''}>${_fp.laeuft ? 'rechnet …' : '↻ neu rechnen'}</button></div>`
+    const gepl = (d.geplant || []).filter(inSicht), ziel = (d.ziel || []).filter(inSicht), aus = (d.ausgelassen || []).filter(inSicht)
+    const teil = (titel, l, art) => l.length ? `<div class="fp-h">${titel} · ${l.length}</div><div class="fp-grid">${l.map(x => fpKachel(x, art, namen)).join('')}</div>` : ''
+    const ausH = aus.length ? `<div class="fp-h">Ausgelassen · ${aus.length}</div><div class="fp-aus">${aus.map(x => `<div><span class="k" title="${escapeHtml(x.konto || '')}">${escapeHtml(fpKurz(x.konto))} · ${escapeHtml(namen[String(x.user_id)] || '')}</span><span class="g">${escapeHtml(x.grund || '')}</span></div>`).join('')}</div>` : ''
+    const fehler = _fp.fehler ? `<div class="tpl-fehler">${escapeHtml(_fp.fehler)}</div>` : ''
+    root.innerHTML = fehler + kopf + reiter + (teil(d.aktiv ? 'Geplant' : 'Würde planen', gepl, 'geplant') + teil('Ziel erreicht → Waiting for Payout', ziel, 'ziel') + ausH
+      || '<div style="color:var(--sub);font-size:12.5px">Keine Funded-Konten einer eingeschalteten Firma.</div>')
+    root.querySelectorAll('[data-fp-sicht]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.fpSicht || null; _fp.sicht = id && id !== _fp.sicht ? id : null; fpRender() }))
+    root.querySelector('[data-fp-neu]')?.addEventListener('click', () => fpLaden())
+  }
+  window._fpRender = fpRender; window._fp = _fp   // Stub-Test (ohne Login): window._fp.d setzen, dann _fpRender()
+  window._fpTabOeffnen = () => { if(!_fp.d || Date.now() - _fp.at > 60000) fpLaden(); else fpRender() }
+  /* ══ ENDE ADMIN „FUNDED-PLANER" ══ */
 
   async function aufLaden(){
     if(_auf.laedt) return
