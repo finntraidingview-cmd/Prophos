@@ -11741,8 +11741,8 @@
             <div class="panel" style="margin-top:14px" id="adm-wert-panel">
               <div class="panel-head">
                 <div>
-                  <div class="panel-title">Wert in Funded-Accounts</div>
-                  <div class="panel-sub">Balance − Größe = Gewinn · × Profit-Share (FundedNext 76,5 %, Tradeify 90 %, Blue Guardian 85 %, sonst 80 % — auch Tradeify CFD) + FundedNext-Refund 150 % beim ersten Payout = potenziell · anpassen im Payout-Kalender unter Finanzen</div>
+                  <div class="panel-title">Wert in Winning Days</div>
+                  <div class="panel-sub">Nur Konten „Winning Days“ im Plus: Balance − Größe = Gewinn · × Profit-Share (Tradeify 90 %, FundedNext 76,5 %, sonst 80 %) = potenziell · Konten im Minus zählen nicht</div>
                 </div>
                 <div id="adm-wert-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
@@ -11761,7 +11761,7 @@
                   <tbody id="adm-wert-rows"></tbody>
                 </table>
               </div>
-              <div class="adm-empty" id="adm-wert-empty" hidden>Keine Funded-Accounts für diesen Filter.</div>
+              <div class="adm-empty" id="adm-wert-empty" hidden>Keine Winning-Days-Konten im Plus für diesen Filter.</div>
             </div>
 
             <!-- Account-Liste: KEINE Dauerliste mehr, sondern die Aufklappung.
@@ -16289,31 +16289,35 @@
 
     /* ── Wert in Funded-Accounts (17.09.2026, Finn: „wie viel Wert ich an
      * Accounts habe … 150k auf 157.000 = potenziell 7.000 $ drin"). Nur
-     * Funded, nicht archiviert, folgt dem Filter wie „geparkt". ── */
+     * Funded, nicht archiviert, folgt dem Filter wie „geparkt".
+     * NUR WINNING DAYS IM PLUS (27.10.2026, Finn: „Hier die ganzen Minus abziehen weglassen. Es geht nur um den Wert in Winning Days,
+     * also alle Konten, die als Winning Days markiert sind, und was da im Plus ist. Sonst nichts, nichts abziehen."): Funded/Funded CFD
+     * ohne WD fallen raus, Konten mit Gewinn ≤ 0 werden weder gelistet noch abgezogen. Potenziell = Gewinn × Profit-Share (anteil) —
+     * ohne FundedNext-Refund und ohne festen Payout-Betrag, die gehören zum Payout-Kalender. ── */
     function admWertRender(){
       const panel = $('adm-wert-panel'); if(!panel || !admData) return
       const tb = $('adm-wert-rows'), sums = $('adm-wert-sums'), pers = $('adm-wert-personen'), empty = $('adm-wert-empty')
       if(!tb || !sums || !pers) return
-      const rows = admFiltered().filter(r => (r.type === 'funded' || r.type === 'funded_cfd' || r.type === 'winning_days') && !r.archived)
+      const wd = admFiltered().filter(r => r.type === 'winning_days' && !r.archived)
+      for(const r of wd) r.wert = admPayoutCalc(r)
+      const rows = wd.filter(r => r.wert.profit > 0)
       tb.innerHTML = ''; sums.innerHTML = ''; pers.innerHTML = ''
       if(empty) empty.hidden = rows.length > 0
       const add = (m, c, v) => { if(v != null) m.set(c, (m.get(c) || 0) + v) }
-      for(const r of rows) r.wert = admPayoutCalc(r)
-      rows.sort((a, b) => ((b.wert.betrag ?? -1) - (a.wert.betrag ?? -1)) || String(a.person || '').localeCompare(String(b.person || ''), 'de'))
+      rows.sort((a, b) => ((b.wert.anteil ?? -1) - (a.wert.anteil ?? -1)) || String(a.person || '').localeCompare(String(b.person || ''), 'de'))
       const sGewinn = new Map(), sPot = new Map(), perPerson = new Map()
-      let ohne = 0
+      const ohne = wd.filter(r => r.wert.profit == null).length   // ohne Balance/Größe — nicht als „im Plus" belegbar
       for(const r of rows){
         const c = r.wert
-        if(c.bal == null) ohne++
-        add(sGewinn, c.ccy, c.profit); add(sPot, c.ccy, c.betrag)
-        const pm = perPerson.get(r.person) || new Map(); add(pm, c.ccy, c.betrag); perPerson.set(r.person, pm)
+        add(sGewinn, c.ccy, c.profit); add(sPot, c.ccy, c.anteil)
+        const pm = perPerson.get(r.person) || new Map(); add(pm, c.ccy, c.anteil); perPerson.set(r.person, pm)
       }
       for(const [lbl, m, farbe] of [['Potenziell', sPot, 'var(--good)'], ['Gewinn (Balance − Größe)', sGewinn, 'var(--ink)']]){
         const d = document.createElement('div')
         d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
         d.children[0].style.color = farbe
         d.children[0].textContent = admGeldMap(m)
-        d.children[1].textContent = lbl + (lbl === 'Potenziell' ? ` · ${rows.length} Funded${ohne ? ` · ${ohne} ohne Balance` : ''}` : '')
+        d.children[1].textContent = lbl + (lbl === 'Potenziell' ? ` · ${rows.length} von ${wd.length} WD im Plus${ohne ? ` · ${ohne} ohne Balance` : ''}` : '')
         sums.appendChild(d)
       }
       for(const [person, m] of [...perPerson.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'de'))){
@@ -16347,9 +16351,9 @@
         }
         const po = tr.querySelector('.w-po')
         po.innerHTML = '<div class="tnum" style="font-weight:700;font-size:13px"></div><div style="font-size:10.5px;color:var(--sub)"></div>'
-        po.children[0].textContent = c.betrag != null ? admGeld(c.betrag, c.ccy) : '—'
-        po.children[0].style.color = c.betrag > 0 ? 'var(--good)' : 'var(--sub)'
-        po.children[1].textContent = admPayoutHerleitung(c)
+        po.children[0].textContent = admGeld(c.anteil, c.ccy)
+        po.children[0].style.color = 'var(--good)'
+        po.children[1].textContent = '+' + admGeld(c.profit, c.ccy) + ' × ' + String(c.pct).replace('.', ',') + ' %'
         tb.appendChild(tr)
       }
     }
@@ -47811,7 +47815,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1782'
+  const OS_TAB_BUILD = '2026-09-22.1783'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
