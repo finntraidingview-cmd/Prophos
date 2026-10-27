@@ -29598,7 +29598,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     for i in range(0, len(ids), 80):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
-                                                    "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start",
+                                                    "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,"
+                                                    "richtung,master_contracts,master_tp,master_sl,auto_plan,auto_bestaetigt_at,funded_plan:mt5_baseline->funded_plan",
                                           "master_account_id": f"in.({teil})",
                                           "created_at": "gte." + (jetzt - timedelta(days=180)).isoformat()})
         for z in _sb_all("pending_payouts", {"select": "account_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []:
@@ -29739,6 +29740,22 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     for k in ("geplant", "ziel", "ausgelassen"):
         for z in erg[k]:
             je_id.setdefault(str(z.get("user_id")), {"geplant": 0, "ziel": 0, "ausgelassen": 0})[k] += 1
+    # ECHTE FUNDED-PLÄNE (27.10.2026, Finn: „1:1 wie der Challenge-Planer … die Trades, die ich bestätigen muss"): alle Pläne der Funded-Konten
+    # dieser Firmen, die geplant sind, laufen oder seit 30 h gestartet/beendet wurden — für Zeitstrahl, „Wartet auf Start", „Läuft", „Heute
+    # beendet" im Admin-Reiter (das Frontend baut daraus dieselben Zeilen wie aus /admin/auto-plan/ids und /delta). Nur lesen.
+    seit = (jetzt - timedelta(hours=30)).isoformat()
+    kmap = {str(a["id"]): a for a in konten}
+    erg["plaene"] = [{"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or (kmap.get(str(p.get("master_account_id"))) or {}).get("user_id") or ""),
+                      "konto_id": str(p.get("master_account_id")), "konto": (kmap.get(str(p.get("master_account_id"))) or {}).get("name"),
+                      "firma": (kmap.get(str(p.get("master_account_id"))) or {}).get("firm"), "status": p.get("status"), "richtung": p.get("richtung"),
+                      "route": p.get("route"), "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at") or p.get("completed_at"),
+                      "menge": _wd_num(p.get("master_contracts")), "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl")),
+                      "pl": _wd_num(p.get("master_pl")), "hedge_eur": _wd_num(p.get("hedge_eur")), "bestaetigt": bool(p.get("auto_bestaetigt_at")) or not p.get("auto_plan"),
+                      "funded_plan": bool(p.get("funded_plan")), "balance": _wd_num((kmap.get(str(p.get("master_account_id"))) or {}).get("tv_balance"))}
+                     for p in plaene
+                     if p.get("status") in ("planned", "open", "review") or str(p.get("started_at") or p.get("ended_at") or "") >= seit]
+    for z in erg["plaene"]:
+        je_id.setdefault(z["user_id"], {"geplant": 0, "ziel": 0, "ausgelassen": 0})
     erg["ids"] = [dict(v, user_id=u, name=namen.get(u) or u[:8], heute_schon=schon.get(u, 0)) for u, v in je_id.items()]
     return erg
 

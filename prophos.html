@@ -3601,34 +3601,6 @@
   #adm-pane-planer .ap-idr-menu .z span{font-size:11.5px;color:var(--sub-2);font-variant-numeric:tabular-nums}
   #adm-pane-planer .ap-idr-menu .z.aus button{color:var(--sub)}
   @media (max-width:760px){ #adm-pane-planer .ap-idr-t{padding:8px 11px 6px;font-size:13px} #adm-pane-planer .ap-idr-m .lang{display:none} }   /* Handy: Leiste wischbar, Menüs als Symbol */
-  /* FUNDED-PLANER (27.10.2026, Finn: „Visuell die Seite vom Trade-Planer kopieren"): Kopf und ID-Reiter wie der Challenge-Planer (ap-idr),
-     Konten als Kacheln in ID-Farbe — Balken Liquidation → Ziel mit der Balance, darunter TP/SL/Kontrakte/Stufe und der Fusion-Hedge. */
-  #adm-pane-fplaner .fdp-kopf{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin:0 0 10px;font-size:12px;color:var(--sub)}
-  #adm-pane-fplaner .fdp-kopf b{font-size:14px;color:var(--ink)} #adm-pane-fplaner .fdp-kopf .btn{padding:3px 9px;font-size:12px;margin-left:auto}
-  #adm-pane-fplaner .fdp-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;background:var(--surface-tint);font-size:11.5px;color:var(--sub)}
-  #adm-pane-fplaner .fdp-chip.an{color:var(--ink)} #adm-pane-fplaner .fdp-chip.an::before{content:'●';color:#12b76a}
-  #adm-pane-fplaner .fdp-chip.vor{color:var(--ink)} #adm-pane-fplaner .fdp-chip.vor::before{content:'◐';color:var(--violet)}
-  #adm-pane-fplaner .fdp-idr{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--border);margin-bottom:14px}
-  #adm-pane-fplaner .fdp-idr::-webkit-scrollbar{display:none}
-  #adm-pane-fplaner .fdp-idr button{--id:var(--violet);flex:none;display:flex;align-items:center;gap:6px;padding:9px 14px 8px;margin-bottom:-1px;background:none;border:0;
-    border-bottom:2px solid transparent;font:inherit;font-size:13.5px;font-weight:500;color:var(--sub);cursor:pointer;white-space:nowrap}
-  #adm-pane-fplaner .fdp-idr button:hover{color:var(--ink)} #adm-pane-fplaner .fdp-idr button.an{color:var(--ink);border-bottom-color:var(--id)}
-  #adm-pane-fplaner .fdp-idr i{width:8px;height:8px;border-radius:50%;background:var(--id)} #adm-pane-fplaner .fdp-idr em{font-style:normal;font-size:12px;color:var(--sub-2);font-variant-numeric:tabular-nums}
-  #adm-pane-fplaner .fdp-h{font-size:12px;font-weight:600;color:var(--sub);margin:14px 0 8px;text-transform:none}
-  #adm-pane-fplaner .fdp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
-  #adm-pane-fplaner .fdp-k{--id:var(--violet);border:1px solid var(--border);border-left:3px solid var(--id);border-radius:10px;padding:10px 12px;background:var(--surface);
-    font-size:12.5px;color:var(--sub);display:flex;flex-direction:column;gap:6px;font-variant-numeric:tabular-nums}
-  #adm-pane-fplaner .fdp-k-kopf{display:flex;align-items:center;gap:6px;min-width:0} #adm-pane-fplaner .fdp-k-kopf b{color:var(--ink);font-size:13px;white-space:nowrap}
-  #adm-pane-fplaner .fdp-k-kopf .wer{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #adm-pane-fplaner .fdp-k-kopf .pill{margin-left:auto;flex:none;padding:1px 8px;border-radius:999px;background:var(--surface-tint);color:var(--ink);font-size:11.5px}
-  #adm-pane-fplaner .fdp-k-kopf .pill.buy{color:#047857} #adm-pane-fplaner .fdp-k-kopf .pill.sell{color:var(--danger)}
-  #adm-pane-fplaner .fdp-bar{position:relative;height:4px;border-radius:2px;background:color-mix(in srgb,var(--id) 14%,var(--surface-tint));margin:2px 0}
-  #adm-pane-fplaner .fdp-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--id)}
-  #adm-pane-fplaner .fdp-bar-t{display:flex;justify-content:space-between;font-size:11px;color:var(--sub-2)}
-  #adm-pane-fplaner .fdp-w{display:flex;flex-wrap:wrap;gap:4px 12px} #adm-pane-fplaner .fdp-w b{color:var(--ink);font-weight:600}
-  #adm-pane-fplaner .fdp-aus{font-size:12px;border-top:1px solid var(--border)} #adm-pane-fplaner .fdp-aus div{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border)}
-  #adm-pane-fplaner .fdp-aus .k{flex:0 0 220px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap} #adm-pane-fplaner .fdp-aus .g{color:var(--sub)}
-  @media (max-width:760px){ #adm-pane-fplaner .fdp-aus .k{flex-basis:140px} #adm-pane-fplaner .fdp-idr button{padding:8px 11px 7px;font-size:13px} }
   /* Bestätigen ohne Warten (08.10.2026, Slave-Terminal 7): Zeile gedimmt solange der POST läuft, kurzes Ausblenden nach Erfolg, Grund bei Ablehnung */
   #adm-pane-planer .pz-z.ap-ok-laeuft{opacity:.5} #adm-pane-planer .pz-z.ap-ok-weg{opacity:0;transform:translateX(8px);transition:opacity .16s,transform .16s}
   #adm-pane-planer .ap-ok-bal{margin-top:4px;padding:2px 8px;font-size:11.5px;height:auto;white-space:nowrap}
@@ -11973,10 +11945,6 @@
         <div id="adm-pane-planer" hidden>
           <div id="ap-ids-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade IDs…</div>
         </div>
-        <!-- Funded-Planer (27.10.2026): Vorschau des Funded-Auto-Planers (Apex), Inhalt baut das Modul ADMIN „FUNDED-PLANER" -->
-        <div id="adm-pane-fplaner" hidden>
-          <div id="fdp-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Funded-Planer…</div>
-        </div>
         <div id="adm-pane-kompass" hidden>
           <!-- Kopf (23.09.2026, Finn: „oben den ganzen Quatsch weglassen, kleiner, einfach sagen was der Bot gerade
                sagt — die langen Texte jucken mich nicht"): eine Zeile, Status im Tooltip des Chips. -->
@@ -19937,10 +19905,9 @@
         $('adm-pane-kapitel').hidden  = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-stat').hidden     = name !== 'stat'
         $('adm-pane-auftrag').hidden  = name !== 'auftrag'
-        $('adm-pane-planer').hidden   = name !== 'planer'
-        $('adm-pane-fplaner').hidden  = name !== 'fplaner'   // Funded-Planer (27.10.2026)
-        if(name === 'planer') window._apIdsTabOeffnen?.()   // Trade-Planer-IDs (08.10.2026)
-        if(name === 'fplaner') window._fdpTabOeffnen?.()
+        // Funded-Planer (27.10.2026, Finn: „1:1 wie der Challenge-Planer"): derselbe Bereich, nur die Datenquelle wechselt (window._apIdsArt)
+        $('adm-pane-planer').hidden   = name !== 'planer' && name !== 'fplaner'
+        if(name === 'planer' || name === 'fplaner'){ window._apIdsArt?.(name === 'fplaner' ? 'funded' : 'challenge'); window._apIdsTabOeffnen?.() }   // Trade-Planer-IDs (08.10.2026)
         if(name === 'auftrag') window._aufTabOeffnen?.(); else window._aufTabSchliessen?.()   // Wochenauftrag (05.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
@@ -72178,7 +72145,7 @@
     }
     if(_ap.sicht === 'eigene' && typeof apLetztenHolen === 'function'){ _ap.laufAt = 0; try{ await apLetztenHolen() }catch(_){} }
   }
-  async function apIdsLaden(){
+  async function apIdsLadenChallenge(){
     if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
     _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
     const t0 = Date.now()
@@ -72771,7 +72738,7 @@
       if(aktion === 'planen' || aktion === 'morgen') apIdsLaden()
     }))
   }
-  function apIdsRender(){
+  function apIdsRenderChallenge(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
     const rows = _apIds.rows, drin = rows.filter(r => r.drin || r.gruppen_planer), u = apSichtUid()   // Gruppen-Planer-IDs zählen wie im Planer (13.10.2026)
@@ -72932,86 +72899,112 @@
     if(apIdsStandEigen() && Date.now() > _apIdsEigenBis){ apIdsLaden(); return true }
     return false
   }
-  const _apIdsTabOeffnenOhneTakt = window._apIdsTabOeffnen
-  window._apIdsTabOeffnen = () => { _apIdsTabOeffnenOhneTakt(); if(!_apIdsLiveTimer) _apIdsLiveTimer = setInterval(apIdsLiveTick, 20000) }
-  /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
-
-  /* ══ ADMIN „FUNDED-PLANER" (27.10.2026, Finn: „zusätzlich einen Auto-Planer für Funded … erst mal für alle Fundeds von Apex … Visuell die
-   * Seite vom Trade-Planer kopieren"). Erste Stufe: nur Vorschau — GET /admin/funded-plan rechnet einen Trockenlauf (app.py fp_planen, nichts
-   * geschrieben): je ID die Funded-Konten mit dem nächsten Trade (Start, Richtung, TP/SL, Kontrakte, Stufe, Liquidation, Fusion-Hedge am
-   * SL/TP, offene Kosten), „Ziel erreicht" (→ Waiting for Payout) und Ausgelassene mit Grund. Reiter wie der Challenge-Planer, Konten als
-   * Kacheln. Scharf plant erst funded_plan_regeln.aktiv auf Railway — hier gibt es dafür (noch) keinen Knopf. ══ */
-  const _fdp = { d: null, fehler: '', laeuft: false, sicht: null, at: 0 }
-  async function fdpLaden(){
-    if(_fdp.laeuft) return
-    _fdp.laeuft = true; _fdp.fehler = ''; fdpRender()
+  /* ══ FUNDED-PLANER IM SELBEN REITER (27.10.2026, Finn: „Ich habe gesagt, er soll 1:1 wie der Challenge-Planer aussehen. Da ist nichts gleich.
+   * Ich habe den Zeitstrahl nicht wie beim Challenge-Planer, und auch die Trades, die ich bestätigen muss, stimmen gar nicht."). Der Reiter
+   * „Funded-Planer" zeigt DENSELBEN Bereich (#adm-pane-planer / #ap-ids-root) mit DENSELBEN Render-Funktionen (apIdsRenderChallenge und
+   * alles darunter: ID-Reiter, Kopf, Kacheln, Zeitstrahl, Läuft, Braucht dich, Zu bestätigen, Wartet auf Start). Anders ist nur die
+   * Datenquelle: GET /admin/funded-plan (app.py fdp_planen: Trockenlauf + echte Pläne der Funded-Konten). fdpMitQuelle stellt die
+   * Daten-Felder (_apIds, _ap, _apd, _tpl.lt, TPL_TYPEN) für die Dauer EINES synchronen Zeichnens auf den Funded-Stand und danach zurück —
+   * kein Takt und keine andere Seite sieht den Funded-Stand. Solange der Funded-Planer nicht scharf ist (aktiv = false), stehen die Pläne des
+   * Trockenlaufs als „Vorschau" in „Zu bestätigen" und im Zeitstrahl. Knöpfe, die auf die Challenge-Routen gehen (✓, zurück, Richtung,
+   * Planer-Haken, Nachplanen), fallen hier weg — Funded-Pläne bestätigt der Planer selbst. ══ */
+  let _apIdsArtWert = 'challenge', _fdpQ = null, _fdpLaedt = false, _fdpFehler = '', _fdpAt = 0
+  window._apIdsArt = art => { _apIdsArtWert = art === 'funded' ? 'funded' : 'challenge' }
+  const fdpEnde4 = konto => (String(konto || '').split('→')[0].match(/(\d{4})\s*$/) || [])[1] || ''
+  // Antwort von /admin/funded-plan → dieselben Formen wie /admin/auto-plan/ids (rows, offen[], bestaetigt[]), /delta (offen[], geplant[]) und Lauf
+  function fdpQuelleBauen(d){
+    const namen = new Map((d.ids || []).map(x => [String(x.user_id), x.name || String(x.user_id).slice(0, 8)]))
+    const heute = tplDatum(new Date()), vorschau = !d.aktiv
+    const zeile = (x, extra) => {
+      const kt = Number(x.kontrakte ?? x.menge) || null, usd = kt ? 20 * kt : null
+      const rest = x.ziel != null && x.balance != null ? Math.max(0, Number(x.ziel) - Number(x.balance)) : null
+      // Funded-Werte wie der Challenge-Planer seine Stufe zeigt (Spalte „Stufe" / Notiz): Stufe · Daily Loss · Liq · Hedge · offene Kosten
+      const stufe = x.stufe != null ? [`Stufe ${x.stufe}${x.dll ? ' · DL ' + Math.round(x.dll).toLocaleString('de-DE') + ' $' : ''}`,
+        x.liq != null ? 'Liq ' + Math.round(x.liq).toLocaleString('de-DE') + ' $' : '',
+        x.hedge_sl_eur != null ? `Hedge +${Math.round(x.hedge_sl_eur)} / −${Math.round(x.hedge_tp_eur)} €` : '',
+        x.offen_eur != null ? 'offen ' + Math.round(x.offen_eur).toLocaleString('de-DE') + ' €' : ''].filter(Boolean).join(' · ') : null
+      return Object.assign({ plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '',
+        firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: 'tvv2', start_um: x.start_um || null, start: x.start_um || null,
+        menge: kt, tp: x.tp ?? null, sl: x.sl ?? null, notes: stufe ? 'Funded-Planer · ' + stufe : null, stufe, balance: x.balance ?? null, rest,
+        konto_id: String(x.konto_id || ''), balance_live: true, boden: x.liq ?? null, boden_min: x.liq ?? null, boden_art: x.liq != null ? 'nachziehend_lock' : null,
+        auto_plan: true, gehedgt: true, tp_punkte: kt && x.tp != null ? x.tp / usd : null, sl_punkte: kt && x.sl != null ? x.sl / usd : null, usd_pro_pkt: usd }, extra || {})
+    }
+    const plaene = d.plaene || []
+    const geplantEcht = plaene.filter(p => p.status === 'planned' && p.start_um).map(p => zeile(p, { bestaetigt: !!p.bestaetigt }))
+    const laufend = plaene.filter(p => p.status === 'open').map(p => zeile(p))
+    const vor = vorschau ? (d.geplant || []).map(g => zeile(g, { bestaetigt: false, vorschau: true })) : []
+    const offen = vor.slice(), bestaetigt = geplantEcht.filter(z => z.bestaetigt)
+    offen.push(...geplantEcht.filter(z => !z.bestaetigt))
+    const konten = new Map()
+    for(const z of [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || []), ...plaene]){ const u = String(z.user_id); if(!konten.has(u)) konten.set(u, new Set()); konten.get(u).add(String(z.konto_id || z.konto)) }
+    const rows = [...namen.entries()].map(([u, name]) => ({ user_id: u, name, drin: true, konten: (konten.get(u) || new Set()).size,
+      geplant: (d.geplant || []).filter(g => String(g.user_id) === u).length + geplantEcht.filter(g => g.user_id === u).length,
+      ausgelassen: (d.ausgelassen || []).filter(g => String(g.user_id) === u).length })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+    const ausg = [...(d.ausgelassen || []), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Winning Days' }))]
+      .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded', grund: x.grund || '' }))
+    const ids = new Set(plaene.map(p => String(p.plan_id)))
+    return {
+      vorschau, aktiv: !!d.aktiv, regelnQuelle: d.regeln_quelle, zeiten: d.zeiten || {},
+      apIds: { rows, offen, bestaetigt, bestaetigtT0: Date.now(), aktiv: !!d.aktiv, tag: heute, D: null, fehler: '', offenFehler: '' },
+      ap: { letzter: { tag: heute, at: d.at, trocken: false, quelle: 'funded', geplant: [], ausgelassen: ausg },
+            info: { auto_bestaetigen: { aktiv: true } } },
+      apd: { d: { tag: heute, um: d.at, offen: laufend, geplant: [...vor, ...geplantEcht].filter(z => z.start_um) }, fehler: '' },
+      planIds: ids
+    }
+  }
+  function fdpMitQuelle(fn){
+    const F = _fdpQ
+    const tausch = (obj, werte) => { const alt = {}; for(const k of Object.keys(werte)){ alt[k] = obj[k]; obj[k] = werte[k] } return () => { for(const k of Object.keys(alt)) obj[k] = alt[k] } }
+    const lt = new Map([...((_tpl.lt && _tpl.lt.entries && _tpl.lt.entries()) || [])].filter(([id]) => F.planIds.has(String(id))))   // nur Funded-Trades (Hypo, Läuft, Heute-Bilanz)
+    const zurueck = [tausch(_apIds, F.apIds), tausch(_ap, F.ap), tausch(_apd, F.apd), tausch(_tpl, { lt })]   // ID-Sicht (window._apSicht) bleibt gemeinsam: Klick auf eine ID gilt in beiden Reitern
+    const typen = TPL_TYPEN.slice(); TPL_TYPEN.splice(0, TPL_TYPEN.length, 'funded')
+    try{ return fn() } finally{ F.apIds.D = _apIds.D; zurueck.reverse().forEach(r => r()); TPL_TYPEN.splice(0, TPL_TYPEN.length, ...typen) }
+  }
+  // nach dem Zeichnen: Überschriften „Funded", Vorschau markieren, Knöpfe ohne Funded-Route weg (Challenge-Routen filtern auf auto_plan = true)
+  function fdpNachbereiten(root){
+    if(!root || !_fdpQ) return
+    const Q = _fdpQ
+    root.querySelectorAll('.ap-ids-kopf b').forEach(b => { b.textContent = b.textContent.replace(/IDs im Trade-Planer/, 'IDs im Funded-Planer') })
+    root.querySelectorAll('.ap-ids-kopf span').forEach(s => { if(!/Nachtlauf/.test(s.textContent)) return
+      s.textContent = (Q.aktiv ? 'Funded-Planer an' : 'Funded-Planer aus · Vorschau') + (Q.regelnQuelle === 'standard' ? ' · Standard-Regeln' : '')
+      s.title = `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
+        + (Q.regelnQuelle === 'standard' ? ' · funded_plan_regeln noch nicht eingespielt, gerechnet mit den Standard-Regeln' : '') })
+    root.querySelectorAll('[data-tpl-nachplan], .ap-idr-r, .gp-leiste, .gp-liste, #ap-ids-alle-ok, [data-ap-ok-id]').forEach(e => e.remove())
+    root.querySelectorAll('[data-ap-ok], [data-ap-zur]').forEach(b => {
+      const vor = String(b.dataset.apOk || '').startsWith('vorschau:'), s = document.createElement('span')
+      s.className = 'ap-gr-live'; s.textContent = vor ? '◐ Vorschau' : '✓ bestätigt'; s.title = vor ? 'Trockenlauf — angelegt wird erst, wenn der Funded-Planer scharf ist' : 'vom Funded-Planer bestätigt — startet zur Startzeit'
+      b.replaceWith(s) })
+    root.querySelectorAll('.ap-ri-flip').forEach(b => { b.disabled = true; b.title = 'Richtung würfelt der Funded-Planer' })
+    if(Q.vorschau) root.querySelectorAll('.ap-gr-offen .ap-adm-kopf b').forEach(b => { b.textContent = b.textContent.replace(/^Zu bestätigen/, 'Vorschau') })
+    root.querySelectorAll('.ap-gr-offen .ap-adm-kopf span').forEach(s => { s.textContent = Q.vorschau ? 'Trockenlauf des Funded-Planers · nichts angelegt, bis er scharf ist · Zeiten Dubai' : s.textContent })
+  }
+  function apIdsRender(){
+    if(_apIdsArtWert !== 'funded') return apIdsRenderChallenge()
+    const root = document.getElementById('ap-ids-root'); if(!root) return
+    if(!_fdpQ){ root.style.padding = '22px 2px'; root.innerHTML = _fdpFehler ? `<div style="color:var(--danger)">⚠ ${escapeHtml(_fdpFehler)}</div>` : 'Lade Funded-Planer…'; return }
+    fdpMitQuelle(apIdsRenderChallenge)
+    fdpNachbereiten(root)
+  }
+  async function apIdsLaden(){
+    if(_apIdsArtWert !== 'funded') return apIdsLadenChallenge()
+    if(_fdpLaedt) return
+    _fdpLaedt = true; _fdpFehler = ''
     try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/funded-plan`, { headers: { 'sb-token': tok } })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw new Error(d.msg || ('HTTP ' + r.status))
-      _fdp.d = d; _fdp.at = Date.now()
-    }catch(e){ _fdp.fehler = (e && e.message) || String(e) }
-    _fdp.laeuft = false; fdpRender()
+      _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now()
+    }catch(e){ _fdpFehler = (e && e.message) || String(e) }
+    _fdpLaedt = false; _apIdsVollAt = Date.now()
+    if(_apIdsArtWert === 'funded') apIdsRender()
   }
-  const fdpUsd = v => (v == null || !isFinite(v)) ? '–' : Math.round(Number(v)).toLocaleString('de-DE') + ' $'
-  const fdpEur = v => (v == null || !isFinite(v)) ? '–' : Math.round(Number(v)).toLocaleString('de-DE') + ' €'
-  // „150k PAAPEX6843320000002 → Funded" → „150k …0002"
-  function fdpKurz(name){
-    const n = String(name || '').split('→')[0].trim(), m = n.match(/^(\d+k)\s+(\S+)/i)
-    return m ? `${m[1]} …${m[2].slice(-4)}` : n
-  }
-  function fdpKachel(z, art, namen){
-    const uid = String(z.user_id || ''), wer = namen[uid] || uid.slice(0, 8)
-    const kopf = art === 'geplant'
-      ? `<span class="pill ${z.richtung === 'buy' ? 'buy' : 'sell'}" title="Start (Dubai) · Richtung">${escapeHtml(z.start || '')} · ${z.richtung === 'buy' ? 'Long' : 'Short'}</span>`
-      : `<span class="pill" title="${escapeHtml(z.grund || '')}">→ Winning Days</span>`
-    const liq = Number(z.liq), ziel = Number(z.ziel), bal = Number(z.balance)
-    const pct = (isFinite(liq) && isFinite(ziel) && ziel > liq) ? Math.max(0, Math.min(100, (bal - liq) / (ziel - liq) * 100)) : 0
-    const werte = art === 'geplant' ? `<div class="fdp-w"><span>TP <b>${fdpUsd(z.tp)}</b>${z.tp_art === 'break_even' ? ' (Break-even)' : ''}</span><span>SL <b>${fdpUsd(z.sl)}</b></span>
-        <span><b>${escapeHtml(String(z.kontrakte || ''))}</b> NQ</span><span title="Stufe nach Balance (liq_regeln) · Daily Loss · max. Minis">Stufe ${escapeHtml(String(z.stufe || ''))} · DL ${fdpUsd(z.dll)}</span></div>
-      <div class="fdp-w" title="Fusion-Gegenhedge: € je $ = offene Kosten ÷ (Balance − Liq) · ${escapeHtml(String(z.lots || ''))} Lot · hedge_eur ${escapeHtml(String(z.hedge_eur || ''))} €">
-        <span>Hedge am SL <b>+${fdpEur(z.hedge_sl_eur)}</b></span><span>am TP <b>−${fdpEur(z.hedge_tp_eur)}</b></span><span>offen ${fdpEur(z.offen_eur)}</span></div>` : ''
-    return `<div class="fdp-k" style="--id:${idFarbe(uid)}">
-      <div class="fdp-k-kopf"><b title="${escapeHtml(z.konto || '')}">${escapeHtml(fdpKurz(z.konto))}</b><span class="wer">${escapeHtml(wer)}${z.zyklus > 1 ? ' · Zyklus ' + escapeHtml(String(z.zyklus)) : ''}</span>${kopf}</div>
-      <div class="fdp-w"><span>Balance <b>${fdpUsd(bal)}</b></span><span>Ziel ${fdpUsd(ziel)}${isFinite(ziel - bal) && ziel > bal ? ' · noch ' + fdpUsd(ziel - bal) : ''}</span>
-        ${z.consistency_pct != null ? `<span title="größter Tag ÷ Gewinn im Zyklus — nur Anzeige, keine Wache (Apex-Payout: höchstens 50 %)">größter Tag ${escapeHtml(String(z.consistency_pct))} %</span>` : ''}</div>
-      <div class="fdp-bar" title="${escapeHtml(z.liq_text || '')}"><i style="width:${pct.toFixed(1)}%"></i></div>
-      <div class="fdp-bar-t"><span>Liq ${fdpUsd(liq)}</span><span>Ziel ${fdpUsd(ziel)}</span></div>${werte}</div>`
-  }
-  function fdpRender(){
-    const root = document.getElementById('fdp-root'); if(!root) return
-    const d = _fdp.d
-    if(!d){ root.innerHTML = _fdp.fehler ? `<div style="color:var(--danger)">⚠ ${escapeHtml(_fdp.fehler)}</div>` : 'Lade Funded-Planer…'; return }
-    root.style.padding = '6px 0'; root.style.color = ''
-    const namen = {}; (d.ids || []).forEach(x => { namen[String(x.user_id)] = x.name })
-    const u = _fdp.sicht, inSicht = z => !u || String(z.user_id) === u
-    const zahl = (uid, k) => ((d[k] || []).filter(z => !uid || String(z.user_id) === uid)).length
-    const ids = (d.ids || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
-    const reiter = `<div class="fdp-idr" role="tablist"><button type="button" class="${u ? '' : 'an'}" data-fdp-sicht="">Alle <em>${zahl(null, 'geplant')}/${zahl(null, 'geplant') + zahl(null, 'ausgelassen') + zahl(null, 'ziel')}</em></button>${ids.map(x => {
-      const id = String(x.user_id), n = zahl(id, 'geplant') + zahl(id, 'ausgelassen') + zahl(id, 'ziel')
-      return `<button type="button" class="${u === id ? 'an' : ''}" style="--id:${idFarbe(id)}" data-fdp-sicht="${escapeHtml(id)}" title="${zahl(id, 'geplant')} geplant · ${zahl(id, 'ziel')} Ziel · ${zahl(id, 'ausgelassen')} ausgelassen"><i></i>${escapeHtml(x.name || id.slice(0, 8))}<em>${zahl(id, 'geplant')}/${n}</em></button>` }).join('')}</div>`
-    const firmen = (d.firmen || []).map(f => `<span class="fdp-chip${f.an ? ' an' : ''}" title="${f.an ? 'wird geplant' : 'wählbar, aus'}">${escapeHtml(f.name || '')}</span>`).join('')
-    const z = d.zeiten || {}
-    const status = d.aktiv ? '<span class="fdp-chip an" title="funded_plan_regeln.aktiv — Railway plant alle 5 min">scharf</span>'
-      : '<span class="fdp-chip vor" title="Trockenlauf — nichts wird angelegt, bis Finn freigibt">Vorschau · nichts geplant</span>'
-    const kopf = `<div class="fdp-kopf"><b>Funded-Planer</b>${status}${firmen}<span title="Fenster wie der Challenge-Planer, Startzeiten darin zufällig; passt ein Slot nicht, wird neu gewürfelt">Start ${escapeHtml(z.von || '')}–${escapeHtml(z.bis || '')} ${escapeHtml(String(z.tz || '').replace('Asia/', '').replace('Europe/', ''))} · zufällig · max. ${escapeHtml(String(z.max_je_id_tag || 2))} je ID und Tag · ${escapeHtml(String(z.firma_abstand_min || 15))} min Firmen-Abstand</span>
-      ${d.regeln_quelle === 'standard' ? '<span title="funded_plan_regeln ist noch nicht eingespielt — gerechnet mit den Standard-Regeln (Seed)">Regeln: Standard (SQL fehlt)</span>' : ''}
-      <span>${_fdp.at ? 'gerechnet ' + new Date(_fdp.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-      <button type="button" class="btn btn-ghost" data-fdp-neu="1"${_fdp.laeuft ? ' disabled' : ''}>${_fdp.laeuft ? 'rechnet …' : '↻ neu rechnen'}</button></div>`
-    const gepl = (d.geplant || []).filter(inSicht), ziel = (d.ziel || []).filter(inSicht), aus = (d.ausgelassen || []).filter(inSicht)
-    const teil = (titel, l, art) => l.length ? `<div class="fdp-h">${titel} · ${l.length}</div><div class="fdp-grid">${l.map(x => fdpKachel(x, art, namen)).join('')}</div>` : ''
-    const ausH = aus.length ? `<div class="fdp-h">Ausgelassen · ${aus.length}</div><div class="fdp-aus">${aus.map(x => `<div><span class="k" title="${escapeHtml(x.konto || '')}">${escapeHtml(fdpKurz(x.konto))} · ${escapeHtml(namen[String(x.user_id)] || '')}</span><span class="g">${escapeHtml(x.grund || '')}</span></div>`).join('')}</div>` : ''
-    const fehler = _fdp.fehler ? `<div class="tpl-fehler">${escapeHtml(_fdp.fehler)}</div>` : ''
-    root.innerHTML = fehler + kopf + reiter + (teil(d.aktiv ? 'Geplant' : 'Würde planen', gepl, 'geplant') + teil('Ziel erreicht → Winning Days', ziel, 'ziel') + ausH
-      || '<div style="color:var(--sub);font-size:12.5px">Keine Funded-Konten einer eingeschalteten Firma.</div>')
-    root.querySelectorAll('[data-fdp-sicht]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.fdpSicht || null; _fdp.sicht = id && id !== _fdp.sicht ? id : null; fdpRender() }))
-    root.querySelector('[data-fdp-neu]')?.addEventListener('click', () => fdpLaden())
-  }
-  window._fdpRender = fdpRender; window._fdp = _fdp   // Stub-Test (ohne Login): window._fdp.d setzen, dann _fdpRender()
-  window._fdpTabOeffnen = () => { if(!_fdp.d || Date.now() - _fdp.at > 60000) fdpLaden(); else fdpRender() }
-  /* ══ ENDE ADMIN „FUNDED-PLANER" ══ */
+  window._fdpStub = d => { _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); apIdsRender() }   // Stub-Test (ohne Login): Antwort von /admin/funded-plan einspielen
+  const _apIdsTabOeffnenOhneTakt = window._apIdsTabOeffnen
+  window._apIdsTabOeffnen = () => { _apIdsTabOeffnenOhneTakt(); if(!_apIdsLiveTimer) _apIdsLiveTimer = setInterval(apIdsLiveTick, 20000) }
+  /* ══ ENDE ADMIN „TRADE-PLANER" ══ */
+
 
   async function aufLaden(){
     if(_auf.laedt) return
