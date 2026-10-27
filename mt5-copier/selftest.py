@@ -9439,6 +9439,7 @@ def test_puls_ein_konto_gekuerzt():
     chk(kb_p == {ZIEL: 155365.92, Z2: 148000.0, Z3: None} and ob.cdp_konten_bal(cmd_b) == kb_p and not any(str(x).startswith("@") for x in cmd_b["geschwister"])
         and ob.cdp_konten_bal({"geschwister": ["@kb=" + ZIEL + ":15", "@kb=" + Z2 + ":1x"]}) == {ZIEL: 15.0}
         and ob.cdp_konto_texte(ZIEL, ["@kb=x:1", Z2]) == [ZIEL, Z2] and "konten_bal" not in ob.TV_BRUECKE_FELDER
+        and ob.cdp_konto_texte(ZIEL, [Z2], {ZIEL: 1.0, Z2: None, Z3: 2.0}) == [ZIEL, Z2, Z3]
         and ob.cdp_bal_aus_umschalter(FN) == 155365.92 and ob.cdp_bal_aus_umschalter("FNFTFAMUSTERMUSTERAB…") is None,
         "Balances je Konto ('@kb=') überleben den Panel-Schnitt [:60] und die Brücke, kaputte Zahlen nie, angezeigte Balance aus dem Umschalter")
     ja0, g0 = Z(FN, ZIEL, True, True, ob.cdp_konto_texte(ZIEL, cmd_b["geschwister"]), kb_p)

@@ -20232,9 +20232,13 @@ def cdp_konten_bal(cmd):
     return out
 
 
-def cdp_konto_texte(ext, geschwister):
-    """REIN RECHNEND (testbar): kontoTexte für augen.js — Ziel + Geschwister, OHNE Brücken-Einträge ('@feld=wert', 27.10.2026)."""
-    return [ext] + [x for x in (geschwister or []) if not str(x).startswith("@")]
+def cdp_konto_texte(ext, geschwister, kb=None):
+    """REIN RECHNEND (testbar): kontoTexte für augen.js — Ziel + Geschwister, OHNE Brücken-Einträge ('@feld=wert', 27.10.2026). kb = Konten
+    aus den Balance-Einträgen (cdp_konten_bal): stehen vorn und überleben den Panel-Schnitt — fehlen sie hinten in geschwister (S2-Hinweis
+    27.10.: '@kb' + 55 Geschwister > 60 Einträge), kommen sie hier dazu."""
+    out = [ext] + [x for x in (geschwister or []) if not str(x).startswith("@")]
+    da = {_nur_alnum(x).upper() for x in out}
+    return out + [k for k in (kb or {}) if k not in da]
 
 
 def cdp_bal_aus_umschalter(text):
@@ -21058,7 +21062,8 @@ def modus_tvlesen_cdp(cmd):
         return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
     ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
+    _kb = cdp_konten_bal(cmd)
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
     trail.append("Weg: Puls-Chrome (CDP)")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): im Puls-Chrome klickt gerade ein Hand-Befehl — nicht dazwischen
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, bitte gleich erneut anstoßen.", "sperre")
@@ -22419,7 +22424,8 @@ def modus_tvkette_cdp(cmd):
         return raus("befehl", fehler, "befehl")
     scharf = tv_ist_scharf(cmd)
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
+    _kb = cdp_konten_bal(cmd)
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
     trail.append("Weg: Puls-Chrome (CDP" + (", SCHARF" if scharf and symbol else ", Probelauf — kein Senden" if symbol else "") + ")")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
@@ -22781,7 +22787,8 @@ def modus_tvclose_cdp(cmd):
     root = tv_symbol_root(symbol)
     richtung = str(cmd.get("richtung") or "").strip().lower() or None
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
+    _kb = cdp_konten_bal(cmd)
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
     res["symbol"], res["wurzel"], res["richtung"] = symbol, root, richtung
     trail.append("Weg: Puls-Chrome (CDP, Schließen)")
     if _handlauf_aktiv():
@@ -25926,7 +25933,8 @@ def modus_tvkette_cdp_mit_neustart(cmd):
         return modus_tvkette_cdp(cmd)
     ext = str(c.get("ext_id") or c.get("konto") or "").strip()
     geschwister = [str(x).strip() for x in (c.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(c)}   # 27.10.2026: Balances für gekürzte Kennungen
+    _kb = cdp_konten_bal(c)
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
     root = tv_symbol_root(symbol)
     return _puls_mit_neustart("tvv2", lambda: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
