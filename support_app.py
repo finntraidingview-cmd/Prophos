@@ -289,7 +289,7 @@ def _log(uid, art, **kw):
     z = {"user_id": uid, "art": art}
     for k, v in kw.items():
         if k in ("frage", "antwort"):
-            v = _kurz(maskieren(v), 500 if k == "frage" else 1000)
+            v = _kurz(maskieren(geheimes_raus(v)), 500 if k == "frage" else 1000)
         z[k] = v
     try:
         _sb("POST", "support_log", body=z, prefer="return=minimal")
@@ -727,7 +727,9 @@ MELDUNG_MAX_TAG = 15          # je ID und Tag — Schutz gegen eine Schleife des
 def geheimes_raus(txt):
     """REIN RECHNEND: Passwörter und Tokens aus freiem Text entfernen (Meldungen sind NICHT maskiert, Konto-/Plan-IDs bleiben)."""
     t = str(txt or "")
-    t = re.sub(r"(?i)\b(passwort|password|kennwort|pass|pw|pin|token|api[-_ ]?key|secret)\b\s*[:=]\s*\S+", r"\1: [entfernt]", t)
+    # „Zugangsdaten: name / geheim" bzw. „Login x Passwort y": alles nach dem Schlüsselwort bis zum Satzende schwärzen (lieber zu viel)
+    t = re.sub(r"(?i)\b(zugangsdaten|zugang|credentials|login-daten|logindaten)\b\s*[:=]?\s*[^\n.;]+", r"\1: [entfernt]", t)
+    t = re.sub(r"(?i)\b(passwort|password|passwd|kennwort|pass|pw|pin|token|api[-_ ]?key|secret)\b\s*[:=]\s*\S+", r"\1: [entfernt]", t)
     # Fließtext (S2-Hinweis 27.10.2026): „mein Passwort ist Geheim123", „Kennwort lautet …", „PIN 1234"
     t = re.sub(r"(?i)\b(passwort|password|kennwort|pw|pin)\s+(?:ist|lautet|is|war)?\s*[:=]?\s*(?!\[entfernt\])\S+", r"\1 [entfernt]", t)
     t = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}", "[Schlüssel entfernt]", t)
