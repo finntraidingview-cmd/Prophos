@@ -24604,7 +24604,31 @@
   window._tvBalanceAus = tvBalanceAus
   // Live-Balance ans Konto (Spalten aus sql/2026-09-26_accounts_tv_balance.sql) — der PC-Tab des Besitzers darf das eigene Konto schreiben.
   // Fehlt die Spalte noch, bleibt es still (nur Warnung): der Trade darf daran nie hängen.
-  async function tvKontoBalanceSchreiben(accountId, b, at){
+  /* GEKÜRZTE KENNUNG ORDNET KEINE BALANCE ZU (27.10.2026, Slave 6, Fall Chris Apex PA …0003): Orbit-Start 26.10. 13:51 UTC, der Bot
+   * (vor .1752) nahm den gekürzten Umschalter „PAAPEX600000000000… 150,074.40 USD" als „Konto steht" — tatsächlich stand der Puls-Chrome
+   * noch im 150k-Konto …0001 (eben unter dem Lock geblowt). tvV2BaselineAusOrder schrieb dessen Balance ohne jeden Konto-Abgleich an
+   * …0003 (100k → tv_balance 150.074,40). Bei Apex beginnen alle Konten eines Users gleich (7 Konten auf denselben 18 Zeichen).
+   * Regel (Finn, Puls-Diskussion 27.10.): volle Kennung → schreiben; gekürzt/angeklebt nur, wenn eindeutig unter allen Konten — bei
+   * mehreren Treffern nur, wenn die Balance centgenau zu GENAU EINEM Konto passt (letzte Lesung) und das dieses ist; sonst nicht.
+   * Kein Konto-Text = wie bisher (der Aufrufer hat das Konto selbst belegt). REIN RECHNEND (Test-Haken window._tvBalanceKontoBelegt). */
+  function tvBalanceKontoBelegt(kontoText, accountId, balance, konten){
+    const t = String(kontoText == null ? '' : kontoText).trim()
+    if(!t) return true
+    const liste = konten || (accounts || [])
+    const acc = liste.find(a => a && String(a.id) === String(accountId)), ext = acc && acc.externalId
+    if(!ext) return false
+    const bezug = kontoTextBezug(t, ext)
+    if(bezug === 'ja') return true
+    if(!bezug) return false
+    if(kontoTextEindeutig(t, ext, liste.map(a => a && a.externalId).filter(Boolean))) return true
+    const cent = v => (v != null && v !== '' && isFinite(Number(v))) ? Math.round(Number(v) * 100) : null
+    const soll = cent(balance); if(soll == null) return false
+    const treffer = liste.filter(a => a && a.externalId && kontoTextBezug(t, a.externalId) && cent(a.tvBalance) === soll)
+    return treffer.length === 1 && String(treffer[0].id) === String(accountId)
+  }
+  window._tvBalanceKontoBelegt = tvBalanceKontoBelegt
+  // kontoText (27.10.2026): Konto-Text aus der Puls-Antwort (r.konto_aktiv) — mit Text schreibt nur ein belegtes Konto (s. oben)
+  async function tvKontoBalanceSchreiben(accountId, b, at, kontoText){
     // Schwelle > 1000 schützt absolute Stände vor Parse-Fehlern — TopstepX-Express ist aber 0-basiert (F27, TopstepX „BAL $0.00"):
     // dort reicht eine endliche Zahl, auch 0 oder negativ (01.10.2026, TSV2-PNL; vorher wurden 0…1.000 und negative Stände still
     // verworfen, tv_balance blieb alt und hieß trotzdem „● aktuell"). -> true = geschrieben
@@ -24612,6 +24636,10 @@
     // Lesung gewinnt (gemeinsame Regel 01.10.2026): relativ true = Express auch ohne Konto im Cache, false = absolut (Schwelle > 1000)
     const express = !!(b && b.relativ === true) || (!(b && b.relativ === false) && typeof kontoIstTopstepExpress === 'function' && kontoIstTopstepExpress(_acc))
     if(!accountId || !b || !(typeof b.balance === 'number' && isFinite(b.balance) && (express || b.balance > 1000))) return false
+    if(!tvBalanceKontoBelegt(kontoText, accountId, b.balance)){
+      console.warn(`[tv-balance] nicht geschrieben: Puls zeigte „${String(kontoText).slice(0, 40)}" — nicht eindeutig ${(_acc && _acc.externalId) || accountId} (Balance ${b.balance})`)
+      return false
+    }
     try{
       const upd = { tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString(), tv_balance_quelle: 'puls' }
       let { error } = await supabase.from('accounts').update(upd).eq('id', accountId)
@@ -25074,7 +25102,7 @@
       const b = tvBalanceAus(r && r.summary)
       if(b.balance != null && (!r.konto_aktiv || String(r.konto_aktiv).includes(tv.konto))){
         tv.balance_start = b.balance; tv.equity_start = b.equity
-        tvKontoBalanceSchreiben(plan.masterAccountId, Object.assign({}, b, { relativ: tsxBalanceRelativ(r) }), tv.at)
+        tvKontoBalanceSchreiben(plan.masterAccountId, Object.assign({}, b, { relativ: tsxBalanceRelativ(r) }), tv.at, r.konto_aktiv)
       }
     }catch(e){ tv.grund = String((e && e.message) || e) }
     if(tv.today_pnl_start == null) console.warn('[tvV2] Start-Baseline ohne Today\'s P&L:', tv.grund)
@@ -25121,7 +25149,7 @@
       const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt(wurzel, 15000) : null
       if(k && k.preis > 1000){ tv.einstieg_nq = k.preis; tv.einstieg_quelle = 'reader_klick'; tv.einstieg_symbol = k.wurzel }
     }
-    if(tv.balance_start != null) tvKontoBalanceSchreiben(plan.masterAccountId, { balance: tv.balance_start, equity: null, relativ: rel }, at)
+    if(tv.balance_start != null) tvKontoBalanceSchreiben(plan.masterAccountId, { balance: tv.balance_start, equity: null, relativ: rel }, at, r && r.konto_aktiv)
     return tv
   }
   window._tsxBaselineAusOrder = tsxBaselineAusOrder   // Test-Haken (Stub)
@@ -25148,7 +25176,7 @@
     if(tv.today_pnl_start == null) tv.grund = 'kein_today_pnl: Order-Antwort ohne Total P/L'
     Object.assign(tv, tvV2OrderLevel(r))
     if(r && r.pruefung && typeof r.pruefung === 'object') tv.pruefung = r.pruefung
-    if(tv.balance_start != null) tvKontoBalanceSchreiben(plan.masterAccountId, { balance: tv.balance_start, equity: tv.equity_start }, at)
+    if(tv.balance_start != null) tvKontoBalanceSchreiben(plan.masterAccountId, { balance: tv.balance_start, equity: tv.equity_start }, at, r && r.konto_aktiv)   // Konto-Beleg: Fall …0003 (27.10.2026)
     return tv
   }
   window._tvV2BaselineAusOrder = tvV2BaselineAusOrder   // Test-Haken (Stub)
@@ -27222,7 +27250,7 @@
     try{ ok = await tvV2EndeSetzen(p0, erg.today, 'puls', extra) }catch(e){ return { ok: false, msg: 'Ende nicht geschrieben: ' + String((e && e.message) || e) } }
     if(!ok) return { ok: false, msg: 'Plan lief schon nicht mehr — nichts geschrieben' }
     try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[beendet] Überprüfen', e) }
-    if(erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity, relativ: p0.route === 'tsv2' ? tsxBalanceRelativ(r) : null }, nowIso)
+    if(erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity, relativ: p0.route === 'tsv2' ? tsxBalanceRelativ(r) : null }, nowIso, r && r.konto_aktiv)
     let msg = erg.balance != null ? `beendet · Balance ${erg.balance.toLocaleString('de-DE', { minimumFractionDigits: 2 })} $` : 'beendet'
     try{
       const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle()
@@ -27337,7 +27365,7 @@
       let neu = null
       try{ neu = await finPatch(patch) }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
       if(!neu) return { ok: false, msg: 'Plan nicht mehr in „Überprüfen" (inzwischen erledigt?) — nichts geschrieben' }
-      if(erg.ok && erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity, relativ: p0.route === 'tsv2' ? tsxBalanceRelativ(r) : null }, nowIso)   // Live-Balance am Konto
+      if(erg.ok && erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity, relativ: p0.route === 'tsv2' ? tsxBalanceRelativ(r) : null }, nowIso, r && r.konto_aktiv)   // Live-Balance am Konto
       // Einstiegs-Fill an tv.einstieg_fill, falls noch nicht da
       if(r && r.einstieg_fill && typeof r.einstieg_fill === 'object' && !(neu.tv && neu.tv.einstieg_fill)){
         try{ const n2 = await baselinePatchIn(pid, 'tv', { einstieg_fill: tvJsonKurz(r.einstieg_fill, 400) }, 'review'); if(n2) neu = n2 }catch(_){}
@@ -47792,7 +47820,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1777'
+  const OS_TAB_BUILD = '2026-09-22.1778'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
