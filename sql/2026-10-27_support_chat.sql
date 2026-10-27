@@ -11,7 +11,8 @@ create table if not exists public.support_zugang (
   an          boolean not null default false,
   tageslimit  integer not null default 40,          -- Fragen je deutschem Tag (ab 03:00 Dubai, wie die Tagesgrenze)
   -- 'eigene' = nur die eigene ID; 'alle' = wie im Admin (Standard-Sicht Hermann Technologies bzw. gewählter Gruppen-Chip) — wirkt nur
-  -- für Logins, die im Admin unbeschränkt sind (Finn, Pascal; Freigabe 27.10.2026). Verwalter sehen immer ihre Gruppe.
+  -- für Logins, die im Admin unbeschränkt sind (Finn, Pascal; Freigabe 27.10.2026). Verwalter sehen ihre Gruppe nur mit 'alle',
+  -- sonst nur sich (Finn 27.10.2026: „jede ID darf nur zu ihrer eigenen ID fragen").
   sicht       text not null default 'eigene' check (sicht in ('eigene', 'alle')),
   notiz       text,
   updated_at  timestamptz not null default now()

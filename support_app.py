@@ -13,7 +13,7 @@ EIGENES MODUL wie polar_app: app.py bekommt nur `support_app.registrieren(app, g
   GET    /support/auftrag?id=          Stand eines Auftrags an den PC (Balance, Beendet-Prüfung, Tab neu laden)
 
 RECHTE-RAHMEN (serverseitig, nie vom Modell): die erlaubte ID-Menge kommt aus dem Token (_wd_login + ?ansicht=admin) und support_zugang:
-Verwalter = seine Gruppe; ein im Admin unbeschränkter Login MIT support_zugang.sicht = 'alle' (Finn, Pascal — Freigabe 27.10.2026 Punkt 3:
+Verwalter = seine Gruppe, aber nur mit sicht 'alle' (seit 27.10.2026, sonst nur er selbst); ein im Admin unbeschränkter Login MIT support_zugang.sicht = 'alle' (Finn, Pascal — Freigabe 27.10.2026 Punkt 3:
 „sehen im Chat alle IDs wie im Admin") = Standard-Sicht Hermann Technologies bzw. der gewählte Gruppen-Chip (?gruppe=); alle anderen = nur
 die eigene ID. Bewusst eine eigene Spalte statt „unbeschränkt" allein: im Admin ist jede HT-ID ohne admin_zugang-Zeile unbeschränkt
 (admin_sicht_menge → None), im Chat sollen normale IDs aber nur sich sehen. Das Modell gibt nie eine user_id an, nur Plan-/Konto-IDs, einen
@@ -222,7 +222,9 @@ def sicht_menge(me, eingeschraenkt, verwalter, zugang_sicht, ht_menge):
     wenn gebraucht). Er selbst gehört immer dazu."""
     me = str(me)
     if eingeschraenkt is not None:
-        return frozenset(str(u) for u in eingeschraenkt) | {me} if verwalter else frozenset({me})
+        # Verwalter = Gruppe NUR mit sicht 'alle' (Finn 27.10.2026 über Master: „jede ID darf nur zu ihrer eigenen ID fragen und hat nur
+        # Wissen zu ihrer eigenen ID") — im Admin sieht er seine Gruppe weiter, im Chat mit 'eigene' nur sich
+        return frozenset(str(u) for u in eingeschraenkt) | {me} if (verwalter and zugang_sicht == "alle") else frozenset({me})
     if zugang_sicht == "alle":
         return frozenset(str(u) for u in (ht_menge() or ())) | {me}
     return frozenset({me})
