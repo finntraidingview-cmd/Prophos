@@ -30998,7 +30998,7 @@
         if(gd && gd.fehler && typeof atToast === 'function') atToast(gd.fehler, 'end')
         if(!abArt && kontoStatus === 'none') abhakWdFlug(abhakWdStand(gd, wdPlan))
       }catch(_){}
-      try{ abhakZielNachziehen() }catch(_){}   // Ziel-Wache sofort, Bestanden nachladen (27.10.2026)
+      try{ abhakZielNachziehen(pid, kontoStatus) }catch(_){}   // sofort in Bestanden + Ziel-Wache, Bestanden nachladen (27.10.2026)
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
@@ -31737,14 +31737,39 @@
    * 60 s für die Zahl (nur sichtbarer Tab). Eigene Verdrahtung, kein Sammel-Handler. Nur Anzeige + vorhandene Wege. */
   const _hand = { d: null, at: 0, laedt: false, fehler: '' }
   const HAND_GRUPPEN = [['bestanden', 'Bestanden → Phase umstellen'], ['geblowt', 'Geblowt → archivieren'], ['ueberpruefen', 'Überprüfen offen'], ['manuell', 'Manuelle Arbeit'], ['planer', 'Planer braucht dich']]   // planer (09.10.2026): Hand-Gründe des letzten Nachtlaufs
-  /* NACH DEM ABHAKEN ZIEL-WACHE ANSTOSSEN (27.10.2026, Finn: „bei Moritz Tradeify-Trades abgehakt … die sollten zu Bestanden kommen, aber sie sind
-   * visuell einfach weg"; Moritz …4180, Balance 159.045 ≥ Ziel 159.000): Radar „Bestanden" zeigt fremde Konten erst mit ziel_erreicht_at, und die
-   * Ziel-Wache läuft nur alle 5 min — zwischen Abhaken (der Trade verlässt Überprüfen) und Ziel-Tag stand das Konto in keiner Gruppe (hier 4½ min).
-   * Jetzt stößt jedes erfolgreiche Abhaken (Radar- und Trades-Dialog) EINEN Lauf an (POST /admin/ziel-wache-jetzt, serverseitig ≤ 1 Lauf/20 s,
-   * derselbe zw_tick) und lädt die Bestanden-Daten nach — einmal gleich, einmal nach dem 30-s-Cache von /admin/handarbeit. Nur Zeitpunkt, keine
-   * neue Regel; ein Fehler hier stört das Abhaken nie. */
-  function abhakZielNachziehen(){
-    (async () => {
+  /* NACH DEM ABHAKEN SOFORT IN „BESTANDEN" (27.10.2026, Finn: „bei Moritz Tradeify-Trades abgehakt … visuell einfach weg" und „es war schon öfter
+   * so, dass ich Accounts abhake, die dann für ein paar Minuten im Radar verschwinden"). Ursache: ein Ziel-Trade steht vor dem Abhaken in Bestanden →
+   * „Trade abhaken" (Überprüfen + Chip); nach dem Abhaken zeigt Bestanden das Konto erst mit accounts.ziel_erreicht_at — das setzt die Ziel-Wache
+   * (bis .1757 nur alle 5 min) und /admin/handarbeit liefert es mit bis zu 30 s Cache + 60 s Takt. Dazwischen stand das Konto in keiner Gruppe
+   * (Moritz Tradeify …4180: 4½ min). Jetzt (1) legt das Abhaken eines Trades mit Bestanden-Chip (Balance nach dem Trade ≥ Ziel, wdlBestandenChip)
+   * und „Nichts ändern" SOFORT eine lokale Bestanden-Zeile an (bstLokal, lokal: true — nur Anzeige, handZielAbgleich ignoriert sie, nie ans Konto),
+   * Balance aus dem abgehakten Ende; sie gilt, bis /admin/handarbeit das Konto selbst führt, höchstens BST_LOKAL_MS. (2) stößt es EINEN Lauf der
+   * Ziel-Wache an (POST /admin/ziel-wache-jetzt, ≤ 1/20 s, leert danach den Handarbeit-Cache) und lädt die Bestanden-Daten neu. Fast-Ziel-Konten
+   * („fehlen noch … → Rest von Hand") brauchen nichts: rvhZeilen nimmt auch abgehakte (completed) Trades. Ein Fehler hier stört das Abhaken nie. */
+  const BST_LOKAL_MS = 10 * 60 * 1000
+  const _bstLokal = new Map()   // konto_id → { z, at }
+  function bstLokalAnwenden(d){
+    if(!d || !_bstLokal.size) return
+    const liste = Array.isArray(d.radar_bestanden) ? d.radar_bestanden : (d.radar_bestanden = [])
+    const jetzt = Date.now()
+    for(const [kid, x] of [..._bstLokal]){
+      if(jetzt - x.at > BST_LOKAL_MS || liste.some(z => z && !z.lokal && String(z.konto_id) === kid)){ _bstLokal.delete(kid); continue }   // Server führt es (oder zu alt)
+      if(!liste.some(z => z && String(z.konto_id) === kid)) liste.push(x.z)
+    }
+  }
+  function abhakZielNachziehen(pid, status){
+    try{
+      const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid))
+      const kid = t && String(t.konto_id || '')
+      if(t && kid && (!status || status === 'none') && wdlBestandenChip(t)){
+        const k = t.konto || {}, bal = (wdlBlowStand(t) || {}).bal ?? (wdlTpUndWeg(t) || {}).bal
+        _bstLokal.set(kid, { at: Date.now(), z: { art: 'bestanden', lokal: true, user_id: wdlUid(t), user: t.person || '', konto_id: kid, firma: k.firma || '',
+          konto: k.name || '', ende4: String(k.kontonr_ende || ''), typ: t.konto_typ || null, start_balance: null, seit: new Date().toISOString(),
+          bal: bal != null ? bal : null, ziel: t.ziel_usd != null ? Number(t.ziel_usd) : null } })
+        if(_hand.d){ bstLokalAnwenden(_hand.d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} }
+      }
+    }catch(e){ console.warn('[radar] Bestanden lokal', e) }
+    ;(async () => {
       try{
         const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
         await fetch(`${WATCHER_HOME}/admin/ziel-wache-jetzt`, { method: 'POST', headers: { 'sb-token': tok } }).catch(() => null)
@@ -31762,7 +31787,7 @@
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
       // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) — nach dem Laden neu zeichnen, wenn der Radar offen ist
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); bstLokalAnwenden(d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
     finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
   }
@@ -31774,7 +31799,7 @@
   function handZielAbgleich(d){
     let neu = 0
     for(const z of ((d && (d.radar_bestanden || (d.gruppen && d.gruppen.bestanden))) || [])){
-      if(!z || !z.konto_id || !z.seit || String(z.user_id) !== String(currentUserId || '')) continue
+      if(!z || z.lokal || !z.konto_id || !z.seit || String(z.user_id) !== String(currentUserId || '')) continue   // lokal = nur Anzeige (bstLokal, 27.10.2026)
       const a = (accounts || []).find(x => x && String(x.id) === String(z.konto_id))
       if(!a || a.zielErreichtAt) continue
       a.zielErreichtAt = z.seit
@@ -47472,7 +47497,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1757'
+  const OS_TAB_BUILD = '2026-09-22.1758'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -64363,7 +64388,7 @@
       // Bewusst KEIN Tab-Wechsel nach dem Speichern (Finn 01.08.2026): der Trade wandert
       // sowieso in "Erledigt" — die Ansicht soll da bleiben, wo man gerade arbeitet.
       closeTradeCompleteModal()
-      try{ if(typeof abhakZielNachziehen === 'function') abhakZielNachziehen() }catch(_){}   // Ziel-Wache sofort, Bestanden nachladen (27.10.2026)
+      try{ if(typeof abhakZielNachziehen === 'function') abhakZielNachziehen(p.id, statusChoice) }catch(_){}   // sofort in Bestanden + Ziel-Wache (27.10.2026)
 
       // ═══ NEUE LOGIK: Account-Status-Aktionen ═══
       if(statusChoice === 'blown' && targetAccountId){

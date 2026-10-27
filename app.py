@@ -28297,6 +28297,10 @@ def admin_ziel_wache_jetzt():
     try:
         _zw_jetzt["at"] = time.time()
         zw_tick(force=True)
+        # Handarbeit-Cache leeren (27.10.2026, Abhaken → sofort in Bestanden): ein eben gesetztes ziel_erreicht_at käme sonst erst nach
+        # HAND_CACHE_S (30 s) in radar_bestanden an — der Tab lädt /admin/handarbeit direkt nach diesem Aufruf
+        with _hand_lock:
+            _hand_cache.clear()
         return jsonify({"ok": True, "gelaufen": True, "erreicht": _zw.get("erreicht")})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Ziel-Wache: {type(e).__name__}: {str(e)[:120]}"}), 500
