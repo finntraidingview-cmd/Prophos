@@ -28919,6 +28919,10 @@ def ap_wecker_tick():
     if konto_neu or bal_neu:
         _ap_info["nachplan_at"] = 0.0
         _ap_auto_best["at"] = 0.0
+        # ZIEL-WACHE MIT (27.10.2026, Finn: Moritz Tradeify …4180 nach dem Abhaken „visuell weg" — Balance 159.045 ≥ Ziel 159.000 um 10:42:48 UTC
+        # gelesen, ziel_erreicht_at erst 10:48:24 im 5-min-Takt; bis dahin stand das Konto im Radar in keiner Gruppe): eine frische Balance lässt
+        # zw_tick im selben Durchlauf laufen (unten in ap_loop), statt bis zu ZW_TAKT_S zu warten. Gleiche Regel, gleiche Drossel wie der Wecker.
+        _zw["at"] = 0.0
         if konto_neu:
             _ap_bal_auto["at"] = 0.0
         _ap_wecker["geweckt"] = _ap_wecker.get("geweckt", 0) + 1
