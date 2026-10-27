@@ -29967,6 +29967,53 @@ def admin_funded_plan_loeschen():
     return _fdp_eingriff("loeschen")
 
 
+def fdp_plan_jetzt(tag, jetzt):
+    """REIN RECHNEND (testbar): Bezugszeit für „Jetzt planen" → (jetzt_fuer_fdp_planen, tag_wort). heute = jetzt; morgen = 00:01 Dubai
+    des Folgetags (fdp_planen plant dann das ganze Fenster des nächsten Tages); auto = morgen, sobald vom heutigen Fenster nach dem Vorlauf
+    keine 30 min mehr übrig sind, sonst heute."""
+    tz = _ap_tz(FDP_ZEITEN_STANDARD["tz"])
+    lokal = jetzt.astimezone(tz)
+    bis = int(FDP_ZEITEN_STANDARD["bis"][:2]) * 60 + int(FDP_ZEITEN_STANDARD["bis"][3:5])
+    t = str(tag or "auto")
+    if t == "auto":
+        t = "morgen" if lokal.hour * 60 + lokal.minute + FDP_ZEITEN_STANDARD["vorlauf_min"] + 30 >= bis else "heute"
+    if t == "morgen":
+        return (lokal.replace(hour=0, minute=1, second=0, microsecond=0) + timedelta(days=1)).astimezone(timezone.utc), "morgen"
+    return jetzt, "heute"
+
+
+@app.route("/admin/funded-plan/planen", methods=["POST", "OPTIONS"])
+def admin_funded_plan_planen():
+    """POST {tag: auto | heute | morgen} — „Jetzt planen" im Reiter Funded-Planer (Finn 27.10.2026: „alle Funded-Konten einmal geplant
+    sehen, ohne zu bestätigen"): derselbe scharfe Lauf wie fdp_tick (Vorschläge OHNE Startzeit, solange auto_bestaetigen aus ist), auf
+    Wunsch für den nächsten Handelstag. Nur bei aktiv = true. Gate wie /admin/funded-plan/ids (HT-weit)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, sicht, err = _fdp_login()
+    if err:
+        return err
+    if not admin and sicht is not None:
+        return jsonify({"ok": False, "msg": "Funded-Planer ist HT-weit — nur Hermann Technologies"}), 403
+    reg = _fdp_regeln_laden()
+    if not reg:
+        return jsonify({"ok": False, "msg": "funded_plan_regeln fehlt — SQL einspielen"}), 503
+    if not reg.get("aktiv"):
+        return jsonify({"ok": False, "msg": "Funded-Planer ist aus (funded_plan_regeln.aktiv)"}), 409
+    body = request.get_json(silent=True) or {}
+    bezug, wort = fdp_plan_jetzt(body.get("tag"), datetime.now(timezone.utc))
+    try:
+        erg = fdp_planen(trocken=False, jetzt=bezug)
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ Jetzt planen: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
+    kurz = lambda z: {k: z.get(k) for k in ("konto", "konto_id", "user_id", "start", "start_um", "richtung", "tp", "sl", "kontrakte", "grund")}
+    print(f"[funded-plan] Jetzt planen ({wort}) durch {'Admin' if admin else 'ID ' + str(uid)[:8]}: {len(erg.get('geplant') or [])} Vorschläge, "
+          f"{len(erg.get('ausgelassen') or [])} ausgelassen", flush=True)
+    return jsonify({"ok": bool(erg.get("ok")), "tag": wort, "plan_tag": erg.get("tag"), "msg": erg.get("msg"),
+                    "geplant": [kurz(z) for z in erg.get("geplant") or []], "ziel": [kurz(z) for z in erg.get("ziel") or []],
+                    "ausgelassen": [kurz(z) for z in erg.get("ausgelassen") or []]})
+
+
 @app.route("/admin/funded-plan/ids", methods=["POST", "OPTIONS"])
 def admin_funded_plan_ids():
     """POST {user_id, drin} → ID in funded_plan_regeln.user_ids rein/raus (wie /admin/auto-plan/ids für den Challenge-Planer). Nur Admin

@@ -292,6 +292,33 @@ def bestaetigen(ns):
           "Schalter auto_bestaetigen = true: Plan gleich mit start_um und auto_bestaetigt_at")
 
 
+def jetzt_planen(ns):
+    """„Jetzt planen" (27.10.2026): Bezugszeit heute / nächster Handelstag."""
+    print("Jetzt planen")
+    exec(block("fdp_plan_jetzt"), ns)
+    f = ns["fdp_plan_jetzt"]
+    j = datetime(2026, 10, 27, 15, 40, tzinfo=timezone.utc)          # 19:40 Dubai, Fenster bis 20:00 → nach „bis − 15 min"
+    b, w = f("auto", j)
+    check(w == "morgen" and b.isoformat() == "2026-10-27T20:01:00+00:00", f"19:40 Dubai, auto → nächster Handelstag ab 00:01 Dubai ({b.isoformat()})")
+    b2, w2 = f("auto", datetime(2026, 10, 27, 6, 0, tzinfo=timezone.utc))   # 10:00 Dubai
+    check(w2 == "heute" and b2.hour == 6, "10:00 Dubai, auto → heute (jetzt)")
+    check(f("morgen", datetime(2026, 10, 27, 6, 0, tzinfo=timezone.utc))[1] == "morgen" and f("heute", j)[0] == j, "heute/morgen ausdrücklich")
+    # scharfer Lauf mit Bezug „morgen": Vorschlag ohne start_um, Zeit im Fenster des nächsten Tages
+    U1 = "00000000-0000-4000-a000-0000000000a1"
+    konto = {"id": "km", "user_id": U1, "name": "150k PAAPEX000000000066 → Funded", "firm": "Apex Trader", "account_type": "funded",
+             "auto_planer": True, "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"}
+    zeilen = []
+    ns.update(_sb_all=lambda t, q: [dict(konto)] if t == "accounts" else [],
+              sb_select=lambda t, q: ([{"id": 1, "aktiv": True, "auto_bestaetigen": False, "user_ids": [U1], "firmen": ns["FDP_FIRMEN_STANDARD"], "zeiten": {}}]
+                                      if t == "funded_plan_regeln" else []),
+              sb_insert=lambda t, x: zeilen.append(x) if t == "trade_plans" else None, sb_update=lambda t, q, x: None)
+    e = ns["fdp_planen"](trocken=False, jetzt=b, seed=8)
+    z = zeilen[0] if zeilen else {}
+    st = (z.get("mt5_baseline") or {}).get("funded_plan", {}).get("start_um") or ""
+    check(len(zeilen) == 1 and z["start_um"] is None and z["planned_for"] == "2026-10-28" and st.startswith("2026-10-2") and e["tag"] == "2026-10-28",
+          f"Lauf für morgen: Vorschlag ohne start_um, planned_for 2026-10-28, vorgeschlagen {st[:16]}")
+
+
 def big_trade(ns):
     """Finn 27.10.2026: Funded-Trades GENAU wie Orbit-Big-Trades von Hand (Prio 1 vor Winning Day) — nichts Eigenes, nur die Marken
     tvv2 + orbit_v3 + hedge_eur > 0. Geprüft mit den echten Erkennern: app.py puls_heim_big_trades („Puls bleibt zu Hause") und
@@ -365,6 +392,7 @@ if __name__ == "__main__":
     tag_13(ns)
     ziel_wd(ns)
     bestaetigen(ns)
+    jetzt_planen(ns)
     big_trade(ns)
     balance_selbst(ns)
     if FEHLER:

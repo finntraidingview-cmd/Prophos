@@ -73026,7 +73026,15 @@
       s.textContent = (Q.aktiv ? 'Funded-Planer an' : 'Funded-Planer aus · Vorschau') + (Q.regelnQuelle === 'standard' ? ' · Standard-Regeln' : '')
       s.title = `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
         + (Q.regelnQuelle === 'standard' ? ' · funded_plan_regeln noch nicht eingespielt, gerechnet mit den Standard-Regeln' : '') })
-    root.querySelectorAll('[data-tpl-nachplan], .gp-leiste, .gp-liste').forEach(e => e.remove())
+    // „Jetzt planen" (27.10.2026, Finn: alle Funded-Konten einmal geplant sehen, ohne zu bestätigen): statt „Nachplanen" des Challenge-Planers
+    // POST /admin/funded-plan/planen {tag:'auto'} — nach dem heutigen Fenster für den nächsten Handelstag; Vorschläge ohne Startzeit
+    root.querySelectorAll('[data-tpl-nachplan]').forEach(b => {
+      if(!Q.aktiv){ b.remove(); return }
+      const n = document.createElement('button'); n.type = 'button'; n.className = b.className; n.setAttribute('style', b.getAttribute('style') || '')
+      n.textContent = _fdpPlantGerade ? 'plant…' : 'Jetzt planen'; n.disabled = _fdpPlantGerade
+      n.title = 'Funded-Planer jetzt laufen lassen — nach dem heutigen Fenster für den nächsten Handelstag. Legt Vorschläge OHNE Startzeit an; gestartet wird erst nach „Bestätigen".'
+      n.addEventListener('click', fdpJetztPlanen); b.replaceWith(n) })
+    root.querySelectorAll('.gp-leiste, .gp-liste').forEach(e => e.remove())
     root.querySelectorAll('.ap-idr-menu .h').forEach(h => { h.textContent = h.textContent.replace(/Trade-Planer/g, 'Funded-Planer') })
     root.querySelectorAll('.ap-idr-m').forEach(b => { b.title = String(b.title || '').replace(/Planer-Haken/g, 'Funded-Planer-Haken') })
     if(Q.vorschau) root.querySelectorAll('#ap-ids-alle-ok, [data-ap-ok-id]').forEach(e => e.remove())   // nur Trockenlauf-Zeilen: nichts zu bestätigen
@@ -73045,6 +73053,17 @@
     fdpMitQuelle(apIdsRenderChallenge)
     fdpNachbereiten(root)
     fdpKlickWache(root)
+  }
+  let _fdpPlantGerade = false
+  async function fdpJetztPlanen(){
+    if(_fdpPlantGerade) return
+    _fdpPlantGerade = true; apIdsRender()
+    try{
+      const d = await apdApi('POST', '/planen', { tag: 'auto' }, '/admin/funded-plan')
+      const g = (d.geplant || []).length, a = (d.ausgelassen || []).length
+      if(typeof atToast === 'function') atToast(`🤖 Funded-Planer (${d.tag === 'morgen' ? 'nächster Handelstag' : 'heute'}): ${g} Vorschl${g === 1 ? 'ag' : 'äge'} angelegt, ${a} ausgelassen — Bestätigen unter „Zu bestätigen"`, g ? 'start' : 'end')
+    }catch(e){ if(typeof atToast === 'function') atToast('Funded-Planer nicht gelaufen: ' + ((e && e.message) || e), 'end') }
+    finally{ _fdpPlantGerade = false; apIdsLaden() }
   }
   async function apIdsLaden(){
     if(_apIdsArtWert !== 'funded') return apIdsLadenChallenge()
