@@ -362,6 +362,19 @@ TOOLS = [
                     "(hilft bei altem Stand/Hänger). pc = Kennung aus pc_stand (pc-…).",
      "input_schema": {"type": "object", "properties": {"pc": {"type": "string"}}, "required": ["pc"],
                       "additionalProperties": False}},
+    {"name": "an_finn_melden",
+     "description": "Meldung direkt an Finn (ohne Bestätigen, ändert nichts am Handel). Nutzen, wenn du einen ECHTEN Fehler/Bug in Prophos "
+                    "erkennst, eine Meldung keinen bekannten Fix hat, kein Werkzeug helfen kann, oder der Nutzer nach 2 Versuchen nicht "
+                    "weiterkommt; auch für klare Wünsche. Danach dem Nutzer sagen: „Okay, tut mir leid — das gebe ich direkt an Finn "
+                    "weiter.“ und nicht weiter raten. Gleiche Ursache binnen 30 min wird zusammengefasst.",
+     "input_schema": {"type": "object", "properties": {
+         "kategorie": {"type": "string", "enum": ["bug", "fehlermeldung", "wunsch", "unklar"]},
+         "titel": {"type": "string", "description": "eine Zeile, was kaputt ist bzw. gewünscht wird"},
+         "beschreibung": {"type": "string", "description": "was der Nutzer wollte, was passiert ist, was du geprüft hast (Werkzeuge + Ergebnis)"},
+         "ursache": {"type": "string", "description": "kurzer Schlüssel der Ursache, z. B. der Kern der Fehlermeldung (zum Zusammenfassen)"},
+         "plan_id": {"type": "string"}, "account_id": {"type": "string"}, "pc": {"type": "string"},
+         "fehlertext": {"type": "string", "description": "die Meldung wörtlich, falls es eine gibt"}},
+         "required": ["kategorie", "titel", "beschreibung"], "additionalProperties": False}},
 ]
 HANDGRIFFE = ("trade_loeschen", "trade_beendet_pruefen", "balance_lesen", "tab_neu_laden")
 
@@ -703,10 +716,88 @@ def h_tab_neu_laden(inp, ctx):
                       f"Der Prophos-Tab an {pc} lädt im nächsten ruhigen Moment neu (keine Order).", {"uid": rows[0].get("user_id")})
 
 
+# ── Meldungen an Finn (Finn 27.10.2026: „das gebe ich direkt an Finn weiter … eine Routine, die die ganze Zeit abfragt") ──────────
+MELDUNG_BUENDEL_MIN = 30      # gleicher Nutzer + gleiche Ursache binnen 30 min → eine Zeile
+MELDUNG_MAX_TAG = 15          # je ID und Tag — Schutz gegen eine Schleife des Modells
+
+
+def geheimes_raus(txt):
+    """REIN RECHNEND: Passwörter und Tokens aus freiem Text entfernen (Meldungen sind NICHT maskiert, Konto-/Plan-IDs bleiben)."""
+    t = str(txt or "")
+    t = re.sub(r"(?i)\b(passwort|password|kennwort|pass|pw|pin|token|api[-_ ]?key|secret)\b\s*[:=]\s*\S+", r"\1: [entfernt]", t)
+    t = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}", "[Schlüssel entfernt]", t)
+    t = re.sub(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+", "[Token entfernt]", t)
+    return t
+
+
+def meldung_schluessel(kategorie, ursache, titel, plan_id=None, account_id=None):
+    """REIN RECHNEND: normierte Ursache fürs Zusammenfassen — Zahlen/Zeiten raus, klein, gekürzt, dazu Plan/Konto, wenn genannt."""
+    k = str(ursache or titel or "").lower()
+    k = re.sub(r"\d+", "#", k)
+    k = re.sub(r"[^a-zäöüß#]+", " ", k).strip()[:80]
+    return f"{kategorie}|{k}|{plan_id or ''}|{account_id or ''}"
+
+
+def t_an_finn_melden(inp, ctx):
+    kat = str(inp.get("kategorie") or "unklar")
+    if kat not in ("bug", "fehlermeldung", "wunsch", "unklar"):
+        kat = "unklar"
+    titel = _kurz(geheimes_raus(re.sub(r"\s+", " ", str(inp.get("titel") or "")).strip()), 160)
+    if not titel:
+        return {"fehler": "titel fehlt"}
+    beschr = _kurz(geheimes_raus(inp.get("beschreibung")), 2500)
+    belege = {"plan_id": None, "konto": None, "pc": None}
+    pid, aid = str(inp.get("plan_id") or "").strip(), str(inp.get("account_id") or "").strip()
+    if pid:   # nur Pläne/Konten aus der erlaubten Menge kommen als Beleg in die Meldung
+        p, f = _plan_holen(pid, ctx["menge"], "id,user_id,master_name,master_firm,route,status")
+        belege["plan_id"] = p["id"] if p else None
+        if p:
+            belege["plan"] = {"konto": p.get("master_name"), "firma": p.get("master_firm"), "weg": p.get("route"), "status": p.get("status")}
+    if aid:
+        k, f = _konto_holen(aid, ctx["menge"])
+        if k:
+            belege["konto"] = {"account_id": k["id"], "name": k.get("name"), "firma": k.get("firm")}
+    pc = str(inp.get("pc") or "").strip().lower()
+    if re.fullmatch(r"pc-[a-z0-9]{3,24}", pc):
+        belege["pc"] = pc
+    if inp.get("fehlertext"):
+        belege["fehlertext"] = _kurz(geheimes_raus(inp.get("fehlertext")), 800)
+    belege["werkzeuge"] = [{"name": t.get("name"), "fehler": t.get("fehler")} for t in ctx.get("tools") or []][-12:]
+    if ctx.get("bilder"):
+        belege["bilder"] = list(ctx["bilder"])
+    belege = {k2: v for k2, v in belege.items() if v not in (None, [], {})}
+    schl = meldung_schluessel(kat, inp.get("ursache"), titel, belege.get("plan_id"), (belege.get("konto") or {}).get("account_id"))
+    uid = ctx["uid"]
+    jetzt = datetime.now(timezone.utc)
+    alt = _sb("GET", "support_meldung", {"select": "id,anzahl,beschreibung,belege", "user_id": f"eq.{uid}", "schluessel": f"eq.{schl}",
+                                         "status": "in.(neu,in_arbeit)", "at": f"gte.{(jetzt - timedelta(minutes=MELDUNG_BUENDEL_MIN)).isoformat()}",
+                                         "order": "at.desc", "limit": "1"}) or []
+    if alt:
+        m = alt[0]
+        nach = f"\n\n— Nachtrag {_zeit(jetzt.isoformat())}: {beschr}" if beschr else ""
+        bel = dict(m.get("belege") or {}, **{k2: v for k2, v in belege.items() if k2 != "werkzeuge"})
+        _sb("PATCH", "support_meldung", {"id": f"eq.{m['id']}"},
+            {"anzahl": int(m.get("anzahl") or 1) + 1, "beschreibung": _kurz((m.get("beschreibung") or "") + nach, 6000), "belege": bel,
+             "aktualisiert_at": jetzt.isoformat(), "unterhaltung_id": ctx.get("unterhaltung_id") or None}, prefer="return=minimal")
+        mid, gebuendelt = m["id"], True
+    else:
+        heute = _sb("GET", "support_meldung", {"select": "id", "user_id": f"eq.{uid}", "at": f"gte.{tag_beginn_utc()}", "limit": "100"}) or []
+        if len(heute) >= MELDUNG_MAX_TAG:
+            return {"fehler": "Heute schon viele Meldungen von dieser ID — sag dem Nutzer, er soll Finn direkt schreiben"}
+        z = (_sb("POST", "support_meldung", body={"user_id": uid, "unterhaltung_id": ctx.get("unterhaltung_id") or None, "kategorie": kat,
+                                                   "titel": titel, "beschreibung": beschr, "belege": belege, "schluessel": schl},
+                 prefer="return=representation") or [{}])[0]
+        mid, gebuendelt = z.get("id"), False
+    ctx.setdefault("meldungen", []).append(mid)
+    print(f"[support] Meldung an Finn #{mid} ({kat}{', zusammengefasst' if gebuendelt else ''}) von {uid[:8]}", flush=True)
+    return {"gemeldet": True, "meldung_id": mid, "zusammengefasst": gebuendelt,
+            "hinweis": "Sag dem Nutzer kurz: „Okay, tut mir leid — das gebe ich direkt an Finn weiter.“ Nicht weiter raten."}
+
+
 WERKZEUG = {"meine_trades": t_meine_trades, "trade_details": t_trade_details, "meine_konten": t_meine_konten,
             "letzte_fehler": t_letzte_fehler, "pc_stand": t_pc_stand, "auftrag_stand": t_auftrag_stand,
             "trade_loeschen": h_trade_loeschen, "trade_beendet_pruefen": h_trade_beendet_pruefen, "balance_lesen": h_balance_lesen,
-            "tab_neu_laden": h_tab_neu_laden}
+            "tab_neu_laden": h_tab_neu_laden, "an_finn_melden": t_an_finn_melden}
 
 
 def _werkzeug_ausfuehren(name, inp, ctx):
@@ -933,6 +1024,11 @@ def support_aufraeumen():
         print(f"[support] ⚠️ Aufräumen: {type(e).__name__}: {e}", flush=True)
 
 
+def _ist_finn(zugang):
+    """Darf die Meldungen sehen/abhaken: Chat an, sicht 'alle' und im Admin unbeschränkt (Finn, Pascal)."""
+    return bool(zugang and zugang[0] and zugang[2] == "alle" and A["_admin_eingeschraenkt"]() is None)
+
+
 def _antwort_text(inhalt):
     return "\n\n".join(b.get("text", "") for b in inhalt if isinstance(b, dict) and b.get("type") == "text").strip()
 
@@ -953,8 +1049,14 @@ def registrieren(app, ns):
         an, limit, _s = zugang
         if not an:
             return jsonify({"ok": True, "an": False})
-        return jsonify({"ok": True, "an": True, "name": NAME, "limit": limit, "rest": max(0, limit - _fragen_heute(uid)),
-                        "eingerichtet": bool(os.environ.get("ANTHROPIC_API_KEY")), "ids": len(menge)})
+        aus = {"ok": True, "an": True, "name": NAME, "limit": limit, "rest": max(0, limit - _fragen_heute(uid)),
+               "eingerichtet": bool(os.environ.get("ANTHROPIC_API_KEY")), "ids": len(menge)}
+        if _ist_finn(zugang):
+            try:
+                aus["meldungen_neu"] = len(_sb("GET", "support_meldung", {"select": "id", "status": "eq.neu", "limit": "500"}) or [])
+            except Exception:
+                pass          # Tabelle support_meldung noch nicht eingespielt → kein Meldungs-Knopf
+        return jsonify(aus)
 
     @app.route("/support/unterhaltungen", methods=["GET", "OPTIONS"])
     def support_unterhaltungen():
@@ -1084,6 +1186,7 @@ def registrieren(app, ns):
                         _bild_cache[pfad] = base64.b64encode(roh).decode()
                     pfade.append(pfad)
                     inhalt.append({"type": "bild", "pfad": pfad, "typ": typ})
+                ctx["bilder"] = pfade
                 inhalt.append({"type": "text", "text": _kontext_zeile(ctx) + "\n\n" + (frage or "(nur Screenshot)")})
                 neu = [{"role": "user", "content": inhalt, "_text": frage, "_bilder": pfade, "_sichtbar": True}]
 
@@ -1226,3 +1329,51 @@ def registrieren(app, ns):
         if erg.get("fehler"):
             return jsonify({"ok": False, "msg": erg["fehler"]}), 404
         return jsonify({"ok": True, **erg})
+
+    @app.route("/support/meldungen", methods=["GET", "OPTIONS"])
+    def support_meldungen():
+        """Meldungen von Mini-Finn an Finn — nur für Finn/Pascal (sicht 'alle'). ?status=offen (neu + in_arbeit, Standard) | alle."""
+        if request.method == "OPTIONS":
+            return "", 200
+        uid, _m, zugang, err = _login()
+        if err:
+            return err
+        if not _ist_finn(zugang):
+            return jsonify({"ok": False, "msg": "Nur für Finn"}), 403
+        p = {"select": "id,at,aktualisiert_at,user_id,kategorie,titel,beschreibung,belege,anzahl,status,erledigt_at,notiz",
+             "order": "at.desc", "limit": "80"}
+        if (request.args.get("status") or "offen") != "alle":
+            p["status"] = "in.(neu,in_arbeit)"
+        try:
+            rows = _sb("GET", "support_meldung", p) or []
+            disp, _x = A["_wd_personen"]()
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+        return jsonify({"ok": True, "liste": [dict(r, person=disp.get(str(r.get("user_id"))) or str(r.get("user_id") or "")[:8],
+                                                   um=_zeit(r.get("at")), zuletzt=_zeit(r.get("aktualisiert_at"))) for r in rows]})
+
+    @app.route("/support/meldung/<int:mid>", methods=["PATCH", "OPTIONS"])
+    def support_meldung(mid):
+        """Status setzen (neu | in_arbeit | erledigt | verworfen) und Notiz — nur Finn/Pascal."""
+        if request.method == "OPTIONS":
+            return "", 200
+        uid, _m, zugang, err = _login()
+        if err:
+            return err
+        if not _ist_finn(zugang):
+            return jsonify({"ok": False, "msg": "Nur für Finn"}), 403
+        d = request.get_json(silent=True) or {}
+        st = str(d.get("status") or "")
+        if st not in ("neu", "in_arbeit", "erledigt", "verworfen"):
+            return jsonify({"ok": False, "msg": "status = neu | in_arbeit | erledigt | verworfen"}), 400
+        upd = {"status": st, "aktualisiert_at": datetime.now(timezone.utc).isoformat(),
+               "erledigt_at": datetime.now(timezone.utc).isoformat() if st in ("erledigt", "verworfen") else None}
+        if d.get("notiz") is not None:
+            upd["notiz"] = _kurz(d.get("notiz"), 1000)
+        try:
+            z = A["sb_update"]("support_meldung", {"id": f"eq.{mid}"}, upd)
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        if not z:
+            return jsonify({"ok": False, "msg": "Meldung nicht gefunden"}), 404
+        return jsonify({"ok": True, "status": st})

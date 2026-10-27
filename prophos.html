@@ -74256,6 +74256,7 @@
     }
 
     async function listeZeigen(an){
+      if(an && lo.meld) meldZeigen(false)
       lo.liste = an; listeEl.hidden = !an; verlaufEl.hidden = an; $l('lo-liste-btn').classList.toggle('an', an)
       $l('lo-form').hidden = an; vorschauEl.hidden = an
       if(!an) return
@@ -74367,7 +74368,57 @@
       fussZeigen()
       if(!window.matchMedia('(max-width:820px)').matches) setTimeout(() => textEl.focus(), 30)
     }
-    function zu(){ panel.classList.remove('offen'); if(lo.liste) listeZeigen(false) }
+    // MELDUNGEN AN FINN (27.10.2026, Finn: „das gebe ich direkt an Finn weiter … eine Routine, die abfragt, wo die Fehler ankommen"):
+    // nur für Finn/Pascal (Server: /support/stand liefert meldungen_neu nur ihnen). Eigene Seite im Fenster, Status per Knopf.
+    const meldEl = $l('lo-meld')
+    const LO_KAT = { bug: 'Bug', fehlermeldung: 'Fehlermeldung', wunsch: 'Wunsch', unklar: 'Unklar' }
+    const LO_ST = { neu: 'neu', in_arbeit: 'in Arbeit', erledigt: 'erledigt', verworfen: 'verworfen' }
+    function meldZahl(n){ const z = $l('lo-meld-n'); z.hidden = !(n > 0); z.textContent = n > 99 ? '99+' : String(n || '') }
+    async function meldZeigen(an){
+      lo.meld = an; meldEl.hidden = !an; $l('lo-meld-btn').classList.toggle('an', an)
+      if(an && lo.liste) listeZeigen(false)
+      verlaufEl.hidden = an || lo.liste; $l('lo-form').hidden = an || lo.liste; vorschauEl.hidden = an || lo.liste
+      if(!an) return
+      meldEl.innerHTML = '<div class="lo-leer">Lade …</div>'
+      try{
+        const d = await loApi('/support/meldungen?status=' + (lo.meldAlle ? 'alle' : 'offen'))
+        const l = d.liste || []
+        meldZahl(l.filter(m => m.status === 'neu').length)
+        const kopf = `<div class="lo-m-kopf"><button type="button" data-lo-mf="offen" class="${lo.meldAlle ? '' : 'an'}">Offen</button>`
+          + `<button type="button" data-lo-mf="alle" class="${lo.meldAlle ? 'an' : ''}">Alle</button></div>`
+        if(!l.length){ meldEl.innerHTML = kopf + '<div class="lo-leer">Keine offenen Meldungen.</div>'; return }
+        const bel = b => { const t = []; if(!b) return ''
+          if(b.plan) t.push('Plan ' + (b.plan.konto || '') + (b.plan_id ? ' · ' + b.plan_id : ''))
+          else if(b.plan_id) t.push('Plan ' + b.plan_id)
+          if(b.konto) t.push('Konto ' + (b.konto.name || '') + ' · ' + b.konto.account_id)
+          if(b.pc) t.push(b.pc)
+          if(b.fehlertext) t.push('„' + b.fehlertext + '“')
+          if(b.bilder && b.bilder.length) t.push(b.bilder.length + ' Screenshot' + (b.bilder.length > 1 ? 's' : ''))
+          return t.length ? `<div class="bel">${escapeHtml(t.join(' · '))}</div>` : '' }
+        meldEl.innerHTML = kopf + l.map(m => `<div class="lo-m${m.status === 'erledigt' || m.status === 'verworfen' ? ' zu' : ''}">`
+          + `<div class="k"><span class="kat ${escapeHtml(m.kategorie)}">${escapeHtml(LO_KAT[m.kategorie] || m.kategorie)}</span>`
+          + `<span>${escapeHtml(m.person || '')} · ${escapeHtml(m.um || '')}${m.anzahl > 1 ? ' · ' + m.anzahl + '×' : ''} · ${escapeHtml(LO_ST[m.status] || m.status)}</span></div>`
+          + `<b>${escapeHtml(m.titel)}</b>`
+          + `<details><summary>Details</summary><div class="txt">${escapeHtml(m.beschreibung || '')}</div>${bel(m.belege)}`
+          + (m.notiz ? `<div class="bel">Notiz: ${escapeHtml(m.notiz)}</div>` : '') + `</details>`
+          + `<div class="kn">${m.status !== 'erledigt' ? `<button type="button" class="ok" data-lo-ms="erledigt" data-lo-mid="${m.id}">Erledigt</button>` : ''}`
+          + (m.status === 'neu' ? `<button type="button" data-lo-ms="in_arbeit" data-lo-mid="${m.id}">In Arbeit</button>` : '')
+          + (m.status !== 'verworfen' && m.status !== 'erledigt' ? `<button type="button" data-lo-ms="verworfen" data-lo-mid="${m.id}">Verwerfen</button>` : '')
+          + (m.status === 'erledigt' || m.status === 'verworfen' ? `<button type="button" data-lo-ms="neu" data-lo-mid="${m.id}">Wieder öffnen</button>` : '')
+          + `</div></div>`).join('')
+      }catch(e){ meldEl.innerHTML = `<div class="lo-leer">${escapeHtml(e.message)}</div>` }
+    }
+    meldEl.addEventListener('click', async ev => {
+      const f = ev.target.closest('[data-lo-mf]')
+      if(f){ lo.meldAlle = f.dataset.loMf === 'alle'; meldZeigen(true); return }
+      const b = ev.target.closest('[data-lo-ms]'); if(!b) return
+      b.disabled = true
+      try{ await loApi('/support/meldung/' + encodeURIComponent(b.dataset.loMid), { method: 'PATCH', body: { status: b.dataset.loMs } }); meldZeigen(true) }
+      catch(e){ b.disabled = false; hinweis(e.message, true) }
+    })
+    $l('lo-meld-btn').addEventListener('click', () => meldZeigen(!lo.meld))
+
+    function zu(){ panel.classList.remove('offen'); if(lo.liste) listeZeigen(false); if(lo.meld) meldZeigen(false) }
     fab.addEventListener('click', () => panel.classList.contains('offen') ? zu() : auf())
     $l('lo-zu').addEventListener('click', zu)
     $l('lo-neu').addEventListener('click', () => { merkeUnterh(null); listeZeigen(false); willkommen(); $l('lo-sub').textContent = 'Neue Unterhaltung'; textEl.focus() })
@@ -74381,12 +74432,16 @@
         lo.an = !!d.an; fab.hidden = !lo.an
         if(lo.an){ lo.rest = d.rest; lo.limit = d.limit; if(d.ids > 1) $l('lo-sub').textContent = `Support · sieht ${d.ids} IDs` }
         if(lo.an && d.eingerichtet === false) $l('lo-sub').textContent = 'Noch nicht eingerichtet (API-Schlüssel fehlt)'
+        // Meldungen an Finn: nur wenn der Server die Zahl liefert (Finn/Pascal)
+        const finn = lo.an && d.meldungen_neu !== undefined
+        $l('lo-meld-btn').hidden = !finn
+        if(finn) meldZahl(d.meldungen_neu || 0)
       }catch(_){ fab.hidden = true }
     }
     let standFuer = null
     supabase.auth.onAuthStateChange((ev, session) => {
       const uid = session?.user?.id || null
-      if(!uid){ standFuer = null; fab.hidden = true; zu(); merkeUnterh(null); verlaufEl.innerHTML = ''; return }
+      if(!uid){ standFuer = null; fab.hidden = true; $l('lo-meld-btn').hidden = true; zu(); merkeUnterh(null); verlaufEl.innerHTML = ''; return }
       // anderes Profil (ID-Wechsel ohne Abmelden): dessen Unterhaltung gehört nicht zu dieser ID
       if(uid !== standFuer){ if(standFuer) merkeUnterh(null); standFuer = uid; verlaufEl.innerHTML = ''; standLaden() }
     })
@@ -74396,7 +74451,13 @@
       const tok = 'stub.token'
       lo.stub = async (pfad, opts) => {
         await new Promise(r => setTimeout(r, 400))
-        if(pfad.startsWith('/support/stand')) return { ok: true, an: true, rest: 38, limit: 40, eingerichtet: true }
+        if(pfad.startsWith('/support/stand')) return { ok: true, an: true, rest: 38, limit: 40, eingerichtet: true, ids: 14, meldungen_neu: 2 }
+        if(pfad.startsWith('/support/meldungen')) return { ok: true, liste: [
+          { id: 7, kategorie: 'bug', titel: 'Radar zeigt Trade als läuft, Position ist laut Nutzer zu', person: 'Marc', um: '27.10. 16:05', anzahl: 2, status: 'neu',
+            beschreibung: 'Wollte: Trade abhaken. Passiert: steht seit 40 min unter Läuft. Geprüft: trade_details (live.offen true, Stand 15:22), auftrag_stand (Beendet-Prüfung: fehler „Positions-Tabelle nicht sichtbar“).',
+            belege: { plan_id: 'a1b2c3d4-0000-0000-0000-000000000000', plan: { konto: '50k APEX …0001' }, pc: 'pc-xxxxxx', fehlertext: 'Positions-Tabelle im Puls-Chrome nicht sichtbar' } },
+          { id: 6, kategorie: 'wunsch', titel: 'Balance-Lesen für alle Konten auf einmal', person: 'Chris', um: '27.10. 15:40', anzahl: 1, status: 'in_arbeit', beschreibung: 'Möchte einen Knopf, der alle Konten nacheinander liest.', belege: {} }] }
+        if(pfad.startsWith('/support/meldung/')) return { ok: true }
         if(pfad.startsWith('/support/unterhaltungen')) return { ok: true, liste: [{ id: 'u1', titel: 'Warum ist mein Apex-Trade nicht gestartet?', um: '27.10. 14:35' }, { id: 'u2', titel: 'Balance stimmt nicht', um: '26.10. 09:10' }] }
         if(pfad.startsWith('/support/unterhaltung/')) return { ok: true, titel: 'Warum ist mein Apex-Trade nicht gestartet?', blasen: [
           { rolle: 'user', text: 'Warum ist mein Apex-Trade nicht gestartet?', bilder: 1, aktionen: [] },
@@ -74409,6 +74470,7 @@
         return { ok: true }
       }
       lo.an = true; fab.hidden = false; lo.rest = 38
+      standLaden()   // wie nach dem Login: Freischaltung + Meldungs-Knopf aus dem Stub-Stand
       return 'Mini-Finn-Stub an'
     }
   })()
@@ -76260,6 +76322,7 @@
     border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);overflow:hidden;
   }
   #lotse-panel.offen{display:flex}
+  #lotse-panel [hidden]{display:none !important}   /* Knöpfe/Formular haben display:flex — hidden muss trotzdem greifen */
   #lotse-panel .lo-kopf{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-bottom:1px solid var(--border-soft)}
   #lotse-panel .lo-av{width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
     background:var(--violet);color:#fff;font-size:11px;font-weight:700;letter-spacing:-.02em}
@@ -76281,6 +76344,29 @@
   #lotse-panel .lo-liste-z .x{border:none;background:transparent;color:var(--sub-2);cursor:pointer;font-size:15px;padding:0 2px}
   #lotse-panel .lo-liste-z .x:hover{color:var(--danger)}
   #lotse-panel .lo-leer{color:var(--sub);font-size:13px;padding:18px 10px;text-align:center}
+  /* Meldungen an Finn (27.10.2026) — nur für Finn/Pascal: Karten, Status per Knopf */
+  #lotse-panel .lo-ik{position:relative}
+  #lotse-panel .lo-zahl{position:absolute;top:2px;right:1px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;
+    background:var(--violet);color:#fff;font-size:10px;font-weight:700;line-height:15px;text-align:center}
+  #lotse-panel .lo-m-kopf{display:flex;gap:6px;padding:2px 2px 8px}
+  #lotse-panel .lo-m-kopf button{border:1px solid var(--border);background:var(--surface);color:var(--sub);border-radius:999px;
+    padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+  #lotse-panel .lo-m-kopf button.an{background:var(--violet-tint);color:var(--violet);border-color:transparent}
+  #lotse-panel .lo-m{border:1px solid var(--border-soft);border-radius:var(--r-md);padding:9px 11px;margin-bottom:8px;font-size:13px}
+  #lotse-panel .lo-m.zu{opacity:.6}
+  #lotse-panel .lo-m .k{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--sub);margin-bottom:3px}
+  #lotse-panel .lo-m .kat{padding:1px 7px;border-radius:999px;background:var(--surface-tint);color:var(--ink-2);font-weight:600}
+  #lotse-panel .lo-m .kat.bug{background:rgba(240,68,56,.1);color:var(--danger-ink)}
+  #lotse-panel .lo-m .kat.wunsch{background:var(--violet-tint);color:var(--violet)}
+  #lotse-panel .lo-m b{display:block;font-weight:650;line-height:1.35}
+  #lotse-panel .lo-m details{margin-top:4px}
+  #lotse-panel .lo-m summary{cursor:pointer;color:var(--sub);font-size:12px}
+  #lotse-panel .lo-m .txt{white-space:pre-wrap;margin-top:4px;line-height:1.45}
+  #lotse-panel .lo-m .bel{margin-top:4px;font-size:11.5px;color:var(--sub);word-break:break-all}
+  #lotse-panel .lo-m .kn{display:flex;gap:6px;margin-top:8px}
+  #lotse-panel .lo-m .kn button{border:1px solid var(--border);background:var(--surface);color:var(--ink);border-radius:8px;padding:4px 10px;
+    font:inherit;font-size:12px;cursor:pointer}
+  #lotse-panel .lo-m .kn .ok{background:var(--violet);border-color:var(--violet);color:#fff}
 
   #lotse-panel .lo-verlauf{flex:1;overflow:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px}
   #lotse-panel .lo-b{max-width:88%;font-size:13.5px;line-height:1.5;padding:9px 12px;border-radius:14px;word-wrap:break-word;overflow-wrap:anywhere}
@@ -76358,11 +76444,13 @@
   <div class="lo-kopf">
     <span class="lo-av">MF</span>
     <div class="lo-tit"><b>Mini-Finn</b><span id="lo-sub">Support · kennt Prophos und deine Trades</span></div>
+    <button type="button" class="lo-ik" id="lo-meld-btn" title="Meldungen an Finn" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4m0 0h11l-1.5 4L16 12H5"/></svg><span class="lo-zahl" id="lo-meld-n" hidden></span></button>
     <button type="button" class="lo-ik" id="lo-liste-btn" title="Unterhaltungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
     <button type="button" class="lo-ik" id="lo-neu" title="Neue Unterhaltung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
     <button type="button" class="lo-ik" id="lo-zu" title="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   <div class="lo-liste" id="lo-liste" hidden></div>
+  <div class="lo-liste" id="lo-meld" hidden></div>
   <div class="lo-verlauf" id="lo-verlauf"></div>
   <div class="lo-vorschau" id="lo-vorschau"></div>
   <form class="lo-form" id="lo-form" autocomplete="off">
