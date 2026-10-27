@@ -30850,12 +30850,15 @@
     const _kw = (typeof wdlKontoWeg === 'function') && wdlKontoWeg(pw)
     // TP + nicht mehr im Dropdown (21.10.2026, s. wdlTpUndWeg): P&L = TP-Schätzung, Status „Phase bestanden" (unten)
     const _tw = (!_mwdErlPolar && typeof wdlTpUndWeg === 'function') ? wdlTpUndWeg(pw) : null
-    const _kwSch = (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : (_tw && plVor == null) ? _tw.pl : null
+    // Topstep-Blow ohne Endlesung (27.10.2026): P&L ≈ MLL − Start-Balance (wdlTsxBlowSchaetzung) — nur, wenn kein P&L am Plan steht
+    const _ts = (!_mwdErlPolar && plVor == null && typeof wdlTsxBlowSchaetzung === 'function') ? wdlTsxBlowSchaetzung(pw) : null
+    const _kwSch = _ts ? _ts.pl : (_kw && plVor == null) ? wdlKontoWegSchaetzung(pw) : (_tw && plVor == null) ? _tw.pl : null
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = plFeldText(plVor != null ? plVor : _kwSch)
     _mwdErlVor = plVor != null ? plVor : _kwSch
     const mHilfe = m && m.closest('.field') && m.closest('.field').querySelector('.mwd-erl-hilfe')
     if(mHilfe) mHilfe.textContent = _mwdErlPolar ? (plVor != null ? 'aus der Polar-Abrechnung (TradingView)' : 'aus TradingView eintragen')
       : _sp ? `Tages-P&L — Balance-Sprung: ${balanceSprungText(_sp)}`
+      : _ts ? '≈ ' + WDL_TSX_SCHAETZ_TIP + ' — MLL − Start-Balance, bitte prüfen'
       : (_tw && plVor == null) ? '≈ geschätzt: TP laut Radar-Chart (Konto nicht mehr im Dropdown) — bitte prüfen'
       : _kwSch != null ? '≈ geschätzt: Start-Balance bis Liquidation (Konto weg) — bitte prüfen'
       : (_kw && plVor == null) ? 'Konto weg — nichts mehr lesbar, bitte eintragen'
@@ -32008,6 +32011,26 @@
    * aus TradingView (konto_balance), aber nur, wenn sie NACH dem Ende gelesen wurde. Liquidation = effektive Liq-Balance des Radars
    * (liq_regel_balance: engere von Regel und Konto-Boden, sonst liq_balance). Geblowt = Balance ≤ Liq + 25 $ (Slippage/Gebühren).
    * Echo hat keine Liq im Radar → nur die Balance. -> {bal, quelle, liq, geblowt} | null */
+  /* TOPSTEP-BLOW OHNE ENDLESUNG (27.10.2026, Finn per Screenshot Radar → „Geblowt · archivieren": Topstep-V2-Blows zeigten bei Konto und
+   * P&L nur „–", Orbit-Blows daneben Balken und Zahlen; Fall Simon Topstep 150k …8949, Plan 2a3f7377). Nach „MAXIMUM_LOSS Violation" ist das
+   * Konto in TopstepX nicht mehr lesbar (Geblowt-Auge, final.grund 'tsx_geblowt' + final.konto_geblowt, kein balance_end/today_pnl). Topstep
+   * sperrt am Maximum Loss Limit — die MLL beim Start (tv.mll_start, an der Zeile als liq_balance mit liq_quelle 'mll_tsx', app.py
+   * tsx_zeile_ueberlagern) ist also der Konto-Stand danach, P&L = MLL − Start-Balance. Nur tsv2, nur mit Blow-Beweis, nur ohne jede gelesene
+   * Endbalance; fehlt MLL oder Start → null (weiter „–", nicht raten). EINE Rechnung für Konto-Spalte/Balken (wdlBlowStand), P&L-Spalte
+   * (wdlPlTrade) und die P&L-Vorbelegung beider Abhak-Dialoge. Nur Anzeige/Vorschlag, gebucht wird erst beim Abhaken. -> {bal, mll, bs, pl} | null */
+  const WDL_TSX_SCHAETZ_TIP = 'geschätzt: Topstep sperrt am Maximum Loss Limit (MLL beim Start), die echte Endbalance ist nach dem Blow nicht lesbar'
+  function wdlTsxBlowSchaetzung(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    if(!t || t.route !== 'tsv2' || t.status === 'open' || t.status === 'planned') return null
+    const f = (t.endlesung && typeof t.endlesung === 'object') ? t.endlesung : {}
+    if(!(f.konto_geblowt || f.grund === 'tsx_geblowt')) return null
+    if(n(t.balance_end) != null || n(f.balance_end) != null || n(f.today_pnl) != null || n(t.pl_balance) != null) return null
+    if(t.liq_quelle !== 'mll_tsx') return null
+    const mll = n(t.liq_balance), bs = n(t.balance_start)
+    if(mll == null || bs == null || !(bs > mll)) return null
+    return { bal: mll, mll, bs, pl: Math.round((mll - bs) * 100) / 100 }
+  }
+  window._wdlTsxBlowSchaetzung = wdlTsxBlowSchaetzung   // Test-Haken (Stub)
   function wdlBlowStand(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return null
@@ -32016,7 +32039,10 @@
       const kb = n(t.konto_balance), kAt = Date.parse(t.konto_balance_at || '') || 0, ende = Date.parse(t.ended_at || t.completed_at || '') || 0
       if(kb != null && kAt && (!ende || kAt >= ende)){ bal = kb; quelle = 'Konto-Balance ' + new Date(kAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
     }
-    if(bal == null) return null
+    if(bal == null){
+      const ts = wdlTsxBlowSchaetzung(t)   // Topstep-Blow ohne Endlesung (27.10.2026): Stand = MLL beim Start, als Schätzung gekennzeichnet
+      return ts ? { bal: ts.bal, quelle: WDL_TSX_SCHAETZ_TIP, liq: ts.mll, tagLiq: null, geblowt: true, vonBoden: false, softBreach: false, geschaetzt: true } : null
+    }
     // Tageslimit (Apex Daily Loss, liq_regel_soft) = Soft-Breach: Konto lebt — echter Blow nur am Konto-Boden (Max Drawdown)
     const soft = !!t.liq_regel_soft
     // Topstep V2 (T1-B 05.10.2026): TopstepX zeigt Express-Konten ab 0 (balance_relativ). Stammt die Balance aus der Nachlesung und
@@ -32044,8 +32070,12 @@
   // BALANCE-SPRUNG (08.10.2026): Backend lt_balance_sprung → t.balance_sprung; Wort kurz, die Zahlen im Tooltip. P&L-Zelle zeigt den
   // Tages-P&L statt der Balance-Differenz (die enthält z. B. eine Auszahlung)
   const wdlSprungErg = t => (t && t.balance_sprung) ? `<span style="color:var(--warn-ink, #b45309)" title="${escapeHtml(balanceSprungText(t.balance_sprung))}">Balance-Sprung</span>` : ''
-  const wdlPlTrade = t => (t && t.balance_sprung) ? t.balance_sprung.tages : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? Number(t.pl_balance) : null
+  // Topstep-Blow ohne Endlesung (27.10.2026, wdlTsxBlowSchaetzung): Schätzung nur, solange am Plan kein P&L steht — ein eingetragener gewinnt
+  const wdlPlGesch = t => !!(t && !(t.master_pl && t.master_pl.wert != null && isFinite(Number(t.master_pl.wert))) && wdlTsxBlowSchaetzung(t))
+  const wdlPlTrade = t => (t && t.balance_sprung) ? t.balance_sprung.tages : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? Number(t.pl_balance)
+    : wdlPlGesch(t) ? wdlTsxBlowSchaetzung(t).pl : null
   const wdlPlTip = (t, echo, pb) => (t && t.balance_sprung) ? 'Tages-P&L — ' + balanceSprungText(t.balance_sprung)
+    : wdlPlGesch(t) ? '≈ MLL − Start-Balance — ' + WDL_TSX_SCHAETZ_TIP + '. Beim Abhaken vorbelegt, bitte prüfen.'
     : (t && t.pl_balance != null && isFinite(Number(t.pl_balance))) ? (echo ? 'MT5-Balance' : 'Balance') + ' nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch kein P&L — beim Abhaken eintragen'
   const WDL_TAGESLIMIT_ERG = '<span style="color:var(--warn-ink, #b45309);opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
@@ -32148,6 +32178,7 @@
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
     if(wdlTpUndWeg(t)) return ''   // TP + nicht mehr im Dropdown = wahrscheinlich bestanden (21.10.2026), kein „fehlen noch"
+    if(wdlTsxBlowSchaetzung(t)) return ''   // Topstep geblowt, Stand nur geschätzt (27.10.2026) — nie „fehlen noch"
     const ziel = n(t.ziel_usd), typ = String(t.konto_typ || '')
     if(ziel == null || !WDL_UEBERGANG[typ]) return ''
     let bal = (wdlBlowStand(t) || {}).bal
@@ -32274,7 +32305,7 @@
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
     let st = null; try{ st = wdlStrahl(t, b) }catch(_){ st = null }
-    const zahl = `<span class="wdl-k-zahl"${b.geblowt ? ' style="color:var(--danger-ink, #b91c1c)"' : ''}>${f0(b.bal)} $</span>`
+    const zahl = `<span class="wdl-k-zahl"${b.geblowt ? ' style="color:var(--danger-ink, #b91c1c)"' : ''}>${b.geschaetzt ? '≈ ' : ''}${f0(b.bal)} $</span>`   // ≈ = Topstep-Schätzung (27.10.2026)
     return st ? `<span class="wdl-z-konto mit-strahl" title="${escapeHtml(st.tip + ' · ' + tip)}">${st.html}${zahl}</span>`
       : `<span class="wdl-z-konto" title="${escapeHtml(tip)}">${zahl}</span>`
   }
@@ -32771,7 +32802,7 @@
         miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
-        plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
+        plZ = zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review'){
         // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
@@ -32792,7 +32823,7 @@
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach Review — wartet auf die neuen Kontodaten der Firma, nichts wird verbucht (früher „parken\")">→ Review</button>`,
           { tip: polar ? wdlPolarErg(t).tip : echo ? '' : demoTip(d) })
-        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : zelle('pl', sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })
+        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(polar){
         // Polar erledigt (Verlauf): wer zuerst zu war + beide P&L aus der Abrechnung
@@ -47395,7 +47426,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1753'
+  const OS_TAB_BUILD = '2026-09-22.1754'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63384,6 +63415,17 @@
                      msgEl.className = 'modal-msg' }
         }
       } }
+    // TOPSTEP-BLOW OHNE ENDLESUNG (27.10.2026, wdlTsxBlowSchaetzung): „geblowt" belegt schon wdlGeblowtUrteil oben vor; fehlt der Master-P&L,
+    // Vorschlag ≈ MLL − Start-Balance aus der Radar-Zeile dieses Plans (nur, wenn der Radar sie geladen hat) — Finn bestätigt beim Abhaken
+    if(p.status === 'review' && p.masterPl == null && typeof wdlTsxBlowSchaetzung === 'function'){
+      let ts = null
+      try{ const tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)); ts = tr ? wdlTsxBlowSchaetzung(tr) : null }catch(_){}
+      const feld = document.getElementById('tc-master-pl'), msgEl = document.getElementById('tradeCompleteMsg')
+      if(ts && feld && !feld.value){
+        feld.value = plFeldText(ts.pl)
+        if(msgEl){ msgEl.textContent = `≈ Master-P&L geschätzt: MLL ${Math.round(ts.mll).toLocaleString('de-DE')} − Start ${Math.round(ts.bs).toLocaleString('de-DE')} — ${WDL_TSX_SCHAETZ_TIP}. Bitte prüfen.`; msgEl.className = 'modal-msg' }
+      }
+    }
 
     // Manueller Winning Day (15.09.2026): Häkchen nur, wenn ein Account des
     // Plans manuell zählt — sonst bleibt die Box unsichtbar.
