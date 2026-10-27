@@ -30816,6 +30816,11 @@
   // Stunde hatte): dort ist ticks die Zahl ECHTER Kurs-Ticks (8–128/min), keine Reader-Pakete — die 200er-Grenze traf jede NQ-Minute.
   // Eine 'ws-tick'-Minute ist da, sobald es ihre 1m-Kerze gibt (fehlt sie, zählt sie oben als Lücke); minTicks gilt nur noch für
   // Zeilen ohne diese Quelle (Reader-Pakete).
+  // ticks = 0 = UNBEKANNT, nicht schwach (.1775, 27.10.2026, Master nach Befund MNQ „Aussetzer 02:08–18:16 (968 min)“): die Erstladung
+  // der Brücke schreibt Chart-Serien-Kerzen mit n = 0 und überschreibt per Upsert die live gezählten Pakete — am 27.10. sechsmal
+  // (01:48 … 14:23 UTC), danach trug fast der ganze Tag 0. Live war der Feed aber da: alle 13 MNQ-Hedge-Schließungen 04:04–13:46 UTC
+  // lasen „quelle realtime“, kein feed_fehlt_seit, jeder Kurs lag in L–H der Kerze. Aussetzer = 1 … minTicks−1 gezählte Pakete;
+  // fehlt eine Kerze ganz, bleibt es eine Lücke.
   // -> {luecken:[{von, bis, min, wurzel, art}] (neueste zuletzt), erste}
   function feedLuecken(je, minFehlend, jetztMs, minTicks){
     const minF = minFehlend > 0 ? minFehlend : 2, minT = minTicks > 0 ? minTicks : 200, out = []
@@ -30839,7 +30844,7 @@
         const schliessen = () => { if(lauf){ out.push(lauf); lauf = null } }
         for(let i = abIdx; i < rows.length; i++){
           const x = rows[i]
-          const schwach = x.quelle !== 'ws-tick' && x.t < laufend && x.ticks != null && x.ticks < minT && cmeMarktOffen(x.t)   // ws-tick: Kerze = da (.1774)
+          const schwach = x.quelle !== 'ws-tick' && x.t < laufend && x.ticks != null && x.ticks > 0 && x.ticks < minT && cmeMarktOffen(x.t)   // 0 = unbekannt (.1775)   // ws-tick: Kerze = da (.1774)
           if(!schwach){ schliessen(); continue }
           if(lauf && x.t === lauf.bis) { lauf.bis = x.t + 60000; lauf.min++ }
           else { schliessen(); lauf = { von: x.t, bis: x.t + 60000, min: 1, wurzel: w, art: 'aussetzer' } }
@@ -30917,7 +30922,7 @@
     const l = feedWache.luecken
     if(!l || l.erste == null) return ''
     const letzte = l.luecken.length ? l.luecken[l.luecken.length - 1] : null
-    const titel = 'tv_kurs_1m der letzten 24 h, NQ und MNQ · Lücke = ab 2 fehlenden Minuten in der CME-Handelszeit · Aussetzer = Minute mit weniger als 200 Reader-Paketen (voll 240; Quelle ws-tick: Kerze da = Minute da) · Tagespause und Wochenende zählen nicht'
+    const titel = 'tv_kurs_1m der letzten 24 h, NQ und MNQ · Lücke = ab 2 fehlenden Minuten in der CME-Handelszeit · Aussetzer = Minute mit weniger als 200 Reader-Paketen (voll 240; 0 = nicht gezählt, z. B. Erstladung; Quelle ws-tick: Kerze da = Minute da) · Tagespause und Wochenende zählen nicht'
     if(!letzte) return `<div class="mwd-feed" title="${titel}">Reader lückenlos seit ${zeit(l.erste)}</div>`
     const nL = l.luecken.filter(x => x.art === 'luecke').length, nA = l.luecken.length - nL
     return `<div class="mwd-feed" title="${titel} · 24 h: ${nL} Lücke${nL === 1 ? '' : 'n'}, ${nA} Aussetzer">Reader lückenlos seit ${zeit(letzte.bis)} · letzte${letzte.art === 'aussetzer' ? 'r Aussetzer' : ' Lücke'} ${zeit(letzte.von)}–${uhr(letzte.bis)} (${letzte.min} min, ${escapeHtml(letzte.wurzel)})</div>`
@@ -47751,7 +47756,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1774'
+  const OS_TAB_BUILD = '2026-09-22.1775'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
