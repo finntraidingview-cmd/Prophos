@@ -9416,9 +9416,9 @@ def test_tv_tp_orders():
 
 def test_puls_ein_konto_gekuerzt():
     """27.10.2026, pc-2zc2we (Finn + Pascal), FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄ — die Kürzung schnitt
-    alle Ziffern ab, augen.js fand keinen Umschalter, jeder Lauf brach mit „kein Konto-Umschalter im Broker-Panel erkannt" ab. Jetzt:
-    gekürzte Kennung = Umschalter (augen.js 0.8.6), Ein-Konto-Login (kein Pfeil + Klick ohne Liste) mit passendem Anfang = Ziel, sonst
-    Login-Wechsel; bei konto_nicht_erreicht einmal ein frischer TradingView-Tab."""
+    alle Ziffern ab, augen.js fand keinen Umschalter, jeder Lauf brach mit „kein Konto-Umschalter im Broker-Panel erkannt" ab. Finns Regel:
+    mit ⌄ den vollen Namen in der Liste lesen (schon aktiv → Esc, kein Klick); ohne ⌄ Präfix eindeutig → ok, Präfix mehrfach → nur mit
+    centgenauer Balance genau eines Kontos; sonst nicht lesbar (→ frischer Tab). Kennungen erfunden."""
     import order_bot as ob, os as _os
     ok = True
 
@@ -9427,42 +9427,59 @@ def test_puls_ein_konto_gekuerzt():
         print(("✓ " if bed else "  ✗ ") + "Ein-Konto-Login gekürzt: " + name)
         ok = ok and bool(bed)
 
-    FN = "FNFTFAFINNSAMUELHE… 155,365.92 USD"            # Muster wie am PC (Platzhalter-Ziffern unten)
-    ZIEL = "FNFTFAFINNSAMUELHERM00001"
-    chk(ob.cdp_ein_konto_ziel(FN, ZIEL, True, True) and not ob.cdp_ein_konto_ziel(FN, ZIEL, False, True)
-        and not ob.cdp_ein_konto_ziel(FN, ZIEL, True, False) and not ob.cdp_ein_konto_ziel(FN, ZIEL, None, True)
-        and not ob.cdp_ein_konto_ziel(FN, "LFF00000000000001", True, True)
-        and not ob.cdp_ein_konto_ziel("FNFTFAFINNSAMUELHERM00001 155,365.92 USD", ZIEL, True, True)
-        and not ob.cdp_ein_konto_ziel("PAAPEX668794000000… 100,000.00 USD", "PAAPEX6687940000016", True, True),
-        "Ziel nur mit kein ⌄ UND Klick ohne Liste UND passendem Anfang; nie Apex, nie ungekürzt (dort entscheidet die Nummer)")
+    FN = "FNFTFAMUSTERMUSTERAB… 155,365.92 USD"
+    ZIEL, Z2, Z3 = "FNFTFAMUSTERMUSTERAB00001", "FNFTFAMUSTERMUSTERAB00002", "FNFTFAMUSTERMUSTERAB00003"
+    Z = ob.cdp_ein_konto_ziel
+    chk(ob.cdp_konten_bal({"geschwister": ["@scharf=1", "@konten_bal=" + ZIEL + ":155365.92," + Z2 + ":148000.00,kaputt", Z2]})
+        == {ZIEL: 155365.92, Z2: 148000.0} and ob.cdp_konten_bal({"konten_bal": ZIEL + ":1.5"}) == {ZIEL: 1.5} and ob.cdp_konten_bal({}) == {}
+        and ob.cdp_konto_texte(ZIEL, ["@konten_bal=x:1", Z2]) == [ZIEL, Z2] and "konten_bal" in ob.TV_BRUECKE_FELDER
+        and ob.cdp_bal_aus_umschalter(FN) == 155365.92 and ob.cdp_bal_aus_umschalter("FNFTFAMUSTERMUSTERAB…") is None,
+        "Balances aus der Brücke, kontoTexte ohne Brücken-Einträge, angezeigte Balance aus dem Umschalter")
+    ja1, g1 = Z(FN, ZIEL, True, True, [ZIEL, "LFF00000000000001"], {})
+    ja2, g2 = Z(FN, ZIEL, True, True, [ZIEL, Z2, Z3], {ZIEL: 155365.92, Z2: 148000.0})
+    ja3, g3 = Z(FN, ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155300.00, Z2: 148000.0})
+    ja4, g4 = Z(FN, ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155365.92, Z2: 155365.92})
+    ja5, _ = Z(FN, ZIEL, True, True, [ZIEL, Z2], {Z2: 155365.92})
+    chk(ja1 and "per Präfix bestätigt" in g1, f"ohne ⌄, Präfix eindeutig → ok ({g1})")
+    chk(ja2 and "Präfix + Balance 155.365,92 bestätigt" in g2, f"ohne ⌄, Präfix bei 3 Konten, Balance centgenau nur beim Ziel → ok ({g2})")
+    chk(not ja3 and "keinem" in g3 and not ja4 and "2 davon" in g4 and not ja5,
+        f"gleiche Präfixe, Balance weicht ab / passt zu zwei / nur zu einem anderen → nicht bestätigt ({g3} | {g4})")
+    chk(not Z(FN, ZIEL, False, True, [ZIEL], {})[0] and not Z(FN, ZIEL, True, False, [ZIEL], {})[0] and not Z(FN, ZIEL, None, True, [ZIEL], {})[0]
+        and not Z(FN, "LFF00000000000001", True, True, [], {})[0] and not Z(ZIEL + " 155,365.92 USD", ZIEL, True, True, [ZIEL], {})[0],
+        "nie ohne doppelten Ein-Konto-Beleg (kein ⌄ + Klick ohne Liste), nie für ein fremdes Ziel, ungekürzt entscheidet die Nummer")
     chk(ob.cdp_ein_konto_beleg(FN, "LFF00000000000001", True) and ob.cdp_ein_konto_beleg(FN, "FTDFYSLX150000000001", False)
-        and ob.cdp_ein_konto_beleg(FN, "FNFTCHFINNSAMUELHERM00002", True) and not ob.cdp_ein_konto_beleg(FN, "FNFTCHFINNSAMUELHERM00002", False)
+        and ob.cdp_ein_konto_beleg(FN, "FNFTCHMUSTERMUSTERAB00002", True) and not ob.cdp_ein_konto_beleg(FN, "FNFTCHMUSTERMUSTERAB00002", False)
         and not ob.cdp_ein_konto_beleg(FN, ZIEL, True) and not ob.cdp_ein_konto_beleg("", "LFF00000000000001", True),
         "Login-Wechsel: andere Firma immer, gleiche Firma (FNFTCH vs. FNFTFA) nur im Ein-Konto-Login, nie fürs Ziel/ohne Text")
     st_v = {"konto": {"schalter": {"rect": [76, 741, 281, 34]}, "aktiv": FN}}
     chk(ob.cdp_konto_verbunden(st_v) == FN and ob.cdp_konto_verbunden({"konto": {"schalter": None, "aktiv": FN}}) == ""
-        and ob.cdp_konto_verbunden({"konto": {"schalter": {"rect": [1, 1, 9, 9]}, "aktiv": "Tradovate"}}) == "",
-        "„verbunden\" auch mit gekürzter Kennung (kein 40-s-Warten auf „kein Konto\"), ohne Umschalter/Kennung nie")
-    chk(ob.cdp_abmelden_erlaubt(FN, {"konto_treffer": 0, "liste_aktiv": FN}) == (True, "")
-        and ob.cdp_abmelden_erlaubt("", {"konto_treffer": 0, "liste_aktiv": FN}) == (False, "unlesbar")
-        and ob.cdp_abmelden_erlaubt(FN, {"konto_treffer": 0, "liste_aktiv": "PAAPEX668794000000… 1 USD"})[0] is False,
-        "Abmelden: gekürzte Kennung ist lesbar, braucht aber weiter den passenden Beleg")
+        and ob.cdp_konto_verbunden({"konto": {"schalter": {"rect": [1, 1, 9, 9]}, "aktiv": "Tradovate"}}) == ""
+        and ob.cdp_abmelden_erlaubt(FN, {"konto_treffer": 0, "liste_aktiv": FN}) == (True, "")
+        and ob.cdp_abmelden_erlaubt("", {"konto_treffer": 0, "liste_aktiv": FN}) == (False, "unlesbar"),
+        "„verbunden\" und Abmelden: gekürzte Kennung ist lesbar, Abmelden braucht weiter den passenden Beleg")
+    L = [{"text": ZIEL + " 155,365.92 USD"}, {"text": Z2 + " 148,000.00 USD"}]
+    chk(ob.cdp_liste_aktiv_bestaetigt(L, FN, ZIEL) and not ob.cdp_liste_aktiv_bestaetigt(L, FN, Z2)
+        and not ob.cdp_liste_aktiv_bestaetigt([{"text": ZIEL + " 155,365.92 USD"}, {"text": Z2 + " 155,365.92 USD"}], FN, ZIEL)
+        and ob.cdp_liste_aktiv_bestaetigt([{"text": ZIEL + " 1 USD", "aria-selected": "true"}, {"text": Z2}], FN, ZIEL),
+        "Liste: Ziel schon aktiv (voller Name + gleiche Balance genau einmal bzw. aria-selected) → bestätigt; sonst nicht")
     T = ob.cdp_tab_frisch_noetig
     cmd = {"tv_username": "FNFT_MUSTER"}
     chk(T(False, "konto_nicht_erreicht", cmd, False, 30)[0] and not T(True, "", cmd, False, 30)[0]
         and not T(False, "konto_nicht_erreicht", cmd, True, 30)[0] and not T(False, "konto_weg", cmd, False, 30)[0]
-        and not T(False, "konto_nicht_erreicht", {}, False, 30)[0] and not T(False, "konto_nicht_erreicht", cmd, False, 200)[0]
-        and "nur einmal" in T(False, "konto_nicht_erreicht", cmd, True, 30)[1],
+        and not T(False, "konto_nicht_erreicht", {}, False, 30)[0] and not T(False, "konto_nicht_erreicht", cmd, False, 200)[0],
         "frischer Tab: nur konto_nicht_erreicht, einmal je Auftrag, nur mit Username, nur früh im Lauf")
 
     class _S1:
-        """Attrappe: Tradovate-Login mit EINEM Konto — Umschalter ohne ⌄, Klick öffnet nie eine Liste."""
-        def __init__(self, ein_konto=True, aktiv=FN):
-            self.ein, self.aktiv, self.klicks, self.tasten = ein_konto, aktiv, [], []
+        """Attrappe Puls-Chrome: Umschalter gekürzt; pfeil=False → Login mit EINEM Konto (Klick öffnet nie eine Liste),
+        pfeil=True → Liste mit vollen Namen, aktiv = erste Zeile."""
+        def __init__(self, pfeil=False, aktiv=FN, liste=None):
+            self.pfeil, self.aktiv, self.klicks, self.tasten, self.offen = pfeil, aktiv, [], [], False
+            self.liste = liste if liste is not None else [{"text": ZIEL + " 155,365.92 USD", "rect": [78, 600, 228, 32]},
+                                                         {"text": Z2 + " 148,000.00 USD", "rect": [78, 632, 228, 32]}]
 
         def stand(self, opts=None):
-            return {"konto": {"panel": "offen", "schalter": {"rect": [76, 741, 281, 34]}, "aktiv": self.aktiv, "ein_konto": self.ein,
-                              "liste_offen": False, "eintraege": []}}
+            return {"konto": {"panel": "offen", "schalter": {"rect": [76, 741, 281, 34]}, "aktiv": self.aktiv, "ein_konto": not self.pfeil,
+                              "liste_offen": self.offen, "eintraege": self.liste if self.offen else []}}
 
         def lese_js(self, a, timeout=8):
             if "elementFromPoint" in a:
@@ -9474,29 +9491,42 @@ def test_puls_ein_konto_gekuerzt():
 
         def taste(self, k, modifiers=0):
             self.tasten.append(k)
+            if k == "Escape":
+                self.offen = False
 
         def klick(self, r, n, toast_ok=False):
             self.klicks.append(n)
+            if n == "Konto-Umschalter":
+                self.offen = self.pfeil
+            elif n.startswith("Konto "):
+                self.offen = False
             return True
     alt_w = ob._warte
     ob._warte = lambda a_, b_: None
+    lauf = lambda s_, ext_, texte_, bal_: (lambda t_: (ob._cdp_konto_sichern(s_, ext_, {"kontoTexte": texte_, "kontenBal": bal_}, t_), t_))([])
     try:
-        s1, t1 = _S1(), []
-        r1 = ob._cdp_konto_sichern(s1, ZIEL, {"kontoTexte": [ZIEL]}, t1)
-        s2, t2 = _S1(ein_konto=False), []
-        r2 = ob._cdp_konto_sichern(s2, ZIEL, {"kontoTexte": [ZIEL]}, t2)
-        s3, t3 = _S1(), []
-        r3 = ob._cdp_konto_sichern(s3, "LFF00000000000001", {"kontoTexte": ["LFF00000000000001"]}, t3)
+        (r1, t1), s1 = lauf(_S1(), ZIEL, [ZIEL], {}), None
+        s2 = _S1(); r2, t2 = lauf(s2, ZIEL, [ZIEL, Z2, Z3], {ZIEL: 155365.92, Z2: 148000.0})
+        s3 = _S1(); r3, t3 = lauf(s3, ZIEL, [ZIEL, Z2], {ZIEL: 150000.0, Z2: 148000.0})
+        s4 = _S1(); r4, t4 = lauf(s4, "LFF00000000000001", ["LFF00000000000001"], {})
+        s5 = _S1(pfeil=True); r5, t5 = lauf(s5, ZIEL, [ZIEL, Z2], {})
+        s6 = _S1(pfeil=True); r6, t6 = lauf(s6, Z2, [Z2, ZIEL], {})
     finally:
         ob._warte = alt_w
-    chk(r1[0] is True and r1[4].get("konto_aktiv") == ZIEL and s1.klicks.count("Konto-Umschalter") == 1
-        and any("Login mit nur diesem einen Konto" in z for z in t1),
-        f"Ein-Konto-Login, Anfang passt → Konto steht, ein Umschalter-Klick, konto_aktiv = volle External ID ({r1[1]}, {t1[-1:]})")
-    chk(r2[0] is False and r2[1] == "konto_nicht_erreicht" and "nur gekürzt" in r2[2] and "konto_aktiv" not in (r2[4] or {}),
-        f"mit ⌄ (mehrere Konten), Liste geht nicht auf → wie bisher kein Beleg, nichts gewählt ({r2[2][:80]})")
-    chk(r3[0] is False and r3[1] == "konto_nicht_erreicht" and (r3[4] or {}).get("konto_treffer") == 0 and (r3[4] or {}).get("liste_aktiv") == FN
-        and "Login-Wechsel" in r3[2] and ob.cdp_abmelden_erlaubt(FN, r3[4]) == (True, ""),
-        f"Ein-Konto-Login, Ziel anderer Login → Beleg für den Login-Wechsel statt Abbruch ({r3[2][:80]})")
+    chk(r1[0] is True and r1[4].get("konto_aktiv") == ZIEL and any("per Präfix bestätigt" in z for z in t1),
+        f"Fall 2 (kein ⌄, Präfix eindeutig): Konto steht, konto_aktiv = volle External ID ({t1[-2:]})")
+    chk(r2[0] is True and r2[4].get("konto_aktiv") == ZIEL and any("Präfix + Balance 155.365,92 bestätigt" in z for z in t2)
+        and s2.klicks.count("Konto-Umschalter") == 1,
+        f"Fall 3 (kein ⌄, gleiche Präfixe, Balance centgenau nur beim Ziel): Konto steht ({t2[-2:]})")
+    chk(r3[0] is False and r3[1] == "konto_nicht_erreicht" and any("nicht bestätigt" in z for z in t3) and "konto_aktiv" not in (r3[4] or {}),
+        f"Fall 4 (gleiche Präfixe, Balance weicht ab): nicht lesbar, nichts gewählt — dann greift der frische Tab ({r3[2][:70]})")
+    chk(r4[0] is False and (r4[4] or {}).get("konto_treffer") == 0 and (r4[4] or {}).get("liste_aktiv") == FN and "Login-Wechsel" in r4[2],
+        f"kein ⌄, Ziel in anderem Login → Beleg für den Login-Wechsel statt Abbruch ({r4[2][:70]})")
+    chk(r5[0] is True and r5[4].get("konto_aktiv") == ZIEL and not any(k.startswith("Konto FNFT") for k in s5.klicks) and "Escape" in s5.tasten
+        and any("per Dropdown bestätigt" in z for z in t5),
+        f"Fall 1 (mit ⌄, Ziel schon aktiv): Liste auf, voller Name gelesen, Esc — kein Klick auf einen Eintrag ({s5.klicks})")
+    chk(r6[0] is True and any(k == "Konto " + Z2 for k in s6.klicks) and r6[4].get("konto_aktiv") == Z2,
+        f"Fall 1b (mit ⌄, anderes Konto aktiv): Ziel-Eintrag geklickt wie bisher ({s6.klicks})")
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("RX_KENNUNG_GEKUERZT.test(entdoppeln(tk))" in js and "ein_konto: s.el ? !pfeil : null" in js and "alle('svg,[role=\"img\"]', s.el)" in js,
         "augen.js 0.8.6: gekürzte Kennung als Umschalter, ein_konto aus dem fehlenden Pfeil")
@@ -9507,7 +9537,6 @@ def test_puls_ein_konto_gekuerzt():
         and _i.getsource(ob.modus_tvkette_cdp).count("frisch=True") >= 1,
         "frischer Tab: Merker vor dem Tab-Tausch, genau ein zweiter Konto-Schritt, Warten nur über _warte; Order-Weg nutzt ihn")
     return ok
-
 
 if __name__ == "__main__":
     sys.exit(main())

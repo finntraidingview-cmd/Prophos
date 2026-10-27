@@ -89,6 +89,13 @@ h4.knoepfe.length = 0; h4.knoepfe.push(knopf("TDFYTEST0000000001 TDFYTEST0000000
 check(h4.kontoNummerAmSchalter() === "TDFYTEST0000000001", "Umschalter-Knopf mit 5+ Endziffern wie bisher");
 h4.knoepfe.length = 0; h4.knoepfe.push(knopf("Positions"), knopf("NQZ2026"), knopf("Paper Trading"));
 check(h4.kontoNummerAmSchalter() === "", "kein Konto-Knopf → leer");
+// 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern (Login mit einem Konto) — erfundene Kennung
+h4.knoepfe.length = 0; h4.knoepfe.push(knopf("Positions"), knopf("FNFTFAMUSTERMUSTERAB\u2026 155,365.92 USD"));
+check(h4.kontoNummerAmSchalter() === "FNFTFAMUSTERMUSTERAB\u2026", "gekuerzte Kennung → Stueck mit … (nie als volle Nummer)");
+check(h4.kontoIstEcht("FNFTFAMUSTERMUSTERAB\u2026") && !h4.kontoIstEcht("MNQZ2026\u2026") && !h4.kontoIstEcht("Positions\u2026")
+      && !h4.kontoIstEcht("ABC\u2026 1,00 USD"), "gekuerzt zaehlt als Konto, kurze Woerter/Kontrakte mit … nie");
+h4.kontoMerk.text = "FNFTFAMUSTERMUSTERAB\u2026"; h4.kontoMerk.ts = T;
+check(h4.kontoAngemeldet(T + 1000), "gekuerzt: kontoAngemeldet (nicht mehr blind)");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }

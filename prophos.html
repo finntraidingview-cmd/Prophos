@@ -24289,10 +24289,21 @@
       const istArch = a => !!(arch[a.id] && arch[a.id].archived)
       const inaktiv = gleiche.filter(istArch).sort((a, b) => String(arch[b.id].at || '').localeCompare(String(arch[a.id].at || ''))).slice(0, 10)
       const geschwister = [...gleiche.filter(a => !istArch(a)), ...inaktiv].map(a => String(a.externalId).trim()).filter(Boolean).slice(0, 55)
-      return { firma, tv_username: (spec && spec.tvUsername) ? String(spec.tvUsername).trim() : '', geschwister }
+      const kb = tvKontenBalBruecke([acc, ...gleiche.filter(a => !istArch(a)), ...inaktiv])   // .1776: Balances für gekürzte Kennungen
+      return { firma, tv_username: (spec && spec.tvUsername) ? String(spec.tvUsername).trim() : '', geschwister: kb ? [kb, ...geschwister] : geschwister }
     }catch(_){ return {} }
   }
   window._tvV2KontoKontext = tvV2KontoKontext
+  /* LETZTE BALANCE JE KONTO FÜR PULS (.1776, 27.10.2026, Finn nach pc-2zc2we: Umschalter „FNFTFAFINNSAMUELHE… 155,365.92 USD" ohne ⌄ —
+   * „den sichtbaren Namensanfang gegen die Kennung prüfen UND die angezeigte Balance gegen die letzte bekannte Balance des Kontos auf den
+   * Cent"): ein Brücken-Eintrag '@konten_bal=EXT:123.45,…' in geschwister (das Panel reicht die Liste seit .316 durch; order_bot
+   * cdp_konten_bal liest ihn). Quelle accounts.tv_balance (acc.tvBalance) — Ziel + dieselbe Kontomenge wie geschwister. */
+  function tvKontenBalBruecke(accs){
+    const t = (accs || []).filter(a => a && a.externalId && a.tvBalance != null && isFinite(Number(a.tvBalance)))
+      .map(a => String(a.externalId).trim().replace(/[,:=\s]/g, '') + ':' + Number(a.tvBalance).toFixed(2)).slice(0, 56).join(',')
+    return t ? '@konten_bal=' + t : ''
+  }
+  window._tvKontenBalBruecke = tvKontenBalBruecke
   async function tvV2Lesen(konto, timeoutS, plan, zusatz){
     if(typeof window.mtcApi !== 'function') return { ok:false, code:'reader_fehlt', msg:'Copier-Backend nicht erreichbar' }
     // zusatz (25.09.2026): {ende, symbol, richtung} nur von der Endlesung — Ende-Modus des Bots (Befund, Rückfall, Exit-Fill)
@@ -48487,6 +48498,10 @@
       .slice(0, 10)
     geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
       .map(a => String(a.externalId).trim())
+    try{   // .1776: letzte Balance je Konto vorn (Puls prüft gekürzte Kennungen centgenau, window._tvKontenBalBruecke)
+      const _kb = typeof window._tvKontenBalBruecke === 'function' ? window._tvKontenBalBruecke([(accounts || []).find(a => String(a.id) === String(plan.masterAccountId)), ..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]) : ''
+      if(_kb) geschwister = [_kb, ...geschwister]
+    }catch(_){}
     // Slave-Vorprüfung auch für Hand-Start und Fern-Signal (29.09.2026) — VOR dem Riegel _tpOrbitLaeuft, sonst bliebe er hängen
     if(vorcheckNoetig(plan) && MT5_LOCAL){
       vorcheckKarteZeigen(plan, null, 'pruefe')

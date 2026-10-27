@@ -7730,7 +7730,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
 
 
 TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf",
-                     "plan_id")        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
+                     "plan_id", "konten_bal")        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
 
 
 def tv_bruecke_auspacken(cmd):
@@ -20206,17 +20206,94 @@ def cdp_ein_konto_beleg(aktiv, ext, ein_konto=False):
     return bool(fa and fz and fa != fz)
 
 
-def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste):
-    """REIN RECHNEND (testbar): Ist ein GEKÜRZTES aktives Konto in einem Login mit nur EINEM Konto das Ziel? (27.10.2026, pc-2zc2we, Finn +
-    Pascal, FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄, Ziel FNFTFAFINNSAMUELHERM38896 — ohne Liste gab es
-    nach der Regel vom 27.10. früh nie einen Beleg, jeder Lauf brach ab.) Ja nur mit DOPPELTEM Beleg „ein Konto": kein Aufklapp-Pfeil
-    (augen.js ein_konto) UND dieser Lauf hat den Umschalter geklickt, ohne dass eine Liste aufging — dazu passt der Anfang (≥ 14 Zeichen,
-    cdp_konto_passt). Apex nie: dort teilen alle Konten eines Users den Anfang und Logins haben fast immer viele Konten (Liste nötig).
-    Steht das Ziel gar nicht in diesem Login, gäbe es mit ihm zwei Konten und damit einen Pfeil."""
+def cdp_konten_bal(cmd):
+    """REIN RECHNEND (testbar): letzte bekannte Balance je External ID aus dem Befehl (accounts.tv_balance aus dem PC-Tab, 27.10.2026).
+    Der Tab schickt sie als Brücken-Eintrag '@konten_bal=EXT:123.45,EXT2:…' in geschwister (das Panel reicht geschwister seit .316
+    durch) oder als Feld konten_bal. -> {EXT (nur A–Z/0–9, groß): float}"""
+    c = cmd if isinstance(cmd, dict) else {}
+    roh = str(c.get("konten_bal") or "")
+    for x in (c.get("geschwister") or []):
+        t = str(x)
+        if t.startswith("@konten_bal="):
+            roh = roh or t.split("=", 1)[1]
+    out = {}
+    for teil in roh.split(","):
+        if ":" not in teil:
+            continue
+        k, v = teil.rsplit(":", 1)
+        try:
+            w = float(v)
+        except (TypeError, ValueError):
+            continue
+        if _nur_alnum(k) and w == w:
+            out[_nur_alnum(k).upper()] = w
+    return out
+
+
+def cdp_konto_texte(ext, geschwister):
+    """REIN RECHNEND (testbar): kontoTexte für augen.js — Ziel + Geschwister, OHNE Brücken-Einträge ('@feld=wert', 27.10.2026)."""
+    return [ext] + [x for x in (geschwister or []) if not str(x).startswith("@")]
+
+
+def cdp_bal_aus_umschalter(text):
+    """REIN RECHNEND (testbar): angezeigte Balance hinter der (gekürzten) Kennung im Umschalter ('FNFT…… 155,365.92 USD' → 155365.92)."""
+    m = re.search(r"(?:…|\.{3}|\d)\s*(-?[\d][\d.,]*\d)\s*(?:USD|EUR|GBP|CHF|AUD|CAD|JPY)?\s*$", str(text or "").strip())
+    if not m:
+        return None
+    return tv_geld_lesen(m.group(1))
+
+
+def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, bal=None):
+    """REIN RECHNEND (testbar): Ist ein GEKÜRZTES aktives Konto in einem Login mit nur EINEM Konto das Ziel? -> (ja, grund)
+    27.10.2026, pc-2zc2we (Finn + Pascal), FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄ — ohne Liste gab es
+    nach der Regel vom 27.10. früh nie einen Beleg, jeder Lauf brach ab. Voraussetzung „ein Konto" doppelt: kein Aufklapp-Pfeil (augen.js
+    ein_konto) UND dieser Lauf hat den Umschalter geklickt, ohne dass eine Liste aufging; dazu passt der Anfang (≥ 14 Zeichen).
+    Finns Regel (27.10.2026): passt der Anfang zu GENAU EINEM Konto dieses Logins (Ziel + andere = Konten derselben Firma dieser ID,
+    aktiv + zuletzt archivierte) → ja. Teilen mehrere den Anfang → nur ja, wenn die angezeigte Balance centgenau zur letzten bekannten
+    Balance (bal: accounts.tv_balance) GENAU EINES dieser Konten passt und das das Ziel ist. Sonst nein (nicht lesbar → frischer Tab)."""
     a = str(aktiv or "")
     if not (ein_konto is True and geklickt_ohne_liste and cdp_konto_gekuerzt(a) and cdp_konto_passt(a, ext)):
+        return False, ""
+    st = cdp_konto_stueck(a)
+    e = _nur_alnum(ext).upper()
+    kand = {e}
+    for x in (andere or []):
+        n = _nur_alnum(x).upper()
+        if n and not str(x).startswith("@") and n.startswith(st):
+            kand.add(n)
+    if kand == {e}:
+        return True, f"Konto per Präfix bestätigt ('{st}…' passt nur zu {ext} unter {1 + len([x for x in (andere or []) if not str(x).startswith('@')])} Konten der Firma)"
+    b = cdp_bal_aus_umschalter(a)
+    if b is None:
+        return False, f"Präfix '{st}…' passt zu {len(kand)} Konten, Balance im Umschalter nicht lesbar"
+    gleich = sorted(k for k in kand if k in (bal or {}) and round(float(bal[k]) * 100) == round(b * 100))
+    bt = f"{b:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if gleich == [e]:
+        return True, f"Konto per Präfix + Balance {bt} bestätigt ({len(kand)} Konten mit diesem Anfang, nur {ext} hat diese Balance)"
+    return False, (f"Präfix '{st}…' passt zu {len(kand)} Konten, Balance {bt} passt zu "
+                   + (f"{len(gleich)} davon" if gleich else "keinem (letzte bekannte Balance fehlt oder weicht ab)"))
+
+
+def cdp_liste_aktiv_bestaetigt(eintraege, aktiv, ext):
+    """REIN RECHNEND (testbar): Steht das Ziel in der SELBST geöffneten Liste schon als aktives Konto? (Finn 27.10.2026: „Dropdown öffnen,
+    dort den vollen Namen lesen … wieder schließen (Escape), ohne Klick auf ein anderes Konto, wenn es schon passt".) Ja, wenn die
+    Ziel-Zeile genau einmal da ist und aria-selected/-checked trägt, oder — bei gekürztem Umschalter — die einzige Zeile ist, deren volle
+    Nummer mit dem Stück beginnt UND deren Balance centgenau der angezeigten gleicht. Sonst nein (dann wird wie bisher der Eintrag geklickt)."""
+    e, n = cdp_konto_eintrag(eintraege, ext)
+    if not e or n != 1:
         return False
-    return not cdp_konto_familie(ext).startswith("apex:") and not re.match(r"^(?:PA)?APEX", _nur_alnum(ext).upper())
+    if e.get("aria-selected") == "true" or e.get("aria-checked") == "true":
+        return True
+    a = str(aktiv or "")
+    if not cdp_konto_gekuerzt(a):
+        return bool(cdp_konto_passt(a, ext))
+    st, b = cdp_konto_stueck(a), cdp_bal_aus_umschalter(a)
+    if not st or b is None:
+        return False
+    kand = [z for z in (eintraege or []) if isinstance(z, dict) and _nur_alnum(cdp_kontonr(str(z.get("text") or ""))).upper().startswith(st)
+            and cdp_bal_aus_umschalter(str(z.get("text") or "")) is not None
+            and round(cdp_bal_aus_umschalter(str(z.get("text") or "")) * 100) == round(b * 100)]
+    return len(kand) == 1 and kand[0] is e
 
 
 def cdp_konto_eintrag(eintraege, ext):
@@ -20630,6 +20707,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
     gekuerzt_gemeldet = False
     ein_konto_ziel = False                                # Ein-Konto-Login, gekürzte Kennung = Ziel (cdp_ein_konto_ziel, 27.10.2026)
+    liste_bestaetigt = False                              # Ziel in der Liste schon aktiv, Esc statt Klick (cdp_liste_aktiv_bestaetigt)
     for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
@@ -20648,7 +20726,8 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 trail.append(f"Umschalter zeigt die Kennung nur gekürzt ('{aktiv[:40]}') — kein Beleg, Konto über die Liste wählen")
         elif aktiv and cdp_konto_passt(aktiv, ext):
             trail.append(f"Konto steht: '{aktiv[:40]}'" + ((" (gekürzt — Login mit nur diesem einen Konto: kein ⌄, Klick öffnet keine Liste)"
-                                                             if ein_konto_ziel else " (gekürzt — Eintrag bewiesen geklickt)") if gekuerzt else ""))
+                                                             if ein_konto_ziel else " (gekürzt — per Dropdown bestätigt)" if liste_bestaetigt
+                                                             else " (gekürzt — Eintrag bewiesen geklickt)") if gekuerzt else ""))
             # Prüfer 30.09.2026: eine offene Liste (z. B. aus einem früheren Lauf) liegt maximiert direkt über den Reitern Positions/
             # Account summary — der Reiter-Klick drückte sonst eine Kontozeile. Erst zu, dann weiter.
             if ko.get("liste_offen"):
@@ -20750,6 +20829,13 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 return False, "konto_nicht_erreicht", (f"Konto {ext} steht im Dropdown {n}x (nicht genau einmal) — nichts geklickt"
                                                         + ((" (anderer Tradovate-Login?)" if ex.get("liste_aktiv") else
                                                             (f" — richtiger Login, Ziel fehlt: {grund}" if ex.get("gleicher_login") else f" — kein Login-Beleg: {grund}")) if n == 0 else "") + "."), st, ex
+            if geklickt_umschalter and gekuerzt and cdp_liste_aktiv_bestaetigt(ko.get("eintraege"), aktiv, ext):
+                # Finn 27.10.2026: voller Name in der Liste, Ziel ist schon aktiv → Liste zu, nichts geklickt
+                _cdp_esc(s, st, trail, "Konto per Dropdown bestätigt (voller Name in der Liste, schon aktiv)")
+                konto_geklickt = liste_bestaetigt = True  # Beleg wie ein bewiesener Klick: „Konto steht" mit voller External ID
+                _warte(0.6, 0.3)
+                st = s.stand(opts)
+                continue
             if not s.klick(cdp_rect(e), f"Konto {ext}"):
                 # Prüfer 30.09.2026: ein nicht gedrückter Eintrag verbrauchte alle Runden und ließ die Liste offen
                 _cdp_esc(s, st, trail, "Konto-Eintrag nicht gedrückt")
@@ -20808,11 +20894,16 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             # LOGIN MIT NUR EINEM KONTO, KENNUNG GEKÜRZT (27.10.2026, pc-2zc2we, FundedNext Futures): kein ⌄ im Umschalter UND dieser Klick
             # öffnete keine Liste → der Login hat genau dieses Konto. Passt sein Anfang zum Ziel, ist es das Ziel (cdp_ein_konto_ziel) —
             # einmal neu lesen und als „Konto steht" weiter. Sonst unten wie bisher: anderer Login (Login-Wechsel) bzw. ehrlich raus.
-            if not ein_konto_ziel and cdp_ein_konto_ziel(aktiv, ext, ko.get("ein_konto"), True):
-                ein_konto_ziel = True
-                _warte(0.6, 0.3)
-                st = s.stand(opts)
-                continue
+            if not ein_konto_ziel:
+                ja_ek, grund_ek = cdp_ein_konto_ziel(aktiv, ext, ko.get("ein_konto"), True, (opts or {}).get("kontoTexte"), (opts or {}).get("kontenBal"))
+                if ja_ek:
+                    ein_konto_ziel = True
+                    trail.append(grund_ek)
+                    _warte(0.6, 0.3)
+                    st = s.stand(opts)
+                    continue
+                if grund_ek:
+                    trail.append(f"Login mit nur einem Konto, Kennung gekürzt — nicht bestätigt: {grund_ek}")
             # LOGIN MIT NUR EINEM KONTO (02.10.2026, Moritz, Balance-Lesen: aktiv TDFYSL…, Umschalter-Klick öffnet keine Liste): ist das
             # aktive Konto als Kontonummer lesbar und ein ANDERES als das Ziel, gilt das als Beleg „anderer Tradovate-Login" — wie beim
             # Order-Weg. Lesbarkeit ist der Schutz aus .865 (dort war aktiv '-'); cdp_abmelden_erlaubt prüft vor dem Abmelden noch einmal.
@@ -20961,7 +21052,7 @@ def modus_tvlesen_cdp(cmd):
         return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
     ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": [ext] + geschwister}
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     trail.append("Weg: Puls-Chrome (CDP)")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): im Puls-Chrome klickt gerade ein Hand-Befehl — nicht dazwischen
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, bitte gleich erneut anstoßen.", "sperre")
@@ -22322,7 +22413,7 @@ def modus_tvkette_cdp(cmd):
         return raus("befehl", fehler, "befehl")
     scharf = tv_ist_scharf(cmd)
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": [ext] + geschwister}
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     trail.append("Weg: Puls-Chrome (CDP" + (", SCHARF" if scharf and symbol else ", Probelauf — kein Senden" if symbol else "") + ")")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
@@ -22684,7 +22775,7 @@ def modus_tvclose_cdp(cmd):
     root = tv_symbol_root(symbol)
     richtung = str(cmd.get("richtung") or "").strip().lower() or None
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": [ext] + geschwister}
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     res["symbol"], res["wurzel"], res["richtung"] = symbol, root, richtung
     trail.append("Weg: Puls-Chrome (CDP, Schließen)")
     if _handlauf_aktiv():
@@ -25829,7 +25920,7 @@ def modus_tvkette_cdp_mit_neustart(cmd):
         return modus_tvkette_cdp(cmd)
     ext = str(c.get("ext_id") or c.get("konto") or "").strip()
     geschwister = [str(x).strip() for x in (c.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
-    opts = {"kontoTexte": [ext] + geschwister}
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister), "kontenBal": cdp_konten_bal(c)}   # 27.10.2026: Balances für gekürzte Kennungen
     root = tv_symbol_root(symbol)
     return _puls_mit_neustart("tvv2", lambda: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),

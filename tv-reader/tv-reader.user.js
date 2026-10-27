@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.9
+// @version      0.9.10
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.10 27.10.2026  Gekuerzte Kennung OHNE Ziffern im Umschalter („FNFTFAFINNSAMUELHE… 155,365.92 USD", pc-2zc2we, Tradovate-Login
+//                      mit nur einem Konto): galt als „kein Konto angemeldet" → Reader blind. Jetzt meldet er das Stueck mit „…"
+//                      (z. B. „FNFTFAFINNSAMUELHE…"); das Frontend ordnet es ueber kontoTextBezug ('kurz', eindeutig) zu, der exakte
+//                      Hedge-Abgleich (hedgeKontoPasst) bleibt streng — ein gekuerzter Text schliesst dort nie etwas.
 //   0.9.8  05.10.2026  Kontonummern mit nur VIER Endziffern zaehlen als Konto (Zusatzregel wie augen.js 0.7.7: mindestens 10
 //                      Buchstaben am Stueck + genau 4 Ziffern). Anlass 05.10.2026: ein FundedNext-Futures-Konto dieser Form
 //                      stand als aktives Konto im Umschalter, fuer den Reader galt „kein Konto angemeldet" — keine Positions-
@@ -132,7 +136,8 @@
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
-  const VERSION    = '0.9.9';
+  // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
+  const VERSION    = '0.9.10';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -356,7 +361,9 @@
   // Kennung wird bitgleich erkannt, die neue greift nur, wenn die alte nichts findet.
   const RX_KONTO_ECHT4 = /[A-Z]{10,}\d{4}(?!\d)/;
   const RX_KONTONR = /[A-Z]{2,}[A-Z0-9_-]*?\d{5,}/i;   // Kontonummer aus dem Knopf-Text (0.9.2, unveraendert)
-  function kontoIstEcht(t) { t = String(t || ''); return RX_KONTO_ECHT.test(t) || RX_KONTO_ECHT4.test(t); }
+  // 0.9.10: gekuerzte Kennung (≥ 4 Grossbuchstaben, ≥ 10 Zeichen, direkt „…"/„...") — wie augen.js 0.8.6 RX_KENNUNG_GEKUERZT
+  const RX_KONTO_KURZ = /^([A-Z]{4,}[A-Z0-9_-]{6,})\s*(?:…|\.{3})/;
+  function kontoIstEcht(t) { t = String(t || ''); return RX_KONTO_ECHT.test(t) || RX_KONTO_ECHT4.test(t) || RX_KONTO_KURZ.test(t.trim()); }
   function kontoNrAus(t) { t = String(t || ''); return t.match(RX_KONTONR) || t.match(RX_KONTO_ECHT4); }
   // Konto im Umschalter angemeldet? (Rohwert — vor 0.8.8 war das allein die Rolle)
   function kontoAngemeldet(jetzt) {
@@ -385,7 +392,7 @@
     const lr = leiste && sichtbar(leiste) ? leiste.getBoundingClientRect() : null;
     const tc = (e) => kontoEntdoppeln(String((e && e.textContent) || '').replace(/\s+/g, ' ').trim());
     let kand = [...document.querySelectorAll('button,[role="button"]')].filter(sichtbar).filter((e) => {
-      if (!kontoIstEcht(tc(e))) return false;   // 0.9.8: auch 4 Endziffern
+      if (!kontoIstEcht(tc(e))) return false;   // 0.9.8: auch 4 Endziffern; 0.9.10: auch gekuerzt
       if (e.closest('[data-name="order-panel"],table,[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return false;
       const r = e.getBoundingClientRect();
       return lr ? (r.top >= lr.top - 4 && r.left <= lr.left + 400) : r.top > window.innerHeight * 0.3;
@@ -394,7 +401,9 @@
     if (!kand.length || (!lr && kand.length > 1)) return '';
     if (lr) kand.sort((a, b) => (a.getBoundingClientRect().top - lr.top) - (b.getBoundingClientRect().top - lr.top));
     const m = kontoNrAus(tc(kand[0]).replace(/\s/g, ''));   // 0.9.8: alte Regel zuerst, sonst 4 Endziffern
-    return m ? m[0] : '';
+    if (m) return m[0];
+    const k = tc(kand[0]).match(RX_KONTO_KURZ);   // 0.9.10: nur das Stueck mit „…" — nie als volle Nummer ausgeben
+    return k ? k[1] + '…' : '';
   }
   function liesKonto() {
     try {
