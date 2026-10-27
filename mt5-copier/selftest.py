@@ -9430,13 +9430,22 @@ def test_puls_ein_konto_gekuerzt():
     FN = "FNFTFAMUSTERMUSTERAB… 155,365.92 USD"
     ZIEL, Z2, Z3 = "FNFTFAMUSTERMUSTERAB00001", "FNFTFAMUSTERMUSTERAB00002", "FNFTFAMUSTERMUSTERAB00003"
     Z = ob.cdp_ein_konto_ziel
-    chk(ob.cdp_konten_bal({"geschwister": ["@scharf=1", "@konten_bal=" + ZIEL + ":155365.92," + Z2 + ":148000.00,kaputt", Z2]})
-        == {ZIEL: 155365.92, Z2: 148000.0} and ob.cdp_konten_bal({"konten_bal": ZIEL + ":1.5"}) == {ZIEL: 1.5} and ob.cdp_konten_bal({}) == {}
-        and ob.cdp_konto_texte(ZIEL, ["@konten_bal=x:1", Z2]) == [ZIEL, Z2] and "konten_bal" in ob.TV_BRUECKE_FELDER
+    # Panel-Schnitt wie panel.py (/api/tv-konto, tv-lesen, tv-close): jeder Eintrag [:60], die Liste [:60] — S2-Befund 27.10.2026
+    panel = lambda g: [str(x).strip()[:60] for x in g][:60]
+    g_roh = (["@scharf=1", "@plan_id=00000000-0000-4000-8000-000000000001", "@kb=" + ZIEL + ":155365.92", "@kb=" + Z2 + ":148000.00", "@kb=" + Z3 + ":"]
+             + ["MUSTER%017d" % i for i in range(60)])
+    kb_p = ob.cdp_konten_bal({"geschwister": panel(g_roh)})
+    cmd_b = ob.tv_bruecke_auspacken({"geschwister": panel(g_roh)})
+    chk(kb_p == {ZIEL: 155365.92, Z2: 148000.0, Z3: None} and ob.cdp_konten_bal(cmd_b) == kb_p and not any(str(x).startswith("@") for x in cmd_b["geschwister"])
+        and ob.cdp_konten_bal({"geschwister": ["@kb=" + ZIEL + ":15", "@kb=" + Z2 + ":1x"]}) == {ZIEL: 15.0}
+        and ob.cdp_konto_texte(ZIEL, ["@kb=x:1", Z2]) == [ZIEL, Z2] and "konten_bal" not in ob.TV_BRUECKE_FELDER
         and ob.cdp_bal_aus_umschalter(FN) == 155365.92 and ob.cdp_bal_aus_umschalter("FNFTFAMUSTERMUSTERAB…") is None,
-        "Balances aus der Brücke, kontoTexte ohne Brücken-Einträge, angezeigte Balance aus dem Umschalter")
+        "Balances je Konto ('@kb=') überleben den Panel-Schnitt [:60] und die Brücke, kaputte Zahlen nie, angezeigte Balance aus dem Umschalter")
+    ja0, g0 = Z(FN, ZIEL, True, True, ob.cdp_konto_texte(ZIEL, cmd_b["geschwister"]), kb_p)
+    chk(not ja0 and "3 Konten" in g0 and "unbekannt" in g0 and ob.cdp_ein_konto_ziel(FN, ZIEL, True, True, [ZIEL], {ZIEL: 155365.92, Z2: 155365.92})[0] is False,
+        f"Geschwister nur in den Balance-Einträgen zählen als gleicher Anfang; Balance eines davon unbekannt bzw. gleiche Start-Balance → nie bestätigt ({g0})")
     ja1, g1 = Z(FN, ZIEL, True, True, [ZIEL, "LFF00000000000001"], {})
-    ja2, g2 = Z(FN, ZIEL, True, True, [ZIEL, Z2, Z3], {ZIEL: 155365.92, Z2: 148000.0})
+    ja2, g2 = Z(FN, ZIEL, True, True, [ZIEL, Z2, Z3], {ZIEL: 155365.92, Z2: 148000.0, Z3: 150000.0})
     ja3, g3 = Z(FN, ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155300.00, Z2: 148000.0})
     ja4, g4 = Z(FN, ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155365.92, Z2: 155365.92})
     ja5, _ = Z(FN, ZIEL, True, True, [ZIEL, Z2], {Z2: 155365.92})
@@ -9506,7 +9515,7 @@ def test_puls_ein_konto_gekuerzt():
     lauf = lambda s_, ext_, texte_, bal_: (lambda t_: (ob._cdp_konto_sichern(s_, ext_, {"kontoTexte": texte_, "kontenBal": bal_}, t_), t_))([])
     try:
         (r1, t1), s1 = lauf(_S1(), ZIEL, [ZIEL], {}), None
-        s2 = _S1(); r2, t2 = lauf(s2, ZIEL, [ZIEL, Z2, Z3], {ZIEL: 155365.92, Z2: 148000.0})
+        s2 = _S1(); r2, t2 = lauf(s2, ZIEL, [ZIEL, Z2, Z3], {ZIEL: 155365.92, Z2: 148000.0, Z3: 150000.0})
         s3 = _S1(); r3, t3 = lauf(s3, ZIEL, [ZIEL, Z2], {ZIEL: 150000.0, Z2: 148000.0})
         s4 = _S1(); r4, t4 = lauf(s4, "LFF00000000000001", ["LFF00000000000001"], {})
         s5 = _S1(pfeil=True); r5, t5 = lauf(s5, ZIEL, [ZIEL, Z2], {})

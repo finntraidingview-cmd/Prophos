@@ -24289,19 +24289,22 @@
       const istArch = a => !!(arch[a.id] && arch[a.id].archived)
       const inaktiv = gleiche.filter(istArch).sort((a, b) => String(arch[b.id].at || '').localeCompare(String(arch[a.id].at || ''))).slice(0, 10)
       const geschwister = [...gleiche.filter(a => !istArch(a)), ...inaktiv].map(a => String(a.externalId).trim()).filter(Boolean).slice(0, 55)
-      const kb = tvKontenBalBruecke([acc, ...gleiche.filter(a => !istArch(a)), ...inaktiv])   // .1776: Balances für gekürzte Kennungen
-      return { firma, tv_username: (spec && spec.tvUsername) ? String(spec.tvUsername).trim() : '', geschwister: kb ? [kb, ...geschwister] : geschwister }
+      const kb = tvKontenBalBruecke(acc, [...gleiche.filter(a => !istArch(a)), ...inaktiv])   // .1776: Balances für gekürzte Kennungen (vorn)
+      return { firma, tv_username: (spec && spec.tvUsername) ? String(spec.tvUsername).trim() : '', geschwister: [...kb, ...geschwister] }
     }catch(_){ return {} }
   }
   window._tvV2KontoKontext = tvV2KontoKontext
   /* LETZTE BALANCE JE KONTO FÜR PULS (.1776, 27.10.2026, Finn nach pc-2zc2we: Umschalter „FNFTFAFINNSAMUELHE… 155,365.92 USD" ohne ⌄ —
    * „den sichtbaren Namensanfang gegen die Kennung prüfen UND die angezeigte Balance gegen die letzte bekannte Balance des Kontos auf den
-   * Cent"): ein Brücken-Eintrag '@konten_bal=EXT:123.45,…' in geschwister (das Panel reicht die Liste seit .316 durch; order_bot
-   * cdp_konten_bal liest ihn). Quelle accounts.tv_balance (acc.tvBalance) — Ziel + dieselbe Kontomenge wie geschwister. */
-  function tvKontenBalBruecke(accs){
-    const t = (accs || []).filter(a => a && a.externalId && a.tvBalance != null && isFinite(Number(a.tvBalance)))
-      .map(a => String(a.externalId).trim().replace(/[,:=\s]/g, '') + ':' + Number(a.tvBalance).toFixed(2)).slice(0, 56).join(',')
-    return t ? '@konten_bal=' + t : ''
+   * Cent"): je Konto EIN Brücken-Eintrag '@kb=EXT:123.45' (leer = Balance unbekannt) für das Ziel und die Konten mit denselben ersten
+   * 14 Zeichen — nur die kann eine gekürzte Kennung verwechseln. Einzeln und vorn in geschwister, weil das Panel jeden Eintrag auf
+   * 60 Zeichen und die Liste auf 60 Einträge kürzt (S2 27.10.). Quelle accounts.tv_balance (acc.tvBalance); order_bot cdp_konten_bal. */
+  function tvKontenBalBruecke(ziel, accs){
+    const nr = a => String((a && a.externalId) || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    const anf = nr(ziel).slice(0, 14); if(anf.length < 14) return []
+    const gesehen = new Set()
+    return [ziel, ...(accs || [])].filter(a => { const n = nr(a); if(!n || !n.startsWith(anf) || gesehen.has(n)) return false; gesehen.add(n); return true })
+      .slice(0, 20).map(a => '@kb=' + nr(a) + ':' + (a.tvBalance != null && isFinite(Number(a.tvBalance)) ? Number(a.tvBalance).toFixed(2) : ''))
   }
   window._tvKontenBalBruecke = tvKontenBalBruecke
   async function tvV2Lesen(konto, timeoutS, plan, zusatz){
@@ -48499,8 +48502,8 @@
     geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
       .map(a => String(a.externalId).trim())
     try{   // .1776: letzte Balance je Konto vorn (Puls prüft gekürzte Kennungen centgenau, window._tvKontenBalBruecke)
-      const _kb = typeof window._tvKontenBalBruecke === 'function' ? window._tvKontenBalBruecke([(accounts || []).find(a => String(a.id) === String(plan.masterAccountId)), ..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]) : ''
-      if(_kb) geschwister = [_kb, ...geschwister]
+      const _kb = typeof window._tvKontenBalBruecke === 'function' ? window._tvKontenBalBruecke((accounts || []).find(a => String(a.id) === String(plan.masterAccountId)), [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]) : []
+      if(_kb.length) geschwister = [..._kb, ...geschwister]
     }catch(_){}
     // Slave-Vorprüfung auch für Hand-Start und Fern-Signal (29.09.2026) — VOR dem Riegel _tpOrbitLaeuft, sonst bliebe er hängen
     if(vorcheckNoetig(plan) && MT5_LOCAL){

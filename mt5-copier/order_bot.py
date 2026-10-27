@@ -7730,7 +7730,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
 
 
 TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf",
-                     "plan_id", "konten_bal")        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
+                     "plan_id")        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
 
 
 def tv_bruecke_auspacken(cmd):
@@ -7751,6 +7751,8 @@ def tv_bruecke_auspacken(cmd):
             feld, wert = t[1:].split("=", 1)
             if feld in TV_BRUECKE_FELDER and cmd.get(feld) in (None, "", False):
                 cmd[feld] = wert.strip()
+            elif feld == "kb":                    # 27.10.2026: letzte Balance je Konto, EIN Eintrag je Konto (cdp_konten_bal)
+                cmd.setdefault("konten_bal_kb", []).append(wert.strip())
             continue
         rest.append(x)
     cmd["geschwister"] = rest
@@ -20208,25 +20210,25 @@ def cdp_ein_konto_beleg(aktiv, ext, ein_konto=False):
 
 def cdp_konten_bal(cmd):
     """REIN RECHNEND (testbar): letzte bekannte Balance je External ID aus dem Befehl (accounts.tv_balance aus dem PC-Tab, 27.10.2026).
-    Der Tab schickt sie als Brücken-Eintrag '@konten_bal=EXT:123.45,EXT2:…' in geschwister (das Panel reicht geschwister seit .316
-    durch) oder als Feld konten_bal. -> {EXT (nur A–Z/0–9, groß): float}"""
+    Der Tab schickt je Konto EINEN Brücken-Eintrag '@kb=EXT:123.45' (leer = Konto bekannt, Balance nicht) vorn in geschwister — nur
+    für das Ziel und die Konten mit demselben Anfang. Einzeln, weil das Panel jeden Eintrag auf 60 Zeichen kürzt (S2-Befund 27.10.:
+    ein Sammel-Eintrag verlor alle Konten außer dem ersten). tv_bruecke_auspacken legt sie unter konten_bal_kb ab.
+    -> {EXT (nur A–Z/0–9, groß): float | None}"""
     c = cmd if isinstance(cmd, dict) else {}
-    roh = str(c.get("konten_bal") or "")
-    for x in (c.get("geschwister") or []):
-        t = str(x)
-        if t.startswith("@konten_bal="):
-            roh = roh or t.split("=", 1)[1]
+    roh = [str(x)[4:] for x in (c.get("geschwister") or []) if str(x).startswith("@kb=")] + [str(x) for x in (c.get("konten_bal_kb") or [])]
     out = {}
-    for teil in roh.split(","):
+    for teil in roh:
         if ":" not in teil:
             continue
         k, v = teil.rsplit(":", 1)
-        try:
-            w = float(v)
-        except (TypeError, ValueError):
+        k = _nur_alnum(k).upper()
+        if len(k) < 3:
             continue
-        if _nur_alnum(k) and w == w:
-            out[_nur_alnum(k).upper()] = w
+        try:
+            w = float(v) if str(v).strip() else None
+        except (TypeError, ValueError):
+            continue                              # abgeschnittene/kaputte Zahl nie als Balance
+        out[k] = w if (w is None or w == w) else None
     return out
 
 
@@ -20257,7 +20259,7 @@ def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, 
     st = cdp_konto_stueck(a)
     e = _nur_alnum(ext).upper()
     kand = {e}
-    for x in (andere or []):
+    for x in list(andere or []) + list((bal or {}).keys()):   # Balance-Einträge zählen mit (stehen vorn, überleben jede Kürzung)
         n = _nur_alnum(x).upper()
         if n and not str(x).startswith("@") and n.startswith(st):
             kand.add(n)
@@ -20266,8 +20268,12 @@ def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, 
     b = cdp_bal_aus_umschalter(a)
     if b is None:
         return False, f"Präfix '{st}…' passt zu {len(kand)} Konten, Balance im Umschalter nicht lesbar"
-    gleich = sorted(k for k in kand if k in (bal or {}) and round(float(bal[k]) * 100) == round(b * 100))
+    gleich = sorted(k for k in kand if (bal or {}).get(k) is not None and round(float(bal[k]) * 100) == round(b * 100))
     bt = f"{b:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    # unbekannte Balance eines ANDEREN Kontos mit gleichem Anfang könnte genauso hoch sein → nie „genau eines" (S3-Test 27.10.2026)
+    unbekannt = sorted(k for k in kand if k != e and (bal or {}).get(k) is None)
+    if unbekannt:
+        return False, f"Präfix '{st}…' passt zu {len(kand)} Konten, letzte Balance von {len(unbekannt)} davon unbekannt — Balance {bt} nicht eindeutig"
     if gleich == [e]:
         return True, f"Konto per Präfix + Balance {bt} bestätigt ({len(kand)} Konten mit diesem Anfang, nur {ext} hat diese Balance)"
     return False, (f"Präfix '{st}…' passt zu {len(kand)} Konten, Balance {bt} passt zu "
