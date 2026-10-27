@@ -72930,7 +72930,7 @@
     return `<div class="fdp-k" style="--id:${idFarbe(uid)}">
       <div class="fdp-k-kopf"><b title="${escapeHtml(z.konto || '')}">${escapeHtml(fdpKurz(z.konto))}</b><span class="wer">${escapeHtml(wer)}${z.zyklus > 1 ? ' · Zyklus ' + escapeHtml(String(z.zyklus)) : ''}</span>${kopf}</div>
       <div class="fdp-w"><span>Balance <b>${fdpUsd(bal)}</b></span><span>Ziel ${fdpUsd(ziel)}${isFinite(ziel - bal) && ziel > bal ? ' · noch ' + fdpUsd(ziel - bal) : ''}</span>
-</div>
+        ${z.consistency_pct != null ? `<span title="größter Tag ÷ Gewinn im Zyklus — nur Anzeige, keine Wache (Apex-Payout: höchstens 50 %)">größter Tag ${escapeHtml(String(z.consistency_pct))} %</span>` : ''}</div>
       <div class="fdp-bar" title="${escapeHtml(z.liq_text || '')}"><i style="width:${pct.toFixed(1)}%"></i></div>
       <div class="fdp-bar-t"><span>Liq ${fdpUsd(liq)}</span><span>Ziel ${fdpUsd(ziel)}</span></div>${werte}</div>`
   }

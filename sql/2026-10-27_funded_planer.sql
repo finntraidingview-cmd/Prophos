@@ -9,7 +9,7 @@
 -- Start der offenen Kosten des Hedges, Finn: 150k 550 €, 100k 350 €), dd (Max Drawdown), kontrakte = Wahrscheinlichkeit je NQ-Anzahl
 -- (Finn: 100k 1/2 je 50 %, 150k 2 mit 75 % / 3 mit 25 %; gedeckelt auf die Minis der Stufe).
 -- zeiten: max_je_id_tag (Funded-Trades je ID und Tag), firma_abstand_min (zwischen zwei Starts derselben Firma, alle IDs + Challenge),
--- abstand_id_min (zwei Big Trades derselben ID), vorlauf_min (frühester Start ab jetzt). Das Startfenster selbst ist das des
+-- abstand_id_min (zwei Funded derselben ID; 0 = nur die Big-Trade-Grenze je Fenster, Finn 27.10.2026), vorlauf_min (frühester Start ab jetzt). Das Startfenster selbst ist das des
 -- Challenge-Planers (auto_plan_regeln.zeiten.fenster/fenster_tz/start_bis), Startzeiten darin zufällig.
 create table if not exists public.funded_plan_regeln (
   id smallint primary key default 1 check (id = 1),
@@ -36,7 +36,7 @@ insert into public.funded_plan_regeln (id, aktiv, user_ids, firmen, zeiten) valu
   {"name": "FundedNext Futures", "namen": ["fundednextfutures"], "an": false},
   {"name": "FTMO Futures", "namen": ["ftmofutures"], "an": false}
 ]'::jsonb,
-'{"max_je_id_tag": 2, "firma_abstand_min": 15, "abstand_id_min": 90, "vorlauf_min": 15}'::jsonb)
+'{"max_je_id_tag": 2, "firma_abstand_min": 15, "abstand_id_min": 0, "vorlauf_min": 15}'::jsonb)
 on conflict (id) do nothing;
 
 -- 2) Lauf-Protokoll: der Funded-Planer schreibt in auto_plan_lauf mit quelle = 'funded' (nur Läufe mit neuen Plänen/Ziel-Konten).

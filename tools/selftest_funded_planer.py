@@ -126,6 +126,12 @@ def bausteine(ns):
     r = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000, random.Random(3))
     check(r["tp_pkt"] == round(7500 / (20 * r["kontrakte"]), 2) and r["sl_pkt"] == round(2500 / (20 * r["kontrakte"]), 2),
           f"Punkte = $ ÷ (Kontrakte × 20 $): {r['kontrakte']} NQ → TP {r['tp_pkt']} / SL {r['sl_pkt']} Punkte")
+    tg = ns["fdp_tage"]([{"status": "completed", "started_at": "2026-10-20T14:00:00+00:00", "master_pl": 7384},
+                         {"status": "completed", "started_at": "2026-10-21T14:00:00+00:00", "master_pl": 7500},
+                         {"status": "planned", "started_at": None, "master_pl": None}])
+    c = R(REGEL, j150, ST150, 164884, 164884, 3000, 150000, 150000, None, tg)
+    check(tg == {"2026-10-20": 7384, "2026-10-21": 7500} and c["consistency_pct"] == 50.4 and c["aktion"] == "planen" and c["tp"] == 116,
+          f"Anzeige „größter Tag {c['consistency_pct']} %“ (Marc 20./21.10.) — keine Wache, nächster TP normal ({c['tp']} $ bis Ziel)")
     z = ns["fdp_zyklus"](150000, [], [])
     check(z == {"nr": 1, "ab": None, "start": 150000.0}, "Zyklus 1 ohne Payout ab Kontogröße")
     z2 = ns["fdp_zyklus"](150000, ["2026-10-20T10:00:00+00:00"], [{"started_at": "2026-10-19T10:00:00+00:00", "bal_start": 160000},
@@ -218,11 +224,7 @@ def tag_13(ns):
     print("    Startzeiten (Dubai): " + ", ".join(f"{s:%H:%M} {namen[z['user_id']]}·{z['kontrakte']}NQ"
                                                   for s, z in sorted(((hm(z['start_um']), z) for z in e['geplant']), key=lambda x: x[0])))
     print("    Challenge (Dubai):   " + ", ".join(f"{hm(c['start_um']):%H:%M}" for c in ch))
-    je_id_min = []
-    for u in U.values():
-        st = sorted(hm(z["start_um"]) for z in e["geplant"] if z["user_id"] == u)
-        je_id_min += [(b - a).total_seconds() / 60 for a, b in zip(st, st[1:])]
-    check(all(x >= 90 for x in je_id_min), f"zwei Funded derselben ID ≥ 90 min auseinander ({[round(x) for x in je_id_min]})")
+    check(ns["FDP_ZEITEN_STANDARD"]["abstand_id_min"] == 0, "kein eigener Abstand je ID — zwei Funded derselben ID trennt nur die Big-Trade-Grenze")
     e2 = ns["fdp_planen"](trocken=False, jetzt=jetzt, seed=27)
     zeilen = [b for t, b in geschrieben if t == "trade_plans"]
     z1 = zeilen[0] if zeilen else {}
@@ -249,12 +251,59 @@ def ziel_wd(ns):
     check(ok, "165.100 → account_type winning_days + wd_farm, Name „→ Winning Days“, kein Waiting for Payout")
 
 
+def big_trade(ns):
+    """Finn 27.10.2026: Funded-Trades GENAU wie Orbit-Big-Trades von Hand (Prio 1 vor Winning Day) — nichts Eigenes, nur die Marken
+    tvv2 + orbit_v3 + hedge_eur > 0. Geprüft mit den echten Erkennern: app.py puls_heim_big_trades („Puls bleibt zu Hause") und
+    prophos.html bigTradePlan (Heim-Wache, Prio 1/2) über JavaScriptCore. Die DB-Funktion prophos_big_trade sieht dieselben Felder."""
+    print("Big Trade wie von Hand (Heim-Wache, Puls bleibt zu Hause)")
+    ns2 = {"_wd_num": ns["_wd_num"]}
+    exec(block("puls_heim_big_trades"), ns2)
+    U1 = "00000000-0000-4000-a000-0000000000a1"
+    konto = {"id": "kb", "user_id": U1, "name": "150k PAAPEX000000000077 → Funded", "firm": "Apex Trader", "account_type": "funded",
+             "auto_planer": True, "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"}
+    zeilen = []
+    ns.update(_sb_all=lambda t, p: [dict(konto)] if t == "accounts" else [],
+              sb_select=lambda t, p: ([{"id": 1, "aktiv": True, "user_ids": [U1], "firmen": ns["FDP_FIRMEN_STANDARD"], "zeiten": {}}]
+                                      if t == "funded_plan_regeln" else []),
+              sb_insert=lambda t, b: zeilen.append(b) if t == "trade_plans" else None, sb_update=lambda t, p, b: None)
+    ns["fdp_planen"](trocken=False, jetzt=datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc), seed=2)
+    fp = dict(zeilen[0], id="funded", status="open", started_at="2026-10-27T10:00:00+00:00", mt5_baseline={"hedge": {"pc": "pc-xxxxxx"}})
+    hand = {"id": "hand", "status": "open", "route": "tvv2", "orbit_v3": True, "hedge_eur": 1328.5, "winning_day": None,
+            "started_at": "2026-10-27T09:00:00+00:00", "mt5_baseline": {"hedge": {"pc": "pc-xxxxxx"}}}
+    wd = {"id": "wd", "status": "open", "route": "tvv2", "orbit_v3": False, "hedge_eur": 175, "winning_day": True,
+          "started_at": "2026-10-27T11:00:00+00:00", "mt5_baseline": {"hedge": {"pc": "pc-xxxxxx"}}}
+    ids = [p["id"] for p in ns2["puls_heim_big_trades"]([fp, hand, wd], "pc-xxxxxx")]
+    check(ids == ["funded", "hand"], f"app.py puls_heim_big_trades: Funded-Plan zählt wie der Hand-Big-Trade, Winning Day nicht ({ids})")
+    jsc = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
+    html = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
+
+    def fn(name):
+        i = html.index("  function " + name + "(")
+        return html[i:html.index("\n  }\n", i) + 4]
+    js = ("var accounts = [], tradePlans = []; function tvV2Konto(){ return 'X' } function bthFenster(r){ return r === 'tsv2' ? 'tsx' : 'tv' }"
+          " function wdHeimWahl(l, j){ return j(l) }\n" + fn("tpIstWdPlan") + "\n" + fn("bigTradePlan") + "\n"
+          "var F = { id: 'funded', status: 'open', route: 'tvv2', orbitV3: " + ("true" if fp["orbit_v3"] else "false") + ", hedgeEur: " + str(fp["hedge_eur"])
+          + ", winningDay: null, startedAt: '2026-10-27T10:00:00Z' }\n"
+          "var W = { id: 'wd', status: 'open', route: 'tvv2', orbitV3: false, hedgeEur: 175, winningDay: true, startedAt: '2026-10-27T11:00:00Z' }\n"
+          "tradePlans = [W, F]; var a = bigTradePlan('tv'); tradePlans = [W]; var b = bigTradePlan('tv');"
+          " print((a && a.id) + ' ' + (b && b.id) + ' ' + tpIstWdPlan(F))")
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(js)
+    try:
+        out = subprocess.run([jsc, f.name], capture_output=True, text=True, timeout=30).stdout.strip()
+    finally:
+        os.unlink(f.name)
+    check(out == "funded wd false", f"prophos.html bigTradePlan: Funded = Prio 1 vor dem Winning Day, kein WD-Plan ({out})")
+
+
 if __name__ == "__main__":
     ns = laden()
     szenario(ns)
     bausteine(ns)
     tag_13(ns)
     ziel_wd(ns)
+    big_trade(ns)
     if FEHLER:
         print(f"\n✗ {len(FEHLER)} Fehler")
         sys.exit(1)

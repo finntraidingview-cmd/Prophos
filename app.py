@@ -29217,8 +29217,10 @@ def ap_loop():
 #    Hedge-Gewinne dieses Kontos im Zyklus — ein Blow holt so genau die offenen Kosten zurück. Am Plan: master_risk = Balance − Liq,
 #    slave_risk = offene Kosten, daraus Multiplikator und hedge_eur wie das Trade-Popup (tpMultiplierAusRisiko / tpWdHedgeEurAus).
 #  - Startzeiten: Zeitfenster des Challenge-Planers (auto_plan_regeln.zeiten), darin komplett zufällig; passt ein Slot nicht (15 min zu
-#    jedem anderen Start derselben Firma über alle IDs inkl. Challenge-Planer, Big Trade derselben ID), wird neu gewürfelt. Die DB setzt
-#    dieselben 15 min beim Start durch (trade_plans_firmen_abstand, sql/2026-10-27_funded_planer.sql).
+#    jedem anderen Start derselben Firma über alle IDs inkl. Challenge-Planer), wird neu gewürfelt. Die DB setzt dieselben 15 min beim
+#    Start durch (trade_plans_firmen_abstand, sql/2026-10-27_funded_planer.sql). Zwei Funded derselben ID trennt nur die Big-Trade-Grenze.
+#  - Priorität: genau wie ein Orbit-Big-Trade von Hand (Prio 1 vor Winning Day, Heim-Wache, „Puls bleibt zu Hause") — nichts Eigenes, nur
+#    die vorhandenen Marken tvv2 + orbit_v3 + hedge_eur > 0 (prophos_big_trade, puls_heim_big_trades, bigTradePlan).
 #  - Weg: normaler Orbit Big Trade (tvv2 + orbit_v3 + hedge_eur > 0, DB-Riegel trade_plans_kontoart_weg), die Big-Trade-Grenze je Fenster
 #    (trade_plans_big_trade) schiebt wie bei jedem Orbit-Big-Trade. Auto-bestätigt von Anfang an.
 #  - Ziel erreicht → Konto auf Winning Days (account_type winning_days + wd_farm, wie funded_wege Folge „winning_days"), Planer hört auf.
@@ -29230,8 +29232,9 @@ FDP_NQ_PPL = 20.0                         # $ je NQ-Punkt und Kontrakt
 FDP_SLAVE_PPL = GP_SLAVE_PPL              # € je NAS100-Punkt und Lot bei Fusion (wie tpWdSlavePpl)
 FDP_SL_MIN_USD = 100                      # darunter kein Trade (Abstand zur Liquidation zu klein)
 # von/bis/tz nur als Rückfall — gilt ist das Fenster des Challenge-Planers (fdp_fenster)
+# abstand_id_min 0 (Finn 27.10.2026): zwei Funded derselben ID trennt nur die Big-Trade-Grenze je Fenster (Claim schiebt), kein eigener Abstand
 FDP_ZEITEN_STANDARD = {"tz": "Asia/Dubai", "von": "02:00", "bis": "20:00", "max_je_id_tag": 2, "firma_abstand_min": 15,
-                      "abstand_id_min": 90, "vorlauf_min": 15}
+                      "abstand_id_min": 0, "vorlauf_min": 15}
 # Standard-Regeln = Seed aus sql/2026-10-27_funded_planer.sql. Die Vorschau rechnet damit, solange die Tabelle fehlt (dann für alle IDs der
 # Gruppe „Hermann Technologies“); scharf plant nur eine eingespielte Zeile mit aktiv = true.
 FDP_FIRMEN_STANDARD = [
@@ -29330,6 +29333,21 @@ def fdp_offen(kosten, hedge_pls):
     return round(float(kosten or 0) - sum(float(x) for x in (hedge_pls or ()) if x is not None), 2)
 
 
+def fdp_tage(plaene, ab=None):
+    """REIN RECHNEND (testbar): Ergebnis je CME-Handelstag im Zyklus (beendete Trades, master_pl) → {tag: $}. Nur für die Anzeige
+    „größter Tag x %" — keine Consistency-Wache (Finn 27.10.2026)."""
+    out = {}
+    for p in plaene or ():
+        st = str(p.get("started_at") or "")
+        pl = _wd_num(p.get("master_pl"))
+        if not st or pl is None or p.get("status") != "completed" or (ab and st <= str(ab)):
+            continue
+        t = _cme_handelstag(st)
+        if t:
+            out[t] = round(out.get(t, 0.0) + pl, 2)
+    return out
+
+
 def fdp_zyklus(groesse, payouts, plaene):
     """REIN RECHNEND (testbar): aktueller Zyklus → {nr, ab, start}. Ohne Payout: Zyklus 1 ab Kontogröße. Mit Payout: ab dem jüngsten
     Payout, Start = Start-Balance des ersten Trades danach (None = noch keiner → der Aufrufer nimmt die aktuelle Balance)."""
@@ -29342,10 +29360,11 @@ def fdp_zyklus(groesse, payouts, plaene):
     return {"nr": len(ps) + 1, "ab": ab, "start": _wd_num(nach[0].get("bal_start")) if nach else None}
 
 
-def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None):
+def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
     funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
-    offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert)."""
+    offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert),
+    tage = fdp_tage (nur Anzeige „größter Tag x %")."""
     g = float(groesse or 0)
     if not jg or not g:
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-Planer"}
@@ -29362,8 +29381,11 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if balance > ziel + float(jg.get("max_trade") or 0):
         return {"aktion": "aus", "grund": f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance neu lesen"}
     tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0)
+    gew = round(balance - start, 2)
+    max_tag = max([v for v in (tage or {}).values() if v > 0], default=0.0)
     basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text,
-             "offen_eur": round(offen, 2)}
+             "offen_eur": round(offen, 2), "gewinn": gew, "max_tag": round(max_tag, 2),
+             "consistency_pct": round(max_tag / gew * 100, 1) if gew > 0 and max_tag > 0 else None}
     if art == "ziel":
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
     dll, minis, nr = fdp_stufe(stufen, balance)
@@ -29498,7 +29520,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
     cme_heute = _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat())
     max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
-    f_abst, id_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15), float(_wd_num(zeiten.get("abstand_id_min")) or 90)
+    f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
+    id_abst = float(_wd_num(zeiten.get("abstand_id_min")) or 0)
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
     erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "regeln_quelle": quelle, "at": jetzt.isoformat(), "tag": cme_heute,
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
@@ -29580,7 +29603,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
         peak = liq_peak({}, a, zeile["balance"], verlauf)
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
-        r = fdp_konto_rechnen(regel, jg, stufen, zeile["balance"], peak, offen, start, g, rnd)
+        r = fdp_konto_rechnen(regel, jg, stufen, zeile["balance"], peak, offen, start, g, rnd, fdp_tage(pl, ab))
         r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=(regel.get("namen") or [""])[0])
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
