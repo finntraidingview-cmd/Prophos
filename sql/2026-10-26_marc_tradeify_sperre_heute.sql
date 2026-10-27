@@ -21,3 +21,6 @@ delete from public.trade_plans
 -- ENDE (morgen 27.10.2026, wenn der Hand-Trade zu ist — erst dann ausführen):
 -- update public.accounts set auto_planer = true, updated_at = now()
 --  where user_id = '6c206a34-c4a7-4352-8097-bb17366bcea1' and firm = 'Tradeify';
+
+-- ENDE AUSGEFÜHRT 27.10.2026 ~14:35 Dubai (Finn: „Ja, die Tradeify-Sperre bei Marc aufheben, der Hand-Trade ist zu"):
+-- 13 Konten (12 Challenges + 1 Funded) zurück auf auto_planer = true (nur die mit false).
