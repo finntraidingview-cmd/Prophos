@@ -24289,12 +24289,12 @@
       const istArch = a => !!(arch[a.id] && arch[a.id].archived)
       const inaktiv = gleiche.filter(istArch).sort((a, b) => String(arch[b.id].at || '').localeCompare(String(arch[a.id].at || ''))).slice(0, 10)
       const geschwister = [...gleiche.filter(a => !istArch(a)), ...inaktiv].map(a => String(a.externalId).trim()).filter(Boolean).slice(0, 55)
-      const kb = tvKontenBalBruecke(acc, [...gleiche.filter(a => !istArch(a)), ...inaktiv])   // .1776: Balances für gekürzte Kennungen (vorn)
+      const kb = tvKontenBalBruecke(acc, [...gleiche.filter(a => !istArch(a)), ...inaktiv])   // .1779: Balances für gekürzte Kennungen (vorn)
       return { firma, tv_username: (spec && spec.tvUsername) ? String(spec.tvUsername).trim() : '', geschwister: [...kb, ...geschwister] }
     }catch(_){ return {} }
   }
   window._tvV2KontoKontext = tvV2KontoKontext
-  /* LETZTE BALANCE JE KONTO FÜR PULS (.1776, 27.10.2026, Finn nach pc-2zc2we: Umschalter „FNFTFAFINNSAMUELHE… 155,365.92 USD" ohne ⌄ —
+  /* LETZTE BALANCE JE KONTO FÜR PULS (.1779, 27.10.2026, Finn nach pc-2zc2we: Umschalter „FNFTFAFINNSAMUELHE… 155,365.92 USD" ohne ⌄ —
    * „den sichtbaren Namensanfang gegen die Kennung prüfen UND die angezeigte Balance gegen die letzte bekannte Balance des Kontos auf den
    * Cent"): je Konto EIN Brücken-Eintrag '@kb=EXT:123.45' (leer = Balance unbekannt) für das Ziel und die Konten mit denselben ersten
    * 14 Zeichen — nur die kann eine gekürzte Kennung verwechseln. Einzeln und vorn in geschwister, weil das Panel jeden Eintrag auf
@@ -47834,7 +47834,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1778'
+  const OS_TAB_BUILD = '2026-09-22.1779'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -48501,7 +48501,7 @@
       .slice(0, 10)
     geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
       .map(a => String(a.externalId).trim())
-    try{   // .1776: letzte Balance je Konto vorn (Puls prüft gekürzte Kennungen centgenau, window._tvKontenBalBruecke)
+    try{   // .1779: letzte Balance je Konto vorn (Puls prüft gekürzte Kennungen centgenau, window._tvKontenBalBruecke)
       const _kb = typeof window._tvKontenBalBruecke === 'function' ? window._tvKontenBalBruecke((accounts || []).find(a => String(a.id) === String(plan.masterAccountId)), [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]) : []
       if(_kb.length) geschwister = [..._kb, ...geschwister]
     }catch(_){}
