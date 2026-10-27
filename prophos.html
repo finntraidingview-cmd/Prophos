@@ -47727,7 +47727,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1765'
+  const OS_TAB_BUILD = '2026-09-22.1766'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -74192,7 +74192,7 @@
     }
     function willkommen(){
       verlaufEl.innerHTML = ''
-      blase('assistant', 'Hi, ich bin **Finnfo** — quasi Finn, nur ohne Kaffeepause. Frag mich, wo etwas ist, was eine Meldung bedeutet oder warum ein Trade hängt — gern mit Screenshot. '
+      blase('assistant', 'Hi, ich bin **Mini-Finn** — wie Finn, nur kleiner und ohne Kaffeepause. Frag mich, wo etwas ist, was eine Meldung bedeutet oder warum ein Trade hängt — gern mit Screenshot. '
         + 'Kleine Handgriffe (geplanten Trade löschen, Balance lesen, am PC prüfen) erledige ich nach deinem **Bestätigen**.')
     }
 
@@ -74329,7 +74329,7 @@
       const bilder = lo.bilder.splice(0); vorschauZeigen()
       blase('user', frage, bilder.length ? `<div class="lo-bilder">${bilder.map(b => `<img src="${b.url}" alt="">`).join('')}</div>` : '')
       textEl.value = ''; textAnpassen()
-      const tippt = document.createElement('div'); tippt.className = 'lo-tippt'; tippt.innerHTML = 'Finnfo schaut nach<i></i><i></i><i></i>'
+      const tippt = document.createElement('div'); tippt.className = 'lo-tippt'; tippt.innerHTML = 'Mini-Finn schaut nach<i></i><i></i><i></i>'
       verlaufEl.appendChild(tippt); unten()
       try{
         const d = await loApi('/support/chat', { method: 'POST', body: { unterhaltung_id: lo.unterh, frage,
@@ -74409,7 +74409,7 @@
         return { ok: true }
       }
       lo.an = true; fab.hidden = false; lo.rest = 38
-      return 'Finnfo-Stub an'
+      return 'Mini-Finn-Stub an'
     }
   })()
 </script>
@@ -74417,7 +74417,7 @@
      kommen aus dem TradingView-Reader (Sektion MARKT LIVE im Modul); /markt/futures im Backend bleibt ungenutzt bestehen. -->
 <!-- Münzwurf (Coin-Flip) entfernt am 27.10.2026 (Finn: „Die Münze weg — die sollen den Münzwurf nicht mehr nutzen. Unten rechts, wo die
      Münze ist, draufdrücken, dann soll da der Lotse kommen … Nenn ihn witzig, was mit Finn“). An seiner Stelle sitzt der Support-Chat
-     „Finnfo“ (#lotse-fab, unten). -->
+     „Mini-Finn“ (#lotse-fab, unten). -->
 <style>
 /* ==== DARK-SPIEGEL (generiert) ==== */
 /* Dark Mode (Finn 18.10.2026): jede Farb-Deklaration der Styles oben noch einmal unter
@@ -76237,7 +76237,7 @@
 </style>
 
 
-<!-- ── Support-Chat „Finnfo“ (bis .1764 „Lotse“, interne Namen lotse-*/lo-* bleiben) (27.10.2026, Finn: „Ein Chat-Support kommt unten rechts, da wo die Münze ist … wie eine eigene KI, Screenshots
+<!-- ── Support-Chat „Mini-Finn“ (bis .1764 „Lotse“, .1765 kurz „Finnfo“, interne Namen lotse-*/lo-* bleiben) (27.10.2026, Finn: „Ein Chat-Support kommt unten rechts, da wo die Münze ist … wie eine eigene KI, Screenshots
      hochladen ist ganz wichtig“). Seit .1765 an der Stelle der Münze (Münzwurf entfernt, Finn 27.10.2026). Sichtbar nur eingeloggt und mit Freischaltung
      (support_zugang, /support/stand). Logik im Modul, Sektion SUPPORT-CHAT „LOTSE“ — eigene Verdrahtung, kein Sammel-Handler. ── -->
 <style>
@@ -76262,7 +76262,7 @@
   #lotse-panel.offen{display:flex}
   #lotse-panel .lo-kopf{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-bottom:1px solid var(--border-soft)}
   #lotse-panel .lo-av{width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
-    background:var(--violet);color:#fff;font-size:13px;font-weight:650}
+    background:var(--violet);color:#fff;font-size:11px;font-weight:700;letter-spacing:-.02em}
   #lotse-panel .lo-tit{flex:1;min-width:0;line-height:1.25}
   #lotse-panel .lo-tit b{display:block;font-size:14px;font-weight:650}
   #lotse-panel .lo-tit span{display:block;font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -76349,15 +76349,15 @@
   }
 </style>
 
-<button id="lotse-fab" type="button" title="Finnfo — frag Prophos statt Finn" aria-label="Support-Chat Finnfo öffnen" hidden>
+<button id="lotse-fab" type="button" title="Mini-Finn — frag mich statt Finn" aria-label="Support-Chat Mini-Finn öffnen" hidden>
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
   <span class="lo-punkt"></span>
 </button>
 
-<div id="lotse-panel" role="dialog" aria-label="Finnfo — Support-Chat">
+<div id="lotse-panel" role="dialog" aria-label="Mini-Finn — Support-Chat">
   <div class="lo-kopf">
-    <span class="lo-av">F</span>
-    <div class="lo-tit"><b>Finnfo</b><span id="lo-sub">Support · kennt Prophos und deine Trades</span></div>
+    <span class="lo-av">MF</span>
+    <div class="lo-tit"><b>Mini-Finn</b><span id="lo-sub">Support · kennt Prophos und deine Trades</span></div>
     <button type="button" class="lo-ik" id="lo-liste-btn" title="Unterhaltungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
     <button type="button" class="lo-ik" id="lo-neu" title="Neue Unterhaltung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
     <button type="button" class="lo-ik" id="lo-zu" title="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
