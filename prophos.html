@@ -22666,7 +22666,8 @@
   // Winning-Day-Plan (25.09.2026, Finn am Trades-Tab: „kennzeichne die Trades als Winning Days, nicht als Orbit V2"): intern
   // route 'tvv2', erkennbar an hedge_eur > 0, der Farmer-Notiz oder der Kontoart 'winning_days' des Master-Kontos.
   // Orbit V3 (01.10.2026): tvv2 + Fusion-Hedge, aber kein Winning Day — die Kennung gewinnt vor hedge_eur > 0
-  const tpIstOrbitV3 = p => !!(p && p.route === 'tvv2' && p.orbitV3)
+  // Topstep Big Trade (27.10.2026, Finn: „Big Trade für Topstep, parallel zu Orbit“): Orbit V3 auch auf tsv2 — Puls in TopstepX, Fusion-Hedge wie Orbit
+  const tpIstOrbitV3 = p => !!(p && (p.route === 'tvv2' || p.route === 'tsv2') && p.orbitV3)
   // P&L aus dem Userscript statt Puls-Nachlesung (01.10.2026 abends, Finn: „bei Winning Days dieselbe Logik wie bei Orbit") —
   // Orbit V3 UND Winning Day (tvv2 + Fusion-Hedge): bis 6 s auf die Reader-Balance warten, Nachtrag, Puls erst nach 10 min
   const planPlUserscript = p => !!(p && p.route === 'tvv2' && (p.orbitV3 || Number(p.hedgeEur) > 0))
@@ -24260,7 +24261,7 @@
     // PULS BLEIBT ZU HAUSE — AUCH BEIM LESEN (19.10.2026, Finn „wie du denkst"): Balance ↻, Rundgang, Nachlesung eines anderen Kontos
     // wechseln das Konto im Puls-Chrome genauso wie eine Order. Läuft auf diesem PC ein Big Trade nah am TP/an der Liq (Railway
     // /admin/puls-heim, Regel puls_heim_regel), kommt die Lesung nicht zustande — Aufrufer sehen ok:false + retry_ok und versuchen später.
-    const _heim = await pulsHeimFrei(konto)
+    const _heim = await pulsHeimFrei(konto, _api === 'tsx-lesen' ? 'tsx' : 'tv')
     if(_heim) return _heim
     let r = null
     for(let v = 1; v <= 4; v++){
@@ -24274,17 +24275,17 @@
       await new Promise(res => setTimeout(res, 12000 + Math.random() * 10000))
     }
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
-    try{ bigTradeHeimPlanen(konto, 'Lesung ' + String(konto).slice(-4), !(typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026); einzelne Lesung = sofort, Rundgang = 20 s Sammelpause (19.10.2026)
+    try{ bigTradeHeimPlanen(konto, 'Lesung ' + String(konto).slice(-4), !(typeof tvV2Poll !== 'undefined' && tvV2Poll.busy), _api === 'tsx-lesen' ? 'tsx' : 'tv') }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026); einzelne Lesung = sofort, Rundgang = 20 s Sammelpause (19.10.2026)
     return r
   }
   /* PULS BLEIBT ZU HAUSE — LESUNGEN (19.10.2026): vor jeder Puls-Lesung eines FREMDEN Kontos (nicht das Big-Trade-Konto, nicht der Heimweg
    * selbst) fragt der PC-Tab Railway GET /admin/puls-heim?pc= — derselbe Riegel wie beim Klick (puls_heim_pruefen: Big Trade dieses PCs
    * ≤ 2.000 $ vor TP/Liq → big_trade_nah; kein Kurs/Level → big_trade_unklar). Ohne laufenden Big Trade auf dem PC: kein Request.
    * Fail-closed wie am Klick: Railway nicht erreichbar/kein Token → Lesung verschoben (big_trade_unklar). → null = frei, sonst Fehlerobjekt */
-  async function pulsHeimFrei(konto){
+  async function pulsHeimFrei(konto, fenster){
     try{
       if(_bthSelbst || !MT5_LOCAL) return null
-      const bt = bigTradePlan(); if(!bt) return null
+      const bt = bigTradePlan(fenster); if(!bt) return null   // 27.10.2026: eine Lesung im anderen Tab verschiebt dieses Konto nie
       if(konto && String(konto).trim() === tvV2Konto(bt)) return null
       const pc = hedgePcId(); if(!pc) return null
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
@@ -24317,7 +24318,13 @@
   // Sammelpause bleibt nur für den Rundgang (tvV2Poll.busy), damit mehrere Konten weiterhin EINEN Heimweg auslösen.
   const BTH_RUHE_MS = 20000, BTH_WARTE_MIN_MS = 2000, BTH_WARTE_MAX_MS = 4000, BTH_SOFORT_MS = 1500
   let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false, _bthAnstoss = null
-  function bigTradePlan(){
+  // ZWEI FENSTER (27.10.2026, Finn: „parallel zu Big Trade für Topstep“): TradingView-Tab und TopstepX-Tab im Puls-Chrome haben je ein eigenes
+  // Auge (tv-reader bzw. tsx-auge) und je ein eigenes Konto — ein Big Trade in jedem darf gleichzeitig laufen (DB: prophos_big_trade_fenster).
+  // Eine Puls-Aktion im einen Tab verschiebt das andere Konto nie; der Heimweg gilt deshalb je Fenster. _bthTimer bleibt TradingView,
+  // _bthTsxTimer ist TopstepX. bigTradePlan(fenster): 'tv' = tvv2, 'tsx' = tsv2, ohne Angabe wie bisher beide.
+  let _bthTsxTimer = null
+  const bthFenster = route => route === 'tsv2' ? 'tsx' : 'tv'
+  function bigTradePlan(fenster){
     // HEIMKONTO MIT RANGFOLGE (14.10.2026 abends, Finn: „läuft ein Weg mit Hedge bei Orbit oder ein Winning Day, platziert Puls die Order
     // und geht danach IMMER zurück zu dem Konto, wo der Trade läuft — laufen Orbit-Big-Trade und Winning Day zugleich, immer zurück zum
     // Orbit-Trade, Orbit hat mehr Positionen und mehr Größe, Prio 1"). Prio 1 = laufender Orbit/Topstep-Trade MIT Hedge (kein Winning
@@ -24328,7 +24335,8 @@
     // Notfall-Schließungen 16.–22.10. hatten einen zweiten WD auf derselben ID). Jetzt der WD mit dem kleinsten $-Rest bis TP ODER Liq
     // (wdHeimWahl). Big Trades (Prio 1) unverändert der jüngste. WD-Erkennung wie das Backend (puls_heim_wd_trades): winning_day,
     // tpIstWdPlan oder konto_typ winning_days — ein WD mit Hedge ohne winning_day-Flag galt hier sonst als Big Trade.
-    const offen = (tradePlans || []).filter(p => p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p))
+    const offen = (tradePlans || []).filter(p => p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p)
+      && (!fenster || bthFenster(p.route) === fenster))
     const juengster = l => l.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
     const istWd = p => p.winningDay === true || p.kontoTyp === 'winning_days' || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))
     const big = juengster(offen.filter(p => !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
@@ -24366,10 +24374,15 @@
     }
     return best.p
   }
-  function bigTradeHeimPlanen(konto, grund, sofort){
+  function bigTradeHeimPlanen(konto, grund, sofort, fenster){
     if(typeof window.mtcApi !== 'function' || _bthSelbst) return
-    const bt = bigTradePlan(); if(!bt) return
+    const bt = bigTradePlan(fenster || 'tv'); if(!bt) return
     if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
+    if(fenster === 'tsx'){   // TopstepX-Tab (27.10.2026): eigener Timer, die Heim-Wache/Statistik unten bleiben TradingView
+      if(_bthTsxTimer) clearTimeout(_bthTsxTimer)
+      _bthTsxTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto', 'tsx'), sofort ? BTH_SOFORT_MS : BTH_RUHE_MS)
+      return
+    }
     if(_bthTimer) clearTimeout(_bthTimer)
     if(!_bthAnstoss) _bthAnstoss = Date.now()   // Heimweg-Dauer ab der ERSTEN fremden Aktion (22.10.2026)
     _hwPulsWegAt = Date.now()   // Heim-Wache: Puls selbst war woanders → 3-s-Schwelle (22.10.2026)
@@ -24386,12 +24399,15 @@
         body: JSON.stringify({ plan_id: bt.id, ok, grund, dauer_ms: dauerMs, lesung_ms: lesungMs, msg: msg || '', pc: hedgePcId() || '' }) })
     }catch(e){ console.warn('[big-trade] Heimweg melden', (e && e.message) || e) }
   }
-  async function bigTradeHeim(grund){
-    _bthTimer = null
-    if(_bthLaeuft) return
-    const bt = bigTradePlan(); if(!bt){ _bthAnstoss = null; return }
+  async function bigTradeHeim(grund, fenster){
+    const tsx = fenster === 'tsx'
+    if(tsx) _bthTsxTimer = null; else _bthTimer = null
+    const spaeterNochmal = () => { const t = setTimeout(() => bigTradeHeim(grund, fenster), BTH_WARTE_MIN_MS + Math.random() * (BTH_WARTE_MAX_MS - BTH_WARTE_MIN_MS)); if(tsx) _bthTsxTimer = t; else _bthTimer = t }
+    // läuft gerade der Heimweg des ANDEREN Fensters (27.10.2026): nicht verwerfen, kurz danach nachholen (Puls kann nur eins zur Zeit)
+    if(_bthLaeuft){ spaeterNochmal(); return }
+    const bt = bigTradePlan(fenster || 'tv'); if(!bt){ if(!tsx) _bthAnstoss = null; return }
     // 22.10.2026 (Finn: „sobald die Order bestätigt ist, direkt zurück — nicht 1–2 Minuten“): belegt → alle 2–4 s (gestreut) statt fest 10 s nachsehen
-    if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ _bthTimer = setTimeout(() => bigTradeHeim(grund), BTH_WARTE_MIN_MS + Math.random() * (BTH_WARTE_MAX_MS - BTH_WARTE_MIN_MS)); return }
+    if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ spaeterNochmal(); return }
     const konto = tvV2Konto(bt)
     _bthLaeuft = true; _bthSelbst = true
     const t0 = Date.now(), anstoss = _bthAnstoss || t0
@@ -24407,13 +24423,13 @@
         _hwWiederN = 0; _hwFehlN = 0; _hwOkAt = Date.now(); _hwOkPlan = String(bt.id); _hwOkOffen = true
         if(_hwWiederTimer){ clearTimeout(_hwWiederTimer); _hwWiederTimer = null }   // anderer Weg war schneller → keine überflüssige Wiederholung
       }else if(!spaeter) _hwFehlN++
-      const wieder = !ok && heimWiederholen(grund, spaeter)   // 22.10.2026: gescheitert → gestreut neu versuchen statt auf die nächste Puls-Aktion zu warten
+      const wieder = !ok && heimWiederholen(grund, spaeter, fenster)   // 22.10.2026: gescheitert → gestreut neu versuchen statt auf die nächste Puls-Aktion zu warten
       if(!ok && !spaeter && _hwFehlN === 1 && typeof atToast === 'function') atToast(`Puls nicht zurück im Big-Trade-Konto „${bt.masterName || konto}": ${fehlTxt} — Reader sieht den Hedge-Trade gerade nicht, ${wieder ? 'neuer Versuch in ein paar Sekunden' : 'Heim-Wache holt ihn zurück, sobald Puls frei ist'}.`, 'end')
       if(heimMeldenJetzt(ok, spaeter)) bigTradeHeimMelden(bt, ok, grund, Date.now() - anstoss, Date.now() - t0, fehlTxt)
     }catch(e){
       console.warn('[big-trade] Heimweg', (e && e.message) || e)
       _hwFehlN++
-      heimWiederholen(grund, false)
+      heimWiederholen(grund, false, fenster)
       if(heimMeldenJetzt(false, false)) bigTradeHeimMelden(bt, false, grund, Date.now() - anstoss, Date.now() - t0, String((e && e.message) || e))
     }
     finally{
@@ -24454,17 +24470,17 @@
     return false
   }
   // → true, wenn ein neuer Versuch geplant ist. spaeter = Puls war nur belegt → zählt nicht gegen HW_WIEDER_MAX
-  function heimWiederholen(grund, spaeter){
-    if(_hwWiederTimer || !bigTradePlan()) return false
+  function heimWiederholen(grund, spaeter, fenster){
+    if(_hwWiederTimer || !bigTradePlan(fenster || 'tv')) return false
     if(!spaeter && _hwWiederN >= HW_WIEDER_MAX) return false
     if(!spaeter) _hwWiederN++
     const n = _hwWiederN, ursprung = String(grund || 'Heimweg').replace(/^Wiederholung \S+ \((.*)\)$/, '$1')   // Grund nicht verschachteln
     const takt = () => {
       _hwWiederTimer = null
-      if(!bigTradePlan()) return
+      if(!bigTradePlan(fenster || 'tv')) return
       // belegt (Order, Rundgang, Signal, Balance-Lesung, Rück-Login) oder Polar → nur verschieben (Prüfer, Punkt 4)
       if(hedgePulsUnterwegs() || (typeof polarLaeuft === 'function' && polarLaeuft())){ _hwWiederTimer = setTimeout(takt, hwZufall(HW_WIEDER_MIN_MS, HW_WIEDER_MAX_MS)); return }
-      bigTradeHeim(`Wiederholung ${n}/${HW_WIEDER_MAX} (${ursprung})`)
+      bigTradeHeim(`Wiederholung ${n}/${HW_WIEDER_MAX} (${ursprung})`, fenster)
     }
     _hwWiederTimer = setTimeout(takt, hwZufall(HW_WIEDER_MIN_MS, HW_WIEDER_MAX_MS))
     return true
@@ -24472,7 +24488,7 @@
   async function heimWacheTick(){
     try{
       if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return
-      const bt = bigTradePlan()
+      const bt = bigTradePlan('tv')   // die Wache liest das TradingView-Auge (27.10.2026: TopstepX hat seinen eigenen Heimweg)
       if(!bt){ _hwFremdSeit = 0; _hwWiederN = 0; _hwFehlN = 0; _bthAnstoss = _bthTimer ? _bthAnstoss : null; return }
       const pid = String(bt.id)
       if(bt.route !== 'tvv2'){ _hwFremdSeit = 0; return }                                                    // Topstep: Reader kennt nur TradingView
@@ -26006,6 +26022,21 @@
   const hedgeLiqDllFelder = lq => lq ? { liq_art: lq.liq_art || null, liq_regeln_geladen: !!lq.liq_regeln_geladen, liq_vor_pkt: lq.liq_vor_pkt || null, liq_dll: lq.liq_dll || null } : {}
   // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start, liq_art, liq_regeln_geladen, …} | {hinweis}
   function hedgeLiqLevel(plan, einstieg, ppl, kt){
+    // TOPSTEP: LIQUIDATION = MLL AUS TOPSTEPX (27.10.2026, Finn: „Liq aus TopstepX-MLL statt Größe + 100"). Befund 13.–27.10.: alle 24 Topstep-
+    // Winning-Days mit Fusion-Hedge standen OHNE Liq-Level („Kontogröße unbekannt" bzw. 150.100 gegen eine 0-basierte Express-Balance von
+    // 7.369) — der Hedge schloss nur am TP. Express zählt 0-basiert (BAL relativ, MLL z. B. 0 bzw. −4.500), Combine absolut; MLL und Start-
+    // Balance stammen aus DERSELBEN TopstepX-Lesung beim Start (tv.mll_start, tv.balance_start), die Basis passt also immer. 100 $ vor der MLL
+    // wie bei Tradeify (Größe + 100). Ohne lesbare MLL wie bisher.
+    const tvT = plan && plan.route === 'tsv2' && plan.mt5Baseline && plan.mt5Baseline.tv
+    const mllT = tvT && tvT.mll_start != null && tvT.mll_start !== '' ? Number(tvT.mll_start) : NaN, bsT = tvT ? Number(tvT.balance_start) : NaN
+    if(tvT && isFinite(mllT) && isFinite(bsT) && (tvT.balance_relativ === true || mllT > 1000)){
+      const liqT = Math.round((mllT + 100) * 100) / 100, usdT = Math.round((bsT - liqT) * 100) / 100
+      const felderT = { liq_art: 'mll_topstep', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
+      if(!(usdT > 0) || !(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Start-Balance nicht über der TopstepX-MLL + 100 $ — Hedge schließt nur am TP', liq_balance: liqT }, felderT)
+      const pktT = Math.round(usdT / (ppl * kt) * 100) / 100
+      const lvlT = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pktT : einstieg + pktT) * 100) / 100 : null
+      return Object.assign({ sl_punkte: pktT, sl_level_nq: lvlT, sl_art: 'liquidation', liq_balance: liqT, sl_usd_hedge: usdT, liq_quelle: 'topstepx_mll', liq_balance_start: bsT }, felderT)
+    }
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
     const groesse = (acc && Number(acc.startingBalance) > 0) ? Number(acc.startingBalance) : tpKontoGroesseAusName((acc && acc.name) || (plan && plan.masterName) || '')
     if(!(groesse > 0)) return { hinweis: 'Kontogröße unbekannt — Hedge schließt nur am TP' }
@@ -28036,7 +28067,7 @@
    * → '' (ruhig) oder der Grund. */
   function hedgePulsUnterwegs(){
     try{
-      if(_bthLaeuft || _bthTimer) return 'Rück-Login ins Big-Trade-Konto'
+      if(_bthLaeuft || _bthTimer || _bthTsxTimer) return 'Rück-Login ins Big-Trade-Konto'
       if(_tpOrbitLaeuft) return 'Puls-Order'
       if(tvV2Poll && tvV2Poll.busy) return 'Rundgang/Lesung'
       if(_osActive) return 'Signal-Lauf'
@@ -28109,7 +28140,9 @@
       const pa = tradePlans.find(x => String(x.id) === pid) || p
       if(pa.status !== 'open') return   // schon beendet (anderer Weg) — kein zweites Ende
       let _balR = null
-      try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){}
+      // Topstep (27.10.2026): das Userscript im TradingView-Tab kennt kein TopstepX-Konto — bis zu 3,5 s Warten für nichts; die End-Balance
+      // liest Puls in TopstepX nach (tvV2EndeSetzen → tvV2EndlesungAnstossen)
+      if(p.route !== 'tsv2'){ try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){} }
       try{ if(_balR && typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balR.balance_end, equity: _balR.equity_end, relativ: false }, _balR.balance_at) }catch(_){}
       try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(pa, null, 'reader_leer', _balR || undefined); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === pid) || pa; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
     } finally { _hedgeWegLaeuft.delete(pid) }
@@ -28179,6 +28212,69 @@
     finally{ _hedgeSchnellBusy = false }
   }
   setInterval(hedgeReaderSchnellTick, 50)   // 01.10.2026: 0,3 → 0,1 → 0,05 s (nur lokale Abfrage, nur bei offenem Hedge dieses PCs)
+  /* TOPSTEPX-SCHNELL-WÄCHTER (27.10.2026, Finn: „In erster Instanz ein Tampermonkey-Script im TopstepX-Tab, bei dem der Trade mit der gleichen
+   * Prio behandelt wird wie ein Orbit Big Trade: sobald der Trade in TopstepX geschlossen wird, sieht das Auge des Scripts das und schließt den
+   * Hedge direkt. Fallback 1 wie bei Orbit über den Radar, Fallback 2 der Notfall-SL im Fusion-Terminal"). Gegenstück zu hedgeReaderSchnellTick
+   * für Topstep (route tsv2 — Big Trade mit Orbit-Hedge und Winning Day): Quelle ist das Userscript tv-reader/tsx-auge.user.js im TopstepX-Tab
+   * des Puls-Chrome, das alle 0,25 s augen_tsx.js stand() an das Panel meldet (GET /api/tsx-stand, nur lokal). Geschlossen wird nur mit
+   * denselben Regeln wie beim Orbit-Reader (hedgeMasterWegEntscheid, schnell): Stand ≤ 1 s alt, Konto EXAKT (konto.kontonr = External ID, nie
+   * eine abgekürzte Kennung — dann bleibt es bei Radar/Level), Konto ≥ 2 s stabil (im Wechsel-Fenster 30 s leer, 1 s erst nach 90 s Ruhe),
+   * Master-Position seit dem Open schon gesehen, Puls nicht unterwegs (hedgePulsUnterwegs, fail-closed) und „leer" nur, wenn augen_tsx.js
+   * flach === true BEWEIST (No Active Position in der Order-Karte bzw. leeres Grid + gesperrter Close-Knopf) — eine leere Liste allein zählt nie.
+   * Radar (tp_feed/sl_feed, Puffer aus wd_farmer_regeln.vorplan.hedge_puffer) und Fusion-Level (level_tp/level_sl) laufen unverändert weiter. */
+  const _tsxSchnellLeer = new Map(), _tsxSchnellKonto = new Map()
+  let _tsxSchnellBusy = false, _tsxStandFehler = 0
+  const tsxKontoGleich = (kontonr, ext) => { const n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); return !!n(kontonr) && n(kontonr) === n(ext) }
+  // REIN RECHNEND (window._tsxStandListe): Positionen des Userscripts → Liste im Format des Orbit-Readers (wurzel, menge_zahl, richtung)
+  function tsxStandListe(st){
+    return ((st && st.positionen) || []).filter(x => x && x.symbol && typeof x.menge === 'number').map(x => ({ symbol: x.symbol,
+      wurzel: (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(x.symbol)) : String(x.symbol), menge_zahl: Math.abs(x.menge), richtung: x.seite || null }))
+  }
+  window._tsxStandListe = tsxStandListe
+  async function hedgeTsxSchnellTick(){
+    if(_tsxSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
+    let tp; try{ tp = tradePlans }catch(_){ return }
+    const pc = hedgePcId()
+    const meine = (tp || []).filter(p => p && p.route === 'tsv2' && p.status === 'open' && p.mt5Baseline && p.mt5Baseline.hedge
+      && p.mt5Baseline.hedge.status === 'offen' && p.mt5Baseline.hedge.pc === pc)
+    if(!meine.length) return
+    const verwerfen = () => { for(const p of meine){ _tsxSchnellKonto.delete(String(p.id)); _tsxSchnellLeer.delete(String(p.id)) } }
+    if(hedgePulsUnterwegs()){ verwerfen(); return }   // Puls unterwegs → Auge blind (wie beim Orbit-Reader)
+    _tsxSchnellBusy = true
+    try{
+      let r = null
+      try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 800 }) }catch(_){ r = null }
+      const st = r && r.ok === true && r.stand && typeof r.stand === 'object' ? r.stand : null
+      if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= 1.0)){ verwerfen(); if(++_tsxStandFehler === 1200) console.warn('[hedgeTsx] kein frischer Stand vom TopstepX-Auge (Userscript tsx-auge im Puls-Chrome?)'); return }
+      _tsxStandFehler = 0
+      if(hedgePulsUnterwegs()){ verwerfen(); return }   // während des Holens losgelaufen
+      const k = st.konto || {}, liste = tsxStandListe(st), jetzt = Date.now()
+      for(const p of meine){
+        const pid = String(p.id), h = p.mt5Baseline.hedge
+        const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+        const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+        if(!kontoPlan || k.abgekuerzt !== false || k.liste_offen || !tsxKontoGleich(k.kontonr, kontoPlan)){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
+        if(!_tsxSchnellKonto.has(pid)) _tsxSchnellKonto.set(pid, jetzt)
+        const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || p.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+        const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
+        if(hedgeMasterTeilweise(liste, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pid); _tsxSchnellLeer.delete(pid); continue }
+        if(st.flach !== true){ _tsxSchnellLeer.delete(pid); continue }   // flach nur mit Beweis — sonst keine Aussage
+        if(!_hedgeMasterGesehen.has(pid)) continue
+        if(!_tsxSchnellLeer.has(pid)) _tsxSchnellLeer.set(pid, jetzt)
+        const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
+        const weg = hedgeMasterWegEntscheid({ liste, positionenOk: true, alterMs: r.alter_s * 1000, sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung,
+          kontoPlan, kontoAktiv: kontoPlan, kontenAnzahl: 99, kontoStabilMs: jetzt - _tsxSchnellKonto.get(pid), leerSeitMs: jetzt - _tsxSchnellLeer.get(pid),
+          schnell: true, gesehen: true })
+        if(weg && p.status === 'open'){
+          _tsxSchnellLeer.delete(pid)
+          console.info('[hedgeTsx] Master weg laut TopstepX-Auge — Fusion wird geschlossen', p.masterName || pid)
+          await hedgeMasterWegAusfuehren(p, kontoPlan, null)
+        }
+      }
+    }catch(e){ console.warn('[hedgeTsx]', e) }
+    finally{ _tsxSchnellBusy = false }
+  }
+  setInterval(hedgeTsxSchnellTick, 50)   // nur lokale Abfrage, nur bei offenem Topstep-Hedge dieses PCs
   /* MASTER LAUT READER (01.10.2026, Live-Befund Moritz 00:55 UTC: Order platziert, Antwort an den Tab verloren, Position zwei Minuten
    * später schon wieder zu — die Übernahme hätte danach einen Fusion-Hedge für eine geschlossene Position nachgeholt). Vor jedem
    * NACHGEHOLTEN Hedge-Open fragen: true = Reader zeigt die Master-Position, false = Puls-Chrome-Reader (flach nur mit Beweis) zeigt
@@ -31203,6 +31299,7 @@
     if(wdlIstPolar(t)) return 'Polar'   // Sticker „Polar" (20.10.2026)
     if(wdlIstEcho(t)) return t.route === 'mt5' ? 'Echo' : 'Echo V2'   // route mt5 = Echo mit Fusion-Hedge (seit 01.10.2026 abends im Radar)
     // Winning Day auf Topstep (.1496, Finn 13.10.2026: „Winning Day ist der Knopf, Topstep V2 der Weg"): die Pille sagt Winning Day
+    if(t.route === 'tsv2' && t.orbit_v3) return 'Orbit'   // Topstep Big Trade (27.10.2026): Orbit-Hedge, kein Winning Day
     if(t.route === 'tsv2') return (Number(t.hedge_eur) > 0 || t.quelle === 'farmer' || String(t.konto_typ || '').toLowerCase() === 'winning_days' || t.winning_day === true) ? 'Winning Day' : 'Topstep V2'
     let eigen = null; try{ eigen = (tradePlans || []).find(x => String(x.id) === String(wdlTid(t))) }catch(_){}
     if(t.orbit_v3 || (eigen && eigen.orbitV3)) return 'Orbit'   // früher „Orbit V3" — heißt wie im Plan-Popup (01.10.2026)
@@ -48347,7 +48444,10 @@
       // SELBSTHEILUNG (.1491, Finn: „ich möchte einfach auf Starten drücken, dass das dann funktioniert"): der Plan wird hier auf Topstep V2
       // gedreht (ohne Hedge, winning_day = true für den Hedge-Kategorien-Riegel) und läuft dann unten über tsx-konto in TopstepX.
       if(plan.route === 'tvv2' && /topstep/i.test(firmName)){
-        const upd = { route: 'tsv2', hedge_eur: null, hedge_faktor: null, multiplier: null, slave_risk: null, winning_day: true, orbit_v3: false }
+        // Topstep Big Trade (27.10.2026): ein Orbit-Plan MIT Fusion-Hedge behält ihn — nur der Weg wird tsv2 (Puls in TopstepX, Hedge wie Orbit);
+        // bisher hätte die Selbstheilung den Hedge still entfernt (Plan aus einem Tab-Build vor dem Topstep-Big-Trade)
+        const upd = (plan.orbitV3 && Number(plan.hedgeEur) > 0) ? { route: 'tsv2', winning_day: false }
+          : { route: 'tsv2', hedge_eur: null, hedge_faktor: null, multiplier: null, slave_risk: null, winning_day: true, orbit_v3: false }
         const { data: dh, error: eh } = await supabase.from('trade_plans').update(upd).eq('id', plan.id).eq('route', 'tvv2').select('*')
         if(eh || !dh || !dh.length){
           await fehler('⛔ Orbit-V2-Plan auf Topstep-Konto: Umstellen auf Topstep V2 fehlgeschlagen (' + String((eh && eh.message) || 'Zeile nicht getroffen') + ') — nichts gesendet, Plan bleibt Geplant.', { ok: false, code: 'falscher_weg', retry_ok: true, _nichtGesendet: true })
@@ -48567,7 +48667,7 @@
       await fehler('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
     }finally{
       _tpOrbitLaeuft = false
-      try{ bigTradeHeimPlanen(extId, 'Order ' + String(extId).slice(-4), true) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026, Prio 1) — sofort (19.10.2026)
+      try{ bigTradeHeimPlanen(extId, 'Order ' + String(extId).slice(-4), true, bthFenster(plan && plan.route)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026, Prio 1) — sofort (19.10.2026)
     }
   }
 
@@ -51040,7 +51140,7 @@
       if(!rows.length){ box.innerHTML = '<span style="color:var(--sub)">Noch keine Schließ-Versuche.</span>'; return }
       box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Letzte Schließ-Versuche</div>' + rows.map(r => {
         const t = new Date(r.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Topstep V2') : (r.route || '—')
+        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? (r.orbit_v3 ? 'Orbit' : Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Topstep V2') : (r.route || '—')
         return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line);align-items:baseline">
           <span class="mono" style="color:var(--sub);flex:0 0 92px">${t}</span>
           <span style="flex:0 0 46px">${weg}</span>
@@ -56634,7 +56734,8 @@
                       : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_wd') === '1')
     // Winning Day auf Topstep (.1495, Finn 13.10.2026: „Bearbeiten schlug ‚Topstep V2 ohne Hedge' vor"): ein tsv2-Plan mit Hedge oder
     // Winning-Day-Marke öffnet als Weg „Winning Day" (intern tvv2 + _tpWd); Speichern dreht ihn über wdTs wieder auf tsv2
-    if(_editPlan && _editPlan.route === 'tsv2' && (_editPlan.hedgeEur > 0 || _editPlan.winningDay === true)){ _tpRoute = 'tvv2'; _tpWd = true }
+    if(_editPlan && _editPlan.route === 'tsv2' && !_editPlan.orbitV3 && (_editPlan.hedgeEur > 0 || _editPlan.winningDay === true)){ _tpRoute = 'tvv2'; _tpWd = true }
+    if(_editPlan && _editPlan.route === 'tsv2' && _editPlan.orbitV3){ _tpRoute = 'tvv2'; _tpWd = false }   // Topstep Big Trade (27.10.2026) → Knopf Orbit
     // Orbit V3 (01.10.2026): beim Bearbeiten aus der Kennung am Plan, neu = letzte Wahl; schließt Winning Day aus
     _tpO3 = _editPlan ? tpIstOrbitV3(_editPlan) : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_o3') === '1')
     if(_tpO3) _tpWd = false
@@ -56978,7 +57079,9 @@
                && !(typeof tpIstWinningDays === 'function' && (tpIstWinningDays(a) || (/topstep/i.test(String(a.firm || '')) && String(a.type || '').toLowerCase() === 'funded')) && String(a.externalId || '').trim())) return false
             // Orbit (= Orbit V3, 01.10.2026 abends, Finn): keine Topstep-Konten im Master-Dropdown — Topstep läuft über TopstepX
             // (eigene Wege Topstep / Topstep V2), nicht über TradingView, wo Puls für Orbit platziert
-            if(_tpRoute === 'tvv2' && _tpO3 && role === 'master' && /topstep/i.test(String(a.firm || ''))) return false
+            // TOPSTEP BIG TRADE (27.10.2026, Finn: „parallel zu Big Trade für Topstep“): Orbit nimmt Topstep-Konten wieder auf — beim Speichern
+            // wird der Weg tsv2 (Puls in TopstepX, Fusion-Hedge wie Orbit, echter SL als „Risk“); ohne External ID findet Puls das Konto nicht
+            if(_tpRoute === 'tvv2' && _tpO3 && role === 'master' && /topstep/i.test(String(a.firm || '')) && !String(a.externalId || '').trim()) return false
             // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
             if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2' && _tpRoute !== 'tsv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
@@ -59469,6 +59572,8 @@
     // Winning Day auf Topstep (.1489, Finn 13.10.2026): derselbe Knopf, aber der Plan wird Topstep V2 (tsv2) — Puls in TopstepX, TP als
     // „To Make", kein Fusion-Hedge (Wächter hängt am TV-Reader), winning_day = true (DB-Riegel Hedge-Kategorien). Kein Multiplikator nötig.
     const wdTs = wd && /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(masterId)) || {}).firm || ''))
+    // Topstep Big Trade (27.10.2026): Orbit auf einem Topstep-Konto wird Weg tsv2 — Puls platziert in TopstepX, SL = „Risk“, Fusion-Hedge wie Orbit
+    const o3Ts = tpO3Aktiv() && /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(masterId)) || {}).firm || ''))
     // Orbit V3 (01.10.2026): dieselbe Multiplikator-Rechnung wie die Farm, aber Risiko Master = echter Stop Loss in TradingView
     // .1493: Winning Day auf Topstep MIT Fusion-Hedge wie jeder Winning Day (Multiplikator, Risiko Slave) — nur der Weg wird tsv2
     const o3 = tpO3Aktiv(), mitHedge = wd || o3
@@ -59552,6 +59657,7 @@
         if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
       }
       if(wdTs) Object.assign(v2Extra, { route: 'tsv2', winning_day: true })   // Topstep: Weg tsv2 mitschreiben (v2Extra liegt hinter route), Hedge-Felder wie Winning Day
+      if(o3Ts) Object.assign(v2Extra, { route: 'tsv2', winning_day: false })   // Topstep Big Trade (27.10.2026): Weg tsv2, orbit_v3 setzt der Block unten
       if(_tpWd || _tpO3){
         if(!masterTp){ msg(`${_tpO3 ? 'Orbit' : 'Winning Day'} braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).`, 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }

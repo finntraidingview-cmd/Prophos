@@ -3322,6 +3322,64 @@ load(); setInterval(load,3000);
 </script></body></html>"""
 
 
+# ══ TOPSTEPX-AUGE (27.10.2026, Finn: „In erster Instanz ein Tampermonkey-Script im TopstepX-Tab … sobald der Trade in TopstepX
+# geschlossen wird, sieht das Auge des Scripts das und schließt den Hedge direkt — gleiche Prio wie ein Orbit Big Trade"). Das Userscript
+# tv-reader/tsx-auge.user.js (Puls-Chrome, topstepx.com) meldet alle 0,25 s seinen Stand (augen_tsx.js stand(): Konto, Positionen,
+# Flach-Beweis, Reiter) per POST /api/tsx-stand; der Prophos-Tab dieses PCs fragt GET /api/tsx-stand alle 0,05 s, solange ein Topstep-
+# Hedge offen ist (prophos.html hedgeTsxSchnellTick). Eigener Kanal statt reader-server (8790): der kennt nur EINEN Stand (TradingView),
+# ein zweiter Tab dort würde den Orbit-Schließer stören, und er kommt erst mit start-alles.bat auf die PCs. Nur im Speicher, je Tab der
+# jüngste Stand; nichts wird geschrieben, nichts geklickt.
+TSX_STAND_MAX = 60_000          # Bytes je Meldung (stand() bleibt laut augen_tsx.js unter STAND_MAX)
+TSX_STAND_TABS = 4              # mehr Tabs merkt sich das Panel nicht (Puls-Chrome hat einen TopstepX-Tab)
+TSX_STAND_ALT_S = 30.0          # ältere Tab-Stände fallen weg
+_tsx_stand = {}                 # tab → {"ts": Panel-Zeit, "stand": dict}
+_tsx_stand_lock = threading.Lock()
+
+
+def tsx_stand_herkunft_ok(origin):
+    """REIN RECHNEND (testbar): darf diese Origin den TopstepX-Stand melden? Tampermonkeys GM_xmlhttpRequest kommt je nach Version ohne
+    Origin, mit der Seite (https://topstepx.com) oder mit der Erweiterung (chrome-extension://…). Andere Webseiten nie — sonst könnte
+    jede Seite im Browser „flach" melden und den Fusion-Hedge schließen lassen."""
+    if not origin:
+        return True
+    o = urlparse(str(origin))
+    host = (o.hostname or "").lower()
+    if o.scheme == "chrome-extension":
+        return True
+    if o.scheme == "https" and (host == "topstepx.com" or host.endswith(".topstepx.com")):
+        return True
+    return o.scheme in ("http", "https") and host in ("127.0.0.1", "localhost")
+
+
+def tsx_stand_merken(daten, jetzt=None):
+    """REIN RECHNEND bis auf den Speicher: Meldung des Userscripts ablegen. → (ok, grund)."""
+    if not isinstance(daten, dict) or not isinstance(daten.get("stand"), dict):
+        return False, "stand fehlt"
+    tab = re.sub(r"[^A-Za-z0-9_.-]", "", str(daten.get("tab") or ""))[:48]
+    if not tab:
+        return False, "tab fehlt"
+    jetzt = time.time() if jetzt is None else jetzt
+    with _tsx_stand_lock:
+        _tsx_stand[tab] = {"ts": jetzt, "stand": daten["stand"], "script": str(daten.get("script") or "")[:24]}
+        for t in [t for t, v in _tsx_stand.items() if jetzt - v["ts"] > TSX_STAND_ALT_S]:
+            _tsx_stand.pop(t, None)
+        while len(_tsx_stand) > TSX_STAND_TABS:
+            _tsx_stand.pop(min(_tsx_stand, key=lambda t: _tsx_stand[t]["ts"]), None)
+    return True, ""
+
+
+def tsx_stand_ausgabe(jetzt=None):
+    """Jüngster Stand aller Tabs mit Alter in Sekunden (Panel-Uhr) — {ok:false}, solange keiner meldet."""
+    jetzt = time.time() if jetzt is None else jetzt
+    with _tsx_stand_lock:
+        if not _tsx_stand:
+            return {"ok": False, "grund": "kein TopstepX-Auge meldet"}
+        tab = max(_tsx_stand, key=lambda t: _tsx_stand[t]["ts"])
+        v = _tsx_stand[tab]
+        return {"ok": True, "tab": tab, "tabs": len(_tsx_stand), "alter_s": round(jetzt - v["ts"], 3), "script": v["script"],
+                "stand": v["stand"]}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         raw = body if isinstance(body, bytes) else body.encode("utf-8")
@@ -3357,6 +3415,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/instances":
             tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
             return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
+        if path == "/api/tsx-stand":
+            # TopstepX-Auge (27.10.2026, s. tsx_stand_merken): jüngster Stand des Userscripts im Puls-Chrome — nur lesen
+            return self._send(200, json.dumps(tsx_stand_ausgabe(), ensure_ascii=False, default=str))
         if path == "/api/puls-klick":
             # Klick-/Fill-Meldung von Puls LOKAL (01.10.2026, Finn: „Fusion sofort beim Knopfdruck, an Supabase vorbei"): order_bot.py
             # legt jede Order-Meldung zusätzlich als puls_ergebnisse/letzt_order.json ab (überschrieben). Der Prophos-Tab dieses PCs fragt
@@ -3381,9 +3442,23 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        u = urlparse(self.path)
+        if u.path == "/api/tsx-stand":
+            # TopstepX-Auge (27.10.2026): eigene Herkunfts-Regel (tsx_stand_herkunft_ok — Tampermonkey kommt nicht als localhost), Host
+            # bleibt 127.0.0.1/localhost; vor der Polar-Sperre, denn das Melden ist kein Puls-Weg und muss auch während Polar laufen
+            host = (self.headers.get("Host") or "").split(":")[0].lower()
+            if host not in ("127.0.0.1", "localhost") or not tsx_stand_herkunft_ok(self.headers.get("Origin")):
+                return self._send(403, json.dumps({"ok": False, "msg": "nur lokal"}))
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > TSX_STAND_MAX:
+                    return self._send(413, json.dumps({"ok": False, "msg": "zu groß"}))
+                ok, grund = tsx_stand_merken(json.loads(self.rfile.read(n) or b"{}") if n else {})
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {type(e).__name__}"}))
+            return self._send(200 if ok else 400, json.dumps({"ok": ok, "msg": grund}))
         if not self._local_ok():
             return self._send(403, json.dumps({"ok": False, "msg": "nur lokal"}))
-        u = urlparse(self.path)
         ctype = (self.headers.get("Content-Type") or "")
         if "application/json" not in ctype:
             return self._send(400, json.dumps({"ok": False, "msg": "Content-Type muss application/json sein"}))
