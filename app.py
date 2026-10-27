@@ -27816,6 +27816,49 @@ def ap_bal_auto_ohne_wert(konten, schon, echo_bal, dup_bal, archiv=None):
     return out
 
 
+def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None):
+    """REIN RECHNEND (testbar): {konto_id: grund} — Quelle (E) FUNDED-PLANER (Master 27.10.2026, Finn: Funded-Konten der im Funded-Planer
+    eingeschalteten Firmen liest der Bot selbst, wie die Planer-Konten). konten = Funded-Konten dieser Firmen (Aufrufer filtert), letzt =
+    {konto_id: Ende des letzten Trades} (ap_letzt_je_konto). Gelesen wird, was der Funded-Planer als „Balance nicht live" auslässt: nie
+    gelesen, letzte Lesung ohne Wert, oder Stand älter als das Ende des letzten Trades (ap_balance_live). Ausnahmen wie (C)/(D):
+    archiviert, Haken „Auto-Planer" aus, ohne External ID, Topstep Express. Deckel 3/Tag + 90 min gelten im Takt wie überall."""
+    archiv = archiv or set()
+    out = {}
+    for a in konten or []:
+        kid = str((a or {}).get("id") or "")
+        if not kid or kid in archiv or kid in (schon or ()) or a.get("auto_planer") is False:
+            continue
+        if not str(a.get("external_id") or "").strip() or ist_topstep_express(a):
+            continue
+        if not any(a.get(f) for f in AP_LESE_FELDER):
+            out[kid] = "Funded-Planer: noch nie gelesen"
+            continue
+        wert = acc_balance_wahl(a, echo_bal, dup_bal)
+        if wert[0] is None:
+            out[kid] = "Funded-Planer: letzte Lesung ohne Wert"
+        elif not ap_balance_live(wert[3], (letzt or {}).get(kid)):
+            out[kid] = "Funded-Planer: Balance seit dem letzten Trade nicht gelesen"
+    return out
+
+
+def _ap_bal_auto_funded_konten():
+    """Funded-Konten der im Funded-Planer eingeschalteten Firmen + Ende ihres letzten Trades → (konten, letzt). Ohne eingespielte
+    funded_plan_regeln (oder ohne Firma an) leer — dann liest der Takt wie bisher nur die Planer-Konten."""
+    reg = _fdp_regeln_laden()
+    an = [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict) and f.get("an")]
+    uids = [str(u) for u in ((reg or {}).get("user_ids") or [])]
+    if not an or not uids:
+        return [], {}
+    konten = [a for a in _ap_konten_laden({"user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"}) or []
+              if ap_regel_finden(an, a.get("firm"))]
+    ids = [str(a.get("id")) for a in konten]
+    plaene = []
+    for i in range(0, len(ids), 100):
+        plaene += _sb_all("trade_plans", {"select": "master_account_id,status,ended_at,completed_at", "status": "in.(review,completed)",
+                                          "master_account_id": "in.(" + ",".join(ids[i:i + 100]) + ")"}) or []
+    return konten, ap_letzt_je_konto(plaene)
+
+
 def ap_bal_auto_kandidaten(letzter_erg, tag, plaene, accs, letzt, echo_bal, dup_bal, archiv=None):
     """REIN RECHNEND (testbar): {konto_id: grund} der Konten, deren Balance der Bot jetzt von selbst lesen soll.
     (A) ausgelassen des letzten Laufs DES TAGES mit Lese-Grund (AP_BAL_AUTO_GRUND, seit 16.10.2026 auch „nie gelesen"/„geblowt?"), ohne grund_code in AP_BAL_AUTO_OHNE_LESUNG, und die
@@ -27972,6 +28015,15 @@ def ap_bal_auto_tick(jetzt, reg=None):
         kand[kid] = grund
     for a in konten_neu:
         accs.setdefault(str(a.get("id")), a)
+    # (E) Funded-Konten der im Funded-Planer eingeschalteten Firmen (27.10.2026) — eigener try: ein Fehler hier lässt (A)–(D) unberührt
+    try:
+        f_konten, f_letzt = _ap_bal_auto_funded_konten()
+        for kid, grund in ap_bal_auto_funded(f_konten, f_letzt, set(kand), echo_bal, dup_bal, archiv).items():
+            kand[kid] = grund
+        for a in f_konten:
+            accs.setdefault(str(a.get("id")), a)
+    except Exception as e:
+        print(f"[balance-auto] ⚠️ Funded-Konten nicht gelesen ({type(e).__name__}: {e}) — nur Planer-Konten", flush=True)
     # Für „Braucht dich" (16.10.2026): wen der Bot jetzt liest, wen grundsätzlich nicht (ein Grund) und welche Konten Planer-Konten sind
     _ap_bal_auto.update(kandidaten=dict(kand), konten=[str(a.get("id")) for a in konten_neu if str(a.get("id")) not in archiv],
                         nicht={str(a.get("id")): w for a in konten_neu for w in [ap_bal_auto_warum_nicht(a, archiv)] if w and str(a.get("id")) not in kand})

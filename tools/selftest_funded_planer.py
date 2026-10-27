@@ -302,6 +302,26 @@ def big_trade(ns):
     check(out == "funded wd false", f"prophos.html bigTradePlan: Funded = Prio 1 vor dem Winning Day, kein WD-Plan ({out})")
 
 
+def balance_selbst(ns):
+    """Quelle (E) im Balance-Takt (app.py ap_bal_auto_funded): Funded-Konten der eingeschalteten Firmen liest der Bot selbst — nie gelesen,
+    ohne Wert, Stand älter als das Ende des letzten Trades. acc_balance_wahl hier vereinfacht (nur tv_balance), Rest echt."""
+    print("Balance selbst lesen (Funded, Quelle E)")
+    ns2 = {"re": re, "datetime": datetime, "timezone": timezone, "AP_LESE_FELDER": ("tv_balance_at", "topstep_last_check", "meta_api_last_check"),
+           "acc_balance_wahl": lambda a, e, d: ((a.get("tv_balance") or None), "USD", "TV", a.get("tv_balance_at") or "")}
+    exec("\n".join(block(n) for n in ("ist_topstep_express", "ap_balance_live", "ap_bal_auto_funded")), ns2)
+    k = lambda i, **x: dict({"id": i, "external_id": "PAAPEX" + i, "firm": "Apex Trader", "account_type": "funded", "auto_planer": True}, **x)
+    konten = [k("nie"), k("leer", tv_balance=0, tv_balance_at="2026-10-26T10:00:00+00:00"),
+              k("alt", tv_balance=150000, tv_balance_at="2026-10-26T10:00:00+00:00"),
+              k("frisch", tv_balance=157500, tv_balance_at="2026-10-26T16:00:00+00:00"),
+              k("aus", auto_planer=False), k("arch"), k("ohne", external_id=""), k("schon")]
+    r = ns2["ap_bal_auto_funded"](konten, {"alt": "2026-10-26T15:00:00+00:00", "frisch": "2026-10-26T15:00:00+00:00"}, {"schon"}, {}, {}, {"arch"})
+    check(sorted(r) == ["alt", "leer", "nie"] and "nie gelesen" in r["nie"] and "ohne Wert" in r["leer"] and "nicht gelesen" in r["alt"],
+          f"liest: nie gelesen, ohne Wert, älter als der letzte Trade — nicht: frisch, Haken aus, archiviert, ohne External ID, schon dran ({sorted(r)})")
+    src_tick = SRC[SRC.index("\ndef ap_bal_auto_tick("):SRC.index("\ndef ", SRC.index("\ndef ap_bal_auto_tick(") + 10)]
+    check("_ap_bal_auto_funded_konten()" in src_tick and src_tick.index("_ap_bal_auto_funded_konten()") < src_tick.index("if not kand:"),
+          "ap_bal_auto_tick hängt (E) vor die Sende-Schleife (eigener try, Deckel 3/Tag + 90 min gelten)")
+
+
 if __name__ == "__main__":
     ns = laden()
     szenario(ns)
@@ -309,6 +329,7 @@ if __name__ == "__main__":
     tag_13(ns)
     ziel_wd(ns)
     big_trade(ns)
+    balance_selbst(ns)
     if FEHLER:
         print(f"\n✗ {len(FEHLER)} Fehler")
         sys.exit(1)
