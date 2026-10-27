@@ -30123,6 +30123,12 @@ try:
 except Exception as _pe:
     print(f"[polar] Modul nicht geladen: {type(_pe).__name__}: {_pe}", flush=True)
 
+try:
+    import support_app          # Support-Chat „Lotse“ (27.10.2026, Finn): eigenes Modul mit den /support/*-Routen, wie Polar
+    support_app.registrieren(app, globals())
+except Exception as _se:
+    print(f"[support] Modul nicht geladen: {type(_se).__name__}: {_se}", flush=True)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     if os.environ.get("PROPHOS_FRONTEND"):

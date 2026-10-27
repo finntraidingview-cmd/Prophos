@@ -47738,7 +47738,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1763'
+  const OS_TAB_BUILD = '2026-09-22.1764'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -74136,6 +74136,293 @@
   // Seite direkt mit #vorrat geöffnet und die Ansicht war schon aktiv, bevor dieser Block lief → jetzt nachholen
   if(document.querySelector('#dashboard-view .view[data-view="vorrat"].active')) window._vrTabOeffnen()
 })()
+
+  /* ========== SUPPORT-CHAT „LOTSE“ ========== */
+  /* Finn 27.10.2026: „Alle Leute, die Prophos nutzen, sollen mich nicht alle 10 Minuten fragen müssen … beschränkter Zugriff auf die
+   * Datenbank, kennt sich in der Navigation aus“ + „wie eine eigene KI, Screenshots hochladen ist ganz wichtig“. Backend: support_app.py
+   * (/support/*, Claude-API mit Werkzeugen, Rechte serverseitig). Hier nur Knopf + Fenster: Unterhaltungen, Screenshots (einfügen,
+   * reinziehen, 📎 — am Handy Kamera/Galerie), Bestätigen-Knöpfe für die Handgriffe, Stand eines Auftrags an den PC.
+   * Sichtbar nur mit Freischaltung (support_zugang). Alle Anfragen mit ?ansicht=admin (+ Gruppen-Chip): ein Verwalter sieht im Chat seine
+   * Gruppe, Finn/Pascal (support_zugang.sicht 'alle') alle IDs wie im Admin, alle anderen nur die eigene ID — der Server entscheidet.
+   * Eigene Verdrahtung, kein Sammel-Handler. */
+  ;(function(){
+    const fab = document.getElementById('lotse-fab'), panel = document.getElementById('lotse-panel')
+    if(!fab || !panel) return
+    const $l = id => document.getElementById(id)
+    const verlaufEl = $l('lo-verlauf'), listeEl = $l('lo-liste'), textEl = $l('lo-text'), vorschauEl = $l('lo-vorschau'), fussEl = $l('lo-fuss')
+    const LO_ANKER = ['accounts', 'trades', 'tplaner', 'wdlive', 'markt', 'payouts', 'mt5copier', 'echoplus', 'news', 'notes', 'mail', 'settings', 'kasse']
+    const LO_BILD_MAX = 3, LO_BILD_KANTE = 1568
+    const lo = { an: false, unterh: null, bilder: [], sendet: false, stub: null, rest: null, limit: null, liste: false }
+    try{ lo.unterh = sessionStorage.getItem('lotse_unterh') || null }catch(_){}
+    const merkeUnterh = id => { lo.unterh = id || null; try{ id ? sessionStorage.setItem('lotse_unterh', id) : sessionStorage.removeItem('lotse_unterh') }catch(_){} }
+
+    async function loApi(pfad, opts = {}){
+      if(lo.stub) return lo.stub(pfad, opts)
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(!tok) throw new Error('nicht angemeldet')
+      // Gruppen-Chip wie in den Admin-Reitern (gilt nur für unbeschränkte Logins mit Sicht „alle"; der Server entscheidet)
+      const gq = typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : ''
+      const r = await fetch(`${WATCHER_HOME}${pfad}${pfad.includes('?') ? '&' : '?'}ansicht=admin${gq}`, {
+        method: opts.method || 'GET', cache: 'no-store',
+        headers: { 'sb-token': tok, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+        body: opts.body ? JSON.stringify(opts.body) : undefined })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || d.ok === false){ const e = new Error(d.msg || d.error || ('HTTP ' + r.status)); e.daten = d; e.status = r.status; throw e }
+      return d
+    }
+
+    // Antworttext → HTML: erst escapen, dann nur **fett**, `code`, Listen und Links auf erlaubte Ansichten (#anker)
+    function loMd(s){
+      const zeile = t => escapeHtml(t)
+        .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\[([^\]]+)\]\(#([a-z0-9-]+)\)/g, (m, txt, v) => LO_ANKER.includes(v) ? `<a data-lo-view="${v}">${txt}</a>` : txt)
+      const out = []; let liste = null
+      for(const roh of String(s || '').split('\n')){
+        const li = roh.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/)
+        if(li){ (liste = liste || []).push(`<li>${zeile(li[1])}</li>`); continue }
+        if(liste){ out.push(`<ul>${liste.join('')}</ul>`); liste = null }
+        if(roh.trim()) out.push(`<p>${zeile(roh)}</p>`)
+      }
+      if(liste) out.push(`<ul>${liste.join('')}</ul>`)
+      return out.join('')
+    }
+    const unten = () => { verlaufEl.scrollTop = verlaufEl.scrollHeight }
+
+    function blase(rolle, text, bilderHtml){
+      const b = document.createElement('div')
+      b.className = 'lo-b ' + (rolle === 'user' ? 'du' : 'er')
+      if(rolle === 'user'){ b.innerHTML = (bilderHtml || '') ; b.appendChild(document.createTextNode(text || '')) }
+      else b.innerHTML = loMd(text)
+      verlaufEl.appendChild(b); return b
+    }
+    function hinweis(text, fehler){
+      const h = document.createElement('div'); h.className = 'lo-hinweis' + (fehler ? ' fehler' : ''); h.textContent = text
+      verlaufEl.appendChild(h); unten(); return h
+    }
+    function willkommen(){
+      verlaufEl.innerHTML = ''
+      blase('assistant', 'Hi, ich bin **Lotse**. Frag mich, wo etwas ist, was eine Meldung bedeutet oder warum ein Trade hängt — gern mit Screenshot. '
+        + 'Kleine Handgriffe (geplanten Trade löschen, Balance lesen, am PC prüfen) erledige ich nach deinem **Bestätigen**.')
+    }
+
+    // Bestätigen-Karte für einen Handgriff (Vorschlag des Servers, Token 5 min gültig)
+    function aktionKarte(a){
+      const k = document.createElement('div'); k.className = 'lo-akt'
+      k.innerHTML = `<b>${escapeHtml(a.titel || 'Handgriff')}</b><div>${escapeHtml(a.text || '')}</div>`
+      const st = document.createElement('div'); st.className = 'st'
+      if(a.erledigt){ st.classList.add('ok'); st.textContent = '✓ ' + a.erledigt; k.appendChild(st) }
+      else if(!a.token){ st.textContent = a.abgelaufen ? 'Abgelaufen — frag einfach noch einmal.' : ''; if(st.textContent) k.appendChild(st) }
+      else{
+        const kn = document.createElement('div'); kn.className = 'knoepfe'
+        const ja = document.createElement('button'); ja.type = 'button'; ja.className = 'lo-ja'; ja.textContent = 'Bestätigen'
+        const nein = document.createElement('button'); nein.type = 'button'; nein.className = 'lo-nein'; nein.textContent = 'Nein'
+        kn.append(ja, nein); k.append(kn, st)
+        nein.addEventListener('click', () => { kn.remove(); st.textContent = 'Nicht ausgeführt.' })
+        ja.addEventListener('click', async () => {
+          ja.disabled = nein.disabled = true; st.className = 'st'; st.textContent = 'Wird ausgeführt …'
+          try{
+            const d = await loApi('/support/aktion', { method: 'POST', body: { token: a.token } })
+            kn.remove(); st.classList.add('ok'); st.textContent = '✓ ' + (d.msg || 'Erledigt')
+            if(d.signal_id) auftragVerfolgen(d.signal_id, k)
+          }catch(e){ ja.disabled = nein.disabled = false; st.classList.add('nein'); st.textContent = e.message }
+        })
+      }
+      verlaufEl.appendChild(k); return k
+    }
+
+    // Auftrag an den PC (Balance, Beendet-Prüfung, Tab neu laden): Stand alle 4 s, höchstens 4 min — nur Lesen, kein Modell-Aufruf
+    function auftragVerfolgen(id, karte){
+      const st = document.createElement('div'); st.className = 'st'; st.textContent = 'PC: wartet auf den Prophos-Tab …'; karte.appendChild(st)
+      const bis = Date.now() + 240000
+      const runde = async () => {
+        let d = null
+        try{ d = await loApi('/support/auftrag?id=' + encodeURIComponent(id)) }catch(_){}
+        const s = d?.status
+        if(s === 'fertig' || s === 'ok' || s === 'erledigt'){
+          st.className = 'st ok'; st.textContent = '✓ PC fertig' + (d.balance != null ? ` · Balance ${Number(d.balance).toLocaleString('de-DE')}` : '') + (d.meldung ? ' · ' + d.meldung : ''); return
+        }
+        if(s === 'fehler' || s === 'verfallen'){ st.className = 'st nein'; st.textContent = 'PC: ' + (d.meldung || 'nicht geklappt'); return }
+        if(s) st.textContent = s === 'laeuft' ? 'PC: läuft …' : 'PC: wartet auf den Prophos-Tab …'
+        if(Date.now() < bis) setTimeout(runde, 4000)
+        else st.textContent = 'PC hat noch nicht fertig gemeldet — frag mich gleich nach dem Stand.'
+      }
+      setTimeout(runde, 3000)
+    }
+
+    async function unterhaltungLaden(id){
+      verlaufEl.innerHTML = ''; hinweis('Lade …')
+      try{
+        const d = await loApi('/support/unterhaltung/' + encodeURIComponent(id))
+        verlaufEl.innerHTML = ''; merkeUnterh(id)
+        $l('lo-sub').textContent = d.titel || 'Unterhaltung'
+        for(const b of d.blasen || []){
+          blase(b.rolle, b.text, b.bilder ? `<div class="lo-bild-n">📎 ${b.bilder} Screenshot${b.bilder > 1 ? 's' : ''}</div>` : '')
+          for(const a of b.aktionen || []) aktionKarte(a)
+        }
+        if(d.zu) hinweis('Diese Unterhaltung ist abgelaufen — für eine neue oben auf ＋.')
+        unten()
+      }catch(e){ merkeUnterh(null); willkommen(); if(e.status !== 404) hinweis(e.message, true) }
+    }
+
+    async function listeZeigen(an){
+      lo.liste = an; listeEl.hidden = !an; verlaufEl.hidden = an; $l('lo-liste-btn').classList.toggle('an', an)
+      $l('lo-form').hidden = an; vorschauEl.hidden = an
+      if(!an) return
+      listeEl.innerHTML = '<div class="lo-leer">Lade …</div>'
+      try{
+        const d = await loApi('/support/unterhaltungen')
+        if(!(d.liste || []).length){ listeEl.innerHTML = '<div class="lo-leer">Noch keine Unterhaltungen.</div>'; return }
+        listeEl.innerHTML = d.liste.map(u => `<div class="lo-liste-z${u.id === lo.unterh ? ' an' : ''}" data-lo-u="${escapeHtml(u.id)}">`
+          + `<span class="t">${escapeHtml(u.titel)}</span><span class="u">${escapeHtml(u.um || '')}</span>`
+          + `<button type="button" class="x" data-lo-weg="${escapeHtml(u.id)}" title="Löschen">×</button></div>`).join('')
+      }catch(e){ listeEl.innerHTML = `<div class="lo-leer">${escapeHtml(e.message)}</div>` }
+    }
+    listeEl.addEventListener('click', async ev => {
+      const weg = ev.target.closest('[data-lo-weg]')
+      if(weg){
+        ev.stopPropagation()
+        try{ await loApi('/support/unterhaltung/' + encodeURIComponent(weg.dataset.loWeg), { method: 'DELETE' }) }catch(e){ return }
+        if(weg.dataset.loWeg === lo.unterh){ merkeUnterh(null); willkommen(); $l('lo-sub').textContent = 'Support' }
+        listeZeigen(true); return
+      }
+      const z = ev.target.closest('[data-lo-u]')
+      if(z){ listeZeigen(false); unterhaltungLaden(z.dataset.loU) }
+    })
+
+    // Screenshots: verkleinern (lange Seite ≤ 1568 px, JPEG 0,85) — so schickt die API kein Bild größer, als sie liest
+    function bildVerkleinern(datei){
+      return new Promise((ok, nein) => {
+        const url = URL.createObjectURL(datei), img = new Image()
+        img.onload = () => {
+          const f = Math.min(1, LO_BILD_KANTE / Math.max(img.naturalWidth, img.naturalHeight))
+          const w = Math.max(1, Math.round(img.naturalWidth * f)), h = Math.max(1, Math.round(img.naturalHeight * f))
+          const c = document.createElement('canvas'); c.width = w; c.height = h
+          const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h)
+          URL.revokeObjectURL(url)
+          ok({ url: c.toDataURL('image/jpeg', 0.85), w, h })
+        }
+        img.onerror = () => { URL.revokeObjectURL(url); nein(new Error('Bild nicht lesbar')) }
+        img.src = url
+      })
+    }
+    async function bilderDazu(dateien){
+      for(const d of [...dateien].filter(x => /^image\//.test(x.type))){
+        if(lo.bilder.length >= LO_BILD_MAX){ hinweis(`Höchstens ${LO_BILD_MAX} Bilder je Nachricht.`, true); break }
+        try{ lo.bilder.push(await bildVerkleinern(d)) }catch(e){ hinweis(e.message, true) }
+      }
+      vorschauZeigen()
+    }
+    function vorschauZeigen(){
+      vorschauEl.innerHTML = lo.bilder.map((b, i) => `<div><img src="${b.url}" alt=""><button type="button" data-lo-bweg="${i}" title="Entfernen">×</button></div>`).join('')
+    }
+    vorschauEl.addEventListener('click', ev => {
+      const x = ev.target.closest('[data-lo-bweg]'); if(!x) return
+      lo.bilder.splice(Number(x.dataset.loBweg), 1); vorschauZeigen()
+    })
+    $l('lo-bild').addEventListener('click', () => $l('lo-datei').click())
+    $l('lo-datei').addEventListener('change', ev => { bilderDazu(ev.target.files); ev.target.value = '' })
+    panel.addEventListener('paste', ev => {
+      const f = [...(ev.clipboardData?.items || [])].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean)
+      if(f.length){ ev.preventDefault(); bilderDazu(f) }
+    })
+    panel.addEventListener('dragover', ev => { if([...(ev.dataTransfer?.types || [])].includes('Files')){ ev.preventDefault(); panel.classList.add('zieht') } })
+    panel.addEventListener('dragleave', ev => { if(!panel.contains(ev.relatedTarget)) panel.classList.remove('zieht') })
+    panel.addEventListener('drop', ev => { panel.classList.remove('zieht'); if(ev.dataTransfer?.files?.length){ ev.preventDefault(); bilderDazu(ev.dataTransfer.files) } })
+
+    function fussZeigen(){ fussEl.textContent = lo.rest != null ? `noch ${lo.rest} Fragen heute` : '' }
+
+    async function senden(){
+      const frage = textEl.value.trim()
+      if(lo.sendet || (!frage && !lo.bilder.length)) return
+      lo.sendet = true; $l('lo-senden').disabled = true
+      const bilder = lo.bilder.splice(0); vorschauZeigen()
+      blase('user', frage, bilder.length ? `<div class="lo-bilder">${bilder.map(b => `<img src="${b.url}" alt="">`).join('')}</div>` : '')
+      textEl.value = ''; textAnpassen()
+      const tippt = document.createElement('div'); tippt.className = 'lo-tippt'; tippt.innerHTML = 'Lotse schaut nach<i></i><i></i><i></i>'
+      verlaufEl.appendChild(tippt); unten()
+      try{
+        const d = await loApi('/support/chat', { method: 'POST', body: { unterhaltung_id: lo.unterh, frage,
+          bilder: bilder.map(b => ({ daten: b.url.split(',')[1], typ: 'image/jpeg', w: b.w, h: b.h })) } })
+        tippt.remove()
+        if(d.unterhaltung_id && d.unterhaltung_id !== lo.unterh){ merkeUnterh(d.unterhaltung_id); $l('lo-sub').textContent = frage.slice(0, 60) || 'Screenshot' }
+        blase('assistant', d.antwort)
+        for(const a of d.aktionen || []) aktionKarte(a)
+        if(d.rest != null){ lo.rest = d.rest; fussZeigen() }
+        if(!panel.classList.contains('offen')) fab.classList.add('hat-neu')
+      }catch(e){
+        tippt.remove(); hinweis(e.message, true)
+        if(e.daten?.zu) merkeUnterh(null)
+        if(e.daten?.unterhaltung_id && !lo.unterh) merkeUnterh(e.daten.unterhaltung_id)
+      }finally{ lo.sendet = false; $l('lo-senden').disabled = false; unten() }
+    }
+    function textAnpassen(){
+      textEl.style.height = 'auto'; textEl.style.height = Math.min(120, textEl.scrollHeight + 2) + 'px'
+      textEl.style.overflowY = textEl.scrollHeight > 120 ? 'auto' : 'hidden'   // Scrollbalken erst, wenn das Feld voll ist
+    }
+    textEl.addEventListener('input', textAnpassen)
+    textEl.addEventListener('keydown', ev => { if(ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing){ ev.preventDefault(); senden() } })
+    $l('lo-form').addEventListener('submit', ev => { ev.preventDefault(); senden() })
+
+    verlaufEl.addEventListener('click', ev => {
+      const a = ev.target.closest('[data-lo-view]'); if(!a) return
+      ev.preventDefault()
+      switchView(a.dataset.loView)   // Modul-Funktion direkt — unabhängig vom Advisor-Wrapper um window.switchView (bis .1762 warf der einen TypeError)
+      if(window.matchMedia('(max-width:820px)').matches) zu()
+    })
+
+    function auf(){
+      panel.classList.add('offen'); fab.classList.remove('hat-neu')
+      if(!verlaufEl.childElementCount){ if(lo.unterh) unterhaltungLaden(lo.unterh); else willkommen() }
+      fussZeigen()
+      if(!window.matchMedia('(max-width:820px)').matches) setTimeout(() => textEl.focus(), 30)
+    }
+    function zu(){ panel.classList.remove('offen'); if(lo.liste) listeZeigen(false) }
+    fab.addEventListener('click', () => panel.classList.contains('offen') ? zu() : auf())
+    $l('lo-zu').addEventListener('click', zu)
+    $l('lo-neu').addEventListener('click', () => { merkeUnterh(null); listeZeigen(false); willkommen(); $l('lo-sub').textContent = 'Neue Unterhaltung'; textEl.focus() })
+    $l('lo-liste-btn').addEventListener('click', () => listeZeigen(!lo.liste))
+    document.addEventListener('keydown', ev => { if(ev.key === 'Escape' && panel.classList.contains('offen')) zu() })
+
+    // Freischaltung: einmal nach dem Login fragen (kein Takt) — aus = Knopf bleibt versteckt
+    async function standLaden(){
+      try{
+        const d = await loApi('/support/stand')
+        lo.an = !!d.an; fab.hidden = !lo.an
+        if(lo.an){ lo.rest = d.rest; lo.limit = d.limit; if(d.ids > 1) $l('lo-sub').textContent = `Support · sieht ${d.ids} IDs` }
+        if(lo.an && d.eingerichtet === false) $l('lo-sub').textContent = 'Noch nicht eingerichtet (API-Schlüssel fehlt)'
+      }catch(_){ fab.hidden = true }
+    }
+    let standFuer = null
+    supabase.auth.onAuthStateChange((ev, session) => {
+      const uid = session?.user?.id || null
+      if(!uid){ standFuer = null; fab.hidden = true; zu(); merkeUnterh(null); verlaufEl.innerHTML = ''; return }
+      // anderes Profil (ID-Wechsel ohne Abmelden): dessen Unterhaltung gehört nicht zu dieser ID
+      if(uid !== standFuer){ if(standFuer) merkeUnterh(null); standFuer = uid; verlaufEl.innerHTML = ''; standLaden() }
+    })
+
+    // Stub ohne Login (Design-Prüfung, wie _wdlStub/_vrStub): window._lotseStub() zeigt Knopf + Fenster mit Beispiel-Antworten
+    window._lotseStub = () => {
+      const tok = 'stub.token'
+      lo.stub = async (pfad, opts) => {
+        await new Promise(r => setTimeout(r, 400))
+        if(pfad.startsWith('/support/stand')) return { ok: true, an: true, rest: 38, limit: 40, eingerichtet: true }
+        if(pfad.startsWith('/support/unterhaltungen')) return { ok: true, liste: [{ id: 'u1', titel: 'Warum ist mein Apex-Trade nicht gestartet?', um: '27.10. 14:35' }, { id: 'u2', titel: 'Balance stimmt nicht', um: '26.10. 09:10' }] }
+        if(pfad.startsWith('/support/unterhaltung/')) return { ok: true, titel: 'Warum ist mein Apex-Trade nicht gestartet?', blasen: [
+          { rolle: 'user', text: 'Warum ist mein Apex-Trade nicht gestartet?', bilder: 1, aktionen: [] },
+          { rolle: 'assistant', text: 'Der Start um **14:30** ist verpasst: **der Prophos-Tab am PC lief nicht** (letztes Lebenszeichen 13:52).\n- PC an, Prophos öffnen\n- Puls holt den Start von selbst nach\n\n[Trade-Planer öffnen](#tplaner)', bilder: 0,
+            aktionen: [{ titel: 'Trade löschen', text: 'Trade „100k APEX …0001“ (Apex, Start 27.10. 14:30) wird gelöscht.', erledigt: 'Trade gelöscht.' }] }] }
+        if(pfad.startsWith('/support/chat')) return { ok: true, unterhaltung_id: 'u3', rest: 37, antwort: 'Der Trade **100k APEX …0001** ist noch **geplant** (Start 16:00) und nicht gestartet — ich kann ihn löschen. Drück auf **Bestätigen**, dann ist er raus. [Radar öffnen](#wdlive)',
+          aktionen: [{ token: tok, titel: 'Trade löschen', text: 'Trade „100k APEX …0001“ (Apex, Start 27.10. 16:00) wird gelöscht.' }] }
+        if(pfad.startsWith('/support/aktion')) return { ok: true, msg: 'Trade „100k APEX …0001“ gelöscht.', signal_id: null }
+        if(pfad.startsWith('/support/auftrag')) return { ok: true, status: 'fertig', balance: 101234.5 }
+        return { ok: true }
+      }
+      lo.an = true; fab.hidden = false; lo.rest = 38
+      return 'Lotse-Stub an'
+    }
+  })()
 </script>
 <!-- Yahoo-Markt-Block (mk-*) entfernt am 25.09.2026 (Finn: „Den unteren Chart wegmachen und NQ/MNQ unten auch weg") — die Live-Daten
      kommen aus dem TradingView-Reader (Sektion MARKT LIVE im Modul); /markt/futures im Backend bleibt ungenutzt bestehen. -->
@@ -76264,6 +76551,141 @@
   })
 })()
 </script>
+
+<!-- ── Support-Chat „Lotse“ (27.10.2026, Finn: „Ein Chat-Support kommt unten rechts, da wo die Münze ist … wie eine eigene KI, Screenshots
+     hochladen ist ganz wichtig“). Eigener Knopf direkt über der Münze, die Münze bleibt. Sichtbar nur eingeloggt und mit Freischaltung
+     (support_zugang, /support/stand). Logik im Modul, Sektion SUPPORT-CHAT „LOTSE“ — eigene Verdrahtung, kein Sammel-Handler. ── -->
+<style>
+  #lotse-fab{
+    position:fixed;right:28px;bottom:88px;width:44px;height:44px;border-radius:50%;
+    display:none;align-items:center;justify-content:center;cursor:pointer;z-index:100;
+    background:var(--surface);color:var(--violet);border:1px solid var(--border);box-shadow:var(--shadow-card-hover);
+    transition:transform .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  #dashboard-view.active ~ #lotse-fab:not([hidden]){display:flex}
+  #lotse-fab:hover{transform:scale(1.06);box-shadow:var(--shadow-pop)}
+  #lotse-fab svg{width:20px;height:20px}
+  #lotse-fab .lo-punkt{position:absolute;top:2px;right:2px;width:9px;height:9px;border-radius:50%;background:var(--violet);
+    border:2px solid var(--surface);display:none}
+  #lotse-fab.hat-neu .lo-punkt{display:block}
+
+  #lotse-panel{
+    position:fixed;right:24px;bottom:24px;width:384px;height:min(600px, calc(100vh - 48px));z-index:1001;
+    display:none;flex-direction:column;background:var(--surface);color:var(--ink);
+    border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);overflow:hidden;
+  }
+  #lotse-panel.offen{display:flex}
+  #lotse-panel .lo-kopf{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-bottom:1px solid var(--border-soft)}
+  #lotse-panel .lo-av{width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--violet);color:#fff;font-size:13px;font-weight:650}
+  #lotse-panel .lo-tit{flex:1;min-width:0;line-height:1.25}
+  #lotse-panel .lo-tit b{display:block;font-size:14px;font-weight:650}
+  #lotse-panel .lo-tit span{display:block;font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #lotse-panel .lo-ik{width:30px;height:30px;border-radius:8px;border:none;background:transparent;color:var(--sub);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+  #lotse-panel .lo-ik:hover{background:var(--surface-tint);color:var(--ink)}
+  #lotse-panel .lo-ik.an{background:var(--violet-tint);color:var(--violet)}
+  #lotse-panel .lo-ik svg{width:16px;height:16px}
+
+  #lotse-panel .lo-liste{flex:1;overflow:auto;padding:8px}
+  #lotse-panel .lo-liste-z{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:var(--r-sm);cursor:pointer}
+  #lotse-panel .lo-liste-z:hover{background:var(--surface-tint)}
+  #lotse-panel .lo-liste-z.an{background:var(--violet-tint)}
+  #lotse-panel .lo-liste-z .t{flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #lotse-panel .lo-liste-z .u{font-size:11.5px;color:var(--sub-2);flex:none}
+  #lotse-panel .lo-liste-z .x{border:none;background:transparent;color:var(--sub-2);cursor:pointer;font-size:15px;padding:0 2px}
+  #lotse-panel .lo-liste-z .x:hover{color:var(--danger)}
+  #lotse-panel .lo-leer{color:var(--sub);font-size:13px;padding:18px 10px;text-align:center}
+
+  #lotse-panel .lo-verlauf{flex:1;overflow:auto;padding:14px 14px 6px;display:flex;flex-direction:column;gap:10px}
+  #lotse-panel .lo-b{max-width:88%;font-size:13.5px;line-height:1.5;padding:9px 12px;border-radius:14px;word-wrap:break-word;overflow-wrap:anywhere}
+  #lotse-panel .lo-b.du{align-self:flex-end;background:var(--violet-tint);border-bottom-right-radius:4px;white-space:pre-wrap}
+  #lotse-panel .lo-b.er{align-self:flex-start;background:var(--surface-tint);border-bottom-left-radius:4px}
+  #lotse-panel .lo-b.er p{margin:0 0 6px}
+  #lotse-panel .lo-b.er p:last-child{margin:0}
+  #lotse-panel .lo-b.er ul{margin:2px 0 6px;padding-left:18px}
+  #lotse-panel .lo-b.er a{color:var(--violet);font-weight:600;text-decoration:none;cursor:pointer}
+  #lotse-panel .lo-b.er a:hover{text-decoration:underline}
+  #lotse-panel .lo-b.er code{font-size:12px;background:var(--surface);padding:1px 4px;border-radius:4px}
+  #lotse-panel .lo-b .lo-bilder{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  #lotse-panel .lo-b .lo-bilder img{max-width:120px;max-height:90px;border-radius:8px;display:block}
+  #lotse-panel .lo-b .lo-bild-n{font-size:12px;color:var(--sub);margin-bottom:4px}
+  #lotse-panel .lo-hinweis{align-self:center;font-size:12px;color:var(--sub);text-align:center;max-width:90%}
+  #lotse-panel .lo-hinweis.fehler{color:var(--danger-ink)}
+  #lotse-panel .lo-tippt{align-self:flex-start;font-size:12.5px;color:var(--sub);padding:2px 4px}
+  #lotse-panel .lo-tippt i{display:inline-block;width:5px;height:5px;margin-left:2px;border-radius:50%;background:var(--sub-2);
+    animation:lo-hops 1.1s infinite var(--ease)}
+  #lotse-panel .lo-tippt i:nth-child(2){animation-delay:.15s}
+  #lotse-panel .lo-tippt i:nth-child(3){animation-delay:.3s}
+  @keyframes lo-hops{0%,60%,100%{opacity:.3;transform:none}30%{opacity:1;transform:translateY(-2px)}}
+
+  #lotse-panel .lo-akt{align-self:flex-start;max-width:88%;border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;
+    background:var(--surface);font-size:13px}
+  #lotse-panel .lo-akt b{display:block;font-size:12px;color:var(--sub);font-weight:600;margin-bottom:3px;text-transform:none}
+  #lotse-panel .lo-akt .knoepfe{display:flex;gap:6px;margin-top:9px}
+  #lotse-panel .lo-akt .knoepfe button{padding:6px 12px;font:inherit;font-size:12.5px;font-weight:600;border-radius:8px;cursor:pointer;
+    border:1px solid var(--border);background:var(--surface);color:var(--ink)}
+  #lotse-panel .lo-akt .knoepfe .lo-ja{background:var(--violet);border-color:var(--violet);color:#fff}
+  #lotse-panel .lo-akt .knoepfe button:disabled{opacity:.5;cursor:default}
+  #lotse-panel .lo-akt .st{margin-top:7px;font-size:12.5px;color:var(--sub)}
+  #lotse-panel .lo-akt .st.ok{color:var(--good-ink)}
+  #lotse-panel .lo-akt .st.nein{color:var(--danger-ink)}
+
+  #lotse-panel .lo-vorschau{display:flex;gap:6px;padding:0 12px;flex-wrap:wrap}
+  #lotse-panel .lo-vorschau:empty{display:none}
+  #lotse-panel .lo-vorschau div{position:relative;margin-top:8px}
+  #lotse-panel .lo-vorschau img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--border);display:block}
+  #lotse-panel .lo-vorschau button{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;
+    background:var(--ink);color:var(--surface);font-size:11px;line-height:18px;cursor:pointer;padding:0}
+  #lotse-panel .lo-form{display:flex;align-items:flex-end;gap:6px;padding:10px 10px 8px;border-top:1px solid var(--border-soft)}
+  #lotse-panel .lo-form textarea{flex:1;resize:none;border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;
+    font:inherit;font-size:13.5px;line-height:1.4;max-height:120px;min-height:36px;background:var(--surface);color:var(--ink);outline:none;
+    overflow-y:hidden}
+  #lotse-panel .lo-form textarea:focus{border-color:var(--violet);box-shadow:var(--shadow-input-focus)}
+  #lotse-panel .lo-form .lo-senden{width:36px;height:36px;border-radius:var(--r-sm);border:none;background:var(--violet);color:#fff;
+    cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center}
+  #lotse-panel .lo-form .lo-senden:disabled{opacity:.45;cursor:default}
+  #lotse-panel .lo-form .lo-senden svg{width:16px;height:16px}
+  #lotse-panel .lo-fuss{font-size:11px;color:var(--sub-2);padding:0 12px 8px;text-align:right}
+  #lotse-panel.zieht{outline:2px dashed var(--violet);outline-offset:-6px}
+
+  @media (max-width:820px){
+    #dashboard-view.active ~ #lotse-fab{
+      right:calc(24px + env(safe-area-inset-right));            /* genau über der Münze (deren Handy-Regel: 24 px, Leiste + 16 px) */
+      bottom:calc(var(--mob-nav-h, var(--m-nav-h)) + 16px + 44px + 10px + env(safe-area-inset-bottom));
+      z-index:60;
+    }
+    #lotse-fab:hover{transform:none}
+    #lotse-panel{left:0;right:0;bottom:0;width:auto;height:calc(100dvh - 48px);border-radius:var(--r-lg) var(--r-lg) 0 0;
+      border-left:none;border-right:none;border-bottom:none;padding-bottom:env(safe-area-inset-bottom)}
+    #lotse-panel .lo-form textarea{font-size:16px}   /* iOS zoomt sonst ins Feld */
+  }
+</style>
+
+<button id="lotse-fab" type="button" title="Lotse — Support-Chat" aria-label="Support-Chat öffnen" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
+  <span class="lo-punkt"></span>
+</button>
+
+<div id="lotse-panel" role="dialog" aria-label="Lotse — Support-Chat">
+  <div class="lo-kopf">
+    <span class="lo-av">L</span>
+    <div class="lo-tit"><b>Lotse</b><span id="lo-sub">Support · kennt Prophos und deine Trades</span></div>
+    <button type="button" class="lo-ik" id="lo-liste-btn" title="Unterhaltungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+    <button type="button" class="lo-ik" id="lo-neu" title="Neue Unterhaltung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button type="button" class="lo-ik" id="lo-zu" title="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="lo-liste" id="lo-liste" hidden></div>
+  <div class="lo-verlauf" id="lo-verlauf"></div>
+  <div class="lo-vorschau" id="lo-vorschau"></div>
+  <form class="lo-form" id="lo-form" autocomplete="off">
+    <button type="button" class="lo-ik" id="lo-bild" title="Screenshot anhängen (oder einfügen / reinziehen)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg></button>
+    <input type="file" id="lo-datei" accept="image/*" multiple hidden>
+    <textarea id="lo-text" rows="1" maxlength="1500" placeholder="Frag mich etwas …"></textarea>
+    <button type="submit" class="lo-senden" id="lo-senden" title="Senden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+  </form>
+  <div class="lo-fuss" id="lo-fuss"></div>
+</div>
 
 <!-- Hell/Dunkel-Schalter (18.10.2026): eigene Verdrahtung für Topbar-Knopf und Settings-Leiste, kein Sammel-Handler.
      prophosTheme kommt aus dem Kopf-Script (setzt das Thema vor dem ersten Paint). -->
