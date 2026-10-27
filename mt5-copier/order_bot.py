@@ -21255,16 +21255,25 @@ def cdp_ticket_taub_js(rect):
 
 
 CDP_TAUB_STOERER_TAGS = ("video", "iframe")   # fremdes Element über dem Ticket (20.10.2026): Werbe-/Promo-Video, eingebettete Werbung
+CDP_TAUB_STOERER_RX = re.compile(r"\bad.?free\b|werbefrei", re.I)   # TradingViews Promo-Karte „Go ad-free. Everywhere" (27.10.2026, wie ADFREE in CDP_WERBUNG_JS)
 
 
 def cdp_taub_stoerer(d):
-    """REIN RECHNEND (testbar): liegt laut Taub-Diagnose ein FREMDES Element (Video/iframe) über der Ticket-Kachel? → True/False.
+    """REIN RECHNEND (testbar): liegt laut Taub-Diagnose ein FREMDES Element (Video/iframe/Promo-Karte) über der Ticket-Kachel? → True/False.
     Anlass 20.10.2026 13:37 Dubai (Aurel, Plan 919fd3a5): dreimal Sell mit Hover-Beweis geklickt, dreimal „oben am Punkt video \"\"" —
-    ein Werbevideo lag über der Seiten-Kachel, die Störer-Räumung kannte es nicht; 18 min später lief derselbe Plan mit einem Klick."""
+    ein Werbevideo lag über der Seiten-Kachel, die Störer-Räumung kannte es nicht; 18 min später lief derselbe Plan mit einem Klick.
+    27.10.2026 (Routine „Puls-Fehler" 20:35 Dubai, Muster „ticket: nichts platziert · seite steht nicht auf sell ('buy # nqz6 market',
+    # versuche, auch nach neu-öffnen per shift+t)": 26.10. und 27.10. je ein PC, beide Male „oben am Punkt div \"Go ad-free. EverywhereAds
+    are \"" — die Promo-KARTE selbst lag über der Seiten-Kachel, galt aber nicht als Störer (nur video/iframe): keine Räumung, Shift+T half
+    nicht, nichts gesendet. werbung_weg kennt die Karte (ADFREE seit 09.10.) und schloss sie am 23.10. bewiesen über ihr eigenes X —
+    jetzt zählt auch ihr Text als Störer, der Rest (Räumung nur über bekannte Container, EIN neuer Versuch) bleibt."""
     if not isinstance(d, dict):
         return False
-    oben = str(d.get("oben") or "").strip().lower()
-    return any(oben == t or oben.startswith(t + " ") or oben.startswith(t + "#") or oben.startswith(t + "[") for t in CDP_TAUB_STOERER_TAGS)
+    oben = str(d.get("oben") or "").strip()
+    o = oben.lower()
+    if any(o == t or o.startswith(t + " ") or o.startswith(t + "#") or o.startswith(t + "[") for t in CDP_TAUB_STOERER_TAGS):
+        return True
+    return bool(CDP_TAUB_STOERER_RX.search(oben))
 
 
 def _cdp_ticket_taub_spur(s, el, name, trail):
@@ -21284,6 +21293,23 @@ def _cdp_ticket_taub_spur(s, el, name, trail):
     return d
 
 
+def _cdp_stoerer_raeumen(s, opts, trail, wo, d):
+    """Störer-Räumung erzwingen, wenn laut Taub-Diagnose (cdp_taub_stoerer) ein fremdes Element über einer Ticket-Stelle liegt — schließt
+    NUR bekannte Werbe-Container über ihr eigenes X mit Beweis (werbung_weg), nie ein blindes X. Seit 27.10.2026 gemeinsam für Seiten-Kachel
+    (20.10.2026) und Units-Feld; der Aufrufer versucht danach genau EINMAL neu. -> Anzahl geschlossener Werbungen (0 = nichts Bekanntes im Weg)."""
+    try:
+        n = int(s.werbung_weg(zwang=True) or 0) if hasattr(s, "werbung_weg") else 0
+    except Exception as e_:
+        n = 0
+        trail.append(f"Störer-Räumung nicht möglich ({type(e_).__name__})")
+    trail.append(f"Störer über {wo} ({str(d.get('oben') or '')[:30]}): Störer-Räumung erzwungen, {n} Werbung(en) geschlossen → EIN neuer Versuch")
+    try:
+        s.stand(opts)
+    except Exception:
+        pass
+    return n
+
+
 def _cdp_seite_stoerer_versuch(s, opts, trail, plan, ticket, knopf, d):
     """STÖRER ÜBER DER SEITEN-KACHEL (20.10.2026, Aurel pc 13:37 Dubai, Plan 919fd3a5: „Seite steht nicht auf SELL ('Buy 2 NQZ6 MARKET',
     3 Versuche, auch nach Neu-Öffnen per Shift+T)" — die Taub-Diagnose sah beide Male „oben am Punkt video": ein Werbevideo lag über der
@@ -21293,16 +21319,7 @@ def _cdp_seite_stoerer_versuch(s, opts, trail, plan, ticket, knopf, d):
     frisch gelesene Kachel. Hover-Riegel unverändert. -> True = Seite steht jetzt, False = weiter wie bisher (Shift+T / Abbruch)."""
     if not cdp_taub_stoerer(d):
         return False
-    try:
-        n = int(s.werbung_weg(zwang=True) or 0) if hasattr(s, "werbung_weg") else 0
-    except Exception as e_:
-        n = 0
-        trail.append(f"Störer-Räumung nicht möglich ({type(e_).__name__})")
-    trail.append(f"Störer über der Seiten-Kachel ({str(d.get('oben') or '')[:30]}): Störer-Räumung erzwungen, {n} Werbung(en) geschlossen → EIN neuer Versuch")
-    try:
-        s.stand(opts)
-    except Exception:
-        pass
+    _cdp_stoerer_raeumen(s, opts, trail, "der Seiten-Kachel", d)
     kachel = ticket().get("kaufen" if plan["richtung"] == "buy" else "verkaufen")
     if not cdp_rect(kachel):
         trail.append("Seiten-Kachel nach der Störer-Räumung nicht gefunden")
@@ -21500,6 +21517,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
     _neu (15.10.2026): zweiter Durchlauf nach _cdp_ticket_neu_oeffnen — nimmt das Ticket die bewiesene Eingabe wieder nicht an, wird nicht
     noch einmal neu geöffnet (genau EIN neuer Durchlauf, Finn 14.10.2026 23:30)."""
     ziel = tv_symbol_root(symbol)
+    plan["spiel_usd"] = cdp_feld_spiel(ziel, plan["menge"])   # Tick-Spiel für TP/SL-Feld und Rücklesung (27.10.2026, s. cdp_feld_spiel)
 
     def ticket():
         return st.get("ticket") if isinstance(st.get("ticket"), dict) else {}
@@ -21690,16 +21708,29 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
                     return True
         return False
 
+    # STÖRER ÜBER DEM UNITS-FELD (Routine „Puls-Fehler" 27.10.2026 20:35 Dubai, Muster „ticket: nichts platziert · units stehen nicht auf #
+    # (feld: '#', auch nach neu-öffnen per shift+t).": 22.10. und 27.10. je ein PC, Spur beide Male „oben am Punkt video \"\" … Störer-Kette
+    # video < div … · Schließ-Knopf Close"): dieselbe Promo-Karte wie über der Seiten-Kachel (20.10.), hier ihr Video über dem Feld — der
+    # Seiten-Weg räumt sie seit 20.10., der Units-Weg ging ohne Räumung zu Shift+T, und das frische Ticket lag wieder unter der Karte.
+    # Jetzt wie bei der Seite: Räumung erzwingen (_cdp_stoerer_raeumen — nur bekannte Werbe-Container über ihr eigenes X, mit Beweis),
+    # dann units_setzen genau EINMAL neu; steht es dann nicht, weiter wie bisher. Riegel (Fokus-Beweis, ein Pfeil, Shift+T einmal) unverändert.
+    # TAUBES TICKET (15.10.2026, Frage 17 (b), unten): Shift+T nur, wenn im Feld nach allen Tipps noch GENAU der Ausgangswert steht
+    # (Vorgänger-Order, „'5' statt 4") — ein anderer Wert (z. B. angehängte Ziffern) ist kein taubes Ticket und bleibt der Abbruch wie bisher.
     if not units_setzen():
-        _cdp_ticket_taub_spur(s, ticket().get("menge"), "Units", trail)
-        # TAUBES TICKET (15.10.2026, Frage 17 (b)): nur wenn im Feld nach allen Tipps noch GENAU der Ausgangswert steht (Vorgänger-Order,
-        # „'5' statt 4") — ein anderer Wert (z. B. angehängte Ziffern) ist kein taubes Ticket und bleibt der Abbruch wie bisher.
-        _wert_jetzt = (ticket().get("menge") or {}).get("wert")
-        if not _neu and units_vorher and cdp_zahl(_wert_jetzt) is not None and cdp_zahl(_wert_jetzt) == cdp_zahl(units_vorher[0]):
-            st_neu, _g = _cdp_ticket_neu_oeffnen(s, opts, trail)
-            if st_neu is not None:
-                return _cdp_ticket_fuellen(s, st_neu, plan, symbol, opts, trail, _neu=True)
-        return False, "ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}'" + (", auch nach Neu-Öffnen per Shift+T" if _neu else "") + ").", "ticket", st, None
+        _d_u = _cdp_ticket_taub_spur(s, ticket().get("menge"), "Units", trail)
+        _frei = False
+        if cdp_taub_stoerer(_d_u):   # Störer (s. o.): Räumung + EIN neuer Versuch
+            _cdp_stoerer_raeumen(s, opts, trail, "dem Units-Feld", _d_u)
+            st = s.stand(opts)
+            _frei = units_setzen()
+            trail.append("Units stehen nach der Störer-Räumung" if _frei else "Units stehen auch nach der Störer-Räumung nicht — weiter wie bisher")
+        if not _frei:
+            _wert_jetzt = (ticket().get("menge") or {}).get("wert")
+            if not _neu and units_vorher and cdp_zahl(_wert_jetzt) is not None and cdp_zahl(_wert_jetzt) == cdp_zahl(units_vorher[0]):
+                st_neu, _g = _cdp_ticket_neu_oeffnen(s, opts, trail)
+                if st_neu is not None:
+                    return _cdp_ticket_fuellen(s, st_neu, plan, symbol, opts, trail, _neu=True)
+            return False, "ticket", f"Units stehen nicht auf {plan['menge']} (Feld: '{(ticket().get('menge') or {}).get('wert')}'" + (", auch nach Neu-Öffnen per Shift+T" if _neu else "") + ").", "ticket", st, None
     trail.append(f"Units = {plan['menge']}")
     # --- TP / SL: Schalter + Wert (Einheit $)
     for schl, name, soll in (("tp", "Take profit", plan["tp"]), ("sl", "Stop loss", plan["sl"])):
@@ -21736,6 +21767,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
             _warte(0.5, 0.2)
             st = s.stand(opts)
             f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
+        spiel = float(plan.get("spiel_usd") or 0.0)   # Tick-Spiel (27.10.2026, cdp_feld_spiel): exakt gleich steht der $-Betrag oft gar nicht im Feld
         if cdp_zahl(f_.get("wert")) != float(soll):
             ok_w = False
             for _v in range(2):
@@ -21745,7 +21777,7 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
                 _warte(0.4, 0.2)
                 st = s.stand(opts)
                 f_ = ticket().get(schl) if isinstance(ticket().get(schl), dict) else {}
-                if cdp_zahl(f_.get("wert")) == float(soll):
+                if cdp_wert_passt(f_.get("wert"), soll, spiel):
                     ok_w = True
                     break
                 if _v == 0:   # 14.10.2026: der alte Wert blieb stehen (Strg+A griff nicht) — in der Spur sichtbar, bevor es anders weitergeht
@@ -21754,7 +21786,9 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
                 return False, "ticket", f"{name}: im Feld steht '{f_.get('wert')}' statt {soll:g}.", "ticket", st, None
         if f_.get("an") is False:
             return False, "ticket", f"'{name}' steht auf {soll:g} $, aber der Schalter ist AUS — die Order ginge ohne {name} raus.", "ticket", st, None
-        trail.append(f"{name} = {soll:g} $ (Schalter {'AN' if f_.get('an') else 'unlesbar'})")
+        _ist = cdp_zahl(f_.get("wert"))
+        trail.append(f"{name} = {soll:g} $ (Schalter {'AN' if f_.get('an') else 'unlesbar'})"
+                     + (f" — im Feld {_ist:g} $ (TradingView rundet aufs Tick-Raster, Spiel {spiel:g} $)" if _ist is not None and _ist != float(soll) else ""))
     # --- Units nach TP/SL nochmal (TradingView dreht sie gern auf den alten Ticket-Wert zurück)
     st = s.stand(opts)
     if not units_setzen():
@@ -21770,6 +21804,27 @@ def _cdp_ticket_fuellen(s, st, plan, symbol, opts, trail, _neu=False):
         return False, "knopf", f"Senden-Knopf ist gesperrt ('{str(kk.get('text'))[:40]}').", "knopf", st, None
     return True, "", "", "knopf", st, kk
 
+
+
+# TP/SL-FELD: SPIEL FÜRS TICK-RASTER (Routine „Puls-Fehler" 27.10.2026 20:35 Dubai, Muster „ticket: nichts platziert · take profit: im feld
+# steht '#' statt # — nichts gesendet.": 3 Fälle in 7 Tagen auf 2 PCs — 21.10. '3525' statt 3538, 23.10. '7770' statt 6060, 27.10. '3510'
+# statt 3504, je 3 NQ, jedes Mal zweimal getippt (Pos1+Shift+Ende), jedes Mal derselbe Rest). TradingView rechnet den $-Betrag der ganzen
+# Position in einen Preis um, rundet den aufs Tick-Raster (NQ 0,25 Pt = 5 $ je Kontrakt) und zeigt den $-Betrag DIESES Preises wieder an —
+# gegen Bid/Ask bzw. den Kurs im Moment der Lesung: 3504 $ / 3 Kontrakte = 58,4 Pt → 58,5 Pt → 3510 $; 3538 $ → 58,97 → 59,0 Pt, einen Tick
+# gegen den Kurs = 3525 $. Ein exakt gleicher Wert KANN da oft nicht stehen; der Feld-Beweis bleibt, nur mit dem Spiel, das TopstepX längst
+# hat (tsx_k4_toleranz: ein Tick der ganzen Position) — hier zwei Ticks (½ Tick Rundung + ein Tick Spread/Kurs): 3 NQ 30 $, 1 MNQ 1 $.
+# '7770' statt 6060 (1710 $) bleibt ein Abbruch wie bisher. Gilt für das Tippen (_cdp_ticket_fuellen) und die Rücklesung vor dem Senden.
+def cdp_feld_spiel(wurzel, menge):
+    """REIN RECHNEND (testbar): erlaubtes Spiel in $ zwischen getipptem und angezeigtem TP/SL — zwei Ticks der ganzen Position."""
+    return 2.0 * TSX_PUNKTWERT.get(str(wurzel or "").upper(), 20.0) * TSX_TICK * max(1, int(menge or 1)) + 0.01
+
+
+def cdp_wert_passt(ist, soll, spiel=0.0):
+    """REIN RECHNEND (testbar): steht im Feld der gewollte Betrag — exakt oder innerhalb des Spiels? ist = Feld-Wert (Text/Zahl)."""
+    w = cdp_zahl(ist)
+    if w is None or soll is None:
+        return False
+    return abs(w - float(soll)) <= float(spiel or 0.0)
 
 
 def cdp_ticket_ruecklesung(st, plan):
@@ -21800,7 +21855,7 @@ def cdp_ticket_ruecklesung(st, plan):
             fehler.append(f"{name}-Schalter nicht AN")
         if "$" not in einh:
             fehler.append(f"{name}-Einheit '{einh or '?'}' statt $")
-        if w != float(soll):
+        if not cdp_wert_passt(w, soll, plan.get("spiel_usd")):   # Tick-Spiel (27.10.2026, cdp_feld_spiel) — ohne Schlüssel exakt wie bisher
             fehler.append(f"{name} '{w}' statt {soll}")
         teile.append(f"{name} {k3_fmt(w, 0) if w is not None else '-'} {einh or '?'} {'AN' if an is True else 'AUS/unlesbar'}")
     return not fehler, " · ".join(teile), fehler

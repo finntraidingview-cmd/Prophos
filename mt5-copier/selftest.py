@@ -2048,6 +2048,7 @@ def main():
     results.append(test_puls_heim())
     results.append(test_tv_tp_orders())
     results.append(test_puls_ein_konto_gekuerzt())
+    results.append(test_puls_fehler_1784())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
     results.append(test_login_wache())
@@ -9547,6 +9548,142 @@ def test_puls_ein_konto_gekuerzt():
         and _i.getsource(ob.modus_tvkette_cdp).count("frisch=True") >= 1,
         "frischer Tab: Merker vor dem Tab-Tausch, genau ein zweiter Konto-Schritt, Warten nur über _warte; Order-Weg nutzt ihn")
     return ok
+
+def test_puls_fehler_1784():
+    """Routine „Puls-Fehler" 27.10.2026 20:35 Dubai (.1784): (A) TP/SL-Feld mit Tick-Spiel — TradingView zeigt nach dem Tippen den aufs
+    Tick-Raster gerundeten $-Betrag ('3510' statt 3504, '3525' statt 3538, je 3 NQ); zwei Ticks der ganzen Position gelten als „steht",
+    '7770' statt 6060 bleibt ein Abbruch; dieselbe Regel in der Rücklesung vor dem Senden. (B) Promo-Karte „Go ad-free" über der Seiten-Kachel
+    zählt als Störer (Räumung + EIN Klick), und das Units-Feld bekommt dieselbe Räumung vor Shift+T. Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1784: " + text)
+            ok = False
+
+    # (A1) rein rechnend: Spiel = zwei Ticks der ganzen Position, Wert-Vergleich exakt/mit Spiel
+    sp3, sp1, sp0 = ob.cdp_feld_spiel("NQ", 3), ob.cdp_feld_spiel("MNQ", 1), ob.cdp_feld_spiel(None, 0)
+    chk(abs(sp3 - 30.01) < 1e-9 and abs(sp1 - 1.01) < 1e-9 and abs(sp0 - 10.01) < 1e-9, f"cdp_feld_spiel: 3 NQ 30,01 / 1 MNQ 1,01 / unbekannt 1× 10,01 ({sp3}, {sp1}, {sp0})")
+    W = ob.cdp_wert_passt
+    chk(W("3510", 3504, sp3) and W("3525", 3538, sp3) and W("3,504.00", 3504) and W(3504, 3504, 0) and not W("7770", 6060, sp3)
+        and not W("3535", 3504, sp3) and not W(None, 3504, sp3) and not W("3510", 3504) and not W("3510", None, sp3),
+        "cdp_wert_passt: 3510/3525 im Spiel, exakt ohne Spiel, 7770 und 31 $ daneben nicht, None nie")
+    # (A2) Rücklesung: ohne Schlüssel exakt wie bisher, mit plan['spiel_usd'] im Spiel
+    tk_ = {"da": True, "symbol": "NQZ6", "seite": "buy", "typen": [{"id": "market", "aria-selected": "true"}], "menge": {"wert": "3"},
+           "tp": {"an": True, "wert": "3510", "einheit": "$"}, "sl": {"an": False, "wert": None, "einheit": "$"}}
+    st_ = {"ticket": tk_, "kauf_knopf": {"seite": "buy", "text": "Buy 3 NQZ6 MARKET"}}
+    RL = ob.cdp_ticket_ruecklesung
+    r_ex = RL(st_, {"richtung": "buy", "menge": 3, "tp": 3504.0, "sl": None})
+    r_sp = RL(st_, {"richtung": "buy", "menge": 3, "tp": 3504.0, "sl": None, "spiel_usd": sp3})
+    r_weit = RL(dict(st_, ticket=dict(tk_, tp={"an": True, "wert": "7770", "einheit": "$"})), {"richtung": "buy", "menge": 3, "tp": 6060.0, "sl": None, "spiel_usd": sp3})
+    chk(not r_ex[0] and "TP '3510.0' statt 3504.0" in r_ex[2] and r_sp[0] and "TP 3,510 $ AN" in r_sp[1] and not r_weit[0] and "TP '7770.0' statt 6060.0" in r_weit[2],
+        f"Rücklesung: ohne Spiel Abbruch, mit Spiel ok (Zeile nennt den Feld-Wert), 7770 statt 6060 Abbruch ({r_ex[2]}, {r_sp[1]}, {r_weit[2]})")
+
+    # (A3/B2) Einbau: Ticket-Attrappe (wie test_puls_fehler_1603, Einheit schon $). zeigt = was TradingView nach dem Tippen ins TP-Feld schreibt;
+    # stoerer = Taub-Diagnose „oben am Punkt" über dem Units-Feld (Units bleiben '2', bis die Räumung die Karte schließt)
+    class _ST:
+        def __init__(self, zeigt=None, menge="3", stoerer=None, raeumt=True, taub=False):
+            self.zeigt, self.menge, self.seite, self.stoerer, self.raeumt, self.taub = zeigt, menge, "buy", stoerer, raeumt, taub
+            self.klicks, self.tasten, self.tp_wert, self.werbung_zwang, self.trail = [], [], "1", 0, []
+
+        def stand(self, opts=None):
+            return {"ticket": {"da": True, "symbol": "NQZ6", "seite": self.seite, "kaufen": {"rect": [1540, 230, 90, 40]}, "verkaufen": {"rect": [1340, 230, 90, 40]},
+                               "typen": [{"id": "market", "aria-selected": "true"}], "menge": {"wert": self.menge, "rect": [1400, 300, 120, 30]},
+                               "tp": {"da": True, "an": True, "einheit": "$", "beschriftung": {"text": "Take profit $ ▾", "rect": [1340, 380, 120, 20]},
+                                      "schalter": {"rect": [1500, 380, 38, 20]}, "feld": {"rect": [1340, 405, 120, 30]}, "wert": self.tp_wert},
+                               "sl": {"da": True, "an": False, "einheit": "$", "beschriftung": {"text": "Stop loss $ ▾", "rect": [1340, 460, 120, 20]},
+                                      "schalter": {"rect": [1500, 460, 38, 20]}, "feld": {"rect": [1340, 485, 120, 30]}, "wert": None}},
+                    "kauf_knopf": {"symbol": "NQZ6", "seite": self.seite, "text": f"Buy {self.menge} NQZ6 MARKET", "rect": [1340, 820, 280, 50]}}
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            return True
+
+        def fokus_im(self, r, n, versuche=3):
+            return True
+
+        def feld_setzen(self, r, text, name, versuch=0):
+            if name == "Take profit":
+                self.tp_wert = self.zeigt or text
+            elif name == "Units" and self.stoerer is None and not self.taub:   # taub = Vorgänger-Wert bleibt (Frage 17), ohne Störer
+                self.menge = text
+
+        def taste(self, k, modifiers=0):
+            self.tasten.append(k)
+
+        def lese_js(self, a, timeout=8):
+            if "elementFromPoint" in a and "sperre" in a:
+                return {"oben": self.stoerer or 'input[qty] ""', "sperre": "", "fokus": True, "aktiv": "input", "sichtbar": "visible",
+                        "zeiger": "auto", "dialoge": 0, "kette": "video < div < div", "xnah": "Close @1032,27 28x28"}
+            return {"menues": 0, "eintraege": []}
+
+        def werbung_weg(self, zwang=False):
+            if zwang:
+                self.werbung_zwang += 1
+                if self.raeumt and self.stoerer:
+                    self.stoerer = None
+                    return 1
+            return 0
+
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        pa, ta = {"richtung": "buy", "menge": 3, "tp": 3504, "sl": None}, []
+        sa = _ST(zeigt="3510")
+        ra = ob._cdp_ticket_fuellen(sa, sa.stand(), pa, "NQZ6", {}, ta)
+        pb, tb = {"richtung": "buy", "menge": 3, "tp": 6060, "sl": None}, []
+        sb = _ST(zeigt="7770")
+        rb = ob._cdp_ticket_fuellen(sb, sb.stand(), pb, "NQZ6", {}, tb)
+        pc, tc = {"richtung": "buy", "menge": 3, "tp": 3504, "sl": None}, []
+        sc = _ST(zeigt="3535")
+        rc = ob._cdp_ticket_fuellen(sc, sc.stand(), pc, "NQZ6", {}, tc)
+        pd, td = {"richtung": "buy", "menge": 3, "tp": 100, "sl": None}, []
+        sd = _ST(menge="2", stoerer='video ""')
+        rd = ob._cdp_ticket_fuellen(sd, sd.stand(), pd, "NQZ6", {}, td)
+        pe, te = {"richtung": "buy", "menge": 3, "tp": 100, "sl": None}, []
+        se = _ST(menge="2", stoerer='div "Go ad-free. EverywhereAds are "', raeumt=False)
+        re_ = ob._cdp_ticket_fuellen(se, se.stand(), pe, "NQZ6", {}, te, _neu=True)
+        pf, tf = {"richtung": "buy", "menge": 3, "tp": 100, "sl": None}, []
+        sf = _ST(menge="2", taub=True)
+        rf = ob._cdp_ticket_fuellen(sf, sf.stand(), pf, "NQZ6", {}, tf, _neu=True)
+    finally:
+        ob._warte = alt_w
+    chk(ra[0] is True and abs(pa.get("spiel_usd", 0) - 30.01) < 1e-9 and sa.tp_wert == "3510"
+        and any(z.startswith("Take profit = 3504 $ (Schalter AN) — im Feld 3510 $ (TradingView rundet aufs Tick-Raster, Spiel 30.01 $)") for z in ta),
+        f"Ticket: '3510' statt 3504 (3 NQ) steht — ok, Spur nennt Feld-Wert und Spiel ({ra[:3]}, {[z for z in ta if 'Take profit' in z]})")
+    chk(rb[0] is False and rb[1] == "ticket" and rb[2] == "Take profit: im Feld steht '7770' statt 6060." and sum(1 for k in tb if "tippe einmal neu" in k) == 1,
+        f"Ticket: '7770' statt 6060 bleibt Abbruch wie bisher, Muster-Text gleich, einmal neu getippt ({rb[:3]})")
+    chk(rc[0] is False and rc[2] == "Take profit: im Feld steht '3535' statt 3504.", f"Ticket: 31 $ daneben (> zwei Ticks) bleibt Abbruch ({rc[:3]})")
+    chk(rd[0] is True and sd.werbung_zwang == 1 and sd.menge == "3" and "Shift" not in " ".join(sd.tasten)
+        and any("Units: Ticket nimmt die Eingabe nicht an — oben am Punkt video" in z and "Störer-Kette video < div" in z for z in td)
+        and any(z.startswith("Störer über dem Units-Feld (video \"\"): Störer-Räumung erzwungen, 1 Werbung(en) geschlossen") for z in td)
+        and "Units stehen nach der Störer-Räumung" in td and td.index("Units stehen nach der Störer-Räumung") < td.index("Units = 3"),
+        f"Units: Video über dem Feld → Räumung erzwungen (einmal), Units danach gesetzt, kein Shift+T ({rd[:3]}, {sd.tasten}, {td[-6:]})")
+    chk(re_[0] is False and re_[2].startswith("Units stehen nicht auf 3 (Feld: '2', auch nach Neu-Öffnen per Shift+T)") and se.werbung_zwang == 1
+        and any("Störer über dem Units-Feld (div \"Go ad-free. Everywhere" in z for z in te) and "Units stehen auch nach der Störer-Räumung nicht — weiter wie bisher" in te,
+        f"Units: Promo-Karte bleibt (nichts Bekanntes geschlossen) → EIN Versuch, dann Abbruch wie bisher ({re_[:3]})")
+    chk(rf[0] is False and rf[2].startswith("Units stehen nicht auf 3 (Feld: '2'") and sf.werbung_zwang == 0 and not any("Störer" in z for z in tf),
+        f"Units taub ohne Störer: keine Räumung, Abbruch wie bisher ({rf[:3]})")
+
+    # (B1) rein rechnend: Promo-Karte zählt als Störer, Ticket-eigene Elemente nicht
+    T = ob.cdp_taub_stoerer
+    chk(T({"oben": 'div "Go ad-free. EverywhereAds are "'}) and T({"oben": 'span "Werbefrei. Überall"'}) and T({"oben": 'video ""'}) and T({"oben": "iframe#ad"})
+        and not T({"oben": 'div "Sell"'}) and not T({"oben": 'button[kaufen] "Buy 3 NQZ6 MARKET"'}) and not T({"oben": 'div "Load more"'}) and not T(None) and not T({}),
+        "cdp_taub_stoerer: 'Go ad-free'/'Werbefrei' und video/iframe = Störer, Seiten-Kachel/Knopf/Sonstiges nicht")
+    # (B3) Quelltext: Räumung an EINER Stelle, Seiten-Weg nutzt sie, Units-Weg vor Shift+T; Spiel im Plan, Rücklesung nutzt es
+    q_s, q_f, q_r = _i.getsource(ob._cdp_seite_stoerer_versuch), _i.getsource(ob._cdp_ticket_fuellen), _i.getsource(ob.cdp_ticket_ruecklesung)
+    i_u = q_f.index("Units stehen nicht auf {plan['menge']}")
+    chk('_cdp_stoerer_raeumen(s, opts, trail, "der Seiten-Kachel", d)' in q_s and "werbung_weg(" not in q_s
+        and q_f.index('_cdp_ticket_taub_spur(s, ticket().get("menge")') < q_f.index('_cdp_stoerer_raeumen(s, opts, trail, "dem Units-Feld"') < q_f.index("_cdp_ticket_neu_oeffnen(s, opts, trail)", i_u - 1200) < i_u
+        and 'plan["spiel_usd"] = cdp_feld_spiel(ziel, plan["menge"])' in q_f and "cdp_wert_passt(f_.get(\"wert\"), soll, spiel)" in q_f
+        and "cdp_wert_passt(w, soll, plan.get(\"spiel_usd\"))" in q_r,
+        "Quelltext: eine Räumungs-Stelle (Seite + Units vor Shift+T), Spiel im Plan, Tippen und Rücklesung mit cdp_wert_passt")
+    if ok:
+        print("✓ Puls-Fehler .1784: TP/SL-Feld mit Tick-Spiel (zwei Ticks der Position, Rücklesung gleich) · „Go ad-free“-Karte und Video als Störer über Seite UND Units-Feld → Räumung + EIN Versuch")
+    return ok
+
 
 if __name__ == "__main__":
     sys.exit(main())
