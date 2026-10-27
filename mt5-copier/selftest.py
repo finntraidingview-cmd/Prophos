@@ -3883,6 +3883,38 @@ def test_puls_cdp_login():
         r4_ = ob._cdp_konto_sichern(k4_, "PAAPEX0000000000008", {}, t4_)
     finally:
         ob._warte = alt_w
+    # GEKÜRZTE KENNUNG IM UMSCHALTER (Routine „Puls-Fehler" 27.10.2026, Muster „konto_balance: puls stand auf einem anderen konto (#… # usd)",
+    # 23× / 5 PCs): TradingView zeigt 'PAAPEX000000000000… 100,000.00 USD' — der Anfang passt zu …0007 UND …0008. Der Text allein ist
+    # kein Beleg: Liste auf, Eintrag mit voller Kennung genau einmal, bewiesen geklickt → dann „steht", konto_aktiv = volle External ID
+    # (der PC-Tab prüft includes(ext)). Ohne Liste: ehrlich raus, nichts gewählt — nie „steht" aus dem gekürzten Anfang.
+    class _SG(_SK):
+        def __init__(self, **kw):
+            _SK.__init__(self, gross=True, aktiv="PAAPEX000000000000… 100,000.00 USD", **kw)
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            if n == "Konto-Umschalter":
+                self.offen = self.liste
+            elif n.startswith("Konto "):
+                self.offen = False             # Umschalter zeigt danach wieder nur den Anfang
+            return True
+    chk(ob.cdp_konto_gekuerzt("PAAPEX000000000000… 100,000.00 USD") and ob.cdp_konto_gekuerzt("FTDFYSLX1507984146...") 
+        and not ob.cdp_konto_gekuerzt("PAAPEX0000000000008USD") and not ob.cdp_konto_gekuerzt("") and not ob.cdp_konto_gekuerzt(None),
+        "cdp_konto_gekuerzt: nur ein Wort direkt vor der Ellipse (… bzw. drei Punkte) gilt als gekürzt")
+    ob._warte = lambda a_, b_: None
+    try:
+        g1_, u1_ = _SG(), []
+        q1_ = ob._cdp_konto_sichern(g1_, "PAAPEX0000000000008", {}, u1_)
+        g2_, u2_ = _SG(liste=False), []
+        q2_ = ob._cdp_konto_sichern(g2_, "PAAPEX0000000000008", {}, u2_)
+    finally:
+        ob._warte = alt_w
+    chk(q1_[0] and g1_.klicks == ["Konto-Umschalter", "Konto PAAPEX0000000000008"] and q1_[4].get("konto_aktiv") == "PAAPEX0000000000008"
+        and any("nur gekürzt" in z for z in u1_) and any(z.startswith("Konto steht: 'PAAPEX000000000000…") and "bewiesen geklickt" in z for z in u1_),
+        f"gekürzter Umschalter: Liste → Eintrag …0008 genau einmal geklickt → steht, konto_aktiv = volle External ID ({g1_.klicks}, {u1_})")
+    chk(not q2_[0] and q2_[1] == "konto_nicht_erreicht" and g2_.klicks == ["Konto-Umschalter", "Taste Escape"] and "nur gekürzt" in q2_[2]
+        and not ob.cdp_login_noetig(q2_[1], q2_[4]),
+        f"gekürzter Umschalter ohne Liste: nie als stehend gewertet, kein Login-Beleg, nichts gewählt ({q2_[2]})")
     chk(r1_[0] and k1_.klicks == ["Order-Panel aufklappen (Maximize panel)", "Konto-Umschalter", "Konto PAAPEX0000000000008"]
         and "Order-Panel war eingeklappt → aufgeklappt → Konto gewechselt" in t1_,
         f"eingeklappt → EIN Klick „Maximize panel“ → Umschalter → Konto gewechselt ({k1_.klicks}, {t1_})")

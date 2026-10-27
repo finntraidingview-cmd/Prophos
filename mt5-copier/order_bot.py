@@ -20130,6 +20130,12 @@ def cdp_kontonr(text):
     return ""
 
 
+def cdp_konto_gekuerzt(text):
+    """REIN RECHNEND (testbar): Zeigt der Umschalter-Text die Kennung nur gekürzt ('PAAPEX684332000000… 162,497.64 USD')? Dann ist der
+    Text allein nie ein Beleg für das Konto (Muster „konto_balance: puls stand auf einem anderen konto", 27.10.2026)."""
+    return bool(re.search(r"[A-Za-z0-9_-]+\s*(?:…|\.{3})", str(text or "")))
+
+
 def cdp_konto_familie(nr):
     """REIN RECHNEND (testbar): Zu welchem Tradovate-Login gehört eine Kontonummer? DB-Stand 30.09.2026: Apex immer (PA)APEX + 6-stellige
     User-ID + 7-stelliger Zähler (58/58, 7 User; Username APEX_<User-ID>), Tradeify immer (F)TDFY…, Lucid LFE…/TOF…, seit 02.10.2026
@@ -20605,11 +20611,25 @@ def _cdp_konto_sichern(s, ext, opts, trail):
 
     def _eintr(ko_):
         return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
+    gekuerzt_gemeldet = False
     for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
-        if aktiv and cdp_konto_passt(aktiv, ext):
-            trail.append(f"Konto steht: '{aktiv[:40]}'")
+        gekuerzt = bool(aktiv) and cdp_konto_gekuerzt(aktiv)
+        # GEKÜRZTE KENNUNG IST KEIN BELEG (Routine „Puls-Fehler" 27.10.2026 05:35 Dubai, Muster „konto_balance: puls stand auf einem
+        # anderen konto (#… # usd)": 23 Fälle in 24 h auf 5 PCs seit 26.10. 14:27 UTC, keiner fertig): TradingView zeigt im Umschalter
+        # seit dem Update lange Namen gekürzt ('PAAPEX684332000000… 162,497.64 USD', 'FTDFYSLX1507984146… 158,418.22 USD'). Der
+        # Anfang passte (cdp_konto_passt, 19.10.2026) → „Konto steht" ohne Blick in die Liste — bei Apex sind so alle Konten EINES Users
+        # gleich (…0001/…0005 je einmal mit 100.000 und mit 162.497,64 gelesen), und der PC-Tab lehnte jede Lesung ab, weil die
+        # gekürzte Anzeige die volle External ID nicht enthält. Jetzt: ein gekürzter Umschalter zählt nur, wenn DIESER Lauf den Eintrag
+        # mit der vollen Kennung in der Liste genau einmal gefunden und bewiesen geklickt hat (konto_geklickt); sonst geht es wie bei
+        # einem fremden Konto über die Liste. Als konto_aktiv geht dann die volle External ID (wie im TopstepX-Weg, Tab prüft includes).
+        if aktiv and cdp_konto_passt(aktiv, ext) and gekuerzt and not konto_geklickt:
+            if not gekuerzt_gemeldet:
+                gekuerzt_gemeldet = True
+                trail.append(f"Umschalter zeigt die Kennung nur gekürzt ('{aktiv[:40]}') — kein Beleg, Konto über die Liste wählen")
+        elif aktiv and cdp_konto_passt(aktiv, ext):
+            trail.append(f"Konto steht: '{aktiv[:40]}'" + (" (gekürzt — Eintrag bewiesen geklickt)" if gekuerzt else ""))
             # Prüfer 30.09.2026: eine offene Liste (z. B. aus einem früheren Lauf) liegt maximiert direkt über den Reitern Positions/
             # Account summary — der Reiter-Klick drückte sonst eine Kontozeile. Erst zu, dann weiter.
             if ko.get("liste_offen"):
@@ -20628,7 +20648,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 st = s.stand(opts)
             if getattr(s, "_panel_aufgeklappt", False) and geklickt_umschalter:
                 trail.append("Order-Panel war eingeklappt → aufgeklappt → Konto gewechselt")
-            return True, "", "", st, {"konto_aktiv": aktiv[:80]}
+            return True, "", "", st, {"konto_aktiv": (ext if gekuerzt else aktiv[:80])}
         if ko.get("panel") == "zu" and cdp_rect(ko.get("panel_knopf")):
             s.klick(cdp_rect(ko.get("panel_knopf")), "Handelspanel auf")
             _warte(1.0, 0.5)
@@ -20776,6 +20796,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
                                                    "augen.js sieht die Liste nicht (Selektoren?), der Klick trifft nicht, oder der Login hat "
                                                    "nur dieses eine Konto" + (f"; Order-Panel {lage} ({(pd or {}).get('unter_leiste')} px)" if lage else "")
+                                                   + ("; Kennung im Umschalter nur gekürzt — ohne Liste kein Beleg für das Konto" if gekuerzt else "")
                                                    + " — Esc, nichts gewählt."), st, \
                 {"konto_stand": ko, "popups": st.get("popups"), "panel_lage": pd}
         geklickt_umschalter = True
