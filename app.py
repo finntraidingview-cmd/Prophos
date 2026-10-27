@@ -6348,6 +6348,30 @@ def heute_traden_info(plaene, heute, tz):
     return {"getradet": getradet, "geplant_um": (min(geplant, key=lambda x: _ap_ts(x)) if geplant and not getradet else None)}
 
 
+# LETZTER TRADE JE KONTO (27.10.2026, Finn: „Unter Admin bei allen Accounts will ich in einer neuen Spalte sehen, wann zuletzt getradet
+# wurde, und danach filtern/sortieren können — damit Accounts nicht wegen Inaktivität gebannt werden"). Nur Anzeige, keine Regel.
+def letzter_trade_je_konto(plaene, konten=None):
+    """REIN RECHNEND (testbar): gelaufene Pläne (status open/review/completed) → {konto_id: {at, laeuft}}. Ein Plan zählt für sein Master-
+    UND sein Slave-Konto (Polar, Echo mit Hedge-Konto). at = jüngster Start (started_at, sonst start_um_gestartet_at, sonst ended_at/
+    completed_at bei Hand-Einträgen ohne Start) als ISO-Text; laeuft = ein Plan des Kontos steht auf open. konten = nur diese IDs (None = alle)."""
+    out = {}
+    for p in plaene or ():
+        p = p or {}
+        st = str(p.get("status") or "")
+        if st not in ("open", "review", "completed"):
+            continue
+        at = next((p.get(k) for k in ("started_at", "start_um_gestartet_at", "ended_at", "completed_at") if p.get(k)), None)
+        for kid in {str(p.get("master_account_id") or ""), str(p.get("slave_account_id") or "")} - {""}:
+            if konten is not None and kid not in konten:
+                continue
+            e = out.setdefault(kid, {"at": None, "laeuft": False})
+            if st == "open":
+                e["laeuft"] = True
+            if at and (e["at"] is None or (_ap_ts(at) or datetime.min.replace(tzinfo=timezone.utc)) > (_ap_ts(e["at"]) or datetime.min.replace(tzinfo=timezone.utc))):
+                e["at"] = str(at)
+    return out
+
+
 # HEUTE IM POLAR-DROPDOWN (Finn 21.10.2026: „Hier auch bitte immer hinschreiben, ob die heute schon plus oder minus gemacht haben, also ob
 # die heute schon getradet wurden, sowohl bei Slave als auch bei Master"): Funded Futures UND Funded CFD, als Master wie als Slave (Polar).
 HEUTE_PL_TYPEN = ("funded", "funded_cfd")
@@ -6891,6 +6915,19 @@ def admin_build_overview(kapitel_id=None):
                     r["heute_pl"] = heute_pl_info(je_pl.get(str(r["id"]), []), heute_h, tz_h)
     except Exception as e:
         print(f"[admin] ⚠️ heute-traden: {type(e).__name__}: {e}", flush=True)
+    # LETZTER TRADE (27.10.2026, Finn: „wann zuletzt getradet wurde … damit Accounts nicht wegen Inaktivität gebannt werden"): je aktivem Konto
+    # letzter_trade {at, laeuft} aus EINER Abfrage über alle gelaufenen Pläne (Master- UND Slave-Seite), eigenes try wie oben
+    try:
+        aktiv_ids = {str(r["id"]) for r in rows if not r.get("archived")}
+        if aktiv_ids:
+            je_lt = letzter_trade_je_konto(_sb_all("trade_plans", {
+                "select": "master_account_id,slave_account_id,status,started_at,start_um_gestartet_at,ended_at,completed_at",
+                "status": "in.(open,review,completed)"}), aktiv_ids)
+            for r in rows:
+                if str(r["id"]) in aktiv_ids:
+                    r["letzter_trade"] = je_lt.get(str(r["id"])) or {"at": None, "laeuft": False}
+    except Exception as e:
+        print(f"[admin] ⚠️ letzter-trade: {type(e).__name__}: {e}", flush=True)
 
     # ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN
     # IDs auf einen Blick … und falls ein Account gerade schon im Trade ist, soll
