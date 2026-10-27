@@ -30812,13 +30812,17 @@
   // (Pakete des Readers je Minute, voll = 240 bei 4/s) — gezählt erst AB der ersten Minute mit ticks > 0 dieser Wurzel (ältere
   // MNQ-Zeilen tragen 0) und nie die laufende Minute (jetztMs). Grund (Koordination 25.09.2026): die Erstladung nach einem
   // Reader-Neustart füllt fehlende Minuten nach — Kerzen allein beweisen dann nichts, die Tick-Zahl schon.
+  // QUELLE 'ws-tick' (.1774, 27.10.2026, Befund S2: „letzter Aussetzer 02:00–18:10 (970 min, NQ)“, obwohl tv_kurs_1m 60/60 Minuten je
+  // Stunde hatte): dort ist ticks die Zahl ECHTER Kurs-Ticks (8–128/min), keine Reader-Pakete — die 200er-Grenze traf jede NQ-Minute.
+  // Eine 'ws-tick'-Minute ist da, sobald es ihre 1m-Kerze gibt (fehlt sie, zählt sie oben als Lücke); minTicks gilt nur noch für
+  // Zeilen ohne diese Quelle (Reader-Pakete).
   // -> {luecken:[{von, bis, min, wurzel, art}] (neueste zuletzt), erste}
   function feedLuecken(je, minFehlend, jetztMs, minTicks){
     const minF = minFehlend > 0 ? minFehlend : 2, minT = minTicks > 0 ? minTicks : 200, out = []
     const laufend = Math.floor((jetztMs == null ? Date.now() : jetztMs) / 60000) * 60000
     let erste = null
     for(const w of Object.keys(je || {})){
-      const rows = (je[w] || []).map(x => (typeof x === 'number') ? { t: x, ticks: null } : { t: Number(x && x.t), ticks: (x && x.ticks != null) ? Number(x.ticks) : null })
+      const rows = (je[w] || []).map(x => (typeof x === 'number') ? { t: x, ticks: null } : { t: Number(x && x.t), ticks: (x && x.ticks != null) ? Number(x.ticks) : null, quelle: (x && x.quelle) || null })
         .filter(x => isFinite(x.t)).sort((a, b) => a.t - b.t)
       if(rows.length && (erste == null || rows[0].t < erste)) erste = rows[0].t
       for(let i = 1; i < rows.length; i++){
@@ -30835,7 +30839,7 @@
         const schliessen = () => { if(lauf){ out.push(lauf); lauf = null } }
         for(let i = abIdx; i < rows.length; i++){
           const x = rows[i]
-          const schwach = x.t < laufend && x.ticks != null && x.ticks < minT && cmeMarktOffen(x.t)
+          const schwach = x.quelle !== 'ws-tick' && x.t < laufend && x.ticks != null && x.ticks < minT && cmeMarktOffen(x.t)   // ws-tick: Kerze = da (.1774)
           if(!schwach){ schliessen(); continue }
           if(lauf && x.t === lauf.bis) { lauf.bis = x.t + 60000; lauf.min++ }
           else { schliessen(); lauf = { von: x.t, bis: x.t + 60000, min: 1, wurzel: w, art: 'aussetzer' } }
@@ -30892,10 +30896,10 @@
       for(const w of ['NQ', 'MNQ']){
         je[w] = []
         for(let ab = 0; ab < 4000; ab += 1000){
-          const { data, error } = await supabase.from('tv_kurs_1m').select('minute,ticks').eq('wurzel', w).gte('minute', seit)
+          const { data, error } = await supabase.from('tv_kurs_1m').select('minute,ticks,quelle').eq('wurzel', w).gte('minute', seit)
             .order('minute', { ascending: true }).range(ab, ab + 999)
           if(error) throw error
-          for(const x of (data || [])){ const t = Date.parse(x.minute); if(t) je[w].push({ t, ticks: x.ticks }) }
+          for(const x of (data || [])){ const t = Date.parse(x.minute); if(t) je[w].push({ t, ticks: x.ticks, quelle: x.quelle || null }) }
           if(!data || data.length < 1000) break
         }
       }
@@ -30913,7 +30917,7 @@
     const l = feedWache.luecken
     if(!l || l.erste == null) return ''
     const letzte = l.luecken.length ? l.luecken[l.luecken.length - 1] : null
-    const titel = 'tv_kurs_1m der letzten 24 h, NQ und MNQ · Lücke = ab 2 fehlenden Minuten in der CME-Handelszeit · Aussetzer = Minute mit weniger als 200 Reader-Paketen (voll 240) · Tagespause und Wochenende zählen nicht'
+    const titel = 'tv_kurs_1m der letzten 24 h, NQ und MNQ · Lücke = ab 2 fehlenden Minuten in der CME-Handelszeit · Aussetzer = Minute mit weniger als 200 Reader-Paketen (voll 240; Quelle ws-tick: Kerze da = Minute da) · Tagespause und Wochenende zählen nicht'
     if(!letzte) return `<div class="mwd-feed" title="${titel}">Reader lückenlos seit ${zeit(l.erste)}</div>`
     const nL = l.luecken.filter(x => x.art === 'luecke').length, nA = l.luecken.length - nL
     return `<div class="mwd-feed" title="${titel} · 24 h: ${nL} Lücke${nL === 1 ? '' : 'n'}, ${nA} Aussetzer">Reader lückenlos seit ${zeit(letzte.bis)} · letzte${letzte.art === 'aussetzer' ? 'r Aussetzer' : ' Lücke'} ${zeit(letzte.von)}–${uhr(letzte.bis)} (${letzte.min} min, ${escapeHtml(letzte.wurzel)})</div>`
@@ -47747,7 +47751,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1773'
+  const OS_TAB_BUILD = '2026-09-22.1774'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
