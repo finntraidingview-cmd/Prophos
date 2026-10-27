@@ -20187,12 +20187,16 @@ def cdp_login_familie(aktiv):
     return (cdp_konto_familie_stueck(st) if st else ""), False
 
 
-def cdp_ein_konto_beleg(aktiv, ext):
+def cdp_ein_konto_beleg(aktiv, ext, ein_konto=False):
     """REIN RECHNEND (testbar): Umschalter geklickt, keine Liste — belegt das einen anderen Tradovate-Login? Nur wenn das aktive Konto
     als Kontonummer lesbar ist und NICHT das Ziel (02.10.2026, Login mit nur einem Konto). 19.10.2026: ein gekürztes aktives Konto
-    (cdp_konto_stueck) belegt den Wechsel nur, wenn Firma/Apex-User sicher ANDERS sind als beim Ziel."""
+    (cdp_konto_stueck) belegt den Wechsel nur, wenn Firma/Apex-User sicher ANDERS sind als beim Ziel.
+    ein_konto (augen.js 0.8.6: Umschalter OHNE Aufklapp-Pfeil, 27.10.2026 pc-2zc2we): der Login hat genau dieses eine Konto — passt sein
+    (gekürzter) Anfang nicht zum Ziel, steht das Ziel sicher nicht in diesem Login, auch bei gleicher Firma (FNFTCH… vs. FNFTFA…)."""
     if not ext or cdp_konto_passt(str(aktiv or ""), ext):
         return False
+    if ein_konto and (cdp_kontonr(aktiv) or len(cdp_konto_stueck(aktiv)) >= 14):
+        return True
     fa, lesbar = cdp_login_familie(aktiv)
     fz = cdp_konto_familie(ext)
     if lesbar:
@@ -20200,6 +20204,19 @@ def cdp_ein_konto_beleg(aktiv, ext):
             return False   # derselbe Apex-User = derselbe Login (viele Konten) — die Liste wurde nur nicht erkannt
         return True
     return bool(fa and fz and fa != fz)
+
+
+def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste):
+    """REIN RECHNEND (testbar): Ist ein GEKÜRZTES aktives Konto in einem Login mit nur EINEM Konto das Ziel? (27.10.2026, pc-2zc2we, Finn +
+    Pascal, FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄, Ziel FNFTFAFINNSAMUELHERM38896 — ohne Liste gab es
+    nach der Regel vom 27.10. früh nie einen Beleg, jeder Lauf brach ab.) Ja nur mit DOPPELTEM Beleg „ein Konto": kein Aufklapp-Pfeil
+    (augen.js ein_konto) UND dieser Lauf hat den Umschalter geklickt, ohne dass eine Liste aufging — dazu passt der Anfang (≥ 14 Zeichen,
+    cdp_konto_passt). Apex nie: dort teilen alle Konten eines Users den Anfang und Logins haben fast immer viele Konten (Liste nötig).
+    Steht das Ziel gar nicht in diesem Login, gäbe es mit ihm zwei Konten und damit einen Pfeil."""
+    a = str(aktiv or "")
+    if not (ein_konto is True and geklickt_ohne_liste and cdp_konto_gekuerzt(a) and cdp_konto_passt(a, ext)):
+        return False
+    return not cdp_konto_familie(ext).startswith("apex:") and not re.match(r"^(?:PA)?APEX", _nur_alnum(ext).upper())
 
 
 def cdp_konto_eintrag(eintraege, ext):
@@ -20612,6 +20629,7 @@ def _cdp_konto_sichern(s, ext, opts, trail):
     def _eintr(ko_):
         return [str(x.get("text"))[:40] for x in (ko_.get("eintraege") or []) if isinstance(x, dict)][:20]
     gekuerzt_gemeldet = False
+    ein_konto_ziel = False                                # Ein-Konto-Login, gekürzte Kennung = Ziel (cdp_ein_konto_ziel, 27.10.2026)
     for _runde in range(6):
         ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
         aktiv = str(ko.get("aktiv") or "")
@@ -20624,12 +20642,13 @@ def _cdp_konto_sichern(s, ext, opts, trail):
         # gekürzte Anzeige die volle External ID nicht enthält. Jetzt: ein gekürzter Umschalter zählt nur, wenn DIESER Lauf den Eintrag
         # mit der vollen Kennung in der Liste genau einmal gefunden und bewiesen geklickt hat (konto_geklickt); sonst geht es wie bei
         # einem fremden Konto über die Liste. Als konto_aktiv geht dann die volle External ID (wie im TopstepX-Weg, Tab prüft includes).
-        if aktiv and cdp_konto_passt(aktiv, ext) and gekuerzt and not konto_geklickt:
+        if aktiv and cdp_konto_passt(aktiv, ext) and gekuerzt and not konto_geklickt and not ein_konto_ziel:
             if not gekuerzt_gemeldet:
                 gekuerzt_gemeldet = True
                 trail.append(f"Umschalter zeigt die Kennung nur gekürzt ('{aktiv[:40]}') — kein Beleg, Konto über die Liste wählen")
         elif aktiv and cdp_konto_passt(aktiv, ext):
-            trail.append(f"Konto steht: '{aktiv[:40]}'" + (" (gekürzt — Eintrag bewiesen geklickt)" if gekuerzt else ""))
+            trail.append(f"Konto steht: '{aktiv[:40]}'" + ((" (gekürzt — Login mit nur diesem einen Konto: kein ⌄, Klick öffnet keine Liste)"
+                                                             if ein_konto_ziel else " (gekürzt — Eintrag bewiesen geklickt)") if gekuerzt else ""))
             # Prüfer 30.09.2026: eine offene Liste (z. B. aus einem früheren Lauf) liegt maximiert direkt über den Reitern Positions/
             # Account summary — der Reiter-Klick drückte sonst eine Kontozeile. Erst zu, dann weiter.
             if ko.get("liste_offen"):
@@ -20786,12 +20805,22 @@ def _cdp_konto_sichern(s, ext, opts, trail):
                 continue
         if geklickt_umschalter:
             _cdp_esc(s, st, trail, "Dropdown nicht erkannt")   # was auch immer aufging: nicht offen stehen lassen (Prüfer 30.09.2026)
+            # LOGIN MIT NUR EINEM KONTO, KENNUNG GEKÜRZT (27.10.2026, pc-2zc2we, FundedNext Futures): kein ⌄ im Umschalter UND dieser Klick
+            # öffnete keine Liste → der Login hat genau dieses Konto. Passt sein Anfang zum Ziel, ist es das Ziel (cdp_ein_konto_ziel) —
+            # einmal neu lesen und als „Konto steht" weiter. Sonst unten wie bisher: anderer Login (Login-Wechsel) bzw. ehrlich raus.
+            if not ein_konto_ziel and cdp_ein_konto_ziel(aktiv, ext, ko.get("ein_konto"), True):
+                ein_konto_ziel = True
+                _warte(0.6, 0.3)
+                st = s.stand(opts)
+                continue
             # LOGIN MIT NUR EINEM KONTO (02.10.2026, Moritz, Balance-Lesen: aktiv TDFYSL…, Umschalter-Klick öffnet keine Liste): ist das
             # aktive Konto als Kontonummer lesbar und ein ANDERES als das Ziel, gilt das als Beleg „anderer Tradovate-Login" — wie beim
             # Order-Weg. Lesbarkeit ist der Schutz aus .865 (dort war aktiv '-'); cdp_abmelden_erlaubt prüft vor dem Abmelden noch einmal.
-            if cdp_ein_konto_beleg(aktiv, ext):
-                trail.append(f"Umschalter öffnet keine Liste, aktiv {cdp_kontonr(aktiv)} ≠ Ziel {ext} → anderer Tradovate-Login (Login mit einem Konto)")
-                return False, "konto_nicht_erreicht", (f"Konto {ext} nicht im aktiven Tradovate-Login (der hat nur {cdp_kontonr(aktiv)}) — Login-Wechsel."), st, \
+            if cdp_ein_konto_beleg(aktiv, ext, ko.get("ein_konto") is True):
+                nr_a = cdp_kontonr(aktiv) or (cdp_konto_stueck(aktiv) + "…")
+                trail.append(f"Umschalter öffnet keine Liste, aktiv {nr_a} ≠ Ziel {ext} → anderer Tradovate-Login (Login mit einem Konto"
+                             + (", kein ⌄" if ko.get("ein_konto") is True else "") + ")")
+                return False, "konto_nicht_erreicht", (f"Konto {ext} nicht im aktiven Tradovate-Login (der hat nur {nr_a}) — Login-Wechsel."), st, \
                     {"konto_treffer": 0, "liste_aktiv": aktiv[:80], "ein_konto": True, "ziel_im_text": _cdp_ziel_im_text(s, ext)}
             return False, "konto_nicht_erreicht", (f"Konto-Umschalter geklickt, Dropdown nicht erkannt (aktiv '{aktiv[:40] or '-'}') — "
                                                    "augen.js sieht die Liste nicht (Selektoren?), der Klick trifft nicht, oder der Login hat "
@@ -20939,7 +20968,7 @@ def modus_tvlesen_cdp(cmd):
     for durchlauf in (1, 2):
         try:
             s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
-            ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+            ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=True)
             s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
             res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
             if not ok:
@@ -22299,7 +22328,7 @@ def modus_tvkette_cdp(cmd):
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
     try:
         s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
-        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=True)
         s = sitz[0]                                          # der Auto-Login tauscht den Tab → neue Sitzung
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
@@ -22662,7 +22691,7 @@ def modus_tvclose_cdp(cmd):
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
     try:
         s = sitz[0] = _cdp_sitzung_holen(cmd, trail)
-        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=True)
         s = sitz[0]
         res.update({k: v for k, v in extra.items() if k == "konto_aktiv"})
         if not ok:
@@ -23960,7 +23989,7 @@ def cdp_abmelden_erlaubt(aktiv, beleg):
     (beleg konto_treffer 0 + liste_aktiv), und das aktive Konto ist jetzt lesbar und dasselbe wie beim Beleg.
     grund: 'unlesbar' (nie abmelden, ehrlich abbrechen) | 'ohne_beleg' / 'anders' (nicht abmelden, Konto-Schritt neu) | ''"""
     a = _nur_alnum(aktiv).upper()
-    if not a or not k3_nr_treffer(a):
+    if not a or not (k3_nr_treffer(a) or cdp_konto_stueck(aktiv)):   # gekürzte Kennung zählt als lesbar (27.10.2026, pc-2zc2we)
         return False, "unlesbar"
     b = beleg if isinstance(beleg, dict) else {}
     if b.get("konto_treffer") != 0 or not b.get("liste_aktiv"):
@@ -23974,7 +24003,9 @@ def cdp_konto_verbunden(stand):
     """REIN RECHNEND (testbar): Zeigt TradingView ein Tradovate-Konto (Umschalter + Kontonummer)? -> Kontotext | ''"""
     ko = (stand or {}).get("konto") if isinstance(stand, dict) and isinstance(stand.get("konto"), dict) else {}
     aktiv = str(ko.get("aktiv") or "")
-    return aktiv if cdp_rect(ko.get("schalter")) and k3_nr_treffer(re.sub(r"\s", "", aktiv).upper()) else ""
+    # 27.10.2026 (pc-2zc2we, „Nach dem Login zeigt TradingView kein Konto (40 s)", obwohl 'FNFTFAFINNSAMUELHE… 155,365.92 USD' stand):
+    # eine gekürzte Kennung ohne Ziffern ist auch ein Konto — welches, klärt danach der Konto-Schritt
+    return aktiv if cdp_rect(ko.get("schalter")) and (k3_nr_treffer(re.sub(r"\s", "", aktiv).upper()) or cdp_konto_stueck(aktiv)) else ""
 
 
 def cdp_panel_zu(stand):
@@ -25155,10 +25186,78 @@ def _cdp_konto_weg_gleicher_login(sitz, ext, opts, trail, res, erg):
     return False, "konto_weg", msg, st2, extra2
 
 
-def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res):
+# FRISCHER TAB NACH KONTO-FEHLER (27.10.2026, Finn nach pc-2zc2we: Puls brach ab 18:27 Dubai jeden Lauf mit konto_nicht_erreicht /
+# login_unlesbar ab — „wie bei den Fehl-Logins den TradingView-Tab einmal komplett schließen und neu öffnen, neu anmelden, Schritt
+# einmal wiederholen"). Nur EINMAL je Puls-Prozess (= je Auftrag), nur vor jedem Senden-Klick (Konto-Schritt → nie eine Doppel-Order),
+# kein Chrome-Neustart (Master 08.10.2026: Konto/Login-Fehler liegen an Seite/Fenster). Nicht bei konto_weg (zwei gleiche Befunde),
+# ohne Tradovate-Username (Einstellung fehlt — ein Tab hilft nicht) und nicht, wenn vom Panel-Deckel zu wenig übrig ist.
+CDP_TAB_FRISCH_BIS_S = 120.0                  # nur, wenn der Prozess höchstens so lange läuft (Panel tv-konto 260 s, Login ~60 s)
+_CDP_TAB_FRISCH = {"versucht": False}
+
+
+def cdp_tab_frisch_noetig(ok, code, cmd, schon, verstrichen_s, bis_s=CDP_TAB_FRISCH_BIS_S):
+    """REIN RECHNEND (testbar): Konto-Schritt einmal mit frischem TradingView-Tab wiederholen? -> (ja, grund)"""
+    if ok:
+        return False, "Konto steht"
+    if schon:
+        return False, "frischer Tab in diesem Auftrag schon versucht (nur einmal)"
+    if str(code or "") != "konto_nicht_erreicht":
+        return False, f"Code '{code or '-'}' — kein Konto-/Login-Fehler"
+    if not str((cmd or {}).get("tv_username") or "").strip():
+        return False, "kein Tradovate-Username hinterlegt — ein frischer Tab hilft nicht"
+    try:
+        v = float(verstrichen_s or 0.0)
+    except (TypeError, ValueError):
+        v = 0.0
+    if v > bis_s:
+        return False, f"zu spät im Lauf ({v:.0f} s > {bis_s:.0f} s, Panel-Deckel)"
+    return True, "Konto-Schritt gescheitert — TradingView-Tab einmal frisch öffnen, neu anmelden, Schritt wiederholen"
+
+
+def _cdp_konto_mit_login_frisch(sitz, ext, opts, cmd, trail, res):
+    """_cdp_konto_mit_login + EIN frischer TradingView-Tab bei konto_nicht_erreicht (cdp_tab_frisch_noetig, 27.10.2026)."""
+    erg = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+    ja, grund = cdp_tab_frisch_noetig(erg[0], erg[1], cmd, _CDP_TAB_FRISCH["versucht"], time.time() - _PULS_PROZESS_T0)
+    if not ja:
+        if not erg[0] and erg[1] == "konto_nicht_erreicht":
+            trail.append(f"[Tab frisch] nein: {grund}")
+        return erg
+    _CDP_TAB_FRISCH["versucht"] = True
+    url = ""
+    try:
+        if hasattr(sitz[0], "lese_js"):
+            url = str(sitz[0].lese_js("location.href", timeout=4) or "")
+    except Exception:
+        url = ""
+    url = tv_start_url(url or cmd.get("tv_url") or "").split("?", 1)[0].split("#", 1)[0]
+    trail.append(f"[Tab frisch] {grund} ({str(erg[2])[:80]})")
+    try:
+        _cdp_tab_mit_link(sitz, url, trail)              # neuer Tab mit der Chart-Adresse, dann der alte zu (Fenster bleibt offen)
+    except Exception as e_:
+        trail.append(f"[Tab frisch] neuer Tab ging nicht ({type(e_).__name__}: {str(e_)[:60]}) — erster Befund bleibt")
+        return erg
+    _warte(3.0, 1.5)                                     # Seite + Broker-Panel laden lassen (Jitter-Regel)
+    try:
+        if hasattr(sitz[0], "_seite_abwarten"):
+            sitz[0]._seite_abwarten(25.0)
+        if hasattr(sitz[0], "_augen_laden"):
+            sitz[0]._augen_laden()
+    except Exception:
+        pass
+    erg2 = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)
+    trail.append("[Tab frisch] Konto-Schritt nach frischem Tab: " + ("ok" if erg2[0] else f"wieder {erg2[1]}"))
+    if not erg2[0]:
+        return erg2[0], erg2[1], str(erg2[2]) + " (auch nach frisch geöffnetem TradingView-Tab)", erg2[3], erg2[4]
+    return erg2
+
+
+def _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=False):
     """Konto sicherstellen wie _cdp_konto_sichern — steht es nicht im Puls-Chrome (kein Broker / anderer Tradovate-Login), verbindet
     Puls selbst (Block-Kopf). sitz = [Sitzung] (der Login tauscht den Tab). -> (ok, code, msg, stand, extra) wie _cdp_konto_sichern.
-    Scheitert der Login, bleibt der Code 'konto_nicht_erreicht' (Frontend „Konto ?", Panel 409) — der Grund steht in msg."""
+    Scheitert der Login, bleibt der Code 'konto_nicht_erreicht' (Frontend „Konto ?", Panel 409) — der Grund steht in msg.
+    frisch=True (die Order-/Lese-/Schließ-Wege, 27.10.2026): bei konto_nicht_erreicht EINMAL je Auftrag mit frischem Tab wiederholen."""
+    if frisch:
+        return _cdp_konto_mit_login_frisch(sitz, ext, opts, cmd, trail, res)
     _cdp_sitzung_zurueck(sitz[0], opts, trail)
     ok, code, msg, st, extra = _cdp_konto_sichern(sitz[0], ext, opts, trail)
     if not ok and _cdp_sitzung_zurueck(sitz[0], opts, trail):
@@ -25681,7 +25780,7 @@ def _neustart_lesung_tvv2(cmd, ext, opts, root, trail):
     try:
         trail.append(f"Lesung nach dem Neustart: Konto {ext}, Wurzel {root}")
         sitz[0] = _cdp_sitzung_holen(cmd, trail)
-        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, {})
+        ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, {}, frisch=True)
         s = sitz[0]
         if not ok:
             out["msg"] = f"Konto nicht erreicht ({code}: {str(msg)[:100]})"

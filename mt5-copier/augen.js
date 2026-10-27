@@ -23,7 +23,7 @@
  */
 var PROPHOS_AUGEN = (function () {
   'use strict';
-  var VERSION = '0.8.5';   // 0.8.5 (26.10.2026, Routine „Puls-Fehler", UNKLAR-Fälle auf 2 PCs mit kleinem Fenster): toasts.log liest das Meldungsprotokoll (role=log) je Textknoten (texte) statt als geklebten textContent-Block — „Buy 1at 29,289.50" fand RX_D_EN nie; meldungen aus dem Protokoll kommen jetzt an, wenn der Stapel unter dem Fensterrand liegt und „Show more" nicht im Bild ist
+  var VERSION = '0.8.6';   // 0.8.6 (27.10.2026, pc-2zc2we Finn + Pascal, FundedNext-Futures-Login: „kein Konto-Umschalter im Broker-Panel erkannt" bei jedem Lauf): der Umschalter zeigte 'FNFTFAFINNSAMUELHE…  155,365.92 USD' — die Kürzung schnitt ALLE Ziffern ab, RX_KONTO fand nichts, s. RX_KENNUNG_GEKUERZT an kontoSchalter. 0.8.5 (26.10.2026, Routine „Puls-Fehler", UNKLAR-Fälle auf 2 PCs mit kleinem Fenster): toasts.log liest das Meldungsprotokoll (role=log) je Textknoten (texte) statt als geklebten textContent-Block — „Buy 1at 29,289.50" fand RX_D_EN nie; meldungen aus dem Protokoll kommen jetzt an, wenn der Stapel unter dem Fensterrand liegt und „Show more" nicht im Bild ist
     // 0.8.4 (19.10.2026, Finn: „Balance nach dem Orbit-Trade wird nicht mehr erkannt"): die Kopfzeile des Account Managers trägt seit dem TradingView-Update kein „Account Balance" mehr — die Balance steht im Umschalter neben der Kennung und kommt als Paar 'USD': '159,011.40' an; konto_summary.balance fällt auf das Währungs-Label zurück (der Bot ergänzt zusätzlich aus dem Umschalter-Text)
     // 0.8.3 (19.10.2026, Finn: TradingView-Update, Konto-Umschalter zeigt jetzt „KENNUNG  153,462.72 USD" in eigenen spans, Puls-Fehlstarts auf 4 PCs „der hat nur APEX6687940000016100" / „aktiv APEX670837000000698,115.70USD"): txtK — Konto-Texte aus den Textknoten MIT Leerzeichen zusammensetzen (textContent klebte Kennung und Balance aneinander, der Bot las die Balance-Ziffern als Teil der Kontonummer); aktiv-Abgleich der Listenzeilen nur noch über die Kontonummer; listeVoll erlaubt Zeilen bis 6 Ebenen unter dem Listen-Container (neues Dropdown „ACCOUNTS" verschachtelt tiefer: „Zeile liegt 5 Ebenen unter dem Vorfahren" → kein Login-Beleg); gekürzte Kennung „FTDFYSLX1507984146…" (title/aria-label mit voller Nummer wird bevorzugt)
     // 0.8.2 (13.10.2026, Routine „Puls-Fehler", „Go ad-free. Everywhere" 34× in 24 h auf 3 PCs): xIn findet das X eines Vollbild-Dialogs an seiner Karte und auch ein namenloses X (nur Symbol) — s. Kommentar an xIn
@@ -550,11 +550,20 @@ var PROPHOS_AUGEN = (function () {
    * aktiv '' → kontoZeilen hielt den Umschalter selbst für eine offene Liste mit 1 Eintrag → der Bot fand das Ziel darin 0× → Login-Weg
    * meldete eine richtige Tradovate-Sitzung ab. Jetzt: unter der Oberkante der Leiste, im linken Teil; ohne Leiste wie bisher untere
    * 70 %. Mehrere → der nächste unter der Leiste (Notiz). -> {el, quelle, notiz} wie suche() */
+  /* GEKÜRZTE KENNUNG OHNE ZIFFERN (0.8.6, 27.10.2026, pc-2zc2we, Inventar 14:41 UTC: Knopf [76,741,281,34]
+   * 'FNFTFAFINNSAMUELHE…155,365.92USD', ohne title/aria): TradingView kürzt lange Tradovate-Namen im Umschalter; bei FundedNext
+   * Futures (FNFTFAFINNSAMUELHERM + 5 Ziffern) fallen dabei alle Ziffern weg — RX_KONTO fand keinen Umschalter, aktiv blieb '' und
+   * Puls brach jeden Lauf mit „kein Konto-Umschalter im Broker-Panel erkannt" ab, auch für Konten anderer Logins. Jetzt zählt auch
+   * ein Knopf, dessen Text mit einer gekürzten Kennung beginnt (≥ 4 Großbuchstaben, ≥ 10 Zeichen, direkt „…"/„..."), an derselben
+   * Stelle wie bisher (unter der Broker-Leiste, links). Die Kennung bleibt gekürzt im aktiv-Text: Ob sie das Ziel ist, entscheidet
+   * order_bot (gekürzt = kein Beleg ohne Liste bzw. eindeutigen Anfang, cdp_ein_konto_eindeutig). */
+  var RX_KENNUNG_GEKUERZT = /^[A-Z]{4,}[A-Z0-9_-]{6,}\s*(?:…|\.{3})/;
   function kontoSchalter() {
     var leiste = document.getElementById('footer-chart-panel');
     var lr = leiste && sichtbar(leiste) ? leiste.getBoundingClientRect() : null;
     var kand = alle('button,[role="button"]').filter(sichtbar).filter(function (e) {
-      if (!RX_KONTO.test(txtK(e) + ' ' + attr(e, 'aria-label'))) return false;
+      var tk = txtK(e);
+      if (!RX_KONTO.test(tk + ' ' + attr(e, 'aria-label')) && !RX_KENNUNG_GEKUERZT.test(entdoppeln(tk))) return false;
       if (e.closest('[data-name="order-panel"],table,[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]')) return false;
       var r = e.getBoundingClientRect();
       return lr ? (r.top >= lr.top - 4 && r.left <= lr.left + 400) : r.top > window.innerHeight * 0.3;
@@ -640,7 +649,13 @@ var PROPHOS_AUGEN = (function () {
     var mx = document.querySelector('#footer-chart-panel [data-name="toggle-maximize-button"], [data-name="toggle-maximize-button"]');
     var mxA = mx ? (attr(mx, 'aria-label') || attr(mx, 'title')) : '';
     var lage = !mx ? null : /restore|wiederherst/i.test(mxA) ? 'maximiert' : /maxim/i.test(mxA) ? 'normal' : null;
-    return { schalter: schalter, aktiv: aktivText, kontonr: kontonrM ? kontonrM[0] : null, gruppen: gruppen, liste_offen: offenListe, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
+    // EIN-KONTO-LOGIN (0.8.6, 27.10.2026): mit mehreren Konten trägt der Umschalter rechts den Aufklapp-Pfeil ⌄ als Symbol im Knopf
+    // (Inventar 27.10.: pc-c19p2l span[role=img] [339,527,18,18], pc-pmqd8g [328,654,18,18]); hat der Tradovate-Login nur EIN Konto,
+    // zeigt TradingView nur Kennung + Balance ohne Pfeil (pc-2zc2we [76,741,281,34], kein Symbol). ein_konto = Umschalter ohne
+    // sichtbares svg/[role=img] — nur ein Hinweis; order_bot zählt ihn erst, wenn auch der Klick keine Liste öffnet.
+    var pfeil = s.el ? alle('svg,[role="img"]', s.el).some(sichtbar) : null;
+    if (schalter) schalter.pfeil = pfeil;
+    return { schalter: schalter, aktiv: aktivText, ein_konto: s.el ? !pfeil : null, kontonr: kontonrM ? kontonrM[0] : null, gruppen: gruppen, liste_offen: offenListe, eintraege: eintraege, treffer: treffer, notiz: s.notiz,
              broker: mgr.el ? txt(mgr.el).slice(0, 30) : (leiste ? txt(leiste).slice(0, 30) : ''), manager_knopf: mgr.el ? kurz(mgr.el) : null,
              panel: panel, panel_knopf: tog && sichtbar(tog) ? kurz(tog) : null, panel_lage: lage, liste_voll: !!(offenListe && voll),
              liste_kurz: !!(offenListe && kurzOk), liste_voll_grund: offenListe && !voll ? String(vollGrund || '').slice(0, 80) : '',

@@ -2047,6 +2047,7 @@ def main():
     results.append(test_tsx_bracket_b36())
     results.append(test_puls_heim())
     results.append(test_tv_tp_orders())
+    results.append(test_puls_ein_konto_gekuerzt())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
     results.append(test_login_wache())
@@ -4626,7 +4627,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.5'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
+        and "VERSION = '0.8.6'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
         "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
     # augen.js 0.8.5 (26.10.2026, Routine Puls-Fehler, UNKLAR auf 2 PCs mit kleinem Fenster): Meldungsprotokoll (role=log) je Textknoten,
     # meldungenAus läuft über l.texte — Browser-Probe: node tools/selftest_augen_meldungsprotokoll.js
@@ -9410,6 +9411,101 @@ def test_tv_tp_orders():
         and ob.TV_RX_POS_TAB_N.search("Positions") and not ob.TV_RX_ORDERS_TAB_N.search("Order History"))
     if ok:
         print("✓ TV-TP-Orders: Limit-Order Wurzel/Gegenseite/Menge, eindeutig, Reiter mit Zähler")
+    return ok
+
+
+def test_puls_ein_konto_gekuerzt():
+    """27.10.2026, pc-2zc2we (Finn + Pascal), FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄ — die Kürzung schnitt
+    alle Ziffern ab, augen.js fand keinen Umschalter, jeder Lauf brach mit „kein Konto-Umschalter im Broker-Panel erkannt" ab. Jetzt:
+    gekürzte Kennung = Umschalter (augen.js 0.8.6), Ein-Konto-Login (kein Pfeil + Klick ohne Liste) mit passendem Anfang = Ziel, sonst
+    Login-Wechsel; bei konto_nicht_erreicht einmal ein frischer TradingView-Tab."""
+    import order_bot as ob, os as _os
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        print(("✓ " if bed else "  ✗ ") + "Ein-Konto-Login gekürzt: " + name)
+        ok = ok and bool(bed)
+
+    FN = "FNFTFAFINNSAMUELHE… 155,365.92 USD"            # Muster wie am PC (Platzhalter-Ziffern unten)
+    ZIEL = "FNFTFAFINNSAMUELHERM00001"
+    chk(ob.cdp_ein_konto_ziel(FN, ZIEL, True, True) and not ob.cdp_ein_konto_ziel(FN, ZIEL, False, True)
+        and not ob.cdp_ein_konto_ziel(FN, ZIEL, True, False) and not ob.cdp_ein_konto_ziel(FN, ZIEL, None, True)
+        and not ob.cdp_ein_konto_ziel(FN, "LFF00000000000001", True, True)
+        and not ob.cdp_ein_konto_ziel("FNFTFAFINNSAMUELHERM00001 155,365.92 USD", ZIEL, True, True)
+        and not ob.cdp_ein_konto_ziel("PAAPEX668794000000… 100,000.00 USD", "PAAPEX6687940000016", True, True),
+        "Ziel nur mit kein ⌄ UND Klick ohne Liste UND passendem Anfang; nie Apex, nie ungekürzt (dort entscheidet die Nummer)")
+    chk(ob.cdp_ein_konto_beleg(FN, "LFF00000000000001", True) and ob.cdp_ein_konto_beleg(FN, "FTDFYSLX150000000001", False)
+        and ob.cdp_ein_konto_beleg(FN, "FNFTCHFINNSAMUELHERM00002", True) and not ob.cdp_ein_konto_beleg(FN, "FNFTCHFINNSAMUELHERM00002", False)
+        and not ob.cdp_ein_konto_beleg(FN, ZIEL, True) and not ob.cdp_ein_konto_beleg("", "LFF00000000000001", True),
+        "Login-Wechsel: andere Firma immer, gleiche Firma (FNFTCH vs. FNFTFA) nur im Ein-Konto-Login, nie fürs Ziel/ohne Text")
+    st_v = {"konto": {"schalter": {"rect": [76, 741, 281, 34]}, "aktiv": FN}}
+    chk(ob.cdp_konto_verbunden(st_v) == FN and ob.cdp_konto_verbunden({"konto": {"schalter": None, "aktiv": FN}}) == ""
+        and ob.cdp_konto_verbunden({"konto": {"schalter": {"rect": [1, 1, 9, 9]}, "aktiv": "Tradovate"}}) == "",
+        "„verbunden\" auch mit gekürzter Kennung (kein 40-s-Warten auf „kein Konto\"), ohne Umschalter/Kennung nie")
+    chk(ob.cdp_abmelden_erlaubt(FN, {"konto_treffer": 0, "liste_aktiv": FN}) == (True, "")
+        and ob.cdp_abmelden_erlaubt("", {"konto_treffer": 0, "liste_aktiv": FN}) == (False, "unlesbar")
+        and ob.cdp_abmelden_erlaubt(FN, {"konto_treffer": 0, "liste_aktiv": "PAAPEX668794000000… 1 USD"})[0] is False,
+        "Abmelden: gekürzte Kennung ist lesbar, braucht aber weiter den passenden Beleg")
+    T = ob.cdp_tab_frisch_noetig
+    cmd = {"tv_username": "FNFT_MUSTER"}
+    chk(T(False, "konto_nicht_erreicht", cmd, False, 30)[0] and not T(True, "", cmd, False, 30)[0]
+        and not T(False, "konto_nicht_erreicht", cmd, True, 30)[0] and not T(False, "konto_weg", cmd, False, 30)[0]
+        and not T(False, "konto_nicht_erreicht", {}, False, 30)[0] and not T(False, "konto_nicht_erreicht", cmd, False, 200)[0]
+        and "nur einmal" in T(False, "konto_nicht_erreicht", cmd, True, 30)[1],
+        "frischer Tab: nur konto_nicht_erreicht, einmal je Auftrag, nur mit Username, nur früh im Lauf")
+
+    class _S1:
+        """Attrappe: Tradovate-Login mit EINEM Konto — Umschalter ohne ⌄, Klick öffnet nie eine Liste."""
+        def __init__(self, ein_konto=True, aktiv=FN):
+            self.ein, self.aktiv, self.klicks, self.tasten = ein_konto, aktiv, [], []
+
+        def stand(self, opts=None):
+            return {"konto": {"panel": "offen", "schalter": {"rect": [76, 741, 281, 34]}, "aktiv": self.aktiv, "ein_konto": self.ein,
+                              "liste_offen": False, "eintraege": []}}
+
+        def lese_js(self, a, timeout=8):
+            if "elementFromPoint" in a:
+                return {"frei": True, "was": ""}
+            return {"leiste": [56, 682, 1199, 38], "unter_leiste": 320, "max_knopf": {"rect": [1217, 682, 38, 38], "aria": "Maximize panel"}}
+
+        def werbung_weg(self, zwang=False):
+            return 0
+
+        def taste(self, k, modifiers=0):
+            self.tasten.append(k)
+
+        def klick(self, r, n, toast_ok=False):
+            self.klicks.append(n)
+            return True
+    alt_w = ob._warte
+    ob._warte = lambda a_, b_: None
+    try:
+        s1, t1 = _S1(), []
+        r1 = ob._cdp_konto_sichern(s1, ZIEL, {"kontoTexte": [ZIEL]}, t1)
+        s2, t2 = _S1(ein_konto=False), []
+        r2 = ob._cdp_konto_sichern(s2, ZIEL, {"kontoTexte": [ZIEL]}, t2)
+        s3, t3 = _S1(), []
+        r3 = ob._cdp_konto_sichern(s3, "LFF00000000000001", {"kontoTexte": ["LFF00000000000001"]}, t3)
+    finally:
+        ob._warte = alt_w
+    chk(r1[0] is True and r1[4].get("konto_aktiv") == ZIEL and s1.klicks.count("Konto-Umschalter") == 1
+        and any("Login mit nur diesem einen Konto" in z for z in t1),
+        f"Ein-Konto-Login, Anfang passt → Konto steht, ein Umschalter-Klick, konto_aktiv = volle External ID ({r1[1]}, {t1[-1:]})")
+    chk(r2[0] is False and r2[1] == "konto_nicht_erreicht" and "nur gekürzt" in r2[2] and "konto_aktiv" not in (r2[4] or {}),
+        f"mit ⌄ (mehrere Konten), Liste geht nicht auf → wie bisher kein Beleg, nichts gewählt ({r2[2][:80]})")
+    chk(r3[0] is False and r3[1] == "konto_nicht_erreicht" and (r3[4] or {}).get("konto_treffer") == 0 and (r3[4] or {}).get("liste_aktiv") == FN
+        and "Login-Wechsel" in r3[2] and ob.cdp_abmelden_erlaubt(FN, r3[4]) == (True, ""),
+        f"Ein-Konto-Login, Ziel anderer Login → Beleg für den Login-Wechsel statt Abbruch ({r3[2][:80]})")
+    js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
+    chk("RX_KENNUNG_GEKUERZT.test(entdoppeln(tk))" in js and "ein_konto: s.el ? !pfeil : null" in js and "alle('svg,[role=\"img\"]', s.el)" in js,
+        "augen.js 0.8.6: gekürzte Kennung als Umschalter, ein_konto aus dem fehlenden Pfeil")
+    import inspect as _i
+    q = _i.getsource(ob._cdp_konto_mit_login_frisch)
+    chk('_CDP_TAB_FRISCH["versucht"] = True' in q and q.index('_CDP_TAB_FRISCH["versucht"] = True') < q.index("_cdp_tab_mit_link(")
+        and q.count("_cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res)") == 2 and "_warte(" in q and "time.sleep" not in q
+        and _i.getsource(ob.modus_tvkette_cdp).count("frisch=True") >= 1,
+        "frischer Tab: Merker vor dem Tab-Tausch, genau ein zweiter Konto-Schritt, Warten nur über _warte; Order-Weg nutzt ihn")
     return ok
 
 
