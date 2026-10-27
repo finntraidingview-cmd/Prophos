@@ -29218,7 +29218,7 @@ def ap_loop():
 #    slave_risk = offene Kosten, daraus Multiplikator und hedge_eur wie das Trade-Popup (tpMultiplierAusRisiko / tpWdHedgeEurAus).
 #  - Startzeiten: Zeitfenster des Challenge-Planers (auto_plan_regeln.zeiten), darin komplett zufällig; passt ein Slot nicht (15 min zu
 #    jedem anderen Start derselben Firma über alle IDs inkl. Challenge-Planer), wird neu gewürfelt. Die DB setzt dieselben 15 min beim
-#    Start durch (trade_plans_firmen_abstand, sql/2026-10-27_funded_planer.sql). Zwei Funded derselben ID trennt nur die Big-Trade-Grenze.
+#    Start durch (trade_plans_firmen_abstand, sql/2026-10-27_funded_planer.sql). Zwei Funded derselben ID mindestens 90 min auseinander.
 #  - Priorität: genau wie ein Orbit-Big-Trade von Hand (Prio 1 vor Winning Day, Heim-Wache, „Puls bleibt zu Hause") — nichts Eigenes, nur
 #    die vorhandenen Marken tvv2 + orbit_v3 + hedge_eur > 0 (prophos_big_trade, puls_heim_big_trades, bigTradePlan).
 #  - Weg: normaler Orbit Big Trade (tvv2 + orbit_v3 + hedge_eur > 0, DB-Riegel trade_plans_kontoart_weg), die Big-Trade-Grenze je Fenster
@@ -29232,9 +29232,10 @@ FDP_NQ_PPL = 20.0                         # $ je NQ-Punkt und Kontrakt
 FDP_SLAVE_PPL = GP_SLAVE_PPL              # € je NAS100-Punkt und Lot bei Fusion (wie tpWdSlavePpl)
 FDP_SL_MIN_USD = 100                      # darunter kein Trade (Abstand zur Liquidation zu klein)
 # von/bis/tz nur als Rückfall — gilt ist das Fenster des Challenge-Planers (fdp_fenster)
-# abstand_id_min 0 (Finn 27.10.2026): zwei Funded derselben ID trennt nur die Big-Trade-Grenze je Fenster (Claim schiebt), kein eigener Abstand
+# abstand_id_min 90 (Master 27.10.2026): mit 0 lägen zwei Funded derselben ID evtl. 16 min auseinander — der zweite würde von der Big-Trade-
+# Sperre immer wieder um 15 min geschoben und rutschte im Zweifel aus dem Fenster. Sonst alles zufällig.
 FDP_ZEITEN_STANDARD = {"tz": "Asia/Dubai", "von": "02:00", "bis": "20:00", "max_je_id_tag": 2, "firma_abstand_min": 15,
-                      "abstand_id_min": 0, "vorlauf_min": 15}
+                      "abstand_id_min": 90, "vorlauf_min": 15}
 # Standard-Regeln = Seed aus sql/2026-10-27_funded_planer.sql. Die Vorschau rechnet damit, solange die Tabelle fehlt (dann für alle IDs der
 # Gruppe „Hermann Technologies“); scharf plant nur eine eingespielte Zeile mit aktiv = true.
 FDP_FIRMEN_STANDARD = [
@@ -29521,7 +29522,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     cme_heute = _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat())
     max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
-    id_abst = float(_wd_num(zeiten.get("abstand_id_min")) or 0)
+    id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 90)
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
     erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "regeln_quelle": quelle, "at": jetzt.isoformat(), "tag": cme_heute,
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),

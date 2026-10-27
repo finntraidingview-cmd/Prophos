@@ -224,7 +224,12 @@ def tag_13(ns):
     print("    Startzeiten (Dubai): " + ", ".join(f"{s:%H:%M} {namen[z['user_id']]}·{z['kontrakte']}NQ"
                                                   for s, z in sorted(((hm(z['start_um']), z) for z in e['geplant']), key=lambda x: x[0])))
     print("    Challenge (Dubai):   " + ", ".join(f"{hm(c['start_um']):%H:%M}" for c in ch))
-    check(ns["FDP_ZEITEN_STANDARD"]["abstand_id_min"] == 0, "kein eigener Abstand je ID — zwei Funded derselben ID trennt nur die Big-Trade-Grenze")
+    je_id_min = []
+    for u in U.values():
+        st = sorted(hm(z["start_um"]) for z in e["geplant"] if z["user_id"] == u)
+        je_id_min += [(b - a).total_seconds() / 60 for a, b in zip(st, st[1:])]
+    check(ns["FDP_ZEITEN_STANDARD"]["abstand_id_min"] == 90 and all(x >= 90 for x in je_id_min),
+          f"zwei Funded derselben ID ≥ 90 min auseinander ({[round(x) for x in je_id_min]})")
     e2 = ns["fdp_planen"](trocken=False, jetzt=jetzt, seed=27)
     zeilen = [b for t, b in geschrieben if t == "trade_plans"]
     z1 = zeilen[0] if zeilen else {}
