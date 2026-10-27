@@ -62,6 +62,12 @@ FAELLE = [  # (name, Radar-Zeile, erwartet geblowt)
     ("laufender Plan → nie",
      {"status": "open", "balance_end": 140000, "liq_regel_balance": 145500}, False),
     ("ohne Zeile → nie", None, False),
+    # Topstep-V2-Blow ohne Endlesung (.1754): TopstepX sperrt am MLL beim Start, Konto nach dem Blow nicht lesbar → geblowt (Schätzung)
+    ("Topstep V2 geblowt ohne Endbalance (MLL beim Start) → geblowt",
+     {"status": "review", "route": "tsv2", "balance_start": 151583.42, "liq_balance": 149947.32, "liq_quelle": "mll_tsx",
+      "endlesung": {"grund": "tsx_geblowt", "konto_geblowt": {"art": "maximum_loss"}}}, True),
+    ("Topstep V2 ohne MLL und ohne Endbalance → nicht geblowt (nicht raten)",
+     {"status": "review", "route": "tsv2", "balance_start": 151583.42, "endlesung": {"grund": "tsx_geblowt", "konto_geblowt": {"art": "maximum_loss"}}}, False),
 ]
 
 JS_TEST = r"""
@@ -81,7 +87,10 @@ def main():
     konto_weg = re.search(r"^\s*const wdlKontoWeg = .*$", html, re.M).group(0)
     # seit 21.10.2026 fragt wdlKontoWeg zuerst wdlTpUndWeg („TP + nicht mehr im Dropdown" = wahrscheinlich bestanden) → mit schneiden
     weg_min = re.search(r"^\s*const TV_LIQ_WEG_MIN = .*$", html, re.M).group(0)
-    js = "\n".join([weg_min, js_funktion(html, "wdlTpUndWeg"), konto_weg, js_funktion(html, "wdlBlowStand"), js_funktion(html, "wdlGeblowtUrteil")])
+    # seit .1754 (27.10.2026) fällt wdlBlowStand ohne gelesene Endbalance auf die Topstep-Blow-Schätzung zurück → echten Helfer + Tooltip-Text mitschneiden
+    tsx_tip = re.search(r"^\s*const WDL_TSX_SCHAETZ_TIP = .*$", html, re.M).group(0)
+    js = "\n".join([weg_min, js_funktion(html, "wdlTpUndWeg"), konto_weg, tsx_tip, js_funktion(html, "wdlTsxBlowSchaetzung"),
+                    js_funktion(html, "wdlBlowStand"), js_funktion(html, "wdlGeblowtUrteil")])
     js += JS_TEST % json.dumps([[n, z] for n, z, _s in FAELLE])
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(js)
