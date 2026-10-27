@@ -28223,6 +28223,11 @@
    * flach === true BEWEIST (No Active Position in der Order-Karte bzw. leeres Grid + gesperrter Close-Knopf) — eine leere Liste allein zählt nie.
    * Radar (tp_feed/sl_feed, Puffer aus wd_farmer_regeln.vorplan.hedge_puffer) und Fusion-Level (level_tp/level_sl) laufen unverändert weiter. */
   const _tsxSchnellLeer = new Map(), _tsxSchnellKonto = new Map()
+  /* MINDESTENS 5 s FLACH (Variante B, Finn/Master 27.10.2026 nach S2-Befund zu bff5b1c6): beim Orbit-Reader reicht nach 90 s Konto-Ruhe 1 s
+   * „flach" — ob TopstepX beim Neuaufbau (SignalR-Reconnect) die Order-Karte kurz leer zeigt, während der Konto-Kopf stehen bleibt, ist live
+   * unbewiesen (bei TradingView war genau das der Fall, .1560). Für den Anfang deshalb ≥ 5 s durchgehend flach mit Beweis, bevor Fusion zugeht;
+   * ein Kurzzeit-Neuaufbau schließt so nie. Nach den ersten echten Läufen (Spur „[hedgeTsx] … flach seit X s") auf 1–2 s senken. */
+  const TSX_FLACH_MIN_MS = 5000
   let _tsxSchnellBusy = false, _tsxStandFehler = 0
   const tsxKontoGleich = (kontonr, ext) => { const n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); return !!n(kontonr) && n(kontonr) === n(ext) }
   // REIN RECHNEND (window._tsxStandListe): Positionen des Userscripts → Liste im Format des Orbit-Readers (wurzel, menge_zahl, richtung)
@@ -28261,13 +28266,15 @@
         if(st.flach !== true){ _tsxSchnellLeer.delete(pid); continue }   // flach nur mit Beweis — sonst keine Aussage
         if(!_hedgeMasterGesehen.has(pid)) continue
         if(!_tsxSchnellLeer.has(pid)) _tsxSchnellLeer.set(pid, jetzt)
+        if(jetzt - _tsxSchnellLeer.get(pid) < TSX_FLACH_MIN_MS) continue   // Variante B: erst nach 5 s durchgehend flach (s. o.)
         const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
         const weg = hedgeMasterWegEntscheid({ liste, positionenOk: true, alterMs: r.alter_s * 1000, sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung,
           kontoPlan, kontoAktiv: kontoPlan, kontenAnzahl: 99, kontoStabilMs: jetzt - _tsxSchnellKonto.get(pid), leerSeitMs: jetzt - _tsxSchnellLeer.get(pid),
           schnell: true, gesehen: true })
         if(weg && p.status === 'open'){
+          const flachS = (jetzt - _tsxSchnellLeer.get(pid)) / 1000
           _tsxSchnellLeer.delete(pid)
-          console.info('[hedgeTsx] Master weg laut TopstepX-Auge — Fusion wird geschlossen', p.masterName || pid)
+          console.info(`[hedgeTsx] Master weg laut TopstepX-Auge (flach seit ${flachS.toFixed(1)} s, Konto ruhig seit ${((jetzt - _tsxSchnellKonto.get(pid)) / 1000).toFixed(0)} s, Stand ${r.alter_s} s alt) — Fusion wird geschlossen`, p.masterName || pid)
           await hedgeMasterWegAusfuehren(p, kontoPlan, null)
         }
       }
@@ -47731,7 +47738,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1762'
+  const OS_TAB_BUILD = '2026-09-22.1763'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

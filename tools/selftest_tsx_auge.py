@@ -91,6 +91,10 @@ f(/Kontogröße/.test(hedgeLiqLevel({ route: 'tsv2', richtung: 'buy', mt5Baselin
 f(hedgeLiqLevel({ route: 'tvv2', richtung: 'buy', mt5Baseline: { tv: { mll_start: 0, balance_start: 5000, balance_relativ: true } } }, 29000, 2, 3).liq_quelle !== 'topstepx_mll', 'Liq: Orbit (tvv2) unberührt')
 print(aus.join('\n'))
 """)
+    # Variante B (27.10.2026): im Schnell-Wächter steht die 5-s-Sperre VOR dem Schließ-Entscheid
+    i = s.index("  async function hedgeTsxSchnellTick("); t = s[i:s.index("\n  setInterval(hedgeTsxSchnellTick", i)]
+    g, e = t.find("< TSX_FLACH_MIN_MS) continue"), t.find("hedgeMasterWegEntscheid(")
+    check("const TSX_FLACH_MIN_MS = 5000" in s and 0 < g < e, "Frontend: Topstep schließt erst nach ≥ 5 s durchgehend flach (Variante B)")
     for z in (jsc(code) or "ROT JavaScriptCore lieferte nichts").strip().splitlines():
         check(z.startswith("OK "), z[3:] if z.startswith("OK ") else z)
 
