@@ -47634,7 +47634,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1761'
+  const OS_TAB_BUILD = '2026-09-22.1762'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68757,10 +68757,13 @@
   document.getElementById('advisor-firm-delete')?.addEventListener('click', advisorDeleteFirm)
 
   // Auto-Health-Check + marked-Preload beim ersten Wechsel auf Advisor-View
+  // REFERENZ BEIM AUFRUF (27.10.2026, Nebenbefund Support-Agent): hier stand const _orig = window.switchView — window.switchView war zu diesem
+  // Zeitpunkt nie gesetzt (switchView ist eine Modul-Funktion), der Wrapper rief also undefined auf und warf TypeError. Einziger Aufrufer im
+  // Frontend: Admin → Konten, Chip „→ Radar" (admKontoRadarOeffnen) — der Fehler wurde dort still gefangen, der Klick tat nichts. Jetzt ruft der
+  // Wrapper die Modul-Funktion direkt; die Advisor-Erstinitialisierung bleibt wie gehabt.
   if (typeof switchView === 'function') {
-    const _origSwitchView = window.switchView
     window.switchView = function(name) {
-      _origSwitchView(name)
+      switchView(name)
       if (name === 'advisor' && !window._advisorInitialised) {
         window._advisorInitialised = true
         advisorEnsureMarked()
