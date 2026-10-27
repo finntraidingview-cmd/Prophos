@@ -47,8 +47,10 @@ on conflict (id) do nothing;
 -- zweite Mechanik. Für die Challenge-Trades untereinander bleibt alles wie es ist"). Eingehängt in den bestehenden Claim-Trigger
 -- trade_plans_firmen_abstand (zuletzt sql/2026-10-13_gruppen_planer.sql, live gleich): der alte Teil (1 min, andere ID, gleiche Gruppe)
 -- bleibt Wort für Wort. Neu: ist der startende Plan ODER der letzte Start derselben Firma ein Funded-Konto (accounts.account_type
--- 'funded'), gilt prophos_firmen_abstand_funded_fenster() = 15 min — auch bei derselben ID. Gilt für jeden Funded-Plan (auch von Hand
--- mit Startzeit), nicht nur für den Funded-Planer. Der Trigger selbst (before update of start_um_gestartet_at) bleibt unverändert.
+-- 'funded'), gilt prophos_firmen_abstand_funded_fenster() = 15 min — auch bei derselben ID. Nur für Firmen, die im Funded-Planer an sind
+-- (funded_plan_regeln.firmen[].an, Firmen-Schlüssel wie prophos_firma_key; Prüfung S2 27.10.2026: ohne Filter hätte es in 7 Tagen auch 4
+-- Tradeify-Challenge- und 2 Tradeify-Funded-Starts geschoben). Gilt dort für jeden Funded-Plan mit Startzeit (auch von Hand), nicht nur
+-- für den Funded-Planer. Der Trigger selbst (before update of start_um_gestartet_at) bleibt unverändert.
 create or replace function public.prophos_firmen_abstand_funded_fenster() returns interval
   language sql immutable as $$ select interval '15 minutes' $$;
 
@@ -67,6 +69,7 @@ declare
   ziel timestamptz;
   grp uuid;
   neu_funded boolean;
+  firma_an boolean;
   grund text;
 begin
   if new.status is distinct from 'planned' or coalesce(btrim(new.master_firm), '') = '' then
@@ -89,8 +92,11 @@ begin
      and public.prophos_firma_key(p.master_firm) = k
    order by 1 desc
    limit 1;
-  -- 27.10.2026 Funded: 15 min zu jedem Start derselben Firma (alle IDs der Gruppe, auch dieselbe), sobald einer der beiden Funded ist
-  neu_funded := exists (select 1 from public.accounts a where a.id = new.master_account_id and a.account_type = 'funded');
+  -- 27.10.2026 Funded: 15 min zu jedem Start derselben Firma (alle IDs der Gruppe, auch dieselbe), sobald einer der beiden Funded ist —
+  -- nur für Firmen, die im Funded-Planer an sind
+  firma_an := exists (select 1 from public.funded_plan_regeln r, jsonb_array_elements(r.firmen) fr
+                       where r.id = 1 and coalesce((fr->>'an')::boolean, false) and public.prophos_firma_key(fr->>'name') = k);
+  neu_funded := firma_an and exists (select 1 from public.accounts a where a.id = new.master_account_id and a.account_type = 'funded');
   select coalesce(p.start_um_gestartet_at, p.orbit_gesendet_at, p.started_at)
     into letzter_f
     from public.trade_plans p
@@ -98,6 +104,7 @@ begin
      and public.prophos_gruppe_von(p.user_id) is not distinct from grp
      and coalesce(p.start_um_gestartet_at, p.orbit_gesendet_at, p.started_at) > now() - ff
      and public.prophos_firma_key(p.master_firm) = k
+     and firma_an
      and (neu_funded or exists (select 1 from public.accounts a where a.id = p.master_account_id and a.account_type = 'funded'))
    order by 1 desc
    limit 1;
