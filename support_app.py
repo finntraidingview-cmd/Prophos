@@ -368,7 +368,8 @@ TOOLS = [
      "description": "Meldung direkt an Finn (ohne Bestätigen, ändert nichts am Handel). Nutzen, wenn du einen ECHTEN Fehler/Bug in Prophos "
                     "erkennst, eine Meldung keinen bekannten Fix hat, kein Werkzeug helfen kann, oder der Nutzer nach 2 Versuchen nicht "
                     "weiterkommt; auch für klare Wünsche. Danach dem Nutzer sagen: „Okay, tut mir leid — das gebe ich direkt an Finn "
-                    "weiter.“ und nicht weiter raten. Gleiche Ursache binnen 30 min wird zusammengefasst.",
+                    "weiter.“ und nicht weiter raten. Gleiche Ursache binnen 30 min wird zusammengefasst. Nie Passwörter, PINs oder Zugangsdaten "
+                    "in die Meldung schreiben.",
      "input_schema": {"type": "object", "properties": {
          "kategorie": {"type": "string", "enum": ["bug", "fehlermeldung", "wunsch", "unklar"]},
          "titel": {"type": "string", "description": "eine Zeile, was kaputt ist bzw. gewünscht wird"},
@@ -727,6 +728,8 @@ def geheimes_raus(txt):
     """REIN RECHNEND: Passwörter und Tokens aus freiem Text entfernen (Meldungen sind NICHT maskiert, Konto-/Plan-IDs bleiben)."""
     t = str(txt or "")
     t = re.sub(r"(?i)\b(passwort|password|kennwort|pass|pw|pin|token|api[-_ ]?key|secret)\b\s*[:=]\s*\S+", r"\1: [entfernt]", t)
+    # Fließtext (S2-Hinweis 27.10.2026): „mein Passwort ist Geheim123", „Kennwort lautet …", „PIN 1234"
+    t = re.sub(r"(?i)\b(passwort|password|kennwort|pw|pin)\s+(?:ist|lautet|is|war)?\s*[:=]?\s*(?!\[entfernt\])\S+", r"\1 [entfernt]", t)
     t = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}", "[Schlüssel entfernt]", t)
     t = re.sub(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+", "[Token entfernt]", t)
     return t
