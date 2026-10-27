@@ -31,7 +31,9 @@ def main():
         {"konto_id": "c-1", "typ": "phase1", "grund": "nur noch 36 $ bis zum Ziel — von Hand prüfen"},
         {"konto_id": "c-2", "typ": "phase1", "grund": "nur noch 56 $ bis zum Ziel — von Hand prüfen"},
         {"konto_id": "c-3", "typ": "phase2", "grund": "nur noch 62 $ bis zum Ziel — von Hand prüfen"},
-        {"konto_id": "c-4", "typ": "phase1", "grund": "nur noch 5 $ bis zum Ziel — unter 10 $ plant der Bot keinen Klein-Trade: …"},
+        {"konto_id": "c-4", "typ": "phase1", "grund": "nur noch 0 $ bis zum Ziel — unter 1 $ plant der Bot keinen Klein-Trade: …"},
+        # seit AP_REST_MIN_CFD 1 $ (27.10.2026): ein CFD-Rest von 5 $ wird frei (Klein-Trade), unter 1 $ bleibt er fest
+        {"konto_id": "c-9", "typ": "phase1", "grund": "nur noch 5 $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade"},
         {"konto_id": "c-5", "typ": "challenge", "grund": "nur noch 60 $ bis zum Ziel — von Hand prüfen"},
         {"konto_id": "c-6", "grund": "nur noch 70 $ bis zum Ziel — von Hand prüfen"},
         {"konto_id": "c-7", "typ": "phase1", "grund": "keine Regel für diese Firma"},
@@ -39,9 +41,9 @@ def main():
 
     # 1) welche Gründe frei werden
     frei = F(lauf, tag)
-    check(frei == {"c-1", "c-2", "c-3"}, f"CFD Rest 36/56/62 frei; < 10 $, Challenge, ohne typ, andere Gründe fest ({sorted(frei)})")
+    check(frei == {"c-1", "c-2", "c-3", "c-9"}, f"CFD Rest 36/56/62/5 frei; < 1 $, Challenge, ohne typ, andere Gründe fest ({sorted(frei)})")
     check(F(lauf, "2026-10-10") == set() and F(None, tag) == set(), "Lauf eines anderen Tags / kein Lauf → nichts frei")
-    check(F(lauf, tag, {"c-1", "c-3"}) == {"c-2"}, "heute schon freigegebene Konten nicht noch einmal")
+    check(F(lauf, tag, {"c-1", "c-3", "c-9"}) == {"c-2"}, "heute schon freigegebene Konten nicht noch einmal")
 
     # 2) Kandidaten
     konten = [{"id": f"c-{i}", "account_type": "challenge" if i == 5 else "phase1"} for i in range(1, 9)]

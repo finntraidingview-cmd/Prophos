@@ -79,13 +79,17 @@ def main():
     wu, gu = R(FUT, "challenge", 158940.0, U, tage=(1, 3))
     check(wu and wu["tage_mini"]["unter_ziel"] is True and wu["sl"] == 8.0 and wu["rest"] == 60 and wu["stufe"].endswith("· sofort wieder zu"),
           f"Futures Challenge 60 $ unter dem Ziel → Mini ohne Kappung ({gu or wu and wu['stufe']})")
-    # CFD unter dem Ziel mit statischem Boden (FundedNext: dd_pct 10): Rest 5 $ < 10 (AP_REST_MIN_CFD) → Mini, SL über Boden + 5 $
+    # CFD unter dem Ziel mit statischem Boden (FundedNext: dd_pct 10): Rest 0,5 $ < 1 (AP_REST_MIN_CFD seit .1772) → Mini, SL über Boden + 5 $
     FN = dict(CFD, namen=["fundednext"], boden="statisch", dd_pct=10, phasen={"phase1": dict(CFD["phasen"]["phase1"], menge_schritt=0.1)})
-    wb, gb = R(FN, "phase1", 109995.0, U, ppl=1.0, tage=(0, 5))
-    check(wb and wb["menge"] == 0.01 and wb["tage_mini"]["unter_ziel"] is True and wb["rest"] == 5 and "über Boden + 5 $" in wb["stufe"],
-          f"FundedNext Rest 5 $, Tage 0/5 → Mini 0,01 Lot, Boden-Kappung ({gb or wb and wb['stufe']})")
-    # Boden-Kappung greift: Ziel +0,01 % (100.010), Boden −0,002 % (99.998), Balance 100.004 → Rest 6 $ (Mini), Luft 1 $ < 20 Pkt × 1 Lot → Grund
-    FNk = dict(FN, dd_pct=0.002, ziel_pct={"phase1": 0.01}, phasen={"phase1": dict(FN["phasen"]["phase1"], menge_schritt=1)})
+    wb, gb = R(FN, "phase1", 109999.5, U, ppl=1.0, tage=(0, 5))
+    check(wb and wb["menge"] == 0.01 and wb["tage_mini"]["unter_ziel"] is True and wb["rest"] in (0, 1) and "über Boden + 5 $" in wb["stufe"],
+          f"FundedNext Rest 0,5 $, Tage 0/5 → Mini 0,01 Lot, Boden-Kappung ({gb or wb and wb['stufe']})")
+    # Rest 5 $ mit offenen Tagen → seit .1772 Klein-Trade bis ans Ziel (wie bisher ab 10 $), nicht der Mini
+    wk, gk = R(FN, "phase1", 109995.0, U, ppl=1.0, tage=(0, 5))
+    check(wk and "tage_mini" not in wk and wk["stufe"].startswith("Klein-Trade · Rest 5 $"), f"FundedNext Rest 5 $, Tage 0/5 → Klein-Trade ({gk or wk and wk['stufe']})")
+    # Boden-Kappung greift: Ziel +0,0045 % (100.004,5), Boden −0,002 % (99.998), Balance 100.004 → Rest 0,5 $ (Mini, unter AP_REST_MIN_CFD),
+    # Luft 6 $ < Boden + 5 $ + Mini-SL → Grund
+    FNk = dict(FN, dd_pct=0.002, ziel_pct={"phase1": 0.0045}, phasen={"phase1": dict(FN["phasen"]["phase1"], menge_schritt=1)})
     wb1, gb1 = R(FNk, "phase1", 100004.0, U, ppl=1.0, tage=(0, 5))
     check(wb1 is None and "Balance nur 6 $ über dem Boden" in (gb1 or "") and "unter Boden + 5 $" in (gb1 or ""), f"1 Lot, 6 $ über dem Boden → kein Mini, Grund ({gb1})")
     wb2, gb2 = R(FN, "phase1", 104000.0, U, ppl=1.0, tage=(0, 5))

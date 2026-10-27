@@ -62,15 +62,19 @@ def main():
     check(g1 is None and w1["menge"] == w0["menge"] and w1["tp"] == w0["tp"] and w1["sl"] == w0["sl"] and "Rest zurück im Planer" not in w1["stufe"],
           f"CFD Rest 346 mit Feld → derselbe Klein-Trade (Feld greift erst unter der Grenze) ({(w1 or {}).get('stufe') or g1})")
 
-    # 2) CFD Rest 5 $: ohne Feld von Hand (mit Hinweis auf den Knopf), mit Feld Klein-Trade 0,01 Lot
+    # 2) CFD Rest 5 $: seit .1772 (AP_REST_MIN_CFD 1 $) auch ohne Feld automatisch Klein-Trade 0,01 Lot, Puffer 3 $
     w, g = R(FP, "phase1", 107995, u, ppl=20)
-    check(w is None and g.startswith("Rest 5 $ bis Ziel — von Hand") and "→ Trade-Planer" in g, f"CFD Rest 5 ohne Feld → von Hand ({g})")
-    w, g = R(FP, "phase1", 107995, u, ppl=20, rest_planer=True)
-    check(g is None and w["menge"] == 0.01 and w["tp"] == 5 + w["puffer"] and 15 <= w["puffer"] <= 20 and w["sl"] == 2250
+    check(g is None and w["menge"] == 0.01 and w["puffer"] == 3 and w["tp"] == 8 and "Rest zurück im Planer" not in w["stufe"],
+          f"CFD Rest 5 ohne Feld → Klein-Trade automatisch ({(w or {}).get('stufe') or g})")
+    # CFD Rest 0,5 $ (unter der Grenze): ohne Feld von Hand (mit Hinweis auf den Knopf), mit Feld Klein-Trade 0,01 Lot
+    w, g = R(FP, "phase1", 107999.5, u, ppl=20)
+    check(w is None and "von Hand" in g and "→ Trade-Planer" in g, f"CFD Rest 0,5 ohne Feld → von Hand ({g})")
+    w, g = R(FP, "phase1", 107999.5, u, ppl=20, rest_planer=True)
+    check(g is None and w["menge"] == 0.01 and w["puffer"] == 3 and w["tp"] == round(0.5 + 3) and w["sl"] == 2250
           and "Klein-Trade" in w["stufe"] and w["stufe"].endswith("· Rest zurück im Planer") and "symbol" not in w,
-          f"CFD Rest 5 mit Feld → Klein-Trade 0,01 Lot, SL 2.250 ({(w or {}).get('stufe') or g})")
-    w, g = R(FP, "phase1", 107995, u, rest_planer=True)
-    check(w is None and "kein Punktwert" in g, f"CFD Rest 5 mit Feld, ohne Punktwert → Handarbeit mit Fix ({g})")
+          f"CFD Rest 0,5 mit Feld → Klein-Trade 0,01 Lot, SL 2.250 ({(w or {}).get('stufe') or g})")
+    w, g = R(FP, "phase1", 107999.5, u, rest_planer=True)
+    check(w is None and "kein Punktwert" in g, f"CFD Rest 0,5 mit Feld, ohne Punktwert → Handarbeit mit Fix ({g})")
 
     # 3) Futures Lucid 150k, Rest 84 $: ohne Feld von Hand, mit Feld 1 MNQ, TP 104 $ (52 Pkt), SL 2.500 wie die Regel
     w, g = R(LUCID, "challenge", 158916, u)

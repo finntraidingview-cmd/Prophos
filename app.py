@@ -16804,7 +16804,10 @@ AP_REST_MIN = 100                    # weniger Rest bis Ziel → kein Auto-Trade
 # abgerundet auf 0,01 (FN-Trades mit 0,04 Lots belegt), TP = Rest + Puffer 15–20 $ (Finn: „Chris 0,18 Lots ist gut", Puffer 15–20).
 # SL bleibt die normale Firmen-Spanne in $ mit Boden-Deckel (Finn: „den SL kannst du ganz groß machen, wie beim ganz normalen Trade").
 # Gilt, sobald der Rest mit den normalen Mindest-Lots in < 20 Pkt verdient wäre (FN 100k < 420 $, FP 100k < 400 $, FTMO P1 < 500 $ …).
-AP_REST_MIN_CFD = 10                 # CFD: erst unter 10 $ Rest Handarbeit
+# 10 → 1 $ (Finn über Master 27.10.2026: „Lieber machen wir einen Tick zu wenig und schieben es dann wieder in den Trade-Planer, als dass wir zu viel
+# Gewinn machen"): mit dem knappen Klein-Trade-Puffer (AP_KLEIN_PUFFER_MIN) endet ein verfehltes Ziel meist 0–5 $ darunter — bis hier wäre das
+# „Rest … von Hand" geworden. Jetzt plant der Bot jeden CFD-Rest ab 1 $ wieder als Klein-Trade (Mindest-Lot, TP = Rest + Puffer)
+AP_REST_MIN_CFD = 1                  # CFD: erst unter 1 $ Rest Handarbeit (Ziel praktisch erreicht)
 # SL HINTER DEN BODEN (Finn 09.10.2026 ~07:00 Dubai, feste Regel: „ein Konto, das auch nur kurz unter der Max-Loss-Grenze war, ist
 # geblowt" — Anlass FN …0296 mit 90.002 $ nach SL-Kappung auf GENAU den Boden): wird der SL auf den Boden gekappt, liegt er so viele $
 # DAHINTER — das Ende ist sicher unter dem Boden (Broker liquidiert oder der SL schließt darunter), die Etappe endet TP oder geblowt,
@@ -16820,7 +16823,12 @@ AP_SL_HINTER_BODEN = 50
 # einen Trade am Tag (AP_GRUND_HEUTE_GEHANDELT), daher ist der Verlust beim Planen 0 — der Parameter steht für Nachplanen bereit.
 AP_TAGES_PUFFER = 100
 AP_KLEIN_PKT = 20                   # Rest in so vielen Punkten verdienen
-AP_KLEIN_PUFFER = (15, 20)           # $ über dem Rest (Zufall der Tranche)
+AP_KLEIN_PUFFER = (15, 20)           # bis 27.10.2026 fester Puffer $ über dem Rest — wird nicht mehr gelesen, Name bleibt für alte Selbsttest-Lader
+# KLEIN-TRADE-PUFFER NACH LOTS (Finn 27.10.2026, Marc FundedNext 100k …7523: Rest 11 $, 0,05 Lots, TP 27 $ = Rest + 16 $ → +18,64 $ über dem
+# Ziel: „Bei sehr wenig Lots reicht ein Puffer von 2–3 $ … die Puffer-Anzahl soll sich nach den Lots richten"): Puffer = 1,5 Pkt × Lots × $/Pkt
+# (dieselbe Rechnung wie der letzte CFD-Trade, AP_PUFFER_PKT ÷ 3, seit 21.10.2026 — Echo V2 zieht TP/SL am Fill nach), abgerundet, mindestens
+# AP_KLEIN_PUFFER_MIN (Schlupf am Fill: dort lag das Ergebnis 2,70 $ über dem TP). klein_puffer je Phase bleibt Übersteuerung.
+AP_KLEIN_PUFFER_MIN = 3
 AP_KLEIN_SCHRITT = 0.01              # Lot-Schritt des Klein-Trades bei Lot-Firmen (menge_schritt < 1); FTMO/The5ers bleiben bei 1
 AP_KLEIN_TP_PKT_HINWEIS = 60         # TP weiter als 60 Pkt (Mindest-Lot zu groß) → trotzdem planen, Hinweis in der Notiz
 AP_PUFFER_PKT = 4.5                  # normaler letzter CFD-Trade: Puffer = AP_PUFFER_PKT × Lots × $/Pkt ÷ 3 (statt fester Firmen-Puffer, ÷ 3 seit 12.10.2026)
@@ -17401,7 +17409,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         # 119 $ unter dem Ziel: „Vor allem bei CFDs soll bei so vielen Dollar einfach noch ein Trade automatisch gemacht werden … entweder
         # ich mache den Trade manuell, oder ‚OK, abhaken und zurück in den Trade-Planer' — der macht den Rest automatisch fertig"):
         # NUR mit gesetztem accounts.rest_planer_at (Knopf „→ Trade-Planer") plant der Bot hier weiter — CFD über den Klein-Trade (Rest in
-        # 20 Pkt, auch unter 10 $), Futures über EINEN Kontrakt (ap_klein_trade_fut, MNQ, TP = Rest + Gebühren-Puffer, SL wie die Regel).
+        # 20 Pkt, auch unter AP_REST_MIN_CFD), Futures über EINEN Kontrakt (ap_klein_trade_fut, MNQ, TP = Rest + Gebühren-Puffer, SL wie die Regel).
         # Standard ohne Feld bleibt „Rest … von Hand". Das Feld löscht die Ziel-Wache am Ziel bzw. das Archivieren — bis dahin plant der
         # Bot nach jedem Trade wieder, falls der Rest noch nicht geholt ist.
         if rest_planer:
@@ -17412,7 +17420,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
                      else ap_klein_trade_fut(rest, regel, ph))
             klein["stufe"] += " · Rest zurück im Planer"
         elif cfd:
-            return None, (f"Rest {rest:.0f} $ bis Ziel — von Hand (unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: erst im Konto "
+            return None, (f"Rest {f'{rest:.2f}'.replace('.', ',')} $ bis Ziel — von Hand (unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: erst im Konto "
                           "prüfen, ob die Firma das Ziel schon zählt, sonst den Rest von Hand holen — oder im Radar „→ Trade-Planer“)")
         else:
             return None, f"Rest {rest:.0f} $ bis Ziel — von Hand (der Bot plant hier keinen Trade mehr — oder im Radar „→ Trade-Planer“)"
@@ -17536,14 +17544,19 @@ def _ap_de(x, stellen=2):
 def ap_klein_trade(rest, ppl, schritt, u_puffer, klein_puffer=None):
     """REIN RECHNEND: Klein-Trade kurz vor dem Ziel (CFD, Finn 09.10.2026) → {menge, puffer, tp, tp_punkte, stufe}.
     Lots = Rest ÷ (AP_KLEIN_PKT × ppl), ABGERUNDET auf den Schritt (0,01 bei Lot-Firmen, sonst menge_schritt), mindestens ein Schritt;
-    TP = Rest + Puffer (AP_KLEIN_PUFFER bzw. klein_puffer der Phase). Mindest-Lot zu groß → TP-Punkte > 60, trotzdem geplant (Finn:
+    TP = Rest + Puffer: max(AP_KLEIN_PUFFER_MIN, 1,5 Pkt × Lots × ppl) seit .1772 (27.10.2026), klein_puffer der Phase übersteuert. Mindest-Lot zu groß → TP-Punkte > 60, trotzdem geplant (Finn:
     „der Bot soll es selbst machen"), der Hinweis steht in der Stufe."""
     s = float(schritt or 1)
     ks = AP_KLEIN_SCHRITT if s < 1 else s
     n = int(float(rest) / (AP_KLEIN_PKT * float(ppl)) / ks + 1e-9)
     menge = round(max(1, n) * ks, 4)
     menge = int(menge) if ks >= 1 else menge
-    puffer = round(_ap_spanne(klein_puffer or AP_KLEIN_PUFFER, u_puffer))
+    if klein_puffer:
+        puffer = round(_ap_spanne(klein_puffer, u_puffer))   # Übersteuerung je Phase (unverändert)
+    else:
+        # nach Lots (27.10.2026, s. AP_KLEIN_PUFFER_MIN); get: ältere Selftest-Lader ziehen ap_klein_trade ohne die neue Konstante
+        pkt = float(globals().get("AP_PUFFER_PKT", 4.5)) / 3.0
+        puffer = max(int(globals().get("AP_KLEIN_PUFFER_MIN", 3)), int(pkt * float(menge) * float(ppl) + 1e-9))
     tp = round(float(rest) + puffer)
     tp_pkt = round(tp / (float(menge) * float(ppl)), 1)
     stufe = f"Klein-Trade · Rest {float(rest):.0f} $ · {_ap_de(menge)} Lots · TP {tp} $ (Rest + Puffer {puffer} $)"
@@ -27438,7 +27451,7 @@ def ap_nachplan_ziel_frei(letzter_erg, tag, schon=None):
     """REIN RECHNEND (testbar): Konto-IDs, deren „nur noch X $ bis zum Ziel"-Grund des letzten Laufs HEUTE einmal neu gerechnet wird — nur
     CFD-Phasen (typ phase1/phase2 in der Lauf-Zeile; ohne typ bleibt der Grund fest) mit Rest ≥ AP_REST_MIN_CFD. Anlass (Master 09.10.2026, Folge zu .1397): seit dem Klein-Trade wird aus so
     einem Rest ein Plan, der Grund stammte aber aus dem Lauf VOR dem Update und galt als fest → Chris/Moritz/Ina (Rest 36/56/62 $) wären
-    erst morgen geplant worden. Unter 10 $ bleibt er fest (Handarbeit), Futures unverändert. schon = heute bereits freigegebene IDs: jedes
+    erst morgen geplant worden. Unter AP_REST_MIN_CFD (seit 27.10.2026 1 $, vorher 10 $) bleibt er fest (Handarbeit), Futures unverändert. schon = heute bereits freigegebene IDs: jedes
     Konto nur EINMAL je Tag (kommt derselbe Grund wieder, z. B. „kein Punktwert", gilt er danach wieder als fest — kein 10-min-Kreisel)."""
     if not isinstance(letzter_erg, dict) or str(letzter_erg.get("tag") or "") != tag:
         return set()
