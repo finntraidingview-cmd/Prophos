@@ -12341,11 +12341,11 @@
                   <input type="checkbox" id="adm-k-heute" class="adm-k-f" style="margin:0">
                   <span>Heute offen zuerst</span>
                 </label>
-                <!-- Inaktiv (27.10.2026, Finn: „damit Accounts nicht wegen Inaktivität gebannt werden"): nur Konten, deren letzter Trade ≥ 5 Tage her
-                     ist oder die nie getradet wurden — läuft gerade einer, fällt das Konto raus. Zustand in localStorage -->
-                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Nur Konten, deren letzter Trade 5 Tage oder länger her ist (oder nie) — laufende Trades zählen als aktiv">
-                  <input type="checkbox" id="adm-k-inaktiv" class="adm-k-f" style="margin:0">
-                  <span>≥ 5 Tage ohne Trade</span>
+                <!-- Längste Trade-Pause zuerst (27.10.2026, Finn: „diesen Knopf nicht ‚5 Tage' nennen … am längsten nicht getradet zuerst"): Sortierung
+                     wie die Nachbar-Haken, kein Filter mehr (vorher „≥ 5 Tage ohne Trade" blendete aus). Zustand in localStorage (eigener Schlüssel) -->
+                <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer" title="Nach dem letzten Trade sortieren: zuerst „nie“, dann der älteste letzte Trade, dann jüngere — laufende Trades ganz unten (zählen als aktiv). Alle Konten bleiben sichtbar">
+                  <input type="checkbox" id="adm-k-pause" class="adm-k-f" style="margin:0">
+                  <span>Längste Trade-Pause zuerst</span>
                 </label>
                 <input id="adm-k-search" class="input" type="search" placeholder="Name, External ID, Firma, ID …" style="padding:5px 10px;font-size:12.5px;height:auto;width:200px">
               </div>
@@ -17261,7 +17261,7 @@
       fuell('adm-k-person', (admData.people || []).map(p => [String(p.user_id), p.name]))
       fuell('adm-k-firm', (admData.firms || []).map(f => [f, f]))
       admK.person = $('adm-k-person').value; admK.firm = $('adm-k-firm').value; admK.type = $('adm-k-type').value
-      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.inaktiv = !!$('adm-k-inaktiv')?.checked; poSortMerken('prophos_adm_inaktiv', admK.inaktiv); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
+      admK.ziel = $('adm-k-ziel').value; admK.payout = !!$('adm-k-payout')?.checked; poSortMerken('prophos_adm_payout_zuerst', admK.payout); admK.heute = !!$('adm-k-heute')?.checked; poSortMerken('prophos_adm_heute_zuerst', admK.heute); admK.pause = !!$('adm-k-pause')?.checked; poSortMerken('prophos_adm_pause_zuerst', admK.pause); admK.q = ($('adm-k-search').value || '').trim(); admK.arch = !!$('adm-k-archived').checked
       const norm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
       const qn = norm(admK.q)
       const zeilen = [], jetztIso = new Date().toISOString()
@@ -17276,7 +17276,6 @@
         // Payout ab (16.10.2026): Datum = payout_ready_at, offene Anfrage liefert /admin/overview je Funded-CFD-Konto (po_offen)
         let po = null; try{ po = payoutAbInfo(a, { offen: !!r.po_offen }) }catch(_){ po = null }
         if(qn && !norm([r.name, r.ext, r.firm, r.person].join(' ')).includes(qn)) continue
-        if(admK.inaktiv && r.letzter_trade){ const li = admLetzterTradeInfo(r.letzter_trade, jetztIso); if(li && (li.stufe === 'lauf' || (li.tage != null && li.tage < ADM_LT_AMBER_T))) continue }   // ≥ 5 T ohne Trade (27.10.2026)
         zeilen.push({ r, a, po })
       }
       // Reihenfolge wie Accounts (accSortiert: Kontoart → Firma), innerhalb gleicher Art/Firma nach ID
@@ -17286,6 +17285,13 @@
       // Heute traden (16.10.2026): heute_traden je Funded-Futures-Zeile kommt fertig aus /admin/overview (heute_traden_info, wie im Planer)
       const heuteR = a => { const r = zu.get(a); return (r && !r.archived && r.heute_traden) ? r.heute_traden : null }
       if(admK.heute) sortiert = heuteZuerst(sortiert, heuteR)
+      // LÄNGSTE TRADE-PAUSE ZUERST (27.10.2026, Finn, statt des Filters „≥ 5 Tage ohne Trade"): „nie" → ältester letzter Trade → jüngere → läuft gerade
+      // → ohne Stand (archiviert/älteres Backend); gleiche Stufe behält die bisherige Reihenfolge. Der Spaltenkopf (ltSort) sortiert danach, gewinnt also
+      if(admK.pause){
+        const rang = a => { const li = admLetzterTradeInfo((zu.get(a) || {}).letzter_trade, jetztIso)
+          return !li ? [3, 0] : li.stufe === 'lauf' ? [2, 0] : li.stufe === 'nie' ? [0, 0] : [1, li.sortMs] }
+        sortiert = sortiert.map((a, i) => ({ a, i, k: rang(a) })).sort((x, y) => x.k[0] - y.k[0] || x.k[1] - y.k[1] || x.i - y.i).map(z => z.a)
+      }
       if(admK.ltSort){   // Letzter Trade (27.10.2026): älteste zuerst bzw. neueste zuerst; Konten ohne Stand (archiviert) ans Ende
         const ms = a => { const li = admLetzterTradeInfo((zu.get(a) || {}).letzter_trade, jetztIso); return li ? li.sortMs : null }
         sortiert = sortiert.map((a, i) => ({ a, i, m: ms(a) })).sort((x, y) => (x.m == null) - (y.m == null) || (x.m == null ? 0 : (admK.ltSort === 'alt' ? x.m - y.m : y.m - x.m)) || x.i - y.i).map(z => z.a)
@@ -17337,7 +17343,8 @@
     }
     { const cb = $('adm-k-payout'); if(cb) cb.checked = poSortLesen('prophos_adm_payout_zuerst') }   // Haken gemerkt (16.10.2026)
     { const cb = $('adm-k-heute'); if(cb) cb.checked = poSortLesen('prophos_adm_heute_zuerst') }     // Heute offen zuerst (16.10.2026)
-    { const cb = $('adm-k-inaktiv'); if(cb) cb.checked = poSortLesen('prophos_adm_inaktiv') }       // ≥ 5 Tage ohne Trade (27.10.2026)
+    { const cb = $('adm-k-pause'); if(cb) cb.checked = poSortLesen('prophos_adm_pause_zuerst') }   // Längste Trade-Pause zuerst (27.10.2026)
+    try{ localStorage.removeItem('prophos_adm_inaktiv') }catch(_){}   // alter Filter „≥ 5 Tage ohne Trade" (bis .1770) — wirkt nie mehr, Schlüssel weg
     document.querySelectorAll('.adm-k-f').forEach(el => el.addEventListener('change', admKontenRender))
     $('adm-k-search')?.addEventListener('input', admKontenRender)
 
@@ -47727,7 +47734,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1770'
+  const OS_TAB_BUILD = '2026-09-22.1771'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
