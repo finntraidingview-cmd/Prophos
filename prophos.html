@@ -2756,7 +2756,7 @@
      Challenges): Bogen + Nadel = Chance, mit den bestehenden Konten das Ziel zu erreichen; Strich am Bogen = schon gesichert. Bogen mit
      Verlauf in Firmenfarbe, Nadel fährt beim Laden hoch, Karte hebt sich beim Hover; Raster füllt die volle Breite (auto-fit), am Handy
      eine wischbare Leiste. Gesperrte Firmen nur als Chip. Firmenfarben dezent (Finn 12.10.2026) an EINER Stelle. */
-  #mp-karte{--mp-tradeify:#4f5bd5;--mp-tradeifycfd:#6b8e23;--mp-topstep:#1f93c9;--mp-apex:#e8892b;--mp-ftmo:#2a3f8f;--mp-fundednext:#a14fc9;--mp-fundingpips:#1f9e8f;--mp-the5ers:#3a9d5d;
+  #mp-karte{--mp-tradeify:#4f5bd5;--mp-tradeifycfd:#6b8e23;--mp-topstep:#1f93c9;--mp-apex:#e8892b;--mp-ftmo:#2a3f8f;--mp-ftmofutures:#5a78c9;--mp-fundednext:#a14fc9;--mp-fundingpips:#1f9e8f;--mp-the5ers:#3a9d5d;
     margin-bottom:14px;padding:10px 16px 12px}
   #mp-karte .mp-kopf{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 8px}
   #mp-karte .mp-kopf h3{margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650}
@@ -47727,7 +47727,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1768'
+  const OS_TAB_BUILD = '2026-09-22.1769'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72950,9 +72950,13 @@
   const _mp = { d: null, uid: '', at: 0, laedt: false, fehler: '', sendet: false, zeig: {} }
   const mpEsc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
   // Firmenfarbe als Token aus der CSS (#mp-karte) — unbekannte Firma: Prophos-Violett
-  const MP_FARBE = { 'Tradeify': 'tradeify', 'Tradeify CFD': 'tradeifycfd', 'Topstep': 'topstep', 'Apex Trader': 'apex', 'FTMO': 'ftmo', 'FundedNext': 'fundednext',
-                     'FundingPips': 'fundingpips', 'The5%ers': 'the5ers' }
+  const MP_FARBE = { 'Tradeify': 'tradeify', 'Tradeify CFD': 'tradeifycfd', 'Topstep': 'topstep', 'Apex Trader': 'apex', 'FTMO': 'ftmo', 'FTMO Futures': 'ftmofutures',
+                     'FundedNext': 'fundednext', 'FundingPips': 'fundingpips', 'The5%ers': 'the5ers' }
   const mpFarbe = f => MP_FARBE[f] ? `var(--mp-${MP_FARBE[f]})` : 'var(--violet)'
+  // ANZEIGENAME (27.10.2026, Finn: „die Spalte FTMO ist eigentlich nur FTMO CFD. Es soll FTMO CFD und FTMO Futures geben, genau wie Tradeify und
+  // Tradeify CFD"): der Firmenschlüssel bleibt „FTMO" (vorrat_ziele, Sperr-Matrix, _firm_norm) — nur das Etikett am Tacho/Chip sagt „FTMO CFD"
+  const MP_NAME = { 'FTMO': 'FTMO CFD' }
+  const mpName = f => MP_NAME[f] || f
   const MP_SCHLOSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>'
   const mpK = v => { const n = Number(v) || 0; return Math.abs(n) >= 1000 ? (Math.round(n / 100) / 10).toLocaleString('de-DE') + 'k' : String(Math.round(n)) }
   // Firmenname wie app.py _firm_norm (Schreibweisen im Firma-Select der Tabelle ↔ Firmen der Vorrat-Ziele)
@@ -72962,6 +72966,9 @@
     if(f.includes('futur') && /funded ?next|founded ?next/.test(f)) return 'fundednext futures'
     if(/funded|founded/.test(f) && f.includes('futur')) return 'myfundedfutures'
     if(istTradeifyCfd(f)) return 'tradeify cfd'   // eigene Firma (23.10.2026), wie app.py _firm_norm
+    // FTMO Futures eigene Firma (seit .1736, wie app.py _firm_norm) — vorher fiel „FTMO Futures" über „ftmo" in die FTMO-Kachel: der Klick auf FTMO
+    // nahm die Option mit den meisten Konten und zeigte die Futures-Konten (Finn 27.10.2026)
+    if(f.includes('ftmo') && f.includes('futur')) return 'ftmo futures'
     for(const [n, out] of [['apex', 'apex trader'], ['tradeify', 'tradeify'], ['fundednext', 'fundednext'], ['funded next', 'fundednext'], ['foundednext', 'fundednext'],
                            ['founded next', 'fundednext'], ['fundingpips', 'fundingpips'], ['funding pips', 'fundingpips'], ['ftmo', 'ftmo'], ['topstep', 'topstep']])
       if(f.includes(n)) return out
@@ -72991,9 +72998,9 @@
     if(g > 0.5 && g < 99.5){ const [a1, b1] = mpPunkt(g, 36), [a2, b2] = mpPunkt(g, 50)
       ges = `<line class="mp-ges" x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}"/>` }
     const zahl = f.fortschritt_pct == null && f.gesichert_pct == null ? '–' : Math.round(v)
-    const tip = `${f.firma}: ${Math.round(v)} % vom Muster erreicht (gesichert + laufende Konten nach ihrer Chance) · gesichert ${mpSub(f)}${g > 0.5 && g < 99.5 ? ' (Strich am Bogen)' : ''}. Klick: Konten unten in der Tabelle zeigen`
+    const tip = `${mpName(f.firma)}: ${Math.round(v)} % vom Muster erreicht (gesichert + laufende Konten nach ihrer Chance) · gesichert ${mpSub(f)}${g > 0.5 && g < 99.5 ? ' (Strich am Bogen)' : ''}. Klick: Konten unten in der Tabelle zeigen`
     return `<div role="button" tabindex="0" class="mp-tacho${aktiv ? ' aktiv' : ''}" data-mp-firma="${mpEsc(f.firma)}" data-mp-v="${v}" style="--mp-f:${mpFarbe(f.firma)}" title="${mpEsc(tip)}">
-      ${darf ? `<button type="button" class="mp-schloss" data-mp-sperren="${mpEsc(f.firma)}" title="${mpEsc(f.firma)} bei dieser ID sperren (Firma hat gesperrt / Restriction) — keine neuen Pläne, laufende Trades bleiben">${MP_SCHLOSS}</button>` : ''}
+      ${darf ? `<button type="button" class="mp-schloss" data-mp-sperren="${mpEsc(f.firma)}" title="${mpEsc(mpName(f.firma))} bei dieser ID sperren (Firma hat gesperrt / Restriction) — keine neuen Pläne, laufende Trades bleiben">${MP_SCHLOSS}</button>` : ''}
       <svg viewBox="0 0 120 96" aria-hidden="true">
         <defs><linearGradient id="mp-verlauf-${i}" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0" style="stop-color:color-mix(in srgb,var(--mp-f) 30%,#fff)"/><stop offset="1" style="stop-color:var(--mp-f)"/></linearGradient></defs>
@@ -73003,7 +73010,7 @@
         <g class="mp-nadel" style="transform:rotate(${mpWinkel(alt)}deg)"><line x1="60" y1="62" x2="60" y2="24"/><circle cx="60" cy="58" r="4"/></g>
         <text class="mp-zahl" x="60" y="90" text-anchor="middle">${zahl}${zahl === '–' ? '' : '<tspan dx="1">%</tspan>'}</text>
       </svg>
-      <div class="mp-firma"><i></i>${mpEsc(f.firma)}</div>
+      <div class="mp-firma"><i></i>${mpEsc(mpName(f.firma))}</div>
       <div class="mp-sub">${mpEsc(mpSub(f))}</div>
     </div>`
   }
@@ -73018,7 +73025,7 @@
     leiste.innerHTML = sichtbar.map((f, i) => mpTacho(f, i, !!fw && mpNorm(f.firma) === fw, darf)).join('') + (_mp.fehler ? `<div class="mp-fehler">${mpEsc(_mp.fehler)}</div>` : '')
     ges.hidden = !gesperrt.length
     ges.innerHTML = gesperrt.length ? 'Gesperrt: ' + gesperrt.map(f => `<button type="button" class="mp-chip" data-mp-frei="${mpEsc(f.firma)}"
-      title="${mpEsc(f.firma)} ist bei dieser ID gesperrt — keine neuen Pläne für Konten dieser Firma (laufende Trades bleiben).${darf ? ' Klick: wieder freigeben' : ''}">${MP_SCHLOSS}${mpEsc(f.firma)}</button>`).join('') : ''
+      title="${mpEsc(mpName(f.firma))} ist bei dieser ID gesperrt — keine neuen Pläne für Konten dieser Firma (laufende Trades bleiben).${darf ? ' Klick: wieder freigeben' : ''}">${MP_SCHLOSS}${mpEsc(mpName(f.firma))}</button>`).join('') : ''
     const st = document.getElementById('mp-stand')
     if(st){ const t = d.gerechnet_um ? new Date(d.gerechnet_um) : null
       st.textContent = t && isFinite(t) ? 'Stand ' + t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '' }
@@ -73075,7 +73082,7 @@
       const a = await r.json().catch(() => ({}))
       if(!r.ok || !a.ok) throw new Error(a.error || ('HTTP ' + r.status))
       _mp.fehler = ''
-    }catch(e){ f.status = alt; _mp.fehler = `${f.firma} nicht umgestellt: ${e.message || e}` }
+    }catch(e){ f.status = alt; _mp.fehler = `${mpName(f.firma)} nicht umgestellt: ${e.message || e}` }
     _mp.sendet = false
     mpRender()
   }
@@ -73102,7 +73109,7 @@
       const opts = [...sel.options].map(o => o.value).filter(v => v && mpNorm(v) === mpNorm(firma))
       const n = v => (typeof accounts !== 'undefined' ? (accounts || []).filter(a => a.firm === v).length : 0)
       ziel = opts.sort((a, b) => n(b) - n(a))[0] || ''
-      if(!ziel){ _mp.fehler = `Keine Konten bei ${firma} in der Tabelle.`; mpRender(); return }
+      if(!ziel){ _mp.fehler = `Keine Konten bei ${mpName(firma)} in der Tabelle.`; mpRender(); return }
     }
     _mp.fehler = ''
     const manuell = document.querySelector('#dashboard-view section.view[data-view="accounts"] .subtab[data-subtab="manual"]')
@@ -75101,7 +75108,7 @@
 :where([data-theme=dark]) #adm-pane-kompass .kp-wochen-titel{color:var(--sub)}
 :where([data-theme=dark]) #adm-pane-kompass .kp-woche .stab{background-color:var(--good)}
 :where([data-theme=dark]) #adm-pane-kompass .kp-woche .kw{color:var(--sub)}
-:where([data-theme=dark]) #mp-karte{--mp-tradeify:#636dda;--mp-tradeifycfd:#9cc25a;--mp-topstep:#57b8e5;--mp-apex:#ec9e50;--mp-ftmo:#798dd8;--mp-fundednext:#b06bd1;--mp-fundingpips:#6ee3d5;--mp-the5ers:#80d09d}
+:where([data-theme=dark]) #mp-karte{--mp-tradeify:#636dda;--mp-tradeifycfd:#9cc25a;--mp-topstep:#57b8e5;--mp-apex:#ec9e50;--mp-ftmo:#798dd8;--mp-ftmofutures:#a4b6ea;--mp-fundednext:#b06bd1;--mp-fundingpips:#6ee3d5;--mp-the5ers:#80d09d}
 :where([data-theme=dark]) #mp-karte .mp-kopf h3,:where([data-theme=dark]) #mp-karte .mp-kopf span{color:var(--sub-2)}
 :where([data-theme=dark]) #mp-karte .mp-tacho{border-color:var(--border-soft);color:inherit;background-color:transparent;box-shadow:var(--shadow-card)}
 :where([data-theme=dark]) #mp-karte .mp-tacho:hover{box-shadow:var(--shadow-card-hover)}
