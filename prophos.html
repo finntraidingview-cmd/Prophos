@@ -33111,7 +33111,8 @@
         // öffnet das normale Trade-planen-Popup mit diesem Konto + Orbit vorgewählt (tpRestHedgeOeffnen). Nur Futures (Orbit = TradingView)
         // und nur im Login des Kontos — das Popup kennt nur die eigenen Konten.
         const istFut = typeof tpFirmIstFutures === 'function' ? tpFirmIstFutures(k.firma || (a && a.firm) || '') : true
-        const knopf = (kid && istFut ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-trade="${escapeHtml(kid)}"${a ? '' : ' disabled'} title="${escapeHtml(a ? 'Orbit-Trade mit Fusion-Gegenhedge planen — Konto und Orbit vorgewählt, Multiplikator frei wählbar' : `Trade planen nur im Login von ${wer} — das Popup kennt nur die eigenen Konten`)}">Trade planen</button>` : '')
+        // Fremdes Konto (27.10.2026): nicht mehr disabled — der Knopf wechselt in den Login der ID und öffnet dort das Popup (rvhTradeFremd)
+        const knopf = (kid && istFut ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-trade="${escapeHtml(kid)}"${a ? '' : ` data-wdl-rvh-trade-uid="${escapeHtml(uid)}" data-wdl-rvh-trade-wer="${escapeHtml(wer)}"`} title="${escapeHtml(a ? 'Orbit-Trade mit Fusion-Gegenhedge planen — Konto und Orbit vorgewählt, Multiplikator frei wählbar' : `Orbit-Trade mit Fusion-Gegenhedge planen — wechselt in den Login von ${wer} (das Popup plant im Login des Kontos) und öffnet dort das Popup mit Konto und Orbit vorgewählt`)}">Trade planen</button>` : '')
           + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-planer="${escapeHtml(kid)}" data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}" data-wdl-rvh-rest="${zr.rest != null ? Math.round(zr.rest) : ''}" title="Rest zurück in den Trade-Planer: der Bot plant den Rest${zr.rest != null ? ` (${de(zr.rest)} $)` : ''} als Klein-Trade (CFD: Rest in 20 Pkt; Futures: 1 MNQ, TP = Rest + Puffer) — Nachplanen ≤ 5 min, sonst im Nachtlauf (ggf. morgen). Die Markierung löscht sich am Ziel.">→ Planer</button>` : '')
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || 'Abhaken — der normale Dialog: Nichts ändern / Account geblowt / Phase bestanden → Nachfolger. Den Rest von Hand holen, hier als manuell nachtragen und den Nachfolger anlegen')}">Abhaken</button>`
           + (kid ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-rvh-bal="${escapeHtml(kid)}"${ziel != null ? ` data-wdl-rvh-ziel="${ziel}"` : ''}${rvhLauf ? ' disabled' : ''}${eigen ? '' : ` data-wdl-rvh-uid="${escapeHtml(uid)}" data-wdl-rvh-wer="${escapeHtml(wer)}"`} title="${escapeHtml(rvhLauf ? (rvhSt.text || 'liest …') : eigen ? 'Balance jetzt lesen (PC dieser ID) — steht sie am Ziel, wandert das Konto sofort nach Tage sammeln/Review' : `Balance über den PC von ${wer} lesen lassen — steht sie am Ziel, wandert das Konto sofort nach Tage sammeln/Review`)}">${rvhLauf ? 'liest …' : 'Balance lesen'}</button>` : '')
@@ -33244,7 +33245,13 @@
       return
     }
     const rt = ev.target.closest('[data-wdl-rvh-trade]')
-    if(rt){ if(!rt.disabled && typeof window.tpRestHedgeOeffnen === 'function') window.tpRestHedgeOeffnen(rt.getAttribute('data-wdl-rvh-trade')); return }   // Rest von Hand mit Hedge (26.10.2026)
+    if(rt){
+      if(rt.disabled) return
+      const kid = rt.getAttribute('data-wdl-rvh-trade'), fUid = rt.getAttribute('data-wdl-rvh-trade-uid')
+      if(fUid && typeof window.rvhTradeFremd === 'function') window.rvhTradeFremd(kid, fUid, rt.getAttribute('data-wdl-rvh-trade-wer') || '')   // fremdes Konto (27.10.2026)
+      else if(typeof window.tpRestHedgeOeffnen === 'function') window.tpRestHedgeOeffnen(kid)   // Rest von Hand mit Hedge (26.10.2026)
+      return
+    }
     const rp = ev.target.closest('[data-wdl-rvh-planer]')
     if(rp){ const d = rp.dataset; rvhZurueckInPlaner(d.wdlRvhPlaner, d.wdlRvhUid, d.wdlRvhWer || '', d.wdlRvhRest); return }
     const rl = ev.target.closest('[data-wdl-rvh-bal]')
@@ -47497,7 +47504,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1758'
+  const OS_TAB_BUILD = '2026-09-22.1759'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59703,6 +59710,45 @@
     _tpRestHedgeNaechst = String(kontoId)
     openTradePlanModal()
   }
+  /* „TRADE PLANEN" FÜR FREMDE KONTEN (Finn 27.10.2026 im Login „Marc", Radar → Rest von Hand → Aurel Tradeify …8239: „Klick auf Trade planen —
+   * es passiert gar nichts … Mach, dass ich im normalen Pop-up den Trade planen kann"). Der Knopf war bei fremden Konten deaktiviert (der Grund
+   * stand nur im Tooltip): das Popup kennt nur die Konten des Logins, und der Plan muss in der ID des Kontos entstehen — dort startet ihn ihr PC,
+   * dort hängen Fusion-Hedge-Konto, Start und Abhaken. Statt eines zweiten Anlegewegs für fremde IDs wechselt der Knopf jetzt in den Login des
+   * Kontos (profSwitchTo, ohne /logout — gespeicherte Profile dieses Geräts) und öffnet nach dem Neuladen genau dieses Popup (tpRestHedgeOeffnen:
+   * Konto + Orbit vorgewählt, Multiplikator frei). Der Merker liegt in sessionStorage (überlebt das Neuladen dieses Tabs, gehört keinem Profil-
+   * Bucket), gilt 3 min und nur für die Ziel-ID. Ist der Login nicht gespeichert: sichtbare Meldung mit dem Weg, nie ein toter Knopf. */
+  const RVH_TRADE_SS = 'rvh_trade_nach_wechsel'
+  window.rvhTradeFremd = async (kid, uid, wer) => {
+    const name = wer || 'der ID'
+    let prof = null; try{ prof = (profList() || []).find(p => p && String(p.userId) === String(uid)) || null }catch(_){}
+    if(!prof){
+      if(typeof atToast === 'function') atToast(`Trade planen geht nur im Login von ${name} — dieser Login ist auf diesem Gerät nicht gespeichert. → oben rechts „Account hinzufügen“ mit dem Login von ${name}, dann hier erneut „Trade planen“ (oder „→ Planer“: der Bot holt den Rest)`, 'warn')
+      return
+    }
+    try{ sessionStorage.setItem(RVH_TRADE_SS, JSON.stringify({ kid: String(kid), uid: String(uid), at: Date.now() })) }catch(_){}
+    if(typeof atToast === 'function') atToast(`Wechsle in den Login von ${name} — dort öffnet sich „Trade planen“ mit dem Konto …`, 'start')
+    await profSwitchTo(String(uid))
+    // kein Neuladen (Passwort nötig oder Wechsel gescheitert) → derselbe Takt wartet weiter: nach dem Login öffnet sich das Popup trotzdem
+    rvhTradeNachWechsel()
+  }
+  // Nach dem Wechsel (Neuladen bzw. Login): Popup öffnen, sobald der Login die Ziel-ID ist und das Konto in accounts steht — solange der
+  // Merker gilt (3 min ab Klick), ein Takt zur Zeit
+  let _rvhTradeTick = null
+  function rvhTradeNachWechsel(){
+    let m = null; try{ m = JSON.parse(sessionStorage.getItem(RVH_TRADE_SS) || 'null') }catch(_){}
+    if(!m || !m.kid || !m.uid || _rvhTradeTick) return
+    const bis = (Number(m.at) || 0) + 180000
+    if(Date.now() > bis){ try{ sessionStorage.removeItem(RVH_TRADE_SS) }catch(_){} return }
+    const tick = _rvhTradeTick = setInterval(() => {
+      if(Date.now() > bis){ clearInterval(tick); _rvhTradeTick = null; try{ sessionStorage.removeItem(RVH_TRADE_SS) }catch(_){} return }
+      if(String(currentUserId || '') !== String(m.uid)) return
+      if(!(accounts || []).some(a => a && String(a.id) === String(m.kid))) return
+      clearInterval(tick); _rvhTradeTick = null
+      try{ sessionStorage.removeItem(RVH_TRADE_SS) }catch(_){}
+      try{ window.tpRestHedgeOeffnen(m.kid) }catch(e){ if(typeof atToast === 'function') atToast('Trade planen nicht geöffnet: ' + ((e && e.message) || e), 'warn') }
+    }, 1000)
+  }
+  rvhTradeNachWechsel()
   function tpKontoartPasstZumWeg(a){
     const t = String((a && a.type) || '').toLowerCase()
     if(tpRestHedgeErlaubt(a)) return true   // Rest von Hand mit Hedge (26.10.2026): das Radar-Konto auf Orbit
