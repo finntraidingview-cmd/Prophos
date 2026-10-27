@@ -14814,12 +14814,23 @@
     const admGruppeAktiv = () => (!admEingeschraenkt() && admGruppe && (admData?.gruppen || []).some(x => String(x.id) === admGruppe && !x.ht)) ? admGruppe : ''
     // ?gruppe= für die Admin-Lader; vor der ersten Übersicht gilt die gemerkte Wahl (der Server prüft sie ohnehin)
     window._admGruppeQ = vor => { const gp = admData ? admGruppeAktiv() : (admEingeschraenkt() ? '' : admGruppe); return gp ? `${vor}gruppe=${encodeURIComponent(gp)}` : '' }
+    /* GRUPPEN MERKEN (.1773, 27.10.2026, Finn im Winning-Day-Farmer: „Nach ein paar Sekunden kamen hier andere IDs dazu bzw.
+     * verschwanden … dass manchmal alle IDs angezeigt werden"): ohne admData (Seite frisch geladen, z. B. nach einem Update)
+     * kannte _admGruppeOk die HT-ausser-Liste nicht und ließ ALLE IDs durch — der Farmer zeichnete sofort aus dem Cache mit
+     * Emins Gruppe, erst der nächste Takt filterte. Jetzt gilt bis zur Übersicht die zuletzt geladene Gruppenliste dieses Browsers
+     * (nur IDs, kein Geld). Nie gemerkt (allererster Besuch) = wie bisher. */
+    const ADM_GRUPPEN_MERK = 'prophos_adm_gruppen_merk'
+    const admGruppenListe = () => {
+      if(admData && Array.isArray(admData.gruppen)) return admData.gruppen
+      try{ const g = JSON.parse(localStorage.getItem(ADM_GRUPPEN_MERK) || 'null'); return Array.isArray(g) ? g : [] }catch(_){ return [] }
+    }
     window._admGruppeOk = uid => {
       if(admEingeschraenkt()) return admData.sicht_ids.map(String).includes(String(uid))
       if(eigenerCode && !admData) return false          // eigener Code, Übersicht noch nicht da: nichts Fremdes zeigen
-      const gp = admGruppeAktiv()
-      if(!gp){ const ht = (admData?.gruppen || []).find(y => y.ht); return !ht || !(ht.ausser || []).map(String).includes(String(uid)) }   // Standard HT (09.10.2026)
-      const x = (admData.gruppen || []).find(y => String(y.id) === gp); if(!x) return true
+      const gl = admGruppenListe()
+      const gp = admData ? admGruppeAktiv() : ((admGruppe && gl.some(x => String(x.id) === admGruppe && !x.ht)) ? admGruppe : '')
+      if(!gp){ const ht = gl.find(y => y.ht); return !ht || !(ht.ausser || []).map(String).includes(String(uid)) }   // Standard HT (09.10.2026)
+      const x = gl.find(y => String(y.id) === gp); if(!x) return true
       return x.ht ? !(x.ausser || []).map(String).includes(String(uid)) : (x.ids || []).map(String).includes(String(uid))
     }
     // eingeschränkt (Verwalter/eigener Code): Listen aus nutzerübergreifenden Tabellen nur über _admGruppeOk (Winning Days, 08.10.2026)
@@ -15005,6 +15016,7 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
+        if(!Array.isArray(d.sicht_ids) && Array.isArray(d.gruppen) && d.gruppen.length){ try{ localStorage.setItem(ADM_GRUPPEN_MERK, JSON.stringify(d.gruppen.map(x => ({ id: x.id, ht: !!x.ht, ids: x.ids || [], ausser: x.ausser || [] })))) }catch(_){} }   // .1773: für den nächsten Kaltstart
         window._admLadeZeit = Date.now()
         window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
         // Lesbare Namen: seit 28.08.2026 liefert der Server die
@@ -15054,6 +15066,7 @@
         kasseReiterFuer(eigenerCode)   // Admin-Gruppen (08.10.2026): Verwalter erst mit dieser Antwort erkennbar → Reiter + HT-Schalter
         admGruppeChips()               // Finns Gruppenfilter (Namen aus id_gruppen)
         if(eigenerCode && !$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()   // WD-Blöcke warteten auf die Gruppe (window._admGruppeOk)
+        else if(!$('adm-pane-wd')?.hidden) window._wdNeuZeichnen?.()          // .1773: Sicht jetzt sicher bekannt → Farmer sofort mit ihr zeichnen, nicht erst im Takt
         admKapChipRender()       // Hinweis-Chip „Kapitel: …" in der Toolbar (24.09.2026)
         admPersonColorsBauen()   // feste Farbe je Person für Balken-Punkte und Verlaufs-Charts (23.09.2026)
         admRender()
@@ -47734,7 +47747,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1772'
+  const OS_TAB_BUILD = '2026-09-22.1773'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60889,6 +60902,13 @@
   window._wdDarf = wdDarf   // Test-Haken
   // IDs, die NIE gefahren werden (Finn 23.09.2026: „Emin und Finn — die ID immer weglassen, immer") — wd_farmer_regeln.ids_aus
   const wdIdsAus = () => new Set((((_wd.regeln || {}).ids_aus) || []).map(String))
+  /* ANZEIGE NUR DIE GEWÄHLTE ADMIN-SICHT (.1773, 27.10.2026, Finn: „Mach hier bitte nur die IDs von Hermann Technologies rein, die
+   * anderen weglassen … manchmal alle IDs angezeigt"): ein Filter für jede Anzeige des Farmers — ID-Tabelle, „noch nicht eingetragen",
+   * Zähler-Zeile, Status-Satz und Zeitstrahl. Bisher filterte nur die Tabelle (über _admGruppeOk), Zähler/Zeitstrahl zählten alle
+   * Tagesplan-Zeilen. Standard = Hermann Technologies, Chip „Emin" = Emins Gruppe. _wd.rows selbst bleibt ungefiltert (Würfeln,
+   * Heilen und die Schreib-Wächter arbeiten wie bisher). */
+  const wdSichtOk = uid => typeof window._admGruppeOk === 'function' ? !!window._admGruppeOk(uid) : true
+  const wdSichtRows = rows => (rows || []).filter(x => x && wdSichtOk(x.user_id))
   // Nur Konten vom Typ Winning Days fahren im Farmer (26.09.2026, Finn: „von jeder ID alle Konten, die als Typ Winning Days sind") —
   // der Mac-Weg (rpc wd_konten_alle) filterte das schon, der PC-Tab-Weg nahm bis .621 auch Funded/Live (tpVorplanIstFunded).
   const wdIstWdKonto = acc => String((acc && (acc.type || acc.account_type)) || '').toLowerCase() === 'winning_days'
@@ -61643,7 +61663,7 @@
   function wdStatus(){
     const r = _wd.regeln || {}, chip = document.getElementById('wd-auto-chip'), txt = document.getElementById('wd-status-text')
     if(!chip || !txt) return
-    const start = r.start_hhmm || WD_VON_STD, rows = _wd.rows || []
+    const start = r.start_hhmm || WD_VON_STD, rows = wdSichtRows(_wd.rows)   // .1773: nur die Admin-Sicht
     chip.textContent = r.aktiv ? `Automatik AN · würfelt 00:10 · Start ${start}–${wdBisHhmm(r)} Dubai` : `Automatik AUS · Start ${start}–${wdBisHhmm(r)} Dubai`
     chip.className = 'wd-status-chip ' + (r.aktiv ? 'an' : 'aus')
     const j = wdJetzt(WD_TZ_STD), laeuft = rows.find(x => x.status === 'laeuft')
@@ -61958,9 +61978,8 @@
     const such = String(document.getElementById('wd-such')?.value || '').trim().toLowerCase()
     const nurFarm = !!document.getElementById('wd-nur-farm')?.checked
     // Admin-Gruppen (08.10.2026): wd_tagesplan ist nutzerübergreifend lesbar — Verwalter sehen nur ihre Gruppe, Finn mit Gruppen-Chip
-    // nur diese Gruppe (window._admGruppeOk aus dem Admin-Block; ohne ihn alles wie bisher)
-    const gOk = typeof window._admGruppeOk === 'function' ? window._admGruppeOk : () => true
-    const alle = [...rows.map(x => ({ x, erw: false })), ...(fehlend || []).map(e => ({ x: e, erw: true }))].filter(({ x }) => gOk(x.user_id))
+    // nur diese Gruppe (window._admGruppeOk aus dem Admin-Block; ohne ihn alles wie bisher) — seit .1773 über wdSichtOk wie Zähler und Zeitstrahl
+    const alle = [...rows.map(x => ({ x, erw: false })), ...(fehlend || []).map(e => ({ x: e, erw: true }))].filter(({ x }) => wdSichtOk(x.user_id))
     const drin = x => (x.konten || []).filter(wdAktiv).length
     let liste = alle.filter(({ x }) => !such || String(x.name || '').toLowerCase().includes(such) || (x.konten || []).some(k => String(k.name || '').toLowerCase().includes(such) || String(k.firm || '').toLowerCase().includes(such)))
     if(nurFarm) liste = liste.filter(({ x }) => drin(x) > 0 || x.reihenfolge)   // gewürfelte Blöcke immer zeigen, auch mit 0 drin
@@ -62072,7 +62091,7 @@
   }
   function wdFehlend(){
     const erwartet = wdErwartet(), da = new Set((_wd.rows || []).map(x => String(x.user_id)))
-    return erwartet ? erwartet.filter(e => !da.has(e.user_id)) : []
+    return erwartet ? erwartet.filter(e => !da.has(e.user_id) && wdSichtOk(e.user_id)) : []   // .1773: nur die Admin-Sicht
   }
   // Ausgelassene IDs unter Einstellungen (Emin, Finn) — Liste aus wd_farmer_regeln.ids_aus, Namen aus den Konten
   function wdIdsAusRender(){
@@ -62094,8 +62113,8 @@
     document.getElementById('wd-aus-add')?.addEventListener('click', () => { const v = document.getElementById('wd-aus-wahl')?.value; if(v) speichern([...aus, v]) })
   }
   function wdRender(){
-    const rows = _wd.rows || []
-    const erwartet = wdErwartet(), fehlend = wdFehlend()
+    const rows = wdSichtRows(_wd.rows)   // .1773: Zähler-Zeile und Hinweise nur über die Admin-Sicht
+    const erwartet = (e => e && e.filter(x => wdSichtOk(x.user_id)))(wdErwartet()), fehlend = wdFehlend()
     wdStatus()
     const fEl = document.getElementById('wd-fehlend')
     if(fEl) fEl.innerHTML = erwartet === null ? `<span style="color:var(--danger)">Konten nicht ladbar${_wd.datenFehler ? ' (' + escapeHtml(_wd.datenFehler) + ')' : ''} — ich zeige nur IDs, deren PC-Tab sich selbst eingetragen hat.</span>`
@@ -62104,7 +62123,7 @@
     const uhr = document.getElementById('wd-uhr'); if(uhr) uhr.textContent = 'Anzeige alle 30 s frisch'
     const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv))
     const kz = document.getElementById('wd-k-zeile'); if(kz) kz.textContent = rows.length ? `${rows.filter(x => x.status !== 'leer').length} Blöcke · ${konten.length} Konten drin · ${konten.filter(k => k.plan_id).length} Pläne · ${konten.filter(k => k.status && k.status !== 'planned' && k.status !== 'verpasst' && k.status !== 'weg').length} gestartet` : (erwartet ? `${erwartet.length} IDs · ${erwartet.reduce((n, e) => n + e.konten.length, 0)} Konten gefunden` : '')
-    wdAblauf(rows, fehlend)
+    wdAblauf(_wd.rows || [], fehlend)   // filtert selbst (wdSichtOk)
     wdIdsAusRender()
     wdFirmenZaehlen()
   }
@@ -62144,6 +62163,8 @@
     // wdVerlauf() nicht mehr — Kasten ausgeblendet (Finn 08.10.2026), spart die 7-Tage-Abfrage
   }
   window._wdTabOeffnen = wdOpen
+  // .1773: neu zeichnen ohne neu zu laden — der Admin ruft das, sobald die Übersicht (= die Sicht) da ist
+  window._wdNeuZeichnen = () => { try{ if((_wd.rows || []).length || _wd.daten){ wdRender(); if(typeof wzRender === 'function') wzRender() } }catch(e){ console.warn('[wd] neu zeichnen', e) } }
 
   /* ── KOMPASS-TAB (23.09.2026) ───────────────────────────────────────────────
    * Pascals Nasdaq-Forecasts („Kompass"): Worker-Feed → Karten je Session + Archiv aus kompass_forecasts.
@@ -62827,7 +62848,7 @@
   function wzRender(){
     const p = wzPanel(); if(!p) return
     const body = p.querySelector('#wz-body'), r = _wd.regeln || {}
-    const rows = (_wd.rows || []).filter(x => x && x.start_um && (x.status !== 'leer' || x.reihenfolge))
+    const rows = wdSichtRows(_wd.rows).filter(x => x.start_um && (x.status !== 'leer' || x.reihenfolge))   // .1773: nur die Admin-Sicht
     if(!rows.length){ body.innerHTML = `<div style="padding:6px 0;color:var(--sub);font-size:13px">Noch keine Startzeiten${wdVerwalter() ? '.' : ` — „🎲 Würfeln" verteilt die Blöcke zwischen ${escapeHtml(r.start_hhmm || WD_VON_STD)} und ${escapeHtml(wdBisHhmm(r))} Dubai.`}</div>`; return }
     const dauer = x => (typeof wdDauerMs === 'function') ? wdDauerMs(x, r) : 10 * 60000
     const H = 3600000
@@ -62855,7 +62876,7 @@
   setInterval(() => {
     const pane = document.getElementById('adm-pane-wd'); if(!pane || pane.hidden || pane.offsetParent === null) return
     const r = _wd.regeln || {}
-    const sig = JSON.stringify([(_wd.rows || []).map(x => [x.user_id, x.start_um, x.status, x.reihenfolge, x.richtung, x.name, (x.konten || []).filter(k => k && k.aktiv !== false).length]), r.scharf, r.aktiv, r.abstand_max, r.start_hhmm, r.bis_hhmm, Math.floor(Date.now() / 60000)])
+    const sig = JSON.stringify([wdSichtRows(_wd.rows).map(x => [x.user_id, x.start_um, x.status, x.reihenfolge, x.richtung, x.name, (x.konten || []).filter(k => k && k.aktiv !== false).length]), r.scharf, r.aktiv, r.abstand_max, r.start_hhmm, r.bis_hhmm, Math.floor(Date.now() / 60000)])
     if(sig === _wzSig) return
     _wzSig = sig; wsRender(); wzRender()
   }, 1000)
