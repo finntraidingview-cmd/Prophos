@@ -7346,17 +7346,6 @@
       box-shadow:var(--shadow-mob-card);
     }
 
-    /* ============ MUENZ-KNOPF ============ */
-    /* Sass am „Mehr"-Tab und war mit 52px + Leuchtschatten der lauteste
-       Punkt im Bild. Kleiner, leiser, aus dem Daumenweg der Leiste. */
-    #dashboard-view.active ~ #coinflip-fab{
-      width:44px;height:44px;font-size:19px;border:none;
-      bottom:calc(var(--m-nav-h) + 14px + env(safe-area-inset-bottom));
-      right:calc(var(--m-gut) + env(safe-area-inset-right));
-      box-shadow:0 2px 10px rgba(217,119,6,.28);
-      opacity:.94;
-    }
-
     /* ============ TOASTS ============ */
     #dashboard-view .mg-toast,.at-toast,.at-prompt{border-radius:var(--m-r-card)}
     .at-toast,.at-prompt{
@@ -47738,7 +47727,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1764'
+  const OS_TAB_BUILD = '2026-09-22.1765'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -74203,7 +74192,7 @@
     }
     function willkommen(){
       verlaufEl.innerHTML = ''
-      blase('assistant', 'Hi, ich bin **Lotse**. Frag mich, wo etwas ist, was eine Meldung bedeutet oder warum ein Trade hängt — gern mit Screenshot. '
+      blase('assistant', 'Hi, ich bin **Finnfo** — quasi Finn, nur ohne Kaffeepause. Frag mich, wo etwas ist, was eine Meldung bedeutet oder warum ein Trade hängt — gern mit Screenshot. '
         + 'Kleine Handgriffe (geplanten Trade löschen, Balance lesen, am PC prüfen) erledige ich nach deinem **Bestätigen**.')
     }
 
@@ -74340,7 +74329,7 @@
       const bilder = lo.bilder.splice(0); vorschauZeigen()
       blase('user', frage, bilder.length ? `<div class="lo-bilder">${bilder.map(b => `<img src="${b.url}" alt="">`).join('')}</div>` : '')
       textEl.value = ''; textAnpassen()
-      const tippt = document.createElement('div'); tippt.className = 'lo-tippt'; tippt.innerHTML = 'Lotse schaut nach<i></i><i></i><i></i>'
+      const tippt = document.createElement('div'); tippt.className = 'lo-tippt'; tippt.innerHTML = 'Finnfo schaut nach<i></i><i></i><i></i>'
       verlaufEl.appendChild(tippt); unten()
       try{
         const d = await loApi('/support/chat', { method: 'POST', body: { unterhaltung_id: lo.unterh, frage,
@@ -74420,195 +74409,16 @@
         return { ok: true }
       }
       lo.an = true; fab.hidden = false; lo.rest = 38
-      return 'Lotse-Stub an'
+      return 'Finnfo-Stub an'
     }
   })()
 </script>
 <!-- Yahoo-Markt-Block (mk-*) entfernt am 25.09.2026 (Finn: „Den unteren Chart wegmachen und NQ/MNQ unten auch weg") — die Live-Daten
      kommen aus dem TradingView-Reader (Sektion MARKT LIVE im Modul); /markt/futures im Backend bleibt ungenutzt bestehen. -->
-<!-- ── Coin-Flip Floating Button + Modal ── -->
+<!-- Münzwurf (Coin-Flip) entfernt am 27.10.2026 (Finn: „Die Münze weg — die sollen den Münzwurf nicht mehr nutzen. Unten rechts, wo die
+     Münze ist, draufdrücken, dann soll da der Lotse kommen … Nenn ihn witzig, was mit Finn“). An seiner Stelle sitzt der Support-Chat
+     „Finnfo“ (#lotse-fab, unten). -->
 <style>
-  #coinflip-fab {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #fbbf24, #d97706);
-    border: 2px solid rgba(255,255,255,.2);
-    box-shadow: 0 4px 12px rgba(217,119,6,.35), 0 2px 4px rgba(0,0,0,.1);
-    cursor: pointer;
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    transition: transform .15s ease, box-shadow .15s ease;
-  }
-  #coinflip-fab:hover {
-    transform: scale(1.08);
-    box-shadow: 0 6px 18px rgba(217,119,6,.45), 0 3px 6px rgba(0,0,0,.15);
-  }
-  #coinflip-fab:active { transform: scale(.95); }
-  /* Am Handy über die Bottom-Tab-Bar heben (28.08.2026, Mobile-App-Schicht) —
-     nur im Dashboard: auf dem Login gibt es keine Leiste, da bleibt er unten.
-     z-index unter Sheet-Overlay (65), damit das „Mehr"-Sheet ihn abdunkelt. */
-  @media (max-width:820px){
-    #dashboard-view.active ~ #coinflip-fab{
-      bottom:calc(var(--mob-nav-h) + 16px + env(safe-area-inset-bottom));
-      right:calc(24px + env(safe-area-inset-right));
-      z-index:60;
-    }
-    /* Kein sticky :hover-Zoom: iOS behält hover bis zum nächsten Tap —
-       der FAB blieb nach jedem Tap vergrößert stehen */
-    #coinflip-fab:hover{transform:none;box-shadow:0 4px 12px rgba(217,119,6,.35),0 2px 4px rgba(0,0,0,.1)}
-    /* Sheet-Optik wie alle anderen Modals — die Sheet-Regeln sind auf
-       #dashboard-view gescopt, dieses Modal liegt als body-Kind daneben */
-    #coinflip-modal{align-items:flex-end;padding:0}
-    #coinflip-modal .cf-content{
-      width:100%;min-width:0;
-      border-radius:18px 18px 0 0;
-      padding:20px 16px calc(18px + env(safe-area-inset-bottom));
-    }
-    #coinflip-modal .cf-content::before{
-      content:'';display:block;width:36px;height:4px;border-radius:999px;
-      background:var(--border,#E5E7EB);margin:0 auto 14px;
-    }
-    #coinflip-modal .cf-stage{height:170px}
-    #coinflip-modal .cf-coin{width:120px;height:120px}
-    #coinflip-modal .cf-face{font-size:40px}
-    #coinflip-modal .cf-actions .cf-btn{flex:1;padding:12px 14px}
-  }
-
-  #coinflip-modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.55);
-    z-index: 200;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(4px);
-  }
-  #coinflip-modal.open { display: flex; }
-  #coinflip-modal .cf-content {
-    background: var(--surface, #fff);
-    border-radius: 18px;
-    padding: 32px 40px 28px;
-    text-align: center;
-    box-shadow: 0 20px 60px rgba(0,0,0,.3);
-    min-width: 320px;
-  }
-  #coinflip-modal .cf-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--sub, #666);
-    text-transform: uppercase;
-    letter-spacing: .8px;
-    margin-bottom: 18px;
-  }
-  #coinflip-modal .cf-stage {
-    perspective: 1000px;
-    height: 200px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 16px;
-  }
-  #coinflip-modal .cf-coin {
-    position: relative;
-    width: 140px;
-    height: 140px;
-    transform-style: preserve-3d;
-    transition: transform 0s;
-  }
-  #coinflip-modal .cf-coin.flipping {
-    animation: coinFlip 1.5s cubic-bezier(.2, .8, .3, 1) forwards;
-  }
-  #coinflip-modal .cf-coin.show-kopf {
-    transform: rotateY(0deg);
-  }
-  #coinflip-modal .cf-coin.show-zahl {
-    transform: rotateY(180deg);
-  }
-  @keyframes coinFlip {
-    0%   { transform: translateY(0) rotateY(0deg) rotateX(0deg); }
-    20%  { transform: translateY(-30px) rotateY(720deg) rotateX(180deg); }
-    60%  { transform: translateY(-50px) rotateY(2160deg) rotateX(540deg); }
-    100% { transform: translateY(0) rotateY(var(--final-rotation, 2880deg)) rotateX(720deg); }
-  }
-  #coinflip-modal .cf-face {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    backface-visibility: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 48px;
-    font-weight: 800;
-    color: #78350f;
-    background: radial-gradient(circle at 30% 30%, #fde68a, #f59e0b 60%, #b45309 100%);
-    box-shadow:
-      inset 0 -4px 8px rgba(120,53,15,.4),
-      inset 0 4px 8px rgba(255,255,255,.5),
-      0 8px 24px rgba(217,119,6,.4);
-    border: 3px solid #d97706;
-  }
-  #coinflip-modal .cf-face.cf-back {
-    transform: rotateY(180deg);
-  }
-  #coinflip-modal .cf-face::before {
-    content: '';
-    position: absolute;
-    inset: 6px;
-    border-radius: 50%;
-    border: 2px dashed rgba(120,53,15,.25);
-  }
-  #coinflip-modal .cf-result {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--ink, #111);
-    margin-top: 8px;
-    min-height: 36px;
-    opacity: 0;
-    transition: opacity .3s ease;
-  }
-  #coinflip-modal .cf-result.show { opacity: 1; }
-  #coinflip-modal .cf-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-    margin-top: 20px;
-  }
-  #coinflip-modal .cf-btn {
-    padding: 10px 20px;
-    border-radius: 10px;
-    border: 1px solid var(--border, #e5e5e5);
-    background: var(--surface, #fafafa);
-    color: var(--ink, #111);
-    font-weight: 600;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background .15s;
-  }
-  #coinflip-modal .cf-btn:hover { background: var(--surface-tint, #f0f0f0); }
-  #coinflip-modal .cf-btn-primary {
-    background: linear-gradient(135deg, #fbbf24, #d97706);
-    color: white;
-    border-color: transparent;
-  }
-  #coinflip-modal .cf-btn-primary:hover {
-    background: linear-gradient(135deg, #f59e0b, #b45309);
-  }
-  #coinflip-modal .cf-stats {
-    margin-top: 14px;
-    font-size: 11.5px;
-    color: var(--sub, #888);
-    font-variant-numeric: tabular-nums;
-  }
 /* ==== DARK-SPIEGEL (generiert) ==== */
 /* Dark Mode (Finn 18.10.2026): jede Farb-Deklaration der Styles oben noch einmal unter
    :where([data-theme=dark]) — gleiche Spezifität, gleiche Reihenfolge, nur die Farbe umgerechnet. Hell bleibt
@@ -76423,148 +76233,23 @@
 :where([data-theme=dark]) #dashboard-view .sync-banner,:where([data-theme=dark]) #dashboard-view .mtc-banner,:where([data-theme=dark]) #dashboard-view .mtc-jobbar,:where([data-theme=dark]) #dashboard-view .mtc-warn{background-color:var(--surface)}
 :where([data-theme=dark]) #dashboard-view .sync-banner,:where([data-theme=dark]) #dashboard-view .mtc-banner,:where([data-theme=dark]) #dashboard-view .mtc-jobbar,:where([data-theme=dark]) #dashboard-view .mtc-warn{box-shadow:var(--shadow-mob-card)}
 }
-:where([data-theme=dark]) #coinflip-fab{background-color:transparent;border-color:rgba(255,255,255,0.04);box-shadow:0 4px 12px rgba(217,119,6,.35), 0 2px 4px rgba(0,0,0,0.3)}
-:where([data-theme=dark]) #coinflip-fab:hover{box-shadow:0 6px 18px rgba(217,119,6,.45), 0 3px 6px rgba(0,0,0,0.41)}
-@media (max-width:820px){
-:where([data-theme=dark]) #coinflip-fab:hover{box-shadow:0 4px 12px rgba(217,119,6,.35),0 2px 4px rgba(0,0,0,0.3)}
-:where([data-theme=dark]) #coinflip-modal .cf-content::before{background-color:var(--border,var(--surface-tint))}
-}
-:where([data-theme=dark]) #coinflip-modal{background-color:rgba(0,0,0,0.7)}
-:where([data-theme=dark]) #coinflip-modal .cf-content{background-color:var(--surface, var(--surface));box-shadow:0 20px 60px rgba(0,0,0,0.65)}
-:where([data-theme=dark]) #coinflip-modal .cf-title{color:var(--sub, var(--sub))}
-:where([data-theme=dark]) #coinflip-modal .cf-face{color:#ec9665;background-color:transparent;box-shadow:inset 0 -4px 8px rgba(120,53,15,.4),
-      inset 0 4px 8px rgba(255,255,255,0.125),
-      0 8px 24px rgba(217,119,6,.4);border-color:#f49425}
-:where([data-theme=dark]) #coinflip-modal .cf-face::before{border-color:rgba(229,116,51,0.25)}
-:where([data-theme=dark]) #coinflip-modal .cf-result{color:var(--ink, var(--ink))}
-:where([data-theme=dark]) #coinflip-modal .cf-btn{border-color:var(--border, var(--border));background-color:var(--surface, var(--surface));color:var(--ink, var(--ink))}
-:where([data-theme=dark]) #coinflip-modal .cf-btn:hover{background-color:var(--surface-tint, var(--surface-tint))}
-:where([data-theme=dark]) #coinflip-modal .cf-btn-primary{background-color:transparent;color:white;border-color:transparent}
-:where([data-theme=dark]) #coinflip-modal .cf-btn-primary:hover{background-color:transparent}
-:where([data-theme=dark]) #coinflip-modal .cf-stats{color:var(--sub, var(--sub-2))}
 /* ==== /DARK-SPIEGEL ==== */
 </style>
 
-<button id="coinflip-fab" title="Münze werfen — Kopf oder Zahl?">🪙</button>
 
-<div id="coinflip-modal">
-  <div class="cf-content">
-    <div class="cf-title">Münze werfen</div>
-    <div class="cf-stage">
-      <div class="cf-coin" id="cf-coin">
-        <div class="cf-face cf-front">K</div>
-        <div class="cf-face cf-back">Z</div>
-      </div>
-    </div>
-    <div class="cf-result" id="cf-result">&nbsp;</div>
-    <div class="cf-actions">
-      <button class="cf-btn cf-btn-primary" id="cf-flip-btn">Werfen</button>
-      <button class="cf-btn" id="cf-close-btn">Schließen</button>
-    </div>
-    <div class="cf-stats" id="cf-stats">Noch keine Würfe in dieser Session</div>
-  </div>
-</div>
-
-<script>
-(function(){
-  const fab = document.getElementById('coinflip-fab')
-  const modal = document.getElementById('coinflip-modal')
-  const coin = document.getElementById('cf-coin')
-  const result = document.getElementById('cf-result')
-  const flipBtn = document.getElementById('cf-flip-btn')
-  const closeBtn = document.getElementById('cf-close-btn')
-  const stats = document.getElementById('cf-stats')
-
-  let session = { kopf: 0, zahl: 0, total: 0 }
-  let flipping = false
-
-  function updateStats(){
-    if(session.total === 0){
-      stats.textContent = 'Noch keine Würfe in dieser Session'
-    } else {
-      const kPct = (session.kopf / session.total * 100).toFixed(0)
-      const zPct = (session.zahl / session.total * 100).toFixed(0)
-      stats.textContent = `${session.total} Würfe · ${session.kopf}× Kopf (${kPct}%) · ${session.zahl}× Zahl (${zPct}%)`
-    }
-  }
-
-  function flip(){
-    if(flipping) return
-    flipping = true
-    flipBtn.disabled = true
-    result.classList.remove('show')
-    result.textContent = '\u00A0'
-
-    // Coin reset (remove animation class to retrigger)
-    coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
-    void coin.offsetWidth  // force reflow
-
-    // Random outcome
-    const isKopf = Math.random() < 0.5
-    // Final rotation: even multiple of 360 for Kopf, odd for Zahl (to land on right face)
-    const baseRotations = 8  // 2880deg
-    const finalDeg = (baseRotations * 360) + (isKopf ? 0 : 180)
-    coin.style.setProperty('--final-rotation', finalDeg + 'deg')
-    coin.classList.add('flipping')
-
-    setTimeout(() => {
-      // Lock final state
-      coin.classList.remove('flipping')
-      coin.classList.add(isKopf ? 'show-kopf' : 'show-zahl')
-
-      result.textContent = isKopf ? 'Kopf' : 'Zahl'
-      result.style.color = isKopf ? 'var(--warn-ink, #b45309)' : '#7c3aed'
-      result.classList.add('show')
-
-      // Update stats
-      if(isKopf) session.kopf++; else session.zahl++
-      session.total++
-      updateStats()
-
-      flipping = false
-      flipBtn.disabled = false
-    }, 1500)
-  }
-
-  function open(){
-    modal.classList.add('open')
-    coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
-    coin.style.removeProperty('--final-rotation')
-    result.classList.remove('show')
-    result.textContent = '\u00A0'
-  }
-
-  function close(){
-    modal.classList.remove('open')
-  }
-
-  fab.addEventListener('click', open)
-  closeBtn.addEventListener('click', close)
-  flipBtn.addEventListener('click', flip)
-  modal.addEventListener('click', (e) => { if(e.target === modal) close() })
-
-  // Spacebar im Modal = werfen, Escape = schließen
-  document.addEventListener('keydown', (e) => {
-    if(!modal.classList.contains('open')) return
-    if(e.key === ' ' || e.code === 'Space'){ e.preventDefault(); flip() }
-    if(e.key === 'Escape'){ close() }
-  })
-})()
-</script>
-
-<!-- ── Support-Chat „Lotse“ (27.10.2026, Finn: „Ein Chat-Support kommt unten rechts, da wo die Münze ist … wie eine eigene KI, Screenshots
-     hochladen ist ganz wichtig“). Eigener Knopf direkt über der Münze, die Münze bleibt. Sichtbar nur eingeloggt und mit Freischaltung
+<!-- ── Support-Chat „Finnfo“ (bis .1764 „Lotse“, interne Namen lotse-*/lo-* bleiben) (27.10.2026, Finn: „Ein Chat-Support kommt unten rechts, da wo die Münze ist … wie eine eigene KI, Screenshots
+     hochladen ist ganz wichtig“). Seit .1765 an der Stelle der Münze (Münzwurf entfernt, Finn 27.10.2026). Sichtbar nur eingeloggt und mit Freischaltung
      (support_zugang, /support/stand). Logik im Modul, Sektion SUPPORT-CHAT „LOTSE“ — eigene Verdrahtung, kein Sammel-Handler. ── -->
 <style>
   #lotse-fab{
-    position:fixed;right:28px;bottom:88px;width:44px;height:44px;border-radius:50%;
+    position:fixed;right:24px;bottom:24px;width:52px;height:52px;border-radius:50%;   /* genau der Platz der Münze (bis .1764) */
     display:none;align-items:center;justify-content:center;cursor:pointer;z-index:100;
     background:var(--surface);color:var(--violet);border:1px solid var(--border);box-shadow:var(--shadow-card-hover);
     transition:transform .15s var(--ease), box-shadow .15s var(--ease);
   }
   #dashboard-view.active ~ #lotse-fab:not([hidden]){display:flex}
   #lotse-fab:hover{transform:scale(1.06);box-shadow:var(--shadow-pop)}
-  #lotse-fab svg{width:20px;height:20px}
+  #lotse-fab svg{width:23px;height:23px}
   #lotse-fab .lo-punkt{position:absolute;top:2px;right:2px;width:9px;height:9px;border-radius:50%;background:var(--violet);
     border:2px solid var(--surface);display:none}
   #lotse-fab.hat-neu .lo-punkt{display:block}
@@ -76651,10 +76336,12 @@
 
   @media (max-width:820px){
     #dashboard-view.active ~ #lotse-fab{
-      right:calc(24px + env(safe-area-inset-right));            /* genau über der Münze (deren Handy-Regel: 24 px, Leiste + 16 px) */
-      bottom:calc(var(--mob-nav-h, var(--m-nav-h)) + 16px + 44px + 10px + env(safe-area-inset-bottom));
+      width:44px;height:44px;                                   /* Handy-Platz der Münze: 24 px rechts, Leiste + 16 px */
+      right:calc(24px + env(safe-area-inset-right));
+      bottom:calc(var(--mob-nav-h, var(--m-nav-h)) + 16px + env(safe-area-inset-bottom));
       z-index:60;
     }
+    #lotse-fab svg{width:20px;height:20px}
     #lotse-fab:hover{transform:none}
     #lotse-panel{left:0;right:0;bottom:0;width:auto;height:calc(100dvh - 48px);border-radius:var(--r-lg) var(--r-lg) 0 0;
       border-left:none;border-right:none;border-bottom:none;padding-bottom:env(safe-area-inset-bottom)}
@@ -76662,15 +76349,15 @@
   }
 </style>
 
-<button id="lotse-fab" type="button" title="Lotse — Support-Chat" aria-label="Support-Chat öffnen" hidden>
+<button id="lotse-fab" type="button" title="Finnfo — frag Prophos statt Finn" aria-label="Support-Chat Finnfo öffnen" hidden>
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>
   <span class="lo-punkt"></span>
 </button>
 
-<div id="lotse-panel" role="dialog" aria-label="Lotse — Support-Chat">
+<div id="lotse-panel" role="dialog" aria-label="Finnfo — Support-Chat">
   <div class="lo-kopf">
-    <span class="lo-av">L</span>
-    <div class="lo-tit"><b>Lotse</b><span id="lo-sub">Support · kennt Prophos und deine Trades</span></div>
+    <span class="lo-av">F</span>
+    <div class="lo-tit"><b>Finnfo</b><span id="lo-sub">Support · kennt Prophos und deine Trades</span></div>
     <button type="button" class="lo-ik" id="lo-liste-btn" title="Unterhaltungen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
     <button type="button" class="lo-ik" id="lo-neu" title="Neue Unterhaltung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
     <button type="button" class="lo-ik" id="lo-zu" title="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>

@@ -1,4 +1,4 @@
-"""SUPPORT-CHAT „Lotse“ (27.10.2026, Finn: „Alle Leute, die Prophos nutzen, sollen mich nicht alle 10 Minuten fragen müssen. Ein
+"""SUPPORT-CHAT „Finnfo“ (bis .1764 „Lotse“) (27.10.2026, Finn: „Alle Leute, die Prophos nutzen, sollen mich nicht alle 10 Minuten fragen müssen. Ein
 Chat-Support kommt unten rechts, da wo die Münze ist. Verbunden mit der Claude-API, ein eigener Support-Agent. Wichtig: beschränkter
 Zugriff auf die Datenbank, kennt sich in der Navigation aus … ‚Mach den Trade mal raus' oder ‚Warum habe ich die Fehlermeldung?' soll
 mit einem Klick gelöst sein“; Nachtrag: „wie eine eigene KI, und dass man da auch Screenshots hochladen kann, ist ganz wichtig“).
@@ -45,7 +45,7 @@ except ImportError:          # Python < 3.9 gibt es auf Railway nicht; nur damit
 
 A = {}                        # Namensraum von app.py (Supabase-Helfer, Auth) — gefüllt in registrieren()
 
-NAME = "Lotse"
+NAME = "Finnfo"          # bis .1764 „Lotse" (Finn 27.10.2026: „Nenn ihn witzig, was mit Finn")
 MODELL = (os.environ.get("SUPPORT_MODELL") or "claude-sonnet-5-5").strip()
 EFFORT = (os.environ.get("SUPPORT_EFFORT") or "low").strip()
 MAX_TOKENS = 4000
@@ -1016,7 +1016,7 @@ def registrieren(app, ns):
         if not an:
             return jsonify({"ok": False, "msg": "Der Support-Chat ist für deine ID nicht freigeschaltet."}), 403
         if not os.environ.get("ANTHROPIC_API_KEY"):
-            return jsonify({"ok": False, "msg": "Lotse ist noch nicht eingerichtet — der Schlüssel fehlt noch. Frag so lange Finn.",
+            return jsonify({"ok": False, "msg": "Finnfo ist noch nicht eingerichtet — der Schlüssel fehlt noch. Frag so lange den echten Finn.",
                             "nicht_eingerichtet": True}), 503
         if (request.content_length or 0) > 12_000_000:
             return jsonify({"ok": False, "msg": "Zu groß — höchstens 3 Bilder"}), 413
