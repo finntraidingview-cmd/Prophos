@@ -45986,12 +45986,12 @@
     // und das Konto wird für diesen Tag sauber ausgetragen (aktiv false + Hinweis) — Farmer-Tab und „Plan heute Nacht" stimmen.
     const p0 = (tradePlans || []).find(p => String(p.id) === String(planId))
     const farmer = !!(p0 && p0.notes === 'Winning-Day-Farmer')
-    // SCHUTZ (28.09.2026, Master: „Plan fehlt darf nie wieder vorkommen"): geplante Farmer-Pläne nicht über die Karte löschen —
-    // raus nimmt man ein Konto im Farmer („nur heute raus"), dann stimmen Tagesplan und Pläne. Laufende/beendete wie bisher.
-    if(farmer && p0.status === 'planned'){
-      alert('Das ist ein geplanter Winning-Day-Farmer-Plan.\n\nLöschen geht hier nicht mehr — bitte im Admin → Winning Days beim Konto „nur heute raus" drücken. Dann fällt der Plan sauber weg und der Tagesplan stimmt.')
-      return
-    }
+    // GEPLANTE FARMER-PLÄNE WIEDER LÖSCHBAR (27.10.2026, Finn unter Marcs Login, WD-Karte Apex …0001, Plan dd3d1a9a: „Wenn ich hier den Trade
+    // löschen will — warum geht das nicht?"). Der Schutz vom 28.09.2026 („Plan fehlt" — die plan_id blieb im Tagesplan stehen) schickte zu
+    // „nur heute raus" im Admin → Winning Days. Ist das Konto dort aber schon heute draußen (aktiv false, z. B. puls_pause „PC aus"), steht
+    // dort nur „heute wieder rein" — eine Sackgasse, der Plan ließ sich nirgends löschen. Jetzt trägt tpLoeschenAusfuehren das Konto ZUERST
+    // aus dem Tagesplan aus (wie „nur heute raus": plan_id weg, aktiv false, Hinweis) und löscht den Plan erst danach; läuft der Block
+    // gerade oder lässt sich der Tagesplan nicht schreiben, wird nichts gelöscht. So bleibt „Plan fehlt" ausgeschlossen.
     // KEINE Rückfrage mehr (06.10.2026, Finn: „einfach direkt löschen"): Zeile sofort weg, Toast „Plan gelöscht · Rückgängig",
     // das echte Löschen läuft erst nach 5 s. Farmer-Pläne (laufend/beendet) genauso — der Tagesplan wird erst beim echten Löschen
     // ausgetragen, Rückgängig lässt ihn also unberührt.
@@ -46038,11 +46038,13 @@
   function tpLoeschenAlleJetzt(){
     const offen = [..._tpLoeschOffen].filter(([, x]) => !x.laeuft).map(([key]) => key)
     if(!offen.length) return
+    // Geplante Farmer-Pläne nicht per keepalive (27.10.2026): erst Tagesplan austragen, dann löschen — das macht nur tpLoeschenAusfuehren
+    const blind = offen.filter(key => { const x = _tpLoeschOffen.get(key); return !(x && x.farmer && x.plan && x.plan.status === 'planned') })
     // keepalive-DELETE zuerst (synchron abgeschickt, überlebt das Entladen) — das normale delete darunter bricht beim Neuladen ab
     try{
       const ses = JSON.parse(localStorage.getItem('sb-gxhkannmzpyuepxlepta-auth-token') || 'null')
       const tok = ses && (ses.access_token || (ses.currentSession && ses.currentSession.access_token))
-      if(tok) fetch(`${SUPABASE_URL}/rest/v1/trade_plans?id=in.(${offen.map(encodeURIComponent).join(',')})`, { method: 'DELETE', keepalive: true,
+      if(tok && blind.length) fetch(`${SUPABASE_URL}/rest/v1/trade_plans?id=in.(${blind.map(encodeURIComponent).join(',')})`, { method: 'DELETE', keepalive: true,
         headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + tok, Prefer: 'return=minimal' } }).catch(() => {})
     }catch(_){}
     for(const key of offen) tpLoeschenAusfuehren(key)
@@ -46072,15 +46074,22 @@
     }catch(e){ console.warn('[wd] Tagesplan-Startzeit', e) }
   }
   // Farmer-Plan aus dem WD-Tagesplan austragen (aus tpLoeschenAusfuehren herausgezogen, 09.10.2026 — auch archivPlaeneEntfernen braucht es)
+  // → { ok, laeuft } (27.10.2026): ok = jeder Tagesplan mit dieser plan_id ist ausgetragen (oder es gab keinen); laeuft = ein Block läuft
+  // gerade (dort schreibt niemand) — tpLoeschenAusfuehren löscht einen geplanten Farmer-Plan nur bei ok
   async function tpWdTagesplanAustragen(planId, hinweis){
+    const out = { ok: true, laeuft: false }
     try{
-      const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten,status').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+      const { data: rows, error: le } = await supabase.from('wd_tagesplan').select('tag,user_id,konten,status').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+      if(le) throw le
       for(const x of (rows || [])){
         if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
+        if(x.status === 'laeuft'){ out.ok = false; out.laeuft = true; continue }
         const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, plan_id: null, status: null, start_um: null, aktiv: false, hinweis } : k)
-        await supabase.from('wd_tagesplan').update({ konten, status: konten.some(k => k && k.aktiv !== false) ? x.status : 'leer', updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
+        const { data: geschrieben, error } = await supabase.from('wd_tagesplan').update({ konten, status: konten.some(k => k && k.aktiv !== false) ? x.status : 'leer', updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft').select('tag')
+        if(error || !geschrieben || !geschrieben.length){ out.ok = false; if(!error) out.laeuft = true }   // 0 Zeilen = Block kam eben in „läuft"
       }
-    }catch(e){ console.warn('[wd] Tagesplan nach Löschen', e) }
+    }catch(e){ console.warn('[wd] Tagesplan nach Löschen', e); out.ok = false }
+    return out
   }
   // Das echte Löschen (unverändert aus deleteTradePlan, nur 5 s später)
   // Der Eintrag bleibt bis zum Ende des Requests in der Map (laeuft) — so bringt ein Poll mittendrin den Plan nicht zurück.
@@ -46090,13 +46099,20 @@
     clearTimeout(ol.timer)
     ol.laeuft = true
     const planId = key, farmer = ol.farmer
+    // Geplanter Farmer-Plan (27.10.2026): erst aus dem Tagesplan austragen, dann löschen — nie eine plan_id im Tagesplan ohne Plan
+    const vorab = farmer && ol.plan && ol.plan.status === 'planned'
     try{
+      if(vorab){
+        const a = await tpWdTagesplanAustragen(planId, 'Plan von Hand gelöscht')
+        if(!a.ok) throw new Error(a.laeuft ? 'Der Winning-Day-Block dieser ID läuft gerade — nichts gelöscht. Nach dem Block erneut löschen (Admin → Winning Days zeigt den Stand).'
+                                           : 'Tagesplan nicht austragbar — nichts gelöscht. Bitte gleich noch einmal löschen.')
+      }
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
       if(error) throw error
       _tpLoeschOffen.delete(key)
       tpLoeschVergessen(key)
       tradePlans = tradePlans.filter(p => String(p.id) !== String(planId))
-      if(farmer) await tpWdTagesplanAustragen(planId, 'Plan von Hand gelöscht')
+      if(farmer && !vorab) await tpWdTagesplanAustragen(planId, 'Plan von Hand gelöscht')
       // Mirror-Route: scharfgeschaltetes Pair freigeben (stoppt die Engine, falls
       // kein anderer Plan sie hält) — sonst würde ein gelöschter Plan weiterspiegeln
       if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(planId)
@@ -47426,7 +47442,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1754'
+  const OS_TAB_BUILD = '2026-09-22.1755'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
