@@ -42178,7 +42178,13 @@
       kontoTyp: row.konto_typ || null,   // Kontotyp am Plan (nur Lesen — Rückfall für den Phasen-Chip der Geplant-Tabelle, 05.10.2026)
       // Auto-Planer (05.10.2026, sql/2026-10-05_auto_planer.sql): vom Planer angelegt; ohne Bestätigung startet der Plan nie
       // von selbst (tpStartUmTick). Wie hedge_eur bewusst nicht in planToRow — ein Modal-Edit darf die Kennung nicht löschen.
-      autoPlan: row.auto_plan === true,
+      // FUNDED-VORSCHLAG (27.10.2026, Master/S2 H1: „Unbestätigte Funded-Vorschläge sollen sich in Trades/Radar genauso verhalten wie
+      // unbestätigte Challenge-Vorschläge … ‚Jetzt starten' darf ‚Bestätigen' nicht umgehen. Bestätigt wird nur im Funded-Reiter"): ein Plan
+      // des Funded-Planers (mt5_baseline.funded_plan) ohne auto_bestaetigt_at gilt hier als Auto-Vorschlag (autoPlan) — damit greifen
+      // dieselben Riegel (suStartetNichtWeil, roter Rand, „Startet erst nach Bestätigung"). In der DB bleibt auto_plan false (planToRow
+      // schreibt das Feld nie); nach dem Bestätigen ist er ein normaler Plan mit Startzeit.
+      fundedVorschlag: !!(row.mt5_baseline && row.mt5_baseline.funded_plan) && !row.auto_bestaetigt_at && row.status === 'planned',
+      autoPlan: row.auto_plan === true || (!!(row.mt5_baseline && row.mt5_baseline.funded_plan) && !row.auto_bestaetigt_at && row.status === 'planned'),
       autoBestaetigtAt: row.auto_bestaetigt_at || null,   // Orbit V3 (01.10.2026, sql/2026-10-01_trade_plans_orbit_v3.sql) — wie hedge_eur nur vom Plan-Popup geschrieben
       handWerteAt: row.hand_werte_at || null,   // TP/SL/Größe von Hand (08.10.2026) — der Start-Wächter dreht solche Pläne nie (09.10.2026)
       // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
@@ -44230,13 +44236,15 @@
       // können, obwohl er noch geplant ist, und Trades im Nachhinein eintragen, wenn was schiefgeht —
       // bei Echo V2 und Orbit V2"): P&L von Hand, Trade-Datum im Abschluss-Popup wählbar. Hedge-Karten unverändert.
       // Auto-Karte (05.10.2026): nur Bearbeiten, Löschen, Uhrzeit, Bestätigen/Bestätigt — „Läuft"/„Erledigt" bleiben über ✎ erreichbar
-      const autoOkBtn = !p.autoPlan ? '' : !p.autoBestaetigtAt
+      const autoOkBtn = !p.autoPlan ? '' : p.fundedVorschlag
+        ? `<span class="btn btn-ghost tc2-btn" style="cursor:default;color:var(--sub)" title="Funded-Vorschlag — bestätigt wird nur unter Admin → Funded-Planer; erst dann bekommt er eine Startzeit">im Funded-Planer bestätigen</span>`
+        : !p.autoBestaetigtAt
         ? `<button class="btn btn-primary tc2-btn" data-plan-auto-ok="${p.id}" title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
         : `<button class="btn btn-ghost tc2-btn" data-plan-auto-zurueck="${p.id}" style="color:var(--good);font-weight:600" title="Bestätigt — Klick nimmt die Freigabe zurück">✓ Bestätigt</button>`
       actions = (istV2Karte && p.autoPlan) ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        ${jetztBtn}
+        ${p.fundedVorschlag ? '' : jetztBtn}
         ${autoOkBtn}` : istV2Karte ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
@@ -44267,7 +44275,9 @@
         const rest = (p.startUm && !p.startUmGestartetAt) ? vorcheckChip : gestartetFrisch ? neuBtn : jetztBtn
         const kopf = `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>`
           + `<button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
-        zeileAkt = kopf + (p.autoPlan
+        zeileAkt = kopf + (p.fundedVorschlag
+          ? `<span class="pz-zustand"><span class="btn btn-ghost tc2-btn pz-ok" style="cursor:default" title="Funded-Vorschlag — bestätigt wird nur unter Admin → Funded-Planer">im Funded-Planer bestätigen</span></span>`
+          : p.autoPlan
           ? `${rest}<span class="pz-zustand">${!p.autoBestaetigtAt
               ? `<button class="btn btn-ghost tc2-btn pz-ok" data-plan-auto-ok="${p.id}" title="Freigeben — der PC-Tab startet den Trade dann zur Startzeit">Bestätigen</button>`
               : `<button class="btn btn-ghost tc2-btn pz-ok is-ok" data-plan-auto-zurueck="${p.id}" title="Bestätigt — startet zur Startzeit. Klick nimmt die Freigabe zurück">✓ bestätigt</button>`}</span>`
@@ -48204,6 +48214,12 @@
     await mt5BalOeffnenAbwarten(60000)   // öffnet eine Balance-Lesung gerade ein MT5-Terminal, nicht mitten hinein klicken (08.10.2026)
     let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
+    // Funded-Vorschlag (27.10.2026, H1): weder Karte noch Fern-Start an „Bestätigen" vorbei
+    if(plan && plan.fundedVorschlag){
+      const t = 'Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.'
+      if(fern) fern.melde({ ok:false, msg: t }); else toast(t, 'end')
+      return
+    }
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
       if(fern) fern.melde({ ok:false, msg: _tpOrbitLaeuft ? 'Am PC läuft schon ein Orbit-Start — nichts gesendet.' : 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' })
       return
@@ -48945,6 +48961,8 @@
   async function tpJetztStarten(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'planned') return
+    // Funded-Vorschlag (27.10.2026, H1): von Hand nie an „Bestätigen" vorbei — bestätigt wird nur unter Admin → Funded-Planer
+    if(plan.fundedVorschlag){ if(typeof atToast === 'function') atToast('Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.', 'end'); return }
     { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
     // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — „Trotzdem starten" nur beim Karten-Klick
     // (opts.karte, 26.10.2026); Startzeit (tpStartUmTick), Neu starten und Radar rufen ohne karte und bleiben wie bisher
@@ -52864,7 +52882,7 @@
     const nicht = suStartetNichtWeil(p, o.scharf)
     if(nicht === 'Farmer nicht scharf') return 'Winning-Days-Farmer nicht scharf → Admin → Winning Days → Ablauf auf „scharf"'
     if(/Puls für Topstep nicht scharf/.test(nicht)) return nicht + ' → Admin → Winning Days → Ablauf „Puls für Topstep" auf „scharf"'
-    if(nicht === 'startet erst nach Bestätigung') return 'Auto-Vorschlag unbestätigt → im Trade-Planer bestätigen'
+    if(nicht === 'startet erst nach Bestätigung') return p && p.fundedVorschlag ? 'Funded-Vorschlag unbestätigt → Admin → Funded-Planer bestätigen' : 'Auto-Vorschlag unbestätigt → im Trade-Planer bestätigen'
     if(nicht) return nicht
     const id = String(p.id)
     if((_vorcheckNaechst.get(id) || 0) > o.now) return 'Slave-Vorprüfung nicht bereit' + (_suVorcheckGrund.get(id) ? ': ' + _suVorcheckGrund.get(id) : '')
@@ -53256,7 +53274,7 @@
     tplSpaeter()   // Trade-Planer-Seite: Lauf/Pläne geändert → neu zeichnen
     const el = document.getElementById('apLeiste'); if(!el) return
     if(currentUserId && _ap.geladenFuer !== currentUserId){ _ap.geladenFuer = currentUserId; apLetztenLaden(); return }
-    const vorschlaege = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && !p.autoBestaetigtAt)
+    const vorschlaege = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && !p.autoBestaetigtAt && !p.fundedVorschlag)   // Funded bestätigt der Funded-Reiter
     const bestaetigt = (tradePlans || []).filter(p => p && p.status === 'planned' && p.autoPlan && p.autoBestaetigtAt).length
     // Ladefehler-Zeile nur außerhalb der Trade-Planer-Seite (09.10.2026, Befund Prüfer S2: die Seite zeichnet sie in #tpl-root direkt
     // darunter selbst — Leiste + Kopf zeigten denselben Satz zweimal untereinander)
