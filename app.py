@@ -29275,7 +29275,12 @@ def ap_loop():
 #  - Priorität: genau wie ein Orbit-Big-Trade von Hand (Prio 1 vor Winning Day, Heim-Wache, „Puls bleibt zu Hause") — nichts Eigenes, nur
 #    die vorhandenen Marken tvv2 + orbit_v3 + hedge_eur > 0 (prophos_big_trade, puls_heim_big_trades, bigTradePlan).
 #  - Weg: normaler Orbit Big Trade (tvv2 + orbit_v3 + hedge_eur > 0, DB-Riegel trade_plans_kontoart_weg), die Big-Trade-Grenze je Fenster
-#    (trade_plans_big_trade) schiebt wie bei jedem Orbit-Big-Trade. Auto-bestätigt von Anfang an.
+#    (trade_plans_big_trade) schiebt wie bei jedem Orbit-Big-Trade.
+#  - BESTÄTIGEN VON HAND (Finn 27.10.2026: „jeden Funded-Trade einzeln von Hand bestätigen, genau wie damals am Anfang beim Challenge-
+#    Planer"): ohne funded_plan_regeln.auto_bestaetigen legt der Planer einen VORSCHLAG an — Plan ohne start_um (kein PC-Tab startet einen
+#    Plan ohne Startzeit), die vorgeschlagene Zeit steht in mt5_baseline.funded_plan.start_um. Erst POST /admin/funded-plan/bestaetigen
+#    setzt start_um (frühestens jetzt + 2 min) und auto_bestaetigt_at; zurück nimmt beides wieder weg, löschen löscht. Gate wie die
+#    Challenge-Routen (_ap_eingriff). Unbestätigte Vorschläge früherer Tage räumt fdp_tick weg.
 #  - Ziel erreicht → Konto auf Winning Days (account_type winning_days + wd_farm, wie funded_wege Folge „winning_days"), Planer hört auf.
 #    Nach einem Payout beginnt ein neuer Zyklus ab neuer Balance mit wieder den Kontokosten als offene Kosten.
 # Pläne tragen auto_plan = false (wie ein Orbit-Big-Trade von Hand — Waage, Richtungs-Bot und Nachtlauf des Challenge-Planers fassen nur
@@ -29301,7 +29306,8 @@ FDP_FIRMEN_STANDARD = [
     {"name": "FundedNext Futures", "namen": ["fundednextfutures"], "an": False},
     {"name": "FTMO Futures", "namen": ["ftmofutures"], "an": False},
 ]
-_fdp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
+_fdp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0, "aufgeraeumt": 0}
+FDP_BESTAETIGEN_VORLAUF_S = 120          # bestätigter Vorschlag mit vergangener Zeit startet frühestens 2 min nach dem Klick
 
 def fdp_je_groesse(regel, groesse):
     """Werte je Kontogröße aus der Firmen-Regel (ziel_gewinn, max_trade, kosten_eur, dd) oder None."""
@@ -29535,13 +29541,25 @@ def _fdp_regeln_laden():
         return None
 
 
+def _fdp_ids_aus():
+    """IDs, die nie gefahren werden — dieselbe Liste wie der WD-Farmer (wd_farmer_regeln.ids_aus: archivierte ID „Finn", Emin).
+    Lesefehler → leere Menge."""
+    try:
+        return {str(u) for u in ((sb_select("wd_farmer_regeln", {"select": "ids_aus", "id": "eq.1"}) or [{}])[0].get("ids_aus") or [])}
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ ids_aus: {type(e).__name__}: {e}", flush=True)
+        return set()
+
+
 def _fdp_ht_ids():
-    """user_ids der Gruppe „Hermann Technologies“ (nur für die Vorschau ohne eingespielte Regeln)."""
+    """user_ids der Gruppe „Hermann Technologies“ ohne ids_aus (Vorschau ohne eingespielte Regeln und Liste „IDs verwalten")."""
     try:
         g = sb_select("id_gruppen", {"select": "id", "name": "eq.Hermann Technologies"}) or []
         if not g:
             return []
-        return [str(m.get("user_id")) for m in sb_select("id_gruppe_mitglied", {"select": "user_id", "gruppe_id": f"eq.{g[0]['id']}"}) or []]
+        aus = _fdp_ids_aus()
+        return [str(m.get("user_id")) for m in sb_select("id_gruppe_mitglied", {"select": "user_id", "gruppe_id": f"eq.{g[0]['id']}"}) or []
+                if str(m.get("user_id")) not in aus]
     except Exception as e:
         print(f"[funded-plan] ⚠️ HT-IDs: {type(e).__name__}: {e}", flush=True)
         return []
@@ -29555,7 +29573,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     if not reg:
         if not trocken:
             return {"ok": False, "msg": "funded_plan_regeln fehlt — sql/2026-10-27_funded_planer.sql einspielen"}
-        reg, quelle = {"aktiv": False, "user_ids": _fdp_ht_ids(), "firmen": FDP_FIRMEN_STANDARD, "zeiten": {}}, "standard"
+        reg, quelle = {"aktiv": False, "auto_bestaetigen": False, "user_ids": _fdp_ht_ids(), "firmen": FDP_FIRMEN_STANDARD, "zeiten": {}}, "standard"
     zeiten = dict(FDP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
     try:
         ap_zeiten = (sb_select("auto_plan_regeln", {"select": "zeiten", "id": "eq.1"}) or [{}])[0].get("zeiten") or {}
@@ -29577,7 +29595,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 90)
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
-    erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "regeln_quelle": quelle, "at": jetzt.isoformat(), "tag": cme_heute,
+    erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "auto_bestaetigen": reg.get("auto_bestaetigen") is True,
+           "regeln_quelle": quelle, "at": jetzt.isoformat(), "tag": cme_heute,
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
            "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an"))} for f in firmen],
            "geplant": [], "ziel": [], "ausgelassen": [], "ids": []}
@@ -29599,7 +29618,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
                                                     "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,"
-                                                    "richtung,master_contracts,master_tp,master_sl,auto_plan,auto_bestaetigt_at,funded_plan:mt5_baseline->funded_plan",
+                                                    "richtung,master_contracts,master_tp,master_sl,auto_plan,auto_bestaetigt_at,funded_plan:mt5_baseline->funded_plan,"
+                                                    "fp_start:mt5_baseline->funded_plan->>start_um",
                                           "master_account_id": f"in.({teil})",
                                           "created_at": "gte." + (jetzt - timedelta(days=180)).isoformat()})
         for z in _sb_all("pending_payouts", {"select": "account_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []:
@@ -29607,7 +29627,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
         for z in _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []:
             payouts.setdefault(str(z.get("account_id")), []).append(z.get("payout_date") or z.get("created_at"))
     # Geplante/laufende Pläne ALLER IDs der Liste (auch Challenge-Planer, jede Firma): Firmen-Abstand und Big Trades je ID
-    offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,start_um,started_at,status,route,orbit_v3,hedge_eur,winning_day",
+    offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,start_um,started_at,status,route,orbit_v3,hedge_eur,winning_day,"
+                                                   "fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": "in.(" + ",".join(uids) + ")", "status": "in.(planned,open)"}) if ids else []
     verlauf = _liq_verlauf_laden(ids)
     lregeln = _liq_regeln_laden()
@@ -29622,7 +29643,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     schon = {}
     for a in konten:
         for p in je_plan.get(str(a["id"]), []):
-            t = p.get("started_at") or (p.get("start_um") if p.get("status") in ("planned", "open") else None)
+            t = p.get("started_at") or ((p.get("start_um") or p.get("fp_start")) if p.get("status") in ("planned", "open") else None)
             if t and _cme_handelstag(t) == cme_heute:
                 schon[str(a.get("user_id"))] = schon.get(str(a.get("user_id")), 0) + 1
     rnd = random.Random(seed if seed is not None else f"fp-{cme_heute}-{int(jetzt.timestamp() // FDP_TAKT_S)}")
@@ -29673,7 +29694,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
         erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund=f"Tagesdeckel {max_je_id} Funded-Trades je ID erreicht — morgen"))
     belegt_id, belegt_firma = {}, {}
     for b in offen_alle or []:
-        t = b.get("started_at") if b.get("status") == "open" else b.get("start_um")
+        t = b.get("started_at") if b.get("status") == "open" else (b.get("start_um") or b.get("fp_start"))   # Vorschlag: vorgeschlagene Zeit
         if not t:
             continue
         try:
@@ -29691,6 +29712,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     minuten, ohne = fdp_zeiten([(u, k, rech[k][1]["firma_key"]) for u, k in gewaehlt], belegt_id, belegt_firma,
                                ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=im_tag)
     frontcode = _wd_futures_frontcode(jetzt)
+    auto_ok = reg.get("auto_bestaetigen") is True
     zeilen = []
     for aid in ohne:
         erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund="kein freier Slot mehr im Fenster heute (Firmen-Abstand / Big Trade der ID)"))
@@ -29698,18 +29720,21 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
         a, r = rech[aid]
         start = mitternacht + timedelta(minutes=m)
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
-        notiz = (f"Funded-Planer · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
+        notiz = (f"Funded-Planer{'' if auto_ok else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
                  f"(Daily Loss {_liq_de(r['dll'])} $) · offene Kosten {_liq_de(r['offen_eur'])} €")
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": aid, "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": r["kontrakte"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
             "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"], "orbit_v3": True, "route": "tvv2",
             "master_tp": r["tp"], "master_sl": r["sl"], "richtung": richtung, "master_symbol": "NQ" + frontcode,
-            "start_um": start.astimezone(timezone.utc).isoformat(), "status": "planned", "priority": "high",
-            "planned_for": start.strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat(), "notes": notiz,
-            "mt5_baseline": {"funded_plan": {k: r.get(k) for k in ("zyklus", "start", "ziel", "liq", "stufe", "dll", "minis", "offen_eur",
-                                                                    "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")}}})
-        erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=zeilen[-1]["start_um"], richtung=richtung))
+            # Vorschlag (Standard): ohne start_um startet kein PC-Tab den Plan — erst „Bestätigen" setzt die Startzeit
+            "start_um": start.astimezone(timezone.utc).isoformat() if auto_ok else None, "status": "planned", "priority": "high",
+            "planned_for": start.strftime("%Y-%m-%d"), "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_ok else None, "notes": notiz,
+            "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("zyklus", "start", "ziel", "liq", "stufe", "dll", "minis", "offen_eur",
+                                                                         "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")},
+                                                 start_um=start.astimezone(timezone.utc).isoformat())}})
+        erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start.astimezone(timezone.utc).isoformat(), richtung=richtung,
+                                   vorschlag=not auto_ok))
     if not trocken:
         for z in zeilen:
             try:
@@ -29748,15 +29773,24 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     erg["plaene"] = [{"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or (kmap.get(str(p.get("master_account_id"))) or {}).get("user_id") or ""),
                       "konto_id": str(p.get("master_account_id")), "konto": (kmap.get(str(p.get("master_account_id"))) or {}).get("name"),
                       "firma": (kmap.get(str(p.get("master_account_id"))) or {}).get("firm"), "status": p.get("status"), "richtung": p.get("richtung"),
-                      "route": p.get("route"), "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at") or p.get("completed_at"),
+                      "route": p.get("route"), "start_um": p.get("start_um") or p.get("fp_start"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at") or p.get("completed_at"),
                       "menge": _wd_num(p.get("master_contracts")), "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl")),
-                      "pl": _wd_num(p.get("master_pl")), "hedge_eur": _wd_num(p.get("hedge_eur")), "bestaetigt": bool(p.get("auto_bestaetigt_at")) or not p.get("auto_plan"),
-                      "funded_plan": bool(p.get("funded_plan")), "balance": _wd_num((kmap.get(str(p.get("master_account_id"))) or {}).get("tv_balance"))}
+                      # bestätigt = auto_bestaetigt_at, oder ein Hand-Plan (ohne Funded-Planer-Kennung); Vorschlag = Funded-Planer, noch nicht bestätigt
+                      "pl": _wd_num(p.get("master_pl")), "hedge_eur": _wd_num(p.get("hedge_eur")),
+                      "bestaetigt": bool(p.get("auto_bestaetigt_at")) or not p.get("funded_plan"),
+                      "vorschlag": bool(p.get("funded_plan")) and not p.get("auto_bestaetigt_at") and p.get("status") == "planned",
+                      "funded_plan": bool(p.get("funded_plan")), "balance": _wd_num((kmap.get(str(p.get("master_account_id"))) or {}).get("tv_balance")),
+                      # Werte des Planers beim Anlegen (Ziel, Liq, Stufe, Hedge, offene Kosten) — Spalte Balance → Ziel und Stufe wie beim Challenge-Planer
+                      **{k: (p.get("funded_plan") or {}).get(k) for k in ("ziel", "liq", "stufe", "dll", "hedge_sl_eur", "hedge_tp_eur", "offen_eur")
+                         if isinstance(p.get("funded_plan"), dict)}}
                      for p in plaene
                      if p.get("status") in ("planned", "open", "review") or str(p.get("started_at") or p.get("ended_at") or "") >= seit]
     for z in erg["plaene"]:
         je_id.setdefault(z["user_id"], {"geplant": 0, "ziel": 0, "ausgelassen": 0})
     erg["ids"] = [dict(v, user_id=u, name=namen.get(u) or u[:8], heute_schon=schon.get(u, 0)) for u, v in je_id.items()]
+    # IDs VERWALTEN (Finn 27.10.2026, wie beim Challenge-Planer): alle HT-IDs ohne ids_aus + die schon eingetragenen, drin = in user_ids
+    alle = list(dict.fromkeys(_fdp_ht_ids() + uids))
+    erg["alle_ids"] = [{"user_id": u, "name": namen.get(u) or u[:8], "drin": u in uids} for u in alle]
     return erg
 
 
@@ -29769,7 +29803,12 @@ def fdp_tick(jetzt=None):
     reg = _fdp_regeln_laden()
     if not reg or not reg.get("aktiv"):
         return None
-    erg = fdp_planen(trocken=False, jetzt=jetzt or datetime.now(timezone.utc))
+    jetzt = jetzt or datetime.now(timezone.utc)
+    try:
+        _fdp_info["aufgeraeumt"] = fdp_vorschlaege_aufraeumen(jetzt)
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ Aufräumen: {type(e).__name__}: {e}", flush=True)
+    erg = fdp_planen(trocken=False, jetzt=jetzt)
     _fdp_info.update(letzter=dict({k: erg.get(k) for k in ("at", "tag")}, geplant=len(erg.get("geplant") or []), ziel=len(erg.get("ziel") or [])),
                     fehler="" if erg.get("ok") else str(erg.get("msg") or ""))
     if erg.get("geplant") or erg.get("ziel"):
@@ -29800,6 +29839,157 @@ def admin_funded_plan():
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
     erg["info"] = {k: _fdp_info.get(k) for k in ("letzter", "fehler")}
     return jsonify(erg), (200 if erg.get("ok") else 503)
+
+
+def fdp_vorschlaege_aufraeumen(jetzt):
+    """Unbestätigte Funded-Vorschläge früherer Tage löschen (wie der Nachtlauf des Challenge-Planers): planned, ohne start_um und
+    auto_bestaetigt_at, nie gestartet, Kennung mt5_baseline.funded_plan, planned_for vor heute (Dubai). → Anzahl gelöscht."""
+    heute = jetzt.astimezone(_ap_tz(FDP_ZEITEN_STANDARD["tz"])).strftime("%Y-%m-%d")
+    r = _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers("return=representation"),
+                    params={"status": "eq.planned", "start_um": "is.null", "auto_bestaetigt_at": "is.null", "start_um_gestartet_at": "is.null",
+                            "started_at": "is.null", "mt5_baseline->funded_plan": "not.is.null", "planned_for": f"lt.{heute}"})
+    _sb_pruefen(r)
+    n = len(r.json() or [])
+    if n:
+        print(f"[funded-plan] {n} unbestätigte Vorschläge früherer Tage gelöscht", flush=True)
+    return n
+
+
+def fdp_eingriff_filter(aktion, plan_ids, sicht_uid=None):
+    """REIN RECHNEND (testbar): PostgREST-Filter für /admin/funded-plan/{bestaetigen | zurueck | loeschen} → (params, art) oder
+    (None, Fehlertext). Guard in derselben Anfrage wie bei ap_eingriff_filter, aber auf die Funded-Kennung statt auf auto_plan:
+    planned + mt5_baseline.funded_plan + nie geclaimt/gestartet; bestaetigen zusätzlich unbestätigt und ohne Puls-Pause.
+    sicht_uid wie ap_eingriff_sicht (None alle, str eine ID, Menge eine Gruppe)."""
+    basis = {"status": "eq.planned", "mt5_baseline->funded_plan": "not.is.null", "start_um_gestartet_at": "is.null", "started_at": "is.null"}
+    bed = {"bestaetigen": (dict(basis, auto_bestaetigt_at="is.null", **{"mt5_baseline->puls_pause": "is.null"}), "patch"),
+           "zurueck": (basis, "patch"), "loeschen": (basis, "delete")}.get(str(aktion or ""))
+    if not bed:
+        return None, "aktion = bestaetigen | zurueck | loeschen"
+    ids = []
+    for i in plan_ids or []:
+        t = str(i or "").strip().lower()
+        if re.match(r"^[0-9a-f-]{36}$", t) and t not in ids:
+            ids.append(t)
+    if not ids:
+        return None, "plan_ids: keine gültige Plan-ID"
+    if len(ids) > AP_EINGRIFF_MAX:
+        return None, f"höchstens {AP_EINGRIFF_MAX} Pläne je Aufruf"
+    params = dict(bed[0], id=("eq." + ids[0]) if len(ids) == 1 else ("in.(" + ",".join(ids) + ")"))
+    if isinstance(sicht_uid, (str, int)) and str(sicht_uid):
+        params["user_id"] = "eq." + str(sicht_uid)
+    elif sicht_uid is not None and not isinstance(sicht_uid, (str, int)):
+        params["user_id"] = "in.(" + ",".join(sorted(str(u) for u in sicht_uid) or ["00000000-0000-0000-0000-000000000000"]) + ")"
+    return params, bed[1]
+
+
+def fdp_start_bestaetigt(vorschlag_iso, jetzt):
+    """REIN RECHNEND (testbar): Startzeit beim Bestätigen = vorgeschlagene Zeit, frühestens jetzt + FDP_BESTAETIGEN_VORLAUF_S."""
+    frueh = jetzt + timedelta(seconds=FDP_BESTAETIGEN_VORLAUF_S)
+    try:
+        v = datetime.fromisoformat(str(vorschlag_iso).replace("Z", "+00:00")) if vorschlag_iso else None
+    except ValueError:
+        v = None
+    return (v if v and v > frueh else frueh).astimezone(timezone.utc).isoformat()
+
+
+def _fdp_login():
+    """Gate wie die Challenge-Routen (_ap_eingriff): (admin, uid, sicht) oder (…, Fehler-Antwort). im_planer = funded_plan_regeln.user_ids."""
+    _mail, err = _admin_auth()
+    admin = err is None
+    uid = str(request.environ.get("prophos.admin_uid") or "") if admin else None
+    if not admin:
+        if err[1] != 403:
+            return False, None, None, err
+        uid, err2 = _wd_login()
+        if err2:
+            return False, None, None, err2
+    try:
+        sicht_l, verwalter = admin_sicht_lesen(str(uid))
+        nur, gruppe = sicht_l is not None, (sicht_l if verwalter else None)
+        reg = _fdp_regeln_laden() or {}
+        im_planer = False if admin else str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
+    except Exception:
+        return admin, uid, None, (jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502)
+    return admin, uid, ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param(), gruppe), None
+
+
+def _fdp_eingriff(aktion):
+    """POST /admin/funded-plan/{bestaetigen {plan_ids} | zurueck {plan_id} | loeschen {plan_id}} — dieselben Knöpfe und dasselbe Gate wie
+    beim Challenge-Planer, Guard über fdp_eingriff_filter. Bestätigen: Balance live (ap_bal_guard wie dort), dann je Plan start_um =
+    fdp_start_bestaetigt(vorgeschlagene Zeit) + auto_bestaetigt_at. Zurück: start_um und auto_bestaetigt_at wieder leer (Vorschlag)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, sicht, err = _fdp_login()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
+    params, art = fdp_eingriff_filter(aktion, ids, sicht)
+    if params is None:
+        return jsonify({"ok": False, "msg": art}), 400
+    try:
+        if sicht is not None:
+            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if not admin_in_sicht(z.get("user_id"), sicht)]
+            if fremd:
+                return jsonify({"ok": False, "msg": "nur eigene Pläne" if isinstance(sicht, str) else "nur Pläne der eigenen Gruppe"}), 403
+        jetzt = datetime.now(timezone.utc)
+        if aktion == "bestaetigen":
+            sperre = ap_bal_guard(lambda: _ap_bal_guard_laden(params["id"]))
+            if sperre:
+                return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
+            zeilen = []
+            for p in sb_select("trade_plans", dict(params, select="id,fp_start:mt5_baseline->funded_plan->>start_um")) or []:
+                zeilen += sb_update("trade_plans", dict(params, id=f"eq.{p['id']}"),
+                                    {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": fdp_start_bestaetigt(p.get("fp_start"), jetzt),
+                                     "start_um_gestartet_at": None})
+        elif art == "delete":
+            zeilen = sb_delete("trade_plans", params)
+        else:
+            zeilen = sb_update("trade_plans", params, {"auto_bestaetigt_at": None, "start_um": None})
+        print(f"[funded-plan] {aktion}: {len(zeilen)} Zeile(n) durch {'Admin' if sicht is None else 'ID ' + str(uid)[:8]}", flush=True)
+        return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None or not isinstance(sicht, str)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/funded-plan/bestaetigen", methods=["POST", "OPTIONS"])
+def admin_funded_plan_bestaetigen():
+    return _fdp_eingriff("bestaetigen")
+
+
+@app.route("/admin/funded-plan/zurueck", methods=["POST", "OPTIONS"])
+def admin_funded_plan_zurueck():
+    return _fdp_eingriff("zurueck")
+
+
+@app.route("/admin/funded-plan/loeschen", methods=["POST", "OPTIONS"])
+def admin_funded_plan_loeschen():
+    return _fdp_eingriff("loeschen")
+
+
+@app.route("/admin/funded-plan/ids", methods=["POST", "OPTIONS"])
+def admin_funded_plan_ids():
+    """POST {user_id, drin} → ID in funded_plan_regeln.user_ids rein/raus (wie /admin/auto-plan/ids für den Challenge-Planer). Nur Admin
+    oder ein HT-Login ohne Einschränkung; Verwalter einer anderen Gruppe nicht (die Liste ist HT-weit)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, sicht, err = _fdp_login()
+    if err:
+        return err
+    if not admin and sicht is not None:
+        return jsonify({"ok": False, "msg": "IDs des Funded-Planers sind HT-weit — nur Hermann Technologies"}), 403
+    body = request.get_json(silent=True) or {}
+    u = str(body.get("user_id") or "").strip().lower()
+    if not re.match(r"^[0-9a-f-]{36}$", u):
+        return jsonify({"ok": False, "msg": "user_id fehlt"}), 400
+    reg = _fdp_regeln_laden()
+    if not reg:
+        return jsonify({"ok": False, "msg": "funded_plan_regeln fehlt — SQL einspielen"}), 503
+    alt = [str(x) for x in (reg.get("user_ids") or [])]
+    neu = [x for x in alt if x != u] + ([u] if body.get("drin") else [])
+    sb_update("funded_plan_regeln", {"id": "eq.1"}, {"user_ids": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
+    print(f"[funded-plan] IDs: {u[:8]} {'rein' if body.get('drin') else 'raus'} ({len(neu)} IDs)", flush=True)
+    return jsonify({"ok": True, "user_id": u, "drin": bool(body.get("drin")), "n": len(neu)})
 
 
 def start_auto_planer():

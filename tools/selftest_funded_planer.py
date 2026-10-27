@@ -234,8 +234,12 @@ def tag_13(ns):
     zeilen = [b for t, b in geschrieben if t == "trade_plans"]
     z1 = zeilen[0] if zeilen else {}
     check(len(zeilen) == 8 and all(b["route"] == "tvv2" and b["orbit_v3"] is True and b["hedge_eur"] > 0 and b["auto_plan"] is False
-                                   and b["auto_bestaetigt_at"] and b["master_symbol"].startswith("NQ") for b in zeilen),
-          f"scharf: 8 Pläne tvv2 + orbit_v3 + hedge_eur, auto-bestätigt ({z1.get('master_symbol')}, Plan-Tag {e2.get('tag')})")
+                                   and b["master_symbol"].startswith("NQ") for b in zeilen),
+          f"scharf: 8 Pläne tvv2 + orbit_v3 + hedge_eur ({z1.get('master_symbol')}, Plan-Tag {e2.get('tag')})")
+    # Finn 27.10.2026: jeden Funded-Trade von Hand bestätigen — Standard = Vorschlag OHNE start_um (kein PC-Tab startet ihn)
+    check(all(b["start_um"] is None and b["auto_bestaetigt_at"] is None and b["mt5_baseline"]["funded_plan"]["start_um"]
+              and "Vorschlag" in b["notes"] for b in zeilen) and all(z.get("vorschlag") for z in e2["geplant"]),
+          "Standard (auto_bestaetigen aus): Vorschlag ohne start_um/auto_bestaetigt_at, Zeit nur in mt5_baseline.funded_plan.start_um")
 
 
 def ziel_wd(ns):
@@ -254,6 +258,38 @@ def ziel_wd(ns):
           and upd[0][2].get("name") == "150k PAAPEX000000000099 → Winning Days" and upd[0][1].get("account_type") == "eq.funded"
           and not any("waiting_payout_since" in x[2] for x in geschrieben))
     check(ok, "165.100 → account_type winning_days + wd_farm, Name „→ Winning Days“, kein Waiting for Payout")
+
+
+def bestaetigen(ns):
+    """Bestätigen von Hand (Finn 27.10.2026): Guard-Filter der Funded-Routen, Startzeit beim Bestätigen, Auto-Bestätigen-Schalter."""
+    print("Bestätigen von Hand / Auto-Bestätigen")
+    exec(block("fdp_eingriff_filter") + "\n" + block("fdp_start_bestaetigt"), ns)
+    ns["AP_EINGRIFF_MAX"] = 200
+    pid = "11111111-2222-4333-8444-555555555555"
+    p, art = ns["fdp_eingriff_filter"]("bestaetigen", [pid])
+    check(art == "patch" and p["status"] == "eq.planned" and p["mt5_baseline->funded_plan"] == "not.is.null" and p["auto_bestaetigt_at"] == "is.null"
+          and p["start_um_gestartet_at"] == "is.null" and p["started_at"] == "is.null" and p["mt5_baseline->puls_pause"] == "is.null" and p["id"] == "eq." + pid,
+          "bestaetigen: nur ungestartete, unbestätigte Funded-Pläne ohne Puls-Pause")
+    p2, art2 = ns["fdp_eingriff_filter"]("loeschen", [pid, "kaputt"], "00000000-0000-4000-a000-0000000000a1")
+    check(art2 == "delete" and "auto_bestaetigt_at" not in p2 and p2["user_id"] == "eq.00000000-0000-4000-a000-0000000000a1",
+          "loeschen: Guard ohne Bestätigt-Bedingung, eigene ID bei eingeschränkter Sicht, ungültige IDs fallen weg")
+    check(ns["fdp_eingriff_filter"]("starten", [pid])[0] is None and ns["fdp_eingriff_filter"]("zurueck", ["x"])[0] is None, "unbekannte Aktion / keine gültige ID → abgelehnt")
+    j = datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc)
+    check(ns["fdp_start_bestaetigt"]("2026-10-28T12:00:00+00:00", j).startswith("2026-10-28T12:00")
+          and ns["fdp_start_bestaetigt"]("2026-10-28T09:00:00+00:00", j).startswith("2026-10-28T10:02")
+          and ns["fdp_start_bestaetigt"](None, j).startswith("2026-10-28T10:02"),
+          "Startzeit beim Bestätigen: vorgeschlagene Zeit, schon vorbei → jetzt + 2 min")
+    U1 = "00000000-0000-4000-a000-0000000000a1"
+    konto = {"id": "ka", "user_id": U1, "name": "150k PAAPEX000000000055 → Funded", "firm": "Apex Trader", "account_type": "funded",
+             "auto_planer": True, "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"}
+    zeilen = []
+    ns.update(_sb_all=lambda t, q: [dict(konto)] if t == "accounts" else [],
+              sb_select=lambda t, q: ([{"id": 1, "aktiv": True, "auto_bestaetigen": True, "user_ids": [U1], "firmen": ns["FDP_FIRMEN_STANDARD"], "zeiten": {}}]
+                                      if t == "funded_plan_regeln" else []),
+              sb_insert=lambda t, b: zeilen.append(b) if t == "trade_plans" else None, sb_update=lambda t, q, b: None)
+    ns["fdp_planen"](trocken=False, jetzt=datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc), seed=5)
+    check(len(zeilen) == 1 and zeilen[0]["start_um"] and zeilen[0]["auto_bestaetigt_at"] and "Vorschlag" not in zeilen[0]["notes"],
+          "Schalter auto_bestaetigen = true: Plan gleich mit start_um und auto_bestaetigt_at")
 
 
 def big_trade(ns):
@@ -328,6 +364,7 @@ if __name__ == "__main__":
     bausteine(ns)
     tag_13(ns)
     ziel_wd(ns)
+    bestaetigen(ns)
     big_trade(ns)
     balance_selbst(ns)
     if FEHLER:

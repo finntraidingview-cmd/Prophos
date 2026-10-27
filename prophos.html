@@ -53612,10 +53612,10 @@
    * Listen rechnen in € Einsatz (einsatz_eur), solange das Backend die €-Felder liefert, sonst wie bisher in €/Pkt. */
   const _apd = { d: null, geladen: 0, laeuft: false, weg: 0, fehler: '', edit: null, busy: new Set(), meldung: null, vorschau: null, vLaeuft: false }
   const APD_TAKT = 60000
-  async function apdApi(method, pfad, body){
+  async function apdApi(method, pfad, body, basis){   // basis (27.10.2026): '/admin/funded-plan' für die Knöpfe im Reiter Funded-Planer
     const { data: { session } } = await supabase.auth.getSession()
     const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
-    const r = await fetch(`${WATCHER_HOME}/admin/auto-plan${pfad}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+    const r = await fetch(`${WATCHER_HOME}${basis || '/admin/auto-plan'}${pfad}`, { method, headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
     const d = await r.json().catch(() => ({}))
     if(!r.ok || d.ok === false){ const f = new Error(d.msg || d.error || d.fehler || ('HTTP ' + r.status)); f.status = r.status; f.daten = d; throw f }
     return d
@@ -56473,7 +56473,9 @@
   async function tplEingriff(aktion, ids, aus){
     // sicht:"admin" nur aus dem Admin-Reiter (08.10.2026): auf der Planer-Seite darf ein Nicht-Admin nur eigene Pläne anfassen
     const sichtP = (typeof window._tplSichtParam === 'function' && window._tplSichtParam()) ? { sicht: 'admin' } : {}
-    const d = await apdApi('POST', '/' + aktion, Object.assign(aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] }, sichtP))
+    // Funded-Planer (27.10.2026): im Admin-Reiter „Funded-Planer" dieselben Knöpfe, Route /admin/funded-plan/… (gleiches Gate)
+    const basis = typeof window._apIdsBasis === 'function' ? window._apIdsBasis() : null
+    const d = await apdApi('POST', '/' + aktion, Object.assign(aktion === 'bestaetigen' ? { plan_ids: ids } : { plan_id: ids[0] }, sichtP), basis)
     const n = Number(d && d.n) || 0
     if(aus) aus.zeilen = Array.isArray(d && d.zeilen) ? d.zeilen : []   // wirklich geänderte Zeilen (Admin „Zu bestätigen" blendet sie sofort aus, 08.10.2026)
     if(typeof atToast === 'function') atToast(n ? (aktion === 'bestaetigen' ? `✓ ${n} Auto-Plan${n === 1 ? '' : 'e'} bestätigt — startet zur Startzeit` : aktion === 'zurueck' ? '↶ Bestätigung zurückgenommen' : '🗑 Vorschlag gelöscht')
@@ -72188,18 +72190,21 @@
   }
   // ↩ ZURÜCK (Wartet auf Start → Zu bestätigen): POST /admin/auto-plan/zurueck (planned + auto + ungestartet, setzt auto_bestaetigt_at null)
   async function apIdsZurueck(id){
+    const lauf = fdpLaeufer()   // Funded-Reiter (27.10.2026): Fortsetzung nach await im selben Daten-Stand wie der Klick
     id = String(id); if(_apIds.okLaeuft.has(id)) return
     let z = null; try{ z = (apIdsWartenLaeuft().warten.find(e => String(e.z.plan_id) === id) || {}).z || null }catch(_){}
     _apIds.okLaeuft.add(id); _apIds.okFehler.delete(id); apIdsRender()
     try{
       const n = await tplEingriff('zurueck', [id])
       if(!n) throw new Error('nicht zurück — schon gestartet oder nicht mehr geplant')
-      const jetzt = Date.now()
-      _apIds.okWeg.delete(id); _apIds.warteLokal.delete(id); try{ _tpl.okLokal.delete(id) }catch(_){}
-      if(z){ const zz = Object.assign({}, z, { balance_live: z.balance_live ?? true }); _apIds.zurLokal.set(id, { z: zz, at: jetzt }); if(!_apIds.offen.some(x => String(x.plan_id) === id)) _apIds.offen.push(zz) }
-      if(Array.isArray(_apIds.bestaetigt)) _apIds.bestaetigt = _apIds.bestaetigt.filter(x => String(x.plan_id) !== id)
-    }catch(e){ _apIds.okFehler.set(id, String((e && e.message) || e)) }
-    finally{ _apIds.okLaeuft.delete(id); apIdsRender(); apIdsLaden() }
+      lauf(() => {
+        const jetzt = Date.now()
+        _apIds.okWeg.delete(id); _apIds.warteLokal.delete(id); try{ _tpl.okLokal.delete(id) }catch(_){}
+        if(z){ const zz = Object.assign({}, z, { balance_live: z.balance_live ?? true }); _apIds.zurLokal.set(id, { z: zz, at: jetzt }); if(!_apIds.offen.some(x => String(x.plan_id) === id)) _apIds.offen.push(zz) }
+        if(Array.isArray(_apIds.bestaetigt)) _apIds.bestaetigt = _apIds.bestaetigt.filter(x => String(x.plan_id) !== id)
+      })
+    }catch(e){ lauf(() => _apIds.okFehler.set(id, String((e && e.message) || e))) }
+    finally{ lauf(() => _apIds.okLaeuft.delete(id)); apIdsRender(); apIdsLaden() }
   }
   /* RICHTUNG PER KLICK (16.10.2026, Auftrag Master — Finn 14.10.2026 ~05:00 Dubai wollte Aurels Tradeify-Short vor dem Start auf BUY
    * drehen; einen Chip gab es nur im WD-Tagesplan, der Master drehte per SQL): EIN Plan, nicht die Tranche (Richtung je Trade frei seit
@@ -72228,6 +72233,7 @@
     }finally{ _apIds.riLaeuft.delete(id); apIdsRender(); apIdsLaden() }
   }
   async function apIdsOk(ids){
+    const lauf = fdpLaeufer()   // Funded-Reiter (27.10.2026): Fortsetzung nach await im selben Daten-Stand wie der Klick
     ids = [...new Set((ids || []).map(String))].filter(id => !_apIds.okLaeuft.has(id)); if(!ids.length) return
     for(const id of ids){ _apIds.okLaeuft.add(id); _apIds.okFehler.delete(id) }
     apIdsRender()
@@ -72236,15 +72242,15 @@
       await tplEingriff('bestaetigen', ids, aus)
       // Antwort ok: alle angefragten raus — nicht geänderte sind schon bestätigt/gestartet/weg (Guard planned + unbestätigt), also auch nicht offen
       const jetzt = Date.now()
-      for(const id of ids){ _apIds.okWeg.set(id, jetzt); _apIds.zurLokal.delete(id); try{ _tpl.okLokal.add(id) }catch(_){}
-        const z = _apIds.offen.find(x => String(x.plan_id) === id); if(z) _apIds.warteLokal.set(id, { z, at: jetzt }) }   // sofort in „Wartet auf Start" (auch morgen)
-      const raus = () => { _apIds.offen = _apIds.offen.filter(z => !_apIds.okWeg.has(String(z.plan_id))); for(const id of ids) _apIds.okLaeuft.delete(id); apIdsRender() }
+      lauf(() => { for(const id of ids){ _apIds.okWeg.set(id, jetzt); _apIds.zurLokal.delete(id); try{ _tpl.okLokal.add(id) }catch(_){}
+        const z = _apIds.offen.find(x => String(x.plan_id) === id); if(z) _apIds.warteLokal.set(id, { z, at: jetzt }) } })   // sofort in „Wartet auf Start" (auch morgen)
+      const raus = () => { lauf(() => { _apIds.offen = _apIds.offen.filter(z => !_apIds.okWeg.has(String(z.plan_id))); for(const id of ids) _apIds.okLaeuft.delete(id) }); apIdsRender() }
       // kurzes Ausblenden der Zeile(n), dann neu zeichnen (Zähler „Zu bestätigen · n", „n offen", „✓ alle n" zählen mit)
       const zeilen = ids.map(id => document.querySelector(`#ap-ids-root .pz-z[data-plan-id="${CSS.escape(id)}"]`)).filter(Boolean)
       if(zeilen.length){ zeilen.forEach(z => z.classList.add('ap-ok-weg')); setTimeout(raus, 170) } else raus()
     }catch(e){
       const msg = String((e && e.message) || e)
-      for(const id of ids){ _apIds.okLaeuft.delete(id); _apIds.okFehler.set(id, msg) }
+      lauf(() => { for(const id of ids){ _apIds.okLaeuft.delete(id); _apIds.okFehler.set(id, msg) } })
       if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + msg.slice(0, 140), 'end')
       apIdsRender()
     } finally { apIdsLaden() }
@@ -72842,8 +72848,9 @@
     root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(apIdsOffenSicht().filter(z => !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), e.currentTarget))
     root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {
       cb.disabled = true
-      try{ await apdApi('POST', '/ids', { user_id: cb.dataset.apId, drin: cb.checked })
-        if(typeof atToast === 'function') atToast(cb.checked ? '🤖 ID im Trade-Planer — der nächste Lauf plant sie mit.' : '🤖 ID aus dem Trade-Planer genommen.', cb.checked ? 'start' : 'end') }
+      const fdp = _apIdsArtWert === 'funded', welcher = fdp ? 'Funded-Planer' : 'Trade-Planer'   // Funded-Planer: funded_plan_regeln.user_ids (27.10.2026)
+      try{ await apdApi('POST', '/ids', { user_id: cb.dataset.apId, drin: cb.checked }, fdp ? '/admin/funded-plan' : undefined)
+        if(typeof atToast === 'function') atToast(cb.checked ? `🤖 ID im ${welcher} — der nächste Lauf plant sie mit.` : `🤖 ID aus dem ${welcher} genommen.`, cb.checked ? 'start' : 'end') }
       catch(e){ cb.checked = !cb.checked; if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + ((e && e.message) || e), 'end') }
       finally{ cb.disabled = false; apIdsLaden() }
     }))
@@ -72909,6 +72916,13 @@
    * Trockenlaufs als „Vorschau" in „Zu bestätigen" und im Zeitstrahl. Knöpfe, die auf die Challenge-Routen gehen (✓, zurück, Richtung,
    * Planer-Haken, Nachplanen), fallen hier weg — Funded-Pläne bestätigt der Planer selbst. ══ */
   let _apIdsArtWert = 'challenge', _fdpQ = null, _fdpLaedt = false, _fdpFehler = '', _fdpAt = 0
+  // eigene Merker (Bestätigen/Zurück unterwegs, lokal Wartet/Zurück) — sonst landete ein Funded-Plan nach „Zurück" in der Challenge-Liste
+  const _fdpMerker = { warteLokal: new Map(), zurLokal: new Map(), okWeg: new Map(), okLaeuft: new Set(), okFehler: new Map(), riLokal: new Map(), riLaeuft: new Set(), riGrund: new Map() }
+  // Läufer: im Funded-Reiter begonnene Aktion → spätere Schritte (nach await) wieder im Funded-Stand; sonst direkt
+  function fdpLaeufer(){
+    const funded = _apIdsArtWert === 'funded' && !!_fdpQ && !!_fdpKlickZurueck
+    return fn => (funded && _fdpQ && !_fdpKlickZurueck) ? fdpMitQuelle(fn) : fn()
+  }
   window._apIdsArt = art => { _apIdsArtWert = art === 'funded' ? 'funded' : 'challenge' }
   const fdpEnde4 = konto => (String(konto || '').split('→')[0].match(/(\d{4})\s*$/) || [])[1] || ''
   // Antwort von /admin/funded-plan → dieselben Formen wie /admin/auto-plan/ids (rows, offen[], bestaetigt[]), /delta (offen[], geplant[]) und Lauf
@@ -72930,14 +72944,18 @@
         auto_plan: true, gehedgt: true, tp_punkte: kt && x.tp != null ? x.tp / usd : null, sl_punkte: kt && x.sl != null ? x.sl / usd : null, usd_pro_pkt: usd }, extra || {})
     }
     const plaene = d.plaene || []
-    const geplantEcht = plaene.filter(p => p.status === 'planned' && p.start_um).map(p => zeile(p, { bestaetigt: !!p.bestaetigt }))
+    // Vorschläge des Funded-Planers (ohne start_um, Zeit aus mt5_baseline.funded_plan — Backend gibt sie als start_um) = „Zu bestätigen"
+    const geplantEcht = plaene.filter(p => p.status === 'planned' && p.start_um).map(p => zeile(p, { bestaetigt: !!p.bestaetigt && !p.vorschlag }))
     const laufend = plaene.filter(p => p.status === 'open').map(p => zeile(p))
     const vor = vorschau ? (d.geplant || []).map(g => zeile(g, { bestaetigt: false, vorschau: true })) : []
     const offen = vor.slice(), bestaetigt = geplantEcht.filter(z => z.bestaetigt)
     offen.push(...geplantEcht.filter(z => !z.bestaetigt))
     const konten = new Map()
     for(const z of [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || []), ...plaene]){ const u = String(z.user_id); if(!konten.has(u)) konten.set(u, new Set()); konten.get(u).add(String(z.konto_id || z.konto)) }
-    const rows = [...namen.entries()].map(([u, name]) => ({ user_id: u, name, drin: true, konten: (konten.get(u) || new Set()).size,
+    // IDs VERWALTEN wie beim Challenge-Planer (Finn 27.10.2026): alle HT-IDs (ohne ids_aus), drin = in funded_plan_regeln.user_ids
+    for(const x of d.alle_ids || []) if(!namen.has(String(x.user_id))) namen.set(String(x.user_id), x.name || String(x.user_id).slice(0, 8))
+    const drinJe = new Map((d.alle_ids || []).map(x => [String(x.user_id), !!x.drin]))
+    const rows = [...namen.entries()].map(([u, name]) => ({ user_id: u, name, drin: drinJe.has(u) ? drinJe.get(u) : true, konten: (konten.get(u) || new Set()).size,
       geplant: (d.geplant || []).filter(g => String(g.user_id) === u).length + geplantEcht.filter(g => g.user_id === u).length,
       ausgelassen: (d.ausgelassen || []).filter(g => String(g.user_id) === u).length })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
     const ausg = [...(d.ausgelassen || []), ...(d.ziel || []).map(z => ({ ...z, grund: z.grund || 'Ziel erreicht → Winning Days' }))]
@@ -72945,21 +72963,42 @@
     const ids = new Set(plaene.map(p => String(p.plan_id)))
     return {
       vorschau, aktiv: !!d.aktiv, regelnQuelle: d.regeln_quelle, zeiten: d.zeiten || {},
-      apIds: { rows, offen, bestaetigt, bestaetigtT0: Date.now(), aktiv: !!d.aktiv, tag: heute, D: null, fehler: '', offenFehler: '' },
+      apIds: { rows, offen, bestaetigt, bestaetigtT0: Date.now(), aktiv: !!d.aktiv, tag: heute, D: null, fehler: '', offenFehler: '', ..._fdpMerker },
       ap: { letzter: { tag: heute, at: d.at, trocken: false, quelle: 'funded', geplant: [], ausgelassen: ausg },
-            info: { auto_bestaetigen: { aktiv: true } } },
+            info: { auto_bestaetigen: { aktiv: !!d.auto_bestaetigen } } },
       apd: { d: { tag: heute, um: d.at, offen: laufend, geplant: [...vor, ...geplantEcht].filter(z => z.start_um) }, fehler: '' },
       planIds: ids
     }
   }
-  function fdpMitQuelle(fn){
+  // Daten-Felder auf den Funded-Stand stellen → Funktion, die alles zurückstellt (verschachtelt sicher: jede Ebene stellt ihren Vorgänger her)
+  function fdpTausch(){
     const F = _fdpQ
     const tausch = (obj, werte) => { const alt = {}; for(const k of Object.keys(werte)){ alt[k] = obj[k]; obj[k] = werte[k] } return () => { for(const k of Object.keys(alt)) obj[k] = alt[k] } }
     const lt = new Map([...((_tpl.lt && _tpl.lt.entries && _tpl.lt.entries()) || [])].filter(([id]) => F.planIds.has(String(id))))   // nur Funded-Trades (Hypo, Läuft, Heute-Bilanz)
     const zurueck = [tausch(_apIds, F.apIds), tausch(_ap, F.ap), tausch(_apd, F.apd), tausch(_tpl, { lt })]   // ID-Sicht (window._apSicht) bleibt gemeinsam: Klick auf eine ID gilt in beiden Reitern
     const typen = TPL_TYPEN.slice(); TPL_TYPEN.splice(0, TPL_TYPEN.length, 'funded')
-    try{ return fn() } finally{ F.apIds.D = _apIds.D; zurueck.reverse().forEach(r => r()); TPL_TYPEN.splice(0, TPL_TYPEN.length, ...typen) }
+    return () => { F.apIds.D = _apIds.D; zurueck.reverse().forEach(r => r()); TPL_TYPEN.splice(0, TPL_TYPEN.length, ...typen) }
   }
+  function fdpMitQuelle(fn){
+    const zurueck = fdpTausch()
+    try{ return fn() } finally{ zurueck() }
+  }
+  // KLICK-WACHE: die Knöpfe/Haken verdrahtet apIdsRenderChallenge direkt — ihr Handler läuft beim Klick, nicht beim Zeichnen. Im Funded-Reiter
+  // stellt die Wache (Capture am Wurzelknoten) den Funded-Stand für genau diesen Klick her und die Bubble-Phase am selben Knoten stellt
+  // zurück (Rückfall setTimeout, falls ein Handler die Weitergabe stoppt). Asynchrone Fortsetzungen (nach await) sehen wieder den
+  // Challenge-Stand und laden am Ende über apIdsLaden → Funded neu.
+  let _fdpKlickZurueck = null
+  const fdpKlickEnde = () => { const z = _fdpKlickZurueck; _fdpKlickZurueck = null; if(z) z() }
+  function fdpKlickWache(root){
+    if(!root || root.dataset.fdpWache) return
+    root.dataset.fdpWache = '1'
+    for(const typ of ['click', 'change']){
+      root.addEventListener(typ, () => { if(_apIdsArtWert !== 'funded' || !_fdpQ || _fdpKlickZurueck) return; _fdpKlickZurueck = fdpTausch(); setTimeout(fdpKlickEnde, 0) }, true)
+      root.addEventListener(typ, fdpKlickEnde)
+    }
+  }
+  // Route-Basis für tplEingriff (Bestätigen/Zurück/Löschen): Funded nur, solange der Reiter Funded-Planer offen ist
+  window._apIdsBasis = () => (_apIdsArtWert === 'funded' && !!document.getElementById('ap-ids-root')?.offsetParent) ? '/admin/funded-plan' : null
   // nach dem Zeichnen: Überschriften „Funded", Vorschau markieren, Knöpfe ohne Funded-Route weg (Challenge-Routen filtern auf auto_plan = true)
   function fdpNachbereiten(root){
     if(!root || !_fdpQ) return
@@ -72969,10 +73008,13 @@
       s.textContent = (Q.aktiv ? 'Funded-Planer an' : 'Funded-Planer aus · Vorschau') + (Q.regelnQuelle === 'standard' ? ' · Standard-Regeln' : '')
       s.title = `Start ${Q.zeiten.von || ''}–${Q.zeiten.bis || ''} Dubai, zufällig · max. ${Q.zeiten.max_je_id_tag || 2} Funded-Trades je ID und Tag · ${Q.zeiten.firma_abstand_min || 15} min Firmen-Abstand`
         + (Q.regelnQuelle === 'standard' ? ' · funded_plan_regeln noch nicht eingespielt, gerechnet mit den Standard-Regeln' : '') })
-    root.querySelectorAll('[data-tpl-nachplan], .ap-idr-r, .gp-leiste, .gp-liste, #ap-ids-alle-ok, [data-ap-ok-id]').forEach(e => e.remove())
-    root.querySelectorAll('[data-ap-ok], [data-ap-zur]').forEach(b => {
-      const vor = String(b.dataset.apOk || '').startsWith('vorschau:'), s = document.createElement('span')
-      s.className = 'ap-gr-live'; s.textContent = vor ? '◐ Vorschau' : '✓ bestätigt'; s.title = vor ? 'Trockenlauf — angelegt wird erst, wenn der Funded-Planer scharf ist' : 'vom Funded-Planer bestätigt — startet zur Startzeit'
+    root.querySelectorAll('[data-tpl-nachplan], .gp-leiste, .gp-liste').forEach(e => e.remove())
+    root.querySelectorAll('.ap-idr-menu .h').forEach(h => { h.textContent = h.textContent.replace(/Trade-Planer/g, 'Funded-Planer') })
+    root.querySelectorAll('.ap-idr-m').forEach(b => { b.title = String(b.title || '').replace(/Planer-Haken/g, 'Funded-Planer-Haken') })
+    if(Q.vorschau) root.querySelectorAll('#ap-ids-alle-ok, [data-ap-ok-id]').forEach(e => e.remove())   // nur Trockenlauf-Zeilen: nichts zu bestätigen
+    root.querySelectorAll('[data-ap-ok^="vorschau:"]').forEach(b => {
+      const s = document.createElement('span')
+      s.className = 'ap-gr-live'; s.textContent = '◐ Vorschau'; s.title = 'Trockenlauf — angelegt wird erst, wenn der Funded-Planer scharf ist'
       b.replaceWith(s) })
     root.querySelectorAll('.ap-ri-flip').forEach(b => { b.disabled = true; b.title = 'Richtung würfelt der Funded-Planer' })
     if(Q.vorschau) root.querySelectorAll('.ap-gr-offen .ap-adm-kopf b').forEach(b => { b.textContent = b.textContent.replace(/^Zu bestätigen/, 'Vorschau') })
@@ -72984,6 +73026,7 @@
     if(!_fdpQ){ root.style.padding = '22px 2px'; root.innerHTML = _fdpFehler ? `<div style="color:var(--danger)">⚠ ${escapeHtml(_fdpFehler)}</div>` : 'Lade Funded-Planer…'; return }
     fdpMitQuelle(apIdsRenderChallenge)
     fdpNachbereiten(root)
+    fdpKlickWache(root)
   }
   async function apIdsLaden(){
     if(_apIdsArtWert !== 'funded') return apIdsLadenChallenge()

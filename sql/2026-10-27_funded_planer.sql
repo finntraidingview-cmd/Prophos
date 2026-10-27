@@ -11,21 +11,28 @@
 -- zeiten: max_je_id_tag (Funded-Trades je ID und Tag), firma_abstand_min (zwischen zwei Starts derselben Firma, alle IDs + Challenge),
 -- abstand_id_min (Mindestabstand zweier Funded derselben ID, 90 min — sonst schiebt die Big-Trade-Sperre), vorlauf_min (frühester Start ab jetzt). Das Startfenster selbst ist das des
 -- Challenge-Planers (auto_plan_regeln.zeiten.fenster/fenster_tz/start_bis), Startzeiten darin zufällig.
+-- auto_bestaetigen (Finn 27.10.2026: „jeden Funded-Trade einzeln von Hand bestätigen"): false = der Planer legt Vorschläge OHNE start_um an,
+-- erst Admin → Funded-Planer → Bestätigen setzt die Startzeit; true = gleich bestätigt (wie der Schalter beim Challenge-Planer). Standard aus.
 create table if not exists public.funded_plan_regeln (
   id smallint primary key default 1 check (id = 1),
   aktiv boolean not null default false,
+  auto_bestaetigen boolean not null default false,
   user_ids uuid[] not null default '{}',
   firmen jsonb not null default '[]'::jsonb,
   zeiten jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
+alter table public.funded_plan_regeln add column if not exists auto_bestaetigen boolean not null default false;
 alter table public.funded_plan_regeln enable row level security;
 -- Keine Policy: nur Railway (Service-Key) liest und schreibt, wie bei auto_plan_regeln.
 
-insert into public.funded_plan_regeln (id, aktiv, user_ids, firmen, zeiten) values (1, false,
-  -- alle IDs der Gruppe Hermann Technologies (die Emin-Gruppe nicht); geplant werden ohnehin nur Funded-Konten einer Firma mit an = true
+insert into public.funded_plan_regeln (id, aktiv, auto_bestaetigen, user_ids, firmen, zeiten) values (1, false, false,
+  -- alle IDs der Gruppe Hermann Technologies (die Emin-Gruppe nicht) OHNE wd_farmer_regeln.ids_aus (archivierte ID „Finn" u. a., dieselbe
+  -- Liste wie der WD-Farmer); geplant werden ohnehin nur Funded-Konten einer Firma mit an = true. Pflege danach im Admin → „IDs verwalten".
   coalesce((select array_agg(m.user_id) from public.id_gruppe_mitglied m join public.id_gruppen g on g.id = m.gruppe_id
-            where g.name = 'Hermann Technologies'), '{}'),
+            where g.name = 'Hermann Technologies'
+              and m.user_id::text not in (select jsonb_array_elements_text(coalesce(to_jsonb(w.ids_aus), '[]'::jsonb))
+                                            from public.wd_farmer_regeln w where w.id = 1)), '{}'),
 '[
   {"name": "Apex Trader", "namen": ["apextrader", "apex"], "an": true, "symbol": "NQ", "lock_usd": 100,
    "je_groesse": {"150000": {"ziel_gewinn": 15000, "max_trade": 7500, "kosten_eur": 550, "dd": 4000, "kontrakte": {"2": 0.75, "3": 0.25}},
@@ -131,7 +138,7 @@ begin
 end $function$;
 
 -- Prüfen:
--- select aktiv, cardinality(user_ids), jsonb_path_query_array(firmen, '$[*] ? (@.an == true).name'), zeiten from public.funded_plan_regeln;
+-- select aktiv, auto_bestaetigen, cardinality(user_ids), jsonb_path_query_array(firmen, '$[*] ? (@.an == true).name'), zeiten from public.funded_plan_regeln;
 -- select public.prophos_firmen_abstand_funded_fenster();   -- 00:15:00
 -- Scharf schalten (erst nach Finns OK zur Vorschau):
 -- update public.funded_plan_regeln set aktiv = true, updated_at = now() where id = 1;
