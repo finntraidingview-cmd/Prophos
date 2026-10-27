@@ -27821,15 +27821,15 @@ def ap_bal_auto_funded(konten, letzt, schon, echo_bal, dup_bal, archiv=None):
     eingeschalteten Firmen liest der Bot selbst, wie die Planer-Konten). konten = Funded-Konten dieser Firmen (Aufrufer filtert), letzt =
     {konto_id: Ende des letzten Trades} (ap_letzt_je_konto). Gelesen wird, was der Funded-Planer als „Balance nicht live" auslässt: nie
     gelesen, letzte Lesung ohne Wert, oder Stand älter als das Ende des letzten Trades (ap_balance_live). Ausnahmen wie (C)/(D):
-    archiviert, Haken „Auto-Planer" aus, ohne External ID, Topstep Express. Deckel 3/Tag + 90 min gelten im Takt wie überall."""
+    archiviert, Haken „Auto-Planer" aus, ohne External ID, Topstep Express — dazu wartet auf Payout. Deckel 3/Tag + 90 min wie überall."""
     archiv = archiv or set()
     out = {}
     for a in konten or []:
         kid = str((a or {}).get("id") or "")
         if not kid or kid in archiv or kid in (schon or ()) or a.get("auto_planer") is False:
             continue
-        if not str(a.get("external_id") or "").strip() or ist_topstep_express(a):
-            continue
+        if not str(a.get("external_id") or "").strip() or ist_topstep_express(a) or a.get("waiting_payout_since"):
+            continue                                       # wartet auf Payout: lässt der Funded-Planer aus, also nicht lesen (S2 27.10.2026)
         if not any(a.get(f) for f in AP_LESE_FELDER):
             out[kid] = "Funded-Planer: noch nie gelesen"
             continue
@@ -27849,7 +27849,8 @@ def _ap_bal_auto_funded_konten():
     uids = [str(u) for u in ((reg or {}).get("user_ids") or [])]
     if not an or not uids:
         return [], {}
-    konten = [a for a in _ap_konten_laden({"user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"}) or []
+    konten = [a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": "in.(" + ",".join(uids) + ")",
+                                              "account_type": "eq.funded"}) or []
               if ap_regel_finden(an, a.get("firm"))]
     ids = [str(a.get("id")) for a in konten]
     plaene = []

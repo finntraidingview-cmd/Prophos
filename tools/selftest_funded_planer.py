@@ -313,10 +313,10 @@ def balance_selbst(ns):
     konten = [k("nie"), k("leer", tv_balance=0, tv_balance_at="2026-10-26T10:00:00+00:00"),
               k("alt", tv_balance=150000, tv_balance_at="2026-10-26T10:00:00+00:00"),
               k("frisch", tv_balance=157500, tv_balance_at="2026-10-26T16:00:00+00:00"),
-              k("aus", auto_planer=False), k("arch"), k("ohne", external_id=""), k("schon")]
+              k("aus", auto_planer=False), k("arch"), k("ohne", external_id=""), k("schon"), k("payout", waiting_payout_since="2026-10-26T00:00:00+00:00")]
     r = ns2["ap_bal_auto_funded"](konten, {"alt": "2026-10-26T15:00:00+00:00", "frisch": "2026-10-26T15:00:00+00:00"}, {"schon"}, {}, {}, {"arch"})
     check(sorted(r) == ["alt", "leer", "nie"] and "nie gelesen" in r["nie"] and "ohne Wert" in r["leer"] and "nicht gelesen" in r["alt"],
-          f"liest: nie gelesen, ohne Wert, älter als der letzte Trade — nicht: frisch, Haken aus, archiviert, ohne External ID, schon dran ({sorted(r)})")
+          f"liest: nie gelesen, ohne Wert, älter als der letzte Trade — nicht: frisch, Haken aus, archiviert, ohne External ID, schon dran, wartet auf Payout ({sorted(r)})")
     src_tick = SRC[SRC.index("\ndef ap_bal_auto_tick("):SRC.index("\ndef ", SRC.index("\ndef ap_bal_auto_tick(") + 10)]
     check("_ap_bal_auto_funded_konten()" in src_tick and src_tick.index("_ap_bal_auto_funded_konten()") < src_tick.index("if not kand:"),
           "ap_bal_auto_tick hängt (E) vor die Sende-Schleife (eigener try, Deckel 3/Tag + 90 min gelten)")
