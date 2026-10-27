@@ -24416,7 +24416,11 @@
       heimWiederholen(grund, false)
       if(heimMeldenJetzt(false, false)) bigTradeHeimMelden(bt, false, grund, Date.now() - anstoss, Date.now() - t0, String((e && e.message) || e))
     }
-    finally{ _bthLaeuft = false; _bthSelbst = false; _hwNaechsterHeimweg = Date.now() + hwPause() }
+    finally{
+      _bthLaeuft = false; _bthSelbst = false; _hwNaechsterHeimweg = Date.now() + hwPause()
+      // Beleg „Puls steht in konto" erst NACH dem Lauf (Puls-Flags weg), gilt bis zur nächsten Puls-Aktion (27.10.2026, s. kontoBelegGilt)
+      if(_hwOkAt >= t0 && _hwOkPlan === String(bt.id)){ try{ kontoBelegMerken(konto) }catch(_){} }
+    }
   }
   /* HEIM-WACHE (Finn 22.10.2026, Aurel pc-pw1put: nach der Orbit-V2-Order 17:40 Dubai auf Tradeify …7608 stand der Puls-Chrome noch ~30 min
    * dort, bis Finn von Hand ins Orbit-V3-Big-Trade-Konto …8937 zurückschaltete — „es darf nicht 2 oder 3 Minuten dauern … er führt die Aktion
@@ -24483,7 +24487,8 @@
       const alterS = (typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s : 99
       if(!(alterS <= 5)){ _hwFremdSeit = 0; return }
       const jetzt = Date.now()
-      if(hedgeKontoPasst(st.konto, konto)){ _hwFremdSeit = 0; _hwWiederN = 0; _hwOkOffen = false; _hwOkFremdN = 0; return }   // steht zu Hause
+      // steht zu Hause — auch mit gekürztem/angeklebtem Kontotext (27.10.2026, WD-Plan 4a1a8a79: 56 unnötige Heimwege, s. heimKontoPasst)
+      if(heimKontoPasst(st.konto, konto)){ _hwFremdSeit = 0; _hwWiederN = 0; _hwOkOffen = false; _hwOkFremdN = 0; return }
       // „ok" gemeldet, aber der Reader zeigt weiter ein fremdes Konto, ohne dass Puls seitdem woanders war → Konto-Text passt nie (Punkt 1)
       if(_hwOkOffen && _hwOkPlan === pid && jetzt - _hwOkAt < 60000 && !(_hwPulsWegAt > _hwOkAt)){
         _hwOkOffen = false
@@ -27954,6 +27959,73 @@
     const t = String(kontoText).trim()
     return t === id || t.split(/[^A-Za-z0-9]+/).includes(id)
   }
+  /* GEKÜRZTE UND ANGEKLEBTE KONTOTEXTE IM READER (27.10.2026, Slave 6, Befund Heim-Wache WD-Plan 4a1a8a79: 04:56–09:02
+   * UTC 56 Heimwege im Takt 100 s / 400 s, je ein Umschalter-Klick im Puls-Chrome, obwohl er die ganze Zeit im WD-Konto stand). Das
+   * Userscript zieht die Kontonummer per Muster (Buchstaben + ≥ 5 Ziffern) aus dem Umschalter-Text. Seit den TradingView-Updates
+   * kommen dabei zwei Formen an, die der exakte Token-Vergleich nie als Plan-Konto erkennt (echoplus_live 27.10.):
+   *  'kurz'  — lange Namen gekürzt („FTDFYSLX1500000000… 151,407.70 USD"), das Muster endet am „…" → Reader-Konto
+   *            „FTDFYSLX1500000000" = nur der ANFANG der External ID (Tradeify 20-stellig, Apex);
+   *  'klebt' — Kennung und Balance in eigenen spans ohne Leerzeichen („TDFYSL150000000000156,981.20USD") → „TDFYSL150000000000156",
+   *            die volle ID mit den ersten Balance-Ziffern dahinter.
+   * Folge: Heim-Wache hielt das eigene Konto für fremd, Schnell-Wächter/Reader-Ende sahen den Master auf diesen Konten nie.
+   * Volle Kennung im DOM gibt es nicht: augen.js nimmt seit 0.8.3 title/aria-label mit voller Nummer, die Stände zeigen trotzdem „…".
+   * → 'ja' | 'kurz' | 'klebt' | '' (kein Bezug). REIN RECHNEND (Test-Haken window._kontoTextBezug). */
+  const KONTO_KURZ_MIN = 12
+  function kontoTextBezug(kontoText, extId){
+    const id = String(extId || '').trim().toUpperCase(); if(!id || !kontoText) return ''
+    if(hedgeKontoPasst(String(kontoText).toUpperCase(), id)) return 'ja'
+    const t = (String(kontoText).trim().toUpperCase().split(/[^A-Z0-9]+/)[0]) || ''   // erstes Wort = die Kontonummer
+    if(t.length >= KONTO_KURZ_MIN && t.length < id.length && id.startsWith(t)) return 'kurz'
+    if(t.length > id.length && t.startsWith(id) && /^\d{1,3}$/.test(t.slice(id.length))) return 'klebt'   // 1–3 Ziffern = Balance-Anfang
+    return ''
+  }
+  // Eindeutig = kein ANDERES Konto dieses Logins (accounts samt archivierten) steht im selben Bezug zum Text. Apex-Falle: alle Konten
+  // eines Users beginnen gleich („PAAPEX600000000000…"), der gekürzte Text passt auf jedes → nie eindeutig. REIN RECHNEND.
+  function kontoTextEindeutig(kontoText, extId, extIds){
+    const id = String(extId || '').trim().toUpperCase()
+    return !(extIds || []).some(x => { const e = String(x || '').trim().toUpperCase(); return !!e && e !== id && !!kontoTextBezug(kontoText, e) })
+  }
+  function kontoExtIds(){ try{ return (accounts || []).map(a => a && a.externalId).filter(Boolean) }catch(_){ return [] } }
+  // BELEG: das Konto, das Puls zuletzt BEWIESEN gewählt hat (Heimweg ok, order_bot meldet bei gekürztem Umschalter die volle ID nur nach
+  // bewiesenem Listen-Klick, .1752). Gilt nur, solange Puls seitdem nichts getan hat — jede Puls-Aktion kann das Konto gewechselt haben.
+  // Nur für die Heim-Wache (spart einen Klick), nie für das Reader-Ende: einen Hand-Wechsel bemerkt der Beleg nicht (Prüfer S2).
+  const _kontoBeleg = { ext: '', at: 0 }
+  let _pulsAktivAt = 0
+  setInterval(() => { try{ if(hedgePulsUnterwegs()) _pulsAktivAt = Date.now() }catch(_){} }, 250)   // jede Puls-Aktion dauert Sekunden
+  function kontoBelegMerken(extId){ _kontoBeleg.ext = String(extId || '').trim().toUpperCase(); _kontoBeleg.at = Date.now() }
+  function kontoBelegGilt(extId){
+    try{ return !!_kontoBeleg.ext && _kontoBeleg.ext === String(extId || '').trim().toUpperCase() && _kontoBeleg.at >= _pulsAktivAt && !hedgePulsUnterwegs() }catch(_){ return false }
+  }
+  // Heim-Wache: steht der Puls-Chrome im Konto? 'kurz'/'klebt' eindeutig → ja; sonst nur mit Beleg (Apex). Kein Bezug → fremd.
+  function heimKontoPasst(kontoText, extId){
+    const b = kontoTextBezug(kontoText, extId)
+    if(b === 'ja') return true
+    if(!b) return false
+    return kontoTextEindeutig(kontoText, extId, kontoExtIds()) || kontoBelegGilt(extId)
+  }
+  // REIN RECHNEND: stehen die angeklebten Ziffern ('klebt') genau für den Anfang der Balance vor dem ersten Tausender-Komma?
+  // 156,981.20 → „156", 1,056,981 → „1". Ziffern + Balance oder Equity aus der Reader-Zusammenfassung (st.summary).
+  function kontoKlebtBalance(kontoText, extId, betraege){
+    const id = String(extId || '').trim().toUpperCase()
+    const t = (String(kontoText || '').trim().toUpperCase().split(/[^A-Z0-9]+/)[0]) || '', rest = t.slice(id.length)
+    return (betraege || []).some(x => { if(!(typeof x === 'number' && x >= 1)) return false
+      const ganz = String(Math.floor(x)); return ganz.slice(0, (ganz.length % 3) || 3) === rest })
+  }
+  // Reader-Ende/Schnell-Wächter: konservativ — ein falsch geschlossener Hedge ist schlimmer als ein ausbleibender (Prüfer S2 27.10.2026).
+  // Nur 'ja' oder 'klebt' (volle ID sichtbar), eindeutig im Login UND die angeklebten Ziffern = Anfang der Balance, die der Reader gerade
+  // liest (Zusammenfassung ≤ 10 s alt) — sonst könnte ein nicht erfasstes Konto „ID + Ziffern" (andere Firma im selben TV-Login) passen.
+  // 'kurz' NIE: ein Hand-Wechsel auf ein nicht erfasstes Konto mit gleichem Anfang ließe den Beleg gültig, und eine Bindung an die Balance
+  // verfiele genau beim Schließen. Gekürzte Namen bleiben ohne Reader-Ende wie bisher (Level/Kurs schließen).
+  function readerKontoPasst(kontoText, extId, st){
+    const b = kontoTextBezug(kontoText, extId)
+    if(b === 'ja') return true
+    if(b !== 'klebt' || !kontoTextEindeutig(kontoText, extId, kontoExtIds())) return false
+    if(!st || !(typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 10)) return false
+    const bq = tvBalanceAus(st.summary)
+    return kontoKlebtBalance(kontoText, extId, [bq.balance, bq.equity])
+  }
+  window._kontoTextBezug = kontoTextBezug; window._kontoTextEindeutig = kontoTextEindeutig; window._kontoKlebtBalance = kontoKlebtBalance
+  window._kontoBeleg = { merken: kontoBelegMerken, gilt: kontoBelegGilt, heim: heimKontoPasst, reader: readerKontoPasst, stand: () => Object.assign({ pulsAktivAt: _pulsAktivAt }, _kontoBeleg) }   // Test-Haken
   /* PULS UNTERWEGS = READER BLIND (16.10.2026, Vorfall e6914376 Aurel pc-pw1put, Tradeify-WD …2766: Order 09:53:26 UTC fertig, Position im
    * Reiter Positions bewiesen; 20 s später Rück-Login ins Orbit-V3-Big-Trade-Konto …3078 (bigTradeHeim, Prio 1) — mitten im Kontowechsel
    * stand im Reader noch der Konto-Text …2766, die Tabelle war leer bzw. schon die des anderen Kontos → Schnell-Wächter: Konto ≥ 2 s
@@ -27987,7 +28059,7 @@
       if(!o.gesehen || !(o.alterMs <= 3000) || !(o.sekundenSeitOpen >= 3)) return false
     }
     else if(!(o.alterMs <= 10000) || !(o.sekundenSeitOpen >= 30)) return false
-    if(o.kontoPlan){ if(!hedgeKontoPasst(o.kontoAktiv, o.kontoPlan)) return false }   // exakter Token-Vergleich (Gegenprüfung 25.09.2026)
+    if(o.kontoPlan){ if(!(o.kontoBewiesen === true || hedgeKontoPasst(o.kontoAktiv, o.kontoPlan))) return false }   // exakter Token-Vergleich (Gegenprüfung 25.09.2026); kontoBewiesen = readerKontoPasst des Aufrufers (gekürzt/angeklebt, 27.10.2026)
     else if(!(o.kontenAnzahl <= 1)) return false
     // Konto seit ≥ 10 s stabil (Gegenprüfung 25.09.2026): nach dem Zurückschalten von Konto B auf A ist die Tabelle kurz leer —
     // ohne diese Regel hätte eine einzige Lesung „Konto A, leer" den Hedge geschlossen, obwohl der Master läuft.
@@ -28073,7 +28145,7 @@
         const pid = String(p.id), h = p.mt5Baseline.hedge
         const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-        if(!kontoPlan || !hedgeKontoPasst(st.konto, kontoPlan)){ _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); continue }
+        if(!kontoPlan || !readerKontoPasst(st.konto, kontoPlan, st)){ _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); continue }
         if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
@@ -28095,7 +28167,7 @@
         // DIESELBE REGEL WIE DER 1-s-WÄCHTER (16.10.2026, Vorfall e6914376): bis dahin schloss dieser Weg nach 0,1 s leer + 2 s Konto und
         // umging .1560/.1563 (30 s leer im Wechsel-Fenster, 1 s erst nach 90 s Ruhe auf dem Plan-Konto) — jetzt entscheidet hedgeMasterWegEntscheid
         const weg = hedgeMasterWegEntscheid({ liste: st.positionen, positionenOk: st.positionen_ok, alterMs: st.positionen_alter_s * 1000,
-          sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung, kontoPlan, kontoAktiv: st.konto, kontenAnzahl: 99,
+          sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung, kontoPlan, kontoAktiv: st.konto, kontoBewiesen: true, kontenAnzahl: 99,   // readerKontoPasst oben
           kontoStabilMs: jetzt - _hedgeSchnellKonto.get(pid), leerSeitMs: jetzt - _hedgeSchnellLeer.get(pid), schnell: true, gesehen: true })
         if(weg && p.status === 'open'){
           _hedgeSchnellLeer.delete(pid)
@@ -28118,8 +28190,8 @@
       if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 5)) return null
       const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
       const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-      if(!kontoPlan || !hedgeKontoPasst(st.konto, kontoPlan)) return null
-      const sym = (plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
+      if(!kontoPlan || !readerKontoPasst(st.konto, kontoPlan, st)) return null
+      const sym =(plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
       const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
       const richtung = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
       if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null) return true
@@ -28171,7 +28243,7 @@
    * und zwei Lesungen hintereinander gleich (Tradovate bucht Gebühren mitunter eine Sekunde später). Höchstens ~3,5 s warten.
    * -> {balance_end, equity_end, balance_quelle:'reader', balance_at, balance_relativ:false} | null (dann liest Puls nach) */
   function hedgeReaderBalanceEntscheid(st, kontoPlan, vorher){
-    if(!st || st.an === false || !kontoPlan || !hedgeKontoPasst(st.konto, kontoPlan)) return { ok: false }
+    if(!st || st.an === false || !kontoPlan || !readerKontoPasst(st.konto, kontoPlan, st)) return { ok: false }
     if(!(typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 2)) return { ok: false }
     const b = (typeof tvBalanceAus === 'function') ? tvBalanceAus(st.summary) : { balance: null, equity: null }
     if(!(typeof b.balance === 'number' && b.balance > 1000) || !(typeof b.equity === 'number') || Math.abs(b.balance - b.equity) > 0.011) return { ok: false, b }
@@ -28424,7 +28496,7 @@
             const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
             // Konto passt (Token) UND ist frisch (konto_ts ≤ 10 s; altes Script ohne konto_ts: Payload-Frische) — sonst kein Timer
             const kontoFrisch = !!(st && (Number(st.konto_ts) > 0 ? Date.now() - Number(st.konto_ts) <= 10000 : frisch))
-            const kontoPasst = kontoPlan ? hedgeKontoPasst(kontoAktiv, kontoPlan) : (kontenAnzahl <= 1)
+            const kontoPasst = kontoPlan ? readerKontoPasst(kontoAktiv, kontoPlan, st) : (kontenAnzahl <= 1)   // gekürzt/angeklebt (27.10.2026)
             const pidK = String(p.id)
             const unterwegs = hedgePulsUnterwegs()   // 16.10.2026: Puls unterwegs → Reader blind, Ruhe beginnt danach neu
             if(kontoFrisch && kontoPasst && !unterwegs){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
@@ -28441,7 +28513,7 @@
             const weg = hedgeMasterWegEntscheid({ liste: st ? st.positionen : null, positionenOk: st ? st.positionen_ok : null,
               alterMs: st ? ((typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s * 1000 : Date.now() - (epLokal.ab || 0)) : Infinity,
               sekundenSeitOpen: (Date.now() - (Date.parse(h.opened_at || h.at || '') || 0)) / 1000, wurzel: wz, richtung,
-              kontoPlan, kontoAktiv, kontenAnzahl, kontoStabilMs,
+              kontoPlan, kontoAktiv, kontoBewiesen: !!kontoPlan && kontoPasst, kontenAnzahl, kontoStabilMs,
               leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0,
               schnell, gesehen: _hedgeMasterGesehen.has(pidK), unterwegs })
             // Hedge öffnete beim Senden-Klick, die Master-Position tauchte aber nie auf (Order abgelehnt / nicht gefüllt): Puls-Chrome-Reader
@@ -47562,7 +47634,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1760'
+  const OS_TAB_BUILD = '2026-09-22.1761'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
