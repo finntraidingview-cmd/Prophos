@@ -10703,6 +10703,8 @@
               <select class="input" id="fin-account">
                 <option value="">— kein bestimmter Account —</option>
               </select>
+              <!-- 29.10.2026: Anfrage 03:51 Dubai ohne Account gespeichert → kein Termin, kein Waiting-Reset, keine Balance-Lesung -->
+              <div id="fin-account-hint" style="display:none;font-size:11px;color:var(--sub);margin-top:4px">Ohne Account: kein nächster Payout-Termin, „Waiting for Payout" bleibt, keine Balance-Lesung</div>
             </div>
             <!-- Nächster Payout (08.10.2026, Finn: „nachdem ich den Payout angefragt habe oder als erledigt eintrage, will ich direkt
                  festlegen, wann der nächste Payout ist") — nur bei Payout mit gewähltem Account; landet in accounts.payout_ready_at
@@ -49325,7 +49327,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1834'
+  const OS_TAB_BUILD = '2026-09-22.1835'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68007,12 +68009,23 @@
   // Anfrage offen ist (bei „Bereits erhalten" ist das Geld ja schon da).
   // Nächster Payout (08.10.2026): nur bei Payout MIT Account — vorbelegt mit dem Termin am Konto (falls in der Zukunft), sonst heute
   // + 14 Tage (einen Firmen-Zyklus kennt Prophos nicht). Wechselt der Account, wird neu vorbelegt.
+  // CFD (29.10.2026, Finn: „wenn ich bei CFD ein Payout anfrage, soll das nächste Payout-Datum automatisch heute + 14 Tage gesetzt
+  // werden"): der Zyklus startet mit der Anfrage neu → heute + 14, ein schon SPÄTERES Datum am Konto bleibt (nie vorziehen).
+  // Ein früheres künftiges Datum gehört zum alten Zyklus. Futures unverändert.
   function finNextPayoutVorschlag(acc){
     const heute = (typeof _deTodayStr === 'function') ? _deTodayStr() : new Date().toISOString().slice(0, 10)
     const am = acc && acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0, 10) : ''
-    if(/^\d{4}-\d{2}-\d{2}$/.test(am) && am > heute) return am
     const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 14)
-    return d.toISOString().slice(0, 10)
+    const plus14 = d.toISOString().slice(0, 10)
+    if(finKontoIstCfd(acc)) return (/^\d{4}-\d{2}-\d{2}$/.test(am) && am > plus14) ? am : plus14
+    if(/^\d{4}-\d{2}-\d{2}$/.test(am) && am > heute) return am
+    return plus14
+  }
+  // CFD-Konto: Typ Funded CFD oder CFD-Firma (tpFirmIstCfd: FundedNext, The5%ers, FTMO, FundingPips, Tradeify CFD, eigene Lots-Firmen)
+  function finKontoIstCfd(acc){
+    if(!acc) return false
+    if(acc.type === 'funded_cfd') return true
+    try{ return typeof tpFirmIstCfd === 'function' && tpFirmIstCfd(acc.firm) }catch(_){ return false }
   }
   function updateFinPayoutFields(){
     const isPayout = document.getElementById('fin-kind').value === 'payout'
@@ -68023,6 +68036,7 @@
     if(liegtRow)  liegtRow.style.display  = (isPayout && isPending) ? '' : 'none'
     const accId = document.getElementById('fin-account')?.value || '', nextRow = document.getElementById('fin-next-payout-row'), nextEl = document.getElementById('fin-next-payout')
     if(nextRow) nextRow.style.display = (isPayout && accId) ? '' : 'none'
+    const accHint = document.getElementById('fin-account-hint'); if(accHint) accHint.style.display = (isPayout && !accId) ? '' : 'none'
     if(nextEl && isPayout && accId && nextEl.dataset.fuer !== accId){ nextEl.value = finNextPayoutVorschlag((accounts || []).find(a => String(a.id) === accId)); nextEl.dataset.fuer = accId }
     if(nextEl && !accId) nextEl.dataset.fuer = ''
   }
@@ -68051,9 +68065,11 @@
   // das MT5-Terminal einloggen und die Balance aktualisieren … bei TradingView-Accounts genauso"): dieselbe Aktion wie „↻ Balance lesen"
   // (accBalanceLesen wählt den Weg: MT5 → Echo-Terminal, TradingView/Topstep → Puls; am PC direkt, sonst per Signal an den PC der ID).
   // Nur anstoßen, nie blockieren — der Stand läuft über _accBalLauf in der Accounts-Liste.
+  // Nur CFD (29.10.2026, Finn: „bei CFD wurde beim Anfragen immer die Balance gelesen, bei Futures kann das weg").
   function finBalanceNachPayout(accountId){
     if(!accountId) return
     const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(!a) return
+    if(!finKontoIstCfd(a)) return
     if(typeof accBalanceLesen !== 'function'){ if(typeof atToast === 'function') atToast(`Balance von ${a.name} am PC der ID lesen`, 'end'); return }
     if(typeof atToast === 'function') atToast(`Balance wird nach dem Payout neu gelesen … (${a.name})`, 'start')
     accBalanceLesen(accountId).catch(e => { if(typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + String((e && e.message) || e), 'end') })
