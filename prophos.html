@@ -4811,6 +4811,7 @@
   #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:15px;font-weight:700}
   #dashboard-view .wdl-z-lauf .wdl-z-dauer{color:var(--ink-2);font-weight:600}
   #dashboard-view .wdl-z-wart .wdl-z-mi{color:var(--sub)}
+  #dashboard-view .wdl-z-wart .wdl-z-mi > .wdl-erg{color:var(--ink)}   /* „Zu laut Kurs-Feed" (29.10.2026): der Ergebnis-Chip bleibt lesbar, nur der Lauftext ist grau */
   /* Spalte mit Knopf (30.09.2026): Wartet „ab 07:33 · in 1 h [Jetzt lesen]", Überprüfen „TP ✓ [Abhaken]" — rechtsbündig, Knopf el-knopf */
   #dashboard-view .wdl-z > .wdl-z-akt{display:flex;align-items:center;justify-content:flex-end;gap:8px}
   #dashboard-view .wdl-z-akt > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}   /* auch am Handy („in 58 min" in einer Zeile) */
@@ -32970,10 +32971,61 @@
     return (jetzt - seit > WDL_LESUNG_VERLOREN_MS) ? jetzt - seit : 0
   }
   window._wdlLesungVerloren = wdlLesungVerloren   // Test-Haken
+  /* ZU LAUT KURS-FEED (29.10.2026 00:10, Finn: „Der Trade läuft im Radar in den Take Profit, und es dauert immer 1–2 Minuten, bis das
+   * erkannt wird und er auf Erledigt geht … sobald der Trade über den TP läuft, sofort zu Erledigt“). Bisher: der PC-Tab fragt alle 55–70 s
+   * (tvV2DemoEndeTakt) das Backend, das gegen MINUTENKERZEN rechnet (_lt_demo, tv_kurs_1m) und erst dann review setzt; der Radar pollt
+   * alle 15 s. Jetzt NUR ANZEIGE: läuft der 2-s-Feed-Kurs durch TP (BUY: Kurs ≥ TP, SELL: Kurs ≤ TP), echten SL oder die Liq-Linie
+   * (TP/SL wie die Live-P&L-Zeile wdlLive; Liq wie Spanne, Chart und Backend-Demo über die Regel-Linie liq_regel_level_nq vor dem
+   * Konto-Boden — Prüfung 29.10.2026), merkt _wdlFeedEnde den Treffer je Plan (Art, Zeit, Kurs, geschätzter P&L) und die Zeile
+   * steht sofort in „Erledigt“ unter „Zu laut Kurs-Feed“ mit dem Kennzeichen „wartet auf Endlesung“. Klebrig: ein Rücklauf des Kurses
+   * nimmt den Merker nicht weg (kein Flackern); er fällt, sobald der Plan laut Backend nicht mehr open ist (review/completed = der
+   * bisherige Weg bestätigt), oder nach WDL_FEED_ENDE_MAX_MS, falls der Plan dann immer noch open ist (TP nicht gefüllt) — dann zählt
+   * der Feed neu. Kein DB-Write, keine Order-Logik, Hand-Werte bleiben. Echo (CFD, kein NQ-Feed) und Polar sind nicht dabei. */
+  const _wdlFeedEnde = new Map(), WDL_FEED_ENDE_MAX_MS = 30 * 60000
+  // REIN RECHNEND (window._wdlFeedEndeArt): 'tp' | 'sl' | 'liq' | null für einen laufenden Plan am Kurs kp
+  const wdlFeedLiqLevel = t => { const n = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v); return n(t && t.liq_regel_level_nq) ?? n(t && t.liq_level_nq) }
+  function wdlFeedEndeArt(t, kp){
+    if(!t || t.status !== 'open' || kp == null || wdlIstEcho(t) || wdlIstPolar(t)) return null
+    const L = wdlLive(t, kp)
+    if(L.dTp != null && L.dTp <= 0) return 'tp'
+    if(L.dSl != null && L.dSl <= 0) return 'sl'
+    // Liq über die Regel-Linie (Tageslimit/Daily Loss) wie Spanne und _lt_demo, sonst der Konto-Boden — wdlLive kennt nur den Boden
+    const lq = wdlFeedLiqLevel(t), ri = t.richtung === 'buy' ? 1 : t.richtung === 'sell' ? -1 : 0
+    if(lq != null && ri && L.dTp != null && ((ri > 0 && kp <= lq) || (ri < 0 && kp >= lq))) return 'liq'
+    return null
+  }
+  window._wdlFeedEndeArt = wdlFeedEndeArt   // Test-Haken
+  const wdlFeedEnde = t => { const e = _wdlFeedEnde.get(wdlTid(t)); return (e && t && t.status === 'open') ? e : null }
+  // Merker setzen (neu getroffen → true) und aufräumen: Plan nicht mehr open → weg; zu alt und immer noch open → weg (Feed zählt neu)
+  function wdlFeedEndePruefen(kp, trades){
+    const jetzt = Date.now(); let neu = false
+    for(const [pid, e] of [..._wdlFeedEnde]){
+      const t = (trades || []).find(x => wdlTid(x) === pid)
+      if((t && t.status !== 'open') || jetzt - e.ms > WDL_FEED_ENDE_MAX_MS) _wdlFeedEnde.delete(pid)
+    }
+    if(kp == null) return false
+    for(const t of (trades || [])){
+      if(t.status !== 'open' || _wdlFeedEnde.has(wdlTid(t))) continue
+      const art = wdlFeedEndeArt(t, kp); if(!art) continue
+      const L = wdlLive(t, kp), n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+      const level = art === 'tp' ? n(t.tp_level_nq) : art === 'sl' ? wdlSlEcht(t) : wdlFeedLiqLevel(t)
+      _wdlFeedEnde.set(wdlTid(t), { art, ms: jetzt, at: new Date(jetzt).toISOString(), preis: kp, level, pl: L.pl })
+      neu = true
+    }
+    return neu
+  }
+  window._wdlFeedEnde = () => [..._wdlFeedEnde.entries()]   // Test-Haken
   // Nur die Live-Zahlen der laufenden Karten alle 2 s nachschreiben — kein Neuaufbau (Chart-Linien, ID-Leiste bleiben stehen)
   function wdlLiveTick(){
     if(!wdl.daten || !wdlAktiv()) return
     const k = wdlKursJetzt(), kp = k ? k.preis : null
+    // Kurs durch TP/SL/Liq (29.10.2026): sofort neu zeichnen — die Zeile wandert nach „Erledigt · Zu laut Kurs-Feed“. Nicht mitten in
+    // eine offene Notiz (Manuelle Arbeit, Riegel wie wdlLaden) oder ein laufendes Ziehen — dann kommt sie mit dem nächsten Laden.
+    if(wdlFeedEndePruefen(kp, wdl.daten.trades || [])){
+      const tippt = !!(_wdlManNotiz && document.querySelector('#wdl-liste [data-wdl-man-notiz]')), zieht = !!document.querySelector('#wdl-liste.is-ziehen')
+      if(!tippt && !zieht) wdlRender()
+      return
+    }
     for(const c of document.querySelectorAll('#wdl-liste .wdl-z-lauf[data-wdl-trade]')){
       const t = (wdl.daten.trades || []).find(x => wdlTid(x) === c.getAttribute('data-wdl-trade')); if(!t) continue
       // Echo hängt nicht am NQ-Kurs: nur die Laufzeit nachziehen (P&L/Punkt kommen mit dem 15-s-Abruf über wdlEchoLive)
@@ -33684,6 +33736,7 @@
     const tag = d => d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
     const zeit = t => { const d = new Date(t || ''); if(isNaN(d)) return '–'; const u = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); return d.toDateString() === heute ? u : tag(d) + ' ' + u }
     const kurs = wdlKursJetzt(), kp = kurs ? kurs.preis : null
+    wdlFeedEndePruefen(kp, alleTrades)   // Zu laut Kurs-Feed (29.10.2026): Merker setzen/aufräumen, bevor teile() die Gruppen bildet
     // KOPF (30.09.2026, Finn: „Orbit V2 · Topstep V2 · 3 laufen · 0 geplant · 42 beendet · Demo … ist hässlich, viel Text, bringt gar
     // nichts"): Statistik-Zeile und Legende entfallen, die Gruppen zählen selbst. Der Kopf erscheint nur noch, wenn das Neuladen
     // scheitert, während alte Zeilen stehen (sonst sähe ein eingefrorener Stand frisch aus); ohne Zeilen sagt es die Liste.
@@ -33757,7 +33810,19 @@
         : echo ? zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${lots(t.lots)} Lot${t.symbol ? `<span class="wdl-z-sym"> ${escapeHtml(t.symbol)}</span>` : ''}`, { tip: `${lots(t.lots)} Lot${t.symbol ? ' ' + t.symbol : ''}` })
         : zelle('ri', `<em${buy ? ' class="is-buy"' : sell ? ' class="is-sell"' : ''}>${buy ? 'BUY' : sell ? 'SELL' : '?'}</em>${t.kt != null ? f0(t.kt) : '?'} × ${escapeHtml(t.symbol_root || '?')}`)
       let art, miZ, plZ, zeitZ, kontoZ = ''
-      if(offen && polar){
+      const fe = (offen && !polar && !echo) ? wdlFeedEnde(t) : null
+      if(fe){
+        // ZU LAUT KURS-FEED (29.10.2026): Ergebnis-Chip + „wartet auf Endlesung“, P&L geschätzt am Feed-Kurs, Zu = Zeit des Durchlaufs;
+        // „Ansehen“ wie in Läuft (Puls springt aufs Konto — ist die Position zu, geht der Plan den bisherigen Weg nach Überprüfen)
+        art = 'wart'
+        const was = fe.art === 'tp' ? 'TP' : fe.art === 'sl' ? 'SL' : (wdlLiqIstTag(t) ? 'Tageslimit' : 'Liq')
+        const apid = wdlTid(t), aBusy = _wdlAnsehenBusy.has(apid), aHand = t.route === 'tsv2' && ((t.tv || {}).puls !== 'tsx')
+        const aKnopf = `<button type="button" class="wdl-ansehen" data-wdl-ansehen="${escapeHtml(apid)}"${(aBusy || aHand) ? ' disabled' : ''} title="${escapeHtml(aHand ? 'Topstep-Handplan — Puls sieht hier nicht nach' : 'Puls springt am PC der ID in TradingView auf dieses Konto — ist die Position schon zu, geht der Trade auf „Überprüfen"')}">${aBusy ? 'öffnet …' : 'Ansehen'}</button>`
+        miZ = zelle('mi wdl-z-akt', `<span class="wdl-erg">${was}${fe.art === 'tp' ? ' ✓' : ''} <small>(Feed)</small></span><span><span class="wdl-z-ab">Kurs durch ${was} · </span>wartet auf Endlesung</span>${aKnopf}`,
+          { tip: `Kurs-Feed ${f2(fe.preis)} lief ${zeit(fe.at)} durch ${was} ${f2(fe.level)} — Anzeige sofort; Ende, P&L und Erledigt bestätigt wie bisher die Endlesung (Puls/Reader)` })
+        plZ = zelle('pl', `<span style="color:${col(fe.pl)}">${fe.pl != null ? sig(fe.pl, '$', 2) : '–'}</span>${fusionLiveZ(t)}`, { tip: 'geschätzt am Feed-Kurs beim Durchlaufen — exakt nach der Endlesung (Balance nachher − vorher)' })
+        zeitZ = zelle('zeit', zeit(fe.at), { tip: `Kurs ${f2(fe.preis)} um ${zeit(fe.at)} durch ${was} ${f2(fe.level)}` })
+      } else if(offen && polar){
         // POLAR LÄUFT (20.10.2026): Phase + Fill beider Seiten aus dem Lauf-Stand (wdl.polar, /polar/stand), „Stand" öffnet das Popup
         // im Lauf-Modus; kein Live-P&L (der Bot streamt keinen, beide P&L kommen mit der Abrechnung), keine Spanne, kein „Ansehen"
         art = 'lauf'
@@ -33958,12 +34023,14 @@
     // Ablauf (30.09.2026, Finn): Läuft → Wartet (Nachlesung) → Überprüfen (P&L steht, abhaken) → Erledigt; „Geplant" ist raus.
     // Echo hat kein Wartet: review geht direkt nach Überprüfen.
     const teile = arr => {
-      const la = arr.filter(t => t.status === 'open'), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
+      // Zu laut Kurs-Feed (29.10.2026): offene Pläne mit Feed-Treffer stehen in Erledigt, nicht mehr in Läuft
+      const fe = arr.filter(t => t.status === 'open' && !!wdlFeedEnde(t))
+      const la = arr.filter(t => t.status === 'open' && !fe.includes(t)), rv = arr.filter(t => t.status === 'review'), er = arr.filter(t => t.status === 'completed')
       // Manuelle Arbeit (08.10.2026) geht vor Wartet/Überprüfen — das Kennzeichen zieht die Zeile aus beiden heraus (Zähler mit)
       // Geparkt (12.10.2026) bleibt in Überprüfen (eigene Untergruppe) und fällt nie nach Wartet
       const ma = rv.filter(t => !!wdlManuell(t) && !wdlGeparkt(t)), rest = rv.filter(t => !ma.includes(t))
       const wa = rest.filter(t => !wdlGeparkt(t) && !wdlIstEcho(t) && wdlWartet(t)), pr = rest.filter(t => !wa.includes(t))
-      return { la, wa, pr, ma, er }
+      return { la, fe, wa, pr, ma, er }
     }
     // MANUELLE ARBEIT (08.10.2026): zwischen Überprüfen und Erledigt, neueste Ablage oben. Leer, aber Überprüfen hat Zeilen → ein
     // schmaler, gestrichelter Kopf als Drop-Ziel (sonst gäbe es nichts, wohin man ziehen könnte); ohne beides nichts.
@@ -34220,8 +34287,11 @@
         const tab = gruppe('Abgehakt', nachEnde(gefiltert), kopf4, 'wdl-tab-konto wdl-tab-sek-erledigt', 'verlauf', []) || '<div class="wdl-og3-leer">Keine abgehakten Trades im Zeitraum.</div>'
         return `<section class="wdl-og3 wdl-og3-verlauf">${kopf}${filter}${tab}</section>`
       }
-      const erledigtN = norm.length + g.wa.length + blow.length + g.ma.length
-      const erledigt = gruppe('Abhaken', nachEnde(norm), kopf4, 'wdl-tab-konto wdl-tab-sek-pruef', null, normA)
+      // Zu laut Kurs-Feed (29.10.2026): zuoberst in Erledigt, neuester Durchlauf oben
+      const feZeit = t => String((wdlFeedEnde(t) || {}).at || ''), nachFeed = arr => arr.sort((x, y) => feZeit(y).localeCompare(feZeit(x)))
+      const erledigtN = g.fe.length + norm.length + g.wa.length + blow.length + g.ma.length
+      const erledigt = gruppe('Zu laut Kurs-Feed', nachFeed(g.fe), ['Ergebnis', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.fe)
+        + gruppe('Abhaken', nachEnde(norm), kopf4, 'wdl-tab-konto wdl-tab-sek-pruef', null, normA)
         + gruppe('Wartet auf Balance', nachEnde(g.wa), ['Nachlesung', 'P&amp;L', 'Zu'], 'wdl-tab-sek-wartet', null, a.wa)
         + gruppe('Geblowt · archivieren', nachEnde(blow), kopf4, 'wdl-tab-konto wdl-tab-sek-geblowt', null, blowA)
         + manuell(g, a)
@@ -48644,7 +48714,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1811'
+  const OS_TAB_BUILD = '2026-09-22.1812'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
