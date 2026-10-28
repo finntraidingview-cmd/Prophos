@@ -29318,7 +29318,9 @@ FDP_ZEITEN_STANDARD = {"tz": "Asia/Dubai", "von": "02:00", "bis": "20:00", "max_
 FDP_FIRMEN_STANDARD = [
     {"name": "Apex Trader", "namen": ["apextrader", "apex"], "an": True, "symbol": "NQ", "lock_usd": 100,
      "je_groesse": {"150000": {"ziel_gewinn": 15000, "max_trade": 7500, "kosten_eur": 550, "dd": 4000, "kontrakte": {"2": 0.75, "3": 0.25}},
-                    "100000": {"ziel_gewinn": 12000, "max_trade": 6000, "kosten_eur": 350, "dd": 3000, "kontrakte": {"1": 0.5, "2": 0.5}}}},
+                    "100000": {"ziel_gewinn": 12000, "max_trade": 6000, "kosten_eur": 350, "dd": 3000, "kontrakte": {"2": 0.5, "3": 0.5}}}},
+    # 100k seit 28.10.2026 2/3 NQ je 50 % statt 1/2 (Finn: „kein einziger Funded-Trade bei Apex soll wieder ein NQ sein, immer zwei bis drei,
+    # auch bei 100k"); die Apex-Stufe 1 erlaubt 3 Minis, der Deckel in fdp_kontrakte greift also nicht
     {"name": "Tradeify", "namen": ["tradeify"], "an": False},
     {"name": "Topstep", "namen": ["topstep"], "an": False},
     {"name": "Lucid Trading", "namen": ["lucidtrading", "lucid"], "an": False},

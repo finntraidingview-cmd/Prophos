@@ -111,18 +111,18 @@ def bausteine(ns):
     h = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000)
     check(h["master_risk"] == 4000 and h["slave_risk"] == 550 and h["lots"] == 6.47 and abs(h["hedge_eur"] - 1031.15) < 0.02,
           f"Plan-Felder wie Trade-Popup: master_risk {h['master_risk']}, slave_risk {h['slave_risk']}, {h['lots']} Lot, hedge_eur {h['hedge_eur']}")
-    # Kontrakte (Finn 27.10.2026): 100k 1/2 je 50 %, 150k 2 mit 75 % / 3 mit 25 %, gedeckelt auf die Minis der Stufe
+    # Kontrakte (Finn 27.10.2026, 100k seit 28.10.2026 2/3): 100k 2/3 je 50 %, 150k 2 mit 75 % / 3 mit 25 %, gedeckelt auf die Minis der Stufe
     K = ns["fdp_kontrakte"]
     rnd = random.Random(11)
     n = 20000
     z150 = [K(j150["kontrakte"], 4, rnd) for _ in range(n)]
     z100 = [K(j100["kontrakte"], 3, rnd) for _ in range(n)]
     a2, a3 = z150.count(2) / n, z150.count(3) / n
-    b1, b2 = z100.count(1) / n, z100.count(2) / n
+    b1, b2 = z100.count(2) / n, z100.count(3) / n
     check(set(z150) == {2, 3} and abs(a2 - 0.75) < 0.015 and abs(a3 - 0.25) < 0.015, f"150k: 2 NQ {a2:.1%} / 3 NQ {a3:.1%} (Soll 75/25)")
-    check(set(z100) == {1, 2} and abs(b1 - 0.5) < 0.015 and abs(b2 - 0.5) < 0.015, f"100k: 1 NQ {b1:.1%} / 2 NQ {b2:.1%} (Soll 50/50)")
+    check(set(z100) == {2, 3} and abs(b1 - 0.5) < 0.015 and abs(b2 - 0.5) < 0.015, f"100k: 2 NQ {b1:.1%} / 3 NQ {b2:.1%} (Soll 50/50, nie 1 NQ)")
     check(K({"3": 1}, 2, rnd) == 2 and K(j150["kontrakte"], 2, random.Random(5)) <= 2, "Deckel: nie mehr als die Minis der Stufe")
-    check(K(j150["kontrakte"], 4) == 2 and K(j100["kontrakte"], 3) == 1 and K(None, 3) == 1, "ohne Würfel: wahrscheinlichster Wert (Gleichstand: kleinerer)")
+    check(K(j150["kontrakte"], 4) == 2 and K(j100["kontrakte"], 3) == 2 and K(None, 3) == 1, "ohne Würfel: wahrscheinlichster Wert (Gleichstand: kleinerer)")
     r = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000, random.Random(3))
     check(r["tp_pkt"] == round(7500 / (20 * r["kontrakte"]), 2) and r["sl_pkt"] == round(2500 / (20 * r["kontrakte"]), 2),
           f"Punkte = $ ÷ (Kontrakte × 20 $): {r['kontrakte']} NQ → TP {r['tp_pkt']} / SL {r['sl_pkt']} Punkte")
