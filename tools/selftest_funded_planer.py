@@ -149,6 +149,20 @@ def bausteine(ns):
     for u, _k in gew:
         je[u] = je.get(u, 0) + 1
     check(je == {"u1": 2, "u2": 1, "u3": 1} and len(ueber) == 4, f"Tagesdeckel 2 je ID (u2 hatte heute schon 1): {je}, {len(ueber)} auf morgen")
+    # Längste Pause zuerst (Finn 28.10.2026: zuletzt vor 7 / 6 / 5 / 3 / 4 Tagen getradet → erst die 7 und die 6)
+    lz = {"k7": "2026-10-21T09:00:00+00:00", "k6": "2026-10-22T09:00:00+00:00", "k5": "2026-10-23T09:00:00+00:00",
+          "k3": "2026-10-25T09:00:00+00:00", "k4": "2026-10-24T09:00:00+00:00"}
+    for sd in range(6):
+        g2, u2 = ns["fdp_auswahl"]([("u1", k) for k in ("k3", "k5", "k4", "k6", "k7")], {}, 2, random.Random(sd), lz)
+        if sorted(k for _u, k in g2) != ["k6", "k7"] or sorted(u2) != ["k3", "k4", "k5"]:
+            break
+    check(sorted(k for _u, k in g2) == ["k6", "k7"] and sorted(u2) == ["k3", "k4", "k5"],
+          "Tagesdeckel nimmt die Konten mit der längsten Pause (7 und 6 Tage), egal wie gewürfelt wird")
+    g3, _u3 = ns["fdp_auswahl"]([("u1", "alt"), ("u1", "neu"), ("u1", "x")], {"u1": 1}, 2, random.Random(1), {"alt": "2026-10-20", "neu": "2026-10-27", "x": "2026-10-26"})
+    check([k for _u, k in g3] == ["alt"], "mit 1 schon heute: nur noch das älteste Konto")
+    m4, r4 = ns["fdp_zeiten"]([("u1", "frisch", "apex"), ("u2", "alt", "apex")], {}, {"apex": [float(x) for x in range(120, 1201, 10) if x not in (590, 600, 610)]},
+                              120, 1200, 90, 15, random.Random(0), letzt={"frisch": "2026-10-27", "alt": "2026-10-20"})
+    check(list(m4) == ["alt"] and r4 == ["frisch"], "nur ein freier Slot im Fenster (595–605) → geht an das Konto mit der längeren Pause")
     kand = [("u1", "a", "apex"), ("u1", "b", "apex"), ("u2", "c", "apex"), ("u3", "d", "apex"), ("u4", "e", "tradeify")]
     m, rest = ns["fdp_zeiten"](kand, {"u1": [600.0]}, {"apex": [300.0, 305.0]}, 120, 1200, 90, 15, random.Random(9))
     neu = sorted(m[k] for k in "abcd")

@@ -29503,9 +29503,12 @@ def fdp_fenster(ap_zeiten):
     return tz, von, bis
 
 
-def fdp_auswahl(kand, schon, max_je_id, rnd):
+def fdp_auswahl(kand, schon, max_je_id, rnd, letzt=None):
     """REIN RECHNEND (testbar): Tagesdeckel je ID (Finn 27.10.2026: „Höchstens 2 Funded-Trades pro ID und Tag") → (gewählt, über).
-    kand = [(user_id, konto_id)], schon = {user_id: heute schon geplant/gelaufen}. Welche Konten einer ID drankommen, entscheidet der Zufall."""
+    kand = [(user_id, konto_id)], schon = {user_id: heute schon geplant/gelaufen}, letzt = {konto_id: ISO des letzten Trades}.
+    LÄNGSTE PAUSE ZUERST (Finn 28.10.2026: „immer die Accounts tradet, die zuletzt am längsten nicht getradet wurden — das umgeht die
+    Inaktivitätsregel"): je ID kommen die Konten mit dem ältesten letzten Trade dran; gleich alt = Zufall."""
+    letzt = letzt or {}
     je = {}
     for u, k in kand:
         je.setdefault(str(u), []).append(k)
@@ -29513,13 +29516,14 @@ def fdp_auswahl(kand, schon, max_je_id, rnd):
     for u, konten in je.items():
         konten = list(konten)
         rnd.shuffle(konten)
+        konten.sort(key=lambda k: str(letzt.get(k) or ""))          # stabil: Zufall nur zwischen gleich alten
         frei = max(0, int(max_je_id) - int(schon.get(u) or 0))
         gew += [(u, k) for k in konten[:frei]]
         ueber += konten[frei:]
     return gew, ueber
 
 
-def fdp_zeiten(kandidaten, belegt_id, belegt_firma, ab, bis, abstand_id, abstand_firma, rnd, versuche=400, erlaubt=None):
+def fdp_zeiten(kandidaten, belegt_id, belegt_firma, ab, bis, abstand_id, abstand_firma, rnd, versuche=400, erlaubt=None, letzt=None):
     """REIN RECHNEND (testbar): Startminuten (Minuten ab Mitternacht der Fenster-Zone) → ({konto_id: minute}, [nicht platziert]).
     kandidaten = [(user_id, konto_id, firma)]. Jede Startzeit ist ein Zufallswert in [ab, bis] (kein Raster, keine Reihenfolge); passt er
     nicht — < abstand_firma zu einem anderen Start derselben Firma (alle IDs, auch Challenge-Planer: belegt_firma) oder < abstand_id zu
@@ -29530,6 +29534,9 @@ def fdp_zeiten(kandidaten, belegt_id, belegt_firma, ab, bis, abstand_id, abstand
     out, rest = {}, []
     reihe = list(kandidaten)
     rnd.shuffle(reihe)
+    # längste Pause zuerst (28.10.2026): wer am längsten nicht getradet wurde, bekommt zuerst einen Slot — reicht das Fenster nicht, fällt
+    # das jüngst getradete Konto weg. Die Startzeit selbst bleibt Zufall, nur die Reihenfolge der Vergabe nicht.
+    reihe.sort(key=lambda x: str((letzt or {}).get(x[1]) or ""))
     for u, k, f in reihe:
         u, f = str(u), str(f)
         t = None
@@ -29705,12 +29712,15 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
         elif r["aktion"] != "planen":
             erg["ausgelassen"].append(r)
         else:
+            # letzter Trade (gestartet) — nie getradet: seit der Anlage des Kontos (ab dann läuft die Inaktivitätsfrist)
+            r["letzter_trade"] = max([str(p.get("started_at")) for p in pl if p.get("started_at")] or [str(a.get("created_at") or "")]) or None
             rech[aid] = (a, r)
             kand.append((str(a.get("user_id")), aid))
-    # Tagesdeckel je ID, dann Startzeiten zufällig im Fenster (Minuten ab Mitternacht der Fenster-Zone)
-    gewaehlt, ueber = fdp_auswahl(kand, schon, max_je_id, rnd)
+    # Tagesdeckel je ID (längste Pause zuerst), dann Startzeiten zufällig im Fenster (Minuten ab Mitternacht der Fenster-Zone)
+    letzt_je = {aid: r.get("letzter_trade") for aid, (_a, r) in rech.items()}
+    gewaehlt, ueber = fdp_auswahl(kand, schon, max_je_id, rnd, letzt_je)
     for aid in ueber:
-        erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund=f"Tagesdeckel {max_je_id} Funded-Trades je ID erreicht — morgen"))
+        erg["ausgelassen"].append(dict(rech[aid][1], aktion="aus", grund=f"Tagesdeckel {max_je_id} Funded-Trades je ID erreicht — andere Konten der ID waren länger nicht dran, morgen"))
     belegt_id, belegt_firma = {}, {}
     for b in offen_alle or []:
         t = b.get("started_at") if b.get("status") == "open" else (b.get("start_um") or b.get("fp_start"))   # Vorschlag: vorgeschlagene Zeit
@@ -29729,7 +29739,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None):
     # nur Startzeiten im Plan-Handelstag (Winterzeit: 02:00–03:00 Dubai ist noch der alte CME-Tag bzw. die Pause)
     im_tag = lambda m: _cme_handelstag((mitternacht + timedelta(minutes=m)).astimezone(timezone.utc).isoformat()) == cme_heute
     minuten, ohne = fdp_zeiten([(u, k, rech[k][1]["firma_key"]) for u, k in gewaehlt], belegt_id, belegt_firma,
-                               ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=im_tag)
+                               ab_min, float(bis_min), id_abst, f_abst, rnd, erlaubt=im_tag, letzt=letzt_je)
     frontcode = _wd_futures_frontcode(jetzt)
     auto_ok = reg.get("auto_bestaetigen") is True
     zeilen = []
