@@ -28470,7 +28470,13 @@
     // der Master lief weiter (Reader 02:42: Long 3 NQZ6, −1.785 $), Pascal musste von Hand nachhedgen. TradingViews Panel baut die
     // Positionstabelle nach einem Login/Konto-Wechsel neu auf und zeigt dabei kurz „no open positions". Deshalb gilt die 1-s-Regel erst,
     // wenn der Reader das Plan-Konto ≥ 60 s ununterbrochen zeigt; davor muss die Liste ≥ 10 s leer sein (wie die langsame Regel).
-    const ruhig = o.kontoStabilMs >= 90000   // .1563: 90 s statt 60
+    // GESEHEN IM ZEITRAUM (28.10.2026, Finn: „das Tampermonkey-Script geht nicht … 3–4 Big Trades habe ich von Hand geschlossen"): seit .1799
+    // 4 Big Trades bei Marc pc-7ftp5l, 0 × Userscript — die 90-s-Uhr fängt bei jeder Puls-Aktion neu an, ein Big Trade mit TP/SL in < 2 min
+    // oder ein Hand-Schluss kam so nie unter 30 s. Der Leer-Text beim Neuaufbau (.1560) steht VOR der ersten Zeile; hat der Reader die
+    // Master-Position in DIESEM Konto-Zeitraum schon gezeigt (o.gesehenImZeitraum, nur der Schnell-Wächter setzt es), ist die Tabelle
+    // aufgebaut → 1 s flach reicht wie nach 90 s Ruhe (Sichtung zählt erst ab 5 s im Konto). Mike 15.10.: Position nur VOR dem Login-Wechsel
+    // gesehen → bleibt bei 30 s. Gekürzte Apex-Namen (Nachbarkonto, gleicher Text) schützt weiter der Balance-Sprung (kurzEndeBeweis).
+    const ruhig = o.kontoStabilMs >= 90000 || o.gesehenImZeitraum === true   // .1563: 90 s statt 60
     const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
     const zeilen = o.liste.filter(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || '')); return xw === w })
     // Position im Plan-Symbol MIT Plan-Richtung (Tradovate nettet je Symbol): Menge 0 = weg, Teilmenge = nur Hinweis, nie schließen
@@ -28527,7 +28533,18 @@
    * (keine Cloud). Schließt, wenn das Plan-Konto ≥ 0,6 s flach ist (mehrere Lesungen), der Stand ≤ 1,5 s alt, das Konto ≥ 2 s stabil,
    * der Hedge ≥ 3 s offen und die Master-Position seit dem Open schon gesehen war. Alles andere bleibt beim 1-s-Wächter. */
   const _hedgeSchnellLeer = new Map(), _hedgeSchnellKonto = new Map(), _hedgeFillAusReader = new Set()
+  const _hedgeSchnellGesehenAt = new Map()   // plan-id → letzte Lesung MIT Master-Position (für gesehenImZeitraum, 28.10.2026)
   let _hedgeSchnellBusy = false
+  /* WARUM SCHLIESST DER READER NICHT (28.10.2026): bei Marcs 4 Big Trades nach .1799 stand am Hedge kein einziges Zeichen, warum das
+   * Userscript wartete. Master weg laut Reader, aber kein Schluss → Grund am Hedge (reader_wartet), erste Meldung sofort, dann je 60 s. */
+  const _hedgeWartetAt = new Map()
+  function hedgeReaderWartetMelden(p, grund, werte){
+    const pid = String(p.id), jetzt = Date.now(), t = _hedgeWartetAt.get(pid)
+    if(t && (jetzt - t.at < 10000 || (t.grund === grund && jetzt - t.at < 60000))) return   // je Plan höchstens alle 10 s, gleicher Grund alle 60 s
+    _hedgeWartetAt.set(pid, { grund, at: jetzt })
+    try{ console.info('[hedgeSchnell] Reader flach, Fusion bleibt offen —', grund, werte || '') }catch(_){}
+    try{ hedgeAmPlanSchreiben(p.id, { reader_wartet: Object.assign({ grund, at: new Date(jetzt).toISOString() }, werte || {}) }).catch(() => {}) }catch(_){}
+  }
   async function hedgeReaderSchnellTick(){
     if(_hedgeSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
     let tp; try{ tp = tradePlans }catch(_){ return }
@@ -28554,11 +28571,19 @@
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         if(kontoPlan) kurzAnkerPflegen(p, kontoPlan, st, wz)   // gekürzter Text: Anker aus Dropdown-Beleg oder Fill-Bindung (28.10.2026)
-        if(!kontoPlan || !(readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst(st.konto, kontoPlan, st))){ _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); continue }
-        if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
+        if(!kontoPlan || !(readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst(st.konto, kontoPlan, st))){
+          _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid)
+          // gekürzter Text ohne Anker (oder Nachbarkonto im selben Login) — bis .1800 stumm, Marcs Apex/FTDFYSLX 28.10.2026
+          if(kontoPlan && _hedgeMasterGesehen.has(pid) && kontoTextBezug(st.konto, kontoPlan) === 'kurz' && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) == null)
+            hedgeReaderWartetMelden(p, 'gekürzter Kontoname: Plan-Position nicht sichtbar, kein Anker (evtl. Nachbarkonto im selben Login)', { konto: String(st.konto || '').slice(0, 40) })
+          continue
+        }
+        if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){
           _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid); kurzFensterNeu(pid, wz)
+          // erst ab 5 s im Konto zählt die Sichtung für gesehenImZeitraum — mitten im Wechsel kann die Tabelle noch die des Vorgängers sein (e6914376, Prüfer 28.10.2026)
+          if(jetzt - _hedgeSchnellKonto.get(pid) >= 5000) _hedgeSchnellGesehenAt.set(pid, jetzt)
           // FILL SOFORT (01.10.2026): der Hedge öffnete beim Senden-Klick mit dem Kurs zum Klick — der echte Avg Fill steht ~0,1–0,3 s nach
           // dem Fill in der Positions-Tabelle des Puls-Chrome; damit Entry + Level am Hedge, ohne auf „Show more" (~3 s) zu warten
           if(/^feed/.test(String(h.einstieg_quelle || '')) && !_hedgeFillAusReader.has(pid) && typeof hedgeEinstiegNachtragen === 'function'
@@ -28578,7 +28603,14 @@
         // umging .1560/.1563 (30 s leer im Wechsel-Fenster, 1 s erst nach 90 s Ruhe auf dem Plan-Konto) — jetzt entscheidet hedgeMasterWegEntscheid
         const weg = hedgeMasterWegEntscheid({ liste: st.positionen, positionenOk: st.positionen_ok, alterMs: st.positionen_alter_s * 1000,
           sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung, kontoPlan, kontoAktiv: st.konto, kontoBewiesen: true, kontenAnzahl: 99,   // readerKontoPasst oben
-          kontoStabilMs: jetzt - _hedgeSchnellKonto.get(pid), leerSeitMs: jetzt - _hedgeSchnellLeer.get(pid), schnell: true, gesehen: true })
+          kontoStabilMs: jetzt - _hedgeSchnellKonto.get(pid), leerSeitMs: jetzt - _hedgeSchnellLeer.get(pid), schnell: true, gesehen: true,
+          gesehenImZeitraum: (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid) })
+        if(!weg && jetzt - _hedgeSchnellLeer.get(pid) >= 1000){
+          const kMs = jetzt - _hedgeSchnellKonto.get(pid), lMs = jetzt - _hedgeSchnellLeer.get(pid)
+          const imZr = (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid)
+          const grund = kMs < 2000 ? 'Konto erst kurz im Reader' : ((kMs < 90000 && !imZr) ? 'Wechsel-Fenster: 30 s flach nötig (Master in diesem Konto-Zeitraum nicht gesehen)' : 'Regel sagt nein')
+          hedgeReaderWartetMelden(p, grund, { konto_ms: kMs, leer_ms: lMs, gesehen_im_zeitraum: imZr })
+        }
         if(weg && p.status === 'open'){
           // Gekürzter Text: zusätzlich Balance-Sprung im Kurs-Fenster (Hand-Wechsel auf ein Konto desselben Logins, 28.10.2026)
           const kurz = kontoTextBezug(st.konto, kontoPlan) === 'kurz' ? kurzEndeBeweis(p, kontoPlan, st, wz) : null
@@ -48188,7 +48220,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1800'
+  const OS_TAB_BUILD = '2026-09-22.1801'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
