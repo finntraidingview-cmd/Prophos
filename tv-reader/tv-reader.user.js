@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.11
+// @version      0.9.12
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.12 29.10.2026  Leer-Beweis nachgeschaerft (Pruefer S2 zu 0.9.11): „Nothing to show yet" ist TradingViews generischer Leer-Text
+//                      (auch Orders/History/Notifications). Er zaehlt jetzt nur noch INNERHALB der Positions-Tabelle
+//                      (table[data-name$="positions-table"]) oder zusammen mit deren Spaltenkopf „Position ID" im selben Vorfahren —
+//                      bei eingeklapptem Panel (Reiter gewaehlt, Tabelle nicht gerendert) traf der Vorfahren-Lauf sonst ein beliebiges
+//                      Seitenelement mit dem generischen Text. „No open positions" (alter Text) bleibt wie bisher tabellen-eindeutig.
 //   0.9.11 29.10.2026  Leer-Beweis nach dem TradingView-Update (ab 26.10. ausgerollt): die leere Positions-Tabelle sagt jetzt
 //                      „Nothing to show yet. You …" statt „No open positions" — RX_LEER_POS kannte den Text nicht, jedes flache
 //                      Konto galt als blind („kein Leer-Beweis"), kein Reader-Ende mehr (28.10.: 0 von 26 Hedge-Enden ueber das
@@ -142,7 +147,7 @@
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.9.11';
+  const VERSION    = '0.9.12';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1038,7 +1043,19 @@
   // 0.9.3 (Puls-Chrome): positiver Leer-Beweis — Reiter Positions aktiv UND TradingViews Leer-Text im Panel
   // 0.9.11 (29.10.2026): TradingView zeigt in der leeren Positions-Tabelle seit dem Update vom 26./27.10. „Nothing to show yet. You …"
   // (Inventar pc-7ftp5l 28.10. 23:19 Dubai); vorher „No open positions". Ohne den Text gab es keinen Leer-Beweis → blind → kein Reader-Ende.
-  const RX_LEER_POS = /no open positions|nothing to show yet|keine offenen positionen|keine positionen/i;
+  // 0.9.12: der alte Text ist tabellen-eindeutig; der neue, generische zaehlt nur in der Positions-Tabelle (oder mit „Position ID" daneben)
+  const RX_LEER_POS = /no open positions|keine offenen positionen|keine positionen/i;
+  const RX_LEER_NEU = /nothing to show yet/i;
+  const RX_LEER_KOPF = /position id/i;
+  const SEL_POS_TABELLE = 'table[data-name$="positions-table"]';
+  // REIN RECHNEND (testbar): Vorfahr-Text + Positions-Tabelle darin (Element oder null) → flach bewiesen?
+  function leerTextPasst(text, tabelle) {
+    const t = String(text || '');
+    if (RX_LEER_POS.test(t)) return true;
+    if (!RX_LEER_NEU.test(t)) return false;
+    if (tabelle) return RX_LEER_NEU.test(String(tabelle.textContent || ''));   // Text steht in der Positions-Tabelle selbst
+    return RX_LEER_KOPF.test(t);                                               // kein Tabellen-Element gefunden: Spaltenkopf „Position ID" muss dabeistehen
+  }
   let leerMerk = { ms: 0, wert: false };
   function leerBeweis() {
     const jetzt = Date.now();
@@ -1050,7 +1067,8 @@
         // 0.9.5: nur im Panel — vom Reiter aufwärts, bis ein Vorfahr den Leer-Text enthält (höchstens 8 Ebenen), nie die ganze Seite
         let el = r.parentElement;
         for (let i = 0; el && i < 8 && el !== document.body; i++, el = el.parentElement) {
-          if (RX_LEER_POS.test(el.textContent || '')) { wert = true; break; }
+          let tab = null; try { tab = el.querySelector(SEL_POS_TABELLE); } catch (_) {}
+          if (leerTextPasst(el.textContent, tab)) { wert = true; break; }
         }
       }
     } catch (_) {}

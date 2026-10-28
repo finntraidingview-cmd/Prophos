@@ -96,6 +96,37 @@ check(h4.kontoIstEcht("FNFTFAMUSTERMUSTERAB\u2026") && !h4.kontoIstEcht("MNQZ202
       && !h4.kontoIstEcht("ABC\u2026 1,00 USD"), "gekuerzt zaehlt als Konto, kurze Woerter/Kontrakte mit … nie");
 h4.kontoMerk.text = "FNFTFAMUSTERMUSTERAB\u2026"; h4.kontoMerk.ts = T;
 check(h4.kontoAngemeldet(T + 1000), "gekuerzt: kontoAngemeldet (nicht mehr blind)");
+// 0.9.12 (29.10.2026): Leer-Beweis — TradingViews generischer Text 'Nothing to show yet' zaehlt nur in der Positions-Tabelle
+var codeLeer = stueck("const RX_LEER_POS", "function blindGrund");
+var harnessLeer = "var leerMerkMs = 0; var document = {body:{}, getElementById:function(){return null}}; var Date = {now:function(){ leerMerkMs += 1000; return leerMerkMs; }};" + codeLeer +
+  "; return {leerBeweis:leerBeweis, leerTextPasst:leerTextPasst, setDoc:function(d){ document = d; }};";
+var h5 = new Function(harnessLeer)();
+function el(text, kinder, tabelle) {   // Element-Attrappe: textContent, parentElement (wird verkettet), querySelector findet die Tabelle
+  var e = { textContent: text, parentElement: null, querySelector: function (sel) { return (sel.indexOf("positions-table") >= 0) ? (tabelle || null) : null; } };
+  (kinder || []).forEach(function (k) { k.parentElement = e; });
+  return e;
+}
+function doc(reiter, kette) { return { body: {}, getElementById: function (id) { return id === "positions" ? reiter : null; } }; }
+var tabLeer = { textContent: "Symbol Side Qty Avg Fill Price Profit Update Time Position ID Nothing to show yet. You have no open positions" };
+var tabVoll = { textContent: "Symbol Side Qty Avg Fill Price Profit Update Time Position ID NQZ6 Long 3 29,947.75 -3,030.00 USD" };
+function reiter(sel) { return { getAttribute: function (a) { return a === "aria-selected" ? sel : null; }, parentElement: null }; }
+// Fall 1: alter Text im Panel → flach (wie bisher)
+var r1 = reiter("true"); var p1 = el("Positions Orders No open positions", [r1]); h5.setDoc(doc(r1));
+check(h5.leerBeweis() === true, "leerBeweis: alter Text 'No open positions' im Panel → flach");
+// Fall 2: neuer Text in der Positions-Tabelle unter dem Panel → flach
+var r2 = reiter("true"); var p2 = el("Positions Orders " + tabLeer.textContent, [r2], tabLeer); h5.setDoc(doc(r2));
+check(h5.leerBeweis() === true, "leerBeweis: 'Nothing to show yet' in table[data-name$=positions-table] → flach");
+// Fall 3: neuer Text irgendwo auf der Seite, Tabelle nicht gerendert (Panel eingeklappt) → NICHT flach
+var r3 = reiter("true"); var p3 = el("Positions Orders", [r3]); var seite3 = el("Notifications log Nothing to show yet. Alerts", [p3]); h5.setDoc(doc(r3));
+check(h5.leerBeweis() === false, "leerBeweis: generischer Text ausserhalb der Positions-Tabelle, keine Tabelle → nicht flach");
+// Fall 4: Tabelle da, aber mit Position (Text 'Nothing to show yet' nur anderswo im Vorfahren) → NICHT flach
+var r4 = reiter("true"); var p4 = el("Positions Nothing to show yet " + tabVoll.textContent, [r4], tabVoll); h5.setDoc(doc(r4));
+check(h5.leerBeweis() === false, "leerBeweis: Positions-Tabelle mit Zeile, generischer Text daneben → nicht flach");
+// Fall 5: ohne Tabellen-Element zaehlt der Spaltenkopf 'Position ID' im selben Vorfahren
+check(h5.leerTextPasst("Symbol Side Qty Position ID Nothing to show yet", null) === true && h5.leerTextPasst("Nothing to show yet", null) === false, "leerTextPasst: ohne Tabellen-Element nur mit 'Position ID' daneben");
+// Fall 6: Reiter nicht gewaehlt → nie flach
+var r6 = reiter("false"); var p6 = el("Positions " + tabLeer.textContent, [r6], tabLeer); h5.setDoc(doc(r6));
+check(h5.leerBeweis() === false, "leerBeweis: Reiter Positions nicht aktiv → nicht flach");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }
