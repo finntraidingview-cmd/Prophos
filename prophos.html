@@ -48817,7 +48817,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1823'
+  const OS_TAB_BUILD = '2026-09-22.1824'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68048,10 +68048,13 @@
    * = 42 % aller Mails. AUSDRÜCKLICH KEIN MÜLL (Master 29.10.): „Tradovate account is ready" (Konto-Mail → Konten aus Mail), „account reset
    * is confirmed" (Reset = Konto wieder am Start), „breached", alle Payout-/Reward-Mails (auch „Reward Request OTP" = Anfrage bei FundedNext),
    * Topstep „Order confirmed. Your Trading Combine is ready" (Konto-Mail mit Account Name — darum „order is confirmed" statt „order (is )?confirm", Review 29.10.).
+   * AUSNAHMEN nach Stresstest S3 (29.10.2026): 5ers „Your order is confirmed!" = einzige Konto-Mail der Firma (→ „tradeify order is confirmed"),
+   * FTMO Futures „Order Confirmation: Your Subscription is Active - FTMO…" = Konto-Mail (→ „^order confirmation$" = nur FundingPips),
+   * Apex „Subscription cancelled" = Konto-Ende, bleibt sichtbar (Muster gestrichen).
    * EINE Konstante für Mail-Reiter, Admin → Mail und das Sidebar-Badge. Dieselbe Zeichenkette läuft als PostgREST-Filter `imatch` (Postgres
    * ~*) — darum ohne Komma, ohne \b (in Postgres = Backspace) und ohne JS-Sonderklassen. Schalter standardmäßig AN, Merker im
    * localStorage (prophos_mail_muell_an, '0' = aus), gilt für beide Listen. */
-  const MAIL_MUELL_BETREFF = 'order is confirmed|order confirmation|bestellbest|payment receipt|payment to .* is complete|hast gekauft|subscription cancel'
+  const MAIL_MUELL_BETREFF = 'tradeify order is confirmed|^order confirmation$|bestellbest|payment receipt|payment to .* is complete|hast gekauft'
     + '|Google-Kontodaten|Google Account data|verification code|is your verification|Sicherheitswarnung|Security alert|trustpilot|Rate Us'
     + '|Must-Know|ROI – |DISCOUNT|Reset at a|Try Again for Less|Bounce Back|unread notification|paid out|paid in rewards|See who topped'
     + '|Welcome to Topstep|Off Your First|free accounts|Labs #|Infinity|Prices dropped|Join the club|made \\$|changed .* family|Bootcamp'
