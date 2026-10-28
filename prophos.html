@@ -2728,6 +2728,47 @@
   #adm-pane-kompass .kp-zeile-bar.klick{cursor:pointer}
   #adm-pane-kompass .kp-zeile-bar.klick:hover{background:rgba(124,92,255,.06)}
   #adm-pane-kompass .kp-zeile-bar.aktiv{background:rgba(124,92,255,.10)}
+  /* RADAR-STATISTIK (28.10.2026, Finn: „kleine Statistiken: wie viel Prozent werden über welchen Weg geschlossen, wie lange dauert das
+     Ganze"): KPI-Kacheln oben (.kpis wie im Dashboard), je Schließweg eine Kachel mit Balken, darunter die letzten Trades als Zeilen.
+     Farben je Weg wie die Schließweg-Zeile im Radar (--sw-f). */
+  #adm-pane-radarstat .rst-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  #adm-pane-radarstat .rst-kopf .seg{margin-left:auto}
+  #adm-pane-radarstat .kpi-value{font-variant-numeric:tabular-nums;white-space:nowrap}
+  #adm-pane-radarstat .kpi-value small{font-size:12px;font-weight:500;color:var(--sub);margin-left:4px}
+  #adm-pane-radarstat .kpi-delta{display:block;color:var(--sub);line-height:1.4;white-space:normal}
+  #adm-pane-radarstat .rst-wege{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+  #adm-pane-radarstat .rst-weg{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:13px 15px;box-shadow:var(--shadow-card);--sw-f:var(--sub)}
+  #adm-pane-radarstat .rst-weg.is-leer{opacity:.55}
+  #adm-pane-radarstat .is-userscript{--sw-f:#2563eb}
+  #adm-pane-radarstat .is-notfall{--sw-f:#ea580c}
+  #adm-pane-radarstat .is-radar{--sw-f:#7c5cff}
+  #adm-pane-radarstat .is-hand{--sw-f:#15803d}
+  #adm-pane-radarstat .is-sonst{--sw-f:var(--sub)}
+  #adm-pane-radarstat .rst-weg-kopf{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink-2)}
+  #adm-pane-radarstat .rst-weg-kopf::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--sw-f);flex:none}
+  #adm-pane-radarstat .rst-weg-wert{font-size:22px;font-weight:600;letter-spacing:-.02em;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+  #adm-pane-radarstat .rst-weg-wert small{font-size:12px;font-weight:500;color:var(--sub);margin-left:5px}
+  #adm-pane-radarstat .rst-bar{height:4px;background:var(--surface-tint);border-radius:999px;overflow:hidden;margin:6px 0 8px}
+  #adm-pane-radarstat .rst-bar i{display:block;height:100%;background:var(--sw-f);border-radius:999px}
+  #adm-pane-radarstat .rst-weg-z{font-size:11.5px;color:var(--sub);line-height:1.55;font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;gap:8px}
+  #adm-pane-radarstat .rst-weg-z b{font-weight:600;color:var(--ink-2);white-space:nowrap}
+  #adm-pane-radarstat .rst-abschnitt{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin:16px 0 4px}
+  #adm-pane-radarstat .rst-liste{display:flex;flex-direction:column}
+  #adm-pane-radarstat .rst-z{display:grid;grid-template-columns:84px minmax(100px,1fr) minmax(120px,1.3fr) 84px 104px minmax(150px,1.5fr) 128px 64px;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--border-soft);font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  #adm-pane-radarstat .rst-z.rst-z-kopf{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);border-bottom-color:var(--border)}
+  #adm-pane-radarstat .rst-z > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #adm-pane-radarstat .rst-z .rst-r{text-align:right}
+  #adm-pane-radarstat .rst-weg-chip{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+  #adm-pane-radarstat .rst-weg-chip::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--sw-f);flex:none}
+  #adm-pane-radarstat .rst-id{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--rst-id,var(--sub));vertical-align:0}
+  #adm-pane-radarstat .is-teuer{color:var(--danger-ink, #b91c1c)}
+  #adm-pane-radarstat .is-guenstig{color:var(--good-ink, #15803d)}
+  #adm-pane-radarstat .rst-msg{color:var(--sub);font-size:13px;padding:14px 2px}
+  @media (max-width:820px){
+    #adm-pane-radarstat .rst-z{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 10px;font-size:12px}
+    #adm-pane-radarstat .rst-z.rst-z-kopf{display:none}
+    #adm-pane-radarstat .rst-z .rst-r{text-align:left}
+  }
   #adm-pane-kompass .kp-zeile-bar .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-kompass .kp-zeile-bar .name small{display:block;font-weight:400;color:var(--sub);font-size:11px}
   #adm-pane-kompass .kp-zeile-bar .wert{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
@@ -4507,6 +4548,31 @@
   #dashboard-view .wdl-z-konto{grid-area:konto;text-align:right;color:var(--sub);white-space:nowrap}
   /* Balance → Ziel im Radar (08.10.2026): Balken unter dem Endstand (Konto-Spalte) bzw. unter dem Live-P&L (Läuft), darunter „x % · Rest" */
   #dashboard-view .wdl-z-slave{display:block;margin-top:1px;font-size:11px;font-weight:500;white-space:nowrap}
+  /* SCHLIESSWEG-ZEILE (28.10.2026, Finn: „genau anzeigen, über welchen Weg der Trade geschlossen wurde, was der eigentliche TP/SL war und
+     der Overshoot … bei allen Trades, die gegengehedgt werden, im Radar unter Erledigt"): bei gehedgten, geschlossenen Trades eine volle
+     Zeile unter der Trade-Zeile (Grid-Area sw) — ersetzt die Mini-Pille „zu über Userscript" in der P&L-Zelle. Je Weg ein kleiner
+     Farbpunkt (Userscript blau, Notfall-SL orange, Radar violett, Hand grün, Sonstiges grau). Reihenfolge der Regeln zählt (gleiche
+     Spezifität): konto vor man vor bst. */
+  #dashboard-view .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi pl zeit" "sw sw sw sw sw";row-gap:3px}
+  #dashboard-view .wdl-tab-konto .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi konto pl zeit" "sw sw sw sw sw sw"}
+  #dashboard-view .wdl-tab-konto .wdl-z-man.wdl-z-sw-da{grid-template-areas:"wer mi mi konto pl zeit" "sw sw sw sw sw sw"}
+  #dashboard-view .wdl-tab-bst .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi konto datum pl zeit" "sw sw sw sw sw sw sw"}
+  #dashboard-view .wdl-z-sw{grid-area:sw;display:block;font-size:11px;font-weight:500;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;line-height:1.35}
+  #dashboard-view .wdl-z-sw b{font-weight:700;color:var(--ink-2)}
+  #dashboard-view .wdl-z-sw b::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sw-f,var(--sub));margin-right:5px;vertical-align:1px}
+  #dashboard-view .wdl-z-sw .wdl-sw-userscript{--sw-f:#2563eb}
+  #dashboard-view .wdl-z-sw .wdl-sw-notfall{--sw-f:#ea580c}
+  #dashboard-view .wdl-z-sw .wdl-sw-radar{--sw-f:#7c5cff}
+  #dashboard-view .wdl-z-sw .wdl-sw-hand{--sw-f:#15803d}
+  #dashboard-view .wdl-z-sw .wdl-sw-sonst{--sw-f:var(--sub)}
+  #dashboard-view .wdl-z-sw i{font-style:normal;color:var(--ink-2)}
+  #dashboard-view .wdl-z-sw .is-teuer{color:var(--danger-ink, #b91c1c)}
+  #dashboard-view .wdl-z-sw .is-guenstig{color:var(--good-ink, #15803d)}
+  @media (max-width:820px){
+    #dashboard-view .wdl-z.wdl-z-sw-da, #dashboard-view .wdl-tab-konto .wdl-z.wdl-z-sw-da, #dashboard-view .wdl-tab-konto .wdl-z-man.wdl-z-sw-da{grid-template-areas:"wer wer wer pl" "ri mi mi zeit" "sw sw sw sw"}
+    #dashboard-view .wdl-tab-bst .wdl-z.wdl-z-sw-da{grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit" "sw sw sw sw"}
+    #dashboard-view .wdl-z > .wdl-z-sw{white-space:normal;overflow:visible;line-height:1.4}   /* schlägt „.wdl-z > span → nowrap" (1,1,1) */
+  }
   /* „Ansehen" unter der Laufzeit (02.10.2026) */
   #dashboard-view .wdl-ansehen{display:block;margin:3px 0 0 auto;padding:1px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--violet);background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer}
   #dashboard-view .wdl-ansehen:hover{border-color:var(--violet)}
@@ -11642,6 +11708,7 @@
           <!-- Kapitel + Acc-Käufe ausgeblendet (Finn 08.10.2026: „Kapitel auch visuell weg und mach das einfach zu Statistik dazu" · „genau wie Acc-Käufe auch zu Statistik hinzufügen") — Inhalte stehen jetzt unter Statistik, Reiter nur display:none -->
           <button class="subtab adm-tab" data-admtab="kapitel" style="display:none">Kapitel</button>
           <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
+          <button class="subtab adm-tab" data-admtab="radarstat">Radar-Statistik</button>
           <button class="subtab adm-tab" data-admtab="buys" style="display:none">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Alle Accounts (13.10.2026, Finn: „alle Accounts von allen IDs auf einem Bündel, 1:1 wie unter Accounts, nur mit Filter nach Zielen und Typen") -->
@@ -12359,6 +12426,26 @@
              genau wie unter Accounts — nur dass man filtern kann nach Zielen und Typen"). Tabelle im Design der Accounts-Tabelle (panel/table.t,
              dieselben Typ-/Ziel-/Planer-Chips), Daten aus /admin/overview (gleiche Sicht + Gruppenfilter wie die Übersicht). Reine Anzeige:
              Bearbeiten/Archivieren bleibt bei der jeweiligen ID. Eigene Verdrahtung admKontenRender im Modul. -->
+        <!-- RADAR-STATISTIK (28.10.2026, Finn: „In Admin unter Radar einen neuen Punkt: Statistik zu den Kopierern, vor allem zu Orbit … über welchen
+             Weg der Trade auf Fusion geschlossen wurde — Tampermonkey-Script · Notfall-SL (Airbag) · über Radar — wie viel Prozent über welchen Weg,
+             wie lange dauert das Ganze, damit ich weiß, wenn da Fehler passieren"): Kacheln je Schließweg aus /admin/live-trades (dieselbe Quelle
+             wie der Radar, Standard-Sicht = Gruppe Hermann Technologies, Route kappt bei 14 Tagen), Rechnung je Trade in swAuswertung. Reine
+             Anzeige, Verdrahtung rstOeffnen/rstRender im Modul (Sektion WINNING DAYS LIVE TRADES, Block RADAR-STATISTIK). -->
+        <div id="adm-pane-radarstat" hidden>
+          <div class="rst-kopf">
+            <div>
+              <div class="panel-title">Radar-Statistik · Schließwege der Fusion-Hedges</div>
+              <div class="panel-sub" id="rst-sub">Über welchen Weg der Fusion-Hedge zu ging, wie weit der Schluss hinter dem Level lag und wie lange der Hedge offen war</div>
+            </div>
+            <div class="seg" id="rst-tage"><button type="button" data-rst-tage="1">Heute</button><button type="button" data-rst-tage="7" class="active">7 Tage</button><button type="button" data-rst-tage="14">14 Tage</button></div>
+            <button class="btn btn-ghost" id="rst-refresh" title="Neu laden" style="padding:6px 10px">↻</button>
+          </div>
+          <div class="rst-msg" id="rst-msg" hidden></div>
+          <div class="kpis rst-kpis" id="rst-kpis"></div>
+          <div class="rst-wege" id="rst-wege"></div>
+          <div class="rst-abschnitt" id="rst-liste-kopf" hidden>Letzte Trades <span id="rst-liste-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+          <div class="rst-liste" id="rst-liste"></div>
+        </div>
         <!-- MAIL ALLER IDs (21.10.2026): Chips „Alle · ID …" mit Ungelesen-Zahl, darunter Liste + Lesen wie im Mail-Reiter (gleiche Klassen
              und gleiche Mail-Ansicht mailLesenZeigen) — Daten aus /admin/mail, geladen beim Öffnen und auf ↻ -->
         <div id="adm-pane-mail" hidden>
@@ -20038,6 +20125,7 @@
         $('adm-pane-kompass').hidden  = name !== 'kompass'
         $('adm-pane-kapitel').hidden  = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-stat').hidden     = name !== 'stat'
+        $('adm-pane-radarstat').hidden = name !== 'radarstat'   // Radar-Statistik (28.10.2026)
         $('adm-pane-auftrag').hidden  = name !== 'auftrag'
         // Funded-Planer (27.10.2026, Finn: „1:1 wie der Challenge-Planer"): derselbe Bereich, nur die Datenquelle wechselt (window._apIdsArt)
         $('adm-pane-planer').hidden   = name !== 'planer' && name !== 'fplaner'
@@ -20053,6 +20141,7 @@
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
         if(name === 'mail') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
+        if(name === 'radarstat') window._rstOeffnen?.()   // Radar-Statistik (28.10.2026): /admin/live-trades beim Öffnen, Cache 60 s
         if(name === 'overview'){ admVlResize(); window._admPcsOeffnen?.() }   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026); PC-Tabs (08.10.2026)
         if(name === 'rg')   rgOpen()
       }))
@@ -33377,6 +33466,53 @@
     finally{ _wdlPolarAbbruchBusy = false; try{ await wdlPolarLaden() }catch(_){}; wdlPolarPopupZeichnen() }
   })
   window._wdlPolarOeffnen = wdlPolarOeffnen   // Test-Haken (Stub)
+  /* ══ SCHLIESSWEG — Rechnung je gehedgtem Trade (28.10.2026, Finn: „über welchen Weg der Trade auf Fusion geschlossen wurde … Tampermonkey-
+   * Script · Notfall-SL (Airbag) · über Radar … die Overshoots: du hast so und so viel Prozent verloren … wie lange dauert das Ganze") ══
+   * REIN RECHNEND aus t.hedge (= mt5_baseline.hedge, kommt komplett mit /admin/live-trades; Radar-Zeile und Admin „Radar-Statistik" rechnen
+   * beide hiermit). Geprüft 28.10.2026 per SELECT: der Schließweg steht ausschließlich in hedge.grund (grund_copier = Echo des Copiers).
+   * Wege: userscript = master_ende_reader (Tampermonkey/Reader sah den Master zu) · notfall = level_tp / level_sl / level_mt5 (Fusion-Level im
+   * MT5-Terminal gefüllt = Airbag) · radar = tp_feed / sl_feed / master_ende (Wächter im PC-Tab: Kurs-Feed bzw. Plan-Ende) · hand · sonst
+   * (master_nie_da, stopout, close, unbekannt). Level in CFD-Preisen: hedge.sl = Fusion-SL = Master-TP-Seite, hedge.tp = Fusion-TP =
+   * Master-SL/Liq-Seite (tp 0 = Master ohne SL). Welche Seite galt: level_tp/tp_feed → TP-Seite, level_sl/sl_feed → SL-Seite, sonst das
+   * dem Schluss nähere Level. Overshoot = echter Schluss (fill_close) hinter dem Level in Fusion-Punkten — Hedge buy: Schluss unter dem Level
+   * ist teurer, Hedge sell: Schluss über dem Level; € = Punkte × lots × wert_pro_punkt; % = € / hedge.eur (geplanter Hedge-Einsatz am
+   * Master-TP). Positiv = teurer als geplant (Reibung, Memory prophos-reibung-merkzahlen). Zeiten: offen = opened_at → closed_at,
+   * verzug = close_at (Schließbefehl des Tabs) → closed_at (Copier bestätigt); schon_zu = das Terminal hatte schon gefüllt. */
+  const SW_WEGE = [['userscript', 'Userscript'], ['notfall', 'Notfall-SL'], ['radar', 'Radar'], ['hand', 'von Hand'], ['sonst', 'Sonstiges']]
+  const SW_WEG_TXT = Object.fromEntries(SW_WEGE)
+  const SW_WEG_VON = { master_ende_reader: 'userscript', level_tp: 'notfall', level_sl: 'notfall', level_mt5: 'notfall', tp_feed: 'radar', sl_feed: 'radar', master_ende: 'radar', hand: 'hand' }
+  function swAuswertung(t){
+    const h = t && t.hedge && typeof t.hedge === 'object' ? t.hedge : null
+    if(!h || h.status !== 'geschlossen' || !h.grund) return null
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const g = String(h.grund), weg = SW_WEG_VON[g] || 'sonst'
+    // sl/tp 0 = kein Level gesetzt (der Tab schreibt beim Öffnen `res.sl || 0`, z. B. ohne Notfall-SL) → null, sonst wäre Level 0 und der Overshoot ~24.000 Pkt
+    const fusionSl = n(h.sl) || null, fusionTp = n(h.tp) || null, zu = n(h.fill_close), buy = h.richtung === 'buy'
+    const lots = n(h.lots), wpp = n(h.wert_pro_punkt), eur = n(h.eur)
+    let seite = (g === 'level_tp' || g === 'tp_feed') ? 'tp' : (g === 'level_sl' || g === 'sl_feed') ? 'sl' : null
+    if(!seite && zu != null){
+      seite = (fusionSl != null && fusionTp != null) ? (Math.abs(zu - fusionTp) < Math.abs(zu - fusionSl) ? 'sl' : 'tp') : fusionSl != null ? 'tp' : fusionTp != null ? 'sl' : null
+    }
+    const level = seite === 'tp' ? fusionSl : seite === 'sl' ? fusionTp : null
+    // Overshoot nur, wo ein Level den Schluss ausgelöst hat (Userscript · Notfall · Radar); von Hand oder „Master nie da" schließen irgendwo
+    // dazwischen — dort wäre der Abstand zum Level kein Overshoot, sondern Zufall → null, zählt in keinen Schnitt. master_ende (Plan-Ende über den
+    // Tab) ebenso: die Hedge-Wache setzt ihn bei jedem nicht mehr offenen Plan, auch nach Hand-Schluss des Masters oder Auto-Close
+    const overPkt = (level != null && zu != null && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende') ? (buy ? level - zu : zu - level) : null
+    const overEur = (overPkt != null && lots != null && wpp != null) ? overPkt * lots * wpp : null
+    const overPct = (overEur != null && eur) ? overEur / Math.abs(eur) * 100 : null
+    const ms = (a, b) => { const x = Date.parse(a || ''), y = Date.parse(b || ''); return (isNaN(x) || isNaN(y)) ? null : Math.max(0, y - x) }
+    return { weg, wegTxt: SW_WEG_TXT[weg], grund: g, seite, level, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
+      masterTp: n(h.tp_level_nq), masterSl: n(h.sl_level_nq), liq: h.sl_art === 'liquidation',
+      overPkt, overEur, overPct, offenMs: ms(h.opened_at || h.at, h.closed_at), verzugMs: h.close_at ? ms(h.close_at, h.closed_at) : null,
+      schonZu: !!h.schon_zu, zuAt: h.closed_at || null, lang: typeof hedgeGrundText === 'function' ? hedgeGrundText(g, h) : g }
+  }
+  // Dauer kurz: „47 s" · „9 min" · „2 h 15 min"
+  function swDauerTxt(ms){
+    if(ms == null || !isFinite(ms)) return '–'
+    const s = Math.round(ms / 1000); if(s < 90) return `${s} s`
+    const m = Math.round(s / 60), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}`
+  }
+  window._swAuswertung = swAuswertung   // Test-Haken
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
     wdl.renderAt = Date.now()
@@ -33423,15 +33559,23 @@
     // Master + Slave (01.10.2026, Finn: „wenn gegengehedgt wurde, sieht man auch den Slave-P&L"): zweite, kleine Zeile in der P&L-Zelle
     // nur bei Modellen MIT Fusion-Hedge (02.10.2026: Orbit V2 ohne Hedge zeigte „Fusion +0,00 €")
     const slaveZ = t => { if(!['Echo', 'Orbit', 'Nova', 'Winning Day'].includes(wdlWeg(t))) return '';   /* Nova (27.10.2026): Fusion-Hedge wie Orbit */ const v = wdlSlavePl(t); return v == null ? '' : `<small class="wdl-z-slave" style="color:${col(v)}" title="Fusion-Gegenhedge">Fusion ${sig(v, '€', 2)}</small>` }
-    // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde —
-    // Userscript, Radar oder das 110-%-Level"): aus hedge.grund, kurz; der lange Text (hedgeGrundText) steht im Tooltip
-    const ZU_WEG = { master_ende_reader: 'Userscript', tp_feed: 'Radar · TP', sl_feed: 'Radar · SL', level_tp: 'Terminal · Notfall 110 %', level_sl: 'Terminal · Master-SL',
-      level_mt5: 'Terminal', master_ende: 'Plan-Ende', hand: 'von Hand', master_nie_da: 'Master nie gefüllt', stopout: 'Stop-out', close: 'Close-Auftrag' }
+    // SCHLIESS-WEG (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge immer sehen, durch welchen Weg geschlossen wurde — Userscript, Radar
+    // oder das 110-%-Level") — seit 28.10.2026 (Finn: „genau angezeigt, über welchen Weg der Trade geschlossen wurde und was der eigentliche
+    // TP/SL war … die Overshoots … bei allen Trades, die gegengehedgt werden, im Radar unter Erledigt") eine volle Zeile unter dem Trade
+    // (Grid-Area sw, CSS .wdl-z-sw) statt der Mini-Pille in der P&L-Zelle: Weg mit Farbpunkt · Master-TP und -SL/Liq (NQ) · Fusion-Level →
+    // echter Schluss (CFD) · Overshoot in Punkten, % und € · Hedge offen · Verzug Schließbefehl → bestätigt. Rechnung in swAuswertung (REIN),
+    // der lange Grund-Text (hedgeGrundText) und die Rechenregel stehen im Tooltip. Die Zeile bekommt dazu die Klasse wdl-z-sw-da (Raster).
     const zuWegZ = t => {
-      const h = t.hedge && typeof t.hedge === 'object' ? t.hedge : null
-      if(!h || h.status !== 'geschlossen' || !h.grund) return ''
-      const g = String(h.grund), txt = ZU_WEG[g] || g, lang = typeof hedgeGrundText === 'function' ? hedgeGrundText(g, h) : g
-      return `<small class="wdl-z-slave" style="color:var(--sub)" title="${escapeHtml(lang)}">zu über ${escapeHtml(txt)}</small>`
+      const s = swAuswertung(t); if(!s) return ''
+      const f1 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }), vz = v => v < 0 ? '−' : '+'
+      const over = s.overPkt == null ? 'Overshoot –'
+        : `<span class="${s.overPkt > 0.05 ? 'is-teuer' : s.overPkt < -0.05 ? 'is-guenstig' : ''}">Overshoot ${vz(s.overPkt)}${f1(Math.abs(s.overPkt))} Pkt${s.overPct != null ? ` · ${vz(s.overPct)}${f1(Math.abs(s.overPct))} %` : ''}${s.overEur != null ? ` (${sig(s.overEur, '€', 2)})` : ''}</span>`
+      const levelTxt = s.level != null ? `Fusion-${s.seite === 'sl' ? 'TP' : 'SL'} ${f2(s.level)} → Schluss <i>${f2(s.zu)}</i>` : `Schluss <i>${f2(s.zu)}</i>`
+      const zeiten = `offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : s.verzugMs != null ? ` · bestätigt nach ${swDauerTxt(s.verzugMs)}` : ''}`
+      const tip = `${s.lang} (grund ${s.grund})${s.seite ? ` · Level-Seite: ${s.seite === 'tp' ? 'Master-TP = Fusion-SL' : (s.liq ? 'Master-Liq' : 'Master-SL') + ' = Fusion-TP'}` : ''}`
+        + ` · Overshoot = Schluss hinter dem Fusion-Level in Punkten, € = Punkte × Lots × Punktwert, % vom geplanten Hedge-Einsatz${s.eur != null ? ` (${f2(s.eur)} €)` : ''} — positiv = teurer als geplant`
+        + ` · offen = Fusion-Fill → geschlossen${s.schonZu ? ' · das Terminal hatte den Level schon gefüllt, als der Tab schließen wollte' : s.verzugMs != null ? ' · bestätigt = Schließbefehl des Tabs → Copier meldet zu' : ''}`
+      return `<span class="wdl-z-sw" title="${escapeHtml(tip)}"><b class="wdl-sw-${s.weg}">${escapeHtml(s.wegTxt)}</b> · TP <i>${f2(s.masterTp)}</i>${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} <i>${f2(s.masterSl)}</i>` : ' · ohne SL'} · ${levelTxt} · ${over} · ${zeiten}</span>`
     }
     // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
     const fusionLiveZ = t => {
@@ -33537,7 +33681,7 @@
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
               : wdlLesungVerloren(wt, jetzt) ? `Seit ${minTxt(wdlLesungVerloren(wt, jetzt))} kein Leseversuch (${wt.letzte ? 'letzter ' + zeit(wt.letzte) : 'noch keiner'}) — der PC-Tab dieser ID (Puls) antwortet nicht. „Jetzt lesen" stößt neu an; hilft das nicht, Prophos am PC der ID öffnen`
               : wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
-        plZ = zelle('pl', '–' + slaveZ(t) + zuWegZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
+        plZ = zelle('pl', '–' + slaveZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review' && wdlManuell(t)){
         // MANUELLE ARBEIT (08.10.2026): wie Überprüfen (Konto, P&L, Zu), in der Mitte Notiz (Klick = bearbeiten) · „seit TT.MM." ·
@@ -33558,7 +33702,7 @@
         miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
-        plZ = zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
+        plZ = zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review'){
         // ÜBERPRÜFEN (30.09.2026, Finn: „Läuft → Wartet → Überprüfen (P&L ist eingetragen, ich muss nur noch abhaken) → Erledigt"):
@@ -33579,7 +33723,7 @@
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-manuell="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach „Manuelle Arbeit" — Notiz dazu, nichts wird verbucht (oder die Zeile dorthin ziehen)">→ manuell</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-parken="${escapeHtml(pid)}"${_wdlManBusy.has(pid) ? ' disabled' : ''} title="Nach Review — wartet auf die neuen Kontodaten der Firma, nichts wird verbucht (früher „parken\")">→ Review</button>`,
           { tip: polar ? wdlPolarErg(t).tip : echo ? '' : demoTip(d) })
-        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
+        plZ = polar ? wdlPolarPlZ(t, zelle, sig, col) : zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(polar){
         // Polar erledigt (Verlauf): wer zuerst zu war + beide P&L aus der Abrechnung
@@ -33604,14 +33748,15 @@
         kontoZ = wdlKontoZ(t)
         // Balance-Sprung (08.10.2026): erledigt zählt der P&L am Plan (von Hand entschieden), sonst der Tages-P&L — nie die Differenz
         const pbZu = t.balance_sprung ? (num(t.master_pl && t.master_pl.wert) ?? t.balance_sprung.tages) : t.pl_balance
-        plZ = zelle('pl', sig(pbZu, '$', 2) + slaveZ(t) + zuWegZ(t), { f: col(pbZu), tip: t.balance_sprung ? 'P&L am Plan — ' + balanceSprungText(t.balance_sprung) : num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
+        plZ = zelle('pl', sig(pbZu, '$', 2) + slaveZ(t), { f: col(pbZu), tip: t.balance_sprung ? 'P&L am Plan — ' + balanceSprungText(t.balance_sprung) : num(t.pl_balance) != null ? 'Balance nachher − vorher' : 'keine End-Balance' })
         }
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       }
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
-      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
+      const sw = zuWegZ(t)   // Schließweg-Zeile (28.10.2026): nur bei geschlossenem Fusion-Hedge, dann zweite Rasterzeile (wdl-z-sw-da)
+      return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${sw ? ' wdl-z-sw-da' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
         + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
-        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
+        + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + sw + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
     // mehr = Schlüssel für „Beendet" (30.09.2026, Finn sah die Echo-Sektion nicht — sie stand unter Orbits „Beendet · 42"): nur die
@@ -34148,6 +34293,93 @@
   // Stub ohne Login: window._wdlStub({trades:[…]}) zeichnet die View mit Testdaten
   window._wdlStub = d => { wdl.daten = d; wdl.fehler = ''; wdlLokalAnwenden(); wdlRender() }   // wie ein Abruf: lokale Merker gelten (08.10.2026)
   window._wdlLokal = () => [..._wdlLokal.keys()]   // Test-Haken
+
+  /* ══ RADAR-STATISTIK (Admin-Reiter, 28.10.2026, Finn: „Statistik zu den Kopierern, vor allem zu Orbit … wie viel Prozent werden über
+   * welchen Weg geschlossen, wie lange dauert das Ganze. Einfach die Statistiken, damit ich weiß, wenn da Fehler passieren") ══
+   * Daten: /admin/live-trades?tage=N&echo=1&ansicht=admin — dieselbe Quelle wie der Radar. Ohne gruppe=-Parameter liefert der Server die
+   * Standard-Sicht (Gruppen MIT Verwalter, also Emins Gruppe, ausgeblendet) = Hermann Technologies; der Gruppen-Chip im Admin-Kopf greift
+   * hier bewusst nicht (Memory prophos-amir-nicht-ht). Die Route kappt bei 14 Tagen (sie lädt zu jedem Start die Minutenkerzen) — darum
+   * Heute · 7 · 14 Tage, nicht 30. Gezählt wird jeder Trade mit geschlossenem Fusion-Hedge (swAuswertung), Modell egal (Orbit, Winning Day,
+   * Nova, Echo). Kacheln: Anteil je Weg mit Balken, Ø/Median Hedge-Dauer, Ø Overshoot in Pkt und %, Σ Mehrkosten; darunter die letzten
+   * Trades als Zeilen. Reine Anzeige, keine Bewertung. Cache 60 s, ↻ lädt sofort. Stub: window._rstStub({trades:[…]}). */
+  const rst = { tage: 7, daten: null, fehler: '', laedt: false, at: 0 }
+  async function rstLaden(){
+    if(rst.laedt) return
+    rst.laedt = true; rstRender()
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+      const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 20000)
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=${rst.tage}&echo=1&ansicht=admin`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      rst.daten = d; rst.fehler = ''; rst.at = Date.now()
+    }catch(e){ rst.fehler = String((e && e.message) || e) }
+    finally{ rst.laedt = false }
+    rstRender()
+  }
+  function rstRender(){
+    const el = id => document.getElementById(id)
+    const kpis = el('rst-kpis'), wege = el('rst-wege'), liste = el('rst-liste'), msg = el('rst-msg'), lk = el('rst-liste-kopf'), ls = el('rst-liste-sub'); if(!kpis || !wege || !liste) return
+    const alle = ((rst.daten && rst.daten.trades) || []).map(t => ({ t, s: swAuswertung(t) })).filter(x => x.s)
+    const zeitraum = rst.tage === 1 ? 'heute' : `letzte ${rst.tage} Tage`
+    const de = (v, d = 1) => v == null || !isFinite(Number(v)) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+    const sig = (v, e, d = 1) => v == null || !isFinite(Number(v)) ? '–' : `${v < 0 ? '−' : '+'}${de(Math.abs(v), d)}${e ? ' ' + e : ''}`
+    const pct = (a, b) => b ? Math.round(a / b * 100) : 0
+    const mw = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null
+    const med = a => { if(!a.length) return null; const b = [...a].sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2 }
+    const kl = v => v == null ? '' : v > 0.05 ? 'is-teuer' : v < -0.05 ? 'is-guenstig' : ''
+    if(msg){
+      const txt = rst.fehler ? `Nicht geladen: ${rst.fehler}` : (rst.laedt && !rst.daten) ? 'Lade Schließwege …' : (rst.daten && !alle.length) ? `Keine geschlossenen Fusion-Hedges (${zeitraum}).` : ''
+      msg.hidden = !txt; msg.textContent = txt
+    }
+    if(!alle.length){ kpis.innerHTML = ''; wege.innerHTML = ''; liste.innerHTML = ''; if(lk) lk.hidden = true; return }
+    const n = alle.length, offen = alle.map(x => x.s.offenMs).filter(v => v != null), overP = alle.map(x => x.s.overPct).filter(v => v != null), overE = alle.map(x => x.s.overEur).filter(v => v != null)
+    const modell = {}; for(const x of alle){ const m = typeof wdlWeg === 'function' ? wdlWeg(x.t) : '?'; modell[m] = (modell[m] || 0) + 1 }
+    const modellTxt = Object.entries(modell).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')
+    const us = alle.filter(x => x.s.weg === 'userscript').length, nf = alle.filter(x => x.s.weg === 'notfall').length
+    const kpi = (label, wert, delta, tip) => `<div class="kpi"${tip ? ` title="${escapeHtml(tip)}"` : ''}><div class="kpi-label">${label}</div><div class="kpi-value">${wert}</div>${delta ? `<div class="kpi-delta">${delta}</div>` : ''}</div>`
+    kpis.innerHTML = kpi('Gehedgte Trades · zu', `${n}`, `${escapeHtml(modellTxt)} · ${zeitraum}`, 'Trades mit geschlossenem Fusion-Hedge im Zeitraum, in der Admin-Sicht dieses Logins (Standard: Gruppe Hermann Technologies)')
+      + kpi('Userscript', `${pct(us, n)}<small>%</small>`, `${us} von ${n} · Notfall-SL ${pct(nf, n)} %`, 'Anteil der Hedges, die das Tampermonkey-Userscript (Reader sah den Master zu) geschlossen hat')
+      + kpi('Hedge offen · Median', escapeHtml(swDauerTxt(med(offen))), `Ø ${escapeHtml(swDauerTxt(mw(offen)))} · Fusion-Fill → zu`, 'Zeit vom Fusion-Fill bis zum bestätigten Schluss, Median und Mittelwert über alle Wege')
+      + kpi('Overshoot · Ø', `<span class="${kl(mw(overP))}">${sig(mw(overP), '%')}</span>`, `Σ ${sig(overE.length ? overE.reduce((a, b) => a + b, 0) : null, '€', 0)} über Plan · Median ${sig(med(overP), '%')}`, 'Wie weit der echte Schluss hinter dem Fusion-Level lag, in % des geplanten Hedge-Einsatzes — positiv = teurer als geplant; nur Userscript · Notfall-SL · Radar (von Hand/Sonstiges schließen nicht am Level)')
+    wege.innerHTML = SW_WEGE.map(([key, name]) => {
+      const a = alle.filter(x => x.s.weg === key), k = a.length
+      const of = a.map(x => x.s.offenMs).filter(v => v != null), op = a.map(x => x.s.overPct).filter(v => v != null), ok = a.map(x => x.s.overPkt).filter(v => v != null), oe = a.map(x => x.s.overEur).filter(v => v != null)
+      const gruende = {}; for(const x of a) gruende[x.s.grund] = (gruende[x.s.grund] || 0) + 1
+      const tip = k ? `grund: ${Object.entries(gruende).sort((x, y) => y[1] - x[1]).map(([g, v]) => `${g} ${v}`).join(' · ')}` : 'im Zeitraum kein Trade über diesen Weg'
+      return `<div class="rst-weg is-${key}${k ? '' : ' is-leer'}" title="${escapeHtml(tip)}"><div class="rst-weg-kopf">${escapeHtml(name)}</div>`
+        + `<div class="rst-weg-wert">${pct(k, n)}<small>% · ${k}</small></div><div class="rst-bar"><i style="width:${pct(k, n)}%"></i></div>`
+        + `<div class="rst-weg-z"><span>offen Median · Ø</span><b>${escapeHtml(swDauerTxt(med(of)))} · ${escapeHtml(swDauerTxt(mw(of)))}</b></div>`
+        + `<div class="rst-weg-z"><span>Overshoot Ø</span><b class="${kl(mw(op))}">${sig(mw(ok), 'Pkt')} · ${sig(mw(op), '%')}</b></div>`
+        + `<div class="rst-weg-z"><span>über Plan Σ</span><b class="${kl(oe.length ? oe.reduce((x, y) => x + y, 0) : null)}">${sig(oe.length ? oe.reduce((x, y) => x + y, 0) : null, '€', 0)}</b></div></div>`
+    }).join('')
+    // Letzte Trades (neueste zuerst, höchstens 40): Zeit · Person · Konto · Modell · Weg · Level → Schluss · Overshoot · offen
+    const zeit = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'; const u = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); return d.toDateString() === new Date().toDateString() ? u : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + u }
+    const sortiert = [...alle].sort((a, b) => String(b.s.zuAt || b.t.ended_at || '').localeCompare(String(a.s.zuAt || a.t.ended_at || '')))
+    const zeilen = sortiert.slice(0, 40)
+    if(lk){ lk.hidden = false; if(ls) ls.textContent = zeilen.length < n ? `· ${zeilen.length} von ${n}` : `· ${n}` }
+    liste.innerHTML = `<div class="rst-z rst-z-kopf"><span>Zu</span><span>Person</span><span>Konto</span><span>Modell</span><span>Weg</span><span>Fusion-Level → Schluss</span><span class="rst-r">Overshoot</span><span class="rst-r">offen</span></div>`
+      + zeilen.map(({ t, s }) => {
+        const k = t.konto || {}, konto = `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
+        const farbe = typeof wdlIdFarbe === 'function' ? wdlIdFarbe(t) : 'var(--sub)'
+        const tipZ = `${s.lang} (grund ${s.grund}) · Master-TP ${de(s.masterTp, 2)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${de(s.masterSl, 2)}` : ''} · Fusion ${sig(s.pl, '€', 2)}${s.eur != null ? ` · geplant −${de(s.eur, 2)} €` : ''}${s.schonZu ? ' · im Terminal gefüllt' : s.verzugMs != null ? ` · bestätigt nach ${swDauerTxt(s.verzugMs)}` : ''}`
+        return `<div class="rst-z" title="${escapeHtml(tipZ)}"><span>${escapeHtml(zeit(s.zuAt || t.ended_at))}</span>`
+          + `<span><i class="rst-id" style="--rst-id:${farbe}"></i>${escapeHtml(String(t.person || '?'))}</span><span title="${escapeHtml(String(k.name || konto))}">${escapeHtml(konto)}</span>`
+          + `<span>${escapeHtml(typeof wdlWeg === 'function' ? wdlWeg(t) : '')}</span><span class="rst-weg-chip is-${s.weg}">${escapeHtml(s.wegTxt)}</span>`
+          + `<span>${s.level != null ? `${de(s.level, 2)} → ${de(s.zu, 2)}` : de(s.zu, 2)}</span>`
+          + `<span class="rst-r ${kl(s.overPkt)}">${s.overPkt == null ? '–' : `${sig(s.overPkt, 'Pkt')}${s.overPct != null ? ` · ${sig(s.overPct, '%')}` : ''}`}</span>`
+          + `<span class="rst-r">${escapeHtml(swDauerTxt(s.offenMs))}</span></div>`
+      }).join('')
+  }
+  window._rstOeffnen = () => { rstRender(); if(!rst.daten || Date.now() - rst.at > 60000) rstLaden() }
+  window._rstStub = d => { rst.daten = d; rst.fehler = ''; rst.at = Date.now(); rstRender() }   // Stub ohne Login (Screenshot)
+  document.getElementById('rst-refresh')?.addEventListener('click', () => rstLaden())
+  document.querySelectorAll('#rst-tage [data-rst-tage]').forEach(b => b.addEventListener('click', () => {
+    rst.tage = Number(b.dataset.rstTage) || 7
+    document.querySelectorAll('#rst-tage [data-rst-tage]').forEach(x => x.classList.toggle('active', x === b))
+    rst.daten = null; rstRender(); rstLaden()
+  }))
   /* ========== ENDE WINNING DAYS LIVE TRADES ========== */
 
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
@@ -48264,7 +48496,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1803'
+  const OS_TAB_BUILD = '2026-09-22.1804'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
