@@ -30073,7 +30073,7 @@
         const wegFalsch = !!(p && p.route && !['tvv2', 'mt5v2', 'tsv2'].includes(String(p.route)))
         const st = !k.plan_id ? 'kein_plan' : wegFalsch ? 'falscher_weg' : p ? String(p.status || '') : P.plaene ? 'fehlt' : ({ planned: 'planned', open: 'open', review: 'review', completed: 'completed' })[k.status] || 'unbekannt'
         out.push({ uid: String(x.user_id), name: x.name || '?', nr: i + 1, n: ks.length, konto: k, plan: p, status: st,
-                   richtung: (p && p.richtung) || x.richtung || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
+                   richtung: (p && p.richtung) || (typeof wdKontoRichtung === 'function' ? wdKontoRichtung(k, x.richtung) : x.richtung) || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
                    tp: (p && p.master_tp != null) ? p.master_tp : k.tp, kt: (p && p.kt != null) ? p.kt : k.kt,
                    root: (p && p.symbol_root) || (p && /^MNQ/i.test(String(p.master_symbol || '')) ? 'MNQ' : p && /^NQ/i.test(String(p.master_symbol || '')) ? 'NQ' : null),
                    // Start-Stempel (Puls hat zugegriffen) — ab da nicht mehr bearbeitbar (F33); live-trades nennt ihn „verknuepft"
@@ -30322,10 +30322,16 @@
    * Handy (CSS) untereinander. Ziehen nur für Farmer-Admins und nur geplante, nicht gestartete Blöcke. */
   function mklWdZeitHtml(P, tr, admin){
     const ids = []
-    for(const t of tr){ if(!ids.some(x => x.uid === t.uid)) ids.push({ uid: t.uid, name: t.name, row: t.row, trades: [] }); ids.find(x => x.uid === t.uid).trades.push(t) }
-    const mitZeit = ids.filter(x => Date.parse(x.row.start_um || '') > 0).sort((a, b) => Date.parse(a.row.start_um) - Date.parse(b.row.start_um))
+    // BÜNDEL (28.10.2026): je ID × Gruppe ein Block (Gruppe = k.gruppe, Start = Blockstart + k.g_versatz_min) — ohne Gruppen wie bisher je ID einer
+    for(const t of tr){
+      const g = (t.konto && t.konto.gruppe) || 1, key = t.uid + '|' + g
+      let e = ids.find(x => x.key === key)
+      if(!e){ e = { key, uid: t.uid, name: t.name, row: t.row, trades: [], start: (Date.parse(t.row.start_um || '') || 0) + (g > 1 && typeof wdKontoVersatzMin === 'function' ? wdKontoVersatzMin(t.konto) * 60000 : 0) }; ids.push(e) }
+      e.trades.push(t)
+    }
+    const mitZeit = ids.filter(x => x.start > 0).sort((a, b) => a.start - b.start)
     if(!mitZeit.length) return ''
-    const H = 3600000, jetzt = Date.now(), zeiten = mitZeit.map(x => Date.parse(x.row.start_um))
+    const H = 3600000, jetzt = Date.now(), zeiten = mitZeit.map(x => x.start)
     const t0 = Math.floor((Math.min(...zeiten) - 15 * 60000) / (H / 2)) * (H / 2), t1 = Math.ceil((Math.max(...zeiten) + 45 * 60000) / (H / 2)) * (H / 2)
     const pct = t => Math.max(0, Math.min(100, (t - t0) / (t1 - t0) * 100))
     let ticks = ''
@@ -30334,16 +30340,17 @@
     const bw = (document.getElementById('mkl-wd') && document.getElementById('mkl-wd').clientWidth) || 900
     const BREITE = Math.min(60, 150 / Math.max(300, bw - 40) * 100), bahnEnde = [-99, -99, -99]
     const bloecke = mitZeit.map((x, i) => {
-      const a = Date.parse(x.row.start_um), p = pct(a)
+      const a = x.start, p = pct(a)
       let bahn = bahnEnde.findIndex(e => p - e >= BREITE); if(bahn < 0) bahn = bahnEnde.indexOf(Math.min(...bahnEnde)); bahnEnde[bahn] = p
       const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(x.uid) : '#667085'
       const fest = x.row.status !== 'geplant' || x.trades.some(t => t.gestartet || !['planned', 'kein_plan', 'fehlt'].includes(t.status))
       const zieh = admin && !fest && !P.tauschBusy
-      const dir = x.row.richtung === 'buy' ? 'BUY' : x.row.richtung === 'sell' ? 'SELL' : ''
-      const abst = i > 0 ? Math.round((a - Date.parse(mitZeit[i - 1].row.start_um)) / 60000) : null
+      const xr = [...new Set(x.trades.map(t => t.richtung).filter(Boolean))], xd = xr.length === 1 ? xr[0] : xr.length ? 'mix' : x.row.richtung
+      const dir = xd === 'buy' ? 'BUY' : xd === 'sell' ? 'SELL' : xd === 'mix' ? 'BUY/SELL' : ''
+      const abst = i > 0 ? Math.round((a - mitZeit[i - 1].start) / 60000) : null
       const rechts = p > 82
       return `<div class="mwz-block${fest ? ' fest' : ''}${zieh ? ' zieh' : ''}${P.zielUid === x.uid ? ' ziel' : ''}" ${zieh ? `data-mwz-drag="${escapeHtml(x.uid)}"` : ''} style="--mwd-farbe:${farbe};top:${bahn * 44}px;${rechts ? `right:${(100 - p).toFixed(2)}%` : `left:${p.toFixed(2)}%`}" title="${escapeHtml(x.name)} · ${escapeHtml(wdHhmm(x.row.start_um))} Dubai · ${x.trades.length} Trade${x.trades.length === 1 ? '' : 's'}${zieh ? ' — auf einen anderen Block ziehen: die beiden tauschen ihre Startzeit' : fest ? ' — läuft/fertig, fest' : ''}">
-          <b>${escapeHtml(x.name)}</b><span>${escapeHtml(wdHhmm(x.row.start_um))}${abst != null ? ` · +${abst} min` : ''} · ${x.trades.length} × ${dir || '?'}</span></div>`
+          <b>${escapeHtml(x.name)}</b><span>${escapeHtml(wdHhmm(new Date(a).toISOString()))}${abst != null ? ` · +${abst} min` : ''} · ${x.trades.length} × ${dir || '?'}</span></div>`
     }).join('')
     const bahnen = Math.max(1, bahnEnde.filter(e => e > -99).length)
     const jetztL = (jetzt >= t0 && jetzt <= t1) ? `<i class="mwz-jetzt" style="left:${pct(jetzt).toFixed(2)}%"><span>jetzt ${escapeHtml(wdHhmm(new Date(jetzt).toISOString()))}</span></i>` : ''
@@ -47955,7 +47962,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1790'
+  const OS_TAB_BUILD = '2026-09-22.1791'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60833,6 +60840,62 @@
     if(v.richtung === x.richtung) return `<span class="kf" title="${escapeHtml(v.grund)}"> · ${escapeHtml(v.grund)}</span>`
     return `<span class="kf" style="color:var(--danger)" title="${escapeHtml(v.grund)}"> · ⚠ gegen ${escapeHtml(v.firma)} (${v.richtung === 'buy' ? 'long' : 'short'} läuft) — Start würde am Riegel scheitern</span>`
   }
+  /* BÜNDEL JE ID GEWÜRFELT (28.10.2026, Finn per Sprachnachricht: „heute startet bei Jacob einer um 16:01 und einer um 16:02 … an manchen
+   * Tagen alle auf einmal, an anderen nicht — z. B. zwei Longs um 16 Uhr und schon um 7 Uhr morgens ein Short, an einem anderen Tag alle
+   * drei zu verschiedenen Uhrzeiten"). Bis hier fuhr jede ID ihre aktiven Konten als EIN Block in EINER Richtung (Blockstart + 80 s je Konto;
+   * Beleg wd_tagesplan 26.–28.10.: Jacob 3 × Tradeify jeden Tag binnen 3 min, Chris 4 Konten binnen 4 min). Jetzt würfelt jede ID je Tag
+   * ihre Bündelung: alle zusammen · Teilgruppen (ab 3 Konten) · alle einzeln — je 1/3 (2 Konten: zusammen/einzeln je 1/2). Gruppe 1 bleibt
+   * am Blockstart, jede weitere bekommt eine eigene Zeit irgendwo im Fenster (≥ Block-Abstand zu allen Blöcken und Gruppen, sonst fährt sie
+   * mit Gruppe 1) und eine eigene Richtung (gleich/gegen Gruppe 1, je 1/2). Gemerkt am Konto als Versatz zum Blockstart (k.g_versatz_min)
+   * + k.g_gegen — so ziehen Drag & Drop, Zeit- und Richtungsänderung im Admin die Gruppen mit. Harte Regeln bleiben: läuft beim Start noch
+   * die Gegenrichtung derselben ID × Firma (WD-Laufzeit Median ~3,7 h, p90 ~10 h), dreht rkVorStart den WD wie bisher auf die laufende
+   * Richtung (.1503) — nie gleichzeitig gegeneinander; Gegenhedge über IDs hält der Block-Abstand; eine übernommene Richtung
+   * (wdRichtungVorgabe) gilt für alle Gruppen. app.py ap_wd_block_starts rechnet dieselben Konto-Zeiten. REIN RECHNEND. */
+  const WD_BUENDEL_ARTEN = ['alle', 'teil', 'einzeln']
+  function wdBuendelWuerfeln(konten, rnd, t0, lo, hi, belegt, gap, richtungFest){
+    const akt = (konten || []).filter(wdAktiv), n = akt.length, M = 60000
+    if(n < 2) return { art: 'alle', gruppen: [{ ids: akt.map(k => String(k.id)), versatz_min: 0, gegen: false }] }
+    const art = n === 2 ? (rnd() < 0.5 ? 'alle' : 'einzeln') : WD_BUENDEL_ARTEN[Math.min(2, Math.floor(rnd() * 3))]
+    const ord = new Map(akt.map((k, i) => [String(k.id), i])), nachZeile = (x, y) => ord.get(x) - ord.get(y)
+    const ids = akt.map(k => String(k.id))
+    for(let i = ids.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]] }
+    let teile
+    if(art === 'alle') teile = [ids]
+    else if(art === 'einzeln') teile = ids.map(x => [x])
+    else{
+      const g = 2 + Math.floor(rnd() * (n - 2))   // 2 … n−1 Gruppen
+      const pos = Array.from({ length: n - 1 }, (_, i) => i + 1)
+      for(let i = pos.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); [pos[i], pos[j]] = [pos[j], pos[i]] }
+      teile = []; let a = 0
+      for(const c of pos.slice(0, g - 1).sort((x, y) => x - y).concat([n])){ teile.push(ids.slice(a, c)); a = c }
+    }
+    const gruppen = [{ ids: teile[0], versatz_min: 0, gegen: false }]
+    for(const t of teile.slice(1)){
+      let z = null
+      for(let k = 0; k < 200 && z == null && hi > lo; k++){ const c = Math.round((lo + rnd() * (hi - lo)) / M) * M; if(c >= lo && c <= hi && (belegt || []).every(x => Math.abs(x - c) >= gap)) z = c }
+      const gegen = rnd() < 0.5   // immer ziehen — Seed-Folge bleibt für alle Tabs gleich
+      if(z == null){ gruppen[0].ids.push(...t); continue }   // kein Platz im Fenster → fährt mit Gruppe 1
+      if(belegt) belegt.push(z)
+      gruppen.push({ ids: t, versatz_min: Math.round((z - t0) / M), gegen: richtungFest ? false : gegen })
+    }
+    for(const g of gruppen) g.ids.sort(nachZeile)   // in der Gruppe Reihenfolge der Zeile (80-s-Takt wie bisher)
+    return { art: gruppen.length === 1 ? 'alle' : art, gruppen }
+  }
+  window._wdBuendelWuerfeln = wdBuendelWuerfeln   // Test-Haken
+  // Gruppen an die Konten schreiben (Kopie) — eine Gruppe = keine Felder, die Zeile sieht aus wie bis 28.10.2026
+  function wdBuendelAnKonten(konten, b){
+    const mehr = !!(b && b.gruppen && b.gruppen.length > 1), wo = new Map()
+    if(mehr) b.gruppen.forEach((g, i) => g.ids.forEach(id => wo.set(String(id), { gruppe: i + 1, g_versatz_min: g.versatz_min, g_gegen: !!g.gegen })))
+    return (konten || []).map(k => {
+      const { gruppe, g_versatz_min, g_gegen, ...rest } = k || {}; void gruppe; void g_versatz_min; void g_gegen
+      const w = wo.get(String(rest.id)); return w ? { ...rest, ...w } : rest
+    })
+  }
+  window._wdBuendelAnKonten = wdBuendelAnKonten
+  // Versatz (min) und Richtung eines Kontos aus seiner Gruppe — ohne Gruppe: Blockstart und Richtung der Zeile
+  const wdKontoVersatzMin = k => (k && k.gruppe && Number.isFinite(+k.g_versatz_min)) ? Math.round(+k.g_versatz_min) : 0
+  const wdKontoRichtung = (k, richtung) => (k && k.gruppe && k.g_gegen && (richtung === 'buy' || richtung === 'sell')) ? (richtung === 'buy' ? 'sell' : 'buy') : richtung
+  window._wdKontoRichtung = wdKontoRichtung
   function wdWuerfeln(rows, regeln, tag, seed, alleNeu, jetztMs, richtungFest){
     const r = regeln || {}, rnd = seed != null ? wdMulberry(seed) : Math.random
     const nAkt = x => (x.konten || []).filter(wdAktiv).length
@@ -60845,13 +60908,19 @@
     // dazwischen; Startzeit schon vorbei (Tab kam spät, „Würfeln" am Nachmittag): frühestens in 5 min (wdFensterMs)
     const nr0 = fest.length ? Math.max(...fest.map(x => +x.reihenfolge || 0)) : 0
     const { lo, hi } = wdFensterMs(r, tag, jetztMs)
-    const zeiten = wdZeitenVerteilen(teil.length, lo, hi, fest.map(x => new Date(x.start_um).getTime()), rnd, wdBlockAbstandMs(Math.max(1, ...(rows || []).map(nAkt))))
+    const gap = wdBlockAbstandMs(Math.max(1, ...(rows || []).map(nAkt)))
+    const zeiten = wdZeitenVerteilen(teil.length, lo, hi, fest.map(x => new Date(x.start_um).getTime()), rnd, gap)
+    // BÜNDEL (28.10.2026): belegt = alle Blockstarts + die Gruppen fester Zeilen — weitere Gruppen halten denselben Abstand
+    const belegt = fest.map(x => new Date(x.start_um).getTime()).concat(zeiten)
+    for(const x of fest) for(const k of (x.konten || [])) if(wdAktiv(k) && k.gruppe > 1) belegt.push(new Date(x.start_um).getTime() + wdKontoVersatzMin(k) * 60000)
     let nr = nr0
     teil.forEach((x, i) => {
       const t = zeiten[i]   // teil ist schon gemischt → Reihenfolge der IDs zufällig, Zeiten aufsteigend
       const gew = rnd() < 0.5 ? 'buy' : 'sell'                          // rnd() immer ziehen — Seed-Folge bleibt für alle Tabs gleich
       const v = wdRichtungVorgabe(richtungFest, String(x.user_id), x.konten)   // RICHTUNG ÜBERNEHMEN (08.10.2026) statt würfeln
-      out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(Math.round(t / 60000) * 60000).toISOString(), richtung: v ? v.richtung : gew, status: 'geplant', richtung_grund: v ? v.grund : null })
+      const t0 = Math.round(t / 60000) * 60000
+      const buendel = wdBuendelWuerfeln(x.konten, rnd, t0, lo, hi, belegt, gap, !!v)
+      out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(t0).toISOString(), richtung: v ? v.richtung : gew, status: 'geplant', richtung_grund: v ? v.grund : null, buendel })
     })
     for(const x of rows || []){
       if(out.has(String(x.user_id)) || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
@@ -61278,6 +61347,12 @@
       const e = erg.get(String(x.user_id)); if(!e) return null
       const upd = { reihenfolge: e.reihenfolge, start_um: e.start_um, richtung: e.richtung, status: e.status, updated_at: new Date().toISOString() }
       if(geloest.has(String(x.user_id))) upd.konten = x.konten
+      // BÜNDEL (28.10.2026): Gruppen an die Konten — nur schreiben, wenn sich etwas ändert (eine Gruppe = Felder weg)
+      if(e.buendel){
+        const neu = wdBuendelAnKonten(x.konten, e.buendel)
+        const sig = ks => JSON.stringify((ks || []).map(k => [k && k.id, k && k.gruppe, k && k.g_versatz_min, k && k.g_gegen]))
+        if(sig(neu) !== sig(x.konten)) upd.konten = neu
+      }
       let q = supabase.from('wd_tagesplan').update(upd).eq('tag', tag).eq('user_id', x.user_id)
       if(!alleNeu) q = q.is('start_um', null)   // wer zuerst schreibt, gewinnt — das Ergebnis ist ohnehin dasselbe
       return q.then(({ error }) => { if(!error) n++ })
@@ -61302,7 +61377,7 @@
   window._wdStartUmNachziehbar = wdStartUmNachziehbar
   function wdKontoZeiten(konten, startUm, r){
     const aMin = Math.max(0, +((r || {}).abstand_min) || 0), aMax = Math.max(aMin, +((r || {}).abstand_max) || 0)
-    let t = new Date(startUm).getTime(), i = 0
+    const t = new Date(startUm).getTime(), idx = new Map()
     const out = new Map(); out.geaendert = false
     for(const k of konten){
       if(!wdAktiv(k)) continue
@@ -61310,8 +61385,10 @@
       // scheiterte, Puls-Chrome neu gestartet, ein Konto nie gefeuert, Reader sah nach dem Kontowechsel „flach“). Finn: 1:20 min
       // zwischen den Winning Days einer ID. Die Warteschlange des PCs (27.09.2026) bleibt der Riegel dahinter.
       // Alte, schon gewürfelte k.abstand_min bleiben am Konto stehen, wirken aber nicht.
+      // BÜNDEL (28.10.2026): je Gruppe eigener Start (Blockstart + k.g_versatz_min), 80 s je Konto innerhalb der Gruppe
       void aMin; void aMax
-      out.set(String(k.id), new Date(t + i * WD_KONTO_ABSTAND_MS).toISOString()); i++
+      const v = wdKontoVersatzMin(k), i = idx.get(v) || 0; idx.set(v, i + 1)
+      out.set(String(k.id), new Date(t + v * 60000 + i * WD_KONTO_ABSTAND_MS).toISOString())
     }
     return out
   }
@@ -61358,7 +61435,7 @@
         // .1487: Würfel aus der Zeile (oder jetzt würfeln und merken) — der Plan trägt genau die Werte, die „Plan heute Nacht“ zeigt
         if(wdKontoWuerfel(k, kd, vp, z)) ge = true
         if(k.wuerfel && Number(k.wuerfel.tp) > 0) z.tp = Number(k.wuerfel.tp)
-        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), symbol, row.richtung, tag)
+        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), symbol, wdKontoRichtung(k, row.richtung), tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
@@ -61411,7 +61488,8 @@
           k.plan_id = null; k.status = null; k.start_um = null; k.tp = null; k.sl = null; ge = true; continue
         }
         const upd = {}, soll = zeiten.get(String(k.id)), kd = wdKontoDaten(k.id)
-        if(row.richtung && p.richtung !== row.richtung) upd.richtung = row.richtung
+        const kr = wdKontoRichtung(k, row.richtung)   // BÜNDEL (28.10.2026): Richtung der Gruppe
+        if(kr && p.richtung !== kr) upd.richtung = kr
         if(soll && wdStartUmNachziehbar(p.start_um, soll)) upd.start_um = soll   // nie in die Vergangenheit zurückziehen (14.10.2026)
         if(kd && kd.tp_vorgabe > 0 && Number(p.master_tp) !== kd.tp_vorgabe) upd.master_tp = kd.tp_vorgabe
         if(p.master_sl != null) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen
@@ -61588,13 +61666,13 @@
           const acc = (accounts || []).find(a => String(a.id) === String(k.id)); if(!acc) continue
           // .1487: genau der gewürfelte TP + die gewürfelten Kontrakte aus der Zeile — das, was „Plan heute Nacht“ schon zeigt
           const wf = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { master_tp: Number(k.wuerfel.tp), master_contracts: Number(k.wuerfel.kt) } : undefined
-          const p = await wdPlanAnlegen(acc, row.richtung, vp, startIso, row.tag, wf)
+          const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, startIso, row.tag, wf)
           if(p.warten) continue   // Claim verloren: der andere Tab legt an (25.09.2026)
           if(p.fehler){ set(k, 'aktiv', false); set(k, 'hinweis', p.fehler); continue }
           set(k, 'plan_id', String(p.plan.id)); set(k, 'start_um', startIso); set(k, 'tp', p.plan.masterTp); set(k, 'sl', p.plan.masterSl); set(k, 'slave', p.plan.slaveRisk); set(k, 'live', p.z.live); set(k, 'plus', p.z.plus); set(k, 'status', 'planned')
         }else if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
           const upd = {}, z = zVon.get(String(k.id))
-          if(plan.richtung !== row.richtung) upd.richtung = row.richtung
+          if(plan.richtung !== wdKontoRichtung(k, row.richtung)) upd.richtung = wdKontoRichtung(k, row.richtung)   // Richtung der Gruppe (28.10.2026)
           if(wdStartUmNachziehbar(plan.startUm, startIso)) upd.start_um = startIso   // nie in die Vergangenheit zurückziehen (14.10.2026)
           // Slave nach Live-Balance: der Mac kannte beim Anlegen evtl. keinen Live-Stand (kleinste Stufe)
           if(plan.route === 'tvv2'){
@@ -61637,7 +61715,7 @@
             if(!(da && da.length)){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
               if(acc){
-                const p = await wdPlanAnlegen(acc, row.richtung, vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt })
+                const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt })
                 if(p && p.plan){ plan = p.plan; if(String(p.plan.id) !== String(k.plan_id)) set(k, 'plan_id', String(p.plan.id)); set(k, 'hinweis', ''); console.warn('[wd] Plan neu angelegt (Selbstheilung)', k.plan_id) }
               }
             }
@@ -62009,7 +62087,9 @@
       const hakenAn = k.farm && (k.aktiv !== false || k.naechster_lauf || !k.ext || k.archiviert)   // wartet auf den Tageslauf = Haken an (21.10.2026)
       const tagKnopf = (!erw && !fest && !nurLesen && !planFest && k.farm && k.ext && !k.archiviert)
         ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-heute="${escapeHtml(String(k.id))}" data-wd-heute-rein="${k.aktiv === false ? '1' : ''}" title="${k.aktiv === false ? 'für diesen Tag wieder mitfahren lassen' : 'nur an diesem Tag auslassen — morgen fährt das Konto wieder mit'}">${k.aktiv === false ? 'heute wieder rein' : 'nur heute raus'}</button>` : ''
-      const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
+      const start = (k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—')
+        // BÜNDEL (28.10.2026): Gruppe + ihre Richtung, sobald eine ID heute in mehreren Gruppen fährt
+        + ((k.gruppe && wdAktiv(k)) ? `<div class="kf">Gruppe ${k.gruppe}${x.richtung ? ' · ' + (wdKontoRichtung(k, x.richtung) === 'buy' ? 'BUY' : 'SELL') : ''}</div>` : '')
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
       const slWert = kd.sl_vorgabe || ''   // Vorgabe für Risiko Master (Lot-Rechnung) — kein Stop am Plan (25.09.2026)
       // RISIKO MASTER FEHLT (08.10.2026, Master: alle 11 WD-Konten ohne wd_sl/max_risiko_trade → hedgeMultAusRisiko fällt auf den TP zurück =

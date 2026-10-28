@@ -23238,7 +23238,10 @@ def ap_wd_block_starts(rows, mitternacht, firmen, bekannt=()):
     08.10.2026: 01:49 Dubai) — der Nachtlauf um 01:30 und der Bot sahen die Blöcke nicht und konnten einen Auto-Plan einer anderen
     ID bei derselben Firma (meist Tradeify) daneben legen. Zeit je Konto wie wdKontoZeiten: Blockstart + 80 s × Nummer des aktiven
     Kontos (aktiv ≠ False). Konten, deren Plan schon im Stand steht (bekannt = plan_ids), entfallen — der Plan zählt selbst.
-    Nur Blöcke mit Zeit (status geplant/laeuft), nur Minuten des Tags (0 … 24 h ab mitternacht)."""
+    Nur Blöcke mit Zeit (status geplant/laeuft), nur Minuten des Tags (0 … 24 h ab mitternacht).
+    BÜNDEL (28.10.2026, Finn: „an manchen Tagen alle auf einmal, an anderen nicht"): fährt eine ID in Gruppen (Konto-Felder gruppe,
+    g_versatz_min, g_gegen — gewürfelt in prophos.html wdBuendelWuerfeln), startet jede Gruppe bei Blockstart + g_versatz_min, 80 s je
+    Konto innerhalb der Gruppe, Richtung der Zeile bzw. bei g_gegen die Gegenrichtung — exakt wie wdKontoZeiten/wdKontoRichtung."""
     bekannt = {str(x) for x in bekannt or ()}
     out = []
     for r in rows or ():
@@ -23248,19 +23251,35 @@ def ap_wd_block_starts(rows, mitternacht, firmen, bekannt=()):
             t0 = datetime.fromisoformat(str(r["start_um"]).replace("Z", "+00:00"))
         except (TypeError, ValueError):
             continue
-        i = 0
+        idx = {}
         for k in r.get("konten") or ():
             if not isinstance(k, dict) or k.get("aktiv") is False:
                 continue
-            t = t0 + timedelta(seconds=WD_KONTO_ABSTAND_S * i)
-            i += 1
+            v, richtung = wd_konto_gruppe(k, r.get("richtung"))
+            i = idx.get(v, 0)
+            idx[v] = i + 1
+            t = t0 + timedelta(minutes=v, seconds=WD_KONTO_ABSTAND_S * i)
             if k.get("plan_id") and str(k["plan_id"]) in bekannt:
                 continue
             m = (t - mitternacht).total_seconds() / 60.0
             if 0 <= m < 24 * 60:
                 out.append({"key": f"wd:{r.get('user_id')}:{k.get('id')}", "user_id": str(r.get("user_id")), "user": r.get("name") or "",
-                            "firma": ap_firma_key(firmen, k.get("firm")), "start": round(m, 2), "richtung": r.get("richtung"), "wd": True})
+                            "firma": ap_firma_key(firmen, k.get("firm")), "start": round(m, 2), "richtung": richtung, "wd": True})
     return out
+
+
+def wd_konto_gruppe(k, richtung):
+    """REIN RECHNEND (28.10.2026): (Versatz in min zum Blockstart, Richtung) eines Farmer-Kontos aus seiner Gruppe — ohne Gruppe
+    (0, Richtung der Zeile). Wie prophos.html wdKontoVersatzMin + wdKontoRichtung."""
+    if not isinstance(k, dict) or not k.get("gruppe"):
+        return 0, richtung
+    try:
+        v = int(round(float(k.get("g_versatz_min") or 0)))
+    except (TypeError, ValueError):
+        v = 0
+    if k.get("g_gegen") and richtung in ("buy", "sell"):
+        richtung = "sell" if richtung == "buy" else "buy"
+    return v, richtung
 
 
 def ap_verteil_gruppen(je, zustand, abstand=None, gestartet=()):
