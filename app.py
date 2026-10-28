@@ -16950,7 +16950,9 @@ def reader_tv_konten_schreiben():
     wer = reader_feed_token_pruefen(request.headers.get("X-Reader-Token") or "")
     if not wer:
         return jsonify({"ok": False, "msg": "Schlüssel ungültig"}), 401
-    if (request.content_length or 0) > TV_KONTEN_MAX:
+    if request.content_length is None:   # chunked ohne Längenangabe → kein Deckel prüfbar (Prüfer S2 29.10.2026, wie /mail/eingang)
+        return jsonify({"ok": False, "msg": "Content-Length fehlt"}), 411
+    if request.content_length > TV_KONTEN_MAX:
         return jsonify({"ok": False, "msg": "zu groß"}), 413
     _rest = sb_bremse_rest_s()
     if _rest > 0:
@@ -17025,6 +17027,17 @@ TV_KONTEN_FIRMEN = ("Tradeify", "Apex Trader", "Lucid Trading", "MyFundedFutures
 TV_AUFTRAG_MIN_S, TV_AUFTRAG_MAX_S = 300, 3 * 3600
 TV_AUFTRAG_LAUF_MAX_S = 20 * 60          # „laeuft" länger als das (Tab neu geladen, PC aus) → wieder offen
 TV_TAEGLICH_MIN_S, TV_TAEGLICH_MAX_S = 20 * 3600, 28 * 3600
+# PROBELAUF-WEICHE (Master 29.10.2026: Klick-Pfad erst auf EINEM PC): Railway-Variable TV_KONTEN_PCS = Komma-Liste der PC-Kennungen, die
+# Aufträge bekommen; „alle" = jeder Puls-PC. Nicht gesetzt → kein PC bekommt einen Auftrag (Aufträge sammeln sich nur an). Sicherer Standard.
+def tv_konten_pc_frei(pc, roh=None):
+    """REIN RECHNEND (testbar): darf dieser PC Lese-Aufträge holen?"""
+    roh = os.environ.get("TV_KONTEN_PCS", "") if roh is None else roh
+    liste = {x.strip().lower() for x in str(roh or "").split(",") if x.strip()}
+    return "alle" in liste or (bool(pc) and str(pc).strip().lower() in liste)
+
+
+TV_FALLBACK_PRUEF_S = 30 * 60           # Tages-Fallback je ID höchstens alle 30 min prüfen (Prüfer S2: GET kostet sonst 4+ DB-Zugriffe je Abfrage)
+_tv_fallback_merk = {}                  # uid → letzte Prüfung (time.time())
 
 
 def tv_konto_mail_firma(von, betreff, text=""):
@@ -17103,12 +17116,18 @@ def pc_tv_konten_auftrag():
     uid, _mail, err = _login_uid_mail()
     if err:
         return err
+    if not tv_konten_pc_frei(request.args.get("pc")):
+        return jsonify({"ok": True, "auftrag": None, "pc_frei": False})   # Probelauf-Weiche: dieser PC liest (noch) nicht
     jetzt = datetime.now(timezone.utc)
     try:
         alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S)).isoformat()
         sb_update("tv_konten_auftrag", {"user_id": f"eq.{uid}", "status": "eq.laeuft", "laeuft_at": f"lt.{alt}"}, {"status": "offen", "laeuft_at": None})
         konten = _sb_all("accounts", {"select": "id,firm,external_id,created_at", "user_id": f"eq.{uid}", "order": "created_at.desc"}) or []
         firmen_mit = [f for f in TV_KONTEN_FIRMEN if any(a.get("firm") == f and a.get("external_id") for a in konten)]
+        if time.time() - _tv_fallback_merk.get(uid, 0) < TV_FALLBACK_PRUEF_S:
+            firmen_mit = []                     # gerade erst geprüft
+        else:
+            _tv_fallback_merk[uid] = time.time()
         for f in firmen_mit:   # Tages-Fallback anlegen, wo nötig
             letzte = sb_select("tv_konten_auftrag", {"select": "created_at", "user_id": f"eq.{uid}", "firma": f"eq.{f}", "order": "created_at.desc", "limit": "1"}) or []
             streu = int(hashlib.sha256(f"{uid}|{f}".encode()).hexdigest()[:4], 16) / 65535
@@ -17125,7 +17144,19 @@ def pc_tv_konten_auftrag():
         got = sb_update("tv_konten_auftrag", {"id": f"eq.{a['id']}", "status": "eq.offen"}, {"status": "laeuft", "laeuft_at": jetzt.isoformat()}) or []
         if not got:
             return jsonify({"ok": True, "auftrag": None})   # anderer Tab war schneller
-        ext = next((k.get("external_id") for k in konten if k.get("firm") == a["firma"] and k.get("external_id")), None)
+        # Bezugskonto für den Login-Weg: das jüngste NICHT archivierte Konto dieser Firma (Prüfer 29.10.2026: ein archiviertes/geblowtes
+        # Konto ließe den Login-Weg ins Leere laufen); Archiv wie im Frontend (user_settings 'archive')
+        try:
+            _arch = ((sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.archive", "limit": "1"}) or [{}])[0].get("value")) or {}
+        except Exception:
+            _arch = {}
+        _arch = _arch if isinstance(_arch, dict) else {}
+        _lebt = [k for k in konten if k.get("firm") == a["firma"] and k.get("external_id") and not ((_arch.get(str(k.get("id"))) or {}).get("archived"))]
+        ext = (_lebt[0] if _lebt else {}).get("external_id")
+        if not ext:   # kein lebendes Konto dieser Firma → nichts zu lesen, Auftrag als Fehler (kein Puls-Lauf)
+            sb_update("tv_konten_auftrag", {"id": f"eq.{a['id']}", "status": "eq.laeuft"},
+                      {"status": "fehler", "erledigt_at": jetzt.isoformat(), "ergebnis": {"msg": "kein aktives Konto dieser Firma in Prophos"}})
+            return jsonify({"ok": True, "auftrag": None})
         return jsonify({"ok": True, "auftrag": {"id": a["id"], "firma": a["firma"], "art": a["art"], "ext": ext}})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Aufträge nicht lesbar ({type(e).__name__}: {str(e)[:100]}) — Tabelle tv_konten_auftrag da?"}), 503
