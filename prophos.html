@@ -3594,6 +3594,9 @@
   #adm-pane-wd .wd-po-fuss{font-size:11.5px;color:var(--sub);display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;min-height:20px}
   #adm-pane-wd .wd-po-fuss .btn-xs{padding:1px 8px;font-size:11px;height:auto}
   #adm-pane-wd .wd-ueb-leer{color:var(--sub);font-size:12.5px;padding:4px 0}
+  /* Heute nicht drin (28.10.2026): Kacheln wie Payouts, Würfeln-Knopf rechts; .btn setzt display:flex und schlägt hidden (wie .wd-po-mehr) */
+  #adm-pane-wd #wdNdAlle[hidden]{display:none}
+  #adm-pane-wd #wd-nd-grid .wd-po-fuss{justify-content:flex-end}
   #adm-pane-wd #wd-ueb-stat-rows .adm-row{grid-template-columns:minmax(130px,1.4fr) minmax(50px,1.4fr) auto 46px;padding:8px 0}
   #adm-pane-wd #wd-ueb-stat-rows .adm-row-name small{display:block;font-size:11px;color:var(--sub);font-weight:400}
   @media (max-width:640px){
@@ -11986,6 +11989,16 @@
             </div>
             <div id="wd-ablauf"></div>
             <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
+          </div>
+          <!-- HEUTE NICHT DRIN (28.10.2026, Finn: „alle Accounts, die Winning Days als Typ haben, aber heute nicht gehandelt werden … per Zufallsprinzip
+               in die heutigen Winning Days der jeweiligen ID reinwürfeln“ — Anlass: Tradeify-Payout nachts angefragt → Konto raus, morgens Geld da → wieder rein).
+               Kacheln wie Payouts (wd-po), Würfeln je Konto + „Alle würfeln“ (wdNdRender / wdKontoEinwuerfeln). Eigene Verdrahtung. -->
+          <div class="panel" id="wd-nd" style="margin:0 0 12px">
+            <div class="wd-panel-kopf">
+              <div class="panel-title">Heute nicht drin <span style="font-weight:400;color:var(--sub);font-size:12px">· Winning-Days-Konten ohne Platz im heutigen Tagesplan <span id="wd-nd-sub"></span></span></div>
+              <button type="button" class="btn btn-ghost btn-mini" id="wdNdAlle" data-ht-global hidden title="alle Konten mit Haken, die heute nicht drin sind, je eins zu seiner ID dazuwürfeln (eigene Zufallszeit, Richtung gleich/gegen den Block je 1/2) — Konten mit Haken aus bleiben draußen">🎲 Alle würfeln</button>
+            </div>
+            <div class="wd-po-grid" id="wd-nd-grid"></div>
           </div>
           <!-- Einstellungen als drei Karten (23.09.2026, Finn: „unten auch draufdrücken, mehr Farben, auf eine Firma
                drücken und die Werte schnell eingeben, Tabelle größer") — gleiche IDs wie zuvor, damit Laden/Speichern
@@ -48507,7 +48520,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1808'
+  const OS_TAB_BUILD = '2026-09-22.1809'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63229,6 +63242,217 @@
     })
     p.addEventListener('keydown', ev => { const ka = ev.target.closest('[data-wd-ueb-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdUebId) } })
   })()
+  /* HEUTE NICHT DRIN (28.10.2026, Finn: „Wenn der Tag schon offen ist und ich nachts ein Tradeify-Payout anfrage, ist der Account automatisch
+   * rausgenommen — sehr gut. Wenn am nächsten Morgen das Geld ankommt, will ich unter Admin → Winning Days alle Accounts, die den Typ Winning
+   * Days haben, aber heute (aus irgendeinem Grund) nicht aktiv drin sind, per Zufallsprinzip mit einem Klick je Account heute irgendwo zur
+   * jeweiligen ID mit reinwürfeln und neu planen lassen“). Liste = WD-Konten der Sicht (dieselbe Quelle wie die Payouts-Kacheln), die in
+   * keiner Tageszeile aktiv stehen, mit dem Grund aus der Zeile (Server-Hinweis, „nur heute raus“, Tageslauf, Haken aus, ID nicht eingetragen).
+   * Würfeln = derselbe Weg wie „heute wieder rein“ (wdKontoHeute), nur mit eigenem Zufallsslot: das Konto bekommt eine eigene Gruppe
+   * (gruppe / g_versatz_min / g_gegen wie wdBuendelWuerfeln — Zeit irgendwo im Fenster mit Block-Abstand zu allen Blöcken und Gruppen aller
+   * IDs, Richtung gleich/gegen den Block je 1/2, übernommene Richtung gilt) statt sich hinten an den Block zu hängen; ID ohne Block →
+   * wdSlotEinplanen (F35). Pläne wie immer über wdPlaeneAnlegen (nur SCHARF). Haken aus = nur einzeln würfelbar (setzt den Haken dauerhaft,
+   * wie wdKontoHaken), „Alle würfeln“ lässt die aus. Block läuft/fertig/verpasst = heute nicht mehr nachwürfelbar (wie wdKontoHeute). */
+  function wdNdListe(){
+    const d = _wd.daten, aus = wdIdsAus(); if(!d || !Array.isArray(d.konten)) return null
+    const rows = wdSichtRows(_wd.rows), proUid = new Map(rows.map(x => [String(x.user_id), x]))
+    const ad = window._admData || {}, angefragt = new Set((ad.pending_payouts || []).map(t => String(t.account_name || '').trim()).filter(Boolean))
+    const out = []
+    for(const kd of d.konten){
+      if(kd.archiviert || aus.has(String(kd.user_id)) || !wdSichtOk(kd.user_id)) continue
+      const x = proUid.get(String(kd.user_id)) || null, kz = x ? ((x.konten || []).find(q => q && String(q.id) === String(kd.id)) || null) : null
+      if(kz && wdAktiv(kz)) continue   // heute drin
+      if(kz && kz.plan_id && kz.status && kz.status !== 'planned' && kz.status !== 'weg' && kz.status !== 'verpasst') continue   // heute schon gefahren
+      const fest = !!(x && wdFest(x))
+      let grund
+      if(fest) grund = x.status === 'laeuft' ? 'Block der ID läuft gerade — morgen wieder' : x.status === 'fertig' ? 'Block der ID ist heute schon durch — morgen wieder' : 'Block der ID wurde heute verpasst'
+      else if(!kd.wd_farm) grund = WD_HINWEIS_FARM
+      else if(!String(kd.ext || '').trim()) grund = WD_HINWEIS_EXT
+      else if(!x) grund = 'ID heute noch nicht eingetragen'
+      else if(!kz) grund = 'heute noch nicht in der Zeile der ID'
+      else grund = kz.hinweis || (kz.naechster_lauf ? WD_HINWEIS_TAGESLAUF : 'nur heute raus (von Hand)')
+      const kann = !fest && !!String(kd.ext || '').trim() && !wdVerwalter()
+      out.push({ kd, x, kz, grund, po: angefragt.has(String(kd.name || '').trim()), kann, farm: !!kd.wd_farm, firma: wdUebFirma(kd.firm) })
+    }
+    return out.sort((a, b) => (b.kann - a.kann) || (b.farm - a.farm) || String(a.kd.person || '').localeCompare(String(b.kd.person || '')) || String(a.kd.name || '').localeCompare(String(b.kd.name || '')))
+  }
+  function wdNdRender(){
+    const box = document.getElementById('wd-nd-grid'), sub = document.getElementById('wd-nd-sub'), alle = document.getElementById('wdNdAlle'); if(!box) return
+    const liste = wdNdListe()
+    if(liste === null){ box.innerHTML = `<div class="wd-ueb-leer">${_wd.datenFehler ? 'Konten nicht ladbar (' + escapeHtml(_wd.datenFehler) + ')' : 'Lädt …'}</div>`; if(alle) alle.hidden = true; if(sub) sub.textContent = ''; return }
+    const wuerfelbar = liste.filter(e => e.kann && e.farm)
+    if(sub) sub.textContent = liste.length ? `· ${liste.length} ${liste.length === 1 ? 'Konto' : 'Konten'}${wuerfelbar.length ? ` · ${wuerfelbar.length} nachwürfelbar` : ''}` : ''
+    if(alle){ alle.hidden = !wuerfelbar.length || wdVerwalter(); alle.textContent = `🎲 Alle würfeln (${wuerfelbar.length})` }
+    if(!liste.length){ box.innerHTML = '<div class="wd-ueb-leer">Alle Winning-Days-Konten dieser Sicht sind heute drin.</div>'; return }
+    box.innerHTML = liste.map(e => {
+      const kd = e.kd, uid = escapeHtml(String(kd.user_id)), live = kd.live_balance
+      const express = kontoIstTopstepExpress({ firm: kd.firm, ext: kd.ext, name: kd.name, type: kd.type })
+      const groesse = express ? 0 : kontoGroesseAnzeige(kd.name, kd.starting_balance, live)
+      const plus = live != null && (groesse > 0 || express) ? Math.round(live - groesse) : null
+      const bal = live != null ? `$${wdDe(live)}${plus != null ? ` <span style="color:${wdUebFarbe(plus)}">${plus >= 0 ? '+' : '−'}${wdDe(Math.abs(plus))}</span>` : ''}` : '<span class="kf">kein Live-Stand</span>'
+      const knopf = e.kann ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-nd-rein="${escapeHtml(String(kd.id))}" data-wd-nd-uid="${uid}" title="${e.farm ? 'heute zur ID dazuwürfeln: eigene Zufallszeit im Fenster, Richtung gleich/gegen den Block je 1/2 — Plan folgt bei SCHARF' : 'Haken dauerhaft setzen UND heute zur ID dazuwürfeln'}">🎲 ${e.farm ? 'Würfeln' : 'Haken + Würfeln'}</button>` : ''
+      return `<div class="wd-po" role="button" tabindex="0" data-wd-nd-id="${uid}" title="Klick: ${escapeHtml(kd.person || '')} oben aufklappen">
+        <div class="wd-po-kopf"><span><span class="adm-dot" style="background:${idFarbe(kd.user_id)}"></span>${escapeHtml(kd.person || '')}</span><span>${escapeHtml(e.firma)}</span></div>
+        <div class="wd-po-name"><span>${escapeHtml(wdUebKonto(kd))}</span><span class="mono" style="font-size:12px;font-weight:500;color:var(--sub)">${bal}</span></div>
+        <div class="wd-po-stand" style="color:var(--sub)">${e.po ? '💸 Payout angefragt · ' : ''}${escapeHtml(e.grund)}</div>
+        <div class="wd-po-fuss">${knopf}</div></div>`
+    }).join('')
+  }
+  /* Zufallsslot für EIN Konto in der Zeile seiner ID (REIN RECHNEND, window._wdNdSlot): Minute im Fenster [Start ab, Spätestens] mit
+   * Block-Abstand (wdBlockAbstandMs) zu allen Blockstarts und Gruppen aller IDs — wie die weiteren Gruppen in wdBuendelWuerfeln —, als Versatz
+   * zum Blockstart der eigenen Zeile. Kein Platz, Block liegt noch vor uns → mit dem Block (Gruppe 1, wie wdBuendelWuerfeln); sonst grund.
+   * → { versatz_min, start_ms, mitBlock? } | { grund } */
+  function wdNdSlot(rows, x, regeln, tag, jetztMs, rnd){
+    const M = 60000, zufall = rnd || Math.random, jetzt = jetztMs || Date.now(), r = regeln || {}
+    const t0 = new Date(x.start_um).getTime()
+    const { lo, hi } = wdFensterMs(r, tag, jetzt)
+    const gap = wdBlockAbstandMs(Math.max(1, ...(rows || []).map(q => ((q && q.konten) || []).filter(wdAktiv).length)))
+    const belegt = []
+    for(const q of (rows || [])){
+      if(!q || !q.start_um) continue
+      const b = new Date(q.start_um).getTime(); if(!(b > 0)) continue
+      belegt.push(b); for(const k of (q.konten || [])) if(wdAktiv(k) && k.gruppe > 1) belegt.push(b + wdKontoVersatzMin(k) * M)
+    }
+    for(let i = 0; i < 200 && hi > lo; i++){
+      const c = Math.round((lo + zufall() * (hi - lo)) / M) * M
+      if(c >= lo && c <= hi && belegt.every(b => Math.abs(b - c) >= gap)) return { versatz_min: Math.round((c - t0) / M), start_ms: c }
+    }
+    if(t0 >= jetzt + 5 * M) return { versatz_min: 0, start_ms: t0, mitBlock: true }
+    return { grund: hi < lo ? `Fenster ${r.start_hhmm || WD_VON_STD}–${wdBisHhmm(r)} Dubai für diesen Tag vorbei und der Block der ID ist schon durch`
+                            : `kein freier Platz mehr im Fenster ${r.start_hhmm || WD_VON_STD}–${wdBisHhmm(r)} Dubai, und der Block der ID ist schon vorbei` }
+  }
+  window._wdNdSlot = wdNdSlot   // Test-Haken
+  /* Ein Konto heute zu seiner ID dazuwürfeln. Schreibt: wd_tagesplan.konten[] der ID (aktiv, Gruppe, start_um — Falle 27.10.2026: konten[].start_um
+   * mitziehen, sonst zieht der PC-Tab-Abgleich den Plan zurück) + status; fehlt die Zeile der ID, wird sie wie in wdAlleEintragen angelegt
+   * (nur dieses Konto aktiv, die übrigen warten auf den Tageslauf — Regel 21.10.2026); accounts.wd_farm per RPC nur bei Haken aus (einzeln);
+   * trade_plans nur über wdPlaeneAnlegen (SCHARF). opts.nurFarm = Haken aus überspringen, opts.ohnePlaene = Pläne legt der Aufrufer an.
+   * → { ok, text } | { fehler } */
+  async function wdKontoEinwuerfeln(uid, kontoId, opts){
+    opts = opts || {}; uid = String(uid); kontoId = String(kontoId)
+    if(!(await wdDarf(uid))) return { fehler: 'nicht in deiner Gruppe' }
+    const tag = _wd.tag || document.getElementById('wd-tag')?.value; if(!tag) return { fehler: 'kein Tag gewählt' }
+    const kd = wdKontoDaten(kontoId); if(!kd) return { fehler: 'Konto nicht in der Kontenliste' }
+    const ext = String(kd.ext || '').trim(); if(!ext) return { fehler: WD_HINWEIS_EXT }
+    const r = _wd.regeln || {}, vpW = wdVorplanRegeln(), fxW = (_wd.daten && _wd.daten.fx) || window._fxUsdEur || 0.85, name = kd.name || 'Konto'
+    const wuerfel = k => { try{ wdKontoWuerfel(k, kd, vpW, tpVorplanZeile(wdAccLike(kd), { live: kd.live_balance, slaveCurrency: '€', fx: fxW, regeln: vpW.regeln, zufall: 0.5 })) }catch(_){} }
+    // 1) Haken aus → dauerhaft setzen (nur einzeln, nie über „Alle würfeln“)
+    let hakenNeu = false
+    if(!kd.wd_farm){
+      if(opts.nurFarm) return { fehler: 'Haken aus — nur einzeln würfelbar' }
+      const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: true }); if(error) return { fehler: 'Haken nicht gesetzt: ' + error.message }
+      kd.wd_farm = true; hakenNeu = true
+    }
+    // 2) Zeile der ID — fehlt sie, anlegen wie wdAlleEintragen (nur diese ID, alle Konten mit Haken aktiv): die ID bekommt unten über
+    //    wdSlotEinplanen ihren Block, die Geschwister fahren darin mit — wie „🎲 Würfeln" eine fehlende ID mitnimmt. (Prüfung 29.10.2026:
+    //    naechster_lauf an den Geschwistern löste sich an einer Zeile mit start_um heute nie mehr)
+    let x = (_wd.rows || []).find(q => String(q.user_id) === uid)
+    if(!x){
+      const e = (wdErwartet() || []).find(q => String(q.user_id) === uid); if(!e) return { fehler: 'ID nicht in der Kontenliste' }
+      const konten = e.konten.map(k => ({ ...k }))
+      const jetzt = new Date().toISOString()
+      const { data, error } = await supabase.from('wd_tagesplan').insert({ tag, user_id: uid, name: e.name, konten, status: konten.some(wdAktiv) ? 'geplant' : 'leer', ergebnis: { quelle: 'admin' }, registriert_at: jetzt, updated_at: jetzt }).select('*')
+      if(error && String(error.code) !== '23505') return { fehler: 'Zeile nicht angelegt: ' + error.message }
+      if(data && data[0]){ x = data[0]; _wd.rows = [...(_wd.rows || []), x] }
+      else x = (await wdRowsLaden(tag)).find(q => String(q.user_id) === uid)   // 23505: inzwischen von anderswo eingetragen → frisch lesen
+      if(!x) return { fehler: 'Zeile der ID nicht lesbar' }
+    }
+    if(wdFest(x)) return { fehler: `Block von ${x.name || 'ID'} ${x.status === 'laeuft' ? 'läuft gerade' : 'ist heute schon durch'} — morgen wieder` }
+    // 3) Konto in der Zeile aktiv schalten, fehlt es, anhängen (Felder wie wdErwartet)
+    const konten = (x.konten || []).map(k => ({ ...k }))
+    let kn = konten.find(q => q && String(q.id) === kontoId)
+    if(!kn){ const sp = wdTpSpanne(kd.firm, kd); kn = { id: kontoId, name: kd.name || '', firm: kd.firm || '', ext, farm: true, aktiv: true, tpVon: sp[0], tpBis: sp[1], archiviert: false, hinweis: '' }; konten.push(kn) }
+    if(kn.plan_id && kn.status && kn.status !== 'planned' && kn.status !== 'weg' && kn.status !== 'verpasst') return { fehler: `${name} ist heute schon gefahren` }
+    kn.farm = true; kn.ext = kn.ext || ext; kn.archiviert = false; kn.aktiv = true; kn.hinweis = ''; delete kn.naechster_lauf
+    if(kn.plan_id && (kn.status === 'weg' || kn.status === 'verpasst')){
+      // verpasst = der Plan steht noch (planned + geclaimt) — ohne Löschen verknüpft POST /admin/wd-plaene ihn wieder (Prüfung 29.10.2026)
+      if(kn.status === 'verpasst' && _wd.daten && _wd.daten.rail){ try{ await wdApi('DELETE', { id: kn.plan_id }) }catch(e){ return { fehler: `${name}: verpasster Plan nicht löschbar — ${e.message || e}` } } }
+      kn.plan_id = null; kn.status = null; kn.um = null; kn.gesendet = false; kn.start_um = null
+    }
+    wuerfel(kn)
+    let text = '', angelegt = 0
+    if(!x.start_um){
+      // ID hat heute noch keinen Block → eigener Slot für die Zeile (F35, wie „heute wieder rein“); wdSlotEinplanen schreibt konten + Zeit + Richtung
+      x.konten = konten; x.status = x.status === 'leer' || !x.status ? 'geplant' : x.status
+      let slot = ''
+      try{ slot = await wdSlotEinplanen(x) }catch(e){ return { fehler: 'Einplanen fehlgeschlagen: ' + (e.message || e) } }
+      if(!slot) return { fehler: `${x.name || 'ID'} wurde inzwischen anderswo eingeplant — bitte neu laden` }
+      if(/nicht eingeplant|nicht in deiner Gruppe/.test(slot)) return { fehler: slot }
+      text = `${name}: ${slot}`
+    }else{
+      // Block steht → eigene Gruppe mit Zufallszeit im Fenster (wie wdBuendelWuerfeln), Richtung gleich/gegen je 1/2 (übernommene Richtung: gleich)
+      const s = wdNdSlot(_wd.rows || [], x, r, tag, Date.now())
+      if(s.grund) return { fehler: `${name}: ${s.grund}` }
+      const v = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, uid, konten)
+      const richtung = x.richtung || (v ? v.richtung : (Math.random() < 0.5 ? 'buy' : 'sell'))
+      delete kn.gruppe; delete kn.g_versatz_min; delete kn.g_gegen
+      const andere = konten.filter(q => q !== kn && wdAktiv(q))
+      let startUm = x.start_um
+      if(!s.mitBlock && !andere.length) startUm = new Date(s.start_ms).toISOString()   // einziges Konto der ID: der Block selbst wandert auf den Slot — keine leere Gruppe 1 (Prüfung 29.10.2026)
+      else if(!s.mitBlock){
+        // Gruppe 1 = Blockstart (Konten ohne Gruppenfeld bekommen es ausdrücklich, wie wdBuendelAnKonten bei mehreren Gruppen); neue Gruppe hinten
+        const nr = Math.max(1, ...andere.map(q => +q.gruppe || 1)) + 1
+        for(const q of andere) if(!q.gruppe){ q.gruppe = 1; q.g_versatz_min = 0; q.g_gegen = false }
+        Object.assign(kn, { gruppe: nr, g_versatz_min: s.versatz_min, g_gegen: v ? false : Math.random() < 0.5 })
+      }
+      if(!kn.plan_id) kn.start_um = new Date(s.start_ms).toISOString()
+      const status = x.status === 'leer' || !x.status ? 'geplant' : x.status
+      const { data, error } = await supabase.from('wd_tagesplan').update({ konten, status, richtung, start_um: startUm, updated_at: new Date().toISOString() })
+        .eq('tag', tag).eq('user_id', uid).neq('status', 'laeuft').select('user_id')
+      if(error) return { fehler: 'Zeile nicht gespeichert: ' + error.message }
+      if(!data || !data.length) return { fehler: `Block von ${x.name || 'ID'} läuft inzwischen — nichts geändert` }
+      x.konten = konten; x.status = status; x.richtung = richtung; x.start_um = startUm
+      const seite = wdKontoRichtung(kn, richtung) === 'buy' ? 'BUY' : 'SELL'
+      text = `${name} heute dazu: ${wdHhmm(kn.start_um || new Date(s.start_ms).toISOString())} Dubai · ${seite}${s.mitBlock ? ' (mit dem Block — kein freier Platz mehr im Fenster)' : kn.gruppe ? ` · Gruppe ${kn.gruppe}${kn.g_gegen ? ' (gegen den Block)' : ''}` : ' (einziges Konto — Block der ID verschoben)'}${v ? ' · ' + v.grund : ''}`
+      if(!opts.ohnePlaene){
+        if(r.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(tag)).angelegt || 0 }catch(e){ text += ' · Plan nicht angelegt: ' + (e.message || e) } }
+        else if(!r.scharf) text += ' · SCHARF aus, Plan kommt beim Scharfstellen'
+      }
+    }
+    wdCacheSchreiben(tag)
+    return { ok: true, text: (hakenNeu ? 'Haken gesetzt (dauerhaft) · ' : '') + text + (angelegt ? ` · ${angelegt} Plan${angelegt === 1 ? '' : 'e'} angelegt` : '') }
+  }
+  async function wdNdAlle(){
+    const b = document.getElementById('wdNdAlle'), liste = (wdNdListe() || []).filter(e => e.kann && e.farm)
+    if(!liste.length || _wd.busy) return
+    if(b){ b.disabled = true; b.textContent = 'würfelt …' }
+    _wd.busy = true
+    const ok = [], schlecht = []
+    try{
+      for(const e of liste){   // nacheinander — jede Runde sieht die Gruppen der vorigen (Block-Abstand), eine Zeile je Schreibzugriff
+        const z = await wdKontoEinwuerfeln(String(e.kd.user_id), String(e.kd.id), { nurFarm: true, ohnePlaene: true })
+        if(z.ok) ok.push(z.text); else schlecht.push(`${e.kd.name || 'Konto'}: ${z.fehler}`)
+      }
+      let angelegt = 0, planHinweis = ''
+      if(ok.length){
+        if(_wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(_wd.tag)).angelegt || 0 }catch(e){ planHinweis = 'Pläne nicht angelegt: ' + (e.message || e) } }
+        else if(!(_wd.regeln && _wd.regeln.scharf)) planHinweis = 'SCHARF aus, Pläne kommen beim Scharfstellen'
+      }
+      await wdNeuLaden()
+      wdSay(`${ok.length} von ${liste.length} Konten heute dazugewürfelt${angelegt ? ` · ${angelegt} Plan${angelegt === 1 ? '' : 'e'} angelegt` : ''}${planHinweis ? ' · ' + planHinweis : ''}${ok.length ? ' — ' + ok.join(' · ') : ''}${schlecht.length ? ' ⚠ ' + schlecht.join(' · ') : ''}`, schlecht.length ? 'err' : 'ok')
+    }catch(err){ wdSay('Fehler: ' + (err.message || err), 'err') }
+    finally{ _wd.busy = false; if(b){ b.disabled = false } try{ wdNdRender() }catch(_){} }
+  }
+  // Eigene Verdrahtung des Kastens (wie #wd-ueb): Würfeln je Konto, Alle würfeln, Klick auf die Kachel klappt die ID oben auf
+  ;(() => {
+    const p = document.getElementById('wd-nd'); if(!p) return
+    p.addEventListener('click', async ev => {
+      const rein = ev.target.closest('[data-wd-nd-rein]')
+      if(rein){
+        ev.stopPropagation(); if(wdVerwalter() || _wd.busy) return
+        rein.disabled = true; rein.textContent = 'würfelt …'; _wd.busy = true
+        try{
+          const z = await wdKontoEinwuerfeln(rein.dataset.wdNdUid, rein.dataset.wdNdRein)
+          wdSay(z.ok ? z.text : 'Nicht dazugewürfelt — ' + z.fehler, z.ok ? 'ok' : 'err')
+          if(typeof atToast === 'function') atToast(z.ok ? z.text : '⚠ ' + z.fehler, z.ok ? 'start' : 'end')
+          await wdNeuLaden()
+        }catch(e){ wdSay('Fehler: ' + (e.message || e), 'err') }
+        finally{ _wd.busy = false; try{ wdNdRender() }catch(_){} }
+        return
+      }
+      if(ev.target.closest('#wdNdAlle')){ ev.stopPropagation(); if(!wdVerwalter()) wdNdAlle(); return }
+      const ka = ev.target.closest('[data-wd-nd-id]'); if(ka) wdUebOeffnen(ka.dataset.wdNdId)
+    })
+    p.addEventListener('keydown', ev => { if(ev.target.closest('button')) return; const ka = ev.target.closest('[data-wd-nd-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdNdId) } })
+  })()
   function wdRender(){
     const rows = wdSichtRows(_wd.rows)   // .1773: Zähler-Zeile und Hinweise nur über die Admin-Sicht
     const erwartet = (e => e && e.filter(x => wdSichtOk(x.user_id)))(wdErwartet()), fehlend = wdFehlend()
@@ -63244,6 +63468,7 @@
     wdIdsAusRender()
     wdFirmenZaehlen()
     try{ wdUebRender() }catch(e){ console.warn('[wd] Überblick', e) }   // nur Anzeige (28.10.2026) — ein Fehler hier stört die Tabelle nie
+    try{ wdNdRender() }catch(e){ console.warn('[wd] Heute nicht drin', e) }   // Kasten „Heute nicht drin“ (28.10.2026) — ebenso nur nachrangig
   }
   function wdSichtbar(){ const p = document.getElementById('adm-pane-wd'); return !!(p && !p.hidden && p.offsetParent !== null) }
   // Letzter Stand im Browser (23.09.2026, Finn: „der Zeitstrahl und alles lädt immer relativ lang"): beim Öffnen sofort
