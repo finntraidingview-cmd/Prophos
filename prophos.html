@@ -1463,6 +1463,8 @@
   }
   #dashboard-view .adm-vl-chip:hover{background:var(--surface-tint)}
   #dashboard-view .adm-vl-chip.is-on{color:var(--ink);font-weight:600;background:var(--violet-tint)}
+  #dashboard-view .adm-mail-sicht{display:flex;gap:4px;margin:0 0 12px}   /* Mails · Konten aus Mail (29.10.2026) */
+  #dashboard-view .adm-mail-sicht[hidden]{display:none}
   #dashboard-view .adm-vl-chip.is-off{opacity:.45}
   #dashboard-view .adm-sub{font-size:11.5px;color:var(--sub-2);font-weight:400}
   /* Kapitel „Ohne Hedge" (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes Einzelne"):
@@ -11789,14 +11791,19 @@
           <button class="subtab adm-tab" data-admtab="mail">Mail</button>
           <!-- Konten aus Mail (29.10.2026, Finn: „ein Reiter, der alle neuen Accounts zeigt, die per E-Mail dazugekommen sind … wenn das proof ist,
                müssen wir nie wieder Accounts in Prophos hinzufügen") — Test-Reiter, nur Hermann Technologies wie Mail, Daten GET /admin/konto-mails -->
-          <button class="subtab adm-tab" data-admtab="kontomail">Konten aus Mail &amp; TV</button>
+          <!-- seit 29.10.2026 kein eigener Reiter mehr (Finn: „Es gibt ‚Konten aus Mail' und ‚Mail' — das zusammenfassen"): Umschalter
+               „Mails · Konten" oben im Reiter Mail; der Knopf bleibt versteckt, damit Pane + Umschaltung (name 'kontomail') unverändert laufen -->
+          <button class="subtab adm-tab" data-admtab="kontomail" data-reiter-aus="1" style="display:none">Konten aus Mail &amp; TV</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
           <!-- Kompass + Rechnungen ganz rechts unter „sperren", klein und gedämpft (Finn 30.09.2026: „ganz nach rechts, unter das
                ‚sperren', wo man sie quasi nicht sieht. Braucht man eh nicht, fast ganz weg, aber behalten") — Pane/Umschaltung unverändert -->
-          <button class="subtab adm-tab adm-tab-rand adm-tab-rand-erst" data-admtab="kompass">Kompass</button>
-          <button class="subtab adm-tab adm-tab-rand" data-admtab="rg">Rechnungen</button>
+          <!-- Kompass + Rechnungen AUSGEBLENDET (29.10.2026, Finn: „Im Admin-Terminal aufräumen, es wird zu viel. Kompass komplett weg, visuell
+               brauchen wir den nicht. Rechnung visuell weg, brauchen wir auch nicht") — Panes, JS und Backend bleiben, nur die Knöpfe sind weg;
+               data-reiter-aus hält sie auch beim Profil-/Gruppenwechsel draußen (kasseReiterFuer) -->
+          <button class="subtab adm-tab adm-tab-rand adm-tab-rand-erst" data-admtab="kompass" data-reiter-aus="1" style="display:none">Kompass</button>
+          <button class="subtab adm-tab adm-tab-rand" data-admtab="rg" data-reiter-aus="1" style="display:none">Rechnungen</button>
         </div>
 
         <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
@@ -12538,6 +12545,12 @@
         </div>
         <!-- MAIL ALLER IDs (21.10.2026): Chips „Alle · ID …" mit Ungelesen-Zahl, darunter Liste + Lesen wie im Mail-Reiter (gleiche Klassen
              und gleiche Mail-Ansicht mailLesenZeigen) — Daten aus /admin/mail, geladen beim Öffnen und auf ↻ -->
+        <!-- Umschalter Mails · Konten (29.10.2026, Finn: „‚Konten aus Mail' und ‚Mail' — das zusammenfassen"): nur im Reiter Mail sichtbar,
+             schaltet zwischen adm-pane-mail und adm-pane-kontomail (Render-Funktionen unverändert, _admMailOeffnen / _admKontoMailOeffnen) -->
+        <div class="adm-mail-sicht" id="adm-mail-sicht" hidden>
+          <button type="button" class="adm-vl-chip is-on" data-adm-mail-sicht="mails">Mails</button>
+          <button type="button" class="adm-vl-chip" data-adm-mail-sicht="konten">Konten aus Mail &amp; TV</button>
+        </div>
         <div id="adm-pane-mail" hidden>
           <div class="adm-mail-kopf">
             <div class="adm-mail-chips" id="adm-mail-chips"></div>
@@ -15084,6 +15097,7 @@
     }
     function kasseReiterFuer(ec){
       document.querySelectorAll('.adm-tab').forEach(b => {
+        if(b.dataset.reiterAus){ b.style.display = 'none'; return }   // dauerhaft ausgeblendete Reiter (29.10.2026: Kompass, Rechnungen, Konten aus Mail)
         if(kasseReiterErlaubt(b.dataset.admtab, ec)){
           if(b.dataset.nurEigeneAus){ b.style.display = ''; delete b.dataset.nurEigeneAus }
         } else if(b.style.display !== 'none'){
@@ -16495,11 +16509,16 @@
      * scheiße, kennt man gar nichts."). Statt der Aufklappung (adm-acc-panel / Kontowert-Balken) öffnet der Klick den Reiter „Alle
      * Accounts" mit genau diesem Filter: übrige Filter leer, „Archivierte" nach dem Status-Filter der Übersicht. Die Aufklappung bleibt
      * für die Suche und die Auswahllisten oben. */
-    function admZuKonten(art, key){
+    // typ (29.10.2026, Finn: „wenn ich auf die jeweilige ID oder die jeweilige Zahl je Person klicke, sehe ich alle Accounts"): optional der
+    // Kontotyp der Zahl (z. B. 'winning_days' aus „Wert in Winning Days"); art 'alle' = ohne Person/Firma (Kachel „Accounts")
+    // extra (29.10.2026, Gegenprüfung): { person, firm, suche } überschreibt einzelne Felder — Kachel „Accounts" reicht die Filter der
+    // Übersicht weiter (sonst passt die Kachelzahl nicht zur Liste), eine WD-Kontozeile die Suche auf genau dieses Konto
+    function admZuKonten(art, key, typ, extra){
       admKontenRender()   // füllt die Auswahllisten, sonst greift der Wert nicht
       const setz = (id, v) => { const el = $(id); if(el) el.value = v }
       setz('adm-k-person', art === 'person' ? String(key) : ''); setz('adm-k-firm', art === 'firm' ? String(key) : '')
-      setz('adm-k-type', ''); setz('adm-k-ziel', ''); setz('adm-k-search', '')
+      setz('adm-k-type', typ || ''); setz('adm-k-ziel', ''); setz('adm-k-search', '')
+      if(extra){ if(extra.person) setz('adm-k-person', String(extra.person)); if(extra.firm) setz('adm-k-firm', String(extra.firm)); if(extra.suche) setz('adm-k-search', String(extra.suche)) }
       const arch = $('adm-k-archived'); if(arch) arch.checked = ($('adm-status')?.value || 'active') !== 'active'
       const tab = document.querySelector('.adm-tab[data-admtab="konten"]'); if(tab) tab.click(); else admKontenRender()
       $('adm-pane-konten')?.scrollIntoView({ behavior:'smooth', block:'start' })
@@ -16672,12 +16691,13 @@
       if(empty) empty.hidden = rows.length > 0
       const add = (m, c, v) => { if(v != null) m.set(c, (m.get(c) || 0) + v) }
       rows.sort((a, b) => ((b.wert.anteil ?? -1) - (a.wert.anteil ?? -1)) || String(a.person || '').localeCompare(String(b.person || ''), 'de'))
-      const sGewinn = new Map(), sPot = new Map(), perPerson = new Map()
+      const sGewinn = new Map(), sPot = new Map(), perPerson = new Map(), perName = new Map()   // je user_id (29.10.2026: gleiche Namen nicht zusammenlegen)
       const ohne = wd.filter(r => r.wert.profit == null).length   // ohne Balance/Größe — nicht als „im Plus" belegbar
       for(const r of rows){
         const c = r.wert
         add(sGewinn, c.ccy, c.profit); add(sPot, c.ccy, c.anteil)
-        const pm = perPerson.get(r.person) || new Map(); add(pm, c.ccy, c.anteil); perPerson.set(r.person, pm)
+        const pk = String(r.user_id || r.person || '—')
+        const pm = perPerson.get(pk) || new Map(); add(pm, c.ccy, c.anteil); perPerson.set(pk, pm); perName.set(pk, r.person || '—')
       }
       for(const [lbl, m, farbe] of [['Potenziell', sPot, 'var(--good)'], ['Gewinn (Balance − Größe)', sGewinn, 'var(--ink)']]){
         const d = document.createElement('div')
@@ -16687,10 +16707,13 @@
         d.children[1].textContent = lbl + (lbl === 'Potenziell' ? ` · ${rows.length} von ${wd.length} WD im Plus${ohne ? ` · ${ohne} ohne Balance` : ''}` : '')
         sums.appendChild(d)
       }
-      for(const [person, m] of [...perPerson.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'de'))){
+      for(const [pk, m] of [...perPerson.entries()].sort((a, b) => String(perName.get(a[0])).localeCompare(String(perName.get(b[0])), 'de'))){
         const chip = document.createElement('span')
         chip.className = 'chip chip-neutral'
-        chip.textContent = `${admShortName(person || '—')} · ${admGeldMap(m)}`
+        chip.textContent = `${admShortName(perName.get(pk) || '—')} · ${admGeldMap(m)}`
+        // Chip klickbar → Alle Accounts dieser ID, Typ Winning Days (29.10.2026, Finn: „wenn ich auf die jeweilige ID … klicke")
+        const uid = (admData.accounts || []).some(a => String(a.user_id) === pk) ? pk : ''
+        if(uid){ chip.style.cursor = 'pointer'; chip.title = 'Klick zeigt die Winning-Days-Accounts dieser ID'; chip.addEventListener('click', () => admZuKonten('person', uid, 'winning_days')) }
         pers.appendChild(chip)
       }
       for(const r of rows){
@@ -16721,6 +16744,8 @@
         po.children[0].textContent = admGeld(c.anteil, c.ccy)
         po.children[0].style.color = 'var(--good)'
         po.children[1].textContent = '+' + admGeld(c.profit, c.ccy) + ' × ' + String(c.pct).replace('.', ',') + ' %'
+        // Zeile klickbar → genau dieses Konto unter „Alle Accounts" (29.10.2026); Text markieren springt nicht weg
+        if(r.user_id){ tr.style.cursor = 'pointer'; tr.title = 'Klick zeigt dieses Konto unter „Alle Accounts"'; tr.addEventListener('click', () => { if(String(getSelection?.() || '')) return; admZuKonten('person', r.user_id, 'winning_days', { suche: r.ext || r.name || '' }) }) }
         tb.appendChild(tr)
       }
     }
@@ -16860,6 +16885,9 @@
       }
       admV2Kacheln(rows, 'adm-k-mpl', 'adm-k-trades')   // Master-P&L / Trades · Blows, nur hedge-frei sichtbar
       $('adm-k-accs').textContent = rows.length
+      // Kachel „Accounts" klickbar → Alle Accounts ohne Filter (29.10.2026, Finn: „jeweilige Zahl … alle Accounts in der Account-View")
+      const accKachel = $('adm-k-accs').closest('.kpi')
+      if(accKachel && !accKachel.dataset.klick){ accKachel.dataset.klick = '1'; accKachel.style.cursor = 'pointer'; accKachel.title = 'Klick zeigt diese Accounts unter „Alle Accounts" (mit den Filtern der Übersicht)'; accKachel.addEventListener('click', () => admZuKonten('alle', '', '', { person: $('adm-person')?.value, firm: $('adm-firm')?.value, suche: ($('adm-search')?.value || '').trim() })) }
       $('adm-k-accs-sub').textContent = nArch
         ? `${rows.length - nArch} aktiv · ${nArch} archiviert`
         : (nPred ? `alle aktiv · ${nPred} abgelöste eingerechnet` : 'alle aktiv')
@@ -16932,6 +16960,9 @@
           `<td class="adm-num" style="color:${g.payouts ? 'var(--good)' : 'var(--sub)'}">${g.payouts ? '−' + admEur.format(g.payouts) : '—'}</td>` +
           `<td class="adm-num" style="font-weight:600">${admEur.format(g.parked)}</td>`
         tr.querySelector('.fm').textContent = g.label
+        // Zeile klickbar → Alle Accounts dieser Firma (29.10.2026, wie die Verteilungs-Zeilen)
+        tr.style.cursor = 'pointer'; tr.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'} — Klick zeigt die Accounts`
+        tr.addEventListener('click', () => admZuKonten('firm', g.key))
         ftb.appendChild(tr)
       }
 
@@ -20357,7 +20388,15 @@
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
       const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', kontomail: 'Konten aus Mail & TV · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
+      let admMailSicht = 'mails'   // Reiter Mail: 'mails' | 'konten' (29.10.2026), gilt bis zum Neuladen
+      document.getElementById('adm-mail-sicht')?.addEventListener('click', ev => {
+        const c = ev.target.closest('[data-adm-mail-sicht]'); if(!c || c.dataset.admMailSicht === admMailSicht) return
+        admMailSicht = c.dataset.admMailSicht
+        document.querySelector('.adm-tab[data-admtab="mail"]')?.click()   // dieselbe Umschaltung wie ein Reiter-Klick
+      })
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
+        // alter Reiter „Konten aus Mail" (Knopf versteckt) → Reiter Mail mit Sicht Konten, damit Leiste und Umschalter stimmen (29.10.2026)
+        if(t.dataset.admtab === 'kontomail'){ admMailSicht = 'konten'; document.querySelector('.adm-tab[data-admtab="mail"]')?.click(); return }
         const name = t.dataset.admtab
         document.querySelectorAll('.adm-tab').forEach(x => {
           const on = x === t
@@ -20370,8 +20409,11 @@
         $('adm-pane-buys').hidden     = name !== 'stat'   // seit 08.10.2026 Abschnitt unter Statistik
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-konten').hidden   = name !== 'konten'   // Alle Accounts (13.10.2026)
-        $('adm-pane-mail').hidden     = name !== 'mail'     // Mail aller IDs (21.10.2026)
-        $('adm-pane-kontomail').hidden = name !== 'kontomail'   // Konten aus Mail (29.10.2026)
+        // Mail + Konten aus Mail in EINEM Reiter (29.10.2026, Finn): der Umschalter oben wählt die Sicht; 'kontomail' als Name bleibt gültig
+        const mailSicht = admMailSicht
+        if($('adm-mail-sicht')){ $('adm-mail-sicht').hidden = name !== 'mail'; $('adm-mail-sicht').querySelectorAll('[data-adm-mail-sicht]').forEach(c => c.classList.toggle('is-on', c.dataset.admMailSicht === mailSicht)) }
+        $('adm-pane-mail').hidden     = !(name === 'mail' && mailSicht === 'mails')     // Mail aller IDs (21.10.2026)
+        $('adm-pane-kontomail').hidden = !(name === 'mail' && mailSicht === 'konten')   // Konten aus Mail (29.10.2026), seit dem Zusammenlegen nur über den Umschalter
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
@@ -20394,8 +20436,8 @@
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
-        if(name === 'mail') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
-        if(name === 'kontomail') window._admKontoMailOeffnen?.()   // Konten aus Mail (29.10.2026): lädt beim Öffnen, sonst nie
+        if(name === 'mail' && mailSicht === 'mails') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
+        if(name === 'mail' && mailSicht === 'konten') window._admKontoMailOeffnen?.()   // Konten aus Mail (29.10.2026): lädt beim Öffnen, sonst nie
         if(name === 'radarstat') window._rstOeffnen?.()   // Radar-Statistik (28.10.2026): /admin/live-trades beim Öffnen, Cache 60 s
         if(name === 'overview'){ admVlResize(); window._admPcsOeffnen?.() }   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026); PC-Tabs (08.10.2026)
         if(name === 'rg')   rgOpen()
@@ -48825,7 +48867,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1827'
+  const OS_TAB_BUILD = '2026-09-22.1828'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
