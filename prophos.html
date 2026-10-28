@@ -10693,6 +10693,42 @@
          ersetzt das nackte confirm() beim ✓ Erhalten. Das Datum landet in
          accounts.payout_ready_at (Karte + Admin-Kalender), die Buchung selbst
          ist unverändert. Eigene Verdrahtung (Regel: keine Sammel-Handler). -->
+    <!-- ADMIN → PAYOUTS: Anfrage abhaken (29.10.2026, Finn: „dass ich im Admin die Payouts schon abhaken kann und dann gleich auf den
+         nächsten Payout-Zyklus Ja sagen kann — so wie unter Finanzen"). Muster finReceiveModal, eigene IDs/Verdrahtung (admPayoutErhalten*),
+         schreibt über /admin/payout-erhalten (Service-Key, Besitzer-ID der Anfrage). „Nächster Payout anfragbar ab" bewusst LEER —
+         den Zyklus der Firma kennt Prophos nicht, Finn trägt ihn ein. -->
+    <div class="modal-bg" id="admReceiveModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Payout erhalten</h3>
+          <button class="modal-x" id="admReceiveClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <span id="adm-receive-acc" style="font-size:12.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">–</span>
+            <span class="mono" id="adm-receive-amt" style="font-size:16px;font-weight:700;color:var(--good,#12B76A);flex:0 0 auto">–</span>
+          </div>
+          <p class="modal-sub" style="margin-top:10px">Bucht den Payout bei der ID der Anfrage — ab dann zählt er in deren Finanzen und hier unter „Payouts erhalten".</p>
+          <div class="field" style="margin-top:12px">
+            <label>Erhalten am</label>
+            <input class="input mono" id="adm-receive-am" type="date" autocomplete="off">
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label>Nächster Payout anfragbar ab <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+            <input class="input mono" id="adm-receive-next" type="date" autocomplete="off">
+            <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird am Account gespeichert — Account-Karte und Kalender „Nächste Payouts". Leer lassen = Termin am Konto bleibt, wie er ist.</div>
+          </div>
+          <div class="modal-msg" id="admReceiveMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="admReceiveCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="admReceiveSave">✓ Erhalten buchen</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="finReceiveModal">
       <div class="modal" style="max-width:440px">
         <div class="modal-head">
@@ -12663,6 +12699,7 @@
                     <th>Liegt bei</th>
                     <th class="adm-num">Betrag</th>
                     <th>Notiz</th>
+                    <th></th>
                   </tr></thead>
                   <tbody id="adm-f-pend-rows"></tbody>
                 </table>
@@ -17374,6 +17411,87 @@
      * dieselben Chip-Helfer wie renderAccounts zeichnen. Konten der angemeldeten ID kommen aus `accounts` (dort zählt zielFortschritt
      * aus den eigenen Plänen); fremde IDs: Mindesttage = Server-Zählung (ap_tage_ist) als manueller Stand, automatische WD-Zählung
      * weggelassen — das Frontend kennt fremde Pläne nicht, lieber kein Abzeichen als ein falsches „0/5". Reine Anzeige, keine Aktionen. */
+    /* ── Admin → Payouts: Anfrage abhaken (29.10.2026, Finn: „dass ich im Admin die Payouts schon abhaken kann und dann gleich auf
+     * den nächsten Payout-Zyklus Ja sagen kann — so wie unter Finanzen"). Finanzen (finReceiveConfirm) bucht per supabase-Client
+     * unter der eigenen ID — im Admin gehören die Anfragen anderen IDs (RLS), darum derselbe Ablauf serverseitig:
+     * /admin/payout-erhalten (transactions + pending received + accounts.payout_ready_at, Besitzer-ID). Danach nur den lokalen
+     * admData-Stand nachziehen (Anfrage raus, Buchung in „erhalten", Termin im Kalender) und admFinRender() — kein Neuladen nötig.
+     * Balance nach dem Payout wie Finanzen (finBalanceNachPayout) nur anstoßen: /admin/konto-balance-lesen, Fehler als Toast. ── */
+    let _admReceive = null
+    function admPayoutErhaltenOeffnen(t){
+      _admReceive = t
+      $('adm-receive-amt').textContent = admEur.format(Number(t.amount) || 0)
+      const acc = $('adm-receive-acc')
+      acc.textContent = `${admShortName(t.person || '—')} · ${t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : 'ohne Account'}`
+      acc.title = acc.textContent
+      $('adm-receive-am').value = _deTodayStr()
+      // Vorbelegt mit dem Termin, der am Konto steht (wie Finanzen) — sonst leer: Zyklus je Firma ist nirgends hinterlegt, Finn trägt
+      // ihn ein. Leer gelassen bleibt der Termin am Konto, wie er ist (der Server schreibt nur, wenn ein Datum mitkommt).
+      const konto = t.account_id ? (admData?.accounts || []).find(r => String(r.id) === String(t.account_id)) : null
+      $('adm-receive-next').value = konto && konto.payout_at ? String(konto.payout_at).slice(0, 10) : ''
+      $('adm-receive-next').disabled = !t.account_id
+      const msg = $('admReceiveMsg'); msg.textContent = ''; msg.className = 'modal-msg'
+      $('admReceiveSave').disabled = false
+      $('admReceiveModal').classList.add('open')
+    }
+    function admPayoutErhaltenZu(){ _admReceive = null; $('admReceiveModal').classList.remove('open') }
+    $('admReceiveClose')?.addEventListener('click', admPayoutErhaltenZu)
+    $('admReceiveCancel')?.addEventListener('click', admPayoutErhaltenZu)
+    $('admReceiveModal')?.addEventListener('click', e => { if(e.target === $('admReceiveModal')) admPayoutErhaltenZu() })
+    $('admReceiveSave')?.addEventListener('click', () => admPayoutErhaltenBuchen())
+    async function admPayoutErhaltenBuchen(){
+      const t = _admReceive; if(!t || !admData) return
+      const msg = $('admReceiveMsg'), btn = $('admReceiveSave')
+      const am = $('adm-receive-am').value || '', next = $('adm-receive-next').value || ''
+      if(!am){ msg.textContent = 'Datum „Erhalten am" fehlt.'; msg.className = 'modal-msg err'; return }
+      btn.disabled = true; msg.textContent = ''; msg.className = 'modal-msg'
+      let d
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const res = await fetch(`${WATCHER_HOME}/admin/payout-erhalten?ansicht=admin`, {
+          method:'PATCH', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
+          body: JSON.stringify({ pending_id: t.id, erhalten_am: am, naechster_payout: next || null })
+        })
+        d = await res.json().catch(() => ({}))
+        if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+      }catch(e){
+        msg.textContent = 'Nicht gebucht: ' + ((e && e.message) || e); msg.className = 'modal-msg err'
+        btn.disabled = false
+        return
+      }
+      // Lokalen Stand nachziehen — dieselben Felder, die /admin/overview liefert
+      admData.pending_payouts = (admData.pending_payouts || []).filter(x => String(x.id) !== String(t.id))
+      const tx = d.tx || {}
+      ;(admData.payouts_received = admData.payouts_received || []).unshift({
+        user_id: t.user_id, person: t.person, amount: Number(tx.amount) || Number(t.amount) || 0, currency: tx.currency || t.currency || 'EUR',
+        occurred_at: tx.occurred_at || am, account_name: t.account_name || '', account_firm: t.account_firm || '', notes: tx.notes || t.notes || ''
+      })
+      if(t.account_id && next && !d.termin_fehler){
+        for(const r of (admData.payout_ready || [])) if(String(r.account_id) === String(t.account_id)) r.ready_at = next
+        for(const r of (admData.accounts || [])) if(String(r.id) === String(t.account_id)) r.payout_at = next
+      }
+      admPayoutErhaltenZu()
+      admFinRender()
+      if(typeof atToast === 'function'){
+        const wann = new Date(am + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })
+        atToast(`✓ Payout ${admEur.format(Number(t.amount) || 0)} bei ${admShortName(t.person || '—')} gebucht (${wann})`
+          + (next ? ` · nächster Payout ab ${new Date(next + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })}` : '')
+          + (d.termin_fehler ? ' — Termin NICHT gespeichert, im Account-Modal setzen' : ''), d.termin_fehler ? 'end' : 'start')
+      }
+      // Balance nach dem Payout neu lesen (wie finBalanceNachPayout): nur anstoßen, nie blockieren
+      if(t.account_id){
+        try{
+          const { data: { session } } = await supabase.auth.getSession()
+          // ?ansicht=admin: die Verwalter-Gruppe gilt dort nur mit dem Marker, sonst 403 für Nicht-ADMIN_EMAILS (Prüfer 29.10.2026)
+          const res = await fetch(`${WATCHER_HOME}/admin/konto-balance-lesen?ansicht=admin`, { method:'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type':'application/json' }, body: JSON.stringify({ aktion:'start', account_id: t.account_id }) })
+          const b = await res.json().catch(() => ({}))
+          if(!res.ok && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + (b.error || ('HTTP ' + res.status)), 'end')
+        }catch(e){ if(typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + ((e && e.message) || e), 'end') }
+      }
+    }
+
     const admK = { person: '', firm: '', type: '', ziel: '', payout: false, q: '', arch: false }
     function admKontoAusZeile(r){
       const eigen = String(r.user_id) === String(currentUserId) ? (accounts || []).find(x => String(x.id) === String(r.id)) : null
@@ -17660,7 +17778,11 @@
               '<td><span class="pp-acc" style="font-size:12.5px"></span></td>' +
               '<td><span class="pp-bei"></span></td>' +
               `<td class="adm-num" style="font-weight:600;color:var(--warn-ink, #b45309)">${admEur.format(Number(t.amount) || 0)}</td>` +
-              '<td style="color:var(--sub);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pp-note"></span></td>'
+              '<td style="color:var(--sub);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pp-note"></span></td>' +
+              '<td style="text-align:right;white-space:nowrap"><button type="button" class="btn btn-primary pp-ok" style="padding:4px 9px;font-size:11.5px">✓ erhalten</button></td>'
+            // ✓ erhalten (29.10.2026): öffnet das Admin-Modal, bucht über /admin/payout-erhalten; ohne id (älterer Backend-Stand) kein Knopf
+            const okBtn = tr.querySelector('.pp-ok')
+            if(t.id) okBtn.addEventListener('click', () => admPayoutErhaltenOeffnen(t)); else okBtn.remove()
             tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
             tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
             tr.querySelector('.pp-bei').textContent = t.liegt_bei || '—'
@@ -48520,7 +48642,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1809'
+  const OS_TAB_BUILD = '2026-09-22.1810'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

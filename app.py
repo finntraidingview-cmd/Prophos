@@ -6718,6 +6718,8 @@ def admin_build_overview(kapitel_id=None):
             except (TypeError, ValueError):
                 continue
             pending_rows.append({
+                "id": str(t.get("id") or ""),             # 29.10.2026: Abhaken im Admin (/admin/payout-erhalten) braucht die Anfrage-ID
+                "account_id": pa,
                 "user_id": uid,
                 "person": disp.get(uid) or names.get(uid, uid[:8]),
                 "person_mail": names.get(uid, ""),
@@ -14102,6 +14104,118 @@ def admin_payout_calc():
     except Exception as e:
         print(f"[payout-calc] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Nicht gespeichert ({type(e).__name__})"}), 502
+
+
+@app.route("/admin/payout-erhalten", methods=["PATCH", "OPTIONS"])
+def admin_payout_erhalten():
+    """Payout-Anfrage im Admin abhaken (29.10.2026, Finn: „dass ich im Admin die Payouts schon abhaken kann und dann gleich auf den
+    nächsten Payout-Zyklus Ja sagen kann — so wie unter Finanzen"). Derselbe Weg wie finReceiveConfirm (prophos.html), nur mit
+    Service-Key, weil die Anfragen anderen IDs gehören (RLS pending_payouts/transactions = auth.uid() = user_id):
+    1) pending_payouts → status received / received_at mit Guard status=eq.pending — ZUERST, als Sperre: greift der Guard nicht
+       (zweiter Klick, zweiter Browser), wird nichts gebucht (409). Prüfer 29.10.2026: Insert vor dem Guard hätte bei Race/Retry
+       doppelt gebucht;
+    2) transactions-Zeile kind=payout mit user_id = BESITZER der Anfrage (nicht der Admin), occurred_at = Empfangstag,
+       Notiz „angefragt <Tag> · lag bei <wo>" wie Finanzen; schlägt der Insert fehl, geht die Anfrage zurück auf pending;
+    3) received_tx_id nachtragen; 4) accounts.payout_ready_at = nächster Termin NUR wenn einer mitkommt (leer = Termin am Konto bleibt;
+       Finanzen schreibt auch nur bei Änderung — Prüfer 29.10.2026: ein stehender Termin darf nicht still auf null fallen).
+    Kontotyp und waiting_payout_since bleiben unangetastet (Finanzen fasst sie beim Abhaken auch nicht an; das Flag leert die Anfrage).
+    Body {pending_id, erhalten_am (JJJJ-MM-TT, Standard heute Berlin), naechster_payout (JJJJ-MM-TT | leer)}.
+    Auth wie /admin/payout-calc: ADMIN_EMAILS oder Verwalter für Anfragen SEINER Gruppe."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    gruppe = None
+    if err:
+        if err[1] != 403:
+            return err
+        _uid, err2 = _wd_login()
+        if err2:
+            return err2
+        if not _admin_verwalter():
+            return err
+        gruppe = getattr(g, "admin_sicht", None)
+    b = request.get_json(silent=True) or {}
+    pid = str(b.get("pending_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+        return jsonify({"error": "pending_id fehlt/ungültig"}), 400
+    from zoneinfo import ZoneInfo
+    heute = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%d")
+    erhalten_am = str(b.get("erhalten_am") or "").strip()[:10] or heute
+    naechster = str(b.get("naechster_payout") or "").strip()[:10] or None
+    for name, wert in (("erhalten_am", erhalten_am), ("naechster_payout", naechster)):
+        if wert and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", wert):
+            return jsonify({"error": f"{name} muss JJJJ-MM-TT sein"}), 400
+    try:
+        rows = sb_select("pending_payouts", {"select": "id,user_id,account_id,account_name,account_firm,amount,currency,liegt_bei,"
+                                                       "requested_at,notes,status", "id": f"eq.{pid}", "limit": "1"}) or []
+    except Exception as e:
+        return jsonify({"error": f"Anfrage nicht lesbar ({type(e).__name__})"}), 502
+    if not rows:
+        return jsonify({"error": "Anfrage nicht gefunden"}), 404
+    p = rows[0]
+    if str(p.get("status") or "") != "pending":
+        return jsonify({"error": f"Anfrage ist schon „{p.get('status')}\" — nichts gebucht"}), 409
+    besitzer = str(p.get("user_id") or "")
+    if gruppe is not None and besitzer not in gruppe:
+        return jsonify({"error": "Nur Anfragen der eigenen Gruppe"}), 403
+    try:
+        betrag = abs(float(p.get("amount") or 0))
+    except (TypeError, ValueError):
+        betrag = 0.0
+    if betrag <= 0:
+        return jsonify({"error": "Anfrage ohne Betrag — nichts gebucht"}), 409
+    angefragt = str(p.get("requested_at") or "")[:10]
+    try:
+        angefragt_txt = datetime.strptime(angefragt, "%Y-%m-%d").strftime("%d.%m.%Y") if angefragt else "?"
+    except ValueError:
+        angefragt_txt = angefragt
+    herkunft = f"angefragt {angefragt_txt}" + (f" · lag bei {p['liegt_bei']}" if p.get("liegt_bei") else "")
+    notes = f"{p['notes']} · {herkunft}" if p.get("notes") else herkunft
+    jetzt = datetime.now(timezone.utc).isoformat()
+    try:
+        upd = sb_update("pending_payouts", {"id": f"eq.{pid}", "status": "eq.pending"},
+                        {"status": "received", "received_at": erhalten_am, "updated_at": jetzt})
+    except Exception as e:
+        print(f"[payout-erhalten] ⚠️ pending_payouts {pid}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Anfrage nicht sperrbar ({type(e).__name__}) — nichts gebucht"}), 502
+    if not upd:
+        return jsonify({"error": "Anfrage ist inzwischen abgehakt (anderer Klick/Browser) — nichts doppelt gebucht"}), 409
+    try:
+        tx = sb_insert("transactions", {
+            "user_id": besitzer, "account_id": p.get("account_id") or None,
+            "account_name": p.get("account_name") or None, "account_firm": p.get("account_firm") or None,
+            "kind": "payout", "amount": betrag, "currency": p.get("currency") or "EUR",
+            "occurred_at": erhalten_am, "notes": notes, "auto_generated": False,
+        })
+    except Exception as e:
+        print(f"[payout-erhalten] ⚠️ transactions: {type(e).__name__}: {e} — Anfrage {pid} zurück auf pending", flush=True)
+        try:
+            sb_update("pending_payouts", {"id": f"eq.{pid}", "status": "eq.received"},
+                      {"status": "pending", "received_at": None, "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e2:
+            print(f"[payout-erhalten] ⚠️ Rücknahme {pid} fehlgeschlagen: {type(e2).__name__}: {e2}", flush=True)
+            return jsonify({"error": f"Buchung nicht gespeichert ({type(e).__name__}) UND Anfrage hängt auf „erhalten\" — "
+                                     "unter Finanzen der ID prüfen"}), 502
+        return jsonify({"error": f"Buchung nicht gespeichert ({type(e).__name__}) — Anfrage bleibt offen"}), 502
+    try:
+        z = sb_update("pending_payouts", {"id": f"eq.{pid}"}, {"received_tx_id": tx.get("id")})
+        if z:
+            upd = z
+    except Exception as e:
+        print(f"[payout-erhalten] ⚠️ received_tx_id {pid}: {type(e).__name__}: {e} — Buchung {tx.get('id')} steht", flush=True)
+    konto = None
+    termin_fehler = None
+    aid = str(p.get("account_id") or "")
+    if aid and naechster:
+        try:
+            z = sb_update("accounts", {"id": f"eq.{aid}", "select": "id,payout_ready_at,waiting_payout_since,account_type"},
+                          {"payout_ready_at": naechster})
+            konto = z[0] if z else None
+        except Exception as e:
+            termin_fehler = f"{type(e).__name__}: {e}"
+            print(f"[payout-erhalten] ⚠️ accounts.payout_ready_at {aid}: {termin_fehler}", flush=True)
+    return jsonify({"ok": True, "tx": tx, "pending": upd[0] if upd else None, "account": konto,
+                    "termin_fehler": termin_fehler, "erhalten_am": erhalten_am, "naechster_payout": naechster})
 
 
 @app.route("/watcher/status", methods=["GET", "OPTIONS"])
