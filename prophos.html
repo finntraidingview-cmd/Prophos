@@ -47962,7 +47962,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1791'
+  const OS_TAB_BUILD = '2026-09-22.1792'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -59222,7 +59222,13 @@
     setTimeout(() => {   // nach tpRouteApply: das Dropdown ist dann für den Orbit-Zustand neu befüllt
       if(tpMasterIstTopstep()) return
       const opt = [...sel.options].find(o => o.value && /topstep/i.test(String(((accounts || []).find(a => String(a.id) === String(o.value)) || {}).firm || '')))
-      if(opt){ sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })) }
+      if(opt){ sel.value = opt.value; sel.dispatchEvent(new Event('change', { bubbles: true })); return }
+      // 28.10.2026 (Finn am Screenshot, ID „Finn + Pascal": „wenn ich auf Nova drücke, passiert gar nichts") — die ID hat kein
+      // Topstep-Konto mit External ID, der Knopf blieb stumm im Orbit-Zustand. Jetzt sagen, warum.
+      // Liste = Orbit-Filter: Futures mit External ID, Kontoart Funded/Winning Days (Challenges nur mit „Challenges mit Hedge", tpKontoartPasstZumWeg)
+      const t = `Nova braucht als Master ein Topstep-Konto mit External ID (Funded oder Winning Days${_tpChHedge ? ', Challenge' : ' — Challenges nur mit „Challenges mit Hedge"'}) — bei dieser ID steht keins in der Liste.`
+      const m = document.getElementById('tradePlanMsg'); if(m){ m.textContent = t; m.className = 'modal-msg err' }
+      if(typeof atToast === 'function') atToast(t, 'start')
     }, 0)
   }
   document.getElementById('tp-slave')?.addEventListener('change',  tpNqUpdateToggle)
