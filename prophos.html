@@ -3612,7 +3612,7 @@
   #adm-pane-wd .wd-ueb-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
   #adm-pane-wd .wd-ueb-liste{max-height:460px;overflow:auto;margin-top:8px}
   #adm-pane-wd .wd-ueb-liste[hidden]{display:none}
-  #adm-pane-wd .wd-ueb-liste .wd-tab{min-width:760px}
+  #adm-pane-wd .wd-ueb-liste .wd-tab{min-width:840px}
   #adm-pane-wd .wd-ueb-liste .wd-tab th{position:sticky;top:0;background:var(--surface);z-index:1}
   #adm-pane-wd .wd-ueb-liste .wd-tab td,#adm-pane-wd .wd-ueb-liste .wd-tab th{white-space:nowrap;vertical-align:middle}
   #adm-pane-wd .wd-ueb-liste .wd-tab .zahl{text-align:right;font-variant-numeric:tabular-nums}
@@ -12135,7 +12135,8 @@
           <div class="panel" id="wd-ueb" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
               <div class="panel-title">Statistik <span style="font-weight:400;color:var(--sub);font-size:12px" id="wd-ueb-stat-sub"></span></div>
-              <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
+              <!-- Firmen-Chips (aus wdUebPayouts) wieder da (29.10.2026): sie filtern Kacheln, Graf und Liste je Firma — .1815 hatte sie mit den Karten entfernt -->
+              <div class="wd-ueb-chips"><div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div><span style="width:8px"></span><div class="wd-ueb-chips" id="wd-ueb-firmen"></div></div>
             </div>
             <div class="wd-ueb-kpis" id="wd-ueb-stat-kpis"></div>
             <!-- Linien-Graf (28.10.2026, Finn: „ein Graf mit zwei Linien — Fusion-PnL akkumuliert … und Master-PnL akkumuliert") — wdUebGraf, Lightweight Charts wie die Markt-View -->
@@ -48768,7 +48769,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1817'
+  const OS_TAB_BUILD = '2026-09-22.1818'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63275,6 +63276,9 @@
   const wdUebFirma = f => { const s = String(f || '').toLowerCase()
     return s.includes('fundednext') && s.includes('futur') ? 'FundedNext' : s.includes('apex') ? 'Apex' : s.includes('lucid') ? 'Lucid' : s.includes('topstep') ? 'Topstep'
       : s.includes('tradeify') ? 'Tradeify' : s.includes('ftmo') ? 'FTMO' : (String(f || '').trim() || '—') }
+  // Deutscher Tag eines WD aus dem Ende-Zeitstempel (Europe/Berlin) — das datum-Feld aus app.py ist der UTC-Tag (29.10.2026)
+  const wdUebDeTag = t => { const d = t && t.zeit ? new Date(t.zeit) : null; return d && Number.isFinite(d.getTime()) ? d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) : String((t && t.datum) || '') }
+  const wdUebZeitName = z => ({ heute: 'Heute', 7: '7 Tage', 30: '30 Tage', alle: 'Kapitel' })[z] || z + ' Tage'
   const wdUebTag = d => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][d.getUTCDay()] + ' ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
   // „150k …0431" — Größe aus dem Namen, External ID hinten (wie die Konto-Kürzel im Radar)
   const wdUebKonto = k => { const g = String(k.name || '').match(/(\d{2,3})\s*k\b/i), x = String(k.ext || '').replace(/\s/g, '')
@@ -63322,7 +63326,7 @@
     if(tr) tr.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   function wdUebPayouts(liste){
-    const chips = document.getElementById('wd-ueb-firmen'), box = document.getElementById('wd-ueb-po'); if(!box) return
+    const chips = null, box = document.getElementById('wd-ueb-po'); if(!box) return   // Karten seit .1815 nicht im Markup; die Firmen-Chips zeichnet wdUebStatistik (29.10.2026)
     const firmen = new Map(); for(const e of liste) firmen.set(e.firma, (firmen.get(e.firma) || 0) + 1)
     if(_wdUeb.firma && !firmen.has(_wdUeb.firma)) _wdUeb.firma = ''
     if(chips) chips.innerHTML = firmen.size > 1 ? [['', 'Alle', liste.length], ...[...firmen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([f, n]) => [f, f, n])]
@@ -63374,12 +63378,23 @@
     const heute = _deTodayStr()
     const tagVon = n => (d => { d.setUTCDate(d.getUTCDate() - (n - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
     const ab = _wdUeb.zeit === 'alle' ? '' : _wdUeb.zeit === 'heute' ? heute : tagVon(Number(_wdUeb.zeit))
-    const zeitName = { heute: 'Heute', 7: '7 Tage', 30: '30 Tage', alle: 'Kapitel' }[_wdUeb.zeit] || _wdUeb.zeit + ' Tage'
+    const zeitName = wdUebZeitName(_wdUeb.zeit)
     const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
     const wann = t => { const d = t.zeit ? new Date(t.zeit) : null; return d && Number.isFinite(d.getTime()) ? d : null }
-    const deTag = t => { const d = wann(t); return d ? d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) : String(t.datum || '') }
+    const deTag = wdUebDeTag
     // Sekunden (UTC) von Mitternacht eines deutschen Tages — Nullpunkt des Grafs am Zeitraum-Anfang
     const deMitternacht = tag => { const d0 = new Date(tag + 'T00:00:00Z'); const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', hour12: false }).format(d0)) % 24; return Math.floor(d0.getTime() / 1000) - h * 3600 }   // um 00:00Z ist Berlin 01:00/02:00 — auch an Umstellungstagen (Wechsel erst 01:00Z)
+    // Firmen-Chips aus den WDs der Statistik (29.10.2026, Gegenprüfung): Zähler = WDs der Firma im Zeitraum. Vorher kamen sie aus den aktiven
+    // WD-Konten (wdUebPayouts) — Firmen ohne aktives Konto fehlten, und ein gesetzter Filter sprang still auf „Alle" zurück.
+    const fchips = document.getElementById('wd-ueb-firmen')
+    if(fchips){
+      const zaehl = new Map()
+      for(const t of alle){ const f = wdUebFirma(t.master_firm); if(!zaehl.has(f)) zaehl.set(f, 0); const tag = deTag(t); if(tag && (!ab || tag >= ab)) zaehl.set(f, zaehl.get(f) + 1) }
+      if(_wdUeb.firma && !zaehl.has(_wdUeb.firma)) _wdUeb.firma = ''
+      const ges = [...zaehl.values()].reduce((a, b) => a + b, 0)
+      fchips.innerHTML = zaehl.size > 1 ? [['', 'Alle', ges], ...[...zaehl.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([f, n]) => [f, f, n])]
+        .map(([f, t, n]) => `<button type="button" class="adm-vl-chip${_wdUeb.firma === f ? ' is-on' : ''}" data-wd-ueb-firma="${escapeHtml(f)}" title="Winning Days dieser Firma im Zeitraum">${escapeHtml(t)} <span class="kf">${n}</span></button>`).join('') : ''
+    }
     const sek = t => { const d = wann(t); return d ? Math.floor(d.getTime() / 1000) : deMitternacht(deTag(t)) + 12 * 3600 }   // Ende-Zeit in Sekunden (ohne Zeitstempel: Mittag des Tages)
     const rows = alle.filter(t => { const tag = deTag(t); return tag && (!ab || tag >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma) })
       .sort((a, b) => sek(a) - sek(b))
@@ -63415,7 +63430,7 @@
         <div class="adm-track"><div class="adm-fill" style="width:${(100 * e.n / maxN).toFixed(1)}%;background:${_wdUeb.sicht === 'id' ? idFarbe(e.key) : 'var(--violet)'};opacity:.7"></div></div>
         <div class="adm-val" style="color:${wdUebFarbe(e.m)}" title="Ø Master-P&amp;L je Winning Day">Ø ${wdUebUsd(e.m / e.n)}</div>
         <div class="adm-pct" title="TP erreicht (Master im Plus)">${Math.round(100 * e.tp / e.n)} %</div></div>`).join('')
-      : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : _wdUeb.zeit === 'heute' ? 'heute' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
+      : `<div class="wd-ueb-leer">Keine Winning Days · ${escapeHtml(zeitName)}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
   }
   // Alle Winning Days einzeln (29.10.2026, Finn: „alle Winning Day Trades einmal runtergerattert, sodass ich gucken kann, dass die
   // Statistik immer stimmt"). Dieselbe Reihe `kum` wie Kacheln und Graf (gleiche Sortierung, gleiche Zahlen) — die Σ-Spalten laufen
@@ -63425,10 +63440,10 @@
     const an = !!_wdUeb.liste, box = document.getElementById('wd-ueb-liste'), sub = document.getElementById('wd-ueb-liste-sub'), cb = document.getElementById('wd-ueb-liste-an')
     if(!box) return
     if(cb && cb.checked !== an) cb.checked = an
-    if(sub) sub.textContent = kum.length ? `${kum.length} Trade${kum.length === 1 ? '' : 's'}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · neueste oben, Σ läuft mit` : ''
+    if(sub) sub.textContent = kum.length ? `${kum.length} Trade${kum.length === 1 ? '' : 's'} · ${wdUebZeitName(_wdUeb.zeit)}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · neueste oben, Σ läuft mit (oberste Zeile = Kacheln)` : ''
     box.hidden = !an
     if(!an){ box.innerHTML = ''; return }
-    if(!kum.length){ box.innerHTML = '<div class="wd-ueb-leer">Noch keine Winning Days im Kapitel.</div>'; return }
+    if(!kum.length){ box.innerHTML = `<div class="wd-ueb-leer">Keine Winning Days · ${escapeHtml(wdUebZeitName(_wdUeb.zeit))}${_wdUeb.firma ? ' · ' + escapeHtml(_wdUeb.firma) : ''}.</div>`; return }
     const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
     let mS = 0, fS = 0
     const zeilen = kum.map(t => {
@@ -63437,9 +63452,12 @@
       if(fe !== null) fS += fe
       return { t, mp, fe, mS, fS }
     }).reverse()
-    const tag = t => escapeHtml(wdUebTag(new Date(String(t.datum) + 'T12:00:00Z'))) + (t.zeit ? ' <span class="kf">' + escapeHtml(wdHhmm(t.zeit)) + '</span>' : '')
+    // Tag + Uhrzeit in deutscher Zeit (wie die Zeitraum-Chips) — Dubai wäre bei Enden nach 21:00 Berlin schon der Folgetag (Gegenprüfung 29.10.2026)
+    const tag = t => escapeHtml(wdUebTag(new Date(wdUebDeTag(t) + 'T12:00:00Z'))) + (t.zeit ? ' <span class="kf" title="deutsche Zeit, wie Heute/7 Tage/30 Tage">' + escapeHtml(new Date(t.zeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' })) + '</span>' : '')
     const ri = r => { const s = String(r || ''); return s ? s[0].toUpperCase() + s.slice(1) : '' }
-    box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>ID</th><th>Konto</th><th>Firma</th><th>Richtung</th>`
+    // Schließweg des Fusion-Hedges aus hedge_grund — dieselben Texte wie der Schließwege-Block (SW_WEG_VON → SW_WEG_TXT), ohne Grund „–"
+    const weg = t => { const g = String(t.grund || ''); return g ? (SW_WEG_TXT[SW_WEG_VON[g] || 'sonst'] || g) : '–' }
+    box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>ID</th><th>Konto</th><th>Firma</th><th>Richtung</th><th>Weg</th>`
       + `<th class="zahl">Master</th><th class="zahl">Fusion</th><th class="zahl">Σ Master</th><th class="zahl">Σ Fusion</th></tr></thead><tbody>`
       + zeilen.map(({ t, mp, fe, mS, fS }) => `<tr>
           <td>${tag(t)}</td>
@@ -63447,6 +63465,7 @@
           <td>${escapeHtml(t.account_name || '—')}${t.blown ? ' <span style="color:var(--danger)">geblowt</span>' : ''}</td>
           <td>${escapeHtml(wdUebFirma(t.master_firm))}</td>
           <td>${escapeHtml([ri(t.richtung), t.kt != null ? wdDe(t.kt) + ' Kt' : ''].filter(Boolean).join(' · ') || '—')}</td>
+          <td title="Schließweg des Fusion-Hedges (hedge_grund: ${escapeHtml(String(t.grund || '–'))})">${escapeHtml(weg(t))}</td>
           <td class="zahl" style="color:${mp !== null ? wdUebFarbe(mp) : ''}">${mp !== null ? wdUebUsd(mp) : '–'}</td>
           <td class="zahl" style="color:${fe !== null ? wdUebFarbe(fe) : ''}">${fe !== null ? wdUebEur(fe) : '<span class="kf">nicht gebucht</span>'}</td>
           <td class="zahl summe">${wdUebUsd(mS)}</td>
