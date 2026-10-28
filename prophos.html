@@ -16506,7 +16506,7 @@
       [f => /tradeify/.test(f), { anteil: .5, deckel: 4500, quelle: 'Finn 28.10.2026: bis zu 50 % vom Gewinn, max. 4.500 $ je Anfrage' }],
       [f => /topstep/.test(f), { anteil: .5, deckel: 5000, quelle: 'Finn 29.10.2026: wie Tradeify, 50 % vom Gewinn, max. 5.000 $ je Anfrage, Split 90 % (Topstep-Funded startet bei 0 → Gewinn = Balance)' }],
       [f => /alpha/.test(f), null, 'Alpha Futures: firm_rules nennt drei Programme (Standard 50 % / 15.000 $, Advanced, Zero) — welches am Konto gilt, steht nirgends'],
-      [f => /apex/.test(f), null, 'Apex: firm_rules nennt für die ersten 5 Payouts nur „Caps je Größe" ohne Zahlen'],
+      [f => /apex/.test(f), { apex: true, anteil: .5, deckel: null, quelle: 'Finn 29.10.2026 + Vault „Apex Payout-Optimierung" (offizielle Apex-Tabelle „EOD PA Max Payouts"): 50 % von (Balance − Puffer), Max je Payout-Nr. und Größe' }],
       [f => /f(ou|u)nded\s*next/.test(f) && /futur/.test(f), { anteil: .5, deckel: 4000, quelle: 'Finn 29.10.2026: 50 % vom Gewinn, max. 4.000 $ je Anfrage, Split 91,5 % (FNF steht nicht in firm_rules.json)' }],
       [f => /ftmo/.test(f) && /futur/.test(f), null, 'FTMO Futures: keine Payout-Regel in firm_rules.json'],
       [f => /f(ou|u)nded\s*next/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: jederzeit anforderbar, kein Anteil, kein Deckel' }],
@@ -16515,12 +16515,39 @@
       [f => /5%er|5ers|five\s*percent/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: alle 14 Tage, kein Anteil, kein Deckel' }],
       [f => /fusion/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: eigenes Geld, jederzeit' }],
     ]
+    /* Apex (Finn 29.10.2026: „immer 50 % vom Balance-Puffer, 150k ist 154.000, alles wie beim Puffer … im ersten Payout immer das
+     * Maximum des ersten Payouts"): Anfragbar = min(50 % × (Balance − Puffer), Max je Payout-Nr.). Puffer = Größe + Max-DD je Größe
+     * (prophos-apex-geblowt-boden / AP_APEX_DD_JE_GROESSE_USD: 150k → 154.000; die Vault-Notiz nennt am Dashboard 154.600 — Finn hat
+     * heute 154.000 gesagt). Max je Payout-Nr. 1–6 aus der offiziellen Apex-Tabelle „EOD Performance Account Max Payouts" (Finn-Vault
+     * „Apex Payout-Optimierung", 01./03.08.2026); nach dem 6. schließt der PA laut Notiz, firm_rules sagt „ab 6. keine Caps" — Nr. > 6
+     * rechnet ohne Deckel und sagt es in der Unterzeile. Payout-Nr. = payouts_n + 1 (erhaltene + angefragte, wie der FundedNext-Refund). */
+    const ADM_APEX_DD = { 25000: 1500, 50000: 2500, 75000: 2750, 100000: 3000, 150000: 4000, 250000: 6500, 300000: 7500 }
+    const ADM_APEX_MAX = { 25000: [1000, 1000, 1000, 1000, 1000, 1000], 50000: [1500, 1500, 2000, 2500, 2500, 3000],
+                           100000: [2000, 2500, 2500, 3000, 4000, 4000], 150000: [2500, 3000, 3000, 3000, 4000, 5000] }
+    function admApexAnfragbar(r, c, regel){
+      if(c.size == null) return { regel, grund: 'Größe unklar', anfragbar: null, erhalten: null }
+      if(c.bal == null) return { regel, grund: 'keine Balance', anfragbar: null, erhalten: null }
+      const dd = ADM_APEX_DD[c.size], caps = ADM_APEX_MAX[c.size]
+      if(dd == null || !caps) return { regel, grund: `${c.size / 1000}k: keine Apex-Payout-Tabelle`, anfragbar: null, erhalten: null }
+      const puffer = c.size + dd
+      const ueber = c.bal - puffer
+      const nr = (Number(r.payouts_n) || 0) + 1
+      const deckel = nr <= caps.length ? caps[nr - 1] : null
+      const roh = Math.max(0, ueber) * .5
+      const gedeckelt = deckel != null && roh > deckel
+      const anfragbar = gedeckelt ? deckel : roh
+      const geld = v => admGeld(v, c.ccy)
+      const sub = `50 % von ${ueber >= 0 ? '+' : '−'}${geld(Math.abs(ueber))} über Puffer ${geld(puffer)} · Payout Nr. ${nr}`
+        + (deckel != null ? ` max. ${geld(deckel)}` : ' ohne Deckel (Tabelle endet bei 6)')
+      return { regel: Object.assign({}, regel, { deckel }), grund: '', roh, gedeckelt, anfragbar, erhalten: anfragbar * c.pct / 100, sub, apex: { puffer, ueber, nr } }
+    }
     function admAnfragbarCalc(r, c){
       const firm = String(r.account_firm || r.firm_raw || r.firm || '').trim()
       const f = firm.toLowerCase()
       let regel = null, grund = ''
       for(const [test, rg, warum] of ADM_ANFRAGBAR_REGELN){ if(test(f)){ regel = rg; grund = warum || ''; break } }
       if(!regel) return { regel: null, grund: grund || `${firm || 'Firma leer'}: keine Payout-Regel in firm_rules.json`, anfragbar: null, erhalten: null }
+      if(regel.apex) return admApexAnfragbar(r, c, regel)
       if(c.profit == null) return { regel, grund: c.size == null ? 'Größe unklar' : 'keine Balance', anfragbar: null, erhalten: null }
       const roh = Math.max(0, c.profit) * regel.anteil
       const gedeckelt = regel.deckel != null && roh > regel.deckel
@@ -18106,8 +18133,9 @@
           sub.textContent = `${a.grund} · ${anteilTxt} · × ${pctTxt} %`; b.title = a.regel.quelle
         }else{
           v.textContent = geld(a.erhalten); v.style.color = a.erhalten > 0 ? 'var(--good)' : 'var(--sub)'
-          sub.textContent = (a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
-            + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : ''))
+          sub.textContent = (a.sub   // Apex: eigene Herleitung (Puffer, Payout-Nr.)
+            || (a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
+            + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : '')))
             + ` · × ${pctTxt} %` + (c.manuell ? ` · Payout fest ${geld(c.betrag)}` : '')
           b.title = `${a.regel.quelle} — klicken: Profit-Share oder fester Payout-Betrag je Konto`
         }
@@ -48714,7 +48742,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1812'
+  const OS_TAB_BUILD = '2026-09-22.1813'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
