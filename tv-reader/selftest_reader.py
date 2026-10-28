@@ -459,6 +459,31 @@ Aktive Verbindungen
     finally:
         rs._tick_zeiten[:] = alt_z; rs._EINZEL.clear(); rs._EINZEL.update(alt_e)
 
+    # 0.9.13 (29.10.2026): Konto-Liste merken + Sende-Entscheid (neu sofort, sonst 1×/h)
+    m = {"namen": {}, "gesendet": None, "gesendet_s": 0.0, "fehler": "", "n": 0}
+    n1 = rs.tv_konten_merken(m, [{"name": "PAAPEX6843320000001", "quelle": "dropdown"}, {"name": "paapex6843320000002"},
+                                 {"name": "FTDFYSLX1502279877…"}, {"name": "x"}, "kaputt", {"name": "TDFYSL150577127231", "quelle": "umschalter"}], 1000.0)
+    check(n1 == 3 and sorted(m["namen"]) == ["PAAPEX6843320000001", "PAAPEX6843320000002", "TDFYSL150577127231"]
+          and m["namen"]["TDFYSL150577127231"]["quelle"] == "umschalter", "TV-Konten: nur volle Kennungen, gross, quelle gemerkt")
+    s1, pk = rs.tv_konten_entscheid(m, 1001.0)
+    check(s1 and len(pk["konten"]) == 3 and "pc_id" in pk, "TV-Konten: erster Versand sofort, alle Namen + pc_id")
+    m["gesendet"], m["gesendet_s"] = frozenset(m["namen"]), 1001.0
+    check(rs.tv_konten_merken(m, [{"name": "PAAPEX6843320000001"}], 1500.0) == 0 and rs.tv_konten_entscheid(m, 1500.0)[0] is False,
+          "TV-Konten: bekannter Name → kein Versand vor Ablauf des Takts")
+    check(rs.tv_konten_entscheid(m, 1001.0 + rs.TVK_TAKT_S + 1)[0] is True, "TV-Konten: nach dem Takt (1×/Tag) Lebenszeichen")
+    check(rs.tv_konten_merken(m, [{"name": "APEX6843320000007", "quelle": "dropdown"}], 1600.0) == 1 and rs.tv_konten_entscheid(m, 1600.0)[0] is True,
+          "TV-Konten: neuer Name → sofort senden")
+    rs.tv_konten_merken(m, [{"name": "TDFYSL150577127231", "quelle": "dropdown"}], 1700.0)
+    check(m["namen"]["TDFYSL150577127231"]["quelle"] == "dropdown", "TV-Konten: Liste schlaegt Umschalter")
+    check(rs.tv_konten_entscheid({"namen": {}, "gesendet": None, "gesendet_s": 0}, 1.0) == (False, None), "TV-Konten: ohne Namen nichts")
+    f = {"namen": {"PAAPEX6843320000001": {"quelle": "dropdown"}}, "gesendet": None, "gesendet_s": 0.0}
+    s1 = rs.tv_konten_fehler_sperre(f, 5000.0); s2 = rs.tv_konten_fehler_sperre(f, 5000.0)
+    check(s1 == 5060.0 and s2 == 5120.0 and rs.tv_konten_entscheid(f, 5100.0)[0] is False and rs.tv_konten_entscheid(f, 5121.0)[0] is True,
+          "TV-Konten: Fehler sperrt 60 s, dann 120 s — auch wenn Namen noch nie gesendet (kein 2-s-Haemmern)")
+    for _ in range(10):
+        rs.tv_konten_fehler_sperre(f, 0.0)
+    check(f["sperre_bis"] == rs.TVK_FEHLER_MAX_S, "TV-Konten: Fehler-Pause hoechstens 30 min")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

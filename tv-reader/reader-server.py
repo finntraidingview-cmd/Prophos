@@ -783,6 +783,7 @@ def _mit_an(stand):
         kerzen = [k for k in (_k1m_vor, _k1m) if k and _kurs_1m_frisch(k.get("minute"), _j1m)]
     out["kurs_1m"] = kerzen
     out["feed_direkt"] = feed_status()   # 0.9.9: der Tab sieht, ob der Reader selbst sendet / einen Schluessel braucht
+    out["tv_konten"] = tv_konten_status()   # 0.9.13: gemerkte Konto-Namen + letzter Versand (Spur fuer den Beleg)
     out["kerzen_alter_s"] = round(time.time() - _kerzen_s, 3) if _kerzen_s else None
     out["kerzen_anzahl"] = {w: len(r) for w, r in _kerzen.items()}
     out["kerzen_quelle"] = {w: ("ws-tick" if _ring_ist_tick(r) else "ws") for w, r in _kerzen.items()}   # 0.8.4
@@ -913,6 +914,16 @@ class Handler(BaseHTTPRequestHandler):
             _t["bf"], _t["bf_s"] = daten, time.time()
             _bedienfeld = daten
             _bedienfeld_s = time.time()
+            # 0.9.13: Namen aus der offenen Konto-Liste merken (nur Puls-Chrome-Tabs 'puls-…' — ein Reader-Chrome mit Broker-Login
+            # gehoert nicht zu einer Prophos-ID dieses PCs); neue Namen gehen sofort an Railway (_tv_konten_schleife)
+            try:
+                _kl = (daten.get("konto") or {}).get("konten_liste") if isinstance(daten.get("konto"), dict) else None
+                if _kl and str(_tid).startswith("puls-"):
+                    _n_neu = tv_konten_merken(_TVK, _kl, time.time())
+                    if _n_neu:
+                        print(f"\n[{time.strftime('%H:%M:%S')}] Konto-Liste: {_n_neu} neue(r) Name(n), {len(_TVK['namen'])} gesamt ({_tid[:6]})", flush=True)
+            except Exception:
+                pass
             # dump-Anforderung zurueckgeben: das Userscript haengt beim
             # NAECHSTEN Tick den Kandidaten-Dump an (nie im Dauerbetrieb —
             # der Dump laeuft durchs ganze DOM).
@@ -1800,6 +1811,96 @@ def feed_status(jetzt=None):
             "fehler": _FEED["fehler"] or None, "gesendet": _FEED["gesendet"]}
 
 
+# ── TV-KONTEN (0.9.13, 29.10.2026, Finn: „Konten automatisch anlegen ueber das Konto-Dropdown in TradingView") ─────────────────
+# Das Userscript (>= 0.9.13) schickt im Bedienfeld konto.konten_liste = die Namen aus der OFFENEN Konto-Liste (nur wenn Puls oder Finn
+# sie ohnehin geoeffnet hat — der Reader klickt nie) plus den vollen Umschalter-Namen. Hier gemerkt je Name (zuerst/zuletzt gesehen)
+# und an Railway gemeldet (POST /reader/tv-konten, gleicher Schluessel wie der Kurs-Feed): sofort, wenn ein NEUER Name dazukommt,
+# sonst hoechstens einmal je TVK_TAKT_S als Lebenszeichen (zuletzt_at; Finn 03:25: Ausloeser ist die Kauf-Mail, nicht ein Stundentakt →
+# 1×/Tag). Nach einem Fehler Pause mit wachsendem Abstand (60 s → 2 → 4 … 30 min, Pruefer 29.10.2026: vorher alle 2 s neu bei 401/502/503).
+TVK_TAKT_S = 86400.0
+TVK_FEHLER_START_S, TVK_FEHLER_MAX_S = 60.0, 1800.0
+_TVK = {"namen": {}, "gesendet": None, "gesendet_s": 0.0, "fehler": "", "n": 0, "sperre_bis": 0.0, "fehler_n": 0}   # namen: name -> {"quelle", "zuerst_s", "zuletzt_s"}
+
+
+def tv_konten_merken(merk, liste, jetzt):
+    """REIN RECHNEND (testbar): Userscript-Liste [{name, quelle}] in merk aufnehmen → Anzahl NEUER Namen. Nur Kennungs-Form
+    (Grossbuchstaben/Ziffern, 6–40 Zeichen, ohne „…"), Dubletten egal, hoechstens 200 Namen im Merker."""
+    neu = 0
+    for k in (liste or []) if isinstance(liste, list) else []:
+        if not isinstance(k, dict):
+            continue
+        name = str(k.get("name") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{5,39}", name):
+            continue
+        quelle = "umschalter" if k.get("quelle") == "umschalter" else "dropdown"
+        e = merk["namen"].get(name)
+        if e is None:
+            if len(merk["namen"]) >= 200:
+                continue
+            merk["namen"][name] = {"quelle": quelle, "zuerst_s": jetzt, "zuletzt_s": jetzt}
+            neu += 1
+        else:
+            e["zuletzt_s"] = jetzt
+            if quelle == "dropdown":
+                e["quelle"] = quelle   # Liste schlaegt Umschalter (dort steht der Name bewiesen in der Liste)
+    return neu
+
+
+def tv_konten_entscheid(merk, jetzt, takt=TVK_TAKT_S):
+    """REIN RECHNEND (testbar): → (senden, paket|None). Senden, wenn Namen da sind UND (noch nie gesendet | ein Name ist neu seit dem
+    letzten Senden | takt seit dem letzten Senden vorbei). Paket = {pc_id, konten:[{name, quelle}]} (alle gemerkten Namen)."""
+    if not merk["namen"] or jetzt < float(merk.get("sperre_bis") or 0):
+        return False, None
+    namen = frozenset(merk["namen"])
+    neu = merk["gesendet"] is None or not namen <= merk["gesendet"]
+    if not neu and jetzt - float(merk.get("gesendet_s") or 0) < takt:
+        return False, None
+    return True, {"pc_id": reader_kennung(), "konten": [{"name": n, "quelle": e.get("quelle") or "dropdown"} for n, e in sorted(merk["namen"].items())]}
+
+
+def tv_konten_fehler_sperre(merk, jetzt):
+    """REIN RECHNEND (testbar): nach einem Fehler naechsten Versuch sperren — 60 s, dann doppelt, hoechstens 30 min."""
+    merk["fehler_n"] = int(merk.get("fehler_n") or 0) + 1
+    merk["sperre_bis"] = jetzt + min(TVK_FEHLER_MAX_S, TVK_FEHLER_START_S * (2 ** (merk["fehler_n"] - 1)))
+    return merk["sperre_bis"]
+
+
+def tv_konten_status(jetzt=None):
+    jetzt = time.time() if jetzt is None else jetzt
+    return {"namen": len(_TVK["namen"]), "gesendet_alter_s": round(jetzt - _TVK["gesendet_s"], 1) if _TVK["gesendet_s"] else None,
+            "gesendet": _TVK["n"], "fehler": _TVK["fehler"] or None,
+            "pause_s": round(max(0.0, float(_TVK.get("sperre_bis") or 0) - jetzt), 0) or None}
+
+
+def _tv_konten_schleife(schlafen=time.sleep):
+    import urllib.request
+    import urllib.error
+    while True:
+        try:
+            senden, paket = tv_konten_entscheid(_TVK, time.time())
+            token = feed_token_lesen() if senden else ""
+            if senden and not token:
+                _TVK["fehler"] = "kein Schluessel (Prophos-Tab gibt ihn einmal)"
+            elif senden:
+                req = urllib.request.Request(f"{DIAGNOSE_BACKEND}/reader/tv-konten", data=json.dumps(paket, default=str).encode("utf-8"),
+                                             headers={"Content-Type": "application/json", "User-Agent": "prophos-reader", "X-Reader-Token": token})
+                try:
+                    urllib.request.urlopen(req, timeout=8.0).read()
+                    # gesendet = genau die Namen im Paket (ein Name, der waehrend des Versands dazukam, bleibt „neu", Pruefer-Hinweis 1)
+                    _TVK.update(gesendet=frozenset(k["name"] for k in paket["konten"]), gesendet_s=time.time(), fehler="", fehler_n=0, sperre_bis=0.0)
+                    _TVK["n"] += 1
+                    print(f"\n[{time.strftime('%H:%M:%S')}] TV-Konten an Prophos gemeldet: {len(paket['konten'])} Name(n)", flush=True)
+                except urllib.error.HTTPError as e:
+                    _TVK["fehler"] = f"HTTP {e.code}"
+                    tv_konten_fehler_sperre(_TVK, time.time())
+                except Exception as e:
+                    _TVK["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
+                    tv_konten_fehler_sperre(_TVK, time.time())
+        except Exception as e:
+            _TVK["fehler"] = f"{type(e).__name__}: {str(e)[:80]}"
+        schlafen(2)
+
+
 def _feed_schleife(schlafen=time.sleep):
     import urllib.request
     import urllib.error
@@ -1865,6 +1966,7 @@ elif __name__ == "__main__":
     einzelinstanz_sichern()
     threading.Thread(target=_kind_diagnose_schleife, daemon=True).start()
     threading.Thread(target=_feed_schleife, daemon=True).start()   # 0.9.9 Direktfeed
+    threading.Thread(target=_tv_konten_schleife, daemon=True).start()   # 0.9.13 Konto-Liste an Prophos
     try:
         ExklusiverServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:

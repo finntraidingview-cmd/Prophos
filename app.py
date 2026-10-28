@@ -525,7 +525,7 @@ def copier_proxy(path):
         # weiterklickte (order_signale 99e6087a, 27.09. ReadTimeout). Das Frontend meldete „nichts gesendet", ein
         # erneuter Start hätte ein zweites Mal platziert: derselbe Doppel-Order-Pfad wie master-order.
         _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close",
-                                "tsx-konto", "tsx-lesen", "tsx-inventar", "tsx-close")
+                                "tsx-konto", "tsx-lesen", "tsx-inventar", "tsx-close", "tv-konten-liste")   # tv-konten-liste (29.10.2026): Panel bis 260 s
                 else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 25)
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
@@ -15997,6 +15997,7 @@ def mail_eingang():
     # Payout-Matcher (29.10.2026): Stand der Payout-Anfragen aus den Mails des Stapels — nach dem Speichern, wirft nie, hält den Import nicht auf
     if zeilen:
         payout_mail_verarbeiten(zeilen)
+        tv_konten_mail_auftraege(zeilen, uid)   # Kauf-Mail einer TradingView-Firma → Auftrag „Konto-Liste lesen" (29.10.2026, wirft nie)
     return jsonify({"ok": True, "angenommen": len(zeilen)})
 
 
@@ -16881,6 +16882,356 @@ def reader_kurs_schreiben():
             for key in [k for k, v in _reader_feed_merk.items() if jetzt - v[1] > 600]:
                 _reader_feed_merk.pop(key, None)
     return jsonify({"ok": True, "kurse": len(kurse), "kerzen": len(kerzen)})
+
+# ══ TV-KONTEN AUS DEM KONTO-UMSCHALTER (29.10.2026, Finn 03:10: „Konten automatisch anlegen über das Konto-Dropdown in TradingView — fast
+# noch besser als Mail"). Der Puls-Chrome-Reader (Userscript ≥ 0.9.13) liest die Einträge der Tradovate-Konto-Liste, sobald sie ohnehin offen
+# ist (Puls-Kontowechsel oder Hand — nie ein eigener Klick, kein Eingriff in Order-Pfade), der reader-server schickt die Namen hierher
+# (POST /reader/tv-konten, Schlüssel uid.pc.sig wie /reader-kurs → user_id + PC aus dem Schlüssel, nie aus dem Body). Tabelle tv_konten
+# (sql/2026-10-29_tv_konten.sql, nur Service-Key): je (user_id, name) zuerst/zuletzt gesehen. GET /admin/tv-konten (Gate wie /admin/konto-mails,
+# HT-Sicht) liefert die Liste mit in_prophos (accounts.external_id bzw. Name, Apex-Form PA-APEX-685010-01 → PAAPEX6850100000001) — der
+# Reiter „Konten aus Mail & TV" (S7) zeigt neue Namen als Zeile. Schnittstelle fest (Master 29.10.2026). ══
+TV_KONTEN_MAX = 32 * 1024
+TV_KONTEN_NAME_RE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{5,39}$")
+TV_KONTEN_QUELLEN = ("dropdown", "umschalter")
+
+
+def tv_konto_normal(roh):
+    """REIN RECHNEND (testbar): Kontoname aus TradingView → Schreibweise in Prophos. Apex „PA-APEX-685010-01" → „PAAPEX6850100000001",
+    „APEX-641699-21" → „APEX6416990000021"; alles andere nur groß und getrimmt."""
+    k = str(roh or "").strip().upper()
+    m = re.fullmatch(r"(PA-)?APEX-([0-9]{5,})-([0-9]{1,3})", k)
+    if m:
+        return ("PAAPEX" if m.group(1) else "APEX") + m.group(2) + m.group(3).zfill(7)
+    return k
+
+
+def tv_konten_zeilen(body, uid, pc, jetzt_iso):
+    """REIN RECHNEND (testbar): Body {konten:[{name, quelle}]} → Upsert-Zeilen [{user_id, name, pc_id, quelle, zuletzt_at}] — Namen groß,
+    nur Kennungs-Form (TV_KONTEN_NAME_RE, gekürzte „…"-Namen fallen raus), ohne Dubletten, höchstens 200. zuerst_at schickt niemand mit:
+    die Tabelle setzt sie beim Insert, der Upsert (merge-duplicates) lässt sie stehen."""
+    aus, gesehen = [], set()
+    liste = (body or {}).get("konten") if isinstance(body, dict) else None
+    for k in (liste if isinstance(liste, list) else [])[:200]:
+        if not isinstance(k, dict):
+            continue
+        name = tv_konto_normal(k.get("name"))
+        if not TV_KONTEN_NAME_RE.fullmatch(name) or name in gesehen:
+            continue
+        quelle = str(k.get("quelle") or "dropdown")
+        gesehen.add(name)
+        aus.append({"user_id": uid, "name": name, "pc_id": pc, "quelle": quelle if quelle in TV_KONTEN_QUELLEN else "dropdown", "zuletzt_at": jetzt_iso})
+        if len(aus) >= 200:   # gleiche Grenze wie der Reader-Merker (Pruefer-Hinweis 2)
+            break
+    return aus
+
+
+def tv_konto_in_prophos(name, konten, uid):
+    """REIN RECHNEND (testbar): steht der TV-Kontoname bei dieser ID in Prophos? → Konto-Zeile oder None. Beide Seiten normiert
+    (tv_konto_normal, ohne Sonderzeichen): external_id GLEICH oder ein ganzes Wort des Kontonamens gleich — nie Teilstring (Prüfer 29.10.2026:
+    Apex-Eval „APEX6843320000001" steckt in „PAAPEX6843320000001" des PA-Kontos und hätte als „in Prophos" gegolten)."""
+    norm = lambda x: re.sub(r"[^A-Z0-9]", "", tv_konto_normal(x))
+    key = norm(name)
+    if len(key) < 6:
+        return None
+    for a in konten or []:
+        if str(a.get("user_id")) != str(uid):
+            continue
+        if norm(a.get("external_id")) == key or any(norm(w) == key for w in re.findall(r"[A-Za-z0-9_-]{6,}", str(a.get("name") or ""))):
+            return a
+    return None
+
+
+@app.route("/reader/tv-konten", methods=["POST", "OPTIONS"])
+def reader_tv_konten_schreiben():
+    """POST vom reader-server (Header X-Reader-Token) {pc_id, konten:[{name, quelle}]} → Upsert tv_konten (user_id + PC aus dem Schlüssel).
+    → {ok, n}. Wirft nie nach außen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    wer = reader_feed_token_pruefen(request.headers.get("X-Reader-Token") or "")
+    if not wer:
+        return jsonify({"ok": False, "msg": "Schlüssel ungültig"}), 401
+    if (request.content_length or 0) > TV_KONTEN_MAX:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    _rest = sb_bremse_rest_s()
+    if _rest > 0:
+        return jsonify({"ok": False, "msg": "Datenbank gestört — später"}), 503, {"Retry-After": str(max(SB_BREMSE_HALB_S, int(_rest)))}
+    zeilen = tv_konten_zeilen(request.get_json(silent=True), wer[0], wer[1], datetime.now(timezone.utc).isoformat())
+    if not zeilen:
+        return jsonify({"ok": True, "n": 0})
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/tv_konten", params={"on_conflict": "user_id,name"}, json=zeilen,
+                        headers=_sb_headers("resolution=merge-duplicates,return=minimal"))
+        _sb_pruefen(r)
+    except SupabaseGesperrt as e:
+        return jsonify({"ok": False, "msg": "Datenbank gestört — später"}), 503, {"Retry-After": str(max(SB_BREMSE_HALB_S, int(e.rest_s)))}
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__}) — Tabelle tv_konten da? (sql/2026-10-29_tv_konten.sql)"}), 502
+    return jsonify({"ok": True, "n": len(zeilen)})
+
+
+@app.route("/admin/tv-konten", methods=["GET", "OPTIONS"])
+def admin_tv_konten():
+    """GET /admin/tv-konten[?tage=30] → {ok, konten:[{user_id, person, name, pc_id, quelle, zuerst_at, zuletzt_at, ignoriert_at, angelegt_account_id,
+    in_prophos, konto_id, konto_name}],
+    n_neu, n_drin}. Gate wie /admin/mail (_admin_mail_auth), HT-Sicht. Nur lesen. Feld „konten" = Vertrag mit dem Reiter „Konten aus Mail & TV"
+    (S7, eaa9a07a liest t.konten)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _admin_mail_auth()
+    if err:
+        return err
+    try:
+        disp, sicht = _admin_mail_sicht()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"IDs nicht lesbar: {str(e)[:120]}"}), 502
+    try:
+        tage = max(1, min(365, int(request.args.get("tage") or 30)))
+    except ValueError:
+        tage = 30
+    if not sicht:
+        return jsonify({"ok": True, "konten": [], "n_neu": 0, "n_drin": 0, "tage": tage})
+    seit = (datetime.now(timezone.utc) - timedelta(days=tage)).isoformat()
+    ids = ",".join(sorted(sicht))
+    try:
+        rows = _sb_all("tv_konten", {"select": "user_id,name,pc_id,quelle,zuerst_at,zuletzt_at,ignoriert_at,angelegt_account_id", "user_id": f"in.({ids})", "zuletzt_at": f"gte.{seit}",
+                                     "order": "zuletzt_at.desc"}) or []
+        konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id", "user_id": f"in.({ids})"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"tv_konten nicht lesbar ({str(e)[:100]}) — Tabelle da? (sql/2026-10-29_tv_konten.sql)"}), 503
+    zeilen, n_neu, n_drin = [], 0, 0
+    for r in rows:
+        uid = str(r.get("user_id") or "")
+        a = tv_konto_in_prophos(r.get("name"), konten, uid)
+        z = dict(r, user_id=uid, person=disp.get(uid, uid[:8]), in_prophos=bool(a), konto_id=(a or {}).get("id"), konto_name=(a or {}).get("name"))
+        n_drin += bool(a); n_neu += not a
+        zeilen.append(z)
+    return jsonify({"ok": True, "konten": zeilen, "n_neu": n_neu, "n_drin": n_drin, "tage": tage})
+
+
+# ── AUFTRÄGE „Konto-Liste lesen" (Finn 29.10.2026 03:25: „Jedes Mal, wenn eine Konto-Mail reinkommt, wird im Zufallsintervall 5 Minuten bis
+# 3 Stunden einmal ganz kurz in den jeweiligen Trading-Account über TradingView eingeloggt und alle neuen externen IDs gelesen"). Nur Firmen,
+# deren Konten im TradingView-Konto-Umschalter (Tradovate) stehen — Topstep (TopstepX), FundedNext/FundingPips/FTMO (MT5) nie. Je ID × Firma
+# höchstens EIN offener Auftrag (Index tv_konten_auftrag_offen_uq): weitere Kauf-Mails bündeln sich, das frühere faellig_at bleibt.
+# Finn 29.10.2026 03:58: der eigentliche Auslöser ist die KAUFQUITTUNG — „ready" kommt bei Tradeify nur bei ~54 % der Käufe, „Your Tradeify
+# order is confirmed" (Select $150k) bei jedem; Level-Up-Produkte (Payout-Programm) zählen nicht (Text „Level Up"). Topstep (TopstepX),
+# FundedNext/FundingPips/FTMO (MT5) stehen NICHT im TradingView-Konto-Umschalter — für sie gibt es nichts zu lesen, ihre Konto-Mails tragen die
+# Kennung ohnehin selbst (Reiter „Konten aus Mail").
+TV_KONTO_MAIL_MUSTER = (
+    ("Tradeify", r"tradeify", r"Tradeify order is confirmed|Tradovate account is (ready|active)|account reset is confirmed|You.re funded"),
+    ("Apex Trader", r"apextrader", r"Payment Receipt|Performance Account is active|Activation Steps|being activated"),
+)
+TV_KONTO_MAIL_NICHT = re.compile(r"Level\s*-?\s*Up", re.I)   # Tradeify-Quittung eines Level-Up-Produkts → kein Konto im Dropdown
+TV_KONTEN_FIRMEN = ("Tradeify", "Apex Trader", "Lucid Trading", "MyFundedFutures", "FundedNext Futures")   # Tages-Fallback: Tradovate-Firmen
+TV_AUFTRAG_MIN_S, TV_AUFTRAG_MAX_S = 300, 3 * 3600
+TV_AUFTRAG_LAUF_MAX_S = 20 * 60          # „laeuft" länger als das (Tab neu geladen, PC aus) → wieder offen
+TV_TAEGLICH_MIN_S, TV_TAEGLICH_MAX_S = 20 * 3600, 28 * 3600
+
+
+def tv_konto_mail_firma(von, betreff, text=""):
+    """REIN RECHNEND (testbar): Kaufquittung/Konto-/Reset-Mail einer TradingView-Firma → Firmenname (wie accounts.firm) oder None.
+    Tradeify-Quittung eines Level-Up-Produkts (Text „Level Up") → None."""
+    v, b = str(von or ""), str(betreff or "")
+    for firma, von_re, bet_re in TV_KONTO_MAIL_MUSTER:
+        if re.search(von_re, v, re.I) and re.search(bet_re, b, re.I):
+            if firma == "Tradeify" and re.search(r"order is confirmed", b, re.I) and TV_KONTO_MAIL_NICHT.search(str(text or "")[:20000]):
+                return None
+            return firma
+    return None
+
+
+def tv_auftrag_verzug_s(r=None):
+    """REIN RECHNEND (testbar): Wartezeit bis zum Lesen in Sekunden, gestreut zwischen 5 min und 3 h (Jitter-Regel: nie fest), kurze häufiger
+    (r^1.6) — Finn will die Konten bald sehen, nur nicht im Takt aller PCs gleichzeitig."""
+    r = random.random() if r is None else min(1.0, max(0.0, float(r)))
+    return int(TV_AUFTRAG_MIN_S + (TV_AUFTRAG_MAX_S - TV_AUFTRAG_MIN_S) * (r ** 1.6))
+
+
+def tv_konten_mail_auftraege(zeilen, uid):
+    """Nach dem Insert in /mail/eingang: je Firma mit Kauf-Mail im Stapel EIN Auftrag (falls noch keiner offen ist). Wirft nie."""
+    try:
+        je_firma = {}
+        for z in zeilen or []:
+            f = tv_konto_mail_firma(z.get("von"), z.get("betreff"), z.get("text"))
+            if f and f not in je_firma:
+                je_firma[f] = z
+        for firma, z in je_firma.items():
+            offen = sb_select("tv_konten_auftrag", {"select": "id", "user_id": f"eq.{uid}", "firma": f"eq.{firma}", "status": "in.(offen,laeuft)", "limit": "1"}) or []
+            if offen:
+                continue
+            faellig = (datetime.now(timezone.utc) + timedelta(seconds=tv_auftrag_verzug_s())).isoformat()
+            try:
+                sb_insert("tv_konten_auftrag", {"user_id": uid, "firma": firma, "art": "mail", "quelle_mail": str(z.get("gmail_msg_id") or "")[:80] or None, "faellig_at": faellig})
+                print(f"[tv-konten] Auftrag {firma} für {str(uid)[:8]} fällig {faellig[:16]} (Mail: {str(z.get('betreff') or '')[:60]})", flush=True)
+            except Exception as e:   # zweiter Stapel gleichzeitig → eindeutiger Index greift, harmlos
+                print(f"[tv-konten] Auftrag {firma} nicht angelegt: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    except Exception as e:
+        print(f"[tv-konten] ⚠️ Mail-Aufträge: {type(e).__name__}: {e}", flush=True)
+
+
+TV_WIEDER_MIN_S, TV_WIEDER_MAX_S = 30 * 60, 60 * 60
+
+
+def tv_auftrag_nach_fehler(versuche, jetzt, r, ergebnis):
+    """REIN RECHNEND (testbar): Fehlversuch → Update-Body. Erster Fehler: wieder „offen", fällig in 30–60 min (r 0..1), versuche + 1;
+    jeder weitere: „fehler" mit Grund (kein Dauer-Retry)."""
+    if int(versuche or 0) < 1:
+        warte = int(TV_WIEDER_MIN_S + (TV_WIEDER_MAX_S - TV_WIEDER_MIN_S) * min(1.0, max(0.0, float(r))))
+        return {"status": "offen", "laeuft_at": None, "versuche": int(versuche or 0) + 1,
+                "faellig_at": (jetzt + timedelta(seconds=warte)).isoformat(), "ergebnis": dict(ergebnis or {}, wiederholung_in_s=warte)}
+    return {"status": "fehler", "erledigt_at": jetzt.isoformat(), "versuche": int(versuche or 0) + 1, "ergebnis": ergebnis}
+
+
+def tv_taeglich_faellig(letzte_iso, jetzt, streu_r):
+    """REIN RECHNEND (testbar): braucht diese ID × Firma einen Tages-Auftrag? letzte_iso = letzter Auftrag (egal welcher Stand) oder None;
+    Abstand gestreut 20–28 h (streu_r 0..1, je Firma fest aus der user_id+Firma gewürfelt, damit nicht alle PCs gleich ticken)."""
+    if not letzte_iso:
+        return True
+    try:
+        t = datetime.fromisoformat(str(letzte_iso).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (jetzt - t).total_seconds() >= TV_TAEGLICH_MIN_S + (TV_TAEGLICH_MAX_S - TV_TAEGLICH_MIN_S) * min(1.0, max(0.0, streu_r))
+
+
+@app.route("/pc/tv-konten-auftrag", methods=["GET", "OPTIONS"])
+def pc_tv_konten_auftrag():
+    """PC-Tab der ID (sb-token): → {ok, auftrag: {id, firma, art, ext} | null}. Holt den ältesten fälligen Auftrag und setzt ihn auf „laeuft"
+    (atomar: nur offen → laeuft). Ohne Mail-Auftrag: je Tradovate-Firma mit Konten dieser ID höchstens 1× in 20–28 h ein Tages-Auftrag.
+    ext = External ID eines Kontos dieser Firma (der Puls braucht sie für den Login-Weg). Aufräumen: „laeuft" > 20 min → wieder offen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    jetzt = datetime.now(timezone.utc)
+    try:
+        alt = (jetzt - timedelta(seconds=TV_AUFTRAG_LAUF_MAX_S)).isoformat()
+        sb_update("tv_konten_auftrag", {"user_id": f"eq.{uid}", "status": "eq.laeuft", "laeuft_at": f"lt.{alt}"}, {"status": "offen", "laeuft_at": None})
+        konten = _sb_all("accounts", {"select": "id,firm,external_id,created_at", "user_id": f"eq.{uid}", "order": "created_at.desc"}) or []
+        firmen_mit = [f for f in TV_KONTEN_FIRMEN if any(a.get("firm") == f and a.get("external_id") for a in konten)]
+        for f in firmen_mit:   # Tages-Fallback anlegen, wo nötig
+            letzte = sb_select("tv_konten_auftrag", {"select": "created_at", "user_id": f"eq.{uid}", "firma": f"eq.{f}", "order": "created_at.desc", "limit": "1"}) or []
+            streu = int(hashlib.sha256(f"{uid}|{f}".encode()).hexdigest()[:4], 16) / 65535
+            if tv_taeglich_faellig((letzte[0] if letzte else {}).get("created_at"), jetzt, streu):
+                try:
+                    sb_insert("tv_konten_auftrag", {"user_id": uid, "firma": f, "art": "taeglich", "faellig_at": jetzt.isoformat()})
+                except Exception:
+                    pass   # offener Auftrag dieser Firma existiert schon (Index) — gut so
+        faellig = sb_select("tv_konten_auftrag", {"select": "id,firma,art,faellig_at", "user_id": f"eq.{uid}", "status": "eq.offen",
+                                                  "faellig_at": f"lte.{jetzt.isoformat()}", "order": "faellig_at.asc", "limit": "1"}) or []
+        if not faellig:
+            return jsonify({"ok": True, "auftrag": None})
+        a = faellig[0]
+        got = sb_update("tv_konten_auftrag", {"id": f"eq.{a['id']}", "status": "eq.offen"}, {"status": "laeuft", "laeuft_at": jetzt.isoformat()}) or []
+        if not got:
+            return jsonify({"ok": True, "auftrag": None})   # anderer Tab war schneller
+        ext = next((k.get("external_id") for k in konten if k.get("firm") == a["firma"] and k.get("external_id")), None)
+        return jsonify({"ok": True, "auftrag": {"id": a["id"], "firma": a["firma"], "art": a["art"], "ext": ext}})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Aufträge nicht lesbar ({type(e).__name__}: {str(e)[:100]}) — Tabelle tv_konten_auftrag da?"}), 503
+
+
+@app.route("/pc/tv-konten-auftrag/erledigt", methods=["POST", "OPTIONS"])
+def pc_tv_konten_auftrag_erledigt():
+    """PC-Tab der ID: {id, ok, konten:[name …], pc_id, msg} → Auftrag erledigt/fehler, Namen → tv_konten (Upsert, quelle 'dropdown')."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    aid = str(b.get("id") or "")
+    if not re.fullmatch(r"[0-9a-f-]{36}", aid):
+        return jsonify({"ok": False, "msg": "id ungültig"}), 400
+    pc = str(b.get("pc_id") or "").strip()
+    pc = pc if READER_KENNUNG_MUSTER.fullmatch(pc) else None
+    jetzt = datetime.now(timezone.utc).isoformat()
+    zeilen = tv_konten_zeilen({"konten": [{"name": n, "quelle": "dropdown"} for n in (b.get("konten") or []) if isinstance(n, str)]}, uid, pc, jetzt) if b.get("ok") else []
+    try:
+        if zeilen:
+            r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/tv_konten", params={"on_conflict": "user_id,name"}, json=zeilen,
+                            headers=_sb_headers("resolution=merge-duplicates,return=minimal"))
+            _sb_pruefen(r)
+        erg = {"n": len(zeilen), "msg": str(b.get("msg") or "")[:300], "code": str(b.get("code") or "")[:40], "pc_id": pc}
+        if b.get("ok"):
+            body = {"status": "erledigt", "erledigt_at": jetzt, "ergebnis": erg}
+        elif str(b.get("code") or "") == "belegt":
+            # PC-Tab gibt zurück, weil inzwischen etwas läuft (Start, Puls, Polar) — kein Fehlversuch, in 5–15 min (gestreut) erneut
+            body = {"status": "offen", "laeuft_at": None, "faellig_at": (datetime.now(timezone.utc) + timedelta(seconds=random.randint(300, 900))).isoformat(),
+                    "ergebnis": erg}
+        else:
+            # Fehlversuch (Master 29.10.2026): höchstens EINMAL nach 30–60 min (gestreut) neu, dann „fehler" mit Grund — kein Dauer-Retry
+            alt = (sb_select("tv_konten_auftrag", {"select": "versuche", "id": f"eq.{aid}", "user_id": f"eq.{uid}"}) or [{}])[0]
+            body = tv_auftrag_nach_fehler(int(alt.get("versuche") or 0), datetime.now(timezone.utc), random.random(), erg)
+        sb_update("tv_konten_auftrag", {"id": f"eq.{aid}", "user_id": f"eq.{uid}", "status": "eq.laeuft"}, body)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True, "n": len(zeilen)})
+
+
+@app.route("/tv-konten/mein", methods=["GET", "PATCH", "OPTIONS"])
+def tv_konten_mein():
+    """Eigene ID (eingeloggt, sb-token). GET[?tage=60] → {ok, konten:[{name, pc_id, quelle, zuerst_at, zuletzt_at, ignoriert_at, angelegt_account_id,
+    in_prophos, konto_id, konto_name}]} — für den Kasten „Neue Konten aus TradingView · noch zu bestätigen" unter Accounts (S7).
+    PATCH {name, ignoriert: true|false[, angelegt_account_id]} → setzt/leert ignoriert_at (bzw. merkt das angelegte Konto) für (eigene ID, name) → {ok, n}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    if request.method == "PATCH":
+        b = request.get_json(silent=True) or {}
+        return _tv_konten_markieren(uid, b.get("name"), b.get("ignoriert"), b.get("angelegt_account_id"))
+    try:
+        tage = max(1, min(365, int(request.args.get("tage") or 60)))
+    except ValueError:
+        tage = 60
+    seit = (datetime.now(timezone.utc) - timedelta(days=tage)).isoformat()
+    try:
+        rows = _sb_all("tv_konten", {"select": "name,pc_id,quelle,zuerst_at,zuletzt_at,ignoriert_at,angelegt_account_id", "user_id": f"eq.{uid}",
+                                     "zuletzt_at": f"gte.{seit}", "order": "zuerst_at.desc"}) or []
+        konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id", "user_id": f"eq.{uid}"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"tv_konten nicht lesbar ({str(e)[:100]})"}), 503
+    aus = []
+    for r in rows:
+        a = tv_konto_in_prophos(r.get("name"), konten, uid)
+        aus.append(dict(r, user_id=uid, in_prophos=bool(a), konto_id=(a or {}).get("id"), konto_name=(a or {}).get("name")))
+    return jsonify({"ok": True, "konten": aus})
+
+
+@app.route("/tv-konten/ignorieren", methods=["POST", "OPTIONS"])
+def tv_konten_ignorieren():
+    """POST {name[, ignoriert=true]} (eingeloggt, eigene ID) → wie PATCH /tv-konten/mein. Zweite Schreibweise aus dem Master-Nachtrag 29.10.2026."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    return _tv_konten_markieren(uid, b.get("name"), b.get("ignoriert", True), None)
+
+
+def _tv_konten_markieren(uid, name, ignoriert, angelegt_account_id):
+    """ignoriert_at setzen/leeren bzw. angelegt_account_id merken — nur für eine Zeile der EIGENEN ID (user_id aus dem Login)."""
+    n = tv_konto_normal(name)
+    if not TV_KONTEN_NAME_RE.fullmatch(n):
+        return jsonify({"ok": False, "msg": "name ungültig"}), 400
+    body = {}
+    if ignoriert is not None:
+        body["ignoriert_at"] = datetime.now(timezone.utc).isoformat() if ignoriert else None
+    if angelegt_account_id:
+        if not re.fullmatch(r"[0-9a-f-]{36}", str(angelegt_account_id)):
+            return jsonify({"ok": False, "msg": "angelegt_account_id ungültig"}), 400
+        body["angelegt_account_id"] = str(angelegt_account_id)
+    if not body:
+        return jsonify({"ok": False, "msg": "nichts zu ändern (ignoriert oder angelegt_account_id)"}), 400
+    try:
+        rows = sb_update("tv_konten", {"user_id": f"eq.{uid}", "name": f"eq.{n}"}, body) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True, "n": len(rows)})
+
 
 # ══ KONTEN PRÜFEN (27.09.2026, Auftrag Koordination B10 für F11: Konten per Einfügen des Tradeify-Dashboard-Texts
 # anlegen, Dubletten über ALLE Nutzer ausschließen) ════════════════════════════════════════════════════════════════

@@ -127,6 +127,23 @@ check(h5.leerTextPasst("Symbol Side Qty Position ID Nothing to show yet", null) 
 // Fall 6: Reiter nicht gewaehlt → nie flach
 var r6 = reiter("false"); var p6 = el("Positions " + tabLeer.textContent, [r6], tabLeer); h5.setDoc(doc(r6));
 check(h5.leerBeweis() === false, "leerBeweis: Reiter Positions nicht aktiv → nicht flach");
+// 0.9.13 (29.10.2026): Konto-Liste aus dem offenen Umschalter — nur volle Nummern als erstes Wort, nie gekuerzt/angeklebt
+var codeKonten = stueck("function kontenAusEintraegen", "// 0.9.13 ENDE kontenAusEintraegen");
+var h6 = new Function("var RX_KONTO_KURZ=" + stueck("const RX_KONTO_KURZ = ", ";\n").replace("const RX_KONTO_KURZ = ", "") + ";" +
+  "var h4 = arguments[0]; var kontoIstEcht = h4.kontoIstEcht, kontoNrAus = h4.kontoNrAus;" + stueck("function kontoEntdoppeln", "// 0.9.2: Konto-Umschalter") + codeKonten + "; return kontenAusEintraegen;")(h4);
+var kl = h6([{ text: 'PAAPEX6843320000001 158,491.44 USD' }, { text: 'PAAPEX6843320000002 157,474.50 USD' }, { text: 'FTDFYSLX1502279877… 150,000.00 USD' },
+  { text: 'TDFYSL150000000000156,981.20USD' }, { text: 'Paper Trading' }, { text: 'PAAPEX6843320000001 PAAPEX6843320000001 158,491.44 USD' }, { text: 'TDFYTEST0000000001 TDFYTEST0000000001 USD' }],
+  'PAAPEX684332000000… 158,491.44 USD');
+check(JSON.stringify(kl.map(function (k) { return k.name; })) === JSON.stringify(['PAAPEX6843320000001', 'PAAPEX6843320000002', 'TDFYTEST0000000001']),
+      "kontenAusEintraegen: volle Nummern, Dubletten einmal, gekuerzt/angeklebt/Paper raus");
+check(kl.every(function (k) { return k.quelle === 'dropdown'; }) && h6([{ text: 'X' }], 'TDFYSL150577127231 157,021.20 USD')[0].quelle === 'umschalter',
+      "kontenAusEintraegen: quelle dropdown/umschalter (voller Umschalter-Name zaehlt allein)");
+check(h6([], 'FTDFYSLX1502279877… 150,000.00 USD').length === 0 && h6(null, '').length === 0, "kontenAusEintraegen: gekuerzter Umschalter allein → nichts, leer → nichts");
+check(h6([{ text: 'EXPRESS-V2-679005-57119155 150,000.00 USD' }], 'EXPRESS-V2-679005-57…').length === 1 && h6([{ text: 'FNFTFAMUSTERMUSTERAB1234 100,000.00 USD' }], 'FNFTFAMUSTERMUSTERAB…')[0].name === 'FNFTFAMUSTERMUSTERAB1234',
+      "kontenAusEintraegen: Topstep-Form mit Bindestrichen und 4-Endziffern-Form zaehlen");
+check(h6([{ text: 'QQQ261218C00500000' }, { text: 'SPXW261218P05000000' }], 'PAAPEX684332000000… 155,407.14 USD').length === 0,
+      "kontenAusEintraegen: fremde offene Liste (Symbolsuche) → nichts, aktives Konto steht nicht drin");
+check(h6([{ text: 'PAAPEX6843320000001 USD' }], '').length === 0, "kontenAusEintraegen: ohne Umschalter-Text keine Liste (nicht beweisbar Konto-Liste)");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }

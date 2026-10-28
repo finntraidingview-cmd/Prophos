@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.12
+// @version      0.9.13
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.13 29.10.2026  Konto-Liste an Prophos (Finn 03:10: „Konten automatisch anlegen ueber das Konto-Dropdown in TradingView — fast
+//                      noch besser als Mail"): konto.konten_liste im Bedienfeld = volle Kontonamen aus der OFFENEN Konto-Liste (nur wenn
+//                      Puls oder Finn sie ohnehin geoeffnet hat — das Script klickt nie) plus der volle Umschalter-Name; gekuerzte „…"-Namen
+//                      und angeklebte Balancen fallen raus (kontenAusEintraegen, REIN RECHNEND). Der reader-server meldet neue Namen an
+//                      Railway (tv_konten), der Admin-Reiter „Konten aus Mail & TV" zeigt sie. Positionen/Order-Pfade unveraendert.
 //   0.9.12 29.10.2026  Leer-Beweis nachgeschaerft (Pruefer S2 zu 0.9.11): „Nothing to show yet" ist TradingViews generischer Leer-Text
 //                      (auch Orders/History/Notifications). Er zaehlt jetzt nur noch INNERHALB der Positions-Tabelle
 //                      (table[data-name$="positions-table"]) oder zusammen mit deren Spaltenkopf „Position ID" im selben Vorfahren —
@@ -147,7 +152,7 @@
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.9.12';
+  const VERSION    = '0.9.13';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -415,6 +420,32 @@
     const k = tc(kand[0]).match(RX_KONTO_KURZ);   // 0.9.10: nur das Stueck mit „…" — nie als volle Nummer ausgeben
     return k ? k[1] + '…' : '';
   }
+  // 0.9.13: Konto-Liste aus dem offenen Umschalter — REIN RECHNEND (testbar): Eintraege [{text}] + aktiver Umschalter-Text →
+  // [{name, quelle}]. Ein Eintrag zaehlt nur, wenn sein ERSTES Wort genau eine volle Kontonummer ist („PAAPEX6843320000001 158,491.44 USD");
+  // gekuerzte Namen („FTDFYSLX1502279877…"), angeklebte Balancen („TDFYSL150000000000156,981.20USD" — das erste Wort waere laenger als die
+  // Nummer) und „Paper Trading" fallen raus. Nie ein Klick: steht die Liste nicht offen, ist die Liste leer.
+  function kontenAusEintraegen(eintraege, aktivText) {
+    const aus = new Map();
+    const nimm = (t, quelle) => {
+      const txt = kontoEntdoppeln(String(t || '').replace(/\s+/g, ' ').trim());
+      const wort = txt.split(' ')[0] || '';
+      if (!wort || RX_KONTO_KURZ.test(txt) || /…|\.\.\./.test(wort) || !kontoIstEcht(wort)) return;
+      // ganzes Wort = Kennung (Buchstaben vorn, Ziffern hinten, dazwischen nur A–Z/0–9/_/-): eine angeklebte Balance bringt Komma/Punkt
+      // mit („…156,981.20USD") und faellt raus; kontoNrAus taugt hier nicht (faul: „EXPRESS-V2-679005-57119155" → „EXPRESS-V2-679005")
+      if (!/^[A-Z][A-Z0-9_-]{4,38}[0-9]{4}$/i.test(wort)) return;
+      const name = wort.toUpperCase();
+      if (!aus.has(name) || quelle === 'dropdown') aus.set(name, quelle);
+    };
+    // Nur die KONTO-Liste: das aktive Konto (Umschalter, oft gekuerzt „PAAPEX684332000000…") muss in der offenen Liste stehen — eine
+    // andere offene Listbox/Menue (Symbolsuche, Optionen „QQQ261218C00500000") bringt sonst Kennungs-Formen mit (Pruefer 29.10.2026)
+    const aktivWort = String(aktivText || '').replace(/\s+/g, ' ').trim().split(' ')[0].replace(/(…|\.{3})$/, '').toUpperCase();
+    const liste = (Array.isArray(eintraege) ? eintraege : []).map((e) => String((e && e.text) || '').trim().toUpperCase());
+    const passt = aktivWort.length >= 6 && liste.some((t) => t.startsWith(aktivWort));
+    if (passt) liste.forEach((t) => nimm(t, 'dropdown'));
+    if (aktivText) nimm(aktivText, 'umschalter');
+    return [...aus].map(([name, quelle]) => ({ name, quelle }));
+  }
+  // 0.9.13 ENDE kontenAusEintraegen
   function liesKonto() {
     try {
       const k = suche(SIG_KONTO_SCHALTER);
@@ -885,6 +916,7 @@
 
     const symbolKnopf = suche(SIG_SYMBOL_KNOPF);
     const kontoSchalter = suche(SIG_KONTO_SCHALTER);
+    const kontoEintraege = sucheAlle(SIG_KONTO_EINTRAEGE);   // 0.9.13: einmal lesen, fuer eintraege + konten_liste
     // Konto-Zusammenfassung (0.5.0) — darf das Bedienfeld nie mitreissen:
     // ein Fehler hier wird gemeldet, alles andere geht trotzdem raus.
     let zus;
@@ -925,7 +957,8 @@
       konto: {
         aktiv: kontoSchalter && kontoSchalter.text ? kontoSchalter.text : '',
         schalter: kontoSchalter,
-        eintraege: sucheAlle(SIG_KONTO_EINTRAEGE),
+        eintraege: kontoEintraege,
+        konten_liste: (() => { try { return kontenAusEintraegen(kontoEintraege, kontoSchalter && kontoSchalter.text); } catch (_) { return []; } })(),   // 0.9.13: volle Namen fuer tv_konten (nie das Bedienfeld kosten)
       },
       // Konto-Zusammenfassung (0.5.0, Orbit-V2-Rundgang): alle Label→Wert-Paare
       // des Account Managers + der Tages-G&V nach TODAY_PNL_LABELS. null =
