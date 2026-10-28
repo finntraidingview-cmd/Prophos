@@ -3523,6 +3523,42 @@
   #adm-pane-wd .wd-tab,:is(#adm-pane-planer,#tpl-view) .wd-tab{width:100%;border-collapse:collapse;font-size:12.5px}
   #adm-pane-wd .wd-tab th,:is(#adm-pane-planer,#tpl-view) .wd-tab th{text-align:left;font-weight:500;color:var(--sub);padding:4px 8px 6px 0;border-bottom:1px solid var(--line)}
   #adm-pane-wd .wd-tab td,:is(#adm-pane-planer,#tpl-view) .wd-tab td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  /* Überblick (28.10.2026): kleine Kacheln wie Admin → Statistik, Payout-Kachel je WD-Konto, Zeilen je Firma/ID wie die Verteilungen */
+  #adm-pane-wd .wd-ueb-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  #adm-pane-wd .wd-ueb-kpis:empty{display:none}
+  #adm-pane-wd #wd-ueb-heute{margin-top:12px}
+  #adm-pane-wd #wd-ueb-stat-kpis{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:6px}
+  #adm-pane-wd #wdMsg:empty{display:none}
+  #adm-pane-wd .wd-po-mehr{margin-top:8px;font-size:12px}
+  #adm-pane-wd .wd-po-mehr[hidden]{display:none}   /* .btn setzt display:flex und schlägt hidden (wie #wal-feed-more) */
+  #adm-pane-wd .wd-ueb-kpis .kpi{min-width:0;padding:9px 12px;box-shadow:none}
+  #adm-pane-wd .wd-ueb-kpis .kpi-label{font-size:11.5px;margin-bottom:1px}
+  #adm-pane-wd .wd-ueb-kpis .kpi-value{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-wd .wd-ueb-kpis .kpi-delta{font-size:11px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-wd .wd-ueb-chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+  #adm-pane-wd .wd-ueb-chips .adm-vl-chip{font-size:12px;padding:3px 9px}
+  #adm-pane-wd .wd-ueb-chips .adm-vl-chip .kf{font-size:10.5px}
+  #adm-pane-wd .wd-ueb-stat-kopf{margin-top:16px;padding-top:12px;border-top:1px solid var(--border-soft, var(--line))}
+  #adm-pane-wd .wd-po-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+  #adm-pane-wd .wd-po{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--surface);cursor:pointer;display:flex;flex-direction:column;gap:3px;min-width:0;transition:background .12s var(--ease)}
+  #adm-pane-wd .wd-po:hover{background:var(--surface-tint)}
+  #adm-pane-wd .wd-po:focus-visible{outline:2px solid var(--violet);outline-offset:1px}
+  #adm-pane-wd .wd-po.bereit{border-color:rgba(5,138,80,.45)}
+  #adm-pane-wd .wd-po-kopf{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--sub);white-space:nowrap}
+  #adm-pane-wd .wd-po-kopf>span{overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-wd .wd-po-name{font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:6px}
+  #adm-pane-wd .wd-po-stand{font-size:12.5px}
+  #adm-pane-wd .wd-po-fuss{font-size:11.5px;color:var(--sub);display:flex;gap:4px 8px;align-items:center;flex-wrap:wrap;min-height:20px}
+  #adm-pane-wd .wd-po-fuss .btn-xs{padding:1px 8px;font-size:11px;height:auto}
+  #adm-pane-wd .wd-ueb-leer{color:var(--sub);font-size:12.5px;padding:4px 0}
+  #adm-pane-wd #wd-ueb-stat-rows .adm-row{grid-template-columns:minmax(130px,1.4fr) minmax(50px,1.4fr) auto 46px;padding:8px 0}
+  #adm-pane-wd #wd-ueb-stat-rows .adm-row-name small{display:block;font-size:11px;color:var(--sub);font-weight:400}
+  @media (max-width:640px){
+    #adm-pane-wd .wd-ueb-kpis,#adm-pane-wd #wd-ueb-stat-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #adm-pane-wd .wd-po-grid{grid-template-columns:1fr}
+    #adm-pane-wd #wd-ueb-stat-rows .adm-row{grid-template-columns:minmax(0,1fr) auto 40px;gap:8px}
+    #adm-pane-wd #wd-ueb-stat-rows .adm-track{display:none}
+  }
   /* Admin „Trade-Planer" (08.10.2026, Finn: „wie hässlich" zur rohen Tabelle): zwei Karten wie die anderen Admin-Blöcke, Tabellen im wd-tab-Stil */
   :is(#adm-pane-planer,#tpl-view) .ap-adm-karte{border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff);padding:14px 16px 10px;margin-bottom:14px}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
@@ -11861,6 +11897,26 @@
               <button class="btn btn-ghost btn-mini" id="wdReload">Neu laden</button>
             </div>
             <div class="modal-msg" id="wdMsg"></div>
+            <!-- Heute auf einen Blick (28.10.2026, Finn: „die WD-Ansicht cleaner, smoother … mehr Infos allgemein") — nur Anzeige, wdUebRender -->
+            <div class="wd-ueb-kpis" id="wd-ueb-heute"></div>
+          </div>
+          <!-- PAYOUTS + STATISTIK (28.10.2026, Finn: „wann ich wo Payout anfragen kann, Statistik hinzufügen etc., und vielleicht direkt WD von
+               da aus planen … die Einstellungen, die Logik: daran nichts ändern"). Nur Lesen: Gewinntage aus wd_konten_alle, Betrag wie
+               Admin → Payouts, Statistik aus wd_liste (/admin/kapitel). Klick auf ein Konto klappt seine ID unten auf (Haken, „heute wieder rein").
+               Der Zeitstrahl hängt sich selbst hinter das erste Panel (wzPanel) — dieses Panel steht damit zwischen Zeitstrahl und IDs. -->
+          <div class="panel" id="wd-ueb" style="margin:0 0 12px">
+            <div class="wd-panel-kopf">
+              <div class="panel-title">Payouts <span style="font-weight:400;color:var(--sub);font-size:12px">· Gewinntage je Konto · Klick öffnet die ID unten</span></div>
+              <div class="wd-ueb-chips" id="wd-ueb-firmen"></div>
+            </div>
+            <div class="wd-po-grid" id="wd-ueb-po"></div>
+            <button type="button" class="btn btn-ghost btn-xs wd-po-mehr" id="wd-ueb-po-mehr" hidden></button>
+            <div class="wd-panel-kopf wd-ueb-stat-kopf">
+              <div class="panel-title">Statistik <span style="font-weight:400;color:var(--sub);font-size:12px" id="wd-ueb-stat-sub"></span></div>
+              <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
+            </div>
+            <div class="wd-ueb-kpis" id="wd-ueb-stat-kpis"></div>
+            <div class="adm-dist" id="wd-ueb-stat-rows"></div>
           </div>
           <div class="panel" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
@@ -15417,6 +15473,7 @@
     }
     function admKapitelRender(d){
       admKapData = d
+      try{ window._wdUebNeu?.() }catch(_){}   // WD-Überblick zeichnet seine Statistik aus wd_liste nach (28.10.2026)
       const msg = $('adm-kap-msg'), body = $('adm-kap-body')
       if(!body) return
       const liste = (d.kapitel || []).slice().sort((a, b) => String(a.von).localeCompare(String(b.von)))
@@ -16292,6 +16349,10 @@
     }
     // Summen je Währung als Text („4.800 $ · 300 €") — nie über Währungen addieren
     const admGeldMap = m => [...m.entries()].map(([c, v]) => admGeld(v, c)).join(' · ') || '—'
+    // WD-Überblick (28.10.2026): Payout-Betrag je WD-Konto mit derselben Rechnung wie der Kalender, Statistik aus derselben Kapitel-Ladung
+    window._admPayoutCalc = r => admPayoutCalc(r)
+    window._admKapDaten = () => admKapData
+    window._admKapOeffnen = () => admKapitelOeffnen()
     function admPayoutHerleitung(c){
       const refund = c.refund
         ? (c.ccy === 'EUR' ? ` + Refund ${admGeld(c.refund, 'EUR')}` : ` + Refund ${admGeld(c.refundEur, 'EUR')} ≈ ${admGeld(c.refund, c.ccy)}`)
@@ -47981,7 +48042,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1795'
+  const OS_TAB_BUILD = '2026-09-22.1796'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62452,6 +62513,196 @@
     box.querySelectorAll('[data-wd-aus-weg]').forEach(b => b.addEventListener('click', () => speichern(aus.filter(u => u !== b.dataset.wdAusWeg))))
     document.getElementById('wd-aus-add')?.addEventListener('click', () => { const v = document.getElementById('wd-aus-wahl')?.value; if(v) speichern([...aus, v]) })
   }
+  /* ÜBERBLICK (28.10.2026, Finn: „bei Admin die WD-Ansicht cleaner, smoother machen, mehr Infos allgemein: wann ich wo Payout anfragen
+   * kann, Statistik hinzufügen etc., und vielleicht direkt WD von da aus planen … die Einstellungen, die Logik: daran nichts ändern").
+   * NUR LESEN, keine eigene Rechnung über das Vorhandene hinaus:
+   * - Heute (Kopf): Konten der Tageszeilen wie Zähler-Zeile und Stand-Spalte (wdMitLive, wdAktiv).
+   * - Payouts: je WD-Konto winning_days / goal_target aus wd_konten_alle — dieselbe Zahl wie die WD-Spalte der ID-Tabelle und
+   *   Admin → Payouts (ohne Ziel 5, wie app.py payout_ready). Betrag = admPayoutCalc (Kalender). „frühestens" zählt nur Handelstage
+   *   ab heute (Plan heute noch offen) bzw. ab morgen — also der Tag, wenn jeder Handelstag ein Gewinntag wird; keine Firmenregel.
+   * - Statistik: wd_liste aus /admin/kapitel wie Admin → Statistik (Orbit V2 mit Fusion-Gegenhedge; Topstep V2 läuft ohne Hedge und
+   *   steht dort nicht drin). TP erreicht = Master im Plus (wie admKfWd).
+   * - Planen = die ID unten aufklappen (Haken, TP, „heute wieder rein") bzw. „heute rein" über wdKontoHeute — dieselben Wege wie bisher. */
+  const _wdUeb = { firma: '', zeit: '30', sicht: 'firma', kapAt: 0 }
+  const wdUebUsd = v => (v < 0 ? '−' : v > 0 ? '+' : '') + wdDe(Math.abs(v)) + ' $'
+  const wdUebEur = v => (v < 0 ? '−' : v > 0 ? '+' : '') + wdDe(Math.abs(v)) + ' €'
+  const wdUebFarbe = v => v < 0 ? 'var(--danger)' : v > 0 ? 'var(--good-ink, #15803d)' : ''
+  const wdUebKpi = (label, wert, sub, farbe, titel) => `<div class="kpi"${titel ? ` title="${escapeHtml(titel)}"` : ''}><div class="kpi-label">${escapeHtml(label)}</div>`
+    + `<div class="kpi-value"${farbe ? ` style="color:${farbe}"` : ''}>${wert}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
+  // Anzeige-Name je Firma — eine Schreibweise für RPC-Konten („Lucid Trading") und wd_liste (_firm_norm, „Lucid")
+  const wdUebFirma = f => { const s = String(f || '').toLowerCase()
+    return s.includes('fundednext') && s.includes('futur') ? 'FundedNext' : s.includes('apex') ? 'Apex' : s.includes('lucid') ? 'Lucid' : s.includes('topstep') ? 'Topstep'
+      : s.includes('tradeify') ? 'Tradeify' : s.includes('ftmo') ? 'FTMO' : (String(f || '').trim() || '—') }
+  const wdUebTag = d => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][d.getUTCDay()] + ' ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
+  // „150k …0431" — Größe aus dem Namen, External ID hinten (wie die Konto-Kürzel im Radar)
+  const wdUebKonto = k => { const g = String(k.name || '').match(/(\d{2,3})\s*k\b/i), x = String(k.ext || '').replace(/\s/g, '')
+    return (/express/i.test(k.name || '') ? 'Express' : g ? g[1] + 'k' : '') + (x ? ' …' + x.slice(-4) : '') || k.name || '—' }
+  // Tag, an dem der letzte fehlende Gewinntag fällt, wenn ab heute (abHeute) bzw. morgen jeder Handelstag (Mo–Fr) einer wird
+  function wdUebFrueh(fehlt, abHeute){
+    const d = new Date(_deTodayStr() + 'T12:00:00Z'); if(!abHeute) d.setUTCDate(d.getUTCDate() + 1)
+    for(let n = fehlt, i = 0; i < 60; i++){ const wt = d.getUTCDay(); if(wt !== 0 && wt !== 6 && --n <= 0) break; d.setUTCDate(d.getUTCDate() + 1) }
+    return d
+  }
+  // Heute je Konto aus den Tageszeilen: { txt, offen, rein } — offen = Plan von heute läuft noch oder kommt noch (zählt evtl. heute)
+  function wdUebHeute(h, kd){
+    if(!h) return { txt: kd.wd_farm ? '' : 'nicht im Farm', offen: false }
+    const k = h.k, x = h.x
+    if(!wdAktiv(k)){
+      const rein = !!(k.farm && k.ext && !k.archiviert && !k.naechster_lauf && x.status !== 'laeuft' && x.status !== 'fertig' && !wdVerwalter())
+      return { txt: !k.farm ? 'nicht im Farm' : k.naechster_lauf ? 'ab nächstem Tageslauf' : 'heute raus', offen: false, rein }
+    }
+    if(!k.plan_id) return { txt: 'heute ohne Plan', offen: false }
+    if(k.status === 'review' || k.status === 'completed') return { txt: `heute ✓${typeof k.pl === 'number' ? ` <b style="color:${wdUebFarbe(k.pl)}">${wdUebUsd(k.pl)}</b>` : ''}`, offen: false, fertig: true }
+    if(k.status === 'open' || (k.status === 'planned' && k.gestartet)) return { txt: '<span style="color:var(--good-ink, #15803d)">heute ▶ läuft</span>', offen: true }
+    if(k.status === 'verpasst') return { txt: '<span style="color:var(--danger)">heute verpasst</span>', offen: false }
+    if(k.status === 'planned' || !k.status) return { txt: `heute ${k.start_um ? wdHhmm(k.start_um) : 'geplant'}`, offen: true }
+    return { txt: '', offen: false }
+  }
+  function wdUebKonten(){
+    const d = _wd.daten, aus = wdIdsAus(); if(!d || !Array.isArray(d.konten)) return []
+    const heute = new Map(); for(const x of wdSichtRows(_wd.rows)) for(const k of (x.konten || [])) heute.set(String(k.id), { k, x })
+    const ad = window._admData || {}, pr = new Map((ad.payout_ready || []).map(r => [String(r.account_id), r]))
+    // offene Anfrage (pending_payouts trägt keine account_id nach außen) — über den Kontonamen, wie die Anfrage ihn speichert
+    const angefragt = new Set((ad.pending_payouts || []).map(t => String(t.account_name || '').trim()).filter(Boolean))
+    return d.konten.filter(k => !k.archiviert && k.winning_days != null && !aus.has(String(k.user_id)) && wdSichtOk(k.user_id)).map(k => {
+      const ziel = k.goal_target > 0 ? k.goal_target : 5, n = Math.max(0, Number(k.winning_days) || 0), h = wdUebHeute(heute.get(String(k.id)), k)
+      const r = pr.get(String(k.id)); let calc = null
+      try{ calc = r && typeof window._admPayoutCalc === 'function' ? window._admPayoutCalc(r) : null }catch(_){}
+      const fehlt = Math.max(0, ziel - n)
+      return { k, ziel, n, fehlt, h, bereit: fehlt === 0, angefragt: angefragt.has(String(k.name || '').trim()), firma: wdUebFirma(k.firm),
+               frueh: fehlt ? wdUebFrueh(fehlt, h.offen) : null, betrag: calc && calc.betrag > 0 ? calc.betrag : null, ccy: (calc && calc.ccy) || 'USD' }
+    })
+  }
+  function wdUebOeffnen(uid){
+    const such = document.getElementById('wd-such'); if(such && such.value){ such.value = '' }
+    _wd.offen = uid; wdAblauf(_wd.rows || [], wdFehlend())
+    const tr = [...document.querySelectorAll('#wd-ablauf tr[data-wd-open]')].find(t => t.dataset.wdOpen === uid)
+    if(tr) tr.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  function wdUebPayouts(liste){
+    const chips = document.getElementById('wd-ueb-firmen'), box = document.getElementById('wd-ueb-po'); if(!box) return
+    const firmen = new Map(); for(const e of liste) firmen.set(e.firma, (firmen.get(e.firma) || 0) + 1)
+    if(_wdUeb.firma && !firmen.has(_wdUeb.firma)) _wdUeb.firma = ''
+    if(chips) chips.innerHTML = firmen.size > 1 ? [['', 'Alle', liste.length], ...[...firmen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([f, n]) => [f, f, n])]
+      .map(([f, t, n]) => `<button type="button" class="adm-vl-chip${_wdUeb.firma === f ? ' is-on' : ''}" data-wd-ueb-firma="${escapeHtml(f)}">${escapeHtml(t)} <span class="kf">${n}</span></button>`).join('') : ''
+    const zeig = liste.filter(e => !_wdUeb.firma || e.firma === _wdUeb.firma)
+      .sort((a, b) => (b.bereit - a.bereit) || a.fehlt - b.fehlt || (a.frueh && b.frueh ? a.frueh - b.frueh : 0) || String(a.k.person).localeCompare(String(b.k.person)))
+    if(!zeig.length){ box.innerHTML = `<div class="wd-ueb-leer">${_wd.daten ? 'Keine Winning-Days-Konten in dieser Sicht.' : 'Lädt …'}</div>`; return }
+    const geld = (v, c) => c === 'EUR' ? wdDe(v) + ' €' : wdDe(v) + ' $'
+    // die nächsten 8 zuerst (Finn: „cleaner") — der Rest auf Klick, gemerkt bis zum Neuladen der Seite
+    const WD_PO_ERST = 8, rest = _wdUeb.alle ? 0 : Math.max(0, zeig.length - WD_PO_ERST)
+    box.innerHTML = zeig.slice(0, rest ? WD_PO_ERST : zeig.length).map(e => {
+      const uid = escapeHtml(String(e.k.user_id)), f = { target: e.ziel, count: Math.min(e.n, e.ziel), done: e.bereit, kind: 'winning_days' }
+      const stand = e.angefragt ? '<span style="color:var(--sub)">💸 Payout angefragt</span>'
+        : e.bereit ? '<b style="color:var(--good-ink, #15803d)">Payout anfragbar</b>'
+        : `<span title="noch ${e.fehlt} Gewinntag${e.fehlt === 1 ? '' : 'e'} bis zum Payout — frühestens am ${escapeHtml(wdUebTag(e.frueh))}, wenn ${e.h.offen ? 'ab heute' : 'ab dem nächsten Handelstag'} jeder Handelstag ein Gewinntag wird">noch ${e.fehlt} · frühestens <b style="font-weight:600">${escapeHtml(wdUebTag(e.frueh))}</b></span>`
+      const fuss = [e.betrag != null ? `<span title="Betrag wie Admin → Payouts (Balance über Kontogröße × Profit-Share)">≈ ${escapeHtml(geld(e.betrag, e.ccy))}</span>` : '', e.h.txt]
+        .filter(Boolean).join('<span>·</span>') + (e.h.rein ? ` <button type="button" class="btn btn-ghost btn-xs" data-wd-ueb-rein="${escapeHtml(String(e.k.id))}" data-wd-ueb-uid="${uid}" title="für heute wieder mitfahren lassen — wie „heute wieder rein“ in der ID">heute rein</button>` : '')
+      return `<div class="wd-po${e.bereit ? ' bereit' : ''}" role="button" tabindex="0" data-wd-ueb-id="${uid}" title="Klick: ${escapeHtml(e.k.person || '')} unten aufklappen — Haken, TP, „heute wieder rein“">
+        <div class="wd-po-kopf"><span><span class="adm-dot" style="background:${idFarbe(e.k.user_id)}"></span>${escapeHtml(e.k.person || '')}</span><span>${escapeHtml(e.firma)}</span></div>
+        <div class="wd-po-name"><span>${escapeHtml(wdUebKonto(e.k))}</span><span class="mono" style="font-size:12px;font-weight:500;color:var(--sub)">${Math.min(e.n, e.ziel)}/${e.ziel}${zielDotsHtml(f)}</span></div>
+        <div class="wd-po-stand">${stand}</div><div class="wd-po-fuss">${fuss}</div></div>`
+    }).join('')
+    const mehr = document.getElementById('wd-ueb-po-mehr')
+    if(mehr){ mehr.hidden = !rest && !(_wdUeb.alle && zeig.length > WD_PO_ERST); mehr.textContent = rest ? `+ ${rest} weitere Konten` : 'weniger zeigen' }
+  }
+  function wdUebStatistik(){
+    const box = document.getElementById('wd-ueb-stat-rows'), kp = document.getElementById('wd-ueb-stat-kpis'), sub = document.getElementById('wd-ueb-stat-sub'), chips = document.getElementById('wd-ueb-stat-chips')
+    if(!box || !kp) return
+    const kap = typeof window._admKapDaten === 'function' ? window._admKapDaten() : null
+    // Kapitel einmal mitladen (dieselbe Ladung wie Admin → Statistik, mit deren Cache) — höchstens alle 5 min angestoßen
+    // nur bei sichtbarem Reiter — wdRender läuft auch in PC-Tabs (wdTick), die sollen /admin/kapitel nie anstoßen
+    if(typeof window._admKapOeffnen === 'function' && wdSichtbar() && Date.now() - _wdUeb.kapAt > 5 * 60000){ _wdUeb.kapAt = Date.now(); try{ window._admKapOeffnen() }catch(_){} }
+    if(chips) chips.innerHTML = [['7', '7 Tage'], ['30', '30 Tage'], ['alle', 'Kapitel']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.zeit === z ? ' is-on' : ''}" data-wd-ueb-zeit="${z}">${t}</button>`).join('')
+      + '<span style="width:8px"></span>' + [['firma', 'je Firma'], ['id', 'je ID']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.sicht === z ? ' is-on' : ''}" data-wd-ueb-sicht="${z}">${t}</button>`).join('')
+    if(!kap){
+      // Ladefehler steht in der Kapitel-Meldung des Admins (admKapitelLaden) — dort lesen statt ewig „lädt" (nächster Versuch im 30-s-Takt nach 5 min)
+      const fehler = String(document.getElementById('adm-kap-msg')?.textContent || ''), kaputt = /nicht verfügbar/.test(fehler)
+      kp.innerHTML = ''; box.innerHTML = `<div class="wd-ueb-leer">${kaputt ? escapeHtml(fehler.replace('Kapitel', 'Statistik')) : 'Statistik lädt … (dieselben Daten wie Admin → Statistik)'}</div>`; if(sub) sub.textContent = ''; return
+    }
+    const aus = wdIdsAus(), gesehen = new Set(), alle = []
+    for(const c of (kap.kapitel || [])) for(const t of (c.wd_liste || [])){
+      if(gesehen.has(String(t.id))) continue; gesehen.add(String(t.id))
+      if(aus.has(String(t.user_id)) || !wdSichtOk(t.user_id)) continue
+      alle.push(t)
+    }
+    const heute = _deTodayStr(), ab = _wdUeb.zeit === 'alle' ? '' : (d => { d.setUTCDate(d.getUTCDate() - (Number(_wdUeb.zeit) - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
+    const mo = (d => { d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
+    const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
+    const rows = alle.filter(t => (!ab || String(t.datum || '') >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
+    const n = rows.length, tp = rows.filter(t => (num(t.master_pl) || 0) > 0).length, mSum = rows.reduce((a, t) => a + (num(t.master_pl) || 0), 0)
+    const mitF = rows.filter(t => num(t.fusion_eur) !== null), fSum = mitF.reduce((a, t) => a + num(t.fusion_eur), 0)
+    const woche = alle.filter(t => String(t.datum || '') >= mo && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
+    const wocheTp = woche.filter(t => (num(t.master_pl) || 0) > 0).length
+    // Payouts erhalten aus WD-Konten: Admin-Übersicht summiert je Konto (EUR); Konten der aktuellen Sicht und Firma
+    const ad = window._admData || {}, acc = (ad.accounts || ad.rows || []).filter(a => a.type === 'winning_days' && !aus.has(String(a.user_id)) && wdSichtOk(a.user_id) && (!_wdUeb.firma || wdUebFirma(a.firm_raw || a.firm) === _wdUeb.firma))
+    const poSum = acc.reduce((s, a) => s + (Number(a.payouts) || 0), 0), poN = acc.filter(a => Number(a.payouts) > 0).length
+    if(sub) sub.textContent = `· ${n} Winning Day${n === 1 ? '' : 's'}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
+    kp.innerHTML =
+      wdUebKpi('Gewinntage · Woche', String(wocheTp), `seit Mo · ${woche.length} WD${woche.length === 1 ? '' : 's'} gefahren`, '', 'Winning Days seit Montag mit Master im Plus (aus der Statistik, unabhängig vom Zeitraum)') +
+      wdUebKpi('TP erreicht', n ? Math.round(100 * tp / n) + ' %' : '–', `${tp} von ${n}`, '') +
+      wdUebKpi('Ø Master je WD', n ? wdUebUsd(mSum / n) : '–', n ? `Σ ${wdUebUsd(mSum)}` : 'keine im Zeitraum', n ? wdUebFarbe(mSum) : '') +
+      wdUebKpi('Fusion-Hedge', mitF.length ? wdUebEur(fSum) : '–', mitF.length ? `Ø ${wdUebEur(fSum / mitF.length)} je WD` : 'noch nichts gebucht', mitF.length ? wdUebFarbe(fSum) : '') +
+      wdUebKpi('Payouts erhalten', poSum ? wdUebEur(poSum).replace('+', '') : '–', poN ? `aus ${poN} ${poN === 1 ? 'WD-Konto' : 'WD-Konten'} · gesamt` : 'aus WD-Konten · gesamt', poSum ? 'var(--good-ink, #15803d)' : '', 'gebuchte Payouts der Konten vom Typ Winning Days (Admin-Übersicht), unabhängig vom Zeitraum')
+    // je Firma / je ID: Balken = Anzahl, Wert = Ø Master je WD, rechts TP-Quote
+    const m = new Map()
+    for(const t of rows){
+      const key = _wdUeb.sicht === 'id' ? String(t.user_id) : wdUebFirma(t.master_firm)
+      const e = m.get(key) || { key, name: _wdUeb.sicht === 'id' ? (t.person || key.slice(0, 8)) : key, n: 0, tp: 0, m: 0, f: 0, fn: 0 }
+      e.n++; const mp = num(t.master_pl) || 0; e.m += mp; if(mp > 0) e.tp++; const fe = num(t.fusion_eur); if(fe !== null){ e.f += fe; e.fn++ }
+      m.set(key, e)
+    }
+    const liste = [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)), maxN = Math.max(1, ...liste.map(e => e.n))
+    box.innerHTML = liste.length ? liste.map(e => `<div class="adm-row">
+        <div class="adm-row-name">${_wdUeb.sicht === 'id' ? `<span class="adm-dot" style="background:${idFarbe(e.key)}"></span>` : ''}<span>${escapeHtml(e.name)}<small>${e.n} WD${e.n === 1 ? '' : 's'} · Fusion ${e.fn ? wdUebEur(e.f) : '–'}</small></span></div>
+        <div class="adm-track"><div class="adm-fill" style="width:${(100 * e.n / maxN).toFixed(1)}%;background:${_wdUeb.sicht === 'id' ? idFarbe(e.key) : 'var(--violet)'};opacity:.7"></div></div>
+        <div class="adm-val" style="color:${wdUebFarbe(e.m)}" title="Ø Master-P&amp;L je Winning Day">Ø ${wdUebUsd(e.m / e.n)}</div>
+        <div class="adm-pct" title="TP erreicht (Master im Plus)">${Math.round(100 * e.tp / e.n)} %</div></div>`).join('')
+      : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
+  }
+  function wdUebRender(){
+    // Betrag + Payouts erhalten brauchen die Admin-Übersicht — direkt auf diesen Reiter gesprungen, ist sie evtl. noch nicht da: einmal anstoßen
+    if(!window._admData && !_wdUeb.admAn && wdSichtbar() && typeof window._admLaden === 'function'){
+      _wdUeb.admAn = true; Promise.resolve().then(() => window._admLaden()).then(() => { try{ wdUebRender() }catch(_){} }).catch(() => {})
+    }
+    const liste = wdUebKonten()
+    // Heute (Kopf): dieselben Konten wie die Zähler-Zeile der ID-Tabelle
+    const kz = document.getElementById('wd-ueb-heute')
+    if(kz){
+      const konten = wdSichtRows(_wd.rows).flatMap(x => (x.konten || []).filter(wdAktiv))
+      let fertig = 0, laeuft = 0, geplant = 0, verpasst = 0, pl = 0, plus = 0, mitPl = 0
+      for(const k of konten){
+        if(k.status === 'review' || k.status === 'completed'){ fertig++; if(typeof k.pl === 'number'){ pl += k.pl; mitPl++; if(k.pl > 0) plus++ } }
+        else if(k.status === 'verpasst' || k.status === 'weg') verpasst++
+        else if(k.status === 'open' || (k.status === 'planned' && k.gestartet)) laeuft++
+        else geplant++
+      }
+      const bereit = liste.filter(e => e.bereit && !e.angefragt), naechst = liste.filter(e => !e.bereit).sort((a, b) => a.frueh - b.frueh || a.fehlt - b.fehlt)[0]
+      const geld = bereit.filter(e => e.betrag != null && e.ccy !== 'EUR').reduce((s, e) => s + e.betrag, 0)
+      kz.innerHTML = !konten.length && !liste.length ? '' :
+        wdUebKpi('Heute', `${fertig} / ${konten.length}`, `fertig · ${laeuft} läuft · ${geplant} geplant${verpasst ? ` · <span style="color:var(--danger)">${verpasst} verpasst</span>` : ''}`, '') +
+        wdUebKpi('P&L heute', mitPl ? wdUebUsd(pl) : '–', mitPl ? `${plus} von ${mitPl} im Plus · Ø ${wdUebUsd(pl / mitPl)}` : 'noch kein WD fertig', mitPl ? wdUebFarbe(pl) : '') +
+        wdUebKpi('Payout anfragbar', bereit.length ? `${bereit.length} ${bereit.length === 1 ? 'Konto' : 'Konten'}` : '–', bereit.length ? escapeHtml([...new Set(bereit.map(e => e.firma))].join(' · ')) + (geld ? ` · ≈ ${wdDe(geld)} $` : '') : 'noch keins', bereit.length ? 'var(--good-ink, #15803d)' : '') +
+        wdUebKpi('Nächster Payout', naechst ? escapeHtml(wdUebTag(naechst.frueh)) : '–', naechst ? `${escapeHtml(naechst.k.person || '')} · ${escapeHtml(naechst.firma)} · noch ${naechst.fehlt}` : '—', '', 'frühester Tag, wenn ab jetzt jeder Handelstag ein Gewinntag wird')
+    }
+    wdUebPayouts(liste)
+    wdUebStatistik()
+  }
+  window._wdUebNeu = () => { try{ if(_wd.daten && wdSichtbar()) wdUebStatistik() }catch(e){ console.warn('[wd] Überblick', e) } }
+  // Eigene Verdrahtung des Überblicks (ein Listener je Kasten, Delegation nur innerhalb des eigenen Panels)
+  ;(() => {
+    const p = document.getElementById('wd-ueb'); if(!p) return
+    p.addEventListener('click', ev => {
+      const rein = ev.target.closest('[data-wd-ueb-rein]')
+      if(rein){ ev.stopPropagation(); if(!wdVerwalter()){ rein.disabled = true; wdKontoHeute(rein.dataset.wdUebUid, rein.dataset.wdUebRein, true) } return }
+      const fi = ev.target.closest('[data-wd-ueb-firma]'); if(fi){ _wdUeb.firma = fi.dataset.wdUebFirma; wdUebRender(); return }
+      if(ev.target.closest('#wd-ueb-po-mehr')){ _wdUeb.alle = !_wdUeb.alle; wdUebRender(); return }
+      const ze = ev.target.closest('[data-wd-ueb-zeit]'); if(ze){ _wdUeb.zeit = ze.dataset.wdUebZeit; wdUebStatistik(); return }
+      const si = ev.target.closest('[data-wd-ueb-sicht]'); if(si){ _wdUeb.sicht = si.dataset.wdUebSicht; wdUebStatistik(); return }
+      const ka = ev.target.closest('[data-wd-ueb-id]'); if(ka) wdUebOeffnen(ka.dataset.wdUebId)
+    })
+    p.addEventListener('keydown', ev => { const ka = ev.target.closest('[data-wd-ueb-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdUebId) } })
+  })()
   function wdRender(){
     const rows = wdSichtRows(_wd.rows)   // .1773: Zähler-Zeile und Hinweise nur über die Admin-Sicht
     const erwartet = (e => e && e.filter(x => wdSichtOk(x.user_id)))(wdErwartet()), fehlend = wdFehlend()
@@ -62466,6 +62717,7 @@
     wdAblauf(_wd.rows || [], fehlend)   // filtert selbst (wdSichtOk)
     wdIdsAusRender()
     wdFirmenZaehlen()
+    try{ wdUebRender() }catch(e){ console.warn('[wd] Überblick', e) }   // nur Anzeige (28.10.2026) — ein Fehler hier stört die Tabelle nie
   }
   function wdSichtbar(){ const p = document.getElementById('adm-pane-wd'); return !!(p && !p.hidden && p.offsetParent !== null) }
   // Letzter Stand im Browser (23.09.2026, Finn: „der Zeitstrahl und alles lädt immer relativ lang"): beim Öffnen sofort
