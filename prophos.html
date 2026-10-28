@@ -48763,7 +48763,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1815'
+  const OS_TAB_BUILD = '2026-09-22.1816'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63350,7 +63350,7 @@
     // Kapitel einmal mitladen (dieselbe Ladung wie Admin → Statistik, mit deren Cache) — höchstens alle 5 min angestoßen
     // nur bei sichtbarem Reiter — wdRender läuft auch in PC-Tabs (wdTick), die sollen /admin/kapitel nie anstoßen
     if(typeof window._admKapOeffnen === 'function' && wdSichtbar() && Date.now() - _wdUeb.kapAt > 5 * 60000){ _wdUeb.kapAt = Date.now(); try{ window._admKapOeffnen() }catch(_){} }
-    if(chips) chips.innerHTML = [['7', '7 Tage'], ['30', '30 Tage'], ['alle', 'Kapitel']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.zeit === z ? ' is-on' : ''}" data-wd-ueb-zeit="${z}">${t}</button>`).join('')
+    if(chips) chips.innerHTML = [['heute', 'Heute'], ['7', '7 Tage'], ['30', '30 Tage'], ['alle', 'Kapitel']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.zeit === z ? ' is-on' : ''}" data-wd-ueb-zeit="${z}">${t}</button>`).join('')
       + '<span style="width:8px"></span>' + [['firma', 'je Firma'], ['id', 'je ID']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.sicht === z ? ' is-on' : ''}" data-wd-ueb-sicht="${z}">${t}</button>`).join('')
     if(!kap){
       // Ladefehler steht in der Kapitel-Meldung des Admins (admKapitelLaden) — dort lesen statt ewig „lädt" (nächster Versuch im 30-s-Takt nach 5 min)
@@ -63363,29 +63363,39 @@
       if(aus.has(String(t.user_id)) || !wdSichtOk(t.user_id)) continue
       alle.push(t)
     }
-    const heute = _deTodayStr(), ab = _wdUeb.zeit === 'alle' ? '' : (d => { d.setUTCDate(d.getUTCDate() - (Number(_wdUeb.zeit) - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
+    // Zeitraum (29.10.2026, Finn: „die Zahl soll sich updaten, je nachdem welchen Tag ich auswähle, und auch Heute") — gilt für
+    // Kacheln, Graf UND Zeilen. „Heute" = deutscher Tag (Winterzeit: beginnt 03:00 Dubai); der Tag eines WD kommt aus seinem
+    // Ende-Zeitstempel in Europe/Berlin — das datum-Feld aus app.py ist der UTC-Tag, 02:30 Berlin wäre dort noch der Vortag.
+    const heute = _deTodayStr()
+    const tagVon = n => (d => { d.setUTCDate(d.getUTCDate() - (n - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
+    const ab = _wdUeb.zeit === 'alle' ? '' : _wdUeb.zeit === 'heute' ? heute : tagVon(Number(_wdUeb.zeit))
+    const zeitName = { heute: 'Heute', 7: '7 Tage', 30: '30 Tage', alle: 'Kapitel' }[_wdUeb.zeit] || _wdUeb.zeit + ' Tage'
     const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
-    const rows = alle.filter(t => (!ab || String(t.datum || '') >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
-    // Kumuliert über ALLE Winning Days (28.10.2026, Finn: „Fusion-PnL akkumuliert über alle Trades vom Typ Winning Day, und Master-PnL
-    // akkumuliert über alle … Netto-Differenz weglassen") — die Zeitraum-Chips gelten nur noch für die Zeilen je Firma/ID unten,
-    // der Firmen-Chip oben für beides. Stand je Tag = Summe bis Tagesende (Reihenfolge datum, zeit).
-    const kum = alle.filter(t => t.datum && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
-      .sort((a, b) => String(a.datum).localeCompare(String(b.datum)) || String(a.zeit || '').localeCompare(String(b.zeit || '')))
-    let mK = 0, fK = 0, mN = 0, fN = 0
-    const tage = new Map()
-    for(const t of kum){
+    const wann = t => { const d = t.zeit ? new Date(t.zeit) : null; return d && Number.isFinite(d.getTime()) ? d : null }
+    const deTag = t => { const d = wann(t); return d ? d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) : String(t.datum || '') }
+    // Sekunden (UTC) von Mitternacht eines deutschen Tages — Nullpunkt des Grafs am Zeitraum-Anfang
+    const deMitternacht = tag => { const d0 = new Date(tag + 'T00:00:00Z'); const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', hour12: false }).format(d0)) % 24; return Math.floor(d0.getTime() / 1000) - h * 3600 }   // um 00:00Z ist Berlin 01:00/02:00 — auch an Umstellungstagen (Wechsel erst 01:00Z)
+    const sek = t => { const d = wann(t); return d ? Math.floor(d.getTime() / 1000) : deMitternacht(deTag(t)) + 12 * 3600 }   // Ende-Zeit in Sekunden (ohne Zeitstempel: Mittag des Tages)
+    const rows = alle.filter(t => { const tag = deTag(t); return tag && (!ab || tag >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma) })
+      .sort((a, b) => sek(a) - sek(b))
+    // Kumuliert über die WDs im Zeitraum (28.10.2026, Finn: „Fusion-PnL akkumuliert … Master-PnL akkumuliert … Netto-Differenz
+    // weglassen"): ein Punkt je WD (Stand nach seinem Ende), davor der Nullpunkt am Zeitraum-Anfang (Kapitel: ein Tag vor dem ersten WD).
+    let mK = 0, fK = 0, mN = 0, fN = 0, zuletzt = 0
+    const punkte = []
+    if(rows.length){ zuletzt = ab ? deMitternacht(ab) : sek(rows[0]) - 86400; punkte.push({ time: zuletzt, m: 0, f: 0 }) }
+    for(const t of rows){
       const mp = num(t.master_pl), fe = num(t.fusion_eur)
       if(mp !== null){ mK += mp; mN++ }
       if(fe !== null){ fK += fe; fN++ }
-      tage.set(String(t.datum), { m: mK, f: fK })
+      let z = sek(t); if(z <= zuletzt) z = zuletzt + 1; zuletzt = z   // Zeitstempel müssen streng steigen (gleiche Sekunde → +1 s)
+      punkte.push({ time: z, m: mK, f: fK })
     }
-    const letzter = kum.length ? kum[kum.length - 1].datum : ''
-    if(sub) sub.textContent = `· ${kum.length} Winning Day${kum.length === 1 ? '' : 's'} kumuliert${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
+    if(sub) sub.textContent = `· ${rows.length} Winning Day${rows.length === 1 ? '' : 's'} · ${zeitName}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
     kp.innerHTML =
-      wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · Ø ${wdUebEur(fK / fN)}` : 'noch nichts gebucht', fN ? wdUebFarbe(fK) : '', 'Fusion-Hedge-P&L aller Winning Days aufsummiert (Deal-Historie, €) — amber Linie im Graf') +
-      wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · Ø ${wdUebUsd(mK / mN)}${letzter ? ' · bis ' + escapeHtml(wdUebTag(new Date(letzter + 'T12:00:00Z'))) : ''}` : 'keine Winning Days', mN ? wdUebFarbe(mK) : '', 'Master-P&L aller Winning Days aufsummiert ($) — violette Linie im Graf')
-    wdUebGraf([...tage.entries()].map(([d, v]) => ({ time: d, m: v.m, f: v.f })))
-    wdUebListe(kum)
+      wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · ${zeitName} · Ø ${wdUebEur(fK / fN)}` : `noch nichts gebucht · ${zeitName}`, fN ? wdUebFarbe(fK) : '', `Fusion-Hedge-P&L der Winning Days im Zeitraum „${zeitName}" aufsummiert (Deal-Historie, €) — amber Linie im Graf`) +
+      wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · ${zeitName} · Ø ${wdUebUsd(mK / mN)}` : `keine Winning Days · ${zeitName}`, mN ? wdUebFarbe(mK) : '', `Master-P&L der Winning Days im Zeitraum „${zeitName}" aufsummiert ($) — violette Linie im Graf`)
+    wdUebGraf(punkte)
+    wdUebListe(rows)   // Liste aller WDs (.1815) — dieselben rows wie Kacheln + Graf (Zeitraum + Firma)
     // je Firma / je ID: Balken = Anzahl, Wert = Ø Master je WD, rechts TP-Quote
     const m = new Map()
     for(const t of rows){
@@ -63400,7 +63410,7 @@
         <div class="adm-track"><div class="adm-fill" style="width:${(100 * e.n / maxN).toFixed(1)}%;background:${_wdUeb.sicht === 'id' ? idFarbe(e.key) : 'var(--violet)'};opacity:.7"></div></div>
         <div class="adm-val" style="color:${wdUebFarbe(e.m)}" title="Ø Master-P&amp;L je Winning Day">Ø ${wdUebUsd(e.m / e.n)}</div>
         <div class="adm-pct" title="TP erreicht (Master im Plus)">${Math.round(100 * e.tp / e.n)} %</div></div>`).join('')
-      : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
+      : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : _wdUeb.zeit === 'heute' ? 'heute' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
   }
   // Alle Winning Days einzeln (29.10.2026, Finn: „alle Winning Day Trades einmal runtergerattert, sodass ich gucken kann, dass die
   // Statistik immer stimmt"). Dieselbe Reihe `kum` wie Kacheln und Graf (gleiche Sortierung, gleiche Zahlen) — die Σ-Spalten laufen
@@ -63439,9 +63449,14 @@
       + '</tbody></table>'
   }
   // Linien-Graf (28.10.2026): Lightweight Charts wie die Markt-View (mklLibLaden, mklToken — dieselbe Bibliothek, kein neues Paket).
-  // x = Datum (Tagesende-Stand), Master $ auf der rechten, Fusion € auf der linken Skala; Farben aus den Tokens, beim Theme-Wechsel neu.
-  // Kein Zoom/Scroll (fitContent) — die Reihe ist klein (ein Punkt je Handelstag), Neuzeichnen alle 30 s über wdRender ohne Flackern (setData).
+  // x = Zeit (Unix-Sekunden, ein Punkt je WD-Ende; „Heute" zeigt Uhrzeiten, sonst Tage), Master $ rechte Skala, Fusion € linke; Farben aus den Tokens, beim Theme-Wechsel neu.
+  // Kein Zoom/Scroll (fitContent) — ein Punkt je WD, Abstände index-basiert (nicht zeitproportional), Neuzeichnen alle 30 s über wdRender ohne Flackern (setData).
   const WD_GRAF_H = 220
+  // Achse: Tag-Ticks „dd.MM.", Zeit-Ticks „HH:mm" (mehrere WDs je Tag → die Bibliothek setzt Zeit-Ticks dazwischen, Gegenprüfung 29.10.2026), Crosshair Tag + Uhrzeit;
+  // Zeiten lokal (Dubai wie überall in Prophos) — die Tagesgrenze der Chips ist der deutsche Tag, ein WD um 23:30 Berlin steht also bei „02:30" des Folgetags
+  const wdUebGrafZeit = (tt, art) => { const d = new Date(Number(tt) * 1000)
+    return art === 'uhr' ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : art === 'tag' ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+      : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
   function wdUebGrafWeg(){ const g = _wdUeb.graf; if(!g) return; try{ g.ro && g.ro.disconnect() }catch(_){} try{ g.chart.remove() }catch(_){} _wdUeb.graf = null }
   function wdUebGraf(punkte){
     const box = document.getElementById('wd-ueb-graf'); if(!box) return
@@ -63455,13 +63470,14 @@
     const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
     const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11 },
       grid: { vertLines: { color: rahmen }, horzLines: { color: rahmen } }, rightPriceScale: { visible: true, borderColor: rahmen }, leftPriceScale: { visible: true, borderColor: rahmen },
-      timeScale: { borderColor: rahmen, timeVisible: false, fixLeftEdge: true, fixRightEdge: true } }
+      timeScale: { borderColor: rahmen, timeVisible: true, secondsVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: (tt, typ) => wdUebGrafZeit(tt, typ >= 3 ? 'uhr' : 'tag') },
+      localization: { locale: 'de-DE', timeFormatter: tt => wdUebGrafZeit(tt, 'beides') } }
     const farben = { m: mklToken('--violet', '#5447CE'), f: mklToken('--warn-ink', '#b45309') }
     let g = _wdUeb.graf
     if(!g || !g.chart || g.box !== box){
       wdUebGrafWeg(); box.innerHTML = ''
       const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || WD_GRAF_H, handleScale: false, handleScroll: false,
-        crosshair: { mode: LW.CrosshairMode.Normal }, localization: { locale: 'de-DE' } }, huelle))
+        crosshair: { mode: LW.CrosshairMode.Normal } }, huelle))
       const fmt = einheit => ({ type: 'custom', minMove: 1, formatter: v => wdDe(v) + einheit })
       const m = chart.addLineSeries({ color: farben.m, lineWidth: 2, priceScaleId: 'right', title: 'Master $', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt(' $') })
       const f = chart.addLineSeries({ color: farben.f, lineWidth: 2, priceScaleId: 'left', title: 'Fusion €', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt(' €') })
