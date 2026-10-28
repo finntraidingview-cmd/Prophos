@@ -7398,6 +7398,9 @@ def admin_build_kapitel():
                     "hedge_eur": _f(p.get("hedge_eur")), "master_tp": _f(p.get("master_tp")),
                     "kt": _f(p.get("master_contracts")), "richtung": str(p.get("richtung") or "").lower(),
                     "grund": p.get("hedge_grund") or None, "blown": bool(p.get("blown")),
+                    # 29.10.2026 (Finn: „ich will nur die Winning Days angezeigt kriegen"): das Frontend (Admin → Winning Days, Statistik-Box)
+                    # trennt damit echte Winning Days (Plan-Haken; WD-Konto nur über den Frontend-Schalter WD_UEB_NUR_FLAG) von Funded-Big-Trades, die hier nur über hedge_eur > 0 drin sind
+                    "winning_day": bool(p.get("winning_day")), "konto_typ": str(p.get("konto_typ") or "") or None,
                     "quelle": "farmer" if "winning-day-farmer" in str(p.get("notes") or "").lower() else "hand",
                     "dauer_min": _kapitel_dauer_min(p.get("started_at"), p.get("ended_at") or p.get("completed_at"))})
             mpl = _f(p.get("master_pl"))
