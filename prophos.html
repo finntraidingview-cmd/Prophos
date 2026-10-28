@@ -24571,6 +24571,7 @@
       console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : spaeter ? 'noch nicht (belegt)' : 'NICHT'} auf „${bt.masterName || konto}" (${((Date.now() - anstoss) / 1000).toFixed(1)} s)`, fehlTxt)
       if(ok){
         _hwWiederN = 0; _hwFehlN = 0; _hwOkAt = Date.now(); _hwOkPlan = String(bt.id); _hwOkOffen = true
+        _hwOkVoll = !!(r.konto_aktiv && String(r.konto_aktiv).includes(konto))   // volle ID bewiesen → Anker fürs Reader-Ende (28.10.2026)
         if(_hwWiederTimer){ clearTimeout(_hwWiederTimer); _hwWiederTimer = null }   // anderer Weg war schneller → keine überflüssige Wiederholung
       }else if(!spaeter) _hwFehlN++
       const wieder = !ok && !/Reader blind/.test(String(grund || '')) && heimWiederholen(grund, spaeter, fenster)   // 22.10.2026: gescheitert → gestreut neu versuchen statt auf die nächste Puls-Aktion zu warten; Blind-Heimweg nie (28.10.2026)
@@ -24585,7 +24586,7 @@
     finally{
       _bthLaeuft = false; _bthSelbst = false; _hwNaechsterHeimweg = Date.now() + hwPause()
       // Beleg „Puls steht in konto" erst NACH dem Lauf (Puls-Flags weg), gilt bis zur nächsten Puls-Aktion (27.10.2026, s. kontoBelegGilt)
-      if(_hwOkAt >= t0 && _hwOkPlan === String(bt.id)){ try{ kontoBelegMerken(konto) }catch(_){} }
+      if(_hwOkAt >= t0 && _hwOkPlan === String(bt.id)){ try{ kontoBelegMerken(konto, _hwOkVoll) }catch(_){} }
     }
   }
   /* HEIM-WACHE (Finn 22.10.2026, Aurel pc-pw1put: nach der Orbit-V2-Order 17:40 Dubai auf Tradeify …7608 stand der Puls-Chrome noch ~30 min
@@ -24610,7 +24611,7 @@
   const HW_SPAETER_CODES = new Set(['puls_beschaeftigt', 'polar_aktiv', 'puls_belegt'])
   const hwZufall = (a, b) => a + Math.random() * (b - a)
   let _hwFremdSeit = 0, _hwNaechsterHeimweg = 0, _hwWiederN = 0, _hwWiederTimer = null, _hwFehlN = 0, _hwPulsWegAt = 0, _hwLetzteFehlMeldung = 0
-  let _hwOkAt = 0, _hwOkPlan = '', _hwOkOffen = false, _hwOkFremdN = 0, _hwAus = { plan: '', bis: 0 }
+  let _hwOkVoll = false, _hwOkAt = 0, _hwOkPlan = '', _hwOkOffen = false, _hwOkFremdN = 0, _hwAus = { plan: '', bis: 0 }
   /* ERST LESEN, DANN HEIM (28.10.2026, Finn nach pc-2zc2we): endet ein Trade in dem Konto, in dem der Puls-Chrome gerade steht, liest
    * tvV2EndlesungAnstossen die End-Balance sofort dort (ohne Kontowechsel) — so lange hält die Wache still (_hwEndHalt, höchstens
    * HW_END_HALT_MS = 150 s: 1–60 s Wartezeit + Lesung), danach geht der Heimweg zur höchsten Prio. Ohne den Halt zog die Wache den Puls 3 s nach dem Prio-Wechsel weg, und
@@ -28267,10 +28268,10 @@
   // BELEG: das Konto, das Puls zuletzt BEWIESEN gewählt hat (Heimweg ok, order_bot meldet bei gekürztem Umschalter die volle ID nur nach
   // bewiesenem Listen-Klick, .1752). Gilt nur, solange Puls seitdem nichts getan hat — jede Puls-Aktion kann das Konto gewechselt haben.
   // Nur für die Heim-Wache (spart einen Klick), nie für das Reader-Ende: einen Hand-Wechsel bemerkt der Beleg nicht (Prüfer S2).
-  const _kontoBeleg = { ext: '', at: 0 }
+  const _kontoBeleg = { ext: '', at: 0, voll: false }   // voll: order_bot meldete konto_aktiv mit der vollen ID (Listen-Klick, 28.10.2026)
   let _pulsAktivAt = 0
   setInterval(() => { try{ if(hedgePulsUnterwegs()) _pulsAktivAt = Date.now() }catch(_){} }, 250)   // jede Puls-Aktion dauert Sekunden
-  function kontoBelegMerken(extId){ _kontoBeleg.ext = String(extId || '').trim().toUpperCase(); _kontoBeleg.at = Date.now() }
+  function kontoBelegMerken(extId, voll){ _kontoBeleg.ext = String(extId || '').trim().toUpperCase(); _kontoBeleg.at = Date.now(); _kontoBeleg.voll = !!voll }
   function kontoBelegGilt(extId){
     try{ return !!_kontoBeleg.ext && _kontoBeleg.ext === String(extId || '').trim().toUpperCase() && _kontoBeleg.at >= _pulsAktivAt && !hedgePulsUnterwegs() }catch(_){ return false }
   }
@@ -28289,6 +28290,128 @@
     return (betraege || []).some(x => { if(!(typeof x === 'number' && x >= 1)) return false
       const ganz = String(Math.floor(x)); return ganz.slice(0, (ganz.length % 3) || 3) === rest })
   }
+  /* GEKÜRZTE KENNUNG FÜRS READER-ENDE (28.10.2026, Vorfall Ina Apex …0005, Plan a37fcf6f: Master 17:37 Dubai im SL, Fusion erst 17:40:54
+   * über den Radar — das Userscript las richtig, aber der Reader liefert „PAAPEX678096000000" (TradingView kürzt seit dem Update 27.10.),
+   * und 'kurz' war fürs Reader-Ende gesperrt. Seit 27.10. 07:10 UTC: Apex 0/9, FTDFYSLX 0/18 Userscript-Schlüsse, davor 30 %.)
+   * Finn: „wenn der Reader weiß, dass er auf dem richtigen Account ist, indem er ins Dropdown reindrückt … stimmen die ersten Zahlen".
+   * Ein gekürzter Text gilt als Plan-Konto nur mit ANKER — Text seitdem gleich, Puls seitdem nichts getan:
+   *  'beleg' — Puls hat das Konto im Dropdown bewiesen (Heimweg ok, volle ID in der Liste, kontoBelegGilt) — Finns Weg;
+   *  'fill'  — unter genau diesem Text stand die Plan-Position: Wurzel, Richtung, Kontrakte und Avg Fill = echter Fill auf den Tick.
+   * Den Hand-Wechsel auf ein Konto desselben Logins (gleicher gekürzter Text) sieht der Anker nicht — deshalb beim ENDE zusätzlich
+   * der Balance-Sprung (kurzEndeEntscheid): aus Start-Balance → jetzt flacher Balance ergibt sich der Ausstiegskurs; der muss im Kurs-
+   * Fenster liegen, das der Feed seit der letzten Lesung mit offenem Master gesehen hat (± 3 Pkt inkl. Gebühren). Fremdes Konto = fremde
+   * Balance = Ausstieg passt nicht → kein Reader-Ende, Radar/Notfall wie bisher.
+   * Prüfung vor dem Push (28.10.2026): Fenster friert bei der ERSTEN flachen Lesung ein (sonst weitet der Markt es, bis ein fremder
+   * Ausstieg hineinpasst), Beweis höchstens 3 min danach; nie, solange ein anderer offener Plan auf einem Konto mit demselben gekürzten
+   * Text läuft (Bündel im selben Login); Anker nur aus dem Puls-Chrome-Tab, Beleg nur mit voller ID aus dem Listen-Klick, Polar löscht
+   * ihn; readerKontoPasst bleibt OHNE 'kurz' (Rückkehr-Wache, End-Balance, Nachholen haben keinen Balance-Beweis) — nur die zwei
+   * Ende-Pfade fragen kurzEndeKontoPasst, die End-Balance kommt dann aus dem Beweis selbst. */
+  const KURZ_TOL_PKT = 3, KURZ_BEWEIS_MAX_MS = 180000
+  const _kurzAnker = new Map()     // External ID (groß) → { text, at, quelle: 'beleg' | 'fill' }
+  const _kurzFenster = new Map()   // plan-id → { lo, hi, wz, at, zu }: Feed-Spanne von der letzten Lesung mit offenem Master bis zur ersten flachen (zu)
+  const kurzPolar = () => { try{ return !!(typeof polarLaeuft === 'function' && polarLaeuft()) }catch(_){ return true } }
+  function kurzAnkerGilt(extId, kontoText){
+    try{
+      const a = _kurzAnker.get(String(extId || '').trim().toUpperCase())
+      return !!a && a.text === String(kontoText == null ? '' : kontoText).trim() && a.at >= _pulsAktivAt && !hedgePulsUnterwegs() && !kurzPolar()
+    }catch(_){ return false }
+  }
+  // Nur für die zwei Ende-Pfade (Schnell- und 1-s-Wächter): gekürzter Text aus dem Puls-Chrome mit gültigem Anker
+  function kurzEndeKontoPasst(kontoText, extId, st){
+    return kontoTextBezug(kontoText, extId) === 'kurz' && !!st && /^puls-/.test(String(st.positionen_tab || '')) && kurzAnkerGilt(extId, kontoText)
+  }
+  // REIN RECHNEND: steht die Plan-Position mit Fill-Bindung in der Liste? (Avg Fill auf den Tick, volle Kontraktzahl, Plan-Richtung)
+  function kurzFillPasst(liste, wz, richtung, kontrakte, einstieg){
+    if(!Array.isArray(liste) || !(kontrakte > 0) || !(einstieg > 1000)) return false
+    return liste.some(x => x && (x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : '')) === wz
+      && (!richtung || x.richtung === richtung) && Math.abs(Number(x.menge_zahl)) === kontrakte && Math.abs(Number(x.avg_fill) - einstieg) < 0.01)
+  }
+  // Echter Fill des Plans (nur aus Fill-Belegen, nie Feed-Schätzung) → Zahl oder 0
+  function kurzPlanFill(p){
+    const tv = (p && p.mt5Baseline && p.mt5Baseline.tv) || {}, h = (p && p.mt5Baseline && p.mt5Baseline.hedge) || {}
+    if(tv.einstieg_quelle === 'fill' && Number(tv.einstieg_nq) > 1000) return Number(tv.einstieg_nq)
+    if(/fill/.test(String(h.einstieg_quelle || '')) && Number(h.einstieg_nq) > 1000) return Number(h.einstieg_nq)
+    return 0
+  }
+  // Anker je Plan-Konto pflegen (Schnell- und 1-s-Wächter, vor readerKontoPasst)
+  function kurzAnkerPflegen(p, kontoPlan, st, wz){
+    try{
+      const ext = String(kontoPlan || '').trim().toUpperCase(), text = String((st && st.konto) || '').trim()
+      if(!ext || !text) return
+      const a = _kurzAnker.get(ext)
+      if(a && (a.text !== text || a.at < _pulsAktivAt || kurzPolar())) _kurzAnker.delete(ext)
+      if(kontoTextBezug(text, kontoPlan) !== 'kurz' || hedgePulsUnterwegs() || kurzPolar()) return
+      if(!/^puls-/.test(String(st.positionen_tab || ''))) return   // ein Beleg sagt nur etwas über den Puls-Chrome
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 2) || st.positionen_ok === false) return
+      if(kontoBelegGilt(kontoPlan) && _kontoBeleg.voll){ if(!_kurzAnker.has(ext)) _kurzAnker.set(ext, { text, at: Date.now(), quelle: 'beleg' }); return }
+      const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
+      if(kurzFillPasst(st.positionen, wz, richtung, Number(p.masterContracts) || 0, kurzPlanFill(p))) _kurzAnker.set(ext, { text, at: Date.now(), quelle: 'fill' })
+    }catch(_){}
+  }
+  function kurzKursJetzt(wz){
+    try{
+      const q = epLokal && epLokal.stand && Date.now() - (epLokal.ab || 0) <= 5000 && epLokal.stand.kurse ? epLokal.stand.kurse[wz] : null
+      const pr = q && !q.stale && !/^delayed/.test(String(q.modus || '')) ? (Number(q.preis) || Number(q.lp) || 0) : 0
+      if(pr > 0) return pr
+      const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[wz] : null
+      if(k && hedgeKursAlterJetzt(k) <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return k.preis
+    }catch(_){}
+    return 0
+  }
+  // Master offen gesehen → Kurs-Fenster neu ab jetzt (ohne Kurs: Fenster weg = kein Beweis)
+  function kurzFensterNeu(pid, wz){ const k = kurzKursJetzt(wz); if(k > 0) _kurzFenster.set(String(pid), { lo: k, hi: k, wz, at: Date.now(), zu: 0 }); else _kurzFenster.delete(String(pid)) }
+  // erste flache Lesung → Fenster einfrieren (danach weitet es nichts mehr, kurzFensterNeu taut es auf)
+  function kurzFensterFrieren(pid){ const f = _kurzFenster.get(String(pid)); if(f && !f.zu){ const k = kurzKursJetzt(f.wz); if(k > 0){ if(k < f.lo) f.lo = k; if(k > f.hi) f.hi = k } f.zu = Date.now() } }
+  setInterval(() => {   // Fenster mit jedem Kurs weiten — auch während Puls unterwegs ist (Reader blind, Kurs läuft weiter)
+    try{
+      for(const [pid, f] of _kurzFenster){
+        if(Date.now() - f.at > 6 * 3600000){ _kurzFenster.delete(pid); continue }
+        if(f.zu) continue
+        const k = kurzKursJetzt(f.wz); if(k > 0){ if(k < f.lo) f.lo = k; if(k > f.hi) f.hi = k }
+      }
+    }catch(_){}
+  }, 200)
+  // REIN RECHNEND (Test-Haken window._kurzEndeEntscheid): Ausstieg aus dem Balance-Sprung im Kurs-Fenster? → { ok, exit, grund }
+  function kurzEndeEntscheid(o){
+    if(!o || !(o.b0 > 1000) || !(o.b1 > 1000)) return { ok: false, grund: 'Balance fehlt' }
+    if(typeof o.eq1 !== 'number' || Math.abs(o.b1 - o.eq1) > 0.011) return { ok: false, grund: 'Balance ≠ Equity (noch offen?)' }
+    if(!(o.einstieg > 1000) || !(o.kontrakte > 0) || !(o.pv > 0) || !(o.dir === 1 || o.dir === -1)) return { ok: false, grund: 'Plan-Werte fehlen' }
+    if(!(o.lo > 0) || !(o.hi >= o.lo)) return { ok: false, grund: 'kein Kurs-Fenster' }
+    const exit = o.einstieg + (o.b1 - o.b0) / (o.dir * o.kontrakte * o.pv)
+    const ok = exit >= o.lo - KURZ_TOL_PKT && exit <= o.hi + KURZ_TOL_PKT
+    return { ok, exit: Math.round(exit * 100) / 100, grund: ok ? '' : `Ausstieg ${exit.toFixed(2)} außerhalb ${o.lo}–${o.hi} ± ${KURZ_TOL_PKT}` }
+  }
+  window._kurzEndeEntscheid = kurzEndeEntscheid
+  // Ende-Beweis für einen Plan mit gekürztem Konto-Text (nach hedgeMasterWegEntscheid true)
+  function kurzEndeBeweis(p, kontoPlan, st, wz){
+    const tv = (p.mt5Baseline && p.mt5Baseline.tv) || {}, h = (p.mt5Baseline && p.mt5Baseline.hedge) || {}
+    if(tv.balance_relativ) return { ok: false, grund: 'Balance relativ' }
+    if(!(st && typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 10)) return { ok: false, grund: 'Zusammenfassung alt' }
+    const f = _kurzFenster.get(String(p.id)) || {}
+    if(!f.zu || Date.now() - f.zu > KURZ_BEWEIS_MAX_MS) return { ok: false, grund: f.zu ? 'Beweis-Frist 3 min vorbei' : 'Fenster nicht eingefroren' }
+    const einstieg = kurzPlanFill(p)
+    if(!(einstieg > 1000)) return { ok: false, grund: 'kein echter Fill am Plan' }
+    // Bündel im selben Login (Prüfer 28.10.2026): läuft ein anderer offener Plan auf einem Konto mit demselben gekürzten Text, kann der
+    // Reader dessen Ende zeigen — Fills im selben Tick + ähnliche Start-Balance bestünden den Balance-Beweis → dann nie über 'kurz'
+    const text = String(st.konto || '').trim()
+    const geschwister = (tradePlans || []).some(x => x && String(x.id) !== String(p.id) && x.status === 'open' && String(x.masterAccountId) !== String(p.masterAccountId)
+      && (() => { const ax = (accounts || []).find(a => String(a.id) === String(x.masterAccountId)); return !!(ax && ax.externalId && kontoTextBezug(text, ax.externalId)) })())
+    if(geschwister) return { ok: false, grund: 'anderer offener Plan im selben gekürzten Login' }
+    const bq = tvBalanceAus(st.summary)
+    const a = _kurzAnker.get(String(kontoPlan || '').trim().toUpperCase()) || {}
+    const e = kurzEndeEntscheid({ b0: Number(tv.balance_start), b1: bq.balance, eq1: bq.equity, einstieg,
+      kontrakte: Number(p.masterContracts) || 0, pv: wz === 'MNQ' ? 2 : 20, dir: p.richtung === 'buy' ? 1 : (p.richtung === 'sell' ? -1 : 0), lo: f.lo, hi: f.hi })
+    return Object.assign(e, { anker: a.quelle || null, b1: bq.balance, eq1: bq.equity, lo: f.lo, hi: f.hi })
+  }
+  // Abgelehntes Ende bei gekürztem Text: Konsole höchstens alle 10 s, am Hedge höchstens jede Minute (Auswertung, warum nicht geschlossen)
+  const _kurzMeldAt = new Map()
+  function kurzEndeMelden(p, kurz){
+    const pid = String(p.id), t = _kurzMeldAt.get(pid) || { k: 0, db: 0 }, jetzt = Date.now()
+    if(jetzt - t.k >= 10000){ t.k = jetzt; console.info('[hedge] gekürztes Konto: Master weg, aber kein Balance-Beweis —', kurz.grund, kurz) }
+    if(jetzt - t.db >= 60000){ t.db = jetzt; try{ hedgeAmPlanSchreiben(p.id, { reader_kurz_nein: { grund: kurz.grund, anker: kurz.anker, exit: kurz.exit || null, b1: kurz.b1 || null, lo: kurz.lo || null, hi: kurz.hi || null, at: new Date(jetzt).toISOString() } }).catch(() => {}) }catch(_){} }
+    _kurzMeldAt.set(pid, t)
+  }
+  window._kurzAnker = { gilt: kurzAnkerGilt, stand: () => ({ anker: Object.fromEntries(_kurzAnker), fenster: Object.fromEntries(_kurzFenster) }), fill: kurzFillPasst, pflegen: kurzAnkerPflegen, ende: kurzEndeKontoPasst, neu: kurzFensterNeu, frieren: kurzFensterFrieren, beweis: kurzEndeBeweis }   // Test-Haken
   // Reader-Ende/Schnell-Wächter: konservativ — ein falsch geschlossener Hedge ist schlimmer als ein ausbleibender (Prüfer S2 27.10.2026).
   // Nur 'ja' oder 'klebt' (volle ID sichtbar), eindeutig im Login UND die angeklebten Ziffern = Anfang der Balance, die der Reader gerade
   // liest (Zusammenfassung ≤ 10 s alt) — sonst könnte ein nicht erfasstes Konto „ID + Ziffern" (andere Firma im selben TV-Login) passen.
@@ -28375,12 +28498,14 @@
   /* Master weg laut Reader → Hedge zu + Plan-Ende (aus hedgeWacheTick herausgezogen, 01.10.2026): gemeinsam für den 1-s-Wächter und den
    * Schnell-Wächter; je Plan höchstens EIN Lauf gleichzeitig (_hedgeWegLaeuft) — nie zweimal Ende setzen. */
   const _hedgeWegLaeuft = new Set()
-  async function hedgeMasterWegAusfuehren(p, kontoPlan, kurs){
+  async function hedgeMasterWegAusfuehren(p, kontoPlan, kurs, kurz){
     const pid = String(p.id)
     if(_hedgeWegLaeuft.has(pid)) return
     _hedgeWegLaeuft.add(pid)
     try{
-      await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
+      const rsW = await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
+      // Nachweis am Hedge, wenn das Konto nur gekürzt zu sehen war (28.10.2026): Anker-Art, Ausstieg aus dem Balance-Sprung, Kurs-Fenster
+      if(kurz && rsW && rsW.ok){ try{ hedgeAmPlanSchreiben(p.id, { reader_kurz: { anker: kurz.anker, exit: kurz.exit, b1: kurz.b1, lo: kurz.lo, hi: kurz.hi, at: new Date().toISOString() } }).catch(() => {}) }catch(_){} }
       // Plan auf Überprüfen wie beim Orbit-V2-Ende, Grund reader_leer.
       // End-Balance direkt aus dem Userscript (Finn 01.10.2026: „sobald der Trade beendet ist, einfach die jetzige Balance an Prophos —
       // davon die Differenz; ohne dass Puls sich noch mal einloggen muss"). Nur mit Beweis, sonst wie bisher Puls-Nachlesung.
@@ -28389,7 +28514,9 @@
       let _balR = null
       // Topstep (27.10.2026): das Userscript im TradingView-Tab kennt kein TopstepX-Konto — bis zu 3,5 s Warten für nichts; die End-Balance
       // liest Puls in TopstepX nach (tvV2EndeSetzen → tvV2EndlesungAnstossen)
-      if(p.route !== 'tsv2'){ try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){} }
+      // Gekürzter Text (28.10.2026): readerKontoPasst kennt 'kurz' nicht → End-Balance direkt aus dem Beweis (flach, Balance = Equity)
+      if(kurz && kurz.ok && kurz.b1 > 1000) _balR = { balance_end: kurz.b1, equity_end: kurz.eq1, balance_quelle: 'reader', balance_at: new Date().toISOString(), balance_relativ: false }
+      else if(p.route !== 'tsv2'){ try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){} }
       try{ if(_balR && typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balR.balance_end, equity: _balR.equity_end, relativ: false }, _balR.balance_at) }catch(_){}
       try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(pa, null, 'reader_leer', _balR || undefined); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === pid) || pa; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
     } finally { _hedgeWegLaeuft.delete(pid) }
@@ -28425,21 +28552,24 @@
         const pid = String(p.id), h = p.mt5Baseline.hedge
         const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-        if(!kontoPlan || !readerKontoPasst(st.konto, kontoPlan, st)){ _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); continue }
-        if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+        if(kontoPlan) kurzAnkerPflegen(p, kontoPlan, st, wz)   // gekürzter Text: Anker aus Dropdown-Beleg oder Fill-Bindung (28.10.2026)
+        if(!kontoPlan || !(readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst(st.konto, kontoPlan, st))){ _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); continue }
+        if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
         if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){
-          _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid)
+          _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid); kurzFensterNeu(pid, wz)
           // FILL SOFORT (01.10.2026): der Hedge öffnete beim Senden-Klick mit dem Kurs zum Klick — der echte Avg Fill steht ~0,1–0,3 s nach
           // dem Fill in der Positions-Tabelle des Puls-Chrome; damit Entry + Level am Hedge, ohne auf „Show more" (~3 s) zu warten
-          if(/^feed/.test(String(h.einstieg_quelle || '')) && !_hedgeFillAusReader.has(pid) && typeof hedgeEinstiegNachtragen === 'function'){
+          if(/^feed/.test(String(h.einstieg_quelle || '')) && !_hedgeFillAusReader.has(pid) && typeof hedgeEinstiegNachtragen === 'function'
+             && readerKontoPasst(st.konto, kontoPlan, st)){   // Fill-Übernahme nur bei voll belegtem Konto, nie über den Kurz-Anker (Prüfer 28.10.2026)
             const pos = st.positionen.find(x => x && (x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : '')) === wz && (!richtung || !x.richtung || x.richtung === richtung))
             const af = pos ? Number(pos.avg_fill) : NaN
             if(af > 1000 && richtung){ _hedgeFillAusReader.add(pid); hedgeEinstiegNachtragen(p, { avg_fill_je_wurzel: { [wz]: { avg_fill: af, seite: richtung } } }).catch(() => {}) }
           }
           continue
         }
+        kurzFensterFrieren(pid)   // erste flache Lesung: Kurs-Fenster fürs Kurz-Ende einfrieren (28.10.2026)
         if(st.positionen.some(x => x && x.pnl_unklar)) continue
         if(!_hedgeMasterGesehen.has(pid)) continue
         if(!_hedgeSchnellLeer.has(pid)) _hedgeSchnellLeer.set(pid, jetzt)
@@ -28450,9 +28580,12 @@
           sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung, kontoPlan, kontoAktiv: st.konto, kontoBewiesen: true, kontenAnzahl: 99,   // readerKontoPasst oben
           kontoStabilMs: jetzt - _hedgeSchnellKonto.get(pid), leerSeitMs: jetzt - _hedgeSchnellLeer.get(pid), schnell: true, gesehen: true })
         if(weg && p.status === 'open'){
+          // Gekürzter Text: zusätzlich Balance-Sprung im Kurs-Fenster (Hand-Wechsel auf ein Konto desselben Logins, 28.10.2026)
+          const kurz = kontoTextBezug(st.konto, kontoPlan) === 'kurz' ? kurzEndeBeweis(p, kontoPlan, st, wz) : null
+          if(kurz && !kurz.ok){ kurzEndeMelden(p, kurz); continue }
           _hedgeSchnellLeer.delete(pid)
-          console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid)
-          await hedgeMasterWegAusfuehren(p, kontoPlan, null)
+          console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid, kurz || '')
+          await hedgeMasterWegAusfuehren(p, kontoPlan, null, kurz)
         }
       }
     }catch(e){ console.warn('[hedgeSchnell]', e) }
@@ -28846,16 +28979,19 @@
             const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
             // Konto passt (Token) UND ist frisch (konto_ts ≤ 10 s; altes Script ohne konto_ts: Payload-Frische) — sonst kein Timer
             const kontoFrisch = !!(st && (Number(st.konto_ts) > 0 ? Date.now() - Number(st.konto_ts) <= 10000 : frisch))
-            const kontoPasst = kontoPlan ? readerKontoPasst(kontoAktiv, kontoPlan, st) : (kontenAnzahl <= 1)   // gekürzt/angeklebt (27.10.2026)
+            if(kontoPlan && st && typeof kontoRoh === 'string') kurzAnkerPflegen(p, kontoPlan, st, wz)   // gekürzter Text: Anker (28.10.2026)
+            const kontoVoll = kontoPlan ? readerKontoPasst(kontoAktiv, kontoPlan, st) : (kontenAnzahl <= 1)   // gekürzt/angeklebt (27.10.2026)
+            const kontoKurz = !kontoVoll && !!kontoPlan && kurzEndeKontoPasst(kontoAktiv, kontoPlan, st)   // gekürzt mit Anker, nur Ende-Pfad (28.10.2026)
+            const kontoPasst = kontoVoll || kontoKurz
             const pidK = String(p.id)
             const unterwegs = hedgePulsUnterwegs()   // 16.10.2026: Puls unterwegs → Reader blind, Ruhe beginnt danach neu
             if(kontoFrisch && kontoPasst && !unterwegs){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
             else { _hedgeKontoSeit.delete(pidK); _hedgeLeerSeit.delete(pidK) }
             const kontoStabilMs = _hedgeKontoSeit.has(pidK) ? Date.now() - _hedgeKontoSeit.get(pidK).seit : 0
             const listeLeer = !!(st && frisch && kontoFrisch && kontoPasst && Array.isArray(st.positionen) && !st.positionen.some(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : ''); if(xw !== wz) return false; if(richtung && x.richtung && x.richtung !== richtung) return false; const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs((typeof tvKursZahl === 'function') ? (tvKursZahl(x.menge) || 0) : (Number(x.menge) || 0)); return m > 0 }))
-            if(listeLeer && !unterwegs){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()) } else _hedgeLeerSeit.delete(String(p.id))
+            if(listeLeer && !unterwegs){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()); kurzFensterFrieren(pidK) } else _hedgeLeerSeit.delete(String(p.id))
             // Master seit dem Open im Reader gesehen? (Voraussetzung der schnellen Regel)
-            if(st && frisch && kontoFrisch && kontoPasst && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null) _hedgeMasterGesehen.add(pidK)
+            if(st && frisch && kontoFrisch && kontoPasst && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pidK); kurzFensterNeu(pidK, wz) }
             const schnell = !!(st && /^puls-/.test(String(st.positionen_tab || '')))
             // Teilschluss (Tradovate nettet je Symbol): nur Hinweis am Chip, schließen erst bei 0
             const teil = (st && frisch) ? hedgeMasterTeilweise(st.positionen, wz, richtung, Number(p.masterContracts) || 0) : null
@@ -28869,7 +29005,7 @@
             // Hedge öffnete beim Senden-Klick, die Master-Position tauchte aber nie auf (Order abgelehnt / nicht gefüllt): Puls-Chrome-Reader
             // (Beweis-Modus) zeigt das Plan-Konto ≥ 10 s flach, Konto ≥ 10 s stabil, Open ≥ 30 s her → Fusion wieder zu (01.10.2026)
             // .1560: Konto ≥ 60 s stabil und ≥ 30 s leer (vorher 10/10 — Apex-Hedge Mike 02:36 Dubai nach dem Zurückschalten vom Hand-Konto zu)
-            if(schnell && !unterwegs && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 60000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 30000
+            if(schnell && !unterwegs && kontoVoll && !_hedgeMasterGesehen.has(pidK) && listeLeer && kontoStabilMs >= 60000 && _hedgeLeerSeit.has(pidK) && Date.now() - _hedgeLeerSeit.get(pidK) >= 30000
                && (Date.now() - (Date.parse(h.opened_at || h.at || '') || Date.now())) >= 30000){
               _hedgeLeerSeit.delete(pidK)
               await hedgeSoloSchliessen(p, 'master_nie_da', kurs)
@@ -28877,9 +29013,14 @@
               continue
             }
             if(weg){
-              _hedgeLeerSeit.delete(String(p.id))
-              await hedgeMasterWegAusfuehren(p, kontoPlan, kurs)
-              continue
+              // Gekürzter Text: zusätzlich Balance-Sprung im Kurs-Fenster (28.10.2026, s. kurzEndeEntscheid)
+              const kurz = (kontoPlan && kontoTextBezug(kontoAktiv, kontoPlan) === 'kurz') ? kurzEndeBeweis(p, kontoPlan, st, wz) : null
+              if(kurz && !kurz.ok) kurzEndeMelden(p, kurz)
+              else {
+                _hedgeLeerSeit.delete(String(p.id))
+                await hedgeMasterWegAusfuehren(p, kontoPlan, kurs, kurz)
+                continue
+              }
             }
           }catch(e){ console.warn('[hedgeWache] Reader-Abgleich', e) }
         }
@@ -48047,7 +48188,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1798'
+  const OS_TAB_BUILD = '2026-09-22.1799'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
