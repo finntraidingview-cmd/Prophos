@@ -24557,10 +24557,13 @@
   let _hwEndHalt = { pid: '', bis: 0 }, _hwBlindSeit = 0, _hwBlindSchwelle = 0, _hwBlindErledigt = ''
   /* KEIN ALARM-SPAM (28.10.2026, Master nach Finns Handy ab 12:13 Dubai: 8× „Puls nicht zurück im Big-Trade-Konto", vorher 0). Aurel pc-pw1put:
    * der Blind-Heimweg feuerte bei jedem Flackern des Reader-Stands neu (12:13/12:24/12:42/12:44), jede Lesung scheiterte an der unsichtbaren
-   * Positions-Tabelle, jede meldete 🔴. Jetzt: Blind-Heimweg je Plan EINMAL je Tab-Sitzung (_hwBlindPlaene), sein Scheitern zählt wie
+   * Positions-Tabelle, jede meldete 🔴. Jetzt: Blind-Heimweg je Plan höchstens alle 5 min (_hwBlindPlaene, s. HW_BLIND_PAUSE_MS), sein Scheitern zählt wie
    * „belegt" (kein 🔴, kein Wiederholer — er war nur ein Versuch); und jeder 🔴 je Plan nur einmal, solange derselbe Grund besteht
    * (_hwFehlGemeldet, Ziffern im Text zählen nicht) — ein „ok" dazwischen gibt ihn wieder frei. */
-  const _hwBlindPlaene = new Set(), _hwFehlGemeldet = new Map()
+  // 28.10.2026 später (Finn: „sobald der Reader blind wird, weil ein Pop-up da ist, soll der Puls aktiv werden und es wegklicken"): statt einmal je
+  // Sitzung höchstens EIN Blind-Versuch je Plan und Blind-Phase, frühestens alle HW_BLIND_PAUSE_MS (gestreut über die 30–45-s-Schwelle)
+  const HW_BLIND_PAUSE_MS = 5 * 60000
+  const _hwBlindPlaene = new Map(), _hwFehlGemeldet = new Map()
   const hwFehlKey = t => String(t || '').replace(/[0-9.,]+/g, '#').slice(0, 160)
   const hwPause = () => _hwFehlN > 0 ? Math.min(HW_BACKOFF_MAX_MS, HW_BACKOFF_START_MS * Math.pow(2, _hwFehlN - 1)) * hwZufall(1, 1.4) : hwZufall(HW_PAUSE_MIN_MS, HW_PAUSE_MAX_MS)
   function heimMeldenJetzt(ok, spaeter, planId, fehlTxt){
@@ -24603,14 +24606,18 @@
       if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
       const ep = window._epLokal, st = ep && ep.stand
       const alterS = (st && typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s : 99
-      if(!st || st.an === false || !/^puls-/.test(String(st.positionen_tab || '')) || !st.konto || !(alterS <= 5)){
+      // blind auch bei frischem Stand ohne lesbaren P&L / positionen_ok false (28.10.2026, Aurel pc-pw1put: Werbekarte „Cash out with referral
+      // rewards … AD" unten links über dem Konto-Panel, Spur „Reader blind: pnl unlesbar") — dann räumt die Puls-Lesung (tv-lesen: Kachel, AD-Karte,
+      // Werbe-Dialog, Reiter Positions) den Tab auf; steht Puls schon im Konto, wechselt dabei nichts
+      const pnlBlind = !!(st && (st.positionen_ok === false || (Array.isArray(st.positionen) && st.positionen.some(x => x && x.pnl_unklar))))
+      if(!st || st.an === false || !/^puls-/.test(String(st.positionen_tab || '')) || !st.konto || !(alterS <= 5) || pnlBlind){
         _hwFremdSeit = 0
         // blind (28.10.2026): einmal je Ziel + Blind-Phase heim, s. HW_BLIND_MIN_MS
         const jetztB = Date.now()
         if(!_hwBlindSeit){ _hwBlindSeit = jetztB; _hwBlindSchwelle = hwZufall(HW_BLIND_MIN_MS, HW_BLIND_MAX_MS); return }
-        if(_hwBlindPlaene.has(pid) || jetztB - _hwBlindSeit < _hwBlindSchwelle || jetztB < _hwNaechsterHeimweg) return
-        if(kontoBelegGilt(konto)){ _hwBlindErledigt = pid; _hwBlindPlaene.add(pid); return }   // Puls hat seitdem nichts getan und stand zuletzt bewiesen dort
-        _hwBlindErledigt = pid; _hwBlindPlaene.add(pid)
+        if(_hwBlindErledigt === pid || jetztB - (_hwBlindPlaene.get(pid) || 0) < HW_BLIND_PAUSE_MS || jetztB - _hwBlindSeit < _hwBlindSchwelle || jetztB < _hwNaechsterHeimweg) return
+        if(!pnlBlind && kontoBelegGilt(konto)){ _hwBlindErledigt = pid; return }   // Puls hat seitdem nichts getan und stand zuletzt bewiesen dort (bei pnl-blind trotzdem aufräumen)
+        _hwBlindErledigt = pid; _hwBlindPlaene.set(pid, jetztB)
         if(!_bthAnstoss) _bthAnstoss = _hwBlindSeit
         console.info(`[heim-wache] Reader blind seit ${((jetztB - _hwBlindSeit) / 1000).toFixed(0)} s — einmal Heimweg zu „${bt.masterName || konto}"`)
         bigTradeHeim('Heim-Wache (Reader blind)')
@@ -47974,7 +47981,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1794'
+  const OS_TAB_BUILD = '2026-09-22.1795'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
