@@ -11906,7 +11906,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Wert in Winning Days</div>
-                  <div class="panel-sub">Nur Konten „Winning Days“ im Plus: Balance − Größe = Gewinn · × Profit-Share (Tradeify 90 %, FundedNext 76,5 %, sonst 80 %) = potenziell · Konten im Minus zählen nicht</div>
+                  <div class="panel-sub">Nur Konten „Winning Days“ im Plus: Balance − Größe = Gewinn · × Profit-Share (Tradeify/Topstep 90 %, FNF 91,5 %, Blue Guardian 85 %, FundedNext 76,5 %, sonst 80 %) = potenziell · Konten im Minus zählen nicht</div>
                 </div>
                 <div id="adm-wert-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
@@ -16453,7 +16453,9 @@
     // FundedNext 76,5 (Finn 08.10.2026: „FundedNext ist 76,5" — FTMO, FundingPips, The5ers bleiben bei 80); Überschreibung je Konto (payout_pct) gewinnt
     // FundedNext Futures (FNF) 91,5 (Finn 29.10.2026: „Deckel 4.000 $, Split 91,5 %") — VOR FundedNext (CFD, 76,5), der Name enthält „FundedNext"
     const admIstFnf = firm => admIstFundedNext(firm) && /futur/i.test(String(firm || ''))
+    // Topstep 90 (Finn 29.10.2026: „alles eins zu eins wie Tradeify, nur Deckel 5.000 $" — firm_rules: 90/10 seit 12.01.2026; bis .1809 fiel Topstep auf 80)
     const admPayoutPctDefault = firm => istTradeifyCfd(firm) ? 80 : /tradeify/i.test(String(firm || '')) ? 90 :   // Tradeify CFD 80 % (23.10.2026)
+      /topstep/i.test(String(firm || '')) ? 90 :
       /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFnf(firm) ? 91.5 : admIstFundedNext(firm) ? 76.5 : 80
     const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
     function admAccGroesse(name, balance){
@@ -16493,15 +16495,15 @@
      * oder die Überschreibung je Konto, dieselbe Zahl wie in der Payout-Spalte). Reine Anzeige: keine Prüfung, keine Sperre.
      * Regeln aus firm_rules.json (Abschnitt „Payout" je Firma); Tradeify-Futures nach Finns Ansage (firm_rules nennt dort nur
      * Select-Flex-Caps 3.000/4.000/5.000 je Größe und keinen Anteil); FundedNext Futures (FNF) nach Finns Ansage 29.10.2026 (50 %,
-     * Deckel 4.000 $, Split 91,5 % in admPayoutPctDefault — FNF fehlt in firm_rules). Topstep bewusst ohne Regel (Prüfer 29.10.2026): drei Caps
-     * in firm_rules, welcher am Konto gilt, weiß nur Finn. anteil 1 = voller Gewinn anfragbar (firm_rules nennt Split
+     * Deckel 4.000 $, Split 91,5 % in admPayoutPctDefault — FNF fehlt in firm_rules). Topstep nach Finns Ansage 29.10.2026 (wie Tradeify,
+     * Deckel 5.000 $, Split 90 — firm_rules nennt drei Caps, Finn hat entschieden). anteil 1 = voller Gewinn anfragbar (firm_rules nennt Split
      * und On-Demand, aber keinen Anteil und keinen Deckel). Regel null = „Regel fehlt": Konto zeigt das, zählt in keiner
      * Summe — kein Raten. Reihenfolge: speziellste Firma zuerst (Tradeify CFD vor Tradeify, FundedNext/FTMO Futures vor
      * FundedNext/FTMO). Der FundedNext-Refund gehört zur Payout-Spalte, nicht hierher. */
     const ADM_ANFRAGBAR_REGELN = [
       [f => istTradeifyCfd(f), null, 'Tradeify CFD: keine Payout-Regel in firm_rules.json'],
       [f => /tradeify/.test(f), { anteil: .5, deckel: 4500, quelle: 'Finn 28.10.2026: bis zu 50 % vom Gewinn, max. 4.500 $ je Anfrage' }],
-      [f => /topstep/.test(f), null, 'Topstep: firm_rules nennt 50 % der Reward Balance, aber drei Caps (XFA Standard 5.000 $, Consistency/RTP 6.000 $, Double Cap 10.000 $ „bestätigt 31.08.2026, Finns XFA") — welcher am Konto gilt, steht nirgends'],
+      [f => /topstep/.test(f), { anteil: .5, deckel: 5000, quelle: 'Finn 29.10.2026: wie Tradeify, 50 % vom Gewinn, max. 5.000 $ je Anfrage, Split 90 % (Topstep-Funded startet bei 0 → Gewinn = Balance)' }],
       [f => /alpha/.test(f), null, 'Alpha Futures: firm_rules nennt drei Programme (Standard 50 % / 15.000 $, Advanced, Zero) — welches am Konto gilt, steht nirgends'],
       [f => /apex/.test(f), null, 'Apex: firm_rules nennt für die ersten 5 Payouts nur „Caps je Größe" ohne Zahlen'],
       [f => /f(ou|u)nded\s*next/.test(f) && /futur/.test(f), { anteil: .5, deckel: 4000, quelle: 'Finn 29.10.2026: 50 % vom Gewinn, max. 4.000 $ je Anfrage, Split 91,5 % (FNF steht nicht in firm_rules.json)' }],
@@ -48642,7 +48644,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1810'
+  const OS_TAB_BUILD = '2026-09-22.1811'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
