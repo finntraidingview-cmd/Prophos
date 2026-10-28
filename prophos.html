@@ -48769,7 +48769,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1818'
+  const OS_TAB_BUILD = '2026-09-22.1819'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63278,6 +63278,13 @@
       : s.includes('tradeify') ? 'Tradeify' : s.includes('ftmo') ? 'FTMO' : (String(f || '').trim() || '—') }
   // Deutscher Tag eines WD aus dem Ende-Zeitstempel (Europe/Berlin) — das datum-Feld aus app.py ist der UTC-Tag (29.10.2026)
   const wdUebDeTag = t => { const d = t && t.zeit ? new Date(t.zeit) : null; return d && Number.isFinite(d.getTime()) ? d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) : String((t && t.datum) || '') }
+  // Echter Winning Day (29.10.2026, Finn am Screenshot der Liste: „jede einzelne Funded-Trade auch … ich will nur die Winning Days"):
+  // nur der Plan-Haken winning_day (Farmer / Erledigt-Haken). Befund 29.10.2026 (DB): 292 Trades im alten Kriterium = 164 mit Haken +
+  // 106 reine Hedge-Trades (92 Funded, 14 Challenge) + 22 ohne Haken auf Konten mit konto_typ 'winning_days' — darunter Funded-Big-Trades
+  // (Apex „→ Funded" −4.006 $, Tradeify-Etappen −4.500 $), deshalb zählt der Kontotyp hier NICHT (WD_UEB_NUR_FLAG = false würde ihn
+  // mitnehmen, wie Admin → Statistik). Liefert das Backend die Felder noch nicht (vor dem Deploy von app.py), bleibt alles wie bisher drin.
+  const WD_UEB_NUR_FLAG = true
+  const wdUebIstWd = t => t.winning_day === undefined && t.konto_typ === undefined ? true : (t.winning_day === true || (!WD_UEB_NUR_FLAG && String(t.konto_typ || '') === 'winning_days'))
   const wdUebZeitName = z => ({ heute: 'Heute', 7: '7 Tage', 30: '30 Tage', alle: 'Kapitel' })[z] || z + ' Tage'
   const wdUebTag = d => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][d.getUTCDay()] + ' ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
   // „150k …0431" — Größe aus dem Namen, External ID hinten (wie die Konto-Kürzel im Radar)
@@ -63367,9 +63374,12 @@
       kp.innerHTML = ''; box.innerHTML = `<div class="wd-ueb-leer">${kaputt ? escapeHtml(fehler.replace('Kapitel', 'Statistik')) : 'Statistik lädt … (dieselben Daten wie Admin → Statistik)'}</div>`; if(sub) sub.textContent = ''; wdUebGraf([]); return
     }
     const aus = wdIdsAus(), gesehen = new Set(), alle = []
+    let backendAlt = false
     for(const c of (kap.kapitel || [])) for(const t of (c.wd_liste || [])){
       if(gesehen.has(String(t.id))) continue; gesehen.add(String(t.id))
       if(aus.has(String(t.user_id)) || !wdSichtOk(t.user_id)) continue
+      if(!wdUebIstWd(t)) continue   // nur echte Winning Days (29.10.2026, Finn) — Funded-Big-Trades stehen in wd_liste nur wegen hedge_eur > 0
+      if(t.winning_day === undefined) backendAlt = true   // Backend liefert das Feld noch nicht (Railway-Deploy von app.py steht aus)
       alle.push(t)
     }
     // Zeitraum (29.10.2026, Finn: „die Zahl soll sich updaten, je nachdem welchen Tag ich auswähle, und auch Heute") — gilt für
@@ -63410,7 +63420,7 @@
       let z = sek(t); if(z <= zuletzt) z = zuletzt + 1; zuletzt = z   // Zeitstempel müssen streng steigen (gleiche Sekunde → +1 s)
       punkte.push({ time: z, m: mK, f: fK })
     }
-    if(sub) sub.textContent = `· ${rows.length} Winning Day${rows.length === 1 ? '' : 's'} · ${zeitName}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
+    if(sub) sub.textContent = `· ${rows.length} Winning Day${rows.length === 1 ? '' : 's'} · ${zeitName}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · ${backendAlt ? 'Backend noch alt → Winning-Day-Filter noch nicht aktiv (Funded-Trades noch drin, nach dem Railway-Deploy weg)' : 'nur Winning Days (Plan-Haken), Funded-Big-Trades und Topstep nicht drin'}`
     kp.innerHTML =
       wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · ${zeitName} · Ø ${wdUebEur(fK / fN)}` : `noch nichts gebucht · ${zeitName}`, fN ? wdUebFarbe(fK) : '', `Fusion-Hedge-P&L der Winning Days im Zeitraum „${zeitName}" aufsummiert (Deal-Historie, €) — amber Linie im Graf`) +
       wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · ${zeitName} · Ø ${wdUebUsd(mK / mN)}` : `keine Winning Days · ${zeitName}`, mN ? wdUebFarbe(mK) : '', `Master-P&L der Winning Days im Zeitraum „${zeitName}" aufsummiert ($) — violette Linie im Graf`)
