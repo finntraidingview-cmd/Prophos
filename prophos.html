@@ -49296,7 +49296,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1832'
+  const OS_TAB_BUILD = '2026-09-22.1833'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -67887,7 +67887,23 @@
     }
     // Nach Prop-Firma gruppiert (08.10.2026, Finn: „die Accounts nach Prop-Firmen sortieren, nicht alles auf einen Haufen") —
     // kontoOptionenGruppiert, Beschriftung „150k …3526 → Funded · Balance"; Werte (a.id) unverändert
-    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + kontoOptionenGruppiert(finFundedAccounts, a => { const bal = finLiveBalStr(a); return bal ? ' · ' + bal : '' })
+    // WD-Stand + „anfragbar" je Option (29.10.2026, Finn: „Schreib bei jedem Account dazu, wie viele Winning Days er schon hat und ob
+    // er ready zum Payouten ist — ich weiß beim Eintragen sonst nicht, welche Accounts es sind"): dieselben Quellen wie das Panel
+    // „Payout-Status je Account" (renderFinPayoutStatus) — payoutReadyInfo (Termin fällig = anfragbar; hat Vorrang) bzw. zielFortschritt
+    // (🏆 3/5, Ziel erreicht = anfragbar). Anfragbare stehen je Firmengruppe oben.
+    const finPoCache = new Map()   // je Öffnen einmal rechnen — Beschriftung und Sortierung fragen beide
+    const finPoStand = a => {
+      if(finPoCache.has(a.id)) return finPoCache.get(a.id)
+      let f = null; try{ f = (typeof zielFortschritt === 'function') ? zielFortschritt(a) : null }catch(_){ f = null }
+      const wd = !!(f && f.kind === 'winning_days' && !f.mindest)
+      const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
+      const r = { wd: wd ? `🏆 ${Math.min(f.count, f.target)}/${f.target}` : '', bereit: pi ? !!pi.faellig : !!(wd && f.done) }   // Termin vor Ziel, wie renderFinPayoutStatus
+      finPoCache.set(a.id, r); return r
+    }
+    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + kontoOptionenGruppiert(finFundedAccounts, a => {
+      const st = finPoStand(a), bal = finLiveBalStr(a)
+      return (st.wd ? ' · ' + st.wd : '') + (st.bereit ? ' · anfragbar' : '') + (bal ? ' · ' + bal : '')
+    }, a => finPoStand(a).bereit)
     const nextEl = document.getElementById('fin-next-payout'); if(nextEl) nextEl.value = ''
 
     document.getElementById('fin-amount').value = ''
@@ -67939,19 +67955,21 @@
    * Haufen"): eine <optgroup> je Firma (alphabetisch), darin nach Kontogröße absteigend, dann Name. Beschriftung kurz, die Firma steht
    * ja in der Gruppe: „150k …3526 → Funded" (Größe über kontoGroesseAnzeige wie der Planer, letzte vier Zeichen der Kontonummer aus
    * external_id, sonst aus dem Namen, Typ-Wort aus typeLabel); zusatz(a) hängt z. B. die Live-Balance an. Werte = a.id, unverändert.
-   * Gemeinsame Hilfe für jedes Konto-<select> dieser Art (Payout eintragen / Manuell buchen = dasselbe Modal). -> HTML */
-  function kontoOptionenGruppiert(liste, zusatz){
+   * Gemeinsame Hilfe für jedes Konto-<select> dieser Art (Payout eintragen / Manuell buchen = dasselbe Modal). -> HTML
+   * 29.10.2026: vorne(a) (optional) = true → innerhalb der Firmengruppe zuerst (Payout: anfragbare oben); kurze Kontonummern (≤ 10
+   * Zeichen, CFD-Logins) stehen voll da, lange Futures-IDs (17–26 Zeichen) bleiben „…1234", damit die Zeile einzeilig bleibt. */
+  function kontoOptionenGruppiert(liste, zusatz, vorne){
     const groesse = a => (typeof kontoGroesseAnzeige === 'function') ? kontoGroesseAnzeige(a.name, a.startingBalance, null) : 0
     const je = new Map()
     for(const a of (liste || [])){ const f = String(a.firm || 'Sonstige'); if(!je.has(f)) je.set(f, []); je.get(f).push(a) }
     const label = a => {
-      const g = groesse(a), nr = String(a.externalId || '').replace(/[^A-Za-z0-9]/g, '') || ((/\d{4,}/.exec(String(a.name || '')) || [''])[0])
-      const kurz = (g > 0 || nr) ? `${g > 0 ? (g % 1000 === 0 ? g / 1000 : (g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''}${nr ? ' …' + nr.slice(-4) : ''}`.trim() : String(a.name || '–')
+      const ext = String(a.externalId || '').replace(/[^A-Za-z0-9]/g, ''), g = groesse(a), nr = ext || ((/\d{4,}/.exec(String(a.name || '')) || [''])[0])
+      const kurz = (g > 0 || nr) ? `${g > 0 ? (g % 1000 === 0 ? g / 1000 : (g / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })) + 'k' : ''}${nr ? ((ext && ext.length <= 10) ? ' #' + ext : ' …' + nr.slice(-4)) : ''}`.trim() : String(a.name || '–')
       const typ = (typeof typeLabel === 'function') ? typeLabel(a.type) : String(a.type || '')
       return `${kurz}${typ ? ' → ' + typ : ''}${zusatz ? (zusatz(a) || '') : ''}`
     }
     return [...je.keys()].sort((a, b) => a.localeCompare(b, 'de')).map(f => `<optgroup label="${escapeHtml(f)}">`
-      + je.get(f).sort((a, b) => (groesse(b) - groesse(a)) || String(a.name || '').localeCompare(String(b.name || ''), 'de'))
+      + je.get(f).sort((a, b) => (vorne ? (!!vorne(b) - !!vorne(a)) : 0) || (groesse(b) - groesse(a)) || String(a.name || '').localeCompare(String(b.name || ''), 'de'))
           .map(a => `<option value="${escapeHtml(String(a.id))}" title="${escapeHtml(String(a.name || ''))}">${escapeHtml(label(a))}</option>`).join('')
       + '</optgroup>').join('')
   }
