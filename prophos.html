@@ -1148,15 +1148,6 @@
   #dashboard-view .note-btn:hover{background:var(--bg2);color:var(--ink)}
   #dashboard-view .note-btn.copied{background:rgba(16,185,129,.12);color:#0f9c7a;border-color:transparent}
   #dashboard-view .note-btn-del:hover{background:rgba(240,68,56,.1);color:#F04438;border-color:transparent}
-  /* Notiz für alle IDs (29.10.2026, Finn: „ein Slider ‚für alle IDs' neben Kopieren und Löschen … relativ simpel"): kleiner Schalter wie
-     .wd-ueb-schalter an jedem Zettel, geteilte Zettel mit Chip „von <ID>" (bearbeitbar wie eigene) */
-  #dashboard-view .note-teilen{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:var(--sub);cursor:pointer;user-select:none;margin-right:4px;white-space:nowrap}
-  #dashboard-view .note-teilen .switch{width:28px;height:16px}
-  #dashboard-view .note-teilen .switch-slider::before{width:12px;height:12px}
-  #dashboard-view .note-teilen .switch input:checked + .switch-slider::before{transform:translateX(12px)}
-  #dashboard-view .note-teilen:has(input:checked){color:var(--violet)}
-  #dashboard-view .note-von{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;font-size:11px;font-weight:500;border-radius:999px;background:var(--bg2);color:var(--sub);white-space:nowrap}
-  #dashboard-view .note-von i{width:7px;height:7px;border-radius:50%;display:inline-block}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
   /* Meta-Wallet: 7 Karten (Gesamt + 6 Chains, seit Ethereum 15.09.2026) — muss VOR der
      960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt.
@@ -3616,7 +3607,7 @@
   #adm-pane-wd .wd-ueb-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
   #adm-pane-wd .wd-ueb-liste{max-height:460px;overflow:auto;margin-top:8px}
   #adm-pane-wd .wd-ueb-liste[hidden]{display:none}
-  #adm-pane-wd .wd-ueb-liste .wd-tab{min-width:840px}
+  #adm-pane-wd .wd-ueb-liste .wd-tab{min-width:760px}
   #adm-pane-wd .wd-ueb-liste .wd-tab th{position:sticky;top:0;background:var(--surface);z-index:1}
   #adm-pane-wd .wd-ueb-liste .wd-tab td,#adm-pane-wd .wd-ueb-liste .wd-tab th{white-space:nowrap;vertical-align:middle}
   #adm-pane-wd .wd-ueb-liste .wd-tab .zahl{text-align:right;font-variant-numeric:tabular-nums}
@@ -11780,6 +11771,9 @@
           <!-- Mail (21.10.2026, Finn: „alle Gmail-Accounts jeder einzelnen ID im Überblick … nach jeder ID filtern oder alles") — nur Hermann Technologies
                (KASSE_REITER_HT), Server nur ADMIN_EMAILS -->
           <button class="subtab adm-tab" data-admtab="mail">Mail</button>
+          <!-- Konten aus Mail (29.10.2026, Finn: „ein Reiter, der alle neuen Accounts zeigt, die per E-Mail dazugekommen sind … wenn das proof ist,
+               müssen wir nie wieder Accounts in Prophos hinzufügen") — Test-Reiter, nur Hermann Technologies wie Mail, Daten GET /admin/konto-mails -->
+          <button class="subtab adm-tab" data-admtab="kontomail">Konten aus Mail</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
@@ -12139,8 +12133,7 @@
           <div class="panel" id="wd-ueb" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
               <div class="panel-title">Statistik <span style="font-weight:400;color:var(--sub);font-size:12px" id="wd-ueb-stat-sub"></span></div>
-              <!-- Firmen-Chips (aus wdUebPayouts) wieder da (29.10.2026): sie filtern Kacheln, Graf und Liste je Firma — .1815 hatte sie mit den Karten entfernt -->
-              <div class="wd-ueb-chips"><div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div><span style="width:8px"></span><div class="wd-ueb-chips" id="wd-ueb-firmen"></div></div>
+              <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
             </div>
             <div class="wd-ueb-kpis" id="wd-ueb-stat-kpis"></div>
             <!-- Linien-Graf (28.10.2026, Finn: „ein Graf mit zwei Linien — Fusion-PnL akkumuliert … und Master-PnL akkumuliert") — wdUebGraf, Lightweight Charts wie die Markt-View -->
@@ -12538,6 +12531,40 @@
           <div class="mail-box">
             <div class="mail-liste" id="adm-mail-liste"></div>
             <div class="mail-lesen" id="adm-mail-lesen"><div class="mail-lesen-kopf">Mail links anklicken.</div></div>
+          </div>
+        </div>
+        <!-- KONTEN AUS MAIL (29.10.2026): je erkannte Konto-Mail eine Zeile (Datum · Firma · Account · Größe · ID · Stand), Knopf „Anlegen"
+             öffnet das bestehende Account-Modal vorbefüllt — nichts wird blind angelegt. Muster je Firma: KONTO_MAIL_MUSTER im JS. -->
+        <div id="adm-pane-kontomail" hidden>
+          <div class="panel" style="margin-bottom:14px">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Konten aus Mail</div>
+                <div class="panel-sub" id="adm-km-sub">Konto-Mails der Prop-Firmen (Tradeify, Topstep, Apex, FundedNext, FundingPips, FTMO) der letzten 90 Tage, Resets als Art „Reset" (neue External ID) · „Anlegen" füllt das Account-Modal vor, angelegt wird nichts von allein</div>
+              </div>
+              <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+                <div id="adm-km-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
+                <button class="btn btn-ghost" id="adm-km-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+              </div>
+            </div>
+            <!-- S3-Stresstest 29.10.2026: was der Reiter nie zeigen kann — Firmen ohne Konto-Mail, IDs ohne Mail-Anbindung (Gmail-Script) -->
+            <div id="adm-km-hinweis" style="color:var(--sub);font-size:11.5px;padding:0 18px 10px">Keine Konto-Mails von: Lucid, Blue Guardian, Tradeify CFD, MFFU, Alpha, Fusion · The5ers und FTMO nennen keine Kontonummer · ohne Mail-Anbindung: Finn + Pascal, Pascal</div>
+            <div id="adm-km-msg" style="color:var(--sub);font-size:13px;padding:14px 18px">Lade Konto-Mails…</div>
+            <div class="table-wrap" id="adm-km-wrap" hidden>
+              <table class="t">
+                <thead><tr>
+                  <th>Datum</th>
+                  <th>Firma</th>
+                  <th>Account</th>
+                  <th class="adm-num">Größe</th>
+                  <th>ID</th>
+                  <th>Betreff</th>
+                  <th>Stand</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="adm-km-rows"></tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div id="adm-pane-konten" hidden>
@@ -15026,7 +15053,7 @@
     // Trade-Planer für Verwalter seit 09.10.2026 aus — seit 13.10.2026 WIEDER AN (Gruppen-Planer, Finn: „genau so soll er in seinem
     // Admin-Panel die Trades bestätigen, genau in der gleichen Ansicht wie Hermann Technologies"): der Server liefert ihm dort nur seine
     // Gruppe (sicht=admin → ap_sicht_uid/ap_eingriff_sicht), Planer-Haken (HT user_ids) bleiben 403
-    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter
+    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail', 'kontomail'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter; kontomail (29.10.2026) ebenso
     const admEingeschraenkt = () => !!(admData && Array.isArray(admData.sicht_ids))
     const admIstVerwalter = () => !!(admData && admData.verwalter)
     function kasseReiterErlaubt(name, ec){
@@ -20322,6 +20349,7 @@
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-konten').hidden   = name !== 'konten'   // Alle Accounts (13.10.2026)
         $('adm-pane-mail').hidden     = name !== 'mail'     // Mail aller IDs (21.10.2026)
+        $('adm-pane-kontomail').hidden = name !== 'kontomail'   // Konten aus Mail (29.10.2026)
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
@@ -20345,6 +20373,7 @@
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
         if(name === 'mail') window._admMailOeffnen?.()   // lädt /admin/mail bei jedem Öffnen, sonst nie (kein Takt)
+        if(name === 'kontomail') window._admKontoMailOeffnen?.()   // Konten aus Mail (29.10.2026): lädt beim Öffnen, sonst nie
         if(name === 'radarstat') window._rstOeffnen?.()   // Radar-Statistik (28.10.2026): /admin/live-trades beim Öffnen, Cache 60 s
         if(name === 'overview'){ admVlResize(); window._admPcsOeffnen?.() }   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026); PC-Tabs (08.10.2026)
         if(name === 'rg')   rgOpen()
@@ -48773,7 +48802,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1820'
+  const OS_TAB_BUILD = '2026-09-22.1821'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63280,16 +63309,6 @@
   const wdUebFirma = f => { const s = String(f || '').toLowerCase()
     return s.includes('fundednext') && s.includes('futur') ? 'FundedNext' : s.includes('apex') ? 'Apex' : s.includes('lucid') ? 'Lucid' : s.includes('topstep') ? 'Topstep'
       : s.includes('tradeify') ? 'Tradeify' : s.includes('ftmo') ? 'FTMO' : (String(f || '').trim() || '—') }
-  // Deutscher Tag eines WD aus dem Ende-Zeitstempel (Europe/Berlin) — das datum-Feld aus app.py ist der UTC-Tag (29.10.2026)
-  const wdUebDeTag = t => { const d = t && t.zeit ? new Date(t.zeit) : null; return d && Number.isFinite(d.getTime()) ? d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) : String((t && t.datum) || '') }
-  // Echter Winning Day (29.10.2026, Finn am Screenshot der Liste: „jede einzelne Funded-Trade auch … ich will nur die Winning Days"):
-  // nur der Plan-Haken winning_day (Farmer / Erledigt-Haken). Befund 29.10.2026 (DB): 292 Trades im alten Kriterium = 164 mit Haken +
-  // 106 reine Hedge-Trades (92 Funded, 14 Challenge) + 22 ohne Haken auf Konten mit konto_typ 'winning_days' — darunter Funded-Big-Trades
-  // (Apex „→ Funded" −4.006 $, Tradeify-Etappen −4.500 $), deshalb zählt der Kontotyp hier NICHT (WD_UEB_NUR_FLAG = false würde ihn
-  // mitnehmen, wie Admin → Statistik). Liefert das Backend die Felder noch nicht (vor dem Deploy von app.py), bleibt alles wie bisher drin.
-  const WD_UEB_NUR_FLAG = true
-  const wdUebIstWd = t => t.winning_day === undefined && t.konto_typ === undefined ? true : (t.winning_day === true || (!WD_UEB_NUR_FLAG && String(t.konto_typ || '') === 'winning_days'))
-  const wdUebZeitName = z => ({ heute: 'Heute', 7: '7 Tage', 30: '30 Tage', alle: 'Kapitel' })[z] || z + ' Tage'
   const wdUebTag = d => ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][d.getUTCDay()] + ' ' + d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
   // „150k …0431" — Größe aus dem Namen, External ID hinten (wie die Konto-Kürzel im Radar)
   const wdUebKonto = k => { const g = String(k.name || '').match(/(\d{2,3})\s*k\b/i), x = String(k.ext || '').replace(/\s/g, '')
@@ -63337,7 +63356,7 @@
     if(tr) tr.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
   function wdUebPayouts(liste){
-    const chips = null, box = document.getElementById('wd-ueb-po'); if(!box) return   // Karten seit .1815 nicht im Markup; die Firmen-Chips zeichnet wdUebStatistik (29.10.2026)
+    const chips = document.getElementById('wd-ueb-firmen'), box = document.getElementById('wd-ueb-po'); if(!box) return
     const firmen = new Map(); for(const e of liste) firmen.set(e.firma, (firmen.get(e.firma) || 0) + 1)
     if(_wdUeb.firma && !firmen.has(_wdUeb.firma)) _wdUeb.firma = ''
     if(chips) chips.innerHTML = firmen.size > 1 ? [['', 'Alle', liste.length], ...[...firmen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([f, n]) => [f, f, n])]
@@ -63370,7 +63389,7 @@
     // Kapitel einmal mitladen (dieselbe Ladung wie Admin → Statistik, mit deren Cache) — höchstens alle 5 min angestoßen
     // nur bei sichtbarem Reiter — wdRender läuft auch in PC-Tabs (wdTick), die sollen /admin/kapitel nie anstoßen
     if(typeof window._admKapOeffnen === 'function' && wdSichtbar() && Date.now() - _wdUeb.kapAt > 5 * 60000){ _wdUeb.kapAt = Date.now(); try{ window._admKapOeffnen() }catch(_){} }
-    if(chips) chips.innerHTML = [['heute', 'Heute'], ['7', '7 Tage'], ['30', '30 Tage'], ['alle', 'Kapitel']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.zeit === z ? ' is-on' : ''}" data-wd-ueb-zeit="${z}">${t}</button>`).join('')
+    if(chips) chips.innerHTML = [['7', '7 Tage'], ['30', '30 Tage'], ['alle', 'Kapitel']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.zeit === z ? ' is-on' : ''}" data-wd-ueb-zeit="${z}">${t}</button>`).join('')
       + '<span style="width:8px"></span>' + [['firma', 'je Firma'], ['id', 'je ID']].map(([z, t]) => `<button type="button" class="adm-vl-chip${_wdUeb.sicht === z ? ' is-on' : ''}" data-wd-ueb-sicht="${z}">${t}</button>`).join('')
     if(!kap){
       // Ladefehler steht in der Kapitel-Meldung des Admins (admKapitelLaden) — dort lesen statt ewig „lädt" (nächster Versuch im 30-s-Takt nach 5 min)
@@ -63378,58 +63397,34 @@
       kp.innerHTML = ''; box.innerHTML = `<div class="wd-ueb-leer">${kaputt ? escapeHtml(fehler.replace('Kapitel', 'Statistik')) : 'Statistik lädt … (dieselben Daten wie Admin → Statistik)'}</div>`; if(sub) sub.textContent = ''; wdUebGraf([]); return
     }
     const aus = wdIdsAus(), gesehen = new Set(), alle = []
-    let backendAlt = false
     for(const c of (kap.kapitel || [])) for(const t of (c.wd_liste || [])){
       if(gesehen.has(String(t.id))) continue; gesehen.add(String(t.id))
       if(aus.has(String(t.user_id)) || !wdSichtOk(t.user_id)) continue
-      if(!wdUebIstWd(t)) continue   // nur echte Winning Days (29.10.2026, Finn) — Funded-Big-Trades stehen in wd_liste nur wegen hedge_eur > 0
-      if(t.winning_day === undefined) backendAlt = true   // Backend liefert das Feld noch nicht (Railway-Deploy von app.py steht aus)
       alle.push(t)
     }
-    // Zeitraum (29.10.2026, Finn: „die Zahl soll sich updaten, je nachdem welchen Tag ich auswähle, und auch Heute") — gilt für
-    // Kacheln, Graf UND Zeilen. „Heute" = deutscher Tag (Winterzeit: beginnt 03:00 Dubai); der Tag eines WD kommt aus seinem
-    // Ende-Zeitstempel in Europe/Berlin — das datum-Feld aus app.py ist der UTC-Tag, 02:30 Berlin wäre dort noch der Vortag.
-    const heute = _deTodayStr()
-    const tagVon = n => (d => { d.setUTCDate(d.getUTCDate() - (n - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
-    const ab = _wdUeb.zeit === 'alle' ? '' : _wdUeb.zeit === 'heute' ? heute : tagVon(Number(_wdUeb.zeit))
-    const zeitName = wdUebZeitName(_wdUeb.zeit)
+    const heute = _deTodayStr(), ab = _wdUeb.zeit === 'alle' ? '' : (d => { d.setUTCDate(d.getUTCDate() - (Number(_wdUeb.zeit) - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
     const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
-    const wann = t => { const d = t.zeit ? new Date(t.zeit) : null; return d && Number.isFinite(d.getTime()) ? d : null }
-    const deTag = wdUebDeTag
-    // Sekunden (UTC) von Mitternacht eines deutschen Tages — Nullpunkt des Grafs am Zeitraum-Anfang
-    const deMitternacht = tag => { const d0 = new Date(tag + 'T00:00:00Z'); const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', hour12: false }).format(d0)) % 24; return Math.floor(d0.getTime() / 1000) - h * 3600 }   // um 00:00Z ist Berlin 01:00/02:00 — auch an Umstellungstagen (Wechsel erst 01:00Z)
-    // Firmen-Chips aus den WDs der Statistik (29.10.2026, Gegenprüfung): Zähler = WDs der Firma im Zeitraum. Vorher kamen sie aus den aktiven
-    // WD-Konten (wdUebPayouts) — Firmen ohne aktives Konto fehlten, und ein gesetzter Filter sprang still auf „Alle" zurück.
-    const fchips = document.getElementById('wd-ueb-firmen')
-    if(fchips){
-      const zaehl = new Map()
-      for(const t of alle){ const f = wdUebFirma(t.master_firm); if(!zaehl.has(f)) zaehl.set(f, 0); const tag = deTag(t); if(tag && (!ab || tag >= ab)) zaehl.set(f, zaehl.get(f) + 1) }
-      if(_wdUeb.firma && !zaehl.has(_wdUeb.firma)) _wdUeb.firma = ''
-      const ges = [...zaehl.values()].reduce((a, b) => a + b, 0)
-      fchips.innerHTML = zaehl.size > 1 ? [['', 'Alle', ges], ...[...zaehl.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([f, n]) => [f, f, n])]
-        .map(([f, t, n]) => `<button type="button" class="adm-vl-chip${_wdUeb.firma === f ? ' is-on' : ''}" data-wd-ueb-firma="${escapeHtml(f)}" title="Winning Days dieser Firma im Zeitraum">${escapeHtml(t)} <span class="kf">${n}</span></button>`).join('') : ''
-    }
-    const sek = t => { const d = wann(t); return d ? Math.floor(d.getTime() / 1000) : deMitternacht(deTag(t)) + 12 * 3600 }   // Ende-Zeit in Sekunden (ohne Zeitstempel: Mittag des Tages)
-    const rows = alle.filter(t => { const tag = deTag(t); return tag && (!ab || tag >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma) })
-      .sort((a, b) => sek(a) - sek(b))
-    // Kumuliert über die WDs im Zeitraum (28.10.2026, Finn: „Fusion-PnL akkumuliert … Master-PnL akkumuliert … Netto-Differenz
-    // weglassen"): ein Punkt je WD (Stand nach seinem Ende), davor der Nullpunkt am Zeitraum-Anfang (Kapitel: ein Tag vor dem ersten WD).
-    let mK = 0, fK = 0, mN = 0, fN = 0, zuletzt = 0
-    const punkte = []
-    if(rows.length){ zuletzt = ab ? deMitternacht(ab) : sek(rows[0]) - 86400; punkte.push({ time: zuletzt, m: 0, f: 0 }) }
-    for(const t of rows){
+    const rows = alle.filter(t => (!ab || String(t.datum || '') >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
+    // Kumuliert über ALLE Winning Days (28.10.2026, Finn: „Fusion-PnL akkumuliert über alle Trades vom Typ Winning Day, und Master-PnL
+    // akkumuliert über alle … Netto-Differenz weglassen") — die Zeitraum-Chips gelten nur noch für die Zeilen je Firma/ID unten,
+    // der Firmen-Chip oben für beides. Stand je Tag = Summe bis Tagesende (Reihenfolge datum, zeit).
+    const kum = alle.filter(t => t.datum && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
+      .sort((a, b) => String(a.datum).localeCompare(String(b.datum)) || String(a.zeit || '').localeCompare(String(b.zeit || '')))
+    let mK = 0, fK = 0, mN = 0, fN = 0
+    const tage = new Map()
+    for(const t of kum){
       const mp = num(t.master_pl), fe = num(t.fusion_eur)
       if(mp !== null){ mK += mp; mN++ }
       if(fe !== null){ fK += fe; fN++ }
-      let z = sek(t); if(z <= zuletzt) z = zuletzt + 1; zuletzt = z   // Zeitstempel müssen streng steigen (gleiche Sekunde → +1 s)
-      punkte.push({ time: z, m: mK, f: fK })
+      tage.set(String(t.datum), { m: mK, f: fK })
     }
-    if(sub) sub.textContent = `· ${rows.length} Winning Day${rows.length === 1 ? '' : 's'} · ${zeitName}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · ${backendAlt ? 'Backend noch alt → Winning-Day-Filter noch nicht aktiv (Funded-Trades noch drin, nach dem Railway-Deploy weg)' : 'nur Winning Days (Plan-Haken), Funded-Big-Trades und Topstep nicht drin'}`
+    const letzter = kum.length ? kum[kum.length - 1].datum : ''
+    if(sub) sub.textContent = `· ${kum.length} Winning Day${kum.length === 1 ? '' : 's'} kumuliert${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
     kp.innerHTML =
-      wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · ${zeitName} · Ø ${wdUebEur(fK / fN)}` : `noch nichts gebucht · ${zeitName}`, fN ? wdUebFarbe(fK) : '', `Fusion-Hedge-P&L der Winning Days im Zeitraum „${zeitName}" aufsummiert (Deal-Historie, €) — amber Linie im Graf`) +
-      wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · ${zeitName} · Ø ${wdUebUsd(mK / mN)}` : `keine Winning Days · ${zeitName}`, mN ? wdUebFarbe(mK) : '', `Master-P&L der Winning Days im Zeitraum „${zeitName}" aufsummiert ($) — violette Linie im Graf`)
-    wdUebGraf(punkte)
-    wdUebListe(rows)   // Liste aller WDs (.1815) — dieselben rows wie Kacheln + Graf (Zeitraum + Firma)
+      wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · Ø ${wdUebEur(fK / fN)}` : 'noch nichts gebucht', fN ? wdUebFarbe(fK) : '', 'Fusion-Hedge-P&L aller Winning Days aufsummiert (Deal-Historie, €) — amber Linie im Graf') +
+      wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · Ø ${wdUebUsd(mK / mN)}${letzter ? ' · bis ' + escapeHtml(wdUebTag(new Date(letzter + 'T12:00:00Z'))) : ''}` : 'keine Winning Days', mN ? wdUebFarbe(mK) : '', 'Master-P&L aller Winning Days aufsummiert ($) — violette Linie im Graf')
+    wdUebGraf([...tage.entries()].map(([d, v]) => ({ time: d, m: v.m, f: v.f })))
+    wdUebListe(kum)
     // je Firma / je ID: Balken = Anzahl, Wert = Ø Master je WD, rechts TP-Quote
     const m = new Map()
     for(const t of rows){
@@ -63444,7 +63439,7 @@
         <div class="adm-track"><div class="adm-fill" style="width:${(100 * e.n / maxN).toFixed(1)}%;background:${_wdUeb.sicht === 'id' ? idFarbe(e.key) : 'var(--violet)'};opacity:.7"></div></div>
         <div class="adm-val" style="color:${wdUebFarbe(e.m)}" title="Ø Master-P&amp;L je Winning Day">Ø ${wdUebUsd(e.m / e.n)}</div>
         <div class="adm-pct" title="TP erreicht (Master im Plus)">${Math.round(100 * e.tp / e.n)} %</div></div>`).join('')
-      : `<div class="wd-ueb-leer">Keine Winning Days · ${escapeHtml(zeitName)}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
+      : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
   }
   // Alle Winning Days einzeln (29.10.2026, Finn: „alle Winning Day Trades einmal runtergerattert, sodass ich gucken kann, dass die
   // Statistik immer stimmt"). Dieselbe Reihe `kum` wie Kacheln und Graf (gleiche Sortierung, gleiche Zahlen) — die Σ-Spalten laufen
@@ -63454,10 +63449,10 @@
     const an = !!_wdUeb.liste, box = document.getElementById('wd-ueb-liste'), sub = document.getElementById('wd-ueb-liste-sub'), cb = document.getElementById('wd-ueb-liste-an')
     if(!box) return
     if(cb && cb.checked !== an) cb.checked = an
-    if(sub) sub.textContent = kum.length ? `${kum.length} Trade${kum.length === 1 ? '' : 's'} · ${wdUebZeitName(_wdUeb.zeit)}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · neueste oben, Σ läuft mit (oberste Zeile = Kacheln)` : ''
+    if(sub) sub.textContent = kum.length ? `${kum.length} Trade${kum.length === 1 ? '' : 's'}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · neueste oben, Σ läuft mit` : ''
     box.hidden = !an
     if(!an){ box.innerHTML = ''; return }
-    if(!kum.length){ box.innerHTML = `<div class="wd-ueb-leer">Keine Winning Days · ${escapeHtml(wdUebZeitName(_wdUeb.zeit))}${_wdUeb.firma ? ' · ' + escapeHtml(_wdUeb.firma) : ''}.</div>`; return }
+    if(!kum.length){ box.innerHTML = '<div class="wd-ueb-leer">Noch keine Winning Days im Kapitel.</div>'; return }
     const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
     let mS = 0, fS = 0
     const zeilen = kum.map(t => {
@@ -63466,12 +63461,9 @@
       if(fe !== null) fS += fe
       return { t, mp, fe, mS, fS }
     }).reverse()
-    // Tag + Uhrzeit in deutscher Zeit (wie die Zeitraum-Chips) — Dubai wäre bei Enden nach 21:00 Berlin schon der Folgetag (Gegenprüfung 29.10.2026)
-    const tag = t => escapeHtml(wdUebTag(new Date(wdUebDeTag(t) + 'T12:00:00Z'))) + (t.zeit ? ' <span class="kf" title="deutsche Zeit, wie Heute/7 Tage/30 Tage">' + escapeHtml(new Date(t.zeit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' })) + '</span>' : '')
+    const tag = t => escapeHtml(wdUebTag(new Date(String(t.datum) + 'T12:00:00Z'))) + (t.zeit ? ' <span class="kf">' + escapeHtml(wdHhmm(t.zeit)) + '</span>' : '')
     const ri = r => { const s = String(r || ''); return s ? s[0].toUpperCase() + s.slice(1) : '' }
-    // Schließweg des Fusion-Hedges aus hedge_grund — dieselben Texte wie der Schließwege-Block (SW_WEG_VON → SW_WEG_TXT), ohne Grund „–"
-    const weg = t => { const g = String(t.grund || ''); return g ? (SW_WEG_TXT[SW_WEG_VON[g] || 'sonst'] || g) : '–' }
-    box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>ID</th><th>Konto</th><th>Firma</th><th>Richtung</th><th>Weg</th>`
+    box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>ID</th><th>Konto</th><th>Firma</th><th>Richtung</th>`
       + `<th class="zahl">Master</th><th class="zahl">Fusion</th><th class="zahl">Σ Master</th><th class="zahl">Σ Fusion</th></tr></thead><tbody>`
       + zeilen.map(({ t, mp, fe, mS, fS }) => `<tr>
           <td>${tag(t)}</td>
@@ -63479,7 +63471,6 @@
           <td>${escapeHtml(t.account_name || '—')}${t.blown ? ' <span style="color:var(--danger)">geblowt</span>' : ''}</td>
           <td>${escapeHtml(wdUebFirma(t.master_firm))}</td>
           <td>${escapeHtml([ri(t.richtung), t.kt != null ? wdDe(t.kt) + ' Kt' : ''].filter(Boolean).join(' · ') || '—')}</td>
-          <td title="Schließweg des Fusion-Hedges (hedge_grund: ${escapeHtml(String(t.grund || '–'))})">${escapeHtml(weg(t))}</td>
           <td class="zahl" style="color:${mp !== null ? wdUebFarbe(mp) : ''}">${mp !== null ? wdUebUsd(mp) : '–'}</td>
           <td class="zahl" style="color:${fe !== null ? wdUebFarbe(fe) : ''}">${fe !== null ? wdUebEur(fe) : '<span class="kf">nicht gebucht</span>'}</td>
           <td class="zahl summe">${wdUebUsd(mS)}</td>
@@ -63487,14 +63478,9 @@
       + '</tbody></table>'
   }
   // Linien-Graf (28.10.2026): Lightweight Charts wie die Markt-View (mklLibLaden, mklToken — dieselbe Bibliothek, kein neues Paket).
-  // x = Zeit (Unix-Sekunden, ein Punkt je WD-Ende; „Heute" zeigt Uhrzeiten, sonst Tage), Master $ rechte Skala, Fusion € linke; Farben aus den Tokens, beim Theme-Wechsel neu.
-  // Kein Zoom/Scroll (fitContent) — ein Punkt je WD, Abstände index-basiert (nicht zeitproportional), Neuzeichnen alle 30 s über wdRender ohne Flackern (setData).
+  // x = Datum (Tagesende-Stand), Master $ auf der rechten, Fusion € auf der linken Skala; Farben aus den Tokens, beim Theme-Wechsel neu.
+  // Kein Zoom/Scroll (fitContent) — die Reihe ist klein (ein Punkt je Handelstag), Neuzeichnen alle 30 s über wdRender ohne Flackern (setData).
   const WD_GRAF_H = 220
-  // Achse: Tag-Ticks „dd.MM.", Zeit-Ticks „HH:mm" (mehrere WDs je Tag → die Bibliothek setzt Zeit-Ticks dazwischen, Gegenprüfung 29.10.2026), Crosshair Tag + Uhrzeit;
-  // Zeiten lokal (Dubai wie überall in Prophos) — die Tagesgrenze der Chips ist der deutsche Tag, ein WD um 23:30 Berlin steht also bei „02:30" des Folgetags
-  const wdUebGrafZeit = (tt, art) => { const d = new Date(Number(tt) * 1000)
-    return art === 'uhr' ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : art === 'tag' ? d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
-      : d.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
   function wdUebGrafWeg(){ const g = _wdUeb.graf; if(!g) return; try{ g.ro && g.ro.disconnect() }catch(_){} try{ g.chart.remove() }catch(_){} _wdUeb.graf = null }
   function wdUebGraf(punkte){
     const box = document.getElementById('wd-ueb-graf'); if(!box) return
@@ -63508,14 +63494,13 @@
     const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
     const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11 },
       grid: { vertLines: { color: rahmen }, horzLines: { color: rahmen } }, rightPriceScale: { visible: true, borderColor: rahmen }, leftPriceScale: { visible: true, borderColor: rahmen },
-      timeScale: { borderColor: rahmen, timeVisible: true, secondsVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: (tt, typ) => wdUebGrafZeit(tt, typ >= 3 ? 'uhr' : 'tag') },
-      localization: { locale: 'de-DE', timeFormatter: tt => wdUebGrafZeit(tt, 'beides') } }
+      timeScale: { borderColor: rahmen, timeVisible: false, fixLeftEdge: true, fixRightEdge: true } }
     const farben = { m: mklToken('--violet', '#5447CE'), f: mklToken('--warn-ink', '#b45309') }
     let g = _wdUeb.graf
     if(!g || !g.chart || g.box !== box){
       wdUebGrafWeg(); box.innerHTML = ''
       const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || WD_GRAF_H, handleScale: false, handleScroll: false,
-        crosshair: { mode: LW.CrosshairMode.Normal } }, huelle))
+        crosshair: { mode: LW.CrosshairMode.Normal }, localization: { locale: 'de-DE' } }, huelle))
       const fmt = einheit => ({ type: 'custom', minMove: 1, formatter: v => wdDe(v) + einheit })
       const m = chart.addLineSeries({ color: farben.m, lineWidth: 2, priceScaleId: 'right', title: 'Master $', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt(' $') })
       const f = chart.addLineSeries({ color: farben.f, lineWidth: 2, priceScaleId: 'left', title: 'Fusion €', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt(' €') })
@@ -67784,21 +67769,16 @@
   async function loadNotesFromSupabase(){
     if(!currentUserId) return
     try{
-      // FÜR ALLE IDs (29.10.2026, Finn: „eine Notiz kurz für alle IDs teilen"): kein user_id-Filter mehr — RLS liefert die eigenen Zettel
-      // plus die geteilten der eigenen Gruppe (sql/2026-10-29_notiz_fuer_alle.sql). Eigene zuerst, dann fremde geteilte, je nach Zeit.
       const { data, error } = await supabase
         .from('notes').select('*')
+        .eq('user_id', currentUserId)
         .order('updated_at', { ascending: false })
       if(error){ console.error('loadNotes:', error); return }
-      notes = (data || []).sort((a, b) => (noteFremd(a) ? 1 : 0) - (noteFremd(b) ? 1 : 0))
+      notes = data || []
       renderNotes()
     }catch(e){ console.error('loadNotesFromSupabase failed:', e) }
   }
 
-  // Geteilter Zettel einer anderen ID: Chip „von <ID>", sonst wie ein eigener (29.10.2026 01:05, Finn: „sehen ihn alle IDs und können ihn
-  // auch verwalten … nicht so advanced mit Admin" — Admin-Gate und Schreibschutz von .1817 sind raus; die Schreibrechte regelt RLS:
-  // sql/2026-10-29_notiz_fuer_alle_verwalten.sql)
-  const noteFremd = n => !!(n && n.user_id && currentUserId && String(n.user_id) !== String(currentUserId))
   function renderNotes(){
     const grid  = document.getElementById('notesGrid')
     const empty = document.getElementById('notesEmpty')
@@ -67809,13 +67789,12 @@
       return
     }
     if(empty) empty.style.display = 'none'
-    grid.innerHTML = notes.map(n => { const fremd = noteFremd(n); return `
+    grid.innerHTML = notes.map(n => `
       <div class="note-card" data-note-id="${n.id}">
         <textarea class="note-ta" data-note-input="${n.id}" placeholder="Hier reinschreiben…">${escapeHtml(n.content || '')}</textarea>
         <div class="note-foot">
-          <span class="note-time" data-note-time="${n.id}">${NOTE_FMT(n.updated_at)}${fremd ? ` <span class="note-von" title="Für alle IDs geteilt von ${escapeHtml(n.geteilt_von || 'anderer ID')}"><i style="background:${idFarbe(n.user_id)}"></i>von ${escapeHtml(n.geteilt_von || 'anderer ID')}</span>` : ''}</span>
+          <span class="note-time" data-note-time="${n.id}">${NOTE_FMT(n.updated_at)}</span>
           <div class="note-actions">
-            <label class="note-teilen" title="${n.fuer_alle ? 'Alle IDs der Gruppe sehen und verwalten diesen Zettel — aus: nur noch der Ersteller' : 'Zettel für alle IDs der Gruppe sichtbar machen'}"><span class="switch"><input type="checkbox" data-note-share="${n.id}"${n.fuer_alle ? ' checked' : ''}><span class="switch-slider"></span></span>für alle IDs</label>
             <button class="note-btn" data-note-copy="${n.id}" title="Kopieren">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               Kopieren
@@ -67825,7 +67804,7 @@
             </button>
           </div>
         </div>
-      </div>` }).join('')
+      </div>`).join('')
     bindNoteEvents()
   }
 
@@ -67859,35 +67838,6 @@
     document.querySelectorAll('[data-note-del]').forEach(btn => {
       btn.addEventListener('click', () => noteDelete(btn.dataset.noteDel))
     })
-    document.querySelectorAll('[data-note-share]').forEach(sw => {
-      sw.addEventListener('change', () => noteTeilen(sw.dataset.noteShare, sw.checked))
-    })
-  }
-
-  // Slider „für alle IDs" (29.10.2026): an = alle IDs der Gruppe sehen und verwalten den Zettel (RLS: lesen/ändern/löschen), aus = nur noch
-  // der Ersteller. Auch eine andere ID darf ihn ausschalten (Finn: „verwalten") — dann verschwindet er bei ihr, Supabase gibt die Zeile
-  // nach dem Update nicht mehr zurück (Lese-Policy) → lokal entfernen. geteilt_von = Anzeigename des Einschaltenden für den Chip.
-  async function noteTeilen(id, an){
-    try{
-      const vonRoh = String((document.getElementById('userName') || {}).textContent || '').trim()
-      const von = (an && vonRoh && !/^loading/i.test(vonRoh)) ? vonRoh.slice(0, 40) : null   // „Loading…" nie als Name
-      const { data, error } = await supabase
-        .from('notes').update({ fuer_alle: !!an, geteilt_von: von }).eq('id', id).select('*')
-      if(error) throw error
-      const i = notes.findIndex(n => String(n.id) === String(id))
-      if(data && data[0]){ if(i >= 0) notes[i] = data[0] }
-      else if(i >= 0) notes.splice(i, 1)   // nicht mehr sichtbar (fremder Zettel, Slider aus)
-      renderNotes()
-      notesSetSync(an ? '✓ für alle IDs geteilt' : '✓ nicht mehr geteilt')
-      setTimeout(() => { if(!_noteSaveTimers.size) notesSetSync('') }, 1500)
-    }catch(e){
-      const msg = String((e && e.message) || e)
-      // Spalte fehlt = SQL-Datei noch nicht eingespielt — die EINE Ursache mit dem Fix (Finn 09.10.2026)
-      renderNotes()   // Schalter zurück auf den gespeicherten Stand
-      alert(/fuer_alle|geteilt_von|column/i.test(msg)
-        ? 'Teilen geht noch nicht: in der Tabelle notes fehlt die Spalte fuer_alle → sql/2026-10-29_notiz_fuer_alle.sql in Supabase einspielen.'
-        : 'Teilen fehlgeschlagen: ' + msg)
-    }
   }
 
   async function noteSave(id, content){
@@ -67935,8 +67885,6 @@
   }
 
   document.getElementById('notesAddBtn')?.addEventListener('click', noteAdd)
-  // Entwickler-Haken wie _admStub (29.10.2026): Zettel ohne Login zeichnen — Liste + eigene user_id, für den Boot-Check der geteilten Zettel
-  window._notesStub = (liste, me) => { if(me && !currentUserId) currentUserId = me; notes = Array.isArray(liste) ? liste : []; renderNotes() }
 
   /* ========== INITIAL LOAD: Accounts aus Supabase nach Login ========== */
 
@@ -68333,6 +68281,213 @@
     if(!r.ok || !d || d.ok === false) throw new Error((d && (d.msg || d.error)) || `HTTP ${r.status}`)
     return d
   }
+  /* ══ KONTEN AUS MAIL (29.10.2026, Finn 02:05–02:15: „Jedes Mal, wenn man einen Account kauft, kommen die Zugangsdaten per Mail …
+   * Bau das als Test: unter Admin ein neuer Reiter, der alle neuen Accounts zeigt, die per E-Mail dazugekommen sind … Wenn das proof ist,
+   * müssen wir nie wieder Accounts in Prophos hinzufügen"). Daten: GET /admin/konto-mails (Railway, HT-Sicht wie /admin/mail, nur Lesen):
+   * Mails, deren Betreff eines der Suchwörter der Muster enthält, + alle Konten der Sicht. Erkennung hier je Firma (KONTO_MAIL_MUSTER:
+   * Betreff-Regex + Konto-Regex auf dem Text, Beispielbetreff im Kommentar). Stand je Zeile: „neu" · „schon in Prophos" (accounts.external_id
+   * oder Name enthält die Kontonummer) · „angelegt" (in dieser Sitzung über den Knopf angelegt). „Anlegen" öffnet das bestehende Account-Modal
+   * (openAccountModal) vorbefüllt mit Firma, Größe, External ID, Typ nach Futures/CFD (Memory prophos-kontoart-futures-challenge) — der Name
+   * folgt der Namensregel (acNameVorschlag), Phase wählt Finn. Nichts wird blind angelegt. Laden nur beim Öffnen und auf ↻ (kein Takt). ══ */
+  const KONTO_MAIL_TAGE = 90
+  const KONTO_MAIL_MUSTER = [
+    // Tradeify — „Your Tradovate account is ready": „Account Details Account Name TDFYSL150207636079 Order ID 8890888"
+    { firma: 'Tradeify', suche: 'Tradovate account is ready', betreff: /Tradovate account is ready/i, konto: /Account\s*Name\s*:?\s*([A-Z]{4,}\d{6,})/, typ: 'challenge',
+      groesse: t => kontoMailGroesseAusName(t) },
+    // Tradeify Reset (Finn 29.10.2026 01:35: „in der Reset-Mail steht die External ID, die wir brauchen, um die Konten in Massen hinzuzufügen") —
+    //   „Your account reset is confirmed": „Reset Details Previous Account TDFYSL150646149538 New Account ID TDFYSL150892920802" → neue External ID
+    { firma: 'Tradeify', suche: 'account reset is confirmed', betreff: /account reset is confirmed/i, konto: /New Account ID\s*:?\s*([A-Z]{4,}\d{6,})/i,
+      vorher: /Previous Account\s*:?\s*([A-Z]{4,}\d{6,})/i, art: 'reset', typ: 'challenge', groesse: t => kontoMailGroesseAusName(t) },
+    // Topstep Reset — „Your Trading Combine has been reset": der Kontoname steht NICHT im Text (3 Mails geprüft 29.10.2026) → „ohne Nummer"
+    { firma: 'Topstep', suche: 'Combine has been reset', betreff: /Combine has been reset/i, konto: /(\d{2,3}KTC[A-Z0-9-]{8,})/i, art: 'reset', typ: 'challenge',
+      groesse: t => (t.match(/^(\d{2,3})K/i) || [])[1] || '' },
+    // Tradeify (älter) — „Tradeify: Your Tradovate account is active": „The account name is TDFYSL150179377125."
+    { firma: 'Tradeify', suche: 'Tradovate account is active', betreff: /Tradovate account is active/i, konto: /account name is\s*([A-Z]{4,}\d{6,})/i, typ: 'challenge',
+      groesse: t => kontoMailGroesseAusName(t) },
+    // Tradeify Funded — „Congratulations! You're funded": „Account FTDFYSLX150227987742 is ready to go … Account Size Select Flex $150k"
+    { firma: 'Tradeify', suche: "You're funded", betreff: /You.re funded/i, konto: /Account\s+([A-Z]{4,}\d{6,})\s+is ready/, typ: 'funded',
+      groesse: (t, text) => (text.match(/Account Size[^$]{0,40}\$(\d{2,3})k/i) || [])[1] || kontoMailGroesseAusName(t) },
+    // Topstep — „Order confirmed. Your Trading Combine is ready": „Account Name:* 150KTC-SKU-V2-DLL-688698-52646025"
+    { firma: 'Topstep', suche: 'Trading Combine is ready', betreff: /Trading Combine is ready/i, konto: /Account\s*Name\s*:?\*?\s*(\d{2,3}K[A-Z0-9-]{8,})/i, typ: 'challenge',
+      groesse: t => (t.match(/^(\d{2,3})K/i) || [])[1] || '' },
+    // Topstep Express — „Your Express Funded Account is Activated": „EXPRESS-V2-…" steht im Text (7/7 Mails, Prüfer 29.10.2026)
+    { firma: 'Topstep', suche: 'Express Funded Account is Activated', betreff: /Express Funded Account is Activated/i, konto: /(EXPRESS-V2-[A-Z0-9-]{6,})/i, typ: 'funded',
+      groesse: t => (t.match(/(\d{2,3})K/i) || [])[1] || '' },
+    // Apex — „Congratulations. Your Performance Account is active for Apex Trader Funding": „Your account is labeled *PA-APEX-685010-01*"
+    //   Prophos-Schreibweise ist PAAPEX6850100000001 (Duplikium): Bindestriche raus, letzte Gruppe auf 7 Stellen → kontoMailApexExt
+    { firma: 'Apex Trader', suche: 'Performance Account is active', betreff: /Performance Account is active/i, konto: /labeled\s*\*?(PA-APEX-\d{4,}-\d{1,})/i, typ: 'funded',
+      ext: m => kontoMailApexExt(m), groesse: () => '' },
+    // Apex Evaluation bestanden — „Passed APEX-641699-23 Activation Steps for Your Performance Funded Account" / „Your Tradovate EOD PA is in the
+    //   process of being activated": „passed evaluation APEX-641699-23" → Prophos-Form APEX6416990000023 (Eval-Konto, das Finn schon hat)
+    { firma: 'Apex Trader', suche: 'Activation Steps', betreff: /Activation Steps|being activated/i, konto: /(APEX-\d{4,}-\d{1,})/i, typ: 'challenge',
+      ext: m => kontoMailApexExt(m), groesse: () => '' },
+    // FundedNext (CFD) Kauf — „Congratulations on your new Challenge Account! - 14353615": „purchased a Stellar-2-Step-100000 USD Account! … Login ID: 14353615"
+    { firma: 'FundedNext', suche: 'new Challenge Account', betreff: /new Challenge Account/i, konto: /Login ID:?\s*(\d{6,})/i, typ: 'phase1',
+      groesse: (t, text) => kontoMailGroesseUsd((text.match(/Stellar[^ ]*?-(\d{4,7})\s*USD/i) || [])[1]) },
+    // FundedNext (CFD) Funded — „Your FundedNext Account is ready for activation! - 14357057": „Login ID: 14357057 … Server Name: FundedNext-Server2"
+    { firma: 'FundedNext', suche: 'ready for activation', betreff: /ready for activation/i, konto: /Login ID:?\s*(\d{6,})/i, typ: 'funded_cfd',
+      groesse: (t, text) => kontoMailGroesseUsd((text.match(/Stellar[^ ]*?-(\d{4,7})\s*USD/i) || [])[1]) },
+    // FundedNext (CFD, älter) — „Here are your requested credentials: [14149609]": „Login/Email:* 14149609 … Plan:* Stellar 2-Step Challenge P1 | 100K"
+    { firma: 'FundedNext', suche: 'requested credentials', betreff: /requested credentials/i, konto: /Login\/Email:?\*?\s*(\d{6,})/i,
+      typ: (m, text) => /FundedNext Account/i.test(text) ? 'funded_cfd' : /\bP2\b/.test(text) ? 'phase2' : 'phase1',
+      groesse: (t, text) => (text.match(/\|\s*(\d{2,3})K/i) || [])[1] || '' },
+    // FundingPips — „[21105542] Phase 2 account details": „your FundingPips 2 Step Flex account #21105542 has been successfully created" (keine Größe)
+    //   Betreff beginnt mit „[Nummer]" (sonst träfe Duplikium „Your Account Details at …"); „[…] Master account details" = Funded (funded_cfd)
+    { firma: 'FundingPips', suche: 'account details', betreff: /^\[\d{6,}\].*account details/i, konto: /account\s*#(\d{6,})/i,
+      typ: (m, text, betreff) => /Master/i.test(betreff) ? 'funded_cfd' : /Phase 2/i.test(betreff) ? 'phase2' : 'phase1', groesse: () => '' },
+    // FTMO — „Login credentials for your 2-Step FTMO Challenge - order 24774475 -": nur HTML, Login steht NICHT in der Mail (nur „Account MetriX") → ohne Nummer
+    { firma: 'FTMO', suche: 'Login credentials for your', betreff: /Login credentials for your/i, konto: /order\s*(\d{6,})/i, typ: 'phase1',
+      ext: () => '', groesse: () => '' },
+  ]
+  // FundedNext schreibt die Größe als „Stellar-2-Step-100000 USD" → 100 (k)
+  function kontoMailGroesseUsd(usd){ const n = Number(usd); return n >= 1000 ? String(Math.round(n / 1000)) : '' }
+  // Größe aus Tradeify-Kontonamen: TDFYSL**150**207636079 / FTDFYSLX**150**… = die ersten 2–3 Ziffern nach den Buchstaben (25/50/100/150/250/300)
+  function kontoMailGroesseAusName(name){
+    const z = (String(name || '').match(/^[A-Z]+(\d+)/) || [])[1] || ''
+    for(const g of ['300', '250', '150', '100', '75', '50', '25']) if(z.startsWith(g)) return g
+    return ''
+  }
+  function kontoMailApexExt(roh){
+    const m = String(roh || '').toUpperCase().match(/^(PA-)?APEX-(\d+)-(\d+)$/)
+    return m ? `${m[1] ? 'PAAPEX' : 'APEX'}${m[2]}${m[3].padStart(7, '0')}` : String(roh || '').replace(/-/g, '')
+  }
+  const _admKm = { mails: [], konten: [], angelegt: new Set(), nr: 0 }
+  function kontoMailErkennen(m){
+    for(const mu of KONTO_MAIL_MUSTER){
+      if(!mu.betreff.test(m.betreff || '')) continue
+      const text = String(m.text || '')
+      const tr = `${m.betreff || ''} ${text}`.match(mu.konto)   // Betreff zuerst: FundedNext/FundingPips/FTMO tragen die Nummer (auch) dort
+      const roh = tr ? tr[1] : ''
+      const ext = roh ? (mu.ext ? mu.ext(roh) : roh) : ''
+      const typ = typeof mu.typ === 'function' ? mu.typ(roh, text, m.betreff || '') : mu.typ
+      const vorher = mu.vorher ? ((`${m.betreff || ''} ${text}`.match(mu.vorher) || [])[1] || '') : ''
+      return { firma: mu.firma, ext, roh, typ, art: mu.art || 'neu', vorher, groesse: roh || text ? String(mu.groesse(roh, text) || '') : '' }
+    }
+    return null
+  }
+  // „schon in Prophos": External ID oder Name eines Kontos der Sicht enthält die Kontonummer (Bindestriche egal); Apex über die Duplikium-Form
+  function kontoMailStand(e){
+    if(!e.ext) return { stand: 'ohne Nummer', konto: null }
+    const key = e.ext.replace(/[^A-Z0-9]/gi, '').toUpperCase()
+    // nur Konten derselben Firma (Prüfer 29.10.2026: eine reine Ziffernnummer könnte sonst Teil einer fremden längeren ID sein)
+    const firmaKey = String(e.firma || '').toLowerCase().split(/\s+/)[0]
+    const k = _admKm.konten.find(k => (!firmaKey || String(k.firm || '').toLowerCase().includes(firmaKey))
+      && [k.external_id, k.name].some(v => String(v || '').replace(/[^A-Z0-9]/gi, '').toUpperCase().includes(key)))
+    if(k) return { stand: k.archived ? 'schon in Prophos (archiviert)' : 'schon in Prophos', konto: k }
+    if(_admKm.angelegt.has(key)) return { stand: 'angelegt', konto: null }
+    return { stand: 'neu', konto: null }
+  }
+  async function admKontoMailLaden(){
+    const nr = ++_admKm.nr, msg = document.getElementById('adm-km-msg'), wrap = document.getElementById('adm-km-wrap')
+    if(!msg) return
+    msg.hidden = false; msg.textContent = 'Lade Konto-Mails…'; if(wrap) wrap.hidden = true
+    try{
+      const suche = [...new Set(KONTO_MAIL_MUSTER.map(x => x.suche))].join('|')
+      const d = await admMailFetch(`/admin/konto-mails?tage=${KONTO_MAIL_TAGE}&betreff=${encodeURIComponent(suche)}`)
+      if(nr !== _admKm.nr) return
+      _admKm.mails = d.mails || []; _admKm.konten = d.konten || []
+      admKontoMailRender()
+    }catch(e){
+      if(nr !== _admKm.nr) return
+      msg.textContent = '✗ ' + String((e && e.message) || e) + ' — Reiter braucht ADMIN_EMAILS oder Mail-Leser-Freigabe (wie Admin → Mail)'
+    }
+  }
+  function admKontoMailRender(){
+    const msg = document.getElementById('adm-km-msg'), wrap = document.getElementById('adm-km-wrap'), tb = document.getElementById('adm-km-rows'), sums = document.getElementById('adm-km-sums')
+    if(!tb || !sums) return
+    const zeilen = []
+    let unerkannt = 0
+    for(const m of _admKm.mails){
+      const e = kontoMailErkennen(m)
+      if(!e){ unerkannt++; continue }
+      zeilen.push(Object.assign({ m }, e, kontoMailStand(e)))
+    }
+    const n = { neu: 0, drin: 0, angelegt: 0, ohne: 0, reset: 0 }
+    for(const z of zeilen){ if(z.art === 'reset') n.reset++; if(z.stand === 'neu') n.neu++; else if(z.stand === 'angelegt') n.angelegt++; else if(z.stand === 'ohne Nummer') n.ohne++; else n.drin++ }
+    sums.innerHTML = ''
+    for(const [wert, lbl, farbe] of [[zeilen.length, 'Konto-Mails', 'var(--ink)'], [n.neu, 'neu', n.neu ? 'var(--good)' : 'var(--sub)'], [n.drin, 'schon drin', 'var(--sub)'], [n.angelegt, 'angelegt', 'var(--sub)'], [n.reset, 'davon Reset', 'var(--sub)']]){
+      const d = document.createElement('div')
+      d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
+      d.children[0].textContent = String(wert); d.children[0].style.color = farbe; d.children[1].textContent = lbl
+      sums.appendChild(d)
+    }
+    tb.innerHTML = ''
+    if(!zeilen.length){ msg.hidden = false; msg.textContent = `Keine Konto-Mail in den letzten ${KONTO_MAIL_TAGE} Tagen erkannt (${_admKm.mails.length} Mails geladen, ${unerkannt} ohne Muster).`; if(wrap) wrap.hidden = true; return }
+    msg.hidden = true; if(wrap) wrap.hidden = false
+    for(const z of zeilen){
+      const tr = document.createElement('tr')
+      tr.innerHTML =
+        '<td class="km-datum" style="white-space:nowrap;color:var(--sub);font-size:12.5px"></td>' +
+        '<td class="km-firma" style="font-weight:600"></td>' +
+        '<td><span class="km-acc mono" style="font-size:12.5px"></span><div class="km-roh" style="font-size:11px;color:var(--sub)"></div></td>' +
+        '<td class="adm-num km-gr tnum" style="color:var(--sub)"></td>' +
+        '<td class="km-id" style="font-weight:600"></td>' +
+        '<td class="km-betreff" style="color:var(--sub);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></td>' +
+        '<td class="km-stand"></td>' +
+        '<td style="text-align:right;white-space:nowrap"><button type="button" class="btn btn-primary km-ok" style="padding:4px 9px;font-size:11.5px">Anlegen</button></td>'
+      const dt = z.m.datum ? new Date(z.m.datum) : null
+      tr.querySelector('.km-datum').textContent = dt && !isNaN(dt) ? dt.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : '—'
+      tr.querySelector('.km-firma').textContent = z.firma
+      tr.querySelector('.km-acc').textContent = z.ext || '— (Kontonummer nicht in der Mail)'
+      const roh = tr.querySelector('.km-roh')
+      const rohTxt = [z.roh && z.roh !== z.ext ? (z.ext ? 'in der Mail: ' : 'Bestellnummer ') + z.roh : '',
+        z.vorher ? `Reset von ${z.vorher}${kontoMailStand({ ext: z.vorher, firma: z.firma }).konto ? ' (in Prophos)' : ''}` : ''].filter(Boolean).join(' · ')
+      if(rohTxt) roh.textContent = rohTxt; else roh.remove()
+      tr.querySelector('.km-gr').textContent = z.groesse ? z.groesse + 'k' : '—'
+      tr.querySelector('.km-id').textContent = String(z.m.person || '—').split(/\s+/)[0]   // Vorname wie admShortName (das lebt im Admin-Block, hier nicht erreichbar)
+      const bt = tr.querySelector('.km-betreff'); bt.textContent = z.m.betreff || ''; bt.title = z.m.betreff || ''
+      const st = tr.querySelector('.km-stand')
+      if(z.art === 'reset'){   // Art „Reset" (Finn 29.10.2026): neue External ID nach Konto-Reset — Abgleich gegen accounts wie sonst
+        const r = document.createElement('span'); r.className = 'chip chip-neutral'; r.style.cssText = 'margin-right:4px;color:var(--violet)'; r.textContent = 'Reset'; st.appendChild(r)
+      }
+      const chip = document.createElement('span')
+      chip.className = 'chip ' + (z.stand === 'neu' ? 'chip-good' : z.stand === 'angelegt' ? 'chip-neutral' : z.stand === 'ohne Nummer' ? 'chip-warn' : 'chip-neutral')
+      chip.textContent = z.stand
+      if(z.konto) chip.title = `${z.konto.name || ''}${z.konto.external_id ? ' · #' + z.konto.external_id : ''}`
+      st.appendChild(chip)
+      const ok = tr.querySelector('.km-ok')
+      if(z.stand === 'neu' || z.stand === 'ohne Nummer') ok.addEventListener('click', () => admKontoMailAnlegen(z)); else ok.remove()
+      tb.appendChild(tr)
+    }
+  }
+  // „Anlegen": bestehendes Account-Modal vorbefüllt — Firma, Größe, External ID, Typ; Name nach Namensregel über acNameVorschlag. Landet bei der
+  // EINGELOGGTEN ID (das Modal hat keine ID-Wahl) — Finn legt heute je ID eingeloggt an; das steht in der Meldung an den Master.
+  function admKontoMailAnlegen(z){
+    if(typeof openAccountModal !== 'function'){ alert('Account-Modal nicht erreichbar'); return }
+    // Das Modal legt bei der EINGELOGGTEN ID an — gehört die Mail einer anderen ID, laut sagen (Prüfer 29.10.2026)
+    if(z.m.user_id && typeof currentUserId !== 'undefined' && String(z.m.user_id) !== String(currentUserId) && typeof atToast === 'function')
+      atToast(`Achtung: das Konto landet bei der eingeloggten ID, die Mail gehört ${z.m.person || 'einer anderen ID'} — dort einloggen oder Besitzer nachher umhängen`, 'end')
+    openAccountModal(z.typ || 'challenge')
+    const E = typeof accEls === 'object' ? accEls : null
+    if(E){
+      if(E.firm) E.firm.value = z.firma
+      if(E.groesse) E.groesse.value = z.groesse || ''
+      if(E.extId) E.extId.value = z.ext || ''
+      if(E.type && z.typ) E.type.value = z.typ
+      if(E.zusatz) E.zusatz.value = ''
+      if(typeof acNameVorschlag === 'function') acNameVorschlag()
+      try{ E.type?.dispatchEvent(new Event('change')) }catch(_){}
+    }
+    const key = String(z.ext || '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
+    // „angelegt" (nur diese Sitzung; beim nächsten Laden zählt die DB): erst wenn das Modal NACH einem Speichern-Klick zugeht — scheitert
+    // saveAccount an der Pflichtprüfung, bleibt das Modal offen und die Zeile bleibt „neu" (Prüfer 29.10.2026); Abbrechen/Escape zählt nicht
+    const save = accEls?.save, modal = accEls?.modal
+    if(save && modal && key){
+      let geklickt = false
+      const klick = () => { geklickt = true }
+      save.addEventListener('click', klick)
+      const zu = new MutationObserver(() => {
+        if(modal.classList.contains('open')) return
+        save.removeEventListener('click', klick); zu.disconnect()
+        if(geklickt){ _admKm.angelegt.add(key); admKontoMailRender() }
+      })
+      zu.observe(modal, { attributes: true, attributeFilter: ['class'] })
+    }
+  }
+  window._admKontoMailOeffnen = () => admKontoMailLaden()
+  window._admKontoMailStub = (mails, konten) => { _admKm.mails = mails || []; _admKm.konten = konten || []; admKontoMailRender() }   // Boot-Check ohne Login
+  window._kontoMailErkennen = m => kontoMailErkennen(m)
+  document.getElementById('adm-km-refresh')?.addEventListener('click', () => admKontoMailLaden())
   function admMailWahl(uid){
     _admMail.uid = uid || ''
     try{ _admMail.uid ? localStorage.setItem('prophos_adm_mail_id', _admMail.uid) : localStorage.removeItem('prophos_adm_mail_id') }catch(_){}

@@ -1,5 +1,6 @@
 import requests
 import re
+import html as html_mod
 import bisect
 import urllib3
 import threading
@@ -7397,9 +7398,6 @@ def admin_build_kapitel():
                     "hedge_eur": _f(p.get("hedge_eur")), "master_tp": _f(p.get("master_tp")),
                     "kt": _f(p.get("master_contracts")), "richtung": str(p.get("richtung") or "").lower(),
                     "grund": p.get("hedge_grund") or None, "blown": bool(p.get("blown")),
-                    # 29.10.2026 (Finn: „ich will nur die Winning Days angezeigt kriegen"): das Frontend (Admin → Winning Days, Statistik-Box)
-                    # trennt damit echte Winning Days (Plan-Haken; WD-Konto nur über den Frontend-Schalter WD_UEB_NUR_FLAG) von Funded-Big-Trades, die hier nur über hedge_eur > 0 drin sind
-                    "winning_day": bool(p.get("winning_day")), "konto_typ": str(p.get("konto_typ") or "") or None,
                     "quelle": "farmer" if "winning-day-farmer" in str(p.get("notes") or "").lower() else "hand",
                     "dauer_min": _kapitel_dauer_min(p.get("started_at"), p.get("ended_at") or p.get("completed_at"))})
             mpl = _f(p.get("master_pl"))
@@ -16171,6 +16169,71 @@ def admin_mail():
         return jsonify({"ok": False, "msg": f"Mails nicht lesbar: {str(e)[:120]}"}), 503
     return jsonify({"ok": True, "ids": admin_mail_ids(disp, set(disp) - sicht, schluessel, ungelesen), "mails": mails[:limit],
                     "mehr": len(mails) > limit})
+
+
+KONTO_MAIL_BETREFF_RE = re.compile(r"[A-Za-z0-9 .:'’!?\-]{3,80}")   # Betreff-Suchwörter aus dem Frontend — ohne Komma/Klammern (PostgREST-or-Syntax, Prüfer 29.10.2026)
+KONTO_MAIL_TEXT_MAX = 3000
+
+
+@app.route("/admin/konto-mails", methods=["GET", "OPTIONS"])
+def admin_konto_mails():
+    """GET /admin/konto-mails?betreff=<a>|<b>…&tage=90 → {ok, mails:[{id, user_id, person, von, betreff, datum, text}],
+    konten:[{id, user_id, name, external_id, firm, archived}]} — KONTEN AUS MAIL (29.10.2026, Finn: „jedes Mal, wenn man einen Account
+    kauft, kommen die Zugangsdaten per Mail … ein Reiter, der alle neuen Accounts zeigt, die per E-Mail dazugekommen sind … wenn das
+    proof ist, müssen wir nie wieder Accounts in Prophos hinzufügen"). Nur Lesen: Mails der HT-Sicht (wie /admin/mail), deren Betreff
+    eines der Suchwörter enthält (die Muster je Firma liegen im Frontend, KONTO_MAIL_MUSTER — hier nur der grobe Vorfilter), Text auf
+    KONTO_MAIL_TEXT_MAX gekürzt; dazu alle Konten der Sicht (Name, External ID), damit das Frontend „schon in Prophos" erkennt.
+    Gate wie /admin/mail (_admin_mail_auth)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _admin_mail_auth()
+    if err:
+        return err
+    try:
+        disp, sicht = _admin_mail_sicht()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"IDs nicht lesbar: {str(e)[:120]}"}), 502
+    woerter = [w.strip() for w in str(request.args.get("betreff") or "").split("|") if w.strip()]
+    woerter = [w for w in woerter if KONTO_MAIL_BETREFF_RE.fullmatch(w)][:12]
+    if not woerter:
+        return jsonify({"ok": False, "msg": "betreff fehlt (Suchwörter mit | getrennt)"}), 400
+    try:
+        tage = max(1, min(365, int(str(request.args.get("tage") or 90))))
+    except ValueError:
+        return jsonify({"ok": False, "msg": "tage ungültig"}), 400
+    ziel = sorted(sicht)
+    if not ziel:
+        return jsonify({"ok": True, "mails": [], "konten": []})
+    seit = (datetime.now(timezone.utc) - timedelta(days=tage)).isoformat()
+    # PostgREST-or: Komma/Klammern im Suchwort sind durch KONTO_MAIL_BETREFF_RE ausgeschlossen, Leerzeichen gehen als Teil des Musters
+    oder = ",".join(f"betreff.ilike.*{w.replace('*', '')}*" for w in woerter)
+    try:
+        mails = _sb_all("mails", {"select": "id,user_id,von,betreff,datum,text,html", "user_id": f"in.({','.join(ziel)})",
+                                  "datum": f"gt.{seit}", "or": f"({oder})", "order": "datum.desc,id.desc"}) or []
+        # Konten + Archiv-Stand wie die Übersicht (_admin_basis: accounts + user_settings-Archiv; archived ist keine accounts-Spalte)
+        basis = _admin_basis()
+        konten = [a for a in basis["accounts"] if str(a.get("user_id")) in sicht]
+        archiv = basis["archived"]
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Mails nicht lesbar: {str(e)[:120]}"}), 503
+    aus = []
+    for m in mails:
+        uid = str(m.get("user_id") or "")
+        text = str(m.get("text") or "")
+        if not text.strip():
+            text = str(m.get("html") or "")
+        # HTML raus, BEVOR gekürzt wird (Prüfer 29.10.2026: 68 Treffer-Mails tragen rohes HTML im text-Feld — FundedNext, Tradeify —, Tags
+        # zwischen „Account Name" und Wert hätten die Nummer versteckt); erst Tags, dann Entities, sonst würde &lt;…&gt; zu Tags
+        if "<" in text and re.search(r"<[a-zA-Z!/]", text):
+            text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.S | re.I)
+            text = re.sub(r"<[^>]+>", " ", text)
+        text = html_mod.unescape(text)
+        text = re.sub(r"\s+", " ", text)[:KONTO_MAIL_TEXT_MAX]
+        aus.append({"id": m.get("id"), "user_id": uid, "person": disp.get(uid) or uid[:8], "von": m.get("von") or "",
+                    "betreff": m.get("betreff") or "", "datum": m.get("datum") or "", "text": text})
+    kk = [{"id": str(k.get("id")), "user_id": str(k.get("user_id") or ""), "name": k.get("name") or "",
+           "external_id": k.get("external_id") or "", "firm": k.get("firm") or "", "archived": str(k.get("id")) in archiv} for k in konten]
+    return jsonify({"ok": True, "mails": aus, "konten": kk, "tage": tage})
 
 
 @app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])
