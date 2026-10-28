@@ -12519,7 +12519,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Nächste Payouts</div>
-                  <div class="panel-sub">Termin je Account und was der Payout bringt · Payout = (Balance − Größe) × Profit-Share + FundedNext-Refund beim ersten Payout, anklicken zum Anpassen · Anfragbar = Gewinn × Anteil-Regel der Firma, gedeckelt (firm_rules) · Erhalten = Anfragbar × Profit-Share</div>
+                  <div class="panel-sub">Termin je Account und was der Payout bringt · Anfragbar = min(Gewinn × Anteil-Regel der Firma, Deckel) × Profit-Share (firm_rules; Gewinn = Balance − Größe) · Betrag anklicken: Profit-Share oder fester Betrag je Konto</div>
                 </div>
                 <div id="adm-f-cal-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
@@ -12532,9 +12532,7 @@
                     <th>Firma</th>
                     <th>Stand</th>
                     <th class="adm-num">Balance</th>
-                    <th class="adm-num">Payout</th>
                     <th class="adm-num">Anfragbar</th>
-                    <th class="adm-num">Erhalten</th>
                   </tr></thead>
                   <tbody id="adm-f-cal-rows"></tbody>
                 </table>
@@ -16393,15 +16391,6 @@
     window._admPayoutCalc = r => admPayoutCalc(r)
     window._admKapDaten = () => admKapData
     window._admKapOeffnen = () => admKapitelOeffnen()
-    function admPayoutHerleitung(c){
-      const refund = c.refund
-        ? (c.ccy === 'EUR' ? ` + Refund ${admGeld(c.refund, 'EUR')}` : ` + Refund ${admGeld(c.refundEur, 'EUR')} ≈ ${admGeld(c.refund, c.ccy)}`)
-        : ''
-      if(c.manuell) return 'manuell' + (c.berechnet != null ? ' · ber. ' + admGeld(c.berechnet, c.ccy) : '')
-      const pctTxt = String(c.pct).replace('.', ',')   // 76,5 (FundedNext, 08.10.2026)
-      if(c.profit == null) return (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + pctTxt + ' %' + refund
-      return (c.profit >= 0 ? '+' : '−') + admGeld(Math.abs(c.profit), c.ccy) + ' × ' + pctTxt + ' %' + refund
-    }
     // Balance-Zelle: Quelle im Tooltip, „manuell" = Startbalance gedämpft,
     // Stand-Zeit sichtbar, sobald der Snapshot älter als eine Stunde ist
     // (Doktrin 31.08.: alter Kontostand ist okay, nur nie als frisch ausgeben).
@@ -17700,7 +17689,6 @@
         const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
         const tageBis = tag => Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
         const geld = admGeld, geldMap = admGeldMap
-        const addTo = (m, r) => { if(r.calc.betrag != null) m.set(r.calc.ccy, (m.get(r.calc.ccy) || 0) + r.calc.betrag) }
         // Rechnung zentral (admPayoutCalc: Größe, Profit-Share je Firma,
         // FundedNext-Refund, Override) — hier kommt nur der Termin dazu.
         for(const r of cal){
@@ -17710,32 +17698,29 @@
           r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
           r.calc.anf = admAnfragbarCalc(r, r.calc)   // Anfragbar / Erhalten (28.10.2026)
         }
-        const addAnf = (m, r) => { if(r.calc.anf.anfragbar != null) m.set(r.calc.ccy, (m.get(r.calc.ccy) || 0) + r.calc.anf.anfragbar) }
         const addErh = (m, r) => { if(r.calc.anf.erhalten != null) m.set(r.calc.ccy, (m.get(r.calc.ccy) || 0) + r.calc.anf.erhalten) }
 
-        // Kopf: anfragbar jetzt · nächste 7 Tage · gesamt offen
+        // Kopf (29.10.2026, Finn: „ein paar zu viele Spalten … nur Balance bleibt, und Erhalten wird zu Anfragbar"): EINE Zahl je Konto —
+        // Anfragbar = min(Gewinn × Anteil, Deckel) × Profit-Share (bisher „Erhalten"). Alle Summen hier (groß, fällig jetzt, nächste
+        // 7 Tage, Gruppen, Raster) rechnen mit dieser Zahl; die reine Gewinn-×-Split-Summe („Payout") gibt es in der Kachel nicht mehr.
         const sJetzt = new Map(), s7 = new Map(), sAll = new Map()
-        let ueberfaellig = 0
+        let ueberfaellig = 0, ohneRegel = 0
         for(const r of cal){
-          addTo(sAll, r)
-          if(r.calc.faellig) addTo(sJetzt, r)
-          if(r.calc.tag && r.calc.tage > 0 && r.calc.tage <= 7) addTo(s7, r)
+          addErh(sAll, r)
+          if(r.calc.faellig) addErh(sJetzt, r)
+          if(r.calc.tag && r.calc.tage > 0 && r.calc.tage <= 7) addErh(s7, r)
           if(r.calc.tag && r.calc.tage < 0) ueberfaellig++
+          if(!r.calc.anf.regel) ohneRegel++
         }
         const sWd = new Map(), sCfd = new Map()
-        for(const r of cal) addTo(istWd(r) ? sWd : sCfd, r)
-        // Anfragbar / Erhalten gesamt (28.10.2026) groß vorn; die bisherigen Payout-Summen bleiben, kleiner. „Anfragbar jetzt"
-        // hieß die fällige Payout-Summe — jetzt „Fällig jetzt", damit nur die Regel-Summe „Anfragbar" heißt.
-        const sAnf = new Map(), sErh = new Map()
-        let ohneRegel = 0
-        for(const r of cal){ addAnf(sAnf, r); addErh(sErh, r); if(!r.calc.anf.regel) ohneRegel++ }
-        for(const [lbl, m, farbe, gross] of [['Anfragbar', sAnf, 'var(--good)', true], ['Erhalten', sErh, 'var(--good)', true], ['Fällig jetzt', sJetzt, 'var(--ink)'], ['Nächste 7 Tage', s7, 'var(--ink)'], ['Winning Days', sWd, 'var(--ink)'], ['CFD', sCfd, 'var(--ink)'], ['Gesamt offen', sAll, 'var(--ink)']]){
+        for(const r of cal) addErh(istWd(r) ? sWd : sCfd, r)
+        for(const [lbl, m, farbe, gross] of [['Anfragbar', sAll, 'var(--good)', true], ['Fällig jetzt', sJetzt, 'var(--ink)'], ['Nächste 7 Tage', s7, 'var(--ink)'], ['Winning Days', sWd, 'var(--ink)'], ['CFD', sCfd, 'var(--ink)']]){
           const d = document.createElement('div')
           d.innerHTML = `<div class="tnum" style="font-size:${gross ? 17 : 13}px;font-weight:${gross ? 800 : 700}"></div><div style="font-size:11px;color:var(--sub)"></div>`
           d.children[0].style.color = farbe
           d.children[0].textContent = geldMap(m)
           d.children[1].textContent = lbl + (lbl === 'Fällig jetzt' && ueberfaellig ? ` · ${ueberfaellig} überfällig` : '')
-            + (lbl === 'Anfragbar' && ohneRegel ? ` · ${ohneRegel} ohne Regel` : '') + (gross ? '' : ' (Payout)')
+            + (lbl === 'Anfragbar' && ohneRegel ? ` · ${ohneRegel} ohne Regel` : '')
           sums.appendChild(d)
         }
 
@@ -17768,7 +17753,7 @@
           if(list.length) top.children[1].textContent = list.length + ' Acc'
           cell.appendChild(top)
           if(list.length){
-            const m = new Map(); list.forEach(r => addTo(m, r))
+            const m = new Map(); list.forEach(r => addErh(m, r))   // 29.10.2026: Anfragbar je Tag
             const v = document.createElement('div')
             v.className = 'tnum'; v.style.cssText = 'font-size:12.5px;font-weight:700;color:var(--good);margin-top:2px'
             v.textContent = geldMap(m)
@@ -17796,19 +17781,14 @@
         const kopfZeile = (titel, sub, list, farbe, key) => {
           const tr = document.createElement('tr')
           tr.dataset.calTag = key
-          const m = new Map(); list.forEach(r => addTo(m, r))
-          const ma = new Map(), me = new Map(); list.forEach(r => { addAnf(ma, r); addErh(me, r) })   // Anfragbar / Erhalten je Gruppe (28.10.2026)
+          const m = new Map(); list.forEach(r => addErh(m, r))   // Anfragbar je Gruppe (29.10.2026: die eine Zahl der Kachel)
           // Spalte „Größe" entfiel 28.10.2026 (Finn: „Topstep-Funded startet immer bei 0 — das Feld Größe ist unnötig … es geht um die Balance") → colspan 5
           tr.innerHTML = '<td colspan="5" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
-            + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px"></td>'
-            + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--good)"></td>'
             + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px;color:var(--good)"></td>'
           tr.children[0].children[0].textContent = titel
           tr.children[0].children[0].style.color = farbe
           tr.children[0].children[1].textContent = `${sub} · ${list.length} Account${list.length === 1 ? '' : 's'}`
           tr.children[1].textContent = geldMap(m)
-          tr.children[2].textContent = geldMap(ma)
-          tr.children[3].textContent = geldMap(me)
           return tr
         }
         const dots = r => {
@@ -17832,9 +17812,7 @@
             '<td><span class="c-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
             '<td class="c-stand" style="white-space:nowrap"></td>' +
             '<td class="adm-num c-bal" style="white-space:nowrap"></td>' +
-            '<td class="adm-num c-po" style="white-space:nowrap"></td>' +
-            '<td class="adm-num c-anf" style="white-space:nowrap"></td>' +
-            '<td class="adm-num c-erh" style="white-space:nowrap"></td>'
+            '<td class="adm-num c-anf" style="white-space:nowrap"></td>'
           tr.querySelector('.c-person').textContent = admShortName(r.person || '—')
           // Nur die ID, ohne „→ <Phase>" (Finn 28.10.2026: „hinten steht immer der Typ … das weglassen"); der gespeicherte Name bleibt
           tr.querySelector('.c-acc').textContent = String(r.account_name || '').replace(/\s*→.*$/, '').trim() || '—'
@@ -17863,8 +17841,7 @@
             if(r.wd_ready){ const chip = document.createElement('span'); chip.className = 'chip chip-good'; chip.style.marginLeft = '8px'; chip.textContent = 'anfragbar'; st.appendChild(chip) }
           }
           admBalanceZelle(tr.querySelector('.c-bal'), r, c)
-          admCalPayoutCell(tr.querySelector('.c-po'), r)
-          admCalAnfragbarCells(tr.querySelector('.c-anf'), tr.querySelector('.c-erh'), r)
+          admCalAnfragbarCell(tr.querySelector('.c-anf'), r)
           return tr
         }
         for(const [key, list] of gruppen){
@@ -17874,54 +17851,36 @@
         }
       }
 
-      // Payout-Zelle: Betrag + Herleitung; Klick öffnet Prozent/Betrag zum
-      // Anpassen. Eigene Verdrahtung je Zelle — kein Sammel-Handler (Regel).
-      function admCalPayoutCell(td, r){
-        const c = r.calc
-        const geld = v => { try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: c.ccy, maximumFractionDigits: 0 }).format(v) } catch(_){ return Math.round(v) + ' ' + c.ccy } }
+      // Anfragbar-Zelle (28.10.2026; 29.10.2026 nur noch EINE Zelle, Finn: „Erhalten wird zu Anfragbar"): Betrag = min(Gewinn × Anteil, Deckel)
+      // × Profit-Share, Unterzeile die Rechnung in einer Zeile („50 % von +4.838 $ · max. 4.500 $ · × 90 %"). Ohne Regel der Firma steht
+      // „Regel fehlt" (Grund im Tooltip), ohne Gewinn „—". Klick öffnet wie bisher Prozent/fester Betrag je Konto (admCalPayoutEdit) —
+      // eigene Verdrahtung je Zelle, kein Sammel-Handler.
+      function admCalAnfragbarCell(td, r){
+        const c = r.calc, a = c.anf
+        const geld = v => admGeld(v, c.ccy)
+        const pctTxt = String(c.pct).replace('.', ',')
         td.innerHTML = ''
         const b = document.createElement('button')
         b.type = 'button'
         b.style.cssText = 'font:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-align:right;color:inherit'
-        b.title = 'Klicken zum Anpassen — Prozent oder fester Betrag'
-        const v = document.createElement('div')
-        v.className = 'tnum'
-        v.style.cssText = 'font-weight:700;font-size:13px;color:' + (c.betrag > 0 ? 'var(--good)' : 'var(--sub)')
-        v.textContent = c.betrag != null ? geld(c.betrag) : '—'
-        const sub = document.createElement('div')
-        sub.style.cssText = 'font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums'
-        sub.textContent = admPayoutHerleitung(c)
-        b.appendChild(v); b.appendChild(sub)
+        b.innerHTML = '<div class="tnum" style="font-weight:700;font-size:13px"></div><div style="font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums"></div>'
+        const v = b.children[0], sub = b.children[1]
+        if(!a.regel){
+          v.textContent = 'Regel fehlt'; v.style.cssText += ';color:var(--sub);font-weight:500'
+          sub.textContent = 'firm_rules.json'; b.title = a.grund
+        }else if(a.anfragbar == null){
+          const anteilTxt = a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % vom Gewinn`
+          v.textContent = '—'; v.style.color = 'var(--sub)'
+          sub.textContent = `${a.grund} · ${anteilTxt} · × ${pctTxt} %`; b.title = a.regel.quelle
+        }else{
+          v.textContent = geld(a.erhalten); v.style.color = a.erhalten > 0 ? 'var(--good)' : 'var(--sub)'
+          sub.textContent = (a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
+            + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : ''))
+            + ` · × ${pctTxt} %` + (c.manuell ? ` · Payout fest ${geld(c.betrag)}` : '')
+          b.title = `${a.regel.quelle} — klicken: Profit-Share oder fester Payout-Betrag je Konto`
+        }
         b.addEventListener('click', () => admCalPayoutEdit(td, r))
         td.appendChild(b)
-      }
-      // Anfragbar / Erhalten (28.10.2026): zweizeilig wie die Payout-Spalte — Betrag + Herleitung („50 % von +7.000 $ · Deckel 4.500 $",
-      // „× 90 %"). Ohne Regel der Firma steht „Regel fehlt" (Grund im Tooltip), ohne Gewinn „—". Kein Klick, nichts zu speichern.
-      function admCalAnfragbarCells(tdA, tdE, r){
-        const c = r.calc, a = c.anf
-        const geld = v => admGeld(v, c.ccy)
-        const pctTxt = String(c.pct).replace('.', ',')
-        for(const td of [tdA, tdE]){
-          td.innerHTML = '<div class="tnum" style="font-weight:700;font-size:13px"></div><div style="font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums"></div>'
-        }
-        if(!a.regel){
-          tdA.children[0].textContent = 'Regel fehlt'; tdA.children[0].style.cssText += ';color:var(--sub);font-weight:500'
-          tdA.children[1].textContent = 'firm_rules.json'; tdA.title = a.grund
-          tdE.children[0].textContent = '—'; tdE.children[0].style.color = 'var(--sub)'; tdE.children[1].remove(); tdE.title = a.grund
-          return
-        }
-        const anteilTxt = a.regel.anteil === 1 ? 'voller Gewinn' : `${Math.round(a.regel.anteil * 100)} % vom Gewinn`
-        tdA.title = a.regel.quelle; tdE.title = `Anfragbar × ${pctTxt} % Profit-Share`
-        if(a.anfragbar == null){
-          tdA.children[0].textContent = '—'; tdA.children[0].style.color = 'var(--sub)'; tdA.children[1].textContent = a.grund + ' · ' + anteilTxt
-          tdE.children[0].textContent = '—'; tdE.children[0].style.color = 'var(--sub)'; tdE.children[1].textContent = '× ' + pctTxt + ' %'
-          return
-        }
-        tdA.children[0].textContent = geld(a.anfragbar); tdA.children[0].style.color = a.anfragbar > 0 ? 'var(--ink)' : 'var(--sub)'
-        tdA.children[1].textContent = (a.regel.anteil === 1 ? anteilTxt : `${Math.round(a.regel.anteil * 100)} % von ${c.profit >= 0 ? '+' : '−'}${geld(Math.abs(c.profit))}`)
-          + (a.gedeckelt ? ` · Deckel ${geld(a.regel.deckel)}` : (a.regel.deckel != null ? ` · max. ${geld(a.regel.deckel)}` : ''))
-        tdE.children[0].textContent = geld(a.erhalten); tdE.children[0].style.color = a.erhalten > 0 ? 'var(--good)' : 'var(--sub)'
-        tdE.children[1].textContent = '× ' + pctTxt + ' %'
       }
       function admCalPayoutEdit(td, r){
         const c = r.calc
@@ -17943,7 +17902,7 @@
         box.append(inPct, pctLbl, inBetrag, ok, nein, msg)
         td.appendChild(box)
         inBetrag.focus()
-        const abbrechen = () => admCalPayoutCell(td, r)
+        const abbrechen = () => admCalAnfragbarCell(td, r)
         const speichern = async () => {
           const pct = inPct.value === '' ? null : Number(inPct.value)
           const betrag = inBetrag.value === '' ? null : Number(inBetrag.value)
@@ -48305,7 +48264,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1802'
+  const OS_TAB_BUILD = '2026-09-22.1803'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
