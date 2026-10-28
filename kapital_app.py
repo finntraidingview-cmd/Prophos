@@ -26,7 +26,9 @@ CoinPayments-Abweichung in der Toleranz.
   POST   /admin/kapital/fusion          {gruppe, betrag, waehrung, stand_am?, notiz?}  (Rückfall, wenn mt5_live nicht frisch)
   POST   /admin/kapital/gk              {gruppe, datum, betrag (± ), waehrung, kategorie, text}  · DELETE {id}
 
-Rechte wie Liquide/Kunden-Zahlungen (_lq_gate): eingeloggt, ADMIN_EMAILS und NICHT eingeschränkt. Tageswerte: jeder GET schreibt den
+Rechte wie die Admin-Übersicht (_gate, seit 29.10.2026 04:25): eingeloggt und im Admin NICHT eingeschränkt — Verwalter (Emin) und „nur
+eigene“ bekommen 403. Bis dahin _lq_gate (ADMIN_EMAILS): „Finn + Pascal“ steht nicht in ADMIN_EMAILS und sah nur „Nur für Voll-Admins.“
+Tageswerte: jeder GET schreibt den
 heutigen Stand, dazu auf Railway ein Stunden-Takt."""
 import os
 import re
@@ -35,7 +37,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import requests
-from flask import request, jsonify
+from flask import request, jsonify, g
 
 try:
     from zoneinfo import ZoneInfo
@@ -385,7 +387,21 @@ def _takt_schleife():
 
 
 def _admin_uid():
-    return str(request.environ.get("prophos.admin_uid") or "")
+    return str(getattr(g, "kapital_uid", "") or request.environ.get("prophos.admin_uid") or "")
+
+
+def _gate():
+    """Gate wie /admin/overview (_wd_login: eingeloggt) plus: NICHT eingeschränkt. _wd_login setzt g.admin_sicht nur für eingeschränkte
+    Logins (Verwalter einer Gruppe, Mitglied, „nur eigene“) — die bekommen 403, die Zahl ist Finns Kontrolle über die Gruppe. Bewusst nicht
+    mehr _lq_gate (ADMIN_EMAILS): Vorfall 29.10.2026 04:25, Finn als „Finn + Pascal“ (Voll-Admin im Admin, aber nicht in ADMIN_EMAILS) sah
+    nur „Nur für Voll-Admins.“ → None oder (Antwort, Status)."""
+    uid, err = A["_wd_login"]()
+    if err:
+        return err
+    if getattr(g, "admin_sicht", None) is not None:
+        return jsonify({"ok": False, "error": "Nur für Logins ohne Einschränkung im Admin"}), 403
+    g.kapital_uid = uid
+    return None
 
 
 def _datum(v):
@@ -409,7 +425,7 @@ def registrieren(app, ns):
     def admin_kapital():
         if request.method == "OPTIONS":
             return "", 200
-        err = A["_lq_gate"]()
+        err = _gate()
         if err:
             return err
         try:
@@ -432,7 +448,7 @@ def registrieren(app, ns):
     def admin_kapital_einlage():
         if request.method == "OPTIONS":
             return "", 200
-        err = A["_lq_gate"]()
+        err = _gate()
         if err:
             return err
         body = request.get_json(silent=True) or {}
@@ -461,7 +477,7 @@ def registrieren(app, ns):
     def admin_kapital_fusion():
         if request.method == "OPTIONS":
             return "", 200
-        err = A["_lq_gate"]()
+        err = _gate()
         if err:
             return err
         body = request.get_json(silent=True) or {}
@@ -482,7 +498,7 @@ def registrieren(app, ns):
         """Geschäftskonto-Buchung (Finn 29.10.2026: „wie in so einem Google-Sheet … Kunden bezahlen oder PCs kaufen")."""
         if request.method == "OPTIONS":
             return "", 200
-        err = A["_lq_gate"]()
+        err = _gate()
         if err:
             return err
         body = request.get_json(silent=True) or {}
