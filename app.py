@@ -7198,6 +7198,15 @@ def admin_build_overview(kapitel_id=None):
     try:
         if _admin_nur_uid():
             gruppen_info = {"sicht_ids": sorted(_admin_sicht() or ()), "verwalter": _admin_verwalter(), "gruppen": []}
+            # Namen der eigenen Gruppe(n) (29.10.2026, Kachel „Gesamtkosten": Start je Gruppe nach id_gruppen.name) — nur die eigene,
+            # keine fremden IDs; Verwalter = verwalter_id, Mitglied = Zeile in id_gruppe_mitglied. Nicht lesbar → Feld fehlt (Kachel ohne Start).
+            try:
+                _gd, _ich = admin_gruppen_daten() or {}, str(_admin_nur_uid())
+                _meine = {str(m.get("gruppe_id")) for m in _gd.get("mitglieder") or () if str(m.get("user_id")) == _ich}
+                gruppen_info["gruppe_namen"] = sorted({str(x.get("name") or "") for x in _gd.get("gruppen") or ()
+                                                       if str(x.get("verwalter_id") or "") == _ich or str(x.get("id")) in _meine} - {""})
+            except Exception as e2:
+                print(f"[admin] ⚠️ gruppe_namen: {type(e2).__name__}: {e2}", flush=True)
         else:
             gruppen_info = {"gruppen": admin_gruppen_liste(admin_gruppen_daten()),
                             "gruppe_aktiv": str(request.args.get("gruppe") or "").strip().lower() or None}

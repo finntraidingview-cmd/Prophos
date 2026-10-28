@@ -17002,25 +17002,54 @@
      * also Accounts → Gesamtkosten/Gesamtwert, Boden 0 je Konto wie kwKachelMalen). Über ALLE Konten der Sicht inkl. archivierter/geblowter
      * (Status-Filter egal), damit die Zahl mit jedem Kauf nur wächst. Gezählt werden nur Ketten-Enden: ein Konto, das Vorgänger eines anderen
      * ist (chain_ids), steckt schon in dessen Kette und zählt nicht doppelt. „geblowt" = archiviertes Ketten-Ende ohne Nachfolger. */
+    // Start je Gruppe (29.10.2026, Finn: „Da, wo Amir dazukam und Emins Finanzen resettet wurden" → „08.10. (Amir)"): gezählt werden nur
+    // Kettenglieder mit created_at ≥ Start; ein Vorgänger vor dem Start fällt aus der Kette. Schlüssel = Gruppenname (id_gruppen.name), ohne
+    // Eintrag (Hermann Technologies) = alle Konten. Emin am 29.10.2026 per SQL: ab 08.10. 20.838 € (69 Konten, 33 geblowt), ohne Start 44.733 €.
+    const ADM_GK_START_JE_GRUPPE = { 'Emin': '2026-10-08T00:00:00+02:00' }
+    // Gruppe der Sicht: gewählter Chip (Voll-Admin) bzw. die Gruppe der eigenen Sicht (Verwalter, sicht_ids)
+    function admGkStart(){
+      const gl = admGruppenListe()
+      let g = null
+      const akt = admGruppeAktiv()
+      if(akt) g = gl.find(x => String(x.id) === String(akt))
+      else if(admEingeschraenkt()){
+        // Verwalter/Mitglied: das Backend liefert gruppen: [] (keine fremden IDs), dafür gruppe_namen = Namen der eigenen Gruppe(n) (29.10.2026)
+        const nm = (admData.gruppe_namen || []).find(n => ADM_GK_START_JE_GRUPPE[String(n).trim()])
+        if(nm) g = { name: nm }
+        else { const ids = new Set((admData.sicht_ids || []).map(String)); g = gl.find(x => !x.ht && (x.ids || []).some(i => ids.has(String(i)))) }
+      }
+      const iso = g && ADM_GK_START_JE_GRUPPE[String(g.name || '').trim()]
+      const t = iso ? new Date(iso) : null
+      return t && Number.isFinite(t.getTime()) ? t : null
+    }
     function admGesamtkostenKachel(){
       const el = $('adm-k-gk'), sub = $('adm-k-gk-sub'); if(!el || !admData) return
-      const alle = admFiltered(true)
+      const start = admGkStart()
+      const abStart = r => !start || (r.created && new Date(r.created) >= start)
+      const alle = admFiltered(true).filter(abStart)
+      const nachId = new Map((admData.accounts || []).map(r => [String(r.id), r]))
+      // Vorgänger nur aus Konten ab dem Start (sonst verschwände ein Ketten-Ende, dessen Nachfolger vor dem Start liegt — gibt es nicht, aber sicher)
       const vorgaenger = new Set()
-      for(const r of (admData.accounts || [])) for(const c of (r.chain_ids || [])) if(String(c) !== String(r.id)) vorgaenger.add(String(c))
+      for(const r of (admData.accounts || [])) if(abStart(r)) for(const c of (r.chain_ids || [])) if(String(c) !== String(r.id)) vorgaenger.add(String(c))
+      const eigen = r => (Number(r.buy) || 0) + (Number(r.hedge) || 0) - (Number(r.payouts) || 0)
       let summe = 0, n = 0, nGeblowt = 0, nPlus = 0
       for(const r of alle){
         if(vorgaenger.has(String(r.id))) continue
-        const gk = (Number(r.c_buy ?? r.buy) || 0) + (Number(r.c_hedge ?? r.hedge) || 0) - (Number(r.c_payouts ?? r.payouts) || 0)
+        // ohne Start: Kette vom Backend (c_*); mit Start: nur Kettenglieder ab dem Start, je Glied die eigenen Zahlen
+        const gk = !start
+          ? (Number(r.c_buy ?? r.buy) || 0) + (Number(r.c_hedge ?? r.hedge) || 0) - (Number(r.c_payouts ?? r.payouts) || 0)
+          : [...new Set([String(r.id), ...(r.chain_ids || []).map(String)])].map(id => nachId.get(id)).filter(x => x && abStart(x)).reduce((a, x) => a + eigen(x), 0)
         n++; if(r.archived) nGeblowt++; if(gk < 0) nPlus++
         summe += Math.max(0, gk)
       }
+      const abTxt = start ? `ab ${start.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} · ` : ''
       el.textContent = admEur.format(summe)
-      if(sub) sub.textContent = `${n} Konten · davon ${nGeblowt} geblowt` + (nPlus ? ` · ${nPlus} im Plus = 0` : '')
+      if(sub) sub.textContent = `${abTxt}${n} Konten · davon ${nGeblowt} geblowt` + (nPlus ? ` · ${nPlus} im Plus = 0` : '')
       const k = $('adm-k-gk-kachel')
       if(k) k.title = 'Summe der Gesamtkosten je Konto (Kauf + Hedge − Payouts, mit abgelösten Vorgängern) über alle Konten der Sicht — auch geblowte/archivierte, '
         + 'unabhängig von „Nur aktive". Konten im Plus zählen 0, wie Accounts → Gesamtwert. „geblowt" = archiviertes Konto ohne Nachfolger.'
+        + (start ? ` Gezählt ab ${start.toLocaleDateString('de-DE')} (Start der Gruppe, ADM_GK_START_JE_GRUPPE) — ältere Konten und Vorgänger zählen nicht.` : '')
     }
-
     function admRender(){
       if(!admData) return
       try{ admGesamtkostenKachel() }catch(e){ console.warn('[admin] Gesamtkosten-Kachel', e) }   // nur Anzeige (29.10.2026)
@@ -49296,7 +49325,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1833'
+  const OS_TAB_BUILD = '2026-09-22.1834'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
