@@ -11900,24 +11900,6 @@
             <!-- Heute auf einen Blick (28.10.2026, Finn: „die WD-Ansicht cleaner, smoother … mehr Infos allgemein") — nur Anzeige, wdUebRender -->
             <div class="wd-ueb-kpis" id="wd-ueb-heute"></div>
           </div>
-          <!-- PAYOUTS + STATISTIK (28.10.2026, Finn: „wann ich wo Payout anfragen kann, Statistik hinzufügen etc., und vielleicht direkt WD von
-               da aus planen … die Einstellungen, die Logik: daran nichts ändern"). Nur Lesen: Gewinntage aus wd_konten_alle, Betrag wie
-               Admin → Payouts, Statistik aus wd_liste (/admin/kapitel). Klick auf ein Konto klappt seine ID unten auf (Haken, „heute wieder rein").
-               Der Zeitstrahl hängt sich selbst hinter das erste Panel (wzPanel) — dieses Panel steht damit zwischen Zeitstrahl und IDs. -->
-          <div class="panel" id="wd-ueb" style="margin:0 0 12px">
-            <div class="wd-panel-kopf">
-              <div class="panel-title">Payouts <span style="font-weight:400;color:var(--sub);font-size:12px">· Gewinntage je Konto · Klick öffnet die ID unten</span></div>
-              <div class="wd-ueb-chips" id="wd-ueb-firmen"></div>
-            </div>
-            <div class="wd-po-grid" id="wd-ueb-po"></div>
-            <button type="button" class="btn btn-ghost btn-xs wd-po-mehr" id="wd-ueb-po-mehr" hidden></button>
-            <div class="wd-panel-kopf wd-ueb-stat-kopf">
-              <div class="panel-title">Statistik <span style="font-weight:400;color:var(--sub);font-size:12px" id="wd-ueb-stat-sub"></span></div>
-              <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
-            </div>
-            <div class="wd-ueb-kpis" id="wd-ueb-stat-kpis"></div>
-            <div class="adm-dist" id="wd-ueb-stat-rows"></div>
-          </div>
           <div class="panel" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
               <div class="panel-title">IDs <span style="font-weight:400;color:var(--sub);font-size:12px">· eine Zeile je ID in Block-Reihenfolge · anklicken zeigt die Konten der ID</span></div>
@@ -12005,6 +11987,25 @@
           <div class="panel" hidden>
             <div class="panel-title" style="margin-bottom:8px">Verlauf (7 Tage)</div>
             <div id="wd-verlauf" style="font-size:12.5px"></div>
+          </div>
+          <!-- PAYOUTS + STATISTIK (28.10.2026, Finn: „wann ich wo Payout anfragen kann, Statistik hinzufügen etc., und vielleicht direkt WD von
+               da aus planen … die Einstellungen, die Logik: daran nichts ändern"). Nur Lesen: Gewinntage aus wd_konten_alle, Betrag wie
+               Admin → Payouts, Statistik aus wd_liste (/admin/kapitel). Klick auf ein Konto klappt seine ID oben auf (Haken, „heute wieder rein").
+               Der Zeitstrahl hängt sich selbst hinter das erste Panel (wzPanel). Seit .1797 ganz unten, unter IDs und Einstellungen (Finn 28.10.2026:
+               „Die Payouts-Box soll unter die ID- und Einstellungen-Box, also ganz runter"). -->
+          <div class="panel" id="wd-ueb" style="margin:0 0 12px">
+            <div class="wd-panel-kopf">
+              <div class="panel-title">Payouts <span style="font-weight:400;color:var(--sub);font-size:12px">· Gewinntage je Konto · Klick öffnet die ID oben</span></div>
+              <div class="wd-ueb-chips" id="wd-ueb-firmen"></div>
+            </div>
+            <div class="wd-po-grid" id="wd-ueb-po"></div>
+            <button type="button" class="btn btn-ghost btn-xs wd-po-mehr" id="wd-ueb-po-mehr" hidden></button>
+            <div class="wd-panel-kopf wd-ueb-stat-kopf">
+              <div class="panel-title">Statistik <span style="font-weight:400;color:var(--sub);font-size:12px" id="wd-ueb-stat-sub"></span></div>
+              <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
+            </div>
+            <div class="wd-ueb-kpis" id="wd-ueb-stat-kpis"></div>
+            <div class="adm-dist" id="wd-ueb-stat-rows"></div>
           </div>
         </div>
         <!-- KOMPASS (23.09.2026, Finn: „bau eine Seite in Prophos unter Admin, wo ich die Daten immer live
@@ -48042,7 +48043,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1796'
+  const OS_TAB_BUILD = '2026-09-22.1797'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -62598,7 +62599,7 @@
         : `<span title="noch ${e.fehlt} Gewinntag${e.fehlt === 1 ? '' : 'e'} bis zum Payout — frühestens am ${escapeHtml(wdUebTag(e.frueh))}, wenn ${e.h.offen ? 'ab heute' : 'ab dem nächsten Handelstag'} jeder Handelstag ein Gewinntag wird">noch ${e.fehlt} · frühestens <b style="font-weight:600">${escapeHtml(wdUebTag(e.frueh))}</b></span>`
       const fuss = [e.betrag != null ? `<span title="Betrag wie Admin → Payouts (Balance über Kontogröße × Profit-Share)">≈ ${escapeHtml(geld(e.betrag, e.ccy))}</span>` : '', e.h.txt]
         .filter(Boolean).join('<span>·</span>') + (e.h.rein ? ` <button type="button" class="btn btn-ghost btn-xs" data-wd-ueb-rein="${escapeHtml(String(e.k.id))}" data-wd-ueb-uid="${uid}" title="für heute wieder mitfahren lassen — wie „heute wieder rein“ in der ID">heute rein</button>` : '')
-      return `<div class="wd-po${e.bereit ? ' bereit' : ''}" role="button" tabindex="0" data-wd-ueb-id="${uid}" title="Klick: ${escapeHtml(e.k.person || '')} unten aufklappen — Haken, TP, „heute wieder rein“">
+      return `<div class="wd-po${e.bereit ? ' bereit' : ''}" role="button" tabindex="0" data-wd-ueb-id="${uid}" title="Klick: ${escapeHtml(e.k.person || '')} oben aufklappen — Haken, TP, „heute wieder rein“">
         <div class="wd-po-kopf"><span><span class="adm-dot" style="background:${idFarbe(e.k.user_id)}"></span>${escapeHtml(e.k.person || '')}</span><span>${escapeHtml(e.firma)}</span></div>
         <div class="wd-po-name"><span>${escapeHtml(wdUebKonto(e.k))}</span><span class="mono" style="font-size:12px;font-weight:500;color:var(--sub)">${Math.min(e.n, e.ziel)}/${e.ziel}${zielDotsHtml(f)}</span></div>
         <div class="wd-po-stand">${stand}</div><div class="wd-po-fuss">${fuss}</div></div>`
