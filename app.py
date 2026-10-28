@@ -16010,13 +16010,16 @@ PAYOUT_MAIL_MUSTER = (
     # Tradeify — Betreff „Your payout request has been received“ → „🎉 Your payout has been approved“ → Rise „Payment Received: $X from Tradeify Holdings, Corp“
     ("tradeify", "angefragt", r"tradeify", r"payout request has been received", None, "Your payout request has been received"),
     ("tradeify", "geprüft", r"tradeify", r"payout has been approved", r"Account\(s\)\s+Approved\s*:?\s*((?:[A-Z]{4,}\d{6,})(?:\s*,\s*[A-Z]{4,}\d{6,})*)", "🎉 Your payout has been approved"),
-    # „Your Forge Level Up payout is approved“ (Tradeify-Forge-Programm, 675 $ an viele IDs gleichzeitig) ist KEIN angefragter Payout — bewusst kein Muster
+    # Forge-Level-Up (675/1.350 $) und „first payout“ sind laut Finn (29.10.2026 01:10) echte Payouts — nur HTML, kein Konto/Betrag im Text;
+    # ohne Anfrage in Prophos landen sie über die Betragsprüfung in der ohne_anfrage-Liste des Dry-Runs (nachtragen)
+    ("tradeify", "geprüft", r"tradeify", r"Forge Level Up payout is approved", None, "Your Forge Level Up payout is approved"),
+    ("tradeify", "geprüft", r"tradeify", r"first payout is confirmed", None, "🎉 Congratulations! Your first payout is confirmed"),
     ("tradeify", "gesendet", r"rise", r"Payment Received:.*from Tradeify", None, "Payment Received: $675.00 from Tradeify Holdings, Corp"),
     # Topstep — „Your payout is being processed 💰“ (Konto + Betrag) → „Your payout has been approved! 🎉“ (nur Betrag; „funds are on the way“)
     ("topstep", "angefragt", r"topstep", r"payout is being processed", r"payout for\s*\*?\s*([A-Z]+(?:-[A-Z0-9]+){2,})", "Your payout is being processed 💰"),
     ("topstep", "geprüft", r"topstep", r"payout has been approved", None, "Your payout has been approved! 🎉"),
     # Apex — nur „PA Payout Approved“ („$2500 approved on Oct 26, Funds within 3–4 business days“, kein Konto)
-    ("apex", "geprüft", r"apex", r"PA Payout Approved", None, "PA Payout Approved"),
+    ("apex", "geprüft", r"apex", r"PA Payout Approved", r"((?:PA-?)?APEX-[0-9]{5,}-[0-9]{1,3})", "PA Payout Approved"),
     # 5ers — „Your 5ers Payout Request Confirmation“ → „You got paid | reference id“ → Rise „Payment Received … from Five Percent Online Ltd“
     ("5ers", "angefragt", r"5ers", r"Payout Request Confirmation", None, "Your 5ers Payout Request Confirmation"),
     ("5ers", "gesendet", r"5ers", r"You got paid", None, "You got paid | Your payout reference id: xAYk2uGv"),
@@ -16088,7 +16091,13 @@ def payout_mail_stufe(mail):
 
 
 def _payout_konto_norm(s):
-    return re.sub(r"[^A-Z0-9]", "", str(s or "").upper())
+    """Kennung vergleichbar machen: Apex „PA-APEX-685010-01“ → „PAAPEX6850100000001“, „APEX-641699-21“ → „APEX6416990000021“ (so legt Finn
+    external_id an; Muster aus S6 59865726, 29.10.2026); sonst nur Groß + ohne Trennzeichen."""
+    k = str(s or "").strip().upper()
+    m = re.fullmatch(r"(PA-?)?APEX-?([0-9]{5,6})-([0-9]{1,3})", k)
+    if m:
+        return ("PAAPEX" if m.group(1) else "APEX") + m.group(2) + m.group(3).zfill(7)
+    return re.sub(r"[^A-Z0-9]", "", k)
 
 
 def _payout_betrag_plausibel(betrag, amount, currency=None, fx=None):
@@ -16204,11 +16213,16 @@ def _payout_mail_passt_zeitlich(mail_datum, requested_at):
     return ra - timedelta(days=1) <= md <= ra + timedelta(days=14)
 
 
+PAYOUT_RECEIVED_TAGE = 3   # schon abgehakte Anfragen bleiben so lange Kandidatin (nur liegt_bei, kein Alarm) — S3-Stresstest 29.10.2026: FundedNext-Mails kommen am Folgetag
+
+
 def _payout_kandidaten(uid, nur_pending=True):
-    """Anfragen einer ID (+ external_id des Kontos) → Liste für payout_pending_zuordnen."""
-    params = {"select": "id,user_id,account_id,account_name,account_firm,amount,currency,liegt_bei,requested_at,status", "user_id": f"eq.{uid}"}
+    """Anfragen einer ID (+ external_id des Kontos) → Liste für payout_pending_zuordnen. nur_pending: offene plus die in den letzten
+    PAYOUT_RECEIVED_TAGE (+2 Puffer) abgehakten (status received) — die Abgleich-Funktion filtert je Mail-Datum nach."""
+    params = {"select": "id,user_id,account_id,account_name,account_firm,amount,currency,liegt_bei,requested_at,received_at,status", "user_id": f"eq.{uid}"}
     if nur_pending:
-        params["status"] = "eq.pending"
+        seit = (datetime.now(timezone.utc) - timedelta(days=PAYOUT_RECEIVED_TAGE + 2)).strftime("%Y-%m-%d")
+        params["or"] = f"(status.eq.pending,and(status.eq.received,received_at.gte.{seit}))"
     rows = sb_select("pending_payouts", params) or []
     ids = sorted({str(r.get("account_id")) for r in rows if r.get("account_id")})
     ext = {}
@@ -16218,6 +16232,16 @@ def _payout_kandidaten(uid, nur_pending=True):
     for r in rows:
         r["external_id"] = ext.get(str(r.get("account_id")), "")
     return rows
+
+
+def _payout_received_frisch(p, mail_datum):
+    """Abgehakte Anfrage zählt nur, wenn sie höchstens PAYOUT_RECEIVED_TAGE vor der Mail abgehakt wurde."""
+    md = _payout_ts(mail_datum)
+    try:
+        ra = datetime.strptime(str(p.get("received_at"))[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    return md is not None and md - timedelta(days=PAYOUT_RECEIVED_TAGE) <= ra
 
 
 def payout_mail_verarbeiten(zeilen):
@@ -16238,8 +16262,16 @@ def payout_mail_verarbeiten(zeilen):
             uid = str(z.get("user_id") or "")
             if uid not in je_uid:
                 je_uid[uid] = _payout_kandidaten(uid, nur_pending=True)
-            kand = [p for p in je_uid[uid] if _payout_mail_passt_zeitlich(z.get("datum"), p.get("requested_at"))]
+            zeitlich = [p for p in je_uid[uid] if _payout_mail_passt_zeitlich(z.get("datum"), p.get("requested_at"))]
+            kand = [p for p in zeitlich if p.get("status") == "pending"]
             p, grund = payout_pending_zuordnen(firma, konto, kand, betrag if len(konten) <= 1 else None, fx)
+            if not p:
+                # Zweiter Blick (S3 29.10.2026): kürzlich abgehakte Anfragen — nur Stand nachtragen, keine Meldung, keine „unklar“-Notiz
+                kand_r = [p for p in zeitlich if p.get("status") == "received" and _payout_received_frisch(p, z.get("datum"))]
+                if kand_r:
+                    p2, grund2 = payout_pending_zuordnen(firma, konto, kand + kand_r, betrag if len(konten) <= 1 else None, fx)
+                    if p2 and p2.get("status") == "received":
+                        p, grund = p2, grund2 + " (schon abgehakt — nur Stand)"
             # Rise meldet JEDE Zahlung der Firma (auch Forge-Programm, 675 $ an viele IDs): ohne Kontonummer gilt „gesendet“ nur für eine Anfrage,
             # die schon „geprüft“ ist — sonst Notiz statt Stufe (29.10.2026, Dry-Run: Forge-Zahlungen am 16.10. hätten 4 Anfragen „gesendet“ gesetzt)
             if p and stufe == "gesendet" and not konto and re.search(r"rise", str(z.get("von") or ""), re.I) and _payout_liegt_bei_stufe(p.get("liegt_bei")) < PAYOUT_STUFEN["geprüft"]:
@@ -16261,15 +16293,15 @@ def payout_mail_verarbeiten(zeilen):
                 continue   # schon so weit (oder weiter) — nichts schreiben, kein zweiter Alarm
             neu = payout_liegt_bei_text(stufe, z.get("datum"), z.get("betreff"), p.get("liegt_bei"))
             try:
-                ok = sb_update("pending_payouts", {"id": f"eq.{p['id']}", "status": "eq.pending"}, {"liegt_bei": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
+                ok = sb_update("pending_payouts", {"id": f"eq.{p['id']}", "status": f"eq.{p.get('status') or 'pending'}"}, {"liegt_bei": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
             except Exception as e:
                 print(f"[payout-mail] ⚠️ liegt_bei {p.get('id')}: {type(e).__name__}: {e}", flush=True)
                 continue
             if not ok:
-                continue   # inzwischen abgehakt — nichts
+                continue   # Status hat sich inzwischen geändert — nichts
             p["liegt_bei"] = neu
             print(f"[payout-mail] {firma} {stufe} → {p.get('account_firm')} {p.get('account_name')} ({grund})", flush=True)
-            if stufe == "gesendet" and not _alarm_fremd_verwaltet(uid):
+            if stufe == "gesendet" and p.get("status") == "pending" and not _alarm_fremd_verwaltet(uid):
                 namen, _aus = _ap_namen()
                 wer = namen.get(uid, uid[:8])
                 konto_txt = konto or str(p.get("account_name") or "")[:40]
