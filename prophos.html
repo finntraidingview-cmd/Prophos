@@ -28682,7 +28682,7 @@
     const pid = String(p.id), jetzt = Date.now(), t = _hedgeWartetAt.get(pid)
     if(t && (jetzt - t.at < 10000 || (t.grund === grund && jetzt - t.at < 60000))) return   // je Plan höchstens alle 10 s, gleicher Grund alle 60 s
     _hedgeWartetAt.set(pid, { grund, at: jetzt })
-    try{ console.info('[hedgeSchnell] Reader flach, Fusion bleibt offen —', grund, werte || '') }catch(_){}
+    try{ console.info('[hedgeSchnell] kein Reader-Ende, Fusion bleibt offen —', grund, werte || '') }catch(_){}
     try{ hedgeAmPlanSchreiben(p.id, { reader_wartet: Object.assign({ grund, at: new Date(jetzt).toISOString() }, werte || {}) }).catch(() => {}) }catch(_){}
   }
   async function hedgeReaderSchnellTick(){
@@ -28701,6 +28701,10 @@
     try{
       if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
       const st = (epLokal && epLokal.stand) ? epLokal.stand : null
+      // READER BLIND → Grund an den Hedge (29.10.2026): am 28.10. stand bei 26 Hedge-Enden ohne Userscript nirgends, WARUM der Reader nichts
+      // sagte (Ursache: TradingView-Leer-Text „Nothing to show yet", Userscript 0.9.11) — reader_wartet trug bisher nur Regel-Gründe
+      if(st && st.an !== false && (st.blind === true || st.positionen_ok === false) && /^puls-/.test(String(st.positionen_tab || '')))
+        for(const p of meine) hedgeReaderWartetMelden(p, 'Reader blind: ' + String(st.blind_grund || 'kein frischer Stand').slice(0, 120), { konto: String(st.konto || '').slice(0, 40) })
       if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen) || !/^puls-/.test(String(st.positionen_tab || ''))){ verwerfen(); return }
       if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.0)){ verwerfen(); return }
       if(hedgePulsUnterwegs()){ verwerfen(); return }   // während des Holens losgelaufen
@@ -48503,7 +48507,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1806'
+  const OS_TAB_BUILD = '2026-09-22.1807'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -49192,6 +49196,13 @@
       }
     }
     _tpOrbitLaeuft = true
+    // KONTO-BELEG AUS DER ORDER (29.10.2026, Marc pc-7ftp5l 28.10. abends, Apex-Big-Trades 130ef370/744eb925/c06e02a5): die Order bewies das
+    // Konto über den Listen-Klick (konto_aktiv = volle External ID), einen Beleg setzte aber nur der Heimweg (bigTradeHeim). Die Heim-Wache
+    // hielt den Puls-Chrome bei gekürztem Apex-Namen deshalb für fremd und schickte 90 s nach der Order einen überflüssigen Heimweg (11–14 s
+    // Puls = Reader blind, Kurz-Anker weg) — bei 130ef370 (2-min-Trade) schloss der Notfall 1 s nach Heimweg-Ende. Der Beleg wird erst im
+    // finally gesetzt (Puls-Flags weg, wie im Heimweg), gilt bis zur nächsten Puls-Aktion (kontoBelegGilt) und gibt dem Schnell-Wächter
+    // sofort den Anker 'beleg' (kurzAnkerPflegen). Nur TradingView (tvv2): der Reader kennt kein TopstepX-Konto.
+    let _belegExt = ''
     // Winning Day: Copier-Update-Neustart für die nächsten 3 min vertagen (Panel POST /api/hedge-solo {aktion:'bereit'}, abc14c6) —
     // sonst trifft der Hedge-Open das Neustart-Fenster (Plan 9302faea: copier_alt). Ohne Antwort egal, die Wiederholung fängt es.
     if(plan.hedgeEur > 0 && typeof window.mtcApi === 'function'){
@@ -49404,6 +49415,7 @@
         return
       }
       if(r && r.ok && r.gesendet){
+        if(plan.route === 'tvv2' && r.konto_aktiv && String(r.konto_aktiv).includes(extId)) _belegExt = extId   // Konto-Beleg aus der Order (29.10.2026, s. o.)
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
         // ORBIT V2 (23.09.2026): niemand erkennt hier etwas — der bewiesene Klick IST „Läuft".
         // Warnung trotz ok (B37, 30.09.2026: z. B. SL-Bracket abgelehnt, Position steht) — Plan läuft wie gehabt, die Warnung bleibt
@@ -49449,6 +49461,7 @@
       await fehler('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
     }finally{
       _tpOrbitLaeuft = false
+      if(_belegExt){ try{ kontoBelegMerken(_belegExt, true) }catch(_){} }   // Beleg erst NACH dem Lauf (29.10.2026, s. o.) — vor dem Heimweg-Timer, der ihn bei fremdem Konto zu Recht entwertet
       try{ bigTradeHeimPlanen(extId, 'Order ' + String(extId).slice(-4), true, bthFenster(plan && plan.route)) }catch(_){}   // Rück-Login ins Big-Trade-Konto (12.10.2026, Prio 1) — sofort (19.10.2026)
     }
   }

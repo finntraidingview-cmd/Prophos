@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.10
+// @version      0.9.11
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.9.11 29.10.2026  Leer-Beweis nach dem TradingView-Update (ab 26.10. ausgerollt): die leere Positions-Tabelle sagt jetzt
+//                      „Nothing to show yet. You …" statt „No open positions" — RX_LEER_POS kannte den Text nicht, jedes flache
+//                      Konto galt als blind („kein Leer-Beweis"), kein Reader-Ende mehr (28.10.: 0 von 26 Hedge-Enden ueber das
+//                      Userscript, alle Puls-PCs positionen_ok=false). Beleg: Puls-Augen-Inventar pc-7ftp5l 23:19 Dubai, Tabelle
+//                      TRADOVATE.positions-table „Symbol Side Qty … Position ID Nothing to show yet. You". Jetzt zaehlt der neue Text.
 //   0.9.10 27.10.2026  Gekuerzte Kennung OHNE Ziffern im Umschalter („FNFTFAFINNSAMUELHE… 155,365.92 USD", pc-2zc2we, Tradovate-Login
 //                      mit nur einem Konto): galt als „kein Konto angemeldet" → Reader blind. Jetzt meldet er das Stueck mit „…"
 //                      (z. B. „FNFTFAFINNSAMUELHE…"); das Frontend ordnet es ueber kontoTextBezug ('kurz', eindeutig) zu, der exakte
@@ -137,7 +142,7 @@
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.9.10';
+  const VERSION    = '0.9.11';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1031,7 +1036,9 @@
   let sichtbarePosZahl = null;   // Positionszahl der letzten SICHTBAREN, nicht blinden Lesung
 
   // 0.9.3 (Puls-Chrome): positiver Leer-Beweis — Reiter Positions aktiv UND TradingViews Leer-Text im Panel
-  const RX_LEER_POS = /no open positions|keine offenen positionen|keine positionen/i;
+  // 0.9.11 (29.10.2026): TradingView zeigt in der leeren Positions-Tabelle seit dem Update vom 26./27.10. „Nothing to show yet. You …"
+  // (Inventar pc-7ftp5l 28.10. 23:19 Dubai); vorher „No open positions". Ohne den Text gab es keinen Leer-Beweis → blind → kein Reader-Ende.
+  const RX_LEER_POS = /no open positions|nothing to show yet|keine offenen positionen|keine positionen/i;
   let leerMerk = { ms: 0, wert: false };
   function leerBeweis() {
     const jetzt = Date.now();
