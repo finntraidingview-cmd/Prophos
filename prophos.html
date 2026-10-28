@@ -16397,8 +16397,10 @@
      * kommen vom Backend (Echo-Snapshot → TSX → Duplikum → manuell). */
     // Blue Guardian 85/15 (2-Step Standard ohne 90-%-Add-on, Finn 04.10.2026) — sonst fiele die Firma auf 80
     // FundedNext 76,5 (Finn 08.10.2026: „FundedNext ist 76,5" — FTMO, FundingPips, The5ers bleiben bei 80); Überschreibung je Konto (payout_pct) gewinnt
+    // FundedNext Futures (FNF) 91,5 (Finn 29.10.2026: „Deckel 4.000 $, Split 91,5 %") — VOR FundedNext (CFD, 76,5), der Name enthält „FundedNext"
+    const admIstFnf = firm => admIstFundedNext(firm) && /futur/i.test(String(firm || ''))
     const admPayoutPctDefault = firm => istTradeifyCfd(firm) ? 80 : /tradeify/i.test(String(firm || '')) ? 90 :   // Tradeify CFD 80 % (23.10.2026)
-      /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFundedNext(firm) ? 76.5 : 80
+      /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFnf(firm) ? 91.5 : admIstFundedNext(firm) ? 76.5 : 80
     const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
     function admAccGroesse(name, balance){
       const m = String(name || '').match(/(\d{2,3})\s*k\b/i)
@@ -16436,7 +16438,8 @@
      * Anfragbar = min(Gewinn × Anteil der Firma, Deckel der Firma), Erhalten = Anfragbar × Profit-Share (c.pct — Firmen-Standard
      * oder die Überschreibung je Konto, dieselbe Zahl wie in der Payout-Spalte). Reine Anzeige: keine Prüfung, keine Sperre.
      * Regeln aus firm_rules.json (Abschnitt „Payout" je Firma); Tradeify-Futures nach Finns Ansage (firm_rules nennt dort nur
-     * Select-Flex-Caps 3.000/4.000/5.000 je Größe und keinen Anteil). Topstep bewusst ohne Regel (Prüfer 29.10.2026): drei Caps
+     * Select-Flex-Caps 3.000/4.000/5.000 je Größe und keinen Anteil); FundedNext Futures (FNF) nach Finns Ansage 29.10.2026 (50 %,
+     * Deckel 4.000 $, Split 91,5 % in admPayoutPctDefault — FNF fehlt in firm_rules). Topstep bewusst ohne Regel (Prüfer 29.10.2026): drei Caps
      * in firm_rules, welcher am Konto gilt, weiß nur Finn. anteil 1 = voller Gewinn anfragbar (firm_rules nennt Split
      * und On-Demand, aber keinen Anteil und keinen Deckel). Regel null = „Regel fehlt": Konto zeigt das, zählt in keiner
      * Summe — kein Raten. Reihenfolge: speziellste Firma zuerst (Tradeify CFD vor Tradeify, FundedNext/FTMO Futures vor
@@ -16447,7 +16450,7 @@
       [f => /topstep/.test(f), null, 'Topstep: firm_rules nennt 50 % der Reward Balance, aber drei Caps (XFA Standard 5.000 $, Consistency/RTP 6.000 $, Double Cap 10.000 $ „bestätigt 31.08.2026, Finns XFA") — welcher am Konto gilt, steht nirgends'],
       [f => /alpha/.test(f), null, 'Alpha Futures: firm_rules nennt drei Programme (Standard 50 % / 15.000 $, Advanced, Zero) — welches am Konto gilt, steht nirgends'],
       [f => /apex/.test(f), null, 'Apex: firm_rules nennt für die ersten 5 Payouts nur „Caps je Größe" ohne Zahlen'],
-      [f => /f(ou|u)nded\s*next/.test(f) && /futur/.test(f), null, 'FundedNext Futures: keine Payout-Regel in firm_rules.json'],
+      [f => /f(ou|u)nded\s*next/.test(f) && /futur/.test(f), { anteil: .5, deckel: 4000, quelle: 'Finn 29.10.2026: 50 % vom Gewinn, max. 4.000 $ je Anfrage, Split 91,5 % (FNF steht nicht in firm_rules.json)' }],
       [f => /ftmo/.test(f) && /futur/.test(f), null, 'FTMO Futures: keine Payout-Regel in firm_rules.json'],
       [f => /f(ou|u)nded\s*next/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: jederzeit anforderbar, kein Anteil, kein Deckel' }],
       [f => /ftmo/.test(f), { anteil: 1, deckel: null, quelle: 'firm_rules: on-demand, kein Anteil, kein Deckel' }],
@@ -48496,7 +48499,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1804'
+  const OS_TAB_BUILD = '2026-09-22.1805'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
