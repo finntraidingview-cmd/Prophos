@@ -17510,15 +17510,20 @@
           + (next ? ` · nächster Payout ab ${new Date(next + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })}` : '')
           + (d.termin_fehler ? ' — Termin NICHT gespeichert, im Account-Modal setzen' : ''), d.termin_fehler ? 'end' : 'start')
       }
-      // Balance nach dem Payout neu lesen (wie finBalanceNachPayout): nur anstoßen, nie blockieren
+      // Balance nach dem Payout neu lesen (wie finBalanceNachPayout): nur anstoßen, nie blockieren. Sofort, dann nach 5 und 30 min
+      // (Prüfer 29.10.2026, wie .1481 unter Finanzen: die Firma bucht den Abzug erst, wenn die Anfrage dort durch ist), solange der Tab offen ist.
       if(t.account_id){
-        try{
-          const { data: { session } } = await supabase.auth.getSession()
-          // ?ansicht=admin: die Verwalter-Gruppe gilt dort nur mit dem Marker, sonst 403 für Nicht-ADMIN_EMAILS (Prüfer 29.10.2026)
-          const res = await fetch(`${WATCHER_HOME}/admin/konto-balance-lesen?ansicht=admin`, { method:'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type':'application/json' }, body: JSON.stringify({ aktion:'start', account_id: t.account_id }) })
-          const b = await res.json().catch(() => ({}))
-          if(!res.ok && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + (b.error || ('HTTP ' + res.status)), 'end')
-        }catch(e){ if(typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + ((e && e.message) || e), 'end') }
+        const lesen = async (laut) => {
+          try{
+            const { data: { session } } = await supabase.auth.getSession()
+            // ?ansicht=admin: die Verwalter-Gruppe gilt dort nur mit dem Marker, sonst 403 für Nicht-ADMIN_EMAILS (Prüfer 29.10.2026)
+            const res = await fetch(`${WATCHER_HOME}/admin/konto-balance-lesen?ansicht=admin`, { method:'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type':'application/json' }, body: JSON.stringify({ aktion:'start', account_id: t.account_id }) })
+            const b = await res.json().catch(() => ({}))
+            if(!res.ok && laut && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + (b.error || ('HTTP ' + res.status)), 'end')
+          }catch(e){ if(laut && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + ((e && e.message) || e), 'end') }
+        }
+        lesen(true)
+        for(const min of [5, 30]) setTimeout(() => { lesen(false) }, min * 60000)   // Nachlesungen still — Fehler nur beim ersten Start als Toast
       }
     }
 
@@ -48742,7 +48747,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1813'
+  const OS_TAB_BUILD = '2026-09-22.1814'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
