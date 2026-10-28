@@ -1148,6 +1148,11 @@
   #dashboard-view .note-btn:hover{background:var(--bg2);color:var(--ink)}
   #dashboard-view .note-btn.copied{background:rgba(16,185,129,.12);color:#0f9c7a;border-color:transparent}
   #dashboard-view .note-btn-del:hover{background:rgba(240,68,56,.1);color:#F04438;border-color:transparent}
+  /* Notiz für alle IDs (29.10.2026): Knopf im Zustand „geteilt" wie „kopiert", fremde geteilte Zettel mit Chip „von <ID>" und nur lesbar */
+  #dashboard-view .note-btn-share.geteilt{background:rgba(136,124,252,.14);color:var(--violet);border-color:transparent}
+  #dashboard-view .note-von{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;font-size:11px;font-weight:500;border-radius:999px;background:var(--bg2);color:var(--sub);white-space:nowrap}
+  #dashboard-view .note-von i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  #dashboard-view .note-ta[readonly]{color:var(--sub);cursor:default}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
   /* Meta-Wallet: 7 Karten (Gesamt + 6 Chains, seit Ethereum 15.09.2026) — muss VOR der
      960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt.
@@ -48763,7 +48768,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1816'
+  const OS_TAB_BUILD = '2026-09-22.1817'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -67746,16 +67751,23 @@
   async function loadNotesFromSupabase(){
     if(!currentUserId) return
     try{
+      // FÜR ALLE IDs (29.10.2026, Finn: „eine Notiz kurz für alle IDs teilen"): kein user_id-Filter mehr — RLS liefert die eigenen Zettel
+      // plus die geteilten der eigenen Gruppe (sql/2026-10-29_notiz_fuer_alle.sql). Eigene zuerst, dann fremde geteilte, je nach Zeit.
       const { data, error } = await supabase
         .from('notes').select('*')
-        .eq('user_id', currentUserId)
         .order('updated_at', { ascending: false })
       if(error){ console.error('loadNotes:', error); return }
-      notes = data || []
+      notes = (data || []).sort((a, b) => (noteFremd(a) ? 1 : 0) - (noteFremd(b) ? 1 : 0))
       renderNotes()
     }catch(e){ console.error('loadNotesFromSupabase failed:', e) }
   }
 
+  // Fremder geteilter Zettel = anderer Ersteller (nur lesbar, kein Löschen, Chip „von <ID>")
+  const noteFremd = n => !!(n && n.user_id && currentUserId && String(n.user_id) !== String(currentUserId))
+  // Teilen-Knopf nur mit Admin-Freischaltung dieses Browsers (29.10.2026, Finn: „unter Admin … für alle IDs teilen"): dasselbe Flag wie
+  // der Admin-Inhalt (prophos_kasse_frei je Profil, '1' = Standard-Code; '2' = eigener Code eines eingeschränkten Logins zählt nicht).
+  // Das ist ein UI-Gate wie beim Admin — die Daten grenzt RLS (Gruppe) ein, ändern/löschen kann ohnehin nur der Ersteller.
+  const noteAdminFrei = () => { try{ return localStorage.getItem('prophos_kasse_frei:' + (localStorage.getItem('prophos_active_profile') || 'default')) === '1' }catch(_){ return false } }
   function renderNotes(){
     const grid  = document.getElementById('notesGrid')
     const empty = document.getElementById('notesEmpty')
@@ -67766,22 +67778,25 @@
       return
     }
     if(empty) empty.style.display = 'none'
-    grid.innerHTML = notes.map(n => `
+    const adminFrei = noteAdminFrei()
+    grid.innerHTML = notes.map(n => { const fremd = noteFremd(n); return `
       <div class="note-card" data-note-id="${n.id}">
-        <textarea class="note-ta" data-note-input="${n.id}" placeholder="Hier reinschreiben…">${escapeHtml(n.content || '')}</textarea>
+        <textarea class="note-ta" data-note-input="${n.id}" placeholder="Hier reinschreiben…"${fremd ? ' readonly title="Geteilter Zettel — nur der Ersteller ändert ihn"' : ''}>${escapeHtml(n.content || '')}</textarea>
         <div class="note-foot">
-          <span class="note-time" data-note-time="${n.id}">${NOTE_FMT(n.updated_at)}</span>
+          <span class="note-time" data-note-time="${n.id}">${NOTE_FMT(n.updated_at)}${fremd ? ` <span class="note-von" title="Für alle IDs geteilt von ${escapeHtml(n.geteilt_von || 'anderer ID')}"><i style="background:${idFarbe(n.user_id)}"></i>von ${escapeHtml(n.geteilt_von || 'anderer ID')}</span>` : ''}</span>
           <div class="note-actions">
+            ${(!fremd && adminFrei) ? `<button class="note-btn note-btn-share${n.fuer_alle ? ' geteilt' : ''}" data-note-share="${n.id}" title="${n.fuer_alle ? 'Geteilt mit allen IDs der Gruppe — klicken: nicht mehr teilen' : 'Diesen Zettel für alle IDs der Gruppe sichtbar machen'}">${n.fuer_alle ? '✓ Geteilt' : 'Für alle IDs'}</button>`
+              : (!fremd && n.fuer_alle) ? `<span class="note-btn note-btn-share geteilt" title="Für alle IDs der Gruppe geteilt — ändern nur mit Admin-Freischaltung">✓ Geteilt</span>` : ''}
             <button class="note-btn" data-note-copy="${n.id}" title="Kopieren">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               Kopieren
             </button>
-            <button class="note-btn note-btn-del" data-note-del="${n.id}" title="Löschen">
+            ${fremd ? '' : `<button class="note-btn note-btn-del" data-note-del="${n.id}" title="Löschen">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
+            </button>`}
           </div>
         </div>
-      </div>`).join('')
+      </div>` }).join('')
     bindNoteEvents()
   }
 
@@ -67815,6 +67830,32 @@
     document.querySelectorAll('[data-note-del]').forEach(btn => {
       btn.addEventListener('click', () => noteDelete(btn.dataset.noteDel))
     })
+    document.querySelectorAll('[data-note-share]').forEach(btn => {
+      btn.addEventListener('click', () => { const n = notes.find(x => String(x.id) === String(btn.dataset.noteShare)); noteTeilen(btn.dataset.noteShare, !(n && n.fuer_alle)) })
+    })
+  }
+
+  // Zettel für alle IDs der eigenen Gruppe teilen bzw. zurücknehmen (29.10.2026). Nur der Ersteller (RLS „own notes update");
+  // geteilt_von = Anzeigename dieses Logins, damit die anderen IDs „von <Name>" sehen.
+  async function noteTeilen(id, an){
+    try{
+      const vonRoh = String((document.getElementById('userName') || {}).textContent || '').trim()
+      const von = (an && vonRoh && !/^loading/i.test(vonRoh)) ? vonRoh.slice(0, 40) : null   // „Loading…" nie als Name
+      const { data, error } = await supabase
+        .from('notes').update({ fuer_alle: !!an, geteilt_von: von }).eq('id', id).select('*').single()
+      if(error) throw error
+      const i = notes.findIndex(n => String(n.id) === String(id))
+      if(i >= 0) notes[i] = data
+      renderNotes()
+      notesSetSync(an ? '✓ für alle IDs geteilt' : '✓ nicht mehr geteilt')
+      setTimeout(() => { if(!_noteSaveTimers.size) notesSetSync('') }, 1500)
+    }catch(e){
+      const msg = String((e && e.message) || e)
+      // Spalte fehlt = SQL-Datei noch nicht eingespielt — die EINE Ursache mit dem Fix (Finn 09.10.2026)
+      alert(/fuer_alle|geteilt_von|column/i.test(msg)
+        ? 'Teilen geht noch nicht: in der Tabelle notes fehlt die Spalte fuer_alle → sql/2026-10-29_notiz_fuer_alle.sql in Supabase einspielen.'
+        : 'Teilen fehlgeschlagen: ' + msg)
+    }
   }
 
   async function noteSave(id, content){
@@ -67862,6 +67903,8 @@
   }
 
   document.getElementById('notesAddBtn')?.addEventListener('click', noteAdd)
+  // Entwickler-Haken wie _admStub (29.10.2026): Zettel ohne Login zeichnen — Liste + eigene user_id, für den Boot-Check der geteilten Zettel
+  window._notesStub = (liste, me) => { if(me && !currentUserId) currentUserId = me; notes = Array.isArray(liste) ? liste : []; renderNotes() }
 
   /* ========== INITIAL LOAD: Accounts aus Supabase nach Login ========== */
 
