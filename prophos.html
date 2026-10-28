@@ -12555,7 +12555,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Konten aus Mail</div>
-                <div class="panel-sub" id="adm-km-sub">Konto-Mails der Prop-Firmen (Tradeify, Topstep, Apex, FundedNext, FundingPips, FTMO) der letzten 90 Tage, Resets als Art „Reset" (neue External ID) · „Anlegen" füllt das Account-Modal vor, angelegt wird nichts von allein</div>
+                <div class="panel-sub" id="adm-km-sub">Konto-Mails der Prop-Firmen (Tradeify, Topstep, Apex, FundedNext, FundingPips, FTMO, FTMO Futures, The5ers) der letzten 90 Tage, Resets als Art „Reset" (neue External ID) · „Anlegen" füllt das Account-Modal vor, angelegt wird nichts von allein</div>
               </div>
               <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
                 <div id="adm-km-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
@@ -12563,7 +12563,7 @@
               </div>
             </div>
             <!-- S3-Stresstest 29.10.2026: was der Reiter nie zeigen kann — Firmen ohne Konto-Mail, IDs ohne Mail-Anbindung (Gmail-Script) -->
-            <div id="adm-km-hinweis" style="color:var(--sub);font-size:11.5px;padding:0 18px 10px">Keine Konto-Mails von: Lucid, Blue Guardian, Tradeify CFD, MFFU, Alpha, Fusion · The5ers und FTMO nennen keine Kontonummer · ohne Mail-Anbindung: Finn + Pascal, Pascal</div>
+            <div id="adm-km-hinweis" style="color:var(--sub);font-size:11.5px;padding:0 18px 10px">Keine Konto-Mails von: Lucid, Blue Guardian, Tradeify CFD, MFFU, Alpha, Fusion · The5ers und FTMO (CFD) nennen keine Kontonummer, nur Bestellung · ohne Mail-Anbindung: Finn + Pascal, Pascal</div>
             <div id="adm-km-msg" style="color:var(--sub);font-size:13px;padding:14px 18px">Lade Konto-Mails…</div>
             <div class="table-wrap" id="adm-km-wrap" hidden>
               <table class="t">
@@ -48817,7 +48817,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1824'
+  const OS_TAB_BUILD = '2026-09-22.1825'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68429,7 +68429,8 @@
    * folgt der Namensregel (acNameVorschlag), Phase wählt Finn. Nichts wird blind angelegt. Laden nur beim Öffnen und auf ↻ (kein Takt). ══ */
   const KONTO_MAIL_TAGE = 90
   const KONTO_MAIL_MUSTER = [
-    // Tradeify — „Your Tradovate account is ready": „Account Details Account Name TDFYSL150207636079 Order ID 8890888"
+    // Tradeify — „Your Tradovate account is ready": „Account Details Account Name TDFYSL150207636079 Order ID 8890888"; dieselbe Mail-Form
+    //   bei Level-Up-Konten „TDFYLVL598530056" (17 Stück vom 15.10.2026, S3-Stresstest) — Nummer ohne Größe im Namen → Größe leer, Finn trägt sie ein
     { firma: 'Tradeify', suche: 'Tradovate account is ready', betreff: /Tradovate account is ready/i, konto: /Account\s*Name\s*:?\s*([A-Z]{4,}\d{6,})/, typ: 'challenge',
       groesse: t => kontoMailGroesseAusName(t) },
     // Tradeify Reset (Finn 29.10.2026 01:35: „in der Reset-Mail steht die External ID, die wir brauchen, um die Konten in Massen hinzuzufügen") —
@@ -68473,9 +68474,18 @@
     //   Betreff beginnt mit „[Nummer]" (sonst träfe Duplikium „Your Account Details at …"); „[…] Master account details" = Funded (funded_cfd)
     { firma: 'FundingPips', suche: 'account details', betreff: /^\[\d{6,}\].*account details/i, konto: /account\s*#(\d{6,})/i,
       typ: (m, text, betreff) => /Master/i.test(betreff) ? 'funded_cfd' : /Phase 2/i.test(betreff) ? 'phase2' : 'phase1', groesse: () => '' },
-    // FTMO — „Login credentials for your 2-Step FTMO Challenge - order 24774475 -": nur HTML, Login steht NICHT in der Mail (nur „Account MetriX") → ohne Nummer
+    // FTMO (CFD) — „Login credentials for your 2-Step FTMO Challenge - order 24774475 -": Login steht NICHT in der Mail (nur „Account MetriX") → ohne Nummer
     { firma: 'FTMO', suche: 'Login credentials for your', betreff: /Login credentials for your/i, konto: /order\s*(\d{6,})/i, typ: 'phase1',
       ext: () => '', groesse: () => '' },
+    // FTMO Futures — „Order Confirmation: Your Subscription is Active - FTMO768773 is ready": Nummer im Betreff und als „Account ID: FTMO768773" im
+    //   Text; Größe steht nicht in der Mail (Prophos: „50k FTMO768773 → Challenge") → leer, Finn trägt sie ein (S3-Stresstest 29.10.2026)
+    { firma: 'FTMO Futures', suche: 'Subscription is Active', betreff: /Subscription is Active - FTMO\d{4,}/i, konto: /(FTMO\d{5,})/i, typ: 'challenge',
+      groesse: () => '' },
+    // The5%ers — „Your order is confirmed!": keine Kontonummer (Zugang im Hub), nur „ORDER 1001006895 … ACCOUNTS 2 … 100k High Stakes X2" →
+    //   Zeile ohne Nummer mit Größe und Anzahl, Anlegen mit leerer External ID (S3-Stresstest 29.10.2026)
+    { firma: 'The5%ers', suche: 'order is confirmed', betreff: /^Your order is confirmed!/i, konto: /ORDER\s*(\d{7,})/i, typ: 'phase1',
+      ext: () => '', groesse: (t, text) => (text.match(/(\d{2,3})k\s+(High Stakes|Hyper Growth|Pro Growth|Bootcamp|Pro)/i) || text.match(/\b(\d{2,3})k\s+[A-Za-z]/) || [])[1] || '',
+      hinweis: (t, text) => { const n = (text.match(/ACCOUNTS\s*(\d+)/i) || [])[1]; return n && n !== '1' ? `${n} Konten in der Bestellung` : '' } },
   ]
   // FundedNext schreibt die Größe als „Stellar-2-Step-100000 USD" → 100 (k)
   function kontoMailGroesseUsd(usd){ const n = Number(usd); return n >= 1000 ? String(Math.round(n / 1000)) : '' }
@@ -68499,7 +68509,8 @@
       const ext = roh ? (mu.ext ? mu.ext(roh) : roh) : ''
       const typ = typeof mu.typ === 'function' ? mu.typ(roh, text, m.betreff || '') : mu.typ
       const vorher = mu.vorher ? ((`${m.betreff || ''} ${text}`.match(mu.vorher) || [])[1] || '') : ''
-      return { firma: mu.firma, ext, roh, typ, art: mu.art || 'neu', vorher, groesse: roh || text ? String(mu.groesse(roh, text) || '') : '' }
+      const hinweis = mu.hinweis ? String(mu.hinweis(roh, text) || '') : ''
+      return { firma: mu.firma, ext, roh, typ, art: mu.art || 'neu', vorher, hinweis, groesse: roh || text ? String(mu.groesse(roh, text) || '') : '' }
     }
     return null
   }
@@ -68568,7 +68579,7 @@
       tr.querySelector('.km-firma').textContent = z.firma
       tr.querySelector('.km-acc').textContent = z.ext || '— (Kontonummer nicht in der Mail)'
       const roh = tr.querySelector('.km-roh')
-      const rohTxt = [z.roh && z.roh !== z.ext ? (z.ext ? 'in der Mail: ' : 'Bestellnummer ') + z.roh : '',
+      const rohTxt = [z.roh && z.roh !== z.ext ? (z.ext ? 'in der Mail: ' : 'Bestellnummer ') + z.roh : '', z.hinweis || '',
         z.vorher ? `Reset von ${z.vorher}${kontoMailStand({ ext: z.vorher, firma: z.firma }).konto ? ' (in Prophos)' : ''}` : ''].filter(Boolean).join(' · ')
       if(rohTxt) roh.textContent = rohTxt; else roh.remove()
       tr.querySelector('.km-gr').textContent = z.groesse ? z.groesse + 'k' : '—'
