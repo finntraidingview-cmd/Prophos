@@ -4772,6 +4772,8 @@
   #dashboard-view .wdl-og3-verlauf.is-zu .wdl-og3-kopf{margin-bottom:0}
   #dashboard-view .wdl-og3-verlauf .wdl-og3-kopf small{margin-left:0}
   #dashboard-view .wdl-vl-schalter{display:inline-flex;align-items:center;gap:8px;margin-left:auto;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;white-space:nowrap}
+  /* Müll-Schalter im Mail-Reiter und Admin → Mail (29.10.2026): derselbe Schalter wie der Verlauf im Radar, ohne margin-left */
+  #dashboard-view .mail-muell-schalter{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none;white-space:nowrap}
   #dashboard-view .wdl-vl-filter{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin:0 2px 8px;font-size:11.5px;color:var(--sub)}
   #dashboard-view .wdl-vl-filter > i{flex:none;min-width:48px;font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2)}
   #dashboard-view .wdl-vl-filter .adm-vl-chip{padding:1px 6px;white-space:nowrap}
@@ -11267,6 +11269,8 @@
         </div>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <input type="search" class="mail-suche" id="mailSuche" placeholder="Suchen (Absender, Betreff, Text)…">
+          <!-- Müll ausblenden (29.10.2026, Finn: „unnötige Order-Mails … vollmüllen den Posteingang"): Muster in MAIL_MUELL_BETREFF/_VON -->
+          <label class="mail-muell-schalter" title="Kauf-/Zahlungsbestätigungen, Google-Kontodaten, Verifizierungs-Codes, Trustpilot und Werbung ausblenden — Konto-Mails, Resets, Breaches und Payouts bleiben sichtbar"><span>Müll ausblenden</span><span class="switch"><input type="checkbox" id="mailMuellAn"><span class="switch-slider"></span></span></label>
         </div>
       </div>
       <div class="mail-setup" id="mailSetup" style="display:none">
@@ -12535,6 +12539,7 @@
           <div class="adm-mail-kopf">
             <div class="adm-mail-chips" id="adm-mail-chips"></div>
             <span class="adm-mail-stand" id="adm-mail-stand"></span>
+            <label class="mail-muell-schalter" title="Kauf-/Zahlungsbestätigungen, Google-Kontodaten, Verifizierungs-Codes, Trustpilot und Werbung ausblenden (derselbe Schalter wie im Mail-Reiter)"><span>Müll ausblenden</span><span class="switch"><input type="checkbox" id="admMailMuellAn"><span class="switch-slider"></span></span></label>
             <button class="btn btn-ghost" id="adm-mail-alle-gelesen" hidden style="padding:7px 12px;font-size:12.5px">Alle als gelesen</button>
             <button class="btn btn-ghost" id="adm-mail-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
           </div>
@@ -48812,7 +48817,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1822'
+  const OS_TAB_BUILD = '2026-09-22.1823'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68035,6 +68040,31 @@
   const MAIL_EINGANG_URL = 'https://web-production-bec81.up.railway.app/mail/eingang'
   const MAIL_LISTE_MAX = 300
   const MAIL_STILL_MIN = 20          // so lange darf das Script schweigen (Takt 5 min), danach Hinweis
+  /* MÜLL-FILTER (29.10.2026, Finn ~02:00: „Die meisten sind unnötige Order-Mails — ‚Order Confirmed', ‚Du hast gekauft' — die den Posteingang
+   * vollmüllen, sodass wichtige vielleicht gar nicht mehr angezeigt werden. Kann man die ausblenden?"). Befund 29.10. über 30 Tage HT
+   * (1.848 Mails, 7 IDs): es gibt keine Trade-Order-Mails — der Müll sind Kauf-/Zahlungsbestätigungen (Tradeify „order is confirmed" 113,
+   * Confirmo „payment … is complete" 62, Apex „Payment Receipt" 41, Bestellbestätigungen Topstep/FundingPips/5ers/FTMO 47), Konto-Technik
+   * (Google „Kontodaten geteilt" 113, Verifizierungs-Codes ~50, „Subscription cancelled" 32) und Werbung (Trustpilot 61, Newsletter ~80)
+   * = 42 % aller Mails. AUSDRÜCKLICH KEIN MÜLL (Master 29.10.): „Tradovate account is ready" (Konto-Mail → Konten aus Mail), „account reset
+   * is confirmed" (Reset = Konto wieder am Start), „breached", alle Payout-/Reward-Mails (auch „Reward Request OTP" = Anfrage bei FundedNext),
+   * Topstep „Order confirmed. Your Trading Combine is ready" (Konto-Mail mit Account Name — darum „order is confirmed" statt „order (is )?confirm", Review 29.10.).
+   * EINE Konstante für Mail-Reiter, Admin → Mail und das Sidebar-Badge. Dieselbe Zeichenkette läuft als PostgREST-Filter `imatch` (Postgres
+   * ~*) — darum ohne Komma, ohne \b (in Postgres = Backspace) und ohne JS-Sonderklassen. Schalter standardmäßig AN, Merker im
+   * localStorage (prophos_mail_muell_an, '0' = aus), gilt für beide Listen. */
+  const MAIL_MUELL_BETREFF = 'order is confirmed|order confirmation|bestellbest|payment receipt|payment to .* is complete|hast gekauft|subscription cancel'
+    + '|Google-Kontodaten|Google Account data|verification code|is your verification|Sicherheitswarnung|Security alert|trustpilot|Rate Us'
+    + '|Must-Know|ROI – |DISCOUNT|Reset at a|Try Again for Less|Bounce Back|unread notification|paid out|paid in rewards|See who topped'
+    + '|Welcome to Topstep|Off Your First|free accounts|Labs #|Infinity|Prices dropped|Join the club|made \\$|changed .* family|Bootcamp'
+  const MAIL_MUELL_VON = 'trustpilotmail\\.com|@google\\.com|accounts\\.google\\.com'
+  const MAIL_MUELL_RE = new RegExp(MAIL_MUELL_BETREFF, 'i'), MAIL_MUELL_VON_RE = new RegExp(MAIL_MUELL_VON, 'i')
+  function mailIstMuell(m){ return !!(m && (MAIL_MUELL_RE.test(String(m.betreff || '')) || MAIL_MUELL_VON_RE.test(String(m.von || '')))) }   // REIN
+  function mailMuellAn(){ try{ return localStorage.getItem('prophos_mail_muell_an') !== '0' }catch(_){ return true } }
+  function mailMuellSetzen(an){ try{ localStorage.setItem('prophos_mail_muell_an', an ? '1' : '0') }catch(_){} }
+  // Schalter-Häkchen beider Listen auf den Merker setzen
+  function mailMuellSchalterMalen(){ for(const id of ['mailMuellAn', 'admMailMuellAn']){ const el = document.getElementById(id); if(el) el.checked = mailMuellAn() } }
+  // PostgREST-Filter für Supabase-Abfragen (Liste + Badge): not.imatch auf Betreff und Absender
+  const mailMuellFilter = q => mailMuellAn() ? q.not('betreff', 'imatch', MAIL_MUELL_BETREFF).not('von', 'imatch', MAIL_MUELL_VON) : q
+  window._mailIstMuell = mailIstMuell   // Test-Haken
   const _mail = { uid: null, liste: [], aktiv: null, schluessel: undefined, suche: '', bilder: new Set(), nr: 0 }
 
   function mailScriptText(token){
@@ -68189,12 +68219,17 @@
     const uid = currentUserId
     if(!uid) return
     const nr = ++_mail.nr
-    let q = supabase.from('mails').select('id,von,betreff,datum,snippet,gelesen,anhaenge').eq('user_id', uid)
-      .order('datum', { ascending: false, nullsFirst: false }).limit(MAIL_LISTE_MAX)
-    // Suche: Zeichen, die PostgREST in or() als Trenner liest, fallen weg
-    const such = _mail.suche.replace(/[,()*%\\]/g, ' ').trim()
-    if(such) q = q.or(`von.ilike.*${such}*,betreff.ilike.*${such}*,snippet.ilike.*${such}*`)
-    const { data, error } = await q
+    const bauen = mitFilter => {
+      let q = supabase.from('mails').select('id,von,betreff,datum,snippet,gelesen,anhaenge').eq('user_id', uid)
+        .order('datum', { ascending: false, nullsFirst: false }).limit(MAIL_LISTE_MAX)
+      // Suche: Zeichen, die PostgREST in or() als Trenner liest, fallen weg
+      const such = _mail.suche.replace(/[,()*%\\]/g, ' ').trim()
+      if(such) q = q.or(`von.ilike.*${such}*,betreff.ilike.*${such}*,snippet.ilike.*${such}*`)
+      return mitFilter ? mailMuellFilter(q) : q
+    }
+    // Müll-Filter (29.10.2026) serverseitig, damit die Liste voll bleibt; kennt der Server imatch nicht, ohne Filter laden und hier sieben
+    let { data, error } = await bauen(true)
+    if(error && mailMuellAn()){ ({ data, error } = await bauen(false)); if(!error) data = (data || []).filter(m => !mailIstMuell(m)) }
     if(nr !== _mail.nr || uid !== currentUserId) return
     if(error){ document.getElementById('mailListe').innerHTML = `<div class="empty" style="margin:14px">Mails nicht lesbar: ${escapeHtml(error.message)}</div>`; return }
     _mail.liste = data || []
@@ -68205,7 +68240,7 @@
     const el = document.getElementById('mailListe')
     if(!el) return
     if(!_mail.liste.length){
-      el.innerHTML = `<div style="padding:24px 16px;font-size:13px;color:var(--sub)">${_mail.suche ? 'Keine Mail passt zur Suche.' : 'Noch keine Mails da.'}</div>`
+      el.innerHTML = `<div style="padding:24px 16px;font-size:13px;color:var(--sub)">${_mail.suche ? 'Keine Mail passt zur Suche.' : mailMuellAn() ? 'Keine Mails außer Müll — Schalter „Müll ausblenden" oben.' : 'Noch keine Mails da.'}</div>`
       return
     }
     el.innerHTML = _mail.liste.map(m => mailZeileHtml(m, String(m.id) === String(_mail.aktiv))).join('')
@@ -68283,7 +68318,9 @@
     const uid = currentUserId, b = document.getElementById('sb-badge-mail')
     if(!b) return
     if(!uid){ b.hidden = true; return }
-    const { count, error } = await supabase.from('mails').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('gelesen', false)
+    // Badge zählt nur Nicht-Müll (29.10.2026); kennt der Server imatch nicht → Zahl ohne Filter (lieber zu viel als keine)
+    let { count, error } = await mailMuellFilter(supabase.from('mails').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('gelesen', false))
+    if(error && mailMuellAn()) ({ count, error } = await supabase.from('mails').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('gelesen', false))
     if(uid !== currentUserId || error) return
     b.textContent = count > 999 ? '999+' : String(count || 0)
     b.hidden = !count
@@ -68352,6 +68389,13 @@
       if(v && v.classList.contains('active')){ mailSchluesselLaden(); mailListeLaden() }
     }, 5 * 60000)
   })()
+  // Müll-Schalter (29.10.2026): ein Merker für Mail-Reiter und Admin → Mail; beide Listen und das Badge laden neu
+  mailMuellSchalterMalen()
+  for(const id of ['mailMuellAn', 'admMailMuellAn']) document.getElementById(id)?.addEventListener('change', e => {
+    mailMuellSetzen(!!e.target.checked); mailMuellSchalterMalen()
+    if(currentUserId) mailListeLaden(); mailBadgeLaden()
+    if(typeof admMailMalen === 'function' && !document.getElementById('adm-pane-mail')?.hidden) admMailMalen()
+  })
   /* ══ ENDE MAIL-REITER ══ */
 
   /* ══ ADMIN → MAIL (21.10.2026, Finn 05:15 Dubai: „Unter Admin noch einmal Gmail hinzufügen, wo ich alle Gmail-Accounts jeder einzelnen ID
@@ -68629,8 +68673,12 @@
       el.innerHTML = `<div style="padding:24px 16px;font-size:13px;color:var(--sub)">${z && !z.verbunden ? 'Gmail dieser ID ist nicht verbunden.' : 'Keine Mails da.'}</div>`
       return
     }
-    el.innerHTML = _admMail.mails.map(m => mailZeileHtml(m, String(m.id) === String(_admMail.aktiv),
+    // Müll ausblenden (29.10.2026): dieselbe Konstante wie der Mail-Reiter, hier im Browser gesiebt (die Route liefert alles)
+    const sicht = mailMuellAn() ? _admMail.mails.filter(m => !mailIstMuell(m)) : _admMail.mails
+    const weg = _admMail.mails.length - sicht.length
+    el.innerHTML = sicht.map(m => mailZeileHtml(m, String(m.id) === String(_admMail.aktiv),
         `<span class="mz-id"><i style="background:${idFarbe(m.user_id)}"></i>${escapeHtml(name.get(String(m.user_id)) || String(m.user_id || '').slice(0, 8))}</span>`)).join('')
+      + (weg ? `<div style="padding:8px 16px;font-size:12px;color:var(--sub)">${weg} Müll-Mail${weg === 1 ? '' : 's'} ausgeblendet</div>` : '')
       + (_admMail.mehr ? '<button type="button" class="adm-mail-mehr" data-adm-mail-mehr="1">Ältere laden</button>' : '')
   }
   function admMailKopf(){
