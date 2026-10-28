@@ -8333,6 +8333,9 @@
                   <th style="padding-right:20px"></th>
                 </tr>
               </thead>
+              <!-- Zu bestätigende TV-Konten (29.10.2026, Finn 03:58: „als eigene Zeilen oben in der Liste … Stand-Chip ‚zu bestätigen'") — eigenes
+                   tbody, damit renderAccounts sie nicht überschreibt; Verdrahtung Sektion „NEUE KONTEN AUS TRADINGVIEW" im Modul -->
+              <tbody id="tvNeuRows"></tbody>
               <tbody id="accountsTable"></tbody>
             </table>
           </div>
@@ -12664,6 +12667,7 @@
                       <th style="padding-right:20px" title="Auto-Planer: Stand des letzten Laufs (Dubai) oder der Grund, warum nicht — umschalten bei der jeweiligen ID unter Accounts">Planer</th>
                     </tr>
                   </thead>
+                  <tbody id="adm-k-tv"></tbody>   <!-- zu bestätigende TV-Konten aller IDs (29.10.2026), Modul-Sektion „NEUE KONTEN AUS TRADINGVIEW" -->
                   <tbody id="adm-k-table"></tbody>
                 </table>
               </div>
@@ -14886,6 +14890,7 @@
     }
     if(name === 'accounts' && typeof window.kwOnEnter === 'function') window.kwOnEnter()   // Kontowert-Spalte (07.10.2026): einmal je Öffnen
     if(name === 'accounts' && typeof window._mpOeffnen === 'function') window._mpOeffnen()   // Muster-Portfolio (16.10.2026)
+    if(name === 'accounts' && typeof window._tvNeuOeffnen === 'function') window._tvNeuOeffnen()   // Neue Konten aus TradingView (29.10.2026)
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'mail' && typeof window.mailOnEnter === 'function') window.mailOnEnter()   // Mail-Reiter (16.10.2026)
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
@@ -17715,6 +17720,7 @@
       if(!msg || !tb) return
       if(!admData){ msg.style.display = ''; body.hidden = true; return }
       msg.style.display = 'none'; body.hidden = false
+      try{ window._admKTvRender?.() }catch(_){}   // zu bestätigende TV-Konten oben (29.10.2026)
       if(admData.alle_fehler){ msg.style.display = ''; msg.textContent = 'Ziel-/Planer-Felder nicht lesbar: ' + admData.alle_fehler + ' — Liste ohne diese Chips.' }
       // Filter-Auswahl aus derselben Antwort (Personen/Firmen) — Wahl bleibt beim Neuladen stehen
       const fuell = (id, opts) => { const el = $(id); if(!el) return; const cur = el.value
@@ -38862,6 +38868,7 @@
     if(!accEls.table) return
     if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
     todoLaden()
+    try{ tvNeuRender() }catch(_){}   // Neue Konten aus TradingView (29.10.2026): Kasten gegen die frische Kontoliste filtern
     // Echo-Kontostände bereitstellen (31.08.2026) — gedrosselt, zeichnet nach
     // dem ersten Füllen einmal neu. Ohne diesen Anstoss stünde der Cache nur
     // nach dem Öffnen des Trade-planen-Modals zur Verfügung, und genau deshalb
@@ -48818,7 +48825,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1826'
+  const OS_TAB_BUILD = '2026-09-22.1827'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68597,6 +68604,7 @@
         if(zuletzt && zuletzt < vor3Tagen && !(stand.konto && stand.konto.archived)) tvWeg.push({ name: e.ext, tage: Math.floor((Date.now() - zuletzt) / 86400000), person: personVon(row.user_id) })
         continue
       }
+      if(row.ignoriert_at) continue   // bei der ID ignoriert (29.10.2026) — erst hier, damit die Warnung „im TV nicht mehr da" für bestehende Konten bleibt (Prüfer)
       const dup = zeilen.find(z => z.ext && kontoKey(z.ext) === key)
       if(dup){ if(!dup.quellen.includes('TV')) dup.quellen.push('TV'); dup.tv = row; continue }
       zeilen.push(Object.assign({ m: { user_id: row.user_id, person: personVon(row.user_id), datum: row.zuletzt_at || row.zuerst_at || '',
@@ -68665,6 +68673,20 @@
       tb.appendChild(tr)
     }
   }
+  // Account-Modal öffnen und vorbefüllen — Firma, Größe, External ID, Typ; Name nach Namensregel über acNameVorschlag. Gemeinsam für den
+  // Admin-Reiter „Konten aus Mail & TV" und den TV-Kasten in Accounts (29.10.2026). Firma „?" (Präfix unbekannt) bleibt leer → Pflichtfeld.
+  function kontoModalVorbefuellen(z){
+    openAccountModal(z.typ || 'challenge')
+    const E = typeof accEls === 'object' ? accEls : null
+    if(!E) return
+    if(E.firm) E.firm.value = z.firma && z.firma !== '?' ? z.firma : ''
+    if(E.groesse) E.groesse.value = z.groesse || ''
+    if(E.extId) E.extId.value = z.ext || ''
+    if(E.type && z.typ) E.type.value = z.typ
+    if(E.zusatz) E.zusatz.value = ''
+    if(typeof acNameVorschlag === 'function') acNameVorschlag()
+    try{ E.type?.dispatchEvent(new Event('change')) }catch(_){}
+  }
   // „Anlegen": bestehendes Account-Modal vorbefüllt — Firma, Größe, External ID, Typ; Name nach Namensregel über acNameVorschlag. Landet bei der
   // EINGELOGGTEN ID (das Modal hat keine ID-Wahl) — Finn legt heute je ID eingeloggt an; das steht in der Meldung an den Master.
   function admKontoMailAnlegen(z){
@@ -68672,17 +68694,7 @@
     // Das Modal legt bei der EINGELOGGTEN ID an — gehört die Mail einer anderen ID, laut sagen (Prüfer 29.10.2026)
     if(z.m.user_id && typeof currentUserId !== 'undefined' && String(z.m.user_id) !== String(currentUserId) && typeof atToast === 'function')
       atToast(`Achtung: das Konto landet bei der eingeloggten ID, die Mail gehört ${z.m.person || 'einer anderen ID'} — dort einloggen oder Besitzer nachher umhängen`, 'end')
-    openAccountModal(z.typ || 'challenge')
-    const E = typeof accEls === 'object' ? accEls : null
-    if(E){
-      if(E.firm) E.firm.value = z.firma
-      if(E.groesse) E.groesse.value = z.groesse || ''
-      if(E.extId) E.extId.value = z.ext || ''
-      if(E.type && z.typ) E.type.value = z.typ
-      if(E.zusatz) E.zusatz.value = ''
-      if(typeof acNameVorschlag === 'function') acNameVorschlag()
-      try{ E.type?.dispatchEvent(new Event('change')) }catch(_){}
-    }
+    kontoModalVorbefuellen(z)
     const key = String(z.ext || '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
     // „angelegt" (nur diese Sitzung; beim nächsten Laden zählt die DB): erst wenn das Modal NACH einem Speichern-Klick zugeht — scheitert
     // saveAccount an der Pflichtprüfung, bleibt das Modal offen und die Zeile bleibt „neu" (Prüfer 29.10.2026); Abbrechen/Escape zählt nicht
@@ -68702,6 +68714,158 @@
   window._admKontoMailOeffnen = () => admKontoMailLaden()
   window._admKontoMailStub = (mails, konten, tv) => { _admKm.mails = mails || []; _admKm.konten = konten || []; _admKm.tv = tv || []; _admKm.tvFehler = ''; admKontoMailRender() }   // Boot-Check ohne Login
   window._kontoTvErkennen = r => kontoTvErkennen(r)
+
+  /* ══ NEUE KONTEN AUS TRADINGVIEW · NOCH ZU BESTÄTIGEN (29.10.2026, Finn 03:25: „unter Accounts der jeweiligen ID als Konto vorliegen, das noch
+   * bestätigt werden muss"; 03:58: „unter ‚Alle Accounts' der eigenen ID UND im Admin unter ‚Alle Accounts' … als eigene Zeilen oben in der Liste
+   * mit Stand-Chip ‚zu bestätigen' — kein neuer Kontotyp, erst Bestätigen legt an").
+   * Eigene ID: Zeilen im tbody #tvNeuRows über der Kontoliste. Daten GET /tv-konten/mein (S3: {ok, konten:[{user_id, name, pc_id, zuerst_at,
+   * zuletzt_at, ignoriert_at, angelegt_account_id, in_prophos, …}]}); 404 = Route noch nicht da → still leer. Offen = nicht in Prophos (Server-
+   * Flag UND eigener Abgleich mit accounts), nicht ignoriert (Server-Feld oder lokal). Firma/Größe/Phase aus dem Präfix (kontoTvErkennen).
+   * „Bestätigen" öffnet das Account-Modal vorbefüllt — angelegt wird über den bestehenden saveAccount-Klick, Finn kann die Phase vorher ändern;
+   * „Ignorieren" merkt den Namen sofort lokal je ID und setzt per POST /tv-konten/ignorieren {name} tv_konten.ignoriert_at.
+   * Admin → Alle Accounts: Zeilen im tbody #adm-k-tv aus GET /admin/tv-konten (HT-Sicht, Gate wie Admin → Mail; 403/404 still), ID-Farbe wie
+   * die Liste, ID-Filter der Liste gilt. Bestätigen/Ignorieren nur für die EINGELOGGTE ID — für fremde IDs gibt es keinen Anlege-Weg (accounts
+   * wird nur über den Browser-Client der eigenen ID geschrieben, RLS; geprüft 29.10.2026), dort steht „bei <ID> bestätigen".
+   * Laden beim Öffnen (höchstens alle 60 s), Filtern bei jedem Neuzeichnen der Listen. ══ */
+  // TV_KONTEN_AUTO (Finn 03:25: „später soll das Bestätigen wegfallen können"): true hieße, neue TV-Konten ohne Klick anzulegen. Das ist
+  // NICHT gebaut — DB-Schreiben ohne Rückfrage braucht Finns Freigabe und den Prüfer. Bei true bleiben die Zeilen, es kommt nur ein Konsolen-Hinweis.
+  const TV_KONTEN_AUTO = false
+  const _tvNeu = { rows: [], at: 0, laedt: false, uid: '' }
+  const _admKTv = { rows: [], at: 0, laedt: false }
+  const tvIgnLsKey = () => `prophos_tv_ignoriert_${currentUserId || ''}`
+  function tvIgnoriertLokal(){ try{ return new Set(JSON.parse(localStorage.getItem(tvIgnLsKey()) || '[]')) }catch(_){ return new Set() } }
+  function tvIgnoriertMerken(name){ try{ const m = tvIgnoriertLokal(); m.add(name); localStorage.setItem(tvIgnLsKey(), JSON.stringify([...m].slice(-500))) }catch(_){} }
+  const tvKonten = d => Array.isArray(d) ? d : ((d && (d.konten || d.rows || d.tv_konten)) || [])
+  async function tvNeuLaden(erzwingen){
+    if(_tvNeu.laedt || !currentUserId) return
+    // ID-Wechsel ohne Neuladen (Passwort-Login): alter Stand gehört der vorigen ID — verwerfen (Prüfer 29.10.2026)
+    if(_tvNeu.uid !== String(currentUserId)){ _tvNeu.rows = []; _tvNeu.at = 0; _tvNeu.uid = String(currentUserId) }
+    if(!erzwingen && _tvNeu.at && Date.now() - _tvNeu.at < 60000){ tvNeuRender(); return }
+    _tvNeu.laedt = true; _tvNeu.at = Date.now()   // Zeitstempel schon beim Versuch: ein Fehler löst keine Ladeschleife aus renderAccounts aus
+    try{
+      const tok = await _pushTok()
+      if(tok){
+        const r = await fetch(`${WATCHER_HOME}/tv-konten/mein`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        if(r.status === 404) _tvNeu.rows = []
+        else{
+          const d = await r.json().catch(() => null)
+          if(!r.ok || !d || d.ok === false) throw new Error((d && (d.msg || d.error)) || `HTTP ${r.status}`)
+          _tvNeu.rows = tvKonten(d)
+        }
+      }
+    }catch(e){ console.warn('[tv-konten] nicht geladen:', (e && e.message) || e) }
+    finally{ _tvNeu.laedt = false }
+    tvNeuRender()
+  }
+  // Steht der Kontoname schon in Prophos? External ID gleich oder Kontoname enthält die Nummer (Bindestriche/Groß-klein egal)
+  const tvSchonDa = (k, liste) => liste.some(a => kontoKey(a.externalId || a.ext || a.external_id) === k || kontoKey(a.name).includes(k))
+  function tvOffen(rows, konten, nurUid){
+    const ign = nurUid ? tvIgnoriertLokal() : new Set()
+    return (rows || []).filter(r => {
+      const name = String(r.name || '').trim(); if(!name) return false
+      if(nurUid && r.user_id && String(r.user_id) !== String(nurUid)) return false
+      if(r.in_prophos === true || r.ignoriert_at || r.angelegt_account_id || ign.has(name)) return false
+      return !tvSchonDa(kontoKey(name), konten.filter(a => !r.user_id || !a.user_id || String(a.user_id) === String(r.user_id)))
+    }).map(r => Object.assign({ row: r }, kontoTvErkennen(r)))
+      .sort((a, b) => (Date.parse(b.row.zuerst_at || '') || 0) - (Date.parse(a.row.zuerst_at || '') || 0))
+  }
+  const tvZeit = v => { const d = v ? new Date(v) : null; return d && !isNaN(d) ? d.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : '' }
+  // Zellen „Account" (Name + Unterzeile) und „Typ" (Phase + Chip) — gleich in beiden Listen
+  function tvZelleAccount(td, z){
+    td.innerHTML = '<span class="mono" style="font-size:12.5px;font-weight:600"></span><div style="font-size:11px;color:var(--sub);margin-top:1px"></div>'
+    td.children[0].textContent = z.ext
+    const seit = tvZeit(z.row.zuerst_at), zuletzt = tvZeit(z.row.zuletzt_at)
+    td.children[1].textContent = [seit ? 'im TV gesehen seit ' + seit : 'im TV gesehen', zuletzt && zuletzt !== seit ? 'zuletzt ' + zuletzt : '', z.groesse ? z.groesse + 'k' : '', z.hinweis || ''].filter(Boolean).join(' · ')
+  }
+  function tvZelleTyp(td, z){
+    td.innerHTML = '<span style="font-size:12.5px"></span> <span class="chip chip-neutral" style="color:var(--violet);margin-left:4px" title="Im TradingView-Dropdown gesehen, in Prophos noch nicht angelegt — Bestätigen legt an">zu bestätigen</span>'
+    td.children[0].textContent = SUC_PHASE_LABEL[z.typ] || z.typ
+  }
+  function tvKnoepfe(td, z){
+    td.style.whiteSpace = 'nowrap'; td.style.textAlign = 'right'
+    td.innerHTML = '<button type="button" class="btn btn-primary" style="padding:4px 10px;font-size:11.5px">Bestätigen</button> '
+      + '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:11.5px">Ignorieren</button>'
+    td.children[0].addEventListener('click', () => kontoModalVorbefuellen(z))
+    td.children[1].addEventListener('click', () => tvNeuIgnorieren(z.ext))
+  }
+  // Eigene ID: Zeilen über der Kontoliste (Spalten wie Accounts: Account · Firm · Typ · Balance · Planer · Verknüpfungen · Aktionen)
+  function tvNeuRender(){
+    const tb = document.getElementById('tvNeuRows')
+    if(!tb) return
+    if((!_tvNeu.at || _tvNeu.uid !== String(currentUserId || '')) && !_tvNeu.laedt){ tvNeuLaden(); return }   // erster Aufruf bzw. andere ID lädt einmal
+    const eigene = (typeof accounts !== 'undefined' && Array.isArray(accounts)) ? accounts : []
+    const offen = tvOffen(_tvNeu.rows, eigene, currentUserId)
+    tb.innerHTML = ''
+    if(!offen.length) return
+    if(TV_KONTEN_AUTO) console.warn('[tv-konten] TV_KONTEN_AUTO = true, automatisches Anlegen ist aber nicht gebaut — Bestätigen bleibt nötig')
+    for(const z of offen){
+      const tr = document.createElement('tr')
+      tr.style.background = 'var(--surface-tint)'
+      tr.innerHTML = '<td style="padding-left:20px"></td><td></td><td></td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td>'
+        + '<td style="color:var(--sub);font-size:12px"></td><td style="padding-right:20px"></td>'
+      tvZelleAccount(tr.children[0], z)
+      tr.children[1].textContent = z.firma === '?' ? 'Firma unbekannt' : z.firma
+      if(z.firma === '?') tr.children[1].style.color = 'var(--sub)'
+      tvZelleTyp(tr.children[2], z)
+      tr.children[5].textContent = ['TradingView', z.row.pc_id || ''].filter(Boolean).join(' · ')
+      tvKnoepfe(tr.children[6], z)
+      tb.appendChild(tr)
+    }
+  }
+  async function tvNeuIgnorieren(name){
+    tvIgnoriertMerken(name); tvNeuRender(); if(_admKTv.at) admKTvRender()   // sofort weg — lokal gemerkt; Admin-Liste nur, wenn sie geladen ist
+    try{
+      const tok = await _pushTok(); if(!tok) return
+      const r = await fetch(`${WATCHER_HOME}/tv-konten/ignorieren`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+      if(r.status === 404) return   // Route noch nicht da: lokal reicht vorerst
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || d.ok === false) throw new Error(d.msg || d.error || `HTTP ${r.status}`)
+    }catch(e){ if(typeof atToast === 'function') atToast(`${name} nur auf diesem Gerät ignoriert — Server: ${(e && e.message) || e}`, 'end') }
+  }
+  // Admin → Alle Accounts: zu bestätigende TV-Konten aller IDs (Spalten wie die Liste: Account · ID · Firm · Typ · Balance · Trade · Letzter Trade · Planer)
+  async function admKTvLaden(){
+    if(_admKTv.laedt) return
+    _admKTv.laedt = true; _admKTv.at = Date.now()
+    try{ _admKTv.rows = tvKonten(await admMailFetch('/admin/tv-konten')) }
+    catch(e){ _admKTv.rows = []; if(!/404|403|nicht gefunden|not found|Nur für Admins/i.test(String((e && e.message) || e))) console.warn('[tv-konten admin] nicht geladen:', (e && e.message) || e) }
+    finally{ _admKTv.laedt = false }
+    admKTvRender()
+  }
+  function admKTvRender(){
+    const tb = document.getElementById('adm-k-tv')
+    if(!tb) return
+    if(!_admKTv.laedt && (!_admKTv.at || Date.now() - _admKTv.at > 60000)){ admKTvLaden(); return }
+    const ad = window._admData || {}
+    const konten = (ad.accounts || []).map(a => ({ user_id: a.user_id, name: a.name, ext: a.ext }))
+    // Zeilen der eingeloggten ID nehmen zusätzlich den lokalen Ignorieren-Merker mit
+    const ign = tvIgnoriertLokal()
+    const person = document.getElementById('adm-k-person')?.value || ''
+    const offen = tvOffen(_admKTv.rows, konten, null)
+      .filter(z => !(String(z.row.user_id) === String(currentUserId) && ign.has(z.ext)))
+      .filter(z => !person || String(z.row.user_id) === person)
+    tb.innerHTML = ''
+    for(const z of offen){
+      const uid = String(z.row.user_id || '')
+      const name = z.row.person || ((ad.people || []).find(p => String(p.user_id) === uid) || {}).name || uid.slice(0, 8)
+      const tr = document.createElement('tr')
+      tr.style.background = 'var(--surface-tint)'
+      tr.innerHTML = '<td style="padding-left:20px"></td><td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle"></span><span></span></td>'
+        + '<td></td><td></td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td><td style="color:var(--sub)">—</td><td style="padding-right:20px"></td>'
+      tvZelleAccount(tr.children[0], z)
+      tr.children[1].children[0].style.background = idFarbe(uid)
+      tr.children[1].children[1].textContent = name
+      tr.children[2].textContent = z.firma === '?' ? 'Firma unbekannt' : z.firma
+      tvZelleTyp(tr.children[3], z)
+      if(uid && uid === String(currentUserId)) tvKnoepfe(tr.children[7], z)
+      else{ tr.children[7].innerHTML = '<span style="font-size:11.5px;color:var(--sub)"></span>'; tr.children[7].children[0].textContent = `bei ${String(name).split(/\s+/)[0]} bestätigen` }
+      tb.appendChild(tr)
+    }
+  }
+  window._tvNeuOeffnen = () => tvNeuLaden()
+  window._admKTvRender = () => admKTvRender()
+  // Boot-Check ohne Login: Zeilen direkt setzen (Stub), ohne Route
+  window._tvNeuStub = rows => { _tvNeu.rows = rows || []; _tvNeu.at = Date.now(); _tvNeu.uid = String(currentUserId || ''); tvNeuRender() }
+  window._admKTvStub = rows => { _admKTv.rows = rows || []; _admKTv.at = Date.now(); admKTvRender() }
   window._kontoMailErkennen = m => kontoMailErkennen(m)
   document.getElementById('adm-km-refresh')?.addEventListener('click', () => admKontoMailLaden())
   function admMailWahl(uid){
