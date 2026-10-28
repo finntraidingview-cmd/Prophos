@@ -1511,8 +1511,9 @@
   #dashboard-view .adm-ohne-hedge .adm-hedge{display:none !important}
   #dashboard-view .adm-v2{display:none}
   #dashboard-view .adm-ohne-hedge .adm-v2{display:block}
-  #dashboard-view .adm-ohne-hedge .kpis.adm-kpis-v2{grid-template-columns:repeat(6,1fr)}
-  @media (max-width:1200px){#dashboard-view .adm-ohne-hedge .kpis.adm-kpis-v2{grid-template-columns:repeat(3,1fr)}}
+  #dashboard-view .kpis.adm-kpis-v2{grid-template-columns:repeat(5,1fr)}   /* 5 Kacheln seit 29.10.2026 (Gesamtkosten) */
+  #dashboard-view .adm-ohne-hedge .kpis.adm-kpis-v2{grid-template-columns:repeat(7,1fr)}
+  @media (max-width:1200px){#dashboard-view .kpis.adm-kpis-v2,#dashboard-view .adm-ohne-hedge .kpis.adm-kpis-v2{grid-template-columns:repeat(3,1fr)}}
   #dashboard-view .adm-row-name small{display:block;font-weight:400;color:var(--sub);font-size:11px;margin-top:1px;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .adm-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   #dashboard-view .adm-scroll{max-height:440px;overflow:auto}
@@ -11871,6 +11872,14 @@
                 <div class="kpi-value" id="adm-k-parked">–</div>
                 <div class="kpi-delta delta-neutral" id="adm-k-parked-sub">–</div>
               </div>
+              <!-- Gesamtkosten (29.10.2026, Finn: „Lass das geparkte Kapital genau so. Die neue Zahl … soll daneben stehen und eigentlich nur
+                   steigen" · „Konten, die schon geblowt sind, sollen auch mit ihren Gesamtkosten drin sein"): Σ max(0, Gesamtkosten) je Konto über
+                   alle Konten der Sicht inkl. archivierter/geblowter, unabhängig vom Status-Filter — admGesamtkostenKachel -->
+              <div class="kpi" id="adm-k-gk-kachel">
+                <div class="kpi-label">Gesamtkosten</div>
+                <div class="kpi-value" id="adm-k-gk">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-k-gk-sub">–</div>
+              </div>
               <div class="kpi">
                 <div class="kpi-label">Accounts</div>
                 <div class="kpi-value" id="adm-k-accs">–</div>
@@ -15544,10 +15553,11 @@
     // Was ein Konto zur Geparkt-Summe beiträgt: im Plus 0, sonst nie unter 0 (26.08.2026 / 07.10.2026)
     const admParkedOf = v => v.plus ? 0 : Math.max(0, Number(v.parked) || 0)
 
-    function admFiltered(){
+    // ohneStatus (29.10.2026): Kachel „Gesamtkosten" nimmt aktive UND archivierte/geblowte Konten, die übrigen Filter gelten
+    function admFiltered(ohneStatus){
       const fPerson = $('adm-person').value
       const fFirm   = $('adm-firm').value
-      const fStatus = $('adm-status').value
+      const fStatus = ohneStatus ? 'all' : $('adm-status').value
       const q       = ($('adm-search').value || '').trim().toLowerCase()
       return (admData.accounts || []).filter(r => {
         // Kapitel (24.09.2026): der Server lässt die Konten UNGEFILTERT (Ketten brauchen die
@@ -16987,8 +16997,33 @@
       if(!liste.length && accs.length) box.innerHTML = '<div class="adm-empty">Keine aktiven Accounts für diesen Filter.</div>'
     }
 
+    /* KACHEL „GESAMTKOSTEN" (29.10.2026, Finn): Σ max(0, Gesamtkosten) je Konto — Gesamtkosten = Kauf + Hedge-Ergebnis − Payouts über die
+     * Vorgänger-Kette (Backend chain() = c_buy + c_hedge − c_payouts, dieselbe Rechnung wie calcReingesteckdEur mit netPayouts + WD-Hedge,
+     * also Accounts → Gesamtkosten/Gesamtwert, Boden 0 je Konto wie kwKachelMalen). Über ALLE Konten der Sicht inkl. archivierter/geblowter
+     * (Status-Filter egal), damit die Zahl mit jedem Kauf nur wächst. Gezählt werden nur Ketten-Enden: ein Konto, das Vorgänger eines anderen
+     * ist (chain_ids), steckt schon in dessen Kette und zählt nicht doppelt. „geblowt" = archiviertes Ketten-Ende ohne Nachfolger. */
+    function admGesamtkostenKachel(){
+      const el = $('adm-k-gk'), sub = $('adm-k-gk-sub'); if(!el || !admData) return
+      const alle = admFiltered(true)
+      const vorgaenger = new Set()
+      for(const r of (admData.accounts || [])) for(const c of (r.chain_ids || [])) if(String(c) !== String(r.id)) vorgaenger.add(String(c))
+      let summe = 0, n = 0, nGeblowt = 0, nPlus = 0
+      for(const r of alle){
+        if(vorgaenger.has(String(r.id))) continue
+        const gk = (Number(r.c_buy ?? r.buy) || 0) + (Number(r.c_hedge ?? r.hedge) || 0) - (Number(r.c_payouts ?? r.payouts) || 0)
+        n++; if(r.archived) nGeblowt++; if(gk < 0) nPlus++
+        summe += Math.max(0, gk)
+      }
+      el.textContent = admEur.format(summe)
+      if(sub) sub.textContent = `${n} Konten · davon ${nGeblowt} geblowt` + (nPlus ? ` · ${nPlus} im Plus = 0` : '')
+      const k = $('adm-k-gk-kachel')
+      if(k) k.title = 'Summe der Gesamtkosten je Konto (Kauf + Hedge − Payouts, mit abgelösten Vorgängern) über alle Konten der Sicht — auch geblowte/archivierte, '
+        + 'unabhängig von „Nur aktive". Konten im Plus zählen 0, wie Accounts → Gesamtwert. „geblowt" = archiviertes Konto ohne Nachfolger.'
+    }
+
     function admRender(){
       if(!admData) return
+      try{ admGesamtkostenKachel() }catch(e){ console.warn('[admin] Gesamtkosten-Kachel', e) }   // nur Anzeige (29.10.2026)
       admHedgeModus()   // Kapitel ohne Hedge: Klasse + WD-Sichtbarkeit (24.09.2026)
       admWertRender()
       const rows = admFiltered()
@@ -49261,7 +49296,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1831'
+  const OS_TAB_BUILD = '2026-09-22.1832'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
