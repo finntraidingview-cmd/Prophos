@@ -78,6 +78,10 @@ def run(name, positions, hedges, *, mult=1.0, expect_actions=None,
 
 def main():
     results = []
+    # 28.10.2026: Offen-Bleiben nach Puls-Läufen im ganzen Selftest aus — Tests mit Attrappen-Fenstern (_WIN_EINGABE=True) schrieben sonst
+    # die Marke puls_tsx_bleiben.json neben den Bot und starteten Kind-Prozesse; der Bleiben-Test schaltet es für sich wieder an
+    import order_bot as _ob_aus
+    _ob_aus._BLEIBEN_AN[0] = False
 
     # 1) Neue Master-Position BUY -> Hedge SELL, gleiches Volumen
     results.append(run(
@@ -3080,7 +3084,11 @@ def test_puls_augen_cdp():
         "Weiche: Netz nur über _augen_regel_holen und nur bei fehlender/alter Regel (seit 01.10.2026)")
     r_ = _rnd.Random(7)
     bahn = ob.cdp_klick_bahn((0, 0), (100, 50), rnd=r_)
-    chk(len(bahn) == 8 and bahn[-1] == (100.0, 50.0) and bahn[0] != (100.0, 50.0), "Klick-Bahn: mehrere Schritte, letzter exakt am Ziel")
+    # 28.10.2026: Schrittzahl gewürfelt (5–11 + Strecke) statt immer 8
+    _bl = [len(ob.cdp_klick_bahn((0, 0), (100, 50), rnd=_rnd.Random(i_))) for i_ in range(60)]
+    chk(5 <= len(bahn) <= 30 and bahn[-1] == (100.0, 50.0) and bahn[0] != (100.0, 50.0) and min(_bl) >= 5 and max(_bl) <= 30
+        and len(set(_bl)) >= 4 and len(ob.cdp_klick_bahn((0, 0), (100, 50), schritte=8, rnd=_rnd.Random(1))) == 8,
+        "Klick-Bahn: mehrere Schritte (gewürfelt 5–30, feste Zahl bleibt möglich), letzter exakt am Ziel")
     # 30.09.2026, PC von ID C: Werbe-Modal („Autumn sale") über dem Connect-Dialog — werbung_weg klickt sein X, beweist das Verschwinden
     _ws = object.__new__(ob._AugenSitzung)
     _ws.trail, _ws._werbung_at = [], 0.0
@@ -4629,7 +4637,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.6'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
+        and "VERSION = '0.8.7'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
         "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
     # augen.js 0.8.5 (26.10.2026, Routine Puls-Fehler, UNKLAR auf 2 PCs mit kleinem Fenster): Meldungsprotokoll (role=log) je Textknoten,
     # meldungenAus läuft über l.texte — Browser-Probe: node tools/selftest_augen_meldungsprotokoll.js
@@ -4981,10 +4989,10 @@ def test_puls_fehler_1571():
     # gesperrtem Desktop (vorn == 0) kein zweiter Anlauf und der UAC-Handgriff; Meldungstext (Muster-Schlüssel) einmal und unverändert
     q_run = _i.getsource(ob.run)
     f9 = q_run[q_run.index("dlg = _finde_order_dialog(w)"):q_run.index('trail.append("F9-Dialog offen")')]
-    chk(f9.count('w.type_keys("{F9}")') == 1 and q_run.count('w.type_keys("{F9}")') == 2 and f9.count("_f9_diagnose(w)") == 1
+    chk(f9.count('_el_tasten(w, "{F9}")') == 1 and q_run.count('_el_tasten(w, "{F9}")') == 2 and f9.count("_f9_diagnose(w)") == 1
         and f9.count("F9 zweiter Anlauf") == 1 and "if vorn != 0:" in f9 and f9.index("_f9_diagnose(w)") < f9.index("if vorn != 0:")
-        and f9.index("if vorn != 0:") < f9.index('w.type_keys("{F9}")') and f9.count("_fenster_betreten(w)") == 1
-        and f9.index("_fenster_betreten(w)") < f9.index('"Fenster-Guard: Titelzeile') < f9.index('w.type_keys("{F9}")')
+        and f9.index("if vorn != 0:") < f9.index('_el_tasten(w, "{F9}")') and f9.count("_fenster_betreten(w)") == 1
+        and f9.index("_fenster_betreten(w)") < f9.index('"Fenster-Guard: Titelzeile') < f9.index('_el_tasten(w, "{F9}")')
         and f9.count("_finde_order_dialog(w)") == 2 and "_UAC_HINWEIS if vorn == 0" in f9
         and q_run.count('"F9-Dialog nicht gefunden — Abbruch, nichts gesendet. ["') == 1 and "for " not in f9 and "while " not in f9,
         "run(): Diagnose → genau ein zweiter Anlauf (neu betreten, Guard, F9, Suche), keiner bei gesperrtem Desktop, Meldung gleich")
@@ -7456,29 +7464,99 @@ def test_tsx_k3a():
         and "maus_hand_text" in _i.getsource(ob.modus_tsxinventar),
         "Riegel: Fahrt über maus_bahn im maus_takt; TopstepX-Pause zittert nur mit Windows-Eingabe; Schrittpause, Hover-Pause, Tipp-Takt, "
         "Klickpunkt (UIA + CDP) und Zögern vor dem Druck je Hand; Hand steht in der Spur")
-    # Nach der Order im Tab bleiben (06.10.2026, Finn: „nicht insta raus, 15 Sekunden bis ein paar Minuten")
+    # ALLES AUS ZUFALL (28.10.2026, Finn: „damit die PCs echt nicht ab-backen"): _warte, Klick-Haltezeit, Doppelklick, Tasten, Echo-Bahnen
+    wd_ = [ob.warte_dauer(0.6, 0.3, zufall=_rd.Random(i_), hand=H1) for i_ in range(2000)]
+    wd0 = [ob.warte_dauer(0.1, 0.1, zufall=_rd.Random(i_), hand=H1) for i_ in range(500)]
+    schnitt = sum(min(d_, 0.6 + 0.3 * 1.5) for d_ in wd_) / len(wd_)
+    chk(all(d_ >= 0.6 for d_ in wd_) and max(d_ for d_ in wd_ if d_ <= 0.6 + 0.3 * 1.5) > 0.6 + 0.3 * H1["pause"] * 0.8
+        and 0.66 <= schnitt <= 0.82 and 20 <= sum(1 for d_ in wd_ if d_ > 0.6 + 0.3 * 1.5) <= 160
+        and all(0.1 <= d_ <= 0.1 + 0.1 * 1.5 for d_ in wd0) and ob.warte_dauer(0.4, 0) == 0.4 and ob.warte_dauer(-1, 0) == 0.0
+        and ob.warte_dauer("x", 1) == 0.0,
+        f"_warte: Minimum hält, Zugabe schief × Pausen-Faktor (Schnitt {schnitt:.2f}), Denkpause nur ab 0,3 s und selten, streuung 0 = fest")
+    kh_ = [ob.klick_haltezeit(zufall=_rd.Random(i_), hand=H1) for i_ in range(300)]
+    da_ = [ob.doppelklick_abstand(zufall=_rd.Random(i_), hand=H1) for i_ in range(300)]
+    tk_ = ob.tasten_takt(5, zufall=_rd.Random(3), hand=H1)
+    tk2 = [x_ for i_ in range(100) for x_ in ob.tasten_takt(3, zufall=_rd.Random(i_), hand=H1)]
+    chk(all(0.025 <= d_ <= 0.24 for d_ in kh_) and len(set(round(d_, 3) for d_ in kh_)) >= 60
+        and all(0.05 <= d_ <= 0.25 for d_ in da_) and len(tk_) == 5 and ob.tasten_takt(0) == []
+        and all(0.02 <= h_ <= 0.16 and 0.01 <= a_ <= 0.55 for h_, a_ in tk2) and len(set(round(a_, 3) for _h, a_ in tk2)) >= 100,
+        "Klick hält 25–240 ms, Doppelklick-Abstand 50–250 ms, Tasten mit Haltezeit und gestreutem Abstand")
+    bs_ = [ob.bahn_schritte(0, 0, 300, 40, 3, zufall=_rd.Random(i_)) for i_ in range(200)]
+    bs8 = [ob.bahn_schritte(0, 0, 900, 300, 8, zufall=_rd.Random(i_)) for i_ in range(200)]
+    sv_ = [ob.start_versatz(zufall=_rd.Random(i_)) for i_ in range(300)]
+    chk(all(3 <= n_ <= 44 for n_ in bs_ + bs8) and len(set(bs_)) >= 3 and len(set(bs8)) >= 5 and max(bs_) <= 9
+        and sum(bs8) / len(bs8) > sum(bs_) / len(bs_) and ob.bahn_schritte(0, 0, 5, 5, "x", zufall=_rd.Random(1)) >= 3
+        and all(0.0 <= d_ <= 2.5 for d_ in sv_) and sum(1 for d_ in sv_ if d_ < 1.0) > 150,
+        "Echo-Bahn: feste Schrittzahl nur Richtwert (× Zufall + Strecke); Start-Versatz 0–2,5 s, kurze häufiger")
+    q_ka = _i.getsource(ob._klick_absolut)
+    q_wt = _i.getsource(ob._tasten_gestreut)
+    chk("klick_haltezeit()" in q_ka and "doppelklick_abstand()" in q_ka and q_ka.count("MOVE | UP | ABS") >= 2
+        and "sende(MOVE | ABS, MOVE | DOWN | ABS)" in q_ka and "warte_dauer(minimum, streuung)" in _i.getsource(ob._warte)
+        and "tasten_takt(" in q_wt and "parse_keys" in q_wt and "_tasten_gestreut(" in _i.getsource(ob._win_tasten)
+        and "pause=0.04" not in _i.getsource(ob._win_tasten) and "bahn_schritte(" in _i.getsource(ob._maus_fahren)
+        and "klick_zoegern()" in _i.getsource(ob._AugenSitzung._win_klick)
+        and all("_start_versatz(trail)" in _i.getsource(f_) for f_ in (ob.modus_tvkette_cdp, ob.modus_tsxlesen_cdp, ob.modus_tvlesen_cdp))
+        and "_start_versatz" not in _i.getsource(ob.modus_tvclose_cdp),
+        "Riegel: Klick mit Haltezeit (Bewegen+Drücken ein Batch, Loslassen mit Ziel-Koordinate), _warte über warte_dauer, Tasten "
+        "gestreut, Echo-Fahrten über bahn_schritte, TradingView zögert vor dem Druck, Start-Versatz nicht beim Close")
+    # Nach dem Lauf offen bleiben (06.10.2026 nur TopstepX-Order; seit 28.10.2026 jeder Lauf mit sichtbarer Bedienung, meist 1–2 min)
     import time as _tm
-    bd_ = [ob.tsx_bleiben_dauer(zufall=_rd.Random(i_), hand=H1) for i_ in range(300)]
+    bd_ = [ob.tsx_bleiben_dauer(zufall=_rd.Random(i_), hand=H1) for i_ in range(400)]
     j_ = _tm.time()
     bb = ob.tsx_bleiben_befehl
     bw = ob.tsx_bleiben_weiter
-    chk(all(15.0 <= d_ <= 240.0 for d_ in bd_) and any(d_ < 60 for d_ in bd_) and any(d_ > 120 for d_ in bd_) and len(set(round(d_) for d_ in bd_)) >= 100
-        and 40 <= sum(1 for d_ in bd_ if d_ < 60) <= 140,
-        f"Bleiben: 15 s–4 min je Hand, rund ein Viertel kurz ({sum(1 for d_ in bd_ if d_ < 60)}/300 unter 60 s), Rest 1–4 min")
-    chk(bb(123, j_ + 90, 0) == {"hwnd": 123, "bis": j_ + 90, "pid": 0} and bb(0, j_ + 90, 0) is None and bb(123, j_ - 1, 0) is None
-        and bb("x", j_ + 9, 0) is None and bb(None, None, None) is None,
-        "Bleiben: Befehl nur mit Fenster und Zeit in der Zukunft")
-    m_ = {"hwnd": 123, "bis": j_ + 60, "pid": 77}
+    bz = ob.tsx_bleiben_bis
+    n12 = sum(1 for d_ in bd_ if 54 <= d_ <= 132)
+    chk(all(30.0 <= d_ <= 180.0 for d_ in bd_) and any(d_ < 60 for d_ in bd_) and any(d_ > 120 for d_ in bd_)
+        and len(set(round(d_) for d_ in bd_)) >= 100 and n12 >= 240,
+        f"Bleiben: 30 s–3 min, meist 1–2 min ({n12}/400 zwischen ~1 und ~2 min)")
+    chk(bb(123, j_ + 90, 55, j_) == {"hwnd": 123, "bis": j_ + 90, "lauf": 55, "seit": j_} and bb(0, j_ + 90, 55) is None
+        and bb(123, j_ - 1, 55) is None and bb(123, j_ + 9, 0) is None and bb("x", j_ + 9, 5) is None and bb(None, None, None) is None,
+        "Bleiben: Marke nur mit Fenster, Lauf und Zeit in der Zukunft")
+    chk(bz(1000.0, 90.0) == (1090.0, 1000.0) and bz(1000.0, 90.0, 900.0) == (1090.0, 900.0) and bz(1000.0, 90.0, 800.0) == (1040.0, 800.0)
+        and bz(1000.0, 90.0, 765.0) is None and bz(1000.0, 90.0, 700.0) == (1090.0, 1000.0) and bz(1000.0, 5.0) is None
+        and bz("x", 9) is None,
+        "Bleiben: Kette über mehrere Läufe höchstens 4 min am Stück (seit), danach neu; unter 10 s Rest → sofort minimieren")
+    m_ = {"hwnd": 123, "bis": j_ + 60, "lauf": 77, "seit": j_}
     chk(bw(m_, 77, False, True, j_) is True and bw(m_, 77, False, True, j_ + 61) is False
+        and bw(m_, 77, False, True, j_ + 61, lauf_lebt=True) is True and bw(m_, 77, False, True, j_ + 601, lauf_lebt=True) is False
         and bw(m_, 78, False, True, j_) is None and bw(m_, 77, True, True, j_) is None and bw(m_, 77, False, False, j_) is None
-        and bw(None, 77, False, True, j_) is None and bw({"pid": 77, "bis": "x"}, 77, False, True, j_) is None,
-        "Bleiben: weiter warten / Zeit um → minimieren / abgelöst, neuer Lauf, Fenster weg oder kaputt → aufhören ohne Minimieren")
-    chk("_bleiben" in _i.getsource(ob._AugenSitzung.zu) and "_tsx_bleiben_starten" in _i.getsource(ob.modus_tsxlesen_cdp)
+        and bw(None, 77, False, True, j_) is None and bw({"lauf": 77, "bis": "x"}, 77, False, True, j_) is None
+        and bw({"pid": 77, "bis": j_ + 60}, 77, False, True, j_) is None,
+        "Bleiben: weiter / Zeit um → minimieren / Lauf lebt → nie mitten im Lauf (höchstens 10 min) / abgelöst, fremder Hand-Lauf, "
+        "Fenster weg, kaputt oder alte Marke → aufhören ohne Minimieren")
+    zu_q = _i.getsource(ob._AugenSitzung.zu)
+    chk("_bleiben" in zu_q and "_puls_bleiben_starten(self" in zu_q and zu_q.index("_puls_bleiben_starten") < zu_q.index("_win_zeigen(self._win_hwnd, 7)")
+        and "_bleiben_abloesen(hwnd)" in _i.getsource(ob._AugenSitzung._win_vorn)
+        and "_tsx_bleiben_starten" in _i.getsource(ob.modus_tsxlesen_cdp)
         and 'res.get("gesendet")' in _i.getsource(ob.modus_tsxlesen_cdp) and "tsxbleiben" in _i.getsource(ob.main)
-        and "tsx_bleiben_weiter" in _i.getsource(ob.modus_tsxbleiben) and "_handlauf_aktiv" in _i.getsource(ob.modus_tsxbleiben)
-        and "_win_zeigen(hwnd, 7)" in _i.getsource(ob.modus_tsxbleiben) and "res.get(\"gesendet\")" in _i.getsource(ob._tsx_bleiben_starten)
-        and ob.TSX_BLEIBEN_S == (15.0, 240.0),
-        "Riegel: zu() lässt das Fenster bei _bleiben stehen; Kind nur nach gesendeter Order, prüft Marke/Sperre/Fenster, minimiert mit SW_SHOWMINNOACTIVE")
+        and "tsx_bleiben_weiter" in _i.getsource(ob.modus_tsxbleiben) and "fremd_handlauf()" in _i.getsource(ob.modus_tsxbleiben)
+        and "_lauf_lebt(lauf)" in _i.getsource(ob.modus_tsxbleiben)
+        and "_win_zeigen(hwnd, 7)" in _i.getsource(ob.modus_tsxbleiben) and "_win_hwnd" in _i.getsource(ob._puls_bleiben_starten)
+        and ob.TSX_BLEIBEN_S == (30.0, 180.0) and ob.TSX_BLEIBEN_DECKEL_S == 240.0,
+        "Riegel: zu() lässt jedes sichtbar bediente Fenster gestreut stehen; neuer Lauf löst ab; Kind prüft Marke/Lauf/Sperre/Fenster, "
+        "minimiert mit SW_SHOWMINNOACTIVE")
+    # Ein Kind je Lauf, Marke gehört dem Lauf (Mac: Attrappen für Popen/Windows)
+    import tempfile as _tf, subprocess as _sp_, os as _os_, types as _types
+    alt_b = (ob._WIN_EINGABE, ob._AUGEN_HIER, _sp_.Popen, ob._BLEIBEN_KIND[0], ob._BLEIBEN_AN[0])
+    gestartet = []
+    try:
+        ob._WIN_EINGABE, ob._AUGEN_HIER, ob._BLEIBEN_KIND[0], ob._BLEIBEN_AN[0] = True, _tf.mkdtemp(), False, True
+        _sp_.Popen = lambda *a_, **k_: gestartet.append(a_[0])
+        ob._bleiben_abloesen(123)
+        m0 = ob._bleiben_marke_lesen()
+        s1, s2 = _types.SimpleNamespace(_win_hwnd=123), _types.SimpleNamespace(_win_hwnd=None)
+        sp1 = []
+        d1 = ob._puls_bleiben_starten(s1, sp1)
+        d2 = ob._puls_bleiben_starten(_types.SimpleNamespace(_win_hwnd=123), [])
+        d3 = ob._puls_bleiben_starten(s2, [])
+        m1 = ob._bleiben_marke_lesen()
+        chk(m0["lauf"] == _os_.getpid() and m0["bis"] == 0 and d1 and 25 <= d1 <= 180 and d2 and len(gestartet) == 1 and d3 is None
+            and getattr(s1, "_bleiben", False) and m1["lauf"] == _os_.getpid() and m1["seit"] == m0["seit"] and m1["bis"] > _tm.time()
+            and "tsxbleiben" in gestartet[0] and any("bleibt noch" in z for z in sp1),
+            f"Bleiben: ein Kind je Lauf, zweites zu() verlängert nur die Marke, ohne Fenster nichts ({len(gestartet)} Kinder, {d1}/{d2}/{d3})")
+    finally:
+        ob._WIN_EINGABE, ob._AUGEN_HIER, _sp_.Popen, ob._BLEIBEN_KIND[0], ob._BLEIBEN_AN[0] = alt_b
     mp = ob.tsx_k3_menge_passt
     chk(mp("1", 1) and mp(" 15 ", 15) and mp("3", 3) and not mp("3", 1) and not mp("", 1) and not mp("1.5", 1) and not mp(None, 1)
         and not mp("15a", 15), "Menge: genau die Zahl, sonst nie")
@@ -7779,9 +7857,10 @@ def test_tsx_k3a():
         chk(s_.klick([1582, 92, 376, 28], "Contract-Feld", pruef=pr) is False and len(zs["klicks"]) == 1
             and "nach der Hover-Pause" in s_.trail[-1], "Ziel nach der Hover-Pause weg → KEIN Druck")
         zs.update(proben=0, passt=[True, True], warte=[])
-        s_.hover_pause = None                                         # Orbit-Sitzung (augen.js): unverändert
-        chk(s_.klick([1582, 92, 376, 28], "Knopf", pruef=pr) is True and ob.TSX_HOVER_PAUSE not in zs["warte"] and zs["proben"] == 1,
-            "Orbit-Sitzung ohne hover_pause: keine Pause, eine Probe wie bisher")
+        s_.hover_pause = None                                         # Orbit-Sitzung (augen.js): seit 28.10.2026 kurzes Zögern + Neu-Beweis
+        chk(s_.klick([1582, 92, 376, 28], "Knopf", pruef=pr) is True and ob.TSX_HOVER_PAUSE not in zs["warte"] and zs["proben"] == 2
+            and any(a_ < 0.3 and b_ <= 0.41 for a_, b_ in zs["warte"][-1:]),
+            "Orbit-Sitzung ohne hover_pause: Zögern der Hand (keine TopstepX-Pause), Ziel danach neu bewiesen")
     finally:
         for n_, v_ in alt.items():
             setattr(ob, n_, v_)

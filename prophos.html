@@ -24463,6 +24463,10 @@
   // Konto zurückswitchen"): nach einer ORDER und nach einer einzelnen Lesung außerhalb des Rundgangs nur 1,5 s Ruhe (sofort), die 20 s
   // Sammelpause bleibt nur für den Rundgang (tvV2Poll.busy), damit mehrere Konten weiterhin EINEN Heimweg auslösen.
   const BTH_RUHE_MS = 20000, BTH_WARTE_MIN_MS = 2000, BTH_WARTE_MAX_MS = 4000, BTH_SOFORT_MS = 1500
+  // GESTREUT (28.10.2026, Finn: „alles aus Zufall, damit die PCs nicht ab-backen"): der Heimweg kam immer genau 1,5 s bzw. 20 s nach der
+  // letzten fremden Aktion. Jetzt je Anstoß gewürfelt — sofort 1–4 s (kurze häufiger), Sammelpause 15–35 s. Die Konstanten bleiben Richtwert.
+  const bthSofortMs = () => 1000 + Math.round(Math.pow(Math.random(), 1.3) * 3000)
+  const bthRuheMs = () => 15000 + Math.round(Math.random() * 20000)
   let _bthTimer = null, _bthLaeuft = false, _bthSelbst = false, _bthAnstoss = null
   // ZWEI FENSTER (27.10.2026, Finn: „parallel zu Big Trade für Topstep“): TradingView-Tab und TopstepX-Tab im Puls-Chrome haben je ein eigenes
   // Auge (tv-reader bzw. tsx-auge) und je ein eigenes Konto — ein Big Trade in jedem darf gleichzeitig laufen (DB: prophos_big_trade_fenster).
@@ -24526,13 +24530,13 @@
     if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
     if(fenster === 'tsx'){   // TopstepX-Tab (27.10.2026): eigener Timer, die Heim-Wache/Statistik unten bleiben TradingView
       if(_bthTsxTimer) clearTimeout(_bthTsxTimer)
-      _bthTsxTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto', 'tsx'), sofort ? BTH_SOFORT_MS : BTH_RUHE_MS)
+      _bthTsxTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto', 'tsx'), sofort ? bthSofortMs() : bthRuheMs())
       return
     }
     if(_bthTimer) clearTimeout(_bthTimer)
     if(!_bthAnstoss) _bthAnstoss = Date.now()   // Heimweg-Dauer ab der ERSTEN fremden Aktion (22.10.2026)
     _hwPulsWegAt = Date.now()   // Heim-Wache: Puls selbst war woanders → 3-s-Schwelle (22.10.2026)
-    _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), sofort ? BTH_SOFORT_MS : BTH_RUHE_MS)   // 19.10.2026: sofort nach Order
+    _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), sofort ? bthSofortMs() : bthRuheMs())   // 19.10.2026: sofort nach Order; 28.10.2026 gestreut
   }
   /* HEIMWEG AN RAILWAY (22.10.2026, Finn: „wie lange hat es gedauert?" + Handy-Alarm, „wenn Puls nach dem Orbit-Trade nicht erfolgreich
    * zurückkehrt"). Bisher stand der Heimweg nur in der Konsole des PC-Tabs — nichts davon war hinterher auswertbar. Jetzt jeder Heimweg
@@ -27626,7 +27630,7 @@
     // Spätestens zur nächsten fälligen Bestätigung aufwachen (29.09.2026): die Puls-Pille zählt die letzten 10 s auf genau diese Zeit
     // herunter — mit dem 60–100-s-Takt kam die Lesung bis zu 1,5 min nach der „0"
     let warte = 60000 + Math.random() * 40000
-    try{ if(MT5_LOCAL){ const jetzt = Date.now(), t = pulsTermine(jetzt).find(x => x.art === 'Bestätigung' && x.t > jetzt); if(t) warte = Math.min(warte, t.t - jetzt + 500) } }catch(_){}
+    try{ if(MT5_LOCAL){ const jetzt = Date.now(), t = pulsTermine(jetzt).find(x => x.art === 'Bestätigung' && x.t > jetzt); if(t) warte = Math.min(warte, t.t - jetzt + 500 + Math.random() * 2500) } }catch(_){}   // 28.10.2026: 0,5–3 s statt fest 500 ms
     setTimeout(tvV2EndlesungTakt, warte)
   }
   setTimeout(tvV2EndlesungTakt, 30000 + Math.random() * 20000)
@@ -48043,7 +48047,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1797'
+  const OS_TAB_BUILD = '2026-09-22.1798'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -51087,13 +51091,18 @@
     if(osWeckerLebt()) return OS_TAKT_RESERVE_MS
     return osPipelineAktiv(true) ? 5000 : OS_TAKT_LEERLAUF_MS
   }
-  setInterval(() => {
-    try{ osWeckerPruefen() }catch(_){}
-    if(Date.now() < _osFehlerBis) return
-    if(Date.now() - _osPollAt < osTaktMs() - 1000) return
-    _osPollAt = Date.now()
-    orderSignalTick()
-  }, 5000)
+  // 28.10.2026 (Finn: „alles aus Zufall"): Takt 4–6,5 s gewürfelt statt fest 5 s — Signale werden nicht mehr im 5-s-Raster übernommen
+  function osTakt(){
+    try{
+      try{ osWeckerPruefen() }catch(_){}
+      if(Date.now() >= _osFehlerBis && Date.now() - _osPollAt >= osTaktMs() - 1000){
+        _osPollAt = Date.now()
+        orderSignalTick()
+      }
+    }catch(e){ console.warn('[signal] Takt', e) }
+    setTimeout(osTakt, 4000 + Math.random() * 2500)
+  }
+  setTimeout(osTakt, 4000 + Math.random() * 2500)   // erster Tick wie bisher erst nach ~5 s
   // Riegel VOR dem ersten Tick hochziehen — er muss stehen, bevor der Tab
   // überhaupt in den Hintergrund geraten kann.
   _osWachStart()
@@ -53358,9 +53367,11 @@
       let anderes = false
       const nachLauf = _suLetzterLauf > 0 && Date.now() - _suLetzterLauf < 2 * 60000
       try{ anderes = (faellig.length > 1 && !nachLauf) || (_rsQueue && _rsQueue.length > 0) || !!_rsAktiv }catch(_){ anderes = false }
-      const jitter = anderes ? SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS) : 0
+      // 28.10.2026 (Finn: „alles aus Zufall"): auch ohne Warteschlange nicht mehr auf die Sekunde — 0–4 s Versatz (kurze häufiger)
+      const jitter = anderes ? SU_PAUSE_MIN_MS + Math.floor(Math.random() * SU_PAUSE_STREU_MS) : Math.round(Math.pow(Math.random(), 1.5) * 4000)
+      const jitterAnderes = anderes
       const rest = faellig.length - 1
-      if(typeof atToast === 'function') atToast(jitter
+      if(typeof atToast === 'function') atToast(jitterAnderes
         ? `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (etwas anderes läuft noch).`
         : `⏰ ${verspaetet > 0 ? 'Geplante Startzeit erreicht' : 'Nächster Winning Day der Kette'} — „${plan.masterName || '—'}" startet jetzt${rest > 0 ? ` (danach noch ${rest} in der Warteschlange)` : ''}.`, 'start')
       if(jitter) await new Promise(r => setTimeout(r, jitter))

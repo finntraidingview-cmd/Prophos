@@ -1109,13 +1109,13 @@ def _tv_neuer_tab(w, url, trail):
     except Exception:
         pass
     try:
-        keyboard.send_keys("^t")
+        _tasten_gestreut("^t", with_spaces=False)
         _warte(0.5, 0.3)
-        keyboard.send_keys(tv_tasten_escape(url), with_spaces=True, pause=0.012)
+        _tasten_gestreut(tv_tasten_escape(url), with_spaces=True, tempo=0.2)   # 28.10.2026: je Zeichen gestreut, schnell wie Einfügen
         _warte(0.25, 0.2)
-        keyboard.send_keys("{DELETE}")
+        _tasten_gestreut("{DELETE}", with_spaces=False)
         _warte(0.15, 0.15)
-        keyboard.send_keys("{ENTER}")
+        _tasten_gestreut("{ENTER}", with_spaces=False)
     except Exception as e:
         return False, f"neuer Tab liess sich nicht oeffnen ({type(e).__name__})"
     trail.append("Neuer Tab im Puls-Fenster geoeffnet: " + re.sub(r"^https?://", "", str(url))[:40])   # B18: war fest „TradingView"
@@ -1984,8 +1984,68 @@ def _warte(minimum, streuung):
     Das Minimum bleibt unangetastet — es ist die Zeit, die die MT5-UI wirklich
     braucht (Tempo-Kalibrierung aus .73 gilt weiter), gewuerfelt wird nur
     OBENDRAUF. Bewusst OHNE Streuung bleiben die 12-ms-Animationsschritte in
-    _maus_fahren (fluessige Bewegung) und die Diagnose-Modi mousetest/inspect."""
-    time.sleep(minimum + random.uniform(0.0, streuung))
+    _maus_fahren (fluessige Bewegung) und die Diagnose-Modi mousetest/inspect.
+
+    Seit 28.10.2026 (Finn: „alles aus Zufall, damit die PCs echt nicht
+    ab-backen") wuerfelt warte_dauer: Zugabe schief verteilt und mal dem
+    Pausen-Faktor der Hand, selten eine kurze Denkpause — zentral hier statt
+    an den ~400 Aufrufstellen."""
+    time.sleep(warte_dauer(minimum, streuung))
+
+
+# Denkpause (28.10.2026): nur bei Wartezeiten ab WARTE_DENK_AB s Minimum (keine Mikro-Pausen in Fahrten/Hover-Schleifen), selten
+WARTE_DENK_AB = 0.3
+WARTE_DENK_ANTEIL = 0.04
+WARTE_DENK_S = (0.3, 1.1)
+
+
+def warte_dauer(minimum, streuung, zufall=None, hand=None):
+    """REIN RECHNEND (testbar): Länge einer _warte-Pause (s). Minimum bleibt unangetastet (was die UI braucht). Obendrauf statt
+    gleichverteilt 0..streuung jetzt schief verteilt (u^1,4 — kurze Zugaben häufiger) mal Pausen-Faktor der Hand (0,8–1,5), also
+    0..1,5 × streuung; der Schnitt bleibt fast gleich (≈ 0,48 statt 0,5 × streuung), die Spanne wird breiter. Bei Pausen ab
+    WARTE_DENK_AB s Minimum in rund 4 % eine kurze Denkpause (+0,3–1,1 s). streuung 0 = bewusst fest (keine Zugabe, keine Denkpause)."""
+    rnd = zufall or random
+    try:
+        mn, st = max(0.0, float(minimum)), max(0.0, float(streuung))
+    except (TypeError, ValueError):
+        return 0.0
+    if st <= 0:
+        return mn
+    h = hand or _hand()
+    d = mn + (rnd.random() ** 1.4) * st * h["pause"]
+    if mn >= WARTE_DENK_AB and rnd.random() < WARTE_DENK_ANTEIL:
+        d += rnd.uniform(*WARTE_DENK_S)
+    return d
+
+
+def klick_haltezeit(zufall=None, hand=None):
+    """REIN RECHNEND (testbar, 28.10.2026): wie lange die Maustaste unten bleibt (s) — 40–100 ms mal Hand-Tempo (0,75–1,35), in rund
+    6 % ein zäherer Druck (+30–90 ms). Vorher 0 ms: Drücken und Loslassen im selben SendInput-Batch."""
+    rnd = zufall or random
+    h = hand or _hand()
+    d = rnd.uniform(0.04, 0.1) * h["tempo"]
+    if rnd.random() < 0.06:
+        d += rnd.uniform(0.03, 0.09)
+    return d
+
+
+def doppelklick_abstand(zufall=None, hand=None):
+    """REIN RECHNEND (testbar, 28.10.2026): Pause zwischen erstem Loslassen und zweitem Drücken eines Doppelklicks (s) — 70–150 ms mal
+    Hand-Tempo, höchstens 0,25 s (Windows-Doppelklickzeit 500 ms bleibt weit drüber). Vorher 0 ms."""
+    rnd = zufall or random
+    h = hand or _hand()
+    return min(0.25, rnd.uniform(0.07, 0.15) * h["tempo"])
+
+
+def tasten_takt(n, zufall=None, hand=None):
+    """REIN RECHNEND (testbar, 28.10.2026): je Tasten-Ereignis eines send_keys-Ausdrucks (Strg, A, Entf …) (haltezeit, abstand) in s —
+    Haltezeit 30–110 ms mal Hand-Tempo, Abstand zum nächsten Ereignis 20–90 ms mal Tempo des Ausdrucks, in rund 8 % ein Stocken
+    (+0,1–0,3 s). Vorher fest 40 ms Abstand und keine Haltezeit (pywinauto pause=0.04). -> Liste der Länge n."""
+    rnd = zufall or random
+    h = hand or _hand()
+    tempo = rnd.uniform(0.8, 1.3) * h["tempo"]
+    return [(rnd.uniform(0.03, 0.11) * h["tempo"],
+             rnd.uniform(0.02, 0.09) * tempo + (rnd.uniform(0.1, 0.3) if rnd.random() < 0.08 else 0.0)) for _ in range(max(0, int(n)))]
 
 
 def _klick_absolut(x, y, taste="links", doppel=False):
@@ -2023,14 +2083,28 @@ def _klick_absolut(x, y, taste="links", doppel=False):
 
     MOVE, ABS = 0x0001, 0x8000 | 0x4000   # ABSOLUTE + VIRTUALDESK (s.o.)
     DOWN, UP = (0x0002, 0x0004) if taste == "links" else (0x0008, 0x0010)
-    folge = [MOVE | ABS, MOVE | DOWN | ABS, MOVE | UP | ABS]
-    if doppel:
-        folge += [MOVE | DOWN | ABS, MOVE | UP | ABS]
-    batch = (_INP * len(folge))()
-    for i, fl in enumerate(folge):
-        batch[i].type = 0  # INPUT_MOUSE
-        batch[i].mi = _MI(ax, ay, 0, fl, 0, None)
-    return user32.SendInput(len(folge), batch, ctypes.sizeof(_INP)) == len(folge)
+
+    def sende(*fl_folge):
+        batch = (_INP * len(fl_folge))()
+        for i, fl in enumerate(fl_folge):
+            batch[i].type = 0  # INPUT_MOUSE
+            batch[i].mi = _MI(ax, ay, 0, fl, 0, None)
+        return user32.SendInput(len(fl_folge), batch, ctypes.sizeof(_INP)) == len(fl_folge)
+    # HALTEZEIT (28.10.2026, Finn: „alles aus Zufall"): bisher Drücken und Loslassen im selben Batch (0 ms unten) — jetzt bleibt die
+    # Taste klick_haltezeit lang unten, Doppelklick mit doppelklick_abstand dazwischen. Der Parsec-Schutz bleibt: Bewegen+Drücken ist
+    # weiter EIN Batch, und jedes Loslassen trägt die Absolut-Koordinate des Ziels (MOVE|UP|ABS) — funkt Parsec in der Haltezeit
+    # dazwischen, landet das Loslassen trotzdem auf dem Ziel.
+    ok = sende(MOVE | ABS, MOVE | DOWN | ABS)
+    if not ok:
+        return False
+    time.sleep(klick_haltezeit())
+    ok = sende(MOVE | UP | ABS) or sende(MOVE | UP | ABS)     # Loslassen nie verschlucken (sonst hinge die Taste unten)
+    if doppel and ok:
+        time.sleep(doppelklick_abstand())
+        ok = sende(MOVE | DOWN | ABS)
+        time.sleep(klick_haltezeit() * 0.8)
+        ok = sende(MOVE | UP | ABS) and ok
+    return ok
 
 
 def _ziehen_absolut(x1, y1, x2, y2, schritte=12):
@@ -2058,13 +2132,14 @@ def _ziehen_absolut(x1, y1, x2, y2, schritte=12):
         b[0].type = 0
         b[0].mi = _MI(ax, ay, 0, fl, 0, None)
         return user32.SendInput(1, b, ctypes.sizeof(_INP)) == 1
+    # 28.10.2026 (Finn: „alles aus Zufall"): Pausen gewürfelt statt fest 80/30/80 ms
     ok = sende(MOVE | ABS, x1, y1)
-    time.sleep(0.08)
+    time.sleep(random.uniform(0.06, 0.14))
     ok = sende(MOVE | DOWN | ABS, x1, y1) and ok
     for i in range(1, schritte + 1):
-        time.sleep(0.03)
+        time.sleep(random.uniform(0.018, 0.05))
         ok = sende(MOVE | ABS, x1 + (x2 - x1) * i // schritte, y1 + (y2 - y1) * i // schritte) and ok
-    time.sleep(0.08)
+    time.sleep(random.uniform(0.06, 0.15))
     return sende(MOVE | UP | ABS, x2, y2) and ok
 
 
@@ -2347,6 +2422,20 @@ def maus_takt(n, zufall=None, hand=None):
     return out
 
 
+def bahn_schritte(cx, cy, x, y, richt, zufall=None):
+    """REIN RECHNEND (testbar, 28.10.2026, Finn: „alles aus Zufall"): Schrittzahl einer Fahrt, wenn der Aufrufer eine feste Zahl
+    vorgab (Echo: 3/4/6/8 — kurze, schnelle Wege im MT5-Fenster). Die Zahl ist nur noch Richtwert: × 0,75–1,5 plus ein Anteil der
+    Strecke (1 Schritt je 120–260 px), 3–44. So bleibt Echo schnell (Hedge-Weg), aber keine zwei Fahrten haben dieselbe Schrittzahl
+    allein deshalb, weil sie im Code gleich stehen."""
+    rnd = zufall or random
+    try:
+        r = float(richt)
+    except (TypeError, ValueError):
+        r = 6.0
+    strecke = math.hypot(float(x) - float(cx), float(y) - float(cy))
+    return max(3, min(44, int(round(r * rnd.uniform(0.75, 1.5) + strecke / rnd.uniform(120.0, 260.0)))))
+
+
 def _maus_fahren(x, y, schritte=None):
     """Den ECHTEN Mauszeiger sichtbar hinfahren (nicht teleportieren) — Finns
     Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt. SetCursorPos
@@ -2358,6 +2447,8 @@ def _maus_fahren(x, y, schritte=None):
         cx, cy = _cursor_pos()
     except Exception:
         cx, cy = x, y
+    if schritte is not None:
+        schritte = bahn_schritte(cx, cy, x, y, schritte)   # 28.10.2026: feste 3/4/6/8 nur noch Richtwert, Rest Strecke + Zufall
     pts = maus_bahn(cx, cy, x, y, schritte=schritte)
     for (px, py), dt in zip(pts, maus_takt(len(pts))):
         try:
@@ -2998,9 +3089,11 @@ def _tv_tippen(wert, name, trail):
     except ImportError:
         return False, "pywinauto fehlt"
     try:
-        keyboard.send_keys("^a{DELETE}")
+        _tasten_gestreut("^a{DELETE}", with_spaces=False)
         _warte(0.1, 0.12)
-        keyboard.send_keys(str(wert), with_spaces=False)
+        for _ch, _dt in zip(str(wert), tipp_takt(len(str(wert)))):   # 28.10.2026: Tipp-Takt der Hand statt fest 50 ms je Zeichen
+            _tasten_gestreut(_ch, with_spaces=False, tempo=0.6)
+            time.sleep(_dt * 0.4)
         _warte(0.15, 0.15)
         trail.append(f"{name} getippt: {wert}")
         return True, ""
@@ -4067,7 +4160,7 @@ def _tv_popups_weg(pw, trail, min_abstand_s=0.0):
         try:
             from pywinauto import keyboard
             vorn()
-            keyboard.send_keys("{ESC}")
+            _tasten_gestreut("{ESC}", with_spaces=False)
             _warte(0.4, 0.2)
             return True
         except Exception:
@@ -4363,15 +4456,15 @@ def _tv_adresse_oeffnen(w, url, trail):
     except Exception:
         pass                      # ohne die Probe (kein Windows) entscheidet set_focus
     try:
-        keyboard.send_keys("^l")
+        _tasten_gestreut("^l", with_spaces=False)
         _warte(0.35, 0.3)
-        keyboard.send_keys(tv_tasten_escape(url), with_spaces=True, pause=0.012)
+        _tasten_gestreut(tv_tasten_escape(url), with_spaces=True, tempo=0.2)   # 28.10.2026: je Zeichen gestreut, schnell wie Einfügen
         _warte(0.25, 0.2)
         # Chrome ergaenzt beim Tippen gern aus dem Verlauf (markierter Rest) —
         # Entf wirft die Ergaenzung weg, getippt bleibt genau die Adresse.
-        keyboard.send_keys("{DELETE}")
+        _tasten_gestreut("{DELETE}", with_spaces=False)
         _warte(0.15, 0.15)
-        keyboard.send_keys("{ENTER}")
+        _tasten_gestreut("{ENTER}", with_spaces=False)
     except Exception as e:
         return False, f"Adresse liess sich nicht tippen ({type(e).__name__})"
     trail.append("Adresse geoeffnet: …" + url[-28:])
@@ -4531,24 +4624,24 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
                 if _vorn_h is None or _vorn_h != int(w.handle):
                     return False, ("Strg+W verweigert: vorn steht nicht das Puls-Fenster (anderes Chrome-Fenster) — "
                                    "es wird nichts geschlossen.")
-                keyboard.send_keys("^w")
+                _tasten_gestreut("^w", with_spaces=False)
                 trail.append("TradingView-Tab geschlossen")
                 verlassen_bestaetigen()
                 _warte(0.3, 0.2)
             elif schritt == "neuer_tab":
-                keyboard.send_keys("^t")
+                _tasten_gestreut("^t", with_spaces=False)
                 _warte(0.5, 0.3)
             elif schritt == "tab_1":
-                keyboard.send_keys("^1")
+                _tasten_gestreut("^1", with_spaces=False)
                 _warte(0.4, 0.3)
             elif schritt == "adresse":
-                keyboard.send_keys("^l")
+                _tasten_gestreut("^l", with_spaces=False)
                 _warte(0.3, 0.2)
-                keyboard.send_keys(tv_tasten_escape(url), with_spaces=True, pause=0.012)
+                _tasten_gestreut(tv_tasten_escape(url), with_spaces=True, tempo=0.2)   # 28.10.2026: je Zeichen gestreut, schnell wie Einfügen
                 _warte(0.25, 0.2)
-                keyboard.send_keys("{DELETE}")
+                _tasten_gestreut("{DELETE}", with_spaces=False)
                 _warte(0.15, 0.15)
-                keyboard.send_keys("{ENTER}")
+                _tasten_gestreut("{ENTER}", with_spaces=False)
     except Exception as e:
         return False, f"Tab-Wechsel im Puls-Fenster fehlgeschlagen ({type(e).__name__})"
     trail.append(f"TradingView neu mit Direkt-Adresse geoeffnet (Tab im Puls-Fenster, vorher {n_tabs} Tabs)")
@@ -5131,7 +5224,7 @@ def modus_tvkonto(cmd):
     def esc():
         try:
             from pywinauto import keyboard
-            keyboard.send_keys("{ESC}")
+            _tasten_gestreut("{ESC}", with_spaces=False)
         except Exception:
             pass
 
@@ -5629,7 +5722,7 @@ def modus_tvkonto(cmd):
                     # Liste nicht (mehr) offen? Pfeil-runter oeffnet sie im Feld.
                     try:
                         from pywinauto import keyboard
-                        keyboard.send_keys("{DOWN}")
+                        _tasten_gestreut("{DOWN}", with_spaces=False)
                         _warte(0.6, 0.3)
                     except Exception:
                         pass
@@ -5645,7 +5738,7 @@ def modus_tvkonto(cmd):
                     # STEHT (sonst ginge Pfeil+Enter auf irgendeinen Vorschlag).
                     try:
                         from pywinauto import keyboard
-                        keyboard.send_keys("{ESC}")           # evtl. offene Liste zu, Feld behaelt den Fokus
+                        _tasten_gestreut("{ESC}", with_spaces=False)           # evtl. offene Liste zu, Feld behaelt den Fokus
                     except Exception:
                         pass
                     hat_fokus, un_r = ins_feld()
@@ -5665,9 +5758,9 @@ def modus_tvkonto(cmd):
                     else:
                         try:
                             from pywinauto import keyboard
-                            keyboard.send_keys("{DOWN}")
+                            _tasten_gestreut("{DOWN}", with_spaces=False)
                             _warte(0.3, 0.2)
-                            keyboard.send_keys("{ENTER}")
+                            _tasten_gestreut("{ENTER}", with_spaces=False)
                             trail.append(f"Autofill per Pfeil+Enter ({len(vor)} sichtbare Vorschlaege)")
                         except Exception:
                             return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
@@ -5703,8 +5796,7 @@ def modus_tvkonto(cmd):
 
             def taste(k):
                 try:
-                    from pywinauto import keyboard
-                    keyboard.send_keys(k)
+                    _tasten_gestreut(k, with_spaces=False)   # 28.10.2026: gestreut statt fest
                     return True
                 except Exception:
                     return False
@@ -5944,7 +6036,7 @@ def modus_tvkonto(cmd):
         # Dropdown wieder schliessen, sonst bleibt es ueber dem Chart haengen.
         try:
             from pywinauto import keyboard
-            keyboard.send_keys("{ESC}")
+            _tasten_gestreut("{ESC}", with_spaces=False)
         except Exception:
             pass
         # Beweise in den Meldungstext (22.09.2026 12:4x, Finns PC: dritter Lauf mit
@@ -6877,9 +6969,10 @@ def _tv_show_more_invoke(w, punkt, trail, offen_fn=None):
         return False
 
     def _weg_maus():
-        mx, my = (r[0] + r[2]) // 2, (r[1] + r[3]) // 2
+        mx, my = klick_punkt(r[0], r[1], r[2], r[3])     # 28.10.2026: gewürfelter Punkt statt exakter Mitte
         _maus_fahren(mx, my, schritte=6)
         _warte(0.15, 0.1)
+        _warte(*klick_zoegern())
         if not _klick_absolut(mx, my):
             raise RuntimeError("SendInput abgelehnt")
 
@@ -7085,7 +7178,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         _tv_uia_klick({"punkt": (fr[0] + int((fr[2] - fr[0]) * 0.35), fr[1] + int((fr[3] - fr[1]) * 0.6))},
                       "Chart (Fokus)", trail)
         _warte(0.25, 0.15)
-        keyboard.send_keys("+t")
+        _tasten_gestreut("+t", with_spaces=False)
         trail.append("Order-Panel per Shift+T geoeffnet")
         ende = time.time() + 6.0
         while time.time() < ende and not ber:
@@ -7296,7 +7389,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         _warte(0.15, 0.1)
         text = str(int(wert)) if abs(wert - round(wert)) < 1e-9 else ("%.2f" % wert)
         _tv_tippen(text, name, trail)
-        keyboard.send_keys("{TAB}")
+        _tasten_gestreut("{TAB}", with_spaces=False)
         _warte(0.3, 0.15)
 
     def pruefe_wert(muster, name, lab, soll, feld_vorher):
@@ -9567,7 +9660,7 @@ def modus_tvclose(cmd):
             # nichts raten — ESC (= Abbrechen) und ehrlich melden.
             try:
                 from pywinauto import keyboard
-                keyboard.send_keys("{ESC}")
+                _tasten_gestreut("{ESC}", with_spaces=False)
                 trail.append("ESC (Rueckfrage abgebrochen, nichts bestaetigt)")
             except Exception:
                 pass
@@ -9801,7 +9894,7 @@ def modus_tvorder(cmd):
         _warte(0.8, 0.5)
         try:
             from pywinauto import keyboard
-            keyboard.send_keys("{ENTER}")
+            _tasten_gestreut("{ENTER}", with_spaces=False)
         except Exception:
             return raus("Enter liess sich nicht senden — Symbol von Hand waehlen.",
                         "symbol")
@@ -10398,8 +10491,8 @@ def _feld_tippen(el, wert, name, trail, rahmen=None):
             # letzten Trade noch '2' drin und es kommt '2' dazu, sind es 22).
             # Strg+A UND Pos1+Shift+Ende — je nach Edit-Control greift nur
             # eines von beiden. Danach ZURUECKLESEN, ob es wirklich leer ist.
-            el.type_keys("^a{DELETE}", set_foreground=False)
-            el.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
+            _el_tasten(el, "^a{DELETE}", set_foreground=False)
+            _el_tasten(el, "{HOME}+{END}{DELETE}", set_foreground=False)
             _warte(0.08, 0.1)
             rest = (_feld_lesen(el) or "").strip()
             if rest:
@@ -10407,14 +10500,15 @@ def _feld_tippen(el, wert, name, trail, rahmen=None):
                 # markieren und DRUEBERtippen — die Auswahl wird ersetzt, das
                 # Ruecklesen unten beweist das Ergebnis.
                 trail.append(f"{name}-Feld leert nicht ('{rest}') — tippe ueber die Auswahl")
-                el.type_keys("^a", set_foreground=False)
-                el.type_keys("{HOME}+{END}", set_foreground=False)
+                _el_tasten(el, "^a", set_foreground=False)
+                _el_tasten(el, "{HOME}+{END}", set_foreground=False)
             # Tippen im Hand-Takt (07.10.2026): je Zeichen ein eigener Abstand aus tipp_takt (× 0,6, damit es im Schnitt nicht
             # langsamer wird als pywinautos festes 50-ms-Raster) — vorher tickte jedes Zeichen im exakt gleichen Abstand
             _txt = str(wert)
             for _ch, _dt in zip(_txt, tipp_takt(len(_txt))):
-                el.type_keys(_ch, pause=0, with_spaces=False, set_foreground=False)
-                time.sleep(_dt * 0.6)
+                # 28.10.2026: jede Taste mit eigener Haltezeit (tasten_takt, × 0,6) — Abstand danach × 0,3, im Schnitt kaum langsamer
+                _el_tasten(el, _ch, set_foreground=False, pruefen=False, tempo=0.6)
+                time.sleep(_dt * 0.3)
             _warte(0.12, 0.15)
             ist = _feld_lesen(el)
             if zahl_gleich(ist, wert):
@@ -10782,7 +10876,7 @@ def _einklick_haftung_annehmen(hauptfenster, trail, melden=False):
     def _weg_leertaste():
         knopf.set_focus()
         _warte(0.1, 0.15)
-        knopf.type_keys("{SPACE}", set_foreground=False)
+        _el_tasten(knopf, "{SPACE}", set_foreground=False)
 
     def _weg_sendinput():
         if not _echo_klick(knopf.rectangle(), schritte=6):   # gewürfelter Punkt (07.10.2026)
@@ -10910,7 +11004,7 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
                     ok.click_input()
                 else:
                     d.set_focus()
-                    d.type_keys("{ENTER}", set_foreground=False)
+                    _el_tasten(d, "{ENTER}", set_foreground=False)
             except Exception:
                 pass
             ende = time.time() + 2.0
@@ -10992,7 +11086,7 @@ def _fremde_dialoge_schliessen(hauptfenster):
                             pass
                         break
                 if not zu:
-                    d.type_keys("{ESC}", set_foreground=False)
+                    _el_tasten(d, "{ESC}", set_foreground=False)
             except Exception:
                 continue
     except Exception:
@@ -11107,6 +11201,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
             break
         n += 1
         _maus_fahren(px_, py_, schritte=3)
+        _warte(*klick_zoegern())          # 28.10.2026: angekommen, kurz stehen, dann drücken (Scan-Punkt selbst bleibt)
         # Finns Schritt 1: Zeile markieren, dann erst oeffnen
         _klick_absolut(px_, py_)
         _warte(0.15, 0.2)
@@ -11119,7 +11214,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
                 d = _finde_aendern_dialog(w, timeout=1.2)
             else:
                 try:
-                    w.type_keys("{ESC}", set_foreground=False)
+                    _el_tasten(w, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
                 if st_menue == "ausgegraut":
@@ -11137,7 +11232,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
         if d is None:
             # kein Dialog (Punkt lag neben der Zeile) — Menue NICHT offen stehen lassen (Fund aus Finns Screenshot 18.08.)
             try:
-                w.type_keys("{ESC}", set_foreground=False)
+                _el_tasten(w, "{ESC}", set_foreground=False)
             except Exception:
                 pass
             continue
@@ -11148,7 +11243,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
                              y_off=hr.bottom - py_)
             return d
         try:
-            d.type_keys("{ESC}", set_foreground=False)
+            _el_tasten(d, "{ESC}", set_foreground=False)
         except Exception:
             pass
         _fremde_dialoge_schliessen(w)
@@ -11245,8 +11340,9 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
             r = el.rectangle()
             unten = (maus_grenze is None) or (r.top >= maus_grenze)
             if unten and r.width() > 0 and r.height() > 0:
-                cx, cy = r.mid_point().x, r.mid_point().y
+                cx, cy = _echo_klickziel(r, deckel=(20.0, 6.0))   # 28.10.2026: gewürfelt nahe der Reiter-Mitte statt exakt
                 _maus_fahren(cx, cy, schritte=4)
+                _warte(*klick_zoegern())
                 _klick_absolut(cx, cy)
                 if trail is not None:
                     trail.append(f"Handel-Tab geklickt @({cx},{cy})")
@@ -11383,6 +11479,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                    and r.top >= maus_grenze)
         if maus_ok:
             _maus_fahren(mx, my, schritte=8)
+            _warte(*klick_zoegern())      # 28.10.2026: kurz stehen vor dem Druck (Zeilen-Punkt bleibt)
             # Finns Reihenfolge (18.08.2026, manuell vorgemacht): erst die
             # Zeile ANKLICKEN (markieren), dann oeffnen
             _klick_absolut(mx, my)
@@ -11401,7 +11498,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         def _weg_menue():
             zeile.select()
             _warte(0.2, 0.25)
-            w.type_keys("+{F10}")
+            _el_tasten(w, "+{F10}")
             _warte(0.4, 0.35)
             if _kontextmenue_aendern_klicken() != "geklickt":
                 raise RuntimeError("kein Menuepunkt")
@@ -11434,13 +11531,13 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                     break
                 trail.append(f"Dialog einer ANDEREN Position ({name}) — geschlossen")
                 try:
-                    d.type_keys("{ESC}", set_foreground=False)
+                    _el_tasten(d, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
             # haengengebliebene Menues UND versehentlich geoeffnete Fenster
             # (EA-Dialog!) schliessen, bevor der naechste Weg drankommt
             try:
-                w.type_keys("{ESC}", set_foreground=False)
+                _el_tasten(w, "{ESC}", set_foreground=False)
             except Exception:
                 pass
             _fremde_dialoge_schliessen(w)
@@ -11500,7 +11597,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                                 menue_notiert = True
                                 trail.append("Kontextmenue per UIA nicht lesbar")
                             try:
-                                w.type_keys("{ESC}", set_foreground=False)
+                                _el_tasten(w, "{ESC}", set_foreground=False)
                             except Exception:
                                 pass
                 if d is None:
@@ -11515,7 +11612,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                     break
                 trail.append(f"Geometrie Zeile -{i}: fremder Dialog — geschlossen")
                 try:
-                    d.type_keys("{ESC}", set_foreground=False)
+                    _el_tasten(d, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
                 _fremde_dialoge_schliessen(w)
@@ -11548,7 +11645,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         _warte(0.3, 0.3)
     except Exception as e:
         try:
-            dlg.type_keys("{ESC}", set_foreground=False)
+            _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
             pass
         return {"ok": False, "msg": f"Felder nicht befuellbar: {e}"}
@@ -11581,7 +11678,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         knopf = max(kandidaten_k, key=_breite)
     if knopf is None:
         try:
-            dlg.type_keys("{ESC}", set_foreground=False)
+            _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
             pass
         return {"ok": False, "msg": "kein Bestaetigen-Knopf im Dialog"}
@@ -11613,7 +11710,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             hat = False
         if not hat:
             raise RuntimeError("kein Tastatur-Fokus")
-        knopf.type_keys("{SPACE}", set_foreground=False)
+        _el_tasten(knopf, "{SPACE}", set_foreground=False)
 
     def _k_sendinput():
         if not _echo_klick(knopf.rectangle(), schritte=3):   # gewürfelter Punkt (07.10.2026)
@@ -11635,7 +11732,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             return {"ok": True, "msg": "geklickt"}
         trail.append(f"Aendern-Knopf: {name} ohne Wirkung")
     try:
-        dlg.type_keys("{ESC}", set_foreground=False)
+        _el_tasten(dlg, "{ESC}", set_foreground=False)
     except Exception:
         pass
     return {"ok": False, "msg": "Aendern-Knopf reagiert auf keinen Weg"}
@@ -11927,7 +12024,7 @@ def run(cfg_path, cmd):
     trail.append("Terminal betreten")
 
     # 3) F9 -> Dialog -> Felder direkt setzen (cursor-unabhaengig, s.o. Parsec)
-    w.type_keys("{F9}")
+    _el_tasten(w, "{F9}")
     seit = time.time()                 # Echo-Takt (07.10.2026): jede Pause rechnet ab der letzten Aktion, s. _echo_pause
     _warte(0.4, 0.35)
     with _EchoUnruhe():                # die Maus wandert, während der Dialog gesucht wird (nur lesen)
@@ -11969,7 +12066,7 @@ def run(cfg_path, cmd):
                 return {"ok": False, "retry_ok": True,
                         "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Tastendruck. [" + _spur(trail) + "]"}
             trail.append("F9 zweiter Anlauf (Terminal neu betreten)")
-            w.type_keys("{F9}")
+            _el_tasten(w, "{F9}")
             seit = time.time()
             _warte(0.4, 0.35)
             with _EchoUnruhe():
@@ -12070,21 +12167,22 @@ def run(cfg_path, cmd):
                 break
             try:
                 sym_combo.set_focus(); _warte(0.15, 0.2)
-                sym_combo.type_keys("^a{DELETE}", set_foreground=False)
-                sym_combo.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
+                _el_tasten(sym_combo, "^a{DELETE}", set_foreground=False)
+                _el_tasten(sym_combo, "{HOME}+{END}{DELETE}", set_foreground=False)
                 _warte(0.1, 0.12)
                 if (_feld_lesen(sym_combo) or "").strip():
                     # Feld leert nicht (Vervollstaendigung fuellt nach) —
                     # alles markieren und DRUEBERtippen, wie in _feld_tippen
-                    sym_combo.type_keys("^a", set_foreground=False)
+                    _el_tasten(sym_combo, "^a", set_foreground=False)
                 # Tasten-Pause pro Anschlag, pro Versuch neu gewuerfelt
                 # (Jitter-Doktrin; das fixe 12-ms-Muster gilt nur fuer die
                 # Maus-Animation)
-                sym_combo.type_keys(symbol, with_spaces=False,
-                                    set_foreground=False,
-                                    pause=0.05 + random.uniform(0.0, 0.04))
+                # 28.10.2026: je Zeichen eigener Abstand (tipp_takt) statt eines Abstands für alle Zeichen
+                for _ch, _dt in zip(str(symbol), tipp_takt(len(str(symbol)))):
+                    _el_tasten(sym_combo, _ch, set_foreground=False, pruefen=False, tempo=0.6)
+                    time.sleep(_dt * 0.4)
                 _warte(0.12, 0.15)
-                sym_combo.type_keys("{TAB}", set_foreground=False)
+                _el_tasten(sym_combo, "{TAB}", set_foreground=False)
                 _warte(0.2, 0.25)
             except Exception as e:
                 trail.append(f"Symbol-Tippversuch {_sv} abgebrochen: "
@@ -12188,7 +12286,7 @@ def run(cfg_path, cmd):
         except Exception:
             pass
         try:
-            dlg.type_keys("{ESC}", set_foreground=False)
+            _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
             pass
         return {"ok": False, "retry_ok": True,
@@ -12244,7 +12342,7 @@ def run(cfg_path, cmd):
         if not hat_fokus:
             # sonst tippte die Leertaste in das gerade fokussierte FELD
             raise RuntimeError("Knopf nimmt keinen Tastatur-Fokus an")
-        knopf.type_keys("{SPACE}", set_foreground=False)
+        _el_tasten(knopf, "{SPACE}", set_foreground=False)
 
     def _weg_sendinput():
         if not _echo_klick(knopf.rectangle(), schritte=3):   # gewürfelter Punkt (07.10.2026)
@@ -12278,7 +12376,7 @@ def run(cfg_path, cmd):
             break
     if ausgeloest is None:
         try:
-            dlg.type_keys("{ESC}", set_foreground=False)
+            _el_tasten(dlg, "{ESC}", set_foreground=False)
         except Exception:
             pass
         return {"ok": False, "retry_ok": True,
@@ -12309,7 +12407,7 @@ def run(cfg_path, cmd):
             # Dialog zu, fertig, KEIN Scan. (mit_sltp steht seit 02.09. oben.)
             if not mit_sltp:
                 try:
-                    dlg.type_keys("{ESC}", set_foreground=False)
+                    _el_tasten(dlg, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
                 trail.append("SL/TP: manuell (Schalter aus)")
@@ -12328,7 +12426,7 @@ def run(cfg_path, cmd):
             if f9_getippt and sl_f9 is not None and tp_f9 is not None \
                     and sltp_bestaetigt(p["sl"], p["tp"], sl_f9, tp_f9, digits):
                 try:
-                    dlg.type_keys("{ESC}", set_foreground=False)
+                    _el_tasten(dlg, "{ESC}", set_foreground=False)
                 except Exception:
                     pass
                 trail.append(f"SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)} "
@@ -12384,7 +12482,7 @@ def run(cfg_path, cmd):
             sl, tp = sltp_vom_fill(cmd["richtung"], fill, vol, contract_size,
                                    cmd["sl_usd"], cmd["tp_usd"], komm or 0.0, digits)
             try:
-                dlg.type_keys("{ESC}", set_foreground=False)
+                _el_tasten(dlg, "{ESC}", set_foreground=False)
             except Exception:
                 pass
             _warte(0.2, 0.25)
@@ -12462,7 +12560,7 @@ def run(cfg_path, cmd):
     # war fertig, aber der Dialog blieb minutenlang stehen — halbkonfigurierte
     # Order, die jeder versehentlich ausloesen koennte).
     try:
-        dlg.type_keys("{ESC}", set_foreground=False)
+        _el_tasten(dlg, "{ESC}", set_foreground=False)
     except Exception:
         pass
     if markt_zu:
@@ -12559,6 +12657,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         (01.09.2026) — zwei Kopien derselben Klickfolge waeren genau die Art
         Stelle, an der spaeter nur eine von beiden gepflegt wird."""
         _maus_fahren(px_, py_, schritte=3)
+        _warte(*klick_zoegern())          # 28.10.2026: kurz stehen vor dem Druck
         _klick_absolut(px_, py_)          # Finns Schritt 1: Zeile markieren
         _warte(0.15, 0.2)
         if not _klick_absolut(px_, py_, taste="rechts"):
@@ -12579,7 +12678,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             if st_menue == "ausgegraut":
                 grau += 1
             try:
-                w.type_keys("{ESC}", set_foreground=False)
+                _el_tasten(w, "{ESC}", set_foreground=False)
             except Exception:
                 pass
             continue
@@ -12637,7 +12736,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             pass
         try:
             r = knopf.rectangle()
-            _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+            _maus_fahren(*_echo_klickziel(r), schritte=6)   # 28.10.2026: gewürfelter Punkt statt Mitte
         except Exception:
             pass
 
@@ -12652,11 +12751,14 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
                 hat_fokus = False
             if not hat_fokus:
                 raise RuntimeError("Knopf nimmt keinen Tastatur-Fokus an")
-            knopf.type_keys("{SPACE}", set_foreground=False)
+            _el_tasten(knopf, "{SPACE}", set_foreground=False)
 
         def _weg_sendinput():
             r2 = knopf.rectangle()
-            if not _klick_absolut(r2.mid_point().x, r2.mid_point().y):
+            _x2, _y2 = _echo_klickziel(r2)        # 28.10.2026: gewürfelter Punkt + Zögern statt Mitte im selben Moment
+            _maus_fahren(_x2, _y2)
+            _warte(*klick_zoegern())
+            if not _klick_absolut(_x2, _y2):
                 raise RuntimeError("SendInput abgelehnt")
 
         for wegname, tu in (("Fokus+Leertaste", _weg_leertaste),
@@ -12871,7 +12973,7 @@ def modus_inspect(cfg_path):
     print(f"Fenster: {w.window_text()!r}")
     w.set_focus()
     time.sleep(0.5)
-    w.type_keys("{F9}")
+    _el_tasten(w, "{F9}")
     time.sleep(0.4)
     dlg = _finde_order_dialog(w)
     if not dlg:
@@ -13959,7 +14061,7 @@ def _tsx_konto_element(roh):
 def _tsx_esc():
     try:
         from pywinauto import keyboard
-        keyboard.send_keys("{ESC}")
+        _tasten_gestreut("{ESC}", with_spaces=False)
     except Exception:
         pass
 
@@ -14703,14 +14805,14 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False, klick=True, v
         trail.append(f"Feld {name}: kein Fokus — nichts getippt")
         return False
     if ist is None or str(ist or ""):
-        keyboard.send_keys("^a")
+        _tasten_gestreut("^a", with_spaces=False)
         _warte(0.1, 0.1)
-        keyboard.send_keys("{DELETE}")
+        _tasten_gestreut("{DELETE}", with_spaces=False)
         _warte(0.15, 0.1)
     if text:
         # 06.10.2026: Zeichen für Zeichen im Tipp-Takt der Hand (50–200 ms, manchmal ein Stocken) statt eines Rutsches mit 30 ms
         for ch, dt in zip(str(text), tipp_takt(len(str(text)))):
-            keyboard.send_keys(tv_tasten_escape(ch), with_spaces=True, pause=0.02)
+            _tasten_gestreut(tv_tasten_escape(ch), with_spaces=True, tempo=0.6)   # 28.10.2026: Haltezeit je Taste
             _warte(dt, 0.02)
         _warte(0.2, 0.15)
     # B36: Tippen selbst in die Spur (ID F 30.09.2026: nach „Feld Profit geklickt" fehlte jeder Beleg, dass 33 getippt wurde)
@@ -14812,7 +14914,7 @@ def _tsx_per_tab(w, von, zu, wert, trail):
             return False
         taste = tsx_tab_taste(fv[1], fz[1], umgekehrt=bool(nr))
         tname = "Shift+Tab" if taste.startswith("+") else "Tab"
-        keyboard.send_keys(taste)
+        _tasten_gestreut(taste, with_spaces=False)
         _warte(0.25, 0.15)
         fk = _uia_fokus()
         if tsx_fokus_passt(fk, fz[1]):
@@ -15082,7 +15184,7 @@ def _tsx_order_nach_kopf(befehl):
                     return ende("menge", "Mengenfeld bekam keinen Fokus — nichts getippt.")
                 try:
                     from pywinauto import keyboard
-                    keyboard.send_keys("{TAB}")
+                    _tasten_gestreut("{TAB}", with_spaces=False)
                 except Exception:
                     pass
             t_bis = time.time() + 3.0
@@ -16128,98 +16230,228 @@ def tsx_hover_pause(zufall=None, hand=None):
 # (subprocess.run) — darum bleibt nicht der Lauf, sondern ein ABGEKOPPELTES Kind (modus_tsxbleiben): der Lauf antwortet sofort wie
 # bisher (Fill → Prophos → Hedge unverändert), das Kind lässt das Puls-Chrome stehen und minimiert es erst nach der gewürfelten
 # Zeit. Deckel 240 s: ab 5 min verdecktem Fenster drosselt Chrome den Reader-Tab daneben stark (deshalb wurde überhaupt minimiert).
-# Nur nach GESENDETER Order (res.gesendet) — Probe/Lesen minimieren wie bisher sofort. Nur der CDP-Weg (Puls-Chrome).
-TSX_BLEIBEN_S = (15.0, 240.0)
+#
+# SEIT 28.10.2026 FÜR ALLE WEGE (Finn: „Wenn Puls bei Topstep eine Änderung macht, geht er rein, aber manchmal ist er in einer
+# Millisekunde wieder draußen. Er soll vielleicht noch 1–2 Minuten bis zum nächsten Puls-Signal einfach da drin bleiben"). Belegt im
+# Code: geblieben ist bisher NUR ein TopstepX-Lauf mit gesendeter Order (K4) — jede Lesung (K1, Endlesung, tv-lesen), jeder
+# Kontowechsel/Heimweg, jede TradingView-Order (Orbit), jedes Close und jeder K4 ohne Senden minimierte im selben Moment. Jetzt bleibt
+# jeder Lauf, der das Puls-Chrome sichtbar bedient hat (Windows-Maus/-Tastatur → _win_hwnd gesetzt), gestreut 30 s–3 min stehen,
+# meist 1–2 min (tsx_bleiben_dauer). Reine CDP-Lesungen ohne Klick holen das Fenster gar nicht nach vorn — da gibt es nichts offen zu
+# lassen. Die Marke gehört jetzt dem LAUF (lauf = pid des Bot-Laufs), nicht dem Kind:
+#   · jeder neue Lauf, der das Fenster nach vorn holt (_win_vorn), schreibt seine pid hinein → das alte Kind hört auf, OHNE zu
+#     minimieren — mitten in einem neuen Lauf wird nie minimiert (vorher nur über die Hand-Lauf-Sperre, die TradingView nicht setzt);
+#   · das Kind minimiert nie, solange sein Lauf noch lebt (Zwischen-zu() beim Tab-Tausch), und wartet danach die Restzeit ab;
+#   · Kette: bleibt das Fenster über mehrere Läufe hinweg stehen, zählt der Deckel TSX_BLEIBEN_DECKEL_S ab dem ersten Hervorholen
+#     (seit) — nie länger als 4 min am Stück offen (Reader-Drosselung).
+# Heim-Wache unverändert: der Heimweg ist ein eigener Lauf, er löst das Kind ab und geht wie bisher ins Big-Trade-Konto. Bleiben heißt
+# Fenster offen, nicht im falschen Konto stehen — es wird dabei nichts geklickt (nur die Maus zuckt ab und zu).
+TSX_BLEIBEN_S = (30.0, 180.0)
+TSX_BLEIBEN_DECKEL_S = 240.0        # am Stück offen (Kette über mehrere Läufe) — danach minimiert
+TSX_BLEIBEN_LAUF_MAX_S = 600.0      # hängt der Lauf, wartet das Kind höchstens so lange auf sein Ende
 TSX_BLEIBEN_MARKE = "puls_tsx_bleiben.json"
 
 
 def tsx_bleiben_dauer(zufall=None, hand=None):
-    """REIN RECHNEND (testbar): wie lange der Bot nach einer gesendeten Order noch im TopstepX-Tab bleibt (s). In rund einem Viertel
-    der Fälle kurz (15–60 s), sonst 1–4 min, mal Pausen-Faktor der Hand, immer innerhalb TSX_BLEIBEN_S."""
+    """REIN RECHNEND (testbar): wie lange das Puls-Chrome nach einem Lauf noch offen bleibt (s). Rund 70 % 1–2 min (Finns Wunsch),
+    15 % kürzer (30–60 s), 15 % länger (2–3 min), mal 0,9–1,1 je Pausen-Faktor der Hand, immer innerhalb TSX_BLEIBEN_S.
+    Vorher (06.10.2026) ein Viertel 15–60 s, sonst 1–4 min, nur nach gesendeter TopstepX-Order."""
     rnd = zufall or random
     h = hand or _hand()
-    d = rnd.uniform(15.0, 60.0) if rnd.random() < 0.25 else rnd.uniform(60.0, 240.0)
-    return max(TSX_BLEIBEN_S[0], min(TSX_BLEIBEN_S[1], d * h["pause"]))
+    w = rnd.random()
+    d = rnd.uniform(30.0, 60.0) if w < 0.15 else rnd.uniform(120.0, 180.0) if w > 0.85 else rnd.uniform(60.0, 120.0)
+    d *= 0.9 + 0.2 * max(0.0, min(1.0, (h["pause"] - 0.8) / 0.7))
+    return max(TSX_BLEIBEN_S[0], min(TSX_BLEIBEN_S[1], d))
 
 
-def tsx_bleiben_befehl(hwnd, bis, pid):
-    """REIN RECHNEND (testbar): Marke/Befehl des Kindes {hwnd, bis, pid}; None bei Unsinn (kein Fenster, Zeit schon vorbei)."""
+def tsx_bleiben_bis(jetzt, dauer, seit=None, deckel=TSX_BLEIBEN_DECKEL_S):
+    """REIN RECHNEND (testbar): (bis, seit) für die Marke. seit = seit wann das Fenster am Stück offen ist (aus der Kette davor), sonst
+    jetzt; bis = jetzt + dauer, höchstens seit + deckel. Bleiben unter 10 s lohnt nicht → None (sofort minimieren wie früher)."""
     try:
-        hwnd, bis, pid = int(hwnd), float(bis), int(pid)
+        jetzt, dauer = float(jetzt), float(dauer)
+        seit = float(seit) if seit is not None else jetzt
     except (TypeError, ValueError):
         return None
-    if hwnd <= 0 or bis <= time.time():
+    if seit > jetzt or jetzt - seit >= deckel:
+        seit = jetzt
+    bis = min(jetzt + dauer, seit + deckel)
+    return (bis, seit) if bis - jetzt >= 10.0 else None
+
+
+def tsx_bleiben_befehl(hwnd, bis, lauf, seit=None):
+    """REIN RECHNEND (testbar): Marke {hwnd, bis, lauf, seit}; None bei Unsinn (kein Fenster, Zeit schon vorbei, kein Lauf)."""
+    try:
+        hwnd, bis, lauf = int(hwnd), float(bis), int(lauf)
+        seit = float(seit) if seit is not None else time.time()
+    except (TypeError, ValueError):
         return None
-    return {"hwnd": hwnd, "bis": bis, "pid": pid}
+    if hwnd <= 0 or lauf <= 0 or bis <= time.time():
+        return None
+    return {"hwnd": hwnd, "bis": bis, "lauf": lauf, "seit": seit}
 
 
-def tsx_bleiben_weiter(marke, pid, handlauf, fenster_da, jetzt):
+def tsx_bleiben_weiter(marke, lauf, handlauf_fremd, fenster_da, jetzt, lauf_lebt=False):
     """REIN RECHNEND (testbar): soll das Kind weiter warten (True), aufhören OHNE zu minimieren (None) oder jetzt minimieren (False)?
-    Abgelöst (Marke trägt eine andere pid — ein neuerer Lauf hat ein neues Kind), neuer Lauf (Hand-Lauf-Sperre: der minimiert am Ende
-    selbst) oder Fenster weg/schon minimiert → None; Zeit um → False; sonst True."""
-    if not isinstance(marke, dict) or marke.get("pid") != pid or handlauf or not fenster_da:
+    Abgelöst (Marke gehört einem anderen Lauf — ein neuerer Lauf hat das Fenster genommen), fremder Hand-Lauf (der minimiert am Ende
+    selbst) oder Fenster weg/schon minimiert → None; eigener Lauf lebt noch → True (nie mitten im Lauf minimieren, höchstens
+    TSX_BLEIBEN_LAUF_MAX_S ab seit); Zeit um → False; sonst True."""
+    if not isinstance(marke, dict) or handlauf_fremd or not fenster_da:
         return None
     try:
-        return True if float(marke.get("bis") or 0) > float(jetzt) else False
+        if int(marke.get("lauf") or 0) != int(lauf):
+            return None
+        bis, seit = float(marke.get("bis") or 0), float(marke.get("seit") or 0)
     except (TypeError, ValueError):
+        return None
+    if lauf_lebt and float(jetzt) - seit < TSX_BLEIBEN_LAUF_MAX_S:
+        return True
+    return True if bis > float(jetzt) else False
+
+
+def _bleiben_marke_lesen():
+    try:
+        with open(os.path.join(_AUGEN_HIER, TSX_BLEIBEN_MARKE), "r", encoding="utf-8") as f:
+            m = json.load(f)
+        return m if isinstance(m, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _bleiben_marke_schreiben(m):
+    try:
+        p = os.path.join(_AUGEN_HIER, TSX_BLEIBEN_MARKE)
+        with open(p + ".neu", "w", encoding="utf-8") as f:
+            json.dump(m, f)
+        os.replace(p + ".neu", p)
+        return True
+    except OSError:
+        return False
+
+
+def _bleiben_abloesen(hwnd):
+    """Dieser Lauf holt das Puls-Chrome nach vorn (_win_vorn): die Marke gehört ab jetzt ihm — ein noch wartendes Kind eines früheren
+    Laufs hört auf, ohne zu minimieren. seit bleibt erhalten, wenn das Fenster gerade noch offen stand (Kette, Deckel 4 min)."""
+    if not (_WIN_EINGABE and _BLEIBEN_AN[0]):
+        return
+    try:
+        jetzt = time.time()
+        alt = _bleiben_marke_lesen() or {}
+        seit = jetzt
+        try:
+            if float(alt.get("bis") or 0) > jetzt and int(alt.get("lauf") or 0) != os.getpid():
+                seit = float(alt.get("seit") or jetzt)
+            elif int(alt.get("lauf") or 0) == os.getpid():
+                seit = float(alt.get("seit") or jetzt)
+        except (TypeError, ValueError):
+            seit = jetzt
+        _bleiben_marke_schreiben({"hwnd": int(hwnd or 0), "bis": 0, "lauf": os.getpid(), "seit": seit})
+    except Exception:
+        pass
+
+
+_BLEIBEN_KIND = [False]       # je Lauf höchstens EIN Kind; weitere zu() verlängern nur die Marke
+_BLEIBEN_AN = [True]          # Selftest schaltet ab (Attrappen-Fenster dürfen weder Marke schreiben noch ein Kind starten)
+
+
+def _puls_bleiben_starten(s, trail=None):
+    """Am Ende eines Laufs (zu()): Puls-Chrome NICHT sofort minimieren — die Marke bekommt eine gewürfelte Restzeit
+    (tsx_bleiben_dauer, Kette über tsx_bleiben_bis), das abgekoppelte Kind minimiert später. Nur Windows und nur, wenn dieser Lauf
+    das Fenster sichtbar bedient hat (_win_hwnd). -> Sekunden, die das Fenster offen bleibt | None (dann minimiert zu() wie früher).
+    Nie ein Fehler nach außen."""
+    try:
+        hwnd = getattr(s, "_win_hwnd", None)
+        if not (_WIN_EINGABE and hwnd and _BLEIBEN_AN[0]):
+            return None
+        jetzt = time.time()
+        alt = _bleiben_marke_lesen() or {}
+        seit = None
+        try:
+            if int(alt.get("lauf") or 0) == os.getpid():
+                seit = float(alt.get("seit") or jetzt)
+        except (TypeError, ValueError):
+            seit = None
+        bb = tsx_bleiben_bis(jetzt, tsx_bleiben_dauer(), seit)
+        if not bb:
+            return None
+        marke = tsx_bleiben_befehl(hwnd, bb[0], os.getpid(), bb[1])
+        if not marke or not _bleiben_marke_schreiben(marke):
+            return None
+        if not _BLEIBEN_KIND[0]:
+            import subprocess
+            flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
+            subprocess.Popen([sys.executable, os.path.abspath(__file__), "tsxbleiben",
+                              json.dumps({"hwnd": int(hwnd), "lauf": os.getpid()})], creationflags=flags,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+            _BLEIBEN_KIND[0] = True
+        s._bleiben = True
+        dauer = int(bb[0] - jetzt)
+        if trail is not None:
+            trail.append(f"Puls-Chrome bleibt noch ~{dauer} s offen (Kind minimiert später; neuer Lauf löst ab)")
+        return dauer
+    except Exception as e:
+        if trail is not None:
+            trail.append(f"Offen-Bleiben nicht gestartet ({type(e).__name__}) — Fenster wird wie bisher minimiert")
         return None
 
 
 def _tsx_bleiben_starten(s, res, trail):
-    """Nach einer gesendeten Order (res.gesendet): Puls-Chrome NICHT sofort minimieren — Kind-Prozess übernimmt das später. Setzt
-    s._bleiben, damit zu() das Fenster stehen lässt. Nur Windows mit bekanntem Fenster; nie ein Fehler nach außen."""
+    """Nach einer gesendeten TopstepX-Order (res.gesendet): wie jeder Lauf über _puls_bleiben_starten — hier schon in raus(), damit
+    bleibt_s in der Antwort steht. Nie ein Fehler nach außen."""
+    if not res.get("gesendet") or getattr(s, "_bleiben", False):
+        return
+    d = _puls_bleiben_starten(s, trail)
+    if d:
+        res["bleibt_s"] = d
+
+
+def _lauf_lebt(pid):
+    """Lebt der Prozess pid noch (Windows: OpenProcess + GetExitCodeProcess = STILL_ACTIVE)? Im Zweifel False."""
     try:
-        hwnd = getattr(s, "_win_hwnd", None)
-        if not (_WIN_EINGABE and hwnd and res.get("gesendet")):
-            return
-        dauer = tsx_bleiben_dauer()
-        marke = tsx_bleiben_befehl(hwnd, time.time() + dauer, 0)
-        if not marke:
-            return
-        import subprocess
-        flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
-        subprocess.Popen([sys.executable, os.path.abspath(__file__), "tsxbleiben", json.dumps(marke)], creationflags=flags,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
-        s._bleiben = True
-        res["bleibt_s"] = int(dauer)
-        trail.append(f"bleibt noch ~{int(dauer)} s im TopstepX-Tab (Kind-Prozess minimiert später)")
-    except Exception as e:
-        trail.append(f"Bleiben im Tab nicht gestartet ({type(e).__name__}) — Fenster wird wie bisher minimiert")
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, int(pid))            # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong(0)
+            return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return False
+
+
+def _handlauf_pid():
+    try:
+        with open(os.path.join(_AUGEN_HIER, HANDLAUF_SPERRE), "r") as f:
+            return int((f.read() or "0").strip() or 0)
+    except (OSError, ValueError):
+        return 0
 
 
 def modus_tsxbleiben(cmd):
-    """Kind-Prozess nach einer gesendeten TopstepX-Order: lässt das Puls-Chrome bis 'bis' stehen (die Maus zuckt ab und zu, solange das
-    Fenster vorn ist), prüft alle 2–4 s die Marke (abgelöst?), die Hand-Lauf-Sperre (ein neuer Lauf minimiert selbst) und das Fenster,
-    und minimiert erst dann (SW_SHOWMINNOACTIVE wie zu()). Keine Ausgabe, kein Fehler nach außen, auf dem Mac sofort zu Ende."""
+    """Kind-Prozess nach einem Puls-Lauf: lässt das Puls-Chrome stehen (die Maus zuckt ab und zu, solange das Fenster vorn ist), prüft
+    alle 2–4 s die Marke (abgelöst? neue Restzeit?), ob der eigene Lauf noch lebt, eine fremde Hand-Lauf-Sperre (der minimiert selbst)
+    und das Fenster, und minimiert erst dann (SW_SHOWMINNOACTIVE wie zu()). Keine Ausgabe, kein Fehler nach außen, auf dem Mac sofort
+    zu Ende. Seit 28.10.2026: die Marke schreibt der Lauf, das Kind liest nur (lauf statt pid des Kindes)."""
     try:
-        hwnd, bis = int((cmd or {}).get("hwnd") or 0), float((cmd or {}).get("bis") or 0)
+        hwnd, lauf = int((cmd or {}).get("hwnd") or 0), int((cmd or {}).get("lauf") or 0)
     except (TypeError, ValueError):
         return
-    if not _WIN_EINGABE or hwnd <= 0:
+    if not _WIN_EINGABE or hwnd <= 0 or lauf <= 0:
         return
     import ctypes
-    p = os.path.join(_AUGEN_HIER, TSX_BLEIBEN_MARKE)
-    pid = os.getpid()
-    try:
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump({"hwnd": hwnd, "bis": bis, "pid": pid}, f)
-    except OSError:
-        return
-
-    def marke():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return None
 
     def fenster_da():
         try:
             return bool(ctypes.windll.user32.IsWindow(hwnd)) and not _win_minimiert(hwnd)
         except Exception:
             return False
+
+    def fremd_handlauf():
+        return _handlauf_aktiv() and _handlauf_pid() != lauf
     while True:
-        w = tsx_bleiben_weiter(marke(), pid, _handlauf_aktiv(), fenster_da(), time.time())
+        m = _bleiben_marke_lesen()
+        w = tsx_bleiben_weiter(m, lauf, fremd_handlauf(), fenster_da(), time.time(), _lauf_lebt(lauf))
         if w is None:
             return
         if w is False:
@@ -16230,15 +16462,19 @@ def modus_tsxbleiben(cmd):
                     _maus_zittern(random.uniform(0.6, 2.5))
             except Exception:
                 pass
-        time.sleep(min(max(0.5, bis - time.time()), random.uniform(2.0, 4.0)))
+        try:
+            rest = float((m or {}).get("bis") or 0) - time.time()
+        except (TypeError, ValueError):
+            rest = 2.0
+        time.sleep(min(max(0.5, rest), random.uniform(2.0, 4.0)))
     try:
         _win_zeigen(hwnd, 7)
     except Exception:
         pass
     try:
-        if (marke() or {}).get("pid") == pid:
-            os.remove(p)
-    except OSError:
+        if int((_bleiben_marke_lesen() or {}).get("lauf") or 0) == lauf:
+            os.remove(os.path.join(_AUGEN_HIER, TSX_BLEIBEN_MARKE))
+    except (OSError, TypeError, ValueError):
         pass
 
 
@@ -18561,6 +18797,22 @@ def _tsx_k3_probe(s, st, befehl, res, trail, raus, order_cmd=None):
                      + (" — Markt zu, Knopf nicht prüfbar" if nur_markt else "")), "probe", ok=True)
 
 
+def start_versatz(zufall=None):
+    """REIN RECHNEND (testbar, 28.10.2026, Finn: „alles aus Zufall"): Versatz (s), bevor ein Puls-Chrome-Lauf die erste Hand anlegt —
+    0–2,5 s, kurze häufiger (u^1,5). Vorher griff jeder Lauf in derselben Sekunde zu, in der das Panel ihn startete."""
+    rnd = zufall or random
+    return (rnd.random() ** 1.5) * 2.5
+
+
+def _start_versatz(trail):
+    d = start_versatz()
+    time.sleep(d)
+    try:
+        trail.append(f"Start-Versatz {d:.1f} s")
+    except Exception:
+        pass
+
+
 def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
     """order (K3a, 01.10.2026): geprüfter tsx_order_befehl ohne scharf — nach der Lesung füllt _tsx_k3_probe das Ticket (Contract, Menge)
     und endet vor dem Order-Knopf; Antwort wie tsx-konto (gesendet false, retry_ok), Wachhund TSX_K3_WACHHUND_S.
@@ -18581,6 +18833,7 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
         wachhund_s = max(10.0, min(wachhund_s, float(frist_s)))
     diag_art = "tsx_order_cdp" if k4 else "tsx_probe_cdp" if order else "tsx_lesen_cdp"
     trail = _StempelSpur()
+    _start_versatz(trail)                          # 28.10.2026: nicht in derselben Sekunde zugreifen, in der der Lauf startet
     trail.frist_s = wachhund_s
     trail.append(puls_bot_stand())
     trail.append(maus_hand_text())                 # 06.10.2026: welche Hand lief
@@ -18900,11 +19153,14 @@ def augen_modus_lauf():
         return "uia"
 
 
-def cdp_klick_bahn(von, nach, schritte=8, streu=2.0, rnd=None):
-    """REIN RECHNEND (testbar): Zwischenpunkte einer Mausbahn (leicht gekrümmt, gestreut, letzter Punkt exakt = Ziel)."""
+def cdp_klick_bahn(von, nach, schritte=None, streu=2.0, rnd=None):
+    """REIN RECHNEND (testbar): Zwischenpunkte einer Mausbahn (leicht gekrümmt, gestreut, letzter Punkt exakt = Ziel). Ohne schritte
+    (28.10.2026, vorher immer 8) gewürfelt: 5–11 plus 1 je 90–200 px Strecke, höchstens 30."""
     import random as _r
     rnd = rnd or _r
     (x0, y0), (x1, y1) = von, nach
+    if schritte is None:
+        schritte = min(30, rnd.randint(5, 11) + int(math.hypot(x1 - x0, y1 - y0) / rnd.uniform(90.0, 200.0)))
     n = max(3, int(schritte))
     bogen = rnd.uniform(-0.12, 0.12)
     out = []
@@ -19469,9 +19725,49 @@ def win_fokus_js(rect):
 
 
 def _win_tasten(text_sk):
-    """Echte Tastatur (pywinauto send_keys → SendInput) an das Vordergrund-Fenster."""
+    """Echte Tastatur (pywinauto send_keys → SendInput) an das Vordergrund-Fenster. Seit 28.10.2026 (Finn: „alles aus Zufall") je
+    Tasten-Ereignis eigene Haltezeit und eigener Abstand (tasten_takt) statt fest 40 ms ohne Haltezeit."""
+    _tasten_gestreut(text_sk)
+
+
+def _tasten_gestreut(text_sk, with_spaces=True, tempo=1.0):
+    """send_keys-Ausdruck (z. B. „^a{DELETE}", „{F9}", „1.25") Taste für Taste: Drücken, Haltezeit, Loslassen, gewürfelter Abstand
+    (tasten_takt). Zerlegt wird VOR dem ersten Tastendruck (pywinauto parse_keys, keine Wirkung) — klappt das nicht (andere pywinauto-
+    Version), geht der ganze Ausdruck wie bisher über send_keys, nur mit gewürfelter pause. Modifier (Strg/Shift) zerlegt pywinauto
+    selbst in getrenntes Drücken und Loslassen; die bleiben so und bekommen nur den Abstand."""
     from pywinauto import keyboard
-    keyboard.send_keys(text_sk, with_spaces=True, pause=0.04)
+    try:
+        folge = []
+        for a in keyboard.parse_keys(text_sk, with_spaces=with_spaces):
+            k = type(a)
+            if getattr(a, "down", True) and getattr(a, "up", True):
+                folge.append((k(a.key, down=True, up=False), k(a.key, down=False, up=True)))
+            else:
+                folge.append((a, None))
+    except Exception:
+        keyboard.send_keys(text_sk, with_spaces=with_spaces, pause=random.uniform(0.03, 0.08))
+        return
+    for (runter, hoch), (halte, abstand) in zip(folge, tasten_takt(len(folge))):
+        runter.run()
+        if hoch is not None:
+            time.sleep(halte * tempo)
+            hoch.run()
+        time.sleep(abstand * tempo)
+
+
+def _el_tasten(el, text_sk, set_foreground=True, with_spaces=False, pruefen=True, tempo=1.0):
+    """Ersatz für el.type_keys(text_sk, …) (28.10.2026): Prüfung und Fokus macht pywinauto wie bisher (type_keys mit leerem Text
+    sendet nichts; pruefen=False lässt das weg — Zeichen-Schleifen nach einem Fokus-Beweis), die Tasten selbst gehen gestreut über
+    _tasten_gestreut — vorher ~10 ms fester Abstand ohne Haltezeit. Ohne pywinauto-Tastatur (Mac, Attrappen im Selftest) wie früher
+    el.type_keys."""
+    try:
+        from pywinauto import keyboard as _kb   # noqa: F401 — nur die Verfügbarkeit prüfen
+    except ImportError:
+        el.type_keys(text_sk, set_foreground=set_foreground, with_spaces=with_spaces)
+        return
+    if pruefen:
+        el.type_keys("", set_foreground=set_foreground)
+    _tasten_gestreut(text_sk, with_spaces=with_spaces, tempo=tempo)
 
 
 
@@ -19724,6 +20020,7 @@ class _AugenSitzung:
             return None, "Puls-Chrome-Fenster nicht eindeutig gefunden"
         if getattr(self, "_win_hwnd", None) is None:
             self._win_hwnd = hwnd                       # am Ende wieder minimieren (zu)
+            _bleiben_abloesen(hwnd)                     # 28.10.2026: ein noch wartendes Offen-Bleiben-Kind hört auf, ohne zu minimieren
         if getattr(self, "_win_gemeldet", None) != hwnd:
             self._win_gemeldet = hwnd                   # Live 15:11 UTC: welches Fenster Puls nahm, stand nirgends
             self.trail.append(f"Fenster {hwnd} '{str(g.get('titel') or '')[:40]}'")
@@ -19963,7 +20260,8 @@ class _AugenSitzung:
 
         def _stups():
             try:
-                _cursor_set(int(punkt[0]) + random.choice((-2, 2)), int(punkt[1]) + random.choice((-1, 1)))
+                # 28.10.2026: Stups-Weite und -Richtung gewürfelt (vorher immer ±2/±1 px)
+                _cursor_set(int(punkt[0]) + random.choice((-1, 1)) * random.randint(1, 3), int(punkt[1]) + random.choice((-1, 1)) * random.randint(1, 2))
                 _warte(0.04, 0.03)
                 _cursor_set(int(punkt[0]), int(punkt[1]))
             except Exception:
@@ -20035,12 +20333,16 @@ class _AugenSitzung:
             # stehen bleiben, dann drücken — und das Ziel danach NEU beweisen, in der Pause kann sich die Seite bewegt haben.
             # Seit 06.10.2026 ist die Länge je Klick anders (tsx_hover_pause, Hand des Laufs).
             _warte(*tsx_hover_pause())
-            if pruef:
-                v2 = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
-                if not (isinstance(v2, dict) and v2.get("hover") and v2.get("passt")):
-                    self.trail.append(f"{name}: nach der Hover-Pause liegt am Zielpunkt nicht mehr das Ziel "
-                                      f"('{v2.get('was') if isinstance(v2, dict) else '-'}') — kein Druck")
-                    return False
+        else:
+            # TradingView (28.10.2026, Finn: „alles aus Zufall"): bisher Druck im selben Moment, in dem :hover bewiesen war — jetzt
+            # das kurze Zögern der Hand (klick_zoegern, im Schnitt ~0,1 s); mit Ziel-Prüfung danach derselbe Neu-Beweis wie TopstepX
+            _warte(*klick_zoegern())
+        if pruef:
+            v2 = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
+            if not (isinstance(v2, dict) and v2.get("hover") and v2.get("passt")):
+                self.trail.append(f"{name}: nach der Hover-Pause liegt am Zielpunkt nicht mehr das Ziel "
+                                  f"('{v2.get('was') if isinstance(v2, dict) else '-'}') — kein Druck")
+                return False
         if _win_vordergrund() != int(hwnd):
             self.trail.append(f"{name}: Puls-Chrome nicht mehr vorn — kein Druck")
             return False
@@ -20087,7 +20389,10 @@ class _AugenSitzung:
         return ((r.get("result") or {}).get("value")) if not r.get("exceptionDetails") else None
 
     def zu(self):
-        # 06.10.2026: nach einer gesendeten Order bleibt das Fenster stehen (_bleiben) — das Kind aus _tsx_bleiben_starten minimiert später
+        # 06.10.2026: nach einer gesendeten Order bleibt das Fenster stehen (_bleiben) — das Kind aus _tsx_bleiben_starten minimiert später.
+        # Seit 28.10.2026 jeder Lauf, der das Fenster sichtbar bedient hat (_puls_bleiben_starten) — nur wenn das nicht klappt, sofort zu.
+        if _WIN_EINGABE and getattr(self, "_win_hwnd", None) and not getattr(self, "_bleiben", False):
+            _puls_bleiben_starten(self, self.trail)
         if _WIN_EINGABE and getattr(self, "_win_hwnd", None) and not getattr(self, "_bleiben", False):
             try:
                 _win_zeigen(self._win_hwnd, 7)          # SW_SHOWMINNOACTIVE: wieder minimiert, nichts aktiviert — Reader frei
@@ -21046,6 +21351,7 @@ def modus_tvlesen_cdp(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto_aktiv": "",
            "konto_quelle": "cdp", "quelle": "cdp"}
     trail = _StempelSpur()
+    _start_versatz(trail)                          # 28.10.2026: nicht in derselben Sekunde zugreifen, in der der Lauf startet
     ende = bool(cmd.get("ende")) if isinstance(cmd, dict) else False
     sitz = [None]
 
@@ -22464,6 +22770,7 @@ def modus_tvkette_cdp(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "gesendet": False, "retry_ok": True,
            "konto_aktiv": "", "konto_quelle": "cdp", "quelle": "cdp"}
     trail = _StempelSpur()
+    _start_versatz(trail)                          # 28.10.2026: nicht in derselben Sekunde zugreifen, in der der Lauf startet
     sitz = [None]
 
     def raus(code, msg, schritt, **extra):
