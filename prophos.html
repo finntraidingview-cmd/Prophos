@@ -11786,7 +11786,7 @@
           <button class="subtab adm-tab" data-admtab="mail">Mail</button>
           <!-- Konten aus Mail (29.10.2026, Finn: „ein Reiter, der alle neuen Accounts zeigt, die per E-Mail dazugekommen sind … wenn das proof ist,
                müssen wir nie wieder Accounts in Prophos hinzufügen") — Test-Reiter, nur Hermann Technologies wie Mail, Daten GET /admin/konto-mails -->
-          <button class="subtab adm-tab" data-admtab="kontomail">Konten aus Mail</button>
+          <button class="subtab adm-tab" data-admtab="kontomail">Konten aus Mail &amp; TV</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
@@ -12554,8 +12554,8 @@
           <div class="panel" style="margin-bottom:14px">
             <div class="panel-head">
               <div>
-                <div class="panel-title">Konten aus Mail</div>
-                <div class="panel-sub" id="adm-km-sub">Konto-Mails der Prop-Firmen (Tradeify, Topstep, Apex, FundedNext, FundingPips, FTMO, FTMO Futures, The5ers) der letzten 90 Tage, Resets als Art „Reset" (neue External ID) · „Anlegen" füllt das Account-Modal vor, angelegt wird nichts von allein</div>
+                <div class="panel-title">Konten aus Mail &amp; TV</div>
+                <div class="panel-sub" id="adm-km-sub">Konto-Mails der Prop-Firmen (Tradeify, Topstep, Apex, FundedNext, FundingPips, FTMO, FTMO Futures, The5ers) der letzten 90 Tage, Resets als Art „Reset" (neue External ID) · zweite Quelle: Konto-Dropdown in TradingView (Reader, tv_konten) — Konten, die dort auftauchen und in Prophos fehlen, stehen als „neu (TV)" dabei · „Anlegen" füllt das Account-Modal vor, angelegt wird nichts von allein</div>
               </div>
               <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
                 <div id="adm-km-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
@@ -12564,6 +12564,7 @@
             </div>
             <!-- S3-Stresstest 29.10.2026: was der Reiter nie zeigen kann — Firmen ohne Konto-Mail, IDs ohne Mail-Anbindung (Gmail-Script) -->
             <div id="adm-km-hinweis" style="color:var(--sub);font-size:11.5px;padding:0 18px 10px">Keine Konto-Mails von: Lucid, Blue Guardian, Tradeify CFD, MFFU, Alpha, Fusion · The5ers und FTMO (CFD) nennen keine Kontonummer, nur Bestellung · ohne Mail-Anbindung: Finn + Pascal, Pascal</div>
+            <div id="adm-km-tv-weg" hidden style="color:var(--sub);font-size:11.5px;padding:0 18px 10px"></div>
             <div id="adm-km-msg" style="color:var(--sub);font-size:13px;padding:14px 18px">Lade Konto-Mails…</div>
             <div class="table-wrap" id="adm-km-wrap" hidden>
               <table class="t">
@@ -20348,7 +20349,7 @@
       $('kasse-date').value = new Date().toISOString().slice(0,10)
       // Admin-Tabs (Übersicht / Kasse)
       // Untertitel je Reiter (Finn 08.10.2026: „Kapitalverteilung über alle Personen" stand auch im Trade-Planer-Reiter) — nur Anzeige
-      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
+      const ADM_SUB = { overview: 'Kapitalverteilung über alle Personen', planer: 'Challenge-Planer · alle IDs', fplaner: 'Funded-Planer · alle IDs', wd: 'Winning-Day-Farmer · alle IDs', stat: 'Statistik · Kapitel · Acc-Käufe', fin: 'Payouts · alle IDs', konten: 'Alle Accounts · alle IDs', mail: 'Mail · alle IDs', kontomail: 'Konten aus Mail & TV · alle IDs', wallet: 'Meta Wallet', kompass: 'Kompass · Pascals Bot', rg: 'Rechnungen', kasse: 'Kasse', auftrag: 'Auftrag', kapitel: 'Kapitel', buys: 'Acc-Käufe' }
       const admSubSetzen = name => { const s = ADM_SUB[name] || ''; const v = document.querySelector('.view[data-view="kasse"] .view-sub'); if(v) v.textContent = s; const t = document.getElementById('topbarSub'); if(t && document.querySelector('.view[data-view="kasse"].active')) t.textContent = s }
       document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
         const name = t.dataset.admtab
@@ -48817,7 +48818,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1825'
+  const OS_TAB_BUILD = '2026-09-22.1826'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68499,7 +68500,31 @@
     const m = String(roh || '').toUpperCase().match(/^(PA-)?APEX-(\d+)-(\d+)$/)
     return m ? `${m[1] ? 'PAAPEX' : 'APEX'}${m[2]}${m[3].padStart(7, '0')}` : String(roh || '').replace(/-/g, '')
   }
-  const _admKm = { mails: [], konten: [], angelegt: new Set(), nr: 0 }
+  const _admKm = { mails: [], konten: [], tv: [], tvFehler: '', angelegt: new Set(), nr: 0 }
+  /* ── Zweite Quelle: TradingViews Konto-Dropdown (Finn 29.10.2026 03:10 freigegeben; S3 baut Reader + Tabelle tv_konten + GET /admin/tv-konten,
+   * Vertrag je Zeile {user_id, name, zuerst_at, zuletzt_at, pc_id, in_prophos}). Firma/Phase aus dem Präfix des Kontonamens, Größe aus den
+   * Ziffern nach den Buchstaben (TDFYSL**150**…); kein Präfix bekannt → Firma „?" und Phase challenge. Gibt es die Route noch nicht (404),
+   * bleibt die TV-Liste still leer. ── */
+  const KONTO_TV_PRAEFIX = [
+    [/^FTDFYSLX/i, 'Tradeify', 'funded'],            // Tradeify Sim-Funded (Select Flex)
+    [/^TDFYLVL/i, 'Tradeify', 'challenge'],           // Tradeify Level-Up (17 Konten vom 15.10.2026)
+    [/^TDFYSL/i, 'Tradeify', 'challenge'],            // Tradeify Select Evaluation
+    [/^PAAPEX/i, 'Apex Trader', 'funded'],            // Apex Performance Account (Duplikium-Form PAAPEX6850100000001)
+    [/^APEX/i, 'Apex Trader', 'challenge'],           // Apex Evaluation (APEX6416990000023)
+    [/^LFF/i, 'Lucid Trading', 'challenge'],          // Lucid
+    [/^FNF/i, 'FundedNext Futures', 'challenge'],     // FundedNext Futures (FNFTFA…)
+    [/^FTMO\d/i, 'FTMO Futures', 'challenge'],        // FTMO Futures (FTMO768773)
+    [/^EXPRESS-V2/i, 'Topstep', 'funded'],            // Topstep Express Funded
+    [/^\d{2,3}KTC/i, 'Topstep', 'challenge'],         // Topstep Trading Combine (150KTC-SKU-V2-…)
+    [/^MFFU|^MFF/i, 'MyFundedFutures', 'challenge'],  // MyFundedFutures
+  ]
+  function kontoTvErkennen(row){
+    const name = String(row.name || '').trim()
+    const pf = KONTO_TV_PRAEFIX.find(([re]) => re.test(name))
+    const groesse = pf && pf[1] === 'Topstep' ? ((name.match(/^(\d{2,3})K/i) || [])[1] || '') : kontoMailGroesseAusName(name)
+    return { firma: pf ? pf[1] : '?', ext: name, roh: name, typ: pf ? pf[2] : 'challenge', art: 'neu', vorher: '', hinweis: pf ? '' : 'Präfix unbekannt — Firma prüfen', groesse }
+  }
+  const kontoKey = ext => String(ext || '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
   function kontoMailErkennen(m){
     for(const mu of KONTO_MAIL_MUSTER){
       if(!mu.betreff.test(m.betreff || '')) continue
@@ -68535,6 +68560,11 @@
       const d = await admMailFetch(`/admin/konto-mails?tage=${KONTO_MAIL_TAGE}&betreff=${encodeURIComponent(suche)}`)
       if(nr !== _admKm.nr) return
       _admKm.mails = d.mails || []; _admKm.konten = d.konten || []
+      // TV-Dropdown (zweite Quelle): 404 = Route noch nicht da → still leer; andere Fehler als Hinweis unter der Tabelle
+      _admKm.tv = []; _admKm.tvFehler = ''
+      try{ const t = await admMailFetch('/admin/tv-konten'); _admKm.tv = Array.isArray(t) ? t : (t.konten || t.rows || t.tv_konten || []) }
+      catch(e2){ if(!/404|nicht gefunden|not found/i.test(String((e2 && e2.message) || e2))) _admKm.tvFehler = String((e2 && e2.message) || e2) }
+      if(nr !== _admKm.nr) return
       admKontoMailRender()
     }catch(e){
       if(nr !== _admKm.nr) return
@@ -68549,19 +68579,49 @@
     for(const m of _admKm.mails){
       const e = kontoMailErkennen(m)
       if(!e){ unerkannt++; continue }
-      zeilen.push(Object.assign({ m }, e, kontoMailStand(e)))
+      zeilen.push(Object.assign({ m, quellen: ['Mail'] }, e, kontoMailStand(e)))
     }
-    const n = { neu: 0, drin: 0, angelegt: 0, ohne: 0, reset: 0 }
-    for(const z of zeilen){ if(z.art === 'reset') n.reset++; if(z.stand === 'neu') n.neu++; else if(z.stand === 'angelegt') n.angelegt++; else if(z.stand === 'ohne Nummer') n.ohne++; else n.drin++ }
+    // TV-Dropdown dazu: gleicher Kontoname wie eine Mail-Zeile → zusammenführen (beide Chips), sonst eigene Zeile „neu (TV)";
+    // Konten, die in Prophos stehen, aber seit > 3 Tagen in keiner TV-Liste mehr auftauchen → Hinweiszeile (nur Anzeige)
+    const personVon = uid => { const p = (window._admData?.people || []).find(x => String(x.user_id) === String(uid)); if(p) return p.name
+      const m = _admKm.mails.find(x => String(x.user_id) === String(uid)); return m ? m.person : String(uid || '').slice(0, 8) }
+    const tvWeg = []
+    const vor3Tagen = Date.now() - 3 * 86400000
+    for(const row of (_admKm.tv || [])){
+      const e = kontoTvErkennen(row)
+      if(!e.ext) continue
+      const key = kontoKey(e.ext)
+      const stand = kontoMailStand(e)
+      if(row.in_prophos === true || stand.konto){
+        const zuletzt = Date.parse(row.zuletzt_at || '') || 0
+        if(zuletzt && zuletzt < vor3Tagen && !(stand.konto && stand.konto.archived)) tvWeg.push({ name: e.ext, tage: Math.floor((Date.now() - zuletzt) / 86400000), person: personVon(row.user_id) })
+        continue
+      }
+      const dup = zeilen.find(z => z.ext && kontoKey(z.ext) === key)
+      if(dup){ if(!dup.quellen.includes('TV')) dup.quellen.push('TV'); dup.tv = row; continue }
+      zeilen.push(Object.assign({ m: { user_id: row.user_id, person: personVon(row.user_id), datum: row.zuletzt_at || row.zuerst_at || '',
+        betreff: `TradingView-Dropdown${row.pc_id ? ' · ' + row.pc_id : ''}${row.zuerst_at ? ' · zuerst ' + new Date(row.zuerst_at).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'Europe/Berlin' }) : ''}` },
+        quellen: ['TV'], tv: row }, e, stand))
+    }
+    zeilen.sort((a, b) => (Date.parse(b.m.datum || '') || 0) - (Date.parse(a.m.datum || '') || 0))
+    const weg = document.getElementById('adm-km-tv-weg')
+    if(weg){
+      const t = tvWeg.sort((a, b) => b.tage - a.tage)
+      weg.hidden = !t.length && !_admKm.tvFehler
+      weg.textContent = (t.length ? `Im TV nicht mehr da (seit > 3 Tagen in keiner Dropdown-Liste): ${t.slice(0, 8).map(x => `${x.name} (${String(x.person || '').split(/\s+/)[0]}, ${x.tage} T)`).join(' · ')}${t.length > 8 ? ` · +${t.length - 8} weitere` : ''}` : '')
+        + (_admKm.tvFehler ? `${t.length ? ' · ' : ''}TV-Liste nicht geladen: ${_admKm.tvFehler}` : '')
+    }
+    const n = { neu: 0, drin: 0, angelegt: 0, ohne: 0, reset: 0, tv: 0 }
+    for(const z of zeilen){ if(z.art === 'reset') n.reset++; if(z.quellen.includes('TV')) n.tv++; if(z.stand === 'neu') n.neu++; else if(z.stand === 'angelegt') n.angelegt++; else if(z.stand === 'ohne Nummer') n.ohne++; else n.drin++ }
     sums.innerHTML = ''
-    for(const [wert, lbl, farbe] of [[zeilen.length, 'Konto-Mails', 'var(--ink)'], [n.neu, 'neu', n.neu ? 'var(--good)' : 'var(--sub)'], [n.drin, 'schon drin', 'var(--sub)'], [n.angelegt, 'angelegt', 'var(--sub)'], [n.reset, 'davon Reset', 'var(--sub)']]){
+    for(const [wert, lbl, farbe] of [[zeilen.length, 'Konten', 'var(--ink)'], [n.neu, 'neu', n.neu ? 'var(--good)' : 'var(--sub)'], [n.drin, 'schon drin', 'var(--sub)'], [n.angelegt, 'angelegt', 'var(--sub)'], [n.reset, 'davon Reset', 'var(--sub)'], [n.tv, 'aus TV', n.tv ? 'var(--violet)' : 'var(--sub)']]){
       const d = document.createElement('div')
       d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
       d.children[0].textContent = String(wert); d.children[0].style.color = farbe; d.children[1].textContent = lbl
       sums.appendChild(d)
     }
     tb.innerHTML = ''
-    if(!zeilen.length){ msg.hidden = false; msg.textContent = `Keine Konto-Mail in den letzten ${KONTO_MAIL_TAGE} Tagen erkannt (${_admKm.mails.length} Mails geladen, ${unerkannt} ohne Muster).`; if(wrap) wrap.hidden = true; return }
+    if(!zeilen.length){ msg.hidden = false; msg.textContent = `Keine Konto-Mail in den letzten ${KONTO_MAIL_TAGE} Tagen erkannt (${_admKm.mails.length} Mails geladen, ${unerkannt} ohne Muster) und nichts Neues im TV-Dropdown (${(_admKm.tv || []).length} TV-Zeilen).`; if(wrap) wrap.hidden = true; return }
     msg.hidden = true; if(wrap) wrap.hidden = false
     for(const z of zeilen){
       const tr = document.createElement('tr')
@@ -68586,12 +68646,18 @@
       tr.querySelector('.km-id').textContent = String(z.m.person || '—').split(/\s+/)[0]   // Vorname wie admShortName (das lebt im Admin-Block, hier nicht erreichbar)
       const bt = tr.querySelector('.km-betreff'); bt.textContent = z.m.betreff || ''; bt.title = z.m.betreff || ''
       const st = tr.querySelector('.km-stand')
+      if(z.quellen.includes('TV')){   // Quelle TradingView-Dropdown; bei Dubletten Mail+TV beide Chips
+        if(z.quellen.includes('Mail')){ const q = document.createElement('span'); q.className = 'chip chip-neutral'; q.style.marginRight = '4px'; q.textContent = 'Mail'; st.appendChild(q) }
+        const q = document.createElement('span'); q.className = 'chip chip-neutral'; q.style.cssText = 'margin-right:4px;color:var(--violet)'; q.textContent = 'TV'
+        q.title = z.tv ? `im TV-Dropdown${z.tv.pc_id ? ' auf ' + z.tv.pc_id : ''}${z.tv.zuletzt_at ? ', zuletzt ' + new Date(z.tv.zuletzt_at).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : ''}` : ''
+        st.appendChild(q)
+      }
       if(z.art === 'reset'){   // Art „Reset" (Finn 29.10.2026): neue External ID nach Konto-Reset — Abgleich gegen accounts wie sonst
         const r = document.createElement('span'); r.className = 'chip chip-neutral'; r.style.cssText = 'margin-right:4px;color:var(--violet)'; r.textContent = 'Reset'; st.appendChild(r)
       }
       const chip = document.createElement('span')
       chip.className = 'chip ' + (z.stand === 'neu' ? 'chip-good' : z.stand === 'angelegt' ? 'chip-neutral' : z.stand === 'ohne Nummer' ? 'chip-warn' : 'chip-neutral')
-      chip.textContent = z.stand
+      chip.textContent = z.stand === 'neu' && !z.quellen.includes('Mail') ? 'neu (TV)' : z.stand
       if(z.konto) chip.title = `${z.konto.name || ''}${z.konto.external_id ? ' · #' + z.konto.external_id : ''}`
       st.appendChild(chip)
       const ok = tr.querySelector('.km-ok')
@@ -68634,7 +68700,8 @@
     }
   }
   window._admKontoMailOeffnen = () => admKontoMailLaden()
-  window._admKontoMailStub = (mails, konten) => { _admKm.mails = mails || []; _admKm.konten = konten || []; admKontoMailRender() }   // Boot-Check ohne Login
+  window._admKontoMailStub = (mails, konten, tv) => { _admKm.mails = mails || []; _admKm.konten = konten || []; _admKm.tv = tv || []; _admKm.tvFehler = ''; admKontoMailRender() }   // Boot-Check ohne Login
+  window._kontoTvErkennen = r => kontoTvErkennen(r)
   window._kontoMailErkennen = m => kontoMailErkennen(m)
   document.getElementById('adm-km-refresh')?.addEventListener('click', () => admKontoMailLaden())
   function admMailWahl(uid){
