@@ -2033,6 +2033,7 @@ def main():
     results.append(test_puls_fehler_1611())
     results.append(test_puls_fehler_1682())
     results.append(test_puls_fehler_1787())
+    results.append(test_puls_fehler_1800())
     results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
@@ -5474,9 +5475,9 @@ def test_puls_fehler_1787():
     chk(q_run.count("_terminal_warm_abwarten(path, trail)") == 1
         and q_run.index('trail.append("Login/Lesen ok")') < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w = _finde_terminal(expected)"),
         "run(): Warm-Warten genau einmal, nach Login/Lesen ok und vor dem Terminal-Fenster (Guard, F9 unverändert dahinter)")
-    chk('if any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in trail):' in q_run
+    chk("if login_warm_pruefen(trail, trail.sekunden()):" in q_run
         and "Login/Lesen: {runden} Runden" in _i.getsource(ob._login_dann_lesen),
-        "run(): Warm-Warten nur nach > 1 Login-Runde (Runden-Stempel aus _login_dann_lesen) — der normale Lauf zahlt nichts")
+        "run(): Warm-Warten nur nach langsamem Login/Lesen oder > 1 Login-Runde (login_warm_pruefen, seit .1800) — der normale Lauf zahlt nichts")
     sp = ob._StempelSpur()
     sp.append("Login/Lesen: 13 Runden, zuletzt 'IPC timeout'")
     chk(any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in sp) and not any(" Runden" in str(z) for z in [sp[0].replace("Runden", "ok")]),
@@ -5484,6 +5485,46 @@ def test_puls_fehler_1787():
     chk('if str(expected) not in (w.window_text() or ""):' in q_run and "F9 zweiter Anlauf (Terminal neu betreten)" in q_run,
         "run(): Fenster-Guard und zweiter F9-Anlauf stehen weiter")
     print(("✓" if ok else "✗") + " Puls-Fehler .1787: F9 kein Fenster vorn → frisch gestartetes Terminal (Alter der terminal64.exe) erst bis 45 s warm werden lassen")
+    return ok
+
+
+def test_puls_fehler_1800():
+    """Routine „Puls-Fehler" 28.10.2026 20:35 Dubai (.1800, dasselbe Muster wie .1787 — „v2order: f9-dialog nicht gefunden", Spur „F9 ohne
+    Dialog: kein Fenster vorn": nach .1787 weitere 2 Fälle, in keiner der 15 Spuren der Woche ein Runden-Stempel — Login/Lesen 130 s in
+    EINER Runde). Auslöser des Warm-Wartens ist jetzt die Login-Dauer (login_warm_pruefen) oder der Runden-Stempel; nicht lesbares
+    Terminal-Alter steht in der Spur. Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1800: " + text)
+            ok = False
+
+    P = ob.login_warm_pruefen
+    chk(ob.LOGIN_LANGSAM_S == 30.0, "LOGIN_LANGSAM_S = 30 s (normaler Login/Lesen 1–10 s, die F9-Fälle 127–144 s)")
+    chk(P([], 129.8) is True and P(["0.0s·Hand: Tempo 1.0", "129.8s·Login/Lesen ok"], 129.8) is True,
+        "login_warm_pruefen: Login/Lesen 130 s ohne Runden-Stempel → Alter lesen (die Spur der 15 Fälle)")
+    chk(P(["0.0s·Hand: Tempo 1.0", "2.1s·Login/Lesen ok"], 2.1) is False and P([], 29.9) is False and P([], 30.0) is True,
+        "login_warm_pruefen: normaler Lauf (< 30 s, kein Stempel) → nichts; genau 30 s zählt")
+    sp = ob._StempelSpur()
+    sp.append("Login/Lesen: 13 Runden, zuletzt 'IPC timeout'")
+    chk(P(sp, 3.0) is True and P(sp, None) is True and P(None, None) is False and P([], "x") is False,
+        "login_warm_pruefen: Runden-Stempel zählt weiter (auch ohne Dauer); kaputte Dauer ohne Stempel → nichts, wirft nie")
+    q_run = _i.getsource(ob.run)
+    chk('if any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in trail):' not in q_run
+        and q_run.count("login_warm_pruefen(trail, trail.sekunden())") == 1
+        and q_run.index('trail.append("Login/Lesen ok")') < q_run.index("login_warm_pruefen(trail, trail.sekunden())")
+        < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w = _finde_terminal(expected)"),
+        "run(): alter Runden-Auslöser weg, neuer genau einmal nach Login/Lesen ok, vor dem Terminal-Fenster")
+    q = _i.getsource(ob._terminal_warm_abwarten) + _i.getsource(P)
+    chk("sleep(" not in q and "Popen" not in q and "TerminateProcess" not in q and "click" not in q.lower() and "type_keys" not in q,
+        "Warm-Warten + Auslöser: nur lesen + _warte, kein Klick/Start/Kill/fester sleep")
+    chk("Terminal-Alter nicht lesbar" in _i.getsource(ob._terminal_warm_abwarten)
+        and ob._terminal_warm_abwarten("C:\\MT5-X\\terminal64.exe", []) == 0.0,
+        "_terminal_warm_abwarten: nicht lesbares Alter steht in der Spur; ohne Windows 0 s, wirft nicht")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1800: Warm-Warten greift jetzt bei langsamem Login/Lesen (≥ 30 s), nicht nur beim Runden-Stempel")
     return ok
 
 

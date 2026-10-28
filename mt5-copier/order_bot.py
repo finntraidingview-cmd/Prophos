@@ -11999,10 +11999,12 @@ def run(cfg_path, cmd):
     contract_size = lese["contract_size"]
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
     trail.append("Login/Lesen ok")
-    # Frisch (neu) gestartetes Terminal erst warm werden lassen (28.10.2026, s. TERMINAL_WARM_S) — nur, wenn Login/Lesen mehr als eine
-    # Runde brauchte (Runden-Stempel in der Spur = das Terminal war beim Lauf-Start nicht erreichbar, kam also währenddessen hoch);
-    # der normale Lauf (eine Runde, Terminal läuft längst) zahlt die Prozess-Lesung nicht.
-    if any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in trail):
+    # Frisch (neu) gestartetes Terminal erst warm werden lassen (28.10.2026, s. TERMINAL_WARM_S). Auslöser seit 28.10.2026 20:35 Dubai
+    # (Routine „Puls-Fehler", s. login_warm_pruefen): die DAUER von Login/Lesen (≥ LOGIN_LANGSAM_S) oder der Runden-Stempel — in keiner
+    # der 15 „kein Fenster vorn"-Spuren der Woche stand ein Runden-Stempel, die 130 s vergingen in EINER Runde (mt5.initialize hängt
+    # am gehängten Terminal, erst der zweite Andock-Versuch trifft das frisch neu gestartete). Der normale Lauf (Login/Lesen in 1–10 s)
+    # zahlt die Prozess-Lesung weiterhin nicht.
+    if login_warm_pruefen(trail, trail.sekunden()):
         _terminal_warm_abwarten(path, trail)
 
     # Start-Versatz (28.08.2026, Finns Sorge): starten mehrere Flotten-Instanzen
@@ -26377,7 +26379,24 @@ def pids_der_installation(prozesse, pfad):
 # länger. Gelesen wird nur nach mehr als einer Login-Runde (Runden-Stempel von _login_dann_lesen: das Terminal war beim Lauf-Start nicht
 # erreichbar), der normale Lauf zahlt die Prozess-Lesung nicht. Kein Riegel verändert: Fenster-Guard, F9-Suche, zweiter Anlauf, Abbruch
 # bleiben; gewartet wird NUR auf ein frisches Terminal.
+# AUSLÖSER = LOGIN-DAUER (Routine „Puls-Fehler" 28.10.2026 20:35 Dubai, dasselbe Muster: nach .1787 weitere 2 Fälle, 06:04 UTC noch
+# ohne Warm-Zeile): der Runden-Stempel kam in KEINER der 15 „kein Fenster vorn"-Spuren der Woche vor — _login_dann_lesen zählt Runden
+# nur über _api_lesen-Fehler, die 130 s vergingen aber in EINER Runde (mt5.initialize hängt ~120 s am gehängten Terminal, der zweite
+# Andock-Versuch in _api_lesen trifft das frisch neu gestartete). Jetzt entscheidet login_warm_pruefen: Login/Lesen ≥ LOGIN_LANGSAM_S
+# ODER Runden-Stempel → Alter lesen; der normale Lauf (1–10 s) zahlt weiterhin nichts. Nicht lesbares Alter steht jetzt in der Spur.
 TERMINAL_WARM_S = 45.0
+LOGIN_LANGSAM_S = 30.0
+
+
+def login_warm_pruefen(trail, dauer_s, langsam_s=LOGIN_LANGSAM_S):
+    """REIN RECHNEND (testbar): Soll run() nach „Login/Lesen ok" das Terminal-Alter lesen (s. Block-Kopf)? True, wenn Login/Lesen
+    dauer_s ≥ langsam_s brauchte ODER die Spur den Runden-Stempel aus _login_dann_lesen trägt; sonst False (normaler Lauf)."""
+    try:
+        if dauer_s is not None and float(dauer_s) >= float(langsam_s):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in (trail or ()))
 
 
 def terminal_alter_s(prozesse, alter, pfad):
@@ -26410,6 +26429,8 @@ def _terminal_warm_abwarten(path, trail):
         return 0.0
     rest = terminal_warm_rest_s(alter)
     if rest <= 0:
+        if trail is not None and prozesse and alter is None:   # 28.10.2026 20:35: in der Spur sagen, warum nicht gewartet wird
+            trail.append("Terminal-Alter nicht lesbar (Pfad/Prozess dieser Installation) — kein Warten")
         return 0.0
     if trail is not None:
         trail.append(f"Terminal erst {int(alter)} s alt (frisch gestartet) — warte ~{int(rest)} s, bis es warm ist")
