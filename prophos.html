@@ -21411,6 +21411,7 @@
     const bwGrund = (seitMs) => {
       const t = (f) => { try{ return f() }catch(_){ return true } }
       if(t(() => _tpOrbitLaeuft)) return 'Puls läuft'
+      if(t(() => !!window._tvkLaeuft)) return 'TV-Konten lesen'   // 29.10.2026: nie mitten im Lesen der Konto-Liste neu laden
       if(t(() => !!_rsAktiv)) return 'Fern-Lauf aktiv'
       if(t(() => !!_osBusy || !!_osActive)) return 'Signal in Arbeit'
       if(t(() => !!(typeof polarLaeuft === 'function' && polarLaeuft()))) return 'Polar läuft'   // POLAR-VORRANG (20.10.2026): nie mitten im Polar-Lauf neu laden
@@ -25720,6 +25721,83 @@
     }catch(e){ console.warn('[heim-wache]', (e && e.message) || e) }
   }
   ;(function hwLoop(){ setTimeout(async () => { await heimWacheTick(); hwLoop() }, hwZufall(HW_TAKT_MIN_MS, HW_TAKT_MAX_MS)) })()
+  /* ══ TV-KONTEN LESEN (29.10.2026, Finn 03:25: „Jedes Mal, wenn eine Konto-Mail reinkommt, wird im Zufallsintervall 5 Minuten bis 3 Stunden
+   * einmal ganz kurz in den jeweiligen Trading-Account über TradingView eingeloggt und alle neuen externen IDs gelesen"; 04:10: „vorher die
+   * Seite einmal neu laden — neue Accounts erscheinen im Dropdown erst danach"). Railway legt die Aufträge an (Kaufquittung/Konto-Mail →
+   * fällig in 5 min–3 h; ohne Mail 1× in 20–28 h je Firma); dieser PC-Tab holt den ältesten fälligen seiner ID (GET /pc/tv-konten-auftrag,
+   * atomar offen → laeuft) und lässt Puls die Konto-Liste lesen (Panel /api/tv-konten-liste → order_bot tvkontenliste: Seite neu laden,
+   * nur bei bewiesen anderem Login der Login-Weg über ein bekanntes aktives Konto der ID (das dabei gewählt wird, wie bei jeder Balance-
+   * Lesung), Umschalter → Liste → Esc, „Liste zu" bewiesen; im Lese-Schritt nie ein Listeneintrag, nie Order). Das Ergebnis geht an
+   * POST /pc/tv-konten-auftrag/erledigt (→ tv_konten; ein Fehler wird höchstens einmal nach 30–60 min wiederholt). Danach Heimweg wie nach
+   * jeder Puls-Aktion. NUR wenn nichts läuft (tvkFrei): kein offener Plan dieser ID, kein bestätigter Start in 45 min, Puls/Polar/Rundgang/
+   * Heimweg/Endlesung frei — ein Neuladen der TradingView-Seite mitten in einem Trade wäre der schlimmste Fall. Während des Laufs gilt
+   * Puls als unterwegs (hedgePulsUnterwegs: Reader-Ende blind, Konto-Beleg verfällt) und der Neulade-Wächter wartet (bwGrund). ══ */
+  const TVK_TAKT_MIN_MS = 2 * 60000, TVK_TAKT_MAX_MS = 4 * 60000, TVK_START_ABSTAND_MS = 45 * 60000
+  window._tvkLaeuft = false
+  let _tvkLetzter = null
+  function tvkFrei(){
+    try{
+      if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return 'kein PC-Tab'
+      // nur ein PC mit laufendem Puls-Chrome-Reader (Tab 'puls-…', Stand ≤ 60 s) — ein eingeloggter localhost-Tab ohne Puls (Mac) holt nie Aufträge
+      const ep = window._epLokal, st = ep && ep.stand
+      if(!(st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000)) return 'kein Puls-Chrome-Reader auf diesem PC'
+      const jetzt = Date.now(), plaene = tradePlans || []
+      if(plaene.some(p => p && p.status === 'open')) return 'offener Plan'
+      // auch unbestätigte Auto-Pläne (Railway bestätigt sie selbst) und Starts, die geclaimt, aber noch nicht gelaufen sind (Nachholen)
+      const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
+        && (Date.parse(p.startUm) - jetzt > -10 * 60000 || (p.startUmGestartetAt && !p.startedAt)))
+      if(bald) return `Start in ${Math.max(0, Math.round((Date.parse(bald.startUm) - jetzt) / 60000))} min`
+      const u = hedgePulsUnterwegs(); if(u) return u
+      if(typeof polarLaeuft === 'function' && polarLaeuft()) return 'Polar läuft'
+      if(typeof polarStartSperre === 'function' && polarStartSperre()) return 'Polar bereitet vor'   // wie die Starts (Prüfer 29.10.2026)
+      if(_osBusy || _osActive || _rsAktiv) return 'Signal/Fern-Lauf aktiv'
+      if(_hwWiederTimer || (_hwEndHalt && _hwEndHalt.bis > jetzt)) return 'Heimweg/Endlesung'
+      if(bigTradePlan()) return 'Big Trade/Winning Day läuft'
+      return ''
+    }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
+  }
+  async function tvkTick(){
+    if(window._tvkLaeuft || tvkFrei()) return
+    let tok = null
+    try{ const { data: { session } } = await supabase.auth.getSession(); tok = session && session.access_token }catch(_){}
+    if(!tok) return
+    let a = null
+    try{
+      const pcq = encodeURIComponent((typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '')   // Probelauf-Weiche TV_KONTEN_PCS (Railway)
+      const r = await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag?pc=${pcq}`, { headers: { 'sb-token': tok } })
+      if(!r.ok) return   // Route/Tabelle noch nicht da → still
+      a = ((await r.json()) || {}).auftrag
+    }catch(_){ return }
+    if(!a || !a.id) return
+    const melden = async (ok, konten, msg, code) => {
+      try{ await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag/erledigt`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: a.id, ok: !!ok, konten: konten || [], msg: String(msg || '').slice(0, 300), code: code || '', pc_id: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '' }) }) }catch(_){}
+    }
+    // zweiter Blick NACH dem Holen (zwischen Tick und Antwort kann ein Start losgelaufen sein) — dann zurückgeben (Fehler zählt als Versuch? nein: code 'belegt')
+    const nachher = tvkFrei()
+    if(nachher){ await melden(false, [], `belegt: ${nachher}`, 'belegt'); return }
+    const acc = (accounts || []).find(x => String(x.externalId || '').trim() === String(a.ext || '').trim())
+    const kx = acc ? tvV2KontoKontext({ masterAccountId: acc.id, masterFirm: acc.firm }) : { firma: a.firma, tv_username: '', geschwister: [] }
+    window._tvkLaeuft = true
+    const t0 = Date.now()
+    let r = null
+    try{
+      r = await window.mtcApi('tv-konten-liste', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ konto: a.ext || '', firma: kx.firma || a.firma, tv_username: kx.tv_username || '', geschwister: kx.geschwister || [] }) })
+    }catch(e){ r = { ok: false, code: 'verbindung', msg: String((e && e.message) || e) } }
+    finally{ window._tvkLaeuft = false }
+    // Panel/Backend nicht erreichbar oder Puls gerade belegt (409) = nichts versucht → zurückgeben, zählt nicht als Fehlversuch
+    if(r && !r.ok && (r._nichtGesendet || r.copier_offline || r.code === 'puls_beschaeftigt' || r.code === 'handlauf')) r = Object.assign({}, r, { code: 'belegt' })
+    _tvkLetzter = { at: new Date().toISOString(), firma: a.firma, art: a.art, ok: !!(r && r.ok), n: ((r && r.konten) || []).length, ms: Date.now() - t0,
+      code: (r && r.code) || '', msg: String((r && r.msg) || '').slice(0, 200) }
+    console.info(`[tv-konten] ${a.firma} (${a.art}): ${r && r.ok ? `${(r.konten || []).length} Name(n)` : `FEHLER ${(r && r.code) || '?'}`} in ${((Date.now() - t0) / 1000).toFixed(0)} s`, (r && r.msg) || '')
+    await melden(!!(r && r.ok), (r && r.konten) || [], (r && r.msg) || '', (r && r.code) || '')
+    // Heimweg wie nach jeder Puls-Aktion (gibt es keinen Big Trade/WD, kehrt bigTradeHeimPlanen sofort zurück)
+    try{ bigTradeHeimPlanen(a.ext || '', 'TV-Konten lesen', true, 'tv') }catch(_){}
+  }
+  ;(function tvkLoop(){ setTimeout(async () => { try{ await tvkTick() }catch(e){ console.warn('[tv-konten]', (e && e.message) || e) } tvkLoop() },
+    TVK_TAKT_MIN_MS + Math.random() * (TVK_TAKT_MAX_MS - TVK_TAKT_MIN_MS)) })()
+  window._tvKonten = { frei: tvkFrei, tick: tvkTick, letzter: () => _tvkLetzter }   // Test-Haken
   window._heimWache = { tick: heimWacheTick, wiederholen: heimWiederholen, stand: () => ({ fremdSeit: _hwFremdSeit, naechster: _hwNaechsterHeimweg, wiederN: _hwWiederN, wiederGeplant: !!_hwWiederTimer, fehlN: _hwFehlN, pulsWegAt: _hwPulsWegAt, aus: _hwAus, okOffen: _hwOkOffen, okFremdN: _hwOkFremdN,
     unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()),
     endHalt: Object.assign({}, _hwEndHalt), blindSeit: _hwBlindSeit, blindErledigt: _hwBlindErledigt }), steht: pulsStehtImKonto, heimFrei: pulsHeimFrei }   // Test-Haken (Stub)
@@ -29444,6 +29522,7 @@
   function hedgePulsUnterwegs(){
     try{
       if(_bthLaeuft || _bthTimer || _bthTsxTimer) return 'Rück-Login ins Big-Trade-Konto'
+      if(window._tvkLaeuft) return 'TV-Konten lesen'   // 29.10.2026: Puls lädt die TV-Seite neu und öffnet die Konto-Liste
       if(_tpOrbitLaeuft) return 'Puls-Order'
       if(tvV2Poll && tvV2Poll.busy) return 'Rundgang/Lesung'
       if(_osActive) return 'Signal-Lauf'
@@ -49489,7 +49568,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1840'
+  const OS_TAB_BUILD = '2026-09-22.1841'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72869,7 +72948,7 @@
     // master-order (07.10.2026, Fehler-Muster „Zeitlimit 20 s": 16× auf 9 PCs, alle UNKLAR): der Order-Bot darf laut Panel bis 300 s
     // brauchen (F9-Dialog, SL/TP-Zeilen-Scan), der Aufruf stand aber nicht in dieser Liste → nach 20 s abgebrochen, während der Bot
     // weiterklickte; Folge „unklar" und beim zweiten Versuch „läuft gerade schon eine Order". Jetzt 320 s wie master-close.
-    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|master-order|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar)/.test(String(path))   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
+    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|master-order|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar|tv-konten-liste)/.test(String(path))   // tv-konten-liste (29.10.2026): bis 260 s   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
     const ctrl = new AbortController()
     const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
     const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)

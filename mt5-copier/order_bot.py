@@ -21312,6 +21312,154 @@ def _cdp_today_aus_reiter(s, opts, trail):
     return summary, today, lab, txt
 
 
+# ══ TV-KONTEN LESEN (29.10.2026, Finn 03:25/04:10: „Jedes Mal, wenn eine Konto-Mail reinkommt, wird im Zufallsintervall 5 Minuten bis 3 Stunden
+# einmal ganz kurz in den jeweiligen Trading-Account über TradingView eingeloggt und alle neuen externen IDs gelesen" — „Wenn er schon im
+# richtigen Konto ist, muss die Seite einmal neu laden — neue Accounts erscheinen im Dropdown erst nach einem Neuladen"). Ablauf, nur Lesen:
+#   1) TradingView-Seite im Puls-Chrome neu laden (_cdp_seite_neu_laden: warten bis sie steht, augen.js neu, Kachel weg, aktives Konto lesbar);
+#   2) steht BEWIESEN ein Login einer anderen Firma/eines anderen Apex-Users im Umschalter (tv_login_urteil 'anderer') → der bekannte Login-Weg
+#      (_cdp_konto_mit_login) mit einem bekannten, aktiven Konto dieser ID × Firma (cmd konto): DABEI WIRD DIESES KONTO GEWÄHLT, genau wie bei
+#      jeder Balance-Lesung — nie ein unbekanntes/neues. Steht der richtige Login schon ('passt'), kein Konto-Klick; 'unklar' → nichts tun;
+#   3) Konto-Umschalter drücken → Liste lesen (unvollständig → abschnittsweise scrollen per JS, _cdp_liste_scrollen) → Esc → „Liste zu"
+#      bewiesen (_cdp_liste_zu); Esc auch in jedem Fehlerpfad nach dem Umschalter-Klick. In DIESEM Schritt nie ein Listeneintrag, nie das
+#      Order-Ticket. Pausen über _warte (Jitter-Regel).
+# Den Heimweg macht der PC-Tab danach wie nach jeder Puls-Aktion (bigTradeHeimPlanen). → {ok, konten:[voller Name …], liste_n, login_gewechselt}
+TVK_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_-]{4,38}[0-9]{4}$")
+
+
+def tv_konten_aus_texten(texte):
+    """REIN RECHNEND (testbar): Listen-Texte → volle Kontonamen (erstes Wort = ganze Kennung, groß; gekürzt „…", angeklebte Balance,
+    „Paper Trading" fallen raus; Dubletten einmal; Reihenfolge der Liste)."""
+    aus = []
+    for t in texte or []:
+        w = (str(t or "").replace(" ", " ").strip().split(" ") or [""])[0].strip().upper()
+        if not w or "…" in w or "..." in w or not TVK_NAME_RE.fullmatch(w) or w in aus:
+            continue
+        aus.append(w)
+    return aus
+
+
+def tv_login_urteil(aktiv, ext):
+    """REIN RECHNEND (testbar): steht im Umschalter schon der Tradovate-Login, zu dem ext gehört? Nutzt die bestehende Login-Familie
+    (cdp_login_familie / cdp_konto_familie: Apex mit User-ID, Tradeify, Lucid LFE/TOF, FundedNext FNFT, MFFU — Prüfer 29.10.2026: eine eigene
+    Familien-Logik urteilte bei Lucid/FNF/MFFU falsch). -> 'passt' | 'anderer' (beide Familien bekannt und verschieden) | 'unklar'
+    (aktives Konto leer oder Familie nicht bestimmbar — dann nie ein Login-Wechsel)."""
+    fa = cdp_login_familie(aktiv)[0] if str(aktiv or "").strip() else ""
+    fe = cdp_konto_familie(ext)
+    if not fa or not fe:
+        return "unklar"
+    return "passt" if fa == fe else "anderer"
+
+
+def modus_tvkontenliste(cmd):
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konten": [], "liste_n": 0, "login_gewechselt": False,
+           "quelle": "cdp"}
+    trail = _StempelSpur()
+    _start_versatz(trail)
+    sitz = [None]
+    sitz_offen = [False]                                       # Umschalter gedrückt, Liste evtl. offen → raus() drückt Esc
+
+    def raus(code, msg, schritt, **extra):
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        if sitz[0] and sitz_offen[0]:
+            try:
+                _cdp_esc(sitz[0], sitz[0].stand(opts), trail, "Ausstieg nach dem Umschalter-Klick — Liste schließen")
+            except Exception as e_:
+                trail.append(f"Esc beim Ausstieg nicht möglich ({type(e_).__name__})")
+            sitz_offen[0] = False
+        if sitz[0]:
+            _cdp_panel_zurueck(sitz[0], trail)
+        res["trail"] = " > ".join(trail)
+        if sitz[0]:
+            sitz[0].zu()
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+
+    opts = {}
+    ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
+    if len(_nur_alnum(ext)) < 3:
+        return raus("befehl", "Feld 'konto' (bekanntes Konto dieser Firma) fehlt", "befehl")
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
+    _kb = cdp_konten_bal(cmd)
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}
+    trail.append("Weg: Puls-Chrome (CDP, TV-Konten lesen — nur Lesen)")
+    if _handlauf_aktiv():
+        return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, später erneut.", "sperre")
+    try:
+        s = sitz[0] = _cdp_sitzung_holen(cmd, trail)
+        st = _cdp_seite_neu_laden(s, opts, trail, "TV-Konten lesen: neu gekaufte Konten erscheinen erst nach dem Neuladen")
+        if st is None:
+            return raus("neu_laden", "TradingView-Seite im Puls-Chrome ließ sich nicht neu laden — nichts gelesen.", "neu_laden")
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        aktiv = str(ko.get("aktiv") or "")
+        urteil = tv_login_urteil(aktiv, ext)
+        if urteil == "unklar":
+            return raus("login_unklar", f"Aktives Konto nach dem Neuladen nicht zuordenbar ('{aktiv[:40] or '-'}') — kein Login-Wechsel, nichts gelesen.", "login")
+        if urteil == "anderer":
+            trail.append(f"anderer Login im Umschalter ('{aktiv[:40]}') — Login-Weg über bekanntes Konto {ext} (wird dabei gewählt, wie bei jeder Balance-Lesung)")
+            ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=True)
+            s = sitz[0]
+            res["login_gewechselt"] = True
+            if not ok:
+                return raus(code or "konto", f"Login der Firma nicht erreicht: {msg}", "login")
+            _warte(1.0, 0.6)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+            aktiv = str(ko.get("aktiv") or "")
+        else:
+            trail.append(f"richtiger Login steht ('{aktiv[:40]}') — kein Konto-Wechsel")
+        if ko.get("liste_offen"):
+            _cdp_esc(s, st, trail, "Konto-Liste stand schon offen (nicht von diesem Lauf)")
+            _warte(0.6, 0.3)
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not cdp_rect(ko.get("schalter")):
+            if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
+                _warte(0.8, 0.4)
+                st = s.stand(opts)
+                ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not cdp_rect(ko.get("schalter")):
+            return raus("kein_umschalter", f"Kein Konto-Umschalter zu sehen (aktiv '{aktiv[:40] or '-'}') — nichts gelesen.", "umschalter")
+        if not s.klick(cdp_rect(ko.get("schalter")), "Konto-Umschalter (TV-Konten lesen)"):
+            return raus("klick", "Konto-Umschalter nicht gedrückt (Klick ohne Beweis) — nichts gelesen.", "umschalter")
+        sitz_offen[0] = True                                   # ab hier: jeder Ausstieg schließt die Liste (Prüfer 29.10.2026)
+        _warte(1.0, 0.6)
+        st = s.stand(opts)
+        ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not ko.get("liste_offen"):
+            _warte(1.2, 0.6)                                   # Liste baut sich nach dem Neuladen manchmal langsamer auf
+            st = s.stand(opts)
+            ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+        if not ko.get("liste_offen"):
+            _cdp_esc(s, st, trail, "Umschalter gedrückt, keine Liste")
+            return raus("keine_liste", "Konto-Liste ging nicht auf — nichts gelesen.", "liste")
+        texte = [str(x.get("text") or "") for x in (ko.get("eintraege") or []) if isinstance(x, dict)]
+        trail.append(f"Liste offen: {len(texte)} Einträge sichtbar" + ("" if ko.get("liste_voll") else f", unvollständig ({ko.get('liste_voll_grund') or '?'})"))
+        if not ko.get("liste_voll"):
+            sc = _cdp_liste_scrollen(s, ext, trail)
+            if sc.get("zeilen"):
+                texte = texte + [str(z.get("text") or "") for z in sc["zeilen"] if isinstance(z, dict)]
+                trail.append(f"gescrollt {sc.get('schritte')}×, {len(sc['zeilen'])} Zeilen, Ende {'ja' if sc.get('ende') else 'nein'}")
+        konten = tv_konten_aus_texten(texte)
+        sitz_offen[0] = False
+        _cdp_esc(s, st, trail, f"Konto-Liste gelesen ({len(konten)} volle Namen) — schließen, nichts gewählt")
+        zu = _cdp_liste_zu(s, opts)
+        if zu is not True:
+            _cdp_esc(s, s.stand(opts), trail, "Konto-Liste nach Esc noch offen — zweites Esc")
+            zu = _cdp_liste_zu(s, opts)
+        if zu is not True:
+            return raus("liste_offen", "Konto-Liste nach zwei Esc nicht bewiesen zu — Ergebnis verworfen (Seite beim nächsten Lauf neu laden).",
+                        "esc", konten=[], liste_n=len(texte))
+        trail.append("Konto-Liste zu (bewiesen)")
+        res.update({"ok": True, "konten": konten, "liste_n": len(texte)})
+        return raus("", f"{len(konten)} Konto-Name(n) gelesen ({'nach Login-Wechsel' if res['login_gewechselt'] else 'im stehenden Login'}).", "fertig")
+    except Exception as e:
+        _cdp_tabs_spur(e, trail)
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
+
+
 def tvlesen_cdp_mit_wiederholung(cmd, lauf=None):
     """Lesen mit EINEM zweiten Versuch bei Zeitüberschreitung (02.10.2026, Mike: „Puls-Chrome/CDP: TimeoutError: timed out" beim
     Balance-Lesen — die TradingView-Seite antwortete 10 s nicht). Nur Lesen, nie Order: ein zweiter Lauf klickt nichts, was handelt.
@@ -26633,6 +26781,20 @@ def main():
             # nicht' — in der DB stand nur 'absturz'): letzte eigene Stelle aus dem Traceback.
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TV-Lesen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
+        augen_anstossen()
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvkontenliste":
+        # TV-Konten lesen (29.10.2026): Seite neu laden, Konto-Liste lesen, Esc — nie ein Eintrag gewählt, nie das Order-Ticket
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "code": "befehl", "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvkontenliste(cmd if isinstance(cmd, dict) else {})
+        except Exception as e:
+            print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
+                              "msg": f"TV-Konten lesen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
         augen_anstossen()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvclose":

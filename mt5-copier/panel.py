@@ -4009,6 +4009,52 @@ class Handler(BaseHTTPRequestHandler):
                       f"{str(res.get('msg') or '')[:160]}", flush=True)
             return self._send(http, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tv-konten-liste":
+            # TV-Konten lesen (29.10.2026, Finn: „im Zufallsintervall nach der Kauf-Mail kurz einloggen und alle neuen externen IDs lesen"):
+            # Bot-Modus tvkontenliste — Seite neu laden, ggf. Login der Firma (dabei wird das mitgegebene bekannte Konto gewählt, wie bei jeder
+            # Balance-Lesung), Konto-Liste lesen, Esc; im Lese-Schritt nie ein Listeneintrag, nie Order.
+            # Unter dem TV-Lock wie tv-lesen (ein Browser, eine Maus). Vertrag: 200 {ok, konten, liste_n, login_gewechselt, trail} · 409 belegt.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            konto = str(body.get("konto") or "").strip()[:60]
+            if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "Feld 'konto' fehlt"}, ensure_ascii=False))
+            bc = base_config()
+            cmd = {k: str(bc.get(k) or "").strip() for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
+            cmd["konto"] = konto
+            cmd["tv_username"] = str(body.get("tv_username") or "").strip()
+            cmd["firma"] = str(body.get("firma") or "").strip()[:60]
+            g = body.get("geschwister")
+            cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                    "msg": "Es laeuft schon ein TradingView-Lauf — spaeter erneut."}, ensure_ascii=False))
+            to = 260   # Login-Weg mit Wiederholung im frischen Tab kann auch ohne Username lang werden (Prüfer 29.10.2026)
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                if not os.path.exists(bot):
+                    res = {"ok": False, "code": "bot_fehlt", "msg": "order_bot.py fehlt auf diesem PC"}
+                else:
+                    p = subprocess.run([sys.executable, bot, "tvkontenliste", json.dumps(cmd)],
+                                       capture_output=True, text=True, errors="replace", timeout=to)
+                    line = (p.stdout or "").strip().splitlines()
+                    res = json.loads(line[-1]) if line else {"ok": False, "code": "bot_stumm",
+                        "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "code": "timeout", "msg": f"TV-Konten lesen Timeout ({to}s)"}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "code": "bot_fehlt", "msg": f"TV-Konten lesen fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            print(f"[panel] tv-konten-liste {konto}: " + (f"{len(res.get('konten') or [])} Name(n)" if res.get("ok")
+                  else f"FEHLER {res.get('code') or '?'} — {str(res.get('msg') or '')[:140]}"), flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         if u.path == "/api/tv-close":
             # Orbit V2 schliessen (24.09.2026, Vollumstieg 'Ohne Hedge'; Finns
             # Auto-Close-Regel 23:45–00:00 Dubai, bisher 'Orbit-Schliessen in TV
