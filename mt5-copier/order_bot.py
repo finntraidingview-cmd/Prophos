@@ -20997,10 +20997,10 @@ def _cdp_today_aus_reiter(s, opts, trail):
                 if w_ is not None:
                     today, lab, txt = w_, str(k_), str(v_)
                     break
-    r_pos = s.rect_von("#id_account-manager-tabs #positions")
-    if r_pos:
-        s.klick(r_pos, "Reiter Positions")
-        _warte(0.5, 0.2)
+    # ZURÜCK MIT BEWEIS (28.10.2026, Ina pc-xc5c52 ab 12:25 Dubai: TradingView blieb auf „Account summary" stehen, danach scheiterte
+    # jede Heimweg-Lesung mit „Reiter 'summary' statt positions" — 4 rote Alarme in 20 min). Bisher EIN Klick ohne Prüfung; jetzt
+    # _cdp_reiter: bis 2 Klicks, Wechsel per aria-selected bewiesen, sonst steht es in der Spur.
+    _cdp_reiter(s, "positions", trail)
     trail.append(f"Today aus „Account summary\": {today} ('{lab}')")
     return summary, today, lab, txt
 
@@ -21092,6 +21092,15 @@ def modus_tvlesen_cdp(cmd):
             # „Konto steht", Panel aber zugeklappt („Open panel") → keine Positions-Tabelle → bisher „Positions-Tabelle nicht sichtbar" ohne
             # Grund. Jetzt: sagt augen.js „zu" (oder sieht keine Tabelle), drückt DIESER Lauf einmal selbst „Open panel" (Zähler des
             # Konto-Schritts zählt hier nicht) und liest neu; bleibt es zu, steht der Grund in Meldung und Spur.
+            # FALSCHER REITER VORN (28.10.2026, Ina pc-xc5c52): steht der Account-Manager auf „Account summary"/„Orders", gibt es keine
+            # Positions-Tabelle — bisher endete die Lesung mit tabelle_unklar. Jetzt erst auf „Positions" zurück (bewiesen), dann neu lesen.
+            _ks0 = st.get("konto_summary") if isinstance(st.get("konto_summary"), dict) else {}
+            if ko.get("panel") == "offen" and _ks0.get("reiter") and _ks0.get("reiter") != "positions":
+                trail.append(f"Reiter '{_ks0.get('reiter')}' vorn statt Positions — zurück")
+                if _cdp_reiter(s, "positions", trail):
+                    _warte(0.6, 0.3)
+                    st = s.stand(opts)
+                    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
             if ko.get("panel") == "zu" or ko.get("positionen_sichtbar") is False:
                 s._panel_open_versucht = False
                 if _cdp_panel_aufklappen(s, trail, ohne_max=True, stand=st)[0] == "aufgeklappt":
