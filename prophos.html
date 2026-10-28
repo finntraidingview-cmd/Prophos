@@ -24345,11 +24345,28 @@
    * selbst) fragt der PC-Tab Railway GET /admin/puls-heim?pc= — derselbe Riegel wie beim Klick (puls_heim_pruefen: Big Trade dieses PCs
    * ≤ 2.000 $ vor TP/Liq → big_trade_nah; kein Kurs/Level → big_trade_unklar). Ohne laufenden Big Trade auf dem PC: kein Request.
    * Fail-closed wie am Klick: Railway nicht erreichbar/kein Token → Lesung verschoben (big_trade_unklar). → null = frei, sonst Fehlerobjekt */
+  /* STEHT PULS SCHON IM KONTO? (28.10.2026, Finn nach pc-2zc2we: drei WDs Lucid/Tradeify/FNF, Lucid …0001 endete 10:31 Dubai, „Jetzt lesen"
+   * 10:44–10:46 fünfmal „Tradeify …0431 ist 83 $ vor dem TP — Puls bleibt im Konto, nichts gesendet". Die Sperre schützt den Reader des
+   * nahen WD vor einem KONTOWECHSEL — liest Puls das Konto, in dem der Puls-Chrome ohnehin steht, wechselt nichts.) Beweis wie die
+   * Heim-Wache: Userscript-Stand aus dem Puls-Tab ≤ 5 s alt, Konto passt (heimKontoPasst), keine Order/kein Heimweg unterwegs.
+   * Nur TradingView (der Reader kennt kein TopstepX). → true | false (unklar = false, dann gilt der Riegel wie bisher) */
+  async function pulsStehtImKonto(konto){
+    try{
+      if(!konto || !MT5_LOCAL || _tpOrbitLaeuft || _bthLaeuft) return false
+      if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
+      const ep = window._epLokal, st = ep && ep.stand
+      if(!st || st.an === false || !/^puls-/.test(String(st.positionen_tab || '')) || !st.konto) return false
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 5)) return false
+      return heimKontoPasst(st.konto, String(konto).trim())
+    }catch(_){ return false }
+  }
   async function pulsHeimFrei(konto, fenster){
     try{
       if(_bthSelbst || !MT5_LOCAL) return null
       const bt = bigTradePlan(fenster); if(!bt) return null   // 27.10.2026: eine Lesung im anderen Tab verschiebt dieses Konto nie
       if(konto && String(konto).trim() === tvV2Konto(bt)) return null
+      // 28.10.2026: Puls-Chrome steht schon in diesem Konto → Lesen ohne Kontowechsel, der Riegel greift nur, wenn gewechselt werden müsste
+      if(fenster !== 'tsx' && await pulsStehtImKonto(konto)){ console.info(`[puls-heim] Lesung …${String(konto).slice(-4)} frei: Puls-Chrome steht schon im Konto`); return null }
       const pc = hedgePcId(); if(!pc) return null
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
       if(!tok) return { ok:false, code:'big_trade_unklar', retry_ok:true, gesendet:false, msg:'Big Trade läuft auf diesem PC, Riegel nicht prüfbar (kein Login-Token) — Lesung verschoben' }
@@ -24524,6 +24541,16 @@
   const hwZufall = (a, b) => a + Math.random() * (b - a)
   let _hwFremdSeit = 0, _hwNaechsterHeimweg = 0, _hwWiederN = 0, _hwWiederTimer = null, _hwFehlN = 0, _hwPulsWegAt = 0, _hwLetzteFehlMeldung = 0
   let _hwOkAt = 0, _hwOkPlan = '', _hwOkOffen = false, _hwOkFremdN = 0, _hwAus = { plan: '', bis: 0 }
+  /* ERST LESEN, DANN HEIM (28.10.2026, Finn nach pc-2zc2we): endet ein Trade in dem Konto, in dem der Puls-Chrome gerade steht, liest
+   * tvV2EndlesungAnstossen die End-Balance sofort dort (ohne Kontowechsel) — so lange hält die Wache still (_hwEndHalt, höchstens
+   * HW_END_HALT_MS), danach geht der Heimweg zur höchsten Prio. Ohne den Halt zog die Wache den Puls 3 s nach dem Prio-Wechsel weg, und
+   * die Lesung brauchte einen Rückwechsel, den die Nah-am-TP-Sperre des nächsten WD verbietet.
+   * BLINDER READER (Befund 28.10.2026 10:31–10:46 Dubai: Lucid endete 10:31, FNF 10:41, beide ohne Userscript-Ende, kein einziger Heimweg,
+   * um 10:46 musste Puls den Puls-Chrome erst starten): ohne frischen Puls-Stand traf die Wache nie eine Aussage — der Puls blieb, wo er
+   * war, auch über einen Prio-Wechsel. Jetzt: ist der Stand 30–45 s (gestreut) blind, EIN Heimweg je Ziel und Blind-Phase (tv-lesen startet
+   * den Puls-Chrome nötigenfalls minimiert). Bleibt der Reader danach blind, kein weiterer — kein Takt-Heimweg ohne Beleg (56er-Lehre 27.10.). */
+  const HW_END_HALT_MS = 90000, HW_BLIND_MIN_MS = 30000, HW_BLIND_MAX_MS = 45000
+  let _hwEndHalt = { pid: '', bis: 0 }, _hwBlindSeit = 0, _hwBlindSchwelle = 0, _hwBlindErledigt = ''
   const hwPause = () => _hwFehlN > 0 ? Math.min(HW_BACKOFF_MAX_MS, HW_BACKOFF_START_MS * Math.pow(2, _hwFehlN - 1)) * hwZufall(1, 1.4) : hwZufall(HW_PAUSE_MIN_MS, HW_PAUSE_MAX_MS)
   function heimMeldenJetzt(ok, spaeter){
     if(ok) return true
@@ -24558,13 +24585,26 @@
       if(typeof tvV2EndlesungPcPasst === 'function' && !tvV2EndlesungPcPasst(bt)){ _hwFremdSeit = 0; return }   // Plan läuft auf einem anderen PC (Punkt 5)
       if(_hwAus.plan === pid && Date.now() < _hwAus.bis){ _hwFremdSeit = 0; return }
       const konto = tvV2Konto(bt); if(!konto){ _hwFremdSeit = 0; return }
+      if(_hwEndHalt.bis > Date.now()){ _hwFremdSeit = 0; return }   // Endlesung im stehenden Konto läuft (28.10.2026)
       if(_bthLaeuft || _bthTimer || _hwWiederTimer || hedgePulsUnterwegs()){ _hwFremdSeit = 0; return }
       if(typeof polarLaeuft === 'function' && polarLaeuft()){ _hwFremdSeit = 0; return }   // Polar hat den PC (Prio vor allem)
       if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
       const ep = window._epLokal, st = ep && ep.stand
-      if(!st || st.an === false || !/^puls-/.test(String(st.positionen_tab || '')) || !st.konto){ _hwFremdSeit = 0; return }
-      const alterS = (typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s : 99
-      if(!(alterS <= 5)){ _hwFremdSeit = 0; return }
+      const alterS = (st && typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s : 99
+      if(!st || st.an === false || !/^puls-/.test(String(st.positionen_tab || '')) || !st.konto || !(alterS <= 5)){
+        _hwFremdSeit = 0
+        // blind (28.10.2026): einmal je Ziel + Blind-Phase heim, s. HW_BLIND_MIN_MS
+        const jetztB = Date.now()
+        if(!_hwBlindSeit){ _hwBlindSeit = jetztB; _hwBlindSchwelle = hwZufall(HW_BLIND_MIN_MS, HW_BLIND_MAX_MS); return }
+        if(_hwBlindErledigt === pid || jetztB - _hwBlindSeit < _hwBlindSchwelle || jetztB < _hwNaechsterHeimweg) return
+        if(kontoBelegGilt(konto)){ _hwBlindErledigt = pid; return }   // Puls hat seitdem nichts getan und stand zuletzt bewiesen dort
+        _hwBlindErledigt = pid
+        if(!_bthAnstoss) _bthAnstoss = _hwBlindSeit
+        console.info(`[heim-wache] Reader blind seit ${((jetztB - _hwBlindSeit) / 1000).toFixed(0)} s — einmal Heimweg zu „${bt.masterName || konto}"`)
+        bigTradeHeim('Heim-Wache (Reader blind)')
+        return
+      }
+      _hwBlindSeit = 0; _hwBlindErledigt = ''
       const jetzt = Date.now()
       // steht zu Hause — auch mit gekürztem/angeklebtem Kontotext (27.10.2026, WD-Plan 4a1a8a79: 56 unnötige Heimwege, s. heimKontoPasst)
       if(heimKontoPasst(st.konto, konto)){ _hwFremdSeit = 0; _hwWiederN = 0; _hwOkOffen = false; _hwOkFremdN = 0; return }
@@ -24589,7 +24629,8 @@
   }
   ;(function hwLoop(){ setTimeout(async () => { await heimWacheTick(); hwLoop() }, hwZufall(HW_TAKT_MIN_MS, HW_TAKT_MAX_MS)) })()
   window._heimWache = { tick: heimWacheTick, wiederholen: heimWiederholen, stand: () => ({ fremdSeit: _hwFremdSeit, naechster: _hwNaechsterHeimweg, wiederN: _hwWiederN, wiederGeplant: !!_hwWiederTimer, fehlN: _hwFehlN, pulsWegAt: _hwPulsWegAt, aus: _hwAus, okOffen: _hwOkOffen, okFremdN: _hwOkFremdN,
-    unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()) }) }   // Test-Haken (Stub)
+    unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()),
+    endHalt: Object.assign({}, _hwEndHalt), blindSeit: _hwBlindSeit, blindErledigt: _hwBlindErledigt }), steht: pulsStehtImKonto, heimFrei: pulsHeimFrei }   // Test-Haken (Stub)
   window._bigTradeHeim = { planen: bigTradeHeimPlanen, plan: bigTradePlan }   // Test-Haken (Stub)
   /* BALANCE STATT TODAY'S P&L (26.09.2026, Finn: „bei jeder Order holen wir uns den Wert Balance … 1–30 min [seit 26.09.2026 spät: 1–150 min] nach dem Trade loggt Puls sich
    * noch mal ein und liest die neue Live-Balance — daraus Take Profit und P&L"). Befund: das Tradovate-Panel in TradingView zeigt in der
@@ -26967,7 +27008,9 @@
   // REIN RECHNEND: warum ist für diesen Plan JETZT keine Endlesung dran? '' = dran (ohne PC-Prüfung — die macht der Aufrufer).
   // force = Knopf „Jetzt lesen" (Design, 25.09.2026): ohne Pausen-, Versuchs- und Aufgegeben-Tor; Status, „schon gelesen" und
   // Handelstag gelten weiter (danach steht Today's P&L auf dem neuen Tag — eine Lesung wäre falsch, nicht nur spät).
-  function tvV2EndlesungGrund(p, jetzt, force){
+  // steht (28.10.2026): der Puls-Chrome steht beim Ende schon im Konto (tvV2EndlesungAnstossen) — dann gelten die beiden Wartezeiten
+  // (Userscript-Frist, Nachlese-Würfel) nicht, alle anderen Gründe (gelesen, Handelstag, Bremsen, Versuche) wie bisher
+  function tvV2EndlesungGrund(p, jetzt, force, steht){
     if(!p || !planIstPuls(p)) return 'kein Orbit-V2-/Winning-Day-/Topstep-Puls-Plan'
     // Mit Start-Balance zählt der Handelstag nicht (Balance ist tagesunabhängig) — nur Today's P&L springt über Nacht auf 0
     const mitBalance = !!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')
@@ -26979,7 +27022,7 @@
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
     // Orbit V3 (01.10.2026, Finn): P&L kommt aus dem Userscript (hedgeV3BalanceNachtrag) — Puls liest nur als Notlösung, 10 min nach dem Ende
-    if(planPlUserscript(p) && !force && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
+    if(planPlUserscript(p) && !force && !steht && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
        && Date.now() - (Date.parse(fin.at || p.endedAt || '') || 0) < 10 * 60000) return 'Orbit/Winning Day: P&L kommt aus dem Userscript (Puls erst nach 10 min als Notlösung)'
     // Topstep V2 (01.10.2026, TSV2-PNL): today_pnl ist dort der RP&L des ganzen Tages — erst die Balance macht das Ende „gelesen"
     if(p.route === 'tsv2' ? (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
@@ -26992,7 +27035,7 @@
     // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
     const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
-    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : '1–120 min Zufall'})`
+    if(!vers0 && !steht && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (${tpKetteNr(p) ? 'Topstep-Kette: 1–35 min Zufall, danach automatisch abgehakt' : '1–120 min Zufall'})`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     // Login-Bremse (30.09.2026): nach einem Login-/Verbindungsfehler 30 min Ruhe, nach zweien nur noch „Jetzt lesen" von Hand
     const lb = tvV2LoginBremse(fin, jetzt)
@@ -27196,11 +27239,38 @@
     spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull, max: TV_ENDLESUNG_MAX, pause: TV_ENDLESUNG_PAUSE_S.slice(),
     loginFehler: tvV2LoginFehler, loginFehlerCode: tvV2LoginFehlerCode, loginBremse: tvV2LoginBremse, loginPauseS: TV_ENDLESUNG_LOGIN_PAUSE_S, loginMax: TV_ENDLESUNG_LOGIN_MAX,
     kontoWeg: tvV2KontoWeg, kontoWegAntwort: tvV2KontoWegAntwort,
-    versuch: (pid, opts) => tvV2EndlesungVersuch(pid, opts), wartet: p => planWartetAufPuls(p) }   // Test-Haken (Stub)
+    versuch: (pid, opts) => tvV2EndlesungVersuch(pid, opts), wartet: p => planWartetAufPuls(p), anstossen: pid => tvV2EndlesungAnstossen(pid) }   // Test-Haken (Stub)
   function tvV2EndlesungAnstossen(pid){
     if(!MT5_LOCAL) return
-    // 15–25 s nach dem Ende: der Broker bucht den Fill, TradingView zieht die Zusammenfassung nach
-    setTimeout(() => { tvV2EndlesungVersuch(pid).catch(e => console.warn('[endlesung]', e)) }, 15000 + Math.random() * 10000)
+    pid = String(pid)
+    // SOFORT IM STEHENDEN KONTO (28.10.2026, Finn nach pc-2zc2we): steht der Puls-Chrome beim Ende schon im Konto des Plans, liest Puls
+    // die End-Balance gleich dort — ohne die 10-min-Userscript-Frist und die 1–120-min-Nachlese-Würfelzeit (die gibt es, damit nicht jedes
+    // Ende einen Login auslöst; hier gibt es keinen) und ohne Kontowechsel. Die Heim-Wache hält so lange still (_hwEndHalt), danach Heimweg.
+    // Halt sofort setzen: die Wache zieht sonst 3 s nach dem Prio-Wechsel weg, bevor die Prüfung (lokaler Reader, ≤ 4 s) zurück ist.
+    _hwEndHalt = { pid, bis: Date.now() + 15000 }
+    ;(async () => {
+      let steht = false
+      try{ const p = tradePlans.find(x => String(x.id) === pid); steht = !!(p && p.route === 'tvv2' && tvV2EndlesungPcPasst(p) && await pulsStehtImKonto(tvV2Konto(p))) }catch(_){ steht = false }
+      if(!steht){
+        if(_hwEndHalt.pid === pid) _hwEndHalt = { pid: '', bis: 0 }
+        // 15–25 s nach dem Ende: der Broker bucht den Fill, TradingView zieht die Zusammenfassung nach
+        setTimeout(() => { tvV2EndlesungVersuch(pid).catch(e => console.warn('[endlesung]', e)) }, 15000 + Math.random() * 10000)
+        return
+      }
+      _hwEndHalt = { pid, bis: Date.now() + HW_END_HALT_MS }
+      console.info(`[endlesung] Puls-Chrome steht im Konto von ${pid.slice(0, 8)} — Endlesung sofort, Heim-Wache wartet`)
+      // 8–14 s (gestreut): Tradovate bucht Fill + Gebühren, die Zusammenfassung zieht nach — dann eine Lesung im stehenden Konto
+      setTimeout(async () => {
+        let r = null
+        try{ r = await tvV2EndlesungVersuch(pid, { steht: true }) }catch(e){ console.warn('[endlesung]', e) }
+        finally{
+          if(_hwEndHalt.pid === pid) _hwEndHalt = { pid: '', bis: 0 }
+          // gleich danach zur höchsten Prio (die Lesung selbst plant den Heimweg mit 20 s Sammelpause, weil sie als Rundgang zählt)
+          try{ const p = tradePlans.find(x => String(x.id) === pid); if(p) bigTradeHeimPlanen(tvV2Konto(p), 'Endlesung ' + String(tvV2Konto(p)).slice(-4), true, 'tv') }catch(_){}
+          console.info(`[endlesung] sofort ${pid.slice(0, 8)}: ${(r && r.msg) || '—'}`)
+        }
+      }, 8000 + Math.random() * 6000)
+    })()
   }
   // Master-P&L aus der Balance nachtragen (aus tvV2EndlesungVersuch herausgezogen, F5 26.09.2026 — Lesung UND Folgetrade nutzen es).
   // Nur ein leeres Feld oder die Schätzung (TP/SL-Level, Vorbelegung) wird ersetzt; eine von Hand eingetragene Zahl bleibt, die
@@ -27291,7 +27361,7 @@
       try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) p0 = rowToPlan(data) }catch(_){}
       if(!p0) return { ok: false, msg: 'Plan nicht gefunden' }
       if(p0.status === 'open' && planIstPuls(p0)) return await tvV2BeendetPruefen(p0)   // Knopf „Beendet" (28.09.2026)
-      const grund = tvV2EndlesungGrund(p0, Date.now(), force)
+      const grund = tvV2EndlesungGrund(p0, Date.now(), force, !!(opts && opts.steht))
       if(grund) return { ok: false, msg: grund }
       if(!tvV2EndlesungPcPasst(p0)) return { ok: false, msg: `Plan gehört zu PC ${tvV2EndlesungPc(p0)} — dort liest Puls` }
       const fin0 = p0.mt5Baseline.final
@@ -47884,7 +47954,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1788'
+  const OS_TAB_BUILD = '2026-09-22.1789'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
