@@ -20259,7 +20259,11 @@
       $('kis-soll-s').textContent = soll.einlagen_n ? `${soll.einlagen_n} Einlage${soll.einlagen_n === 1 ? '' : 'n'} − Reibung + Gewinne` : 'Noch keine Einlage gebucht — Soll fehlt die Basis'
       const abw = Number(d.abweichung || 0)
       $('kis-abw').textContent = kisVz(abw)
+      // „Ausgeglichen bei Einlagen von …": so viel hätten die Investoren insgesamt einzahlen müssen, damit Ist = Soll — der direkte Vergleich
+      // mit dem, was wirklich eingezahlt wurde (solange noch keine Einlage gebucht ist, die einzige lesbare Aussage der Abweichung)
+      const noetig = Number(soll.einlagen || 0) + abw
       $('kis-abw-s').textContent = `Toleranz ± ${kisUsd.format(d.toleranz || 0)}` + (d.auffaellig ? ` · ${abw < 0 ? 'fehlt mehr als die Reibung' : 'mehr da als erwartet'}` : ' · im Rahmen der Reibung')
+        + ` · ausgeglichen bei Einlagen von ${kisUsd.format(noetig)}`
       const k = $('kis-abw-k'); k.classList.toggle('is-auf', !!d.auffaellig); k.classList.toggle('is-ok', !d.auffaellig)
 
       const f = ist.fusion
