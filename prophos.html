@@ -3568,7 +3568,9 @@
   #adm-pane-wd .wd-ueb-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
   #adm-pane-wd .wd-ueb-kpis:empty{display:none}
   #adm-pane-wd #wd-ueb-heute{margin-top:12px}
-  #adm-pane-wd #wd-ueb-stat-kpis{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:6px}
+  #adm-pane-wd #wd-ueb-stat-kpis{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:8px}   /* 28.10.2026: zwei Kacheln (Fusion / Master kumuliert) */
+  #adm-pane-wd .wd-ueb-graf{height:220px;border:1px solid var(--border-soft,var(--line));border-radius:10px;overflow:hidden;background:var(--surface);margin:0 0 12px}
+  #adm-pane-wd .wd-ueb-graf[hidden]{display:none}
   #adm-pane-wd #wdMsg:empty{display:none}
   #adm-pane-wd .wd-po-mehr{margin-top:8px;font-size:12px}
   #adm-pane-wd .wd-po-mehr[hidden]{display:none}   /* .btn setzt display:flex und schlägt hidden (wie #wal-feed-more) */
@@ -12072,6 +12074,8 @@
               <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
             </div>
             <div class="wd-ueb-kpis" id="wd-ueb-stat-kpis"></div>
+            <!-- Linien-Graf (28.10.2026, Finn: „ein Graf mit zwei Linien — Fusion-PnL akkumuliert … und Master-PnL akkumuliert") — wdUebGraf, Lightweight Charts wie die Markt-View -->
+            <div class="wd-ueb-graf" id="wd-ueb-graf" hidden></div>
             <div class="adm-dist" id="wd-ueb-stat-rows"></div>
           </div>
         </div>
@@ -48499,7 +48503,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1805'
+  const OS_TAB_BUILD = '2026-09-22.1806'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63082,7 +63086,7 @@
     if(!kap){
       // Ladefehler steht in der Kapitel-Meldung des Admins (admKapitelLaden) — dort lesen statt ewig „lädt" (nächster Versuch im 30-s-Takt nach 5 min)
       const fehler = String(document.getElementById('adm-kap-msg')?.textContent || ''), kaputt = /nicht verfügbar/.test(fehler)
-      kp.innerHTML = ''; box.innerHTML = `<div class="wd-ueb-leer">${kaputt ? escapeHtml(fehler.replace('Kapitel', 'Statistik')) : 'Statistik lädt … (dieselben Daten wie Admin → Statistik)'}</div>`; if(sub) sub.textContent = ''; return
+      kp.innerHTML = ''; box.innerHTML = `<div class="wd-ueb-leer">${kaputt ? escapeHtml(fehler.replace('Kapitel', 'Statistik')) : 'Statistik lädt … (dieselben Daten wie Admin → Statistik)'}</div>`; if(sub) sub.textContent = ''; wdUebGraf([]); return
     }
     const aus = wdIdsAus(), gesehen = new Set(), alle = []
     for(const c of (kap.kapitel || [])) for(const t of (c.wd_liste || [])){
@@ -63091,23 +63095,27 @@
       alle.push(t)
     }
     const heute = _deTodayStr(), ab = _wdUeb.zeit === 'alle' ? '' : (d => { d.setUTCDate(d.getUTCDate() - (Number(_wdUeb.zeit) - 1)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
-    const mo = (d => { d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10) })(new Date(heute + 'T12:00:00Z'))
     const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
     const rows = alle.filter(t => (!ab || String(t.datum || '') >= ab) && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
-    const n = rows.length, tp = rows.filter(t => (num(t.master_pl) || 0) > 0).length, mSum = rows.reduce((a, t) => a + (num(t.master_pl) || 0), 0)
-    const mitF = rows.filter(t => num(t.fusion_eur) !== null), fSum = mitF.reduce((a, t) => a + num(t.fusion_eur), 0)
-    const woche = alle.filter(t => String(t.datum || '') >= mo && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
-    const wocheTp = woche.filter(t => (num(t.master_pl) || 0) > 0).length
-    // Payouts erhalten aus WD-Konten: Admin-Übersicht summiert je Konto (EUR); Konten der aktuellen Sicht und Firma
-    const ad = window._admData || {}, acc = (ad.accounts || ad.rows || []).filter(a => a.type === 'winning_days' && !aus.has(String(a.user_id)) && wdSichtOk(a.user_id) && (!_wdUeb.firma || wdUebFirma(a.firm_raw || a.firm) === _wdUeb.firma))
-    const poSum = acc.reduce((s, a) => s + (Number(a.payouts) || 0), 0), poN = acc.filter(a => Number(a.payouts) > 0).length
-    if(sub) sub.textContent = `· ${n} Winning Day${n === 1 ? '' : 's'}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
+    // Kumuliert über ALLE Winning Days (28.10.2026, Finn: „Fusion-PnL akkumuliert über alle Trades vom Typ Winning Day, und Master-PnL
+    // akkumuliert über alle … Netto-Differenz weglassen") — die Zeitraum-Chips gelten nur noch für die Zeilen je Firma/ID unten,
+    // der Firmen-Chip oben für beides. Stand je Tag = Summe bis Tagesende (Reihenfolge datum, zeit).
+    const kum = alle.filter(t => t.datum && (!_wdUeb.firma || wdUebFirma(t.master_firm) === _wdUeb.firma))
+      .sort((a, b) => String(a.datum).localeCompare(String(b.datum)) || String(a.zeit || '').localeCompare(String(b.zeit || '')))
+    let mK = 0, fK = 0, mN = 0, fN = 0
+    const tage = new Map()
+    for(const t of kum){
+      const mp = num(t.master_pl), fe = num(t.fusion_eur)
+      if(mp !== null){ mK += mp; mN++ }
+      if(fe !== null){ fK += fe; fN++ }
+      tage.set(String(t.datum), { m: mK, f: fK })
+    }
+    const letzter = kum.length ? kum[kum.length - 1].datum : ''
+    if(sub) sub.textContent = `· ${kum.length} Winning Day${kum.length === 1 ? '' : 's'} kumuliert${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · Orbit V2 mit Fusion-Hedge, Topstep V2 nicht drin`
     kp.innerHTML =
-      wdUebKpi('Gewinntage · Woche', String(wocheTp), `seit Mo · ${woche.length} WD${woche.length === 1 ? '' : 's'} gefahren`, '', 'Winning Days seit Montag mit Master im Plus (aus der Statistik, unabhängig vom Zeitraum)') +
-      wdUebKpi('TP erreicht', n ? Math.round(100 * tp / n) + ' %' : '–', `${tp} von ${n}`, '') +
-      wdUebKpi('Ø Master je WD', n ? wdUebUsd(mSum / n) : '–', n ? `Σ ${wdUebUsd(mSum)}` : 'keine im Zeitraum', n ? wdUebFarbe(mSum) : '') +
-      wdUebKpi('Fusion-Hedge', mitF.length ? wdUebEur(fSum) : '–', mitF.length ? `Ø ${wdUebEur(fSum / mitF.length)} je WD` : 'noch nichts gebucht', mitF.length ? wdUebFarbe(fSum) : '') +
-      wdUebKpi('Payouts erhalten', poSum ? wdUebEur(poSum).replace('+', '') : '–', poN ? `aus ${poN} ${poN === 1 ? 'WD-Konto' : 'WD-Konten'} · gesamt` : 'aus WD-Konten · gesamt', poSum ? 'var(--good-ink, #15803d)' : '', 'gebuchte Payouts der Konten vom Typ Winning Days (Admin-Übersicht), unabhängig vom Zeitraum')
+      wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · Ø ${wdUebEur(fK / fN)}` : 'noch nichts gebucht', fN ? wdUebFarbe(fK) : '', 'Fusion-Hedge-P&L aller Winning Days aufsummiert (Deal-Historie, €) — amber Linie im Graf') +
+      wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · Ø ${wdUebUsd(mK / mN)}${letzter ? ' · bis ' + escapeHtml(wdUebTag(new Date(letzter + 'T12:00:00Z'))) : ''}` : 'keine Winning Days', mN ? wdUebFarbe(mK) : '', 'Master-P&L aller Winning Days aufsummiert ($) — violette Linie im Graf')
+    wdUebGraf([...tage.entries()].map(([d, v]) => ({ time: d, m: v.m, f: v.f })))
     // je Firma / je ID: Balken = Anzahl, Wert = Ø Master je WD, rechts TP-Quote
     const m = new Map()
     for(const t of rows){
@@ -63124,6 +63132,47 @@
         <div class="adm-pct" title="TP erreicht (Master im Plus)">${Math.round(100 * e.tp / e.n)} %</div></div>`).join('')
       : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
   }
+  // Linien-Graf (28.10.2026): Lightweight Charts wie die Markt-View (mklLibLaden, mklToken — dieselbe Bibliothek, kein neues Paket).
+  // x = Datum (Tagesende-Stand), Master $ auf der rechten, Fusion € auf der linken Skala; Farben aus den Tokens, beim Theme-Wechsel neu.
+  // Kein Zoom/Scroll (fitContent) — die Reihe ist klein (ein Punkt je Handelstag), Neuzeichnen alle 30 s über wdRender ohne Flackern (setData).
+  const WD_GRAF_H = 220
+  function wdUebGrafWeg(){ const g = _wdUeb.graf; if(!g) return; try{ g.ro && g.ro.disconnect() }catch(_){} try{ g.chart.remove() }catch(_){} _wdUeb.graf = null }
+  function wdUebGraf(punkte){
+    const box = document.getElementById('wd-ueb-graf'); if(!box) return
+    if(!punkte || !punkte.length){ wdUebGrafWeg(); box.innerHTML = ''; box.hidden = true; return }
+    box.hidden = false
+    if(!window.LightweightCharts){
+      if(!box.firstChild) box.innerHTML = '<div class="wd-ueb-leer" style="padding:12px">Graf lädt …</div>'
+      mklLibLaden().then(ok => { if(ok) wdUebGraf(punkte); else box.innerHTML = '<div class="wd-ueb-leer" style="padding:12px">Graf nicht verfügbar: Chart-Bibliothek (cdn.jsdelivr.net) nicht ladbar → Seite neu laden</div>' })
+      return
+    }
+    const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
+    const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11 },
+      grid: { vertLines: { color: rahmen }, horzLines: { color: rahmen } }, rightPriceScale: { visible: true, borderColor: rahmen }, leftPriceScale: { visible: true, borderColor: rahmen },
+      timeScale: { borderColor: rahmen, timeVisible: false, fixLeftEdge: true, fixRightEdge: true } }
+    const farben = { m: mklToken('--violet', '#5447CE'), f: mklToken('--warn-ink', '#b45309') }
+    let g = _wdUeb.graf
+    if(!g || !g.chart || g.box !== box){
+      wdUebGrafWeg(); box.innerHTML = ''
+      const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || WD_GRAF_H, handleScale: false, handleScroll: false,
+        crosshair: { mode: LW.CrosshairMode.Normal }, localization: { locale: 'de-DE' } }, huelle))
+      const fmt = einheit => ({ type: 'custom', minMove: 1, formatter: v => wdDe(v) + einheit })
+      const m = chart.addLineSeries({ color: farben.m, lineWidth: 2, priceScaleId: 'right', title: 'Master $', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt(' $') })
+      const f = chart.addLineSeries({ color: farben.f, lineWidth: 2, priceScaleId: 'left', title: 'Fusion €', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt(' €') })
+      g = _wdUeb.graf = { chart, m, f, box, ro: null }
+      // Breite folgt dem Panel; danach fitContent, sonst zeigt der Graf bis zum nächsten 30-s-Render nur den Anfang der Reihe (Stub-Test Handy 29.10.2026)
+      try{ g.ro = new ResizeObserver(() => { const gg = _wdUeb.graf; if(!gg || !gg.chart || !box.clientWidth) return; try{ gg.chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || WD_GRAF_H }); gg.chart.timeScale().fitContent() }catch(_){} }); g.ro.observe(box) }catch(_){}
+    } else {
+      try{ g.chart.applyOptions(huelle); g.m.applyOptions({ color: farben.m }); g.f.applyOptions({ color: farben.f }) }catch(_){}
+    }
+    try{
+      g.m.setData(punkte.map(p => ({ time: p.time, value: Math.round(p.m) })))
+      g.f.setData(punkte.map(p => ({ time: p.time, value: Math.round(p.f) })))
+      g.chart.timeScale().fitContent()
+    }catch(e){ console.warn('[wd] Graf', e); wdUebGrafWeg(); box.innerHTML = ''; box.hidden = true }
+  }
+  window.addEventListener('prophos:theme', () => { try{ if(_wdUeb.graf) wdUebStatistik() }catch(_){} })
+
   function wdUebRender(){
     // Betrag + Payouts erhalten brauchen die Admin-Übersicht — direkt auf diesen Reiter gesprungen, ist sie evtl. noch nicht da: einmal anstoßen
     if(!window._admData && !_wdUeb.admAn && wdSichtbar() && typeof window._admLaden === 'function'){
