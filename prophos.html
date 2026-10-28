@@ -24543,13 +24543,13 @@
   let _hwOkAt = 0, _hwOkPlan = '', _hwOkOffen = false, _hwOkFremdN = 0, _hwAus = { plan: '', bis: 0 }
   /* ERST LESEN, DANN HEIM (28.10.2026, Finn nach pc-2zc2we): endet ein Trade in dem Konto, in dem der Puls-Chrome gerade steht, liest
    * tvV2EndlesungAnstossen die End-Balance sofort dort (ohne Kontowechsel) — so lange hält die Wache still (_hwEndHalt, höchstens
-   * HW_END_HALT_MS), danach geht der Heimweg zur höchsten Prio. Ohne den Halt zog die Wache den Puls 3 s nach dem Prio-Wechsel weg, und
+   * HW_END_HALT_MS = 150 s: 1–60 s Wartezeit + Lesung), danach geht der Heimweg zur höchsten Prio. Ohne den Halt zog die Wache den Puls 3 s nach dem Prio-Wechsel weg, und
    * die Lesung brauchte einen Rückwechsel, den die Nah-am-TP-Sperre des nächsten WD verbietet.
    * BLINDER READER (Befund 28.10.2026 10:31–10:46 Dubai: Lucid endete 10:31, FNF 10:41, beide ohne Userscript-Ende, kein einziger Heimweg,
    * um 10:46 musste Puls den Puls-Chrome erst starten): ohne frischen Puls-Stand traf die Wache nie eine Aussage — der Puls blieb, wo er
    * war, auch über einen Prio-Wechsel. Jetzt: ist der Stand 30–45 s (gestreut) blind, EIN Heimweg je Ziel und Blind-Phase (tv-lesen startet
    * den Puls-Chrome nötigenfalls minimiert). Bleibt der Reader danach blind, kein weiterer — kein Takt-Heimweg ohne Beleg (56er-Lehre 27.10.). */
-  const HW_END_HALT_MS = 90000, HW_BLIND_MIN_MS = 30000, HW_BLIND_MAX_MS = 45000
+  const HW_END_HALT_MS = 150000, HW_BLIND_MIN_MS = 30000, HW_BLIND_MAX_MS = 45000
   let _hwEndHalt = { pid: '', bis: 0 }, _hwBlindSeit = 0, _hwBlindSchwelle = 0, _hwBlindErledigt = ''
   const hwPause = () => _hwFehlN > 0 ? Math.min(HW_BACKOFF_MAX_MS, HW_BACKOFF_START_MS * Math.pow(2, _hwFehlN - 1)) * hwZufall(1, 1.4) : hwZufall(HW_PAUSE_MIN_MS, HW_PAUSE_MAX_MS)
   function heimMeldenJetzt(ok, spaeter){
@@ -27259,7 +27259,8 @@
       }
       _hwEndHalt = { pid, bis: Date.now() + HW_END_HALT_MS }
       console.info(`[endlesung] Puls-Chrome steht im Konto von ${pid.slice(0, 8)} — Endlesung sofort, Heim-Wache wartet`)
-      // 8–14 s (gestreut): Tradovate bucht Fill + Gebühren, die Zusammenfassung zieht nach — dann eine Lesung im stehenden Konto
+      // 1–60 s (gestreut, Finn 28.10.2026: „mach 1 sec – 60 sec“, vorher 8–14 s): Tradovate bucht Fill + Gebühren, die Zusammenfassung
+      // zieht nach — dann eine Lesung im stehenden Konto (zu früh gelesen = Flach-Beweis fehlt → normaler Nachlese-Takt übernimmt)
       setTimeout(async () => {
         let r = null
         try{ r = await tvV2EndlesungVersuch(pid, { steht: true }) }catch(e){ console.warn('[endlesung]', e) }
@@ -27269,7 +27270,7 @@
           try{ const p = tradePlans.find(x => String(x.id) === pid); if(p) bigTradeHeimPlanen(tvV2Konto(p), 'Endlesung ' + String(tvV2Konto(p)).slice(-4), true, 'tv') }catch(_){}
           console.info(`[endlesung] sofort ${pid.slice(0, 8)}: ${(r && r.msg) || '—'}`)
         }
-      }, 8000 + Math.random() * 6000)
+      }, 1000 + Math.random() * 59000)
     })()
   }
   // Master-P&L aus der Balance nachtragen (aus tvV2EndlesungVersuch herausgezogen, F5 26.09.2026 — Lesung UND Folgetrade nutzen es).
@@ -47954,7 +47955,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1789'
+  const OS_TAB_BUILD = '2026-09-22.1790'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
