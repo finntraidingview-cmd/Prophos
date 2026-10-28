@@ -45,7 +45,8 @@ Dann direkt:
    Mehr Slaves sind erwünscht, wenn viel ansteht. Der Nutzer kann auch selbst welche öffnen,
    die sich dann beim Master melden.
 3. **Takt an:** gibt es `CronCreate`, dann mit `cron: "2-59/5 * * * *"` (oder dem Takt aus `projekt.md`) und dem Prompt
-   „Slave-System: Statustabelle. Nur senden, wenn sich seit der letzten etwas geändert hat, sonst eine Zeile ‚—‘.“
+   „Slave-System: Statustabelle. Immer mit der aktuellen Live-Version in der ersten Zeile; nur senden,
+   wenn sich seit der letzten etwas geändert hat, sonst eine Zeile ‚— · live <Version>‘.“
    Nach 7 Tagen neu anlegen. Ohne `CronCreate` kommt die Tabelle bei jedem Ereignis.
 4. **Warteschlange:** oben in der Warteschlangen-Datei einen Block `## Lauf TT.MM.JJJJ`
    mit einer Zeile je Aufgabe: Terminal, Update, Wo, Stand, Fertig in, Commit, Version.
@@ -76,7 +77,11 @@ Schätzung: <Minuten>
 
 ### A3. Statustabelle
 
-Bei jedem Takt mit Änderung und sofort bei „fertig“ oder einer Frage:
+Bei jedem Takt mit Änderung und sofort bei „fertig“ oder einer Frage. **Erste Zeile immer die
+aktuelle Live-Version** (`git show origin/main:<Versionsdatei>`), auch beim leeren Takt
+(„— · live .NNNN“) — der Nutzer will alle 5 Minuten sehen, wo wir stehen (Finn 29.10.2026):
+
+**Live: .NNNN (HH:MM)**
 
 | Terminal | Update | Wo | Stand | Fertig in |
 |---|---|---|---|---|
