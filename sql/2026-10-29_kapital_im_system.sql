@@ -6,14 +6,17 @@
 -- gewinnt der Hedge ungefähr dessen Wert; besteht es, steckt das Geld im Konto und wird zum Payout. Weniger wird es nur durch
 -- Reibung. Fällt die Zahl deutlich stärker als die Reibung, fehlt Geld.
 --
---   Ist  = Wallets (letzter wallet_snapshots-Tag) + Fusion-Balance (eingetragen) + Σ Gesamtkosten der laufenden Ketten (Boden 0)
---          + offene Payouts (pending_payouts status pending)
+--   Ist  = „insgesamt geparkt" = Wallets (letzter wallet_snapshots-Tag) + Fusion (live aus mt5_live, Equity je hedge_login einmal;
+--          Hand-Eingabe kapital_fusion nur als Rückfall) + Geschäftskonto (kapital_gk_buchungen) + Σ Gesamtkosten der laufenden Ketten
+--          (Boden 0) + offene Payouts (pending_payouts status pending)
 --   Soll = Σ Einlagen − Reibung (beendete Ketten, deren Kosten der Hedge nicht zurückgeholt hat) + Gewinne (beendete Ketten im
---          Plus + laufende Ketten im Plus) − Gebühren (wallet_tx Kategorie „Gebühr")
+--          Plus + laufende Ketten im Plus) − Gebühren (wallet_tx Kategorie „Gebühr") + Geschäftskonto-Buchungen außer „Umbuchung Krypto"
 --
 -- Finn hat am 29.10.2026 bestätigt: laufendes Konto = Gesamtkosten wie die Accounts-Kachel (Kauf + Hedge der ganzen Kette − Payouts,
 -- Boden 0), Funded genauso, ein Konto im Plus zählt 0 und sein Überschuss geht als Gewinn in die Soll-Linie; Kasse 0xc27c… wird
--- Gruppen-Wallet (unter Emin); gerechnet wird in US-Dollar.
+-- Gruppen-Wallet (unter Emin). Nachtrag Finn 29.10.2026 (über die Vertrags-Session): „alles in EUR" — Wallets (USDT/USDC) zum
+-- EZB-Tageskurs, Fusion ist EUR, Geschäftskonto in EUR; Account-Käufe zählen mit dem in Prophos gebuchten €-Betrag. Ort: eigener
+-- Admin-Reiter „Kapital" mit Fusion-Report, Geschäftskonto (Buchungsliste wie ein Sheet) und „insgesamt geparkt".
 --
 -- Gelesen und geschrieben wird NUR über app.py (/admin/kapital, Service-Key, nur Voll-Admins wie Liquide/Kunden-Zahlungen) — die
 -- Tabellen haben RLS ohne Policy, die Funktion ist für anon/authenticated gesperrt. Idempotent.
@@ -24,7 +27,8 @@
 create table if not exists public.kapital_einlagen (
   id           uuid primary key default gen_random_uuid(),
   gruppe_id    uuid not null references public.id_gruppen(id) on delete cascade,
-  betrag_usd   numeric not null check (betrag_usd > 0),
+  betrag       numeric not null check (betrag > 0),
+  waehrung     text not null default 'EUR' check (waehrung in ('EUR','USD')),   -- USD (z. B. Finns 5.000 $) zählt zum Tageskurs
   datum        date not null default current_date,
   ziel_wallet  text,
   notiz        text,
@@ -34,8 +38,8 @@ create table if not exists public.kapital_einlagen (
 );
 create index if not exists kapital_einlagen_gruppe_idx on public.kapital_einlagen (gruppe_id, datum);
 
--- Fusion-Balance von Hand (Prophos liest Fusion nicht live: meta_api_balance der Fusion-Konten steht seit 22.09.2026). Jede Eingabe
--- eine Zeile, es gilt die jüngste. Fusion rechnet in Euro (FIRM_PRESETS fusion currency €) → waehrung mitspeichern.
+-- Fusion-Balance von Hand — nur RÜCKFALL: live kommt sie aus mt5_live (Copier-Status der PC-Tabs, hedge_equity, ~5 s), gilt aber nur,
+-- solange die Zeile höchstens 1 h alt ist. Jede Eingabe eine Zeile, es gilt die jüngste. Fusion rechnet in Euro.
 create table if not exists public.kapital_fusion (
   id          uuid primary key default gen_random_uuid(),
   gruppe_id   uuid not null references public.id_gruppen(id) on delete cascade,
@@ -52,15 +56,34 @@ create index if not exists kapital_fusion_gruppe_idx on public.kapital_fusion (g
 create table if not exists public.kapital_tageswerte (
   gruppe_id      uuid not null references public.id_gruppen(id) on delete cascade,
   tag            date not null,
-  ist_usd        numeric not null,
-  soll_usd       numeric not null,
-  abweichung_usd numeric not null,
+  ist_eur        numeric not null,
+  soll_eur       numeric not null,
+  abweichung_eur numeric not null,
   teile          jsonb not null default '{}'::jsonb,
   updated_at     timestamptz not null default now(),
   primary key (gruppe_id, tag)
 );
 
+-- Geschäftskonto (Finn 29.10.2026: „wo man … Geschäftskontentransaktionen hinzufügen kann, wie in so einem Google-Sheet … Kunden
+-- bezahlen oder PCs kaufen"). Kontostand = Σ betrag (erste Buchung „Anfangsstand"), + Eingang / − Ausgang. Im Soll zählt jede Buchung außer
+-- „Umbuchung Krypto" (Geld wechselt nur die Tasche): Kundenzahlung hebt das Soll, PC-Kauf/Ausgabe/Entnahme senken es — sonst sähe jede
+-- Ausgabe oder Gewinnverteilung wie Schwund aus.
+create table if not exists public.kapital_gk_buchungen (
+  id           uuid primary key default gen_random_uuid(),
+  gruppe_id    uuid not null references public.id_gruppen(id) on delete cascade,
+  datum        date not null default current_date,
+  betrag       numeric not null check (betrag <> 0),
+  waehrung     text not null default 'EUR' check (waehrung in ('EUR','USD')),
+  kategorie    text not null default 'Sonstiges',
+  text         text,
+  angelegt_von text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists kapital_gk_buchungen_gruppe_idx on public.kapital_gk_buchungen (gruppe_id, datum desc);
+
+
 alter table public.kapital_einlagen   enable row level security;
+alter table public.kapital_gk_buchungen enable row level security;
 alter table public.kapital_fusion     enable row level security;
 alter table public.kapital_tageswerte enable row level security;
 

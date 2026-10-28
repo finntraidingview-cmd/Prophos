@@ -1164,37 +1164,41 @@
      nebeneinander, darunter bricht die letzte Karte um statt die Beträge abzuschneiden. */
   #adm-pane-wallet .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
   /* KAPITAL IM SYSTEM (29.10.2026): kleine Karte oben in Meta Wallet — drei Kacheln, Teile als Mini-Kacheln, Verlauf, Listen eingeklappt */
-  #kis-panel .kis-k3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
-  #kis-panel .kis-k{border:1px solid var(--border);border-radius:var(--r-md);padding:11px 14px;background:var(--surface)}
-  #kis-panel .kis-l{font-size:12px;color:var(--sub);font-weight:500}
-  #kis-panel .kis-v{font-size:21px;font-weight:600;letter-spacing:-.02em;margin:2px 0;font-variant-numeric:tabular-nums}
-  #kis-panel .kis-s{font-size:11.5px;color:var(--sub);line-height:1.35}
-  #kis-panel .kis-k.is-auf{border-color:color-mix(in srgb, var(--danger) 45%, var(--border))}
-  #kis-panel .kis-k.is-auf .kis-v{color:var(--danger-ink)}
-  #kis-panel .kis-k.is-ok .kis-v{color:var(--good-ink)}
-  #kis-panel .kis-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
-  #kis-panel .kis-h{font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:6px}
-  #kis-panel .kis-teile{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
-  #kis-panel .kis-t{background:var(--surface-tint);border-radius:var(--r-sm);padding:7px 10px;min-width:0}
-  #kis-panel .kis-t b{display:block;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
-  #kis-panel .kis-t span{display:block;font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #kis-panel .kis-t.is-leer b{color:var(--warn-ink)}
-  #kis-panel .kis-chart{margin:4px 0 12px}
-  #kis-panel .kis-chart svg{width:100%;height:130px;display:block}
-  #kis-panel .kis-forms{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px}
-  #kis-panel .kis-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-  #kis-panel .kis-form input,#kis-panel .kis-form select{padding:6px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
-  #kis-panel details{border-top:1px solid var(--border-soft);padding:8px 0 2px}
-  #kis-panel summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink-2)}
-  #kis-panel summary .kis-s{display:inline;font-weight:400}
-  #kis-panel .kis-zeile{display:grid;grid-template-columns:78px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--border-soft);font-size:12.5px}
-  #kis-panel .kis-zeile:last-child{border-bottom:0}
-  #kis-panel .kis-zeile .mono{font-variant-numeric:tabular-nums}
-  #kis-panel .kis-zeile .kis-s{display:block}
+  #adm-pane-kapital .kis-k3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}
+  #adm-pane-kapital .kis-k{border:1px solid var(--border);border-radius:var(--r-md);padding:11px 14px;background:var(--surface)}
+  #adm-pane-kapital .kis-l{font-size:12px;color:var(--sub);font-weight:500}
+  #adm-pane-kapital .kis-v{font-size:21px;font-weight:600;letter-spacing:-.02em;margin:2px 0;font-variant-numeric:tabular-nums}
+  #adm-pane-kapital .kis-s{font-size:11.5px;color:var(--sub);line-height:1.35}
+  #adm-pane-kapital .kis-k.is-auf{border-color:color-mix(in srgb, var(--danger) 45%, var(--border))}
+  #adm-pane-kapital .kis-k.is-auf .kis-v{color:var(--danger-ink)}
+  #adm-pane-kapital .kis-k.is-ok .kis-v{color:var(--good-ink)}
+  #adm-pane-kapital .kis-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
+  #adm-pane-kapital .kis-h{font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:6px}
+  #adm-pane-kapital .kis-teile{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+  #adm-pane-kapital .kis-t{background:var(--surface-tint);border-radius:var(--r-sm);padding:7px 10px;min-width:0}
+  #adm-pane-kapital .kis-t b{display:block;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+  #adm-pane-kapital .kis-t span{display:block;font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-kapital .kis-t.is-leer b{color:var(--warn-ink)}
+  #adm-pane-kapital .kis-chart{margin:4px 0 12px}
+  #adm-pane-kapital .kis-chart svg{width:100%;height:130px;display:block}
+  #adm-pane-kapital .kis-forms{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px}
+  #adm-pane-kapital .kis-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  #adm-pane-kapital .kis-form input,#adm-pane-kapital .kis-form select{padding:6px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
+  #adm-pane-kapital details{border-top:1px solid var(--border-soft);padding:8px 0 2px}
+  #adm-pane-kapital summary{cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink-2)}
+  #adm-pane-kapital summary .kis-s{display:inline;font-weight:400}
+  #adm-pane-kapital .kis-zeile{display:grid;grid-template-columns:78px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--border-soft);font-size:12.5px}
+  #adm-pane-kapital .kis-zeile:last-child{border-bottom:0}
+  #adm-pane-kapital .kis-split > .panel{margin:0}
+  #adm-pane-kapital > #kis-body > .kis-split{margin-bottom:14px}
+  #adm-pane-kapital .kis-gk-liste{margin-top:8px;max-height:320px;overflow:auto}
+  #adm-pane-kapital .kis-zeile .kis-s{display:block}
+  #adm-pane-kapital .kis-zeile .mono{font-variant-numeric:tabular-nums}
+  #adm-pane-kapital .kis-zeile .kis-s{display:block}
   @media (max-width:760px){
-    #kis-panel .kis-k3,#kis-panel .kis-split,#kis-panel .kis-forms{grid-template-columns:1fr}
-    #kis-panel .kis-zeile{grid-template-columns:64px minmax(0,1fr) auto}
-    #kis-panel .kis-zeile > :nth-child(4){grid-column:2 / -1;justify-self:start}
+    #adm-pane-kapital .kis-k3,#adm-pane-kapital .kis-split,#adm-pane-kapital .kis-forms{grid-template-columns:1fr}
+    #adm-pane-kapital .kis-zeile{grid-template-columns:64px minmax(0,1fr) auto}
+    #adm-pane-kapital .kis-zeile > :nth-child(4){grid-column:2 / -1;justify-self:start}
   }
   /* „Mehr anzeigen" blieb trotz hidden sichtbar und zeigte „(4 von 4)" — .btn setzt
      display:flex und schlägt damit das hidden-Attribut (18.09.2026 beim Transfer-Feed
@@ -11830,6 +11834,8 @@
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
+          <!-- Kapital (29.10.2026, Finn: Fusion-Report, Geschäftskonto, „insgesamt geparkt“ je Gruppe) — nur Voll-Admins (KASSE_REITER_HT + Server-Gate) -->
+          <button class="subtab adm-tab" data-admtab="kapital">Kapital</button>
           <!-- Kompass + Rechnungen ganz rechts unter „sperren", klein und gedämpft (Finn 30.09.2026: „ganz nach rechts, unter das
                ‚sperren', wo man sie quasi nicht sieht. Braucht man eh nicht, fast ganz weg, aber behalten") — Pane/Umschaltung unverändert -->
           <!-- Kompass + Rechnungen AUSGEBLENDET (29.10.2026, Finn: „Im Admin-Terminal aufräumen, es wird zu viel. Kompass komplett weg, visuell
@@ -12962,62 +12968,85 @@
 
         <!-- META WALLET (24.08.2026): Stable-Bestände (USDT + USDC) der MetaMask-Wallets aller Personen.
              Watch-only über die öffentlichen Adressen — hier landen NIE Keys oder Seeds. -->
-        <div id="adm-pane-wallet" hidden>
-          <!-- KAPITAL IM SYSTEM (29.10.2026, Finn: 50 % an der Emin-Gruppe, „eine Zahl, die zeigt, ob Geld abgezweigt wird"). Ist = Wallets +
-               Fusion (von Hand) + Gesamtkosten der laufenden Ketten + offene Payouts; Soll = Einlagen − Reibung + Gewinne. Daten nur über
-               Railway /admin/kapital (kapital_app.py, Gate wie Kunden-Zahlungen: nur Voll-Admins) — eigene Gruppenwahl, weil Meta Wallet
-               in der HT-Sicht die Emin-IDs ausblendet. Eigene Verdrahtung kis* im Modul. -->
-          <div class="panel" id="kis-panel" hidden style="margin-bottom:14px">
-            <div class="panel-head">
-              <div>
-                <div class="panel-title">Kapital im System</div>
-                <div class="panel-sub" id="kis-sub">Erhaltungs-Zahl je Gruppe — in US-Dollar</div>
+        <!-- KAPITAL (29.10.2026, Finn: 50 % an der Emin-Gruppe, „eine Zahl, die zeigt, ob Geld abgezweigt wird"; Nachtrag über die
+             Vertrags-Session: eigener Admin-Bereich, „wo man dann auch immer die Geschäftskonten hat und Geschäftskontentransaktionen
+             hinzufügen kann, wie in so einem Google-Sheet … Kunden bezahlen oder PCs kaufen", alles in EUR). Drei Blöcke: Fusion-Report,
+             Geschäftskonto, „insgesamt geparkt" = Wallets + Fusion + Geschäftskonto + Kontowerte (Gesamtkosten wie die Accounts-Kachel).
+             Daten nur über Railway /admin/kapital (kapital_app.py, Gate wie Kunden-Zahlungen: nur Voll-Admins). Eigene Gruppenwahl, weil
+             die übrigen Admin-Reiter in der HT-Sicht die Emin-IDs ausblenden. Eigene Verdrahtung kis* im Modul. -->
+        <div id="adm-pane-kapital" hidden>
+          <div class="adm-toolbar">
+            <select id="kis-gruppe" class="adm-f" title="Gruppe"></select>
+            <button class="btn btn-ghost" id="kis-refresh" title="Neu rechnen" style="padding:8px 12px">↻</button>
+            <span id="kis-sub" style="font-size:12px;color:var(--sub)"></span>
+          </div>
+          <div id="kis-msg" style="color:var(--sub);font-size:13px;padding:14px 2px">Lade…</div>
+          <div id="kis-body" hidden>
+            <div class="kis-k3">
+              <div class="kis-k"><div class="kis-l">Insgesamt geparkt</div><div class="kis-v" id="kis-ist">–</div><div class="kis-s" id="kis-ist-s"></div></div>
+              <div class="kis-k"><div class="kis-l">Soll</div><div class="kis-v" id="kis-soll">–</div><div class="kis-s" id="kis-soll-s"></div></div>
+              <div class="kis-k" id="kis-abw-k"><div class="kis-l">Abweichung</div><div class="kis-v" id="kis-abw">–</div><div class="kis-s" id="kis-abw-s"></div></div>
+            </div>
+
+            <div class="kis-split">
+              <!-- (a) FUSION-REPORT -->
+              <div class="panel">
+                <div class="panel-head"><div><div class="panel-title">Fusion-Report</div><div class="panel-sub" id="kis-fus-sub"></div></div></div>
+                <div class="kis-teile" id="kis-fus-teile"></div>
+                <div class="kis-h" style="margin-top:10px">Von Hand eintragen <span class="kis-s" style="font-weight:400">— nur Rückfall, wenn kein PC-Tab Fusion liest</span></div>
+                <div class="kis-form">
+                  <input id="kis-f-betrag" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Equity €" style="width:110px">
+                  <input id="kis-f-datum" type="date" title="Stand vom">
+                  <button class="btn btn-ghost" id="kis-f-ok" style="padding:6px 12px;font-size:12.5px">Speichern</button>
+                </div>
               </div>
-              <div style="display:flex;gap:6px;align-items:center">
-                <select id="kis-gruppe" class="adm-f" title="Gruppe"></select>
-                <button class="btn btn-ghost" id="kis-refresh" title="Neu rechnen" style="padding:7px 12px">↻</button>
+              <!-- (b) GESCHÄFTSKONTO -->
+              <div class="panel">
+                <div class="panel-head"><div><div class="panel-title">Geschäftskonto</div><div class="panel-sub" id="kis-gk-sub"></div></div>
+                  <div class="kis-v" id="kis-gk-stand" style="font-size:18px">–</div></div>
+                <div class="kis-form">
+                  <input id="kis-g-datum" type="date" title="Datum">
+                  <select id="kis-g-richtung" title="Richtung"><option value="1">Eingang +</option><option value="-1">Ausgang −</option></select>
+                  <input id="kis-g-betrag" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Betrag €" style="width:100px">
+                  <select id="kis-g-kat" title="Kategorie"></select>
+                  <input id="kis-g-text" type="text" placeholder="Text (z. B. Kunde Carsten, PC Marc)" style="flex:1;min-width:140px">
+                  <button class="btn btn-primary" id="kis-g-ok" style="padding:6px 12px;font-size:12.5px">Buchen</button>
+                </div>
+                <div class="kis-gk-liste" id="kis-gk-liste"></div>
               </div>
             </div>
-            <div id="kis-msg" style="color:var(--sub);font-size:13px;padding:6px 2px">Lade…</div>
-            <div id="kis-body" hidden>
-              <div class="kis-k3">
-                <div class="kis-k"><div class="kis-l">Kapital im System</div><div class="kis-v" id="kis-ist">–</div><div class="kis-s" id="kis-ist-s"></div></div>
-                <div class="kis-k"><div class="kis-l">Soll</div><div class="kis-v" id="kis-soll">–</div><div class="kis-s" id="kis-soll-s"></div></div>
-                <div class="kis-k" id="kis-abw-k"><div class="kis-l">Abweichung</div><div class="kis-v" id="kis-abw">–</div><div class="kis-s" id="kis-abw-s"></div></div>
-              </div>
-              <div class="kis-split">
+
+            <!-- (c) INSGESAMT GEPARKT -->
+            <div class="panel" style="margin-bottom:14px">
+              <div class="panel-head"><div><div class="panel-title">Insgesamt geparkt</div>
+                <div class="panel-sub">Wallets + Fusion + Geschäftskonto + Kontowerte (Kauf + bisherige Hedge-Verluste je Kette, im Plus = 0) + offene Payouts</div></div></div>
+              <div class="kis-split" style="margin-bottom:12px">
                 <div><div class="kis-h">Ist setzt sich zusammen</div><div class="kis-teile" id="kis-ist-teile"></div></div>
                 <div><div class="kis-h">Soll setzt sich zusammen</div><div class="kis-teile" id="kis-soll-teile"></div></div>
               </div>
-              <div class="kis-h">Verlauf — Kapital im System gegen Soll</div>
+              <div class="kis-h">Verlauf — insgesamt geparkt gegen Soll</div>
               <div class="kis-chart" id="kis-chart"></div>
-              <div class="kis-forms">
-                <div>
-                  <div class="kis-h">Einlage buchen</div>
-                  <div class="kis-form">
-                    <input id="kis-e-betrag" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Betrag $" style="width:100px">
-                    <input id="kis-e-datum" type="date" title="Datum der Einlage">
-                    <input id="kis-e-ziel" type="text" placeholder="Ziel-Wallet (z. B. Kasse)" style="flex:1;min-width:120px">
-                    <input id="kis-e-notiz" type="text" placeholder="Notiz (wer)" style="flex:1;min-width:100px">
-                    <button class="btn btn-primary" id="kis-e-ok" style="padding:6px 12px;font-size:12.5px">Buchen</button>
-                  </div>
-                </div>
-                <div>
-                  <div class="kis-h">Fusion-Balance eintragen</div>
-                  <div class="kis-form">
-                    <input id="kis-f-betrag" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Balance" style="width:100px">
-                    <select id="kis-f-waehrung"><option value="EUR">€</option><option value="USD">$</option></select>
-                    <input id="kis-f-datum" type="date" title="Stand vom">
-                    <button class="btn btn-primary" id="kis-f-ok" style="padding:6px 12px;font-size:12.5px">Speichern</button>
-                  </div>
-                </div>
+            </div>
+
+            <div class="panel">
+              <div class="kis-h">Einlage buchen</div>
+              <div class="kis-form" style="margin-bottom:6px">
+                <input id="kis-e-betrag" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Betrag" style="width:100px">
+                <select id="kis-e-waehrung"><option value="EUR">€</option><option value="USD">$</option></select>
+                <input id="kis-e-datum" type="date" title="Datum der Einlage">
+                <input id="kis-e-ziel" type="text" placeholder="Ziel (z. B. Kasse, Geschäftskonto)" style="flex:1;min-width:120px">
+                <input id="kis-e-notiz" type="text" placeholder="Notiz (wer)" style="flex:1;min-width:100px">
+                <button class="btn btn-primary" id="kis-e-ok" style="padding:6px 12px;font-size:12.5px">Buchen</button>
               </div>
               <div id="kis-form-msg" style="font-size:12px;color:var(--sub);min-height:15px;margin-bottom:4px"></div>
+              <details id="kis-einl"><summary>Einlagen <span class="kis-s" id="kis-einl-s"></span></summary><div id="kis-einl-liste"></div></details>
               <details id="kis-abfl"><summary>Abflüsse ohne Erklärung <span class="kis-s" id="kis-abfl-s"></span></summary><div id="kis-abfl-liste"></div></details>
               <details id="kis-zufl"><summary>Zuflüsse ohne Erklärung — als Einlage buchen? <span class="kis-s" id="kis-zufl-s"></span></summary><div id="kis-zufl-liste"></div></details>
-              <details id="kis-einl"><summary>Einlagen <span class="kis-s" id="kis-einl-s"></span></summary><div id="kis-einl-liste"></div></details>
             </div>
           </div>
+        </div>
+
+        <div id="adm-pane-wallet" hidden>
           <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:color-mix(in srgb, var(--danger) 8%, transparent);border:1px solid color-mix(in srgb, var(--danger) 30%, transparent);font-size:12.5px;color:var(--sub)">
             Tabellen <code>id_wallets</code>/<code>wallet_snapshots</code> fehlen noch — bitte <code>sql/2026-08-24_id_wallets.sql</code> im Supabase SQL-Editor ausführen.
           </div>
@@ -15175,7 +15204,7 @@
     // Trade-Planer für Verwalter seit 09.10.2026 aus — seit 13.10.2026 WIEDER AN (Gruppen-Planer, Finn: „genau so soll er in seinem
     // Admin-Panel die Trades bestätigen, genau in der gleichen Ansicht wie Hermann Technologies"): der Server liefert ihm dort nur seine
     // Gruppe (sicht=admin → ap_sicht_uid/ap_eingriff_sicht), Planer-Haken (HT user_ids) bleiben 403
-    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail', 'kontomail'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter; kontomail (29.10.2026) ebenso
+    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail', 'kontomail', 'kapital'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter; kontomail (29.10.2026) ebenso; kapital (29.10.2026) bis Finn es freigibt
     const admEingeschraenkt = () => !!(admData && Array.isArray(admData.sicht_ids))
     const admIstVerwalter = () => !!(admData && admData.verwalter)
     function kasseReiterErlaubt(name, ec){
@@ -18765,7 +18794,7 @@
       if(walOpened){ return }
       walOpened = true
       // Feed erst nach den Balances — beide reden mit TronGrid (1 Req/s keyless)
-      walLoad().then(walRefreshBalances).then(() => walFeedLoad(false)).then(() => window._kisNachWallets?.())   // Kapital im System mit frischen Snapshots neu rechnen (29.10.2026)
+      walLoad().then(walRefreshBalances).then(() => walFeedLoad(false))
     }
 
     async function walLoad(){
@@ -20192,20 +20221,24 @@
       }
     }
 
-    /* ── KAPITAL IM SYSTEM (29.10.2026, Finn: 50 % an der Emin-Gruppe, legt 5.000 $ nach — „eine Zahl, die zeigt, ob Geld abgezweigt
-     * wird") ── Rechnung komplett auf Railway (kapital_app.py, /admin/kapital, nur Voll-Admins): Ist = Wallets + Fusion (von Hand) +
-     * Gesamtkosten der laufenden Ketten (Boden 0, wie die Accounts-Kachel) + offene Payouts; Soll = Einlagen − Reibung beendeter Ketten +
-     * Gewinne − Gebühren/Swaps − Ausschüttungen. Hier nur zeichnen, Einlage/Fusion buchen, Zufluss als Einlage übernehmen. Reine
-     * Finanzübersicht. Antwortet der Server 403 (Verwalter, „nur eigene"), bleibt die Karte unsichtbar. */
+    /* ── KAPITAL (29.10.2026, Finn: 50 % an der Emin-Gruppe, legt 5.000 $ nach — „eine Zahl, die zeigt, ob Geld abgezweigt wird"; Nachtrag:
+     * eigener Admin-Reiter mit Fusion-Report, Geschäftskonto „wie in so einem Google-Sheet" und „insgesamt geparkt", alles in EUR) ──
+     * Rechnung komplett auf Railway (kapital_app.py, /admin/kapital, nur Voll-Admins): Ist = Wallets (EZB-Tageskurs) + Fusion (live aus
+     * mt5_live, Equity, Hand-Eingabe nur Rückfall) + Geschäftskonto + Gesamtkosten der laufenden Ketten (Boden 0, wie die Accounts-Kachel)
+     * + offene Payouts; Soll = Einlagen − Reibung beendeter Ketten + Gewinne − Gebühren/Swaps − Ausschüttungen + Geschäftskonto außer
+     * „Umbuchung Krypto". Hier nur zeichnen und buchen. Reine Finanzübersicht. Antwortet der Server 403, bleibt der Bereich leer. */
     let kisDaten = null, kisGruppe = '', kisLaeuft = false
     try{ kisGruppe = localStorage.getItem('prophos_kis_gruppe') || '' }catch(_){}
-    const kisUsd = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
     const kisEur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
-    const kisVz = v => (v > 0 ? '+' : v < 0 ? '−' : '') + kisUsd.format(Math.abs(v))
+    const kisEur2 = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const kisUsd = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+    const kisVz = v => (v > 0 ? '+' : v < 0 ? '−' : '') + kisEur.format(Math.abs(v))
     const kisTag = iso => { const s = String(iso || '').slice(0, 10).split('-'); return s.length === 3 ? `${s[2]}.${s[1]}.` : '–' }
+    const kisZeit = iso => { const d = new Date(iso); return isNaN(d) ? '–' : d.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) }
     const kisKurz = a => { a = String(a || ''); return a.length > 14 ? a.slice(0, 6) + '…' + a.slice(-4) : a }
     const kisHeute = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
     const kisTeil = (titel, wert, sub, leer) => `<div class="kis-t${leer ? ' is-leer' : ''}" title="${escapeHtml(sub || '')}"><b>${wert}</b><span>${escapeHtml(titel)}${sub ? ' · ' + escapeHtml(sub) : ''}</span></div>`
+    const kisFehler = t => { const m = $('kis-form-msg'); m.style.color = 'var(--danger)'; m.textContent = t }
 
     function kisChart(v){
       const el = $('kis-chart'); if(!el) return
@@ -20218,8 +20251,8 @@
       const x = i => v.length === 1 ? W / 2 : L + i * (W - L - R) / (v.length - 1)
       const y = w => T + (hi - w) * (H - T - B) / (hi - lo)
       const linie = k => v.map((p, i) => `${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ')
-      const punkte = (k, farbe) => v.length > 12 ? '' : v.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[k]).toFixed(1)}" r="3" fill="${farbe}"><title>${kisTag(p.tag)} ${k === 'ist' ? 'Ist' : 'Soll'} ${kisUsd.format(p[k])}</title></circle>`).join('')
-      el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Kapital im System gegen Soll">
+      const punkte = (k, farbe) => v.length > 12 ? '' : v.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p[k]).toFixed(1)}" r="3" fill="${farbe}"><title>${kisTag(p.tag)} ${k === 'ist' ? 'Geparkt' : 'Soll'} ${kisEur.format(p[k])}</title></circle>`).join('')
+      el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Insgesamt geparkt gegen Soll">
         <line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--border)" stroke-width="1"/>
         <polyline points="${linie('soll')}" fill="none" stroke="var(--sub-2)" stroke-width="1.5" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
         <polyline points="${linie('ist')}" fill="none" stroke="var(--violet)" stroke-width="2" vector-effect="non-scaling-stroke"/>
@@ -20227,7 +20260,7 @@
       </svg>
       <div class="kis-s" style="display:flex;justify-content:space-between;gap:8px">
         <span>${kisTag(v[0].tag)}</span>
-        <span><span style="color:var(--violet)">━</span> Ist · <span style="color:var(--sub-2)">┅</span> Soll${v.length === 1 ? ' · Verlauf startet heute, ein Wert je Tag' : ''}</span>
+        <span><span style="color:var(--violet)">━</span> geparkt · <span style="color:var(--sub-2)">┅</span> Soll${v.length === 1 ? ' · Verlauf startet heute, ein Wert je Tag' : ''}</span>
         <span>${kisTag(v[v.length - 1].tag)}</span>
       </div>`
     }
@@ -20239,7 +20272,7 @@
       return `<div class="kis-zeile">
         <span class="mono">${kisTag(z.ts)}</span>
         <span style="min-width:0"><span class="mono" title="${escapeHtml(z.an || '')}">${escapeHtml(z.person || '')} ${z.chain ? '· ' + escapeHtml(z.chain) : ''} → ${escapeHtml(kisKurz(z.an))}</span>${link}<span class="kis-s">${escapeHtml(was)}</span></span>
-        <span class="mono" style="font-weight:600">${kisUsd.format(z.betrag)} <span class="kis-s" style="display:inline">${escapeHtml(z.sym || '')}</span></span>
+        <span class="mono" style="font-weight:600;text-align:right">${kisEur.format(z.betrag_eur)}<span class="kis-s">${kisUsd.format(z.betrag)} ${escapeHtml(z.sym || '')}</span></span>
         <span>${knopf || ''}</span>
       </div>`
     }
@@ -20251,80 +20284,104 @@
         sel.innerHTML = (d.gruppen || []).map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.ht ? 'Hermann Technologies' : g.name)}</option>`).join('')
         sel.value = d.gruppe?.id || ''
       }
-      const ist = d.ist || {}, soll = d.soll || {}
-      $('kis-sub').textContent = `${d.gruppe?.name || ''} · Stand ${kisTag(d.generated)} · in US-Dollar, Konten zum Kurs ${Number(d.fx || 0.85).toLocaleString('de-DE')} €/$`
-      $('kis-ist').textContent = kisUsd.format(ist.summe || 0)
-      $('kis-ist-s').textContent = 'Wallets + Fusion + laufende Konten + offene Payouts'
-      $('kis-soll').textContent = kisUsd.format(soll.summe || 0)
-      $('kis-soll-s').textContent = soll.einlagen_n ? `${soll.einlagen_n} Einlage${soll.einlagen_n === 1 ? '' : 'n'} − Reibung + Gewinne` : 'Noch keine Einlage gebucht — Soll fehlt die Basis'
+      const ist = d.ist || {}, soll = d.soll || {}, kurs = d.kurs || {}, fr = d.fusion_report || {}
+      const fxTxt = `${Number(kurs.fx || 0).toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/$`
+      $('kis-sub').textContent = `Stand ${kisZeit(d.generated)} · alles in EUR · Wallets zum ${kurs.quelle || 'Kurs'} ${fxTxt}${kurs.stand ? ' vom ' + kisTag(kurs.stand) : ''}`
+      $('kis-ist').textContent = kisEur.format(ist.summe || 0)
+      $('kis-ist-s').textContent = 'Wallets + Fusion + Geschäftskonto + Kontowerte + offene Payouts'
+      $('kis-soll').textContent = kisEur.format(soll.summe || 0)
+      $('kis-soll-s').textContent = soll.einlagen_n ? `${soll.einlagen_n} Einlage${soll.einlagen_n === 1 ? '' : 'n'} − Reibung + Gewinne ± Geschäftskonto` : 'Noch keine Einlage gebucht — dem Soll fehlt die Basis'
       const abw = Number(d.abweichung || 0)
-      $('kis-abw').textContent = kisVz(abw)
-      // „Ausgeglichen bei Einlagen von …": so viel hätten die Investoren insgesamt einzahlen müssen, damit Ist = Soll — der direkte Vergleich
-      // mit dem, was wirklich eingezahlt wurde (solange noch keine Einlage gebucht ist, die einzige lesbare Aussage der Abweichung)
+      // „Ausgeglichen bei Einlagen von …": so viel hätten die Investoren insgesamt einzahlen müssen, damit geparkt = Soll — der direkte
+      // Vergleich mit dem, was wirklich eingezahlt wurde (solange noch keine Einlage gebucht ist, die einzige lesbare Aussage)
       const noetig = Number(soll.einlagen || 0) + abw
-      $('kis-abw-s').textContent = `Toleranz ± ${kisUsd.format(d.toleranz || 0)}` + (d.auffaellig ? ` · ${abw < 0 ? 'fehlt mehr als die Reibung' : 'mehr da als erwartet'}` : ' · im Rahmen der Reibung')
-        + ` · ausgeglichen bei Einlagen von ${kisUsd.format(noetig)}`
+      $('kis-abw').textContent = kisVz(abw)
+      $('kis-abw-s').textContent = `Toleranz ± ${kisEur.format(d.toleranz || 0)}` + (d.auffaellig ? ` · ${abw < 0 ? 'fehlt mehr als die Reibung' : 'mehr da als erwartet'}` : ' · im Rahmen der Reibung')
+        + ` · ausgeglichen bei Einlagen von ${kisEur.format(noetig)}`
       const k = $('kis-abw-k'); k.classList.toggle('is-auf', !!d.auffaellig); k.classList.toggle('is-ok', !d.auffaellig)
 
+      // (a) Fusion-Report
       const f = ist.fusion
+      $('kis-fus-sub').textContent = !f ? 'Kein PC-Tab liest Fusion gerade und kein Stand von Hand — unten eintragen'
+        : f.quelle === 'live' ? `live vom PC-Tab · Konto ${(f.logins || []).join(', ')} · ${f.equity ? 'Equity' : 'Balance'} · ${kisZeit(f.stand)}`
+        : `von Hand eingetragen · Stand ${kisTag(f.stand)} (kein PC-Tab liest Fusion gerade)`
+      $('kis-fus-teile').innerHTML = [
+        f ? kisTeil('Fusion-Kapital', kisEur2.format(f.eur), f.quelle === 'live' ? 'live' : 'von Hand') : kisTeil('Fusion-Kapital', 'fehlt', 'unten eintragen', true),
+        kisTeil('Hedge-Ergebnis', kisVz(fr.hedge_ergebnis || 0), 'alle Ketten laut Prophos'),
+        kisTeil('Eingezahlt', kisEur.format(fr.einzahlungen || 0), 'Wallets → Fusion'),
+        kisTeil('Ausgezahlt', kisEur.format(fr.auszahlungen || 0), 'Fusion → Wallets'),
+      ].join('')
+
+      // (b) Geschäftskonto
+      const gb = d.gk_buchungen || []
+      $('kis-gk-stand').textContent = kisEur2.format(ist.geschaeftskonto || 0)
+      $('kis-gk-sub').textContent = gb.length ? `${gb.length} Buchung${gb.length === 1 ? '' : 'en'} · Einnahmen ${kisEur.format(soll.gk_einnahmen || 0)} · Ausgaben ${kisEur.format(soll.gk_ausgaben || 0)}`
+        : 'Noch keine Buchung — zuerst den Anfangsstand buchen'
+      const ks = $('kis-g-kat')
+      if(ks && !ks.options.length) ks.innerHTML = (d.gk_kategorien || []).map(c => `<option>${escapeHtml(c)}</option>`).join('')
+      $('kis-gk-liste').innerHTML = gb.map(g => `<div class="kis-zeile">
+          <span class="mono">${kisTag(g.datum)}</span>
+          <span style="min-width:0">${escapeHtml(g.text || '–')}<span class="kis-s">${escapeHtml(g.kategorie)}${g.kategorie === 'Umbuchung Krypto' ? ' · zählt nicht ins Soll' : ''}</span></span>
+          <span class="mono" style="font-weight:600;text-align:right;color:${g.betrag < 0 ? 'var(--danger-ink)' : 'var(--good-ink)'}">${g.betrag < 0 ? '−' : '+'}${(g.waehrung === 'USD' ? kisUsd : kisEur2).format(Math.abs(g.betrag))}</span>
+          <span><button class="btn btn-ghost kis-gk-weg" data-id="${escapeHtml(g.id)}" title="Buchung löschen" style="padding:4px 9px;font-size:12px">✕</button></span>
+        </div>`).join('')
+
+      // (c) Insgesamt geparkt
       $('kis-ist-teile').innerHTML = [
-        kisTeil('Wallets', kisUsd.format(ist.wallets || 0), `${ist.wallets_n || 0} von ${ist.wallets_gesamt_n || 0} mit Stand${ist.wallets_tag ? ' · ' + kisTag(ist.wallets_tag) : ''}`),
-        f ? kisTeil('Fusion', kisUsd.format(f.betrag_usd), `${f.waehrung === 'EUR' ? kisEur.format(f.betrag) : kisUsd.format(f.betrag)} · ${kisTag(f.stand_am)}`)
-          : kisTeil('Fusion', 'fehlt', 'unten eintragen', true),
-        kisTeil('Laufende Konten', kisUsd.format(ist.konten || 0), `${ist.konten_n || 0} Ketten · ${kisEur.format(ist.konten_eur || 0)}${ist.konten_plus_n ? ` · ${ist.konten_plus_n} im Plus = 0` : ''}`),
-        kisTeil('Offene Payouts', kisUsd.format(ist.payouts_offen || 0), `${ist.payouts_offen_n || 0} beantragt`),
+        kisTeil('Wallets', kisEur.format(ist.wallets || 0), `${kisUsd.format(ist.wallets_usd || 0)} · ${ist.wallets_n || 0} von ${ist.wallets_gesamt_n || 0} mit Stand${ist.wallets_tag ? ' · ' + kisTag(ist.wallets_tag) : ''}`),
+        f ? kisTeil('Fusion', kisEur.format(f.eur), f.quelle === 'live' ? 'live' : 'von Hand · ' + kisTag(f.stand)) : kisTeil('Fusion', 'fehlt', 'im Fusion-Report eintragen', true),
+        kisTeil('Geschäftskonto', kisEur.format(ist.geschaeftskonto || 0), `${ist.gk_n || 0} Buchungen`, !ist.gk_n),
+        kisTeil('Kontowerte', kisEur.format(ist.konten || 0), `${ist.konten_n || 0} laufende Ketten${ist.konten_plus_n ? ` · ${ist.konten_plus_n} im Plus = 0` : ''}`),
+        kisTeil('Offene Payouts', kisEur.format(ist.payouts_offen || 0), `${ist.payouts_offen_n || 0} beantragt`),
       ].join('')
       $('kis-soll-teile').innerHTML = [
-        kisTeil('Einlagen', kisUsd.format(soll.einlagen || 0), `${soll.einlagen_n || 0} gebucht`, !soll.einlagen_n),
-        kisTeil('Reibung', '−' + kisUsd.format(soll.reibung || 0), `${soll.beendet_n || 0} beendete Ketten · ${kisEur.format(soll.reibung_eur || 0)} nicht vom Hedge zurück`),
-        kisTeil('Gewinne', '+' + kisUsd.format(soll.gewinne || 0), `Ketten im Plus · ${kisEur.format(soll.gewinne_eur || 0)}`),
-        kisTeil('Gebühren + Swaps', '−' + kisUsd.format(soll.krypto_reibung || 0), `Gebühr ${kisUsd.format(soll.gebuehren || 0)} · Swap ${kisUsd.format(soll.swap_saldo || 0)}`),
-        ...(soll.ausschuettungen ? [kisTeil('Ausschüttungen', '−' + kisUsd.format(soll.ausschuettungen), 'Profit Split / Bank')] : []),
+        kisTeil('Einlagen', kisEur.format(soll.einlagen || 0), `${soll.einlagen_n || 0} gebucht`, !soll.einlagen_n),
+        kisTeil('Reibung', '−' + kisEur.format(soll.reibung || 0), `${soll.beendet_n || 0} beendete Ketten, nicht vom Hedge zurück`),
+        kisTeil('Gewinne', '+' + kisEur.format(soll.gewinne || 0), 'Ketten im Plus'),
+        kisTeil('Gebühren + Swaps', '−' + kisEur.format(soll.krypto_reibung || 0), `Gebühr ${kisEur.format(soll.gebuehren || 0)} · Swap ${kisEur.format(soll.swap_saldo || 0)}`),
+        kisTeil('Geschäftskonto', kisVz(soll.geschaeftskonto || 0), 'Buchungen ohne Umbuchung Krypto'),
+        ...(soll.ausschuettungen ? [kisTeil('Ausschüttungen', '−' + kisEur.format(soll.ausschuettungen), 'Profit Split')] : []),
       ].join('')
       kisChart(d.verlauf || [])
 
       const gf = d.gefiltert || {}
-      $('kis-abfl-s').textContent = `· ${d.abfluesse_n || 0} · ${kisUsd.format(d.abfluesse_summe || 0)} · ausgefiltert: ${gf.null || 0} Null-Transfers, ${gf.fake || 0} fremde Token, ${gf.poisoning || 0} Lookalike-Adressen`
+      $('kis-abfl-s').textContent = `· ${d.abfluesse_n || 0} · ${kisEur.format(d.abfluesse_summe || 0)} · ausgefiltert: ${gf.null || 0} Null-Transfers, ${gf.fake || 0} fremde Token, ${gf.poisoning || 0} Lookalike-Adressen`
       $('kis-abfl-liste').innerHTML = (d.abfluesse || []).map(z => kisZeile(z)).join('') || '<div class="kis-s" style="padding:6px 2px">Keine — jeder Abfluss ist als Account-Kauf, Fusion, Gebühr, Swap oder interner Transfer erklärt.</div>'
       $('kis-abfl').open = !!d.auffaellig && !!(d.abfluesse || []).length
-      $('kis-zufl-s').textContent = `· ${d.zufluesse_n || 0} · ${kisUsd.format(d.zufluesse_summe || 0)}`
+      $('kis-zufl-s').textContent = `· ${d.zufluesse_n || 0} · ${kisEur.format(d.zufluesse_summe || 0)}`
       $('kis-zufl-liste').innerHTML = (d.zufluesse || []).map(z => kisZeile(z,
         `<button class="btn btn-ghost kis-als-einlage" data-key="${escapeHtml(z.key || '')}" style="padding:4px 9px;font-size:12px">als Einlage</button>`)).join('')
         || '<div class="kis-s" style="padding:6px 2px">Keine.</div>'
       const el = d.einlagen || []
-      $('kis-einl-s').textContent = `· ${el.length} · ${kisUsd.format(soll.einlagen || 0)}`
+      $('kis-einl-s').textContent = `· ${el.length} · ${kisEur.format(soll.einlagen || 0)}`
       $('kis-einl-liste').innerHTML = el.slice().reverse().map(e => `<div class="kis-zeile">
           <span class="mono">${kisTag(e.datum)}</span>
           <span style="min-width:0">${escapeHtml(e.ziel_wallet || '–')}<span class="kis-s">${escapeHtml(e.notiz || '')}</span></span>
-          <span class="mono" style="font-weight:600">${kisUsd.format(e.betrag_usd)}</span>
+          <span class="mono" style="font-weight:600;text-align:right">${kisEur.format(e.betrag_eur)}${e.waehrung === 'USD' ? `<span class="kis-s">${kisUsd.format(e.betrag)}</span>` : ''}</span>
           <span><button class="btn btn-ghost kis-einl-weg" data-id="${escapeHtml(e.id)}" title="Einlage löschen" style="padding:4px 9px;font-size:12px">✕</button></span>
         </div>`).join('') || '<div class="kis-s" style="padding:6px 2px">Noch keine Einlage — oben buchen oder einen Zufluss übernehmen.</div>'
     }
 
     async function kisLaden(){
-      const p = $('kis-panel'); if(!p || kisLaeuft) return
-      if(admEingeschraenkt()){ p.hidden = true; return }
+      if(kisLaeuft || !$('adm-pane-kapital')) return
       kisLaeuft = true
       const msg = $('kis-msg')
       if(!kisDaten){ msg.style.display = ''; msg.textContent = 'Lade…' }
       try{
         const r = await rgApi('/admin/kapital' + (kisGruppe ? '?gruppe=' + encodeURIComponent(kisGruppe) : ''), { raw: true })
-        if(r.status === 403 || r.status === 401){ p.hidden = true; return }
         const d = await r.json().catch(() => ({}))
+        if(r.status === 403 || r.status === 401){ msg.style.display = ''; msg.textContent = 'Nur für Voll-Admins.'; return }
         if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
-        p.hidden = false
         kisDaten = d; kisGruppe = d.gruppe?.id || kisGruppe
         msg.style.display = 'none'; $('kis-body').hidden = false
         kisRender()
       }catch(e){
-        p.hidden = false
-        msg.style.display = ''; msg.textContent = 'Kapital im System nicht verfügbar: ' + (e.message || e)
+        msg.style.display = ''; msg.textContent = 'Kapital nicht verfügbar: ' + (e.message || e)
         console.warn('[kapital] laden:', e)
       }finally{ kisLaeuft = false }
     }
     function kisOeffnen(){
-      if(!$('kis-e-datum').value) $('kis-e-datum').value = kisHeute()
-      if(!$('kis-f-datum').value) $('kis-f-datum').value = kisHeute()
+      for(const id of ['kis-e-datum', 'kis-f-datum', 'kis-g-datum']) if(!$(id).value) $(id).value = kisHeute()
       kisLaden()
     }
     async function kisSenden(pfad, methode, body, btn){
@@ -20335,41 +20392,52 @@
         await kisLaden()
         return true
       }catch(e){
-        m.style.color = 'var(--danger)'; m.textContent = 'Fehler: ' + (e.message || e)
+        kisFehler('Fehler: ' + (e.message || e))
         return false
       }finally{ if(btn) btn.disabled = false }
     }
-    window._kisNachWallets = () => { if(!$('kis-panel')?.hidden) kisLaden() }
     $('kis-refresh')?.addEventListener('click', () => kisLaden())
     $('kis-gruppe')?.addEventListener('change', ev => {
       kisGruppe = ev.target.value; try{ localStorage.setItem('prophos_kis_gruppe', kisGruppe) }catch(_){}
       kisDaten = null; $('kis-body').hidden = true; kisLaden()
     })
+    // Kategorie wählt die übliche Richtung vor (PC-Kauf/Ausgabe/Entnahme = Ausgang), änderbar
+    $('kis-g-kat')?.addEventListener('change', ev => { $('kis-g-richtung').value = /PC-Kauf|Ausgabe|Entnahme/.test(ev.target.value) ? '-1' : '1' })
     $('kis-e-ok')?.addEventListener('click', async ev => {
       const betrag = Number($('kis-e-betrag').value)
-      if(!(betrag > 0)){ $('kis-form-msg').style.color = 'var(--danger)'; $('kis-form-msg').textContent = 'Betrag in $ eingeben'; return }
-      const ok = await kisSenden('/admin/kapital/einlage', 'POST', { gruppe: kisGruppe, betrag_usd: betrag, datum: $('kis-e-datum').value,
+      if(!(betrag > 0)) return kisFehler('Betrag eingeben')
+      const w = $('kis-e-waehrung').value
+      const ok = await kisSenden('/admin/kapital/einlage', 'POST', { gruppe: kisGruppe, betrag, waehrung: w, datum: $('kis-e-datum').value,
         ziel_wallet: $('kis-e-ziel').value, notiz: $('kis-e-notiz').value }, ev.currentTarget)
-      if(ok){ $('kis-e-betrag').value = ''; $('kis-e-notiz').value = ''; $('kis-form-msg').textContent = `Einlage ${kisUsd.format(betrag)} gebucht.` }
+      if(ok){ $('kis-e-betrag').value = ''; $('kis-e-notiz').value = ''; $('kis-form-msg').textContent = `Einlage ${(w === 'USD' ? kisUsd : kisEur).format(betrag)} gebucht.` }
     })
     $('kis-f-ok')?.addEventListener('click', async ev => {
       const raw = $('kis-f-betrag').value
-      if(raw === '' || !(Number(raw) >= 0)){ $('kis-form-msg').style.color = 'var(--danger)'; $('kis-form-msg').textContent = 'Fusion-Balance eingeben'; return }
-      const ok = await kisSenden('/admin/kapital/fusion', 'POST', { gruppe: kisGruppe, betrag: Number(raw), waehrung: $('kis-f-waehrung').value,
-        stand_am: $('kis-f-datum').value }, ev.currentTarget)
-      if(ok){ $('kis-f-betrag').value = ''; $('kis-form-msg').textContent = 'Fusion-Stand gespeichert.' }
+      if(raw === '' || !(Number(raw) >= 0)) return kisFehler('Fusion-Equity in € eingeben')
+      const ok = await kisSenden('/admin/kapital/fusion', 'POST', { gruppe: kisGruppe, betrag: Number(raw), waehrung: 'EUR', stand_am: $('kis-f-datum').value }, ev.currentTarget)
+      if(ok){ $('kis-f-betrag').value = ''; $('kis-form-msg').textContent = 'Fusion-Stand gespeichert (zählt nur, solange kein PC-Tab Fusion live liest).' }
     })
-    $('kis-panel')?.addEventListener('click', ev => {
+    $('kis-g-ok')?.addEventListener('click', async ev => {
+      const betrag = Number($('kis-g-betrag').value)
+      if(!(betrag > 0)) return kisFehler('Betrag eingeben')
+      const kat = $('kis-g-kat').value || 'Sonstiges'
+      const ok = await kisSenden('/admin/kapital/gk', 'POST', { gruppe: kisGruppe, datum: $('kis-g-datum').value, betrag: betrag * Number($('kis-g-richtung').value),
+        waehrung: 'EUR', kategorie: kat, text: $('kis-g-text').value }, ev.currentTarget)
+      if(ok){ $('kis-g-betrag').value = ''; $('kis-g-text').value = ''; $('kis-form-msg').textContent = `${kat} gebucht.` }
+    })
+    $('adm-pane-kapital')?.addEventListener('click', ev => {
       const b = ev.target.closest('.kis-als-einlage')
       if(b){
         const z = (kisDaten?.zufluesse || []).find(x => String(x.key) === b.dataset.key); if(!z) return
-        if(!confirm(`Zufluss ${kisUsd.format(z.betrag)} vom ${kisTag(z.ts)} als Einlage buchen?`)) return
-        kisSenden('/admin/kapital/einlage', 'POST', { gruppe: kisGruppe, betrag_usd: z.betrag, datum: String(z.ts || '').slice(0, 10) || kisHeute(),
+        if(!confirm(`Zufluss ${kisUsd.format(z.betrag)} (${kisEur.format(z.betrag_eur)}) vom ${kisTag(z.ts)} als Einlage buchen?`)) return
+        kisSenden('/admin/kapital/einlage', 'POST', { gruppe: kisGruppe, betrag: z.betrag, waehrung: 'USD', datum: String(z.ts || '').slice(0, 10) || kisHeute(),
           ziel_wallet: `${z.person || ''} ${z.chain || ''}`.trim(), notiz: 'aus Zufluss ' + kisKurz(z.an), quelle_tx: z.key }, b)
         return
       }
       const w = ev.target.closest('.kis-einl-weg')
-      if(w && confirm('Einlage löschen?')) kisSenden('/admin/kapital/einlage', 'DELETE', { id: w.dataset.id }, w)
+      if(w && confirm('Einlage löschen?')){ kisSenden('/admin/kapital/einlage', 'DELETE', { id: w.dataset.id }, w); return }
+      const g = ev.target.closest('.kis-gk-weg')
+      if(g && confirm('Buchung löschen?')) kisSenden('/admin/kapital/gk', 'DELETE', { id: g.dataset.id }, g)
     })
 
     function rgOpen(){
@@ -20694,6 +20762,7 @@
         $('adm-pane-kontomail').hidden = !(name === 'mail' && mailSicht === 'konten')   // Konten aus Mail (29.10.2026), seit dem Zusammenlegen nur über den Umschalter
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
+        $('adm-pane-kapital').hidden  = name !== 'kapital'   // Kapital (29.10.2026)
         $('adm-pane-rg').hidden       = name !== 'rg'
         $('adm-pane-wd').hidden       = name !== 'wd'
         $('adm-pane-kompass').hidden  = name !== 'kompass'
@@ -20710,7 +20779,8 @@
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
         admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
-        if(name === 'wallet'){ walOpen(); kisOeffnen() }   // Kapital im System (29.10.2026): Karte oben in Meta Wallet, rechnet je Öffnen neu
+        if(name === 'wallet') walOpen()
+        if(name === 'kapital') kisOeffnen()   // Kapital (29.10.2026): rechnet bei jedem Öffnen neu
         if(name === 'stat') admBuysRender()   // Acc-Käufe unter Statistik (08.10.2026); Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
         if(name === 'konten') admKontenRender()
