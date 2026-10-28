@@ -39682,6 +39682,35 @@
     return d
   }
 
+  /* ── DOPPEL-SCHUTZ (29.10.2026, Finn 04:50: „Wenn der Bot zwei neue External IDs findet, die es eventuell schon in Prophos gibt — die dürfen
+   * nicht zweimal angelegt werden"). saveAccount prüft beim NEU-Anlegen eines Prop-Firm-Kontos, ob die eingeloggte ID schon ein Konto mit
+   * derselben External ID hat — archivierte zählen mit (das Archiv ist nur ein Merker, die Zeile steht weiter in accounts). Erst die lokale Liste,
+   * dann frisch aus der DB (eigene Zeilen per RLS; fängt ein Konto, das auf einem anderen Gerät oder in einem anderen Tab angelegt wurde). Treffer =
+   * gleiche External ID (normiert: Großbuchstaben, Sonderzeichen raus, Apex PA-APEX-685010-01 ↔ PAAPEX6850100000001) oder der Kontoname enthält
+   * sie (ab 8 Zeichen, gegen Zufallstreffer kurzer Nummern). Dann wird NICHT angelegt: Meldung „Gibt es schon: …" mit „Öffnen", die TV-Zeile
+   * zeigt danach „schon in Prophos". Beim Bearbeiten und für Live-Konten gilt die Prüfung nicht. ── */
+  function extIdNorm(v){
+    let t = String(v || '').trim().toUpperCase()
+    if(/^(PA-)?APEX-\d+-\d+$/.test(t) && typeof kontoMailApexExt === 'function') t = kontoMailApexExt(t)
+    return t.replace(/[^A-Z0-9]/g, '')
+  }
+  function kontoDoppelFinden(ext, liste){
+    const k = extIdNorm(ext); if(!k) return null
+    return (liste || []).find(a => extIdNorm(a.externalId ?? a.external_id) === k || (k.length >= 8 && extIdNorm(a.name).includes(k))) || null
+  }
+  function kontoDoppelMelden(doppel, ext){
+    const lokal = (accounts || []).find(x => String(x.id) === String(doppel.id)) || null
+    let arch = false; try{ arch = !!((typeof getArchive === 'function' ? getArchive() : {})[doppel.id]?.archived) }catch(_){}
+    setModalMsg(`Gibt es schon: ${doppel.name || ext}${arch ? ' (archiviert)' : ''} — nicht doppelt angelegt.${lokal ? '' : ' Auf diesem Gerät noch nicht geladen → Seite neu laden.'}`, 'err')
+    if(lokal){
+      const b = document.createElement('button')
+      b.type = 'button'; b.className = 'btn btn-ghost'; b.style.cssText = 'margin-left:8px;padding:3px 9px;font-size:11.5px'; b.textContent = 'Öffnen'
+      b.addEventListener('click', () => openAccountModal(null, lokal))
+      accEls.msg.appendChild(b)
+    }
+    try{ if(typeof window._tvSchonDa === 'function') window._tvSchonDa(ext) }catch(_){}
+  }
+
   async function saveAccount(){
     if(!_editingAccountId) acNameVorschlag()   // Anlegen: Name frisch aus den Feldern — egal, wie die External ID hineinkam (22.10.2026)
     const name = accEls.name.value.trim()
@@ -39806,6 +39835,23 @@
 
     accEls.save.disabled = true
     accEls.save.classList.add('ts-btn-loading')
+
+    // DOPPEL-SCHUTZ (29.10.2026): nach dem Sperren, damit ein zweiter Klick während der DB-Abfrage nicht durchkommt
+    if(!isEdit && type !== 'live' && externalIdVal){
+      let doppel = kontoDoppelFinden(externalIdVal, accounts)
+      if(!doppel){
+        try{
+          const { data: frisch, error: fe } = await supabase.from('accounts').select('id,name,external_id').eq('user_id', currentUserId)
+          if(!fe) doppel = kontoDoppelFinden(externalIdVal, frisch || [])
+          else console.warn('[konto] Doppel-Prüfung nur lokal — DB nicht lesbar:', fe.message || fe)
+        }catch(e){ console.warn('[konto] Doppel-Prüfung nur lokal:', (e && e.message) || e) }
+      }
+      if(doppel){
+        accEls.save.disabled = false; accEls.save.classList.remove('ts-btn-loading')
+        kontoDoppelMelden(doppel, externalIdVal)
+        return
+      }
+    }
 
     try{
       if(type === 'live'){
@@ -48867,7 +48913,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1828'
+  const OS_TAB_BUILD = '2026-09-22.1829'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68772,7 +68818,7 @@
   // TV_KONTEN_AUTO (Finn 03:25: „später soll das Bestätigen wegfallen können"): true hieße, neue TV-Konten ohne Klick anzulegen. Das ist
   // NICHT gebaut — DB-Schreiben ohne Rückfrage braucht Finns Freigabe und den Prüfer. Bei true bleiben die Zeilen, es kommt nur ein Konsolen-Hinweis.
   const TV_KONTEN_AUTO = false
-  const _tvNeu = { rows: [], at: 0, laedt: false, uid: '' }
+  const _tvNeu = { rows: [], at: 0, laedt: false, uid: '', schonDa: new Set() }   // schonDa: vom Doppel-Schutz gefunden (29.10.2026)
   const _admKTv = { rows: [], at: 0, laedt: false }
   const tvIgnLsKey = () => `prophos_tv_ignoriert_${currentUserId || ''}`
   function tvIgnoriertLokal(){ try{ return new Set(JSON.parse(localStorage.getItem(tvIgnLsKey()) || '[]')) }catch(_){ return new Set() } }
@@ -68822,12 +68868,21 @@
   function tvZelleTyp(td, z){
     td.innerHTML = '<span style="font-size:12.5px"></span> <span class="chip chip-neutral" style="color:var(--violet);margin-left:4px" title="Im TradingView-Dropdown gesehen, in Prophos noch nicht angelegt — Bestätigen legt an">zu bestätigen</span>'
     td.children[0].textContent = SUC_PHASE_LABEL[z.typ] || z.typ
+    if(z.schonDa){ td.children[1].textContent = 'schon in Prophos'; td.children[1].style.color = 'var(--sub)'; td.children[1].title = 'Beim Bestätigen gefunden: ein Konto mit dieser External ID gibt es schon (Doppel-Schutz)' }
   }
   function tvKnoepfe(td, z){
     td.style.whiteSpace = 'nowrap'; td.style.textAlign = 'right'
     td.innerHTML = '<button type="button" class="btn btn-primary" style="padding:4px 10px;font-size:11.5px">Bestätigen</button> '
       + '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:11.5px">Ignorieren</button>'
-    td.children[0].addEventListener('click', () => kontoModalVorbefuellen(z))
+    // Bestätigen sperrt beide Knöpfe, bis das Modal wieder zu ist (kein zweites Modal/kein Doppel-Anlegen aus derselben Zeile)
+    td.children[0].addEventListener('click', () => {
+      const knoepfe = [...td.querySelectorAll('button')]; knoepfe.forEach(b => { b.disabled = true })
+      kontoModalVorbefuellen(z)
+      const modal = accEls?.modal
+      if(!modal){ knoepfe.forEach(b => { b.disabled = false }); return }
+      const zu = new MutationObserver(() => { if(!modal.classList.contains('open')){ zu.disconnect(); knoepfe.forEach(b => { b.disabled = false }) } })
+      zu.observe(modal, { attributes: true, attributeFilter: ['class'] })
+    })
     td.children[1].addEventListener('click', () => tvNeuIgnorieren(z.ext))
   }
   // Eigene ID: Zeilen über der Kontoliste (Spalten wie Accounts: Account · Firm · Typ · Balance · Planer · Verknüpfungen · Aktionen)
@@ -68848,9 +68903,10 @@
       tvZelleAccount(tr.children[0], z)
       tr.children[1].textContent = z.firma === '?' ? 'Firma unbekannt' : z.firma
       if(z.firma === '?') tr.children[1].style.color = 'var(--sub)'
+      z.schonDa = _tvNeu.schonDa.has(extIdNorm(z.ext))
       tvZelleTyp(tr.children[2], z)
       tr.children[5].textContent = ['TradingView', z.row.pc_id || ''].filter(Boolean).join(' · ')
-      tvKnoepfe(tr.children[6], z)
+      if(!z.schonDa) tvKnoepfe(tr.children[6], z)
       tb.appendChild(tr)
     }
   }
@@ -68897,13 +68953,16 @@
       tr.children[1].children[0].style.background = idFarbe(uid)
       tr.children[1].children[1].textContent = name
       tr.children[2].textContent = z.firma === '?' ? 'Firma unbekannt' : z.firma
+      z.schonDa = uid === String(currentUserId) && _tvNeu.schonDa.has(extIdNorm(z.ext))
       tvZelleTyp(tr.children[3], z)
-      if(uid && uid === String(currentUserId)) tvKnoepfe(tr.children[7], z)
+      if(z.schonDa) { /* Doppel-Schutz hat das Konto gefunden — keine Knöpfe */ }
+      else if(uid && uid === String(currentUserId)) tvKnoepfe(tr.children[7], z)
       else{ tr.children[7].innerHTML = '<span style="font-size:11.5px;color:var(--sub)"></span>'; tr.children[7].children[0].textContent = `bei ${String(name).split(/\s+/)[0]} bestätigen` }
       tb.appendChild(tr)
     }
   }
   window._tvNeuOeffnen = () => tvNeuLaden()
+  window._tvSchonDa = ext => { const k = extIdNorm(ext); if(!k) return; _tvNeu.schonDa.add(k); tvNeuRender(); if(_admKTv.at) admKTvRender() }   // Doppel-Schutz (29.10.2026)
   window._admKTvRender = () => admKTvRender()
   // Boot-Check ohne Login: Zeilen direkt setzen (Stub), ohne Route
   window._tvNeuStub = rows => { _tvNeu.rows = rows || []; _tvNeu.at = Date.now(); _tvNeu.uid = String(currentUserId || ''); tvNeuRender() }
