@@ -102,6 +102,19 @@ ihrem Stand fragen und nicht pollen. Sie melden sich selbst.
    Zeile in der Warteschlange auf „live“, der Slave bekommt die nächste Aufgabe.
 5. „Nachkontrolle“ aus `projekt.md`, falls angegeben.
 
+### A4b. Visueller Stammbaum bei Features
+
+Sobald ein Feature aus mehreren Teilen besteht (mehrere Slaves, mehrere Schritte, mehrere Wege)
+und spätestens wenn der Nutzer fragt „wie wird das gebaut?“, zeigt der Master es als **visuellen
+Stammbaum** (Diagramm im Chat, nicht als Text-Liste) — Finn 29.10.2026: „Bei Features will ich
+immer so einen visuellen Stammbaum sehen.“
+
+- Oben der Auslöser, darunter die Äste je Teilweg, je Kasten Titel + eine Zeile Stand
+  („live · Zahl“ / „im Bau · was“), eine Farbe je Ast, grau für gemeinsame Schritte.
+- Klein und sauber: höchstens ~10 Kästen, keine Code-Namen, keine Dateipfade.
+- Zahlen aus Befunden/Stresstests in die Stand-Zeile (z. B. „84 von 100 richtig“).
+- Bei jeder neuen Stufe des Features den Stammbaum neu zeigen, nicht nur den Text.
+
 ### A5. Master-Chat sauber halten
 
 Der Master baut nichts und macht keine langen Auswertungen (mehr als 2–3 Abfragen gehen an
