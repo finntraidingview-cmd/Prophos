@@ -4125,6 +4125,18 @@
   #dashboard-view .pz-bahn2 > .pz-bahn-vor{top:-2px;bottom:-2px;height:auto;width:2px;margin-left:-1px;border-radius:1px;background:var(--sub);z-index:3}
   #dashboard-view .pz-bahn2 > .pz-bahn-pkt{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--surface);z-index:4}
   @media (prefers-reduced-motion:reduce){#dashboard-view .pz-bahn2 > .pz-bahn-fuell.is-tp{animation:none}}
+  /* Fusion am Zeitstrahl (Funded-Planer, 28.10.2026): „Fusion −x €" über dem Master-TP, „Fusion +y €" unter dem Master-SL, je ein Strich */
+  #dashboard-view .pz-bahn.pz-bahn2.mit-fus{margin:15px 0 15px}
+  #dashboard-view .pz-bahn2 > .pz-bahn-mk{top:-3px;bottom:-3px;width:2px;margin-left:-1px;border-radius:1px;z-index:3}
+  #dashboard-view .pz-bahn2 > .pz-bahn-mk.is-minus{background:var(--good-ink, #15803d)} #dashboard-view .pz-bahn2 > .pz-bahn-mk.is-plus{background:var(--danger-ink, #b91c1c)}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fus{position:absolute;transform:translateX(-50%);font-size:10.5px;font-weight:600;font-style:normal;line-height:1;white-space:nowrap}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-r{transform:translateX(-100%)} #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-l{transform:none}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-minus{bottom:calc(100% + 5px);color:var(--danger-ink, #b91c1c)}
+  #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-plus{top:calc(100% + 5px);color:var(--good-ink, #15803d)}
+  /* Spalte „Fusion" und die kleine Zeile unter TP/SL: wo Fusion zumacht (Fusion-SL am Master-TP, Fusion-TP am Master-SL) */
+  #dashboard-view .pz-z > .pz-tp.mit-fus,#dashboard-view .pz-z > .pz-sl.mit-fus{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+  #dashboard-view .pz-z > .mit-fus .pz-fus-u{font-size:10.5px;font-weight:500;color:var(--sub)}
+  #dashboard-view .pz-art.pz-fus b{color:var(--ink)}
   /* ID-Hierarchie (08.10.2026): Karte je ID mit Rand in ID-Farbe, großer sticky Kopf, Firmen-Kopf darunter 13 px grau */
   #dashboard-view .ap-id-karte{border-left:3px solid var(--id,var(--border));padding:0 0 4px 14px;margin:0 0 18px}
   #dashboard-view .ap-id-karte > .ap-adm-grp{position:sticky;top:0;z-index:4;background:var(--surface);padding:10px 0 8px;margin-top:0;border-top:0}
@@ -43085,10 +43097,20 @@
         + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>`
       return { html, prozent, titel }
     }
-    const html = `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}" title="${escapeHtml(titel)}">`
+    // FUSION AM ZEITSTRAHL (a.fusion, Funded-Planer 28.10.2026, Finn: „drüber und runterschreiben, was dann jeweils Fusion Plus und Fusion
+    // Minus werden"): Strich am Master-TP mit „Fusion −x €" darüber, Strich am Master-SL mit „Fusion +y €" darunter; am Rand bündig statt
+    // mittig, damit nichts aus der Zelle läuft
+    const fu = a.fusion && (a.fusion.minus != null || a.fusion.plus != null) ? a.fusion : null
+    const eur = v => Math.round(Number(v)).toLocaleString('de-DE') + ' €'
+    const fuMarke = (p, wo, txt) => `<i class="pz-bahn-mk is-${wo}" style="left:${p.toFixed(1)}%"></i><small class="pz-bahn-fus is-${wo}${p > 72 ? ' is-r' : p < 28 ? ' is-l' : ''}" style="left:${p.toFixed(1)}%">${txt}</small>`
+    const fuHtml = !fu ? '' : (tpUsd && fu.minus != null ? fuMarke(pTp, 'minus', 'Fusion −' + eur(fu.minus)) : '')
+      + (slUsd && fu.plus != null ? fuMarke(pct(istV - slUsd), 'plus', 'Fusion +' + eur(fu.plus)) : '')
+    const fuTitel = !fu ? '' : `${fu.minus != null && tpUsd ? ' · nach TP Fusion −' + eur(fu.minus) : ''}${fu.plus != null && slUsd ? ' · nach SL Fusion +' + eur(fu.plus) : ''}${fu.gedeckt != null ? ' · an der Liq Fusion +' + eur(fu.gedeckt) : ''}`
+    const html = `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}${fuHtml ? ' mit-fus' : ''}" title="${escapeHtml(titel + fuTitel)}">`
       + (Math.max(pIst, verlB) > 0 ? `<i class="pz-bahn-fuell" style="width:${Math.max(pIst, verlB).toFixed(1)}%;background:${farbe}"></i>` : '')
       + (pTp > pIst ? `<i class="pz-bahn-fuell is-tp" style="left:${pIst.toFixed(1)}%;width:${(pTp - pIst).toFixed(1)}%;background:${farbe}"></i>` : '')
       + (boden != null && startDa ? `<i class="pz-bahn-start" style="left:${pStart.toFixed(1)}%"></i>` : '')
+      + fuHtml
       + `<b class="pz-bahn-pkt" style="left:${pIst.toFixed(1)}%;background:${idFarb}"></b></i>`
     return { html, prozent, titel }
   }
@@ -43174,7 +43196,7 @@
       // Balance → Ziel hell „offen", Potenzial dieses Trades pulsiert (nur Deckkraft). Ohne Boden bleibt die Skala Start → Ziel von oben.
       const tpUsd = Number(p.masterTp) > 0 ? Number(p.masterTp) : 0, slUsd = Number(p.masterSl) > 0 ? Number(p.masterSl) : 0
       const mitBahn = o.zielTp ? ziel > istV : (ziel > 0 && groesse > 0 && ziel > groesse && ziel <= groesse * 1.3)
-      const bz = mitBahn ? pzBahnHtml({ groesse, ziel, boden: planZeileBoden(p, konto, o, groesse), ist: istV, tpUsd, slUsd, uid: o.uid, plL, balVal: bal.val, zielFrei: !!o.zielTp }) : null
+      const bz = mitBahn ? pzBahnHtml({ groesse, ziel, boden: planZeileBoden(p, konto, o, groesse), ist: istV, tpUsd, slUsd, uid: o.uid, plL, balVal: bal.val, zielFrei: !!o.zielTp, fusion: o.fusion || null }) : null
       balHtml = `<span class="pz-bal-t">${typChipHandy}${liveZ}${plL != null ? `<i class="pz-live-pl ${plL >= 0 ? 'plus' : 'minus'}" title="läuft · Live-P&L ${plL >= 0 ? '+' : '−'}${de(Math.abs(plL))} $">●</i>` : ''}${de(istV)}${bal.startwert ? `<span class="pz-rest" title="${escapeHtml(PLAN_STARTWERT_TIP)}"> Startwert</span>` : ''}${ziel ? `<em>→</em>${de(ziel)}<span class="pz-rest"> · Rest ${de(Math.max(0, ziel - istV))}</span>` : ' $'}</span>`
         + (bz ? bz.html : '')
     } else if(notiz && (notiz.ziel || notiz.rest)){
@@ -43234,15 +43256,22 @@
       const em = o.riHtml || `<em class="${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? 'BUY' : p.richtung === 'sell' ? 'SELL' : '?'}</em>`   // o.riHtml: Klick-Chip im Admin-Planer (16.10.2026)
       const grR = !menge ? '–' : p.route === 'mt5v2' ? menge.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' × Lot'
         : menge.toLocaleString('de-DE') + ' × ' + escapeHtml(String(p.masterSymbol || '').replace(/[FGHJKMNQUVXZ]\d{1,2}$/, '') || 'NQ')
+      // Funded-Planer (o.fusion, 28.10.2026): Spalte „Fusion" = Lots + gedeckte Kosten statt Stufe; unter TP/SL, wo Fusion dabei steht —
+      // der Fusion-SL liegt auf dem Master-TP, der Fusion-TP auf dem Master-SL (der Schließer macht Fusion mit dem Master zu)
+      const fu = o.fusion, eur = v => Math.round(Number(v)).toLocaleString('de-DE') + ' €', pkt = v => v != null ? Math.round(v).toLocaleString('de-DE') + ' Pkt' : ''
+      const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
+      const fuUnter = (wo, txt, tip) => fu && txt ? `<small class="pz-fus-u is-${wo}" title="${escapeHtml(tip)}">${txt}</small>` : ''
+      const fuTp = fu && fu.minus != null ? fuUnter('minus', 'Fusion-SL', `Am Master-TP (${pkt(fu.tpPkt)} vom Einstieg) schließt Fusion mit −${eur(fu.minus)}`) : ''
+      const fuSl = fu && fu.plus != null ? fuUnter('plus', 'Fusion-TP', `Am Master-SL (${pkt(fu.slPkt)} vom Einstieg) schließt Fusion mit +${eur(fu.plus)}`) : ''
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
         <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}</span><small class="pz-k2">${k2}</small></span>
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
-        ${artZelle}
-        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
-        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
+        ${fuZelle || artZelle}
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${fu ? ' mit-fus' : ''}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}${fuTp}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${fu ? ' mit-fus' : ''}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}${fuSl}</span>
         <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
       </div>`
     }
@@ -47855,7 +47884,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1787'
+  const OS_TAB_BUILD = '2026-09-22.1788'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72554,7 +72583,7 @@
         riHtml = `<button type="button" class="ap-ri-flip${riG ? ' is-gesperrt' : ''}" data-ap-ri="${escapeHtml(id)}"${riL ? ' disabled' : ''}
           title="${escapeHtml(riG ? riG + ' — Klick prüft erneut' : `anklicken: nur diesen Plan auf ${ziel} drehen (Richtungsschutz ID × Firma wird vorher geprüft)`)}"><em class="${p.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${riL ? '…' : (riG ? '⛔ ' : '') + (p.richtung === 'buy' ? 'BUY' : 'SELL')}</em></button>`
       }
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar' })
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
@@ -73012,7 +73041,17 @@
         x.liq != null ? 'Liq ' + Math.round(x.liq).toLocaleString('de-DE') + ' $' : '',
         x.hedge_sl_eur != null ? `Hedge +${Math.round(x.hedge_sl_eur)} / −${Math.round(x.hedge_tp_eur)} €` : '',
         x.offen_eur != null ? 'offen ' + Math.round(x.offen_eur).toLocaleString('de-DE') + ' €' : ''].filter(Boolean).join(' · ') : null
-      return Object.assign({ plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '',
+      // FUSION-GEGENHEDGE SICHTBAR (28.10.2026, Finn am Screenshot „Zu bestätigen": „wie viel gehedged wird, wo mein Fusion-TP und -SL sind,
+      // auf dem Zeitstrahl drüber und drunter Fusion Plus und Fusion Minus, die Lotanzahl von Fusion"). Werte aus app.py fdp_hedge: minus =
+      // hedge_eur (Fusion-Verlust am Master-TP), plus = hedge_sl_eur (Fusion-Gewinn am Master-SL), gedeckt = offene Kosten (Gewinn an der Liq).
+      // Lots: Vorschau liefert sie direkt, angelegte Pläne über hedge_eur ÷ (0,85 €/Pkt × TP-Punkte) — dieselbe Formel rückwärts.
+      const fusPpl = typeof tpWdSlavePpl === 'function' ? tpWdSlavePpl() : 0.85
+      const fusMinus = x.hedge_eur ?? x.hedge_tp_eur ?? null, tpPkt = kt && Number(x.tp) > 0 ? Number(x.tp) / usd : null
+      const fusLots = Number(x.lots) > 0 ? Number(x.lots) : (Number(fusMinus) > 0 && tpPkt ? Math.round(Number(fusMinus) / (fusPpl * tpPkt) * 100) / 100 : null)
+      const fusion = (fusMinus != null || x.hedge_sl_eur != null) ? { lots: fusLots, minus: fusMinus != null ? Number(fusMinus) : null,
+        plus: x.hedge_sl_eur != null ? Number(x.hedge_sl_eur) : null, gedeckt: x.offen_eur != null ? Number(x.offen_eur) : null,
+        tpPkt, slPkt: kt && Number(x.sl) > 0 ? Number(x.sl) / usd : null } : null
+      return Object.assign({ fusion, plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '',
         firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded', richtung: x.richtung || null, route: 'tvv2', start_um: x.start_um || null, start: x.start_um || null,
         menge: kt, tp: x.tp ?? null, sl: x.sl ?? null, notes: stufe ? 'Funded-Planer · ' + stufe : null, stufe, balance: x.balance ?? null, rest,
         konto_id: String(x.konto_id || ''), balance_live: true, boden: x.liq ?? null, boden_min: x.liq ?? null, boden_art: x.liq != null ? 'nachziehend_lock' : null,
@@ -73100,6 +73139,8 @@
       s.className = 'ap-gr-live'; s.textContent = '◐ Vorschau'; s.title = 'Trockenlauf — angelegt wird erst, wenn der Funded-Planer scharf ist'
       b.replaceWith(s) })
     root.querySelectorAll('.ap-ri-flip').forEach(b => { b.disabled = true; b.title = 'Richtung würfelt der Funded-Planer' })
+    // Spalte „Schritt" zeigt hier den Fusion-Gegenhedge (Lots + gedeckte Kosten, planZeileHtml o.fusion, 28.10.2026)
+    root.querySelectorAll('.pz-z-kopf > .pz-art').forEach(s => { if(s.textContent === 'Schritt' && s.closest('.pz-tab')?.querySelector('.pz-fus')) s.textContent = 'Fusion' })
     if(Q.vorschau) root.querySelectorAll('.ap-gr-offen .ap-adm-kopf b').forEach(b => { b.textContent = b.textContent.replace(/^Zu bestätigen/, 'Vorschau') })
     root.querySelectorAll('.ap-gr-offen .ap-adm-kopf span').forEach(s => { s.textContent = Q.vorschau ? 'Trockenlauf des Funded-Planers · nichts angelegt, bis er scharf ist · Zeiten Dubai' : s.textContent })
   }
