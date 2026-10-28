@@ -2028,6 +2028,7 @@ def main():
     results.append(test_puls_fehler_1606())
     results.append(test_puls_fehler_1611())
     results.append(test_puls_fehler_1682())
+    results.append(test_puls_fehler_1787())
     results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
@@ -5423,6 +5424,58 @@ def test_puls_fehler_1682():
     chk("order_calc_margin" in q and "order_send" not in q and "order_check" not in q and "richtung and volumen" in q,
         "_order_api_zustand: Marge nur gerechnet (order_calc_margin), keine Order, nur mit Richtung + Volumen")
     print(("✓" if ok else "✗") + " Puls-Fehler .1682: keine Bestätigung ohne Grund → Marge aus der API + Befund (Knopf, Journal) · F9 kein Fenster vorn → consent.exe/LogonUI benannt")
+    return ok
+
+
+def test_puls_fehler_1787():
+    """Routine „Puls-Fehler" 28.10.2026 05:35 Dubai (.1787, Muster „v2order: f9-dialog nicht gefunden — abbruch, nichts gesendet",
+    Spur „F9 ohne Dialog: kein Fenster vorn": 15 Fälle in 7 Tagen auf 3 PCs; seit .1740 jede Spur mit terminal64.exe 21–24 s alt beim F9,
+    Login/Lesen 127–136 s — die Panel-Selbstheilung hatte das Terminal gerade neu gestartet). Frisches Terminal erst warm werden lassen:
+    Alter der terminal64.exe dieser Installation, Rest bis TERMINAL_WARM_S, Warten nur über _warte, kein Riegel verändert. Kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1787: " + text)
+            ok = False
+
+    pfad = "C:\\MT5-X\\terminal64.exe"
+    pl = [{"pid": 8, "name": "terminal64.exe", "pfad": "C:\\MT5-X\\terminal64.exe"},
+          {"pid": 9, "name": "terminal64.exe", "pfad": "C:\\MT5-Y\\terminal64.exe"},
+          {"pid": 10, "name": "python.exe", "pfad": ""}]
+    A = ob.terminal_alter_s
+    chk(A(pl, {8: 7.4, 9: 3.0, 10: 45.0}, pfad) == 7.4, "terminal_alter_s: nur die terminal64.exe DIESER Installation (nicht die jüngere fremde)")
+    chk(A(pl + [{"pid": 11, "name": "terminal64.exe", "pfad": pfad}], {8: 130.0, 11: 4.0}, pfad) == 4.0,
+        "terminal_alter_s: zwei Prozesse derselben Installation (alte + neu gestartete) → die jüngste zählt")
+    chk(A(pl, {8: 7.4}, "") is None and A(pl, {}, pfad) is None and A(pl, {9: 3.0}, pfad) is None and A([], {8: 1.0}, pfad) is None
+        and A(pl, {8: "x"}, pfad) is None, "terminal_alter_s: ohne Pfad/Alter/Terminal dieser Installation None")
+    chk(A([{"pid": 8, "name": "terminal64.exe", "pfad": ""}], {8: 2.0}, pfad) is None,
+        "terminal_alter_s: terminal64.exe mit unlesbarem Pfad → nicht sicher → None (kein Warten ins Blaue)")
+    R = ob.terminal_warm_rest_s
+    chk(R(None) == 0.0 and R("x") == 0.0 and R(45.0) == 0.0 and R(130.0) == 0.0 and R(7.0) == 38.0 and R(7, warm_s=20) == 13.0 and R(0.0) == 45.0,
+        "terminal_warm_rest_s: unbekannt/alt genug 0, sonst Rest bis TERMINAL_WARM_S")
+    chk(ob.TERMINAL_WARM_S == 45.0, "TERMINAL_WARM_S = 45 s (Selbstheilung des Panels rechnet mit Boots > 45 s)")
+    chk(ob._terminal_warm_abwarten(pfad, []) == 0.0 and ob._terminal_warm_abwarten("", None) == 0.0,
+        "_terminal_warm_abwarten: ohne Windows (keine Prozess-Lage) 0 s, wirft nicht, auch ohne Spur")
+    q = _i.getsource(ob._terminal_warm_abwarten) + _i.getsource(ob.terminal_alter_s) + _i.getsource(ob.terminal_warm_rest_s)
+    chk("sleep(" not in q and "_warte(" in q and "Popen" not in q and "TerminateProcess" not in q and "click" not in q.lower()
+        and "type_keys" not in q and "set_focus" not in q, "Warm-Warten: nur lesen + _warte (Streuung), kein Klick/Start/Kill/fester sleep")
+    q_run = _i.getsource(ob.run)
+    chk(q_run.count("_terminal_warm_abwarten(path, trail)") == 1
+        and q_run.index('trail.append("Login/Lesen ok")') < q_run.index("_terminal_warm_abwarten(path, trail)") < q_run.index("w = _finde_terminal(expected)"),
+        "run(): Warm-Warten genau einmal, nach Login/Lesen ok und vor dem Terminal-Fenster (Guard, F9 unverändert dahinter)")
+    chk('if any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in trail):' in q_run
+        and "Login/Lesen: {runden} Runden" in _i.getsource(ob._login_dann_lesen),
+        "run(): Warm-Warten nur nach > 1 Login-Runde (Runden-Stempel aus _login_dann_lesen) — der normale Lauf zahlt nichts")
+    sp = ob._StempelSpur()
+    sp.append("Login/Lesen: 13 Runden, zuletzt 'IPC timeout'")
+    chk(any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in sp) and not any(" Runden" in str(z) for z in [sp[0].replace("Runden", "ok")]),
+        "Runden-Stempel ist in der gestempelten Spur als Text erkennbar")
+    chk('if str(expected) not in (w.window_text() or ""):' in q_run and "F9 zweiter Anlauf (Terminal neu betreten)" in q_run,
+        "run(): Fenster-Guard und zweiter F9-Anlauf stehen weiter")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1787: F9 kein Fenster vorn → frisch gestartetes Terminal (Alter der terminal64.exe) erst bis 45 s warm werden lassen")
     return ok
 
 

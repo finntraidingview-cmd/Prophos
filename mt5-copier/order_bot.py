@@ -11902,6 +11902,11 @@ def run(cfg_path, cmd):
     contract_size = lese["contract_size"]
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
     trail.append("Login/Lesen ok")
+    # Frisch (neu) gestartetes Terminal erst warm werden lassen (28.10.2026, s. TERMINAL_WARM_S) — nur, wenn Login/Lesen mehr als eine
+    # Runde brauchte (Runden-Stempel in der Spur = das Terminal war beim Lauf-Start nicht erreichbar, kam also währenddessen hoch);
+    # der normale Lauf (eine Runde, Terminal läuft längst) zahlt die Prozess-Lesung nicht.
+    if any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in trail):
+        _terminal_warm_abwarten(path, trail)
 
     # Start-Versatz (28.08.2026, Finns Sorge): starten mehrere Flotten-Instanzen
     # im selben Moment, blieben sie trotz gestreuter Einzelschritte anfangs eng
@@ -26042,6 +26047,60 @@ def pids_der_installation(prozesse, pfad):
         if os.path.normcase(os.path.abspath(str(p["pfad"]))) == ziel:
             out.add(int(p.get("pid") or 0))
     return out
+
+
+# TERMINAL FRISCH GESTARTET — ERST WARM WERDEN LASSEN (Routine „Puls-Fehler" 28.10.2026 05:35 Dubai, Muster „v2order: f9-dialog nicht
+# gefunden — abbruch, nichts gesendet", Spur-Variante „F9 ohne Dialog: kein Fenster vorn": 15 Fälle in 7 Tagen auf 3 PCs, 7 davon in
+# 24 h). Seit der Alters-Lesung .1740 sagt JEDE dieser Spuren (7/7) dasselbe: „Login/Lesen ok" erst nach 127–136 s, und beim F9 ist
+# terminal64.exe 21–24 s alt — beim „Terminal betreten" also erst ~7 s. Ablauf dahinter: der Kaltstart hängt (Sicherheitsabfrage,
+# Frage 4), der Bot wartet in seinen Login-Runden; nach 45 s + 90 s Boot-Puffer startet die Selbstheilung des Panels das Terminal neu,
+# dessen API antwortet dem Bot schon 3–4 s später — das Hauptfenster ist aber noch im Aufbau, F9 trifft kein Fenster (GetForegroundWindow
+# 0, keine consent.exe mehr). Der sfTick-Nachholer 8–12 min später lief jedes Mal in ~30 s durch. Jetzt: ist die terminal64.exe GENAU
+# dieser Installation (pids_der_installation, dasselbe Alter wie uac_frische) jünger als TERMINAL_WARM_S, wartet run() gestreut
+# (_warte) bis dahin, mit Zeile in der Spur — alt genug oder nicht lesbar (kein Windows, Prozess ohne Pfad) = wie bisher, keine Sekunde
+# länger. Gelesen wird nur nach mehr als einer Login-Runde (Runden-Stempel von _login_dann_lesen: das Terminal war beim Lauf-Start nicht
+# erreichbar), der normale Lauf zahlt die Prozess-Lesung nicht. Kein Riegel verändert: Fenster-Guard, F9-Suche, zweiter Anlauf, Abbruch
+# bleiben; gewartet wird NUR auf ein frisches Terminal.
+TERMINAL_WARM_S = 45.0
+
+
+def terminal_alter_s(prozesse, alter, pfad):
+    """REIN RECHNEND (testbar): Alter (s) der JÜNGSTEN terminal64.exe GENAU dieser Installation aus Prozessliste + _prozess_alter;
+    None, wenn das nicht sicher feststeht (kein Pfad, Prozess ohne Pfad, kein Terminal dieser Installation, kein lesbares Alter)."""
+    pids = pids_der_installation(prozesse, pfad)
+    if not pids or not alter:
+        return None
+    werte = []
+    for pid in pids:
+        a = alter.get(pid)
+        if isinstance(a, (int, float)):
+            werte.append(float(a))
+    return min(werte) if werte else None
+
+
+def terminal_warm_rest_s(alter_s, warm_s=TERMINAL_WARM_S):
+    """REIN RECHNEND (testbar): so viele Sekunden fehlen dem Terminal noch bis „warm" — 0 bei unbekanntem Alter oder alt genug."""
+    if not isinstance(alter_s, (int, float)):
+        return 0.0
+    return max(0.0, float(warm_s) - float(alter_s))
+
+
+def _terminal_warm_abwarten(path, trail):
+    """Nur lesen + gestreut warten, wirft nie (s. Block-Kopf TERMINAL_WARM_S). → gewartete Sekunden (0 = nichts zu warten)."""
+    try:
+        prozesse, _fenster = _verbindung_lage()
+        alter = terminal_alter_s(prozesse, _prozess_alter(prozesse), path) if prozesse else None
+    except Exception:
+        return 0.0
+    rest = terminal_warm_rest_s(alter)
+    if rest <= 0:
+        return 0.0
+    if trail is not None:
+        trail.append(f"Terminal erst {int(alter)} s alt (frisch gestartet) — warte ~{int(rest)} s, bis es warm ist")
+    ende = time.time() + rest
+    while time.time() < ende:
+        _warte(0.8, 0.6)
+    return rest
 
 
 # „aus" erst nach dieser Zeit am Stück glauben: zwischen Updater-Ende und Neustart des Terminals liegt eine kurze Lücke
