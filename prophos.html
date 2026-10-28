@@ -11683,7 +11683,7 @@
                 <div class="panel-head">
                   <div>
                     <div class="panel-title">Verteilung nach Prop-Firma</div>
-                    <div class="panel-sub">Zum Aufklappen auf eine Firma klicken</div>
+                    <div class="panel-sub">Klick auf eine Firma zeigt ihre Accounts</div>
                   </div>
                 </div>
                 <div class="adm-dist" id="adm-firm-dist"></div>
@@ -11692,7 +11692,7 @@
                 <div class="panel-head">
                   <div>
                     <div class="panel-title">Nach Person</div>
-                    <div class="panel-sub">Zum Aufklappen auf eine Person klicken</div>
+                    <div class="panel-sub">Klick auf eine Person zeigt ihre Accounts</div>
                   </div>
                 </div>
                 <div class="adm-dist" id="adm-person-dist"></div>
@@ -16212,15 +16212,24 @@
         row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
           + (admGpModus() ? (g.plusN ? ` · ${g.plusN} im Plus (zählt nicht mit, nicht gegen)` : '')
                           : (g.net < 0 ? ` · ${admEur.format(-g.net)} im Plus (zählt nicht gegen die Summe)` : ''))
-          + ' — zum Aufklappen klicken'
-        row.addEventListener('click', () => {
-          const sel = $(filterId)
-          sel.value = (String(sel.value) === String(g.key)) ? '' : g.key   // nochmal klicken = zu
-          admRender()
-          if(sel.value) $('adm-acc-panel').scrollIntoView({ behavior:'smooth', block:'nearest' })
-        })
+          + ' — Klick zeigt die Accounts'
+        row.addEventListener('click', () => admZuKonten(filterId === 'adm-person' ? 'person' : 'firm', g.key))
         el.appendChild(row)
       }
+    }
+    /* KLICK AUF FIRMA/PERSON → „ALLE ACCOUNTS" (28.10.2026, Finn: „Wenn ich unter Übersicht auf die jeweilige Propfirm oder Person drücke,
+     * sehe ich die ganz normalen Accounts wie unter Accounts — alle aufgelistet und anklickbar. Nicht diese Aktübersicht, die ist voll
+     * scheiße, kennt man gar nichts."). Statt der Aufklappung (adm-acc-panel / Kontowert-Balken) öffnet der Klick den Reiter „Alle
+     * Accounts" mit genau diesem Filter: übrige Filter leer, „Archivierte" nach dem Status-Filter der Übersicht. Die Aufklappung bleibt
+     * für die Suche und die Auswahllisten oben. */
+    function admZuKonten(art, key){
+      admKontenRender()   // füllt die Auswahllisten, sonst greift der Wert nicht
+      const setz = (id, v) => { const el = $(id); if(el) el.value = v }
+      setz('adm-k-person', art === 'person' ? String(key) : ''); setz('adm-k-firm', art === 'firm' ? String(key) : '')
+      setz('adm-k-type', ''); setz('adm-k-ziel', ''); setz('adm-k-search', '')
+      const arch = $('adm-k-archived'); if(arch) arch.checked = ($('adm-status')?.value || 'active') !== 'active'
+      const tab = document.querySelector('.adm-tab[data-admtab="konten"]'); if(tab) tab.click(); else admKontenRender()
+      $('adm-pane-konten')?.scrollIntoView({ behavior:'smooth', block:'start' })
     }
 
     // Hedge-Zelle: negative Werte (= Gewinn statt Verlust) grün und mit echtem Minus.
@@ -16404,12 +16413,7 @@
         b.querySelector('.gp-n').textContent = `${share.toFixed(0)} % · ${g.gpN} ${g.gpN === 1 ? 'Konto' : 'Konten'}` + (g.plusN ? ` · ${g.plusN} im Plus` : '')
         b.title = `${g.label}: geparkt ${admEur.format(g.parked)} = Wert ${admEur.format(g.gpWert)} − gezahlt ${admEur.format(g.gpGez)}`
           + (g.plusN ? ` · ${g.plusN} ${g.plusN === 1 ? 'Konto' : 'Konten'} im Plus zählen nicht` : '') + ' — Klick zeigt die Konten'
-        b.addEventListener('click', () => {
-          const sel = $('adm-firm')
-          sel.value = (String(sel.value) === String(g.key)) ? '' : g.key   // nochmal klicken = zu
-          admRender()
-          if(sel.value) $('adm-acc-panel').scrollIntoView({ behavior:'smooth', block:'nearest' })
-        })
+        b.addEventListener('click', () => admZuKonten('firm', g.key))   // wie die Verteilungs-Zeilen (28.10.2026)
         box.appendChild(b)
       }
     }
@@ -47962,7 +47966,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1792'
+  const OS_TAB_BUILD = '2026-09-22.1793'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
