@@ -15985,7 +15985,356 @@ def mail_eingang():
         sb_update("mail_schluessel", {"user_id": f"eq.{uid}"}, upd)
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Speichern fehlgeschlagen: {str(e)[:160]}"}), 503
+    # Payout-Matcher (29.10.2026): Stand der Payout-Anfragen aus den Mails des Stapels — nach dem Speichern, wirft nie, hält den Import nicht auf
+    if zeilen:
+        payout_mail_verarbeiten(zeilen)
     return jsonify({"ok": True, "angenommen": len(zeilen)})
+
+
+# ══ PAYOUT-MATCHER (29.10.2026, Finn ~02:00: „Jedes Mal, wenn ich ein Payout anfrage, bekomme ich E-Mails (angefragt, approved, geschickt).
+# Die Payouts sollen unter Admin automatisch im Feld ‚Liegt bei‘ den Stand bekommen, mit Meldung an mich. Abhaken bleibt manuell.“)
+# Einziger Verarbeitungspunkt = /mail/eingang beim Ankommen (Apps-Script je ID → public.mails, keine account_id an der Mail). Je Firma und
+# Stufe ein Muster auf Betreff (+ Absender), Kontonummer/Betrag aus dem Text. Zuordnung: pending_payouts status=pending derselben user_id ×
+# Firma — mit Kontonummer exakt (accounts.external_id bzw. Nummer im account_name), sonst nur, wenn GENAU EINE offene Anfrage passt. Schreibt
+# nur liegt_bei („<Stufe> · <Datum> · <Betreff kurz>“, eine höhere Stufe überschreibt eine niedrigere, nie umgekehrt — dadurch idempotent, falls
+# das Script dieselbe Mail nochmal schickt) und meldet „gesendet“ ⚪ an die Master-IDs (alarm_senden). Nichts wird abgehakt (status bleibt
+# pending), Hand-Texte in liegt_bei bleiben als „vorher: …“ erhalten. Rein rechnend testbar: payout_mail_stufe, payout_pending_zuordnen;
+# Dry-Run über echte Mails ohne Schreiben: payout_matcher_dryrun / GET /admin/payout-mail-dryrun. Wirft nie nach außen. ══
+PAYOUT_STUFEN = {"angefragt": 1, "geprüft": 2, "gesendet": 3}
+# Betrag im Text: „$1,710.98“, „$4500.00“, „$822.626“, „$786.5“ — erster Treffer nach dem Schlüsselwort, sonst erster $-Betrag
+_PAYOUT_BETRAG_RE = re.compile(r"\$\s?([0-9][0-9,]*(?:\.[0-9]+)?)")
+# Muster-Tabelle: (firma, stufe, Absender-Regex, Betreff-Regex, Konto-Regex auf Betreff+Text | None, Beispielbetreff)
+# Kontonummern: Tradeify FTDFYSLX150393423058 („Account(s) Approved …“), Topstep EXPRESS-V2-679005-57119155 („Your payout for * EXPRESS-…*“),
+# FundedNext 14192655 (im Betreff „… disbursed! - 14192655“). Apex/5ers/FundingPips nennen kein Konto → nur über „genau eine offene Anfrage“.
+PAYOUT_MAIL_MUSTER = (
+    # Tradeify — Betreff „Your payout request has been received“ → „🎉 Your payout has been approved“ → Rise „Payment Received: $X from Tradeify Holdings, Corp“
+    ("tradeify", "angefragt", r"tradeify", r"payout request has been received", None, "Your payout request has been received"),
+    ("tradeify", "geprüft", r"tradeify", r"payout has been approved", r"Account\(s\)\s+Approved\s*:?\s*([A-Z]{4,}\d{6,})", "🎉 Your payout has been approved"),
+    # „Your Forge Level Up payout is approved“ (Tradeify-Forge-Programm, 675 $ an viele IDs gleichzeitig) ist KEIN angefragter Payout — bewusst kein Muster
+    ("tradeify", "gesendet", r"rise", r"Payment Received:.*from Tradeify", None, "Payment Received: $675.00 from Tradeify Holdings, Corp"),
+    # Topstep — „Your payout is being processed 💰“ (Konto + Betrag) → „Your payout has been approved! 🎉“ (nur Betrag; „funds are on the way“)
+    ("topstep", "angefragt", r"topstep", r"payout is being processed", r"payout for\s*\*?\s*([A-Z]+(?:-[A-Z0-9]+){2,})", "Your payout is being processed 💰"),
+    ("topstep", "geprüft", r"topstep", r"payout has been approved", None, "Your payout has been approved! 🎉"),
+    # Apex — nur „PA Payout Approved“ („$2500 approved on Oct 26, Funds within 3–4 business days“, kein Konto)
+    ("apex", "geprüft", r"apex", r"PA Payout Approved", None, "PA Payout Approved"),
+    # 5ers — „Your 5ers Payout Request Confirmation“ → „You got paid | reference id“ → Rise „Payment Received … from Five Percent Online Ltd“
+    ("5ers", "angefragt", r"5ers", r"Payout Request Confirmation", None, "Your 5ers Payout Request Confirmation"),
+    ("5ers", "gesendet", r"5ers", r"You got paid", None, "You got paid | Your payout reference id: xAYk2uGv"),
+    ("5ers", "gesendet", r"rise", r"Payment Received:.*from Five Percent", None, "Payment Received: $1,157.23 from Five Percent Online Ltd"),
+    # FundedNext — „Your Performance Reward Request OTP“ → „Performance Reward Request Accepted“ → „… Reward has been disbursed! - <Kontonr>“
+    ("fundednext", "angefragt", r"fundednext", r"Performance Reward Request OTP", None, "Your Performance Reward Request OTP"),
+    ("fundednext", "geprüft", r"fundednext", r"Performance Reward Request Accepted", None, "Performance Reward Request Accepted"),
+    ("fundednext", "gesendet", r"fundednext", r"Performance Reward has been disbursed", r"disbursed!?\s*-\s*(\d{6,})", "Congratulations! Your Performance Reward has been disbursed! - 14192655"),
+    # FundingPips — „Reward Requested“ → „Reward Processing Initiated“ (Betrag „Amount $822.626“); Geld-Mail gibt es nicht
+    ("fundingpips", "angefragt", r"fundingpips", r"^\s*Reward Requested\s*$", None, "Reward Requested"),
+    ("fundingpips", "geprüft", r"fundingpips", r"Reward Processing Initiated", None, "Reward Processing Initiated"),
+)
+# FTMO, Lucid, Blue Guardian: keine Payout-Mails (Befund S6 29.10.2026) — kein Muster.
+_PAYOUT_MUSTER_RE = [(f, st, re.compile(von, re.I), re.compile(bet, re.I), re.compile(kon, re.I) if kon else None, bsp)
+                     for f, st, von, bet, kon, bsp in PAYOUT_MAIL_MUSTER]
+
+
+def payout_firma_key(name):
+    """REIN RECHNEND: Firmenname aus pending_payouts.account_firm/Absender → Schlüssel der Muster-Tabelle oder None.
+    „Tradeify CFD“ zählt als tradeify (gleicher Absender), „FundedNext Futures“ als fundednext, „The5%ers“ als 5ers."""
+    s = re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+    if "tradeify" in s:
+        return "tradeify"
+    if "topstep" in s:
+        return "topstep"
+    if "apex" in s:
+        return "apex"
+    if "5ers" in s or "fivepercent" in s or "the5" in s:
+        return "5ers"
+    if "fundednext" in s or "fundingnext" in s:
+        return "fundednext"
+    if "fundingpips" in s:
+        return "fundingpips"
+    return None
+
+
+def _payout_text_flach(mail):
+    """Text einer Mail ohne Tags/Links/Schmuckzeichen, auf eine Zeile — Betreff zuerst (Kontonummer steht bei FundedNext nur dort)."""
+    roh = str(mail.get("text") or "") or str(mail.get("snippet") or "")
+    if not roh.strip() and mail.get("html"):
+        roh = str(mail.get("html") or "")
+    roh = re.sub(r"<[^>]*>|https?://\S+", " ", roh)
+    return re.sub(r"[\s‌͏ ]+", " ", f"{mail.get('betreff') or ''} \n {roh}")[:20000]
+
+
+def payout_mail_stufe(mail):
+    """REIN RECHNEND (testbar): Mail-Zeile (von, betreff, text/snippet/html) → (firma, stufe, kontonr|None, betrag|None) oder None,
+    wenn es keine Payout-Mail ist. Erster passender Eintrag der Muster-Tabelle gewinnt (Betreff + Absender)."""
+    von, betreff = str(mail.get("von") or ""), str(mail.get("betreff") or "")
+    for firma, stufe, von_re, bet_re, kon_re, _bsp in _PAYOUT_MUSTER_RE:
+        if not von_re.search(von) or not bet_re.search(betreff):
+            continue
+        flach = _payout_text_flach(mail)
+        konto = None
+        if kon_re:
+            m = kon_re.search(flach)
+            konto = m.group(1).strip() if m else None
+        betrag = None
+        m = _PAYOUT_BETRAG_RE.search(flach)
+        if m:
+            try:
+                betrag = round(float(m.group(1).replace(",", "")), 2)
+            except ValueError:
+                betrag = None
+        return firma, stufe, konto, betrag
+    return None
+
+
+def _payout_konto_norm(s):
+    return re.sub(r"[^A-Z0-9]", "", str(s or "").upper())
+
+
+def _payout_betrag_plausibel(betrag, amount, currency=None, fx=None):
+    """REIN RECHNEND: Mail-Betrag ($) passt ±10 % zum Anfrage-Betrag — brutto oder netto (Tradeify/Topstep zahlen 90 % des genehmigten Betrags
+    aus), bei EUR-Anfragen zusätzlich über den Kurs (fx = EUR je USD, wie _wd_fx) — Finn trägt mal $, mal € ein (Prüfung 29.10.2026:
+    Tradeify 4.500 $ → 4.040 „EUR“, Topstep 1.715 $ → 1.354 €)."""
+    try:
+        b, a = float(betrag), float(amount)
+    except (TypeError, ValueError):
+        return False
+    if not (b > 0 and a > 0):
+        return False
+    werte = [b, b * 0.9]
+    if str(currency or "EUR").upper() != "USD" and fx and 0.5 < float(fx) < 1.5:
+        werte += [b * float(fx), b * 0.9 * float(fx)]
+    return any(abs(x - a) <= 0.10 * a for x in werte)
+
+
+def payout_pending_zuordnen(firma, konto, kandidaten, betrag=None, fx=None):
+    """REIN RECHNEND (testbar): offene Anfragen [{id, account_firm, account_name, external_id, requested_at, amount}] derselben ID → (Treffer|None, grund).
+    Mit Kontonummer: exakt gegen external_id oder enthalten im account_name (normiert); passen mehrere Anfragen desselben Kontos, gilt die
+    jüngste (requested_at) — dieselbe Nummer taucht alle paar Wochen wieder auf. Ohne Nummer: GENAU EINE Anfrage der Firma, sonst die einzige,
+    deren Betrag ±10 % zum Mail-Betrag passt (S3-Stresstest 29.10.2026: zwei Payouts derselben ID × Firma liegen oft nebeneinander)."""
+    gleiche = [p for p in kandidaten if payout_firma_key(p.get("account_firm")) == firma]
+    if not gleiche:
+        return None, "keine offene Anfrage dieser Firma"
+    if konto:
+        kn = _payout_konto_norm(konto)
+        exakt = [p for p in gleiche if kn and (_payout_konto_norm(p.get("external_id")) == kn or kn in _payout_konto_norm(p.get("account_name")))]
+        if len(exakt) == 1:
+            return exakt[0], "Kontonummer"
+        if len(exakt) > 1:
+            juengst = max(str(p.get("requested_at") or "") for p in exakt)
+            neueste = [p for p in exakt if str(p.get("requested_at") or "") == juengst]
+            if len(neueste) == 1:
+                return neueste[0], f"Kontonummer, jüngste von {len(exakt)} Anfragen"
+            return None, f"Kontonummer passt auf {len(exakt)} offene Anfragen vom selben Tag"
+        # Nennt die Mail ein Konto, das zu keiner offenen Anfrage passt, ist es ein ANDERES Konto — nie auf „die einzige“ ausweichen
+        # (Live-Simulation 29.10.2026: Mail für …033794 wäre sonst der Anfrage …060459 zugeordnet worden)
+        return None, f"Kontonummer passt zu keiner der {len(gleiche)} offenen Anfragen"
+    if len(gleiche) == 1:
+        return gleiche[0], "einzige offene Anfrage der Firma"
+    if betrag:
+        plausibel = [p for p in gleiche if _payout_betrag_plausibel(betrag, p.get("amount"), p.get("currency"), fx)]
+        if len(plausibel) == 1:
+            return plausibel[0], f"Betrag ±10 % (eine von {len(gleiche)} offenen Anfragen)"
+        return None, f"{len(gleiche)} offene Anfragen der Firma, Mail nennt kein Konto, Betrag passt auf {len(plausibel)}"
+    return None, f"{len(gleiche)} offene Anfragen der Firma, Mail nennt kein Konto"
+
+
+def _payout_liegt_bei_stufe(txt):
+    """Stufe aus einem liegt_bei-Text, den der Matcher geschrieben hat („geprüft · 28.10. 21:04 · …“) → Rang 0–3."""
+    t = str(txt or "").strip().lower()
+    for st, rang in PAYOUT_STUFEN.items():
+        if t.startswith(st):
+            return rang
+    return 0
+
+
+def _payout_ts(iso):
+    """ISO-Zeit aus mail_zeile (isoformat) oder PostgREST („2026-10-28 20:25:23+00“, Bruchteile) → aware datetime (UTC), None bei Müll."""
+    t = str(iso or "").strip().replace("Z", "+00:00")
+    t = re.sub(r"([+-]\d{2})$", r"\1:00", t)
+    t = re.sub(r"\.(\d{1,6})\d*", lambda m: "." + m.group(1).ljust(6, "0"), t)
+    try:
+        d = datetime.fromisoformat(t)
+    except (TypeError, ValueError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _payout_datum_txt(iso):
+    try:
+        d = _payout_ts(iso)
+        if d is None:
+            return "?"
+        try:
+            from zoneinfo import ZoneInfo
+            d = d.astimezone(ZoneInfo("Europe/Berlin"))
+        except Exception:
+            pass
+        return d.strftime("%d.%m. %H:%M")
+    except (TypeError, ValueError):
+        return "?"
+
+
+def payout_liegt_bei_text(stufe, datum_iso, betreff, alt):
+    """REIN RECHNEND: neuer liegt_bei-Text; ein Hand-Text (nicht vom Matcher) bleibt als „vorher: …“ erhalten."""
+    kurz = re.sub(r"\s+", " ", str(betreff or "")).strip()[:60]
+    neu = f"{stufe} · {_payout_datum_txt(datum_iso)} · {kurz}"
+    alt = str(alt or "").strip()
+    if " · vorher: " in alt:                                   # Hand-Text aus einer früheren Stufe weiter mitführen (Prüfung 29.10.2026)
+        neu += " · vorher: " + alt.split(" · vorher: ", 1)[1][:60]
+    elif alt and not _payout_liegt_bei_stufe(alt) and not alt.lower().startswith("unklar"):
+        neu += f" · vorher: {alt[:60]}"
+    return neu[:240]
+
+
+def _payout_mail_passt_zeitlich(mail_datum, requested_at):
+    """Mail gehört zeitlich zur Anfrage: frühestens 1 Tag vor requested_at (Datum ohne Uhrzeit, Berlin vs. UTC) und höchstens 14 Tage danach
+    (S3-Stresstest 29.10.2026; Tradeify zahlt in 1–2 Tagen, 5ers bis 4, Apex 3–10 Werktage; länger offene Anfragen bleiben Handarbeit)."""
+    md = _payout_ts(mail_datum)
+    try:
+        ra = datetime.strptime(str(requested_at)[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    if md is None:
+        return False
+    return ra - timedelta(days=1) <= md <= ra + timedelta(days=14)
+
+
+def _payout_kandidaten(uid, nur_pending=True):
+    """Anfragen einer ID (+ external_id des Kontos) → Liste für payout_pending_zuordnen."""
+    params = {"select": "id,user_id,account_id,account_name,account_firm,amount,currency,liegt_bei,requested_at,status", "user_id": f"eq.{uid}"}
+    if nur_pending:
+        params["status"] = "eq.pending"
+    rows = sb_select("pending_payouts", params) or []
+    ids = sorted({str(r.get("account_id")) for r in rows if r.get("account_id")})
+    ext = {}
+    for i in range(0, len(ids), 80):
+        for a in sb_select("accounts", {"select": "id,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}) or []:
+            ext[str(a.get("id"))] = a.get("external_id") or ""
+    for r in rows:
+        r["external_id"] = ext.get(str(r.get("account_id")), "")
+    return rows
+
+
+def payout_mail_verarbeiten(zeilen):
+    """Nach dem Insert in /mail/eingang: jede Payout-Mail des Stapels einer offenen Anfrage zuordnen und liegt_bei setzen; „gesendet“ meldet
+    ⚪ an die Master-IDs. Wirft nie; Ergebnis nur im Log. Idempotent: gleiche/niedrigere Stufe schreibt nichts (auch kein zweiter Alarm)."""
+    try:
+        treffer = [(z, payout_mail_stufe(z)) for z in (zeilen or []) if z]
+        treffer = [(z, t) for z, t in treffer if t]
+        if not treffer:
+            return
+        je_uid, fx = {}, None
+        try:
+            fx = _wd_fx()
+        except Exception:
+            fx = None
+        for z, (firma, stufe, konto, betrag) in sorted(treffer, key=lambda x: PAYOUT_STUFEN[x[1][1]]):   # niedrige Stufe zuerst → Reihenfolge wie der Posteingang
+            uid = str(z.get("user_id") or "")
+            if uid not in je_uid:
+                je_uid[uid] = _payout_kandidaten(uid, nur_pending=True)
+            kand = [p for p in je_uid[uid] if _payout_mail_passt_zeitlich(z.get("datum"), p.get("requested_at"))]
+            p, grund = payout_pending_zuordnen(firma, konto, kand, betrag, fx)
+            # Rise meldet JEDE Zahlung der Firma (auch Forge-Programm, 675 $ an viele IDs): ohne Kontonummer gilt „gesendet“ nur für eine Anfrage,
+            # die schon „geprüft“ ist — sonst Notiz statt Stufe (29.10.2026, Dry-Run: Forge-Zahlungen am 16.10. hätten 4 Anfragen „gesendet“ gesetzt)
+            if p and stufe == "gesendet" and not konto and re.search(r"rise", str(z.get("von") or ""), re.I) and _payout_liegt_bei_stufe(p.get("liegt_bei")) < PAYOUT_STUFEN["geprüft"]:
+                p, grund = None, "Rise-Zahlung ohne Kontonummer, Anfrage noch nicht „geprüft“"
+            if not p:
+                # Mehrdeutig: an den Kandidaten ohne Stand eine Notiz, damit Finn im Admin sieht, dass eine Mail da ist — nie eine Stufe überschreiben;
+                # nennt die Mail ein fremdes Konto, gehört sie keiner der Anfragen → keine Notiz (Prüfung 29.10.2026)
+                offen = [] if grund.startswith("Kontonummer passt zu keiner") else [q for q in kand if payout_firma_key(q.get("account_firm")) == firma and not str(q.get("liegt_bei") or "").strip()]
+                for q in offen:
+                    notiz = f"unklar · {_payout_datum_txt(z.get('datum'))} · Mail ohne eindeutige Zuordnung: {str(z.get('betreff') or '')[:70]}"[:240]
+                    try:
+                        sb_update("pending_payouts", {"id": f"eq.{q['id']}", "status": "eq.pending"}, {"liegt_bei": notiz, "updated_at": datetime.now(timezone.utc).isoformat()})
+                        q["liegt_bei"] = notiz
+                    except Exception as e:
+                        print(f"[payout-mail] ⚠️ Notiz {q.get('id')}: {type(e).__name__}: {e}", flush=True)
+                print(f"[payout-mail] {firma} {stufe} {konto or ''} {betrag or ''} — keine Zuordnung ({grund}): {str(z.get('betreff') or '')[:80]}", flush=True)
+                continue
+            if _payout_liegt_bei_stufe(p.get("liegt_bei")) >= PAYOUT_STUFEN[stufe]:
+                continue   # schon so weit (oder weiter) — nichts schreiben, kein zweiter Alarm
+            neu = payout_liegt_bei_text(stufe, z.get("datum"), z.get("betreff"), p.get("liegt_bei"))
+            try:
+                ok = sb_update("pending_payouts", {"id": f"eq.{p['id']}", "status": "eq.pending"}, {"liegt_bei": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
+            except Exception as e:
+                print(f"[payout-mail] ⚠️ liegt_bei {p.get('id')}: {type(e).__name__}: {e}", flush=True)
+                continue
+            if not ok:
+                continue   # inzwischen abgehakt — nichts
+            p["liegt_bei"] = neu
+            print(f"[payout-mail] {firma} {stufe} → {p.get('account_firm')} {p.get('account_name')} ({grund})", flush=True)
+            if stufe == "gesendet" and not _alarm_fremd_verwaltet(uid):
+                namen, _aus = _ap_namen()
+                wer = namen.get(uid, uid[:8])
+                konto_txt = konto or str(p.get("account_name") or "")[:40]
+                betrag_txt = f" {betrag:,.2f} $".replace(",", "X").replace(".", ",").replace("X", ".") if betrag else ""
+                alarm_senden(3, "payout_gesendet", f"Payout {p.get('account_firm') or firma}{betrag_txt} gesendet",
+                             f"{wer}: Payout {p.get('account_firm') or firma} {konto_txt}{betrag_txt} gesendet — Geld sollte da sein. Im Admin unter Payouts abhaken.",
+                             uid=uid, schluessel=f"payout|{p.get('id')}|gesendet", daten={"pending_id": str(p.get("id")), "firma": firma, "betrag": betrag, "konto": konto})
+    except Exception as e:
+        print(f"[payout-mail] ⚠️ verarbeiten: {type(e).__name__}: {e}", flush=True)
+
+
+def payout_matcher_dryrun(tage=30):
+    """Nur rechnen, nichts schreiben: alle Mails der letzten `tage` Tage von Payout-Absendern durch die Muster, Zuordnung gegen Anfragen ALLER
+    Stände (pending/received) derselben ID im Zeitfenster der Anfrage (so sieht man, was historisch getroffen hätte). → {tage, mails, payout_mails,
+    eindeutig, unklar, je_firma, ohne_anfrage: [Payout-Mails ohne Anfrage in Prophos — zum Nachtragen], treffer: [{…}]}."""
+    seit = (datetime.now(timezone.utc) - timedelta(days=max(1, int(tage or 30)))).isoformat()
+    mails = _sb_all("mails", {"select": "id,user_id,von,betreff,datum,snippet,text", "datum": f"gte.{seit}",
+                              "or": "(von.ilike.*tradeify*,von.ilike.*topstep*,von.ilike.*apex*,von.ilike.*5ers*,von.ilike.*fundednext*,von.ilike.*fundingpips*,von.ilike.*riseworks*)",
+                              "order": "datum.asc,id.asc"})   # fester Tiebreaker fürs Blättern in _sb_all
+    je_uid, out, je_firma, ohne_anfrage = {}, [], {}, []
+    try:
+        fx = _wd_fx()
+    except Exception:
+        fx = None
+    n_payout = n_ok = n_unklar = 0
+    for z in mails:
+        t = payout_mail_stufe(z)
+        if not t:
+            continue
+        firma, stufe, konto, betrag = t
+        n_payout += 1
+        uid = str(z.get("user_id") or "")
+        if uid not in je_uid:
+            je_uid[uid] = _payout_kandidaten(uid, nur_pending=False)
+        kand = [p for p in je_uid[uid] if _payout_mail_passt_zeitlich(z.get("datum"), p.get("requested_at"))]
+        p, grund = payout_pending_zuordnen(firma, konto, kand, betrag, fx)
+        if p:
+            n_ok += 1
+        else:
+            n_unklar += 1
+            if grund.startswith("keine offene Anfrage"):   # Payout-Mail ohne Anfrage in Prophos → zum Nachtragen (kein Alarm, kein Write)
+                ohne_anfrage.append({"firma": firma, "user_id": uid, "stufe": stufe, "betrag": betrag, "datum": z.get("datum"), "betreff": str(z.get("betreff") or "")[:90]})
+        f = je_firma.setdefault(firma, {"mails": 0, "eindeutig": 0, "unklar": 0})
+        f["mails"] += 1
+        f["eindeutig" if p else "unklar"] += 1
+        out.append({"mail_id": str(z.get("id") or ""), "datum": z.get("datum"), "user_id": uid, "firma": firma, "stufe": stufe, "konto": konto,
+                    "betrag": betrag, "betreff": str(z.get("betreff") or "")[:90], "treffer": str(p.get("id")) if p else None,
+                    "treffer_konto": (f"{p.get('account_firm')} {p.get('account_name')}"[:80] if p else None),
+                    "treffer_status": (p.get("status") if p else None), "grund": grund,
+                    "liegt_bei_neu": (payout_liegt_bei_text(stufe, z.get("datum"), z.get("betreff"), p.get("liegt_bei")) if p else None)})
+    return {"tage": int(tage or 30), "mails": len(mails), "payout_mails": n_payout, "eindeutig": n_ok, "unklar": n_unklar, "je_firma": je_firma,
+            "ohne_anfrage": ohne_anfrage, "treffer": out}
+
+
+@app.route("/admin/payout-mail-dryrun", methods=["GET", "OPTIONS"])
+def admin_payout_mail_dryrun():
+    """GET ?tage=30 → payout_matcher_dryrun (nur rechnen, nichts schreiben). Gate wie die Rechnungen (_admin_auth, ADMIN_EMAILS):
+    die Treffer nennen Betreffzeilen und Konten aller IDs."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err:
+        return err
+    try:
+        tage = max(1, min(60, int(request.args.get("tage") or 30)))   # 60 Tage ≈ 17 MB Mail-Text — darüber reißt der gunicorn-Timeout
+    except ValueError:
+        tage = 30
+    try:
+        return jsonify(payout_matcher_dryrun(tage))
+    except Exception as e:
+        print(f"[payout-mail] ⚠️ dryrun: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Dry-Run fehlgeschlagen ({type(e).__name__}: {str(e)[:120]})"}), 502
 
 
 # ══ ADMIN → MAIL (21.10.2026, Finn 05:15 Dubai: „Unter Admin noch einmal Gmail hinzufügen, wo ich alle Gmail-Accounts jeder einzelnen ID im
