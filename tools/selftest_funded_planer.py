@@ -279,6 +279,30 @@ def bestaetigen(ns):
           and ns["fdp_start_bestaetigt"]("2026-10-28T09:00:00+00:00", j).startswith("2026-10-28T10:02")
           and ns["fdp_start_bestaetigt"](None, j).startswith("2026-10-28T10:02"),
           "Startzeit beim Bestätigen: vorgeschlagene Zeit, schon vorbei → jetzt + 2 min")
+    # Vorfall 28.10.2026 10:38 Dubai: 7 Vorschläge bestätigt, 4 mit vergangener Zeit (zwei davon Chris) → alle auf jetzt + 2 min
+    exec(block("fdp_start_verteilen"), ns)
+    ns["FDP_BESTAETIGEN_STREU_S"] = int(re.search(r"^FDP_BESTAETIGEN_STREU_S = (\d+)", SRC, re.M).group(1))
+    j2 = datetime(2026, 10, 28, 6, 38, tzinfo=timezone.utc)
+    C, I, M, K = "u-chris", "u-ina", "u-marc", "u-mike"
+    pl = [{"id": "c3", "fp_start": "2026-10-27T23:51:54+00:00", "firma": "apextrader", "user_id": C},
+          {"id": "c6", "fp_start": "2026-10-28T04:33:55+00:00", "firma": "apextrader", "user_id": C},
+          {"id": "i5", "fp_start": "2026-10-28T05:09:29+00:00", "firma": "apextrader", "user_id": I},
+          {"id": "m2", "fp_start": "2026-10-27T23:15:30+00:00", "firma": "apextrader", "user_id": M},
+          {"id": "k11", "fp_start": "2026-10-28T07:18:35+00:00", "firma": "apextrader", "user_id": K},
+          {"id": "m4", "fp_start": "2026-10-28T09:17:25+00:00", "firma": "apextrader", "user_id": M}]
+    belegt = [("tradeify", I, True, datetime(2026, 10, 28, 7, 0, tzinfo=timezone.utc))]
+    st = {k: datetime.fromisoformat(v) for k, v in ns["fdp_start_verteilen"](pl, belegt, j2, 900, 5400, random.Random(3)).items()}
+    zs = sorted(st.values())
+    check(len(st) == 6 and all((b - a).total_seconds() >= 900 for a, b in zip(zs, zs[1:])),
+          "Bestätigen mit vergangenen Zeiten: alle Starts derselben Firma ≥ 15 min auseinander (" + ", ".join(t.strftime("%H:%M") for t in zs) + " UTC)")
+    check(abs((st["c6"] - st["c3"]).total_seconds()) >= 5400 and abs((st["m4"] - st["m2"]).total_seconds()) >= 5400
+          and abs((st["i5"] - belegt[0][3]).total_seconds()) >= 5400, "je ID ≥ 90 min zwischen Big Trades, auch gegen einen anderen Big Trade der ID")
+    check(st["k11"] == datetime(2026, 10, 28, 7, 18, 35, tzinfo=timezone.utc) or all(abs((st["k11"] - t).total_seconds()) >= 900 for k, t in st.items() if k != "k11"),
+          "Vorschlag in der Zukunft ohne Konflikt bleibt, sonst gestreut")
+    check(min(zs) >= j2 + timedelta(seconds=120), "kein Start vor jetzt + 2 min Vorlauf")
+    st2 = ns["fdp_start_verteilen"](pl[:4], [], j2, 900, 5400, random.Random(4))
+    check(len({v[11:16] for v in st2.values()}) == 4,
+          "Zufall: kein fester Takt, vier verschiedene Minuten")
     U1 = "00000000-0000-4000-a000-0000000000a1"
     konto = {"id": "ka", "user_id": U1, "name": "150k PAAPEX000000000055 → Funded", "firm": "Apex Trader", "account_type": "funded",
              "auto_planer": True, "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"}

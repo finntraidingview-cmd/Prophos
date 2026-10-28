@@ -29892,6 +29892,48 @@ def fdp_start_bestaetigt(vorschlag_iso, jetzt):
     return (v if v and v > frueh else frueh).astimezone(timezone.utc).isoformat()
 
 
+FDP_BESTAETIGEN_STREU_S = 600            # verschobene Startzeit: Zufall 0–10 min obendrauf (Puls-Jitter-Regel, nie im festen Takt)
+
+
+def fdp_start_verteilen(plaene, belegt, jetzt, abstand_firma_s, abstand_id_s, rnd=None):
+    """REIN RECHNEND (testbar): Startzeiten beim Bestätigen → {plan_id: iso}. Vorfall 28.10.2026 10:38 Dubai: Finn bestätigte 7 Vorschläge auf
+    einmal, vier davon mit schon vergangener Zeit — fdp_start_bestaetigt setzte alle vier auf „jetzt + 2 min" → vier Apex-Big-Trades (zwei
+    davon Chris) im selben Augenblick. Jetzt: plaene = [{id, fp_start, firma, user_id}] (Funded = immer Big Trade), belegt = [(firma, user_id,
+    big, datetime)] der übrigen geplanten/laufenden Pläne. Die vorgeschlagene Zeit bleibt, wenn sie nach jetzt + Vorlauf liegt und die
+    Abstände hält (abstand_firma_s zu jedem Start derselben Firma, abstand_id_s zu jedem Big Trade derselben ID); sonst ab frühestens
+    jetzt + Vorlauf + Zufall und hinter jeden Konflikt geschoben (+ Zufall) — der Reihe nach, auch gegeneinander."""
+    rnd = rnd or random.Random()
+    frueh = jetzt + timedelta(seconds=FDP_BESTAETIGEN_VORLAUF_S)
+    bel = list(belegt or ())
+    def zeit(s):
+        try:
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00")) if s else None
+        except ValueError:
+            return None
+    def konflikt(x, f, u):
+        bis = None
+        for bf, bu, bb, t in bel:
+            d = abs((x - t).total_seconds())
+            if f and bf == f and d < abstand_firma_s:
+                bis = max(bis or t, t + timedelta(seconds=abstand_firma_s))
+            if bb and bu == u and d < abstand_id_s:
+                bis = max(bis or t, t + timedelta(seconds=abstand_id_s))
+        return bis
+    out = {}
+    for p in sorted(plaene or (), key=lambda p: zeit(p.get("fp_start")) or frueh):
+        v = zeit(p.get("fp_start"))
+        x = v if v and v > frueh else frueh + timedelta(seconds=rnd.uniform(0, FDP_BESTAETIGEN_STREU_S))
+        f, u = str(p.get("firma") or ""), str(p.get("user_id") or "")
+        for _ in range(500):
+            k = konflikt(x, f, u)
+            if k is None:
+                break
+            x = k + timedelta(seconds=rnd.uniform(0, FDP_BESTAETIGEN_STREU_S))
+        out[str(p["id"])] = x.astimezone(timezone.utc).isoformat()
+        bel.append((f, u, True, x))
+    return out
+
+
 def _fdp_login():
     """Gate wie die Challenge-Routen (_ap_eingriff): (admin, uid, sicht) oder (…, Fehler-Antwort). im_planer = funded_plan_regeln.user_ids."""
     _mail, err = _admin_auth()
@@ -29938,9 +29980,31 @@ def _fdp_eingriff(aktion):
             if sperre:
                 return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
             zeilen = []
-            for p in sb_select("trade_plans", dict(params, select="id,fp_start:mt5_baseline->funded_plan->>start_um")) or []:
+            neu = sb_select("trade_plans", dict(params, select="id,user_id,master_firm,fp_start:mt5_baseline->funded_plan->>start_um")) or []
+            # Startzeiten streuen (28.10.2026, fdp_start_verteilen): Abstand je Firma und je ID gegen alle geplanten/laufenden Pläne
+            reg = _fdp_regeln_laden() or {}
+            zt = dict(FDP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
+            firmen = reg.get("firmen") or FDP_FIRMEN_STANDARD
+            fkey = lambda firm: ((ap_regel_finden(firmen, firm) or {}).get("namen") or [_ap_norm(firm)])[0]
+            ids_neu = {str(p["id"]) for p in neu}
+            belegt = []
+            for b in sb_select("trade_plans", {"select": "id,user_id,master_firm,route,winning_day,orbit_v3,hedge_eur,status,start_um,started_at",
+                                               "status": "in.(planned,open)", "planned_for": f"gte.{(jetzt - timedelta(days=1)).date().isoformat()}"}) or []:
+                t = b.get("started_at") if b.get("status") == "open" else b.get("start_um")
+                if str(b.get("id")) in ids_neu or not t:
+                    continue
+                try:
+                    t = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                big = (b.get("route") in ("tvv2", "tsv2") and not b.get("winning_day")
+                       and bool(b.get("orbit_v3") or (_wd_num(b.get("hedge_eur")) or 0) > 0))
+                belegt.append((fkey(b.get("master_firm")), str(b.get("user_id")), big, t))
+            starts = fdp_start_verteilen([dict(p, firma=fkey(p.get("master_firm"))) for p in neu], belegt, jetzt,
+                                         60 * float(zt.get("firma_abstand_min") or 15), 60 * float(zt.get("abstand_id_min") or 90))
+            for p in neu:
                 zeilen += sb_update("trade_plans", dict(params, id=f"eq.{p['id']}"),
-                                    {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": fdp_start_bestaetigt(p.get("fp_start"), jetzt),
+                                    {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": starts.get(str(p["id"])) or fdp_start_bestaetigt(p.get("fp_start"), jetzt),
                                      "start_um_gestartet_at": None})
         elif art == "delete":
             zeilen = sb_delete("trade_plans", params)
