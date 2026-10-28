@@ -31650,6 +31650,12 @@ except Exception as _pe:
     print(f"[polar] Modul nicht geladen: {type(_pe).__name__}: {_pe}", flush=True)
 
 try:
+    import kapital_app          # Kapital im System je Gruppe (29.10.2026, Finn): eigenes Modul mit den /admin/kapital*-Routen, wie Polar
+    kapital_app.registrieren(app, globals())
+except Exception as _ke:
+    print(f"[kapital] Modul nicht geladen: {type(_ke).__name__}: {_ke}", flush=True)
+
+try:
     import support_app          # Support-Chat „Lotse“ (27.10.2026, Finn): eigenes Modul mit den /support/*-Routen, wie Polar
     support_app.registrieren(app, globals())
 except Exception as _se:
