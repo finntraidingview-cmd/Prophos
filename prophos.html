@@ -3599,6 +3599,19 @@
   #adm-pane-wd #wd-nd-grid .wd-po-fuss{justify-content:flex-end}
   #adm-pane-wd #wd-ueb-stat-rows .adm-row{grid-template-columns:minmax(130px,1.4fr) minmax(50px,1.4fr) auto 46px;padding:8px 0}
   #adm-pane-wd #wd-ueb-stat-rows .adm-row-name small{display:block;font-size:11px;color:var(--sub);font-weight:400}
+  /* Alle Winning Days einzeln (29.10.2026): kleiner Schalter wie .apd-schalter, Liste scrollt in sich, Kopfzeile bleibt stehen */
+  #adm-pane-wd .wd-ueb-liste-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--border-soft, var(--line));font-size:12.5px}
+  #adm-pane-wd .wd-ueb-schalter{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-weight:500}
+  #adm-pane-wd .wd-ueb-schalter .switch{width:28px;height:16px}
+  #adm-pane-wd .wd-ueb-schalter .switch-slider::before{width:12px;height:12px}
+  #adm-pane-wd .wd-ueb-schalter .switch input:checked + .switch-slider::before{transform:translateX(12px)}
+  #adm-pane-wd .wd-ueb-liste{max-height:460px;overflow:auto;margin-top:8px}
+  #adm-pane-wd .wd-ueb-liste[hidden]{display:none}
+  #adm-pane-wd .wd-ueb-liste .wd-tab{min-width:760px}
+  #adm-pane-wd .wd-ueb-liste .wd-tab th{position:sticky;top:0;background:var(--surface);z-index:1}
+  #adm-pane-wd .wd-ueb-liste .wd-tab td,#adm-pane-wd .wd-ueb-liste .wd-tab th{white-space:nowrap;vertical-align:middle}
+  #adm-pane-wd .wd-ueb-liste .wd-tab .zahl{text-align:right;font-variant-numeric:tabular-nums}
+  #adm-pane-wd .wd-ueb-liste .wd-tab .summe{color:var(--sub)}
   @media (max-width:640px){
     #adm-pane-wd .wd-ueb-kpis,#adm-pane-wd #wd-ueb-stat-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
     #adm-pane-wd .wd-po-grid{grid-template-columns:1fr}
@@ -12111,15 +12124,11 @@
                da aus planen … die Einstellungen, die Logik: daran nichts ändern"). Nur Lesen: Gewinntage aus wd_konten_alle, Betrag wie
                Admin → Payouts, Statistik aus wd_liste (/admin/kapitel). Klick auf ein Konto klappt seine ID oben auf (Haken, „heute wieder rein").
                Der Zeitstrahl hängt sich selbst hinter das erste Panel (wzPanel). Seit .1797 ganz unten, unter IDs und Einstellungen (Finn 28.10.2026:
-               „Die Payouts-Box soll unter die ID- und Einstellungen-Box, also ganz runter"). -->
+               „Die Payouts-Box soll unter die ID- und Einstellungen-Box, also ganz runter").
+               Payout-Kacheln seit 29.10.2026 raus (Finn: „Das kannst du visuell komplett weglassen") — wdUebPayouts läuft ohne #wd-ueb-po
+               leer durch, die Kopf-Kacheln „Payout anfragbar" / „Nächster Payout" bleiben. -->
           <div class="panel" id="wd-ueb" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
-              <div class="panel-title">Payouts <span style="font-weight:400;color:var(--sub);font-size:12px">· Gewinntage je Konto · Klick öffnet die ID oben</span></div>
-              <div class="wd-ueb-chips" id="wd-ueb-firmen"></div>
-            </div>
-            <div class="wd-po-grid" id="wd-ueb-po"></div>
-            <button type="button" class="btn btn-ghost btn-xs wd-po-mehr" id="wd-ueb-po-mehr" hidden></button>
-            <div class="wd-panel-kopf wd-ueb-stat-kopf">
               <div class="panel-title">Statistik <span style="font-weight:400;color:var(--sub);font-size:12px" id="wd-ueb-stat-sub"></span></div>
               <div class="wd-ueb-chips" id="wd-ueb-stat-chips"></div>
             </div>
@@ -12127,6 +12136,13 @@
             <!-- Linien-Graf (28.10.2026, Finn: „ein Graf mit zwei Linien — Fusion-PnL akkumuliert … und Master-PnL akkumuliert") — wdUebGraf, Lightweight Charts wie die Markt-View -->
             <div class="wd-ueb-graf" id="wd-ueb-graf" hidden></div>
             <div class="adm-dist" id="wd-ueb-stat-rows"></div>
+            <!-- Alle Winning Days einzeln (29.10.2026, Finn: „unter die Statistik alle Winning Day Trades einmal runtergerattert, sodass ich gucken kann,
+                 dass die Statistik immer stimmt … gerne mit so einem Slider optional einblenden") — wdUebListe, dieselbe Reihe wie die Kacheln oben -->
+            <div class="wd-ueb-liste-kopf">
+              <label class="wd-ueb-schalter"><span class="switch"><input type="checkbox" id="wd-ueb-liste-an"><span class="switch-slider"></span></span>Alle Winning Days einzeln</label>
+              <span class="kf" id="wd-ueb-liste-sub"></span>
+            </div>
+            <div class="wd-ueb-liste" id="wd-ueb-liste" hidden></div>
           </div>
         </div>
         <!-- KOMPASS (23.09.2026, Finn: „bau eine Seite in Prophos unter Admin, wo ich die Daten immer live
@@ -48747,7 +48763,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1814'
+  const OS_TAB_BUILD = '2026-09-22.1815'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -63369,6 +63385,7 @@
       wdUebKpi('Fusion Total P&L', fN ? wdUebEur(fK) : '–', fN ? `kumuliert aus ${fN} WD${fN === 1 ? '' : 's'} mit Buchung · Ø ${wdUebEur(fK / fN)}` : 'noch nichts gebucht', fN ? wdUebFarbe(fK) : '', 'Fusion-Hedge-P&L aller Winning Days aufsummiert (Deal-Historie, €) — amber Linie im Graf') +
       wdUebKpi('Master Total P&L', mN ? wdUebUsd(mK) : '–', mN ? `kumuliert aus ${mN} WD${mN === 1 ? '' : 's'} · Ø ${wdUebUsd(mK / mN)}${letzter ? ' · bis ' + escapeHtml(wdUebTag(new Date(letzter + 'T12:00:00Z'))) : ''}` : 'keine Winning Days', mN ? wdUebFarbe(mK) : '', 'Master-P&L aller Winning Days aufsummiert ($) — violette Linie im Graf')
     wdUebGraf([...tage.entries()].map(([d, v]) => ({ time: d, m: v.m, f: v.f })))
+    wdUebListe(kum)
     // je Firma / je ID: Balken = Anzahl, Wert = Ø Master je WD, rechts TP-Quote
     const m = new Map()
     for(const t of rows){
@@ -63384,6 +63401,42 @@
         <div class="adm-val" style="color:${wdUebFarbe(e.m)}" title="Ø Master-P&amp;L je Winning Day">Ø ${wdUebUsd(e.m / e.n)}</div>
         <div class="adm-pct" title="TP erreicht (Master im Plus)">${Math.round(100 * e.tp / e.n)} %</div></div>`).join('')
       : `<div class="wd-ueb-leer">Keine Winning Days ${_wdUeb.zeit === 'alle' ? 'im Kapitel' : `in den letzten ${_wdUeb.zeit} Tagen`}${_wdUeb.firma ? ' bei ' + escapeHtml(_wdUeb.firma) : ''}.</div>`
+  }
+  // Alle Winning Days einzeln (29.10.2026, Finn: „alle Winning Day Trades einmal runtergerattert, sodass ich gucken kann, dass die
+  // Statistik immer stimmt"). Dieselbe Reihe `kum` wie Kacheln und Graf (gleiche Sortierung, gleiche Zahlen) — die Σ-Spalten laufen
+  // in Zeitfolge mit, die neueste Zeile steht oben und muss genau die Kachel-Summe zeigen. Fusion leer = noch nicht gebucht, zählt nicht.
+  // Aus = nichts rendern (wdRender läuft alle 30 s); der Schalter gilt bis zum Neuladen der Seite.
+  function wdUebListe(kum){
+    const an = !!_wdUeb.liste, box = document.getElementById('wd-ueb-liste'), sub = document.getElementById('wd-ueb-liste-sub'), cb = document.getElementById('wd-ueb-liste-an')
+    if(!box) return
+    if(cb && cb.checked !== an) cb.checked = an
+    if(sub) sub.textContent = kum.length ? `${kum.length} Trade${kum.length === 1 ? '' : 's'}${_wdUeb.firma ? ' · ' + _wdUeb.firma : ''} · neueste oben, Σ läuft mit` : ''
+    box.hidden = !an
+    if(!an){ box.innerHTML = ''; return }
+    if(!kum.length){ box.innerHTML = '<div class="wd-ueb-leer">Noch keine Winning Days im Kapitel.</div>'; return }
+    const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
+    let mS = 0, fS = 0
+    const zeilen = kum.map(t => {
+      const mp = num(t.master_pl), fe = num(t.fusion_eur)
+      if(mp !== null) mS += mp
+      if(fe !== null) fS += fe
+      return { t, mp, fe, mS, fS }
+    }).reverse()
+    const tag = t => escapeHtml(wdUebTag(new Date(String(t.datum) + 'T12:00:00Z'))) + (t.zeit ? ' <span class="kf">' + escapeHtml(wdHhmm(t.zeit)) + '</span>' : '')
+    const ri = r => { const s = String(r || ''); return s ? s[0].toUpperCase() + s.slice(1) : '' }
+    box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>ID</th><th>Konto</th><th>Firma</th><th>Richtung</th>`
+      + `<th class="zahl">Master</th><th class="zahl">Fusion</th><th class="zahl">Σ Master</th><th class="zahl">Σ Fusion</th></tr></thead><tbody>`
+      + zeilen.map(({ t, mp, fe, mS, fS }) => `<tr>
+          <td>${tag(t)}</td>
+          <td><span class="adm-dot" style="background:${idFarbe(t.user_id)}"></span>${escapeHtml(t.person || String(t.user_id || '').slice(0, 8))}</td>
+          <td>${escapeHtml(t.account_name || '—')}${t.blown ? ' <span style="color:var(--danger)">geblowt</span>' : ''}</td>
+          <td>${escapeHtml(wdUebFirma(t.master_firm))}</td>
+          <td>${escapeHtml([ri(t.richtung), t.kt != null ? wdDe(t.kt) + ' Kt' : ''].filter(Boolean).join(' · ') || '—')}</td>
+          <td class="zahl" style="color:${mp !== null ? wdUebFarbe(mp) : ''}">${mp !== null ? wdUebUsd(mp) : '–'}</td>
+          <td class="zahl" style="color:${fe !== null ? wdUebFarbe(fe) : ''}">${fe !== null ? wdUebEur(fe) : '<span class="kf">nicht gebucht</span>'}</td>
+          <td class="zahl summe">${wdUebUsd(mS)}</td>
+          <td class="zahl summe">${wdUebEur(fS)}</td></tr>`).join('')
+      + '</tbody></table>'
   }
   // Linien-Graf (28.10.2026): Lightweight Charts wie die Markt-View (mklLibLaden, mklToken — dieselbe Bibliothek, kein neues Paket).
   // x = Datum (Tagesende-Stand), Master $ auf der rechten, Fusion € auf der linken Skala; Farben aus den Tokens, beim Theme-Wechsel neu.
@@ -63467,6 +63520,8 @@
       const si = ev.target.closest('[data-wd-ueb-sicht]'); if(si){ _wdUeb.sicht = si.dataset.wdUebSicht; wdUebStatistik(); return }
       const ka = ev.target.closest('[data-wd-ueb-id]'); if(ka) wdUebOeffnen(ka.dataset.wdUebId)
     })
+    // Schalter „Alle Winning Days einzeln" (29.10.2026) — nur dieser eine Kasten, kein Sammel-Handler
+    document.getElementById('wd-ueb-liste-an')?.addEventListener('change', ev => { _wdUeb.liste = ev.target.checked; wdUebStatistik() })
     p.addEventListener('keydown', ev => { const ka = ev.target.closest('[data-wd-ueb-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdUebId) } })
   })()
   /* HEUTE NICHT DRIN (28.10.2026, Finn: „Wenn der Tag schon offen ist und ich nachts ein Tradeify-Payout anfrage, ist der Account automatisch
