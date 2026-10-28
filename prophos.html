@@ -11837,7 +11837,7 @@
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
           <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
-          <!-- Kapital (29.10.2026, Finn: Fusion-Report, Geschäftskonto, „insgesamt geparkt“ je Gruppe) — nur Voll-Admins (KASSE_REITER_HT + Server-Gate) -->
+          <!-- Kapital (29.10.2026, Finn: Fusion-Report, Geschäftskonto, „insgesamt geparkt“ je Gruppe) — HT sieht alle Gruppen, ein Verwalter (Emin) nur seine (Server-Gate _gate, ?ansicht=admin) -->
           <button class="subtab adm-tab" data-admtab="kapital">Kapital</button>
           <!-- Kompass + Rechnungen ganz rechts unter „sperren", klein und gedämpft (Finn 30.09.2026: „ganz nach rechts, unter das
                ‚sperren', wo man sie quasi nicht sieht. Braucht man eh nicht, fast ganz weg, aber behalten") — Pane/Umschaltung unverändert -->
@@ -15215,7 +15215,7 @@
     // Trade-Planer für Verwalter seit 09.10.2026 aus — seit 13.10.2026 WIEDER AN (Gruppen-Planer, Finn: „genau so soll er in seinem
     // Admin-Panel die Trades bestätigen, genau in der gleichen Ansicht wie Hermann Technologies"): der Server liefert ihm dort nur seine
     // Gruppe (sicht=admin → ap_sicht_uid/ap_eingriff_sicht), Planer-Haken (HT user_ids) bleiben 403
-    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail', 'kontomail', 'kapital'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter; kontomail (29.10.2026) ebenso; kapital (29.10.2026) bis Finn es freigibt
+    const KASSE_REITER_HT = new Set(['rg', 'kasse', 'auftrag', 'mail', 'kontomail'])   // mail (21.10.2026): Mails aller IDs nie für Verwalter; kontomail (29.10.2026) ebenso — kapital ist für Verwalter frei (Finn 29.10.2026 04:30, nur seine Gruppe, Server-Gate)
     const admEingeschraenkt = () => !!(admData && Array.isArray(admData.sicht_ids))
     const admIstVerwalter = () => !!(admData && admData.verwalter)
     function kasseReiterErlaubt(name, ec){
@@ -20434,7 +20434,7 @@
       const msg = $('kis-msg')
       if(!kisDaten){ msg.style.display = ''; msg.textContent = 'Lade…' }
       try{
-        const r = await rgApi('/admin/kapital' + (kisGruppe ? '?gruppe=' + encodeURIComponent(kisGruppe) : ''), { raw: true })
+        const r = await rgApi('/admin/kapital?ansicht=admin' + (kisGruppe ? '&gruppe=' + encodeURIComponent(kisGruppe) : ''), { raw: true })   // ansicht=admin: Verwalter sieht nur mit dem Marker seine Gruppe
         const d = await r.json().catch(() => ({}))
         // Grund vom Server zeigen statt fester Text (29.10.2026: „Nur für Voll-Admins.“ verdeckte, dass das Gate an ADMIN_EMAILS hing)
         if(r.status === 403 || r.status === 401){ msg.style.display = ''; msg.textContent = 'Kein Zugriff: ' + (d.error || ('HTTP ' + r.status)); return }
@@ -20455,7 +20455,7 @@
       const m = $('kis-form-msg'); m.style.color = ''; m.textContent = ''
       if(btn) btn.disabled = true
       try{
-        await rgApi(pfad, { method: methode, body: JSON.stringify(body) })
+        await rgApi(pfad + '?ansicht=admin', { method: methode, body: JSON.stringify(body) })
         await kisLaden()
         return true
       }catch(e){

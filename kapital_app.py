@@ -26,8 +26,9 @@ CoinPayments-Abweichung in der Toleranz.
   POST   /admin/kapital/fusion          {gruppe, betrag, waehrung, stand_am?, notiz?}  (Rückfall, wenn mt5_live nicht frisch)
   POST   /admin/kapital/gk              {gruppe, datum, betrag (± ), waehrung, kategorie, text}  · DELETE {id}
 
-Rechte wie die Admin-Übersicht (_gate, seit 29.10.2026 04:25): eingeloggt und im Admin NICHT eingeschränkt — Verwalter (Emin) und „nur
-eigene“ bekommen 403. Bis dahin _lq_gate (ADMIN_EMAILS): „Finn + Pascal“ steht nicht in ADMIN_EMAILS und sah nur „Nur für Voll-Admins.“
+Rechte wie die Admin-Übersicht (_gate, seit 29.10.2026 04:25): eingeloggt; uneingeschränkt = alle Gruppen. VERWALTER (Finn 04:30: „Bei Emin
+soll es auch gehen — es geht ja vor allem um die IDs von Emin") = nur die Gruppe, deren Verwalter er ist (Lesen, Buchen, Löschen; nie
+HT-Daten), nur mit ?ansicht=admin wie alle Admin-Reiter. Mitglied / „nur eigene“ bekommen 403. Bis dahin _lq_gate (ADMIN_EMAILS): „Finn + Pascal“ steht nicht in ADMIN_EMAILS und sah nur „Nur für Voll-Admins.“
 Tageswerte: jeder GET schreibt den
 heutigen Stand, dazu auf Railway ein Stunden-Takt."""
 import os
@@ -391,17 +392,26 @@ def _admin_uid():
 
 
 def _gate():
-    """Gate wie /admin/overview (_wd_login: eingeloggt) plus: NICHT eingeschränkt. _wd_login setzt g.admin_sicht nur für eingeschränkte
-    Logins (Verwalter einer Gruppe, Mitglied, „nur eigene“) — die bekommen 403, die Zahl ist Finns Kontrolle über die Gruppe. Bewusst nicht
-    mehr _lq_gate (ADMIN_EMAILS): Vorfall 29.10.2026 04:25, Finn als „Finn + Pascal“ (Voll-Admin im Admin, aber nicht in ADMIN_EMAILS) sah
-    nur „Nur für Voll-Admins.“ → None oder (Antwort, Status)."""
+    """Gate wie /admin/overview (_wd_login: eingeloggt). → (erlaubt, None) oder (None, (Antwort, Status)); erlaubt = None (alle Gruppen) oder
+    set der Gruppen-IDs. _wd_login setzt g.admin_sicht nur für eingeschränkte Logins: ein Verwalter (g.admin_verwalter, nur mit
+    ?ansicht=admin) bekommt genau die Gruppen, deren verwalter_user_id er ist (Finn 29.10.2026 04:30: Emin soll seine Gruppe sehen); Mitglied
+    und „nur eigene“ → 403. Bewusst nicht mehr _lq_gate (ADMIN_EMAILS): Vorfall 29.10.2026 04:25, Finn als „Finn + Pascal“ (im Admin
+    uneingeschränkt, aber nicht in ADMIN_EMAILS) sah nur „Nur für Voll-Admins.“"""
     uid, err = A["_wd_login"]()
     if err:
-        return err
-    if getattr(g, "admin_sicht", None) is not None:
-        return jsonify({"ok": False, "error": "Nur für Logins ohne Einschränkung im Admin"}), 403
+        return None, err
     g.kapital_uid = uid
-    return None
+    if getattr(g, "admin_sicht", None) is None:
+        return None, None
+    if getattr(g, "admin_verwalter", False):
+        eigene = {str(x["id"]) for x in (_sb("GET", "id_gruppen", {"select": "id", "verwalter_user_id": f"eq.{uid}"}) or [])}
+        if eigene:
+            return eigene, None
+    return None, (jsonify({"ok": False, "error": "Nur für Admins ohne Einschränkung oder den Verwalter der Gruppe"}), 403)
+
+
+def _darf(erlaubt, gid):
+    return erlaubt is None or gid in erlaubt
 
 
 def _datum(v):
@@ -409,11 +419,14 @@ def _datum(v):
     return v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else ""
 
 
-def _loeschen(tabelle, body):
+def _loeschen(tabelle, body, erlaubt):
     eid = _uuid(body.get("id"))
     if not eid:
         return jsonify({"ok": False, "error": "id nötig"}), 400
-    weg = _sb("DELETE", tabelle, {"id": f"eq.{eid}"}, prefer="return=representation") or []
+    filt = {"id": f"eq.{eid}"}
+    if erlaubt is not None:
+        filt["gruppe_id"] = _in(erlaubt)               # Verwalter löscht nur Zeilen seiner Gruppe
+    weg = _sb("DELETE", tabelle, filt, prefer="return=representation") or []
     return jsonify({"ok": True}) if weg else (jsonify({"ok": False, "error": "nicht gefunden"}), 404)
 
 
@@ -425,38 +438,41 @@ def registrieren(app, ns):
     def admin_kapital():
         if request.method == "OPTIONS":
             return "", 200
-        err = _gate()
+        erlaubt, err = _gate()
         if err:
             return err
         try:
-            gruppen = [{"id": str(g["id"]), "name": g.get("name") or "", "ht": not g.get("verwalter_user_id")}
-                       for g in (_sb("GET", "id_gruppen", {"select": "id,name,verwalter_user_id", "order": "name.asc"}) or [])]
+            gruppen = [{"id": str(x["id"]), "name": x.get("name") or "", "ht": not x.get("verwalter_user_id")}
+                       for x in (_sb("GET", "id_gruppen", {"select": "id,name,verwalter_user_id", "order": "name.asc"}) or [])
+                       if _darf(erlaubt, str(x["id"]))]
             gid = _uuid(request.args.get("gruppe"))
-            if not gid:                                # Standard: erste Gruppe mit Verwalter (Emin)
-                gid = next((g["id"] for g in gruppen if not g["ht"]), "")
-            g = next((x for x in gruppen if x["id"] == gid), None)
-            if not g:
+            if not gid or not any(x["id"] == gid for x in gruppen):   # Standard (auch bei fremder/alter Wahl): erste Gruppe mit Verwalter
+                gid = next((x["id"] for x in gruppen if not x["ht"]), gruppen[0]["id"] if gruppen else "")
+            grp = next((x for x in gruppen if x["id"] == gid), None)
+            if not grp:
                 return jsonify({"ok": False, "error": "Gruppe nicht gefunden", "gruppen": gruppen}), 404
             b = kapital_fuer(gid, schreiben=True)
         except Exception as e:
             print(f"[kapital] ⚠️ GET: {type(e).__name__}: {e}", flush=True)
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
-        return jsonify(dict(b, ok=True, gruppe=g, gruppen=gruppen, takt={"fehler": _takt["fehler"]},
+        return jsonify(dict(b, ok=True, gruppe=grp, gruppen=gruppen, takt={"fehler": _takt["fehler"]},
                             generated=datetime.now(timezone.utc).isoformat()))
 
     @app.route("/admin/kapital/einlage", methods=["POST", "DELETE", "OPTIONS"])
     def admin_kapital_einlage():
         if request.method == "OPTIONS":
             return "", 200
-        err = _gate()
+        erlaubt, err = _gate()
         if err:
             return err
         body = request.get_json(silent=True) or {}
         try:
             if request.method == "DELETE":
-                return _loeschen("kapital_einlagen", body)
+                return _loeschen("kapital_einlagen", body, erlaubt)
             gid, betrag, datum = _uuid(body.get("gruppe")), _num(body.get("betrag")), _datum(body.get("datum"))
             w = str(body.get("waehrung") or "EUR").upper()
+            if not _darf(erlaubt, gid):
+                return jsonify({"ok": False, "error": "Gruppe nicht freigegeben"}), 403
             if not gid or not (betrag > 0) or not datum or w not in ("EUR", "USD"):
                 return jsonify({"ok": False, "error": "gruppe, betrag > 0, waehrung EUR/USD und datum (JJJJ-MM-TT) nötig"}), 400
             neu = A["sb_insert"]("kapital_einlagen", {
@@ -477,12 +493,14 @@ def registrieren(app, ns):
     def admin_kapital_fusion():
         if request.method == "OPTIONS":
             return "", 200
-        err = _gate()
+        erlaubt, err = _gate()
         if err:
             return err
         body = request.get_json(silent=True) or {}
         gid, betrag, stand = _uuid(body.get("gruppe")), _num(body.get("betrag")), _datum(body.get("stand_am"))
         w = str(body.get("waehrung") or "EUR").upper()
+        if not _darf(erlaubt, gid):
+            return jsonify({"ok": False, "error": "Gruppe nicht freigegeben"}), 403
         if not gid or betrag < 0 or w not in ("EUR", "USD") or not stand:
             return jsonify({"ok": False, "error": "gruppe, betrag ≥ 0, waehrung EUR/USD und stand_am nötig"}), 400
         try:
@@ -498,16 +516,18 @@ def registrieren(app, ns):
         """Geschäftskonto-Buchung (Finn 29.10.2026: „wie in so einem Google-Sheet … Kunden bezahlen oder PCs kaufen")."""
         if request.method == "OPTIONS":
             return "", 200
-        err = _gate()
+        erlaubt, err = _gate()
         if err:
             return err
         body = request.get_json(silent=True) or {}
         try:
             if request.method == "DELETE":
-                return _loeschen("kapital_gk_buchungen", body)
+                return _loeschen("kapital_gk_buchungen", body, erlaubt)
             gid, betrag, datum = _uuid(body.get("gruppe")), _num(body.get("betrag")), _datum(body.get("datum"))
             w = str(body.get("waehrung") or "EUR").upper()
             kat = str(body.get("kategorie") or "Sonstiges").strip()[:40] or "Sonstiges"
+            if not _darf(erlaubt, gid):
+                return jsonify({"ok": False, "error": "Gruppe nicht freigegeben"}), 403
             if not gid or betrag == 0 or not datum or w not in ("EUR", "USD"):
                 return jsonify({"ok": False, "error": "gruppe, betrag ≠ 0 (+ Eingang / − Ausgang), waehrung und datum nötig"}), 400
             neu = A["sb_insert"]("kapital_gk_buchungen", {
