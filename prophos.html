@@ -31147,11 +31147,12 @@
     const sk = bq.balance == null ? summaryKeysKurz(st.summary) : undefined
     return Object.assign(e, { anker: a.quelle || null, b1: bq.balance, eq1: bq.equity, lo: f.lo, hi: f.hi }, sk !== undefined ? { summary_keys: sk } : {})
   }
-  // REIN RECHNEND (Test-Haken window._summaryKeysKurz): Label-Namen der Reader-Zusammenfassung → höchstens 24 Namen à 40 Zeichen | 'keine Zusammenfassung'
+  // REIN RECHNEND (Test-Haken window._summaryKeysKurz): Label-Namen der Reader-Zusammenfassung → höchstens 24 Namen à 40 Zeichen | 'keine Zusammenfassung'.
+  // Ziffern maskiert (Prüfer S2 zu f5b81959: das Userscript lässt „Net Liq $51,234.56" oder „Balance 48.512,30" als Label durch) — nie ein Betrag am Hedge
   function summaryKeysKurz(summary){
     if(!summary || typeof summary !== 'object' || Array.isArray(summary)) return 'keine Zusammenfassung'
     const k = Object.keys(summary)
-    return k.length ? k.slice(0, 24).map(x => String(x).replace(/\s+/g, ' ').trim().slice(0, 40)) : 'Zusammenfassung leer'
+    return k.length ? k.slice(0, 24).map(x => String(x).replace(/\d[\d.,'\s\u00a0]*/g, '# ').replace(/\s+/g, ' ').trim().slice(0, 40)) : 'Zusammenfassung leer'
   }
   window._summaryKeysKurz = summaryKeysKurz
   // Abgelehntes Ende bei gekürztem Text: Konsole höchstens alle 10 s, am Hedge höchstens jede Minute (Auswertung, warum nicht geschlossen)
@@ -51700,7 +51701,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1897'
+  const OS_TAB_BUILD = '2026-09-22.1898'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

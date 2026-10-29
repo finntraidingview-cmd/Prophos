@@ -48,6 +48,8 @@ def main():
         "neu": {"Cash": "$150,123.45", "Net Liq": "$150,123.45", "Realized P&L": "$0.00"},
         "lang": {("Label " + str(i) + " " + "x" * 50): "1" for i in range(30)},
         "alt": {"Account Balance": "$150,123.45", "Equity": "$150,123.45"},
+        # Prüfer S2 zu f5b81959: Beträge im Label-Namen werden maskiert
+        "betrag": {"Net Liq $51,234.56": "x", "Balance 48.512,30": "y", "Day 2 P&L": "z"},
     }
     js = "\n".join([
         "function tvGeldText(v){ var n = Number(String(v).replace(/[^0-9.\\-]/g, '')); return isFinite(n) && String(v).trim() ? n : null }",
@@ -75,6 +77,8 @@ def main():
     check(isinstance(o["lang"]["keys"], list) and len(o["lang"]["keys"]) == 24 and all(len(x) <= 40 for x in o["lang"]["keys"]),
           "höchstens 24 Namen à 40 Zeichen")
     check(o["alt"]["bal"] == 150123.45, "bekanntes Label 'Account Balance' liest weiter die Balance")
+    check(o["betrag"]["keys"] == ["Net Liq $#", "Balance #", "Day # P&L"] and not any(c.isdigit() for k in o["betrag"]["keys"] for c in k),
+          f"Ziffern im Label maskiert, nie ein Betrag ({o['betrag']['keys']})")
     beweis, melden = js_funktion(src, "kurzEndeBeweis"), js_funktion(src, "kurzEndeMelden")
     check("bq.balance == null ? summaryKeysKurz(st.summary) : undefined" in beweis and "summary_keys: sk" in beweis,
           "kurzEndeBeweis: summary_keys nur ohne Balance")
