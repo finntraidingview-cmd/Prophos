@@ -4924,6 +4924,16 @@
   #dashboard-view .tc-zl .tc-puls-spur{margin-top:5px;padding:7px 9px;border:1px solid var(--border-soft);border-radius:6px;background:var(--bg);font-family:var(--mono);font-size:10.5px;color:var(--ink-2);white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
   #dashboard-view .tc-zl .tc-zl-alarm{padding:6px 13px;background:var(--surface);border-top:1px solid var(--border-soft)}
   #dashboard-view .wdl-modelle{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin:0 0 12px}
+  /* RADAR-ZEITBUDGET (29.10.2026): Restzeit im Untertitel, gesperrt = nur Kopf + Sperrfläche sichtbar (der Radar-Code läuft weiter) */
+  #dashboard-view .rz-rest{font-variant-numeric:tabular-nums;color:var(--sub)}
+  #dashboard-view .rz-rest.rz-knapp{color:var(--warn-ink, #b45309)}
+  #dashboard-view section.view.rz-zu > :not(.view-head):not(#wdl-sperre){display:none !important}
+  #dashboard-view #wdl-sperre{max-width:420px;margin:48px auto;padding:26px 24px 22px;border:1px solid var(--border);border-radius:var(--r-md, 12px);
+    background:var(--surface);text-align:center}
+  #dashboard-view #wdl-sperre .rz-titel{font-size:15px;font-weight:600;color:var(--ink)}
+  #dashboard-view #wdl-sperre .rz-sub{font-size:12.5px;color:var(--sub);margin:6px 0 18px;line-height:1.5}
+  #dashboard-view #wdl-sperre input[type=range]{width:100%;accent-color:var(--violet);cursor:grab}
+  #dashboard-view #wdl-sperre .rz-hint{font-size:11.5px;color:var(--sub-2, var(--sub));margin-top:6px}
   #dashboard-view .wdl-modelle .wdl-mg{display:flex;align-items:center;gap:6px}
   #dashboard-view .wdl-modelle .wdl-mg > span{font-size:11px;color:var(--sub)}
   #dashboard-view .wdl-modelle .seg button b{margin-left:6px;font-variant-numeric:tabular-nums;color:#15803d}
@@ -11533,7 +11543,7 @@
           <!-- „Live Trades" heißt seit 27.09.2026 „Radar" (Finn: „änder mal Live Trades zu Radar"); data-view="wdlive" und wdl-* bleiben -->
           <h1 class="view-title">Radar</h1>
           <!-- Untertitel ohne Technik (30.09.2026, Finn: „viel Text, bringt gar nichts") — Demo/Balance laufen weiter im Hintergrund -->
-          <p class="view-sub">Trades aller IDs</p>   <!-- seit 30.09.2026 auch Echo (CFD) -->
+          <p class="view-sub">Trades aller IDs<span class="rz-rest" id="wdl-budget" hidden></span></p>   <!-- seit 30.09.2026 auch Echo (CFD); Restzeit: RADAR-ZEITBUDGET -->
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <div class="seg" id="wdl-tage"><button type="button" data-wdl-tage="1">Heute</button><button type="button" data-wdl-tage="2" class="active">2 Tage</button><button type="button" data-wdl-tage="7">7 Tage</button></div>
@@ -11546,6 +11556,14 @@
            über wdlChartLinien. -->
       <!-- Modell-Leiste (01.10.2026 abends, Finn: „ein Tab für jedes einzelne Modell … schön geordnet"): Alle · Mit Hedge (Echo, Orbit,
            Winning Day) · Ohne Hedge (Echo V2, Orbit V2, Topstep V2) — filtert Liste und ID-Leiste, gezeichnet in wdlModelleRender -->
+      <!-- RADAR-ZEITBUDGET (29.10.2026, Finn: „10 Minuten erst mal nur da auf Radar … irgendwann ist es geschlossen … dann muss ich mich mit einem Slider
+           freischalten, damit ich clean arbeiten kann und nicht jede 2 Sekunden ins Radar gucken muss"): Sperrfläche, nur sichtbar wenn die Zeit um ist -->
+      <div id="wdl-sperre" hidden>
+        <div class="rz-titel">Radar-Zeit aufgebraucht</div>
+        <div class="rz-sub">Alarme, Wächter und Trades laufen weiter — nur die Anzeige ist zu.</div>
+        <input type="range" id="wdl-sperre-slider" min="0" max="100" value="0" aria-label="Zum Freischalten ganz nach rechts ziehen">
+        <div class="rz-hint">Zum Freischalten ganz nach rechts ziehen · gibt <span id="wdl-sperre-min">10</span> Minuten</div>
+      </div>
       <!-- Polar über alle IDs (21.10.2026): je laufendem Polar-Lauf eine Zeile oben im Radar — polarRadarLeiste, Daten aus /admin/live-trades -->
       <div class="pol-radar-leiste" id="wdl-polar-leiste" hidden></div>
       <div class="wdl-modelle" id="wdl-modelle"></div>
@@ -13622,6 +13640,16 @@
             <button type="button" data-theme-wahl="light">Hell</button>
             <button type="button" data-theme-wahl="dark">Dunkel</button>
           </div>
+        </div>
+      </div>
+      <!-- Radar-Zeitbudget (29.10.2026): an/aus je Gerät (localStorage), Standard an; am PC-Tab ohne Wirkung -->
+      <div class="panel" style="margin-bottom:14px" id="rzPanel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Radar-Zeitbudget</div>
+            <div class="panel-sub">10 Minuten Radar, dann mit dem Schieberegler freischalten · füllt sich nach 60 Minuten ohne Radar wieder auf</div>
+          </div>
+          <span class="switch"><input type="checkbox" id="rzAn" checked><span class="switch-slider"></span></span>
         </div>
       </div>
 
@@ -36665,7 +36693,7 @@
     pcStandLaden()   // PC-Tab-Lebenszeichen je ID, höchstens alle 60 s (08.10.2026)
     wdl.timer = setTimeout(wdlTakt, 15000)
   }
-  window.wdlOnEnter = () => { wdlChartHolen(); wdlRender(); wdlTakt(); try{ if(!_hand.d && typeof handLaden === 'function') handLaden() }catch(_){}   /* .1480: Bestanden-Abschnitt braucht _hand sofort, nicht erst nach 60 s */ try{ setTimeout(() => mklTick(true), 80) }catch(_){} }
+  window.wdlOnEnter = () => { wdlChartHolen(); wdlRender(); wdlTakt(); try{ if(!_hand.d && typeof handLaden === 'function') handLaden() }catch(_){}   /* .1480: Bestanden-Abschnitt braucht _hand sofort, nicht erst nach 60 s */ try{ setTimeout(() => mklTick(true), 80) }catch(_){} try{ rzTick() }catch(_){}   /* Radar-Zeitbudget sofort prüfen (Auffüllen ohne Sperr-Aufblitzen) */ }
   document.getElementById('wdl-refresh')?.addEventListener('click', () => wdlLaden(true))
   document.querySelectorAll('#wdl-tage [data-wdl-tage]').forEach(b => b.addEventListener('click', () => {
     wdl.tage = Number(b.dataset.wdlTage) || 2
@@ -36675,6 +36703,75 @@
   // Stub ohne Login: window._wdlStub({trades:[…]}) zeichnet die View mit Testdaten
   window._wdlStub = d => { wdl.daten = d; wdl.fehler = ''; wdlLokalAnwenden(); wdlRender() }   // wie ein Abruf: lokale Merker gelten (08.10.2026)
   window._wdlLokal = () => [..._wdlLokal.keys()]   // Test-Haken
+
+  /* ══ RADAR-ZEITBUDGET (29.10.2026, Finn: „ich habe einfach so 10 Minuten erst mal nur da auf Radar, und die Zeit läuft dann immer ab, wenn
+   * ich auf Radar drauf bin. Irgendwann ist es halt geschlossen … und dann klicke ich auf Radar, da muss ich mich erst mal mit einem Slider
+   * freischalten … damit ich clean arbeiten kann und nicht jede 2 Sekunden ins Radar gucken muss") ══
+   * Die Zeit läuft NUR, solange die Radar-View offen UND der Tab sichtbar ist. Leer → Sperrfläche statt Inhalt (nur CSS: der Radar-Code,
+   * Alarme, Toasts und Wächter laufen weiter), Schieberegler ganz nach rechts = wieder RZ_BUDGET_MIN. War Radar RZ_AUFFUELL_MIN lang nicht
+   * offen, ist das Budget beim nächsten Öffnen wieder voll. Nur im Browser: am PC-Tab (MT5_LOCAL) nie — dort laufen die Wächter. Merker je
+   * Gerät in localStorage (try/catch, ohne Speicher gilt: voll). Schalter in Settings, Standard an. Admin → Radar-Statistik ist nicht betroffen. */
+  const RZ_BUDGET_MIN = 10, RZ_AUFFUELL_MIN = 60
+  const RZ_KEY = 'prophos_radar_budget_v1', RZ_AN_KEY = 'prophos_radar_budget_an'
+  const rzVoll = () => RZ_BUDGET_MIN * 60000
+  const rzLesen = () => { try{ const d = JSON.parse(localStorage.getItem(RZ_KEY) || 'null'); if(d && typeof d.rest === 'number') return d }catch(_){} return { rest: rzVoll(), offen: 0 } }
+  const rzSchreiben = d => { try{ localStorage.setItem(RZ_KEY, JSON.stringify(d)) }catch(_){} }
+  const rzAn = () => { try{ return localStorage.getItem(RZ_AN_KEY) !== '0' }catch(_){ return true } }
+  let _rz = rzLesen(), _rzLetzt = 0
+  function rzGilt(){ return !MT5_LOCAL && rzAn() }
+  function rzZeigen(){
+    const sec = document.querySelector('#dashboard-view section.view[data-view="wdlive"]'), el = document.getElementById('wdl-budget'), sp = document.getElementById('wdl-sperre')
+    if(!sec || !el || !sp) return
+    const gilt = rzGilt(), zu = gilt && _rz.rest <= 0
+    sec.classList.toggle('rz-zu', zu); sp.hidden = !zu
+    el.hidden = !gilt
+    if(gilt){
+      const s = Math.max(0, Math.ceil(_rz.rest / 1000))
+      el.textContent = zu ? ' · Radar-Zeit aufgebraucht' : ` · noch ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+      el.classList.toggle('rz-knapp', !zu && s <= 60)
+    }
+    const m = document.getElementById('wdl-sperre-min'); if(m) m.textContent = String(RZ_BUDGET_MIN)
+  }
+  function rzTick(){
+    const jetzt = Date.now()
+    const offen = !!document.querySelector('#dashboard-view .view[data-view="wdlive"].active') && document.visibilityState === 'visible'
+    if(rzGilt() && offen){
+      if(_rz.offen && jetzt - _rz.offen >= RZ_AUFFUELL_MIN * 60000) _rz.rest = rzVoll()     // lange nicht offen → wieder voll
+      if(_rzLetzt && _rz.rest > 0) _rz.rest = Math.max(0, _rz.rest - Math.min(2000, jetzt - _rzLetzt))
+      _rz.offen = jetzt; _rzLetzt = jetzt
+      rzSchreiben(_rz)
+    }else _rzLetzt = 0
+    rzZeigen()
+  }
+  setInterval(rzTick, 1000)
+  document.addEventListener('visibilitychange', rzTick)
+  window.addEventListener('storage', e => { if(e.key === RZ_KEY || e.key === RZ_AN_KEY){ _rz = rzLesen(); rzZeigen() } })   // zweiter Tab hat freigeschaltet
+  // Schieberegler: nur ganz rechts losgelassen gibt frei, sonst zurück auf 0 (bewusste Geste, kein Passwort)
+  ;(() => {
+    const sl = document.getElementById('wdl-sperre-slider'); if(!sl) return
+    // nur eine echte Geste zählt (Prüfer 29.10.2026: ein Tipp aufs rechte Ende setzte sofort 100): Ziehen = ab dem Drücken mindestens 3
+    // Bewegungs-Ereignisse und 0,25 s; Pfeiltaste gehalten = mindestens 20 Schritte. Ein Tipp (1 Ereignis) oder „Ende" gibt nie frei.
+    let n = 0, t0 = 0
+    sl.addEventListener('pointerdown', () => { n = 0; t0 = Date.now() })
+    sl.addEventListener('input', () => { n++ })
+    const los = () => {
+      const geste = t0 ? (n >= 3 && Date.now() - t0 >= 250) : n >= 20
+      if(Number(sl.value) >= 100 && geste){ _rz = { rest: rzVoll(), offen: Date.now() }; _rzLetzt = 0; rzSchreiben(_rz); rzZeigen() }
+      sl.value = '0'; n = 0; t0 = 0
+    }
+    sl.addEventListener('pointerup', los)                                                   // Loslassen: immer zurück auf 0
+    sl.addEventListener('change', () => { if(t0 || Number(sl.value) >= 100) los() })        // Pfeiltasten-Schritte dazwischen bleiben stehen
+    sl.addEventListener('keyup', () => { if(Number(sl.value) >= 100) los() })
+  })()
+  // Settings-Schalter (eigene Verdrahtung)
+  ;(() => {
+    const cb = document.getElementById('rzAn'); if(!cb) return
+    cb.checked = rzAn()
+    cb.addEventListener('change', () => { try{ localStorage.setItem(RZ_AN_KEY, cb.checked ? '1' : '0') }catch(_){} ; rzZeigen() })
+    if(MT5_LOCAL){ const p = document.getElementById('rzPanel'); if(p) p.hidden = true }    // am PC-Tab ohne Wirkung → gar nicht zeigen
+  })()
+  rzZeigen()
+  window._rzStub = (rest_ms, offen_ms) => { _rz = { rest: rest_ms, offen: offen_ms || Date.now() }; _rzLetzt = 0; rzSchreiben(_rz); rzZeigen() }   // Test-Haken
 
   /* ══ RADAR-STATISTIK (Admin-Reiter, 28.10.2026, Finn: „Statistik zu den Kopierern, vor allem zu Orbit … wie viel Prozent werden über
    * welchen Weg geschlossen, wie lange dauert das Ganze. Einfach die Statistiken, damit ich weiß, wenn da Fehler passieren") ══
@@ -50979,7 +51076,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1861'
+  const OS_TAB_BUILD = '2026-09-22.1862'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
