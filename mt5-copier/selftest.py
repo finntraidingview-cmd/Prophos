@@ -2034,6 +2034,7 @@ def main():
     results.append(test_puls_fehler_1682())
     results.append(test_puls_fehler_1787())
     results.append(test_puls_fehler_1800())
+    results.append(test_puls_fehler_1850())
     results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
@@ -10369,6 +10370,41 @@ def test_puls_fehlerfoto():
             "Hülle: Deckel sagt nein → kein fehlerbild, Grund als Spur-Zeile (trail als Liste)")
     finally:
         ob.fehlerfoto_anstossen = alt
+    return ok
+
+
+def test_puls_fehler_1850():
+    """Routine „Puls-Fehler" 29.10.2026 05:30 Dubai (.1850): Muster „close: schließen geklickt, aber flach nicht bewiesen" (2 PCs 28.10.,
+    beide Positionen waren zu) + „close: positions-tabelle … nicht sicher lesbar" (5× / 3 PCs). Beleg puls_augen: leeres Konto →
+    positionen_sichtbar false (13/13 Stände, 10 PCs). Flach-Beweis jetzt auch über TradingViews Close-Fill-Meldung (k3_flach_beweis);
+    Zeile noch da bleibt UNKLAR, Rückfrage-Riegel und Doktrin unverändert. Attrappen, kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1850: " + text)
+            ok = False
+    fb = ob.k3_flach_beweis
+    chk(fb(2, 2, None) == "tabelle" and fb(2, 2, 29817.25) == "tabelle", "Tabelle sichtbar + 2 Lesungen ohne Zeile = 'tabelle' (wie bisher, Meldung egal)")
+    chk(fb(0, 2, 29817.25) == "meldung" and fb(1, 3, 29817.25) == "meldung", "Tabelle nicht im Bild, 2 Lesungen ohne Zeile + Close-Fill-Meldung = 'meldung'")
+    chk(fb(0, 2, None) is None and fb(0, 1, 29817.25) is None and fb(1, 1, None) is None and fb(0, 0, 29817.25) is None,
+        "ohne Close-Fill-Meldung oder mit nur einer Lesung: kein Beweis (UNKLAR wie bisher)")
+    m_ok = [{"art": "fill", "status": "ausgefuehrt", "seite": "buy", "menge": 2, "preis": 29817.25, "text": "Buy 2 at 29,817.25"}]
+    m_falsch = [{"art": "fill", "status": "ausgefuehrt", "seite": "sell", "menge": 2, "preis": 29817.25, "text": "x"},
+                {"art": "fill", "status": "ausgefuehrt", "seite": "buy", "menge": 1, "preis": 29817.25, "text": "y"},
+                {"art": "tp", "status": "storniert", "seite": "buy", "menge": 2, "preis": 29730.75, "text": "z"}]
+    chk(fb(0, 2, ob.k3_close_meldungen(m_ok, "sell", 2)[0]) == "meldung" and fb(0, 2, ob.k3_close_meldungen(m_falsch, "sell", 2)[0]) is None,
+        "nur der Fill der Gegenseite mit gleicher Menge gilt als Close-Fill (eigene Seite, andere Menge, Storno nicht)")
+    q = _i.getsource(ob.modus_tvclose_cdp)
+    chk(q.count("k3_flach_beweis(") == 2 and 'beweis == "tabelle"' in q and "Close-Fill-Meldung gelesen" in q and "-Zeile noch da" in q,
+        "tvclose: Beweis über k3_flach_beweis, UNKLAR nennt den Grund (Zeile noch da / Tabelle nicht im Bild ohne Close-Meldung)")
+    chk(q.count('raus("bestaetigung_unklar"') == 4 and 'raus("close_knopf_unklar"' in q and 'res["retry_ok"] = False' in _i.getsource(ob.modus_tvclose_cdp)
+        and "time.sleep" not in q and "_warte(1.0, 0.4)" in q,
+        "tvclose: Rückfrage-Riegel, Knopf-Beweis und Doktrin (kein blinder zweiter Klick) unverändert, Wartezeiten nur über _warte")
+    chk("Flach nicht bewiesen:" in q and "cdp_meldung_text(m) for m in neu_c" in q, "tvclose: Diagnose-Zeile im Unklar-Fall (Zeile/Tabelle/Meldungen)")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1850: Close flach — leeres Konto zeigt keine Tabelle → Beweis über TradingViews Close-Fill-Meldung, sonst UNKLAR mit Diagnose")
     return ok
 
 

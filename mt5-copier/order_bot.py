@@ -24119,35 +24119,53 @@ def modus_tvclose_cdp(cmd):
                 bestaetigung = "dialog"
                 break
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
-            if ko.get("positionen_sichtbar") is True and not k3_zeilen(st.get("positionen"), root):
+            # 29.10.2026 (k3_flach_beweis): ohne Rückfrage zählt auch die Close-Fill-Meldung — ein leeres Konto zeigt keine Tabelle
+            if not k3_zeilen(st.get("positionen"), root) and (ko.get("positionen_sichtbar") is True
+                    or k3_close_meldungen(k3_neue_meldungen(vorher_c, (st.get("toasts") or {}).get("meldungen")),
+                                          str(z0.get("seite") or ""), cdp_zahl(z0.get("menge")) or 1)[0] is not None):
                 bestaetigung = "ohne_dialog"
         if not bestaetigung:
             return raus("bestaetigung_unklar", "Nach dem Close-Klick weder Rückfrage noch leere Tabelle (6 s) — POSITION womöglich OFFEN, bitte nachsehen.", "bestaetigung")
         res["bestaetigung"] = bestaetigung
-        # Flach-Beweis: zwei Lesungen mit sichtbarer Tabelle ohne Zeile der Wurzel
-        n_flach, neu_c, ende = 0, [], time.time() + 15
+        # Flach-Beweis: zwei Lesungen mit sichtbarer Tabelle ohne Zeile der Wurzel — ODER (29.10.2026, k3_flach_beweis: ein leeres Konto
+        # zeigt keinen Tabellenkopf) zwei Lesungen ohne Zeile der Wurzel + TradingViews eigene Close-Fill-Meldung seit dem Klick
+        n_flach, n_leer, neu_c, c_fill, storno, zeile_da, ende = 0, 0, [], None, set(), False, time.time() + 15
+        seite0, menge0 = str(z0.get("seite") or ""), cdp_zahl(z0.get("menge")) or 1
         while time.time() < ende:
             _warte(1.0, 0.4)
             st = s.stand(opts)
             ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
             neu_c = k3_neue_meldungen(vorher_c, (st.get("toasts") or {}).get("meldungen"))
-            if ko.get("positionen_sichtbar") is True and not k3_zeilen(st.get("positionen"), root):
-                n_flach += 1
-                if n_flach >= 2:
-                    break
-            else:
-                n_flach = 0
+            c_fill, storno = k3_close_meldungen(neu_c, seite0, menge0)
+            zeile_da = bool(k3_zeilen(st.get("positionen"), root))
+            if zeile_da:
+                n_flach = n_leer = 0
+                continue
+            n_leer += 1
+            n_flach = n_flach + 1 if ko.get("positionen_sichtbar") is True else 0
+            if k3_flach_beweis(n_flach, n_leer, c_fill):
+                break
         danach = cdp_positionen_vertrag([p for p in st.get("positionen") or [] if isinstance(p, dict) and p.get("sichtbar")])
-        if n_flach < 2:
-            return raus("ende_unklar", f"Schließen geklickt, aber flach NICHT bewiesen ({root}-Zeile noch da oder Tabelle unsichtbar) — in TradingView nachsehen.",
+        beweis = k3_flach_beweis(n_flach, n_leer, c_fill)
+        if not beweis:
+            # Diagnose (29.10.2026): Zeile noch sichtbar? Tabelle im Bild? welche Meldungen kamen seit dem Klick? — damit der nächste
+            # Unklar-Fall erklärt, was TradingView zeigte (Rohtexte ohne Konto, nur Art/Status/Seite/Menge/Preis)
+            trail.append(f"Flach nicht bewiesen: {root}-Zeile sichtbar {'ja' if zeile_da else 'nein'} · Tabelle im Bild "
+                         f"{'ja' if ko.get('positionen_sichtbar') is True else 'nein'} ({n_leer} Lesungen ohne Zeile) · Meldungen seit dem Klick: "
+                         + ("; ".join(cdp_meldung_text(m) for m in neu_c[:4]) or "keine"))
+            grund_u = f"{root}-Zeile noch da" if zeile_da else "Tabelle nicht im Bild und keine Close-Fill-Meldung gelesen"
+            return raus("ende_unklar", f"Schließen geklickt, aber flach NICHT bewiesen ({grund_u}) — in TradingView nachsehen.",
                         "flach", positionen_danach=danach)
-        c_fill, storno = k3_close_meldungen(neu_c, str(z0.get("seite") or ""), cdp_zahl(z0.get("menge")) or 1)
-        res["close_fill"], res["storniert"], res["beweis"] = c_fill, sorted(storno), "tabelle"
-        trail.append(f"FLACH (2 Lesungen, Tabelle sichtbar) · Close-Fill {k3_fmt(c_fill) if c_fill else 'nicht in den Meldungen'} · "
+        res["close_fill"], res["storniert"], res["beweis"] = c_fill, sorted(storno), beweis
+        trail.append((f"FLACH (2 Lesungen, Tabelle sichtbar)" if beweis == "tabelle" else
+                      f"FLACH (Meldung: Close-Fill {k3_fmt(c_fill)} · Tabelle nicht im Bild — leeres Konto zeigt keinen Tabellenkopf · "
+                      f"{n_leer} Lesungen ohne {root}-Zeile)")
+                     + f" · Close-Fill {k3_fmt(c_fill) if c_fill else 'nicht in den Meldungen'} · "
                      f"storniert: {', '.join(sorted(storno)).upper() or 'nicht gemeldet'}")
         t_info = _cdp_today_info(s, opts, trail)
         trail.append(f"Danach: Balance {k3_fmt(t_info['balance_end'])} · Equity {k3_fmt(t_info['equity_end'])} · Total P/L {k3_fmt(t_info['today_pnl'])}")
-        return raus("", f"Position {root} auf {res['konto_aktiv'][:40]} geschlossen (bewiesen: Tabelle"
+        return raus("", f"Position {root} auf {res['konto_aktiv'][:40]} geschlossen (bewiesen: "
+                    + ("Tabelle" if beweis == "tabelle" else f"TradingView-Meldung (Close-Fill {k3_fmt(c_fill)})")
                     + (", Rückfrage bestätigt" if bestaetigung == "dialog" else "") + ")"
                     + (f", Total P/L {t_info['today_pnl']:g}" if t_info["today_pnl"] is not None else ", Total P/L nicht gelesen"),
                     "fertig", ok=True, bestaetigt=True, positionen_danach=danach, gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -24260,6 +24278,24 @@ def k3_close_meldungen(neu, richtung, menge):
                  and m.get("status") == "ausgefuehrt" and _k3_menge_passt(m, menge)), None)
     storno = {m.get("art") for m in neu or [] if m.get("art") in ("tp", "sl") and m.get("status") == "storniert"}
     return fill, storno
+
+
+def k3_flach_beweis(n_tabelle, n_leer, c_fill):
+    """REIN RECHNEND (testbar): Flach-Beweis nach dem bestätigten Close-Klick (Routine „Puls-Fehler" 29.10.2026 05:30 Dubai, Muster
+    „close: schließen geklickt, aber flach nicht bewiesen (nq-zeile noch da oder tabelle unsichtbar)" — 2 PCs am 28.10. 17:38/17:47 UTC,
+    beide Positionen waren zu — dazu „close: positions-tabelle im puls-chrome nicht sicher lesbar" 5× auf 3 PCs in 7 Tagen. Beleg
+    puls_augen: in allen 13 Ständen der letzten 14 Tage (10 PCs, auch 1100 px hoch) ist konto.positionen_sichtbar GENAU DANN false, wenn
+    das Konto 0 Positionen hat — ein leeres Konto zeigt keinen Tabellenkopf (augen.js posSicht), „flach" war über die Tabelle nach dem
+    letzten Close eines Kontos nie beweisbar; in 7 Tagen gelang es 1× von 24).
+      'tabelle': zwei Lesungen mit sichtbarer Tabelle ohne Zeile der Wurzel (wie bisher)
+      'meldung': Tabelle nicht im Bild, aber zwei Lesungen ohne sichtbare Zeile der Wurzel UND TradingViews eigene Meldung „Gegenseite,
+                 gleiche Menge, ausgeführt" NEU seit dem Klick (dieselbe Quelle, mit der Orbit den Einstieg beweist: fill_toast)
+      None:      sonst (Zeile noch da, oder Tabelle weg ohne Close-Fill-Meldung) — bleibt UNKLAR, nie ein zweiter Klick."""
+    if n_tabelle >= 2:
+        return "tabelle"
+    if n_leer >= 2 and c_fill is not None:
+        return "meldung"
+    return None
 
 
 def k3_zeilen(positionen, root):
