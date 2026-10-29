@@ -26250,8 +26250,9 @@
   }
   /* ZWEI SCRIPTS, EIN WEG (29.10.2026, Finn 10:20: „Ich will, dass sich das Auge automatisch aktualisiert — sowohl bei Topstep als auch beim
    * TradingView-Script für Orbit"). Blick je Script: art 'tv' (TV-Reader im Puls-Chrome, Stand vom reader-server) oder 'tsx' (TopstepX-Auge,
-   * Stand vom Panel /api/tsx-stand) → {art, lader, version, posGrund}. posGrund ≠ '' = dort ist eine Position offen oder die Lesung beweist
-   * nichts (TV: positionen_ok + leere Liste; TopstepX: flach bewiesen, keine Position, nicht ausgeloggt) — dann nie neu laden/aktualisieren. */
+   * Stand vom Panel /api/tsx-stand) → {art, lader, version, posGrund, blind?}. posGrund ≠ '' = dort ist eine Position offen (TV: sehender Reader
+   * mit Liste) bzw. TopstepX beweist nichts (flach nicht bewiesen, ausgeloggt) — dann nie neu laden/aktualisieren. TV blind (seit 29.10.2026) =
+   * posGrund '' + blind: dann entscheidet vor jedem Eingriff die DB-Freigabe (tvnDbFrei). */
   const TVN_ART = {
     tv:  { name: 'Userscript', erster: '0.10.0', paarKey: 'prophos_tvneu_paar', tab: 'tv' },
     tsx: { name: 'TopstepX-Auge', erster: '0.3.0', paarKey: 'prophos_tvneu_paar_tsx', tab: 'tsx' }
@@ -26314,7 +26315,9 @@
   // Gemeinsame Freigabe aller Wege (Neuladen + Tampermonkey, TV + TopstepX): nichts läuft, nichts steht bevor — '' oder Grund. Wirft →
   // Aufrufer fail-closed. Das Abstands-Merkmal TVN_KEY gilt für beide Scripts: höchstens ein Puls-Eingriff je 30 min und PC.
   function tvnRuhe(b){
-    // Hand-Trades/Fremd-Positionen ohne Plan: nur mit sehender Lesung und leerer Positionsliste (Prüfer 29.10.2026)
+    // Hand-Trades/Fremd-Positionen ohne Plan: mit sehender Lesung über die leere Positionsliste (Prüfer 29.10.2026). Blinder Reader (29.10.2026,
+    // vom Master angenommen): TV-Hand-Trades ohne Plan sieht dann niemand — es zählt die DB-Freigabe (tvnDbFrei: Pläne, Hedges, Starts, Signale,
+    // Fremd-Positionen MT5) im Tick; Tampermonkey/Neuladen schließen keine Position
     if(b.posGrund) return b.posGrund
     let letzt = 0; try{ letzt = Number(localStorage.getItem(TVN_KEY)) || 0 }catch(_){}
     if(Date.now() - letzt < TVN_ABSTAND_MS) return 'letztes Neuladen < 30 min'
@@ -26345,14 +26348,16 @@
   }
   // „Übersprungen: Grund" an Railway (alarm_log userscript_tm_skip, ohne Push) — nur solange Schritt D an diesem PC nötig ist und noch nicht
   // versucht wurde; je Script höchstens alle 6 h und bei neuem Grund (localStorage), dazu drosselt Railway 24 h je PC × Grund
-  const TVTM_SKIP_KEY = art => 'prophos_tvtm_skip_' + art, TVTM_SKIP_MS = 6 * 3600000
+  const TVTM_SKIP_KEY = art => 'prophos_tvtm_skip_' + art, TVTM_SKIP_MS = 6 * 3600000, TVTM_SKIP_MIN_MS = 30 * 60000   // Prüfung 29.10.2026: wechselnde Gründe nie öfter als alle 30 min
   const TVTM_SKIP_STILL = ['letztes Neuladen < 30 min', 'kein frischer Stand', 'an diesem PC schon versucht', 'Lader aktuell', 'localStorage nicht lesbar']
   async function tvTmSkipMelden(b, grund){
     try{
       if(!grund || TVTM_SKIP_STILL.includes(grund) || /Version unbekannt oder ≥/.test(grund) || tvTmNoetig(b)) return
       try{ if(localStorage.getItem(tvTmKey(b.art))) return }catch(_){ return }
+      grund = String(grund).replace(/\s*\([^)]*\)/g, '').trim() || String(grund)   // „Popup offen (Name)" → „Popup offen": ein Schlüssel je Art von Grund
       let alt = null; try{ alt = JSON.parse(localStorage.getItem(TVTM_SKIP_KEY(b.art)) || 'null') }catch(_){}
-      if(alt && alt.grund === grund && Date.now() - (Number(alt.at) || 0) < TVTM_SKIP_MS) return
+      const seit = Date.now() - (Number(alt && alt.at) || 0)
+      if(alt && (seit < TVTM_SKIP_MIN_MS || (alt.grund === grund && seit < TVTM_SKIP_MS))) return
       try{ localStorage.setItem(TVTM_SKIP_KEY(b.art), JSON.stringify({ grund, at: Date.now() })) }catch(_){ return }
       const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return
       await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -26417,6 +26422,14 @@
     const blicke = [tvnBlickTv(), bTsx].filter(Boolean)
     // Blinder Reader (29.10.2026): Ersatz-Freigabe aus der DB, frisch vor jedem Eingriff — sonst kein Eingriff, Grund gemeldet
     const dbFrei = async () => blicke.some(x => x.blind) ? tvnDbFrei() : ''
+    // Nach dem Warten auf Railway (bis 12 s) die Blicke NEU lesen (Prüfung 29.10.2026: TV könnte inzwischen sehend mit Position sein, TopstepX
+    // nicht mehr flach) → frischer Blick desselben Scripts, sofern alle Scripts weiter ohne Position; sonst null
+    const frischerBlick = async art => {
+      let t2 = null; if(bTsx){ try{ t2 = tvnBlickTsx(await window.mtcApi('tsx-stand', { timeoutMs: 3000 })) }catch(_){ t2 = null } if(!t2) return null }
+      const neu = [tvnBlickTv(), t2].filter(Boolean)
+      if(neu.length !== blicke.length || neu.some(x => x.posGrund)) return null
+      return neu.find(x => x.art === art) || null
+    }
     // erst die einmalige Lader-Installation — nur wenn auch das ANDERE Script nichts Offenes sieht (der Tampermonkey-Weg öffnet einen Tab und
     // drückt mit der echten Maus; Hand-Trades ohne Plan im anderen Fenster sperren so auch, Prüfer 29.10.2026)
     for(const b of blicke){
@@ -26424,13 +26437,17 @@
       if(g){ tvTmSkipMelden(b, g); continue }
       const anders = blicke.find(x => x !== b && x.posGrund); if(anders){ tvTmSkipMelden(b, anders.posGrund); return }
       const gDb = await dbFrei(); if(gDb){ tvTmSkipMelden(b, 'Reader blind, ' + gDb); return }
-      if(window._tvNeuLaeuft || tvTmFrei(b)) return   // nach dem Warten auf Railway erneut prüfen (Start/Signal könnte inzwischen laufen)
-      return tvTmTick(b)
+      if(!blicke.some(x => x.blind)) return tvTmTick(b)   // sehend: kein Warten, Blick ist frisch
+      const nb = await frischerBlick(b.art)
+      if(window._tvNeuLaeuft || !nb || tvTmFrei(nb)) return   // nach dem Warten erneut prüfen (Start/Signal/Position könnte inzwischen da sein)
+      return tvTmTick(nb)
     }
     for(const b of blicke) if(!tvNeuladenFrei(b)){
       const gDb = await dbFrei(); if(gDb) return
-      if(window._tvNeuLaeuft || tvNeuladenFrei(b)) return
-      return tvNeuladenLauf(b)
+      if(!blicke.some(x => x.blind)) return tvNeuladenLauf(b)
+      const nb = await frischerBlick(b.art)
+      if(window._tvNeuLaeuft || !nb || tvNeuladenFrei(nb)) return
+      return tvNeuladenLauf(nb)
     }
   }
   ;(function tvnLoop(){ setTimeout(async () => { try{ await tvNeuladenTick() }catch(e){ console.warn('[tv-neuladen]', (e && e.message) || e) } tvnLoop() },

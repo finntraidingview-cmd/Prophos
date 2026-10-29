@@ -3936,15 +3936,18 @@ _TM_LINK = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
 # nirgends). Ersatz-Beweis aus der DB, wenn der Reader nichts beweisen kann: für diese ID kein Plan open, kein review-Plan mit lebendem Hedge,
 # kein Start < 45 min (auch unbestätigt; bis 65 min überfällig = noch im Startfenster), keine offene Fremd-Position (fremd_positionen, Hand-Trade
 # ohne Plan — der Tab kann die Tabelle per RLS nicht lesen) und auf diesem PC keine MT5-Position laut Lese-EA (mt5_live.master_positions ≤ 2 min).
-# Nur lesen. Neuladen/Tampermonkey schließt keine Position — die Sperre schützt vor einem Eingriff mitten in einem Lauf. ══
+# Wie tab_stand_riegel für ALLE IDs dieses PCs (mt5_live) plus laufende Signale des PCs (order_signale status laeuft, pc). Nur lesen.
+# GRENZE (Prüfung 29.10.2026, vom Master bewusst angenommen): Hand-Trades in TradingView ohne Plan sieht bei blindem Reader NIEMAND —
+# fremd_positionen entsteht für TV nur aus dem sehenden Reader (echoplus_live). Geschützt bleiben Plan-Trades, Hedges, Starts, Signale und
+# MT5-Hand-Trades. Neuladen/Tampermonkey schließen keine Position und klicken nicht im Chart (Tampermonkey öffnet eine eigene Seite). ══
 TM_BLIND_START_S = 45 * 60
 TM_BLIND_UEBERFAELLIG_S = 65 * 60
 TM_BLIND_HEDGE_LEBT = ("offen", "schliesst", "oeffnet")
 
 
-def tm_blind_frei_rechnen(plaene, fremd, live, jetzt):
-    """REIN RECHNEND (testbar): plaene [{status, start_um, start_um_gestartet_at, started_at, hedge_status}], fremd [{weg_at}], live
-    [{updated_at, n_pos}] (Zeilen dieses PCs) → '' (frei) oder der erste Grund."""
+def tm_blind_frei_rechnen(plaene, fremd, live, jetzt, signale=None):
+    """REIN RECHNEND (testbar): plaene [{status, start_um, start_um_gestartet_at, started_at, hedge_status}] aller IDs des PCs, fremd [{weg_at}],
+    live [{updated_at, n_pos}] (Zeilen dieses PCs), signale = order_signale status laeuft dieses PCs → '' (frei) oder der erste Grund."""
     def ts(v):
         # PostgREST-Formen („…+00", 1–9 Nachkommastellen) wie _payout_ts normieren — Python < 3.11 parst sie sonst nicht
         t = re.sub(r"\.(\d{1,6})\d*", lambda m: "." + m.group(1).ljust(6, "0"), str(v or "").strip().replace("Z", "+00:00"))
@@ -3953,6 +3956,8 @@ def tm_blind_frei_rechnen(plaene, fremd, live, jetzt):
             return datetime.fromisoformat(t).timestamp()
         except (TypeError, ValueError):
             return None
+    if signale:
+        return f"Puls/Signal läuft auf diesem PC ({len(signale)})"
     for p in plaene or []:
         st = str(p.get("status") or "")
         if st == "open":
@@ -3988,15 +3993,19 @@ def alarm_userscript_frei():
     if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
         return jsonify({"ok": True, "frei": False, "grund": "PC-Kennung fehlt"})
     try:
+        rows = sb_select("mt5_live", {"select": "updated_at,user_id:status->>user_id,pos:status->master_positions", "pc_name": f"eq.{pc}"}) or []
+        live = [{"updated_at": z.get("updated_at"), "n_pos": len(z.get("pos")) if isinstance(z.get("pos"), list) else 0} for z in rows]
+        # alle IDs dieses PCs (wie tab_stand_riegel) + die eigene — ein PC fährt heute je eine ID, abgesichert auch für mehrere (Prüfung 29.10.2026)
+        uids = sorted({str(z.get("user_id")) for z in rows if re.fullmatch(r"[0-9a-f-]{36}", str(z.get("user_id") or ""))} | {str(uid)})
+        uin = "in.(" + ",".join(uids) + ")"
         plaene = [dict(p, hedge_status=((p.get("hedge") or {}) if isinstance(p.get("hedge"), dict) else {}).get("status"))
                   for p in _sb_all("trade_plans", {"select": "status,start_um,start_um_gestartet_at,started_at,hedge:mt5_baseline->hedge",
-                                                   "user_id": f"eq.{uid}", "status": "in.(open,review,planned)"})]
-        fremd = sb_select("fremd_positionen", {"select": "weg_at", "user_id": f"eq.{uid}", "weg_at": "is.null", "limit": "5"}) or []
-        live = [{"updated_at": z.get("updated_at"), "n_pos": len(z.get("pos")) if isinstance(z.get("pos"), list) else 0}
-                for z in (sb_select("mt5_live", {"select": "updated_at,pos:status->master_positions", "pc_name": f"eq.{pc}"}) or [])]
+                                                   "user_id": uin, "status": "in.(open,review,planned)"})]
+        fremd = sb_select("fremd_positionen", {"select": "weg_at", "user_id": uin, "weg_at": "is.null", "limit": "5"}) or []
+        signale = sb_select("order_signale", {"select": "id", "status": "eq.laeuft", "pc": f"eq.{pc}", "limit": "5"}) or []
     except Exception as e:
         return jsonify({"ok": True, "frei": False, "grund": f"DB nicht lesbar ({type(e).__name__})"})
-    grund = tm_blind_frei_rechnen(plaene, fremd, live, time.time())
+    grund = tm_blind_frei_rechnen(plaene, fremd, live, time.time(), signale)
     return jsonify({"ok": True, "frei": not grund, "grund": grund})
 TM_MELDE_ABSTAND_S = 86400
 _TM_GEMELDET = {}
