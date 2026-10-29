@@ -2509,6 +2509,14 @@ def test_login_eigenes_konto():
         and "_konto_verbunden" not in q, "Waechter: gestreut, Login-Fenster statt Copier-Status, Runden-Zaehler im Deckel")
     chk("target=_login_dialog_waechter" in inspect.getsource(panel), "Waechter wird beim Panel-Start gestartet")
     chk("_LOGIN_WACHE_ZULETZT[fname] = time.time()" in inspect.getsource(panel._login_ok_wache), "Ende jeder Wache wird gemerkt")
+    chk("_bot_lauf_aktiv()" in q and q.index("_bot_lauf_aktiv()") < q.index("target=_login_ok_wache"), "Waechter wartet bei laufendem Bot-Lauf")
+    K = ob.konto_im_titel
+    chk(K(115319, "115319 - Tradeify-Demo: Demokonto - Hedge") and K("115319", "MetaTrader 5 - 115319")
+        and not K(115319, "1153190 - Broker") and not K(115319, "2115319 - Broker") and not K(115319, "") and not K("", "115319"),
+        "Kontonummer im Titel nur als ganze Zahl (Prüfer .1842)")
+    for f_ in (ob._finde_terminal, ob.run, ob.run_close):
+        chk("str(login) in" not in inspect.getsource(f_) and "str(expected) not in (w.window_text()" not in inspect.getsource(f_),
+            f"{f_.__name__}: kein Teilstring-Vergleich mehr")
     if ok:
         print("✓ Login eigenes Konto: Dialog der eigenen anderen Installation per invoke bestaetigt (Prozess belegt, 1× je Lauf), "
               "Fremdnummer/falsches Terminal nie; Panel-Wache bei stehendem Login-Fenster, gedeckelt")
@@ -5645,7 +5653,7 @@ def test_puls_fehler_1787():
     sp.append("Login/Lesen: 13 Runden, zuletzt 'IPC timeout'")
     chk(any("Login/Lesen: " in str(z) and " Runden" in str(z) for z in sp) and not any(" Runden" in str(z) for z in [sp[0].replace("Runden", "ok")]),
         "Runden-Stempel ist in der gestempelten Spur als Text erkennbar")
-    chk('if str(expected) not in (w.window_text() or ""):' in q_run and "F9 zweiter Anlauf (Terminal neu betreten)" in q_run,
+    chk('if not konto_im_titel(expected, w.window_text()):' in q_run and "F9 zweiter Anlauf (Terminal neu betreten)" in q_run,   # Guard seit .1842-Folge mit Zahlengrenze
         "run(): Fenster-Guard und zweiter F9-Anlauf stehen weiter")
     print(("✓" if ok else "✗") + " Puls-Fehler .1787: F9 kein Fenster vorn → frisch gestartetes Terminal (Alter der terminal64.exe) erst bis 45 s warm werden lassen")
     return ok

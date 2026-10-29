@@ -2643,6 +2643,8 @@ def _login_dialog_waechter():
                     _DIALOG_SEIT[fname] = seit
                 if not faellig:
                     continue
+                if _bot_lauf_aktiv():
+                    continue   # Prüfer zu .1842: mitten im Puls-/Order-Lauf nicht dazwischen (der Lauf bestätigt seine Dialoge selbst); Uhr bleibt, nächste Runde
                 neu += 1
                 _DIALOG_SEIT.pop(fname, None)
                 _LOGIN_WACHE_SCHWELLE.pop(fname, None)

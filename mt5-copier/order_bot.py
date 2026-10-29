@@ -2701,11 +2701,20 @@ def _fenster_betreten(w):
         pass  # Fokus steht schon — der Klick ist der sichtbare Uebernahme-Moment
 
 
+# KONTONUMMER IM FENSTERTITEL NUR ALS GANZE ZAHL (Prüfer zu .1842, 29.10.2026): bisher Teilstring — mit mehr eingeloggten Terminals
+# auf einem PC (seit .1842 bestätigt der Bot auch Login-Dialoge anderer eigener Installationen) träfe 115319 auch „1153190 - …" oder
+# „2115319 - …". Jetzt keine Ziffer direkt davor oder dahinter; gilt für _finde_terminal und die drei Fenster-Guards vor F9/Schließen.
+def konto_im_titel(login, titel):
+    """REIN RECHNEND (testbar): steht die Kontonummer als ganze Zahl im Fenstertitel?"""
+    k = str(login or "").strip()
+    return bool(k) and re.search(r"(?<!\d)" + re.escape(k) + r"(?!\d)", str(titel or "")) is not None
+
+
 def _finde_terminal(login):
     from pywinauto import Desktop
     for w in Desktop(backend="uia").windows():
         try:
-            if w.element_info.class_name == MT5_KLASSE and str(login) in (w.window_text() or ""):
+            if w.element_info.class_name == MT5_KLASSE and konto_im_titel(login, w.window_text()):
                 return w
         except Exception:
             continue
@@ -12125,7 +12134,7 @@ def run(cfg_path, cmd):
                 "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden. "
                        + _UAC_HINWEIS}
     _fenster_betreten(w)
-    if str(expected) not in (w.window_text() or ""):
+    if not konto_im_titel(expected, w.window_text()):
         return {"ok": False, "retry_ok": True,
                 "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Tastendruck."}
     trail.append("Terminal betreten")
@@ -12169,7 +12178,7 @@ def run(cfg_path, cmd):
             trail.append(urs[0])
         if vorn != 0:
             _fenster_betreten(w)
-            if str(expected) not in (w.window_text() or ""):
+            if not konto_im_titel(expected, w.window_text()):
                 return {"ok": False, "retry_ok": True,
                         "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Tastendruck. [" + _spur(trail) + "]"}
             trail.append("F9 zweiter Anlauf (Terminal neu betreten)")
@@ -13003,7 +13012,7 @@ def run_close(cfg_path, cmd):
                 "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden. "
                        + _UAC_HINWEIS}
     _fenster_betreten(w)
-    if str(expected) not in (w.window_text() or ""):
+    if not konto_im_titel(expected, w.window_text()):
         return {"ok": False, "retry_ok": True,
                 "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Klick."}
     trail.append("Terminal betreten")
