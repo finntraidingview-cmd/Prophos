@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TopstepX-Auge
 // @namespace    prophos
-// @version      0.3.0
+// @version      0.3.1
 // @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,1 s und bei jeder Änderung an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
 // @match        https://topstepx.com/*
 // @match        https://*.topstepx.com/*
@@ -47,7 +47,13 @@
  * (http://127.0.0.1:8770/userscript/tsx-kern.json: Kern + die aktuelle augen_tsx.js in einem Stück, SHA-256) eine NEUERE Fassung,
  * merkt sie in GM_setValue und fährt sie beim nächsten Laden des TopstepX-Tabs (das stößt Prophos an, nur wenn nichts läuft). eval
  * gesperrt (MV3), nichts gemerkt oder Fehler → die eingebaute Fassung mit der @require-augen_tsx.js, nie schlechter als vorher. Update
- * der Datei selbst (neuer Lader) holt Tampermonkey über @updateURL am Panel bzw. Puls einmal je PC (Knopf „Aktualisieren"). */
+ * der Datei selbst (neuer Lader) holt Tampermonkey über @updateURL am Panel bzw. Puls einmal je PC (Knopf „Aktualisieren").
+ * 0.3.1 FLACH-FOLGE (29.10.2026, Prüfer S2 zu afb622fa: das Panel hält nur den letzten Stand, Prophos holt ~alle 50 ms — zwei gesehene
+ * flache Meldungen konnten eine ungesehene „nicht flach"-Messung beim Karten-Neuaufbau einschließen): der Kern zählt selbst.
+ * stand.flach_folge = Zahl aufeinanderfolgender EIGENER Messungen mit flach-Beweis im selben Konto (nicht ausgeloggt); jede andere Messung
+ * setzt auf 0. stand.flach_seit = Zeitpunkt (ms) der ersten Messung dieser Serie. Gemessen wird in JEDEM Takt, auch wenn die vorige Meldung
+ * noch unterwegs ist (dann wird nur nicht gesendet) — sonst fiele genau die Messung weg, die das Flackern zeigt. Prophos schließt erst ab
+ * flach_folge ≥ 3 über ≥ 200 ms; ohne das Feld (Auge < 0.3.1) gilt dort die alte 5-s-Regel. Kommt per Lader, kein Handgriff am PC. */
 
 /* ══ LADER 0.3.0 (s. oben): prophosKern ist das eigentliche Auge. Alles zwischen den Markern KERN-START und KERN-ENDE holt der Lader
  * neuer nach (Panel /userscript/tsx-kern.json) — die Marker nie verschieben oder doppeln (Selbsttest prueft sie). ══ */
@@ -58,7 +64,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   // 0.3.0 DOPPELLAUF-RIEGEL: nie zwei Kerne in einer Seite (eingebaute UND nachgeladene Fassung) — lieber blind als doppelt
   if (unsafeWindow.__prophosTsxKernAn) return;
   unsafeWindow.__prophosTsxKernAn = true;
-  var SCRIPT = '0.3.0';
+  var SCRIPT = '0.3.1';
   var PANEL = 'http://127.0.0.1:8770/api/tsx-stand';
   var TAKT_MS = 100;                               // 0.2.0: 250 → 100 ms (Finn 29.10.2026)
   var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
@@ -88,8 +94,18 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
     } catch (_) { return false; }
   }
 
-  // Nur was der Schließer braucht (klein halten: 4 Meldungen je Sekunde). Rechtecke, Inventar und Chart bleiben weg.
-  function kurz(s) {
+  // FLACH-FOLGE (0.3.1, s. Kopf): Zähler über die eigenen Messungen — REIN bis auf die drei Variablen
+  var flachFolge = 0, flachSeit = null, flachKonto = null;
+  function folgeZaehlen(s, aus) {
+    var k = (s && s.konto && s.konto.kontonr) || null, ts = (s && s.ts) || Date.now();
+    if (s && s.flach === true && k && !aus && (flachFolge === 0 || k === flachKonto)) {
+      if (flachFolge === 0) flachSeit = ts;
+      flachFolge += 1; flachKonto = k;
+    } else { flachFolge = 0; flachSeit = null; flachKonto = k; }
+  }
+
+  // Nur was der Schließer braucht (klein halten: 10 Meldungen je Sekunde). Rechtecke, Inventar und Chart bleiben weg.
+  function kurz(s, aus) {
     var k = s.konto || {}, t = s.ticket || {}, r = (t.reiter && t.reiter.positions) || null, kp = s.kopf || {};
     var br = s.toasts && s.toasts.bracket ? s.toasts.bracket : null;
     return {
@@ -108,7 +124,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
       bracket: br ? { fill: br.fill ? { preis: br.fill.preis, menge: br.fill.menge, seite: br.fill.seite, symbol: br.fill.symbol } : null,
                       tp: br.tp ? { preis: br.tp.preis } : null, sl: br.sl ? { preis: br.sl.preis } : null } : null,
       popups: (s.popups || []).length,
-      ausgeloggt: ausgeloggt(),
+      ausgeloggt: aus,
+      flach_folge: flachFolge, flach_seit: flachSeit,
       takt: takt,
       fehler: s.fehler ? s.fehler.slice(0, 4).map(function (f) { return String(f).slice(0, 80); }) : null
     };
@@ -116,15 +133,18 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
 
   var letzterTick = 0, takt = 'start';
   function tick() {
-    if (unterwegs) return;                         // ein Request zur Zeit — ein hängendes Panel staut sonst Meldungen auf
     letzterTick = Date.now();
     var a = auge();
-    if (!a || typeof a.stand !== 'function') { letzterFehler = 'augen_tsx.js nicht geladen'; return; }
+    if (!a || typeof a.stand !== 'function') { letzterFehler = 'augen_tsx.js nicht geladen'; folgeZaehlen(null, false); return; }
     var paket;
-    try { paket = { tab: TAB, script: SCRIPT, stand: kurz(a.stand({})),
-      lader: (typeof PROPHOS_LADER !== 'undefined' && PROPHOS_LADER) ? Object.assign({}, PROPHOS_LADER) : null };   // 0.3.0: Lader-Stand
+    try {
+      var s = a.stand({}), aus = ausgeloggt();
+      folgeZaehlen(s, aus);                         // 0.3.1: JEDE Messung zählt, auch wenn gleich nicht gesendet wird
+      paket = { tab: TAB, script: SCRIPT, stand: kurz(s, aus),
+        lader: (typeof PROPHOS_LADER !== 'undefined' && PROPHOS_LADER) ? Object.assign({}, PROPHOS_LADER) : null };   // 0.3.0: Lader-Stand
     }
-    catch (e) { letzterFehler = 'Lesen: ' + String(e).slice(0, 80); return; }
+    catch (e) { letzterFehler = 'Lesen: ' + String(e).slice(0, 80); folgeZaehlen(null, false); return; }
+    if (unterwegs) return;                         // ein Request zur Zeit — ein hängendes Panel staut sonst Meldungen auf (gemessen ist schon)
     unterwegs = true;
     GM_xmlhttpRequest({
       method: 'POST', url: PANEL, timeout: 2000, data: JSON.stringify(paket), headers: { 'Content-Type': 'application/json' },
@@ -163,7 +183,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.3.0';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.3.1';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8770/userscript/tsx-kern.json';
   const MERK = 'prophos_tsx_kern_v1';         // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
