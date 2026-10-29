@@ -26,7 +26,8 @@ CoinPayments-Abweichung in der Toleranz.
   POST   /admin/kapital/fusion          {gruppe, betrag, waehrung, stand_am?, notiz?}  (Rückfall, wenn mt5_live nicht frisch)
   POST   /admin/kapital/gk              {gruppe, datum, betrag (± ), waehrung, kategorie, text}  · DELETE {id}
 
-Rechte wie die Admin-Übersicht (_gate, seit 29.10.2026 04:25): eingeloggt; uneingeschränkt = alle Gruppen. VERWALTER (Finn 04:30: „Bei Emin
+Rechte (_gate, Stand 29.10.2026 nach Prüfer): alle Gruppen nur für ADMIN_EMAILS oder admin_mail_leser („Finn + Pascal"), nie für jede
+uneingeschränkte HT-ID (Kunden). VERWALTER (Finn 04:30: „Bei Emin
 soll es auch gehen — es geht ja vor allem um die IDs von Emin") = nur die Gruppe, deren Verwalter er ist (Lesen, Buchen, Löschen; nie
 HT-Daten), nur mit ?ansicht=admin wie alle Admin-Reiter. Mitglied / „nur eigene“ bekommen 403. Bis dahin _lq_gate (ADMIN_EMAILS): „Finn + Pascal“ steht nicht in ADMIN_EMAILS und sah nur „Nur für Voll-Admins.“
 Tageswerte: jeder GET schreibt den
@@ -392,22 +393,35 @@ def _admin_uid():
 
 
 def _gate():
-    """Gate wie /admin/overview (_wd_login: eingeloggt). → (erlaubt, None) oder (None, (Antwort, Status)); erlaubt = None (alle Gruppen) oder
-    set der Gruppen-IDs. _wd_login setzt g.admin_sicht nur für eingeschränkte Logins: ein Verwalter (g.admin_verwalter, nur mit
-    ?ansicht=admin) bekommt genau die Gruppen, deren verwalter_user_id er ist (Finn 29.10.2026 04:30: Emin soll seine Gruppe sehen); Mitglied
-    und „nur eigene“ → 403. Bewusst nicht mehr _lq_gate (ADMIN_EMAILS): Vorfall 29.10.2026 04:25, Finn als „Finn + Pascal“ (im Admin
-    uneingeschränkt, aber nicht in ADMIN_EMAILS) sah nur „Nur für Voll-Admins.“"""
+    """→ (erlaubt, None) oder (None, (Antwort, Status)); erlaubt = None (alle Gruppen) oder set der Gruppen-IDs. ENG wie _admin_mail_auth
+    (Prüfer 29.10.2026: „im Admin uneingeschränkt" heißt nur „keine admin_zugang-Zeile" — das sind alle 15 HT-IDs, auch jeder Kunde):
+      1. _wd_login (eingeloggt; setzt g.admin_sicht für eingeschränkte Logins, Verwalter nur mit ?ansicht=admin)
+      2. Verwalter (g.admin_verwalter) → genau die Gruppen mit verwalter_user_id = er (Finn 04:30: Emin soll seine Gruppe sehen)
+      3. sonst eingeschränkt (Mitglied, „nur eigene") → 403
+      4. uneingeschränkt nur mit ADMIN_EMAILS (_admin_auth frei) ODER Eintrag in admin_mail_leser (heute „Finn + Pascal" — dieselbe
+         Freigabe wie Admin → Mail, bewusst mitbenutzt statt einer zweiten Liste) → alle Gruppen; jeder andere Login → 403."""
     uid, err = A["_wd_login"]()
     if err:
         return None, err
     g.kapital_uid = uid
-    if getattr(g, "admin_sicht", None) is None:
+    nein = (jsonify({"ok": False, "error": "Nur für Admins oder den Verwalter der Gruppe"}), 403)
+    if getattr(g, "admin_sicht", None) is not None:
+        if getattr(g, "admin_verwalter", False):
+            eigene = {str(x["id"]) for x in (_sb("GET", "id_gruppen", {"select": "id", "verwalter_user_id": f"eq.{uid}"}) or [])}
+            if eigene:
+                return eigene, None
+        return None, nein
+    _mail, err = A["_admin_auth"]()
+    if err is None:
         return None, None
-    if getattr(g, "admin_verwalter", False):
-        eigene = {str(x["id"]) for x in (_sb("GET", "id_gruppen", {"select": "id", "verwalter_user_id": f"eq.{uid}"}) or [])}
-        if eigene:
-            return eigene, None
-    return None, (jsonify({"ok": False, "error": "Nur für Admins ohne Einschränkung oder den Verwalter der Gruppe"}), 403)
+    if err[1] != 403:
+        return None, err
+    try:
+        if str(uid) in A["admin_mail_leser_uids"]():
+            return None, None
+    except Exception:
+        return None, (jsonify({"ok": False, "error": "Anmeldung nicht prüfbar"}), 502)
+    return None, nein
 
 
 def _darf(erlaubt, gid):
