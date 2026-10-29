@@ -51350,7 +51350,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1868'
+  const OS_TAB_BUILD = '2026-09-22.1869'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -71674,17 +71674,34 @@
    * /konto-reset-bestaetigen (Railway: Einstellungen der alten Zeile, Startbalance = Größe, Kaufpreis der Schablone, alte als blown archiviert);
    * fehlt die alte Zeile, öffnet sich das Modal wie bei einem Kauf. Mails ohne Nummer (FTMO CFD, The5%ers, Topstep-Reset) bleiben im Admin-Reiter. */
   const KONTO_ZU_BEST_TAGE = 14
+  // STICHTAG (Finn 29.10.2026 nach dem ersten Test unter Marc: „Erst ab diesem Datum werden Accounts aus Mails zugefügt, nicht davor. Davor
+  // haben wir alles manuell zugeteilt."): nur Mails ab 28.10.2026 00:00 Dubai erzeugen Zeilen „zu bestätigen" — unter Accounts und in Admin →
+  // Alle Accounts. Ältere Mails (Topstep-Express 21.10., Tradeify-Level-Up 15.10. bei Marc: nie in Prophos, von Hand entschieden) bleiben
+  // nur im Admin-Reiter „Konten aus Mail" sichtbar, der weiter alles zeigt.
+  const KONTO_ZU_BEST_AB = Date.parse('2026-10-28T00:00:00+04:00')
+  // Topstep-Nummern (Finn/Master 29.10.2026): 150KTC-SKU-V2-DLL-697339-79770038 / EXPRESS-V2-DLL-697339-62007238 — die letzte Zahlengruppe
+  // (8 Ziffern) ist je Konto eindeutig, der Präfix ändert sich zwischen Combine und Express. Abgleich zusätzlich darüber (nur Topstep, ≥ 8 Ziffern).
+  const kontoTopstepSchwanz = ext => { const m = String(ext || '').toUpperCase().match(/^(?:\d{2,3}KTC|EXPRESS)[A-Z0-9-]*-(\d{8,})$/); return m ? m[1] : '' }
+  function kontoSchonDa(ext, liste){
+    const k = kontoKey(ext)
+    if(tvSchonDa(k, liste)) return true
+    const s = kontoTopstepSchwanz(ext)
+    // Gegenseite ebenso nur Topstep-Form (External ID bzw. Wort im Namen) — nie eine beliebige Ziffernfolge einer anderen Firma
+    return !!s && liste.some(a => [a.externalId, a.ext, a.external_id, ...String(a.name || '').split(/\s+/)].some(v => kontoTopstepSchwanz(v) === s))
+  }
   const kontoMailSuche = () => [...new Set(KONTO_MAIL_MUSTER.map(x => x.suche))].join('|')
   function mailOffen(mails, konten, verworfen){   // verworfen: uid → Set(EXT normiert)
     const gesehen = new Set(), out = []
     for(const m of (mails || []).slice().sort((a, b) => (Date.parse(b.datum || '') || 0) - (Date.parse(a.datum || '') || 0))){
+      if((Date.parse(m.datum || '') || 0) < KONTO_ZU_BEST_AB) continue   // Stichtag: ältere Mails nur im Admin-Reiter „Konten aus Mail"
       const e = kontoMailErkennen(m)
       if(!e || !e.ext) continue
       const uid = String(m.user_id || ''), k = kontoKey(e.ext)
       if(gesehen.has(uid + '|' + k)) continue
       gesehen.add(uid + '|' + k)
       if((verworfen(uid) || new Set()).has(k)) continue
-      if(tvSchonDa(k, konten.filter(a => !uid || !a.user_id || String(a.user_id) === uid))) continue
+      // gegen ALLE Konten der ID, archivierte eingeschlossen (eigene Liste: accounts; Admin: konten der ganzen Sicht vom Server)
+      if(kontoSchonDa(e.ext, konten.filter(a => !uid || !a.user_id || String(a.user_id) === uid))) continue
       out.push(Object.assign({ row: { user_id: uid, name: e.ext, zuerst_at: m.datum || '', person: m.person || '' }, quellen: ['Mail'], mail: m }, e))
     }
     return out
