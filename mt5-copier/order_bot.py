@@ -21250,6 +21250,9 @@ def cdp_konten_erwartet(cmd):
         k = _nur_alnum(st[0] if st else "").upper()
         if len(k) < 3:
             continue
+        offen = len(st) == 5 and st[4].strip() == "o"            # ':o' = auf dem Konto läuft ein Trade (S2 30.10.2026)
+        if offen:
+            st = st[:4]
         zeit = st[3].strip() if len(st) == 4 and re.fullmatch(r"\d{8}", st[3].strip()) else ""
         if len(st) != 4:
             out[k] = {"unbekannt": "kaputt", "zeit": zeit}
@@ -21262,7 +21265,8 @@ def cdp_konten_erwartet(cmd):
         except (TypeError, ValueError):
             out[k] = {"unbekannt": "kaputt", "zeit": zeit}
             continue
-        out[k] = {"n": n, "pl": pl, "zeit": zeit} if (n >= 0 and pl == pl) else {"unbekannt": "kaputt", "zeit": zeit}
+        out[k] = ({"n": n, "pl": pl, "zeit": zeit, "offen": offen} if offen else {"n": n, "pl": pl, "zeit": zeit}) if (n >= 0 and pl == pl) \
+            else {"unbekannt": "kaputt", "zeit": zeit}
     return out
 
 
@@ -21296,7 +21300,9 @@ def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, 
     Spielräume"): erw = cdp_konten_erwartet. Je Kandidat erwartet = tv_balance + Σ master_pl der seitdem beendeten Pläne, Toleranz 25 $ je
     Trade (0 Pläne = centgenau wie bisher). Bestätigt nur, wenn GENAU das Ziel passt und KEIN anderer Kandidat passt oder unbekannt ist
     (Balance unbekannt, Trade läuft, master_pl fehlt, Eintrag kaputt). Ohne '@ke' (alter Tab) gilt N = 0 — also die Regel vom 27.10.
-    Die Spur nennt jeden Kandidaten: Kennung · tv_balance (Zeit) · Σ master_pl (N) · erwartet · passt."""
+    Die Spur nennt jeden Kandidaten: Kennung · tv_balance (Zeit) · Σ master_pl (N) · erwartet · passt.
+    LAUFENDER TRADE (S2 30.10.2026: sonst brach tvclose genau dieses Trades ab): beim ZIEL Beitrag 0 — die offene Position ändert die
+    Balance nicht; ist sie an der Börse schon zu, passt die Balance nicht mehr → nicht bestätigt (sicher). Bei anderen Kandidaten blockiert er."""
     a = str(aktiv or "")
     if not (ein_konto is True and geklickt_ohne_liste and cdp_konto_gekuerzt(a) and cdp_konto_passt(a, ext)):
         return False, ""
@@ -21326,6 +21332,8 @@ def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, 
             unbekannt.append(k)
             teile.append(f"…{k[-5:]} · Balance unbekannt · blockiert")
             continue
+        if info.get("offen") and k != e:
+            info = {"unbekannt": "offen", "zeit": z}   # laufender Trade auf einem ANDEREN Kandidaten: Balance kann sich jederzeit ändern → blockiert
         if info.get("unbekannt"):
             unbekannt.append(k)
             grund = {"offen": "Trade läuft", "pl": "master_pl fehlt", "knapp": "Ende knapp nach der Lesung", "kaputt": "Eintrag kaputt"}.get(info["unbekannt"], info["unbekannt"])
@@ -21338,7 +21346,7 @@ def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, 
         if ok_k:
             passt.append(k)
         teile.append(f"…{k[-5:]} · {eur(float(kb))}{zt} · Σ {vz(pl)} ({n} {'Plan' if n == 1 else 'Pläne'}) · erwartet {eur(erwartet)}"
-                     + (f" ± {tol} $" if tol else "") + f" · passt {'ja' if ok_k else 'nein'}")
+                     + (f" ± {tol} $" if tol else "") + (" · laufender Trade zählt 0" if info.get("offen") else "") + f" · passt {'ja' if ok_k else 'nein'}")
     liste = f"angezeigt {bt}: " + " | ".join(teile)
     if passt == [e] and not unbekannt:
         return True, f"Konto per Präfix bestätigt über die erwartete Balance ({len(kand)} Konten mit diesem Anfang) — {liste}"
