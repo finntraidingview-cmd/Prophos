@@ -18,6 +18,8 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 
+import threading
+
 import requests
 from flask import Flask, g, jsonify, request
 
@@ -50,6 +52,8 @@ class DB:
         self.inserts, self.frei, self.riegel = [], {"frei": True}, None
 
     def sb_select(self, t, q):
+        if t == "trade_plans" and "created_at" in q:     # Duplikat-Schutz: eben angelegte Pläne dieses Kontos × Richtung
+            return [p for p in getattr(self, "angelegt", []) if p["richtung"] == q["richtung"][3:]]
         if t == "trade_plans":
             return [p for p in getattr(self, "geplant", []) if p["richtung"] == q["richtung"][3:]]
         i = q.get("id", "")[3:]
@@ -75,7 +79,7 @@ def lade(db, gate):
     app = Flask("t")
     ns = {"app": app, "jsonify": jsonify, "request": request, "g": g, "re": re, "requests": requests, "datetime": datetime,
           "timedelta": timedelta, "timezone": timezone, "sb_select": db.sb_select, "sb_insert": db.sb_insert, "_sb_anfrage": db._sb_anfrage,
-          "_sb_pruefen": lambda r: None, "_sb_headers": lambda *a: {}, "SUPABASE_URL": "https://x", "_admin_konto_gate": gate,
+          "_sb_pruefen": lambda r: None, "_sb_headers": lambda *a: {}, "SUPABASE_URL": "https://x", "_admin_konto_gate": gate, "threading": threading,
           "_ap_norm": lambda f: re.sub(r"[^a-z0-9]", "", str(f or "").lower()), "_firm_norm": lambda f: f}
     exec(src[i:j], ns)
     return app, ns
@@ -129,6 +133,8 @@ def main():
     check(f is None and z["winning_day"] is True and z["hedge_eur"] == 40.0, "Topstep Winning Day mit Hedge-Feldern ok")
 
     c = app.test_client()
+    # Routen-Fälle mit Start relativ zu jetzt (die Route prüft „nicht in der Vergangenheit" gegen die echte Uhr)
+    row = dict(row, start_um=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
     print("GET /admin/plan-konto")
     d = c.get(f"/admin/plan-konto?account_id={KONTO['id']}").get_json()
     check(d["ok"] and d["konto"]["name"] == KONTO["name"] and not any(k in d["konto"] for k in ("cred_login", "cred_password", "meta_api_token")),
@@ -153,10 +159,34 @@ def main():
           "geplanter BUY derselben Firma bei Marc → SELL nicht gespeichert (wie das Popup, Gegenprüfung Fund 2)")
     db.geplant = []
     db.frei, db.riegel = {"frei": True}, "Challenge-/Phase-Konto „100k …“ nur ohne Hedge"
-    r = c.post("/admin/plan-anlegen", json={"account_id": KONTO["id"], "row": row})
+    r = c.post("/admin/plan-anlegen", json={"account_id": KONTO["id"], "row": dict(row, start_um=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat())})   # anderer Start: kein Doppel
     check(r.status_code == 409 and "nur ohne Hedge" in r.get_json()["msg"], f"DB-Riegel → 409 mit Grund ({r.get_json()['msg'][:60]})")
     db.riegel = None
     check(c.post("/admin/plan-anlegen", json={"account_id": LIVE["id"], "row": row}).status_code == 400, "Live-Konto → 400")
+
+    print("Duplikat-Schutz (Master 29.10.2026)")
+    D, jetzt2 = ns["admin_plan_doppel"], datetime.now(timezone.utc)
+    alt = {"master_account_id": KONTO["id"], "richtung": "sell", "start_um": jetzt2.isoformat(), "created_at": (jetzt2 - timedelta(seconds=10)).isoformat()}
+    neu_z = {"master_account_id": KONTO["id"], "richtung": "sell", "start_um": (jetzt2 + timedelta(seconds=30)).isoformat()}
+    check(D([alt], neu_z, jetzt2), "gleiches Konto + Richtung, vor 10 s, Start +30 s → Doppel")
+    check(not D([dict(alt, created_at=(jetzt2 - timedelta(seconds=40)).isoformat())], neu_z, jetzt2), "vor 40 s angelegt → kein Doppel")
+    check(not D([alt], dict(neu_z, start_um=(jetzt2 + timedelta(minutes=5)).isoformat()), jetzt2), "Start 5 min später → eigener Plan")
+    check(not D([alt], dict(neu_z, richtung="buy"), jetzt2) and not D([dict(alt, master_account_id="anderes")], neu_z, jetzt2),
+          "andere Richtung / anderes Konto → kein Doppel")
+    app2, _ = lade(db, lambda: (None, None))
+    c2 = app2.test_client()
+    n0 = len(db.inserts)
+    r1 = c2.post("/admin/plan-anlegen", json={"account_id": KONTO["id"], "row": dict(row, start_um=None), "sofort": True})
+    r2 = c2.post("/admin/plan-anlegen", json={"account_id": KONTO["id"], "row": dict(row, start_um=None), "sofort": True})
+    check(r1.status_code == 200 and r2.status_code == 409 and "Schon angelegt" in r2.get_json()["msg"] and len(db.inserts) == n0 + 1,
+          "„Speichern & sofort starten“ zweimal direkt hintereinander → 1 Plan, zweiter 409 „schon angelegt“ (Prozess-Merker)")
+    app3, _ = lade(db, lambda: (None, None))      # anderer Worker/Neustart: Merker leer, die DB kennt den Plan
+    db.angelegt = [dict(alt)]
+    r3 = app3.test_client().post("/admin/plan-anlegen", json={"account_id": KONTO["id"], "row": dict(row, start_um=None), "sofort": True})
+    check(r3.status_code == 409 and len(db.inserts) == n0 + 1, "anderer Prozess: Doppel aus der DB erkannt → 409")
+    db.angelegt = []
+    r4 = app3.test_client().post("/admin/plan-anlegen", json={"account_id": KONTO["id"], "row": dict(row, richtung="buy", start_um=None), "sofort": True})
+    check(r4.status_code == 200, "Gegenrichtung (BUY) auf demselben Konto ist kein Doppel (Richtungsschutz entscheidet, hier frei)")
     check(c.post("/admin/plan-anlegen", json={"account_id": "x", "row": row}).status_code == 400, "account_id ungültig → 400")
     print(f"\n{'ALLES OK' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
     sys.exit(1 if FEHLER else 0)

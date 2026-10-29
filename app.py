@@ -17712,6 +17712,32 @@ def admin_plan_zeile(b, konto, jetzt):
     return z, None
 
 
+ADMIN_PLAN_DOPPEL_S = 30            # Duplikat-Schutz (Master 29.10.2026): derselbe Plan in den letzten 30 s …
+ADMIN_PLAN_DOPPEL_START_S = 120     # … mit Start ±2 min = Doppelklick, kein zweiter Trade
+_admin_plan_lock = threading.Lock()
+_admin_plan_merk = {}               # (konto, richtung) → [(angelegt_ts, start_ts)] dieses Prozesses (Rennen zweier Anfragen in derselben ms)
+
+
+def admin_plan_doppel(vorhanden, zeile, jetzt):
+    """REIN RECHNEND (testbar): ist zeile ein Doppel? vorhanden = [{master_account_id, richtung, start_um, created_at}] (DB) — gleiches Konto,
+    gleiche Richtung, angelegt in den letzten ADMIN_PLAN_DOPPEL_S, Start ±ADMIN_PLAN_DOPPEL_START_S. → True/False"""
+    def ts(v):
+        try:
+            return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            return None
+    neu_start = ts(zeile.get("start_um"))
+    for p in vorhanden or ():
+        if str(p.get("master_account_id")) != str(zeile.get("master_account_id")) or p.get("richtung") != zeile.get("richtung"):
+            continue
+        an, st = ts(p.get("created_at")), ts(p.get("start_um"))
+        if an is None or jetzt.timestamp() - an > ADMIN_PLAN_DOPPEL_S:
+            continue
+        if st is None or neu_start is None or abs(st - neu_start) <= ADMIN_PLAN_DOPPEL_START_S:
+            return True
+    return False
+
+
 def admin_plan_gegen_geplant(plaene, firma, richtung, norm):
     """REIN RECHNEND (testbar): wie v2RichtungKonflikt(geplanteHand) im Popup — ein noch nicht gestarteter Plan derselben ID × Firma in
     Gegenrichtung (geplant, auch auf demselben Konto) sperrt das Speichern. plaene = geplante Pläne der Ziel-ID. → Plan-Name oder None."""
@@ -17790,6 +17816,29 @@ def admin_plan_anlegen():
     gegen = admin_plan_gegen_geplant(geplant, zeile.get("master_firm"), zeile["richtung"], lambda f: _ap_norm(_firm_norm(f)))
     if gegen:
         return jsonify({"ok": False, "msg": f"{zeile.get('master_firm')}: bei dieser ID ist schon „{gegen}“ in Gegenrichtung geplant — nicht gespeichert (Richtungs-Schutz)"}), 409
+    # DUPLIKAT-SCHUTZ (Master 29.10.2026: bei „Speichern & sofort starten" ist ein doppelter Plan ein doppelter Trade): Prüfen + Anlegen unter
+    # einem Lock (zwei Anfragen derselben ms), dazu der Merker dieses Prozesses und die DB (andere Worker/Neustart). 409 „schon angelegt".
+    with _admin_plan_lock:
+        key = (str(zeile["master_account_id"]), zeile["richtung"])
+        merk = [(a, st) for a, st in _admin_plan_merk.get(key, []) if jetzt.timestamp() - a <= ADMIN_PLAN_DOPPEL_S]
+        try:
+            seit = (jetzt - timedelta(seconds=ADMIN_PLAN_DOPPEL_S)).isoformat()
+            vorhanden = sb_select("trade_plans", {"select": "master_account_id,richtung,start_um,created_at", "master_account_id": f"eq.{zeile['master_account_id']}",
+                                                  "richtung": f"eq.{zeile['richtung']}", "created_at": f"gte.{seit}", "limit": "20"}) or []
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"Duplikat-Schutz nicht prüfbar ({type(e).__name__}) — nicht gespeichert"}), 502
+        vorhanden = list(vorhanden) + [{"master_account_id": key[0], "richtung": key[1], "created_at": datetime.fromtimestamp(a, timezone.utc).isoformat(),
+                                         "start_um": datetime.fromtimestamp(st, timezone.utc).isoformat()} for a, st in merk]
+        if admin_plan_doppel(vorhanden, zeile, jetzt):
+            return jsonify({"ok": False, "msg": "Schon angelegt — derselbe Plan (Konto, Richtung, Start ±2 min) kam gerade eben schon an, kein zweiter Trade"}), 409
+        antwort = _admin_plan_einfuegen(zeile)
+        if antwort[1] == 200:
+            _admin_plan_merk[key] = merk + [(jetzt.timestamp(), datetime.fromisoformat(zeile["start_um"]).timestamp())]
+        return antwort
+
+
+def _admin_plan_einfuegen(zeile):
+    """Plan anlegen (Service-Key). → (Antwort, Status) — 409 mit dem Grund eines DB-Riegels im Klartext."""
     try:
         neu = sb_insert("trade_plans", zeile)
     except requests.exceptions.HTTPError as e:
@@ -17805,7 +17854,7 @@ def admin_plan_anlegen():
         return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
     print(f"[admin-plan] {getattr(g, 'admin_konto_uid', '')} plant für {zeile['user_id']}: {zeile.get('master_name')} {zeile['route']} "
           f"{zeile['richtung']} Start {zeile['start_um']} ({(neu or {}).get('id')})", flush=True)
-    return jsonify({"ok": True, "plan": neu})
+    return jsonify({"ok": True, "plan": neu}), 200
 
 
 @app.route("/admin/konto-mails", methods=["GET", "OPTIONS"])

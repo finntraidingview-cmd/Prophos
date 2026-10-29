@@ -61726,8 +61726,6 @@
     const f = _tpFuer
     if(!['mt5v2', 'tvv2', 'tsv2'].includes(String(insertRow.route || ''))){ msg('Für andere IDs nur Echo V2, Orbit V2, Orbit oder Winning Day — die startet der PC der ID selbst.', 'err'); return false }
     if(!sofort && !insertRow.start_um){ msg('„Mit Uhrzeit hinzufügen" braucht eine Startzeit (Start um) — oder „Speichern & sofort starten".', 'err'); return false }
-    const knoepfe = ['tradePlanSave', 'tradePlanSaveStart'].map(id => document.getElementById(id)).filter(Boolean)
-    knoepfe.forEach(b => { b.disabled = true })
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/plan-anlegen?ansicht=admin`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -61741,7 +61739,6 @@
       try{ window._admLaden?.() }catch(_){}
       return true
     }catch(e){ msg('Nicht gespeichert: ' + ((e && e.message) || e), 'err'); return false }
-    finally{ knoepfe.forEach(b => { b.disabled = false }) }
   }
 
   /* POLAR — VORSCHAU (13.10.2026, Finn: „ein bisschen Frontend zu Polar, wie das mit Tradeplan, Polar, den Accounts je ID aussieht").
@@ -63807,7 +63804,20 @@
     knoepfe.forEach(b => { b.disabled = true; b.dataset.riegel = '1' })
     return true
   }
+  // DOPPELKLICK IM FREMD-MODUS (Master 29.10.2026: „bei ‚Speichern & sofort starten' ist ein doppelter Plan ein doppelter Trade"): beide
+  // Knöpfe SOFORT beim Klick sperren — vor dem Versions-Riegel (der bis 4 s wartet) — und erst nach der Antwort wieder frei; ein zweiter
+  // Klick in der Zeit tut nichts. Railway hat dazu einen eigenen Duplikat-Schutz (/admin/plan-anlegen).
   async function saveTradePlanFromModal(startAfter){
+    const f = _tpFuer
+    if(!f) return saveTradePlanFromModalInnen(startAfter)
+    if(f.busy) return
+    f.busy = true
+    const knoepfe = ['tradePlanSave', 'tradePlanSaveStart'].map(id => document.getElementById(id)).filter(Boolean)
+    knoepfe.forEach(b => { b.disabled = true })
+    try{ await saveTradePlanFromModalInnen(startAfter) }
+    finally{ f.busy = false; knoepfe.forEach(b => { if(!b.dataset.riegel) b.disabled = false }) }
+  }
+  async function saveTradePlanFromModalInnen(startAfter){
     if(await tpVersionRiegel()) return
     if(_tpFuer && !accounts.includes(_tpFuer.acc)) accounts.push(_tpFuer.acc)   // Fremd-Modus: Kontoliste kann neu geladen worden sein
     const masterId = document.getElementById('tp-master').value
