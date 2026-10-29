@@ -541,6 +541,33 @@ def ereignisse_lesen(gid, fx, ab=None):
             for z in zeilen if z.get("tag") and (not ab or str(z.get("tag"))[:10] >= ab)]
 
 
+def verluste_rechnen(ketten, blow_tage):
+    """REIN RECHNEND: beendete Ketten (kapital_ketten archiviert = true) für die Kachel „Verlust beendete Konten" (Finn 29.10.2026:
+    „geblowte Konten sind bei uns dicke Minus"). Je Kette Kauf, Hedge (+ = Hedge hat verloren, − = zurückgeholt), Payouts und netto =
+    Kauf + Hedge − Payouts (= gk_eur, Netto-Verlust der Kette), dazu der Blow-Tag aus kapital_blow_tage (None = unbekannt, zählt nur bei
+    „Alles"). Die Kapital-Zahl bleibt davon unberührt (beendete Ketten zählen dort 0)."""
+    tage = {str(z.get("kopf_id")): (str(z.get("arch_tag"))[:10] if z.get("arch_tag") else None) for z in blow_tage or []}
+    return [{"id": str(k.get("user_id") or ""), "tag": tage.get(str(k.get("kopf_id"))), "kauf": round(_num(k.get("kauf_eur")), 2),
+             "hedge": round(_num(k.get("hedge_eur")), 2), "payouts": round(_num(k.get("payouts_eur")), 2),
+             "netto": round(_num(k.get("gk_eur")), 2)}
+            for k in ketten if k.get("archiviert")]
+
+
+def blow_tage_lesen(gid):
+    """Blow-Tag je beendeter Kette (sql/2026-10-29_kapital_blow_tage.sql). Fehlt die Funktion oder schlägt sie fehl → [] (die Kachel zeigt
+    dann nur „Alles")."""
+    try:
+        r = A["_sb_anfrage"]("POST", f"{A['SUPABASE_URL']}/rest/v1/rpc/kapital_blow_tage", headers=A["_sb_headers"](), timeout=(5, 15),
+                             json={"p_gruppe": gid})
+        if r.status_code != 200:
+            print(f"[kapital] Blow-Tage HTTP {r.status_code}", flush=True)
+            return []
+        return r.json() or []
+    except Exception as e:
+        print(f"[kapital] ⚠️ Blow-Tage: {type(e).__name__}: {e}", flush=True)
+        return []
+
+
 def kapital_fuer(gid, schreiben=True):
     d = _daten_lesen(gid)
     b = bilanz_rechnen(d["ketten"], d["snaps"], d["fusion_live"], d["fusion_hand"], d["einlagen"], d["tx"], d["labels"], d["adressen"],
@@ -573,6 +600,7 @@ def kapital_fuer(gid, schreiben=True):
     b["verlauf"] = [verlauf_zeile(r) for r in A["_sb_all"]("kapital_tageswerte", {"select": "tag,ist_eur,soll_eur,abweichung_eur,teile",
                                                                                   "gruppe_id": f"eq.{gid}", "order": "tag.asc"})]
     b["ereignisse"] = ereignisse_lesen(gid, fx, str(b["verlauf"][0]["tag"])[:10] if b["verlauf"] else None)
+    b["verluste"] = verluste_rechnen(d["ketten"], blow_tage_lesen(gid))
     return b
 
 

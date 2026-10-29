@@ -1185,7 +1185,8 @@
   #adm-pane-kapital .kis-n-legende{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:12px;color:var(--sub)}
   /* Graf klar (29.10.2026 05:37, Finn: „Man erkennt ihn nicht so … größer, smoother, mit Zahlen … noch so ein, zwei KPIs"): KPI-Kacheln,
      Tooltip am Mauszeiger, Quellen per Klick in der Legende */
-  #adm-pane-kapital .kis-kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 6px}
+  #adm-pane-kapital .kis-kpis{grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 6px}
+  @media (max-width:1100px){#adm-pane-kapital .kis-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
   #adm-pane-kapital .kis-kpis .kpi{min-width:0;padding:12px 14px;box-shadow:none}
   #adm-pane-kapital .kis-kpis .kpi-value{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-kapital .kis-kpis .kpi:first-child .kpi-value{font-size:28px}
@@ -1216,6 +1217,7 @@
   @media (max-width:640px){
     #adm-pane-kapital .wd-ueb-graf.kis-n-graf{height:280px}
     #adm-pane-kapital .kis-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #adm-pane-kapital .kis-kpis .kpi.kis-verlust{grid-column:1 / -1}
     #adm-pane-kapital .kis-kpis .kpi:first-child .kpi-value{font-size:22px}
     #adm-pane-kapital .kis-gross-v{font-size:30px}
     #adm-pane-kapital .kis-n-posten .kis-p-zeile{grid-template-columns:minmax(0,1fr) 92px auto}
@@ -13076,6 +13078,9 @@
               <div class="kpi"><div class="kpi-label">Δ 7 Tage</div><div class="kpi-value" id="kis-k2">–</div><div class="kpi-delta" id="kis-k2-s"></div></div>
               <div class="kpi"><div class="kpi-label" id="kis-k3-l">Δ seit Beginn</div><div class="kpi-value" id="kis-k3">–</div><div class="kpi-delta" id="kis-k3-s"></div></div>
               <div class="kpi"><div class="kpi-label">Laufende Konten</div><div class="kpi-value" id="kis-k4">–</div><div class="kpi-delta" id="kis-k4-s"></div></div>
+              <!-- Verlust beendete Konten (29.10.2026, Finn: „geblowte Konten sind bei uns dicke Minus" → „ok mach"): Kapital bleibt „was noch drin
+                   ist" (geblowt = 0), diese Kachel zeigt, was die beendeten Ketten netto gekostet haben — Zeitraum = Chips über den Blow-Tag -->
+              <div class="kpi kis-verlust" id="kis-k5-box"><div class="kpi-label">Verlust beendete Konten</div><div class="kpi-value" id="kis-k5">–</div><div class="kpi-delta" id="kis-k5-s"></div></div>
             </div>
             <div class="kis-s" id="kis-n-stand" style="margin:0 0 12px"></div>
             <div class="panel" style="margin-bottom:14px">
@@ -20611,6 +20616,29 @@
       const reihe = tage.filter(p => p.tag >= ab), vor = tage.filter(p => p.tag < ab)
       return { reihe, basis: vor.length ? vor[vor.length - 1] : (reihe.length > 1 ? reihe[0] : null), tage }
     }
+    // Kachel „Verlust beendete Konten" (29.10.2026): Σ (Kauf + Hedge − Payouts) der beendeten Ketten (kapital_ketten archiviert), Zeitraum der
+    // Chips über den Blow-Tag (kapital_blow_tage; ohne Tag nur bei „Alles"), ID-Chip wirkt. Netto: Hedge-Gewinne und Payouts sind abgezogen.
+    // Tooltip (title) nennt immer auch den Gesamtwert seit Beginn.
+    function kisVerlustKachel(d){
+      const box = $('kis-k5-box'); if(!box) return
+      const alle = (d.verluste || []).filter(v => !kisId || v.id === kisId)
+      if(!d.verluste){ $('kis-k5').textContent = '–'; $('kis-k5-s').textContent = 'nach dem nächsten Update'; box.title = ''; return }
+      const heute = kisHeute()
+      const ab = kisZeitraum === 'alle' ? null : kisZeitraum === 'heute' ? heute : kisTagMinus(Number(kisZeitraum) - 1)
+      const im = ab ? alle.filter(v => v.tag && v.tag >= ab) : alle
+      const sum = l => l.reduce((a, v) => ({ n: a.n + 1, kauf: a.kauf + (Number(v.kauf) || 0), hedge: a.hedge + (Number(v.hedge) || 0),
+        payouts: a.payouts + (Number(v.payouts) || 0), netto: a.netto + (Number(v.netto) || 0) }), { n: 0, kauf: 0, hedge: 0, payouts: 0, netto: 0 })
+      const z = sum(im), g = sum(alle)
+      const zahl = w => (Math.round(w) > 0 ? '−' : Math.round(w) < 0 ? '+' : '') + kisEur.format(Math.abs(Math.round(w)))   // Verlust als Minus
+      $('kis-k5').textContent = zahl(z.netto)
+      $('kis-k5').style.color = Math.round(z.netto) > 0 ? 'var(--danger-ink)' : Math.round(z.netto) < 0 ? 'var(--good-ink)' : ''
+      const hedgeTxt = h => Math.round(h) <= 0 ? `Hedge zurück ${kisEur.format(Math.abs(Math.round(h)))}` : `Hedge-Verlust ${kisEur.format(Math.round(h))}`
+      const zeitName = (KIS_ZEITEN.find(([k]) => k === kisZeitraum) || [])[1] || ''
+      $('kis-k5-s').textContent = `netto · ${kisZeitraum === 'alle' ? 'seit Beginn' : zeitName} · ${z.n} Konten · Kauf ${kisEur.format(Math.round(z.kauf))} · ${hedgeTxt(z.hedge)} · Payouts ${kisEur.format(Math.round(z.payouts))}`
+      box.title = `Netto = Kauf + Hedge − Payouts der beendeten (archivierten) Konten${kisId ? ' dieser ID' : ''}, Zeitraum nach Blow-Tag.\n`
+        + `Gesamt seit Beginn: ${zahl(g.netto)} · ${g.n} Konten · Kauf ${kisEur.format(Math.round(g.kauf))} · ${hedgeTxt(g.hedge)} · Payouts ${kisEur.format(Math.round(g.payouts))}.\n`
+        + 'Die Kapital-Zahl bleibt davon unberührt: beendete Konten zählen dort 0.'
+    }
     // Quellen-Linien standardmäßig AUS (29.10.2026, Finn: „ein klarer Graf"), Klick in der Legende schaltet sie zu
     const kisAn = new Set()
     const kisK = w => { const a = Math.abs(w); return (w < 0 ? '−' : '+') + (a >= 1000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : Math.round(a) + ' €') }
@@ -20781,6 +20809,7 @@
       // Käufe/Blows nach dem Basistag, passend zu „Δ seit …" (Gegenprüfung)
       const evSumme = [...ev.entries()].filter(([t]) => !erster || t > erster.tag).reduce((a, [, z]) => ({ k: a.k + z.gekauft_n, b: a.b + z.geblowt_n }), { k: 0, b: 0 })
       $('kis-k4').textContent = String(Number(kisId ? jeId[kisId]?.konten_n : d.ist?.konten_n) || 0)
+      kisVerlustKachel(d)
       $('kis-k4-s').textContent = (d.ereignisse || []).length ? `+${evSumme.k} gekauft · −${evSumme.b} geblowt${erster ? ' seit ' + kisTag(erster.tag) : ''}` : 'Kauf + Hedge je laufendem Konto'
       const zeitName = (KIS_ZEITEN.find(([z]) => z === kisZeitraum) || [])[1] || ''
       $('kis-n-verlauf-sub').textContent = `${kisId ? idName + ' · ' : ''}Insgesamt${kisId ? '' : ' im System'} und je Quelle · ein Punkt je Tag · ${zeitName} ${reihe.length === 1 ? kisTag(reihe[0].tag) : 'ab ' + kisTag(reihe[0].tag)}`
@@ -50586,7 +50615,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1860'
+  const OS_TAB_BUILD = '2026-09-22.1861'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
