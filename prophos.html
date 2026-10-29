@@ -51398,7 +51398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1874'
+  const OS_TAB_BUILD = '2026-09-22.1875'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77654,6 +77654,8 @@
     try{ const t = JSON.stringify(wert); if(t.length <= AP_IDS_CACHE_MAX_ZEICHEN) sessionStorage.setItem(key, t); else sessionStorage.removeItem(key) }catch(_){}
   }
   const apIdsGruppeQ = () => (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
+  // Speicher-Stand gilt nur für denselben Login UND dieselbe Gruppe (S2: ID-Wechsel ohne Neuladen zeigte sonst kurz den vorigen Login)
+  const apIdsStandPasst = gq => !!(_apIds.rows.length && _apIds.gq === gq && _apIds.uid === String(currentUserId || ''))
   function apIdsCacheSchreiben(d, gq){
     apIdsSessionSetzen(AP_IDS_CACHE_KEY, { uid: String(currentUserId || ''), gq, at: Date.now(),
       d: { ids: d.ids, aktiv: d.aktiv, tag: d.tag, offen: d.offen, bestaetigt: d.bestaetigt } })
@@ -77665,7 +77667,7 @@
       _apIds.rows = Array.isArray(c.d.ids) ? c.d.ids : []; _apIds.aktiv = !!c.d.aktiv; _apIds.tag = c.d.tag || null
       _apIds.offen = apIdsOhneBestaetigte(Array.isArray(c.d.offen) ? c.d.offen : [], c.at)
       if(Array.isArray(c.d.bestaetigt)) _apIds.bestaetigt = c.d.bestaetigt
-      _apIds.gq = gq; _apIds.frischAt = c.at
+      _apIds.gq = gq; _apIds.uid = c.uid; _apIds.frischAt = c.at; _apIds.echt = false
       return true
     }catch(_){ return false }
   }
@@ -77681,14 +77683,15 @@
   // Öffnen des Reiters: sofort zeichnen, nachladen nur ohne frischen Stand (≤ 60 s) derselben Gruppe
   function apIdsOeffnenSchnell(){
     if(_apIdsArtWert === 'funded'){
+      if(_fdpQ && _fdpUid !== String(currentUserId || '')){ _fdpQ = null; _fdpAt = 0; _fdpFrisch = false }   // anderer Login: nichts Altes zeigen
       if(!_fdpQ) fdpCacheLesen()
       if(_fdpQ) apIdsRender()
       if(!_fdpQ || Date.now() - (_fdpAt || 0) > AP_IDS_FRISCH_MS || !_fdpFrisch) apIdsLaden()
       apIdsStandZeigen(); return
     }
     const gq = apIdsGruppeQ()
-    if(!_apIds.rows.length || _apIds.gq !== gq) apIdsCacheLesen(gq)
-    const da = _apIds.rows.length && _apIds.gq === gq
+    if(!apIdsStandPasst(gq)) apIdsCacheLesen(gq)
+    const da = apIdsStandPasst(gq)
     if(da) apIdsRender()
     if(!da || !_apIds.echt || Date.now() - (_apIds.frischAt || 0) > AP_IDS_FRISCH_MS) apIdsLaden()
     apIdsStandZeigen()
@@ -77696,10 +77699,10 @@
   async function apIdsLadenChallenge(){
     if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
     _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
-    const t0 = Date.now(), gq = apIdsGruppeQ()
+    const t0 = Date.now(), gq = apIdsGruppeQ(), uid0 = String(currentUserId || '')
     // PLANER-SCHNELL (29.10.2026): letzten Stand derselben Gruppe sofort zeigen (Speicher, nach Neuladen sessionStorage), still nachladen
-    if(!_apIds.rows.length || _apIds.gq !== gq) apIdsCacheLesen(gq)
-    if(_apIds.rows.length && _apIds.gq === gq) apIdsRender()
+    if(!apIdsStandPasst(gq)) apIdsCacheLesen(gq)
+    if(apIdsStandPasst(gq)) apIdsRender()
     apIdsStandZeigen()
     let kopfFertig = false
     gpLaden()   // Gruppen-Planer-Zeile (13.10.2026) — eigener Abruf, zeichnet selbst nach
@@ -77709,11 +77712,11 @@
     // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
     // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
     // Gruppenfilter (08.10.2026): Finns Gruppen-Chip hängt ?gruppe= an (Verwalter bekommt ohnehin nur seine Gruppe)
-    const ids = apdApi('GET', '/ids?ansicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')).then(d => { if(gq !== apIdsGruppeQ()){ _apIds.nochmal = true; return }   // Gruppe inzwischen gewechselt (S2): Antwort verwerfen, danach neu
+    const ids = apdApi('GET', '/ids?ansicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')).then(d => { if(gq !== apIdsGruppeQ() || uid0 !== String(currentUserId || '')){ _apIds.nochmal = true; return }   // Gruppe inzwischen gewechselt (S2): Antwort verwerfen, danach neu
       _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
       if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 }
-      _apIds.gq = gq; _apIds.frischAt = Date.now(); _apIds.echt = true; apIdsCacheSchreiben(d, gq)
+      _apIds.gq = gq; _apIds.uid = String(currentUserId || ''); _apIds.frischAt = Date.now(); _apIds.echt = true; apIdsCacheSchreiben(d, gq)
       if(!kopfFertig) apIdsRender() })   // gleich zeichnen, nicht auf Lauf/Delta/Live warten (der Kopf zeichnet sich selbst nach)
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
     // Delta nur, wenn tplLaden es nicht eben selbst geholt hat (vorher lief es beim Öffnen zweimal nacheinander, je 1,4–2 s — PLANER-SCHNELL)
@@ -78620,25 +78623,27 @@
     if(_apIdsArtWert !== 'funded') return apIdsLadenChallenge()
     if(_fdpLaedt) return
     _fdpLaedt = true; _fdpFehler = ''; apIdsStandZeigen()
+    const uid0 = String(currentUserId || '')
     try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/funded-plan`, { headers: { 'sb-token': tok } })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw new Error(d.msg || ('HTTP ' + r.status))
-      _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); _fdpFrisch = true
+      if(uid0 !== String(currentUserId || '')) throw new Error('Login gewechselt — lädt neu')   // Antwort des vorigen Logins nie zuordnen
+      _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); _fdpFrisch = true; _fdpUid = uid0
       apIdsSessionSetzen('prophos_fdp_stand', { uid: String(currentUserId || ''), at: _fdpAt, d })   // PLANER-SCHNELL (Deckel, try/catch)
     }catch(e){ _fdpFehler = (e && e.message) || String(e) }
     _fdpLaedt = false; _apIdsVollAt = Date.now()
     if(_apIdsArtWert === 'funded'){ apIdsRender(); apIdsStandZeigen() }
   }
   // PLANER-SCHNELL: letzten Funded-Stand nach Neuladen sofort zeigen (sessionStorage, je Login, ≤ 30 min), danach still frisch
-  let _fdpFrisch = false
+  let _fdpFrisch = false, _fdpUid = ''
   function fdpCacheLesen(){
     try{
       const c = JSON.parse(sessionStorage.getItem('prophos_fdp_stand') || 'null')
       if(!c || c.uid !== String(currentUserId || '') || !(Date.now() - c.at < AP_IDS_CACHE_MAX_MS) || !c.d) return false
-      _fdpQ = fdpQuelleBauen(c.d); _fdpAt = c.at; return true
+      _fdpQ = fdpQuelleBauen(c.d); _fdpAt = c.at; _fdpUid = c.uid; _fdpFrisch = false; return true
     }catch(_){ return false }
   }
   window._fdpStub = d => { _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); apIdsRender() }   // Stub-Test (ohne Login): Antwort von /admin/funded-plan einspielen
