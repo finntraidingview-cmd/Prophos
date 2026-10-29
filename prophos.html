@@ -12343,6 +12343,8 @@
           <!-- NEUE HEDGE-TRADES BESTÄTIGEN (29.10.2026, Finn: „alle Trades, die mit der neuen Logik kommen, unter Admin → Challenge-Planer
                bestätigen"): ganz oben, nur Challenge-Planer, nur mit offenen Zeilen — Zeichnen im Modul (ahf*) -->
           <div id="ahf-root" hidden></div>
+          <!-- PLANER-SCHNELL (29.10.2026): „aktualisiert vor x s" — der Reiter zeichnet sofort den letzten Stand und lädt still nach -->
+          <div id="ap-ids-stand" style="font-size:11.5px;color:var(--sub);text-align:right;min-height:15px;margin:-4px 2px 2px"></div>
           <div id="ap-ids-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade IDs…</div>
           <!-- VERLAUF IN € (29.10.2026, Finn: „den Chart, wo ich die Werte-Zahl über alle Tage akkumuliert und filterbar nach Prop-Firma sehe"):
                nur im Challenge-Planer (nicht Funded), Daten GET /admin/auto-plan/verlauf-eur, Zeichnen im Modul (apv*) -->
@@ -51396,7 +51398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1872'
+  const OS_TAB_BUILD = '2026-09-22.1873'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57885,7 +57887,7 @@
     } else if(z){ _apv.zeit = z.dataset.apvZeit; try{ localStorage.setItem('prophos_apv_zeit', _apv.zeit) }catch(_){} apvRender() }
   })
   window.addEventListener('prophos:theme', () => { try{ if(_apv.graf){ apvGrafWeg(); apvRender() } }catch(_){} })
-  window._apvOeffnen = an => { const r = document.getElementById('apv-root'); if(!r) return; r.hidden = !an; if(an){ apvRender(); apvLaden(false) } }
+  window._apvOeffnen = an => { const r = document.getElementById('apv-root'); if(!r) return; r.hidden = !an; if(an){ apvRender(); setTimeout(() => apvLaden(false), _apv.d ? 0 : 1500) } }   // PLANER-SCHNELL: erst nach dem Planer selbst
   window._apvGruppeNeu = () => { const r = document.getElementById('apv-root'); _apv.d = null; _apv.at = 0; if(!r || r.hidden) return; apvRender(); apvLaden(true) }
   window._apvStub = d => { _apv.d = d; _apv.fehler = ''; _apv.at = Date.now(); const r = document.getElementById('apv-root'); if(r) r.hidden = false; apvRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('apv-root'); if(r && !r.hidden && r.offsetParent && !document.hidden) apvLaden(false) }, 60000)
@@ -77641,10 +77643,60 @@
     }
     if(_ap.sicht === 'eigene' && typeof apLetztenHolen === 'function'){ _ap.laufAt = 0; try{ await apLetztenHolen() }catch(_){} }
   }
+  /* ══ PLANER-SCHNELL (29.10.2026, Finn: „nervt ultra" — Challenge-/Funded-Planer brauchten bei JEDEM Öffnen 4–6 s, bevor etwas stand):
+   * gemessen 29.10. 12:47 UTC — /ids 1,1–2,3 s, Delta 1,3–2,3 s und lief zweimal nacheinander, gezeichnet wurde erst nach allem. Jetzt: der
+   * letzte Stand (Speicher; nach Neuladen sessionStorage, je Login + Gruppen-Filter, höchstens 30 min alt) steht sofort, Nachladen still im
+   * Hintergrund und nur, wenn er älter als 60 s ist; „aktualisiert vor x s" darüber. Nur Laden/Anzeige — Planer-Verhalten unverändert. ══ */
+  const AP_IDS_CACHE_KEY = 'prophos_apids_stand', AP_IDS_FRISCH_MS = 60000, AP_IDS_CACHE_MAX_MS = 30 * 60000
+  const apIdsGruppeQ = () => (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
+  function apIdsCacheSchreiben(d, gq){
+    try{ sessionStorage.setItem(AP_IDS_CACHE_KEY, JSON.stringify({ uid: String(currentUserId || ''), gq, at: Date.now(),
+      d: { ids: d.ids, aktiv: d.aktiv, tag: d.tag, offen: d.offen, bestaetigt: d.bestaetigt } })) }catch(_){}
+  }
+  function apIdsCacheLesen(gq){
+    try{
+      const c = JSON.parse(sessionStorage.getItem(AP_IDS_CACHE_KEY) || 'null')
+      if(!c || c.uid !== String(currentUserId || '') || c.gq !== gq || !(Date.now() - c.at < AP_IDS_CACHE_MAX_MS) || !c.d) return false
+      _apIds.rows = Array.isArray(c.d.ids) ? c.d.ids : []; _apIds.aktiv = !!c.d.aktiv; _apIds.tag = c.d.tag || null
+      _apIds.offen = apIdsOhneBestaetigte(Array.isArray(c.d.offen) ? c.d.offen : [], c.at)
+      if(Array.isArray(c.d.bestaetigt)) _apIds.bestaetigt = c.d.bestaetigt
+      _apIds.gq = gq; _apIds.frischAt = c.at
+      return true
+    }catch(_){ return false }
+  }
+  // „aktualisiert vor x s" (· lädt …) über dem Reiter — je Planer-Art der Zeitpunkt des letzten echten Abrufs
+  function apIdsStandZeigen(){
+    const el = document.getElementById('ap-ids-stand'); if(!el) return
+    const funded = _apIdsArtWert === 'funded', at = funded ? _fdpAt : _apIds.frischAt, laedt = funded ? _fdpLaedt : _apIds.laeuft
+    if(!at){ el.textContent = laedt ? 'lädt …' : ''; return }
+    const s = Math.max(0, Math.round((Date.now() - at) / 1000))
+    el.textContent = `aktualisiert vor ${s < 90 ? s + ' s' : Math.round(s / 60) + ' min'}${laedt ? ' · lädt …' : ''}`
+  }
+  setInterval(() => { if(document.getElementById('ap-ids-root')?.offsetParent && !document.hidden) apIdsStandZeigen() }, 5000)
+  // Öffnen des Reiters: sofort zeichnen, nachladen nur ohne frischen Stand (≤ 60 s) derselben Gruppe
+  function apIdsOeffnenSchnell(){
+    if(_apIdsArtWert === 'funded'){
+      if(!_fdpQ) fdpCacheLesen()
+      if(_fdpQ) apIdsRender()
+      if(!_fdpQ || Date.now() - (_fdpAt || 0) > AP_IDS_FRISCH_MS || !_fdpFrisch) apIdsLaden()
+      apIdsStandZeigen(); return
+    }
+    const gq = apIdsGruppeQ()
+    if(!_apIds.rows.length || _apIds.gq !== gq) apIdsCacheLesen(gq)
+    const da = _apIds.rows.length && _apIds.gq === gq
+    if(da) apIdsRender()
+    if(!da || !_apIds.echt || Date.now() - (_apIds.frischAt || 0) > AP_IDS_FRISCH_MS) apIdsLaden()
+    apIdsStandZeigen()
+  }
   async function apIdsLadenChallenge(){
     if(_apIds.laeuft){ _apIds.nochmal = true; return }   // läuft schon: danach genau einmal nachladen, statt den Wunsch zu verschlucken (Bestätigen-Serie, 08.10.2026)
     _apIds.laeuft = true; _apIds.nochmal = false; _apIds.fehler = ''; _apIds.offenFehler = ''
-    const t0 = Date.now()
+    const t0 = Date.now(), gq = apIdsGruppeQ()
+    // PLANER-SCHNELL (29.10.2026): letzten Stand derselben Gruppe sofort zeigen (Speicher, nach Neuladen sessionStorage), still nachladen
+    if(!_apIds.rows.length || _apIds.gq !== gq) apIdsCacheLesen(gq)
+    if(_apIds.rows.length && _apIds.gq === gq) apIdsRender()
+    apIdsStandZeigen()
+    let kopfFertig = false
     gpLaden()   // Gruppen-Planer-Zeile (13.10.2026) — eigener Abruf, zeichnet selbst nach
     // ZU BESTÄTIGEN (Finn 08.10.2026: „unter Admin eine richtig cleane Übersicht über alle Trades, die ich bestätigen muss"): offene
     // Vorschläge aller IDs kommen mit aus /ids (heute UND morgen — das Delta kennt nur heute), Bestätigen über tplEingriff (Admin-Route)
@@ -77654,13 +77706,16 @@
     // Gruppenfilter (08.10.2026): Finns Gruppen-Chip hängt ?gruppe= an (Verwalter bekommt ohnehin nur seine Gruppe)
     const ids = apdApi('GET', '/ids?ansicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')).then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
-      if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 } })
+      if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 }
+      _apIds.gq = gq; _apIds.frischAt = Date.now(); _apIds.echt = true; apIdsCacheSchreiben(d, gq)
+      if(!kopfFertig) apIdsRender() })   // gleich zeichnen, nicht auf Lauf/Delta/Live warten (der Kopf zeichnet sich selbst nach)
       .catch(e => { _apIds.fehler = (e && e.message) || String(e) })
-    const kopf = (async () => { try{ _ap.laufAt = 0; if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function') await apdLaden(true); await apIdsSichtAdmin() }catch(e){ console.warn('[ap-ids] Kopf', e) } })()
+    // Delta nur, wenn tplLaden es nicht eben selbst geholt hat (vorher lief es beim Öffnen zweimal nacheinander, je 1,4–2 s — PLANER-SCHNELL)
+    const kopf = (async () => { try{ _ap.laufAt = 0; if(typeof tplLaden === 'function') await tplLaden(); if(typeof apdLaden === 'function' && Date.now() - (_apd.geladen || 0) > 5000) await apdLaden(true); await apIdsSichtAdmin() }catch(e){ console.warn('[ap-ids] Kopf', e) } finally{ kopfFertig = true } })()
     await Promise.all([ids, kopf])
     if(apIdsStandEigen() && typeof window._tplSichtParam === 'function' && window._tplSichtParam() === 'admin') _apIdsEigenBis = Date.now() + 300000   // Backend gibt nur „eigene" (Sicht-Wächter)
     _apIdsVollAt = Date.now()   // 60-s-Nachladen im Live-Takt
-    _apIds.laeuft = false; apIdsRender()
+    _apIds.laeuft = false; apIdsRender(); apIdsStandZeigen()
     if(_apIds.nochmal) apIdsLaden()
   }
   /* BESTÄTIGEN OHNE WARTEN (08.10.2026, Slave-Terminal 7 — Finn beim Durchklicken: „Wenn ich die Pläne bestätige, soll der Plan hier verschwinden.
@@ -78353,7 +78408,7 @@
   }
   // Box „Braucht dich" im Admin-Reiter (tplSpaeter/tplNachLesung, 08.10.2026): die Planer-Seite erreicht diese Funktionen sonst nicht
   window._apIdsRender = () => { if(!_apIds.laeuft) apIdsRender() }; window._apIdsLaden = () => apIdsLaden()
-  window._apIdsTabOeffnen = () => { apIdsLaden(); if(typeof window.pcStandLaden === 'function') Promise.resolve(window.pcStandLaden()).then(() => { if(!_apIds.laeuft) apIdsRender() }).catch(() => {}) }   // PC-Punkt (höchstens alle 60 s) nachziehen
+  window._apIdsTabOeffnen = () => { apIdsOeffnenSchnell(); if(typeof window.pcStandLaden === 'function') Promise.resolve(window.pcStandLaden()).then(() => { if(!_apIds.laeuft) apIdsRender() }).catch(() => {}) }   // PC-Punkt (höchstens alle 60 s) nachziehen
   /* BOT-SCHALTER IM ADMIN-REITER (Master 08.10.2026, gefunden beim Bau von .1305): die Schalter Bot / Auto-Start (apdBotSchalterHtml — in der
    * Bot-Kachel bzw. seit .1305 klein unter der Kachel „Heute") kommen über tplKachelnHtml auch hierher, verdrahtet waren sie aber nur auf der
    * Planer-Seite (tplRoot change) — im Admin-Reiter bewirkte ein Klick nichts. Eigener change-Listener an #ap-ids-root (statisches Markup,
@@ -78558,17 +78613,27 @@
   async function apIdsLaden(){
     if(_apIdsArtWert !== 'funded') return apIdsLadenChallenge()
     if(_fdpLaedt) return
-    _fdpLaedt = true; _fdpFehler = ''
+    _fdpLaedt = true; _fdpFehler = ''; apIdsStandZeigen()
     try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/funded-plan`, { headers: { 'sb-token': tok } })
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw new Error(d.msg || ('HTTP ' + r.status))
-      _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now()
+      _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); _fdpFrisch = true
+      try{ sessionStorage.setItem('prophos_fdp_stand', JSON.stringify({ uid: String(currentUserId || ''), at: _fdpAt, d })) }catch(_){}   // PLANER-SCHNELL
     }catch(e){ _fdpFehler = (e && e.message) || String(e) }
     _fdpLaedt = false; _apIdsVollAt = Date.now()
-    if(_apIdsArtWert === 'funded') apIdsRender()
+    if(_apIdsArtWert === 'funded'){ apIdsRender(); apIdsStandZeigen() }
+  }
+  // PLANER-SCHNELL: letzten Funded-Stand nach Neuladen sofort zeigen (sessionStorage, je Login, ≤ 30 min), danach still frisch
+  let _fdpFrisch = false
+  function fdpCacheLesen(){
+    try{
+      const c = JSON.parse(sessionStorage.getItem('prophos_fdp_stand') || 'null')
+      if(!c || c.uid !== String(currentUserId || '') || !(Date.now() - c.at < AP_IDS_CACHE_MAX_MS) || !c.d) return false
+      _fdpQ = fdpQuelleBauen(c.d); _fdpAt = c.at; return true
+    }catch(_){ return false }
   }
   window._fdpStub = d => { _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); apIdsRender() }   // Stub-Test (ohne Login): Antwort von /admin/funded-plan einspielen
   const _apIdsTabOeffnenOhneTakt = window._apIdsTabOeffnen
