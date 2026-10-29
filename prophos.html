@@ -4522,6 +4522,7 @@
   /* Sektionsköpfe Orbit/Echo kräftiger als die Gruppenköpfe (30.09.2026: Finn übersah „Echo" unter Orbits „Beendet") — beide gleich */
   /* Plattform-Pille je Zeile (30.09.2026, Finn: „eine Liste, wo alle Laufenden drin sind, unterschieden nur mit Orbit und Echo"):
      dezent grau, kein zweiter Farbcode — die Sektionsköpfe Orbit/Echo (.858) sind weg */
+  #dashboard-view .wdl-rot{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border-radius:4px;background:color-mix(in srgb, var(--danger) 12%, transparent);color:var(--danger-ink, #b91c1c);font-size:10px;font-weight:700;letter-spacing:.03em;font-style:normal;vertical-align:1px;white-space:nowrap}   /* Nova ohne SL/TP · wieder offen (29.10.2026) */
   #dashboard-view .wdl-pf{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border-radius:4px;background:var(--surface-tint);color:var(--sub);font-size:10px;font-weight:600;letter-spacing:.03em;font-style:normal;vertical-align:1px}
   #dashboard-view .wdl-z-echo{cursor:default}
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
@@ -24196,6 +24197,33 @@
   // Plan läuft mit Puls (Rundgang, Nachlesung, Demo-Ende, Schließen): Orbit V2 immer, Topstep V2 nur, wenn Puls ihn gestartet hat
   // (mt5_baseline.tv.puls 'tsx') — von Hand gestartete tsv2-Pläne bleiben Handarbeit.
   function planIstPuls(p){ return !!p && (p.route === 'tvv2' || (p.route === 'tsv2' && !!(p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.puls === 'tsx'))) }
+  /* NOVA OHNE SL/TP (29.10.2026, Topstep 150k, Plan 523545ee: Puls meldete beim Start nur die Warnung „Risk … nicht gesetzt; To Make … nicht
+   * gesetzt“, die Position stand ohne Brackets. Prophos beendete den Plan trotzdem per Demo-TP (Kurs-Schätzung), die echte Position lief
+   * ungeschützt weiter — die Endlesung sah sie 30× „noch offen“). REIN RECHNEND (window._tsxBracketsFehlen): fehlen an diesem tsv2-Plan
+   * laut Start-Ergebnis Brackets? Quelle: tv.brackets_fehlen {risk, tp} (Bot-Rücklesung, ab S5) — sonst die Warnung des Bots („Risk/To
+   * Make … nicht gesetzt“, ältere Bots). Nachgewiesen (tv.brackets_ok_at: Puls-Rücklesung oder Hand-Knopf) = nichts fehlt mehr.
+   * -> {risk, tp} | null. Folgen: kein Demo-Ende (tvV2DemoEndePruefen), kein Feed-Ende im Radar, roter Chip, 🔴 aus alarm_tick. */
+  function tsxBracketsFehlen(p){
+    const tv = p && p.route === 'tsv2' && p.mt5Baseline && p.mt5Baseline.tv
+    if(!tv || typeof tv !== 'object' || tv.brackets_ok_at) return null
+    const bf = tv.brackets_fehlen
+    if(bf === true) return { risk: true, tp: true }
+    if(bf && typeof bf === 'object' && (bf.risk || bf.tp)) return { risk: !!bf.risk, tp: !!bf.tp }
+    return tsxWarnungBrackets(tv.warnung)
+  }
+  window._tsxBracketsFehlen = tsxBracketsFehlen   // Test-Haken
+  // REIN RECHNEND (window._tsxWarnungBrackets): Bot-Warnung des Starts („Brackets in TopstepX prüfen: A; B; …“) → {risk, tp} | null.
+  // FAIL-CLOSED (Prüfung 29.10.2026): jeder Teil zählt als „fehlt“ — auch „Reiter Positions … nicht gefunden“, „Order abgelehnt“ o. Ä., bei
+  // denen gar kein Bracket gesetzt wurde —, außer „Risk/To Make steht auf … $ (TopstepX-Bracket), der Plan hat keinen SL/TP“ (Bracket steht).
+  // Nennt kein Teil Risk bzw. To Make ausdrücklich als nicht gesetzt, gelten beide als fehlend.
+  function tsxWarnungBrackets(w){
+    const teile = String(w || '').replace(/^\s*Brackets in TopstepX prüfen:\s*/i, '').split(/;\s*/).map(x => x.trim()).filter(Boolean)
+      .filter(x => !/^(Risk|To Make) steht auf .*der Plan hat keinen (SL|TP)$/i.test(x))
+    if(!teile.length) return null
+    const risk = teile.some(x => /^Risk\b[^;]*nicht gesetzt/i.test(x)), tp = teile.some(x => /^To Make\b[^;]*nicht gesetzt/i.test(x))
+    return (risk || tp) && teile.every(x => /nicht gesetzt/i.test(x)) ? { risk, tp } : { risk: true, tp: true }
+  }
+  window._tsxWarnungBrackets = tsxWarnungBrackets
   // Panel-Route: TopstepX (tsx-*) für Topstep V2 bzw. Firma Topstep, sonst TradingView (tv-*)
   // Die ROUTE entscheidet (30.09.2026, Topstep-Paket Etappe S): tsv2 → tsx-*, tvv2 → tv-*. Vorher reichte die Firma „Topstep" —
   // ein Orbit-V2-Plan (tvv2) auf einem Topstep-Konto lief beim Schließen/Nachlesen in tsx-close/tsx-lesen, obwohl er in TradingView
@@ -27164,6 +27192,11 @@
                  lesen_trail: String(r.trail || '').slice(0, 2000), lesen_at: new Date().toISOString() }
     // Warnung des Bots bei ok:true (B37, 30.09.2026: z. B. SL-Bracket abgelehnt, Position steht) — die Karte zeigt „Brackets in TopstepX prüfen"
     if(r && r.warnung) tv.warnung = String(r.warnung).slice(0, 300)
+    // Rücklesung des Bots (29.10.2026): {risk, tp} = geplante Brackets nicht bewiesen → kein Demo-Ende, 🔴 (s. tsxBracketsFehlen)
+    // Ohne das Feld (ältere Bots) aus der UNGEKÜRZTEN Warnung — tv.warnung ist auf 300 Zeichen gekappt, der Teil „To Make …“ fiele sonst weg.
+    if(r && r.brackets_fehlen && typeof r.brackets_fehlen === 'object' && (r.brackets_fehlen.risk || r.brackets_fehlen.tp))
+      tv.brackets_fehlen = { risk: !!r.brackets_fehlen.risk, tp: !!r.brackets_fehlen.tp }
+    else if(r && r.warnung){ const wb = tsxWarnungBrackets(r.warnung); if(wb) tv.brackets_fehlen = wb }
     const ein = r.einstieg != null ? tvKursZahl(r.einstieg) : null
     if(ein > 1000){ tv.einstieg_nq = ein; tv.einstieg_quelle = 'fill'; tv.einstieg_beleg = (r && r.einstieg_quelle) || null; tv.einstieg_symbol = r.tv_symbol || null }
     else if(!(opts && opts.ohneReader)){
@@ -29341,6 +29374,55 @@
     return { ok: true, msg }
   }
   // -> immer {ok, msg} (nie werfen) — für den Knopf „Jetzt lesen" und den Signal-Empfänger
+  /* NOCH OFFEN → ZURÜCK AUF „LÄUFT“ (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS, Plan 523545ee: Demo-TP beendete den Plan, die Endlesung sah die
+   * Position danach 30× „noch offen“ — der Plan blieb in „Überprüfen“/„Wartet“, die ungeschützte Position stand nirgends unter „Läuft“).
+   * REIN RECHNEND (window._tvV2NochOffenRegel): '' = zurück auf open, sonst der Grund, warum nicht. Zurück nur ohne Fusion-Hedge (mit Hedge
+   * gelten die Hedge-Wege und -Alarme; ein neues Level-Ende gäbe sonst Ping-Pong). Erst beim zweiten „noch offen“ in Folge — TradingView
+   * zeigt eine eben geschlossene Position manchmal noch Sekunden —, bei Nova ohne bewiesene Brackets schon beim ersten. Nie, wenn auf demselben Konto ein anderer Plan läuft oder seit dem Start dieses Plans gestartet ist —
+   * dann kann die gesehene Position dessen Position sein. */
+  function tvV2NochOffenRegel(p, fin, n, plaene){
+    if(!p || p.status !== 'review') return 'nicht in Überprüfen'
+    if((p.mt5Baseline && p.mt5Baseline.hedge) || Number(p.hedgeEur) > 0 || p.orbitV3) return 'mit Fusion-Hedge'
+    // Prüfung 29.10.2026: auch nach Demo-/Level-Ende erst beim zweiten „noch offen“ (die erste Lesung kommt 1–60 s nach dem Ende, TradingView
+    // zeigt die eben am Bracket geschlossene Position manchmal noch) — sofort nur bei Nova ohne bewiesene Brackets (dort schließt nichts)
+    if(!(Number(n) >= (tsxBracketsFehlen(p) ? 1 : 2))) return 'erst beim zweiten „noch offen“'
+    const start = Date.parse(p.startedAt || '') || 0
+    const fremd = (plaene || []).find(x => x && String(x.id) !== String(p.id) && x.masterAccountId != null && String(x.masterAccountId) === String(p.masterAccountId)
+      && (x.status === 'open' || (start && (Date.parse(x.startedAt || '') || 0) > start)))
+    return fremd ? 'anderer Plan auf demselben Konto' : ''
+  }
+  window._tvV2NochOffenRegel = tvV2NochOffenRegel
+  // Schreibweg: (1) final_verworfen mit Guard review — sperrt Demo-/Feed-Ende für diesen Plan (tvV2DemoGesperrt), (2) status open + ended_at
+  // weg mit Guard review (master_pl nur, wenn er die Schätzung des Endes ist — wie atMoveToReview nur leere Felder füllt), (3) final weg +
+  // live.offen mit Guard open. Sperre je Plan (zwei Tabs). Der 🔴 kommt aus alarm_tick (plan_wieder_offen). -> Ende-Quelle | null
+  async function tvV2NochOffenZurueck(pid, fin, n, p0){
+    let _tp = []; try{ _tp = tradePlans }catch(_){}
+    // der final-Patch eben lief mit Guard review → der Plan IST in review, auch wenn der lokale Stand noch hinterherhinkt
+    const p = Object.assign({}, (_tp || []).find(x => String(x.id) === String(pid)) || p0 || {}, { status: 'review' })
+    const grund = tvV2NochOffenRegel(p, fin, n, _tp)
+    if(grund){ if(p && p.status === 'review' && Number(n) >= 1) console.info(`[endlesung] noch offen, Plan bleibt in Überprüfen: ${grund}`, p.masterName || pid); return null }
+    if(!(await hedgeSperre(pid, 'wieder_offen', 30))) return null
+    const at = new Date().toISOString(), q = String((fin && fin.quelle) || '')
+    try{
+      const fv = Object.assign({}, fin || {}, { verworfen_at: at, verworfen_grund: 'puls_noch_offen', puls_offen_n: Number(n) || null })
+      if(!(await baselinePatch(pid, { final_verworfen: fv }, 'review'))) return null
+    }catch(e){ console.warn('[endlesung] wieder offen: final_verworfen', e); return null }
+    // P&L weg wie beim Hand-„zurück zu Offen“: in review stehen nur Auto-Werte (Schätzung/Auto-P&L), Hand-Werte erst nach „Erledigt“ — ein
+    // stehender Wert bliebe sonst beim echten Ende stehen (atMoveToReview füllt nur leere Felder) und ginge in die Finanzen
+    const upd = { status: 'open', ended_at: null, master_pl: null, slave_pl: null }
+    const { data, error } = await supabase.from('trade_plans').update(upd).eq('id', pid).eq('status', 'review').select('*').maybeSingle()
+    if(error || !data){ console.warn('[endlesung] wieder offen: Plan nicht zurück auf open', pid, error); return null }
+    const i = tradePlans.findIndex(x => String(x.id) === String(pid)); if(i >= 0) tradePlans[i] = rowToPlan(data)
+    try{
+      const liveAlt = (data.mt5_baseline && data.mt5_baseline.live) || {}
+      await baselinePatch(pid, { final: null, live: Object.assign({}, liveAlt, { offen: true, at }) }, 'open')
+    }catch(e){ console.warn('[endlesung] wieder offen: final', e) }
+    try{ _autoPnlCache.delete(String(pid)); tvV2Poll.wasOpen.delete(String(pid)); tvV2Poll.streak.delete(String(pid)) }catch(_){}
+    atPendingWeg(pid)
+    const was = q === 'demo' ? 'Demo (Kurs-Schätzung)' : q === 'level' ? 'Level (Schätzung)' : (q || 'Ende')
+    if(typeof atToast === 'function') atToast(`⟲ ${p.masterName || 'Plan'}: Position laut Puls noch offen — Ende über ${was} verworfen, Plan wieder unter „Läuft“. Position prüfen; Ende jetzt nur über „Beendet“.`, 'end')
+    return was
+  }
   async function tvV2EndlesungVersuch(pid, opts){
     pid = String(pid)
     const force = !!(opts && opts.force)
@@ -29460,7 +29542,14 @@
           return { ok: false, konto_weg: true, msg: 'Konto weg · vermutlich geblowt — der Trade steht unter „Überprüfen"' }
         }
         if(nochOffen && patch.puls_offen_n === 1 && typeof atToast === 'function') atToast(`${name}: Puls sieht die Master-Position noch offen — kein Versuch verbraucht, Balance wird gelesen, sobald sie zu ist`, 'end')
-        if(nochOffen){ try{ renderTradePlans() }catch(_){}; return { ok: false, offen: true, msg: `Position laut Puls noch offen (${patch.puls_offen_n}×) — kein Versuch verbraucht, nächste Lesung im Takt${exitTxt}` } }
+        if(nochOffen){
+          // Ende war falsch → Plan zurück auf „Läuft“ (29.10.2026, s. tvV2NochOffenRegel) — sonst wie bisher: nächste Lesung im Takt
+          let zurueck = null
+          try{ zurueck = await tvV2NochOffenZurueck(pid, (neu && neu.final) || Object.assign({}, fin0, patch), patch.puls_offen_n, p0) }catch(e){ console.warn('[endlesung] wieder offen', e) }
+          try{ renderTradePlans() }catch(_){}
+          if(zurueck) return { ok: false, offen: true, wieder_offen: true, msg: `Position laut Puls noch offen — Ende über ${zurueck} verworfen, Plan wieder unter „Läuft“` }
+          return { ok: false, offen: true, msg: `Position laut Puls noch offen (${patch.puls_offen_n}×) — kein Versuch verbraucht, nächste Lesung im Takt${exitTxt}` }
+        }
         if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
         if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
@@ -29723,7 +29812,9 @@
     try{
       if(!MT5_LOCAL || !currentUserId) return
       let _tp = []; try{ _tp = tradePlans }catch(_){}
-      const offen = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open' && !(p.mt5Baseline && p.mt5Baseline.hedge) && tvV2EndlesungPcPasst(p))
+      // NUR MIT BEWEIS (29.10.2026, s. tsxBracketsFehlen / tvV2DemoGesperrt): Nova ohne bewiesene Brackets und Pläne, die die Endlesung
+      // schon einmal als „noch offen“ zurückgeholt hat, enden nie per Kurs-Schätzung — nur über „Beendet“ von Hand bzw. einen Flach-Beweis
+      const offen = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open' && !(p.mt5Baseline && p.mt5Baseline.hedge) && tvV2EndlesungPcPasst(p) && !tvV2DemoGesperrt(p))
       if(!offen.length) return
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
       const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
@@ -29744,7 +29835,7 @@
         if(!(await hedgeSperre(pid, 'demo_ende', 30))) continue
         let frisch = p
         try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
-        if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.hedge)) continue
+        if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.hedge) || tvV2DemoGesperrt(frisch)) continue
         const beide = dm.status === 'beide_in_minute'
         // EINSTIEG UNBESTÄTIGT (Finn 08.10.2026, Vorfall 07.10. 17:37 Dubai, FundedNext 3 NQ, Plan a7256d6c: Puls klickte korrekt, sah aber
         // in 15 s keine Fill-Meldung → „unklar", Einstieg aus der Startkerze geschätzt (31.219,5). Die Demo rechnete gegen diesen
@@ -29792,6 +29883,15 @@
   }
   setTimeout(tvV2DemoEndeTakt, 40000 + Math.random() * 20000)
   window._tvV2DemoEndePruefen = tvV2DemoEndePruefen   // Test-Haken: ein Durchlauf ohne neuen Takt
+  // REIN RECHNEND (window._tvV2DemoGesperrt): darf die Demo (Kurs gegen Minutenkerzen) diesen Plan NICHT beenden? Ja bei Nova ohne bewiesene
+  // Brackets (die Position schließt am Level nicht von selbst) und nach „wieder offen“ (final_verworfen: die Endlesung sah die Position nach
+  // einem Ende noch offen — die Demo stünde sofort wieder auf TP und würde ihn erneut beenden). Ende dann nur von Hand („Beendet“).
+  function tvV2DemoGesperrt(p){
+    if(!p) return false
+    if(tsxBracketsFehlen(p)) return true
+    return !!(p.mt5Baseline && p.mt5Baseline.final_verworfen)
+  }
+  window._tvV2DemoGesperrt = tvV2DemoGesperrt
   // REIN RECHNEND (window._tvV2EinstiegUnbestaetigt): ist der Einstieg dieses Plans NICHT bewiesen? Bewiesen = Fill-Meldung, Avg Fill
   // aus Tabelle/Reader, Hand-Eintrag oder Feed-Kurs zum Klick. Nur geraten = 'kerze_start' (Mitte der Startkerze, Backend _lt_kerze_start)
   // oder gar kein Einstieg. Backend-Zeile t (live-trades) hat Vorrang, dann der eingefrorene Wert am Plan (tv.einstieg_quelle).
@@ -34945,6 +35045,7 @@
   const wdlFeedLiqLevel = t => { const n = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v); return n(t && t.liq_regel_level_nq) ?? n(t && t.liq_level_nq) }
   function wdlFeedEndeArt(t, kp){
     if(!t || t.status !== 'open' || kp == null || wdlIstEcho(t) || wdlIstPolar(t)) return null
+    if(t.ohne_sltp || t.wieder_offen) return null   // Nova ohne Brackets / nach „noch offen“ zurückgeholt: Kurs am Level ist kein Ende (29.10.2026)
     const L = wdlLive(t, kp)
     if(L.dTp != null && L.dTp <= 0) return 'tp'
     if(L.dSl != null && L.dSl <= 0) return 'sl'
@@ -34954,6 +35055,20 @@
     return null
   }
   window._wdlFeedEndeArt = wdlFeedEndeArt   // Test-Haken
+  // ROTE CHIPS IN „LÄUFT“ (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS): t.ohne_sltp {risk, tp} = Nova ohne bewiesene Brackets (Backend wie
+  // tsxBracketsFehlen), t.wieder_offen = die Endlesung sah die Position nach einem Ende noch offen, Plan ist zurück auf open. Bleibt, bis
+  // Puls/Hand die Brackets nachweist (tv.brackets_ok_at) bzw. der Plan endet. Nur Anzeige.
+  function wdlSltpChip(t){
+    if(!t || t.status !== 'open') return ''
+    let h = ''
+    const bf = t.ohne_sltp
+    if(bf){
+      const was = [bf.risk ? 'SL (Risk)' : '', bf.tp ? 'TP (To Make)' : ''].filter(Boolean).join(' und ')
+      h += `<em class="wdl-rot" title="${escapeHtml(`${was || 'Brackets'} laut Puls nicht gesetzt — die Position ist in TopstepX ungeschützt. Dort setzen; Prophos beendet den Plan nicht per Kurs-Schätzung`)}">ohne SL/TP</em>`
+    }
+    if(t.wieder_offen) h += `<em class="wdl-rot" title="${escapeHtml('Die Endlesung sah die Position nach dem Ende noch offen — Plan wieder auf „Läuft“. Position prüfen, Ende nur noch von Hand („Beendet“)')}">wieder offen</em>`
+    return h
+  }
   const wdlFeedEnde = t => { const e = _wdlFeedEnde.get(wdlTid(t)); return (e && t && t.status === 'open') ? e : null }
   // Merker setzen (neu getroffen → true) und aufräumen: Plan nicht mehr open → weg; zu alt und immer noch open → weg (Feed zählt neu)
   function wdlFeedEndePruefen(kp, trades){
@@ -35966,7 +36081,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       const sw = zuWegZ(t)   // Schließweg-Zeile (28.10.2026): nur bei geschlossenem Fusion-Hedge, dann zweite Rasterzeile (wdl-z-sw-da)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${sw ? ' wdl-z-sw-da' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i><small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlSltpChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + sw + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -37989,6 +38104,8 @@
           // schnellen Trades erledigt der Server planned→open→review innerhalb
           // EINES Poll-Fensters; der reine open→review-Match hätte dann weder
           // Popup noch Banner gezeigt).
+          // zurück auf open (Endlesung „noch offen“ in einem anderen Tab, 29.10.2026) → Ende-Merker auch hier weg (s. atPendingWeg)
+          if(op.status === 'review' && np.status === 'open') atPendingWeg(np.id)
           if(np.status === 'review' && op.status !== 'review'){
             // fromServer=true: Status + P&L hat der Server schon erledigt —
             // nur Banner/Popup zeigen, nichts erneut schreiben oder fetchen.
@@ -38121,6 +38238,15 @@
   // fromServer=true (04.08.2026): der Railway-Wächter hat Status UND Auto-P&L
   // bereits erledigt — dann ist das hier reine Anzeige (Banner + Popup), es wird
   // nichts erneut geschrieben oder gefetcht.
+  // Ende-Merker eines Plans weg (29.10.2026, Plan wieder auf open: Endlesung „noch offen“): sonst kehrt atShowEndPrompt beim NÄCHSTEN echten
+  // Ende früh zurück (pendingFinish schon gesetzt) und atMoveToReview läuft nie — der Plan bliebe trotz Ende unter „Läuft“
+  function atPendingWeg(pid){
+    try{
+      if(autoTrack.pendingFinish.delete(String(pid))) localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
+      for(const k of [...(autoTrack.state?.keys?.() || [])]) if(String(k) === String(pid)) autoTrack.state.delete(k)
+      const el = document.getElementById(`at-prompt-${pid}`); if(el) el.remove()
+    }catch(_){}
+  }
   function atShowEndPrompt(plan, fromServer){
     if(document.getElementById(`at-prompt-${plan.id}`)) return
     // Schon einmal gemeldet? → Popup NICHT erneut zeigen (auch nicht nach "Später").
@@ -47308,7 +47434,10 @@
                 // Winning Days Farm (25.09.2026, Design-Rundgang): „ohne Hedge" stand direkt neben „Fusion-Gegenhedge"
                 ? `<span class="tc2-chip" title="Winning Day: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:color-mix(in srgb, var(--violet) 10%, transparent);color:#6D28D9">Fusion-Hedge</span>`
                 : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
-            ${(p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
+            ${(p.route === 'tsv2' && p.status === 'open' && tsxBracketsFehlen(p))
+              // NOVA OHNE SL/TP (29.10.2026): rot + Hand-Nachweis — erst danach darf die Demo den Plan wieder beenden (tsxBracketsFehlen)
+              ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--danger) 12%, transparent);color:var(--danger-ink, #b91c1c);font-weight:700" title="${escapeHtml(String(p.mt5Baseline.tv.warnung || 'Brackets laut Puls nicht gesetzt'))} — Position in TopstepX ungeschützt, dort setzen">⚠ ohne SL/TP</span><button type="button" class="tc2-chip" data-plan-sltp-ok="${p.id}" style="cursor:pointer;border:1px solid var(--line)" title="SL und TP stehen jetzt in TopstepX (von Hand geprüft) — roter Hinweis weg, Demo-Ende wieder erlaubt">gesetzt ✓</button>`
+              : (p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
               ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--warn) 12%, transparent);color:var(--warn-ink, #b45309)" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
               : ''}
             ${(() => { const ks = tpKetteSchritt(p); return ks ? `<span class="tc2-chip" title="${escapeHtml(ks.tip)}">${escapeHtml(ks.text)}${ks.kette}</span>` : '' })()}
@@ -47724,6 +47853,20 @@
         if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt schließen?`)) return
         btn.disabled = true; btn.textContent = 'schließt…'
         try{ await hedgeSoloSchliessen(p, 'hand') }finally{ try{ renderTradePlans() }catch(_){} }
+      })
+    })
+    // „SL/TP gesetzt ✓" (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS): Hand-Nachweis der Brackets → tv.brackets_ok_at, nur solange der Plan läuft
+    document.querySelectorAll('[data-plan-sltp-ok]').forEach(btn => {
+      btn.addEventListener('click', async ev => {
+        ev.stopPropagation()
+        const p = tradePlans.find(x => String(x.id) === String(btn.dataset.planSltpOk))
+        if(!p || !confirm(`${p.masterName || 'Plan'}: Stehen SL (Risk) und TP (To Make) jetzt wirklich in TopstepX?`)) return
+        btn.disabled = true
+        try{
+          const neu = await baselinePatchIn(p.id, 'tv', { brackets_ok_at: new Date().toISOString(), brackets_ok_von: 'hand' }, 'open')
+          if(!neu && typeof atToast === 'function') atToast(`${p.masterName || 'Plan'}: nicht gespeichert — Plan läuft nicht mehr`, 'end')
+        }catch(e){ alert('Fehler: ' + ((e && e.message) || e)) }
+        try{ renderTradePlans() }catch(_){}
       })
     })
     // „Jetzt lesen" (Endlesung, 25.09.2026) — eigener Handler

@@ -3782,6 +3782,30 @@ def _alarm_ts(v):
         return None
 
 
+def tsx_brackets_fehlen(route, tv):
+    """REIN RECHNEND (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS — wie tsxBracketsFehlen in prophos.html): fehlen an diesem tsv2-Plan laut
+    Start-Ergebnis Brackets? tv.brackets_fehlen {risk, tp} (Bot-Rücklesung bzw. vom PC-Tab aus der vollen Warnung), sonst die Bot-Warnung. tv.brackets_ok_at (Puls oder Hand-Knopf) = nachgewiesen. -> {"risk": bool, "tp": bool} | None"""
+    if str(route or "") != "tsv2" or not isinstance(tv, dict) or tv.get("brackets_ok_at"):
+        return None
+    bf = tv.get("brackets_fehlen")
+    if bf is True:
+        return {"risk": True, "tp": True}
+    if isinstance(bf, dict) and (bf.get("risk") or bf.get("tp")):
+        return {"risk": bool(bf.get("risk")), "tp": bool(bf.get("tp"))}
+    # FAIL-CLOSED (Prüfung 29.10.2026, wie tsxWarnungBrackets): jeder Teil der Warnung zählt als „fehlt“ (auch „Reiter Positions … nicht
+    # gefunden“, „Order abgelehnt“), außer „Risk/To Make steht auf … der Plan hat keinen SL/TP“ (Bracket steht)
+    w = re.sub(r"^\s*Brackets in TopstepX prüfen:\s*", "", str(tv.get("warnung") or ""), flags=re.I)
+    teile = [x.strip() for x in re.split(r";\s*", w) if x.strip()]
+    teile = [x for x in teile if not re.match(r"^(Risk|To Make) steht auf .*der Plan hat keinen (SL|TP)$", x, re.I)]
+    if not teile:
+        return None
+    risk = any(re.match(r"^Risk\b[^;]*nicht gesetzt", x, re.I) for x in teile)
+    tp = any(re.match(r"^To Make\b[^;]*nicht gesetzt", x, re.I) for x in teile)
+    if (risk or tp) and all(re.search(r"nicht gesetzt", x, re.I) for x in teile):
+        return {"risk": risk, "tp": tp}
+    return {"risk": True, "tp": True}
+
+
 def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
     """REIN RECHNEND (testbar): Plan-Zeilen (id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,started_at,updated_at,
     hedge,final_at + Felder für gp_push_ereignisse) → [(schluessel, prio, art, titel, text, uid, plan_id)].
@@ -3825,6 +3849,28 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             elif hst in HEDGE_LEBT and h.get("close_fehler"):
                 out.append((f"{pid}|close_fehler", 1, "hedge_close_fehler", "Hedge-Close scheitert",
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
+        # NOVA OHNE SL/TP (29.10.2026): Start-Ergebnis meldet fehlende Brackets → 🔴 sofort (nächster Takt), Erinnerung alle 15 min, bis Puls/
+        # Hand sie nachweist (tv.brackets_ok_at) oder der Plan nicht mehr läuft. Prophos beendet solche Pläne nie per Kurs-Schätzung.
+        bf = tsx_brackets_fehlen(p.get("route"), {"brackets_fehlen": p.get("tv_bf"), "warnung": p.get("tv_w"), "brackets_ok_at": p.get("tv_ok")})
+        if st == "open" and bf:
+            s = max((jetzt - start).total_seconds(), 0) if start else 0
+            ri = str(p.get("richtung") or "").upper()
+            kt = _wd_num(p.get("master_contracts"))
+            menge = f"{ri + ' ' if ri in ('BUY', 'SELL') else ''}{('%g' % kt) if kt is not None else '?'}"
+            ein = _wd_num(p.get("tv_ein"))
+            preis = f"{ein:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if ein else "?"
+            fehlt = " und ".join(x for x, ja in (("SL (Risk)", bf["risk"]), ("TP (To Make)", bf["tp"])) if ja)
+            out.append((f"{pid}|ohne_sltp|{min(int(s // ALARM_ERINNERN_S), 3)}", 1, "nova_ohne_sltp", "Nova ohne SL/TP",
+                        f"{wer} · {konto}: {menge} @ {preis} — {fehlt} nicht gesetzt — in TopstepX setzen.", uid, pid))
+        # WIEDER OFFEN (29.10.2026): die Endlesung sah die Position nach dem Ende noch offen, der PC-Tab hat den Plan zurück auf open gesetzt
+        # (final → final_verworfen). Einmal je Rückholung (Schlüssel mit Zeitpunkt), nur als Übergang nach seit_iso.
+        fv = p.get("fv") if isinstance(p.get("fv"), dict) else {}
+        fv_at = _alarm_ts(fv.get("verworfen_at"))
+        if st == "open" and fv_at and fv_at > (_alarm_ts(seit_iso) or jetzt):
+            out.append((f"{pid}|wieder_offen|{fv.get('verworfen_at')}", 1, "plan_wieder_offen", "Position noch offen — Plan wieder läuft",
+                        f"{wer} · {konto}: Prophos hatte den Trade beendet ({str(fv.get('grund') or fv.get('quelle') or '?')[:30]}), die "
+                        f"Endlesung sieht die Position noch offen — Plan wieder unter Läuft. In {'TopstepX' if p.get('route') == 'tsv2' else 'TradingView'} "
+                        f"prüfen und schließen.", uid, pid))
         if hst == "geschlossen" and h.get("grund") in ALARM_RADAR_GRUENDE and str(h.get("closed_at") or "") > seit_iso:
             out.append((f"{pid}|radar", 2, "radar_schloss", "Radar hat geschlossen",
                         f"{wer} · {konto}: Radar hat den Hedge {ALARM_RADAR_GRUENDE[h.get('grund')]} geschlossen — das Userscript hat das "
@@ -3840,7 +3886,9 @@ def alarm_tick():
     jetzt = datetime.now(timezone.utc)
     seit = max(datetime.fromtimestamp(_alarm["start"], timezone.utc), jetzt - timedelta(minutes=20)).isoformat()
     sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,richtung,master_contracts,started_at,updated_at,"
-           "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre")
+           "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
+           "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
+           "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
@@ -12658,7 +12706,9 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere
               "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at"),
               # blown am Plan (09.10.2026): Echo-Zeilen haben keine Liq im Radar — der Chip „geblowt" kommt dort nur von hier
-              "blown": bool(p.get("blown"))})
+              "blown": bool(p.get("blown")),
+              # NOVA-ENDE-NUR-MIT-BEWEIS (29.10.2026): roter Chip in „Läuft“, kein Feed-Ende im Radar (wdlSltpChip / wdlFeedEndeArt)
+              "ohne_sltp": tsx_brackets_fehlen(p.get("route"), tv), "wieder_offen": isinstance(base.get("final_verworfen"), dict)})
     z.update(regel_f)   # liq_regel_* nur zusätzlich — liq_level_nq/Hedge bleiben wie oben gerechnet
     return z
 

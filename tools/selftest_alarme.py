@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "alarm_ereignisse")
+FUNKTIONEN = ("_wd_num", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "tsx_brackets_fehlen", "alarm_ereignisse")
 KONSTANTEN = ("ALARM_PRIO_TITEL", "HEDGE_LEBT", "ALARM_HEDGE_OFFEN_S", "ALARM_OHNE_HEDGE_S", "ALARM_HEDGE_ZU_MASTER_S",
               "ALARM_ERINNERN_S", "ALARM_RADAR_GRUENDE")
 
@@ -79,6 +79,43 @@ def main():
     k1 = [e[0] for e in ereig([dict(plaene[0], final_at=iso(1000))], namen, jetzt, seit)]
     k2 = [e[0] for e in ereig([dict(plaene[0], final_at=iso(9000))], namen, jetzt, seit)]
     ok(k1 == ["a|hedge_offen|1"] and k2 == ["a|hedge_offen|3"], f"Erinnerungs-Schlüssel {k1} {k2}")
+
+    # NOVA OHNE SL/TP + WIEDER OFFEN (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS)
+    bf = ns["tsx_brackets_fehlen"]
+    w = "Risk 1000 $ nicht gesetzt (kein Feld); To Make 2000 $ nicht gesetzt (Dialog)"
+    ok(bf("tsv2", {"warnung": w}) == {"risk": True, "tp": True}, "Warnung beide → risk+tp")
+    ok(bf("tsv2", {"warnung": "To Make 2000 $ nicht gesetzt"}) == {"risk": False, "tp": True}, "Warnung nur TP")
+    ok(bf("tsv2", {"warnung": "Risk steht auf 900 $ (TopstepX-Bracket), der Plan hat keinen SL"}) is None, "Risk steht → nichts fehlt")
+    ok(bf("tsv2", {"brackets_fehlen": {"risk": True, "tp": False}}) == {"risk": True, "tp": False}, "Bot-Feld brackets_fehlen")
+    ok(bf("tsv2", {"brackets_fehlen": {"risk": True}, "brackets_ok_at": iso(10)}) is None, "nachgewiesen → nichts fehlt")
+    ok(bf("tvv2", {"warnung": w}) is None and bf("tsv2", None) is None, "nur tsv2")
+    ok(bf("tsv2", {"warnung": "Brackets in TopstepX prüfen: Reiter „Positions“ unten nicht gefunden"}) == {"risk": True, "tp": True},
+       "fail-closed: Reiter nicht gefunden → beide fehlen")
+    ok(bf("tsv2", {"warnung": "Brackets in TopstepX prüfen: TopstepX hat eine Order abgelehnt: x; To Make 2000 $ nicht gesetzt (y)"})
+       == {"risk": True, "tp": True}, "fail-closed: abgelehnt + TP → beide")
+    ok(bf("tsv2", {"warnung": "Brackets in TopstepX prüfen: Risk steht auf 900 $ (TopstepX-Bracket), der Plan hat keinen SL"}) is None,
+       "mit Präfix: Risk steht → nichts")
+    ok(bf("tsv2", {"warnung": "Brackets in TopstepX prüfen: " + w}) == {"risk": True, "tp": True}, "mit Präfix beide")
+    nova = {"user_id": "u1", "master_firm": "Topstep", "master_name": "150k …0002", "route": "tsv2", "richtung": "buy", "master_contracts": 2}
+    pl2 = [
+        dict(nova, id="m", status="open", started_at=iso(100), tv_w=w, tv_ein="21345.25", master_contracts=2.0),
+        dict(nova, id="n", status="open", started_at=iso(100), tv_bf={"risk": False, "tp": True}, tv_ok=iso(5)),       # nachgewiesen
+        dict(nova, id="o", status="review", started_at=iso(100), tv_bf={"risk": True, "tp": True}),                     # nicht mehr open
+        dict(nova, id="q", status="open", started_at=iso(3000), fv={"verworfen_at": iso(30), "quelle": "demo", "grund": "demo_tp"}),
+        dict(nova, id="r", status="open", started_at=iso(9000), fv={"verworfen_at": iso(5000), "quelle": "demo"}),       # alt (vor seit)
+        dict(nova, id="s", status="review", started_at=iso(3000), fv={"verworfen_at": iso(30), "quelle": "demo"}),       # wieder beendet
+    ]
+    ev2 = {e[0].split("|")[0] + "|" + e[2]: e for e in ereig(pl2, namen, jetzt, seit)}
+    em = ev2.get("m|nova_ohne_sltp")
+    ok(em is not None and em[1] == 1 and em[3] == "Nova ohne SL/TP", f"m: Nova ohne SL/TP fehlt: {sorted(ev2)}")
+    ok(em is not None and "BUY 2 @ 21.345,25" in em[4] and "SL (Risk) und TP (To Make)" in em[4] and "in TopstepX setzen" in em[4],
+       f"m: Text {em and em[4]!r}")
+    ok(em is not None and em[0] == "m|ohne_sltp|0", f"m: Schlüssel {em and em[0]}")
+    ok(not any(k.startswith(("n|", "o|", "r|", "s|")) for k in ev2), f"n/o/r/s gemeldet: {sorted(ev2)}")
+    eq = ev2.get("q|plan_wieder_offen")
+    ok(eq is not None and eq[1] == 1 and "noch offen" in eq[4] and "TopstepX" in eq[4], f"q: wieder offen fehlt/Text: {eq}")
+    k3 = [e[0] for e in ereig([dict(pl2[0], started_at=iso(2000))], namen, jetzt, seit)]
+    ok(k3 == ["m|ohne_sltp|2"], f"Erinnerung ohne SL/TP {k3}")
 
     if f:
         print("ROT:\n  " + "\n  ".join(f))
