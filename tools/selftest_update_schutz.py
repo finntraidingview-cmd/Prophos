@@ -50,7 +50,9 @@ def main():
     # Panel
     P = panel.update_neustart_entscheiden
     ok(P([], T - 60, T, T + 5)[0] == "warten" and P([], T - 60, T, T - 1) == ("jetzt", ""), "Panel: Streuung, dann frei → jetzt")
-    ok(P(["Polar-Lauf"], T - 60, T, T - 1)[0] == "warten" and P(["Polar-Lauf"], T - 900, T, T - 1)[0] == "erzwingen", "Panel: belegt → warten, nach 15 min Deckel")
+    ok(P(["MT5-Order x"], T - 60, T, T - 1)[0] == "warten" and P(["MT5-Order x"], T - 900, T, T - 1)[0] == "erzwingen", "Panel: belegt → warten, nach 15 min Deckel")
+    ok(P(["Polar-Lauf"], T - 86400, T, T - 1)[0] == "warten" and P(["MT5-Order x", "Polar-Maus-Test"], T - 3600, T, T - 1)[0] == "warten",
+       "Panel: Polar nie erzwingen (auch nach Stunden)")
     alt_prov = panel.PROV_JOB
     try:
         panel.PROV_JOB = None
@@ -91,9 +93,18 @@ def main():
     finally:
         panel.UPDATE_LEERLAUF_S = alt_l
         panel._PANEL_POST.update(n=0, zu=False)
+    # Polar beim Leerlaufen: nie erzwingen, sofort wieder auf
+    alt_aktiv = panel.polar_panel
+    try:
+        panel.polar_panel = type("P", (), {"aktiv": staticmethod(lambda: True), "test_aktiv": staticmethod(lambda: False)})()
+        ok(panel._panel_zu_und_leeren(True) is False and panel._PANEL_POST["zu"] is False, "Panel: Deckel + Polar läuft → nicht beenden, wieder auf")
+    finally:
+        panel.polar_panel = alt_aktiv
+        panel._PANEL_POST.update(n=0, zu=False)
     hq = q[q.index("    def do_POST(self):"):q.index("    def _do_post_innen(self):")]
     ok('"/api/tsx-stand"' in hq and '_PANEL_POST["n"] += 1' in hq and "finally:" in hq and '"code": "backend_neustart"' in hq and '"_nichtGesendet": True' in hq,
        "Panel: do_POST zählt (außer tsx-stand) mit finally, zu → 503 backend_neustart/_nichtGesendet")
+    ok('"_httpFail": True, "copier_offline": True' in hq, "Panel-503 trägt _httpFail/copier_offline wie die Proxy-503")
     vw2 = q[q.index("def _version_watcher("):q.index("def _selbst_auffrischen(")]
     ok('upd["code"] = {neuester: _panel_code_geaendert(neuester)}' in vw2 and "_panel_zu_und_leeren(" in vw2 and vw2.rindex("finally:") < vw2.rindex("os._exit(0)"),
        "Panel-Watcher: Codeänderung je Stand nur einmal geholt, zu+leeren vor dem Beenden, os._exit im finally")

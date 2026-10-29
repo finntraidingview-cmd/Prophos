@@ -2005,6 +2005,9 @@ def update_neustart_entscheiden(gruende, wartet_seit, jetzt, streu_bis, deckel_s
         return "warten", f"Streuung noch {int(streu_bis - jetzt)} s"
     if not gruende:
         return "jetzt", ""
+    # POLAR NIE ERZWINGEN (S2/Master 29.10.2026, alte Regel „nie mitten im Polar-Trade"): solange Polar läuft, unbegrenzt vertagen
+    if any(str(x).startswith("Polar") for x in gruende):
+        return "warten", "Polar läuft — Neustart nie erzwungen: " + ", ".join(gruende)[:200]
     if wartet_seit is not None and jetzt - wartet_seit >= deckel_s:
         return "erzwingen", "seit " + str(int((jetzt - wartet_seit) // 60)) + " min belegt: " + ", ".join(gruende)[:200]
     return "warten", "belegt: " + ", ".join(gruende)[:200]
@@ -2023,10 +2026,12 @@ def _panel_zu_und_leeren(erzwingen):
         _PANEL_POST["zu"] = True
     ende = time.time() + (UPDATE_LEERLAUF_S if erzwingen else 0.0)
     while True:
-        if not panel_lauf_gruende(panel_beschaeftigt_gruende()):
+        g = panel_beschaeftigt_gruende()          # ALLE Gründe (S2 29.10.2026) — nicht nur die, die das lokale app.py betreffen
+        if not g:
             return True
-        if time.time() >= ende:
-            if erzwingen:
+        polar = any(str(x).startswith("Polar") for x in g)
+        if time.time() >= ende or polar:          # Polar: nie erzwingen, sofort wieder auf und weiter vertagen
+            if erzwingen and not polar:
                 return True
             with _PANEL_POST_LOCK:
                 _PANEL_POST["zu"] = False
@@ -3714,6 +3719,7 @@ class Handler(BaseHTTPRequestHandler):
         with _PANEL_POST_LOCK:
             if _PANEL_POST["zu"]:
                 return self._send(503, json.dumps({"ok": False, "code": "backend_neustart", "retry_ok": True, "_nichtGesendet": True,
+                    "_httpFail": True, "copier_offline": True,
                     "msg": "Panel startet gerade neu (Update) — nichts gesendet, gleich erneut."}, ensure_ascii=False))
             _PANEL_POST["n"] += 1
         try:
@@ -5464,7 +5470,7 @@ def _version_watcher(my_version):
             upd["auf"] = remote
             if (TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))) and time.time() - upd["seit"] < UPDATE_DECKEL_S:
                 continue
-            if polar_panel and polar_panel.aktiv() and time.time() - upd["seit"] < UPDATE_DECKEL_S:   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten (Kindprozess bliebe verwaist)
+            if polar_panel and polar_panel.aktiv():   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten — auch nach dem Deckel nicht (S2 29.10.2026)
                 continue
             # NUR neu starten, wenn sich das PANEL selbst geaendert hat (23.09.2026, Finns
             # Nacht: 12 Frontend-Commits in 100 min, jeder mit VERSION-Bump, jeder ein
@@ -5497,7 +5503,7 @@ def _version_watcher(my_version):
             if not _panel_zu_und_leeren(entsch == "erzwingen"):
                 continue
             try:
-                rest = panel_lauf_gruende(panel_beschaeftigt_gruende())
+                rest = panel_beschaeftigt_gruende()
                 if entsch == "erzwingen":
                     print(f"[panel] Update {my_version} → {remote}: Deckel {UPDATE_DECKEL_S // 60} min — Neustart ({grund})", flush=True)
                     if rest:   # nur wenn wirklich noch etwas lief, kann etwas abgerissen sein
