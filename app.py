@@ -14733,10 +14733,10 @@ def admin_payout_erhalten():
        Finanzen schreibt auch nur bei Änderung — Prüfer 29.10.2026: ein stehender Termin darf nicht still auf null fallen).
     Kontotyp und waiting_payout_since bleiben unangetastet (Finanzen fasst sie beim Abhaken auch nicht an; das Flag leert die Anfrage).
     Body {pending_id, erhalten_am (JJJJ-MM-TT, Standard heute Berlin), naechster_payout (JJJJ-MM-TT | leer)}.
-    Auth wie /admin/payout-calc: ADMIN_EMAILS oder Verwalter für Anfragen SEINER Gruppe."""
+    Auth: ADMIN_EMAILS oder voller Admin-Reiter-Login (_admin_voll, 30.10.2026 „Finn + Pascal") — sonst Verwalter für Anfragen SEINER Gruppe."""
     if request.method == "OPTIONS":
         return "", 200
-    _, err = _admin_auth()
+    _, err = _admin_voll()
     gruppe = None
     if err:
         if err[1] != 403:
@@ -23023,6 +23023,36 @@ def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None, gruppe=None
     return str(uid)
 
 
+def admin_voll_frei(im_planer, nur_eigene, verwalter):
+    """REIN RECHNEND (testbar, ADMIN-VOLL 30.10.2026, Finn als „Finn + Pascal" — nicht in ADMIN_EMAILS, will keine Railway-Variablen pflegen):
+    darf ein Login OHNE ADMIN_EMAILS die Admin-Reiter-Routen „Payout erhalten" und „Hedge-Freigabe" wie ein Admin? Genau dann, wenn
+    ap_eingriff_sicht ihm im Admin-Reiter (sicht="admin") alle IDs gibt — im Planer (auto_plan_regeln.user_ids), nicht admin_zugang
+    „nur eigene" — und er kein Verwalter ist (der bleibt bei seiner Gruppe). Dasselbe Recht, mit dem er heute alle Vorschläge bestätigt."""
+    return not verwalter and ap_eingriff_sicht(False, "", im_planer, nur_eigene, AP_SICHT_ADMIN, None) is None
+
+
+def _admin_voll():
+    """Gate „voller Admin" für Admin-Reiter-Routen → (uid, None) oder (None, Fehler-Antwort): ADMIN_EMAILS (_admin_auth) ODER ein Login,
+    für den admin_voll_frei gilt. Der 403 von _admin_auth bleibt die Antwort für alle anderen (Aufrufer prüfen danach ggf. den Verwalter)."""
+    _mail, err = _admin_auth()
+    if err is None:
+        return str(request.environ.get("prophos.admin_uid") or ""), None
+    if err[1] != 403:
+        return None, err
+    uid, err2 = _wd_login()
+    if err2:
+        return None, err2
+    try:
+        sicht_l, verwalter = admin_sicht_lesen(str(uid))
+        im_planer = str(uid) in [str(u) for u in ((sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"}) or [{}])[0].get("user_ids") or [])]
+    except Exception:
+        return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
+    if admin_voll_frei(im_planer, sicht_l is not None, bool(verwalter)):
+        request.environ["prophos.admin_uid"] = str(uid)
+        return str(uid), None
+    return None, err
+
+
 def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
     """REIN RECHNEND (08.10.2026, Finn: „Ja, sollen alle dies machen können."): darf dieser Login richtung_tauschen/start/neu_starten an
     BELIEBIGEN Plänen? Admin (ADMIN_EMAILS) immer; sonst nur im Admin-Reiter (sicht="admin") und nicht admin_zugang „nur eigene" —
@@ -25864,11 +25894,9 @@ def _ap_hedge_mit_freigeben(zeilen, uid):
 def admin_auto_plan_hedge_freigabe():
     if request.method == "OPTIONS":
         return "", 200
-    admin, uid, _reg, err = _ap_zugang(admin_reiter=True)
+    uid, err = _admin_voll()   # ADMIN_EMAILS oder voller Admin-Reiter-Login (30.10.2026, „Finn + Pascal")
     if err:
-        return err
-    if not admin:
-        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+        return (jsonify({"ok": False, "msg": "Nur für Admins"}), 403) if err[1] == 403 else err
     basis = {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
              "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}
     try:
@@ -34299,7 +34327,8 @@ def _ap_eingriff(aktion):
             if sperre:
                 return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
         zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
-        frei = _ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" and admin and sicht is None else 0
+        # Hedge-Freigabe beim ✓ (30.10.2026): jeder Login mit allen IDs (sicht None) — auch „Finn + Pascal" ohne ADMIN_EMAILS (admin_voll_frei)
+        frei = _ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" and sicht is None else 0
         wer = "Admin" if sicht is None else ("ID " + sicht[:8]) if isinstance(sicht, str) else ("Verwalter " + str(uid)[:8])
         print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {wer}" + (f", {frei} Hedge-Freigabe(n)" if frei else ""), flush=True)
         return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None or not isinstance(sicht, str),
