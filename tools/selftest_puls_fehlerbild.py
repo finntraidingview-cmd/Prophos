@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Selbsttest PULS-FEHLERFOTO (29.10.2026, Slave 7) — die Railway-Routen ohne Netz (Flask-Testclient, Storage als Attrappe):
 (A) puls_fehlerbild_pfad / puls_fehlerbild_erlaubt — Pfad nur mit gültiger pc_id, id (Datum ± 2 Tage) und art; Stundendeckel je PC.
-(B) POST /puls-fehlerbild/<pc> — nur bekannte PCs (mt5_live), nur JPEG, ≤ 400 KB, nie überschreiben (x-upsert false), Pfad
-    <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg; Deckel je PC und über alle → 429; Log nur pc_id + Größe; Protokoll je Foto und Status-Route.
+(B) POST /puls-fehlerbild/<pc> — nur bekannte PCs (_rw_pc_namen, sonst 404), ohne Content-Length 411, nur JPEG, ≤ 400 KB, nie
+    überschreiben (x-upsert false), Pfad <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg; Deckel je PC und über alle → 429; Log nur pc_id + Größe;
+    Protokoll je Foto und Status-Route.
 (C) GET /admin/puls-fehlerbild — Gate zuerst (fremder Login 403, nichts signiert), dann 5-min-Link.
-(D) GET /puls-fehlerbild-datei — Token fehlt/zu kurz/falsch → 404, richtig → JPEG, Token nie im Log.
+(D) GET /puls-fehlerbild-datei — Token nur als Header (X-Fehlerbild-Token / Bearer), Query-Token zählt nie; fehlt/zu kurz/falsch → 404,
+    richtig → JPEG, Token nie im Log.
 Aufruf: python3 tools/selftest_puls_fehlerbild.py"""
 import contextlib
 import hmac
@@ -66,10 +68,10 @@ class _Requests:
 def lade(stubs):
     src = open(APP, encoding="utf-8").read()
     konst = ("PC_ID_MUSTER", "PULS_FEHLERBILD_BUCKET", "PULS_FEHLERBILD_MAX", "PULS_FEHLERBILD_STUNDE", "PULS_FEHLERBILD_ID_RE",
-             "PULS_FEHLERBILD_PRAEFIX_RE", "HT_PAYOUTS_CSV_TOKEN_MIN", "PULS_FEHLERBILD_STUNDE_ALLE", "PULS_FEHLERBILD_PC_TAGE", "_puls_fehlerbild_pcs")
+             "PULS_FEHLERBILD_PRAEFIX_RE", "HT_PAYOUTS_CSV_TOKEN_MIN", "PULS_FEHLERBILD_STUNDE_ALLE")
     teile = [re.search(rf"^{k} = .*$", src, re.M).group(0) for k in konst]
     teile += ["_puls_fehlerbild_zeiten = {}", "_puls_fehlerbild_lock = threading.Lock()"]
-    for name in ("puls_fehlerbild_pfad", "puls_fehlerbild_erlaubt", "ht_payouts_token_ok", "_puls_fehlerbild_pc_bekannt", "_puls_fehlerbild_tor",
+    for name in ("puls_fehlerbild_pfad", "puls_fehlerbild_erlaubt", "ht_payouts_token_ok", "_puls_fehlerbild_tor",
                  "_puls_fehlerbild_protokoll"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
@@ -86,16 +88,8 @@ def lade(stubs):
     return ns, app
 
 
-PCS = {"liste": ["pc-abcd12", "pc-voll99"], "fehler": False, "abfragen": 0}
+PCS = {"namen": {"pc-abcd12": "Finn + Pascal", "pc-voll99": "Marc"}}
 LOG_ZEILEN = []
-
-
-def sb_select(tabelle, params):
-    assert tabelle == "mt5_live" and params.get("pc_name") == "like.pc-*" and params.get("updated_at", "").startswith("gte.")
-    PCS["abfragen"] += 1
-    if PCS["fehler"]:
-        raise RuntimeError("Supabase weg")
-    return [{"pc_name": p} for p in PCS["liste"]]
 
 
 def sb_insert(tabelle, zeile):
@@ -107,7 +101,7 @@ def sb_insert(tabelle, zeile):
 def main():
     rq = _Requests()
     gate = {"err": None}
-    ns, app = lade({"requests": rq, "_admin_mail_auth": lambda: gate["err"], "sb_select": sb_select, "sb_insert": sb_insert})
+    ns, app = lade({"requests": rq, "_admin_mail_auth": lambda: gate["err"], "_rw_pc_namen": lambda: dict(PCS["namen"]), "sb_insert": sb_insert})
     P = ns["puls_fehlerbild_pfad"]
 
     # (A)
@@ -132,11 +126,10 @@ def main():
     check(log.getvalue().strip() == "[puls-fehlerbild] pc-abcd12 1 KB" and LOG_ZEILEN[-1] == {"pc": "pc-abcd12", "bild_id": ID, "art": "bildschirm", "kb": 1, "grund": None},
           f"B1b Log nur pc_id + Größe, Protokoll-Zeile je Foto ({log.getvalue().strip()})")
     n_rq = len(rq.posts)
-    check(cl.post(f"/puls-fehlerbild/pc-erfunden?id={ID}&art=tab", data=JPEG).status_code == 403 and len(rq.posts) == n_rq,
-          "B1c erfundene pc_id (kein Herzschlag in mt5_live) → 403, nichts gespeichert")
-    n_abfr = PCS["abfragen"]
-    cl.post(f"/puls-fehlerbild/pc-erfunden?id={ID}&art=tab", data=JPEG)
-    check(PCS["abfragen"] == n_abfr, "B1d unbekannter PC fragt die PC-Liste höchstens einmal je Minute neu ab")
+    check(cl.post(f"/puls-fehlerbild/pc-erfunden?id={ID}&art=tab", data=JPEG).status_code == 404 and len(rq.posts) == n_rq,
+          "B1c erfundene pc_id (nicht in _rw_pc_namen) → 404, nichts gespeichert")
+    r = cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=JPEG, headers={"Transfer-Encoding": "chunked"})   # chunked: keine Länge
+    check(r.status_code == 411 and len(rq.posts) == n_rq, f"B1d ohne Content-Length (chunked) → 411, nichts gelesen ({r.status_code})")
     check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=bildschirm", data=JPEG).status_code == 502, "B2 gleicher Pfad nochmal → nicht überschrieben (502)")
     check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=b"<html>").status_code == 400, "B3 kein JPEG → 400")
     check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=b"\xff\xd8\xff" + b"x" * (400 * 1024)).status_code in (400, 413), "B4 zu groß → 400/413")
@@ -151,12 +144,13 @@ def main():
     r = cl.post("/puls-fehlerbild-status/pc-abcd12", json={"id": ID, "art": "tab", "grund": "kein Tab im Puls-Chrome"})
     check(r.status_code == 200 and LOG_ZEILEN[-1] == {"pc": "pc-abcd12", "bild_id": ID, "art": "tab", "kb": None, "grund": "kein Tab im Puls-Chrome"},
           "B9 Status-Route: Grund ohne Bild ins Protokoll")
-    check(cl.post("/puls-fehlerbild-status/pc-erfunden", json={"id": ID, "art": "tab", "grund": "x"}).status_code == 403
-          and cl.post("/puls-fehlerbild-status/pc-abcd12", json={"id": "x", "art": "tab"}).status_code == 400, "B10 Status-Route: gleiches Tor, id geprüft")
-    ns["_puls_fehlerbild_pcs"].update(pcs=None, bis=0.0, versucht=0.0)
-    PCS["fehler"] = True
-    check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=JPEG).status_code == 503, "B11 PC-Liste nicht lesbar (nie gelesen) → 503, nie offen")
-    PCS["fehler"] = False
+    check(cl.post("/puls-fehlerbild-status/pc-erfunden", json={"id": ID, "art": "tab", "grund": "x"}).status_code == 404
+          and cl.post("/puls-fehlerbild-status/pc-abcd12", json={"id": "x", "art": "tab"}).status_code == 400
+          and cl.post("/puls-fehlerbild-status/pc-abcd12", json={"id": ID, "art": "tab"}, headers={"Transfer-Encoding": "chunked"}).status_code == 411,
+          "B10 Status-Route: gleiches Tor, id geprüft, ohne Länge 411")
+    alt_namen, PCS["namen"] = PCS["namen"], {}
+    check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=JPEG).status_code == 404, "B11 PC-Liste nicht lesbar (leer) → 404, nie offen")
+    PCS["namen"] = alt_namen
 
     # (C)
     gate["err"] = ("Nur für Admins", 403)
@@ -174,17 +168,20 @@ def main():
     # (D)
     os.environ.pop("PULS_FEHLERBILD_TOKEN", None)
     q = f"/puls-fehlerbild-datei?pfad=pc-abcd12/{TAG}/{ID}&art=bildschirm"
-    check(cl.get(q + f"&token={TOKEN}").status_code == 404, "D1 Variable fehlt → 404")
+    H = lambda t: {"X-Fehlerbild-Token": t}
+    check(cl.get(q, headers=H(TOKEN)).status_code == 404, "D1 Variable fehlt → 404")
     os.environ["PULS_FEHLERBILD_TOKEN"] = "kurz"
-    check(cl.get(q + "&token=kurz").status_code == 404, "D2 Variable zu kurz → 404")
+    check(cl.get(q, headers=H("kurz")).status_code == 404, "D2 Variable zu kurz → 404")
     os.environ["PULS_FEHLERBILD_TOKEN"] = TOKEN
-    check(cl.get(q).status_code == 404 and cl.get(q + "&token=falsch").status_code == 404, "D3 ohne/falscher Token → 404")
+    check(cl.get(q).status_code == 404 and cl.get(q, headers=H("falsch")).status_code == 404, "D3 ohne/falscher Token → 404")
+    check(cl.get(q + f"&token={TOKEN}").status_code == 404, "D3b Token in der URL zählt nie → 404")
     log = io.StringIO()
     with contextlib.redirect_stdout(log):
-        r = cl.get(q + f"&token={TOKEN}")
+        r = cl.get(q, headers=H(TOKEN))
+        r2 = cl.get(q, headers={"Authorization": f"Bearer {TOKEN}"})
     check(r.status_code == 200 and r.mimetype == "image/jpeg" and r.data == JPEG and r.headers.get("Cache-Control") == "no-store"
-          and TOKEN not in log.getvalue(), "D4 richtiger Token → das JPEG, no-store, Token nicht im Log")
-    check(cl.get(f"/puls-fehlerbild-datei?pfad=pc-abcd12/{TAG}/{ID}&art=tab&token={TOKEN}").status_code == 404, "D5 Bild fehlt → 404")
+          and r2.status_code == 200 and TOKEN not in log.getvalue(), "D4 Token im Header (X-Fehlerbild-Token / Bearer) → das JPEG, no-store, Token nicht im Log")
+    check(cl.get(f"/puls-fehlerbild-datei?pfad=pc-abcd12/{TAG}/{ID}&art=tab", headers=H(TOKEN)).status_code == 404, "D5 Bild fehlt → 404")
     os.environ.pop("PULS_FEHLERBILD_TOKEN", None)
 
     print(f"\n{'ALLES GRÜN' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")

@@ -15581,15 +15581,14 @@ def puls_diagnose_schreiben(pc_id):
 # Ablage: privater Bucket puls-fehlerbilder ohne Policies (nur Service-Key, sql/2026-10-29_puls_fehlerbilder.sql), Pfad
 # <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg. Den Präfix <pc>/<JJJJ-MM-TT>/<id> gibt der Bot im Ergebnis als „fehlerbild" zurück → order_signale.ergebnis
 # und puls_fehlstarts.bild_pfad. Ansehen: GET /admin/puls-fehlerbild?pfad=<präfix>&art=bildschirm|tab → Link 5 min gültig.
-# Master 29.10.2026: nur pc_ids, die Prophos kennt (Herzschlag in mt5_live.pc_name, 30 Tage — sonst könnte jeder mit erfundenen
-# Kennungen den Bucket füllen), dazu ein Deckel über alle PCs (PULS_FEHLERBILD_STUNDE_ALLE). Geloggt wird nur pc_id + Größe. Jedes Foto
+# Master/Prüfer S2 29.10.2026: nur pc_ids, die Prophos kennt (_rw_pc_namen: pc_namen + mt5_live, 60-s-Cache — sonst könnte jeder mit
+# erfundenen Kennungen den Bucket füllen; unbekannt → 404), dazu ein Deckel über alle PCs (PULS_FEHLERBILD_STUNDE_ALLE) im selben Lock wie
+# der je PC; ohne Content-Length (chunked) → 411, erst danach wird gelesen. Geloggt wird nur pc_id + Größe. Jedes Foto
 # (und jeder Grund, warum keins — POST /puls-fehlerbild-status/<pc>) landet in puls_fehlerbild_log, damit sichtbar ist, ob es läuft.
 PULS_FEHLERBILD_BUCKET = "puls-fehlerbilder"
 PULS_FEHLERBILD_MAX = 400 * 1024
 PULS_FEHLERBILD_STUNDE = 30
 PULS_FEHLERBILD_STUNDE_ALLE = 200
-PULS_FEHLERBILD_PC_TAGE = 30
-_puls_fehlerbild_pcs = {"bis": 0.0, "versucht": 0.0, "pcs": None}
 PULS_FEHLERBILD_ID_RE = re.compile(r"(\d{4})(\d{2})(\d{2})-\d{6}-[0-9a-f]{6}")
 PULS_FEHLERBILD_PRAEFIX_RE = re.compile(r"(pc-[a-z0-9]{4,12})/(\d{4}-\d{2}-\d{2})/(\d{8}-\d{6}-[0-9a-f]{6})")
 _puls_fehlerbild_zeiten = {}
@@ -15620,38 +15619,11 @@ def puls_fehlerbild_erlaubt(zeiten, pc_id, jetzt_s, je_stunde=PULS_FEHLERBILD_ST
     return True
 
 
-def _puls_fehlerbild_pc_bekannt(pc_id):
-    """Kennt Prophos diesen PC? Herzschlag-Zeile in mt5_live (pc_name) aus den letzten PULS_FEHLERBILD_PC_TAGE Tagen; 5 min gemerkt, ein
-    unbekannter PC frischt höchstens einmal je Minute nach. Lesefehler ohne bekannten Stand → Exception (Aufrufer 503, nie offen)."""
-    jetzt = time.time()
-    with _puls_fehlerbild_lock:
-        c = dict(_puls_fehlerbild_pcs)
-    if c["pcs"] is not None and pc_id in c["pcs"] and jetzt < c["bis"]:
-        return True
-    if c["pcs"] is not None and jetzt - c["versucht"] < 60:
-        return pc_id in c["pcs"]
-    with _puls_fehlerbild_lock:
-        _puls_fehlerbild_pcs["versucht"] = jetzt
-    seit = (datetime.now(timezone.utc) - timedelta(days=PULS_FEHLERBILD_PC_TAGE)).isoformat()
-    try:
-        rows = sb_select("mt5_live", {"select": "pc_name", "pc_name": "like.pc-*", "updated_at": f"gte.{seit}", "limit": "5000"}) or []
-    except Exception:
-        if c["pcs"] is None:
-            raise
-        return pc_id in c["pcs"]
-    pcs = frozenset(str(z.get("pc_name")) for z in rows if isinstance(z, dict) and z.get("pc_name"))
-    with _puls_fehlerbild_lock:
-        _puls_fehlerbild_pcs.update(bis=jetzt + 300, pcs=pcs)
-    return pc_id in pcs
-
-
 def _puls_fehlerbild_tor(pc_id):
-    """Gemeinsames Tor von Upload und Status: bekannter PC, Deckel je PC und über alle. → None (frei) oder (Antwort, Status)."""
-    try:
-        if not _puls_fehlerbild_pc_bekannt(pc_id):
-            return jsonify({"ok": False, "msg": "pc_id unbekannt"}), 403
-    except Exception:
-        return jsonify({"ok": False, "msg": "PC-Liste nicht lesbar"}), 503
+    """Gemeinsames Tor von Upload und Status: bekannter PC (_rw_pc_namen; nicht lesbar → leer → 404, nie offen), Deckel je PC und über
+    alle im selben Lock. → None (frei) oder (Antwort, Status)."""
+    if pc_id not in _rw_pc_namen():
+        return jsonify({"ok": False, "msg": "unbekannt"}), 404
     with _puls_fehlerbild_lock:
         jetzt = time.time()
         if not puls_fehlerbild_erlaubt(_puls_fehlerbild_zeiten, "*", jetzt, PULS_FEHLERBILD_STUNDE_ALLE):
@@ -15676,7 +15648,9 @@ def puls_fehlerbild_hochladen(pc_id):
     pfad = puls_fehlerbild_pfad(pc_id, request.args.get("id"), request.args.get("art"))
     if not pfad:
         return jsonify({"ok": False, "msg": "pc_id/id/art ungültig"}), 400
-    if (request.content_length or 0) > PULS_FEHLERBILD_MAX:
+    if request.content_length is None:   # chunked ohne Länge umginge den Deckel (Prüfer S2 29.10.2026, wie /mail/eingang)
+        return jsonify({"ok": False, "msg": "Content-Length fehlt"}), 411
+    if request.content_length > PULS_FEHLERBILD_MAX:
         return jsonify({"ok": False, "msg": "zu groß"}), 413
     tor = _puls_fehlerbild_tor(pc_id)
     if tor:
@@ -15705,8 +15679,12 @@ def puls_fehlerbild_hochladen(pc_id):
 def puls_fehlerbild_status(pc_id):
     """POST /puls-fehlerbild-status/<pc_id> {id, art, grund} — der Foto-Prozess meldet, warum es KEIN Bild gab (PowerShell-Fehler, kein
     Puls-Chrome-Tab, Puls läuft wieder). Gleiches Tor wie der Upload; nur ins Protokoll."""
+    if request.content_length is None:
+        return jsonify({"ok": False, "msg": "Content-Length fehlt"}), 411
+    if request.content_length > 2000:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
     b = request.get_json(silent=True) or {}
-    if (request.content_length or 0) > 2000 or not puls_fehlerbild_pfad(pc_id, b.get("id"), b.get("art")):
+    if not puls_fehlerbild_pfad(pc_id, b.get("id"), b.get("art")):
         return jsonify({"ok": False, "msg": "ungültig"}), 400
     tor = _puls_fehlerbild_tor(pc_id)
     if tor:
@@ -15742,10 +15720,15 @@ def admin_puls_fehlerbild():
 
 @app.route("/puls-fehlerbild-datei", methods=["GET"])
 def puls_fehlerbild_datei():
-    """GET /puls-fehlerbild-datei?pfad=<pc>/<JJJJ-MM-TT>/<id>&art=bildschirm|tab&token=… → das JPEG selbst (für die Fehler-Routine und
-    Claude am Mac, die keinen Prophos-Login haben: curl → Datei → ansehen). Token aus der Railway-Variable PULS_FEHLERBILD_TOKEN (fehlt sie
-    oder ist sie kürzer als 32 Zeichen → immer 404), Vergleich zeitkonstant wie /ht/payouts.csv; falscher Token → 404. Nur lesen."""
-    if not ht_payouts_token_ok(request.args.get("token"), os.environ.get("PULS_FEHLERBILD_TOKEN")):
+    """GET /puls-fehlerbild-datei?pfad=<pc>/<JJJJ-MM-TT>/<id>&art=bildschirm|tab → das JPEG selbst (für die Fehler-Routine und Claude am
+    Mac, die keinen Prophos-Login haben: curl → Datei → ansehen). Token NUR als Header (Prüfer S2 29.10.2026 — nie in der URL, die landet in
+    Logs/Verläufen): X-Fehlerbild-Token: … oder Authorization: Bearer …; Soll aus der Railway-Variable PULS_FEHLERBILD_TOKEN (fehlt sie oder
+    ist sie kürzer als 32 Zeichen → immer 404), Vergleich zeitkonstant wie /ht/payouts.csv; falscher/fehlender Token → 404. Nur lesen."""
+    kopf = str(request.headers.get("X-Fehlerbild-Token") or "").strip()
+    if not kopf:
+        auth = str(request.headers.get("Authorization") or "")
+        kopf = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    if not ht_payouts_token_ok(kopf, os.environ.get("PULS_FEHLERBILD_TOKEN")):
         return Response("Not Found", status=404, mimetype="text/plain")
     m = PULS_FEHLERBILD_PRAEFIX_RE.fullmatch(str(request.args.get("pfad") or "").strip())
     art = str(request.args.get("art") or "bildschirm")

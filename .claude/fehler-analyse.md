@@ -48,10 +48,11 @@ Puls-Chrome. Deckel: dasselbe (Weg, Code) höchstens alle 10 min, je PC höchste
 - **Ansehen (Claude am Mac / Routine):** Bild laden, dann mit dem Read-Werkzeug öffnen:
 
 ```bash
-curl -s "https://web-production-bec81.up.railway.app/puls-fehlerbild-datei?pfad=<pfad>&art=bildschirm&token=$PULS_FEHLERBILD_TOKEN" -o /tmp/fehlerbild.jpg
+curl -s -H "X-Fehlerbild-Token: $PULS_FEHLERBILD_TOKEN" "https://web-production-bec81.up.railway.app/puls-fehlerbild-datei?pfad=<pfad>&art=bildschirm" -o /tmp/fehlerbild.jpg
 ```
 
-  `art=tab` für das Bild des Puls-Chrome-Tabs. Der Token steht in der Railway-Variable `PULS_FEHLERBILD_TOKEN` (fehlt sie → 404).
+  `art=tab` für das Bild des Puls-Chrome-Tabs. Der Token geht nur als Header (`X-Fehlerbild-Token` oder `Authorization: Bearer …`),
+  nie in der URL; er steht in der Railway-Variable `PULS_FEHLERBILD_TOKEN` (fehlt sie → 404).
   Im Browser mit Admin-Login geht auch `GET /admin/puls-fehlerbild?pfad=<pfad>&art=bildschirm` (5-min-Link, Gate wie Admin → Mail).
 - **Nur Hermann Technologies auswerten** (Standing-Regel, Master 29.10.2026): gespeichert werden Bilder aller PCs, ausgewertet nur Fehler
   von IDs der Gruppe Hermann Technologies — die Emin-Gruppe (Gruppen MIT Verwalter in `id_gruppen`) nie. Immer über `user_id` filtern:
@@ -77,8 +78,8 @@ select pc, count(*) filter (where kb is not null) bilder, count(*) filter (where
 from puls_fehlerbild_log where at > now() - interval '24 hours' group by pc order by max(at) desc;
 ```
 
-  Uploads nehmen nur PCs an, die einen Herzschlag in `mt5_live` haben (30 Tage). Auf dem PC liegt neben dem Bot zusätzlich
-  `fehlerfoto.log`.
+  Uploads nehmen nur PCs an, die Prophos kennt (`pc_namen` + `mt5_live`, wie die PC-Namen im Admin); sonst 404. Auf dem PC liegt
+  neben dem Bot zusätzlich `fehlerfoto.log`.
 - Ein Bild ist ein Beleg, kein Beweis für die Ursache: immer mit `trail`/`puls_diagnose` derselben Minute zusammen lesen.
 
 ## Vorgehen
