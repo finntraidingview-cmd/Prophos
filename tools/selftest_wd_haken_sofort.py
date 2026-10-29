@@ -95,6 +95,46 @@ print(JSON.stringify(out))
           "mit dem Block in einem Bündel → ausdrücklich Gruppe 1")
     check("if(!(await wdDarf(uid))) return { fehler: 'nicht in deiner Gruppe' }" in ew, "Gruppen-Recht (Emin nur seine Gruppe) bleibt im gemeinsamen Weg")
     check("wdSlotEinplanen(x)" in ew and "x.start_um = startUm" in ew, "ID ohne Block → eigener Slot (wdSlotEinplanen, feste Blöcke bleiben)")
+    # (3) Zweig „Einwürfeln scheitert + Konto fehlt in der Zeile" (Emin 30.10., konten []) — wdHakenSofortLauf ECHT in jsc (S2-Stopp 88c3d628:
+    # ReferenceError kd → falsche Meldung „Haken nicht gespeichert", kein Hinweis an der Zeile)
+    lauf = bis("  async function wdHakenSofortLauf(uid, kontoId, x, k, name){", "\n  }\n")
+    prog = """var SAGT = [], GESCHRIEBEN = null, NEU = 0
+var _wd = { busy: false, rows: [{ tag: '2026-10-30', user_id: 'emin', status: 'leer', konten: [] }] }
+const WD_HAKEN_WARTE_MS = 120000
+function wdKontoDaten(id){ return { id: id, name: '150k FTDFYSLX150607770887 → Winning Days', firm: 'Tradeify', ext: 'FTDFYSLX150607770887' } }
+async function wdKontoEinwuerfeln(){ return { fehler: 'kein freier Platz mehr im Fenster 05:00–18:00 Dubai' } }
+function wdTpSpanne(){ return [268, 280] }
+function wdAktiv(k){ return !!(k && k.aktiv !== false && k.farm && k.ext) }
+function wdSay(t, k){ SAGT.push([k, t]) }
+async function wdNeuLaden(){ NEU++ }
+var atToast = undefined
+var supabase = { from: () => ({ update: (u) => { GESCHRIEBEN = u; const q = { eq: () => q, neq: () => Promise.resolve({ error: null }) }; return q } }) }
+%s
+wdHakenSofortLauf('emin', 'konto-e', _wd.rows[0], undefined, 'Emin-Konto').then(() => {
+  const kn = GESCHRIEBEN && GESCHRIEBEN.konten && GESCHRIEBEN.konten.find(q => q.id === 'konto-e')
+  print(JSON.stringify({ sagt: SAGT, kn: kn || null, status: GESCHRIEBEN && GESCHRIEBEN.status, neu: NEU, busy: _wd.busy }))
+}).catch(e => print('ERR ' + e))
+""" % lauf
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write(prog)
+        pfad = f.name
+    try:
+        o = subprocess.run([JSC, pfad], capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(pfad)
+    t3 = (o.stdout or "").strip()
+    r3 = json.loads(t3) if t3.startswith("{") else None
+    check(r3 is not None, f"wdHakenSofortLauf läuft im Fehler-Zweig ohne ReferenceError{'' if r3 else ' (' + (t3 or o.stderr)[:200] + ')'}")
+    if r3:
+        meld = " ".join(x[1] for x in r3["sagt"])
+        check("Haken nicht gespeichert" not in meld and "heute nicht eingeplant: kein freier Platz" in meld,
+              "Meldung: dauerhaft drin, heute nicht eingeplant (Grund) — nie „Haken nicht gespeichert“")
+        kn = r3["kn"] or {}
+        check(kn.get("aktiv") is False and kn.get("farm") is True and str(kn.get("hinweis", "")).startswith("heute nicht eingeplant: kein freier Platz")
+              and kn.get("ext") == "FTDFYSLX150607770887" and kn.get("tpVon") == 268,
+              "fehlendes Konto wird an die Zeile gehängt: farm an, heute aus, Hinweis mit Grund (→ „Heute nicht drin“)")
+        check(r3["status"] == "leer" and r3["neu"] == 1 and r3["busy"] is False, "Zeile bleibt leer (nichts aktiv), Farmer neu geladen, busy wieder frei")
+
     print(f"\n{'ALLES OK' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
     sys.exit(1 if FEHLER else 0)
 
