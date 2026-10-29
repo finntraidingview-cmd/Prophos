@@ -70,6 +70,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
   var TAB = 'tsx-' + Math.random().toString(36).slice(2, 10);
   var unterwegs = false, fehlerN = 0, gesendetN = 0, letzterFehler = '';
+  var workerTicks = 0, workerLetzt = 0, timeouts = [];   // 0.3.1 Diagnose: Worker-Ticks, letzte Panel-Timeouts (ms-Zeitstempel)
 
   function auge() {
     try { return (typeof PROPHOS_AUGEN_TSX !== 'undefined' && PROPHOS_AUGEN_TSX) || globalThis.prophosAugen || null; } catch (_) { return null; }
@@ -126,7 +127,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
       popups: (s.popups || []).length,
       ausgeloggt: aus,
       flach_folge: flachFolge, flach_seit: flachSeit,
-      takt: takt,
+      takt: takt, gesendet_n: gesendetN, worker_ticks: workerTicks, panel_timeouts: timeouts.slice(),   // 0.3.1: von außen sichtbar
       fehler: s.fehler ? s.fehler.slice(0, 4).map(function (f) { return String(f).slice(0, 80); }) : null
     };
   }
@@ -150,16 +151,29 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
       method: 'POST', url: PANEL, timeout: 2000, data: JSON.stringify(paket), headers: { 'Content-Type': 'application/json' },
       onload: function (r) { unterwegs = false; if (r.status === 200) { gesendetN++; fehlerN = 0; letzterFehler = ''; } else { fehlerN++; letzterFehler = 'Panel HTTP ' + r.status; } },
       onerror: function () { unterwegs = false; fehlerN++; letzterFehler = 'Panel nicht erreichbar'; },
-      ontimeout: function () { unterwegs = false; fehlerN++; letzterFehler = 'Panel Timeout'; }
+      ontimeout: function () { unterwegs = false; fehlerN++; letzterFehler = 'Panel Timeout'; timeouts.push(Date.now()); if (timeouts.length > 5) timeouts.shift(); }
     });
   }
 
+  // WORKER-WACHE (0.3.1, PC von Marco 29.10.2026: Stand im Panel 2–6,5 s alt trotz takt 'worker'): new Worker(blob:) wirft bei einer
+  // CSP-Sperre NICHT — der Fehler kommt später als error-Event, getickt hätte dann nur noch der MutationObserver (im Hintergrund selten).
+  // Jetzt: onerror, Anlauf-Wache (kein Worker-Tick in 0,5 s) und Dauer-Wache (Worker > 2 s stumm) → setInterval zusätzlich, takt ehrlich
+  // 'worker-tot'. Doppelte Ticks schaden nicht (ein Request zur Zeit; Prophos verlangt für den Schnellschluss auch ≥ 200 ms Folge).
+  var ersatzAn = false;
+  function workerTot(grund) {
+    if (ersatzAn) return;
+    ersatzAn = true; takt = 'worker-tot'; letzterFehler = 'Worker: ' + grund;
+    setInterval(tick, TAKT_MS);
+  }
   function starteTakt() {
     try {
       var quelle = 'let id=null;onmessage=e=>{if(id)clearInterval(id);id=setInterval(()=>postMessage(0),e.data)}';
       var w = new Worker(URL.createObjectURL(new Blob([quelle], { type: 'text/javascript' })));
-      w.onmessage = tick;
+      w.onmessage = function () { workerTicks++; workerLetzt = Date.now(); tick(); };
+      w.onerror = function () { workerTot('Fehler beim Start (CSP?)'); };
       w.postMessage(TAKT_MS);
+      setTimeout(function () { if (!workerTicks) workerTot('kein Tick in 0,5 s'); }, 500);
+      setInterval(function () { if (workerTicks && Date.now() - workerLetzt > 2000) workerTot('über 2 s stumm'); }, 1000);
       return 'worker';
     } catch (_) {
       setInterval(tick, TAKT_MS);
@@ -167,7 +181,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
     }
   }
 
-  takt = starteTakt();
+  var t0 = starteTakt();
+  if (!ersatzAn) takt = t0;                        // onerror kann nicht vorher feuern (asynchron) — sicher ist sicher
   // MutationObserver (0.2.0): jede DOM-Änderung meldet sofort — höchstens alle MO_ABSTAND_MS, ein Request zur Zeit (tick prüft unterwegs)
   try {
     new MutationObserver(function () { if (Date.now() - letzterTick >= MO_ABSTAND_MS) tick(); })

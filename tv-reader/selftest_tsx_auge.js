@@ -1,4 +1,4 @@
-// Selbsttest TopstepX-Auge 0.3.0 (Lader + Kern, 29.10.2026) — ohne Node, mit JavaScriptCore des Macs:
+// Selbsttest TopstepX-Auge 0.3.x (Lader + Kern, 29.10.2026; 0.3.1 Flach-Folge, Worker-Wache) — ohne Node, mit JavaScriptCore des Macs:
 //   osascript -l JavaScript tv-reader/selftest_tsx_auge.js [pfad/zu/tsx-auge.user.js]
 // Lader-Wege mit nachgebauten GM-Funktionen (kein Netz) und ein echter Lauf des Kerns mit nachgebautem Auge/DOM: Meldung trägt SCRIPT und
 // lader, der Doppellauf-Riegel lässt keinen zweiten Kern in derselben Seite starten.
@@ -58,6 +58,43 @@ check(uw.__prophosTsxKernAn === true, "Kern: setzt den Doppellauf-Riegel");
 var vorher = gesendet.length, iv = intervalle;
 K(gm, function () {}, function () {}, uw, info);
 check(gesendet.length === vorher && intervalle === iv, "Kern: zweiter Start in derselben Seite kehrt sofort um (kein zweiter Takt, keine Meldung)");
+// 0.3.1 Flach-Folge + Diagnose in der Meldung
+check(p && p.stand && p.stand.flach_folge === 1 && typeof p.stand.flach_seit === "number" && p.stand.gesendet_n === 0
+      && p.stand.worker_ticks === 0 && Array.isArray(p.stand.panel_timeouts), "Kern 0.3.1: flach_folge/flach_seit + gesendet_n/worker_ticks/panel_timeouts in der Meldung");
+// 0.3.1 Worker-Wache: Worker ohne Tick (CSP sperrt still) → nach 0,5 s setInterval zusätzlich, takt 'worker-tot'
+var spaeter = [], wInst = null;
+globalThis.setTimeout = function (f) { spaeter.push(f); return 1; };
+globalThis.URL = { createObjectURL: function () { return "blob:x"; } };
+globalThis.Blob = function () {};
+globalThis.Worker = function () { wInst = this; this.postMessage = function () {}; };
+gesendet = []; intervalle = 0;
+var uw2 = {};
+K(function (req) { gesendet.push(req); }, function () {}, function () {}, uw2, info);
+var ivStart = intervalle;
+spaeter.forEach(function (f) { f(); });
+gesendet[0] && gesendet[0].onload && gesendet[0].onload({ status: 200 });
+check(intervalle === ivStart + 1, "Worker-Wache: kein Worker-Tick in 0,5 s → genau ein Ersatz-setInterval");
+// nächste Meldung trägt takt 'worker-tot'
+var K2tick = gesendet.length;
+// eine Meldung erzwingen: Worker-Ereignis simulieren (zählt als Tick, ersetzt aber nichts mehr)
+wInst.onmessage();
+var letzte = gesendet.length > K2tick ? JSON.parse(gesendet[gesendet.length - 1].data) : null;
+check(letzte && letzte.stand.takt === "worker-tot" && letzte.stand.worker_ticks === 1, "Worker-Wache: takt ehrlich 'worker-tot', worker_ticks gezählt");
+// lebender Worker: tickt vor Ablauf der 0,5 s → kein Ersatz
+spaeter = []; gesendet = []; intervalle = 0;
+var uw3 = {};
+K(function (req) { gesendet.push(req); }, function () {}, function () {}, uw3, info);
+var iv3 = intervalle;
+gesendet.length && gesendet[0].onload({ status: 200 });
+wInst.onmessage();
+spaeter.forEach(function (f) { f(); });
+check(intervalle === iv3, "Worker-Wache: Worker tickt → kein Ersatz-Takt");
+// onerror → Ersatz
+spaeter = []; gesendet = []; intervalle = 0;
+K(function (req) { gesendet.push(req); }, function () {}, function () {}, {}, info);
+var iv4 = intervalle;
+wInst.onerror();
+check(intervalle === iv4 + 1, "Worker-Wache: error-Event (CSP) → Ersatz-setInterval");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }
