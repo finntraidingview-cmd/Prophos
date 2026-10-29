@@ -1958,6 +1958,98 @@ def _tab_oeffnen(url=TAB_URL):
         TV_ORDER_LOCK.release()
 
 
+# ══ UPDATE-SCHUTZ (29.10.2026, Master nach dem Befund „Deploy-Welle": fünf Abrisse in zwei Stunden, jeder 1–2 min nach einem Push mit
+# app.py/panel.py — der Neustart riss laufende Puls-/Order-Aufrufe ab, „Ergebnis UNKLAR"). Das Panel sagt per GET /api/beschaeftigt, ob ein
+# Lauf es hält; das lokale app.py (Proxy aller Tab-Aufrufe) und der Versions-Wächter hier starten nur neu, wenn es „frei" ist — gestreut
+# 0–60 s je PC (Jitter-Regel), höchstens UPDATE_DECKEL_S lang vertagt, danach trotzdem (Spur + ⚪ an die Master-IDs über Railway).
+UPDATE_DECKEL_S = 15 * 60
+UPDATE_STREU_S = 60.0
+UPDATE_LEERLAUF_S = 320.0       # Deckel erreicht: zu und höchstens so lange leerlaufen lassen (längster Lauf ~310 s), dann beenden
+# Laufende POST-Aufrufe (Prüfer 29.10.2026: manche Wege tun vor dem Lock Sekunden lang etwas — richtung_frei, tv-fokus, mouse-test …);
+# zu = kurz vor dem Beenden neue POSTs mit 503 „nichts gesendet" ablehnen (wie der Proxy im lokalen app.py). tsx-stand zählt nie.
+_PANEL_POST = {"n": 0, "zu": False}
+_PANEL_POST_LOCK = threading.Lock()
+
+
+def panel_beschaeftigt_gruende():
+    """Was hält das Panel gerade? -> Liste kurzer Gründe ([] = frei). Nur lesen; wirft nie (Fehler = 'unbekannt', also belegt)."""
+    try:
+        g = []
+        if _PANEL_POST["n"] > 0:
+            g.append(f"{_PANEL_POST['n']} laufende(r) Panel-Aufruf(e)")
+        if TV_ORDER_LOCK.locked():
+            g.append("TradingView-/TopstepX-Lauf (TV_ORDER_LOCK)")
+        for f, l in list(MASTER_ORDER_LOCKS.items()):
+            if l.locked():
+                g.append(f"MT5-Order {str(f)[:40]}")
+        if polar_panel and polar_panel.aktiv():
+            g.append("Polar-Lauf")
+        if polar_panel and getattr(polar_panel, "test_aktiv", lambda: False)():
+            g.append("Polar-Maus-Test")
+        if PROV_JOB and not PROV_JOB.get("done"):
+            g.append("Provisionierung")
+        try:
+            if time.time() - os.path.getmtime(os.path.join(HERE, "puls_handlauf.lock")) < 900:
+                g.append("K3-Handlauf")
+        except OSError:
+            pass
+        return g
+    except Exception as e:
+        return [f"unbekannt ({type(e).__name__})"]
+
+
+def update_neustart_entscheiden(gruende, wartet_seit, jetzt, streu_bis, deckel_s=UPDATE_DECKEL_S):
+    """REIN RECHNEND (testbar): darf der Neustart jetzt? -> ('warten' | 'jetzt' | 'erzwingen', grund).
+    Erst nach der Streuzeit (streu_bis), dann nur ohne Gründe; belegt länger als deckel_s seit wartet_seit → 'erzwingen'."""
+    if jetzt < streu_bis:
+        return "warten", f"Streuung noch {int(streu_bis - jetzt)} s"
+    if not gruende:
+        return "jetzt", ""
+    if wartet_seit is not None and jetzt - wartet_seit >= deckel_s:
+        return "erzwingen", "seit " + str(int((jetzt - wartet_seit) // 60)) + " min belegt: " + ", ".join(gruende)[:200]
+    return "warten", "belegt: " + ", ".join(gruende)[:200]
+
+
+def panel_lauf_gruende(gruende):
+    """Teilmenge der Gründe, die ein Neustart des LOKALEN app.py (Proxy) betrifft: laufende Panel-Aufrufe und Order-Sperren. Polar,
+    K3-Handlauf und Provisionierung laufen ohne Proxy weiter (Prüfer 29.10.2026: sonst wartet app.py bei jedem Polar-Trade 15 min)."""
+    return [x for x in (gruende or []) if "Panel-Aufruf" in x or "TV_ORDER_LOCK" in x or x.startswith("MT5-Order") or x.startswith("unbekannt")]
+
+
+def _panel_zu_und_leeren(erzwingen):
+    """Neue POSTs ablehnen, dann prüfen: läuft noch etwas? -> True = darf beenden. Ohne Deckel: läuft etwas → wieder auf, False.
+    Mit Deckel: bis UPDATE_LEERLAUF_S auf das Ende warten (0,5-s-Takt), dann True."""
+    with _PANEL_POST_LOCK:
+        _PANEL_POST["zu"] = True
+    ende = time.time() + (UPDATE_LEERLAUF_S if erzwingen else 0.0)
+    while True:
+        if not panel_lauf_gruende(panel_beschaeftigt_gruende()):
+            return True
+        if time.time() >= ende:
+            if erzwingen:
+                return True
+            with _PANEL_POST_LOCK:
+                _PANEL_POST["zu"] = False
+            return False
+        time.sleep(0.5)
+
+
+def update_spur_melden(wer, von, auf, grund, wartete_s):
+    """Erzwungener Neustart → Railway POST /pc/update-spur (⚪ an die Master-IDs). Wirft nie, blockiert höchstens 5 s."""
+    import urllib.request
+    tok = code_token()
+    if not tok:
+        return
+    try:
+        body = json.dumps({"pc": pc_id_lesen() or "", "wer": wer, "von": str(von)[:30], "auf": str(auf)[:30], "grund": str(grund)[:240],
+                           "wartete_s": int(wartete_s or 0)}).encode("utf-8")
+        req = urllib.request.Request(CODE_QUELLE + "/pc/update-spur", data=body, method="POST",
+                                     headers={"X-Code-Token": tok, "Content-Type": "application/json", "User-Agent": "prophos-panel"})
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print(f"[panel] Update-Spur nicht gemeldet ({type(e).__name__})", flush=True)
+
+
 def _browser_und_mt5_frei(tv_eigen=False):
     """Kein Puls im Browser (TV_ORDER_LOCK) und keine MT5-Order (MASTER_ORDER_LOCKS: Echo-V2 /api/master-order klickt im MT5-Fenster
     F9/Felder/Knopf — Prüfer S2 16.10.2026: holt der Wächter dann Chrome nach vorn, landet der Vordergrund mitten im Order-Dialog).
@@ -3606,12 +3698,31 @@ class Handler(BaseHTTPRequestHandler):
             # Steht eine Windows-Sicherheitsabfrage offen? (23.10.2026, Master: ein Start, der daran scheitert, ist kein Fehlversuch —
             # sfTick im Prophos-Tab plant neu ein, sobald consent.exe weg ist). Nur lesen; ohne Windows/lesbare Liste consent None.
             return self._send(200, json.dumps({"ok": True, "consent": consent_offen()}))
+        if path == "/api/beschaeftigt":
+            # UPDATE-SCHUTZ (29.10.2026): hält ein Lauf das Panel? Fragt das lokale app.py vor seinem Selbst-Neustart. Nur lesen.
+            g = panel_beschaeftigt_gruende()
+            return self._send(200, json.dumps({"ok": True, "frei": not g, "gruende": g, "lauf": panel_lauf_gruende(g)}, ensure_ascii=False))
         if path == "/api/code-token":
             # Liegt der PC-Schlüssel für die Code-Quelle schon da? (07.10.2026) — nur ja/nein, nie der Schlüssel selbst
             return self._send(200, json.dumps({"ok": True, "da": bool(code_token())}))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        # UPDATE-SCHUTZ (29.10.2026): jeden POST außer tsx-stand zählen; kurz vor dem Neustart (zu) sofort 503 „nichts gesendet"
+        if urlparse(self.path).path == "/api/tsx-stand":
+            return self._do_post_innen()
+        with _PANEL_POST_LOCK:
+            if _PANEL_POST["zu"]:
+                return self._send(503, json.dumps({"ok": False, "code": "backend_neustart", "retry_ok": True, "_nichtGesendet": True,
+                    "msg": "Panel startet gerade neu (Update) — nichts gesendet, gleich erneut."}, ensure_ascii=False))
+            _PANEL_POST["n"] += 1
+        try:
+            return self._do_post_innen()
+        finally:
+            with _PANEL_POST_LOCK:
+                _PANEL_POST["n"] -= 1
+
+    def _do_post_innen(self):
         u = urlparse(self.path)
         if u.path == "/api/tsx-stand":
             # TopstepX-Auge (27.10.2026): eigene Herkunfts-Regel (tsx_stand_herkunft_ok — Tampermonkey kommt nicht als localhost), Host
@@ -5310,6 +5421,7 @@ def _version_watcher(my_version):
     neuester = BOT_STAND.get("sha")
     fehl_n = 0
     runde = 0
+    upd = {"auf": None, "streu_bis": 0.0, "seit": None, "gemeldet": "", "code": {}}   # UPDATE-SCHUTZ (29.10.2026)
     while True:
         time.sleep(15)
         runde += 1
@@ -5346,9 +5458,13 @@ def _version_watcher(my_version):
             # neu gestartet, WAEHREND der Puls in TradingView klickte; die Antwort ging
             # verloren, der Bot lief verwaist weiter). Solange der TradingView-Lauf
             # oder eine Master-Order ihre Sperre haelt, wird der Neustart vertagt.
-            if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
+            # UPDATE-SCHUTZ (29.10.2026): die Wartezeit zählt ab dem ersten Sehen dieser VERSION (Deckel unten gilt auch hier)
+            if upd["seit"] is None:       # Wartezeit ab dem ersten anstehenden Update — eine neue VERSION beim Warten setzt sie nicht zurück
+                upd.update(streu_bis=time.time() + random.uniform(0, UPDATE_STREU_S), seit=time.time(), gemeldet="")
+            upd["auf"] = remote
+            if (TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values()))) and time.time() - upd["seit"] < UPDATE_DECKEL_S:
                 continue
-            if polar_panel and polar_panel.aktiv():   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten (Kindprozess bliebe verwaist)
+            if polar_panel and polar_panel.aktiv() and time.time() - upd["seit"] < UPDATE_DECKEL_S:   # POLAR (13.10.2026): nie mitten im Polar-Trade neu starten (Kindprozess bliebe verwaist)
                 continue
             # NUR neu starten, wenn sich das PANEL selbst geaendert hat (23.09.2026, Finns
             # Nacht: 12 Frontend-Commits in 100 min, jeder mit VERSION-Bump, jeder ein
@@ -5359,13 +5475,36 @@ def _version_watcher(my_version):
             # der neueste Commit; ist panel.py/provision.py dort gleich dem laufenden
             # Code, bringt ein Neustart nichts — nur die VERSION-Datei nachziehen, damit
             # der Chip stimmt. order_bot.py ist ohnehin schon per Hot-Swap frisch.
-            if not _panel_code_geaendert(neuester):
+            if neuester not in upd["code"]:   # je Stand nur einmal holen (Prüfer: sonst panel.py+provision.py bei jedem Warte-Takt)
+                upd["code"] = {neuester: _panel_code_geaendert(neuester)}
+            if not upd["code"][neuester]:
                 _version_uebernehmen(remote)
                 print(f"[panel] Update {my_version} → {remote}: Panel-Code unveraendert — kein Neustart.", flush=True)
                 my_version = remote
+                upd.update(auf=None, seit=None, gemeldet="")
                 continue
-            print(f"[panel] Update {my_version} → {remote} — Neustart durch start-panel.bat.", flush=True)
-            os._exit(0)
+            # UPDATE-SCHUTZ (29.10.2026, Befund Deploy-Welle): zwischen der Sperrprüfung oben und hier lagen bis zu 20 s (zwei Abrufe in
+            # _panel_code_geaendert) — ein Lauf, der genau dann begann, starb mit. Jetzt: gestreut 0–60 s je PC, dann DIREKT vor dem Beenden
+            # noch einmal alle Gründe (panel_beschaeftigt_gruende), belegt → 30 s vertagen; nach UPDATE_DECKEL_S trotzdem (Spur + ⚪).
+            entsch, grund = update_neustart_entscheiden(panel_beschaeftigt_gruende(), upd["seit"], time.time(), upd["streu_bis"])
+            if entsch == "warten":
+                if grund != upd["gemeldet"] and not grund.startswith("Streuung"):
+                    print(f"[panel] Update {my_version} → {remote} wartet — {grund}", flush=True)
+                upd["gemeldet"] = grund
+                time.sleep(random.uniform(0, 15))   # mit den 15 s oben ≈ alle 15–30 s neu prüfen
+                continue
+            # zu (neue POSTs → 503 „nichts gesendet") und nachprüfen; mit Deckel bis UPDATE_LEERLAUF_S leerlaufen lassen statt abzureißen
+            if not _panel_zu_und_leeren(entsch == "erzwingen"):
+                continue
+            try:
+                rest = panel_lauf_gruende(panel_beschaeftigt_gruende())
+                if entsch == "erzwingen":
+                    print(f"[panel] Update {my_version} → {remote}: Deckel {UPDATE_DECKEL_S // 60} min — Neustart ({grund})", flush=True)
+                    if rest:   # nur wenn wirklich noch etwas lief, kann etwas abgerissen sein
+                        update_spur_melden("panel", my_version, remote, ", ".join(rest)[:200], time.time() - upd["seit"])
+                print(f"[panel] Update {my_version} → {remote} — Neustart durch start-panel.bat.", flush=True)
+            finally:
+                os._exit(0)
 
 
 def _selbst_auffrischen():

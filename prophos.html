@@ -27868,7 +27868,7 @@
   // Fenster des Copiers nach dem Selbst-Update): kein Auftrag geschrieben (copier_alt), Panel pausiert (retry_ok true), Panel
   // nicht erreicht ohne cmd_id (verbindung). Nur diese werden wiederholt / per Knopf bzw. Selbstheilung erneut geöffnet.
   // positionen_unlesbar (Copier-Riegel .556): Konto vor dem Senden nicht lesbar → nichts gesendet, retry_ok true
-  const HEDGE_SICHER = new Set(['copier_alt', 'pausiert', 'verbindung', 'positionen_unlesbar'])
+  const HEDGE_SICHER = new Set(['copier_alt', 'pausiert', 'verbindung', 'positionen_unlesbar', 'backend_neustart'])   // backend_neustart (29.10.2026): Proxy/Panel startet neu, beweisbar nichts weitergereicht
   const hedgeFehlerSicher = x => !!(x && HEDGE_SICHER.has(x.code) && x.retry_ok !== false && !(x.code === 'verbindung' && x.cmd_id))
   // Position dieses Plans im frischen hedge_solo (Copier b30d580: plan_id, sonst plan8 aus 'PXsolo:<plan8>')
   function hedgeSoloEigen(plan){

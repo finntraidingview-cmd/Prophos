@@ -480,6 +480,15 @@ def ma_proxy(path):
 # unberuehrt; das hier ist die parallele Schnittstelle zum eigenen Copier.
 COPIER_PANEL = "http://127.0.0.1:8770"
 
+# UPDATE-SCHUTZ (29.10.2026, Befund „Deploy-Welle": fünf Abrisse in zwei Stunden — jeder 1–2 min nach einem Push mit app.py; der lokale
+# Selbst-Neustart (_local_version_watcher) beendete diesen Prozess per os._exit mitten in einem /copier-Aufruf, der Bot lief im Panel
+# weiter und klickte, nur die Antwort war weg → „Ergebnis UNKLAR"). Jeder Proxy-Aufruf zählt hier mit; der Watcher startet nur bei 0 und
+# wenn das Panel „frei" meldet. Kurz vor dem Beenden schließt er den Proxy (zu): neue Aufrufe bekommen sofort 503 „nichts gesendet" statt
+# mitten im Lauf abzureißen.
+_PROXY = {"n": 0, "zu": False}
+_PROXY_LOCK = threading.Lock()
+
+
 @app.route("/copier/<path:path>", methods=["GET","POST","OPTIONS"])
 def copier_proxy(path):
     if request.method == "OPTIONS": return "", 200
@@ -494,6 +503,20 @@ def copier_proxy(path):
     if request.remote_addr not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
         return jsonify({"ok": False, "copier_offline": True,
                         "error": "Copier ist nur lokal auf dem PC selbst erreichbar."}), 403
+    with _PROXY_LOCK:
+        if _PROXY["zu"]:
+            # _nichtGesendet: beweisbar nichts weitergereicht — der Tab wertet es wie „lokales Backend weg" (kein UNKLAR, später erneut)
+            return jsonify({"ok": False, "copier_offline": True, "_httpFail": True, "code": "backend_neustart", "retry_ok": True, "_nichtGesendet": True,
+                            "error": "Prophos-Backend startet gerade neu (Update) — nichts gesendet, gleich erneut."}), 503
+        _PROXY["n"] += 1
+    try:
+        return _copier_proxy_lauf(path)
+    finally:
+        with _PROXY_LOCK:
+            _PROXY["n"] -= 1
+
+
+def _copier_proxy_lauf(path):
     h = {"Content-Type": "application/json"}
     origin = request.headers.get("Origin")
     if origin: h["Origin"] = origin
@@ -4036,6 +4059,39 @@ def _tm_melde_frei(key):
     if frei:
         _TM_GEMELDET[key] = jetzt
     return frei
+
+
+_UPDATE_SPUR_MERK = {}
+
+
+@app.route("/pc/update-spur", methods=["POST"])
+def pc_update_spur():
+    """UPDATE-SCHUTZ (29.10.2026): ein PC meldet, dass sein Panel bzw. lokales Backend nach dem 15-min-Deckel TROTZ laufendem Lauf neu
+    gestartet ist → ⚪ an die Master-IDs (nur Hermann-Technologies-IDs, je PC × Teil höchstens 1× je Stunde). Header X-Code-Token (Feed-
+    Schlüssel des PCs wie /code/…); vom PC nur kurze Felder."""
+    wer = _code_zugang()                         # Feed-Schlüssel wie /code/… inkl. CODE_SPERRE
+    if not wer:
+        return jsonify({"ok": False, "error": "kein gültiger Schlüssel"}), 403
+    uid = str(wer[0])
+    d = request.get_json(silent=True) or {}
+    kurz = lambda k, n: re.sub(r"\s+", " ", str(d.get(k) or ""))[:n]   # noqa: E731
+    pc = str(wer[1] or "")[:20]                  # PC aus dem Schlüssel, nie aus dem Body (Drossel nicht umgehbar)
+    teil = "Panel" if kurz("wer", 10) == "panel" else "Backend (app.py)"
+    namen, aus = _ap_namen()
+    if uid in aus or _alarm_fremd_verwaltet(uid):
+        return jsonify({"ok": True})
+    key = f"{pc}|{teil}"
+    if time.time() - _UPDATE_SPUR_MERK.get(key, 0) < 3600:
+        return jsonify({"ok": True, "gedrosselt": True})
+    _UPDATE_SPUR_MERK[key] = time.time()
+    w0 = _wd_num(d.get("wartete_s"))
+    wartete = int(min(max(w0, 0), 86400)) if (w0 is not None and w0 == w0 and abs(w0) != float("inf")) else 0
+    wer_txt = f"{namen.get(uid, uid[:8])}" + (f" · {pc}" if pc else "")
+    alarm_senden(3, "update_erzwungen", f"Update erzwungen: {wer_txt}",
+                 f"{wer_txt}: {teil} {kurz('von', 30)} → {kurz('auf', 30)} nach {wartete // 60} min Warten trotzdem neu gestartet — "
+                 f"{kurz('grund', 240)}. Ein laufender Lauf kann abgerissen sein: Pläne dieses PCs ansehen.",
+                 uid=uid, daten={"pc": pc, "teil": teil, "grund": kurz("grund", 240), "wartete_s": wartete}, schluessel=f"update|{key}")
+    return jsonify({"ok": True})
 
 
 @app.route("/alarm/stand", methods=["GET", "POST", "OPTIONS"])
@@ -32776,6 +32832,64 @@ def _local_code_geaendert():
     except Exception:
         return True
 
+LOCAL_UPDATE_DECKEL_S = 15 * 60
+LOCAL_UPDATE_LEERLAUF_S = 320.0   # Deckel: Proxy zu und laufende Aufrufe höchstens so lange zu Ende laufen lassen (Proxy-Maximum 310 s)
+
+
+def local_update_entscheiden(proxy_n, panel_gruende, wartet_seit, jetzt, streu_bis, deckel_s=LOCAL_UPDATE_DECKEL_S):
+    """REIN RECHNEND (testbar): darf das lokale Backend jetzt für ein Update neu starten? -> ('warten' | 'jetzt' | 'erzwingen', grund).
+    panel_gruende: Liste aus GET /api/beschaeftigt ([] = frei); None = Panel nicht erreichbar/ohne Route (dann zählt nur der Proxy)."""
+    if jetzt < streu_bis:
+        return "warten", f"Streuung noch {int(streu_bis - jetzt)} s"
+    gruende = ([f"{proxy_n} laufende(r) Copier-Aufruf(e)"] if proxy_n > 0 else []) + list(panel_gruende or [])
+    if not gruende:
+        return "jetzt", ""
+    if wartet_seit is not None and jetzt - wartet_seit >= deckel_s:
+        return "erzwingen", f"seit {int((jetzt - wartet_seit) // 60)} min belegt: " + ", ".join(gruende)[:200]
+    return "warten", "belegt: " + ", ".join(gruende)[:200]
+
+
+def _local_panel_gruende():
+    """GET /api/beschaeftigt des Panels → nur die Gründe, die ein Neustart DIESES Prozesses betrifft (lauf: laufende Panel-Aufrufe, Order-
+    Sperren; [] = frei). None = Panel aus (Connection refused) oder alt (404) — dann hält es auch keinen Lauf über uns. Zeitüberschreitung/
+    andere Antwort = unklar → belegt (Prüfer 29.10.2026)."""
+    try:
+        r = requests.get(f"{COPIER_PANEL}/api/beschaeftigt", timeout=5)
+    except requests.exceptions.ConnectionError:
+        return None
+    except Exception as e:
+        return [f"Panel antwortet nicht eindeutig ({type(e).__name__})"]
+    if r.status_code == 404:
+        return None
+    try:
+        d = r.json() if r.status_code == 200 else None
+    except ValueError:
+        d = None
+    if not isinstance(d, dict):
+        return [f"Panel antwortet nicht eindeutig (HTTP {r.status_code})"]
+    lauf = d.get("lauf") if isinstance(d.get("lauf"), list) else (d.get("gruende") or [])
+    return [str(x)[:80] for x in lauf]
+
+
+def _local_update_spur(von, auf, grund, wartete_s):
+    """Erzwungener Neustart → Railway POST /pc/update-spur (⚪ an die Master-IDs). Wirft nie."""
+    tok = _code_token_lokal()
+    if not tok:
+        return
+    pc = ""
+    try:
+        r = requests.get(f"{COPIER_PANEL}/api/pc-id", timeout=3)
+        pc = str((r.json() or {}).get("pc_id") or "") if r.ok else ""
+    except Exception:
+        pass
+    try:
+        requests.post(CODE_QUELLE + "/pc/update-spur", headers={"X-Code-Token": tok}, timeout=5,
+                      json={"pc": pc, "wer": "backend", "von": str(von)[:30], "auf": str(auf)[:30], "grund": str(grund)[:240],
+                            "wartete_s": int(wartete_s or 0)})
+    except Exception as e:
+        print(f"[update] Spur nicht gemeldet ({type(e).__name__})")
+
+
 def _local_version_watcher():
     # Boot-Baseline EINMAL holen. Schlägt das fehl (kein Netz beim Start),
     # bleibt der Watcher komplett inaktiv — ein Vergleich gegen None würde
@@ -32787,10 +32901,13 @@ def _local_version_watcher():
               "inaktiv (nächster .bat-Durchlauf holt trotzdem frische Dateien).")
         return
     waiting_logged = False
+    upd = {"auf": None, "seit": None, "streu_bis": 0.0, "gemeldet": "", "kurz": False, "code": {}}   # UPDATE-SCHUTZ (29.10.2026)
     while True:
-        time.sleep(60)
+        time.sleep(random.uniform(5, 10) if upd["kurz"] else 60)   # wartet ein Update auf einen freien Moment: öfter schauen
+        upd["kurz"] = False
         rv = _local_fetch_version()
         if rv is None or rv == baseline:
+            upd.update(auf=None, seit=None)
             continue
         # NUR neu starten, wenn app.py sich geaendert hat (23.09.2026, Finns Nacht: 12
         # Frontend-Commits in 100 min, jeder VERSION-Bump ein Backend-Neustart — und
@@ -32798,9 +32915,12 @@ def _local_version_watcher():
         # meldete 'copier-offline' und claimte kein Remote-Signal: "Puls ist langsam").
         # Das Frontend kommt ohnehin live von pages.dev, dafuer braucht es keinen
         # Neustart. Gleicher Code → nur die Baseline nachziehen.
-        if not _local_code_geaendert():
+        if rv not in upd["code"]:            # je Stand nur EINMAL app.py (2 MB) von Railway holen (Prüfer 29.10.2026)
+            upd["code"] = {rv: _local_code_geaendert()}
+        if not upd["code"][rv]:
             print(f"[update] {baseline} → {rv}: app.py unveraendert — kein Neustart noetig.")
             baseline = rv
+            upd.update(auf=None, seit=None)
             continue
         # Update da. Exit NUR, wenn keine Mirror-Session scharf ist — ein
         # os._exit mitten im Spiegeln hieße: offene Position ohne Hedge-Pflege
@@ -32818,11 +32938,41 @@ def _local_version_watcher():
                 print(f"[update] ↻ {baseline} → {rv} verfügbar — Update wartet, "
                       f"bis keine Mirror-Position mehr offen ist ({', '.join(str(p) for p in armed)}).")
             continue
-        print(f"[update] ↻ {baseline} → {rv} — keine Position offen, beende Prozess "
-              f"(start-prophos.bat lädt die neuen Dateien und startet neu; scharfe "
-              f"Echtzeit-Pairs kommen aus der Sidecar-Datei von selbst zurück).")
-        _sessions_save()
-        os._exit(0)
+        # UPDATE-SCHUTZ (29.10.2026): gestreut 0–60 s je PC, dann nur ohne laufenden /copier-Aufruf und mit freiem Panel
+        # (GET /api/beschaeftigt); belegt → vertagen, nach LOCAL_UPDATE_DECKEL_S trotzdem (Spur + ⚪ über Railway /pc/update-spur)
+        if upd["seit"] is None:                  # Wartezeit ab dem ersten anstehenden Update — eine neue VERSION setzt sie nicht zurück
+            upd.update(seit=time.time(), streu_bis=time.time() + random.uniform(0, 60.0), gemeldet="")
+        upd["auf"] = rv
+        entsch, grund = local_update_entscheiden(_PROXY["n"], _local_panel_gruende(), upd["seit"], time.time(), upd["streu_bis"])
+        if entsch == "warten":
+            if grund != upd["gemeldet"] and not grund.startswith("Streuung"):
+                print(f"[update] ↻ {baseline} → {rv} wartet — {grund}")
+            upd.update(gemeldet=grund, kurz=True)
+            continue
+        with _PROXY_LOCK:
+            _PROXY["zu"] = True                    # ab hier keine neuen Aufrufe mehr (503 „nichts gesendet")
+            noch = _PROXY["n"]
+        if noch and entsch != "erzwingen":         # in der Lücke zwischen Prüfung und Schließen kam einer rein → wieder auf, warten
+            with _PROXY_LOCK:
+                _PROXY["zu"] = False
+            upd["kurz"] = True
+            continue
+        try:
+            if entsch == "erzwingen":
+                # Deckel: nicht abreißen — der Proxy ist zu, laufende Aufrufe bis LOCAL_UPDATE_LEERLAUF_S zu Ende laufen lassen
+                ende = time.time() + LOCAL_UPDATE_LEERLAUF_S
+                while _PROXY["n"] > 0 and time.time() < ende:
+                    time.sleep(0.5)
+                print(f"[update] ↻ {baseline} → {rv}: Deckel {LOCAL_UPDATE_DECKEL_S // 60} min — Neustart ({grund})")
+                if _PROXY["n"] > 0:                # nur wenn wirklich noch ein Aufruf lief, kann etwas abgerissen sein
+                    _local_update_spur(baseline, rv, f"{_PROXY['n']} Copier-Aufruf(e) noch offen nach {int(LOCAL_UPDATE_LEERLAUF_S)} s",
+                                       time.time() - upd["seit"])
+            print(f"[update] ↻ {baseline} → {rv} — keine Position offen, beende Prozess "
+                  f"(start-prophos.bat lädt die neuen Dateien und startet neu; scharfe "
+                  f"Echtzeit-Pairs kommen aus der Sidecar-Datei von selbst zurück).")
+            _sessions_save()
+        finally:
+            os._exit(0)                            # nie mit geschlossenem Proxy weiterleben (Prüfer 29.10.2026)
 
 def _local_port_taken(port):
     # Doppelstart-Schutz (15.08.2026, nur Lokal-Modus): lauscht schon jemand auf
