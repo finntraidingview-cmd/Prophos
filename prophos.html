@@ -36415,7 +36415,7 @@
           const sp = wdlSpanne(t), pkt = wdlEchoPunkt(t, sp), P = wdlEchoPl(t)
           miZ = sp ? wdlSpanneHtml(sp, pkt ? pkt.v : null, P.farbe, wdlEchoSpTip(t, sp, pkt))
             : zelle('mi', '–', { tip: t.position_offen ? 'SL oder TP fehlt an der MT5-Position' : 'keine frische MT5-Position' })
-          plZ = zelle('pl', `<span class="wdl-pl-m" style="color:${P.farbe}">${P.txt}</span>${fusionLiveZ(t)}`, { tip: P.tip })
+          plZ = zelle('pl', `<span class="wdl-pl-m" style="color:${P.farbe}">${escapeHtml(P.txt)}</span>${fusionLiveZ(t)}`, { tip: P.tip })   // pl_grund kommt vom Backend (S2 30.10.2026)
         } else {
         const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L (F28); der 2-s-Takt schreibt denselben Text nach
         const sp = wdlSpanne(t)
@@ -51459,7 +51459,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1882'
+  const OS_TAB_BUILD = '2026-09-22.1883'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
