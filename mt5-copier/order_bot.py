@@ -1053,23 +1053,23 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # ═══════════════════════════════════════════════════════════════════════════
 # PULS-FEHLERFOTO (29.10.2026, Finn: „Wenn Fehler kommt, immer mit Screenshots arbeiten, ist eine gute Idee. Kannst einfach direkt schon
 # bauen."). Endet ein Lauf mit ok false, bekommt seine JSON-Antwort das Feld „fehlerbild" (<pc>/<JJJJ-MM-TT>/<id>) und ein ENTKOPPELTER
-# Prozess (Muster augen_anstossen) fotografiert den ganzen Bildschirm (PowerShell + System.Drawing, ohne pip — fängt MT5-/Windows-Dialoge
-# wie consent.exe) und bei TradingView-/TopstepX-Läufen zusätzlich den Tab im Puls-Chrome (CDP Page.captureScreenshot). Hochgeladen wird
+# Prozess (Muster augen_anstossen) fotografiert den ganzen Bildschirm (seit 29.10.2026 GDI per ctypes → PNG, ohne PowerShell und ohne pip —
+# fängt MT5-/Windows-Dialoge wie consent.exe) und bei TradingView-/TopstepX-Läufen zusätzlich den Tab im Puls-Chrome (CDP
+# Page.captureScreenshot, JPEG). Hochgeladen wird
 # über Railway POST /puls-fehlerbild/<pc> (der Bot hat keinen Supabase-Schlüssel) in den privaten Bucket puls-fehlerbilder.
 # Nie im Klick-/Order-Pfad: die Hülle greift erst an der fertigen Antwort (letzte JSON-Zeile), der Lauf wartet nicht auf das Foto.
 # Fehler beim Foto werden geschluckt (Zeile in fehlerfoto.log neben dem Bot). Deckel: dasselbe (Weg, Code) höchstens alle 10 min, je PC
 # höchstens FEHLERFOTO_STUNDE Fotos je Stunde; „belegt"-Antworten (Puls/Polar beschäftigt, kaputter Befehl) nie.
 # Spur (Master 29.10.2026: „damit wir sehen, ob es auf den PCs läuft"): die Antwort trägt in trail „Fehlerfoto angestoßen → <pfad>" bzw.
 # „kein Fehlerfoto: <grund>"; je Foto meldet Railway das Ergebnis in puls_fehlerbild_log („bildschirm 143 KB" bzw. der Grund, warum keins —
-# PowerShell-Fehler, kein Puls-Chrome-Tab, Puls läuft wieder). Läuft schon der nächste Puls-Lauf (Handlauf-Sperre eines anderen
+# GDI-Fehler, Bild zu groß, kein Puls-Chrome-Tab, Puls läuft wieder). Läuft schon der nächste Puls-Lauf (Handlauf-Sperre eines anderen
 # Prozesses), wird nicht fotografiert — nie ein Foto mitten in einen Login.
 # ═══════════════════════════════════════════════════════════════════════════
 FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "loginok", "tvfokus"})
 FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl"})
 FEHLERFOTO_GLEICH_S = 600.0
 FEHLERFOTO_STUNDE = 12
-FEHLERFOTO_BREITE = 1600
-FEHLERFOTO_QUALITAET = 60
+FEHLERFOTO_QUALITAET = 60   # nur noch das CDP-Tab-Foto (JPEG)
 FEHLERFOTO_MAX = 400 * 1024
 _FEHLERFOTO_HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -1235,34 +1235,122 @@ def fehlerfoto_huelle_einbauen(argv1):
         pass
 
 
-FEHLERFOTO_PS = r"""
-$ErrorActionPreference='Stop'
-Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name P -Namespace FF
-[void][FF.P]::SetProcessDPIAware()
-Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-$b=[System.Windows.Forms.SystemInformation]::VirtualScreen
-$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
-$g=[System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size)
-$f=[Math]::Min(1.0,__BREITE__/$b.Width)
-$w=[int]($b.Width*$f);$h=[int]($b.Height*$f)
-$k=New-Object System.Drawing.Bitmap $w,$h
-$g2=[System.Drawing.Graphics]::FromImage($k)
-$g2.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-$g2.DrawImage($bmp,0,0,$w,$h)
-$enc=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{$_.MimeType -eq 'image/jpeg'}
-$p=New-Object System.Drawing.Imaging.EncoderParameters 1
-$p.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality),[long]__QUALITAET__
-$k.Save('__PFAD__',$enc,$p)
-"""
+# BILDSCHIRM OHNE POWERSHELL (29.10.2026, Live-Befund .1853: 0/5 Bildschirmfotos — Windows Defender/AMSI blockte das CopyFromScreen-Skript
+# als ScriptContainedMaliciousContent; Tab-Fotos über CDP 5/5). Jetzt reines Python: GDI per ctypes (BitBlt des ganzen virtuellen
+# Bildschirms, DPI-bewusst), Verkleinern und PNG aus der Standardbibliothek (zlib) — kein Skript, keine Ausnahme, kein pip. Zu groß für die
+# Route (FEHLERFOTO_MAX) → stufenweise 256 Farben (3-3-2-Palette) und kleiner (FEHLERFOTO_STUFEN).
+FEHLERFOTO_STUFEN = ((1600, "rgb"), (1600, "p332"), (1200, "p332"), (900, "p332"))
 
 
-def fehlerfoto_ps_skript(pfad, breite=FEHLERFOTO_BREITE, qualitaet=FEHLERFOTO_QUALITAET):
-    """REIN RECHNEND (testbar): PowerShell-Skript für das Bildschirmfoto (Pfad ohne einfaches Anführungszeichen, sonst ValueError)."""
-    p = str(pfad)
-    if "'" in p or "\n" in p:
-        raise ValueError("Pfad ungeeignet")
-    return FEHLERFOTO_PS.replace("__BREITE__", str(int(breite))).replace("__QUALITAET__", str(int(qualitaet))).replace("__PFAD__", p)
+def fehlerfoto_skalieren(bgra, w, h, ziel_w):
+    """REIN RECHNEND (testbar): BGRA (oben→unten, 4 Byte je Punkt) → (RGB-Bytes, tw, th), nächster Nachbar, nie größer als das Original.
+    Je Zeile drei C-Zugriffe (itemgetter) statt einer Python-Schleife je Punkt — 1600 × 900 in unter einer Sekunde."""
+    import operator
+    tw = max(1, min(int(w), int(ziel_w)))
+    th = max(1, round(h * tw / w))
+    spalten = [min(w - 1, int(x * w / tw)) for x in range(tw)]
+    hole = operator.itemgetter(*spalten) if tw > 1 else (lambda s: (s[spalten[0]],))
+    mv, out = memoryview(bgra), bytearray(tw * th * 3)
+    for y in range(th):
+        sy = min(h - 1, int(y * h / th))
+        zeile = bytes(mv[sy * w * 4:(sy + 1) * w * 4])
+        o = y * tw * 3
+        out[o + 2:o + tw * 3:3] = bytes(hole(zeile[0::4]))   # B
+        out[o + 1:o + tw * 3:3] = bytes(hole(zeile[1::4]))   # G
+        out[o:o + tw * 3:3] = bytes(hole(zeile[2::4]))       # R
+    return bytes(out), tw, th
+
+
+_P332_R = bytes(v & 0xE0 for v in range(256))
+_P332_G = bytes((v & 0xE0) >> 3 for v in range(256))
+_P332_B = bytes(v >> 6 for v in range(256))
+
+
+def fehlerfoto_palette332(rgb):
+    """REIN RECHNEND (testbar): RGB-Bytes → Palettenindex je Punkt (3 Bit Rot, 3 Bit Grün, 2 Bit Blau). Bitfelder überschneiden sich nicht,
+    darum ist ODER = Summe; translate + map(or_) laufen in C."""
+    import operator
+    r, g, b = rgb[0::3].translate(_P332_R), rgb[1::3].translate(_P332_G), rgb[2::3].translate(_P332_B)
+    return bytes(map(operator.or_, map(operator.or_, r, g), b))
+
+
+def fehlerfoto_png(daten, w, h, art):
+    """REIN RECHNEND (testbar): PNG (8 Bit, ohne Zeilenfilter) aus RGB-Bytes (art 'rgb') bzw. 3-3-2-Indizes (art 'p332', mit PLTE)."""
+    import struct
+    import zlib
+
+    def stueck(typ, inhalt):
+        return struct.pack(">I", len(inhalt)) + typ + inhalt + struct.pack(">I", zlib.crc32(typ + inhalt) & 0xFFFFFFFF)
+    bpp = 3 if art == "rgb" else 1
+    if len(daten) != w * h * bpp:
+        raise ValueError("Datenlänge passt nicht zu Breite × Höhe")
+    roh = b"".join(b"\x00" + daten[y * w * bpp:(y + 1) * w * bpp] for y in range(h))
+    kopf = stueck(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2 if art == "rgb" else 3, 0, 0, 0))
+    plte = b"" if art == "rgb" else stueck(b"PLTE", bytes(c for i in range(256) for c in
+                                                       ((i >> 5) * 255 // 7, ((i >> 2) & 7) * 255 // 7, (i & 3) * 255 // 3)))
+    return b"\x89PNG\r\n\x1a\n" + kopf + plte + stueck(b"IDAT", zlib.compress(roh, 6)) + stueck(b"IEND", b"")
+
+
+def fehlerfoto_png_unter(bgra, w, h, max_bytes=None, stufen=FEHLERFOTO_STUFEN):
+    """REIN RECHNEND (testbar): erste Stufe (Breite, Farben), deren PNG ≤ max_bytes ist. -> (png, 'B×H rgb|p332') oder ValueError."""
+    grenze = FEHLERFOTO_MAX if max_bytes is None else max_bytes
+    for ziel_w, art in stufen:
+        rgb, tw, th = fehlerfoto_skalieren(bgra, w, h, ziel_w)
+        png = fehlerfoto_png(rgb if art == "rgb" else fehlerfoto_palette332(rgb), tw, th, art)
+        if len(png) <= grenze:
+            return png, f"{tw}×{th} {art}"
+    raise ValueError(f"PNG auch in der kleinsten Stufe über {grenze // 1024} KB")
+
+
+def _fehlerfoto_gdi():
+    """Ganzer virtueller Bildschirm per GDI (BitBlt + GetDIBits, 32 Bit oben→unten), DPI-bewusst. Eigene WinDLL-Objekte mit argtypes/restype
+    (64-Bit-Handles), damit die gemeinsamen ctypes.windll-Funktionen des Bots unberührt bleiben. -> (bgra, w, h)"""
+    import ctypes
+    from ctypes import wintypes as wt
+    u32, g32 = ctypes.WinDLL("user32"), ctypes.WinDLL("gdi32")
+    for f, arg, res in ((u32.GetSystemMetrics, [ctypes.c_int], ctypes.c_int), (u32.GetDC, [wt.HWND], wt.HDC),
+                        (u32.ReleaseDC, [wt.HWND, wt.HDC], ctypes.c_int), (g32.CreateCompatibleDC, [wt.HDC], wt.HDC),
+                        (g32.CreateCompatibleBitmap, [wt.HDC, ctypes.c_int, ctypes.c_int], wt.HBITMAP),
+                        (g32.SelectObject, [wt.HDC, wt.HGDIOBJ], wt.HGDIOBJ), (g32.DeleteObject, [wt.HGDIOBJ], wt.BOOL),
+                        (g32.DeleteDC, [wt.HDC], wt.BOOL),
+                        (g32.BitBlt, [wt.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.HDC, ctypes.c_int, ctypes.c_int, wt.DWORD], wt.BOOL),
+                        (g32.GetDIBits, [wt.HDC, wt.HBITMAP, wt.UINT, wt.UINT, ctypes.c_void_p, ctypes.c_void_p, wt.UINT], ctypes.c_int)):
+        f.argtypes, f.restype = arg, res
+    try:
+        ctypes.WinDLL("user32").SetProcessDPIAware()
+    except Exception:
+        pass
+    x, y, w, h = (u32.GetSystemMetrics(i) for i in (76, 77, 78, 79))   # SM_X/Y/CX/CYVIRTUALSCREEN
+    if w <= 0 or h <= 0:
+        raise RuntimeError(f"Bildschirmgröße unbekannt ({w}×{h})")
+
+    class _BIH(ctypes.Structure):
+        _fields_ = [("biSize", wt.DWORD), ("biWidth", wt.LONG), ("biHeight", wt.LONG), ("biPlanes", wt.WORD), ("biBitCount", wt.WORD),
+                    ("biCompression", wt.DWORD), ("biSizeImage", wt.DWORD), ("biXPelsPerMeter", wt.LONG), ("biYPelsPerMeter", wt.LONG),
+                    ("biClrUsed", wt.DWORD), ("biClrImportant", wt.DWORD)]
+    hdc = u32.GetDC(None)
+    if not hdc:
+        raise RuntimeError("GetDC gescheitert (keine Desktop-Sitzung?)")
+    mdc, bmp = g32.CreateCompatibleDC(hdc), g32.CreateCompatibleBitmap(hdc, w, h)
+    try:
+        if not mdc or not bmp:
+            raise RuntimeError("GDI-Speicher nicht angelegt")
+        alt = g32.SelectObject(mdc, bmp)
+        ok = g32.BitBlt(mdc, 0, 0, w, h, hdc, x, y, 0x00CC0020 | 0x40000000)   # SRCCOPY | CAPTUREBLT (auch überlagerte Fenster)
+        g32.SelectObject(mdc, alt)                                              # GetDIBits nur mit nicht ausgewählter Bitmap
+        if not ok:
+            raise RuntimeError("BitBlt gescheitert")
+        bi = _BIH(ctypes.sizeof(_BIH), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)            # negative Höhe = oben→unten, BI_RGB
+        puf = ctypes.create_string_buffer(w * h * 4)
+        if g32.GetDIBits(mdc, bmp, 0, h, puf, ctypes.byref(bi), 0) != h:
+            raise RuntimeError("GetDIBits las nicht alle Zeilen")
+        return puf.raw, w, h
+    finally:
+        if bmp:
+            g32.DeleteObject(bmp)
+        if mdc:
+            g32.DeleteDC(mdc)
+        u32.ReleaseDC(None, hdc)
 
 
 def _fehlerfoto_status(pc, bid, art, grund):
@@ -1286,31 +1374,18 @@ def fehlerfoto_handlauf_frei(inhalt, eltern_pid, frisch):
 
 def _fehlerfoto_hochladen(pc, bid, art, roh):
     import urllib.request
+    typ = "image/png" if roh.startswith(b"\x89PNG") else "image/jpeg"
     req = urllib.request.Request(f"{PULS_BACKEND}/puls-fehlerbild/{pc}?id={bid}&art={art}", data=roh, method="POST",
-                                 headers={"Content-Type": "image/jpeg"})
+                                 headers={"Content-Type": typ})
     urllib.request.urlopen(req, timeout=20).read()
 
 
 def _fehlerfoto_bildschirm(pc, bid):
-    import subprocess
-    import tempfile
-    pfad = os.path.join(tempfile.gettempdir(), f"prophos-fehlerfoto-{bid}.jpg")
-    try:
-        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", fehlerfoto_ps_skript(pfad)],
-                           capture_output=True, text=True, timeout=25, creationflags=0x08000000)
-        if r.returncode != 0 or not os.path.exists(pfad):
-            raise RuntimeError(f"PowerShell {r.returncode}: {(r.stderr or '').strip()[-160:]}")
-        with open(pfad, "rb") as f:
-            roh = f.read()
-        if not roh.startswith(b"\xff\xd8\xff") or len(roh) > FEHLERFOTO_MAX:
-            raise RuntimeError(f"Bild unbrauchbar ({len(roh)} Bytes)")
-        _fehlerfoto_hochladen(pc, bid, "bildschirm", roh)
-        return len(roh)
-    finally:
-        try:
-            os.remove(pfad)
-        except OSError:
-            pass
+    """Bildschirm per GDI (ohne PowerShell, 29.10.2026) → PNG ≤ FEHLERFOTO_MAX → hochladen. -> Bytes"""
+    bgra, w, h = _fehlerfoto_gdi()
+    png, _stufe = fehlerfoto_png_unter(bgra, w, h)
+    _fehlerfoto_hochladen(pc, bid, "bildschirm", png)
+    return len(png)
 
 
 def _fehlerfoto_tab(pc, bid, tab):

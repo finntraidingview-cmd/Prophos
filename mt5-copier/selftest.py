@@ -10430,14 +10430,52 @@ def test_puls_fehlerfoto():
     i = ob.fehlerfoto_id(1793232000.0, "abc123")
     chk(i == "20261029-000000-abc123" and ob.fehlerfoto_praefix("pc-7ftp5l", i) == "pc-7ftp5l/2026-10-29/20261029-000000-abc123",
         f"fehlerfoto_id/praefix: UTC-Datum im Namen und im Ordner ({i})")
-    ps = ob.fehlerfoto_ps_skript(r"C:\Temp\f.jpg")
-    chk("CopyFromScreen" in ps and "SetProcessDPIAware" in ps and "VirtualScreen" in ps and "[long]60" in ps and "1600/" in ps
-        and r"C:\Temp\f.jpg" in ps, "PowerShell: ganzer virtueller Bildschirm, DPI-bewusst, ≤ 1600 px, JPEG 60")
+    # Bildschirm ohne PowerShell (29.10.2026, Defender blockte das Skript): GDI → skalieren → PNG aus der Standardbibliothek
+    import struct as _st, zlib as _zl
+    w0, h0 = 40, 20
+    bgra = bytearray(w0 * h0 * 4)
+    for y in range(h0):
+        for x in range(w0):
+            o = (y * w0 + x) * 4
+            bgra[o:o + 4] = bytes((x * 6 % 256, y * 12 % 256, 200 if x < 20 else 10, 255))   # B, G, R, A
+    rgb, tw, th = ob.fehlerfoto_skalieren(bytes(bgra), w0, h0, 20)
+    chk((tw, th) == (20, 10) and rgb[0:3] == bytes((200, 0, 0)) and rgb[(9 * 20 + 19) * 3:(9 * 20 + 19) * 3 + 3] == bytes((10, 216, 228)),
+        f"skalieren: halbe Größe, BGRA → RGB richtig herum, nächster Nachbar ({tw}×{th})")
+    rgb_g, tw_g, _ = ob.fehlerfoto_skalieren(bytes(bgra), w0, h0, 5000)
+    chk(tw_g == w0 and len(rgb_g) == w0 * h0 * 3, "skalieren: nie größer als das Original")
+    idx = ob.fehlerfoto_palette332(bytes((255, 255, 255, 0, 0, 0, 224, 28, 192)))
+    chk(idx == bytes((255, 0, 0xE0 | 0x00 | 0x03)), f"palette332: Weiß 255, Schwarz 0, Bitfelder RRRGGGBB ({list(idx)})")
+
+    def png_lesen(png):
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        i, teile = 8, {}
+        while i < len(png):
+            n = _st.unpack(">I", png[i:i + 4])[0]
+            typ, inh, crc = png[i + 4:i + 8], png[i + 8:i + 8 + n], _st.unpack(">I", png[i + 8 + n:i + 12 + n])[0]
+            assert _zl.crc32(typ + inh) & 0xFFFFFFFF == crc, typ
+            teile[typ] = teile.get(typ, b"") + inh
+            i += 12 + n
+        w_, h_, tiefe, farbe = _st.unpack(">IIBB", teile[b"IHDR"][:10])
+        return w_, h_, tiefe, farbe, _zl.decompress(teile[b"IDAT"]), teile
+    pw, ph, tiefe, farbe, roh, teile = png_lesen(ob.fehlerfoto_png(rgb, tw, th, "rgb"))
+    chk((pw, ph, tiefe, farbe) == (20, 10, 8, 2) and len(roh) == th * (1 + tw * 3) and roh[1:4] == rgb[0:3] and b"IEND" in teile,
+        "PNG rgb: Kopf 20×10 8 Bit Farbtyp 2, CRCs stimmen, Zeilen mit Filter 0, Daten unverändert")
+    pw, ph, tiefe, farbe, roh, teile = png_lesen(ob.fehlerfoto_png(ob.fehlerfoto_palette332(rgb), tw, th, "p332"))
+    chk(farbe == 3 and len(teile[b"PLTE"]) == 768 and teile[b"PLTE"][-3:] == b"\xff\xff\xff" and len(roh) == th * (1 + tw),
+        "PNG p332: Farbtyp 3, Palette 256 Farben (Weiß am Ende), 1 Byte je Punkt")
+    rausch = os.urandom(400 * 300 * 4)   # Rauschen: RGB (~350 KB) zu groß, 256 Farben (~120 KB) passt
+    png, stufe = ob.fehlerfoto_png_unter(rausch, 400, 300, max_bytes=200 * 1024, stufen=((400, "rgb"), (400, "p332"), (200, "p332")))
+    chk(len(png) <= 200 * 1024 and stufe == "400×300 p332", f"png_unter: RGB zu groß → erste passende Stufe 256 Farben ({stufe}, {len(png) // 1024} KB)")
     try:
-        ob.fehlerfoto_ps_skript("C:\\x'; rm")
-        chk(False, "PowerShell: Pfad mit ' muss abbrechen")
+        ob.fehlerfoto_png_unter(bytes(os.urandom(200 * 100 * 4)), 200, 100, max_bytes=1000, stufen=((200, "rgb"), (100, "p332")))
+        chk(False, "png_unter: alles zu groß muss abbrechen")
     except ValueError:
-        chk(True, "PowerShell: Pfad mit ' bricht ab")
+        chk(True, "png_unter: auch kleinste Stufe zu groß → ValueError (Grund ins Protokoll)")
+    src = open(ob.__file__, encoding="utf-8").read()
+    blk = src[src.index("def _fehlerfoto_bildschirm("):src.index("def _fehlerfoto_tab(")]
+    chk("subprocess" not in blk and '"powershell"' not in blk and "_fehlerfoto_gdi()" in blk and "fehlerfoto_png_unter(" in blk
+        and "FEHLERFOTO_PS" not in src and "$g.CopyFromScreen" not in src,
+        "Bildschirmfoto ohne PowerShell (GDI → PNG), kein Skript mehr im Bot")
     alt = ob.fehlerfoto_anstossen
     gerufen = []
     try:

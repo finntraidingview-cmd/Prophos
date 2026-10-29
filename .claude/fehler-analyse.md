@@ -43,15 +43,16 @@ Puls-Chrome. Deckel: dasselbe (Weg, Code) höchstens alle 10 min, je PC höchste
 - **Wo steht der Pfad?** `puls_fehlstarts.bild_pfad`, `order_signale.ergebnis->>'fehlerbild'`, in den Views als `bild_pfad`
   (`puls_fehler_ereignisse`) bzw. `bild` (jüngstes Bild je Muster, `puls_fehler_muster`). Beim gescheiterten Heimweg steht er am Ende
   der Meldung („· Bild <pfad>“). Form: `<pc>/<JJJJ-MM-TT>/<id>`.
-- **Dateien im privaten Bucket `puls-fehlerbilder`:** `<pfad>-bildschirm.jpg` und, falls da, `<pfad>-tab.jpg`. Ohne Policies, nur der
+- **Dateien im privaten Bucket `puls-fehlerbilder`:** `<pfad>-bildschirm.png` (seit 29.10.2026 per GDI ohne PowerShell — das
+  PowerShell-Skript blockte Windows Defender) und, falls da, `<pfad>-tab.jpg`. Ohne Policies, nur der
   Service-Key kommt dran.
 - **Ansehen (Claude am Mac / Routine):** Bild laden, dann mit dem Read-Werkzeug öffnen:
 
 ```bash
-curl -s -H "X-Fehlerbild-Token: $PULS_FEHLERBILD_TOKEN" "https://web-production-bec81.up.railway.app/puls-fehlerbild-datei?pfad=<pfad>&art=bildschirm" -o /tmp/fehlerbild.jpg
+curl -s -H "X-Fehlerbild-Token: $PULS_FEHLERBILD_TOKEN" "https://web-production-bec81.up.railway.app/puls-fehlerbild-datei?pfad=<pfad>&art=bildschirm" -o /tmp/fehlerbild.png
 ```
 
-  `art=tab` für das Bild des Puls-Chrome-Tabs. Der Token geht nur als Header (`X-Fehlerbild-Token` oder `Authorization: Bearer …`),
+  `art=tab` für das Bild des Puls-Chrome-Tabs (JPEG → `-o /tmp/fehlerbild.jpg`). Der Token geht nur als Header (`X-Fehlerbild-Token` oder `Authorization: Bearer …`),
   nie in der URL; er steht in der Railway-Variable `PULS_FEHLERBILD_TOKEN` (fehlt sie → 404).
   Im Browser mit Admin-Login geht auch `GET /admin/puls-fehlerbild?pfad=<pfad>&art=bildschirm` (5-min-Link, Gate wie Admin → Mail).
 - **Nur Hermann Technologies auswerten** (Standing-Regel, Master 29.10.2026): gespeichert werden Bilder aller PCs, ausgewertet nur Fehler
@@ -70,7 +71,7 @@ order by e.at desc;
   Das Muster-View `puls_fehler_muster` mischt alle IDs — für HT-Auswertungen mit Bild die Ereignisse oben nehmen, nicht `bild` aus dem Muster.
 - **Läuft das Foto auf den PCs?** In der Antwort jedes fehlgeschlagenen Laufs (`order_signale.ergebnis->>'trail'`) steht am Ende
   „Fehlerfoto angestoßen → <pfad>" oder „kein Fehlerfoto: <grund>" (Deckel, Code zählt nicht). Je Foto schreibt Railway eine Zeile in
-  `puls_fehlerbild_log` — mit `kb` (hochgeladen) oder `grund` (PowerShell-Fehler, kein Puls-Chrome-Tab, Puls läuft wieder):
+  `puls_fehlerbild_log` — mit `kb` (hochgeladen) oder `grund` (GDI-Fehler, Bild zu groß, kein Puls-Chrome-Tab, Puls läuft wieder):
 
 ```sql
 select pc, count(*) filter (where kb is not null) bilder, count(*) filter (where grund is not null) ohne_bild,

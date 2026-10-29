@@ -27,6 +27,8 @@ TOKEN = "f" * 40
 JPEG = b"\xff\xd8\xff\xe0" + b"x" * 2000
 JETZT = datetime.now(timezone.utc)
 ID = JETZT.strftime("%Y%m%d-%H%M%S") + "-abc123"
+ID2 = JETZT.strftime("%Y%m%d-%H%M%S") + "-def456"
+PNG = b"\x89PNG\r\n\x1a\n" + b"p" * 1500
 TAG = JETZT.strftime("%Y-%m-%d")
 
 
@@ -68,10 +70,10 @@ class _Requests:
 def lade(stubs):
     src = open(APP, encoding="utf-8").read()
     konst = ("PC_ID_MUSTER", "PULS_FEHLERBILD_BUCKET", "PULS_FEHLERBILD_MAX", "PULS_FEHLERBILD_STUNDE", "PULS_FEHLERBILD_ID_RE",
-             "PULS_FEHLERBILD_PRAEFIX_RE", "HT_PAYOUTS_CSV_TOKEN_MIN", "PULS_FEHLERBILD_STUNDE_ALLE")
+             "PULS_FEHLERBILD_PRAEFIX_RE", "HT_PAYOUTS_CSV_TOKEN_MIN", "PULS_FEHLERBILD_STUNDE_ALLE", "PULS_FEHLERBILD_TYPEN")
     teile = [re.search(rf"^{k} = .*$", src, re.M).group(0) for k in konst]
     teile += ["_puls_fehlerbild_zeiten = {}", "_puls_fehlerbild_lock = threading.Lock()"]
-    for name in ("puls_fehlerbild_pfad", "puls_fehlerbild_erlaubt", "ht_payouts_token_ok", "_puls_fehlerbild_tor",
+    for name in ("puls_fehlerbild_typ", "puls_fehlerbild_pfad", "puls_fehlerbild_erlaubt", "ht_payouts_token_ok", "_puls_fehlerbild_tor",
                  "_puls_fehlerbild_protokoll"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
@@ -131,7 +133,12 @@ def main():
     r = cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=JPEG, headers={"Transfer-Encoding": "chunked"})   # chunked: keine Länge
     check(r.status_code == 411 and len(rq.posts) == n_rq, f"B1d ohne Content-Length (chunked) → 411, nichts gelesen ({r.status_code})")
     check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=bildschirm", data=JPEG).status_code == 502, "B2 gleicher Pfad nochmal → nicht überschrieben (502)")
-    check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=b"<html>").status_code == 400, "B3 kein JPEG → 400")
+    check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=b"<html>").status_code == 400, "B3 weder JPEG noch PNG → 400")
+    r = cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID2}&art=bildschirm", data=PNG)
+    up = rq.posts[-1]
+    check(r.status_code == 200 and r.get_json()["pfad"].endswith(f"{ID2}-bildschirm.png") and up[0].endswith(f"{ID2}-bildschirm.png")
+          and up[1].get("Content-Type") == "image/png" and up[1].get("x-upsert") == "false",
+          "B3b PNG (Bildschirm per GDI) → <id>-bildschirm.png als image/png, nie überschreiben")
     check(cl.post(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab", data=b"\xff\xd8\xff" + b"x" * (400 * 1024)).status_code in (400, 413), "B4 zu groß → 400/413")
     check(cl.post(f"/puls-fehlerbild/evil?id={ID}&art=tab", data=JPEG).status_code == 400, "B5 pc_id ungültig → 400")
     check(cl.get(f"/puls-fehlerbild/pc-abcd12?id={ID}&art=tab").status_code == 405, "B6 nur POST")
@@ -164,6 +171,8 @@ def main():
           "C2 Admin → signierter Link")
     check(cl.get(f"/admin/puls-fehlerbild?pfad=pc-abcd12/{TAG}/{ID}&art=tab").status_code == 404, "C3 Bild fehlt → 404")
     check(cl.get("/admin/puls-fehlerbild?pfad=../../etc").status_code == 400, "C4 Pfad-Trick → 400")
+    d = cl.get(f"/admin/puls-fehlerbild?pfad=pc-abcd12/{TAG}/{ID2}&art=bildschirm").get_json() or {}
+    check(d.get("pfad", "").endswith("-bildschirm.png") and ".png?token=" in d.get("url", ""), "C5 PNG-Bild → Link auf .png (JPEG zuerst probiert)")
 
     # (D)
     os.environ.pop("PULS_FEHLERBILD_TOKEN", None)
@@ -182,6 +191,8 @@ def main():
     check(r.status_code == 200 and r.mimetype == "image/jpeg" and r.data == JPEG and r.headers.get("Cache-Control") == "no-store"
           and r2.status_code == 200 and TOKEN not in log.getvalue(), "D4 Token im Header (X-Fehlerbild-Token / Bearer) → das JPEG, no-store, Token nicht im Log")
     check(cl.get(f"/puls-fehlerbild-datei?pfad=pc-abcd12/{TAG}/{ID}&art=tab", headers=H(TOKEN)).status_code == 404, "D5 Bild fehlt → 404")
+    r = cl.get(f"/puls-fehlerbild-datei?pfad=pc-abcd12/{TAG}/{ID2}&art=bildschirm", headers=H(TOKEN))
+    check(r.status_code == 200 and r.mimetype == "image/png" and r.data == PNG, "D6 PNG-Bild → image/png")
     os.environ.pop("PULS_FEHLERBILD_TOKEN", None)
 
     print(f"\n{'ALLES GRÜN' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")

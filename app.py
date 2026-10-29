@@ -15694,8 +15694,23 @@ _puls_fehlerbild_zeiten = {}
 _puls_fehlerbild_lock = threading.Lock()
 
 
-def puls_fehlerbild_pfad(pc_id, bild_id, art, jetzt=None):
-    """REIN RECHNEND: Ablagepfad <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg oder None (pc/id/art ungültig, Datum der id > 2 Tage weg)."""
+# PNG (29.10.2026): das Bildschirmfoto kommt seit dem GDI-Weg als PNG (PowerShell/JPEG blockte Windows Defender), das Tab-Foto bleibt JPEG.
+# Endung folgt dem Inhalt (Kopf-Bytes), Lesen probiert beide Endungen. Bucket allowed_mime_types: sql/2026-10-29_puls_fehlerbilder_png.sql.
+PULS_FEHLERBILD_TYPEN = (("jpg", "image/jpeg", b"\xff\xd8\xff"), ("png", "image/png", b"\x89PNG\r\n\x1a\n"))
+
+
+def puls_fehlerbild_typ(roh):
+    """REIN RECHNEND: (endung, mime) nach den Kopf-Bytes — JPEG oder PNG — sonst None."""
+    for endung, mime, kopf in PULS_FEHLERBILD_TYPEN:
+        if roh.startswith(kopf):
+            return endung, mime
+    return None
+
+
+def puls_fehlerbild_pfad(pc_id, bild_id, art, jetzt=None, endung="jpg"):
+    """REIN RECHNEND: Ablagepfad <pc>/<JJJJ-MM-TT>/<id>-<art>.<endung> oder None (pc/id/art/endung ungültig, Datum der id > 2 Tage weg)."""
+    if endung not in [t[0] for t in PULS_FEHLERBILD_TYPEN]:
+        return None
     m = PULS_FEHLERBILD_ID_RE.fullmatch(str(bild_id or ""))
     if not PC_ID_MUSTER.fullmatch(str(pc_id or "")) or not m or art not in ("bildschirm", "tab"):
         return None
@@ -15705,7 +15720,7 @@ def puls_fehlerbild_pfad(pc_id, bild_id, art, jetzt=None):
         return None
     if abs((tag - (jetzt or datetime.now(timezone.utc)).date()).days) > 2:
         return None
-    return f"{pc_id}/{tag.isoformat()}/{bild_id}-{art}.jpg"
+    return f"{pc_id}/{tag.isoformat()}/{bild_id}-{art}.{endung}"
 
 
 def puls_fehlerbild_erlaubt(zeiten, pc_id, jetzt_s, je_stunde=PULS_FEHLERBILD_STUNDE):
@@ -15743,7 +15758,7 @@ def _puls_fehlerbild_protokoll(pc_id, bild_id, art, kb=None, grund=None):
 
 @app.route("/puls-fehlerbild/<pc_id>", methods=["POST"])
 def puls_fehlerbild_hochladen(pc_id):
-    """POST /puls-fehlerbild/<pc_id>?id=<JJJJMMTT-hhmmss-xxxxxx>&art=bildschirm|tab, Körper = JPEG → {ok, pfad}. Siehe Block oben."""
+    """POST /puls-fehlerbild/<pc_id>?id=<JJJJMMTT-hhmmss-xxxxxx>&art=bildschirm|tab, Körper = JPEG oder PNG → {ok, pfad}. Siehe Block oben."""
     pfad = puls_fehlerbild_pfad(pc_id, request.args.get("id"), request.args.get("art"))
     if not pfad:
         return jsonify({"ok": False, "msg": "pc_id/id/art ungültig"}), 400
@@ -15757,14 +15772,16 @@ def puls_fehlerbild_hochladen(pc_id):
     roh = request.get_data(cache=False) or b""
     if len(roh) > PULS_FEHLERBILD_MAX:
         return jsonify({"ok": False, "msg": "zu groß"}), 413
-    if not roh.startswith(b"\xff\xd8\xff"):
-        return jsonify({"ok": False, "msg": "kein JPEG"}), 400
+    typ = puls_fehlerbild_typ(roh)
+    if not typ:
+        return jsonify({"ok": False, "msg": "kein JPEG/PNG"}), 400
+    pfad = puls_fehlerbild_pfad(pc_id, request.args.get("id"), request.args.get("art"), endung=typ[0])
     if not SUPABASE_SERVICE_KEY:
         return jsonify({"ok": False, "msg": "Server nicht konfiguriert"}), 503
     try:
         r = requests.post(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{pfad}", data=roh, timeout=20,
                           headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                                   "Content-Type": "image/jpeg", "x-upsert": "false"})
+                                   "Content-Type": typ[1], "x-upsert": "false"})
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     if r.status_code >= 300:
@@ -15776,7 +15793,7 @@ def puls_fehlerbild_hochladen(pc_id):
 
 @app.route("/puls-fehlerbild-status/<pc_id>", methods=["POST"])
 def puls_fehlerbild_status(pc_id):
-    """POST /puls-fehlerbild-status/<pc_id> {id, art, grund} — der Foto-Prozess meldet, warum es KEIN Bild gab (PowerShell-Fehler, kein
+    """POST /puls-fehlerbild-status/<pc_id> {id, art, grund} — der Foto-Prozess meldet, warum es KEIN Bild gab (GDI-Fehler, Bild zu groß, kein
     Puls-Chrome-Tab, Puls läuft wieder). Gleiches Tor wie der Upload; nur ins Protokoll."""
     if request.content_length is None:
         return jsonify({"ok": False, "msg": "Content-Length fehlt"}), 411
@@ -15804,22 +15821,23 @@ def admin_puls_fehlerbild():
     art = str(request.args.get("art") or "bildschirm")
     if not m or art not in ("bildschirm", "tab"):
         return jsonify({"ok": False, "msg": "pfad/art ungültig"}), 400
-    pfad = f"{m.group(0)}-{art}.jpg"
-    try:
-        r = requests.post(f"{SUPABASE_URL}/storage/v1/object/sign/{PULS_FEHLERBILD_BUCKET}/{pfad}", json={"expiresIn": 300}, timeout=10,
-                          headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
-        d = r.json() if r.status_code == 200 else {}
-    except Exception as e:
-        return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
-    teil = d.get("signedURL") or d.get("signedUrl")
-    if not teil:
-        return jsonify({"ok": False, "msg": "Bild nicht gefunden"}), 404
-    return jsonify({"ok": True, "pfad": pfad, "url": f"{SUPABASE_URL}/storage/v1{teil}"})
+    for endung, _mime, _kopf in PULS_FEHLERBILD_TYPEN:   # JPEG (Tab, alte Bilder) oder PNG (Bildschirm seit dem GDI-Weg)
+        pfad = f"{m.group(0)}-{art}.{endung}"
+        try:
+            r = requests.post(f"{SUPABASE_URL}/storage/v1/object/sign/{PULS_FEHLERBILD_BUCKET}/{pfad}", json={"expiresIn": 300}, timeout=10,
+                              headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+            d = r.json() if r.status_code == 200 else {}
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+        teil = d.get("signedURL") or d.get("signedUrl")
+        if teil:
+            return jsonify({"ok": True, "pfad": pfad, "url": f"{SUPABASE_URL}/storage/v1{teil}"})
+    return jsonify({"ok": False, "msg": "Bild nicht gefunden"}), 404
 
 
 @app.route("/puls-fehlerbild-datei", methods=["GET"])
 def puls_fehlerbild_datei():
-    """GET /puls-fehlerbild-datei?pfad=<pc>/<JJJJ-MM-TT>/<id>&art=bildschirm|tab → das JPEG selbst (für die Fehler-Routine und Claude am
+    """GET /puls-fehlerbild-datei?pfad=<pc>/<JJJJ-MM-TT>/<id>&art=bildschirm|tab → das Bild selbst, JPEG oder PNG (für die Fehler-Routine und Claude am
     Mac, die keinen Prophos-Login haben: curl → Datei → ansehen). Token NUR als Header (Prüfer S2 29.10.2026 — nie in der URL, die landet in
     Logs/Verläufen): X-Fehlerbild-Token: … oder Authorization: Bearer …; Soll aus der Railway-Variable PULS_FEHLERBILD_TOKEN (fehlt sie oder
     ist sie kürzer als 32 Zeichen → immer 404), Vergleich zeitkonstant wie /ht/payouts.csv; falscher/fehlender Token → 404. Nur lesen."""
@@ -15833,17 +15851,18 @@ def puls_fehlerbild_datei():
     art = str(request.args.get("art") or "bildschirm")
     if not m or art not in ("bildschirm", "tab"):
         return Response("pfad/art ungültig", status=400, mimetype="text/plain")
-    try:
-        r = requests.get(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{m.group(0)}-{art}.jpg", timeout=20,
-                         headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
-    except Exception as e:
-        print(f"[puls-fehlerbild] ⚠️ nicht lesbar ({type(e).__name__})", flush=True)   # bewusst ohne URL/Token
-        return Response("Fehler", status=502, mimetype="text/plain")
-    if r.status_code != 200:
-        return Response("Bild nicht gefunden", status=404, mimetype="text/plain")
-    a = Response(r.content, mimetype="image/jpeg")
-    a.headers["Cache-Control"] = "no-store"
-    return a
+    for endung, mime, _kopf in PULS_FEHLERBILD_TYPEN:
+        try:
+            r = requests.get(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{m.group(0)}-{art}.{endung}", timeout=20,
+                             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+        except Exception as e:
+            print(f"[puls-fehlerbild] ⚠️ nicht lesbar ({type(e).__name__})", flush=True)   # bewusst ohne URL/Token
+            return Response("Fehler", status=502, mimetype="text/plain")
+        if r.status_code == 200:
+            a = Response(r.content, mimetype=mime)
+            a.headers["Cache-Control"] = "no-store"
+            return a
+    return Response("Bild nicht gefunden", status=404, mimetype="text/plain")
 
 
 # ══ READER-DIAGNOSE (26.09.2026, Auftrag Koordination B9) ═════════════════════════════════════════════════════════
