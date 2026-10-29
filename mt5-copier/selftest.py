@@ -2058,6 +2058,7 @@ def main():
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
     results.append(test_login_wache())
+    results.append(test_login_eigenes_konto())
     results.append(test_windows_abfrage_vorbeugen())
 
     print()
@@ -2349,6 +2350,168 @@ def test_login_wache():
     chk(qs.count("target=_login_ok_wache") == 3, "Wache nach jedem Kaltstart (start_terminal + beide Heil-Starts)")
     if ok:
         print("✓ Login-Wache: Lage warten/suchen/aus, 30 min ohne Abfrage-Zeit, Ende bei stabiler Verbindung, nach jedem Kaltstart")
+    return ok
+
+
+def test_login_eigenes_konto():
+    """Eigenes Konto, andere Installation (Finn 29.10.2026 07:35: „bei dieser Meldung hingehen und OK druecken, dann normal weiter"):
+    Login-Dialog eines Kontos DIESES PCs wird bestaetigt, echte Fremdnummern bleiben unberuehrt; Panel-Wache auch ohne Kaltstart."""
+    import order_bot as ob, panel, inspect, tempfile, json as _json
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ Login eigenes Konto: " + name); ok = False
+    E = ob.mt5_login_eigenes_anderes_konto
+    eigene = {115319, 14355525, 20969210}
+    chk(E(["14355525"], 115319, eigene) == 14355525, "Mike 29.10.: Feld 14355525 beim Lauf fuer 115319 → eigenes Konto")
+    chk(E(["14355525 - FundedNext-Server2"], 115319, eigene) == 14355525, "Kontofeld mit Zusatz")
+    chk(E(["99999999"], 115319, eigene) is None, "echte Fremdnummer → None (bleibt uebergangen)")
+    chk(E(["115319"], 115319, eigene) is None, "das erwartete Konto selbst ist kein ‚anderes‘")
+    chk(E(["14355525"], 115319, set()) is None and E(["14355525"], 115319, None) is None, "ohne Konten-Liste → None")
+    chk(E(["114355525"], 115319, eigene) is None, "Teilnummer zaehlt nicht")
+    with tempfile.TemporaryDirectory() as td:
+        for n, k in (("config-100k115319Phase1.json", 115319), ("config-50k14355525.json", "14355525"), ("config-leer.json", 0),
+                     ("anker-config-x.json", 777), ("status-100k.json", 888), ("config-x - Kopie.json", 555), ("config.example.json", 444)):
+            with open(os.path.join(td, n), "w", encoding="utf-8") as f:
+                _json.dump({"master_expected_login": k, "master_terminal_path": f"C:\\MT5-{k}\\terminal64.exe"}, f)
+        with open(os.path.join(td, "config-kaputt.json"), "w", encoding="utf-8") as f:
+            f.write("{kein json")
+        eg = ob.eigene_mt5_konten(td)
+        chk(set(eg) == {115319, 14355525} and eg[14355525].endswith("terminal64.exe"),
+            "eigene_mt5_konten: nur Instanz-Configs (keine Kopie/Vorlage/anker/status), Konto → Pfad, kaputte Datei still")
+    chk(ob.eigene_mt5_konten(os.path.join(tempfile.gettempdir(), "gibt-es-nicht-29-10")) == {}, "fehlender Ordner → leer")
+    A = ob.login_andere_installation_ok
+    pfadB = "C:\\MT5-B\\terminal64.exe"
+    eg = {14355525: pfadB, 115319: "C:\\MT5-A\\terminal64.exe"}
+    pr = [{"pid": 11, "name": "terminal64.exe", "pfad": "C:\\MT5-A\\terminal64.exe"}, {"pid": 22, "name": "terminal64.exe", "pfad": pfadB}]
+    chk(A(14355525, eg, 22, pr, 1000.0, None) == (True, ""), "Dialog aus der Installation des Kontos → ja")
+    chk(A(14355525, eg, 11, pr, 1000.0, None)[0] is False, "Dialog aus einem ANDEREN Terminal (A) → nein (kein Umloggen)")
+    chk(A(14355525, {14355525: ""}, 22, pr, 1000.0, None)[0] is False and A(14355525, eg, 22, [], 1000.0, None)[0] is False,
+        "Installation unbekannt / Prozesse unlesbar → nein")
+    chk(A(14355525, eg, 22, pr, 1000.0, 1000.0 - 60)[0] is False and A(14355525, eg, 22, pr, 1000.0, 1000.0 - ob.LOGIN_ANDERE_PAUSE_S)[0],
+        "je Konto hoechstens einmal je Pause")
+
+    # Verhaltenstest mit Fenster-Attrappen: welcher OK-Knopf wird gedrückt, was kommt zurück
+    import sys as _s, types as _t
+    gedrueckt = []
+
+    class Info:
+        def __init__(self, cls, pid):
+            self.class_name, self.process_id = cls, pid
+
+    class Knopf:
+        def __init__(self, txt, dlg):
+            self.txt, self.dlg = txt, dlg
+        def window_text(self): return self.txt
+        def is_visible(self): return self.dlg.offen
+        def invoke(self):
+            gedrueckt.append((self.dlg.konto, "invoke")); self.dlg.offen = False
+        def click_input(self):
+            gedrueckt.append((self.dlg.konto, "klick")); self.dlg.offen = False
+
+    class Feld:
+        def __init__(self, txt): self.txt = txt
+        def window_text(self): return self.txt
+
+    class Dialog:
+        def __init__(self, konto, pid):
+            self.konto, self.offen = konto, True
+            self.element_info = Info("#32770", pid)
+        def window_text(self): return "Einloggen"
+        def is_visible(self): return self.offen
+        def descendants(self, control_type=None):
+            if control_type == "Button": return [Knopf("OK", self), Knopf("Abbrechen", self)]
+            if control_type == "Text": return [Feld("Login:"), Feld("Passwort:"), Feld("Server:")]
+            if control_type == "ComboBox": return [Feld(str(self.konto))]
+            return []
+
+    class Haupt:
+        def __init__(self, pid): self.element_info = Info(ob.MT5_KLASSE, pid)
+        def is_visible(self): return True
+        def window_text(self): return "MetaTrader 5"
+
+    fenster = []
+
+    class Desk:
+        def __init__(self, backend=None): pass
+        def windows(self): return fenster
+    alt_mod = _s.modules.get("pywinauto")
+    pw = _t.ModuleType("pywinauto"); pw.Desktop = Desk; _s.modules["pywinauto"] = pw
+    orig = {k: getattr(ob, k) for k in ("_verbindung_lage", "_kind_fenster", "_warte", "_uia_wert", "eigene_mt5_konten")}
+    try:
+        ob._verbindung_lage = lambda: (pr, [])
+        ob._kind_fenster = lambda h, voll=False: []
+        ob._warte = lambda a, b=0: None
+        ob._uia_wert = lambda e: e.window_text()
+        ob.eigene_mt5_konten = lambda ordner=None: dict(eg)
+        ob._LOGIN_ANDERE_OK.clear()
+        # Mike 29.10.: Lauf fuer 115319 (Terminal A, pid 11), Dialog 14355525 im Terminal B (pid 22) → bestaetigt per invoke, Rueckgabe keiner
+        fenster[:] = [Haupt(11), Haupt(22), Dialog(14355525, 22)]
+        tr = []
+        r1 = ob._mt5_login_bestaetigen(115319, tr)
+        chk(r1 == "keiner" and gedrueckt == [(14355525, "invoke")] and any("andere Installation, mit OK bestaetigt (invoke)" in z for z in tr),
+            "Dialog eigener anderer Installation: nur invoke, Spur, Rueckgabe gilt weiter dem erwarteten Konto")
+        # derselbe Dialog im Terminal A (falsche Installation) → unberuehrt
+        gedrueckt.clear(); ob._LOGIN_ANDERE_OK.clear()
+        fenster[:] = [Haupt(11), Haupt(22), Dialog(14355525, 11)]
+        tr = []
+        r2 = ob._mt5_login_bestaetigen(115319, tr)
+        chk(r2 == "keiner" and not gedrueckt and any("nicht aus dessen Installation" in z for z in tr), "Dialog im falschen Terminal → kein Klick")
+        # Fremdnummer → unberuehrt
+        gedrueckt.clear()
+        fenster[:] = [Haupt(11), Dialog(99999999, 11)]
+        tr = []
+        chk(ob._mt5_login_bestaetigen(115319, tr) == "keiner" and not gedrueckt and any("Konto passt nicht" in z for z in tr),
+            "echte Fremdnummer → uebergangen, kein Klick")
+        # zweite Runde im selben Lauf → nicht noch einmal (Broker-Login-Serie)
+        gedrueckt.clear(); ob._LOGIN_ANDERE_OK.clear()
+        fenster[:] = [Haupt(11), Haupt(22), Dialog(14355525, 22)]
+        ob._mt5_login_bestaetigen(115319, [])
+        fenster[:] = [Haupt(11), Haupt(22), Dialog(14355525, 22)]
+        ob._mt5_login_bestaetigen(115319, [])
+        chk(gedrueckt == [(14355525, "invoke")], "je Konto nur einmal je Lauf")
+        # erwartetes Konto wie bisher: bestaetigt, Rueckgabe bestaetigt
+        gedrueckt.clear()
+        fenster[:] = [Haupt(11), Dialog(115319, 11)]
+        chk(ob._mt5_login_bestaetigen(115319, []) == "bestaetigt" and gedrueckt == [(115319, "invoke")], "erwartetes Konto unveraendert")
+        # Panel-Wache (eigene={}) bestaetigt nie ein anderes Konto, auch ohne nur_pids
+        gedrueckt.clear(); ob._LOGIN_ANDERE_OK.clear()
+        fenster[:] = [Haupt(11), Haupt(22), Dialog(14355525, 22)]
+        chk(ob._mt5_login_bestaetigen(115319, [], wege=("invoke",), nur_pids=None, eigene={}) == "keiner" and not gedrueckt,
+            "Wache (eigene={}) bleibt bei ihrem Konto")
+    finally:
+        for k, v in orig.items():
+            setattr(ob, k, v)
+        if alt_mod is None:
+            _s.modules.pop("pywinauto", None)
+        else:
+            _s.modules["pywinauto"] = alt_mod
+        ob._LOGIN_ANDERE_OK.clear()
+    chk("eigene={}" in inspect.getsource(ob.modus_loginok), "modus_loginok gibt eigene={} weiter")
+
+    T = panel.login_fenster_titel
+    chk(T("Einloggen") and T("Login to Trade Account") and not T("Logintest") and not T("MetaTrader 5") and not T(""), "Panel: Login-Fenstertitel")
+    F = panel.login_wache_faellig
+    S, sw = 1000.0, panel.LOGIN_DIALOG_STEHT_S
+    chk(F(False, True, None, S, sw, None, False, 0) == (False, None), "Terminal aus → nichts")
+    chk(F(True, False, S - 999, S, sw, None, False, 0) == (False, None), "kein Login-Fenster → nichts, Uhr zurueck (auch ohne Copier)")
+    chk(F(True, True, None, S, sw, None, False, 0) == (False, S), "Login-Fenster erstmals gesehen → Uhr startet")
+    chk(F(True, True, S - sw + 1, S, sw, None, False, 0)[0] is False and F(True, True, S - sw, S, sw, None, False, 0)[0] is True,
+        f"faellig erst, wenn das Fenster {sw} s steht")
+    chk(F(True, True, S - sw, S, sw, None, True, 1)[0] is False, "Wache laeuft schon → nicht doppelt")
+    chk(F(True, True, S - sw, S, sw, None, False, panel.LOGIN_WACHE_GLEICHZEITIG)[0] is False, "Deckel gleichzeitige Wachen")
+    chk(F(True, True, S - sw, S, sw, S - 60, False, 0)[0] is False and F(True, True, S - sw, S, sw, S - panel.LOGIN_WACHE_PAUSE_S, False, 0)[0] is True,
+        "je Instanz Pause ab dem Ende der letzten Wache")
+    q = inspect.getsource(panel._login_dialog_waechter)
+    chk("random.uniform" in q and "target=_login_ok_wache" in q and "_login_dialog_steht(install_dir)" in q and "len(LOGIN_WACHE) + neu" in q
+        and "_konto_verbunden" not in q, "Waechter: gestreut, Login-Fenster statt Copier-Status, Runden-Zaehler im Deckel")
+    chk("target=_login_dialog_waechter" in inspect.getsource(panel), "Waechter wird beim Panel-Start gestartet")
+    chk("_LOGIN_WACHE_ZULETZT[fname] = time.time()" in inspect.getsource(panel._login_ok_wache), "Ende jeder Wache wird gemerkt")
+    if ok:
+        print("✓ Login eigenes Konto: Dialog der eigenen anderen Installation per invoke bestaetigt (Prozess belegt, 1× je Lauf), "
+              "Fremdnummer/falsches Terminal nie; Panel-Wache bei stehendem Login-Fenster, gedeckelt")
     return ok
 
 

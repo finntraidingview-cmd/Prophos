@@ -458,6 +458,75 @@ def ist_mt5_login_dialog(titel, beschriftungen, knoepfe, konto_werte, expected):
     return mt5_login_dialog_grund(titel, beschriftungen, knoepfe, konto_werte, expected) == ""
 
 
+# EIGENES KONTO, ANDERE INSTALLATION (Finn 29.10.2026 07:35 Dubai: „Ich will einfach, dass der Bot bei dieser Meldung hingeht und OK
+# drueckt, und dann normal weiter, sodass die Order platziert werden kann"). Befund 29.10.: 16 von 19 Login-Dialogen der Woche liefen auf
+# „uebergangen (Konto passt nicht)" — jedes Mal ein Konto DESSELBEN PCs (andere MT5-Installation, z. B. pc-l5o8bv 14355525 im Lauf fuer
+# 115319), 4x danach „F9-Dialog nicht gefunden", weil der Dialog vorn stehen blieb. Die Regel vom 07.10. bleibt fuer echte Fremdnummern:
+# bestaetigt wird nur, wenn die Nummer im Kontofeld als master_expected_login in einer config-*.json DIESES PCs steht UND das Dialog-
+# Fenster zum terminal64.exe-Prozess GENAU dieser Installation gehoert (Review 29.10.: sonst koennte OK Terminal A auf Konto B umloggen);
+# nur per invoke, je Konto hoechstens einmal je Lauf (LOGIN_ANDERE_PAUSE_S, keine Login-Serie beim Broker).
+# Namensregel wie panel.CONFIG_RE/TEMPLATES und copier.py: Explorer-Kopien („config - Kopie.json") und Vorlagen zaehlen nicht.
+_CONFIG_DATEI_RE = re.compile(r"config(?:[-_][A-Za-z0-9]{1,24})?\.json", re.I)
+_CONFIG_VORLAGEN = ("config.example.json", "config.fusion-test.json")
+LOGIN_ANDERE_PAUSE_S = 600
+_LOGIN_ANDERE_OK = {}   # Konto → Zeitpunkt der Bestaetigung in diesem Bot-Prozess
+
+
+def mt5_login_eigenes_anderes_konto(konto_werte, expected, eigene):
+    """REIN RECHNEND (testbar): Kontonummer aus dem Kontofeld des Dialogs, wenn sie NICHT das erwartete Konto ist, aber zu den eigenen
+    Konten dieses PCs gehoert (eigene = master_expected_login aller config-*.json) — sonst None."""
+    try:
+        exp = int(expected or 0)
+    except (TypeError, ValueError):
+        exp = 0
+    for k in sorted(eigene or ()):
+        try:
+            k = int(k)
+        except (TypeError, ValueError):
+            continue
+        if k and k != exp and any(_mt5_konto_wert_passt(v, k) for v in (konto_werte or ())):
+            return k
+    return None
+
+
+def eigene_mt5_konten(ordner=None):
+    """master_expected_login aller Instanz-Configs neben dem Bot (= die MT5-Installationen dieses PCs) → {Konto: master_terminal_path};
+    nicht lesbar → leer. Gleiche Namensregel wie Panel/Copier (keine Kopien, keine Vorlagen)."""
+    ordner = ordner or os.path.dirname(os.path.abspath(__file__))
+    out = {}
+    try:
+        namen = os.listdir(ordner)
+    except OSError:
+        return out
+    for n in namen:
+        if not _CONFIG_DATEI_RE.fullmatch(n) or n.lower() in _CONFIG_VORLAGEN:
+            continue
+        try:
+            with open(os.path.join(ordner, n), "r", encoding="utf-8") as f:
+                cfg = json.load(f) or {}
+            k = int(cfg.get("master_expected_login") or 0)
+            if k:
+                out[k] = str(cfg.get("master_terminal_path") or "").strip()
+        except Exception:
+            continue
+    return out
+
+
+def login_andere_installation_ok(konto, eigene, pid, prozesse, jetzt, zuletzt):
+    """REIN RECHNEND (testbar): darf der Dialog-Prozess pid fuer das eigene Konto `konto` bestaetigt werden? → (ja, Grund).
+    Nur wenn das Konto eine Installation mit Pfad hat, pid zu GENAU deren terminal64.exe gehoert und das Konto in diesem Lauf nicht
+    schon vor < LOGIN_ANDERE_PAUSE_S bestaetigt wurde."""
+    pfad = (eigene or {}).get(konto) if isinstance(eigene, dict) else None
+    if not pfad:
+        return False, f"eigenes Konto {konto}, Installation unbekannt"
+    pids = pids_der_installation(prozesse, pfad)
+    if not pids or pid not in pids:
+        return False, f"eigenes Konto {konto}, Dialog nicht aus dessen Installation"
+    if zuletzt is not None and jetzt - zuletzt < LOGIN_ANDERE_PAUSE_S:
+        return False, f"eigenes Konto {konto}, vor {round(jetzt - zuletzt)} s schon bestaetigt"
+    return True, ""
+
+
 # Fensterklassen der Browser (28.08.2026): alle Chromium-Ableger (Chrome, Edge,
 # Brave — auch die als App installierte PWA-Huelle) teilen sich eine Klasse,
 # dazu Firefox.
@@ -10922,7 +10991,7 @@ def _uia_wert(el):
     return ""
 
 
-def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter"), nur_pids=None):
+def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter"), nur_pids=None, eigene=None):
     """Den 'Einloggen'-Dialog von MT5 mit OK bestaetigen (Finn 07.10.2026:
     „Kannst du einstellen, dass … der Bot automatisch hier auf OK drueckt?").
     MT5 schiebt ihn ab und zu beim Konto-Login dazwischen; Konto, gespeichertes
@@ -10939,6 +11008,9 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
     MT5-Hauptfenster (gleiche zwei Quellen wie beim Haftungsausschluss).
     Beweis: angenommen erst, wenn der OK-Knopf weg ist.
     nur_pids (23.10.2026, Prüf-Agent): nur Fenster dieser Prozesse — die Login-Wache kennt ihre Installation.
+    eigene (29.10.2026): Konten dieses PCs; Dialoge einer ANDEREN eigenen Installation werden ebenfalls bestaetigt (s.
+    mt5_login_eigenes_anderes_konto), die Suche laeuft danach weiter — die Rueckgabe gilt weiter nur dem erwarteten Konto. Ohne nur_pids
+    (Puls-Lauf) liest der Bot die Liste selbst; die Login-Wache des Panels (nur_pids) bleibt bei ihrer Installation.
     Rueckgabe: 'bestaetigt' | 'gescheitert' | 'keiner'."""
     try:
         from pywinauto import Desktop
@@ -10966,37 +11038,14 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
     for h in haupt:
         kandidaten.extend(_kind_fenster(h))
 
-    for d in kandidaten:
-        try:
-            titel = (d.window_text() or "").strip()
-            if not ist_mt5_login_titel(titel):
-                continue
-            knoepfe = d.descendants(control_type="Button")
-            texte = [t.window_text() for t in d.descendants(control_type="Text")]
-            werte = []
-            for typ in ("ComboBox", "Edit"):
-                try:
-                    werte += [_uia_wert(e) for e in d.descendants(control_type=typ)]
-                except Exception:
-                    pass
-            grund = mt5_login_dialog_grund(titel, texte, [b.window_text() for b in knoepfe], werte, expected)
-            if grund:
-                if trail is not None:
-                    trail.append(f"Login-Dialog '{titel}' uebergangen ({grund})")
-                continue
-            ok = mt5_login_knopf_waehlen(knoepfe, lambda b: b.window_text())
-            if ok is None:
-                continue
-        except Exception:
-            continue
-
+    def _druecken(d, ok, nur_wege=None):
+        """OK des Dialogs d druecken (Wege der Reihe nach), Beweis = Knopf/Dialog weg → Weg | None."""
         def _weg():
             try:
                 return not ok.is_visible() or not d.is_visible()
             except Exception:
                 return True   # Element nicht mehr ansprechbar = weg
-
-        for weg in wege:
+        for weg in (nur_wege or wege):
             try:
                 if weg == "invoke":
                     ok.invoke()
@@ -11010,10 +11059,66 @@ def _mt5_login_bestaetigen(expected, trail=None, wege=("invoke", "klick", "enter
             ende = time.time() + 2.0
             while time.time() < ende:
                 if _weg():
-                    if trail is not None:
-                        trail.append(f"MT5-Login-Dialog fuer {expected} mit OK bestaetigt ({weg})")
-                    return "bestaetigt"
+                    return weg
                 _warte(0.2, 0.1)
+        return None
+
+    for d in kandidaten:
+        ziel = expected
+        try:
+            titel = (d.window_text() or "").strip()
+            if not ist_mt5_login_titel(titel):
+                continue
+            knoepfe = d.descendants(control_type="Button")
+            texte = [t.window_text() for t in d.descendants(control_type="Text")]
+            werte = []
+            for typ in ("ComboBox", "Edit"):
+                try:
+                    werte += [_uia_wert(e) for e in d.descendants(control_type=typ)]
+                except Exception:
+                    pass
+            ktexte = [b.window_text() for b in knoepfe]
+            grund = mt5_login_dialog_grund(titel, texte, ktexte, werte, expected)
+            if grund.startswith("Konto passt nicht") and nur_pids is None:
+                # eigenes Konto einer anderen Installation (29.10.2026): volle Signatur fuer DIESES Konto, Dialog aus GENAU dessen
+                # Installation (Prozess), in diesem Lauf noch nicht bestaetigt — dann bestaetigen
+                if eigene is None:
+                    eigene = eigene_mt5_konten()
+                anderes = mt5_login_eigenes_anderes_konto(werte, expected, eigene)
+                if anderes and mt5_login_dialog_grund(titel, texte, ktexte, werte, anderes) == "":
+                    prozesse, _f = _verbindung_lage()
+                    darf, warum = login_andere_installation_ok(anderes, eigene, d.element_info.process_id, prozesse, time.time(),
+                                                               _LOGIN_ANDERE_OK.get(anderes))
+                    if darf:
+                        ziel, grund = anderes, ""
+                    else:
+                        grund = f"{grund}; {warum}"
+            if grund:
+                if trail is not None:
+                    trail.append(f"Login-Dialog '{titel}' uebergangen ({grund})")
+                continue
+            ok = mt5_login_knopf_waehlen(knoepfe, lambda b: b.window_text())
+            if ok is None:
+                continue
+        except Exception:
+            continue
+
+        if ziel != expected:
+            _LOGIN_ANDERE_OK[ziel] = time.time()
+            weg = _druecken(d, ok, ("invoke",))   # fremdes Terminal: nur invoke — keine Maus, kein Fokus, kein Enter
+        else:
+            weg = _druecken(d, ok)
+        if ziel != expected:
+            # andere eigene Installation: bestaetigt oder nicht — weiter nach dem Dialog des erwarteten Kontos suchen; den eigenen Fokus
+            # holt der Lauf danach selbst zurueck (_finde_terminal + _fenster_betreten vor F9)
+            if trail is not None:
+                trail.append(f"MT5-Login-Dialog fuer eigenes Konto {ziel}, andere Installation, mit OK bestaetigt ({weg})" if weg
+                             else f"MT5-Login-Dialog fuer eigenes Konto {ziel}, andere Installation: OK ohne Wirkung")
+            continue
+        if weg:
+            if trail is not None:
+                trail.append(f"MT5-Login-Dialog fuer {expected} mit OK bestaetigt ({weg})")
+            return "bestaetigt"
         if trail is not None:
             trail.append(f"MT5-Login-Dialog fuer {expected}: OK ohne Wirkung")
         return "gescheitert"
@@ -26623,7 +26728,7 @@ def modus_loginok(expected, sekunden="90", pfad=None):
                 warten_s += time.time() - t0
                 continue
             nur_pids = pids_der_installation(prozesse, pfad) if prozesse else None
-        st = _mt5_login_bestaetigen(exp, trail, wege=("invoke",), nur_pids=nur_pids)
+        st = _mt5_login_bestaetigen(exp, trail, wege=("invoke",), nur_pids=nur_pids, eigene={})   # Wache: nur ihr eigenes Konto (29.10.2026)
         if st == "bestaetigt":
             return {"ok": True, "msg": f"MT5-Login-Dialog für {exp} bestätigt", "ende": "bestaetigt",
                     "warten_s": round(warten_s), "trail": trail[-5:]}

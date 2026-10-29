@@ -2560,6 +2560,101 @@ def _konto_verbunden(fname, expected):
             and str(st.get("master_login") or "") == str(int(expected)))
 
 
+# LOGIN-WACHE AUCH OHNE KALTSTART (Finn 29.10.2026 07:35 Dubai, Mikes PC pc-l5o8bv: der Dialog „Einloggen" stand nach 04:13 Dubai bis
+# Finn ihn um 07:20 wegdrueckte — die Wache lief nur nach einem Kaltstart DURCH das Panel; meldete MT5 sich selbst ab oder startete ohne
+# Panel, schaute niemand nach). Jetzt prueft _login_dialog_waechter jede Minute (gestreut), ob im Prozess eines laufenden Master-Terminals
+# ein Login-Fenster steht (Titel „Einloggen"/„Login …", win32-Fensterliste — billig, kein UIA-Baum). Steht es LOGIN_DIALOG_STEHT_S
+# (+ 0–60 s) am Stück, startet dieselbe _login_ok_wache wie nach einem Kaltstart. Bewusst NICHT der Copier-Status: Puls-/Echo-V2-Instanzen
+# laufen ohne Copier und waeren sonst immer „nicht verbunden" (Review 29.10.2026). Last-Deckel: hoechstens LOGIN_WACHE_GLEICHZEITIG
+# Wachen auf dem PC (in einer Runde mitgezaehlt), je Instanz frühestens LOGIN_WACHE_PAUSE_S nach dem Ende der letzten Wache (auch der
+# Kaltstart-Wache). Die Wache bestaetigt weiter nur den Dialog GENAU dieses Kontos per invoke (keine Maus).
+LOGIN_DIALOG_STEHT_S, LOGIN_WACHE_PAUSE_S, LOGIN_WACHE_GLEICHZEITIG = 120, 3600, 2
+LOGIN_FENSTER_TITEL = ("einloggen", "login", "anmelden", "anmeldung")   # wie order_bot.MT5_LOGIN_TITEL
+_DIALOG_SEIT, _LOGIN_WACHE_ZULETZT, _LOGIN_WACHE_SCHWELLE = {}, {}, {}
+
+
+def login_fenster_titel(titel):
+    """REIN RECHNEND (testbar): Titel eines MT5-Login-Fensters? Exakt oder als Anfang (wie order_bot.ist_mt5_login_titel)."""
+    t = (titel or "").strip().lower()
+    return bool(t) and any(t == x or t.startswith(x + " ") or t.startswith(x + ":") for x in LOGIN_FENSTER_TITEL)
+
+
+def _login_dialog_steht(install_dir):
+    """True, wenn ein sichtbares Login-Fenster zu einem terminal64.exe-Prozess dieser Installation gehoert; None ohne Windows/pywinauto."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return None
+    try:
+        pids = set(provision.terminal_pids(install_dir))
+        if not pids:
+            return False
+        for w in Desktop(backend="win32").windows():
+            try:
+                if w.process_id() in pids and w.is_visible() and login_fenster_titel(w.window_text()):
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return False
+
+
+def login_wache_faellig(laeuft, dialog, seit, jetzt, schwelle, zuletzt, aktiv, laufende):
+    """REIN RECHNEND (testbar): (faellig, seit). laeuft = Master-Terminal der Instanz laeuft, dialog = Login-Fenster steht, seit = erster
+    Zeitpunkt mit stehendem Dialog (None = bisher keiner), zuletzt = Ende der letzten Wache dieser Instanz, aktiv = Wache laeuft schon,
+    laufende = Wachen auf dem PC insgesamt. Terminal aus oder kein Dialog → (False, None)."""
+    if not laeuft or not dialog:
+        return False, None
+    seit = jetzt if seit is None else seit
+    if aktiv or laufende >= LOGIN_WACHE_GLEICHZEITIG:
+        return False, seit
+    if zuletzt is not None and jetzt - zuletzt < LOGIN_WACHE_PAUSE_S:
+        return False, seit
+    return jetzt - seit >= schwelle, seit
+
+
+def _login_dialog_waechter():
+    time.sleep(90 + random.uniform(0, 60))   # Panel-Start: Terminals/Kaltstart-Wachen erst hochkommen lassen
+    while True:
+        try:
+            neu = 0   # in dieser Runde gestartete Wachen (tragen sich erst in ihrem Thread in LOGIN_WACHE ein)
+            for i in instances():
+                fname = i["config_file"]
+                cfg = read_json(os.path.join(HERE, fname), {}) or {}
+                pfad = str(cfg.get("master_terminal_path") or "").strip()
+                try:
+                    expected = int(cfg.get("master_expected_login") or 0)
+                except (TypeError, ValueError):
+                    expected = 0
+                if not pfad or not expected:
+                    continue   # Orbit/TV-Instanzen oder Konto unbekannt
+                install_dir = os.path.dirname(os.path.abspath(pfad))
+                laeuft = bool(provision.terminal_pids(install_dir))
+                dialog = laeuft and bool(_login_dialog_steht(install_dir))
+                with HEAL_LOCK:
+                    aktiv, laufende = install_dir in LOGIN_WACHE, len(LOGIN_WACHE) + neu
+                schwelle = _LOGIN_WACHE_SCHWELLE.setdefault(fname, LOGIN_DIALOG_STEHT_S + random.uniform(0, 60))
+                faellig, seit = login_wache_faellig(laeuft, dialog, _DIALOG_SEIT.get(fname), time.time(), schwelle,
+                                                    _LOGIN_WACHE_ZULETZT.get(fname), aktiv, laufende)
+                if seit is None:
+                    _DIALOG_SEIT.pop(fname, None)
+                else:
+                    _DIALOG_SEIT[fname] = seit
+                if not faellig:
+                    continue
+                neu += 1
+                _DIALOG_SEIT.pop(fname, None)
+                _LOGIN_WACHE_SCHWELLE.pop(fname, None)
+                print(f"[panel] {fname}: Login-Fenster steht seit {round(time.time() - seit)} s, Terminal läuft — "
+                      f"Login-Wache für {expected} startet (ohne Kaltstart)", flush=True)
+                threading.Thread(target=_login_ok_wache, args=(fname, expected, install_dir), daemon=True).start()
+                time.sleep(2 + random.uniform(0, 3))
+        except Exception as e:
+            print(f"[panel] Login-Dialog-Waechter: {type(e).__name__}: {e}", flush=True)
+        time.sleep(60 + random.uniform(0, 30))
+
+
 def _login_ok_wache(fname, expected, install_dir=None):
     """Nach einem Kaltstart (08.10.2026, Master — Moritz 8a05ebaa: das MT5-Einloggen-Fenster blockierte Snapshot und API ~4 min, der
     _ok_dialog_watcher erkennt es nicht, nur der Bot — und der erst mitten im Order-Lauf): der Bot sucht NUR das Einloggen-Fenster für
@@ -2609,6 +2704,7 @@ def _login_ok_wache(fname, expected, install_dir=None):
     finally:
         with HEAL_LOCK:
             LOGIN_WACHE.discard(install_dir)
+        _LOGIN_WACHE_ZULETZT[fname] = time.time()   # Pause des Dialog-Waechters zaehlt ab dem Ende jeder Wache (29.10.2026)
 
 
 def start_terminal(fname, creds=None, ohne_update=False):
@@ -5228,6 +5324,7 @@ def main():
         print(f"[panel] Terminal-Zu nachholen: {type(e).__name__}: {e}", flush=True)
     # Leerlauf-Waechter (22.09.2026): Terminal ohne Trade geht nach ~15 min von selbst zu
     threading.Thread(target=_leerlauf_waechter, daemon=True).start()
+    threading.Thread(target=_login_dialog_waechter, daemon=True).start()   # 29.10.2026: Login-Wache auch ohne Kaltstart
     threading.Thread(target=_boot_terminals, daemon=True).start()   # 01.10.2026: Master mit laufendem Trade nach PC-Start
     # MT5-Update ohne UAC-Abfrage (01.10.2026) — Details bei _mt5_update_waechter
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
