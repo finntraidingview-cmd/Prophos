@@ -24355,6 +24355,7 @@
   }
   window._v2Nachhol = { treffer: v2NachholTreffer }   // Test-Haken
   async function mt5PlanPollTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL || mt5PlanPoll.busy) return
     // defensiver tradePlans-Zugriff wie atCheck (Boot-Reihenfolge)
     let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
@@ -24927,6 +24928,9 @@
       const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
       // HAUPT-TAB (30.10.2026): ein zweiter Tab meldet nichts mehr (kein mt5_live) und wechselt auf „nur ansehen"
+      // Sofort-Sperre (S2 30.10.2026): ab jetzt beginnt dieser Tab nichts Neues (Start, Signal, Hedge-Wächter, Auto-Close …); laufende Läufe
+      // enden, dann lädt er im ruhigen Moment als „nur ansehen" neu. Wird er doch wieder Haupt-Tab, fällt die Sperre.
+      window._tabNeben = dd.haupt_tab === false
       if(dd.haupt_tab === false){ tabNebenWerden(); return }
       // BOT-STAND UNTEN IM TAB (19.10.2026, Finn: „immer unten die neueste Version reinschreiben, damit ich weiß, ob es tatsächlich ein
       // Update ist" — der Bot wird per Commit getauscht, ohne dass die Seite neu lädt; die Build-Nummer allein sagt also nichts über
@@ -27426,6 +27430,7 @@
     catch(e){ console.warn('[bal-nach]', (e && e.message) || e) }
   }
   async function ebnTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL || _ebnLaeuft || typeof window.mtcApi !== 'function') return
     if(polarLaeuft()) return   // POLAR-VORRANG (20.10.2026): keine Balance-Lesung, solange Polar diese ID hält
     const jetzt = Date.now(), je = ebnLetzte(jetzt)
@@ -27776,6 +27781,7 @@
     tvV2Poll.timer = null
   }
   async function tvV2PollTick(opts){
+    if(window._tabNeben) return { ok:false, grund:'neben_tab' }   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     const manuell = !!(opts && opts.manuell)
     let gelesen = 0
     const fehler = []   // je Konto: 'code: msg' — für den Toast von „P&L holen" (24.09.2026 abends)
@@ -28518,6 +28524,7 @@
   }
   window._hedgeExitFillWahl = hedgeExitFillWahl   // Test-Haken
   function hedgeExitFillTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     try{
       if(!MT5_LOCAL) return
       const st = (typeof epLokal !== 'undefined' && epLokal) ? epLokal.stand : null
@@ -30458,6 +30465,7 @@
     finally{ setTimeout(tvV2DemoEndeTakt, 55000 + Math.random() * 15000) }
   }
   async function tvV2DemoEndePruefen(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     try{
       if(!MT5_LOCAL || !currentUserId) return
       let _tp = []; try{ _tp = tradePlans }catch(_){}
@@ -30625,6 +30633,7 @@
   }
   let _tvFeedBusy = false
   async function tvV2FeedPruefen(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL || !currentUserId || _tvFeedBusy || !_tvFeedLv.size) return
     let _tp = []; try{ _tp = tradePlans }catch(_){}
     const jetzt = Date.now()
@@ -31517,6 +31526,7 @@
     try{ hedgeAmPlanSchreiben(p.id, { reader_wartet: Object.assign({ grund, at: new Date(jetzt).toISOString() }, werte || {}) }).catch(() => {}) }catch(_){}
   }
   async function hedgeReaderSchnellTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(_hedgeSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
     let tp; try{ tp = tradePlans }catch(_){ return }
     const pc = hedgePcId()
@@ -31781,6 +31791,7 @@
       : String((r && (r.msg || r.code)) || 'Reparatur-Lauf ohne Antwort').slice(0, 120) }
   }
   async function hedgeTsxSchnellTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(_tsxSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
     let tp; try{ tp = tradePlans }catch(_){ return }
     const pc = hedgePcId()
@@ -31872,6 +31883,7 @@
    * des Hedges, nur bis 30 min nach dem Ende; je Plan ein Lauf zur Zeit. */
   const _v3NachtragLaeuft = new Set()
   async function hedgeV3BalanceNachtrag(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!(MT5_LOCAL && typeof window.mtcApi === 'function')) return
     let tp; try{ tp = tradePlans }catch(_){ return }
     const pc = hedgePcId(), jetzt = Date.now()
@@ -31992,6 +32004,7 @@
     }
   }
   async function hedgeWacheTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(_hedgeWacheBusy) return
     // Am PC (Terminal dort): voller Wächter. Am Mac (Backend .475): nur der Ring-Abgleich aus mt5_live, damit die Karte
     // „zu · −4,20 € · Master-TP erreicht" auch zeigt, wenn der PC-Tab gerade nicht lief.
@@ -51956,7 +51969,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1904'
+  const OS_TAB_BUILD = '2026-09-22.1905'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54130,6 +54143,7 @@
     try{ await supabase.from('puls_ergebnisse').update({ abgeholt_at: new Date().toISOString() }).eq('plan_id', String(planId)).eq('art', art) }catch(_){}
   }
   async function pulsErgebnisseUebernehmen(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL || _peLaeuft) return
     let uid = null; try{ uid = currentUserId }catch(_){}
     if(!uid) return
@@ -54534,6 +54548,7 @@
     }
   }
   async function orderSignalTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL) return
     if(_osBusy || _osActive){ _osStand = 'lauf-aktiv'; return }
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
@@ -55102,6 +55117,7 @@
     }, n ? 500 : 50)
   }
   function osWeckerPruefen(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || typeof window.mtcApi !== 'function' || typeof supabase.channel !== 'function') return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(_osRt.kanal && _osRt.uid !== uid) osWeckerAbbauen()   // Profilwechsel/Abmelden: Abo gehört zur alten ID
@@ -55559,6 +55575,7 @@
   }
 
   async function acTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!_ac.geladen){ if(!(await acLaden())) return }
     const r = _ac.regel
     acStatusZeile()
@@ -56950,6 +56967,7 @@
   }
   let _sfLaeuft = false, _sfAbgleichAt = 0
   async function sfTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL || _sfLaeuft) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid) return
@@ -57299,6 +57317,7 @@
     return neu
   }
   async function tpStartUmTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL) return
     let orbitLaeuft = false; try{ orbitLaeuft = !!_tpOrbitLaeuft || !!_osActive }catch(_){ orbitLaeuft = true }
     // Warte-Grund (16.10.2026): jeder frühe Ausstieg verbucht für alle fälligen Pläne, woran es hängt
@@ -66410,6 +66429,7 @@
   }
   // Der Tick (nur PC-Tab): eintragen, Automatik-Würfeln, fremd angelegte Pläne nachladen, eigene Zeilen abgleichen
   async function wdTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || _wd.laeuft) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid) return
@@ -77351,6 +77371,7 @@
   const MTC_NACHZ_KEY = 'prophos_echo_nachzuegler'
   let _mtcNachzLaeuft = false
   async function mtcNachzueglerEinrichten(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL || _mtcNachzLaeuft) return
     if(typeof mt5CreateAccountInCopier !== 'function') return
     _mtcNachzLaeuft = true
@@ -77597,6 +77618,7 @@
   const EP_TICK_TOT_MS = 10000, EP_HEIL_MS = 60000, EP_HEIL_PAUSE_MS = 10 * 60 * 1000, EP_HEIL_KEY = 'prophos_bruecke_heil'
   const epStart = Date.now()
   function epHeilPruefen(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL) return
     const jetzt = Date.now()
     if(!epLokal.readerFrischAt || jetzt - epLokal.readerFrischAt > 10000) return   // Reader liefert nichts — kein Tab-Problem
@@ -77646,6 +77668,7 @@
    * (/code/…, GitHub nur Rückfall). Es ist derselbe signierte Schlüssel wie für den Reader-Direktfeed (uid.pc.sig); dieser
    * PC-Tab holt ihn EINMAL und legt ihn im Panel ab (code_token.txt). Alle 5 min nachsehen, ob er da ist — Mac/Handy: nichts. */
   async function codeSchluesselTick(){
+    if(window._tabNeben) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return
     try{
       const st = await window.mtcApi('code-token')

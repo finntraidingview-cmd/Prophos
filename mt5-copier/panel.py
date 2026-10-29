@@ -1674,7 +1674,7 @@ TAB_URL_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{2,5}/[A-Za-z0-9._/
 # bisherige (kein Flattern). Nur der Haupt-Tab zählt als Herzschlag (Öffnen/Neuladen/Heilung) — ein zweiter Tab bekommt haupt_tab:false und
 # schaltet sich auf „nur ansehen" (prophos.html ?neben=1: ohne PC-Rollen, kein mt5_live, keine Claims). Geschlossen wird er nie. Ob eine
 # Kennung im Puls-Chrome liegt, liest das Panel per CDP (window._tabHerzId der Prophos-Seiten, nur lesen). ══
-TAB_HAUPT_FRISCH_S = 60
+TAB_HAUPT_FRISCH_S = 5 * 60   # Hysterese (S2 30.10.2026): Chrome drosselt verdeckte Tabs auf ~1 Abfrage/min oder friert sie kurz ein
 TAB_PULS_PRUEF_S = 5 * 60
 _TABS = {}   # tid → {"at", "login", "url", "puls": True/False/None}
 _TAB_HAUPT = {"tid": "", "puls_at": 0.0, "meldung": ""}
@@ -2099,6 +2099,8 @@ def _haupt_tab_runde(pc, liste, jetzt):
         h = _TABS.get(_TAB_HAUPT["tid"]) or {}
         meldung = (f"{len(lebend)} Prophos-Tabs an diesem PC — Haupt-Tab {'im Puls-Chrome' if h.get('puls') else 'in einem anderen Chrome'}"
                    f"{'' if h.get('login') else ' (nicht angemeldet)'}, die anderen nur ansehen")
+        if any(_TABS[t].get("puls") is True and not _TABS[t].get("login") for t in lebend):
+            meldung += " — der Prophos-Tab im Puls-Chrome ist nicht angemeldet: am PC dort einmal in Prophos einloggen, dann wird er Haupt-Tab"
     if meldung != _TAB_HAUPT["meldung"]:
         _TAB_HAUPT["meldung"] = meldung
         if meldung:
@@ -2581,7 +2583,10 @@ def _tab_heil_schritt(pc, still0):
             liste = _cdp_get("/json/list")
         except Exception:
             return False
-        if not cdp_prophos_ziele(liste if isinstance(liste, list) else [])[0]:
+        pro0 = cdp_prophos_ziele(liste if isinstance(liste, list) else [])[0]
+        # nur den HAUPT-Tab heilen (S2 30.10.2026): liegt im Puls-Chrome nur ein „nur ansehen"-Tab (z. B. dort nicht angemeldet) bzw. liegt
+        # der Haupt-Tab nachweislich woanders → bisheriger Weg, nie den falschen Tab wecken/neu laden/schließen
+        if not pro0 or "neben=1" in str(pro0.get("url") or "") or (_TABS.get(_TAB_HAUPT["tid"]) or {}).get("puls") is False:
             return False                     # Prophos-Tab nicht im Puls-Chrome: bisheriger Weg
     stand = _tab_stand_holen(pc, TAB_HEIL["grund"]) if pc else None
     if isinstance(stand, dict) and stand.get("ok"):

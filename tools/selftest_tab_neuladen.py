@@ -140,10 +140,21 @@ def main():
     check(H(tabs, j1, "a") == "b", "Tab im Puls-Chrome schlägt den anderen Chrome")
     tabs["b"]["login"] = False
     check(H(tabs, j1, "b") == "a", "nicht angemeldet im Puls-Chrome verliert gegen angemeldet woanders")
-    check(H({"a": {"at": j1 - 61, "login": True}}, j1, "a") == "", "kein Tab fragt ≤ 60 s → keiner")
+    check(H({"a": {"at": j1 - 301, "login": True}}, j1, "a") == "", "kein Tab fragt ≤ 5 min → keiner")
+    check(H({"a": {"at": j1 - 240, "login": True, "puls": True}, "b": {"at": j1 - 1, "login": True, "puls": False}}, j1, "a") == "a",
+          "Hysterese (S2): gedrosselter Haupt-Tab im Puls-Chrome (4 min still) bleibt Haupt-Tab, kein Neuladen im Kreis")
     N = hz["neben_tab_frei"]
-    check(N(tabs, "b", False, j1, "a") is False and N(tabs, "b", True, j1, "a") is True and N({"a": {"at": j1 - 120, "login": True}}, "b", False, j1, "a") is True,
+    check(N(tabs, "b", False, j1, "a") is False and N(tabs, "b", True, j1, "a") is True and N({"a": {"at": j1 - 120, "login": True}}, "b", False, j1, "a") is False
+          and N({"a": {"at": j1 - 301, "login": True}}, "b", False, j1, "a") is True,
           "nur ansehen → wieder Haupt-Tab, wenn der Haupt-Tab tot ist oder dieser Tab höher rangiert (angemeldet + Puls-Chrome)")
+
+    html = open(os.path.join(HIER, "..", "prophos.html"), encoding="utf-8").read()
+    check(html.count("if(window._tabNeben) return") >= 20 and "window._tabNeben = dd.haupt_tab === false" in html
+          and all(f"function {n}(" in html for n in ("tpStartUmTick", "sfTick", "orderSignalTick", "acTick", "hedgeWacheTick", "wdTick")),
+          "Sofort-Sperre (S2): haupt_tab:false → Start, Signale, Hedge-Wächter, Auto-Close, WD beginnen nichts Neues bis zum Neuladen")
+    pq = open(os.path.join(HIER, "..", "mt5-copier", "panel.py"), encoding="utf-8").read()
+    hs = pq[pq.index("\ndef _tab_heil_schritt("):pq.index("\n\n\n", pq.index("\ndef _tab_heil_schritt("))]
+    check('"neben=1" in' in hs and '.get("puls") is False' in hs, "Stufen-Heilung nur am Haupt-Tab im Puls-Chrome, nie am „nur ansehen“-Tab (S2)")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)
