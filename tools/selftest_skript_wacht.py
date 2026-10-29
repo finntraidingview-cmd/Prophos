@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_version_neuer", "skript_wacht_pruefen", "skript_wacht_ht_filter", "tsx_wacht_zeilen")
-KONSTANTEN = ("SKRIPT_WACHT_TAKT_S", "SKRIPT_WACHT_KARENZ_S", "SKRIPT_WACHT_WIEDER_S")
+FUNKTIONEN = ("_version_neuer", "skript_wacht_pruefen", "skript_wacht_ht_filter", "tsx_wacht_zeilen", "tm_melde_frei_rechnen")
+KONSTANTEN = ("SKRIPT_WACHT_TAKT_S", "SKRIPT_WACHT_KARENZ_S", "SKRIPT_WACHT_WIEDER_S", "TM_MELDE_ABSTAND_S")
 
 
 def lade():
@@ -63,6 +63,11 @@ def main():
        f"Auge-Zeilen: jüngste je PC, laeuft zählt, PC ohne Auge raus ({z})")
     tz = ns["skript_wacht_pruefen"](ns["skript_wacht_ht_filter"](z, live_tsx, fremd), "0.3.0", jetzt, jetzt - 3600, {})
     ok(tz == [("pc-aaaa01", "0.2.0")], f"Auge-Wache: alter Kern auf HT-PC gemeldet, Emin-PC und aktueller PC still ({tz})")
+    # 24-h-Drossel der Tampermonkey-Meldung (Prüfer 29.10.2026)
+    fr, m = ns["tm_melde_frei_rechnen"], {}
+    ok(fr("k", jetzt, m, False) and fr("k", jetzt, m, None) and not fr("k", jetzt, m, True), "Drossel: neu → frei, in alarm_log < 24 h → still")
+    m["k"] = jetzt - 100
+    ok(not fr("k", jetzt, m, False) and not fr("k", jetzt, m, None) and fr("k", jetzt + 86400, m, False), "Drossel: im Prozess < 24 h → still, danach frei")
     for t in f:
         print("✗", t)
     print("alle Tests bestanden" if not f else f"FEHLER ({len(f)})")

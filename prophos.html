@@ -26207,7 +26207,7 @@
       const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token
       if(tok) await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
         body: JSON.stringify({ ok: !!(r && r.ok), code: (r && r.code) || '', msg: String((r && r.msg) || '').slice(0, 200), von, soll: (r && r.soll) || '',
-          pc: hedgePcId() || '', art: b.art }) })
+          pc: hedgePcId() || '', art: b.art, trail: String((r && r.trail) || '').slice(-400) }) })   // Spur für alarm_log.daten (Diagnose je PC)
     }catch(e){ console.warn('[tv-neuladen] Tampermonkey melden', (e && e.message) || e) }
   }
   async function tvNeuladenLauf(b){

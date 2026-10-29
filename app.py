@@ -3893,20 +3893,50 @@ def alarm_userscript_update():
     if str(uid) in _aus or _alarm_fremd_verwaltet(uid):   # nur Hermann-Technologies-IDs melden (wie alarm_tick), Emin-Gruppe nie
         return jsonify({"ok": True})
     wer = f"{namen.get(uid, uid[:8])}" + (f" · {pc}" if pc else "")
-    daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg, "art": "tsx" if tsx else "tv"}
+    daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg, "art": "tsx" if tsx else "tv", "trail": kurz("trail", 400)}
+    # 24-h-Drossel je Schlüssel (Prüfer 29.10.2026): der Tab meldet je PC nur einmal — verliert er seinen localStorage oder laufen zwei Tabs,
+    # käme dieselbe Meldung sonst wieder. Gemerkt im Prozess UND in alarm_log (mehrere Worker, Neustart).
+    key = f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}" + ("" if d.get("ok") is True else "|fehl")
+    if not _tm_melde_frei(key):
+        return jsonify({"ok": True, "gedrosselt": True})
     if d.get("ok") is True:
         alarm_senden(3, "userscript_tm_ok", f"Tampermonkey aktualisiert auf {wer}",
                      f"{wer}: Puls hat das {was} in Tampermonkey aktualisiert ({von or '?'} → {soll or '?'}). Ab jetzt kommen Updates über den Lader.",
-                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}")
+                     uid=uid, daten=daten, schluessel=key)
     else:
         alarm_senden(3, "userscript_tm_fehl", f"Tampermonkey-Update von Hand: {wer}",
                      f"{wer}: Puls konnte das {was} nicht aktualisieren ({code or '?'}: {msg or 'keine Antwort'}). Bitte einmal am PC im "
                      f"Puls-Chrome {link} öffnen und „Aktualisieren\" drücken — danach geht es von selbst.",
-                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}|fehl")
+                     uid=uid, daten=daten, schluessel=key)
     return jsonify({"ok": True})
 
 
 _TM_LINK = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
+TM_MELDE_ABSTAND_S = 86400
+_TM_GEMELDET = {}
+
+
+def tm_melde_frei_rechnen(key, jetzt, merk, in_db):
+    """REIN RECHNEND (testbar): darf die Meldung mit diesem Schlüssel raus? Nein, wenn sie in den letzten 24 h im Prozess (merk) oder in
+    alarm_log (in_db: True = gefunden, None = nicht prüfbar → nur der Prozess-Merker zählt) schon stand."""
+    t = merk.get(key)
+    if t is not None and jetzt - float(t) < TM_MELDE_ABSTAND_S:
+        return False
+    return in_db is not True
+
+
+def _tm_melde_frei(key):
+    jetzt = time.time()
+    in_db = None
+    try:
+        ab = datetime.fromtimestamp(jetzt - TM_MELDE_ABSTAND_S, timezone.utc).isoformat()
+        in_db = bool(sb_select("alarm_log", {"select": "id", "schluessel": f"eq.{key}", "at": f"gte.{ab}", "limit": "1"}))
+    except Exception:
+        in_db = None
+    frei = tm_melde_frei_rechnen(key, jetzt, _TM_GEMELDET, in_db)
+    if frei:
+        _TM_GEMELDET[key] = jetzt
+    return frei
 
 
 @app.route("/alarm/stand", methods=["GET", "POST", "OPTIONS"])
