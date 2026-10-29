@@ -3869,7 +3869,13 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
         # FINALER TRADEIFY GEHALTEN (29.10.2026): der DB-Trigger hat den Start verschoben (start_sperre art final_halten) → ⚪ einmal je Plan
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else {}
-        if st == "planned" and ss.get("art") == "final_halten" and str(ss.get("at") or "") > seit_iso:
+        # HEDGE-TRADE OHNE FREIGABE (29.10.2026, trade_plans_a0_hedge_freigabe): ⚪ einmal je Plan
+        if st == "planned" and ss.get("art") == "hedge_freigabe" and str(ss.get("at") or "") > seit_iso:
+            out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Hedge-Trade wartet auf Bestätigung",
+                        f"{wer} · {konto}: wartet auf deine Bestätigung im Challenge-Planer (Admin → Challenge-Planer → „Neue Hedge-Trades "
+                        f"bestätigen“) — startet erst danach.", uid, pid))
+        tfh = p.get("tfh") if isinstance(p.get("tfh"), dict) else {}
+        if st == "planned" and ss.get("art") == "final_halten" and str(ss.get("at") or "") > seit_iso and not tfh.get("gemeldet"):
             nx = _alarm_ts(ss.get("naechster"))
             nx_txt = nx.astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m. %H:%M") if nx else "?"
             out.append((f"{pid}|final_halten", 3, "tradeify_final_halten", "Finaler Tradeify-Trade gehalten",
@@ -3919,7 +3925,7 @@ def alarm_tick():
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
-           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild")
+           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
@@ -23451,6 +23457,8 @@ def ap_tradeify_final_halten(regeln, firma, w):
     bis Ziel (Rest ≤ 0 = Ziel schon erreicht)."""
     if (regeln or {}).get("tradeify_final_halten") is False:
         return False
+    if tfh_param(regeln)["an"]:
+        return False                    # Gegenhedge-Weg an (tfh_tick): finale Trades werden geplant und kurz vor dem Start Orbit V3
     f = re.sub(r"[^a-z0-9]", "", str(firma or "").lower())
     if "tradeify" not in f or _ist_tradeify_cfd(firma):
         return False
@@ -24484,7 +24492,7 @@ def gp_push_ereignisse(plaene, namen, seit_iso):
         if sf and sf.get("status") == "rot" and str(sf.get("at") or "") > seit_iso and sf.get("schritt") != "ziel_erreicht":
             out.append((f"{pid}|sf|{sf.get('at')}", "⚠ Trade nicht gestartet", f"{wer} · {konto}: {str(sf.get('msg') or 'Start-Check rot')[:150]}"))
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else None
-        if ss and ss.get("art") == "final_halten":
+        if ss and ss.get("art") in ("final_halten", "hedge_freigabe"):
             ss = None                                # finaler Tradeify gehalten (29.10.2026): eigene ⚪-Meldung in alarm_ereignisse
         if ss and str(ss.get("at") or "") > seit_iso:
             out.append((pid + "|ss", "⛔ Order ging nicht durch — Richtungsschutz",
@@ -24807,6 +24815,13 @@ def eh_tick(jetzt=None, force=False):
                                            f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})"}):
         eh = q.get("echo_hedge") if isinstance(q.get("echo_hedge"), dict) else {}
         vorgemerkt[str(eh.get("login") or "")] = vorgemerkt.get(str(eh.get("login") or ""), 0.0) + (_wd_num(eh.get("lots")) or 0.0)
+    # dazu die finalen Tradeify-Gegenhedges (tfh_tick, route tvv2) — derselbe Fusion-Login, dieselbe 60-Lot-Grenze (Prüfung 29.10.2026)
+    for q in _sb_all("trade_plans", {"select": "mt5_baseline->tradeify_hedge", "status": "in.(planned,open)", "route": "eq.tvv2",
+                                     "mt5_baseline->tradeify_hedge->>status": "eq.mit",
+                                     "or": f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
+                                           f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})"}):
+        th = q.get("tradeify_hedge") if isinstance(q.get("tradeify_hedge"), dict) else {}
+        vorgemerkt[str(th.get("login") or "")] = vorgemerkt.get(str(th.get("login") or ""), 0.0) + (_wd_num(th.get("lots")) or 0.0)
     for p in plaene:
         a = konten.get(str(p.get("master_account_id")))
         if not a or (a.get("account_type") or "") not in EH_TYPEN:
@@ -24861,6 +24876,364 @@ def eh_tick(jetzt=None, force=False):
         _eh["umgestellt"] += 1
         _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Echo mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']})")
     return erg
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ══ FINALER TRADEIFY MIT GEGENHEDGE (Finn 29.10.2026 ~16:30 Dubai, über Master: „Für Tradeify will ich, dass die Trades, die eins vor Passed
+# sind, mit der Orbit-Logik gestartet werden, auch mit der Orbit-Priorität … mit Gegenhedge … bei Tradeify NUR beim Final Trade"). Der
+# Planer plant den finalen Tradeify-Futures-Trade wie bisher als Orbit V2 (tvv2); tfh_tick stellt ihn — wie eh_tick bei Echo — ab vorlauf_min
+# vor bis nachlauf_min nach seinem Start auf Orbit V3 um: orbit_v3 + Fusion-Gegenhedge (master_risk = Polster $, slave_risk = q × Polster €,
+# hedge_eur = Hedge am Master-TP, multiplier/hedge_faktor) — derselbe Weg wie Funded-Planer und Winning Days; der PC-Tab rechnet die Lots
+# daraus (hedgeMultAusRisiko) und gibt dem Plan die Big-Trade-/Orbit-Priorität (orbit_v3). q = Kontowert ÷ Polster ÷ netto_faktor (€ je $,
+# S1: ein Blow deckt den Kontowert; 157k → ≈ +669 € Blow, ≈ −297 € Pass). Gegen den Claim dicht (UPDATE mit start_um_gestartet_at is null +
+# updated_at), hand_werte_at blockiert NICHT (Marc 880b8b11). Geht es nicht (Fusion-Lesung alt, Marge knapp, 60-Lot-Grenze je Login — offen +
+# vorgemerkt aus Echo-Hedge UND diesem Weg —, kein Hedge-Konto/Kontowert …): NIE ohne Hedge starten — der Plan bleibt Orbit V2 und der
+# DB-Halte-Riegel (trade_plans_a_final_halten) hält ihn am Claim; Grund in mt5_baseline.tradeify_hedge, ⚪ einmal kurz vor dem Start.
+# Schalter auto_plan_regeln.regeln.tradeify_final_hedge.an (Standard AUS — dann gilt nur der Halte-Riegel); aus → umgestellte, nicht
+# gestartete Pläne zurück auf Orbit V2. Der Riegel trade_plans_kontoart_weg lässt genau diesen Weg durch (sql/2026-10-29_tradeify_final_hedge.sql).
+TFH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "max_lots": 60.0, "vorlauf_min": 20.0, "nachlauf_min": 30.0}
+TFH_SLAVE_PPL = 0.85          # € je Punkt und Lot Fusion — derselbe feste Wert wie hedgeMultAusRisiko im PC-Tab
+_tfh = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
+
+
+def tfh_param(regeln):
+    """REIN RECHNEND (testbar): regeln.tradeify_final_hedge → Parameter; Ungültiges fällt einzeln auf TFH_STANDARD zurück."""
+    roh = (regeln or {}).get("tradeify_final_hedge") if isinstance(regeln, dict) else None
+    roh = roh if isinstance(roh, dict) else {}
+    out = dict(TFH_STANDARD, an=roh.get("an") is True)
+    for k, lo, hi in (("netto_faktor", 0.5, 1.0), ("min_lot", 0.01, 1.0), ("max_lots", 1.0, 1000.0), ("vorlauf_min", 3.0, 120.0),
+                      ("nachlauf_min", 0.0, 60.0)):
+        v = _wd_num(roh.get(k))
+        if v is not None and not isinstance(roh.get(k), bool) and lo <= v <= hi:
+            out[k] = float(v)
+    return out
+
+
+def ap_plan_final_text(notes, tp):
+    """REIN RECHNEND (testbar): wie prophos_plan_final_text in der DB — True | False | None (aus der Notiz nicht erkennbar)."""
+    n = str(notes or "")
+    if "Auto-Planer · Tage sammeln" in n:
+        return False
+    if re.search(r"Auto-Planer · (letzter Trade|Klein-Trade)", n):
+        return True
+    m = re.search(r"Rest ([0-9][0-9.]*(?:,[0-9]+)?) \$ bis Ziel", n)
+    if not m:
+        return None
+    rest = float(m.group(1).replace(".", "").replace(",", "."))
+    if rest <= 0:
+        return True
+    t = _wd_num(tp)
+    return bool(t and t > 0 and t >= rest)
+
+
+def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01):
+    """REIN RECHNEND (testbar): Fusion-Gegenhedge des finalen Tradeify-Trades → (dict, None) | (None, grund).
+    satz = Kontowert ÷ Polster (€ je $), polster $ (Balance − Liq), kt Kontrakte, ppl $/Pkt je Kontrakt (NQ 20, MNQ 2), tp $.
+    q = satz ÷ faktor; slave_risk = q × Polster (Hedge-Gewinn am Blow), Lots wie hedgeMultAusRisiko: slave_risk ÷ (0,85 × Polster-Punkte);
+    hedge_eur = Lots × 0,85 × TP-Punkte (Hedge-Verlust am Master-TP)."""
+    s, pol, k, pp, t = (_wd_num(x) for x in (satz, polster, kt, ppl, tp))
+    if not s or s <= 0:
+        return None, "kein Kontowert-Satz (Kontowert ÷ Polster) für dieses Konto"
+    if not pol or pol <= 0:
+        return None, "kein Polster (Balance − Liq) für dieses Konto"
+    if not k or k <= 0 or not pp or pp <= 0:
+        return None, "keine Kontrakte oder kein Punktwert am Plan"
+    if not t or t <= 0:
+        return None, "kein TP am Plan"
+    q = s / float(faktor or TFH_STANDARD["netto_faktor"])
+    slave_risk = q * pol
+    pkt = pol / (pp * k)
+    lots = slave_risk / (TFH_SLAVE_PPL * pkt)
+    mult = lots / k
+    if round(lots, 2) < float(min_lot) - 1e-9:
+        return None, f"Hedge {lots:.3f} Lot unter {float(min_lot):.2f} Lot".replace(".", ",")
+    return {"q": round(q, 5), "master_risk": round(pol, 2), "slave_risk": round(slave_risk, 2), "lots": round(lots, 2),
+            "multiplier": round(mult, 4), "hedge_faktor": round(mult, 3), "hedge_eur": round(lots * TFH_SLAVE_PPL * t / (pp * k), 2)}, None
+
+
+def _tfh_spur(text):
+    _tfh["letzt"] = (_tfh["letzt"] + [{"at": _wt_now_iso(), "text": str(text)[:300]}])[-30:]
+    print(f"[tradeify-hedge] {text}", flush=True)
+
+
+def _tfh_guard(p, orbit_v3=False):
+    """Update-Guard: noch geplant, Orbit (tvv2), nicht geclaimt, Auto-Plan, seitdem unverändert — hand_werte_at blockiert bewusst nicht."""
+    g = {"id": f"eq.{p['id']}", "status": "eq.planned", "route": "eq.tvv2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
+         "orbit_v3": "is.true" if orbit_v3 else "not.is.true"}
+    if p.get("updated_at"):
+        g["updated_at"] = f"eq.{p['updated_at']}"
+    return g
+
+
+def _tfh_ohne(p, code, grund, wer, jetzt):
+    """Plan bleibt Orbit V2 (der Halte-Riegel hält ihn am Claim). mt5_baseline.tradeify_hedge {status ohne, code, grund} nur bei neuem Code
+    oder fälliger Meldung; ⚪ einmal je Plan, sobald der Start ≤ EH_MELDEN_MIN entfernt ist (vorher kann es noch klappen)."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    alt = base.get("tradeify_hedge") if isinstance(base.get("tradeify_hedge"), dict) else None
+    try:
+        nah = (datetime.fromisoformat(str(p.get("start_um")).replace("Z", "+00:00")) - jetzt).total_seconds() <= EH_MELDEN_MIN * 60
+    except (TypeError, ValueError):
+        nah = True
+    melden = nah and not (alt or {}).get("gemeldet")
+    gleich = bool(alt) and alt.get("status") == "ohne" and alt.get("code") == code
+    if gleich and not melden:
+        return
+    neu = {"status": "ohne", "code": code, "grund": grund, "at": _wt_now_iso(), "gemeldet": bool((alt or {}).get("gemeldet")) or melden}
+    try:
+        if not sb_update("trade_plans", _tfh_guard(p), {"mt5_baseline": dict(base, tradeify_hedge=neu)}):
+            return
+    except Exception as e:
+        _tfh_spur(f"⚠️ {str(p['id'])[:8]} Grund nicht gespeichert: {type(e).__name__}: {e}")
+        return
+    if not gleich:
+        _tfh["ohne"] += 1
+        _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: kein Gegenhedge — {grund}")
+    if melden:
+        alarm_senden(3, "tradeify_final_ohne", "Finaler Tradeify-Trade ohne Gegenhedge",
+                     f"{wer} · {p.get('master_name') or '—'}: startet nicht ohne Gegenhedge (bleibt geplant) — {grund}",
+                     uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"tfh-ohne-{p['id']}")
+
+
+def tfh_zurueck():
+    """Schalter aus → umgestellte, noch nicht gestartete Pläne zurück auf Orbit V2 ohne Hedge (der Halte-Riegel hält sie dann). → Anzahl."""
+    n = 0
+    for p in _sb_all("trade_plans", {"select": "id,user_id,master_name,mt5_baseline,updated_at", "status": "eq.planned", "route": "eq.tvv2",
+                                     "orbit_v3": "is.true", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
+                                     "mt5_baseline->tradeify_hedge->>status": "eq.mit"}):
+        base = dict(p.get("mt5_baseline") or {})
+        base["tradeify_hedge"] = dict(base.get("tradeify_hedge") or {}, status="zurueck", zurueck_at=_wt_now_iso())
+        try:
+            if sb_update("trade_plans", _tfh_guard(p, orbit_v3=True), {"orbit_v3": False, "hedge_eur": None, "hedge_faktor": None, "multiplier": None,
+                                                                         "master_risk": None, "slave_risk": None, "mt5_baseline": base}):
+                n += 1
+                _tfh_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf Orbit V2")
+        except Exception as e:
+            _tfh_spur(f"⚠️ {str(p['id'])[:8]} zurück: {type(e).__name__}: {e}")
+    _tfh["zurueck"] += n
+    return n
+
+
+def tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par):
+    """Hedge-Vorschau eines finalen Tradeify-Plans für den Bestätigen-Block: {lots, hedge_eur, blow_eur, pass_eur, q, at} bzw. {grund, at}."""
+    bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+    if bal is None:
+        return {"grund": "Balance nicht lesbar", "at": _wt_now_iso()}
+    kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+    satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
+    ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
+    h, grund = tfh_hedge(satz, (wert / satz) if (satz and wert) else None, p.get("master_contracts"), ppl, p.get("master_tp"),
+                         par["netto_faktor"], par["min_lot"])
+    if grund:
+        return {"grund": grund, "at": _wt_now_iso()}
+    return {"lots": h["lots"], "hedge_eur": h["hedge_eur"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"], "q": h["q"], "at": _wt_now_iso()}
+
+
+def tfh_vorschau_neu(alt, neu):
+    """REIN RECHNEND (testbar): Vorschau schreiben? Ja ohne alte, bei anderem Grund oder > 1 % Abweichung bei Lots/Blow/Pass."""
+    if not isinstance(alt, dict):
+        return True
+    if (alt.get("grund") or None) != (neu.get("grund") or None):
+        return True
+    for k in ("lots", "blow_eur", "pass_eur"):
+        x, y = _wd_num(alt.get(k)), _wd_num(neu.get(k))
+        if (x is None) != (y is None) or (x is not None and abs(x - y) > max(0.01, abs(y) * 0.01)):
+            return True
+    return False
+
+
+def tfh_tick(jetzt=None, force=False):
+    """Jede Minute (ap_loop): fällige finale Tradeify-Futures-Auto-Pläne (Orbit V2, bestätigt, nicht geclaimt, Start in −nachlauf … +vorlauf)
+    auf Orbit V3 mit Fusion-Gegenhedge umstellen bzw. mit Grund halten; Schalter aus → zurück. → {umgestellt, ohne} oder None."""
+    if not force and time.time() - _tfh["at"] < EH_TAKT_S:
+        return None
+    _tfh["at"] = time.time()
+    jetzt = jetzt or datetime.now(timezone.utc)
+    regeln = _eh_regeln()
+    par = tfh_param(regeln)
+    if not par["an"]:
+        return {"umgestellt": 0, "ohne": 0, "zurueck": tfh_zurueck()}
+    von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
+    # alle geplanten (auch spätere/unbestätigte): Kennung hedge_art + Vorschau für den Block „Neue Hedge-Trades bestätigen"; umgestellt wird
+    # nur im Fenster, bestätigt UND freigegeben (hedge_freigabe_at, sql/2026-10-29_hedge_freigabe.sql)
+    roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,master_contracts,master_symbol,master_tp,richtung,"
+                                            "start_um,notes,mt5_baseline,updated_at,auto_bestaetigt_at,hedge_freigabe_at",
+                                  "status": "eq.planned", "route": "eq.tvv2", "orbit_v3": "not.is.true", "auto_plan": "is.true",
+                                  "start_um_gestartet_at": "is.null", "master_firm": "ilike.*tradeify*", "order": "start_um.asc"})
+    namen, aus = _ap_namen()
+    verwaltet = gp_verwalter_karte()
+    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    plaene = [p for p in roh if str(p.get("user_id")) not in aus and not _ist_tradeify_cfd(p.get("master_firm"))]
+    erg = {"umgestellt": 0, "ohne": 0}
+    if not plaene:
+        return erg
+    firmen = regeln.get("firmen") or []
+    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER + ",ziel_usd", "id": "in.(" + ",".join(
+        sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
+    echo_bal, dup_bal = _ap_balance_karten()
+    finale = []
+    for p in plaene:
+        a = konten.get(str(p.get("master_account_id")))
+        if not a or (a.get("account_type") or "") not in EH_TYPEN:
+            continue
+        f = ap_plan_final_text(p.get("notes"), p.get("master_tp"))
+        if f is None:                                     # wie prophos_plan_final: Plan ohne Notiz → TP ≥ Ziel − Konto-Balance
+            z, tb, t = _wd_num(a.get("ziel_usd")), _wd_num(a.get("tv_balance")), _wd_num(p.get("master_tp"))
+            f = bool(z is not None and tb is not None and t and t > 0 and t >= z - tb)
+        if f:
+            finale.append((p, a))
+    if not finale:
+        return erg
+
+    def _faellig(p):
+        try:
+            st_ = datetime.fromisoformat(str(p.get("start_um")).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return False
+        return von <= st_ <= bis and bool(p.get("auto_bestaetigt_at")) and bool(p.get("hedge_freigabe_at"))
+    kauf = _ap_kauf_echt(sorted({str(a["id"]) for _p, a in finale}))
+    if not any(_faellig(p) for p, _a in finale):           # nur Kennung + Vorschau — Hedge-Konten/Fusion-Lesungen nicht laden
+        for p, a in finale:
+            base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+            if base.get("tage_mini"):
+                continue
+            vs = tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par)
+            if base.get("hedge_art") != "tradeify_final" or tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
+                try:
+                    sb_update("trade_plans", _tfh_guard(p), {"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)})
+                except Exception as e:
+                    _tfh_spur(f"⚠️ {str(p['id'])[:8]} Kennung nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
+        return erg
+    uids = sorted({str(p["user_id"]) for p, _a in finale})
+    hedge = {}
+    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": "in.(" + ",".join(uids) + ")"}):
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        if v.get("accountId"):
+            hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
+    hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm,external_id", "id": "in.(" + ",".join(
+        sorted({h[0] for h in hedge.values()})) + ")"}) if hedge else [])}
+    try:
+        lesungen = gp_fusion_lesungen(set(uids), jetzt)
+    except Exception as e:
+        _tfh_spur(f"⚠️ Fusion-Lesung: {type(e).__name__}: {e}")
+        lesungen = {}
+    # vorgemerkt je Fusion-Login: umgestellte, noch nicht offene Hedges — Echo-Hedge (route mt5) UND dieser Weg (tvv2), Fenster wie eh_tick
+    frisch = (jetzt - timedelta(minutes=EH_VORGEMERKT_CLAIM_MIN)).isoformat()
+    vorgemerkt = {}
+    for route_v, feld in (("mt5", "echo_hedge"), ("tvv2", "tradeify_hedge")):
+        for q in _sb_all("trade_plans", {"select": f"h:mt5_baseline->{feld}", "status": "in.(planned,open)", "route": f"eq.{route_v}",
+                                         f"mt5_baseline->{feld}->>status": "eq.mit",
+                                         "or": f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
+                                               f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})"}):
+            h_ = q.get("h") if isinstance(q.get("h"), dict) else {}
+            vorgemerkt[str(h_.get("login") or "")] = vorgemerkt.get(str(h_.get("login") or ""), 0.0) + (_wd_num(h_.get("lots")) or 0.0)
+    for p, a in finale:
+        uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        if base.get("tage_mini"):
+            continue
+        # KENNUNG + VORSCHAU (Master 29.10.2026, „Neue Hedge-Trades bestätigen"): hedge_art 'tradeify_final' + hedge_vorschau {lots, hedge_eur,
+        # blow_eur, pass_eur, q} — geschrieben nur bei neuer Kennung oder geänderter Vorschau; dann diesen Takt nicht umstellen (updated_at neu)
+        vs = tfh_vorschau(a, p, echo_bal, dup_bal, firmen, kauf, par)
+        if base.get("hedge_art") != "tradeify_final" or tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
+            try:
+                sb_update("trade_plans", _tfh_guard(p), {"mt5_baseline": dict(base, hedge_art="tradeify_final", hedge_vorschau=vs)})
+                if base.get("hedge_art") != "tradeify_final":
+                    _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: finaler Tradeify erkannt — wartet auf Bestätigung im Challenge-Planer")
+            except Exception as e:
+                _tfh_spur(f"⚠️ {str(p['id'])[:8]} Kennung nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
+            continue
+        if not _faellig(p):
+            continue                                  # nur im Fenster, bestätigt und freigegeben umstellen
+        hid, login = hedge.get(uid, (None, ""))
+        if not hid or hid not in hedge_acc:
+            _tfh_ohne(p, "kein_konto", "kein Hedge-Konto (Fusion) bei dieser ID", wer, jetzt)
+            continue
+        login = login or str(hedge_acc[hid].get("external_id") or "")
+        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        if bal is None:
+            _tfh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
+            continue
+        kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+        satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
+        polster = (wert / satz) if (satz and wert) else None
+        ppl = 2.0 if re.match(r"^MNQ", str(p.get("master_symbol") or ""), re.I) else 20.0
+        h, grund = tfh_hedge(satz, polster, p.get("master_contracts"), ppl, p.get("master_tp"), par["netto_faktor"], par["min_lot"])
+        if grund:
+            _tfh_ohne(p, "groesse", grund + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""), wer, jetzt)
+            continue
+        les = lesungen.get(login)
+        if not les or jetzt.timestamp() - float(les.get("at") or 0) > EH_LESUNG_MAX_S:
+            _tfh_ohne(p, "lesung", f"keine frische Fusion-Lesung ({login or '?'}, älter als {EH_LESUNG_MAX_S // 60} min)", wer, jetzt)
+            continue
+        ok, grund = eh_marge(les, h["lots"], p.get("richtung"), vorgemerkt.get(login, 0.0), par["max_lots"])
+        if not ok:
+            _tfh_ohne(p, "grenze" if "gleichzeitig" in grund else "marge", grund, wer, jetzt)
+            continue
+        info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"], "satz": satz,
+                "kontowert_eur": wert, "polster": h["master_risk"], "balance": round(float(bal), 2), "login": login,
+                "netto_faktor": par["netto_faktor"], "blow_eur": h["slave_risk"], "pass_eur": -h["hedge_eur"]}
+        upd = {"orbit_v3": True, "hedge_eur": h["hedge_eur"], "hedge_faktor": h["hedge_faktor"], "multiplier": h["multiplier"],
+               "master_risk": h["master_risk"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, tradeify_hedge=info),
+               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Orbit V3 (finaler Tradeify, Gegenhedge): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                         f"· Blow +{h['slave_risk']:.0f} € · Pass −{h['hedge_eur']:.0f} €").replace(".", ",")).strip()}
+        try:
+            if not sb_update("trade_plans", _tfh_guard(p), upd):
+                continue                                  # inzwischen geclaimt/geändert → nächster Takt
+        except Exception as e:
+            _tfh_spur(f"⚠️ {wer} · {p.get('master_name') or '—'} nicht umgestellt: {type(e).__name__}: {str(e)[:200]}")
+            continue
+        vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
+        erg["umgestellt"] += 1
+        _tfh["umgestellt"] += 1
+        _tfh_spur(f"{wer} · {p.get('master_name') or '—'}: Orbit V3 mit Gegenhedge {h['lots']:.2f} Lot (q {h['q']}, Blow +{h['slave_risk']:.0f} €)")
+    return erg
+
+
+# NEUE HEDGE-TRADES BESTÄTIGEN (Finn 29.10.2026, über Master): Pläne mit mt5_baseline.hedge_art 'apex' (Slave 1) oder 'tradeify_final'
+# (tfh_tick) starten erst nach Finns Freigabe — hedge_freigabe_at/_von, Claim-Riegel trade_plans_a0_hedge_freigabe (sql/2026-10-29_hedge_freigabe.sql).
+# GET listet die offenen (planned, ungeclaimt, ohne Freigabe; ohne ADMIN_EXCLUDE), POST {ids:[…]} | {alle:true} gibt frei. Nur Admin, wie der
+# Echo-Hedge-Schalter. Nur Lesen bzw. diese zwei Spalten.
+HEDGE_ARTEN = ("apex", "tradeify_final")
+
+
+@app.route("/admin/auto-plan/hedge-freigabe", methods=["GET", "POST", "OPTIONS"])
+def admin_auto_plan_hedge_freigabe():
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, _reg, err = _ap_zugang(admin_reiter=True)
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    basis = {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
+             "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}
+    try:
+        namen, aus = _ap_namen()
+        rows = [r for r in _sb_all("trade_plans", dict(basis, select="id,user_id,master_account_id,master_name,master_firm,start_um,richtung,"
+                                                      "master_contracts,master_symbol,master_tp,route,orbit_v3,hedge_eur,auto_bestaetigt_at,"
+                                                      "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre",
+                                                      order="start_um.asc.nullslast"))
+                if str(r.get("user_id")) not in aus]
+        if request.method == "GET":
+            return jsonify({"ok": True, "zeilen": [dict(r, user=namen.get(str(r.get("user_id")), "")) for r in rows]})
+        body = request.get_json(silent=True) or {}
+        frei = {str(r["id"]) for r in rows}
+        if body.get("alle") is True:
+            ids = sorted(frei)
+        else:
+            ids = [str(x) for x in (body.get("ids") or []) if str(x) in frei]
+        if not ids:
+            return jsonify({"ok": False, "msg": "nichts zu bestätigen (schon freigegeben, gestartet oder nicht in der Liste)"}), 400
+        jetzt = _wt_now_iso()
+        n = 0
+        for j in range(0, len(ids), 100):
+            n += len(sb_update("trade_plans", dict(basis, id="in.(" + ",".join(ids[j:j + 100]) + ")"),
+                               {"hedge_freigabe_at": jetzt, "hedge_freigabe_von": str(uid or "")[:80]}) or [])
+        print(f"[hedge-freigabe] {n} Plan/Pläne freigegeben ({str(uid or '')[:8]})", flush=True)
+        return jsonify({"ok": True, "freigegeben": n})
+    except Exception as e:
+        print(f"[hedge-freigabe] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -31906,6 +32279,12 @@ def ap_loop():
         except Exception as e:
             _eh["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[echo-hedge] ⚠️ {_eh['fehler']}", flush=True)
+        try:
+            if tfh_tick() is not None:        # FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026): kurz vor dem Start Orbit V3 — eigener try
+                _tfh["fehler"] = ""
+        except Exception as e:
+            _tfh["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[tradeify-hedge] ⚠️ {_tfh['fehler']}", flush=True)
         try:
             if time.time() - (_gp_info.get("auftrag_at") or 0) >= 60:
                 _gp_info["auftrag_at"] = time.time()

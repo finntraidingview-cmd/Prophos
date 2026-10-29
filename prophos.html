@@ -12340,6 +12340,9 @@
         </div>
         <!-- Trade-Planer (08.10.2026, Finn: „alle IDs zum Trade-Planen zufügen und einen Überblick über alle IDs"): auto_plan_regeln.user_ids -->
         <div id="adm-pane-planer" hidden>
+          <!-- NEUE HEDGE-TRADES BESTÄTIGEN (29.10.2026, Finn: „alle Trades, die mit der neuen Logik kommen, unter Admin → Challenge-Planer
+               bestätigen"): ganz oben, nur Challenge-Planer, nur mit offenen Zeilen — Zeichnen im Modul (ahf*) -->
+          <div id="ahf-root" hidden></div>
           <div id="ap-ids-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade IDs…</div>
           <!-- VERLAUF IN € (29.10.2026, Finn: „den Chart, wo ich die Werte-Zahl über alle Tage akkumuliert und filterbar nach Prop-Firma sehe"):
                nur im Challenge-Planer (nicht Funded), Daten GET /admin/auto-plan/verlauf-eur, Zeichnen im Modul (apv*) -->
@@ -21486,6 +21489,7 @@
         $('adm-pane-planer').hidden   = name !== 'planer' && name !== 'fplaner'
         if(name === 'planer' || name === 'fplaner'){ window._apIdsArt?.(name === 'fplaner' ? 'funded' : 'challenge'); window._apIdsTabOeffnen?.() }   // Trade-Planer-IDs (08.10.2026)
         window._apvOeffnen?.(name === 'planer')   // Verlauf in € (29.10.2026): nur Challenge-Planer
+        window._ahfOeffnen?.(name === 'planer')   // Neue Hedge-Trades bestätigen (29.10.2026): nur Challenge-Planer
         if(name === 'auftrag') window._aufTabOeffnen?.(); else window._aufTabSchliessen?.()   // Wochenauftrag (05.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
@@ -28197,12 +28201,14 @@
    * accounts.tv_balance — nur, wenn tv_balance_at nach dem Ende des letzten Trades dieses Kontos liegt und keine Nachlesung aussteht
    * (liq_quelle 'konto_balance'); sonst kein Level beim Open, der Wächter rechnet nach, sobald tv.balance_start da ist ('balance_start').
    * master_sl bleibt null. */
+  const hedgeIstTradeifyFinal = plan => !!(plan && plan.orbitV3 && plan.mt5Baseline && plan.mt5Baseline.tradeify_hedge && plan.mt5Baseline.tradeify_hedge.status === 'mit')
   function hedgeIstWd(plan){
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
     // Orbit V3 (01.10.2026): normaler Master-SL am Hedge, kein Liquidations-Level — AUSSER auf einem Winning-Days-Konto ohne Master-SL
     // (08.10.2026, Plan d18f860e, 4 MNQ: orbit_v3 + WD-Konto + master_sl null → weder SL- noch Liq-Level, kein Nachtrag, der Fusion-Hedge
     // hatte auf der Liq-Seite gar nichts). Ohne Stop ist die Liquidation das einzige ferne Level — wie bei jedem Winning Day.
-    if(plan && plan.orbitV3) return !!(acc && acc.type === 'winning_days') && !(Number(plan.masterSl) > 0)
+    // FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026, Prüfung): Challenge ohne SL (Tradeify-Liq) — sonst hätte der Hedge auf der Blow-Seite kein Level
+    if(plan && plan.orbitV3) return (!!(acc && acc.type === 'winning_days') || hedgeIstTradeifyFinal(plan)) && !(Number(plan.masterSl) > 0)
     return !!((acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days')) || Number(plan && plan.hedgeEur) > 0)
   }  /* HEDGE-LOTS IMMER FRISCH AUS RISIKO (08.10.2026, Slave-Terminal 7 — Vorfall 05:04 Dubai, Jacob WD-Farmer, Plan 8da04bfe, 6 MNQ, TP 2.100 $:
    * am Plan master_risk 250 / slave_risk 65, aber multiplier 0,0728 → 0,44 Lot, weil Mac- und PC-Tab auf .1265 noch die alte TP-Rechnung
@@ -28344,6 +28350,18 @@
       const pktT = Math.round(usdT / (ppl * kt) * 100) / 100
       const lvlT = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pktT : einstieg + pktT) * 100) / 100 : null
       return Object.assign({ sl_punkte: pktT, sl_level_nq: lvlT, sl_art: 'liquidation', liq_balance: liqT, sl_usd_hedge: usdT, liq_quelle: 'topstepx_mll', liq_balance_start: bsT }, felderT)
+    }
+    // FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026, Prüfung zu tfh_tick): Liquidation = Start-Balance − Polster (master_risk, Planer-Kontowert
+    // = Drawdown 4.500 $ bei Tradeify 150k) + 100 $ wie bei Größe + 100 — „Kontogröße + 100" läge bei einer 157k-Challenge 7.000 $ zu tief
+    if(hedgeIstTradeifyFinal(plan) && Number(plan.masterRisk) > 100){
+      const felderF = { liq_art: 'polster_tradeify', liq_regeln_geladen: true, liq_vor_pkt: null, liq_dll: null }
+      const stF = hedgeLiqStart(plan)
+      if(!stF) return Object.assign({ hinweis: 'keine Start-Balance — Liq-Level kommt, sobald sie gelesen ist' }, felderF)
+      const usdF = Math.round((Number(plan.masterRisk) - 100) * 100) / 100, liqF = Math.round((stF.balance - usdF) * 100) / 100
+      if(!(ppl > 0) || !(kt > 0)) return Object.assign({ hinweis: 'Punktwert/Kontrakte fehlen — Hedge schließt nur am TP', liq_balance: liqF }, felderF)
+      const pktF = Math.round(usdF / (ppl * kt) * 100) / 100
+      const lvlF = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pktF : einstieg + pktF) * 100) / 100 : null
+      return Object.assign({ sl_punkte: pktF, sl_level_nq: lvlF, sl_art: 'liquidation', liq_balance: liqF, sl_usd_hedge: usdF, liq_quelle: stF.quelle, liq_balance_start: stF.balance }, felderF)
     }
     const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
     const groesse = (acc && Number(acc.startingBalance) > 0) ? Number(acc.startingBalance) : tpKontoGroesseAusName((acc && acc.name) || (plan && plan.masterName) || '')
@@ -57820,6 +57838,77 @@
   window._apvGruppeNeu = () => { const r = document.getElementById('apv-root'); _apv.d = null; _apv.at = 0; if(!r || r.hidden) return; apvRender(); apvLaden(true) }
   window._apvStub = d => { _apv.d = d; _apv.fehler = ''; _apv.at = Date.now(); const r = document.getElementById('apv-root'); if(r) r.hidden = false; apvRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('apv-root'); if(r && !r.hidden && r.offsetParent && !document.hidden) apvLaden(false) }, 60000)
+  /* ══ NEUE HEDGE-TRADES BESTÄTIGEN (29.10.2026, Finn über Master: „Bevor wir die Trades mit Auto-Planen machen, will ich alle Trades, die mit
+   * der neuen Logik kommen, unter Admin → Challenge-Planer bestätigen müssen"). Gemeinsam für den finalen Tradeify mit Gegenhedge (hedge_art
+   * 'tradeify_final', app.py tfh_tick) und den Apex-WD-Hedge (hedge_art 'apex', Slave 1). GET/POST /admin/auto-plan/hedge-freigabe (nur Admin):
+   * offene Pläne je ID wie „Zu bestätigen" (ap-adm-karte, ap-adm-grp, wd-tab), ✓ je Zeile, ✓ alle je ID und „✓ Alle n bestätigen". Ohne
+   * Freigabe startet der Plan nicht (DB-Claim-Riegel trade_plans_a0_hedge_freigabe, ⚪ einmal). Hedge-Spalten aus mt5_baseline.hedge_vorschau
+   * {lots, blow_eur, pass_eur | grund}, sonst hedge_eur am Plan. Liest nur und setzt nur die Freigabe. ══ */
+  const _ahf = { d: null, laeuft: false, at: 0, busy: new Set(), fehler: '' }
+  const AHF_ART = { tradeify_final: ['Tradeify final', 'Finaler Tradeify-Trade: startet als Orbit V3 mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],
+                    apex: ['Apex WD', 'Apex Winning Day mit Fusion-Hedge'] }
+  async function ahfLaden(){
+    if(_ahf.laeuft) return
+    _ahf.laeuft = true
+    try{ _ahf.d = await apdApi('GET', '/hedge-freigabe'); _ahf.fehler = ''; _ahf.at = Date.now() }
+    catch(e){ _ahf.fehler = (e && e.status === 403) ? '' : ((e && e.message) || String(e)); if(e && (e.status === 403 || e.status === 404)) _ahf.d = { zeilen: [] } }
+    finally{ _ahf.laeuft = false; ahfRender() }
+  }
+  // Start in Dubai: heute nur die Uhrzeit, sonst Datum + Uhrzeit (wie „Zu bestätigen")
+  const ahfWann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
+    const f = o => d.toLocaleString('de-DE', Object.assign({ timeZone: 'Asia/Dubai' }, o)), heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
+    const t = f({ day: '2-digit', month: '2-digit' }), u = f({ hour: '2-digit', minute: '2-digit' }); return t === heute ? u : `${t} ${u}` }
+  const ahfEur = v => { const n = Number(v); return isFinite(n) && v != null ? (n < 0 ? '−' : '+') + Math.round(Math.abs(n)).toLocaleString('de-DE') + ' €' : '–' }
+  function ahfRender(){
+    const root = document.getElementById('ahf-root'); if(!root) return
+    const zs = (_ahf.d && _ahf.d.zeilen) || []
+    if(!root.dataset.an || !zs.length){ root.hidden = true; root.innerHTML = ''; return }   // ohne offene Zeilen nichts (auch kein Fehler oben im Planer)
+    const je = new Map()
+    for(const z of zs){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), z: [] }); je.get(k).z.push(z) }
+    const zeile = z => {
+      const id = String(z.id), art = AHF_ART[z.art] || [z.art || '?', ''], vs = (z.vs && typeof z.vs === 'object') ? z.vs : {}
+      const ri = z.richtung === 'buy' ? '<b style="color:var(--good-ink)">BUY</b>' : z.richtung === 'sell' ? '<b style="color:var(--danger-ink)">SELL</b>' : '–'
+      const hedge = vs.lots != null ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot` : Number(z.hedge_eur) > 0 ? ahfEur(z.hedge_eur).replace('+', '') : (vs.grund ? '⚠' : '–')
+      const bp = vs.blow_eur != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(vs.pass_eur)}</span>` : '–'
+      const unterwegs = _ahf.busy.has(id)
+      return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
+        <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
+        <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}</td><td>${ri}</td>
+        <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
+        <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
+        <td class="zahl" title="${escapeHtml(vs.grund ? 'Hedge nicht rechenbar: ' + vs.grund : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
+        <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass (TP erreicht)">${bp}</td>
+        <td class="zahl"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Freigeben — der Plan startet dann zur Startzeit mit Hedge">${unterwegs ? '…' : '✓'}</button></td></tr>`
+    }
+    const kopf = `<div class="ap-adm-kopf"><b>Neue Hedge-Trades bestätigen · ${zs.length}</b><span>starten erst nach deiner Freigabe · Zeiten Dubai</span>
+      ${zs.length ? `<button type="button" class="ap-adm-ok" data-ahf-alle="1" style="margin-left:auto"${_ahf.busy.size ? ' disabled' : ''}>✓ Alle ${zs.length} bestätigen</button>` : ''}</div>`
+    const fehl = _ahf.fehler ? `<div class="kis-s" style="color:var(--danger-ink)">${escapeHtml(_ahf.fehler)}</div>` : ''
+    const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.z.length} Trade${g.z.length === 1 ? '' : 's'}</span>
+        ${g.z.length > 1 ? `<button type="button" class="ap-adm-ok" data-ahf-id="${escapeHtml(g.uid)}">✓ alle ${g.z.length}</button>` : ''}</div>
+      <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr><th class="zahl">Start</th><th>Konto</th><th>Weg</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th><th class="zahl">Hedge</th><th class="zahl">Blow / Pass</th><th></th></tr></thead>
+      <tbody>${g.z.map(zeile).join('')}</tbody></table></div>`).join('')
+    root.innerHTML = `<div class="ap-adm-karte">${kopf}${fehl}${gruppen}</div>`
+    root.hidden = false
+  }
+  async function ahfFreigeben(ids, alle){
+    for(const id of ids) _ahf.busy.add(String(id))
+    ahfRender()
+    try{
+      const d = await apdApi('POST', '/hedge-freigabe', alle ? { alle: true } : { ids })
+      if(typeof atToast === 'function') atToast(`✓ ${d.freigegeben || 0} Hedge-Trade${(d.freigegeben || 0) === 1 ? '' : 's'} freigegeben`, 'start')
+    }catch(e){ _ahf.fehler = 'Freigabe fehlgeschlagen: ' + ((e && e.message) || e) }
+    finally{ for(const id of ids) _ahf.busy.delete(String(id)); await ahfLaden() }
+  }
+  document.addEventListener('click', e => {
+    const t = e.target && e.target.closest && e.target.closest('[data-ahf-ok],[data-ahf-alle],[data-ahf-id]'); if(!t || t.disabled) return
+    const zs = (_ahf.d && _ahf.d.zeilen) || []
+    if(t.dataset.ahfOk) ahfFreigeben([t.dataset.ahfOk], false)
+    else if(t.dataset.ahfId) ahfFreigeben(zs.filter(z => String(z.user_id) === t.dataset.ahfId).map(z => String(z.id)), false)
+    else if(t.dataset.ahfAlle && confirm(`Alle ${zs.length} neuen Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)) ahfFreigeben(zs.map(z => String(z.id)), true)
+  })
+  window._ahfOeffnen = an => { const r = document.getElementById('ahf-root'); if(!r) return; if(an){ r.dataset.an = '1'; ahfRender(); ahfLaden() } else { delete r.dataset.an; r.hidden = true } }
+  window._ahfStub = d => { _ahf.d = d; _ahf.fehler = ''; const r = document.getElementById('ahf-root'); if(r) r.dataset.an = '1'; ahfRender() }   // Stub ohne Login
+  setInterval(() => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an && !document.hidden && document.getElementById('adm-pane-planer')?.offsetParent) ahfLaden() }, 60000)
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
   const TPL_TYPEN = ['challenge', 'phase1', 'phase2']   // AP_TYPEN im Planer
   const tplDatum = d => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
