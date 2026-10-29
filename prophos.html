@@ -29393,7 +29393,7 @@
   }
   window._tvV2NochOffenRegel = tvV2NochOffenRegel
   // Schreibweg: (1) final_verworfen mit Guard review — sperrt Demo-/Feed-Ende für diesen Plan (tvV2DemoGesperrt), (2) status open + ended_at
-  // weg mit Guard review (master_pl nur, wenn er die Schätzung des Endes ist — wie atMoveToReview nur leere Felder füllt), (3) final weg +
+  // weg mit Guard review (master_pl und slave_pl immer null, wie beim Hand-„zurück zu Offen“), (3) final weg +
   // live.offen mit Guard open. Sperre je Plan (zwei Tabs). Der 🔴 kommt aus alarm_tick (plan_wieder_offen). -> Ende-Quelle | null
   async function tvV2NochOffenZurueck(pid, fin, n, p0){
     let _tp = []; try{ _tp = tradePlans }catch(_){}
