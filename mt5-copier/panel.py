@@ -2163,17 +2163,46 @@ def _prophos_puls_vorn():
                 return False, "fehler", msg
             erg = "geoeffnet"
             da, n, liste = puls_prophos_lage()
-        pro = cdp_prophos_ziele(liste, url_merk)[0]
+        pro, tv = cdp_prophos_ziele(liste, url_merk)
         if not pro:
             return False, "fehler", "Prophos-Tab im Puls-Chrome nach dem Öffnen nicht gefunden"
         time.sleep(0.4 + random.random() * 0.6)
         _cdp_get(f"/json/activate/{pro['id']}")
+        zurueck = ""
+        # TRADINGVIEW ZURÜCK (S2 30.10.2026): liegen Prophos und TradingView im SELBEN Fenster, wäre das Userscript jetzt ein Hintergrund-Tab
+        # (gedrosselt) → nach 4–7 s (gestreut) TradingView wieder aktivieren, wie _prophos_tab_wecken. Eigene Fenster bleiben, wie sie sind.
+        if tv and tv.get("id") != pro.get("id") and _cdp_selbes_fenster(pro["id"], tv["id"]) is not False:
+            time.sleep(4 + random.random() * 3)
+            try:
+                _cdp_get(f"/json/activate/{tv['id']}")
+                zurueck = ", TradingView danach wieder vorn (selbes Fenster)"
+            except Exception as e:
+                zurueck = f", TradingView NICHT zurück ({type(e).__name__})"
         return True, erg, ("im Puls-Chrome im eigenen Fenster geöffnet und nach vorn geholt" if erg == "geoeffnet"
-                           else "Prophos-Tab im Puls-Chrome nach vorn geholt (war schon offen, nicht doppelt geöffnet)")
+                           else "Prophos-Tab im Puls-Chrome nach vorn geholt (war schon offen, nicht doppelt geöffnet)") + zurueck
     except Exception as e:
         return False, "fehler", f"{type(e).__name__}: {e}"
     finally:
         TV_ORDER_LOCK.release()
+
+
+_TAB_FENSTER_CODE = (
+    "import sys, json, order_bot\n"
+    "v = order_bot._cdp_http('/json/version') or {}\n"
+    "c = order_bot._CdpVerbindung(v.get('webSocketDebuggerUrl') or '')\n"
+    "w = [c.rufe('Browser.getWindowForTarget', {'targetId': t}, timeout=5).get('windowId') for t in sys.argv[1:3]]; c.zu()\n"
+    "print(json.dumps(w))\n")
+
+
+def _cdp_selbes_fenster(a, b):
+    """Liegen zwei Seiten des Puls-Chrome im selben Fenster? → True/False, None = unklar (nur lesen, Browser.getWindowForTarget)."""
+    try:
+        r = subprocess.run([sys.executable, "-c", _TAB_FENSTER_CODE, str(a), str(b)], cwd=HERE, capture_output=True, text=True, timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        w = json.loads((r.stdout or "").strip().splitlines()[-1])
+        return None if None in w else w[0] == w[1]
+    except Exception:
+        return None
 
 
 def _tab_auftrag_quittung(aid, ergebnis, grund):

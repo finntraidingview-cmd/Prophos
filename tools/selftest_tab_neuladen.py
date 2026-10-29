@@ -231,8 +231,13 @@ def main():
           "Auftrag: Server-Riegel / Puls-Polar-MT5 / Eingabe < 20 s → verschoben mit Grund; 4 Fehlversuche → aufgeben")
     pv = pq[pq.index("\ndef _prophos_puls_vorn("):pq.index("\n\n\n", pq.index("\ndef _prophos_puls_vorn("))]
     check("TV_ORDER_LOCK.acquire(blocking=False)" in pv and "TV_ORDER_LOCK.release()" in pv and "_browser_und_mt5_frei(tv_eigen=True)" in pv
-          and "lock_gehalten=True" in pv and "/json/activate/" in pv and "if not da or n == 0:" in pv and "tradingview" not in pv.lower(),
-          "Auftrag ausführen: unter TV_ORDER_LOCK, öffnen nur ohne Prophos-Tab im Puls-Chrome, sonst nur nach vorn (/json/activate), nie TradingView")
+          and "lock_gehalten=True" in pv and "/json/activate/" in pv and "if not da or n == 0:" in pv and "click" not in pv.lower() and "Runtime.evaluate" not in pv,
+          "Auftrag ausführen: unter TV_ORDER_LOCK, öffnen nur ohne Prophos-Tab im Puls-Chrome, sonst nur nach vorn (/json/activate), kein Klick/Skript")
+    check("nav.type === 'reload'" in html and "sessionStorage.setItem('prophos_tab_weiter'" in html and html.count("prophos_tab_weiter") >= 5,
+          "Duplikat (S2): gespeicherte Kennung nur beim Neuladen oder eigenem Seitenwechsel, sonst eigene Kennung")
+    pv2 = pq[pq.index("\ndef _prophos_puls_vorn("):pq.index("\n\n\n", pq.index("\ndef _prophos_puls_vorn("))]
+    check("_cdp_selbes_fenster(" in pv2 and "activate/{tv['id']}" in pv2 and "random.random() * 3" in pv2 and "Browser.getWindowForTarget" in pq,
+          "Fern-Auftrag: TradingView danach wieder vorn, wenn im selben Fenster (gestreut 4–7 s), eigene Fenster bleiben")
     wq = pq[pq.index("\ndef _tab_neulade_waechter("):pq.index("\n\n\n", pq.index("\ndef _tab_neulade_waechter("))]
     check("_tab_auftrag_schritt()" in wq and "TAB_ZAEHL_FRISCH_S" in pq, "Tab-Wächter führt den Auftrag je Runde aus; Doppel-Tab-Zählung nur frische Kennungen")
     check("sessionStorage.getItem('prophos_tab_id')" in html and "data-adm-pcs-puls" in html and "adm-pcs-puls-alle" in html and "/admin/pc-tab-auftrag" in html,
