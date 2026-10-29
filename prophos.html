@@ -49905,6 +49905,13 @@
         : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.', retryOk && !offen)
     }
   }
+  // REIN RECHNEND (window._mt5OrderWiederholen, 30.10.2026): master-order-Antwort + Sekunden seit dem ersten Versuch → erneut versuchen?
+  // Nur bei retry_ok (beweisbar nichts gesendet) und Terminal-Gründen; terminal_heilt bis 180 s, sonst 90 s — wie der Echo-V2-Weg
+  function mt5OrderWiederholen(r, seitMs){
+    const wartbar = !!(r && !r.ok && r.retry_ok === true && (r.grund === 'terminal_heilt' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
+    return wartbar && seitMs <= (r.grund === 'terminal_heilt' ? 180000 : 90000)
+  }
+  window._mt5OrderWiederholen = mt5OrderWiederholen   // Test-Haken
   async function tpPreflightMt5(plan){
     _pfMt5StopTimer()
     // Verdrängt dieser Check einen noch offenen Remote-Lauf eines ANDEREN
@@ -49918,6 +49925,7 @@
     }
     _pfErrLog = []
     _pfPlanId = plan.id
+    const vonTick = _rkTickStart.delete(String(plan.id))   // Start zur Startzeit (tpStartUmTick) → Start-Fehler melden (30.10.2026, wie V2)
 
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
@@ -50341,10 +50349,25 @@
               if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
               if(fe){ fe.textContent = `🤖 Bot platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} ${po.sl_usd ? `(TP $${po.tp_usd} · SL $${po.sl_usd})` : '(ohne SL/TP — machst du von Hand)'} — HÄNDE WEG, bis die Bestätigung kommt!` }
               try{
-                const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
-                  headers:{'Content-Type':'application/json'},
-                  body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
-                                         volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
+                // WIEDERHOLEN BEI „TERMINAL HEILT" (30.10.2026, Befund Marco e7e9782d 03:11 Dubai: der Tab feuerte, sobald der Snapshot frisch
+                // war, während der Hintergrund-Check von start-terminal das Terminal noch hielt → 409 terminal_heilt, EIN Versuch, kein
+                // Start-Fehler, der Claim blieb still stehen). Wie der Echo-V2-Weg: solange retry_ok wahr ist (Bot-Vertrag: beweisbar nichts
+                // gesendet), gestreut alle 5–7 s erneut — bei terminal_heilt bis 180 s, sonst 90 s; nur, solange dieses Popup für diesen Plan
+                // offen ist. Die Order-Sperre des Panels verhindert parallele Aufträge; nach ok/unklar wird nie wiederholt.
+                const t0 = Date.now()
+                let r = null
+                for(;;){
+                  r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
+                                           volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
+                  if(!mt5OrderWiederholen(r, Date.now() - t0)) break
+                  if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
+                    r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
+                  }
+                  _pfSet('m5term', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in ~6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
+                  await new Promise(res => setTimeout(res, 5000 + Math.random() * 2000))   // gestreut (Jitter-Regel)
+                }
                 // Position lesend bestätigt → Plan SOFORT auf „Läuft", ohne aufs
                 // Check-Ende zu warten (18.08.2026, Finns Punkt). Gilt auch, wenn
                 // nur SL/TP scheiterte: price+ticket heißt, die Position ist offen.
@@ -50387,6 +50410,8 @@
                   _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk,
                     offen: !!(r && r.price && r.ticket),
                     msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
+                  // START-FEHLER statt stillem Claim (30.10.2026, wie V2): Start kam von der Startzeit und keine Position offen
+                  if(vonTick && !(r && r.price && r.ticket) && !echoAus) await sfMelden(plan, { schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
                 }
               }catch(e){
                 _pfSet('m5term', 'err', 'Order-Abschuss gestört: ' + escapeHtml(String(e && e.message || e)))
@@ -50394,6 +50419,7 @@
                   fe.textContent = '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
                 _pfRemoteMelde(plan.id, { ok:false, unklar:true,
                   msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) + ' — im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut senden.' })
+                if(vonTick) await sfMelden(plan, { schritt: 'm5order', msg: 'Order-Abschuss gestört: ' + String(e && e.message || e), unklar: true })   // Start-Fehler (unklar) statt stillem Claim
               }
               return
             }
@@ -52067,7 +52093,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1913'
+  const OS_TAB_BUILD = '2026-09-22.1914'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
