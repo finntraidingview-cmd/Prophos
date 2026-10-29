@@ -2055,6 +2055,7 @@ def main():
     results.append(test_puls_heim())
     results.append(test_tv_tp_orders())
     results.append(test_puls_ein_konto_gekuerzt())
+    results.append(test_puls_ein_konto_erwartet())
     results.append(test_puls_fehler_1784())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
@@ -9993,6 +9994,65 @@ def test_tv_tp_orders():
     return ok
 
 
+def test_puls_ein_konto_erwartet():
+    """29.10.2026, Fehler-Muster „Dropdown nicht erkannt" 9× in 24 h, pc-2zc2we (Finn + Pascal), FundedNext Futures: Umschalter gekürzt, Login
+    mit einem Konto, Anfang passt zu zwei Konten; tv_balance des Ziels stand vor einem TP-Trade (155.365,92, master_pl +284,30), der
+    Umschalter zeigte danach 155.645,22 — der Cent-Vergleich passte nie mehr. Jetzt: erwartete Balance = tv_balance + Σ master_pl der seit
+    der Lesung beendeten Pläne (±25 $ je Trade), '@ke' vom PC-Tab. S2-Gegenbeispiele der Spielraum-Fassung (Nachbar mit veralteter Balance
+    150.980, angezeigt 151.200 bzw. 12.000) → nie bestätigt. Kennungen erfunden."""
+    import order_bot as ob
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        print(("✓ " if bed else "  ✗ ") + "Ein-Konto-Login erwartet: " + name)
+        ok = ok and bool(bed)
+
+    U = lambda bal: "FNFTFAMUSTERMUSTERAB… " + f"{bal:,.2f}" + " USD"
+    ZIEL, Z2 = "FNFTFAMUSTERMUSTERAB00001", "FNFTFAMUSTERMUSTERAB00002"
+    Z, E = ob.cdp_ein_konto_ziel, ob.cdp_konten_erwartet
+    panel = lambda g: [str(x).strip()[:60] for x in g][:60]
+    g_roh = (["@kb=" + ZIEL + ":155365.92", "@kb=" + Z2 + ":145992.72", "@ke=" + ZIEL + ":1:284.30:10280555", "@ke=" + Z2 + ":0:0.00:10231400"]
+             + ["MUSTER%017d" % i for i in range(60)])
+    cmd_b = ob.tv_bruecke_auspacken({"geschwister": panel(g_roh)})
+    ew = E({"geschwister": panel(g_roh)})
+    chk(ew == {ZIEL: {"n": 1, "pl": 284.30, "zeit": "10280555"}, Z2: {"n": 0, "pl": 0.0, "zeit": "10231400"}} and E(cmd_b) == ew
+        and not any(str(x).startswith("@") for x in cmd_b["geschwister"]) and ob.cdp_konten_bal(cmd_b) == {ZIEL: 155365.92, Z2: 145992.72}
+        and E({"geschwister": ["@ke=" + ZIEL + ":x:offen:10280555"]}) == {ZIEL: {"unbekannt": "offen", "zeit": "10280555"}}
+        and E({"geschwister": ["@ke=" + ZIEL + ":1:2x:10280555", "@ke=" + Z2 + ":1:5"]}) == {ZIEL: {"unbekannt": "kaputt", "zeit": "10280555"}, Z2: {"unbekannt": "kaputt", "zeit": ""}},
+        "'@ke=EXT:N:ΣPL:Zeit' überlebt Panel-Schnitt + Brücke; unbekannt/kaputt/abgeschnitten = unbekannt (fail-closed)")
+    bal = {ZIEL: 155365.92, Z2: 145992.72}
+    ja1, g1 = Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], bal, ew)
+    chk(ja1 and "bestätigt über die erwartete Balance" in g1 and "…00001 · 155.365,92 (28.10. 05:55Z) · Σ +284,30 (1 Plan) · erwartet 155.650,22 ± 25 $ · passt ja" in g1
+        and "…00002 · 145.992,72 (23.10. 14:00Z) · Σ +0,00 (0 Pläne) · erwartet 145.992,72 · passt nein" in g1,
+        f"Pascal-Fall: TP-Trade mit master_pl, Gebühren 5,00 $ (Toleranz 25 $) → bestätigt, Spur nennt jeden Kandidaten ({g1})")
+    chk(not Z(U(155624.00), ZIEL, True, True, [ZIEL, Z2], bal, ew)[0] and Z(U(155626.00), ZIEL, True, True, [ZIEL, Z2], bal, ew)[0]
+        and not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], bal, {})[0],
+        "über 25 $ daneben (155.624) nicht, knapp innerhalb (155.626) ja bzw. ohne '@ke' (alter Tab = centgenau) → nicht bestätigt")
+    # S2-Gegenbeispiele: Ziel mit Big Trade (läuft bzw. beendet), Nachbar mit veralteter Balance 150.980, angezeigt ist der Nachbar
+    bal_s2 = {ZIEL: 155365.92, Z2: 150980.00}
+    for angezeigt in (151200.00, 12000.00):
+        for ew_s2 in ({ZIEL: {"unbekannt": "offen", "zeit": ""}, Z2: {"n": 0, "pl": 0.0, "zeit": ""}},
+                      {ZIEL: {"n": 1, "pl": 3500.0, "zeit": ""}, Z2: {"n": 0, "pl": 0.0, "zeit": ""}},
+                      {ZIEL: {"n": 1, "pl": -4000.0, "zeit": ""}, Z2: {"n": 0, "pl": 0.0, "zeit": ""}}):
+            j, g = Z(U(angezeigt), ZIEL, True, True, [ZIEL, Z2], bal_s2, ew_s2)
+            chk(j is False, f"S2: angezeigt {angezeigt:,.0f}, Ziel {ew_s2[ZIEL]} → nicht bestätigt ({g[:90]}…)")
+    chk(not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], bal, {ZIEL: ew[ZIEL], Z2: {"unbekannt": "offen", "zeit": ""}})[0]
+        and not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], bal, {ZIEL: ew[ZIEL], Z2: {"unbekannt": "pl", "zeit": ""}})[0]
+        and not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155365.92, Z2: None}, ew)[0],
+        "anderer Kandidat mit laufendem Trade / fehlendem master_pl / unbekannter Balance blockiert")
+    chk(not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], bal, {ZIEL: {"unbekannt": "offen", "zeit": ""}, Z2: ew[Z2]})[0],
+        "Ziel selbst mit laufendem Trade → nicht bestätigt")
+    chk(not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155365.92, Z2: 155645.22}, ew)[0]
+        and not Z(U(145992.72), ZIEL, True, True, [ZIEL, Z2], bal, ew)[0],
+        "passt auch beim anderen bzw. nur beim anderen → nicht bestätigt (kein Klick ins falsche Konto)")
+    chk(Z(U(155365.92), ZIEL, True, True, [ZIEL, Z2], bal, {})[0],
+        "ohne Trades seit der Lesung centgenau wie bisher → bestätigt")
+    if ok:
+        print("✓ Ein-Konto-Login erwartet: tv_balance + Σ master_pl (±25 $ je Trade), nur das Ziel passt, keiner unbekannt → bestätigt, sonst nie")
+    return ok
+
+
 def test_puls_ein_konto_gekuerzt():
     """27.10.2026, pc-2zc2we (Finn + Pascal), FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄ — die Kürzung schnitt
     alle Ziffern ab, augen.js fand keinen Umschalter, jeder Lauf brach mit „kein Konto-Umschalter im Broker-Panel erkannt" ab. Finns Regel:
@@ -10030,7 +10090,7 @@ def test_puls_ein_konto_gekuerzt():
     ja4, g4 = Z(FN, ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155365.92, Z2: 155365.92})
     ja5, _ = Z(FN, ZIEL, True, True, [ZIEL, Z2], {Z2: 155365.92})
     chk(ja1 and "per Präfix bestätigt" in g1, f"ohne ⌄, Präfix eindeutig → ok ({g1})")
-    chk(ja2 and "Präfix + Balance 155.365,92 bestätigt" in g2, f"ohne ⌄, Präfix bei 3 Konten, Balance centgenau nur beim Ziel → ok ({g2})")
+    chk(ja2 and "bestätigt über die erwartete Balance" in g2 and "passt ja" in g2, f"ohne ⌄, Präfix bei 3 Konten, Balance centgenau nur beim Ziel → ok ({g2})")
     chk(not ja3 and "keinem" in g3 and not ja4 and "2 davon" in g4 and not ja5,
         f"gleiche Präfixe, Balance weicht ab / passt zu zwei / nur zu einem anderen → nicht bestätigt ({g3} | {g4})")
     chk(not Z(FN, ZIEL, False, True, [ZIEL], {})[0] and not Z(FN, ZIEL, True, False, [ZIEL], {})[0] and not Z(FN, ZIEL, None, True, [ZIEL], {})[0]
@@ -10104,7 +10164,7 @@ def test_puls_ein_konto_gekuerzt():
         ob._warte = alt_w
     chk(r1[0] is True and r1[4].get("konto_aktiv") == ZIEL and any("per Präfix bestätigt" in z for z in t1),
         f"Fall 2 (kein ⌄, Präfix eindeutig): Konto steht, konto_aktiv = volle External ID ({t1[-2:]})")
-    chk(r2[0] is True and r2[4].get("konto_aktiv") == ZIEL and any("Präfix + Balance 155.365,92 bestätigt" in z for z in t2)
+    chk(r2[0] is True and r2[4].get("konto_aktiv") == ZIEL and any("bestätigt über die erwartete Balance" in z and "passt ja" in z for z in t2)
         and s2.klicks.count("Konto-Umschalter") == 1,
         f"Fall 3 (kein ⌄, gleiche Präfixe, Balance centgenau nur beim Ziel): Konto steht ({t2[-2:]})")
     chk(r3[0] is False and r3[1] == "konto_nicht_erreicht" and any("nicht bestätigt" in z for z in t3) and "konto_aktiv" not in (r3[4] or {}),

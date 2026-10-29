@@ -25813,13 +25813,48 @@
    * „den sichtbaren Namensanfang gegen die Kennung prüfen UND die angezeigte Balance gegen die letzte bekannte Balance des Kontos auf den
    * Cent"): je Konto EIN Brücken-Eintrag '@kb=EXT:123.45' (leer = Balance unbekannt) für das Ziel und die Konten mit denselben ersten
    * 14 Zeichen — nur die kann eine gekürzte Kennung verwechseln. Einzeln und vorn in geschwister, weil das Panel jeden Eintrag auf
-   * 60 Zeichen und die Liste auf 60 Einträge kürzt (S2 27.10.). Quelle accounts.tv_balance (acc.tvBalance); order_bot cdp_konten_bal. */
+   * 60 Zeichen und die Liste auf 60 Einträge kürzt (S2 27.10.). Quelle accounts.tv_balance (acc.tvBalance); order_bot cdp_konten_bal.
+   * ERWARTETE BALANCE AUS DEN EIGENEN TRADES (29.10.2026, Fehler-Muster „Dropdown nicht erkannt" 9× in 24 h, pc-2zc2we, …38896: tv_balance
+   * 155.365,92 vom 28.10. 05:55, danach lief Trade 02fe3cd6 in den TP → Umschalter 155.645,22; die Endlesung scheiterte am selben
+   * Cent-Vergleich, tv_balance blieb für immer alt, jeder Lauf auf dem Konto brach ab. Master nach S2-Stopp der Spielraum-Fassung: „enge
+   * Variante, keine Spielräume"): je Konto mit gleichem Anfang ein Eintrag '@ke=EXT:N:ΣPL:MMTTHHMM' — N Pläne dieses Kontos, die NACH
+   * tv_balance_at geendet haben (completed/review), Σ ihrer master_pl, Zeit der Lesung (UTC). Unbekannt '@ke=EXT:x:<grund>:MMTTHHMM', wenn
+   * seitdem ein Trade läuft ('offen'), ein beendeter keinen master_pl hat ('pl') oder knapp (≤ 120 s) nach der Lesung endete und die Lesung
+   * ihn nicht nachweislich schon enthält ('knapp': balance_start + master_pl = tv_balance → enthalten, Befund …75474 23.10.: Endlesung
+   * 0,26 s vor ended_at). Der Bot rechnet erwartet = tv_balance + ΣPL (±25 $ je Trade) und bestätigt nur, wenn GENAU das Ziel passt und kein
+   * anderer Kandidat passt oder unbekannt ist (order_bot cdp_konten_erwartet / cdp_ein_konto_ziel). Eigener Präfix, alte Bots überlesen ihn. */
+  function tvKontenErwartet(a){
+    const balAt = Date.parse((a && a.tvBalanceAt) || '') || 0, bal = Number(a && a.tvBalance)
+    if(!a || !balAt || a.tvBalance == null || !isFinite(bal)) return null
+    const zeit = new Date(balAt).toISOString().replace(/^\d{4}-(\d\d)-(\d\d)T(\d\d):(\d\d).*$/, '$1$2$3$4')
+    let plaene = []; try{ plaene = tradePlans || [] }catch(_){ return { unbekannt: 'pl', zeit } }
+    let n = 0, pl = 0
+    for(const p of plaene){
+      if(!p || String(p.masterAccountId) !== String(a.id) || !['open', 'review', 'completed'].includes(p.status) || !p.startedAt) continue
+      const ende = Date.parse(p.endedAt || '') || 0
+      if(p.status === 'open' || !ende) return { unbekannt: 'offen', zeit }
+      if(ende < balAt) continue                                                  // in der Lesung enthalten
+      const mpl = p.masterPl != null && isFinite(Number(p.masterPl)) ? Number(p.masterPl) : null
+      if(ende < balAt + 120000){
+        const bs = Number(p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.balance_start)
+        if(mpl != null && isFinite(bs) && bs > 0 && Math.abs(bs + mpl - bal) <= 0.011) continue   // Endlesung: nachweislich enthalten
+        return { unbekannt: 'knapp', zeit }
+      }
+      if(mpl == null) return { unbekannt: 'pl', zeit }
+      n++; pl += mpl
+    }
+    return { n, pl, zeit }
+  }
+  window._tvKontenErwartet = tvKontenErwartet
   function tvKontenBalBruecke(ziel, accs){
     const nr = a => String((a && a.externalId) || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
     const anf = nr(ziel).slice(0, 14); if(anf.length < 14) return []
     const gesehen = new Set()
-    return [ziel, ...(accs || [])].filter(a => { const n = nr(a); if(!n || !n.startsWith(anf) || gesehen.has(n)) return false; gesehen.add(n); return true })
-      .slice(0, 20).map(a => '@kb=' + nr(a) + ':' + (a.tvBalance != null && isFinite(Number(a.tvBalance)) ? Number(a.tvBalance).toFixed(2) : ''))
+    const konten = [ziel, ...(accs || [])].filter(a => { const n = nr(a); if(!n || !n.startsWith(anf) || gesehen.has(n)) return false; gesehen.add(n); return true }).slice(0, 20)
+    const kb = konten.map(a => '@kb=' + nr(a) + ':' + (a.tvBalance != null && isFinite(Number(a.tvBalance)) ? Number(a.tvBalance).toFixed(2) : ''))
+    const ke = konten.map(a => { const e = tvKontenErwartet(a); if(!e) return null
+      return '@ke=' + nr(a) + ':' + (e.unbekannt ? 'x:' + e.unbekannt : e.n + ':' + e.pl.toFixed(2)) + ':' + e.zeit }).filter(Boolean)
+    return [...kb, ...ke]
   }
   window._tvKontenBalBruecke = tvKontenBalBruecke
   async function tvV2Lesen(konto, timeoutS, plan, zusatz){
@@ -74138,6 +74173,18 @@
   // 5-s-Push an mt5_live auf — genau beim ersten stündlichen Rundgang. Ohne Zeitlimit hängt ein fetch, dessen
   // Antwort nie kommt, für immer; _fleetPushBusy bleibt gesetzt, kein Push, keine lokalen Chips. Kurze Wege
   // 20 s, die langen Bot-Wege (tv-lesen/-close/-konto/-order, master-close) 320 s (> Proxy 310 s in app.py).
+  /* GEKÜRZTE KENNUNG ÜBER DIE ERWARTETE BALANCE BESTÄTIGT (29.10.2026, Master: „Spur und Toast nennen beide Kandidaten"): steht in
+   * der Bot-Spur die Bestätigung aus order_bot.cdp_ein_konto_ziel, einmal je Text (10 min) als Toast — nur Anzeige. */
+  const _pulsKontoBelegGezeigt = new Map()
+  function pulsKontoBelegToast(j){
+    const t = String((j && j.trail) || ''), i = t.indexOf('bestätigt über die erwartete Balance')
+    if(i < 0 || typeof atToast !== 'function') return
+    const a = t.lastIndexOf('Konto per Präfix', i), e = t.indexOf(' > ', i)
+    const txt = t.slice(a >= 0 ? a : i, e > 0 ? e : undefined).slice(0, 260)
+    const jetzt = Date.now(); if(jetzt - (_pulsKontoBelegGezeigt.get(txt) || 0) < 600000) return
+    _pulsKontoBelegGezeigt.set(txt, jetzt)
+    atToast('Puls: ' + txt, 'start')
+  }
   async function mtcApi(path, opts){
     // tsx-lesen / tsx-inventar seit 30.09.2026 (Topstep-Paket S): das Panel wartet 150 s, der Proxy seit heute 310 s — 20 s Standard
     // hätte eine laufende Lesung als „offline" gemeldet
@@ -74156,6 +74203,7 @@
         return { ok:false, copier_offline:true, _httpFail:true,
                  error: r.ok ? 'Backend-Antwort ist kein JSON (falsche/alte Version?)' : `HTTP ${r.status}` }
       }
+      try{ pulsKontoBelegToast(j) }catch(_){}
       return j
     // _nichtGesendet NUR, wenn fetch selbst wirft (TypeError: lokales Backend weg) — dann hat beweisbar niemand geklickt.
     // Zeitlimit (_zeitlimit) oder Proxy-502 sagen darüber NICHTS: der Bot kann weiterklicken (30.09.2026, Topstep-Paket S).

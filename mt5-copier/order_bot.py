@@ -8323,6 +8323,8 @@ def tv_bruecke_auspacken(cmd):
                 cmd[feld] = wert.strip()
             elif feld == "kb":                    # 27.10.2026: letzte Balance je Konto, EIN Eintrag je Konto (cdp_konten_bal)
                 cmd.setdefault("konten_bal_kb", []).append(wert.strip())
+            elif feld == "ke":                    # 29.10.2026: erwartete Balance aus eigenen Trades seit der Lesung (cdp_konten_erwartet)
+                cmd.setdefault("konten_erw_ke", []).append(wert.strip())
             continue
         rest.append(x)
     cmd["geschwister"] = rest
@@ -21235,6 +21237,35 @@ def cdp_konten_bal(cmd):
     return out
 
 
+def cdp_konten_erwartet(cmd):
+    """REIN RECHNEND (testbar): was Prophos' eigene Trades seit der letzten Lesung je External ID mit der Balance gemacht haben (29.10.2026,
+    Brücken-Eintrag vom PC-Tab, tvKontenErwartet): '@ke=EXT:N:ΣPL:MMTTHHMM' = N beendete Pläne mit Σ master_pl; '@ke=EXT:x:<grund>:MMTTHHMM'
+    = unbekannt (offen = Trade läuft, pl = master_pl fehlt, knapp = Ende ≤ 120 s nach der Lesung ohne Nachweis). Zeit = Lesung (UTC).
+    Kaputt/abgeschnitten → unbekannt (fail-closed). -> {EXT: {"n", "pl", "zeit"} | {"unbekannt", "zeit"}}"""
+    c = cmd if isinstance(cmd, dict) else {}
+    roh = [str(x)[4:] for x in (c.get("geschwister") or []) if str(x).startswith("@ke=")] + [str(x) for x in (c.get("konten_erw_ke") or [])]
+    out = {}
+    for teil in roh:
+        st = teil.split(":")
+        k = _nur_alnum(st[0] if st else "").upper()
+        if len(k) < 3:
+            continue
+        zeit = st[3].strip() if len(st) == 4 and re.fullmatch(r"\d{8}", st[3].strip()) else ""
+        if len(st) != 4:
+            out[k] = {"unbekannt": "kaputt", "zeit": zeit}
+            continue
+        if st[1].strip() == "x":
+            out[k] = {"unbekannt": (st[2].strip() or "?")[:12], "zeit": zeit}
+            continue
+        try:
+            n, pl = int(st[1]), float(st[2])
+        except (TypeError, ValueError):
+            out[k] = {"unbekannt": "kaputt", "zeit": zeit}
+            continue
+        out[k] = {"n": n, "pl": pl, "zeit": zeit} if (n >= 0 and pl == pl) else {"unbekannt": "kaputt", "zeit": zeit}
+    return out
+
+
 def cdp_konto_texte(ext, geschwister, kb=None):
     """REIN RECHNEND (testbar): kontoTexte für augen.js — Ziel + Geschwister, OHNE Brücken-Einträge ('@feld=wert', 27.10.2026). kb = Konten
     aus den Balance-Einträgen (cdp_konten_bal): stehen vorn und überleben den Panel-Schnitt — fehlen sie hinten in geschwister (S2-Hinweis
@@ -21252,14 +21283,20 @@ def cdp_bal_aus_umschalter(text):
     return tv_geld_lesen(m.group(1))
 
 
-def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, bal=None):
+def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, bal=None, erw=None):
     """REIN RECHNEND (testbar): Ist ein GEKÜRZTES aktives Konto in einem Login mit nur EINEM Konto das Ziel? -> (ja, grund)
     27.10.2026, pc-2zc2we (Finn + Pascal), FundedNext Futures: Umschalter 'FNFTFAFINNSAMUELHE… 155,365.92 USD' ohne ⌄ — ohne Liste gab es
     nach der Regel vom 27.10. früh nie einen Beleg, jeder Lauf brach ab. Voraussetzung „ein Konto" doppelt: kein Aufklapp-Pfeil (augen.js
     ein_konto) UND dieser Lauf hat den Umschalter geklickt, ohne dass eine Liste aufging; dazu passt der Anfang (≥ 14 Zeichen).
     Finns Regel (27.10.2026): passt der Anfang zu GENAU EINEM Konto dieses Logins (Ziel + andere = Konten derselben Firma dieser ID,
     aktiv + zuletzt archivierte) → ja. Teilen mehrere den Anfang → nur ja, wenn die angezeigte Balance centgenau zur letzten bekannten
-    Balance (bal: accounts.tv_balance) GENAU EINES dieser Konten passt und das das Ziel ist. Sonst nein (nicht lesbar → frischer Tab)."""
+    Balance (bal: accounts.tv_balance) GENAU EINES dieser Konten passt und das das Ziel ist. Sonst nein (nicht lesbar → frischer Tab).
+    ERWARTETE BALANCE (29.10.2026, pc-2zc2we …38896: tv_balance 155.365,92 vor einem TP-Trade, Umschalter 155.645,22 — die Endlesung des
+    Trades scheiterte am selben Vergleich, tv_balance blieb alt, jeder Lauf brach ab; Master nach S2-Stopp: „enge Variante, keine
+    Spielräume"): erw = cdp_konten_erwartet. Je Kandidat erwartet = tv_balance + Σ master_pl der seitdem beendeten Pläne, Toleranz 25 $ je
+    Trade (0 Pläne = centgenau wie bisher). Bestätigt nur, wenn GENAU das Ziel passt und KEIN anderer Kandidat passt oder unbekannt ist
+    (Balance unbekannt, Trade läuft, master_pl fehlt, Eintrag kaputt). Ohne '@ke' (alter Tab) gilt N = 0 — also die Regel vom 27.10.
+    Die Spur nennt jeden Kandidaten: Kennung · tv_balance (Zeit) · Σ master_pl (N) · erwartet · passt."""
     a = str(aktiv or "")
     if not (ein_konto is True and geklickt_ohne_liste and cdp_konto_gekuerzt(a) and cdp_konto_passt(a, ext)):
         return False, ""
@@ -21275,16 +21312,40 @@ def cdp_ein_konto_ziel(aktiv, ext, ein_konto, geklickt_ohne_liste, andere=None, 
     b = cdp_bal_aus_umschalter(a)
     if b is None:
         return False, f"Präfix '{st}…' passt zu {len(kand)} Konten, Balance im Umschalter nicht lesbar"
-    gleich = sorted(k for k in kand if (bal or {}).get(k) is not None and round(float(bal[k]) * 100) == round(b * 100))
     bt = f"{b:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    # unbekannte Balance eines ANDEREN Kontos mit gleichem Anfang könnte genauso hoch sein → nie „genau eines" (S3-Test 27.10.2026)
-    unbekannt = sorted(k for k in kand if k != e and (bal or {}).get(k) is None)
+    eur = lambda x: f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    vz = lambda x: ("+" if x >= 0 else "−") + eur(abs(x))
+    ew = erw or {}
+    passt, unbekannt, teile = [], [], []
+    for k in sorted(kand, key=lambda x: (x != e, x)):
+        info = ew.get(k) or {"n": 0, "pl": 0.0, "zeit": ""}
+        z = info.get("zeit") or ""
+        zt = f" ({z[2:4]}.{z[0:2]}. {z[4:6]}:{z[6:8]}Z)" if len(z) == 8 else ""
+        kb = (bal or {}).get(k)
+        if kb is None:
+            unbekannt.append(k)
+            teile.append(f"…{k[-5:]} · Balance unbekannt · blockiert")
+            continue
+        if info.get("unbekannt"):
+            unbekannt.append(k)
+            grund = {"offen": "Trade läuft", "pl": "master_pl fehlt", "knapp": "Ende knapp nach der Lesung", "kaputt": "Eintrag kaputt"}.get(info["unbekannt"], info["unbekannt"])
+            teile.append(f"…{k[-5:]} · {eur(float(kb))}{zt} · unbekannt ({grund}) · blockiert")
+            continue
+        n, pl = int(info.get("n") or 0), float(info.get("pl") or 0.0)
+        erwartet = float(kb) + pl
+        tol = 25 * n   # Gebühren/Rundung je Trade (Master 30.10.2026: ±25 $ je Trade; 02fe3cd6: master_pl 284,30, echt 279,30)
+        ok_k = abs(round(b * 100) - round(erwartet * 100)) <= tol * 100
+        if ok_k:
+            passt.append(k)
+        teile.append(f"…{k[-5:]} · {eur(float(kb))}{zt} · Σ {vz(pl)} ({n} {'Plan' if n == 1 else 'Pläne'}) · erwartet {eur(erwartet)}"
+                     + (f" ± {tol} $" if tol else "") + f" · passt {'ja' if ok_k else 'nein'}")
+    liste = f"angezeigt {bt}: " + " | ".join(teile)
+    if passt == [e] and not unbekannt:
+        return True, f"Konto per Präfix bestätigt über die erwartete Balance ({len(kand)} Konten mit diesem Anfang) — {liste}"
     if unbekannt:
-        return False, f"Präfix '{st}…' passt zu {len(kand)} Konten, letzte Balance von {len(unbekannt)} davon unbekannt — Balance {bt} nicht eindeutig"
-    if gleich == [e]:
-        return True, f"Konto per Präfix + Balance {bt} bestätigt ({len(kand)} Konten mit diesem Anfang, nur {ext} hat diese Balance)"
-    return False, (f"Präfix '{st}…' passt zu {len(kand)} Konten, Balance {bt} passt zu "
-                   + (f"{len(gleich)} davon" if gleich else "keinem (letzte bekannte Balance fehlt oder weicht ab)"))
+        return False, f"Präfix '{st}…' passt zu {len(kand)} Konten, {len(unbekannt)} davon unbekannt — nicht eindeutig ({liste})"
+    return False, (f"Präfix '{st}…' passt zu {len(kand)} Konten, erwartete Balance passt zu "
+                   + (f"{len(passt)} davon" if passt else "keinem") + f" ({liste})")
 
 
 def cdp_liste_aktiv_bestaetigt(eintraege, aktiv, ext):
@@ -21908,7 +21969,8 @@ def _cdp_konto_sichern(s, ext, opts, trail):
             # öffnete keine Liste → der Login hat genau dieses Konto. Passt sein Anfang zum Ziel, ist es das Ziel (cdp_ein_konto_ziel) —
             # einmal neu lesen und als „Konto steht" weiter. Sonst unten wie bisher: anderer Login (Login-Wechsel) bzw. ehrlich raus.
             if not ein_konto_ziel:
-                ja_ek, grund_ek = cdp_ein_konto_ziel(aktiv, ext, ko.get("ein_konto"), True, (opts or {}).get("kontoTexte"), (opts or {}).get("kontenBal"))
+                ja_ek, grund_ek = cdp_ein_konto_ziel(aktiv, ext, ko.get("ein_konto"), True, (opts or {}).get("kontoTexte"), (opts or {}).get("kontenBal"),
+                                                (opts or {}).get("kontenErw"))
                 if ja_ek:
                     ein_konto_ziel = True
                     trail.append(grund_ek)
@@ -22074,7 +22136,7 @@ def modus_tvkontenliste(cmd):
         return raus("befehl", "Feld 'konto' (bekanntes Konto dieser Firma) fehlt", "befehl")
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     _kb = cdp_konten_bal(cmd)
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb, "kontenErw": cdp_konten_erwartet(cmd)}
     trail.append("Weg: Puls-Chrome (CDP, TV-Konten lesen — nur Lesen)")
     if _handlauf_aktiv():
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, später erneut.", "sperre")
@@ -22493,7 +22555,7 @@ def modus_tvlesen_cdp(cmd):
     ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     _kb = cdp_konten_bal(cmd)
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb, "kontenErw": cdp_konten_erwartet(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     trail.append("Weg: Puls-Chrome (CDP)")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): im Puls-Chrome klickt gerade ein Hand-Befehl — nicht dazwischen
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts gelesen, bitte gleich erneut anstoßen.", "sperre")
@@ -23920,7 +23982,7 @@ def modus_tvkette_cdp(cmd):
     scharf = tv_ist_scharf(cmd)
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     _kb = cdp_konten_bal(cmd)
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb, "kontenErw": cdp_konten_erwartet(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     trail.append("Weg: Puls-Chrome (CDP" + (", SCHARF" if scharf and symbol else ", Probelauf — kein Senden" if symbol else "") + ")")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
@@ -24283,7 +24345,7 @@ def modus_tvclose_cdp(cmd):
     richtung = str(cmd.get("richtung") or "").strip().lower() or None
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     _kb = cdp_konten_bal(cmd)
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb, "kontenErw": cdp_konten_erwartet(cmd)}   # 27.10.2026: Balances für gekürzte Kennungen
     res["symbol"], res["wurzel"], res["richtung"] = symbol, root, richtung
     trail.append("Weg: Puls-Chrome (CDP, Schließen)")
     if _handlauf_aktiv():
@@ -27465,7 +27527,7 @@ def modus_tvkette_cdp_mit_neustart(cmd):
     ext = str(c.get("ext_id") or c.get("konto") or "").strip()
     geschwister = [str(x).strip() for x in (c.get("geschwister") or []) if len(_nur_alnum(x)) >= 3][:60]
     _kb = cdp_konten_bal(c)
-    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb}   # 27.10.2026: Balances für gekürzte Kennungen
+    opts = {"kontoTexte": cdp_konto_texte(ext, geschwister, _kb), "kontenBal": _kb, "kontenErw": cdp_konten_erwartet(c)}   # 27.10.2026: Balances für gekürzte Kennungen
     root = tv_symbol_root(symbol)
     return _puls_mit_neustart("tvv2", lambda: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
