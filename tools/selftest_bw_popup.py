@@ -34,7 +34,7 @@ def main():
     else:
         js = ("var _tpOrbitLaeuft=false,_rsAktiv=false,_osBusy=false,_osActive=false,tvV2Poll=null,_hedgeBusy=new Set(),_suLaeuft=false,"
               "_pfV2Laeuft=false,tradePlans=[];function pulsTermine(){return []}function hedgePcId(){return 'pc-x'}\n"
-              "var OFFEN=[],AKTIV=null;var document={querySelectorAll:function(){return OFFEN.map(function(id){return {id:id}})},"
+              "var OFFEN=[],AKTIV=null;var window={};var document={querySelectorAll:function(){return OFFEN.map(function(id){return {id:id}})},"
               "get activeElement(){return AKTIV}};\n" + fn.replace("const bwGrund", "var bwGrund") + "\n"
               "var M=60000,r=[];OFFEN=['tradePlanModal'];r.push(bwGrund(5*M));r.push(bwGrund(16*M));r.push(bwGrund(0));"
               "OFFEN=['tpPreflightModal'];r.push(bwGrund(60*M));OFFEN=['tpOrderModal','finModal'];r.push(bwGrund(60*M));"

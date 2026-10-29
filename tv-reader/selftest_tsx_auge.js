@@ -17,7 +17,8 @@ function laderLauf(o) {
   var uw = o.uw || {};
   var fn = new Function("GM_getValue", "GM_setValue", "GM_xmlhttpRequest", "unsafeWindow", "prophosKern", "setTimeout", "Function", "window", laderSrc);
   var Fn = o.evalGesperrt ? function () { throw new Error("EvalError: Refused to evaluate a string as JavaScript"); } : Function;
-  fn(function (k, d) { return k in store ? store[k] : d; }, function (k, v) { store[k] = v; }, function (req) { spur.netz.push(req); }, uw,
+  fn(o.ohneGm ? undefined : function (k, d) { return k in store ? store[k] : d; }, o.ohneGm ? undefined : function (k, v) { store[k] = v; },
+     function (req) { spur.netz.push(req); }, uw,
      function () { spur.kern++; spur.info = arguments[4]; }, function () {}, Fn, {});
   spur.store = store; return spur;
 }
@@ -34,6 +35,9 @@ var L5 = laderLauf({ merk: { version: "0.1.0", code: "x", sha: "x" } });
 check(L5.kern === 1 && L5.info.quelle === "eingebaut", "Lader: ältere gemerkte Fassung wird nie gestartet");
 var L6 = laderLauf({ evalGesperrt: true, merk: { version: "9.0.0", code: "x", sha: "x" } });
 check(L6.kern === 1 && L6.info.eval === false && L6.netz.length === 0, "Lader: eval gesperrt (MV3) → eingebaute Fassung, nichts nachgeladen");
+
+var L7 = laderLauf({ ohneGm: true });
+check(L7.kern === 1 && L7.info.quelle === "eingebaut", "Lader: GM_getValue/GM_setValue fehlen → eingebaute Fassung läuft trotzdem (nie ganz tot)");
 
 // echter Kern-Lauf mit nachgebautem Auge/DOM
 var kern = src.slice(src.indexOf("// ==KERN-START==\n") + 18, src.indexOf("// ==KERN-ENDE=="));

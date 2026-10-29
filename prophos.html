@@ -26236,7 +26236,9 @@
     }
     if(window._tvNeuLaeuft) return
     const blicke = [tvnBlickTv(), bTsx].filter(Boolean)
-    for(const b of blicke) if(!tvTmFrei(b)) return tvTmTick(b)          // erst die einmalige Lader-Installation
+    // erst die einmalige Lader-Installation — nur wenn auch das ANDERE Script nichts Offenes sieht (der Tampermonkey-Weg öffnet einen Tab und
+    // drückt mit der echten Maus; Hand-Trades ohne Plan im anderen Fenster sperren so auch, Prüfer 29.10.2026)
+    for(const b of blicke) if(!tvTmFrei(b)) return blicke.some(x => x !== b && x.posGrund) ? undefined : tvTmTick(b)
     for(const b of blicke) if(!tvNeuladenFrei(b)) return tvNeuladenLauf(b)
   }
   ;(function tvnLoop(){ setTimeout(async () => { try{ await tvNeuladenTick() }catch(e){ console.warn('[tv-neuladen]', (e && e.message) || e) } tvnLoop() },
@@ -50079,7 +50081,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1849'
+  const OS_TAB_BUILD = '2026-09-22.1850'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

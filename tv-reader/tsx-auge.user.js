@@ -9,6 +9,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        unsafeWindow
 // @connect      127.0.0.1
 // @run-at       document-idle
 // @updateURL    http://127.0.0.1:8770/userscript/tsx-auge.meta.js
@@ -179,7 +180,11 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   try { evalOk = new Function('return 1')() === 1; } catch (e) { info.fehler = 'eval gesperrt: ' + String((e && e.message) || e).slice(0, 80); }
   info.eval = evalOk;
   const PARAM = ['GM_xmlhttpRequest', 'GM_getValue', 'GM_setValue', 'unsafeWindow', 'PROPHOS_LADER'];
-  const gm = () => [GM_xmlhttpRequest, GM_getValue, GM_setValue, (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window)];
+  // je GM-Funktion mit typeof-Schutz (Prüfer 29.10.2026): fehlt eine (Grant-Problem, andere Engine), startet trotzdem die eingebaute Fassung —
+  // ohne Schutz würfe der Lader hier, und das Auge wäre ganz tot. Ohne GM_getValue/GM_setValue wird nur nichts gemerkt.
+  const gm = () => [(typeof GM_xmlhttpRequest !== 'undefined' ? GM_xmlhttpRequest : undefined), (typeof GM_getValue !== 'undefined' ? GM_getValue : undefined),
+    (typeof GM_setValue !== 'undefined' ? GM_setValue : undefined),
+    (typeof unsafeWindow !== 'undefined' ? unsafeWindow : (typeof window !== 'undefined' ? window : globalThis))];
   let laeuft = false;
   if (evalOk) {
     let m = null;
@@ -200,7 +205,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
     if (uw && uw.__prophosTsxKernAn) { info.quelle = 'blind (Riegel)'; info.fehler += ' — Doppellauf-Riegel: eingebaute Fassung nicht gestartet'; }
     prophosKern(...gm(), info);
   }
-  if (!evalOk) return;                          // ohne eval nie etwas nachladen — die eingebaute Fassung bleibt
+  if (!evalOk || typeof GM_setValue === 'undefined' || typeof setTimeout !== 'function') return;   // ohne eval/Speicher nie etwas nachladen
   // Hintergrund: neuere Fassung vom Panel dieses PCs holen, pruefen, fuer das NAECHSTE Laden merken (nie zwei Kerne in einer Seite)
   async function sha256(t) {
     const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
