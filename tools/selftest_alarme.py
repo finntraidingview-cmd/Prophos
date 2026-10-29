@@ -127,7 +127,8 @@ def main():
        and len(e5[0]) == 8 and e5[0][7].endswith("#fehlerbild=pc-abcd12/2026-10-29/20261029-060000-a1b2c3"), f"Text/Link mit Dialog+Foto: {e5}")
     ok(len(ev2["m|nova_ohne_sltp"]) == 7, "ohne Foto kein Link")
     k3 = [e[0] for e in ereig([dict(pl2[0], started_at=iso(2000))], namen, jetzt, seit)]
-    ok(k3 == ["m|ohne_sltp|2"], f"Erinnerung ohne SL/TP {k3}")
+    # höchstens 2 Meldungen je Plan (Triage 30.10.2026): nach 2.000 s bleibt der Zähler bei 1 — keine dritte Erinnerung
+    ok(k3 == ["m|ohne_sltp|1"], f"Erinnerung ohne SL/TP gedeckelt {k3}")
 
     # FINALER TRADEIFY GEHALTEN (29.10.2026): ⚪ einmal je Plan, kein „Richtungsschutz"
     ss = {"art": "final_halten", "at": iso(30), "naechster": "2026-10-23T12:09:00+00:00", "text": "finaler Tradeify-Trade wartet auf Gegenhedge"}

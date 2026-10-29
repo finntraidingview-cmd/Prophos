@@ -3904,7 +3904,8 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             fehlt = " und ".join(x for x, ja in (("SL (Risk)", bf["risk"]), ("TP (To Make)", bf["tp"])) if ja)
             dlg = f" (Dialog „{bf['dialog']}“)" if bf.get("dialog") else ""
             # Fehlerfoto (S5): der Push öffnet Prophos mit …#fehlerbild=<pfad> → Radar + Bild (pulsFehlerbildZeigen, Admin-Bildroute)
-            out.append((f"{pid}|ohne_sltp|{min(int(s // ALARM_ERINNERN_S), 3)}", 1, "nova_ohne_sltp", "Nova ohne SL/TP",
+            # höchstens 2 Meldungen je Plan (Triage 30.10.2026: Marc …0038 9× in 3 h) — erste sofort, eine Erinnerung nach 15 min
+            out.append((f"{pid}|ohne_sltp|{min(int(s // ALARM_ERINNERN_S), 1)}", 1, "nova_ohne_sltp", "Nova ohne SL/TP",
                         f"{wer} · {konto}: {menge} @ {preis} — {fehlt} nicht gesetzt{dlg} — in TopstepX setzen." + (" Foto: antippen." if bf.get("bild") else ""),
                         uid, pid) + ((f"https://prophos.pages.dev/prophos#fehlerbild={bf['bild']}",) if bf.get("bild") else ()))
         # WIEDER OFFEN (29.10.2026): die Endlesung sah die Position nach dem Ende noch offen, der PC-Tab hat den Plan zurück auf open gesetzt
@@ -3923,6 +3924,28 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
     return out
 
 
+def alarm_im_log_filter(keys):
+    """REIN RECHNEND (testbar): PostgREST-Filter schluessel=in.("…","…") — Schlüssel in Anführungszeichen (sie tragen „|"), ohne Anführungszeichen und Backslash."""
+    ks = sorted({str(k) for k in keys or () if k and '"' not in str(k) and "\\" not in str(k)})
+    return "in.(" + ",".join(f'"{k}"' for k in ks) + ")" if ks else None
+
+
+def alarm_im_log(keys, seit_s):
+    """Welche dieser Schlüssel stehen in den letzten seit_s Sekunden schon im alarm_log? → set; Lesefehler → None (der Aufrufer sendet dann
+    wie bisher — lieber doppelt als eine 🔴 verschluckt). Triage 30.10.2026: die Merker _alarm["gemeldet"] / _SKRIPT_WACHT lagen nur im
+    Speicher, jeder Railway-Neustart meldete dasselbe erneut (userscript_alt 4 Wellen am 29.10., Nova ohne SL/TP 9× für einen Plan)."""
+    filt = alarm_im_log_filter(keys)
+    if not filt:
+        return set()
+    try:
+        ab = datetime.fromtimestamp(time.time() - seit_s, timezone.utc).isoformat()
+        rows = _sb_all("alarm_log", {"select": "schluessel", "schluessel": filt, "at": f"gte.{ab}"}) or []
+        return {str(r.get("schluessel")) for r in rows if r.get("schluessel")}
+    except Exception as e:
+        print(f"[alarm] ⚠️ alarm_log nicht lesbar ({type(e).__name__}) — Entprellung nur im Speicher", flush=True)
+        return None
+
+
 def alarm_tick():
     """Weg (b), Railway-Takt (ap_loop): einmal je Minute die Pläne der HT-IDs lesen und melden, was alarm_ereignisse findet."""
     if time.time() - _alarm["at"] < ALARM_TAKT_S or not _alarm_empfaenger():
@@ -3938,11 +3961,13 @@ def alarm_tick():
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
-    for ev in alarm_ereignisse(rows, namen, jetzt, seit):
+    evs = [ev for ev in alarm_ereignisse(rows, namen, jetzt, seit) if ev[0] not in _alarm["gemeldet"]]
+    schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()   # nach einem Neustart: in 24 h Gemeldetes nicht noch einmal
+    for ev in evs:
         key, prio, art, titel, text, uid, pid = ev[:7]
-        if key in _alarm["gemeldet"]:
-            continue
         _alarm["gemeldet"][key] = time.time()
+        if schon and key in schon:
+            continue
         uid = uid or next((str(r.get("user_id")) for r in rows if str(r.get("id")) == pid), None)
         alarm_senden(prio, art, titel, text, uid=uid, plan_id=pid, schluessel=key, tag=f"alarm-{art}-{pid[:8]}", url=ev[7] if len(ev) > 7 else None)
     _alarm["gemeldet"] = {k: t for k, t in _alarm["gemeldet"].items() if time.time() - t < 86400}
@@ -4529,6 +4554,12 @@ KONTO_WEG_PUSH_SPERRE_S = 3600
 _konto_weg_push = {}     # account_id → epoch der letzten Meldung
 
 
+def konto_weg_push_still(urteil, archiviert):
+    """REIN RECHNEND (testbar): „Konto weg" ohne Push? Nur wenn nichts Neues passiert ist — kein Urteil (bestanden/prüfen) und nicht eben
+    archiviert, also „war schon archiviert"."""
+    return str(urteil or "") not in ("bestanden", "pruefen") and not archiviert
+
+
 @app.route("/konto-weg/melden", methods=["POST", "OPTIONS"])
 def konto_weg_melden():
     if request.method == "OPTIONS":
@@ -4568,6 +4599,11 @@ def konto_weg_melden():
              else "als geblowt archiviert" if d.get("archiviert") else "war schon archiviert")
     text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + wer if wer else ''}: " + anlass + folge
             + (f" · {n} laufende{'r Trade' if n == 1 else ' Trades'} unter „Überprüfen“" if n else ""))
+    if konto_weg_push_still(urteil, d.get("archiviert")):
+        # „war schon archiviert" (Triage 30.10.2026: Marco …6523/…1329 je 4× an 2 Empfänger, jede neue TopstepX-„Ineligible"-Meldung): nichts
+        # Neues passiert — nur die Spur, kein Push
+        print(f"[konto-weg] 🗄 still (schon archiviert): {text} (Quelle {str(d.get('quelle') or '-')[:12]})", flush=True)
+        return jsonify({"ok": True, "zugestellt": 0, "still": True})
     zu = 0
     for ziel in {uid} | (_zw_admin_uids() or set()):
         try:
@@ -15986,6 +16022,18 @@ def skript_wacht_tick(jetzt=None):
         namen = _rw_pc_namen() or {}
     except Exception:
         pass
+    # nach einem Railway-Neustart ist _SKRIPT_WACHT leer — in 24 h schon Gemeldetes (alarm_log.schluessel) nicht noch einmal (Triage 30.10.2026)
+    schon = alarm_im_log([f"userscript|{pc}|{soll}" for pc, _i in treffer] + [f"tsx_auge|{pc}|{soll_tsx}" for pc, _i in treffer_tsx],
+                         SKRIPT_WACHT_WIEDER_S) if (treffer or treffer_tsx) else set()
+    if schon:
+        for pc, _i in treffer:
+            if f"userscript|{pc}|{soll}" in schon:
+                _SKRIPT_WACHT["gemeldet"][(pc, soll)] = jetzt
+        for pc, _i in treffer_tsx:
+            if f"tsx_auge|{pc}|{soll_tsx}" in schon:
+                _SKRIPT_WACHT["gemeldet_tsx"][(pc, soll_tsx)] = jetzt
+        treffer = [(pc, i) for pc, i in treffer if f"userscript|{pc}|{soll}" not in schon]
+        treffer_tsx = [(pc, i) for pc, i in treffer_tsx if f"tsx_auge|{pc}|{soll_tsx}" not in schon]
     for pc, ist in treffer:
         _SKRIPT_WACHT["gemeldet"][(pc, soll)] = jetzt
         wer = namen.get(pc) or pc
