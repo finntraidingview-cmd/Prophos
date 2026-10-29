@@ -8475,7 +8475,7 @@ def test_tsx_k4():
             self.o = dict(fill_nach=1, fill_toast=True, abgelehnt=False, order_druck=True, reiter=False, risk=None, to_make=None, edit_geht=True,
                           strg_a=True, tipp_extra="", enter_wirkt=True, flach_ohne_pos=True, markt_zu=False, popup_nach_enter=False, edit_fokus=True,
                           wirft_nach_klick=False, tippen_wirft=False, tasten_wirken=True, k4=True, reiter_da=True, bein_abgelehnt=False, zeile_nach=0, klick_wirft="",
-                          abl_ohne_zeile=False, dialog_nach_doppel="", stift=False)
+                          abl_ohne_zeile=False, dialog_nach_doppel="", stift=False, stift_beweis=True, stift_wirkt=True)
             self.o.update(kw)
             self.dlg, self.dlg_gezeigt = None, False
             self.richtung, self.menge, self.avg = richtung, menge, avg
@@ -8563,7 +8563,9 @@ def test_tsx_k4():
                     self.dlg = None
             elif name in ("Risk-Stift", "To Make-Stift"):
                 feld = "risk" if name.startswith("Risk") else "to_make"
-                if self.o["edit_geht"]:
+                if not self.o["stift_beweis"]:
+                    return False                               # S2: svg ohne Knopf → Beweis sieht die ganze Zelle, kein Druck
+                if self.o["edit_geht"] and self.o["stift_wirkt"]:
                     w = self.werte[feld]
                     self.edit, self.eingabe, self.markiert = feld, ("" if w is None else str(int(w))), False
             elif name.startswith("Risk-Zelle") or name.startswith("To Make-Zelle"):
@@ -8793,6 +8795,18 @@ def test_tsx_k4():
         chk(r6s["ok"] and "warnung" not in r6s and s6s.werte == {"risk": 21.0, "to_make": 198.0} and len(ks_) == 2
             and all(not k[1] and pr.get("zelle") and pr["rect"] == k[2] for k, pr in ks_) and not any("Doppelklick" in k[0] for k in s6s.klicks),
             f"Stift-Weg: je Zelle EIN Klick auf ✎ (kein Doppelklick), pruef.zelle, Risk + To Make gesetzt ({r6s.get('warnung')}, {s6s.werte})")
+        # Stift aus (Prüfer S2 zu f907c566): ohne Beweis → derselbe Versuch fällt auf den Doppelklick; Stift ohne Eingabefeld → nächster
+        # Versuch per Doppelklick; in beiden Fällen je Zelle höchstens EIN Stift-Klick im Lauf, Risk + To Make am Ende gesetzt
+        for opt_, txt_ in (({"stift_beweis": False}, "ohne Beweis"), ({"stift_wirkt": False}, "ohne Eingabefeld")):
+            s6t = _T4(stift=True, **opt_)
+            r6t, t6t = lauf(s6t)
+            n_st = {n_: sum(1 for k in s6t.klicks if k[0] == n_ + "-Stift") for n_ in ("Risk", "To Make")}
+            n_dk = {n_: sum(1 for k in s6t.klicks if k[0] == n_ + "-Zelle (Doppelklick)") for n_ in ("Risk", "To Make")}
+            chk(r6t["ok"] and "brackets_fehlen" not in r6t and s6t.werte == {"risk": 21.0, "to_make": 198.0}
+                and n_st == {"Risk": 1, "To Make": 1} and n_dk == {"Risk": 1, "To Make": 1} and any("Doppelklick" in x and "Stift" in x for x in t6t),
+                f"Stift {txt_}: je Zelle ein Stift-Versuch, dann Doppelklick, Brackets gesetzt ({r6t.get('warnung')}, {n_st}, {n_dk})")
+        chk(re.search(ob.TSX_K4_TABU, "Remove bracket", re.I) and re.search(ob.TSX_K4_TABU, "Clear", re.I) and not re.search(ob.TSX_K4_TABU, "Edit", re.I),
+            "TSX_K4_TABU: remove/clear/entfernen gesperrt, Edit nicht")
         sr = ob.tsx_k4_stift_rect
         zl2 = {"rect": [69, 766, 1930, 22], "close_rect": RC}
         fs = lambda r, zu=None: {"rect": RR, "stift": {"rect": r, "zu": zu or {}}}
@@ -8931,7 +8945,7 @@ def test_tsx_k4():
     neu_js = js.split("function reiterLesen()")[1].split("function positionAus")[0]
     # tsx-0.6.3 seit 4af8c460 (19.10.2026, Symbol-X der Login-Meldung) — Reiter/Positions-Tabelle unberührt (S4 21.10.2026)
     # tsx-0.6.4: dazu feld().stift (Rechteck des ✎) — weiter nur lesend
-    chk("var VERSION = 'tsx-0.6.4'" in js and "stift: stift" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
+    chk("var VERSION = 'tsx-0.6.4'" in js and "stift: stift" in neu_js and "r.left >= wr - 2" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
         and "o.ticket.k4 = true" in js and ".click(" not in neu_js and "dispatchEvent" not in neu_js and ".focus(" not in neu_js
         and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
     chk("zuletzt" in js and "15000" in js and "e.zuletzt = jetzt; m.erst_gesehen = e.erst;" in js, "augen_tsx.js 0.6.1: Meldungs-Merker vergisst nach 15 s (Prüfer 06.10.2026)")

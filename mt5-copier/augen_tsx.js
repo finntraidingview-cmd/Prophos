@@ -457,7 +457,12 @@ var PROPHOS_AUGEN_TSX = (function () {
       if (!inp) {
         var nm = function (e) { var k = e.className; return (attr(e, 'data-testid') + ' ' + attr(e, 'aria-label') + ' ' + attr(e, 'title') + ' ' + String(k && k.baseVal !== undefined ? k.baseVal : (k || ''))); };
         var kand = alle('button,[role="button"],svg', z).filter(sichtbar).filter(function (e) { return /edit|pencil/i.test(nm(e)); }), art = 'name';
-        if (!kand.length) { art = 'einzig'; kand = alle('svg', z).filter(sichtbar).filter(function (e) { var r = e.getBoundingClientRect(); return r.width >= 6 && r.width <= 28 && r.height >= 6 && r.height <= 28; }); }
+        if (!kand.length) {
+          // Rückfall nur RECHTS vom Wert (S2 zu f907c566: nie ein Sortierpfeil o. Ä.): rechter Rand der Blätter mit Geld-Text der Zelle
+          var wr = -1;
+          alle('*', z).forEach(function (e) { if (!e.children.length && e.tagName.toLowerCase() !== 'svg' && /[\d$]/.test(txt(e))) wr = Math.max(wr, e.getBoundingClientRect().right); });
+          art = 'einzig'; kand = wr < 0 ? [] : alle('svg', z).filter(sichtbar).filter(function (e) { var r = e.getBoundingClientRect(); return r.width >= 6 && r.width <= 28 && r.height >= 6 && r.height <= 28 && r.left >= wr - 2; });
+        }
         if (kand.length === 1 || (art === 'name' && kand.length)) {
           var s0 = kand[0], tr = (s0.closest && s0.closest('button,[role="button"]')) || s0;
           if (!z.contains(tr)) tr = s0;

@@ -17096,7 +17096,7 @@ TSX_PUNKTWERT = {"MNQ": 2.0, "NQ": 20.0}   # $ je Punkt und Kontrakt
 TSX_TICK = 0.25
 # Ziel-Beweis der K4-Klicks: der Order-Knopf trägt selbst „buy/sell/market" (TSX_K0_TABU würde ihn ablehnen) — verboten bleibt alles,
 # was schließt, dreht oder storniert
-TSX_K4_TABU = r"\b(close|flatten|cancel|reverse|join|log ?out|abmelden|delete|löschen|reset)\b"
+TSX_K4_TABU = r"\b(close|flatten|cancel|reverse|join|log ?out|abmelden|delete|löschen|reset|remove|clear|entfernen)\b"   # remove/clear/entfernen: S2 29.10.2026 (Stift-Klick)
 # Menschliches Tempo (Finn 01.10.2026: beim Kontowechsel ging das Dropdown „in einer Millisekunde" auf und zu): zwischen den Schritten
 # 1–2 s, vor jedem Druck 0,3–0,8 s über dem Ziel stehen — beides über _warte (Streuung). Gilt für K2, Login und das Ticket.
 TSX_SCHRITT_PAUSE = (1.0, 1.0)
@@ -19409,12 +19409,24 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
             # STIFT ✎ ZUERST (29.10.2026 abends, Fehlerfoto e9cf8722, Master): „$0.00 ✎" — der vorgesehene Bearbeiten-Weg ist das Stift-Symbol
             # der Zelle (augen_tsx.js tsx-0.6.4 meldet stift.rect). EIN Klick, Ziel-Beweis = am Punkt liegt dieser Stift UND diese Zelle
             # (pruef.zelle). Ohne Stift (altes Auge, Symbol nicht eindeutig) der Doppelklick wie bisher — mit Klickfläche und Zellen-Beweis.
-            stift = tsx_k4_stift_rect(f, z_)
+            # STIFT AUS (Prüfer S2 zu f907c566): ein Stift ohne Beweis (z. B. svg ohne Knopf, der Beweis sieht dann die ganze Zelle → „klein"
+            # scheitert immer) oder ohne Eingabefeld danach gilt für den Rest des Laufs als aus — dieser und jeder weitere Versuch der Zelle
+            # nimmt den Doppelklick. Merker je Lauf an der Sitzung (_tsx_k4_senden setzt ihn vor den Runden neu).
+            aus = getattr(s, "_k4_stift_aus", None)
+            if not isinstance(aus, set):
+                aus = set()
+                try:
+                    s._k4_stift_aus = aus
+                except Exception:
+                    pass
+            stift = None if feld in aus else tsx_k4_stift_rect(f, z_)
             if stift:
                 _tsx_pause()
                 if not s.klick(stift, f"{name}-Stift", pruef={"rect": stift, "text": "", "aria": "", "tabu": TSX_K4_TABU, "zelle": r}):
-                    return False, None, f"{name}-Stift nicht gedrückt (Klick ohne Beweis)", st
-            else:
+                    aus.add(feld)
+                    trail.append(f"{name}-Stift ohne Beweis — ab jetzt Doppelklick")
+                    stift = None
+            if not stift:
                 links, grund_k = tsx_k4_klick_rect(r, z_)
                 if not links:
                     return False, None, f"{name}-Zelle: {grund_k} — kein Doppelklick", st
@@ -19427,6 +19439,9 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
             e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
         if not e.get("offen") or e.get("fokus") is not True:
             letzter = f"{name}: nach dem {'Stift-Klick' if stift else 'Doppelklick'} kein Eingabefeld mit Fokus"
+            if stift:
+                aus.add(feld)                                  # Stift öffnet kein Feld → nächster Versuch per Doppelklick (S2)
+                letzter += " — Stift aus, ab jetzt Doppelklick"
             trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
             if e.get("offen"):
                 _cdp_esc(s, st, trail, f"{name}-Feld ohne Fokus")
@@ -19627,6 +19642,10 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
         # Zwischen den Runden gestreut 1–2 s (Jitter-Regel). Danach Rücklesung der Zeile; nie ein Close, nie eine zweite Order.
         offen_f = [(f_, u_, n_) for f_, u_, n_ in (("risk", sl, "Risk"), ("to_make", tp, "To Make")) if u_]
         letzte = {}
+        try:
+            s._k4_stift_aus = set()                            # Stift-Merker je Lauf neu (s. _tsx_k4_feld)
+        except Exception:
+            pass
         for runde in range(TSX_K4_BRACKET_RUNDEN):
             if not offen_f:
                 break
