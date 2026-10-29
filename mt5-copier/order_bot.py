@@ -1181,15 +1181,28 @@ class _FehlerfotoAusgabe:
             d = json.loads(z)
         except ValueError:
             return z
-        if not isinstance(d, dict) or d.get("ok") is not False or d.get("fehlerbild"):
+        if not isinstance(d, dict) or d.get("fehlerbild"):
+            return z
+        # Auch bei ok true (29.10.2026, Master/Finn — Nova-Brackets fehlten, Position 8 h ohne SL/TP): fehlen nach dem Fill Brackets
+        # (brackets_fehlen) oder stand ein Dialog über der Positions-Tabelle (bracket_dialog), wird der Bildschirm + Tab fotografiert —
+        # sonst sieht niemand den Dialog. Pfad in brackets_fehlen.bild bzw. bracket_dialog_bild; „fehlerbild" bleibt den ok-false-Läufen.
+        bf_ = d.get("brackets_fehlen") if isinstance(d.get("brackets_fehlen"), dict) else None
+        ok_mit_bild = d.get("ok") is True and (bf_ is not None or bool(d.get("bracket_dialog")))
+        if d.get("ok") is not False and not ok_mit_bild:
             return z
         self._fertig = True
-        bild, grund = fehlerfoto_anstossen(self._weg, self._tab, d.get("code") or d.get("schritt"))
+        code_ = ("brackets_fehlen" if bf_ is not None else "bracket_dialog") if ok_mit_bild else (d.get("code") or d.get("schritt"))
+        bild, grund = fehlerfoto_anstossen(self._weg, self._tab, code_)
         zeile = (f"Fehlerfoto angestoßen → {bild} (bildschirm{' + tab' if self._tab else ''})" if bild else f"kein Fehlerfoto: {grund}")
         t = d.get("trail")
         d["trail"] = (t + [zeile]) if isinstance(t, list) else (f"{t} → {zeile}" if t else zeile)
         if bild:
-            d["fehlerbild"] = bild
+            if not ok_mit_bild:
+                d["fehlerbild"] = bild
+            elif bf_ is not None:
+                bf_["bild"] = bild
+            else:
+                d["bracket_dialog_bild"] = bild
         return json.dumps(d, ensure_ascii=True)
 
     def write(self, s):
@@ -16711,6 +16724,7 @@ TSX_K3_WACHHUND_S = 158.0          # Panel /api/tsx-konto beendet den Bot nach 1
 # Risk / To Make der Positions-Tabelle. Ersetzt den Plan „SL/TP im Chart ziehen". Wirkt nur bei scharf:true (Schalter puls_topstep
 # 'scharf') auf PCs in puls_topstep_pcs. False = scharf antwortet wieder cdp_folgt K4.
 TSX_K4_AKTIV = True
+TSX_K4_BRACKET_RUNDEN = 3          # Risk/To Make nach dem Fill: so viele Runden (je Zelle zwei Versuche), gestreut, Reiter neu (29.10.2026)
 TSX_K4_REST_S = 75.0               # so viel Zeit muss bis zum Wachhund noch sein — sonst wird NICHT gesendet (Order + Beweis + zwei Zellen)
 TSX_K4_BEWEIS_S = 15.0             # so lange nach dem Klick auf Fill-Meldung oder Position warten (wie Orbit K4)
 TSX_PUNKTWERT = {"MNQ": 2.0, "NQ": 20.0}   # $ je Punkt und Kontrakt
@@ -18909,6 +18923,26 @@ def _tsx_k4_reiter(s, st, trail):
     return False, st, "Reiter „Positions“ offen, aber die Tabelle mit Risk / To Make ist nicht zu sehen"
 
 
+def tsx_k4_brackets_fehlen(zeile, ist, tp, sl):
+    """REIN RECHNEND (testbar, 29.10.2026 — Simon Topstep 150k: Position lief 8 h ohne SL/TP, Puls meldete nur eine Warnung): welche GEPLANTEN
+    Brackets sind nach allen Runden NICHT bewiesen? Beweis = in diesem Lauf eingetragen und zurückgelesen (ist[feld]) ODER die frisch gelesene
+    Positionszeile zeigt einen Betrag > 0 $ (TopstepX-Bracket). Zeile nicht lesbar = kein Beweis. -> {risk: bool, tp: bool} | None (alles da)"""
+    z = zeile if isinstance(zeile, dict) else {}
+    i = ist if isinstance(ist, dict) else {}
+
+    def steht(feld):
+        w = (z.get(feld) or {}).get("wert") if isinstance(z.get(feld), dict) else None
+        return feld in i or (isinstance(w, (int, float)) and w > 0)
+    f = {"risk": bool(sl) and not steht("risk"), "tp": bool(tp) and not steht("to_make")}
+    return f if (f["risk"] or f["tp"]) else None
+
+
+def _tsx_k4_dialog_name(st):
+    """Titel bzw. Text des ersten offenen TopstepX-Dialogs für Spur/Warnung ('' ohne Dialog). Liest nur."""
+    p0 = (st.get("popups") or [None])[0] if isinstance(st, dict) else None
+    return str((p0 or {}).get("titel") or (p0 or {}).get("text") or "")[:50] if isinstance(p0, dict) else ""
+
+
 def _tsx_k4_feld_aus(st, befehl, feld):
     z, grund = tsx_k4_zeile(st, befehl)
     f = z.get(feld) if isinstance(z, dict) and isinstance(z.get(feld), dict) else None
@@ -19151,27 +19185,67 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
     # offenes Eingabefeld wird mit Esc verlassen, und solange es offen sein könnte, wird keine zweite Zelle angeklickt.
     if tp or sl:
         res["schritt"] = "brackets"
-        if isinstance(st, dict) and st.get("popups"):       # ein Dialog nach dem Fill: nichts darunter anklicken
-            ok_r, grund_r = False, "nach dem Fill steht ein Dialog offen — Risk / To Make nicht gesetzt"
-        else:
+        # BIS ZU DREI RUNDEN (29.10.2026, Vorfall Simon Topstep 150k Plan 523545ee: BUY 2 NQ, Position lief 8 h ohne SL/TP; tags zuvor Ina 2×):
+        # nach dem ersten Doppelklick auf Risk kam kein Eingabefeld, 0,5 s später stand ein TopstepX-Dialog über der Tabelle → 2. Versuch
+        # „verdeckt", To Make „Dialog offen", danach versuchte niemand mehr etwas. Jetzt je Runde: Dialog offen → die bekannte Loss-Limit-
+        # Meldung schließt _tsx_blow_dialog_weg (einmal je Lauf, Ziel-Beweis); jeder ANDERE Dialog wird nie angefasst, sein Titel steht in
+        # Spur und Warnung. Dann Reiter „Positions" neu (höchstens ein Klick), die noch fehlenden Zellen wie bisher (je zwei Versuche).
+        # Zwischen den Runden gestreut 1–2 s (Jitter-Regel). Danach Rücklesung der Zeile; nie ein Close, nie eine zweite Order.
+        offen_f = [(f_, u_, n_) for f_, u_, n_ in (("risk", sl, "Risk"), ("to_make", tp, "To Make")) if u_]
+        letzte = {}
+        for runde in range(TSX_K4_BRACKET_RUNDEN):
+            if not offen_f:
+                break
+            if abbruch:
+                for _f, _u, n_ in offen_f:
+                    letzte[n_] = letzte.get(n_) or "nach dem Abbruch nicht mehr versucht — ein Eingabefeld könnte offen sein"
+                break
+            if _tsx_frist(trail) - trail.sekunden() < 30.0:          # eine Zelle mit zwei Versuchen + Zeilen-Warten braucht bis ~29 s (Nachprüfer 06.10.2026)
+                for _f, _u, n_ in offen_f:                          # Runde ohne Versuch: der genauere Grund einer früheren Runde bleibt stehen
+                    letzte[n_] = letzte.get(n_) or "Zeitlimit des Laufs"
+                break
+            if runde:
+                _warte(1.0, 1.0)
+                try:
+                    st = s.stand()
+                except Exception as e_:
+                    trail.append(f"Brackets Runde {runde + 1}: Lesen {type(e_).__name__}")
+                    continue
+                trail.append(f"Brackets: Runde {runde + 1} von {TSX_K4_BRACKET_RUNDEN} für {', '.join(n_ for _f, _u, n_ in offen_f)}")
+            if isinstance(st, dict) and st.get("popups"):
+                res.setdefault("bracket_dialog", _tsx_k4_dialog_name(st) or "Dialog")   # → Fehlerfoto auch bei ok true (Hülle)
+                try:
+                    st, _bd = _tsx_blow_dialog_weg(s, st, trail, res)
+                except Exception as e_:
+                    trail.append(f"Brackets: Meldung schließen {type(e_).__name__}: {str(e_)[:60]}")
+                if isinstance(st, dict) and st.get("popups"):
+                    g_ = f"Dialog offen ('{_tsx_k4_dialog_name(st)}')"
+                    trail.append(f"Brackets: {g_} — nichts darunter angeklickt")
+                    for _f, _u, n_ in offen_f:
+                        letzte[n_] = letzte.get(n_) or g_
+                    continue
             try:
                 ok_r, st, grund_r = _tsx_k4_reiter(s, st, trail)
             except Exception as e_:
                 ok_r, grund_r = False, f"Reiter Positions abgebrochen ({type(e_).__name__}: {str(e_)[:80]})"
-        if not ok_r:
-            warn.append(grund_r)
-        else:
-            for feld, usd, name in (("risk", sl, "Risk"), ("to_make", tp, "To Make")):
-                if not usd:
-                    continue
+            if not ok_r:
+                trail.append(f"Brackets: {grund_r}")
+                for _f, _u, n_ in offen_f:
+                    letzte[n_] = letzte.get(n_) or grund_r
+                continue
+            noch = []
+            for feld, usd, name in offen_f:
                 if abbruch:
-                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (nach dem Abbruch nicht mehr versucht — ein Eingabefeld könnte offen sein)")
+                    letzte[name] = "nach dem Abbruch nicht mehr versucht — ein Eingabefeld könnte offen sein"
+                    noch.append((feld, usd, name))
                     continue
                 if isinstance(st, dict) and st.get("popups"):
-                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (Dialog offen)")
+                    letzte[name] = letzte.get(name) or f"Dialog offen ('{_tsx_k4_dialog_name(st)}')"
+                    noch.append((feld, usd, name))
                     continue
-                if _tsx_frist(trail) - trail.sekunden() < 30.0:      # eine Zelle mit zwei Versuchen + Zeilen-Warten braucht bis ~29 s (Nachprüfer 06.10.2026)
-                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt (Zeitlimit des Laufs)")
+                if _tsx_frist(trail) - trail.sekunden() < 30.0:
+                    letzte[name] = letzte.get(name) or "Zeitlimit des Laufs"
+                    noch.append((feld, usd, name))
                     continue
                 try:
                     ok_f, wert, grund_f, st = _tsx_k4_feld(s, st, befehl, feld, usd, name, trail)
@@ -19182,7 +19256,39 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                 if ok_f:
                     ist[feld] = wert
                 else:
-                    warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt ({grund_f})")
+                    if isinstance(st, dict) and st.get("popups"):
+                        res.setdefault("bracket_dialog", _tsx_k4_dialog_name(st) or "Dialog")
+                    if isinstance(st, dict) and st.get("popups") and "Dialog" not in str(grund_f):
+                        grund_f = f"{grund_f}; danach Dialog offen ('{_tsx_k4_dialog_name(st)}')"
+                    letzte[name] = grund_f
+                    noch.append((feld, usd, name))
+            offen_f = noch
+        for _f, usd, name in offen_f:
+            warn.append(f"{name} {tsx_k4_betrag_text(usd)} $ nicht gesetzt ({letzte.get(name) or 'nicht gesetzt'})")
+        # RÜCKLESUNG ALS BEWEIS (29.10.2026): Zeile frisch lesen — eingetragen (ist) oder Betrag > 0 $ in der Zeile; sonst brackets_fehlen
+        # {risk, tp} im Ergebnis, damit Prophos 🔴 alarmiert. Nie automatisch schließen.
+        # Prüfer 29.10.2026: nur mit Restzeit lesen (der Wachhund darf nie vor dem Ergebnis zuschlagen); kein frischer Stand = kein
+        # Beweis aus der Zeile (nie der alte Stand), dann zählen nur die in diesem Lauf eingetragenen Zellen
+        st_r = None
+        if _tsx_frist(trail) - trail.sekunden() >= 8.0:
+            try:
+                st_r = s.stand()
+            except Exception as e_:
+                trail.append(f"Brackets Rücklesung: {type(e_).__name__}")
+        z_r = None
+        if isinstance(st_r, dict):
+            st = st_r
+            try:
+                z_r, _g = tsx_k4_zeile(st_r, befehl)
+            except Exception:
+                z_r = None
+        else:
+            trail.append("Brackets Rücklesung: kein frischer Stand — Beweis nur aus den eingetragenen Zellen")
+        bf = tsx_k4_brackets_fehlen(z_r, ist, tp, sl)
+        if bf:
+            res["brackets_fehlen"] = bf
+            trail.append("BRACKETS FEHLEN nach der Rücklesung: " + ", ".join(k for k, v in (("Risk (SL)", bf["risk"]), ("To Make (TP)", bf["tp"])) if v)
+                         + " — Position bleibt offen, NICHT automatisch geschlossen")
     z, _g = tsx_k4_zeile(st, befehl)
     if not sl and isinstance(z, dict) and isinstance((z.get("risk") or {}).get("wert"), (int, float)) and z["risk"]["wert"] > 0:
         warn.append(f"Risk steht auf {z['risk']['wert']:g} $ (TopstepX-Bracket), der Plan hat keinen SL")
@@ -23887,7 +23993,9 @@ PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt"
                         "tv_symbol", "menge", "konto_aktiv", "pruefung", "meldung_roh", "positionen_danach", "close_fill", "storniert",
                         "symbol", "richtung", "konto", "trail_ende", "quelle",
                         "mll", "rpl", "tp_level", "sl_level", "positionen", "plattform",
-                        "warnung", "unklar", "balance", "upl", "balance_relativ")
+                        "warnung", "unklar", "balance", "upl", "balance_relativ",
+                        # Nova-Brackets (29.10.2026): fehlende Brackets nach dem Fill + Dialog über der Tabelle — für den 🔴-Alarm in Prophos
+                        "brackets_fehlen", "bracket_dialog", "bracket_dialog_bild")
 
 
 def puls_ergebnis_paket(art, stufe, cmd, res, trail=None, jetzt_ms=None):

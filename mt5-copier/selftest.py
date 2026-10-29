@@ -8473,8 +8473,9 @@ def test_tsx_k4():
             self.o = dict(fill_nach=1, fill_toast=True, abgelehnt=False, order_druck=True, reiter=False, risk=None, to_make=None, edit_geht=True,
                           strg_a=True, tipp_extra="", enter_wirkt=True, flach_ohne_pos=True, markt_zu=False, popup_nach_enter=False, edit_fokus=True,
                           wirft_nach_klick=False, tippen_wirft=False, tasten_wirken=True, k4=True, reiter_da=True, bein_abgelehnt=False, zeile_nach=0, klick_wirft="",
-                          abl_ohne_zeile=False)
+                          abl_ohne_zeile=False, dialog_nach_doppel="")
             self.o.update(kw)
+            self.dlg, self.dlg_gezeigt = None, False
             self.richtung, self.menge, self.avg = richtung, menge, avg
             self.pos, self.lesungen, self.t_klick, self.reiter = False, None, 0, self.o["reiter"]
             self.n_reiter = 0
@@ -8487,7 +8488,7 @@ def test_tsx_k4():
                 return {"text": "", "wert": None, "rect": rect, "zu": {"disabled": False, "verdeckt": False},
                         "edit": {"offen": True, "wert": self.eingabe, "rect": rect, "fokus": bool(self.o["edit_fokus"]), "typ": "number"}}
             w = self.werte[name]
-            return {"text": "" if w is None else f"${w:,.2f}", "wert": w, "rect": rect, "zu": {"disabled": False, "verdeckt": False}, "edit": {"offen": False}}
+            return {"text": "" if w is None else f"${w:,.2f}", "wert": w, "rect": rect, "zu": {"disabled": False, "verdeckt": bool(self.dlg)}, "edit": {"offen": False}}
 
         def stand(self, opts=None):
             if self.lesungen is not None:
@@ -8522,7 +8523,7 @@ def test_tsx_k4():
                              "rpl": {"text": "$-4.92", "wert": -4.92}, "upl": {"text": "$24.00", "wert": 24.0}, "balance_relativ": True},
                     "positionen": [{"symbol": "MNQZ26", "seite": self.richtung, "menge": n, "avg": self.avg, "pl_text": None}] if self.pos else [],
                     "positionen_sichtbar": True, "flach": False if self.pos else (True if self.o["flach_ohne_pos"] else None),
-                    "popups": [{"titel": "Confirm Order", "text": "Confirm Order"}] if self.popup else [],
+                    "popups": [self.dlg] if self.dlg else ([{"titel": "Confirm Order", "text": "Confirm Order"}] if self.popup else []),
                     "toasts": {"gruppen": [], "meldungen": meld},
                     "ticket": {"k3": True, "k4": bool(self.o["k4"]), "ordertyp": {"text": "Market"},
                                "contract": {"wert": "MNQZ26", "offen": False, "fokus": False, "rect": [1582, 92, 376, 28], "zu": {}},
@@ -8549,8 +8550,20 @@ def test_tsx_k4():
                 self.lesungen, self.t_klick = 0, int(_t.time() * 1000)
             elif name == "Reiter Positions":
                 self.reiter = True
+            elif name.startswith("Meldung schließen"):
+                if self.dlg and "loss limit" in str(self.dlg.get("text") or "").lower():
+                    self.dlg = None
             elif name.startswith("Risk-Zelle") or name.startswith("To Make-Zelle"):
                 feld = "risk" if name.startswith("Risk") else "to_make"
+                if doppel and self.o["dialog_nach_doppel"] and not self.dlg_gezeigt:
+                    # 29.10.2026 (Simon/Ina): nach dem ERSTEN Doppelklick steht ein Dialog über der Tabelle, kein Eingabefeld
+                    self.dlg_gezeigt = True
+                    if self.o["dialog_nach_doppel"] == "blow":
+                        self.dlg = {"titel": "", "text": "You Hit Your Maximum Loss Limit. Account: 150KTC-SKU-V2-DLL-000000-00000000",
+                                    "knoepfe": [{"text": "Close", "aria": "", "rect": [900, 500, 80, 30]}]}
+                    else:
+                        self.dlg = {"titel": "Trade Copier Notice", "text": "Trade Copier Notice", "knoepfe": [{"text": "OK", "aria": "", "rect": [900, 500, 80, 30]}]}
+                    return True
                 if doppel and self.o["edit_geht"] and self.o["edit_geht"] != ("nur_" + ("to_make" if feld == "risk" else "risk")):
                     w = self.werte[feld]
                     self.edit, self.eingabe, self.markiert = feld, ("" if w is None else str(int(w))), False
@@ -8674,24 +8687,46 @@ def test_tsx_k4():
         r6, _ = lauf(s6)
         chk(r6["ok"] is True and r6["gesendet"] is True and "Risk 21 $ nicht gesetzt" in r6["warnung"] and "To Make 198 $ nicht gesetzt" in r6["warnung"]
             and "sl_level" not in r6 and r6["einstieg"] == 31339.5 and sum(1 for k in s6.klicks if k[0].startswith("ORDER")) == 1
-            and sum(1 for k in s6.klicks if k[0].startswith("Risk")) == 2,
-            f"Eingabefeld geht nicht auf: je Zelle zwei Versuche, dann Warnung „Brackets prüfen“ — die Order bleibt bewiesen ({r6.get('warnung')})")
+            and sum(1 for k in s6.klicks if k[0].startswith("Risk")) == 2 * ob.TSX_K4_BRACKET_RUNDEN
+            and r6.get("brackets_fehlen") == {"risk": True, "tp": True},
+            f"Eingabefeld geht nicht auf: je Zelle zwei Versuche in jeder der drei Runden, dann Warnung + brackets_fehlen — die Order bleibt bewiesen ({r6.get('warnung')}, {r6.get('brackets_fehlen')})")
         s6b = _T4(tipp_extra="9")
         r6b, _ = lauf(s6b)
         chk(r6b["ok"] and "nicht gesetzt" in r6b["warnung"] and s6b.werte == {"risk": None, "to_make": None} and "Enter" not in s6b.tasten
-            and s6b.tasten.count("Escape") == 4, f"falscher Wert im Feld: nie Enter, Esc, Warnung ({s6b.tasten})")
+            and s6b.tasten.count("Escape") == 4 * ob.TSX_K4_BRACKET_RUNDEN, f"falscher Wert im Feld: nie Enter, Esc, Warnung ({s6b.tasten})")
         s6c = _T4(enter_wirkt=False)
         r6c, _ = lauf(s6c)
         chk(r6c["ok"] and "nach Enter" in r6c["warnung"] and "sl_level" not in r6c, "Enter ohne Wirkung → Rücklesung scheitert, Warnung")
         s6d = _T4(popup_nach_enter=True)
         r6d, _ = lauf(s6d)
-        chk(r6d["ok"] and "fragt nach dem Eintragen" in r6d["warnung"] and "To Make 198 $ nicht gesetzt (Dialog offen)" in r6d["warnung"]
+        chk(r6d["ok"] and "fragt nach dem Eintragen" in r6d["warnung"] and "To Make 198 $ nicht gesetzt (Dialog offen ('Confirm Order'))" in r6d["warnung"]
+            and r6d.get("brackets_fehlen") == {"risk": True, "tp": True}
             and not any(k[0].startswith("To Make") for k in s6d.klicks) and s6d.tasten.count("Enter") == 1,
             f"Dialog nach Enter: nichts bestätigt, unter dem Dialog nichts mehr angeklickt ({r6d.get('warnung')})")
         s6e = _T4(edit_fokus=False)
         r6e, _ = lauf(s6e)
         chk(r6e["ok"] and "kein Eingabefeld mit Fokus" in r6e["warnung"] and not any(x.startswith("tippe") for x in s6e.tasten),
             "Eingabefeld ohne Fokus: nie getippt")
+        # 6f) 29.10.2026 (Simon 523545ee / Ina 60c0620c): Dialog nach dem ersten Doppelklick. Loss-Limit-Meldung → einmal schließen (Ziel-Beweis),
+        # Runde 2 setzt beide Zellen, kein brackets_fehlen. Fremder Dialog → nie angefasst, nichts darunter geklickt, Titel in der Warnung,
+        # brackets_fehlen {risk, tp}. Nie ein Close der Position.
+        s6f = _T4(dialog_nach_doppel="blow")
+        r6f, t6f = lauf(s6f)
+        chk(r6f["ok"] and "warnung" not in r6f and "brackets_fehlen" not in r6f and s6f.werte == {"risk": 21.0, "to_make": 198.0}
+            and sum(1 for k in s6f.klicks if k[0].startswith("Meldung schließen")) == 1 and any("Runde 2" in x for x in t6f)
+            and sum(1 for k in s6f.klicks if k[0].startswith("ORDER")) == 1,
+            f"Loss-Limit-Meldung nach dem Doppelklick: einmal geschlossen, Runde 2 setzt Risk + To Make ({r6f.get('warnung')}, {s6f.werte})")
+        s6g = _T4(dialog_nach_doppel="fremd")
+        r6g, t6g = lauf(s6g)
+        chk(r6g["ok"] and r6g.get("brackets_fehlen") == {"risk": True, "tp": True} and "Dialog offen ('Trade Copier Notice')" in r6g["warnung"]
+            and not any(k[0].startswith("Meldung") for k in s6g.klicks) and not any(k[0].startswith("To Make") for k in s6g.klicks)
+            and sum(1 for k in s6g.klicks if k[0].startswith("Risk")) == 1 and any("BRACKETS FEHLEN" in x for x in t6g),
+            f"fremder Dialog: nie angefasst, nichts darunter, Titel in der Warnung, brackets_fehlen ({r6g.get('warnung')}, {r6g.get('brackets_fehlen')})")
+        bfe = ob.tsx_k4_brackets_fehlen
+        chk(bfe(None, {}, 198, 21) == {"risk": True, "tp": True} and bfe({"risk": {"wert": 21.0}, "to_make": {"wert": 0.0}}, {}, 198, 21) == {"risk": False, "tp": True}
+            and bfe({}, {"risk": 21.0, "to_make": 198.0}, 198, 21) is None and bfe({"risk": {"wert": 0}}, {}, None, 21) == {"risk": True, "tp": False}
+            and bfe({"risk": {"wert": 21.0}}, {}, None, 21) is None and bfe(None, {}, None, None) is None,
+            "tsx_k4_brackets_fehlen: Beweis = eingetragen oder Zeile > 0 $; nur geplante Brackets zählen")
         # 7) Sonderfälle der Zelle
         s7 = _T4(risk=21.0, to_make=198.0)
         r7, t7 = lauf(s7)
@@ -8734,7 +8769,7 @@ def test_tsx_k4():
         s9b = _T4(tippen_wirft=True)
         r9b, _ = lauf(s9b)
         chk(r9b["ok"] is True and r9b["gesendet"] is True and "Risk 21 $ nicht gesetzt (abgebrochen: RuntimeError" in r9b["warnung"]
-            and "To Make 198 $ nicht gesetzt (abgebrochen" in r9b["warnung"] and s9b.tasten.count("Escape") == 2 and gesendet_log[-1][1] == "ende"
+            and "To Make 198 $ nicht gesetzt (abgebrochen" in r9b["warnung"] and s9b.tasten.count("Escape") == 2 * ob.TSX_K4_BRACKET_RUNDEN and gesendet_log[-1][1] == "ende"
             and any(k[0].startswith("To Make") for k in s9b.klicks) and "tp_level" not in r9b and r9b["code"] == "" and r9b["einstieg"] == 31339.5,
             f"Ausnahme in der Zelle NACH dem Fill → ok + Warnung statt cdp_fehler, Esc je Feld, zweite Zelle noch versucht, 'ende' gesendet ({r9b.get('warnung')})")
         s9c = _T4(tippen_wirft=True, tasten_wirken=False)
@@ -10701,6 +10736,25 @@ def test_puls_fehlerfoto():
         d2 = json.loads(echt2.getvalue())
         chk("fehlerbild" not in d2 and d2["trail"] == ["a", "b", "kein Fehlerfoto: Deckel: 12 Fotos in der letzten Stunde"] and d2["code"] == "konto",
             "Hülle: Deckel sagt nein → kein fehlerbild, Grund als Spur-Zeile (trail als Liste)")
+        # 29.10.2026 (Nova-Brackets): ok true MIT brackets_fehlen bzw. bracket_dialog → Foto, Pfad in brackets_fehlen.bild / bracket_dialog_bild;
+        # ok true ohne beides → nie ein Foto
+        gerufen3 = []
+        ob.fehlerfoto_anstossen = lambda weg, tab, code: (gerufen3.append(code) or ("pc-abcd/2026-10-29/20261029-000001-def456", ""))
+        e3 = io.StringIO()
+        h3 = ob._FehlerfotoAusgabe(e3, "tsxorder", "tsx")
+        print(json.dumps({"ok": True, "msg": "Order platziert", "brackets_fehlen": {"risk": True, "tp": False}, "bracket_dialog": "Notice", "trail": "x"}), file=h3)
+        d3 = json.loads(e3.getvalue())
+        e4 = io.StringIO()
+        h4 = ob._FehlerfotoAusgabe(e4, "tsxorder", "tsx")
+        print(json.dumps({"ok": True, "msg": "Order platziert", "bracket_dialog": "You Hit Your Maximum Loss Limit"}), file=h4)
+        d4 = json.loads(e4.getvalue())
+        e5 = io.StringIO()
+        h5 = ob._FehlerfotoAusgabe(e5, "tsxorder", "tsx")
+        print(json.dumps({"ok": True, "msg": "Order platziert"}), file=h5)
+        chk(d3["brackets_fehlen"] == {"risk": True, "tp": False, "bild": "pc-abcd/2026-10-29/20261029-000001-def456"} and "fehlerbild" not in d3
+            and d4.get("bracket_dialog_bild") == "pc-abcd/2026-10-29/20261029-000001-def456" and "fehlerbild" not in d4
+            and json.loads(e5.getvalue()) == {"ok": True, "msg": "Order platziert"} and gerufen3 == ["brackets_fehlen", "bracket_dialog"],
+            f"Hülle: ok true mit brackets_fehlen/bracket_dialog → Foto (brackets_fehlen.bild / bracket_dialog_bild), sonst keins ({gerufen3})")
     finally:
         ob.fehlerfoto_anstossen = alt
     return ok

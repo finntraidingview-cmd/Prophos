@@ -18543,7 +18543,9 @@ PULS_ERGEBNIS_FELDER = ("ok", "code", "schritt", "msg", "gesendet", "bestaetigt"
                         "warnung", "unklar",
                         # TSV2-PNL (01.10.2026): TopstepX-Balance als Zahl + Basis (Express 0-basiert), UP&L beim Klick und die summary —
                         # sonst verliert ein nachgeholter tsx-close die End-Balance. order_bot.py zieht nach (app.py zuerst deployen)
-                        "balance", "balance_relativ", "upl", "summary")
+                        "balance", "balance_relativ", "upl", "summary",
+                        # Nova-Brackets (29.10.2026): fehlende Brackets nach dem Fill ({risk, tp, bild?}) + Dialog über der Tabelle (Titel, Foto)
+                        "brackets_fehlen", "bracket_dialog", "bracket_dialog_bild")
 _PLAN_ID_MUSTER = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
