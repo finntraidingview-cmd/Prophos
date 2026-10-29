@@ -51744,7 +51744,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1901'
+  const OS_TAB_BUILD = '2026-09-22.1902'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72574,7 +72574,8 @@
     const zahl = x => x != null && isFinite(Number(x)) && Number(x) > 0 ? Number(x) : null
     const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, ''), firm: z.firma, type: z.typ, externalId: z.ext, purchaseCost: zahl(v.purchase_cost),
       maxDrawdown: zahl(v.max_drawdown), maxRisikoTrade: null, autoPlaner: true, goalKind: v.goal_kind || null, goalTarget: v.goal_kind ? Number(v.goal_target) : null }
-    try{ await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct)) }
+    let d = null
+    try{ d = await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct), true) }
     catch(e){
       const t = String((e && e.message) || e)
       if(/Nur für Admins|HTTP 403/i.test(t)) return 'modal'
@@ -72582,11 +72583,43 @@
       else if(typeof atToast === 'function') atToast(`${z.ext}: ${t}`, 'end')
       return 'fehler'
     }
+    kontoUndoToast({ id: d && d.account && d.account.id, name: acc.name, firma: acc.firm, typ: acc.type, fremd })
     if(!fremd) try{ if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase() }catch(_){}
     try{ tvNeuRender() }catch(_){}
     try{ window._admKontoMailNeu?.() }catch(_){}
     return 'ok'
   }
+  /* RÜCKGÄNGIG NACH EIN-KLICK (30.10.2026, Master nach S2-Hinweis: „Tradeify vs. Tradeify CFD wurde schon öfter verwechselt"): Toast
+   * „Angelegt: <Name> · <Firma> · <Typ> (für <ID>)" mit „Rückgängig", 15 s. Rückgängig = POST /konto-rueckgaengig: das neue Konto archivieren
+   * (nie löschen), bei einem Reset die alte Zeile wieder aktiv. Eigene ID: danach den Archiv-Stand vom Server in den Browser spiegeln (ohne
+   * Upload — ein veralteter lokaler Stand darf das Server-Archiv nicht überschreiben). o = {id, name, firma, typ, fremd, altId, altName} */
+  function kontoUndoToast(o){
+    if(typeof atToast !== 'function') return
+    const typ = SUC_PHASE_LABEL[o.typ] || o.typ || ''
+    const txt = `Angelegt: ${o.name} · ${o.firma === '?' ? 'Firma ?' : o.firma} · ${typ}${o.fremd ? ` (für ${o.fremd.name})` : ''}${o.altId ? ` · ${o.altName || 'alte Zeile'} archiviert` : ''}`
+    const el = atToast(txt, 'ok', 15000)
+    if(!el || !o.id) return
+    el.classList.add('undo')   // dieselbe Klick-Freigabe wie „Plan gelöscht · Rückgängig"
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'at-undo'; b.textContent = 'Rückgängig'
+    b.addEventListener('click', () => { el.remove(); kontoRueckgaengig(o) }, { once: true })
+    el.appendChild(b)
+  }
+  async function kontoRueckgaengig(o){
+    try{
+      await admMailFetch(`/konto-rueckgaengig${o.fremd ? '?ansicht=admin' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: String(o.id), alt_id: o.altId ? String(o.altId) : '' }) })
+    }catch(e){ if(typeof atToast === 'function') atToast(`Nicht rückgängig: ${(e && e.message) || e}`, 'end'); return }
+    if(!o.fremd){
+      try{ let c = await fetchSetting('archive'); if(typeof c === 'string') c = JSON.parse(c)
+        if(c && typeof c === 'object' && !Array.isArray(c)){ delete _archNeu[String(o.id)]; if(o.altId) delete _archNeu[String(o.altId)]; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(c)) } }catch(_){}
+      try{ if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase(); if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
+    }
+    try{ window._admLaden?.() }catch(_){}
+    try{ tvNeuRender(); if(_admKTv.at) admKTvRender(); window._admKontoMailNeu?.(true) }catch(_){}
+    if(typeof atToast === 'function') atToast(`↩ ${o.name} archiviert${o.altId ? ` · ${o.altName || 'alte Zeile'} wieder aktiv` : ''}`, 'ok')
+  }
+  window._kontoUndoToast = o => kontoUndoToast(o)   // Test-Haken (Stub)
   // → true = als Kauf übers Modal weitermachen (alte Zeile fehlt), false = erledigt/abgebrochen
   async function kontoResetBestaetigen(z, fremd, td){
     const wer = fremd ? ` für ${fremd.name}` : ''
@@ -72607,7 +72640,9 @@
       const d = await admMailFetch(`/konto-reset-bestaetigen${fremd ? '?ansicht=admin' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: uid, neu: z.ext, alt: z.vorher, tv_name: (z.quellen || []).includes('TV') ? z.ext : '' }) })
       _admKTv.angelegt.add(key)   // Zeile sofort weg (eigene Liste und Admin), bis die Kontoliste das neue Konto selbst zeigt
-      if(typeof atToast === 'function') atToast(`✓ ${(d.account && d.account.name) || z.ext} angelegt${wer}${d.archiviert ? ` · ${(d.alt && d.alt.name) || z.vorher} als blown archiviert` : ''}${d.typ ? ` · ${SUC_PHASE_LABEL[d.typ] || d.typ}${d.consistency_pct ? `, Consistency ${d.consistency_pct} %` : ', ohne Consistency'}` : ''}${d.plaene_entfernt ? ` · ${d.plaene_entfernt} geplante Trades der alten Zeile entfernt` : ''}${d.hinweis ? ' — ' + d.hinweis : ''}`, d.hinweis ? 'end' : 'ok')
+      // Toast mit Rückgängig (30.10.2026): neue Zeile archivieren, die alte wieder aktiv
+      kontoUndoToast({ id: d.account && d.account.id, name: (d.account && d.account.name) || z.ext, firma: z.firma, typ: d.typ || 'challenge', fremd,
+        altId: d.archiviert && d.alt ? d.alt.id : null, altName: (d.alt && d.alt.name) || z.vorher })
       // wie archiveAccount() bei „blown": Duplikum-Verknüpfung der alten Zeile lösen — Token und Verknüpfung liegen nur im Browser der
       // eigenen ID (still, wenn keine besteht); bei einer fremden ID geht das nicht von hier aus
       if(!fremd && d.archiviert && d.alt && d.alt.id) try{ window._dupDeleteAccountForProphos?.(d.alt.id) }catch(_){}
@@ -72645,7 +72680,7 @@
   }
   // Speichern für eine fremde ID (aus saveAccount): POST /admin/konto-anlegen?ansicht=admin — Felder wie das Modal beim Anlegen schreibt, der
   // Server nimmt nur seine Whitelist. Erfolg → Zeile weg, Toast, Admin-Liste neu; „Gibt es schon" → Zeile zeigt „schon in Prophos".
-  async function kontoFuerAnlegen(fuer, acc, consWert){
+  async function kontoFuerAnlegen(fuer, acc, consWert, still){
     const key = `${fuer.uid}|${extIdNorm(acc.externalId || fuer.tvName || fuer.ext)}`, zeile = `${fuer.uid}|${extIdNorm(fuer.tvName || fuer.ext)}`
     const body = { user_id: fuer.uid, tv_name: fuer.tvName || '', name: acc.name, firm: acc.firm, account_type: acc.type, external_id: acc.externalId,
       purchase_cost: acc.purchaseCost, max_drawdown: acc.maxDrawdown, max_risiko_trade: acc.maxRisikoTrade, auto_planer: acc.autoPlaner !== false,
@@ -72663,7 +72698,7 @@
     admKTvRender()
     try{ window._admKontoMailNeu?.() }catch(_){}
     const zusatz = [acc.creds ? 'Zugangsdaten nicht übernommen' : '', d && d.hinweis].filter(Boolean).join(' · ')
-    if(typeof atToast === 'function') atToast(`✓ ${acc.name} für ${fuer.name} angelegt${zusatz ? ' — ' + zusatz : ''}`, zusatz ? 'end' : 'ok')
+    if(!still && typeof atToast === 'function') atToast(`✓ ${acc.name} für ${fuer.name} angelegt${zusatz ? ' — ' + zusatz : ''}`, zusatz ? 'end' : 'ok')
     try{ window._admLaden?.() }catch(_){}
     return d
   }

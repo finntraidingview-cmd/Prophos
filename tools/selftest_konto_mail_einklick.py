@@ -24,7 +24,7 @@ def main():
     ok("if(!z.ext || !z.firma || z.firma === '?' || !(gr > 0) || !z.typ" in d and "if(!v) return 'modal'" in d, "ein Klick nur mit Firma, Größe, Nummer, Typ, Schablone")
     ok("if(v.goal_kind && !(Number(v.goal_target) > 0)) return 'modal'" in d, "Ziel ohne Zahl → Modal (nichts erfunden)")
     ok("kontoNameRegel(gr + 'k', z.ext, z.typ, '')" in d, "Name nach Namensregel")
-    ok("await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct))" in d and "/Nur für Admins|HTTP 403/i" in d, "über /admin/konto-anlegen, 403 → Modal")
+    ok("await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct), true)" in d and "/Nur für Admins|HTTP 403/i" in d, "über /admin/konto-anlegen, 403 → Modal")
     ok("let direkt = 'modal'; try{ direkt = await kontoDirektAnlegen(z, fremd) }" in s, "Bestätigen versucht zuerst den einen Klick")
     ok("if(z.art === 'reset' && z.vorher && !(await kontoResetBestaetigen(z, fremd, td))) return" in s, "Reset vor dem Kauf")
     ok("window._kontoFuerAnlegen = (fuer, acc, cons) => kontoFuerAnlegen(fuer, acc, cons)" in s, "Consistency aus dem Modal geht mit")

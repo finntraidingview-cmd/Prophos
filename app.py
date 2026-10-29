@@ -18438,6 +18438,75 @@ def konto_verwerfen():
     return jsonify({"ok": True})
 
 
+# RÜCKGÄNGIG NACH EIN-KLICK-ANLEGEN (30.10.2026, Master nach S2-Hinweis: „Tradeify vs. Tradeify CFD wurde schon öfter verwechselt"): der Toast
+# „Angelegt: <Name> · <Firma> · <Typ> (für <ID>) · Rückgängig" (~15 s) ruft POST /konto-rueckgaengig {account_id, alt_id?}. Rückgängig =
+# das NEUE Konto archivieren (Grund 'rueckgaengig'), NIE löschen; bei einem Reset kommt die alte Zeile aus dem Archiv zurück (alt_id, gleicher
+# Besitzer). Nur für Konten, die höchstens KONTO_RUECK_S alt sind. Recht: Besitzer selbst, sonst das Gate von /admin/konto-anlegen. Die
+# Kauf-Buchung bleibt stehen (nichts wird gelöscht); geplante Pläne eines archivierten Kontos fallen ohnehin aus Planer und Delta.
+KONTO_RUECK_S = 30 * 60
+
+
+def konto_rueckgaengig_pruefen(neu, alt, jetzt):
+    """REIN RECHNEND (testbar): darf das Anlegen rückgängig gemacht werden? neu/alt = accounts-Zeilen {id, user_id, created_at} (alt optional).
+    → None oder Fehlertext."""
+    if not neu or not neu.get("id"):
+        return "Konto nicht gefunden"
+    try:
+        t = datetime.fromisoformat(str(neu.get("created_at") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return "Anlegezeit unbekannt"
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    if (jetzt - t).total_seconds() > KONTO_RUECK_S:
+        return f"zu alt für Rückgängig (älter als {KONTO_RUECK_S // 60} min) — unter Accounts archivieren"
+    if alt is not None:
+        if not alt.get("id") or str(alt.get("id")) == str(neu.get("id")):
+            return "alte Zeile ungültig"
+        if str(alt.get("user_id")) != str(neu.get("user_id")):
+            return "alte Zeile gehört einer anderen ID"
+    return None
+
+
+@app.route("/konto-rueckgaengig", methods=["POST", "OPTIONS"])
+def konto_rueckgaengig():
+    if request.method == "OPTIONS":
+        return "", 200
+    b = request.get_json(silent=True) or {}
+    kid, alt_id = str(b.get("account_id") or "").strip().lower(), str(b.get("alt_id") or "").strip().lower()
+    if not re.match(r"^[0-9a-f-]{36}$", kid) or (alt_id and not re.match(r"^[0-9a-f-]{36}$", alt_id)):
+        return jsonify({"ok": False, "msg": "account_id/alt_id ungültig"}), 400
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    try:
+        zeilen = sb_select("accounts", {"select": "id,user_id,name,created_at", "id": f"in.({','.join([kid] + ([alt_id] if alt_id else []))})"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht prüfbar: {type(e).__name__}"}), 502
+    neu = next((z for z in zeilen if str(z.get("id")) == kid), None)
+    alt = next((z for z in zeilen if str(z.get("id")) == alt_id), None) if alt_id else None
+    if alt_id and alt is None:
+        return jsonify({"ok": False, "msg": "alte Zeile nicht gefunden"}), 404
+    fehler = konto_rueckgaengig_pruefen(neu, alt, datetime.now(timezone.utc))
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler}), 404 if fehler == "Konto nicht gefunden" else 409
+    besitzer = str(neu.get("user_id"))
+    if besitzer != str(uid):
+        erlaubt, err = _admin_konto_gate()
+        if err:
+            return err
+        if erlaubt is not None and besitzer not in erlaubt:
+            return jsonify({"ok": False, "msg": "ID nicht in deiner Gruppe"}), 403
+    jetzt_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        _konto_archiv_eintragen(besitzer, kid, "rueckgaengig", jetzt_iso, neu.get("name"))
+        _ap_archiv_merk["wert"] = None
+        alt_zurueck = _archiv_eintrag_entfernen(alt_id) if alt else 0
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht rückgängig: {type(e).__name__}: {str(e)[:120]}"}), 502
+    print(f"[konto-rueckgaengig] {str(uid)[:8]}: {neu.get('name')} archiviert (Rückgängig){(', alte Zeile ' + str(alt.get('name') or '') + ' wieder aktiv') if alt else ''}", flush=True)
+    return jsonify({"ok": True, "archiviert": kid, "alt_wieder_aktiv": bool(alt_zurueck) if alt else None})
+
+
 @app.route("/konto-reset-bestaetigen", methods=["POST", "OPTIONS"])
 def konto_reset_bestaetigen():
     """POST {neu, alt[, user_id][, tv_name]} → {ok, account, archiviert, hinweis} | 404 (alte Zeile fehlt → als Kauf anlegen) | 409 (neue
@@ -22901,6 +22970,28 @@ def entarchivieren_darf(uid, admin, besitzer, gruppe):
     return str(uid) == str(besitzer) or (bool(gruppe) and str(besitzer) in {str(x) for x in gruppe})
 
 
+def _archiv_eintrag_entfernen(kid):
+    """Konto kid aus dem Archiv aller Profile nehmen (user_settings 'archive', Wächter updated_at) → Anzahl Profile. Wirft bei DB-Fehlern."""
+    profile = 0
+    for row in _sb_all("user_settings", {"select": "user_id,value,updated_at", "key": "eq.archive"}):
+        for _versuch in range(2):     # Wächter updated_at: hat der Browser des Profils dazwischen geschrieben → neu lesen, nochmal
+            neu, weg = archiv_ohne_konto(row.get("value"), kid)
+            if not weg:
+                break
+            guard = {"user_id": f"eq.{row['user_id']}", "key": "eq.archive"}
+            if row.get("updated_at"):
+                guard["updated_at"] = f"eq.{row['updated_at']}"
+            if sb_update("user_settings", guard, {"value": neu, "updated_at": datetime.now(timezone.utc).isoformat()}):
+                profile += 1
+                break
+            row = (sb_select("user_settings", {"select": "user_id,value,updated_at", "user_id": f"eq.{row['user_id']}",
+                                               "key": "eq.archive"}) or [{}])[0]
+            if not row.get("user_id"):
+                break
+    _ap_archiv_merk["wert"] = None     # Delta-Filter sofort neu lesen
+    return profile
+
+
 @app.route("/account/entarchivieren", methods=["POST", "OPTIONS"])
 def account_entarchivieren():
     if request.method == "OPTIONS":
@@ -22926,23 +23017,7 @@ def account_entarchivieren():
             _nur, gruppe = _ap_gruppe_lesen(uid)
         if not entarchivieren_darf(uid, admin, besitzer, gruppe):
             return jsonify({"ok": False, "msg": "Nur Besitzer, Admin oder Verwalter der Gruppe"}), 403
-        profile = 0
-        for row in _sb_all("user_settings", {"select": "user_id,value,updated_at", "key": "eq.archive"}):
-            for _versuch in range(2):     # Wächter updated_at: hat der Browser des Profils dazwischen geschrieben → neu lesen, nochmal
-                neu, weg = archiv_ohne_konto(row.get("value"), kid)
-                if not weg:
-                    break
-                guard = {"user_id": f"eq.{row['user_id']}", "key": "eq.archive"}
-                if row.get("updated_at"):
-                    guard["updated_at"] = f"eq.{row['updated_at']}"
-                if sb_update("user_settings", guard, {"value": neu, "updated_at": datetime.now(timezone.utc).isoformat()}):
-                    profile += 1
-                    break
-                row = (sb_select("user_settings", {"select": "user_id,value,updated_at", "user_id": f"eq.{row['user_id']}",
-                                                   "key": "eq.archive"}) or [{}])[0]
-                if not row.get("user_id"):
-                    break
-        _ap_archiv_merk["wert"] = None     # Delta-Filter sofort neu lesen
+        profile = _archiv_eintrag_entfernen(kid)
         print(f"[archiv] Konto {kid[:8]} entarchiviert — Eintrag in {profile} Profil(en) entfernt", flush=True)
         return jsonify({"ok": True, "profile": profile})
     except Exception as e:
