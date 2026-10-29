@@ -17595,6 +17595,219 @@ def admin_konto_anlegen():
     return jsonify({"ok": True, "account": neu, "markiert": markiert, "hinweis": " · ".join(hinweis)})
 
 
+# ══ ADMIN → TRADE PLANEN FÜR EINE ANDERE ID (29.10.2026, Finn ~17:20 am Screenshot Admin → Alle Accounts: „Hier direkt auf ‚Trade planen'
+# drücken, von hier aus alle Accounts planen, ohne auf die jeweilige ID zu wechseln … alle Parameter eingeben, am Ende hinzufügen mit Uhrzeit
+# ODER speichern und direkt starten, sodass er direkt losgeschickt wird"). Das Frontend öffnet das bestehende Trade-Popup für das Konto der
+# fremden ID (GET /admin/plan-konto liefert die Kontozeile ohne Zugangsdaten); gespeichert wird hier mit dem Service-Key für den BESITZER des
+# Kontos (user_id = Besitzer, ein Hand-Plan wie aus dem Popup der ID). Gate wie /admin/konto-anlegen (_admin_konto_gate: ADMIN_EMAILS /
+# admin_mail_leser, Verwalter nur seine Gruppe). Alle DB-Riegel gelten (Kontoart/Hedge-Freigabe beim Anlegen; Gegenrichtung, Waage, Big
+# Trade, Final-Halten, Firmen-Abstand beim Start-Claim); der Richtungsschutz beim Speichern (im Popup sonst gegen die EIGENEN Pläne)
+# läuft hier gegen die Pläne der Ziel-ID (prophos_gegenrichtung_frei_konto). Nur Wege, die der PC der ID über start_um selbst startet
+# (Echo V2, Orbit V2/V3, Winning Day; Topstep nur als Winning Day — Topstep V2/Nova von Hand startet nur ein Klick am PC). „Sofort starten" = start_um jetzt — Puls am PC der ID startet ihn beim nächsten
+# Takt; vom Mac geht nie eine Order raus. ══
+ADMIN_PLAN_ROUTEN = frozenset({"mt5v2", "tvv2", "tsv2"})
+ADMIN_PLAN_ZAHLEN = ("master_risk", "master_contracts", "slave_risk", "multiplier", "master_tp", "master_sl", "hedge_eur", "hedge_faktor")
+ADMIN_PLAN_TEXTE = (("master_name", 120), ("master_firm", 60), ("slave_name", 120), ("slave_firm", 60), ("notes", 2000), ("master_symbol", 16))
+ADMIN_KONTO_GEHEIM = ("cred_login", "cred_password", "cred_server", "cred_platform", "cred_notes", "meta_api_token", "meta_api_login")
+
+
+ADMIN_PLAN_CFD_TYPEN = frozenset({"phase1", "phase2", "funded_cfd"})
+
+
+def admin_plan_weg(konto, route, orbit_v3, hedge_eur, winning_day):
+    """REIN RECHNEND (testbar): passt der Weg zum Konto? Dieselbe Logik wie das Master-Dropdown des Popups je Weg (das im Fremd-Modus nicht
+    filtert) — CFD (phase1/phase2/funded_cfd) nur Echo V2; Futures nur über TradingView mit External ID: Orbit V2 (ohne Hedge), Orbit
+    (orbit_v3 + Hedge), Winning Day (Hedge, nur Kontoart winning_days); Topstep nur als Winning Day über TopstepX (tsv2, Funded oder
+    Winning Days) — Topstep V2/Nova von Hand startet nur ein Klick am PC. → (art 'echo_v2'|'orbit_v2'|'orbit'|'wd', None) | (None, Grund)"""
+    typ = str(konto.get("account_type") or "").lower()
+    ext = str(konto.get("external_id") or "").strip()
+    topstep = "topstep" in str(konto.get("firm") or "").lower()
+    if typ in ADMIN_PLAN_CFD_TYPEN:
+        return ("echo_v2", None) if route == "mt5v2" else (None, "CFD-Konto: nur Echo V2 (MT5)")
+    if route == "mt5v2":
+        return None, "Futures-Konto: Echo V2 gibt es nur für CFD — Orbit V2, Orbit oder Winning Day wählen"
+    if not ext:
+        return None, "Konto ohne External ID — Puls findet es in TradingView/TopstepX nicht (unter Accounts eintragen)"
+    if topstep:
+        if route != "tsv2" or winning_day is not True or orbit_v3 is True or not (hedge_eur and hedge_eur > 0):
+            return None, "Topstep-Konto: für andere IDs nur Winning Day (Topstep V2/Nova von Hand startet nur ein Klick am PC)"
+        if typ not in ("funded", "winning_days"):
+            return None, "Topstep-Winning-Day nur auf Funded/Winning-Days-Konten (Challenges plant die Topstep-Kette selbst)"
+        return "wd", None
+    if route != "tvv2":
+        return None, "Topstep V2 nur für Topstep-Konten"
+    if orbit_v3 is True:
+        return ("orbit", None) if hedge_eur and hedge_eur > 0 else (None, "Orbit ohne Hedge-Betrag — Take Profit, Kontrakte und Risiko prüfen")
+    if hedge_eur and hedge_eur > 0:
+        return ("wd", None) if typ == "winning_days" else (None, "Winning Day nur auf Winning-Days-Konten")
+    return "orbit_v2", None
+
+
+def admin_plan_zeile(b, konto, jetzt):
+    """REIN RECHNEND (testbar): Request-Body {row:{…Felder wie das Trade-Popup}, sofort?} + Kontozeile des Masters → (zeile, None) |
+    (None, Fehler). Nur Whitelist-Felder; user_id/master_account_id/master_firm/master_name kommen aus dem KONTO (an der Firma hängen
+    Richtungsschutz und alle Claim-Riegel), status immer planned, kein auto_plan (Hand-Plan), nie rest_hedge. Weg ↔ Konto über admin_plan_weg,
+    Hedge-Felder nur, wo der Weg einen Hedge hat. sofort true → start_um = jetzt; sonst Pflicht start_um (ISO, nicht älter als 10 min)."""
+    r = (b or {}).get("row") if isinstance((b or {}).get("row"), dict) else {}
+    route = str(r.get("route") or "")
+    if route not in ADMIN_PLAN_ROUTEN:
+        return None, "Weg nicht erlaubt — für andere IDs nur Echo V2, Orbit V2, Orbit oder Winning Day (startet der PC selbst)"
+    z = {"user_id": konto["user_id"], "master_account_id": konto["id"], "route": route, "status": "planned",
+         "master_name": konto.get("name"), "master_firm": konto.get("firm"),
+         "priority": r.get("priority") if r.get("priority") in ("low", "medium", "high") else "medium"}
+    for k in ADMIN_PLAN_ZAHLEN:
+        v = r.get(k)
+        if v in (None, ""):
+            continue
+        if isinstance(v, bool):
+            return None, f"Feld ungültig: {k}"
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None, f"Feld ungültig: {k}"
+        if f != f or abs(f) > 1e9 or f < 0:
+            return None, f"Feld ungültig: {k}"
+        z[k] = f
+    for k, n in ADMIN_PLAN_TEXTE:
+        v = r.get(k)
+        if v not in (None, "") and k not in ("master_name", "master_firm"):
+            z[k] = str(v).strip()[:n]
+    if not (z.get("master_contracts") or 0) > 0:
+        return None, "Kontrakte/Lots fehlen"
+    if r.get("richtung") in ("buy", "sell"):
+        z["richtung"] = r["richtung"]
+    else:
+        return None, "Richtung wählen (BUY oder SELL)"
+    art, fehler = admin_plan_weg(konto, route, r.get("orbit_v3"), z.get("hedge_eur"), r.get("winning_day"))
+    if fehler:
+        return None, fehler
+    if art in ("echo_v2", "orbit_v2"):       # ohne Hedge: Hedge-Felder nie (sonst zählte prophos_hedge_weg den Plan als „mit Hedge")
+        for k in ("hedge_eur", "hedge_faktor"):
+            z.pop(k, None)
+        if route == "tvv2":
+            z["orbit_v3"] = False
+        if route == "mt5v2":
+            z.pop("master_symbol", None)
+    elif art == "orbit":
+        z["orbit_v3"] = True
+    elif route == "tsv2":                    # Topstep-Winning-Day
+        z["winning_day"] = True
+    pf = str(r.get("planned_for") or "").strip()
+    if pf:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", pf):
+            return None, "Feld ungültig: planned_for"
+        z["planned_for"] = pf
+    if (b or {}).get("sofort") is True:
+        z["start_um"] = jetzt.isoformat()
+    else:
+        try:
+            su = datetime.fromisoformat(str(r.get("start_um") or "").replace("Z", "+00:00"))
+            if su.tzinfo is None:
+                raise ValueError
+        except ValueError:
+            return None, "Startzeit fehlt — „Mit Uhrzeit hinzufügen“ braucht eine Uhrzeit (oder „Speichern & sofort starten“)"
+        if su < jetzt - timedelta(minutes=10):
+            return None, "Startzeit liegt in der Vergangenheit"
+        z["start_um"] = su.astimezone(timezone.utc).isoformat()
+    return z, None
+
+
+def admin_plan_gegen_geplant(plaene, firma, richtung, norm):
+    """REIN RECHNEND (testbar): wie v2RichtungKonflikt(geplanteHand) im Popup — ein noch nicht gestarteter Plan derselben ID × Firma in
+    Gegenrichtung (geplant, auch auf demselben Konto) sperrt das Speichern. plaene = geplante Pläne der Ziel-ID. → Plan-Name oder None."""
+    gegen = {"buy": "sell", "sell": "buy"}.get(richtung)
+    k = norm(firma)
+    for p in plaene or ():
+        if p.get("status") == "planned" and p.get("richtung") == gegen and norm(p.get("master_firm")) == k:
+            return p.get("master_name") or "ein geplanter Trade"
+    return None
+
+
+def _admin_plan_konto(acc_id, erlaubt):
+    """Kontozeile (ohne Zugangsdaten) + Prüfung, dass der Login sie sehen darf. → (konto, None) | (None, Antwort)."""
+    if not re.fullmatch(r"[0-9a-f-]{36}", str(acc_id or "")):
+        return None, (jsonify({"ok": False, "msg": "account_id ungültig"}), 400)
+    try:
+        k = (sb_select("accounts", {"select": "*", "id": f"eq.{acc_id}", "limit": "1"}) or [None])[0]
+    except Exception as e:
+        return None, (jsonify({"ok": False, "msg": f"Konto nicht lesbar ({type(e).__name__})"}), 502)
+    if not k:
+        return None, (jsonify({"ok": False, "msg": "Konto nicht gefunden"}), 404)
+    if erlaubt is not None and str(k.get("user_id")) not in erlaubt:
+        return None, (jsonify({"ok": False, "msg": "Konto nicht in deiner Gruppe"}), 403)
+    return {x: v for x, v in k.items() if x not in ADMIN_KONTO_GEHEIM}, None
+
+
+@app.route("/admin/plan-konto", methods=["GET", "OPTIONS"])
+def admin_plan_konto():
+    """GET ?account_id= → {ok, konto} — die Kontozeile für das Trade-Popup im Admin (ohne Zugangsdaten/MetaApi). Gate wie /admin/konto-anlegen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    erlaubt, err = _admin_konto_gate()
+    if err:
+        return err
+    k, err = _admin_plan_konto(request.args.get("account_id"), erlaubt)
+    if err:
+        return err
+    return jsonify({"ok": True, "konto": k})
+
+
+@app.route("/admin/plan-anlegen", methods=["POST", "OPTIONS"])
+def admin_plan_anlegen():
+    """POST {account_id, row:{…}, sofort?} → {ok, plan} | 400/403/404/409 (Richtungsschutz/DB-Riegel mit Grund)/502. Siehe Block oben."""
+    if request.method == "OPTIONS":
+        return "", 200
+    erlaubt, err = _admin_konto_gate()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    k, err = _admin_plan_konto(b.get("account_id"), erlaubt)
+    if err:
+        return err
+    if str(k.get("account_type") or "") == "live":
+        return jsonify({"ok": False, "msg": "Live-Konto ist nie Master"}), 400
+    jetzt = datetime.now(timezone.utc)
+    zeile, fehler = admin_plan_zeile(b, k, jetzt)
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler}), 400
+    try:   # Richtungsschutz wie im Popup, aber gegen die Pläne der ZIEL-ID (sonst prüfte der Admin seine eigenen)
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_gegenrichtung_frei_konto",
+                        json={"p_user": zeile["user_id"], "p_firma": zeile.get("master_firm"), "p_richtung": zeile["richtung"],
+                              "p_ausser_plan": None, "p_ausser_konto": zeile["master_account_id"]},
+                        headers=_sb_headers(), timeout=(5, 20))
+        _sb_pruefen(r)
+        frei = r.json() or {}
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Richtungsschutz nicht prüfbar ({type(e).__name__}) — nicht gespeichert"}), 502
+    if frei.get("frei") is False:
+        return jsonify({"ok": False, "msg": f"{frei.get('grund') or 'Gegenrichtung bei dieser ID'} — nicht gespeichert (Richtungs-Schutz)"}), 409
+    try:   # dazu geplante, noch nicht gestartete Pläne der Ziel-ID (die RPC zählt nur laufende/unklare/eben geclaimte) — wie das Popup
+        geplant = sb_select("trade_plans", {"select": "master_name,master_firm,richtung,status", "user_id": f"eq.{zeile['user_id']}",
+                                            "status": "eq.planned", "richtung": f"eq.{'sell' if zeile['richtung'] == 'buy' else 'buy'}",
+                                            "start_um_gestartet_at": "is.null", "limit": "200"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Richtungsschutz nicht prüfbar ({type(e).__name__}) — nicht gespeichert"}), 502
+    gegen = admin_plan_gegen_geplant(geplant, zeile.get("master_firm"), zeile["richtung"], lambda f: _ap_norm(_firm_norm(f)))
+    if gegen:
+        return jsonify({"ok": False, "msg": f"{zeile.get('master_firm')}: bei dieser ID ist schon „{gegen}“ in Gegenrichtung geplant — nicht gespeichert (Richtungs-Schutz)"}), 409
+    try:
+        neu = sb_insert("trade_plans", zeile)
+    except requests.exceptions.HTTPError as e:
+        txt = str(getattr(getattr(e, "response", None), "text", "") or e)
+        try:   # Meldung des Riegels (raise exception … using errcode) im Klartext, nicht als \u-Escape
+            fj = e.response.json() if getattr(e, "response", None) is not None else {}
+        except ValueError:
+            fj = {}
+        grund = str((fj or {}).get("message") or txt)[:300]
+        riegel = str((fj or {}).get("code") or "") in ("23514", "P0001") or "check_violation" in txt
+        return jsonify({"ok": False, "msg": f"Nicht gespeichert: {grund}"}), 409 if riegel else 502
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    print(f"[admin-plan] {getattr(g, 'admin_konto_uid', '')} plant für {zeile['user_id']}: {zeile.get('master_name')} {zeile['route']} "
+          f"{zeile['richtung']} Start {zeile['start_um']} ({(neu or {}).get('id')})", flush=True)
+    return jsonify({"ok": True, "plan": neu})
+
+
 @app.route("/admin/konto-mails", methods=["GET", "OPTIONS"])
 def admin_konto_mails():
     """GET /admin/konto-mails?betreff=<a>|<b>…&tage=90 → {ok, mails:[{id, user_id, person, von, betreff, datum, text}],
