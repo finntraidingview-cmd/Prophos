@@ -86,7 +86,8 @@ def main():
     exec(block(app, "\ndef _ap_archiviert(").lstrip("\n"), ns_a)
     check(ns_a["_ap_archiviert"](streng=True) == {"k1", "k4"} and ns_a["_ap_archiviert"]() == {"k1", "k2", "k3", "k4"},
           "Archiv streng (Sweep löscht): nur archived === true; Anzeige-Lesart unverändert")
-    sw = block(app, "\ndef ap_archiv_sweep(")
+    # seit 29.10.2026 (Reset-Bestätigen nutzt dieselbe Lösch-Schleife): Sweep + _ap_plaene_entfernen + AP_SWEEP_FELDER zusammen prüfen
+    sw = block(app, "\ndef ap_archiv_sweep(") + block(app, "\ndef _ap_plaene_entfernen(") + block(app, "\nAP_SWEEP_FELDER = ")
     check(all(x in sw for x in ('_ap_archiviert(streng=True)', '"status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",',
                                 '"orbit_gesendet_at": "is.null", "master_account_id": f"eq.{kid}" if kid else "is.null"', "sb_delete(")),
           "Sweep-DELETE trägt den Wächter in der Anfrage selbst")

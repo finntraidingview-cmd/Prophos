@@ -54,7 +54,11 @@ class DB:
                        {"id": "alt-2", "user_id": ICH, "name": "150k TDFYSL150111111111 → Challenge", "firm": "Tradeify", "account_type": "challenge",
                         "external_id": "TDFYSL150111111111", "account_size": 150000, "max_drawdown": 4500}]
         self.archiv = {"alt-2"}
-        self.settings, self.inserts, self.updates, self.archiviert = {}, [], [], []
+        self.settings, self.inserts, self.updates, self.archiviert, self.entfernt = {}, [], [], [], []
+        self.plaene = [{"id": "p-geplant", "master_account_id": "alt-1", "status": "planned"},
+                       {"id": "p-claim", "master_account_id": "alt-1", "status": "planned", "start_um_gestartet_at": "2026-10-29T10:00:00Z"},
+                       {"id": "p-offen", "master_account_id": "alt-1", "status": "open"},
+                       {"id": "p-anderes", "master_account_id": "alt-2", "status": "planned"}]
         self.vorlagen = [{"name": "Tradeify Select 150k", "firm": "Tradeify", "account_type": "challenge", "account_size": 150000, "purchase_cost": 213, "aktiv": True},
                          {"name": "FundedNext 100k", "firm": "FundedNext", "account_type": "phase1", "account_size": 100000, "purchase_cost": 475, "aktiv": True}]
 
@@ -64,6 +68,8 @@ class DB:
             return [dict(a) for a in self.konten if a["user_id"] == uid]
         if t == "bulk_vorlagen":
             return list(self.vorlagen)
+        if t == "trade_plans":
+            return [dict(p) for p in self.plaene if p["master_account_id"] == q["master_account_id"][3:] and p["status"] == "planned"]
         if t == "user_settings":
             v = self.settings.get((q["user_id"][3:], q["key"][3:]))
             return [{"value": v}] if v is not None else []
@@ -119,7 +125,9 @@ def lade(db, login, gate):
           "_ap_archiviert": lambda: set(db.archiv),
           "_konto_archiv_eintragen": lambda uid, aid, grund, at, name=None: db.archiviert.append((uid, aid, grund)) or True,
           "_konto_mails_laden": lambda uids, w, tage, disp=None: [{"id": 1, "user_id": uids[0], "betreff": "Your account reset is confirmed", "text": "…"}],
-          "_login_uid_mail": lambda: login, "_admin_konto_gate": gate}
+          "_login_uid_mail": lambda: login, "_admin_konto_gate": gate, "AP_SWEEP_FELDER": "id",
+          "ap_archiv_sweep_ziele": lambda plaene, archiv: [p for p in plaene if not p.get("start_um_gestartet_at") and p["master_account_id"] in archiv],
+          "_ap_plaene_entfernen": lambda ziele: db.entfernt.extend(p["id"] for p in ziele) or [p["id"] for p in ziele]}
     exec("\n".join(teile) + "\n" + src[i:j], ns)
     return app, ns
 
@@ -152,6 +160,8 @@ def main():
     check(db.archiviert == [(ICH, "alt-1", "blown")], f"alte Zeile als blown archiviert ({db.archiviert})")
     check(tx and tx[0]["amount"] == -213 and tx[0]["kind"] == "account_purchase", "Kauf-Transaktion −213 € (Reset = Kauf)")
     check(any(t == "tv_konten" and b.get("angelegt_account_id") for t, _f, b in db.updates), "TV-Zeile als angelegt markiert")
+    check(db.entfernt == ["p-geplant"] and d["plaene_entfernt"] == 1,
+          f"geplanter Trade der alten Zeile entfernt; geclaimt/laufend/andere Zeile bleiben ({db.entfernt})")
     r = c.post("/konto-reset-bestaetigen", json={"neu": "TDFYSL150831535169", "alt": "TDFYSL150930752021"})
     check(r.status_code == 409 and "Gibt es schon" in r.get_json()["msg"], "zweites Mal → 409, nicht doppelt")
     r = c.post("/konto-reset-bestaetigen", json={"neu": "TDFYSL150999999999", "alt": "TDFYSL150000000000"})

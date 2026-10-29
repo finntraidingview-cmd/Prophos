@@ -71804,7 +71804,11 @@
       const d = await admMailFetch(`/konto-reset-bestaetigen${fremd ? '?ansicht=admin' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: uid, neu: z.ext, alt: z.vorher, tv_name: (z.quellen || []).includes('TV') ? z.ext : '' }) })
       _admKTv.angelegt.add(key)   // Zeile sofort weg (eigene Liste und Admin), bis die Kontoliste das neue Konto selbst zeigt
-      if(typeof atToast === 'function') atToast(`✓ ${(d.account && d.account.name) || z.ext} angelegt${wer}${d.archiviert ? ` · ${(d.alt && d.alt.name) || z.vorher} als blown archiviert` : ''}${d.hinweis ? ' — ' + d.hinweis : ''}`, d.hinweis ? 'end' : 'ok')
+      if(typeof atToast === 'function') atToast(`✓ ${(d.account && d.account.name) || z.ext} angelegt${wer}${d.archiviert ? ` · ${(d.alt && d.alt.name) || z.vorher} als blown archiviert` : ''}${d.plaene_entfernt ? ` · ${d.plaene_entfernt} geplante Trades der alten Zeile entfernt` : ''}${d.hinweis ? ' — ' + d.hinweis : ''}`, d.hinweis ? 'end' : 'ok')
+      // wie archiveAccount() bei „blown": Duplikum-Verknüpfung der alten Zeile lösen — Token und Verknüpfung liegen nur im Browser der
+      // eigenen ID (still, wenn keine besteht); bei einer fremden ID geht das nicht von hier aus
+      if(!fremd && d.archiviert && d.alt && d.alt.id) try{ window._dupDeleteAccountForProphos?.(d.alt.id) }catch(_){}
+      if(!fremd && d.plaene_entfernt && d.alt && d.alt.id) try{ tradePlans = (tradePlans || []).filter(p => !(String(p.masterAccountId) === String(d.alt.id) && p.status === 'planned' && !p.startedAt && !p.startUmGestartetAt)); renderTradePlans() }catch(_){}
       try{ if(!fremd && typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase() }catch(_){}
       try{ window._admLaden?.() }catch(_){}
       tvNeuRender(); if(_admKTv.at) admKTvRender()

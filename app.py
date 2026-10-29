@@ -17614,7 +17614,8 @@ def _konto_mails_laden(uids, woerter, tage, disp=None):
 # nur ausblenden, nichts gelöscht; bei einer TV-Zeile zusätzlich tv_konten.ignoriert_at) und den RESET bestätigen (Finn: „Reset = Kauf",
 # Standard bei Tradeify, neue External ID): neue Zeile mit den Einstellungen der alten (Previous Account), Startbalance = Größe, Kaufpreis aus
 # der Schablone (bulk_vorlagen gleicher Firma × Typ × Größe), sonst der alten Zeile; die alte Zeile, falls noch aktiv, als blown archiviert
-# (_konto_archiv_eintragen) — Vorbild sql/2026-10-29_mike_tradeify_reset_nachtrag.sql. Ein Kauf geht weiter übers Account-Modal (eigene ID)
+# (_konto_archiv_eintragen, Echo-Löschauftrag) und ihre geplanten, nie gestarteten Pläne sofort entfernt (_ap_plaene_entfernen wie der
+# Archiv-Sweep; die Duplikum-Verknüpfung löst der Browser wie archiveAccount()) — Vorbild sql/2026-10-29_mike_tradeify_reset_nachtrag.sql. Ein Kauf geht weiter übers Account-Modal (eigene ID)
 # bzw. /admin/konto-anlegen (fremde ID). Fremde IDs nur mit dem Gate von /admin/konto-anlegen. Keine Automatik. ══
 KONTO_VERWORFEN_KEY = "konto_verworfen"
 KONTO_VERWORFEN_MAX = 500
@@ -17805,6 +17806,21 @@ def konto_reset_bestaetigen():
             archiviert = _konto_archiv_eintragen(ziel, str(alt["id"]), "blown", jetzt, name=alt.get("name"))
         except Exception as e:
             hinweis.append(f"alte Zeile nicht archiviert ({type(e).__name__}) — von Hand als blown archivieren")
+    plaene_weg = []
+    if archiviert or str(alt.get("id")) in archiv:
+        # wie archiveAccount()/archivPlaeneEntfernen im Frontend (Master 29.10.2026): geplante, nie gestartete Pläne der alten Zeile sofort
+        # weg — sonst will Puls bis zum nächsten Archiv-Sweep auf einem Konto starten, das es nicht mehr gibt. Laufende/Review bleiben.
+        try:
+            plaene_weg = _ap_plaene_entfernen(ap_archiv_sweep_ziele(
+                sb_select("trade_plans", {"select": AP_SWEEP_FELDER, "master_account_id": f"eq.{alt['id']}", "status": "eq.planned",
+                                          "started_at": "is.null"}) or [], {str(alt["id"])}))
+        except Exception as e:
+            hinweis.append(f"geplante Trades der alten Zeile nicht entfernt ({type(e).__name__}) — der Archiv-Sweep holt es nach")
+        if alt.get("rest_planer_at"):   # wie archiveAccount(): „Rest zurück im Planer" weg
+            try:
+                sb_update("accounts", {"id": f"eq.{alt['id']}"}, {"rest_planer_at": None})
+            except Exception:
+                pass
     tv = tv_konto_normal(b.get("tv_name"))
     if acc_id and TV_KONTEN_NAME_RE.fullmatch(tv) and admin_konto_ext_norm(tv) == admin_konto_ext_norm(neu_ext):
         try:
@@ -17812,7 +17828,7 @@ def konto_reset_bestaetigen():
         except Exception:
             pass
     return jsonify({"ok": True, "account": neu, "archiviert": archiviert, "alt": {"id": alt.get("id"), "name": alt.get("name")},
-                    "hinweis": " · ".join(hinweis)})
+                    "plaene_entfernt": len(plaene_weg), "hinweis": " · ".join(hinweis)})
 
 
 @app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])
@@ -22026,11 +22042,21 @@ def ap_archiv_sweep(force=False):
         return None
     _ap_sweep["at"] = time.time()
     archiv = _ap_archiviert(streng=True)
-    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,richtung,status,start_um,"
-                                               "start_um_gestartet_at,started_at,orbit_gesendet_at,notes,start_fehler:mt5_baseline->start_fehler",
-                                     "status": "eq.planned", "started_at": "is.null"})
+    plaene = _sb_all("trade_plans", {"select": AP_SWEEP_FELDER, "status": "eq.planned", "started_at": "is.null"})
+    weg = _ap_plaene_entfernen(ap_archiv_sweep_ziele(plaene, archiv))
+    _ap_sweep["letzt"] = {"at": datetime.now(timezone.utc).isoformat(), "weg": len(weg)}
+    return weg
+
+
+AP_SWEEP_FELDER = ("id,user_id,master_account_id,master_name,master_firm,richtung,status,start_um,start_um_gestartet_at,started_at,"
+                   "orbit_gesendet_at,notes,start_fehler:mt5_baseline->start_fehler")
+
+
+def _ap_plaene_entfernen(ziele):
+    """Pläne aus ap_archiv_sweep_ziele löschen — mit Guard (nie gestartet/gesendet, Claim nur der hängende), Farmer-Tagesplan austragen,
+    Protokoll in auto_plan_umplanung. Gemeinsam für den Sweep und das Reset-Bestätigen (29.10.2026). → Liste gelöschter Plan-IDs."""
     weg, protokoll = [], []
-    for p in ap_archiv_sweep_ziele(plaene, archiv):
+    for p in ziele:
         kid = p.get("master_account_id")
         guard = {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "started_at": "is.null",
                  "orbit_gesendet_at": "is.null", "master_account_id": f"eq.{kid}" if kid else "is.null"}
@@ -22061,7 +22087,6 @@ def ap_archiv_sweep(force=False):
             r.raise_for_status()
         except Exception as e:
             print(f"[archiv-sweep] ⚠️ Protokoll nicht geschrieben ({type(e).__name__}) — Pläne sind trotzdem entfernt", flush=True)
-    _ap_sweep["letzt"] = {"at": datetime.now(timezone.utc).isoformat(), "weg": len(weg)}
     return weg
 
 
