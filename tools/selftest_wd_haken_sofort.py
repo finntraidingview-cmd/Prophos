@@ -69,15 +69,19 @@ print(JSON.stringify(out))
     check("if(an && (!x.tag || x.tag === _wd.tag) && wdTagGewuerfelt(_wd.rows, _wd.tag)) return wdHakenSofort(uid, kontoId, x, k)" in hk
           and hk.index("wdHakenSofort(") < hk.index("k.naechster_lauf = true"), "wdKontoHaken: gewürfelter Tag → sofort einwürfeln, VOR der alten Tageslauf-Regel")
     check("if(!k){ if(an) return wdKontoHakenOhneZeile(kontoId, true); return }" in hk, "Konto fehlt in der Zeile (Emin): Haken wird gespeichert statt still abzubrechen")
-    so = HTML[HTML.index("  async function wdHakenSofort(uid, kontoId, x, k){"):HTML.index("  /* Haken für eine ID ohne Tageszeile (26.09.2026)")]
+    so = HTML[HTML.index("  let _wdHakenKette = Promise.resolve()"):HTML.index("  /* Haken für eine ID ohne Tageszeile (26.09.2026)")]
     check("rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: true })" in so and so.index("wd_konto_setzen") < so.index("wdKontoEinwuerfeln(")
           and "wdKontoEinwuerfeln(uid, kontoId, { anBlock: true })" in so, "wdHakenSofort: erst dauerhaft, dann derselbe Weg wie das 🎲 (anBlock)")
     check("aktiv: false, hinweis: 'heute nicht eingeplant: '" in so and "if(kn && !kn.plan_id)" in so and ".neq('status', 'laeuft')" in so,
           "nicht eingeplant → dauerhaft drin, heute aus mit Grund (Heute nicht drin), nie an einem Konto mit Plan")
-    check("for(let i = 0; _wd.busy && i < 30; i++)" in so and "finally{ _wd.busy = false }" in so
-          and so.index("if(_wd.busy){") < so.index("_wd.busy = true") and "wdNeuLaden()" in so[so.index("if(_wd.busy){"):so.index("_wd.busy = true")]
-          and "p_wd_farm: true" in so[so.index("if(_wd.busy){"):so.index("_wd.busy = true")],
-          "Busy: bis 15 s warten, sonst Haken trotzdem dauerhaft setzen + neu zeichnen (S2: Kästchen blieb optisch an)")
+    hs = so[so.index("  function wdHakenSofort(uid, kontoId, x, k){"):so.index("  async function wdHakenSofortLauf(")]
+    check(hs.index("supabase.rpc('wd_konto_setzen'") < hs.index("_wdHakenKette.then(") and hs.index("wdRender()") < hs.index("_wdHakenKette.then(")
+          and "_wdHakenKette = lauf.catch(() => {})" in hs and ".then(() => dauerhaft).then(() => wdHakenSofortLauf(" in hs,
+          "Warteschlange: Haken sofort dauerhaft (rpc) + sofort gezeichnet, Einwürfeln nacheinander in der Kette")
+    check("if(kd) kd.wd_farm = false" in hs, "rpc scheitert → Haken lokal zurück, Meldung, neu laden")
+    lf = so[so.index("  async function wdHakenSofortLauf("):]
+    check("while(_wd.busy && Date.now() - t0 < WD_HAKEN_WARTE_MS)" in lf and "finally{ _wd.busy = false }" in lf and lf.index("if(_wd.busy){") < lf.index("_wd.busy = true"),
+          "Lauf wartet auf busy (≤ 2 min), danach Hinweis + neu laden; eigener Lauf hält busy")
     oz = HTML[HTML.index("  async function wdKontoHakenOhneZeile(kontoId, an){"):][:900]
     check("if(an && uid0 && wdTagGewuerfelt(_wd.rows, _wd.tag)) return wdHakenSofort(uid0, kontoId, null, null)" in oz
           and oz.index("wdDarf(") < oz.index("wdHakenSofort("), "ID ohne Tageszeile: gewürfelter Tag → sofort (nach dem Gruppen-Recht)")
