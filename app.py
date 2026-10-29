@@ -7602,7 +7602,8 @@ def admin_build_kapitel():
                   "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
                   "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day,"
                   # Winning-Days-Statistik (26.09.2026): Herkunft, TP, Kontrakte, Zeiten, Schließgrund des Fusion-Hedges
-                  "notes,master_tp,master_contracts,started_at,ended_at,hedge_grund:mt5_baseline->hedge->>grund")
+                  "notes,master_tp,master_contracts,started_at,ended_at,hedge_grund:mt5_baseline->hedge->>grund,"
+                  "ah_status:mt5_baseline->apex_hedge->>status")
     # konto_typ (25.09.2026, Kontotyp zum Zeitpunkt des Trades): fehlt die Spalte noch (SQL nicht eingespielt), ohne sie laden —
     # die Statistik darf daran nie kippen
     try:
@@ -7719,8 +7720,8 @@ def admin_build_kapitel():
                 trades_ohne_hedge += 1
             # Winning Day (26.09.2026): Orbit V2 mit Fusion-Gegenhedge (hedge_eur > 0) oder als Winning Day markiert — echter
             # Hedge, Fusion-€ = slave_pl (Deal-Historie). Eigene Liste, zählt NICHT in die Kontrafakt-Trades.
-            if kontrafakt and str(p.get("route") or "") == "tvv2" and ((_f(p.get("hedge_eur")) or 0) > 0 or p.get("winning_day")
-                                                                        or str(p.get("konto_typ") or "") == "winning_days"):
+            if kontrafakt and str(p.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(p) and (
+                    (_f(p.get("hedge_eur")) or 0) > 0 or p.get("winning_day") or str(p.get("konto_typ") or "") == "winning_days"):
                 macc = by_id.get(str(p.get("master_account_id") or "")) or {}
                 wd_liste.append({
                     "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
@@ -12069,7 +12070,7 @@ def admin_wd_heute():
             # Orbit V3 ist nie ein Winning Day (05.10.2026, Finn: „Orbit-Pläne mit Fusion-Hedge sind separat von Winning Days … die
             # kommen ganz normal ins Radar") — Chris' Apex-Funded-Trades standen unter „Läuft gerade", weil hedge_eur > 0 reichte.
             # Gilt auch auf Winning-Days-Konten; wie plan_ist_wd.
-            if p.get("orbit_v3") is True:
+            if p.get("orbit_v3") is True or plan_ist_apex_hedge(p):   # Apex mit Hedge zählt nie als WD (ah_tick)
                 continue
             z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, wd_vorher_waehlen(p, fruehere))
             z.pop("_tsx", None)
@@ -12169,11 +12170,29 @@ def plan_ist_wd(plan, typ=""):
             or (_wd_num(plan.get("hedge_eur")) or 0) > 0)
 
 
+def plan_ist_apex_hedge(plan):
+    """REIN RECHNEND (testbar): Apex-Challenge auf dem Winning-Day-Weg (ah_tick, Finn 29.10.2026) — mt5_baseline.apex_hedge.status 'mit'.
+    Läuft technisch wie ein WD (Start, Puls-Prio, Fusion-Gegenhedge, Heim-Wache), ZÄHLT aber nie als Winning Day und schließt am
+    Challenge-Boden apex_hedge.liq_balance statt bei Größe + 100. Auszüge ohne mt5_baseline dürfen das Feld ah_status mitliefern."""
+    plan = plan or {}
+    base = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+    ah = base.get("apex_hedge") if isinstance(base.get("apex_hedge"), dict) else {}
+    return (ah.get("status") or plan.get("ah_status")) == "mit"
+
+
+def plan_wd_zaehlt(plan, typ=""):
+    """REIN RECHNEND (testbar): zählt der Plan als Winning Day (Statistik, konto_typ, Good Day, WD-Listen)? WD-Weg ohne Apex-Hedge."""
+    return plan_ist_wd(plan, typ) and not plan_ist_apex_hedge(plan)
+
+
 def _lt_liq_balance(acc, plan, balance_start):
     """REIN RECHNEND (testbar): Balance, bei der das Konto blowt → (wert, regel) oder (None, grund).
     B25: Topstep Express startet bei 0 $ — dort nie „Kontogröße + 100", sondern wie jedes andere Konto Max-Drawdown."""
     typ = str((acc or {}).get("account_type") or "").lower()
     wd = plan_ist_wd(plan, typ)
+    ah_liq = _wd_num(((plan or {}).get("mt5_baseline") or {}).get("apex_hedge", {}).get("liq_balance")) if plan_ist_apex_hedge(plan) else None
+    if wd and ah_liq and ah_liq > 0:               # Apex mit Hedge: Fusion-Hedge zu am Challenge-Boden (ah_tick)
+        return round(ah_liq, 2), f"Apex mit Hedge: Challenge-Boden {ah_liq:,.0f} $".replace(",", ".")
     if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         g = _wd_konto_groesse(acc)
         return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
@@ -13164,6 +13183,7 @@ def admin_live_trades():
         for z in trades:
             q = je_id.get(str(z.get("id"))) or {}
             z["orbit_v3"], z["konto_typ"] = bool(q.get("orbit_v3")), q.get("konto_typ")
+            z["apex_hedge"] = plan_ist_apex_hedge(q)     # Apex mit Hedge (ah_tick): WD-Weg, aber eigenes Label, zählt nicht als WD
             if mit_echo and isinstance(z.get("konto"), dict):
                 z["konto"]["archiviert"] = str(q.get("master_account_id") or "") in _lt_archiv
         if mit_echo:
@@ -14280,7 +14300,7 @@ def admin_wd_plaene():
                     def _good_day():
                         # Good Day (01.10.2026): Tradeify-WD mit Master-P&L über 250 $ → Plan winning_day = true und Winning Day +1 am
                         # Konto (einmal je Berlin-Tag). Fehler hier stoppen das Abhaken nicht — sie stehen in der Antwort.
-                        if f_kk is None:
+                        if f_kk is None or plan_ist_apex_hedge(plan):
                             return None
                         try:
                             kr = f_kk.result()
@@ -14309,7 +14329,8 @@ def admin_wd_plaene():
                         except Exception as e:
                             return {"fehler": f"Konto nicht archiviert ({type(e).__name__}) — im Account von Hand archivieren"}
 
-                    f_typ = pool.submit(_konto_typ) if str(plan.get("route") or "") == "tvv2" else None
+                    # Apex mit Hedge (ah_tick) läuft wie ein WD, ist aber keiner — konto_typ bleibt leer, kein Good Day
+                    f_typ = pool.submit(_konto_typ) if str(plan.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(plan) else None
                     f_buch = pool.submit(_buchen)
                     f_gd = pool.submit(_good_day)
                     f_arch = pool.submit(_archivieren) if konto_status != "none" else None
@@ -16391,8 +16412,8 @@ def puls_heim_big_trades(plaene, pc, ausser=None):
             continue
         if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2"):
             continue
-        if p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days":
-            continue
+        if p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days" or plan_ist_apex_hedge(p):
+            continue                                       # Apex mit Hedge: läuft als Winning Day (puls_heim_wd_trades)
         if not ((_wd_num(p.get("hedge_eur")) or 0) > 0 or p.get("orbit_v3") is True):
             continue
         h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
@@ -16422,7 +16443,7 @@ def puls_heim_wd_trades(plaene, pc, ausser=None):
             continue
         if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2"):
             continue
-        if not (p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days"):
+        if not (p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days" or plan_ist_apex_hedge(p)):
             continue
         h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
         if not isinstance(h, dict) or str(h.get("pc") or "") != str(pc or ""):
@@ -24758,6 +24779,24 @@ def eh_zurueck():
     return n
 
 
+def hedge_vorgemerkt(von, jetzt):
+    """Umgestellte, noch nicht offene Fusion-Hedges je Fusion-Login (zählen voll gegen max_lots und Marge): Echo-Hedge (route mt5,
+    mt5_baseline.echo_hedge), finaler Tradeify (route tvv2, mt5_baseline.tradeify_hedge, S4 tfh_tick) UND Apex-Hedge (route tvv2,
+    mt5_baseline.apex_hedge, 30.10.2026) — eine Grenze für alle drei, dazu kommen in
+    der Fusion-Lesung die offenen WD-/Funded-Hedges. Nur, was gleich einen Hedge öffnet: nicht geclaimt mit Start ab von, oder eben
+    geclaimt bzw. eben offen (bis die Fusion-Lesung den Hedge zeigt). Verpasste/liegengebliebene Pläne zählen nicht."""
+    frisch = (jetzt - timedelta(minutes=EH_VORGEMERKT_CLAIM_MIN)).isoformat()
+    oder = (f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
+            f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})")
+    out = {}
+    for feld, route in (("echo_hedge", "mt5"), ("tradeify_hedge", "tvv2"), ("apex_hedge", "tvv2")):
+        for q in _sb_all("trade_plans", {"select": f"mt5_baseline->{feld}", "status": "in.(planned,open)", "route": f"eq.{route}",
+                                         f"mt5_baseline->{feld}->>status": "eq.mit", "or": oder}):
+            h = q.get(feld) if isinstance(q.get(feld), dict) else {}
+            out[str(h.get("login") or "")] = out.get(str(h.get("login") or ""), 0.0) + (_wd_num(h.get("lots")) or 0.0)
+    return out
+
+
 def eh_tick(jetzt=None, force=False):
     """Jede Minute (ap_loop): fällige HT-CFD-Auto-Pläne (Start in −nachlauf_min … +vorlauf_min, bestätigt, nicht geclaimt) auf Echo mit Hedge umstellen bzw. mit
     Grund als Echo V2 lassen; Schalter aus → zurück. → {umgestellt, ohne} oder None (Takt nicht fällig)."""
@@ -24808,20 +24847,7 @@ def eh_tick(jetzt=None, force=False):
     vorgemerkt = {}                 # umgestellte, noch nicht offene Hedges je Fusion-Login (zählen voll gegen Grenze + Marge)
     # Nur, was gleich einen Hedge öffnet: nicht geclaimt mit Start ab jetzt − nachlauf, oder eben geclaimt bzw. eben offen (bis die
     # Fusion-Lesung den Hedge zeigt). Verpasste/liegengebliebene Pläne zählen nicht (Prüfung Subagent 29.10.2026).
-    frisch = (jetzt - timedelta(minutes=EH_VORGEMERKT_CLAIM_MIN)).isoformat()
-    for q in _sb_all("trade_plans", {"select": "mt5_baseline->echo_hedge", "status": "in.(planned,open)", "route": "eq.mt5",
-                                     "mt5_baseline->echo_hedge->>status": "eq.mit",
-                                     "or": f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
-                                           f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})"}):
-        eh = q.get("echo_hedge") if isinstance(q.get("echo_hedge"), dict) else {}
-        vorgemerkt[str(eh.get("login") or "")] = vorgemerkt.get(str(eh.get("login") or ""), 0.0) + (_wd_num(eh.get("lots")) or 0.0)
-    # dazu die finalen Tradeify-Gegenhedges (tfh_tick, route tvv2) — derselbe Fusion-Login, dieselbe 60-Lot-Grenze (Prüfung 29.10.2026)
-    for q in _sb_all("trade_plans", {"select": "mt5_baseline->tradeify_hedge", "status": "in.(planned,open)", "route": "eq.tvv2",
-                                     "mt5_baseline->tradeify_hedge->>status": "eq.mit",
-                                     "or": f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
-                                           f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})"}):
-        th = q.get("tradeify_hedge") if isinstance(q.get("tradeify_hedge"), dict) else {}
-        vorgemerkt[str(th.get("login") or "")] = vorgemerkt.get(str(th.get("login") or ""), 0.0) + (_wd_num(th.get("lots")) or 0.0)
+    vorgemerkt = hedge_vorgemerkt(von, jetzt)   # Echo + finaler Tradeify + Apex — eine 60-Lot-Grenze je Fusion-Login (30.10.2026)
     for p in plaene:
         a = konten.get(str(p.get("master_account_id")))
         if not a or (a.get("account_type") or "") not in EH_TYPEN:
@@ -25116,16 +25142,9 @@ def tfh_tick(jetzt=None, force=False):
     except Exception as e:
         _tfh_spur(f"⚠️ Fusion-Lesung: {type(e).__name__}: {e}")
         lesungen = {}
-    # vorgemerkt je Fusion-Login: umgestellte, noch nicht offene Hedges — Echo-Hedge (route mt5) UND dieser Weg (tvv2), Fenster wie eh_tick
-    frisch = (jetzt - timedelta(minutes=EH_VORGEMERKT_CLAIM_MIN)).isoformat()
-    vorgemerkt = {}
-    for route_v, feld in (("mt5", "echo_hedge"), ("tvv2", "tradeify_hedge")):
-        for q in _sb_all("trade_plans", {"select": f"h:mt5_baseline->{feld}", "status": "in.(planned,open)", "route": f"eq.{route_v}",
-                                         f"mt5_baseline->{feld}->>status": "eq.mit",
-                                         "or": f"(and(status.eq.planned,start_um_gestartet_at.is.null,start_um.gte.{von.isoformat()}),"
-                                               f"start_um_gestartet_at.gte.{frisch},started_at.gte.{frisch})"}):
-            h_ = q.get("h") if isinstance(q.get("h"), dict) else {}
-            vorgemerkt[str(h_.get("login") or "")] = vorgemerkt.get(str(h_.get("login") or ""), 0.0) + (_wd_num(h_.get("lots")) or 0.0)
+    # vorgemerkt je Fusion-Login: umgestellte, noch nicht offene Hedges — Echo-Hedge, dieser Weg UND Apex-Hedge (gemeinsamer Helfer, eine
+    # 60-Lot-Grenze je Fusion-Login, Zusammenführung S1/S4 30.10.2026), Fenster wie eh_tick
+    vorgemerkt = hedge_vorgemerkt(von, jetzt)
     for p, a in finale:
         uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
         base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -25234,6 +25253,301 @@ def admin_auto_plan_hedge_freigabe():
     except Exception as e:
         print(f"[hedge-freigabe] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# APEX-CHALLENGE-WD-HEDGE (30.10.2026, Finn 29.10. ~16:30 Dubai: „Für Apex die Trades mit der normalen Winning-Days-Logik starten, eins zu
+# eins wie Winning Days … mit der gleichen Priorität plus mit dem gleichen Gegenhedge-Verfahren … bei Apex IMMER bei den Challenges mit
+# Gegenhedge"). Wie eh_tick: ein bestätigter, nicht geclaimter HT-Apex-Challenge-Auto-Plan (route tvv2) wird ab vorlauf_min vor seinem Start
+# bis nachlauf_min danach auf den Winning-Day-Weg gestellt — hedge_eur > 0 auf tvv2 ist im PC-Tab (tpIstWdPlan/hedgeIstWd) genau das,
+# woran Start- und Schließweg, Puls-Priorität, Verspätung, Fusion-Open (Toasts, Liq, Buchung) hängen. Er zählt aber NICHT als Winning Day:
+# winning_day = false und die Marke mt5_baseline.apex_hedge = {status 'mit', …} — tpWdZaehlt/_wd_zaehlt nehmen ihn aus WD-Statistik,
+# Farmer, Gewinntagen und WD-Abhaken.
+# Hedge-GRÖSSE wie immer bei Challenges (Finn: „100k-Konto für 50 € → 3.000 $ Max DD werden mit 50 € gegengehedgt"): Satz = Kontowert ÷
+# Polster aus ap_kontowert_konto (Apex statisch: Kaufpreis ÷ Max DD), q = Satz ÷ netto_faktor (0,89 — derselbe EUR/USD-Netto-Faktor wie
+# eh_hedge: der Hedge auf Fusion läuft in EUR, die Master-$ werden mit 0,89 netto umgerechnet, damit ein Blow den Kontowert deckt).
+# master_risk = Polster ($), slave_risk = q × Polster (€) → der PC-Tab rechnet daraus beim Open denselben Multiplikator (hedgeMultAusRisiko,
+# Lots = slave_risk ÷ (Fusion-€/Pkt × master_risk-Punkte)). LIQUIDATION: der WD-Hedge schließt sonst bei Kontogröße + 100 $ — für die
+# Challenge am Boden = Balance − Polster (Apex statisch: Größe − Max DD, 100k 97.000 / 150k 146.000); steht als apex_hedge.liq_balance am
+# Plan, hedgeLiqLevel im Tab nimmt ihn (Master/Finn 30.10.2026, WD-Weg unverändert).
+# Fallback ⚪ ohne Hedge (bleibt Orbit V2 wie bisher), wenn Kontowert/Lots/frische Fusion-Lesung fehlen oder max_lots (echo_hedge.max_lots,
+# eine Grenze für WD + Echo-Hedge + Apex je Fusion-Login, hedge_vorgemerkt) bzw. die Marge knapp wird. Schalter
+# auto_plan_regeln.regeln.apex_hedge.an (Standard AUS, sql/2026-10-30_apex_hedge.sql), aus → umgestellte, nicht gestartete Pläne zurück.
+# ════════════════════════════════════════════════════════════════════════════
+AH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "vorlauf_min": 20.0, "nachlauf_min": 30.0}
+AH_TAKT_S = 60
+AH_FIRMA = "Apex Trader"
+_ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
+
+
+def ah_param(regeln):
+    """REIN RECHNEND (testbar): regeln.apex_hedge → Parameter; Ungültiges fällt einzeln auf AH_STANDARD zurück. max_lots kommt vom
+    Echo-Hedge (gemeinsame Grenze je Fusion-Login)."""
+    roh = (regeln or {}).get("apex_hedge") if isinstance(regeln, dict) else None
+    roh = roh if isinstance(roh, dict) else {}
+    out = dict(AH_STANDARD, an=roh.get("an") is True)
+    for k, lo, hi in (("netto_faktor", 0.5, 1.0), ("min_lot", 0.01, 1.0), ("vorlauf_min", 3.0, 120.0), ("nachlauf_min", 0.0, 60.0)):
+        v = _wd_num(roh.get(k))
+        if v is not None and not isinstance(roh.get(k), bool) and lo <= v <= hi:
+            out[k] = float(v)
+    out["max_lots"] = eh_param(regeln)["max_lots"]
+    return out
+
+
+def ah_master_ppl(p):
+    """$ je Punkt und Kontrakt am Apex-Plan: MNQ 2 $, sonst NQ 20 $ (wie hedgePplFuer/wdFarmHedge aus dem Plan-Symbol)."""
+    sym = str(p.get("master_symbol_root") or p.get("master_symbol") or "").upper()
+    return 2.0 if sym.startswith("MNQ") else 20.0
+
+
+def ah_stand(regeln=None):
+    """Schalter + letzter Takt für die Admin-Ansicht (GET /admin/auto-plan/delta)."""
+    try:
+        p = ah_param(regeln if regeln is not None else _eh_regeln())
+    except Exception as e:
+        return {"an": None, "fehler": f"{type(e).__name__}: {e}"}
+    return {"an": p["an"], "netto_faktor": p["netto_faktor"], "max_lots": p["max_lots"], "umgestellt": _ah["umgestellt"],
+            "ohne": _ah["ohne"], "zurueck": _ah["zurueck"], "fehler": _ah["fehler"] or None, "letzt": _ah["letzt"][-10:]}
+
+
+def _ah_spur(text):
+    _ah["letzt"] = (_ah["letzt"] + [{"at": _wt_now_iso(), "text": str(text)[:300]}])[-30:]
+    print(f"[apex-hedge] {text}", flush=True)
+
+
+def _ah_guard(p, mit=False):
+    """Update-Guard: tvv2, noch geplant, Auto-Plan, nicht geclaimt, keine Hand-Werte, kein Orbit V3, seitdem unverändert (updated_at);
+    vor der Umstellung zusätzlich noch ohne Hedge (hedge_eur leer/0)."""
+    g = {"id": f"eq.{p['id']}", "status": "eq.planned", "route": "eq.tvv2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
+         "hand_werte_at": "is.null", "orbit_v3": "is.false"}
+    if not mit:
+        g["or"] = "(hedge_eur.is.null,hedge_eur.eq.0)"
+    if p.get("updated_at"):
+        g["updated_at"] = f"eq.{p['updated_at']}"
+    return g
+
+
+def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
+    """Plan bleibt (vorerst) Orbit V2 ohne Hedge — wie _eh_ohne: mt5_baseline.apex_hedge {status ohne, code, grund} nur bei neuem Code,
+    Notiz beim ersten Grund, ⚪ einmal je Plan, sobald der Start ≤ EH_MELDEN_MIN entfernt ist."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    alt = base.get("apex_hedge") if isinstance(base.get("apex_hedge"), dict) else None
+    try:
+        nah = (datetime.fromisoformat(str(p.get("start_um")).replace("Z", "+00:00")) - jetzt).total_seconds() <= EH_MELDEN_MIN * 60
+    except (TypeError, ValueError):
+        nah = True
+    melden = melden and nah and not (alt or {}).get("gemeldet")
+    gleich = bool(alt) and alt.get("status") == "ohne" and alt.get("code") == code
+    if gleich and not melden:
+        return
+    neu = {"status": "ohne", "code": code, "grund": grund, "at": _wt_now_iso(), "gemeldet": bool((alt or {}).get("gemeldet")) or melden}
+    upd = {"mt5_baseline": dict(base, apex_hedge=neu)}
+    if not (alt and alt.get("status") == "ohne"):
+        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nApex-Hedge: ohne Hedge, weil {grund}").strip()
+    try:
+        if not sb_update("trade_plans", _ah_guard(p), upd):
+            return
+    except Exception as e:
+        _ah_spur(f"⚠️ {str(p['id'])[:8]} Grund nicht gespeichert: {type(e).__name__}: {e}")
+        return
+    if not gleich:
+        _ah["ohne"] += 1
+        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: ohne Hedge — {grund}")
+    if melden:
+        alarm_senden(3, "apex_hedge_ohne", "Apex-Hedge ausgelassen",
+                     f"{wer} · {p.get('master_name') or '—'}: startet als Orbit V2 ohne Hedge — {grund}",
+                     uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"ah-ohne-{p['id']}")
+
+
+def ah_zurueck():
+    """Schalter aus → umgestellte, noch nicht gestartete Pläne zurück auf Orbit V2 ohne Hedge (Werte von vorher). → Anzahl."""
+    n = 0
+    for p in _sb_all("trade_plans", {"select": "id,user_id,master_name,mt5_baseline,updated_at", "status": "eq.planned", "route": "eq.tvv2",
+                                     "auto_plan": "is.true", "start_um_gestartet_at": "is.null", "mt5_baseline->apex_hedge->>status": "eq.mit"}):
+        base = dict(p.get("mt5_baseline") or {})
+        ah = dict(base.get("apex_hedge") or {})
+        vor = ah.get("vorher") if isinstance(ah.get("vorher"), dict) else {}
+        base["apex_hedge"] = dict(ah, status="zurueck", zurueck_at=_wt_now_iso())
+        g = _ah_guard(p, mit=True)
+        g.pop("hand_werte_at", None)
+        try:
+            if sb_update("trade_plans", g, {"hedge_eur": None, "hedge_faktor": vor.get("hedge_faktor"), "multiplier": vor.get("multiplier"),
+                                            "slave_risk": vor.get("slave_risk"), "master_risk": vor.get("master_risk"), "mt5_baseline": base}):
+                n += 1
+                _ah_spur(f"Schalter aus · {p.get('master_name') or '—'} zurück auf Orbit V2 ohne Hedge")
+        except Exception as e:
+            _ah_spur(f"⚠️ {str(p['id'])[:8]} zurück: {type(e).__name__}: {e}")
+    # nur vorgemerkte (hedge_art 'apex', noch nicht umgestellt): Marke + Vorschau weg, damit der Bestätigen-Block sie nicht mehr zeigt
+    for p in _sb_all("trade_plans", {"select": "id,mt5_baseline,updated_at", "status": "eq.planned", "route": "eq.tvv2", "auto_plan": "is.true",
+                                     "start_um_gestartet_at": "is.null", "mt5_baseline->>hedge_art": "eq.apex"}):
+        base = dict(p.get("mt5_baseline") or {})
+        if isinstance(base.get("apex_hedge"), dict) and base["apex_hedge"].get("status") == "mit":
+            continue
+        base.pop("hedge_art", None)
+        base.pop("hedge_vorschau", None)
+        try:
+            sb_update("trade_plans", {"id": f"eq.{p['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"}, {"mt5_baseline": base})
+        except Exception as e:
+            _ah_spur(f"⚠️ {str(p['id'])[:8]} Marke nicht entfernt: {type(e).__name__}: {e}")
+    _ah["zurueck"] += n
+    return n
+
+
+def ah_vorschau(h, wert, polster, liq, master_tp):
+    """REIN RECHNEND (testbar): Vorschau für den Bestätigen-Block (Admin → Challenge-Planer, S4): Hedge-Lots, Kontowert €, was der Fusion-Hedge
+    beim Blow bringt (+slave_risk ≈ Kontowert ÷ netto_faktor) und was er am Master-TP kostet (−TP $ × q)."""
+    tp = _wd_num(master_tp)
+    return {"lots": h["lots"], "q": h["q"], "eur": round(float(wert), 2), "blow_eur": h["slave_risk"],
+            "tp_eur": (round(-tp * h["q"], 2) if tp and tp > 0 else None), "polster_usd": round(float(polster), 2), "liq_balance": liq,
+            "multiplier": h["multiplier"], "at": _wt_now_iso()}
+
+
+def ah_tick(jetzt=None, force=False):
+    """Jede Minute (ap_loop), zwei Schritte (Schalter an):
+    (1) VORMERKEN: jeder geplante, nicht geclaimte HT-Apex-Challenge-Auto-Plan (tvv2, ohne Hedge) bekommt schon beim Planen
+        mt5_baseline.hedge_art = 'apex' und mt5_baseline.hedge_vorschau (Lots, €, Blow +€, TP −€) — Finn bestätigt ihn unter Admin →
+        Challenge-Planer (S4: trade_plans.hedge_freigabe_at, Bestätigen-Block, Riegel im Claim-Trigger). Neu geschrieben nur, wenn die
+        Marke fehlt oder sich die Lots ändern.
+    (2) UMSTELLEN: nur freigegebene Pläne (hedge_freigabe_at gesetzt) mit Start in −nachlauf_min … +vorlauf_min auf den Winning-Day-Weg mit
+        Fusion-Gegenhedge bzw. mit Grund als Orbit V2 lassen. Alle anderen bleiben unangetastet. Schalter aus → zurück.
+    → {umgestellt, ohne, vorgemerkt} oder None (Takt nicht fällig)."""
+    if not force and time.time() - _ah["at"] < AH_TAKT_S:
+        return None
+    _ah["at"] = time.time()
+    jetzt = jetzt or datetime.now(timezone.utc)
+    regeln = _eh_regeln()
+    par = ah_param(regeln)
+    if not par["an"]:
+        return {"umgestellt": 0, "ohne": 0, "vorgemerkt": 0, "zurueck": ah_zurueck()}
+    von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
+    felder = ("id,user_id,master_account_id,master_name,master_firm,master_contracts,master_symbol,master_symbol_root,master_tp,"
+              "master_risk,slave_risk,multiplier,hedge_faktor,richtung,start_um,notes,mt5_baseline,updated_at,auto_bestaetigt_at")
+    filt = {"status": "eq.planned", "route": "eq.tvv2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null", "hand_werte_at": "is.null",
+            "orbit_v3": "is.false", "or": "(hedge_eur.is.null,hedge_eur.eq.0)", "start_um": f"gte.{von.isoformat()}", "order": "start_um.asc"}
+    try:                                                     # hedge_freigabe_at baut S4 (Spalte + Bestätigen-Block) — fehlt sie, wird nichts umgestellt
+        roh = _sb_all("trade_plans", {"select": felder + ",hedge_freigabe_at", **filt})
+        freigabe_da = True
+    except Exception as e:
+        if "hedge_freigabe_at" not in str(e):
+            raise
+        roh = _sb_all("trade_plans", {"select": felder, **filt})
+        freigabe_da = False
+    roh = [p for p in roh if _firm_norm(p.get("master_firm") or "") == _firm_norm(AH_FIRMA)]
+    namen, aus = _ap_namen()
+    verwaltet = gp_verwalter_karte()
+    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    plaene = [p for p in roh if str(p.get("user_id")) not in aus]
+    erg = {"umgestellt": 0, "ohne": 0, "vorgemerkt": 0}
+    if not plaene:
+        return erg
+    firmen = regeln.get("firmen") or []
+    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(
+        sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
+    plaene = [p for p in plaene if (konten.get(str(p.get("master_account_id"))) or {}).get("account_type") == "challenge"]
+    if not plaene:
+        return erg
+    uids = sorted({str(p["user_id"]) for p in plaene})
+    in_uids = "in.(" + ",".join(uids) + ")"
+    hedge = {}
+    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}):
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        if v.get("accountId"):
+            hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
+    hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm,external_id", "id": "in.(" + ",".join(
+        sorted({h[0] for h in hedge.values()})) + ")"}) if hedge else [])}
+    ppl, _ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                   norm=lambda n: _ap_norm(_firm_norm(n)))
+    echo_bal, dup_bal = _ap_balance_karten()
+    kauf = _ap_kauf_echt(sorted(konten)) if konten else {}
+
+    def rechnen(p, a):
+        """→ (h, wert, polster, bal, liq, None) | (None, …, (code, grund))."""
+        uid = str(p["user_id"])
+        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        if bal is None:
+            return None, None, None, None, None, ("balance", "Balance des Kontos nicht lesbar (Kontowert und Boden für den Hedge)")
+        kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+        satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
+        if not satz or satz <= 0 or not wert or wert <= 0:
+            return None, None, None, bal, None, ("groesse", "kein Kontowert-Satz (Kaufpreis ÷ Max DD)" + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""))
+        polster = wert / satz                              # $ bis zum Boden (Apex statisch: Max DD + Gewinn über der Größe)
+        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        h, grund = eh_hedge(satz, p.get("master_contracts"), ah_master_ppl(p), sppl, polster, par["netto_faktor"], par["min_lot"])
+        if grund:
+            return None, wert, polster, bal, None, ("groesse", grund)
+        return h, wert, polster, bal, round(float(bal) - polster, 2), None
+
+    # (1) VORMERKEN — hedge_art + hedge_vorschau für den Bestätigen-Block
+    for p in plaene:
+        a = konten.get(str(p.get("master_account_id")))
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        h, wert, polster, _bal, liq, fehl = rechnen(p, a)
+        vs = ah_vorschau(h, wert, polster, liq, p.get("master_tp")) if h else {"fehler": fehl[1], "code": fehl[0], "at": _wt_now_iso()}
+        alt = base.get("hedge_vorschau") if isinstance(base.get("hedge_vorschau"), dict) else {}
+        if base.get("hedge_art") == "apex" and (alt.get("lots") == vs.get("lots")) and (alt.get("code") == vs.get("code")):
+            continue
+        try:
+            if sb_update("trade_plans", _ah_guard(p), {"mt5_baseline": dict(base, hedge_art="apex", hedge_vorschau=vs)}):
+                erg["vorgemerkt"] += 1
+                p["mt5_baseline"] = dict(base, hedge_art="apex", hedge_vorschau=vs)
+                p["updated_at"] = None                   # Zeile ist neu geschrieben — der Umstell-Guard unten prüft dann ohne updated_at
+        except Exception as e:
+            _ah_spur(f"⚠️ {str(p['id'])[:8]} Vorschau nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
+
+    # (2) UMSTELLEN — nur freigegebene, fällige Pläne
+    if not freigabe_da:
+        return erg
+    faellig = [p for p in plaene if p.get("hedge_freigabe_at") and p.get("auto_bestaetigt_at") and str(p.get("start_um") or "") <= bis.isoformat()]
+    if not faellig:
+        return erg
+    try:
+        lesungen = gp_fusion_lesungen({str(p["user_id"]) for p in faellig}, jetzt)
+    except Exception as e:
+        _ah_spur(f"⚠️ Fusion-Lesung: {type(e).__name__}: {e}")
+        lesungen = {}
+    vorgemerkt = hedge_vorgemerkt(von, jetzt)
+    for p in faellig:
+        a = konten.get(str(p.get("master_account_id")))
+        uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        hid, login = hedge.get(uid, (None, ""))
+        if not hid or hid not in hedge_acc:
+            _ah_ohne(p, "kein_konto", "kein Hedge-Konto (Fusion) bei dieser ID", wer, jetzt)
+            continue
+        login = login or str(hedge_acc[hid].get("external_id") or "")
+        h, wert, polster, bal, liq, fehl = rechnen(p, a)
+        if fehl:
+            _ah_ohne(p, fehl[0], fehl[1], wer, jetzt)
+            continue
+        les = lesungen.get(login)
+        if not les or jetzt.timestamp() - float(les.get("at") or 0) > EH_LESUNG_MAX_S:
+            _ah_ohne(p, "lesung", f"keine frische Fusion-Lesung ({login or '?'}, älter als {EH_LESUNG_MAX_S // 60} min)", wer, jetzt)
+            continue
+        ok, grund = eh_marge(les, h["lots"], p.get("richtung"), vorgemerkt.get(login, 0.0), par["max_lots"])
+        if not ok:
+            _ah_ohne(p, "grenze" if "gleichzeitig" in grund else "marge", grund, wer, jetzt)
+            continue
+        info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"], "satz": round(wert / polster, 6),
+                "kontowert_eur": round(wert, 2), "polster_usd": round(polster, 2), "liq_balance": liq, "balance": round(float(bal), 2),
+                "login": login, "netto_faktor": par["netto_faktor"], "freigabe_at": p.get("hedge_freigabe_at"),
+                "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}}
+        upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": round(polster, 2), "slave_risk": h["slave_risk"],
+               "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
+               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Apex mit Hedge (WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                         f"(Kontowert {wert:.0f} € ÷ Polster {polster:.0f} $ ÷ {par['netto_faktor']}) · Hedge zu am Boden {liq:.0f} $").replace(".", ",")).strip()}
+        g = _ah_guard(p)
+        g["hedge_freigabe_at"] = "not.is.null"
+        try:
+            if not sb_update("trade_plans", g, upd):
+                continue                                  # inzwischen geclaimt/geändert → nächster Takt sieht den neuen Stand
+        except Exception as e:
+            _ah_spur(f"⚠️ {wer} · {p.get('master_name') or '—'} nicht umgestellt: {type(e).__name__}: {str(e)[:200]}")
+            continue
+        vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
+        erg["umgestellt"] += 1
+        _ah["umgestellt"] += 1
+        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: Apex mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']}, Boden {liq:.0f})")
+    return erg
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -28501,7 +28815,8 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
            "start_bis": _ap_hhmm_txt(ap_start_bis(stand["zeiten"])),
            "cfd_bis": None if ap_cfd_bis(stand["zeiten"]) is None else _ap_hhmm_txt(ap_cfd_bis(stand["zeiten"])),   # CFD-Ende (sfTagesEnde)
            "bot": _ap_bot_stand(stand["param"], stand["jetzt"]), "hinweise": hinweise,
-           "echo_hedge": eh_stand()}   # HT Echo-Hedge B2 (29.10.2026): Schalter neben „Bot an/aus"
+           "echo_hedge": eh_stand(),   # HT Echo-Hedge B2 (29.10.2026): Schalter neben „Bot an/aus"
+           "apex_hedge": ah_stand()}   # Apex-Challenge-WD-Hedge (30.10.2026): Schalter neben „Echo-Hedge"
     # SZENARIO (08.10.2026, für Slave 5s Anzeige): Kurve jetzt (laufende) und +60 min (mit den in 60 min startenden), Steigung, schlimmster
     # Fall links/rechts über ±AP_SZENARIO_R; Trades ohne Satz/$ je Pkt zählen 0 und stehen in szenario.ohne
     try:
@@ -30255,6 +30570,18 @@ def admin_auto_plan_ausgleich_einstellung():
         _eh["at"] = 0.0                # nächster Schleifendurchlauf nimmt den Schalter sofort
         print(f"[echo-hedge] Schalter {'AN' if body['echo_hedge'] else 'AUS'} ({uid})", flush=True)
         return jsonify({"ok": True, "echo_hedge": eh_stand(regeln)})
+    if "apex_hedge" in body:          # APEX-CHALLENGE-WD-HEDGE (30.10.2026): nur regeln.apex_hedge.an — eigener Schalter
+        if not isinstance(body["apex_hedge"], bool):
+            return jsonify({"ok": False, "msg": "apex_hedge = true | false"}), 400
+        ah_roh = regeln.get("apex_hedge") if isinstance(regeln.get("apex_hedge"), dict) else {}
+        regeln["apex_hedge"] = dict(ah_roh, an=body["apex_hedge"])
+        try:
+            sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        _ah["at"] = 0.0
+        print(f"[apex-hedge] Schalter {'AN' if body['apex_hedge'] else 'AUS'} ({uid})", flush=True)
+        return jsonify({"ok": True, "apex_hedge": ah_stand(regeln)})
     neu = dict(ap_ausgleich_param(regeln))
     for k in ("aktiv", "auto_start"):
         if k in body:
@@ -32285,6 +32612,12 @@ def ap_loop():
         except Exception as e:
             _tfh["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[tradeify-hedge] ⚠️ {_tfh['fehler']}", flush=True)
+        try:
+            if ah_tick() is not None:         # APEX-CHALLENGE-WD-HEDGE (30.10.2026): Apex-Challenges kurz vor dem Start auf den WD-Weg — eigener try
+                _ah["fehler"] = ""
+        except Exception as e:
+            _ah["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[apex-hedge] ⚠️ {_ah['fehler']}", flush=True)
         try:
             if time.time() - (_gp_info.get("auftrag_at") or 0) >= 60:
                 _gp_info["auftrag_at"] = time.time()

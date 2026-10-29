@@ -1,0 +1,190 @@
+-- APEX-CHALLENGE-WD-HEDGE (30.10.2026, Finn 29.10. ~16:30 Dubai: „Für Apex die Trades mit der normalen Winning-Days-Logik starten, eins zu
+-- eins wie Winning Days … mit der gleichen Priorität plus mit dem gleichen Gegenhedge-Verfahren … bei Apex IMMER bei den Challenges mit
+-- Gegenhedge"). Railway (app.py ah_tick) stellt bestätigte HT-Apex-Challenge-Auto-Pläne (route tvv2) ab 20 min vor dem Start auf den
+-- Winning-Day-Weg: hedge_eur = Kontowert, master_risk = Polster, slave_risk/multiplier nach q = Kaufpreis ÷ Max DD ÷ 0,89, winning_day = false,
+-- Marke mt5_baseline.apex_hedge. Er läuft wie ein WD (Start, Priorität, Verspätung, Fusion-Hedge), zählt aber nicht als WD; der Fusion-Hedge
+-- schließt am Challenge-Boden (apex_hedge.liq_balance), nicht bei Größe + 100.
+--
+-- 1. Schalter auto_plan_regeln.regeln.apex_hedge = {an, netto_faktor, min_lot, vorlauf_min, nachlauf_min}. Standard AUS; ein schon gesetzter
+--    Wert bleibt (Merge). Die 60-Lot-Grenze je Fusion-Login teilt er mit dem Echo-Hedge (regeln.echo_hedge.max_lots). Umschalten: Admin →
+--    Trade-Planer, Schalter „Apex-Hedge" neben „Echo-Hedge", oder per SQL:
+--      update public.auto_plan_regeln set regeln = jsonb_set(regeln, '{apex_hedge,an}', 'true') where id = 1;   -- an
+--      update public.auto_plan_regeln set regeln = jsonb_set(regeln, '{apex_hedge,an}', 'false') where id = 1;  -- aus (ah_tick stellt
+--      umgestellte, noch nicht gestartete Pläne zurück auf Orbit V2 ohne Hedge; laufende bleiben, wie sie sind)
+-- 2. Riegel trade_plans_kontoart_weg: eine Apex-Challenge mit Hedge auf tvv2 darf es, wenn sie ein Auto-Plan mit Marke apex_hedge 'mit' ist
+--    und der Schalter an ist (prophos_apex_hedge_an). Sonst unverändert (Live-Fassung aus sql/2026-10-29_ht_echo_hedge.sql + dieser Block).
+-- VORAUSSETZUNG: sql/2026-10-29_ht_echo_hedge.sql ist eingespielt (prophos_ht_echo_hedge_an, regeln.echo_hedge) — Stand 30.10.2026 live
+-- noch die Fassung OHNE Echo-Hedge-Block; diese Datei enthält beide Blöcke und setzt die Funktion des Echo-Hedge voraus.
+-- Wiederholbar. Rückbau: Schalter aus genügt; die Funktion ohne den Block „APEX-CHALLENGE-WD-HEDGE" neu anlegen
+-- (= sql/2026-10-29_ht_echo_hedge.sql, Abschnitt trade_plans_kontoart_weg).
+
+update public.auto_plan_regeln
+   set regeln = jsonb_set(regeln, '{apex_hedge}',
+         '{"an": false, "netto_faktor": 0.89, "min_lot": 0.01, "vorlauf_min": 20, "nachlauf_min": 30}'::jsonb
+         || coalesce(case when jsonb_typeof(regeln->'apex_hedge') = 'object' then regeln->'apex_hedge' end, '{}'::jsonb)),
+       updated_at = now()
+ where id = 1;
+
+create or replace function public.prophos_apex_hedge_an()
+returns boolean language sql stable security definer set search_path to 'public' as $$
+  -- nur ein echtes JSON-true zählt (kein Cast: ein Tippfehler im Schalter darf den Riegel nie mit einem Fehler abbrechen)
+  select coalesce((select (r.regeln->'apex_hedge'->'an') = 'true'::jsonb from public.auto_plan_regeln r where r.id = 1), false)
+$$;
+
+create or replace function public.trade_plans_kontoart_weg()
+ returns trigger
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  typ text;
+  kname text;
+  mit boolean;
+  schalter boolean := false;
+begin
+  if new.master_account_id is null or coalesce(new.status, 'planned') <> 'planned' then
+    return new;
+  end if;
+  select lower(coalesce(a.account_type, '')), a.name into typ, kname from public.accounts a where a.id = new.master_account_id;
+  if typ is null then
+    return new;
+  end if;
+  mit := public.prophos_hedge_weg(new.route, new.hedge_eur, new.orbit_v3, new.winning_day);
+  if mit is null then
+    return new;
+  end if;
+  if typ in ('funded', 'funded_cfd', 'winning_days') and not mit then
+    raise exception 'Funded-Konto „%" nur mit Hedge: Weg % ohne Hedge ist für Challenges — im Trade-Popup Echo, Orbit V3, Winning Day oder Topstep (mit Hedge) wählen.',
+      coalesce(kname, '?'), coalesce(new.route, '?')
+      using errcode = 'check_violation', hint = 'hedge_kategorien_regel';
+  end if;
+  -- Rest von Hand mit Hedge (26.10.2026): Orbit-Plan aus dem Radar-Knopf — nur tvv2 + orbit_v3, sonst gilt die Kennung nicht
+  if coalesce(new.rest_hedge, false) and coalesce(new.route, '') = 'tvv2' and coalesce(new.orbit_v3, false) then
+    return new;
+  end if;
+  -- APEX-CHALLENGE-WD-HEDGE (30.10.2026): Apex-Challenge-Auto-Plan auf dem Winning-Day-Weg (tvv2 + hedge_eur, Marke apex_hedge 'mit'),
+  -- solange regeln.apex_hedge.an true ist — nur die Umstellung von Railway (ah_tick) trägt die Marke
+  if typ = 'challenge' and coalesce(new.route, '') = 'tvv2' and coalesce(new.auto_plan, false) and coalesce(new.hedge_eur, 0) > 0
+     and not coalesce(new.orbit_v3, false) and public.prophos_firma_key(new.master_firm) = 'Apex Trader'
+     and coalesce(new.mt5_baseline->'apex_hedge'->>'status', '') = 'mit' and public.prophos_apex_hedge_an() then
+    return new;
+  end if;
+  -- HT ECHO-HEDGE B2 (29.10.2026): Auto-Plan auf dem klassischen Echo mit Slave, solange der zentrale Schalter an ist
+  if typ in ('challenge', 'phase1', 'phase2') and coalesce(new.route, '') = 'mt5' and coalesce(new.auto_plan, false)
+     and new.slave_account_id is not null and public.prophos_ht_echo_hedge_an() then
+    return new;
+  end if;
+  if typ in ('challenge', 'phase1', 'phase2') and mit and coalesce(new.route, '') in ('mt5', 'mt5v2', 'tvv2', 'tsv2') then
+    select coalesce((s.value->>'an')::boolean, false) into schalter
+      from public.user_settings s where s.user_id = new.user_id and s.key = 'tp_challenges_mit_hedge';
+    if not coalesce(schalter, false) then
+      raise exception 'Challenge-/Phase-Konto „%" nur ohne Hedge: Echo V2, Orbit V2 oder Topstep V2 wählen — oder im Trade-Popup oben „Challenges mit Hedge" einschalten.',
+        coalesce(kname, '?')
+        using errcode = 'check_violation', hint = 'hedge_kategorien_regel';
+    end if;
+  end if;
+  return new;
+end $function$;
+
+-- ── Big Trade: Apex mit Hedge läuft wie ein Winning Day ─────────────────────────────────────────────────────────────────────────────
+-- prophos_big_trade(route, hedge_eur, orbit_v3, winning_day) sieht mt5_baseline nicht. Ein umgestellter Apex-Plan (hedge_eur > 0,
+-- winning_day false) wäre sonst ein Big Trade („ein Big Trade je ID und Fenster", 15-min-Verschiebung). Die drei Aufrufer reichen
+-- deshalb prophos_wd_wie(winning_day, mt5_baseline) statt winning_day weiter. Rümpfe sonst 1:1 wie live (gelesen 29.10.2026).
+-- Rückbau: die drei Funktionen mit p.winning_day / pl.winning_day / new.winning_day neu anlegen.
+create or replace function public.prophos_wd_wie(p_winning_day boolean, p_baseline jsonb)
+returns boolean language sql immutable as $$
+  select coalesce(p_winning_day, false) or coalesce(p_baseline->'apex_hedge'->>'status', '') = 'mit'
+$$;
+
+CREATE OR REPLACE FUNCTION public.prophos_big_trade_laeuft(p_id uuid, p_user uuid)
+ RETURNS TABLE(plan_id uuid, name text, seit timestamp with time zone)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select p.id, p.master_name, coalesce(p.started_at, p.orbit_gesendet_at, p.start_um_gestartet_at, now())
+    from public.trade_plans p
+   where p.id <> p_id
+     and p.user_id = p_user
+     and public.prophos_big_trade(p.route, p.hedge_eur, p.orbit_v3, public.prophos_wd_wie(p.winning_day, p.mt5_baseline))
+     and (p.status = 'open'
+          or (p.status = 'planned' and (p.orbit_gesendet_at > now() - interval '10 minutes'
+                                        or (p.start_um_gestartet_at > now() - interval '2 minutes' and p.started_at is null))))
+   order by 3 desc
+   limit 1
+$function$;
+
+CREATE OR REPLACE FUNCTION public.prophos_big_trade_halten(p_plan uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  pl public.trade_plans%rowtype;
+  c record;
+  ziel timestamptz;
+begin
+  select * into pl from public.trade_plans where id = p_plan;
+  if not found or pl.user_id is distinct from auth.uid() then
+    return jsonb_build_object('frei', true, 'grund', 'kein eigener Plan');
+  end if;
+  if pl.status is distinct from 'planned' or not public.prophos_big_trade(pl.route, pl.hedge_eur, pl.orbit_v3, public.prophos_wd_wie(pl.winning_day, pl.mt5_baseline)) then
+    return jsonb_build_object('frei', true);
+  end if;
+  if pl.started_at is not null or pl.orbit_gesendet_at is not null then
+    return jsonb_build_object('frei', true, 'grund', 'Order schon gesendet — kein Eingriff');
+  end if;
+  perform pg_advisory_xact_lock(hashtext('prophos_big_trade:' || pl.user_id::text));
+  select * into c from public.prophos_big_trade_laeuft(pl.id, pl.user_id);
+  if c.plan_id is null then
+    return jsonb_build_object('frei', true);
+  end if;
+  ziel := now() + interval '15 minutes' + make_interval(secs => 20 + floor(random() * 70));
+  if pl.start_um is null or pl.start_um < ziel - interval '2 minutes' then
+    update public.trade_plans set start_um = ziel, start_um_gestartet_at = null where id = pl.id;
+    insert into public.auto_plan_umplanung (plan_id, user_id, firma, von_richtung, nach_richtung, von_start, nach_start, grund, quelle)
+    values (pl.id, pl.user_id, pl.master_firm, pl.richtung, pl.richtung, pl.start_um, ziel,
+            '[Big Trade] „' || coalesce(c.name, '?') || '" läuft in diesem Fenster seit ' || to_char(c.seit at time zone 'Asia/Dubai', 'HH24:MI')
+            || ' Dubai — Start (Neu starten/von Hand) wartet bis ' || to_char(ziel at time zone 'Asia/Dubai', 'HH24:MI:SS'), 'start');
+  else
+    ziel := pl.start_um;
+    update public.trade_plans set start_um_gestartet_at = null where id = pl.id;
+  end if;
+  return jsonb_build_object('frei', false, 'laeuft', true, 'ziel', ziel, 'wer', coalesce(c.name, '?'), 'seit', c.seit,
+                            'grund', 'Big Trade „' || coalesce(c.name, '?') || '" läuft noch in diesem Fenster');
+end $function$;
+
+CREATE OR REPLACE FUNCTION public.trade_plans_big_trade()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  c record;
+  ziel timestamptz;
+begin
+  if new.status is distinct from 'planned' or not public.prophos_big_trade(new.route, new.hedge_eur, new.orbit_v3, public.prophos_wd_wie(new.winning_day, new.mt5_baseline)) then
+    return new;
+  end if;
+  if old.start_um is not null and old.start_um < now() - interval '60 minutes' then
+    return new;
+  end if;
+  perform pg_advisory_xact_lock(hashtext('prophos_big_trade:' || new.user_id::text));
+  select * into c from public.prophos_big_trade_laeuft(new.id, new.user_id);
+  if c.plan_id is null then
+    return new;
+  end if;
+  ziel := now() + interval '15 minutes' + make_interval(secs => 20 + floor(random() * 70));
+  if old.start_um is null or old.start_um < ziel - interval '2 minutes' then
+    update public.trade_plans set start_um = ziel where id = new.id;
+    insert into public.auto_plan_umplanung (plan_id, user_id, firma, von_richtung, nach_richtung, von_start, nach_start, grund, quelle)
+    values (new.id, new.user_id, new.master_firm, new.richtung, new.richtung, old.start_um, ziel,
+            '[Big Trade] „' || coalesce(c.name, '?') || '" läuft in diesem Fenster seit ' || to_char(c.seit at time zone 'Asia/Dubai', 'HH24:MI')
+            || ' Dubai — Orbit/Topstep nur ein Big Trade gleichzeitig, neue Prüfung ' || to_char(ziel at time zone 'Asia/Dubai', 'HH24:MI:SS'),
+            'start');
+  end if;
+  return null;
+end $function$;
