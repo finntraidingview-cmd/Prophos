@@ -3921,7 +3921,7 @@ def alarm_tick():
     _alarm["at"] = time.time()
     jetzt = datetime.now(timezone.utc)
     seit = max(datetime.fromtimestamp(_alarm["start"], timezone.utc), jetzt - timedelta(minutes=20)).isoformat()
-    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,richtung,master_contracts,master_tp,started_at,updated_at,"
+    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,master_account_id,richtung,master_contracts,master_tp,started_at,updated_at,"
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
@@ -3937,11 +3937,102 @@ def alarm_tick():
         uid = uid or next((str(r.get("user_id")) for r in rows if str(r.get("id")) == pid), None)
         alarm_senden(prio, art, titel, text, uid=uid, plan_id=pid, schluessel=key, tag=f"alarm-{art}-{pid[:8]}", url=ev[7] if len(ev) > 7 else None)
     _alarm["gemeldet"] = {k: t for k, t in _alarm["gemeldet"].items() if time.time() - t < 86400}
+    try:
+        echo_frost_tick(rows, namen, jetzt.timestamp())
+    except Exception as e:
+        print(f"[alarm] ⚠️ Echo-Snapshot-Wache: {type(e).__name__}: {e}", flush=True)
     if jetzt.minute == 7 and jetzt.hour == 3:          # einmal am Tag aufräumen
         try:
             sb_delete("alarm_log", {"at": f"lt.{(jetzt - timedelta(days=ALARM_LOG_TAGE)).isoformat()}"})
         except Exception as e:
             print(f"[alarm] ⚠️ aufräumen: {type(e).__name__}: {e}", flush=True)
+
+
+# ECHO BLIND (30.10.2026, Befund RADAR-PNL-FEHLT: Jacob pc-auzre5 …2655, Echo MIT Fusion-Hedge offen, Lese-EA eingefroren → der Copier sah
+# keine Master-Position, hedges leer, standby=true — und warnte genau deshalb nicht; dazu …8930 seit 28.10. „open"). Master: „🔴 an die
+# Master-IDs bei OFFENEM Echo-Plan (mt5/mt5v2) mit Snapshot ‚eingefroren' oder > 5 min alt am Master-Login, je Plan gedrosselt (einmal +
+# Erinnerung nach 30 min)". Läuft im alarm_tick (Emin-Gruppe schon gefiltert), ein Read accounts + ein Read mt5_live, nur lesen.
+ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S = 5 * 60, 30 * 60
+_echo_frost = {}   # plan_id → {"erst": ts der ersten Meldung, "n": Zahl der Meldungen}
+
+
+def echo_frost_urteil(live, jetzt_ts):
+    """REIN RECHNEND (testbar): jüngste mt5_live-Zeile des Master-Logins → (gestört, Grund)."""
+    if not live:
+        return True, "keine Copier-Meldung für den Master-Login"
+    try:
+        alter = jetzt_ts - datetime.fromisoformat(str(live.get("updated_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return True, "Copier-Meldung ohne lesbare Zeit"
+    if "eingefroren" in str(live.get("note") or ""):
+        return True, "Lese-EA eingefroren"
+    if alter > ECHO_FROST_ALT_S:
+        return True, f"Copier-Meldung {int(alter // 60)} min alt (PC offline?)"
+    return False, ""
+
+
+def echo_frost_faellig(merk, pid, jetzt_ts):
+    """REIN RECHNEND (testbar): 0 = erste Meldung, 1 = Erinnerung (30 min nach der ersten), None = nichts."""
+    m = merk.get(pid)
+    if not m:
+        return 0
+    if m.get("n", 0) == 1 and jetzt_ts - m.get("erst", jetzt_ts) >= ECHO_FROST_ERINNERN_S:
+        return 1
+    return None
+
+
+def echo_frost_tick(rows, namen, jetzt_ts):
+    echo = [r for r in rows or [] if str(r.get("status")) == "open" and str(r.get("route") or "") in ("mt5", "mt5v2") and r.get("master_account_id")]
+    for pid in [k for k in _echo_frost if k not in {str(r.get("id")) for r in echo}]:
+        _echo_frost.pop(pid, None)
+    if not echo:
+        return
+    ids = sorted({str(r["master_account_id"]) for r in echo})
+    accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,external_id", "id": f"in.({','.join(ids)})"}) or [])}
+    logins = sorted({str((accs.get(str(r["master_account_id"])) or {}).get("external_id") or "").strip() for r in echo} - {""})
+    live = lt_echo_live_wahl(sb_select("mt5_live", {"select": "master_login,pc_name,updated_at,note:status->>note",
+                                                    "master_login": f"in.({','.join(logins)})"}) or []) if logins else {}
+    pc_namen = _pc_namen_daten()
+    for r in echo:
+        pid = str(r["id"])
+        login = str((accs.get(str(r["master_account_id"])) or {}).get("external_id") or "").strip()
+        z = live.get(login) if login else None
+        gestoert, grund = echo_frost_urteil(z, jetzt_ts)
+        if not gestoert:
+            _echo_frost.pop(pid, None)
+            continue
+        n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
+        if n is None:
+            continue
+        if n == 0 and pid not in _echo_frost:
+            # nach einem Railway-Neustart ist der Merker leer — schon gemeldet (alarm_log, 24 h)? dann nur den Merker nachziehen
+            try:
+                vorher = sb_select("alarm_log", {"select": "schluessel,at", "schluessel": f"like.echo_blind|{pid}|*",
+                                                 "at": f"gte.{datetime.fromtimestamp(jetzt_ts - 86400, timezone.utc).isoformat()}", "order": "at.asc"}) or []
+            except Exception:
+                vorher = []
+            if vorher:
+                try:
+                    erst = datetime.fromisoformat(str(vorher[0]["at"]).replace("Z", "+00:00")).timestamp()
+                except (TypeError, ValueError):
+                    erst = jetzt_ts
+                _echo_frost[pid] = {"erst": erst, "n": len(vorher)}
+                n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
+                if n is None:
+                    continue
+        pc = str((z or {}).get("pc_name") or "")
+        pc_txt = f"PC von {(pc_namen.get(pc) or {}).get('name') or '?'} ({pc})" if pc else "PC unbekannt"
+        uid = str(r.get("user_id") or "")
+        wer = namen.get(uid, uid[:8])
+        konto = f"{r.get('master_firm') or ''} …{login[-4:]}".strip() if login else str(r.get("master_name") or "")
+        mit_hedge = str(r.get("route")) == "mt5"
+        text = (f"{wer} · {konto} ({'Echo mit Hedge' if mit_hedge else 'Echo V2'}, offen): {grund}"
+                + (" — Copier sieht keine Master-Position, Hedge evtl. nicht offen." if mit_hedge else " — kein Live-P&L, Copier blind.")
+                + f" Am {pc_txt} das Master-Terminal prüfen (EA ProphosHedgeReader auf dem Chart?).")
+        alarm_senden(1, "echo_blind", ("Erinnerung: " if n else "") + f"Echo blind: {grund}"[:70], text, uid=uid, plan_id=pid,
+                     schluessel=f"echo_blind|{pid}|{n}", tag=f"alarm-echo-blind-{pid[:8]}", renotify=True,
+                     daten={"grund": grund, "pc": pc, "route": r.get("route"), "login4": login[-4:] if login else None})
+        _echo_frost[pid] = {"erst": (_echo_frost.get(pid) or {}).get("erst", jetzt_ts), "n": n + 1}
 
 
 @app.route("/alarm/heimweg", methods=["POST", "OPTIONS"])
@@ -12929,6 +13020,26 @@ def lt_echo_live_wahl(zeilen):
     return out
 
 
+def lt_echo_pl_grund(note, alter_s, updated_at):
+    """REIN RECHNEND (testbar): kurzer Grund, warum der Echo-P&L fehlt — „PC offline seit HH:MM" (Dubai, Copier-Meldung > 90 s alt) bzw.
+    „Lese-EA eingefroren" (Copier-Hinweis) bzw. der Hinweis gekürzt."""
+    if alter_s is not None and alter_s > LT_ECHO_MAX_ALTER_S:
+        try:
+            t = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+            try:
+                from zoneinfo import ZoneInfo
+                t = t.astimezone(ZoneInfo(KAPITEL_TZ))
+            except Exception:   # pragma: no cover — tzdata fehlt → feste +4 h
+                t = t.astimezone(timezone(timedelta(hours=4)))
+            return f"PC offline seit {t.strftime('%H:%M')}"
+        except (TypeError, ValueError):
+            return "PC offline"
+    n = str(note or "")
+    if "eingefroren" in n:
+        return "Lese-EA eingefroren"
+    return n[:40] or None
+
+
 def lt_echo_felder(p, live, jetzt_ts):
     """REIN RECHNEND (testbar): Echo-Felder eines mt5v2-Plans aus mt5_baseline und der jüngsten mt5_live-Zeile des
     Master-Logins (live = {updated_at, pos, bal, eq, ccy, note} oder None). Nichts wird erfunden: ohne passende, frische
@@ -12941,8 +13052,13 @@ def lt_echo_felder(p, live, jetzt_ts):
            "position_offen": False, "kurs_jetzt": None, "pl_live": None, "pl_live_art": None, "pl_bei_tp": None, "pl_bei_sl": None,
            "waehrung": None, "mt5_alter_s": None, "balance_start": bs, "balance_end": be,
            "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
-           "konto_balance": None, "konto_balance_at": None, "demo": None}
+           "konto_balance": None, "konto_balance_at": None, "demo": None, "pl_grund": None}
+    # GRUND STATT „–" (30.10.2026, Finn 29.10.: „bei manchen Accounts keinen P&L mehr" — Jacob …2655 Lese-EA eingefroren, Chris' PC offline):
+    # bleibt pl_live bei einem OFFENEN Plan leer, sagt pl_grund kurz warum (reine Anzeige, Radar zeigt ihn statt „–")
+    offen = str(p.get("status") or "") == "open"
     if not live:
+        if offen:
+            out["pl_grund"] = "keine Copier-Meldung"
         return out
     try:
         alter = jetzt_ts - datetime.fromisoformat(str(live.get("updated_at")).replace("Z", "+00:00")).timestamp()
@@ -12950,6 +13066,8 @@ def lt_echo_felder(p, live, jetzt_ts):
         return out
     out["mt5_alter_s"] = int(round(alter))
     if alter > LT_ECHO_MAX_ALTER_S or live.get("note"):
+        if offen:
+            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"))
         return out
     eq, bal = _wd_num(live.get("eq")), _wd_num(live.get("bal"))
     ccy = str(live.get("ccy") or "").upper() or None

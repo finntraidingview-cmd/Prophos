@@ -35134,9 +35134,12 @@
     const v = (t.pl_live == null || !isFinite(Number(t.pl_live))) ? null : Number(t.pl_live)
     const w = t.waehrung === 'EUR' ? '€' : t.waehrung && t.waehrung !== 'USD' ? t.waehrung : '$'
     const alt = t.mt5_alter_s != null ? ` · vor ${t.mt5_alter_s} s` : ''
-    return { txt: v == null ? '–' : `≈ ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${w}`,
-             farbe: v == null ? 'var(--sub)' : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)',
-             tip: v == null ? 'kein frischer MT5-Stand' : `Live-P&L aus MT5 (Equity − Balance beim Start)${alt}` }
+    // ohne Wert der Grund vom Backend (30.10.2026: „Lese-EA eingefroren" / „PC offline seit 16:52") statt nur „–"
+    const grund = v == null && t.pl_grund ? String(t.pl_grund) : ''
+    return { txt: v == null ? (grund || '–') : `≈ ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${w}`,
+             farbe: v == null ? (grund ? 'var(--warn-ink, #b45309)' : 'var(--sub)') : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)',
+             tip: v == null ? (grund ? `kein frischer MT5-Stand: ${grund}${/eingefroren/.test(grund) ? ' — Lese-EA (ProphosHedgeReader) im Master-Terminal prüfen' : ''}${alt}` : 'kein frischer MT5-Stand')
+                  : `Live-P&L aus MT5 (Equity − Balance beim Start)${alt}` }
   }
   // Spannen-Tooltip Echo: echte Preise der Position, Kurs mit „≈" (aus Equity − Balance gerechnet)
   function wdlEchoSpTip(t, sp, pkt){
