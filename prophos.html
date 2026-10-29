@@ -26394,7 +26394,9 @@
       const ep = window._epLokal, st = ep && ep.stand
       if(!(st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000)) return 'kein Puls-Chrome-Reader auf diesem PC'
       const jetzt = Date.now(), plaene = tradePlans || []
-      if(plaene.some(p => p && p.status === 'open')) return 'offener Plan'
+      // nur Pläne im Puls-Chrome sperren (Master 29.10.2026, Befund Chris: drei Echo-V2-Trades liefen 7–13 h und hielten das Lesen den ganzen
+      // Tag zurück, ohne das Puls-Chrome zu nutzen). Echo/Echo V2 (MT5) prüft das Panel selbst (MT5-Order läuft? Leerlauf ≥ 120 s?)
+      if(plaene.some(p => p && p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2'))) return 'offener Plan im Puls-Chrome'
       // auch unbestätigte Auto-Pläne (Railway bestätigt sie selbst) und Starts, die geclaimt, aber noch nicht gelaufen sind (Nachholen)
       const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
         && (Date.parse(p.startUm) - jetzt > -10 * 60000 || (p.startUmGestartetAt && !p.startedAt)))

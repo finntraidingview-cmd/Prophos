@@ -4333,6 +4333,14 @@ class Handler(BaseHTTPRequestHandler):
                     "msg": "Es laeuft schon ein TradingView-Lauf — spaeter erneut."}, ensure_ascii=False))
             to = 260   # Login-Weg mit Wiederholung im frischen Tab kann auch ohne Username lang werden (Prüfer 29.10.2026)
             try:
+                # MT5 FREI (Master 29.10.2026): offene Echo-/Echo-V2-Pläne sperren das Lesen im PC-Tab nicht mehr (tvkFrei zählt nur tvv2/tsv2) —
+                # dafür hier: keine MT5-Order/Polar gerade (_browser_und_mt5_frei) und ≥ TAB_NL_IDLE_S keine Eingabe am PC; sonst 409 belegt
+                idle = _win_leerlauf_s()
+                if not _browser_und_mt5_frei(tv_eigen=True) or (idle is not None and idle < TAB_NL_IDLE_S):
+                    grund = "MT5-Order/Polar läuft" if not _browser_und_mt5_frei(tv_eigen=True) else f"am PC wird gearbeitet (letzte Eingabe vor {int(idle)} s)"
+                    print(f"[panel] tv-konten-liste {konto}: belegt — {grund}", flush=True)
+                    return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                        "msg": f"TV-Konten lesen vertagt: {grund}", "trail": f"Panel: {grund} — nichts geklickt"}, ensure_ascii=False))
                 bot = os.path.join(HERE, "order_bot.py")
                 if not os.path.exists(bot):
                     ensure_bot_source()
