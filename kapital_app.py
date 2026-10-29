@@ -380,6 +380,53 @@ def bilanz_rechnen(ketten, snaps, fusion_live, fusion_hand, einlagen, tx, labels
     }
 
 
+def je_id_rechnen(ketten, snaps, offene, fx, mit=None):
+    """REIN RECHNEND: die Teile, die einer ID gehören, je ID (29.10.2026, Finn 09:35: „auch nach IDs filtern") — Kontowerte (Kette = ID des
+    Kopfes, Regel wie bilanz_rechnen: kauf + hedge der laufenden Ketten), Wallets (id_wallets.person_uid) und offene Payouts (user_id).
+    Fusion, Geschäftskonto und Weitere Posten sind gruppenweit und fehlen hier. Σ über alle IDs = die Gruppensumme dieser drei Teile.
+    snaps: {wallet_id: {usd, uid}} · offene: pending_payouts mit user_id · mit: alle Mitglieder (auch ohne Werte). Ohne Namen — die stehen
+    nur in der Antwort (b.ids), nicht im gespeicherten Tageswert (Gegenprüfung 29.10.2026)."""
+    fx = fx if fx and 0.5 < fx < 1.5 else 0.85
+    eur = lambda betrag, waehrung="USD": _num(betrag) * (fx if str(waehrung or "USD").upper() == "USD" else 1.0)
+    je = {}
+    leer = lambda: {"konten": 0.0, "konten_n": 0, "wallets": 0.0, "wallets_usd": 0.0, "wallets_n": 0, "payouts_offen": 0.0}
+    for uid in mit or []:
+        je[str(uid)] = leer()
+    for k in ketten:
+        if k.get("archiviert") or not k.get("user_id"):
+            continue
+        z = je.setdefault(str(k["user_id"]), leer())
+        z["konten"] += _num(k.get("kauf_eur")) + _num(k.get("hedge_eur"))
+        z["konten_n"] += 1
+    for s in snaps.values():
+        if not s.get("uid"):
+            continue
+        z = je.setdefault(str(s["uid"]), leer())
+        z["wallets_usd"] += _num(s.get("usd"))
+        z["wallets_n"] += 1
+    for o in offene or []:
+        if not o.get("user_id"):
+            continue
+        je.setdefault(str(o["user_id"]), leer())["payouts_offen"] += eur(o.get("amount"), o.get("currency") or "EUR")
+    for uid, z in je.items():
+        z["wallets"] = eur(z["wallets_usd"])
+        for f in ("konten", "wallets", "wallets_usd", "payouts_offen"):
+            z[f] = round(z[f], 2)
+    return je
+
+
+def _id_namen(uids):
+    """Anzeigenamen der IDs (user_metadata.name, sonst die ersten 8 Zeichen) über die gemerkte Nutzerliste von app.py — nie Mails.
+    Lesefehler → nur Kürzel (die Zahlen hängen nicht daran)."""
+    try:
+        r = A["_auth_liste_anfrage"]()
+        users = (r.json() or {}).get("users") or [] if r.status_code == 200 else []
+    except Exception:
+        users = []
+    namen = {str(u.get("id")): str(((u.get("user_metadata") or {}).get("name")) or "").strip() for u in users}
+    return {str(u): namen.get(str(u)) or str(u)[:8] for u in uids}
+
+
 def _daten_lesen(gid):
     """Alle Zeilen für bilanz_rechnen. Fehler fliegen durch (Aufrufer antwortet 502)."""
     kurs = tageskurs()
@@ -389,7 +436,8 @@ def _daten_lesen(gid):
                          json={"p_gruppe": gid, "p_fx": fx})
     A["_sb_pruefen"](r)
     ketten = r.json() or []
-    wallets = A["_sb_all"]("id_wallets", {"select": "id,person_name,chain,address", "person_uid": _in(mit)}) if mit else []
+    wallets = A["_sb_all"]("id_wallets", {"select": "id,person_name,person_uid,chain,address", "person_uid": _in(mit)}) if mit else []
+    uid_von = {w["id"]: str(w.get("person_uid") or "") for w in wallets}
     wids = [w["id"] for w in wallets]
     snaps = {}
     if wids:
@@ -397,7 +445,7 @@ def _daten_lesen(gid):
         for s in A["_sb_all"]("wallet_snapshots", {"select": "id,wallet_id,day,usdt,coin_usdt", "wallet_id": _in(wids),
                                                     "day": f"gte.{ab}", "order": "day.desc,id.asc"}):
             if s["wallet_id"] not in snaps:            # jüngster Tag je Wallet
-                snaps[s["wallet_id"]] = {"usd": _num(s.get("usdt")) + _num(s.get("coin_usdt")), "tag": s.get("day")}
+                snaps[s["wallet_id"]] = {"usd": _num(s.get("usdt")) + _num(s.get("coin_usdt")), "tag": s.get("day"), "uid": uid_von.get(s["wallet_id"])}
     # Fusion live: Hedge-Logins = external_id der Live-Konten der Gruppe (Emin-Gruppe: alle fünf IDs auf 430095 → einmal zählen)
     logins = {str(a.get("external_id") or "").strip() for a in
               (A["_sb_all"]("accounts", {"select": "id,external_id", "account_type": "eq.live", "user_id": _in(mit)}) if mit else [])}
@@ -407,7 +455,7 @@ def _daten_lesen(gid):
         zeilen = _sb("GET", "mt5_live", {"select": "hedge_login,updated_at,status", "hedge_login": _in(logins),
                                          "order": "updated_at.desc", "limit": "50"}) or []
         fus_live = fusion_live_waehlen(zeilen, logins)
-    offene = (_sb("GET", "pending_payouts", {"select": "amount,currency", "status": "eq.pending", "user_id": _in(mit)}) or []) if mit else []
+    offene = (_sb("GET", "pending_payouts", {"select": "amount,currency,user_id", "status": "eq.pending", "user_id": _in(mit)}) or []) if mit else []
     fus = _sb("GET", "kapital_fusion", {"select": "*", "gruppe_id": f"eq.{gid}", "order": "created_at.desc", "limit": "1"}) or []
     einl = A["_sb_all"]("kapital_einlagen", {"select": "*", "gruppe_id": f"eq.{gid}", "order": "datum.asc,id.asc"})
     gk = A["_sb_all"]("kapital_gk_buchungen", {"select": "*", "gruppe_id": f"eq.{gid}", "order": "datum.asc,id.asc"})
@@ -420,7 +468,8 @@ def _daten_lesen(gid):
         for l in _sb("GET", "wallet_labels", {"select": "address,kind", "address": _in(others[i:i + 150])}) or []:
             labels[str(l["address"]).lower()] = l.get("kind") or ""
     return {"kurs": kurs, "ketten": ketten, "snaps": snaps, "fusion_live": fus_live, "fusion_hand": fus[0] if fus else None,
-            "einlagen": einl, "gk": gk, "tx": tx, "labels": labels, "adressen": adressen, "wallets_n": len(wallets), "offene": offene}
+            "einlagen": einl, "gk": gk, "tx": tx, "labels": labels, "adressen": adressen, "wallets_n": len(wallets), "offene": offene,
+            "mit": mit}
 
 
 def verlauf_quellen(ist):
@@ -435,16 +484,24 @@ def verlauf_quellen(ist):
             "konten": round(_num(ist.get("konten")), 2), "payouts_offen": round(_num(ist.get("payouts_offen")), 2), "sonstiges": round(sonst, 2)}
 
 
+def _als_dict(v):
+    return v if isinstance(v, dict) else {}
+
+
 def verlauf_zeile(r):
     """REIN RECHNEND: eine kapital_tageswerte-Zeile → Verlauf-Punkt. Rückblick-Zeilen (sql/2026-10-29_kapital_rueckblick.sql, teile.quelle
     'rueckblick': nur Wallets + Kontowerte nachgerechnet, Fusion/GK/offene Payouts erst ab 29.10.) tragen rueckblick=True und kein Soll —
     gelesen aus teile, damit es auch ohne die neue Spalte quelle geht."""
-    teile = r.get("teile") or {}
+    teile = _als_dict(r.get("teile"))
     rueck = teile.get("quelle") == "rueckblick"
     return {"tag": r["tag"], "ist": _num(r["ist_eur"]), "rueckblick": rueck,
             "soll": None if rueck or r.get("soll_eur") is None else _num(r["soll_eur"]),
             "abw": None if rueck or r.get("abweichung_eur") is None else _num(r["abweichung_eur"]),
-            "quellen": verlauf_quellen(teile.get("ist") or {})}
+            "quellen": verlauf_quellen(teile.get("ist") or {}),
+            # je ID (ab 29.10.2026 im Tageswert, Rückblick-Tage per sql/2026-10-29_kapital_rueckblick_je_id.sql) — fehlt bei älteren Zeilen
+            "je_id": {uid: {"wallets": round(_num(z.get("wallets")), 2), "konten": round(_num(z.get("konten")), 2),
+                            "payouts_offen": round(_num(z.get("payouts_offen")), 2)}
+                      for uid, z in _als_dict((teile.get("ist") or {}).get("je_id")).items() if isinstance(z, dict)} or None}
 
 
 def _tageswert_schreiben(gid, b):
@@ -461,6 +518,9 @@ def kapital_fuer(gid, schreiben=True):
                        d["kurs"]["fx"], d["offene"], d["gk"])
     b["kurs"] = d["kurs"]
     b["ist"]["wallets_gesamt_n"] = d["wallets_n"]
+    namen = _id_namen(d["mit"])
+    b["ist"]["je_id"] = je_id_rechnen(d["ketten"], d["snaps"], d["offene"], d["kurs"]["fx"], d["mit"])
+    b["ids"] = sorted(({"id": u, "name": namen.get(u) or u[:8]} for u in b["ist"]["je_id"]), key=lambda x: x["name"].lower())
     if schreiben:
         try:
             _tageswert_schreiben(gid, b)

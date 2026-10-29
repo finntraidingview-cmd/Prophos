@@ -1177,7 +1177,9 @@
   /* Neue Hauptansicht (29.10.2026): eine große Zahl, Tagesbalken je Quelle, Aufteilung jetzt, Weitere Posten */
   #adm-pane-kapital .kis-gross{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);padding:18px 20px;margin-bottom:14px}
   #adm-pane-kapital .kis-gross-v{font-size:38px;font-weight:650;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.15;margin:4px 0 2px}
-  #adm-pane-kapital .kis-n-graf{height:240px;margin:0 0 4px}   /* Liniengraf (Lightweight Charts) in der .wd-ueb-graf-Box aus Admin → Winning Days */
+  #adm-pane-kapital .wd-ueb-graf.kis-n-graf{height:450px;margin:0 0 4px}   /* Liniengraf (Lightweight Charts) in der .wd-ueb-graf-Box aus Admin → Winning Days; 29.10.2026 09:35 Finn: „Chart größer“ */
+  #adm-pane-kapital .kis-n-ids{margin:0 0 10px}
+  #adm-pane-kapital .kis-n-ids .adm-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px}
   #adm-pane-kapital .kis-n-legende .kf{font-size:11px;font-weight:500}
   #adm-pane-kapital .kis-n-strich{display:inline-block;width:14px;height:0;border-top:3px solid;margin-right:6px;vertical-align:3px}
   #adm-pane-kapital .kis-n-legende{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:12px;color:var(--sub)}
@@ -1194,6 +1196,7 @@
   #adm-pane-kapital .kis-details{margin-top:6px}
   #adm-pane-kapital .kis-details>summary{cursor:pointer;font-size:12.5px;color:var(--sub);padding:8px 2px}
   @media (max-width:640px){
+    #adm-pane-kapital .wd-ueb-graf.kis-n-graf{height:280px}
     #adm-pane-kapital .kis-gross-v{font-size:30px}
     #adm-pane-kapital .kis-n-posten .kis-p-zeile{grid-template-columns:minmax(0,1fr) 92px auto}
     #adm-pane-kapital .kis-n-posten .kis-p-zeile .m-aus{display:none}
@@ -13024,7 +13027,7 @@
              die übrigen Admin-Reiter in der HT-Sicht die Emin-IDs ausblenden. Eigene Verdrahtung kis* im Modul. -->
         <div id="adm-pane-kapital" hidden>
           <div class="adm-toolbar">
-            <select id="kis-gruppe" class="adm-f" title="Gruppe"></select>
+            <select id="kis-gruppe" class="adm-f" title="Gruppe" hidden></select><!-- ausgeblendet (29.10.2026): Kapital folgt dem Gruppen-Umschalter oben (kisSichtGruppe) -->
             <button class="btn btn-ghost" id="kis-refresh" title="Neu rechnen" style="padding:8px 12px">↻</button>
             <span id="kis-sub" style="font-size:12px;color:var(--sub)"></span>
           </div>
@@ -13045,6 +13048,9 @@
                    Lightweight Charts wie Admin → Winning Days → Statistik, Zeitraum-Chips mit denselben Klassen (adm-vl-chip in .wd-ueb-chips) -->
               <div class="panel-head"><div><div class="panel-title">Verlauf</div><div class="panel-sub" id="kis-n-verlauf-sub"></div></div>
                 <div class="wd-ueb-chips" id="kis-n-zeit"></div></div>
+              <!-- Filter je ID (29.10.2026 09:35, Finn: „und auch nach IDs filtern"): Chips mit ID-Farbe, wirken auf Zahl, Graf, Legende, Aufteilung —
+                   je ID nur Kontowerte, Wallets, offene Payouts (ist.je_id); Fusion/Geschäftskonto/Weitere Posten sind gruppenweit -->
+              <div class="wd-ueb-chips kis-n-ids" id="kis-n-ids"></div>
               <div class="wd-ueb-graf kis-n-graf" id="kis-n-chart"></div>
               <div class="kis-n-legende" id="kis-n-legende"></div>
               <div class="kis-s" id="kis-n-hinweis" style="margin-top:6px"></div>
@@ -15367,6 +15373,10 @@
       const x = gl.find(y => String(y.id) === gp); if(!x) return true
       return x.ht ? !(x.ausser || []).map(String).includes(String(uid)) : (x.ids || []).map(String).includes(String(uid))
     }
+    // Kapital folgt dem Umschalter oben (29.10.2026 10:15, Finn: „Wenn ich oben auf Hermann Technologies bin, will ich unter Kapital das Kapital
+    // von HT sehen — bin ich auf Emin, das von Emin"): gewählte Verwalter-Gruppe oder die HT-Gruppen-ID; eingeschränkt = Server entscheidet (Gate)
+    window._admGruppeSicht = () => ({ eingeschraenkt: admEingeschraenkt(), gruppe: admData ? admGruppeAktiv() : (admGruppe || ''),
+      ht: String((admGruppenListe().find(x => x.ht) || {}).id || '') })
     // eingeschränkt (Verwalter/eigener Code): Listen aus nutzerübergreifenden Tabellen nur über _admGruppeOk (Winning Days, 08.10.2026)
     window._admNurGruppe = () => admEingeschraenkt() || !!eigenerCode
     // dasselbe, aber ohne vorher den Admin betreten zu haben: admin_zugang (eigene Zeile, RLS) einmal je Login nachladen (Prüfer M1,
@@ -15397,6 +15407,7 @@
       if(!$('adm-pane-stat')?.hidden) admKapitelLaden()
       if(!$('adm-pane-planer')?.hidden) window._apIdsLaden?.()
       if(!$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()
+      if(!$('adm-pane-kapital')?.hidden) window._kisGruppeNeu?.()   // Kapital lädt sofort die Gruppe von oben (29.10.2026)
       window._admPcsOeffnen?.()   // PC-Tabs neu zeichnen (Filter über _admGruppeOk)
     })
     /* Gerät merken (22.10.2026, Finn: „da mein MacBook … drin ist, nicht jedes Mal das Admin-Passwort
@@ -20487,7 +20498,15 @@
      * + offene Payouts; Soll = Einlagen − Reibung beendeter Ketten + Gewinne − Gebühren/Swaps − Ausschüttungen + Geschäftskonto außer
      * „Umbuchung Krypto". Hier nur zeichnen und buchen. Reine Finanzübersicht. Antwortet der Server 403, bleibt der Bereich leer. */
     let kisDaten = null, kisGruppe = '', kisLaeuft = false
-    try{ kisGruppe = localStorage.getItem('prophos_kis_gruppe') || '' }catch(_){}
+    // Gruppe = Admin-Umschalter oben (29.10.2026 10:15, Finn): Verwalter-Gruppe gewählt → deren ID, sonst Hermann Technologies (HT-ID aus der
+    // Gruppenliste der Übersicht bzw. der letzten Kapital-Antwort). Eingeschränkte Logins (Emin) schicken keine Gruppe — der Server zeigt nur ihre.
+    function kisSichtGruppe(){
+      const s = window._admGruppeSicht?.()
+      if(!s) return ''
+      if(s.eingeschraenkt) return null   // keine Gruppe schicken
+      return s.gruppe || s.ht || String(((kisDaten?.gruppen || []).find(x => x.ht) || {}).id || '')
+    }
+    window._kisGruppeNeu = () => { kisDaten = null; $('kis-body').hidden = true; kisLaden() }
     const kisEur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
     const kisEur2 = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const kisUsd = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -20542,10 +20561,16 @@
     const KIS_TOKEN = { konten: '--warn', wallets: '--violet', fusion: '--teal', geschaeftskonto: '--blue', payouts_offen: '--good', sonstiges: '--sub-2' }
     const kisSumme = q => KIS_QUELLEN.reduce((a, [k]) => a + (Number(q[k]) || 0), 0)
     const kisTagMinus = n => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
-    // alle Tage (heute aus den Live-Werten) → { reihe: Tage im Zeitraum, basis: Tag vor dem Zeitraum (für Δ) oder null }
+    // Filter je ID: '' = alle; je ID gibt es nur diese Teile (Fusion, Geschäftskonto, Weitere Posten sind gruppenweit)
+    let kisId = ''
+    const KIS_JE_ID = ['konten', 'wallets', 'payouts_offen']
+    const kisIdTeile = z => z ? { konten: Number(z.konten) || 0, wallets: Number(z.wallets) || 0, payouts_offen: Number(z.payouts_offen) || 0 } : null
+    // alle Tage (heute aus den Live-Werten) → { reihe: Tage im Zeitraum, basis: Tag vor dem Zeitraum (für Δ) oder null }. Mit ID nur Tage, die
+    // Werte je ID kennen (Tageswerte ab 29.10.2026, Rückblick-Tage nach sql/2026-10-29_kapital_rueckblick_je_id.sql)
     function kisReihe(v, jetzt){
       const heute = kisHeute()
-      const tage = (v || []).filter(p => p.quellen && String(p.tag).slice(0, 10) < heute).map(p => ({ tag: String(p.tag).slice(0, 10), quellen: p.quellen, rueckblick: !!p.rueckblick }))
+      const tage = (v || []).filter(p => p.quellen && String(p.tag).slice(0, 10) < heute && (!kisId || p.je_id?.[kisId]))
+        .map(p => ({ tag: String(p.tag).slice(0, 10), quellen: kisId ? kisIdTeile(p.je_id[kisId]) : p.quellen, rueckblick: !!p.rueckblick }))
       tage.push({ tag: heute, quellen: jetzt, rueckblick: false })
       const ab = kisZeitraum === 'alle' ? '' : kisZeitraum === 'heute' ? heute : kisTagMinus(Number(kisZeitraum) - 1)
       const reihe = tage.filter(p => p.tag >= ab), vor = tage.filter(p => p.tag < ab)
@@ -20559,55 +20584,79 @@
         mklLibLaden().then(ok => { if(ok) kisGraf(reihe); else box.innerHTML = '<div class="kis-s" style="padding:12px">Graf nicht verfügbar: Chart-Bibliothek (cdn.jsdelivr.net) nicht ladbar → Seite neu laden</div>' })
         return
       }
+      // ruhiger (29.10.2026 09:35, Finn: „mit cleaneren Linien"): nur waagerechtes Gitter ganz zart, kleine Achsen-Schrift, keine Preis-Labels und
+      // keine waagerechte Fadenkreuz-Linie am rechten Rand (die Werte stehen in der Legende), Rückblick heller statt gestrichelt
       const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
-      const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11 },
-        grid: { vertLines: { color: rahmen }, horzLines: { color: rahmen } }, rightPriceScale: { borderColor: rahmen, scaleMargins: { top: 0.12, bottom: 0.04 } },
-        timeScale: { borderColor: rahmen, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: t => kisTag(typeof t === 'string' ? t : `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`) },
+      const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub-2', mklToken('--sub', '#667085')), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 10 },
+        grid: { vertLines: { visible: false }, horzLines: { color: kisAlpha(rahmen, 0.6) } }, rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.04 } },
+        timeScale: { borderVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: t => kisTag(typeof t === 'string' ? t : `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`) },
+        crosshair: { mode: LW.CrosshairMode.Magnet, horzLine: { visible: false, labelVisible: false }, vertLine: { color: rahmen, width: 1, style: LW.LineStyle.Solid, labelBackgroundColor: mklToken('--sub', '#667085') } },
         localization: { locale: 'de-DE', dateFormat: 'dd.MM.yyyy' } }
       const fmt = { type: 'custom', minMove: 1, formatter: w => kisEur.format(w) }
       const punkte = reihe.length <= 2   // ein/zwei Tage („Heute"): Punkte zeigen, sonst sähe man keine Linie
+      const ruhig = { lastValueVisible: false, priceLineVisible: false, priceFormat: fmt }
       let g = _kisGraf
       if(!g || !g.chart || g.box !== box){
         kisGrafWeg(); box.innerHTML = ''
-        const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || 240, handleScale: false, handleScroll: false,
-          crosshair: { mode: LW.CrosshairMode.Normal } }, huelle))
+        const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || 450, handleScale: false, handleScroll: false }, huelle))
         const quellen = {}
-        for(const [k, name] of KIS_QUELLEN) quellen[k] = chart.addLineSeries({ lineWidth: 1, title: '', lastValueVisible: false, priceLineVisible: false, priceFormat: fmt })
-        const rueck = chart.addLineSeries({ lineWidth: 3, lineStyle: LW.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, priceFormat: fmt })
-        const summe = chart.addLineSeries({ lineWidth: 3, title: 'Insgesamt', lastValueVisible: true, priceLineVisible: false, priceFormat: fmt })
+        for(const [k] of KIS_QUELLEN) quellen[k] = chart.addLineSeries(Object.assign({ lineWidth: 1, crosshairMarkerRadius: 2.5 }, ruhig))
+        const rueck = chart.addLineSeries(Object.assign({ lineWidth: 2.5, crosshairMarkerVisible: false }, ruhig))
+        const summe = chart.addLineSeries(Object.assign({ lineWidth: 2.5, crosshairMarkerRadius: 3.5 }, ruhig))
         g = _kisGraf = { chart, quellen, rueck, summe, box, ro: null }
-        try{ g.ro = new ResizeObserver(() => { const gg = _kisGraf; if(!gg || !gg.chart || !box.clientWidth) return; try{ gg.chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || 240 }); gg.chart.timeScale().fitContent() }catch(_){} }); g.ro.observe(box) }catch(_){}
+        try{ g.ro = new ResizeObserver(() => { const gg = _kisGraf; if(!gg || !gg.chart || !box.clientWidth) return; try{ gg.chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || 450 }); gg.chart.timeScale().fitContent() }catch(_){} }); g.ro.observe(box) }catch(_){}
       } else {
         try{ g.chart.applyOptions(huelle) }catch(_){}
       }
       try{
         const ink = mklToken('--ink', '#101828')
         for(const [k] of KIS_QUELLEN){
-          g.quellen[k].applyOptions({ color: mklToken(KIS_TOKEN[k], '#98a2b3'), pointMarkersVisible: punkte })
-          g.quellen[k].setData(reihe.map(p => ({ time: p.tag, value: Math.round(Number(p.quellen[k]) || 0) })))
+          const an = !kisId || KIS_JE_ID.includes(k)   // mit ID-Filter: gruppenweite Quellen leer
+          g.quellen[k].applyOptions({ color: kisAlpha(mklToken(KIS_TOKEN[k], '#98a2b3'), 0.85), pointMarkersVisible: punkte })
+          g.quellen[k].setData(an ? reihe.map(p => ({ time: p.tag, value: Math.round(Number(p.quellen[k]) || 0) })) : [])
         }
-        // gestrichelt: Rückblick-Tage + der erste echte Tag (der Sprung dorthin ist Fusion/GK/offene Payouts, die erst ab dann zählen)
+        // heller: Rückblick-Tage + der erste echte Tag (der Sprung dorthin ist Fusion/GK/offene Payouts, die erst ab dann zählen)
         const iEcht = reihe.findIndex(p => !p.rueckblick)
         const rueckTeil = iEcht > 0 ? reihe.slice(0, iEcht + 1) : iEcht < 0 ? reihe : []
-        g.rueck.applyOptions({ color: ink, pointMarkersVisible: punkte })
+        g.rueck.applyOptions({ color: kisAlpha(ink, 0.3), pointMarkersVisible: punkte })
         g.rueck.setData(rueckTeil.map(p => ({ time: p.tag, value: Math.round(kisSumme(p.quellen)) })))
-        g.summe.applyOptions({ color: ink, pointMarkersVisible: punkte })
-        g.summe.setData((iEcht < 0 ? [] : reihe.slice(iEcht)).map(p => ({ time: p.tag, value: Math.round(kisSumme(p.quellen)) })))
+        const echt = iEcht < 0 ? [] : reihe.slice(iEcht)
+        g.summe.applyOptions({ color: ink, pointMarkersVisible: punkte || echt.length === 1 })   // erster echter Tag allein: als Punkt, nicht als Strich
+        g.summe.setData(echt.map(p => ({ time: p.tag, value: Math.round(kisSumme(p.quellen)) })))
         g.chart.timeScale().fitContent()
       }catch(e){ console.warn('[kapital] Graf', e); kisGrafWeg(); box.innerHTML = '' }
+    }
+    // Token-Farbe (#rrggbb / #rgb / rgb(…)) mit Deckkraft — Lightweight Charts kennt kein var(--x) und kein color-mix
+    function kisAlpha(farbe, a){
+      const f = String(farbe || '').trim()
+      let m = f.match(/^#([0-9a-f]{3})$/i); if(m) return `rgba(${[...m[1]].map(c => parseInt(c + c, 16)).join(',')},${a})`
+      m = f.match(/^#([0-9a-f]{6})/i); if(m) return `rgba(${[0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(',')},${a})`
+      m = f.match(/^rgba?\(([^)]+)\)/i); if(m){ const t = m[1].split(/[\s,\/]+/).filter(Boolean).slice(0, 3); return `rgba(${t.join(',')},${a})` }
+      return f
     }
     window.addEventListener('prophos:theme', () => { try{ if(_kisGraf) kisNeuRender() }catch(_){} })
     function kisNeuRender(){
       const d = kisDaten; if(!d) return
-      const jetzt = kisJetzt(d), gesamt = Number(d.ist?.summe) || 0
+      // ID-Chips: nur IDs mit Werten (laufende Konten, Wallet, offener Payout) — archivierte/leere IDs der Gruppe bleiben weg
+      const jeId = d.ist?.je_id || {}
+      const ids = (d.ids || []).filter(x => { const z = jeId[x.id]; return z && ((Number(z.konten_n) || 0) + (Number(z.wallets_n) || 0) > 0 || Number(z.payouts_offen) > 0) })
+      if(kisId && (ids.length < 2 || !ids.some(x => x.id === kisId))) kisId = ''   // ohne Chips kein festhängender Filter (Gegenprüfung)
+      $('kis-n-ids').innerHTML = ids.length < 2 ? '' : [`<button type="button" class="adm-vl-chip${!kisId ? ' is-on' : ''}" data-kis-id="">Alle</button>`]
+        .concat(ids.map(x => `<button type="button" class="adm-vl-chip${kisId === x.id ? ' is-on' : ''}" data-kis-id="${escapeHtml(x.id)}"><span class="adm-dot" style="background:${idFarbe(x.id)}"></span>${escapeHtml(x.name)}</button>`)).join('')
+      const idName = kisId ? (ids.find(x => x.id === kisId) || {}).name || '' : ''
+      const quellen = kisId ? KIS_QUELLEN.filter(([k]) => KIS_JE_ID.includes(k)) : KIS_QUELLEN
+      const jetzt = kisId ? Object.assign({ fusion: 0, geschaeftskonto: 0, sonstiges: 0 }, kisIdTeile(jeId[kisId])) : kisJetzt(d)
+      const gesamt = kisId ? kisSumme(jetzt) : Number(d.ist?.summe) || 0
       $('kis-n-summe').textContent = kisEur.format(gesamt)
-      $('kis-n-stand').textContent = `Stand ${kisZeit(d.generated)} · Wallets + Fusion + Geschäftskonto + Kontowerte + offene Payouts + Sonstiges`
-        + (d.ist?.fusion ? '' : ' · Fusion ohne Stand (kein PC-Tab liest gerade)')
+      $('kis-n-stand').textContent = kisId
+        ? `${idName} · Stand ${kisZeit(d.generated)} · Kontowerte + Wallets + offene Payouts dieser ID · Fusion, Geschäftskonto und Weitere Posten sind gruppenweit, nicht je ID`
+        : `Stand ${kisZeit(d.generated)} · Wallets + Fusion + Geschäftskonto + Kontowerte + offene Payouts + Sonstiges`
+          + (d.ist?.fusion ? '' : ' · Fusion ohne Stand (kein PC-Tab liest gerade)')
       $('kis-n-zeit').innerHTML = KIS_ZEITEN.map(([z, t]) => `<button type="button" class="adm-vl-chip${kisZeitraum === z ? ' is-on' : ''}" data-kis-zeit="${z}">${t}</button>`).join('')
       const { reihe, basis } = kisReihe(d.verlauf, jetzt)
       kisGraf(reihe)
       const zeitName = (KIS_ZEITEN.find(([z]) => z === kisZeitraum) || [])[1] || ''
-      $('kis-n-verlauf-sub').textContent = `Insgesamt im System und je Quelle · ein Punkt je Tag · ${zeitName} ${reihe.length === 1 ? kisTag(reihe[0].tag) : 'ab ' + kisTag(reihe[0].tag)}`
+      $('kis-n-verlauf-sub').textContent = `${kisId ? idName + ' · ' : ''}Insgesamt${kisId ? '' : ' im System'} und je Quelle · ein Punkt je Tag · ${zeitName} ${reihe.length === 1 ? kisTag(reihe[0].tag) : 'ab ' + kisTag(reihe[0].tag)}`
       // Legende: Wert jetzt + Veränderung im Zeitraum (gegen den Tag vor dem Zeitraum). Gegen einen Rückblick-Tag nur Wallets + Kontowerte —
       // Fusion/GK/offene Payouts gibt es dort nicht, ihr „Zuwachs" wäre nur der Beginn der Aufzeichnung.
       const vergl = basis ? basis.quellen : null, nurWK = !!basis?.rueckblick
@@ -20615,16 +20664,17 @@
         const dv = Math.round(w - (Number(vergl[k]) || 0)); return ` <span class="kf" style="color:${dv > 0 ? 'var(--good-ink)' : dv < 0 ? 'var(--danger-ink)' : 'var(--sub)'}">${dv > 0 ? '+' : dv < 0 ? '−' : '±'}${kisEur.format(Math.abs(dv))}</span>` }
       const dSumme = !vergl ? '' : (() => { const dv = Math.round(nurWK ? (jetzt.wallets + jetzt.konten) - (Number(vergl.wallets) || 0) - (Number(vergl.konten) || 0) : gesamt - kisSumme(vergl))
         return ` <span class="kf" style="color:${dv > 0 ? 'var(--good-ink)' : dv < 0 ? 'var(--danger-ink)' : 'var(--sub)'}">${dv > 0 ? '+' : dv < 0 ? '−' : '±'}${kisEur.format(Math.abs(dv))}${nurWK ? ' (Wallets + Kontowerte)' : ''} seit ${kisTag(basis.tag)}</span>` })()
-      const pos = KIS_QUELLEN.reduce((a, [k]) => a + Math.max(0, jetzt[k]), 0) || 1
+      const pos = quellen.reduce((a, [k]) => a + Math.max(0, jetzt[k]), 0) || 1
       $('kis-n-legende').innerHTML = `<span><span class="kis-n-strich" style="border-color:var(--ink)"></span>Insgesamt <b>${kisEur.format(gesamt)}</b>${dSumme}</span>`
-        + KIS_QUELLEN.map(([k, name, farbe]) => `<span><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b>${delta(k, jetzt[k])}</span>`).join('')
+        + quellen.map(([k, name, farbe]) => `<span><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b>${delta(k, jetzt[k])}</span>`).join('')
         // Kontowerte (Finn 29.10.2026 06:45): Kauf + Hedge je laufendem Konto, Payouts nicht abgezogen — sie stecken als Geld in Wallets/Konto
-        + `<span style="flex-basis:100%;font-size:11.5px">Kontowerte: ${Number(d.ist?.konten_n) || 0} laufende Konten · Kauf + Hedge, Payouts stecken in Wallets/Konto · geblowte Konten zählen 0</span>`
+        + `<span style="flex-basis:100%;font-size:11.5px">Kontowerte: ${Number(kisId ? jeId[kisId]?.konten_n : d.ist?.konten_n) || 0} laufende Konten · Kauf + Hedge, Payouts stecken in Wallets/Konto · geblowte Konten zählen 0</span>`
+        + (kisId ? `<span style="flex-basis:100%;font-size:11.5px">Fusion, Geschäftskonto, Weitere Posten: gruppenweit, nicht je ID — bei „Alle“</span>` : '')
       const ersterEcht = (d.verlauf || []).find(p => !p.rueckblick)?.tag || kisHeute()
       $('kis-n-hinweis').textContent = reihe.some(p => p.rueckblick)
-        ? `Gestrichelt = Rückblick: nur Wallets + Kontowerte nachgerechnet · Fusion/GK ab ${kisTag(ersterEcht)} (auch offene Payouts und Sonstiges)` : ''
-      $('kis-n-balken').innerHTML = `<div class="spur">${KIS_QUELLEN.filter(([k]) => jetzt[k] > 0).map(([k, name, farbe]) => `<div style="width:${(100 * jetzt[k] / pos).toFixed(2)}%;background:${farbe}" title="${name} ${kisEur.format(jetzt[k])}"></div>`).join('')}</div>`
-        + `<div class="zeilen">${KIS_QUELLEN.map(([k, name, farbe]) => `<span><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b> · ${Math.round(100 * Math.max(0, jetzt[k]) / pos)} %</span>`).join('')}</div>`
+        ? `Hellere Linie = Rückblick: nur Wallets + Kontowerte nachgerechnet · ${kisId ? 'offene Payouts' : 'Fusion/GK'} ab ${kisTag(ersterEcht)}${kisId ? '' : ' (auch offene Payouts und Sonstiges)'}` : ''
+      $('kis-n-balken').innerHTML = `<div class="spur">${quellen.filter(([k]) => jetzt[k] > 0).map(([k, name, farbe]) => `<div style="width:${(100 * jetzt[k] / pos).toFixed(2)}%;background:${farbe}" title="${name} ${kisEur.format(jetzt[k])}"></div>`).join('')}</div>`
+        + `<div class="zeilen">${quellen.map(([k, name, farbe]) => `<span><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b> · ${Math.round(100 * Math.max(0, jetzt[k]) / pos)} %</span>`).join('')}</div>`
       // Weitere Posten = kapital_gk_buchungen (je Zeile ein Stand)
       const posten = (d.gk_buchungen || []).filter(g => g.quelle !== 'sheet' || KAPITAL_SHEET_SYNC_ANZEIGEN)
       $('kis-n-posten-summe').textContent = kisEur2.format(posten.reduce((a, g) => a + (Number(g.betrag) || 0) * (g.waehrung === 'USD' ? (Number(d.kurs?.fx) || 0.85) : 1), 0))
@@ -20670,7 +20720,7 @@
       }
       const ist = d.ist || {}, soll = d.soll || {}, kurs = d.kurs || {}, fr = d.fusion_report || {}
       const fxTxt = `${Number(kurs.fx || 0).toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/$`
-      $('kis-sub').textContent = `Stand ${kisZeit(d.generated)} · alles in EUR · Wallets zum ${kurs.quelle || 'Kurs'} ${fxTxt}${kurs.stand ? ' vom ' + kisTag(kurs.stand) : ''}`
+      $('kis-sub').textContent = `${d.gruppe ? (d.gruppe.ht ? 'Hermann Technologies' : d.gruppe.name) + ' · ' : ''}Stand ${kisZeit(d.generated)} · alles in EUR · Wallets zum ${kurs.quelle || 'Kurs'} ${fxTxt}${kurs.stand ? ' vom ' + kisTag(kurs.stand) : ''}`
       $('kis-ist').textContent = kisEur.format(ist.summe || 0)
       $('kis-ist-s').textContent = 'Wallets + Fusion + Geschäftskonto + Kontowerte + offene Payouts'
       $('kis-soll').textContent = kisEur.format(soll.summe || 0)
@@ -20768,6 +20818,9 @@
       kisLaeuft = true
       const msg = $('kis-msg')
       if(!kisDaten){ msg.style.display = ''; msg.textContent = 'Lade…' }
+      const sg = kisSichtGruppe()
+      kisGruppe = sg === null ? '' : (sg || kisGruppe)
+      let nachHt = ''
       try{
         const r = await rgApi('/admin/kapital?ansicht=admin' + (kisGruppe ? '&gruppe=' + encodeURIComponent(kisGruppe) : ''), { raw: true })   // ansicht=admin: Verwalter sieht nur mit dem Marker seine Gruppe
         const d = await r.json().catch(() => ({}))
@@ -20775,12 +20828,15 @@
         if(r.status === 403 || r.status === 401){ msg.style.display = ''; msg.textContent = 'Kein Zugriff: ' + (d.error || ('HTTP ' + r.status)); return }
         if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
         kisDaten = d; kisGruppe = d.gruppe?.id || kisGruppe
-        msg.style.display = 'none'; $('kis-body').hidden = false
-        kisRender()
+        // Umschalter oben auf HT, aber die HT-ID war noch unbekannt (Übersicht nicht geladen) → Server lieferte seinen Standard: einmal mit HT nachladen
+        const s = window._admGruppeSicht?.(), ht = (d.gruppen || []).find(x => x.ht)
+        if(s && !s.eingeschraenkt && !s.gruppe && ht && d.gruppe && !d.gruppe.ht && kisGruppe !== String(ht.id)) nachHt = String(ht.id)
+        if(!nachHt){ msg.style.display = 'none'; $('kis-body').hidden = false; kisRender() }
       }catch(e){
         msg.style.display = ''; msg.textContent = 'Kapital nicht verfügbar: ' + (e.message || e)
         console.warn('[kapital] laden:', e)
       }finally{ kisLaeuft = false }
+      if(nachHt){ kisGruppe = nachHt; kisDaten = null; kisLaden() }   // einmal, mit der HT-ID aus der Antwort
     }
     function kisOeffnen(){
       for(const id of ['kis-e-datum', 'kis-f-datum', 'kis-g-datum', 'kis-p-datum']) if(!$(id).value) $(id).value = kisHeute()
@@ -20828,6 +20884,7 @@
       if(ok){ $('kis-g-betrag').value = ''; $('kis-g-text').value = ''; $('kis-form-msg').textContent = `${kat} gebucht.` }
     })
     // Weitere Posten (29.10.2026): Hinzufügen = POST /admin/kapital/gk (Kategorie Geschäftskonto/Sonstiges, Betrag = aktueller Stand)
+    $('kis-n-ids')?.addEventListener('click', ev => { const c = ev.target.closest('[data-kis-id]'); if(!c) return; kisId = c.dataset.kisId; kisNeuRender() })   // Filter je ID (29.10.2026)
     $('kis-n-zeit')?.addEventListener('click', ev => { const c = ev.target.closest('[data-kis-zeit]'); if(!c) return; kisZeitraum = c.dataset.kisZeit; kisNeuRender() })   // Zeitraum-Chips (29.10.2026)
     $('kis-p-ok')?.addEventListener('click', async ev => {
       const name = ($('kis-p-name').value || '').trim(), betrag = Number($('kis-p-betrag').value), m = $('kis-p-msg')
@@ -49983,7 +50040,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1848'
+  const OS_TAB_BUILD = '2026-09-22.1849'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
