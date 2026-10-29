@@ -13008,7 +13008,12 @@ def admin_live_trades():
         basis_f = {"select": felder, "route": "in.(tvv2,tsv2,mt5v2,mt5,polar)" if mit_echo else "in.(tvv2,tsv2)"}
         if nur_eigene:
             basis_f["user_id"] = f"eq.{me}"
-        if nur_offen:
+        # ?ids= (29.10.2026, ERLEDIGT SCHNELLER — Messung im PC-Tab): nur diese Pläne (≤ 10 UUIDs), egal welcher Status; Sicht/Filter unten
+        # wie immer — die Kerzen werden so nur ab deren Start geladen statt ab dem ältesten liegengebliebenen Plan
+        ids = [x for x in str(request.args.get("ids") or "").lower().split(",") if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", x)][:10]
+        if ids:
+            rows = _sb_all("trade_plans", dict(basis_f, id=f"in.({','.join(ids)})"))
+        elif nur_offen:
             rows = _sb_all("trade_plans", dict(basis_f, status="eq.open"))
         else:
             rows = _sb_all("trade_plans", dict(basis_f, status="in.(open,review,planned)"))

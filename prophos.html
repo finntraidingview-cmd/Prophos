@@ -29921,8 +29921,12 @@
       // NUR MIT BEWEIS (29.10.2026, s. tsxBracketsFehlen / tvV2DemoGesperrt): Nova ohne bewiesene Brackets und Pläne, die die Endlesung
       // schon einmal als „noch offen“ zurückgeholt hat, enden nie per Kurs-Schätzung — nur über „Beendet“ von Hand bzw. einen Flach-Beweis
       const offen = (_tp || []).filter(p => p && planIstPuls(p) && p.status === 'open' && !(p.mt5Baseline && p.mt5Baseline.hedge) && tvV2EndlesungPcPasst(p) && !tvV2DemoGesperrt(p))
-      if(!offen.length) return
+      // ERLEDIGT SCHNELLER, MESSUNG (29.10.2026): Pläne, die der Feed beendet hat, liest der Takt bis zu 20 min weiter, bis der Kerzen-Weg
+      // denselben Treffer meldet → Vorsprung in Sekunden an final (tvV2FeedMessung) — eigener, kleiner Abruf (?ids=) NACH dem Kerzen-Weg
+      const messen = (_tp || []).filter(p => p && p.status !== 'open' && tvV2FeedMessungOffen(p, Date.now()) && tvV2EndlesungPcPasst(p)).slice(0, 10)
+      if(!offen.length && !messen.length) return
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      if(!offen.length){ await tvV2FeedMessungLaden(messen, tok); return }
       const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
       const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&nur_eigene=1&status=open`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
       const d = r.ok ? await r.json().catch(() => null) : null
@@ -29932,16 +29936,37 @@
       for(const t of ((d && d.trades) || [])){
         const pid = String(t.id || t.plan_id || ''), dm = t.demo || {}
         const p = offen.find(x => String(x.id) === pid); if(!p) continue
+        if(t.status === 'open') _tvFeedLv.set(pid, { t, at: Date.now() })   // Level für den Feed-Weg (tvV2FeedTakt)
         // Handstart auch mit eingefrorenem Einstieg ('feed_start'), solange die Start-Balance fehlt (29.09.2026)
         const _tvH = (p.mt5Baseline && p.mt5Baseline.tv) || {}
         if(t.einstieg_quelle === 'kerze_start' || (_tvH.handstart_at && typeof _tvH.balance_start !== 'number')) await tvV2HandstartEinstieg(p, t)
         if(!['tp', 'liquidiert', 'beide_in_minute'].includes(dm.status)) continue
-        const alt = _demoEndeVersucht.get(pid); if(alt && Date.now() - alt < 60000) continue
-        _demoEndeVersucht.set(pid, Date.now())
-        if(!(await hedgeSperre(pid, 'demo_ende', 30))) continue
+        await tvV2DemoEndeAus(p, t, dm, null)
+      }
+      if(messen.length) await tvV2FeedMessungLaden(messen, tok)
+    }catch(e){ console.warn('[demo-ende]', e) }
+  }
+  /* Demo-Ende eines offenen Puls-Plans (Kerzen-Weg und seit 29.10.2026 Feed-Weg): dm = {status 'tp'|'liquidiert'|'beide_in_minute', stop?,
+   * at, preis, pl_usd}; feed = null (Kerzen) oder {at, preis, level, art, quelle, alter_ms} — dann steht er als final.feed am Ende und
+   * ended_at = Zeit des zweiten Ticks. Alles Weitere wie bisher: Überprüfen, Endlesung (Lesung hat immer Vorrang vor der Schätzung). */
+  // Feed-Weg mit eigenem Merker (Prüfung 29.10.2026: ein Feed-Abbruch durfte den Kerzen-Weg nicht 60 s sperren); ein Plan zur Zeit
+  const _tvFeedVersucht = new Map(), _demoEndeLaeuft = new Set()
+  async function tvV2DemoEndeAus(p, t, dm, feed){
+    const pid = String(p.id)
+    if(_demoEndeLaeuft.has(pid)) return false
+    // Feed-Ausschlüsse VOR Merker und Sperre — an frisch unten noch einmal (DB-Stand)
+    if(feed && (tvV2FeedNein(p) || tvV2EinstiegUnbestaetigt(p, t)
+      || (dm.status !== 'liquidiert' && tvV2KontoUnerreichbar((p.mt5Baseline && p.mt5Baseline.final) || null, t.endlesung)))) return false
+    const merk = feed ? _tvFeedVersucht : _demoEndeVersucht
+    _demoEndeLaeuft.add(pid)
+    try{
+        const alt = merk.get(pid); if(alt && Date.now() - alt < 60000) return false
+        merk.set(pid, Date.now())
+        if(!(await hedgeSperre(pid, 'demo_ende', 30))) return false
         let frisch = p
         try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
-        if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.hedge) || tvV2DemoGesperrt(frisch)) continue
+        if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.hedge) || tvV2DemoGesperrt(frisch)) return false
+        if(feed && (tvV2FeedNein(frisch) || tvV2EinstiegUnbestaetigt(frisch, t))) return false   // Feed-Weg nur mit Beweis-Einstieg, nie Nova
         const beide = dm.status === 'beide_in_minute'
         // EINSTIEG UNBESTÄTIGT (Finn 08.10.2026, Vorfall 07.10. 17:37 Dubai, FundedNext 3 NQ, Plan a7256d6c: Puls klickte korrekt, sah aber
         // in 15 s keine Fill-Meldung → „unklar", Einstieg aus der Startkerze geschätzt (31.219,5). Die Demo rechnete gegen diesen
@@ -29957,6 +29982,7 @@
         const _finAlt = (frisch.mt5Baseline && frisch.mt5Baseline.final) || null
         const ku = dm.status !== 'liquidiert' ? tvV2KontoUnerreichbar(_finAlt, t.endlesung) : null
         const verm = tvV2KontoVermutet(ku)
+        if(feed && ku) return false   // Konto beim letzten Lesen nicht erreichbar → nur der Kerzen-Weg (mit seinen Hinweisen)
         const extra = ku
           ? { grund: verm ? 'demo_konto_weg' : 'demo_konto_unklar', demo_status: dm.status, at: dm.at || new Date().toISOString(), preis: null, master_pl_schaetzung: null,
               konto_weg_vermutet: verm, ...(ku.weg ? { konto_weg: true, konto_weg_at: ((_finAlt && _finAlt.konto_weg_at) || (t.endlesung && t.endlesung.konto_weg_at) || new Date().toISOString()) } : {}),
@@ -29972,9 +29998,10 @@
           : { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'demo_sl' : 'demo_liq') : 'demo_beide', at: dm.at || new Date().toISOString(),
               preis: dm.preis != null ? Number(dm.preis) : null, master_pl_schaetzung: (!beide && dm.pl_usd != null && isFinite(Number(dm.pl_usd))) ? Number(dm.pl_usd) : null,
               ...(beide ? { hinweis: 'TP und Liquidation in derselben Minute — Reihenfolge unbekannt, keine Schätzung' } : {}) }
+        if(feed) extra.feed = feed   // ERLEDIGT SCHNELLER (29.10.2026): Spur des Feed-Treffers; feed.kerze_at/vorsprung_s trägt tvV2FeedMessung nach
         let ok = false
         try{ ok = await tvV2EndeSetzen(frisch, null, 'demo', extra) }catch(e){ console.warn('[demo-ende]', e) }
-        if(!ok) continue
+        if(!ok) return false
         try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[demo-ende] Überprüfen', e) }
         // Trade-Ende = Demo-Treffer (atMoveToReview stempelt „jetzt") — Live Trades rechnet die Nachlese-Zeit ab ended_at
         try{ await supabase.from('trade_plans').update({ ended_at: extra.at }).eq('id', pid).eq('status', 'review'); const pf = tradePlans.find(x => String(x.id) === pid); if(pf) pf.endedAt = extra.at }catch(_){}
@@ -29983,12 +30010,154 @@
                   : `⚠ ${frisch.masterName || 'Plan'}: Login der Endlesung scheiterte — Demo-TP NICHT gewertet → Überprüfen ohne P&L · Balance-Lesung abwarten`)
           : unbestaetigt
           ? `⚠ ${frisch.masterName || 'Plan'}: Demo meldet ein Ende, der Einstieg ist aber nur geschätzt → Überprüfen ohne P&L · Balance-Lesung abwarten`
+          : feed ? `✓ ${frisch.masterName || 'Plan'}: Kurs-Feed durch ${feed.art === 'tp' ? 'TP' : feed.art === 'sl' ? 'SL' : 'Liquidation'} (${feed.preis}) → Überprüfen · Warte auf Puls`
           : `✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'SL' : 'Liquidation') : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')   // stop 'sl' seit 29.09.2026 (Backend _lt_demo)
-      }
-    }catch(e){ console.warn('[demo-ende]', e) }
+        return true
+    }catch(e){ console.warn('[demo-ende]', e); return false }
+    finally{ _demoEndeLaeuft.delete(pid) }
   }
   setTimeout(tvV2DemoEndeTakt, 40000 + Math.random() * 20000)
   window._tvV2DemoEndePruefen = tvV2DemoEndePruefen   // Test-Haken: ein Durchlauf ohne neuen Takt
+  /* ══ ERLEDIGT SCHNELLER (29.10.2026, Finn freigegeben — Master: „tvV2DemoEndeTakt prüft zusätzlich zum Minutenkerzen-Weg den Feed-Kurs …
+   * Kurs durch TP/SL/Liq laut Feed → echter Erledigt-Weg wie bisher, nur früher"). Der Kerzen-Weg fragt alle 55–70 s /admin/live-trades
+   * (Backend _lt_demo gegen tv_kurs_1m) — zwischen Treffer und „Überprüfen" lagen so 1–2 min. Jetzt prüft der PC-Tab jede Sekunde den Feed-
+   * Kurs (wdKursJetzt: Reader im Puls-Chrome, sonst Feed/Cloud) gegen die Level, die der Kerzen-Weg zuletzt geliefert hat (_tvFeedLv: TP,
+   * echter SL bei Bracket/master_sl, Liq-Linie wie Radar/Backend). Zwei Ticks hintereinander (verschiedene Erfassungszeit, je ≤ 5 s alt,
+   * frühestens 5 s nach dem Start) jenseits desselben Levels → tvV2DemoEndeAus mit feed — derselbe Weg wie die Kerze (Überprüfen, Endlesung;
+   * die Lesung ersetzt die Schätzung). NIE für Nova/tsv2 (nur mit Beweis, Vorfall Plan 523545ee), nie mit fehlenden Brackets oder nach
+   * „wieder offen“ (tvV2DemoGesperrt), nie ohne bewiesenen Einstieg, nicht bei unerreichbarem Konto, nicht mit Fusion-Hedge. Messung: der Takt
+   * liest den Plan bis zu 20 min weiter, bis die Kerze denselben Treffer meldet → final.feed.kerze_at + vorsprung_s (tvV2FeedMessung). ══ */
+  const _tvFeedLv = new Map()                    // plan-id → { t: live-trades-Zeile, at } (vom Kerzen-Takt)
+  const _tvFeedTicks = new Map()                 // plan-id → { art, cap, n } letzte Feed-Ticks jenseits eines Levels
+  // Level höchstens 90 s alt (ein Kerzen-Takt + Luft; Prüfung 29.10.2026: TP/Einstieg können am Plan wandern)
+  const TV_FEED_MAX_ALTER_MS = 5000, TV_FEED_TICKS = 2, TV_FEED_LV_MAX_MS = 90000, TV_FEED_START_MS = 5000, TV_FEED_MESS_MS = 20 * 60000
+  // Weg für diesen Plan aus? Nova/tsv2 (nur mit Beweis), gesperrte Demo (Brackets fehlen, „wieder offen"), Fusion-Hedge (auch nur geplant:
+  // hedgeEur/orbitV3, solange das Hedge-Objekt noch fehlt)
+  const tvV2FeedNein = p => !p || p.route !== 'tvv2' || tvV2DemoGesperrt(p) || !!(p.mt5Baseline && p.mt5Baseline.hedge) || Number(p.hedgeEur) > 0 || !!p.orbitV3
+  // REIN RECHNEND (window._tvV2FeedArt): Level aus der live-trades-Zeile t, Kurs k → 'tp' | 'sl' | 'liq' | null (wie wdlFeedEndeArt)
+  function tvV2FeedLevel(t){
+    const n = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v)
+    return { ri: t && t.richtung === 'buy' ? 1 : t && t.richtung === 'sell' ? -1 : 0, tp: n(t && t.tp_level_nq),
+             sl: (t && (t.sl_art === 'bracket' || t.sl_art === 'master_sl')) ? n(t.sl_level_nq) : null, liq: n(t && t.liq_regel_level_nq) ?? n(t && t.liq_level_nq) }
+  }
+  function tvV2FeedArt(t, k){
+    const L = tvV2FeedLevel(t)
+    if(!L.ri || !(k > 0)) return null
+    const ueber = lv => lv != null && (L.ri > 0 ? k >= lv : k <= lv), unter = lv => lv != null && (L.ri > 0 ? k <= lv : k >= lv)
+    if(ueber(L.tp)) return 'tp'
+    if(unter(L.sl)) return 'sl'
+    if(unter(L.liq)) return 'liq'
+    return null
+  }
+  window._tvV2FeedArt = tvV2FeedArt
+  // REIN RECHNEND (window._tvV2FeedTick): ein Kurs-Tick (art des Levels, cap = Erfassungszeit, preis, quelle) → Zähler { art, cap, preis, quelle, n }
+  // bzw. null; fällig, wenn n ≥ TV_FEED_TICKS. Ein weiterer Tick zählt nur mit SPÄTERER Erfassung (> 250 ms) UND anderem Kurs aus derselben Quelle
+  // (Prüfung 29.10.2026: ein unverändert weitergeschriebener Kurs sind nicht zwei Ticks); sonst bleibt der Stand. Anderes Level, andere
+  // Quelle → neu bei 1; ein Tick diesseits → null (kein Einzel-Ausreißer).
+  function tvV2FeedTick(alt, art, cap, preis, quelle){
+    if(!art) return null
+    const neu = { art, cap, preis, quelle: quelle || '', n: 1 }
+    if(!alt || alt.art !== art || alt.quelle !== neu.quelle) return neu
+    if(cap > alt.cap + 250 && preis !== alt.preis) return Object.assign(neu, { n: alt.n + 1 })
+    return alt
+  }
+  window._tvV2FeedTick = tvV2FeedTick
+  // Kurs mit ehrlicher Erfassungszeit (Prüfung 29.10.2026): Reader im Puls-Chrome → Abfragezeit − alter_s des Kursangebots (wdKursJetzt kennt
+  // nur das Alter der lokalen Abfrage); sonst wdKursJetzt (Feed/Cloud tragen ihr Alter selbst). Reader ohne alter_s zählt nicht.
+  function tvV2FeedKurs(wurzel){
+    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', jetzt = Date.now()
+    try{
+      if(typeof epLokal !== 'undefined' && epLokal && epLokal.stand && jetzt - (epLokal.ab || 0) <= TV_FEED_MAX_ALTER_MS){
+        for(const ww of [w, w === 'NQ' ? 'MNQ' : 'NQ']){
+          const q = epLokal.stand.kurse && epLokal.stand.kurse[ww]
+          const pr = q && !q.stale && !/^delayed/.test(String(q.modus || '')) ? (Number(q.preis) || Number(q.lp) || 0) : 0
+          if(pr > 0 && q.alter_s != null && isFinite(Number(q.alter_s))){ const cap = (epLokal.ab || 0) - Number(q.alter_s) * 1000; return { preis: pr, quelle: 'Reader', cap, alter_ms: jetzt - cap } }
+        }
+      }
+    }catch(_){}
+    const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt(w, TV_FEED_MAX_ALTER_MS) : null
+    if(!k || k.quelle === 'Reader' || !(k.preis > 0)) return null
+    return { preis: Number(k.preis), quelle: String(k.quelle || ''), cap: jetzt - (Number(k.alter_ms) || 0), alter_ms: Number(k.alter_ms) || 0 }
+  }
+  let _tvFeedBusy = false
+  async function tvV2FeedPruefen(){
+    if(!MT5_LOCAL || !currentUserId || _tvFeedBusy || !_tvFeedLv.size) return
+    let _tp = []; try{ _tp = tradePlans }catch(_){}
+    const jetzt = Date.now()
+    for(const [pid, lv] of [..._tvFeedLv]){
+      const p = (_tp || []).find(x => String(x.id) === pid)
+      if(!p || p.status !== 'open' || jetzt - lv.at > TV_FEED_LV_MAX_MS || tvV2FeedNein(p) || !planIstPuls(p) || !tvV2EndlesungPcPasst(p) || tvV2EinstiegUnbestaetigt(p, lv.t)){
+        if(!p || p.status !== 'open') _tvFeedLv.delete(pid)
+        _tvFeedTicks.delete(pid); continue
+      }
+      const k = tvV2FeedKurs(/^MNQ/i.test(String(lv.t.symbol_root || '')) ? 'MNQ' : 'NQ')
+      if(!k || !(k.alter_ms <= TV_FEED_MAX_ALTER_MS)){ _tvFeedTicks.delete(pid); continue }
+      const cap = k.cap
+      const start = Date.parse(p.startedAt || (lv.t && lv.t.started_at) || '') || 0
+      if(!start || cap < start + TV_FEED_START_MS){ _tvFeedTicks.delete(pid); continue }   // Ticks vor/direkt nach dem Fill zählen nicht
+      const st = tvV2FeedTick(_tvFeedTicks.get(pid), tvV2FeedArt(lv.t, Number(k.preis)), cap, Number(k.preis), k.quelle)
+      if(!st){ _tvFeedTicks.delete(pid); continue }
+      _tvFeedTicks.set(pid, st)
+      if(st.n < TV_FEED_TICKS) continue
+      _tvFeedTicks.delete(pid)
+      const L = tvV2FeedLevel(lv.t), level = st.art === 'tp' ? L.tp : st.art === 'sl' ? L.sl : L.liq
+      const at = new Date(cap).toISOString()
+      const feed = { at, preis: Number(k.preis), level, art: st.art, quelle: String(k.quelle || '').slice(0, 30), alter_ms: Math.round(Number(k.alter_ms) || 0), ticks: st.n }
+      // dm wie der Kerzen-Weg: TP → master_tp, SL → −master_sl; Liq ohne Schätzung (die Endlesung liest die Balance)
+      const dm = st.art === 'tp' ? { status: 'tp', at, preis: Number(k.preis), pl_usd: Number(p.masterTp) > 0 ? Number(p.masterTp) : null }
+        : { status: 'liquidiert', stop: st.art === 'sl' ? 'sl' : undefined, at, preis: Number(k.preis), pl_usd: st.art === 'sl' && Number(p.masterSl) > 0 ? -Number(p.masterSl) : null }
+      _tvFeedBusy = true
+      try{
+        const ok = await tvV2DemoEndeAus(p, lv.t, dm, feed)
+        console.info(`[feed-ende] ${p.masterName || pid}: Kurs ${feed.preis} durch ${st.art} ${level} (${feed.quelle}, ${feed.alter_ms} ms alt, ${st.n} Ticks)${ok ? ' → Überprüfen' : ' — nicht beendet'}`)
+        if(ok) _tvFeedLv.delete(pid)
+      }finally{ _tvFeedBusy = false }
+    }
+  }
+  function tvV2FeedTakt(){
+    tvV2FeedPruefen().catch(e => console.warn('[feed-ende]', e)).finally(() => setTimeout(tvV2FeedTakt, 900 + Math.random() * 300))
+  }
+  setTimeout(tvV2FeedTakt, 30000 + Math.random() * 5000)
+  window._tvV2FeedPruefen = tvV2FeedPruefen
+  // MESSUNG: offen = Plan per Feed beendet, Kerzen-Zeit noch nicht eingetragen, Feed-Treffer ≤ 20 min her
+  function tvV2FeedMessungOffen(p, jetzt){
+    const f = p && p.mt5Baseline && p.mt5Baseline.final && p.mt5Baseline.final.feed
+    if(!f || f.kerze_at || f.kerze) return false
+    const a = Date.parse(f.at || '') || 0
+    return a > 0 && jetzt - a <= TV_FEED_MESS_MS + 120000
+  }
+  window._tvV2FeedMessungOffen = tvV2FeedMessungOffen
+  // Kerze meldet den Treffer (dm.status tp/liquidiert/beide) → vorsprung_s = jetzt − Feed-Treffer (so viel früher als dieser Takt sonst beendet
+  // hätte), kerze_demo_at = Minute laut Kerze; nach 20 min ohne Kerzen-Treffer kerze 'nie' (Feed-Treffer ohne Bestätigung der Minutenkerze).
+  // Nur final.feed wird ergänzt (baselinePatchIn 'final', ohne Status-Guard: der Plan kann inzwischen erledigt sein; die Endlesung patcht andere Felder).
+  async function tvV2FeedMessung(p, dm){
+    const fin = (p.mt5Baseline && p.mt5Baseline.final) || {}, f = fin.feed || {}, jetzt = Date.now()
+    const a = Date.parse(f.at || '') || 0
+    let neu = null
+    if(['tp', 'liquidiert', 'beide_in_minute'].includes(dm && dm.status)){
+      neu = Object.assign({}, f, { kerze_at: new Date(jetzt).toISOString(), vorsprung_s: a ? Math.round((jetzt - a) / 1000) : null, kerze_demo_at: dm.at || null,
+        kerze_art: dm.status === 'tp' ? 'tp' : dm.status === 'liquidiert' ? (dm.stop === 'sl' ? 'sl' : 'liq') : 'beide' })
+    } else if(a && jetzt - a > TV_FEED_MESS_MS){
+      neu = Object.assign({}, f, { kerze: 'nie', kerze_bis: new Date(jetzt).toISOString(), kerze_status: (dm && dm.status) || null })
+    }
+    if(!neu) return
+    // Guard = Status, den der Takt gesehen hat (nie auf einen inzwischen wieder offenen Plan, s. tvV2NochOffenZurueck)
+    try{ await baselinePatchIn(p.id, 'final', { feed: neu }, p.status || 'review') }catch(e){ console.warn('[feed-ende] Messung', e) }
+  }
+  async function tvV2FeedMessungLaden(messen, tok){
+    try{
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
+      const ids = messen.map(p => String(p.id)).join(',')
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&nur_eigene=1&ids=${encodeURIComponent(ids)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = r.ok ? await r.json().catch(() => null) : null
+      if(!d || d.stand_alt) return
+      for(const t of d.trades || []){
+        const pm = messen.find(x => String(x.id) === String(t.id || t.plan_id || ''))
+        if(pm && t.status !== 'open') await tvV2FeedMessung(pm, t.demo || {})
+      }
+    }catch(e){ console.warn('[feed-ende] Messung laden', e) }
+  }
+  window._tvV2FeedMessung = tvV2FeedMessung   // Test-Haken
   // REIN RECHNEND (window._tvV2DemoGesperrt): darf die Demo (Kurs gegen Minutenkerzen) diesen Plan NICHT beenden? Ja bei Nova ohne bewiesene
   // Brackets (die Position schließt am Level nicht von selbst) und nach „wieder offen“ (final_verworfen: die Endlesung sah die Position nach
   // einem Ende noch offen — die Demo stünde sofort wieder auf TP und würde ihn erneut beenden). Ende dann nur von Hand („Beendet“).
