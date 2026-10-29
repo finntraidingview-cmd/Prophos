@@ -51994,7 +51994,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1907'
+  const OS_TAB_BUILD = '2026-09-22.1908'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66923,7 +66923,17 @@
   // bis bis_hhmm, Block läuft/ist durch), bleibt das Konto dauerhaft drin, heute aus mit Grund — so steht es in „Heute nicht drin".
   async function wdHakenSofort(uid, kontoId, x, k){
     const kd = wdKontoDaten(kontoId), name = (k && k.name) || (kd && kd.name) || 'Konto'
-    if(_wd.busy) return wdSay('Farmer arbeitet gerade — Haken gleich nochmal setzen.', 'err')
+    // Busy (S2 30.10.2026: ein zweiter Haken während busy setzte gar nichts, das Kästchen blieb optisch an): bis 15 s warten; danach den
+    // Haken trotzdem dauerhaft setzen und neu zeichnen — eingewürfelt wird er dann über das 🎲 in „Heute nicht drin“ bzw. den Tageslauf
+    for(let i = 0; _wd.busy && i < 30; i++) await new Promise(res => setTimeout(res, 500))
+    if(_wd.busy){
+      try{ const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: true }); if(error) throw error
+        if(kd) kd.wd_farm = true
+        wdSay(`${name} ist drin — dauerhaft; der Farmer war beschäftigt, heute über 🎲 in „Heute nicht drin“ einwürfeln.`, 'err') }
+      catch(e){ wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
+      try{ await wdNeuLaden() }catch(_){}
+      return
+    }
     _wd.busy = true
     let text = '', fehler = ''
     try{

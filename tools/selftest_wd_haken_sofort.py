@@ -74,7 +74,10 @@ print(JSON.stringify(out))
           and "wdKontoEinwuerfeln(uid, kontoId, { anBlock: true })" in so, "wdHakenSofort: erst dauerhaft, dann derselbe Weg wie das 🎲 (anBlock)")
     check("aktiv: false, hinweis: 'heute nicht eingeplant: '" in so and "if(kn && !kn.plan_id)" in so and ".neq('status', 'laeuft')" in so,
           "nicht eingeplant → dauerhaft drin, heute aus mit Grund (Heute nicht drin), nie an einem Konto mit Plan")
-    check("if(_wd.busy) return" in so and "finally{ _wd.busy = false }" in so, "Busy-Riegel gegen Doppelklick/30-s-Takt")
+    check("for(let i = 0; _wd.busy && i < 30; i++)" in so and "finally{ _wd.busy = false }" in so
+          and so.index("if(_wd.busy){") < so.index("_wd.busy = true") and "wdNeuLaden()" in so[so.index("if(_wd.busy){"):so.index("_wd.busy = true")]
+          and "p_wd_farm: true" in so[so.index("if(_wd.busy){"):so.index("_wd.busy = true")],
+          "Busy: bis 15 s warten, sonst Haken trotzdem dauerhaft setzen + neu zeichnen (S2: Kästchen blieb optisch an)")
     oz = HTML[HTML.index("  async function wdKontoHakenOhneZeile(kontoId, an){"):][:900]
     check("if(an && uid0 && wdTagGewuerfelt(_wd.rows, _wd.tag)) return wdHakenSofort(uid0, kontoId, null, null)" in oz
           and oz.index("wdDarf(") < oz.index("wdHakenSofort("), "ID ohne Tageszeile: gewürfelter Tag → sofort (nach dem Gruppen-Recht)")
