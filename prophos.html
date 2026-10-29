@@ -57868,16 +57868,20 @@
     const zeile = z => {
       const id = String(z.id), art = AHF_ART[z.art] || [z.art || '?', ''], vs = (z.vs && typeof z.vs === 'object') ? z.vs : {}
       const ri = z.richtung === 'buy' ? '<b style="color:var(--good-ink)">BUY</b>' : z.richtung === 'sell' ? '<b style="color:var(--danger-ink)">SELL</b>' : '–'
-      const hedge = vs.lots != null ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot` : Number(z.hedge_eur) > 0 ? ahfEur(z.hedge_eur).replace('+', '') : (vs.grund ? '⚠' : '–')
-      const bp = vs.blow_eur != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(vs.pass_eur)}</span>` : '–'
+      // Namen beider Wege (S1 Apex: tp_eur statt pass_eur, Hinweis als {fehler, code}; S4 Tradeify: pass_eur, grund) — Pass/TP immer als −€
+      const hinweis = vs.grund || vs.fehler ? String(vs.grund || vs.fehler) + (vs.code ? ` (${vs.code})` : '') : ''
+      const passTp = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? -Math.abs(Number(vs.tp_eur)) : null
+      const hedge = vs.lots != null ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot` : Number(z.hedge_eur) > 0 ? ahfEur(z.hedge_eur).replace('+', '')
+        : hinweis ? `<small style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</small>` : '–'
+      const bp = vs.blow_eur != null || passTp != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>` : '–'
       const unterwegs = _ahf.busy.has(id)
       return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
         <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
         <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}</td><td>${ri}</td>
         <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
         <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
-        <td class="zahl" title="${escapeHtml(vs.grund ? 'Hedge nicht rechenbar: ' + vs.grund : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
-        <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass (TP erreicht)">${bp}</td>
+        <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
+        <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>
         <td class="zahl"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Freigeben — der Plan startet dann zur Startzeit mit Hedge">${unterwegs ? '…' : '✓'}</button></td></tr>`
     }
     const kopf = `<div class="ap-adm-kopf"><b>Neue Hedge-Trades bestätigen · ${zs.length}</b><span>starten erst nach deiner Freigabe · Zeiten Dubai</span>
@@ -57885,7 +57889,7 @@
     const fehl = _ahf.fehler ? `<div class="kis-s" style="color:var(--danger-ink)">${escapeHtml(_ahf.fehler)}</div>` : ''
     const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.z.length} Trade${g.z.length === 1 ? '' : 's'}</span>
         ${g.z.length > 1 ? `<button type="button" class="ap-adm-ok" data-ahf-id="${escapeHtml(g.uid)}">✓ alle ${g.z.length}</button>` : ''}</div>
-      <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr><th class="zahl">Start</th><th>Konto</th><th>Weg</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th><th class="zahl">Hedge</th><th class="zahl">Blow / Pass</th><th></th></tr></thead>
+      <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr><th class="zahl">Start</th><th>Konto</th><th>Weg</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th><th class="zahl">Hedge</th><th class="zahl">Blow / Pass/TP</th><th></th></tr></thead>
       <tbody>${g.z.map(zeile).join('')}</tbody></table></div>`).join('')
     root.innerHTML = `<div class="ap-adm-karte">${kopf}${fehl}${gruppen}</div>`
     root.hidden = false
