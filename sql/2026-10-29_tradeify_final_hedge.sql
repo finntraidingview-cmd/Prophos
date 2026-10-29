@@ -9,8 +9,9 @@
 --     gehalten wird, solange tradeify_final_halten ODER tradeify_final_hedge.an gilt — bei Hedge-Weg an also nie ohne Hedge, auch wenn die
 --     Umstellung scheitert (Fusion-Lesung, Marge, 60-Lot-Grenze …).
 -- (3) Riegel trade_plans_kontoart_weg: Ausnahme für genau diesen Weg — Auto-Plan, Tradeify (Futures-Schlüssel), Challenge/Phase, tvv2 +
---     orbit_v3, mt5_baseline.tradeify_hedge.status 'mit', Schalter an. Sonst Wort für Wort die Live-Fassung vom 29.10.2026 ~17:00
---     (pg_get_functiondef: Funded nur mit Hedge, Rest von Hand, HT ECHO-HEDGE aus sql/2026-10-29_ht_echo_hedge.sql, Schalter je ID).
+--     orbit_v3, mt5_baseline.tradeify_hedge.status 'mit', Schalter an. GEMEINSAME FASSUNG mit S1 (sql/2026-10-30_apex_hedge.sql, Apex-
+--     WD-Hedge) — beide Dateien tragen denselben Wortlaut, s. Abschnitt 3. Sonst die Live-Fassung vom 29.10.2026 ~17:00 (Funded nur mit
+--     Hedge, Rest von Hand, HT ECHO-HEDGE, Schalter je ID).
 -- Mehrfach-Claim < 1 min nach einem Halt schiebt nicht noch einen Tag weiter (S2-Hinweis zu a6db74b0).
 -- Rückbau: Schalter aus genügt (tfh_tick stellt nicht gestartete Pläne zurück, der Halte-Riegel hält). Komplett: Funktion
 -- trade_plans_kontoart_weg ohne den Block „FINALER TRADEIFY MIT GEGENHEDGE" neu anlegen, prophos_tradeify_final_hedge_an droppen und
@@ -33,10 +34,11 @@ update public.auto_plan_regeln
                                                 'netto_faktor', 0.89, 'min_lot', 0.01, 'max_lots', 60, 'vorlauf_min', 20, 'nachlauf_min', 30))
  where id = 1;
 
+-- nur ein echtes JSON-true zählt (kein Cast — ein Tippfehler im Schalter darf keinen Trigger mit Fehler abbrechen; wie S1 prophos_apex_hedge_an)
 create or replace function public.prophos_tradeify_final_hedge_an()
 returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce((select (regeln->'tradeify_final_hedge'->>'an')::boolean from public.auto_plan_regeln where id = 1), false)
+  select coalesce((select (r.regeln->'tradeify_final_hedge'->'an') = 'true'::jsonb from public.auto_plan_regeln r where r.id = 1), false)
 $$;
 grant execute on function public.prophos_tradeify_final_hedge_an() to authenticated, service_role;
 
@@ -87,7 +89,20 @@ begin
   return null;
 end $$;
 
--- ── 3. Riegel trade_plans_kontoart_weg mit Ausnahme ───────────────────────────────────────────────────────────────────
+-- ── 3. Riegel trade_plans_kontoart_weg — GEMEINSAME FASSUNG mit S1 (sql/2026-10-30_apex_hedge.sql) ────────────────────
+-- S2 29.10.2026: beide Dateien legten die Funktion komplett neu an, je nur mit dem eigenen Block — die zweite hätte den Block der ersten
+-- gelöscht. Jetzt steht in BEIDEN Dateien derselbe Wortlaut (Rest von Hand · Apex-WD-Hedge · HT Echo-Hedge · finaler Tradeify) und jede legt
+-- die Schalter-Funktion der anderen an, falls sie fehlt (Standard aus) — Reihenfolge egal, kein Aufruf einer fehlenden Funktion im Trigger.
+do $schalter$
+begin
+  if to_regprocedure('public.prophos_apex_hedge_an()') is null then
+    execute $f$create function public.prophos_apex_hedge_an()
+      returns boolean language sql stable security definer set search_path to 'public' as $b$
+        select coalesce((select (r.regeln->'apex_hedge'->'an') = 'true'::jsonb from public.auto_plan_regeln r where r.id = 1), false)
+      $b$$f$;
+  end if;
+end $schalter$;
+
 create or replace function public.trade_plans_kontoart_weg()
  returns trigger
  language plpgsql
@@ -120,6 +135,13 @@ begin
   if coalesce(new.rest_hedge, false) and coalesce(new.route, '') = 'tvv2' and coalesce(new.orbit_v3, false) then
     return new;
   end if;
+  -- APEX-CHALLENGE-WD-HEDGE (30.10.2026): Apex-Challenge-Auto-Plan auf dem Winning-Day-Weg (tvv2 + hedge_eur, Marke apex_hedge 'mit'),
+  -- solange regeln.apex_hedge.an true ist — nur die Umstellung von Railway (ah_tick) trägt die Marke
+  if typ = 'challenge' and coalesce(new.route, '') = 'tvv2' and coalesce(new.auto_plan, false) and coalesce(new.hedge_eur, 0) > 0
+     and not coalesce(new.orbit_v3, false) and public.prophos_firma_key(new.master_firm) = 'Apex Trader'
+     and coalesce(new.mt5_baseline->'apex_hedge'->>'status', '') = 'mit' and public.prophos_apex_hedge_an() then
+    return new;
+  end if;
   -- HT ECHO-HEDGE B2 (29.10.2026): Auto-Plan auf dem klassischen Echo mit Slave, solange der zentrale Schalter an ist
   if typ in ('challenge', 'phase1', 'phase2') and coalesce(new.route, '') = 'mt5' and coalesce(new.auto_plan, false)
      and new.slave_account_id is not null and public.prophos_ht_echo_hedge_an() then
@@ -127,7 +149,7 @@ begin
   end if;
   -- FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026): finaler Tradeify-Futures-Auto-Plan als Orbit V3, umgestellt von tfh_tick, Schalter an
   if typ in ('challenge', 'phase1', 'phase2') and coalesce(new.route, '') = 'tvv2' and coalesce(new.orbit_v3, false)
-     and coalesce(new.auto_plan, false) and new.mt5_baseline->'tradeify_hedge'->>'status' = 'mit'
+     and coalesce(new.auto_plan, false) and coalesce(new.mt5_baseline->'tradeify_hedge'->>'status', '') = 'mit'
      and public.prophos_firma_key(new.master_firm) = public.prophos_firma_key('Tradeify')
      and public.prophos_tradeify_final_hedge_an() then
     return new;
