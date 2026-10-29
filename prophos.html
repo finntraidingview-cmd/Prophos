@@ -51409,7 +51409,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1878'
+  const OS_TAB_BUILD = '2026-09-22.1879'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57915,6 +57915,7 @@
    * planen", ⚙ IDs, ↻) + Chip „Vorschau", solange der Funded-Planer aus ist. Nur Funded zurück: AP_SCHLANK_FUNDED = false. */
   const AP_SCHLANK = true, AP_SCHLANK_FUNDED = true
   window._apvOeffnen = an => { const r = document.getElementById('apv-root'); if(!r) return; const zeigen = !!an && APV_AN; r.hidden = !zeigen; if(zeigen){ apvRender(); setTimeout(() => apvLaden(false), _apv.d ? 0 : 1500) } }   // PLANER-SCHNELL: erst nach dem Planer selbst
+  window._apvSicherstellen = () => { const r = document.getElementById('apv-root'); if(r && r.hidden && APV_AN) window._apvOeffnen(true) }   // ohne Reiter-Klick (s. apIdsRenderChallenge)
   window._apvGruppeNeu = () => { const r = document.getElementById('apv-root'); _apv.d = null; _apv.at = 0; if(!r || r.hidden || !APV_AN) return; apvRender(); apvLaden(true) }
   window._apvStub = d => { _apv.d = d; _apv.fehler = ''; _apv.at = Date.now(); const r = document.getElementById('apv-root'); if(r) r.hidden = false; apvRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('apv-root'); if(r && !r.hidden && r.offsetParent && !document.hidden) apvLaden(false) }, 60000)
@@ -57942,7 +57943,11 @@
   function ahfRender(){
     const root = document.getElementById('ahf-root'); if(!root) return
     const zs = (_ahf.d && _ahf.d.zeilen) || []
-    if(!root.dataset.an || !zs.length){ root.hidden = true; root.innerHTML = ''; return }   // ohne offene Zeilen nichts (auch kein Fehler oben im Planer)
+    if(!root.dataset.an || (!zs.length && !_ahf.fehler)){ root.hidden = true; root.innerHTML = ''; return }   // ohne offene Zeilen nichts
+    if(!zs.length){   // Abruf gescheitert: kleine Zeile statt still (sonst sähe niemand, dass offene Hedge-Trades nicht geladen werden konnten)
+      root.innerHTML = `<div class="kis-s" style="color:var(--danger-ink);margin:0 2px 10px">⚠ Neue Hedge-Trades: nicht ladbar — ${escapeHtml(_ahf.fehler.slice(0, 160))}</div>`
+      root.hidden = false; return
+    }
     const je = new Map()
     for(const z of zs){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), z: [] }); je.get(k).z.push(z) }
     const zeile = z => {
@@ -57990,6 +57995,7 @@
     else if(t.dataset.ahfId) ahfFreigeben(zs.filter(z => String(z.user_id) === t.dataset.ahfId).map(z => String(z.id)), false)
     else if(t.dataset.ahfAlle && confirm(`Alle ${zs.length} neuen Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)) ahfFreigeben(zs.map(z => String(z.id)), true)
   })
+  window._ahfSicherstellen = () => { const r = document.getElementById('ahf-root'); if(r && !r.dataset.an) window._ahfOeffnen(true) }
   window._ahfOeffnen = an => { const r = document.getElementById('ahf-root'); if(!r) return; if(an){ r.dataset.an = '1'; ahfRender(); ahfLaden() } else { delete r.dataset.an; r.hidden = true } }
   window._ahfStub = d => { _ahf.d = d; _ahf.fehler = ''; const r = document.getElementById('ahf-root'); if(r) r.dataset.an = '1'; ahfRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an && !document.hidden && document.getElementById('adm-pane-planer')?.offsetParent) ahfLaden() }, 60000)
@@ -78358,6 +78364,9 @@
   }
   function apIdsRenderChallenge(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
+    // Admin direkt mit dem gemerkten Reiter Challenge-Planer geöffnet (kein Reiter-Klick): Hedge-Block und Verlauf in € trotzdem aktivieren
+    // (Vorfall 30.10.2026 .1877: „Neue Hedge-Trades bestätigen" fehlte, GET /hedge-freigabe lief kein einziges Mal)
+    if(_apIdsArtWert === 'challenge' && !document.getElementById('adm-pane-planer')?.hidden){ window._ahfSicherstellen?.(); window._apvSicherstellen?.() }
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
     const rows = _apIds.rows, drin = rows.filter(r => r.drin || r.gruppen_planer), u = apSichtUid()   // Gruppen-Planer-IDs zählen wie im Planer (13.10.2026)
     if(apSchlankJetzt() && u){ apSichtSetzen(null); return }   // SCHLANK (29.10.2026): ohne ID-Leiste gibt es keinen Weg zurück aus einer Einzel-Sicht → immer „alle"
