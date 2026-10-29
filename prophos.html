@@ -66961,7 +66961,7 @@
   }
   window._wdHakenWarteschlange = () => _wdHakenWartend   // Test-Haken
   async function wdHakenSofortLauf(uid, kontoId, x, k, name){
-    const t0 = Date.now()
+    const t0 = Date.now(), kd = wdKontoDaten(kontoId)   // S2-Stopp 88c3d628: kd lebte nur in wdHakenSofort
     while(_wd.busy && Date.now() - t0 < WD_HAKEN_WARTE_MS) await new Promise(res => setTimeout(res, 500))
     if(_wd.busy){
       wdSay(`${name} ist drin — dauerhaft; der Farmer war über 2 min beschäftigt — heute über 🎲 in „Heute nicht drin“ einwürfeln.`, 'err')

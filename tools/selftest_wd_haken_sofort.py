@@ -80,6 +80,9 @@ print(JSON.stringify(out))
           "Warteschlange: Haken sofort dauerhaft (rpc) + sofort gezeichnet, Einwürfeln nacheinander in der Kette")
     check("if(kd) kd.wd_farm = false" in hs, "rpc scheitert → Haken lokal zurück, Meldung, neu laden")
     lf = so[so.index("  async function wdHakenSofortLauf("):]
+    # jeder in wdHakenSofortLauf benutzte Name muss dort definiert sein (S2-Stopp 88c3d628: kd fehlte → „Haken nicht gespeichert" obwohl rpc durch)
+    check("const t0 = Date.now(), kd = wdKontoDaten(kontoId)" in lf and lf.index("kd = wdKontoDaten(kontoId)") < lf.index("if(!kn && kd)"),
+          "wdHakenSofortLauf definiert kd selbst, bevor der Fehler-Zweig es braucht")
     check("while(_wd.busy && Date.now() - t0 < WD_HAKEN_WARTE_MS)" in lf and "finally{ _wd.busy = false }" in lf and lf.index("if(_wd.busy){") < lf.index("_wd.busy = true"),
           "Lauf wartet auf busy (≤ 2 min), danach Hinweis + neu laden; eigener Lauf hält busy")
     oz = HTML[HTML.index("  async function wdKontoHakenOhneZeile(kontoId, an){"):][:900]
