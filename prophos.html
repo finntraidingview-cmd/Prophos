@@ -77647,11 +77647,16 @@
    * gemessen 29.10. 12:47 UTC — /ids 1,1–2,3 s, Delta 1,3–2,3 s und lief zweimal nacheinander, gezeichnet wurde erst nach allem. Jetzt: der
    * letzte Stand (Speicher; nach Neuladen sessionStorage, je Login + Gruppen-Filter, höchstens 30 min alt) steht sofort, Nachladen still im
    * Hintergrund und nur, wenn er älter als 60 s ist; „aktualisiert vor x s" darüber. Nur Laden/Anzeige — Planer-Verhalten unverändert. ══ */
-  const AP_IDS_CACHE_KEY = 'prophos_apids_stand', AP_IDS_FRISCH_MS = 60000, AP_IDS_CACHE_MAX_MS = 30 * 60000
+  // Erste Wahl ist der Speicher (_apIds/_fdpQ, Modul-Variablen); sessionStorage nur für den Stand nach F5 — klein (Deckel AP_IDS_CACHE_MAX_ZEICHEN,
+  // sonst gar nicht), try/catch, nie localStorage (Quota-Vorfälle, ID-Wechsel stumm — Master 29.10.2026)
+  const AP_IDS_CACHE_KEY = 'prophos_apids_stand', AP_IDS_FRISCH_MS = 60000, AP_IDS_CACHE_MAX_MS = 30 * 60000, AP_IDS_CACHE_MAX_ZEICHEN = 300000
+  function apIdsSessionSetzen(key, wert){
+    try{ const t = JSON.stringify(wert); if(t.length <= AP_IDS_CACHE_MAX_ZEICHEN) sessionStorage.setItem(key, t); else sessionStorage.removeItem(key) }catch(_){}
+  }
   const apIdsGruppeQ = () => (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
   function apIdsCacheSchreiben(d, gq){
-    try{ sessionStorage.setItem(AP_IDS_CACHE_KEY, JSON.stringify({ uid: String(currentUserId || ''), gq, at: Date.now(),
-      d: { ids: d.ids, aktiv: d.aktiv, tag: d.tag, offen: d.offen, bestaetigt: d.bestaetigt } })) }catch(_){}
+    apIdsSessionSetzen(AP_IDS_CACHE_KEY, { uid: String(currentUserId || ''), gq, at: Date.now(),
+      d: { ids: d.ids, aktiv: d.aktiv, tag: d.tag, offen: d.offen, bestaetigt: d.bestaetigt } })
   }
   function apIdsCacheLesen(gq){
     try{
@@ -78621,7 +78626,7 @@
       const d = await r.json().catch(() => ({}))
       if(!r.ok || d.ok === false) throw new Error(d.msg || ('HTTP ' + r.status))
       _fdpQ = fdpQuelleBauen(d); _fdpAt = Date.now(); _fdpFrisch = true
-      try{ sessionStorage.setItem('prophos_fdp_stand', JSON.stringify({ uid: String(currentUserId || ''), at: _fdpAt, d })) }catch(_){}   // PLANER-SCHNELL
+      apIdsSessionSetzen('prophos_fdp_stand', { uid: String(currentUserId || ''), at: _fdpAt, d })   // PLANER-SCHNELL (Deckel, try/catch)
     }catch(e){ _fdpFehler = (e && e.message) || String(e) }
     _fdpLaedt = false; _apIdsVollAt = Date.now()
     if(_apIdsArtWert === 'funded'){ apIdsRender(); apIdsStandZeigen() }
