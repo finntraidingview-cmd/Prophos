@@ -41,7 +41,8 @@ def wd_num(x):
 ns = {"_wd_num": wd_num, "_wt_now_iso": lambda: "2026-10-30T10:00:00+00:00"}
 exec("\n".join([konst(k) for k in ("EH_STANDARD", "EH_MARGE_RESERVE", "AH_STANDARD")]
                + [block(f) for f in ("eh_param", "eh_hedge", "eh_marge", "ah_param", "ah_master_ppl", "ah_vorschau",
-                                     "plan_ist_wd", "plan_ist_apex_hedge", "plan_wd_zaehlt", "puls_heim_big_trades", "puls_heim_wd_trades")]), ns)
+                                     "plan_ist_wd", "plan_ist_apex_hedge", "plan_wd_zaehlt", "puls_heim_big_trades", "puls_heim_wd_trades",
+                                     "ah_dll_balance", "_lt_liq_balance")]), ns)
 
 # Teil A
 p0 = ns["ah_param"]({})
@@ -79,8 +80,22 @@ offen = dict(ap, id="a", status="open", mt5_baseline={"apex_hedge": {"status": "
 soll("Heim-Wache: Apex nicht als Big Trade (2.000 $) …", ns["puls_heim_big_trades"]([offen], "pc-1") == [])
 soll("… sondern als Winning Day (100 $)", ns["puls_heim_wd_trades"]([offen], "pc-1") == [offen])
 
+acc100 = {"account_type": "challenge", "max_daily_drawdown": 1500, "max_drawdown": 3000}
+soll("Daily Loss aus dem Konto ab Tagesstart", ns["ah_dll_balance"](acc100, 99500)[0] == 98000.0 and ns["ah_dll_balance"]({}, 99500) == (None, None))
+ap_liq = dict(ap, mt5_baseline={"apex_hedge": {"status": "mit", "liq_balance": 97000}})
+soll("Liq = max(Boden, Daily Loss): Start 99.500 → 98.000 (Daily Loss)", ns["_lt_liq_balance"](acc100, ap_liq, 99500)[0] == 98000.0)
+soll("Liq = max(Boden, Daily Loss): Start 98.200 → 97.000 (Boden)", ns["_lt_liq_balance"](acc100, ap_liq, 98200)[0] == 97000.0)
+soll("Liq ohne Konto-Daily-Loss: Boden", ns["_lt_liq_balance"]({"account_type": "challenge"}, ap_liq, 99500)[0] == 97000.0)
+
 # Teil B
 t = block("ah_tick")
+soll("Vormerken: updated_at der geschriebenen Zeile übernommen, ohne → kein Umstellen im Takt",
+     'p["updated_at"] = neu[0].get("updated_at")' in t and 'not p.get("_ah_kein_guard")' in t)
+lf = block("liq_regel_felder")
+soll("Radar-Liq: Apex wie Challenge + Konto-Daily-Loss + Challenge-Boden",
+     "wd = plan_ist_wd(plan, typ) and not ah" in lf and "ah_dll_balance(a, tagesstart" in lf and "Challenge-Boden" in lf)
+soll("Konto-Selects tragen max_daily_drawdown (Live-Trades, Heim-Wache)", APP.count("max_drawdown,max_daily_drawdown,tv_balance") >= 2)
+soll("Tab: Apex-Hedge-Level = max(Boden, Daily Loss)", "art === 'apex_boden' ? hedgeLiqDllApex(" in HTML and "function hedgeLiqDllApex(" in HTML)
 soll("Tick: nur tvv2, ungeclaimt, ohne Hand-Werte, kein Orbit V3, ohne Hedge",
      all(x in t for x in ('"route": "eq.tvv2"', '"start_um_gestartet_at": "is.null"',
                           '"hand_werte_at": "is.null"', '"orbit_v3": "is.false"', '(hedge_eur.is.null,hedge_eur.eq.0)')))

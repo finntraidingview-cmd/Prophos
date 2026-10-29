@@ -28337,6 +28337,21 @@
     const d = liqDailyLoss(r, ts.balance)
     return d ? { liq_balance: Math.round((ts.balance - d.dl) * 100) / 100, dl: d.dl, stufe: d.stufe, ab: d.ab, tagesstart: ts.balance, quelle: ts.quelle, regel_id: r.id } : null
   }
+  // APEX-CHALLENGE-WD-HEDGE Daily Loss (S2/Master 30.10.2026): Apex-Challenges haben ein Tageslimit (Konto max_daily_drawdown, live 1.500 $ bei
+  // 100k / 2.000 $ bei 150k; liq_regeln Apex challenge 'tagesstart'). Schließt Apex den Master am Daily Loss und ist der Reader blind, darf die
+  // Fusion nie nackt weiterlaufen → das strengere (kleinere) Tageslimit ab Tagesstart-Balance; hedgeLiqLevel nimmt das höhere Level.
+  function hedgeLiqDllApex(plan, acc, groesse, startBal, regeln){
+    if(!(startBal > 0)) return null
+    const ts = hedgeTagesstart(plan, startBal)
+    const r = Array.isArray(regeln) ? liqRegelWaehlen(regeln, (acc && acc.firm) || (plan && plan.masterFirm) || '', 'challenge', groesse) : null
+    const d = liqDailyLoss(r, ts.balance), dlKonto = acc && Number(acc.maxDailyDrawdown) > 0 ? Number(acc.maxDailyDrawdown) : null
+    const dl = d && dlKonto ? Math.min(d.dl, dlKonto) : (dlKonto || (d && d.dl) || null)
+    if(!(dl > 0) || !(ts.balance > 0)) return null
+    const ausKonto = dl === dlKonto
+    return { liq_balance: Math.round((ts.balance - dl) * 100) / 100, dl, stufe: ausKonto ? null : d.stufe, ab: ausKonto ? null : d.ab,
+             tagesstart: ts.balance, quelle: ts.quelle, regel_id: ausKonto ? null : (r && r.id), dl_quelle: ausKonto ? 'konto' : 'liq_regeln' }
+  }
+  window._hedgeLiqDllApex = hedgeLiqDllApex   // Test-Haken
   // Daily-Loss-Felder fürs Hedge-Objekt (Open + Wächter-Nachtrag), damit Radar/Spur zeigen, woher das Level kommt
   const hedgeLiqDllFelder = lq => lq ? { liq_art: lq.liq_art || null, liq_regeln_geladen: !!lq.liq_regeln_geladen, liq_vor_pkt: lq.liq_vor_pkt || null, liq_dll: lq.liq_dll || null } : {}
   // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start, liq_art, liq_regeln_geladen, …} | {hinweis}
@@ -28380,7 +28395,8 @@
     const ahLiq = tpIstApexHedge(plan) ? Number(plan.mt5Baseline.apex_hedge.liq_balance) : NaN
     if(ahLiq > 0){ liq = ahLiq; art = 'apex_boden' }
     if(!st) return { hinweis: 'keine Start-Balance — Hedge schließt nur am TP', liq_balance: liq }
-    const dll = art === 'apex_boden' ? null : hedgeLiqDll(plan, acc, groesse, st.balance, regeln)
+    // Apex: liq = max(Boden, Daily-Loss-Level) — art 'daily_loss' wie bei WD-Konten (wd_sl_zeile übernimmt dann das Hedge-Level)
+    const dll = art === 'apex_boden' ? hedgeLiqDllApex(plan, acc, groesse, st.balance, regeln) : hedgeLiqDll(plan, acc, groesse, st.balance, regeln)
     if(dll && dll.liq_balance > liq){ liq = dll.liq_balance; vorPkt = HEDGE_DLL_VOR_PKT; art = 'daily_loss' }
     const dllFelder = { liq_art: art, liq_regeln_geladen: !!regeln, liq_vor_pkt: vorPkt || null,
       liq_dll: dll ? { usd: dll.dl, stufe: dll.stufe, ab_balance: dll.ab, tagesstart: dll.tagesstart, quelle: dll.quelle, regel_id: dll.regel_id } : null }

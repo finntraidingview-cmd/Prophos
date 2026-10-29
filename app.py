@@ -12185,13 +12185,26 @@ def plan_wd_zaehlt(plan, typ=""):
     return plan_ist_wd(plan, typ) and not plan_ist_apex_hedge(plan)
 
 
+def ah_dll_balance(acc, tagesstart):
+    """REIN RECHNEND (testbar): Daily-Loss-Liq eines Apex-mit-Hedge-Plans aus dem Konto (max_daily_drawdown, live 1.500 $ bei 100k / 2.000 $
+    bei 150k) ab Tagesstart → (balance, text) | (None, None). Liegt sie über dem Challenge-Boden, gilt sie (S2/Master 30.10.2026: schließt
+    Apex den Master am Daily Loss und ist der Reader blind, darf die Fusion nie nackt weiterlaufen)."""
+    mdd, ts = _wd_num((acc or {}).get("max_daily_drawdown")), _wd_num(tagesstart)
+    if not mdd or mdd <= 0 or ts is None:
+        return None, None
+    return round(ts - mdd, 2), f"Daily Loss {mdd:,.0f} $ ab Tagesstart {ts:,.0f} $".replace(",", ".")
+
+
 def _lt_liq_balance(acc, plan, balance_start):
     """REIN RECHNEND (testbar): Balance, bei der das Konto blowt → (wert, regel) oder (None, grund).
     B25: Topstep Express startet bei 0 $ — dort nie „Kontogröße + 100", sondern wie jedes andere Konto Max-Drawdown."""
     typ = str((acc or {}).get("account_type") or "").lower()
     wd = plan_ist_wd(plan, typ)
     ah_liq = _wd_num(((plan or {}).get("mt5_baseline") or {}).get("apex_hedge", {}).get("liq_balance")) if plan_ist_apex_hedge(plan) else None
-    if wd and ah_liq and ah_liq > 0:               # Apex mit Hedge: Fusion-Hedge zu am Challenge-Boden (ah_tick)
+    if wd and ah_liq and ah_liq > 0:               # Apex mit Hedge: max(Challenge-Boden, Daily Loss) — Tagesstart ≈ Start-Balance (der Tab
+        d_bal, d_text = ah_dll_balance(acc, balance_start)   # rechnet das Hedge-Level mit dem echten Tagesstart, wd_sl_zeile nimmt es dann)
+        if d_bal is not None and d_bal > ah_liq:
+            return d_bal, f"Apex mit Hedge: {d_text} (über dem Challenge-Boden {ah_liq:,.0f} $)".replace(",", ".")
         return round(ah_liq, 2), f"Apex mit Hedge: Challenge-Boden {ah_liq:,.0f} $".replace(",", ".")
     if wd and not ist_topstep_express(acc, plan_balance_relativ(plan)):
         g = _wd_konto_groesse(acc)
@@ -12533,10 +12546,18 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     dort liegt der Boden der Regel (Größe + 100) ohnehin gleich oder enger."""
     a = acc or {}
     typ = str(a.get("account_type") or "").lower()
-    wd = plan_ist_wd(plan, typ)
+    # Apex mit Hedge (ah_tick): Liq wie eine Apex-Challenge (Regel challenge + Konto-Boden), nie Größe + 100; dazu das Konto-Daily-Loss
+    # (strenger als die Regel) und mindestens der Challenge-Boden aus apex_hedge.liq_balance — wie hedgeLiqLevel im Tab
+    ah = plan_ist_apex_hedge(plan)
+    wd = plan_ist_wd(plan, typ) and not ah
     groesse = _wd_konto_groesse(a)
     regel, weg = liq_regel_waehlen(regeln, a.get("firm"), "winning_days" if wd else (typ or None), groesse)
     r_bal, r_text = liq_aus_regel(regel, groesse, start_bal, tagesstart)
+    r_art = (regel or {}).get("art")
+    if ah:
+        d_bal, d_text = ah_dll_balance(a, tagesstart if tagesstart is not None else start_bal)
+        if d_bal is not None and (r_bal is None or d_bal > r_bal):
+            r_bal, r_text, r_art = d_bal, d_text + " (Konto)", "tagesstart"
     if weg:
         r_text = f"{r_text} ({weg})"
     if mll is not None:
@@ -12544,6 +12565,9 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
     else:
         b_regel, b_acc, b_gr = liq_boden_kernwerte(regel, a, typ, wd, kw_firmen)
         b_bal, b_text, dd, art = liq_konto_boden(b_regel, b_acc, b_gr, peak, start_bal, plan_balance_relativ(plan))
+        ah_boden = _wd_num((((plan or {}).get("mt5_baseline") or {}).get("apex_hedge") or {}).get("liq_balance")) if ah else None
+        if ah_boden and (b_bal is None or ah_boden > b_bal):
+            b_bal, b_text = round(ah_boden, 2), f"Challenge-Boden {_liq_de(ah_boden)} $ (Apex mit Hedge)"
     kand = [(v, k) for v, k in ((r_bal, "regel"), (b_bal, "boden")) if v is not None]
     bal, gilt = max(kand) if kand else (None, None)        # gleich hoch → „regel" (Tupel-Vergleich, 'regel' > 'boden')
     text = b_text if gilt == "boden" else r_text
@@ -12567,7 +12591,7 @@ def liq_regel_felder(regeln, acc, plan, start_bal, tagesstart, einstieg, richtun
             "liq_maxdd_art": art, "liq_vergleich_text": vergleich,
             # Art der Regel (02.10.2026, Finn: „Apex Daily Loss ist nur ein Soft-Breach, kein Blow") — 'tagesstart'/'stufen' sind
             # Tageslimits: Positionen zu, Konto lebt. Echter Blow nur am Konto-Boden (liq_boden_balance). Das Radar trennt danach.
-            "liq_regel_art": (regel or {}).get("art"), "liq_regel_soft": (regel or {}).get("art") in ("tagesstart", "stufen")}
+            "liq_regel_art": r_art, "liq_regel_soft": r_art in ("tagesstart", "stufen")}
 
 
 def lt_demo_liq(liq_level, liq_pl_alt, regel_f, start_bal, einstieg, richtung, ppl, kt):
@@ -13075,7 +13099,7 @@ def admin_live_trades():
             teil = (ids + slave_ids)[i:i + 80]
             if not teil:
                 break
-            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at,currency"
+            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at,currency"   # max_daily_drawdown: Apex mit Hedge (ah_dll_balance)
             try:
                 _lt_rows = sb_select("accounts", {"select": _lt_sel + ",rest_planer_at", "id": f"in.({','.join(teil)})"})   # Rest zurück im Planer (20.10.2026)
             except requests.exceptions.HTTPError as e:
@@ -16478,7 +16502,7 @@ def puls_heim_pruefen(pc, ausser=None):
         if not big and not wds:
             return {"frei": True}
         ids = sorted({str(p.get("master_account_id")) for p in big + wds if p.get("master_account_id")})
-        accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at",
+        accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at",
                                                                      "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
         fruehere = _wd_fruehere_trades(ids)
         liq_regeln, liq_verlauf, liq_kw = _liq_regeln_laden(), _liq_verlauf_laden(ids), _liq_kw_laden()
@@ -25487,17 +25511,23 @@ def ah_tick(jetzt=None, force=False):
         if base.get("hedge_art") == "apex" and (alt.get("lots") == vs.get("lots")) and (alt.get("code") == vs.get("code")):
             continue
         try:
-            if sb_update("trade_plans", _ah_guard(p), {"mt5_baseline": dict(base, hedge_art="apex", hedge_vorschau=vs)}):
+            neu = sb_update("trade_plans", _ah_guard(p), {"mt5_baseline": dict(base, hedge_art="apex", hedge_vorschau=vs)})
+            if neu:
                 erg["vorgemerkt"] += 1
-                p["mt5_baseline"] = dict(base, hedge_art="apex", hedge_vorschau=vs)
-                p["updated_at"] = None                   # Zeile ist neu geschrieben — der Umstell-Guard unten prüft dann ohne updated_at
+                # Stand der geschriebenen Zeile übernehmen (return=representation): der Umstell-Guard unten hält im selben Takt mit
+                # dem NEUEN updated_at — fehlt es in der Antwort, bleibt der Plan für diesen Takt unangetastet (nie ohne Guard)
+                p["mt5_baseline"] = neu[0].get("mt5_baseline") if isinstance(neu[0].get("mt5_baseline"), dict) else dict(base, hedge_art="apex", hedge_vorschau=vs)
+                p["updated_at"] = neu[0].get("updated_at")
+                if not p["updated_at"]:
+                    p["_ah_kein_guard"] = True
         except Exception as e:
             _ah_spur(f"⚠️ {str(p['id'])[:8]} Vorschau nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
 
     # (2) UMSTELLEN — nur freigegebene, fällige Pläne
     if not freigabe_da:
         return erg
-    faellig = [p for p in plaene if p.get("hedge_freigabe_at") and p.get("auto_bestaetigt_at") and str(p.get("start_um") or "") <= bis.isoformat()]
+    faellig = [p for p in plaene if p.get("hedge_freigabe_at") and p.get("auto_bestaetigt_at") and not p.get("_ah_kein_guard")
+               and str(p.get("start_um") or "") <= bis.isoformat()]
     if not faellig:
         return erg
     try:
