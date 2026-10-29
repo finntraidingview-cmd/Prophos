@@ -108,7 +108,15 @@ check(re.search(r"p\.status is distinct from 'review' or p\.ended_at is null or 
       "SQL: nur review mit ended_at + master_pl kann gelesen sein")
 check("(fin->>'quelle' = 'puls' or fin->>'balance_quelle' = 'reader')" in SQL and "(fin->>'balance_end')::numeric > 0" in SQL,
       "SQL Orbit: final.quelle puls ODER balance_quelle reader (Finn 20.10.), je + balance_end > 0")
-check("(fin.quelle === 'puls' || fin.balance_quelle === 'reader') && zahl(fin.balance_end)" in HTML, "JS Orbit: dieselbe Zeile wie SQL (puls oder reader)")
+# Seit c970908e (29.10.2026, Nova-Endlesung aus dem TopstepX-Auge, sql/2026-10-29_plan_gelesen_auge.sql): tsv2 + final.quelle 'auge' +
+# balance_end > 0 = gelesen — nur Topstep (tsv2), nie Orbit tvv2; das Auge schreibt die Lesung nur mit Flach-Beweis
+check("(fin.quelle === 'puls' || fin.balance_quelle === 'reader' || (route === 'tsv2' && fin.quelle === 'auge')) && zahl(fin.balance_end)" in HTML,
+      "JS Orbit/Nova: dieselbe Zeile wie SQL (puls oder reader, tsv2 auch auge)")
+SQL_AUGE = open(os.path.join(WURZEL, "sql", "2026-10-29_plan_gelesen_auge.sql"), encoding="utf-8").read()
+check("or (p.route = 'tsv2' and fin->>'quelle' = 'auge'))" in SQL_AUGE and "(fin->>'balance_end')::numeric > 0" in SQL_AUGE,
+      "SQL auge: tsv2 + final.quelle auge + balance_end > 0")
+check("p.route = 'tvv2' and fin->>'quelle' = 'auge'" not in SQL_AUGE and "route === 'tvv2' && fin.quelle === 'auge'" not in HTML,
+      "auge gilt nie für Orbit tvv2")
 check("bn->>'ok' = 'true'" in SQL and "(bn->>'balance')::numeric > 0" in SQL and "fin is not null and bn is not null" in SQL,
       "SQL Echo: final da + bal_nach.ok + balance > 0")
 check(SQL.count("and not (p.status = 'review' and public.prophos_plan_gelesen(p.id))") == 2,
