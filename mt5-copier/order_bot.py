@@ -20347,6 +20347,25 @@ def ist_windows_toast(klasse, titel):
     return str(klasse or "").strip().lower() == WIN_TOAST_KLASSE and bool(WIN_RX_TOAST_TITEL.match(str(titel or "").strip()))
 
 
+# WINDOWS-SUCHE VORN (Auftrag „Fehler-Muster" 29.10.2026, Muster „Tradovate-Login nicht geschafft (connect): Connect ließ sich zweimal nicht
+# klicken (Maus nicht bewiesen …)", 2× am 29.10. 02:06/02:07 UTC auf einem PC, Fehlerfoto: Connect-Dialog frei, Knopf unverdeckt): in allen
+# vier Versuchen stand die Windows-Suche vorn — 'Suche', Klasse Windows.UI.Core.CoreWindow, SearchHost, fast bildfüllend. Sie geht anders
+# als der Toast (ist_windows_toast) NICHT von selbst weg, und SetForegroundWindow kommt gegen sie nicht an → „Puls-Chrome kommt nicht in den
+# Vordergrund", auch nach frischem Tab. Darum: steht beim Nach-vorn-Holen (_win_vorn) genau dieses Flyout vorn, bekommt es EINMAL je Aufruf
+# ein Esc (Tastatur geht ans Vordergrund-Fenster = die Suche, frisch geprüft unmittelbar davor) — die Suche schließt sich, dann wie bisher
+# nach vorn. Kein Klick, der Riegel bleibt (nie ein Druck in ein fremdes Fenster); andere Fenster bekommen nie eine Taste.
+# Erkannt nur über Klasse UND Prozess (Master 29.10.2026: „nur wenn eindeutig per Klasse/Prozess erkannt") — Titel sind je Sprache anders.
+WIN_SUCHE_EXE = ("searchhost.exe", "startmenuexperiencehost.exe", "searchapp.exe", "searchui.exe")   # Win 11 / Win 10
+
+
+def ist_windows_suche(klasse, exe):
+    """REIN RECHNEND (testbar): steht die Windows-Suche bzw. das Startmenü vorn? Klasse Windows.UI.Core.CoreWindow UND Prozess
+    SearchHost/StartMenuExperienceHost (Win 10: SearchApp/SearchUI) — der Toast (ShellExperienceHost), alles andere und ein nicht
+    lesbarer Prozess: False."""
+    return (str(klasse or "").strip().lower() == WIN_TOAST_KLASSE
+            and os.path.basename(str(exe or "").strip().replace("\\", "/")).lower() in WIN_SUCHE_EXE)
+
+
 def _win_klasse(hwnd):
     """Fensterklasse (GetClassNameW) — '' wenn nicht lesbar (kein Windows, Attrappe im Test). Liest nur."""
     try:
@@ -20686,7 +20705,23 @@ class _AugenSitzung:
             _win_zeigen(hwnd, 9)                        # SW_RESTORE: alte Größe bzw. Maximierung bleibt
             _warte(0.5, 0.2)
         ende = time.time() + 3.0
+        suche_esc = False                               # Windows-Suche vorn (29.10.2026): höchstens EIN Esc je Aufruf
         while _win_vordergrund() != int(hwnd):
+            if not suche_esc:
+                try:
+                    vh = _win_vordergrund()
+                    fi = _fenster_info(vh) if vh and vh != int(hwnd) else {}
+                    if fi.get("da") and ist_windows_suche(fi.get("klasse"), fi.get("exe")):
+                        suche_esc = True
+                        _warte(0.2, 0.4)                # Jitter-Regel: gestreut 0,2–0,6 s vor der Taste
+                        if _win_vordergrund() == vh:    # frisch: die Suche steht noch vorn → das Esc geht genau an sie
+                            _tasten_gestreut("{ESC}", with_spaces=False)
+                            self.trail.append(f"Windows-Suche vorn → Esc ({fi.get('exe')}, '{str(fi.get('titel') or '')[:20]}', {vh}), dann nach vorn")
+                            _warte(0.3, 0.3)
+                            ende = max(ende, time.time() + 2.0)
+                            continue
+                except Exception:
+                    suche_esc = True
             if time.time() >= ende:
                 return None, "Puls-Chrome kommt nicht in den Vordergrund" + _vorn_fremd_hinweis(hwnd)
             _win_nach_vorn(hwnd)

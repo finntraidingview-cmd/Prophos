@@ -2064,6 +2064,7 @@ def main():
     results.append(test_windows_abfrage_vorbeugen())
     results.append(test_tv_neuladen())
     results.append(test_tv_tm_update())
+    results.append(test_puls_windows_suche_vorn())
     results.append(test_hedge_closed_at_ms())
     results.append(test_puls_fehlerfoto())
 
@@ -5800,6 +5801,95 @@ def test_puls_fehler_1787():
     chk('if not konto_im_titel(expected, w.window_text()):' in q_run and "F9 zweiter Anlauf (Terminal neu betreten)" in q_run,   # Guard seit .1842-Folge mit Zahlengrenze
         "run(): Fenster-Guard und zweiter F9-Anlauf stehen weiter")
     print(("✓" if ok else "✗") + " Puls-Fehler .1787: F9 kein Fenster vorn → frisch gestartetes Terminal (Alter der terminal64.exe) erst bis 45 s warm werden lassen")
+    return ok
+
+
+def test_puls_windows_suche_vorn():
+    """29.10.2026 (Muster „Connect ließ sich zweimal nicht klicken", Fehlerfoto: Dialog frei): die Windows-Suche stand vorn, SetForeground-
+    Window kam nicht dagegen an. Jetzt: Suche vorn → EIN Esc an sie, dann nach vorn; anderes Fenster vorn → nie eine Taste; Suche bleibt →
+    höchstens ein Esc, dann ehrlich „kommt nicht in den Vordergrund". Attrappen, kein Windows."""
+    import order_bot as ob
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Windows-Suche vorn: " + text)
+            ok = False
+    t = ob.ist_windows_suche
+    cw = "Windows.UI.Core.CoreWindow"
+    chk(t(cw, "searchhost.exe") and t("windows.ui.core.corewindow", "SearchHost.exe") and t(cw, "startmenuexperiencehost.exe")
+        and t(cw, "C:\\Windows\\SystemApps\\Microsoft.Windows.Search_cw5n1h2txyewy\\SearchHost.exe") and t(cw, "searchapp.exe")
+        and not t(cw, "shellexperiencehost.exe") and not t(cw, "") and not t("Chrome_WidgetWin_1", "searchhost.exe")
+        and not t("", "searchhost.exe") and not t(cw, "chrome.exe"),
+        "ist_windows_suche: genau Klasse CoreWindow UND Prozess SearchHost/StartMenuExperienceHost (Toast = ShellExperienceHost nein)")
+    namen = ("_puls_fenster_liste", "_puls_chrome_browser_pid", "_win_vordergrund", "_fenster_info", "_win_minimiert",
+             "_win_zeigen", "_win_nach_vorn", "_dpi_bewusst", "_warte", "_tasten_gestreut", "_bleiben_abloesen", "time")
+    alt = {n: getattr(ob, n) for n in namen}
+    z = {"vorn": 999, "esc": [], "suche_bleibt": False, "uhr": 1000.0, "warte": []}
+    info = {999: {"da": True, "klasse": cw, "exe": "searchhost.exe", "titel": "Suche"},
+            77: {"da": True, "klasse": cw, "exe": "shellexperiencehost.exe", "titel": "Neue Benachrichtigung"}}
+
+    class _Ws:
+        def rufe(self, m, par=None, timeout=10.0):
+            a_ = (par or {}).get("expression", "") if m == "Runtime.evaluate" else ""
+            if a_ == ob.WIN_GEO_JS:
+                return {"result": {"value": {"innerWidth": 1600, "innerHeight": 773, "dpr": 1, "titel": "TopstepX"}}}
+            return {"result": {"value": None}}
+
+    class _Uhr:
+        @staticmethod
+        def time():
+            z["uhr"] += 0.05
+            return z["uhr"]
+
+        @staticmethod
+        def sleep(_s):
+            z["uhr"] += float(_s)
+
+    def _esc(text_sk, with_spaces=True, tempo=1.0):
+        z["esc"].append((z["vorn"], text_sk))
+        if z["vorn"] == 999 and not z["suche_bleibt"]:
+            z["vorn"] = 0                               # Suche zu, kurz nichts vorn
+
+    def _nach_vorn(h):
+        if z["vorn"] != 999 and z["vorn"] != 77:
+            z["vorn"] = int(h)
+
+    f1 = {"hwnd": 11, "text": "TopstepX - Google Chrome", "klasse": "Chrome_WidgetWin_1", "sichtbar": True}
+    try:
+        ob._puls_fenster_liste = lambda pid: [f1]
+        ob._puls_chrome_browser_pid = lambda: 4711
+        ob._win_vordergrund = lambda: z["vorn"]
+        ob._fenster_info = lambda h: info.get(int(h), {"da": True, "klasse": "Notepad", "exe": "notepad.exe", "titel": "Editor"})
+        ob._win_minimiert = lambda h: False
+        ob._win_zeigen = lambda h, b: None
+        ob._win_nach_vorn = _nach_vorn
+        ob._dpi_bewusst = lambda: True
+        ob._warte = lambda a_, b_: z["warte"].append((a_, b_, len(z["esc"])))
+        ob._tasten_gestreut = _esc
+        ob._bleiben_abloesen = lambda h: None
+        ob.time = _Uhr
+        s_ = ob._AugenSitzung.__new__(ob._AugenSitzung)
+        s_.trail, s_.ws, s_.js, s_.maus, s_.target_id, s_.tv_riegel = [], _Ws(), "/* augen.js */", (0.0, 0.0), "T", False
+        # (1) Suche vorn → genau ein Esc an die Suche, danach Puls-Chrome vorn
+        h1, g1 = s_._win_vorn()
+        chk(h1 == 11 and g1 == "" and z["esc"] == [(999, "{ESC}")] and any("Windows-Suche vorn → Esc (searchhost.exe" in x for x in s_.trail),
+            f"Suche vorn → ein Esc, dann vorn ({h1}, {g1}, {z['esc']}, {s_.trail[-2:]})")
+        chk((0.2, 0.4, 0) in z["warte"], f"Jitter-Regel: gestreut 0,2–0,6 s VOR dem Esc ({z['warte'][:3]})")
+        # (2) Windows-Toast (CoreWindow, aber ShellExperienceHost) vorn → nie eine Taste, nach Ablauf ehrlich gescheitert
+        s_.trail, s_._win_hwnd, s_._win_gemeldet, z["esc"], z["vorn"] = [], None, None, [], 77
+        h2, g2 = s_._win_vorn()
+        chk(h2 is None and "kommt nicht in den Vordergrund" in g2 and z["esc"] == [], f"Editor vorn → keine Taste ({h2}, {g2}, {z['esc']})")
+        # (3) Suche bleibt trotz Esc → höchstens EIN Esc, dann ehrlich gescheitert
+        s_.trail, s_._win_hwnd, s_._win_gemeldet, z["esc"], z["vorn"], z["suche_bleibt"] = [], None, None, [], 999, True
+        h3, g3 = s_._win_vorn()
+        chk(h3 is None and "kommt nicht in den Vordergrund" in g3 and len(z["esc"]) == 1, f"Suche bleibt → ein Esc, dann Abbruch ({h3}, {z['esc']})")
+    finally:
+        for n, f in alt.items():
+            setattr(ob, n, f)
+    if ok:
+        print("✓ Windows-Suche vorn: ein Esc an die Suche, dann nach vorn; fremde Fenster bekommen nie eine Taste")
     return ok
 
 
