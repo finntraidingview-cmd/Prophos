@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "echo_terminal_zu", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig")
-KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S", "ECHO_TERMINAL_ZU_TXT", "ECHO_FROST_START_S")
+FUNKTIONEN = ("_wd_num", "echo_terminal_zu", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_gesehen_belegt", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig")
+KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S", "ECHO_TERMINAL_ZU_TXT")
 
 
 def lade():
@@ -49,16 +49,23 @@ def main():
     gut = {"updated_at": iso(3), "note": None, "eq": 98500.0, "bal": 98344.31, "pos": [{"ident": "1", "volume": 1.8}]}
     frost_pos = dict(frost, pos=[{"ident": "1", "volume": 0.3}])
     frost_hd = dict(frost, hd={"288016262": [{"ticket": 1, "volume": 1.76}]})
-    check(F(plan, frost, jetzt)["pl_grund"].startswith("Master-Terminal zu") and F(plan, frost, jetzt)["pl_live"] is None
-          and F(plan, frost_pos, jetzt)["pl_grund"] == "Lese-EA eingefroren" and F(plan, frost_hd, jetzt)["pl_grund"] == "Lese-EA eingefroren",
-          "Feld: eingefroren ohne Position/Hedge → 'Master-Terminal zu …', mit Position oder Hedge → 'Lese-EA eingefroren'")
+    plan_g = dict(plan, mt5_baseline=dict(plan["mt5_baseline"], echo_gesehen={"at": iso(1800), "pos": True, "hd": True}))
+    check(F(plan_g, frost, jetzt)["pl_grund"].startswith("Master-Terminal zu") and F(plan_g, frost, jetzt)["pl_live"] is None
+          and F(plan, frost, jetzt)["pl_grund"] == "Lese-EA eingefroren"
+          and F(plan_g, frost_pos, jetzt)["pl_grund"] == "Lese-EA eingefroren" and F(plan_g, frost_hd, jetzt)["pl_grund"] == "Lese-EA eingefroren",
+          "Feld: eingefroren ohne Position/Hedge + Beleg → 'Master-Terminal zu …'; ohne Beleg (EA tot vor dem Einstieg) oder mit Position/Hedge → 'Lese-EA eingefroren'")
     T = ns["echo_frost_stufe"]
-    check(T(frost, "Lese-EA eingefroren", jetzt - 3600, jetzt)[0] == 3 and T(frost, "Lese-EA eingefroren", jetzt - 3600, jetzt)[1].startswith("Master-Terminal zu")
-          and T(frost, "Lese-EA eingefroren", jetzt - 600, jetzt)[0] == 1 and "keine Master-Position" in T(frost, "Lese-EA eingefroren", jetzt - 600, jetzt)[1]
-          and T(frost_pos, "Lese-EA eingefroren", jetzt - 3600, jetzt) == (1, "Lese-EA eingefroren")
-          and T(frost_hd, "Lese-EA eingefroren", None, jetzt) == (1, "Lese-EA eingefroren")
-          and T(None, "Copier-Meldung 9 min alt (PC offline?)", jetzt - 3600, jetzt)[0] == 1,
-          "Alarm: Terminal zu → ⚪; < 15 min nach Start ohne Position, mit Position/Hedge, PC offline → 🔴")
+    check(T(frost, "Lese-EA eingefroren", True)[0] == 3 and T(frost, "Lese-EA eingefroren", True)[1].startswith("Master-Terminal zu")
+          and T(frost, "Lese-EA eingefroren", False)[0] == 1 and "keine Master-Position" in T(frost, "Lese-EA eingefroren", False)[1]
+          and T(frost_pos, "Lese-EA eingefroren", True) == (1, "Lese-EA eingefroren")
+          and T(frost_hd, "Lese-EA eingefroren", True) == (1, "Lese-EA eingefroren")
+          and T(None, "Copier-Meldung 9 min alt (PC offline?)", True)[0] == 1,
+          "Alarm: Terminal zu nur mit Beleg → ⚪; ohne Beleg (Jacob-Fall), mit Position/Hedge, PC offline → 🔴")
+    B = ns["echo_gesehen_belegt"]
+    check(B(gut, jetzt - 600, jetzt) is True and B(dict(gut, pos=[], hd={"1": [{"ticket": 2}]}), jetzt - 600, jetzt) is True
+          and B(dict(gut, pos=[]), jetzt - 600, jetzt) is False and B(frost_pos, jetzt - 600, jetzt) is False
+          and B(gut, jetzt + 60, jetzt) is False and B(dict(gut, updated_at=iso(600)), jetzt - 3600, jetzt) is False and B(None, None, jetzt) is False,
+          "Beleg: nur frische, nicht eingefrorene Zeile nach dem Start mit Position oder Hedge")
     check(F(plan, dict(gut, updated_at=iso(1060)), jetzt)["pl_grund"].startswith("PC offline seit"), "Feld: alt → PC offline")
     check(F(plan, None, jetzt)["pl_grund"] == "keine Copier-Meldung", "Feld: keine Zeile → keine Copier-Meldung")
     check(F(plan, gut, jetzt)["pl_grund"] is None and F(plan, gut, jetzt)["pl_live"] == 155.69, "Feld: frisch → P&L, kein Grund")
@@ -79,6 +86,13 @@ def main():
     check(W(merk, "p1", jetzt + 29 * 60) is None and W(merk, "p1", jetzt + 30 * 60) == 1, "Drossel: Erinnerung erst nach 30 min")
     merk["p1"] = {"erst": jetzt, "n": 2}
     check(W(merk, "p1", jetzt + 5 * 3600) is None, "Drossel: danach nichts mehr")
+
+    src = open(APP, encoding="utf-8").read()
+    tick = src[src.index("\ndef echo_frost_tick("):src.index("\n\n\n", src.index("\ndef echo_frost_tick("))]
+    check("if prio == 3 and n:" in tick and "prio, grund = 1, roh" in tick, "Tick: Erinnerung zu einem 🔴 bleibt 🔴, nie ⚪")
+    check('"art") == "echo_terminal_zu"' in tick and '"schluessel,at,art"' in tick, "Tick: nach Railway-Neustart keine Erinnerung zu einem ⚪")
+    check('"echo_gesehen"' in tick and '"p_status": "open"' in tick and "mt5_baseline_patch" in tick and "eg:mt5_baseline->echo_gesehen" in src,
+          "Tick: Beleg dauerhaft per Merge-RPC (Guard open) am Plan, alarm_tick liest ihn mit")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1

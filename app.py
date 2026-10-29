@@ -3934,7 +3934,7 @@ def alarm_tick():
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
-           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge")
+           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->echo_gesehen")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
@@ -3967,6 +3967,7 @@ def alarm_tick():
 ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S = 9 * 60, 30 * 60, 9 * 60
 _echo_frost = {}   # plan_id → {"erst": ts der ersten Meldung, "n": Zahl der Meldungen}
 _echo_frost_seit = {}   # plan_id → seit wann der Snapshot eingefroren gesehen wird (Railway-Takt)
+_echo_gesehen = set()   # plan_ids, deren mt5_baseline.echo_gesehen dieser Railway-Lauf schon geschrieben hat
 
 
 def echo_frost_urteil(live, jetzt_ts):
@@ -3985,17 +3986,24 @@ def echo_frost_urteil(live, jetzt_ts):
     return False, ""
 
 
-ECHO_FROST_START_S = 15 * 60   # so lange nach dem Start zählt „noch keine Position gesehen" als Ernstfall (Terminal-zu wäre dann falsch)
+def echo_gesehen_belegt(z, started_ts, jetzt_ts):
+    """REIN RECHNEND (testbar): frische, nicht eingefrorene Copier-Zeile NACH dem Plan-Start mit Master-Position oder Hedge → der Copier hat
+    diesen Trade belegt gesehen (Beleg für ⚪ „Terminal zu", wird als mt5_baseline.echo_gesehen am Plan gemerkt)."""
+    if not z or echo_frost_urteil(z, jetzt_ts)[0] or echo_terminal_zu(z):
+        return False
+    try:
+        return not started_ts or datetime.fromisoformat(str(z.get("updated_at")).replace("Z", "+00:00")).timestamp() >= started_ts
+    except (TypeError, ValueError):
+        return False
 
 
-def echo_frost_stufe(z, grund, started_ts, jetzt_ts):
+def echo_frost_stufe(z, grund, gesehen):
     """REIN RECHNEND (testbar): (prio, grund) — 1 = 🔴 Ernstfall, 3 = ⚪ „Master-Terminal zu, Trade wohl beendet". Eingefroren ohne Position
-    und ohne Hedge (echo_terminal_zu) ist das nach dem Trade geschlossene Terminal → ⚪, außer < ECHO_FROST_START_S nach dem Start (dann
-    hat der Copier die Position nie gesehen → 🔴). Andere Gründe (PC/Tab offline, keine Zeile) bleiben 🔴."""
-    if grund == "Lese-EA eingefroren" and echo_terminal_zu(z) and not (started_ts and jetzt_ts - started_ts < ECHO_FROST_START_S):
-        return 3, ECHO_TERMINAL_ZU_TXT
+    und ohne Hedge (echo_terminal_zu) ist nur dann das nach dem Trade geschlossene Terminal, wenn der Copier für DIESEN Plan schon einmal
+    eine Position oder einen Hedge gesehen hat (gesehen = mt5_baseline.echo_gesehen) → ⚪. Sonst sieht „EA tot vor dem Einstieg" (Trade
+    offen, ungehedgt, Snapshot alt und leer) genauso aus (S2-Fund 30.10.2026) → 🔴. Andere Gründe (PC/Tab offline, keine Zeile) bleiben 🔴."""
     if grund == "Lese-EA eingefroren" and echo_terminal_zu(z):
-        return 1, "Lese-EA eingefroren — seit dem Start keine Master-Position gesehen"
+        return (3, ECHO_TERMINAL_ZU_TXT) if gesehen else (1, "Lese-EA eingefroren — für diesen Plan noch keine Master-Position gesehen")
     return 1, grund
 
 
@@ -4036,6 +4044,22 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         pid = str(r["id"])
         login = str((accs.get(str(r["master_account_id"])) or {}).get("external_id") or "").strip()
         z = live.get(login) if login else None
+        try:
+            started_ts = datetime.fromisoformat(str(r.get("started_at")).replace("Z", "+00:00")).timestamp() if r.get("started_at") else None
+        except (TypeError, ValueError):
+            started_ts = None
+        gesehen = bool(r.get("eg")) or pid in _echo_gesehen
+        if not gesehen and echo_gesehen_belegt(z, started_ts, jetzt_ts):
+            # BELEG MERKEN (30.10.2026, S2): einmal je Plan mt5_baseline.echo_gesehen — überlebt Railway-Neustarts; nur Merge, Guard 'open'
+            try:
+                rr = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                                 json={"p_plan": pid, "p_status": "open", "p_patch": {"echo_gesehen": {
+                                     "at": datetime.fromtimestamp(jetzt_ts, timezone.utc).isoformat(), "pos": bool((z or {}).get("pos")),
+                                     "hd": any(v for v in ((z or {}).get("hd") or {}).values()) if isinstance((z or {}).get("hd"), dict) else False}}})
+                _sb_pruefen(rr)
+                _echo_gesehen.add(pid)
+            except Exception as e:
+                print(f"[alarm] ⚠️ echo_gesehen {pid[:8]}: {type(e).__name__}: {e}", flush=True)
         gestoert, grund = echo_frost_urteil(z, jetzt_ts)
         if not gestoert:
             _echo_frost.pop(pid, None)
@@ -4044,18 +4068,15 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         melden, _echo_frost_seit[pid] = echo_frost_karenz(_echo_frost_seit.get(pid), grund, jetzt_ts)
         if not melden:
             continue
-        try:
-            started_ts = datetime.fromisoformat(str(r.get("started_at")).replace("Z", "+00:00")).timestamp() if r.get("started_at") else None
-        except (TypeError, ValueError):
-            started_ts = None
-        prio, grund = echo_frost_stufe(z, grund, started_ts, jetzt_ts)
+        roh = grund
+        prio, grund = echo_frost_stufe(z, grund, gesehen)
         n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
         if n is None:
             continue
         if n == 0 and pid not in _echo_frost:
             # nach einem Railway-Neustart ist der Merker leer — schon gemeldet (alarm_log, 24 h)? dann nur den Merker nachziehen
             try:
-                vorher = sb_select("alarm_log", {"select": "schluessel,at", "schluessel": f"like.echo_blind|{pid}|*",
+                vorher = sb_select("alarm_log", {"select": "schluessel,at,art", "schluessel": f"like.echo_blind|{pid}|*",
                                                  "at": f"gte.{datetime.fromtimestamp(jetzt_ts - 86400, timezone.utc).isoformat()}", "order": "at.asc"}) or []
             except Exception:
                 vorher = []
@@ -4064,7 +4085,8 @@ def echo_frost_tick(rows, namen, jetzt_ts):
                     erst = datetime.fromisoformat(str(vorher[0]["at"]).replace("Z", "+00:00")).timestamp()
                 except (TypeError, ValueError):
                     erst = jetzt_ts
-                _echo_frost[pid] = {"erst": erst, "n": len(vorher)}
+                # war es ⚪ „Terminal zu", kommt keine Erinnerung mehr (n = 2)
+                _echo_frost[pid] = {"erst": erst, "n": 2 if any(v.get("art") == "echo_terminal_zu" for v in vorher) else len(vorher)}
                 n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
                 if n is None:
                     continue
@@ -4074,6 +4096,8 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         wer = namen.get(uid, uid[:8])
         konto = f"{r.get('master_firm') or ''} …{login[-4:]}".strip() if login else str(r.get("master_name") or "")
         mit_hedge = str(r.get("route")) == "mt5"
+        if prio == 3 and n:
+            prio, grund = 1, roh   # die Erinnerung zu einem 🔴 bleibt 🔴 — nie nachträglich ⚪ (S2-Fund 30.10.2026)
         if prio == 3:
             # ⚪ einmal, keine Erinnerung (30.10.2026, Master: „Master-Terminal zu, Trade wohl beendet — Plan prüfen/abhaken")
             text = f"{wer} · {konto} ({'Echo mit Hedge' if mit_hedge else 'Echo V2'}, Plan noch offen): {grund}. Am {pc_txt} ist das Master-Terminal ohne Position und ohne Hedge."
@@ -13163,7 +13187,8 @@ def lt_echo_felder(p, live, jetzt_ts):
     out["mt5_alter_s"] = int(round(alter))
     if alter > LT_ECHO_MAX_ALTER_S or live.get("note"):
         if offen:
-            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"), echo_terminal_zu(live))
+            # „Terminal zu" nur mit Beleg (mt5_baseline.echo_gesehen), sonst bleibt es „Lese-EA eingefroren" (EA tot vor dem Einstieg)
+            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"), echo_terminal_zu(live) and bool(base.get("echo_gesehen")))
         return out
     eq, bal = _wd_num(live.get("eq")), _wd_num(live.get("bal"))
     ccy = str(live.get("ccy") or "").upper() or None
