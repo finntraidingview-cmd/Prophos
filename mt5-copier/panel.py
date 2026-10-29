@@ -1935,9 +1935,9 @@ def _puls_profil():
         return "", f"Puls-Profil nicht lesbar ({type(e).__name__})"
 
 
-def _tab_oeffnen(url=TAB_URL):
+def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
     """Öffnet den Prophos-Tab im Puls-Profil unter der Adresse, die der Tab zuletzt selbst gemeldet hat (localhost ≠ 127.0.0.1 = eigener
-    Login), sonst TAB_URL → (ok, Klartext)."""
+    Login), sonst TAB_URL → (ok, Klartext). lock_gehalten = der Aufrufer hält TV_ORDER_LOCK schon (Stufe 3 der Tab-Heilung)."""
     import urllib.request
     url = url if TAB_URL_RE.fullmatch(str(url or "")) else TAB_URL
     try:
@@ -1950,7 +1950,7 @@ def _tab_oeffnen(url=TAB_URL):
     profil, fehler = _puls_profil()
     if fehler or not profil:
         return False, (fehler or "kein Chrome-Profil bekannt") + " — Tab nicht geöffnet (nie im Reader-Profil)"
-    if not TV_ORDER_LOCK.acquire(blocking=False):
+    if not lock_gehalten and not TV_ORDER_LOCK.acquire(blocking=False):
         return False, "Puls läuft gerade im Browser — nächster Versuch später"
     try:
         if not _browser_und_mt5_frei(tv_eigen=True):
@@ -1963,7 +1963,8 @@ def _tab_oeffnen(url=TAB_URL):
     except Exception as e:
         return False, f"Öffnen fehlgeschlagen: {type(e).__name__}: {e}"
     finally:
-        TV_ORDER_LOCK.release()
+        if not lock_gehalten:
+            TV_ORDER_LOCK.release()
 
 
 # ══ UPDATE-SCHUTZ (29.10.2026, Master nach dem Befund „Deploy-Welle": fünf Abrisse in zwei Stunden, jeder 1–2 min nach einem Push mit
@@ -2197,7 +2198,7 @@ def tab_heil_lage(still_s, login, sb_s, rt_aus_s):
         return still_s, f"Prophos-Tab fragt seit {int(still_s // 60)} min nicht (eingefroren/verworfen)"
     if login and sb_s is not None and sb_s >= TAB_HEIL_SB_S:
         return sb_s, f"Prophos-Tab ohne Supabase-Verbindung seit {int(sb_s // 60)} min (kein Schreiben)"
-    if rt_aus_s is not None and rt_aus_s >= TAB_HEIL_RT_S:
+    if login and rt_aus_s is not None and rt_aus_s >= TAB_HEIL_RT_S:   # ohne Login baut der Tab keinen Realtime-Kanal auf (S2)
         return rt_aus_s, f"Prophos-Tab ohne Realtime seit {int(rt_aus_s // 60)} min"
     return None, ""
 
@@ -2343,23 +2344,39 @@ def _prophos_tab_neuladen_cdp():
         TV_ORDER_LOCK.release()
 
 
-def _prophos_tab_neu_oeffnen():
-    """Stufe 3 → (ok, Klartext): alten Prophos-Tab im Puls-Chrome schließen (/json/close), dann frisch im EIGENEN Fenster öffnen."""
+def _prophos_tab_neu_oeffnen(still_s=None):
+    """Stufe 3 → (ok, Klartext): unter TV_ORDER_LOCK den alten Prophos-Tab im Puls-Chrome schließen (/json/close) und erst, wenn er
+    nachweislich aus der CDP-Liste verschwunden ist, frisch im EIGENEN Fenster öffnen (Prüfer S2: nie zwei Prophos-Tabs). Ist kein alter
+    Tab im Puls-Chrome zu finden, nur dann öffnen, wenn auch kein Tab mehr beim Panel fragt (still_s ≥ TAB_HEIL_START_S)."""
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "Puls läuft gerade im Browser — nächster Versuch später"
     try:
-        if TV_ORDER_LOCK.locked() or not _browser_und_mt5_frei():
-            return False, "Puls/MT5-Order läuft gerade — nächster Versuch später"
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "MT5-Order/Polar läuft gerade — nächster Versuch später"
         liste = _cdp_get("/json/list")
         pro, _tv = cdp_prophos_ziele(liste if isinstance(liste, list) else [], _TAB_OEFFNEN.get("url") or "")
         if pro:
             _cdp_get(f"/json/close/{pro['id']}")
-            time.sleep(1.5 + random.random() * 1.5)
-        ok, msg = _tab_oeffnen(_TAB_OEFFNEN.get("url") or TAB_URL)
+            weg = False
+            for _ in range(6):
+                time.sleep(0.8 + random.random() * 0.6)
+                l2 = _cdp_get("/json/list")
+                if not any(isinstance(t, dict) and t.get("id") == pro["id"] for t in (l2 if isinstance(l2, list) else [])):
+                    weg = True
+                    break
+            if not weg:
+                return False, "alter Prophos-Tab ließ sich nicht schließen — kein zweiter Tab geöffnet"
+        elif still_s is None or still_s < TAB_HEIL_START_S:
+            return False, "kein alter Prophos-Tab im Puls-Chrome, aber ein Tab fragt noch beim Panel — kein zweiter Tab geöffnet"
+        ok, msg = _tab_oeffnen(_TAB_OEFFNEN.get("url") or TAB_URL, lock_gehalten=True)
         if ok:
             _TAB_OEFFNEN["geoeffnet"].append(datetime.now().isoformat(timespec="seconds"))
             _TAB_OEFFNEN["geoeffnet_at"] = time.time()
         return ok, ("alter Tab geschlossen, " if pro else "") + msg
     except Exception as e:
         return False, f"Neu öffnen fehlgeschlagen: {type(e).__name__}: {e}"
+    finally:
+        TV_ORDER_LOCK.release()
 
 
 def _tab_heil_melden(grund):
@@ -2407,7 +2424,8 @@ def _tab_heil_schritt(pc, still0):
         TAB_HEIL["letzte"] = jetzt
     TAB_HEIL["ep"] = ep_neu or {"stufe": 0, "at": 0.0, "start": jetzt}
     if aktion:
-        tun = {"wecken": _prophos_tab_wecken, "neuladen": _prophos_tab_neuladen_cdp, "neu_oeffnen": _prophos_tab_neu_oeffnen}.get(aktion)
+        tun = {"wecken": _prophos_tab_wecken, "neuladen": _prophos_tab_neuladen_cdp,
+               "neu_oeffnen": lambda: _prophos_tab_neu_oeffnen(still0)}.get(aktion)
         if tun:
             ok, msg = tun()
             grund = f"{grund} → {'ok' if ok else 'NICHT ok'}: {msg}"
@@ -2438,15 +2456,32 @@ EA_FROST_NACH_S = 5 * 60
 EA_FROST_MAX_S = 12 * 3600      # länger still = die Instanz läuft auf diesem PC gar nicht (Login auf zwei PCs eingetragen) → nie heilen
 EA_STATUS_FRISCH_S = 60         # Positionen/Hedges zählen nur aus einem frischen Copier-Stand (alte Statusdatei = kein Beleg)
 EA_FROST = {}   # config_file → {"letzter": ts, "geprueft": bool, "grund": str}
+EA_FROST_HAELT = set()   # config_files, deren Order-Sperre die EA-Heilung gerade hält (Order/Close antworten dann „gleich erneut")
 
 
-def ea_frost_entscheiden(snap_alter_s, gebraucht, letzter, jetzt, puls_frei, order_frei, terminal_da):
-    """REIN RECHNEND (testbar): (heilen: bool, grund). gebraucht = Grund, warum die Instanz gebraucht wird ('' = nicht)."""
+def _instanz_heilt(inst):
+    """True = für diese Instanz läuft gerade eine EA-Heilung (eigene Sperre der Heilung oder HEAL_ACTIVE des Terminals) — Order/Close
+    antworten dann 409 retry_ok:true statt „unklar" (Prüfer S2 30.10.2026 zu 21c004d7: master-close route mt5 lief sonst in retry_ok:false)."""
+    if inst["config_file"] in EA_FROST_HAELT:
+        return True
+    cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+    tpath = str(cfg.get("master_terminal_path") or "").strip()
+    d = os.path.dirname(os.path.abspath(tpath)) if tpath else ""
+    with HEAL_LOCK:
+        return bool(d) and d in HEAL_ACTIVE
+
+
+def ea_frost_entscheiden(snap_alter_s, gebraucht, letzter, jetzt, puls_frei, order_frei, terminal_da, hedges_offen=False):
+    """REIN RECHNEND (testbar): (heilen: bool, grund). gebraucht = Grund, warum die Instanz gebraucht wird ('' = nicht).
+    hedges_offen (Prüfer S2 30.10.2026): der erste frische Snapshot nach dem Neustart kann vor dem Server-Sync 0 Positionen zeigen, und der
+    Copier schlösse daraufhin die Hedges (copier.py Master-zu-Weg) — bei offenen Hedges deshalb NIE heilen, nur melden."""
     if snap_alter_s is None or snap_alter_s <= EA_FROST_S or not gebraucht:
         return False, ""
     warum = f"Snapshot seit {int(snap_alter_s)} s eingefroren ({gebraucht})"
     if snap_alter_s > EA_FROST_MAX_S:
         return False, f"{warum} — über {EA_FROST_MAX_S // 3600} h still: Instanz läuft auf diesem PC wohl nicht, keine Heilung (zweites Terminal?)"
+    if hedges_offen:
+        return False, f"{warum} — offene Hedges: keine automatische Heilung (Neustart könnte sie schließen), Lese-EA am PC von Hand prüfen"
     if not terminal_da:
         return False, f"{warum} — kein master_terminal_path in der Config, Heilung nicht möglich"
     if not puls_frei:
@@ -2509,12 +2544,17 @@ def _ea_frost_waechter():
                         _tab_stand_holen(pc, g)
                 lock = MASTER_ORDER_LOCKS.setdefault(fname, threading.Lock())
                 path = str(cfg.get("master_terminal_path") or "").strip()
-                ja, grund = ea_frost_entscheiden(alter, ea_gebraucht(st, login, echo_logins, st_alter), m["letzter"], jetzt,
+                gebraucht = ea_gebraucht(st, login, echo_logins, st_alter)
+                # offene Hedges laut frischem Copier-Stand (auch wenn „gebraucht" schon aus den Master-Positionen kommt)
+                hedges_offen = ea_gebraucht({"hedges": st.get("hedges")}, "", [], st_alter) == "offene Hedges"
+                ja, grund = ea_frost_entscheiden(alter, gebraucht, m["letzter"], jetzt,
                                                  not TV_ORDER_LOCK.locked() and _browser_und_mt5_frei(tv_eigen=True),
-                                                 not lock.locked(), path.lower().endswith("terminal64.exe"))
+                                                 not lock.locked(), path.lower().endswith("terminal64.exe"), hedges_offen)
                 if grund and grund != m["grund"]:
                     print(f"[ea-frost] {fname}: {grund}", flush=True)
                     m["grund"] = grund
+                    if "offene Hedges" in grund and pc_id_lesen():
+                        _tab_stand_holen(pc_id_lesen(), f"EA {fname}: {grund}")   # Spur an Railway (🔴 echo_blind folgt nach der Karenz)
                 if not ja:
                     continue
                 time.sleep(random.random() * 15)                    # gestreut (Jitter-Regel)
@@ -2525,6 +2565,7 @@ def _ea_frost_waechter():
                     lock.release()
                     continue
                 m.update(letzter=time.time(), geprueft=False)
+                EA_FROST_HAELT.add(fname)
                 g = f"EA-Heilung {fname}: {grund} → Terminal neu + EA aufziehen"
                 print(f"[ea-frost] {g}", flush=True)
                 pc = pc_id_lesen()
@@ -2535,6 +2576,7 @@ def _ea_frost_waechter():
                     try:
                         _heal_ea(fname, cfg, os.path.dirname(os.path.abspath(path)), time.time(), 15)
                     finally:
+                        EA_FROST_HAELT.discard(fname)
                         lock.release()
                 threading.Thread(target=_heilen, daemon=True).start()
         except Exception as e:
@@ -5389,6 +5431,9 @@ class Handler(BaseHTTPRequestHandler):
                     "grund": "copier_alt", "msg":
                     "Copier liefert keine frischen Daten — die Order wuerde UNGEHEDGET "
                     "bleiben. Erst den Trade-Start-Check gruen bekommen."}, ensure_ascii=False))
+            if _instanz_heilt(inst):
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "terminal_heilt", "msg":
+                    "Terminal wird gerade geheilt (EA-Selbstheilung, nichts gesendet) — gleich erneut."}, ensure_ascii=False))
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):
@@ -5498,6 +5543,9 @@ class Handler(BaseHTTPRequestHandler):
                     "Copier liefert keine frischen Daten — der Hedge wuerde das Close "
                     "nicht mitgehen und bliebe allein offen. Erst Copier gruen bekommen."},
                     ensure_ascii=False))
+            if _instanz_heilt(inst):
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True, "grund": "terminal_heilt", "msg":
+                    "Terminal wird gerade geheilt (EA-Selbstheilung, nichts gesendet) — gleich erneut."}, ensure_ascii=False))
             with MASTER_ORDER_GUARD:
                 lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
             if not lock.acquire(blocking=False):

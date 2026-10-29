@@ -18488,6 +18488,11 @@ def code_tab_stand(pc):
                            if str(x.get("status")) == "open" and str(x.get("route") or "") in ("mt5", "mt5v2") and x.get("master_account_id")})
         echo_logins = sorted({str(a.get("external_id") or "").strip() for a in (sb_select("accounts", {"select": "external_id",
                               "id": "in.(" + ",".join(echo_ids) + ")"}) or [])} - {""}) if echo_ids else []
+        # nur Logins, deren jüngste Copier-Zeile von DIESEM PC kommt (Prüfer S2 30.10.2026: ein Login kann auf zwei PCs eingetragen sein —
+        # geheilt wird nur dort, wo er zuletzt lief, nie ein zweites Terminal)
+        if echo_logins:
+            echo_logins = sorted(lg for lg, z in lt_echo_live_wahl(sb_select("mt5_live", {"select": "master_login,pc_name,updated_at",
+                                 "master_login": "in.(" + ",".join(echo_logins) + ")"}) or []).items() if str(z.get("pc_name") or "") == pc)
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Stand nicht lesbar: {type(e).__name__}"}), 503
     spur = (request.args.get("panel") or "").strip()[:200]

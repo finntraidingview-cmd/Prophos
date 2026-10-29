@@ -2578,8 +2578,9 @@ def test_panel_tab_wecken_ea_frost():
             print("✗ Tab wecken / EA-Heilung: " + name); ok = False
     L, S = panel.tab_heil_lage, panel.tab_heil_stufe
     chk(L(200, True, 10, 0)[0] == 200 and L(100, True, 200, 0)[0] == 200 and "Supabase" in L(100, True, 200, 0)[1]
-        and L(100, False, 999, 0) == (None, "") and L(100, True, 20, 400)[0] == 400 and L(100, True, None, None) == (None, ""),
-        "Lage: still ≥ 3 min, angemeldet ohne Supabase ≥ 3 min, Realtime ≥ 5 min — sonst gesund (alter Tab ohne Felder = gesund)")
+        and L(100, False, 999, 0) == (None, "") and L(100, True, 20, 400)[0] == 400 and L(100, True, None, None) == (None, "")
+        and L(100, False, None, 999) == (None, ""),
+        "Lage: still ≥ 3 min, angemeldet ohne Supabase ≥ 3 min bzw. ohne Realtime ≥ 5 min — ohne Login/alter Tab gesund")
     j = 10_000.0
     a1, g1, e1 = S(None, 200, "P", j, "", True, 300, 0)
     a2, _, e2 = S(e1, 200, "P", j + 30, "", True, 300, j)
@@ -2611,7 +2612,9 @@ def test_panel_tab_wecken_ea_frost():
         "heilen erst > 60 s eingefroren und nur gebraucht")
     chk("Puls" in E(120, "x", 0, j, False, True, True)[1] and "MT5-Order" in E(120, "x", 0, j, True, False, True)[1]
         and "master_terminal_path" in E(120, "x", 0, j, True, True, False)[1] and "zuletzt geheilt" in E(120, "x", j - 600, j, True, True, True)[1]
-        and "12 h" in E(13 * 3600, "x", 0, j, True, True, True)[1] and E(120, "x", j - 901, j, True, True, True)[0],
+        and "12 h" in E(13 * 3600, "x", 0, j, True, True, True)[1] and E(120, "x", j - 901, j, True, True, True)[0]
+        and not E(120, "offene Hedges", 0, j, True, True, True, True)[0] and "nur melden" not in E(120, "x", 0, j, True, True, True, True)[1]
+        and "von Hand" in E(120, "x", 0, j, True, True, True, True)[1],
         "nie bei Puls/Polar oder MT5-Order, nie ohne Terminal-Pfad, 1× je 15 min, nie über 12 h still (zweites Terminal)")
     q = inspect.getsource(panel._tab_oeffnen)
     chk('"--new-window"' in q, "Neu-Öffnen im eigenen Fenster")
@@ -2620,9 +2623,15 @@ def test_panel_tab_wecken_ea_frost():
         and q.count("TV_ORDER_LOCK.release()") == 2 and "click" not in q.lower() and "taste" not in q.lower(),
         "Wecken/Neu laden: unter TV_ORDER_LOCK, nur /json/activate bzw. Page.reload, gestreut, kein Klick/Taste")
     q = inspect.getsource(panel._prophos_tab_neu_oeffnen)
-    chk("/json/close/" in q and "_tab_oeffnen(" in q and "_browser_und_mt5_frei()" in q, "Neu öffnen: alten Prophos-Tab schließen, frisch im eigenen Fenster")
+    chk("TV_ORDER_LOCK.acquire(blocking=False)" in q and "/json/close/" in q and "lock_gehalten=True" in q and "if not weg:" in q
+        and q.index("if not weg:") < q.index("_tab_oeffnen(") and "still_s < TAB_HEIL_START_S" in q,
+        "Neu öffnen: unter TV_ORDER_LOCK, erst nach bewiesenem Schließen bzw. ohne alten Tab nur, wenn keiner mehr fragt")
+    q = inspect.getsource(panel.Handler)
+    chk(q.count("if _instanz_heilt(inst):") == 2 and q.count('"retry_ok": True, "grund": "terminal_heilt"') >= 2,
+        "laufende EA-Heilung: Master-Order und Master-Close antworten 409 retry_ok:true (alle Routen), nie „unklar\"")
     q = inspect.getsource(panel._ea_frost_waechter)
     chk("lock.acquire(blocking=False)" in q and "lock.release()" in q and "_heal_ea(" in q and "random.random()" in q
+        and "EA_FROST_HAELT.add(fname)" in q and "EA_FROST_HAELT.discard(fname)" in q and "hedges_offen" in q
         and "_panel_fehlerfoto(" in q and "EA_FROST_NACH_S" in q, "EA-Wächter: Order-Sperre gehalten, gestreut, Nachkontrolle mit Fehlerfoto")
     if ok:
         print("✓ Tab wecken / EA-Heilung: Riegel, CDP-Ziele, gebraucht nur frisch, 1× je 15 min, eigenes Fenster, kein Klick")
