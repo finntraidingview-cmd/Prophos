@@ -3896,6 +3896,23 @@ def alarm_userscript_update():
     daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg, "art": "tsx" if tsx else "tv", "trail": kurz("trail", 400)}
     # 24-h-Drossel je Schlüssel (Prüfer 29.10.2026): der Tab meldet je PC nur einmal — verliert er seinen localStorage oder laufen zwei Tabs,
     # käme dieselbe Meldung sonst wieder. Gemerkt im Prozess UND in alarm_log (mehrere Worker, Neustart).
+    # ÜBERSPRUNGEN (29.10.2026, Master: „Spur + alarm_log userscript_tm_* auch bei ‚übersprungen: Grund', damit wir den Rollout sehen"):
+    # der Tab meldet, warum Schritt D an diesem PC (noch) nicht lief — nur alarm_log, KEIN Push (sonst ein Strom ⚪ je PC), 24 h je PC × Grund
+    if d.get("uebersprungen") is True:
+        grund = kurz("grund", 80)
+        key = f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}|skip|{re.sub(r'[^a-z0-9]+', '-', grund.lower())[:40]}"
+        if not _tm_melde_frei(key):
+            return jsonify({"ok": True, "gedrosselt": True})
+        daten["grund"] = grund
+        try:
+            _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/alarm_log",
+                        json={"prio": 3, "art": "userscript_tm_skip", "titel": f"Tampermonkey übersprungen: {wer}"[:120],
+                              "text": f"{wer}: {was}-Update (Schritt D) wartet — {grund or '?'}"[:400], "uid": uid if re.fullmatch(r"[0-9a-f-]{36}", str(uid)) else None,
+                              "schluessel": key, "daten": daten, "zugestellt": 0, "geraete": 0},
+                        headers=_sb_headers("return=minimal"), timeout=10)
+        except Exception as e:
+            print(f"[tm] ⚠️ übersprungen loggen: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": True})
     key = f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}" + ("" if d.get("ok") is True else "|fehl")
     if not _tm_melde_frei(key):
         return jsonify({"ok": True, "gedrosselt": True})
@@ -3912,6 +3929,75 @@ def alarm_userscript_update():
 
 
 _TM_LINK = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
+
+
+# ══ SCHRITT D BEI BLINDEM READER (29.10.2026, Master/Finn: Lader-Rollout stand still — auf 10 von 12 HT-PCs ist der Puls-Chrome-Reader blind
+# (positionen_ok false), die Freigabe des PC-Tabs verlangt aber eine sehende, leere Positionsliste → Tampermonkey-Update und TV-Neuladen liefen
+# nirgends). Ersatz-Beweis aus der DB, wenn der Reader nichts beweisen kann: für diese ID kein Plan open, kein review-Plan mit lebendem Hedge,
+# kein Start < 45 min (auch unbestätigt; bis 65 min überfällig = noch im Startfenster), keine offene Fremd-Position (fremd_positionen, Hand-Trade
+# ohne Plan — der Tab kann die Tabelle per RLS nicht lesen) und auf diesem PC keine MT5-Position laut Lese-EA (mt5_live.master_positions ≤ 2 min).
+# Nur lesen. Neuladen/Tampermonkey schließt keine Position — die Sperre schützt vor einem Eingriff mitten in einem Lauf. ══
+TM_BLIND_START_S = 45 * 60
+TM_BLIND_UEBERFAELLIG_S = 65 * 60
+TM_BLIND_HEDGE_LEBT = ("offen", "schliesst", "oeffnet")
+
+
+def tm_blind_frei_rechnen(plaene, fremd, live, jetzt):
+    """REIN RECHNEND (testbar): plaene [{status, start_um, start_um_gestartet_at, started_at, hedge_status}], fremd [{weg_at}], live
+    [{updated_at, n_pos}] (Zeilen dieses PCs) → '' (frei) oder der erste Grund."""
+    def ts(v):
+        # PostgREST-Formen („…+00", 1–9 Nachkommastellen) wie _payout_ts normieren — Python < 3.11 parst sie sonst nicht
+        t = re.sub(r"\.(\d{1,6})\d*", lambda m: "." + m.group(1).ljust(6, "0"), str(v or "").strip().replace("Z", "+00:00"))
+        t = re.sub(r"([+-]\d{2})$", r"\1:00", t)
+        try:
+            return datetime.fromisoformat(t).timestamp()
+        except (TypeError, ValueError):
+            return None
+    for p in plaene or []:
+        st = str(p.get("status") or "")
+        if st == "open":
+            return "offener Plan"
+        if st == "review" and str(p.get("hedge_status") or "") in TM_BLIND_HEDGE_LEBT:
+            return "Hedge eines beendeten Plans noch offen"
+        if st == "planned":
+            t = ts(p.get("start_um"))
+            if t is None:
+                continue
+            d = t - jetzt
+            if d < TM_BLIND_START_S and (d > -TM_BLIND_UEBERFAELLIG_S or (p.get("start_um_gestartet_at") and not p.get("started_at"))):
+                return "Start in < 45 min"
+    if any(not f.get("weg_at") for f in fremd or []):
+        return "Fremd-Position (Hand-Trade ohne Plan) offen"
+    for z in live or []:
+        t = ts(z.get("updated_at"))
+        if int(z.get("n_pos") or 0) > 0 and (t is None or jetzt - t <= 120):   # Zeit unlesbar → lieber gesperrt (fail-closed)
+            return "MT5-Position laut Lese-EA offen"
+    return ""
+
+
+@app.route("/alarm/userscript-frei", methods=["GET", "OPTIONS"])
+def alarm_userscript_frei():
+    """GET ?pc=pc-xxxx → {frei, grund}: Ersatz-Freigabe für Schritt D/TV-Neuladen bei blindem Reader (s. oben). Nur die eigene ID des Logins;
+    Lesefehler → nicht frei (fail-closed)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    pc = str(request.args.get("pc") or "")
+    if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
+        return jsonify({"ok": True, "frei": False, "grund": "PC-Kennung fehlt"})
+    try:
+        plaene = [dict(p, hedge_status=((p.get("hedge") or {}) if isinstance(p.get("hedge"), dict) else {}).get("status"))
+                  for p in _sb_all("trade_plans", {"select": "status,start_um,start_um_gestartet_at,started_at,hedge:mt5_baseline->hedge",
+                                                   "user_id": f"eq.{uid}", "status": "in.(open,review,planned)"})]
+        fremd = sb_select("fremd_positionen", {"select": "weg_at", "user_id": f"eq.{uid}", "weg_at": "is.null", "limit": "5"}) or []
+        live = [{"updated_at": z.get("updated_at"), "n_pos": len(z.get("pos")) if isinstance(z.get("pos"), list) else 0}
+                for z in (sb_select("mt5_live", {"select": "updated_at,pos:status->master_positions", "pc_name": f"eq.{pc}"}) or [])]
+    except Exception as e:
+        return jsonify({"ok": True, "frei": False, "grund": f"DB nicht lesbar ({type(e).__name__})"})
+    grund = tm_blind_frei_rechnen(plaene, fremd, live, time.time())
+    return jsonify({"ok": True, "frei": not grund, "grund": grund})
 TM_MELDE_ABSTAND_S = 86400
 _TM_GEMELDET = {}
 

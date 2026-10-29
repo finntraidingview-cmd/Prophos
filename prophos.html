@@ -26244,11 +26244,17 @@
     tv:  { name: 'Userscript', erster: '0.10.0', paarKey: 'prophos_tvneu_paar', tab: 'tv' },
     tsx: { name: 'TopstepX-Auge', erster: '0.3.0', paarKey: 'prophos_tvneu_paar_tsx', tab: 'tsx' }
   }
+  /* BLIND ≠ OFFEN (29.10.2026, Befund Slave 4: auf 10 von 12 HT-PCs meldet der Puls-Chrome-Reader positionen_ok false — Schritt D und das
+   * Neuladen warteten dort für immer auf „Position offen oder Reader blind", der Lader-Rollout stand). blind = der Reader beweist nichts
+   * (positionen_ok nicht true); dann gilt NICHT posGrund, sondern vor jedem Eingriff die Ersatz-Freigabe aus der DB (tvnDbFrei, Railway
+   * /alarm/userscript-frei: kein offener Plan, kein Hedge, kein Start < 45 min, keine Fremd-Position, keine MT5-Position dieses PCs). Sieht
+   * der Reader, zählt wie bisher die Liste: eine Position = nie eingreifen. */
   function tvnBlickTv(){
     const st = tvnPulsStand(); if(!st) return null
     const tab = (st.tabs || []).find(t => t && t.tab_id === st.positionen_tab)
-    return { art: 'tv', lader: (st.lader && typeof st.lader === 'object') ? st.lader : null, version: (tab && tab.version) || '',
-      posGrund: (st.positionen_ok !== true || !Array.isArray(st.positionen) || st.positionen.length) ? 'Position offen oder Reader blind' : '' }
+    const blind = st.positionen_ok !== true || !Array.isArray(st.positionen)
+    return { art: 'tv', lader: (st.lader && typeof st.lader === 'object') ? st.lader : null, version: (tab && tab.version) || '', blind,
+      posGrund: blind ? '' : st.positionen.length ? 'Position offen' : '' }
   }
   // REIN RECHNEND: Antwort von GET /api/tsx-stand → Blick | null (kein frischer Stand ≤ 10 s)
   function tvnBlickTsx(r){
@@ -26312,6 +26318,36 @@
     const bw = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : 'Zustand nicht lesbar'; if(bw) return bw
     return ''
   }
+  // Ersatz-Freigabe bei blindem Reader (29.10.2026): Railway prüft Pläne/Hedges/Starts/Fremd-Positionen der ID und MT5-Positionen des PCs.
+  // → '' (frei) oder Grund; jeder Fehler = nicht frei (fail-closed)
+  async function tvnDbFrei(){
+    try{
+      const pc = hedgePcId(); if(!pc) return 'PC-Kennung fehlt'
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return 'nicht angemeldet'
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 12000)
+      const r = await fetch(`${WATCHER_HOME}/alarm/userscript-frei?pc=${encodeURIComponent(pc)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = r.ok ? await r.json().catch(() => null) : null
+      if(!d || d.ok !== true) return 'Freigabe nicht prüfbar' + (r.ok ? '' : ` (HTTP ${r.status})`)
+      return d.frei === true ? '' : String(d.grund || 'nicht frei').slice(0, 80)
+    }catch(e){ return 'Freigabe nicht prüfbar' }
+  }
+  // „Übersprungen: Grund" an Railway (alarm_log userscript_tm_skip, ohne Push) — nur solange Schritt D an diesem PC nötig ist und noch nicht
+  // versucht wurde; je Script höchstens alle 6 h und bei neuem Grund (localStorage), dazu drosselt Railway 24 h je PC × Grund
+  const TVTM_SKIP_KEY = art => 'prophos_tvtm_skip_' + art, TVTM_SKIP_MS = 6 * 3600000
+  const TVTM_SKIP_STILL = ['letztes Neuladen < 30 min', 'kein frischer Stand', 'an diesem PC schon versucht', 'Lader aktuell', 'localStorage nicht lesbar']
+  async function tvTmSkipMelden(b, grund){
+    try{
+      if(!grund || TVTM_SKIP_STILL.includes(grund) || /Version unbekannt oder ≥/.test(grund) || tvTmNoetig(b)) return
+      try{ if(localStorage.getItem(tvTmKey(b.art))) return }catch(_){ return }
+      let alt = null; try{ alt = JSON.parse(localStorage.getItem(TVTM_SKIP_KEY(b.art)) || 'null') }catch(_){}
+      if(alt && alt.grund === grund && Date.now() - (Number(alt.at) || 0) < TVTM_SKIP_MS) return
+      try{ localStorage.setItem(TVTM_SKIP_KEY(b.art), JSON.stringify({ grund, at: Date.now() })) }catch(_){ return }
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return
+      await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uebersprungen: true, grund: String(grund).slice(0, 80), von: (b.lader && b.lader.laeuft) || b.version || '',
+          soll: `Lader ${tvTmSoll(b.art)}`, pc: hedgePcId() || '', art: b.art, blind: !!b.blind }) })
+    }catch(e){ console.warn('[tv-neuladen] übersprungen melden', (e && e.message) || e) }
+  }
   async function tvTmTick(b){
     const a = TVN_ART[b.art], key = tvTmKey(b.art), von = (b.lader && b.lader.laeuft) || b.version || ''
     const marke = new Date().toISOString() + '#' + Math.random().toString(36).slice(2, 8)   // eigener Wert: nur den eigenen Versuch zurücknehmen
@@ -26367,15 +26403,28 @@
     }
     if(window._tvNeuLaeuft) return
     const blicke = [tvnBlickTv(), bTsx].filter(Boolean)
+    // Blinder Reader (29.10.2026): Ersatz-Freigabe aus der DB, frisch vor jedem Eingriff — sonst kein Eingriff, Grund gemeldet
+    const dbFrei = async () => blicke.some(x => x.blind) ? tvnDbFrei() : ''
     // erst die einmalige Lader-Installation — nur wenn auch das ANDERE Script nichts Offenes sieht (der Tampermonkey-Weg öffnet einen Tab und
     // drückt mit der echten Maus; Hand-Trades ohne Plan im anderen Fenster sperren so auch, Prüfer 29.10.2026)
-    for(const b of blicke) if(!tvTmFrei(b)) return blicke.some(x => x !== b && x.posGrund) ? undefined : tvTmTick(b)
-    for(const b of blicke) if(!tvNeuladenFrei(b)) return tvNeuladenLauf(b)
+    for(const b of blicke){
+      const g = tvTmFrei(b)
+      if(g){ tvTmSkipMelden(b, g); continue }
+      const anders = blicke.find(x => x !== b && x.posGrund); if(anders){ tvTmSkipMelden(b, anders.posGrund); return }
+      const gDb = await dbFrei(); if(gDb){ tvTmSkipMelden(b, 'Reader blind, ' + gDb); return }
+      if(window._tvNeuLaeuft || tvTmFrei(b)) return   // nach dem Warten auf Railway erneut prüfen (Start/Signal könnte inzwischen laufen)
+      return tvTmTick(b)
+    }
+    for(const b of blicke) if(!tvNeuladenFrei(b)){
+      const gDb = await dbFrei(); if(gDb) return
+      if(window._tvNeuLaeuft || tvNeuladenFrei(b)) return
+      return tvNeuladenLauf(b)
+    }
   }
   ;(function tvnLoop(){ setTimeout(async () => { try{ await tvNeuladenTick() }catch(e){ console.warn('[tv-neuladen]', (e && e.message) || e) } tvnLoop() },
     TVN_TAKT_MIN_MS + Math.random() * (TVN_TAKT_MAX_MS - TVN_TAKT_MIN_MS)) })()
   window._tvNeuladen = { frei: tvNeuladenFrei, tmFrei: tvTmFrei, tmNoetig: tvTmNoetig, tick: tvNeuladenTick, letzter: () => _tvnLetzter, planSperre: tvnPlanSperre,
-    blickTv: tvnBlickTv, blickTsx: tvnBlickTsx }   // Test-Haken
+    blickTv: tvnBlickTv, blickTsx: tvnBlickTsx, dbFrei: tvnDbFrei, skipMelden: tvTmSkipMelden }   // Test-Haken
   window._heimWache = { tick: heimWacheTick, wiederholen: heimWiederholen, stand: () => ({ fremdSeit: _hwFremdSeit, naechster: _hwNaechsterHeimweg, wiederN: _hwWiederN, wiederGeplant: !!_hwWiederTimer, fehlN: _hwFehlN, pulsWegAt: _hwPulsWegAt, aus: _hwAus, okOffen: _hwOkOffen, okFremdN: _hwOkFremdN,
     unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()),
     endHalt: Object.assign({}, _hwEndHalt), blindSeit: _hwBlindSeit, blindErledigt: _hwBlindErledigt }), steht: pulsStehtImKonto, heimFrei: pulsHeimFrei }   // Test-Haken (Stub)
@@ -50412,7 +50461,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1857'
+  const OS_TAB_BUILD = '2026-09-22.1858'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
