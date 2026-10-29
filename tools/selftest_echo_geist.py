@@ -37,7 +37,7 @@ def zeile(anfang):
 def js(prog_koerper):
     code = "\n".join([
         zeile("  function routeIstEcho(r){"),
-        bis("  const ECHO_GEIST_AB_MS =", "window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs }"),
+        bis("  const ECHO_GEIST_AB_MS =", "window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs, reif: echoEndeReif }"),
         zeile("  const HEDGE_REVIEW_GRUENDE ="),
         zeile("  const HEDGE_REVIEW_SPAET ="),
         zeile("  const NIE_DA_LESUNGEN ="),
@@ -92,6 +92,12 @@ out.geist_copier_gestoppt = echoGeistFaellig(jacob, { alive: false, lesen: true,
 out.geist_review = echoGeistFaellig(pMt5(jacob.mt5Baseline, 'review'), frost, J, null)
 out.geist_v2_lesen_frisch = echoGeistFaellig({ id: 'v', route: 'mt5v2', status: 'open', mt5Baseline: { master_balance: 1, at: iso(J - 60*M) } }, { alive: false, lesen: true, status: { note: null, master_positions: [] } }, J, null)
 out.beleg_max = echoBelegMs(pMt5({ at: iso(J - 400*M), schon_zu: { at: iso(J - 20*M) } })) === J - 20*M
+out.reif_normal = echoEndeReif({ streak: 2, beruhigen: false }, J)
+out.reif_normal_1 = echoEndeReif({ streak: 1, beruhigen: false }, J)
+out.reif_beruhigen_10s = echoEndeReif({ streak: 3, beruhigen: true, flachSeit: J - 10000 }, J)
+out.reif_beruhigen_89s = echoEndeReif({ streak: 18, beruhigen: true, flachSeit: J - 89000 }, J)
+out.reif_beruhigen_90s = echoEndeReif({ streak: 19, beruhigen: true, flachSeit: J - 90000 }, J)
+out.reif_beruhigen_ohne_uhr = echoEndeReif({ streak: 19, beruhigen: true }, J)
 // Orbit V2 nach Hedge-Hand-Close
 var hp = (h, extra) => Object.assign({ id: 'm', route: 'tvv2', status: 'open', startedAt: iso(J - 600*M), mt5Baseline: Object.assign({ hedge: h }, extra || {}) })
 out.hand_faellig = hedgeHandFlachFaellig(hp({ status: 'geschlossen', grund: 'hand', closed_at: iso(J - 2*M) }), J)
@@ -137,6 +143,9 @@ print(JSON.stringify(out))
         check(not r["geist_copier_gestoppt"], "mit Hedge: gestoppter Copier → keine (wirkungslose) Lesung")
         check(not r["geist_review"] and not r["geist_v2_lesen_frisch"], "nur offene Pläne; V2 mit frischer Lese-Instanz → normaler Weg")
         check(r["beleg_max"], "Beleg-Zeit = jüngster Beleg (schon_zu nach Puls-Spur)")
+        check(r["reif_normal"] and not r["reif_normal_1"], "selbst gesehene Position: Ende wie bisher nach 2 frischen 0-Messungen")
+        check(not r["reif_beruhigen_10s"] and not r["reif_beruhigen_89s"] and r["reif_beruhigen_90s"] and not r["reif_beruhigen_ohne_uhr"],
+              "S2-Stopp: nach Re-Arm/nicht frisch/Anstoß Ende erst nach ≥ 90 s ununterbrochen frisch+flach (frisch geöffnetes Terminal vor Server-Sync)")
         check(r["hand_faellig"] and not r["hand_zu_frisch"], "Orbit V2: Hedge von Hand zu ≥ 60 s, Plan open → Flach-Prüfung")
         check(not r["hand_tp"] and not r["hand_nie_da"], "TP/SL-Gründe und master_nie_da behalten ihre eigenen Wege")
         check(not r["hand_offen"] and not r["hand_final"] and not r["hand_master_da"] and not r["hand_tsv2"],
@@ -150,15 +159,22 @@ print(JSON.stringify(out))
 
     # (2) Verdrahtung
     tick = HTML[HTML.index("  async function mt5PlanPollTick(){"):HTML.index("        /* ECHO V2 (24.09.2026): Ende = Master flach")]
-    check("if(!fresh){ if(plan.status === 'open') echoGeistAnstossen(plan, route); continue }" in tick,
-          "mt5PlanPollTick: nicht frisch → nur Geist-Prüfung, kein Ende")
-    check("else if(!istV2 && echoEndeScharf(plan)) mt5PlanPoll.wasOpen.add(String(plan.id))" in tick
-          and tick.index("echoEndeScharf(plan)) mt5PlanPoll.wasOpen") < tick.index("if(!mt5PlanPoll.wasOpen.has(String(plan.id))) continue")
-          and "if(n < 2) continue" in tick, "Re-Arm vor der Streak-Prüfung; Ende weiter erst nach 2 frischen 0-Messungen")
+    nf = tick[tick.index("        if(!fresh){"):]
+    check("echoGeistAnstossen(plan, route) } continue }" in nf[:300], "mt5PlanPollTick: nicht frisch → nur Geist-Prüfung, kein Ende")
+    check("else if(!istV2 && !mt5PlanPoll.wasOpen.has(String(plan.id)) && echoEndeScharf(plan)){" in tick
+          and tick.index("echoEndeScharf(plan)){") < tick.index("if(!mt5PlanPoll.wasOpen.has(String(plan.id))) continue"),
+          "Re-Arm vor der Streak-Prüfung, nur wenn der Tab noch nicht scharf war")
+    check("if(!fresh){ if(plan.status === 'open'){ mt5PlanPoll.beruhigen.add(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id))" in tick
+          and "mt5PlanPoll.wasOpen.add(String(plan.id)); mt5PlanPoll.beruhigen.add(String(plan.id)) }" in tick, "nicht frischer Takt und Re-Arm aus dem Beleg setzen „beruhigen“ (Uhr zurück)")
+    pos_blk = tick[tick.index("        if(posCount > 0){"):]
+    check("mt5PlanPoll.beruhigen.delete(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id))   // selbst frisch gesehen" in pos_blk[:600]
+          and "if(!echoEndeReif({ streak: n, beruhigen: mt5PlanPoll.beruhigen.has(String(plan.id)), flachSeit: mt5PlanPoll.flachSeit.get(String(plan.id)) }, Date.now())) continue" in tick,
+          "Position frisch gesehen → Uhr zurück + normaler Weg; Ende nur über echoEndeReif")
     an = HTML[HTML.index("  function echoGeistAnstossen(plan, route){"):HTML.index("  async function echoSchonZuNachfassen(")]
     check("ebnStartNah()" in an and "polarLaeuft()" in an and "mt5KontoBalanceJetzt(" in an and "status: 'review'" not in an and "atMoveToReview" not in an,
           "Geist-Prüfung: nur frisch lesen (mt5KontoBalanceJetzt), nicht vor einem Start/bei Polar, beendet selbst nichts")
     sz = HTML[HTML.index("  async function echoSchonZuNachfassen("):HTML.index("  async function mt5PlanAufOpen(")]
+    check("mt5PlanPoll.beruhigen.add(pid)" in an and "mt5PlanPoll.beruhigen.add(pid)" in sz, "Geist- und schon_zu-Anstoß setzen „beruhigen“")
     check("schon_zu: {" in sz and "'open')" in sz and "atMoveToReview" not in sz and "status: 'review'" not in sz,
           "schon_zu: Beleg am Plan (Guard open) + Lesung, kein Ende aus der Antwort allein")
     rc = HTML[HTML.index("const r = await window.mtcApi(`master-close?file=${encodeURIComponent(routeC.inst.file)}`"):][:1400]

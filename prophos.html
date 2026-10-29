@@ -24058,6 +24058,8 @@
     // Messungen ein falsches Trade-Ende samt master_pl≈0 erzeugen (Review-Fund
     // 15.08.2026) — 'beobachtet != beabsichtigt', exakt das atCheck-Muster.
     wasOpen: new Set(),
+    beruhigen: new Set(),   // planId → Ende erst nach ECHO_BERUHIGT_MS frisch+flach (S2-Stopp 30.10.2026)
+    flachSeit: new Map(),   // planId → erster frischer 0-Positionen-Takt der laufenden Flach-Strecke
     busy: false
   }
   /* GEISTER-PLÄNE (30.10.2026, Master: „Echo-Pläne bleiben open, obwohl der Trade längst zu ist" — Jacob 2775030a im SL, Plan bis zum
@@ -24107,7 +24109,18 @@
     if((m.n || 0) >= ECHO_GEIST_MAX || (m.at && jetzt - m.at < ECHO_GEIST_ABSTAND_MS)) return false
     return true
   }
-  window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs }   // Test-Haken (rein rechnend)
+  /* BERUHIGEN (S2-Stopp 30.10.2026): ein eben geöffnetes Master-Terminal kann vor dem Server-Sync 0 Positionen melden (Lese-EA ohne
+   * TERMINAL_CONNECTED-Prüfung) — zwei frische 0-Messungen in ~10 s hätten dann einen offenen, ungehedgten Trade beendet. Für jeden Plan,
+   * den DIESER Tab nicht selbst mit Positionen gesehen hat (Re-Arm aus dem Beleg, Stand war nicht frisch, Geist-/schon_zu-Anstoß), gilt
+   * deshalb: Ende erst, wenn der Stand ≥ 90 s ununterbrochen frisch UND flach war (flachSeit); jede Position oder jeder nicht frische Takt
+   * setzt die Uhr zurück. Sieht der Tab frisch eine Position, fällt die Marke (normaler Weg: 2 Messungen). */
+  const ECHO_BERUHIGT_MS = 90000
+  function echoEndeReif(z, jetzt){
+    if(!z || (z.streak || 0) < 2) return false
+    if(!z.beruhigen) return true
+    return !!z.flachSeit && jetzt - z.flachSeit >= ECHO_BERUHIGT_MS
+  }
+  window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs, reif: echoEndeReif }   // Test-Haken (rein rechnend)
   const _echoGeistMerk = new Map()   // planId → { n, at }
   function echoGeistAnstossen(plan, route){
     try{
@@ -24119,7 +24132,7 @@
       if(typeof mt5KontoBalanceJetzt !== 'function') return
       const n = ((alt && alt.n) || 0) + 1
       _echoGeistMerk.set(pid, { n, at: jetzt })
-      mt5PlanPoll.wasOpen.add(pid)
+      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.beruhigen.add(pid); mt5PlanPoll.flachSeit.delete(pid)
       baselinePatch(pid, { geist_pruefung: { n, at: new Date(jetzt).toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null,
         grund: String(((route && route.inst && route.inst.status) || {}).note || 'kein frischer Stand').slice(0, 80) } }, 'open').catch(() => {})
       console.info(`[echo-geist] ${pid.slice(0, 8)}: Stand nicht frisch, letzter Stand flach — frische Lesung ${n}/${ECHO_GEIST_MAX}`)
@@ -24131,7 +24144,7 @@
   async function echoSchonZuNachfassen(plan, r, ticket){
     try{
       const pid = String(plan.id)
-      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.streak.set(pid, 0)
+      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.streak.set(pid, 0); mt5PlanPoll.beruhigen.add(pid); mt5PlanPoll.flachSeit.delete(pid)
       await baselinePatch(pid, { schon_zu: { at: new Date().toISOString(), ticket: ticket || null, quelle: 'close', msg: String((r && r.msg) || '').slice(0, 160),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } }, 'open')
       if(typeof mt5KontoBalanceJetzt === 'function') mt5KontoBalanceJetzt(plan.masterAccountId, null, {}).catch(() => {})
@@ -24349,7 +24362,7 @@
         // Echo V2 auch aus der Lese-Instanz (Panel liest den Snapshot ohne Copier, 25.09.2026) — Echo mit Hedge
         // braucht weiter den laufenden Copier (alive)
         const fresh = (!!route.inst.alive || (istV2 && !!route.inst.lesen)) && !s.note
-        if(!fresh){ if(plan.status === 'open') echoGeistAnstossen(plan, route); continue }   // Geister-Pläne (30.10.2026): nur frisch lesen, nie beenden
+        if(!fresh){ if(plan.status === 'open'){ mt5PlanPoll.beruhigen.add(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id)); echoGeistAnstossen(plan, route) } continue }   // Geister-Pläne (30.10.2026): nur frisch lesen, nie beenden
         const posCount = (s.master_positions || []).length
 
         if(plan.status === 'planned'){
@@ -24417,7 +24430,7 @@
         // wasOpen sie nie gesehen und der Plan bliebe ewig „Läuft". Baseline = Beweis → Ende-Erkennung scharf.
         if(istV2 && plan.mt5Baseline && plan.mt5Baseline.master_balance != null) mt5PlanPoll.wasOpen.add(String(plan.id))
         // Mit Hedge (30.10.2026, Geister-Pläne): nach dem Tab-Neuladen aus dem festen Beleg wieder scharf (echoEndeScharf)
-        else if(!istV2 && echoEndeScharf(plan)) mt5PlanPoll.wasOpen.add(String(plan.id))
+        else if(!istV2 && !mt5PlanPoll.wasOpen.has(String(plan.id)) && echoEndeScharf(plan)){ mt5PlanPoll.wasOpen.add(String(plan.id)); mt5PlanPoll.beruhigen.add(String(plan.id)) }
         // TAGE SAMMELN · SOFORT ZU (12.10.2026, Finn: „den Trade, sobald er gestartet wurde, auch direkt eigenständig beenden"): der Mini-Trade
         // des Auto-Planers (mt5_baseline.tage_mini.sofort_zu) wird geschlossen, sobald dieser PC-Tab seine Position frisch sieht — derselbe
         // Weg wie „Schließen" auf der Karte (v2SchliessenAmPc); die Ende-Erkennung darunter läuft danach wie bei jedem Echo-V2-Trade
@@ -24425,13 +24438,16 @@
         if(posCount > 0){
           mt5PlanPoll.wasOpen.add(String(plan.id))
           mt5PlanPoll.streak.set(String(plan.id), 0)
+          mt5PlanPoll.beruhigen.delete(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id))   // selbst frisch gesehen → normaler Weg
           continue
         }
         if(!mt5PlanPoll.wasOpen.has(String(plan.id))) continue
         const n = (mt5PlanPoll.streak.get(String(plan.id)) || 0) + 1
         mt5PlanPoll.streak.set(String(plan.id), n)
-        if(n < 2) continue
+        if(!mt5PlanPoll.flachSeit.has(String(plan.id))) mt5PlanPoll.flachSeit.set(String(plan.id), Date.now())
+        if(!echoEndeReif({ streak: n, beruhigen: mt5PlanPoll.beruhigen.has(String(plan.id)), flachSeit: mt5PlanPoll.flachSeit.get(String(plan.id)) }, Date.now())) continue
         mt5PlanPoll.streak.set(String(plan.id), 0)
+        mt5PlanPoll.beruhigen.delete(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id))
 
         /* ECHO V2 (24.09.2026): Ende = Master flach (2 frische Messungen wie bei Echo). Eingefroren wird
          * nur die Master-Balance — es gibt keinen Hedge, also kein closed_sum/closed_tickets. Fehlt die
@@ -51900,7 +51916,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1903'
+  const OS_TAB_BUILD = '2026-09-22.1904'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
