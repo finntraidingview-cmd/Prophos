@@ -4620,6 +4620,8 @@
   /* Plattform-Pille je Zeile (30.09.2026, Finn: „eine Liste, wo alle Laufenden drin sind, unterschieden nur mit Orbit und Echo"):
      dezent grau, kein zweiter Farbcode — die Sektionsköpfe Orbit/Echo (.858) sind weg */
   #dashboard-view .wdl-rot{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border-radius:4px;background:color-mix(in srgb, var(--danger) 12%, transparent);color:var(--danger-ink, #b91c1c);font-size:10px;font-weight:700;letter-spacing:.03em;font-style:normal;vertical-align:1px;white-space:nowrap}   /* Nova ohne SL/TP · wieder offen (29.10.2026) */
+  #dashboard-view .wdl-paar{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border:0;border-radius:4px;background:var(--warn-bg, #FFFBEB);color:var(--warn-ink, #b45309);font-size:10px;font-weight:700;letter-spacing:.03em;vertical-align:1px;white-space:nowrap;cursor:pointer}   /* Konto-Paar Läuft ⇄ Erledigt (30.10.2026) */
+  #dashboard-view .wdl-z.is-paar-ziel{outline:2px solid var(--warn-ink, #b45309);outline-offset:-2px;transition:outline-color .6s}
   #dashboard-view .wdl-pf{display:inline-block;margin:0 0 0 8px;padding:1px 6px;border-radius:4px;background:var(--surface-tint);color:var(--sub);font-size:10px;font-weight:600;letter-spacing:.03em;font-style:normal;vertical-align:1px}
   #dashboard-view .wdl-z-echo{cursor:default}
   #dashboard-view .wdl-z-sym{color:var(--sub-2)}   /* Richtung-Spalte 150 px (vorher 112): „SELL 0,5 Lot NDX100" passt ganz */
@@ -35743,6 +35745,44 @@
     if(t.wieder_offen) h += `<em class="wdl-rot" title="${escapeHtml('Die Endlesung sah die Position nach dem Ende noch offen — Plan wieder auf „Läuft“. Position prüfen, Ende nur noch von Hand („Beendet“)')}">wieder offen</em>`
     return h
   }
+  /* KONTO-PAAR (30.10.2026, Finn: „Unter Radar werden mir manchmal doppelte Trades angezeigt" — Triage Slave 1: nie derselbe Plan zweimal,
+   * aber dasselbe Konto zweimal: der beendete, noch nicht abgehakte Trade steht in Erledigt, der nächste Trade desselben Kontos schon in
+   * Läuft — 3× in 4 Tagen, bis 79 min, z. B. Simon Tradeify …7813 am 29.10.). Beide Zeilen bleiben; je ein Chip macht sie als zwei Trades
+   * kenntlich und springt per Klick zur anderen Zeile. REIN RECHNEND: trades → Map(tid → {art: 'voriger'|'naechster', ziel: tid}).
+   * Konto = konto_id, sonst ID + Kontonummer-Ende; Polar und geplante Pläne zählen nicht; je Seite die jüngste andere Zeile. */
+  function wdlKontoPaare(trades){
+    const aus = new Map(), je = new Map()
+    const key = t => t.konto_id ? 'k|' + t.konto_id : ((t.konto || {}).kontonr_ende ? wdlUid(t) + '|' + (t.konto || {}).kontonr_ende : '')
+    for(const t of trades || []){
+      if(!t || wdlIstPolar(t) || (t.status !== 'open' && t.status !== 'review')) continue
+      const k = key(t); if(!k) continue
+      const x = je.get(k) || { open: [], review: [] }; x[t.status].push(t); je.set(k, x)
+    }
+    const neuste = (arr, feld) => arr.reduce((b, t) => (!b || String(t[feld] || '') > String(b[feld] || '')) ? t : b, null)
+    for(const { open, review } of je.values()){
+      if(!open.length || !review.length) continue
+      const r = neuste(review, 'ended_at'), o = neuste(open, 'started_at')
+      for(const t of open) aus.set(wdlTid(t), { art: 'voriger', ziel: wdlTid(r) })
+      for(const t of review) aus.set(wdlTid(t), { art: 'naechster', ziel: wdlTid(o) })
+    }
+    return aus
+  }
+  window._wdlKontoPaare = wdlKontoPaare   // Test-Haken
+  let _wdlPaare = new Map()
+  function wdlPaarChip(t){
+    const p = t && _wdlPaare.get(wdlTid(t)); if(!p) return ''
+    const txt = p.art === 'voriger' ? 'voriger Trade noch nicht abgehakt' : 'nächster Trade läuft'
+    const tip = p.art === 'voriger' ? 'Dasselbe Konto hat noch einen beendeten, nicht abgehakten Trade (Erledigt) — klicken: zur Zeile springen'
+      : 'Auf diesem Konto läuft schon der nächste Trade (Läuft) — klicken: zur Zeile springen'
+    return `<button type="button" class="wdl-paar" data-wdl-paar="${escapeHtml(p.ziel)}" title="${escapeHtml(tip)}">${txt}</button>`
+  }
+  function wdlPaarSpringen(tid){
+    const liste = document.getElementById('wdl-liste'), sel = `[data-wdl-trade="${String(tid).replace(/["\\]/g, '')}"]`
+    const el = liste && liste.querySelector(sel)
+    if(!el){ if(typeof atToast === 'function') atToast('Die andere Zeile ist gerade ausgeblendet — Personen-/Modell-Filter oder „alle zeigen“', 'start'); return }
+    try{ el.scrollIntoView({ behavior: 'smooth', block: 'center' }) }catch(_){ el.scrollIntoView() }
+    el.classList.add('is-paar-ziel'); setTimeout(() => el.classList.remove('is-paar-ziel'), 1600)
+  }
   const wdlFeedEnde = t => { const e = _wdlFeedEnde.get(wdlTid(t)); return (e && t && t.status === 'open') ? e : null }
   // Merker setzen (neu getroffen → true) und aufräumen: Plan nicht mehr open → weg; zu alt und immer noch open → weg (Feed zählt neu)
   function wdlFeedEndePruefen(kp, trades){
@@ -36515,6 +36555,7 @@
     // Geplante raus (30.09.2026, Finn: „Geplante Trades komplett rausmachen. Die gehören nur unter die jeweilige ID in die
     // Trade-Planung") — Liste, ID-Chips und Auswahl sehen status planned nicht mehr; das Backend liefert sie weiter
     const alleTrades = ((wdl.daten && wdl.daten.trades) || []).filter(t => t.status !== 'planned')
+    try{ _wdlPaare = wdlKontoPaare(alleTrades) }catch(_){ _wdlPaare = new Map() }   // Konto-Paar Läuft ⇄ Erledigt (30.10.2026)
     // Auswahl, deren Trade aus den Daten gefallen ist, aufheben — sonst bliebe sie unsichtbar gesetzt (30.09.2026, s. mklAuswahlTrade)
     if(wdl.auswahl && wdl.daten && !alleTrades.some(x => wdlTid(x) === wdl.auswahl)) wdl.auswahl = null
     try{ polarRadarLeiste(alleTrades) }catch(_){}   // Polar über alle IDs oben (21.10.2026), unabhängig von Modell-/ID-Filter
@@ -36782,7 +36823,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       const sw = zuWegZ(t)   // Schließweg-Zeile (28.10.2026): nur bei geschlossenem Fusion-Hedge, dann zweite Rasterzeile (wdl-z-sw-da)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${sw ? ' wdl-z-sw-da' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlSltpChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlSltpChip(t)}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + sw + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
@@ -37175,6 +37216,8 @@
     if(vp){ const u = vp.getAttribute('data-wdl-vl-person'); wdl.verlauf.person = wdl.verlauf.person === u ? null : u; wdlRender(); return }
     const vk = ev.target.closest('[data-wdl-vl-konto]')
     if(vk){ const k = vk.getAttribute('data-wdl-vl-konto'); wdl.verlauf.konto = wdl.verlauf.konto === k ? null : k; wdlRender(); return }
+    const pa = ev.target.closest('[data-wdl-paar]')   // Konto-Paar (30.10.2026): zur anderen Zeile desselben Kontos springen
+    if(pa){ wdlPaarSpringen(pa.getAttribute('data-wdl-paar')); return }
     const m = ev.target.closest('[data-wdl-mehr]')
     if(m){ const k = m.getAttribute('data-wdl-mehr'); wdl.alleZu = Object.assign({}, wdl.alleZu, { [k]: !(wdl.alleZu || {})[k] }); wdlRender(); return }
     // „Jetzt lesen" (Wartet) und „Abhaken" (Überprüfen), 30.09.2026 — vorhandene Wege, keine Auswahl der Zeile
@@ -51701,7 +51744,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1900'
+  const OS_TAB_BUILD = '2026-09-22.1901'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
