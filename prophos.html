@@ -57250,7 +57250,17 @@
     const an = !!(v.bot || {}).aktiv, sperre = admin ? '' : ' disabled'
     return `<div class="apd-schalter">
           <label title="${admin ? 'Ausgleichs-Bot an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-apd-schalter="aktiv"${an ? ' checked' : ''}${sperre || (_apd.busy.has('aktiv') ? ' disabled' : '')}><span class="switch-slider"></span></span>${an ? 'Bot an' : 'Bot aus'}</label>
+          ${apdEchoHedgeSchalterHtml(v, admin)}
         </div>`
+  }
+  /* HT ECHO-HEDGE B2 (29.10.2026, Finn: „Auf jeden Fall immer mit Echo jetzt"): zweiter Schalter = auto_plan_regeln.regeln.echo_hedge.an.
+   * An: Railway (eh_tick) stellt HT-CFD-Pläne ab 20 min vor dem Start (bis zum Claim) auf Echo mit Fusion-Hedge um; aus: zurück auf Echo V2. Fehlt
+   * v.echo_hedge (älteres Backend), bleibt er weg. */
+  function apdEchoHedgeSchalterHtml(v, admin){
+    const eh = v && v.echo_hedge
+    if(!eh || typeof eh.an !== 'boolean') return ''
+    const tip = admin ? `HT-CFD-Challenges starten als Echo mit Fusion-Hedge (B2, Faktor ${eh.netto_faktor}, max. ${eh.max_lots} Lot) — aus = Echo V2 ohne Hedge` : 'nur Admin'
+    return `<label title="${escapeHtml(tip)}"><span class="switch"><input type="checkbox" data-apd-schalter="echo_hedge"${eh.an ? ' checked' : ''}${admin ? (_apd.busy.has('echo_hedge') ? ' disabled' : '') : ' disabled'}><span class="switch-slider"></span></span>${eh.an ? 'Echo-Hedge an' : 'Echo-Hedge aus'}</label>`
   }
   const apdBotMeldungHtml = () => _apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''
   function apdBotKachelHtml(v, admin){   // Rückfall, wenn es die Kachel „Heute" nicht gibt: nur der Schalter
@@ -57391,7 +57401,8 @@
     try{
       await apdApi('POST', '/ausgleich-einstellung', { [feld]: !!wert })
       if(_apd.d){   // sofort zeigen, der nächste GET bestätigt
-        if(feld === 'aktiv') _apd.d.bot = { ...(_apd.d.bot || {}), aktiv: !!wert }
+        if(feld === 'echo_hedge') _apd.d.echo_hedge = { ...(_apd.d.echo_hedge || {}), an: !!wert }
+        else if(feld === 'aktiv') _apd.d.bot = { ...(_apd.d.bot || {}), aktiv: !!wert }
         else _apd.d.bot = { ...(_apd.d.bot || {}), auto_start: !!wert }
       }
       _apd.busy.delete(feld)
