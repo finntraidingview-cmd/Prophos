@@ -51701,7 +51701,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1899'
+  const OS_TAB_BUILD = '2026-09-22.1900'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72100,7 +72100,7 @@
     const m = String(roh || '').toUpperCase().match(/^(PA-)?APEX-(\d+)-(\d+)$/)
     return m ? `${m[1] ? 'PAAPEX' : 'APEX'}${m[2]}${m[3].padStart(7, '0')}` : String(roh || '').replace(/-/g, '')
   }
-  const _admKm = { mails: [], konten: [], tv: [], tvFehler: '', angelegt: new Set(), nr: 0 }
+  const _admKm = { mails: [], konten: [], tv: [], tvFehler: '', angelegt: new Set(), nr: 0, verworfen: {} }   // verworfen: {user_id: [EXT normiert]} vom Server
   /* ── Zweite Quelle: TradingViews Konto-Dropdown (Finn 29.10.2026 03:10 freigegeben; S3 baut Reader + Tabelle tv_konten + GET /admin/tv-konten,
    * Vertrag je Zeile {user_id, name, zuerst_at, zuletzt_at, pc_id, in_prophos}). Firma/Phase aus dem Präfix des Kontonamens, Größe aus den
    * Ziffern nach den Buchstaben (TDFYSL**150**…); kein Präfix bekannt → Firma „?" und Phase challenge. Gibt es die Route noch nicht (404),
@@ -72183,7 +72183,7 @@
       const suche = [...new Set(KONTO_MAIL_MUSTER.map(x => x.suche))].join('|')
       const d = await admMailFetch(`/admin/konto-mails?tage=${KONTO_MAIL_TAGE}&betreff=${encodeURIComponent(suche)}`)
       if(nr !== _admKm.nr) return
-      _admKm.mails = d.mails || []; _admKm.konten = d.konten || []
+      _admKm.mails = d.mails || []; _admKm.konten = d.konten || []; _admKm.verworfen = (d.verworfen && typeof d.verworfen === 'object') ? d.verworfen : {}
       // TV-Dropdown (zweite Quelle): 404 = Route noch nicht da → still leer; andere Fehler als Hinweis unter der Tabelle
       _admKm.tv = []; _admKm.tvFehler = ''
       try{ const t = await admMailFetch('/admin/tv-konten'); _admKm.tv = Array.isArray(t) ? t : (t.konten || t.rows || t.tv_konten || []) }
@@ -72230,6 +72230,13 @@
         quellen: ['TV'], tv: row }, e, stand))
     }
     zeilen.sort((a, b) => (Date.parse(b.m.datum || '') || 0) - (Date.parse(a.m.datum || '') || 0))
+    // MAIL-KONTO EIN KLICK (30.10.2026, Finn: „im Admin die Accounts hinzufügen per E-Mail ist komplett schwammig"): verworfene Nummern der
+    // Besitzer-ID (Server user_settings konto_verworfen + diese Sitzung) bleiben weg; „angelegt" gilt auch für Bestätigen unter Alle Accounts
+    const verworfenBei = (uid, ext) => { const n = extIdNorm(ext); if(!n) return false
+      return (_admKm.verworfen[String(uid)] || []).map(extIdNorm).includes(n) || !!(_admKTv.verworfen[String(uid)] && _admKTv.verworfen[String(uid)].has(kontoKey(ext))) }
+    for(let i = zeilen.length - 1; i >= 0; i--){ const z = zeilen[i]
+      if(z.ext && z.stand === 'neu' && verworfenBei(z.m.user_id, z.ext)){ zeilen.splice(i, 1); continue }
+      if(z.ext && z.stand === 'neu' && _admKTv.angelegt.has(`${z.m.user_id}|${extIdNorm(z.ext)}`)) z.stand = 'angelegt' }
     const weg = document.getElementById('adm-km-tv-weg')
     if(weg){
       const t = tvWeg.sort((a, b) => b.tage - a.tage)
@@ -72259,7 +72266,7 @@
         '<td class="km-id" style="font-weight:600"></td>' +
         '<td class="km-betreff" style="color:var(--sub);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></td>' +
         '<td class="km-stand"></td>' +
-        '<td style="text-align:right;white-space:nowrap"><button type="button" class="btn btn-primary km-ok" style="padding:4px 9px;font-size:11.5px">Anlegen</button></td>'
+        '<td class="km-akt" style="text-align:right;white-space:nowrap"></td>'
       const dt = z.m.datum ? new Date(z.m.datum) : null
       tr.querySelector('.km-datum').textContent = dt && !isNaN(dt) ? dt.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : '—'
       tr.querySelector('.km-firma').textContent = z.firma
@@ -72286,8 +72293,13 @@
       chip.textContent = z.stand === 'neu' && !z.quellen.includes('Mail') ? 'neu (TV)' : z.stand
       if(z.konto) chip.title = `${z.konto.name || ''}${z.konto.external_id ? ' · #' + z.konto.external_id : ''}`
       st.appendChild(chip)
-      const ok = tr.querySelector('.km-ok')
-      if(z.stand === 'neu' || z.stand === 'ohne Nummer') ok.addEventListener('click', () => admKontoMailAnlegen(z)); else ok.remove()
+      // Bestätigen wie Admin → Alle Accounts (tvKnoepfe): für den BESITZER der Mail (fremde ID über /admin/konto-anlegen bzw. Reset über
+      // /konto-reset-bestaetigen), ein Klick, wenn Firma, Größe, Nummer und Schablone feststehen — sonst das vorbefüllte Modal. Ohne Nummer kein Verwerfen.
+      if(z.stand === 'neu' || z.stand === 'ohne Nummer'){
+        const uid = String(z.m.user_id || ''), fremd = uid && uid !== String(currentUserId || '') ? { uid, name: String(z.m.person || uid.slice(0, 8)).split(/\s+/)[0], tvName: z.tv ? String(z.tv.name || '') : '', ext: z.ext } : null
+        const td = tr.querySelector('.km-akt'); tvKnoepfe(td, z, fremd)
+        if(!z.ext) td.children[1]?.remove()
+      }
       tb.appendChild(tr)
     }
   }
@@ -72335,31 +72347,9 @@
     if(v.goal_kind && E.goalKind && !E.goalKind.value){ E.goalKind.value = v.goal_kind; if(E.goalTarget && !E.goalTarget.value && v.goal_target) E.goalTarget.value = v.goal_target }
     if(E.msg && !E.msg.textContent) { E.msg.textContent = `Schablone „${v.name}" eingetragen — prüfen, dann Hinzufügen.`; E.msg.className = 'modal-msg muted' }
   }
-  // „Anlegen": bestehendes Account-Modal vorbefüllt — Firma, Größe, External ID, Typ; Name nach Namensregel über acNameVorschlag. Landet bei der
-  // EINGELOGGTEN ID (das Modal hat keine ID-Wahl) — Finn legt heute je ID eingeloggt an; das steht in der Meldung an den Master.
-  function admKontoMailAnlegen(z){
-    if(typeof openAccountModal !== 'function'){ alert('Account-Modal nicht erreichbar'); return }
-    // Das Modal legt bei der EINGELOGGTEN ID an — gehört die Mail einer anderen ID, laut sagen (Prüfer 29.10.2026)
-    if(z.m.user_id && typeof currentUserId !== 'undefined' && String(z.m.user_id) !== String(currentUserId) && typeof atToast === 'function')
-      atToast(`Achtung: das Konto landet bei der eingeloggten ID, die Mail gehört ${z.m.person || 'einer anderen ID'} — dort einloggen oder Besitzer nachher umhängen`, 'end')
-    kontoModalVorbefuellen(z)
-    const key = String(z.ext || '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
-    // „angelegt" (nur diese Sitzung; beim nächsten Laden zählt die DB): erst wenn das Modal NACH einem Speichern-Klick zugeht — scheitert
-    // saveAccount an der Pflichtprüfung, bleibt das Modal offen und die Zeile bleibt „neu" (Prüfer 29.10.2026); Abbrechen/Escape zählt nicht
-    const save = accEls?.save, modal = accEls?.modal
-    if(save && modal && key){
-      let geklickt = false
-      const klick = () => { geklickt = true }
-      save.addEventListener('click', klick)
-      const zu = new MutationObserver(() => {
-        if(modal.classList.contains('open')) return
-        save.removeEventListener('click', klick); zu.disconnect()
-        if(geklickt){ _admKm.angelegt.add(key); admKontoMailRender() }
-      })
-      zu.observe(modal, { attributes: true, attributeFilter: ['class'] })
-    }
-  }
   window._admKontoMailOeffnen = () => admKontoMailLaden()
+  // nach Bestätigen/Verwerfen (tvKnoepfe, Reset, Anlegen für eine ID): Reiter neu zeichnen, mit neu = true aus der DB neu laden (eigenes Modal)
+  window._admKontoMailNeu = neu => { const p = document.getElementById('adm-pane-kontomail'); if(!p || p.hidden || !_admKm.nr) return; if(neu) admKontoMailLaden(); else admKontoMailRender() }
   window._admKontoMailStub = (mails, konten, tv) => { _admKm.mails = mails || []; _admKm.konten = konten || []; _admKm.tv = tv || []; _admKm.tvFehler = ''; admKontoMailRender() }   // Boot-Check ohne Login
   window._kontoTvErkennen = r => kontoTvErkennen(r)
 
@@ -72513,15 +72503,46 @@
       // RESET (Finn: „Reset = Kauf"): alte Zeile übernehmen statt Modal — nur wenn die alte Zeile fehlt, weiter wie ein Kauf
       if(z.art === 'reset' && z.vorher && !(await kontoResetBestaetigen(z, fremd, td))) return
       const knoepfe = [...td.querySelectorAll('button')]; knoepfe.forEach(b => { b.disabled = true })
+      // Kauf mit vollständigen Daten + Schablone: ein Klick, kein Modal (kontoDirektAnlegen)
+      let direkt = 'modal'; try{ direkt = await kontoDirektAnlegen(z, fremd) }catch(_){ direkt = 'modal' }
+      if(direkt !== 'modal'){ knoepfe.forEach(b => { b.disabled = false }); return }
       kontoModalVorbefuellen(z)
       window._kontoFuer = fremd || null
       const modal = accEls?.modal
       if(!modal){ window._kontoFuer = null; knoepfe.forEach(b => { b.disabled = false }); return }
       if(fremd && accEls.msg){ accEls.msg.textContent = `Wird angelegt für ${fremd.name} — nicht für die eingeloggte ID. Zugangsdaten gehen nicht mit.`; accEls.msg.className = 'modal-msg muted' }
-      const zu = new MutationObserver(() => { if(!modal.classList.contains('open')){ zu.disconnect(); window._kontoFuer = null; knoepfe.forEach(b => { b.disabled = false }) } })
+      const zu = new MutationObserver(() => { if(!modal.classList.contains('open')){ zu.disconnect(); window._kontoFuer = null; knoepfe.forEach(b => { b.disabled = false }); try{ window._admKontoMailNeu?.(!fremd) }catch(_){} } })
       zu.observe(modal, { attributes: true, attributeFilter: ['class'] })
     })
     td.children[1].addEventListener('click', () => kontoVerwerfen(z, fremd))
+  }
+  /* EIN KLICK (30.10.2026, Master: „eine Kauf-Mail mit einem Klick als Konto anlegen — richtige Firma, Größe, External ID, Kontoart nach
+   * Namensregel"): stehen Firma, Größe, External ID, Typ UND eine Schablone (bulk_vorlagen gleicher Firma × Typ × Größe) fest, legt
+   * „Bestätigen" sofort an — POST /admin/konto-anlegen für den Besitzer (auch die eingeloggte ID), Name „<Größe> <External ID> → <Phase>",
+   * Kaufpreis/Max DD/Consistency/Ziel aus der Schablone; der Server bucht den Kauf und schützt vor Doppeln. Fehlt etwas oder ist der Login
+   * kein Admin (403), öffnet sich wie bisher das vorbefüllte Modal. → 'ok' | 'modal' | 'fehler' */
+  async function kontoDirektAnlegen(z, fremd){
+    const gr = Number(z.groesse) || 0
+    if(!z.ext || !z.firma || z.firma === '?' || !(gr > 0) || !z.typ || typeof kontoNameRegel !== 'function') return 'modal'
+    const v = kontoVorlageFinden(z, await kontoVorlagenLaden()); if(!v) return 'modal'
+    if(v.goal_kind && !(Number(v.goal_target) > 0)) return 'modal'   // Ziel ohne Zahl in der Schablone (z. B. Mindesttage): das Modal rechnet es
+    const uid = fremd ? fremd.uid : String(currentUserId || ''); if(!uid) return 'modal'
+    const fuer = fremd || { uid, name: 'die eingeloggte ID', tvName: (z.quellen || []).includes('TV') ? String((z.tv && z.tv.name) || z.ext) : '', ext: z.ext }
+    const zahl = x => x != null && isFinite(Number(x)) && Number(x) > 0 ? Number(x) : null
+    const acc = { name: kontoNameRegel(gr + 'k', z.ext, z.typ, ''), firm: z.firma, type: z.typ, externalId: z.ext, purchaseCost: zahl(v.purchase_cost),
+      maxDrawdown: zahl(v.max_drawdown), maxRisikoTrade: null, autoPlaner: true, goalKind: v.goal_kind || null, goalTarget: v.goal_kind ? Number(v.goal_target) : null }
+    try{ await kontoFuerAnlegen(fuer, acc, zahl(v.consistency_pct)) }
+    catch(e){
+      const t = String((e && e.message) || e)
+      if(/Nur für Admins|HTTP 403/i.test(t)) return 'modal'
+      if(!/^Gibt es schon/.test(t) && typeof atToast === 'function') atToast(`${z.ext}: nicht angelegt — ${t}`, 'end')
+      else if(typeof atToast === 'function') atToast(`${z.ext}: ${t}`, 'end')
+      return 'fehler'
+    }
+    if(!fremd) try{ if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase() }catch(_){}
+    try{ tvNeuRender() }catch(_){}
+    try{ window._admKontoMailNeu?.() }catch(_){}
+    return 'ok'
   }
   // → true = als Kauf übers Modal weitermachen (alte Zeile fehlt), false = erledigt/abgebrochen
   async function kontoResetBestaetigen(z, fremd, td){
@@ -72551,6 +72572,7 @@
       try{ if(!fremd && typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase() }catch(_){}
       try{ window._admLaden?.() }catch(_){}
       tvNeuRender(); if(_admKTv.at) admKTvRender()
+      try{ window._admKontoMailNeu?.() }catch(_){}
       return false
     }catch(e){
       const t = String((e && e.message) || e)
@@ -72567,6 +72589,7 @@
     const uid = fremd ? fremd.uid : String(currentUserId || ''), k = kontoKey(z.ext)
     if(fremd){ (_admKTv.verworfen[uid] = _admKTv.verworfen[uid] || new Set()).add(k); admKTvRender() }
     else{ _tvNeu.verworfen.add(k); (_admKTv.verworfen[uid] = _admKTv.verworfen[uid] || new Set()).add(k); if((z.quellen || []).includes('TV')) tvIgnoriertMerken(z.ext); tvNeuRender(); if(_admKTv.at) admKTvRender() }
+    try{ window._admKontoMailNeu?.() }catch(_){}
     try{
       await admMailFetch(`/konto-verwerfen${fremd ? '?ansicht=admin' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: uid, ext: z.ext, tv_name: (z.quellen || []).includes('TV') ? ((z.tv && z.tv.name) || z.ext) : '' }) })
@@ -72595,12 +72618,13 @@
     finally{ _admKTv.laeuft.delete(zeile) }
     _admKTv.angelegt.add(key); _admKTv.angelegt.add(zeile)
     admKTvRender()
+    try{ window._admKontoMailNeu?.() }catch(_){}
     const zusatz = [acc.creds ? 'Zugangsdaten nicht übernommen' : '', d && d.hinweis].filter(Boolean).join(' · ')
     if(typeof atToast === 'function') atToast(`✓ ${acc.name} für ${fuer.name} angelegt${zusatz ? ' — ' + zusatz : ''}`, zusatz ? 'end' : 'ok')
     try{ window._admLaden?.() }catch(_){}
     return d
   }
-  window._kontoFuerAnlegen = (fuer, acc) => kontoFuerAnlegen(fuer, acc)
+  window._kontoFuerAnlegen = (fuer, acc, cons) => kontoFuerAnlegen(fuer, acc, cons)   // cons = Consistency aus dem Modal (ging bis 30.10.2026 verloren)
   // Eigene ID: Zeilen über der Kontoliste (Spalten wie Accounts: Account · Firm · Typ · Balance · Planer · Verknüpfungen · Aktionen)
   function tvNeuRender(){
     const tb = document.getElementById('tvNeuRows')
