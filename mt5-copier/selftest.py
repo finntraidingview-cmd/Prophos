@@ -2035,6 +2035,7 @@ def main():
     results.append(test_puls_fehler_1787())
     results.append(test_puls_fehler_1800())
     results.append(test_puls_fehler_1850())
+    results.append(test_puls_fehler_1887())
     results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
@@ -10960,6 +10961,53 @@ def test_fehlerfoto_luecken():
     chk('_fehlerfoto_senden(pc, bid, "tab", roh)' in src and "fehlerfoto_nachreichen_anstossen()" in src
         and '"fehlerfoto_nachreichen"' in src and "fehlerfoto_nachreichen" in ob.FEHLERFOTO_OHNE,
         "Tab-Foto nutzt denselben Merk-Weg; Hülle stößt nachreichen an; eigener Modus, fotografiert selbst nie")
+    return ok
+
+
+def test_puls_fehler_1887():
+    """Routine „Puls-Fehler" 29.10.2026 20:35 Dubai (.1887): Muster „v2order/signal: abbruch vor dem order-knopf: symbol 'nas100' steht
+    nicht bestaetigt im dialog (gelesen: 'eurusd …')" — 2 PCs in 8 h, beide Spuren: drei Tippversuche, Feld wörtlich unverändert, nicht
+    einmal ^a{DELETE} kam an → die Tasten gingen in ein fremdes Fenster (Windows-„Suche" am selben PC). Jetzt je Tippversuch: fremder
+    Prozess vorn → Dialog nach vorn, bleibt er hinten → nicht getippt. Riegel (Rücklese-Beweis, drei Versuche) unverändert. Kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1887: " + text)
+            ok = False
+    u = ob.f9_tipp_vorn_urteil
+    chk(u(4711, 4711, 90210) == "ok" and u("4711", 4711, "90210") == "ok", "Vordergrund im Terminal-Prozess (Haupt- oder Dialogfenster) = ok")
+    chk(u(8496, 4711, 66150) == "fremd", "Fenster eines anderen Prozesses vorn (z. B. Windows-Suche) = fremd")
+    chk(u(0, 4711, 90210) == "unbekannt" and u(8496, 0, 90210) == "unbekannt" and u(8496, 4711, 0) == "unbekannt"
+        and u(None, None, None) == "unbekannt" and u("x", 4711, 1) == "unbekannt",
+        "kein Fenster vorn / Prozess nicht lesbar / kein Windows = unbekannt (tippen wie bisher)")
+
+    class _Dlg:
+        fokus = 0
+
+        def set_focus(self):
+            self.fokus += 1
+
+    class _W:
+        class element_info:
+            process_id = 4711
+    trail = []
+    d = _Dlg()
+    chk(ob._f9_tipp_vorn(d, _W(), trail, 1) == "unbekannt" and trail == [] and d.fokus == 0,
+        "ohne Windows (Attrappe): 'unbekannt', keine Spur, kein Fokus-Griff — Verhalten wie bisher")
+    q = _i.getsource(ob.run)
+    i_loop = q.find("for _sv in (1, 2, 3):")
+    i_vorn = q.find('if _f9_tipp_vorn(dlg, w, trail, _sv) == "fremd":')
+    i_tipp = q.find('_el_tasten(sym_combo, "^a{DELETE}"')
+    chk(0 < i_loop < i_vorn < i_tipp and "continue" in q[i_vorn:i_tipp], "run: Vordergrund-Prüfung je Tippversuch VOR dem ersten Tastendruck, fremd → Versuch ausgelassen")
+    chk(q.count("Symbol-Tippversuch {_sv}: Feld zeigt") == 1 and "steht nicht bestaetigt im Dialog" in q,
+        "run: Rücklese-Beweis, drei Versuche und Abbruch ohne Bestätigung unverändert")
+    h = _i.getsource(ob._f9_tipp_vorn)
+    chk("dlg.set_focus()" in h and "_warte(0.3, 0.25)" in h and "time.sleep" not in h and "nicht getippt" in h,
+        "_f9_tipp_vorn: Dialog nach vorn (set_focus), Warten nur über _warte, zweite Lesung mit Spur")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1887: Symbol-Tasten ins fremde Fenster — Vordergrund je Tippversuch, Dialog nach vorn, nie blind tippen")
     return ok
 
 

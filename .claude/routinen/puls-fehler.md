@@ -67,6 +67,7 @@ Startzeit, **worauf er wartet** (konkret, mit Wert — nie „A, B oder C“).
 | `claim+zu_spaet` | Claim gesetzt, kein Start, `versuche < 3` | sfTick am PC holt binnen 1–6 min nach (Memory prophos-nachholen-luecke-claim-zu-spaet). Liegt er > 15 min so: PC/Tab prüfen (Lebenszeichen `mt5_live`) |
 | `claim+<schritt>` / `rot/…` / `neu/…` | Start-Fehler rot/neu, `versuche < 3` | sfTick plant in 2–6 min neu, sobald die Ursache weg ist → das Muster zählt in Abschnitt 3 |
 | `vorcheck/slave_nicht_bereit: …` / `vorcheck/verpasst_slave: …` | `mt5_baseline.vorcheck` (Slave-Vorprüfung vor Orbit/Topstep-Starts mit Fusion-Hedge) | auf den Check im `grund` (Copier läuft, Fusion-Terminal, Algo Trading, Fusion-Marge): Tab prüft alle 20–40 s bis zum Ende des Start-Fensters, dann `verpasst_slave`. Fusion-Marge zu knapp = Finanzen → Frage an Finn, nie anfassen |
+| `hedge_freigabe` | `hedge_freigabe_at` null bei `hedge_art` apex/tradeify_final (seit 29.10.2026) | auf Finns Bestätigung unter Admin → Challenge-Planer → „Neue Hedge-Trades bestätigen“. Nie selbst setzen, nur Bericht |
 | `claim_ohne_fehler` | Claim gesetzt, kein `start_fehler`, kein Start | Handplan ohne Start-Fehler-Pfad (Echo/`mt5`) oder Tab mitten im Start neu geladen → Rohdaten lesen; bleibt es unklar → Frage |
 | `pc_aus` | kein frisches Lebenszeichen (`mt5_live` ≤ 3 min) für die ID | auf den PC (Memory prophos-pc-aus). Nur Bericht, kein Handgriff. |
 | `unbestaetigt` | Auto-Plan ohne `auto_bestaetigt_at` | auf die Bestätigung (Railway Auto-Bestätigen bzw. Finn) → nur Bericht |

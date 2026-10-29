@@ -109,6 +109,7 @@ Wo die Gründe stehen (alles in `trade_plans.mt5_baseline`, außer Lebenszeichen
 | `start_sperre {art, text, …}` | Server-Sperre mit Grund (z. B. Big Trade nah) — nicht anfassen |
 | `vorcheck {status, seit, versuche, grund, pc, verpasst_at}` | Slave-Vorprüfung des PC-Tabs vor Orbit/Topstep-Starts mit Fusion-Hedge (seit 29.09.2026): `slave_nicht_bereit` = Tab prüft alle 20–40 s weiter (Copier/Terminal/Algo/Fusion-Marge), kein Claim; `verpasst_slave` = im ganzen Start-Fenster nicht bereit, Plan bleibt Geplant. `grund` nennt den Check (z. B. „Fusion-Marge: frei … nötig …“) — Hedge/Finanzen, nie anfassen |
 | `start_um_gestartet_at` (Spalte) | Claim des PC-Tabs; Claim + `start_fehler` ohne Start = der Tab hat es versucht |
+| `hedge_freigabe_at` (Spalte, seit 29.10.2026) | Finns Bestätigung im Challenge-Planer („Neue Hedge-Trades bestätigen“) für Pläne mit `mt5_baseline.hedge_art` apex/tradeify_final; null = der Claim-Trigger hält den Start (Plan bleibt planned, `start_um` rückt je 15–30 min weiter, `start_sperre.art = 'hedge_freigabe'`) — nur Finn, nie per SQL |
 | `mt5_live` (`status->>'user_id'`, `updated_at`) | Lebenszeichen des PC-Tabs der ID (≤ 3 min = lebt) |
 | `order_signale` / `puls_diagnose` / `puls_fehlstarts` | Rohdaten des Versuchs (trail, Spur, code `konto_weg`) |
 
@@ -126,6 +127,8 @@ select left(p.id::text,8) as plan, left(p.user_id::text,8) as id, p.master_firm 
             when y.sf->>'status' = 'tagesende' then 'tagesende'
             when x.b->'vorcheck'->>'status' in ('slave_nicht_bereit','verpasst_slave')   -- 22.10.2026: Slave-Vorprüfung (Fusion-Copier/-Marge) hält den Start, kein Claim, kein start_fehler
                  then 'vorcheck/'||(x.b->'vorcheck'->>'status')||': '||left(coalesce(x.b->'vorcheck'->>'grund',''),90)
+            when p.hedge_freigabe_at is null and coalesce(x.b->>'hedge_art','') in ('apex','tradeify_final')   -- 29.10.2026: Hedge-Trades (Apex-WD, finaler Tradeify) starten erst nach Finns Bestätigung im Challenge-Planer (Claim-Riegel trade_plans_a0_hedge_freigabe, sql/2026-10-29_hedge_freigabe.sql)
+                 then 'hedge_freigabe'
             when p.start_um_gestartet_at is not null and y.sf is null then 'claim_ohne_fehler'
             when p.start_um_gestartet_at is not null then 'claim+'||coalesce(y.sf->>'schritt','?')
             when y.sf is not null then coalesce(y.sf->>'status','?')||'/'||coalesce(y.sf->>'schritt','?')

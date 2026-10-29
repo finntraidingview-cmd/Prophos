@@ -12591,6 +12591,65 @@ def _f9_diagnose(w):
     return "F9 ohne Dialog: " + lage + (f"; weitere Terminal-Fenster {andere[:3]}" if andere else ""), vorn
 
 
+def f9_tipp_vorn_urteil(vorn_pid, terminal_pid, vorn):
+    """REIN RECHNEND (testbar): darf ins Symbolfeld des F9-Dialogs getippt werden? Tasten gehen immer ans Vordergrund-Fenster —
+    liegt dort ein Fenster eines FREMDEN Prozesses, kämen sie nie im Dialog an. -> 'ok' (Vordergrund gehört dem Terminal-Prozess,
+    Haupt- oder Dialogfenster — der F9-Dialog hängt oft als Kind am Hauptfenster), 'fremd' (anderer Prozess vorn), 'unbekannt'
+    (kein Fenster vorn, Prozess nicht lesbar, kein Windows → wie bisher tippen, der Rücklese-Beweis fängt es).
+    ANLASS (Routine „Puls-Fehler" 29.10.2026 20:35 Dubai, Muster „v2order/signal: abbruch vor dem order-knopf (nichts platziert):
+    symbol 'nas100' steht nicht bestaetigt im dialog (gelesen: 'eurusd, euro vs us dollar')": 2 Fälle auf 2 PCs in 8 h (01:44 und
+    09:27 UTC), beide Spuren gleich — drei Tippversuche, das Feld blieb jedes Mal wörtlich 'EURUSD, Euro vs US Dolla', nicht einmal
+    ^a{DELETE} kam an; am selben PC stand 20 min später die Windows-„Suche" (CoreWindow) vorn. Der Nachholer 8–20 min später lief
+    mit demselben Code durch. Riegel unverändert: ohne bestätigtes Rücklesen wird nie gesendet."""
+    try:
+        vp, tp, v = int(vorn_pid or 0), int(terminal_pid or 0), int(vorn or 0)
+    except (TypeError, ValueError):
+        return "unbekannt"
+    if not v or not vp or not tp:
+        return "unbekannt"
+    return "ok" if vp == tp else "fremd"
+
+
+def _f9_tipp_vorn(dlg, w, trail, versuch):
+    """Vor jedem Tippversuch ins Symbolfeld (29.10.2026, s. f9_tipp_vorn_urteil): liegt ein fremdes Fenster vorn, den F9-Dialog
+    nach vorn holen (set_focus wie _fenster_betreten) und nachlesen; bleibt es fremd, wird in diesem Versuch NICHT getippt — Tasten
+    nie in ein unbekanntes Fenster. Nur lesen + Fokus, wirft nie; ohne Windows 'unbekannt'. -> 'ok' | 'fremd' | 'unbekannt'."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        u32 = ctypes.windll.user32
+
+        def _lage():
+            h = int(u32.GetForegroundWindow() or 0)
+            pid = wt.DWORD(0)
+            if h:
+                u32.GetWindowThreadProcessId(wt.HWND(h), ctypes.byref(pid))
+            return h, int(pid.value)
+        try:
+            tpid = int(w.element_info.process_id or 0)
+        except Exception:
+            tpid = 0
+        vorn, vpid = _lage()
+        urteil = f9_tipp_vorn_urteil(vpid, tpid, vorn)
+        if urteil != "fremd":
+            return urteil
+        trail.append(f"Symbol-Tippversuch {versuch}: fremdes Fenster vorn ('{str(_vordergrund_titel() or '')[:30] or '?'}' {vorn}"
+                     f"{_win_fenster_steckbrief(vorn)}) — hole den F9-Dialog nach vorn")
+        try:
+            dlg.set_focus()
+        except Exception:
+            pass
+        _warte(0.3, 0.25)
+        vorn, vpid = _lage()
+        urteil = f9_tipp_vorn_urteil(vpid, tpid, vorn)
+        if urteil == "fremd":
+            trail.append(f"Symbol-Tippversuch {versuch}: Dialog bleibt hinten (vorn '{str(_vordergrund_titel() or '')[:30] or '?'}' "
+                         f"{vorn}) — nicht getippt")
+        return urteil
+    except Exception:
+        return "unbekannt"
+
+
 def _f9_ursache(path, expected, symbol, w, vorn):
     """Nach „F9 ohne Dialog: Terminal selbst vorn" (Routine „Puls-Fehler" 16.10.2026 20:30 Dubai, s. run): WARUM öffnete MT5 nichts?
     Liest nur, wirft nie. Nur wenn das Terminal selbst vorn lag (vorn == Kennung von w) — F9 kam dann nachweislich an; sonst None.
@@ -12968,6 +13027,10 @@ def run(cfg_path, cmd):
         for _sv in (1, 2, 3):
             if gewaehlt:
                 break
+            # FREMDES FENSTER VORN (Routine „Puls-Fehler" 29.10.2026, s. f9_tipp_vorn_urteil): 2 PCs, Feld blieb dreimal wörtlich
+            # 'EURUSD, …' — die Tasten gingen in ein anderes Fenster. Dialog nach vorn holen; bleibt es fremd, diesen Versuch auslassen.
+            if _f9_tipp_vorn(dlg, w, trail, _sv) == "fremd":
+                continue
             try:
                 sym_combo.set_focus(); _warte(0.15, 0.2)
                 _el_tasten(sym_combo, "^a{DELETE}", set_foreground=False)
