@@ -1183,6 +1183,24 @@
   #adm-pane-kapital .kis-n-legende .kf{font-size:11px;font-weight:500}
   #adm-pane-kapital .kis-n-strich{display:inline-block;width:14px;height:0;border-top:3px solid;margin-right:6px;vertical-align:3px}
   #adm-pane-kapital .kis-n-legende{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:12px;color:var(--sub)}
+  /* Graf klar (29.10.2026 05:37, Finn: „Man erkennt ihn nicht so … größer, smoother, mit Zahlen … noch so ein, zwei KPIs"): KPI-Kacheln,
+     Tooltip am Mauszeiger, Quellen per Klick in der Legende */
+  #adm-pane-kapital .kis-kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 6px}
+  #adm-pane-kapital .kis-kpis .kpi{min-width:0;padding:12px 14px;box-shadow:none}
+  #adm-pane-kapital .kis-kpis .kpi-value{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-kapital .kis-kpis .kpi:first-child .kpi-value{font-size:28px}
+  #adm-pane-kapital .kis-kpis .kpi-delta{display:block;color:var(--sub);font-size:11.5px;line-height:1.4;white-space:normal}
+  #adm-pane-kapital .wd-ueb-graf.kis-n-graf{position:relative}
+  #adm-pane-kapital .kis-tip{position:absolute;z-index:3;pointer-events:none;min-width:190px;max-width:250px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 6px 18px rgba(16,24,40,.12);font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #adm-pane-kapital .kis-tip[hidden]{display:none}
+  #adm-pane-kapital .kis-tip .t-tag{font-size:11.5px;margin-bottom:2px}
+  #adm-pane-kapital .kis-tip .t-summe{font-size:20px;font-weight:650;color:var(--ink);letter-spacing:-.02em}
+  #adm-pane-kapital .kis-tip .t-z{display:flex;justify-content:space-between;gap:10px;padding:1px 0}
+  #adm-pane-kapital .kis-tip .t-z b{color:var(--ink);font-weight:600}
+  #adm-pane-kapital .kis-tip .t-ev{margin-top:5px;padding-top:5px;border-top:1px solid var(--border-soft,var(--line))}
+  #adm-pane-kapital .kis-n-legende [data-kis-q]{cursor:pointer;opacity:.5;border-radius:6px;padding:1px 4px;margin:-1px -4px}
+  #adm-pane-kapital .kis-n-legende [data-kis-q]:hover{background:var(--surface-tint)}
+  #adm-pane-kapital .kis-n-legende [data-kis-q].is-an{opacity:1}
   #adm-pane-kapital .kis-n-legende b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
   #adm-pane-kapital .kis-n-punkt{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px}
   #adm-pane-kapital .kis-n-balken .spur{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--surface-tint)}
@@ -1197,6 +1215,8 @@
   #adm-pane-kapital .kis-details>summary{cursor:pointer;font-size:12.5px;color:var(--sub);padding:8px 2px}
   @media (max-width:640px){
     #adm-pane-kapital .wd-ueb-graf.kis-n-graf{height:280px}
+    #adm-pane-kapital .kis-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+    #adm-pane-kapital .kis-kpis .kpi:first-child .kpi-value{font-size:22px}
     #adm-pane-kapital .kis-gross-v{font-size:30px}
     #adm-pane-kapital .kis-n-posten .kis-p-zeile{grid-template-columns:minmax(0,1fr) 92px auto}
     #adm-pane-kapital .kis-n-posten .kis-p-zeile .m-aus{display:none}
@@ -13038,11 +13058,14 @@
                  nach oben geht. Die Eingaben/‚Buchen' unten weglassen. Geschäftskonto und andere Werte … einfach in einer Liste von Hand eintragen").
                  kisNeuRender zeichnet: große Zahl, Tagesbalken je Quelle (kapital_tageswerte.teile), Aufteilung jetzt, Liste „Weitere Posten"
                  (kapital_gk_buchungen, Kategorie Geschäftskonto/Sonstiges). Die bisherige Ansicht steht unverändert unter „Details". -->
-            <div class="kis-gross">
-              <div class="kis-l">Insgesamt im System</div>
-              <div class="kis-gross-v" id="kis-n-summe">–</div>
-              <div class="kis-s" id="kis-n-stand"></div>
+            <!-- KPI-Kacheln (29.10.2026 05:37, Finn: „Auch noch so ein, zwei KPIs") statt der einzelnen großen Zahl — die erste Kachel ist die Zahl -->
+            <div class="kpis kis-kpis" id="kis-n-kpis">
+              <div class="kpi"><div class="kpi-label">Insgesamt jetzt</div><div class="kpi-value" id="kis-n-summe">–</div><div class="kpi-delta" id="kis-k1-s"></div></div>
+              <div class="kpi"><div class="kpi-label">Δ 7 Tage</div><div class="kpi-value" id="kis-k2">–</div><div class="kpi-delta" id="kis-k2-s"></div></div>
+              <div class="kpi"><div class="kpi-label" id="kis-k3-l">Δ seit Beginn</div><div class="kpi-value" id="kis-k3">–</div><div class="kpi-delta" id="kis-k3-s"></div></div>
+              <div class="kpi"><div class="kpi-label">Laufende Konten</div><div class="kpi-value" id="kis-k4">–</div><div class="kpi-delta" id="kis-k4-s"></div></div>
             </div>
+            <div class="kis-s" id="kis-n-stand" style="margin:0 0 12px"></div>
             <div class="panel" style="margin-bottom:14px">
               <!-- Graf statt Balken (29.10.2026 07:00, Finn: „Ein Graf, kein Balkenchart — plus Filterleiste mit dem Design, das ich immer nehme"):
                    Lightweight Charts wie Admin → Winning Days → Statistik, Zeitraum-Chips mit denselben Klassen (adm-vl-chip in .wd-ueb-chips) -->
@@ -13051,7 +13074,7 @@
               <!-- Filter je ID (29.10.2026 09:35, Finn: „und auch nach IDs filtern"): Chips mit ID-Farbe, wirken auf Zahl, Graf, Legende, Aufteilung —
                    je ID nur Kontowerte, Wallets, offene Payouts (ist.je_id); Fusion/Geschäftskonto/Weitere Posten sind gruppenweit -->
               <div class="wd-ueb-chips kis-n-ids" id="kis-n-ids"></div>
-              <div class="wd-ueb-graf kis-n-graf" id="kis-n-chart"></div>
+              <div class="wd-ueb-graf kis-n-graf" id="kis-n-chart"></div><!-- Tooltip (.kis-tip) hängt kisGraf selbst ein -->
               <div class="kis-n-legende" id="kis-n-legende"></div>
               <div class="kis-s" id="kis-n-hinweis" style="margin-top:6px"></div>
               <div class="kis-h" style="margin-top:12px">Aufteilung jetzt</div>
@@ -20574,57 +20597,130 @@
       tage.push({ tag: heute, quellen: jetzt, rueckblick: false })
       const ab = kisZeitraum === 'alle' ? '' : kisZeitraum === 'heute' ? heute : kisTagMinus(Number(kisZeitraum) - 1)
       const reihe = tage.filter(p => p.tag >= ab), vor = tage.filter(p => p.tag < ab)
-      return { reihe, basis: vor.length ? vor[vor.length - 1] : (reihe.length > 1 ? reihe[0] : null) }
+      return { reihe, basis: vor.length ? vor[vor.length - 1] : (reihe.length > 1 ? reihe[0] : null), tage }
+    }
+    // Quellen-Linien standardmäßig AUS (29.10.2026, Finn: „ein klarer Graf"), Klick in der Legende schaltet sie zu
+    const kisAn = new Set()
+    const kisK = w => { const a = Math.abs(w); return (w < 0 ? '−' : '+') + (a >= 1000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : Math.round(a) + ' €') }
+    const kisVzEur = w => { const r = Math.round(w); return (r > 0 ? '+' : r < 0 ? '−' : '±') + kisEur.format(Math.abs(r)) }
+    const kisVzFarbe = w => Math.round(w) > 0 ? 'var(--good-ink)' : Math.round(w) < 0 ? 'var(--danger-ink)' : 'var(--sub)'
+    // Ereignisse (kapital_ereignisse) je Tag, mit ID-Filter nur diese ID
+    function kisEreignisse(d){
+      const je = new Map()
+      for(const e of d.ereignisse || []){
+        if(kisId && e.id !== kisId) continue
+        const z = je.get(e.tag) || { gekauft_n: 0, gekauft_eur: 0, geblowt_n: 0, geblowt_eur: 0, hedge_eur: 0 }
+        for(const f of ['gekauft_n', 'gekauft_eur', 'geblowt_n', 'geblowt_eur', 'hedge_eur']) z[f] += Number(e[f]) || 0
+        je.set(e.tag, z)
+      }
+      return je
+    }
+    // Marken: nur Tage mit Kauf/Blow, Tage bis 3 Tage nach dem ersten einer Gruppe zusammengefasst (Marke am letzten Tag), dazu der erste
+    // vollständige Tag (Fusion, Geschäftskonto, alle Wallets) — nicht bei ID-Filter (dort gibt es nur ID-Teile)
+    function kisMarken(reihe, ev){
+      const tage = new Set(reihe.map(p => p.tag)), marken = []
+      const liste = [...ev.entries()].filter(([t, z]) => tage.has(t) && (z.gekauft_n || z.geblowt_n)).sort((a, b) => a[0] < b[0] ? -1 : 1)
+      const tagNr = t => Date.parse(t + 'T00:00:00Z') / 864e5
+      let grp = null
+      const fertig = () => { if(!grp) return
+        // kurz, damit sich Marken nicht überlagern — Beträge und Hedge stehen im Tooltip
+        const text = grp.gekauft_n && grp.geblowt_n ? `+${grp.gekauft_n} / −${grp.geblowt_n} Konten` : grp.gekauft_n ? `+${grp.gekauft_n} Konten (${kisK(grp.gekauft_eur)})` : `−${grp.geblowt_n} geblowt`
+        const netto = grp.gekauft_eur - grp.geblowt_eur
+        marken.push({ time: grp.bis, position: netto >= 0 ? 'aboveBar' : 'belowBar', color: netto >= 0 ? mklToken('--good', '#12b76a') : mklToken('--danger', '#f04438'), shape: 'circle', size: 0.6, text })
+        grp = null }
+      for(const [t, z] of liste){
+        if(grp && tagNr(t) - tagNr(grp.von) > 3) fertig()
+        if(!grp) grp = { von: t, bis: t, gekauft_n: 0, gekauft_eur: 0, geblowt_n: 0, geblowt_eur: 0 }
+        grp.bis = t; for(const f of ['gekauft_n', 'gekauft_eur', 'geblowt_n', 'geblowt_eur']) grp[f] += z[f]
+      }
+      fertig()
+      const iEcht = reihe.findIndex(p => !p.rueckblick)
+      // am rechten Rand (erster echter Tag = heute) schneidet die Bibliothek den Text ab → dort nur die Marke, der Hinweis steht unter dem Graf
+      if(!kisId && iEcht > 0) marken.push({ time: reihe[iEcht].tag, position: 'aboveBar', color: mklToken('--sub', '#667085'), shape: 'square', size: 0.6, text: iEcht >= reihe.length - 2 ? '' : 'ab hier inkl. Fusion/GK' })
+      return marken.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0)
     }
     function kisGrafWeg(){ const g = _kisGraf; if(!g) return; try{ g.ro && g.ro.disconnect() }catch(_){} try{ g.chart.remove() }catch(_){} _kisGraf = null }
-    function kisGraf(reihe){
+    // Graf klar (29.10.2026 05:37, Finn: „Ich find den Chart immer noch kacke. Man erkennt ihn nicht so. Wenn ich da draufgehe, will ich ja direkt
+    // sehen, wie viel Geld da war … größer, smoother, mit Zahlen"): „Insgesamt" als Fläche mit weicher Linie (Rückblick-Tage heller), letzter Wert
+    // am rechten Rand, Quellen nur zugeschaltet, Marken für Käufe/Blows, Tooltip am Mauszeiger (am Handy: Tippen) mit allen Quellen und Δ zum Vortag.
+    function kisGraf(reihe, info){
       const box = $('kis-n-chart'); if(!box) return
       if(!window.LightweightCharts){
         if(!box.firstChild) box.innerHTML = '<div class="kis-s" style="padding:12px">Graf lädt …</div>'
-        mklLibLaden().then(ok => { if(ok) kisGraf(reihe); else box.innerHTML = '<div class="kis-s" style="padding:12px">Graf nicht verfügbar: Chart-Bibliothek (cdn.jsdelivr.net) nicht ladbar → Seite neu laden</div>' })
+        mklLibLaden().then(ok => { if(ok) kisGraf(reihe, info); else box.innerHTML = '<div class="kis-s" style="padding:12px">Graf nicht verfügbar: Chart-Bibliothek (cdn.jsdelivr.net) nicht ladbar → Seite neu laden</div>' })
         return
       }
-      // ruhiger (29.10.2026 09:35, Finn: „mit cleaneren Linien"): nur waagerechtes Gitter ganz zart, kleine Achsen-Schrift, keine Preis-Labels und
-      // keine waagerechte Fadenkreuz-Linie am rechten Rand (die Werte stehen in der Legende), Rückblick heller statt gestrichelt
-      const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
-      const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub-2', mklToken('--sub', '#667085')), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 10 },
-        grid: { vertLines: { visible: false }, horzLines: { color: kisAlpha(rahmen, 0.6) } }, rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.04 } },
+      const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)'), ink = mklToken('--ink', '#101828')
+      const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12 },
+        grid: { vertLines: { visible: false }, horzLines: { color: kisAlpha(rahmen, 0.6) } }, rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.14, bottom: 0.06 } },
         timeScale: { borderVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: t => kisTag(typeof t === 'string' ? t : `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`) },
-        crosshair: { mode: LW.CrosshairMode.Magnet, horzLine: { visible: false, labelVisible: false }, vertLine: { color: rahmen, width: 1, style: LW.LineStyle.Solid, labelBackgroundColor: mklToken('--sub', '#667085') } },
+        crosshair: { mode: LW.CrosshairMode.Magnet, horzLine: { visible: false, labelVisible: false }, vertLine: { color: kisAlpha(ink, 0.25), width: 1, style: LW.LineStyle.Solid, labelVisible: false } },
         localization: { locale: 'de-DE', dateFormat: 'dd.MM.yyyy' } }
       const fmt = { type: 'custom', minMove: 1, formatter: w => kisEur.format(w) }
-      const punkte = reihe.length <= 2   // ein/zwei Tage („Heute"): Punkte zeigen, sonst sähe man keine Linie
-      const ruhig = { lastValueVisible: false, priceLineVisible: false, priceFormat: fmt }
+      const punkte = reihe.length <= 2
       let g = _kisGraf
       if(!g || !g.chart || g.box !== box){
         kisGrafWeg(); box.innerHTML = ''
         const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || 450, handleScale: false, handleScroll: false }, huelle))
         const quellen = {}
-        for(const [k] of KIS_QUELLEN) quellen[k] = chart.addLineSeries(Object.assign({ lineWidth: 1, crosshairMarkerRadius: 2.5 }, ruhig))
-        const rueck = chart.addLineSeries(Object.assign({ lineWidth: 2.5, crosshairMarkerVisible: false }, ruhig))
-        const summe = chart.addLineSeries(Object.assign({ lineWidth: 2.5, crosshairMarkerRadius: 3.5 }, ruhig))
-        g = _kisGraf = { chart, quellen, rueck, summe, box, ro: null }
-        try{ g.ro = new ResizeObserver(() => { const gg = _kisGraf; if(!gg || !gg.chart || !box.clientWidth) return; try{ gg.chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || 450 }); gg.chart.timeScale().fitContent() }catch(_){} }); g.ro.observe(box) }catch(_){}
+        for(const [k] of KIS_QUELLEN) quellen[k] = chart.addLineSeries({ lineWidth: 1.5, lineType: LW.LineType.Curved, crosshairMarkerRadius: 3, lastValueVisible: false, priceLineVisible: false, priceFormat: fmt })
+        const summe = chart.addAreaSeries({ lineWidth: 3, lineType: LW.LineType.Curved, crosshairMarkerRadius: 4.5, lastValueVisible: true, priceLineVisible: false, priceFormat: fmt })
+        const tip = document.createElement('div'); tip.className = 'kis-tip'; tip.hidden = true; box.appendChild(tip)
+        g = _kisGraf = { chart, quellen, summe, box, tip, ro: null, info: null }
+        chart.subscribeCrosshairMove(par => kisTip(par))
+        try{ g.ro = new ResizeObserver(() => { const gg = _kisGraf; if(!gg || !gg.chart || !box.clientWidth) return; try{ gg.chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || 450 }); gg.chart.timeScale().fitContent(); kisMarkenSetzen(gg) }catch(_){} }); g.ro.observe(box) }catch(_){}
       } else {
         try{ g.chart.applyOptions(huelle) }catch(_){}
       }
+      g.info = info
       try{
-        const ink = mklToken('--ink', '#101828')
         for(const [k] of KIS_QUELLEN){
-          const an = !kisId || KIS_JE_ID.includes(k)   // mit ID-Filter: gruppenweite Quellen leer
-          g.quellen[k].applyOptions({ color: kisAlpha(mklToken(KIS_TOKEN[k], '#98a2b3'), 0.85), pointMarkersVisible: punkte })
+          const an = kisAn.has(k) && (!kisId || KIS_JE_ID.includes(k))
+          g.quellen[k].applyOptions({ color: mklToken(KIS_TOKEN[k], '#98a2b3'), pointMarkersVisible: punkte, visible: an })
           g.quellen[k].setData(an ? reihe.map(p => ({ time: p.tag, value: Math.round(Number(p.quellen[k]) || 0) })) : [])
         }
-        // heller: Rückblick-Tage + der erste echte Tag (der Sprung dorthin ist Fusion/GK/offene Payouts, die erst ab dann zählen)
-        const iEcht = reihe.findIndex(p => !p.rueckblick)
-        const rueckTeil = iEcht > 0 ? reihe.slice(0, iEcht + 1) : iEcht < 0 ? reihe : []
-        g.rueck.applyOptions({ color: kisAlpha(ink, 0.3), pointMarkersVisible: punkte })
-        g.rueck.setData(rueckTeil.map(p => ({ time: p.tag, value: Math.round(kisSumme(p.quellen)) })))
-        const echt = iEcht < 0 ? [] : reihe.slice(iEcht)
-        g.summe.applyOptions({ color: ink, pointMarkersVisible: punkte || echt.length === 1 })   // erster echter Tag allein: als Punkt, nicht als Strich
-        g.summe.setData(echt.map(p => ({ time: p.tag, value: Math.round(kisSumme(p.quellen)) })))
+        // Rückblick-Tage (nur Wallets + Kontowerte nachgerechnet) heller — Farbe je Punkt, eine durchgehende Fläche
+        const hell = { lineColor: kisAlpha(ink, 0.4), topColor: kisAlpha(ink, 0.07), bottomColor: kisAlpha(ink, 0.01) }
+        g.summe.applyOptions({ lineColor: ink, topColor: kisAlpha(ink, 0.16), bottomColor: kisAlpha(ink, 0.015), pointMarkersVisible: punkte })
+        g.summe.setData(reihe.map(p => Object.assign({ time: p.tag, value: Math.round(kisSumme(p.quellen)) }, p.rueckblick ? hell : {})))
+        kisMarkenSetzen(g)
         g.chart.timeScale().fitContent()
       }catch(e){ console.warn('[kapital] Graf', e); kisGrafWeg(); box.innerHTML = '' }
+    }
+    // schmal (Handy): nur die Punkte, Texte würden sich überlagern — Tippen zeigt den Tag mit Käufen/Blows. Auch beim Größenwechsel neu
+    // (Gegenprüfung: Breite 0 bei verstecktem Reiter zählt als breit, sonst fehlten die Texte am Desktop bis zum nächsten Klick)
+    function kisMarkenSetzen(g){
+      const w = g.box.clientWidth, schmal = w > 0 && w < 560
+      try{ g.summe.setMarkers(((g.info && g.info.marken) || []).map(m => schmal ? Object.assign({}, m, { text: '' }) : m)) }catch(_){}
+    }
+    // Tooltip am Mauszeiger: Datum, Insgesamt groß (Δ Vortag), jede Quelle mit € und Δ Vortag, darunter Käufe/Blows/Hedge des Tages
+    function kisTip(par){
+      const g = _kisGraf; if(!g || !g.tip) return
+      const tip = g.tip, info = g.info || {}
+      const zeit = par && par.time ? (typeof par.time === 'string' ? par.time : `${par.time.year}-${String(par.time.month).padStart(2, '0')}-${String(par.time.day).padStart(2, '0')}`) : ''
+      const i = zeit ? (info.reihe || []).findIndex(p => p.tag === zeit) : -1
+      if(i < 0 || !par.point){ tip.hidden = true; return }
+      const p = info.reihe[i], vor = i > 0 ? info.reihe[i - 1] : info.basis
+      const vergl = vor && !(vor.rueckblick && !p.rueckblick) ? vor.quellen : null   // Sprung Rückblick → erster echter Tag: kein Δ (Beginn der Aufzeichnung)
+      const summe = kisSumme(p.quellen)
+      const zeilen = info.quellen.map(([k, name, farbe]) => {
+        const w = Number(p.quellen[k]) || 0
+        if(!w && !(vergl && Number(vergl[k]))) return ''
+        const dv = vergl ? w - (Number(vergl[k]) || 0) : null
+        return `<div class="t-z"><span><span class="kis-n-punkt" style="background:${farbe}"></span>${name}</span><span><b>${kisEur.format(w)}</b>${dv != null && Math.round(dv) ? ` <span style="color:${kisVzFarbe(dv)}">${kisVzEur(dv)}</span>` : ''}</span></div>`
+      }).join('')
+      const ev = (info.ev || new Map()).get(p.tag)
+      const evTxt = ev ? [ev.gekauft_n ? `+${ev.gekauft_n} Konten gekauft (${kisEur.format(ev.gekauft_eur)})` : '', ev.geblowt_n ? `−${ev.geblowt_n} geblowt (${kisEur.format(ev.geblowt_eur)} Kontowert)` : '',
+        Math.round(ev.hedge_eur) ? `Hedge-Ergebnis ${kisVzEur(ev.hedge_eur)} auf die Kontowerte` : ''].filter(Boolean) : []
+      const dSumme = vergl ? summe - kisSumme(vergl) : null
+      tip.innerHTML = `<div class="t-tag">${escapeHtml(new Date(p.tag + 'T12:00:00').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }))}${p.rueckblick ? ' · Rückblick' : ''}</div>
+        <div class="t-summe">${kisEur.format(summe)}${dSumme != null && Math.round(dSumme) ? ` <span style="font-size:12px;font-weight:600;color:${kisVzFarbe(dSumme)}">${kisVzEur(dSumme)}</span>` : ''}</div>
+        ${zeilen}${evTxt.length ? `<div class="t-ev">${evTxt.map(t => `<div>${escapeHtml(t)}</div>`).join('')}</div>` : ''}${p.rueckblick ? '<div class="t-ev">nur Wallets + Kontowerte nachgerechnet</div>' : ''}`
+      tip.hidden = false
+      const bw = g.box.clientWidth, bh = g.box.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight
+      let x = par.point.x + 16; if(x + tw > bw - 4) x = par.point.x - tw - 16; if(x < 4) x = 4
+      let y = par.point.y - th / 2; y = Math.max(4, Math.min(bh - th - 4, y))
+      tip.style.left = x + 'px'; tip.style.top = y + 'px'
     }
     // Token-Farbe (#rrggbb / #rgb / rgb(…)) mit Deckkraft — Lightweight Charts kennt kein var(--x) und kein color-mix
     function kisAlpha(farbe, a){
@@ -20648,13 +20744,32 @@
       const jetzt = kisId ? Object.assign({ fusion: 0, geschaeftskonto: 0, sonstiges: 0 }, kisIdTeile(jeId[kisId])) : kisJetzt(d)
       const gesamt = kisId ? kisSumme(jetzt) : Number(d.ist?.summe) || 0
       $('kis-n-summe').textContent = kisEur.format(gesamt)
+      $('kis-k1-s').textContent = kisId ? `${idName} · Kontowerte, Wallets, offene Payouts` : 'alle Quellen zusammen'
       $('kis-n-stand').textContent = kisId
         ? `${idName} · Stand ${kisZeit(d.generated)} · Kontowerte + Wallets + offene Payouts dieser ID · Fusion, Geschäftskonto und Weitere Posten sind gruppenweit, nicht je ID`
         : `Stand ${kisZeit(d.generated)} · Wallets + Fusion + Geschäftskonto + Kontowerte + offene Payouts + Sonstiges`
           + (d.ist?.fusion ? '' : ' · Fusion ohne Stand (kein PC-Tab liest gerade)')
       $('kis-n-zeit').innerHTML = KIS_ZEITEN.map(([z, t]) => `<button type="button" class="adm-vl-chip${kisZeitraum === z ? ' is-on' : ''}" data-kis-zeit="${z}">${t}</button>`).join('')
-      const { reihe, basis } = kisReihe(d.verlauf, jetzt)
-      kisGraf(reihe)
+      const { reihe, basis, tage } = kisReihe(d.verlauf, jetzt)
+      const ev = kisEreignisse(d)
+      kisGraf(reihe, { reihe, basis, ev, quellen, marken: kisMarken(reihe, ev) })
+      // KPI-Kacheln: Δ 7 Tage und Δ seit dem ersten Tag (unabhängig vom Zeitraum-Chip). Gegen einen Rückblick-Tag nur Wallets + Kontowerte.
+      const kpiDelta = (vId, sId, basisTag, fallbackText) => {
+        if(!basisTag){ $(vId).textContent = '–'; $(sId).textContent = fallbackText; $(vId).style.color = ''; return }
+        const nur = basisTag.rueckblick
+        const dv = nur ? (jetzt.wallets + jetzt.konten) - (Number(basisTag.quellen.wallets) || 0) - (Number(basisTag.quellen.konten) || 0) : gesamt - kisSumme(basisTag.quellen)
+        $(vId).textContent = kisVzEur(dv); $(vId).style.color = kisVzFarbe(dv)
+        $(sId).textContent = `gegen ${kisTag(basisTag.tag)}${nur ? ' · nur Wallets + Kontowerte (Rückblick-Tag)' : ''}`
+      }
+      const vor7 = tage.filter(p => p.tag <= kisTagMinus(7)).pop()
+      kpiDelta('kis-k2', 'kis-k2-s', vor7, 'noch keine 7 Tage Verlauf')
+      const erster = tage.length > 1 ? tage[0] : null
+      $('kis-k3-l').textContent = erster ? `Δ seit ${kisTag(erster.tag)}` : 'Δ seit Beginn'
+      kpiDelta('kis-k3', 'kis-k3-s', erster, 'Verlauf startet heute')
+      // Käufe/Blows nach dem Basistag, passend zu „Δ seit …" (Gegenprüfung)
+      const evSumme = [...ev.entries()].filter(([t]) => !erster || t > erster.tag).reduce((a, [, z]) => ({ k: a.k + z.gekauft_n, b: a.b + z.geblowt_n }), { k: 0, b: 0 })
+      $('kis-k4').textContent = String(Number(kisId ? jeId[kisId]?.konten_n : d.ist?.konten_n) || 0)
+      $('kis-k4-s').textContent = (d.ereignisse || []).length ? `+${evSumme.k} gekauft · −${evSumme.b} geblowt${erster ? ' seit ' + kisTag(erster.tag) : ''}` : 'Kauf + Hedge je laufendem Konto'
       const zeitName = (KIS_ZEITEN.find(([z]) => z === kisZeitraum) || [])[1] || ''
       $('kis-n-verlauf-sub').textContent = `${kisId ? idName + ' · ' : ''}Insgesamt${kisId ? '' : ' im System'} und je Quelle · ein Punkt je Tag · ${zeitName} ${reihe.length === 1 ? kisTag(reihe[0].tag) : 'ab ' + kisTag(reihe[0].tag)}`
       // Legende: Wert jetzt + Veränderung im Zeitraum (gegen den Tag vor dem Zeitraum). Gegen einen Rückblick-Tag nur Wallets + Kontowerte —
@@ -20666,13 +20781,14 @@
         return ` <span class="kf" style="color:${dv > 0 ? 'var(--good-ink)' : dv < 0 ? 'var(--danger-ink)' : 'var(--sub)'}">${dv > 0 ? '+' : dv < 0 ? '−' : '±'}${kisEur.format(Math.abs(dv))}${nurWK ? ' (Wallets + Kontowerte)' : ''} seit ${kisTag(basis.tag)}</span>` })()
       const pos = quellen.reduce((a, [k]) => a + Math.max(0, jetzt[k]), 0) || 1
       $('kis-n-legende').innerHTML = `<span><span class="kis-n-strich" style="border-color:var(--ink)"></span>Insgesamt <b>${kisEur.format(gesamt)}</b>${dSumme}</span>`
-        + quellen.map(([k, name, farbe]) => `<span><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b>${delta(k, jetzt[k])}</span>`).join('')
+        + quellen.map(([k, name, farbe]) => `<span data-kis-q="${k}" role="button" tabindex="0" class="${kisAn.has(k) ? 'is-an' : ''}" title="${kisAn.has(k) ? 'Linie ausblenden' : 'Linie im Graf zeigen'}"><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b>${delta(k, jetzt[k])}</span>`).join('')
+        + `<span style="flex-basis:100%;font-size:11.5px">Klick auf eine Quelle zeigt ihre Linie im Graf · Punkte = Käufe (grün) und Blows (rot), Maus/Tippen auf den Graf zeigt den Tag</span>`
         // Kontowerte (Finn 29.10.2026 06:45): Kauf + Hedge je laufendem Konto, Payouts nicht abgezogen — sie stecken als Geld in Wallets/Konto
         + `<span style="flex-basis:100%;font-size:11.5px">Kontowerte: ${Number(kisId ? jeId[kisId]?.konten_n : d.ist?.konten_n) || 0} laufende Konten · Kauf + Hedge, Payouts stecken in Wallets/Konto · geblowte Konten zählen 0</span>`
         + (kisId ? `<span style="flex-basis:100%;font-size:11.5px">Fusion, Geschäftskonto, Weitere Posten: gruppenweit, nicht je ID — bei „Alle“</span>` : '')
       const ersterEcht = (d.verlauf || []).find(p => !p.rueckblick)?.tag || kisHeute()
       $('kis-n-hinweis').textContent = reihe.some(p => p.rueckblick)
-        ? `Hellere Linie = Rückblick: nur Wallets + Kontowerte nachgerechnet · ${kisId ? 'offene Payouts' : 'Fusion/GK'} ab ${kisTag(ersterEcht)}${kisId ? '' : ' (auch offene Payouts und Sonstiges)'}` : ''
+        ? `Hellere Fläche = Rückblick: nur Wallets + Kontowerte nachgerechnet · ${kisId ? 'offene Payouts' : 'Fusion/GK'} ab ${kisTag(ersterEcht)}${kisId ? '' : ' (auch offene Payouts und Sonstiges)'}` : ''
       $('kis-n-balken').innerHTML = `<div class="spur">${quellen.filter(([k]) => jetzt[k] > 0).map(([k, name, farbe]) => `<div style="width:${(100 * jetzt[k] / pos).toFixed(2)}%;background:${farbe}" title="${name} ${kisEur.format(jetzt[k])}"></div>`).join('')}</div>`
         + `<div class="zeilen">${quellen.map(([k, name, farbe]) => `<span><span class="kis-n-punkt" style="background:${farbe}"></span>${name} <b>${kisEur.format(jetzt[k])}</b> · ${Math.round(100 * Math.max(0, jetzt[k]) / pos)} %</span>`).join('')}</div>`
       // Weitere Posten = kapital_gk_buchungen (je Zeile ein Stand)
@@ -20884,6 +21000,9 @@
       if(ok){ $('kis-g-betrag').value = ''; $('kis-g-text').value = ''; $('kis-form-msg').textContent = `${kat} gebucht.` }
     })
     // Weitere Posten (29.10.2026): Hinzufügen = POST /admin/kapital/gk (Kategorie Geschäftskonto/Sonstiges, Betrag = aktueller Stand)
+    const kisLegendeKlick = ev => { const q = ev.target.closest('[data-kis-q]'); if(!q) return; const k = q.dataset.kisQ; kisAn.has(k) ? kisAn.delete(k) : kisAn.add(k); kisNeuRender() }
+    $('kis-n-legende')?.addEventListener('click', kisLegendeKlick)   // Quellen-Linien zuschalten (29.10.2026)
+    $('kis-n-legende')?.addEventListener('keydown', ev => { if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); kisLegendeKlick(ev) } })
     $('kis-n-ids')?.addEventListener('click', ev => { const c = ev.target.closest('[data-kis-id]'); if(!c) return; kisId = c.dataset.kisId; kisNeuRender() })   // Filter je ID (29.10.2026)
     $('kis-n-zeit')?.addEventListener('click', ev => { const c = ev.target.closest('[data-kis-zeit]'); if(!c) return; kisZeitraum = c.dataset.kisZeit; kisNeuRender() })   // Zeitraum-Chips (29.10.2026)
     $('kis-p-ok')?.addEventListener('click', async ev => {
@@ -50135,7 +50254,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1854'
+  const OS_TAB_BUILD = '2026-09-22.1855'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

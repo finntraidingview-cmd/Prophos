@@ -416,15 +416,24 @@ def je_id_rechnen(ketten, snaps, offene, fx, mit=None):
 
 
 def _id_namen(uids):
-    """Anzeigenamen der IDs (user_metadata.name, sonst die ersten 8 Zeichen) über die gemerkte Nutzerliste von app.py — nie Mails.
+    """Anzeigenamen der IDs wie in den übrigen Admin-Reitern (app.py _wd_personen / Übersicht): user_metadata.name, sonst das Kürzel vor
+    dem @ der Login-Mail, sonst die ersten 8 Zeichen — nie die ganze Mail (29.10.2026: Chip „46ce0409“ in Finns HT-Screenshot).
     Lesefehler → nur Kürzel (die Zahlen hängen nicht daran)."""
     try:
         r = A["_auth_liste_anfrage"]()
         users = (r.json() or {}).get("users") or [] if r.status_code == 200 else []
     except Exception:
         users = []
-    namen = {str(u.get("id")): str(((u.get("user_metadata") or {}).get("name")) or "").strip() for u in users}
+    namen = {}
+    for u in users:
+        mail = str(u.get("email") or "")
+        namen[str(u.get("id"))] = str(((u.get("user_metadata") or {}).get("name")) or "").strip() or (mail.split("@")[0] if "@" in mail else "")
     return {str(u): namen.get(str(u)) or str(u)[:8] for u in uids}
+
+
+# Kein eigener ID-Chip im Kapital-Reiter (29.10.2026, Master nach Finns HT-Screenshot): der Test-Login nie; „Finn" ist seit 21.10.2026
+# archiviert (nur noch „Finn + Pascal") — seine laufenden Konten bleiben in der Gruppensumme, nur der Chip entfällt, bis Finn anders entscheidet.
+KAPITAL_OHNE_CHIP = {"eeeeeeee-0000-4000-a000-000000000001", "b55d7ab4-5246-4101-abca-f729c71d17ec"}
 
 
 def _daten_lesen(gid):
@@ -512,6 +521,26 @@ def _tageswert_schreiben(gid, b):
                   "abfluesse_summe": b["abfluesse_summe"], "abfluesse_n": b["abfluesse_n"], "kurs": b["kurs"]}})
 
 
+def ereignisse_lesen(gid, fx, ab=None):
+    """Käufe, Blows und Hedge-Ergebnis je Tag und ID (sql/2026-10-29_kapital_ereignisse.sql) für die Marken im Verlauf-Grafen (Finn 29.10.2026:
+    „warum der Chart manchmal so dumm um so 3–4k [springt]"). Je Tag gilt Δ Kontowerte = gekauft_eur + hedge_eur − geblowt_eur. Fehlt die
+    Funktion oder schlägt sie fehl → [] (der Graf bleibt dann ohne Marken, alles andere unverändert)."""
+    try:
+        r = A["_sb_anfrage"]("POST", f"{A['SUPABASE_URL']}/rest/v1/rpc/kapital_ereignisse", headers=A["_sb_headers"](), timeout=(5, 20),
+                             json={"p_gruppe": gid, "p_fx": fx})
+        if r.status_code != 200:
+            print(f"[kapital] Ereignisse HTTP {r.status_code}", flush=True)
+            return []
+        zeilen = r.json() or []
+    except Exception as e:
+        print(f"[kapital] ⚠️ Ereignisse: {type(e).__name__}: {e}", flush=True)
+        return []
+    return [{"tag": str(z.get("tag"))[:10], "id": str(z.get("user_id") or ""), "gekauft_n": int(_num(z.get("gekauft_n"))),
+             "gekauft_eur": round(_num(z.get("gekauft_eur")), 2), "geblowt_n": int(_num(z.get("geblowt_n"))),
+             "geblowt_eur": round(_num(z.get("geblowt_eur")), 2), "hedge_eur": round(_num(z.get("hedge_eur")), 2)}
+            for z in zeilen if z.get("tag") and (not ab or str(z.get("tag"))[:10] >= ab)]
+
+
 def kapital_fuer(gid, schreiben=True):
     d = _daten_lesen(gid)
     b = bilanz_rechnen(d["ketten"], d["snaps"], d["fusion_live"], d["fusion_hand"], d["einlagen"], d["tx"], d["labels"], d["adressen"],
@@ -520,7 +549,7 @@ def kapital_fuer(gid, schreiben=True):
     b["ist"]["wallets_gesamt_n"] = d["wallets_n"]
     namen = _id_namen(d["mit"])
     b["ist"]["je_id"] = je_id_rechnen(d["ketten"], d["snaps"], d["offene"], d["kurs"]["fx"], d["mit"])
-    b["ids"] = sorted(({"id": u, "name": namen.get(u) or u[:8]} for u in b["ist"]["je_id"]), key=lambda x: x["name"].lower())
+    b["ids"] = sorted(({"id": u, "name": namen.get(u) or u[:8]} for u in b["ist"]["je_id"] if u not in KAPITAL_OHNE_CHIP), key=lambda x: x["name"].lower())
     if schreiben:
         try:
             _tageswert_schreiben(gid, b)
@@ -543,6 +572,7 @@ def kapital_fuer(gid, schreiben=True):
     b["gk_posten_kategorien"] = GK_POSTEN_KATEGORIEN
     b["verlauf"] = [verlauf_zeile(r) for r in A["_sb_all"]("kapital_tageswerte", {"select": "tag,ist_eur,soll_eur,abweichung_eur,teile",
                                                                                   "gruppe_id": f"eq.{gid}", "order": "tag.asc"})]
+    b["ereignisse"] = ereignisse_lesen(gid, fx, str(b["verlauf"][0]["tag"])[:10] if b["verlauf"] else None)
     return b
 
 
