@@ -2558,27 +2558,42 @@ def _ea_frost_waechter():
                 if not ja:
                     continue
                 time.sleep(random.random() * 15)                    # gestreut (Jitter-Regel)
-                if not lock.acquire(blocking=False):
-                    continue
-                # Puls/Polar kam in der Streuzeit dazu? (nicht _browser_und_mt5_frei — das zählte jetzt die eigene, gerade gehaltene Sperre)
-                if TV_ORDER_LOCK.locked() or (polar_panel and (polar_panel.aktiv() or getattr(polar_panel, "test_aktiv", lambda: False)())):
-                    lock.release()
-                    continue
-                m.update(letzter=time.time(), geprueft=False)
+                # Merkliste VOR der Sperre (Prüfer S2 30.10.2026): eine Order/ein Close genau zwischen Sperre und Merkliste sähe sonst nur
+                # „belegt" (retry_ok:false) statt „terminal_heilt"; jede Ausnahme bis zum Thread-Start gibt Sperre und Merkliste wieder frei
                 EA_FROST_HAELT.add(fname)
-                g = f"EA-Heilung {fname}: {grund} → Terminal neu + EA aufziehen"
-                print(f"[ea-frost] {g}", flush=True)
+                if not lock.acquire(blocking=False):
+                    EA_FROST_HAELT.discard(fname)
+                    continue
+                gestartet = False
+                try:
+                    # Puls/Polar kam in der Streuzeit dazu? (nicht _browser_und_mt5_frei — das zählte jetzt die eigene, gerade gehaltene Sperre)
+                    if TV_ORDER_LOCK.locked() or (polar_panel and (polar_panel.aktiv() or getattr(polar_panel, "test_aktiv", lambda: False)())):
+                        continue
+                    m.update(letzter=time.time(), geprueft=False)
+                    g = f"EA-Heilung {fname}: {grund} → Terminal neu + EA aufziehen"
+                    print(f"[ea-frost] {g}", flush=True)
+
+                    def _heilen(fname=fname, cfg=cfg, path=path, lock=lock):
+                        try:
+                            _heal_ea(fname, cfg, os.path.dirname(os.path.abspath(path)), time.time(), 15)
+                        finally:
+                            EA_FROST_HAELT.discard(fname)
+                            lock.release()
+                    threading.Thread(target=_heilen, daemon=True).start()
+                    gestartet = True
+                except Exception as e:
+                    f = f"EA-Heilung {fname}: Start fehlgeschlagen ({type(e).__name__}: {str(e)[:80]}) — Sperre freigegeben"
+                    print(f"[ea-frost] {f}", flush=True)
+                    if pc_id_lesen():
+                        _tab_stand_holen(pc_id_lesen(), f)
+                    continue
+                finally:
+                    if not gestartet:
+                        EA_FROST_HAELT.discard(fname)
+                        lock.release()
                 pc = pc_id_lesen()
                 if pc:
                     _tab_stand_holen(pc, g)
-
-                def _heilen(fname=fname, cfg=cfg, path=path, lock=lock):
-                    try:
-                        _heal_ea(fname, cfg, os.path.dirname(os.path.abspath(path)), time.time(), 15)
-                    finally:
-                        EA_FROST_HAELT.discard(fname)
-                        lock.release()
-                threading.Thread(target=_heilen, daemon=True).start()
         except Exception as e:
             print(f"[ea-frost] Fehler: {type(e).__name__}: {e}", flush=True)
         time.sleep(EA_FROST_TAKT_S + random.random() * 15)

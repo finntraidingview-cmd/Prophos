@@ -2632,6 +2632,7 @@ def test_panel_tab_wecken_ea_frost():
     q = inspect.getsource(panel._ea_frost_waechter)
     chk("lock.acquire(blocking=False)" in q and "lock.release()" in q and "_heal_ea(" in q and "random.random()" in q
         and "EA_FROST_HAELT.add(fname)" in q and "EA_FROST_HAELT.discard(fname)" in q and "hedges_offen" in q
+        and q.index("EA_FROST_HAELT.add(fname)") < q.index("lock.acquire(blocking=False)") and "if not gestartet:" in q and "Start fehlgeschlagen" in q
         and "_panel_fehlerfoto(" in q and "EA_FROST_NACH_S" in q, "EA-Wächter: Order-Sperre gehalten, gestreut, Nachkontrolle mit Fehlerfoto")
     if ok:
         print("✓ Tab wecken / EA-Heilung: Riegel, CDP-Ziele, gebraucht nur frisch, 1× je 15 min, eigenes Fenster, kein Klick")
