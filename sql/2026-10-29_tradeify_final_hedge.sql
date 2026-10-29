@@ -28,10 +28,10 @@ end $pruef$;
 
 -- ── 1. Schalter (Standard AUS) ─────────────────────────────────────────────────────────────────────────────────────────
 update public.auto_plan_regeln
+   -- Standards zuerst, vorhandene Werte darüber (S2 29.10.2026): erneutes Einspielen setzt nichts zurück, auch „an" bleibt
    set regeln = jsonb_set(coalesce(regeln, '{}'::jsonb), '{tradeify_final_hedge}',
-                          coalesce(regeln->'tradeify_final_hedge', '{}'::jsonb)
-                          || jsonb_build_object('an', coalesce((regeln->'tradeify_final_hedge'->>'an')::boolean, false),
-                                                'netto_faktor', 0.89, 'min_lot', 0.01, 'max_lots', 60, 'vorlauf_min', 20, 'nachlauf_min', 30))
+                          jsonb_build_object('an', false, 'netto_faktor', 0.89, 'min_lot', 0.01, 'max_lots', 60, 'vorlauf_min', 20, 'nachlauf_min', 30)
+                          || coalesce(regeln->'tradeify_final_hedge', '{}'::jsonb))
  where id = 1;
 
 -- nur ein echtes JSON-true zählt (kein Cast — ein Tippfehler im Schalter darf keinen Trigger mit Fehler abbrechen; wie S1 prophos_apex_hedge_an)
