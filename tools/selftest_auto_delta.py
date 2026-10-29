@@ -60,6 +60,8 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "random": random, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "json": json,
           "hashlib": hashlib, "time": __import__("time")}
+    # ap_delta_antwort meldet seit 43d7096e den Echo-Hedge-Schalter (eh_stand, liest Regeln/Takt-Zustand) — hier ein fester Stand, der Test prüft das Delta
+    ns["eh_stand"] = lambda regeln=None: {"an": False}
 
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
