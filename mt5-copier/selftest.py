@@ -2570,6 +2570,7 @@ def test_panel_tab_wecken_ea_frost():
     29.10.) bzw. ohne Verbindung (Finn) → Stufen wecken / neu laden / neu öffnen / melden, Riegel wie TAB_NL; Neu-Öffnen im eigenen Fenster. (F2) Lese-EA
     eingefroren bei gebrauchter Instanz (Jacob pc-auzre5 …2655) → Panel ruft _heal_ea selbst, 1× je 15 min, nie bei Puls/Order."""
     import panel, inspect
+    from datetime import datetime, timezone
     ok = True
 
     def chk(bed, name):
@@ -2618,6 +2619,19 @@ def test_panel_tab_wecken_ea_frost():
         "nie bei Puls/Polar oder MT5-Order, nie ohne Terminal-Pfad, 1× je 15 min, nie über 12 h still (zweites Terminal)")
     q = inspect.getsource(panel._tab_oeffnen)
     chk('"--new-window"' in q, "Neu-Öffnen im eigenen Fenster")
+    # 30.10.2026: verdeckter Tab lädt nicht selbst (tab_bw „Tab im Hintergrund") → Panel lädt schon nach TAB_NL_HINTER_BG_S
+    N = panel.tab_neuladen_entscheiden
+    j0 = 1_761_800_000.0
+    st_bg = {"ok": True, "origin": "2026-09-22.1894", "tab_build": "2026-09-22.1893", "tab_at": datetime.fromtimestamp(j0 - 5, timezone.utc).isoformat(),
+             "riegel": "", "tab_bw": {"grund": "Tab im Hintergrund — Panel lädt neu", "hinter_seit": (j0 - 200) * 1000}}
+    st_vorn = dict(st_bg, tab_bw={"grund": "Streuung", "hinter_seit": (j0 - 200) * 1000})
+    chk(N(st_bg, j0, None, 0, 300, True)[0] is True and N(st_vorn, j0, None, 0, 300, True)[0] is False
+        and N(dict(st_bg, riegel="Signal läuft"), j0, None, 0, 300, True)[0] is False
+        and N(dict(st_bg, tab_bw={"grund": "Tab im Hintergrund — Panel lädt neu", "hinter_seit": (j0 - 100) * 1000}), j0, None, 0, 300, True)[0] is False,
+        "Hintergrund-Tab: Panel lädt nach 3 min (sichtbarer Tab weiter erst nach 20 min), Riegel gelten")
+    q = inspect.getsource(panel._tab_neulade_waechter)
+    chk("_prophos_tab_neuladen_cdp()" in q and "cdp_prophos_ziele(" in q and "random.random()" in q,
+        "Panel: kein Prophos-Fenster → im Puls-Chrome per CDP neu laden (gestreut), sonst bisheriger Hinweis")
     q = inspect.getsource(panel._prophos_tab_wecken) + inspect.getsource(panel._prophos_tab_neuladen_cdp)
     chk(q.count("TV_ORDER_LOCK.acquire(blocking=False)") == 2 and "/json/activate/" in q and "Page.reload" in q and "random.random()" in q
         and q.count("TV_ORDER_LOCK.release()") == 2 and "click" not in q.lower() and "taste" not in q.lower(),

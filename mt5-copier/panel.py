@@ -1649,6 +1649,7 @@ def pc_id_setzen(neu, pfad=None):
 TAB_NL_TAKT_S = 60
 TAB_NL_ANLAUF_S = 180
 TAB_NL_HINTER_S = 20 * 60
+TAB_NL_HINTER_BG_S = 3 * 60     # 30.10.2026: verdeckter Tab lädt nicht selbst (tab_bw „Tab im Hintergrund") → das Panel schon nach 3 min
 TAB_NL_STUMM_S = 10 * 60
 TAB_NL_IDLE_S = 120
 TAB_NL_ABSTAND_S = 15 * 60
@@ -1753,6 +1754,9 @@ def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s,
         warum = f"Tab stumm seit {int(stumm_s // 60)} min (letztes Lebenszeichen in mt5_live)"
     elif hinter and jetzt - hinter_seit >= TAB_NL_HINTER_S:
         warum = f"Tab {stand.get('tab_build')} seit {int((jetzt - hinter_seit) // 60)} min hinter {stand.get('origin')}"
+    elif hinter and jetzt - hinter_seit >= TAB_NL_HINTER_BG_S and "Hintergrund" in str((bw or {}).get("grund") or ""):
+        # der verdeckte Tab lädt nicht selbst (prophos.html bwGrund) — das Panel übernimmt früher
+        warum = f"Tab {stand.get('tab_build')} seit {int((jetzt - hinter_seit) // 60)} min hinter {stand.get('origin')} (Tab im Hintergrund)"
     elif hinter:
         return False, f"Tab {stand.get('tab_build')} hinter {stand.get('origin')} seit {int((jetzt - hinter_seit) // 60)} min — " \
                       f"der Tab-Wächter hat bis {TAB_NL_HINTER_S // 60} min Zeit", hinter_seit
@@ -2155,6 +2159,17 @@ def _tab_neulade_waechter():
                 if laden:
                     TAB_NL["letzter_versuch"] = jetzt
                     ok, msg = _prophos_tab_neu_laden()
+                    if not ok and "kein Chrome-Fenster mit aktivem Prophos-Tab" in str(msg):
+                        # kein eigenes Prophos-Fenster (Tab liegt im Puls-Chrome hinter TradingView, 30.10.2026) → per CDP neu laden;
+                        # nicht im Puls-Chrome → bleibt beim bisherigen Hinweis
+                        try:
+                            pro = cdp_prophos_ziele(_cdp_get("/json/list") or [], _TAB_OEFFNEN.get("url") or "")[0]
+                        except Exception:
+                            pro = None
+                        if pro:
+                            time.sleep(random.random() * 10)        # gestreut
+                            ok, msg = _prophos_tab_neuladen_cdp()
+                            msg = f"per CDP im Puls-Chrome: {msg}"
                     grund = f"{grund} → {'neu geladen' if ok else 'NICHT neu geladen'}: {msg}"
                     TAB_NL["ergebnis"] = grund
                 if grund != TAB_NL["grund"]:

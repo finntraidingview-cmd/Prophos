@@ -34,7 +34,7 @@ def bloecke(pfad, namen, konst=()):
 def main():
     ns = {"re": re, "datetime": datetime}
     exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["_build_nr", "tab_neuladen_entscheiden", "tab_oeffnen_entscheiden"],
-                 ["TAB_NL_HINTER_S", "TAB_NL_STUMM_S", "TAB_NL_IDLE_S", "TAB_NL_ABSTAND_S", "TAB_OEFFNEN_FEHLT_S", "TAB_OEFFNEN_ANLAUF_S",
+                 ["TAB_NL_HINTER_S", "TAB_NL_HINTER_BG_S", "TAB_NL_STUMM_S", "TAB_NL_IDLE_S", "TAB_NL_ABSTAND_S", "TAB_OEFFNEN_FEHLT_S", "TAB_OEFFNEN_ANLAUF_S",
                   "TAB_OEFFNEN_ABSTAND_S", "TAB_OEFFNEN_MAX_TAG"]), ns)
     f = ns["tab_neuladen_entscheiden"]
     jetzt = datetime(2026, 10, 16, 1, 0, tzinfo=timezone.utc).timestamp()

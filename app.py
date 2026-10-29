@@ -3985,6 +3985,20 @@ def echo_frost_urteil(live, jetzt_ts):
     return False, ""
 
 
+ECHO_FROST_START_S = 15 * 60   # so lange nach dem Start zählt „noch keine Position gesehen" als Ernstfall (Terminal-zu wäre dann falsch)
+
+
+def echo_frost_stufe(z, grund, started_ts, jetzt_ts):
+    """REIN RECHNEND (testbar): (prio, grund) — 1 = 🔴 Ernstfall, 3 = ⚪ „Master-Terminal zu, Trade wohl beendet". Eingefroren ohne Position
+    und ohne Hedge (echo_terminal_zu) ist das nach dem Trade geschlossene Terminal → ⚪, außer < ECHO_FROST_START_S nach dem Start (dann
+    hat der Copier die Position nie gesehen → 🔴). Andere Gründe (PC/Tab offline, keine Zeile) bleiben 🔴."""
+    if grund == "Lese-EA eingefroren" and echo_terminal_zu(z) and not (started_ts and jetzt_ts - started_ts < ECHO_FROST_START_S):
+        return 3, ECHO_TERMINAL_ZU_TXT
+    if grund == "Lese-EA eingefroren" and echo_terminal_zu(z):
+        return 1, "Lese-EA eingefroren — seit dem Start keine Master-Position gesehen"
+    return 1, grund
+
+
 def echo_frost_karenz(seit, grund, jetzt_ts):
     """REIN RECHNEND (testbar): (melden jetzt?, seit_neu). seit = seit wann gestört gesehen (oder None). 'Lese-EA eingefroren' erst nach
     ECHO_FROST_KARENZ_S durchgehend (die Panel-Heilung bekommt ihre Zeit); alle anderen Gründe tragen ihr Alter schon im Urteil."""
@@ -4015,8 +4029,8 @@ def echo_frost_tick(rows, namen, jetzt_ts):
     ids = sorted({str(r["master_account_id"]) for r in echo})
     accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,external_id", "id": f"in.({','.join(ids)})"}) or [])}
     logins = sorted({str((accs.get(str(r["master_account_id"])) or {}).get("external_id") or "").strip() for r in echo} - {""})
-    live = lt_echo_live_wahl(sb_select("mt5_live", {"select": "master_login,pc_name,updated_at,note:status->>note",
-                                                    "master_login": f"in.({','.join(logins)})"}) or []) if logins else {}
+    live = lt_echo_live_wahl(sb_select("mt5_live", {"select": "master_login,pc_name,updated_at,note:status->>note,pos:status->master_positions,"
+                                                              "hd:status->hedges", "master_login": f"in.({','.join(logins)})"}) or []) if logins else {}
     pc_namen = _pc_namen_daten()
     for r in echo:
         pid = str(r["id"])
@@ -4030,6 +4044,11 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         melden, _echo_frost_seit[pid] = echo_frost_karenz(_echo_frost_seit.get(pid), grund, jetzt_ts)
         if not melden:
             continue
+        try:
+            started_ts = datetime.fromisoformat(str(r.get("started_at")).replace("Z", "+00:00")).timestamp() if r.get("started_at") else None
+        except (TypeError, ValueError):
+            started_ts = None
+        prio, grund = echo_frost_stufe(z, grund, started_ts, jetzt_ts)
         n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
         if n is None:
             continue
@@ -4055,6 +4074,14 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         wer = namen.get(uid, uid[:8])
         konto = f"{r.get('master_firm') or ''} …{login[-4:]}".strip() if login else str(r.get("master_name") or "")
         mit_hedge = str(r.get("route")) == "mt5"
+        if prio == 3:
+            # ⚪ einmal, keine Erinnerung (30.10.2026, Master: „Master-Terminal zu, Trade wohl beendet — Plan prüfen/abhaken")
+            text = f"{wer} · {konto} ({'Echo mit Hedge' if mit_hedge else 'Echo V2'}, Plan noch offen): {grund}. Am {pc_txt} ist das Master-Terminal ohne Position und ohne Hedge."
+            alarm_senden(3, "echo_terminal_zu", f"Echo: Master-Terminal zu — Plan prüfen"[:70], text, uid=uid, plan_id=pid,
+                         schluessel=f"echo_blind|{pid}|{n}", tag=f"alarm-echo-zu-{pid[:8]}",
+                         daten={"grund": grund, "pc": pc, "route": r.get("route"), "login4": login[-4:] if login else None})
+            _echo_frost[pid] = {"erst": (_echo_frost.get(pid) or {}).get("erst", jetzt_ts), "n": 2}
+            continue
         text = (f"{wer} · {konto} ({'Echo mit Hedge' if mit_hedge else 'Echo V2'}, offen): {grund}"
                 + (" — Copier sieht keine Master-Position, Hedge evtl. nicht offen." if mit_hedge else " — kein Live-P&L, Copier blind.")
                 + f" Am {pc_txt} das Master-Terminal prüfen (EA ProphosHedgeReader auf dem Chart?).")
@@ -13077,7 +13104,19 @@ def lt_echo_live_wahl(zeilen):
     return out
 
 
-def lt_echo_pl_grund(note, alter_s, updated_at):
+ECHO_TERMINAL_ZU_TXT = "Master-Terminal zu — Trade wohl beendet, Plan prüfen/abhaken"
+
+
+def echo_terminal_zu(live):
+    """REIN RECHNEND (testbar): Copier-Zeile zeigt ein absichtlich geschlossenes Master-Terminal — Standby bzw. weder Master-Position noch
+    Hedge im letzten Stand (30.10.2026, Befund: „Lese-EA eingefroren" war fast immer das nach dem Trade geschlossene Terminal)."""
+    z = live if isinstance(live, dict) else {}
+    pos = z.get("pos") if isinstance(z.get("pos"), list) else []
+    hd = z.get("hd") if isinstance(z.get("hd"), dict) else {}
+    return not pos and not any(v for v in hd.values())
+
+
+def lt_echo_pl_grund(note, alter_s, updated_at, zu=False):
     """REIN RECHNEND (testbar): kurzer Grund, warum der Echo-P&L fehlt — „PC offline seit HH:MM" (Dubai, Copier-Meldung > 90 s alt) bzw.
     „Lese-EA eingefroren" (Copier-Hinweis) bzw. der Hinweis gekürzt."""
     if alter_s is not None and alter_s > LT_ECHO_MAX_ALTER_S:
@@ -13093,7 +13132,7 @@ def lt_echo_pl_grund(note, alter_s, updated_at):
             return "PC offline"
     n = str(note or "")
     if "eingefroren" in n:
-        return "Lese-EA eingefroren"
+        return ECHO_TERMINAL_ZU_TXT if zu else "Lese-EA eingefroren"   # zu = ohne Position/Hedge (echo_terminal_zu)
     return n[:40] or None
 
 
@@ -13124,7 +13163,7 @@ def lt_echo_felder(p, live, jetzt_ts):
     out["mt5_alter_s"] = int(round(alter))
     if alter > LT_ECHO_MAX_ALTER_S or live.get("note"):
         if offen:
-            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"))
+            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"), echo_terminal_zu(live))
         return out
     eq, bal = _wd_num(live.get("eq")), _wd_num(live.get("bal"))
     ccy = str(live.get("ccy") or "").upper() or None

@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_frost_karenz", "echo_frost_faellig")
-KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S")
+FUNKTIONEN = ("_wd_num", "echo_terminal_zu", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig")
+KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S", "ECHO_TERMINAL_ZU_TXT", "ECHO_FROST_START_S")
 
 
 def lade():
@@ -47,7 +47,18 @@ def main():
     plan = {"status": "open", "mt5_baseline": {"master_balance": 98344.31}}
     frost = {"updated_at": iso(3), "note": "Snapshot eingefroren — Lese-EA …", "eq": 97751.07, "bal": 97751.07, "pos": []}
     gut = {"updated_at": iso(3), "note": None, "eq": 98500.0, "bal": 98344.31, "pos": [{"ident": "1", "volume": 1.8}]}
-    check(F(plan, frost, jetzt)["pl_grund"] == "Lese-EA eingefroren" and F(plan, frost, jetzt)["pl_live"] is None, "Feld: eingefroren → pl_grund, kein P&L")
+    frost_pos = dict(frost, pos=[{"ident": "1", "volume": 0.3}])
+    frost_hd = dict(frost, hd={"288016262": [{"ticket": 1, "volume": 1.76}]})
+    check(F(plan, frost, jetzt)["pl_grund"].startswith("Master-Terminal zu") and F(plan, frost, jetzt)["pl_live"] is None
+          and F(plan, frost_pos, jetzt)["pl_grund"] == "Lese-EA eingefroren" and F(plan, frost_hd, jetzt)["pl_grund"] == "Lese-EA eingefroren",
+          "Feld: eingefroren ohne Position/Hedge → 'Master-Terminal zu …', mit Position oder Hedge → 'Lese-EA eingefroren'")
+    T = ns["echo_frost_stufe"]
+    check(T(frost, "Lese-EA eingefroren", jetzt - 3600, jetzt)[0] == 3 and T(frost, "Lese-EA eingefroren", jetzt - 3600, jetzt)[1].startswith("Master-Terminal zu")
+          and T(frost, "Lese-EA eingefroren", jetzt - 600, jetzt)[0] == 1 and "keine Master-Position" in T(frost, "Lese-EA eingefroren", jetzt - 600, jetzt)[1]
+          and T(frost_pos, "Lese-EA eingefroren", jetzt - 3600, jetzt) == (1, "Lese-EA eingefroren")
+          and T(frost_hd, "Lese-EA eingefroren", None, jetzt) == (1, "Lese-EA eingefroren")
+          and T(None, "Copier-Meldung 9 min alt (PC offline?)", jetzt - 3600, jetzt)[0] == 1,
+          "Alarm: Terminal zu → ⚪; < 15 min nach Start ohne Position, mit Position/Hedge, PC offline → 🔴")
     check(F(plan, dict(gut, updated_at=iso(1060)), jetzt)["pl_grund"].startswith("PC offline seit"), "Feld: alt → PC offline")
     check(F(plan, None, jetzt)["pl_grund"] == "keine Copier-Meldung", "Feld: keine Zeile → keine Copier-Meldung")
     check(F(plan, gut, jetzt)["pl_grund"] is None and F(plan, gut, jetzt)["pl_live"] == 155.69, "Feld: frisch → P&L, kein Grund")

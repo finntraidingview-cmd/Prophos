@@ -22060,6 +22060,11 @@
     // als „unruhig" (lieber später laden als mitten hinein).
     const bwGrund = (seitMs) => {
       const t = (f) => { try{ return f() }catch(_){ return true } }
+      // NUR SICHTBAR NEU LADEN (30.10.2026, Befund: PC-Tabs verstummten genau beim Deploy — Ina pc-xc5c52 23:26 Dubai = .1892, Chris
+      // pc-c19p2l 16:52 = .1870: der Tab lud sich im Hintergrund selbst neu und kam nicht zurück). Am PC-Tab lädt ein verdeckter Tab nicht
+      // selbst; das Panel übernimmt (Neulade-Weg per Fenster bzw. CDP im Puls-Chrome, gestreut, mit den bekannten Riegeln) — es erkennt
+      // den Fall an diesem Grund im Tab-Stand (mt5_live.status.tab_bw). Mac/Handy unverändert.
+      if((location.hostname === 'localhost' || location.hostname === '127.0.0.1') && document.visibilityState !== 'visible') return 'Tab im Hintergrund — Panel lädt neu'
       if(t(() => _tpOrbitLaeuft)) return 'Puls läuft'
       if(t(() => !!window._tvkLaeuft)) return 'TV-Konten lesen'   // 29.10.2026: nie mitten im Lesen der Konto-Liste neu laden
       if(t(() => !!window._tvNeuLaeuft)) return 'TV-Tab lädt neu'   // 29.10.2026: Userscript-Update im Puls-Chrome
@@ -35296,7 +35301,7 @@
     // ohne Wert der Grund vom Backend (30.10.2026: „Lese-EA eingefroren" / „PC offline seit 16:52") statt nur „–"
     const grund = v == null && t.pl_grund ? String(t.pl_grund) : ''
     return { txt: v == null ? (grund || '–') : `≈ ${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${w}`,
-             farbe: v == null ? (grund ? 'var(--warn-ink, #b45309)' : 'var(--sub)') : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)',
+             farbe: v == null ? (grund && !/^Master-Terminal zu/.test(grund) ? 'var(--warn-ink, #b45309)' : 'var(--sub)') : v >= 0 ? 'var(--good-ink, #15803d)' : 'var(--danger-ink, #b91c1c)',   // Terminal zu = ruhig grau (30.10.2026)
              tip: v == null ? (grund ? `kein frischer MT5-Stand: ${grund}${/eingefroren/.test(grund) ? ' — Lese-EA (ProphosHedgeReader) im Master-Terminal prüfen' : ''}${alt}` : 'kein frischer MT5-Stand')
                   : `Live-P&L aus MT5 (Equity − Balance beim Start)${alt}` }
   }
