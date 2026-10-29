@@ -3200,6 +3200,9 @@ def test_puls_augen_cdp():
     chk(not any(a.startswith("--profile-directory") for a in arg), "nie --profile-directory")
     chk("--start-maximized" in arg and arg.index("--start-maximized") < arg.index("--new-window"),
         "Puls-Chrome startet maximiert (08.10.2026: Neustart brachte ein halbes Fenster)")
+    chk(all(f in arg for f in ("--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+                               "--disable-backgrounding-occluded-windows")) and arg.index("--disable-renderer-backgrounding") < arg.index("--new-window"),
+        "Puls-Chrome ohne Hintergrund-Drosselung (29.10.2026: TopstepX-Auge im Hintergrund nur ~1/s)")
     for falsch in ("C:\\Users\\m\\AppData\\Local\\Google\\Chrome\\User Data", "", "C:\\x\\puls-chromeX"):
         try:
             ob.puls_chrome_argumente("chrome.exe", falsch)

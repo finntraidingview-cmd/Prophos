@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Prophos TopstepX-Auge
 // @namespace    prophos
-// @version      0.1.0
-// @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,25 s an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
+// @version      0.2.0
+// @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,1 s und bei jeder Änderung an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
 // @match        https://topstepx.com/*
 // @match        https://*.topstepx.com/*
 // @require      https://prophos.pages.dev/mt5-copier/augen_tsx.js?v=tsx-0.6.3
@@ -27,12 +27,22 @@
  *    Frische-Regel in Prophos (Stand ≤ 1 s alt) lässt dann nur Radar und Fusion-Level schließen, nie ein altes Bild.
  * Nur im Puls-Chrome installieren (Anleitung tv-reader/TSX-AUGE.md). Ein zweites TopstepX in einem normalen Chrome mit diesem Script würde
  * ebenfalls melden — Prophos nimmt den jüngsten Tab und schließt nur bei exakt passendem Konto.
- * Update von augen_tsx.js: Tampermonkey hält @require im Cache; bei einer neuen augen_tsx.js-Version Query-Teil und @version anheben. */
+ * Update von augen_tsx.js: Tampermonkey hält @require im Cache; bei einer neuen augen_tsx.js-Version Query-Teil und @version anheben.
+ * 0.2.0 (29.10.2026, Finn 09:00 Dubai-PC: Tab im Hintergrund → Stand 0,4–0,98 s alt, die Schließ-Grenze ist 1 s — „geht das nicht schneller,
+ * so alle 0,1 s?"): Takt 100 ms; zusätzlich meldet ein MutationObserver jede DOM-Änderung des Tabs sofort (höchstens alle 100 ms, ein
+ * Request zur Zeit) — DOM-Änderungen kommen aus TopstepX' Datenstrom und werden im Hintergrund nicht gedrosselt, auch wenn die CSP den
+ * Worker verbietet. stand.takt sagt, welcher Takt läuft ('worker' | 'interval'). Dazu startet der Bot das Puls-Chrome ohne
+ * Hintergrund-Drosselung (order_bot.py puls_chrome_argumente).
+ * AUSGELOGGT (Finn: „Wenn TopstepX ausgeloggt ist, soll nicht aus Panik geschlossen werden, sondern Puls geht auf TopstepX und loggt sich
+ * wieder ein"): stand.ausgeloggt = true auf der Login-Seite (Adresse …/login|signin|sign-in, wie tsx_url_login im Bot), bei sichtbarem
+ * Passwortfeld mit Login-Knopf oder einem Dialog „session expired / logged out". Prophos schließt dann nie über das Auge (auch ohne dieses
+ * Feld nicht: ohne Konto-Auslöser fehlt die Kennung) und stößt den Rück-Login des Bots an (hedgeTsxSchnellTick). */
 (function () {
   'use strict';
-  var SCRIPT = '0.1.0';
+  var SCRIPT = '0.2.0';
   var PANEL = 'http://127.0.0.1:8770/api/tsx-stand';
-  var TAKT_MS = 250;
+  var TAKT_MS = 100;                               // 0.2.0: 250 → 100 ms (Finn 29.10.2026)
+  var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
   var TAB = 'tsx-' + Math.random().toString(36).slice(2, 10);
   var unterwegs = false, fehlerN = 0, gesendetN = 0, letzterFehler = '';
 
@@ -40,6 +50,24 @@
     try { return (typeof PROPHOS_AUGEN_TSX !== 'undefined' && PROPHOS_AUGEN_TSX) || globalThis.prophosAugen || null; } catch (_) { return null; }
   }
   function zahlWert(x) { return x && typeof x === 'object' ? (typeof x.wert === 'number' ? x.wert : null) : (typeof x === 'number' ? x : null); }
+
+  // AUSGELOGGT (0.2.0): Login-Seite, Passwortfeld + Login-Knopf oder Dialog „Sitzung abgelaufen" — nur lesen, nie klicken
+  var RX_LOGIN_URL = /topstepx\.com\/+(login|signin|sign-in)\b/i;
+  var RX_LOGIN_KNOPF = /^\s*(platform login|log ?in|sign ?in)\s*$/i;
+  var RX_SITZUNG_WEG = /session (has )?expired|you (have been|were) logged out|logged out|please (log|sign) in again/i;
+  function sichtbarEl(e) { try { var r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch (_) { return false; } }
+  function ausgeloggt() {
+    try {
+      if (RX_LOGIN_URL.test(String(location.href))) return true;
+      var pw = Array.prototype.some.call(document.querySelectorAll('input[type="password"]'), sichtbarEl);
+      if (pw && Array.prototype.some.call(document.querySelectorAll('button,[role="button"],input[type="submit"]'), function (b) {
+        return sichtbarEl(b) && RX_LOGIN_KNOPF.test(String(b.textContent || b.value || ''));
+      })) return true;
+      return Array.prototype.some.call(document.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"]'), function (d) {
+        return sichtbarEl(d) && RX_SITZUNG_WEG.test(String(d.textContent || '').slice(0, 600));
+      });
+    } catch (_) { return false; }
+  }
 
   // Nur was der Schließer braucht (klein halten: 4 Meldungen je Sekunde). Rechtecke, Inventar und Chart bleiben weg.
   function kurz(s) {
@@ -61,12 +89,16 @@
       bracket: br ? { fill: br.fill ? { preis: br.fill.preis, menge: br.fill.menge, seite: br.fill.seite, symbol: br.fill.symbol } : null,
                       tp: br.tp ? { preis: br.tp.preis } : null, sl: br.sl ? { preis: br.sl.preis } : null } : null,
       popups: (s.popups || []).length,
+      ausgeloggt: ausgeloggt(),
+      takt: takt,
       fehler: s.fehler ? s.fehler.slice(0, 4).map(function (f) { return String(f).slice(0, 80); }) : null
     };
   }
 
+  var letzterTick = 0, takt = 'start';
   function tick() {
     if (unterwegs) return;                         // ein Request zur Zeit — ein hängendes Panel staut sonst Meldungen auf
+    letzterTick = Date.now();
     var a = auge();
     if (!a || typeof a.stand !== 'function') { letzterFehler = 'augen_tsx.js nicht geladen'; return; }
     var paket;
@@ -94,7 +126,12 @@
     }
   }
 
-  var takt = starteTakt();
+  takt = starteTakt();
+  // MutationObserver (0.2.0): jede DOM-Änderung meldet sofort — höchstens alle MO_ABSTAND_MS, ein Request zur Zeit (tick prüft unterwegs)
+  try {
+    new MutationObserver(function () { if (Date.now() - letzterTick >= MO_ABSTAND_MS) tick(); })
+      .observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['aria-expanded', 'disabled', 'aria-selected'] });
+  } catch (_) {}
   tick();
   // Lebenszeichen in der Konsole des Tabs (kein Badge im TopstepX-Bild — die Augen des Bots lesen die Seite)
   setInterval(function () { console.info('[Prophos TopstepX-Auge ' + SCRIPT + '] Takt ' + takt + ' · gesendet ' + gesendetN + (letzterFehler ? ' · ' + letzterFehler : '')); }, 60000);

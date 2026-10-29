@@ -29945,6 +29945,27 @@
    * ein Kurzzeit-Neuaufbau schließt so nie. Nach den ersten echten Läufen (Spur „[hedgeTsx] … flach seit X s") auf 1–2 s senken. */
   const TSX_FLACH_MIN_MS = 5000
   let _tsxSchnellBusy = false, _tsxStandFehler = 0
+  /* TOPSTEPX AUSGELOGGT (29.10.2026, Finn: „Wenn TopstepX ausgeloggt ist, soll nicht aus Panik geschlossen werden, sondern Puls geht auf
+   * TopstepX und loggt sich wieder ein"). Das Auge (tsx-auge.user.js ≥ 0.2.0) meldet stand.ausgeloggt = true (Login-Seite, Passwortfeld +
+   * Login-Knopf, Dialog „session expired"). Dann schließt das Auge nie (Riegel unten; ohne Konto-Auslöser fehlte die Kennung ohnehin) und
+   * der bestehende TopstepX-Heimweg wird angestoßen: bigTradeHeimPlanen(…, 'tsx') → tsx-lesen ins Big-Trade-Konto, dessen Kette den Login des
+   * Bots enthält (ein Klick nur mit Autofill-Beweis, Bot-Sperre TSX_LOGIN_SPERRE_S 30 min). Gestreut 1–4 s (bthSofortMs), höchstens einmal je
+   * TSX_RELOGIN_ABSTAND_MS, nie während Puls unterwegs ist oder Polar den PC hat (dann im nächsten Takt). Scheitert der Heimweg, meldet er wie
+   * jeder Heimweg (Toast, alarm/heimweg an die Master-IDs). Radar und Fusion-Level schließen unverändert weiter. */
+  const TSX_RELOGIN_ABSTAND_MS = 10 * 60000
+  let _tsxReloginAt = 0
+  function tsxReloginAnstossen(plan){
+    const jetzt = Date.now()
+    if(jetzt - _tsxReloginAt < TSX_RELOGIN_ABSTAND_MS) return false
+    if(hedgePulsUnterwegs() || (typeof polarLaeuft === 'function' && polarLaeuft())) return false   // belegt → nächster Takt
+    if(typeof bigTradeHeimPlanen !== 'function') return false
+    _tsxReloginAt = jetzt
+    console.warn('[hedgeTsx] TopstepX ausgeloggt — kein Schließen über das Auge, Puls loggt über den Heimweg wieder ein', (plan && (plan.masterName || plan.id)) || '')
+    if(typeof atToast === 'function') atToast(`TopstepX ausgeloggt — Puls loggt sich wieder ein (${(plan && plan.masterName) || 'Topstep-Trade'}); Radar und Fusion-Level schließen weiter`, 'end')
+    bigTradeHeimPlanen('', 'TopstepX ausgeloggt — Rück-Login', true, 'tsx')
+    return true
+  }
+  window._tsxReloginAnstossen = plan => tsxReloginAnstossen(plan)   // Test-Haken
   const tsxKontoGleich = (kontonr, ext) => { const n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); return !!n(kontonr) && n(kontonr) === n(ext) }
   // REIN RECHNEND (window._tsxStandListe): Positionen des Userscripts → Liste im Format des Orbit-Readers (wurzel, menge_zahl, richtung)
   function tsxStandListe(st){
@@ -29969,6 +29990,7 @@
       if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= 1.0)){ verwerfen(); if(++_tsxStandFehler === 1200) console.warn('[hedgeTsx] kein frischer Stand vom TopstepX-Auge (Userscript tsx-auge im Puls-Chrome?)'); return }
       _tsxStandFehler = 0
       if(hedgePulsUnterwegs()){ verwerfen(); return }   // während des Holens losgelaufen
+      if(st.ausgeloggt === true){ verwerfen(); tsxReloginAnstossen(meine[0]); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
       const k = st.konto || {}, liste = tsxStandListe(st), jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
@@ -49802,7 +49824,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1845'
+  const OS_TAB_BUILD = '2026-09-22.1846'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

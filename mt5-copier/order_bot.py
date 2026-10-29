@@ -15451,6 +15451,10 @@ def puls_chrome_argumente(exe, profil_pfad, port=PULS_CDP_PORT, url=AUGEN_TV_URL
             # „Seiten wiederherstellen?" (eigenes Fenster Chrome_WidgetWin_1) über die Seite — am Zielpunkt lag sie zweimal, kein Druck. Das Flag
             # unterdrückt die Blase; die Sitzung wird ohnehin nie wiederhergestellt (jeder Start öffnet die Ziel-URL neu).
             "--hide-crash-restore-bubble",
+            # 29.10.2026 (Finn 09:00, Dubai-PC: TopstepX-Tab im Hintergrund → Auge-Stand 0,4–0,98 s alt, die Schließ-Grenze ist 1 s): Chrome drosselt
+            # Timer und Rendering verdeckter/minimierter Tabs auf ~1/s. Die drei Flags halten TopstepX-Auge und TV-Reader im Puls-Chrome im
+            # vollen Takt (wirken ab dem nächsten Start des Puls-Chrome; nur dieses Profil, nie der Chrome des Nutzers).
+            "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
             # 08.10.2026 (Finn: „schließt alles und öffnet dann so ein ganz komisches Format"): nach Browser.close + Neustart (minimiert)
             # stellte das erste Wiederherstellen nur die gemerkte Normalgröße her (pc-2zc2we 929×917 statt Vollbild, Klicks bei x 1322
             # statt ~1535). Maximiert gestartet → Windows merkt sich „wiederherstellen = maximiert", Layout + Klickpunkte wie gewohnt
