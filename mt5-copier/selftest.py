@@ -8555,7 +8555,7 @@ def test_tsx_k4():
                 if self.dlg and "loss limit" in str(self.dlg.get("text") or "").lower():
                     self.dlg = None
             elif name.startswith("Symbol-Dialog schließen"):
-                if self.dlg and self.o["dialog_nach_doppel"] == "symbol_x":
+                if self.dlg and self.o["dialog_nach_doppel"] in ("symbol_cancel", "symbol_x"):
                     self.dlg = None
             elif name.startswith("Risk-Zelle") or name.startswith("To Make-Zelle"):
                 feld = "risk" if name.startswith("Risk") else "to_make"
@@ -8565,12 +8565,17 @@ def test_tsx_k4():
                     if self.o["dialog_nach_doppel"] == "blow":
                         self.dlg = {"titel": "", "text": "You Hit Your Maximum Loss Limit. Account: 150KTC-SKU-V2-DLL-000000-00000000",
                                     "knoepfe": [{"text": "Close", "aria": "", "rect": [900, 500, 80, 30]}]}
-                    elif self.o["dialog_nach_doppel"] in ("symbol", "symbol_x", "symbol_fest"):
-                        # 29.10.2026 abends (Marc e9cf8722): Doppelklick traf die Zeile → „Switch Chart Symbol"; Esc schließt ihn
-                        # (symbol), sonst nur das Symbol-X (symbol_x) bzw. gar nichts (symbol_fest: nur OK/Cancel)
-                        kn = [{"text": "Cancel", "aria": "", "rect": [800, 500, 80, 30]}, {"text": "OK", "aria": "", "rect": [900, 500, 80, 30]}]
-                        if self.o["dialog_nach_doppel"] == "symbol_x":
+                    elif self.o["dialog_nach_doppel"] in ("symbol", "symbol_cancel", "symbol_x", "symbol_fest"):
+                        # 29.10.2026 abends (Marc e9cf8722): Doppelklick traf die Zeile → „Switch Chart Symbol". symbol: Esc schließt ihn;
+                        # symbol_cancel: Esc nicht, Cancel + OK; symbol_x: Esc nicht, OK + Symbol-X; symbol_fest: Esc nicht, nur OK + Switch
+                        art = self.o["dialog_nach_doppel"]
+                        kn = [{"text": "OK", "aria": "", "rect": [900, 500, 80, 30]}]
+                        if art in ("symbol", "symbol_cancel"):
+                            kn = [{"text": "Cancel", "aria": "", "rect": [800, 500, 80, 30]}] + kn
+                        if art == "symbol_x":
                             kn = kn + [{"text": "", "aria": "", "icon": "CloseIcon", "ecke": True, "rect": [1000, 420, 20, 20]}]
+                        if art == "symbol_fest":
+                            kn = kn + [{"text": "Switch", "aria": "", "rect": [700, 500, 80, 30]}]
                         self.dlg = {"titel": "Switch Chart Symbol", "text": "Switch Chart Symbol Do you want to switch the chart to NQZ26?", "knoepfe": kn}
                     else:
                         self.dlg = {"titel": "Trade Copier Notice", "text": "Trade Copier Notice", "knoepfe": [{"text": "OK", "aria": "", "rect": [900, 500, 80, 30]}]}
@@ -8736,27 +8741,48 @@ def test_tsx_k4():
             and sum(1 for k in s6g.klicks if k[0].startswith("Risk")) == 1 and any("BRACKETS FEHLEN" in x for x in t6g),
             f"fremder Dialog: nie angefasst, nichts darunter, Titel in der Warnung, brackets_fehlen ({r6g.get('warnung')}, {r6g.get('brackets_fehlen')})")
         # 6h) 29.10.2026 abends (Marc e9cf8722): „Switch Chart Symbol" nach dem Doppelklick — Esc schließt ihn, Runde 2 setzt beide Zellen; nie OK/Cancel
-        for art_, mit_x in (("symbol", False), ("symbol_x", True)):
+        for art_, knopf_ in (("symbol", ""), ("symbol_cancel", "Cancel"), ("symbol_x", "Symbol-X")):
             s6h = _T4(dialog_nach_doppel=art_)
             r6h, t6h = lauf(s6h)
+            zu_ = [k for k in s6h.klicks if k[0].startswith("Symbol-Dialog schließen")]
+            pz_ = [pr for (k, pr) in zip(s6h.klicks, s6h.pruef) if k[0].startswith("Symbol-Dialog schließen")]
             chk(r6h["ok"] and "brackets_fehlen" not in r6h and s6h.werte == {"risk": 21.0, "to_make": 198.0} and "Escape" in s6h.tasten
-                and sum(1 for k in s6h.klicks if k[0].startswith("Symbol-Dialog schließen")) == (1 if mit_x else 0)
+                and len(zu_) == (1 if knopf_ else 0) and all(knopf_ in k[0] for k in zu_)
+                and all("ok" in pr["tabu"] and "switch" in pr["tabu"] for pr in pz_)
                 and not any(k[0].startswith("Meldung") for k in s6h.klicks) and sum(1 for k in s6h.klicks if k[0].startswith("ORDER")) == 1
                 and any("Switch Chart Symbol" in x for x in t6h),
-                f"Symbol-Dialog ({art_}): Esc{' + Schließ-X' if mit_x else ''}, Runde 2 setzt Risk + To Make ({r6h.get('warnung')}, {s6h.werte})")
+                f"Symbol-Dialog ({art_}): Esc{' + ' + knopf_ if knopf_ else ''}, Runde 2 setzt Risk + To Make ({r6h.get('warnung')}, {s6h.werte})")
         s6i = _T4(dialog_nach_doppel="symbol_fest")
         r6i, t6i = lauf(s6i)
         chk(r6i["ok"] and r6i.get("brackets_fehlen") == {"risk": True, "tp": True}
             and not any(k[0].startswith(("Symbol-Dialog", "Meldung")) for k in s6i.klicks) and not any(k[0].startswith("To Make") for k in s6i.klicks)
-            and any("kein eindeutiges Schließ-X" in x for x in t6i),
-            f"Symbol-Dialog nur mit OK/Cancel: nach Esc nichts gedrückt, brackets_fehlen ({r6i.get('warnung')})")
+            and any("kein eindeutiger Cancel-/Schließ-Knopf" in x for x in t6i),
+            f"Symbol-Dialog nur mit OK/Switch: nach Esc nichts gedrückt, brackets_fehlen ({r6i.get('warnung')})")
         sd, sk = ob.tsx_symbol_dialog, ob.tsx_symbol_dialog_knopf
         d_ = {"titel": "Switch Chart Symbol", "text": "Switch Chart Symbol"}
         chk(sd([d_]) is d_ and sd([d_, {"titel": "Trade Copier Notice"}]) is None and sd([{"titel": "Confirm Order"}]) is None and sd([]) is None
             and sk(dict(d_, knoepfe=[{"text": "OK", "rect": [1, 1, 50, 20]}])) is None
+            and sk(dict(d_, knoepfe=[{"text": "Switch", "rect": [1, 1, 50, 20]}, {"text": "Confirm", "rect": [60, 1, 50, 20]}])) is None
             and sk(dict(d_, knoepfe=[{"text": "Close", "rect": [1, 1, 50, 20]}]))["text"] == "Close"
-            and sk(dict(d_, knoepfe=[{"text": "Cancel", "rect": [1, 1, 50, 20]}, {"text": "", "icon": "CloseIcon", "ecke": True, "rect": [9, 9, 20, 20]}])).get("icon_x"),
-            "tsx_symbol_dialog: nur der EINE Symbol-Dialog; Knopf nur Close/× oder Symbol-X, nie OK/Cancel")
+            and sk(dict(d_, knoepfe=[{"text": "Cancel", "rect": [1, 1, 50, 20]}, {"text": "OK", "rect": [60, 1, 50, 20]}])).get("cancel")
+            and sk(dict(d_, knoepfe=[{"text": "Cancel", "rect": [1, 1, 50, 20]}, {"text": "Cancel", "rect": [60, 1, 50, 20]}])) is None
+            and sk(dict(d_, knoepfe=[{"text": "OK", "rect": [1, 1, 50, 20]}, {"text": "", "icon": "CloseIcon", "ecke": True, "rect": [9, 9, 20, 20]}])).get("icon_x"),
+            "tsx_symbol_dialog: nur der EINE Symbol-Dialog; Knopf genau ein Cancel, sonst Close/× oder Symbol-X, nie OK/Switch/Confirm")
+        # Rechteck-Beweis vor dem Doppelklick (29.10.2026 abends, Master nach e9cf8722): Klickfläche im mittleren Band der Zelle, Zelle in der Zeile
+        kr = ob.tsx_k4_klick_rect
+        zl_ = lambda r: {"rect": r, "close_rect": RC}
+        k_, g_ = kr(RR, zl_([69, 766, 1930, 22]))
+        chk(k_ == [1004.0, 771.5, 80.0, 11.0] and g_ == "" and kr(RR, zl_([69, 800, 1930, 22]))[0] is None
+            and "Zeile" in kr(RR, zl_([69, 800, 1930, 22]))[1] and kr([1840, 766, 200, 22], zl_([69, 766, 2100, 22]))[0] is None
+            and kr([1000, 766, 20, 22], None)[0] is None and kr(RR, None)[0] == [1004.0, 771.5, 80.0, 11.0],
+            "tsx_k4_klick_rect: mittleres Band, links; Zelle außerhalb der Zeile / über Close / zu klein → kein Doppelklick")
+        s6k = _T4()
+        r6k, _ = lauf(s6k)
+        pk_ = [pr for (k, pr) in zip(s6k.klicks, s6k.pruef) if k[0].endswith("-Zelle (Doppelklick)")]
+        kk_ = [k for k in s6k.klicks if k[0].endswith("-Zelle (Doppelklick)")]
+        chk(r6k["ok"] and pk_ and all(pr.get("zelle") == pr.get("rect") for pr in pk_)
+            and all(z[1] + z[3] * 0.25 - 0.01 <= k[2][1] and k[2][1] + k[2][3] <= z[1] + z[3] * 0.75 + 0.01 for k, z in zip(kk_, (RR, RM))),
+            "Doppelklick auf Risk/To Make: Ziel-Beweis mit pruef.zelle, Klickfläche nur im mittleren Band")
         bfe = ob.tsx_k4_brackets_fehlen
         chk(bfe(None, {}, 198, 21) == {"risk": True, "tp": True} and bfe({"risk": {"wert": 21.0}, "to_make": {"wert": 0.0}}, {}, 198, 21) == {"risk": False, "tp": True}
             and bfe({}, {"risk": 21.0, "to_make": 198.0}, 198, 21) is None and bfe({"risk": {"wert": 0}}, {}, None, 21) == {"risk": True, "tp": False}

@@ -14223,10 +14223,13 @@ def _tsx_blow_dialog_weg(s, st, trail, res):
 # SYMBOL-WECHSEL-DIALOG (29.10.2026, Marc Topstep 150k Plan e9cf8722, BUY 2 NQ): der Doppelklick auf die Risk-Zelle traf die Positionszeile —
 # TopstepX öffnet dann „Switch Chart Symbol" statt eines Eingabefelds. Runde 2 und 3 sahen den Dialog und fassten ihn als FREMDEN Dialog nie an,
 # also lief die Position ohne SL/TP (brackets_fehlen + 🔴 kamen, der Retry war wirkungslos). Diesen Dialog hat Puls selbst ausgelöst: er wird mit
-# Esc geschlossen (kein Knopf, kein Symbolwechsel), steht er danach noch, höchstens mit dem eindeutigen Schließ-X/„Close" (nie „OK", „Switch",
-# „Confirm", „Cancel"). Nur, wenn er der EINZIGE offene Dialog ist — jeder andere Dialog bleibt unangetastet.
+# Esc geschlossen (kein Knopf, kein Symbolwechsel), steht er danach noch, mit EINEM Klick auf „Cancel" (Master: „mit Cancel/X schließen" —
+# in DIESEM Dialog heißt Cancel „nicht wechseln"), sonst „Close"/×/Symbol-X; nie „OK", „Switch", „Confirm". Nur, wenn er der EINZIGE offene
+# Dialog ist — jeder andere Dialog bleibt unangetastet.
 TSX_RX_SYMBOL_DIALOG = re.compile(r"switch\s+chart\s+symbol", re.I)
 TSX_RX_SYMBOL_DIALOG_ZU = re.compile(r"^\s*(close|dismiss|schlie(?:ß|ss)en|[×✕✖])\s*$", re.I)
+TSX_RX_SYMBOL_DIALOG_CANCEL = re.compile(r"^\s*(cancel|abbrechen)\s*$", re.I)
+TSX_SYMBOL_DIALOG_TABU = r"\b(ok|okay|continue|switch|confirm|yes|buy|sell|flatten|reverse|submit|place|order|position|kauf|verkauf)\b"
 
 
 def tsx_symbol_dialog(popups):
@@ -14239,9 +14242,24 @@ def tsx_symbol_dialog(popups):
 
 
 def tsx_symbol_dialog_knopf(popup):
-    """REIN RECHNEND (testbar): Schließ-Knopf des Symbol-Dialogs NACH erfolglosem Esc — wie tsx_blow_dialog_knopf, aber nur „Close"/„Dismiss"/×
-    oder das Symbol-X; „OK"/„Continue" (könnten den Wechsel bestätigen) zählen hier nie. -> knopf | None"""
+    """REIN RECHNEND (testbar): Schließ-Knopf des Symbol-Dialogs NACH erfolglosem Esc — zuerst GENAU EIN „Cancel"/„Abbrechen" (Text oder aria,
+    Rechteck ≥ 2 px, kein OK-/Switch-/Order-Wort; Ergebnis cancel=True), sonst wie tsx_blow_dialog_knopf, aber nur „Close"/„Dismiss"/× oder
+    das Symbol-X; „OK"/„Continue" (könnten den Wechsel bestätigen) zählen hier nie. -> knopf | None"""
     p = popup if isinstance(popup, dict) else {}
+    ca = []
+    for b in (p.get("knoepfe") or []):
+        if not isinstance(b, dict):
+            continue
+        text, aria = str(b.get("text") or "").strip(), str(b.get("aria") or "").strip()
+        r = b.get("rect")
+        if not (isinstance(r, (list, tuple)) and len(r) >= 4 and r[2] >= 2 and r[3] >= 2):
+            continue
+        if TSX_RX_SYMBOL_DIALOG_CANCEL.match(text or aria) and not re.search(TSX_SYMBOL_DIALOG_TABU, text + " " + aria, re.I):
+            ca.append(dict(b, text=(text or aria), aus_aria=not text, cancel=True))
+    if len(ca) == 1:
+        return ca[0]
+    if ca:
+        return None                                        # zwei Cancel-Knöpfe: mehrdeutig → nichts
     # OK/Continue … vorher raus — sonst gewänne ein „OK" (Wechsel bestätigen) vor dem Symbol-X
     ohne = [b for b in (p.get("knoepfe") or []) if isinstance(b, dict) and not (
         TSX_RX_DIALOG_ZU.match(str(b.get("text") or "").strip() or str(b.get("aria") or "").strip())
@@ -14273,14 +14291,15 @@ def _tsx_symbol_dialog_weg(s, st, trail):
         return st, not (isinstance(st, dict) and st.get("popups"))
     kn = tsx_symbol_dialog_knopf(dlg)
     if not kn:
-        trail.append("Symbol-Dialog steht nach Esc noch, kein eindeutiges Schließ-X — nichts gedrückt")
+        trail.append("Symbol-Dialog steht nach Esc noch, kein eindeutiger Cancel-/Schließ-Knopf — nichts gedrückt")
         return st, False
     r = list(kn["rect"])[:4]
     try:
         _tsx_pause()
-        pruef = {"rect": r, "text": "", "aria": "", "tabu": TSX_DIALOG_TABU} if kn.get("icon_x") else dict(
+        tabu = TSX_SYMBOL_DIALOG_TABU   # ohne „cancel" (sonst Tabu: Order stornieren — hier ist es der Knopf), dafür OK/Switch/Confirm tabu
+        pruef = {"rect": r, "text": "", "aria": "", "tabu": tabu} if kn.get("icon_x") else dict(
             {"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
-             "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
+             "tabu": tabu}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
         if not s.klick(r, f"Symbol-Dialog schließen ({kn.get('name') or repr(kn['text'][:20])})", pruef=pruef):
             return st, False
         _warte(0.7, 0.4)
@@ -19283,6 +19302,30 @@ def tsx_k4_brackets_fehlen(zeile, ist, tp, sl):
     return f if (f["risk"] or f["tp"]) else None
 
 
+def tsx_k4_klick_rect(zelle, zeile):
+    """REIN RECHNEND (testbar, 29.10.2026 abends, Marc e9cf8722 — der Doppelklick auf Risk traf die Positionszeile, TopstepX öffnete „Switch
+    Chart Symbol"): das Rechteck, in das der Doppelklick fallen darf. Die Zelle muss in ihrer Zeile liegen (±2 px; sonst ist der Stand
+    veraltet), Klickfläche = linkes Stück (der Stift sitzt rechts) im MITTLEREN Band der Zellhöhe (25–75 %), ≥ 4 px vom Zellrand, nie über der
+    Close-Zelle. zeile = die Positionszeile aus tsx_k4_zeile ({rect, close_rect, …}) oder None. -> ([x, y, w, h] | None, grund)"""
+    zd = zeile if isinstance(zeile, dict) else {}
+    z = cdp_rect(zelle)
+    if not z or z[2] < 30 or z[3] < 10:
+        return None, "Zelle ohne brauchbares Rechteck"
+    zx, zy, zw, zh = [float(v) for v in list(z)[:4]]
+    r = cdp_rect(zd.get("rect"))
+    if r:
+        rx, ry, rw, rh = [float(v) for v in list(r)[:4]]
+        if zy < ry - 2 or zy + zh > ry + rh + 2 or zx < rx - 2 or zx + zw > rx + rw + 2:
+            return None, "Zelle liegt nicht in ihrer Zeile (Stand veraltet)"
+    k = [zx + 4.0, zy + zh * 0.25, min(max(12.0, zw * 0.4), zw - 8.0), zh * 0.5]
+    c = cdp_rect(zd.get("close_rect"))
+    if c:
+        cx, cy, cw, ch = [float(v) for v in list(c)[:4]]
+        if k[0] < cx + cw and cx < k[0] + k[2] and k[1] < cy + ch and cy < k[1] + k[3]:
+            return None, "Klickfläche überdeckt die Close-Zelle"
+    return [round(v, 1) for v in k], ""
+
+
 def _tsx_k4_dialog_name(st):
     """Titel bzw. Text des ersten offenen TopstepX-Dialogs für Spur/Warnung ('' ohne Dialog). Liest nur."""
     p0 = (st.get("popups") or [None])[0] if isinstance(st, dict) else None
@@ -19330,9 +19373,14 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
             if not r or r[2] < 30 or zu.get("verdeckt") or zu.get("disabled"):
                 return False, None, f"{name}-Zelle verdeckt, gesperrt oder ohne Rechteck", st
             r = list(r)[:4]
-            links = [r[0] + 4.0, r[1], max(12.0, r[2] * 0.4), r[3]]      # linkes Stück: der Stift sitzt rechts neben dem Wert
+            # RECHTECK-BEWEIS (29.10.2026 abends, Master nach e9cf8722): Klickfläche nur im mittleren Band der Zelle, Zelle in ihrer Zeile;
+            # am Druckpunkt muss die Seite GENAU diese Zelle (role=gridcell/cell, Rechteck ±3 px, Punkt ≥ 3 px vom Rand) zeigen (pruef.zelle)
+            z_, _g = tsx_k4_zeile(st, befehl)
+            links, grund_k = tsx_k4_klick_rect(r, z_)
+            if not links:
+                return False, None, f"{name}-Zelle: {grund_k} — kein Doppelklick", st
             _tsx_pause()
-            if not s.klick(links, f"{name}-Zelle (Doppelklick)", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K4_TABU}, doppel=True):
+            if not s.klick(links, f"{name}-Zelle (Doppelklick)", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K4_TABU, "zelle": r}, doppel=True):
                 return False, None, f"{name}-Zelle nicht gedrückt (Klick ohne Beweis)", st
             _warte(0.5, 0.3)
             st = s.stand()
@@ -20439,9 +20487,13 @@ def win_ziel_pruef_js(x, y, pruef):
             "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
             "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
             "var tabu=p.tabu?new RegExp(p.tabu,'i').test(kt+' '+ka):false,w=String(p.wort||'').toLowerCase(),wort_ok=!w||T(e)===w;"
+            # pruef.zelle (29.10.2026 abends, e9cf8722): am Punkt liegt GENAU diese Tabellenzelle — nicht die Zeile, nicht die Nachbarzelle
+            "var zc=p.zelle?e.closest('[role=\"gridcell\"],[role=\"cell\"]'):null,zr=zc?zc.getBoundingClientRect():null,px=" + f"{float(x):.1f},py={float(y):.1f}" + ";"
+            "var zelle_ok=!p.zelle||(!!zr&&Math.abs(zr.left-p.zelle[0])<=3&&Math.abs(zr.top-p.zelle[1])<=3&&Math.abs(zr.width-p.zelle[2])<=3"
+            "&&Math.abs(zr.height-p.zelle[3])<=3&&px>=zr.left+3&&px<=zr.right-3&&py>=zr.top+3&&py<=zr.bottom-3);"
             "var h=win_hover_eltern(e);"
             "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"   # s. win_ziel_js (08.10.2026)
-            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok),was:(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,unter:h.unter,maus:m};})("
+            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok&&zelle_ok),was:(p.zelle&&!zelle_ok?'nicht die Zelle: ':'')+(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,zelle:zelle_ok,unter:h.unter,maus:m};})("
             + json.dumps(pruef, ensure_ascii=False) + ")").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS)
 
 
