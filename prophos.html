@@ -23976,7 +23976,45 @@
 
   // Das Localhost-Gate ist der HOSTNAME, nie die Existenz von window.mtcApi —
   // die Copier-IIFE läuft auch auf pages.dev/Railway (und meldet dort nur offline).
-  const MT5_LOCAL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  // NUR ANSEHEN (30.10.2026, HAUPT-TAB, Befund C: Ina pc-xc5c52 — Prophos lag nicht im Puls-Chrome; die Tabs eines PCs schlossen sich bis
+  // heute nicht aus). Das Panel führt genau EINEN Haupt-Tab (angemeldet, im Puls-Chrome bevorzugt); ein zweiter Tab bekommt beim Herzschlag
+  // haupt_tab:false und lädt sich im ruhigen Moment als ?neben=1 neu: dann ohne PC-Rollen (MT5_LOCAL false — kein mt5_live, keine Claims,
+  // kein Puls), nur ansehen. Geschlossen wird er nie. Stirbt der Haupt-Tab (oder rangiert dieser höher), wird er wieder Haupt-Tab.
+  const TAB_NEBEN = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && /[?&]neben=1(&|$)/.test(location.search)
+  window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)   // Kennung je Tab (Panel liest sie im Puls-Chrome per CDP)
+  const MT5_LOCAL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && !TAB_NEBEN
+  function tabNebenWerden(){
+    // nie mitten in einem Lauf: dieselbe Ruhe-Prüfung wie das Sofort-Update — nur „Tab im Hintergrund" zählt hier nicht (nur-ansehen-Tab)
+    let g = ''
+    try{ g = typeof window._bwGrund === 'function' ? window._bwGrund(0) : '' }catch(_){ g = 'unbekannt' }
+    if(g && !/^Tab im Hintergrund/.test(g)){
+      if(window._nebenWartet !== g){ window._nebenWartet = g; console.warn('[haupt-tab] zweiter Prophos-Tab — wechselt auf „nur ansehen", wartet: ' + g) }
+      return
+    }
+    const u = new URL(location.href); u.searchParams.set('neben', '1')
+    location.replace(u.toString())
+  }
+  if(TAB_NEBEN){
+    const nebenPruefen = async () => {
+      try{
+        const login = (typeof currentUserId !== 'undefined' && currentUserId) ? '1' : '0'
+        const r = await fetch(`${location.origin}/copier/haupt-tab?tid=${encodeURIComponent(window._tabHerzId)}&login=${login}`, { cache: 'no-store' })
+        const j = await r.json()
+        if(j && j.frei === true){ const u = new URL(location.href); u.searchParams.delete('neben'); location.replace(u.toString()); return }
+      }catch(_){ /* Panel nicht erreichbar — weiter nur ansehen */ }
+      setTimeout(nebenPruefen, 50000 + Math.random() * 20000)   // gestreut
+    }
+    setTimeout(nebenPruefen, 15000 + Math.random() * 10000)
+    const nebenHinweis = () => {
+      if(document.getElementById('tabNebenHinweis')) return
+      const d = document.createElement('div')
+      d.id = 'tabNebenHinweis'
+      d.style.cssText = 'position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:9999;padding:4px 10px;border-radius:8px;font-size:12px;background:var(--card,#fff);color:var(--sub,#666);border:1px solid var(--line,#ddd);box-shadow:0 1px 4px rgba(0,0,0,.08)'
+      d.textContent = 'Zweiter Prophos-Tab — nur ansehen. Der Haupt-Tab dieses PCs läuft im anderen Fenster.'
+      document.body.appendChild(d)
+    }
+    if(document.body) nebenHinweis(); else document.addEventListener('DOMContentLoaded', nebenHinweis)
+  }
 
   // Reverse-Lookup mt5_links: Prophos-Account-ID → MT5-Login (Pendant zu atGetDupId)
   function mt5LoginForAccount(prophosAccountId){
@@ -24883,11 +24921,13 @@
       // das Panel lädt den Tab in Stufen neu (panel.py tab_heil_stufe)
       window._rtAusSeit = (typeof _osRt !== 'undefined' && _osRt.status === 'SUBSCRIBED') ? 0 : (window._rtAusSeit || Date.now())
       const herz = new URLSearchParams({ tab: '1', login: currentUserId ? '1' : '0', url: location.origin + location.pathname,
-        build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: (window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)),
+        build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: window._tabHerzId,
         // sb nur mit Copier-Zeilen (ohne Zeilen schreibt der Tab nie — keine Aussage, S2 30.10.2026)
         sb: (_fleetPushAt && !window._fleetZeilenLeer) ? String(Math.round((Date.now() - _fleetPushAt) / 1000)) : '', rt: window._rtAusSeit ? String(Math.round((Date.now() - window._rtAusSeit) / 1000)) : '0' })
       const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
+      // HAUPT-TAB (30.10.2026): ein zweiter Tab meldet nichts mehr (kein mt5_live) und wechselt auf „nur ansehen"
+      if(dd.haupt_tab === false){ tabNebenWerden(); return }
       // BOT-STAND UNTEN IM TAB (19.10.2026, Finn: „immer unten die neueste Version reinschreiben, damit ich weiß, ob es tatsächlich ein
       // Update ist" — der Bot wird per Commit getauscht, ohne dass die Seite neu lädt; die Build-Nummer allein sagt also nichts über
       // den Bot): neben „Build …" steht am PC-Tab „· Bot .1630" aus /api/instances bot_version (VERSION des Bot-Stands, Panel BOT_STAND).

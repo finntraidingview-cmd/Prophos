@@ -33,7 +33,7 @@ def bloecke(pfad, namen, konst=()):
 
 def main():
     ns = {"re": re, "datetime": datetime}
-    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["_build_nr", "tab_neuladen_entscheiden", "tab_oeffnen_entscheiden"],
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["_build_nr", "tab_neuladen_entscheiden", "tab_oeffnen_entscheiden", "puls_tab_entscheiden"],
                  ["TAB_NL_HINTER_S", "TAB_NL_HINTER_BG_S", "TAB_NL_STUMM_S", "TAB_NL_IDLE_S", "TAB_NL_ABSTAND_S", "TAB_OEFFNEN_FEHLT_S", "TAB_OEFFNEN_ANLAUF_S",
                   "TAB_OEFFNEN_ABSTAND_S", "TAB_OEFFNEN_MAX_TAG"]), ns)
     f = ns["tab_neuladen_entscheiden"]
@@ -92,12 +92,27 @@ def main():
     a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 20)
     check(not a and "letzte Eingabe vor 20 s" in g, "Eingabe am PC → warten")
     a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 999, True)
-    check(not a and "im Hintergrund oder von Chrome verworfen" in g, "Chrome läuft ohne aktiven Prophos-Tab → nie öffnen (S2)")
+    check(not a and "im Hintergrund oder von Chrome verworfen" in g, "Chrome läuft, Prophos-Tab im Puls-Chrome (Heilung) → nie zweiter (S2)")
+    a, g = o(jetzt, jetzt - 400, s0, False, 0, 0, True, 999, True, False)
+    check(a and "seit 6 min keine Abfrage" in g, "Chrome läuft, aber kein Prophos-Tab im Puls-Chrome → dort öffnen (alter Tab wird nur ansehen)")
+
+    # PROPHOS IM PULS-CHROME HALTEN (30.10.2026): Haupt-Tab lebt woanders, im Puls-Chrome fehlt Prophos
+    pt = ns["puls_tab_entscheiden"]
+    check(pt(jetzt, s0, True, 0, True, 0, 0, "", True, 999)[0] is True, "Puls-Chrome ohne Prophos, Haupt-Tab lebt woanders → öffnen")
+    check(pt(jetzt, s0, True, 1, True, 0, 0, "", True, 999) == (False, "") and pt(jetzt, s0, False, 0, True, 0, 0, "", True, 999) == (False, "")
+          and pt(jetzt, s0, True, 0, False, 0, 0, "", True, 999) == (False, "") and pt(s0 + 60, s0, True, 0, True, 0, 0, "", True, 999) == (False, ""),
+          "schon einer im Puls-Chrome / Puls-Chrome aus / gar kein Tab lebt (alter Weg) / Anlauf → nichts")
+    check("einer ist Haupt-Tab" in pt(jetzt, s0, True, 2, True, 0, 0, "", True, 999)[1], "zwei im Puls-Chrome → melden, keiner geschlossen")
+    check("Signal läuft" in pt(jetzt, s0, True, 0, True, 0, 0, "Signal läuft", True, 999)[1] and "Puls/MT5-Order" in pt(jetzt, s0, True, 0, True, 0, 0, "", False, 999)[1]
+          and "Eingabe vor 20 s" in pt(jetzt, s0, True, 0, True, 0, 0, "", True, 20)[1] and "Deckel" in pt(jetzt, s0, True, 0, True, 0, 8, "", True, 999)[1]
+          and "höchstens 1 je 20 min" in pt(jetzt, s0, True, 0, True, jetzt - 600, 0, "", True, 999)[1],
+          "Riegel: Server-Riegel, Puls/MT5-Order, Eingabe am PC, Tages-Deckel, Abstand")
 
     # Herzschlag mit Login/URL/Kennung (16.10.2026)
     import time as _t
     hz = {"re": re, "time": _t}
-    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["tab_gesehen"], ["_TAB_OEFFNEN", "TAB_URL_RE"]), hz)
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen", "neben_tab_frei"],
+                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "_TABS", "_TAB_HAUPT"]), hz)
     hz["tab_gesehen"]("Mozilla/5.0", {"tab": ["1"], "login": ["1"], "url": ["http://localhost:5000/"]})
     check(hz["_TAB_OEFFNEN"]["zuletzt"] == 0.0, "Panel-Seite im Browser zählt nicht als Tab")
     hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["0"], "url": ["http://127.0.0.1:5000/"], "tid": ["abc"]})
@@ -108,6 +123,27 @@ def main():
     check(t0["url"] == "http://127.0.0.1:5000/" and t0["login"] is True, "fremde URL wird nie übernommen (nur localhost/127.0.0.1)")
     hz["tab_gesehen"]("python-requests/2.32", None)
     check(t0["login"] is True, "alter Tab ohne Angaben: nur Herzschlag")
+
+    # HAUPT-TAB (30.10.2026): genau einer zählt — angemeldet vor nicht angemeldet, Puls-Chrome vor anderem Chrome, kein Flattern
+    H, T = hz["haupt_tab_waehlen"], hz["_TABS"]
+    check(hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["1"], "url": ["http://localhost:5000/"], "tid": ["neu"]}) is True
+          and hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["0"], "url": ["http://127.0.0.1:5000/"], "tid": ["abc"]}) is False
+          and hz["_TAB_HAUPT"]["tid"] == "neu", "angemeldeter Tab wird Haupt-Tab, der nicht angemeldete bekommt haupt_tab:false")
+    z0 = t0["zuletzt"]
+    _t.sleep(0.01)
+    hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["0"], "url": ["http://127.0.0.1:5000/"], "tid": ["abc"]})
+    check(t0["zuletzt"] == z0 and t0["url"] == "http://localhost:5000/", "zweiter Tab zählt nie als Herzschlag, überschreibt nichts")
+    j1 = 1000.0
+    tabs = {"a": {"at": j1 - 5, "login": True, "puls": None}, "b": {"at": j1 - 1, "login": True, "puls": None}}
+    check(H(tabs, j1, "a") == "a" and H(tabs, j1, "") == "b", "gleicher Rang → der bisherige bleibt (kein Flattern), sonst der jüngste")
+    tabs["b"]["puls"] = True
+    check(H(tabs, j1, "a") == "b", "Tab im Puls-Chrome schlägt den anderen Chrome")
+    tabs["b"]["login"] = False
+    check(H(tabs, j1, "b") == "a", "nicht angemeldet im Puls-Chrome verliert gegen angemeldet woanders")
+    check(H({"a": {"at": j1 - 61, "login": True}}, j1, "a") == "", "kein Tab fragt ≤ 60 s → keiner")
+    N = hz["neben_tab_frei"]
+    check(N(tabs, "b", False, j1, "a") is False and N(tabs, "b", True, j1, "a") is True and N({"a": {"at": j1 - 120, "login": True}}, "b", False, j1, "a") is True,
+          "nur ansehen → wieder Haupt-Tab, wenn der Haupt-Tab tot ist oder dieser Tab höher rangiert (angemeldet + Puls-Chrome)")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)

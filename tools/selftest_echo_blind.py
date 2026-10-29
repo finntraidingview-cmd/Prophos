@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "echo_terminal_zu", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_gesehen_belegt", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig")
-KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S", "ECHO_TERMINAL_ZU_TXT")
+FUNKTIONEN = ("_wd_num", "panel_lage", "echo_terminal_zu", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_gesehen_belegt", "echo_frost_stufe", "echo_frost_karenz", "echo_frost_faellig")
+KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S", "ECHO_TERMINAL_ZU_TXT", "PANEL_AN_S", "PC_AUS_S")
 
 
 def lade():
@@ -39,7 +39,15 @@ def main():
     jetzt = datetime(2026, 10, 29, 14, 10, tzinfo=timezone.utc).timestamp()
     iso = lambda s_vor: datetime.fromtimestamp(jetzt - s_vor, timezone.utc).isoformat()
     G = ns["lt_echo_pl_grund"]
-    check(G(None, 1060, "2026-10-29T12:52:16+00:00") == "PC offline seit 16:52", "Grund: Meldung > 90 s alt → 'PC offline seit HH:MM' (Dubai)")
+    check(G(None, 1060, "2026-10-29T12:52:16+00:00", panel="aus") == "PC offline seit 16:52"
+          and G(None, 1060, "2026-10-29T12:52:16+00:00", panel="an") == "Prophos-Tab still (PC an)"
+          and G(None, 1060, "2026-10-29T12:52:16+00:00") == "Prophos-Tab still seit 16:52",
+          "Grund: Meldung > 90 s alt → 'PC offline seit HH:MM' nur bei Panel ≥ 10 min still, Panel lebt → 'Prophos-Tab still (PC an)', unklar neutral")
+    PL = ns["panel_lage"]
+    check(PL("pc-a", jetzt, {"pc-a": jetzt - 60}, jetzt - 9999) == "an" and PL("pc-a", jetzt, {"pc-a": jetzt - 600}, jetzt - 9999) == "aus"
+          and PL("pc-a", jetzt, {"pc-a": jetzt - 300}, jetzt - 9999) is None and PL("pc-a", jetzt, {}, jetzt - 300) is None
+          and PL("pc-a", jetzt, {}, jetzt - 700) == "aus" and PL(None, jetzt, {}, jetzt - 9999) is None,
+          "Panel-Lage: ≤ 3 min an, ≥ 10 min aus (auch nie gesehen seit ≥ 10 min Railway), dazwischen/kurz nach Neustart unklar")
     check(G("Snapshot eingefroren — Lese-EA im Master-Terminal pruefen!", 3, iso(3)) == "Lese-EA eingefroren", "Grund: Copier-Hinweis eingefroren → kurz")
     check(G("warte auf Snapshot des Master-Terminals", 3, iso(3)) == "warte auf Snapshot des Master-Terminals", "Grund: anderer Hinweis gekürzt")
 
@@ -66,7 +74,8 @@ def main():
           and B(dict(gut, pos=[]), jetzt - 600, jetzt) is False and B(frost_pos, jetzt - 600, jetzt) is False
           and B(gut, jetzt + 60, jetzt) is False and B(dict(gut, updated_at=iso(600)), jetzt - 3600, jetzt) is False and B(None, None, jetzt) is False,
           "Beleg: nur frische, nicht eingefrorene Zeile nach dem Start mit Position oder Hedge")
-    check(F(plan, dict(gut, updated_at=iso(1060)), jetzt)["pl_grund"].startswith("PC offline seit"), "Feld: alt → PC offline")
+    check(F(plan, dict(gut, updated_at=iso(1060)), jetzt, "aus")["pl_grund"].startswith("PC offline seit")
+          and F(plan, dict(gut, updated_at=iso(1060)), jetzt, "an")["pl_grund"] == "Prophos-Tab still (PC an)", "Feld: alt → PC offline nur mit Panel aus")
     check(F(plan, None, jetzt)["pl_grund"] == "keine Copier-Meldung", "Feld: keine Zeile → keine Copier-Meldung")
     check(F(plan, gut, jetzt)["pl_grund"] is None and F(plan, gut, jetzt)["pl_live"] == 155.69, "Feld: frisch → P&L, kein Grund")
     check(F(dict(plan, status="completed"), frost, jetzt)["pl_grund"] is None, "Feld: beendeter Plan → kein Grund (nichts zu zeigen)")

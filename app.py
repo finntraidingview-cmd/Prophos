@@ -4092,6 +4092,8 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         melden, _echo_frost_seit[pid] = echo_frost_karenz(_echo_frost_seit.get(pid), grund, jetzt_ts)
         if not melden:
             continue
+        if grund.startswith("Copier-Meldung") and panel_lage((z or {}).get("pc_name"), jetzt_ts, _panel_herz, _PANEL_HERZ_START) == "an":
+            grund = grund.replace("(PC offline?)", "(Prophos-Tab still, PC an)")   # PANEL-HERZSCHLAG (30.10.2026)
         roh = grund
         prio, grund = echo_frost_stufe(z, grund, gesehen)
         n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
@@ -13175,10 +13177,35 @@ def echo_terminal_zu(live):
     return not pos and not any(v for v in hd.values())
 
 
-def lt_echo_pl_grund(note, alter_s, updated_at, zu=False):
-    """REIN RECHNEND (testbar): kurzer Grund, warum der Echo-P&L fehlt — „PC offline seit HH:MM" (Dubai, Copier-Meldung > 90 s alt) bzw.
-    „Lese-EA eingefroren" (Copier-Hinweis) bzw. der Hinweis gekürzt."""
+# PANEL-HERZSCHLAG (30.10.2026, Master nach Befund C: Ina pc-xc5c52 stand im Radar „PC offline", obwohl PC und Panel liefen — nur der
+# Prophos-Tab war still; mt5_live schreibt allein der Tab). Das Panel fragt je Minute GET /code/tab-stand/<pc> — das ist der Herzschlag des
+# PCs (Speicher, ein Worker). „PC offline" nur noch, wenn das Panel ≥ PC_AUS_S schweigt; fragt es ≤ PANEL_AN_S, heißt es „Prophos-Tab
+# still (PC an)"; dazwischen bzw. kurz nach einem Railway-Neustart neutral „Prophos-Tab still seit HH:MM".
+PANEL_AN_S = 3 * 60
+_panel_herz = {}   # pc_name → ts der letzten Abfrage des Panels
+_PANEL_HERZ_START = time.time()
+
+
+def panel_lage(pc, jetzt_ts, merk, seit_ts):
+    """REIN RECHNEND (testbar): 'an' (Panel fragte ≤ PANEL_AN_S), 'aus' (≥ PC_AUS_S still bzw. seit dem Railway-Start nie gesehen und der
+    liegt ≥ PC_AUS_S zurück) oder None (unklar)."""
+    if not pc:
+        return None
+    t = (merk or {}).get(str(pc))
+    if t and jetzt_ts - t <= PANEL_AN_S:
+        return "an"
+    if (t and jetzt_ts - t >= PC_AUS_S) or (not t and jetzt_ts - seit_ts >= PC_AUS_S):
+        return "aus"
+    return None
+
+
+def lt_echo_pl_grund(note, alter_s, updated_at, zu=False, panel=None):
+    """REIN RECHNEND (testbar): kurzer Grund, warum der Echo-P&L fehlt — Copier-Meldung > 90 s alt: „Prophos-Tab still (PC an)" (Panel lebt),
+    „PC offline seit HH:MM" (Dubai, Panel ≥ 10 min still) bzw. „Prophos-Tab still seit HH:MM" (unklar) — sonst „Lese-EA eingefroren"
+    (Copier-Hinweis) bzw. der Hinweis gekürzt. panel = panel_lage(...)."""
     if alter_s is not None and alter_s > LT_ECHO_MAX_ALTER_S:
+        if panel == "an":
+            return "Prophos-Tab still (PC an)"
         try:
             t = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
             try:
@@ -13186,16 +13213,16 @@ def lt_echo_pl_grund(note, alter_s, updated_at, zu=False):
                 t = t.astimezone(ZoneInfo(KAPITEL_TZ))
             except Exception:   # pragma: no cover — tzdata fehlt → feste +4 h
                 t = t.astimezone(timezone(timedelta(hours=4)))
-            return f"PC offline seit {t.strftime('%H:%M')}"
+            return f"{'PC offline' if panel == 'aus' else 'Prophos-Tab still'} seit {t.strftime('%H:%M')}"
         except (TypeError, ValueError):
-            return "PC offline"
+            return "PC offline" if panel == "aus" else "Prophos-Tab still"
     n = str(note or "")
     if "eingefroren" in n:
         return ECHO_TERMINAL_ZU_TXT if zu else "Lese-EA eingefroren"   # zu = ohne Position/Hedge (echo_terminal_zu)
     return n[:40] or None
 
 
-def lt_echo_felder(p, live, jetzt_ts):
+def lt_echo_felder(p, live, jetzt_ts, panel=None):
     """REIN RECHNEND (testbar): Echo-Felder eines mt5v2-Plans aus mt5_baseline und der jüngsten mt5_live-Zeile des
     Master-Logins (live = {updated_at, pos, bal, eq, ccy, note} oder None). Nichts wird erfunden: ohne passende, frische
     Position bleiben Einstieg/Level/Kurs null. -> dict"""
@@ -13223,7 +13250,8 @@ def lt_echo_felder(p, live, jetzt_ts):
     if alter > LT_ECHO_MAX_ALTER_S or live.get("note"):
         if offen:
             # „Terminal zu" nur mit Beleg (mt5_baseline.echo_pos_gesehen_at), sonst bleibt es „Lese-EA eingefroren" (EA tot vor dem Einstieg)
-            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"), echo_terminal_zu(live) and bool(base.get("echo_pos_gesehen_at")))
+            out["pl_grund"] = lt_echo_pl_grund(live.get("note"), alter, live.get("updated_at"), echo_terminal_zu(live) and bool(base.get("echo_pos_gesehen_at")),
+                                               panel)
         return out
     eq, bal = _wd_num(live.get("eq")), _wd_num(live.get("bal"))
     ccy = str(live.get("ccy") or "").upper() or None
@@ -13267,7 +13295,8 @@ def _lt_echo_zeile(p, acc, disp, live_je_login, firm_sym, jetzt_ts, vorher=None)
     z = _wd_heute_zeile(p, acc, disp, vorher)
     z.pop("_tsx", None)
     login = str((acc or {}).get("external_id") or "").strip()
-    z.update(lt_echo_felder(p, live_je_login.get(login) if login else None, jetzt_ts))
+    _lv = live_je_login.get(login) if login else None
+    z.update(lt_echo_felder(p, _lv, jetzt_ts, panel_lage((_lv or {}).get("pc_name"), jetzt_ts, _panel_herz, _PANEL_HERZ_START)))
     if str(p.get("route") or "") == "mt5" and str(p.get("status") or "") == "open":
         z["slave_pl_live"] = lt_fusion_pl_echo(live_je_login.get(login) if login else None, jetzt_ts)
         z["slave_lots_live"] = lt_fusion_lots_echo(live_je_login.get(login) if login else None, jetzt_ts)
@@ -13411,7 +13440,7 @@ def admin_live_trades():
         if logins:
             try:
                 live_je_login = lt_echo_live_wahl(sb_select("mt5_live", {
-                    "select": "master_login,updated_at,pos:status->master_positions,bal:status->master_balance,eq:status->master_equity,"
+                    "select": "master_login,pc_name,updated_at,pos:status->master_positions,bal:status->master_balance,eq:status->master_equity,"
                               "ccy:status->>master_currency,note:status->>note,hd:status->hedges",
                     "master_login": f"in.({','.join(logins)})"}) or [])
             except Exception as e:
@@ -18715,6 +18744,7 @@ def code_tab_stand(pc):
                                  "master_login": "in.(" + ",".join(echo_logins) + ")"}) or []).items() if str(z.get("pc_name") or "") == pc)
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Stand nicht lesbar: {type(e).__name__}"}), 503
+    _panel_herz[pc] = time.time()   # Herzschlag des Panels (PANEL-HERZSCHLAG, 30.10.2026)
     spur = (request.args.get("panel") or "").strip()[:200]
     if spur and _tab_stand_spur.get(pc) != spur:
         _tab_stand_spur[pc] = spur

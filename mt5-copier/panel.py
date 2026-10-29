@@ -1668,14 +1668,50 @@ _TAB_OEFFNEN = {"zuletzt": 0.0, "start": time.time(), "geoeffnet": [], "tag": ""
 TAB_URL_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{2,5}/[A-Za-z0-9._/-]*$")
 
 
+# ══ HAUPT-TAB (30.10.2026, Master nach Befund C: Ina pc-xc5c52 — Prophos lag nicht im Puls-Chrome, F1 fand ihn per CDP nicht; die Tabs
+# schlossen sich bis heute gar nicht aus, das Panel merkte sich nur die zuletzt fragende Kennung). Jeder Tab meldet seine Kennung (tid); das
+# Panel führt GENAU EINEN Haupt-Tab: angemeldet vor nicht angemeldet, im Puls-Chrome vor einem anderen Chrome, bei gleichem Rang bleibt der
+# bisherige (kein Flattern). Nur der Haupt-Tab zählt als Herzschlag (Öffnen/Neuladen/Heilung) — ein zweiter Tab bekommt haupt_tab:false und
+# schaltet sich auf „nur ansehen" (prophos.html ?neben=1: ohne PC-Rollen, kein mt5_live, keine Claims). Geschlossen wird er nie. Ob eine
+# Kennung im Puls-Chrome liegt, liest das Panel per CDP (window._tabHerzId der Prophos-Seiten, nur lesen). ══
+TAB_HAUPT_FRISCH_S = 60
+TAB_PULS_PRUEF_S = 5 * 60
+_TABS = {}   # tid → {"at", "login", "url", "puls": True/False/None}
+_TAB_HAUPT = {"tid": "", "puls_at": 0.0, "meldung": ""}
+
+
+def haupt_tab_waehlen(tabs, jetzt, bisher=""):
+    """REIN RECHNEND (testbar): Kennung des Haupt-Tabs ('' = keiner lebt). Lebend = Abfrage ≤ TAB_HAUPT_FRISCH_S her. Rang: angemeldet,
+    dann im Puls-Chrome (puls True); bei gleichem Rang bleibt der bisherige, sonst der zuletzt fragende."""
+    lebend = {t: z for t, z in (tabs or {}).items() if jetzt - float(z.get("at") or 0) <= TAB_HAUPT_FRISCH_S}
+    if not lebend:
+        return ""
+    rang = lambda z: (bool(z.get("login")), z.get("puls") is True)   # noqa: E731
+    best = max(rang(z) for z in lebend.values())
+    if bisher in lebend and rang(lebend[bisher]) == best:
+        return bisher
+    return max((t for t, z in lebend.items() if rang(z) == best), key=lambda t: float(lebend[t].get("at") or 0))
+
+
 def tab_gesehen(user_agent, query=None):
     """Aufruf von /api/instances über das lokale app.py (= Prophos-Tab) → Herzschlag merken. Seit 16.10.2026 meldet der Tab dabei
-    login (1/0), url (origin + pathname), build, tid (Kennung je Tab) — ältere Tabs ohne diese Angaben zählen nur als Herzschlag."""
+    login (1/0), url (origin + pathname), build, tid (Kennung je Tab) — ältere Tabs ohne diese Angaben zählen nur als Herzschlag.
+    → True = dieser Tab ist der Haupt-Tab (bzw. alter Tab ohne Kennung), False = zweiter Tab (haupt_tab:false)."""
     if not str(user_agent or "").lower().startswith("python-requests"):
-        return
-    _TAB_OEFFNEN["zuletzt"] = time.time()
+        return True
     q = query or {}
     w = lambda k: str((q.get(k) or [""])[0]).strip()   # noqa: E731 — parse_qs-Form
+    tid = w("tid")[:16] if w("tab") == "1" else ""
+    if tid:
+        jetzt = time.time()
+        alt = _TABS.get(tid) or {}
+        _TABS[tid] = {"at": jetzt, "login": w("login") == "1", "url": w("url"), "puls": alt.get("puls"), "neben_at": alt.get("neben_at")}
+        for t in [t for t, z in _TABS.items() if jetzt - max(float(z.get("at") or 0), float(z.get("neben_at") or 0)) > 3600]:
+            _TABS.pop(t, None)
+        _TAB_HAUPT["tid"] = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"])
+        if _TAB_HAUPT["tid"] != tid:
+            return False
+    _TAB_OEFFNEN["zuletzt"] = time.time()
     if w("tab") == "1":
         if TAB_URL_RE.fullmatch(w("url")):
             _TAB_OEFFNEN["url"] = w("url")
@@ -1687,13 +1723,25 @@ def tab_gesehen(user_agent, query=None):
                 _TAB_OEFFNEN[feld] = int(w(k)) if w(k) != "" else None
             except ValueError:
                 _TAB_OEFFNEN[feld] = None
+    return True
 
 
-def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, n_heute, lock_frei, idle_s, chrome_offen=False):
+def neben_tab_frei(tabs, tid, login, jetzt, haupt):
+    """REIN RECHNEND (testbar, /api/haupt-tab): darf ein Tab im „nur ansehen"-Modus wieder Haupt-Tab werden? Ja, wenn kein Haupt-Tab mehr
+    lebt oder er selbst den höheren Rang hätte (angemeldet / im Puls-Chrome)."""
+    z = (tabs or {}).get(haupt) if haupt else None
+    if not z or jetzt - float(z.get("at") or 0) > TAB_HAUPT_FRISCH_S:
+        return True
+    ich = (bool(login), ((tabs or {}).get(tid) or {}).get("puls") is True)
+    return ich > (bool(z.get("login")), z.get("puls") is True)
+
+
+def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, n_heute, lock_frei, idle_s, chrome_offen=False, puls_hat=True):
     """REIN RECHNEND (testbar): (öffnen: bool, grund: str). '' = Tab lebt, nichts zu tun. chrome_offen = irgendein Chrome-Hauptfenster
-    läuft: dann NIE öffnen (Prüfer S2 16.10.2026: ein eingefrorener/verworfener Prophos-Tab im Hintergrund — typisch nach einem Puls-Lauf,
-    der TradingView im selben Fenster vorn lässt — fragt nicht mehr; ein neuer Tab gäbe beim nächsten Anklicken zwei Tabs mit derselben
-    pc_id: Claim atomar, aber Fleet-Push, Hedge-Wächter und Signale doppelt)."""
+    läuft: früher dann NIE öffnen (Prüfer S2 16.10.2026: ein eingefrorener/verworfener Prophos-Tab im Hintergrund fragt nicht mehr; ein
+    neuer Tab gäbe beim nächsten Anklicken zwei Tabs mit derselben pc_id — Fleet-Push, Hedge-Wächter und Signale doppelt). Seit der
+    Haupt-Tab-Wahl (30.10.2026) wird ein wieder erwachter alter Tab zum „nur ansehen"-Tab — gesperrt bleibt das Öffnen nur noch, wenn im
+    Puls-Chrome schon ein Prophos-Tab steht (puls_hat; den heilt die Stufen-Heilung). Geöffnet wird nur noch im Puls-Chrome."""
     if jetzt - start < TAB_OEFFNEN_ANLAUF_S:
         return False, ""
     still_s = jetzt - max(zuletzt, start)
@@ -1702,7 +1750,7 @@ def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, 
     warum = f"kein Prophos-Tab: seit {int(still_s // 60)} min keine Abfrage vom Tab"
     if fenster_da:
         return False, f"{warum}, aber ein Prophos-Fenster ist da — kein zweiter Tab (Neulade-Weg)"
-    if chrome_offen:
+    if chrome_offen and puls_hat:
         return False, (f"{warum} — Chrome läuft, aber ohne aktiven Prophos-Tab: Prophos-Tab im Hintergrund oder von Chrome verworfen → "
                        "am PC den Prophos-Tab anklicken (kein zweiter Tab)")
     if n_heute >= TAB_OEFFNEN_MAX_TAG:
@@ -1918,57 +1966,145 @@ def _prophos_tab_neu_laden():
         TV_ORDER_LOCK.release()
 
 
-def _chrome_exe():
-    for p in (r"%ProgramFiles%\Google\Chrome\Application\chrome.exe", r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
-              r"%LocalAppData%\Google\Chrome\Application\chrome.exe"):
-        p = os.path.expandvars(p)
-        if os.path.exists(p):
-            return p
-    return ""
-
-
-def _puls_profil():
-    """(profil, fehler) aus order_bot.puls_start_profil — frischer Prozess, damit immer der aktuelle Profil-Riegel gilt."""
-    code = ("import json, order_bot; p, f = order_bot.puls_start_profil(); print(json.dumps([p, f]))")
-    try:
-        r = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, timeout=30,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        p, f = json.loads((r.stdout or "").strip().splitlines()[-1])
-        return str(p or ""), str(f or "")
-    except Exception as e:
-        return "", f"Puls-Profil nicht lesbar ({type(e).__name__})"
-
-
 def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
-    """Öffnet den Prophos-Tab im Puls-Profil unter der Adresse, die der Tab zuletzt selbst gemeldet hat (localhost ≠ 127.0.0.1 = eigener
-    Login), sonst TAB_URL → (ok, Klartext). lock_gehalten = der Aufrufer hält TV_ORDER_LOCK schon (Stufe 3 der Tab-Heilung)."""
+    """Öffnet den Prophos-Tab IM PULS-CHROME (Port 9333) in einem eigenen Fenster, unter der Adresse, die der Tab zuletzt selbst gemeldet
+    hat (localhost ≠ 127.0.0.1 = eigener Login), sonst TAB_URL → (ok, Klartext). lock_gehalten = der Aufrufer hält TV_ORDER_LOCK schon.
+    PULS-CHROME STATT „chrome.exe --profile-directory" (30.10.2026, Befund C: Ina pc-xc5c52 — der alte Weg öffnete im normalen Chrome des
+    Nutzers; auch Stufe 3 der Tab-Heilung schloss den Tab im Puls-Chrome und öffnete ihn dort, wo F1 ihn danach nicht mehr fand). Läuft das
+    Puls-Chrome nicht, startet es order_bot._puls_chrome_sicher (minimiert, nie ein zweiter Start). Steht schon ein Prophos-Tab im
+    Puls-Chrome, wird keiner geöffnet."""
     import urllib.request
     url = url if TAB_URL_RE.fullmatch(str(url or "")) else TAB_URL
     try:
         urllib.request.urlopen(url, timeout=5).close()
     except Exception as e:
         return False, f"lokales Backend (localhost:5000) antwortet nicht ({type(e).__name__}) — start-alles.bat"
-    exe = _chrome_exe()
-    if not exe:
-        return False, "chrome.exe nicht gefunden"
-    profil, fehler = _puls_profil()
-    if fehler or not profil:
-        return False, (fehler or "kein Chrome-Profil bekannt") + " — Tab nicht geöffnet (nie im Reader-Profil)"
     if not lock_gehalten and not TV_ORDER_LOCK.acquire(blocking=False):
         return False, "Puls läuft gerade im Browser — nächster Versuch später"
     try:
         if not _browser_und_mt5_frei(tv_eigen=True):
             return False, "MT5-Order läuft gerade — nächster Versuch später"
         # EIGENES FENSTER (30.10.2026, Befund ECHO-AUSSETZER: Prophos als Tab hinter TradingView wurde von Chrome eingefroren/verworfen —
-        # der aktive Tab eines eigenen Fensters wird nicht verworfen, und der Neulade-Weg findet ihn wieder am Fenstertitel)
-        subprocess.Popen([exe, f"--profile-directory={profil}", "--new-window", url], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        time.sleep(4 + random.random())   # Lock kurz halten: der neue Tab holt sich den Fokus
-        return True, f"Chrome ({profil}, eigenes Fenster) → {url}"
+        # der aktive Tab eines eigenen Fensters wird nicht verworfen). Target.createTarget newWindow im Browser-Kanal des Puls-Chrome.
+        r = subprocess.run([sys.executable, "-c", _TAB_PULS_OEFFNEN_CODE, url], cwd=HERE, capture_output=True, text=True, timeout=60,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            ok, msg = json.loads((r.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            return False, f"Öffnen im Puls-Chrome ohne Antwort ({(r.stderr or '').strip()[-120:]})"
+        if not ok:
+            return False, str(msg)
+        time.sleep(4 + random.random())   # Lock kurz halten: die neue Seite lädt
+        return True, f"{msg} → {url}"
     except Exception as e:
         return False, f"Öffnen fehlgeschlagen: {type(e).__name__}: {e}"
     finally:
         if not lock_gehalten:
             TV_ORDER_LOCK.release()
+
+
+_TAB_PULS_OEFFNEN_CODE = (
+    "import sys, json, order_bot\n"
+    "t = []\n"
+    "if not order_bot._puls_chrome_sicher(t):\n"
+    "    print(json.dumps([False, ' / '.join(t)[-200:] or 'Puls-Chrome nicht erreichbar'])); sys.exit(0)\n"
+    "l = order_bot._cdp_http('/json/list') or []\n"
+    "if any(isinstance(x, dict) and x.get('type') == 'page' and str(x.get('url') or '').startswith(('http://localhost:5000', 'http://127.0.0.1:5000')) for x in l):\n"
+    "    print(json.dumps([False, 'im Puls-Chrome steht schon ein Prophos-Tab — kein zweiter'])); sys.exit(0)\n"
+    "v = order_bot._cdp_http('/json/version') or {}\n"
+    "c = order_bot._CdpVerbindung(v.get('webSocketDebuggerUrl') or '')\n"
+    "r = c.rufe('Target.createTarget', {'url': sys.argv[1], 'newWindow': True, 'background': True}, timeout=8); c.zu()\n"
+    "print(json.dumps([bool((r or {}).get('targetId')), 'Puls-Chrome (Port 9333), eigenes Fenster']))\n")
+_TAB_PULS_LESEN_CODE = (
+    "import sys, json, order_bot\n"
+    "out = []\n"
+    "for u in sys.argv[1:]:\n"
+    "    try:\n"
+    "        c = order_bot._CdpVerbindung(u)\n"
+    "        r = c.rufe('Runtime.evaluate', {'expression': 'String(window._tabHerzId || \"\")', 'returnByValue': True}, timeout=5); c.zu()\n"
+    "        out.append(str(((r or {}).get('result') or {}).get('value') or ''))\n"
+    "    except Exception:\n"
+    "        pass\n"
+    "print(json.dumps(out))\n")
+
+
+# ══ PROPHOS IM PULS-CHROME HALTEN (30.10.2026, Master nach Befund C, Ina pc-xc5c52: „Das Panel stellt dauerhaft sicher, dass genau EIN
+# Prophos-Tab im Puls-Chrome (im eigenen Fenster) läuft. Fehlt er dort, öffnet das Panel ihn selbst, gestreut und mit allen Riegeln.") Je
+# Runde liest der Tab-Wächter die CDP-Liste des Puls-Chrome. Fehlt dort ein Prophos-Tab, während ein Tab woanders lebt, öffnet er ihn —
+# höchstens TAB_OEFFNEN_MAX_TAG am Tag, 1 je TAB_OEFFNEN_ABSTAND_S, gestreut 0–30 s, nur ohne Server-Riegel (Signal/Start/Hedge), ohne
+# Puls/Polar/MT5-Order und 120 s ohne Eingabe. Läuft das Puls-Chrome nicht, startet es dafür niemand (das macht Puls beim nächsten Lauf);
+# fragt gar kein Tab mehr, öffnet der bisherige Weg (tab_oeffnen_entscheiden) — jetzt ebenfalls im Puls-Chrome. Der alte Tab bleibt offen
+# und wird über die Haupt-Tab-Wahl zum „nur ansehen"-Tab. ══
+def puls_tab_entscheiden(jetzt, start, erreichbar, n_prophos, haupt_lebt, letzter_versuch, n_heute, riegel, lock_frei, idle_s):
+    """REIN RECHNEND (testbar): (öffnen: bool, grund: str). '' = nichts zu sagen."""
+    if jetzt - start < TAB_OEFFNEN_ANLAUF_S or not erreichbar or not haupt_lebt:
+        return False, ""
+    if n_prophos >= 2:
+        return False, f"{n_prophos} Prophos-Tabs im Puls-Chrome — einer ist Haupt-Tab, die anderen nur ansehen (keiner geschlossen)"
+    if n_prophos == 1:
+        return False, ""
+    warum = "kein Prophos-Tab im Puls-Chrome (Haupt-Tab liegt in einem anderen Chrome)"
+    if n_heute >= TAB_OEFFNEN_MAX_TAG:
+        return False, f"{warum} — heute schon {n_heute}× geöffnet (Deckel {TAB_OEFFNEN_MAX_TAG})"
+    if letzter_versuch and jetzt - letzter_versuch < TAB_OEFFNEN_ABSTAND_S:
+        return False, f"{warum} — zuletzt vor {int((jetzt - letzter_versuch) // 60)} min geöffnet (höchstens 1 je {TAB_OEFFNEN_ABSTAND_S // 60} min)"
+    if riegel:
+        return False, f"{warum} — wartet: {riegel}"
+    if not lock_frei:
+        return False, f"{warum} — wartet: Puls/MT5-Order läuft"
+    if idle_s is not None and idle_s < TAB_NL_IDLE_S:
+        return False, f"{warum} — wartet: am PC wird gerade gearbeitet (letzte Eingabe vor {int(idle_s)} s)"
+    return True, warum
+
+
+def puls_prophos_lage():
+    """CDP-Liste des Puls-Chrome → (erreichbar, Zahl der Prophos-Seiten, Liste). Nur lesen."""
+    try:
+        liste = _cdp_get("/json/list")
+    except Exception:
+        return False, 0, []
+    liste = liste if isinstance(liste, list) else []
+    n = sum(1 for t in liste if isinstance(t, dict) and t.get("type") == "page" and _PROPHOS_URL_RE.match(str(t.get("url") or "")))
+    return True, n, liste
+
+
+def _tabs_puls_lesen(liste):
+    """Kennungen (window._tabHerzId) der Prophos-Seiten im Puls-Chrome per CDP Runtime.evaluate — nur lesen, frischer Prozess. → set | None."""
+    urls = [str(t.get("webSocketDebuggerUrl")) for t in liste or [] if isinstance(t, dict) and t.get("type") == "page"
+            and _PROPHOS_URL_RE.match(str(t.get("url") or "")) and t.get("webSocketDebuggerUrl")]
+    if not urls:
+        return set()
+    try:
+        r = subprocess.run([sys.executable, "-c", _TAB_PULS_LESEN_CODE] + urls[:6], cwd=HERE, capture_output=True, text=True, timeout=45,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return {t for t in json.loads((r.stdout or "").strip().splitlines()[-1]) if t}
+    except Exception:
+        return None
+
+
+def _haupt_tab_runde(pc, liste, jetzt):
+    """Puls-Kennzeichen der lebenden Tabs nachziehen (nur bei ≥ 2 lebenden Tabs, höchstens je TAB_PULS_PRUEF_S, sonst sobald eine Kennung
+    noch unbekannt ist) und zweite Tabs einmal in Log/Spur melden."""
+    lebend = [t for t, z in _TABS.items() if jetzt - float(z.get("at") or 0) <= TAB_HAUPT_FRISCH_S
+              or jetzt - float(z.get("neben_at") or 0) <= TAB_HAUPT_FRISCH_S * 2]
+    if len(lebend) >= 2 and (any(_TABS[t].get("puls") is None for t in lebend) or jetzt - _TAB_HAUPT["puls_at"] >= TAB_PULS_PRUEF_S):
+        tids = _tabs_puls_lesen(liste)
+        _TAB_HAUPT["puls_at"] = jetzt
+        if tids is not None:
+            for t in _TABS:
+                _TABS[t]["puls"] = t in tids
+            _TAB_HAUPT["tid"] = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"])
+    meldung = ""
+    if len(lebend) >= 2:
+        h = _TABS.get(_TAB_HAUPT["tid"]) or {}
+        meldung = (f"{len(lebend)} Prophos-Tabs an diesem PC — Haupt-Tab {'im Puls-Chrome' if h.get('puls') else 'in einem anderen Chrome'}"
+                   f"{'' if h.get('login') else ' (nicht angemeldet)'}, die anderen nur ansehen")
+    if meldung != _TAB_HAUPT["meldung"]:
+        _TAB_HAUPT["meldung"] = meldung
+        if meldung:
+            print(f"[haupt-tab] {meldung}", flush=True)
+            if pc:
+                _tab_stand_holen(pc, meldung)
 
 
 # ══ UPDATE-SCHUTZ (29.10.2026, Master nach dem Befund „Deploy-Welle": fünf Abrisse in zwei Stunden, jeder 1–2 min nach einem Push mit
@@ -2112,11 +2248,15 @@ def _tab_neulade_waechter():
             if jetzt0 - _TAB_OEFFNEN["start"] >= TAB_OEFFNEN_ANLAUF_S and _tab_heil_schritt(pc, still0):
                 time.sleep(20 + random.random() * 15)       # während einer Folge enger takten (Stufe 2 nach 60 s)
                 continue
+            # PULS-CHROME-LAGE + HAUPT-TAB (30.10.2026): Prophos-Seiten im Puls-Chrome zählen, Puls-Kennzeichen der Tabs nachziehen
+            puls_da, puls_n, puls_liste = puls_prophos_lage()
+            if puls_da:
+                _haupt_tab_runde(pc, puls_liste, jetzt0)
             fenster_da = bool(_prophos_fenster())
             chrome_offen = (not fenster_da) and still0 >= TAB_OEFFNEN_FEHLT_S and _chrome_hauptfenster_da()
             auf, grund_auf = tab_oeffnen_entscheiden(jetzt0, _TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"], fenster_da,
                                                      TAB_NL["letzter_versuch"], len(_TAB_OEFFNEN["geoeffnet"]),
-                                                     _browser_und_mt5_frei(), _win_leerlauf_s(), chrome_offen)
+                                                     _browser_und_mt5_frei(), _win_leerlauf_s(), chrome_offen, puls_da and puls_n > 0)
             if auf:
                 TAB_NL["letzter_versuch"] = jetzt0
                 ok, msg = _tab_oeffnen(_TAB_OEFFNEN["url"] or TAB_URL)
@@ -2172,6 +2312,20 @@ def _tab_neulade_waechter():
                             msg = f"per CDP im Puls-Chrome: {msg}"
                     grund = f"{grund} → {'neu geladen' if ok else 'NICHT neu geladen'}: {msg}"
                     TAB_NL["ergebnis"] = grund
+                elif puls_da:
+                    # PROPHOS IM PULS-CHROME HALTEN (30.10.2026): lebt der Haupt-Tab woanders und fehlt er im Puls-Chrome → dort öffnen
+                    riegel = str((stand or {}).get("riegel") or "").strip() if isinstance(stand, dict) and stand.get("ok") else "Tab-Stand von Railway nicht lesbar"
+                    auf2, g2 = puls_tab_entscheiden(jetzt, _TAB_OEFFNEN["start"], puls_da, puls_n, still is not None and still < TAB_OEFFNEN_FEHLT_S,
+                                                    TAB_NL["letzter_versuch"], len(_TAB_OEFFNEN["geoeffnet"]), riegel, frei, _win_leerlauf_s())
+                    if auf2:
+                        TAB_NL["letzter_versuch"] = jetzt
+                        time.sleep(random.random() * 30)            # gestreut
+                        ok, msg = _tab_oeffnen(_TAB_OEFFNEN["url"] or TAB_URL)
+                        if ok:
+                            _TAB_OEFFNEN["geoeffnet"].append(datetime.now().isoformat(timespec="seconds"))
+                            _TAB_HAUPT["puls_at"] = 0.0             # Kennungen bald neu lesen → Haupt-Tab wechselt ins Puls-Chrome
+                        g2 = f"{g2} → {'geöffnet' if ok else 'NICHT geöffnet'}: {msg}"
+                    grund = grund or g2
                 if grund != TAB_NL["grund"]:
                     if grund:
                         print(f"[tab-neuladen] {grund}", flush=True)
@@ -2257,8 +2411,8 @@ def cdp_prophos_ziele(liste, url_merk=""):
     Prophos = Seite auf localhost:5000 (die zuletzt gemeldete Adresse zuerst); TradingView = die vorderste TradingView-Seite."""
     seiten = [t for t in (liste or []) if isinstance(t, dict) and t.get("type") == "page" and t.get("id")]
     pro = [t for t in seiten if _PROPHOS_URL_RE.match(str(t.get("url") or ""))]
-    if url_merk:
-        pro.sort(key=lambda t: 0 if str(t.get("url") or "").startswith(url_merk) else 1)
+    # Tabs im „nur ansehen"-Modus (?neben=1, HAUPT-TAB 30.10.2026) zuletzt — gemeint ist immer der Haupt-Tab
+    pro.sort(key=lambda t: (1 if "neben=1" in str(t.get("url") or "") else 0, 0 if url_merk and str(t.get("url") or "").startswith(url_merk) else 1))
     tv = [t for t in seiten if "tradingview.com" in str(t.get("url") or "")]
     return (pro[0] if pro else None), (tv[0] if tv else None)
 
@@ -4154,8 +4308,17 @@ class Handler(BaseHTTPRequestHandler):
             code, antwort = polar_panel.behandle_get(path, parse_qs(urlparse(self.path).query))
             return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if path == "/api/instances":
-            tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
-            return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
+            haupt = tab_gesehen(self.headers.get("User-Agent"), parse_qs(urlparse(self.path).query))   # Tab öffnen, wenn gar keiner läuft (16.10.2026)
+            return self._send(200, json.dumps(dict(snapshot(), haupt_tab=haupt), ensure_ascii=False))
+        if path == "/api/haupt-tab":
+            # Tab im „nur ansehen"-Modus (30.10.2026, HAUPT-TAB): darf er wieder Haupt-Tab werden? Nur lesen, zählt nie als Herzschlag
+            q = parse_qs(urlparse(self.path).query)
+            tid = str((q.get("tid") or [""])[0]).strip()[:16]
+            login = str((q.get("login") or [""])[0]) == "1"
+            if tid:   # merken (für die Doppel-Tab-Meldung), aber nie als Haupt-Herzschlag ("at" bleibt)
+                _TABS.setdefault(tid, {"at": 0.0, "puls": None}).update(login=login, neben_at=time.time())
+            frei = neben_tab_frei(_TABS, tid, login, time.time(), _TAB_HAUPT["tid"])
+            return self._send(200, json.dumps({"ok": True, "frei": frei}))
         if path == "/api/tsx-stand":
             # TopstepX-Auge (27.10.2026, s. tsx_stand_merken): jüngster Stand des Userscripts im Puls-Chrome — nur lesen
             return self._send(200, json.dumps(tsx_stand_ausgabe(), ensure_ascii=False, default=str))

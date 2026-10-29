@@ -2617,8 +2617,16 @@ def test_panel_tab_wecken_ea_frost():
         and not E(120, "offene Hedges", 0, j, True, True, True, True)[0] and "nur melden" not in E(120, "x", 0, j, True, True, True, True)[1]
         and "von Hand" in E(120, "x", 0, j, True, True, True, True)[1],
         "nie bei Puls/Polar oder MT5-Order, nie ohne Terminal-Pfad, 1× je 15 min, nie über 12 h still (zweites Terminal)")
-    q = inspect.getsource(panel._tab_oeffnen)
-    chk('"--new-window"' in q, "Neu-Öffnen im eigenen Fenster")
+    q = inspect.getsource(panel._tab_oeffnen) + panel._TAB_PULS_OEFFNEN_CODE
+    chk("'newWindow': True" in q and "Target.createTarget" in q and "_puls_chrome_sicher(" in q and "--profile-directory={" not in q and "Popen(" not in q
+        and "schon ein Prophos-Tab" in q and "TV_ORDER_LOCK.acquire(blocking=False)" in q,
+        "Neu-Öffnen nur im Puls-Chrome (Port 9333), eigenes Fenster, nie ein zweiter Prophos-Tab dort, unter TV_ORDER_LOCK")
+    q = inspect.getsource(panel._tab_neulade_waechter)
+    chk("puls_tab_entscheiden(" in q and "puls_prophos_lage()" in q and "_haupt_tab_runde(" in q and "random.random() * 30" in q,
+        "Tab-Wächter hält Prophos im Puls-Chrome (gestreut, mit Riegeln) und führt den Haupt-Tab")
+    q = inspect.getsource(panel._tabs_puls_lesen) + panel._TAB_PULS_LESEN_CODE
+    chk("Runtime.evaluate" in q and "_tabHerzId" in q and "Page.reload" not in q and "close" not in q.lower(),
+        "Puls-Kennzeichen der Tabs nur lesend (Runtime.evaluate _tabHerzId)")
     # 30.10.2026: verdeckter Tab lädt nicht selbst (tab_bw „Tab im Hintergrund") → Panel lädt schon nach TAB_NL_HINTER_BG_S
     N = panel.tab_neuladen_entscheiden
     j0 = 1_761_800_000.0
