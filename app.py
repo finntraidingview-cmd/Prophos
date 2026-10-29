@@ -17565,18 +17565,31 @@ def admin_konto_mails():
     ziel = sorted(sicht)
     if not ziel:
         return jsonify({"ok": True, "mails": [], "konten": []})
-    seit = (datetime.now(timezone.utc) - timedelta(days=tage)).isoformat()
-    # PostgREST-or: Komma/Klammern im Suchwort sind durch KONTO_MAIL_BETREFF_RE ausgeschlossen, Leerzeichen gehen als Teil des Musters
-    oder = ",".join(f"betreff.ilike.*{w.replace('*', '')}*" for w in woerter)
     try:
-        mails = _sb_all("mails", {"select": "id,user_id,von,betreff,datum,text,html", "user_id": f"in.({','.join(ziel)})",
-                                  "datum": f"gt.{seit}", "or": f"({oder})", "order": "datum.desc,id.desc"}) or []
+        aus = _konto_mails_laden(ziel, woerter, tage, disp)
         # Konten + Archiv-Stand wie die Übersicht (_admin_basis: accounts + user_settings-Archiv; archived ist keine accounts-Spalte)
         basis = _admin_basis()
         konten = [a for a in basis["accounts"] if str(a.get("user_id")) in sicht]
         archiv = basis["archived"]
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Mails nicht lesbar: {str(e)[:120]}"}), 503
+    try:
+        verworfen = _konto_verworfen_lesen(ziel)
+    except Exception:
+        verworfen = {}   # Verwerfen-Merker nicht lesbar → Reiter läuft trotzdem (Gegenprüfung 29.10.2026)
+    kk = [{"id": str(k.get("id")), "user_id": str(k.get("user_id") or ""), "name": k.get("name") or "",
+           "external_id": k.get("external_id") or "", "firm": k.get("firm") or "", "archived": str(k.get("id")) in archiv} for k in konten]
+    return jsonify({"ok": True, "mails": aus, "konten": kk, "tage": tage, "verworfen": verworfen})
+
+
+def _konto_mails_laden(uids, woerter, tage, disp=None):
+    """Mails der IDs (letzte `tage`), deren Betreff eines der Suchwörter enthält — Text ohne HTML, auf KONTO_MAIL_TEXT_MAX gekürzt.
+    → [{id, user_id, person, von, betreff, datum, text}]. Gemeinsam für Admin → Konten aus Mail und „zu bestätigen" unter Accounts. Wirft."""
+    seit = (datetime.now(timezone.utc) - timedelta(days=tage)).isoformat()
+    # PostgREST-or: Komma/Klammern im Suchwort sind durch KONTO_MAIL_BETREFF_RE ausgeschlossen, Leerzeichen gehen als Teil des Musters
+    oder = ",".join(f"betreff.ilike.*{w.replace('*', '')}*" for w in woerter)
+    mails = _sb_all("mails", {"select": "id,user_id,von,betreff,datum,text,html", "user_id": f"in.({','.join(uids)})",
+                              "datum": f"gt.{seit}", "or": f"({oder})", "order": "datum.desc,id.desc"}) or []
     aus = []
     for m in mails:
         uid = str(m.get("user_id") or "")
@@ -17590,11 +17603,216 @@ def admin_konto_mails():
             text = re.sub(r"<[^>]+>", " ", text)
         text = html_mod.unescape(text)
         text = re.sub(r"\s+", " ", text)[:KONTO_MAIL_TEXT_MAX]
-        aus.append({"id": m.get("id"), "user_id": uid, "person": disp.get(uid) or uid[:8], "von": m.get("von") or "",
+        aus.append({"id": m.get("id"), "user_id": uid, "person": (disp or {}).get(uid) or uid[:8], "von": m.get("von") or "",
                     "betreff": m.get("betreff") or "", "datum": m.get("datum") or "", "text": text})
-    kk = [{"id": str(k.get("id")), "user_id": str(k.get("user_id") or ""), "name": k.get("name") or "",
-           "external_id": k.get("external_id") or "", "firm": k.get("firm") or "", "archived": str(k.get("id")) in archiv} for k in konten]
-    return jsonify({"ok": True, "mails": aus, "konten": kk, "tage": tage})
+    return aus
+
+
+# ══ KONTEN ZU BESTÄTIGEN AUS MAIL (29.10.2026, Finn ~16:30 über den Master: „erst ein paar Tage selbst bestätigen, automatisch kommt erst
+# danach"). Erkannte Kauf-/Reset-Mails (KONTO_MAIL_MUSTER im Frontend) stehen unter Accounts der ID und in Admin → Alle Accounts als Zeile
+# „zu bestätigen", wie die TV-Zeilen. Hier nur: eigene Mails lesen, Verwerfen merken (user_settings 'konto_verworfen' {EXT: at} der Besitzer-ID,
+# nur ausblenden, nichts gelöscht; bei einer TV-Zeile zusätzlich tv_konten.ignoriert_at) und den RESET bestätigen (Finn: „Reset = Kauf",
+# Standard bei Tradeify, neue External ID): neue Zeile mit den Einstellungen der alten (Previous Account), Startbalance = Größe, Kaufpreis aus
+# der Schablone (bulk_vorlagen gleicher Firma × Typ × Größe), sonst der alten Zeile; die alte Zeile, falls noch aktiv, als blown archiviert
+# (_konto_archiv_eintragen) — Vorbild sql/2026-10-29_mike_tradeify_reset_nachtrag.sql. Ein Kauf geht weiter übers Account-Modal (eigene ID)
+# bzw. /admin/konto-anlegen (fremde ID). Fremde IDs nur mit dem Gate von /admin/konto-anlegen. Keine Automatik. ══
+KONTO_VERWORFEN_KEY = "konto_verworfen"
+KONTO_VERWORFEN_MAX = 500
+KONTO_ZU_BESTAETIGEN_TAGE = 14
+KONTO_RESET_KOPIE = ("firm", "account_type", "account_size", "currency", "max_drawdown", "max_daily_drawdown", "max_loss_per_trade",
+                     "max_profit_per_trade", "consistency_pct", "max_risiko_trade", "auto_planer", "goal_kind", "goal_target",
+                     "goal_min_profit", "purchase_cost")   # nie kapitel_id: das neue Konto gehört ins Kapitel von heute (Trigger set_kapitel)
+KONTO_PHASE_NAME = {"challenge": "Challenge", "phase1": "Phase 1", "phase2": "Phase 2", "funded": "Funded", "funded_cfd": "Funded",
+                    "winning_days": "Winning Days"}
+
+
+def konto_reset_zeile(alt, neu_ext, vorlage=None):
+    """REIN RECHNEND (testbar): neue Konto-Zeile nach einem Reset aus der alten (accounts-Zeile) → dict ohne user_id. Einstellungen der alten
+    Zeile, External ID neu, Startbalance = Größe, Balance 0, nie WD-Farm/Duplikum/Zugangsdaten, Ziel-Zählung frisch; Kaufpreis aus der Vorlage
+    (bulk_vorlagen), sonst der alten Zeile. Name nach der Namensregel „<Größe> <External ID> → <Phase>"."""
+    z = {k: alt.get(k) for k in KONTO_RESET_KOPIE if alt.get(k) is not None}
+    if vorlage and _wd_num(vorlage.get("purchase_cost")):
+        z["purchase_cost"] = _wd_num(vorlage["purchase_cost"])
+    gr = _wd_num(alt.get("account_size")) or _wd_num(alt.get("starting_balance")) or _wd_num((vorlage or {}).get("account_size"))
+    if gr:
+        z["account_size"] = gr
+        z["starting_balance"] = gr
+    gr_txt = (f"{gr / 1000:g}k " if gr else "")
+    z.update(external_id=str(neu_ext).strip(), balance=0, wd_farm=False, duplikum_linked=False, goal_manual=z.get("goal_kind") == "winning_days",
+             name=f"{gr_txt}{str(neu_ext).strip()} → {KONTO_PHASE_NAME.get(z.get('account_type'), 'Challenge')}")
+    z.setdefault("account_type", "challenge")
+    z.setdefault("currency", "USD")
+    return z
+
+
+def konto_vorlage_finden(vorlagen, firm, typ, groesse):
+    """REIN RECHNEND (testbar): aktive Schablone gleicher Firma × Typ × Größe (account_size/starting_balance) → dict oder None."""
+    for v in vorlagen or ():
+        if v.get("aktiv") is False or str(v.get("firm") or "").strip().lower() != str(firm or "").strip().lower() or v.get("account_type") != typ:
+            continue
+        if groesse and _wd_num(v.get("account_size") or v.get("starting_balance")) != _wd_num(groesse):
+            continue
+        return v
+    return None
+
+
+def _konto_verworfen_lesen(uids):
+    """{user_id: [EXT normiert, …]} aus user_settings 'konto_verworfen'. Wirft."""
+    out = {}
+    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{KONTO_VERWORFEN_KEY}", "user_id": f"in.({','.join(uids)})"}) or []:
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        out[str(r.get("user_id"))] = sorted(v)
+    return out
+
+
+def _konto_ziel_uid(b):
+    """Ziel-ID einer Bestätigen-/Verwerfen-Aktion → (ziel, None) | (None, Antwort). Eigene ID (sb-token) immer; eine andere nur mit dem Gate
+    von /admin/konto-anlegen (ADMIN_EMAILS/admin_mail_leser, Verwalter nur seine Gruppe)."""
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return None, err
+    ziel = str((b or {}).get("user_id") or uid).strip().lower()
+    if not ADMIN_MAIL_UID_RE.fullmatch(ziel):
+        return None, (jsonify({"ok": False, "msg": "user_id ungültig"}), 400)
+    if ziel == str(uid):
+        return ziel, None
+    erlaubt, err = _admin_konto_gate()
+    if err:
+        return None, err
+    if erlaubt is not None and ziel not in erlaubt:
+        return None, (jsonify({"ok": False, "msg": "ID nicht in deiner Gruppe"}), 403)
+    return ziel, None
+
+
+@app.route("/konto-mails/mein", methods=["GET", "OPTIONS"])
+def konto_mails_mein():
+    """GET /konto-mails/mein?betreff=<a>|<b>…[&tage=14] (eingeloggt, eigene ID) → {ok, mails:[…wie /admin/konto-mails], verworfen:[EXT…]}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    woerter = [w.strip() for w in str(request.args.get("betreff") or "").split("|") if w.strip()]
+    woerter = [w for w in woerter if KONTO_MAIL_BETREFF_RE.fullmatch(w)][:12]
+    if not woerter:
+        return jsonify({"ok": False, "msg": "betreff fehlt (Suchwörter mit | getrennt)"}), 400
+    try:
+        tage = max(1, min(60, int(str(request.args.get("tage") or KONTO_ZU_BESTAETIGEN_TAGE))))
+    except ValueError:
+        return jsonify({"ok": False, "msg": "tage ungültig"}), 400
+    try:
+        mails = _konto_mails_laden([uid], woerter, tage)
+        verworfen = _konto_verworfen_lesen([uid]).get(uid, [])
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Mails nicht lesbar: {str(e)[:120]}"}), 503
+    return jsonify({"ok": True, "mails": mails, "verworfen": verworfen, "tage": tage})
+
+
+@app.route("/konto-verwerfen", methods=["POST", "OPTIONS"])
+def konto_verwerfen():
+    """POST {ext[, user_id][, tv_name]} → {ok}: Zeile „zu bestätigen" ausblenden (nichts gelöscht). Eigene ID oder Admin-Gate."""
+    if request.method == "OPTIONS":
+        return "", 200
+    b = request.get_json(silent=True) or {}
+    ziel, err = _konto_ziel_uid(b)
+    if err:
+        return err
+    ext = admin_konto_ext_norm(b.get("ext"))
+    if not 6 <= len(ext) <= 64:
+        return jsonify({"ok": False, "msg": "ext ungültig"}), 400
+    jetzt = datetime.now(timezone.utc).isoformat()
+    try:
+        z = sb_select("user_settings", {"select": "value", "user_id": f"eq.{ziel}", "key": f"eq.{KONTO_VERWORFEN_KEY}", "limit": "1"}) or []
+        v = dict((z[0].get("value") if z and isinstance(z[0].get("value"), dict) else {}))
+        v[ext] = jetzt
+        if len(v) > KONTO_VERWORFEN_MAX:
+            v = dict(sorted(v.items(), key=lambda kv: str(kv[1]))[-KONTO_VERWORFEN_MAX:])
+        _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
+                    json={"user_id": ziel, "key": KONTO_VERWORFEN_KEY, "value": v, "updated_at": jetzt},
+                    headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=12).raise_for_status()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+    tv = tv_konto_normal(b.get("tv_name"))
+    if TV_KONTEN_NAME_RE.fullmatch(tv):           # dieselbe Zeile steht auch im TV-Dropdown → dort ebenfalls ignoriert (Tabelle fehlt → egal)
+        try:
+            sb_update("tv_konten", {"user_id": f"eq.{ziel}", "name": f"eq.{tv}", "ignoriert_at": "is.null"}, {"ignoriert_at": jetzt})
+        except Exception:
+            pass
+    return jsonify({"ok": True})
+
+
+@app.route("/konto-reset-bestaetigen", methods=["POST", "OPTIONS"])
+def konto_reset_bestaetigen():
+    """POST {neu, alt[, user_id][, tv_name]} → {ok, account, archiviert, hinweis} | 404 (alte Zeile fehlt → als Kauf anlegen) | 409 (neue
+    External ID gibt es schon). Eigene ID oder Admin-Gate. Siehe Block oben."""
+    if request.method == "OPTIONS":
+        return "", 200
+    b = request.get_json(silent=True) or {}
+    ziel, err = _konto_ziel_uid(b)
+    if err:
+        return err
+    neu_ext, alt_ext = str(b.get("neu") or "").strip(), str(b.get("alt") or "").strip()
+    if not 6 <= len(admin_konto_ext_norm(neu_ext)) <= 64 or not 6 <= len(admin_konto_ext_norm(alt_ext)) <= 64 \
+            or admin_konto_ext_norm(neu_ext) == admin_konto_ext_norm(alt_ext):
+        return jsonify({"ok": False, "msg": "neu/alt ungültig"}), 400
+    try:
+        konten = sb_select("accounts", {"select": "*", "user_id": f"eq.{ziel}"}) or []
+        archiv = _ap_archiviert()
+        vorlagen = sb_select("bulk_vorlagen", {"select": "*", "aktiv": "eq.true"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht prüfbar: {type(e).__name__}"}), 502
+    doppel = admin_konto_doppel(neu_ext, konten)
+    if doppel:
+        return jsonify({"ok": False, "msg": f"Gibt es schon: {doppel.get('name') or neu_ext} — nicht doppelt angelegt",
+                        "konto": {"id": doppel.get("id"), "name": doppel.get("name")}}), 409
+    k_alt = admin_konto_ext_norm(alt_ext)
+    # mehrere Zeilen mit derselben Nummer (Fehl-Zeile von Hand archiviert, Gegenprüfung 29.10.2026): die aktive zuerst, sonst die jüngste
+    kandidaten = sorted((a for a in konten if admin_konto_ext_norm(a.get("external_id")) == k_alt),
+                        key=lambda a: (str(a.get("id")) not in archiv, str(a.get("created_at") or "")), reverse=True)
+    alt = kandidaten[0] if kandidaten else None
+    if not alt:
+        return jsonify({"ok": False, "msg": f"Alte Zeile {alt_ext} gibt es bei dieser ID nicht — als Kauf anlegen"}), 404
+    if (alt.get("account_type") or "challenge") not in ADMIN_KONTO_TYPEN:
+        return jsonify({"ok": False, "msg": f"Alte Zeile ist {alt.get('account_type')} — Reset nur für Prop-Firm-Konten"}), 400
+    zeile = konto_reset_zeile(alt, neu_ext, konto_vorlage_finden(vorlagen, alt.get("firm"), alt.get("account_type") or "challenge",
+                                                                 alt.get("account_size") or alt.get("starting_balance")))
+    hinweis = []
+    try:
+        try:
+            neu = sb_insert("accounts", dict(zeile, user_id=ziel))
+        except requests.exceptions.HTTPError as e:
+            if "consistency_pct" not in zeile or "consistency_pct" not in str(getattr(getattr(e, "response", None), "text", "") or ""):
+                raise
+            zeile.pop("consistency_pct")
+            hinweis.append("Consistency nicht übernommen (Spalte fehlt)")
+            neu = sb_insert("accounts", dict(zeile, user_id=ziel))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht angelegt: {str(e)[:160]}"}), 502
+    acc_id = (neu or {}).get("id")
+    jetzt = datetime.now(timezone.utc).isoformat()
+    print(f"[konto-reset] {ziel[:8]}: {alt.get('name')} → {zeile['name']} ({acc_id})", flush=True)
+    if zeile.get("purchase_cost"):   # wie saveAccount / /admin/konto-anlegen: Kauf-Transaktion (EUR, negativ) — Reset = Kauf
+        try:
+            sb_insert("transactions", {"user_id": ziel, "account_id": acc_id, "account_name": zeile["name"], "account_firm": zeile.get("firm"),
+                                       "kind": "account_purchase", "amount": -abs(float(zeile["purchase_cost"])), "currency": "EUR",
+                                       "occurred_at": datetime.now(timezone.utc).date().isoformat(), "notes": f"Reset von {alt_ext} (auto)",
+                                       "auto_generated": True})
+        except Exception as e:
+            hinweis.append(f"Kauf-Transaktion nicht gebucht ({type(e).__name__})")
+    archiviert = False
+    if str(alt.get("id")) not in archiv:
+        try:
+            archiviert = _konto_archiv_eintragen(ziel, str(alt["id"]), "blown", jetzt, name=alt.get("name"))
+        except Exception as e:
+            hinweis.append(f"alte Zeile nicht archiviert ({type(e).__name__}) — von Hand als blown archivieren")
+    tv = tv_konto_normal(b.get("tv_name"))
+    if acc_id and TV_KONTEN_NAME_RE.fullmatch(tv) and admin_konto_ext_norm(tv) == admin_konto_ext_norm(neu_ext):
+        try:
+            sb_update("tv_konten", {"user_id": f"eq.{ziel}", "name": f"eq.{tv}", "angelegt_account_id": "is.null"}, {"angelegt_account_id": acc_id})
+        except Exception:
+            pass
+    return jsonify({"ok": True, "account": neu, "archiviert": archiviert, "alt": {"id": alt.get("id"), "name": alt.get("name")},
+                    "hinweis": " · ".join(hinweis)})
 
 
 @app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])
