@@ -4405,12 +4405,22 @@ def pc_tab_heil_spur():
     namen, aus = _ap_namen()
     if uid in aus or _alarm_fremd_verwaltet(uid):
         return jsonify({"ok": True})
+    pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
+    wer_txt = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
+    if str(d.get("art") or "") == "puls_login":
+        # HAUPT-TAB (30.10.2026, Master): Prophos-Tab im Puls-Chrome nicht angemeldet → ⚪ einmal je PC (1× je Tag), nie geheilt
+        key = f"{pc}|puls-login"
+        if time.time() - _UPDATE_SPUR_MERK.get(key, 0) < 86400:
+            return jsonify({"ok": True, "gedrosselt": True})
+        _UPDATE_SPUR_MERK[key] = time.time()
+        alarm_senden(3, "puls_login_fehlt", f"Prophos im Puls-Chrome nicht angemeldet: {wer_txt}"[:120],
+                     f"{wer_txt}: Prophos im Puls-Chrome nicht angemeldet — einmal einloggen (im Puls-Chrome-Fenster mit Prophos). Bis dahin "
+                     f"bleibt der Prophos-Tab im anderen Chrome Haupt-Tab.", uid=uid, daten={"pc": pc}, schluessel=f"puls_login|{pc}")
+        return jsonify({"ok": True})
     key = f"{pc}|tab-heil"
     if time.time() - _UPDATE_SPUR_MERK.get(key, 0) < 3600:
         return jsonify({"ok": True, "gedrosselt": True})
     _UPDATE_SPUR_MERK[key] = time.time()
-    pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
-    wer_txt = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
     alarm_senden(3, "tab_heil_fehl", f"Prophos-Tab nicht zu retten: {wer_txt}"[:120],
                  f"{wer_txt}: {grund or 'Prophos-Tab still'} — geweckt, neu geladen und im eigenen Fenster neu geöffnet, ohne Erfolg. Bitte am "
                  f"PC Chrome/Prophos ansehen (Login? Internet?). Laufende Trades sind davon nicht betroffen.",

@@ -149,12 +149,20 @@ def main():
           "nur ansehen → wieder Haupt-Tab, wenn der Haupt-Tab tot ist oder dieser Tab höher rangiert (angemeldet + Puls-Chrome)")
 
     html = open(os.path.join(HIER, "..", "prophos.html"), encoding="utf-8").read()
-    check(html.count("if(window._tabNeben) return") >= 20 and "window._tabNeben = dd.haupt_tab === false" in html
+    check(html.count("if(window._tabNebenSofort) return") >= 20 and "window._tabNebenSofort = dd.haupt_tab === false" in html
           and all(f"function {n}(" in html for n in ("tpStartUmTick", "sfTick", "orderSignalTick", "acTick", "hedgeWacheTick", "wdTick")),
           "Sofort-Sperre (S2): haupt_tab:false → Start, Signale, Hedge-Wächter, Auto-Close, WD beginnen nichts Neues bis zum Neuladen")
     pq = open(os.path.join(HIER, "..", "mt5-copier", "panel.py"), encoding="utf-8").read()
     hs = pq[pq.index("\ndef _tab_heil_schritt("):pq.index("\n\n\n", pq.index("\ndef _tab_heil_schritt("))]
     check('"neben=1" in' in hs and '.get("puls") is False' in hs, "Stufen-Heilung nur am Haupt-Tab im Puls-Chrome, nie am „nur ansehen“-Tab (S2)")
+    hr = pq[pq.index("\ndef _haupt_tab_runde("):pq.index("\n\n\n", pq.index("\ndef _haupt_tab_runde("))]
+    check('_tab_heil_melden("Prophos im Puls-Chrome nicht angemeldet — einmal einloggen", "puls_login")' in hr and 'login_gemeldet' in hr,
+          "Puls-Chrome nicht angemeldet → ⚪ einmal je PC statt Heilung (Master)")
+    aq = open(os.path.join(HIER, "..", "app.py"), encoding="utf-8").read()
+    rt = aq[aq.index("\ndef pc_tab_heil_spur("):aq.index("\n\n\n", aq.index("\ndef pc_tab_heil_spur("))]
+    check('== "puls_login"' in rt and '|puls-login"' in rt and "< 86400" in rt and 'alarm_senden(3, "puls_login_fehlt"' in rt,
+          "Railway: ⚪ „Prophos im Puls-Chrome nicht angemeldet“ je PC höchstens 1× am Tag, eigene Drossel neben tab-heil")
+    check("_tabNebenSofort" in html and "window._tabNeben " not in html and "window._tabNeben)" not in html, "Sofort-Flag heißt window._tabNebenSofort (Master)")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)

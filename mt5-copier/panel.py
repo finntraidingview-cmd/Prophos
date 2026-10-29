@@ -2101,6 +2101,10 @@ def _haupt_tab_runde(pc, liste, jetzt):
                    f"{'' if h.get('login') else ' (nicht angemeldet)'}, die anderen nur ansehen")
         if any(_TABS[t].get("puls") is True and not _TABS[t].get("login") for t in lebend):
             meldung += " — der Prophos-Tab im Puls-Chrome ist nicht angemeldet: am PC dort einmal in Prophos einloggen, dann wird er Haupt-Tab"
+            if not _TAB_HAUPT.get("login_gemeldet"):
+                # ⚪ einmal je PC (Master 30.10.2026): statt den „nur ansehen"-Tab zu heilen → melden (Railway drosselt je PC auf 1× je Tag)
+                _TAB_HAUPT["login_gemeldet"] = True
+                _tab_heil_melden("Prophos im Puls-Chrome nicht angemeldet — einmal einloggen", "puls_login")
     if meldung != _TAB_HAUPT["meldung"]:
         _TAB_HAUPT["meldung"] = meldung
         if meldung:
@@ -2550,14 +2554,15 @@ def _prophos_tab_neu_oeffnen(still_s=None):
         TV_ORDER_LOCK.release()
 
 
-def _tab_heil_melden(grund):
-    """Stufe 4: ⚪ an die Master-IDs über Railway POST /pc/tab-heil-spur (X-Code-Token). Wirft nie."""
+def _tab_heil_melden(grund, art=""):
+    """Stufe 4: ⚪ an die Master-IDs über Railway POST /pc/tab-heil-spur (X-Code-Token). art 'puls_login' = Prophos im Puls-Chrome nicht
+    angemeldet (Railway: einmal je PC). Wirft nie."""
     import urllib.request
     tok = code_token()
     if not tok:
         return
     try:
-        body = json.dumps({"grund": str(grund)[:240]}).encode("utf-8")
+        body = json.dumps({"grund": str(grund)[:240], "art": str(art or "")[:20]}).encode("utf-8")
         req = urllib.request.Request(CODE_QUELLE + "/pc/tab-heil-spur", data=body, method="POST",
                                      headers={"X-Code-Token": tok, "Content-Type": "application/json", "User-Agent": "prophos-panel"})
         urllib.request.urlopen(req, timeout=5).read()
