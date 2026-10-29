@@ -1158,6 +1158,15 @@
   #dashboard-view .note-von{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;font-size:11px;font-weight:500;border-radius:999px;background:var(--bg2);color:var(--sub);white-space:nowrap}
   #dashboard-view .note-von i{width:7px;height:7px;border-radius:50%;display:inline-block}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+  /* Meta Wallet (29.10.2026): Kopfzeile je Person, Chain-Beträge als kleine Chips, Zwilling-Knopf */
+  #adm-pane-wallet .wal-person-kopf td{background:var(--surface-tint);font-weight:600;font-size:12.5px;padding-top:8px;padding-bottom:8px;cursor:default}
+  #adm-pane-wallet .wal-person-kopf .kf{font-weight:400;color:var(--sub)}
+  #adm-pane-wallet .wal-chip{display:inline-flex;align-items:center;gap:5px;margin:1px 8px 1px 0;font-size:12px;white-space:nowrap;cursor:pointer;border:0;background:none;padding:0;color:var(--ink);font-family:inherit}
+  #adm-pane-wallet .wal-chip:hover .wal-chip-n{text-decoration:underline}
+  #adm-pane-wallet .wal-chip .wal-del{font-size:13px;padding:0 2px}
+  #adm-pane-wallet .wal-twin{font-size:11px;padding:1px 7px;border:1px dashed var(--border);border-radius:999px;background:none;color:var(--sub);cursor:pointer;white-space:nowrap}
+  #adm-pane-wallet .wal-twin:hover{color:var(--ink);border-color:var(--violet)}
+  #adm-pane-wallet .wal-label{font-weight:600;font-size:12.5px;display:block}
   /* Meta-Wallet: 7 Karten (Gesamt + 6 Chains, seit Ethereum 15.09.2026) — muss VOR der
      960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt.
      auto-fit statt fester Spaltenzahl: 7 Karten à 150px passen ab ~1.150px Inhaltsbreite
@@ -13072,38 +13081,40 @@
             <span id="wal-msg" style="font-size:12px;color:var(--sub)"></span>
           </div>
 
-          <div class="kpis">
+          <!-- Kacheln (29.10.2026, Finn: „wir brauchen eigentlich nur Ethereum und Arbitrum"): Gesamt, Ethereum, Arbitrum immer;
+               Polygon/BNB/Solana/Tron nur, wenn dort eine Wallet existiert (walRender) — nichts entfernt -->
+          <div class="kpis wal-kpis">
             <div class="kpi">
               <div class="kpi-label">Gesamt (USDT)</div>
               <div class="kpi-value" id="wal-k-total">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-total-sub">–</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-wal-kpi="ethereum">
               <div class="kpi-label">Ethereum</div>
               <div class="kpi-value" id="wal-k-ethereum">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-ethereum-sub">–</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-wal-kpi="arbitrum">
               <div class="kpi-label">Arbitrum</div>
               <div class="kpi-value" id="wal-k-arbitrum">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-arbitrum-sub">–</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-wal-kpi="polygon">
               <div class="kpi-label">Polygon</div>
               <div class="kpi-value" id="wal-k-polygon">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-polygon-sub">–</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-wal-kpi="bnb">
               <div class="kpi-label">BNB Chain</div>
               <div class="kpi-value" id="wal-k-bnb">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-bnb-sub">–</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-wal-kpi="solana">
               <div class="kpi-label">Solana</div>
               <div class="kpi-value" id="wal-k-solana">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-solana-sub">–</div>
             </div>
-            <div class="kpi">
+            <div class="kpi" data-wal-kpi="tron">
               <div class="kpi-label">Tron</div>
               <div class="kpi-value" id="wal-k-tron">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-tron-sub">–</div>
@@ -13120,12 +13131,12 @@
               </div>
               <div class="adm-dist" id="wal-person-dist"></div>
               <div style="display:flex;gap:14px;margin-top:10px;font-size:11.5px;color:var(--sub)">
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#627eea;margin-right:5px"></span>Ethereum</span>
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:5px"></span>Arbitrum</span>
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8247e5;margin-right:5px"></span>Polygon</span>
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#f0b90b;margin-right:5px"></span>BNB</span>
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#14f195;margin-right:5px"></span>Solana</span>
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ef4444;margin-right:5px"></span>Tron</span>
+                <span data-wal-leg="ethereum"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#627eea;margin-right:5px"></span>Ethereum</span>
+                <span data-wal-leg="arbitrum"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:5px"></span>Arbitrum</span>
+                <span data-wal-leg="polygon"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8247e5;margin-right:5px"></span>Polygon</span>
+                <span data-wal-leg="bnb"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#f0b90b;margin-right:5px"></span>BNB</span>
+                <span data-wal-leg="solana"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#14f195;margin-right:5px"></span>Solana</span>
+                <span data-wal-leg="tron"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ef4444;margin-right:5px"></span>Tron</span>
               </div>
             </div>
             <div class="panel">
@@ -13146,20 +13157,25 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Wallets</div>
-                <div class="panel-sub">Pro Person bis zu sechs Adressen — Ethereum, Arbitrum, Polygon, BNB Chain, Solana, Tron · Zeile anklicken zeigt die letzten Transfers</div>
+                <div class="panel-sub">Nach Person · beliebig viele Wallets je Person · eine 0x-Adresse = Ethereum + Arbitrum · Zeile anklicken zeigt die letzten Transfers, Chain-Betrag anklicken die dieser Chain</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
               <input id="wal-add-person" list="wal-person-names" placeholder="Person" autocomplete="off" style="flex:1;min-width:120px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
               <datalist id="wal-person-names"></datalist>
+              <!-- Chains (29.10.2026, Finn: „Wenn ich eine Ethereum-Wallet hinzufüge, sollen automatisch Ethereum UND Arbitrum mit derselben
+                   Adresse angelegt werden"): Standard „Ethereum + Arbitrum" (evm) legt zwei Zeilen an; Solana/Tron weiter, nur nicht mehr Standard.
+                   Die Adresse wählt die Chain mit (walAddChainRaten): T… = Tron, Base58 = Solana, 0x… = Ethereum + Arbitrum. -->
               <select id="wal-add-chain" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-                <option value="ethereum">Ethereum</option>
-                <option value="arbitrum">Arbitrum</option>
-                <option value="polygon">Polygon</option>
-                <option value="bnb">BNB Chain</option>
+                <option value="evm">Ethereum + Arbitrum</option>
                 <option value="solana">Solana</option>
                 <option value="tron">Tron</option>
+                <option value="ethereum">nur Ethereum</option>
+                <option value="arbitrum">nur Arbitrum</option>
+                <option value="polygon">Polygon</option>
+                <option value="bnb">BNB Chain</option>
               </select>
+              <input id="wal-add-label" placeholder="Name (optional)" autocomplete="off" style="flex:1;min-width:110px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
               <input id="wal-add-address" placeholder="Öffentliche Adresse (0x… / Base58 / T…)" autocomplete="off" spellcheck="false" style="flex:2;min-width:220px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:12.5px">
               <button class="btn btn-primary" id="wal-add">Hinzufügen</button>
             </div>
@@ -13167,8 +13183,8 @@
             <div class="table-wrap">
               <table class="t">
                 <thead><tr>
-                  <th>Person</th>
-                  <th>Chain</th>
+                  <th>Wallet</th>
+                  <th>Chains</th>
                   <th>Adresse</th>
                   <th class="adm-num" title="USDT + USDC (+ USDC.e) — Aufschlüsselung im Tooltip der Zelle">Stables</th>
                   <th class="adm-num">Coin</th>
@@ -18815,6 +18831,9 @@
                   hint:'T… (34 Zeichen)' }
     }
     let wallets = [], walSnaps = [], walOpened = false
+    // 29.10.2026 (Finn: „wir brauchen eigentlich nur Ethereum und Arbitrum"): diese beiden Kacheln immer, eine 0x-Adresse gilt für beide
+    const WAL_IMMER = ['ethereum', 'arbitrum']
+    const WAL_KURZ = { ethereum: 'ETH', arbitrum: 'ARB', polygon: 'POL', bnb: 'BNB', solana: 'SOL', tron: 'TRX' }
     /* Gegenseiten-Labels (15.09.2026, Finn: „CoinPayments-Dinge validieren … Anzeige
      * für Account-Käufe"). Tabelle wallet_labels, Schlüssel chain:adresse (klein).
      * kind: coinpayments_hot (Sammel-/Auszahlungs-Wallet 0x2dF9b935…, Seed per SQL),
@@ -19166,6 +19185,10 @@
         const n = rows.filter(w => w.chain === ch).length
         $('wal-k-' + ch).textContent = (loaded && n) ? walNf.format(sum(ch)) : '–'
         $('wal-k-' + ch + '-sub').textContent = n ? `${n} Wallet${n === 1 ? '' : 's'}` : 'keine Wallet'
+        // 29.10.2026: nur Ethereum/Arbitrum immer, die übrigen Chains nur mit mindestens einer Wallet (über alle, nicht nur den Filter)
+        const da = WAL_IMMER.includes(ch) || wallets.some(w => w.chain === ch)
+        const k = document.querySelector(`#adm-pane-wallet [data-wal-kpi="${ch}"]`); if(k) k.hidden = !da
+        const lg = document.querySelector(`#adm-pane-wallet [data-wal-leg="${ch}"]`); if(lg) lg.hidden = !da
       }
 
       // Nach Person: gestapelte Balken (Segmente = Chains), Breite = Anteil am Gesamt
@@ -19210,36 +19233,76 @@
 
       walDrawHistory(rows)
 
-      // Wallet-Tabelle
+      // Wallet-Tabelle (29.10.2026, Finn: „geordneter nach Person — eine Person kann mehrere Wallets haben"): je Person eine Kopfzeile mit
+      // Summe, darunter ihre Wallets; eine Wallet = eine Adresse, Ethereum + Arbitrum (und andere EVM-Chains) derselben 0x-Adresse in EINER
+      // Zeile mit je einem Chain-Betrag. Fehlt einer 0x-Adresse der Ethereum- oder Arbitrum-Zwilling: Knopf „+ Arbitrum"/„+ Ethereum"
+      // (schreibt erst auf Klick, nie von selbst).
       const tb = $('wal-rows')
       tb.innerHTML = ''
       $('wal-empty').hidden = !!wallets.length
+      const einheitKey = w => WAL_CHAINS[w.chain]?.evm ? 'evm:' + w.address.toLowerCase() : w.chain + ':' + w.address
+      const proPerson = new Map()
       for(const w of rows){
-        const c = WAL_CHAINS[w.chain]
-        const b = walBal.get(w.id)
-        const short = w.address.length > 14 ? w.address.slice(0, 7) + '…' + w.address.slice(-5) : w.address
-        // Aufschlüsselung als Tooltip (28.08.2026): die Spalte zeigt die Stable-Summe,
-        // der title sagt, was drinsteckt (z.B. „USDT 9,30 · USDC 4.499,00").
-        const partsTitle = b?.parts ? Object.entries(b.parts).filter(([, v]) => v >= 0.005)
-          .map(([k, v]) => k + ' ' + walNf.format(v)).join(' · ') : ''
-        const tr = document.createElement('tr')
-        // Zeile anklicken = letzte Transfers (03.09.2026) — Kopier-Knopf,
-        // Explorer-Link und ×-Knopf behalten ihre eigene Bedeutung.
-        tr.dataset.wid = w.id
-        tr.style.cursor = 'pointer'
-        tr.title = 'Klicken: letzte Transfers dieser Wallet'
-        if(walTxSel === w.id) tr.style.background = 'color-mix(in srgb, var(--violet) 7%, transparent)'
-        tr.innerHTML =
-          '<td class="wal-td-person"></td>' +
-          `<td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin-right:7px"></span>${c.label}</td>` +
-          `<td><button type="button" class="wal-addr" data-full="${escapeHtml(w.address)}" title="${escapeHtml(w.address)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
-          ` <a href="${c.explorer(w.address)}" target="_blank" rel="noopener" title="Im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
-          `<td class="adm-num"${partsTitle ? ' title="' + escapeHtml(partsTitle) + '"' : ''}>${b?.usdt != null ? walNf.format(b.usdt) : (b?.err ? '<span title="' + escapeHtml(b.err) + '" style="color:var(--danger)">Fehler</span>' : '–')}</td>` +
-          `<td class="adm-num">${b?.coin != null ? coinNf.format(b.coin) + ' ' + c.coin + ' <span style="color:var(--sub)">≈ ' + (b.coinUsdt != null ? walNf.format(b.coinUsdt) : '–') + '</span>' : '–'}</td>` +
-          `<td class="adm-num" style="font-weight:650">${b?.usdt != null ? walNf.format(b.usdt + (b.coinUsdt || 0)) : '–'}</td>` +
-          `<td style="text-align:right"><button type="button" class="wal-del" data-id="${w.id}" title="Wallet entfernen" style="border:none;background:none;color:var(--sub);font-size:16px;line-height:1;cursor:pointer;padding:2px 5px">×</button></td>`
-        tr.querySelector('.wal-td-person').textContent = w.person_name
-        tb.appendChild(tr)
+        const pm = proPerson.get(w.person_name) || new Map()
+        const k = einheitKey(w), u = pm.get(k) || []
+        u.push(w); pm.set(k, u); proPerson.set(w.person_name, pm)
+      }
+      const chainRang = ch => { const i = Object.keys(WAL_CHAINS).indexOf(ch); return i < 0 ? 99 : i }
+      const personen = [...proPerson.entries()].map(([name, pm]) => {
+        const einheiten = [...pm.values()].map(ws => ws.sort((x, y) => chainRang(x.chain) - chainRang(y.chain)))
+        const summe = einheiten.flat().reduce((t, w) => t + (bal(w) ?? 0), 0)
+        return { name, einheiten, summe }
+      }).sort((x, y) => (y.summe - x.summe) || x.name.localeCompare(y.name, 'de'))
+      for(const p of personen){
+        const kopf = document.createElement('tr')
+        kopf.className = 'wal-person-kopf'
+        const pDa = p.einheiten.flat().some(w => bal(w) != null)   // nur mit mindestens einem geladenen Wert eine Summe, sonst „–"
+        kopf.innerHTML = `<td colspan="5"><span class="nm"></span> <span class="kf">· ${p.einheiten.length} Adresse${p.einheiten.length === 1 ? '' : 'n'}</span></td>`
+          + `<td class="adm-num">${pDa ? walNf.format(p.summe) : '–'}</td><td></td>`
+        kopf.querySelector('.nm').textContent = p.name
+        tb.appendChild(kopf)
+        for(const ws of p.einheiten){
+          const w0 = ws[0], c0 = WAL_CHAINS[w0.chain]
+          const short = w0.address.length > 14 ? w0.address.slice(0, 7) + '…' + w0.address.slice(-5) : w0.address
+          const label = ws.map(w => w.label).find(Boolean) || ''
+          let stab = null, gesamt = null, err = ''
+          const teile = {}, coins = new Map()
+          for(const w of ws){
+            const b = walBal.get(w.id), c = WAL_CHAINS[w.chain]
+            if(b?.err && !err) err = b.err
+            if(b?.usdt != null){ stab = (stab || 0) + b.usdt; gesamt = (gesamt || 0) + b.usdt + (b.coinUsdt || 0) }
+            if(b?.parts) for(const [k, v] of Object.entries(b.parts)) teile[k] = (teile[k] || 0) + v
+            if(b?.coin != null){ const m = coins.get(c.coin) || { n: 0, usdt: 0, da: false }; m.n += b.coin; if(b.coinUsdt != null){ m.usdt += b.coinUsdt; m.da = true }; coins.set(c.coin, m) }
+          }
+          const partsTitle = Object.entries(teile).filter(([, v]) => v >= 0.005).map(([k, v]) => k + ' ' + walNf.format(v)).join(' · ')
+          const chips = ws.map(w => {
+            const c = WAL_CHAINS[w.chain], v = bal(w)
+            return `<span class="wal-chip" data-wal-tx="${w.id}" title="${escapeHtml(c.label)}: letzte Transfers dieser Chain">`
+              + `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col}"></span>`
+              + `<span class="wal-chip-n">${escapeHtml(WAL_KURZ[w.chain] || c.label)} ${v != null ? walNf.format(v) : (walBal.get(w.id)?.err ? '<span style="color:var(--danger)">Fehler</span>' : '–')}</span>`
+              + `<button type="button" class="wal-del" data-id="${w.id}" title="${escapeHtml(c.label)}-Eintrag dieser Adresse entfernen" style="border:none;background:none;color:var(--sub);cursor:pointer">×</button></span>`
+          }).join('')
+          // Zwilling fehlt? nur Ethereum ↔ Arbitrum (die beiden, die wir nutzen)
+          const hat = new Set(ws.map(w => w.chain))
+          const twin = c0.evm && (hat.has('ethereum') || hat.has('arbitrum')) ? WAL_IMMER.find(ch => !hat.has(ch)) : null
+          const twinBtn = twin ? ` <button type="button" class="wal-twin" data-id="${w0.id}" data-chain="${twin}" title="Gleiche Adresse auch auf ${escapeHtml(WAL_CHAINS[twin].label)} eintragen">+ ${escapeHtml(WAL_CHAINS[twin].label)}</button>` : ''
+          const tr = document.createElement('tr')
+          tr.dataset.wid = w0.id
+          tr.style.cursor = 'pointer'
+          tr.title = 'Klicken: letzte Transfers dieser Wallet (' + c0.label + ')'
+          if(ws.some(w => walTxSel === w.id)) tr.style.background = 'color-mix(in srgb, var(--violet) 7%, transparent)'
+          tr.innerHTML =
+            `<td>${label ? '<span class="wal-label"></span>' : ''}<span style="color:var(--sub);font-size:12px">${escapeHtml(ws.length > 1 ? 'EVM' : c0.label)}</span></td>` +
+            `<td>${chips}${twinBtn}</td>` +
+            `<td><button type="button" class="wal-addr" data-full="${escapeHtml(w0.address)}" title="${escapeHtml(w0.address)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
+            ` <a href="${c0.explorer(w0.address)}" target="_blank" rel="noopener" title="Im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
+            `<td class="adm-num"${partsTitle ? ' title="' + escapeHtml(partsTitle) + '"' : ''}>${stab != null ? walNf.format(stab) : (err ? '<span title="' + escapeHtml(err) + '" style="color:var(--danger)">Fehler</span>' : '–')}</td>` +
+            `<td class="adm-num">${coins.size ? [...coins.entries()].map(([sym, m]) => coinNf.format(m.n) + ' ' + escapeHtml(sym) + ' <span style="color:var(--sub)">≈ ' + (m.da ? walNf.format(m.usdt) : '–') + '</span>').join('<br>') : '–'}</td>` +
+            `<td class="adm-num" style="font-weight:650">${gesamt != null ? walNf.format(gesamt) : '–'}</td>` +
+            '<td></td>'
+          if(label) tr.querySelector('.wal-label').textContent = label
+          tb.appendChild(tr)
+        }
       }
       walFeedRender()   // Alle-Transfers-Feed folgt demselben Personen-Filter (15.09.2026)
     }
@@ -19288,35 +19351,81 @@
         `<text x="${W - padR}" y="${Math.max(padT + 8, y(series[series.length - 1]) - 8).toFixed(1)}" font-size="11" font-weight="600" fill="var(--ink)" text-anchor="end">${walNf.format(series[series.length - 1])}</text>`
     }
 
+    // Chain aus der Adresse raten (29.10.2026): T… = Tron, Base58 = Solana, 0x… = Ethereum + Arbitrum (eine eigens gewählte EVM-Chain bleibt)
+    function walAddChainRaten(){
+      const a = ($('wal-add-address').value || '').trim(), sel = $('wal-add-chain'); if(!a || !sel) return
+      if(/^0x/i.test(a)){ if(!WAL_CHAINS[sel.value]?.evm && sel.value !== 'evm') sel.value = 'evm' }
+      else if(WAL_CHAINS.tron.valid(a)) sel.value = 'tron'
+      else if(WAL_CHAINS.solana.valid(a)) sel.value = 'solana'
+    }
+    // Zeilen schreiben, Label nur, wenn die Spalte existiert (sql/2026-10-29_meta_wallet_label.sql) — sonst ohne und mit Hinweis
+    async function walInsert(zeilen){
+      const ohneSpalte = e => e && (e.code === 'PGRST204' || /'label' column/i.test(e.message || ''))
+      let { error } = await supabase.from('id_wallets').insert(zeilen)
+      let hinweis = ''
+      if(ohneSpalte(error) && zeilen.some(z => 'label' in z)){
+        ;({ error } = await supabase.from('id_wallets').insert(zeilen.map(z => { const k = { ...z }; delete k.label; return k })))
+        hinweis = 'Name nicht gespeichert: Spalte label fehlt noch (sql/2026-10-29_meta_wallet_label.sql).'
+      }
+      // UNIQUE(chain, address) — z. B. bei einer ausgeblendeten ID (Emin-Gruppe, hier nicht sichtbar) schon eingetragen; der Insert ist atomar
+      if(error && error.code === '23505') throw new Error('Adresse ist schon bei einer anderen (ausgeblendeten) ID eingetragen — nichts gespeichert.')
+      if(error) throw error
+      return hinweis
+    }
     async function walAdd(){
       const msgEl = $('wal-add-msg')
-      msgEl.textContent = ''
+      msgEl.textContent = ''; msgEl.style.color = ''
       const person = ($('wal-add-person').value || '').trim()
-      const chain = $('wal-add-chain').value
+      const wahl = $('wal-add-chain').value
       const address = ($('wal-add-address').value || '').trim()
-      const c = WAL_CHAINS[chain]
+      const label = ($('wal-add-label')?.value || '').trim()
+      // „Ethereum + Arbitrum" = zwei Zeilen mit derselben Adresse (29.10.2026); jede andere Wahl wie bisher eine
+      const chains = wahl === 'evm' ? WAL_IMMER.slice() : [wahl]
+      const c = WAL_CHAINS[chains[0]]
       if(!person){ msgEl.textContent = 'Person fehlt.'; $('wal-add-person').focus(); return }
       if(!c.valid(address)){
-        msgEl.textContent = `Das sieht nicht nach einer ${c.label}-Adresse aus — erwartet: ${c.hint}.`
+        msgEl.textContent = `Das sieht nicht nach einer ${wahl === 'evm' ? 'Ethereum/Arbitrum' : c.label}-Adresse aus — erwartet: ${c.hint}.`
         $('wal-add-address').focus(); return
       }
-      if(wallets.some(w => w.chain === chain && w.address.toLowerCase() === address.toLowerCase())){
-        msgEl.textContent = 'Diese Adresse ist schon eingetragen.'; return
-      }
+      const vorhanden = wallets.filter(w => chains.includes(w.chain) && w.address.toLowerCase() === address.toLowerCase())
+      // dieselbe Adresse bei einer anderen Person → nicht still einer zweiten Person zuordnen (Gegenprüfung 29.10.2026)
+      const fremd = vorhanden.find(w => String(w.person_name || '').toLowerCase() !== person.toLowerCase())
+      if(fremd){ msgEl.textContent = `Diese Adresse gehört schon ${fremd.person_name} (${WAL_CHAINS[fremd.chain]?.label || fremd.chain}) — nichts gespeichert.`; return }
+      const neu = chains.filter(ch => !vorhanden.some(w => w.chain === ch))
+      if(!neu.length){ msgEl.textContent = 'Diese Adresse ist schon eingetragen.'; return }
       // user_id des Profils mitschreiben, wenn der Name bekannt ist (Admin-Übersicht/Profile)
       const uid = (admData?.people || []).find(p => p.name?.toLowerCase() === person.toLowerCase())?.user_id
         || (typeof profList === 'function' ? profList() : []).find(p => p?.name?.toLowerCase() === person.toLowerCase())?.userId
         || null
       const btn = $('wal-add'); btn.disabled = true
       try{
-        const { error } = await supabase.from('id_wallets').insert({ person_uid: uid, person_name: person, chain, address })
-        if(error) throw error
-        $('wal-add-address').value = ''
+        const hinweis = await walInsert(neu.map(chain => Object.assign({ person_uid: uid, person_name: person, chain, address }, label ? { label } : {})))
+        $('wal-add-address').value = ''; if($('wal-add-label')) $('wal-add-label').value = ''
+        msgEl.style.color = 'var(--sub)'   // Hinweise grau, Fehler bleiben rot (unten zurückgesetzt)
+        if(hinweis){ msgEl.textContent = hinweis }
+        else if(neu.length < chains.length) msgEl.textContent = `${WAL_CHAINS[chains.find(ch => !neu.includes(ch))].label} war schon eingetragen — ${neu.map(ch => WAL_CHAINS[ch].label).join(' + ')} ergänzt.`
         await walLoad()
         walRefreshBalances().then(() => walFeedLoad(false))   // nur die neue Wallet fehlt im Feed
       }catch(e){
         msgEl.textContent = 'Konnte nicht speichern: ' + (e.message || e)
       }finally{ btn.disabled = false }
+    }
+    // „+ Arbitrum"/„+ Ethereum" (29.10.2026, Finn: bestehende Einträge nicht von selbst umschreiben) — nur auf Klick: dieselbe Person,
+    // Adresse, user_id und derselbe Name als Zeile auf der anderen Chain
+    let walZwillingLaeuft = false
+    async function walZwilling(id, chain){
+      const w = wallets.find(x => String(x.id) === String(id)), c = WAL_CHAINS[chain]
+      if(!w || !c || !c.valid(w.address) || walZwillingLaeuft) return
+      if(wallets.some(x => x.chain === chain && x.address.toLowerCase() === w.address.toLowerCase())){ walRender(); return }
+      if(!confirm(`${w.person_name}: dieselbe Adresse auch auf ${c.label} eintragen?\n${w.address}`)) return
+      walZwillingLaeuft = true
+      try{
+        const hinweis = await walInsert([Object.assign({ person_uid: w.person_uid || null, person_name: w.person_name, chain, address: w.address }, w.label ? { label: w.label } : {})])
+        if(hinweis){ $('wal-add-msg').style.color = 'var(--sub)'; $('wal-add-msg').textContent = hinweis }
+        await walLoad()
+        walRefreshBalances().then(() => walFeedLoad(false))
+      }catch(e){ $('wal-add-msg').style.color = ''; $('wal-add-msg').textContent = 'Konnte nicht speichern: ' + (e.message || e) }
+      finally{ walZwillingLaeuft = false }
     }
 
     async function walDelete(id){
@@ -20924,6 +21033,8 @@
       $('wal-person')?.addEventListener('change', walRender)
       $('wal-add')?.addEventListener('click', walAdd)
       $('wal-add-address')?.addEventListener('keydown', e => { if(e.key === 'Enter') walAdd() })
+      $('wal-add-address')?.addEventListener('input', walAddChainRaten)   // 29.10.2026: Chain aus der Adresse
+      $('wal-add-label')?.addEventListener('keydown', e => { if(e.key === 'Enter') walAdd() })
       // Adress-Kopieren gilt in der Wallet- UND der Transfer-Tabelle (gleiche .wal-addr-Knöpfe)
       const walAddrKopieren = ad => {
         if(!navigator.clipboard) return
@@ -20936,6 +21047,10 @@
       $('wal-rows')?.addEventListener('click', ev => {
         const del = ev.target.closest('.wal-del')
         if(del){ walDelete(del.dataset.id); return }
+        const tw = ev.target.closest('.wal-twin')   // „+ Arbitrum"/„+ Ethereum" (29.10.2026)
+        if(tw){ walZwilling(tw.dataset.id, tw.dataset.chain); return }
+        const ch = ev.target.closest('[data-wal-tx]')   // Chain-Betrag: Transfers genau dieser Chain
+        if(ch){ const w = wallets.find(x => String(x.id) === String(ch.dataset.walTx)); if(w) walTxOpen(w); return }
         const ad = ev.target.closest('.wal-addr')
         if(ad){ walAddrKopieren(ad); return }
         if(ev.target.closest('a')) return   // Explorer-Link bleibt Explorer-Link
@@ -49340,7 +49455,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1838'
+  const OS_TAB_BUILD = '2026-09-22.1839'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
