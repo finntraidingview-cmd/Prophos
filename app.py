@@ -18035,6 +18035,17 @@ def pc_tv_konten_auftrag_erledigt():
                             headers=_sb_headers("resolution=merge-duplicates,return=minimal"))
             _sb_pruefen(r)
         erg = {"n": len(zeilen), "msg": str(b.get("msg") or "")[:300], "code": str(b.get("code") or "")[:40], "pc_id": pc}
+        # Spur + Fehlerfoto (Master/Finn 29.10.2026: „bei jedem Fehler Spur und Foto"): Bot-trail (≤ 2000 Zeichen) und fehlerbild-Pfad
+        # (<pc>/<JJJJ-MM-TT>/<id>, Bucket puls-fehlerbilder) ins ergebnis — nur kurze Texte, Pfad nur in der bekannten Form
+        tr = str(b.get("trail") or "")[-2000:]
+        if tr:
+            erg["trail"] = tr
+        fb = str(b.get("fehlerbild") or "").strip()
+        if re.fullmatch(r"[a-z0-9-]{3,24}/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_.-]{4,60}", fb):
+            erg["fehlerbild"] = fb
+        sch = str(b.get("schritt") or "")[:40]
+        if sch:
+            erg["schritt"] = sch
         if b.get("ok"):
             body = {"status": "erledigt", "erledigt_at": jetzt, "ergebnis": erg}
         elif str(b.get("code") or "") == "belegt":

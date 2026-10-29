@@ -26385,9 +26385,13 @@
       a = ((await r.json()) || {}).auftrag
     }catch(_){ return }
     if(!a || !a.id) return
-    const melden = async (ok, konten, msg, code) => {
+    // Spur + Fehlerfoto (Master/Finn 29.10.2026: „bei jedem Fehler Spur und Foto"): trail (letzte 2000 Zeichen) und fehlerbild-Pfad des Bots
+    // reisen mit und landen in tv_konten_auftrag.ergebnis
+    const melden = async (ok, konten, msg, code, lauf) => {
+      const tr = lauf && lauf.trail != null ? (Array.isArray(lauf.trail) ? lauf.trail.join(' > ') : String(lauf.trail)) : ''
       try{ await fetch(`${WATCHER_HOME}/pc/tv-konten-auftrag/erledigt`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: a.id, ok: !!ok, konten: konten || [], msg: String(msg || '').slice(0, 300), code: code || '', pc_id: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '' }) }) }catch(_){}
+        body: JSON.stringify({ id: a.id, ok: !!ok, konten: konten || [], msg: String(msg || '').slice(0, 300), code: code || '', pc_id: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
+          trail: tr.slice(-2000), fehlerbild: lauf && lauf.fehlerbild ? String(lauf.fehlerbild).slice(0, 120) : '', schritt: lauf && lauf.schritt ? String(lauf.schritt).slice(0, 40) : '' }) }) }catch(_){}
     }
     // zweiter Blick NACH dem Holen (zwischen Tick und Antwort kann ein Start losgelaufen sein) — dann zurückgeben (Fehler zählt als Versuch? nein: code 'belegt')
     const nachher = tvkFrei()
@@ -26407,7 +26411,7 @@
     _tvkLetzter = { at: new Date().toISOString(), firma: a.firma, art: a.art, ok: !!(r && r.ok), n: ((r && r.konten) || []).length, ms: Date.now() - t0,
       code: (r && r.code) || '', msg: String((r && r.msg) || '').slice(0, 200) }
     console.info(`[tv-konten] ${a.firma} (${a.art}): ${r && r.ok ? `${(r.konten || []).length} Name(n)` : `FEHLER ${(r && r.code) || '?'}`} in ${((Date.now() - t0) / 1000).toFixed(0)} s`, (r && r.msg) || '')
-    await melden(!!(r && r.ok), (r && r.konten) || [], (r && r.msg) || '', (r && r.code) || '')
+    await melden(!!(r && r.ok), (r && r.konten) || [], (r && r.msg) || '', (r && r.code) || '', r)
     // Heimweg wie nach jeder Puls-Aktion (gibt es keinen Big Trade/WD, kehrt bigTradeHeimPlanen sofort zurück)
     try{ bigTradeHeimPlanen(a.ext || '', 'TV-Konten lesen', true, 'tv') }catch(_){}
   }
