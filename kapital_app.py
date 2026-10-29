@@ -11,6 +11,8 @@ EZB-Tageskurs (frankfurter.dev, 6 h gemerkt; Rückfall Prophos-Kurs user_setting
 Geschäftskonto in EUR. Account-Käufe zählen mit dem in Prophos gebuchten €-Betrag; dass on-chain in USDT bezahlt wurde, liegt als Kurs- und
 CoinPayments-Abweichung in der Toleranz.
 
+  Seit 29.10.2026 (Finn 06:45): Kontowerte = Kauf + Hedge-Verluste je laufender Kette ohne Payout-Abzug, Soll mit Payouts laufender Ketten
+  statt Gewinnen im Plus (Abweichung unverändert) — Details in bilanz_rechnen. Die Zeilen unten beschreiben den Stand davor.
   Ist („insgesamt geparkt") = Wallets der Gruppe (letzter wallet_snapshots-Tag je Wallet, inkl. Kasse 0xc27c…)
          + Fusion (live aus mt5_live: Equity, je hedge_login nur einmal, Zeile ≤ 1 h alt; sonst Hand-Eingabe kapital_fusion)
          + Geschäftskonto (Σ kapital_gk_buchungen)
@@ -63,6 +65,11 @@ ERKLAERT_REIN = {"Payout", "Payout Prop-Firm", "Swap", "Fusion Deposit", "Intern
 GK_KONTO_KAUF = "Konto-Kauf (in Prophos)"
 GK_NEUTRAL = {"Umbuchung Krypto", GK_KONTO_KAUF}
 GK_KATEGORIEN = ["Anfangsstand", "Kundenzahlung", "PC-Kauf", "Ausgabe", "Einlage", "Entnahme", "Umbuchung Krypto", "Sonstiges"]
+# „Weitere Posten" (29.10.2026, Finn: „Geschäftskonto und andere Werte will ich ohne Google Sheet einfach in einer Liste von Hand
+# eintragen"): je Zeile in kapital_gk_buchungen ein Stand (Name = text, Betrag = aktueller Wert). Kategorie „Geschäftskonto" oder
+# „Sonstiges"; „Sonstiges" steht im Ist als eigener Teil (Chart-Quelle), alle übrigen Kategorien zählen als Geschäftskonto.
+GK_POSTEN_KATEGORIEN = ["Geschäftskonto", "Sonstiges"]
+GK_SONSTIGES = "Sonstiges"
 TOLERANZ_MIN = 250.0
 TOLERANZ_ANTEIL = 0.03         # Kurs-/CoinPayments-Aufschläge auf die Account-Käufe
 FUSION_FRISCH_S = 3600         # mt5_live-Zeile älter → Hand-Eingabe
@@ -246,8 +253,13 @@ def bilanz_rechnen(ketten, snaps, fusion_live, fusion_hand, einlagen, tx, labels
     # ── Konten (Ketten) ──
     lauf = [k for k in ketten if not k.get("archiviert")]
     ende = [k for k in ketten if k.get("archiviert")]
-    konten = sum(max(0.0, _num(k.get("gk_eur"))) for k in lauf)
-    plus_lauf = sum(max(0.0, -_num(k.get("gk_eur"))) for k in lauf)
+    # KONTOWERT NEU (29.10.2026, Finn 06:45: „Ein Emin-Konto, das schon 2,5k Payout gebracht hat, fällt dadurch auf 0 und verschwindet aus dem
+    # Unternehmenswert, obwohl das Konto noch da ist und Geld bringt"): je laufender Kette Kauf + bisherige Hedge-Verluste (kauf_eur + hedge_eur,
+    # = calcReingesteckdEur mit WD-Hedge, aber ohne netPayouts), OHNE Payout-Abzug und ohne 0-Kappung — die Payouts stecken schon als Geld in
+    # Wallets/Geschäftskonto/Weiteren Posten bzw. als offene Payouts. Geblowte (archivierte) Ketten zählen 0. Bis 28.10.: Σ max(0, gk_eur).
+    konten = sum(_num(k.get("kauf_eur")) + _num(k.get("hedge_eur")) for k in lauf)
+    konten_netto_alt = sum(max(0.0, _num(k.get("gk_eur"))) for k in lauf)          # alte Regel, nur zum Vergleich in der Antwort
+    po_lauf = sum(_num(k.get("payouts_eur")) for k in lauf)
     reibung = sum(max(0.0, _num(k.get("gk_eur"))) for k in ende)
     gewinn_ende = sum(max(0.0, -_num(k.get("gk_eur"))) for k in ende)
     kauf = sum(_num(k.get("kauf_eur")) for k in ketten)
@@ -274,6 +286,7 @@ def bilanz_rechnen(ketten, snaps, fusion_live, fusion_hand, einlagen, tx, labels
     # ── Geschäftskonto ──
     gk = gk or []
     gk_saldo = sum(eur(b.get("betrag"), b.get("waehrung") or "EUR") for b in gk)
+    sonstiges = sum(eur(b.get("betrag"), b.get("waehrung") or "EUR") for b in gk if (b.get("kategorie") or "") == GK_SONSTIGES)
     gk_soll = sum(eur(b.get("betrag"), b.get("waehrung") or "EUR") for b in gk if (b.get("kategorie") or "") not in GK_NEUTRAL)
     gk_rein = sum(eur(b.get("betrag"), b.get("waehrung") or "EUR") for b in gk
                   if (b.get("kategorie") or "") not in GK_NEUTRAL and _num(b.get("betrag")) > 0)
@@ -341,16 +354,20 @@ def bilanz_rechnen(ketten, snaps, fusion_live, fusion_hand, einlagen, tx, labels
     einlagen_eur = sum(eur(e.get("betrag"), e.get("waehrung") or "EUR") for e in einlagen)
     wallets = eur(wallets_usd)
     ist = wallets + (fus["eur"] if fus else 0.0) + gk_saldo + konten + offen
-    soll = einlagen_eur - reibung + gewinn_ende + plus_lauf - krypto_reibung - eur(ausschuett) + gk_soll
+    # Soll passend zum neuen Kontowert: statt „Gewinne der laufenden Ketten im Plus" die Payouts der laufenden Ketten (inkl. beantragter) —
+    # die Abweichung bleibt rechnerisch dieselbe wie mit der alten Konten-Regel (je Kette: Ist kauf+hedge, Soll +payouts).
+    soll = einlagen_eur - reibung + gewinn_ende + po_lauf - krypto_reibung - eur(ausschuett) + gk_soll
     abw = ist - soll
     toleranz = max(TOLERANZ_MIN, TOLERANZ_ANTEIL * kauf)
     return {
         "ist": {"summe": r2(ist), "wallets": r2(wallets), "wallets_usd": r2(wallets_usd), "wallets_tag": wallets_tag,
                 "wallets_n": len(snaps), "fusion": fus, "geschaeftskonto": r2(gk_saldo), "gk_n": len(gk),
+                "gk_konto": r2(gk_saldo - sonstiges), "sonstiges": r2(sonstiges),
                 "konten": r2(konten), "konten_n": len(lauf), "konten_plus_n": sum(1 for k in lauf if _num(k.get("gk_eur")) < 0),
+                "konten_regel": "kauf_plus_hedge", "konten_netto_alt": r2(konten_netto_alt),
                 "payouts_offen": r2(offen), "payouts_offen_n": len(offene or [])},
         "soll": {"summe": r2(soll), "einlagen": r2(einlagen_eur), "einlagen_n": len(einlagen),
-                 "reibung": r2(reibung), "beendet_n": len(ende), "gewinne": r2(gewinn_ende + plus_lauf),
+                 "reibung": r2(reibung), "beendet_n": len(ende), "gewinne": r2(gewinn_ende), "payouts_lauf": r2(po_lauf),
                  "krypto_reibung": r2(krypto_reibung), "gebuehren": r2(eur(gebuehren)), "swap_saldo": r2(eur(swap_raus - swap_rein)),
                  "ausschuettungen": r2(eur(ausschuett)), "geschaeftskonto": r2(gk_soll), "gk_einnahmen": r2(gk_rein),
                  "gk_ausgaben": r2(gk_rein - gk_soll)},
@@ -406,6 +423,30 @@ def _daten_lesen(gid):
             "einlagen": einl, "gk": gk, "tx": tx, "labels": labels, "adressen": adressen, "wallets_n": len(wallets), "offene": offene}
 
 
+def verlauf_quellen(ist):
+    """REIN RECHNEND: Teile eines gespeicherten Tageswerts (teile.ist) je Chart-Quelle (29.10.2026, Finn: „ein Chart, auf dem ich sehe, wie
+    viel auf Wallets, auf Fusion, auf Geschäftskonto, in Kontowerten und sonstigen Sachen steckt"). Tage vor dem Split kennen kein
+    gk_konto/sonstiges → Geschäftskonto = geschaeftskonto, Sonstiges = 0. Fusion kann fehlen (kein Stand) → 0."""
+    fus = ist.get("fusion") if isinstance(ist.get("fusion"), dict) else None
+    gk = _num(ist.get("geschaeftskonto"))
+    sonst = _num(ist.get("sonstiges")) if "sonstiges" in ist else 0.0
+    return {"wallets": round(_num(ist.get("wallets")), 2), "fusion": round(_num(fus.get("eur")) if fus else 0.0, 2),
+            "geschaeftskonto": round(_num(ist.get("gk_konto")) if "gk_konto" in ist else gk - sonst, 2),
+            "konten": round(_num(ist.get("konten")), 2), "payouts_offen": round(_num(ist.get("payouts_offen")), 2), "sonstiges": round(sonst, 2)}
+
+
+def verlauf_zeile(r):
+    """REIN RECHNEND: eine kapital_tageswerte-Zeile → Verlauf-Punkt. Rückblick-Zeilen (sql/2026-10-29_kapital_rueckblick.sql, teile.quelle
+    'rueckblick': nur Wallets + Kontowerte nachgerechnet, Fusion/GK/offene Payouts erst ab 29.10.) tragen rueckblick=True und kein Soll —
+    gelesen aus teile, damit es auch ohne die neue Spalte quelle geht."""
+    teile = r.get("teile") or {}
+    rueck = teile.get("quelle") == "rueckblick"
+    return {"tag": r["tag"], "ist": _num(r["ist_eur"]), "rueckblick": rueck,
+            "soll": None if rueck or r.get("soll_eur") is None else _num(r["soll_eur"]),
+            "abw": None if rueck or r.get("abweichung_eur") is None else _num(r["abweichung_eur"]),
+            "quellen": verlauf_quellen(teile.get("ist") or {})}
+
+
 def _tageswert_schreiben(gid, b):
     A["sb_upsert"]("kapital_tageswerte", {
         "gruppe_id": gid, "tag": _heute().isoformat(), "ist_eur": b["ist"]["summe"], "soll_eur": b["soll"]["summe"],
@@ -439,9 +480,9 @@ def kapital_fuer(gid, schreiben=True):
         "stand_text": q.get("stand_text") or "", "zeitraum_ab": q.get("zeitraum_ab"), "zeilen": q.get("zeilen"), "fehler": q.get("fehler") or "",
         "eingerichtet": bool((os.environ.get(GK_SHEET_SA_VAR) or "").strip())}
     b["gk_kategorien"] = GK_KATEGORIEN
-    b["verlauf"] = [{"tag": r["tag"], "ist": _num(r["ist_eur"]), "soll": _num(r["soll_eur"]), "abw": _num(r["abweichung_eur"])}
-                    for r in A["_sb_all"]("kapital_tageswerte", {"select": "tag,ist_eur,soll_eur,abweichung_eur",
-                                                                  "gruppe_id": f"eq.{gid}", "order": "tag.asc"})]
+    b["gk_posten_kategorien"] = GK_POSTEN_KATEGORIEN
+    b["verlauf"] = [verlauf_zeile(r) for r in A["_sb_all"]("kapital_tageswerte", {"select": "tag,ist_eur,soll_eur,abweichung_eur,teile",
+                                                                                  "gruppe_id": f"eq.{gid}", "order": "tag.asc"})]
     return b
 
 
@@ -602,6 +643,36 @@ def _loeschen(tabelle, body, erlaubt):
     return jsonify({"ok": True}) if weg else (jsonify({"ok": False, "error": "nicht gefunden"}), 404)
 
 
+def _gk_aendern(body, erlaubt):
+    """Posten inline bearbeiten (29.10.2026, „Weitere Posten"): {id, betrag?, kategorie?, text?, datum?} — nur Felder, die mitkommen; Zeile nur
+    in einer erlaubten Gruppe (Verwalter: seine), Betrag ≠ 0 wie beim Anlegen (Wert „0" = Zeile löschen)."""
+    eid = _uuid(body.get("id"))
+    if not eid:
+        return jsonify({"ok": False, "error": "id nötig"}), 400
+    neu = {}
+    if "betrag" in body:
+        betrag = _num(body.get("betrag"))
+        if betrag == 0:
+            return jsonify({"ok": False, "error": "betrag ≠ 0 nötig (0 = Posten löschen)"}), 400
+        neu["betrag"] = round(betrag, 2)
+    if "kategorie" in body:
+        neu["kategorie"] = str(body.get("kategorie") or "Sonstiges").strip()[:40] or "Sonstiges"
+    if "text" in body:
+        neu["text"] = str(body.get("text") or "").strip()[:300] or None
+    if "datum" in body:
+        datum = _datum(body.get("datum"))
+        if not datum:
+            return jsonify({"ok": False, "error": "datum JJJJ-MM-TT nötig"}), 400
+        neu["datum"] = datum
+    if not neu:
+        return jsonify({"ok": False, "error": "nichts zu ändern"}), 400
+    filt = {"id": f"eq.{eid}"}
+    if erlaubt is not None:
+        filt["gruppe_id"] = _in(erlaubt)               # Verwalter ändert nur Zeilen seiner Gruppe
+    geaendert = A["sb_update"]("kapital_gk_buchungen", filt, neu) or []
+    return jsonify({"ok": True, "buchung": geaendert[0]}) if geaendert else (jsonify({"ok": False, "error": "nicht gefunden"}), 404)
+
+
 def registrieren(app, ns):
     """Routen an die Flask-App hängen; auf Railway den Stunden-Takt starten (auf den PCs ist PROPHOS_FRONTEND gesetzt — dort nie)."""
     A.update(ns)
@@ -683,7 +754,7 @@ def registrieren(app, ns):
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
 
-    @app.route("/admin/kapital/gk", methods=["POST", "DELETE", "OPTIONS"])
+    @app.route("/admin/kapital/gk", methods=["POST", "PATCH", "DELETE", "OPTIONS"])
     def admin_kapital_gk():
         """Geschäftskonto-Buchung (Finn 29.10.2026: „wie in so einem Google-Sheet … Kunden bezahlen oder PCs kaufen")."""
         if request.method == "OPTIONS":
@@ -695,6 +766,8 @@ def registrieren(app, ns):
         try:
             if request.method == "DELETE":
                 return _loeschen("kapital_gk_buchungen", body, erlaubt)
+            if request.method == "PATCH":
+                return _gk_aendern(body, erlaubt)
             gid, betrag, datum = _uuid(body.get("gruppe")), _num(body.get("betrag")), _datum(body.get("datum"))
             w = str(body.get("waehrung") or "EUR").upper()
             kat = str(body.get("kategorie") or "Sonstiges").strip()[:40] or "Sonstiges"
