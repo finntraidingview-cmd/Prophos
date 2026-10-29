@@ -144,6 +144,34 @@ check(h6([{ text: 'EXPRESS-V2-679005-57119155 150,000.00 USD' }], 'EXPRESS-V2-67
 check(h6([{ text: 'QQQ261218C00500000' }, { text: 'SPXW261218P05000000' }], 'PAAPEX684332000000… 155,407.14 USD').length === 0,
       "kontenAusEintraegen: fremde offene Liste (Symbolsuche) → nichts, aktives Konto steht nicht drin");
 check(h6([{ text: 'PAAPEX6843320000001 USD' }], '').length === 0, "kontenAusEintraegen: ohne Umschalter-Text keine Liste (nicht beweisbar Konto-Liste)");
+// 0.10.0 LADER: alle Wege mit nachgebauten GM-Funktionen (setTimeout wird nur gemerkt, kein Netz)
+var laderSrc = src.slice(src.indexOf("(function prophosLader()"));
+function laderLauf(o) {
+  var spur = { kern: 0, info: null, gesetzt: [], netz: [] };
+  var store = { prophos_kern_v1: o.merk || null };
+  var fn = new Function("GM_getValue", "GM_setValue", "GM_xmlhttpRequest", "GM_registerMenuCommand", "unsafeWindow", "prophosKern", "setTimeout", "Function", "window",
+    laderSrc);
+  var Fn = o.evalGesperrt ? function () { throw new Error("EvalError: Refused to evaluate a string as JavaScript"); } : Function;
+  fn(function (k, d) { return k in store ? store[k] : d; }, function (k, v) { store[k] = v; spur.gesetzt.push(v); },
+     function (req) { spur.netz.push(req); }, function () {}, {}, function () { spur.kern++; spur.info = arguments[5]; },
+     function () {}, Fn, {});
+  spur.store = store; return spur;
+}
+var L1 = laderLauf({});
+check(L1.kern === 1 && L1.info.quelle === "eingebaut" && L1.info.eval === true && L1.info.laeuft === "0.10.0", "Lader: nichts gemerkt → eingebaute Fassung läuft genau einmal");
+var gelaufen = 0;
+var L2 = laderLauf({ merk: { version: "0.10.1", code: "globalThis.__laderInfo = PROPHOS_LADER;", sha: "x" } });
+var i2 = globalThis.__laderInfo;
+check(L2.kern === 0 && i2 && i2.quelle === "nachgeladen" && i2.laeuft === "0.10.1", "Lader: neuere gemerkte Fassung läuft statt der eingebauten (nie beide)");
+var L3 = laderLauf({ merk: { version: "0.10.1", code: "throw new Error('kaputt')", sha: "x" } });
+check(L3.kern === 1 && L3.info.quelle === "eingebaut" && L3.store.prophos_kern_v1 === null && /warf/.test(L3.info.fehler), "Lader: gemerkte Fassung wirft → eingebaute läuft, Merker gelöscht");
+var L4 = laderLauf({ merk: { version: "0.10.1", code: "}{ kein js", sha: "x" } });
+check(L4.kern === 1 && L4.store.prophos_kern_v1 === null && /nicht lesbar/.test(L4.info.fehler), "Lader: gemerkte Fassung nicht lesbar → eingebaute läuft, Merker gelöscht");
+var L5 = laderLauf({ merk: { version: "0.9.12", code: "PROPHOS_LADER.x = 1;", sha: "x" } });
+check(L5.kern === 1 && L5.info.quelle === "eingebaut", "Lader: gemerkte ÄLTERE Fassung wird nie gestartet");
+var L6 = laderLauf({ evalGesperrt: true, merk: { version: "0.10.1", code: "PROPHOS_LADER.x = 1;", sha: "x" } });
+check(L6.kern === 1 && L6.info.eval === false && L6.info.quelle === "eingebaut" && /eval gesperrt/.test(L6.info.fehler) && L6.store.prophos_kern_v1 !== null,
+      "Lader: eval gesperrt (MV3) → eingebaute Fassung, nichts nachgeladen");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;
 return aus.join("\n") + "\n" + (fehl ? "FEHLER (" + fehl + ")" : "alle Tests bestanden");
 }

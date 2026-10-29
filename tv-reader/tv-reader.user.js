@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.9.13
+// @version      0.10.0
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,15 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.0 29.10.2026  LADER (Finn 05:20: „dass das Tampermonkey-Script in Zukunft immer automatisch und schneller aktualisiert wird —
+//                      es dauert ewig"; Befund: kein Puls-PC auf 0.9.11/0.9.12, zwei noch auf 0.9.7 vom 05.10. — Tampermonkey zieht
+//                      @updateURL praktisch nie). Die Datei ist jetzt Lader + eingebauter Kern: der Kern (zwischen KERN-START und
+//                      KERN-ENDE) ist der bisherige Reader UNVERAENDERT (Leer-Beweis/Schliess-Logik 0.9.12 Zeichen fuer Zeichen), nur in
+//                      die Funktion prophosKern gelegt und mit dem Feld „lader" im Positions-Payload. Der Lader holt im Hintergrund
+//                      http://127.0.0.1:8790/userscript/kern.json (eigener reader-server, der die Datei von Railway holt), prueft SHA-256
+//                      und merkt eine NEUERE Fassung in GM_setValue; beim naechsten Laden des Tabs laeuft sie (new Function in der
+//                      Tampermonkey-Sandbox). eval gesperrt (MV3), nichts gemerkt oder Fehler → die eingebaute Fassung, nie schlechter
+//                      als vorher. Stand im Payload: lader {v, eval, laeuft, quelle, bereit, fehler}.
 //   0.9.13 29.10.2026  Konto-Liste an Prophos (Finn 03:10: „Konten automatisch anlegen ueber das Konto-Dropdown in TradingView — fast
 //                      noch besser als Mail"): konto.konten_liste im Bedienfeld = volle Kontonamen aus der OFFENEN Konto-Liste (nur wenn
 //                      Puls oder Finn sie ohnehin geoeffnet hat — das Script klickt nie) plus der volle Umschalter-Name; gekuerzte „…"-Namen
@@ -142,6 +151,10 @@
 //   0.4.0  01.09.2026  textContent statt innerText, Blind-Pruefung, Worker-Takt.
 //   0.3.x  30./31.08.  Bedienfeld, Kompakt-Dump, Spaltentitel-Listen.
 
+/* ══ LADER 0.10.0 (29.10.2026, s. CHANGELOG): prophosKern ist der eigentliche Reader. Alles zwischen den Markern KERN-START und KERN-ENDE
+ * holt der Lader neuer nach (reader-server /userscript/kern.json) — die Marker nie verschieben oder doppeln (Selbsttest prueft sie). ══ */
+function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMenuCommand, unsafeWindow, PROPHOS_LADER) {
+// ==KERN-START==
 (function () {
   'use strict';
 
@@ -152,7 +165,7 @@
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.9.13';
+  const VERSION    = '0.10.0';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1645,6 +1658,8 @@
     } : { positionen_quelle: 'feed' };
     const payload = JSON.stringify(Object.assign({
       ts: Date.now(), version: VERSION, tab_id: TAB_ID, rolle,
+      // 0.10.0: Lader-Stand (welche Fassung laeuft, eval moeglich, neuere bereit) — fuer Version-Wache und Neuladen-Anstoss
+      lader: (typeof PROPHOS_LADER !== 'undefined' && PROPHOS_LADER) ? Object.assign({}, PROPHOS_LADER) : null,
       sichtbar: document.visibilityState === 'visible',
       // 0.6.0 (24.09.2026, Winning-Day-Gegenhedge auf Fusion — Finn: „auf einem PC,
       // der 24/7 laeuft, per Reader immer in Echtzeit die aktuellen NQ-/MNQ-Punkte
@@ -1721,4 +1736,70 @@
   const start = () => { starteTakt(); tick(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
+})();
+// ==KERN-ENDE==
+}
+
+(function prophosLader() {
+  'use strict';
+  const LADER_V = 1;
+  const EINGEBAUT = '0.10.0';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
+  const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
+  const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
+  // REIN RECHNEND: '0.10.0' > '0.9.12' (Zahl je Stelle)
+  function neuer(a, b) {
+    const x = String(a || '').split('.').map(Number), y = String(b || '').split('.').map(Number);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      const d = (x[i] || 0) - (y[i] || 0);
+      if (d) return d > 0;
+    }
+    return false;
+  }
+  let evalOk = false;
+  try { evalOk = new Function('return 1')() === 1; } catch (e) { info.fehler = 'eval gesperrt: ' + String((e && e.message) || e).slice(0, 80); }
+  info.eval = evalOk;
+  const PARAM = ['GM_xmlhttpRequest', 'GM_getValue', 'GM_setValue', 'GM_registerMenuCommand', 'unsafeWindow', 'PROPHOS_LADER'];
+  const gm = () => [GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMenuCommand, (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window)];
+  let laeuft = false;
+  if (evalOk) {
+    let m = null;
+    try { m = GM_getValue(MERK, null); } catch (_) {}
+    if (m && typeof m.code === 'string' && m.version && neuer(m.version, EINGEBAUT)) {
+      let fn = null;
+      try { fn = new Function(...PARAM, m.code); } catch (e) { info.fehler = 'gemerkte Fassung ' + m.version + ' nicht lesbar: ' + String((e && e.message) || e).slice(0, 80); }
+      if (fn) {
+        info.laeuft = m.version; info.quelle = 'nachgeladen';
+        try { fn(...gm(), info); laeuft = true; }
+        catch (e) { info.laeuft = EINGEBAUT; info.quelle = 'eingebaut'; info.fehler = 'gemerkte Fassung ' + m.version + ' warf: ' + String((e && e.message) || e).slice(0, 80); }
+      }
+      if (!laeuft) { try { GM_setValue(MERK, null); } catch (_) {} }   // kaputte Fassung nie wieder starten
+    }
+  }
+  if (!laeuft) prophosKern(...gm(), info);
+  if (!evalOk) return;                          // ohne eval nie etwas nachladen — die eingebaute Fassung bleibt
+  // Hintergrund: neuere Fassung vom eigenen reader-server holen, pruefen, fuer das NAECHSTE Laden merken (nie zwei Kerne in einer Seite)
+  async function sha256(t) {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+    return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  function holen() {
+    try {
+      GM_xmlhttpRequest({ method: 'GET', url: KERN_URL, timeout: 8000, onload: async (r) => {
+        try {
+          if (r.status !== 200) { info.fehler = 'kern.json HTTP ' + r.status; return; }
+          const j = JSON.parse(r.responseText);
+          if (!j || typeof j.kern !== 'string' || !j.version || !/^[0-9a-f]{64}$/.test(String(j.sha || ''))) { info.fehler = 'kern.json unvollstaendig'; return; }
+          if (!neuer(j.version, info.laeuft)) { info.bereit = null; return; }   // nichts Neues
+          if ((await sha256(j.kern)) !== j.sha) { info.fehler = 'Pruefsumme passt nicht (' + j.version + ')'; return; }
+          try { new Function(...PARAM, j.kern); } catch (e) { info.fehler = 'Fassung ' + j.version + ' nicht lesbar'; return; }
+          GM_setValue(MERK, { version: j.version, sha: j.sha, code: j.kern, at: Date.now() });
+          info.bereit = j.version; info.fehler = '';
+        } catch (e) { info.fehler = 'kern.json: ' + String((e && e.message) || e).slice(0, 80); }
+      }, onerror: () => { info.fehler = 'reader-server nicht erreichbar (kern.json)'; } });
+    } catch (e) { info.fehler = 'holen: ' + String((e && e.message) || e).slice(0, 80); }
+  }
+  // gestreut (Jitter-Regel): erster Blick 10–40 s nach dem Laden, dann alle 20–40 min
+  const naechster = (a, b) => a + Math.random() * (b - a);
+  setTimeout(function takt() { holen(); setTimeout(takt, naechster(20 * 60000, 40 * 60000)); }, naechster(10000, 40000));
 })();

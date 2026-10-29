@@ -8,6 +8,7 @@ sichtbarem Tab) und die Stale-Ausgabe (Userscript-Urteil ODER Alter > 45 s)."""
 import importlib.util
 import os
 import sys
+import re
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -483,6 +484,17 @@ Aktive Verbindungen
     for _ in range(10):
         rs.tv_konten_fehler_sperre(f, 0.0)
     check(f["sperre_bis"] == rs.TVK_FEHLER_MAX_S, "TV-Konten: Fehler-Pause hoechstens 30 min")
+    # 0.10.0 LADER: Kern aus der echten Userscript-Datei schneiden
+    import hashlib as _hl
+    _us = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tv-reader.user.js"), encoding="utf-8").read()
+    kj = rs.kern_aus_userscript(_us)
+    _ver = re.search(r"@version\s+([0-9.]+)", _us).group(1)
+    check(kj is not None and kj["version"] == _ver and kj["sha"] == _hl.sha256(kj["kern"].encode("utf-8")).hexdigest()
+          and kj["kern"].lstrip().startswith("(function () {") and "function leerBeweis" in kj["kern"] and "prophosLader" not in kj["kern"],
+          "Lader: Kern aus der Datei = Reader ohne Lader, Version wie @version, SHA-256 stimmt")
+    check(rs.kern_aus_userscript(_us.replace("// ==KERN-ENDE==", "")) is None and rs.kern_aus_userscript(_us + "\n// ==KERN-START==\n") is None
+          and rs.kern_aus_userscript(b"") is None, "Lader: fehlende/doppelte Marker → None (nie ein halber Kern)")
+    check(re.search(r"const EINGEBAUT = '([0-9.]+)'", _us).group(1) == _ver, "Lader: EINGEBAUT = @version = VERSION im Kern")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1

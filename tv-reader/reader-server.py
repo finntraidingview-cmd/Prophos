@@ -1227,6 +1227,17 @@ class Handler(BaseHTTPRequestHandler):
                              "aufloesung_warnung": _aufl_warnung, "modus": _kerzen_modus, "delay_s": _kerzen_delay_s})
             return
 
+        # LADER (0.10.0, 29.10.2026): GET /userscript/kern.json → {version, sha, kern} — das Stück zwischen KERN-START/KERN-ENDE aus der
+        # aktuellen tv-reader.user.js (Railway, Feed-Schlüssel dieses PCs), SHA-256 über den Kern. Der Lader im Puls-Chrome merkt eine
+        # neuere Fassung und fährt sie beim nächsten Laden des Tabs. 60 s gemerkt (jeder Tab fragt alle 20–40 min, nie im Sekundentakt).
+        if self.path.split("?")[0] == "/userscript/kern.json":
+            antwort = kern_json_holen()
+            if antwort is None:
+                self._json(502, {"ok": False, "msg": "Userscript nicht ladbar (kein Schlüssel / Railway nicht erreichbar / Marker fehlen)"})
+            else:
+                self._json(200, antwort)
+            return
+
         # Userscript-Update (07.10.2026, Repo privat): Tampermonkey fragt @updateURL ohne Schlüssel — der Reader holt die Datei
         # mit dem Feed-Schlüssel dieses PCs bei Railway und reicht sie durch. Nur diese eine Datei.
         if self.path.split("?")[0] in ("/userscript/tv-reader.user.js", "/userscript/tv-reader.meta.js"):
@@ -1600,6 +1611,36 @@ def _diagnose_senden(rolle):
 # CODE-QUELLE RAILWAY (07.10.2026, Repo privat): zuerst Railway mit dem Feed-Schlüssel dieses PCs (feed_token.txt — derselbe
 # signierte Schlüssel uid.pc.sig, den Railway als X-Code-Token annimmt), GitHub nur noch als Rückfall.
 CODE_QUELLE = "https://web-production-bec81.up.railway.app"
+
+
+def kern_aus_userscript(text):
+    """REIN RECHNEND (testbar): ganze tv-reader.user.js → {version, sha, kern} oder None. Kern = alles zwischen den Zeilen
+    „// ==KERN-START==" und „// ==KERN-ENDE==" (je genau einmal), Version aus const VERSION im Kern, sha = SHA-256 (hex) über den Kern."""
+    import hashlib
+    t = text.decode("utf-8") if isinstance(text, (bytes, bytearray)) else str(text or "")
+    a, e = "// ==KERN-START==\n", "// ==KERN-ENDE=="
+    if t.count(a) != 1 or t.count(e) != 1 or t.index(a) > t.index(e):
+        return None
+    kern = t[t.index(a) + len(a):t.index(e)]
+    m = re.search(r"const VERSION\s*=\s*'([0-9][0-9.]{2,20})'", kern)
+    if not m:
+        return None
+    return {"ok": True, "version": m.group(1), "sha": hashlib.sha256(kern.encode("utf-8")).hexdigest(), "kern": kern}
+
+
+_KERN_MERK = {"s": 0.0, "wert": None}
+
+
+def kern_json_holen(jetzt=None):
+    """kern.json-Antwort (60 s gemerkt) — None, wenn Railway/Schlüssel/Marker fehlen."""
+    jetzt = time.time() if jetzt is None else jetzt
+    if _KERN_MERK["wert"] is not None and jetzt - _KERN_MERK["s"] < 60:
+        return _KERN_MERK["wert"]
+    data = _code_holen("/code/datei/tv-reader/tv-reader.user.js")
+    wert = kern_aus_userscript(data) if data else None
+    if wert is not None:
+        _KERN_MERK.update(s=jetzt, wert=wert)
+    return wert
 
 
 def _code_holen(pfad_url, timeout=15):
