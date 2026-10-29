@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_frost_faellig")
-KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S")
+FUNKTIONEN = ("_wd_num", "lt_echo_pl_grund", "lt_echo_felder", "echo_frost_urteil", "echo_frost_karenz", "echo_frost_faellig")
+KONSTANTEN = ("KAPITEL_TZ", "LT_ECHO_MAX_ALTER_S", "ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S")
 
 
 def lade():
@@ -55,9 +55,13 @@ def main():
 
     U, W = ns["echo_frost_urteil"], ns["echo_frost_faellig"]
     check(U(frost, jetzt) == (True, "Lese-EA eingefroren") and U(None, jetzt)[0] is True
-          and U(dict(gut, updated_at=iso(301)), jetzt) == (True, "Copier-Meldung 5 min alt (PC offline?)")
-          and U(dict(gut, updated_at=iso(200)), jetzt) == (False, "") and U(gut, jetzt) == (False, ""),
-          "Wache: eingefroren / keine Zeile / > 5 min alt → gestört; 200 s alt oder frisch → ruhig")
+          and U(dict(gut, updated_at=iso(541)), jetzt) == (True, "Copier-Meldung 9 min alt (PC offline?)")
+          and U(dict(gut, updated_at=iso(400)), jetzt) == (False, "") and U(gut, jetzt) == (False, ""),
+          "Wache: eingefroren / keine Zeile / > 9 min alt → gestört; 400 s alt oder frisch → ruhig")
+    K = ns["echo_frost_karenz"]
+    check(K(None, "Lese-EA eingefroren", jetzt) == (False, jetzt) and K(jetzt - 539, "Lese-EA eingefroren", jetzt)[0] is False
+          and K(jetzt - 540, "Lese-EA eingefroren", jetzt)[0] is True and K(None, "Copier-Meldung 9 min alt (PC offline?)", jetzt)[0] is True,
+          "Karenz: eingefroren erst nach 9 min durchgehend (Panel heilt vorher), Alter-Gründe sofort")
     merk = {}
     check(W(merk, "p1", jetzt) == 0, "Drossel: erste Meldung")
     merk["p1"] = {"erst": jetzt, "n": 1}

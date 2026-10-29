@@ -1680,6 +1680,12 @@ def tab_gesehen(user_agent, query=None):
             _TAB_OEFFNEN["url"] = w("url")
         _TAB_OEFFNEN["login"] = w("login") == "1"
         _TAB_OEFFNEN["tid"] = w("tid")[:16]
+        # 30.10.2026 (Stufen-Heilung): Sekunden seit dem letzten Supabase-Schreiben / ohne Realtime — leer = unbekannt (alter Tab)
+        for k, feld in (("sb", "sb_s"), ("rt", "rt_aus_s")):
+            try:
+                _TAB_OEFFNEN[feld] = int(w(k)) if w(k) != "" else None
+            except ValueError:
+                _TAB_OEFFNEN[feld] = None
 
 
 def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, n_heute, lock_frei, idle_s, chrome_offen=False):
@@ -1949,9 +1955,11 @@ def _tab_oeffnen(url=TAB_URL):
     try:
         if not _browser_und_mt5_frei(tv_eigen=True):
             return False, "MT5-Order läuft gerade — nächster Versuch später"
-        subprocess.Popen([exe, f"--profile-directory={profil}", url], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        # EIGENES FENSTER (30.10.2026, Befund ECHO-AUSSETZER: Prophos als Tab hinter TradingView wurde von Chrome eingefroren/verworfen —
+        # der aktive Tab eines eigenen Fensters wird nicht verworfen, und der Neulade-Weg findet ihn wieder am Fenstertitel)
+        subprocess.Popen([exe, f"--profile-directory={profil}", "--new-window", url], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         time.sleep(4 + random.random())   # Lock kurz halten: der neue Tab holt sich den Fokus
-        return True, f"Chrome ({profil}) → {url}"
+        return True, f"Chrome ({profil}, eigenes Fenster) → {url}"
     except Exception as e:
         return False, f"Öffnen fehlgeschlagen: {type(e).__name__}: {e}"
     finally:
@@ -2094,8 +2102,12 @@ def _tab_neulade_waechter():
             tag = datetime.now().strftime("%Y-%m-%d")
             if _TAB_OEFFNEN["tag"] != tag:
                 _TAB_OEFFNEN.update(tag=tag, geoeffnet=[])
-            fenster_da = bool(_prophos_fenster())
             still0 = jetzt0 - max(_TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"])
+            # STUFEN-HEILUNG (30.10.2026): Prophos-Tab im Puls-Chrome still bzw. ohne Verbindung → wecken / neu laden / neu öffnen / melden
+            if jetzt0 - _TAB_OEFFNEN["start"] >= TAB_OEFFNEN_ANLAUF_S and _tab_heil_schritt(pc, still0):
+                time.sleep(20 + random.random() * 15)       # während einer Folge enger takten (Stufe 2 nach 60 s)
+                continue
+            fenster_da = bool(_prophos_fenster())
             chrome_offen = (not fenster_da) and still0 >= TAB_OEFFNEN_FEHLT_S and _chrome_hauptfenster_da()
             auf, grund_auf = tab_oeffnen_entscheiden(jetzt0, _TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"], fenster_da,
                                                      TAB_NL["letzter_versuch"], len(_TAB_OEFFNEN["geoeffnet"]),
@@ -2125,12 +2137,15 @@ def _tab_neulade_waechter():
                 if grund_auf != TAB_NL["grund"]:
                     print(f"[tab-neuladen] {grund_auf}", flush=True)
                     TAB_NL.update(grund=grund_auf, at=jetzt0)
-                if pc:
-                    _tab_stand_holen(pc, grund_auf)          # nur die Spur an Railway
+                stand0 = _tab_stand_holen(pc, grund_auf) if pc else None          # nur die Spur an Railway
+                if isinstance(stand0, dict) and stand0.get("ok"):
+                    TAB_NL.update(stand=stand0, stand_at=time.time())
                 time.sleep(TAB_NL_TAKT_S + random.random() * 10)
                 continue
             if pc:
                 stand = _tab_stand_holen(pc, TAB_NL["grund"])
+                if isinstance(stand, dict) and stand.get("ok"):
+                    TAB_NL.update(stand=stand, stand_at=time.time())   # echo_logins für die EA-Selbstheilung (F2)
                 jetzt = time.time()
                 frei = _browser_und_mt5_frei()
                 still = jetzt - max(_TAB_OEFFNEN["zuletzt"], _TAB_OEFFNEN["start"]) if jetzt - _TAB_OEFFNEN["start"] >= TAB_OEFFNEN_ANLAUF_S else None
@@ -2148,6 +2163,383 @@ def _tab_neulade_waechter():
         except Exception as e:
             print(f"[tab-neuladen] Fehler: {type(e).__name__}: {e}", flush=True)
         time.sleep(TAB_NL_TAKT_S + random.random() * 10)
+
+
+# ══ TAB WECKEN (F1, 30.10.2026, Befund ECHO-AUSSETZER: Chris pc-c19p2l 16:57–19:03 Dubai „kein Prophos-Tab … Chrome läuft, aber ohne
+# aktiven Prophos-Tab", 29.10. elf solche Episoden auf vier PCs, seit 27./28.10. gehäuft — der Prophos-Tab liegt im Puls-Chrome hinter
+# TradingView, Chrome friert/verwirft ihn; Neuladen per Fenstertitel findet ihn nicht, ein zweiter Tab ist verboten). Master: „Prophos-Tab
+# im Puls-Chrome per /json/activate wecken, danach TradingView gestreut zurück nach vorn. Gleiche Riegel wie TAB_NL". Weg: CDP-Liste des
+# Puls-Chrome (127.0.0.1:9333) → Seite mit localhost:5000 → /json/activate (holt sie nach vorn; ein verworfener Tab lädt dabei neu) → 4–7 s
+# (gestreut) auf die erste Abfrage beim Panel warten, sonst noch einmal 5–8 s → den zuvor vordersten TradingView-Tab wieder aktivieren.
+# Unter TV_ORDER_LOCK (Puls kann nicht dazwischen). Kein Klick, keine Taste. Scheitert es: Spur + Fehlerfoto (Bildschirm). Seit Finns
+# Ergänzung (30.10.2026) ist Wecken Stufe 1 der Stufen-Heilung unten (tab_heil_stufe). ══
+TAB_WECK_CDP = "http://127.0.0.1:9333"
+_PROPHOS_URL_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):5000(/|$)")
+# STUFEN (Master 30.10.2026 nach Finn: „Oft verliert der Prophos-Tab die Verbindung und wird als inaktiv angezeigt. Dann muss ich in den PC
+# rein und einmal neu laden, meistens reicht das."): Problem = Tab fragt ≥ 3 min nicht ODER (angemeldet) seit ≥ 3 min kein Supabase-
+# Schreiben ODER Realtime ≥ 5 min getrennt. Stufe 1 wecken (/json/activate), 2 nach 60 s weiter Problem → Page.reload per CDP, 3 nach
+# weiteren 3 min → Tab schließen und frisch im EIGENEN Fenster öffnen, 4 nach weiteren 3 min → Spur + ⚪ an die Master-IDs (Railway
+# /pc/tab-heil-spur). Jede Stufe nur mit den Riegeln (Server-Riegel: Signal/Start ≤ 5 min/Hedge-Lauf; Puls/MT5-Order; 120 s ohne Eingabe),
+# sonst wartet sie; eine neue Folge höchstens je TAB_HEIL_ABSTAND_S. Ein laufender Trade bleibt unberührt — nur der Tab lädt neu.
+TAB_HEIL_START_S = 3 * 60
+TAB_HEIL_SB_S = 3 * 60
+TAB_HEIL_RT_S = 5 * 60
+TAB_HEIL_NEULADEN_NACH_S = 60
+TAB_HEIL_OEFFNEN_NACH_S = 3 * 60
+TAB_HEIL_MELDEN_NACH_S = 3 * 60
+TAB_HEIL_ABSTAND_S = 10 * 60
+TAB_HEIL = {"ep": None, "letzte": 0.0, "grund": ""}
+
+
+def tab_heil_lage(still_s, login, sb_s, rt_aus_s):
+    """REIN RECHNEND (testbar): (Dauer des Problems in s | None, Klartext). still_s = Sekunden ohne Abfrage beim Panel."""
+    if still_s is not None and still_s >= TAB_HEIL_START_S:
+        return still_s, f"Prophos-Tab fragt seit {int(still_s // 60)} min nicht (eingefroren/verworfen)"
+    if login and sb_s is not None and sb_s >= TAB_HEIL_SB_S:
+        return sb_s, f"Prophos-Tab ohne Supabase-Verbindung seit {int(sb_s // 60)} min (kein Schreiben)"
+    if rt_aus_s is not None and rt_aus_s >= TAB_HEIL_RT_S:
+        return rt_aus_s, f"Prophos-Tab ohne Realtime seit {int(rt_aus_s // 60)} min"
+    return None, ""
+
+
+def tab_heil_stufe(ep, problem_s, problem, jetzt, riegel, lock_frei, idle_s, letzte):
+    """REIN RECHNEND (testbar): (aktion, grund, ep_neu). aktion ∈ '' | 'wecken' | 'neuladen' | 'neu_oeffnen' | 'melden'.
+    ep = {stufe, at, start} der laufenden Folge oder None; problem_s None = Tab gesund → Folge vorbei (ep None)."""
+    if problem_s is None:
+        return "", "", None
+    stufe, at = int((ep or {}).get("stufe") or 0), float((ep or {}).get("at") or 0.0)
+    if stufe == 0:
+        if letzte and jetzt - letzte < TAB_HEIL_ABSTAND_S:
+            return "", f"{problem} — wartet: letzte Heil-Folge vor {int((jetzt - letzte) // 60)} min (höchstens 1 je {TAB_HEIL_ABSTAND_S // 60} min)", ep
+        naechste, text = "wecken", "Tab wecken"
+    elif stufe == 1:
+        if jetzt - at < TAB_HEIL_NEULADEN_NACH_S:
+            return "", "", ep
+        naechste, text = "neuladen", "Tab neu laden"
+    elif stufe == 2:
+        if jetzt - at < TAB_HEIL_OEFFNEN_NACH_S:
+            return "", "", ep
+        naechste, text = "neu_oeffnen", "Tab schließen und im eigenen Fenster neu öffnen"
+    elif stufe == 3:
+        if jetzt - at < TAB_HEIL_MELDEN_NACH_S:
+            return "", "", ep
+        return "melden", f"{problem} — Stufen 1–3 ohne Erfolg → Meldung an die Master-IDs", dict(ep, stufe=4, at=jetzt)
+    else:
+        return "", f"{problem} — Stufen 1–3 ohne Erfolg, gemeldet", ep
+    if riegel:
+        return "", f"{problem} — Stufe {stufe + 1} wartet: {riegel}", ep
+    if not lock_frei:
+        return "", f"{problem} — Stufe {stufe + 1} wartet: Puls/MT5-Order läuft", ep
+    if idle_s is not None and idle_s < TAB_NL_IDLE_S:
+        return "", f"{problem} — Stufe {stufe + 1} wartet: am PC wird gerade gearbeitet (letzte Eingabe vor {int(idle_s)} s)", ep
+    start = float((ep or {}).get("start") or jetzt)
+    return naechste, f"{problem} → Stufe {stufe + 1}: {text}", {"stufe": stufe + 1, "at": jetzt, "start": start}
+
+
+def cdp_prophos_ziele(liste, url_merk=""):
+    """REIN RECHNEND (testbar): CDP-Seitenliste (/json/list, vorderste zuerst) → (Prophos-Seite | None, TradingView-Seite | None).
+    Prophos = Seite auf localhost:5000 (die zuletzt gemeldete Adresse zuerst); TradingView = die vorderste TradingView-Seite."""
+    seiten = [t for t in (liste or []) if isinstance(t, dict) and t.get("type") == "page" and t.get("id")]
+    pro = [t for t in seiten if _PROPHOS_URL_RE.match(str(t.get("url") or ""))]
+    if url_merk:
+        pro.sort(key=lambda t: 0 if str(t.get("url") or "").startswith(url_merk) else 1)
+    tv = [t for t in seiten if "tradingview.com" in str(t.get("url") or "")]
+    return (pro[0] if pro else None), (tv[0] if tv else None)
+
+
+def _cdp_get(pfad, timeout=2.0):
+    import urllib.request
+    with urllib.request.urlopen(TAB_WECK_CDP + pfad, timeout=timeout) as r:
+        roh = r.read().decode("utf-8", "replace")
+    try:
+        return json.loads(roh)
+    except ValueError:
+        return roh
+
+
+def _panel_fehlerfoto(weg, code):
+    """Fehlerfoto über den Bot (order_bot.fehlerfoto_anstossen, entkoppelt, eigener Deckel) — frischer Prozess. → Text für die Spur."""
+    code_py = ("import json, order_bot; b, g = order_bot.fehlerfoto_anstossen(%r, False, %r); print(json.dumps([b, g]))" % (weg, code))
+    try:
+        r = subprocess.run([sys.executable, "-c", code_py], cwd=HERE, capture_output=True, text=True, timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        b, g = json.loads((r.stdout or "").strip().splitlines()[-1])
+        return f"Fehlerfoto {b}" if b else f"kein Fehlerfoto: {g}"
+    except Exception as e:
+        return f"kein Fehlerfoto ({type(e).__name__})"
+
+
+def _prophos_tab_wecken():
+    """Stufe 1 → (ok, Klartext). Siehe Block-Kopf."""
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "Puls läuft gerade im Browser — nächster Versuch später"
+    try:
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "MT5-Order/Polar läuft gerade — nächster Versuch später"
+        try:
+            liste = _cdp_get("/json/list")
+        except Exception as e:
+            return False, f"Puls-Chrome per CDP nicht erreichbar ({type(e).__name__}) — Prophos-Tab liegt wohl in einem anderen Chrome: am PC anklicken"
+        pro, tv = cdp_prophos_ziele(liste if isinstance(liste, list) else [], _TAB_OEFFNEN.get("url") or "")
+        if not pro:
+            return False, "kein Prophos-Tab im Puls-Chrome (CDP) — am PC den Prophos-Tab anklicken"
+        t0 = time.time()
+        _cdp_get(f"/json/activate/{pro['id']}")
+        time.sleep(4 + random.random() * 3)
+        if _TAB_OEFFNEN["zuletzt"] < t0:
+            time.sleep(5 + random.random() * 3)
+        wach = _TAB_OEFFNEN["zuletzt"] >= t0
+        zurueck = ""
+        if tv and tv.get("id") != pro.get("id"):
+            try:
+                _cdp_get(f"/json/activate/{tv['id']}")
+                zurueck = ", TradingView wieder vorn"
+            except Exception as e:
+                zurueck = f", TradingView NICHT zurück ({type(e).__name__})"
+        if wach:
+            return True, f"Prophos-Tab geweckt (fragt wieder nach {time.time() - t0:.0f} s){zurueck}"
+        return False, f"Prophos-Tab aktiviert, fragt aber nicht ({time.time() - t0:.0f} s){zurueck}"
+    except Exception as e:
+        return False, f"Wecken fehlgeschlagen: {type(e).__name__}: {e}"
+    finally:
+        TV_ORDER_LOCK.release()
+
+
+def _prophos_tab_neuladen_cdp():
+    """Stufe 2 → (ok, Klartext): Prophos-Seite im Puls-Chrome per CDP Page.reload (ignoreCache) — über order_bot._CdpVerbindung in einem
+    frischen Prozess (nur 127.0.0.1:9333), danach gestreut auf die erste Abfrage warten und TradingView zurück nach vorn."""
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "Puls läuft gerade im Browser — nächster Versuch später"
+    try:
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "MT5-Order/Polar läuft gerade — nächster Versuch später"
+        liste = _cdp_get("/json/list")
+        pro, tv = cdp_prophos_ziele(liste if isinstance(liste, list) else [], _TAB_OEFFNEN.get("url") or "")
+        if not pro or not pro.get("webSocketDebuggerUrl"):
+            return False, "Prophos-Tab im Puls-Chrome (CDP) nicht verbindbar"
+        t0 = time.time()
+        _cdp_get(f"/json/activate/{pro['id']}")
+        code = ("import sys, order_bot; c = order_bot._CdpVerbindung(sys.argv[1]); "
+                "c.rufe('Page.reload', {'ignoreCache': True}, timeout=8); c.zu(); print('ok')")
+        r = subprocess.run([sys.executable, "-c", code, pro["webSocketDebuggerUrl"]], cwd=HERE, capture_output=True, text=True, timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if "ok" not in (r.stdout or ""):
+            return False, f"Page.reload ohne Antwort ({(r.stderr or '').strip()[-120:]})"
+        time.sleep(6 + random.random() * 4)
+        if _TAB_OEFFNEN["zuletzt"] < t0:
+            time.sleep(5 + random.random() * 4)
+        zurueck = ""
+        if tv and tv.get("id") != pro.get("id"):
+            try:
+                _cdp_get(f"/json/activate/{tv['id']}")
+                zurueck = ", TradingView wieder vorn"
+            except Exception as e:
+                zurueck = f", TradingView NICHT zurück ({type(e).__name__})"
+        wach = _TAB_OEFFNEN["zuletzt"] >= t0
+        return wach, f"Prophos-Tab neu geladen, {'fragt wieder' if wach else 'fragt noch nicht'} ({time.time() - t0:.0f} s){zurueck}"
+    except Exception as e:
+        return False, f"Neu laden fehlgeschlagen: {type(e).__name__}: {e}"
+    finally:
+        TV_ORDER_LOCK.release()
+
+
+def _prophos_tab_neu_oeffnen():
+    """Stufe 3 → (ok, Klartext): alten Prophos-Tab im Puls-Chrome schließen (/json/close), dann frisch im EIGENEN Fenster öffnen."""
+    try:
+        if TV_ORDER_LOCK.locked() or not _browser_und_mt5_frei():
+            return False, "Puls/MT5-Order läuft gerade — nächster Versuch später"
+        liste = _cdp_get("/json/list")
+        pro, _tv = cdp_prophos_ziele(liste if isinstance(liste, list) else [], _TAB_OEFFNEN.get("url") or "")
+        if pro:
+            _cdp_get(f"/json/close/{pro['id']}")
+            time.sleep(1.5 + random.random() * 1.5)
+        ok, msg = _tab_oeffnen(_TAB_OEFFNEN.get("url") or TAB_URL)
+        if ok:
+            _TAB_OEFFNEN["geoeffnet"].append(datetime.now().isoformat(timespec="seconds"))
+            _TAB_OEFFNEN["geoeffnet_at"] = time.time()
+        return ok, ("alter Tab geschlossen, " if pro else "") + msg
+    except Exception as e:
+        return False, f"Neu öffnen fehlgeschlagen: {type(e).__name__}: {e}"
+
+
+def _tab_heil_melden(grund):
+    """Stufe 4: ⚪ an die Master-IDs über Railway POST /pc/tab-heil-spur (X-Code-Token). Wirft nie."""
+    import urllib.request
+    tok = code_token()
+    if not tok:
+        return
+    try:
+        body = json.dumps({"grund": str(grund)[:240]}).encode("utf-8")
+        req = urllib.request.Request(CODE_QUELLE + "/pc/tab-heil-spur", data=body, method="POST",
+                                     headers={"X-Code-Token": tok, "Content-Type": "application/json", "User-Agent": "prophos-panel"})
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print(f"[tab-heilen] Meldung nicht gesendet ({type(e).__name__})", flush=True)
+
+
+def _tab_heil_schritt(pc, still0):
+    """Eine Runde der Stufen-Heilung. → True = diese Runde behandelt (der übrige Wächter-Lauf entfällt), False = nichts zu tun bzw. kein
+    Prophos-Tab im Puls-Chrome (dann der bisherige Weg: Fenster-Neuladen / Öffnen / „anklicken")."""
+    jetzt = time.time()
+    dauer, problem = tab_heil_lage(still0, _TAB_OEFFNEN.get("login"), _TAB_OEFFNEN.get("sb_s"), _TAB_OEFFNEN.get("rt_aus_s"))
+    if dauer is None:
+        if TAB_HEIL["ep"]:
+            g = "Prophos-Tab wieder gesund" + (f" (nach Stufe {TAB_HEIL['ep'].get('stufe')})" if TAB_HEIL["ep"].get("stufe") else "")
+            print(f"[tab-heilen] {g}", flush=True)
+            if pc:
+                _tab_stand_holen(pc, g)
+        TAB_HEIL["ep"] = None
+        return False
+    if not TAB_HEIL["ep"]:
+        try:
+            liste = _cdp_get("/json/list")
+        except Exception:
+            return False
+        if not cdp_prophos_ziele(liste if isinstance(liste, list) else [])[0]:
+            return False                     # Prophos-Tab nicht im Puls-Chrome: bisheriger Weg
+    stand = _tab_stand_holen(pc, TAB_HEIL["grund"]) if pc else None
+    if isinstance(stand, dict) and stand.get("ok"):
+        TAB_NL.update(stand=stand, stand_at=time.time())
+    riegel = str((stand or {}).get("riegel") or "").strip() if isinstance(stand, dict) else "Tab-Stand von Railway nicht lesbar"
+    aktion, grund, ep_neu = tab_heil_stufe(TAB_HEIL["ep"], dauer, problem, jetzt, riegel, _browser_und_mt5_frei(), _win_leerlauf_s(),
+                                           TAB_HEIL["letzte"])
+    if aktion == "wecken":
+        TAB_HEIL["letzte"] = jetzt
+    TAB_HEIL["ep"] = ep_neu or {"stufe": 0, "at": 0.0, "start": jetzt}
+    if aktion:
+        tun = {"wecken": _prophos_tab_wecken, "neuladen": _prophos_tab_neuladen_cdp, "neu_oeffnen": _prophos_tab_neu_oeffnen}.get(aktion)
+        if tun:
+            ok, msg = tun()
+            grund = f"{grund} → {'ok' if ok else 'NICHT ok'}: {msg}"
+            if not ok:
+                grund += " — " + _panel_fehlerfoto(f"panel_tab_{aktion}", "tab_heilen")
+        else:
+            _tab_heil_melden(grund)
+    if grund and grund != TAB_HEIL["grund"]:
+        print(f"[tab-heilen] {grund}", flush=True)
+        TAB_HEIL["grund"] = grund
+        if pc:
+            _tab_stand_holen(pc, grund)
+    return True
+
+
+# ══ EA-SELBSTHEILUNG OHNE KNOPF (F2, 30.10.2026, Befund ECHO-AUSSETZER: Jacob pc-auzre5 …2655, Echo MIT Fusion-Hedge offen, Lese-EA
+# eingefroren → Copier ohne Master-Position, kein Hedge; _heal_ea lief nur nach „Terminal starten"). Master: „Panel ruft _heal_ea selbst,
+# wenn der Snapshot einer gebrauchten Instanz > 60 s eingefroren ist (offene Positionen/Hedges oder offener Echo-Plan). Höchstens 1× je
+# 15 min je Instanz, gestreut, nie während eines Puls-Laufs oder einer offenen MT5-Order." Eingefroren = Snapshot-Datei des Lese-EA älter
+# als EA_FROST_S (wie copier.master_status, dort 15 s). Gebraucht = Positionen/Hedges im letzten Copier-Stand ODER Master-Login unter den
+# offenen Echo-Plänen dieses PCs (Railway /code/tab-stand echo_logins, Stand ≤ 5 min aus dem Tab-Wächter). Die Heilung selbst ist
+# _heal_ea (Terminal beenden, EA per Profil/StartUp aufziehen, neu starten — Positionen liegen beim Broker); die MT5-Order-Sperre der
+# Instanz bleibt dabei gehalten. 5 min danach noch eingefroren → Spur + Fehlerfoto. Railway meldet 🔴 erst nach ECHO_FROST_KARENZ_S. ══
+EA_FROST_S = 60
+EA_FROST_TAKT_S = 30
+EA_FROST_ABSTAND_S = 15 * 60
+EA_FROST_NACH_S = 5 * 60
+EA_FROST_MAX_S = 12 * 3600      # länger still = die Instanz läuft auf diesem PC gar nicht (Login auf zwei PCs eingetragen) → nie heilen
+EA_STATUS_FRISCH_S = 60         # Positionen/Hedges zählen nur aus einem frischen Copier-Stand (alte Statusdatei = kein Beleg)
+EA_FROST = {}   # config_file → {"letzter": ts, "geprueft": bool, "grund": str}
+
+
+def ea_frost_entscheiden(snap_alter_s, gebraucht, letzter, jetzt, puls_frei, order_frei, terminal_da):
+    """REIN RECHNEND (testbar): (heilen: bool, grund). gebraucht = Grund, warum die Instanz gebraucht wird ('' = nicht)."""
+    if snap_alter_s is None or snap_alter_s <= EA_FROST_S or not gebraucht:
+        return False, ""
+    warum = f"Snapshot seit {int(snap_alter_s)} s eingefroren ({gebraucht})"
+    if snap_alter_s > EA_FROST_MAX_S:
+        return False, f"{warum} — über {EA_FROST_MAX_S // 3600} h still: Instanz läuft auf diesem PC wohl nicht, keine Heilung (zweites Terminal?)"
+    if not terminal_da:
+        return False, f"{warum} — kein master_terminal_path in der Config, Heilung nicht möglich"
+    if not puls_frei:
+        return False, f"{warum} — wartet: Puls/Polar läuft"
+    if not order_frei:
+        return False, f"{warum} — wartet: MT5-Order dieser Instanz läuft"
+    if letzter and jetzt - letzter < EA_FROST_ABSTAND_S:
+        return False, f"{warum} — wartet: zuletzt geheilt vor {int((jetzt - letzter) // 60)} min (höchstens 1 je {EA_FROST_ABSTAND_S // 60} min)"
+    return True, warum
+
+
+def ea_gebraucht(st, login, echo_logins, status_alter_s=None):
+    """REIN RECHNEND (testbar): warum die Instanz gebraucht wird, sonst ''. st = Copier-Status; Positionen/Hedges zählen nur, wenn er
+    frisch ist (status_alter_s ≤ EA_STATUS_FRISCH_S — der Copier schreibt alle ~3 s, auch bei eingefrorenem Snapshot)."""
+    st = st if isinstance(st, dict) and status_alter_s is not None and status_alter_s <= EA_STATUS_FRISCH_S else {}
+    if st.get("master_positions"):
+        return "Master-Positionen im letzten Stand"
+    if any(v for v in (st.get("hedges") or {}).values()) if isinstance(st.get("hedges"), dict) else bool(st.get("hedges")):
+        return "offene Hedges"
+    if login and str(login).strip() in {str(x).strip() for x in (echo_logins or [])}:
+        return "offener Echo-Plan"
+    return ""
+
+
+def _ea_frost_waechter():
+    if os.name != "nt":
+        return
+    time.sleep(TAB_NL_ANLAUF_S + random.random() * 30)
+    while True:
+        try:
+            jetzt = time.time()
+            stand = TAB_NL.get("stand") if jetzt - TAB_NL.get("stand_at", 0.0) <= 300 else None
+            echo_logins = (stand or {}).get("echo_logins") or []
+            for inst in instances():
+                fname = inst["config_file"]
+                cfg = read_json(os.path.join(HERE, fname), {}) or {}
+                st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+                sp = _snapshot_path(cfg)
+                try:
+                    alter = jetzt - os.path.getmtime(sp) if sp else None
+                except OSError:
+                    alter = None
+                m = EA_FROST.setdefault(fname, {"letzter": 0.0, "geprueft": True, "grund": ""})
+                try:
+                    st_alter = (datetime.now() - datetime.fromisoformat(st["updated_at"])).total_seconds() if st.get("updated_at") else None
+                except Exception:
+                    st_alter = None
+                login = str(cfg.get("master_expected_login") or st.get("master_login") or "").strip()
+                # Nachkontrolle EA_FROST_NACH_S nach der Heilung (einmal)
+                if not m["geprueft"] and jetzt - m["letzter"] >= EA_FROST_NACH_S:
+                    m["geprueft"] = True
+                    if alter is not None and alter > EA_FROST_S:
+                        foto = _panel_fehlerfoto("panel_ea_heilung", "ea_eingefroren")
+                        g = f"EA-Heilung {fname}: {EA_FROST_NACH_S // 60} min danach weiter eingefroren ({int(alter)} s) — {foto}"
+                    else:
+                        g = f"EA-Heilung {fname}: Snapshot fließt wieder"
+                    print(f"[ea-frost] {g}", flush=True)
+                    pc = pc_id_lesen()
+                    if pc:
+                        _tab_stand_holen(pc, g)
+                lock = MASTER_ORDER_LOCKS.setdefault(fname, threading.Lock())
+                path = str(cfg.get("master_terminal_path") or "").strip()
+                ja, grund = ea_frost_entscheiden(alter, ea_gebraucht(st, login, echo_logins, st_alter), m["letzter"], jetzt,
+                                                 not TV_ORDER_LOCK.locked() and _browser_und_mt5_frei(tv_eigen=True),
+                                                 not lock.locked(), path.lower().endswith("terminal64.exe"))
+                if grund and grund != m["grund"]:
+                    print(f"[ea-frost] {fname}: {grund}", flush=True)
+                    m["grund"] = grund
+                if not ja:
+                    continue
+                time.sleep(random.random() * 15)                    # gestreut (Jitter-Regel)
+                if not lock.acquire(blocking=False):
+                    continue
+                # Puls/Polar kam in der Streuzeit dazu? (nicht _browser_und_mt5_frei — das zählte jetzt die eigene, gerade gehaltene Sperre)
+                if TV_ORDER_LOCK.locked() or (polar_panel and (polar_panel.aktiv() or getattr(polar_panel, "test_aktiv", lambda: False)())):
+                    lock.release()
+                    continue
+                m.update(letzter=time.time(), geprueft=False)
+                g = f"EA-Heilung {fname}: {grund} → Terminal neu + EA aufziehen"
+                print(f"[ea-frost] {g}", flush=True)
+                pc = pc_id_lesen()
+                if pc:
+                    _tab_stand_holen(pc, g)
+
+                def _heilen(fname=fname, cfg=cfg, path=path, lock=lock):
+                    try:
+                        _heal_ea(fname, cfg, os.path.dirname(os.path.abspath(path)), time.time(), 15)
+                    finally:
+                        lock.release()
+                threading.Thread(target=_heilen, daemon=True).start()
+        except Exception as e:
+            print(f"[ea-frost] Fehler: {type(e).__name__}: {e}", flush=True)
+        time.sleep(EA_FROST_TAKT_S + random.random() * 15)
 
 
 def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
@@ -5628,6 +6020,7 @@ def main():
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
     # Tab selbst neu laden (16.10.2026) — Details bei _tab_neulade_waechter
     threading.Thread(target=_tab_neulade_waechter, daemon=True).start()
+    threading.Thread(target=_ea_frost_waechter, daemon=True).start()   # F2 (30.10.2026): EA-Selbstheilung ohne Knopf
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die

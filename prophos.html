@@ -24565,8 +24565,13 @@
     try{
       // HERZSCHLAG FÜRS PANEL (16.10.2026, Tab selbst öffnen/neu laden): Login ja/nein, Adresse, Build und eine Kennung je Tab — das Panel
       // öffnet einen fehlenden Tab unter genau dieser Adresse (localhost ≠ 127.0.0.1 = eigener Login) und beweist danach den Login
+      // VERBINDUNG FÜRS PANEL (30.10.2026, Finn: „Oft verliert der Prophos-Tab die Verbindung … dann muss ich einmal neu laden"): sb = Sekunden
+      // seit dem letzten erfolgreichen mt5_live-Schreiben (Supabase), rt = Sekunden, die der Signal-Wecker (Realtime) schon nicht verbunden ist —
+      // das Panel lädt den Tab in Stufen neu (panel.py tab_heil_stufe)
+      window._rtAusSeit = (typeof _osRt !== 'undefined' && _osRt.status === 'SUBSCRIBED') ? 0 : (window._rtAusSeit || Date.now())
       const herz = new URLSearchParams({ tab: '1', login: currentUserId ? '1' : '0', url: location.origin + location.pathname,
-        build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: (window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)) })
+        build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : '', tid: (window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)),
+        sb: _fleetPushAt ? String(Math.round((Date.now() - _fleetPushAt) / 1000)) : '', rt: window._rtAusSeit ? String(Math.round((Date.now() - window._rtAusSeit) / 1000)) : '0' })
       const dd = await window.mtcApi('instances?' + herz.toString())
       if(!dd || dd.copier_offline || dd._httpFail) return
       // BOT-STAND UNTEN IM TAB (19.10.2026, Finn: „immer unten die neueste Version reinschreiben, damit ich weiß, ob es tatsächlich ein

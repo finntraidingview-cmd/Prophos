@@ -3952,12 +3952,17 @@ def alarm_tick():
 # keine Master-Position, hedges leer, standby=true — und warnte genau deshalb nicht; dazu …8930 seit 28.10. „open"). Master: „🔴 an die
 # Master-IDs bei OFFENEM Echo-Plan (mt5/mt5v2) mit Snapshot ‚eingefroren' oder > 5 min alt am Master-Login, je Plan gedrosselt (einmal +
 # Erinnerung nach 30 min)". Läuft im alarm_tick (Emin-Gruppe schon gefiltert), ein Read accounts + ein Read mt5_live, nur lesen.
-ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S = 5 * 60, 30 * 60
+# KARENZ FÜR DIE SELBSTHEILUNG (30.10.2026, Master zu F1/F2: „🔴 echo_blind erst, wenn es 5 min nach der Heilung noch steht"): das Panel
+# heilt einen eingefrorenen Lese-EA ab 60 s (≤ ~3 min samt Terminal-Neustart) und weckt einen eingefrorenen Prophos-Tab ab 5 min — gemeldet
+# wird erst, wenn der Snapshot ECHO_FROST_KARENZ_S durchgehend eingefroren ist bzw. die Copier-Meldung so alt ist.
+ECHO_FROST_ALT_S, ECHO_FROST_ERINNERN_S, ECHO_FROST_KARENZ_S = 9 * 60, 30 * 60, 9 * 60
 _echo_frost = {}   # plan_id → {"erst": ts der ersten Meldung, "n": Zahl der Meldungen}
+_echo_frost_seit = {}   # plan_id → seit wann der Snapshot eingefroren gesehen wird (Railway-Takt)
 
 
 def echo_frost_urteil(live, jetzt_ts):
-    """REIN RECHNEND (testbar): jüngste mt5_live-Zeile des Master-Logins → (gestört, Grund)."""
+    """REIN RECHNEND (testbar): jüngste mt5_live-Zeile des Master-Logins → (gestört, Grund). 'eingefroren' zählt hier sofort — die
+    Karenz für die Selbstheilung des Panels rechnet echo_frost_karenz."""
     if not live:
         return True, "keine Copier-Meldung für den Master-Login"
     try:
@@ -3969,6 +3974,15 @@ def echo_frost_urteil(live, jetzt_ts):
     if alter > ECHO_FROST_ALT_S:
         return True, f"Copier-Meldung {int(alter // 60)} min alt (PC offline?)"
     return False, ""
+
+
+def echo_frost_karenz(seit, grund, jetzt_ts):
+    """REIN RECHNEND (testbar): (melden jetzt?, seit_neu). seit = seit wann gestört gesehen (oder None). 'Lese-EA eingefroren' erst nach
+    ECHO_FROST_KARENZ_S durchgehend (die Panel-Heilung bekommt ihre Zeit); alle anderen Gründe tragen ihr Alter schon im Urteil."""
+    s = seit or jetzt_ts
+    if grund != "Lese-EA eingefroren":
+        return True, s
+    return jetzt_ts - s >= ECHO_FROST_KARENZ_S, s
 
 
 def echo_frost_faellig(merk, pid, jetzt_ts):
@@ -3985,6 +3999,8 @@ def echo_frost_tick(rows, namen, jetzt_ts):
     echo = [r for r in rows or [] if str(r.get("status")) == "open" and str(r.get("route") or "") in ("mt5", "mt5v2") and r.get("master_account_id")]
     for pid in [k for k in _echo_frost if k not in {str(r.get("id")) for r in echo}]:
         _echo_frost.pop(pid, None)
+    for pid in [k for k in _echo_frost_seit if k not in {str(r.get("id")) for r in echo}]:
+        _echo_frost_seit.pop(pid, None)
     if not echo:
         return
     ids = sorted({str(r["master_account_id"]) for r in echo})
@@ -4000,6 +4016,10 @@ def echo_frost_tick(rows, namen, jetzt_ts):
         gestoert, grund = echo_frost_urteil(z, jetzt_ts)
         if not gestoert:
             _echo_frost.pop(pid, None)
+            _echo_frost_seit.pop(pid, None)
+            continue
+        melden, _echo_frost_seit[pid] = echo_frost_karenz(_echo_frost_seit.get(pid), grund, jetzt_ts)
+        if not melden:
             continue
         n = echo_frost_faellig(_echo_frost, pid, jetzt_ts)
         if n is None:
@@ -4281,6 +4301,34 @@ def pc_update_spur():
                  f"{wer_txt}: {teil} {kurz('von', 30)} → {kurz('auf', 30)} nach {wartete // 60} min Warten trotzdem neu gestartet — "
                  f"{kurz('grund', 240)}. Ein laufender Lauf kann abgerissen sein: Pläne dieses PCs ansehen.",
                  uid=uid, daten={"pc": pc, "teil": teil, "grund": kurz("grund", 240), "wartete_s": wartete}, schluessel=f"update|{key}")
+    return jsonify({"ok": True})
+
+
+@app.route("/pc/tab-heil-spur", methods=["POST"])
+def pc_tab_heil_spur():
+    """STUFEN-HEILUNG DES PROPHOS-TABS (30.10.2026, Finn: „Oft verliert der Prophos-Tab die Verbindung … dann muss ich einmal neu laden"):
+    das Panel hat den Tab geweckt, neu geladen und neu geöffnet, er ist trotzdem still/getrennt → ⚪ an die Master-IDs (nur HT-IDs, je PC
+    höchstens 1× je Stunde). Header X-Code-Token wie /pc/update-spur; vom PC nur der kurze Grund."""
+    wer = _code_zugang()
+    if not wer:
+        return jsonify({"ok": False, "error": "kein gültiger Schlüssel"}), 403
+    uid = str(wer[0])
+    pc = str(wer[1] or "")[:20]
+    d = request.get_json(silent=True) or {}
+    grund = re.sub(r"\s+", " ", str(d.get("grund") or ""))[:240]
+    namen, aus = _ap_namen()
+    if uid in aus or _alarm_fremd_verwaltet(uid):
+        return jsonify({"ok": True})
+    key = f"{pc}|tab-heil"
+    if time.time() - _UPDATE_SPUR_MERK.get(key, 0) < 3600:
+        return jsonify({"ok": True, "gedrosselt": True})
+    _UPDATE_SPUR_MERK[key] = time.time()
+    pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
+    wer_txt = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
+    alarm_senden(3, "tab_heil_fehl", f"Prophos-Tab nicht zu retten: {wer_txt}"[:120],
+                 f"{wer_txt}: {grund or 'Prophos-Tab still'} — geweckt, neu geladen und im eigenen Fenster neu geöffnet, ohne Erfolg. Bitte am "
+                 f"PC Chrome/Prophos ansehen (Login? Internet?). Laufende Trades sind davon nicht betroffen.",
+                 uid=uid, daten={"pc": pc, "grund": grund}, schluessel=f"tab_heil|{pc}")
     return jsonify({"ok": True})
 
 
@@ -18427,13 +18475,19 @@ def code_tab_stand(pc):
         sig = sb_select("order_signale", {"select": "id", "status": "eq.laeuft", "pc": f"eq.{pc}", "limit": "5"}) or []
         plaene = []
         if uids:
-            plaene = sb_select("trade_plans", {"select": "status,start_um,start_um_gestartet_at,auto_plan,auto_bestaetigt_at,"
+            plaene = sb_select("trade_plans", {"select": "status,start_um,start_um_gestartet_at,auto_plan,auto_bestaetigt_at,route,master_account_id,"
                                                          "hedge_status:mt5_baseline->hedge->>status,hedge_pc:mt5_baseline->hedge->>pc",
                                                "user_id": "in.(" + ",".join(uids) + ")", "status": "in.(planned,open)",
                                                # nur bis jetzt + 10 min, jüngste zuerst (Hinweis S2: sonst Folgetage im Limit, ein frischer Claim fehlt)
                                                "or": f"(start_um.is.null,start_um.lte.{(jetzt + timedelta(minutes=10)).isoformat()})",
                                                "order": "start_um.desc.nullslast", "limit": "300"}) or []
         riegel = tab_stand_riegel(sig, plaene, pc, jetzt)
+        # EA-SELBSTHEILUNG IM PANEL (30.10.2026, Befund ECHO-AUSSETZER: Jacob …2655 Lese-EA eingefroren, offener Echo-Plan, Snapshot ohne
+        # Position → der Copier wusste nicht, dass die Instanz gebraucht wird): Master-Logins OFFENER Echo-Pläne (mt5/mt5v2) der IDs dieses PCs
+        echo_ids = sorted({str(x.get("master_account_id")) for x in plaene
+                           if str(x.get("status")) == "open" and str(x.get("route") or "") in ("mt5", "mt5v2") and x.get("master_account_id")})
+        echo_logins = sorted({str(a.get("external_id") or "").strip() for a in (sb_select("accounts", {"select": "external_id",
+                              "id": "in.(" + ",".join(echo_ids) + ")"}) or [])} - {""}) if echo_ids else []
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Stand nicht lesbar: {type(e).__name__}"}), 503
     spur = (request.args.get("panel") or "").strip()[:200]
@@ -18441,7 +18495,7 @@ def code_tab_stand(pc):
         _tab_stand_spur[pc] = spur
         print(f"[tab-stand] {pc}: {spur}", flush=True)
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
-                    "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel})
+                    "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins})
 
 
 @app.route("/reader-kurs", methods=["POST", "OPTIONS"])

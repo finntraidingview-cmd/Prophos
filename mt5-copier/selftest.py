@@ -2063,6 +2063,7 @@ def main():
     results.append(test_login_wache())
     results.append(test_login_eigenes_konto())
     results.append(test_tsx_auge_reparatur())
+    results.append(test_panel_tab_wecken_ea_frost())
     results.append(test_tsx_auge_jemals())
     results.append(test_windows_abfrage_vorbeugen())
     results.append(test_tv_neuladen())
@@ -2561,6 +2562,70 @@ def test_tsx_auge_jemals():
         panel._tsx_stand.clear(); panel._tsx_stand.update(alt_stand); panel._tsx_jemals.update(alt_je)
     if ok:
         print("✓ TopstepX-Auge je gesehen: jemals_s None bis zum ersten Stand, bleibt danach (Panel-Start-Zeitraum)")
+    return ok
+
+
+def test_panel_tab_wecken_ea_frost():
+    """30.10.2026, Befund ECHO-AUSSETZER: (F1) Prophos-Tab im Puls-Chrome hinter TradingView eingefroren (Chris pc-c19p2l, 11 Episoden am
+    29.10.) bzw. ohne Verbindung (Finn) → Stufen wecken / neu laden / neu öffnen / melden, Riegel wie TAB_NL; Neu-Öffnen im eigenen Fenster. (F2) Lese-EA
+    eingefroren bei gebrauchter Instanz (Jacob pc-auzre5 …2655) → Panel ruft _heal_ea selbst, 1× je 15 min, nie bei Puls/Order."""
+    import panel, inspect
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ Tab wecken / EA-Heilung: " + name); ok = False
+    L, S = panel.tab_heil_lage, panel.tab_heil_stufe
+    chk(L(200, True, 10, 0)[0] == 200 and L(100, True, 200, 0)[0] == 200 and "Supabase" in L(100, True, 200, 0)[1]
+        and L(100, False, 999, 0) == (None, "") and L(100, True, 20, 400)[0] == 400 and L(100, True, None, None) == (None, ""),
+        "Lage: still ≥ 3 min, angemeldet ohne Supabase ≥ 3 min, Realtime ≥ 5 min — sonst gesund (alter Tab ohne Felder = gesund)")
+    j = 10_000.0
+    a1, g1, e1 = S(None, 200, "P", j, "", True, 300, 0)
+    a2, _, e2 = S(e1, 200, "P", j + 30, "", True, 300, j)
+    a3, _, e3 = S(e1, 260, "P", j + 61, "", True, 300, j)
+    a4, _, e4 = S(e3, 400, "P", j + 61 + 179, "", True, 300, j)
+    a5, _, e5 = S(e3, 400, "P", j + 61 + 181, "", True, 300, j)
+    a6, g6, e6 = S(e5, 600, "P", j + 61 + 181 + 181, "Signal läuft", False, 10, j)
+    a7, g7, _ = S(e6, 900, "P", j + 2000, "", True, 300, j)
+    chk((a1, e1["stufe"]) == ("wecken", 1) and a2 == "" and (a3, e3["stufe"]) == ("neuladen", 2) and a4 == "" and (a5, e5["stufe"]) == ("neu_oeffnen", 3)
+        and (a6, e6["stufe"]) == ("melden", 4) and a7 == "" and "gemeldet" in g7,
+        "Stufen: wecken → 60 s → neu laden → 3 min → neu öffnen → 3 min → melden (Melden ohne Riegel), danach nichts mehr")
+    chk(S(None, 200, "P", j, "Start in ≤ 5 min", True, 300, 0)[0] == "" and "Puls" in S(None, 200, "P", j, "", False, 300, 0)[1]
+        and "Eingabe" in S(None, 200, "P", j, "", True, 30, 0)[1] and "letzte Heil-Folge" in S(None, 200, "P", j, "", True, 300, j - 300)[1]
+        and S(e1, 260, "P", j + 61, "Hedge öffnet", True, 300, j)[2] == e1 and S(e3, None, "P", j, "", True, 300, j) == ("", "", None),
+        "Riegel halten jede Stufe an (Server-Riegel, Puls/Order, Eingabe), neue Folge höchstens je 10 min, gesund → Folge vorbei")
+    Z = panel.cdp_prophos_ziele
+    liste = [{"type": "page", "id": "tv1", "url": "https://www.tradingview.com/chart/x/"}, {"type": "page", "id": "p1", "url": "http://localhost:5000/#radar"},
+             {"type": "page", "id": "p2", "url": "http://127.0.0.1:5000/"}, {"type": "service_worker", "id": "sw", "url": "http://localhost:5000/sw.js"},
+             {"type": "page", "id": "x", "url": "http://localhost:50000/"}]
+    pro, tv = Z(liste, "http://127.0.0.1:5000/")
+    chk(pro["id"] == "p2" and tv["id"] == "tv1" and Z(liste)[0]["id"] == "p1" and Z([], "")== (None, None),
+        "CDP: Prophos-Seite (gemerkte Adresse zuerst, nie Port 50000/Service-Worker), vorderste TradingView-Seite")
+    E, G = panel.ea_frost_entscheiden, panel.ea_gebraucht
+    chk(G({"master_positions": [{"t": 1}]}, "1", [], 5) and G({"hedges": {"a": [1]}}, "1", [], 5) == "offene Hedges"
+        and G({}, "2655", ["2655"]) == "offener Echo-Plan" and G({"master_positions": [{"t": 1}]}, "1", [], 600) == ""
+        and G({"master_positions": [{"t": 1}]}, "1", [], None) == "" and G({}, "1", ["2"]) == "",
+        "gebraucht: Positionen/Hedges nur aus frischem Copier-Stand, sonst offener Echo-Plan (Login)")
+    chk(E(120, "offener Echo-Plan", 0, j, True, True, True)[0] and not E(50, "x", 0, j, True, True, True)[0] and not E(120, "", 0, j, True, True, True)[0],
+        "heilen erst > 60 s eingefroren und nur gebraucht")
+    chk("Puls" in E(120, "x", 0, j, False, True, True)[1] and "MT5-Order" in E(120, "x", 0, j, True, False, True)[1]
+        and "master_terminal_path" in E(120, "x", 0, j, True, True, False)[1] and "zuletzt geheilt" in E(120, "x", j - 600, j, True, True, True)[1]
+        and "12 h" in E(13 * 3600, "x", 0, j, True, True, True)[1] and E(120, "x", j - 901, j, True, True, True)[0],
+        "nie bei Puls/Polar oder MT5-Order, nie ohne Terminal-Pfad, 1× je 15 min, nie über 12 h still (zweites Terminal)")
+    q = inspect.getsource(panel._tab_oeffnen)
+    chk('"--new-window"' in q, "Neu-Öffnen im eigenen Fenster")
+    q = inspect.getsource(panel._prophos_tab_wecken) + inspect.getsource(panel._prophos_tab_neuladen_cdp)
+    chk(q.count("TV_ORDER_LOCK.acquire(blocking=False)") == 2 and "/json/activate/" in q and "Page.reload" in q and "random.random()" in q
+        and q.count("TV_ORDER_LOCK.release()") == 2 and "click" not in q.lower() and "taste" not in q.lower(),
+        "Wecken/Neu laden: unter TV_ORDER_LOCK, nur /json/activate bzw. Page.reload, gestreut, kein Klick/Taste")
+    q = inspect.getsource(panel._prophos_tab_neu_oeffnen)
+    chk("/json/close/" in q and "_tab_oeffnen(" in q and "_browser_und_mt5_frei()" in q, "Neu öffnen: alten Prophos-Tab schließen, frisch im eigenen Fenster")
+    q = inspect.getsource(panel._ea_frost_waechter)
+    chk("lock.acquire(blocking=False)" in q and "lock.release()" in q and "_heal_ea(" in q and "random.random()" in q
+        and "_panel_fehlerfoto(" in q and "EA_FROST_NACH_S" in q, "EA-Wächter: Order-Sperre gehalten, gestreut, Nachkontrolle mit Fehlerfoto")
+    if ok:
+        print("✓ Tab wecken / EA-Heilung: Riegel, CDP-Ziele, gebraucht nur frisch, 1× je 15 min, eigenes Fenster, kein Klick")
     return ok
 
 
