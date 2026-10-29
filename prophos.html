@@ -35570,7 +35570,7 @@
     try{ const a = (accounts || []).find(x => x && String(x.id) === kid); if(a && a.zielErreichtAt) return vorher(a.zielErreichtAt) }catch(_){}
     try{ const z = _hand.d && Array.isArray(_hand.d.radar_bestanden) ? _hand.d.radar_bestanden.find(x => x && String(x.konto_id) === kid) : null; return !!(z && vorher(z.seit)) }catch(_){ return false }
   }
-  const wdlKontoWeg = t => !!(t && !wdlTpUndWeg(t) && !wdlZielMarkiert(t) && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026); Ziel markiert = nicht „weg" (29.10.2026)
+  const wdlKontoWeg = t => !!(t && !wdlTpUndWeg(t) && !(typeof wdlZielMarkiert === 'function' && wdlZielMarkiert(t)) && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026); Ziel markiert = nicht „weg" (29.10.2026)
   /* EINE WAHRHEIT „GEBLOWT" (20.10.2026, Finn 23:00 Dubai, Radar .1647 „Geblowt · archivieren · 2", Tradeify 150k …1607/…9125: „Der Account ist
    * eigentlich geblowt. Wenn ich auf Abhaken gehe, steht trotzdem ‚Nichts ändern‘ vorbelegt. Das Radar weiß schon, dass er geblowt ist"):
    * dieselbe Regel wie die Radar-Gruppe — abgehakt geblowt, Balance nach dem Trade an/unter der Liquidation (wdlBlowStand: Liq-Regel am
@@ -51350,7 +51350,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1866'
+  const OS_TAB_BUILD = '2026-09-22.1867'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
