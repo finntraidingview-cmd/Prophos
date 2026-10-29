@@ -30362,7 +30362,10 @@
     if(offen) return false
     // .1563 (Finn 15.10.2026 ~03:00 Dubai, zwei Big Trades laufen: „da darf es nicht schiefgehen, wenn Puls nachher Orders platziert"): im
     // Wechsel-Fenster 30 s leer statt 10 — ein Tradovate-Login auf einem langsamen PC baut die Tabelle bis zu 30 s auf (pc-l5o8bv: Logins 30 s)
-    return o.leerSeitMs >= ((o.schnell && ruhig) ? 1000 : 30000)
+    // flachMinMs (29.10.2026, Nova/TopstepX): der TopstepX-Wächter beweist „flach" über zwei aufeinanderfolgende Auge-Meldungen statt über
+    // 1 s Dauer — er gibt die Mindestdauer selbst vor; der Orbit-Reader gibt nichts mit und bleibt bei 1 s. Das Wechsel-Fenster (30 s) gilt für
+    // beide, solange der Master im aktuellen Konto-Zeitraum nicht gesehen wurde (seit 29.10. reicht der TopstepX-Wächter gesehenImZeitraum mit).
+    return o.leerSeitMs >= ((o.schnell && ruhig) ? (typeof o.flachMinMs === 'number' && o.flachMinMs >= 0 ? o.flachMinMs : 1000) : 30000)
   }
   // Teilschluss (nur Hinweis am Chip, nie schließen): Menge in der Plan-Wurzel/-Richtung kleiner als die Kontrakte des Plans
   function hedgeMasterTeilweise(liste, wurzel, richtung, kontrakte){
@@ -30507,18 +30510,39 @@
    * Prio behandelt wird wie ein Orbit Big Trade: sobald der Trade in TopstepX geschlossen wird, sieht das Auge des Scripts das und schließt den
    * Hedge direkt. Fallback 1 wie bei Orbit über den Radar, Fallback 2 der Notfall-SL im Fusion-Terminal"). Gegenstück zu hedgeReaderSchnellTick
    * für Topstep (route tsv2 — Big Trade mit Orbit-Hedge und Winning Day): Quelle ist das Userscript tv-reader/tsx-auge.user.js im TopstepX-Tab
-   * des Puls-Chrome, das alle 0,25 s augen_tsx.js stand() an das Panel meldet (GET /api/tsx-stand, nur lokal). Geschlossen wird nur mit
+   * des Puls-Chrome, das alle 0,1 s (Auge 0.2.0, Web-Worker-Takt; bis 0.1.x 0,25 s) augen_tsx.js stand() an das Panel meldet (GET /api/tsx-stand,
+   * nur lokal; Finns Messung 29.10.2026: Stand 0,14–0,32 s alt beim Abholen). Geschlossen wird nur mit
    * denselben Regeln wie beim Orbit-Reader (hedgeMasterWegEntscheid, schnell): Stand ≤ 1 s alt, Konto EXAKT (konto.kontonr = External ID, nie
    * eine abgekürzte Kennung — dann bleibt es bei Radar/Level), Konto ≥ 2 s stabil (im Wechsel-Fenster 30 s leer, 1 s erst nach 90 s Ruhe),
    * Master-Position seit dem Open schon gesehen, Puls nicht unterwegs (hedgePulsUnterwegs, fail-closed) und „leer" nur, wenn augen_tsx.js
    * flach === true BEWEIST (No Active Position in der Order-Karte bzw. leeres Grid + gesperrter Close-Knopf) — eine leere Liste allein zählt nie.
    * Radar (tp_feed/sl_feed, Puffer aus wd_farmer_regeln.vorplan.hedge_puffer) und Fusion-Level (level_tp/level_sl) laufen unverändert weiter. */
   const _tsxSchnellLeer = new Map(), _tsxSchnellKonto = new Map()
-  /* MINDESTENS 5 s FLACH (Variante B, Finn/Master 27.10.2026 nach S2-Befund zu bff5b1c6): beim Orbit-Reader reicht nach 90 s Konto-Ruhe 1 s
-   * „flach" — ob TopstepX beim Neuaufbau (SignalR-Reconnect) die Order-Karte kurz leer zeigt, während der Konto-Kopf stehen bleibt, ist live
-   * unbewiesen (bei TradingView war genau das der Fall, .1560). Für den Anfang deshalb ≥ 5 s durchgehend flach mit Beweis, bevor Fusion zugeht;
-   * ein Kurzzeit-Neuaufbau schließt so nie. Nach den ersten echten Läufen (Spur „[hedgeTsx] … flach seit X s") auf 1–2 s senken. */
-  const TSX_FLACH_MIN_MS = 5000
+  /* SCHLIESSEN SO SCHNELL WIE DAS STARTEN (29.10.2026, Finn: „genau wie beim Starten so schnell wie geht unter 1 sec … besser 0.1 - 0.5 sec"):
+   * bis .1848 mindestens 5 s durchgehend flach (Variante B 27.10., Sorge: TopstepX zeigt beim SignalR-Neuaufbau kurz eine leere Order-Karte).
+   * Jetzt: flach MIT Beweis in TSX_FLACH_MELDUNGEN aufeinanderfolgenden Auge-Meldungen mit VERSCHIEDENEM stand.ts (Auge 0.2.0 misst alle
+   * 0,1 s → ≈ 0,1–0,2 s) — ein Ein-Bild-Aussetzer schließt so nie, jede Meldung ohne flach-Beweis setzt zurück (tsxFlachZaehlen). Alle übrigen
+   * Riegel unverändert über hedgeMasterWegEntscheid (Stand ≤ 1 s, Konto exakt, Konto ≥ 2 s stabil, Master vorher gesehen, Puls nicht unterwegs,
+   * ausgeloggt nie). Damit kurze Nova-Trades (< 90 s im Konto) nicht ins 30-s-Wechsel-Fenster fallen, zählt wie beim Orbit-Reader (.1801)
+   * „Master in DIESEM Konto-Zeitraum gesehen" (Sichtung erst ab 5 s im Konto, _tsxGesehenAt). Spur „[hedgeTsx] … flach seit X ms (N Meldungen)"
+   * bleibt, damit die echte Reaktionszeit ablesbar ist. */
+  // Gegenprüfung 29.10.2026: „aufeinanderfolgend" heißt Abstand der Messungen 80–400 ms (Auge-Takt 100 ms) — dichter (MutationObserver-Tick
+  // wenige ms nach dem Worker-Tick) zählt nicht, weiter auseinander (Lücke: Prophos-Tab verdeckt/gedrosselt, Zwischenmeldung nicht gesehen)
+  // beginnt neu. Mehr als EIN meldender TopstepX-Tab (Panel r.tabs): kein Schnellschluss, dann gilt wieder ≥ TSX_FLACH_MEHR_TABS_MS flach —
+  // ein zweiter, abgerissener Tab mit „flach" könnte sonst die Position im echten Tab überdecken.
+  const TSX_FLACH_MELDUNGEN = 2, TSX_FLACH_MIN_MS = 0, TSX_FLACH_ABSTAND_MS = [80, 400], TSX_FLACH_MEHR_TABS_MS = 5000
+  const _tsxFlach = new Map(), _tsxGesehenAt = new Map()   // plan-id → {ts, n} der flachen Meldungen · letzte Sichtung im Konto-Zeitraum
+  // REIN RECHNEND (window._tsxFlachZaehlen): nächster Zähler nach einer flachen Meldung — nur ein NEUER Zeitstempel im Takt-Abstand zählt
+  function tsxFlachZaehlen(alt, ts){
+    const t = Number(ts) || 0, a = alt && typeof alt === 'object' ? alt : { ts: 0, n: 0 }
+    if(!t || t === a.ts) return a
+    if(!a.ts) return { ts: t, n: 1 }
+    const d = t - a.ts
+    if(d < TSX_FLACH_ABSTAND_MS[0] && d >= 0) return a                            // zu dicht: dieselbe Takt-Runde, nicht zählen
+    if(d >= TSX_FLACH_ABSTAND_MS[0] && d <= TSX_FLACH_ABSTAND_MS[1]) return { ts: t, n: (a.n || 0) + 1 }
+    return { ts: t, n: 1 }                                                         // Lücke oder Uhr rückwärts: neu beginnen
+  }
+  window._tsxFlachZaehlen = tsxFlachZaehlen
   let _tsxSchnellBusy = false, _tsxStandFehler = 0
   /* TOPSTEPX AUSGELOGGT (29.10.2026, Finn: „Wenn TopstepX ausgeloggt ist, soll nicht aus Panik geschlossen werden, sondern Puls geht auf
    * TopstepX und loggt sich wieder ein"). Das Auge (tsx-auge.user.js ≥ 0.2.0) meldet stand.ausgeloggt = true (Login-Seite, Passwortfeld +
@@ -30555,7 +30579,7 @@
     const meine = (tp || []).filter(p => p && p.route === 'tsv2' && p.status === 'open' && p.mt5Baseline && p.mt5Baseline.hedge
       && p.mt5Baseline.hedge.status === 'offen' && p.mt5Baseline.hedge.pc === pc)
     if(!meine.length) return
-    const verwerfen = () => { for(const p of meine){ _tsxSchnellKonto.delete(String(p.id)); _tsxSchnellLeer.delete(String(p.id)) } }
+    const verwerfen = () => { for(const p of meine){ _tsxSchnellKonto.delete(String(p.id)); _tsxSchnellLeer.delete(String(p.id)); _tsxFlach.delete(String(p.id)) } }
     if(hedgePulsUnterwegs()){ verwerfen(); return }   // Puls unterwegs → Auge blind (wie beim Orbit-Reader)
     _tsxSchnellBusy = true
     try{
@@ -30571,24 +30595,31 @@
         const pid = String(p.id), h = p.mt5Baseline.hedge
         const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-        if(!kontoPlan || k.abgekuerzt !== false || k.liste_offen || !tsxKontoGleich(k.kontonr, kontoPlan)){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
+        if(!kontoPlan || k.abgekuerzt !== false || k.liste_offen || !tsxKontoGleich(k.kontonr, kontoPlan)){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); _tsxFlach.delete(pid); continue }
         if(!_tsxSchnellKonto.has(pid)) _tsxSchnellKonto.set(pid, jetzt)
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || p.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
-        if(hedgeMasterTeilweise(liste, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pid); _tsxSchnellLeer.delete(pid); continue }
-        if(st.flach !== true){ _tsxSchnellLeer.delete(pid); continue }   // flach nur mit Beweis — sonst keine Aussage
+        if(hedgeMasterTeilweise(liste, wz, richtung, 1e9) != null){
+          _hedgeMasterGesehen.add(pid); _tsxSchnellLeer.delete(pid); _tsxFlach.delete(pid)
+          if(jetzt - _tsxSchnellKonto.get(pid) >= 5000) _tsxGesehenAt.set(pid, jetzt)   // Sichtung im Konto-Zeitraum (wie .1801)
+          continue
+        }
+        if(st.flach !== true){ _tsxSchnellLeer.delete(pid); _tsxFlach.delete(pid); continue }   // flach nur mit Beweis — sonst keine Aussage, Zähler zurück
         if(!_hedgeMasterGesehen.has(pid)) continue
         if(!_tsxSchnellLeer.has(pid)) _tsxSchnellLeer.set(pid, jetzt)
-        if(jetzt - _tsxSchnellLeer.get(pid) < TSX_FLACH_MIN_MS) continue   // Variante B: erst nach 5 s durchgehend flach (s. o.)
+        const fz = tsxFlachZaehlen(_tsxFlach.get(pid), st.ts); _tsxFlach.set(pid, fz)
+        const einTab = !(Number(r.tabs) > 1)
+        if(einTab ? fz.n < TSX_FLACH_MELDUNGEN : jetzt - _tsxSchnellLeer.get(pid) < TSX_FLACH_MEHR_TABS_MS) continue   // 2 Meldungen bzw. mehrere Tabs: 5 s (s. o.)
         const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
         const weg = hedgeMasterWegEntscheid({ liste, positionenOk: true, alterMs: r.alter_s * 1000, sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung,
           kontoPlan, kontoAktiv: kontoPlan, kontenAnzahl: 99, kontoStabilMs: jetzt - _tsxSchnellKonto.get(pid), leerSeitMs: jetzt - _tsxSchnellLeer.get(pid),
-          schnell: true, gesehen: true })
+          schnell: true, gesehen: true, flachMinMs: TSX_FLACH_MIN_MS,
+          gesehenImZeitraum: (_tsxGesehenAt.get(pid) || 0) >= _tsxSchnellKonto.get(pid) })
         if(weg && p.status === 'open'){
           const flachS = (jetzt - _tsxSchnellLeer.get(pid)) / 1000
           hedgeMasterWegStempeln(p, 'auge', _tsxSchnellLeer.get(pid))   // Master-Ende ab „flach seit" (29.10.2026)
-          _tsxSchnellLeer.delete(pid)
-          console.info(`[hedgeTsx] Master weg laut TopstepX-Auge (flach seit ${flachS.toFixed(1)} s, Konto ruhig seit ${((jetzt - _tsxSchnellKonto.get(pid)) / 1000).toFixed(0)} s, Stand ${r.alter_s} s alt) — Fusion wird geschlossen`, p.masterName || pid)
+          _tsxSchnellLeer.delete(pid); _tsxFlach.delete(pid)
+          console.info(`[hedgeTsx] Master weg laut TopstepX-Auge (flach seit ${Math.round(flachS * 1000)} ms (${fz.n} Meldungen), Konto ruhig seit ${((jetzt - _tsxSchnellKonto.get(pid)) / 1000).toFixed(0)} s, Stand ${r.alter_s} s alt) — Fusion wird geschlossen`, p.masterName || pid)
           await hedgeMasterWegAusfuehren(p, kontoPlan, null)
         }
       }
