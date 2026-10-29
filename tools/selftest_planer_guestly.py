@@ -20,6 +20,16 @@ def main():
     ok("if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){" in s and "['Echo + Hedge', 'hedge'," in s and "'Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`" in s,
        "Echo-Vorschlag mit Vorschau + Schalter an → „Echo + Hedge“, mit Grund → „Echo V2 · ⚠ Grund“")
     ok("if(v && v.echo_hedge && v.echo_hedge.an === false) return ''" in s, "Echo-Hedge aus → kein Vorschau-Chip")
+    # Master | Fusion (30.10.2026): Fusion-Werte in Lots/TP/SL neben den Master-Werten, Kopf „Master | Fusion", Chip entfällt
+    i = s.index("function apgMasterFusion(root, je){")
+    mf = s[i:s.index("\n  }\n", s.index("tab.querySelectorAll('.pz-z[data-plan-id]')", i))]
+    ok("if(_apIdsArtWert !== 'funded') apgMasterFusion(root, je)" in s, "nur Challenge (Funded hat die Spalte Fusion)")
+    ok("[[3, 'Lots'], [6, 'TP'], [7, 'SL']]" in mf and "Master <i>|</i> Fusion" in mf, "Köpfe Lots/TP/SL mit Master | Fusion")
+    ok("zellen.tp.appendChild(fus(passTp != null ? ahfEur(passTp)" in mf and "zellen.sl.appendChild(fus(vs.blow_eur != null ? ahfEur(vs.blow_eur)" in mf, "TP = Fusion am Master-TP, SL = Fusion am Master-SL/Blow")
+    ok("fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')" in mf and "fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')" in mf, "ohne Vorschau „—“, mit Grund „⚠“ + Tooltip")
+    ok("s.title = tip" in mf and "s.innerHTML = txt" in mf and "escapeHtml" not in mf.split("const fus")[1].split("\n")[0], "Tooltip als title (kein HTML)")
+    ok("if(!/Freigabe offen/.test(c.textContent)) c.remove()" in mf, "Chip weg, nur „Freigabe offen“ bleibt")
+    ok("#ap-ids-root.ap-guestly .pz-radar .apg-mfz{display:inline-flex;flex-direction:column" in s, "Handy: Fusion unter Master")
     ok(".pz-radar:not(:has(.pz-fus)) .pz-z > :nth-child(5){display:none}" in s, "Spalte Schritt nur ohne Fusion-Hedge aus")
     # Tokens nur unter #ap-ids-root.ap-guestly, dunkel über den Sonnen-Schalter, Guestly-Farben
     for c in ("--g-a1:#5447ce", "--g-a2:#887cfc", "--g-a3:#4996ff", "--g-a4:#16c8c6"):

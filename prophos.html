@@ -3825,15 +3825,33 @@
   #ap-ids-root.ap-guestly .plan-firma-kopf{margin:10px 2px 6px;font-size:12px;color:var(--g-sub);text-transform:uppercase;letter-spacing:.04em}
   #ap-ids-root.ap-guestly .pz-tab.pz-radar{grid-template-columns:minmax(260px,1.7fr) 118px 92px minmax(170px,1.1fr) 84px 76px 76px minmax(150px,auto);border:0;background:transparent;row-gap:8px;overflow:visible}
   #ap-ids-root.ap-guestly .pz-radar .pz-z-kopf{display:none}
+  /* Master | Fusion (30.10.2026): Kopfzeile wieder da, Lots/TP/SL breiter, Fusion gedämpft rechts daneben */
+  #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 84px 135px 135px minmax(100px,auto);column-gap:14px}
+  #ap-ids-root.ap-guestly .pz-tab.pz-radar:not(:has(.pz-fus)):has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 135px 135px minmax(100px,auto)}
+  #ap-ids-root.ap-guestly .pz-radar:has(.apg-mfz) .pz-z-kopf > *{text-align:left;justify-content:flex-start}
+  #ap-ids-root.ap-guestly .pz-radar .apg-mfz{justify-content:flex-start;text-align:left}
+  #ap-ids-root.ap-guestly .pz-radar .pz-konto2 .pz-k2{white-space:normal;overflow:visible;line-height:1.6}
+  #ap-ids-root.ap-guestly .pz-radar[data-apg-kopf]:has(.apg-mfz) .pz-z-kopf{display:grid;background:transparent;min-height:0;padding:0 16px 2px;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--g-sub)}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z-kopf .apg-mf{display:block;text-transform:none;letter-spacing:0;font-size:10.5px;font-weight:500;color:var(--g-sub);opacity:.85}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z-kopf .apg-mf i{font-style:normal;opacity:.5;margin:0 3px}
+  #ap-ids-root.ap-guestly .pz-radar .apg-mfz{display:flex;align-items:baseline;gap:10px;flex-wrap:nowrap}
+  #ap-ids-root.ap-guestly .pz-radar .apg-fus{color:var(--g-sub);font-size:12.5px;font-weight:500;white-space:nowrap;padding-left:10px;border-left:1px solid var(--g-rand)}
+  #ap-ids-root.ap-guestly .pz-radar .apg-fus small{display:block;font-size:10.5px;opacity:.8;line-height:1.1}
+  #ap-ids-root.ap-guestly .pz-radar .apg-fus.gut{color:color-mix(in srgb, var(--g-gut) 75%, var(--g-sub))}
+  #ap-ids-root.ap-guestly .pz-radar .apg-fus.rot{color:color-mix(in srgb, var(--g-rot) 75%, var(--g-sub))}
+  #ap-ids-root.ap-guestly .pz-radar .apg-fus.warn{color:var(--warn-ink, #b45309);cursor:help}
+  #ap-ids-root.ap-guestly .pz-radar .apg-fus.leer{opacity:.6}
+  @media (max-width:820px){ #ap-ids-root.ap-guestly .pz-radar .apg-mfz{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px}
+    #ap-ids-root.ap-guestly .pz-radar .apg-fus{padding-left:0;border-left:0} #ap-ids-root.ap-guestly .pz-radar[data-apg-kopf]:has(.apg-mfz) .pz-z-kopf{display:none} }
   #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf){background:var(--g-kpi);border-radius:14px;min-height:56px;padding:12px 16px;border:0;color:var(--g-text)}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(1){order:3;color:var(--g-sub);font-size:12.5px}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(2){order:1}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(3){order:2}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(4){order:4}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(5){order:5}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(6){order:6}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(7){order:7}
-  #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(8){order:8}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(1){order:3;color:var(--g-sub);font-size:12.5px}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(2){order:1}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(3){order:2}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(4){order:4}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(5){order:5}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(6){order:6}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(7){order:7}
+  #ap-ids-root.ap-guestly .pz-radar .pz-z > :nth-child(8){order:8}
   #ap-ids-root.ap-guestly .pz-radar:not(:has(.pz-fus)) .pz-z > :nth-child(5){display:none}
   #ap-ids-root.ap-guestly .pz-radar:not(:has(.pz-fus)){grid-template-columns:minmax(260px,1.7fr) 118px 92px minmax(170px,1.1fr) 76px 76px minmax(150px,auto)}
   #ap-ids-root.ap-guestly .pz-radar .pz-k1 b{font-size:14px}
@@ -51995,7 +52013,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1911'
+  const OS_TAB_BUILD = '2026-09-22.1912'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -79452,6 +79470,42 @@
     root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
       const z = je.get(String(r.dataset.planId)), w = apgWeg(z), ort = r.querySelector('.pz-k2') || r.querySelector('.pz-k1'); if(!w || !ort || ort.querySelector('.apg-weg')) return
       const c = document.createElement('span'); c.className = 'apg-weg' + (w[1] ? ' ' + w[1] : ''); c.textContent = w[0]; if(w[2]) c.title = w[2]; ort.appendChild(c) })
+    if(_apIdsArtWert !== 'funded') apgMasterFusion(root, je)
+  }
+  /* MASTER | FUSION NEBENEINANDER (30.10.2026, Finn am Echo-Chip: „Master-TP und rechts daneben Slave-TP, dann SL genauso, und die Lot-Anzahl —
+   * gerade ist es unübersichtlich, was die Slave-Werte sind"): statt des einen Hedge-Chips stehen die Fusion-Werte in den Spalten Lots / TP / SL
+   * neben den Master-Werten (gedämpft), Kopf je Spalte „Master | Fusion". Quelle mt5_baseline.hedge_vorschau (Echo: ehv_tick, Apex/Tradeify:
+   * ah_tick/tfh_tick) — TP = Fusion am Master-TP (pass_eur bzw. −|tp_eur|), SL = Fusion am Master-SL bzw. beim Blow (blow_eur). Ohne Vorschau „—",
+   * mit Grund „⚠" (Tooltip). Nur Darstellung: Zellen aus planZeileHtml bleiben, die Fusion-Werte kommen als eigener Span dazu. */
+  function apgMasterFusion(root, je){
+    const z2 = (v, d) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: d })
+    const fus = (txt, tip, cls) => { const s = document.createElement('span'); s.className = 'apg-fus' + (cls ? ' ' + cls : ''); s.innerHTML = txt; if(tip) s.title = tip; return s }
+    root.querySelectorAll('.pz-tab.pz-radar').forEach(tab => {
+      if(tab.querySelector('.pz-fus')) return                          // Funded-Spalte „Fusion" hat ihre eigene Anzeige
+      const kopf = tab.querySelector('.pz-z-kopf')
+      const block = tab.closest('.ap-adm-karte'); if(block && block.querySelector('.pz-tab.pz-radar') === tab) tab.dataset.apgKopf = '1'   // Kopf nur einmal je Block
+      if(kopf && !kopf.dataset.apgMf){ kopf.dataset.apgMf = '1'
+        for(const [n, t] of [[3, 'Lots'], [6, 'TP'], [7, 'SL']]){ const c = kopf.children[n - 1]; if(c) c.innerHTML = `${t}<small class="apg-mf">Master <i>|</i> Fusion</small>` } }
+      tab.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
+        if(r.dataset.apgMf) return; r.dataset.apgMf = '1'
+        const z = je.get(String(r.dataset.planId)) || {}, vs = z.hedge_vorschau && typeof z.hedge_vorschau === 'object' ? z.hedge_vorschau : null
+        const zellen = { lots: r.children[2], tp: r.children[5], sl: r.children[6] }
+        if(!zellen.lots || !zellen.tp || !zellen.sl) return
+        Object.values(zellen).forEach(c => c.classList.add('apg-mfz'))
+        r.querySelectorAll('.ahf-kurz').forEach(c => { if(!/Freigabe offen/.test(c.textContent)) c.remove() })   // der Chip steht jetzt in den Spalten
+        const grund = vs && vs.lots == null ? String(vs.grund || vs.fehler || '') : ''
+        const art = z.hedge_weg === 'echo' ? 'Echo-Hedge' : z.hedge_art === 'apex' ? 'Apex-Hedge (WD-Weg)' : z.hedge_art === 'tradeify_final' ? 'Tradeify-Final-Hedge' : 'Hedge'
+        if(!vs || (!grund && vs.lots == null)){ for(const c of Object.values(zellen)) c.appendChild(fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')); return }
+        if(grund){ for(const c of Object.values(zellen)) c.appendChild(fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')); return }
+        const ml = Number(z.menge), mult = vs.multiplier != null ? Number(vs.multiplier) : (ml > 0 ? Number(vs.lots) / ml : null)
+        const passTp = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? -Math.abs(Number(vs.tp_eur)) : null
+        const blowTip = z.hedge_weg === 'echo' ? 'Fusion, wenn der Master am Stop Loss rausgeht' : 'Fusion beim Blow (Konto am Boden / Liq)'
+        zellen.lots.appendChild(fus(`${z2(vs.lots, 2)}${mult != null && isFinite(mult) ? `<small>×${z2(mult, mult < 0.1 ? 3 : 2)}</small>` : ''}`,
+          `${art}: ${z2(vs.lots, 2)} Lot Fusion${ml > 0 ? ` auf ${z2(ml, 2)} Lot Master` : ''}${vs.q ? ` · q ${vs.q} €/$` : ''}`))
+        zellen.tp.appendChild(fus(passTp != null ? ahfEur(passTp) : '—', 'Fusion, wenn der Master den Take Profit trifft', passTp != null ? 'rot' : 'leer'))
+        zellen.sl.appendChild(fus(vs.blow_eur != null ? ahfEur(vs.blow_eur) : '—', blowTip, vs.blow_eur != null ? 'gut' : 'leer'))
+      })
+    })
   }
   /* FUNDED CFD (30.10.2026, Master: „dieselbe Hülle, leer mit ‚kommt'"): dieselben Bausteine wie Challenge/Funded Futures, ohne Daten und ohne
    * Abfragen; Knöpfe gesperrt. Einmal beim Laden des Moduls gezeichnet. */
