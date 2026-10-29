@@ -15627,7 +15627,9 @@
      * Planer (sessionStorage, ein kurzer Schlüssel). */
     const PLANER_CHIP_SS = 'prophos_planer_chip'
     const planerModus = () => !!document.querySelector('#dashboard-view section.view[data-view="kasse"].adm-planer-modus')
-    const planerErlaubt = ec => ['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec))
+    // Vor der Übersicht kennt kasseReiterErlaubt einen Verwalter noch nicht (eigener Code = „nur eigene"); ist er in dieser Sitzung schon als
+    // Verwalter erkannt (planerRolle), gelten seine Rechte gleich — Planer-Reiter sind für Verwalter frei (nicht KASSE_REITER_HT)
+    const planerErlaubt = ec => ['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec) || (!admData && ec && planerRolle() === 'verwalter' && !KASSE_REITER_HT.has(n)))
     function planerChipsSync(ec){
       const frei = planerErlaubt(ec)
       document.querySelectorAll('#adm-planer-chips [data-planerchip]').forEach(c => { c.hidden = !frei.includes(c.dataset.planerchip) })
@@ -15677,11 +15679,13 @@
       // wenn ich ganz kurz auf Kompass gehe — die Übersicht auch, ist mir nervig"): Stand bleibt 10 min, ↻ lädt sofort.
       // PLANER-TAB (30.10.2026, „SCHNELL: es lädt nur der offene Planer"): im Planer-Modus die Übersicht (/admin/overview, p90 ~3,5 s) erst
       // NACH dem Planer — sie liefert hier nur Verwalter-Erkennung und Gruppen-Chips; im Admin wie bisher sofort
-      // VERWALTER ZUERST (Master 30.10.2026: „ein Verwalter darf in der ersten Zeichnung keine fremden IDs sehen — lieber kurz leer"): verzögert
-      // wird nur, wenn diese ID in dieser Browser-Sitzung schon als Hermann Technologies erkannt ist (planerRolle 'ht'); sonst lädt die
-      // Übersicht sofort, der Planer zeigt „Lade Planer …" und öffnet erst mit der Verwalter-Erkennung (admData)
+      // VERWALTER ZUERST (Master 30.10.2026: „ein Verwalter darf in der ersten Zeichnung keine fremden IDs sehen — lieber kurz leer"): sofort
+      // gezeichnet (Übersicht verzögert) wird nur bei Entsperrung mit dem Standard-Code (kein eigener Code, Flag '1') und ohne gemerkte
+      // eingeschränkte Rolle — jeder Verwalter hat einen eigenen Code (Riegel sql/2026-10-30_verwalter_braucht_code.sql) und entsperrt mit '2'.
+      // Sonst lädt die Übersicht sofort, der Planer zeigt „Lade Planer …" und öffnet erst mit der Verwalter-Erkennung (admData)
       const planerJetzt = planerModus(), admFrisch = !!admData && Date.now() - (window._admLadeZeit || 0) <= ADM_CACHE_MS
-      const planerWarten = planerJetzt && !admFrisch && planerRolle() !== 'ht'
+      const planerSchnell = eigenerCode === null && !eigenerCodeUnklar && !['verwalter', 'eigen'].includes(planerRolle())
+      const planerWarten = planerJetzt && !admFrisch && !planerSchnell
       if(!admFrisch){
         if(planerJetzt && !planerWarten) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)
         else if(planerWarten){
@@ -51614,7 +51618,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1893'
+  const OS_TAB_BUILD = '2026-09-22.1894'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

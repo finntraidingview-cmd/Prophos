@@ -31,7 +31,7 @@ def main():
     # Planer-Modus = Admin-Section (dieselbe Sperre/Rechte), Chips nach kasseReiterErlaubt
     ok("v.dataset.view === name || (name === 'planer' && v.dataset.view === 'kasse')" in s, "Planer aktiviert die Admin-Section")
     ok("if((name === 'kasse' || name === 'planer') && typeof kasseOnEnter === 'function') kasseOnEnter()" in s, "Planer geht durch kasseOnEnter (Code-Sperre)")
-    ok("['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec))" in s, "Chips/Link nach kasseReiterErlaubt")
+    ok("['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec) ||" in s, "Chips/Link nach kasseReiterErlaubt")
     ok("link.style.display = unlocked && frei.length ? '' : 'none'" in s, "Link nur entsperrt + erlaubt")
     ok("section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}" in s, "Admin-Reiter im Planer-Modus aus")
     # Verweis im Admin, Merker nur sessionStorage
@@ -43,10 +43,15 @@ def main():
     ok("if(planerJetzt && !planerWarten) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)" in s,
        "Übersicht im Planer-Modus verzögert (nur bekannte HT-Rolle)")
     # Verwalter zuerst (Master 30.10.2026): ohne bekannte Rolle wartet der Planer auf admLoad, Panes bis dahin aus
-    ok("const planerWarten = planerJetzt && !admFrisch && planerRolle() !== 'ht'" in s, "ohne bekannte HT-Rolle warten")
+    ok("const planerSchnell = eigenerCode === null && !eigenerCodeUnklar && !['verwalter', 'eigen'].includes(planerRolle())" in s
+       and "const planerWarten = planerJetzt && !admFrisch && !planerSchnell" in s, "schnell nur mit Standard-Code und ohne eingeschränkte Rolle")
+    sql = open(os.path.join(os.path.dirname(HTML), "sql", "2026-10-30_verwalter_braucht_code.sql"), encoding="utf-8").read()
+    ok("before insert or update of verwalter_user_id on public.id_gruppen" in sql and "before update or delete on public.admin_zugang" in sql
+       and "coalesce(btrim(z.code), '') <> ''" in sql, "Riegel: Verwalter braucht eigenen Code")
     ok("admLoad().finally(() => { planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } })" in s,
        "Planer öffnet erst nach der Verwalter-Erkennung")
     ok("if(!planerWarten) planerChipOeffnen()" in s, "kein Chip vor der Erkennung")
+    ok("(!admData && ec && planerRolle() === 'verwalter' && !KASSE_REITER_HT.has(n))" in s, "bekannter Verwalter: Link vor der Übersicht, ohne HT-Reiter")
     ok("section.view.adm-planer-warten #kasse-content [id^=\"adm-pane-\"]{display:none !important}" in s, "Panes während des Wartens aus")
     ok("try{ planerRolleMerken(d) }catch(_){}" in s and "sessionStorage.setItem(PLANER_ROLLE_SS" in s, "Rolle je ID in sessionStorage")
     for t in f:
