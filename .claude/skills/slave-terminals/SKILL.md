@@ -102,6 +102,19 @@ ihrem Stand fragen und nicht pollen. Sie melden sich selbst.
    Zeile in der Warteschlange auf „live“, der Slave bekommt die nächste Aufgabe.
 5. „Nachkontrolle“ aus `projekt.md`, falls angegeben.
 
+### A4a. SQL selbst einspielen
+
+Der Master spielt SQL-Dateien aus `sql/` selbst in die Datenbank ein (Supabase-MCP `apply_migration`
+bzw. `execute_sql` für reine Daten-Zeilen), ohne den Nutzer zu fragen — Finn 29.10.2026: „Du darfst
+eigenständig SQLs ausführen.“ Bedingungen:
+
+- Die Datei liegt vorher im Repo (`sql/JJJJ-MM-TT_thema.sql`), idempotent, mit Kommentar warum.
+- Gehört sie zu DB-Schreiblogik, Policies/RLS oder Rechten, erst nach dem OK des Prüfers.
+- Reihenfolge: SQL einspielen, dann den Code pushen, der sie braucht.
+- Destruktives (drop table, delete ohne enge where-Klausel, truncate) nie selbstständig — dafür den
+  Nutzer fragen.
+- Blockt die Berechtigungsprüfung des Werkzeugs trotzdem, nicht umgehen: dem Nutzer Datei + Weg nennen.
+
 ### A4b. Visueller Stammbaum bei Features
 
 Sobald ein Feature aus mehreren Teilen besteht (mehrere Slaves, mehrere Schritte, mehrere Wege)
