@@ -41,6 +41,8 @@ def main():
     check(f([{"status": "open"}], [], [], jetzt) == "offener Plan", "Plan open → gesperrt")
     for hs in ("offen", "oeffnet", "schliesst"):
         check(f([{"status": "review", "hedge_status": hs}], [], [], jetzt) != "", f"review mit Hedge {hs} → gesperrt")
+    for hs in ("unklar", "fehler"):
+        check(f([{"status": "review", "hedge_status": hs}], [], [], jetzt) != "", f"review mit Hedge {hs} → gesperrt (fail-closed)")
     check(f([{"status": "review", "hedge_status": "geschlossen"}], [], [], jetzt) == "", "review mit geschlossenem Hedge → frei")
     check(f([{"status": "planned", "start_um": iso(1800)}], [], [], jetzt) == "Start in < 45 min", "Start in 30 min → gesperrt")
     check(f([{"status": "planned", "start_um": iso(3000)}], [], [], jetzt) == "", "Start in 50 min → frei")

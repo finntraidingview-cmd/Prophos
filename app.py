@@ -3942,7 +3942,7 @@ _TM_LINK = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
 # MT5-Hand-Trades. Neuladen/Tampermonkey schließen keine Position und klicken nicht im Chart (Tampermonkey öffnet eine eigene Seite). ══
 TM_BLIND_START_S = 45 * 60
 TM_BLIND_UEBERFAELLIG_S = 65 * 60
-TM_BLIND_HEDGE_LEBT = ("offen", "schliesst", "oeffnet")
+TM_BLIND_HEDGE_LEBT = ("offen", "schliesst", "oeffnet", "unklar", "fehler")   # unklar/fehler: Hedge-Lage nicht bewiesen → sperrt (S2 29.10.2026, fail-closed)
 
 
 def tm_blind_frei_rechnen(plaene, fremd, live, jetzt, signale=None):
@@ -3994,6 +3994,10 @@ def alarm_userscript_frei():
         return jsonify({"ok": True, "frei": False, "grund": "PC-Kennung fehlt"})
     try:
         rows = sb_select("mt5_live", {"select": "updated_at,user_id:status->>user_id,pos:status->master_positions", "pc_name": f"eq.{pc}"}) or []
+        # Nur PCs der eigenen ID (S2 29.10.2026): kein mt5_live-Eintrag dieses PCs mit der uid des Logins → nicht frei, ohne Grund-Text
+        # (kein Ausforschen fremder PCs über die Route)
+        if not any(str(z.get("user_id") or "") == str(uid) for z in rows):
+            return jsonify({"ok": True, "frei": False, "grund": ""})
         live = [{"updated_at": z.get("updated_at"), "n_pos": len(z.get("pos")) if isinstance(z.get("pos"), list) else 0} for z in rows]
         # alle IDs dieses PCs (wie tab_stand_riegel) + die eigene — ein PC fährt heute je eine ID, abgesichert auch für mehrere (Prüfung 29.10.2026)
         uids = sorted({str(z.get("user_id")) for z in rows if re.fullmatch(r"[0-9a-f-]{36}", str(z.get("user_id") or ""))} | {str(uid)})
