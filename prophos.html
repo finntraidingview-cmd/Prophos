@@ -2419,6 +2419,7 @@
   :is(#tpl-view,#adm-pane-planer) .tpl-fehler{color:var(--danger);font-size:12.5px;margin:0 0 10px}
   :is(#tpl-view,#adm-pane-planer) .kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
   :is(#tpl-view,#adm-pane-planer) .kpis.tpl-kpis5{grid-template-columns:repeat(5,minmax(0,1fr))}
+  #adm-pane-planer .kpis.tpl-kpis3{grid-template-columns:repeat(3,minmax(0,1fr))}   /* Funded-Planer schlank (29.10.2026) */
   :is(#tpl-view,#adm-pane-planer) .kpi{padding:10px 12px;box-shadow:none;min-width:0;border-radius:var(--r-md)}
   :is(#tpl-view,#adm-pane-planer) .kpi:hover{box-shadow:none}
   :is(#tpl-view,#adm-pane-planer) .kpi-label{font-size:12px;margin-bottom:2px}
@@ -3773,6 +3774,12 @@
      Bildschirm sein … eher dafür da, dass ich jede ID einzeln anklicken kann"): ganz oben im Admin-Trade-Planer, volle Breite, „Alle" + je ID
      eine Kachel in ID-Farbe (--id aus idFarbe), Klick = nur diese ID. Haken oben rechts = Planer-Haken. Handy: eine Reihe zum Wischen. */
   #adm-pane-planer .ap-ids-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+  /* CHALLENGE-PLANER SCHLANK (29.10.2026): Knopfzeile rechtsbündig, Erklärtexte der Listenköpfe und Zeitstrahl-Legende aus, „Heute beendet" klappbar */
+  #adm-pane-planer .ap-ids-kopf-schlank{justify-content:flex-end}
+  #adm-pane-planer #ap-ids-root.ap-schlank .ap-adm-kopf > span,#adm-pane-planer #ap-ids-root.ap-schlank .leg{display:none}
+  #adm-pane-planer .ap-hb-klapp{margin-top:12px}
+  #adm-pane-planer .ap-idr-wrap.ap-idr-wrap-schlank{margin:0;padding:0;border:0;min-height:0}
+  #adm-pane-planer .ap-hb-klapp > summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--ink);padding:6px 0}
   #adm-pane-planer .ap-ids-kopf b{font-size:14px;color:var(--ink)} #adm-pane-planer .ap-ids-kopf span{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
   /* GRUPPEN-PLANER (13.10.2026, Emin-Gruppe): eine schlichte Zeile unter der ID-Leiste — Stand, Probelauf, Jetzt planen, an/aus; Klick auf
      „ausgelassen"/„Probelauf" klappt eine kleine Liste auf. Nur für Verwalter (und Admin), keine eigenen Farben. */
@@ -57894,8 +57901,21 @@
     } else if(z){ _apv.zeit = z.dataset.apvZeit; try{ localStorage.setItem('prophos_apv_zeit', _apv.zeit) }catch(_){} apvRender() }
   })
   window.addEventListener('prophos:theme', () => { try{ if(_apv.graf){ apvGrafWeg(); apvRender() } }catch(_){} })
-  window._apvOeffnen = an => { const r = document.getElementById('apv-root'); if(!r) return; r.hidden = !an; if(an){ apvRender(); setTimeout(() => apvLaden(false), _apv.d ? 0 : 1500) } }   // PLANER-SCHNELL: erst nach dem Planer selbst
-  window._apvGruppeNeu = () => { const r = document.getElementById('apv-root'); _apv.d = null; _apv.at = 0; if(!r || r.hidden) return; apvRender(); apvLaden(true) }
+  /* VERLAUF IN € AUS (29.10.2026, Finn: „Mach den Block visuell weg, der fuckt nur ab"): kein Panel, kein Zeichnen, keine Abfrage
+   * /admin/auto-plan/verlauf-eur mehr (spart Ladezeit im Challenge-Planer). Code bleibt — wieder an: APV_AN = true. */
+  const APV_AN = false
+  const AP_HEUTE_BILANZ_CHALLENGE = false   // Heute-Bilanz im Admin-Challenge-Planer (s. apIdsKopf), 29.10.2026 aus
+  /* CHALLENGE-PLANER SCHLANK (29.10.2026, Finn: „Challenge-Planer und Funded-Planer viel zu viel rumgesiffelt … so viele Texte, so viele Zahlen …
+   * schmaler, clean, smooth, der Rest kann visuell weg"). Bleibt: Kacheln Long/Short · Waage (Futures) · P&L hypothetisch · Heute (netto + Bot-/
+   * Hedge-Schalter), „Neue Hedge-Trades bestätigen" (#ahf-root), Zeitstrahl, Läuft · Braucht dich · Wartet auf Start, „Heute beendet" eingeklappt.
+   * Nur ausgeblendet (kein Zeichnen): ID-Leiste mit Fortschritt, Gruppen-Leiste, Firmen-Chips, Heute je ID, Charts, Heute-Bilanz, Verlauf in €,
+   * Erklärtexte. Code bleibt — wieder alles: AP_SCHLANK = false, dazu AP_HEUTE_BILANZ_CHALLENGE = true (Heute-Bilanz) und APV_AN = true (Verlauf in €).
+   * FUNDED-PLANER nach demselben Prinzip (Master 29.10.2026, Finns Satz oben): Kacheln Long/Short + P&L hypothetisch, „Zu bestätigen" (immer —
+   * Funded wird von Hand bestätigt), Zeitstrahl, Läuft · Braucht dich · Wartet auf Start, „Heute beendet" eingeklappt; Kopf nur Knöpfe („Jetzt
+   * planen", ⚙ IDs, ↻) + Chip „Vorschau", solange der Funded-Planer aus ist. Nur Funded zurück: AP_SCHLANK_FUNDED = false. */
+  const AP_SCHLANK = true, AP_SCHLANK_FUNDED = true
+  window._apvOeffnen = an => { const r = document.getElementById('apv-root'); if(!r) return; const zeigen = !!an && APV_AN; r.hidden = !zeigen; if(zeigen){ apvRender(); setTimeout(() => apvLaden(false), _apv.d ? 0 : 1500) } }   // PLANER-SCHNELL: erst nach dem Planer selbst
+  window._apvGruppeNeu = () => { const r = document.getElementById('apv-root'); _apv.d = null; _apv.at = 0; if(!r || r.hidden || !APV_AN) return; apvRender(); apvLaden(true) }
   window._apvStub = d => { _apv.d = d; _apv.fehler = ''; _apv.at = Date.now(); const r = document.getElementById('apv-root'); if(r) r.hidden = false; apvRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('apv-root'); if(r && !r.hidden && r.offsetParent && !document.hidden) apvLaden(false) }, 60000)
   /* ══ NEUE HEDGE-TRADES BESTÄTIGEN (29.10.2026, Finn über Master: „Bevor wir die Trades mit Auto-Planen machen, will ich alle Trades, die mit
@@ -58157,7 +58177,7 @@
     return pts
   }
 
-  function tplKachelnHtml(D){
+  function tplKachelnHtml(D, o){
     // KACHELN (Finn 07.10.2026 zu .1115): Long/Short im Spiel = nur LAUFENDE ungehedgte Trades (Einsatz € aus offen[]), geplante als
     // Unterzeile „+ n geplant · € "; Netto: Hauptzahl laufend („jetzt"), Unterzeile „bis Tagesende mit geplanten ±€". Chart unverändert.
     const lauf = D.trades.filter(t => t.status === 'laeuft' && !t.gehedgt), plan = D.trades.filter(t => (t.status === 'offen' || t.status === 'bestaetigt') && !t.gehedgt)
@@ -58183,6 +58203,21 @@
         <div class="tpl-ls"><i style="width:${anteil.toFixed(1)}%;background:var(--good)"></i><i style="flex:1;background:var(--danger)"></i></div>
         <span class="kpi-delta umbruch" title="${tag ? `Long heute ${tplEur(Lt)} · Short heute ${tplEur(St)} (Eröffnungs-Gewicht, laufend + beendet)` : 'Netto der laufenden Trades · darunter mit den geplanten bis Tagesende'}${band}">${unterN}</span>${tplSzKachelHtml(D)}</div>`
     const hy = tplHypo(D)
+    if(o && o.schlank){
+      // SCHLANK (29.10.2026, Admin-Challenge-Planer): je Kachel eine große Zahl + höchstens eine kurze Zeile; Waage nur Futures
+      const kS = (label, wert, cls, zeile, tip) => `<div class="kpi"><div class="kpi-label"${tip ? ` title="${escapeHtml(tip)}"` : ''}>${label}</div><div class="kpi-value ${cls || ''}">${wert}</div>${zeile ? `<span class="kpi-delta">${zeile}</span>` : ''}</div>`
+      const nL = lauf.filter(t => t.long).length, nS = lauf.filter(t => !t.long).length
+      const wf = d && d.waage_an && d.klassen && d.klassen.futures
+      let kw
+      if(wf){
+        const leer = !(wf.n_long || wf.n_short), ok = wf.passt !== false
+        kw = kS('Waage jetzt', leer ? '–' : `${wf.n_long || 0} : ${wf.n_short || 0}`, leer ? '' : ok ? 'tpl-gut' : 'tpl-rot',
+          leer ? 'Futures · nichts läuft' : `Futures · ${ok ? 'ausgeglichen' : 'unausgeglichen'}`, ok || leer ? 'Futures Long : Short (laufend + Starts in ≤ 2 min), Grenze 2 : 1' : String(wf.grund || ''))
+      }else kw = kS(tag ? 'Netto heute' : 'Netto', vz(N), N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : '', '')
+      if(o.funded) return `<div class="kpis tpl-kpis3">${kS('Long im Spiel', '▲ ' + tplEur(Ll), 'tpl-gut', `${nL} laufend`)}${kS('Short im Spiel', '▼ ' + tplEur(Sl), 'tpl-rot', `${nS} laufend`)}${tplHypoKachelHtml(hy)}</div>`   // Funded: ohne Waage/Heute
+      return `<div class="kpis tpl-kpis5">${kS('Long im Spiel', '▲ ' + tplEur(Ll), 'tpl-gut', `${nL} laufend`)}${kS('Short im Spiel', '▼ ' + tplEur(Sl), 'tpl-rot', `${nS} laufend`)}${kw}`
+        + `${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D, { schlank: true }) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
+    }
     // Kachel „Heute" statt der Bot-Kachel (Finn 08.10.2026); altes Backend ohne delta.heute_beendet → Bot-Kachel wie bisher
     return `<div class="kpis tpl-kpis5">${k1}${k2}${tplWaageKachelHtml(d) || k3}${tplHypoKachelHtml(hy)}${tplHeuteKachelHtml(D) || apdBotKachelHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
@@ -59759,7 +59794,7 @@
       return `${wer}${konto} ${tplUhrIso(z.ende)}: ${was}`
     }).join('\n')
   }
-  function tplHeuteKachelHtml(D){
+  function tplHeuteKachelHtml(D, o){
     const ids = D && D.sicht instanceof Set ? D.sicht : null
     const zeilen = tplHeuteZeilen(ids); if(!zeilen) return ''
     const s = tplHeuteSumme(zeilen), mit = s.n - s.offen - s.ohne
@@ -59771,7 +59806,8 @@
       + (zeilen.length ? '\n\n' + tplHeuteHerleitung(zeilen, ids) : '')
     return `<div class="kpi tpl-heute"><div class="kpi-label" title="${escapeHtml(tip)}">Heute</div>
         <div class="kpi-value ${tplKlE(s.netto)}" title="${escapeHtml(tip)}">${mit ? tplVzE(s.netto) : '–'}<small>netto</small></div>
-        <span class="kpi-delta umbruch" title="${escapeHtml(tip)}"><b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren${neben ? ` · ${neben}` : ''}</span>
+        ${o && o.schlank ? `<span class="kpi-delta" title="${escapeHtml(tip)}"><b class="tpl-gut">${tplVzE(s.plus)}</b> · <b class="tpl-rot">${tplVzE(s.minus)}</b></span>`
+          : `<span class="kpi-delta umbruch" title="${escapeHtml(tip)}"><b class="tpl-gut">${tplVzE(s.plus)}</b> gewonnen · <b class="tpl-rot">${tplVzE(s.minus)}</b> verloren${neben ? ` · ${neben}` : ''}</span>`}
         ${apdBotKleinHtml(apdDaten(), apdAdmin(), tplUhrIso)}</div>`
   }
   const TPL_HB_ART = { bestanden: ['bestanden', 'gut'], geblowt: ['geblowt', 'rot'], offen: ['nicht gelesen', 'offen'] }
@@ -77870,6 +77906,9 @@
   }
   // laeuft = fertiger „Läuft"-Block (apIdsOffenHtml) — steht seit 08.10.2026 direkt unter den Charts (Finn: „den Läuft-Block packen und
   // unter PNL hypothetisch heute da drunter packen"); ohne Kopf (Fehler/fehlende Bausteine) kommt er trotzdem
+  // Schlank gilt nur im Challenge-Planer (Funded unverändert), Schalter AP_SCHLANK
+  function apSchlankJetzt(){ try{ return AP_SCHLANK && (_apIdsArtWert !== 'funded' || AP_SCHLANK_FUNDED) }catch(_){ return false } }
+  function apSchlankFunded(){ try{ return apSchlankJetzt() && _apIdsArtWert === 'funded' }catch(_){ return false } }
   function apIdsKopfHtml(laeuft = ''){
     if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return laeuft
     try{
@@ -77899,7 +77938,13 @@
       // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
       let heuteKonten = ''   // Heute je ID (12.10.2026) wie auf der Planer-Seite, mit gewählter ID nur ihre Zeile
       try{ if(typeof tplHeuteKontenHtml === 'function' && typeof tplAbdeckung === 'function'){ const ab = tplAbdeckung(D); heuteKonten = tplHeuteKontenHtml(u ? ab.filter(o => o.uid === String(u)) : ab) } }catch(e){ console.warn('[apIds] Heute je ID', e) }
-      try{ return seg + firmenChips + tplKachelnHtml(DF) + tplHeuteBilanzHtml({ uids: u ? new Set([String(u)]) : null, firma: fs.firma }) + tplZeitstrahlHtml(DF, zeilenF) + heuteKonten + tplChartsUmschalterHtml(DF, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
+      // HEUTE-BILANZ AUS IM CHALLENGE-PLANER (29.10.2026, Finn: „Mach den Block visuell weg, der fuckt nur ab"): der Block „Heute · Dubai-Tag ·
+      // Master-P&L" (Futures/CFD je Firma) wird hier nicht mehr gezeichnet — Funded-Planer und Trade-Planer-Seite unverändert. Wieder an:
+      // AP_HEUTE_BILANZ_CHALLENGE = true. Er rechnet nur aus schon geladenen Radar-Zeilen, eine eigene Abfrage gibt es nicht.
+      let hbHtml = ''
+      try{ if(!apSchlankJetzt() && (AP_HEUTE_BILANZ_CHALLENGE || _apIdsArtWert === 'funded')) hbHtml = tplHeuteBilanzHtml({ uids: u ? new Set([String(u)]) : null, firma: fs.firma }) }catch(_){ hbHtml = '' }
+      if(apSchlankJetzt()) try{ return seg + tplKachelnHtml(DF, { schlank: true, funded: apSchlankFunded() }) + tplZeitstrahlHtml(DF, zeilenF) + laeuft + braucht } finally{ _tpl.tag = alt }   // SCHLANK (29.10.2026)
+      try{ return seg + firmenChips + tplKachelnHtml(DF) + hbHtml + tplZeitstrahlHtml(DF, zeilenF) + heuteKonten + tplChartsUmschalterHtml(DF, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
     }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return laeuft }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
@@ -78070,7 +78115,9 @@
     // Reihenfolge (Finn 08.10.2026: „Mach die laufenden Trades nach oben über den Block mit Wartet auf Start"): Läuft · Zu bestätigen · Wartet auf Start
     // Reihenfolge seit 08.10.2026 (Finn über den Master): Braucht dich (Kopf) · Zu bestätigen · Wartet auf Start · Läuft · Heute beendet
     // seit 08.10.2026 ~11:45 Dubai (Finn): Läuft direkt unter „P&L hypothetisch heute" (apIdsKopfHtml), dann Braucht dich · Zu bestätigen · Wartet · Heute beendet
-    return { laeuft: apIdsBlockHtml('laeuft', wl.laeuft, kopfL), rest: apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO) + apIdsBlockHtml('warten', wl.warten, kopfW) }
+    // SCHLANK (29.10.2026): „Zu bestätigen" nur, wenn wirklich etwas zu bestätigen ist (der Bot bestätigt sonst selbst)
+    const offenBlock = apSchlankJetzt() && !apSchlankFunded() && !o.length ? '' : apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO)   // Funded: immer (Bestätigen von Hand)
+    return { laeuft: apIdsBlockHtml('laeuft', wl.laeuft, kopfL), rest: offenBlock + apIdsBlockHtml('warten', wl.warten, kopfW) }
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
@@ -78313,6 +78360,7 @@
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
     const rows = _apIds.rows, drin = rows.filter(r => r.drin || r.gruppen_planer), u = apSichtUid()   // Gruppen-Planer-IDs zählen wie im Planer (13.10.2026)
+    if(apSchlankJetzt() && u){ apSichtSetzen(null); return }   // SCHLANK (29.10.2026): ohne ID-Leiste gibt es keinen Weg zurück aus einer Einzel-Sicht → immer „alle"
     const lzAt = _ap.letzter && _ap.letzter.at && !_ap.letzter.trocken ? tplUhrIso(_ap.letzter.at) : ''
     // PC-Tab-Lebenszeichen je ID (Slave 2, .1180: pcStandPunktHtml → grün/grau/rot, '' solange nichts geladen) rechts neben dem Namen
     const pcs = uid => (typeof window.pcStandPunktHtml === 'function') ? (window.pcStandPunktHtml(String(uid)) || '') : ''
@@ -78358,10 +78406,13 @@
       : _apIds.menu === 'verw' ? `<div class="ap-idr-menu" data-ap-menu-box><div class="h">Haken = im Trade-Planer (gilt ab dem nächsten Lauf)</div>${Z.map(mz).join('')}</div>` : ''
     const rechts = `<div class="ap-idr-r">${raus.length ? `<button type="button" class="ap-idr-m${_apIds.menu === 'raus' ? ' auf' : ''}" data-ap-menu="raus" title="IDs ohne Planer-Haken">+${raus.length}<span class="lang"> nicht im Planer</span> ▾</button>` : ''}
         <button type="button" class="ap-idr-m${_apIds.menu === 'verw' ? ' auf' : ''}" data-ap-menu="verw" title="Planer-Haken aller IDs">⚙<span class="lang"> IDs verwalten</span> ▾</button></div>`
+    const kopfKnoepfe = `${(_ap.admin === true || _ap.imPlaner) ? `<button type="button" class="btn btn-ghost" data-tpl-nachplan="1" style="margin-left:auto;padding:3px 9px;font-size:12px"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute (neu gekauft, Phase umgestellt, Haken gesetzt) sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}<button type="button" class="btn btn-ghost" id="ap-ids-tpl" style="margin-left:${(_ap.admin === true || _ap.imPlaner) ? '6px' : 'auto'};padding:3px 9px;font-size:12px" title="Tagesplan als Zeitstrahl je ID (eigene Seite, nicht mehr in der Seitenleiste)">Trade-Planer öffnen</button><button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:6px;padding:3px 9px;font-size:12px" title="Neu laden">↻</button>`
     const kopf = `<div class="ap-ids-kopf"><b>IDs im Trade-Planer · ${drin.length} von ${rows.length}</b>
         <span title="Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.">Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${lzAt ? ' · letzter Lauf ' + escapeHtml(lzAt) : _apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
-        ${(_ap.admin === true || _ap.imPlaner) ? `<button type="button" class="btn btn-ghost" data-tpl-nachplan="1" style="margin-left:auto;padding:3px 9px;font-size:12px"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute (neu gekauft, Phase umgestellt, Haken gesetzt) sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}<button type="button" class="btn btn-ghost" id="ap-ids-tpl" style="margin-left:${(_ap.admin === true || _ap.imPlaner) ? '6px' : 'auto'};padding:3px 9px;font-size:12px" title="Tagesplan als Zeitstrahl je ID (eigene Seite, nicht mehr in der Seitenleiste)">Trade-Planer öffnen</button><button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:6px;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
-    const leiste = kopf + (rows.length ? `<div class="ap-idr-wrap"><div class="ap-idr" role="tablist">${alle}${im.map(reiter).join('')}${raus.filter(z => z.uid === u).map(reiter).join('')}</div>${rechts}${menu}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
+        ${kopfKnoepfe}</div>`
+    // SCHLANK (29.10.2026): nur die Knopfzeile (⚙ IDs verwalten, Nachplanen, Trade-Planer öffnen, ↻) — ohne Text und ohne ID-Leiste
+    const schlank = apSchlankJetzt()
+    const leiste = schlank ? `<div class="ap-ids-kopf ap-ids-kopf-schlank">${kopfKnoepfe}${rechts}</div>${menu ? `<div class="ap-idr-wrap ap-idr-wrap-schlank">${menu}</div>` : ''}` : kopf + (rows.length ? `<div class="ap-idr-wrap"><div class="ap-idr" role="tablist">${alle}${im.map(reiter).join('')}${raus.filter(z => z.uid === u).map(reiter).join('')}</div>${rechts}${menu}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
       // ID-Details (apIdDetailRender) seit 08.10.2026 nicht mehr unter der Leiste: die ganze Seite filtert nach der ID (Finns Reihenfolge)
     root.style.padding = '6px 0'; root.style.color = ''
     try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags (und der gewählten ID) einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
@@ -78371,8 +78422,12 @@
     let ow = { laeuft: '', rest: '' }; try{ ow = apIdsOffenHtml() }catch(e){ console.warn('[ap-ids] Vorschläge/Läuft', e) }
     // Ladefehler Planer/Delta sichtbar über allem (09.10.2026) — der Kopf darunter zeigt sonst still den Zwischenspeicher
     const fz = [typeof apLadeFehlerText === 'function' ? apLadeFehlerText() : '', typeof apdLadeFehlerText === 'function' ? apdLadeFehlerText() : ''].filter(Boolean)
-    let gpHtml = ''; try{ gpHtml = gpLeisteHtml() }catch(e){ console.warn('[gruppen-plan] Leiste', e) }
+    let gpHtml = ''; if(!schlank) try{ gpHtml = gpLeisteHtml() }catch(e){ console.warn('[gruppen-plan] Leiste', e) }
+    // „Heute beendet" eingeklappt (SCHLANK, 29.10.2026); offen/zu bleibt über das Neuzeichnen (_apIds.hbAuf)
+    if(schlank && heuteHb) heuteHb = `<details class="ap-hb-klapp" data-ap-hb${_apIds.hbAuf ? ' open' : ''}><summary>Heute beendet</summary>${heuteHb}</details>`
+    root.classList.toggle('ap-schlank', schlank)
     root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + leiste + gpHtml + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
+    root.querySelector('details[data-ap-hb]')?.addEventListener('toggle', e => { _apIds.hbAuf = !!e.target.open })
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
     try{ gpVerdrahten(root) }catch(e){ console.warn('[gruppen-plan] Knöpfe', e) }
     const det = root.querySelector('#ap-id-detail'), detFn = typeof window.apIdDetailRender === 'function' ? window.apIdDetailRender : typeof apIdDetailRender === 'function' ? apIdDetailRender : null
@@ -78593,6 +78648,10 @@
       n.textContent = _fdpPlantGerade ? 'plant…' : 'Jetzt planen'; n.disabled = _fdpPlantGerade
       n.title = 'Funded-Planer jetzt laufen lassen — nach dem heutigen Fenster für den nächsten Handelstag. Legt Vorschläge OHNE Startzeit an; gestartet wird erst nach „Bestätigen".'
       n.addEventListener('click', fdpJetztPlanen); b.replaceWith(n) })
+    // SCHLANK (29.10.2026): der Kopf-Text „Funded-Planer aus · Vorschau" fehlt — kleiner Chip in der Knopfzeile, solange er aus ist
+    const ks = root.querySelector('.ap-ids-kopf-schlank')
+    if(ks && !Q.aktiv && !ks.querySelector('[data-fdp-vorschau]')){ const c = document.createElement('span'); c.className = 'chip chip-neutral'; c.dataset.fdpVorschau = '1'
+      c.textContent = 'Vorschau'; c.title = 'Funded-Planer aus — Trockenlauf, nichts wird angelegt oder gestartet'; c.style.marginRight = 'auto'; ks.prepend(c) }
     root.querySelectorAll('.gp-leiste, .gp-liste').forEach(e => e.remove())
     root.querySelectorAll('.ap-idr-menu .h').forEach(h => { h.textContent = h.textContent.replace(/Trade-Planer/g, 'Funded-Planer') })
     root.querySelectorAll('.ap-idr-m').forEach(b => { b.title = String(b.title || '').replace(/Planer-Haken/g, 'Funded-Planer-Haken') })
