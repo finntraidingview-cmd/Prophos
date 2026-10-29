@@ -16687,8 +16687,10 @@
     // FundedNext Futures (FNF) 91,5 (Finn 29.10.2026: „Deckel 4.000 $, Split 91,5 %") — VOR FundedNext (CFD, 76,5), der Name enthält „FundedNext"
     const admIstFnf = firm => admIstFundedNext(firm) && /futur/i.test(String(firm || ''))
     // Topstep 90 (Finn 29.10.2026: „alles eins zu eins wie Tradeify, nur Deckel 5.000 $" — firm_rules: 90/10 seit 12.01.2026; bis .1809 fiel Topstep auf 80)
+    // Apex 100 % in USD (Finn 29.10.2026 05:30: „Apex Split 100 % in USD, Puffer 154.000" — bis .1837 fiel Apex auf 80; Puffer steht in ADM_APEX_DD)
     const admPayoutPctDefault = firm => istTradeifyCfd(firm) ? 80 : /tradeify/i.test(String(firm || '')) ? 90 :   // Tradeify CFD 80 % (23.10.2026)
       /topstep/i.test(String(firm || '')) ? 90 : /lucid/i.test(String(firm || '')) ? 90 :   // Lucid 90 % (Finn 29.10.2026, vorher Standard 80)
+      /apex/i.test(String(firm || '')) ? 100 :
       /blue\s*guardian/i.test(String(firm || '')) ? 85 : admIstFnf(firm) ? 91.5 : admIstFundedNext(firm) ? 76.5 : 80
     const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
     function admAccGroesse(name, balance){
@@ -49338,7 +49340,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1837'
+  const OS_TAB_BUILD = '2026-09-22.1838'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
