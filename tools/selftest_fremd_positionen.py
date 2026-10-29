@@ -14,7 +14,7 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"datetime": datetime, "timezone": timezone, "re": re}
     teile = [re.search(r"^FP_FRISCH_S = .*$", src, re.M).group(0)]
-    for name in ("lt_echo_live_wahl", "_fp_ts", "fp_plan_aktiv", "fp_erkennen", "fp_konto_norm", "fp_preis_norm", "fp_erkennen_tv", "fp_alarme"):
+    for name in ("lt_echo_live_wahl", "_fp_ts", "fp_plan_aktiv", "fp_erkennen", "fp_konto_norm", "fp_preis_norm", "fp_erkennen_tv", "fp_erkennen_tsx", "fp_alarme"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n\n".join(teile), ns)
@@ -145,6 +145,21 @@ def main():
     check([(x[0], x[1]) for x in al] == [(5, "plan:p1"), (5, "hand:5-7")],
           f"Alarme: plan:p1 + hand:5-7 einmal, plan:p9 schon gemeldet, unbekannte Zeile raus ({[(x[0], x[1]) for x in al]})")
     check(A([{"id": 5, "alarm_keys": ["plan:p1", "hand:5-7"]}, {"id": 7, "alarm_keys": []}], k[:3]) == [], "alles gemeldet → kein Alarm")
+
+    # TopstepX-Auge (29.10.2026): nur positionen_ok, nicht ausgeloggt, volle Kontonummer; Konto mit aktivem tsv2-Plan bleibt unbewertet
+    TSX = ns["fp_erkennen_tsx"]
+    kt = {"EXPRESSV200000100000001": {"id": "k9", "user_id": "u-marco", "firm": "Topstep", "name": "150k Express", "account_type": "funded"}}
+    z = lambda **o: dict({"konto": "EXPRESS-V2-000001-00000001", "positionen": [{"symbol": "MNQZ6", "seite": "buy", "menge": 2, "avg": 25000.0}],
+                          "positionen_ok": True, "ausgeloggt": False, "abgekuerzt": False, "updated_at": iso(5)}, **o)
+    fr, bw = TSX([z()], kt, [], jetzt)
+    check(len(fr) == 1 and fr[0]["richtung"] == "buy" and fr[0]["ident"] == "MNQZ6:buy:25000.00" and bw == {"EXPRESSV200000100000001"},
+          "TopstepX: Hand-Position ohne Plan → fremd")
+    check(TSX([z(ausgeloggt=True)], kt, [], jetzt) == ([], set()) and TSX([z(abgekuerzt=True)], kt, [], jetzt) == ([], set())
+          and TSX([z(abgekuerzt=None)], kt, [], jetzt) == ([], set()) and TSX([z(positionen_ok=False)], kt, [], jetzt) == ([], set())
+          and TSX([z(updated_at=iso(200))], kt, [], jetzt) == ([], set()), "TopstepX: ausgeloggt / abgekürzt / unklar / nicht ok / alt → keine Aussage")
+    check(TSX([z()], kt, [{"master_account_id": "k9", "status": "open"}], jetzt) == ([], set()), "TopstepX: laufender tsv2-Plan → Konto unbewertet")
+    fr, bw = TSX([z(positionen=[])], kt, [], jetzt)
+    check(fr == [] and bw == {"EXPRESSV200000100000001"}, "TopstepX: flach bewiesen → bewertet ohne Fremde (weg_at-Wache)")
 
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)

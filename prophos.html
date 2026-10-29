@@ -26483,6 +26483,52 @@
     TVN_TAKT_MIN_MS + Math.random() * (TVN_TAKT_MAX_MS - TVN_TAKT_MIN_MS)) })()
   window._tvNeuladen = { frei: tvNeuladenFrei, tmFrei: tvTmFrei, tmNoetig: tvTmNoetig, tick: tvNeuladenTick, letzter: () => _tvnLetzter, planSperre: tvnPlanSperre,
     blickTv: tvnBlickTv, blickTsx: tvnBlickTsx, dbFrei: tvnDbFrei, skipMelden: tvTmSkipMelden }   // Test-Haken
+  /* ══ TOPSTEPX-HAND-POSITIONEN FÜR DEN RICHTUNGSSCHUTZ (29.10.2026, Lücke D aus dem Richtungsschutz-Audit, Finn: „auf gar keinen Fall
+   * interner Hedge"). Hand-Positionen in TopstepX ohne Plan waren für fremd_positionen unsichtbar (fp_tick las nur mt5_live/echoplus_live).
+   * Das TopstepX-Auge (Panel /api/tsx-stand) sieht Konto + Positionen live → dieser PC schreibt sie wie die TV-Brücke nach echoplus_live in
+   * eine eigene Zeile tsx_live (id = PC, sql/2026-10-29_tsx_live.sql); Railway (fp_tick, quelle 'tsx') gleicht gegen laufende Pläne ab und
+   * führt die weg_at-Wache. positionen_ok nur mit Beweis: Stand ≤ 10 s, nicht ausgeloggt, volle Kontonummer (abgekuerzt === false), Liste zu,
+   * und flach === true (leer bewiesen) oder eine gelesene Position. GRENZE: das Auge sieht nur das GERADE GEWÄHLTE TopstepX-Konto — andere
+   * Konten desselben Logins sind unsichtbar (wie bei TradingView). Takt 5 s, geschrieben nur bei Änderung, sonst Lebenszeichen alle 30 s
+   * (Supabase-Diät, Railway nimmt Zeilen ≤ 90 s). Nur lesen, kein Klick. ══ */
+  const TSX_LIVE_TAKT_MS = 5000, TSX_LIVE_LEBEN_MS = 30000
+  let _tsxLive = { fp: '', at: 0, aus: 0, busy: false }
+  // REIN RECHNEND (window._tsxLive.zeile): Antwort von GET /api/tsx-stand + PC → Zeile für tsx_live oder null (kein frischer Stand)
+  function tsxLiveZeile(r, pc, jetzt){
+    if(!pc || !(r && r.ok && typeof r.alter_s === 'number' && r.alter_s <= 10 && r.stand && typeof r.stand === 'object')) return null
+    const st = r.stand, k = st.konto || {}
+    const pos = (Array.isArray(st.positionen) ? st.positionen : []).filter(x => x && typeof x === 'object').slice(0, 10).map(x => ({
+      symbol: x.symbol ? String(x.symbol).slice(0, 16) : null, seite: x.seite === 'buy' || x.seite === 'sell' ? x.seite : null,
+      menge: typeof x.menge === 'number' && isFinite(x.menge) ? x.menge : null, avg: typeof x.avg === 'number' && isFinite(x.avg) ? x.avg : null }))
+    const konto = k.kontonr ? String(k.kontonr).slice(0, 64) : null
+    const ok = !st.ausgeloggt && !!konto && k.abgekuerzt === false && !k.liste_offen
+      && (st.flach === true ? pos.length === 0 : (pos.length > 0 && pos.every(x => x.symbol && x.seite)))
+    return { id: pc, pc_name: pc, konto, abgekuerzt: k.abgekuerzt === false ? false : k.abgekuerzt === true ? true : null, positionen: pos,
+             positionen_ok: ok, flach: st.flach === true ? true : st.flach === false ? false : null, ausgeloggt: !!st.ausgeloggt,
+             script: String(r.script || '').slice(0, 24) || null, stand_ts: new Date(jetzt - r.alter_s * 1000).toISOString(),
+             updated_at: new Date(jetzt).toISOString() }
+  }
+  async function tsxLiveTick(){
+    if(_tsxLive.busy || !MT5_LOCAL || typeof window.mtcApi !== 'function' || Date.now() < _tsxLive.aus) return
+    _tsxLive.busy = true
+    try{
+      let r = null; try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 1500 }) }catch(_){ r = null }
+      const pc = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
+      const z = tsxLiveZeile(r, pc, Date.now()); if(!z) return
+      const fp = JSON.stringify([z.konto, z.positionen, z.positionen_ok, z.flach, z.ausgeloggt, z.abgekuerzt])
+      if(fp === _tsxLive.fp && Date.now() - _tsxLive.at < TSX_LIVE_LEBEN_MS) return
+      const { error } = await supabase.from('tsx_live').upsert(z)
+      if(error){
+        // Tabelle noch nicht eingespielt / RLS → 10 min Ruhe statt alle 5 s eine Fehl-Anfrage
+        if(/tsx_live|relation|does not exist|schema cache/i.test(String(error.message || ''))) _tsxLive.aus = Date.now() + 10 * 60000
+        return
+      }
+      _tsxLive.fp = fp; _tsxLive.at = Date.now()
+    }finally{ _tsxLive.busy = false }
+  }
+  ;(function tsxLiveLoop(){ setTimeout(async () => { try{ await tsxLiveTick() }catch(e){ console.warn('[tsx-live]', (e && e.message) || e) } tsxLiveLoop() },
+    TSX_LIVE_TAKT_MS * (0.9 + Math.random() * 0.2)) })()
+  window._tsxLive = { zeile: tsxLiveZeile, tick: tsxLiveTick, stand: () => Object.assign({}, _tsxLive) }   // Test-Haken
   window._heimWache = { tick: heimWacheTick, wiederholen: heimWiederholen, stand: () => ({ fremdSeit: _hwFremdSeit, naechster: _hwNaechsterHeimweg, wiederN: _hwWiederN, wiederGeplant: !!_hwWiederTimer, fehlN: _hwFehlN, pulsWegAt: _hwPulsWegAt, aus: _hwAus, okOffen: _hwOkOffen, okFremdN: _hwOkFremdN,
     unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()),
     endHalt: Object.assign({}, _hwEndHalt), blindSeit: _hwBlindSeit, blindErledigt: _hwBlindErledigt }), steht: pulsStehtImKonto, heimFrei: pulsHeimFrei }   // Test-Haken (Stub)

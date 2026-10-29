@@ -30278,7 +30278,13 @@ def admin_ziel_wache_jetzt():
 # positionen_ok (vollständige Lesung, nicht blind). Orbit-Pläne führen kein Ticket → ein Konto mit laufendem/eben beendetem Plan (Master
 # oder Gegenkonto) bleibt unbewertet; ident = Symbol:Richtung:Einstieg (neuer Einstieg = neue Position, neues seit). Andere Unterkonten
 # als das aktive sieht TV nicht. Probe: 3 offene TV-Positionen, alle auf Konten mit laufendem Orbit-V2-Plan → 0 Fremde.
-# TopstepX (tsv2) läuft nicht über TV, puls_augen nur als Schnappschuss im Puls-Lauf → nicht erkannt.
+# TOPSTEPX (29.10.2026, Lücke D des Richtungsschutz-Audits, Finn: „auf gar keinen Fall interner Hedge"): das TopstepX-Auge (Userscript
+# im Puls-Chrome) meldet dem Panel Konto + Positionen live; der PC-Tab schreibt sie je PC nach tsx_live (sql/2026-10-29_tsx_live.sql:
+# konto, positionen [{symbol, seite, menge, avg}], positionen_ok mit Beweis — Stand ≤ 10 s, nicht ausgeloggt, volle Kontonummer,
+# flach bewiesen oder Position gelesen). Erkennung wie TV (fp_erkennen_tsx → fp_erkennen_tv, quelle 'tsx'): je Konto die frischeste
+# vollständige Lesung, Konten mit aktivem Plan (tsv2-Master) bleiben unbewertet, ident = Symbol:Richtung:Einstieg, weg_at-Wache wie TV.
+# GRENZE: das Auge sieht nur das GERADE GEWÄHLTE TopstepX-Konto — andere Konten desselben Logins bleiben unsichtbar. Ohne Tabelle
+# (SQL noch nicht eingespielt) bleibt die Quelle still, MT5 und TV laufen unverändert.
 # Eigener 15-s-Takt (fp_loop, nur Railway), ein Read auf mt5_live je Takt, keine Realtime. Zwei Container gleichzeitig (Rollout): Upsert
 # idempotent, Push nur vom Lauf, dessen Guard-PATCH (alarm_keys enthält den Schlüssel noch nicht) wirklich eine Zeile geändert hat. ══
 FP_TAKT_S = 15
@@ -30406,6 +30412,19 @@ def fp_erkennen_tv(tv_rows, konten, plaene, jetzt):
     return fremde, bewertet
 
 
+def fp_erkennen_tsx(tsx_rows, konten, plaene, jetzt):
+    """REIN RECHNEND (testbar): TopstepX-Auge (tsx_live {konto, positionen [{symbol, seite, menge, avg}], positionen_ok, ausgeloggt,
+    abgekuerzt, updated_at}) → (fremde, bewertet) über fp_erkennen_tv. Nur Zeilen mit positionen_ok, nicht ausgeloggt, volle Kontonummer."""
+    rows = []
+    for z in tsx_rows or ():
+        if not isinstance(z, dict) or z.get("ausgeloggt") or z.get("abgekuerzt") is not False or not isinstance(z.get("positionen"), list):
+            continue
+        pos = [{"richtung": str(x.get("seite") or "").lower(), "symbol": x.get("symbol"), "avg_fill": x.get("avg"), "menge_zahl": x.get("menge")}
+               for x in z["positionen"] if isinstance(x, dict)]
+        rows.append({"konto": z.get("konto"), "positionen": pos, "positionen_ok": z.get("positionen_ok") is True, "updated_at": z.get("updated_at")})
+    return fp_erkennen_tv(rows, konten, plaene, jetzt)
+
+
 def fp_alarme(aktive, konflikte):
     """REIN: neue Alarme → [(zeilen_id, schluessel, fremd_zeile, konflikt)]. Je Paar ein Schlüssel: „plan:<plan_id>" an der Fremd-Zeile,
     Hand gegen Hand „hand:<klein>-<groß>" nur an der kleineren id (sonst käme derselbe Alarm zweimal). Schon gemeldete (alarm_keys) raus."""
@@ -30454,23 +30473,37 @@ def fp_tick(force=False):
                                   "updated_at": f"gte.{ab}", "master_login": "not.is.null"}) or []
     tv = sb_select("echoplus_live", {"select": "konto,positionen,positionen_ok,updated_at", "updated_at": f"gte.{ab}",
                                      "positionen_ok": "is.true", "konto": "not.is.null"}) or []
+    try:                                         # TopstepX-Auge (29.10.2026) — Tabelle fehlt noch → Quelle still, Rest unverändert
+        tsx = sb_select("tsx_live", {"select": "konto,positionen,positionen_ok,ausgeloggt,abgekuerzt,updated_at", "updated_at": f"gte.{ab}",
+                                     "positionen_ok": "is.true", "konto": "not.is.null"}) or []
+        _fp["tsx_fehlt"] = False
+    except Exception as e:
+        tsx = []
+        if not _fp.get("tsx_fehlt"):
+            print(f"[fremd] ℹ️ tsx_live nicht lesbar ({type(e).__name__}) — TopstepX-Quelle aus, bis sql/2026-10-29_tsx_live.sql eingespielt ist",
+                  flush=True)
+        _fp["tsx_fehlt"] = True
     logins = sorted({str(z.get("master_login") or "").strip() for z in live} - {""})
     tv_konten = sorted({fp_konto_norm(z.get("konto")) for z in tv} - {""})
     tv_roh = sorted({str(z.get("konto") or "").strip() for z in tv} - {""} - set(tv_konten))   # Schreibweise wie in TV, falls anders
-    konten, konten_tv, plaene = {}, {}, []
-    if logins or tv_konten:
+    tsx_konten = sorted({fp_konto_norm(z.get("konto")) for z in tsx} - {""})
+    tsx_roh = sorted({str(z.get("konto") or "").strip() for z in tsx} - {""} - set(tsx_konten))
+    konten, konten_tv, konten_tsx, plaene = {}, {}, {}, []
+    if logins or tv_konten or tsx_konten:
         archiv = _ap_archiviert()
         def nimm(d, k, a):
             if k not in d or (str(d[k]["id"]) in archiv and str(a["id"]) not in archiv):
                 d[k] = a                                          # doppelte External ID: das nicht archivierte Konto gewinnt
         for a in sb_select("accounts", {"select": "id,user_id,firm,name,account_type,external_id,duplikum_linked",
-                                        "external_id": f"in.({','.join(logins + tv_konten + tv_roh)})"}) or []:
+                                        "external_id": f"in.({','.join(logins + tv_konten + tv_roh + tsx_konten + tsx_roh)})"}) or []:
             lg = str(a.get("external_id") or "").strip()
             if lg in logins:
                 nimm(konten, lg, a)
             if fp_konto_norm(lg) in tv_konten:
                 nimm(konten_tv, fp_konto_norm(lg), a)
-        ids = sorted({str(a["id"]) for a in list(konten.values()) + list(konten_tv.values())})
+            if fp_konto_norm(lg) in tsx_konten:
+                nimm(konten_tsx, fp_konto_norm(lg), a)
+        ids = sorted({str(a["id"]) for a in list(konten.values()) + list(konten_tv.values()) + list(konten_tsx.values())})
         if ids:
             seit3 = datetime.fromtimestamp(time.time() - 3 * 86400, timezone.utc).isoformat()
             plaene = sb_select("trade_plans", {
@@ -30480,8 +30513,10 @@ def fp_tick(force=False):
                        f"or(status.in.(open,planned,review),ended_at.gte.{seit3},completed_at.gte.{seit3}))"}) or []
     fremde, bewertet = fp_erkennen(live, konten, plaene, jetzt)
     fremde_tv, bewertet_tv = fp_erkennen_tv(tv, konten_tv, plaene, jetzt)
-    fremde = [dict(f, quelle="mt5") for f in fremde] + [dict(f, quelle="tv") for f in fremde_tv]
-    _fp["logins"], _fp["tv_konten"] = len(bewertet), len(bewertet_tv)
+    fremde_tsx, bewertet_tsx = fp_erkennen_tsx(tsx, konten_tsx, plaene, jetzt)
+    fremde = ([dict(f, quelle="mt5") for f in fremde] + [dict(f, quelle="tv") for f in fremde_tv]
+              + [dict(f, quelle="tsx") for f in fremde_tsx])
+    _fp["logins"], _fp["tv_konten"], _fp["tsx_konten"] = len(bewertet), len(bewertet_tv), len(bewertet_tsx)
     # WEG_AT BLIEB LEER (S4, 18.10.2026: 5 TV-Zeilen ohne weg_at, zuletzt gesehen 09.–16.10., u. a. Apex 150k sell 3): hier stand
     # „aktiv == 0" — aktiv zählt aber nur Zeilen der letzten 3 min. TV liest nur das GERADE AKTIVE Konto, und ein Konto mit laufendem
     # Orbit-Plan bleibt unbewertet; kam das Konto später flach wieder in die Lesung, war die Zeile längst nicht mehr „aktiv", der Takt
@@ -30497,7 +30532,7 @@ def fp_tick(force=False):
                             headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=(5, 15))
             _sb_pruefen(r)
         bekannt = _fp["offen_logins"]            # None = unbekannt (Start) → alle bewerteten Logins schließen lassen
-        for quelle, bw in (("mt5", bewertet), ("tv", bewertet_tv)):
+        for quelle, bw in (("mt5", bewertet), ("tv", bewertet_tv), ("tsx", bewertet_tsx)):
             if bekannt is not None:
                 bw = set(bw) & set(bekannt.get(quelle) or ())   # nur Logins mit offener Zeile — sonst ein leerer PATCH je Takt
             if bw:
@@ -30559,7 +30594,7 @@ def fp_tick(force=False):
 
 def fp_loop():
     """Fremd-Positionen-Wache alle FP_TAKT_S (Railway). Schutzfunktion, idempotent — keine Anlaufsperre nötig (s. o.)."""
-    print(f"[fremd] 👁 Fremd-Positionen-Wache bereit (MT5 + TradingView/Tradovate, alle {FP_TAKT_S} s)", flush=True)
+    print(f"[fremd] 👁 Fremd-Positionen-Wache bereit (MT5 + TradingView/Tradovate + TopstepX-Auge, alle {FP_TAKT_S} s)", flush=True)
     while True:
         try:
             fp_tick()

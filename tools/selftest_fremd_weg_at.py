@@ -15,13 +15,17 @@ from datetime import datetime, timedelta, timezone
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 
-DB = {"fremd": [], "echoplus": [], "accounts": [], "calls": []}
+DB = {"fremd": [], "echoplus": [], "tsx": None, "accounts": [], "calls": [], "upsert": []}
 
 
 def sb_select(t, p):
     DB["calls"].append(("select", t))
     if t == "echoplus_live":
         return [dict(z) for z in DB["echoplus"]]
+    if t == "tsx_live":
+        if DB["tsx"] is None:
+            raise Exception('relation "public.tsx_live" does not exist')   # Tabelle noch nicht eingespielt
+        return [dict(z) for z in DB["tsx"]]
     if t == "accounts":
         return [dict(a) for a in DB["accounts"]]
     if t == "fremd_positionen":
@@ -57,7 +61,7 @@ def lade():
     ns = {"time": time, "re": re, "datetime": datetime, "timezone": timezone,
           "requests": types.SimpleNamespace(exceptions=types.SimpleNamespace(HTTPError=Exception)),
           "sb_select": sb_select, "sb_update": sb_update, "SUPABASE_URL": "x",
-          "_sb_anfrage": lambda *a, **k: DB["calls"].append(("post", a[1].rsplit("/", 1)[-1])) or _Antwort(),
+          "_sb_anfrage": lambda *a, **k: DB["calls"].append(("post", a[1].rsplit("/", 1)[-1])) or DB["upsert"].extend(k.get("json") or []) or _Antwort(),
           "_sb_pruefen": lambda r: None, "_sb_headers": lambda *a: {}, "_ap_archiviert": lambda: set(),
           "lt_echo_live_wahl": lambda rows: {}, "_ap_namen": lambda: ({}, {}), "_zw_admin_uids": lambda: set(),
           "push_an_user": lambda *a, **k: None}
@@ -71,7 +75,7 @@ def lade():
         if tiefe == 0 and src[j - 1] == "}":
             break
     exec(src[i:j], ns)
-    for f in ("_fp_ts", "fp_plan_aktiv", "fp_erkennen", "fp_konto_norm", "fp_preis_norm", "fp_erkennen_tv", "fp_alarme",
+    for f in ("_fp_ts", "fp_plan_aktiv", "fp_erkennen", "fp_konto_norm", "fp_preis_norm", "fp_erkennen_tv", "fp_erkennen_tsx", "fp_alarme",
               "_fp_richtung", "_fp_tabelle_fehlt", "fp_tick"):
         exec(block(f), ns)
     return ns
@@ -121,6 +125,29 @@ def main():
     DB["calls"].clear()
     tick()
     check(ns["_fp"]["offen"] == 0 and ("select", "fremd_positionen") not in DB["calls"], "nichts offen → früher Ausstieg ohne Schreiben")
+
+    # TopstepX-Auge (29.10.2026, quelle 'tsx'): Tabelle fehlt → still; Hand-Position ohne Plan → fremd; flach → weg_at
+    check(ns["_fp"].get("tsx_fehlt") is True, "tsx_live fehlt → TopstepX-Quelle still, Takt läuft weiter")
+    DB["accounts"].append({"id": "a3", "user_id": "u3", "firm": "Topstep", "name": "150k Express", "account_type": "funded",
+                           "external_id": "EXPRESS-V2-000001-00000001"})
+    DB["tsx"] = [{"konto": "EXPRESS-V2-000001-00000001", "positionen": [{"symbol": "MNQZ6", "seite": "sell", "menge": 3, "avg": 25012.75}],
+                  "positionen_ok": True, "ausgeloggt": False, "abgekuerzt": False, "updated_at": jetzt()}]
+    DB["upsert"].clear()
+    tick()
+    u = [z for z in DB["upsert"] if z.get("quelle") == "tsx"]
+    check(len(u) == 1 and u[0]["master_login"] == "EXPRESSV200000100000001" and u[0]["ident"] == "MNQZ6:sell:25012.75"
+          and u[0]["richtung"] == "sell" and u[0]["konto_id"] == "a3", f"TopstepX-Hand-Position ohne Plan → fremd (quelle tsx) ({u[:1]})")
+    DB["fremd"].append({"id": 3, "quelle": "tsx", "master_login": "EXPRESSV200000100000001", "weg_at": None, "zuletzt_gesehen": alt,
+                        "alarm_keys": [], "gegen": []})
+    tick()                                        # wie im echten Ablauf: der Takt, der die Zeile anlegt, kennt sie danach als offen
+    DB["tsx"] = [{"konto": "EXPRESS-V2-000001-00000001", "positionen": [], "positionen_ok": True, "ausgeloggt": False, "abgekuerzt": False,
+                  "updated_at": jetzt()}]
+    tick()
+    check(DB["fremd"][2]["weg_at"] is not None, "TopstepX flach bewiesen → weg_at (wie TV)")
+    DB["fremd"][2]["weg_at"] = None
+    DB["tsx"][0]["abgekuerzt"] = True
+    tick()
+    check(DB["fremd"][2]["weg_at"] is None, "abgekürzte Kontonummer → keine Aussage, Zeile bleibt")
 
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)
