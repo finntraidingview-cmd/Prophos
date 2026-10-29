@@ -601,6 +601,9 @@ def _tab(daten, jetzt):
     elif t.get("login_im_feed") and jetzt - float(t["login_im_feed"].get("s") or 0) > 60:
         t.pop("login_im_feed", None)
     t.update({"rolle": rolle, "last_s": jetzt, "version": daten.get("version") or t.get("version")})
+    # Userscript-Lader (0.10.0, 29.10.2026): {v, eval, laeuft, quelle, bereit, fehler} — der PC-Tab laedt den TV-Tab neu, wenn bereit > laeuft
+    if isinstance(daten.get("lader"), dict):
+        t["lader"] = lader_kurz(daten["lader"])
     if "sichtbar" in daten:
         t["sichtbar"] = daten.get("sichtbar") is not False
     if "fokus" in daten:
@@ -609,6 +612,20 @@ def _tab(daten, jetzt):
     for alt in [k for k, v in _tabs.items() if jetzt - float(v.get("last_s") or 0) > 600 and k != tid]:
         _tabs.pop(alt, None)
     return tid, t
+
+
+def lader_kurz(l):
+    """REIN RECHNEND: Lader-Status aus dem Userscript auf einfache, kurze Felder stutzen (nie ganze Objekte durchreichen)."""
+    out = {}
+    for k in ("v", "eval", "laeuft", "quelle", "bereit", "fehler"):
+        x = l.get(k) if isinstance(l, dict) else None
+        if isinstance(x, bool) or x is None:
+            out[k] = x
+        elif isinstance(x, (int, float)):
+            out[k] = x
+        else:
+            out[k] = str(x)[:80]
+    return out
 
 
 def _effektiv_setzen(jetzt):
@@ -804,6 +821,7 @@ def _mit_an(stand):
     out["konto"] = stand.get("konto") or None
     out["konto_ts"] = stand.get("konto_ts") or None
     out["positionen_tab"] = _btid
+    out["lader"] = (_tabs.get(_btid) or {}).get("lader") if _btid else None   # 29.10.2026: Userscript-Lader des Broker-Tabs
     out["tabs"] = _tabs_liste(jetzt_)
     return out
 

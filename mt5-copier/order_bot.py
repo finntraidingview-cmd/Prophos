@@ -21578,6 +21578,44 @@ def modus_tvkontenliste(cmd):
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}", "cdp")
 
 
+# ══ TV-TAB NEU LADEN FÜR EIN USERSCRIPT-UPDATE (29.10.2026, Finn 05:20: „dass das Tampermonkey-Script immer automatisch und schneller
+# aktualisiert wird"). Der Lader im Puls-Chrome (Userscript ≥ 0.10.0) merkt eine neuere Fassung, sie läuft aber erst nach dem nächsten Laden
+# des TradingView-Tabs. Dieser Modus lädt NUR die Seite neu (_cdp_seite_neu_laden: Page.reload, warten bis sie steht, augen.js neu)
+# — kein Klick, kein Konto, keine Order, kein Fenster nach vorn (Prüfer 29.10.2026): Sitzung mit tv_riegel=False (so schließt
+# _cdp_kachel_weg die Werbe-Kachel NICHT per Maus), ohne _cdp_sitzung_holen (der holt das Fenster groß/öffnet Tabs) und ohne Puls-Chrome-
+# Start (läuft keins oder steht keine TV-Seite da → nichts tun). Der PC-Tab ruft ihn nur, wenn nichts läuft (tvNeuladenFrei). → {ok, aktiv, trail}
+def modus_tvneuladen(cmd):
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "aktiv": "", "quelle": "cdp"}
+    trail = _StempelSpur()
+    _start_versatz(trail)
+    sitz = None
+
+    def raus(code, msg):
+        res["code"], res["msg"], res["trail"] = code, msg, " > ".join(trail)
+        if sitz:
+            sitz.zu()
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+
+    if _handlauf_aktiv():
+        return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nicht neu geladen.")
+    try:
+        if not augen_target_waehlen(_cdp_http("/json/list")):
+            return raus("kein_tab", "Puls-Chrome aus oder keine TradingView-Seite offen — nichts neu geladen.")
+        sitz = _AugenSitzung(trail, tv_riegel=False)
+        st = _cdp_seite_neu_laden(sitz, {}, trail, f"Userscript-Update ({str(cmd.get('grund') or 'neuere Fassung bereit')[:60]})")
+        if st is None:
+            return raus("neu_laden", "TradingView-Seite ließ sich nicht neu laden.")
+        res["aktiv"] = str(((st.get("konto") or {}) if isinstance(st.get("konto"), dict) else {}).get("aktiv") or "")[:80]
+        res["ok"] = True
+        return raus("", "TradingView-Seite neu geladen" + (f" (Konto '{res['aktiv'][:40]}')" if res["aktiv"] else ""))
+    except Exception as e:
+        _cdp_tabs_spur(e, trail)
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}")
+
+
 def tvlesen_cdp_mit_wiederholung(cmd, lauf=None):
     """Lesen mit EINEM zweiten Versuch bei Zeitüberschreitung (02.10.2026, Mike: „Puls-Chrome/CDP: TimeoutError: timed out" beim
     Balance-Lesen — die TradingView-Seite antwortete 10 s nicht). Nur Lesen, nie Order: ein zweiter Lauf klickt nichts, was handelt.
@@ -26913,6 +26951,19 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TV-Konten lesen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
+        augen_anstossen()
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvneuladen":
+        # Userscript-Update (29.10.2026): nur Page.reload im Puls-Chrome — kein Klick, kein Konto, keine Order
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "code": "befehl", "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvneuladen(cmd if isinstance(cmd, dict) else {})
+        except Exception as e:
+            print(json.dumps({"ok": False, "code": "absturz", "msg": f"TV-Neuladen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
         augen_anstossen()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvclose":

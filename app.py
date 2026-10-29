@@ -526,7 +526,7 @@ def copier_proxy(path):
         # erneuter Start hätte ein zweites Mal platziert: derselbe Doppel-Order-Pfad wie master-order.
         _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close",
                                 "tsx-konto", "tsx-lesen", "tsx-inventar", "tsx-close", "tv-konten-liste")   # tv-konten-liste (29.10.2026): Panel bis 260 s
-                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 25)
+                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 100 if path == "tv-neuladen" else 25)   # tv-neuladen (29.10.2026): Panel bis 90 s
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,

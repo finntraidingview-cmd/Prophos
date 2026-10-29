@@ -2060,6 +2060,7 @@ def main():
     results.append(test_login_wache())
     results.append(test_login_eigenes_konto())
     results.append(test_windows_abfrage_vorbeugen())
+    results.append(test_tv_neuladen())
 
     print()
     ok = sum(1 for r in results if r)
@@ -10029,6 +10030,70 @@ def test_puls_fehler_1784():
         "Quelltext: eine Räumungs-Stelle (Seite + Units vor Shift+T), Spiel im Plan, Tippen und Rücklesung mit cdp_wert_passt")
     if ok:
         print("✓ Puls-Fehler .1784: TP/SL-Feld mit Tick-Spiel (zwei Ticks der Position, Rücklesung gleich) · „Go ad-free“-Karte und Video als Störer über Seite UND Units-Feld → Räumung + EIN Versuch")
+    return ok
+
+
+
+def test_tv_neuladen():
+    """Userscript-Update (29.10.2026): Modus tvneuladen lädt nur die Seite neu — kein Klick, Handlauf sperrt, Fehler ehrlich."""
+    import io, json, contextlib, inspect as _i
+    import order_bot as ob
+    ok = True
+
+    def chk(b, msg):
+        nonlocal ok
+        print(("✓ " if b else "✗ ") + msg)
+        ok = ok and bool(b)
+
+    class _S:
+        def __init__(self):
+            self.zu_n, self.klicks = 0, 0
+        def zu(self):
+            self.zu_n += 1
+        def klick(self, *a, **k):
+            self.klicks += 1
+            return True
+
+    alt = {n: getattr(ob, n) for n in ("_AugenSitzung", "_cdp_http", "_cdp_seite_neu_laden", "_handlauf_aktiv", "_start_versatz", "_cdp_sitzung_holen")}
+    try:
+        ob._start_versatz = lambda trail: None
+
+        def lauf(neu, hand=False, wirft=False, tabs=None):
+            s, g = _S(), {}
+            ob._handlauf_aktiv = lambda: hand
+            ob._cdp_http = lambda pfad, **k: [{"type": "page", "url": "https://www.tradingview.com/chart/x"}] if tabs is None else tabs
+            def _hol(trail, **k):
+                if wirft:
+                    raise RuntimeError("Puls-Chrome nicht erreichbar (Port 9333)")
+                g["riegel"] = k.get("tv_riegel", True)
+                return s
+            ob._AugenSitzung = _hol
+            ob._cdp_sitzung_holen = lambda *a, **k: (_ for _ in ()).throw(AssertionError("_cdp_sitzung_holen darf nicht laufen"))
+            ob._cdp_seite_neu_laden = lambda s_, o_, t_, g_: (g.__setitem__("grund", g_) or neu)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                ob.modus_tvneuladen({"grund": "Userscript 0.10.0 → 0.10.1"})
+            return json.loads(buf.getvalue().strip().splitlines()[-1]), s, g
+
+        r1, s1, g1 = lauf({"konto": {"aktiv": "KONTO-A"}})
+        chk(r1["ok"] is True and r1["aktiv"] == "KONTO-A" and s1.zu_n == 1 and s1.klicks == 0 and "Userscript 0.10.0 → 0.10.1" in g1["grund"]
+            and g1["riegel"] is False, f"tvneuladen: Seite neu geladen, Konto gelesen, Sitzung zu, tv_riegel aus (kein Kachel-Klick) ({r1})")
+        r5, _, g5 = lauf({"konto": {}}, tabs=[])
+        r6, _, g6 = lauf({"konto": {}}, tabs=[{"type": "page", "url": "https://example.com/"}])
+        chk(r5["code"] == "kein_tab" and r6["code"] == "kein_tab" and "grund" not in g5 and "grund" not in g6,
+            "tvneuladen: keine TradingView-Seite (oder Puls-Chrome aus) → nichts geöffnet, nichts geladen")
+        r2, s2, _ = lauf(None)
+        chk(r2["ok"] is False and r2["code"] == "neu_laden" and s2.zu_n == 1, f"tvneuladen: Neuladen nicht möglich → ok False, code neu_laden ({r2['code']})")
+        r3, s3, g3 = lauf({"konto": {}}, hand=True)
+        chk(r3["ok"] is False and r3["code"] == "handlauf" and not g3 and s3.zu_n == 0, "tvneuladen: K3-Handlauf → nichts angefasst")
+        r4, _, _ = lauf({}, wirft=True)
+        chk(r4["ok"] is False and r4["code"] == "cdp_fehler" and "9333" in r4["msg"], f"tvneuladen: Puls-Chrome weg → cdp_fehler ({r4['msg'][:60]})")
+        q = _i.getsource(ob.modus_tvneuladen)
+        chk("klick" not in q.lower().replace("kein klick", "") and "Input.dispatch" not in q and "order" not in q.lower().replace("keine order", ""),
+            "tvneuladen: Quelltext ohne Klick/Taste/Order")
+    finally:
+        for n, f in alt.items():
+            setattr(ob, n, f)
     return ok
 
 

@@ -4153,6 +4153,42 @@ class Handler(BaseHTTPRequestHandler):
                   else f"FEHLER {res.get('code') or '?'} — {str(res.get('msg') or '')[:140]}"), flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tv-neuladen":
+            # Userscript-Update (29.10.2026): TradingView-Tab im Puls-Chrome neu laden, damit der Lader die bereitliegende neuere Fassung
+            # startet. Nur Page.reload (Bot-Modus tvneuladen), unter dem TV-Lock (nie in einen laufenden Order-/Lese-Lauf), 409 = belegt.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            bc = base_config()
+            cmd = {k: str(bc.get(k) or "").strip() for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
+            cmd["grund"] = str(body.get("grund") or "").strip()[:80]
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                    "msg": "Es laeuft schon ein TradingView-Lauf — spaeter erneut."}, ensure_ascii=False))
+            try:
+                # Prüfer 29.10.2026: auch keine MT5-Order (Echo V2 hängt nicht am TV-Lock), kein Polar, niemand tippt gerade am PC
+                idle = _win_leerlauf_s()
+                if not _browser_und_mt5_frei(tv_eigen=True) or (idle is not None and idle < TAB_NL_IDLE_S):
+                    return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                        "msg": "MT5-Order/Polar laeuft oder am PC wird gerade gearbeitet — spaeter erneut."}, ensure_ascii=False))
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                p = subprocess.run([sys.executable, bot, "tvneuladen", json.dumps(cmd)],
+                                   capture_output=True, text=True, errors="replace", timeout=90)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {"ok": False, "code": "bot_stumm", "msg": (p.stderr or "").strip()[-200:] or "keine Antwort"}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "code": "timeout", "msg": "TV-Neuladen Timeout (90 s)"}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "code": "bot_fehlt", "msg": f"TV-Neuladen fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            print(f"[panel] tv-neuladen: {'ok' if res.get('ok') else 'FEHLER ' + str(res.get('code') or '?')} — {str(res.get('msg') or '')[:140]}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         if u.path == "/api/tv-close":
             # Orbit V2 schliessen (24.09.2026, Vollumstieg 'Ohne Hedge'; Finns
             # Auto-Close-Regel 23:45–00:00 Dubai, bisher 'Orbit-Schliessen in TV

@@ -496,6 +496,11 @@ Aktive Verbindungen
           and rs.kern_aus_userscript(b"") is None, "Lader: fehlende/doppelte Marker → None (nie ein halber Kern)")
     check(re.search(r"const EINGEBAUT = '([0-9.]+)'", _us).group(1) == _ver, "Lader: EINGEBAUT = @version = VERSION im Kern")
 
+    lk = rs.lader_kurz({"v": 1, "eval": True, "laeuft": "0.10.0", "quelle": "eingebaut", "bereit": "0.10.1", "fehler": None, "code": "x" * 999, "z": {"a": 1}})
+    check(lk == {"v": 1, "eval": True, "laeuft": "0.10.0", "quelle": "eingebaut", "bereit": "0.10.1", "fehler": None}
+          and rs.lader_kurz({"fehler": {"x": "y" * 200}})["fehler"] == str({"x": "y" * 200})[:80] and rs.lader_kurz(None)["bereit"] is None,
+          "Lader-Status: nur die sechs Felder, kurz, nie ganze Objekte")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 
