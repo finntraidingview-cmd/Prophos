@@ -24096,8 +24096,10 @@
     // Messungen ein falsches Trade-Ende samt master_pl≈0 erzeugen (Review-Fund
     // 15.08.2026) — 'beobachtet != beabsichtigt', exakt das atCheck-Muster.
     wasOpen: new Set(),
-    beruhigen: new Set(),   // planId → Ende erst nach ECHO_BERUHIGT_MS frisch+flach (S2-Stopp 30.10.2026)
+    beruhigen: new Map(),   // planId → Marke (ms): Ende erst nach ECHO_BERUHIGT_MS frisch+flach UND Login-Lesung nach der Marke (S2/Master 30.10.2026)
     flachSeit: new Map(),   // planId → erster frischer 0-Positionen-Takt der laufenden Flach-Strecke
+    loginLesung: new Map(), // planId → Zeit (ms) der letzten erfolgreichen mt5KontoBalanceJetzt-Lesung im Plan-Login
+    loginVersuch: new Map(),// planId → letzter Anstoß (ms), Drossel
     busy: false
   }
   /* GEISTER-PLÄNE (30.10.2026, Master: „Echo-Pläne bleiben open, obwohl der Trade längst zu ist" — Jacob 2775030a im SL, Plan bis zum
@@ -24152,11 +24154,30 @@
    * den DIESER Tab nicht selbst mit Positionen gesehen hat (Re-Arm aus dem Beleg, Stand war nicht frisch, Geist-/schon_zu-Anstoß), gilt
    * deshalb: Ende erst, wenn der Stand ≥ 90 s ununterbrochen frisch UND flach war (flachSeit); jede Position oder jeder nicht frische Takt
    * setzt die Uhr zurück. Sieht der Tab frisch eine Position, fällt die Marke (normaler Weg: 2 Messungen). */
-  const ECHO_BERUHIGT_MS = 90000
+  // NACHTRAG MASTER (30.10.2026): dazu eine per Login gelesene Balance (mt5KontoBalanceJetzt ok, Login = Plan-Login) NACH der Marke —
+  // Terminal sicher im Konto. Beides zusammen, nie eines allein. z = { streak, beruhigen (Marke ms|0), flachSeit, loginAt }
+  const ECHO_BERUHIGT_MS = 90000, ECHO_LOGIN_ABSTAND_MS = 120000
   function echoEndeReif(z, jetzt){
     if(!z || (z.streak || 0) < 2) return false
     if(!z.beruhigen) return true
-    return !!z.flachSeit && jetzt - z.flachSeit >= ECHO_BERUHIGT_MS
+    const ruhig = !!z.flachSeit && jetzt - z.flachSeit >= ECHO_BERUHIGT_MS
+    const login = !!z.loginAt && z.loginAt >= z.beruhigen
+    return ruhig && login
+  }
+  function echoBeruhigen(pid){ mt5PlanPoll.beruhigen.set(String(pid), Date.now()); mt5PlanPoll.flachSeit.delete(String(pid)) }
+  // Ergebnis einer Lesung merken (nur ok + richtiger Login)
+  function echoLoginMerken(pid, login, r){
+    if(r && r.ok && r.login != null && login != null && String(r.login) === String(login)) mt5PlanPoll.loginLesung.set(String(pid), Date.parse(r.balance_at || '') || Date.now())
+    return r
+  }
+  // Login-Lesung für einen beruhigten Plan anstoßen (höchstens alle 2 min je Plan; mt5KontoBalanceJetzt sperrt je Konto selbst)
+  function echoLoginLesen(plan, login){
+    const pid = String(plan.id), mark = mt5PlanPoll.beruhigen.get(pid)
+    if(!mark || (mt5PlanPoll.loginLesung.get(pid) || 0) >= mark || typeof mt5KontoBalanceJetzt !== 'function') return
+    if(Date.now() - (mt5PlanPoll.loginVersuch.get(pid) || 0) < ECHO_LOGIN_ABSTAND_MS) return
+    if((typeof ebnStartNah === 'function' && ebnStartNah()) || (typeof polarLaeuft === 'function' && polarLaeuft())) return
+    mt5PlanPoll.loginVersuch.set(pid, Date.now())
+    mt5KontoBalanceJetzt(plan.masterAccountId, login, {}).then(r => echoLoginMerken(pid, login, r)).catch(() => {})
   }
   window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs, reif: echoEndeReif }   // Test-Haken (rein rechnend)
   const _echoGeistMerk = new Map()   // planId → { n, at }
@@ -24170,11 +24191,11 @@
       if(typeof mt5KontoBalanceJetzt !== 'function') return
       const n = ((alt && alt.n) || 0) + 1
       _echoGeistMerk.set(pid, { n, at: jetzt })
-      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.beruhigen.add(pid); mt5PlanPoll.flachSeit.delete(pid)
+      mt5PlanPoll.wasOpen.add(pid); echoBeruhigen(pid); mt5PlanPoll.loginVersuch.set(pid, jetzt)
       baselinePatch(pid, { geist_pruefung: { n, at: new Date(jetzt).toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null,
         grund: String(((route && route.inst && route.inst.status) || {}).note || 'kein frischer Stand').slice(0, 80) } }, 'open').catch(() => {})
       console.info(`[echo-geist] ${pid.slice(0, 8)}: Stand nicht frisch, letzter Stand flach — frische Lesung ${n}/${ECHO_GEIST_MAX}`)
-      mt5KontoBalanceJetzt(plan.masterAccountId, route && route.masterLogin, {}).catch(e => console.warn('[echo-geist] Lesung', (e && e.message) || e))
+      mt5KontoBalanceJetzt(plan.masterAccountId, route && route.masterLogin, {}).then(r => echoLoginMerken(pid, route && route.masterLogin, r)).catch(e => console.warn('[echo-geist] Lesung', (e && e.message) || e))
     }catch(e){ console.warn('[echo-geist]', (e && e.message) || e) }
   }
   // Remote-Close meldete „nicht (mehr) offen" (Puls las das Master-Terminal mit Login-Guard): Beleg am Plan + Ende-Erkennung scharf + frische
@@ -24182,10 +24203,12 @@
   async function echoSchonZuNachfassen(plan, r, ticket){
     try{
       const pid = String(plan.id)
-      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.streak.set(pid, 0); mt5PlanPoll.beruhigen.add(pid); mt5PlanPoll.flachSeit.delete(pid)
+      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.streak.set(pid, 0); echoBeruhigen(pid)
       await baselinePatch(pid, { schon_zu: { at: new Date().toISOString(), ticket: ticket || null, quelle: 'close', msg: String((r && r.msg) || '').slice(0, 160),
         pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } }, 'open')
-      if(typeof mt5KontoBalanceJetzt === 'function') mt5KontoBalanceJetzt(plan.masterAccountId, null, {}).catch(() => {})
+      const lg = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(plan.masterAccountId) : null
+      mt5PlanPoll.loginVersuch.set(pid, Date.now())
+      if(typeof mt5KontoBalanceJetzt === 'function') mt5KontoBalanceJetzt(plan.masterAccountId, lg, {}).then(r => echoLoginMerken(pid, lg, r)).catch(() => {})
     }catch(e){ console.warn('[echo-schon-zu]', (e && e.message) || e) }
   }
 
@@ -24401,7 +24424,7 @@
         // Echo V2 auch aus der Lese-Instanz (Panel liest den Snapshot ohne Copier, 25.09.2026) — Echo mit Hedge
         // braucht weiter den laufenden Copier (alive)
         const fresh = (!!route.inst.alive || (istV2 && !!route.inst.lesen)) && !s.note
-        if(!fresh){ if(plan.status === 'open'){ mt5PlanPoll.beruhigen.add(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id)); echoGeistAnstossen(plan, route) } continue }   // Geister-Pläne (30.10.2026): nur frisch lesen, nie beenden
+        if(!fresh){ if(plan.status === 'open'){ echoBeruhigen(plan.id); echoGeistAnstossen(plan, route) } continue }   // Geister-Pläne (30.10.2026): nur frisch lesen, nie beenden
         const posCount = (s.master_positions || []).length
 
         if(plan.status === 'planned'){
@@ -24469,7 +24492,7 @@
         // wasOpen sie nie gesehen und der Plan bliebe ewig „Läuft". Baseline = Beweis → Ende-Erkennung scharf.
         if(istV2 && plan.mt5Baseline && plan.mt5Baseline.master_balance != null) mt5PlanPoll.wasOpen.add(String(plan.id))
         // Mit Hedge (30.10.2026, Geister-Pläne): nach dem Tab-Neuladen aus dem festen Beleg wieder scharf (echoEndeScharf)
-        else if(!istV2 && !mt5PlanPoll.wasOpen.has(String(plan.id)) && echoEndeScharf(plan)){ mt5PlanPoll.wasOpen.add(String(plan.id)); mt5PlanPoll.beruhigen.add(String(plan.id)) }
+        else if(!istV2 && !mt5PlanPoll.wasOpen.has(String(plan.id)) && echoEndeScharf(plan)){ mt5PlanPoll.wasOpen.add(String(plan.id)); echoBeruhigen(plan.id) }
         // TAGE SAMMELN · SOFORT ZU (12.10.2026, Finn: „den Trade, sobald er gestartet wurde, auch direkt eigenständig beenden"): der Mini-Trade
         // des Auto-Planers (mt5_baseline.tage_mini.sofort_zu) wird geschlossen, sobald dieser PC-Tab seine Position frisch sieht — derselbe
         // Weg wie „Schließen" auf der Karte (v2SchliessenAmPc); die Ende-Erkennung darunter läuft danach wie bei jedem Echo-V2-Trade
@@ -24484,7 +24507,9 @@
         const n = (mt5PlanPoll.streak.get(String(plan.id)) || 0) + 1
         mt5PlanPoll.streak.set(String(plan.id), n)
         if(!mt5PlanPoll.flachSeit.has(String(plan.id))) mt5PlanPoll.flachSeit.set(String(plan.id), Date.now())
-        if(!echoEndeReif({ streak: n, beruhigen: mt5PlanPoll.beruhigen.has(String(plan.id)), flachSeit: mt5PlanPoll.flachSeit.get(String(plan.id)) }, Date.now())) continue
+        const zEnde = { streak: n, beruhigen: mt5PlanPoll.beruhigen.get(String(plan.id)) || 0, flachSeit: mt5PlanPoll.flachSeit.get(String(plan.id)),
+                        loginAt: mt5PlanPoll.loginLesung.get(String(plan.id)) || 0 }
+        if(!echoEndeReif(zEnde, Date.now())){ if(zEnde.beruhigen) echoLoginLesen(plan, route.masterLogin); continue }
         mt5PlanPoll.streak.set(String(plan.id), 0)
         mt5PlanPoll.beruhigen.delete(String(plan.id)); mt5PlanPoll.flachSeit.delete(String(plan.id))
 
