@@ -26049,6 +26049,7 @@
    * läuft. Danach kommt jedes Update über den Lader + Neuladen. Ein Versuch je PC und Lader-Stand (localStorage), Ergebnis an Railway
    * (/alarm/userscript-update: gescheitert → ⚪ „einmal von Hand"). REIN RECHNEND → '' (nötig) oder Grund. */
   const TVTM_LADER_SOLL = 1, TVTM_KEY = 'prophos_tvtm_l' + TVTM_LADER_SOLL, TVTM_ERSTER_LADER = '0.10.0'
+  const TVTM_NICHTS_ANGEFASST = ['puls_beschaeftigt', 'kein_tab', 'handlauf', 'soll_fehlt', 'tab_neu', 'nicht_gesendet', 'verbindung']
   function tvTmNoetig(st){
     if(!st) return 'kein Puls-Chrome-Reader'
     const l = st.lader, tab = (st.tabs || []).find(t => t && t.tab_id === st.positionen_tab), v = tab && tab.version
@@ -26095,7 +26096,8 @@
   async function tvTmTick(){
     const st = window._epLokal.stand || {}, l = st.lader, tab = (st.tabs || []).find(t => t && t.tab_id === st.positionen_tab)
     const von = (l && l.laeuft) || (tab && tab.version) || ''
-    try{ localStorage.setItem(TVTM_KEY, new Date().toISOString()); localStorage.setItem(TVN_KEY, String(Date.now())) }catch(_){ return }   // ein Versuch je PC
+    const marke = new Date().toISOString() + '#' + Math.random().toString(36).slice(2, 8)   // eigener Wert: nur den eigenen Versuch zurücknehmen
+    try{ localStorage.setItem(TVTM_KEY, marke); localStorage.setItem(TVN_KEY, String(Date.now())) }catch(_){ return }   // ein Versuch je PC
     window._tvNeuLaeuft = true
     let r = null
     try{
@@ -26103,11 +26105,17 @@
         body: JSON.stringify({ grund: `Tampermonkey ${von || '?'} → Lader ${TVTM_LADER_SOLL}` }), timeoutMs: 165000 })
     }catch(e){ r = { ok: false, code: 'verbindung', msg: String((e && e.message) || e) } }
     finally{ window._tvNeuLaeuft = false }
+    if(r && !r.msg && r.error) r.msg = String(r.error)   // mtcApi meldet eigene Fehler in error
+    if(r && r._nichtGesendet && !r.code) r.code = 'nicht_gesendet'
     _tvnLetzter = { at: new Date().toISOString(), art: 'tampermonkey', von: von || null, auf: (r && r.soll) || null, ok: !!(r && r.ok), code: (r && r.code) || '',
       msg: String((r && r.msg) || '').slice(0, 200), trail: String((r && r.trail) || '').slice(-600) }
     console.info(`[tv-neuladen] Tampermonkey ${von || '?'} → ${(r && r.soll) || '?'}: ${r && r.ok ? 'aktualisiert' : 'FEHLER ' + ((r && r.code) || '?')}`, (r && r.msg) || '', (r && r.trail) || '')
-    // belegt (409) = nichts angefasst → Versuch nicht verbraucht, später erneut; alles andere geht an Railway (gescheitert = einmal von Hand)
-    if(r && r.code === 'puls_beschaeftigt'){ try{ localStorage.removeItem(TVTM_KEY) }catch(_){} return }
+    // nichts angefasst (belegt, Panel/Puls-Chrome kurz weg, Reader-Schluckauf, K3-Handlauf, kein Tab) → Versuch nicht verbraucht, später erneut
+    // (frühestens nach dem 30-min-Abstand); alles andere geht an Railway (gescheitert = einmal von Hand). Prüfer 29.10.2026
+    if(r && TVTM_NICHTS_ANGEFASST.includes(r.code)){
+      try{ if(localStorage.getItem(TVTM_KEY) === marke) localStorage.removeItem(TVTM_KEY) }catch(_){}
+      return
+    }
     try{
       const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token
       if(tok) await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -49948,7 +49956,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1846'
+  const OS_TAB_BUILD = '2026-09-22.1847'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

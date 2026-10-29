@@ -10114,7 +10114,7 @@ def test_tv_tm_update():
     soll = ob.tm_soll_aus("// ==UserScript==\n// @name         Prophos TV-Reader\n// @version      0.10.0\n// ==/UserScript==\n")
     chk(soll == {"name": "Prophos TV-Reader", "version": "0.10.0"} and ob.tm_soll_aus("kein Kopf") is None, f"tm_soll_aus: Name + Version aus dem Kopf ({soll})")
     K = lambda t, dis=False: {"t": t, "dis": dis, "x": {"left": 100, "top": 200, "width": 80, "height": 30}}   # noqa: E731
-    L = lambda kn, text="Prophos TV-Reader 0.10.0", url="chrome-extension://tm/ask.html?aid=1": {"url": url, "text": text, "knoepfe": kn}   # noqa: E731
+    L = lambda kn, text="Prophos TV-Reader 0.10.0", url="chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/ask.html?aid=1": {"url": url, "text": text, "knoepfe": kn}   # noqa: E731
     W = lambda l: ob.tm_knopf_wahl(l, soll)[0]   # noqa: E731
     chk(W(L([K("Aktualisieren"), K("Abbrechen")])) == "klick" and W(L([K("Update"), K("Cancel")])) == "klick",
         "Knopf-Wahl: genau ein Aktualisieren/Update → klick")
@@ -10123,7 +10123,8 @@ def test_tv_tm_update():
         "Knopf-Wahl: Neu installieren = aktuell, Downgrade nie, gesperrter Knopf wartet")
     chk(W(L([K("Aktualisieren")], text="Anderes Script 0.10.0")) == "fremd" and W(L([K("Aktualisieren")], url="http://127.0.0.1:8790/x")) == "fremd"
         and W(L([K("Aktualisieren")], text="Prophos TV-Reader 0.9.12")) == "unklar" and W(L([K("Aktualisieren"), K("Update")])) == "unklar"
-        and W(None) == "unklar", "Knopf-Wahl: fremdes Script/keine Extension-Seite/falsche Version/zwei Knöpfe → kein Klick")
+        and W(None) == "unklar" and W(L([K("Aktualisieren")], url="chrome-extension://andereextension0000000000000000/ask.html")) == "fremd",
+        "Knopf-Wahl: fremdes Script/keine Tampermonkey-Seite/falsche Version/zwei Knöpfe → kein Klick")
 
     TV = {"id": "TV", "type": "page", "url": "https://www.tradingview.com/chart/x", "webSocketDebuggerUrl": "ws://tv"}
 
@@ -10143,12 +10144,15 @@ def test_tv_tm_update():
         def zu(self):
             pass
 
-    def lauf(seite, beweis=True, schliesst=True, tm_kommt=True):
-        welt = {"tabs": [dict(TV)], "seite": seite, "beweis": beweis, "schliesst": schliesst, "maus": [], "zu": [], "neu_geladen": 0}
+    def lauf(seite, beweis=True, schliesst=True, tm_kommt=True, win=False, win_ok=True):
+        welt = {"tabs": [dict(TV)], "seite": seite, "beweis": beweis, "schliesst": schliesst, "maus": [], "zu": [], "neu_geladen": 0, "win_ok": win_ok}
+        ob._WIN_EINGABE = win
 
         def http(pfad, methode="GET", timeout=2.0):
             if pfad == "/json/list":
                 return [dict(t) for t in welt["tabs"]]
+            if pfad.startswith("/json/activate/"):
+                welt.setdefault("aktiviert", []).append(pfad.rsplit("/", 1)[1])
             if pfad.startswith("/json/close/"):
                 tid = pfad.rsplit("/", 1)[1]
                 welt["zu"].append(tid)
@@ -10160,17 +10164,24 @@ def test_tv_tm_update():
             t = {"id": "NEU", "type": "page", "url": url, "webSocketDebuggerUrl": "ws://neu"}
             welt["tabs"].append(t)
             if tm_kommt:   # Tampermonkey fängt ab: derselbe Tab wird zur Extension-Seite
-                t.update(id="TM", url="chrome-extension://tm/ask.html?aid=1", webSocketDebuggerUrl="ws://tm")
+                t.update(id="TM", url="chrome-extension://dhdgffkkebhmkfjojejmpbldmpobfkfo/ask.html?aid=1", webSocketDebuggerUrl="ws://tm")
                 return {"id": "NEU", "webSocketDebuggerUrl": "ws://neu"}
             return dict(t)
 
         class _Sitz:
+            def __init__(self, ziel=None):
+                self.ziel = ziel
+            def klick(self, rect, name, pruef=None, **k):
+                welt.setdefault("winklick", []).append((self.ziel and self.ziel.get("id"), rect, pruef))
+                if welt.get("schliesst"):
+                    welt["tabs"] = [t for t in welt["tabs"] if t["id"] != "TM"]
+                return welt.get("win_ok", True)
             def zu(self):
-                pass
+                welt["zu_sitz"] = welt.get("zu_sitz", 0) + 1
         ob._cdp_http, ob._cdp_tab_neu = http, tab_neu
         ob._CdpVerbindung = lambda url, timeout=8.0: _Ws(welt)
         ob._tm_soll_holen = lambda trail: dict(soll)
-        ob._AugenSitzung = lambda trail, **k: _Sitz()
+        ob._AugenSitzung = lambda trail, **k: _Sitz(k.get("ziel"))
         ob._cdp_seite_neu_laden = lambda s_, o_, t_, g_: (welt.__setitem__("neu_geladen", welt["neu_geladen"] + 1) or {"konto": {}})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -10178,13 +10189,13 @@ def test_tv_tm_update():
         return json.loads(buf.getvalue().strip().splitlines()[-1]), welt
 
     namen = ("_cdp_http", "_cdp_tab_neu", "_CdpVerbindung", "_tm_soll_holen", "_AugenSitzung", "_cdp_seite_neu_laden", "_handlauf_aktiv",
-             "_start_versatz", "_warte")
+             "_start_versatz", "_warte", "_WIN_EINGABE")
     alt = {n: getattr(ob, n) for n in namen}
     try:
         ob._handlauf_aktiv, ob._start_versatz, ob._warte = (lambda: False), (lambda trail: None), (lambda a_, b_: None)
         r1, w1 = lauf(L([K("Aktualisieren"), K("Abbrechen")]))
         chk(r1["ok"] and r1["geklickt"] and w1["maus"] == ["mouseMoved", "mousePressed", "mouseReleased"] and w1["neu_geladen"] == 1
-            and "TV" not in w1["zu"] and w1["url"].endswith("/userscript/tv-reader.user.js") and r1["soll"] == "0.10.0",
+            and "TV" not in w1["zu"] and w1["url"].endswith("/userscript/tv-reader.user.js") and r1["soll"] == "0.10.0" and w1.get("aktiviert") == ["TV"],
             f"tm-update: Aktualisieren bewiesen gedrückt, Seite zu, TV-Tab neu geladen, TV-Tab nie geschlossen ({r1['code']}, {w1['maus']})")
         r2, w2 = lauf(L([K("Installieren"), K("Abbrechen")]))
         chk(not r2["ok"] and r2["code"] == "tm_neu" and not w2["maus"] and w2["neu_geladen"] == 0 and "TV" not in w2["zu"] and "TM" in w2["zu"],
@@ -10198,6 +10209,13 @@ def test_tv_tm_update():
         chk(r5["ok"] and r5["code"] == "schon_aktuell" and not w5["maus"] and w5["neu_geladen"] == 1, "tm-update: schon aktuell → kein Klick, TV-Tab neu geladen")
         r6, w6 = lauf(L([K("Aktualisieren")]), schliesst=False)
         chk(not r6["ok"] and r6["code"] == "tm_unbelegt" and r6["geklickt"] and w6["neu_geladen"] == 0, "tm-update: Klick ohne Beleg → ehrlich nicht ok")
+        r7, w7 = lauf(L([K("Aktualisieren"), K("Abbrechen")]), win=True)
+        wk = (w7.get("winklick") or [None])[0]
+        chk(r7["ok"] and not w7["maus"] and wk and wk[0] == "TM" and wk[1] == [100, 200, 80, 30] and "install" in wk[2]["tabu"]
+            and w7.get("zu_sitz", 0) >= 1 and w7.get("aktiviert") == ["TV"],
+            f"tm-update Windows: echte Maus über _AugenSitzung.klick mit Ziel-Beweis (Tabu install/downgrade), kein CDP-Klick, Fenster wieder zu ({r7['code']})")
+        r8, w8 = lauf(L([K("Aktualisieren")]), win=True, win_ok=False)
+        chk(not r8["ok"] and r8["code"] == "tm_kein_druck" and not r8["geklickt"] and not w8["maus"], "tm-update Windows: Ziel-Beweis fehlt → kein Druck, ehrlich gemeldet")
     finally:
         for n, f in alt.items():
             setattr(ob, n, f)

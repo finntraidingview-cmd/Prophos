@@ -21621,7 +21621,9 @@ def modus_tvneuladen(cmd):
 # PC"). Nötig nur, solange auf einem PC noch ein Userscript OHNE Lader (< 0.10.0) oder mit älterem Lader läuft — danach kommt jedes Update
 # über den Lader (kern.json + tvneuladen). Weg: neuer Tab im Puls-Chrome mit der .user.js des lokalen Readers → Tampermonkey fängt ihn ab
 # und zeigt seine Installationsseite (chrome-extension://…) → nur wenn dort GENAU EIN Knopf „Aktualisieren"/„Update" steht, die Seite das
-# Prophos-Script in der Soll-Version zeigt und der Punkt unter der Maus bewiesen der Knopf ist: CDP-Klick (kein Windows-Fenster nach vorn).
+# Prophos-Script in der Soll-Version zeigt und der Punkt unter der Maus bewiesen der Knopf ist: auf Windows mit der ECHTEN Maus (Finns Regel
+# „immer echte Maus", _AugenSitzung.klick mit Ziel-Beweis: Puls-Chrome kurz nach vorn, danach wieder minimiert), nur ohne Windows per CDP.
+# Nur Seiten der Tampermonkey-Extension (TM_EXT_IDS). Nach dem Lauf steht wieder der Chart-Tab vorn (/json/activate).
 # „Installieren" wird NIE gedrückt (das wäre ein zweites Script neben dem alten: doppelte Reader, doppeltes Schließen), „Neu installieren"
 # = schon aktuell, „Downgrade" nie. Danach eigene Tabs zu, TV-Tab neu laden (wie tvneuladen). Kein Konto, keine Order.
 TM_USERSCRIPT_URL = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
@@ -21632,6 +21634,8 @@ TM_LESE_JS = r"""(() => { const vis = e => { const r = e.getBoundingClientRect()
     return { t: String(e.value || e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40), dis: !!e.disabled,
       x: { left: r.left, top: r.top, width: r.width, height: r.height } } })
   return { url: String(location.href), text: String(document.body ? document.body.innerText : '').slice(0, 6000), knoepfe: kn.slice(0, 40) } })()"""
+TM_EXT_IDS = ("dhdgffkkebhmkfjojejmpbldmpobfkfo", "gcalenpjmijncebpfijmoaglllgpjagf")   # Tampermonkey, Tampermonkey Beta (Chrome Web Store)
+TM_FRIST_S = 120.0                                    # Panel bricht nach 150 s ab — danach kein Neuladen mehr anfangen
 TM_KNOPF_UPDATE = ("aktualisieren", "update")
 TM_KNOPF_AKTUELL = ("neu installieren", "reinstall")
 TM_KNOPF_NEU = ("installieren", "install")
@@ -21653,8 +21657,8 @@ def tm_knopf_wahl(lesung, soll):
     if not (isinstance(lesung, dict) and isinstance(soll, dict)):
         return "unklar", None, "Seite nicht lesbar"
     text = str(lesung.get("text") or "")
-    if not str(lesung.get("url") or "").startswith("chrome-extension://"):
-        return "fremd", None, f"keine Extension-Seite ({str(lesung.get('url') or '')[:60]})"
+    if not any(str(lesung.get("url") or "").startswith(f"chrome-extension://{e}/") for e in TM_EXT_IDS):
+        return "fremd", None, f"keine Tampermonkey-Seite ({str(lesung.get('url') or '')[:60]})"
     if soll.get("name") and soll["name"] not in text:
         return "fremd", None, f"Seite zeigt nicht „{soll['name']}\""
     kn = [k for k in (lesung.get("knoepfe") or []) if isinstance(k, dict)]
@@ -21694,8 +21698,9 @@ def modus_tvtmupdate(cmd):
     """→ {ok, code, msg, trail, soll, geklickt}. ok = Tampermonkey hat aktualisiert (oder hatte die Fassung schon), TV-Tab neu geladen."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "soll": "", "geklickt": False, "quelle": "cdp"}
     trail = _StempelSpur()
+    t0 = time.time()
     _start_versatz(trail)
-    eigene, ws = [], None
+    eigene, ws, tv_id, sitz_tm = [], None, None, None
 
     def raus(code, msg, ok=False):
         res["ok"], res["code"], res["msg"] = ok, code, msg
@@ -21706,7 +21711,18 @@ def modus_tvtmupdate(cmd):
                 pass
         for tid in eigene:                                # nur selbst geöffnete Tabs — nie den TV-Tab
             _cdp_http(f"/json/close/{tid}")
-        if ok:
+        if tv_id and eigene:                              # /json/new hat den neuen Tab aktiv gemacht → Chart wieder vorn (Prüfer 29.10.2026)
+            _cdp_http(f"/json/activate/{tv_id}")
+        if sitz_tm is not None:                           # echte Maus: Fenster wieder minimieren wie nach jedem Puls-Lauf
+            try:
+                sitz_tm.zu()
+            except Exception:
+                pass
+        laden = ok
+        if ok and time.time() - t0 > TM_FRIST_S:      # Update ist durch — nur das Neuladen fällt weg (Panel-Frist 150 s), ok bleibt
+            res["msg"] += " — TV-Tab nicht neu geladen (Zeit knapp), die neue Fassung läuft beim nächsten Laden"
+            laden = False
+        if laden:
             try:
                 sitz = _AugenSitzung(trail, tv_riegel=False)
                 try:
@@ -21726,8 +21742,10 @@ def modus_tvtmupdate(cmd):
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts angefasst.")
     try:
         liste = _cdp_http("/json/list")
-        if not augen_target_waehlen(liste):
+        tv = augen_target_waehlen(liste)
+        if not tv:
             return raus("kein_tab", "Puls-Chrome aus oder keine TradingView-Seite offen — nichts angefasst.")
+        tv_id = tv.get("id")
         soll = _tm_soll_holen(trail)
         if not soll:
             return raus("soll_fehlt", "Userscript nicht vom lokalen Reader ladbar.")
@@ -21741,7 +21759,8 @@ def modus_tvtmupdate(cmd):
         while time.time() < ende and not ziel:
             _warte(1.0, 0.4)
             for t in (_cdp_http("/json/list") or []):
-                if not isinstance(t, dict) or t.get("type") != "page" or not str(t.get("url") or "").startswith("chrome-extension://"):
+                if not isinstance(t, dict) or t.get("type") != "page" or not any(
+                        str(t.get("url") or "").startswith(f"chrome-extension://{e}/") for e in TM_EXT_IDS):
                     continue
                 if t.get("id") == neu.get("id") or t.get("id") not in vorher:
                     ziel = t
@@ -21775,7 +21794,7 @@ def modus_tvtmupdate(cmd):
         if urteil != "klick":
             return raus("tm_" + urteil, grund + " — bitte einmal von Hand aktualisieren.")
         k = knopf["x"]
-        x, y = k["left"] + k["width"] * (0.35 + 0.3 * random.random()), k["top"] + k["height"] * (0.35 + 0.3 * random.random())
+        x, y = k["left"] + k["width"] / 2, k["top"] + k["height"] / 2
         beweis_js = ("(() => { const e = document.elementFromPoint(%f, %f), b = e && e.closest('button, input, [role=button]');"
                      " return !!b && %s.includes(String(b.value || b.innerText || b.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase()) })()"
                      % (x, y, json.dumps(list(TM_KNOPF_UPDATE))))
@@ -21786,13 +21805,21 @@ def modus_tvtmupdate(cmd):
             passt = False
         if not passt:
             return raus("tm_kein_beweis", "Am Klickpunkt liegt nicht der Aktualisieren-Knopf — kein Druck, bitte einmal von Hand.")
-        ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
-        _warte(0.25, 0.25)
-        ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1}, timeout=3)
-        _warte(0.08, 0.07)
-        ws.rufe("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1}, timeout=3)
+        if _WIN_EINGABE:
+            # echte Maus (Finns Regel): Ziel-Beweis am Druckpunkt (:hover, Größe, kein Install/Downgrade-Wort), sonst kein Druck. Text leer,
+            # weil ein <input value="…"> keinen textContent hat — dass dort der Aktualisieren-Knopf liegt, hat beweis_js oben gezeigt.
+            sitz_tm = _AugenSitzung(trail, ziel=ziel, tv_riegel=False)
+            rect = [k["left"], k["top"], k["width"], k["height"]]
+            if not sitz_tm.klick(rect, "Tampermonkey Aktualisieren", pruef={"rect": rect, "text": "", "aria": "", "tabu": "install|downgrade|herabstufen"}):
+                return raus("tm_kein_druck", "Aktualisieren nicht gedrückt (Ziel-Beweis der echten Maus fehlt) — bitte einmal von Hand.")
+        else:
+            ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
+            _warte(0.25, 0.25)
+            ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1}, timeout=3)
+            _warte(0.08, 0.07)
+            ws.rufe("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1}, timeout=3)
+            trail.append(f"„{knopf['t']}\" geklickt @{int(x)},{int(y)} (CDP, ohne Windows)")
         res["geklickt"] = True
-        trail.append(f"„{knopf['t']}\" geklickt @{int(x)},{int(y)} (CDP)")
         # Beweis: Tampermonkey schließt die Seite nach dem Update oder der Knopf ist weg
         ende = time.time() + 15.0
         while time.time() < ende:
@@ -21801,8 +21828,8 @@ def modus_tvtmupdate(cmd):
                 trail.append("Tampermonkey-Seite nach dem Klick zu")
                 return raus("", f"Tampermonkey aktualisiert auf {soll['version']}", ok=True)
             v = lies()
-            if isinstance(v, dict) and tm_knopf_wahl(v, soll)[0] not in ("klick", "wartet", "unklar"):
-                trail.append("Aktualisieren-Knopf nach dem Klick weg")
+            if isinstance(v, dict) and tm_knopf_wahl(v, soll)[0] == "aktuell":   # Prüfer: nur „hat die Fassung jetzt" zählt als Beleg
+                trail.append("Tampermonkey zeigt nach dem Klick „Neu installieren\" (Fassung da)")
                 return raus("", f"Tampermonkey aktualisiert auf {soll['version']}", ok=True)
         return raus("tm_unbelegt", "Aktualisieren geklickt, aber kein Beleg (Seite/Knopf unverändert) — bitte einmal von Hand prüfen.")
     except Exception as e:
