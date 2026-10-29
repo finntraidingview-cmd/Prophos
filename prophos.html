@@ -51398,7 +51398,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1873'
+  const OS_TAB_BUILD = '2026-09-22.1874'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77709,7 +77709,8 @@
     // hypothetischen Betrag und dem kleinen Graph"): dieselben Lader (tplLaden → Lauf/live-trades/Kerzen/Bilanz, apdLaden → Delta) mit
     // Sicht „alle" (window._tplSicht sieht den offenen Reiter), dieselben Bausteine tplKachelnHtml/tplZeitstrahlHtml — keine Kopie.
     // Gruppenfilter (08.10.2026): Finns Gruppen-Chip hängt ?gruppe= an (Verwalter bekommt ohnehin nur seine Gruppe)
-    const ids = apdApi('GET', '/ids?ansicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')).then(d => { _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
+    const ids = apdApi('GET', '/ids?ansicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')).then(d => { if(gq !== apIdsGruppeQ()){ _apIds.nochmal = true; return }   // Gruppe inzwischen gewechselt (S2): Antwort verwerfen, danach neu
+      _apIds.rows = Array.isArray(d.ids) ? d.ids : []; _apIds.aktiv = !!d.aktiv; _apIds.tag = d.tag || null; _apIds.offen = apIdsOhneBestaetigte(Array.isArray(d.offen) ? d.offen : [], t0); apIdsNotizMerken(d.offen)
       // bestätigte, noch nicht gestartete Pläne aller IDs (heute + morgen), sobald das Backend sie mitliefert — sonst null (Delta heute + warteLokal)
       if(Array.isArray(d.bestaetigt)){ _apIds.bestaetigt = d.bestaetigt.filter(z => !_apIds.zurLokal.has(String(z.plan_id))); _apIds.bestaetigtT0 = t0 }
       _apIds.gq = gq; _apIds.frischAt = Date.now(); _apIds.echt = true; apIdsCacheSchreiben(d, gq)
