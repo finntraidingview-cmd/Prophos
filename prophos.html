@@ -3096,6 +3096,9 @@
   #dashboard-view #kasse-content > .subtabs,#dashboard-view .nav-gruppe-tabs{overflow-x:auto;scrollbar-width:thin}
   /* PLANER-TAB (30.10.2026): im Planer-Modus statt der Admin-Reiter die Chip-Leiste der vier Planer */
   #dashboard-view section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}
+  /* Planer-Modus: nie ein Admin-Pane (Übersicht, Payouts …), solange die Verwalter-Erkennung aussteht auch kein Planer-Pane */
+  #dashboard-view section.view.adm-planer-modus #kasse-content [id^="adm-pane-"]:not(#adm-pane-planer):not(#adm-pane-wd):not(#adm-pane-fcfd),
+  #dashboard-view section.view.adm-planer-warten #kasse-content [id^="adm-pane-"]{display:none !important}
   #adm-pane-fcfd .ap-adm-kopf span{color:var(--sub);font-size:12.5px}
   #adm-pane-fcfd .fcfd-kacheln{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
   #adm-pane-fcfd .fcfd-kachel{border:1px solid var(--border-soft, var(--border));border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
@@ -11987,6 +11990,7 @@
           <button class="subtab" data-planerchip="fplaner">Funded Futures</button>
           <button class="subtab" data-planerchip="fcfd">Funded CFD</button>
         </div>
+        <div id="adm-planer-warte" class="kis-s" style="color:var(--sub);font-size:13px;padding:22px 2px" hidden>Lade Planer …</div>
 
         <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
         <div id="adm-pane-overview">
@@ -15644,6 +15648,15 @@
       document.querySelector(`.adm-tab[data-admtab="${ziel}"]`)?.click()
     }
     window._planerChipOeffnen = planerChipOeffnen
+    // Rolle je ID für diese Browser-Sitzung ('ht' | 'verwalter' | 'eigen') — gesetzt von admLoad, gelesen nur für das Warten oben
+    const PLANER_ROLLE_SS = 'prophos_planer_rolle'
+    const planerRolle = () => { try{ const r = JSON.parse(sessionStorage.getItem(PLANER_ROLLE_SS) || 'null'); return r && r.uid === currentUserId ? r.rolle : null }catch(_){ return null } }
+    const planerRolleMerken = d => { try{ sessionStorage.setItem(PLANER_ROLLE_SS, JSON.stringify({ uid: currentUserId, rolle: d.verwalter ? 'verwalter' : Array.isArray(d.sicht_ids) ? 'eigen' : 'ht' })) }catch(_){} }
+    // „Lade Planer …": Section-Klasse blendet alle Panes aus, bis die Verwalter-Erkennung steht
+    function planerWarteSetzen(an){
+      document.querySelector('#dashboard-view section.view[data-view="kasse"]')?.classList.toggle('adm-planer-warten', !!an)
+      const w = document.getElementById('adm-planer-warte'); if(w) w.hidden = !an
+    }
     document.getElementById('adm-planer-chips')?.addEventListener('click', e => {
       const c = e.target.closest('[data-planerchip]'); if(!c || c.classList.contains('active')) return
       planerChipOeffnen(c.dataset.planerchip)
@@ -15664,14 +15677,22 @@
       // wenn ich ganz kurz auf Kompass gehe — die Übersicht auch, ist mir nervig"): Stand bleibt 10 min, ↻ lädt sofort.
       // PLANER-TAB (30.10.2026, „SCHNELL: es lädt nur der offene Planer"): im Planer-Modus die Übersicht (/admin/overview, p90 ~3,5 s) erst
       // NACH dem Planer — sie liefert hier nur Verwalter-Erkennung und Gruppen-Chips; im Admin wie bisher sofort
-      const planerJetzt = planerModus()
-      if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS){
-        if(planerJetzt) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)
+      // VERWALTER ZUERST (Master 30.10.2026: „ein Verwalter darf in der ersten Zeichnung keine fremden IDs sehen — lieber kurz leer"): verzögert
+      // wird nur, wenn diese ID in dieser Browser-Sitzung schon als Hermann Technologies erkannt ist (planerRolle 'ht'); sonst lädt die
+      // Übersicht sofort, der Planer zeigt „Lade Planer …" und öffnet erst mit der Verwalter-Erkennung (admData)
+      const planerJetzt = planerModus(), admFrisch = !!admData && Date.now() - (window._admLadeZeit || 0) <= ADM_CACHE_MS
+      const planerWarten = planerJetzt && !admFrisch && planerRolle() !== 'ht'
+      if(!admFrisch){
+        if(planerJetzt && !planerWarten) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)
+        else if(planerWarten){
+          planerWarteSetzen(true)
+          admLoad().finally(() => { planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } })
+        }
         else admLoad()
       }
       kasseReiterFuer(eigenerCode)
       planerChipsSync(eigenerCode)
-      if(planerJetzt){ window._wdTabPending = false; planerChipOeffnen() }
+      if(planerJetzt){ window._wdTabPending = false; if(!planerWarten) planerChipOeffnen() }
       // Sprung aus Trades („Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
       if(window._wdTabPending){ window._wdTabPending = false; if(kasseReiterErlaubt('wd', eigenerCode)) document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
       // Reiter „Trade-Planer" schon offen (Admin über die Seitenleiste betreten / entsperrt): frisch laden wie beim Reiter-Klick (08.10.2026)
@@ -15773,6 +15794,7 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
+        try{ planerRolleMerken(d) }catch(_){}   // PLANER-TAB: Rolle dieser ID für die Sitzung (Verwalter zuerst)
         if(!Array.isArray(d.sicht_ids) && Array.isArray(d.gruppen) && d.gruppen.length){ try{ localStorage.setItem(ADM_GRUPPEN_MERK, JSON.stringify(d.gruppen.map(x => ({ id: x.id, ht: !!x.ht, ids: x.ids || [], ausser: x.ausser || [] })))) }catch(_){} }   // .1773: für den nächsten Kaltstart
         window._admLadeZeit = Date.now()
         window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)

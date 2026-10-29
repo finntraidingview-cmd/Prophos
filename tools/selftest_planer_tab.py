@@ -40,8 +40,15 @@ def main():
     ok("localStorage" not in s[s.find("const PLANER_CHIP_SS"):s.find("function showLocked()")], "Chip-Merker ohne localStorage")
     ok("sessionStorage.getItem(PLANER_CHIP_SS)" in s, "Chip-Merker in sessionStorage")
     # Lazy: Übersicht im Planer-Modus erst nach dem Planer
-    ok("if(planerJetzt) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)" in s,
-       "Übersicht im Planer-Modus verzögert")
+    ok("if(planerJetzt && !planerWarten) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)" in s,
+       "Übersicht im Planer-Modus verzögert (nur bekannte HT-Rolle)")
+    # Verwalter zuerst (Master 30.10.2026): ohne bekannte Rolle wartet der Planer auf admLoad, Panes bis dahin aus
+    ok("const planerWarten = planerJetzt && !admFrisch && planerRolle() !== 'ht'" in s, "ohne bekannte HT-Rolle warten")
+    ok("admLoad().finally(() => { planerWarteSetzen(false); if(planerModus()){ kasseReiterFuer(eigenerCode); planerChipsSync(eigenerCode); planerChipOeffnen() } })" in s,
+       "Planer öffnet erst nach der Verwalter-Erkennung")
+    ok("if(!planerWarten) planerChipOeffnen()" in s, "kein Chip vor der Erkennung")
+    ok("section.view.adm-planer-warten #kasse-content [id^=\"adm-pane-\"]{display:none !important}" in s, "Panes während des Wartens aus")
+    ok("try{ planerRolleMerken(d) }catch(_){}" in s and "sessionStorage.setItem(PLANER_ROLLE_SS" in s, "Rolle je ID in sessionStorage")
     for t in f:
         print("✗", t)
     print("OK" if not f else f"\n{len(f)} FEHLER")
