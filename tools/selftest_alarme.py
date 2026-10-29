@@ -142,6 +142,19 @@ def main():
     gp = ns["gp_push_ereignisse"]([dict(tf, id="v", status="planned", ss=ss)], namen, seit)
     ok(not gp, f"gp_push meldet final_halten: {gp}")
 
+    # APEX OHNE HEDGE GEHALTEN (30.10.2026, trade_plans_a1_apex_hedge): ⚪ einmal, nur ohne eigene ah_tick-Meldung, kein „Richtungsschutz"
+    sa = {"art": "apex_hedge", "at": iso(30), "naechster": "2026-10-23T12:09:00+00:00", "text": "Apex-Challenge wartet auf Gegenhedge (Marge)"}
+    ap = {"user_id": "u1", "master_firm": "Apex Trader", "master_name": "50k …0011", "route": "tvv2", "master_tp": 260}
+    e7 = ereig([dict(ap, id="a", status="planned", ss=sa), dict(ap, id="b", status="planned", ss=sa, ahm={"status": "ohne", "gemeldet": True}),
+                dict(ap, id="c", status="open", ss=sa), dict(ap, id="d", status="planned", ss=dict(sa, at=iso(5000)))], namen, jetzt, seit)
+    k7 = {e[0]: e for e in e7}
+    ok(list(k7) == ["a|apex_hedge"], f"apex_hedge Schlüssel {list(k7)}")
+    ok(k7.get("a|apex_hedge", (0, 0))[1] == 3 and "nie ohne Hedge" in k7["a|apex_hedge"][4] and "16:09" in k7["a|apex_hedge"][4]
+       and "Marge" in k7["a|apex_hedge"][4], f"apex_hedge Prio/Text {k7.get('a|apex_hedge')}")
+    ok(not any("richtungsschutz" == e[2] for e in e7), "apex_hedge als Richtungsschutz gemeldet")
+    gp = ns["gp_push_ereignisse"]([dict(ap, id="a", status="planned", ss=sa)], namen, seit)
+    ok(not gp, f"gp_push meldet apex_hedge: {gp}")
+
     if f:
         print("ROT:\n  " + "\n  ".join(f))
         sys.exit(1)

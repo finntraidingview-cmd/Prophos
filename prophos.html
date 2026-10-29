@@ -51466,7 +51466,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1889'
+  const OS_TAB_BUILD = '2026-09-22.1890'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55888,7 +55888,7 @@
    * der Plan geplant und ungestartet ist und der letzte Versuch höchstens 30 min her ist. → { kurz, voll, versuche, naechster } | null */
   function tpStartSperre(p){
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
-    if(!s || !['richtung', 'ein_finaler', 'waage_deckel'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
     // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist
@@ -55898,6 +55898,11 @@
       : { kurz: `⛔ Wartet: Waage-Deckel${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
           voll: `Wartet: ${text}. Startet von selbst, sobald das Futures-Buch es zulässt (höchstens 2 Trades Abstand); bis dahin neuer Versuch alle 10–20 min bis Fensterende.`,
           versuche: Number(s.versuche) || 1, at: s.at }
+    // Apex immer mit Hedge (30.10.2026, DB-Riegel trade_plans_a1_apex_hedge): wartet, bis Railway den Hedge rechnen kann — nie ohne Hedge
+    if(s.art === 'apex_hedge'){ if(p.mt5Baseline.apex_hedge && p.mt5Baseline.apex_hedge.status === 'mit') return null
+      return { kurz: `⛔ Wartet auf Hedge${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
+        voll: `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — startet von selbst, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`,
+        versuche: Number(s.versuche) || 1, at: s.at } }
     if(s.art === 'ein_finaler') return { kurz: `⛔ Wartet: nur ein finaler Trade je ID${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
       voll: `Wartet: ${text}. Startet von selbst, sobald der andere finale Trade zu und gelesen ist; bis dahin versucht der PC-Tab es alle 10–20 min neu.`,
       versuche: Number(s.versuche) || 1, at: s.at }

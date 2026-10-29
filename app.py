@@ -3872,8 +3872,17 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
         # HEDGE-TRADE OHNE FREIGABE (29.10.2026, trade_plans_a0_hedge_freigabe): ⚪ einmal je Plan
         if st == "planned" and ss.get("art") == "hedge_freigabe" and str(ss.get("at") or "") > seit_iso:
             out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Hedge-Trade wartet auf Bestätigung",
-                        f"{wer} · {konto}: wartet auf deine Bestätigung im Challenge-Planer (Admin → Challenge-Planer → „Neue Hedge-Trades "
-                        f"bestätigen“) — startet erst danach.", uid, pid))
+                        f"{wer} · {konto}: wartet auf deine Bestätigung im Challenge-Planer (Admin → Challenge-Planer → „Zu bestätigen“ "
+                        f"bzw. „Hedge-Freigabe offen“) — startet erst danach.", uid, pid))
+        # APEX OHNE HEDGE GEHALTEN (30.10.2026, trade_plans_a1_apex_hedge): ⚪ einmal je Plan — nur, wenn ah_tick den Grund nicht schon selbst
+        # gemeldet hat (_ah_ohne, apex_hedge.gemeldet), z. B. weil Railway den Plan noch nicht gesehen hat
+        ahm = p.get("ahm") if isinstance(p.get("ahm"), dict) else {}
+        if st == "planned" and ss.get("art") == "apex_hedge" and str(ss.get("at") or "") > seit_iso and not ahm.get("gemeldet"):
+            nx = _alarm_ts(ss.get("naechster"))
+            nx_txt = nx.astimezone(_ap_tz("Asia/Dubai")).strftime("%H:%M") if nx else "?"
+            out.append((f"{pid}|apex_hedge", 3, "apex_hedge_ohne", "Apex wartet auf Hedge",
+                        f"{wer} · {konto}: {str(ss.get('text') or 'Apex-Challenge wartet auf Gegenhedge')[:160]} — startet nie ohne Hedge, "
+                        f"nächster Versuch {nx_txt} Dubai.", uid, pid))
         tfh = p.get("tfh") if isinstance(p.get("tfh"), dict) else {}
         if st == "planned" and ss.get("art") == "final_halten" and str(ss.get("at") or "") > seit_iso and not tfh.get("gemeldet"):
             nx = _alarm_ts(ss.get("naechster"))
@@ -3925,7 +3934,7 @@ def alarm_tick():
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
-           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge")
+           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
@@ -25097,7 +25106,7 @@ def gp_push_ereignisse(plaene, namen, seit_iso):
         if sf and sf.get("status") == "rot" and str(sf.get("at") or "") > seit_iso and sf.get("schritt") != "ziel_erreicht":
             out.append((f"{pid}|sf|{sf.get('at')}", "⚠ Trade nicht gestartet", f"{wer} · {konto}: {str(sf.get('msg') or 'Start-Check rot')[:150]}"))
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else None
-        if ss and ss.get("art") in ("final_halten", "hedge_freigabe"):
+        if ss and ss.get("art") in ("final_halten", "hedge_freigabe", "apex_hedge"):
             ss = None                                # finaler Tradeify gehalten (29.10.2026): eigene ⚪-Meldung in alarm_ereignisse
         if ss and str(ss.get("at") or "") > seit_iso:
             out.append((pid + "|ss", "⛔ Order ging nicht durch — Richtungsschutz",
@@ -25906,8 +25915,10 @@ def admin_auto_plan_hedge_freigabe():
 # Lots = slave_risk ÷ (Fusion-€/Pkt × master_risk-Punkte)). LIQUIDATION: der WD-Hedge schließt sonst bei Kontogröße + 100 $ — für die
 # Challenge am Boden = Balance − Polster (Apex statisch: Größe − Max DD, 100k 97.000 / 150k 146.000); steht als apex_hedge.liq_balance am
 # Plan, hedgeLiqLevel im Tab nimmt ihn (Master/Finn 30.10.2026, WD-Weg unverändert).
-# Fallback ⚪ ohne Hedge (bleibt Orbit V2 wie bisher), wenn Kontowert/Lots/frische Fusion-Lesung fehlen oder max_lots (echo_hedge.max_lots,
-# eine Grenze für WD + Echo-Hedge + Apex je Fusion-Login, hedge_vorgemerkt) bzw. die Marge knapp wird. Schalter
+# Kein Hedge rechenbar (Kontowert/Lots/frische Fusion-Lesung fehlen, max_lots — echo_hedge.max_lots, eine Grenze für WD + Echo-Hedge + Apex je
+# Fusion-Login, hedge_vorgemerkt — oder Marge knapp): seit 30.10.2026 NIE ohne Hedge (Finn: „Apex-Challenges laufen IMMER mit Hedge") —
+# _ah_ohne merkt den Grund + ⚪ einmal, der DB-Riegel trade_plans_a1_apex_hedge (sql/2026-10-30_apex_immer_hedge.sql) hält den Claim und rückt
+# den Start 15–30 min weiter, ah_tick stellt um, sobald der Hedge rechenbar ist. Schalter
 # auto_plan_regeln.regeln.apex_hedge.an (Standard AUS, sql/2026-10-30_apex_hedge.sql), aus → umgestellte, nicht gestartete Pläne zurück.
 # ════════════════════════════════════════════════════════════════════════════
 AH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "vorlauf_min": 20.0, "nachlauf_min": 30.0}
@@ -25964,8 +25975,10 @@ def _ah_guard(p, mit=False):
 
 
 def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
-    """Plan bleibt (vorerst) Orbit V2 ohne Hedge — wie _eh_ohne: mt5_baseline.apex_hedge {status ohne, code, grund} nur bei neuem Code,
-    Notiz beim ersten Grund, ⚪ einmal je Plan, sobald der Start ≤ EH_MELDEN_MIN entfernt ist."""
+    """Kein Hedge rechenbar — wie _eh_ohne: mt5_baseline.apex_hedge {status ohne, code, grund} nur bei neuem Code, Notiz beim ersten Grund,
+    ⚪ einmal je Plan, sobald der Start ≤ EH_MELDEN_MIN entfernt ist. Seit 30.10.2026 startet der Plan so NIE (Finn: „Apex-Challenges IMMER
+    mit Hedge"): der Claim-Riegel trade_plans_a1_apex_hedge hält ihn mit diesem Grund, der Start rückt 15–30 min weiter, der nächste Takt
+    rechnet neu."""
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     alt = base.get("apex_hedge") if isinstance(base.get("apex_hedge"), dict) else None
     try:
@@ -25979,7 +25992,7 @@ def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
     neu = {"status": "ohne", "code": code, "grund": grund, "at": _wt_now_iso(), "gemeldet": bool((alt or {}).get("gemeldet")) or melden}
     upd = {"mt5_baseline": dict(base, apex_hedge=neu)}
     if not (alt and alt.get("status") == "ohne"):
-        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nApex-Hedge: ohne Hedge, weil {grund}").strip()
+        upd["notes"] = (str(p.get("notes") or "").rstrip() + f"\nApex-Hedge: wartet auf Hedge, weil {grund}").strip()
     try:
         if not sb_update("trade_plans", _ah_guard(p), upd):
             return
@@ -25988,10 +26001,11 @@ def _ah_ohne(p, code, grund, wer, jetzt, melden=True):
         return
     if not gleich:
         _ah["ohne"] += 1
-        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: ohne Hedge — {grund}")
+        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: wartet auf Hedge — {grund}")
     if melden:
-        alarm_senden(3, "apex_hedge_ohne", "Apex-Hedge ausgelassen",
-                     f"{wer} · {p.get('master_name') or '—'}: startet als Orbit V2 ohne Hedge — {grund}",
+        alarm_senden(3, "apex_hedge_ohne", "Apex wartet auf Hedge",
+                     f"{wer} · {p.get('master_name') or '—'}: startet nie ohne Hedge — wartet, bis er rechenbar ist ({grund}); "
+                     f"Start rückt je 15–30 min weiter",
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"ah-ohne-{p['id']}")
 
 
