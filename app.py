@@ -16579,6 +16579,85 @@ KONTO_MAIL_BETREFF_RE = re.compile(r"[A-Za-z0-9 .:'’!?\-]{3,80}")   # Betreff-
 KONTO_MAIL_TEXT_MAX = 3000
 
 
+# HT-PAYOUTS ALS CSV (29.10.2026, Finn: „Einnahmen = alle HT-Payouts aus Prophos“ für das Google Sheet „HT Buchhaltung 2026“, das die Liste per
+# IMPORTDATA selbst lädt — ohne Teilen, ohne Dienstkonto). Schutz: Token aus der Railway-Variable HT_PAYOUTS_CSV_TOKEN (fehlt sie oder ist sie
+# kürzer als HT_PAYOUTS_CSV_TOKEN_MIN → immer 404, nie offen), Vergleich mit hmac.compare_digest, falscher/fehlender Token → 404 (die Route
+# gibt sich nicht zu erkennen). Inhalt: nur transactions kind=payout der Gruppe Hermann Technologies — ausgeblendet wie in Admin → Payouts
+# „Payouts erhalten“: ADMIN_EXCLUDE und alle IDs von Gruppen MIT Verwalter (id_gruppen, nicht hart codiert). Spalten nur Datum · Betrag ·
+# Währung · ID · Zweck · Transaktions-ID, keine Logins/Mails (ID-Name nur aus user_metadata.name, sonst die ersten 8 Zeichen der user_id).
+# Betrag mit Dezimalkomma, ohne Tausenderpunkt — liest Google in de- und en-Tabellen gleich (das Sheet rechnet Text und Zahl). Der Token
+# wird nie geloggt; Fehler nur mit Typ.
+HT_PAYOUTS_CSV_TOKEN_MIN = 32
+
+
+def ht_payouts_token_ok(ist, soll):
+    """REIN RECHNEND: True nur bei gesetztem, ausreichend langem Soll-Token und exakt gleichem Ist-Token (zeitkonstant verglichen)."""
+    soll = str(soll or "").strip()
+    if len(soll) < HT_PAYOUTS_CSV_TOKEN_MIN:
+        return False
+    return hmac.compare_digest(str(ist or "").encode("utf-8"), soll.encode("utf-8"))
+
+
+def ht_payouts_ausblenden(users, exclude_mails, gruppen_daten):
+    """REIN RECHNEND: (disp, aus) — disp = user_id → Anzeigename (nur user_metadata.name, sonst user_id[:8], nie die Mail), aus = ADMIN_EXCLUDE
+    + alle IDs der Gruppen MIT Verwalter (Emin-Gruppe …). Wirft bei leerer Nutzerliste: ohne Auth-API ist nicht trennbar, was HT ist."""
+    if not users:
+        raise RuntimeError("Nutzerliste leer — HT nicht sicher trennbar")
+    disp, aus = {}, set()
+    for u in users:
+        uid = str(u.get("id") or "")
+        if not uid:
+            continue
+        name = str((u.get("user_metadata") or {}).get("name") or "").strip()
+        disp[uid] = name or uid[:8]
+        if str(u.get("email") or "").strip().lower() in exclude_mails:
+            aus.add(uid)
+    return disp, aus | _admin_verwalter_gruppen_ids(gruppen_daten)
+
+
+def ht_payouts_csv(txs, disp, aus):
+    """REIN RECHNEND: CSV-Text (Kopf + Zeilen, nach Datum) aus transactions kind=payout; Zeilen ausgeblendeter IDs fallen raus."""
+    import csv as _csv
+    import io as _io
+    zeilen = []
+    for t in txs or ():
+        uid = str(t.get("user_id") or "")
+        if not uid or uid in aus:
+            continue
+        try:
+            betrag = abs(float(t.get("amount") or 0))
+        except (TypeError, ValueError):
+            continue
+        zweck = " · ".join(x for x in (str(t.get("account_firm") or "").strip(), str(t.get("account_name") or "").strip()) if x)
+        zeilen.append([str(t.get("occurred_at") or "")[:10], f"{betrag:.2f}".replace(".", ","), str(t.get("currency") or "EUR").upper(),
+                       disp.get(uid) or uid[:8], zweck, str(t.get("id") or "")])
+    zeilen.sort(key=lambda z: (z[0], z[5]))
+    buf = _io.StringIO()
+    w = _csv.writer(buf, lineterminator="\n")
+    w.writerow(["Datum", "Betrag", "Währung", "ID", "Zweck", "Transaktions-ID"])
+    w.writerows(zeilen)
+    return buf.getvalue()
+
+
+@app.route("/ht/payouts.csv", methods=["GET"])
+def ht_payouts_csv_route():
+    """GET /ht/payouts.csv?token=… → text/csv der HT-Payouts (siehe Block oben). 404 ohne gültigen Token, 502 bei Lesefehler."""
+    if not ht_payouts_token_ok(request.args.get("token"), os.environ.get("HT_PAYOUTS_CSV_TOKEN")):
+        return Response("Not Found", status=404, mimetype="text/plain")
+    try:
+        users = (_auth_liste_anfrage().json() or {}).get("users", [])
+        disp, aus = ht_payouts_ausblenden(users, ADMIN_EXCLUDE_EMAILS, admin_gruppen_daten())
+        txs = _sb_all("transactions", {"select": "id,user_id,account_name,account_firm,amount,currency,occurred_at", "kind": "eq.payout"}) or []
+        text = ht_payouts_csv(txs, disp, aus)
+    except Exception as e:
+        print(f"[ht-payouts-csv] ⚠️ nicht lesbar ({type(e).__name__})", flush=True)   # bewusst ohne URL/Token
+        return Response("Fehler", status=502, mimetype="text/plain")
+    r = Response(text, mimetype="text/csv")
+    r.headers["Content-Type"] = "text/csv; charset=utf-8"
+    r.headers["Cache-Control"] = "no-store"
+    return r
+
+
 @app.route("/admin/konto-mails", methods=["GET", "OPTIONS"])
 def admin_konto_mails():
     """GET /admin/konto-mails?betreff=<a>|<b>…&tage=90 → {ok, mails:[{id, user_id, person, von, betreff, datum, text}],
