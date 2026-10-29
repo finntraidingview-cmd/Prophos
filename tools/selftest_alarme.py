@@ -8,14 +8,14 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "tsx_brackets_fehlen", "_tsx_brackets_kern", "alarm_ereignisse")
+FUNKTIONEN = ("_wd_num", "_ap_tz", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "tsx_brackets_fehlen", "_tsx_brackets_kern", "alarm_ereignisse")
 KONSTANTEN = ("PULS_BILD_PFAD_RE", "ALARM_PRIO_TITEL", "HEDGE_LEBT", "ALARM_HEDGE_OFFEN_S", "ALARM_OHNE_HEDGE_S", "ALARM_HEDGE_ZU_MASTER_S",
               "ALARM_ERINNERN_S", "ALARM_RADAR_GRUENDE")
 
 
 def lade():
     src = open(APP, encoding="utf-8").read()
-    ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta}
+    ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta}   # _ap_tz importiert ZoneInfo selbst
     teile = []
     for k in KONSTANTEN:
         i = re.search(rf"^{k} = ", src, re.M).start()
@@ -128,6 +128,19 @@ def main():
     ok(len(ev2["m|nova_ohne_sltp"]) == 7, "ohne Foto kein Link")
     k3 = [e[0] for e in ereig([dict(pl2[0], started_at=iso(2000))], namen, jetzt, seit)]
     ok(k3 == ["m|ohne_sltp|2"], f"Erinnerung ohne SL/TP {k3}")
+
+    # FINALER TRADEIFY GEHALTEN (29.10.2026): ⚪ einmal je Plan, kein „Richtungsschutz"
+    ss = {"art": "final_halten", "at": iso(30), "naechster": "2026-10-23T12:09:00+00:00", "text": "finaler Tradeify-Trade wartet auf Gegenhedge"}
+    tf = {"user_id": "u1", "master_firm": "Tradeify", "master_name": "150k …0003", "route": "tvv2", "master_tp": 2039}
+    e6 = ereig([dict(tf, id="v", status="planned", ss=ss), dict(tf, id="w", status="open", ss=ss),
+                dict(tf, id="x", status="planned", ss=dict(ss, at=iso(5000)))], namen, jetzt, seit)
+    k6 = {e[0]: e for e in e6}
+    ok(list(k6) == ["v|final_halten"], f"final_halten Schlüssel {list(k6)}")
+    ok(k6.get("v|final_halten", (0, 0))[1] == 3 and "Gegenhedge" in k6["v|final_halten"][4] and "23.10. 16:09" in k6["v|final_halten"][4],
+       f"final_halten Prio/Text {k6.get('v|final_halten')}")
+    ok(not any("richtungsschutz" == e[2] for e in e6), "final_halten als Richtungsschutz gemeldet")
+    gp = ns["gp_push_ereignisse"]([dict(tf, id="v", status="planned", ss=ss)], namen, seit)
+    ok(not gp, f"gp_push meldet final_halten: {gp}")
 
     if f:
         print("ROT:\n  " + "\n  ".join(f))

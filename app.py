@@ -3867,6 +3867,14 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             elif hst in HEDGE_LEBT and h.get("close_fehler"):
                 out.append((f"{pid}|close_fehler", 1, "hedge_close_fehler", "Hedge-Close scheitert",
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
+        # FINALER TRADEIFY GEHALTEN (29.10.2026): der DB-Trigger hat den Start verschoben (start_sperre art final_halten) → ⚪ einmal je Plan
+        ss = p.get("ss") if isinstance(p.get("ss"), dict) else {}
+        if st == "planned" and ss.get("art") == "final_halten" and str(ss.get("at") or "") > seit_iso:
+            nx = _alarm_ts(ss.get("naechster"))
+            nx_txt = nx.astimezone(_ap_tz("Asia/Dubai")).strftime("%d.%m. %H:%M") if nx else "?"
+            out.append((f"{pid}|final_halten", 3, "tradeify_final_halten", "Finaler Tradeify-Trade gehalten",
+                        f"{wer} · {konto}: finaler Trade (TP {_wd_num(p.get('master_tp')) or '?'} $) startet nicht, bis die Gegenhedge-Logik steht — "
+                        f"bleibt geplant, nächster Versuch {nx_txt} Dubai.", uid, pid))
         # NOVA OHNE SL/TP (29.10.2026): Start-Ergebnis meldet fehlende Brackets → 🔴 sofort (nächster Takt), Erinnerung alle 15 min, bis Puls/
         # Hand sie nachweist (tv.brackets_ok_at) oder der Plan nicht mehr läuft. Prophos beendet solche Pläne nie per Kurs-Schätzung.
         bf = tsx_brackets_fehlen(p.get("route"), {"brackets_fehlen": p.get("tv_bf"), "warnung": p.get("tv_w"), "brackets_ok_at": p.get("tv_ok"),
@@ -3907,7 +3915,7 @@ def alarm_tick():
     _alarm["at"] = time.time()
     jetzt = datetime.now(timezone.utc)
     seit = max(datetime.fromtimestamp(_alarm["start"], timezone.utc), jetzt - timedelta(minutes=20)).isoformat()
-    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,richtung,master_contracts,started_at,updated_at,"
+    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,richtung,master_contracts,master_tp,started_at,updated_at,"
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
@@ -23429,6 +23437,34 @@ def ap_richtung_fest_plan(p, tag, tz):
     return True
 
 
+# FINALER TRADEIFY HALTEN (Finn 29.10.2026 ~16:05 Dubai, Master „TRADEIFY-FINAL-HALTEN"): finale Tradeify-Futures-Trades (TP erreicht oder
+# überschreitet das Ziel, z. B. 157k → 159k) starten nicht, bis die Gegenhedge-Logik für den letzten Trade steht — sie werden nicht geplant
+# (ap_planen: Grund AP_TRADEIFY_FINAL_GRUND) und ein schon geplanter startet nicht (DB-Trigger trade_plans_a_final_halten, sql/2026-10-29_
+# tradeify_final_halten.sql: bleibt planned, Start +1 Tag gestreut, hand_werte_at schützt vor dem Löschen, ⚪ über alarm_tick). Schalter
+# auto_plan_regeln.regeln.tradeify_final_halten (fehlt = AN). Tradeify CFD, andere Firmen und nicht-finale Trades laufen weiter.
+AP_TRADEIFY_FINAL_GRUND = "finaler Tradeify-Trade wartet auf Gegenhedge"
+
+
+def ap_tradeify_final_halten(regeln, firma, w):
+    """REIN RECHNEND (testbar): hält der Planer diesen Trade zurück? Nur Tradeify Futures (nie Tradeify CFD), nur bei Schalter an, nur final —
+    dieselbe Regel wie prophos_plan_final_text in der DB: Stufe „letzter Trade"/„Klein-Trade" ist final, „Tage sammeln" nie, sonst TP ≥ Rest
+    bis Ziel (Rest ≤ 0 = Ziel schon erreicht)."""
+    if (regeln or {}).get("tradeify_final_halten") is False:
+        return False
+    f = re.sub(r"[^a-z0-9]", "", str(firma or "").lower())
+    if "tradeify" not in f or _ist_tradeify_cfd(firma):
+        return False
+    stufe = str((w or {}).get("stufe") or "")
+    if stufe.startswith("Tage sammeln"):
+        return False
+    if stufe.startswith("letzter Trade") or stufe.startswith("Klein-Trade"):
+        return True
+    rest, tp = _wd_num((w or {}).get("rest")), _wd_num((w or {}).get("tp"))
+    if rest is None:
+        return False
+    return rest <= 0 or (tp is not None and tp > 0 and tp >= rest)
+
+
 def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None, ids=None,
               nur_konten=None):
     """Plant den Tag `tag` (Dubai-Datum, Standard heute) für alle IDs aus auto_plan_regeln. trocken = nur rechnen.
@@ -23698,6 +23734,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 w, grund = ap_konto_rechnen(k["regel"], k["a"]["account_type"], k["bal"], u_k, peak=(peaks_kette or {}).get(str(k["a"].get("id"))),
                                             ppl=ap_cfd_ppl(stand.get("ctx"), k["a"]), tage=k.get("tage"),
                                             mll_belegt=(mlls_kette or {}).get(str(k["a"].get("id"))), rest_planer=bool(k["a"].get("rest_planer_at")))
+            if w and not grund and ap_tradeify_final_halten(reg.get("regeln"), k["a"].get("firm"), w):
+                grund = AP_TRADEIFY_FINAL_GRUND   # finaler Tradeify-Trade wartet auf Gegenhedge (29.10.2026) — nicht planen
             if w and not grund:
                 tps_tranche.add(w.get("tp"))
             if grund and "Boden" in grund:
@@ -24446,6 +24484,8 @@ def gp_push_ereignisse(plaene, namen, seit_iso):
         if sf and sf.get("status") == "rot" and str(sf.get("at") or "") > seit_iso and sf.get("schritt") != "ziel_erreicht":
             out.append((f"{pid}|sf|{sf.get('at')}", "⚠ Trade nicht gestartet", f"{wer} · {konto}: {str(sf.get('msg') or 'Start-Check rot')[:150]}"))
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else None
+        if ss and ss.get("art") == "final_halten":
+            ss = None                                # finaler Tradeify gehalten (29.10.2026): eigene ⚪-Meldung in alarm_ereignisse
         if ss and str(ss.get("at") or "") > seit_iso:
             out.append((pid + "|ss", "⛔ Order ging nicht durch — Richtungsschutz",
                          f"{wer} · {konto}: {str(ss.get('text') or '')[:150]} — neuer Versuch alle ~10 min, Gegen-Trade abhaken löst es"))
