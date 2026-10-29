@@ -32,7 +32,15 @@ def main():
     ok("'art', 'apex_hedge'" in fn and "'grund'" in fn and "'versuche'" in fn, "start_sperre mit Grund + Versuchen")
     ok("> now() - interval '1 minute' then\n    return null;" in fn, "Mehrfach-Claim < 1 min schiebt nicht weiter")
     ok(re.search(r"if erst then\s+insert into public\.auto_plan_umplanung", fn) is not None, "Protokoll nur beim ersten Halt")
-    ok("hand_werte_at" not in fn, "hand_werte_at bleibt (ah_tick stellt nur Pläne ohne Hand-Werte um)")
+    ok("hand_werte_at =" not in fn and "hand_werte_at = coalesce" not in fn, "hand_werte_at wird nie gesetzt (ah_tick stellt nur Pläne ohne Hand-Werte um)")
+    # Nachtrag Hand-Werte (Master 30.10.2026, Variante 2): weiter halten, eigener Sperrtext; Nachtrag-Datei wortgleich
+    i_hand = fn.find("if new.hand_werte_at is not null then")
+    ok(i_mit < i_hand < i_halt and "Werte von Hand geändert, Takt stellt nicht mehr um: ablehnen und neu planen" in fn
+       and "return new" not in fn[i_hand:i_halt], "Hand-Werte: gehalten mit eigenem Text, nie durchgelassen")
+    hand = lies("sql", "2026-10-30_apex_immer_hedge_hand.sql")
+    hc = "\n".join(z for z in hand.splitlines() if not z.lstrip().startswith("--"))
+    ok(hc[hc.index("create or replace function public.trade_plans_a1_apex_hedge()"):].strip() == fn.strip(), "Nachtrag-Datei wortgleich mit der Hauptdatei")
+    ok("create trigger" not in hc and "drop trigger" not in hc, "Nachtrag: nur die Funktion, Trigger bleibt")
     ok("trade_plans_kontoart_weg" not in code, "kontoart_weg unverändert")
     trig = code[code.index("create trigger trade_plans_a1_apex_hedge"):]
     ok("before update of start_um_gestartet_at" in trig and "old.start_um_gestartet_at is null and new.start_um_gestartet_at is not null" in trig,
@@ -46,6 +54,7 @@ def main():
     ok("ahm:mt5_baseline->apex_hedge" in app and '"apex_hedge"):' in app, "alarm_tick liest apex_hedge, gp_push nimmt die Art aus")
     html = lies("prophos.html")
     ok("'waage_deckel', 'apex_hedge'].includes(s.art)" in html and "if(s.art === 'apex_hedge')" in html, "tpStartSperre zeigt die Sperre")
+    ok("/von Hand geändert/.test(text)" in html, "tpStartSperre: eigener Satz für Hand-Werte")
     for t in f:
         print("✗", t)
     print("OK" if not f else f"\n{len(f)} FEHLER")

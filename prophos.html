@@ -51466,7 +51466,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1890'
+  const OS_TAB_BUILD = '2026-09-22.1891'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -55901,7 +55901,8 @@
     // Apex immer mit Hedge (30.10.2026, DB-Riegel trade_plans_a1_apex_hedge): wartet, bis Railway den Hedge rechnen kann — nie ohne Hedge
     if(s.art === 'apex_hedge'){ if(p.mt5Baseline.apex_hedge && p.mt5Baseline.apex_hedge.status === 'mit') return null
       return { kurz: `⛔ Wartet auf Hedge${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
-        voll: `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — startet von selbst, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`,
+        voll: /von Hand geändert/.test(text) ? `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — nach Hand-Werten stellt der Takt nicht mehr um.`
+          : `Wartet: ${text}. Apex-Challenges starten nur mit Gegenhedge — startet von selbst, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`,
         versuche: Number(s.versuche) || 1, at: s.at } }
     if(s.art === 'ein_finaler') return { kurz: `⛔ Wartet: nur ein finaler Trade je ID${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
       voll: `Wartet: ${text}. Startet von selbst, sobald der andere finale Trade zu und gelesen ist; bis dahin versucht der PC-Tab es alle 10–20 min neu.`,

@@ -12,6 +12,9 @@
 -- alarm_tick, falls ah_tick den Plan noch nicht gesehen hat.
 -- Nur solange regeln.apex_hedge.an true ist (prophos_apex_hedge_an aus sql/2026-10-30_apex_hedge.sql) — Schalter aus: wie bisher Orbit V2.
 -- hand_werte_at bleibt unberührt (ah_tick stellt nur Pläne ohne Hand-Werte um). Ein Start von Hand ohne Claim bleibt möglich.
+-- Nachtrag 30.10.2026 (Prüfer S2 / Master, Variante 2): ein markierter Plan mit späteren Hand-Werten wird von ah_tick nie umgestellt — er
+-- bleibt gehalten (nie ohne Hedge), der Sperrtext sagt es: „… Werte von Hand geändert, Takt stellt nicht mehr um: ablehnen und neu planen".
+-- Live eingespielt über sql/2026-10-30_apex_immer_hedge_hand.sql (dieselbe Funktion, Wort für Wort).
 -- trade_plans_kontoart_weg bleibt unverändert (kein neuer Weg). Wiederholbar.
 -- Rückbau: drop trigger trade_plans_a1_apex_hedge on public.trade_plans; drop function public.trade_plans_a1_apex_hedge();
 
@@ -49,8 +52,13 @@ begin
   end if;
   erst := coalesce(ss->>'art', '') <> 'apex_hedge';
   ziel := greatest(coalesce(old.start_um, now()), now()) + interval '15 minutes' + make_interval(secs => floor(random() * 900));
-  txt := 'Apex-Challenge wartet auf Gegenhedge'
-         || coalesce(' (' || nullif(left(new.mt5_baseline->'apex_hedge'->>'grund', 160), '') || ')', ' (noch nicht umgestellt)');
+  -- Hand-Werte (Master 30.10.2026, Variante 2): ah_tick stellt solche Pläne nie mehr um — weiter halten (nie ohne Hedge), Grund sagt es
+  if new.hand_werte_at is not null then
+    txt := 'Apex wartet auf Hedge — Werte von Hand geändert, Takt stellt nicht mehr um: ablehnen und neu planen';
+  else
+    txt := 'Apex-Challenge wartet auf Gegenhedge'
+           || coalesce(' (' || nullif(left(new.mt5_baseline->'apex_hedge'->>'grund', 160), '') || ')', ' (noch nicht umgestellt)');
+  end if;
   update public.trade_plans
      set start_um = ziel,
          mt5_baseline = coalesce(mt5_baseline, '{}'::jsonb) || jsonb_build_object('start_sperre', jsonb_build_object(
