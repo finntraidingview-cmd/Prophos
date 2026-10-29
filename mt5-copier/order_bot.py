@@ -19326,6 +19326,35 @@ def tsx_k4_klick_rect(zelle, zeile):
     return [round(v, 1) for v in k], ""
 
 
+def tsx_k4_stift_rect(feld, zeile):
+    """REIN RECHNEND (testbar, 29.10.2026 abends, Fehlerfoto e9cf8722): Rechteck des Stift-Symbols ✎ einer Risk-/To-Make-Zelle (augen_tsx.js
+    tsx-0.6.4, feld.stift) — nur wenn es ganz in der Zelle liegt (±2 px), klein ist (6–40 px), nicht verdeckt/gesperrt und die Zelle in ihrer
+    Zeile liegt; nie über der Close-Zelle. -> [x, y, w, h] | None (dann Doppelklick-Weg)"""
+    f = feld if isinstance(feld, dict) else {}
+    st = f.get("stift") if isinstance(f.get("stift"), dict) else None
+    s_, z = cdp_rect((st or {}).get("rect")), cdp_rect(f.get("rect"))
+    if not s_ or not z:
+        return None
+    zu = st.get("zu") if isinstance(st.get("zu"), dict) else {}
+    if zu.get("verdeckt") or zu.get("disabled"):
+        return None
+    sx, sy, sw, sh = [float(v) for v in list(s_)[:4]]
+    zx, zy, zw, zh = [float(v) for v in list(z)[:4]]
+    if not (6 <= sw <= 40 and 6 <= sh <= 40):
+        return None
+    if sx < zx - 2 or sy < zy - 2 or sx + sw > zx + zw + 2 or sy + sh > zy + zh + 2:
+        return None
+    if not tsx_k4_klick_rect(z, zeile)[0]:                 # Zelle außerhalb ihrer Zeile / über Close → auch kein Stift-Klick
+        return None
+    zd = zeile if isinstance(zeile, dict) else {}
+    c = cdp_rect(zd.get("close_rect"))
+    if c:
+        cx, cy, cw, ch = [float(v) for v in list(c)[:4]]
+        if sx < cx + cw and cx < sx + sw and sy < cy + ch and cy < sy + sh:
+            return None
+    return [sx, sy, sw, sh]
+
+
 def _tsx_k4_dialog_name(st):
     """Titel bzw. Text des ersten offenen TopstepX-Dialogs für Spur/Warnung ('' ohne Dialog). Liest nur."""
     p0 = (st.get("popups") or [None])[0] if isinstance(st, dict) else None
@@ -19347,6 +19376,7 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
     text = tsx_k4_betrag_text(usd)
     letzter = ""
     for versuch in range(2):
+        stift = None                                       # Stift-Weg dieses Versuchs (tsx-0.6.4) — None = Doppelklick bzw. Feld schon offen
         if versuch == 1 and _tsx_frist(trail) - trail.sekunden() < 27.0:
             # Prüfer 06.10.2026: ein zweiter Versuch braucht bis ~19 s — der Wachhund (os._exit) träfe sonst mitten ins Tippen
             letzter += " — kein zweiter Versuch (Zeitlimit des Laufs)"
@@ -19376,18 +19406,27 @@ def _tsx_k4_feld(s, st, befehl, feld, usd, name, trail):
             # RECHTECK-BEWEIS (29.10.2026 abends, Master nach e9cf8722): Klickfläche nur im mittleren Band der Zelle, Zelle in ihrer Zeile;
             # am Druckpunkt muss die Seite GENAU diese Zelle (role=gridcell/cell, Rechteck ±3 px, Punkt ≥ 3 px vom Rand) zeigen (pruef.zelle)
             z_, _g = tsx_k4_zeile(st, befehl)
-            links, grund_k = tsx_k4_klick_rect(r, z_)
-            if not links:
-                return False, None, f"{name}-Zelle: {grund_k} — kein Doppelklick", st
-            _tsx_pause()
-            if not s.klick(links, f"{name}-Zelle (Doppelklick)", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K4_TABU, "zelle": r}, doppel=True):
-                return False, None, f"{name}-Zelle nicht gedrückt (Klick ohne Beweis)", st
+            # STIFT ✎ ZUERST (29.10.2026 abends, Fehlerfoto e9cf8722, Master): „$0.00 ✎" — der vorgesehene Bearbeiten-Weg ist das Stift-Symbol
+            # der Zelle (augen_tsx.js tsx-0.6.4 meldet stift.rect). EIN Klick, Ziel-Beweis = am Punkt liegt dieser Stift UND diese Zelle
+            # (pruef.zelle). Ohne Stift (altes Auge, Symbol nicht eindeutig) der Doppelklick wie bisher — mit Klickfläche und Zellen-Beweis.
+            stift = tsx_k4_stift_rect(f, z_)
+            if stift:
+                _tsx_pause()
+                if not s.klick(stift, f"{name}-Stift", pruef={"rect": stift, "text": "", "aria": "", "tabu": TSX_K4_TABU, "zelle": r}):
+                    return False, None, f"{name}-Stift nicht gedrückt (Klick ohne Beweis)", st
+            else:
+                links, grund_k = tsx_k4_klick_rect(r, z_)
+                if not links:
+                    return False, None, f"{name}-Zelle: {grund_k} — kein Doppelklick", st
+                _tsx_pause()
+                if not s.klick(links, f"{name}-Zelle (Doppelklick)", pruef={"rect": r, "text": "", "aria": "", "tabu": TSX_K4_TABU, "zelle": r}, doppel=True):
+                    return False, None, f"{name}-Zelle nicht gedrückt (Klick ohne Beweis)", st
             _warte(0.5, 0.3)
             st = s.stand()
             f, grund = _tsx_k4_feld_aus(st, befehl, feld)
             e = f.get("edit") if isinstance(f, dict) and isinstance(f.get("edit"), dict) else {}
         if not e.get("offen") or e.get("fokus") is not True:
-            letzter = f"{name}: nach dem Doppelklick kein Eingabefeld mit Fokus"
+            letzter = f"{name}: nach dem {'Stift-Klick' if stift else 'Doppelklick'} kein Eingabefeld mit Fokus"
             trail.append(letzter + (" — zweiter Versuch" if versuch == 0 else ""))
             if e.get("offen"):
                 _cdp_esc(s, st, trail, f"{name}-Feld ohne Fokus")

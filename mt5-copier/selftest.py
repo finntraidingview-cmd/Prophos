@@ -8353,7 +8353,8 @@ def test_tsx_k3a():
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
     # Version 0.6.2 → 0.6.3 nachgezogen (S4 21.10.2026): 4af8c460 (19.10.) hob augen_tsx.js für das Symbol-X der Login-Meldung auf
     # tsx-0.6.3, ohne diese Prüfung mitzunehmen — seitdem rot, obwohl Contract-/Ticket-Lesung unverändert und weiter klickfrei ist.
-    chk("var VERSION = 'tsx-0.6.3'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
+    # tsx-0.6.4 (29.10.2026 abends, S5): Stift ✎ je Risk-/To-Make-Zelle gemeldet — Contract-/Ticket-Lesung unverändert
+    chk("var VERSION = 'tsx-0.6.4'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
         and "order-card-click-button-buy" in js and "k3: true" in js
         and "filter(function (z) { return RX_CODE.test(z); })" in js    # DOM-Test 01.10.2026: vor dem Code steht „■" — nie nur Zeile 1
         and ".click(" not in js.split("function contractLesen")[1].split("function ticketLesen")[0],
@@ -8474,7 +8475,7 @@ def test_tsx_k4():
             self.o = dict(fill_nach=1, fill_toast=True, abgelehnt=False, order_druck=True, reiter=False, risk=None, to_make=None, edit_geht=True,
                           strg_a=True, tipp_extra="", enter_wirkt=True, flach_ohne_pos=True, markt_zu=False, popup_nach_enter=False, edit_fokus=True,
                           wirft_nach_klick=False, tippen_wirft=False, tasten_wirken=True, k4=True, reiter_da=True, bein_abgelehnt=False, zeile_nach=0, klick_wirft="",
-                          abl_ohne_zeile=False, dialog_nach_doppel="")
+                          abl_ohne_zeile=False, dialog_nach_doppel="", stift=False)
             self.o.update(kw)
             self.dlg, self.dlg_gezeigt = None, False
             self.richtung, self.menge, self.avg = richtung, menge, avg
@@ -8489,7 +8490,10 @@ def test_tsx_k4():
                 return {"text": "", "wert": None, "rect": rect, "zu": {"disabled": False, "verdeckt": False},
                         "edit": {"offen": True, "wert": self.eingabe, "rect": rect, "fokus": bool(self.o["edit_fokus"]), "typ": "number"}}
             w = self.werte[name]
-            return {"text": "" if w is None else f"${w:,.2f}", "wert": w, "rect": rect, "zu": {"disabled": False, "verdeckt": bool(self.dlg)}, "edit": {"offen": False}}
+            # Stift ✎ rechts in der Zelle (tsx-0.6.4, Fehlerfoto e9cf8722) — nur mit Option stift
+            st_ = {"rect": [rect[0] + rect[2] - 24, rect[1] + 3, 16, 16], "zu": {"disabled": False, "verdeckt": bool(self.dlg)}, "art": "name"} if self.o["stift"] else None
+            return {"text": "" if w is None else f"${w:,.2f}", "wert": w, "rect": rect, "zu": {"disabled": False, "verdeckt": bool(self.dlg)}, "edit": {"offen": False},
+                    "stift": st_}
 
         def stand(self, opts=None):
             if self.lesungen is not None:
@@ -8557,6 +8561,11 @@ def test_tsx_k4():
             elif name.startswith("Symbol-Dialog schließen"):
                 if self.dlg and self.o["dialog_nach_doppel"] in ("symbol_cancel", "symbol_x"):
                     self.dlg = None
+            elif name in ("Risk-Stift", "To Make-Stift"):
+                feld = "risk" if name.startswith("Risk") else "to_make"
+                if self.o["edit_geht"]:
+                    w = self.werte[feld]
+                    self.edit, self.eingabe, self.markiert = feld, ("" if w is None else str(int(w))), False
             elif name.startswith("Risk-Zelle") or name.startswith("To Make-Zelle"):
                 feld = "risk" if name.startswith("Risk") else "to_make"
                 if doppel and self.o["dialog_nach_doppel"] and not self.dlg_gezeigt:
@@ -8776,6 +8785,21 @@ def test_tsx_k4():
             and "Zeile" in kr(RR, zl_([69, 800, 1930, 22]))[1] and kr([1840, 766, 200, 22], zl_([69, 766, 2100, 22]))[0] is None
             and kr([1000, 766, 20, 22], None)[0] is None and kr(RR, None)[0] == [1004.0, 771.5, 80.0, 11.0],
             "tsx_k4_klick_rect: mittleres Band, links; Zelle außerhalb der Zeile / über Close / zu klein → kein Doppelklick")
+        # Stift ✎ (29.10.2026 abends, Fehlerfoto e9cf8722): EIN Klick auf den Stift statt Doppelklick, Ziel-Beweis mit pruef.zelle; auch mit
+        # „Switch Chart Symbol"-Option kommt kein Dialog (der Stift trifft nie die Zeile)
+        s6s = _T4(stift=True, dialog_nach_doppel="fremd")
+        r6s, _ = lauf(s6s)
+        ks_ = [(k, pr) for (k, pr) in zip(s6s.klicks, s6s.pruef) if k[0] in ("Risk-Stift", "To Make-Stift")]
+        chk(r6s["ok"] and "warnung" not in r6s and s6s.werte == {"risk": 21.0, "to_make": 198.0} and len(ks_) == 2
+            and all(not k[1] and pr.get("zelle") and pr["rect"] == k[2] for k, pr in ks_) and not any("Doppelklick" in k[0] for k in s6s.klicks),
+            f"Stift-Weg: je Zelle EIN Klick auf ✎ (kein Doppelklick), pruef.zelle, Risk + To Make gesetzt ({r6s.get('warnung')}, {s6s.werte})")
+        sr = ob.tsx_k4_stift_rect
+        zl2 = {"rect": [69, 766, 1930, 22], "close_rect": RC}
+        fs = lambda r, zu=None: {"rect": RR, "stift": {"rect": r, "zu": zu or {}}}
+        chk(sr(fs([1176, 769, 16, 16]), zl2) == [1176.0, 769.0, 16.0, 16.0] and sr(fs([1176, 769, 16, 16], {"verdeckt": True}), zl2) is None
+            and sr(fs([1210, 769, 16, 16]), zl2) is None and sr(fs([1100, 760, 80, 40]), zl2) is None and sr({"rect": RR}, zl2) is None
+            and sr(fs([1176, 769, 16, 16]), {"rect": [69, 800, 1930, 22]}) is None,
+            "tsx_k4_stift_rect: nur ein kleiner, freier Stift ganz in der Zelle, Zelle in ihrer Zeile — sonst Doppelklick-Weg")
         s6k = _T4()
         r6k, _ = lauf(s6k)
         pk_ = [pr for (k, pr) in zip(s6k.klicks, s6k.pruef) if k[0].endswith("-Zelle (Doppelklick)")]
@@ -8896,7 +8920,8 @@ def test_tsx_k4():
         "K4: genau EIN Order-Klick; gesendet/retry_ok davor gesetzt, nur ohne Druck zurückgenommen")
     qk = "".join(_i.getsource(f) for f in (ob._tsx_k4_senden, ob._tsx_k4_feld, ob._tsx_k4_reiter, ob._tsx_k4_feld_aus))
     # .1494: vier Klicks — Order-Knopf, Reiter Positions, Zelle (Doppelklick), Eingabefeld (Fokus-Nachgriff nach dem Tippen, Mike 13.10.2026)
-    chk("close_rect" not in qk and qk.count("TSX_K4_TABU") == 4 and qk.count("pruef=") == 4 and "doppel=True" in _i.getsource(ob._tsx_k4_feld)
+    # 29.10.2026 abends: fünf — dazu der Stift-Klick ✎ (tsx-0.6.4), ebenfalls mit Ziel-Beweis + Tabu
+    chk("close_rect" not in qk and qk.count("TSX_K4_TABU") == 5 and qk.count("pruef=") == 5 and "doppel=True" in _i.getsource(ob._tsx_k4_feld)
         and "Eingabefeld (Fokus)" in _i.getsource(ob._tsx_k4_feld) and "time.sleep" not in qk,
         "K4-Schritte: jeder Klick mit Ziel-Beweis + Tabu (auch der Fokus-Nachgriff), Close-Zelle nie benutzt, keine festen Pausen")
     sig = _i.signature(ob._AugenSitzung.klick)
@@ -8905,7 +8930,8 @@ def test_tsx_k4():
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
     neu_js = js.split("function reiterLesen()")[1].split("function positionAus")[0]
     # tsx-0.6.3 seit 4af8c460 (19.10.2026, Symbol-X der Login-Meldung) — Reiter/Positions-Tabelle unberührt (S4 21.10.2026)
-    chk("var VERSION = 'tsx-0.6.3'" in js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
+    # tsx-0.6.4: dazu feld().stift (Rechteck des ✎) — weiter nur lesend
+    chk("var VERSION = 'tsx-0.6.4'" in js and "stift: stift" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
         and "o.ticket.k4 = true" in js and ".click(" not in neu_js and "dispatchEvent" not in neu_js and ".focus(" not in neu_js
         and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
     chk("zuletzt" in js and "15000" in js and "e.zuletzt = jetzt; m.erst_gesehen = e.erst;" in js, "augen_tsx.js 0.6.1: Meldungs-Merker vergisst nach 15 s (Prüfer 06.10.2026)")

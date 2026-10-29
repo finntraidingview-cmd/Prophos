@@ -36,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.6.3';
+  var VERSION = 'tsx-0.6.4';
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -450,7 +450,21 @@ var PROPHOS_AUGEN_TSX = (function () {
       var z = zelle(row, name); if (!z || !sichtbar(z)) return null;
       var inp = alle('input', z).filter(function (i) { var t = String(i.type || '').toLowerCase(); return t !== 'checkbox' && t !== 'radio' && t !== 'hidden'; })[0] || null;
       var t = txt(z);
-      return { text: t.slice(0, 30), wert: inp ? null : geld(t), rect: rect(z), zu: zustand(z),
+      // STIFT ✎ (tsx-0.6.4, 29.10.2026 abends, Fehlerfoto Marc e9cf8722: „$0.00 ✎" je Zelle; der Doppelklick links ins Leere wählte die ZEILE
+      // und öffnete „Switch Chart Symbol"): das Bearbeiten-Symbol der Zelle — erst über Name (data-testid/aria/title/Klasse mit edit|pencil),
+      // sonst das EINZIGE kleine Symbol (svg ≤ 28 px) in der Zelle. Gemeldet wird der klickbare Träger (Knopf um das svg, sonst das svg). Nur lesen.
+      var stift = null;
+      if (!inp) {
+        var nm = function (e) { var k = e.className; return (attr(e, 'data-testid') + ' ' + attr(e, 'aria-label') + ' ' + attr(e, 'title') + ' ' + String(k && k.baseVal !== undefined ? k.baseVal : (k || ''))); };
+        var kand = alle('button,[role="button"],svg', z).filter(sichtbar).filter(function (e) { return /edit|pencil/i.test(nm(e)); }), art = 'name';
+        if (!kand.length) { art = 'einzig'; kand = alle('svg', z).filter(sichtbar).filter(function (e) { var r = e.getBoundingClientRect(); return r.width >= 6 && r.width <= 28 && r.height >= 6 && r.height <= 28; }); }
+        if (kand.length === 1 || (art === 'name' && kand.length)) {
+          var s0 = kand[0], tr = (s0.closest && s0.closest('button,[role="button"]')) || s0;
+          if (!z.contains(tr)) tr = s0;
+          stift = { rect: rect(tr), zu: zustand(tr), art: art, name: nm(s0).replace(/\s+/g, ' ').trim().slice(0, 40) };
+        }
+      }
+      return { text: t.slice(0, 30), wert: inp ? null : geld(t), rect: rect(z), zu: zustand(z), stift: stift,
                edit: inp ? { offen: true, wert: String(inp.value == null ? '' : inp.value).slice(0, 20), rect: rect(inp), fokus: aktivIst(inp), typ: String(inp.type || '').slice(0, 12) }
                          : { offen: false } };
     }
