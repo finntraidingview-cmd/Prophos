@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Selbsttest: TV-Konten lesen trotz offener Echo-/Echo-V2-Pläne (Master 29.10.2026, Befund Chris: drei mt5v2-Trades sperrten das Lesen den
-ganzen Tag). PC-Tab: tvkFrei zählt nur tvv2/tsv2 als „offener Plan"; Panel /api/tv-konten-liste: bei laufender MT5-Order/Polar oder Arbeit
+ganzen Tag). PC-Tab: tvkFrei lässt nur mt5/mt5v2 als „offener Plan" aus; Panel /api/tv-konten-liste: bei laufender MT5-Order/Polar oder Arbeit
 am PC (< 120 s) → 409 belegt, kein Bot-Start. Panel-Handler mit nachgebauter Anfrage, ohne Netz/Bot.  Aufruf: python3 tools/selftest_tvk_mt5frei.py"""
 import io
 import json
@@ -67,8 +67,14 @@ def main():
     ph = open(os.path.join(WURZEL, "prophos.html"), encoding="utf-8").read()
     i = ph.index("  function tvkFrei(){")
     blk = ph[i:ph.index("  async function tvkTick(){", i)]
-    ok("p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2')" in blk and "p.status === 'open')) return" not in blk
-       and "TVK_START_ABSTAND_MS" in blk, "PC-Tab: nur tvv2/tsv2 sperren als offener Plan, Start < 45 min bleibt für alle Routen")
+    zeile = next(z for z in blk.splitlines() if "plaene.some(p => p && p.status === 'open'" in z)
+    bed = zeile[zeile.index("p => ") + 5:zeile.index(")) return")]
+    js = bed.replace("&&", " and ").replace("!==", "!=").replace("===", "==").replace("'", '"')
+    sperrt = lambda route: bool(eval(js, {}, {"p": type("P", (), {"status": "open", "route": route})()}))   # noqa: E731
+    ok(not sperrt("mt5") and not sperrt("mt5v2"), "PC-Tab: offene Echo/Echo-V2-Pläne (mt5, mt5v2) sperren das Lesen nicht mehr")
+    ok(all(sperrt(r) for r in ("tvv2", "tsv2", "tvplus", "polar", "dup", "topstep", None)),
+       "PC-Tab: tvv2, tsv2, tvplus (Duplikum Puls), polar, dup, topstep und Pläne ohne route sperren weiter")
+    ok("TVK_START_ABSTAND_MS" in blk, "PC-Tab: Start < 45 min bleibt für alle Routen")
     j = ph.index("  function tvnRuhe(")
     ok("if(plaene.some(p => p && p.status === 'open')) return 'offener Plan'" in ph[ph.index("  function tvnPlanSperre("):j],
        "TV-Neuladen/Tampermonkey (tvnPlanSperre) unverändert: jeder offene Plan sperrt")

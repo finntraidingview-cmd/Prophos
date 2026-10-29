@@ -26394,9 +26394,10 @@
       const ep = window._epLokal, st = ep && ep.stand
       if(!(st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000)) return 'kein Puls-Chrome-Reader auf diesem PC'
       const jetzt = Date.now(), plaene = tradePlans || []
-      // nur Pläne im Puls-Chrome sperren (Master 29.10.2026, Befund Chris: drei Echo-V2-Trades liefen 7–13 h und hielten das Lesen den ganzen
-      // Tag zurück, ohne das Puls-Chrome zu nutzen). Echo/Echo V2 (MT5) prüft das Panel selbst (MT5-Order läuft? Leerlauf ≥ 120 s?)
-      if(plaene.some(p => p && p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2'))) return 'offener Plan im Puls-Chrome'
+      // nur Echo/Echo V2 (MT5) sperren nicht mehr (Master 29.10.2026, Befund Chris: drei Echo-V2-Trades liefen 7–13 h und hielten das Lesen
+      // den ganzen Tag zurück, ohne das Puls-Chrome zu nutzen) — das prüft das Panel selbst (MT5-Order läuft? Leerlauf ≥ 120 s?). Jede andere
+      // Route (tvv2, tsv2, tvplus, polar, dup, topstep, ohne route) sperrt weiter (S2: tvplus platziert ebenfalls im Puls-Chrome)
+      if(plaene.some(p => p && p.status === 'open' && p.route !== 'mt5' && p.route !== 'mt5v2')) return 'offener Plan (nicht Echo)'
       // auch unbestätigte Auto-Pläne (Railway bestätigt sie selbst) und Starts, die geclaimt, aber noch nicht gelaufen sind (Nachholen)
       const bald = plaene.find(p => p && p.status === 'planned' && p.startUm && Date.parse(p.startUm) - jetzt < TVK_START_ABSTAND_MS
         && (Date.parse(p.startUm) - jetzt > -10 * 60000 || (p.startUmGestartetAt && !p.startedAt)))
@@ -51455,7 +51456,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1881'
+  const OS_TAB_BUILD = '2026-09-22.1882'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
