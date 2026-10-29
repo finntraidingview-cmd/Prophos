@@ -27367,6 +27367,7 @@
     }
     if(masterPnl != null) masterPnl = Number(masterPnl.toFixed(2))
     if(fin.quelle === 'puls' && !hinweis) hinweis = tsx ? 'aus TopstepX gelesen (RP&L ab dem Klick)' : 'aus TradingView gelesen (Today\'s P&L nach dem Ende)'   // T1-B 05.10.2026
+    if(fin.quelle === 'auge' && !hinweis) hinweis = 'aus dem TopstepX-Auge (RP&L ab dem Klick)'   // Nova 29.10.2026
     // Winning Days Farm (24.09.2026 spät): mit Fusion-Gegenhedge ist der Slave-P&L NICHT 0, sondern kommt vom Hedge-Wächter
     // (hedge.pl → slave_pl) — null lässt atMoveToReview das Feld in Ruhe, statt 0 zu schreiben, bevor der Hedge zu ist.
     return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis,
@@ -29323,6 +29324,123 @@
     setTimeout(tvV2EndlesungTakt, warte)
   }
   setTimeout(tvV2EndlesungTakt, 30000 + Math.random() * 20000)
+  /* ══ NOVA-ENDLESUNG AUS DEM TOPSTEPX-AUGE (29.10.2026, Finn 06:00 am Screenshot „Warte auf Puls", Topstep 150k Express, PC von Marco:
+   * „Es ist 1:1 der Profit aus TopstepX [RP&L $18.78] … das Auge kann es direkt lesen … man muss gar nicht erst auf Puls warten … kann
+   * eigentlich direkt zu Überprüfen kommen"). Nach dem Ende eines Topstep-V2-Plans (route tsv2, Status review, noch keine balance_end) gilt
+   * eine Lesung des Auges (tsx-auge.user.js → Panel /api/tsx-stand) als Endlesung, wenn ALLES stimmt (tsxAugeEndeUrteil, rein rechnend):
+   * Stand ≤ 1 s, Konto = External ID des Master-Kontos EXAKT (nicht abgekürzt), flach === true (Beweis des Auges), keine Position, nicht
+   * ausgeloggt, RP&L lesbar, RP&L-Start (tv.today_pnl_start bzw. rpl_start) vom HEUTIGEN Handelstag, und ZWEI aufeinanderfolgende Lesungen
+   * ≥ 2 s nach dem ersten flachen Blick mit demselben RP&L (TopstepX bucht kurz nach). Master-P&L = RP&L − RP&L-Start.
+   * Plausibel nur, wenn das Delta höchstens TSX_AUGE_TOL von der Radar-Schätzung (final.master_pl_schaetzung) abweicht, die Balance-Differenz
+   * (falls Start-Balance mit gleicher Basis) dasselbe sagt (≤ 0,50 $ — in den letzten 25 Nova-Plänen auf den Cent gleich) und am Konto
+   * zwischen Start und jetzt kein weiterer Puls-Plan lief — sonst nur Vorschlag (final.auge_vorschlag), der Plan wartet wie bisher auf Puls.
+   * Geschrieben wird wie bei der Puls-Endlesung (baselinePatchIn mit Status-Guard review, dann tvV2MasterPlAusBalance → master_pl); danach
+   * liest Puls diesen Plan nicht mehr (tvV2EndlesungGrund: balance_end steht). Nur am PC des Plans, nur lesen — kein Klick, keine Order. ══ */
+  const TSX_AUGE_TOL_USD = 25, TSX_AUGE_TOL_PCT = 0   // Abweichung zur Radar-Schätzung: max(USD, PCT × |Schätzung|) — Auftrag: 25 $ fest
+  const TSX_AUGE_RUHE_MS = 2000, TSX_AUGE_FRISCH_S = 1.0, TSX_AUGE_BAL_TOL = 0.5
+  const _tsxAugeMerk = new Map()   // planId → { flachSeit, letzte: {t, rpl, balance} }
+  const tsxAugeToleranz = sz => Math.max(TSX_AUGE_TOL_USD, TSX_AUGE_TOL_PCT * Math.abs(Number(sz) || 0))
+  // REIN RECHNEND (window._tsxAugeEnde.urteil): Plan + Antwort von /api/tsx-stand + Merker → { art, grund, merk, werte }
+  //   art 'warten' (noch nicht stabil / Lesung passt gerade nicht — Merker ggf. zurückgesetzt), 'schreiben' (Endlesung), 'vorschlag'
+  //   (Werte stabil, aber unplausibel → nur Vorschlag), 'nichts' (Plan kommt für das Auge nicht in Frage).
+  function tsxAugeEndeUrteil(p, r, merk, jetzt, plaene, extId){
+    const num = v => (typeof v === 'number' && isFinite(v)) ? v : null
+    const fin = p && p.mt5Baseline && p.mt5Baseline.final, tv = (p && p.mt5Baseline && p.mt5Baseline.tv) || {}
+    if(!p || p.route !== 'tsv2' || p.status !== 'review' || !fin) return { art: 'nichts', grund: 'kein beendeter Topstep-V2-Plan' }
+    if(num(fin.balance_end) != null || fin.quelle === 'auge') return { art: 'nichts', grund: 'Ende ist schon gelesen' }
+    if(fin.auge_vorschlag) return { art: 'nichts', grund: 'Auge-Vorschlag liegt schon — Puls liest wie bisher' }
+    const rplStart = num(tv.today_pnl_start) != null ? num(tv.today_pnl_start) : num(tv.rpl_start)
+    if(rplStart == null) return { art: 'nichts', grund: 'kein RP&L-Start beim Klick' }
+    if(!tv.datum_start || tv.datum_start !== tvV2Handelstag(jetzt)) return { art: 'nichts', grund: 'anderer Handelstag als beim Start — RP&L nicht vergleichbar' }
+    const ext = String(extId || '').trim().toUpperCase()
+    if(!ext) return { art: 'nichts', grund: 'Master-Konto ohne External ID' }
+    const weg = grund => ({ art: 'warten', grund, merk: null })
+    if(!(r && r.ok && num(r.alter_s) != null && r.alter_s <= TSX_AUGE_FRISCH_S && r.stand && typeof r.stand === 'object')) return weg('kein frischer Stand vom Auge (≤ 1 s)')
+    const st = r.stand, k = st.konto || {}, kp = st.kopf || {}
+    if(st.ausgeloggt) return weg('TopstepX ausgeloggt')
+    if(k.abgekuerzt === true || String(k.kontonr || '').trim().toUpperCase() !== ext) return weg('Auge steht nicht im Konto des Plans (exakt)')
+    if(st.flach !== true || !Array.isArray(st.positionen) || st.positionen.length) return weg('kein Flach-Beweis des Auges')
+    const rpl = num(kp.rpl), bal = num(kp.balance)
+    if(rpl == null) return weg('RP&L nicht lesbar')
+    const m = merk && typeof merk === 'object' ? merk : {}
+    const flachSeit = m.flachSeit || jetzt
+    if(jetzt - flachSeit < TSX_AUGE_RUHE_MS) return { art: 'warten', grund: 'flach, Ruhezeit läuft', merk: { flachSeit, letzte: null } }
+    const l = m.letzte
+    if(!(l && l.t >= flachSeit + TSX_AUGE_RUHE_MS && Math.abs(l.rpl - rpl) < 0.005 && jetzt > l.t))
+      return { art: 'warten', grund: 'erste stabile Lesung — warte auf die zweite', merk: { flachSeit, letzte: { t: jetzt, rpl, balance: bal } } }
+    // zwei Lesungen ≥ 2 s nach dem Flach mit demselben RP&L → Werte stehen; jetzt die Plausibilität
+    const delta = Math.round((rpl - rplStart) * 100) / 100
+    const rel = kp.balance_relativ === true ? true : kp.balance_relativ === false ? false : null
+    const werte = { rpl, rpl_start: rplStart, master_pl: delta, balance: bal, balance_relativ: rel, konto: String(k.kontonr), flach_seit: new Date(flachSeit).toISOString(),
+                    lesungen: [{ t: new Date(l.t).toISOString(), rpl: l.rpl }, { t: new Date(jetzt).toISOString(), rpl }] }
+    const sz = num(fin.master_pl_schaetzung)
+    const gruende = []
+    if(sz == null) gruende.push('keine Radar-Schätzung zum Vergleich')
+    else if(Math.abs(delta - sz) > tsxAugeToleranz(sz)) gruende.push(`RP&L-Delta ${delta} weicht von der Radar-Schätzung ${sz} um mehr als ${tsxAugeToleranz(sz)} $ ab`)
+    const bs = num(tv.balance_start)
+    if(bs != null && bal != null && tvBalanceBasisGleich(tv, { balance_relativ: rel }) && Math.abs((bal - bs) - delta) > TSX_AUGE_BAL_TOL)
+      gruende.push(`Balance-Differenz ${Math.round((bal - bs) * 100) / 100} ≠ RP&L-Delta ${delta}`)
+    const startMs = Date.parse(p.startedAt || '') || 0
+    const andere = (plaene || []).filter(x => x && String(x.id) !== String(p.id) && String(x.masterAccountId) === String(p.masterAccountId)
+      && (x.status === 'open' || ((Date.parse(x.startedAt || '') || 0) >= startMs && (Date.parse(x.startedAt || '') || 0) <= jetzt)))
+    if(!startMs) gruende.push('Startzeit des Plans fehlt')
+    else if(andere.length) gruende.push(`am Konto lief zwischen Start und jetzt ein weiterer Trade (${andere.length})`)
+    if(gruende.length) return { art: 'vorschlag', grund: gruende.join(' · '), merk: null, werte }
+    return { art: 'schreiben', grund: '', merk: null, werte }
+  }
+  let _tsxAugeBusy = false
+  async function tsxAugeEndeTick(){
+    if(_tsxAugeBusy || !MT5_LOCAL || typeof window.mtcApi !== 'function') return
+    let _tp = []; try{ _tp = tradePlans || [] }catch(_){ return }
+    const jetzt = Date.now()
+    const kand = _tp.filter(p => p && p.route === 'tsv2' && p.status === 'review' && planIstPuls(p) && tvV2EndlesungPcPasst(p)
+      && !_tvEndlesungLaeuft.has(String(p.id)) && tsxAugeEndeUrteil(p, null, null, jetzt, _tp, tvV2Konto(p)).art !== 'nichts')
+    for(const id of [..._tsxAugeMerk.keys()]) if(!kand.some(p => String(p.id) === id)) _tsxAugeMerk.delete(id)
+    if(!kand.length) return
+    _tsxAugeBusy = true
+    try{
+      let r = null; try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 800 }) }catch(_){ r = null }
+      for(const p of kand){
+        const pid = String(p.id), u = tsxAugeEndeUrteil(p, r, _tsxAugeMerk.get(pid), Date.now(), _tp, tvV2Konto(p))
+        if(u.art === 'warten'){ if(u.merk) _tsxAugeMerk.set(pid, u.merk); else _tsxAugeMerk.delete(pid); continue }
+        _tsxAugeMerk.delete(pid)
+        if(u.art === 'schreiben' || u.art === 'vorschlag') await tsxAugeEndeSchreiben(p, u)
+      }
+    }finally{ _tsxAugeBusy = false }
+  }
+  async function tsxAugeEndeSchreiben(p0, u){
+    const pid = String(p0.id), w = u.werte, nowIso = new Date().toISOString(), name = p0.masterName || 'Plan'
+    if(_tvEndlesungLaeuft.has(pid)) return
+    _tvEndlesungLaeuft.add(pid)   // dieselbe Sperre wie die Puls-Endlesung: nie beide zugleich für einen Plan
+    try{
+      const auge = Object.assign({ at: nowIso, quelle: 'tsx-auge' }, w)
+      if(u.art === 'vorschlag'){
+        // nur Vorschlag: Plan wartet weiter auf Puls (bisheriger Weg); der Wert steht im Tooltip/Abhak-Popup zur Einsicht
+        await baselinePatchIn(pid, 'final', { auge_vorschlag: Object.assign(auge, { grund: u.grund }) }, 'review')
+        console.info(`[nova-auge] ${name}: nur Vorschlag (${u.grund}) — Puls liest wie bisher`, w)
+        try{ renderTradePlans() }catch(_){}
+        return
+      }
+      const fin0 = (p0.mt5Baseline && p0.mt5Baseline.final) || {}
+      const patch = { quelle: 'auge', ende_quelle: fin0.quelle || null, today_pnl: w.rpl, datum: tvV2Handelstag(), plattform: 'tsx',
+                      balance_end: w.balance, equity_end: w.balance, balance_quelle: 'auge', puls_fehler: null, auge_at: nowIso, auge,
+                      lesen_at: nowIso, lesen_trail: `TopstepX-Auge: Konto ${w.konto} flach seit ${w.flach_seit} · RP&L ${w.lesungen.map(x => x.rpl).join(' = ')} (2 Lesungen ≥ 2 s nach dem Flach) − Start ${w.rpl_start} = ${w.master_pl} · Balance ${w.balance}` }
+      if(w.balance_relativ != null) patch.balance_relativ = w.balance_relativ
+      let neu = null
+      try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[nova-auge] final-Patch', (e && e.message) || e); return }
+      if(!neu) return   // inzwischen erledigt — Finns Wert gilt
+      if(w.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: w.balance, equity: w.balance, relativ: w.balance_relativ }, nowIso, w.konto)
+      try{ _autoPnlCache.delete(pid) }catch(_){}
+      const { m } = await tvV2MasterPlAusBalance(pid, p0, fin0, neu)
+      const txt = m != null ? `${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $` : `${w.master_pl} $`
+      if(typeof atToast === 'function') atToast(`✓ ${name}: Master-P&L ${txt} aus dem TopstepX-Auge — Puls muss nicht nachlesen`, 'end')
+      console.info(`[nova-auge] ${name}: Endlesung aus dem Auge (RP&L ${w.rpl} − ${w.rpl_start} = ${w.master_pl})`, w)
+      try{ renderTradePlans() }catch(_){}
+    }finally{ _tvEndlesungLaeuft.delete(pid) }
+  }
+  ;(function tsxAugeLoop(){ setTimeout(async () => { try{ await tsxAugeEndeTick() }catch(e){ console.warn('[nova-auge]', (e && e.message) || e) } tsxAugeLoop() },
+    900 + Math.random() * 300) })()
+  window._tsxAugeEnde = { urteil: tsxAugeEndeUrteil, tick: tsxAugeEndeTick, merk: _tsxAugeMerk, toleranz: tsxAugeToleranz }   // Test-Haken
   /* DEMO-ENDE (27.09.2026, F21, Finn: „Wenn der Trade auf diesem Markt als erledigt ist, springt er unter den Live Trades auf Überprüfen.
    * Warte auf Puls."). Der PC-Tab des Plans (MT5_LOCAL, tvV2EndlesungPcPasst) fragt alle ~60 s /admin/live-trades (Login reicht) und
    * prüft seine offenen Orbit-V2-Pläne OHNE Hedge (WD mit Hedge haben eigene Wege: hedgePlanAufReview) gegen die Demo desselben
@@ -32684,6 +32802,16 @@
       const puls = fin.quelle === 'puls'
       return { art: 'gelesen', text: `gelesen ${uhr(fin.puls_at || fin.at)} (${puls ? 'TradingView' : 'beim Ende'})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
     }
+    // TopstepX-Auge (Nova, 29.10.2026): Endlesung ohne Puls — „Profit aus TopstepX-Auge · 18,78 $"
+    if(fin.quelle === 'auge' && fin.auge && typeof fin.auge.master_pl === 'number'){
+      const a = fin.auge, wert = `${a.master_pl < 0 ? '−' : ''}${Math.abs(a.master_pl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+      tip.push(`TopstepX-Auge ${uhr(a.at)}: RP&L ${n2(a.rpl)} − ${n2(a.rpl_start)} beim Klick${a.balance != null ? ' · Balance ' + n2(a.balance) + ' $' : ''} · Konto ${a.konto || '?'}`)
+      return { art: 'gelesen', text: `✓ Profit aus TopstepX-Auge · ${wert}`, tip: tip.join('\n'), bisMs: null, knopf: false }
+    }
+    if(fin.auge_vorschlag && typeof fin.auge_vorschlag === 'object'){
+      const a = fin.auge_vorschlag
+      tip.push(`TopstepX-Auge (nur Vorschlag): ${a.master_pl} $ — ${String(a.grund || '')}`)
+    }
     // Balance nach dem Trade gelesen (seit .625 statt Today's P&L; F21 27.09.2026) — P&L exakt setzt endlesungZeileHtml mit der Start-Balance
     if(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
       return { art: 'gelesen', text: `✓ ${fin.balance_quelle === 'reader' ? 'Userscript hat gelesen' : 'Puls hat bestätigt'} ${uhr(fin.puls_at || fin.at)} (Balance ${n2(fin.balance_end)} $${fin.balance_quelle === 'folgetrade' ? ', aus dem Folgetrade' : ''})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
@@ -32799,7 +32927,7 @@
       m = num(pw.master_pl_plan)
       mq = pw.pl_quelle === 'tv' ? "Today's P&L"
         : (pw.final_quelle === 'level' && num(pw.master_pl_schaetzung) != null && Math.abs(m - num(pw.master_pl_schaetzung)) < 0.005) ? 'aus TP-Level geschätzt'
-        : pw.final_quelle === 'puls' ? 'aus TradingView gelesen' : 'eingetragen'
+        : pw.final_quelle === 'puls' ? 'aus TradingView gelesen' : pw.final_quelle === 'auge' ? 'aus dem TopstepX-Auge' : 'eingetragen'
     } else if(pw.master_pl && num(pw.master_pl.wert) != null){
       // art (TSV2-PNL, 01.10.2026): Topstep V2 rechnet im Backend aus der Balance bzw. dem RP&L ab dem Klick, nie aus dem Tageswert
       m = num(pw.master_pl.wert); mq = pw.master_pl.art === 'balance' ? 'Balance nachher − vorher' : pw.master_pl.art === 'rpl_start' ? 'RP&L ab dem Klick'
@@ -49687,7 +49815,7 @@
     if(status !== 'review' || !endedAt || masterPl == null || !isFinite(Number(masterPl))) return false
     const zahl = v => v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0
     const obj = o => !!o && typeof o === 'object'
-    if(route === 'tvv2' || route === 'tsv2') return obj(fin) && (fin.quelle === 'puls' || fin.balance_quelle === 'reader') && zahl(fin.balance_end)
+    if(route === 'tvv2' || route === 'tsv2') return obj(fin) && (fin.quelle === 'puls' || fin.balance_quelle === 'reader' || (route === 'tsv2' && fin.quelle === 'auge')) && zahl(fin.balance_end)   // auge: Nova-Endlesung aus dem TopstepX-Auge (29.10.2026)
     if(route === 'mt5' || route === 'mt5v2') return obj(fin) && obj(bn) && bn.ok === true && zahl(bn.balance)
     return false
   }
