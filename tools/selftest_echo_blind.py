@@ -49,7 +49,7 @@ def main():
     gut = {"updated_at": iso(3), "note": None, "eq": 98500.0, "bal": 98344.31, "pos": [{"ident": "1", "volume": 1.8}]}
     frost_pos = dict(frost, pos=[{"ident": "1", "volume": 0.3}])
     frost_hd = dict(frost, hd={"288016262": [{"ticket": 1, "volume": 1.76}]})
-    plan_g = dict(plan, mt5_baseline=dict(plan["mt5_baseline"], echo_gesehen={"at": iso(1800), "pos": True, "hd": True}))
+    plan_g = dict(plan, mt5_baseline=dict(plan["mt5_baseline"], echo_pos_gesehen_at=iso(1800)))
     check(F(plan_g, frost, jetzt)["pl_grund"].startswith("Master-Terminal zu") and F(plan_g, frost, jetzt)["pl_live"] is None
           and F(plan, frost, jetzt)["pl_grund"] == "Lese-EA eingefroren"
           and F(plan_g, frost_pos, jetzt)["pl_grund"] == "Lese-EA eingefroren" and F(plan_g, frost_hd, jetzt)["pl_grund"] == "Lese-EA eingefroren",
@@ -91,7 +91,7 @@ def main():
     tick = src[src.index("\ndef echo_frost_tick("):src.index("\n\n\n", src.index("\ndef echo_frost_tick("))]
     check("if prio == 3 and n:" in tick and "prio, grund = 1, roh" in tick, "Tick: Erinnerung zu einem 🔴 bleibt 🔴, nie ⚪")
     check('"art") == "echo_terminal_zu"' in tick and '"schluessel,at,art"' in tick, "Tick: nach Railway-Neustart keine Erinnerung zu einem ⚪")
-    check('"echo_gesehen"' in tick and '"p_status": "open"' in tick and "mt5_baseline_patch" in tick and "eg:mt5_baseline->echo_gesehen" in src,
+    check('"echo_pos_gesehen_at"' in tick and '"p_status": "open"' in tick and "mt5_baseline_patch" in tick and "eg:mt5_baseline->>echo_pos_gesehen_at" in src,
           "Tick: Beleg dauerhaft per Merge-RPC (Guard open) am Plan, alarm_tick liest ihn mit")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
