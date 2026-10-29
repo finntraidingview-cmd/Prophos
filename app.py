@@ -4348,8 +4348,13 @@ def konto_weg_melden():
     # grund 'tsx' (14.10.2026): TopstepX-Geblowt-Auge — Dropdown-Hinweis / Loss-Limit-Meldung statt „nicht mehr in der Liste"
     anlass = (f"TopstepX meldet „{str(d.get('text') or 'Violation')[:80]}“ → " if str(d.get("grund") or "") == "tsx"
               else "nicht mehr in der TradingView-Kontoliste → ")
-    text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + wer if wer else ''}: " + anlass
-            + ("als geblowt archiviert" if d.get("archiviert") else "war schon archiviert")
+    # urteil (29.10.2026, Vorfall Simon Tradeify …287813 — bestanden, aber als geblowt archiviert): der Tab archiviert bei „Konto weg"
+    # nur noch nahe der Liq; Stand über Start = vermutlich bestanden, dazwischen bitte prüfen. Feste Texte, nichts aus dem Request.
+    urteil = str(d.get("urteil") or "")
+    folge = ("Stand über Start → vermutlich bestanden, nicht archiviert — bitte abhaken (Ziel ✓ / Review)" if urteil == "bestanden"
+             else "nicht archiviert — Stand weder klar über Start noch an der Liq, bitte prüfen" if urteil == "pruefen"
+             else "als geblowt archiviert" if d.get("archiviert") else "war schon archiviert")
+    text = (f"{acc.get('firm') or 'Konto'}{' …' + e4 if e4 else ''}{' · ' + wer if wer else ''}: " + anlass + folge
             + (f" · {n} laufende{'r Trade' if n == 1 else ' Trades'} unter „Überprüfen“" if n else ""))
     zu = 0
     for ziel in {uid} | (_zw_admin_uids() or set()):
@@ -30682,6 +30687,15 @@ def _zw_admin_uids():
     return out
 
 
+def zw_markierung_juenger(ziel_erreicht_at, bal_stand):
+    """REIN RECHNEND (testbar, 29.10.2026 — Vorfall Simon Tradeify …287813): ist die Ziel-Markierung JÜNGER als die Balance-Lesung, mit der
+    die Ziel-Wache gerade rechnet? Dann widerlegt diese ältere Lesung sie nicht (der PC-Tab setzt die Markierung bei „Konto weg" mit Stand
+    über Start — Tradeify/Topstep nehmen bestandene Evals aus dem Login, danach ist nichts mehr lesbar). Erst eine NEUERE Lesung unter dem
+    Ziel nimmt sie wieder weg. Unlesbare Zeiten → False (Verhalten wie bisher)."""
+    m, b = _ap_ts(ziel_erreicht_at), _ap_ts(bal_stand)
+    return bool(m and b and m > b)
+
+
 def zw_tick(force=False):
     if not force and time.time() - _zw["at"] < ZW_TAKT_S:
         return
@@ -30714,7 +30728,8 @@ def zw_tick(force=False):
         if aid in archiv or _ap_norm(a.get("firm")) in AP_STILL_FIRMEN:
             continue
         regel = ap_regel_finden(firmen, a.get("firm"))
-        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+        _bw = acc_balance_wahl(a, echo_bal, dup_bal)
+        bal = _bw[0]
         if regel and bal:
             regel = ap_regel_konto(regel, a, float(bal))   # Ziel-% je Konto (ziel_pct_konto, 07.10.2026)
         zg = zw_ziel(regel, a.get("account_type"), bal) if (regel and bal) else None
@@ -30749,6 +30764,8 @@ def zw_tick(force=False):
                 push_an_user(uid, "🎯 Ziel erreicht", text, "https://prophos.pages.dev/prophos#accounts", "ziel-" + aid[:8])
             print(f"[ziel-wache] 🎯 {text}", flush=True)
         elif war and not erreicht:
+            if zw_markierung_juenger((flags.get(aid) or {}).get("ziel_erreicht_at"), _bw[3]):
+                continue                     # Konto-weg-Markierung (29.10.2026): jünger als die Lesung → die alte Lesung widerlegt sie nicht
             sb_update("accounts", {"id": f"eq.{aid}"}, {"ziel_erreicht_at": None, "ziel_erreicht_bal": None, "ziel_usd": None})
     _zw["erreicht"] = n
 

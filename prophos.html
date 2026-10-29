@@ -27187,7 +27187,7 @@
       // KONTO WEG BEIM BALANCE-LESEN (09.10.2026, Fall Mike …1443): Bot belegt nach Seiten-Neuladen, dass das Konto nicht mehr in der Liste steht
       if(r && !r.ok && tvV2KontoWegAntwort(r)){
         await kontoWegFolge(acc.id, r, 'balance')
-        return { ok: false, konto_weg: true, trail, msg: 'Konto nicht mehr in der TradingView-Kontoliste — als geblowt archiviert. ' + String(r.msg || '').slice(0, 200) }
+        return { ok: false, konto_weg: true, trail, msg: 'Konto nicht mehr in der TradingView-Kontoliste — bestanden oder geblowt entscheidet der letzte Stand (Meldung oben). ' + String(r.msg || '').slice(0, 200) }
       }
       // TOPSTEPX GEBLOWT-AUGE (14.10.2026): Dropdown-Hinweis / Loss-Limit-Meldung → dieses und jedes genannte Konto als geblowt archivieren
       if(r && (r.konto_geblowt || r.konto_verletzungen || r.code === 'konto_geblowt')){ try{ await tsxGeblowtFolge(acc.id, r, 'balance') }catch(_){} }
@@ -29690,10 +29690,11 @@
       const exitTxt = patch.exit_fill ? ` · Exit-Fill ${patch.exit_fill.preis}` : ''
       if(!erg.ok){
         if(kontoWeg){
-          if(typeof atToast === 'function') atToast(`${name}: Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Der Trade steht unter „Überprüfen".`, 'end')
-          kontoWegFolge(p0.masterAccountId, r, 'endlesung')   // 09.10.2026: Konto als geblowt archivieren
+          // 29.10.2026: nicht mehr „vermutlich geblowt" vorweg — kontoWegFolge entscheidet am letzten Stand (bestanden / geblowt / prüfen) und toastet selbst
+          if(typeof atToast === 'function') atToast(`${name}: Konto bei Tradovate nicht mehr vorhanden. Der Trade steht unter „Überprüfen".`, 'end')
+          kontoWegFolge(p0.masterAccountId, r, 'endlesung')
           try{ renderTradePlans() }catch(_){}
-          return { ok: false, konto_weg: true, msg: 'Konto weg · vermutlich geblowt — der Trade steht unter „Überprüfen"' }
+          return { ok: false, konto_weg: true, msg: 'Konto weg — bestanden oder geblowt entscheidet der letzte Stand; der Trade steht unter „Überprüfen"' }
         }
         if(nochOffen && patch.puls_offen_n === 1 && typeof atToast === 'function') atToast(`${name}: Puls sieht die Master-Position noch offen — kein Versuch verbraucht, Balance wird gelesen, sobald sie zu ist`, 'end')
         if(nochOffen){
@@ -35559,7 +35560,17 @@
   }
   window._wdlTpUndWeg = wdlTpUndWeg   // Test-Haken (Stub)
   // „Konto weg" gilt nicht für den Fall oben — dort ist das Konto am TP sehr wahrscheinlich bestanden, nicht verschwunden (21.10.2026)
-  const wdlKontoWeg = t => !!(t && !wdlTpUndWeg(t) && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026)
+  // Konto mit Ziel-Markierung (29.10.2026, Konto weg ≠ geblowt): eigene Konten aus `accounts`, fremde aus der Bestanden-Liste (/admin/handarbeit)
+  // Nur für Trades, die VOR der Markierung begannen (Prüfer: ein späterer Blow nach dem Ziel bleibt sichtbar)
+  const wdlZielMarkiert = t => {
+    const kid = String((t && t.konto_id) || '')
+    if(!kid) return false
+    const start = Date.parse((t && (t.started_at || t.start)) || '') || 0
+    const vorher = seit => { const m = Date.parse(seit || '') || 0; return m > 0 && start > 0 && m >= start }
+    try{ const a = (accounts || []).find(x => x && String(x.id) === kid); if(a && a.zielErreichtAt) return vorher(a.zielErreichtAt) }catch(_){}
+    try{ const z = _hand.d && Array.isArray(_hand.d.radar_bestanden) ? _hand.d.radar_bestanden.find(x => x && String(x.konto_id) === kid) : null; return !!(z && vorher(z.seit)) }catch(_){ return false }
+  }
+  const wdlKontoWeg = t => !!(t && !wdlTpUndWeg(t) && !wdlZielMarkiert(t) && typeof tvV2KontoWeg === 'function' && (tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))))   // + vermutet ohne gelesene Balance (09.10.2026); Ziel markiert = nicht „weg" (29.10.2026)
   /* EINE WAHRHEIT „GEBLOWT" (20.10.2026, Finn 23:00 Dubai, Radar .1647 „Geblowt · archivieren · 2", Tradeify 150k …1607/…9125: „Der Account ist
    * eigentlich geblowt. Wenn ich auf Abhaken gehe, steht trotzdem ‚Nichts ändern‘ vorbelegt. Das Radar weiß schon, dass er geblowt ist"):
    * dieselbe Regel wie die Radar-Gruppe — abgehakt geblowt, Balance nach dem Trade an/unter der Liquidation (wdlBlowStand: Liq-Regel am
@@ -51555,7 +51566,54 @@
    *   1) archiveAccount(id, 'blown') — vorhandener Weg: Duplikum-/Echo-Löschauftrag, geplante Trades weg (archivPlaeneEntfernen)
    *   2) laufende Pläne des Kontos → „Überprüfen" mit final.konto_weg (zeigt „Konto nicht mehr in der Liste — liquidiert?", .1439)
    *   3) Toast hier + Push an Inhaber und Admins (POST /konto-weg/melden, Backend prüft den Besitz)
-   * quelle: 'balance' | 'endlesung' | 'start'. Wirft nie. */
+   * quelle: 'balance' | 'endlesung' | 'start'. Wirft nie.
+   * KONTO WEG ≠ GEBLOWT (29.10.2026, Vorfall Simon Tradeify …287813: Hand-Trade 10:53 UTC ins TP, Tradeify-Mail „You passed" 11:05, das
+   * Konto verschwand aus dem Login — die Endlesung 11:24 archivierte es als geblowt; Dashboard danach: Passed, 159.008,02 / 9.000).
+   * Tradeify (und Topstep) nehmen BESTANDENE Evals genauso aus dem Login wie geblowte. Jetzt entscheidet der letzte bekannte Stand
+   * (kontoWegStand: jüngste Lesung, + P&L des danach beendeten Trades; ohne Lesung Plan-Rechnung balance_start + P&L) per kontoWegUrteil:
+   *   'bestanden' — Stand ≥ Start (bzw. ≥ Ziel), nur Challenge/Phase 1/Phase 2: NICHT archivieren; ziel_erreicht_at/_bal setzen (falls leer,
+   *                 dieselben Felder wie die Ziel-Wache — Radar „Bestanden" / Accounts „Review"), 🟠 „vermutlich bestanden, bitte abhaken"
+   *   'blown'     — Stand unter Start UND nahe der Liq (Kontogröße − Max Drawdown): wie bisher als geblowt archivieren
+   *   'pruefen'   — alles dazwischen (auch ohne bekannten Stand, Funded über Start): nicht archivieren, 🟠 „bitte prüfen"
+   * Laufende Pläne kommen in allen drei Fällen nach „Überprüfen" (unverändert). Die Ziel-Wache lässt eine Markierung stehen, die jünger ist
+   * als ihre Lesung (app.py zw_markierung_juenger). */
+  const KONTO_WEG_LIQ_NAH_ANTEIL = 0.25, KONTO_WEG_LIQ_NAH_MIN = 250
+  function kontoWegUrteil(stand, start, boden, ziel){
+    const n = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+    const s = n(stand), st = n(start), b = n(boden), z = n(ziel)
+    if(s == null) return 'pruefen'
+    if((st != null && st > 0 && s >= st) || (z != null && z > 0 && s >= z)) return 'bestanden'
+    if(b != null && st != null && st > b && s - b <= Math.max(KONTO_WEG_LIQ_NAH_MIN, (st - b) * KONTO_WEG_LIQ_NAH_ANTEIL)) return 'blown'
+    return 'pruefen'
+  }
+  window._kontoWegUrteil = kontoWegUrteil   // Test-Haken
+  function kontoWegStand(acc){
+    const n = v => (v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null
+    const ts = v => Date.parse(v || '') || 0
+    const kand = []
+    if(n(acc.tvBalance) != null) kand.push({ v: n(acc.tvBalance), at: ts(acc.tvBalanceAt), q: 'Lesung' })
+    const plaene = (tradePlans || []).filter(p => p && String(p.masterAccountId) === String(acc.id) && p.startedAt)
+      .sort((a, b) => ts(b.startedAt) - ts(a.startedAt))
+    for(const p of plaene){
+      const f = p.mt5Baseline && p.mt5Baseline.final
+      if(f && n(f.balance_end) != null) kand.push({ v: n(f.balance_end), at: ts(f.puls_at || f.lesen_at || f.at), q: 'Endlesung' })
+    }
+    kand.sort((a, b) => b.at - a.at)
+    const best = kand[0] || null, letzt = plaene[0]
+    if(letzt){
+      const f = (letzt.mt5Baseline && letzt.mt5Baseline.final) || {}, tv = (letzt.mt5Baseline && letzt.mt5Baseline.tv) || {}
+      const plRoh = letzt.masterPl != null && isFinite(Number(letzt.masterPl)) ? Number(letzt.masterPl)
+        : (f.master_pl_schaetzung != null && isFinite(Number(f.master_pl_schaetzung)) ? Number(f.master_pl_schaetzung) : null)
+      const ende = ts(letzt.endedAt || f.at)
+      // Lesung lag VOR dem Ende des letzten Trades (Simon: 10:36 Lesung, Trade zu 10:53) → dessen P&L kommt dazu
+      if(best && plRoh != null && ende > best.at && n(f.balance_end) == null) return { stand: best.v + plRoh, quelle: best.q + ' + P&L des letzten Trades' }
+      // Prüfer 29.10.2026: Trade endete NACH der Lesung, sein P&L ist unbekannt → der Stand ist unsicher (ein Blow in diesem Trade sähe sonst wie
+      // „über Start" aus) → nie „bestanden", höchstens „prüfen"
+      if(best && plRoh == null && ende > best.at && n(f.balance_end) == null) return { stand: best.v, quelle: best.q + ', danach Trade ohne P&L', unsicher: true }
+      if(!best && n(tv.balance_start) != null && plRoh != null) return { stand: n(tv.balance_start) + plRoh, quelle: 'Plan-Rechnung' }
+    }
+    return best ? { stand: best.v, quelle: best.q } : null
+  }
   const _kontoWegErledigt = new Set()
   async function kontoWegFolge(accountId, r, quelle){
     const id = String(accountId || ''); if(!id || _kontoWegErledigt.has(id)) return false
@@ -51563,10 +51621,41 @@
     _kontoWegErledigt.add(id)
     const e4 = String(acc.externalId || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)
     const name = `${acc.firm || 'Konto'}${e4 ? ' …' + e4 : ''}`
-    let archiviert = false
+    let urteil = 'blown', st = null
     try{
-      if(!(typeof isAccountArchived === 'function' && isAccountArchived(id))){ archiveAccount(id, 'blown'); archiviert = true }
-    }catch(e){ console.warn('[konto-weg] archivieren', (e && e.message) || e) }
+      st = kontoWegStand(acc)
+      const start = (typeof kontoGroesseAnzeige === 'function' ? Number(kontoGroesseAnzeige(acc.name, acc.startingBalance, null)) : 0) || Number(acc.startingBalance) || null
+      const dd = Number(acc.maxDrawdown) || 0
+      const boden = start && dd >= start * 0.01 && dd <= start * 0.15 ? start - dd : null   // wie planZeileBoden: Größe − Drawdown, nur plausibel
+      urteil = kontoWegUrteil(st && st.stand, start, boden, acc.zielUsd)
+      if(urteil === 'bestanden' && (st.unsicher || !/^(challenge|phase1|phase2)$/.test(String(acc.type || '')))) urteil = 'pruefen'   // Funded „besteht" nicht; unsicherer Stand nie
+    }catch(e){ console.warn('[konto-weg] Urteil', (e && e.message) || e); urteil = 'pruefen' }
+    let archiviert = false
+    if(urteil === 'blown'){
+      try{
+        if(!(typeof isAccountArchived === 'function' && isAccountArchived(id))){ archiveAccount(id, 'blown'); archiviert = true }
+      }catch(e){ console.warn('[konto-weg] archivieren', (e && e.message) || e) }
+    }else{
+      if(urteil === 'bestanden' && !acc.zielErreichtAt){
+        try{
+          const bal = Math.round(Number(st.stand) * 100) / 100, nowZ = new Date().toISOString()
+          const { data, error } = await supabase.from('accounts').update({ ziel_erreicht_at: nowZ, ziel_erreicht_bal: bal }).eq('id', id).is('ziel_erreicht_at', null).select('id')
+          if(error) throw error
+          if(!Array.isArray(data) || !data.length) throw new Error('0 Zeilen geschrieben')   // Prüfer: ohne Beleg nie „bestanden" melden
+          acc.zielErreichtAt = nowZ; acc.zielErreichtBal = bal
+        }catch(e){ console.warn('[konto-weg] Ziel-Markierung', (e && e.message) || e); urteil = 'pruefen' }
+      }
+      // Konto nicht mehr im Login: geplante, noch nicht gestartete Trades weg (wie beim Archivieren); bei „prüfen" zusätzlich Auto-Planer aus
+      // für dieses Konto — sonst plant der Bot weiter auf ein Konto, das es dort nicht mehr gibt (Finn schaltet ihn in Accounts wieder an)
+      try{ if(typeof archivPlaeneEntfernen === 'function') await archivPlaeneEntfernen(id, 'konto_weg') }catch(e){ console.warn('[konto-weg] Pläne', (e && e.message) || e) }
+      if(urteil === 'pruefen' && acc.autoPlaner !== false){
+        try{
+          const { error } = await supabase.from('accounts').update({ auto_planer: false }).eq('id', id).select('id')
+          if(error) throw error
+          acc.autoPlaner = false
+        }catch(e){ console.warn('[konto-weg] Auto-Planer aus', (e && e.message) || e) }
+      }
+    }
     let n = 0
     const nowIso = new Date().toISOString()
     for(const p of (tradePlans || []).filter(x => x && String(x.masterAccountId) === id && x.status === 'open')){
@@ -51582,12 +51671,17 @@
     }
     try{ renderTradePlans() }catch(_){}
     try{ renderAccounts() }catch(_){}
-    const t = `${name} nicht mehr in der TradingView-Kontoliste → ${archiviert ? 'als geblowt archiviert' : 'war schon archiviert'}${n ? ` · ${n} laufende${n === 1 ? 'r Trade' : ' Trades'} unter „Überprüfen"` : ''}`
-    if(typeof atToast === 'function') atToast('🗄 ' + t, 'end')
+    const deS = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const standTxt = st && st.stand != null ? ` (Stand ${deS(st.stand)} $, ${st.quelle})` : ''
+    const folge = urteil === 'bestanden' ? `Stand über Start${standTxt} → vermutlich bestanden, nicht archiviert — bitte abhaken`
+      : urteil === 'pruefen' ? `nicht archiviert${standTxt || ' (kein Stand bekannt)'}, Auto-Planer für das Konto aus — bitte prüfen`
+      : (archiviert ? 'als geblowt archiviert' : 'war schon archiviert') + standTxt
+    const t = `${name} nicht mehr in der TradingView-Kontoliste → ${folge}${n ? ` · ${n} laufende${n === 1 ? 'r Trade' : ' Trades'} unter „Überprüfen"` : ''}`
+    if(typeof atToast === 'function') atToast((urteil === 'bestanden' ? '🎯 ' : urteil === 'pruefen' ? '⚠ ' : '🗄 ') + t, 'end')
     try{
       const tok = typeof _pushTok === 'function' ? await _pushTok() : ''
       if(tok) await fetch(`${WATCHER_HOME}/konto-weg/melden`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: id, quelle, archiviert, laufende: n }) })
+        body: JSON.stringify({ account_id: id, quelle, archiviert, laufende: n, urteil: urteil === 'blown' ? '' : urteil }) })
     }catch(e){ console.warn('[konto-weg] Push', (e && e.message) || e) }
     return true
   }
@@ -68234,7 +68328,16 @@
       const _kwVerm = tvV2KontoVermutetOffen(finKw)   // 09.10.2026: Konto nicht mehr in der Liste — liquidiert? (nur ohne gelesene Balance)
       let _tpWeg = null   // TP + nicht mehr im Dropdown (21.10.2026): dann ist „Konto weg → geblowt" hier falsch (oben „Phase bestanden")
       try{ const tr = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(p.id)); _tpWeg = tr && typeof wdlTpUndWeg === 'function' ? wdlTpUndWeg(tr) : null }catch(_){}
-      if(p.status === 'review' && !_tpWeg && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
+      // Konto weg ≠ geblowt (29.10.2026): trägt das Konto eine Ziel-Markierung, die nach dem Start dieses Trades gesetzt wurde (kontoWegFolge
+      // „vermutlich bestanden" oder Ziel-Wache), wird NICHT „geblowt" vorbelegt — Finn wählt „Phase bestanden" bzw. legt den Nachfolger an
+      let _kwZiel = false
+      try{ const ak = (accounts || []).find(a => String(a.id) === String(p.masterAccountId)); const m = Date.parse((ak && ak.zielErreichtAt) || '') || 0
+        _kwZiel = m > 0 && m >= (Date.parse(p.startedAt || '') || 0) }catch(_){}
+      if(_kwZiel && p.status === 'review' && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
+        const msgEl = document.getElementById('tradeCompleteMsg')
+        if(msgEl){ msgEl.textContent = '🎯 Konto nicht mehr im Login, Stand über Start → vermutlich bestanden (Ziel markiert) — bitte prüfen, nicht geblowt vorbelegt.'; msgEl.className = 'modal-msg' }
+      }
+      if(p.status === 'review' && !_tpWeg && !_kwZiel && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
         const rb = document.querySelector('input[name="tc-status"][value="blown"]')
         if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
         if(p.masterPl == null){
