@@ -24007,6 +24007,7 @@
     catch(_){ return Math.random().toString(36).slice(2, 10) }
   })()
   const MT5_LOCAL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && !TAB_NEBEN
+  const TAB_NEBEN_ANLAUF_MS = 90000
   function tabNebenWerden(){
     // nie mitten in einem Lauf: dieselbe Ruhe-Prüfung wie das Sofort-Update — nur „Tab im Hintergrund" zählt hier nicht (nur-ansehen-Tab)
     let g = ''
@@ -24980,7 +24981,11 @@
       // Sofort-Sperre (S2 30.10.2026): ab jetzt beginnt dieser Tab nichts Neues (Start, Signal, Hedge-Wächter, Auto-Close …); laufende Läufe
       // enden, dann lädt er im ruhigen Moment als „nur ansehen" neu. Wird er doch wieder Haupt-Tab, fällt die Sperre.
       window._tabNebenSofort = dd.haupt_tab === false
-      if(dd.haupt_tab === false){ tabNebenWerden(); return }
+      // ANLAUF (S2/Master 30.10.2026, Variante b — erster Deploy, neues Fenster, Stufe 3: die alte Kennung ist beim ersten Herzschlag erst
+      // ~10 s still): in den ersten TAB_NEBEN_ANLAUF_MS nach dem Laden nie als ?neben=1 neu laden, nur gesperrt weiter fragen (alle 5 s).
+      // Bleibt die alte Kennung 60 s still, macht das Panel diesen Tab zum Haupt-Tab und die Sperre fällt — ohne Neuladen. Ein echter
+      // zweiter Tab (der andere fragt weiter) wird nach dem Anlauf wie bisher „nur ansehen".
+      if(dd.haupt_tab === false){ if(performance.now() >= TAB_NEBEN_ANLAUF_MS) tabNebenWerden(); return }
       // BOT-STAND UNTEN IM TAB (19.10.2026, Finn: „immer unten die neueste Version reinschreiben, damit ich weiß, ob es tatsächlich ein
       // Update ist" — der Bot wird per Commit getauscht, ohne dass die Seite neu lädt; die Build-Nummer allein sagt also nichts über
       // den Bot): neben „Build …" steht am PC-Tab „· Bot .1630" aus /api/instances bot_version (VERSION des Bot-Stands, Panel BOT_STAND).

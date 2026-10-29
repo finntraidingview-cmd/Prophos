@@ -159,6 +159,40 @@ def main():
     T["anders"] = {"at": _t.time() - 10, "login": True, "puls": True}
     hz["_TAB_HAUPT"]["tid"] = "anders"
     check(hz["tab_gesehen"]("python-requests/2.32", q("neu")) is False, "lebt ein anderer Tab nachweislich (< 60 s) → Hysterese/Rang gilt weiter")
+    # ZEITVERLAUF (S2/Master 30.10.2026, Variante b): Panel-Wahl mit gestellter Uhr + Frontend-Regel „erst nach 90 s als nur ansehen neu laden"
+    class _Uhr:
+        t = 10_000.0
+        def time(self):
+            return self.t
+    uhr = _Uhr()
+    zv = {"re": re, "time": uhr}
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen"],
+                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "TAB_HAUPT_SICHER_S", "_TABS", "_TAB_HAUPT"]), zv)
+    ANLAUF_S = 90.0
+    def verlauf(anderer_fragt):
+        zv["_TABS"].clear()
+        zv["_TABS"]["alt"] = {"at": uhr.t - 10, "login": True, "puls": True}   # alte Kennung: letzter Herzschlag vor 10 s
+        zv["_TAB_HAUPT"]["tid"] = "alt"
+        t0, haupt_ab, neben_neu = uhr.t, None, None
+        for k in range(0, 25):                                      # 0 … 120 s, neue Seite fragt alle 5 s
+            uhr.t = t0 + 5 * k
+            if anderer_fragt:
+                zv["_TABS"]["alt"]["at"] = uhr.t - 2
+            h = zv["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["1"], "url": ["http://localhost:5000/"], "tid": ["neu"]})
+            if h and haupt_ab is None:
+                haupt_ab = uhr.t - t0
+            if not h and uhr.t - t0 >= ANLAUF_S and neben_neu is None:
+                neben_neu = uhr.t - t0                              # hier lüde das Frontend als ?neben=1 neu
+            if h or neben_neu is not None:
+                break
+        return haupt_ab, neben_neu
+    ha, nn = verlauf(False)
+    check(ha is not None and ha <= 65 and nn is None, f"Deploy: alte Kennung 10 s frisch, neue fragt alle 5 s → nach {ha} s Haupt-Tab, kein ?neben=1-Neuladen")
+    ha, nn = verlauf(True)
+    check(ha is None and nn == 90, f"echter zweiter lebender Tab → bleibt gesperrt, nach {nn} s „nur ansehen“ wie bisher")
+    check("TAB_NEBEN_ANLAUF_MS = 90000" in open(os.path.join(HIER, "..", "prophos.html"), encoding="utf-8").read()
+          and "if(performance.now() >= TAB_NEBEN_ANLAUF_MS) tabNebenWerden()" in open(os.path.join(HIER, "..", "prophos.html"), encoding="utf-8").read(),
+          "Frontend: in den ersten 90 s nach dem Laden nie als nur ansehen neu laden, nur gesperrt weiter fragen")
     N = hz["neben_tab_frei"]
     check(N(tabs, "b", False, j1, "a") is False and N(tabs, "b", True, j1, "a") is True and N({"a": {"at": j1 - 120, "login": True}}, "b", False, j1, "a") is False
           and N({"a": {"at": j1 - 301, "login": True}}, "b", False, j1, "a") is True,
