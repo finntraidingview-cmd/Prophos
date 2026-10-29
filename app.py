@@ -16586,8 +16586,11 @@ KONTO_MAIL_TEXT_MAX = 3000
 # „Payouts erhalten“: ADMIN_EXCLUDE und alle IDs von Gruppen MIT Verwalter (id_gruppen, nicht hart codiert). Spalten nur Datum · Betrag ·
 # Währung · ID · Zweck · Transaktions-ID, keine Logins/Mails (ID-Name nur aus user_metadata.name, sonst die ersten 8 Zeichen der user_id).
 # Betrag mit Dezimalkomma, ohne Tausenderpunkt — liest Google in de- und en-Tabellen gleich (das Sheet rechnet Text und Zahl). Der Token
-# wird nie geloggt; Fehler nur mit Typ.
+# wird nie geloggt; Fehler nur mit Typ. Prüfer 29.10.2026: Textfelder kommen von den Kunden (Kontoname, Firma, Name) — beginnt eins mit
+# = + - @ Tab CR, kommt ein ' davor (sonst liefe z. B. „=IMPORTXML(…)“ im Sheet als Formel); nur Payouts ab HT_PAYOUTS_AB (Finns Zeitraum);
+# ohne lesbare Verwalter-Gruppe (id_gruppen fehlt/leer) → 502, nie die Emin-Gruppe ungefiltert.
 HT_PAYOUTS_CSV_TOKEN_MIN = 32
+HT_PAYOUTS_AB = "2026-05-30"
 
 
 def ht_payouts_token_ok(ist, soll):
@@ -16598,11 +16601,20 @@ def ht_payouts_token_ok(ist, soll):
     return hmac.compare_digest(str(ist or "").encode("utf-8"), soll.encode("utf-8"))
 
 
+def ht_payouts_csv_sicher(s):
+    """REIN RECHNEND: Text für eine CSV-Zelle, die ein Tabellenprogramm nie als Formel liest (führendes = + - @ Tab CR → ' davor)."""
+    s = str(s or "")
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+
 def ht_payouts_ausblenden(users, exclude_mails, gruppen_daten):
     """REIN RECHNEND: (disp, aus) — disp = user_id → Anzeigename (nur user_metadata.name, sonst user_id[:8], nie die Mail), aus = ADMIN_EXCLUDE
     + alle IDs der Gruppen MIT Verwalter (Emin-Gruppe …). Wirft bei leerer Nutzerliste: ohne Auth-API ist nicht trennbar, was HT ist."""
     if not users:
         raise RuntimeError("Nutzerliste leer — HT nicht sicher trennbar")
+    verwalter = _admin_verwalter_gruppen_ids(gruppen_daten)
+    if not verwalter:
+        raise RuntimeError("keine Gruppe mit Verwalter lesbar — HT nicht sicher trennbar")
     disp, aus = {}, set()
     for u in users:
         uid = str(u.get("id") or "")
@@ -16612,25 +16624,27 @@ def ht_payouts_ausblenden(users, exclude_mails, gruppen_daten):
         disp[uid] = name or uid[:8]
         if str(u.get("email") or "").strip().lower() in exclude_mails:
             aus.add(uid)
-    return disp, aus | _admin_verwalter_gruppen_ids(gruppen_daten)
+    return disp, aus | verwalter
 
 
 def ht_payouts_csv(txs, disp, aus):
-    """REIN RECHNEND: CSV-Text (Kopf + Zeilen, nach Datum) aus transactions kind=payout; Zeilen ausgeblendeter IDs fallen raus."""
+    """REIN RECHNEND: CSV-Text (Kopf + Zeilen, nach Datum) aus transactions kind=payout; Zeilen ausgeblendeter IDs und vor HT_PAYOUTS_AB
+    fallen raus, Textfelder über ht_payouts_csv_sicher."""
     import csv as _csv
     import io as _io
     zeilen = []
     for t in txs or ():
         uid = str(t.get("user_id") or "")
-        if not uid or uid in aus:
+        datum = str(t.get("occurred_at") or "")[:10]
+        if not uid or uid in aus or datum < HT_PAYOUTS_AB:
             continue
         try:
             betrag = abs(float(t.get("amount") or 0))
         except (TypeError, ValueError):
             continue
         zweck = " · ".join(x for x in (str(t.get("account_firm") or "").strip(), str(t.get("account_name") or "").strip()) if x)
-        zeilen.append([str(t.get("occurred_at") or "")[:10], f"{betrag:.2f}".replace(".", ","), str(t.get("currency") or "EUR").upper(),
-                       disp.get(uid) or uid[:8], zweck, str(t.get("id") or "")])
+        zeilen.append([datum, f"{betrag:.2f}".replace(".", ","), ht_payouts_csv_sicher(str(t.get("currency") or "EUR").upper()),
+                       ht_payouts_csv_sicher(disp.get(uid) or uid[:8]), ht_payouts_csv_sicher(zweck), ht_payouts_csv_sicher(t.get("id"))])
     zeilen.sort(key=lambda z: (z[0], z[5]))
     buf = _io.StringIO()
     w = _csv.writer(buf, lineterminator="\n")
