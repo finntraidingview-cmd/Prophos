@@ -25779,6 +25779,11 @@ def _ap_hedge_mit_freigeben(zeilen, uid):
     if not ids:
         return 0
     try:
+        _namen, aus = _ap_namen()   # wie die Freigabe-Route: ADMIN_EXCLUDE (Emin-Gruppe) nie freigeben (Prüfer S2)
+        uid_je = {str(z.get("id")): str(z.get("user_id")) for z in zeilen or []}
+        ids = [i for i in ids if uid_je.get(i) not in aus]
+        if not ids:
+            return 0
         return len(sb_update("trade_plans", {"id": "in.(" + ",".join(ids) + ")", "status": "eq.planned", "start_um_gestartet_at": "is.null",
                                              "hedge_freigabe_at": "is.null", "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"},
                              {"hedge_freigabe_at": _wt_now_iso(), "hedge_freigabe_von": str(uid or "")[:80]}) or [])

@@ -47,6 +47,7 @@ def main():
     mit = src[i:src.find("\n\n\n", i)]
     for g in ('"status": "eq.planned"', '"start_um_gestartet_at": "is.null"', '"hedge_freigabe_at": "is.null"', '"mt5_baseline->>hedge_art"'):
         ok(g in mit, "Guard " + g)
+    ok("_ap_namen()" in mit and "not in aus" in mit, "ADMIN_EXCLUDE wie die Freigabe-Route")
     ok("hedge_freigabe_von" in mit and "auto_bestaetigt_at" not in mit.split('"""')[2], "setzt nur die Freigabe-Spalten")
     ok("hvs:mt5_baseline->hedge_vorschau" in src and "**ap_ids_hedge_felder(p)" in src, "/ids liefert die Hedge-Felder")
     for t in f:
