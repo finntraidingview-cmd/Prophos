@@ -33634,7 +33634,7 @@
     }
     // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern liest Puls nicht mehr von selbst — „Jetzt lesen" bleibt
     // Konto weg (05.10.2026): die Lesung ist beendet — ruhig sagen, was Puls gefunden hat, statt „Lesung aufgegeben — konto_weg: …"
-    if(typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(fin)) return { art: 'kontoweg', text: 'Konto weg · vermutlich geblowt', tip: tip.join('\n'), bisMs: null, knopf: true }
+    if(typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(fin)) return { art: 'kontoweg', text: kontoWegChipText(kontoWegUrteilVon(fin)), tip: tip.join('\n'), bisMs: null, knopf: true }
     const lb = (!fin.puls_aufgegeben && typeof tvV2LoginBremse === 'function') ? tvV2LoginBremse(fin, jetzt) : null
     if(lb && lb.pruefen) return { art: 'aufgegeben', text: `Wartet · Login prüfen — ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''}`, tip: tip.join('\n'), bisMs: null, knopf: true }
     if(fin.puls_aufgegeben || versuche >= max){
@@ -35578,6 +35578,17 @@
    * Trades-Dialog für eigene) fragen hier — der Trades-Dialog belegte bisher nur bei „Konto weg" vor. Nur Vorbelegung, Finn bestätigt. */
   function wdlGeblowtUrteil(t){ return !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t))) }
   const WDL_KONTO_WEG_ERG = '<span style="color:var(--warn-ink, #b45309)" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
+  // Radar-Ergebnis „Konto weg" nach dem Urteil (29.10.2026): vermutlich bestanden (grün) · bitte prüfen (amber) · sonst wie bisher (nahe Liq / alter Stand)
+  function wdlKontoWegErg(t){
+    if(!t || wdlTpUndWeg(t) || typeof tvV2KontoWeg !== 'function') return ''
+    const weg = tvV2KontoWeg(t.endlesung) || (typeof tvV2KontoVermutetOffen === 'function' && tvV2KontoVermutetOffen(t.endlesung))
+    if(!weg) return ''
+    const u = kontoWegUrteilVon(t.endlesung, t)
+    if(u === 'bestanden') return '<span style="color:var(--good-ink, #15803d)" title="Konto nicht mehr im Login, letzter Stand über Start — Tradeify/Topstep nehmen bestandene Evals heraus. Ziel markiert, nicht archiviert: abhaken, Nachfolger anlegen.">Konto weg · vermutlich bestanden</span>'
+    if(u === 'pruefen') return '<span style="color:var(--warn-ink, #b45309)" title="Konto nicht mehr im Login, Stand weder klar über Start noch an der Liq — nicht archiviert, Auto-Planer des Kontos aus. Bitte prüfen.">Konto weg · bitte prüfen</span>'
+    if(wdlKontoWeg(t)) return WDL_KONTO_WEG_ERG
+    return ''
+  }
   /* Schätzung für den Abhak-Dialog bei „Konto weg": Verlust von der Start-Balance des Trades bis zur Liquidation — dieselbe
    * Liq-Balance wie wdlBlowStand (Regel/Konto-Boden; beim Tageslimit der Konto-Boden). Nur wenn beide Werte an der Zeile stehen
    * und die Liq unter dem Start liegt, sonst null (Feld bleibt leer — nicht raten). */
@@ -35755,7 +35766,10 @@
   }
   function wdlKontoZ(t){
     const b = wdlBlowStand(t)
-    if(!b && wdlKontoWeg(t)) return '<span class="wdl-z-konto" title="Konto bei Tradovate nicht mehr vorhanden — keine Balance mehr lesbar">vermutl. geblowt</span>'
+    if(!b && (wdlKontoWeg(t) || wdlKontoWegErg(t))){
+      const u = kontoWegUrteilVon(t.endlesung, t)
+      return `<span class="wdl-z-konto" title="Konto bei Tradovate nicht mehr vorhanden — keine Balance mehr lesbar">${u === 'bestanden' ? 'vermutl. bestanden' : u === 'pruefen' ? 'bitte prüfen' : 'vermutl. geblowt'}</span>`
+    }
     if(!b) return '<span class="wdl-z-konto" title="noch keine Balance nach dem Trade gelesen">–</span>'
     const f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const tip = `${b.quelle}: ${f0(b.bal)} $${b.liq != null ? ` · Blow (Max Drawdown) bei ${f0(b.liq)} $` : ''}${b.tagLiq != null ? ` · Tageslimit bei ${f0(b.tagLiq)} $ (Soft-Breach, Konto lebt)` : ''}`
@@ -36363,7 +36377,7 @@
             + `<input type="text" class="wdl-man-notiz" data-wdl-man-notiz="${escapeHtml(pid)}" value="${escapeHtml(String(m.notiz || ''))}" maxlength="140" placeholder="Notiz · Enter oder Klick daneben speichert, Esc verwirft" autocomplete="off">`
           : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml((m.notiz ? m.notiz + ' — ' : '') + 'klicken: Schritt/Notiz bearbeiten')}">${schrittTxt ? `<b>${escapeHtml(schrittTxt)}</b>` : ''}${schrittTxt && m.notiz ? ' · ' : ''}${m.notiz ? escapeHtml(String(m.notiz)) : (schrittTxt ? '' : '<i>Notiz …</i>')}</button>`
         // Ergebnis-Wort auch hier (Master 21.10.2026): Finn sah bei Apex …0008 „fehlen noch 34 $" nirgends — gleiche Reihenfolge wie Überprüfen
-        const ergM = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
+        const ergM = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWegErg(t) ? wdlKontoWegErg(t) : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
         miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
@@ -36376,7 +36390,7 @@
         art = 'pruef'
         const pid = wdlTid(t), sperre = wdlAbhakenSperre(t)
         const pb = wdlPlTrade(t) != null ? wdlPlTrade(t) : num(t.master_pl && t.master_pl.wert)   // Balance-Sprung → Tages-P&L (08.10.2026)
-        let erg = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')   // Polar: wer zuerst zu war (20.10.2026)
+        let erg = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWegErg(t) ? wdlKontoWegErg(t) : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')   // Polar: wer zuerst zu war (20.10.2026)
         // Bestanden: wohin das Konto nach dem Abhaken geht (13.10.2026) — „→ Tage sammeln 3/5" oder „→ Review", wie der Typ-Chip in Accounts
         // Mini-Trade (13.10.2026, Finn: „da steht bestanden — kommt der nicht zu Trade abhaken?"): eigenes Etikett „Tage-Mini" statt „🎯 bestanden"
         // — er bringt nur einen Handelstag, das Konto steht schon in Bestanden → Tage sammeln und bleibt dort
@@ -36408,7 +36422,7 @@
           kontoZ = wdlKontoZ(t)
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
-        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWeg(t) ? WDL_KONTO_WEG_ERG : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
+        const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWegErg(t) ? wdlKontoWegErg(t) : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
         miZ = zelle('mi', erg, { tip: demoTip(d) })
         kontoZ = wdlKontoZ(t)
         // Balance-Sprung (08.10.2026): erledigt zählt der P&L am Plan (von Hand entschieden), sonst der Tages-P&L — nie die Differenz
@@ -51577,6 +51591,16 @@
    *   'pruefen'   — alles dazwischen (auch ohne bekannten Stand, Funded über Start): nicht archivieren, 🟠 „bitte prüfen"
    * Laufende Pläne kommen in allen drei Fällen nach „Überprüfen" (unverändert). Die Ziel-Wache lässt eine Markierung stehen, die jünger ist
    * als ihre Lesung (app.py zw_markierung_juenger). */
+  // Urteil eines Plans: final.konto_weg_urteil (kontoWegFolge), sonst Ziel-Markierung des Kontos (Radar-Zeile t) → 'bestanden'; '' = alter Stand/nahe Liq
+  function kontoWegUrteilVon(fin, t){
+    const u = String((fin && fin.konto_weg_urteil) || '')
+    if(u === 'bestanden' || u === 'pruefen' || u === 'blown') return u
+    try{ if(t && typeof wdlZielMarkiert === 'function' && wdlZielMarkiert(t)) return 'bestanden' }catch(_){}
+    return ''
+  }
+  function kontoWegChipText(u){
+    return u === 'bestanden' ? 'Konto weg · vermutlich bestanden' : u === 'pruefen' ? 'Konto weg · bitte prüfen' : 'Konto weg · vermutlich geblowt'
+  }
   const KONTO_WEG_LIQ_NAH_ANTEIL = 0.25, KONTO_WEG_LIQ_NAH_MIN = 250
   function kontoWegUrteil(stand, start, boden, ziel){
     const n = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
@@ -51656,6 +51680,13 @@
         }catch(e){ console.warn('[konto-weg] Auto-Planer aus', (e && e.message) || e) }
       }
     }
+    // URTEIL AM PLAN (29.10.2026, Master: Chip „Konto weg · vermutlich bestanden / bitte prüfen / vermutlich geblowt"): final.konto_weg_urteil
+    // an jedem Überprüfen-Plan dieses Kontos mit Konto-weg-Befund (app.py reicht das Feld im Endlesungs-Auszug für fremde IDs durch)
+    for(const p of (tradePlans || []).filter(x => x && String(x.masterAccountId) === id && x.status === 'review')){
+      const fk = p.mt5Baseline && p.mt5Baseline.final
+      if(!(fk && (fk.konto_weg === true || fk.konto_weg_vermutet === true))) continue
+      try{ await baselinePatchIn(p.id, 'final', { konto_weg_urteil: urteil }, 'review') }catch(e){ console.warn('[konto-weg] Urteil am Plan', (e && e.message) || e) }
+    }
     let n = 0
     const nowIso = new Date().toISOString()
     for(const p of (tradePlans || []).filter(x => x && String(x.masterAccountId) === id && x.status === 'open')){
@@ -51665,7 +51696,7 @@
         const row = Array.isArray(data) ? data[0] : data; if(!row || !row.id) continue
         const i = tradePlans.findIndex(x => String(x.id) === String(p.id)); if(i >= 0) tradePlans[i] = rowToPlan(row)
         await baselinePatchIn(p.id, 'final', { at: nowIso, grund: 'konto_weg', konto_weg: true, konto_weg_at: nowIso, konto_weg_vermutet: true, puls_aufgegeben: true,
-          puls_at: nowIso, puls_fehler: 'konto_weg: ' + String((r && (r.msg || r.error)) || '').slice(0, 300), konto_weg_quelle: quelle }, 'review')
+          puls_at: nowIso, puls_fehler: 'konto_weg: ' + String((r && (r.msg || r.error)) || '').slice(0, 300), konto_weg_quelle: quelle, konto_weg_urteil: urteil }, 'review')
         n++
       }catch(e){ console.warn('[konto-weg] laufender Plan → review', p.id, (e && e.message) || e) }
     }
@@ -52374,10 +52405,10 @@
         // KONTO WEG (06.10.2026): nichts platziert, Konto nicht mehr im Login → wie bei der Endlesung nach „Überprüfen", keine UNKLAR-Marke,
         // kein zweiter Versuch (s. v2KontoWegBeimStart). Nur code 'konto_weg' — jeder andere Fehler läuft unverändert in die Zweige darunter.
         const kw = await v2KontoWegBeimStart(plan, r)
-        kontoWegFolge(plan.masterAccountId, r, 'start')   // 09.10.2026: Konto als geblowt archivieren (nicht awaiten — Meldung zuerst)
-        const t = `Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt, nichts platziert. ${kw ? 'Der Plan steht unter „Überprüfen".' : 'Der Plan ließ sich nicht nach „Überprüfen" setzen — bitte von Hand „Erledigt".'} · ${r.msg || ''}`
+        kontoWegFolge(plan.masterAccountId, r, 'start')   // entscheidet am letzten Stand: bestanden / geblowt / prüfen (29.10.2026), nicht awaiten — Meldung zuerst
+        const t = `Konto bei Tradovate nicht mehr vorhanden — nichts platziert (bestanden oder geblowt entscheidet der letzte Stand). ${kw ? 'Der Plan steht unter „Überprüfen".' : 'Der Plan ließ sich nicht nach „Überprüfen" setzen — bitte von Hand „Erledigt".'} · ${r.msg || ''}`
         if(fern) return fern.melde({ ok:false, konto_weg: true, msg: t, trail: r.trail || null })
-        if(imPopup){ _pfSet('ob-order', 'err', escapeHtml(t)); pfEnde(false, '✕ Konto weg · vermutlich geblowt — nichts platziert' + (kw ? ', Plan steht unter „Überprüfen".' : '.')); return }
+        if(imPopup){ _pfSet('ob-order', 'err', escapeHtml(t)); pfEnde(false, '✕ Konto weg — nichts platziert' + (kw ? ', Plan steht unter „Überprüfen".' : '.')); return }
         toast(t, 'end')
       } else if(r && r.retry_ok === false){
         // retry_ok=false kommt vom Bot: der Kauf-Klick KANN raus sein. Dieselbe Regel wie auf
@@ -68337,7 +68368,12 @@
         const msgEl = document.getElementById('tradeCompleteMsg')
         if(msgEl){ msgEl.textContent = '🎯 Konto nicht mehr im Login, Stand über Start → vermutlich bestanden (Ziel markiert) — bitte prüfen, nicht geblowt vorbelegt.'; msgEl.className = 'modal-msg' }
       }
-      if(p.status === 'review' && !_tpWeg && !_kwZiel && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
+      const _kwU = kontoWegUrteilVon(finKw)   // 29.10.2026: „bitte prüfen" → nichts vorbelegen, nur Hinweis
+      if(_kwU === 'pruefen' && p.status === 'review' && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
+        const msgEl = document.getElementById('tradeCompleteMsg')
+        if(msgEl){ msgEl.textContent = '⚠ Konto weg · bitte prüfen — Stand weder klar über Start noch an der Liq; nichts vorbelegt.'; msgEl.className = 'modal-msg' }
+      }
+      if(p.status === 'review' && !_tpWeg && !_kwZiel && _kwU !== 'pruefen' && _kwU !== 'bestanden' && ((typeof tvV2KontoWeg === 'function' && tvV2KontoWeg(finKw)) || _kwVerm)){
         const rb = document.querySelector('input[name="tc-status"][value="blown"]')
         if(rb){ rb.checked = true; if(typeof tcUpdateStatusUI === 'function') tcUpdateStatusUI() }
         if(p.masterPl == null){

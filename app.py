@@ -11964,6 +11964,8 @@ def _wd_endlesung_zeile(final):
             # Konto nicht mehr in der Liste — liquidiert? (09.10.2026, Demo-Ende bei gescheitertem Login, Fall 0e344d8e): Radar-Abhaken belegt
             # dann „geblowt" vor wie bei konto_weg
             "konto_weg_vermutet", "grund",
+            # Konto weg ≠ geblowt (29.10.2026): Urteil des PC-Tabs (bestanden / pruefen / blown) — Radar-Chip fremder IDs
+            "konto_weg_urteil",
             # TopstepX-Geblowt-Auge (14.10.2026): Dropdown-Hinweis „(MAXIMUM_LOSS Violation)"/„(Ineligible)" oder Meldung „You Hit Your
             # Maximum Loss Limit" — der PC-Tab archiviert und setzt blown; der Radar fremder IDs sieht den Beweis hier
             "konto_geblowt",
