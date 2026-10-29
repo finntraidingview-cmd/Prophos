@@ -508,6 +508,21 @@ Aktive Verbindungen
           and rs.lader_kurz({"fehler": {"x": "y" * 200}})["fehler"] == str({"x": "y" * 200})[:80] and rs.lader_kurz(None)["bereit"] is None,
           "Lader-Status: nur die sechs Felder, kurz, nie ganze Objekte")
 
+    # 30.10.2026 Exit-Fill-Stempel: fills nur aus Broker-Tabs, saubere Felder, ohne Doppelte, Alte raus
+    f1 = {"seite": "sell", "menge": 1, "preis": 30801.25, "at": 1761800000123, "symbol": "NQZ6", "art": "market", "konto": "K1", "text": "Sell 1 at 30,801.25"}
+    L = rs.fills_merken([], [f1, dict(f1), {"seite": "x", "preis": 1, "at": 1}, {"seite": "buy", "preis": "a", "at": 1}, "kaputt"], "puls-a", "broker", 1000.0)
+    L2 = rs.fills_merken(L, [f1], "puls-a", "broker", 1001.0)
+    check(len(L) == 1 and L[0]["at"] == 1761800000123 and L[0]["preis"] == 30801.25 and L2 == L
+          and rs.fills_merken([], [f1], "feed-a", "feed", 1000.0) == [] and rs.fills_merken(L, None, "puls-a", "broker", 1000.0 + rs.FILLS_HALT_S + 1) == [],
+          "Exit-Fills: nur Broker-Tab, kaputte Einträge nie, gleiche Meldung einmal, nach 30 min weg")
+    _alt = list(rs._fills)
+    try:
+        rs._fills = L
+        aus = rs._mit_an({})
+        check(aus["fills"] and "empf_s" not in aus["fills"][0] and aus["fills"][0]["at"] == 1761800000123, "Exit-Fills stehen in jeder Ausgabe (ohne Empfangszeit)")
+    finally:
+        rs._fills = _alt
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

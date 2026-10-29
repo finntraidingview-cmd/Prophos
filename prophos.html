@@ -28096,6 +28096,54 @@
     return true
   }
   window._hedgeMasterWegStempeln = hedgeMasterWegStempeln   // Test-Haken
+  /* EXIT-FILL-STEMPEL (30.10.2026, Finn 29.10. freigegeben): das echte Master-Ende = TradingViews Meldung „… order executed … Sell/Buy N
+   * at PREIS" der Gegenseite, gelesen vom Userscript ≥ 0.10.2 im Puls-Chrome (fills im Reader-Stand, Zeit = erstes Auftauchen in ms, gleiche
+   * PC-Uhr). Nach dem Master-Ende-Stempel (master_weg_at, sonst close_at) sucht hedgeExitFillTick je Orbit-Hedge DIESES PCs den passenden
+   * Fill und schreibt ihn EINMAL nach hedge.master_exit {at, preis, seite, menge, symbol, art, quelle 'toast', text} (RPC mt5_baseline_patch_in
+   * wie der Stempel, ohne baselineLokal). Passend (hedgeExitFillWahl, REIN): Konto des Tabs = Plan-Konto (kontoTextBezug 'ja' — gekürzte
+   * Namen nie), Gegenseite der Plan-Richtung, Menge = Plan-Lots, Wurzel NQ/MNQ (wenn die Meldung ein Symbol trägt), Zeit nach dem Start
+   * und höchstens 5 s nach dem erkannten Ende, höchstens 10 min davor — der späteste gewinnt. Kein Treffer binnen 10 min → aufgeben, der
+   * Radar rechnet dann wie bisher ab master_weg_at. Nur lesen/schreiben, kein Klick. */
+  const _hedgeExitFertig = new Set()
+  function hedgeExitFillWahl(fills, o){
+    const nach = (o.endeMs || 0) + 5000, vor = (o.endeMs || 0) - 10 * 60000
+    const passt = (fills || []).filter(f => f && typeof f.at === 'number' && f.at > (o.startMs || 0) + 1000 && f.at <= nach && f.at >= vor
+      && f.seite === o.seite && Number(f.menge) === Number(o.menge) && Number(f.preis) > 0
+      && (!f.symbol || !o.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(f.symbol)) : '') === o.wurzel)
+      && (typeof kontoTextBezug === 'function') && kontoTextBezug(f.konto, o.ext) === 'ja')
+    return passt.sort((a, b) => b.at - a.at)[0] || null
+  }
+  window._hedgeExitFillWahl = hedgeExitFillWahl   // Test-Haken
+  function hedgeExitFillTick(){
+    try{
+      if(!MT5_LOCAL) return
+      const st = (typeof epLokal !== 'undefined' && epLokal) ? epLokal.stand : null
+      const fills = st && Array.isArray(st.fills) ? st.fills : null
+      const pc = hedgePcId(), jetzt = Date.now()
+      for(const p of (tradePlans || [])){
+        const h = p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge
+        if(!h || h.pc !== pc || h.master_exit || _hedgeExitFertig.has(String(p.id))) continue
+        const endeMs = Date.parse(h.master_weg_at || h.close_at || '') || 0
+        if(!endeMs) continue
+        if(jetzt - endeMs > 10 * 60000){ _hedgeExitFertig.add(String(p.id)); continue }   // kein Fill binnen 10 min → Radar wie bisher
+        if(!fills) continue
+        const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+        const ow = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p) : {}
+        const wz = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(ow.symbol || p.masterSymbol || '')) : ''
+        const f = hedgeExitFillWahl(fills, { ext: acc ? String(acc.externalId || '') : '', seite: p.richtung === 'buy' ? 'sell' : p.richtung === 'sell' ? 'buy' : null,
+          menge: ow.lots, wurzel: wz === 'MNQ' || wz === 'NQ' ? wz : null, startMs: Date.parse(p.startedAt || h.opened_at || h.at || '') || 0, endeMs })
+        if(!f) continue
+        _hedgeExitFertig.add(String(p.id))
+        const me = { at: new Date(f.at).toISOString(), preis: Number(f.preis), seite: f.seite, menge: Number(f.menge), symbol: f.symbol || null,
+          art: f.art || null, quelle: 'toast', text: String(f.text || '').slice(0, 80) }
+        console.info(`[hedge] Exit-Fill ${String(p.id).slice(0, 8)}: ${me.seite} ${me.menge} @ ${me.preis} um ${me.at} (${Math.round(endeMs - f.at)} ms vor dem erkannten Ende)`)
+        Promise.resolve(supabase.rpc('mt5_baseline_patch_in', { p_plan: String(p.id), p_key: 'hedge', p_patch: { master_exit: me }, p_status: null }))
+          .then(({ error }) => { if(error) throw error; h.master_exit = me })
+          .catch(e => { setTimeout(() => _hedgeExitFertig.delete(String(p.id)), 30000); console.warn('[hedge] Exit-Fill-Stempel', (e && e.message) || e) })
+      }
+    }catch(e){ console.warn('[hedge] Exit-Fill', (e && e.message) || e) }
+  }
+  setInterval(hedgeExitFillTick, 1000)
   const hedgePcId = () => (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
   // Nach dem bewiesenen Kauf-Klick (tpOrbitStarten → v2AufOpen): Gegen-Order auf Fusion. r = Bot-Antwort
   // (einstieg = Text des Avg-Fill-Preises, tv_symbol). Läuft nur am PC (dort steht das Hedge-Terminal).
@@ -36052,13 +36100,16 @@
     const overEur = (overPkt != null && lots != null && wpp != null) ? overPkt * lots * wpp : null
     const overPct = (overEur != null && eur) ? overEur / Math.abs(eur) * 100 : null
     const ms = (a, b) => { const x = Date.parse(a || ''), y = Date.parse(b || ''); return (isNaN(x) || isNaN(y)) ? null : Math.max(0, y - x) }
+    const mFill = h.master_exit && typeof h.master_exit === 'object' && !isNaN(Date.parse(h.master_exit.at || '')) ? h.master_exit.at : null
+    const mEnde = mFill || h.master_weg_at || null
     return { weg, wegTxt: SW_WEG_TXT[weg], grund: g, seite, level, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
       masterTp: n(h.tp_level_nq), masterSl: n(h.sl_level_nq), liq: h.sl_art === 'liquidation',
       overPkt, overEur, overPct, offenMs: ms(h.opened_at || h.at, h.closed_at), verzugMs: h.close_at ? ms(h.close_at, h.closed_at) : null,
-      bisZuMs: h.master_weg_at ? ms(h.master_weg_at, h.closed_at) : null,   // Erkennungs-Stempel (29.10.2026), sonst ab Schließbefehl
+      // echtes Master-Ende (30.10.2026): Exit-Fill aus TradingViews Meldung (hedge.master_exit.at) vor dem Erkennungs-Stempel, sonst ab Schließbefehl
+      bisZuMs: mEnde ? ms(mEnde, h.closed_at) : null,
       // Fusion vor dem erkannten Master-Ende zu (Notfall-Level im Terminal schneller als Feed/Reader) → „vor Master" statt „0,0 s nach Master"
-      vorMasterMs: h.master_weg_at && h.closed_at && Date.parse(h.closed_at) < Date.parse(h.master_weg_at) ? Date.parse(h.master_weg_at) - Date.parse(h.closed_at) : null,
-      masterQuelle: h.master_weg_at ? String(h.master_weg_quelle || '') : null,
+      vorMasterMs: mEnde && h.closed_at && Date.parse(h.closed_at) < Date.parse(mEnde) ? Date.parse(mEnde) - Date.parse(h.closed_at) : null,
+      masterQuelle: mFill ? 'fill' : h.master_weg_at ? String(h.master_weg_quelle || '') : null,
       // closed_at nur sekundengenau (Copier, 44 % der Fälle — S5 fixt copier.py): erkennbar am fehlenden Bruchteil → „≈ 1 s" statt Scheingenauigkeit
       zuGrob: !!h.closed_at && !/[T ]\d{2}:\d{2}:\d{2}\.\d/.test(String(h.closed_at)),
       schonZu: !!h.schon_zu, zuAt: h.closed_at || null, lang: typeof hedgeGrundText === 'function' ? hedgeGrundText(g, h) : g }
@@ -36082,7 +36133,7 @@
     const sek = Math.round(ms / 1000), m = Math.floor(sek / 60), r = sek % 60
     return `${grob ? '≈ ' : ''}${m} min${r ? ` ${r} s` : ''}`
   }
-  const SW_MASTER_QUELLE = { feed: 'Kurs-Feed kreuzte den Master-Level', reader: 'Reader/Userscript sah die Master-Position weg', auge: 'TopstepX-Auge zeigte das Konto flach' }
+  const SW_MASTER_QUELLE = { fill: 'TradingView-Meldung: Master-Order ausgeführt (Exit-Fill)', feed: 'Kurs-Feed kreuzte den Master-Level', reader: 'Reader/Userscript sah die Master-Position weg', auge: 'TopstepX-Auge zeigte das Konto flach' }
   window._swAuswertung = swAuswertung   // Test-Haken
   window._swBisZuTxt = swBisZuTxt
   function wdlRender(){

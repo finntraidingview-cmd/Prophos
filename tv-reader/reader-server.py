@@ -757,6 +757,38 @@ def _kerzen_diag(kerzen, bedienfeld, aufl_warnung, script_version):
     return f"Kerzen {ring} · {teil} · {aufl} · Script {script_version or '?'} · Reader {READER_VERSION}"
 
 
+# EXIT-FILL-STEMPEL (30.10.2026, Userscript 0.10.2): ausgefuehrte Orders aus TradingViews Meldungen, je Broker-Tab mit der Zeit ihres ersten
+# Auftauchens (ms, Browser-Uhr). Getrennt vom Positions-Stand gemerkt — auch bei Pause/blind (Beobachtung, kein Hedge-Befehl), damit der
+# PC-Tab das echte Master-Ende stempeln kann (hedge.master_exit). Gleiche Meldung (Tab, Seite, Menge, Preis, Symbol, Zeit) nur einmal.
+FILLS_HALT_S, FILLS_MAX = 30 * 60, 40
+_fills = []
+
+
+def fills_merken(liste, neu, tab_id, rolle, jetzt):
+    """REIN RECHNEND (testbar): neue fills eines Tabs in die Liste — nur Broker-Tabs, nur saubere Felder, ohne Doppelte, Alte raus."""
+    out = [f for f in (liste or []) if jetzt - f.get("empf_s", 0) <= FILLS_HALT_S]
+    if rolle != "broker" or not isinstance(neu, list):
+        return out
+    for f in neu[:20]:
+        if not isinstance(f, dict):
+            continue
+        try:
+            preis, at = float(f.get("preis")), int(f.get("at"))
+        except (TypeError, ValueError):
+            continue
+        seite = f.get("seite") if f.get("seite") in ("buy", "sell") else None
+        menge = f.get("menge") if isinstance(f.get("menge"), (int, float)) and not isinstance(f.get("menge"), bool) else None
+        if not seite or preis <= 0 or at <= 0:
+            continue
+        z = {"tab_id": str(tab_id or "")[:40], "seite": seite, "menge": menge, "preis": preis, "at": at,
+             "symbol": str(f.get("symbol") or "")[:16] or None, "art": str(f.get("art") or "")[:10] or None,
+             "konto": str(f.get("konto") or "")[:60] or None, "text": str(f.get("text") or "")[:80], "empf_s": jetzt}
+        if any(g["tab_id"] == z["tab_id"] and g["at"] == at and g["seite"] == seite and g["preis"] == preis for g in out):
+            continue
+        out.append(z)
+    return out[-FILLS_MAX:]
+
+
 def _mit_an(stand):
     """Stand + Schalter-Zustand — 'an' gehoert in JEDE Ausgabe (Datei und GET),
     damit kein Konsument den Schalter uebersehen kann."""
@@ -823,6 +855,7 @@ def _mit_an(stand):
     out["positionen_tab"] = _btid
     out["lader"] = (_tabs.get(_btid) or {}).get("lader") if _btid else None   # 29.10.2026: Userscript-Lader des Broker-Tabs
     out["tabs"] = _tabs_liste(jetzt_)
+    out["fills"] = [{k: v for k, v in f.items() if k != "empf_s"} for f in _fills]   # 30.10.2026: Exit-Fill-Stempel (Userscript 0.10.2)
     return out
 
 
@@ -871,7 +904,7 @@ class Handler(BaseHTTPRequestHandler):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
         global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor, _kurse, _k1m_je, _k1m_vor_je, _reload_grund, _reload_s
         global _kerzen, _kerzen_s, _kerzen_modus, _kerzen_delay_s, _aufl_warnung
-        global _script_version, _script_s
+        global _script_version, _script_s, _fills
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -1062,6 +1095,13 @@ class Handler(BaseHTTPRequestHandler):
                 _reload_grund = str(daten.get("reload_grund"))[:120]
                 _reload_s = time.time()
                 print(f"\n[{time.strftime('%H:%M:%S')}] Userscript hat sich selbst neu geladen: {_reload_grund}", flush=True)
+        except Exception:
+            pass
+
+        # 30.10.2026: ausgefuehrte Orders (Exit-Fill-Stempel) — VOR dem Pause-Gate, Beobachtung wie die Kurse
+        try:
+            if daten.get("fills"):
+                _fills = fills_merken(_fills, daten.get("fills"), _tid, _t.get("rolle"), time.time())
         except Exception:
             pass
 

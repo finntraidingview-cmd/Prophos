@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.1
+// @version      0.10.2
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.2 30.10.2026  EXIT-FILL-STEMPEL (Finn 29.10. freigegeben): der Kern liest im Takt TradingViews Order-Meldungen (Toast-Stapel
+//                      + Meldungsprotokoll role=log) und meldet jede AUSGEFUEHRTE Order („Market/Limit/Stop order executed … Sell 1
+//                      at 30,000.00") mit der Zeit ihres ersten Auftauchens in ms im Feld fills (Broker-Tab). Nur lesen — kein Klick,
+//                      auch kein „Show more": neue Meldungen stehen beim Erscheinen im DOM, auch im zugeklappten Stapel. Prophos
+//                      stempelt damit das echte Master-Ende (hedge.master_exit), der Radar rechnet „… nach Master" ab diesem Fill.
 //   0.10.1 29.10.2026  DOPPELLAUF-RIEGEL (Master: „lieber blind (Hedge bleibt) als doppelt"): der Kern setzt beim Start
 //                      unsafeWindow.__prophosKernAn und kehrt bei einem zweiten Start in derselben Seite sofort um — ein halb gestarteter,
 //                      dann geworfener nachgeladener Kern laeuft so nie neben der eingebauten Fassung. Kern sonst = 0.9.13 (Konto-Liste).
@@ -171,7 +176,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.1';
+  const VERSION    = '0.10.2';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1630,6 +1635,96 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     return kurse;
   }
 
+  /* EXIT-FILL-STEMPEL (0.10.2, 30.10.2026, Finn 29.10. freigegeben): ausgefuehrte Orders aus TradingViews Meldungen — Regeln wie
+   * augen.js meldungenAus (Titel setzt Art/Status, „Buy 1" + „at 30,801.00" als zwei Text-Knoten zusammensetzen, Live-Befund a9b3b671),
+   * Zeit = erstes Auftauchen im DOM (Takt 50 ms im Puls-Chrome). Quellen: Toast-Stapel ([data-name^="toast-group-"] bzw. Klasse
+   * toastGroup-/toastListInner-) und Meldungsprotokoll [role="log"] — gelesen wird textContent, also auch zugeklappte Meldungen; nie ein
+   * Klick. NEU ist eine Meldung nur, wenn ihre Anzahl gegenueber dem vorigen Takt WAECHST (fillsNeu) — was beim Start schon dastand und
+   * alte Protokoll-Zeilen bleiben so fuer immer alt. Doppelt (Toast + Protokoll-Kopie, React baut neu) zaehlt eine Meldung mit gleicher
+   * Seite/Menge/Preis/Symbol binnen FILL_DOPPELT_MS einmal — mit der FRUEHESTEN Zeit. */
+  const FILL_MAX = 10, FILL_HALT_MS = 15 * 60000, FILL_DOPPELT_MS = 10 * 60000;   // 10 min: ein spaeter wieder aufgeklappter Toast ist kein neuer Fill
+  const RX_F_TITEL = /\border\b|auftrag|position opened|marktorder|limitorder|stop-?order/i;
+  const RX_F_FILL = /executed|filled|ausgef(ü|ue)hrt|gef(ü|ue)llt/i;
+  const RX_F_NICHT = /cancel+ed|storniert|abgebrochen|reject|abgelehnt|modified|ge(ä|ae)ndert/i;
+  const RX_F_EN = /\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*(\d[\d.,]*)/i;
+  const RX_F_DE = /(?:(?:^|\s)(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b/i;
+  const RX_F_SYMBOL = /\b((?:MNQ|NQ|MES|ES|MYM|YM|M2K|RTY)[FGHJKMNQUVXZ]\d{1,2})\b|\b((?:MNQ|NQ|MES|ES)1!)/;
+  const fillMerk = { fills: [], vorher: null, fehler: 0 };
+  function fillZahl(t) {
+    t = String(t || '').replace(/\s/g, '');
+    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, '');            // 30,801.00
+    else if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g, '').replace(',', '.');   // 30.801,00
+    else t = t.replace(',', '.');
+    const z = Number(t);
+    return isFinite(z) ? z : null;
+  }
+  // REIN (Selbsttest): Textknoten einer Meldungsquelle → [{art, seite, menge, preis, symbol, text}] nur fuer AUSGEFUEHRTE Orders
+  function fillsAusTexten(texte) {
+    const out = [];
+    let art = null, fill = false, symbol = null;
+    for (let i = 0; i < texte.length; i++) {
+      const t = String(texte[i] || '');
+      const sy = t.match(RX_F_SYMBOL);
+      if (RX_F_TITEL.test(t)) {
+        fill = RX_F_FILL.test(t) && !RX_F_NICHT.test(t);
+        art = /\bmarket|markt/i.test(t) ? 'market' : /\blimit/i.test(t) ? 'limit' : /\bstop/i.test(t) ? 'stop' : /take[\s-]*profit/i.test(t) ? 'tp' : 'order';
+        symbol = sy ? (sy[1] || sy[2]) : null;
+      } else if (sy && !symbol) symbol = sy[1] || sy[2];
+      let m = t.match(RX_F_EN), seite = null, menge = null, preis = null, roh = t;
+      if (!m && i + 1 < texte.length && /^(buy|sell|kauf(en)?|verkauf(en)?)\s+[\d.,]+$/i.test(t.trim()) && /^(@|at|zu|bei)\s*\d/i.test(String(texte[i + 1]).trim())) {
+        roh = t + ' ' + texte[i + 1]; m = roh.match(RX_F_EN); if (m) i++;
+      }
+      if (m) { seite = /^(buy|kauf)/i.test(m[1]) ? 'buy' : 'sell'; menge = fillZahl(m[2]); preis = fillZahl(m[3]); }
+      else { const d = t.match(RX_F_DE); if (d) { seite = /^verkauf/i.test(d[3]) ? 'sell' : 'buy'; menge = d[1] ? fillZahl(d[1]) : null; preis = fillZahl(d[2]); } }
+      if (fill && preis != null && preis > 0 && seite)
+        out.push({ art: art, seite: seite, menge: menge, preis: preis, symbol: symbol, text: roh.replace(/\s+/g, ' ').trim().slice(0, 80) });
+    }
+    return out;
+  }
+  const fillSig = f => [f.seite, f.menge, f.preis, f.symbol || ''].join('|');
+  // REIN (Selbsttest): Meldungen dieses Takts gegen den vorigen → {neu: Meldungen, deren Anzahl gewachsen ist, zaehl: Anzahl je Meldung}.
+  // vorher null (erster Takt) → nichts neu
+  function fillsNeu(vorher, jetztListe) {
+    const zaehl = {}, neu = [];
+    (jetztListe || []).forEach(function (f) {
+      const k = fillSig(f); zaehl[k] = (zaehl[k] || 0) + 1;
+      if (vorher && zaehl[k] > (vorher[k] || 0)) neu.push(f);
+    });
+    return { neu: neu, zaehl: zaehl };
+  }
+  // REIN (Selbsttest): neue Meldungen in die Liste — gleiche binnen FILL_DOPPELT_MS nur einmal (frueheste Zeit bleibt), Alte raus
+  function fillsMerken(liste, neu, jetzt, konto) {
+    const out = (liste || []).filter(f => jetzt - f.at <= FILL_HALT_MS);
+    for (const f of neu || []) {
+      if (out.some(g => fillSig(g) === fillSig(f) && Math.abs(jetzt - g.at) <= FILL_DOPPELT_MS)) continue;
+      out.push(Object.assign({}, f, { at: jetzt, konto: konto || null }));
+    }
+    return out.slice(-FILL_MAX);
+  }
+  function fillsLesen() {
+    try {
+      const quellen = Array.prototype.slice.call(document.querySelectorAll('[data-name^="toast-group-"],[class*="toastGroup-"],[class*="toastListInner-"],[role="log"]'));
+      const alle_ = [];
+      quellen.forEach(function (q) {
+        if (quellen.some(function (x) { return x !== q && x.contains(q); })) return;   // innerste Quelle nur einmal
+        const texte = [], lauf = document.createTreeWalker(q, NodeFilter.SHOW_TEXT);
+        let k;
+        while ((k = lauf.nextNode()) && texte.length < 400) {
+          const v = String(k.nodeValue || '').replace(/\s+/g, ' ').trim();
+          if (v) texte.push(v.slice(0, 80));
+        }
+        // die JUENGSTEN 80 Knoten — das Protokoll waechst nach unten; am Schnitt nur ganze Meldungen (Titel zuerst)
+        let ab = Math.max(0, texte.length - 80);
+        while (ab > 0 && ab < texte.length && !RX_F_TITEL.test(texte[ab])) ab++;
+        fillsAusTexten(texte.slice(ab)).forEach(function (f) { alle_.push(f); });
+      });
+      const n = fillsNeu(fillMerk.vorher, alle_);
+      fillMerk.vorher = n.zaehl;
+      if (n.neu.length) fillMerk.fills = fillsMerken(fillMerk.fills, n.neu, Date.now(), kontoMerk.text);
+    } catch (_) { fillMerk.fehler++; }
+    return fillMerk.fills.slice(-FILL_MAX);
+  }
+
   function tick() {
     if (PULS_CHROME && document.readyState !== 'complete' && Date.now() - SCRIPT_START_MS < 15000) return;   // 0.9.5/0.9.7: Seite lädt — höchstens 15 s schonen
     // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
@@ -1661,6 +1756,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       positionen_ok: !blind,
       konto: kontoMerk.text,
       konto_ts: kontoMerk.ts || null,
+      fills: fillsLesen(),   // 0.10.2: ausgefuehrte Orders mit Zeit des ersten Auftauchens (Exit-Fill-Stempel)
     } : { positionen_quelle: 'feed' };
     const payload = JSON.stringify(Object.assign({
       ts: Date.now(), version: VERSION, tab_id: TAB_ID, rolle,
@@ -1749,7 +1845,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.1';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.2';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
