@@ -3752,6 +3752,71 @@
     #adm-pane-wd #wd-ueb-stat-rows .adm-track{display:none}
   }
   /* Admin „Trade-Planer" (08.10.2026, Finn: „wie hässlich" zur rohen Tabelle): zwei Karten wie die anderen Admin-Blöcke, Tabellen im wd-tab-Stil */
+  /* ══ GUESTLY-DESIGN Challenge-Planer (30.10.2026, .claude/design-vorlagen-guestly.md): Tokens nur hier, dunkel über den Sonnen-Schalter ══ */
+  #ap-ids-root.ap-guestly{--g-a1:#5447ce;--g-a2:#887cfc;--g-a3:#4996ff;--g-a4:#16c8c6;--g-karte:#fff;--g-kpi:#f3f4f8;--g-rand:#eceef3;--g-text:#101828;
+    --g-sub:#667085;--g-gitter:rgba(16,24,40,.06);--g-schatten:0 10px 24px rgba(16,24,40,.06),0 2px 6px rgba(16,24,40,.04);--g-lila-bg:#efedfd;--g-lila:#5447ce;
+    --g-tuerkis-bg:#e2f8f8;--g-tuerkis:#0d9e9c;--g-gut:#12a150;--g-rot:#e5484d;--g-knopf:#101828;--g-knopf-text:#fff;--g-pille:#eef0f4;--g-pille-an:#fff;color:var(--g-text)}
+  html[data-theme="dark"] #ap-ids-root.ap-guestly{--g-karte:#151a24;--g-kpi:#1a2030;--g-rand:#252c3b;--g-text:#e7eaf0;--g-sub:#98a2b3;--g-gitter:rgba(255,255,255,.06);
+    --g-schatten:0 10px 24px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25);--g-lila-bg:rgba(136,124,252,.16);--g-lila:#b3aaff;--g-tuerkis-bg:rgba(22,200,198,.15);
+    --g-tuerkis:#4fe3e0;--g-gut:#3ccf7a;--g-rot:#ff6b70;--g-knopf:#f4f5f8;--g-knopf-text:#101828;--g-pille:#1f2636;--g-pille-an:#2c3447}
+  #ap-ids-root.ap-guestly .apg-kopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 18px}
+  #ap-ids-root.ap-guestly .apg-zeitraum{display:inline-flex;background:var(--g-pille);border-radius:999px;padding:4px;gap:2px}
+  #ap-ids-root.ap-guestly .apg-zeitraum button{border:0;background:transparent;color:var(--g-sub);font:600 13px/1 inherit;padding:8px 14px;border-radius:999px;cursor:pointer}
+  #ap-ids-root.ap-guestly .apg-zeitraum button.on{background:var(--g-pille-an);color:var(--g-text);box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  #ap-ids-root.ap-guestly .apg-zeitraum button:disabled{opacity:.45;cursor:default}
+  #ap-ids-root.ap-guestly .apg-filter{border:1px solid var(--g-rand);background:var(--g-karte);color:var(--g-text);border-radius:10px;padding:8px 30px 8px 12px;font-size:13px;max-width:200px}
+  #ap-ids-root.ap-guestly .apg-stand{color:var(--g-sub);font-size:12.5px}
+  #ap-ids-root.ap-guestly .apg-knoepfe{margin-left:auto;display:flex;align-items:center;gap:6px;position:relative}
+  #ap-ids-root.ap-guestly .apg-knopf{border:1px solid var(--g-rand);background:var(--g-karte);color:var(--g-text);border-radius:10px;padding:7px 12px;font-size:12.5px;cursor:pointer}
+  #ap-ids-root.ap-guestly .apg-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;margin-bottom:18px}
+  #ap-ids-root.ap-guestly .apg-kpi{grid-column:span 2;background:var(--g-kpi);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+  #ap-ids-root.ap-guestly .apg-kpi.gross{grid-column:span 3}
+  #ap-ids-root.ap-guestly .apg-kpi[data-apg-ziel]{cursor:pointer}
+  #ap-ids-root.ap-guestly .apg-kpi-kopf{display:flex;align-items:center;gap:8px;color:var(--g-text);font-size:14px;font-weight:600}
+  #ap-ids-root.ap-guestly .apg-icon{width:18px;height:18px;color:var(--g-a1)}
+  #ap-ids-root.ap-guestly .apg-kpi-mitte{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+  #ap-ids-root.ap-guestly .apg-kpi-l{min-width:0}
+  #ap-ids-root.ap-guestly .apg-zahl{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+  #ap-ids-root.ap-guestly .apg-kpi:not(.gross) .apg-zahl{font-size:28px}
+  #ap-ids-root.ap-guestly .apg-zahl.gut{color:var(--g-gut)} #ap-ids-root.ap-guestly .apg-zahl.rot{color:var(--g-rot)}
+  #ap-ids-root.ap-guestly .apg-unter{color:var(--g-sub);font-size:12.5px;margin-top:6px}
+  #ap-ids-root.ap-guestly .apg-kpi-r{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none}
+  #ap-ids-root.ap-guestly .apg-welle{width:48px;height:20px;color:var(--g-a2)}
+  #ap-ids-root.ap-guestly .apg-pille{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600;white-space:nowrap}
+  #ap-ids-root.ap-guestly .apg-pille.lila{background:var(--g-lila-bg);color:var(--g-lila)} #ap-ids-root.ap-guestly .apg-pille.tuerkis{background:var(--g-tuerkis-bg);color:var(--g-tuerkis)}
+  #ap-ids-root.ap-guestly .apg-karte{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px;min-width:0}
+  #ap-ids-root.ap-guestly .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  #ap-ids-root.ap-guestly .apg-charts .apg-karte{margin-bottom:18px}
+  #ap-ids-root.ap-guestly .apg-karte-kopf{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  #ap-ids-root.ap-guestly .apg-titel{font-size:18px;font-weight:600;color:var(--g-text)}
+  #ap-ids-root.ap-guestly .apg-sub{color:var(--g-sub);font-size:12.5px;margin-top:3px}
+  #ap-ids-root.ap-guestly .apg-sub .lila{color:var(--g-a1);font-weight:600} #ap-ids-root.ap-guestly .apg-sub .tuerkis{color:var(--g-a4);font-weight:600}
+  #ap-ids-root.ap-guestly .apg-i{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--g-sub);color:var(--g-sub);font:600 11px/15px inherit;text-align:center;flex:none;cursor:help}
+  #ap-ids-root.ap-guestly .apg-legende{display:flex;gap:14px;font-size:13px;color:var(--g-sub);margin-top:10px}
+  #ap-ids-root.ap-guestly .apg-legende i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+  #ap-ids-root.ap-guestly .apg-legende i.lila{background:var(--g-a1)} #ap-ids-root.ap-guestly .apg-legende i.tuerkis{background:var(--g-a4)}
+  #ap-ids-root.ap-guestly .apg-chart{position:relative;height:300px;margin-top:12px;padding-top:12px;border-top:1px solid var(--g-rand)}
+  #ap-ids-root.ap-guestly .apg-leer{color:var(--g-sub);font-size:13px;display:grid;place-items:center;height:100%}
+  #ap-ids-root.ap-guestly .apg-einst{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  #ap-ids-root.ap-guestly .apg-einst-l{flex:1;min-width:220px}
+  #ap-ids-root.ap-guestly .apg-haupt{border:0;background:var(--g-knopf);color:var(--g-knopf-text);border-radius:12px;padding:11px 22px;font:600 14px/1 inherit;cursor:pointer}
+  #ap-ids-root.ap-guestly .apg-haupt:disabled{opacity:.6;cursor:default}
+  #ap-ids-root.ap-guestly .apg-schalter{flex-basis:100%}
+  #ap-ids-root.ap-guestly .apg-schalter > summary{cursor:pointer;color:var(--g-sub);font-size:12.5px;list-style:none;display:inline-flex;align-items:center;gap:6px}
+  #ap-ids-root.ap-guestly .apg-schalter > summary::after{content:'▾'}
+  #ap-ids-root.ap-guestly .apg-schalter[open] > summary::after{content:'▴'}
+  #ap-ids-root.ap-guestly .apg-schalter .apd-schalter{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 18px}
+  #ap-ids-root.ap-guestly .apg-zs > :first-child{margin-top:0}
+  #ap-ids-root.ap-guestly .apg-zs .tpl-karte{border:0;box-shadow:none;background:transparent;padding:0;margin:0}
+  #ap-ids-root.ap-guestly .ap-adm-karte,#ap-ids-root.ap-guestly .tpl-bd,#ap-ids-root.ap-guestly .ap-hb-klapp{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px}
+  #ap-ids-root.ap-guestly .ap-adm-kopf b{font-size:18px;font-weight:600}
+  #ap-ids-root.ap-guestly .ap-adm-ok{background:var(--g-knopf);color:var(--g-knopf-text);border:0;border-radius:10px;padding:7px 14px;font-weight:600}
+  @media (max-width:980px){ #ap-ids-root.ap-guestly .apg-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} #ap-ids-root.ap-guestly .apg-kpi,#ap-ids-root.ap-guestly .apg-kpi.gross{grid-column:span 1}
+    #ap-ids-root.ap-guestly .apg-kpi.gross{grid-column:span 2} #ap-ids-root.ap-guestly .apg-charts{grid-template-columns:1fr} }
+  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-kpis{gap:var(--m-gap, 10px)} #ap-ids-root.ap-guestly .apg-kpi{padding:14px 14px;gap:10px}
+    #ap-ids-root.ap-guestly .apg-zahl{font-size:24px} #ap-ids-root.ap-guestly .apg-kpi:not(.gross) .apg-zahl{font-size:22px} #ap-ids-root.ap-guestly .apg-welle{display:none}
+    #ap-ids-root.ap-guestly .apg-chart{height:260px} #ap-ids-root.ap-guestly .apg-knoepfe{margin-left:0} #ap-ids-root.ap-guestly .apg-filter{max-width:none;flex:1}
+    #ap-ids-root.ap-guestly .apg-kpi:last-child{grid-column:span 2} }
   :is(#adm-pane-planer,#tpl-view,#adm-pane-fcfd) .ap-adm-karte{border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff);padding:14px 16px 10px;margin-bottom:14px}
   :is(#adm-pane-planer,#tpl-view,#adm-pane-fcfd) .ap-adm-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
   :is(#adm-pane-planer,#tpl-view) .ap-adm-kopf b{font-size:14px;color:var(--ink)} :is(#adm-pane-planer,#tpl-view) .ap-adm-kopf span{font-size:12px;color:var(--sub)}
@@ -51623,7 +51688,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1896'
+  const OS_TAB_BUILD = '2026-09-22.1897'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -78288,8 +78353,8 @@
   // Schlank gilt nur im Challenge-Planer (Funded unverändert), Schalter AP_SCHLANK
   function apSchlankJetzt(){ try{ return AP_SCHLANK && (_apIdsArtWert !== 'funded' || AP_SCHLANK_FUNDED) }catch(_){ return false } }
   function apSchlankFunded(){ try{ return apSchlankJetzt() && _apIdsArtWert === 'funded' }catch(_){ return false } }
-  function apIdsKopfHtml(laeuft = ''){
-    if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return laeuft
+  function apIdsKopfHtml(laeuft = '', teile = false){   // teile = true: Bausteine als Objekt für das Guestly-Layout (apGuestlyHtml, 30.10.2026)
+    if(typeof tplDaten !== 'function' || typeof tplKachelnHtml !== 'function' || typeof tplZeitstrahlHtml !== 'function') return teile ? null : laeuft
     try{
       const D = _apIds.D || apIdsDaten(), sp = new Map()
       for(const t of D.trades) if(!sp.has(t.user_id)) sp.set(t.user_id, { uid: t.user_id, name: t.user })
@@ -78312,8 +78377,9 @@
       const fs = tplFirmenStand(D.trades), DF = fs.firma === 'alle' ? D : tplFirmaFilter(D, fs.firma)
       const zeilenF = fs.firma === 'alle' ? zeilen : tplZeilenFirma(zeilen, DF.trades)
       const firmenChips = tplFirmenChipsHtml(fs, D.trades.length)
-      let braucht = ''
-      try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function') braucht = tplBrauchtHtml(tplBraucht(D, u ? new Set([u]) : null)) }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
+      let braucht = '', brauchtN = 0
+      try{ if(typeof tplBraucht === 'function' && typeof tplBrauchtHtml === 'function'){ const bl = tplBraucht(D, u ? new Set([u]) : null); braucht = tplBrauchtHtml(bl)
+        brauchtN = (bl || []).reduce((a, o) => a + ((o && o.zeilen) || []).filter(z => !TPL_BD_LEISE.has(z.art)).length, 0) } }catch(e){ console.warn('[ap-ids] Braucht dich', e) }   // Ausgelassene je ID mit Grund + Knöpfen (08.10.2026)
       // Heute beendet (Finn 08.10.2026) unter den Charts — nur bei „Alle"; mit gewählter ID steht dieselbe Liste im ID-Detail oben
       let heuteKonten = ''   // Heute je ID (12.10.2026) wie auf der Planer-Seite, mit gewählter ID nur ihre Zeile
       try{ if(typeof tplHeuteKontenHtml === 'function' && typeof tplAbdeckung === 'function'){ const ab = tplAbdeckung(D); heuteKonten = tplHeuteKontenHtml(u ? ab.filter(o => o.uid === String(u)) : ab) } }catch(e){ console.warn('[apIds] Heute je ID', e) }
@@ -78322,9 +78388,11 @@
       // AP_HEUTE_BILANZ_CHALLENGE = true. Er rechnet nur aus schon geladenen Radar-Zeilen, eine eigene Abfrage gibt es nicht.
       let hbHtml = ''
       try{ if(!apSchlankJetzt() && (AP_HEUTE_BILANZ_CHALLENGE || _apIdsArtWert === 'funded')) hbHtml = tplHeuteBilanzHtml({ uids: u ? new Set([String(u)]) : null, firma: fs.firma }) }catch(_){ hbHtml = '' }
-      if(apSchlankJetzt()) try{ return seg + tplKachelnHtml(DF, { schlank: true, funded: apSchlankFunded() }) + tplZeitstrahlHtml(DF, zeilenF) + laeuft + braucht } finally{ _tpl.tag = alt }   // SCHLANK (29.10.2026)
+      if(apSchlankJetzt()) try{
+        if(teile) return { D, DF, fs, tag, u, uName, zeitstrahl: tplZeitstrahlHtml(DF, zeilenF), braucht, brauchtN }
+        return seg + tplKachelnHtml(DF, { schlank: true, funded: apSchlankFunded() }) + tplZeitstrahlHtml(DF, zeilenF) + laeuft + braucht } finally{ _tpl.tag = alt }   // SCHLANK (29.10.2026)
       try{ return seg + firmenChips + tplKachelnHtml(DF) + hbHtml + tplZeitstrahlHtml(DF, zeilenF) + heuteKonten + tplChartsUmschalterHtml(DF, 'a') + laeuft + braucht } finally{ _tpl.tag = alt }   // Reihenfolge Finn 08.10.2026; Heute beendet steht unter „Läuft" (apIdsRender)   // beide Charts wie auf der Planer-Seite (Finn 08.10.2026)
-    }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return laeuft }
+    }catch(e){ console.warn('[ap-ids] Kopf zeichnen', e); return teile ? null : laeuft }
   }
   const apKontoKurz = z => { let g = 0; try{ g = Number(kontoGroesseAnzeige(z.konto, null, null)) || 0 }catch(_){}
     const gk = g >= 1000 ? Math.round(g / 1000) + 'k' : g > 0 ? String(g) : ''
@@ -78498,7 +78566,9 @@
     // EIN BESTÄTIGEN JE TRADE (30.10.2026, Master: „Die Liste muss immer sichtbar sein, auch leer"): alle Auto-Vorschläge (Echo, Orbit, WD,
     // Apex, Tradeify-Final) stehen hier — Hedge-Trades mit ihren Hedge-Spalten; leer eine kurze Zeile (apIdsBlockHtml)
     const offenBlock = apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO)
-    return { laeuft: apIdsBlockHtml('laeuft', wl.laeuft, kopfL), rest: offenBlock + apIdsBlockHtml('warten', wl.warten, kopfW) }
+    const wartenBlock = apIdsBlockHtml('warten', wl.warten, kopfW), laeuftBlock = apIdsBlockHtml('laeuft', wl.laeuft, kopfL)
+    // Guestly-Layout (30.10.2026): Blöcke und Listen einzeln — gleiche Zeilen, nur anders angeordnet
+    return { laeuft: laeuftBlock, rest: offenBlock + wartenBlock, offen: offenBlock, warten: wartenBlock, offenListe: o, wartenListe: wl.warten, laeuftListe: wl.laeuft }
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
    * Konten aus accounts/tradePlans (tplKontoBalance wie auf der Planer-Seite), fremde aus Lauf (balance/rest), Delta (wert_eur), live-trades
@@ -78737,6 +78807,131 @@
       if(aktion === 'planen' || aktion === 'morgen') apIdsLaden()
     }))
   }
+  /* ══ GUESTLY-DESIGN CHALLENGE-PLANER (Finn 30.10.2026, PLANER Schritt 2 — Vorlage .claude/design-vorlagen-guestly.md: „sein altes Guestly-Design
+   * inkl. der Farben"). Nur Darstellung und Anordnung, keine Logik: dieselben Daten (apIdsKopfHtml-Teile, apIdsOffenHtml, tplHypo, apdDaten)
+   * und dieselben Knöpfe/Handler (data-ap-tag, data-ap-ok, data-tpl-nachplan, data-apd-schalter, #ap-ids-neu, #ap-ids-tpl, data-ap-menu).
+   * Von oben: Kopf (Zeitraum-Pille Heute · Morgen · 7 Tage · 30 Tage, Filter ID + Firma, Knöpfe) · KPI-Raster (2 groß: P&L hypothetisch, Zu
+   * bestätigen; 3 klein: Läuft, Braucht dich, Wartet auf Start) · Chart-Reihe (Long oben / Short unten je ID, Starts je Stunde Dubai) ·
+   * Einstellungs-Leiste (Stand der Schalter + EIN Hauptknopf „Nachplanen", Schalter aufklappbar) · Zeitstrahl · Zu bestätigen · Läuft · Braucht
+   * dich · Wartet auf Start · Heute beendet. 7/30 Tage bräuchten neue Abfragen → ausgegraut („kommt"). Farben als Tokens --g-* nur unter
+   * #ap-ids-root.ap-guestly, dunkel über html[data-theme="dark"] (Sonnen-Schalter). Charts: Chart.js 4 (schon geladen). ══ */
+  const _apg = { charts: [], schalterAuf: false, daten: null }
+  function apgChartsWeg(){ for(const c of _apg.charts){ try{ c.destroy() }catch(_){} } _apg.charts = [] }
+  const APG_WELLE = '<svg class="apg-welle" viewBox="0 0 48 20" aria-hidden="true"><path d="M1 14c5 0 6-9 11-9s6 11 11 11 6-13 12-13 6 7 12 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+  const apgIcon = d => `<svg class="apg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`
+  const APG_ICON = { pl: apgIcon('<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>'), ok: apgIcon('<path d="M20 6L9 17l-5-5"/>'),
+    lauf: apgIcon('<circle cx="12" cy="12" r="9"/><path d="M10 8l6 4-6 4z"/>'), hand: apgIcon('<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'),
+    warte: apgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>') }
+  const apgPille = (art, text, tip) => `<span class="apg-pille ${art}"${tip ? ` title="${escapeHtml(tip)}"` : ''}>${text}</span>`
+  const apgKpi = o => `<div class="apg-kpi${o.gross ? ' gross' : ''}"${o.ziel ? ` data-apg-ziel="${o.ziel}" role="button" tabindex="0"` : ''}${o.tip ? ` title="${escapeHtml(o.tip)}"` : ''}>
+      <div class="apg-kpi-kopf">${o.icon}<span>${o.name}</span></div>
+      <div class="apg-kpi-mitte"><div class="apg-kpi-l"><div class="apg-zahl ${o.cls || ''}">${o.zahl}</div><div class="apg-unter">${o.unter || ''}</div></div>
+        <div class="apg-kpi-r">${APG_WELLE}${o.pillen || ''}</div></div></div>`
+  const apgEur = x => (x > 0 ? '+' : x < 0 ? '−' : '') + tplEur(x)
+  const _apgStd = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', hourCycle: 'h23' })
+  function apGuestlyHtml(x){
+    const T = apIdsKopfHtml(x.ow.laeuft, true); if(!T) return ''
+    const { DF, tag, u, fs } = T, trades = (DF.trades || []).filter(t => !t.wd)
+    let hy = { jetzt: 0, n: 0, ohne: 0 }; try{ hy = tplHypo(DF) }catch(_){}
+    const laufH = trades.filter(t => t.status === 'laeuft' && !t.gehedgt), sumE = long => laufH.filter(t => t.long === long).reduce((a, t) => a + (t.einsatz || 0), 0)
+    const oL = x.ow.offenListe || [], wL = x.ow.wartenListe || [], lL = x.ow.laeuftListe || []
+    const nHedge = oL.filter(z => z.hedge_art).length, lLong = lL.filter(e => e.z && e.z.richtung === 'buy').length
+    const naechst = wL.map(e => Date.parse((e.z && e.z.start_um) || '')).filter(v => isFinite(v) && v > Date.now() - 600000).sort((a, b) => a - b)[0]
+    // ── 1. Kopf
+    const tagB = (k, t) => `<button type="button" data-ap-tag="${k}" class="${tag === k ? 'on' : ''}">${t}</button>`
+    const idsOpt = (_apIds.rows || []).filter(r => r.drin || r.gruppen_planer || String(r.user_id) === u).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'de'))
+      .map(r => `<option value="${escapeHtml(String(r.user_id))}"${String(r.user_id) === u ? ' selected' : ''}>${escapeHtml(String(r.name || ''))}</option>`).join('')
+    const firmOpt = ((fs && fs.firmen) || []).map(([f, n]) => `<option value="${escapeHtml(f)}"${fs.firma === f ? ' selected' : ''}>${escapeHtml(f)} · ${n}</option>`).join('')
+    const stand = _apd.d && _apd.d.um && tag === 'heute' ? ' · Stand ' + tplUhrIso(_apd.d.um) : ''
+    const kopf = `<div class="apg-kopf">
+        <div class="apg-zeitraum" role="tablist" aria-label="Zeitraum">${tagB('heute', 'Heute')}${tagB('morgen', 'Morgen')}<button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button></div>
+        <select class="apg-filter" data-apg-id aria-label="ID"><option value="">Alle IDs</option>${idsOpt}</select>
+        <select class="apg-filter" data-apg-firma aria-label="Firma"${(fs && fs.firmen.length) ? '' : ' disabled'}><option value="alle">Alle Firmen</option>${firmOpt}</select>
+        <span class="apg-stand">${escapeHtml(apPrTagText(DF.tag || T.D.tag))} · Dubai${stand}</span>
+        <div class="apg-knoepfe"><button type="button" class="apg-knopf" id="ap-ids-tpl" title="Tagesplan als Zeitstrahl je ID (eigene Seite)">Trade-Planer öffnen</button><button type="button" class="apg-knopf" id="ap-ids-neu" title="Neu laden">↻</button>${x.rechts || ''}</div>
+      </div>${x.menu ? `<div class="ap-idr-wrap ap-idr-wrap-schlank">${x.menu}</div>` : ''}`
+    // ── 2. KPI-Raster (Trend-Pillen nur mit echten Zahlen: Long/Short im Spiel, Hedge-Anteil)
+    const kpis = `<div class="apg-kpis">
+      ${apgKpi({ gross: true, icon: APG_ICON.pl, name: 'P&amp;L hypothetisch', zahl: apgEur(hy.jetzt), cls: hy.jetzt > 0 ? 'gut' : hy.jetzt < 0 ? 'rot' : '',
+        unter: (hy.n - hy.ohne) > 0 ? `${hy.n - hy.ohne} laufende Trade${hy.n - hy.ohne === 1 ? '' : 's'} mit Live-Wert` : hy.n ? 'noch kein Live-Wert' : 'nichts läuft',
+        tip: 'Σ Kontowert-Satz (€ je $) × Live-P&L $ je laufendem ungehedgtem Trade',
+        pillen: apgPille('lila', '▲ Long ' + tplEur(sumE(true)), 'Long im Spiel (Einsatz laufend)') + apgPille('tuerkis', '▼ Short ' + tplEur(sumE(false)), 'Short im Spiel (Einsatz laufend)') })}
+      ${apgKpi({ gross: true, icon: APG_ICON.ok, name: 'Zu bestätigen', zahl: String(oL.length), ziel: 'offen',
+        unter: oL.length ? 'heute und morgen · ein Klick bestätigt — Hedge-Trades inkl. Freigabe' : 'nichts zu bestätigen – nächste Vorschläge mit dem Nachtlauf',
+        pillen: nHedge ? apgPille('tuerkis', `⇄ ${nHedge} mit Hedge`, 'Vorschläge mit Fusion-Gegenhedge (Apex / finaler Tradeify)') : '' })}
+      ${apgKpi({ icon: APG_ICON.lauf, name: 'Läuft', zahl: String(lL.length), ziel: 'laeuft', unter: lL.length ? `${lLong} Long · ${lL.length - lLong} Short` : 'nichts läuft' })}
+      ${apgKpi({ icon: APG_ICON.hand, name: 'Braucht dich', zahl: String(T.brauchtN), cls: T.brauchtN ? 'rot' : '', ziel: 'braucht', unter: T.brauchtN ? 'Handgriffe offen' : 'alles erledigt' })}
+      ${apgKpi({ icon: APG_ICON.warte, name: 'Wartet auf Start', zahl: String(wL.length), ziel: 'warten', unter: naechst ? 'nächster Start ' + apIdsWann(new Date(naechst).toISOString()) : 'nichts bestätigt' })}
+    </div>`
+    // ── 3. Chart-Reihe: Long oben / Short unten je ID · Starts je Stunde (Dubai)
+    const je = new Map()
+    for(const t of trades){ const k = String(t.user_id || '?'); if(!je.has(k)) je.set(k, { name: t.user || k.slice(0, 6), L: 0, S: 0 }); je.get(k)[t.long ? 'L' : 'S']++ }
+    const ls = [...je.values()].sort((a, b) => (b.L + b.S) - (a.L + a.S)).slice(0, 15)
+    const off = (typeof tplMinDt === 'function' ? (tplMinDt((DF.tag || T.D.tag) + 'T12:00:00Z', DF.tag || T.D.tag) ?? 840) : 840) - 720
+    const std = Array(24).fill(0)
+    for(const t of trades){ const ms = Date.parse((DF.tag || T.D.tag) + 'T00:00:00Z') + ((Number(t.start) || 0) - off) * 60000; if(isFinite(ms)) std[Number(_apgStd.format(new Date(ms))) % 24]++ }
+    const total = std.reduce((a, b) => a + b, 0), peak = total ? std.indexOf(Math.max(...std)) : -1
+    _apg.daten = { ls, std }
+    const nL = ls.reduce((a, z) => a + z.L, 0), nS = ls.reduce((a, z) => a + z.S, 0)
+    const charts = `<div class="apg-charts">
+      <div class="apg-karte"><div class="apg-karte-kopf"><div><div class="apg-titel">Long · Short je ID</div><div class="apg-sub"><span class="lila">${nL} Long</span> · <span class="tuerkis">${nS} Short</span> · ${tag === 'morgen' ? 'morgen' : 'heute'}, alle Trades der Sicht</div></div>
+        <span class="apg-i" title="Long oben, Short unten — je ID die Trades des Tages (geplant, bestätigt, läuft, beendet), ohne Winning Days. Je Tag über 7/30 Tage kommt mit dem Zeitraum.">i</span></div>
+        <div class="apg-legende"><span><i class="lila"></i>Long</span><span><i class="tuerkis"></i>Short</span></div>
+        <div class="apg-chart">${ls.length ? '<canvas id="apg-c-ls"></canvas>' : '<div class="apg-leer">noch keine Trades</div>'}</div></div>
+      <div class="apg-karte"><div class="apg-karte-kopf"><div><div class="apg-titel">Starts je Stunde</div><div class="apg-sub">Dubai · Total: ${total}${peak >= 0 ? ` · Peak: ${String(peak).padStart(2, '0')}:00 (${std[peak]})` : ''}</div></div>
+        <span class="apg-i" title="Startzeit (Dubai) aller Trades des Tages der Sicht, ohne Winning Days">i</span></div>
+        <div class="apg-chart">${total ? '<canvas id="apg-c-std"></canvas>' : '<div class="apg-leer">noch keine Starts</div>'}</div></div>
+    </div>`
+    // ── 4. Einstellungs-Leiste: Stand der Schalter + EIN Hauptknopf, Schalter aufklappbar
+    let v = {}; try{ v = apdDaten() || {} }catch(_){}
+    const an = b => b ? 'an' : 'aus', teile = [`Bot ${an(v.bot && v.bot.aktiv)}`]
+    if(v.echo_hedge && typeof v.echo_hedge.an === 'boolean') teile.push(`Echo-Hedge ${an(v.echo_hedge.an)}`)
+    if(v.apex_hedge && typeof v.apex_hedge.an === 'boolean') teile.push(`Apex-Hedge ${an(v.apex_hedge.an)}`)
+    if(v.tradeify_final_hedge && typeof v.tradeify_final_hedge.an === 'boolean') teile.push(`Tradeify-Final-Hedge ${an(v.tradeify_final_hedge.an)}`)
+    teile.push(`Nachtlauf ${an(_apIds.aktiv)}${x.lzAt ? ' · letzter Lauf ' + escapeHtml(x.lzAt) : ''}`)
+    let schalter = ''; try{ schalter = apdBotSchalterHtml(v, apdAdmin()) + apdBotMeldungHtml() }catch(_){}
+    const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${teile.join(' · ')}</div></div>
+        ${x.admin ? `<button type="button" class="apg-haupt" data-tpl-nachplan="1"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}
+        <details class="apg-schalter" data-apg-schalter${_apg.schalterAuf ? ' open' : ''}><summary>Schalter</summary>${schalter}</details></div>`
+    // ── 5./6. Zeitstrahl + Listen (bestehend, im Kartenstil)
+    const zs = `<div class="apg-karte apg-zs">${T.zeitstrahl}</div>`
+    const listen = `<div data-apg-anker="offen">${x.ow.offen || ''}</div><div data-apg-anker="laeuft">${x.ow.laeuft || ''}</div><div data-apg-anker="braucht">${T.braucht || ''}</div><div data-apg-anker="warten">${x.ow.warten || ''}</div>${x.heuteHb || ''}`
+    return kopf + kpis + charts + leiste + zs + listen
+  }
+  function apGuestlyVerdrahten(root){
+    root.querySelector('[data-apg-id]')?.addEventListener('change', e => apSichtSetzen(e.target.value || null))
+    root.querySelector('[data-apg-firma]')?.addEventListener('change', e => { tplFirmaWaehlen(e.target.value || 'alle'); apIdsRender() })
+    root.querySelector('details[data-apg-schalter]')?.addEventListener('toggle', e => { _apg.schalterAuf = !!e.target.open })
+    root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
+    if(typeof window.Chart !== 'function' || !_apg.daten) return
+    const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
+    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a2 = tok('--g-a2') || '#887cfc', a4 = tok('--g-a4') || '#16c8c6'
+    const verlauf = (ctx, oben, unten) => { const g = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height || 300); g.addColorStop(0, oben); g.addColorStop(1, unten); return g }
+    const tip = { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, displayColors: true, boxPadding: 4 }
+    const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
+    const ls = _apg.daten.ls, cLs = root.querySelector('#apg-c-ls')
+    // Null als winziger Stummel (Vorlage: EPS), relativ zur größten Zahl — der Tooltip zeigt trotzdem 0
+    const eps = werte => Math.max(1, ...werte) * 0.025
+    if(cLs && ls.length){
+      const ctx = cLs.getContext('2d'), e1 = eps(ls.flatMap(z => [z.L, z.S]))
+      _apg.charts.push(new Chart(ctx, { type: 'bar', data: { labels: ls.map(z => z.name),
+          datasets: [{ label: 'Long', data: ls.map(z => z.L || e1), roh: ls.map(z => z.L), backgroundColor: verlauf(ctx, a2, a1), borderRadius: { topLeft: 6, topRight: 6, bottomLeft: 3, bottomRight: 3 }, borderSkipped: false, barPercentage: .65 },
+                     { label: 'Short', data: ls.map(z => -(z.S || e1)), roh: ls.map(z => z.S), backgroundColor: verlauf(ctx, a4, '#7fe3e2'), borderRadius: { topLeft: 3, topRight: 3, bottomLeft: 6, bottomRight: 6 }, borderSkipped: false, barPercentage: .65 }] },
+        options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { display: false }, tooltip: Object.assign({}, tip, { callbacks: { label: c => ` ${c.dataset.label}: ${c.dataset.roh[c.dataIndex]}` } }) },
+          scales: { x: Object.assign({ stacked: true }, achse, { grid: { display: false } }), y: Object.assign({ stacked: true }, achse, { ticks: { color: sub, font: { size: 11 }, precision: 0, callback: v => Math.abs(v) } }) } } }))
+    }
+    const std = _apg.daten.std, cStd = root.querySelector('#apg-c-std')
+    if(cStd && std.some(n => n)){
+      const ctx = cStd.getContext('2d'), e2 = eps(std)
+      _apg.charts.push(new Chart(ctx, { type: 'bar', data: { labels: std.map((_, h) => String(h).padStart(2, '0')),
+          datasets: [{ label: 'Starts', data: std.map(n => n || e2), roh: std, backgroundColor: verlauf(ctx, a1, a2), borderRadius: { topLeft: 8, topRight: 8, bottomLeft: 3, bottomRight: 3 }, borderSkipped: false, barPercentage: .45 }] },
+        options: { animation: false, responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: Object.assign({}, tip, { displayColors: false, callbacks: { title: c => `Stunde ${c[0].label}:00`, label: c => ` ${c.dataset.roh[c.dataIndex]} Start${c.dataset.roh[c.dataIndex] === 1 ? '' : 's'}` } }) },
+          scales: { x: Object.assign({}, achse, { grid: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } }), y: Object.assign({}, achse, { ticks: { color: sub, font: { size: 11 }, precision: 0 } }) } } }))
+    }
+  }
   function apIdsRenderChallenge(){
     const root = document.getElementById('ap-ids-root'); if(!root) return
     // Admin direkt mit dem gemerkten Reiter Challenge-Planer geöffnet (kein Reiter-Klick): Hedge-Block und Verlauf in € trotzdem aktivieren
@@ -78744,7 +78939,8 @@
     if(_apIdsArtWert === 'challenge' && !document.getElementById('adm-pane-planer')?.hidden){ window._ahfSicherstellen?.(); window._apvSicherstellen?.() }
     if(_apIds.fehler){ root.innerHTML = `<div style="color:var(--danger)">⚠ ${escapeHtml(_apIds.fehler)}</div>`; return }
     const rows = _apIds.rows, drin = rows.filter(r => r.drin || r.gruppen_planer), u = apSichtUid()   // Gruppen-Planer-IDs zählen wie im Planer (13.10.2026)
-    if(apSchlankJetzt() && u){ apSichtSetzen(null); return }   // SCHLANK (29.10.2026): ohne ID-Leiste gibt es keinen Weg zurück aus einer Einzel-Sicht → immer „alle"
+    const guestly = _apIdsArtWert === 'challenge' && apSchlankJetzt()   // GUESTLY-DESIGN (30.10.2026): nur der Challenge-Planer
+    if(apSchlankJetzt() && u && !guestly){ apSichtSetzen(null); return }   // SCHLANK (29.10.2026): ohne ID-Leiste gibt es keinen Weg zurück aus einer Einzel-Sicht → immer „alle" (Guestly: ID-Filter im Kopf)
     const lzAt = _ap.letzter && _ap.letzter.at && !_ap.letzter.trocken ? tplUhrIso(_ap.letzter.at) : ''
     // PC-Tab-Lebenszeichen je ID (Slave 2, .1180: pcStandPunktHtml → grün/grau/rot, '' solange nichts geladen) rechts neben dem Namen
     const pcs = uid => (typeof window.pcStandPunktHtml === 'function') ? (window.pcStandPunktHtml(String(uid)) || '') : ''
@@ -78810,7 +79006,11 @@
     // „Heute beendet" eingeklappt (SCHLANK, 29.10.2026); offen/zu bleibt über das Neuzeichnen (_apIds.hbAuf)
     if(schlank && heuteHb) heuteHb = `<details class="ap-hb-klapp" data-ap-hb${_apIds.hbAuf ? ' open' : ''}><summary>Heute beendet</summary>${heuteHb}</details>`
     root.classList.toggle('ap-schlank', schlank)
-    root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + leiste + gpHtml + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb
+    root.classList.toggle('ap-guestly', guestly)
+    apgChartsWeg()
+    const gHtml = guestly ? apGuestlyHtml({ ow, menu, rechts, lzAt, heuteHb, admin: _ap.admin === true || _ap.imPlaner }) : ''
+    root.innerHTML = fz.map(t => `<div class="tpl-fehler">${escapeHtml(t)}</div>`).join('') + (gHtml || (leiste + gpHtml + apIdsKopfHtml(ow.laeuft) + ow.rest + heuteHb))
+    if(gHtml) apGuestlyVerdrahten(root)
     root.querySelector('details[data-ap-hb]')?.addEventListener('toggle', e => { _apIds.hbAuf = !!e.target.open })
     if(leisteX && root.querySelector('.ap-idr')) root.querySelector('.ap-idr').scrollLeft = leisteX
     try{ gpVerdrahten(root) }catch(e){ console.warn('[gruppen-plan] Knöpfe', e) }
