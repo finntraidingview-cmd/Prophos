@@ -24060,6 +24060,83 @@
     wasOpen: new Set(),
     busy: false
   }
+  /* GEISTER-PLÄNE (30.10.2026, Master: „Echo-Pläne bleiben open, obwohl der Trade längst zu ist" — Jacob 2775030a im SL, Plan bis zum
+   * Abhaken von Hand open; Ina 6cde41c5): zwei Ursachen. (1) wasOpen lebt nur im Speicher — nach jedem Tab-Neuladen (Build-Update) war die
+   * Ende-Erkennung für route mt5 blind, bis dieser Tab selbst wieder Positionen sah; war der Trade da schon zu, nie mehr. (2) Hat das Panel
+   * das Master-Terminal nach dem Ende geschlossen (oder war der Lese-EA nie frisch), steht der Copier-Stand dauerhaft „eingefroren" — nie
+   * beweisfähig. Ein eingefrorener Stand beendet weiterhin NIE einen Plan.
+   * echoEndeScharf (REIN): fester Beleg am Plan, dass die Master-Position existierte → Ende-Erkennung nach dem Neuladen wieder scharf.
+   *   V2: Start-Baseline (wie seit K1); mit Hedge: Puls-Spur ok (bewiesener Klick), Railway sah die Position (echo_pos_gesehen_at) oder
+   *   Puls meldete beim Close „nicht (mehr) offen" (schon_zu). Ein Hand-„Läuft" ohne solchen Beleg bleibt wie bisher unscharf.
+   * echoGeistFaellig (REIN): offener, scharfer Plan, dessen Instanz keinen frischen Stand liefert, der letzte Stand zeigt weder Master-
+   *   Position noch Hedge, ≥ 10 min nach dem Beleg, letzter Versuch ≥ 30 min her, höchstens 3 Versuche → einmal frisch lesen
+   *   (mt5KontoBalanceJetzt: frischer Snapshot, sonst Master-Terminal öffnen + lesen). Beendet wird danach NUR über den normalen Weg:
+   *   zwei frische 0-Positionen-Messungen in Folge (final aus dem frischen Stand) → Überprüfen bzw. Abhak-Liste. Kein Auto-Abhaken. */
+  const ECHO_GEIST_AB_MS = 10 * 60000, ECHO_GEIST_ABSTAND_MS = 30 * 60000, ECHO_GEIST_MAX = 3, ECHO_BELEG_TOL_MS = 5 * 60000
+  // Beleg gilt nur für DIESEN Lauf (Gegenprüfung 30.10.2026): „Zurück zu Geplant" lässt mt5_baseline stehen — ein alter puls_spur/
+  // echo_pos_gesehen_at/schon_zu würde sonst einen Hand-„Läuft" vor dem Einstieg sofort beenden. Ohne startedAt kein Beleg.
+  function echoBelegImLauf(plan, at){
+    const st = Date.parse((plan && plan.startedAt) || '') || 0, t = Date.parse(at || '') || 0
+    return st > 0 && t > 0 && t >= st - ECHO_BELEG_TOL_MS
+  }
+  function echoEndeScharf(plan){
+    const b = (plan && plan.mt5Baseline) || {}
+    if(!plan || !routeIstEcho(plan.route)) return false
+    if(plan.route === 'mt5v2') return b.master_balance != null
+    const sp = b.puls_spur
+    return !!((sp && sp.ok === true && echoBelegImLauf(plan, sp.at)) || echoBelegImLauf(plan, b.echo_pos_gesehen_at)
+      || (b.schon_zu && echoBelegImLauf(plan, b.schon_zu.at)))
+  }
+  function echoBelegMs(plan){
+    const b = (plan && plan.mt5Baseline) || {}
+    const t = [b.schon_zu && b.schon_zu.at, b.echo_pos_gesehen_at, b.puls_spur && b.puls_spur.at, b.at, plan && plan.startedAt]
+      .map(x => Date.parse(x || '') || 0).filter(x => x > 0)
+    return t.length ? Math.max(...t) : 0
+  }
+  function echoGeistFaellig(plan, inst, jetzt, merk){
+    if(!plan || plan.status !== 'open' || !echoEndeScharf(plan) || !inst) return false
+    const s = inst.status || {}
+    const frisch = (!!inst.alive || (plan.route === 'mt5v2' && !!inst.lesen)) && !s.note
+    if(frisch) return false
+    if(plan.route === 'mt5' && !inst.alive) return false   // mit Hedge zählt nur der laufende Copier — gestoppt hilft keine Lesung (start-alles.bat)
+    if((s.master_positions || []).length) return false                                     // letzter Stand mit Position → nicht anfassen (Alarm-Weg)
+    if(Object.values(s.hedges || {}).some(h => Array.isArray(h) ? h.length : !!h)) return false   // offener Hedge → nicht anfassen
+    const beleg = echoBelegMs(plan)
+    if(!beleg || jetzt - beleg < ECHO_GEIST_AB_MS) return false
+    const m = merk || {}
+    if((m.n || 0) >= ECHO_GEIST_MAX || (m.at && jetzt - m.at < ECHO_GEIST_ABSTAND_MS)) return false
+    return true
+  }
+  window._echoGeist = { scharf: echoEndeScharf, faellig: echoGeistFaellig, belegMs: echoBelegMs }   // Test-Haken (rein rechnend)
+  const _echoGeistMerk = new Map()   // planId → { n, at }
+  function echoGeistAnstossen(plan, route){
+    try{
+      const pid = String(plan.id), jetzt = Date.now()
+      const b = plan.mt5Baseline || {}, gp = b.geist_pruefung
+      const alt = _echoGeistMerk.get(pid) || ((gp && echoBelegImLauf(plan, gp.at)) ? { n: Number(gp.n) || 0, at: Date.parse(gp.at || '') || 0 } : null)   // Zähler je Lauf
+      if(!echoGeistFaellig(plan, route && route.inst, jetzt, alt)) return
+      if((typeof ebnStartNah === 'function' && ebnStartNah()) || (typeof polarLaeuft === 'function' && polarLaeuft())) return   // kein Terminal öffnen, wenn hier gleich ein Start ansteht
+      if(typeof mt5KontoBalanceJetzt !== 'function') return
+      const n = ((alt && alt.n) || 0) + 1
+      _echoGeistMerk.set(pid, { n, at: jetzt })
+      mt5PlanPoll.wasOpen.add(pid)
+      baselinePatch(pid, { geist_pruefung: { n, at: new Date(jetzt).toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null,
+        grund: String(((route && route.inst && route.inst.status) || {}).note || 'kein frischer Stand').slice(0, 80) } }, 'open').catch(() => {})
+      console.info(`[echo-geist] ${pid.slice(0, 8)}: Stand nicht frisch, letzter Stand flach — frische Lesung ${n}/${ECHO_GEIST_MAX}`)
+      mt5KontoBalanceJetzt(plan.masterAccountId, route && route.masterLogin, {}).catch(e => console.warn('[echo-geist] Lesung', (e && e.message) || e))
+    }catch(e){ console.warn('[echo-geist]', (e && e.message) || e) }
+  }
+  // Remote-Close meldete „nicht (mehr) offen" (Puls las das Master-Terminal mit Login-Guard): Beleg am Plan + Ende-Erkennung scharf + frische
+  // Lesung anstoßen. Beendet wird auch hier nur über zwei frische 0-Messungen — nie aus der Close-Antwort allein.
+  async function echoSchonZuNachfassen(plan, r, ticket){
+    try{
+      const pid = String(plan.id)
+      mt5PlanPoll.wasOpen.add(pid); mt5PlanPoll.streak.set(pid, 0)
+      await baselinePatch(pid, { schon_zu: { at: new Date().toISOString(), ticket: ticket || null, quelle: 'close', msg: String((r && r.msg) || '').slice(0, 160),
+        pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } }, 'open')
+      if(typeof mt5KontoBalanceJetzt === 'function') mt5KontoBalanceJetzt(plan.masterAccountId, null, {}).catch(() => {})
+    }catch(e){ console.warn('[echo-schon-zu]', (e && e.message) || e) }
+  }
 
   /* Plan SOFORT auf „Läuft" stellen, sobald der Order-Bot die Position lesend
    * bestätigt hat (18.08.2026, Finns Punkt: der Check kann mit SL/TP-Scan
@@ -24272,7 +24349,7 @@
         // Echo V2 auch aus der Lese-Instanz (Panel liest den Snapshot ohne Copier, 25.09.2026) — Echo mit Hedge
         // braucht weiter den laufenden Copier (alive)
         const fresh = (!!route.inst.alive || (istV2 && !!route.inst.lesen)) && !s.note
-        if(!fresh) continue
+        if(!fresh){ if(plan.status === 'open') echoGeistAnstossen(plan, route); continue }   // Geister-Pläne (30.10.2026): nur frisch lesen, nie beenden
         const posCount = (s.master_positions || []).length
 
         if(plan.status === 'planned'){
@@ -24339,6 +24416,8 @@
         // (v2PlanAufOpen) — schließt die Position vor dem ersten frischen Tick (schneller TP/SL), hätte
         // wasOpen sie nie gesehen und der Plan bliebe ewig „Läuft". Baseline = Beweis → Ende-Erkennung scharf.
         if(istV2 && plan.mt5Baseline && plan.mt5Baseline.master_balance != null) mt5PlanPoll.wasOpen.add(String(plan.id))
+        // Mit Hedge (30.10.2026, Geister-Pläne): nach dem Tab-Neuladen aus dem festen Beleg wieder scharf (echoEndeScharf)
+        else if(!istV2 && echoEndeScharf(plan)) mt5PlanPoll.wasOpen.add(String(plan.id))
         // TAGE SAMMELN · SOFORT ZU (12.10.2026, Finn: „den Trade, sobald er gestartet wurde, auch direkt eigenständig beenden"): der Mini-Trade
         // des Auto-Planers (mt5_baseline.tage_mini.sofort_zu) wird geschlossen, sobald dieser PC-Tab seine Position frisch sieht — derselbe
         // Weg wie „Schließen" auf der Karte (v2SchliessenAmPc); die Ende-Erkennung darunter läuft danach wie bei jedem Echo-V2-Trade
@@ -29058,6 +29137,63 @@
   const nieDaFillGemeldet = tv => !!(tv && (tv.einstieg_quelle === 'fill' || /fill/i.test(String(tv.einstieg_beleg || ''))))
   window._nieDa = { lesung: nieDaLesung, schritt: nieDaSchritt, bewiesen: nieDaBewiesen, fill: nieDaFillGemeldet }   // Test-Haken (rein rechnend)
   const _nieDaStand = new Map(), _nieDaFertig = new Set()
+  /* HEDGE VON HAND ZU, MASTER LAUT PROPHOS OFFEN (30.10.2026, Master aus der S1-Triage #8: Alarm „Hedge zu (hand), Master laut Prophos
+   * offen" 4× je Plan; Mike d607455a, Tradeify-WD, Fusion 19:53 UTC von Hand zu, Plan blieb open). Bisher beendete der Wächter nur bei
+   * TP/SL-Gründen (HEDGE_REVIEW_GRUENDE) und dem Reader-Nachzügler. Jetzt für jeden anderen Hedge-Schluss (hand, close, …; nie master_nie_da —
+   * eigener Weg) ≥ 60 s her, Orbit V2 (tvv2): Beweis wie bei „Master nie gefüllt" — Puls-Chrome-Reader, Stand ≤ 3 s, genau das Plan-Konto,
+   * KEINE Position der Plan-Wurzel, ≥ 6 Lesungen über ≥ 60 s ohne Lücke > 15 s. Bewiesen → Ende (final quelle 'reader_flach', today_pnl null
+   * → Puls-Endlesung) → Überprüfen/Abhak-Liste; kein Auto-Abhaken. Reader zeigt eine Position → einmal Marke master_da, Alarm bleibt.
+   * Reader auf anderem Konto/aus → keine Aussage, Plan bleibt offen (Alarm bleibt) — nie aus einem alten Stand. */
+  const HEDGE_HAND_AB_MS = 60000
+  function hedgeHandFlachFaellig(p, jetzt){
+    const h = p && p.mt5Baseline && p.mt5Baseline.hedge
+    if(!h || h.status !== 'geschlossen' || !p || p.status !== 'open' || p.route !== 'tvv2') return false
+    if(HEDGE_REVIEW_GRUENDE[h.grund] || HEDGE_REVIEW_SPAET[h.grund] || h.grund === 'master_nie_da') return false   // eigene Wege
+    if(p.mt5Baseline.final || (p.mt5Baseline.hand_flach && p.mt5Baseline.hand_flach.status === 'master_da')) return false
+    const zu = Date.parse(h.closed_at || '') || 0, st = Date.parse(p.startedAt || '') || 0
+    if(!st || zu < st) return false   // Hedge aus einem früheren Lauf (wiederverwendeter Plan) zählt nie (Gegenprüfung 30.10.2026)
+    return zu > 0 && (Number(jetzt) || Date.now()) - zu >= HEDGE_HAND_AB_MS
+  }
+  window._hedgeHandFlachFaellig = hedgeHandFlachFaellig   // Test-Haken (rein rechnend)
+  // REIN: flach nur, wenn weder NQ noch MNQ auf dem Plan-Konto steht (Gegenprüfung: eine falsch erkannte Wurzel darf eine Position nie verstecken)
+  function handFlachLesung(st, kontoPlan){
+    const a = nieDaLesung(st, kontoPlan, 'NQ'), b = nieDaLesung(st, kontoPlan, 'MNQ')
+    if(a === 'position' || b === 'position') return 'position'
+    return (a === 'flach' && b === 'flach') ? 'flach' : null
+  }
+  window._handFlachLesung = handFlachLesung
+  const _handFlachStand = new Map(), _handFlachFertig = new Set()
+  async function hedgeHandFlachPruefen(p){
+    const pid = String(p.id), h = p.mt5Baseline.hedge
+    if(_handFlachFertig.has(pid)) return
+    const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+    const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+    try{ if(typeof window._epLokalHolen === 'function') await window._epLokalHolen() }catch(_){}
+    const ep = window._epLokal, st = (ep && ep.stand) ? ep.stand : null
+    const stand = nieDaSchritt(_handFlachStand.get(pid), handFlachLesung(st, kontoPlan), Date.now())
+    if(stand) _handFlachStand.set(pid, stand)
+    if(stand && stand.position){
+      _handFlachFertig.add(pid)
+      try{ await baselinePatch(pid, { hand_flach: { status: 'master_da', at: new Date().toISOString() } }, 'open') }catch(_){}
+      if(typeof atToast === 'function') atToast(`⚠ ${p.masterName || 'Plan'}: Fusion-Hedge ist zu, die Master-Position steht laut Reader NOCH in TradingView — von Hand prüfen.`, 'end')
+      return
+    }
+    if(!nieDaBewiesen(stand)) return
+    if(h.pl == null && h.pl_offen) return   // Fusion-P&L zuerst (hedgePlNachholen), wie bei master_nie_da
+    if(!(await hedgeSperre(pid, 'waechter', 20))) return
+    _handFlachFertig.add(pid)
+    let frisch = p
+    try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
+    if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.final)) return
+    const hinweis = `Fusion-Hedge zu (${h.grund || '?'}), Master per Reader ${Math.round((stand.letzte - stand.erste) / 1000)} s / ${stand.n} Lesungen bewiesen flach`
+    let ok = false
+    try{ ok = await tvV2EndeSetzen(frisch, null, 'reader_flach', { grund: h.grund || null, art: 'hedge_zu_flach', hinweis,
+      hedge_pl: (h.pl != null && isFinite(Number(h.pl))) ? Number(h.pl) : null }) }catch(e){ console.warn('[handFlach] Ende', e) }
+    if(ok){
+      try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(_){}
+      if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: ${hinweis} → Überprüfen (Endlesung folgt)`, 'end')
+    } else _handFlachFertig.delete(pid)
+  }
   async function hedgeNieDaPruefen(p){
     const pid = String(p.id), h = p.mt5Baseline.hedge
     if(_nieDaFertig.has(pid)) return
@@ -31886,6 +32022,8 @@
         if(!amPc) continue
         // Hedge wegen Master-TP/-SL zu, Plan läuft noch → Plan auf Überprüfen (25.09.2026, auch nachträglich, z. B. Plan 24b7c138)
         if(h.status === 'geschlossen' && p.status === 'open' && (HEDGE_REVIEW_GRUENDE[h.grund] || hedgeReviewSpaetFaellig(h, Date.now()))){ if(await hedgePlanAufReview(p)) continue }   // + Nachzügler nach Reader-Ende (08.10.2026)
+        // Hedge von Hand/anders zu, Master laut Prophos offen (30.10.2026): nur mit Reader-Flach-Beweis → Überprüfen, sonst bleibt der Alarm
+        if(hedgeHandFlachFaellig(p, Date.now())){ try{ await hedgeHandFlachPruefen(p) }catch(e){ console.warn('[handFlach]', e) } }
         // Ring meldete zu ohne P&L (Historie hinkte) → per Close-Aufruf mit Ticket nachfragen (schon_zu + pl)
         if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id))){ await hedgePlNachholen(p); continue }
         // Master nie gefüllt → Beweis sammeln, dann Start-Fehler + neu einplanen bzw. Überprüfen (08.10.2026, Finn) — nach dem P&L-Nachholen
@@ -54724,9 +54862,11 @@
               headers:{'Content-Type':'application/json'},
               body: JSON.stringify({ ticket: t.ticket, symbol: pcp.symbol || '' }) })
             _osErgebnis(sig.id, (r && typeof r === 'object')
-              ? { ok: !!r.ok, retry_ok: !!r.retry_ok, profit: (r.profit ?? null), trail: r.trail || null,
+              ? { ok: !!r.ok, retry_ok: !!r.retry_ok, profit: (r.profit ?? null), trail: r.trail || null, schon_zu: r.schon_zu === true || undefined,
                   msg: String(r.msg || (r.ok ? 'Position geschlossen.' : 'Close fehlgeschlagen.')) }
               : { ok:false, unklar:true, msg:'keine Antwort vom Close-Bot' })
+            // „nicht (mehr) offen" (30.10.2026, Julian 688a4554: Antwort kam, Plan blieb 1 T 5 h open) → Beleg + frische Lesung, Ende über 2 frische Messungen
+            if(r && r.ok && r.schon_zu === true) echoSchonZuNachfassen(plan, r, t.ticket)
           }catch(e){
             _osErgebnis(sig.id, { ok:false, unklar:true,
               msg:'Close-Aufruf gestört: ' + String(e && e.message || e) + ' — im Terminal prüfen, ob die Position noch offen ist.' })
