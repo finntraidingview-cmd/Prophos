@@ -4657,8 +4657,10 @@
   #dashboard-view .wdl-tab-konto .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi konto pl zeit" "sw sw sw sw sw sw"}
   #dashboard-view .wdl-tab-konto .wdl-z-man.wdl-z-sw-da{grid-template-areas:"wer mi mi konto pl zeit" "sw sw sw sw sw sw"}
   #dashboard-view .wdl-tab-bst .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi konto datum pl zeit" "sw sw sw sw sw sw sw"}
-  #dashboard-view .wdl-z-sw{grid-area:sw;display:block;font-size:11px;font-weight:500;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;line-height:1.35}
-  #dashboard-view .wdl-z-sw b{font-weight:700;color:var(--ink-2)}
+  #dashboard-view .wdl-z-sw{grid-area:sw;display:flex;align-items:center;gap:14px;font-size:11px;font-weight:500;color:var(--sub);white-space:nowrap;overflow:hidden;font-variant-numeric:tabular-nums;line-height:1.35}
+  /* kompakt (29.10.2026): Chip „Weg · Dauer" mit fester Breite → die Overshoot-Spalte fluchtet über alle Zeilen */
+  #dashboard-view .wdl-z-sw b{font-weight:700;color:var(--ink-2);flex:0 0 170px;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .wdl-z-sw .wdl-sw-over{overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .wdl-z-sw b::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--sw-f,var(--sub));margin-right:5px;vertical-align:1px}
   #dashboard-view .wdl-z-sw .wdl-sw-userscript{--sw-f:#2563eb}
   #dashboard-view .wdl-z-sw .wdl-sw-notfall{--sw-f:#ea580c}
@@ -4671,7 +4673,8 @@
   @media (max-width:820px){
     #dashboard-view .wdl-z.wdl-z-sw-da, #dashboard-view .wdl-tab-konto .wdl-z.wdl-z-sw-da, #dashboard-view .wdl-tab-konto .wdl-z-man.wdl-z-sw-da{grid-template-areas:"wer wer wer pl" "ri mi mi zeit" "sw sw sw sw"}
     #dashboard-view .wdl-tab-bst .wdl-z.wdl-z-sw-da{grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit" "sw sw sw sw"}
-    #dashboard-view .wdl-z > .wdl-z-sw{white-space:normal;overflow:visible;line-height:1.4}   /* schlägt „.wdl-z > span → nowrap" (1,1,1) */
+    #dashboard-view .wdl-z > .wdl-z-sw{white-space:normal;overflow:visible;line-height:1.4;flex-wrap:wrap;gap:2px 12px}   /* schlägt „.wdl-z > span → nowrap" (1,1,1) */
+    #dashboard-view .wdl-z-sw b{flex-basis:auto}
   }
   /* „Ansehen" unter der Laufzeit (02.10.2026) */
   #dashboard-view .wdl-ansehen{display:block;margin:3px 0 0 auto;padding:1px 8px;font:inherit;font-size:11px;font-weight:500;color:var(--violet);background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer}
@@ -34880,6 +34883,7 @@
     return { weg, wegTxt: SW_WEG_TXT[weg], grund: g, seite, level, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
       masterTp: n(h.tp_level_nq), masterSl: n(h.sl_level_nq), liq: h.sl_art === 'liquidation',
       overPkt, overEur, overPct, offenMs: ms(h.opened_at || h.at, h.closed_at), verzugMs: h.close_at ? ms(h.close_at, h.closed_at) : null,
+      bisZuMs: h.master_weg_at ? ms(h.master_weg_at, h.closed_at) : null,   // Erkennungs-Stempel (29.10.2026), sonst ab Schließbefehl
       schonZu: !!h.schon_zu, zuAt: h.closed_at || null, lang: typeof hedgeGrundText === 'function' ? hedgeGrundText(g, h) : g }
   }
   // Dauer kurz: „47 s" · „9 min" · „2 h 15 min"
@@ -34888,7 +34892,17 @@
     const s = Math.round(ms / 1000); if(s < 90) return `${s} s`
     const m = Math.round(s / 60), h = Math.floor(m / 60); return m < 60 ? `${m} min` : `${h} h${m % 60 ? ` ${m % 60} min` : ''}`
   }
+  // „bis zu" kurz (Finn 29.10.2026 09:50: „unter 1 s in Millisekunden, sonst Sekunden mit einer Nachkommastelle, über 60 s ‚2 min 10 s'")
+  function swBisZuTxt(ms){
+    if(ms == null || !isFinite(ms)) return '–'
+    if(ms < 1000) return `${Math.round(ms)} ms`
+    const zehntel = Math.round(ms / 100) / 10   // 59.999 ms → 60,0 → schon „1 min"
+    if(zehntel < 60) return `${zehntel.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`
+    const sek = Math.round(ms / 1000), m = Math.floor(sek / 60), r = sek % 60
+    return `${m} min${r ? ` ${r} s` : ''}`
+  }
   window._swAuswertung = swAuswertung   // Test-Haken
+  window._swBisZuTxt = swBisZuTxt
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
     wdl.renderAt = Date.now()
@@ -34942,17 +34956,30 @@
     // (Grid-Area sw, CSS .wdl-z-sw) statt der Mini-Pille in der P&L-Zelle: Weg mit Farbpunkt · Master-TP und -SL/Liq (NQ) · Fusion-Level →
     // echter Schluss (CFD) · Overshoot in Punkten, % und € · Hedge offen · Verzug Schließbefehl → bestätigt. Rechnung in swAuswertung (REIN),
     // der lange Grund-Text (hedgeGrundText) und die Rechenregel stehen im Tooltip. Die Zeile bekommt dazu die Klasse wdl-z-sw-da (Raster).
+    // KOMPAKT seit 29.10.2026 (Finn 09:45 am Screenshot: „nur den Overshoot oder Undershoot plus über welchen Weg geschlossen wurde. Die
+    // ganzen extra Texte brauchst du nicht … in der nächsten Spalte, wie viele Sekunden es bis zum Schließen gedauert hat"): Chip „Weg ·
+    // Dauer" (feste Breite, fluchtet über alle Zeilen) + „Overshoot +0,3 Pkt · +0,64 €" bzw. „Undershoot −0,4 Pkt · −1,03 €". Dauer = hedge.close_at
+    // (Prophos erkennt das Master-Ende/Level und schickt den Schließbefehl) → hedge.closed_at (Copier meldet Fusion zu) — echte Zeitstempel,
+    // keine Schätzung; den Master-Exit-Fill selbst speichert Prophos nicht (Befund 29.10.). TP/Liq/Fusion-Level/Schluss/„im Terminal gefüllt"/
+    // offen stehen nur noch im Tooltip. Rechnung unverändert in swAuswertung.
     const zuWegZ = t => {
       const s = swAuswertung(t); if(!s) return ''
-      const f1 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }), vz = v => v < 0 ? '−' : '+'
-      const over = s.overPkt == null ? 'Overshoot –'
-        : `<span class="${s.overPkt > 0.05 ? 'is-teuer' : s.overPkt < -0.05 ? 'is-guenstig' : ''}">Overshoot ${vz(s.overPkt)}${f1(Math.abs(s.overPkt))} Pkt${s.overPct != null ? ` · ${vz(s.overPct)}${f1(Math.abs(s.overPct))} %` : ''}${s.overEur != null ? ` (${sig(s.overEur, '€', 2)})` : ''}</span>`
-      const levelTxt = s.level != null ? `Fusion-${s.seite === 'sl' ? 'TP' : 'SL'} ${f2(s.level)} → Schluss <i>${f2(s.zu)}</i>` : `Schluss <i>${f2(s.zu)}</i>`
-      const zeiten = `offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : s.verzugMs != null ? ` · bestätigt nach ${swDauerTxt(s.verzugMs)}` : ''}`
-      const tip = `${s.lang} (grund ${s.grund})${s.seite ? ` · Level-Seite: ${s.seite === 'tp' ? 'Master-TP = Fusion-SL' : (s.liq ? 'Master-Liq' : 'Master-SL') + ' = Fusion-TP'}` : ''}`
-        + ` · Overshoot = Schluss hinter dem Fusion-Level in Punkten, € = Punkte × Lots × Punktwert, % vom geplanten Hedge-Einsatz${s.eur != null ? ` (${f2(s.eur)} €)` : ''} — positiv = teurer als geplant`
-        + ` · offen = Fusion-Fill → geschlossen${s.schonZu ? ' · das Terminal hatte den Level schon gefüllt, als der Tab schließen wollte' : s.verzugMs != null ? ' · bestätigt = Schließbefehl des Tabs → Copier meldet zu' : ''}`
-      return `<span class="wdl-z-sw" title="${escapeHtml(tip)}"><b class="wdl-sw-${s.weg}">${escapeHtml(s.wegTxt)}</b> · TP <i>${f2(s.masterTp)}</i>${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} <i>${f2(s.masterSl)}</i>` : ' · ohne SL'} · ${levelTxt} · ${over} · ${zeiten}</span>`
+      const f1 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      const bisZu = s.bisZuMs != null ? s.bisZuMs : s.verzugMs
+      let over = ''
+      if(s.overPkt != null){
+        const eps = Math.abs(s.overPkt) < 0.05, plus = s.overPkt > 0
+        const wort = eps ? 'Overshoot' : plus ? 'Overshoot' : 'Undershoot', vz = eps ? '±' : plus ? '+' : '−'
+        over = `<span class="wdl-sw-over${eps ? '' : plus ? ' is-teuer' : ' is-guenstig'}">${wort} ${vz}${f1(Math.abs(s.overPkt))} Pkt`
+          + (s.overEur != null ? ` · ${eps ? '±' : s.overEur < 0 ? '−' : '+'}${Math.abs(s.overEur).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '') + `</span>`
+      }
+      const levelTxt = s.level != null ? `Fusion-${s.seite === 'sl' ? 'TP' : 'SL'} ${f2(s.level)} → Schluss ${f2(s.zu)}` : `Schluss ${f2(s.zu)}`
+      const tip = `${s.lang} (grund ${s.grund})`
+        + ` · bis zu ${swBisZuTxt(bisZu)} = ${s.bisZuMs != null ? 'Master-Ende erkannt' : 'ab Schließbefehl'} → Fusion zu (Copier bestätigt; der Master-Fill selbst wird nicht gemessen)`
+        + ` · Master-TP ${f2(s.masterTp)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${f2(s.masterSl)}` : ' · ohne SL'} · ${levelTxt}`
+        + (s.overPct != null ? ` · ${s.overPct < 0 ? '−' : '+'}${f1(Math.abs(s.overPct))} % vom geplanten Hedge-Einsatz${s.eur != null ? ` (${f2(s.eur)} €)` : ''}` : '')
+        + ` · Overshoot = Schluss hinter dem Fusion-Level (teurer als geplant), Undershoot = davor · offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : ''}`
+      return `<span class="wdl-z-sw" title="${escapeHtml(tip)}"><b class="wdl-sw-${s.weg}">${escapeHtml(s.wegTxt)} · ${escapeHtml(swBisZuTxt(bisZu))}</b>${over}</span>`
     }
     // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
     const fusionLiveZ = t => {
@@ -49956,7 +49983,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1847'
+  const OS_TAB_BUILD = '2026-09-22.1848'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
