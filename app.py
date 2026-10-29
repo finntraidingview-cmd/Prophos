@@ -25797,6 +25797,107 @@ def eh_tick(jetzt=None, force=False):
         erg["umgestellt"] += 1
         _eh["umgestellt"] += 1
         _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Echo mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']})")
+        ab = ehv_abweichung(base.get("hedge_vorschau"), h["lots"])   # ECHO-VORSCHAU (30.10.2026): > 5 % anders als die Vorschau → Spur
+        if ab:
+            _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Umstellung weicht von der Vorschau ab — {ab}")
+    return erg
+
+
+# ══ ECHO-HEDGE-VORSCHAU (30.10.2026, Finn 02:12 am Planer → Challenge → Zu bestätigen: „hier auch immer der Fusion-SL und Fusion-TP …
+# wie viel ich beim Take Profit auf Fusion verliere bzw. beim Stop Loss auf Fusion mache, und die Lot-Zahl von Fusion, damit ich gucken kann,
+# ob der Multiplikator grob hinkommt"). eh_tick rechnet erst ~20 min vor dem Start; ehv_tick schreibt für ALLE geplanten HT-CFD-Auto-Pläne auf
+# Echo V2 (auch unbestätigte und spätere) mt5_baseline.hedge_vorschau {lots, multiplier, q, blow_eur, pass_eur, at} bzw. {grund, at} — dieselbe
+# Rechnung wie das Umstellen (eh_hedge, Kontowert-Satz, netto_faktor aus regeln.echo_hedge), nur ohne Umstellen und ohne Marge/Lesung
+# (die prüft erst eh_tick). blow_eur = Hedge-Gewinn am Master-SL (slave_risk = q × master_risk $), pass_eur = Hedge-Verlust am Master-TP
+# (−q × master_tp $). Neu geschrieben nur bei anderem Grund oder > 1 % Abweichung (tfh_vorschau_neu). KEIN hedge_art (Echo braucht keine
+# Extra-Freigabe). Eigener Takt neben eh_tick, Guard wie eh_tick (_eh_guard: planned, ungeclaimt, keine Hand-Werte, updated_at).
+EHV_TAKT_S = 120
+_ehv = {"at": 0.0, "fehler": "", "geschrieben": 0}
+
+
+def ehv_vorschau(h, grund, master_tp, jetzt_iso):
+    """REIN RECHNEND (testbar): Vorschau aus eh_hedge-Ergebnis → {lots, multiplier, q, blow_eur, pass_eur, at} | {grund, at}."""
+    if grund or not h:
+        return {"grund": str(grund or "nicht rechenbar"), "at": jetzt_iso}
+    tp = _wd_num(master_tp)
+    return {"lots": h["lots"], "multiplier": h["multiplier"], "q": h["q"], "blow_eur": h.get("slave_risk"),
+            "pass_eur": (round(-tp * h["q"], 2) if tp and tp > 0 else None), "at": jetzt_iso}
+
+
+def ehv_abweichung(vs, lots):
+    """REIN RECHNEND (testbar): weicht die echte Umstellung (lots) um > 5 % von der Vorschau ab? → Text | None."""
+    alt = _wd_num((vs or {}).get("lots")) if isinstance(vs, dict) else None
+    neu = _wd_num(lots)
+    if alt is None or neu is None or alt <= 0:
+        return None
+    d = (neu - alt) / alt
+    return None if abs(d) <= 0.05 else f"Vorschau {alt:.2f} Lot, umgestellt {neu:.2f} Lot ({d * 100:+.0f} %)".replace(".", ",")
+
+
+def ehv_tick(jetzt=None, force=False):
+    """Alle EHV_TAKT_S (ap_loop): Vorschau für alle geplanten HT-CFD-Auto-Pläne auf Echo V2. Schalter echo_hedge aus → nichts.
+    → {geschrieben} oder None (Takt nicht fällig)."""
+    if not force and time.time() - _ehv["at"] < EHV_TAKT_S:
+        return None
+    _ehv["at"] = time.time()
+    jetzt = jetzt or datetime.now(timezone.utc)
+    regeln = _eh_regeln()
+    par = eh_param(regeln)
+    if not par["an"]:
+        return {"geschrieben": 0}
+    roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_contracts,master_risk,master_tp,start_um,mt5_baseline,updated_at",
+                                  "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
+                                  "hand_werte_at": "is.null", "start_um": f"gte.{(jetzt - timedelta(hours=12)).isoformat()}", "order": "start_um.asc"})
+    _namen, aus = _ap_namen()
+    verwaltet = gp_verwalter_karte()
+    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    plaene = [p for p in roh if str(p.get("user_id")) not in aus]
+    erg = {"geschrieben": 0}
+    if not plaene:
+        return erg
+    firmen = regeln.get("firmen") or []
+    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(
+        sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
+    in_uids = "in.(" + ",".join(sorted({str(p["user_id"]) for p in plaene})) + ")"
+    hedge = {str(r["user_id"]) for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})
+             if isinstance(r.get("value"), dict) and r["value"].get("accountId")}
+    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                  norm=lambda n: _ap_norm(_firm_norm(n)))
+    ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
+    echo_bal, dup_bal = _ap_balance_karten()
+    kauf = _ap_kauf_echt(sorted(konten)) if konten else {}
+    for p in plaene:
+        a = konten.get(str(p.get("master_account_id")))
+        if not a or (a.get("account_type") or "") not in EH_TYPEN:
+            continue
+        regel = ap_regel_finden(firmen, a.get("firm"))
+        if not regel or str(regel.get("route") or "mt5v2") != "mt5v2":
+            continue
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        if base.get("tage_mini"):
+            continue                                       # Mini-Trade (sofort zu) bekommt nie einen Hedge
+        uid = str(p["user_id"])
+        h, grund = None, None
+        if uid not in hedge:
+            grund = "kein Echo-Hedge-Konto (Fusion) bei dieser ID"
+        else:
+            bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+            if bal is None:
+                grund = "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)"
+            else:
+                kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+                sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+                h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
+                                    par["netto_faktor"], par["min_lot"])
+        vs = ehv_vorschau(h, grund, p.get("master_tp"), _wt_now_iso())
+        if not tfh_vorschau_neu(base.get("hedge_vorschau"), vs):
+            continue
+        try:
+            if sb_update("trade_plans", _eh_guard(p), {"mt5_baseline": dict(base, hedge_vorschau=vs)}):
+                erg["geschrieben"] += 1
+        except Exception as e:
+            _eh_spur(f"⚠️ {str(p['id'])[:8]} Vorschau nicht gespeichert: {type(e).__name__}: {str(e)[:160]}")
+    _ehv["geschrieben"] += erg["geschrieben"]
     return erg
 
 
@@ -26126,8 +26227,10 @@ def ap_ids_hedge_felder(p):
     """REIN (EIN BESTÄTIGEN JE TRADE, Finn 30.10.2026): Hedge-Felder einer Zeile von /admin/auto-plan/ids — hedge_art nur 'apex' |
     'tradeify_final' (sonst null), hedge_vorschau nur als Objekt, hedge_frei = Freigabe schon gesetzt. Gelesen aus den Aliassen hart/hvs."""
     art = p.get("hart") if p.get("hart") in HEDGE_ARTEN else None
-    return {"hedge_art": art, "hedge_vorschau": (p.get("hvs") if isinstance(p.get("hvs"), dict) else None) if art else None,
-            "hedge_frei": bool(p.get("hedge_freigabe_at"))}
+    # ECHO-VORSCHAU (30.10.2026): Echo-Pläne (mt5v2/mt5) zeigen ihre Vorschau ebenfalls — hedge_weg 'echo', hedge_art bleibt leer (keine Freigabe)
+    echo = not art and str(p.get("route") or "") in ("mt5v2", "mt5") and isinstance(p.get("hvs"), dict)
+    return {"hedge_art": art, "hedge_vorschau": (p.get("hvs") if isinstance(p.get("hvs"), dict) else None) if (art or echo) else None,
+            "hedge_frei": bool(p.get("hedge_freigabe_at")), "hedge_weg": "echo" if echo else None}
 
 
 def ap_hedge_freigabe_ids(zeilen):
@@ -33579,6 +33682,12 @@ def ap_loop():
         except Exception as e:
             _eh["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[echo-hedge] ⚠️ {_eh['fehler']}", flush=True)
+        try:
+            if ehv_tick() is not None:        # ECHO-HEDGE-VORSCHAU (30.10.2026): Lots/€ für alle geplanten Echo-V2-Vorschläge — eigener try
+                _ehv["fehler"] = ""
+        except Exception as e:
+            _ehv["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[echo-vorschau] ⚠️ {_ehv['fehler']}", flush=True)
         try:
             if tfh_tick() is not None:        # FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026): kurz vor dem Start Orbit V3 — eigener try
                 _tfh["fehler"] = ""

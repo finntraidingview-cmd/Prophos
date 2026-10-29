@@ -26,11 +26,14 @@ def main():
     ok = lambda b, t: f.append(t) if not b else None   # noqa: E731
     hf, ids = ns["ap_ids_hedge_felder"], ns["ap_hedge_freigabe_ids"]
     vs = {"lots": 5.6, "hedge_eur": 535, "pass_eur": -250}
-    ok(hf({"hart": "apex", "hvs": vs}) == {"hedge_art": "apex", "hedge_vorschau": vs, "hedge_frei": False}, "Apex mit Vorschau")
+    ok(hf({"hart": "apex", "hvs": vs}) == {"hedge_art": "apex", "hedge_vorschau": vs, "hedge_frei": False, "hedge_weg": None}, "Apex mit Vorschau")
     ok(hf({"hart": "tradeify_final", "hvs": "kaputt", "hedge_freigabe_at": "2026-10-30T01:00:00Z"})
-       == {"hedge_art": "tradeify_final", "hedge_vorschau": None, "hedge_frei": True}, "Tradeify ohne Objekt, schon frei")
-    ok(hf({"hart": "echo", "hvs": vs}) == {"hedge_art": None, "hedge_vorschau": None, "hedge_frei": False}, "fremde Art → kein Hedge")
-    ok(hf({}) == {"hedge_art": None, "hedge_vorschau": None, "hedge_frei": False}, "normaler Plan")
+       == {"hedge_art": "tradeify_final", "hedge_vorschau": None, "hedge_frei": True, "hedge_weg": None}, "Tradeify ohne Objekt, schon frei")
+    ok(hf({"hart": "echo", "hvs": vs}) == {"hedge_art": None, "hedge_vorschau": None, "hedge_frei": False, "hedge_weg": None}, "fremde Art → kein Hedge")
+    ok(hf({"route": "mt5v2", "hvs": vs}) == {"hedge_art": None, "hedge_vorschau": vs, "hedge_frei": False, "hedge_weg": "echo"}, "Echo V2 mit Vorschau → Chip, ohne hedge_art")
+    ok(hf({"route": "mt5", "hvs": {"grund": "x"}})["hedge_weg"] == "echo" and hf({"route": "tvv2", "hvs": vs})["hedge_weg"] is None, "Echo mit Hedge ja, Orbit ohne Art nein")
+    ok(hf({"route": "mt5v2"})["hedge_vorschau"] is None and hf({"route": "mt5v2"})["hedge_weg"] is None, "Echo ohne Vorschau → nichts")
+    ok(hf({}) == {"hedge_art": None, "hedge_vorschau": None, "hedge_frei": False, "hedge_weg": None}, "normaler Plan")
     z = [{"id": "a", "mt5_baseline": {"hedge_art": "apex"}},
          {"id": "b", "mt5_baseline": {"hedge_art": "tradeify_final"}, "hedge_freigabe_at": "x"},
          {"id": "c", "mt5_baseline": None},

@@ -51994,7 +51994,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1908'
+  const OS_TAB_BUILD = '2026-09-22.1909'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58594,6 +58594,7 @@
   /* Hedge-Spalten in derselben Zeile von „Zu bestätigen" / „Wartet auf Start" (EIN BESTÄTIGEN, 30.10.2026): z aus /admin/auto-plan/ids
    * {hedge_art, hedge_vorschau, hedge_frei}. Lots · Blow € / Pass € — oder der Grund, warum kein Hedge rechenbar ist. Normale Pläne: ''. */
   function ahfHedgeKurz(z, art){
+    if(z && z.hedge_weg === 'echo') return ahfEchoKurz(z)   // ECHO-VORSCHAU (30.10.2026): eigener Chip, keine Freigabe
     if(!z || !AHF_ART[z.hedge_art]) return ''
     const vs = (z.hedge_vorschau && typeof z.hedge_vorschau === 'object') ? z.hedge_vorschau : {}, name = AHF_ART[z.hedge_art]
     const hinweis = vs.grund || vs.fehler ? String(vs.grund || vs.fehler) + (vs.code ? ` (${vs.code})` : '') : ''
@@ -58604,6 +58605,23 @@
       ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot · <span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>`
       : hinweis ? `<span style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</span>` : 'wird gerechnet'
     return `<span class="tc2-chip ahf-kurz" title="${escapeHtml(name[0] + ' — ' + (hinweis ? 'Hedge nicht rechenbar: ' + hinweis + ' — ' : '') + tip)}">⇄ ${inner}${frei}</span>`
+  }
+  /* ECHO-HEDGE-VORSCHAU (30.10.2026, Finn 02:12: „Fusion-SL und Fusion-TP … wie viel ich beim Take Profit auf Fusion verliere bzw. beim Stop Loss
+   * auf Fusion mache, und die Lot-Zahl von Fusion, damit ich gucken kann, ob der Multiplikator grob hinkommt"): Railway (ehv_tick) rechnet für
+   * jeden Echo-V2-Vorschlag dasselbe wie beim Umstellen kurz vor dem Start — „⇄ 1,6 Lot · SL +185 € / TP −240 € · ×0,08" bzw. „⇄ ⚠ Grund". */
+  function ahfEchoKurz(z){
+    const vs = (z.hedge_vorschau && typeof z.hedge_vorschau === 'object') ? z.hedge_vorschau : {}
+    const zahl = (v, d) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: d })
+    if(vs.lots == null){
+      const g = String(vs.grund || '')
+      return g ? `<span class="tc2-chip ahf-kurz" title="${escapeHtml('Echo-Hedge (Fusion) nicht rechenbar: ' + g)}">⇄ <span style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(g.slice(0, 48))}</span></span>` : ''
+    }
+    const ml = Number(z.menge), mult = vs.multiplier != null ? Number(vs.multiplier) : (ml > 0 ? Number(vs.lots) / ml : null)
+    const tip = `Echo mit Fusion-Gegenhedge (Vorschau, ${vs.at ? 'gerechnet ' + new Date(vs.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }) + ' Dubai' : 'Railway'})`
+      + ` — ${zahl(vs.lots, 2)} Lot Fusion${ml > 0 ? ` auf ${zahl(ml, 2)} Lot Master` : ''}${vs.q ? ` · q ${vs.q} €/$ (Kontowert ÷ Polster)` : ''}`
+      + ` · SL: Master am Stop Loss → Fusion +€ · TP: Master am Take Profit → Fusion −€. Umgestellt wird erst ~20 min vor dem Start (dann mit Marge/Lesung).`
+    return `<span class="tc2-chip ahf-kurz" title="${escapeHtml(tip)}">⇄ ${zahl(vs.lots, 2)} Lot · SL <span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span>`
+      + ` / TP <span style="color:var(--danger-ink)">${ahfEur(vs.pass_eur)}</span>${mult != null && isFinite(mult) ? ` · <small>×${zahl(mult, mult < 0.1 ? 3 : 2)}</small>` : ''}</span>`
   }
   window._ahfHedgeKurz = ahfHedgeKurz
   function ahfRender(){
