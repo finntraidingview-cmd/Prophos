@@ -8,6 +8,13 @@
 --   • wd_farmer_regeln (Automatik, Zeitfenster, Firmen-Regeln, ids_aus, SCHARF): schreiben nur HT.
 -- Lesen bleibt offen (Markt/PC-Tabs lesen den Tagesplan aller IDs, gefiltert wird in der Anzeige). Railway schreibt mit dem Service-Key
 -- (an RLS vorbei) und prüft selbst (/admin/wd-plaene). Einspielen: Master.
+-- PC-TABS BLEIBEN DRIN (Master 30.10.2026, geprüft): wdRegistrieren (Insert mit eigener user_id), wdTick → wdAbgleich (nur Zeilen
+-- eq user_id = eigener Login), tpWdTagesplanStartSetzen/-Austragen (dito) — die eigene ID liegt für JEDE Rolle in admin_sichtbare_ids()
+-- (union auth.uid()): HT-Kunde (nicht eingeschränkt), Verwalter Emin, Mitglieder (Ahmad & Co.), „nur eigene"-Code. Die Automatik um 00:10
+-- (wdWuerfelnSchreiben) rechnet deterministisch und schreibt „wer zuerst schreibt" — einem Mitglied-Tab verweigert RLS fremde Zeilen
+-- still (0 Zeilen, kein Fehler), die schreiben HT-Tabs/Mac. Kein PC-Tab ruft wd_konto_setzen oder schreibt wd_farmer_regeln; Puls
+-- (order_bot.py) liest Regeln nur über Railway, support_app.py schreibt mit Service-Key. Keine DB-Funktion/kein Trigger fasst die Tabellen an.
+-- Stand live 30.10.: 17 IDs im Tagesplan (3 Tage), davon 5 in der Verwalter-Gruppe, 1 mit „nur eigene"-Code.
 
 -- 1) RPC wd_konto_setzen: Besitz prüfen
 create or replace function public.wd_konto_setzen(p_account uuid, p_wd_farm boolean default null, p_tp numeric default null, p_sl numeric default null)

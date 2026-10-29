@@ -155,6 +155,26 @@ def main():
           "SQL wd_farmer_regeln: schreiben nur HT")
     check(not re.search(r"\b(delete from|truncate|alter table)\b", s, re.I), "SQL ohne Datenänderung (nur Funktion + Policies)")
 
+    # (4) PC-TAB-SCHREIBWEGE (Master 30.10.2026: „ein Riegel, der einen PC-Tab aussperrt, wäre schlimmer als die Lücke"): jeder Weg, den ein
+    # PC-Tab ohne Admin-Reiter geht, schreibt nur die EIGENE Zeile — die liegt für jede Rolle in admin_sichtbare_ids() (union auth.uid()),
+    # HT-Kunden sind gar nicht eingeschränkt. wd_konto_setzen und wd_farmer_regeln ruft kein PC-Tab-Weg.
+    def fn(name, n):
+        j = HTML.index(name); return HTML[j:j + n]
+    reg = fn("  async function wdRegistrieren(tag){", 1200)
+    check("const row = { tag, user_id: user.id," in reg and "from('wd_tagesplan').insert(row)" in reg, "PC-Tab wdRegistrieren: Insert nur mit user_id = eigener Login")
+    tick = fn("  async function wdTick(){", 5200)
+    check(".from('wd_tagesplan').select('*').eq('user_id', uid)" in tick and "for(const row of (data || [])) await wdAbgleich(row)" in tick,
+          "PC-Tab wdTick → wdAbgleich nur über die eigenen Zeilen")
+    abg = HTML[HTML.index("  async function wdAbgleich(row){"):HTML.index("  async function wdTick(){")]
+    check(abg.count("from('wd_tagesplan')") == 1 and ".eq('user_id', row.user_id)" in abg, "wdAbgleich schreibt nur die übergebene (eigene) Zeile")
+    for name in ("  async function tpWdTagesplanStartSetzen(", "  async function tpWdTagesplanAustragen("):
+        check(".eq('user_id', currentUserId)" in fn(name, 700), f"Plan-Update {name.strip()[15:-1]}: liest/schreibt nur Zeilen des eigenen Logins")
+    w = fn("  async function wdWuerfelnSchreiben(", 3000)
+    check("await wdNurErlaubte(offen, true)" in w and "q.is('start_um', null)" in w,
+          "Automatik 00:10: deterministisch, „wer zuerst schreibt“ — ein Mitglied-Tab, dem RLS fremde Zeilen verweigert, schreibt die eigene, die anderen schreiben HT-Tabs/Mac")
+    pc_wege = [abg, reg, tick] + [fn(x, 1800) for x in ("  async function tpWdTagesplanStartSetzen(", "  async function tpWdTagesplanAustragen(")]
+    check(not any("wd_konto_setzen" in x or "wd_farmer_regeln')." in x for x in pc_wege), "PC-Tab-Wege rufen weder wd_konto_setzen noch schreiben sie wd_farmer_regeln")
+
     print(f"\n{'ALLES OK' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
     sys.exit(1 if FEHLER else 0)
 
