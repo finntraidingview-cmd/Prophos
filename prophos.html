@@ -3823,7 +3823,7 @@
   #ap-ids-root.ap-guestly .ap-id-karte{border:0;padding:0;margin:0 0 14px;background:transparent}
   #ap-ids-root.ap-guestly .ap-adm-grp{margin:4px 0 8px}
   #ap-ids-root.ap-guestly .plan-firma-kopf{margin:10px 2px 6px;font-size:12px;color:var(--g-sub);text-transform:uppercase;letter-spacing:.04em}
-  #ap-ids-root.ap-guestly .pz-tab.pz-radar{grid-template-columns:minmax(220px,1.6fr) 118px 92px minmax(170px,1.1fr) 84px 76px 76px minmax(150px,auto);border:0;background:transparent;row-gap:8px;overflow:visible}
+  #ap-ids-root.ap-guestly .pz-tab.pz-radar{grid-template-columns:minmax(260px,1.7fr) 118px 92px minmax(170px,1.1fr) 84px 76px 76px minmax(150px,auto);border:0;background:transparent;row-gap:8px;overflow:visible}
   #ap-ids-root.ap-guestly .pz-radar .pz-z-kopf{display:none}
   #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf){background:var(--g-kpi);border-radius:14px;min-height:56px;padding:12px 16px;border:0;color:var(--g-text)}
   #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(1){order:3;color:var(--g-sub);font-size:12.5px}
@@ -3835,10 +3835,11 @@
   #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(7){order:7}
   #ap-ids-root.ap-guestly .pz-radar .pz-z:not(.pz-z-kopf) > :nth-child(8){order:8}
   #ap-ids-root.ap-guestly .pz-radar:not(:has(.pz-fus)) .pz-z > :nth-child(5){display:none}
-  #ap-ids-root.ap-guestly .pz-radar:not(:has(.pz-fus)){grid-template-columns:minmax(220px,1.6fr) 118px 92px minmax(170px,1.1fr) 76px 76px minmax(150px,auto)}
+  #ap-ids-root.ap-guestly .pz-radar:not(:has(.pz-fus)){grid-template-columns:minmax(260px,1.7fr) 118px 92px minmax(170px,1.1fr) 76px 76px minmax(150px,auto)}
   #ap-ids-root.ap-guestly .pz-radar .pz-k1 b{font-size:14px}
   #ap-ids-root.ap-guestly .apg-weg{display:inline-flex;align-items:center;margin-left:8px;vertical-align:1px;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;background:var(--g-lila-bg);color:var(--g-lila);white-space:nowrap}
   #ap-ids-root.ap-guestly .apg-weg.hedge{background:var(--g-tuerkis-bg);color:var(--g-tuerkis)}
+  #ap-ids-root.ap-guestly .apg-weg.warn{background:rgba(245,158,11,.14);color:var(--warn-ink, #b45309)}
   #ap-ids-root.ap-guestly .pz-radar .pz-ok,#ap-ids-root.ap-guestly .pz-radar .tc2-btn{border-radius:10px}
   #ap-ids-root.ap-guestly .pz-radar .pz-ok:not(.is-ok){background:var(--g-knopf);color:var(--g-knopf-text);border:0;font-weight:600}
   #ap-ids-root.ap-guestly .wdl-z{background:var(--g-kpi);border-radius:14px;margin-bottom:8px;border:0}
@@ -51994,7 +51995,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1910'
+  const OS_TAB_BUILD = '2026-09-22.1911'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58610,6 +58611,7 @@
    * auf Fusion mache, und die Lot-Zahl von Fusion, damit ich gucken kann, ob der Multiplikator grob hinkommt"): Railway (ehv_tick) rechnet für
    * jeden Echo-V2-Vorschlag dasselbe wie beim Umstellen kurz vor dem Start — „⇄ 1,6 Lot · SL +185 € / TP −240 € · ×0,08" bzw. „⇄ ⚠ Grund". */
   function ahfEchoKurz(z){
+    try{ const v = apdDaten(); if(v && v.echo_hedge && v.echo_hedge.an === false) return '' }catch(_){}   // Echo-Hedge aus: alte Vorschau nicht zeigen
     const vs = (z.hedge_vorschau && typeof z.hedge_vorschau === 'object') ? z.hedge_vorschau : {}
     const zahl = (v, d) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: d })
     if(vs.lots == null){
@@ -79436,12 +79438,20 @@
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
     if(z && (z.hedge_art === 'apex')) return ['WD-Weg + Hedge', 'hedge']
     if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit V3 + Hedge', 'hedge']
+    // ECHO + HEDGE (30.10.2026, Finn: „Warum steht bei jedem Trade ‚Echo V2'? Wir machen jetzt Echo (mit Hedge)"): ein HT-CFD-Vorschlag auf Echo V2
+    // mit Vorschau (ehv_tick) wird bei Schalter echo_hedge an kurz vor dem Start auf Echo mit Hedge umgestellt → „Echo + Hedge"; „Echo V2" nur,
+    // wenn er ohne Hedge laufen wird (Schalter aus oder Vorschau mit Grund → „Echo V2 · ⚠ Grund")
+    if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){
+      const g = z.hedge_vorschau && z.hedge_vorschau.grund
+      // Grund steht ausgeschrieben im Hedge-Chip derselben Zeile — hier kurz, ganz im Tooltip
+      return g ? ['Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`] : ['Echo + Hedge', 'hedge', 'wird ~20 min vor dem Start auf Echo mit Fusion-Gegenhedge umgestellt'] }
     return r === 'tvv2' ? ['Orbit V2', ''] : r === 'mt5v2' ? ['Echo V2', ''] : r === 'mt5' ? ['Echo + Hedge', 'hedge'] : r === 'tsv2' ? ['Topstep V2', ''] : r ? [r, ''] : null }
+  const apgEchoHedgeAn = () => { try{ const v = apdDaten(); return !!(v && v.echo_hedge && v.echo_hedge.an === true) }catch(_){ return false } }
   function apgZeilenSchmuecken(root, x){
     const je = new Map([...(x.offenListe || []).map(z => [String(z.plan_id), z]), ...(x.wartenListe || []).map(e => [String(e.z && e.z.plan_id), e.z])])
     root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
       const z = je.get(String(r.dataset.planId)), w = apgWeg(z), ort = r.querySelector('.pz-k2') || r.querySelector('.pz-k1'); if(!w || !ort || ort.querySelector('.apg-weg')) return
-      const c = document.createElement('span'); c.className = 'apg-weg' + (w[1] ? ' ' + w[1] : ''); c.textContent = w[0]; ort.appendChild(c) })
+      const c = document.createElement('span'); c.className = 'apg-weg' + (w[1] ? ' ' + w[1] : ''); c.textContent = w[0]; if(w[2]) c.title = w[2]; ort.appendChild(c) })
   }
   /* FUNDED CFD (30.10.2026, Master: „dieselbe Hülle, leer mit ‚kommt'"): dieselben Bausteine wie Challenge/Funded Futures, ohne Daten und ohne
    * Abfragen; Knöpfe gesperrt. Einmal beim Laden des Moduls gezeichnet. */

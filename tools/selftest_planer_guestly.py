@@ -17,6 +17,9 @@ def main():
     ok("funded: _apIdsArtWert === 'funded'" in s and "vorschau ? 'Vorschau' : 'Zu bestätigen'" in s, "Funded: Vorschau statt Zu bestätigen")
     ok("let schalter = ''; if(!fd)" in s and "teile.push(Q ? (Q.aktiv ? 'Funded-Planer an'" in s, "Funded: Einstellungen = Funded-Regeln, keine Challenge-Schalter")
     ok("function apgZeilenSchmuecken(root, x)" in s and "apgZeilenSchmuecken(root, ow)" in s, "Weg-Chips in den Zeilen")
+    ok("if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){" in s and "['Echo + Hedge', 'hedge'," in s and "'Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`" in s,
+       "Echo-Vorschlag mit Vorschau + Schalter an → „Echo + Hedge“, mit Grund → „Echo V2 · ⚠ Grund“")
+    ok("if(v && v.echo_hedge && v.echo_hedge.an === false) return ''" in s, "Echo-Hedge aus → kein Vorschau-Chip")
     ok(".pz-radar:not(:has(.pz-fus)) .pz-z > :nth-child(5){display:none}" in s, "Spalte Schritt nur ohne Fusion-Hedge aus")
     # Tokens nur unter #ap-ids-root.ap-guestly, dunkel über den Sonnen-Schalter, Guestly-Farben
     for c in ("--g-a1:#5447ce", "--g-a2:#887cfc", "--g-a3:#4996ff", "--g-a4:#16c8c6"):
