@@ -14220,6 +14220,79 @@ def _tsx_blow_dialog_weg(s, st, trail, res):
     return st2, bd
 
 
+# SYMBOL-WECHSEL-DIALOG (29.10.2026, Marc Topstep 150k Plan e9cf8722, BUY 2 NQ): der Doppelklick auf die Risk-Zelle traf die Positionszeile —
+# TopstepX öffnet dann „Switch Chart Symbol" statt eines Eingabefelds. Runde 2 und 3 sahen den Dialog und fassten ihn als FREMDEN Dialog nie an,
+# also lief die Position ohne SL/TP (brackets_fehlen + 🔴 kamen, der Retry war wirkungslos). Diesen Dialog hat Puls selbst ausgelöst: er wird mit
+# Esc geschlossen (kein Knopf, kein Symbolwechsel), steht er danach noch, höchstens mit dem eindeutigen Schließ-X/„Close" (nie „OK", „Switch",
+# „Confirm", „Cancel"). Nur, wenn er der EINZIGE offene Dialog ist — jeder andere Dialog bleibt unangetastet.
+TSX_RX_SYMBOL_DIALOG = re.compile(r"switch\s+chart\s+symbol", re.I)
+TSX_RX_SYMBOL_DIALOG_ZU = re.compile(r"^\s*(close|dismiss|schlie(?:ß|ss)en|[×✕✖])\s*$", re.I)
+
+
+def tsx_symbol_dialog(popups):
+    """REIN RECHNEND (testbar): stand.popups → der EINE offene Dialog „Switch Chart Symbol" | None (mehrere Dialoge oder ein anderer → None)."""
+    ps = [p for p in (popups or []) if isinstance(p, dict)]
+    if len(ps) != 1:
+        return None
+    t = " ".join(str(ps[0].get(k) or "") for k in ("titel", "text"))
+    return ps[0] if TSX_RX_SYMBOL_DIALOG.search(t) else None
+
+
+def tsx_symbol_dialog_knopf(popup):
+    """REIN RECHNEND (testbar): Schließ-Knopf des Symbol-Dialogs NACH erfolglosem Esc — wie tsx_blow_dialog_knopf, aber nur „Close"/„Dismiss"/×
+    oder das Symbol-X; „OK"/„Continue" (könnten den Wechsel bestätigen) zählen hier nie. -> knopf | None"""
+    p = popup if isinstance(popup, dict) else {}
+    # OK/Continue … vorher raus — sonst gewänne ein „OK" (Wechsel bestätigen) vor dem Symbol-X
+    ohne = [b for b in (p.get("knoepfe") or []) if isinstance(b, dict) and not (
+        TSX_RX_DIALOG_ZU.match(str(b.get("text") or "").strip() or str(b.get("aria") or "").strip())
+        and not TSX_RX_SYMBOL_DIALOG_ZU.match(str(b.get("text") or "").strip() or str(b.get("aria") or "").strip()))]
+    kn = tsx_blow_dialog_knopf(dict(p, knoepfe=ohne))
+    if not kn:
+        return None
+    return kn if (kn.get("icon_x") or TSX_RX_SYMBOL_DIALOG_ZU.match(str(kn.get("text") or ""))) else None
+
+
+def _tsx_symbol_dialog_weg(s, st, trail):
+    """Den selbst ausgelösten Dialog „Switch Chart Symbol" schließen: Esc, neu lesen; steht er noch, EIN Klick auf das Schließ-X (Ziel-Beweis).
+    -> (stand, geschlossen: bool). Wirft nie; fasst keinen anderen Dialog an."""
+    dlg = tsx_symbol_dialog((st or {}).get("popups") if isinstance(st, dict) else None)
+    if not dlg:
+        return st, False
+    trail.append("Brackets: Dialog 'Switch Chart Symbol' (vom Doppelklick auf die Zeile) → Esc")
+    try:
+        _tsx_pause()
+        s.taste("Escape")
+        _warte(0.7, 0.4)
+        st = s.stand()
+    except Exception as e_:
+        trail.append(f"Symbol-Dialog: Esc/Lesen {type(e_).__name__}: {str(e_)[:60]}")
+        return st, False
+    dlg = tsx_symbol_dialog((st or {}).get("popups") if isinstance(st, dict) else None)
+    if not dlg:
+        trail.append("Symbol-Dialog geschlossen — weiter")
+        return st, not (isinstance(st, dict) and st.get("popups"))
+    kn = tsx_symbol_dialog_knopf(dlg)
+    if not kn:
+        trail.append("Symbol-Dialog steht nach Esc noch, kein eindeutiges Schließ-X — nichts gedrückt")
+        return st, False
+    r = list(kn["rect"])[:4]
+    try:
+        _tsx_pause()
+        pruef = {"rect": r, "text": "", "aria": "", "tabu": TSX_DIALOG_TABU} if kn.get("icon_x") else dict(
+            {"rect": r, "text": "" if kn.get("aus_aria") else kn["text"][:40], "aria": kn["text"][:40] if kn.get("aus_aria") else "",
+             "tabu": TSX_DIALOG_TABU}, **({} if kn.get("aus_aria") else {"wort": kn["text"].lower()[:40]}))
+        if not s.klick(r, f"Symbol-Dialog schließen ({kn.get('name') or repr(kn['text'][:20])})", pruef=pruef):
+            return st, False
+        _warte(0.7, 0.4)
+        st = s.stand()
+    except Exception as e_:
+        trail.append(f"Symbol-Dialog schließen: {type(e_).__name__}: {str(e_)[:60]}")
+        return st, False
+    zu = not (isinstance(st, dict) and st.get("popups"))
+    trail.append("Symbol-Dialog geschlossen — weiter" if zu else "Symbol-Dialog steht nach dem Druck noch — nichts weiter")
+    return st, zu
+
+
 def _tsx_geblowt_merken(res, ext, st=None):
     """res.konto_geblowt = tsx_geblowt_urteil(…) setzen, falls bewiesen (aktives Konto aus dem Stand). Nur Felder, kein Klick."""
     ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
@@ -19461,7 +19534,8 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
         # BIS ZU DREI RUNDEN (29.10.2026, Vorfall Simon Topstep 150k Plan 523545ee: BUY 2 NQ, Position lief 8 h ohne SL/TP; tags zuvor Ina 2×):
         # nach dem ersten Doppelklick auf Risk kam kein Eingabefeld, 0,5 s später stand ein TopstepX-Dialog über der Tabelle → 2. Versuch
         # „verdeckt", To Make „Dialog offen", danach versuchte niemand mehr etwas. Jetzt je Runde: Dialog offen → die bekannte Loss-Limit-
-        # Meldung schließt _tsx_blow_dialog_weg (einmal je Lauf, Ziel-Beweis); jeder ANDERE Dialog wird nie angefasst, sein Titel steht in
+        # Meldung schließt _tsx_blow_dialog_weg (einmal je Lauf, Ziel-Beweis), den selbst ausgelösten „Switch Chart Symbol" _tsx_symbol_dialog_weg
+        # (Esc, 29.10.2026 abends, e9cf8722); jeder ANDERE Dialog wird nie angefasst, sein Titel steht in
         # Spur und Warnung. Dann Reiter „Positions" neu (höchstens ein Klick), die noch fehlenden Zellen wie bisher (je zwei Versuche).
         # Zwischen den Runden gestreut 1–2 s (Jitter-Regel). Danach Rücklesung der Zeile; nie ein Close, nie eine zweite Order.
         offen_f = [(f_, u_, n_) for f_, u_, n_ in (("risk", sl, "Risk"), ("to_make", tp, "To Make")) if u_]
@@ -19487,6 +19561,10 @@ def _tsx_k4_senden(s, st, befehl, ziel, kn, res, trail, raus, order_cmd):
                 trail.append(f"Brackets: Runde {runde + 1} von {TSX_K4_BRACKET_RUNDEN} für {', '.join(n_ for _f, _u, n_ in offen_f)}")
             if isinstance(st, dict) and st.get("popups"):
                 res.setdefault("bracket_dialog", _tsx_k4_dialog_name(st) or "Dialog")   # → Fehlerfoto auch bei ok true (Hülle)
+                try:
+                    st, _sd = _tsx_symbol_dialog_weg(s, st, trail)   # selbst ausgelöst (29.10.2026, e9cf8722) — nur dieser Dialog
+                except Exception as e_:
+                    trail.append(f"Brackets: Symbol-Dialog {type(e_).__name__}: {str(e_)[:60]}")
                 try:
                     st, _bd = _tsx_blow_dialog_weg(s, st, trail, res)
                 except Exception as e_:
