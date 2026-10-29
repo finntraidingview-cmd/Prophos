@@ -7864,7 +7864,8 @@
       </button>
       <!-- Trade-Planer (07.10.2026, Finn: Tagesplan des Auto-Planers als Zeitstrahl je ID, Long/Short im Spiel, Konten-Abdeckung).
            Seit 07.10.2026 02:55 hinter der Prop-Gruppe statt direkt nach Trades (Finn: „Trades, Prop-Firm, dann Trade-Planung") —
-           nur Markup verschoben, data-view, switchView, Hash-Start und Handler unverändert. -->
+           nur Markup verschoben, data-view, switchView, Hash-Start und Handler unverändert.
+           Seit 29.10.2026 ausgeblendet über SIDEBAR_AUSGEBLENDET (Weg: Admin → Challenge-Planer → „Trade-Planer öffnen"). -->
       <button class="sb-link" data-view="tplaner">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="8" cy="6" r="1.6" fill="currentColor"/><circle cx="15" cy="12" r="1.6" fill="currentColor"/><circle cx="11" cy="18" r="1.6" fill="currentColor"/></svg>
         Trade-Planer
@@ -7969,7 +7970,7 @@
       </button>
       <!-- Hedge-Ära: Topstep Mirror (Spiegelung TopstepX ↔ MT5), Lot Rechner (Hatch-Multiplier Master ↔ Slave,
            Duplikium-Push) und Topstep Manager gehören zum Gegenhedge — bleiben erreichbar, nur unten. -->
-      <div class="sb-section" style="padding-top:12px">Hedge-Ära</div>
+      <div class="sb-section" data-sb="hedgeaera" style="padding-top:12px">Hedge-Ära</div>
       <button class="sb-link" data-view="topstep">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
         Topstep Mirror
@@ -15082,6 +15083,15 @@
    * (mtcLoad, epRenderTick) und Deep-Links/#hash/Stubs auf die Views zeigen. Gruppen-Knopf und Unter-Tabs klicken deshalb
    * den versteckten Link — derselbe Weg wie vorher ein Klick in die Seitenleiste. Als Funktionen (gehoben), weil switchView
    * schon beim Boot läuft. */
+  /* SEITENLEISTE AUSGEBLENDET (29.10.2026, Finn: „Trade-Planer visuell komplett wegmachen … damit ich über Admin darauf zugreife",
+   * „Copier auch komplett wegmachen, nutze ich nie", Hedge-Ära: „hier soll alles weg außer dem Lot Rechner", „Winning Days auch visuell
+   * wegmachen — ist ja unter Radar dabei"; „NICHTS löschen — in den Seiten steckt viel Arbeit"). Nur ausgeblendet, nichts gelöscht:
+   * Markup, Views, switchView, #hash-Start und Klick-Handler bleiben (Echo/Orbit/Markt hängen ihr Sofort-Laden an den versteckten Link,
+   * .click() geht auch unsichtbar). Schlüssel = data-view, data-navgruppe oder data-sb (Überschrift); einer raus = wieder sichtbar.
+   * 'hedgeaera' dazu = Überschrift weg, Lot Rechner hängt dann direkt unter Trading. */
+  const SIDEBAR_AUSGEBLENDET = ['tplaner', 'copier', 'topstep', 'managed', 'markt']
+  for(const k of SIDEBAR_AUSGEBLENDET)
+    document.querySelectorAll(`#dashboard-view .sb-nav > :is([data-view="${k}"],[data-navgruppe="${k}"],[data-sb="${k}"])`).forEach(el => el.style.setProperty('display', 'none', 'important'))
   function navGruppen(){
     return {
       // Muster-Portfolio (16.10.2026, Finn: „Propbaum komplett weg, Accounts je Firma komplett weg, Vorrat komplett weg — visuell"): nur noch
@@ -49328,7 +49338,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1836'
+  const OS_TAB_BUILD = '2026-09-22.1837'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -75538,7 +75548,7 @@
         <button type="button" class="ap-idr-m${_apIds.menu === 'verw' ? ' auf' : ''}" data-ap-menu="verw" title="Planer-Haken aller IDs">⚙<span class="lang"> IDs verwalten</span> ▾</button></div>`
     const kopf = `<div class="ap-ids-kopf"><b>IDs im Trade-Planer · ${drin.length} von ${rows.length}</b>
         <span title="Welche Konten einer ID geplant werden, entscheiden weiter Typ, Firma (Kernwerte), Balance und der Haken je Konto unter Accounts.">Nachtlauf ${_apIds.aktiv ? 'an' : 'aus'}${lzAt ? ' · letzter Lauf ' + escapeHtml(lzAt) : _apIds.tag ? ' · letzter Lauf ' + escapeHtml(String(_apIds.tag)) : ''}</span>
-        ${(_ap.admin === true || _ap.imPlaner) ? `<button type="button" class="btn btn-ghost" data-tpl-nachplan="1" style="margin-left:auto;padding:3px 9px;font-size:12px"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute (neu gekauft, Phase umgestellt, Haken gesetzt) sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}<button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:${(_ap.admin === true || _ap.imPlaner) ? '6px' : 'auto'};padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
+        ${(_ap.admin === true || _ap.imPlaner) ? `<button type="button" class="btn btn-ghost" data-tpl-nachplan="1" style="margin-left:auto;padding:3px 9px;font-size:12px"${_tpl.nachplanLaeuft ? ' disabled' : ''} title="Nachplanen jetzt: alle Konten ohne Plan für heute (neu gekauft, Phase umgestellt, Haken gesetzt) sofort einplanen — dieselbe Rechnung wie der 5-min-Takt, bestehende Pläne bleiben">${_tpl.nachplanLaeuft ? 'läuft …' : 'Nachplanen'}</button>` : ''}<button type="button" class="btn btn-ghost" id="ap-ids-tpl" style="margin-left:${(_ap.admin === true || _ap.imPlaner) ? '6px' : 'auto'};padding:3px 9px;font-size:12px" title="Tagesplan als Zeitstrahl je ID (eigene Seite, nicht mehr in der Seitenleiste)">Trade-Planer öffnen</button><button type="button" class="btn btn-ghost" id="ap-ids-neu" style="margin-left:6px;padding:3px 9px;font-size:12px" title="Neu laden">↻</button></div>`
     const leiste = kopf + (rows.length ? `<div class="ap-idr-wrap"><div class="ap-idr" role="tablist">${alle}${im.map(reiter).join('')}${raus.filter(z => z.uid === u).map(reiter).join('')}</div>${rechts}${menu}</div>` : '<div style="color:var(--sub);font-size:12.5px;margin-bottom:14px">keine ID mit planbaren Konten</div>')
       // ID-Details (apIdDetailRender) seit 08.10.2026 nicht mehr unter der Leiste: die ganze Seite filtert nach der ID (Finns Reihenfolge)
     root.style.padding = '6px 0'; root.style.color = ''
@@ -75568,6 +75578,8 @@
       document.addEventListener('keydown', e => { if(e.key === 'Escape') menuZu() })
     }
     root.querySelector('#ap-ids-neu')?.addEventListener('click', apIdsLaden)
+    // Weg zur Trade-Planer-Seite (29.10.2026): der Sidebar-Eintrag ist ausgeblendet, Finn öffnet sie von hier
+    root.querySelector('#ap-ids-tpl')?.addEventListener('click', () => { if(typeof window.switchView === 'function') window.switchView('tplaner'); else location.hash = '#tplaner' })
     if(!root.dataset.tplKlick && typeof window._tplKlick === 'function'){ root.addEventListener('click', window._tplKlick); root.dataset.tplKlick = '1' }   // Braucht-dich-Knöpfe (Balance, External ID, Haken, Neu starten) wie auf der Planer-Seite
     try{ if(typeof tplScrollJetzt === 'function'){ const alt = _tpl.tag; _tpl.tag = apIdsTag(); try{ tplScrollJetzt(root, _apIds.scrollX) } finally{ _tpl.tag = alt } } }catch(_){}   // Handy: Kasten auf „jetzt − 45 %" (08.10.2026)
     root.querySelector('.tpl-scroll')?.addEventListener('scroll', ev => { _apIds.scrollX = ev.currentTarget.scrollLeft })
