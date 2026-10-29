@@ -2069,6 +2069,7 @@ def main():
     results.append(test_puls_windows_suche_vorn())
     results.append(test_hedge_closed_at_ms())
     results.append(test_puls_fehlerfoto())
+    results.append(test_fehlerfoto_luecken())
 
     print()
     ok = sum(1 for r in results if r)
@@ -10757,6 +10758,108 @@ def test_puls_fehlerfoto():
             f"Hülle: ok true mit brackets_fehlen/bracket_dialog → Foto (brackets_fehlen.bild / bracket_dialog_bild), sonst keins ({gerufen3})")
     finally:
         ob.fehlerfoto_anstossen = alt
+    return ok
+
+
+def test_fehlerfoto_luecken():
+    """FEHLERFOTO-LÜCKEN (29.10.2026): (1) BitBlt gescheitert (Mike 15:13 Dubai) → Rückfall PrintWindow + Desktop-Diagnose im Grund;
+    (2) kein Netz (Marco 16:02) → Foto gemerkt, nachgereicht (älteste zuerst, Deckel, ≤ 36 h, Railway-Antwort = verwerfen, Netz weg = aufhören);
+    Anstoß höchstens alle 10 min. Attrappen statt Windows/Netz."""
+    import order_bot as ob, tempfile, shutil, urllib.error
+    ok = True
+
+    def chk(c, t):
+        nonlocal ok
+        print(("  OK   " if c else "  FEHL ") + t)
+        ok = ok and bool(c)
+    W = ob.fehlerfoto_fenster_wahl
+    f = lambda hw, **x: dict({"hwnd": hw, "sichtbar": True, "minimiert": False, "w": 800, "h": 600, "klasse": "Chrome_WidgetWin_1", "vorne": False}, **x)   # noqa: E731
+    chk(W([f(1), f(2, vorne=True)]) == 2, "Fenster-Wahl: das vordere zuerst")
+    chk(W([f(1, w=1900, h=1000), f(2, klasse=ob.FEHLERFOTO_MT5_KLASSE)]) == 2, "ohne vorderes: MetaTrader vor dem größten")
+    chk(W([f(1, w=1900, h=1000), f(2), f(3, minimiert=True, w=3000, h=2000), f(4, sichtbar=False, w=3000, h=2000), f(5, w=100, h=100, vorne=True)]) == 1,
+        "minimiert/unsichtbar/winzig zählen nie, sonst das größte")
+    chk(W([]) is None and W([f(1, sichtbar=False)]) is None, "nichts Sichtbares → None")
+    N = ob.fehlerfoto_netzfehler
+    chk(N(urllib.error.URLError("getaddrinfo failed")) and N(TimeoutError()) and N(ConnectionResetError()) and N(OSError(11002, "x")),
+        "Netzfehler: DNS/Timeout/Verbindung")
+    chk(not N(urllib.error.HTTPError("u", 413, "zu groß", {}, None)) and not N(urllib.error.HTTPError("u", 409, "x", {}, None)) and not N(ValueError("x")),
+        "Railway-Antwort 409/413 und Rest: nicht nochmal")
+    chk(N(urllib.error.HTTPError("u", 429, "Deckel", {}, None)) and N(urllib.error.HTTPError("u", 502, "x", {}, None)),
+        "429 (Stundendeckel) und 502 (Railway gestört): später nochmal")
+    A, t = ob.fehlerfoto_warte_auswahl, 2_000_000.0
+    d = [("20261029-120000-aaaaaa-bildschirm.png", t - 100), ("20261029-110000-bbbbbb-tab.jpg", t - 200), ("fremd.txt", t),
+         ("20261027-000000-cccccc-bildschirm.png", t - 40 * 3600)]
+    hoch, weg = A(d, t)
+    chk([n for n, _i, _a in hoch] == ["20261029-110000-bbbbbb-tab.jpg", "20261029-120000-aaaaaa-bildschirm.png"]
+        and hoch[0][1:] == ("20261029-110000-bbbbbb", "tab") and sorted(weg) == ["20261027-000000-cccccc-bildschirm.png", "fremd.txt"],
+        f"Warte-Auswahl: älteste zuerst, fremde Namen + > 36 h weg ({weg})")
+    viele = [(f"20261029-1200{i:02d}-{i:06x}-bildschirm.png", t - 100 + i) for i in range(25)]
+    hoch, weg = A(viele, t)
+    chk(len(weg) == 5 and weg[0] == viele[0][0] and len(hoch) == ob.FEHLERFOTO_NACHREICHEN_JE and hoch[0][0] == viele[5][0],
+        "Deckel 20: die 5 ältesten fallen, je Lauf höchstens 10")
+    F = ob.fehlerfoto_nachreichen_faellig
+    chk(F(None, t, True) and not F(None, t, False) and not F(t - 60, t, True) and F(t - 601, t, True) and F(t + 99, t, True),
+        "Anstoß nur mit Dateien und höchstens alle 10 min (Uhr zurück zählt als fällig)")
+    tmp = tempfile.mkdtemp()
+    alt = (ob._FEHLERFOTO_HIER, ob._fehlerfoto_hochladen, ob._fehlerfoto_pc, ob._fehlerfoto_gdi, ob._fehlerfoto_printwindow,
+           ob._fehlerfoto_status, ob._fehlerfoto_desktop_diag)
+    try:
+        ob._FEHLERFOTO_HIER, ob._fehlerfoto_pc = tmp, (lambda: "pc-abcd12")
+        hoch_ruf, status = [], []
+
+        def kein_netz(pc, bid, art, roh):
+            raise urllib.error.URLError("[Errno 11002] getaddrinfo failed")
+        ob._fehlerfoto_hochladen = kein_netz
+        png = ob.fehlerfoto_png(bytes(3 * 4 * 3), 4, 3, "rgb")
+        try:
+            ob._fehlerfoto_senden("pc-abcd12", "20261029-120202-abcdef", "bildschirm", png)
+            chk(False, "ohne Netz muss senden werfen")
+        except RuntimeError as e:
+            chk("gemerkt" in str(e) and os.listdir(os.path.join(tmp, ob.FEHLERFOTO_WARTE_DIR)) == ["20261029-120202-abcdef-bildschirm.png"],
+                f"kein Netz → gemerkt als <id>-bildschirm.png, Grund sagt es ({e})")
+        ob.fehlerfoto_nachreichen()
+        chk(os.listdir(os.path.join(tmp, ob.FEHLERFOTO_WARTE_DIR)) == ["20261029-120202-abcdef-bildschirm.png"], "nachreichen ohne Netz: Datei bleibt")
+        ob._fehlerfoto_hochladen = lambda pc, bid, art, roh: hoch_ruf.append((pc, bid, art, roh[:4]))
+        ob.fehlerfoto_nachreichen()
+        chk(hoch_ruf == [("pc-abcd12", "20261029-120202-abcdef", "bildschirm", b"\x89PNG")] and os.listdir(os.path.join(tmp, ob.FEHLERFOTO_WARTE_DIR)) == [],
+            "Netz wieder da → hochgeladen (gleiche id/art), Datei weg")
+        open(os.path.join(tmp, ob.FEHLERFOTO_WARTE_DIR, "20261029-120303-abcdef-tab.jpg"), "wb").write(b"\xff\xd8\xffx")
+
+        def antwort_409(pc, bid, art, roh):
+            raise urllib.error.HTTPError("u", 409, "gibt es schon", {}, None)
+        ob._fehlerfoto_hochladen = antwort_409
+        ob.fehlerfoto_nachreichen()
+        chk(os.listdir(os.path.join(tmp, ob.FEHLERFOTO_WARTE_DIR)) == [], "Railway-Antwort (409) → verworfen, kein Dauer-Versuch")
+        # (1) BitBlt scheitert → PrintWindow, Status mit Diagnose
+        ob._fehlerfoto_hochladen = lambda pc, bid, art, roh: hoch_ruf.append((art, len(roh)))
+        ob._fehlerfoto_status = lambda pc, bid, art, grund: status.append(grund)
+        ob._fehlerfoto_desktop_diag = lambda: "Eingabe-Desktop nicht lesbar (Fehler 5) — UAC/Sperrbildschirm? · Sitzung aktiv"
+
+        def gdi_kaputt():
+            raise RuntimeError("BitBlt gescheitert")
+        ob._fehlerfoto_gdi = gdi_kaputt
+        ob._fehlerfoto_printwindow = lambda: (bytes(40 * 30 * 4), 40, 30, "100k 511448478 - FTMO-Server - Demo")
+        n = ob._fehlerfoto_bildschirm("pc-abcd12", "20261029-120404-abcdef")
+        chk(n > 0 and hoch_ruf[-1][0] == "bildschirm" and status and "Rückfall PrintWindow" in status[-1] and "UAC" in status[-1],
+            f"BitBlt gescheitert → PrintWindow-Bild hochgeladen, Grund + Diagnose an Railway ({status[-1][:90] if status else '—'})")
+
+        def pw_kaputt():
+            raise RuntimeError("kein sichtbares Fenster für PrintWindow")
+        ob._fehlerfoto_printwindow = pw_kaputt
+        try:
+            ob._fehlerfoto_bildschirm("pc-abcd12", "20261029-120505-abcdef")
+            chk(False, "beides gescheitert muss werfen")
+        except RuntimeError as e:
+            chk("BitBlt gescheitert" in str(e) and "PrintWindow" in str(e) and "Sitzung aktiv" in str(e),
+                "beides gescheitert → ein Grund mit BitBlt, PrintWindow und Diagnose (landet in puls_fehlerbild_log)")
+    finally:
+        (ob._FEHLERFOTO_HIER, ob._fehlerfoto_hochladen, ob._fehlerfoto_pc, ob._fehlerfoto_gdi, ob._fehlerfoto_printwindow,
+         ob._fehlerfoto_status, ob._fehlerfoto_desktop_diag) = alt
+        shutil.rmtree(tmp, ignore_errors=True)
+    src = open(ob.__file__, encoding="utf-8").read()
+    chk('_fehlerfoto_senden(pc, bid, "tab", roh)' in src and "fehlerfoto_nachreichen_anstossen()" in src
+        and '"fehlerfoto_nachreichen"' in src and "fehlerfoto_nachreichen" in ob.FEHLERFOTO_OHNE,
+        "Tab-Foto nutzt denselben Merk-Weg; Hülle stößt nachreichen an; eigener Modus, fotografiert selbst nie")
     return ok
 
 

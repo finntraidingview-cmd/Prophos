@@ -1065,7 +1065,7 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # GDI-Fehler, Bild zu groß, kein Puls-Chrome-Tab, Puls läuft wieder). Läuft schon der nächste Puls-Lauf (Handlauf-Sperre eines anderen
 # Prozesses), wird nicht fotografiert — nie ein Foto mitten in einen Login.
 # ═══════════════════════════════════════════════════════════════════════════
-FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "loginok", "tvfokus"})
+FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "fehlerfoto_nachreichen", "loginok", "tvfokus"})
 FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl"})
 FEHLERFOTO_GLEICH_S = 600.0
 FEHLERFOTO_STUNDE = 12
@@ -1237,6 +1237,8 @@ def fehlerfoto_huelle_einbauen(argv1):
     try:
         if os.path.abspath(str(getattr(sys.modules.get("__main__"), "__file__", "") or "")) != os.path.abspath(__file__):
             return
+        if str(argv1 or "").strip().lower() not in FEHLERFOTO_OHNE:
+            fehlerfoto_nachreichen_anstossen()   # Fotos ohne Netz (29.10.2026): höchstens alle 10 min, entkoppelt, sonst nur ein listdir
         wt = fehlerfoto_weg(argv1)
         if not wt or isinstance(sys.stdout, _FehlerfotoAusgabe):
             return
@@ -1366,6 +1368,257 @@ def _fehlerfoto_gdi():
         u32.ReleaseDC(None, hdc)
 
 
+# LÜCKEN (29.10.2026, Auftrag FEHLERFOTO-LÜCKEN, Befund puls_fehlerbild_log seit .1862):
+# (1) Mike (PC von Mike, pc-l5o8bv) 15:13 Dubai, F9-Dialog nicht gefunden → „RuntimeError: BitBlt gescheitert". BitBlt vom Bildschirm-DC
+#     scheitert, wenn nicht der normale Desktop vorn ist (UAC-/Sperr-Desktop „Winlogon", Parsec/RDP getrennt) — derselbe Grund, aus dem auch
+#     der F9-Dialog nicht zu finden war. Jetzt: (a) Diagnose im Grund (Eingabe-Desktop + Sitzungsstand), (b) Rückfall PrintWindow auf das
+#     vordere bzw. größte sichtbare Fenster (MetaTrader zuerst) — rendert das Fenster selbst, ohne den sichtbaren Bildschirm.
+# (2) Marco (pc-t8wg97) 16:02 Dubai war kurz offline. Geht ein Foto beim Hochladen wegen fehlendem Netz verloren, liegt es jetzt in
+#     fehlerfoto_warte/ und wird nachgereicht (höchstens FEHLERFOTO_WARTE_MAX Dateien, nur solange die Route das Datum nimmt, ≤ 36 h).
+#     Angestoßen von jedem folgenden Puls-Lauf (höchstens alle 10 min, entkoppelt) und von jedem neuen Foto-Prozess.
+FEHLERFOTO_WARTE_DIR = "fehlerfoto_warte"
+FEHLERFOTO_WARTE_MAX = 20
+FEHLERFOTO_WARTE_S = 36 * 3600            # Railway nimmt nur ids, deren Datum ± 2 Tage um heute liegt
+FEHLERFOTO_NACHREICHEN_S = 600.0
+FEHLERFOTO_NACHREICHEN_JE = 10
+FEHLERFOTO_MT5_KLASSE = "MetaQuotes::MetaTrader::5.00"
+_FEHLERFOTO_WARTE_RE = re.compile(r"^(\d{8}-\d{6}-[0-9a-f]{6})-(bildschirm|tab)\.(png|jpg)$")
+
+
+def fehlerfoto_fenster_wahl(fenster):
+    """REIN RECHNEND (testbar): Ziel für den PrintWindow-Rückfall. fenster = [{hwnd, sichtbar, minimiert, w, h, klasse, vorne}] →
+    hwnd oder None. Vordere Fenster zuerst (wenn sichtbar, nicht minimiert, ≥ 300×200), sonst das größte MetaTrader-Fenster, sonst das
+    größte sichtbare."""
+    gut = [f for f in (fenster or ()) if isinstance(f, dict) and f.get("hwnd") and f.get("sichtbar") and not f.get("minimiert")
+           and int(f.get("w") or 0) >= 300 and int(f.get("h") or 0) >= 200]
+    vorne = [f for f in gut if f.get("vorne")]
+    if vorne:
+        return vorne[0]["hwnd"]
+    groesse = lambda f: int(f.get("w") or 0) * int(f.get("h") or 0)   # noqa: E731
+    mt5 = [f for f in gut if str(f.get("klasse") or "") == FEHLERFOTO_MT5_KLASSE]
+    for liste in (mt5, gut):
+        if liste:
+            return max(liste, key=groesse)["hwnd"]
+    return None
+
+
+FEHLERFOTO_HTTP_SPAETER = frozenset({429, 500, 502, 503, 504})   # Stundendeckel / Railway gestört → später nochmal
+
+
+def fehlerfoto_netzfehler(e):
+    """REIN RECHNEND (testbar): später nochmal versuchen? → True bei fehlendem Netz (kein DNS, keine Verbindung, Zeitüberschreitung) und bei
+    Railway-Antworten, die nur „jetzt nicht" heißen (429 Deckel, 5xx gestört). Andere Antworten (400/404/409/413) hat die Route
+    entschieden — nochmal schicken hilft nicht."""
+    import urllib.error
+    if isinstance(e, urllib.error.HTTPError):
+        return int(getattr(e, "code", 0) or 0) in FEHLERFOTO_HTTP_SPAETER
+    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError, OSError))
+
+
+def fehlerfoto_warte_auswahl(dateien, jetzt, max_n=FEHLERFOTO_WARTE_MAX, max_s=FEHLERFOTO_WARTE_S, je=FEHLERFOTO_NACHREICHEN_JE):
+    """REIN RECHNEND (testbar): dateien = [(name, mtime)] im Warte-Ordner → (hochladen [(name, id, art)] älteste zuerst, höchstens je;
+    weg [name] = fremde Namen, älter als max_s oder über max_n hinaus (die ältesten fallen))."""
+    gut, weg = [], []
+    for name, mt in dateien or ():
+        m = _FEHLERFOTO_WARTE_RE.match(str(name))
+        if not m or not isinstance(mt, (int, float)) or jetzt - mt > max_s:
+            weg.append(name)
+            continue
+        gut.append((mt, name, m.group(1), m.group(2)))
+    gut.sort()
+    if len(gut) > max_n:
+        weg += [x[1] for x in gut[:len(gut) - max_n]]
+        gut = gut[len(gut) - max_n:]
+    return [(n, i, a) for _mt, n, i, a in gut[:je]], weg
+
+
+def fehlerfoto_nachreichen_faellig(letzt, jetzt, hat_dateien):
+    """REIN RECHNEND (testbar): Nachreich-Lauf anstoßen? Nur mit wartenden Dateien und höchstens alle FEHLERFOTO_NACHREICHEN_S."""
+    zahl = isinstance(letzt, (int, float)) and not isinstance(letzt, bool)
+    return bool(hat_dateien) and (not zahl or not 0 <= jetzt - letzt < FEHLERFOTO_NACHREICHEN_S)
+
+
+def _fehlerfoto_warte_pfad():
+    return os.path.join(_FEHLERFOTO_HIER, FEHLERFOTO_WARTE_DIR)
+
+
+def _fehlerfoto_merken(bid, art, roh):
+    """Upload ohne Netz → Foto in den Warte-Ordner (nachreichen). → True, wenn gemerkt."""
+    try:
+        d = _fehlerfoto_warte_pfad()
+        os.makedirs(d, exist_ok=True)
+        endung = "png" if roh.startswith(b"\x89PNG") else "jpg"
+        with open(os.path.join(d, f"{bid}-{art}.{endung}"), "wb") as f:
+            f.write(roh)
+        return True
+    except Exception as e:
+        _fehlerfoto_log(f"{bid}-{art}: nicht gemerkt ({type(e).__name__}: {e})")
+        return False
+
+
+def fehlerfoto_nachreichen():
+    """Wartende Fotos hochladen (älteste zuerst, je Lauf höchstens FEHLERFOTO_NACHREICHEN_JE). Erfolg oder Railway-Antwort (4xx) → Datei
+    weg; erneut kein Netz → aufhören, nächster Anlauf später. Still, nur fehlerfoto.log."""
+    pc, d = _fehlerfoto_pc(), _fehlerfoto_warte_pfad()
+    if not pc or not os.path.isdir(d):
+        return
+    try:
+        dateien = [(n, os.path.getmtime(os.path.join(d, n))) for n in os.listdir(d)]
+    except OSError:
+        return
+    hoch, weg = fehlerfoto_warte_auswahl(dateien, time.time())
+    for n in weg:
+        try:
+            os.remove(os.path.join(d, n))
+        except OSError:
+            pass
+    for name, bid, art in hoch:
+        p = os.path.join(d, name)
+        try:
+            with open(p, "rb") as f:
+                roh = f.read()
+            _fehlerfoto_hochladen(pc, bid, art, roh)
+            _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)}-{art}: nachgereicht ({len(roh) // 1024} KB)")
+        except Exception as e:
+            if fehlerfoto_netzfehler(e):
+                _fehlerfoto_log(f"nachreichen: noch kein Netz ({type(e).__name__})")
+                return
+            _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)}-{art}: nachreichen verworfen ({type(e).__name__}: {str(e)[:120]})")
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def fehlerfoto_nachreichen_anstossen():
+    """Aus der Hülle jedes Puls-Laufs: liegen Fotos im Warte-Ordner und ist der letzte Anlauf ≥ 10 min her → entkoppelter Prozess
+    „fehlerfoto_nachreichen". Kostet sonst nur ein listdir. Nie ein Fehler nach außen."""
+    try:
+        d = _fehlerfoto_warte_pfad()
+        hat = os.path.isdir(d) and any(_FEHLERFOTO_WARTE_RE.match(n) for n in os.listdir(d))
+        p = os.path.join(_FEHLERFOTO_HIER, "fehlerfoto_merk.json")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                merk = json.load(f) or {}
+        except Exception:
+            merk = {}
+        if not fehlerfoto_nachreichen_faellig(merk.get("nachreichen_at"), time.time(), hat):
+            return False
+        merk["nachreichen_at"] = time.time()
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(merk, f)
+        import subprocess
+        flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "fehlerfoto_nachreichen"], creationflags=flags,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        return True
+    except Exception:
+        return False
+
+
+def _fehlerfoto_desktop_diag():
+    """Warum der Bildschirm nicht lesbar ist: Eingabe-Desktop (Default = normal; nicht lesbar = UAC-/Sperr-Desktop) und Sitzungsstand
+    (WTSConnectState). → kurzer Text, nie ein Fehler."""
+    teile = []
+    try:
+        import ctypes
+        from ctypes import wintypes as wt
+        u32 = ctypes.WinDLL("user32", use_last_error=True)
+        u32.OpenInputDesktop.argtypes, u32.OpenInputDesktop.restype = [wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE
+        u32.GetUserObjectInformationW.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD, ctypes.POINTER(wt.DWORD)]
+        u32.CloseDesktop.argtypes = [wt.HANDLE]
+        h = u32.OpenInputDesktop(0, False, 0x0001)   # DESKTOP_READOBJECTS
+        if not h:
+            teile.append(f"Eingabe-Desktop nicht lesbar (Fehler {ctypes.get_last_error()}) — UAC/Sperrbildschirm?")
+        else:
+            puf, n = ctypes.create_unicode_buffer(64), wt.DWORD(0)
+            if u32.GetUserObjectInformationW(h, 2, puf, ctypes.sizeof(puf), ctypes.byref(n)):   # UOI_NAME
+                teile.append(f"Eingabe-Desktop {puf.value or '?'}")
+            u32.CloseDesktop(h)
+    except Exception as e:
+        teile.append(f"Desktop unbekannt ({type(e).__name__})")
+    try:
+        import ctypes
+        from ctypes import wintypes as wt
+        wts = ctypes.WinDLL("wtsapi32")
+        wts.WTSQuerySessionInformationW.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wt.DWORD)]
+        wts.WTSFreeMemory.argtypes = [ctypes.c_void_p]
+        p, n = ctypes.c_void_p(), wt.DWORD(0)
+        if wts.WTSQuerySessionInformationW(None, 0xFFFFFFFF, 8, ctypes.byref(p), ctypes.byref(n)) and p.value:   # WTSConnectState
+            st = ctypes.cast(p, ctypes.POINTER(ctypes.c_int)).contents.value
+            wts.WTSFreeMemory(p)
+            teile.append("Sitzung " + {0: "aktiv", 1: "verbunden", 2: "verbindet", 3: "Schatten", 4: "getrennt", 5: "leer", 6: "lauscht",
+                                       7: "zurückgesetzt", 8: "ausgefallen", 9: "init"}.get(st, str(st)))
+    except Exception:
+        pass
+    return " · ".join(teile)[:160]
+
+
+def _fehlerfoto_printwindow():
+    """Rückfall, wenn BitBlt scheitert: ein Fenster per PrintWindow (PW_RENDERFULLCONTENT) — vorn, sonst MetaTrader, sonst das größte.
+    -> (bgra, w, h, titel)"""
+    import ctypes
+    from ctypes import wintypes as wt
+    u32, g32 = ctypes.WinDLL("user32"), ctypes.WinDLL("gdi32")
+    for f, arg, res in ((u32.GetForegroundWindow, [], wt.HWND), (u32.IsWindowVisible, [wt.HWND], wt.BOOL), (u32.IsIconic, [wt.HWND], wt.BOOL),
+                        (u32.GetWindowRect, [wt.HWND, ctypes.POINTER(wt.RECT)], wt.BOOL),
+                        (u32.GetClassNameW, [wt.HWND, wt.LPWSTR, ctypes.c_int], ctypes.c_int),
+                        (u32.GetWindowTextW, [wt.HWND, wt.LPWSTR, ctypes.c_int], ctypes.c_int),
+                        (u32.GetDC, [wt.HWND], wt.HDC), (u32.ReleaseDC, [wt.HWND, wt.HDC], ctypes.c_int),
+                        (u32.PrintWindow, [wt.HWND, wt.HDC, wt.UINT], wt.BOOL),
+                        (g32.CreateCompatibleDC, [wt.HDC], wt.HDC), (g32.CreateCompatibleBitmap, [wt.HDC, ctypes.c_int, ctypes.c_int], wt.HBITMAP),
+                        (g32.SelectObject, [wt.HDC, wt.HGDIOBJ], wt.HGDIOBJ), (g32.DeleteObject, [wt.HGDIOBJ], wt.BOOL), (g32.DeleteDC, [wt.HDC], wt.BOOL),
+                        (g32.GetDIBits, [wt.HDC, wt.HBITMAP, wt.UINT, wt.UINT, ctypes.c_void_p, ctypes.c_void_p, wt.UINT], ctypes.c_int)):
+        f.argtypes, f.restype = arg, res
+    vorn = u32.GetForegroundWindow()
+    liste = []
+    ENUM = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+
+    def _je(hwnd, _l):
+        r, k = wt.RECT(), ctypes.create_unicode_buffer(128)
+        u32.GetWindowRect(hwnd, ctypes.byref(r))
+        u32.GetClassNameW(hwnd, k, 128)
+        liste.append({"hwnd": hwnd, "sichtbar": bool(u32.IsWindowVisible(hwnd)), "minimiert": bool(u32.IsIconic(hwnd)), "w": r.right - r.left,
+                      "h": r.bottom - r.top, "klasse": k.value, "vorne": bool(vorn) and hwnd == vorn})
+        return True
+    u32.EnumWindows(ENUM(_je), 0)
+    hwnd = fehlerfoto_fenster_wahl(liste)
+    if not hwnd:
+        raise RuntimeError("kein sichtbares Fenster für PrintWindow")
+    f = next(x for x in liste if x["hwnd"] == hwnd)
+    w, h = int(f["w"]), int(f["h"])
+    t = ctypes.create_unicode_buffer(120)
+    u32.GetWindowTextW(hwnd, t, 120)
+
+    class _BIH(ctypes.Structure):
+        _fields_ = [("biSize", wt.DWORD), ("biWidth", wt.LONG), ("biHeight", wt.LONG), ("biPlanes", wt.WORD), ("biBitCount", wt.WORD),
+                    ("biCompression", wt.DWORD), ("biSizeImage", wt.DWORD), ("biXPelsPerMeter", wt.LONG), ("biYPelsPerMeter", wt.LONG),
+                    ("biClrUsed", wt.DWORD), ("biClrImportant", wt.DWORD)]
+    hdc = u32.GetDC(None)
+    if not hdc:
+        raise RuntimeError("GetDC gescheitert (keine Desktop-Sitzung?)")
+    mdc, bmp = g32.CreateCompatibleDC(hdc), g32.CreateCompatibleBitmap(hdc, w, h)
+    try:
+        if not mdc or not bmp:
+            raise RuntimeError("GDI-Speicher nicht angelegt")
+        alt = g32.SelectObject(mdc, bmp)
+        ok = u32.PrintWindow(hwnd, mdc, 2)   # PW_RENDERFULLCONTENT (auch Chrome/DirectX-Inhalte)
+        g32.SelectObject(mdc, alt)
+        if not ok:
+            raise RuntimeError("PrintWindow gescheitert")
+        bi = _BIH(ctypes.sizeof(_BIH), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
+        puf = ctypes.create_string_buffer(w * h * 4)
+        if g32.GetDIBits(mdc, bmp, 0, h, puf, ctypes.byref(bi), 0) != h:
+            raise RuntimeError("GetDIBits las nicht alle Zeilen")
+        return puf.raw, w, h, t.value
+    finally:
+        if bmp:
+            g32.DeleteObject(bmp)
+        if mdc:
+            g32.DeleteDC(mdc)
+        u32.ReleaseDC(None, hdc)
+
+
 def _fehlerfoto_status(pc, bid, art, grund):
     """Foto gescheitert/ausgelassen → Grund an Railway (puls_fehlerbild_log), damit sichtbar ist, ob das Foto auf den PCs läuft. Still."""
     try:
@@ -1393,11 +1646,30 @@ def _fehlerfoto_hochladen(pc, bid, art, roh):
     urllib.request.urlopen(req, timeout=20).read()
 
 
+def _fehlerfoto_senden(pc, bid, art, roh):
+    """Hochladen; fehlt das Netz, Foto merken (nachreichen) und den Netzfehler weiterwerfen (der Grund geht ins Protokoll)."""
+    try:
+        _fehlerfoto_hochladen(pc, bid, art, roh)
+    except Exception as e:
+        if fehlerfoto_netzfehler(e) and _fehlerfoto_merken(bid, art, roh):
+            raise RuntimeError(f"kein Netz ({type(e).__name__}) — gemerkt, wird nachgereicht") from e
+        raise
+
+
 def _fehlerfoto_bildschirm(pc, bid):
-    """Bildschirm per GDI (ohne PowerShell, 29.10.2026) → PNG ≤ FEHLERFOTO_MAX → hochladen. -> Bytes"""
-    bgra, w, h = _fehlerfoto_gdi()
+    """Bildschirm per GDI (ohne PowerShell, 29.10.2026) → PNG ≤ FEHLERFOTO_MAX → hochladen. Scheitert BitBlt (UAC-/Sperr-Desktop, getrennte
+    Sitzung), Rückfall PrintWindow auf ein Fenster; der Grund samt Desktop-Diagnose geht als Status an Railway. -> Bytes"""
+    try:
+        bgra, w, h = _fehlerfoto_gdi()
+    except Exception as e:
+        diag = _fehlerfoto_desktop_diag()
+        try:
+            bgra, w, h, titel = _fehlerfoto_printwindow()
+        except Exception as e2:
+            raise RuntimeError(f"{e} · Rückfall PrintWindow: {e2} · {diag}") from e
+        _fehlerfoto_status(pc, bid, "bildschirm", f"{e} → Rückfall PrintWindow ({str(titel or '?')[:40]}) · {diag}")
     png, _stufe = fehlerfoto_png_unter(bgra, w, h)
-    _fehlerfoto_hochladen(pc, bid, "bildschirm", png)
+    _fehlerfoto_senden(pc, bid, "bildschirm", png)
     return len(png)
 
 
@@ -1419,7 +1691,7 @@ def _fehlerfoto_tab(pc, bid, tab):
         v.zu()
     if not roh.startswith(b"\xff\xd8\xff") or len(roh) > FEHLERFOTO_MAX:
         raise RuntimeError(f"Tab-Bild unbrauchbar ({len(roh)} Bytes)")
-    _fehlerfoto_hochladen(pc, bid, "tab", roh)
+    _fehlerfoto_senden(pc, bid, "tab", roh)
     return len(roh)
 
 
@@ -1460,6 +1732,7 @@ def modus_fehlerfoto(cmd):
             teile.append(f"{art} FEHLER {grund}")
             _fehlerfoto_status(pc, bid, art, grund)
     _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)} ({cmd.get('weg') or '?'} {cmd.get('code') or '-'}): " + " · ".join(teile))
+    fehlerfoto_nachreichen()   # wartende Fotos (Netz war weg) gleich mitnehmen — nach dem eigenen, das zählt zuerst
 
 
 def _puls_fenster(trail):
@@ -27831,6 +28104,13 @@ def main():
             modus_fehlerfoto(json.loads(sys.argv[2]))
         except Exception as e:
             _fehlerfoto_log(f"fehlerfoto abgebrochen: {type(e).__name__}: {e}")
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "fehlerfoto_nachreichen":
+        # Fotos, die ohne Netz liegen blieben (fehlerfoto_warte/), nachreichen — entkoppelt aus fehlerfoto_nachreichen_anstossen
+        try:
+            fehlerfoto_nachreichen()
+        except Exception as e:
+            _fehlerfoto_log(f"nachreichen abgebrochen: {type(e).__name__}: {e}")
         return 0
     fehlerfoto_huelle_einbauen(sys.argv[1] if len(sys.argv) >= 2 else "")   # ok-false-Antwort → „fehlerbild" + Foto (29.10.2026)
     if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":
