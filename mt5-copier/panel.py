@@ -4912,6 +4912,24 @@ class Handler(BaseHTTPRequestHandler):
                    "sl_usd": body.get("sl_usd"), "tp_usd": body.get("tp_usd")}
             if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            # HARTE LINIE AUCH FUER ECHO (30.10.2026, Finn: „auf gar keinen Fall ein interner Hedge"; Audit Slave 1: Echo von Hand am PC
+            # hatte keine DB-Linie, nur die Pruefung im Tab): vor JEDEM Bot-Start fragt das Panel Railway/DB selbst (richtung_frei ->
+            # prophos_gegenrichtung_frei), wie /api/tv-konto. FAIL-CLOSED: ohne Plan-UUID (alter Tab), ohne Richtung, ohne Token, ohne
+            # Netz oder bei unklarer Antwort = gesperrt, beweisbar nichts gesendet (retry_ok=True). big_trade_nah/_unklar sind die
+            # Heim-Regel des Puls-Chrome (TradingView/TopstepX) — Railway prueft sie erst, wenn die Gegenrichtung frei ist; fuer eine
+            # MT5-Order gelten sie nicht.
+            _pid = str(body.get("plan_id") or "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f-]{36}", _pid) or cmd["richtung"] not in ("buy", "sell"):
+                print(f"[panel] {fname}: master-order RIEGEL ohne plan_id/richtung -> gesperrt", flush=True)
+                return self._send(200, json.dumps({"ok": False, "retry_ok": True, "gesendet": False, "grund": "riegel_unerreichbar",
+                    "code": "riegel_unerreichbar", "msg": "Richtungs-Riegel nicht pruefbar: die Order kam ohne Plan-ID/Richtung (alter Prophos-"
+                    "Tab?) — den Prophos-Tab an diesem PC neu laden. Nichts gesendet."}, ensure_ascii=False))
+            _frei, _msg, _code = richtung_frei(_pid, cmd["richtung"])
+            if not _frei and _code in ("gegenrichtung", "riegel_unerreichbar"):
+                print(f"[panel] {fname}: master-order RIEGEL {_code} {cmd['richtung']}: {_msg[:160]}", flush=True)
+                return self._send(200, json.dumps({"ok": False, "retry_ok": True, "gesendet": False, "grund": _code, "code": _code,
+                                                   "msg": _msg + ("" if "Nichts gesendet" in _msg or "nichts gesendet" in _msg else " Nichts gesendet.")},
+                                                  ensure_ascii=False))
             # ECHO V2 (23.09.2026, Finn: "nichts gegengehedgt, kein Multiplikator, gar nichts"): ohne_hedge
             # heisst, der Copier SOLL nicht mitlaufen — der Frische-Riegel unten (schuetzt die Order vor einem
             # ungehedgten Markt) ist hier verkehrt. Stattdessen zwei eigene Riegel, beide beweisbar VOR dem

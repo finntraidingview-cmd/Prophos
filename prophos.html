@@ -48396,7 +48396,9 @@
       const meine = po ? (/sell/i.test(po.richtung) ? 'SHORT' : 'LONG') : null
       // Laufende/geplante V2-Pläne derselben Firma dieser ID, frisch aus der DB (25.09.2026 nachmittags, Finn-Fund bei Mike):
       // Echo V2 startet keinen Copier → firmLiveRichtungen (mt5_live) sah den laufenden FundedNext-Trade oft gar nicht.
-      let kPlan = null; try{ kPlan = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
+      // FAIL-CLOSED (30.10.2026, Finn: „auf gar keinen Fall ein interner Hedge"): streng — sind die Pläne nicht frisch aus der DB lesbar,
+      // wirft die Prüfung und der Check unten sperrt (vorher: Rückfall auf den Tab-Speicher bzw. nur „warn", Start lief weiter)
+      const kPlan = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true, streng: true })
       const dirs = await window.firmLiveRichtungen(plan.masterFirm)
       let laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
       if(kPlan && kPlan.lauf && meine && kPlan.lauf.toUpperCase() !== meine){ rkSperre = kPlan; fail('v2dir', `${escapeHtml(kPlan.text)} — nicht gestartet (Richtungs-Schutz).`) }
@@ -48408,7 +48410,7 @@
         if(gepDir && meine && gepDir !== meine){ rkSperre = { lauf: gepDir.toLowerCase(), quelle: 'plan', text: `${plan.masterFirm || '—'}: gespeicherter Plan auf ${gepDir}` }; fail('v2dir', `${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b> — deine <b>${meine}</b>-Order wäre die Gegenrichtung. Nicht gestartet.`) }
         else _pfSet('v2dir', 'ok', gepDir ? `Kein laufender Trade bei ${fName} — gespeicherter Plan ebenfalls ${gepDir} ✓` : `Kein laufender Trade bei ${fName} — Richtung frei.`)
       }
-    }catch(_){ _pfSet('v2dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.') }
+    }catch(e){ fail('v2dir', `Richtungs-Schutz nicht prüfbar (${escapeHtml(String((e && e.message) || e).slice(0, 120))}) — nicht gestartet, nichts gesendet. Gleich erneut versuchen.`) }
     zMark('richtung')
 
     // ── 4. Terminal starten / nach vorn (Login-Zwang wie bei Echo, wenn die Zugangsdaten zum Login passen) ──
@@ -48471,7 +48473,8 @@
       try{
         r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
           headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true,
+          // plan_id (30.10.2026): das Panel prüft damit vor dem Klick selbst die Gegenrichtung in der DB (richtung_frei, fail-closed)
+          body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true,
             final: _fin.final, final_grund: _fin.grund,   // Nachziehen nur bei finalem Trade (21.10.2026, echoV2Final)
             // Tagesgrenze-Rest in $ ohne Puffer (26.10.2026, Vertrag Teil B): reißt der SL am echten Fill die Grenze, zieht der Bot ihn nach;
             // aus der Order (Signal/Klick), sonst vom Plan — null = keine Prüfung
@@ -48709,7 +48712,10 @@
       } else {
         _pfSet('m5dir', 'warn', `⚠ ${fName} läuft bereits <b>${laufDir}</b>${beleg(laufArr)} — nur in dieselbe Richtung handeln, sonst Selbst-Hedge!`)
       }
-    }catch(_){ _pfSet('m5dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.') }
+    }catch(e){   // FAIL-CLOSED (30.10.2026, Finn: „auf gar keinen Fall ein interner Hedge"): nicht prüfbar = kein Start (vorher nur „warn")
+      _pfSet('m5dir', 'err', `Richtungs-Schutz nicht prüfbar (${escapeHtml(String((e && e.message) || e).slice(0, 120))}) — nicht gestartet, nichts gesendet. Gleich erneut versuchen.`)
+      hardFail = true
+    }
 
     // ── 4. Werte pushen ── (max Lots komplett abgeschafft, 15.08.2026 Finns
     // Ansage — es gibt keine Sicherheitsgrenze mehr, nur noch Broker-Limits)
@@ -48956,7 +48962,7 @@
               try{
                 const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                   headers:{'Content-Type':'application/json'},
-                  body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung,
+                  body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
                                          volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
                 // Position lesend bestätigt → Plan SOFORT auf „Läuft", ohne aufs
                 // Check-Ende zu warten (18.08.2026, Finns Punkt). Gilt auch, wenn
@@ -50150,6 +50156,7 @@
              + ',route,ended_at,master_pl,final:mt5_baseline->final,bal_nach:mt5_baseline->bal_nach'   // für rkPlanGelesen (19.10.2026)
              + (o.geplanteHand ? ',auto_plan,orbit_v3,hedge_eur,notes,master_account_id,start_um,planned_for,created_at' : ''))   // (route steht oben schon)
              .in('status', ['open', 'review', 'planned'])
+           if(o.streng && (error || !Array.isArray(data))) throw new Error('Pläne nicht lesbar: ' + ((error && error.message) || 'keine Daten'))
            if(!error && Array.isArray(data)) liste = data.map(r => {
              // Plan-Popup (geplanteHand): Hand/WD/Orbit V3 + „von heute" wie aus tradePlans (09.10.2026)
              const pl = o.geplanteHand ? { route: r.route, orbitV3: r.orbit_v3 === true, hedgeEur: r.hedge_eur != null ? Number(r.hedge_eur) : null, notes: r.notes,
@@ -50157,7 +50164,7 @@
              return { id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name,
                geclaimt: rkClaimAt(r.start_um_gestartet_at, r.orbit_gesendet_at), sf: r.start_fehler || null,
                gelesen: rkPlanGelesen(r.status, r.route, r.ended_at, r.master_pl, r.final, r.bal_nach),
-               hand: pl ? (r.auto_plan !== true || tpIstWdPlan(pl) || tpIstOrbitV3(pl)) : false, heute: pl ? rkPlanHeute(pl) : false } }) }catch(_){}
+               hand: pl ? (r.auto_plan !== true || tpIstWdPlan(pl) || tpIstOrbitV3(pl)) : false, heute: pl ? rkPlanHeute(pl) : false } }) }catch(e){ if(o.streng) throw e }
     }
     if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'review' || p.status === 'planned')
       .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName,
