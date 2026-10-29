@@ -2063,6 +2063,7 @@ def main():
     results.append(test_tv_neuladen())
     results.append(test_tv_tm_update())
     results.append(test_hedge_closed_at_ms())
+    results.append(test_puls_fehlerfoto())
 
     print()
     ok = sum(1 for r in results if r)
@@ -10295,6 +10296,73 @@ def test_tv_tm_update():
     finally:
         for n, f in alt.items():
             setattr(ob, n, f)
+    return ok
+
+
+def test_puls_fehlerfoto():
+    """PULS-FEHLERFOTO (29.10.2026): welcher Lauf fotografiert, Deckel (10 min je Weg+Code, Stunde), id/Präfix, PowerShell-Skript, und die
+    stdout-Hülle: nur die erste ok-false-Antwort bekommt „fehlerbild", alles andere geht unverändert durch, kein Foto ohne Anstoß."""
+    import io, json
+    import order_bot as ob
+    ok = True
+
+    def chk(b, msg):
+        nonlocal ok
+        print(("✓ " if b else "✗ ") + msg)
+        ok = ok and bool(b)
+
+    W = ob.fehlerfoto_weg
+    chk(W("tsxorder") == ("tsxorder", "tsx") and W("tvlesen") == ("tvlesen", "tv") and W(r"C:\x\cfg.json") == ("echo", None)
+        and W("mousetest") is None and W("fehlerfoto") is None and W("augen") is None and W("") is None,
+        "fehlerfoto_weg: TopstepX/TradingView mit Tab, Echo nur Bildschirm, Diagnose-Modi nie")
+    E, t = ob.fehlerfoto_entscheid, 1_000_000.0
+    j1, m1 = E(None, "tvorder", "konto", t)
+    j2, m2 = E(m1, "tvorder", "konto", t + 60)
+    j3, _ = E(m2, "tvorder", "konto", t + 601)
+    j4, _ = E(m1, "tvorder", "ratlos", t + 60)
+    j5, _ = E(None, "tvlesen", "puls_beschaeftigt", t)
+    voll = {"zeiten": [t - i for i in range(ob.FEHLERFOTO_STUNDE)], "je": {}}
+    j6, _ = E(voll, "tsxorder", "neu", t)
+    chk(j1 and not j2 and j3 and j4 and not j5 and not j6, "fehlerfoto_entscheid: 10 min je Weg+Code, anderer Code sofort, belegt nie, Stundendeckel")
+    i = ob.fehlerfoto_id(1793232000.0, "abc123")
+    chk(i == "20261029-000000-abc123" and ob.fehlerfoto_praefix("pc-7ftp5l", i) == "pc-7ftp5l/2026-10-29/20261029-000000-abc123",
+        f"fehlerfoto_id/praefix: UTC-Datum im Namen und im Ordner ({i})")
+    ps = ob.fehlerfoto_ps_skript(r"C:\Temp\f.jpg")
+    chk("CopyFromScreen" in ps and "SetProcessDPIAware" in ps and "VirtualScreen" in ps and "[long]60" in ps and "1600/" in ps
+        and r"C:\Temp\f.jpg" in ps, "PowerShell: ganzer virtueller Bildschirm, DPI-bewusst, ≤ 1600 px, JPEG 60")
+    try:
+        ob.fehlerfoto_ps_skript("C:\\x'; rm")
+        chk(False, "PowerShell: Pfad mit ' muss abbrechen")
+    except ValueError:
+        chk(True, "PowerShell: Pfad mit ' bricht ab")
+    alt = ob.fehlerfoto_anstossen
+    gerufen = []
+    try:
+        ob.fehlerfoto_anstossen = lambda weg, tab, code: (gerufen.append((weg, tab, code)) or "pc-abcd/2026-10-29/20261029-000000-abc123")
+        echt = io.StringIO()
+        h = ob._FehlerfotoAusgabe(echt, "tsxorder", "tsx")
+        print("Spur-Zeile ohne JSON", file=h)
+        h.write(json.dumps({"ok": True, "msg": "gut"}))
+        h.write("\n")
+        print(json.dumps({"ok": False, "code": "haenger", "msg": "hing — ü"}), file=h)
+        print(json.dumps({"ok": False, "code": "zweite"}), file=h)
+        h.write('{"ok": false, "code": "rest"}')
+        zeilen = echt.getvalue().splitlines()
+        d = json.loads(zeilen[2])
+        chk(zeilen[0] == "Spur-Zeile ohne JSON" and json.loads(zeilen[1]) == {"ok": True, "msg": "gut"}
+            and d["fehlerbild"] == "pc-abcd/2026-10-29/20261029-000000-abc123" and d["msg"] == "hing — ü" and gerufen == [("tsxorder", "tsx", "haenger")]
+            and "fehlerbild" not in json.loads(zeilen[3]) and len(zeilen) == 4,
+            f"Hülle: nur die erste ok-false-Antwort bekommt fehlerbild, Rest unverändert, Teilzeile wartet ({len(zeilen)} Zeilen)")
+        h.rest_ausgeben()
+        chk(echt.getvalue().endswith('{"ok": false, "code": "rest"}') and len(gerufen) == 1, "Hülle: Rest ohne Zeilenende geht beim Ende raus, kein zweites Foto")
+        ob.fehlerfoto_anstossen = lambda weg, tab, code: None
+        echt2 = io.StringIO()
+        h2 = ob._FehlerfotoAusgabe(echt2, "echo", None)
+        roh = json.dumps({"ok": False, "code": "konto"})
+        print(roh, file=h2)
+        chk(echt2.getvalue() == roh + "\n", "Hülle: Deckel sagt nein → Antwort Zeichen für Zeichen unverändert")
+    finally:
+        ob.fehlerfoto_anstossen = alt
     return ok
 
 

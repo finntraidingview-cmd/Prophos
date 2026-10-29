@@ -25852,7 +25852,7 @@
       const ok = !!(r && r.ok && (!r.konto_aktiv || String(r.konto_aktiv).includes(konto)))
       // Puls belegt / Polar hat den PC (Panel 409): kein Fehlschlag, nur „später" — kein Zähler, kein 🔴 (Prüfer 22.10.2026, Punkt 4)
       const spaeter = !ok && (HW_SPAETER_CODES.has(String((r && r.code) || '')) || /Reader blind/.test(String(grund || '')))   // Blind-Heimweg = nur ein Versuch (28.10.2026)
-      const fehlTxt = ok ? '' : String((r && (r.msg || r.code)) || 'keine Antwort')
+      const fehlTxt = ok ? '' : String((r && (r.msg || r.code)) || 'keine Antwort') + (r && r.fehlerbild ? ' · Bild ' + r.fehlerbild : '')   // Fehlerfoto (29.10.2026)
       console.info(`[big-trade] Heimweg nach ${grund}: Puls ${ok ? 'wieder' : spaeter ? 'noch nicht (belegt)' : 'NICHT'} auf „${bt.masterName || konto}" (${((Date.now() - anstoss) / 1000).toFixed(1)} s)`, fehlTxt)
       if(ok){
         _hwWiederN = 0; _hwFehlN = 0; _hwOkAt = Date.now(); _hwOkPlan = String(bt.id); _hwOkOffen = true
@@ -47971,8 +47971,8 @@
       const retryOk = !!(r && r.retry_ok)
       const msg = String((r && (r.msg || r.error)) || 'keine Antwort vom Bot')
       _pfSet('v2order', 'err', escapeHtml(msg))
-      _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk, offen, msg })
-      if(vonTick && !offen) await sfMelden(plan, { schritt: 'v2order', msg, unklar: !retryOk })   // START-FEHLER (07.10.2026)
+      _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk, offen, msg, fehlerbild: (r && r.fehlerbild) || null })
+      if(vonTick && !offen) await sfMelden(plan, { schritt: 'v2order', msg, unklar: !retryOk, bild: r && r.fehlerbild })   // START-FEHLER (07.10.2026); Fehlerfoto (29.10.2026)
       abschluss(false, offen ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT im Master-Terminal nachtragen!'
         : retryOk ? '✗ Nichts platziert — Meldung oben. „Erneut versuchen" nimmt die Order vom Plan.'
         : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.', retryOk && !offen)
@@ -50613,14 +50613,14 @@
         const schritt = unk ? 'unklar' : String((r && (r.schritt || r.code)) || (/nicht erreichbar|Backend/i.test(String(text)) ? 'pc' : 'puls'))
         // Konto-Befund (08.10.2026): puls_fehlstarts hat kein JSON-Feld → kurz an msg (sfMelden kappt bei 400)
         const kb = (typeof tvPulsKontoBefund === 'function') ? tvPulsKontoBefundText(tvPulsKontoBefund(r)) : ''
-        try{ await sfMelden(plan, { schritt, msg: (String(text).replace(/\s+/g, ' ') + kb).slice(0, 400), unklar: unk }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }
+        try{ await sfMelden(plan, { schritt, msg: (String(text).replace(/\s+/g, ' ') + kb).slice(0, 400), unklar: unk, bild: r && r.fehlerbild }) }catch(e){ console.warn('[start-fehler] orbit', (e && e.message) || e) }
       }
       // Diagnose mitschicken (23.09.2026, Moritz-PC: der Dump lag nur auf dem PC, vom Mac
       // aus war 'steht dort eine Fehlermeldung?' nicht zu beantworten) — per SQL lesbar.
       if(fern) return fern.melde({ ok:false, unklar: !!(r && r.retry_ok === false) || /^⚠ Ergebnis UNKLAR/.test(text),
                                    msg: text, trail: (r && r.trail) || null,
                                    zustand: (r && r.zustand) || null, schritt: (r && r.schritt) || null,
-                                   diagnose: (r && r.diagnose) || null })
+                                   diagnose: (r && r.diagnose) || null, fehlerbild: (r && r.fehlerbild) || null })
       if(imPopup){
         _pfSet('ob-order', 'err', escapeHtml(text))
         pfEnde(false, /^✗ von TopstepX abgelehnt/.test(text) ? '✗ Von TopstepX abgelehnt — Plan bleibt Geplant.'
@@ -54874,9 +54874,16 @@
       // Kein Minuten-Spam (14.10.2026: 25 Zeilen „zu_spaet" für zwei gelöschte Chris-Pläne in 20 min) — derselbe Schritt binnen 10 min
       // kommt nur einmal ins Protokoll; das Flag am Plan ist trotzdem frisch
       const doppelt = !!(alt && alt.schritt === flag.schritt && Date.now() - (Date.parse(alt.at) || 0) < 10 * 60000)
-      if(!doppelt) supabase.from('puls_fehlstarts').insert({ plan_id: String(plan.id), route: plan.route || null, firma: plan.masterFirm || null,
-        konto: plan.masterName || null, pc: flag.pc, login: flag.login, schritt: flag.schritt, msg: flag.msg, unklar: flag.unklar })
-        .then(({ error }) => { if(error) console.warn('[start-fehler] Protokoll', error.message) }, () => {})
+      // FEHLERFOTO (29.10.2026, Finn: „Wenn Fehler kommt, immer mit Screenshots arbeiten"): der Bot gibt bei ok false „fehlerbild" zurück
+      // (<pc>/<JJJJ-MM-TT>/<id>, Bild im privaten Bucket puls-fehlerbilder) → bild_pfad. Fehlt die Spalte noch (SQL steht aus), ohne Feld nochmal.
+      const bild = /^pc-[a-z0-9]{4,12}\/\d{4}-\d{2}-\d{2}\/\d{8}-\d{6}-[0-9a-f]{6}$/.test(String(f.bild || '')) ? String(f.bild) : null
+      const sfZeile = { plan_id: String(plan.id), route: plan.route || null, firma: plan.masterFirm || null,
+        konto: plan.masterName || null, pc: flag.pc, login: flag.login, schritt: flag.schritt, msg: flag.msg, unklar: flag.unklar, ...(bild ? { bild_pfad: bild } : {}) }
+      if(!doppelt) supabase.from('puls_fehlstarts').insert(sfZeile)
+        .then(({ error }) => {
+          if(error && bild && /bild_pfad/.test(String(error.message || ''))){ delete sfZeile.bild_pfad; return supabase.from('puls_fehlstarts').insert(sfZeile).then(({ error: e2 }) => { if(e2) console.warn('[start-fehler] Protokoll', e2.message) }) }
+          if(error) console.warn('[start-fehler] Protokoll', error.message)
+        }, () => {})
       // Handy-Meldung (07.10.2026, Finn: Fehlstarts sofort sehen und selbst beheben) — Ziel erreicht meldet tpStartUmTick selbst
       // Nur, wenn kein Neuversuch folgt (21.10.2026, s. sfVersuchtErneut): Deckel voll, unklar, ohne Selbstheilung. Hängt ein Plan später
       // (kein Neuversuch binnen SF_HAENGT_MS), meldet sfTick EINMAL nach (sfHaengtMelden)

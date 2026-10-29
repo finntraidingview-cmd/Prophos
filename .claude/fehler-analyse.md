@@ -32,6 +32,39 @@ where puls_fehler_muster_text(schritt, msg) = '<muster>' order by at desc limit 
 
 Rohdaten eines Laufs: `order_signale.ergebnis` (trail, diagnose) bzw. `puls_diagnose` (pc_id, at) zur selben Zeit.
 
+## Fehlerfoto (seit 29.10.2026)
+
+Finn: „Wenn Fehler kommt, immer mit Screenshots arbeiten.“ Endet ein Puls-Lauf mit `ok: false`, fotografiert der Bot entkoppelt den
+ganzen Bildschirm des PCs (fängt MT5-/Windows-Dialoge wie `consent.exe`) und bei TradingView-/TopstepX-Läufen zusätzlich den Tab im
+Puls-Chrome. Deckel: dasselbe (Weg, Code) höchstens alle 10 min, je PC höchstens 12 Fotos je Stunde. Belegt-Antworten
+(`puls_beschaeftigt`, `polar_aktiv`, …) bekommen nie ein Foto. Code: `order_bot.py` (Block PULS-FEHLERFOTO), `app.py` (Routen
+`/puls-fehlerbild*`), SQL `sql/2026-10-29_puls_fehlerbilder.sql`.
+
+- **Wo steht der Pfad?** `puls_fehlstarts.bild_pfad`, `order_signale.ergebnis->>'fehlerbild'`, in den Views als `bild_pfad`
+  (`puls_fehler_ereignisse`) bzw. `bild` (jüngstes Bild je Muster, `puls_fehler_muster`). Beim gescheiterten Heimweg steht er am Ende
+  der Meldung („· Bild <pfad>“). Form: `<pc>/<JJJJ-MM-TT>/<id>`.
+- **Dateien im privaten Bucket `puls-fehlerbilder`:** `<pfad>-bildschirm.jpg` und, falls da, `<pfad>-tab.jpg`. Ohne Policies, nur der
+  Service-Key kommt dran.
+- **Ansehen (Claude am Mac / Routine):** Bild laden, dann mit dem Read-Werkzeug öffnen:
+
+```bash
+curl -s "https://web-production-bec81.up.railway.app/puls-fehlerbild-datei?pfad=<pfad>&art=bildschirm&token=$PULS_FEHLERBILD_TOKEN" -o /tmp/fehlerbild.jpg
+```
+
+  `art=tab` für das Bild des Puls-Chrome-Tabs. Der Token steht in der Railway-Variable `PULS_FEHLERBILD_TOKEN` (fehlt sie → 404).
+  Im Browser mit Admin-Login geht auch `GET /admin/puls-fehlerbild?pfad=<pfad>&art=bildschirm` (5-min-Link, Gate wie Admin → Mail).
+- **Welche Fehler haben Bilder?**
+
+```sql
+select at, pc, quelle, schritt, left(msg, 80) msg, bild_pfad from puls_fehler_ereignisse
+where bild_pfad is not null and at > now() - interval '24 hours' order by at desc;
+select name, created_at from storage.objects where bucket_id = 'puls-fehlerbilder' order by created_at desc limit 20;
+```
+
+- **Kein Bild, obwohl Fehler?** Auf dem PC liegt neben dem Bot `fehlerfoto.log` (je Foto eine Zeile: Größe oder Fehler — PowerShell,
+  kein Puls-Chrome, Upload). Gegen Spam greift der Deckel (siehe oben).
+- Ein Bild ist ein Beleg, kein Beweis für die Ursache: immer mit `trail`/`puls_diagnose` derselben Minute zusammen lesen.
+
 ## Vorgehen
 
 1. Bei „Was steht an?", nach einem gemeldeten Fehlstart oder wenn Finn nach Fehlern fragt: Top-Muster abfragen.

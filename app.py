@@ -15573,6 +15573,123 @@ def puls_diagnose_schreiben(pc_id):
     return jsonify({"ok": True})
 
 
+# ══ PULS-FEHLERFOTO (29.10.2026, Finn: „Wenn Fehler kommt, immer mit Screenshots arbeiten, ist eine gute Idee") ══════════════════════
+# Der Bot (order_bot.py fehlerfoto, ENTKOPPELT nach einem Lauf mit ok false) lädt je Fehler bis zu zwei JPEGs hoch: art 'bildschirm'
+# (ganzer Bildschirm per PowerShell — fängt MT5-/Windows-Dialoge wie consent.exe) und 'tab' (aktiver Tab des Puls-Chrome per CDP). Wie
+# /puls-diagnose ohne Anmeldung (der Bot hat keinen Schlüssel): pc_id-Muster, Bild-id mit Datum (± 2 Tage), nur JPEG (Kopf FF D8 FF),
+# ≤ PULS_FEHLERBILD_MAX, je PC höchstens PULS_FEHLERBILD_STUNDE Bilder je Stunde, nie überschreiben (x-upsert false), nie löschen.
+# Ablage: privater Bucket puls-fehlerbilder ohne Policies (nur Service-Key, sql/2026-10-29_puls_fehlerbilder.sql), Pfad
+# <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg. Den Präfix <pc>/<JJJJ-MM-TT>/<id> gibt der Bot im Ergebnis als „fehlerbild" zurück → order_signale.ergebnis
+# und puls_fehlstarts.bild_pfad. Ansehen: GET /admin/puls-fehlerbild?pfad=<präfix>&art=bildschirm|tab → Link 5 min gültig.
+PULS_FEHLERBILD_BUCKET = "puls-fehlerbilder"
+PULS_FEHLERBILD_MAX = 400 * 1024
+PULS_FEHLERBILD_STUNDE = 30
+PULS_FEHLERBILD_ID_RE = re.compile(r"(\d{4})(\d{2})(\d{2})-\d{6}-[0-9a-f]{6}")
+PULS_FEHLERBILD_PRAEFIX_RE = re.compile(r"(pc-[a-z0-9]{4,12})/(\d{4}-\d{2}-\d{2})/(\d{8}-\d{6}-[0-9a-f]{6})")
+_puls_fehlerbild_zeiten = {}
+_puls_fehlerbild_lock = threading.Lock()
+
+
+def puls_fehlerbild_pfad(pc_id, bild_id, art, jetzt=None):
+    """REIN RECHNEND: Ablagepfad <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg oder None (pc/id/art ungültig, Datum der id > 2 Tage weg)."""
+    m = PULS_FEHLERBILD_ID_RE.fullmatch(str(bild_id or ""))
+    if not PC_ID_MUSTER.fullmatch(str(pc_id or "")) or not m or art not in ("bildschirm", "tab"):
+        return None
+    try:
+        tag = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=timezone.utc).date()
+    except ValueError:
+        return None
+    if abs((tag - (jetzt or datetime.now(timezone.utc)).date()).days) > 2:
+        return None
+    return f"{pc_id}/{tag.isoformat()}/{bild_id}-{art}.jpg"
+
+
+def puls_fehlerbild_erlaubt(zeiten, pc_id, jetzt_s, je_stunde=PULS_FEHLERBILD_STUNDE):
+    """REIN RECHNEND bis auf das übergebene dict: noch Platz in der Stunde dieses PCs? Zählt den Versuch mit, wenn ja."""
+    z = [t for t in zeiten.get(pc_id, ()) if jetzt_s - t < 3600]
+    if len(z) >= je_stunde:
+        zeiten[pc_id] = z
+        return False
+    zeiten[pc_id] = z + [jetzt_s]
+    return True
+
+
+@app.route("/puls-fehlerbild/<pc_id>", methods=["POST"])
+def puls_fehlerbild_hochladen(pc_id):
+    """POST /puls-fehlerbild/<pc_id>?id=<JJJJMMTT-hhmmss-xxxxxx>&art=bildschirm|tab, Körper = JPEG → {ok, pfad}. Siehe Block oben."""
+    pfad = puls_fehlerbild_pfad(pc_id, request.args.get("id"), request.args.get("art"))
+    if not pfad:
+        return jsonify({"ok": False, "msg": "pc_id/id/art ungültig"}), 400
+    if (request.content_length or 0) > PULS_FEHLERBILD_MAX:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    roh = request.get_data(cache=False) or b""
+    if len(roh) > PULS_FEHLERBILD_MAX or not roh.startswith(b"\xff\xd8\xff"):
+        return jsonify({"ok": False, "msg": "kein JPEG oder zu groß"}), 400
+    with _puls_fehlerbild_lock:
+        if not puls_fehlerbild_erlaubt(_puls_fehlerbild_zeiten, pc_id, time.time()):
+            return jsonify({"ok": False, "msg": "zu viele Bilder in dieser Stunde"}), 429
+    if not SUPABASE_SERVICE_KEY:
+        return jsonify({"ok": False, "msg": "Server nicht konfiguriert"}), 503
+    try:
+        r = requests.post(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{pfad}", data=roh, timeout=20,
+                          headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                   "Content-Type": "image/jpeg", "x-upsert": "false"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    if r.status_code >= 300:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar (HTTP {r.status_code})"}), 502
+    return jsonify({"ok": True, "pfad": pfad})
+
+
+@app.route("/admin/puls-fehlerbild", methods=["GET", "OPTIONS"])
+def admin_puls_fehlerbild():
+    """GET /admin/puls-fehlerbild?pfad=<pc>/<JJJJ-MM-TT>/<id>&art=bildschirm|tab → {ok, url} (signierter Link, 5 min). Gate wie Admin → Mail."""
+    if request.method == "OPTIONS":
+        return "", 200
+    err = _admin_mail_auth()
+    if err:
+        return err
+    m = PULS_FEHLERBILD_PRAEFIX_RE.fullmatch(str(request.args.get("pfad") or "").strip())
+    art = str(request.args.get("art") or "bildschirm")
+    if not m or art not in ("bildschirm", "tab"):
+        return jsonify({"ok": False, "msg": "pfad/art ungültig"}), 400
+    pfad = f"{m.group(0)}-{art}.jpg"
+    try:
+        r = requests.post(f"{SUPABASE_URL}/storage/v1/object/sign/{PULS_FEHLERBILD_BUCKET}/{pfad}", json={"expiresIn": 300}, timeout=10,
+                          headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+        d = r.json() if r.status_code == 200 else {}
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht lesbar ({type(e).__name__})"}), 502
+    teil = d.get("signedURL") or d.get("signedUrl")
+    if not teil:
+        return jsonify({"ok": False, "msg": "Bild nicht gefunden"}), 404
+    return jsonify({"ok": True, "pfad": pfad, "url": f"{SUPABASE_URL}/storage/v1{teil}"})
+
+
+@app.route("/puls-fehlerbild-datei", methods=["GET"])
+def puls_fehlerbild_datei():
+    """GET /puls-fehlerbild-datei?pfad=<pc>/<JJJJ-MM-TT>/<id>&art=bildschirm|tab&token=… → das JPEG selbst (für die Fehler-Routine und
+    Claude am Mac, die keinen Prophos-Login haben: curl → Datei → ansehen). Token aus der Railway-Variable PULS_FEHLERBILD_TOKEN (fehlt sie
+    oder ist sie kürzer als 32 Zeichen → immer 404), Vergleich zeitkonstant wie /ht/payouts.csv; falscher Token → 404. Nur lesen."""
+    if not ht_payouts_token_ok(request.args.get("token"), os.environ.get("PULS_FEHLERBILD_TOKEN")):
+        return Response("Not Found", status=404, mimetype="text/plain")
+    m = PULS_FEHLERBILD_PRAEFIX_RE.fullmatch(str(request.args.get("pfad") or "").strip())
+    art = str(request.args.get("art") or "bildschirm")
+    if not m or art not in ("bildschirm", "tab"):
+        return Response("pfad/art ungültig", status=400, mimetype="text/plain")
+    try:
+        r = requests.get(f"{SUPABASE_URL}/storage/v1/object/{PULS_FEHLERBILD_BUCKET}/{m.group(0)}-{art}.jpg", timeout=20,
+                         headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+    except Exception as e:
+        print(f"[puls-fehlerbild] ⚠️ nicht lesbar ({type(e).__name__})", flush=True)   # bewusst ohne URL/Token
+        return Response("Fehler", status=502, mimetype="text/plain")
+    if r.status_code != 200:
+        return Response("Bild nicht gefunden", status=404, mimetype="text/plain")
+    a = Response(r.content, mimetype="image/jpeg")
+    a.headers["Cache-Control"] = "no-store"
+    return a
+
+
 # ══ READER-DIAGNOSE (26.09.2026, Auftrag Koordination B9) ═════════════════════════════════════════════════════════
 # Der TV-Reader (ab 0.9.7) meldet seinen Updater-Zustand — Anlass: 0.9.6 kam auf pc-usq1i6 per Selbst-Update nicht an,
 # die Ursache stand nur im Reader-Fenster. sql/2026-09-26_reader_diagnose.sql, eine Zeile je (kennung, rolle).

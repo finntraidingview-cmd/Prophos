@@ -1050,6 +1050,274 @@ def _puls_diagnose_senden(spur=None, schritt=""):
         pass
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS-FEHLERFOTO (29.10.2026, Finn: „Wenn Fehler kommt, immer mit Screenshots arbeiten, ist eine gute Idee. Kannst einfach direkt schon
+# bauen."). Endet ein Lauf mit ok false, bekommt seine JSON-Antwort das Feld „fehlerbild" (<pc>/<JJJJ-MM-TT>/<id>) und ein ENTKOPPELTER
+# Prozess (Muster augen_anstossen) fotografiert den ganzen Bildschirm (PowerShell + System.Drawing, ohne pip — fängt MT5-/Windows-Dialoge
+# wie consent.exe) und bei TradingView-/TopstepX-Läufen zusätzlich den Tab im Puls-Chrome (CDP Page.captureScreenshot). Hochgeladen wird
+# über Railway POST /puls-fehlerbild/<pc> (der Bot hat keinen Supabase-Schlüssel) in den privaten Bucket puls-fehlerbilder.
+# Nie im Klick-/Order-Pfad: die Hülle greift erst an der fertigen Antwort (letzte JSON-Zeile), der Lauf wartet nicht auf das Foto.
+# Fehler beim Foto werden geschluckt (Zeile in fehlerfoto.log neben dem Bot). Deckel: dasselbe (Weg, Code) höchstens alle 10 min, je PC
+# höchstens FEHLERFOTO_STUNDE Fotos je Stunde; „belegt"-Antworten (Puls/Polar beschäftigt, kaputter Befehl) nie.
+# ═══════════════════════════════════════════════════════════════════════════
+FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "loginok", "tvfokus"})
+FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl"})
+FEHLERFOTO_GLEICH_S = 600.0
+FEHLERFOTO_STUNDE = 12
+FEHLERFOTO_BREITE = 1600
+FEHLERFOTO_QUALITAET = 60
+FEHLERFOTO_MAX = 400 * 1024
+_FEHLERFOTO_HIER = os.path.dirname(os.path.abspath(__file__))
+
+
+def fehlerfoto_weg(argv1):
+    """REIN RECHNEND (testbar): argv[1] eines Laufs → (weg, tab) oder None (Modus fotografiert nie). tab 'tv'/'tsx' = Puls-Chrome-Tab
+    per CDP mitfotografieren, None = nur der Bildschirm (Echo/MT5: argv[1] ist der Pfad der Config)."""
+    a = str(argv1 or "").strip()
+    if not a or a.lower() in FEHLERFOTO_OHNE:
+        return None
+    if a.lower().endswith(".json"):
+        return ("echo", None)
+    a = a.lower()[:20]
+    return (a, "tsx") if a.startswith("tsx") else (a, "tv") if a.startswith("tv") else (a, None)
+
+
+def fehlerfoto_entscheid(merk, weg, code, jetzt):
+    """REIN RECHNEND (testbar): Foto machen? -> (ja, merk_neu). merk = {'zeiten': [t…], 'je': {'weg|code': t}} aus fehlerfoto_merk.json."""
+    m = merk if isinstance(merk, dict) else {}
+    zahl = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    zeiten = [t for t in (m.get("zeiten") or []) if zahl(t) and 0 <= jetzt - t < 3600]
+    je = {k: v for k, v in (m.get("je") or {}).items() if isinstance(k, str) and zahl(v) and 0 <= jetzt - v < FEHLERFOTO_GLEICH_S}
+    key = f"{weg}|{code or '-'}"[:80]
+    if str(code or "") in FEHLERFOTO_CODES_OHNE or key in je or len(zeiten) >= FEHLERFOTO_STUNDE:
+        return False, {"zeiten": zeiten, "je": je}
+    je[key] = jetzt
+    return True, {"zeiten": zeiten + [jetzt], "je": je}
+
+
+def fehlerfoto_id(jetzt=None, zufall=None):
+    """REIN RECHNEND (testbar mit festen Werten): JJJJMMTT-hhmmss-xxxxxx (UTC) — die Railway-Route liest das Datum daraus."""
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() if jetzt is None else jetzt)) + "-" + (zufall or os.urandom(3).hex())
+
+
+def fehlerfoto_praefix(pc, bild_id):
+    """REIN RECHNEND (testbar): Ablage-Präfix <pc>/<JJJJ-MM-TT>/<id> (ohne -<art>.jpg) — so steht es in order_signale/puls_fehlstarts."""
+    i = str(bild_id)
+    return f"{pc}/{i[:4]}-{i[4:6]}-{i[6:8]}/{i}"
+
+
+def _fehlerfoto_pc():
+    try:
+        with open(os.path.join(_FEHLERFOTO_HIER, "pc_id.json"), "r", encoding="utf-8") as f:
+            pc = (json.load(f) or {}).get("pc_id")
+        return pc if isinstance(pc, str) and re.fullmatch(r"pc-[a-z0-9]{4,12}", pc) else None
+    except Exception:
+        return None
+
+
+def _fehlerfoto_log(text):
+    """Eine Zeile in fehlerfoto.log (höchstens ~200 Zeilen), nie ein Fehler nach außen."""
+    try:
+        p = os.path.join(_FEHLERFOTO_HIER, "fehlerfoto.log")
+        alt = []
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                alt = f.read().splitlines()[-199:]
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("\n".join(alt + [time.strftime("%Y-%m-%d %H:%M:%S ") + str(text)[:300]]) + "\n")
+    except Exception:
+        pass
+
+
+def fehlerfoto_anstossen(weg, tab, code):
+    """Nach der fertigen Antwort eines Laufs mit ok false: entscheiden (Deckel), id würfeln, Foto-Prozess ENTKOPPELT starten.
+    -> Präfix für „fehlerbild" oder None. Nie ein Fehler nach außen."""
+    try:
+        pc = _fehlerfoto_pc()
+        if not pc:
+            return None
+        p = os.path.join(_FEHLERFOTO_HIER, "fehlerfoto_merk.json")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                merk = json.load(f)
+        except Exception:
+            merk = None
+        ja, merk = fehlerfoto_entscheid(merk, weg, code, time.time())
+        if not ja:
+            return None
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(merk, f)
+        bid = fehlerfoto_id()
+        import subprocess
+        flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "fehlerfoto",
+                          json.dumps({"id": bid, "tab": tab, "weg": weg, "code": str(code or "")[:40]})], creationflags=flags,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        return fehlerfoto_praefix(pc, bid)
+    except Exception as e:
+        _fehlerfoto_log(f"anstoßen gescheitert: {type(e).__name__}: {e}")
+        return None
+
+
+class _FehlerfotoAusgabe:
+    """stdout-Hülle des Hauptlaufs (main): die ERSTE JSON-Zeile mit ok false bekommt „fehlerbild", danach startet das Foto entkoppelt.
+    Alles andere geht unverändert durch; Teilzeilen bleiben im Puffer bis zum Zeilenende (print schreibt Text und \\n getrennt)."""
+
+    def __init__(self, echt, weg, tab):
+        self._echt, self._weg, self._tab, self._puffer, self._fertig = echt, weg, tab, "", False
+
+    def _zeile(self, z):
+        if self._fertig or not z.lstrip().startswith("{"):
+            return z
+        try:
+            d = json.loads(z)
+        except ValueError:
+            return z
+        if not isinstance(d, dict) or d.get("ok") is not False or d.get("fehlerbild"):
+            return z
+        self._fertig = True
+        bild = fehlerfoto_anstossen(self._weg, self._tab, d.get("code") or d.get("schritt"))
+        if not bild:
+            return z
+        d["fehlerbild"] = bild
+        return json.dumps(d, ensure_ascii=True)
+
+    def write(self, s):
+        self._puffer += str(s)
+        while "\n" in self._puffer:
+            z, self._puffer = self._puffer.split("\n", 1)
+            self._echt.write(self._zeile(z) + "\n")
+        return len(s)
+
+    def flush(self):
+        try:
+            self._echt.flush()
+        except Exception:
+            pass
+
+    def rest_ausgeben(self):
+        if self._puffer:
+            z, self._puffer = self._puffer, ""
+            self._echt.write(self._zeile(z))
+        self.flush()
+
+    def __getattr__(self, n):
+        return getattr(self._echt, n)
+
+
+def fehlerfoto_huelle_einbauen(argv1):
+    """In main(): sys.stdout umhüllen, wenn der Modus fotografiert. Rest im Puffer geht beim Ende raus (atexit). Nie ein Fehler."""
+    try:
+        wt = fehlerfoto_weg(argv1)
+        if not wt or isinstance(sys.stdout, _FehlerfotoAusgabe):
+            return
+        h = _FehlerfotoAusgabe(sys.stdout, wt[0], wt[1])
+        sys.stdout = h
+        import atexit
+        atexit.register(h.rest_ausgeben)
+    except Exception:
+        pass
+
+
+FEHLERFOTO_PS = r"""
+$ErrorActionPreference='Stop'
+Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name P -Namespace FF
+[void][FF.P]::SetProcessDPIAware()
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
+$g=[System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size)
+$f=[Math]::Min(1.0,__BREITE__/$b.Width)
+$w=[int]($b.Width*$f);$h=[int]($b.Height*$f)
+$k=New-Object System.Drawing.Bitmap $w,$h
+$g2=[System.Drawing.Graphics]::FromImage($k)
+$g2.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+$g2.DrawImage($bmp,0,0,$w,$h)
+$enc=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{$_.MimeType -eq 'image/jpeg'}
+$p=New-Object System.Drawing.Imaging.EncoderParameters 1
+$p.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality),[long]__QUALITAET__
+$k.Save('__PFAD__',$enc,$p)
+"""
+
+
+def fehlerfoto_ps_skript(pfad, breite=FEHLERFOTO_BREITE, qualitaet=FEHLERFOTO_QUALITAET):
+    """REIN RECHNEND (testbar): PowerShell-Skript für das Bildschirmfoto (Pfad ohne einfaches Anführungszeichen, sonst ValueError)."""
+    p = str(pfad)
+    if "'" in p or "\n" in p:
+        raise ValueError("Pfad ungeeignet")
+    return FEHLERFOTO_PS.replace("__BREITE__", str(int(breite))).replace("__QUALITAET__", str(int(qualitaet))).replace("__PFAD__", p)
+
+
+def _fehlerfoto_hochladen(pc, bid, art, roh):
+    import urllib.request
+    req = urllib.request.Request(f"{PULS_BACKEND}/puls-fehlerbild/{pc}?id={bid}&art={art}", data=roh, method="POST",
+                                 headers={"Content-Type": "image/jpeg"})
+    urllib.request.urlopen(req, timeout=20).read()
+
+
+def _fehlerfoto_bildschirm(pc, bid):
+    import subprocess
+    import tempfile
+    pfad = os.path.join(tempfile.gettempdir(), f"prophos-fehlerfoto-{bid}.jpg")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", fehlerfoto_ps_skript(pfad)],
+                           capture_output=True, text=True, timeout=25, creationflags=0x08000000)
+        if r.returncode != 0 or not os.path.exists(pfad):
+            raise RuntimeError(f"PowerShell {r.returncode}: {(r.stderr or '').strip()[-160:]}")
+        with open(pfad, "rb") as f:
+            roh = f.read()
+        if not roh.startswith(b"\xff\xd8\xff") or len(roh) > FEHLERFOTO_MAX:
+            raise RuntimeError(f"Bild unbrauchbar ({len(roh)} Bytes)")
+        _fehlerfoto_hochladen(pc, bid, "bildschirm", roh)
+        return len(roh)
+    finally:
+        try:
+            os.remove(pfad)
+        except OSError:
+            pass
+
+
+def _fehlerfoto_tab(pc, bid, tab):
+    import base64
+    liste = _cdp_http("/json/list") or []
+    ziele = tsx_targets(liste) if tab == "tsx" else augen_tv_targets(liste)
+    if not ziele or not ziele[0].get("webSocketDebuggerUrl"):
+        raise RuntimeError("kein Tab im Puls-Chrome")
+    v = _CdpVerbindung(ziele[0]["webSocketDebuggerUrl"], timeout=8.0)
+    try:
+        roh = b""
+        for q in (FEHLERFOTO_QUALITAET, 35):
+            roh = base64.b64decode(v.rufe("Page.captureScreenshot", {"format": "jpeg", "quality": q, "captureBeyondViewport": False},
+                                          timeout=10.0).get("data") or "")
+            if len(roh) <= FEHLERFOTO_MAX:
+                break
+    finally:
+        v.zu()
+    if not roh.startswith(b"\xff\xd8\xff") or len(roh) > FEHLERFOTO_MAX:
+        raise RuntimeError(f"Tab-Bild unbrauchbar ({len(roh)} Bytes)")
+    _fehlerfoto_hochladen(pc, bid, "tab", roh)
+    return len(roh)
+
+
+def modus_fehlerfoto(cmd):
+    """Entkoppelter Foto-Prozess (fehlerfoto_anstossen): Bildschirm + ggf. Puls-Chrome-Tab fotografieren und hochladen. Kein Klick, keine
+    Ausgabe nach außen, jeder Fehler nur in fehlerfoto.log."""
+    pc, bid = _fehlerfoto_pc(), str((cmd or {}).get("id") or "")
+    if not pc or not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}", bid):
+        return
+    teile = []
+    for art, fn in (("bildschirm", lambda: _fehlerfoto_bildschirm(pc, bid)),
+                    ("tab", (lambda: _fehlerfoto_tab(pc, bid, cmd.get("tab"))) if cmd.get("tab") in ("tv", "tsx") else None)):
+        if fn is None:
+            continue
+        try:
+            teile.append(f"{art} {fn() // 1024} KB")
+        except Exception as e:
+            teile.append(f"{art} FEHLER {type(e).__name__}: {str(e)[:120]}")
+    _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)} ({cmd.get('weg') or '?'} {cmd.get('code') or '-'}): " + " · ".join(teile))
+
+
 def _puls_fenster(trail):
     """Das Handels-Fenster dieses PCs → (pywinauto-Fenster | None, code, text). code 'gemerkt' | 'neu' | 'kein_chrome' |
     'unklar'. Ein Mal je Lauf gesucht; danach nur noch geprueft, ob es noch lebt."""
@@ -27039,6 +27307,14 @@ def main():
             _s.reconfigure(errors="replace")
         except Exception:
             pass
+    if len(sys.argv) >= 3 and sys.argv[1] == "fehlerfoto":
+        # PULS-FEHLERFOTO (29.10.2026): entkoppelter Foto-Prozess nach einem Lauf mit ok false (fehlerfoto_anstossen)
+        try:
+            modus_fehlerfoto(json.loads(sys.argv[2]))
+        except Exception as e:
+            _fehlerfoto_log(f"fehlerfoto abgebrochen: {type(e).__name__}: {e}")
+        return 0
+    fehlerfoto_huelle_einbauen(sys.argv[1] if len(sys.argv) >= 2 else "")   # ok-false-Antwort → „fehlerbild" + Foto (29.10.2026)
     if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":
         modus_mousetest()
         return 0
