@@ -40705,6 +40705,25 @@
 
     accEls.save.disabled = true
     accEls.save.classList.add('ts-btn-loading')
+    window._accSaveNr = (window._accSaveNr || 0) + 1   // läuft ein Anlegen für eine fremde ID noch, lässt es diese Sperre stehen
+
+    // FÜR EINE ANDERE ID (29.10.2026, Finn 07:15: „im Admin soll man alle bestätigen können"): aus Admin → Alle Accounts „Bestätigen" bei
+    // einer fremden ID — angelegt wird über POST /admin/konto-anlegen für den Besitzer der Zeile (Service-Key, Doppel-Schutz serverseitig).
+    // Kein accounts.unshift, kein Duplikum/MT5 (das ist die Liste und der PC der eingeloggten ID); Zugangsdaten gehen nicht mit.
+    // Gegenprüfung 29.10.2026: schließt Escape das Modal während der Anfrage und öffnet sich ein neues, fasst die Antwort das neue nicht an
+    // (fuer ist je Öffnung ein eigenes Objekt; nach dem Schließen steht window._kontoFuer auf null)
+    if(!isEdit && window._kontoFuer && typeof window._kontoFuerAnlegen === 'function'){
+      const fuer = window._kontoFuer
+      const nochOffen = () => window._kontoFuer === fuer
+      const nr = (window._accSaveNr = (window._accSaveNr || 0) + 1)   // Sperre nur lösen, wenn seitdem kein anderes Speichern begonnen hat
+      try{
+        setModalMsg(`Lege für ${fuer.name} an…`, 'muted')
+        await window._kontoFuerAnlegen(fuer, acc, consOn ? cons.wert : null)
+        if(nochOffen()) closeAccountModal()
+      }catch(e){ if(nochOffen()) setModalMsg((e && e.message) || String(e), 'err'); else if(typeof atToast === 'function') atToast(`${fuer.name}: ${(e && e.message) || e}`, 'end') }
+      finally{ if(window._accSaveNr === nr){ accEls.save.disabled = false; accEls.save.classList.remove('ts-btn-loading') } }
+      return
+    }
 
     // DOPPEL-SCHUTZ (29.10.2026): nach dem Sperren, damit ein zweiter Klick während der DB-Abfrage nicht durchkommt
     if(!isEdit && type !== 'live' && externalIdVal){
@@ -49783,7 +49802,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1843'
+  const OS_TAB_BUILD = '2026-09-22.1844'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -69714,14 +69733,15 @@
    * „Bestätigen" öffnet das Account-Modal vorbefüllt — angelegt wird über den bestehenden saveAccount-Klick, Finn kann die Phase vorher ändern;
    * „Ignorieren" merkt den Namen sofort lokal je ID und setzt per POST /tv-konten/ignorieren {name} tv_konten.ignoriert_at.
    * Admin → Alle Accounts: Zeilen im tbody #adm-k-tv aus GET /admin/tv-konten (HT-Sicht, Gate wie Admin → Mail; 403/404 still), ID-Farbe wie
-   * die Liste, ID-Filter der Liste gilt. Bestätigen/Ignorieren nur für die EINGELOGGTE ID — für fremde IDs gibt es keinen Anlege-Weg (accounts
-   * wird nur über den Browser-Client der eigenen ID geschrieben, RLS; geprüft 29.10.2026), dort steht „bei <ID> bestätigen".
+   * die Liste, ID-Filter der Liste gilt. Eingeloggte ID: Bestätigen/Ignorieren wie oben. Fremde ID (seit 29.10.2026 07:15, Finn: „im Admin soll
+   * man alle bestätigen können"): nur „Bestätigen" — dasselbe vorbefüllte Modal mit Hinweis „wird angelegt für <ID>", Speichern geht über
+   * POST /admin/konto-anlegen (Gate wie Kapital: ADMIN_EMAILS/admin_mail_leser, Verwalter nur seine Gruppe; Doppel → 409 „Gibt es schon").
    * Laden beim Öffnen (höchstens alle 60 s), Filtern bei jedem Neuzeichnen der Listen. ══ */
   // TV_KONTEN_AUTO (Finn 03:25: „später soll das Bestätigen wegfallen können"): true hieße, neue TV-Konten ohne Klick anzulegen. Das ist
   // NICHT gebaut — DB-Schreiben ohne Rückfrage braucht Finns Freigabe und den Prüfer. Bei true bleiben die Zeilen, es kommt nur ein Konsolen-Hinweis.
   const TV_KONTEN_AUTO = false
   const _tvNeu = { rows: [], at: 0, laedt: false, uid: '', schonDa: new Set() }   // schonDa: vom Doppel-Schutz gefunden (29.10.2026)
-  const _admKTv = { rows: [], at: 0, laedt: false }
+  const _admKTv = { rows: [], at: 0, laedt: false, angelegt: new Set(), schonDa: new Set(), laeuft: new Set() }   // Schlüssel user_id|External ID (fremde IDs)
   const tvIgnLsKey = () => `prophos_tv_ignoriert_${currentUserId || ''}`
   function tvIgnoriertLokal(){ try{ return new Set(JSON.parse(localStorage.getItem(tvIgnLsKey()) || '[]')) }catch(_){ return new Set() } }
   function tvIgnoriertMerken(name){ try{ const m = tvIgnoriertLokal(); m.add(name); localStorage.setItem(tvIgnLsKey(), JSON.stringify([...m].slice(-500))) }catch(_){} }
@@ -69772,21 +69792,50 @@
     td.children[0].textContent = SUC_PHASE_LABEL[z.typ] || z.typ
     if(z.schonDa){ td.children[1].textContent = 'schon in Prophos'; td.children[1].style.color = 'var(--sub)'; td.children[1].title = 'Beim Bestätigen gefunden: ein Konto mit dieser External ID gibt es schon (Doppel-Schutz)' }
   }
-  function tvKnoepfe(td, z){
+  // fremd = {uid, name, tvName}: Zeile einer anderen ID im Admin — nur „Bestätigen", gespeichert wird über window._kontoFuer (saveAccount)
+  function tvKnoepfe(td, z, fremd){
     td.style.whiteSpace = 'nowrap'; td.style.textAlign = 'right'
     td.innerHTML = '<button type="button" class="btn btn-primary" style="padding:4px 10px;font-size:11.5px">Bestätigen</button> '
-      + '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:11.5px">Ignorieren</button>'
-    // Bestätigen sperrt beide Knöpfe, bis das Modal wieder zu ist (kein zweites Modal/kein Doppel-Anlegen aus derselben Zeile)
+      + (fremd ? '' : '<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:11.5px">Ignorieren</button>')
+    // Bestätigen sperrt die Knöpfe, bis das Modal wieder zu ist (kein zweites Modal/kein Doppel-Anlegen aus derselben Zeile)
     td.children[0].addEventListener('click', () => {
+      // fremde ID: läuft für diese Zeile noch eine Anlege-Anfrage (Modal per Escape zu), nicht ein zweites Mal öffnen (Gegenprüfung 29.10.2026)
+      if(fremd && _admKTv.laeuft.has(`${fremd.uid}|${extIdNorm(fremd.tvName)}`)){ if(typeof atToast === 'function') atToast(`${z.ext}: Anlegen läuft noch`, 'end'); return }
       const knoepfe = [...td.querySelectorAll('button')]; knoepfe.forEach(b => { b.disabled = true })
       kontoModalVorbefuellen(z)
+      window._kontoFuer = fremd || null
       const modal = accEls?.modal
-      if(!modal){ knoepfe.forEach(b => { b.disabled = false }); return }
-      const zu = new MutationObserver(() => { if(!modal.classList.contains('open')){ zu.disconnect(); knoepfe.forEach(b => { b.disabled = false }) } })
+      if(!modal){ window._kontoFuer = null; knoepfe.forEach(b => { b.disabled = false }); return }
+      if(fremd && accEls.msg){ accEls.msg.textContent = `Wird angelegt für ${fremd.name} — nicht für die eingeloggte ID. Zugangsdaten gehen nicht mit.`; accEls.msg.className = 'modal-msg muted' }
+      const zu = new MutationObserver(() => { if(!modal.classList.contains('open')){ zu.disconnect(); window._kontoFuer = null; knoepfe.forEach(b => { b.disabled = false }) } })
       zu.observe(modal, { attributes: true, attributeFilter: ['class'] })
     })
-    td.children[1].addEventListener('click', () => tvNeuIgnorieren(z.ext))
+    if(!fremd) td.children[1].addEventListener('click', () => tvNeuIgnorieren(z.ext))
   }
+  // Speichern für eine fremde ID (aus saveAccount): POST /admin/konto-anlegen?ansicht=admin — Felder wie das Modal beim Anlegen schreibt, der
+  // Server nimmt nur seine Whitelist. Erfolg → Zeile weg, Toast, Admin-Liste neu; „Gibt es schon" → Zeile zeigt „schon in Prophos".
+  async function kontoFuerAnlegen(fuer, acc, consWert){
+    const key = `${fuer.uid}|${extIdNorm(acc.externalId || fuer.tvName)}`, zeile = `${fuer.uid}|${extIdNorm(fuer.tvName)}`
+    const body = { user_id: fuer.uid, tv_name: fuer.tvName || '', name: acc.name, firm: acc.firm, account_type: acc.type, external_id: acc.externalId,
+      purchase_cost: acc.purchaseCost, max_drawdown: acc.maxDrawdown, max_risiko_trade: acc.maxRisikoTrade, auto_planer: acc.autoPlaner !== false,
+      consistency_pct: consWert ?? null, payout_ready_at: acc.payoutReadyAt || null, waiting_payout: !!acc.waitingPayoutSince,
+      goal_kind: acc.goalKind || null, goal_target: acc.goalTarget, goal_min_profit: acc.goalMinProfit, goal_done_offset: acc.goalDoneOffset, goal_since: acc.goalSince }
+    let d
+    _admKTv.laeuft.add(zeile)
+    try{ d = await admMailFetch('/admin/konto-anlegen?ansicht=admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) }
+    catch(e){
+      if(/^Gibt es schon/.test(String((e && e.message) || ''))){ _admKTv.schonDa.add(key); admKTvRender() }
+      throw e
+    }
+    finally{ _admKTv.laeuft.delete(zeile) }
+    _admKTv.angelegt.add(key); _admKTv.angelegt.add(`${fuer.uid}|${extIdNorm(fuer.tvName)}`)
+    admKTvRender()
+    const zusatz = [acc.creds ? 'Zugangsdaten nicht übernommen' : '', d && d.hinweis].filter(Boolean).join(' · ')
+    if(typeof atToast === 'function') atToast(`✓ ${acc.name} für ${fuer.name} angelegt${zusatz ? ' — ' + zusatz : ''}`, zusatz ? 'end' : 'ok')
+    try{ window._admLaden?.() }catch(_){}
+    return d
+  }
+  window._kontoFuerAnlegen = (fuer, acc) => kontoFuerAnlegen(fuer, acc)
   // Eigene ID: Zeilen über der Kontoliste (Spalten wie Accounts: Account · Firm · Typ · Balance · Planer · Verknüpfungen · Aktionen)
   function tvNeuRender(){
     const tb = document.getElementById('tvNeuRows')
@@ -69843,6 +69892,7 @@
     const offen = tvOffen(_admKTv.rows, konten, null)
       .filter(z => !(String(z.row.user_id) === String(currentUserId) && ign.has(z.ext)))
       .filter(z => !person || String(z.row.user_id) === person)
+      .filter(z => !_admKTv.angelegt.has(`${z.row.user_id}|${extIdNorm(z.ext)}`))
     tb.innerHTML = ''
     for(const z of offen){
       const uid = String(z.row.user_id || '')
@@ -69855,11 +69905,11 @@
       tr.children[1].children[0].style.background = idFarbe(uid)
       tr.children[1].children[1].textContent = name
       tr.children[2].textContent = z.firma === '?' ? 'Firma unbekannt' : z.firma
-      z.schonDa = uid === String(currentUserId) && _tvNeu.schonDa.has(extIdNorm(z.ext))
+      z.schonDa = (uid === String(currentUserId) && _tvNeu.schonDa.has(extIdNorm(z.ext))) || _admKTv.schonDa.has(`${uid}|${extIdNorm(z.ext)}`)
       tvZelleTyp(tr.children[3], z)
       if(z.schonDa) { /* Doppel-Schutz hat das Konto gefunden — keine Knöpfe */ }
       else if(uid && uid === String(currentUserId)) tvKnoepfe(tr.children[7], z)
-      else{ tr.children[7].innerHTML = '<span style="font-size:11.5px;color:var(--sub)"></span>'; tr.children[7].children[0].textContent = `bei ${String(name).split(/\s+/)[0]} bestätigen` }
+      else if(uid) tvKnoepfe(tr.children[7], z, { uid, name, tvName: z.row.name || z.ext })
       tb.appendChild(tr)
     }
   }

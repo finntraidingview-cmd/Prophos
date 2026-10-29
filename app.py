@@ -16673,6 +16673,212 @@ def ht_payouts_csv_route():
     return r
 
 
+# ADMIN → KONTO FÜR EINE ANDERE ID ANLEGEN (29.10.2026, Finn 07:15: „Ja — im Admin soll man alle bestätigen können.“). Admin → Alle Accounts zeigt
+# TV-Konten aller IDs als „zu bestätigen“; bis hierhin konnte nur die eingeloggte ID ihre eigenen anlegen (accounts schreibt der Browser-Client per
+# RLS nur für sich). POST /admin/konto-anlegen legt das Konto mit dem Service-Key für den BESITZER der Zeile an — die eigene ID geht weiter über
+# saveAccount. Gate wie Kapital/Admin → Mail: uneingeschränkt nur ADMIN_EMAILS oder admin_mail_leser (Finn + Pascal, Pascal); Verwalter (Emin) nur
+# mit ?ansicht=admin und nur für IDs seiner Gruppe; jeder andere Login → 403. Body = Whitelist (admin_konto_zeile): genau die Felder, die das
+# Account-Modal beim Anlegen schreibt — nie Zugangsdaten, nie MetaApi, nie live, wd_farm immer aus. Doppel-Schutz wie kontoDoppelFinden im
+# Frontend (External ID normiert inkl. Apex-Form, archivierte zählen mit, Kontoname enthält die Nummer ab 8 Zeichen) → 409 mit Kontoname.
+# Danach tv_konten.angelegt_account_id (Tabelle fehlt → nur das Markieren entfällt) und wie saveAccount die Kauf-Transaktion bei Kaufpreis.
+ADMIN_KONTO_TYPEN = frozenset({"challenge", "phase1", "phase2", "funded", "funded_cfd", "winning_days"})   # live nie über diesen Weg
+ADMIN_KONTO_ZIELE = frozenset({"trading_days", "winning_days"})
+ADMIN_KONTO_APEX_RE = re.compile(r"^(PA-)?APEX-(\d+)-(\d+)$")
+
+
+def admin_konto_ext_norm(v):
+    """REIN RECHNEND: External ID normiert wie extIdNorm im Frontend — Großbuchstaben, Apex PA-APEX-685010-01 → PAAPEX6850100000001,
+    alles außer A–Z/0–9 raus."""
+    t = str(v or "").strip().upper()
+    m = ADMIN_KONTO_APEX_RE.match(t)
+    if m:
+        t = f"{'PAAPEX' if m.group(1) else 'APEX'}{m.group(2)}{m.group(3).rjust(7, '0')}"
+    return re.sub(r"[^A-Z0-9]", "", t)
+
+
+def admin_konto_doppel(ext, konten):
+    """REIN RECHNEND: erstes Konto der Liste mit derselben External ID (normiert) oder dessen Name die Nummer enthält (ab 8 Zeichen) — sonst None.
+    Wie kontoDoppelFinden; die Liste enthält archivierte Konten mit (das Archiv ist nur ein Merker)."""
+    k = admin_konto_ext_norm(ext)
+    if not k:
+        return None
+    for a in konten or ():
+        if admin_konto_ext_norm(a.get("external_id")) == k or (len(k) >= 8 and k in admin_konto_ext_norm(a.get("name"))):
+            return a
+    return None
+
+
+def admin_konto_zeile(b):
+    """REIN RECHNEND: (zeile, None) oder (None, Fehlertext) aus dem Request-Body — nur Whitelist-Felder, Typen geprüft; user_id setzt die Route."""
+    def text(k, n):
+        return str(b.get(k) or "").strip()[:n]
+
+    def zahl(k):
+        v = b.get(k)
+        if v in (None, ""):
+            return None
+        if isinstance(v, bool):
+            raise ValueError(k)
+        try:
+            f = float(v)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(k)
+        if f != f or f <= 0 or f > 1e9:
+            raise ValueError(k)
+        return f
+
+    def ganz(k, lo, hi, leer=None):
+        # nur echte Ganzzahl oder Ziffern-Text — kein bool, kein 5.9 → 5, kein Infinity (Gegenprüfung 29.10.2026)
+        v = b.get(k)
+        if v in (None, ""):
+            return leer
+        if isinstance(v, int) and not isinstance(v, bool):
+            n = v
+        elif isinstance(v, str) and re.fullmatch(r"\d{1,4}", v.strip()):
+            n = int(v.strip())
+        else:
+            raise ValueError(k)
+        if not lo <= n <= hi:
+            raise ValueError(k)
+        return n
+
+    def datum(k):
+        v = str(b.get(k) or "").strip()
+        if not v:
+            return None
+        try:
+            datetime.strptime(v[:10], "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(k)
+        if len(v) != 10:
+            raise ValueError(k)
+        return v
+
+    b = b if isinstance(b, dict) else {}
+    name, firm, ext, typ = text("name", 120), text("firm", 60), text("external_id", 64), text("account_type", 20)
+    if not name or not firm:
+        return None, "Name und Firma sind Pflicht"
+    if not ext:
+        return None, "External ID ist Pflicht"
+    if typ not in ADMIN_KONTO_TYPEN:
+        return None, "Typ nicht erlaubt"
+    try:
+        zeile = {"name": name, "firm": firm, "account_type": typ, "external_id": ext,
+                 "purchase_cost": zahl("purchase_cost"), "max_drawdown": zahl("max_drawdown"), "max_risiko_trade": zahl("max_risiko_trade"),
+                 "auto_planer": b.get("auto_planer") is not False, "wd_farm": False}
+        cons = zahl("consistency_pct")   # nur wenn im Modal gewählt (Standard = leer = DB-Standard); „Andere Zahl" darf Komma haben
+        if cons is not None and cons > 100:
+            raise ValueError("consistency_pct")
+        if cons is not None:
+            zeile["consistency_pct"] = cons
+        if typ == "funded_cfd":   # Payout-Block des Modals: nur Funded CFD
+            zeile["payout_ready_at"] = datum("payout_ready_at")
+            zeile["waiting_payout_since"] = datetime.now(timezone.utc).isoformat() if b.get("waiting_payout") is True else None
+        ziel = b.get("goal_kind") or None
+        if ziel is not None and ziel not in ADMIN_KONTO_ZIELE:
+            raise ValueError("goal_kind")
+        if ziel:
+            zeile.update(goal_kind=ziel, goal_target=ganz("goal_target", 1, 100, 5), goal_min_profit=zahl("goal_min_profit"),
+                         goal_done_offset=ganz("goal_done_offset", 0, 100), goal_since=datum("goal_since"), goal_manual=ziel == "winning_days")
+    except (TypeError, ValueError) as e:
+        return None, f"Feld ungültig: {e}"
+    return zeile, None
+
+
+def _admin_konto_gate():
+    """→ (erlaubt, None) oder (None, (Antwort, Status)); erlaubt = None (alle IDs) oder Menge der user_ids (Verwalter mit ?ansicht=admin).
+    Eng wie kapital_app._gate: eingeschränkte Logins nur als Verwalter, sonst ADMIN_EMAILS oder admin_mail_leser."""
+    uid, err = _wd_login()
+    if err:
+        return None, err
+    g.admin_konto_uid = str(uid)   # fürs Log: wer hat angelegt
+    nein = (jsonify({"ok": False, "msg": "Nur für Admins oder den Verwalter der Gruppe"}), 403)
+    sicht = getattr(g, "admin_sicht", None)
+    if sicht is not None:
+        if getattr(g, "admin_verwalter", False) and not isinstance(sicht, str) and sicht:
+            return frozenset(str(x) for x in sicht), None
+        return None, nein
+    _mail, err = _admin_auth()
+    if err is None:
+        return None, None
+    if err[1] != 403:
+        return None, err
+    try:
+        if str(uid) in admin_mail_leser_uids():
+            return None, None
+    except Exception:
+        return None, (jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502)
+    return None, nein
+
+
+@app.route("/admin/konto-anlegen", methods=["POST", "OPTIONS"])
+def admin_konto_anlegen():
+    """POST /admin/konto-anlegen {user_id, name, firm, account_type, external_id, …, tv_name?} → {ok, account, markiert} | 409 {ok:false, msg,
+    konto:{id,name}} (gibt es schon) | 400/403/404/502. Siehe Block oben."""
+    if request.method == "OPTIONS":
+        return "", 200
+    erlaubt, err = _admin_konto_gate()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    ziel = str(b.get("user_id") or "").strip().lower()
+    if not ADMIN_MAIL_UID_RE.fullmatch(ziel):
+        return jsonify({"ok": False, "msg": "user_id fehlt oder ungültig"}), 400
+    if erlaubt is not None and ziel not in erlaubt:
+        return jsonify({"ok": False, "msg": "ID nicht in deiner Gruppe"}), 403
+    zeile, fehler = admin_konto_zeile(b)
+    if fehler:
+        return jsonify({"ok": False, "msg": fehler}), 400
+    try:
+        if not any(str(u.get("id")) == ziel for u in (_auth_liste_anfrage().json() or {}).get("users", [])):
+            return jsonify({"ok": False, "msg": "ID nicht gefunden"}), 404
+        doppel = admin_konto_doppel(zeile["external_id"], sb_select("accounts", {"select": "id,name,external_id", "user_id": f"eq.{ziel}"}) or [])
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht prüfbar: {type(e).__name__}"}), 502
+    if doppel:
+        return jsonify({"ok": False, "msg": f"Gibt es schon: {doppel.get('name') or zeile['external_id']} — nicht doppelt angelegt",
+                        "konto": {"id": doppel.get("id"), "name": doppel.get("name")}}), 409
+    hinweis = []
+    try:
+        try:
+            neu = sb_insert("accounts", dict(zeile, user_id=ziel))
+        except requests.exceptions.HTTPError as e:
+            # Spalte consistency_pct fehlt (SQL nicht eingespielt) → ohne Feld nochmal, wie accConsFehlt im Frontend
+            if "consistency_pct" not in zeile or "consistency_pct" not in str(getattr(getattr(e, "response", None), "text", "") or ""):
+                raise
+            zeile.pop("consistency_pct")
+            hinweis.append("Consistency nicht gespeichert (Spalte fehlt)")
+            neu = sb_insert("accounts", dict(zeile, user_id=ziel))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht angelegt: {str(e)[:160]}"}), 502
+    acc_id = (neu or {}).get("id")
+    print(f"[admin-konto] {getattr(g, 'admin_konto_uid', '')} legt für {ziel} an: "
+          f"{zeile['name']} ({acc_id})", flush=True)
+    if zeile.get("purchase_cost"):   # wie saveAccount: Auto-Transaktion für den Kaufpreis (EUR, negativ)
+        try:
+            sb_insert("transactions", {"user_id": ziel, "account_id": acc_id, "account_name": zeile["name"], "account_firm": zeile["firm"],
+                                       "kind": "account_purchase", "amount": -abs(zeile["purchase_cost"]), "currency": "EUR",
+                                       "occurred_at": datetime.now(timezone.utc).date().isoformat(), "notes": "Account-Kauf (auto)",
+                                       "auto_generated": True})
+        except Exception as e:
+            hinweis.append(f"Kauf-Transaktion nicht gebucht ({type(e).__name__})")
+    markiert = False
+    tv_name = str(b.get("tv_name") or "").strip()[:120]
+    if tv_name and acc_id and admin_konto_ext_norm(tv_name) != admin_konto_ext_norm(zeile["external_id"]):
+        # External ID im Modal geändert (Tippfehler korrigiert): die TV-Zeile gehört zu einer anderen Nummer — nicht als angelegt markieren
+        hinweis.append("TV-Zeile nicht markiert (External ID weicht ab)")
+    elif tv_name and acc_id:
+        try:
+            markiert = bool(sb_update("tv_konten", {"user_id": f"eq.{ziel}", "name": f"eq.{tv_name}", "angelegt_account_id": "is.null"},
+                                      {"angelegt_account_id": acc_id}))
+        except requests.exceptions.HTTPError as e:
+            if not admin_gruppen_tabelle_fehlt(e):
+                hinweis.append("TV-Zeile nicht markiert")
+        except Exception:
+            hinweis.append("TV-Zeile nicht markiert")
+    return jsonify({"ok": True, "account": neu, "markiert": markiert, "hinweis": " · ".join(hinweis)})
+
+
 @app.route("/admin/konto-mails", methods=["GET", "OPTIONS"])
 def admin_konto_mails():
     """GET /admin/konto-mails?betreff=<a>|<b>…&tage=90 → {ok, mails:[{id, user_id, person, von, betreff, datum, text}],
