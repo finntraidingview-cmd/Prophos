@@ -51459,7 +51459,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1887'
+  const OS_TAB_BUILD = '2026-09-22.1888'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57974,7 +57974,11 @@
    * 'tradeify_final', app.py tfh_tick) und den Apex-WD-Hedge (hedge_art 'apex', Slave 1). GET/POST /admin/auto-plan/hedge-freigabe (nur Admin):
    * offene Pläne je ID wie „Zu bestätigen" (ap-adm-karte, ap-adm-grp, wd-tab), ✓ je Zeile, ✓ alle je ID und „✓ Alle n bestätigen". Ohne
    * Freigabe startet der Plan nicht (DB-Claim-Riegel trade_plans_a0_hedge_freigabe, ⚪ einmal). Hedge-Spalten aus mt5_baseline.hedge_vorschau
-   * {lots, blow_eur, pass_eur | grund}, sonst hedge_eur am Plan. Liest nur und setzt nur die Freigabe. ══ */
+   * {lots, blow_eur, pass_eur | grund}, sonst hedge_eur am Plan. Liest nur und setzt nur die Freigabe.
+   * EIN BESTÄTIGEN JE TRADE (30.10.2026, Finn über Master: „Ich werde die Trades einmal bestätigen … dann werden sie abgespielt"): Hedge-Trades
+   * stehen jetzt in „Zu bestätigen" mit ihren Hedge-Spalten (ahfHedgeKurz) — ✓ dort setzt Bestätigung UND Freigabe (app.py
+   * _ap_hedge_mit_freigeben). Dieser Block zeigt nur noch die Altlast: schon bestätigt (z. B. vom Bot oder vor dem Umbau), Freigabe fehlt —
+   * derselbe eine Knopf gibt frei. Unbestätigte Hedge-Pläne zeigt er nicht mehr (die stehen in „Zu bestätigen"). ══ */
   const _ahf = { d: null, laeuft: false, at: 0, busy: new Set(), fehler: '' }
   const AHF_ART = { tradeify_final: ['Tradeify final', 'Finaler Tradeify-Trade: startet als Orbit V3 mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],
                     apex: ['Apex WD', 'Apex Winning Day mit Fusion-Hedge'] }
@@ -57990,12 +57994,28 @@
     const f = o => d.toLocaleString('de-DE', Object.assign({ timeZone: 'Asia/Dubai' }, o)), heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
     const t = f({ day: '2-digit', month: '2-digit' }), u = f({ hour: '2-digit', minute: '2-digit' }); return t === heute ? u : `${t} ${u}` }
   const ahfEur = v => { const n = Number(v); return isFinite(n) && v != null ? (n < 0 ? '−' : '+') + Math.round(Math.abs(n)).toLocaleString('de-DE') + ' €' : '–' }
+  const ahfAltlast = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.auto_bestaetigt_at)
+  /* Hedge-Spalten in derselben Zeile von „Zu bestätigen" / „Wartet auf Start" (EIN BESTÄTIGEN, 30.10.2026): z aus /admin/auto-plan/ids
+   * {hedge_art, hedge_vorschau, hedge_frei}. Lots · Blow € / Pass € — oder der Grund, warum kein Hedge rechenbar ist. Normale Pläne: ''. */
+  function ahfHedgeKurz(z, art){
+    if(!z || !AHF_ART[z.hedge_art]) return ''
+    const vs = (z.hedge_vorschau && typeof z.hedge_vorschau === 'object') ? z.hedge_vorschau : {}, name = AHF_ART[z.hedge_art]
+    const hinweis = vs.grund || vs.fehler ? String(vs.grund || vs.fehler) + (vs.code ? ` (${vs.code})` : '') : ''
+    const passTp = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? -Math.abs(Number(vs.tp_eur)) : null
+    const frei = art === 'warten' && !z.hedge_frei ? ' · <b style="color:var(--warn-ink, #b45309)">Freigabe offen</b>' : ''
+    const tip = `${name[1]}${vs.q ? ` · q ${vs.q} €/$ (Kontowert ÷ Polster ÷ 0,89)` : ''} — Blow: Konto geblowt (Hedge +), Pass/TP: Master-TP erreicht (Hedge −)${art === 'offen' ? '. ✓ bestätigt den Trade und gibt den Hedge in einem Schritt frei' : ''}`
+    const inner = vs.lots != null
+      ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot · <span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>`
+      : hinweis ? `<span style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</span>` : 'wird gerechnet'
+    return `<span class="tc2-chip ahf-kurz" title="${escapeHtml(name[0] + ' — ' + (hinweis ? 'Hedge nicht rechenbar: ' + hinweis + ' — ' : '') + tip)}">⇄ ${inner}${frei}</span>`
+  }
+  window._ahfHedgeKurz = ahfHedgeKurz
   function ahfRender(){
     const root = document.getElementById('ahf-root'); if(!root) return
-    const zs = (_ahf.d && _ahf.d.zeilen) || []
+    const zs = ahfAltlast()
     if(!root.dataset.an || (!zs.length && !_ahf.fehler)){ root.hidden = true; root.innerHTML = ''; return }   // ohne offene Zeilen nichts
     if(!zs.length){   // Abruf gescheitert: kleine Zeile statt still (sonst sähe niemand, dass offene Hedge-Trades nicht geladen werden konnten)
-      root.innerHTML = `<div class="kis-s" style="color:var(--danger-ink);margin:0 2px 10px">⚠ Neue Hedge-Trades: nicht ladbar — ${escapeHtml(_ahf.fehler.slice(0, 160))}</div>`
+      root.innerHTML = `<div class="kis-s" style="color:var(--danger-ink);margin:0 2px 10px">⚠ Hedge-Freigabe: nicht ladbar — ${escapeHtml(_ahf.fehler.slice(0, 160))}</div>`
       root.hidden = false; return
     }
     const je = new Map()
@@ -58019,7 +58039,7 @@
         <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>
         <td class="zahl"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Freigeben — der Plan startet dann zur Startzeit mit Hedge">${unterwegs ? '…' : '✓'}</button></td></tr>`
     }
-    const kopf = `<div class="ap-adm-kopf"><b>Neue Hedge-Trades bestätigen · ${zs.length}</b><span>starten erst nach deiner Freigabe · Zeiten Dubai</span>
+    const kopf = `<div class="ap-adm-kopf"><b>Hedge-Freigabe offen · ${zs.length}</b><span>schon bestätigt, Hedge noch nicht freigegeben — startet erst nach ✓ · Zeiten Dubai</span>
       ${zs.length ? `<button type="button" class="ap-adm-ok" data-ahf-alle="1" style="margin-left:auto"${_ahf.busy.size ? ' disabled' : ''}>✓ Alle ${zs.length} bestätigen</button>` : ''}</div>`
     const fehl = _ahf.fehler ? `<div class="kis-s" style="color:var(--danger-ink)">${escapeHtml(_ahf.fehler)}</div>` : ''
     const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.z.length} Trade${g.z.length === 1 ? '' : 's'}</span>
@@ -58033,20 +58053,21 @@
     for(const id of ids) _ahf.busy.add(String(id))
     ahfRender()
     try{
-      const d = await apdApi('POST', '/hedge-freigabe', alle ? { alle: true } : { ids })
+      const d = await apdApi('POST', '/hedge-freigabe', { ids })   // immer die gezeigten IDs (alle:true gäbe auch unbestätigte frei)
       if(typeof atToast === 'function') atToast(`✓ ${d.freigegeben || 0} Hedge-Trade${(d.freigegeben || 0) === 1 ? '' : 's'} freigegeben`, 'start')
     }catch(e){ _ahf.fehler = 'Freigabe fehlgeschlagen: ' + ((e && e.message) || e) }
     finally{ for(const id of ids) _ahf.busy.delete(String(id)); await ahfLaden() }
   }
   document.addEventListener('click', e => {
     const t = e.target && e.target.closest && e.target.closest('[data-ahf-ok],[data-ahf-alle],[data-ahf-id]'); if(!t || t.disabled) return
-    const zs = (_ahf.d && _ahf.d.zeilen) || []
+    const zs = ahfAltlast()
     if(t.dataset.ahfOk) ahfFreigeben([t.dataset.ahfOk], false)
     else if(t.dataset.ahfId) ahfFreigeben(zs.filter(z => String(z.user_id) === t.dataset.ahfId).map(z => String(z.id)), false)
-    else if(t.dataset.ahfAlle && confirm(`Alle ${zs.length} neuen Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)) ahfFreigeben(zs.map(z => String(z.id)), true)
+    else if(t.dataset.ahfAlle && confirm(`Alle ${zs.length} Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)) ahfFreigeben(zs.map(z => String(z.id)), true)
   })
   window._ahfSicherstellen = () => { const r = document.getElementById('ahf-root'); if(r && !r.dataset.an) window._ahfOeffnen(true) }
   window._ahfOeffnen = an => { const r = document.getElementById('ahf-root'); if(!r) return; if(an){ r.dataset.an = '1'; ahfRender(); ahfLaden() } else { delete r.dataset.an; r.hidden = true } }
+  window._ahfNeu = () => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an) ahfLaden() }   // nach ✓ in „Zu bestätigen"
   window._ahfStub = d => { _ahf.d = d; _ahf.fehler = ''; const r = document.getElementById('ahf-root'); if(r) r.dataset.an = '1'; ahfRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an && !document.hidden && document.getElementById('adm-pane-planer')?.offsetParent) ahfLaden() }, 60000)
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
@@ -78032,7 +78053,7 @@
       lauf(() => { for(const id of ids){ _apIds.okLaeuft.delete(id); _apIds.okFehler.set(id, msg) } })
       if(typeof atToast === 'function') atToast('Nicht bestätigt: ' + msg.slice(0, 140), 'end')
       apIdsRender()
-    } finally { apIdsLaden() }
+    } finally { apIdsLaden(); try{ window._ahfNeu?.() }catch(_){} }
   }
   /* Kacheln + Zeitstrahl aller IDs: Spuren = Planer-IDs (Haken im Reiter oder Auto-Trades heute), die übrigen IDs mit laufenden Hand-/Orbit-V3-
    * Trades in der Sammelzeile „Weitere" (aufklappbar wie auf der Planer-Seite, Zustand nur hier) */
@@ -78199,7 +78220,7 @@
   /* Ein Block (art offen | warten | laeuft): je ID eine Gruppe (Farbpunkt · Name · Zähler · „✓ alle n" nur bei offen), darin die Firmen-Blöcke
    * (planFirmenBloecke) mit planZeileHtml-Zeilen. Balance/Rest/Stufe: Trade-Zeile → Lauf-Zeile → notes-Text → eigenes Konto. */
   function apIdsBlockHtml(art, liste, kopf){
-    const leer = { offen: 'Nichts offen.', warten: 'Nichts bestätigt.', laeuft: 'Nichts läuft.' }[art]
+    const leer = { offen: 'nichts zu bestätigen – nächste Vorschläge mit dem Nachtlauf', warten: 'Nichts bestätigt.', laeuft: 'Nichts läuft.' }[art]
     if(!liste.length) return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}<div style="color:var(--sub);font-size:12.5px;padding:2px 0 6px">${leer}</div></div>`
     // LÄUFT = RADAR-ZEILEN (08.10.2026, Finn: „Für den Trade-Planer unter Admin das Ganze auch anpassen"): statt Firmen-Blöcken dieselben Zeilen
     // wie unter „P&L hypothetisch heute" (laufZeilenHtml) — ID-Punkt · Person · Weg · Konto kurz · BUY/SELL × Größe · Spanne Liq → TP · P&L $ + € ·
@@ -78267,7 +78288,8 @@
         riHtml = `<button type="button" class="ap-ri-flip${riG ? ' is-gesperrt' : ''}" data-ap-ri="${escapeHtml(id)}"${riL ? ' disabled' : ''}
           title="${escapeHtml(riG ? riG + ' — Klick prüft erneut' : `anklicken: nur diesen Plan auf ${ziel} drehen (Richtungsschutz ID × Firma wird vorher geprüft)`)}"><em class="${p.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${riL ? '…' : (riG ? '⛔ ' : '') + (p.richtung === 'buy' ? 'BUY' : 'SELL')}</em></button>`
       }
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: '', akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
+      const hChip = art !== 'laeuft' && typeof window._ahfHedgeKurz === 'function' ? window._ahfHedgeKurz(z, art) : ''   // EIN BESTÄTIGEN (30.10.2026)
+      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: hChip, akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
@@ -78293,8 +78315,9 @@
     // Reihenfolge (Finn 08.10.2026: „Mach die laufenden Trades nach oben über den Block mit Wartet auf Start"): Läuft · Zu bestätigen · Wartet auf Start
     // Reihenfolge seit 08.10.2026 (Finn über den Master): Braucht dich (Kopf) · Zu bestätigen · Wartet auf Start · Läuft · Heute beendet
     // seit 08.10.2026 ~11:45 Dubai (Finn): Läuft direkt unter „P&L hypothetisch heute" (apIdsKopfHtml), dann Braucht dich · Zu bestätigen · Wartet · Heute beendet
-    // SCHLANK (29.10.2026): „Zu bestätigen" nur, wenn wirklich etwas zu bestätigen ist (der Bot bestätigt sonst selbst)
-    const offenBlock = apSchlankJetzt() && !apSchlankFunded() && !o.length ? '' : apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO)   // Funded: immer (Bestätigen von Hand)
+    // EIN BESTÄTIGEN JE TRADE (30.10.2026, Master: „Die Liste muss immer sichtbar sein, auch leer"): alle Auto-Vorschläge (Echo, Orbit, WD,
+    // Apex, Tradeify-Final) stehen hier — Hedge-Trades mit ihren Hedge-Spalten; leer eine kurze Zeile (apIdsBlockHtml)
+    const offenBlock = apIdsBlockHtml('offen', o.map(z => ({ z })), kopfO)
     return { laeuft: apIdsBlockHtml('laeuft', wl.laeuft, kopfL), rest: offenBlock + apIdsBlockHtml('warten', wl.warten, kopfW) }
   }
   /* Konto-Popup (08.10.2026): Name, Firma, Typ/Phase, Balance (letzte Lesung + Quelle + Alter), Ziel/Rest, Kontowert, letzte Trades — eigene
