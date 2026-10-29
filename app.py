@@ -13992,6 +13992,37 @@ def admin_handarbeit():
     return jsonify(antwort)
 
 
+# ══ WD-SICHT FÜR JEDEN LOGIN (30.10.2026, Finn: „Emin soll nur die IDs von ihm sehen und wir nur die IDs von uns" — dringlich, seit Emin
+# nicht mehr in wd_farmer_regeln.ids_aus steht). wd_tagesplan ist per RLS für alle Angemeldeten lesbar; der Markt-Reiter „Plan heute Nacht"
+# filterte nur über ids_aus. Eine normale ID darf die Mitglieder ihrer Gruppe nicht lesen (RLS id_gruppe_mitglied: nur eigene Zeile) —
+# deshalb sagt Railway jedem Login seine Sicht: Mitglied/Verwalter einer Gruppe MIT Verwalter → genau diese Gruppe (ids); jeder andere =
+# Hermann Technologies → alles außer den Verwalter-Gruppen (ausser). Nur IDs, keine Namen, kein Geld. ══
+def wd_sicht_fuer(uid, daten):
+    """REIN RECHNEND (testbar): Sicht eines Logins → {art: 'gruppe', ids: […]} (Verwalter-Gruppe inkl. Verwalter) | {art: 'ht', ausser: […]}."""
+    daten = daten or {}
+    uid = str(uid)
+    mit_v = {str(x.get("id")): str(x.get("verwalter_id")) for x in daten.get("gruppen") or () if x.get("verwalter_id")}
+    for gid, vid in mit_v.items():
+        ids = {vid} | {str(m.get("user_id")) for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) == gid}
+        if uid in ids:
+            return {"art": "gruppe", "ids": sorted(ids)}
+    return {"art": "ht", "ausser": sorted(_admin_verwalter_gruppen_ids(daten))}
+
+
+@app.route("/wd-sicht", methods=["GET", "OPTIONS"])
+def wd_sicht():
+    """GET (eingeloggt, sb-token) → {ok, art, ids|ausser} — siehe Block oben. Gruppen nicht lesbar → 502 (der Browser zeigt dann nur die eigene ID)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, _mail, err = _login_uid_mail()
+    if err:
+        return err
+    try:
+        return jsonify(dict(wd_sicht_fuer(uid, admin_gruppen_daten()), ok=True))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Gruppen nicht lesbar ({type(e).__name__})"}), 502
+
+
 @app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_wd_plaene():
     if request.method == "OPTIONS":

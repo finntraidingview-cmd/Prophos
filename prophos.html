@@ -32960,6 +32960,30 @@
    * Angemeldete liest), Tag = Farmer-Tag (wdNaechsterTag) — hat der heutige Tag noch geplante/laufende Blöcke, bleibt er es (nach
    * 02:00 läuft die Nacht ja noch). Ausgelassene IDs (ids_aus) fehlen wie im Farmer. Nur Anzeige, höchstens alle 60 s. */
   mkl.wd.plan = { tag: '', heute: '', rows: [], regeln: null, plaene: null, konten: null, farmerAdmin: undefined, at: 0, fehler: '' }
+  /* SICHT WIE IM FARMER (30.10.2026, Finn: „Emin soll nur die IDs von ihm sehen und wir nur die IDs von uns" — dringlich, seit Emin nicht
+   * mehr in ids_aus steht): wd_tagesplan ist für alle lesbar, „Plan heute Nacht" filterte nur über ids_aus. Jetzt dieselbe Sicht wie der
+   * Farmer: mit geladenem Admin window._admGruppeOk (Standard HT, Gruppen-Chip, Verwalter nur seine Gruppe); sonst fragt der Tab Railway
+   * GET /wd-sicht (normale IDs dürfen die Mitglieder ihrer Gruppe nicht lesen) — 5 min gemerkt. Geht beides nicht: nur die eigene ID
+   * (lieber zu wenig zeigen als fremde Blöcke). → Funktion uid → bool */
+  mkl.wd.sicht = { at: 0, uid: '', ok: null }
+  async function mklWdSichtOk(){
+    const ich = String(currentUserId || '')
+    if(typeof window._admGruppeOk === 'function' && window._admData) return uid => String(uid) === ich || !!window._admGruppeOk(uid)
+    const S = mkl.wd.sicht
+    if(S.ok && S.uid === ich && Date.now() - S.at < 300000) return S.ok
+    let ok = uid => String(uid) === ich
+    try{
+      const tok = await _pushTok()
+      if(tok){
+        const r = await fetch(`${WATCHER_HOME}/wd-sicht`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        const d = r.ok ? await r.json().catch(() => null) : null
+        if(d && d.ok && d.art === 'gruppe' && Array.isArray(d.ids)){ const m = new Set(d.ids.map(String)); ok = uid => String(uid) === ich || m.has(String(uid)) }
+        else if(d && d.ok && d.art === 'ht' && Array.isArray(d.ausser)){ const m = new Set(d.ausser.map(String)); ok = uid => String(uid) === ich || !m.has(String(uid)) }
+        if(d && d.ok){ S.at = Date.now(); S.uid = ich; S.ok = ok }
+      }
+    }catch(e){ console.warn('[wd-plan] Sicht nicht ladbar — nur die eigene ID', (e && e.message) || e) }
+    return ok
+  }
   async function mklWdPlanLaden(){
     if(mkl.stub || Date.now() - mkl.wd.plan.at < 60000) return
     mkl.wd.plan.at = Date.now()
@@ -32969,8 +32993,8 @@
       const naechster = wdNaechsterTag(r || {}, j)
       const { data: rows, error: e2 } = await supabase.from('wd_tagesplan').select('tag,user_id,name,konten,status,start_um,richtung,reihenfolge').in('tag', [...new Set([j.tag, naechster])])
       if(e2) throw e2
-      const aus = new Set(((r && r.ids_aus) || []).map(String))
-      const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)))
+      const aus = new Set(((r && r.ids_aus) || []).map(String)), sichtOk = await mklWdSichtOk()
+      const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)) && sichtOk(x.user_id))   // Sicht wie im Farmer (30.10.2026)
       const tag = je(j.tag).some(x => x.status === 'geplant' || x.status === 'laeuft') ? j.tag : naechster
       const alt = mkl.wd.plan
       // Sofort zeichnen (F32-Zusatz): Tagesplan steht, der Plan-Status von Railway kommt gleich nach — bis dahin der letzte bekannte
@@ -51466,7 +51490,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1891'
+  const OS_TAB_BUILD = '2026-09-22.1892'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
