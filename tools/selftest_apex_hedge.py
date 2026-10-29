@@ -122,6 +122,8 @@ soll("SQL: Kontoart-Riegel lässt nur Apex-Challenge tvv2 + Marke + Schalter dur
      all(x in SQL for x in ("typ = 'challenge'", "coalesce(new.route, '') = 'tvv2'", "prophos_firma_key(new.master_firm) = 'Apex Trader'",
                             "new.mt5_baseline->'apex_hedge'->>'status'", "public.prophos_apex_hedge_an()")))
 soll("SQL: Echo-Hedge-Block bleibt drin", "HT ECHO-HEDGE B2" in SQL)
+soll("SQL: gemeinsame Fassung — Tradeify-Block (S4) bleibt drin, Prüfung auf Vorgängerinnen",
+     "FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026)" in SQL and "'public.prophos_tradeify_final_hedge_an()'::regprocedure" in SQL)
 soll("Tab: Kennung + zählt-als-WD", "const tpIstApexHedge = p =>" in HTML and "const tpWdZaehlt = p => tpIstWdPlan(p) && !tpIstApexHedge(p)" in HTML)
 soll("Tab: Liq am Challenge-Boden statt Größe + 100", "if(ahLiq > 0){ liq = ahLiq; art = 'apex_boden' }" in HTML)
 soll("Liq am Boden auch im Backend (_lt_liq_balance)", "Apex mit Hedge: Challenge-Boden" in block("_lt_liq_balance"))

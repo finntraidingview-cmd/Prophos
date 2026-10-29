@@ -12,11 +12,22 @@
 --      update public.auto_plan_regeln set regeln = jsonb_set(regeln, '{apex_hedge,an}', 'false') where id = 1;  -- aus (ah_tick stellt
 --      umgestellte, noch nicht gestartete Pläne zurück auf Orbit V2 ohne Hedge; laufende bleiben, wie sie sind)
 -- 2. Riegel trade_plans_kontoart_weg: eine Apex-Challenge mit Hedge auf tvv2 darf es, wenn sie ein Auto-Plan mit Marke apex_hedge 'mit' ist
---    und der Schalter an ist (prophos_apex_hedge_an). Sonst unverändert (Live-Fassung aus sql/2026-10-29_ht_echo_hedge.sql + dieser Block).
--- VORAUSSETZUNG: sql/2026-10-29_ht_echo_hedge.sql ist eingespielt (prophos_ht_echo_hedge_an, regeln.echo_hedge) — Stand 30.10.2026 live
--- noch die Fassung OHNE Echo-Hedge-Block; diese Datei enthält beide Blöcke und setzt die Funktion des Echo-Hedge voraus.
+--    und der Schalter an ist (prophos_apex_hedge_an). Sonst Wort für Wort die Fassung aus S4s sql/2026-10-29_tradeify_final_hedge.sql
+--    (ac4f4307: Live-Fassung mit HT ECHO-HEDGE + FINALER TRADEIFY MIT GEGENHEDGE) + dieser Block — GEMEINSAME FASSUNG (S2 30.10.2026: wer
+--    die Funktion als Zweites neu anlegt, darf den Block des anderen nicht löschen).
+-- REIHENFOLGE: sql/2026-10-29_ht_echo_hedge.sql → sql/2026-10-29_tradeify_final_halten.sql → sql/2026-10-29_tradeify_final_hedge.sql →
+-- DIESE Datei. Die Prüfung unten bricht ab, solange eine Vorgängerin fehlt. Wer trade_plans_kontoart_weg danach neu anlegt, nimmt den
+-- Apex-Block mit.
 -- Wiederholbar. Rückbau: Schalter aus genügt; die Funktion ohne den Block „APEX-CHALLENGE-WD-HEDGE" neu anlegen
--- (= sql/2026-10-29_ht_echo_hedge.sql, Abschnitt trade_plans_kontoart_weg).
+-- (= sql/2026-10-29_tradeify_final_hedge.sql, Abschnitt 3).
+
+do $pruef$
+begin
+  perform 'public.prophos_ht_echo_hedge_an()'::regprocedure;
+  perform 'public.prophos_tradeify_final_hedge_an()'::regprocedure;
+exception when undefined_function then
+  raise exception 'Erst sql/2026-10-29_ht_echo_hedge.sql, sql/2026-10-29_tradeify_final_halten.sql und sql/2026-10-29_tradeify_final_hedge.sql einspielen';
+end $pruef$;
 
 update public.auto_plan_regeln
    set regeln = jsonb_set(regeln, '{apex_hedge}',
@@ -73,6 +84,13 @@ begin
   -- HT ECHO-HEDGE B2 (29.10.2026): Auto-Plan auf dem klassischen Echo mit Slave, solange der zentrale Schalter an ist
   if typ in ('challenge', 'phase1', 'phase2') and coalesce(new.route, '') = 'mt5' and coalesce(new.auto_plan, false)
      and new.slave_account_id is not null and public.prophos_ht_echo_hedge_an() then
+    return new;
+  end if;
+  -- FINALER TRADEIFY MIT GEGENHEDGE (29.10.2026): finaler Tradeify-Futures-Auto-Plan als Orbit V3, umgestellt von tfh_tick, Schalter an
+  if typ in ('challenge', 'phase1', 'phase2') and coalesce(new.route, '') = 'tvv2' and coalesce(new.orbit_v3, false)
+     and coalesce(new.auto_plan, false) and new.mt5_baseline->'tradeify_hedge'->>'status' = 'mit'
+     and public.prophos_firma_key(new.master_firm) = public.prophos_firma_key('Tradeify')
+     and public.prophos_tradeify_final_hedge_an() then
     return new;
   end if;
   if typ in ('challenge', 'phase1', 'phase2') and mit and coalesce(new.route, '') in ('mt5', 'mt5v2', 'tvv2', 'tsv2') then
