@@ -29336,7 +29336,10 @@
    * zwischen Start und jetzt kein weiterer Puls-Plan lief — sonst nur Vorschlag (final.auge_vorschlag), der Plan wartet wie bisher auf Puls.
    * Geschrieben wird wie bei der Puls-Endlesung (baselinePatchIn mit Status-Guard review, dann tvV2MasterPlAusBalance → master_pl); danach
    * liest Puls diesen Plan nicht mehr (tvV2EndlesungGrund: balance_end steht). Nur am PC des Plans, nur lesen — kein Klick, keine Order. ══ */
-  const TSX_AUGE_TOL_USD = 25, TSX_AUGE_TOL_PCT = 0   // Abweichung zur Radar-Schätzung: max(USD, PCT × |Schätzung|) — Auftrag: 25 $ fest
+  // Schwelle zur Radar-Schätzung = max(25 $, 15 % der Schätzung) (Master 29.10.2026). Befund an den letzten 25 Nova-Plänen: die Radar-Schätzung
+  // lag bei Verlusten 40–173 $ (einmal 439 $) neben dem echten Wert (Gebühren/Schlupf am SL) — mit festen 25 $ griffe das Auge nur bei ~40 %.
+  // Der harte Beweis ist der zweite Check: Balance-Differenz = RP&L-Delta (TSX_AUGE_BAL_TOL, in 25/25 Plänen auf den Cent gleich).
+  const TSX_AUGE_TOL_USD = 25, TSX_AUGE_TOL_PCT = 0.15
   const TSX_AUGE_RUHE_MS = 2000, TSX_AUGE_FRISCH_S = 1.0, TSX_AUGE_BAL_TOL = 0.5
   const _tsxAugeMerk = new Map()   // planId → { flachSeit, letzte: {t, rpl, balance} }
   const tsxAugeToleranz = sz => Math.max(TSX_AUGE_TOL_USD, TSX_AUGE_TOL_PCT * Math.abs(Number(sz) || 0))
@@ -29349,6 +29352,8 @@
     if(!p || p.route !== 'tsv2' || p.status !== 'review' || !fin) return { art: 'nichts', grund: 'kein beendeter Topstep-V2-Plan' }
     if(num(fin.balance_end) != null || fin.quelle === 'auge') return { art: 'nichts', grund: 'Ende ist schon gelesen' }
     if(fin.auge_vorschlag) return { art: 'nichts', grund: 'Auge-Vorschlag liegt schon — Puls liest wie bisher' }
+    // Topstep-Kette (Prüfer 29.10.2026): ap_kette_t1_fertig (Railway) wartet auf eine PULS-Balance — die Kette liest weiter nur Puls
+    if((p.mt5Baseline && p.mt5Baseline.kette) || (typeof tpKetteNr === 'function' && tpKetteNr(p))) return { art: 'nichts', grund: 'Topstep-Kette — Puls liest nach' }
     const rplStart = num(tv.today_pnl_start) != null ? num(tv.today_pnl_start) : num(tv.rpl_start)
     if(rplStart == null) return { art: 'nichts', grund: 'kein RP&L-Start beim Klick' }
     if(!tv.datum_start || tv.datum_start !== tvV2Handelstag(jetzt)) return { art: 'nichts', grund: 'anderer Handelstag als beim Start — RP&L nicht vergleichbar' }
@@ -29358,7 +29363,11 @@
     if(!(r && r.ok && num(r.alter_s) != null && r.alter_s <= TSX_AUGE_FRISCH_S && r.stand && typeof r.stand === 'object')) return weg('kein frischer Stand vom Auge (≤ 1 s)')
     const st = r.stand, k = st.konto || {}, kp = st.kopf || {}
     if(st.ausgeloggt) return weg('TopstepX ausgeloggt')
-    if(k.abgekuerzt === true || String(k.kontonr || '').trim().toUpperCase() !== ext) return weg('Auge steht nicht im Konto des Plans (exakt)')
+    // Konto wie im TopstepX-Hedge-Wächter: volle Kennung (abgekuerzt === false), Liste zu, gleich ohne Trennzeichen; Puls nicht unterwegs
+    const kNorm = v => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    if(k.abgekuerzt !== false || k.liste_offen || !kNorm(k.kontonr) || kNorm(k.kontonr) !== kNorm(ext)) return weg('Auge steht nicht im Konto des Plans (exakt)')
+    let unterwegs = ''; try{ unterwegs = (typeof hedgePulsUnterwegs === 'function') ? hedgePulsUnterwegs() : '' }catch(_){ unterwegs = 'Zustand nicht lesbar' }
+    if(unterwegs) return weg('Puls ist unterwegs: ' + unterwegs)
     if(st.flach !== true || !Array.isArray(st.positionen) || st.positionen.length) return weg('kein Flach-Beweis des Auges')
     const rpl = num(kp.rpl), bal = num(kp.balance)
     if(rpl == null) return weg('RP&L nicht lesbar')
@@ -29375,6 +29384,9 @@
                     lesungen: [{ t: new Date(l.t).toISOString(), rpl: l.rpl }, { t: new Date(jetzt).toISOString(), rpl }] }
     const sz = num(fin.master_pl_schaetzung)
     const gruende = []
+    // RP&L noch nicht gebucht (Prüfer 29.10.2026): Flach-Beweis vor dem RP&L-Update → Delta 0 bei einem Trade, den der Radar ≠ 0 schätzt
+    if(Math.abs(delta) < 0.005 && !(sz != null && Math.abs(sz) < 0.005)) gruende.push('RP&L seit dem Klick unverändert — Buchung in TopstepX noch nicht sichtbar')
+    if(bal == null) gruende.push('Balance im TopstepX-Kopf nicht lesbar')
     if(sz == null) gruende.push('keine Radar-Schätzung zum Vergleich')
     else if(Math.abs(delta - sz) > tsxAugeToleranz(sz)) gruende.push(`RP&L-Delta ${delta} weicht von der Radar-Schätzung ${sz} um mehr als ${tsxAugeToleranz(sz)} $ ab`)
     const bs = num(tv.balance_start)
@@ -32803,6 +32815,8 @@
       return { art: 'gelesen', text: `gelesen ${uhr(fin.puls_at || fin.at)} (${puls ? 'TradingView' : 'beim Ende'})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
     }
     // TopstepX-Auge (Nova, 29.10.2026): Endlesung ohne Puls — „Profit aus TopstepX-Auge · 18,78 $"
+    if(fin.quelle === 'auge' && !(fin.auge && typeof fin.auge.master_pl === 'number') && typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
+      return { art: 'gelesen', text: `✓ Profit aus TopstepX-Auge ${uhr(fin.auge_at || fin.at)} (Balance ${n2(fin.balance_end)} $)`, tip: tip.join('\n'), bisMs: null, knopf: false }   // Auszug ohne auge (Radar/andere IDs)
     if(fin.quelle === 'auge' && fin.auge && typeof fin.auge.master_pl === 'number'){
       const a = fin.auge, wert = `${a.master_pl < 0 ? '−' : ''}${Math.abs(a.master_pl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
       tip.push(`TopstepX-Auge ${uhr(a.at)}: RP&L ${n2(a.rpl)} − ${n2(a.rpl_start)} beim Klick${a.balance != null ? ' · Balance ' + n2(a.balance) + ' $' : ''} · Konto ${a.konto || '?'}`)
