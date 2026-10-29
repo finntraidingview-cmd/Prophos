@@ -15170,6 +15170,86 @@ def _rw_versionen(jetzt):
 
 READER_WACHT_KARENZ_S = 60
 
+# ── USERSCRIPT-VERSION-WACHE (29.10.2026, Finn 05:20: „dass das Tampermonkey-Script immer automatisch und schneller aktualisiert wird";
+# Befund: kein Puls-PC auf 0.9.11/0.9.12, zwei noch auf 0.9.7 vom 05.10. — niemand hat es gemerkt). Soll = @version der tv-reader.user.js
+# im deployten Stand; meldet ein Puls-PC (echoplus_live.script_version, Zeile ≤ 10 min frisch) 30 min nach dem Deploy noch eine ältere
+# Version → ⚪ an die Master-IDs, je PC und Soll-Version höchstens einmal je 24 h. Läuft im Takt der Reader-Wacht, höchstens alle 5 min.
+SKRIPT_WACHT_TAKT_S, SKRIPT_WACHT_KARENZ_S, SKRIPT_WACHT_WIEDER_S = 300, 1800, 86400
+_SKRIPT_WACHT = {"start_s": time.time(), "letzt_s": 0.0, "gemeldet": {}, "soll": None}
+
+
+def skript_version_soll():
+    """@version der deployten tv-reader.user.js (beim ersten Aufruf gelesen) → '0.10.0' | None."""
+    if _SKRIPT_WACHT["soll"] is None:
+        try:
+            with open(os.path.join(_CODE_WURZEL, "tv-reader", "tv-reader.user.js"), "r", encoding="utf-8") as f:
+                m = re.search(r"@version\s+([0-9][0-9.]{2,20})", f.read(4000))
+            _SKRIPT_WACHT["soll"] = m.group(1) if m else ""
+        except OSError:
+            _SKRIPT_WACHT["soll"] = ""
+    return _SKRIPT_WACHT["soll"] or None
+
+
+def _version_neuer(a, b):
+    """REIN RECHNEND: '0.10.0' > '0.9.12' (Zahl je Stelle)."""
+    def teile(v):
+        return [int(x) if x.isdigit() else 0 for x in str(v or "").split(".")]
+    x, y = teile(a), teile(b)
+    n = max(len(x), len(y))
+    return (x + [0] * (n - len(x))) > (y + [0] * (n - len(y)))
+
+
+def skript_wacht_pruefen(rows, soll, jetzt, start_s, gemeldet):
+    """REIN RECHNEND (testbar): echoplus_live-Zeilen [{id/pc_name, script_version, updated_at}] → Liste (pc, ist) für eine Meldung.
+    Nur Zeilen mit Script-Version (Puls-PCs), ≤ 10 min frisch, ist < soll, ≥ 30 min nach dem Deploy (start_s), (pc, soll) nicht in 24 h gemeldet."""
+    if not soll or jetzt - start_s < SKRIPT_WACHT_KARENZ_S:
+        return []
+    aus = []
+    for r in rows or []:
+        ist = str(r.get("script_version") or "").strip()
+        pc = str(r.get("pc_name") or r.get("id") or "").strip()
+        if not ist or not pc or not _version_neuer(soll, ist):
+            continue
+        try:
+            t = datetime.fromisoformat(str(r.get("updated_at") or "").replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+        if jetzt - t > 600:
+            continue
+        if jetzt - float(gemeldet.get((pc, soll)) or 0) < SKRIPT_WACHT_WIEDER_S:
+            continue
+        aus.append((pc, ist))
+    return aus
+
+
+def skript_wacht_tick(jetzt=None):
+    """Im Takt der Reader-Wacht: höchstens alle 5 min echoplus_live lesen und alte Userscript-Versionen melden. Wirft nie."""
+    jetzt = time.time() if jetzt is None else jetzt
+    if jetzt - _SKRIPT_WACHT["letzt_s"] < SKRIPT_WACHT_TAKT_S:
+        return []
+    _SKRIPT_WACHT["letzt_s"] = jetzt
+    soll = skript_version_soll()
+    try:
+        rows = sb_select("echoplus_live", {"select": "id,pc_name,script_version,updated_at", "limit": "40"}) or []
+    except Exception as e:
+        print(f"[skript-wacht] ⚠️ echoplus_live: {type(e).__name__}", flush=True)
+        return []
+    treffer = skript_wacht_pruefen(rows, soll, jetzt, _SKRIPT_WACHT["start_s"], _SKRIPT_WACHT["gemeldet"])
+    namen = {}
+    try:
+        namen = _rw_pc_namen() or {}
+    except Exception:
+        pass
+    for pc, ist in treffer:
+        _SKRIPT_WACHT["gemeldet"][(pc, soll)] = jetzt
+        wer = namen.get(pc) or pc
+        alarm_senden(3, "userscript_alt", f"Userscript alt auf {wer}",
+                     f"{wer} ({pc}): Tampermonkey-Script {ist} statt {soll} — Puls-Chrome-Tab neu laden; hilft das nicht, im Puls-Chrome "
+                     f"http://127.0.0.1:8790/userscript/tv-reader.user.js öffnen und „Aktualisieren\" klicken (einmal, danach lädt der Lader selbst).",
+                     schluessel=f"userscript|{pc}|{soll}", daten={"pc": pc, "ist": ist, "soll": soll})
+        print(f"[skript-wacht] ⚪ {pc}: Userscript {ist} statt {soll}", flush=True)
+    return treffer
+
 
 def reader_wacht_tick(jetzt=None):
     global _reader_wacht_zustand
@@ -15183,6 +15263,10 @@ def reader_wacht_tick(jetzt=None):
     offen = seit is not None
     m = _rw_messen(jetzt) if offen else {}
     _rw_versionen(jetzt)        # auch bei geschlossenem Markt — genau dann spielt der Reader Updates ein
+    try:
+        skript_wacht_tick(jetzt)    # Userscript-Version je Puls-PC (29.10.2026), höchstens alle 5 min
+    except Exception as e:
+        print(f"[skript-wacht] ⚠️ {type(e).__name__}: {e}", flush=True)
     neu, ev = reader_wacht_schritt(_reader_wacht_zustand, jetzt, m.get("feed_alter_s"), offen,
                                    seit_offen_s=seit, kerzen_alter_s=m.get("kerzen_alter_s"),
                                    kerzen_wurzel=m.get("kerzen_wurzel"), letzter_kurs=m.get("letzter_kurs"),
