@@ -18141,6 +18141,51 @@ def reader_tv_konten_schreiben():
     return jsonify({"ok": True, "n": len(zeilen)})
 
 
+@app.route("/admin/tv-konten-pcs", methods=["GET", "POST", "OPTIONS"])
+def admin_tv_konten_pcs():
+    """Weiche „TV-Konten lesen auf" (Finn 29.10.2026). GET → {ok, pcs, quelle, bekannte:[{pc, name}]} (PCs der letzten 24 h aus mt5_live, Namen aus
+    pc_namen; nur Hermann-Technologies-PCs). POST {pcs:[pc-… | "alle"]} → auto_plan_regeln.regeln.tv_konten_pcs. Nur Admin (wie die anderen
+    Schalter, _ap_zugang)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Nur für Admins"}), 403
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        roh = body.get("pcs")
+        if not isinstance(roh, list) or len(roh) > 60:
+            return jsonify({"ok": False, "msg": "pcs = Liste von PC-Kennungen (pc-…) oder [\"alle\"]"}), 400
+        neu = sorted({str(x).strip().lower() for x in roh if TVK_PCS_MUSTER.fullmatch(str(x).strip().lower())})
+        regeln = dict((reg or {}).get("regeln") or {})
+        regeln["tv_konten_pcs"] = neu
+        try:
+            sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        _tvk_pcs_merk.update(s=0.0, liste=None)
+        print(f"[tv-konten] Weiche: {', '.join(neu) or 'kein PC'} ({uid})", flush=True)
+    liste, quelle = _tv_konten_pcs()
+    bekannte = []
+    try:
+        ab = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        live = sb_select("mt5_live", {"select": "pc_name,user_id:status->>user_id", "updated_at": f"gte.{ab}", "order": "updated_at.desc", "limit": "1000"}) or []
+        _n, aus = _ap_namen()
+        pcs = {}
+        for z in live:
+            pc, u = str(z.get("pc_name") or ""), str(z.get("user_id") or "")
+            if re.fullmatch(r"pc-[a-z0-9]{4,12}", pc) and pc not in pcs:
+                pcs[pc] = u
+        namen = {k: v.get("name") for k, v in (_pc_namen_daten() or {}).items() if v}
+        bekannte = [{"pc": pc, "name": namen.get(pc) or pc} for pc, u in pcs.items() if u and u not in aus and not _alarm_fremd_verwaltet(u)]
+        bekannte.sort(key=lambda x: str(x["name"]).lower())
+    except Exception as e:
+        print(f"[tv-konten] PC-Liste: {type(e).__name__}", flush=True)
+    return jsonify({"ok": True, "pcs": liste, "quelle": quelle, "bekannte": bekannte})
+
+
 @app.route("/admin/tv-konten", methods=["GET", "OPTIONS"])
 def admin_tv_konten():
     """GET /admin/tv-konten[?tage=30] → {ok, konten:[{user_id, person, name, pc_id, quelle, zuerst_at, zuletzt_at, ignoriert_at, angelegt_account_id,
@@ -18199,10 +18244,40 @@ TV_AUFTRAG_LAUF_MAX_S = 20 * 60          # „laeuft" länger als das (Tab neu g
 TV_TAEGLICH_MIN_S, TV_TAEGLICH_MAX_S = 20 * 3600, 28 * 3600
 # PROBELAUF-WEICHE (Master 29.10.2026: Klick-Pfad erst auf EINEM PC): Railway-Variable TV_KONTEN_PCS = Komma-Liste der PC-Kennungen, die
 # Aufträge bekommen; „alle" = jeder Puls-PC. Nicht gesetzt → kein PC bekommt einen Auftrag (Aufträge sammeln sich nur an). Sicherer Standard.
+# WEICHE IN DER DB (Finn 29.10.2026: „Ich möchte nicht immer Railway-Variablen hinzufügen"): auto_plan_regeln.regeln.tv_konten_pcs = Liste
+# der PC-Kennungen bzw. ["alle"], gesetzt im Admin → Konten aus Mail & TV (POST /admin/tv-konten-pcs). Fehlt der Schlüssel, gilt wie bisher die
+# Railway-Variable TV_KONTEN_PCS (Fallback). 60 s gemerkt.
+TVK_PCS_MUSTER = re.compile(r"pc-[a-z0-9]{4,12}|alle")
+_tvk_pcs_merk = {"s": 0.0, "liste": None, "quelle": ""}
+
+
+def tv_konten_pcs_aus(regeln, env):
+    """REIN RECHNEND (testbar): (liste, quelle) — quelle 'db' (Schlüssel in regeln, auch leere Liste = keiner), 'railway' (Variable) oder 'aus'."""
+    if isinstance(regeln, dict) and isinstance(regeln.get("tv_konten_pcs"), list):
+        return sorted({str(x).strip().lower() for x in regeln["tv_konten_pcs"] if TVK_PCS_MUSTER.fullmatch(str(x).strip().lower())}), "db"
+    liste = sorted({x.strip().lower() for x in str(env or "").split(",") if x.strip()})
+    return liste, ("railway" if liste else "aus")
+
+
+def _tv_konten_pcs(jetzt=None):
+    jetzt = time.time() if jetzt is None else jetzt
+    if _tvk_pcs_merk["liste"] is not None and jetzt - _tvk_pcs_merk["s"] < 60:
+        return _tvk_pcs_merk["liste"], _tvk_pcs_merk["quelle"]
+    try:
+        regeln = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln")) or {}
+    except Exception:
+        regeln = None   # DB nicht lesbar → Railway-Variable (wie vor dieser Weiche)
+    liste, quelle = tv_konten_pcs_aus(regeln, os.environ.get("TV_KONTEN_PCS", ""))
+    _tvk_pcs_merk.update(s=jetzt, liste=liste, quelle=quelle)
+    return liste, quelle
+
+
 def tv_konten_pc_frei(pc, roh=None):
-    """REIN RECHNEND (testbar): darf dieser PC Lese-Aufträge holen?"""
-    roh = os.environ.get("TV_KONTEN_PCS", "") if roh is None else roh
-    liste = {x.strip().lower() for x in str(roh or "").split(",") if x.strip()}
+    """REIN RECHNEND (testbar) mit roh (Komma-Text wie die Railway-Variable); ohne roh aus der DB-Weiche (Fallback Railway-Variable)."""
+    if roh is not None:
+        liste = {x.strip().lower() for x in str(roh or "").split(",") if x.strip()}
+    else:
+        liste = set(_tv_konten_pcs()[0])
     return "alle" in liste or (bool(pc) and str(pc).strip().lower() in liste)
 
 

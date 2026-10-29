@@ -12750,6 +12750,8 @@
             <!-- S3-Stresstest 29.10.2026: was der Reiter nie zeigen kann — Firmen ohne Konto-Mail, IDs ohne Mail-Anbindung (Gmail-Script) -->
             <div id="adm-km-hinweis" style="color:var(--sub);font-size:11.5px;padding:0 18px 10px">Keine Konto-Mails von: Lucid, Blue Guardian, Tradeify CFD, MFFU, Alpha, Fusion · The5ers und FTMO (CFD) nennen keine Kontonummer, nur Bestellung · ohne Mail-Anbindung: Finn + Pascal, Pascal</div>
             <div id="adm-km-tv-weg" hidden style="color:var(--sub);font-size:11.5px;padding:0 18px 10px"></div>
+            <!-- Weiche „TV-Konten lesen auf" (Finn 29.10.2026: statt Railway-Variable) — Chip je PC, nur Admin (POST /admin/tv-konten-pcs) -->
+            <div id="adm-km-pcs" hidden style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:0 18px 12px;font-size:12px"></div>
             <div id="adm-km-msg" style="color:var(--sub);font-size:13px;padding:14px 18px">Lade Konto-Mails…</div>
             <div class="table-wrap" id="adm-km-wrap" hidden>
               <table class="t">
@@ -51394,7 +51396,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1871'
+  const OS_TAB_BUILD = '2026-09-22.1872'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -71603,6 +71605,30 @@
     if(_admKm.angelegt.has(key)) return { stand: 'angelegt', konto: null }
     return { stand: 'neu', konto: null }
   }
+  // WEICHE „TV-Konten lesen auf" (29.10.2026): Chip je PC (Hermann-Technologies-PCs der letzten 24 h); Klick schaltet; „alle" als eigener Chip.
+  // Puls liest auf einem eingeschalteten PC nur, wenn er frei ist (tvkFrei). Nur Admin — für andere antwortet die Route 403, die Zeile bleibt weg.
+  async function admTvkPcsLaden(neu){
+    const box = document.getElementById('adm-km-pcs'); if(!box) return
+    let d = null
+    try{
+      d = neu ? await admMailFetch('/admin/tv-konten-pcs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pcs: neu }) })
+              : await admMailFetch('/admin/tv-konten-pcs')
+    }catch(e){ if(neu){ box.insertAdjacentHTML('beforeend', `<span style="color:var(--bad)">${esc(String((e && e.message) || e))}</span>`) } else box.hidden = true; return }
+    const an = new Set(d.pcs || []), alle = an.has('alle')
+    const chip = (key, txt, ein) => `<button class="btn btn-ghost" data-tvkpc="${esc(key)}" style="padding:3px 10px;font-size:12px;border-radius:999px;${ein ? 'background:var(--good-tint, color-mix(in srgb, var(--good) 14%, var(--surface)));color:var(--good);border-color:var(--good)' : ''}">${ein ? '✓ ' : ''}${esc(txt)}</button>`
+    const q = d.quelle === 'railway' ? ' · noch aus der Railway-Variable' : d.quelle === 'aus' ? ' · aus' : ''
+    box.innerHTML = `<span style="color:var(--sub)">TV-Konten lesen auf${q}:</span>`
+      + (d.bekannte || []).map(x => chip(x.pc, x.name || x.pc, alle || an.has(x.pc))).join('') + chip('alle', 'alle PCs', alle)
+    box.hidden = false
+    box.querySelectorAll('[data-tvkpc]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.tvkpc, s0 = new Set([...an].filter(x => x !== 'alle'))
+      let ziel
+      if(k === 'alle') ziel = alle ? [...s0] : ['alle']
+      else { if(alle) (d.bekannte || []).forEach(x => s0.add(x.pc)); if(s0.has(k)) s0.delete(k); else s0.add(k); ziel = [...s0] }
+      admTvkPcsLaden(ziel)
+    }))
+  }
+  window._admTvkPcsLaden = admTvkPcsLaden   // Test-Haken
   async function admKontoMailLaden(){
     const nr = ++_admKm.nr, msg = document.getElementById('adm-km-msg'), wrap = document.getElementById('adm-km-wrap')
     if(!msg) return
@@ -71618,6 +71644,7 @@
       catch(e2){ if(!/404|nicht gefunden|not found/i.test(String((e2 && e2.message) || e2))) _admKm.tvFehler = String((e2 && e2.message) || e2) }
       if(nr !== _admKm.nr) return
       admKontoMailRender()
+      admTvkPcsLaden()
     }catch(e){
       if(nr !== _admKm.nr) return
       msg.textContent = '✗ ' + String((e && e.message) || e) + ' — Reiter braucht ADMIN_EMAILS oder Mail-Leser-Freigabe (wie Admin → Mail)'
