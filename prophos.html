@@ -51994,7 +51994,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1906'
+  const OS_TAB_BUILD = '2026-09-22.1907'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66889,7 +66889,11 @@
   async function wdKontoHaken(uid, kontoId, an){
     if(!(await wdDarf(uid))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
-    const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k) return
+    const k = (x.konten || []).find(q => String(q.id) === String(kontoId))
+    // Tag schon gewürfelt → sofort einwürfeln (30.10.2026, Finn: „automatisch in den aktuellen Tag … ohne neu zu würfeln") — auch für ein
+    // Konto, das noch nicht in der Zeile steht (Emin 30.10.: Zeile mit konten [] — der Haken brach bisher still ab)
+    if(an && (!x.tag || x.tag === _wd.tag) && wdTagGewuerfelt(_wd.rows, _wd.tag)) return wdHakenSofort(uid, kontoId, x, k)
+    if(!k){ if(an) return wdKontoHakenOhneZeile(kontoId, true); return }
     k.farm = !!an; k.aktiv = !!(an && k.ext && !k.archiviert); k.hinweis = an ? (k.ext ? '' : WD_HINWEIS_EXT) : WD_HINWEIS_FARM
     delete k.naechster_lauf
     /* NUR IM TAGESLAUF (21.10.2026, Finn: „Ich habe den Account heute hinzugefügt … Er soll nicht sofort geplant werden, sondern immer zu
@@ -66915,10 +66919,46 @@
       wdCacheSchreiben(x.tag)
     }catch(e){ wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
   }
+  // Haken an einem gewürfelten Tag: dauerhaft setzen, dann derselbe Weg wie das 🎲 (wdKontoEinwuerfeln, anBlock). Klappt es nicht (kein Platz
+  // bis bis_hhmm, Block läuft/ist durch), bleibt das Konto dauerhaft drin, heute aus mit Grund — so steht es in „Heute nicht drin".
+  async function wdHakenSofort(uid, kontoId, x, k){
+    const kd = wdKontoDaten(kontoId), name = (k && k.name) || (kd && kd.name) || 'Konto'
+    if(_wd.busy) return wdSay('Farmer arbeitet gerade — Haken gleich nochmal setzen.', 'err')
+    _wd.busy = true
+    let text = '', fehler = ''
+    try{
+      const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: true }); if(error) throw error
+      if(kd) kd.wd_farm = true
+      if(k){ k.farm = true; delete k.naechster_lauf }
+      const z = await wdKontoEinwuerfeln(uid, kontoId, { anBlock: true })
+      if(z && z.ok) text = z.text
+      else{
+        fehler = String((z && z.fehler) || 'nicht eingeplant')
+        const xr = (_wd.rows || []).find(r => String(r.user_id) === String(uid)) || x
+        if(xr && xr.status !== 'laeuft'){
+          const konten = (xr.konten || []).map(q => ({ ...q }))
+          let kn = konten.find(q => q && String(q.id) === String(kontoId))
+          if(!kn && kd){ const sp = wdTpSpanne(kd.firm, kd); kn = { id: String(kontoId), name: kd.name || '', firm: kd.firm || '', ext: String(kd.ext || '').trim(), tpVon: sp[0], tpBis: sp[1], archiviert: false }; konten.push(kn) }
+          if(kn && !kn.plan_id){
+            Object.assign(kn, { farm: true, aktiv: false, hinweis: 'heute nicht eingeplant: ' + fehler.slice(0, 120) }); delete kn.naechster_lauf
+            const status = konten.some(wdAktiv) ? (xr.status === 'leer' ? 'geplant' : xr.status) : 'leer'
+            await supabase.from('wd_tagesplan').update({ konten, status, updated_at: new Date().toISOString() }).eq('tag', xr.tag).eq('user_id', xr.user_id).neq('status', 'laeuft')
+          }
+        }
+      }
+    }catch(e){ fehler = 'Haken nicht gespeichert: ' + (e.message || e) }
+    finally{ _wd.busy = false }
+    if(text){ wdSay(text, 'ok'); if(typeof atToast === 'function') atToast(text, 'start') }
+    else wdSay(/^Haken nicht/.test(fehler) ? fehler : `${name} ist drin — dauerhaft; heute nicht eingeplant: ${fehler}`, 'err')
+    try{ await wdNeuLaden() }catch(_){}
+  }
   /* Haken für eine ID ohne Tageszeile (26.09.2026): nur dauerhaft am Konto (rpc wd_konto_setzen) — die Zeile entsteht beim Würfeln bzw.
    * um 00:00 über den PC-Tab und übernimmt den Haken dann von selbst (wdErwartet/wdKandidaten lesen wd_farm). */
   async function wdKontoHakenOhneZeile(kontoId, an){
     if(!(await wdDarf((wdKontoDaten(kontoId) || {}).user_id))) return wdSay('Nur Konten deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
+    // gewürfelter Tag → sofort einwürfeln, die Zeile der ID legt wdKontoEinwuerfeln an (30.10.2026)
+    const uid0 = (wdKontoDaten(kontoId) || {}).user_id
+    if(an && uid0 && wdTagGewuerfelt(_wd.rows, _wd.tag)) return wdHakenSofort(uid0, kontoId, null, null)
     const kd = wdKontoDaten(kontoId); if(kd) kd.wd_farm = !!an
     try{
       const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: !!an }); if(error) throw error
@@ -67531,6 +67571,19 @@
                             : `kein freier Platz mehr im Fenster ${r.start_hhmm || WD_VON_STD}–${wdBisHhmm(r)} Dubai, und der Block der ID ist schon vorbei` }
   }
   window._wdNdSlot = wdNdSlot   // Test-Haken
+  /* HAKEN → SOFORT EINWÜRFELN (30.10.2026, Finn 02:07: „Wenn ich die ID anhänge, dann soll sie automatisch in den aktuellen Tag mit eingeplant
+   * werden, ohne dass ich neu würfeln muss"). REIN: Slot für ein Konto, dessen ID heute schon einen Block hat → an den Block HÄNGEN, solange
+   * der Block noch ≥ 5 min vor uns liegt (Gruppe 1, Warteschlange des Blocks, kein Neu-Würfeln); Block schon angelaufen → eigener Platz im
+   * Fenster wie das 🎲 (wdNdSlot, Firmen-Abstand, bis bis_hhmm), kein Platz → { grund }. Andere Blöcke werden nie verschoben.
+   * wdTagGewuerfelt (REIN): steht für den Farmer-Tag schon eine Startzeit? Nur dann würfelt der Haken sofort — sonst fährt das Konto wie
+   * bisher im Tageslauf mit (Regel 21.10.2026 bleibt für ungewürfelte Tage). */
+  function wdHakenSlot(rows, x, regeln, tag, jetztMs, rnd){
+    const jetzt = jetztMs || Date.now(), t0 = new Date((x && x.start_um) || 0).getTime()
+    if(t0 > 0 && t0 >= jetzt + 5 * 60000) return { versatz_min: 0, start_ms: t0, mitBlock: true, anBlock: true }
+    return wdNdSlot(rows, x, regeln, tag, jetzt, rnd)
+  }
+  function wdTagGewuerfelt(rows, tag){ return (rows || []).some(q => q && (!tag || !q.tag || q.tag === tag) && q.start_um) }
+  window._wdHakenSlot = wdHakenSlot; window._wdTagGewuerfelt = wdTagGewuerfelt   // Test-Haken (rein rechnend)
   /* Ein Konto heute zu seiner ID dazuwürfeln. Schreibt: wd_tagesplan.konten[] der ID (aktiv, Gruppe, start_um — Falle 27.10.2026: konten[].start_um
    * mitziehen, sonst zieht der PC-Tab-Abgleich den Plan zurück) + status; fehlt die Zeile der ID, wird sie wie in wdAlleEintragen angelegt
    * (nur dieses Konto aktiv, die übrigen warten auf den Tageslauf — Regel 21.10.2026); accounts.wd_farm per RPC nur bei Haken aus (einzeln);
@@ -67589,13 +67642,16 @@
       text = `${name}: ${slot}`
     }else{
       // Block steht → eigene Gruppe mit Zufallszeit im Fenster (wie wdBuendelWuerfeln), Richtung gleich/gegen je 1/2 (übernommene Richtung: gleich)
-      const s = wdNdSlot(_wd.rows || [], x, r, tag, Date.now())
+      // opts.anBlock (Haken-Weg, 30.10.2026): an den Block hängen statt eigene Zufallsgruppe — wdHakenSlot
+      const s = opts.anBlock ? wdHakenSlot(_wd.rows || [], x, r, tag, Date.now()) : wdNdSlot(_wd.rows || [], x, r, tag, Date.now())
       if(s.grund) return { fehler: `${name}: ${s.grund}` }
       const v = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, uid, konten)
       const richtung = x.richtung || (v ? v.richtung : (Math.random() < 0.5 ? 'buy' : 'sell'))
       delete kn.gruppe; delete kn.g_versatz_min; delete kn.g_gegen
       const andere = konten.filter(q => q !== kn && wdAktiv(q))
       let startUm = x.start_um
+      // mit dem Block und der Block hat Gruppen → ausdrücklich Gruppe 1 (Blockstart), wie wdBuendelAnKonten (30.10.2026)
+      if(s.mitBlock && andere.some(q => q.gruppe)) Object.assign(kn, { gruppe: 1, g_versatz_min: 0, g_gegen: false })
       if(!s.mitBlock && !andere.length) startUm = new Date(s.start_ms).toISOString()   // einziges Konto der ID: der Block selbst wandert auf den Slot — keine leere Gruppe 1 (Prüfung 29.10.2026)
       else if(!s.mitBlock){
         // Gruppe 1 = Blockstart (Konten ohne Gruppenfeld bekommen es ausdrücklich, wie wdBuendelAnKonten bei mehreren Gruppen); neue Gruppe hinten
