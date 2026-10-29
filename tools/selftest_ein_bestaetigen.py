@@ -42,8 +42,9 @@ def main():
     # Verdrahtung: nur bei bestaetigen in Admin-Sicht, Guard wie die Freigabe-Route, a0-Riegel unberührt
     i = src.index("\ndef _ap_eingriff(")
     eing = src[i:src.find("\n\n\n", i)]
-    # seit ADMIN-VOLL (30.10.2026): jeder Login mit allen IDs (sicht None), nicht mehr nur ADMIN_EMAILS — „Finn + Pascal" gibt beim ✓ frei
-    ok('_ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" and sicht is None else 0' in eing, "nur bestätigen + Admin-Sicht (alle IDs)")
+    # seit ADMIN-VOLL (30.10.2026): voller Admin (ADMIN_EMAILS oder Liste admin_voll, nicht eingeschränkt) UND alle IDs (sicht None)
+    ok('_ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" and voll and sicht is None else 0' in eing
+       and "voll = admin or (" in eing, "nur bestätigen + voller Admin + Admin-Sicht")
     i = src.index("\ndef _ap_hedge_mit_freigeben(")
     mit = src[i:src.find("\n\n\n", i)]
     for g in ('"status": "eq.planned"', '"start_um_gestartet_at": "is.null"', '"hedge_freigabe_at": "is.null"', '"mt5_baseline->>hedge_art"'):

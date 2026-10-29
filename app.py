@@ -23023,34 +23023,50 @@ def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None, gruppe=None
     return str(uid)
 
 
-def admin_voll_frei(im_planer, nur_eigene, verwalter):
+def admin_voll_frei(uid, voll_uids, sicht_l):
     """REIN RECHNEND (testbar, ADMIN-VOLL 30.10.2026, Finn als „Finn + Pascal" — nicht in ADMIN_EMAILS, will keine Railway-Variablen pflegen):
-    darf ein Login OHNE ADMIN_EMAILS die Admin-Reiter-Routen „Payout erhalten" und „Hedge-Freigabe" wie ein Admin? Genau dann, wenn
-    ap_eingriff_sicht ihm im Admin-Reiter (sicht="admin") alle IDs gibt — im Planer (auto_plan_regeln.user_ids), nicht admin_zugang
-    „nur eigene" — und er kein Verwalter ist (der bleibt bei seiner Gruppe). Dasselbe Recht, mit dem er heute alle Vorschläge bestätigt."""
-    return not verwalter and ap_eingriff_sicht(False, "", im_planer, nur_eigene, AP_SICHT_ADMIN, None) is None
+    darf ein Login OHNE ADMIN_EMAILS „Payout erhalten" und die Hedge-Freigabe wie ein Admin? Nur, wenn er in der engen Liste admin_voll steht
+    (sql/2026-10-30_admin_voll.sql, nur Service-Key) UND im Admin nicht eingeschränkt ist (admin_sicht_lesen → None: kein Verwalter, kein
+    Gruppen-Mitglied, nicht „nur eigene"). NICHT über auto_plan_regeln.user_ids — dort stehen alle Kunden-IDs (Master-Stopp 95197c02)."""
+    return bool(uid) and str(uid) in (voll_uids or ()) and sicht_l is None
+
+
+_admin_voll_cache = {"bis": 0.0, "uids": None}
+
+
+def admin_voll_uids():
+    """user_ids aus admin_voll (frozenset), 60 s gemerkt wie admin_mail_leser_uids. Tabelle fehlt (SQL nicht eingespielt) → leer. Andere
+    Lesefehler werfen (Aufrufer 502) — nie still freigeben."""
+    jetzt = time.time()
+    with _kurz_cache_lock:
+        if _admin_voll_cache["uids"] is not None and _admin_voll_cache["bis"] > jetzt:
+            return _admin_voll_cache["uids"]
+    try:
+        rows = sb_select("admin_voll", {"select": "user_id"}) or []
+    except requests.exceptions.HTTPError as e:
+        if not admin_gruppen_tabelle_fehlt(e):
+            raise
+        rows = []
+    uids = frozenset(str(z.get("user_id")) for z in rows if isinstance(z, dict) and z.get("user_id"))
+    with _kurz_cache_lock:
+        _admin_voll_cache.update(bis=jetzt + AUTH_LISTE_CACHE_S, uids=uids)
+    return uids
 
 
 def _admin_voll():
-    """Gate „voller Admin" für Admin-Reiter-Routen → (uid, None) oder (None, Fehler-Antwort): ADMIN_EMAILS (_admin_auth) ODER ein Login,
-    für den admin_voll_frei gilt. Der 403 von _admin_auth bleibt die Antwort für alle anderen (Aufrufer prüfen danach ggf. den Verwalter)."""
+    """Gate „voller Admin" für Payout erhalten + Hedge-Freigabe → (uid, None) oder (None, Fehler-Antwort): ADMIN_EMAILS (_admin_auth) ODER
+    admin_voll_frei (Liste admin_voll + im Admin nicht eingeschränkt). Sonst bleibt der 403 von _admin_auth (Aufrufer prüfen ggf. den Verwalter)."""
     _mail, err = _admin_auth()
     if err is None:
         return str(request.environ.get("prophos.admin_uid") or ""), None
     if err[1] != 403:
         return None, err
-    uid, err2 = _wd_login()
-    if err2:
-        return None, err2
+    uid = str(request.environ.get("prophos.admin_uid") or "")   # setzt _admin_auth vor dem 403
     try:
-        sicht_l, verwalter = admin_sicht_lesen(str(uid))
-        im_planer = str(uid) in [str(u) for u in ((sb_select("auto_plan_regeln", {"select": "user_ids", "id": "eq.1"}) or [{}])[0].get("user_ids") or [])]
+        frei = admin_voll_frei(uid, admin_voll_uids(), admin_sicht_lesen(uid)[0]) if uid else False
     except Exception:
         return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
-    if admin_voll_frei(im_planer, sicht_l is not None, bool(verwalter)):
-        request.environ["prophos.admin_uid"] = str(uid)
-        return str(uid), None
-    return None, err
+    return (uid, None) if frei else (None, err)
 
 
 def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
@@ -34327,8 +34343,14 @@ def _ap_eingriff(aktion):
             if sperre:
                 return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
         zeilen = sb_delete("trade_plans", params) if art == "delete" else sb_update("trade_plans", params, upd)
-        # Hedge-Freigabe beim ✓ (30.10.2026): jeder Login mit allen IDs (sicht None) — auch „Finn + Pascal" ohne ADMIN_EMAILS (admin_voll_frei)
-        frei = _ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" and sicht is None else 0
+        # Hedge-Freigabe beim ✓ (30.10.2026): nur voller Admin (ADMIN_EMAILS oder Liste admin_voll, im Admin nicht eingeschränkt) UND alle
+        # IDs (sicht None) — ein Kunde aus user_ids bestätigt weiter, gibt aber nie einen Hedge frei
+        try:     # Lesefehler der Liste → keine Freigabe (die Bestätigung selbst ist schon geschrieben, nie still freigeben)
+            voll = admin or (aktion == "bestaetigen" and sicht is None and admin_voll_frei(uid, admin_voll_uids(), sicht_l))
+        except Exception as e:
+            voll = False
+            print(f"[auto-plan] ⚠️ admin_voll nicht lesbar — keine Hedge-Freigabe: {type(e).__name__}: {e}", flush=True)
+        frei = _ap_hedge_mit_freigeben(zeilen, uid) if aktion == "bestaetigen" and voll and sicht is None else 0
         wer = "Admin" if sicht is None else ("ID " + sicht[:8]) if isinstance(sicht, str) else ("Verwalter " + str(uid)[:8])
         print(f"[auto-plan] {aktion}: {len(zeilen)} Zeile(n) durch {wer}" + (f", {frei} Hedge-Freigabe(n)" if frei else ""), flush=True)
         return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen, "alle": sicht is None or not isinstance(sicht, str),
