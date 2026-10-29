@@ -30742,11 +30742,9 @@
   function tsxReloginAnstossen(plan, art){
     const jetzt = Date.now(), blind = art === 'blind'
     if(jetzt - _tsxReloginAt < TSX_RELOGIN_ABSTAND_MS) return false
-    if(blind && !tsxReparaturFrei()) return false   // Auge-Reparatur höchstens 1× je 30 min je PC (30.10.2026, s. tsxAugeUrteil)
     if(hedgePulsUnterwegs() || (typeof polarLaeuft === 'function' && polarLaeuft())) return false   // belegt → nächster Takt
     if(typeof bigTradeHeimPlanen !== 'function') return false
     _tsxReloginAt = jetzt
-    if(blind) tsxLs.set('prophos_tsx_auge_rep_at', jetzt)
     console.warn(`[hedgeTsx] TopstepX-${blind ? 'Auge blind' : 'ausgeloggt'} — kein Schließen über das Auge, Puls repariert über den Heimweg`, (plan && (plan.masterName || plan.id)) || '')
     if(typeof atToast === 'function') atToast(`TopstepX ${blind ? '-Auge blind — Puls lädt den Tab neu bzw. öffnet ihn neu' : 'ausgeloggt — Puls loggt sich wieder ein'} (${(plan && plan.masterName) || 'Topstep-Trade'}); Radar und Fusion-Level schließen weiter`, 'end')
     bigTradeHeimPlanen('', blind ? 'TopstepX-Auge blind — Reparatur' : 'TopstepX ausgeloggt — Rück-Login', true, 'tsx')
@@ -30775,8 +30773,10 @@
    *     Tab-Schließen) — meldet das Auge auch danach nie, gilt es als nicht installiert (prophos_tsx_auge_fehlt_at): 🟠 an die Master-IDs
    *     (Railway /alarm/userscript-update fehlt, 24 h je PC), Fehlstart 'auge_fehlt' ohne Deckel und OHNE Neuversuch im 15-min-Takt —
    *     sfBehoben plant erst neu ein, wenn das Auge meldet.
-   *   - war da, jetzt blind → Reparatur höchstens 1× je TSX_REP_ABSTAND_MS = 30 min je PC (prophos_tsx_auge_rep_at, gilt für Startsperre
-   *     und Heimweg „Auge blind"), dazwischen Fehlstart ohne Reparatur.
+   *   - war da, jetzt blind → Reparatur der Nova-STARTSPERRE höchstens 1× je TSX_REP_ABSTAND_MS = 30 min je PC (prophos_tsx_auge_rep_at),
+   *     dazwischen Fehlstart ohne Reparatur. Der Heimweg „Auge blind" bei OFFENEM Topstep-Hedge behält seinen eigenen Abstand
+   *     (TSX_RELOGIN_ABSTAND_MS = 10 min, _tsxReloginAt) und rührt diesen Stempel nicht an (Master/S2 30.10.2026: ein laufender Hedge
+   *     braucht sein Auge — ihn sperrt keine Start-Reparatur).
    * localStorage nur mit try/catch; fehlt er, bleibt das Panel-Feld als Beleg. */
   const TSX_REP_ABSTAND_MS = 30 * 60000, TSX_FEHLT_MS = 24 * 3600000
   const tsxLs = { get: k => { try{ return Number(localStorage.getItem(k)) || 0 }catch(_){ return 0 } },
