@@ -8,8 +8,8 @@ from datetime import datetime, timezone, timedelta
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_wd_num", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "tsx_brackets_fehlen", "alarm_ereignisse")
-KONSTANTEN = ("ALARM_PRIO_TITEL", "HEDGE_LEBT", "ALARM_HEDGE_OFFEN_S", "ALARM_OHNE_HEDGE_S", "ALARM_HEDGE_ZU_MASTER_S",
+FUNKTIONEN = ("_wd_num", "gp_push_ereignisse", "alarm_prio_aus_titel", "_alarm_ts", "tsx_brackets_fehlen", "_tsx_brackets_kern", "alarm_ereignisse")
+KONSTANTEN = ("PULS_BILD_PFAD_RE", "ALARM_PRIO_TITEL", "HEDGE_LEBT", "ALARM_HEDGE_OFFEN_S", "ALARM_OHNE_HEDGE_S", "ALARM_HEDGE_ZU_MASTER_S",
               "ALARM_ERINNERN_S", "ALARM_RADAR_GRUENDE")
 
 
@@ -114,6 +114,18 @@ def main():
     ok(not any(k.startswith(("n|", "o|", "r|", "s|")) for k in ev2), f"n/o/r/s gemeldet: {sorted(ev2)}")
     eq = ev2.get("q|plan_wieder_offen")
     ok(eq is not None and eq[1] == 1 and "noch offen" in eq[4] and "TopstepX" in eq[4], f"q: wieder offen fehlt/Text: {eq}")
+    # S5-Felder (9286f5f9): Objekt mit bild, Dialog-Titel, Foto-Link im Push
+    bfx = bf("tsv2", {"brackets_fehlen": {"risk": False, "tp": True, "bild": "pc-abcd12/2026-10-29/20261029-060000-a1b2c3"},
+                      "bracket_dialog": "Daily Loss Limit"})
+    ok(bfx == {"risk": False, "tp": True, "bild": "pc-abcd12/2026-10-29/20261029-060000-a1b2c3", "dialog": "Daily Loss Limit"}, f"S5-Objekt {bfx}")
+    ok(bf("tsv2", {"brackets_fehlen": True}) == {"risk": True, "tp": True}, "alter Bot: true")
+    ok("bild" not in (bf("tsv2", {"brackets_fehlen": {"risk": True, "bild": "../geheim"}}) or {}), "Bild-Pfad ungültig → weg")
+    ok(bf("tsv2", {"bracket_dialog": "X"}) is None, "nur Dialog, nichts fehlt → kein Alarm")
+    e5 = ereig([dict(nova, id="t", status="open", started_at=iso(100), tv_bf={"risk": True, "tp": False},
+                     tv_bd="Daily Loss Limit", tv_bdb="pc-abcd12/2026-10-29/20261029-060000-a1b2c3")], namen, jetzt, seit)
+    ok(len(e5) == 1 and "SL (Risk) nicht gesetzt (Dialog „Daily Loss Limit“)" in e5[0][4] and "Foto" in e5[0][4]
+       and len(e5[0]) == 8 and e5[0][7].endswith("#fehlerbild=pc-abcd12/2026-10-29/20261029-060000-a1b2c3"), f"Text/Link mit Dialog+Foto: {e5}")
+    ok(len(ev2["m|nova_ohne_sltp"]) == 7, "ohne Foto kein Link")
     k3 = [e[0] for e in ereig([dict(pl2[0], started_at=iso(2000))], namen, jetzt, seit)]
     ok(k3 == ["m|ohne_sltp|2"], f"Erinnerung ohne SL/TP {k3}")
 

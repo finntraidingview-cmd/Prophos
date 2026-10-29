@@ -3782,11 +3782,29 @@ def _alarm_ts(v):
         return None
 
 
+PULS_BILD_PFAD_RE = re.compile(r"pc-[a-z0-9]{4,12}/\d{4}-\d{2}-\d{2}/\d{8}-\d{6}-[0-9a-f]{6}")   # wie PULS_FEHLERBILD_PRAEFIX_RE (weiter unten)
+
+
 def tsx_brackets_fehlen(route, tv):
     """REIN RECHNEND (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS — wie tsxBracketsFehlen in prophos.html): fehlen an diesem tsv2-Plan laut
-    Start-Ergebnis Brackets? tv.brackets_fehlen {risk, tp} (Bot-Rücklesung bzw. vom PC-Tab aus der vollen Warnung), sonst die Bot-Warnung. tv.brackets_ok_at (Puls oder Hand-Knopf) = nachgewiesen. -> {"risk": bool, "tp": bool} | None"""
+    Start-Ergebnis Brackets? tv.brackets_fehlen {risk, tp, bild?} (Bot-Rücklesung S5 9286f5f9 bzw. vom PC-Tab aus der vollen Warnung; alte
+    Bots true), sonst die Bot-Warnung. tv.brackets_ok_at (Puls oder Hand-Knopf) = nachgewiesen.
+    -> {"risk": bool, "tp": bool[, "dialog": Titel aus tv.bracket_dialog][, "bild": Fehlerfoto-Pfad]} | None"""
     if str(route or "") != "tsv2" or not isinstance(tv, dict) or tv.get("brackets_ok_at"):
         return None
+    f = _tsx_brackets_kern(tv)
+    if not f:
+        return None
+    bf = tv.get("brackets_fehlen")
+    bild = (bf.get("bild") if isinstance(bf, dict) else None) or tv.get("bracket_dialog_bild")
+    if bild and PULS_BILD_PFAD_RE.fullmatch(str(bild)):
+        f["bild"] = str(bild)
+    if tv.get("bracket_dialog"):
+        f["dialog"] = re.sub(r"\s+", " ", str(tv.get("bracket_dialog")))[:60]
+    return f
+
+
+def _tsx_brackets_kern(tv):
     bf = tv.get("brackets_fehlen")
     if bf is True:
         return {"risk": True, "tp": True}
@@ -3808,7 +3826,7 @@ def tsx_brackets_fehlen(route, tv):
 
 def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
     """REIN RECHNEND (testbar): Plan-Zeilen (id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,started_at,updated_at,
-    hedge,final_at + Felder für gp_push_ereignisse) → [(schluessel, prio, art, titel, text, uid, plan_id)].
+    hedge,final_at + Felder für gp_push_ereignisse) → [(schluessel, prio, art, titel, text, uid, plan_id[, url])].
     Zustände (Hedge/Master auseinander) zählen ab Dauer, Übergänge (Start, Start-Fehler, Radar-Schluss) nur nach seit_iso."""
     out = []
     for key, titel, text in gp_push_ereignisse(plaene, namen, seit_iso):
@@ -3851,7 +3869,8 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
         # NOVA OHNE SL/TP (29.10.2026): Start-Ergebnis meldet fehlende Brackets → 🔴 sofort (nächster Takt), Erinnerung alle 15 min, bis Puls/
         # Hand sie nachweist (tv.brackets_ok_at) oder der Plan nicht mehr läuft. Prophos beendet solche Pläne nie per Kurs-Schätzung.
-        bf = tsx_brackets_fehlen(p.get("route"), {"brackets_fehlen": p.get("tv_bf"), "warnung": p.get("tv_w"), "brackets_ok_at": p.get("tv_ok")})
+        bf = tsx_brackets_fehlen(p.get("route"), {"brackets_fehlen": p.get("tv_bf"), "warnung": p.get("tv_w"), "brackets_ok_at": p.get("tv_ok"),
+                                                   "bracket_dialog": p.get("tv_bd"), "bracket_dialog_bild": p.get("tv_bdb")})
         if st == "open" and bf:
             s = max((jetzt - start).total_seconds(), 0) if start else 0
             ri = str(p.get("richtung") or "").upper()
@@ -3860,8 +3879,11 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             ein = _wd_num(p.get("tv_ein"))
             preis = f"{ein:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if ein else "?"
             fehlt = " und ".join(x for x, ja in (("SL (Risk)", bf["risk"]), ("TP (To Make)", bf["tp"])) if ja)
+            dlg = f" (Dialog „{bf['dialog']}“)" if bf.get("dialog") else ""
+            # Fehlerfoto (S5): der Push öffnet Prophos mit …#fehlerbild=<pfad> → Radar + Bild (pulsFehlerbildZeigen, Admin-Bildroute)
             out.append((f"{pid}|ohne_sltp|{min(int(s // ALARM_ERINNERN_S), 3)}", 1, "nova_ohne_sltp", "Nova ohne SL/TP",
-                        f"{wer} · {konto}: {menge} @ {preis} — {fehlt} nicht gesetzt — in TopstepX setzen.", uid, pid))
+                        f"{wer} · {konto}: {menge} @ {preis} — {fehlt} nicht gesetzt{dlg} — in TopstepX setzen." + (" Foto: antippen." if bf.get("bild") else ""),
+                        uid, pid) + ((f"https://prophos.pages.dev/prophos#fehlerbild={bf['bild']}",) if bf.get("bild") else ()))
         # WIEDER OFFEN (29.10.2026): die Endlesung sah die Position nach dem Ende noch offen, der PC-Tab hat den Plan zurück auf open gesetzt
         # (final → final_verworfen). Einmal je Rückholung (Schlüssel mit Zeitpunkt), nur als Übergang nach seit_iso.
         fv = p.get("fv") if isinstance(p.get("fv"), dict) else {}
@@ -3888,16 +3910,18 @@ def alarm_tick():
     sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,richtung,master_contracts,started_at,updated_at,"
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
-           "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen")
+           "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
+           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
-    for key, prio, art, titel, text, uid, pid in alarm_ereignisse(rows, namen, jetzt, seit):
+    for ev in alarm_ereignisse(rows, namen, jetzt, seit):
+        key, prio, art, titel, text, uid, pid = ev[:7]
         if key in _alarm["gemeldet"]:
             continue
         _alarm["gemeldet"][key] = time.time()
         uid = uid or next((str(r.get("user_id")) for r in rows if str(r.get("id")) == pid), None)
-        alarm_senden(prio, art, titel, text, uid=uid, plan_id=pid, schluessel=key, tag=f"alarm-{art}-{pid[:8]}")
+        alarm_senden(prio, art, titel, text, uid=uid, plan_id=pid, schluessel=key, tag=f"alarm-{art}-{pid[:8]}", url=ev[7] if len(ev) > 7 else None)
     _alarm["gemeldet"] = {k: t for k, t in _alarm["gemeldet"].items() if time.time() - t < 86400}
     if jetzt.minute == 7 and jetzt.hour == 3:          # einmal am Tag aufräumen
         try:

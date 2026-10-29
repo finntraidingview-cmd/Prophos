@@ -14543,8 +14543,11 @@
     }
     // Activate tab based on hash, or default to accounts (Overview ausgeblendet)
     const hash = (location.hash || '').replace('#','')
-    const tab = Object.keys(viewTitles).includes(hash) ? hash : 'accounts'
+    // Push-Link „…#fehlerbild=<pfad>“ (29.10.2026, 🔴 Nova ohne SL/TP): Radar öffnen, dann das Fehlerfoto als Overlay
+    const fbPfad = /^fehlerbild=/.test(hash) ? decodeURIComponent(hash.slice(11)) : ''
+    const tab = fbPfad ? 'wdlive' : Object.keys(viewTitles).includes(hash) ? hash : 'accounts'
     switchView(tab)
+    if(fbPfad) setTimeout(() => { try{ pulsFehlerbildZeigen(fbPfad) }catch(_){} }, 1200)
   }
 
   /* ========== BOOT ========== */
@@ -24207,10 +24210,52 @@
     const tv = p && p.route === 'tsv2' && p.mt5Baseline && p.mt5Baseline.tv
     if(!tv || typeof tv !== 'object' || tv.brackets_ok_at) return null
     const bf = tv.brackets_fehlen
-    if(bf === true) return { risk: true, tp: true }
-    if(bf && typeof bf === 'object' && (bf.risk || bf.tp)) return { risk: !!bf.risk, tp: !!bf.tp }
-    return tsxWarnungBrackets(tv.warnung)
+    const f = bf === true ? { risk: true, tp: true } : (bf && typeof bf === 'object' && (bf.risk || bf.tp)) ? { risk: !!bf.risk, tp: !!bf.tp } : tsxWarnungBrackets(tv.warnung)
+    if(!f) return null
+    // S5 (9286f5f9): Fehlerfoto-Pfad in brackets_fehlen.bild bzw. bracket_dialog_bild, Titel des Dialogs über der Tabelle in bracket_dialog
+    const bild = (bf && typeof bf === 'object' && bf.bild) || tv.bracket_dialog_bild
+    if(PULS_FEHLERBILD_RE.test(String(bild || ''))) f.bild = String(bild)
+    if(tv.bracket_dialog) f.dialog = String(tv.bracket_dialog).slice(0, 60)
+    return f
   }
+  // Text „SL (Risk) und TP (To Make) nicht gesetzt (Dialog 'Titel')“ für Chip, Karte und Toast
+  function tsxBracketsText(f){
+    if(!f) return ''
+    const was = [f.risk ? 'SL (Risk)' : '', f.tp ? 'TP (To Make)' : ''].filter(Boolean).join(' und ') || 'SL/TP'
+    return `${was} nicht gesetzt${f.dialog ? ` (Dialog „${f.dialog}“)` : ''}`
+  }
+  /* FEHLERFOTO ANSEHEN (29.10.2026, Master: „Fehlerfoto-Pfad als Link“): der Bot legt Bilder im privaten Bucket ab (<pc>/<JJJJ-MM-TT>/<id>),
+   * die Admin-Bildroute /admin/puls-fehlerbild gibt mit Admin-Token einen 5-min-Link. Klick auf [data-fehlerbild] (Chips in Radar/Karte) oder
+   * der Push-Link …#fehlerbild=<pfad> (showDashboard) → Bild als Overlay; ohne Admin-Recht die Meldung der Route. Liest nur. */
+  const PULS_FEHLERBILD_RE = /^pc-[a-z0-9]{4,12}\/\d{4}-\d{2}-\d{2}\/\d{8}-\d{6}-[0-9a-f]{6}$/
+  async function pulsFehlerbildZeigen(pfad){
+    pfad = String(pfad || '')
+    if(!PULS_FEHLERBILD_RE.test(pfad)) return
+    document.getElementById('puls-fehlerbild-ov')?.remove()
+    const ov = document.createElement('div')
+    ov.id = 'puls-fehlerbild-ov'
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out'
+    ov.innerHTML = `<div style="color:#fff;font-size:13px">Fehlerfoto wird geladen …</div>`
+    ov.addEventListener('click', () => ov.remove())
+    document.body.appendChild(ov)
+    let url = null, fehler = ''
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const r = await fetch(`${WATCHER_HOME}/admin/puls-fehlerbild?pfad=${encodeURIComponent(pfad)}&art=bildschirm`, { headers: { 'sb-token': session?.access_token || '' }, cache: 'no-store' })
+      const d = await r.json().catch(() => null)
+      if(d && d.ok && d.url) url = d.url; else fehler = String((d && (d.msg || d.error)) || ('HTTP ' + r.status))
+    }catch(e){ fehler = String((e && e.message) || e) }
+    ov.innerHTML = url
+      ? `<img src="${escapeHtml(url)}" alt="Fehlerfoto" style="max-width:100%;max-height:100%;border-radius:6px;box-shadow:0 8px 30px rgba(0,0,0,.5)">`
+      : `<div style="color:#fff;font-size:13px">Fehlerfoto nicht abrufbar: ${escapeHtml(fehler)}</div>`
+  }
+  window._pulsFehlerbildZeigen = pulsFehlerbildZeigen
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest && e.target.closest('[data-fehlerbild]')
+    if(!b) return
+    e.preventDefault(); e.stopPropagation()
+    pulsFehlerbildZeigen(b.dataset.fehlerbild)
+  }, true)
   window._tsxBracketsFehlen = tsxBracketsFehlen   // Test-Haken
   // REIN RECHNEND (window._tsxWarnungBrackets): Bot-Warnung des Starts („Brackets in TopstepX prüfen: A; B; …“) → {risk, tp} | null.
   // FAIL-CLOSED (Prüfung 29.10.2026): jeder Teil zählt als „fehlt“ — auch „Reiter Positions … nicht gefunden“, „Order abgelehnt“ o. Ä., bei
@@ -27194,9 +27239,14 @@
     if(r && r.warnung) tv.warnung = String(r.warnung).slice(0, 300)
     // Rücklesung des Bots (29.10.2026): {risk, tp} = geplante Brackets nicht bewiesen → kein Demo-Ende, 🔴 (s. tsxBracketsFehlen)
     // Ohne das Feld (ältere Bots) aus der UNGEKÜRZTEN Warnung — tv.warnung ist auf 300 Zeichen gekappt, der Teil „To Make …“ fiele sonst weg.
-    if(r && r.brackets_fehlen && typeof r.brackets_fehlen === 'object' && (r.brackets_fehlen.risk || r.brackets_fehlen.tp))
-      tv.brackets_fehlen = { risk: !!r.brackets_fehlen.risk, tp: !!r.brackets_fehlen.tp }
+    // S5 9286f5f9: brackets_fehlen {risk, tp, bild?}, bracket_dialog (Titel), bracket_dialog_bild (Fehlerfoto-Pfad) — alte Bots: true
+    if(r && r.brackets_fehlen === true) tv.brackets_fehlen = { risk: true, tp: true }
+    else if(r && r.brackets_fehlen && typeof r.brackets_fehlen === 'object' && (r.brackets_fehlen.risk || r.brackets_fehlen.tp))
+      tv.brackets_fehlen = Object.assign({ risk: !!r.brackets_fehlen.risk, tp: !!r.brackets_fehlen.tp },
+        PULS_FEHLERBILD_RE.test(String(r.brackets_fehlen.bild || '')) ? { bild: String(r.brackets_fehlen.bild) } : {})
     else if(r && r.warnung){ const wb = tsxWarnungBrackets(r.warnung); if(wb) tv.brackets_fehlen = wb }
+    if(r && r.bracket_dialog) tv.bracket_dialog = String(r.bracket_dialog).slice(0, 80)
+    if(r && PULS_FEHLERBILD_RE.test(String(r.bracket_dialog_bild || ''))) tv.bracket_dialog_bild = String(r.bracket_dialog_bild)
     const ein = r.einstieg != null ? tvKursZahl(r.einstieg) : null
     if(ein > 1000){ tv.einstieg_nq = ein; tv.einstieg_quelle = 'fill'; tv.einstieg_beleg = (r && r.einstieg_quelle) || null; tv.einstieg_symbol = r.tv_symbol || null }
     else if(!(opts && opts.ohneReader)){
@@ -35063,8 +35113,9 @@
     let h = ''
     const bf = t.ohne_sltp
     if(bf){
-      const was = [bf.risk ? 'SL (Risk)' : '', bf.tp ? 'TP (To Make)' : ''].filter(Boolean).join(' und ')
-      h += `<em class="wdl-rot" title="${escapeHtml(`${was || 'Brackets'} laut Puls nicht gesetzt — die Position ist in TopstepX ungeschützt. Dort setzen; Prophos beendet den Plan nicht per Kurs-Schätzung`)}">ohne SL/TP</em>`
+      const was = bf.risk && !bf.tp ? 'ohne SL' : bf.tp && !bf.risk ? 'ohne TP' : 'ohne SL/TP'
+      h += `<em class="wdl-rot" title="${escapeHtml(`${tsxBracketsText(bf)} laut Puls — die Position ist in TopstepX ungeschützt. Dort setzen; Prophos beendet den Plan nicht per Kurs-Schätzung`)}">${was}</em>`
+      if(bf.bild) h += `<button type="button" class="wdl-rot" data-fehlerbild="${escapeHtml(bf.bild)}" style="cursor:pointer;border:0" title="Fehlerfoto vom PC ansehen (Bildschirm beim Start)">Foto</button>`
     }
     if(t.wieder_offen) h += `<em class="wdl-rot" title="${escapeHtml('Die Endlesung sah die Position nach dem Ende noch offen — Plan wieder auf „Läuft“. Position prüfen, Ende nur noch von Hand („Beendet“)')}">wieder offen</em>`
     return h
@@ -47436,7 +47487,7 @@
                 : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
             ${(p.route === 'tsv2' && p.status === 'open' && tsxBracketsFehlen(p))
               // NOVA OHNE SL/TP (29.10.2026): rot + Hand-Nachweis — erst danach darf die Demo den Plan wieder beenden (tsxBracketsFehlen)
-              ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--danger) 12%, transparent);color:var(--danger-ink, #b91c1c);font-weight:700" title="${escapeHtml(String(p.mt5Baseline.tv.warnung || 'Brackets laut Puls nicht gesetzt'))} — Position in TopstepX ungeschützt, dort setzen">⚠ ohne SL/TP</span><button type="button" class="tc2-chip" data-plan-sltp-ok="${p.id}" style="cursor:pointer;border:1px solid var(--line)" title="SL und TP stehen jetzt in TopstepX (von Hand geprüft) — roter Hinweis weg, Demo-Ende wieder erlaubt">gesetzt ✓</button>`
+              ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--danger) 12%, transparent);color:var(--danger-ink, #b91c1c);font-weight:700" title="${escapeHtml(tsxBracketsText(tsxBracketsFehlen(p)) + (p.mt5Baseline.tv.warnung ? ' — ' + String(p.mt5Baseline.tv.warnung) : ''))} — Position in TopstepX ungeschützt, dort setzen">⚠ ${(f => f.risk && !f.tp ? 'ohne SL' : f.tp && !f.risk ? 'ohne TP' : 'ohne SL/TP')(tsxBracketsFehlen(p))}</span>${tsxBracketsFehlen(p).bild ? `<button type="button" class="tc2-chip" data-fehlerbild="${escapeHtml(tsxBracketsFehlen(p).bild)}" style="cursor:pointer;border:1px solid var(--line)" title="Fehlerfoto vom PC ansehen">Foto</button>` : ''}<button type="button" class="tc2-chip" data-plan-sltp-ok="${p.id}" style="cursor:pointer;border:1px solid var(--line)" title="SL und TP stehen jetzt in TopstepX (von Hand geprüft) — roter Hinweis weg, Demo-Ende wieder erlaubt">gesetzt ✓</button>`
               : (p.route === 'tsv2' && (p.status === 'open' || p.status === 'review') && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.warnung)
               ? `<span class="tc2-chip" style="background:color-mix(in srgb, var(--warn) 12%, transparent);color:var(--warn-ink, #b45309)" title="${escapeHtml(String(p.mt5Baseline.tv.warnung))}">⚠ Brackets in TopstepX prüfen</span>`
               : ''}
