@@ -22,11 +22,13 @@ def main():
     ok(chips == ["wd", "planer", "fplaner", "fcfd"], f"Chips {chips}")
     ok('class="subtabs nav-gruppe-tabs adm-planer-chips"' in s, "Chip-Leiste im Stil der Navigations-Gruppen")
     # Hülle Funded CFD: Gerüst, keine Abfrage
-    i = s.find('<div id="adm-pane-fcfd" hidden>')
-    huelle = s[i:s.find('<div id="adm-pane-kompass" hidden>', i)]
-    for teil in ("Zeitstrahl", "Läuft · 0", "Braucht dich · 0", "Wartet auf Start · 0", "Zu bestätigen · 0", "kommt"):
+    # seit 30.10.2026 (Planer Schritt 2) baut apgHuelleHtml die Hülle mit den Guestly-Bausteinen in #apg-fcfd
+    ok('<div id="adm-pane-fcfd" hidden><div id="apg-fcfd" class="ap-guestly"></div></div>' in s, "Hülle-Container Funded CFD")
+    i = s.find("function apgHuelleHtml(){")
+    huelle = s[i:s.find("function apGuestlyVerdrahten(root){", i)]
+    for teil in ("Zeitstrahl", "'Zu bestätigen', 'Läuft', 'Braucht dich', 'Wartet auf Start'", "kommt", "Long · Short je ID", "Starts je Stunde"):
         ok(teil in huelle, "Hülle Funded CFD: " + teil)
-    ok("fetch" not in huelle and "apdApi" not in huelle, "Hülle ohne Abfragen")
+    ok("fetch" not in huelle and "apdApi" not in huelle and "disabled" in huelle, "Hülle ohne Abfragen, Knöpfe gesperrt")
     ok('data-admtab="fcfd" data-reiter-aus="1"' in s and "$('adm-pane-fcfd').hidden     = name !== 'fcfd'" in s, "Reiter fcfd nur im Planer, Pane geschaltet")
     # Planer-Modus = Admin-Section (dieselbe Sperre/Rechte), Chips nach kasseReiterErlaubt
     ok("v.dataset.view === name || (name === 'planer' && v.dataset.view === 'kasse')" in s, "Planer aktiviert die Admin-Section")

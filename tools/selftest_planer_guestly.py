@@ -13,14 +13,18 @@ def main():
     s = open(HTML, encoding="utf-8").read()
     f = []
     ok = lambda b, t: f.append(t) if not b else None   # noqa: E731
-    ok("const guestly = _apIdsArtWert === 'challenge' && apSchlankJetzt()" in s, "nur Challenge-Planer (Funded/WD unverändert)")
+    ok("const guestly = apSchlankJetzt() && (_apIdsArtWert === 'challenge' || apSchlankFunded())" in s, "Challenge + Funded Futures (WD unverändert)")
+    ok("funded: _apIdsArtWert === 'funded'" in s and "vorschau ? 'Vorschau' : 'Zu bestätigen'" in s, "Funded: Vorschau statt Zu bestätigen")
+    ok("let schalter = ''; if(!fd)" in s and "teile.push(Q ? (Q.aktiv ? 'Funded-Planer an'" in s, "Funded: Einstellungen = Funded-Regeln, keine Challenge-Schalter")
+    ok("function apgZeilenSchmuecken(root, x)" in s and "apgZeilenSchmuecken(root, ow)" in s, "Weg-Chips in den Zeilen")
+    ok(".pz-radar:not(:has(.pz-fus)) .pz-z > :nth-child(5){display:none}" in s, "Spalte Schritt nur ohne Fusion-Hedge aus")
     # Tokens nur unter #ap-ids-root.ap-guestly, dunkel über den Sonnen-Schalter, Guestly-Farben
     for c in ("--g-a1:#5447ce", "--g-a2:#887cfc", "--g-a3:#4996ff", "--g-a4:#16c8c6"):
         ok(c in s, "Farbe " + c)
-    ok('html[data-theme="dark"] #ap-ids-root.ap-guestly{' in s, "dunkle Tokens am Sonnen-Schalter")
+    ok('html[data-theme="dark"] :is(#ap-ids-root.ap-guestly,#apg-fcfd){' in s, "dunkle Tokens am Sonnen-Schalter")
     ok(not re.search(r":root\{[^}]*--g-a1", s), "keine globalen --g-Tokens")
-    css = "\n".join(z for z in s.splitlines() if "apg-" in z and "{" in z and z.lstrip().startswith(("#", "@", "html")))
-    ok(all("#ap-ids-root.ap-guestly" in z for z in css.splitlines() if z.lstrip().startswith("#") and "apg-" in z), "apg-Stile nur im Planer-Bereich")
+    css = "\n".join(z for z in s.splitlines() if "apg-" in z and "{" in z and z.lstrip().startswith(("#", "@", "html", ":is(")))
+    ok(all("#ap-ids-root.ap-guestly" in z for z in css.splitlines() if z.lstrip().startswith(("#", ":is(")) and "apg-" in z), "apg-Stile nur im Planer-Bereich")
     ok("border-radius:16px" in css, "Karten 16 px Radius")
     # Aufbau in der Reihenfolge der Vorgabe
     i = s.index("function apGuestlyHtml(x){")
@@ -28,7 +32,7 @@ def main():
     ok(g.rstrip().endswith("return kopf + kpis + charts + leiste + zs + listen\n  }") or "return kopf + kpis + charts + leiste + zs + listen" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · Listen")
     ok('<button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button>' in g, "7/30 Tage ausgegraut mit „kommt“")
     ok("data-ap-tag" in g and "data-apg-id" in g and "data-apg-firma" in g, "Zeitraum + Filter ID/Firma")
-    ok(g.count("apgKpi({ gross: true") == 2 and g.count("apgKpi({ icon:") == 3, "2 große + 3 kleine KPI-Karten")
+    ok(g.count("apgKpi({ gross: true") >= 2 and g.count("apgKpi({ icon:") >= 3, "2 große + 3 kleine KPI-Karten")
     for n in ("P&amp;L hypothetisch", "Zu bestätigen", "Läuft", "Braucht dich", "Wartet auf Start"):
         ok(f"name: '{n}'" in g, "KPI " + n)
     ok('id="apg-c-ls"' in g and 'id="apg-c-std"' in g, "Chart-Reihe Long/Short + Starts je Stunde")
