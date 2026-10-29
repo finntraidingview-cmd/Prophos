@@ -131,16 +131,17 @@ def main():
     DB["accounts"].append({"id": "a3", "user_id": "u3", "firm": "Topstep", "name": "150k Express", "account_type": "funded",
                            "external_id": "EXPRESS-V2-000001-00000001"})
     DB["tsx"] = [{"konto": "EXPRESS-V2-000001-00000001", "positionen": [{"symbol": "MNQZ6", "seite": "sell", "menge": 3, "avg": 25012.75}],
-                  "positionen_ok": True, "ausgeloggt": False, "abgekuerzt": False, "updated_at": jetzt()}]
+                  "positionen_ok": True, "vollstaendig": True, "ausgeloggt": False, "abgekuerzt": False, "updated_at": jetzt()}]
     DB["upsert"].clear()
     tick()
     u = [z for z in DB["upsert"] if z.get("quelle") == "tsx"]
-    check(len(u) == 1 and u[0]["master_login"] == "EXPRESSV200000100000001" and u[0]["ident"] == "MNQZ6:sell:25012.75"
+    check(len(u) == 1 and u[0]["master_login"] == "EXPRESSV200000100000001" and u[0]["ident"] == "MNQZ6:sell:25013.00"
           and u[0]["richtung"] == "sell" and u[0]["konto_id"] == "a3", f"TopstepX-Hand-Position ohne Plan → fremd (quelle tsx) ({u[:1]})")
     DB["fremd"].append({"id": 3, "quelle": "tsx", "master_login": "EXPRESSV200000100000001", "weg_at": None, "zuletzt_gesehen": alt,
                         "alarm_keys": [], "gegen": []})
     tick()                                        # wie im echten Ablauf: der Takt, der die Zeile anlegt, kennt sie danach als offen
-    DB["tsx"] = [{"konto": "EXPRESS-V2-000001-00000001", "positionen": [], "positionen_ok": True, "ausgeloggt": False, "abgekuerzt": False,
+    DB["tsx"] = [{"konto": "EXPRESS-V2-000001-00000001", "positionen": [], "positionen_ok": True, "vollstaendig": True, "ausgeloggt": False,
+                  "abgekuerzt": False,
                   "updated_at": jetzt()}]
     tick()
     check(DB["fremd"][2]["weg_at"] is not None, "TopstepX flach bewiesen → weg_at (wie TV)")

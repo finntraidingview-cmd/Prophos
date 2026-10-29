@@ -4,7 +4,10 @@
 -- wie die TV-Brücke nach echoplus_live in EINE Zeile je PC hierher. fp_tick liest frische Zeilen (≤ 90 s, positionen_ok) als quelle 'tsx'
 -- in fremd_positionen — damit sperren prophos_gegenhedge_konflikt / prophos_fremd_konflikte auch gegen TopstepX-Hand-Trades (die Funktionen
 -- unterscheiden keine Quelle).
--- positionen_ok nur mit Beweis (Stand ≤ 10 s, nicht ausgeloggt, volle Kontonummer, Liste zu, flach bewiesen oder Position gelesen).
+-- positionen_ok nur mit Beweis (Stand ≤ 10 s, nicht ausgeloggt, volle Kontonummer, Liste zu, flach bewiesen — flach_folge ≥ 3 über ≥ 200 ms —
+-- oder Position gelesen; zwei gleiche Lesungen ≥ 3 s auseinander, Puls nicht unterwegs). vollstaendig: nur dann schließt fp_tick (weg_at).
+-- BEKANNTE GRENZE DES RIEGELS (Gegenlesung 29.10.2026, gilt für mt5/tv/tsx gleich): prophos_gegenhedge_konflikt zählt eine Fremd-Position
+-- nur in den ersten 90 s ab seit — eine länger offene Hand-Position sperrt eine Gegenrichtung danach nicht mehr (eigener SQL-Schritt, offen).
 -- GRENZE: das Auge sieht nur das GERADE GEWÄHLTE TopstepX-Konto — andere Konten desselben Logins bleiben unsichtbar (wie bei TradingView).
 -- Rechte wie echoplus_live (eingeloggte Tabs lesen/schreiben, Backup-Leser liest). Einspielen: Master nach Prüfer-OK. Idempotent.
 --
@@ -20,6 +23,7 @@ create table if not exists public.tsx_live (
   abgekuerzt boolean,
   positionen jsonb default '[]'::jsonb,        -- [{symbol, seite: buy|sell, menge, avg}] — höchstens 10
   positionen_ok boolean,
+  vollstaendig boolean,                        -- flach bewiesen oder alle Positionen aus der Positions-Tabelle — nur dann darf fp_tick schließen
   flach boolean,
   ausgeloggt boolean,
   script text,                                 -- Version des Auges

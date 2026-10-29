@@ -30415,14 +30415,26 @@ def fp_erkennen_tv(tv_rows, konten, plaene, jetzt):
 def fp_erkennen_tsx(tsx_rows, konten, plaene, jetzt):
     """REIN RECHNEND (testbar): TopstepX-Auge (tsx_live {konto, positionen [{symbol, seite, menge, avg}], positionen_ok, ausgeloggt,
     abgekuerzt, updated_at}) → (fremde, bewertet) über fp_erkennen_tv. Nur Zeilen mit positionen_ok, nicht ausgeloggt, volle Kontonummer."""
-    rows = []
+    rows, voll = [], set()
     for z in tsx_rows or ():
         if not isinstance(z, dict) or z.get("ausgeloggt") or z.get("abgekuerzt") is not False or not isinstance(z.get("positionen"), list):
             continue
-        pos = [{"richtung": str(x.get("seite") or "").lower(), "symbol": x.get("symbol"), "avg_fill": x.get("avg"), "menge_zahl": x.get("menge")}
-               for x in z["positionen"] if isinstance(x, dict)]
+        # ident stabil zwischen Positions-Tabelle und Order-Karte (Gegenlesung 29.10.2026): Symbol ohne „/", groß; Einstieg auf ganze
+        # Punkte (x.125 / x.13 der beiden Quellen ergäben sonst zwei Zeilen und einen falschen „frischen Hand-Start")
+        def avg_ganz(v):
+            try:
+                return float(round(float(v)))
+            except (TypeError, ValueError):
+                return None
+        pos = [{"richtung": str(x.get("seite") or "").lower(), "symbol": str(x.get("symbol") or "").lstrip("/").upper() or None,
+                "avg_fill": avg_ganz(x.get("avg")), "menge_zahl": x.get("menge")} for x in z["positionen"] if isinstance(x, dict)]
         rows.append({"konto": z.get("konto"), "positionen": pos, "positionen_ok": z.get("positionen_ok") is True, "updated_at": z.get("updated_at")})
-    return fp_erkennen_tv(rows, konten, plaene, jetzt)
+        if z.get("positionen_ok") is True and z.get("vollstaendig") is True:
+            voll.add(fp_konto_norm(z.get("konto")))
+    fremde, bewertet = fp_erkennen_tv(rows, konten, plaene, jetzt)
+    # schließen (weg_at) nur nach einer VOLLSTÄNDIGEN Lesung (flach bewiesen oder Positions-Tabelle) — eine Order-Karten-Lesung zeigt nur den
+    # gewählten Contract; sie darf Fremd-Zeilen anlegen, aber keine schließen
+    return fremde, bewertet & voll
 
 
 def fp_alarme(aktive, konflikte):
@@ -30474,7 +30486,8 @@ def fp_tick(force=False):
     tv = sb_select("echoplus_live", {"select": "konto,positionen,positionen_ok,updated_at", "updated_at": f"gte.{ab}",
                                      "positionen_ok": "is.true", "konto": "not.is.null"}) or []
     try:                                         # TopstepX-Auge (29.10.2026) — Tabelle fehlt noch → Quelle still, Rest unverändert
-        tsx = sb_select("tsx_live", {"select": "konto,positionen,positionen_ok,ausgeloggt,abgekuerzt,updated_at", "updated_at": f"gte.{ab}",
+        tsx = sb_select("tsx_live", {"select": "konto,positionen,positionen_ok,vollstaendig,ausgeloggt,abgekuerzt,updated_at",
+                                     "updated_at": f"gte.{ab}", "stand_ts": f"gte.{ab}",   # stand_ts: ein verstummtes Auge zählt nicht nach
                                      "positionen_ok": "is.true", "konto": "not.is.null"}) or []
         _fp["tsx_fehlt"] = False
     except Exception as e:

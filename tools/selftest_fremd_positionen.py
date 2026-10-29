@@ -150,7 +150,7 @@ def main():
     TSX = ns["fp_erkennen_tsx"]
     kt = {"EXPRESSV200000100000001": {"id": "k9", "user_id": "u-marco", "firm": "Topstep", "name": "150k Express", "account_type": "funded"}}
     z = lambda **o: dict({"konto": "EXPRESS-V2-000001-00000001", "positionen": [{"symbol": "MNQZ6", "seite": "buy", "menge": 2, "avg": 25000.0}],
-                          "positionen_ok": True, "ausgeloggt": False, "abgekuerzt": False, "updated_at": iso(5)}, **o)
+                          "positionen_ok": True, "vollstaendig": True, "ausgeloggt": False, "abgekuerzt": False, "updated_at": iso(5)}, **o)
     fr, bw = TSX([z()], kt, [], jetzt)
     check(len(fr) == 1 and fr[0]["richtung"] == "buy" and fr[0]["ident"] == "MNQZ6:buy:25000.00" and bw == {"EXPRESSV200000100000001"},
           "TopstepX: Hand-Position ohne Plan → fremd")
@@ -160,6 +160,11 @@ def main():
     check(TSX([z()], kt, [{"master_account_id": "k9", "status": "open"}], jetzt) == ([], set()), "TopstepX: laufender tsv2-Plan → Konto unbewertet")
     fr, bw = TSX([z(positionen=[])], kt, [], jetzt)
     check(fr == [] and bw == {"EXPRESSV200000100000001"}, "TopstepX: flach bewiesen → bewertet ohne Fremde (weg_at-Wache)")
+    fr, bw = TSX([z(vollstaendig=False)], kt, [], jetzt)
+    check(len(fr) == 1 and bw == set(), "TopstepX: Order-Karten-Lesung (nicht vollständig) legt an, schließt aber nie")
+    a = TSX([z(positionen=[{"symbol": "/MNQZ6", "seite": "buy", "menge": 2, "avg": 25000.125}])], kt, [], jetzt)[0][0]["ident"]
+    b = TSX([z(positionen=[{"symbol": "MNQZ6", "seite": "buy", "menge": 2, "avg": 25000.13}])], kt, [], jetzt)[0][0]["ident"]
+    check(a == b == "MNQZ6:buy:25000.00", f"TopstepX: ident gleich für Tabelle/Karte (Schrägstrich, x.125 vs x.13) ({a}, {b})")
 
     print(f"{len(f) - sum(f)}/{len(f)} ok")
     sys.exit(1 if sum(f) else 0)
