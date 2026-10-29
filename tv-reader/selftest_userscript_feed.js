@@ -158,18 +158,21 @@ function laderLauf(o) {
   spur.store = store; return spur;
 }
 var L1 = laderLauf({});
-check(L1.kern === 1 && L1.info.quelle === "eingebaut" && L1.info.eval === true && L1.info.laeuft === "0.10.0", "Lader: nichts gemerkt → eingebaute Fassung läuft genau einmal");
+check(L1.kern === 1 && L1.info.quelle === "eingebaut" && L1.info.eval === true && L1.info.laeuft === "0.10.1", "Lader: nichts gemerkt → eingebaute Fassung läuft genau einmal");
 var gelaufen = 0;
-var L2 = laderLauf({ merk: { version: "0.10.1", code: "globalThis.__laderInfo = PROPHOS_LADER;", sha: "x" } });
+var L2 = laderLauf({ merk: { version: "0.10.2", code: "globalThis.__laderInfo = PROPHOS_LADER;", sha: "x" } });
 var i2 = globalThis.__laderInfo;
-check(L2.kern === 0 && i2 && i2.quelle === "nachgeladen" && i2.laeuft === "0.10.1", "Lader: neuere gemerkte Fassung läuft statt der eingebauten (nie beide)");
-var L3 = laderLauf({ merk: { version: "0.10.1", code: "throw new Error('kaputt')", sha: "x" } });
+check(L2.kern === 0 && i2 && i2.quelle === "nachgeladen" && i2.laeuft === "0.10.2", "Lader: neuere gemerkte Fassung läuft statt der eingebauten (nie beide)");
+var L3 = laderLauf({ merk: { version: "0.10.2", code: "throw new Error('kaputt')", sha: "x" } });
 check(L3.kern === 1 && L3.info.quelle === "eingebaut" && L3.store.prophos_kern_v1 === null && /warf/.test(L3.info.fehler), "Lader: gemerkte Fassung wirft → eingebaute läuft, Merker gelöscht");
-var L4 = laderLauf({ merk: { version: "0.10.1", code: "}{ kein js", sha: "x" } });
+var L4 = laderLauf({ merk: { version: "0.10.2", code: "}{ kein js", sha: "x" } });
 check(L4.kern === 1 && L4.store.prophos_kern_v1 === null && /nicht lesbar/.test(L4.info.fehler), "Lader: gemerkte Fassung nicht lesbar → eingebaute läuft, Merker gelöscht");
+var L3r = laderLauf({ merk: { version: "0.10.2", code: "unsafeWindow.__prophosKernAn = true; throw new Error('halb gestartet')", sha: "x" } });
+check(L3r.info.quelle === "blind (Riegel)" && /Riegel/.test(L3r.info.fehler) && L3r.store.prophos_kern_v1 === null,
+      "Lader: nachgeladener Kern setzt den Riegel und wirft → eingebaute Fassung startet NICHT daneben (blind statt doppelt), Merker gelöscht");
 var L5 = laderLauf({ merk: { version: "0.9.12", code: "PROPHOS_LADER.x = 1;", sha: "x" } });
 check(L5.kern === 1 && L5.info.quelle === "eingebaut", "Lader: gemerkte ÄLTERE Fassung wird nie gestartet");
-var L6 = laderLauf({ evalGesperrt: true, merk: { version: "0.10.1", code: "PROPHOS_LADER.x = 1;", sha: "x" } });
+var L6 = laderLauf({ evalGesperrt: true, merk: { version: "0.10.2", code: "PROPHOS_LADER.x = 1;", sha: "x" } });
 check(L6.kern === 1 && L6.info.eval === false && L6.info.quelle === "eingebaut" && /eval gesperrt/.test(L6.info.fehler) && L6.store.prophos_kern_v1 !== null,
       "Lader: eval gesperrt (MV3) → eingebaute Fassung, nichts nachgeladen");
 var fehl = aus.filter(function (z) { return z.indexOf("FEHL") === 0; }).length;

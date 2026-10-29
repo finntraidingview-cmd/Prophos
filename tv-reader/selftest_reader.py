@@ -495,6 +495,9 @@ Aktive Verbindungen
     check(rs.kern_aus_userscript(_us.replace("// ==KERN-ENDE==", "")) is None and rs.kern_aus_userscript(_us + "\n// ==KERN-START==\n") is None
           and rs.kern_aus_userscript(b"") is None, "Lader: fehlende/doppelte Marker → None (nie ein halber Kern)")
     check(re.search(r"const EINGEBAUT = '([0-9.]+)'", _us).group(1) == _ver, "Lader: EINGEBAUT = @version = VERSION im Kern")
+    check(kj["kern"].startswith("(function () {\n  'use strict';\n  // 0.10.1 DOPPELLAUF-RIEGEL")
+          and "  if (unsafeWindow.__prophosKernAn) return;\n  unsafeWindow.__prophosKernAn = true;\n" in kj["kern"][:300]
+          and kj["kern"].count("__prophosKernAn") == 2, "Lader: Doppellauf-Riegel steht ganz oben im Kern (eingebaut und nachgeladen)")
     _ph = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prophos.html"), encoding="utf-8").read()
     _lv, _soll = re.search(r"const LADER_V = (\d+);", _us), re.search(r"const TVTM_LADER_SOLL = (\d+)", _ph)
     check(_lv and _soll and _lv.group(1) == _soll.group(1),

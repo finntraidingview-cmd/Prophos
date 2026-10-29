@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.0
+// @version      0.10.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,9 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.1 29.10.2026  DOPPELLAUF-RIEGEL (Master: „lieber blind (Hedge bleibt) als doppelt"): der Kern setzt beim Start
+//                      unsafeWindow.__prophosKernAn und kehrt bei einem zweiten Start in derselben Seite sofort um — ein halb gestarteter,
+//                      dann geworfener nachgeladener Kern laeuft so nie neben der eingebauten Fassung. Kern sonst = 0.9.13 (Konto-Liste).
 //   0.10.0 29.10.2026  LADER (Finn 05:20: „dass das Tampermonkey-Script in Zukunft immer automatisch und schneller aktualisiert wird —
 //                      es dauert ewig"; Befund: kein Puls-PC auf 0.9.11/0.9.12, zwei noch auf 0.9.7 vom 05.10. — Tampermonkey zieht
 //                      @updateURL praktisch nie). Die Datei ist jetzt Lader + eingebauter Kern: der Kern (zwischen KERN-START und
@@ -157,6 +160,9 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 // ==KERN-START==
 (function () {
   'use strict';
+  // 0.10.1 DOPPELLAUF-RIEGEL: nie zwei Kerne in einer Seite (eingebaute UND nachgeladene Fassung) — lieber blind als doppelt
+  if (unsafeWindow.__prophosKernAn) return;
+  unsafeWindow.__prophosKernAn = true;
 
   // Version doppelt: einmal im @version-Kopf fuer Tampermonkey, einmal hier
   // fuer die Ferndiagnose. Klingt redundant, ist es nicht -- an Finns PC wurde
@@ -165,7 +171,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.0';
+  const VERSION    = '0.10.1';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1743,7 +1749,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.0';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.1';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
@@ -1776,7 +1782,11 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       if (!laeuft) { try { GM_setValue(MERK, null); } catch (_) {} }   // kaputte Fassung nie wieder starten
     }
   }
-  if (!laeuft) prophosKern(...gm(), info);
+  if (!laeuft) {
+    const uw = gm()[4];
+    if (uw && uw.__prophosKernAn) { info.quelle = 'blind (Riegel)'; info.fehler += ' — Doppellauf-Riegel: eingebaute Fassung nicht gestartet'; }
+    prophosKern(...gm(), info);
+  }
   if (!evalOk) return;                          // ohne eval nie etwas nachladen — die eingebaute Fassung bleibt
   // Hintergrund: neuere Fassung vom eigenen reader-server holen, pruefen, fuer das NAECHSTE Laden merken (nie zwei Kerne in einer Seite)
   async function sha256(t) {

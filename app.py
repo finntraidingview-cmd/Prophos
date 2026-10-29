@@ -3885,7 +3885,11 @@ def alarm_userscript_update():
     d = request.get_json(silent=True) or {}
     kurz = lambda k, n: re.sub(r"\s+", " ", str(d.get(k) or ""))[:n]   # noqa: E731
     pc, soll, von, code, msg = kurz("pc", 20), kurz("soll", 16), kurz("von", 16), kurz("code", 30), kurz("msg", 200)
+    if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
+        pc = ""
     namen, _aus = _ap_namen()
+    if str(uid) in _aus or _alarm_fremd_verwaltet(uid):   # nur Hermann-Technologies-IDs melden (wie alarm_tick), Emin-Gruppe nie
+        return jsonify({"ok": True})
     wer = f"{namen.get(uid, uid[:8])}" + (f" · {pc}" if pc else "")
     daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg}
     if d.get("ok") is True:
@@ -15252,6 +15256,18 @@ def skript_wacht_pruefen(rows, soll, jetzt, start_s, gemeldet):
     return aus
 
 
+def skript_wacht_ht_filter(rows, live, fremd):
+    """REIN RECHNEND (testbar): echoplus_live-Zeilen nur von PCs, deren jüngste mt5_live-Zeile (live absteigend nach updated_at) eine ID
+    trägt, für die fremd(uid) False ist. PC ohne bekannte ID → raus (fail-closed: nie eine Emin-PC-Meldung an die Master-IDs)."""
+    uid_je_pc = {}
+    for z in live or []:
+        pc, uid = str((z or {}).get("pc_name") or ""), str((z or {}).get("user_id") or "")
+        if pc and uid and pc not in uid_je_pc:
+            uid_je_pc[pc] = uid
+    pc_von = lambda r: str((r or {}).get("pc_name") or (r or {}).get("id") or "").strip()   # noqa: E731 — wie skript_wacht_pruefen
+    return [r for r in rows or [] if uid_je_pc.get(pc_von(r)) and not fremd(uid_je_pc[pc_von(r)])]
+
+
 def skript_wacht_tick(jetzt=None):
     """Im Takt der Reader-Wacht: höchstens alle 5 min echoplus_live lesen und alte Userscript-Versionen melden. Wirft nie."""
     jetzt = time.time() if jetzt is None else jetzt
@@ -15264,6 +15280,15 @@ def skript_wacht_tick(jetzt=None):
     except Exception as e:
         print(f"[skript-wacht] ⚠️ echoplus_live: {type(e).__name__}", flush=True)
         return []
+    # nur PCs von Hermann-Technologies-IDs (Master 29.10.2026: „PCs der Emin-Gruppe wie bei den übrigen Master-Alarmen über
+    # _alarm_fremd_verwaltet ausfiltern"). PC → ID aus mt5_live (jüngste Zeile je PC); ohne bekannte ID keine Meldung (nie raten).
+    try:
+        live = sb_select("mt5_live", {"select": "pc_name,user_id:status->>user_id", "order": "updated_at.desc", "limit": "1000"}) or []
+        _n, aus = _ap_namen()
+    except Exception as e:
+        print(f"[skript-wacht] ⚠️ mt5_live/IDs: {type(e).__name__}", flush=True)
+        return []
+    rows = skript_wacht_ht_filter(rows, live, lambda u: str(u) in aus or _alarm_fremd_verwaltet(u))
     treffer = skript_wacht_pruefen(rows, soll, jetzt, _SKRIPT_WACHT["start_s"], _SKRIPT_WACHT["gemeldet"])
     namen = {}
     try:
