@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.2
+// @version      0.10.3
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.3 30.10.2026  LEER-BEWEIS „Make …" (Finn: „Tampermonkey-Script schliesst nicht"): TradingView zeigt in der leeren Positions-
+//                      Tabelle neu „Make …" mit Buy-/Sell-Knoepfen statt „Nothing to show yet" — kein Leer-Beweis, Reader blind, Radar/
+//                      Notfall schlossen statt des Userscripts. Zaehlt jetzt nur in table[data-name$="positions-table"], direkt nach
+//                      „Position ID" und ohne Symbol-/Position-ID-Zelle mit Text (leerMakePasst). Sonst unveraendert.
 //   0.10.2 30.10.2026  EXIT-FILL-STEMPEL (Finn 29.10. freigegeben): der Kern liest im Takt TradingViews Order-Meldungen (Toast-Stapel
 //                      + Meldungsprotokoll role=log) und meldet jede AUSGEFUEHRTE Order („Market/Limit/Stop order executed … Sell 1
 //                      at 30,000.00") mit der Zeit ihres ersten Auftauchens in ms im Feld fills (Broker-Tab). Nur lesen — kein Klick,
@@ -176,7 +180,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.2';
+  const VERSION    = '0.10.3';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1105,10 +1109,30 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   const RX_LEER_NEU = /nothing to show yet/i;
   const RX_LEER_KOPF = /position id/i;
   const SEL_POS_TABELLE = 'table[data-name$="positions-table"]';
+  // 0.10.3 (30.10.2026): DRITTER Leer-Text. TradingView rollt seit 29.10. eine neue Leer-Ansicht aus: die leere Positions-Tabelle zeigt
+  // direkt unter dem Spaltenkopf „Make …" mit eigenen Buy-/Sell-Knoepfen (Augen-Inventar 29.10. abends: pc-7ftp5l, -auzre5, -2zc2we,
+  // -usq1i6, -onkrbk, -t8wg97 „…Position IDMake " — alle mit positionen_ok=false; PCs mit „Nothing to show yet" waren ok). Ohne diesen
+  // Beweis blieb jedes flache Konto blind → 14× reader_wartet „kein Leer-Beweis" in 48 h, 0 Userscript-Schluesse. Nur in der Positions-
+  // Tabelle selbst: der Text muss UNMITTELBAR auf den Spaltenkopf „Position ID" folgen (eine Datenzeile stuende mit ihrem Symbol dazwischen)
+  // und keine Zelle Symbol/Position ID darf Text tragen. Fehlt etwas davon → kein Beweis (blind wie bisher, nie ein falsches „flach").
+  const RX_LEER_MAKE = /position id\s*make\b/i;
+  // REIN RECHNEND (testbar): Positions-Tabelle (Element) → neue „Make …"-Leer-Ansicht bewiesen?
+  function leerMakePasst(tabelle) {
+    if (!tabelle) return false;
+    if (!RX_LEER_MAKE.test(String(tabelle.textContent || ''))) return false;
+    let zellen; try { zellen = tabelle.querySelectorAll('td[data-label]'); } catch (_) { return false; }
+    if (!zellen) return false;
+    for (const td of zellen) {
+      const lab = String((td.getAttribute && td.getAttribute('data-label')) || '').trim().toLowerCase();
+      if ((lab === 'symbol' || lab === 'position id') && String(td.textContent || '').trim()) return false;
+    }
+    return true;
+  }
   // REIN RECHNEND (testbar): Vorfahr-Text + Positions-Tabelle darin (Element oder null) → flach bewiesen?
   function leerTextPasst(text, tabelle) {
     const t = String(text || '');
     if (RX_LEER_POS.test(t)) return true;
+    if (leerMakePasst(tabelle)) return true;   // 0.10.3: „Make …"-Leer-Ansicht, nur mit Tabellen-Element
     if (!RX_LEER_NEU.test(t)) return false;
     if (tabelle) return RX_LEER_NEU.test(String(tabelle.textContent || ''));   // Text steht in der Positions-Tabelle selbst
     return RX_LEER_KOPF.test(t);                                               // kein Tabellen-Element gefunden: Spaltenkopf „Position ID" muss dabeistehen
@@ -1849,7 +1873,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.2';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.3';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

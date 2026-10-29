@@ -127,6 +127,23 @@ check(h5.leerTextPasst("Symbol Side Qty Position ID Nothing to show yet", null) 
 // Fall 6: Reiter nicht gewaehlt → nie flach
 var r6 = reiter("false"); var p6 = el("Positions " + tabLeer.textContent, [r6], tabLeer); h5.setDoc(doc(r6));
 check(h5.leerBeweis() === false, "leerBeweis: Reiter Positions nicht aktiv → nicht flach");
+// 0.10.3 (30.10.2026): dritte Leer-Ansicht „Make …" mit Buy/Sell-Knoepfen — nur in der Positions-Tabelle, direkt nach „Position ID", ohne Datenzelle
+function td(label, text) { return { textContent: text, getAttribute: function (a) { return a === "data-label" ? label : null; } }; }
+function tabelle(text, zellen) { return { textContent: text, querySelectorAll: function (sel) { return sel === "td[data-label]" ? (zellen || []) : []; } }; }
+var KOPF = "SymbolSideQtyAvg Fill PriceProfitUpdate TimePosition ID";
+var tabMake = tabelle(KOPF + "Make your first trade SellBuy");
+var r7 = reiter("true"); var p7 = el("Positions Orders " + tabMake.textContent, [r7], tabMake); h5.setDoc(doc(r7));
+check(h5.leerBeweis() === true, "leerBeweis: 'Make …' direkt nach 'Position ID' in der Positions-Tabelle → flach");
+check(h5.leerTextPasst("x", tabelle(KOPF + "Make ")) === true, "leerTextPasst: abgeschnittener Inventar-Text '…Position IDMake ' → flach");
+check(h5.leerTextPasst(KOPF + "Make your first trade", null) === false, "leerTextPasst: 'Make' ohne Tabellen-Element → nicht flach");
+check(h5.leerTextPasst("x", tabelle(KOPF + "MNQZ6Long129,086.50-8.50USD4470324 Make", [td("Symbol", "MNQZ6"), td("Position ID", "4470324")])) === false,
+      "leerTextPasst: Datenzeile zwischen Kopf und 'Make' → nicht flach");
+check(h5.leerTextPasst("x", tabelle(KOPF + "Make ", [td("Symbol", "MNQZ6")])) === false, "leerTextPasst: 'Make' direkt nach Kopf, aber Symbol-Zelle mit Text → nicht flach");
+check(h5.leerTextPasst("x", tabelle(KOPF + "Make ", [td("Symbol", " "), td("Update Time", "")])) === true, "leerTextPasst: leere Zellen stoeren nicht");
+check(h5.leerTextPasst("x", tabelle(KOPF + "Makeover")) === false && h5.leerTextPasst("x", tabelle(KOPF)) === false, "leerTextPasst: 'Makeover'/nur Kopf → nicht flach");
+check(h5.leerTextPasst("x", { textContent: KOPF + "Make ", querySelectorAll: function () { throw "kaputt"; } }) === false, "leerTextPasst: querySelectorAll wirft → nicht flach (fail-closed)");
+var r8 = reiter("false"); var p8 = el("Positions " + tabMake.textContent, [r8], tabMake); h5.setDoc(doc(r8));
+check(h5.leerBeweis() === false, "leerBeweis: 'Make …' bei nicht gewaehltem Reiter Positions → nicht flach");
 // 0.9.13 (29.10.2026): Konto-Liste aus dem offenen Umschalter — nur volle Nummern als erstes Wort, nie gekuerzt/angeklebt
 var codeKonten = stueck("function kontenAusEintraegen", "// 0.9.13 ENDE kontenAusEintraegen");
 var h6 = new Function("var RX_KONTO_KURZ=" + stueck("const RX_KONTO_KURZ = ", ";\n").replace("const RX_KONTO_KURZ = ", "") + ";" +
