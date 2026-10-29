@@ -18711,6 +18711,82 @@ def tab_stand_riegel(signale_laeuft, plaene, pc, jetzt):
     return ""
 
 
+# ══ FERN-AUFTRAG „PROPHOS IM PULS-CHROME ÖFFNEN" (30.10.2026, Finn, während Pascal sich an allen HT-PCs im Puls-Chrome einloggt: „Mach
+# diesen Tab nochmal überall auf." — bei Chris war das Prophos-Fenster im Puls-Chrome nicht offen). Admin setzt je PC (oder für alle HT-PCs)
+# einen einmaligen Auftrag (Speicher, ein Worker, verfällt nach TAB_AUFTRAG_GUELTIG_S); das Panel liest ihn beim minütlichen Tab-Stand-
+# Abruf, öffnet Prophos im Puls-Chrome im eigenen Fenster bzw. holt den vorhandenen Tab nach vorn (mit allen Riegeln) und quittiert über
+# POST /pc/tab-auftrag-quittung (geöffnet / nach vorn / verschoben mit Grund / Fehler). Nur HT-PCs, kein Login, kein Klick in TradingView. ══
+TAB_AUFTRAG_GUELTIG_S = 10 * 60
+_tab_auftrag = {}   # pc → {"id", "at", "von", "quittung": {"at", "ergebnis", "grund"} | None}
+
+
+def tab_auftrag_offen(a, jetzt_ts):
+    """REIN RECHNEND (testbar): offener Auftrag für das Panel → {"id", "at"} oder None (keiner, verfallen oder schon erledigt)."""
+    if not isinstance(a, dict) or not a.get("id") or jetzt_ts - float(a.get("at") or 0) >= TAB_AUFTRAG_GUELTIG_S:
+        return None
+    if str(((a.get("quittung") or {}).get("ergebnis")) or "") in ("geoeffnet", "vorn"):
+        return None
+    return {"id": a["id"], "at": a["at"]}
+
+
+def tab_auftrag_ht_pcs(rows, aus, fremd):
+    """REIN RECHNEND (testbar): mt5_live-Zeilen → sortierte PC-Kennungen der HT-IDs (ohne ausgeblendete und fremd verwaltete IDs)."""
+    return sorted({str(r.get("pc_name")) for r in rows or [] if re.fullmatch(r"pc-[a-z0-9]{4,12}", str(r.get("pc_name") or ""))
+                   and str(r.get("user_id") or "") and str(r.get("user_id")) not in aus and not fremd(str(r.get("user_id")))})
+
+
+@app.route("/admin/pc-tab-auftrag", methods=["GET", "POST", "OPTIONS"])
+def admin_pc_tab_auftrag():
+    """GET → {ok, auftraege: {pc: {...}}, gueltig_s}. POST {pc} oder {alle: true} → Auftrag „Prophos im Puls-Chrome öffnen" je HT-PC. Voller Admin."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, err = _admin_voll()
+    if err:
+        return err
+    jetzt = time.time()
+    if request.method == "GET":
+        return jsonify({"ok": True, "gueltig_s": TAB_AUFTRAG_GUELTIG_S, "auftraege": {pc: dict(a, offen=tab_auftrag_offen(a, jetzt) is not None,
+                        alter_s=int(jetzt - float(a.get("at") or 0))) for pc, a in _tab_auftrag.items() if jetzt - float(a.get("at") or 0) < 6 * 3600}})
+    d = request.get_json(silent=True) or {}
+    try:
+        rows = sb_select("mt5_live", {"select": "pc_name,user_id:status->>user_id",
+                                      "updated_at": f"gte.{datetime.fromtimestamp(jetzt - 7 * 86400, timezone.utc).isoformat()}"}) or []
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"PC-Liste nicht lesbar: {type(e).__name__}"}), 502
+    _namen, aus = _ap_namen()
+    ht = tab_auftrag_ht_pcs(rows, aus, _alarm_fremd_verwaltet)
+    if d.get("alle") is True:
+        ziele = ht
+    else:
+        pc = str(d.get("pc") or "").strip().lower()
+        if pc not in ht:
+            return jsonify({"ok": False, "error": "kein HT-PC (oder seit 7 Tagen ohne Prophos-Tab)"}), 403
+        ziele = [pc]
+    for pc in ziele:
+        _tab_auftrag[pc] = {"id": uuid.uuid4().hex[:12], "at": jetzt, "von": uid, "quittung": None}
+    print(f"[tab-auftrag] Prophos im Puls-Chrome öffnen → {', '.join(ziele) or '—'}", flush=True)
+    return jsonify({"ok": True, "pcs": ziele, "gueltig_s": TAB_AUFTRAG_GUELTIG_S})
+
+
+@app.route("/pc/tab-auftrag-quittung", methods=["POST"])
+def pc_tab_auftrag_quittung():
+    """Quittung des Panels (X-Code-Token, PC aus dem Schlüssel): {id, ergebnis: geoeffnet|vorn|verschoben|fehler, grund}."""
+    wer = _code_zugang()
+    if not wer:
+        return jsonify({"ok": False, "error": "kein gültiger Schlüssel"}), 403
+    pc = str(wer[1] or "")[:20]
+    d = request.get_json(silent=True) or {}
+    a = _tab_auftrag.get(pc)
+    if not a or str(d.get("id") or "") != a.get("id"):
+        return jsonify({"ok": True, "unbekannt": True})
+    erg = str(d.get("ergebnis") or "")
+    if erg not in ("geoeffnet", "vorn", "verschoben", "fehler"):
+        return jsonify({"ok": False, "error": "ergebnis ungültig"}), 400
+    a["quittung"] = {"at": time.time(), "ergebnis": erg, "grund": re.sub(r"\s+", " ", str(d.get("grund") or ""))[:200]}
+    print(f"[tab-auftrag] {pc}: {erg} — {a['quittung']['grund']}", flush=True)
+    return jsonify({"ok": True})
+
+
 @app.route("/code/tab-stand/<pc>", methods=["GET"])
 def code_tab_stand(pc):
     """GET (X-Code-Token wie /code/stand) → {ok, origin, tab_build, tab_gleich, tab_bw, tab_at, riegel}. Nur Lesen."""
@@ -18760,7 +18836,8 @@ def code_tab_stand(pc):
         _tab_stand_spur[pc] = spur
         print(f"[tab-stand] {pc}: {spur}", flush=True)
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
-                    "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins})
+                    "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
+                    "auftrag": tab_auftrag_offen(_tab_auftrag.get(pc), time.time())})
 
 
 @app.route("/reader-kurs", methods=["POST", "OPTIONS"])

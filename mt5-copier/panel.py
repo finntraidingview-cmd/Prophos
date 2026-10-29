@@ -2121,6 +2121,105 @@ def _haupt_tab_runde(pc, liste, jetzt):
                 _tab_stand_holen(pc, meldung)
 
 
+# ══ FERN-AUFTRAG „PROPHOS IM PULS-CHROME ÖFFNEN" (30.10.2026, Finn: „Mach diesen Tab nochmal überall auf."): Railway legt den Auftrag in die
+# Antwort von /code/tab-stand (auftrag {id, at}, verfällt nach 10 min). Das Panel öffnet localhost:5000 im Puls-Chrome im eigenen Fenster
+# (_tab_oeffnen) bzw. holt den vorhandenen Prophos-Tab nach vorn (/json/activate) — nie doppelt. Unter TV_ORDER_LOCK, ohne Puls/Polar/MT5-Lauf,
+# ohne Server-Riegel und TAB_AUFTRAG_IDLE_S ohne Eingabe (kürzer als sonst: der Auftrag kommt bewusst, während jemand am PC ist); sonst
+# „verschoben" mit Grund und nächste Runde erneut. Quittung an Railway POST /pc/tab-auftrag-quittung. Kein Login, kein Klick. ══
+TAB_AUFTRAG_IDLE_S = 20
+TAB_AUFTRAG_MAX_VERSUCHE = 4
+_TAB_AUFTRAG = {"erledigt": set(), "versuche": {}, "gemeldet": {}}
+
+
+def tab_auftrag_entscheiden(auftrag, erledigt, versuche, riegel, lock_frei, idle_s):
+    """REIN RECHNEND (testbar): ('' | 'tun' | 'verschoben' | 'aufgeben', grund)."""
+    aid = str((auftrag or {}).get("id") or "") if isinstance(auftrag, dict) else ""
+    if not aid or aid in erledigt:
+        return "", ""
+    if versuche >= TAB_AUFTRAG_MAX_VERSUCHE:
+        return "aufgeben", f"{versuche} Versuche ohne Erfolg — am PC ansehen"
+    if riegel:
+        return "verschoben", f"wartet: {riegel}"
+    if not lock_frei:
+        return "verschoben", "wartet: Puls/Polar/MT5-Order läuft — danach"
+    if idle_s is not None and idle_s < TAB_AUFTRAG_IDLE_S:
+        return "verschoben", f"wartet: am PC wird gerade gearbeitet (letzte Eingabe vor {int(idle_s)} s)"
+    return "tun", ""
+
+
+def _prophos_puls_vorn():
+    """→ (ok, ergebnis 'geoeffnet'|'vorn'|'verschoben'|'fehler', Klartext). Unter TV_ORDER_LOCK; öffnet nur, wenn im Puls-Chrome kein Prophos-Tab steht."""
+    if not TV_ORDER_LOCK.acquire(blocking=False):
+        return False, "verschoben", "Puls läuft gerade im Browser — danach"
+    try:
+        if not _browser_und_mt5_frei(tv_eigen=True):
+            return False, "verschoben", "MT5-Order/Polar läuft gerade — danach"
+        url_merk = _TAB_OEFFNEN.get("url") or ""
+        da, n, liste = puls_prophos_lage()
+        erg = "vorn"
+        if not da or n == 0:
+            ok, msg = _tab_oeffnen(url_merk or TAB_URL, lock_gehalten=True)
+            if not ok:
+                return False, "fehler", msg
+            erg = "geoeffnet"
+            da, n, liste = puls_prophos_lage()
+        pro = cdp_prophos_ziele(liste, url_merk)[0]
+        if not pro:
+            return False, "fehler", "Prophos-Tab im Puls-Chrome nach dem Öffnen nicht gefunden"
+        time.sleep(0.4 + random.random() * 0.6)
+        _cdp_get(f"/json/activate/{pro['id']}")
+        return True, erg, ("im Puls-Chrome im eigenen Fenster geöffnet und nach vorn geholt" if erg == "geoeffnet"
+                           else "Prophos-Tab im Puls-Chrome nach vorn geholt (war schon offen, nicht doppelt geöffnet)")
+    except Exception as e:
+        return False, "fehler", f"{type(e).__name__}: {e}"
+    finally:
+        TV_ORDER_LOCK.release()
+
+
+def _tab_auftrag_quittung(aid, ergebnis, grund):
+    """POST /pc/tab-auftrag-quittung (X-Code-Token). Wirft nie."""
+    import urllib.request
+    tok = code_token()
+    if not tok:
+        return
+    try:
+        body = json.dumps({"id": aid, "ergebnis": ergebnis, "grund": str(grund)[:200]}).encode("utf-8")
+        req = urllib.request.Request(CODE_QUELLE + "/pc/tab-auftrag-quittung", data=body, method="POST",
+                                     headers={"X-Code-Token": tok, "Content-Type": "application/json", "User-Agent": "prophos-panel"})
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:
+        print(f"[tab-auftrag] Quittung nicht gesendet ({type(e).__name__})", flush=True)
+
+
+def _tab_auftrag_schritt():
+    """Eine Runde: offenen Auftrag aus dem letzten Tab-Stand (≤ 150 s alt) ausführen bzw. verschieben und quittieren."""
+    st = TAB_NL.get("stand") if time.time() - float(TAB_NL.get("stand_at") or 0) < 150 else None
+    a = st.get("auftrag") if isinstance(st, dict) else None
+    aid = str((a or {}).get("id") or "") if isinstance(a, dict) else ""
+    riegel = str((st or {}).get("riegel") or "").strip() if isinstance(st, dict) else ""
+    aktion, grund = tab_auftrag_entscheiden(a, _TAB_AUFTRAG["erledigt"], _TAB_AUFTRAG["versuche"].get(aid, 0), riegel,
+                                            _browser_und_mt5_frei(), _win_leerlauf_s())
+    if not aktion:
+        return
+    erg = "verschoben"
+    if aktion == "aufgeben":
+        _TAB_AUFTRAG["erledigt"].add(aid)
+        erg = "fehler"
+    elif aktion == "tun":
+        time.sleep(random.random() * 4)                 # gestreut
+        _TAB_AUFTRAG["versuche"][aid] = _TAB_AUFTRAG["versuche"].get(aid, 0) + 1
+        ok, erg, grund = _prophos_puls_vorn()
+        if ok:
+            _TAB_AUFTRAG["erledigt"].add(aid)
+            _TAB_HAUPT["puls_at"] = 0.0                 # Kennungen bald neu lesen
+        elif erg == "verschoben":
+            _TAB_AUFTRAG["versuche"][aid] -= 1          # nur echte Fehlversuche zählen
+    if _TAB_AUFTRAG["gemeldet"].get(aid) != (erg, grund):
+        _TAB_AUFTRAG["gemeldet"][aid] = (erg, grund)
+        print(f"[tab-auftrag] {erg}: {grund}", flush=True)
+        _tab_auftrag_quittung(aid, erg, grund)
+
+
 # ══ UPDATE-SCHUTZ (29.10.2026, Master nach dem Befund „Deploy-Welle": fünf Abrisse in zwei Stunden, jeder 1–2 min nach einem Push mit
 # app.py/panel.py — der Neustart riss laufende Puls-/Order-Aufrufe ab, „Ergebnis UNKLAR"). Das Panel sagt per GET /api/beschaeftigt, ob ein
 # Lauf es hält; das lokale app.py (Proxy aller Tab-Aufrufe) und der Versions-Wächter hier starten nur neu, wenn es „frei" ist — gestreut
@@ -2253,6 +2352,11 @@ def _tab_neulade_waechter():
                 time.sleep(TAB_NL_TAKT_S * 5)
                 continue
             pc = pc_id_lesen()
+            # FERN-AUFTRAG (30.10.2026): „Prophos im Puls-Chrome öffnen" aus dem letzten Tab-Stand — vor allem anderen, eigene Riegel
+            try:
+                _tab_auftrag_schritt()
+            except Exception as e:
+                print(f"[tab-auftrag] Fehler: {type(e).__name__}: {e}", flush=True)
             jetzt0 = time.time()
             tag = datetime.now().strftime("%Y-%m-%d")
             if _TAB_OEFFNEN["tag"] != tag:

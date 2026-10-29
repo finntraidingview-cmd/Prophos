@@ -12315,7 +12315,7 @@
                zuletzt gesehen, Ampel und „Tab neu laden" (Signal an genau diesen PC). Eigene Verdrahtung admPcs* — außerhalb von adm-body,
                damit die Liste auch ohne geladene Übersicht steht. -->
           <div class="panel adm-pcs" id="adm-pcs" style="margin:16px 0 0">
-            <div class="adm-pcs-kopf"><b>PC-Tabs</b><span id="adm-pcs-info"></span><button class="btn btn-ghost" id="adm-pcs-refresh" title="Neu laden" style="padding:4px 10px;margin-left:auto">↻</button></div>
+            <div class="adm-pcs-kopf"><b>PC-Tabs</b><span id="adm-pcs-info"></span><button class="btn btn-ghost" id="adm-pcs-puls-alle" title="Auftrag an alle HT-PCs: Prophos im Puls-Chrome im eigenen Fenster öffnen bzw. nach vorn holen (verfällt nach 10 min, kein Login, kein Klick in TradingView)" style="padding:4px 10px;margin-left:auto">Prophos im Puls-Chrome öffnen · alle HT-PCs</button><button class="btn btn-ghost" id="adm-pcs-refresh" title="Neu laden" style="padding:4px 10px">↻</button></div>
             <div class="table-wrap"><table class="t">
               <thead><tr><th>PC</th><th>ID</th><th>Tab-Build</th><th>Bot</th><th>Zuletzt</th><th>Stand</th><th>MT5-Update</th><th></th></tr></thead>
               <tbody id="adm-pcs-rows"><tr><td colspan="8" style="color:var(--sub)">Lade …</td></tr></tbody>
@@ -35203,7 +35203,7 @@
    * Maßstab „neuester Build" = der höchste bekannte (dieser Tab oder irgendein PC). Ampel: grün = aktuell bzw. inhaltsgleich, gelb =
    * wartet (< 15 min, Grund im Tooltip), rot = hängt ≥ 15 min oder alter Wächter ohne tab_bw, grau = kein Tab. Knopf = Signal
    * tab_neu_laden über /admin/wd-plaene (PATCH, im Namen der ID) — kein Order-Weg; der PC lädt nur im ruhigen Moment neu. */
-  const _admPcs = { daten: null, at: 0, laedt: false, gesendet: new Map() }
+  const _admPcs = { daten: null, at: 0, laedt: false, gesendet: new Map(), auftraege: {} }
   async function admPcsLaden(){
     if(_admPcs.laedt) return
     _admPcs.laedt = true
@@ -35212,6 +35212,10 @@
       const r = await fetch(`${WATCHER_HOME}/admin/pc-stand?ansicht=admin`, { headers: { 'sb-token': tok }, cache: 'no-store' })   // Admin-Ansicht (08.10.2026)
       const d = r.ok ? await r.json().catch(() => null) : null
       if(d && d.ok && d.stand){ _admPcs.daten = d.stand; _admPcs.at = Date.now() }
+      // Fern-Aufträge „Prophos im Puls-Chrome öffnen" + Quittungen (30.10.2026) — nur voller Admin, sonst leer
+      const ra = await fetch(`${WATCHER_HOME}/admin/pc-tab-auftrag`, { headers: { 'sb-token': tok }, cache: 'no-store' }).catch(() => null)
+      const da = ra && ra.ok ? await ra.json().catch(() => null) : null
+      _admPcs.auftraege = (da && da.ok && da.auftraege) || {}
     }catch(e){ console.warn('[adm-pcs]', (e && e.message) || e) }
     finally{ _admPcs.laedt = false; admPcsRender() }
   }
@@ -35270,11 +35274,38 @@
       const knopf = !q.pc_name || !q.lebt ? '' : ges && jetzt - ges < 3 * 60000
         ? '<span style="color:var(--sub)">gesendet ✓</span>'
         : `<button type="button" class="btn btn-ghost tc2-btn" data-adm-pcs-neu="${escapeHtml(key)}" title="Signal an ${escapeHtml(pcLabel(q.pc_name))}: Prophos-Tab im nächsten ruhigen Moment neu laden (kein Neuladen während Start, Puls, Hedge oder offenem Popup)">Tab neu laden</button>`
+      const pk = q.pc_name ? `<button type="button" class="btn btn-ghost tc2-btn" data-adm-pcs-puls="${escapeHtml(q.pc_name)}" title="Auftrag an ${escapeHtml(pcLabel(q.pc_name))}: Prophos im Puls-Chrome im eigenen Fenster öffnen bzw. nach vorn holen (verfällt nach 10 min)">Puls-Chrome</button>${admPcsAuftragText(_admPcs.auftraege[q.pc_name])}` : ''
       return `<tr><td>${q.pc_name ? pcLabelHtml(q.pc_name) : '–'}</td><td>${escapeHtml(q.name)}</td><td class="mono">${escapeHtml(String(q.tab_build || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td>`
         + `<td class="mono">${escapeHtml(String(q.bot_version || '–').replace(/^\d{4}-\d{2}-\d{2}/, ''))}</td><td>${uhr(q.zuletzt)}</td>`
-        + `<td title="${escapeHtml(u.titel)}"><span class="pcs-dot pcs-${u.farbe}"></span>${escapeHtml(u.text)}</td>${admPcsMt5UpdZelle(q.mt5_update)}<td>${knopf}</td></tr>`
+        + `<td title="${escapeHtml(u.titel)}"><span class="pcs-dot pcs-${u.farbe}"></span>${escapeHtml(u.text)}</td>${admPcsMt5UpdZelle(q.mt5_update)}<td>${knopf} ${pk}</td></tr>`
     }).join('') || '<tr><td colspan="8" style="color:var(--sub)">Kein PC-Tab bekannt.</td></tr>'
     if(info) info.textContent = `neuester Build ${String(neu).replace(/^\d{4}-\d{2}-\d{2}/, '')} · ${aktuell}/${lebend} aktuell`
+  }
+  // REIN RECHNEND (window._admPcsAuftragText): Stand eines Fern-Auftrags → kleiner Text unter dem Knopf
+  function admPcsAuftragText(a){
+    if(!a) return ''
+    const q = a.quittung, uhr = t => new Date(Number(t) * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    let t, f = 'var(--sub)'
+    if(q && q.ergebnis === 'geoeffnet'){ t = `geöffnet ${uhr(q.at)}`; f = 'var(--good)' }
+    else if(q && q.ergebnis === 'vorn'){ t = `nach vorn ${uhr(q.at)}`; f = 'var(--good)' }
+    else if(!a.offen) t = q && q.ergebnis === 'fehler' ? 'nicht geöffnet' : 'verfallen (10 min)'
+    else if(q && q.ergebnis === 'verschoben') t = 'verschoben'
+    else if(q && q.ergebnis === 'fehler') t = 'Fehler — neuer Versuch'
+    else t = 'wartet auf das Panel …'
+    return `<div style="font-size:11px;color:${f}" title="${escapeHtml((q && q.grund) || '')}">${escapeHtml(t)}</div>`
+  }
+  window._admPcsAuftragText = admPcsAuftragText   // Test-Haken
+  async function admPcsPulsAuftrag(body, btn){
+    if(btn){ btn.disabled = true; btn.textContent = 'sende …' }
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/pc-tab-auftrag`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      if(typeof toast === 'function') toast(`Auftrag an ${d.pcs.length} PC${d.pcs.length === 1 ? '' : 's'} — das Panel öffnet in 1–2 min`, 'start')
+      setTimeout(() => admPcsLaden(), 60000); setTimeout(() => admPcsLaden(), 150000)
+    }catch(e){ if(typeof toast === 'function') toast('Prophos im Puls-Chrome: ' + ((e && e.message) || e), 'end') }
+    admPcsLaden()
   }
   async function admPcsNeuLaden(key, btn){
     const [uid, pc] = String(key).split('|')
@@ -35292,6 +35323,10 @@
   }
   document.getElementById('adm-pcs-rows')?.addEventListener('click', ev => {
     const b = ev.target.closest('[data-adm-pcs-neu]'); if(b) admPcsNeuLaden(b.dataset.admPcsNeu, b)
+    const pb = ev.target.closest('[data-adm-pcs-puls]'); if(pb) admPcsPulsAuftrag({ pc: pb.dataset.admPcsPuls }, pb)
+  })
+  document.getElementById('adm-pcs-puls-alle')?.addEventListener('click', ev => {
+    if(confirm('Prophos auf allen HT-PCs im Puls-Chrome öffnen bzw. nach vorn holen?')) admPcsPulsAuftrag({ alle: true }, null)
   })
   document.getElementById('adm-pcs-refresh')?.addEventListener('click', () => admPcsLaden())
   // Laden beim Öffnen der Übersicht und danach jede Minute, solange sie sichtbar ist

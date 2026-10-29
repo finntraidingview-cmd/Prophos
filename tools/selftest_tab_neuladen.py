@@ -219,6 +219,36 @@ def main():
     pq0 = open(os.path.join(HIER, "..", "mt5-copier", "panel.py"), encoding="utf-8").read()
     check("TAB_ZAEHL_FRISCH_S" in pq0 and "haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT[\"tid\"], tid)" in pq0,
           "Doppel-Tab-Zählung nur frische Kennungen; Sicherung bekommt die fragende Kennung")
+    # FERN-AUFTRAG „Prophos im Puls-Chrome öffnen" (30.10.2026)
+    fa = {"re": re}
+    exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["tab_auftrag_entscheiden"], ["TAB_AUFTRAG_IDLE_S", "TAB_AUFTRAG_MAX_VERSUCHE"]), fa)
+    E = fa["tab_auftrag_entscheiden"]
+    A = {"id": "a1", "at": 1.0}
+    check(E(None, set(), 0, "", True, 999) == ("", "") and E(A, {"a1"}, 0, "", True, 999) == ("", "") and E(A, set(), 0, "", True, 999) == ("tun", ""),
+          "Auftrag: keiner/erledigt → nichts, offen + frei → ausführen")
+    check(E(A, set(), 0, "Signal läuft", True, 999)[0] == "verschoben" and "Puls/Polar/MT5" in E(A, set(), 0, "", False, 999)[1]
+          and "Eingabe vor 5 s" in E(A, set(), 0, "", True, 5)[1] and E(A, set(), 0, "", True, 25)[0] == "tun" and E(A, set(), 4, "", True, 999)[0] == "aufgeben",
+          "Auftrag: Server-Riegel / Puls-Polar-MT5 / Eingabe < 20 s → verschoben mit Grund; 4 Fehlversuche → aufgeben")
+    pv = pq[pq.index("\ndef _prophos_puls_vorn("):pq.index("\n\n\n", pq.index("\ndef _prophos_puls_vorn("))]
+    check("TV_ORDER_LOCK.acquire(blocking=False)" in pv and "TV_ORDER_LOCK.release()" in pv and "_browser_und_mt5_frei(tv_eigen=True)" in pv
+          and "lock_gehalten=True" in pv and "/json/activate/" in pv and "if not da or n == 0:" in pv and "tradingview" not in pv.lower(),
+          "Auftrag ausführen: unter TV_ORDER_LOCK, öffnen nur ohne Prophos-Tab im Puls-Chrome, sonst nur nach vorn (/json/activate), nie TradingView")
+    wq = pq[pq.index("\ndef _tab_neulade_waechter("):pq.index("\n\n\n", pq.index("\ndef _tab_neulade_waechter("))]
+    check("_tab_auftrag_schritt()" in wq and "TAB_ZAEHL_FRISCH_S" in pq, "Tab-Wächter führt den Auftrag je Runde aus; Doppel-Tab-Zählung nur frische Kennungen")
+    check("sessionStorage.getItem('prophos_tab_id')" in html and "data-adm-pcs-puls" in html and "adm-pcs-puls-alle" in html and "/admin/pc-tab-auftrag" in html,
+          "Tab-Kennung übersteht Neuladen (sessionStorage); Admin: Knopf je PC + alle HT-PCs, Quittung sichtbar")
+    ra = {"re": re}
+    exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_auftrag_offen", "tab_auftrag_ht_pcs"], ["TAB_AUFTRAG_GUELTIG_S"]), ra)
+    O, P = ra["tab_auftrag_offen"], ra["tab_auftrag_ht_pcs"]
+    check(O({"id": "x", "at": 100.0, "quittung": None}, 200.0) == {"id": "x", "at": 100.0} and O({"id": "x", "at": 100.0}, 700.0) is None
+          and O({"id": "x", "at": 100.0, "quittung": {"ergebnis": "vorn"}}, 200.0) is None
+          and O({"id": "x", "at": 100.0, "quittung": {"ergebnis": "verschoben"}}, 200.0) is not None and O(None, 1.0) is None,
+          "Railway: Auftrag offen bis 10 min bzw. bis geöffnet/nach vorn; verschoben bleibt offen")
+    rows = [{"pc_name": "pc-aaaa1", "user_id": "u1"}, {"pc_name": "pc-bbbb2", "user_id": "emin"}, {"pc_name": "pc-cccc3", "user_id": "aus"},
+            {"pc_name": "kaputt", "user_id": "u1"}, {"pc_name": "pc-aaaa1", "user_id": "u1"}]
+    check(P(rows, {"aus"}, lambda u: u == "emin") == ["pc-aaaa1"], "Railway: nur HT-PCs (ohne Emin-Gruppe, ohne ausgeblendete, gültige Kennung)")
+    aq2 = aq[aq.index("\ndef code_tab_stand("):aq.index("\n\n\n", aq.index("\ndef code_tab_stand("))]
+    check('"auftrag": tab_auftrag_offen(_tab_auftrag.get(pc)' in aq2 and "uid, err = _admin_voll()" in aq, "Tab-Stand liefert den Auftrag; Auftrag setzen nur voller Admin")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)
