@@ -58,7 +58,10 @@ ERKLAERT_RAUS = {"Account Kauf", "Account-Kauf", "Fusion Deposit", "Gebühr", "G
 AUSSCHUETTUNG = {"Profit Split", "Kunden-Payout → Bank", "Auszahlung an Person", "Privat"}
 ERKLAERT_REIN = {"Payout", "Payout Prop-Firm", "Swap", "Fusion Deposit", "Interner Transfer (Krypto)", "Interner Transfer auf Bank",
                  "Umbuchung intern", "Account Kauf", "Account-Kauf"}
-GK_NEUTRAL = {"Umbuchung Krypto"}                   # Geschäftskonto ↔ Wallets: Tasche wechselt, Soll bleibt
+# Geschäftskonto ↔ Wallets: Tasche wechselt, Soll bleibt. „Konto-Kauf (in Prophos)": Konto-Käufe aus Emins Sheet stehen schon als
+# purchase_cost in Prophos und damit in den Kontowerten — im Soll noch einmal abgezogen, zählten sie doppelt (Befund 29.10.2026, 4.323,78 €)
+GK_KONTO_KAUF = "Konto-Kauf (in Prophos)"
+GK_NEUTRAL = {"Umbuchung Krypto", GK_KONTO_KAUF}
 GK_KATEGORIEN = ["Anfangsstand", "Kundenzahlung", "PC-Kauf", "Ausgabe", "Einlage", "Entnahme", "Umbuchung Krypto", "Sonstiges"]
 TOLERANZ_MIN = 250.0
 TOLERANZ_ANTEIL = 0.03         # Kurs-/CoinPayments-Aufschläge auf die Account-Käufe
@@ -69,6 +72,16 @@ TZ_TAG = "Asia/Dubai"          # Tageswert nach Finns Tag
 
 _takt = {"at": 0.0, "fehler": "", "laeuft": False}
 _kurs = {"bis": 0.0, "wert": None}
+_google = {"creds": None}
+
+# ── GESCHÄFTSKONTO AUS EMINS SHEET (29.10.2026, Finn: „Bring genau den Gesamtbetrag mit rein", Entscheidung: automatisch) ──────────────
+# Railway liest täglich Buchungen!A2:G (+ Stand-Zeile Übersicht!A2, „Zeitraum ab" Übersicht!B3) per Google-Service-Konto — nur lesen,
+# nie zurückschreiben — und spiegelt jede Zeile nach kapital_gk_buchungen (quelle 'sheet'): das Sheet ist die Wahrheit, verschwundene
+# Zeilen gehen raus, neue kommen rein. Ohne Railway-Variable GOOGLE_SERVICE_ACCOUNT_JSON (komplette JSON-Schlüsseldatei des Kontos)
+# steht in kapital_gk_quellen.fehler „Service-Konto fehlt" und der Reiter rechnet mit den Hand-Buchungen weiter.
+GK_SHEET_SA_VAR = "GOOGLE_SERVICE_ACCOUNT_JSON"
+GK_SHEET_BEREICHE = ["Buchungen!A2:G", "Übersicht!A2", "Übersicht!B3"]
+GK_SHEET_TAKT_S = 24 * 3600       # „täglich"; nach einem Fehler beim nächsten Stunden-Takt erneut
 
 
 def _sb(methode, tabelle, params=None, body=None, prefer=None, timeout=15):
@@ -159,6 +172,65 @@ def fusion_live_waehlen(zeilen, logins, jetzt=None):
         return None
     return {"konten": {lg: {"betrag": v[1], "waehrung": v[2], "equity": v[3], "stand": v[0].isoformat()} for lg, v in frisch.items()},
             "stand": min(v[0] for v in frisch.values()).isoformat()}
+
+
+def _de_zahl(v):
+    """REIN RECHNEND: „3.476,14 €" / „-10,18" / 3476.14 → float oder None."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = re.sub(r"[^\d,.\-−]", "", str(v or "")).replace("−", "-")
+    if not t or t in ("-", ",", "."):
+        return None
+    t = t.replace(".", "").replace(",", ".") if "," in t else t
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _de_datum(v):
+    """REIN RECHNEND: „25.09.2026" → „2026-09-25" (auch ISO durchreichen), sonst None."""
+    t = str(v or "").strip()
+    m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", t)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return t if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t) else None
+
+
+def gk_sheet_zeilen(werte):
+    """REIN RECHNEND: Zeilen aus Buchungen!A2:G (Datum, Art, Betrag €, Zweck, Kategorie, Beleg, Dateiname) → Buchungen für
+    kapital_gk_buchungen. Ausgabe = negativ. Kategorien: „Challenge / Evaluation" → Konto-Kauf (in Prophos) = neutral (schon in den
+    Kontowerten), Zweck „Auszahlung …" → Entnahme, sonst die Kategorie des Sheets (Payout, Hardware, Software & Abos …). Schlüssel aus dem
+    Inhalt + laufende Nummer bei exakt gleichen Zeilen (Zeilennummern wandern, im Sheet stehen Nachträge mitten drin). Leer-/Kopfzeilen
+    und Zeilen ohne lesbares Datum/Betrag fallen raus."""
+    aus, gesehen = [], {}
+    for z in werte or []:
+        z = list(z) + [""] * (7 - len(z))
+        datum, art, betrag = _de_datum(z[0]), str(z[1] or "").strip(), _de_zahl(z[2])
+        zweck, kat = str(z[3] or "").strip(), str(z[4] or "").strip()
+        if not datum or betrag is None or betrag == 0:
+            continue
+        b = -abs(betrag) if art.lower().startswith("ausgabe") else abs(betrag)
+        if kat.lower().startswith("challenge"):
+            kategorie = GK_KONTO_KAUF
+        elif re.match(r"auszahlung\b", zweck, re.I):
+            kategorie = "Entnahme"
+        else:
+            kategorie = kat or ("Einnahme" if b > 0 else "Ausgabe")
+        roh = "|".join([datum, art, f"{abs(betrag):.2f}", zweck, kat])
+        gesehen[roh] = gesehen.get(roh, 0) + 1
+        aus.append({"datum": datum, "betrag": round(b, 2), "waehrung": "EUR", "kategorie": kategorie[:40],
+                    "text": (zweck or kat)[:300], "zeilen_schluessel": f"{roh}#{gesehen[roh]}"[:400]})
+    return aus
+
+
+def gk_abgleich(sheet_zeilen, db_zeilen):
+    """REIN RECHNEND: (neu, weg_ids) — Sheet-Zeilen, die in der DB fehlen, und DB-Zeilen (quelle sheet), die das Sheet nicht mehr hat."""
+    im_sheet = {z["zeilen_schluessel"] for z in sheet_zeilen}
+    in_db = {str(d.get("zeilen_schluessel")): d for d in db_zeilen if d.get("zeilen_schluessel")}
+    neu = [z for z in sheet_zeilen if z["zeilen_schluessel"] not in in_db]
+    weg = [str(d["id"]) for k, d in in_db.items() if k not in im_sheet]
+    return neu, weg
 
 
 def bilanz_rechnen(ketten, snaps, fusion_live, fusion_hand, einlagen, tx, labels, gruppen_adressen, fx, offene=None, gk=None):
@@ -359,12 +431,95 @@ def kapital_fuer(gid, schreiben=True):
                       "datum": e.get("datum"), "ziel_wallet": e.get("ziel_wallet") or "", "notiz": e.get("notiz") or "",
                       "quelle_tx": e.get("quelle_tx") or ""} for e in d["einlagen"]]
     b["gk_buchungen"] = [{"id": g["id"], "datum": g.get("datum"), "betrag": _num(g["betrag"]), "waehrung": g.get("waehrung") or "EUR",
-                          "kategorie": g.get("kategorie") or "", "text": g.get("text") or ""} for g in reversed(d["gk"])]
+                          "kategorie": g.get("kategorie") or "", "text": g.get("text") or "", "quelle": g.get("quelle") or "hand"}
+                         for g in sorted(d["gk"], key=lambda x: (str(x.get("datum") or ""), str(x.get("created_at") or "")), reverse=True)]
+    q = gk_quelle_lesen(gid)
+    b["gk_quelle"] = None if not q else {
+        "titel": q.get("titel") or "", "anteil_hinweis": q.get("anteil_hinweis") or "", "abruf_at": q.get("abruf_at"),
+        "stand_text": q.get("stand_text") or "", "zeitraum_ab": q.get("zeitraum_ab"), "zeilen": q.get("zeilen"), "fehler": q.get("fehler") or "",
+        "eingerichtet": bool((os.environ.get(GK_SHEET_SA_VAR) or "").strip())}
     b["gk_kategorien"] = GK_KATEGORIEN
     b["verlauf"] = [{"tag": r["tag"], "ist": _num(r["ist_eur"]), "soll": _num(r["soll_eur"]), "abw": _num(r["abweichung_eur"])}
                     for r in A["_sb_all"]("kapital_tageswerte", {"select": "tag,ist_eur,soll_eur,abweichung_eur",
                                                                   "gruppe_id": f"eq.{gid}", "order": "tag.asc"})]
     return b
+
+
+def _google_token():
+    """Zugriffstoken für die Sheets-API (nur lesen) aus der Railway-Variable GOOGLE_SERVICE_ACCOUNT_JSON. → (token, None) / (None, fehler)."""
+    roh = (os.environ.get(GK_SHEET_SA_VAR) or "").strip()
+    if not roh:
+        return None, f"Service-Konto fehlt (Railway-Variable {GK_SHEET_SA_VAR})"
+    try:
+        import json as _json
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request as _GReq
+        if _google["creds"] is None:
+            _google["creds"] = service_account.Credentials.from_service_account_info(
+                _json.loads(roh), scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
+        c = _google["creds"]
+        if not c.valid:
+            c.refresh(_GReq())
+        return c.token, None
+    except Exception as e:
+        _google["creds"] = None
+        return None, f"Service-Konto nicht nutzbar: {type(e).__name__}: {str(e)[:160]}"
+
+
+def gk_quelle_lesen(gid):
+    """kapital_gk_quellen-Zeile der Gruppe oder None (auch wenn die Tabelle noch fehlt — sql/2026-10-29_kapital_gk_sheet.sql)."""
+    try:
+        rows = _sb("GET", "kapital_gk_quellen", {"select": "*", "gruppe_id": f"eq.{gid}"}) or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
+def gk_sheet_abgleichen(gid, quelle):
+    """Sheet lesen und kapital_gk_buchungen (quelle sheet) darauf abgleichen. Schreibt Stand/Fehler in kapital_gk_quellen. → Kurzbericht."""
+    jetzt = datetime.now(timezone.utc).isoformat()
+    token, fehler = _google_token()
+    stand = {"abruf_at": jetzt, "fehler": fehler}
+    bericht = {"ok": False, "fehler": fehler, "neu": 0, "weg": 0}
+    if token:
+        try:
+            r = requests.get(f"https://sheets.googleapis.com/v4/spreadsheets/{quelle['sheet_id']}/values:batchGet",
+                             params=[("ranges", b) for b in GK_SHEET_BEREICHE] + [("valueRenderOption", "FORMATTED_VALUE")],
+                             headers={"Authorization": f"Bearer {token}"}, timeout=(5, 20))
+            if r.status_code in (403, 404):
+                raise RuntimeError(f"HTTP {r.status_code} — Sheet nicht mit dem Service-Konto geteilt?")
+            r.raise_for_status()
+            vr = (r.json() or {}).get("valueRanges") or []
+            werte = (vr[0].get("values") if len(vr) > 0 else None) or []
+            stand_text = (((vr[1].get("values") or [[""]])[0] or [""])[0] if len(vr) > 1 else "") or None
+            ab = _de_datum((((vr[2].get("values") or [[""]])[0] or [""])[0]) if len(vr) > 2 else "")
+            soll = gk_sheet_zeilen(werte)
+            db = A["_sb_all"]("kapital_gk_buchungen", {"select": "id,zeilen_schluessel", "gruppe_id": f"eq.{gid}", "quelle": "eq.sheet"})
+            neu, weg = gk_abgleich(soll, db)
+            for i in range(0, len(weg), 100):
+                _sb("DELETE", "kapital_gk_buchungen", {"id": _in(weg[i:i + 100]), "quelle": "eq.sheet"})
+            if neu:
+                _sb("POST", "kapital_gk_buchungen", body=[dict(z, gruppe_id=gid, quelle="sheet", angelegt_von="sheet") for z in neu],
+                    prefer="return=minimal")
+            stand.update(fehler=None, stand_text=stand_text, zeitraum_ab=ab, zeilen=len(soll))
+            bericht = {"ok": True, "fehler": None, "neu": len(neu), "weg": len(weg), "zeilen": len(soll)}
+        except Exception as e:
+            stand["fehler"] = f"{type(e).__name__}: {str(e)[:200]}"
+            bericht["fehler"] = stand["fehler"]
+    try:
+        _sb("PATCH", "kapital_gk_quellen", {"gruppe_id": f"eq.{gid}"}, body=stand, prefer="return=minimal")
+    except Exception as e:
+        print(f"[kapital] ⚠️ gk-quelle Stand: {type(e).__name__}: {e}", flush=True)
+    if bericht["fehler"]:
+        print(f"[kapital] ⚠️ Sheet {str(quelle.get('sheet_id'))[:6]}…: {bericht['fehler']}", flush=True)
+    return bericht
+
+
+def _gk_sheet_faellig(q):
+    if not q:
+        return False
+    t = _ts(q.get("abruf_at"))
+    return t is None or bool(q.get("fehler")) or (datetime.now(timezone.utc) - t).total_seconds() >= GK_SHEET_TAKT_S
 
 
 def _takt_gruppen():
@@ -378,6 +533,9 @@ def _takt_schleife():
         _takt["laeuft"] = True
         try:
             for gid in _takt_gruppen():
+                q = gk_quelle_lesen(gid)
+                if _gk_sheet_faellig(q):
+                    gk_sheet_abgleichen(gid, q)        # erst das Sheet, dann rechnen — der Tageswert enthält den frischen Stand
                 kapital_fuer(gid, schreiben=True)
             _takt["fehler"] = ""
         except Exception as e:
@@ -550,6 +708,22 @@ def registrieren(app, ns):
             return jsonify({"ok": True, "buchung": neu})
         except Exception as e:
             return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+
+    @app.route("/admin/kapital/gk/sheet", methods=["POST", "OPTIONS"])
+    def admin_kapital_gk_sheet():
+        """Knopf „Sheet jetzt lesen" im Geschäftskonto (sonst täglich im Takt)."""
+        if request.method == "OPTIONS":
+            return "", 200
+        erlaubt, err = _gate()
+        if err:
+            return err
+        gid = _uuid((request.get_json(silent=True) or {}).get("gruppe"))
+        if not gid or not _darf(erlaubt, gid):
+            return jsonify({"ok": False, "error": "Gruppe nicht freigegeben"}), 403
+        q = gk_quelle_lesen(gid)
+        if not q:
+            return jsonify({"ok": False, "error": "Für diese Gruppe ist kein Sheet hinterlegt (kapital_gk_quellen)"}), 404
+        return jsonify(gk_sheet_abgleichen(gid, q))
 
     if (os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "").strip() \
             and not os.environ.get("PROPHOS_FRONTEND"):

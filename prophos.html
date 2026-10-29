@@ -13024,7 +13024,15 @@
               <!-- (b) GESCHÄFTSKONTO -->
               <div class="panel">
                 <div class="panel-head"><div><div class="panel-title">Geschäftskonto</div><div class="panel-sub" id="kis-gk-sub"></div></div>
-                  <div class="kis-v" id="kis-gk-stand" style="font-size:18px">–</div></div>
+                  <div style="text-align:right"><div class="kis-v" id="kis-gk-stand" style="font-size:18px">–</div><div class="kis-s" id="kis-gk-anteil"></div></div></div>
+                <!-- Emins Sheet (29.10.2026): Railway spiegelt Buchungen!A2:G täglich; Stand/Fehler aus kapital_gk_quellen, Knopf liest sofort -->
+                <div class="kis-s" id="kis-gk-quelle" style="margin:-4px 0 8px"></div>
+                <!-- Anfangsstand: das Sheet führt keinen Kontostand, nur Buchungen ab „Zeitraum ab" — bis Finn die Zahl von Emin/Bank hat -->
+                <div class="kis-form" id="kis-gk-anfang" hidden style="margin-bottom:8px">
+                  <span class="kis-s" id="kis-gk-anfang-l" style="color:var(--warn-ink)">Anfangsstand fehlt</span>
+                  <input id="kis-a-betrag" type="number" inputmode="decimal" step="0.01" placeholder="Kontostand €" style="width:120px">
+                  <button class="btn btn-ghost" id="kis-a-ok" style="padding:6px 12px;font-size:12.5px">Speichern</button>
+                </div>
                 <div class="kis-form">
                   <input id="kis-g-datum" type="date" title="Datum">
                   <select id="kis-g-richtung" title="Richtung"><option value="1">Eingang +</option><option value="-1">Ausgang −</option></select>
@@ -20502,15 +20510,27 @@
       // (b) Geschäftskonto
       const gb = d.gk_buchungen || []
       $('kis-gk-stand').textContent = kisEur2.format(ist.geschaeftskonto || 0)
+      const gq = d.gk_quelle
+      $('kis-gk-anteil').textContent = gq?.anteil_hinweis ? `${gq.anteil_hinweis}: ${kisEur2.format((ist.geschaeftskonto || 0) / 2)}` : ''
+      $('kis-gk-quelle').innerHTML = !gq ? ''
+        : `Quelle: Emins Sheet „${escapeHtml(gq.titel || 'Buchhaltung')}“${gq.stand_text ? ' · ' + escapeHtml(gq.stand_text) : ''}`
+          + (gq.abruf_at ? ` · gelesen ${kisZeit(gq.abruf_at)}${gq.zeilen != null ? ', ' + gq.zeilen + ' Zeilen' : ''}` : ' · noch nie gelesen')
+          + (gq.fehler ? ` · <span style="color:var(--warn-ink)">${escapeHtml(gq.fehler)}</span>` : '')
+          + ` <button class="btn btn-ghost" id="kis-gk-sheet" style="padding:2px 8px;font-size:11.5px;margin-left:4px">Sheet jetzt lesen</button>`
+      const anfang = gb.find(x => x.kategorie === 'Anfangsstand')
+      const abTag = gq?.zeitraum_ab || '2026-09-01'
+      $('kis-gk-anfang').hidden = !!anfang
+      $('kis-gk-anfang-l').textContent = `Anfangsstand am ${kisTag(abTag)}${abTag.slice(0, 4)} fehlt — sonst ist der Kontostand nur das Ergebnis seit dann:`
+      $('kis-gk-anfang').dataset.datum = abTag
       $('kis-gk-sub').textContent = gb.length ? `${gb.length} Buchung${gb.length === 1 ? '' : 'en'} · Einnahmen ${kisEur.format(soll.gk_einnahmen || 0)} · Ausgaben ${kisEur.format(soll.gk_ausgaben || 0)}`
         : 'Noch keine Buchung — zuerst den Anfangsstand buchen'
       const ks = $('kis-g-kat')
       if(ks && !ks.options.length) ks.innerHTML = (d.gk_kategorien || []).map(c => `<option>${escapeHtml(c)}</option>`).join('')
       $('kis-gk-liste').innerHTML = gb.map(g => `<div class="kis-zeile">
           <span class="mono">${kisTag(g.datum)}</span>
-          <span style="min-width:0">${escapeHtml(g.text || '–')}<span class="kis-s">${escapeHtml(g.kategorie)}${g.kategorie === 'Umbuchung Krypto' ? ' · zählt nicht ins Soll' : ''}</span></span>
+          <span style="min-width:0">${escapeHtml(g.text || '–')}<span class="kis-s">${escapeHtml(g.kategorie)}${g.kategorie === 'Umbuchung Krypto' || g.kategorie === 'Konto-Kauf (in Prophos)' ? ' · zählt nicht ins Soll' : ''}${g.quelle === 'sheet' ? ' · Sheet' : ''}</span></span>
           <span class="mono" style="font-weight:600;text-align:right;color:${g.betrag < 0 ? 'var(--danger-ink)' : 'var(--good-ink)'}">${g.betrag < 0 ? '−' : '+'}${(g.waehrung === 'USD' ? kisUsd : kisEur2).format(Math.abs(g.betrag))}</span>
-          <span><button class="btn btn-ghost kis-gk-weg" data-id="${escapeHtml(g.id)}" title="Buchung löschen" style="padding:4px 9px;font-size:12px">✕</button></span>
+          <span>${g.quelle === 'sheet' ? '' : `<button class="btn btn-ghost kis-gk-weg" data-id="${escapeHtml(g.id)}" title="Buchung löschen" style="padding:4px 9px;font-size:12px">✕</button>`}</span>
         </div>`).join('')
 
       // (c) Insgesamt geparkt
@@ -20624,6 +20644,20 @@
       }
       const w = ev.target.closest('.kis-einl-weg')
       if(w && confirm('Einlage löschen?')){ kisSenden('/admin/kapital/einlage', 'DELETE', { id: w.dataset.id }, w); return }
+      if(ev.target.closest('#kis-gk-sheet')){
+        const btn = ev.target.closest('#kis-gk-sheet'); btn.disabled = true; btn.textContent = 'liest …'
+        rgApi('/admin/kapital/gk/sheet?ansicht=admin', { method: 'POST', body: JSON.stringify({ gruppe: kisGruppe }) })
+          .then(x => { $('kis-form-msg').style.color = ''; $('kis-form-msg').textContent = x.ok ? `Sheet gelesen: ${x.zeilen} Zeilen, ${x.neu} neu, ${x.weg} raus.` : 'Sheet: ' + (x.fehler || 'nicht lesbar') })
+          .catch(e => kisFehler('Sheet: ' + (e.message || e))).finally(() => kisLaden())
+        return
+      }
+      if(ev.target.closest('#kis-a-ok')){
+        const raw = $('kis-a-betrag').value
+        if(raw === '' || isNaN(Number(raw)) || Number(raw) === 0) return kisFehler('Anfangsstand in € eingeben')
+        kisSenden('/admin/kapital/gk', 'POST', { gruppe: kisGruppe, datum: $('kis-gk-anfang').dataset.datum || '2026-09-01', betrag: Number(raw),
+          waehrung: 'EUR', kategorie: 'Anfangsstand', text: 'Anfangsstand Geschäftskonto (Emin/Bank)' }, ev.target.closest('#kis-a-ok'))
+        return
+      }
       const g = ev.target.closest('.kis-gk-weg')
       if(g && confirm('Buchung löschen?')) kisSenden('/admin/kapital/gk', 'DELETE', { id: g.dataset.id }, g)
     })

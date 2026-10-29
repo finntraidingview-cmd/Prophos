@@ -5,3 +5,4 @@ signalrcore
 anthropic
 reportlab
 pywebpush
+google-auth
