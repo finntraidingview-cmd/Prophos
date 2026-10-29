@@ -21214,13 +21214,17 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
     return out
 
 
-def _ap_hb_laden(firmen, jetzt=None):
+def _ap_hb_laden(firmen, jetzt=None, ab=None):
     """heute_beendet[] aller IDs (ohne ADMIN_EXCLUDE_EMAILS), neueste zuerst — nur Lesen: beendete Pläne mit Ende seit 00:00 Dubai, ihre
     Konten, Archiv-Gründe, Läufe der Start-Tage (Satz wie die Hypo-Bilanz); Kontowerte heute nur, wenn eine Zeile sonst ohne Satz bliebe
-    (ap_kontowerte_gemerkt, höchstens einmal je Minute). → (zeilen, ab_iso)"""
+    (ap_kontowerte_gemerkt, höchstens einmal je Minute). → (zeilen, ab_iso)
+    VERLAUF IN € (29.10.2026, PLANER-VERLAUF-EURO): ab = früherer Tagesbeginn (00:00 Dubai) → dieselbe Rechnung über mehrere Dubai-Tage.
+    „Jüngster Trade des Kontos“ und der Archiv-Grund gelten dann JE DUBAI-TAG des Endes (rückwirkend zählt nur eine Archivierung am selben
+    Tag, sonst kippten alte Tage); für heute allein ist das genau die bisherige Rechnung."""
     jetzt = jetzt or datetime.now(timezone.utc)
     z = jetzt.astimezone(_ap_tz(AP_HB_TZ))
-    ab = datetime(z.year, z.month, z.day, tzinfo=z.tzinfo)
+    if ab is None:
+        ab = datetime(z.year, z.month, z.day, tzinfo=z.tzinfo)
     ab_q = ab.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # ohne „+" (würde im or-Filter zum Leerzeichen)
     namen, aus = _ap_namen()
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,auto_plan,master_pl,"
@@ -21288,16 +21292,26 @@ def _ap_hb_laden(firmen, jetzt=None):
                         lauf[(str(l.get("tag")), str(g["konto_id"]))] = float(g["satz_eur_je_usd"])
         except Exception as e:
             print(f"[auto-plan] ⚠️ heute beendet/Lauf: {type(e).__name__}: {e}", flush=True)
+    dtz = _ap_tz(AP_HB_TZ)
+    dtag = lambda p: (_ap_ts(ap_hb_ende(p)) or ab).astimezone(dtz).date()   # noqa: E731 — Dubai-Tag des Endes (Verlauf über mehrere Tage)
     letzt = {}
     for p in plaene:
         k = str(p.get("master_account_id") or "")
-        if k and str(ap_hb_ende(p) or "") > letzt.get(k, ""):
-            letzt[k] = str(ap_hb_ende(p) or "")
+        if k and str(ap_hb_ende(p) or "") > letzt.get((k, dtag(p)), ""):
+            letzt[(k, dtag(p))] = str(ap_hb_ende(p) or "")
+
+    def archiv_am_tag(k, p):
+        a = arch.get(k)
+        if not a:
+            return None
+        d = dtag(p)
+        tag_ende = datetime(d.year, d.month, d.day, tzinfo=dtz) + timedelta(days=1)
+        return a if a[0] < tag_ende else None          # heute: Archiv liegt nie nach dem Tagesende → wie bisher
 
     def zeile(p, kw_heute):
         k = str(p.get("master_account_id") or "")
         return ap_hb_zeile(p, accs.get(k), firmen, lauf.get((tag_je.get(str(p.get("id"))), k)), kw_heute, namen,
-                           arch.get(k), letzter=bool(k) and str(ap_hb_ende(p) or "") >= letzt.get(k, ""))
+                           archiv_am_tag(k, p), letzter=bool(k) and str(ap_hb_ende(p) or "") >= letzt.get((k, dtag(p)), ""))
     zeilen = [zeile(p, None) for p in plaene]
     fehlt = [i for i, r in enumerate(zeilen) if r["art"] != "offen" and r["eur"] is None]
     if fehlt:
@@ -21316,7 +21330,7 @@ def _ap_hb_laden(firmen, jetzt=None):
         k = str(p.get("master_account_id") or "")
         bn = (p.get("mt5_baseline") or {}).get("bal_nach")
         zeilen[i]["konto_id"] = k or None
-        if not (isinstance(bn, dict) and bn.get("ok") is False) or str(ap_hb_ende(p) or "") < letzt.get(k, "") or k in arch_alle:
+        if not (isinstance(bn, dict) and bn.get("ok") is False) or str(ap_hb_ende(p) or "") < letzt.get((k, dtag(p)), "") or k in arch_alle:
             continue                                   # archiviert → kein „Balance nicht gelesen" mehr (Zeile zählt weiter in die Bilanz)
         ende, bal_at = _ap_ts(ap_hb_ende(p)), _ap_ts((accs.get(k) or {}).get("tv_balance_at"))
         if ende is not None and (bal_at is None or bal_at < ende):
@@ -21337,6 +21351,101 @@ def ap_heute_beendet_gemerkt(firmen, jetzt=None):
         zeilen, ab = _ap_hb_laden(firmen, jetzt)
         _ap_hb_cache.update(bis=time.time() + AP_HB_CACHE_S, tag=tag, zeilen=zeilen, ab=ab)
         return zeilen, ab
+
+
+# VERLAUF IN € (29.10.2026, Finn: „den Chart, wo ich die Werte-Zahl über alle Tage akkumuliert und filterbar nach Prop-Firma sehe"): je
+# Dubai-Tag die Zahl der Kachel „Heute" im Challenge-Planer — GENAU dieselbe Rechnung (_ap_hb_laden → ap_hb_zeile → hypo_bilanz_zeile: echter
+# P&L $ × Kontowert-Satz, geblowt = −Kontowert vor dem Trade, „offen"/ohne Satz zählt nicht), nur über mehrere Tage. Nur Lesen; alle IDs
+# 5 min im Prozess gemerkt, die Sicht (?sicht=admin, Gruppen-Chip ?gruppe=) filtert danach wie das Delta. Summiert wird im Frontend
+# (Firmen-Chips), hier nur kompakte Zeilen.
+AP_VERLAUF_CACHE_S = 300
+AP_VERLAUF_TAGE_MAX = 120
+AP_VERLAUF_AB = (2026, 10, 7)          # frühester Dubai-Tag: davor gab es weder Planer-Läufe noch die Kachel „Heute" (Prüfung 29.10.2026)
+AP_VERLAUF_FIRMEN = (("tradeify_cfd", "Tradeify CFD"), ("tradeify", "Tradeify"), ("apex", "Apex"), ("topstep", "Topstep"),
+                     ("ftmo_futures", "FTMO Futures"), ("ftmo", "FTMO"), ("fundingpips", "FundingPips"),
+                     ("fundednext_futures", "FundedNext Futures"), ("fundednext", "FundedNext"), ("the5ers", "The5%ers"),
+                     ("blueguardian", "Blue Guardian"), ("lucid", "Lucid"))
+_ap_verlauf_cache = {}
+_ap_verlauf_lock = threading.Lock()
+
+
+def ap_firma_kurz(firm):
+    """REIN RECHNEND (testbar): Firmenname am Plan → Chip-Name des Verlaufs (Tradeify CFD vor Tradeify, FTMO/FundedNext Futures vor der
+    CFD-Firma); unbekannt → der Name selbst (gekürzt)."""
+    f = re.sub(r"[^a-z0-9]", "", str(firm or "").lower())
+    fut = "futures" in f
+    for key, name in AP_VERLAUF_FIRMEN:
+        if key == "tradeify_cfd" and _ist_tradeify_cfd(firm):
+            return name
+        if key == "ftmo_futures" and "ftmo" in f and fut:
+            return name
+        if key == "fundednext_futures" and "fundednext" in f and fut:
+            return name
+        if key == "the5ers" and ("5ers" in f or "fiveers" in f):
+            return name
+        if "_" not in key and key != "the5ers" and key in f:
+            return name
+    return str(firm or "").strip()[:30] or "?"
+
+
+def ap_verlauf_zeilen(zeilen, tz_name=AP_HB_TZ):
+    """REIN RECHNEND (testbar): heute_beendet-Zeilen (beliebig viele Tage) → kompakte Zeilen {tag (Dubai-Tag des Endes), user_id, firma,
+    eur, usd, art}, älteste zuerst. eur bleibt None, wo die Kachel nicht zählt (art „offen" bzw. ohne Satz)."""
+    tz = _ap_tz(tz_name)
+    out = []
+    for z in zeilen or ():
+        e = _ap_ts(z.get("ende"))
+        if e is None:
+            continue
+        out.append({"tag": e.astimezone(tz).date().isoformat(), "user_id": str(z.get("user_id") or ""), "firma": ap_firma_kurz(z.get("firma")),
+                    "eur": None if z.get("art") == "offen" else z.get("eur"), "usd": z.get("ergebnis_usd"), "art": z.get("art")})
+    out.sort(key=lambda r: r["tag"])
+    return out
+
+
+def ap_verlauf_gemerkt(firmen, tage, jetzt=None):
+    """Verlauf-Zeilen aller IDs der letzten `tage` Dubai-Tage (inkl. heute), 5 min gemerkt je tage; Single-Flight. Fehler fliegen durch."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    z = jetzt.astimezone(_ap_tz(AP_HB_TZ))
+    heute = datetime(z.year, z.month, z.day, tzinfo=z.tzinfo)
+    schluessel = (heute.date().isoformat(), int(tage))
+    with _ap_verlauf_lock:
+        c = _ap_verlauf_cache.get(schluessel)
+        if c and c["bis"] > time.time():
+            return c["zeilen"]
+        ab = max(heute - timedelta(days=int(tage) - 1), datetime(*AP_VERLAUF_AB, tzinfo=heute.tzinfo))
+        zeilen, _ab = _ap_hb_laden(firmen, jetzt, ab=ab)
+        aus = ap_verlauf_zeilen(zeilen)
+        _ap_verlauf_cache.clear()
+        _ap_verlauf_cache[schluessel] = {"bis": time.time() + AP_VERLAUF_CACHE_S, "zeilen": aus}
+        return aus
+
+
+@app.route("/admin/auto-plan/verlauf-eur", methods=["GET", "OPTIONS"])
+def admin_auto_plan_verlauf_eur():
+    """GET ?tage=7|30|… (≤ AP_VERLAUF_TAGE_MAX, nie vor AP_VERLAUF_AB) [&sicht=admin&gruppe=…] → {ok, tage, tz, heute,
+    zeilen:[{tag, user_id, firma, eur, usd, art}]}.
+    Gate und Sicht wie /admin/auto-plan/delta (_ap_zugang, _ap_sicht_aus_anfrage): eingeschränkte Logins sehen nur ihre IDs."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, reg, err = _ap_zugang(admin_reiter=True)
+    if err:
+        return err
+    try:
+        tage = max(1, min(AP_VERLAUF_TAGE_MAX, int(request.args.get("tage") or 30)))
+        zeilen = ap_verlauf_gemerkt((reg.get("regeln") or {}).get("firmen") or [], tage)
+        sicht = _ap_sicht_aus_anfrage(admin, uid)
+        if sicht is not None:
+            s = str(sicht) if isinstance(sicht, (str, int)) else frozenset(str(u) for u in sicht)
+            zeilen = [r for r in zeilen if (r["user_id"] == s if isinstance(s, str) else r["user_id"] in s)]
+        weg = _ap_ht_standard_aus(sicht)            # HT ohne Verwalter-Gruppen (wie die Kachel „Heute")
+        if weg:
+            zeilen = [r for r in zeilen if r["user_id"] not in weg]
+        heute = datetime.now(timezone.utc).astimezone(_ap_tz(AP_HB_TZ)).date().isoformat()   # „heute" vom Server, nicht von der Browser-Uhr
+        return jsonify({"ok": True, "tage": tage, "tz": AP_HB_TZ, "heute": heute, "zeilen": zeilen})
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ verlauf-eur: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
 
 
 def _ap_hhmm_txt(m):
@@ -21905,6 +22014,16 @@ def _ap_sicht_aus_anfrage(admin, uid):
         if f is not None:
             return f
     return erg
+
+
+def _ap_ht_standard_aus(sicht):
+    """NUR HT IM ADMIN-REITER (29.10.2026, Master: Kachel „Heute … netto" und Verlauf folgen dem Gruppen-Umschalter — HT ohne Verwalter-Gruppen):
+    der Reiter schickt bei „Hermann Technologies" keinen ?gruppe= (HT = Standard), _ap_sicht_aus_anfrage liefert dann None = alle IDs. Für
+    diesen Fall (sicht=admin, kein Gruppen-Chip, uneingeschränkter Login) → die IDs der Gruppen MIT Verwalter (_admin_standard_aus), die
+    heute_beendet bzw. der Verlauf ausblenden; sonst leere Menge. Gruppen nicht lesbar → Fehler fliegt (Aufrufer zeigt dann nichts)."""
+    if sicht is not None or _ap_sicht_param() != AP_SICHT_ADMIN or str(request.args.get("gruppe") or "").strip():
+        return set()
+    return {str(u) for u in _admin_standard_aus()}
 
 
 def _ap_gruppe_lesen(uid):
@@ -28261,6 +28380,14 @@ def admin_auto_plan_delta():
             antwort = ap_delta_ohne_archiv(antwort, _ap_archiviert_gemerkt())   # archivierte Konten (09.10.2026), eigener try
         except Exception as e:
             print(f"[auto-plan] ⚠️ Delta-Archiv: {type(e).__name__}: {e}", flush=True)
+        # Kachel „Heute" nur HT (29.10.2026, _ap_ht_standard_aus): Netto/Band/Waage bleiben wie bisher, nur die Heute-Liste ohne Verwalter-Gruppen
+        if isinstance(antwort.get("heute_beendet"), list):
+            try:
+                weg = _ap_ht_standard_aus(sicht_d)
+                if weg:
+                    antwort["heute_beendet"] = [z for z in antwort["heute_beendet"] if str(z.get("user_id")) not in weg]
+            except Exception as e:
+                antwort["heute_beendet"], antwort["heute_beendet_fehler"] = None, f"Gruppen nicht lesbar: {type(e).__name__}"
         antwort.setdefault("sicht", "alle")
         if not admin and nur:   # Bot-Zustand ist HT-weit (letzter Lauf, Zähler) — nur Schalter-Stand
             antwort["bot"] = {k: (antwort.get("bot") or {}).get(k) for k in ("aktiv", "auto_start", "takt_min", "zielband_pct")}

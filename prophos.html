@@ -3676,8 +3676,21 @@
   #adm-pane-wd .wd-ueb-kpis:empty{display:none}
   #adm-pane-wd #wd-ueb-heute{margin-top:12px}
   #adm-pane-wd #wd-ueb-stat-kpis{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:8px}   /* 28.10.2026: zwei Kacheln (Fusion / Master kumuliert) */
-  :is(#adm-pane-wd,#adm-pane-kapital) .wd-ueb-graf{height:220px;border:1px solid var(--border-soft,var(--line));border-radius:10px;overflow:hidden;background:var(--surface);margin:0 0 12px}
-  :is(#adm-pane-wd,#adm-pane-kapital) .wd-ueb-graf[hidden]{display:none}
+  /* VERLAUF IN € im Challenge-Planer (29.10.2026): Bausteine wie Kapital-Graf (wd-ueb-graf, wd-ueb-chips, Tooltip) */
+  #adm-pane-planer .apv{margin:16px 0 0}
+  #adm-pane-planer .apv .panel-title b.apv-summe{margin-left:8px;font-variant-numeric:tabular-nums}
+  #adm-pane-planer .apv .apv-firmen{margin:2px 0 10px}
+  #adm-pane-planer .wd-ueb-graf.apv-graf{position:relative;height:360px;margin:0 0 4px}
+  @media (max-width:720px){#adm-pane-planer .wd-ueb-graf.apv-graf{height:260px}}
+  #adm-pane-planer .apv-tip{position:absolute;z-index:3;pointer-events:none;min-width:180px;max-width:240px;padding:9px 11px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 6px 18px rgba(16,24,40,.12);font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+  #adm-pane-planer .apv-tip[hidden]{display:none}
+  #adm-pane-planer .apv-tip .t-tag{font-size:11.5px;margin-bottom:2px}
+  #adm-pane-planer .apv-tip .t-summe{font-size:18px;font-weight:650;color:var(--ink);letter-spacing:-.02em}
+  #adm-pane-planer .apv-tip .t-z{display:flex;justify-content:space-between;gap:10px;padding:1px 0}
+  #adm-pane-planer .apv-tip .t-z b{color:var(--ink);font-weight:600}
+  #adm-pane-planer .apv-msg:empty{display:none}
+  :is(#adm-pane-wd,#adm-pane-kapital,#adm-pane-planer) .wd-ueb-graf{height:220px;border:1px solid var(--border-soft,var(--line));border-radius:10px;overflow:hidden;background:var(--surface);margin:0 0 12px}
+  :is(#adm-pane-wd,#adm-pane-kapital,#adm-pane-planer) .wd-ueb-graf[hidden]{display:none}
   #adm-pane-wd #wdMsg:empty{display:none}
   #adm-pane-wd .wd-po-mehr{margin-top:8px;font-size:12px}
   #adm-pane-wd .wd-po-mehr[hidden]{display:none}   /* .btn setzt display:flex und schlägt hidden (wie #wal-feed-more) */
@@ -3685,8 +3698,8 @@
   #adm-pane-wd .wd-ueb-kpis .kpi-label{font-size:11.5px;margin-bottom:1px}
   #adm-pane-wd .wd-ueb-kpis .kpi-value{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-wd .wd-ueb-kpis .kpi-delta{font-size:11px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  :is(#adm-pane-wd,#adm-pane-kapital) .wd-ueb-chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
-  :is(#adm-pane-wd,#adm-pane-kapital) .wd-ueb-chips .adm-vl-chip{font-size:12px;padding:3px 9px}
+  :is(#adm-pane-wd,#adm-pane-kapital,#adm-pane-planer) .wd-ueb-chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+  :is(#adm-pane-wd,#adm-pane-kapital,#adm-pane-planer) .wd-ueb-chips .adm-vl-chip{font-size:12px;padding:3px 9px}
   #adm-pane-wd .wd-ueb-chips .adm-vl-chip .kf{font-size:10.5px}
   #adm-pane-wd .wd-ueb-stat-kopf{margin-top:16px;padding-top:12px;border-top:1px solid var(--border-soft, var(--line))}
   #adm-pane-wd .wd-po-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
@@ -12328,6 +12341,16 @@
         <!-- Trade-Planer (08.10.2026, Finn: „alle IDs zum Trade-Planen zufügen und einen Überblick über alle IDs"): auto_plan_regeln.user_ids -->
         <div id="adm-pane-planer" hidden>
           <div id="ap-ids-root" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade IDs…</div>
+          <!-- VERLAUF IN € (29.10.2026, Finn: „den Chart, wo ich die Werte-Zahl über alle Tage akkumuliert und filterbar nach Prop-Firma sehe"):
+               nur im Challenge-Planer (nicht Funded), Daten GET /admin/auto-plan/verlauf-eur, Zeichnen im Modul (apv*) -->
+          <div class="panel apv" id="apv-root" hidden>
+            <div class="panel-head"><div><div class="panel-title">Verlauf in € <b class="apv-summe" id="apv-summe"></b></div>
+              <div class="panel-sub" id="apv-sub">kumuliert je Tag (Dubai) · dieselbe Zahl wie die Kachel „Heute“</div></div>
+              <div class="wd-ueb-chips" id="apv-zeit"></div></div>
+            <div class="wd-ueb-chips apv-firmen" id="apv-firmen"></div>
+            <div class="wd-ueb-graf apv-graf" id="apv-chart"></div>
+            <div class="kis-s apv-msg" id="apv-msg"></div>
+          </div>
         </div>
         <div id="adm-pane-kompass" hidden>
           <!-- Kopf (23.09.2026, Finn: „oben den ganzen Quatsch weglassen, kleiner, einfach sagen was der Bot gerade
@@ -15477,7 +15500,7 @@
       admLoad().then(() => { if(walOpened){ walOpened = false; if(!$('adm-pane-wallet')?.hidden) walOpen() } })
       admKapData = null
       if(!$('adm-pane-stat')?.hidden) admKapitelLaden()
-      if(!$('adm-pane-planer')?.hidden) window._apIdsLaden?.()
+      if(!$('adm-pane-planer')?.hidden){ window._apIdsLaden?.(); window._apvGruppeNeu?.() }   // Verlauf in € folgt der Gruppe (29.10.2026)
       if(!$('adm-pane-wd')?.hidden) window._wdTabOeffnen?.()
       if(!$('adm-pane-kapital')?.hidden) window._kisGruppeNeu?.()   // Kapital lädt sofort die Gruppe von oben (29.10.2026)
       window._admPcsOeffnen?.()   // PC-Tabs neu zeichnen (Filter über _admGruppeOk)
@@ -21462,6 +21485,7 @@
         // Funded-Planer (27.10.2026, Finn: „1:1 wie der Challenge-Planer"): derselbe Bereich, nur die Datenquelle wechselt (window._apIdsArt)
         $('adm-pane-planer').hidden   = name !== 'planer' && name !== 'fplaner'
         if(name === 'planer' || name === 'fplaner'){ window._apIdsArt?.(name === 'fplaner' ? 'funded' : 'challenge'); window._apIdsTabOeffnen?.() }   // Trade-Planer-IDs (08.10.2026)
+        window._apvOeffnen?.(name === 'planer')   // Verlauf in € (29.10.2026): nur Challenge-Planer
         if(name === 'auftrag') window._aufTabOeffnen?.(); else window._aufTabSchliessen?.()   // Wochenauftrag (05.10.2026)
         if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
@@ -51076,7 +51100,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1862'
+  const OS_TAB_BUILD = '2026-09-22.1863'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57277,6 +57301,164 @@
   window._tplSicht = () => tplAdminReiterSichtbar() ? '?sicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
     : (document.querySelector('#tpl-view.active') && (typeof apdAdmin === 'function' ? apdAdmin() : _ap.admin === true)) ? '?sicht=alle' : ''
   window._tplSichtParam = () => tplAdminReiterSichtbar() ? 'admin' : ''   // für POST-Bodies (tplEingriff)
+  /* ══ VERLAUF IN € (29.10.2026, PLANER-VERLAUF-EURO — Finn: „den Chart, wo ich die Werte-Zahl über alle Tage akkumuliert und filterbar nach
+   * Prop-Firma sehe — würde ich immer mal gerne sehen"). Im Admin-Reiter Challenge-Planer (nicht Radar-Statistik: die Zahl IST die Kachel
+   * „Heute" dieses Reiters, gleiche Sicht und Gruppe). Daten: GET /admin/auto-plan/verlauf-eur?tage=120 — je beendetem Trade Dubai-Tag, Firma,
+   * € (Backend: dieselbe Rechnung wie delta.heute_beendet, ap_hb_zeile; „offen"/ohne Satz = eur null, zählt nicht). Hier nur filtern
+   * (Firmen-Chips, Zeitraum), je Tag summieren (wie tplHeuteSumme) und kumulieren. Gruppe wie der Planer: ?sicht=admin + Gruppen-Chip, ohne
+   * Chip HT ohne Verwalter-Gruppen (Server); eingeschränkte Logins schicken keine Gruppe, der Server zeigt nur ihre IDs. Liest nur. ══ */
+  const APV_FIRMEN = ['Tradeify', 'Apex', 'Topstep', 'FTMO', 'FundingPips', 'FundedNext', 'The5%ers', 'Blue Guardian', 'Tradeify CFD', 'Lucid', 'FTMO Futures', 'FundedNext Futures']
+  const APV_ZEITEN = [['7', '7 T'], ['30', '30 T'], ['alle', 'Alles']]
+  const _apv = { d: null, laeuft: false, at: 0, firmen: new Set(), zeit: '30', graf: null, fehler: '' }
+  try{ const z = localStorage.getItem('prophos_apv_zeit'); if(z && APV_ZEITEN.some(x => x[0] === z)) _apv.zeit = z }catch(_){}
+  const apvEur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
+  const apvVz = x => { const r = Math.round(x); return (r > 0 ? '+' : r < 0 ? '−' : '±') + apvEur.format(Math.abs(r)) }
+  const apvFarbe = x => Math.round(x) > 0 ? 'var(--good-ink)' : Math.round(x) < 0 ? 'var(--danger-ink)' : 'var(--sub)'
+  function apvAlpha(farbe, a){
+    const f = String(farbe || '').trim()
+    let m = f.match(/^#([0-9a-f]{3})$/i); if(m) return `rgba(${[...m[1]].map(c => parseInt(c + c, 16)).join(',')},${a})`
+    m = f.match(/^#([0-9a-f]{6})/i); if(m) return `rgba(${[0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(',')},${a})`
+    m = f.match(/^rgba?\(([^)]+)\)/i); if(m) return `rgba(${m[1].split(/[\s,\/]+/).filter(Boolean).slice(0, 3).join(',')},${a})`
+    return f
+  }
+  // Gruppe wie der Planer-Reiter (_admGruppeQ): Verwalter-Chip → ?gruppe=, HT ohne Parameter (Server blendet die Verwalter-Gruppen aus,
+  // _ap_ht_standard_aus), eingeschränkte Logins schicken keine Gruppe
+  const apvQuery = () => '?sicht=admin&tage=120' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
+  // Antwort nur übernehmen, wenn sie noch zur Gruppe passt (Prüfung 29.10.2026: Gruppenwechsel während einer langsamen ersten Abfrage
+  // zeigte sonst die alte Gruppe 2–3 min unter der neuen) — laufende Nummer je Abfrage, ein Wechsel startet sofort neu
+  async function apvLaden(sofort){
+    if((_apv.laeuft && !sofort) || (!sofort && _apv.d && Date.now() - _apv.at < 120000)) return
+    const nr = _apv.nr = (_apv.nr || 0) + 1, q = apvQuery()
+    _apv.laeuft = true
+    try{
+      const d = await apdApi('GET', '/verlauf-eur' + q)
+      if(nr !== _apv.nr || q !== apvQuery()) return
+      _apv.d = d; _apv.fehler = ''; _apv.at = Date.now()
+    }catch(e){ if(nr === _apv.nr) _apv.fehler = (e && e.message) || String(e) }
+    finally{ if(nr === _apv.nr){ _apv.laeuft = false; apvRender() } }
+  }
+  // REIN RECHNEND (window._apvReihe): Zeilen → Tage von..heute (Lücken = 0 €) mit Tages-€, Kumulierung und Zählern; Summe wie tplHeuteSumme
+  // (nur Zeilen mit €; „offen" und ohne Satz zählen nur als Hinweis). firmen = Set der Chip-Namen (leer = alle), zeit '7' | '30' | 'alle'.
+  function apvReihe(zeilen, firmen, zeit, heute){
+    const passt = z => !firmen || !firmen.size || firmen.has(z.firma)
+    const jeTag = new Map()
+    for(const z of zeilen || []){
+      if(!z || !z.tag || !passt(z)) continue
+      const t = jeTag.get(z.tag) || { eur: 0, n: 0, plus: 0, minus: 0, blow: 0, offen: 0, ohne: 0 }
+      t.n++
+      const e = z.eur == null || !isFinite(Number(z.eur)) ? null : Number(z.eur)
+      if(z.art === 'offen') t.offen++
+      else if(e == null) t.ohne++
+      else { t.eur += e; if(z.art === 'geblowt') t.blow++; else if(e > 0) t.plus++; else if(e < 0) t.minus++ }
+      jeTag.set(z.tag, t)
+    }
+    const tagNr = t => Math.round(Date.parse(t + 'T00:00:00Z') / 864e5)
+    const ausNr = n => new Date(n * 864e5).toISOString().slice(0, 10)
+    const bis = tagNr(heute), ersterDaten = [...jeTag.keys()].sort()[0]
+    let von = zeit === 'alle' ? (ersterDaten ? tagNr(ersterDaten) : bis) : bis - Number(zeit) + 1
+    const reihe = []; let kum = 0
+    for(let n = von; n <= bis; n++){
+      const tag = ausNr(n), t = jeTag.get(tag) || { eur: 0, n: 0, plus: 0, minus: 0, blow: 0, offen: 0, ohne: 0 }
+      kum += t.eur
+      reihe.push(Object.assign({ tag, kum }, t))
+    }
+    return reihe
+  }
+  window._apvReihe = apvReihe
+  const apvHeuteDubai = () => new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)   // Dubai = UTC+4 ohne Sommerzeit
+  function apvRender(){
+    const root = document.getElementById('apv-root'); if(!root || root.hidden) return
+    const msg = document.getElementById('apv-msg')
+    const d = _apv.d
+    if(!d){ msg.textContent = _apv.fehler ? 'Verlauf nicht verfügbar: ' + _apv.fehler : 'Lade…'; return }
+    msg.textContent = _apv.fehler ? 'Stand von ' + new Date(_apv.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) + ' — neu laden scheiterte: ' + _apv.fehler : ''
+    const zeilen = d.zeilen || []
+    const da = new Set(zeilen.map(z => z.firma))
+    const liste = APV_FIRMEN.filter(f => da.has(f)).concat([...da].filter(f => !APV_FIRMEN.includes(f)).sort())
+    for(const f of [..._apv.firmen]) if(!da.has(f)) _apv.firmen.delete(f)
+    document.getElementById('apv-firmen').innerHTML = [`<button type="button" class="adm-vl-chip${!_apv.firmen.size ? ' is-on' : ''}" data-apv-firma="">Alle</button>`]
+      .concat(liste.map(f => `<button type="button" class="adm-vl-chip${_apv.firmen.has(f) ? ' is-on' : ''}" data-apv-firma="${escapeHtml(f)}">${escapeHtml(f)}</button>`)).join('')
+    document.getElementById('apv-zeit').innerHTML = APV_ZEITEN.map(([z, t]) => `<button type="button" class="adm-vl-chip${_apv.zeit === z ? ' is-on' : ''}" data-apv-zeit="${z}">${t}</button>`).join('')
+    const reihe = apvReihe(zeilen, _apv.firmen, _apv.zeit, /^\d{4}-\d{2}-\d{2}$/.test(String(d.heute || '')) ? d.heute : apvHeuteDubai())
+    const ges = reihe.length ? reihe[reihe.length - 1].kum : 0, heute = reihe.length ? reihe[reihe.length - 1] : null
+    const su = document.getElementById('apv-summe'); su.textContent = apvVz(ges); su.style.color = apvFarbe(ges)
+    document.getElementById('apv-sub').textContent = `kumuliert je Tag (Dubai) · ${_apv.firmen.size ? [..._apv.firmen].join(', ') : 'alle Firmen'} · heute ${heute ? apvVz(heute.eur) : '±0 €'} · € wie die Kachel „Heute“ (P&L × Kontowert-Satz, geblowt = −Kontowert)`
+    apvGraf(reihe)
+  }
+  function apvGrafWeg(){ const g = _apv.graf; if(!g) return; try{ g.ro && g.ro.disconnect() }catch(_){} try{ g.chart.remove() }catch(_){} _apv.graf = null }
+  function apvGraf(reihe){
+    const box = document.getElementById('apv-chart'); if(!box) return
+    if(!window.LightweightCharts){
+      if(!box.firstChild) box.innerHTML = '<div class="kis-s" style="padding:12px">Graf lädt …</div>'
+      mklLibLaden().then(ok => { if(ok) apvGraf(reihe); else box.innerHTML = '<div class="kis-s" style="padding:12px">Graf nicht verfügbar: Chart-Bibliothek nicht ladbar → Seite neu laden</div>' })
+      return
+    }
+    const LW = window.LightweightCharts, rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)'), ink = mklToken('--ink', '#101828')
+    const gut = mklToken('--good', '#12b76a'), rot = mklToken('--danger', '#f04438')
+    const tagTxt = t => { const s = String(t).split('-'); return s.length === 3 ? `${s[2]}.${s[1]}.` : String(t) }
+    const huelle = { layout: { background: { type: 'solid', color: mklToken('--surface', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12 },
+      grid: { vertLines: { visible: false }, horzLines: { color: apvAlpha(rahmen, 0.6) } }, rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.1, bottom: 0.34 } },
+      timeScale: { borderVisible: false, fixLeftEdge: true, fixRightEdge: true, tickMarkFormatter: t => tagTxt(typeof t === 'string' ? t : `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`) },
+      crosshair: { mode: LW.CrosshairMode.Magnet, horzLine: { visible: false, labelVisible: false }, vertLine: { color: apvAlpha(ink, 0.25), width: 1, style: LW.LineStyle.Solid, labelVisible: false } },
+      localization: { locale: 'de-DE', dateFormat: 'dd.MM.yyyy' } }
+    const fmt = { type: 'custom', minMove: 1, formatter: w => apvEur.format(w) }
+    let g = _apv.graf
+    if(!g || g.box !== box){
+      apvGrafWeg(); box.innerHTML = ''
+      const chart = LW.createChart(box, Object.assign({ width: box.clientWidth || 600, height: box.clientHeight || 360, handleScale: false, handleScroll: false }, huelle))
+      const linie = chart.addAreaSeries({ lineWidth: 3, lineType: LW.LineType.Curved, crosshairMarkerRadius: 4, lastValueVisible: true, priceLineVisible: false, priceFormat: fmt })
+      const balken = chart.addHistogramSeries({ priceScaleId: 'tage', lastValueVisible: false, priceLineVisible: false, priceFormat: fmt })
+      chart.priceScale('tage').applyOptions({ scaleMargins: { top: 0.72, bottom: 0 }, visible: false })
+      const tip = document.createElement('div'); tip.className = 'apv-tip'; tip.hidden = true; box.appendChild(tip)
+      g = _apv.graf = { chart, linie, balken, box, tip, ro: null, reihe: [] }
+      chart.subscribeCrosshairMove(par => apvTip(par))
+      try{ g.ro = new ResizeObserver(() => { const gg = _apv.graf; if(!gg || !box.clientWidth) return; try{ gg.chart.applyOptions({ width: box.clientWidth, height: box.clientHeight || 360 }); gg.chart.timeScale().fitContent() }catch(_){} }); g.ro.observe(box) }catch(_){}
+    } else {
+      try{ g.chart.applyOptions(huelle) }catch(_){}
+    }
+    g.reihe = reihe
+    try{
+      const ende = reihe.length ? reihe[reihe.length - 1].kum : 0
+      const f = ende >= 0 ? gut : rot
+      g.linie.applyOptions({ lineColor: f, topColor: apvAlpha(f, 0.18), bottomColor: apvAlpha(f, 0.02), pointMarkersVisible: reihe.length <= 2 })
+      g.linie.setData(reihe.map(p => ({ time: p.tag, value: Math.round(p.kum) })))
+      g.balken.setData(reihe.map(p => ({ time: p.tag, value: Math.round(p.eur), color: apvAlpha(p.eur >= 0 ? gut : rot, 0.55) })))
+      g.chart.timeScale().fitContent()
+    }catch(e){ console.warn('[apv] Graf', e); apvGrafWeg(); box.innerHTML = '' }
+  }
+  // Tooltip: Datum, € des Tages groß, kumuliert, Trades (mit € / nicht gelesen / ohne Satz), im Plus (TP) · im Minus (SL) · geblowt
+  function apvTip(par){
+    const g = _apv.graf; if(!g || !g.tip) return
+    const zeit = par && par.time ? (typeof par.time === 'string' ? par.time : `${par.time.year}-${String(par.time.month).padStart(2, '0')}-${String(par.time.day).padStart(2, '0')}`) : ''
+    const p = zeit ? g.reihe.find(x => x.tag === zeit) : null
+    if(!p || !par.point){ g.tip.hidden = true; return }
+    const z = (k, v) => `<div class="t-z"><span>${k}</span><span>${v}</span></div>`
+    g.tip.innerHTML = `<div class="t-tag">${escapeHtml(new Date(p.tag + 'T12:00:00').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }))}</div>
+      <div class="t-summe" style="color:${apvFarbe(p.eur)}">${apvVz(p.eur)}</div>
+      ${z('kumuliert', `<b style="color:${apvFarbe(p.kum)}">${apvVz(p.kum)}</b>`)}
+      ${z('Trades', `<b>${p.n}</b>`)}
+      ${p.plus || p.minus || p.blow ? z('TP · SL', `<b>${p.plus}</b> im Plus · <b>${p.minus}</b> im Minus`) : ''}
+      ${p.blow ? z('geblowt', `<b>${p.blow}</b> (−Kontowert)`) : ''}
+      ${p.offen ? z('nicht gelesen', `<b>${p.offen}</b> (zählt nicht)`) : ''}${p.ohne ? z('ohne Satz', `<b>${p.ohne}</b> (zählt nicht)`) : ''}`
+    g.tip.hidden = false
+    const bw = g.box.clientWidth, bh = g.box.clientHeight, tw = g.tip.offsetWidth, th = g.tip.offsetHeight
+    let x = par.point.x + 16; if(x + tw > bw - 4) x = par.point.x - tw - 16; if(x < 4) x = 4
+    let y = par.point.y - th / 2; y = Math.max(4, Math.min(bh - th - 4, y))
+    g.tip.style.left = x + 'px'; g.tip.style.top = y + 'px'
+  }
+  document.addEventListener('click', e => {
+    const f = e.target.closest && e.target.closest('[data-apv-firma]'), z = e.target.closest && e.target.closest('[data-apv-zeit]')
+    if(f){
+      const n = f.dataset.apvFirma
+      if(!n) _apv.firmen.clear(); else if(_apv.firmen.has(n)) _apv.firmen.delete(n); else _apv.firmen.add(n)   // Mehrfachauswahl
+      apvRender()
+    } else if(z){ _apv.zeit = z.dataset.apvZeit; try{ localStorage.setItem('prophos_apv_zeit', _apv.zeit) }catch(_){} apvRender() }
+  })
+  window.addEventListener('prophos:theme', () => { try{ if(_apv.graf){ apvGrafWeg(); apvRender() } }catch(_){} })
+  window._apvOeffnen = an => { const r = document.getElementById('apv-root'); if(!r) return; r.hidden = !an; if(an){ apvRender(); apvLaden(false) } }
+  window._apvGruppeNeu = () => { const r = document.getElementById('apv-root'); _apv.d = null; _apv.at = 0; if(!r || r.hidden) return; apvRender(); apvLaden(true) }
+  window._apvStub = d => { _apv.d = d; _apv.fehler = ''; _apv.at = Date.now(); const r = document.getElementById('apv-root'); if(r) r.hidden = false; apvRender() }   // Stub ohne Login
+  setInterval(() => { const r = document.getElementById('apv-root'); if(r && !r.hidden && r.offsetParent && !document.hidden) apvLaden(false) }, 60000)
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
   const TPL_TYPEN = ['challenge', 'phase1', 'phase2']   // AP_TYPEN im Planer
   const tplDatum = d => d.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
