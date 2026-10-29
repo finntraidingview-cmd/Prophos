@@ -1649,7 +1649,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   const RX_F_EN = /\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*(\d[\d.,]*)/i;
   const RX_F_DE = /(?:(?:^|\s)(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b/i;
   const RX_F_SYMBOL = /\b((?:MNQ|NQ|MES|ES|MYM|YM|M2K|RTY)[FGHJKMNQUVXZ]\d{1,2})\b|\b((?:MNQ|NQ|MES|ES)1!)/;
-  const fillMerk = { fills: [], vorher: null, fehler: 0 };
+  const fillMerk = { fills: [], vorher: null, fehler: 0, naechst: 0 };
   function fillZahl(t) {
     t = String(t || '').replace(/\s/g, '');
     if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, '');            // 30,801.00
@@ -1702,6 +1702,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     return out.slice(-FILL_MAX);
   }
   function fillsLesen() {
+    // gestreut alle 250–500 ms statt in jedem 50-ms-Takt (Prüfer S2 30.10.2026: Last im Puls-Chrome) — reicht für die Sekunden-Statistik
+    const jetztL = Date.now();
+    if (jetztL < fillMerk.naechst) return fillMerk.fills.slice(-FILL_MAX);
+    fillMerk.naechst = jetztL + 250 + Math.random() * 250;
     try {
       const quellen = Array.prototype.slice.call(document.querySelectorAll('[data-name^="toast-group-"],[class*="toastGroup-"],[class*="toastListInner-"],[role="log"]'));
       const alle_ = [];
