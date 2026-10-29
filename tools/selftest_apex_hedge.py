@@ -139,6 +139,10 @@ soll("SQL: Big-Trade-Riegel sieht Apex als WD (3 Aufrufer)", SQL.count("public.p
 soll("Tab: konto_typ/Sticker/Tagesplan über tpWdZaehlt", HTML.count("tpWdZaehlt(") >= 3 and "if(tpWdZaehlt(p))        return 'wd'" in HTML)
 soll("Tab: Radar-Label Apex-Hedge mit Fusion-Spalte", "if(t.apex_hedge === true) return 'Apex-Hedge'" in HTML
      and HTML.count("'Winning Day', 'Apex-Hedge'") >= 3)
+soll("Tradeify-Final-Hedge-Schalter: Delta-Feld, Route (bool), tfh_stand",
+     '"tradeify_final_hedge": tfh_stand()' in APP and '"tradeify_final_hedge = true | false"' in APP and "def tfh_stand(" in APP)
+soll("Tab: Tradeify-Final-Hedge-Schalter neben Apex", 'data-apd-schalter="tradeify_final_hedge"' in HTML
+     and "${apdTradeifyHedgeSchalterHtml(v, admin)}" in HTML and "feld === 'tradeify_final_hedge'" in HTML)
 soll("Tab: Admin-Schalter", 'data-apd-schalter="apex_hedge"' in HTML and "apdApexHedgeSchalterHtml(v, admin)" in HTML)
 print("ALLE OK" if not fehler else f"{fehler} FEHLER")
 sys.exit(1 if fehler else 0)

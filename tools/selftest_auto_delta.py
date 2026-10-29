@@ -63,6 +63,7 @@ def lade():
     # ap_delta_antwort meldet seit 43d7096e den Echo-Hedge-Schalter (eh_stand, liest Regeln/Takt-Zustand) — hier ein fester Stand, der Test prüft das Delta
     ns["eh_stand"] = lambda regeln=None: {"an": False}
     ns["ah_stand"] = lambda regeln=None: {"an": False}   # Apex-Hedge-Schalter (30.10.2026), wie eh_stand
+    ns["tfh_stand"] = lambda regeln=None: {"an": False}   # Tradeify-Final-Hedge-Schalter (30.10.2026), wie eh_stand
 
     def block(name):
         i = src.index(f"\ndef {name}(") + 1

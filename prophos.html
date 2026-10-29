@@ -51394,7 +51394,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1870'
+  const OS_TAB_BUILD = '2026-09-22.1871'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57472,6 +57472,7 @@
           <label title="${admin ? 'Ausgleichs-Bot an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-apd-schalter="aktiv"${an ? ' checked' : ''}${sperre || (_apd.busy.has('aktiv') ? ' disabled' : '')}><span class="switch-slider"></span></span>${an ? 'Bot an' : 'Bot aus'}</label>
           ${apdEchoHedgeSchalterHtml(v, admin)}
           ${apdApexHedgeSchalterHtml(v, admin)}
+          ${apdTradeifyHedgeSchalterHtml(v, admin)}
         </div>`
   }
   /* HT ECHO-HEDGE B2 (29.10.2026, Finn: „Auf jeden Fall immer mit Echo jetzt"): zweiter Schalter = auto_plan_regeln.regeln.echo_hedge.an.
@@ -57492,6 +57493,15 @@
     if(!ah || typeof ah.an !== 'boolean') return ''
     const tip = admin ? `HT-Apex-Challenges starten wie Winning Days mit Fusion-Hedge (Kaufpreis ÷ Max DD, Faktor ${ah.netto_faktor}, gemeinsam max. ${ah.max_lots} Lot je Fusion-Login, Hedge zu am Boden) — zählen nicht als Winning Day; aus = Orbit V2 ohne Hedge` : 'nur Admin'
     return `<label title="${escapeHtml(tip)}"><span class="switch"><input type="checkbox" data-apd-schalter="apex_hedge"${ah.an ? ' checked' : ''}${admin ? (_apd.busy.has('apex_hedge') ? ' disabled' : '') : ' disabled'}><span class="switch-slider"></span></span>${ah.an ? 'Apex-Hedge an' : 'Apex-Hedge aus'}</label>`
+  }
+  /* FINALER TRADEIFY MIT GEGENHEDGE (Finn/Master 30.10.2026): vierter Schalter = auto_plan_regeln.regeln.tradeify_final_hedge.an. An: Railway
+   * (tfh_tick) stellt den finalen Tradeify-Futures-Trade kurz vor dem Start auf Orbit V3 mit Fusion-Gegenhedge; aus: finale Trades werden
+   * weiter gehalten (Halte-Riegel), nie ohne Hedge gestartet. Fehlt v.tradeify_final_hedge (älteres Backend), bleibt er weg. */
+  function apdTradeifyHedgeSchalterHtml(v, admin){
+    const th = v && v.tradeify_final_hedge
+    if(!th || typeof th.an !== 'boolean') return ''
+    const tip = admin ? `Finaler Tradeify-Trade startet als Orbit V3 mit Fusion-Gegenhedge (Faktor ${th.netto_faktor}, gemeinsam max. ${th.max_lots} Lot je Fusion-Login) — aus = finale Trades werden weiter gehalten` : 'nur Admin'
+    return `<label title="${escapeHtml(tip)}"><span class="switch"><input type="checkbox" data-apd-schalter="tradeify_final_hedge"${th.an ? ' checked' : ''}${admin ? (_apd.busy.has('tradeify_final_hedge') ? ' disabled' : '') : ' disabled'}><span class="switch-slider"></span></span>${th.an ? 'Tradeify-Final-Hedge an' : 'Tradeify-Final-Hedge aus'}</label>`
   }
   const apdBotMeldungHtml = () => _apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''
   function apdBotKachelHtml(v, admin){   // Rückfall, wenn es die Kachel „Heute" nicht gibt: nur der Schalter
@@ -57634,6 +57644,7 @@
       if(_apd.d){   // sofort zeigen, der nächste GET bestätigt
         if(feld === 'echo_hedge') _apd.d.echo_hedge = { ...(_apd.d.echo_hedge || {}), an: !!wert }
         else if(feld === 'apex_hedge') _apd.d.apex_hedge = { ...(_apd.d.apex_hedge || {}), an: !!wert }
+        else if(feld === 'tradeify_final_hedge') _apd.d.tradeify_final_hedge = { ...(_apd.d.tradeify_final_hedge || {}), an: !!wert }
         else if(feld === 'aktiv') _apd.d.bot = { ...(_apd.d.bot || {}), aktiv: !!wert }
         else _apd.d.bot = { ...(_apd.d.bot || {}), auto_start: !!wert }
       }

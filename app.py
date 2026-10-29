@@ -25001,6 +25001,17 @@ def tfh_hedge(satz, polster, kt, ppl, tp, faktor=0.89, min_lot=0.01):
             "multiplier": round(mult, 4), "hedge_faktor": round(mult, 3), "hedge_eur": round(lots * TFH_SLAVE_PPL * t / (pp * k), 2)}, None
 
 
+def tfh_stand(regeln=None):
+    """Schalter + letzter Takt für die Admin-Ansicht (GET /admin/auto-plan/delta) — wie eh_stand/ah_stand. Aus = finale Tradeify-Trades
+    werden weiter gehalten (Halte-Riegel), nie ohne Hedge gestartet."""
+    try:
+        p = tfh_param(regeln if regeln is not None else _eh_regeln())
+    except Exception as e:
+        return {"an": None, "fehler": f"{type(e).__name__}: {e}"}
+    return {"an": p["an"], "netto_faktor": p["netto_faktor"], "max_lots": p["max_lots"], "umgestellt": _tfh["umgestellt"],
+            "ohne": _tfh["ohne"], "zurueck": _tfh["zurueck"], "fehler": _tfh["fehler"] or None, "letzt": _tfh["letzt"][-10:]}
+
+
 def _tfh_spur(text):
     _tfh["letzt"] = (_tfh["letzt"] + [{"at": _wt_now_iso(), "text": str(text)[:300]}])[-30:]
     print(f"[tradeify-hedge] {text}", flush=True)
@@ -28846,7 +28857,8 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
            "cfd_bis": None if ap_cfd_bis(stand["zeiten"]) is None else _ap_hhmm_txt(ap_cfd_bis(stand["zeiten"])),   # CFD-Ende (sfTagesEnde)
            "bot": _ap_bot_stand(stand["param"], stand["jetzt"]), "hinweise": hinweise,
            "echo_hedge": eh_stand(),   # HT Echo-Hedge B2 (29.10.2026): Schalter neben „Bot an/aus"
-           "apex_hedge": ah_stand()}   # Apex-Challenge-WD-Hedge (30.10.2026): Schalter neben „Echo-Hedge"
+           "apex_hedge": ah_stand(),   # Apex-Challenge-WD-Hedge (30.10.2026): Schalter neben „Echo-Hedge"
+           "tradeify_final_hedge": tfh_stand()}   # finaler Tradeify mit Gegenhedge (30.10.2026): Schalter neben „Apex-Hedge"
     # SZENARIO (08.10.2026, für Slave 5s Anzeige): Kurve jetzt (laufende) und +60 min (mit den in 60 min startenden), Steigung, schlimmster
     # Fall links/rechts über ±AP_SZENARIO_R; Trades ohne Satz/$ je Pkt zählen 0 und stehen in szenario.ohne
     try:
@@ -30612,6 +30624,18 @@ def admin_auto_plan_ausgleich_einstellung():
         _ah["at"] = 0.0
         print(f"[apex-hedge] Schalter {'AN' if body['apex_hedge'] else 'AUS'} ({uid})", flush=True)
         return jsonify({"ok": True, "apex_hedge": ah_stand(regeln)})
+    if "tradeify_final_hedge" in body:   # FINALER TRADEIFY MIT GEGENHEDGE (Finn/Master 30.10.2026): nur regeln.tradeify_final_hedge.an — aus =
+        if not isinstance(body["tradeify_final_hedge"], bool):   # Final-Trades werden weiter gehalten (Halte-Riegel)
+            return jsonify({"ok": False, "msg": "tradeify_final_hedge = true | false"}), 400
+        tf_roh = regeln.get("tradeify_final_hedge") if isinstance(regeln.get("tradeify_final_hedge"), dict) else {}
+        regeln["tradeify_final_hedge"] = dict(tf_roh, an=body["tradeify_final_hedge"])
+        try:
+            sb_update("auto_plan_regeln", {"id": "eq.1"}, {"regeln": regeln, "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": f"nicht gespeichert ({type(e).__name__})"}), 502
+        _tfh["at"] = 0.0
+        print(f"[tradeify-hedge] Schalter {'AN' if body['tradeify_final_hedge'] else 'AUS'} ({uid})", flush=True)
+        return jsonify({"ok": True, "tradeify_final_hedge": tfh_stand(regeln)})
     neu = dict(ap_ausgleich_param(regeln))
     for k in ("aktiv", "auto_start"):
         if k in body:
