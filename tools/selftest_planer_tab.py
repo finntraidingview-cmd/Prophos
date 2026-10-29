@@ -34,7 +34,8 @@ def main():
     ok("v.dataset.view === name || (name === 'planer' && v.dataset.view === 'kasse')" in s, "Planer aktiviert die Admin-Section")
     ok("if((name === 'kasse' || name === 'planer') && typeof kasseOnEnter === 'function') kasseOnEnter()" in s, "Planer geht durch kasseOnEnter (Code-Sperre)")
     ok("['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec) ||" in s, "Chips/Link nach kasseReiterErlaubt")
-    ok("link.style.display = unlocked && frei.length ? '' : 'none'" in s, "Link nur entsperrt + erlaubt")
+    ok("link.style.display = currentUserId ? '' : 'none'" in s, "Link für jede eingeloggte ID (Sperre kommt im Planer)")
+    ok("pl.style.display = 'none' }   // PLANER-TAB: Link weg" in s, "Abmelden: Link weg")
     ok("section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}" in s, "Admin-Reiter im Planer-Modus aus")
     # Verweis im Admin, Merker nur sessionStorage
     ok("if(['wd', 'planer', 'fplaner', 'fcfd'].includes(name) && !planerModus()){" in s and "switchView('planer'); return" in s, "Admin-Reiter = Verweis auf Planer")
