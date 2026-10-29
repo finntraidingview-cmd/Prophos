@@ -21616,6 +21616,200 @@ def modus_tvneuladen(cmd):
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}")
 
 
+# ══ TAMPERMONKEY „AKTUALISIEREN" (29.10.2026, Master: „Puls öffnet über CDP den Lader-Link und klickt in Tampermonkey ‚Aktualisieren',
+# nur unter denselben Freigabe-Bedingungen, je PC einmal … scheitert der Klick, sauber abbrechen und melden — dann macht Finn es einmal je
+# PC"). Nötig nur, solange auf einem PC noch ein Userscript OHNE Lader (< 0.10.0) oder mit älterem Lader läuft — danach kommt jedes Update
+# über den Lader (kern.json + tvneuladen). Weg: neuer Tab im Puls-Chrome mit der .user.js des lokalen Readers → Tampermonkey fängt ihn ab
+# und zeigt seine Installationsseite (chrome-extension://…) → nur wenn dort GENAU EIN Knopf „Aktualisieren"/„Update" steht, die Seite das
+# Prophos-Script in der Soll-Version zeigt und der Punkt unter der Maus bewiesen der Knopf ist: CDP-Klick (kein Windows-Fenster nach vorn).
+# „Installieren" wird NIE gedrückt (das wäre ein zweites Script neben dem alten: doppelte Reader, doppeltes Schließen), „Neu installieren"
+# = schon aktuell, „Downgrade" nie. Danach eigene Tabs zu, TV-Tab neu laden (wie tvneuladen). Kein Konto, keine Order.
+TM_USERSCRIPT_URL = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
+TM_LESE_JS = r"""(() => { const vis = e => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e)
+    return r.width > 4 && r.height > 4 && cs.visibility !== 'hidden' && cs.display !== 'none' }
+  const kn = [...document.querySelectorAll('button, input[type=button], input[type=submit], [role=button]')].filter(vis).map(e => {
+    const r = e.getBoundingClientRect()
+    return { t: String(e.value || e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40), dis: !!e.disabled,
+      x: { left: r.left, top: r.top, width: r.width, height: r.height } } })
+  return { url: String(location.href), text: String(document.body ? document.body.innerText : '').slice(0, 6000), knoepfe: kn.slice(0, 40) } })()"""
+TM_KNOPF_UPDATE = ("aktualisieren", "update")
+TM_KNOPF_AKTUELL = ("neu installieren", "reinstall")
+TM_KNOPF_NEU = ("installieren", "install")
+TM_KNOPF_ALT = ("downgrade", "herabstufen")
+
+
+def tm_soll_aus(text):
+    """REIN RECHNEND (testbar): Kopf der ausgelieferten .user.js → {name, version} | None."""
+    t = text.decode("utf-8", "replace") if isinstance(text, (bytes, bytearray)) else str(text or "")
+    n = re.search(r"^//\s*@name\s+(.+?)\s*$", t, re.M)
+    v = re.search(r"^//\s*@version\s+([0-9][0-9.]{0,20})\s*$", t, re.M)
+    return {"name": n.group(1), "version": v.group(1)} if n and v else None
+
+
+def tm_knopf_wahl(lesung, soll):
+    """REIN RECHNEND (testbar): Tampermonkey-Installationsseite → (urteil, knopf|None, grund). urteil: 'klick' (genau ein bewiesener
+    Aktualisieren-Knopf, aktiv), 'wartet' (Knopf noch gesperrt), 'aktuell' (nur Neu installieren), 'neu' (nur Installieren — nie drücken),
+    'alt' (Downgrade), 'fremd' (nicht unser Script), 'unklar'."""
+    if not (isinstance(lesung, dict) and isinstance(soll, dict)):
+        return "unklar", None, "Seite nicht lesbar"
+    text = str(lesung.get("text") or "")
+    if not str(lesung.get("url") or "").startswith("chrome-extension://"):
+        return "fremd", None, f"keine Extension-Seite ({str(lesung.get('url') or '')[:60]})"
+    if soll.get("name") and soll["name"] not in text:
+        return "fremd", None, f"Seite zeigt nicht „{soll['name']}\""
+    kn = [k for k in (lesung.get("knoepfe") or []) if isinstance(k, dict)]
+    art = lambda k: str(k.get("t") or "").strip().lower()   # noqa: E731
+    upd = [k for k in kn if art(k) in TM_KNOPF_UPDATE]
+    if len(upd) > 1:
+        return "unklar", None, f"{len(upd)} Aktualisieren-Knöpfe"
+    if upd:
+        if soll.get("version") and soll["version"] not in text:
+            return "unklar", None, f"Version {soll['version']} steht nicht auf der Seite"
+        if upd[0].get("dis"):
+            return "wartet", None, "Aktualisieren noch gesperrt"
+        return "klick", upd[0], ""
+    if any(art(k) in TM_KNOPF_AKTUELL for k in kn):
+        return "aktuell", None, "Tampermonkey hat diese Fassung schon (nur „Neu installieren\")"
+    if any(art(k) in TM_KNOPF_NEU for k in kn):
+        return "neu", None, "Tampermonkey bietet „Installieren\" statt „Aktualisieren\" — kein Klick (wäre ein zweites Script)"
+    if any(art(k) in TM_KNOPF_ALT for k in kn):
+        return "alt", None, "Tampermonkey bietet nur ein Downgrade an — kein Klick"
+    return "unklar", None, "kein Aktualisieren-Knopf (" + ", ".join(art(k) for k in kn[:6]) + ")"
+
+
+def _tm_soll_holen(trail):
+    import urllib.request
+    try:
+        with urllib.request.urlopen(TM_USERSCRIPT_URL.replace(".user.js", ".meta.js"), timeout=20) as r:
+            soll = tm_soll_aus(r.read())
+    except Exception as e:
+        trail.append(f"Userscript vom Reader nicht ladbar ({type(e).__name__})")
+        return None
+    if soll:
+        trail.append(f"Soll: {soll['name']} {soll['version']}")
+    return soll
+
+
+def modus_tvtmupdate(cmd):
+    """→ {ok, code, msg, trail, soll, geklickt}. ok = Tampermonkey hat aktualisiert (oder hatte die Fassung schon), TV-Tab neu geladen."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "soll": "", "geklickt": False, "quelle": "cdp"}
+    trail = _StempelSpur()
+    _start_versatz(trail)
+    eigene, ws = [], None
+
+    def raus(code, msg, ok=False):
+        res["ok"], res["code"], res["msg"] = ok, code, msg
+        if ws is not None:
+            try:
+                ws.zu()
+            except Exception:
+                pass
+        for tid in eigene:                                # nur selbst geöffnete Tabs — nie den TV-Tab
+            _cdp_http(f"/json/close/{tid}")
+        if ok:
+            try:
+                sitz = _AugenSitzung(trail, tv_riegel=False)
+                try:
+                    if _cdp_seite_neu_laden(sitz, {}, trail, "Tampermonkey-Update") is None:
+                        res["msg"] += " — TV-Tab ließ sich nicht neu laden (läuft beim nächsten Laden)"
+                finally:
+                    sitz.zu()
+            except Exception as e:
+                trail.append(f"TV-Tab nicht neu geladen ({type(e).__name__})")
+        res["trail"] = " > ".join(trail)
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))
+
+    if _handlauf_aktiv():
+        return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts angefasst.")
+    try:
+        liste = _cdp_http("/json/list")
+        if not augen_target_waehlen(liste):
+            return raus("kein_tab", "Puls-Chrome aus oder keine TradingView-Seite offen — nichts angefasst.")
+        soll = _tm_soll_holen(trail)
+        if not soll:
+            return raus("soll_fehlt", "Userscript nicht vom lokalen Reader ladbar.")
+        res["soll"] = soll["version"]
+        vorher = {t.get("id") for t in liste if isinstance(t, dict)}
+        neu = _cdp_tab_neu(TM_USERSCRIPT_URL, trail)
+        if not neu:
+            return raus("tab_neu", "Neuer Tab im Puls-Chrome ließ sich nicht öffnen.")
+        eigene.append(neu.get("id"))
+        ziel, ende = None, time.time() + 20.0
+        while time.time() < ende and not ziel:
+            _warte(1.0, 0.4)
+            for t in (_cdp_http("/json/list") or []):
+                if not isinstance(t, dict) or t.get("type") != "page" or not str(t.get("url") or "").startswith("chrome-extension://"):
+                    continue
+                if t.get("id") == neu.get("id") or t.get("id") not in vorher:
+                    ziel = t
+                    break
+        if ziel and ziel.get("id") not in eigene:
+            eigene.append(ziel.get("id"))
+        if not ziel:
+            return raus("tm_seite_fehlt", "Tampermonkey-Seite erschien nicht (fängt die .user.js nicht ab) — bitte einmal von Hand aktualisieren.")
+        if not ziel.get("webSocketDebuggerUrl"):
+            return raus("tm_nicht_erreichbar", "Tampermonkey-Seite per CDP nicht erreichbar — bitte einmal von Hand aktualisieren.")
+        try:
+            ws = _CdpVerbindung(ziel["webSocketDebuggerUrl"], timeout=8.0)
+        except Exception as e:
+            return raus("tm_nicht_erreichbar", f"Tampermonkey-Seite per CDP nicht erreichbar ({type(e).__name__}) — bitte einmal von Hand.")
+
+        def lies():
+            try:
+                r = ws.rufe("Runtime.evaluate", {"expression": TM_LESE_JS, "returnByValue": True}, timeout=5)
+                return (r.get("result") or {}).get("value")
+            except Exception:
+                return None
+        urteil, knopf, grund, ende = "unklar", None, "Seite nicht lesbar", time.time() + 12.0
+        while time.time() < ende:
+            urteil, knopf, grund = tm_knopf_wahl(lies(), soll)
+            if urteil not in ("unklar", "wartet"):
+                break
+            _warte(1.0, 0.4)
+        trail.append(f"Tampermonkey-Seite: {urteil}" + (f" ({grund})" if grund else ""))
+        if urteil == "aktuell":
+            return raus("schon_aktuell", grund, ok=True)
+        if urteil != "klick":
+            return raus("tm_" + urteil, grund + " — bitte einmal von Hand aktualisieren.")
+        k = knopf["x"]
+        x, y = k["left"] + k["width"] * (0.35 + 0.3 * random.random()), k["top"] + k["height"] * (0.35 + 0.3 * random.random())
+        beweis_js = ("(() => { const e = document.elementFromPoint(%f, %f), b = e && e.closest('button, input, [role=button]');"
+                     " return !!b && %s.includes(String(b.value || b.innerText || b.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase()) })()"
+                     % (x, y, json.dumps(list(TM_KNOPF_UPDATE))))
+        try:
+            b = ws.rufe("Runtime.evaluate", {"expression": beweis_js, "returnByValue": True}, timeout=5)
+            passt = (b.get("result") or {}).get("value") is True
+        except Exception:
+            passt = False
+        if not passt:
+            return raus("tm_kein_beweis", "Am Klickpunkt liegt nicht der Aktualisieren-Knopf — kein Druck, bitte einmal von Hand.")
+        ws.rufe("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "buttons": 0}, timeout=3)
+        _warte(0.25, 0.25)
+        ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1}, timeout=3)
+        _warte(0.08, 0.07)
+        ws.rufe("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1}, timeout=3)
+        res["geklickt"] = True
+        trail.append(f"„{knopf['t']}\" geklickt @{int(x)},{int(y)} (CDP)")
+        # Beweis: Tampermonkey schließt die Seite nach dem Update oder der Knopf ist weg
+        ende = time.time() + 15.0
+        while time.time() < ende:
+            _warte(1.0, 0.4)
+            if not any(isinstance(t, dict) and t.get("id") == ziel.get("id") for t in (_cdp_http("/json/list") or [])):
+                trail.append("Tampermonkey-Seite nach dem Klick zu")
+                return raus("", f"Tampermonkey aktualisiert auf {soll['version']}", ok=True)
+            v = lies()
+            if isinstance(v, dict) and tm_knopf_wahl(v, soll)[0] not in ("klick", "wartet", "unklar"):
+                trail.append("Aktualisieren-Knopf nach dem Klick weg")
+                return raus("", f"Tampermonkey aktualisiert auf {soll['version']}", ok=True)
+        return raus("tm_unbelegt", "Aktualisieren geklickt, aber kein Beleg (Seite/Knopf unverändert) — bitte einmal von Hand prüfen.")
+    except Exception as e:
+        _cdp_tabs_spur(e, trail)
+        return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}")
+
+
 def tvlesen_cdp_mit_wiederholung(cmd, lauf=None):
     """Lesen mit EINEM zweiten Versuch bei Zeitüberschreitung (02.10.2026, Mike: „Puls-Chrome/CDP: TimeoutError: timed out" beim
     Balance-Lesen — die TradingView-Seite antwortete 10 s nicht). Nur Lesen, nie Order: ein zweiter Lauf klickt nichts, was handelt.
@@ -26951,6 +27145,19 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TV-Konten lesen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
+        augen_anstossen()
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvtmupdate":
+        # Tampermonkey „Aktualisieren" (29.10.2026): einmal je PC, nur auf der Tampermonkey-Seite, keine Order
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "code": "befehl", "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvtmupdate(cmd if isinstance(cmd, dict) else {})
+        except Exception as e:
+            print(json.dumps({"ok": False, "code": "absturz", "msg": f"Tampermonkey-Update abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
         augen_anstossen()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvneuladen":

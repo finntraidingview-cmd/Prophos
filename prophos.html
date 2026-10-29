@@ -26037,33 +26037,87 @@
       return d < TVN_START_ABSTAND_MS && (d > -TVN_UEBERFAELLIG_MS || (!!p.startUmGestartetAt && !p.startedAt)) })) return 'Start in < 45 min'
     return ''
   }
+  // Puls-Chrome-Reader dieses PCs: frisch (≤ 60 s), Tab 'puls-…' → Stand, sonst null
+  function tvnPulsStand(){
+    if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return null
+    const ep = window._epLokal, st = ep && ep.stand
+    return (st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000) ? st : null
+  }
+  /* TAMPERMONKEY EINMAL JE PC (29.10.2026, Master: „Puls öffnet über CDP den Lader-Link und klickt in Tampermonkey ‚Aktualisieren', nur
+   * unter denselben Freigabe-Bedingungen, je PC einmal"). Nötig, solange im Puls-Chrome ein Userscript OHNE Lader (< 0.10.0, Reader-Stand
+   * ohne lader) oder mit älterem Lader (lader.v < TVTM_LADER_SOLL — mit LADER_V in tv-reader.user.js hochzählen, Selbsttest prüft das)
+   * läuft. Danach kommt jedes Update über den Lader + Neuladen. Ein Versuch je PC und Lader-Stand (localStorage), Ergebnis an Railway
+   * (/alarm/userscript-update: gescheitert → ⚪ „einmal von Hand"). REIN RECHNEND → '' (nötig) oder Grund. */
+  const TVTM_LADER_SOLL = 1, TVTM_KEY = 'prophos_tvtm_l' + TVTM_LADER_SOLL, TVTM_ERSTER_LADER = '0.10.0'
+  function tvTmNoetig(st){
+    if(!st) return 'kein Puls-Chrome-Reader'
+    const l = st.lader, tab = (st.tabs || []).find(t => t && t.tab_id === st.positionen_tab), v = tab && tab.version
+    if(l && typeof l === 'object') return Number(l.v || 0) < TVTM_LADER_SOLL ? '' : 'Lader aktuell'
+    return (v && tvnNeuer(TVTM_ERSTER_LADER, v)) ? '' : 'Userscript-Version unbekannt oder ≥ ' + TVTM_ERSTER_LADER
+  }
+  function tvTmFrei(){
+    try{
+      const st = tvnPulsStand(); if(!st) return 'kein Puls-Chrome-Reader'
+      const n = tvTmNoetig(st); if(n) return n
+      let schon = null; try{ schon = localStorage.getItem(TVTM_KEY) }catch(_){ return 'localStorage nicht lesbar' }
+      if(schon) return 'an diesem PC schon versucht'
+      return tvnRuhe(st)
+    }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
+  }
   function tvNeuladenFrei(){
     try{
-      if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return 'kein PC-Tab'
-      const ep = window._epLokal, st = ep && ep.stand, l = st && st.lader
-      if(!(st && /^puls-/.test(String(st.positionen_tab || '')) && Date.now() - (ep.ab || 0) <= 60000)) return 'kein Puls-Chrome-Reader'
+      const st = tvnPulsStand(); if(!st) return 'kein Puls-Chrome-Reader'
+      const l = st.lader
       if(!(l && l.bereit && tvnNeuer(l.bereit, l.laeuft))) return 'keine neuere Fassung bereit'
-      // Hand-Trades/Fremd-Positionen ohne Plan: nur mit sehendem Reader und leerer Positionsliste (Prüfer 29.10.2026)
-      if(st.positionen_ok !== true || !Array.isArray(st.positionen) || st.positionen.length) return 'Position offen oder Reader blind'
       // Endlos-Schutz: kommt dieselbe Fassung nach 2 Neuladen nicht zum Laufen (Kern wirft beim Start), nicht weiter laden
       let pa = null; try{ pa = JSON.parse(localStorage.getItem(TVN_PAAR_KEY) || 'null') }catch(_){}
       if(pa && pa.paar === `${l.laeuft}>${l.bereit}` && pa.n >= TVN_PAAR_MAX) return `Fassung ${l.bereit} läuft auch nach ${pa.n}× Neuladen nicht`
-      let letzt = 0; try{ letzt = Number(localStorage.getItem(TVN_KEY)) || 0 }catch(_){}
-      if(Date.now() - letzt < TVN_ABSTAND_MS) return 'letztes Neuladen < 30 min'
-      const jetzt = Date.now(), ps = tvnPlanSperre(tradePlans || [], jetzt); if(ps) return ps
-      const u = hedgePulsUnterwegs(); if(u) return u
-      if(typeof polarLaeuft === 'function' && polarLaeuft()) return 'Polar läuft'
-      if(typeof polarStartSperre === 'function' && polarStartSperre()) return 'Polar bereitet vor'
-      if(_osBusy || _osActive || _rsAktiv) return 'Signal/Fern-Lauf aktiv'
-      if(_hwWiederTimer || (_hwEndHalt && _hwEndHalt.bis > jetzt)) return 'Heimweg/Endlesung'
-      if(bigTradePlan()) return 'Big Trade/Winning Day läuft'
-      // dieselben Riegel wie die Brücken-Selbstheilung (Start-/Echo-V2-Vorprüfung, Hedge öffnet/schließt, Popup/Start-Dialog offen …)
-      const bw = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : 'Zustand nicht lesbar'; if(bw) return bw
-      return ''
+      return tvnRuhe(st)
     }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
   }
+  // Gemeinsame Freigabe beider Wege (Neuladen + Tampermonkey): nichts läuft, nichts steht bevor — '' oder Grund. Wirft → Aufrufer fail-closed.
+  function tvnRuhe(st){
+    // Hand-Trades/Fremd-Positionen ohne Plan: nur mit sehendem Reader und leerer Positionsliste (Prüfer 29.10.2026)
+    if(st.positionen_ok !== true || !Array.isArray(st.positionen) || st.positionen.length) return 'Position offen oder Reader blind'
+    let letzt = 0; try{ letzt = Number(localStorage.getItem(TVN_KEY)) || 0 }catch(_){}
+    if(Date.now() - letzt < TVN_ABSTAND_MS) return 'letztes Neuladen < 30 min'
+    const jetzt = Date.now(), ps = tvnPlanSperre(tradePlans || [], jetzt); if(ps) return ps
+    const u = hedgePulsUnterwegs(); if(u) return u
+    if(typeof polarLaeuft === 'function' && polarLaeuft()) return 'Polar läuft'
+    if(typeof polarStartSperre === 'function' && polarStartSperre()) return 'Polar bereitet vor'
+    if(_osBusy || _osActive || _rsAktiv) return 'Signal/Fern-Lauf aktiv'
+    if(_hwWiederTimer || (_hwEndHalt && _hwEndHalt.bis > jetzt)) return 'Heimweg/Endlesung'
+    if(bigTradePlan()) return 'Big Trade/Winning Day läuft'
+    // dieselben Riegel wie die Brücken-Selbstheilung (Start-/Echo-V2-Vorprüfung, Hedge öffnet/schließt, Popup/Start-Dialog offen …)
+    const bw = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : 'Zustand nicht lesbar'; if(bw) return bw
+    return ''
+  }
+  async function tvTmTick(){
+    const st = window._epLokal.stand || {}, l = st.lader, tab = (st.tabs || []).find(t => t && t.tab_id === st.positionen_tab)
+    const von = (l && l.laeuft) || (tab && tab.version) || ''
+    try{ localStorage.setItem(TVTM_KEY, new Date().toISOString()); localStorage.setItem(TVN_KEY, String(Date.now())) }catch(_){ return }   // ein Versuch je PC
+    window._tvNeuLaeuft = true
+    let r = null
+    try{
+      r = await window.mtcApi('tv-tm-update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grund: `Tampermonkey ${von || '?'} → Lader ${TVTM_LADER_SOLL}` }), timeoutMs: 165000 })
+    }catch(e){ r = { ok: false, code: 'verbindung', msg: String((e && e.message) || e) } }
+    finally{ window._tvNeuLaeuft = false }
+    _tvnLetzter = { at: new Date().toISOString(), art: 'tampermonkey', von: von || null, auf: (r && r.soll) || null, ok: !!(r && r.ok), code: (r && r.code) || '',
+      msg: String((r && r.msg) || '').slice(0, 200), trail: String((r && r.trail) || '').slice(-600) }
+    console.info(`[tv-neuladen] Tampermonkey ${von || '?'} → ${(r && r.soll) || '?'}: ${r && r.ok ? 'aktualisiert' : 'FEHLER ' + ((r && r.code) || '?')}`, (r && r.msg) || '', (r && r.trail) || '')
+    // belegt (409) = nichts angefasst → Versuch nicht verbraucht, später erneut; alles andere geht an Railway (gescheitert = einmal von Hand)
+    if(r && r.code === 'puls_beschaeftigt'){ try{ localStorage.removeItem(TVTM_KEY) }catch(_){} return }
+    try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token
+      if(tok) await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ok: !!(r && r.ok), code: (r && r.code) || '', msg: String((r && r.msg) || '').slice(0, 200), von, soll: (r && r.soll) || '', pc: hedgePcId() || '' }) })
+    }catch(e){ console.warn('[tv-neuladen] Tampermonkey melden', (e && e.message) || e) }
+  }
   async function tvNeuladenTick(){
-    if(window._tvNeuLaeuft || tvNeuladenFrei()) return
+    if(window._tvNeuLaeuft) return
+    if(!tvTmFrei()) return tvTmTick()
+    if(tvNeuladenFrei()) return
     const l = (window._epLokal.stand || {}).lader || {}
     try{ localStorage.setItem(TVN_KEY, String(Date.now()))
       const paar = `${l.laeuft}>${l.bereit}`, pa = JSON.parse(localStorage.getItem(TVN_PAAR_KEY) || 'null')
@@ -26081,7 +26135,7 @@
   }
   ;(function tvnLoop(){ setTimeout(async () => { try{ await tvNeuladenTick() }catch(e){ console.warn('[tv-neuladen]', (e && e.message) || e) } tvnLoop() },
     TVN_TAKT_MIN_MS + Math.random() * (TVN_TAKT_MAX_MS - TVN_TAKT_MIN_MS)) })()
-  window._tvNeuladen = { frei: tvNeuladenFrei, tick: tvNeuladenTick, letzter: () => _tvnLetzter, planSperre: tvnPlanSperre }   // Test-Haken
+  window._tvNeuladen = { frei: tvNeuladenFrei, tmFrei: tvTmFrei, tmNoetig: tvTmNoetig, tick: tvNeuladenTick, letzter: () => _tvnLetzter, planSperre: tvnPlanSperre }   // Test-Haken
   window._heimWache = { tick: heimWacheTick, wiederholen: heimWiederholen, stand: () => ({ fremdSeit: _hwFremdSeit, naechster: _hwNaechsterHeimweg, wiederN: _hwWiederN, wiederGeplant: !!_hwWiederTimer, fehlN: _hwFehlN, pulsWegAt: _hwPulsWegAt, aus: _hwAus, okOffen: _hwOkOffen, okFremdN: _hwOkFremdN,
     unterwegs: hedgePulsUnterwegs(), bthLaeuft: _bthLaeuft, bthTimer: !!_bthTimer, polar: !!(typeof polarLaeuft === 'function' && polarLaeuft()),
     endHalt: Object.assign({}, _hwEndHalt), blindSeit: _hwBlindSeit, blindErledigt: _hwBlindErledigt }), steht: pulsStehtImKonto, heimFrei: pulsHeimFrei }   // Test-Haken (Stub)
@@ -73305,7 +73359,7 @@
     // master-order (07.10.2026, Fehler-Muster „Zeitlimit 20 s": 16× auf 9 PCs, alle UNKLAR): der Order-Bot darf laut Panel bis 300 s
     // brauchen (F9-Dialog, SL/TP-Zeilen-Scan), der Aufruf stand aber nicht in dieser Liste → nach 20 s abgebrochen, während der Bot
     // weiterklickte; Folge „unklar" und beim zweiten Versuch „läuft gerade schon eine Order". Jetzt 320 s wie master-close.
-    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|master-order|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar|tv-konten-liste|tv-neuladen)/.test(String(path))   // tv-konten-liste (29.10.2026): bis 260 s, tv-neuladen bis 90 s   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
+    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|master-order|order|tv-fokus|tsx-konto|tsx-close|tsx-lesen|tsx-inventar|tv-konten-liste|tv-neuladen|tv-tm-update)/.test(String(path))   // tv-konten-liste (29.10.2026): bis 260 s, tv-neuladen 90 s, tv-tm-update 150 s   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
     const ctrl = new AbortController()
     const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
     const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)

@@ -495,6 +495,10 @@ Aktive Verbindungen
     check(rs.kern_aus_userscript(_us.replace("// ==KERN-ENDE==", "")) is None and rs.kern_aus_userscript(_us + "\n// ==KERN-START==\n") is None
           and rs.kern_aus_userscript(b"") is None, "Lader: fehlende/doppelte Marker → None (nie ein halber Kern)")
     check(re.search(r"const EINGEBAUT = '([0-9.]+)'", _us).group(1) == _ver, "Lader: EINGEBAUT = @version = VERSION im Kern")
+    _ph = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prophos.html"), encoding="utf-8").read()
+    _lv, _soll = re.search(r"const LADER_V = (\d+);", _us), re.search(r"const TVTM_LADER_SOLL = (\d+)", _ph)
+    check(_lv and _soll and _lv.group(1) == _soll.group(1),
+          "Lader: TVTM_LADER_SOLL im PC-Tab = LADER_V im Userscript (neuer Lader → PC-Tab lässt Tampermonkey einmal je PC aktualisieren)")
 
     lk = rs.lader_kurz({"v": 1, "eval": True, "laeuft": "0.10.0", "quelle": "eingebaut", "bereit": "0.10.1", "fehler": None, "code": "x" * 999, "z": {"a": 1}})
     check(lk == {"v": 1, "eval": True, "laeuft": "0.10.0", "quelle": "eingebaut", "bereit": "0.10.1", "fehler": None}

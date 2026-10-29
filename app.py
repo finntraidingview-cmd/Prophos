@@ -526,7 +526,7 @@ def copier_proxy(path):
         # erneuter Start hätte ein zweites Mal platziert: derselbe Doppel-Order-Pfad wie master-order.
         _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close",
                                 "tsx-konto", "tsx-lesen", "tsx-inventar", "tsx-close", "tv-konten-liste")   # tv-konten-liste (29.10.2026): Panel bis 260 s
-                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 100 if path == "tv-neuladen" else 25)   # tv-neuladen (29.10.2026): Panel bis 90 s
+                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 100 if path == "tv-neuladen" else 160 if path == "tv-tm-update" else 25)   # 29.10.2026: Panel bis 90 / 150 s
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,
@@ -3871,6 +3871,36 @@ def alarm_heimweg():
         alarm_senden(1, "heimweg_fehl", "Puls nicht zurück im Big-Trade-Konto", text, uid=uid, plan_id=pid, daten=daten, renotify=True,
                      tag=f"alarm-heimweg-{pid[:8]}")
     return jsonify({"ok": True})
+
+
+@app.route("/alarm/userscript-update", methods=["POST", "OPTIONS"])
+def alarm_userscript_update():
+    """PC-Tab meldet den einmaligen Tampermonkey-Klick (Puls „Aktualisieren", 29.10.2026): ok → Info, nicht ok → ⚪ an die Master-IDs mit
+    der Bitte, es an diesem PC einmal von Hand zu machen. Vom Tab nur kurze Felder; der Tab meldet je PC nur einmal (ein Versuch je PC)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    kurz = lambda k, n: re.sub(r"\s+", " ", str(d.get(k) or ""))[:n]   # noqa: E731
+    pc, soll, von, code, msg = kurz("pc", 20), kurz("soll", 16), kurz("von", 16), kurz("code", 30), kurz("msg", 200)
+    namen, _aus = _ap_namen()
+    wer = f"{namen.get(uid, uid[:8])}" + (f" · {pc}" if pc else "")
+    daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg}
+    if d.get("ok") is True:
+        alarm_senden(3, "userscript_tm_ok", f"Tampermonkey aktualisiert auf {wer}",
+                     f"{wer}: Puls hat das Userscript in Tampermonkey aktualisiert ({von or '?'} → {soll or '?'}). Ab jetzt kommen Updates über den Lader.",
+                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}")
+    else:
+        alarm_senden(3, "userscript_tm_fehl", f"Tampermonkey-Update von Hand: {wer}",
+                     f"{wer}: Puls konnte das Userscript nicht aktualisieren ({code or '?'}: {msg or 'keine Antwort'}). Bitte einmal am PC im "
+                     f"Puls-Chrome {_TM_LINK} öffnen und „Aktualisieren\" drücken — danach geht es von selbst.",
+                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}|fehl")
+    return jsonify({"ok": True})
+
+
+_TM_LINK = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
 
 
 @app.route("/alarm/stand", methods=["GET", "POST", "OPTIONS"])

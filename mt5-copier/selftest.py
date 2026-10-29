@@ -2061,6 +2061,7 @@ def main():
     results.append(test_login_eigenes_konto())
     results.append(test_windows_abfrage_vorbeugen())
     results.append(test_tv_neuladen())
+    results.append(test_tv_tm_update())
 
     print()
     ok = sum(1 for r in results if r)
@@ -10091,6 +10092,112 @@ def test_tv_neuladen():
         q = _i.getsource(ob.modus_tvneuladen)
         chk("klick" not in q.lower().replace("kein klick", "") and "Input.dispatch" not in q and "order" not in q.lower().replace("keine order", ""),
             "tvneuladen: Quelltext ohne Klick/Taste/Order")
+    finally:
+        for n, f in alt.items():
+            setattr(ob, n, f)
+    return ok
+
+
+
+def test_tv_tm_update():
+    """Tampermonkey „Aktualisieren" (29.10.2026): nur genau ein bewiesener Aktualisieren-Knopf auf der Tampermonkey-Seite unseres Scripts,
+    nie „Installieren", ohne Beweis kein Druck, nur eigene Tabs zu, TV-Tab danach neu geladen."""
+    import io, json, contextlib
+    import order_bot as ob
+    ok = True
+
+    def chk(b, msg):
+        nonlocal ok
+        print(("✓ " if b else "✗ ") + msg)
+        ok = ok and bool(b)
+
+    soll = ob.tm_soll_aus("// ==UserScript==\n// @name         Prophos TV-Reader\n// @version      0.10.0\n// ==/UserScript==\n")
+    chk(soll == {"name": "Prophos TV-Reader", "version": "0.10.0"} and ob.tm_soll_aus("kein Kopf") is None, f"tm_soll_aus: Name + Version aus dem Kopf ({soll})")
+    K = lambda t, dis=False: {"t": t, "dis": dis, "x": {"left": 100, "top": 200, "width": 80, "height": 30}}   # noqa: E731
+    L = lambda kn, text="Prophos TV-Reader 0.10.0", url="chrome-extension://tm/ask.html?aid=1": {"url": url, "text": text, "knoepfe": kn}   # noqa: E731
+    W = lambda l: ob.tm_knopf_wahl(l, soll)[0]   # noqa: E731
+    chk(W(L([K("Aktualisieren"), K("Abbrechen")])) == "klick" and W(L([K("Update"), K("Cancel")])) == "klick",
+        "Knopf-Wahl: genau ein Aktualisieren/Update → klick")
+    chk(W(L([K("Installieren"), K("Abbrechen")])) == "neu" and W(L([K("Install")])) == "neu", "Knopf-Wahl: Installieren → nie klicken (zweites Script)")
+    chk(W(L([K("Neu installieren")])) == "aktuell" and W(L([K("Downgrade")])) == "alt" and W(L([K("Aktualisieren", True)])) == "wartet",
+        "Knopf-Wahl: Neu installieren = aktuell, Downgrade nie, gesperrter Knopf wartet")
+    chk(W(L([K("Aktualisieren")], text="Anderes Script 0.10.0")) == "fremd" and W(L([K("Aktualisieren")], url="http://127.0.0.1:8790/x")) == "fremd"
+        and W(L([K("Aktualisieren")], text="Prophos TV-Reader 0.9.12")) == "unklar" and W(L([K("Aktualisieren"), K("Update")])) == "unklar"
+        and W(None) == "unklar", "Knopf-Wahl: fremdes Script/keine Extension-Seite/falsche Version/zwei Knöpfe → kein Klick")
+
+    TV = {"id": "TV", "type": "page", "url": "https://www.tradingview.com/chart/x", "webSocketDebuggerUrl": "ws://tv"}
+
+    class _Ws:
+        def __init__(self, welt):
+            self.w = welt
+        def rufe(self, m, p=None, timeout=10.0):
+            if m == "Runtime.evaluate":
+                if "elementFromPoint" in p["expression"]:
+                    return {"result": {"value": self.w["beweis"]}}
+                return {"result": {"value": self.w["seite"]}}
+            if m == "Input.dispatchMouseEvent":
+                self.w["maus"].append(p["type"])
+                if p["type"] == "mouseReleased" and self.w.get("schliesst"):
+                    self.w["tabs"] = [t for t in self.w["tabs"] if t["id"] != "TM"]
+            return {}
+        def zu(self):
+            pass
+
+    def lauf(seite, beweis=True, schliesst=True, tm_kommt=True):
+        welt = {"tabs": [dict(TV)], "seite": seite, "beweis": beweis, "schliesst": schliesst, "maus": [], "zu": [], "neu_geladen": 0}
+
+        def http(pfad, methode="GET", timeout=2.0):
+            if pfad == "/json/list":
+                return [dict(t) for t in welt["tabs"]]
+            if pfad.startswith("/json/close/"):
+                tid = pfad.rsplit("/", 1)[1]
+                welt["zu"].append(tid)
+                welt["tabs"] = [t for t in welt["tabs"] if t["id"] != tid]
+            return None
+
+        def tab_neu(url, trail):
+            welt["url"] = url
+            t = {"id": "NEU", "type": "page", "url": url, "webSocketDebuggerUrl": "ws://neu"}
+            welt["tabs"].append(t)
+            if tm_kommt:   # Tampermonkey fängt ab: derselbe Tab wird zur Extension-Seite
+                t.update(id="TM", url="chrome-extension://tm/ask.html?aid=1", webSocketDebuggerUrl="ws://tm")
+                return {"id": "NEU", "webSocketDebuggerUrl": "ws://neu"}
+            return dict(t)
+
+        class _Sitz:
+            def zu(self):
+                pass
+        ob._cdp_http, ob._cdp_tab_neu = http, tab_neu
+        ob._CdpVerbindung = lambda url, timeout=8.0: _Ws(welt)
+        ob._tm_soll_holen = lambda trail: dict(soll)
+        ob._AugenSitzung = lambda trail, **k: _Sitz()
+        ob._cdp_seite_neu_laden = lambda s_, o_, t_, g_: (welt.__setitem__("neu_geladen", welt["neu_geladen"] + 1) or {"konto": {}})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ob.modus_tvtmupdate({})
+        return json.loads(buf.getvalue().strip().splitlines()[-1]), welt
+
+    namen = ("_cdp_http", "_cdp_tab_neu", "_CdpVerbindung", "_tm_soll_holen", "_AugenSitzung", "_cdp_seite_neu_laden", "_handlauf_aktiv",
+             "_start_versatz", "_warte")
+    alt = {n: getattr(ob, n) for n in namen}
+    try:
+        ob._handlauf_aktiv, ob._start_versatz, ob._warte = (lambda: False), (lambda trail: None), (lambda a_, b_: None)
+        r1, w1 = lauf(L([K("Aktualisieren"), K("Abbrechen")]))
+        chk(r1["ok"] and r1["geklickt"] and w1["maus"] == ["mouseMoved", "mousePressed", "mouseReleased"] and w1["neu_geladen"] == 1
+            and "TV" not in w1["zu"] and w1["url"].endswith("/userscript/tv-reader.user.js") and r1["soll"] == "0.10.0",
+            f"tm-update: Aktualisieren bewiesen gedrückt, Seite zu, TV-Tab neu geladen, TV-Tab nie geschlossen ({r1['code']}, {w1['maus']})")
+        r2, w2 = lauf(L([K("Installieren"), K("Abbrechen")]))
+        chk(not r2["ok"] and r2["code"] == "tm_neu" and not w2["maus"] and w2["neu_geladen"] == 0 and "TV" not in w2["zu"] and "TM" in w2["zu"],
+            f"tm-update: Installieren → kein Druck, eigene Seite zu ({r2['code']})")
+        r3, w3 = lauf(L([K("Aktualisieren")]), beweis=False)
+        chk(not r3["ok"] and r3["code"] == "tm_kein_beweis" and not w3["maus"], "tm-update: Klickpunkt nicht bewiesen → kein Druck")
+        r4, w4 = lauf(L([K("Aktualisieren")]), tm_kommt=False)
+        chk(not r4["ok"] and r4["code"] == "tm_seite_fehlt" and "NEU" in w4["zu"] and "TV" not in w4["zu"] and not w4["maus"],
+            f"tm-update: Tampermonkey fängt nicht ab → sauber abbrechen, eigener Tab zu ({r4['code']})")
+        r5, w5 = lauf(L([K("Neu installieren")]))
+        chk(r5["ok"] and r5["code"] == "schon_aktuell" and not w5["maus"] and w5["neu_geladen"] == 1, "tm-update: schon aktuell → kein Klick, TV-Tab neu geladen")
+        r6, w6 = lauf(L([K("Aktualisieren")]), schliesst=False)
+        chk(not r6["ok"] and r6["code"] == "tm_unbelegt" and r6["geklickt"] and w6["neu_geladen"] == 0, "tm-update: Klick ohne Beleg → ehrlich nicht ok")
     finally:
         for n, f in alt.items():
             setattr(ob, n, f)

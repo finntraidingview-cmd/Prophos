@@ -4153,9 +4153,12 @@ class Handler(BaseHTTPRequestHandler):
                   else f"FEHLER {res.get('code') or '?'} — {str(res.get('msg') or '')[:140]}"), flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
-        if u.path == "/api/tv-neuladen":
-            # Userscript-Update (29.10.2026): TradingView-Tab im Puls-Chrome neu laden, damit der Lader die bereitliegende neuere Fassung
-            # startet. Nur Page.reload (Bot-Modus tvneuladen), unter dem TV-Lock (nie in einen laufenden Order-/Lese-Lauf), 409 = belegt.
+        if u.path in ("/api/tv-neuladen", "/api/tv-tm-update"):
+            # Userscript-Update (29.10.2026): tv-neuladen = TradingView-Tab im Puls-Chrome neu laden, damit der Lader die bereitliegende
+            # neuere Fassung startet (nur Page.reload); tv-tm-update = einmal je PC in Tampermonkey „Aktualisieren" (nur auf dessen Seite,
+            # danach Neuladen). Beide unter dem TV-Lock (nie in einen laufenden Order-/Lese-Lauf), 409 = belegt.
+            tm = u.path == "/api/tv-tm-update"
+            modus, frist = ("tvtmupdate", 150) if tm else ("tvneuladen", 90)
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
@@ -4176,17 +4179,17 @@ class Handler(BaseHTTPRequestHandler):
                 bot = os.path.join(HERE, "order_bot.py")
                 if not os.path.exists(bot):
                     ensure_bot_source()
-                p = subprocess.run([sys.executable, bot, "tvneuladen", json.dumps(cmd)],
-                                   capture_output=True, text=True, errors="replace", timeout=90)
+                p = subprocess.run([sys.executable, bot, modus, json.dumps(cmd)],
+                                   capture_output=True, text=True, errors="replace", timeout=frist)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {"ok": False, "code": "bot_stumm", "msg": (p.stderr or "").strip()[-200:] or "keine Antwort"}
             except subprocess.TimeoutExpired:
-                res = {"ok": False, "code": "timeout", "msg": "TV-Neuladen Timeout (90 s)"}
+                res = {"ok": False, "code": "timeout", "msg": f"{modus} Timeout ({frist} s)"}
             except (OSError, ValueError) as e:
-                res = {"ok": False, "code": "bot_fehlt", "msg": f"TV-Neuladen fehlgeschlagen: {e}"}
+                res = {"ok": False, "code": "bot_fehlt", "msg": f"{modus} fehlgeschlagen: {e}"}
             finally:
                 TV_ORDER_LOCK.release()
-            print(f"[panel] tv-neuladen: {'ok' if res.get('ok') else 'FEHLER ' + str(res.get('code') or '?')} — {str(res.get('msg') or '')[:140]}", flush=True)
+            print(f"[panel] {modus}: {'ok' if res.get('ok') else 'FEHLER ' + str(res.get('code') or '?')} — {str(res.get('msg') or '')[:140]}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
         if u.path == "/api/tv-close":
