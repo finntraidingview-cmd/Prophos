@@ -10019,8 +10019,9 @@ def test_puls_ein_konto_erwartet():
     chk(ew == {ZIEL: {"n": 1, "pl": 284.30, "zeit": "10280555"}, Z2: {"n": 0, "pl": 0.0, "zeit": "10231400"}} and E(cmd_b) == ew
         and not any(str(x).startswith("@") for x in cmd_b["geschwister"]) and ob.cdp_konten_bal(cmd_b) == {ZIEL: 155365.92, Z2: 145992.72}
         and E({"geschwister": ["@ke=" + ZIEL + ":x:pl:10280555"]}) == {ZIEL: {"unbekannt": "pl", "zeit": "10280555"}}
-        and E({"geschwister": ["@ke=" + ZIEL + ":1:284.30:10280555:o"]}) == {ZIEL: {"n": 1, "pl": 284.30, "zeit": "10280555", "offen": True}}
-        and E({"geschwister": ["@ke=" + ZIEL + ":1:284.30:10280555:y"]}) == {ZIEL: {"unbekannt": "kaputt", "zeit": ""}}
+        and E({"geschwister": ["@ke=" + ZIEL + ":o1:284.30:10280555"]}) == {ZIEL: {"n": 1, "pl": 284.30, "zeit": "10280555", "offen": True}}
+        and E({"geschwister": ["@ke=" + ZIEL + ":1:284.30:10280555:o"]}) == {ZIEL: {"unbekannt": "kaputt", "zeit": ""}}
+        and E({"geschwister": ["@ke=" + ZIEL + ":y1:284.30:10280555"]}) == {ZIEL: {"unbekannt": "kaputt", "zeit": "10280555"}}
         and E({"geschwister": ["@ke=" + ZIEL + ":1:2x:10280555", "@ke=" + Z2 + ":1:5"]}) == {ZIEL: {"unbekannt": "kaputt", "zeit": "10280555"}, Z2: {"unbekannt": "kaputt", "zeit": ""}},
         "'@ke=EXT:N:ΣPL:Zeit' überlebt Panel-Schnitt + Brücke; unbekannt/kaputt/abgeschnitten = unbekannt (fail-closed)")
     bal = {ZIEL: 155365.92, Z2: 145992.72}
@@ -10043,6 +10044,13 @@ def test_puls_ein_konto_erwartet():
         and not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], bal, {ZIEL: ew[ZIEL], Z2: {"unbekannt": "pl", "zeit": ""}})[0]
         and not Z(U(155645.22), ZIEL, True, True, [ZIEL, Z2], {ZIEL: 155365.92, Z2: None}, ew)[0],
         "anderer Kandidat mit laufendem Trade / fehlendem master_pl / unbekannter Balance blockiert")
+    # S2 30.10.2026: vom Panel GEKAPPTER Eintrag eines laufenden Nachbarn (lange Kennung, großes Σ) → kaputt → blockiert weiter
+    LANG = "FNFTFAMUSTERMUSTERABCDEFGHIJKL0002"
+    roh_l = "@ke=" + LANG + ":o12:-123456.78:10280555"
+    gekappt = E({"geschwister": panel([roh_l])})
+    chk(len(roh_l) > 60 and gekappt == {LANG: {"unbekannt": "kaputt", "zeit": ""}}
+        and not Z(U(155645.22), ZIEL, True, True, [ZIEL, LANG], {ZIEL: 155365.92, LANG: 150000.0}, dict(gekappt, **{ZIEL: ew[ZIEL]}))[0],
+        "gekappter Eintrag (> 60 Zeichen) eines laufenden Nachbarn → unbekannt → blockiert")
     # S2 30.10.2026: Ziel mit LAUFENDEM Trade (tvclose genau dieses Trades) — Beitrag 0, Σ der beendeten zählt mit
     jo, go = Z(U(155365.92), ZIEL, True, True, [ZIEL, Z2], bal, {ZIEL: {"n": 0, "pl": 0.0, "zeit": "", "offen": True}, Z2: ew[Z2]})
     chk(jo and "laufender Trade zählt 0" in go, f"Ziel mit laufendem Trade, Balance unverändert → bestätigt ({go[:120]}…)")

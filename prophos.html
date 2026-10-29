@@ -25818,8 +25818,8 @@
    * 155.365,92 vom 28.10. 05:55, danach lief Trade 02fe3cd6 in den TP → Umschalter 155.645,22; die Endlesung scheiterte am selben
    * Cent-Vergleich, tv_balance blieb für immer alt, jeder Lauf auf dem Konto brach ab. Master nach S2-Stopp der Spielraum-Fassung: „enge
    * Variante, keine Spielräume"): je Konto mit gleichem Anfang ein Eintrag '@ke=EXT:N:ΣPL:MMTTHHMM' — N Pläne dieses Kontos, die NACH
-   * tv_balance_at geendet haben (completed/review), Σ ihrer master_pl, Zeit der Lesung (UTC), ':o' am Ende = auf dem Konto läuft gerade ein
-   * Trade (Bot: beim Ziel Beitrag 0, bei anderen blockierend — S2 30.10.). Unbekannt '@ke=EXT:x:<grund>:MMTTHHMM', wenn
+   * tv_balance_at geendet haben (completed/review), Σ ihrer master_pl, Zeit der Lesung (UTC); 'o' vor N ('@ke=EXT:oN:…') = auf dem Konto läuft
+   * gerade ein Trade (Bot: beim Ziel Beitrag 0, bei anderen blockierend — S2 30.10.). Unbekannt '@ke=EXT:x:<grund>:MMTTHHMM', wenn
    * ein beendeter keinen master_pl hat ('pl') oder knapp (≤ 120 s) nach der Lesung endete und die Lesung
    * ihn nicht nachweislich schon enthält ('knapp': balance_start + master_pl = tv_balance → enthalten, Befund …75474 23.10.: Endlesung
    * 0,26 s vor ended_at). Der Bot rechnet erwartet = tv_balance + ΣPL (±25 $ je Trade) und bestätigt nur, wenn GENAU das Ziel passt und kein
@@ -25855,8 +25855,11 @@
     const gesehen = new Set()
     const konten = [ziel, ...(accs || [])].filter(a => { const n = nr(a); if(!n || !n.startsWith(anf) || gesehen.has(n)) return false; gesehen.add(n); return true }).slice(0, 20)
     const kb = konten.map(a => '@kb=' + nr(a) + ':' + (a.tvBalance != null && isFinite(Number(a.tvBalance)) ? Number(a.tvBalance).toFixed(2) : ''))
+    // ':o' (laufender Trade) steht VORN am N-Feld ('o1'), nicht am Ende — das Panel kappt jeden Eintrag auf 60 Zeichen (S2 30.10.2026);
+    // ein zu langer Eintrag wird als unbekannt ('lang') geschickt, ein gekappter fällt im Bot über die Zeit (8 Ziffern) durch → blockiert
     const ke = konten.map(a => { const e = tvKontenErwartet(a); if(!e) return null
-      return '@ke=' + nr(a) + ':' + (e.unbekannt ? 'x:' + e.unbekannt : e.n + ':' + e.pl.toFixed(2)) + ':' + e.zeit + (!e.unbekannt && e.offen ? ':o' : '') }).filter(Boolean)
+      const t = '@ke=' + nr(a) + ':' + (e.unbekannt ? 'x:' + e.unbekannt : (e.offen ? 'o' : '') + e.n + ':' + e.pl.toFixed(2)) + ':' + e.zeit
+      return t.length <= 60 ? t : '@ke=' + nr(a) + ':x:lang:' + e.zeit }).filter(Boolean)
     return [...kb, ...ke]
   }
   window._tvKontenBalBruecke = tvKontenBalBruecke

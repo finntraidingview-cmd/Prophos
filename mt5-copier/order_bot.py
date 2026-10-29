@@ -21239,7 +21239,7 @@ def cdp_konten_bal(cmd):
 
 def cdp_konten_erwartet(cmd):
     """REIN RECHNEND (testbar): was Prophos' eigene Trades seit der letzten Lesung je External ID mit der Balance gemacht haben (29.10.2026,
-    Brücken-Eintrag vom PC-Tab, tvKontenErwartet): '@ke=EXT:N:ΣPL:MMTTHHMM' = N beendete Pläne mit Σ master_pl; '@ke=EXT:x:<grund>:MMTTHHMM'
+    Brücken-Eintrag vom PC-Tab, tvKontenErwartet): '@ke=EXT:[o]N:ΣPL:MMTTHHMM' = N beendete Pläne mit Σ master_pl, 'o' = Trade läuft; '@ke=EXT:x:<grund>:MMTTHHMM'
     = unbekannt (offen = Trade läuft, pl = master_pl fehlt, knapp = Ende ≤ 120 s nach der Lesung ohne Nachweis). Zeit = Lesung (UTC).
     Kaputt/abgeschnitten → unbekannt (fail-closed). -> {EXT: {"n", "pl", "zeit"} | {"unbekannt", "zeit"}}"""
     c = cmd if isinstance(cmd, dict) else {}
@@ -21250,18 +21250,17 @@ def cdp_konten_erwartet(cmd):
         k = _nur_alnum(st[0] if st else "").upper()
         if len(k) < 3:
             continue
-        offen = len(st) == 5 and st[4].strip() == "o"            # ':o' = auf dem Konto läuft ein Trade (S2 30.10.2026)
-        if offen:
-            st = st[:4]
         zeit = st[3].strip() if len(st) == 4 and re.fullmatch(r"\d{8}", st[3].strip()) else ""
-        if len(st) != 4:
-            out[k] = {"unbekannt": "kaputt", "zeit": zeit}
+        if len(st) != 4 or not zeit:
+            out[k] = {"unbekannt": "kaputt", "zeit": zeit}   # auch ein vom Panel gekappter Eintrag (Zeit nicht 8 Ziffern) → blockiert
             continue
         if st[1].strip() == "x":
             out[k] = {"unbekannt": (st[2].strip() or "?")[:12], "zeit": zeit}
             continue
+        m_n = re.fullmatch(r"(o?)(\d+)", st[1].strip())        # 'o' vor N = auf dem Konto läuft ein Trade (S2 30.10.2026)
+        offen = bool(m_n and m_n.group(1))
         try:
-            n, pl = int(st[1]), float(st[2])
+            n, pl = int(m_n.group(2) if m_n else "x"), float(st[2])
         except (TypeError, ValueError):
             out[k] = {"unbekannt": "kaputt", "zeit": zeit}
             continue
