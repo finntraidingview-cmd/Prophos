@@ -17620,9 +17620,18 @@ def _konto_mails_laden(uids, woerter, tage, disp=None):
 KONTO_VERWORFEN_KEY = "konto_verworfen"
 KONTO_VERWORFEN_MAX = 500
 KONTO_ZU_BESTAETIGEN_TAGE = 14
-KONTO_RESET_KOPIE = ("firm", "account_type", "account_size", "currency", "max_drawdown", "max_daily_drawdown", "max_loss_per_trade",
-                     "max_profit_per_trade", "consistency_pct", "max_risiko_trade", "auto_planer", "goal_kind", "goal_target",
+KONTO_RESET_KOPIE = ("firm", "account_size", "currency", "max_drawdown", "max_daily_drawdown", "max_loss_per_trade",
+                     "max_profit_per_trade", "max_risiko_trade", "auto_planer", "goal_kind", "goal_target",
                      "goal_min_profit", "purchase_cost")   # nie kapitel_id: das neue Konto gehört ins Kapitel von heute (Trigger set_kapitel)
+# Typ und Consistency NICHT aus der alten Zeile (Master/S2 29.10.2026): ein Reset beginnt von vorn — Futures (challenge/funded/WD) als
+# challenge, 2-Phasen-CFD (phase1/phase2/funded_cfd) wieder als phase1; Consistency nur aus der Schablone, weil ein Addon nur gilt, wenn er
+# neu gekauft wurde (keine Schablone → ohne Consistency, die Rückfrage im Browser sagt das)
+KONTO_RESET_CFD_TYPEN = frozenset({"phase1", "phase2", "funded_cfd"})
+
+
+def konto_reset_typ(alt_typ):
+    """REIN RECHNEND (testbar): Typ der neuen Zeile nach einem Reset — CFD-Phasen → phase1, sonst challenge."""
+    return "phase1" if str(alt_typ or "") in KONTO_RESET_CFD_TYPEN else "challenge"
 KONTO_PHASE_NAME = {"challenge": "Challenge", "phase1": "Phase 1", "phase2": "Phase 2", "funded": "Funded", "funded_cfd": "Funded",
                     "winning_days": "Winning Days"}
 
@@ -17632,8 +17641,11 @@ def konto_reset_zeile(alt, neu_ext, vorlage=None):
     Zeile, External ID neu, Startbalance = Größe, Balance 0, nie WD-Farm/Duplikum/Zugangsdaten, Ziel-Zählung frisch; Kaufpreis aus der Vorlage
     (bulk_vorlagen), sonst der alten Zeile. Name nach der Namensregel „<Größe> <External ID> → <Phase>"."""
     z = {k: alt.get(k) for k in KONTO_RESET_KOPIE if alt.get(k) is not None}
+    z["account_type"] = konto_reset_typ(alt.get("account_type"))
     if vorlage and _wd_num(vorlage.get("purchase_cost")):
         z["purchase_cost"] = _wd_num(vorlage["purchase_cost"])
+    if vorlage and _wd_num(vorlage.get("consistency_pct")):
+        z["consistency_pct"] = _wd_num(vorlage["consistency_pct"])
     gr = _wd_num(alt.get("account_size")) or _wd_num(alt.get("starting_balance")) or _wd_num((vorlage or {}).get("account_size"))
     if gr:
         z["account_size"] = gr
@@ -17775,8 +17787,9 @@ def konto_reset_bestaetigen():
         return jsonify({"ok": False, "msg": f"Alte Zeile {alt_ext} gibt es bei dieser ID nicht — als Kauf anlegen"}), 404
     if (alt.get("account_type") or "challenge") not in ADMIN_KONTO_TYPEN:
         return jsonify({"ok": False, "msg": f"Alte Zeile ist {alt.get('account_type')} — Reset nur für Prop-Firm-Konten"}), 400
-    zeile = konto_reset_zeile(alt, neu_ext, konto_vorlage_finden(vorlagen, alt.get("firm"), alt.get("account_type") or "challenge",
-                                                                 alt.get("account_size") or alt.get("starting_balance")))
+    vorlage = konto_vorlage_finden(vorlagen, alt.get("firm"), konto_reset_typ(alt.get("account_type")),
+                                   alt.get("account_size") or alt.get("starting_balance"))
+    zeile = konto_reset_zeile(alt, neu_ext, vorlage)
     hinweis = []
     try:
         try:
@@ -17828,7 +17841,8 @@ def konto_reset_bestaetigen():
         except Exception:
             pass
     return jsonify({"ok": True, "account": neu, "archiviert": archiviert, "alt": {"id": alt.get("id"), "name": alt.get("name")},
-                    "plaene_entfernt": len(plaene_weg), "hinweis": " · ".join(hinweis)})
+                    "plaene_entfernt": len(plaene_weg), "typ": zeile.get("account_type"), "consistency_pct": zeile.get("consistency_pct"),
+                    "schablone": (vorlage or {}).get("name"), "hinweis": " · ".join(hinweis)})
 
 
 @app.route("/admin/mail/<int:mid>", methods=["GET", "OPTIONS"])

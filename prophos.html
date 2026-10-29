@@ -51350,7 +51350,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1867'
+  const OS_TAB_BUILD = '2026-09-22.1868'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -71794,7 +71794,14 @@
   // → true = als Kauf übers Modal weitermachen (alte Zeile fehlt), false = erledigt/abgebrochen
   async function kontoResetBestaetigen(z, fremd, td){
     const wer = fremd ? ` für ${fremd.name}` : ''
-    if(!confirm(`Reset${wer} übernehmen?\n\n${z.vorher}  →  ${z.ext}\n\nNeue Zeile mit den Einstellungen der alten (Startbalance = Größe, Kaufpreis aus der Schablone). Die alte Zeile wird als blown archiviert, falls sie noch aktiv ist.`)) return false
+    // Typ + Consistency wie der Server (konto_reset_typ / konto_vorlage_finden, Master 29.10.2026): ein Reset beginnt von vorn — CFD-Phasen
+    // wieder Phase 1, sonst Challenge; Consistency nur aus der Schablone gleicher Firma × Typ × Größe (Addon gilt nur neu gekauft)
+    const typNeu = ['phase1', 'phase2', 'funded_cfd'].includes(z.typ) ? 'phase1' : 'challenge'
+    const gr = (Number(z.groesse) || 0) * 1000, firma = String(z.firma || '').trim().toLowerCase()
+    const sch = (await kontoVorlagenLaden()).find(v => String(v.firm || '').trim().toLowerCase() === firma && v.account_type === typNeu
+      && (!gr || Number(v.account_size || v.starting_balance) === gr)) || null
+    const consTxt = sch && Number(sch.consistency_pct) ? `Consistency ${sch.consistency_pct} % (Schablone „${sch.name}")` : (sch ? `ohne Consistency (Schablone „${sch.name}")` : 'ohne Consistency — keine Schablone gefunden, Kaufpreis von der alten Zeile')
+    if(!confirm(`Reset${wer} übernehmen?\n\n${z.vorher}  →  ${z.ext}\n\nTyp: ${SUC_PHASE_LABEL[typNeu] || typNeu} · ${consTxt}\n\nNeue Zeile mit Größe und Limits der alten (Startbalance = Größe). Die alte Zeile wird als blown archiviert, falls sie noch aktiv ist; ihre geplanten Trades werden entfernt.`)) return false
     const uid = fremd ? fremd.uid : String(currentUserId || ''), key = `${uid}|${extIdNorm(z.ext)}`
     // dieselbe Zeile steht in Accounts UND im Admin: zweiter Klick, solange der erste läuft, legt nicht doppelt an
     if(_admKTv.laeuft.has(key)){ if(typeof atToast === 'function') atToast(`${z.ext}: Reset läuft noch`, 'end'); return false }
@@ -71804,7 +71811,7 @@
       const d = await admMailFetch(`/konto-reset-bestaetigen${fremd ? '?ansicht=admin' : ''}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: uid, neu: z.ext, alt: z.vorher, tv_name: (z.quellen || []).includes('TV') ? z.ext : '' }) })
       _admKTv.angelegt.add(key)   // Zeile sofort weg (eigene Liste und Admin), bis die Kontoliste das neue Konto selbst zeigt
-      if(typeof atToast === 'function') atToast(`✓ ${(d.account && d.account.name) || z.ext} angelegt${wer}${d.archiviert ? ` · ${(d.alt && d.alt.name) || z.vorher} als blown archiviert` : ''}${d.plaene_entfernt ? ` · ${d.plaene_entfernt} geplante Trades der alten Zeile entfernt` : ''}${d.hinweis ? ' — ' + d.hinweis : ''}`, d.hinweis ? 'end' : 'ok')
+      if(typeof atToast === 'function') atToast(`✓ ${(d.account && d.account.name) || z.ext} angelegt${wer}${d.archiviert ? ` · ${(d.alt && d.alt.name) || z.vorher} als blown archiviert` : ''}${d.typ ? ` · ${SUC_PHASE_LABEL[d.typ] || d.typ}${d.consistency_pct ? `, Consistency ${d.consistency_pct} %` : ', ohne Consistency'}` : ''}${d.plaene_entfernt ? ` · ${d.plaene_entfernt} geplante Trades der alten Zeile entfernt` : ''}${d.hinweis ? ' — ' + d.hinweis : ''}`, d.hinweis ? 'end' : 'ok')
       // wie archiveAccount() bei „blown": Duplikum-Verknüpfung der alten Zeile lösen — Token und Verknüpfung liegen nur im Browser der
       // eigenen ID (still, wenn keine besteht); bei einer fremden ID geht das nicht von hier aus
       if(!fremd && d.archiviert && d.alt && d.alt.id) try{ window._dupDeleteAccountForProphos?.(d.alt.id) }catch(_){}

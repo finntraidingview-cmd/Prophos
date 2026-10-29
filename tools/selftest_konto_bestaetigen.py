@@ -145,6 +145,19 @@ def main():
     check(z["purchase_cost"] == 213 and z["max_drawdown"] == 4500 and z["max_profit_per_trade"] == 3600 and "kapitel_id" not in z,
           "Kauf aus Schablone, Limits aus der alten Zeile (wie Mike-Reset), Kapitel nicht kopiert (Trigger setzt das von heute)")
     check(ns["konto_reset_zeile"](dict(db.konten[0], goal_kind="winning_days"), "X1234567", v)["goal_manual"] is True, "goal_manual folgt der Ziel-Art")
+    # Typ + Consistency (Master/S2 29.10.2026): Reset beginnt von vorn, Addon nur aus der Schablone
+    check(ns["konto_reset_typ"]("phase2") == "phase1" and ns["konto_reset_typ"]("funded_cfd") == "phase1" and ns["konto_reset_typ"]("phase1") == "phase1",
+          "CFD-Phasen → phase1")
+    check(ns["konto_reset_typ"]("challenge") == "challenge" and ns["konto_reset_typ"]("funded") == "challenge" and ns["konto_reset_typ"](None) == "challenge",
+          "Futures → challenge")
+    fn_alt = {"firm": "FundedNext", "account_type": "phase2", "account_size": 100000, "max_drawdown": 10000, "consistency_pct": 40, "purchase_cost": 500}
+    z2 = ns["konto_reset_zeile"](fn_alt, "14399999", ns["konto_vorlage_finden"](db.vorlagen, "FundedNext", "phase1", 100000))
+    check(z2["account_type"] == "phase1" and z2["name"] == "100k 14399999 → Phase 1" and "consistency_pct" not in z2 and z2["purchase_cost"] == 475,
+          f"FundedNext Phase 2 → Phase 1, Kauf aus Schablone, alte Consistency 40 nicht kopiert ({z2.get('account_type')}, {z2.get('consistency_pct')})")
+    z3 = ns["konto_reset_zeile"](dict(db.konten[0], consistency_pct=50), "TDFYSL150777777777", dict(v, consistency_pct=40))
+    check(z3["consistency_pct"] == 40, "Consistency aus der Schablone (40), nicht aus der alten Zeile (50)")
+    z4 = ns["konto_reset_zeile"](dict(db.konten[0], consistency_pct=50), "TDFYSL150777777778", None)
+    check("consistency_pct" not in z4 and z4["account_type"] == "challenge", "ohne Schablone: challenge ohne Consistency")
     check(z["wd_farm"] is False and z["duplikum_linked"] is False and "cred_login" not in z and "cred_password" not in z
           and "goal_done_offset" not in z and "id" not in z, "nie WD-Farm/Duplikum/Zugangsdaten/Zählstand/alte id")
     check(ns["konto_reset_zeile"](db.konten[0], "X1234567", None)["purchase_cost"] == 200, "ohne Schablone: Kauf der alten Zeile")
@@ -156,6 +169,7 @@ def main():
     neu = [x for t, x in db.inserts if t == "accounts"]
     tx = [x for t, x in db.inserts if t == "transactions"]
     check(r.status_code == 200 and d["ok"] and d["archiviert"] is True, f"eigene ID: angelegt + alte archiviert ({r.status_code})")
+    check(d["typ"] == "challenge" and d["schablone"] == "Tradeify Select 150k" and d["consistency_pct"] is None, "Antwort nennt Typ, Schablone, Consistency")
     check(neu and neu[0]["user_id"] == ICH and neu[0]["external_id"] == "TDFYSL150831535169", "neue Zeile bei der eigenen ID")
     check(db.archiviert == [(ICH, "alt-1", "blown")], f"alte Zeile als blown archiviert ({db.archiviert})")
     check(tx and tx[0]["amount"] == -213 and tx[0]["kind"] == "account_purchase", "Kauf-Transaktion −213 € (Reset = Kauf)")
