@@ -30570,9 +30570,24 @@
    * (order_bot._tsx_auge_reparieren; erst neuer Tab, dann übrige zu; danach Bereit-Probe + Konto-Wechsel ins Ziel-Konto). Bleibt das Auge
    * blind (oder im falschen Konto), gilt der Heimweg als gescheitert → bestehender Heimweg-Alarm an die Master-IDs. EIN Lauf je Anstoß (kein
    * Heimweg-Wiederholer, nur „belegt" wird verschoben), nächster frühestens nach TSX_RELOGIN_ABSTAND_MS, nie während Puls unterwegs/Polar.
-   * Radar und Fusion-Level schließen unverändert weiter. */
-  const TSX_BLIND_MS = 3000
-  let _tsxBlindSeit = 0
+   * Radar und Fusion-Level schließen unverändert weiter.
+   * BLIND ≠ TRÄGE (PC von Marco 29.10.2026, .1852: Stand 5,9 · 6,5 · 0,15 · 2,0 s alt — das Auge lebte, meldete nur in Lücken; 3 s hätten
+   * im Trade ständig repariert, Neuladen hilft da nicht): blind erst nach TSX_BLIND_MS = 15 s DURCHGEHEND ohne frischen Stand (≤ 1 s) UND
+   * mindestens TSX_BLIND_MIN_ABFRAGEN Abfragen dieses Tabs im Fenster (sonst war der Prophos-Tab gedrosselt, nicht das Auge). Jede frische
+   * Meldung setzt zurück. Träge (Lücken > 1 s) nur als Spur „[hedgeTsx] Auge träge, max alter X s/min" (tsxTraegeMerken), keine Aktion. */
+  const TSX_BLIND_MS = 15000, TSX_BLIND_MIN_ABFRAGEN = 10
+  let _tsxBlindSeit = 0, _tsxBlindN = 0
+  const tsxBlindZurueck = () => { _tsxBlindSeit = 0; _tsxBlindN = 0 }
+  let _tsxTraege = { ab: 0, max: 0 }
+  // Spur: höchstes Stand-Alter je Minute (nur bei offenem Topstep-Hedge dieses PCs, nur wenn > 1 s) — reine Anzeige in der Konsole
+  function tsxTraegeMerken(alter, st){
+    const jetzt = Date.now()
+    if(!_tsxTraege.ab) _tsxTraege.ab = jetzt
+    if(typeof alter === 'number' && alter > _tsxTraege.max) _tsxTraege.max = alter
+    if(jetzt - _tsxTraege.ab < 60000) return
+    if(_tsxTraege.max > 1.0) console.info(`[hedgeTsx] Auge träge, max alter ${_tsxTraege.max.toFixed(1)} s/min (Auge ${(st && st.takt) || '?'}, gesendet ${(st && st.gesendet_n != null) ? st.gesendet_n : '?'}, Panel-Timeouts ${(st && Array.isArray(st.panel_timeouts)) ? st.panel_timeouts.length : '?'})`)
+    _tsxTraege = { ab: jetzt, max: 0 }
+  }
   const TSX_HEIM_REPARATUR_RE = /TopstepX ausgeloggt|TopstepX-Auge blind/
   function tsxReloginAnstossen(plan, art){
     const jetzt = Date.now(), blind = art === 'blind'
@@ -30585,11 +30600,11 @@
     bigTradeHeimPlanen('', blind ? 'TopstepX-Auge blind — Reparatur' : 'TopstepX ausgeloggt — Rück-Login', true, 'tsx')
     return true
   }
-  // REIN RECHNEND (window._tsxBlindUrteil): neuer blind-seit-Wert und ob der Heimweg fällig ist
-  function tsxBlindUrteil(seit, blind, jetzt){
-    if(!blind) return { seit: 0, faellig: false }
-    const s = seit || jetzt
-    return { seit: s, faellig: jetzt - s >= TSX_BLIND_MS }
+  // REIN RECHNEND (window._tsxBlindUrteil): neuer blind-seit-Wert, Zahl der blinden Abfragen und ob der Heimweg fällig ist
+  function tsxBlindUrteil(seit, n, blind, jetzt){
+    if(!blind) return { seit: 0, n: 0, faellig: false }
+    const s = seit || jetzt, m = (seit ? (Number(n) || 0) : 0) + 1
+    return { seit: s, n: m, faellig: jetzt - s >= TSX_BLIND_MS && m >= TSX_BLIND_MIN_ABFRAGEN }
   }
   window._tsxBlindUrteil = tsxBlindUrteil
   window._tsxReloginAnstossen = (plan, art) => tsxReloginAnstossen(plan, art)   // Test-Haken
@@ -30608,11 +30623,15 @@
         && r.stand.konto && r.stand.konto.kontonr)
     }catch(_){ return false }
   }
+  const TSX_START_WARTEN_MS = 10000
   async function tsxAugeStartBereit(plan, konto){
-    // bis zu 3 Abfragen, gestreut 0,3–0,7 s auseinander — ein einzelner langsamer tsx-stand löst noch keinen Reparatur-Lauf aus
-    for(let i = 0; i < 3; i++){
+    // bis ~10 s gestreut (0,3–0,7 s) auf eine frische Meldung warten — ein träges Auge (Lücken von Sekunden, PC von Marco 29.10.2026)
+    // löst so keinen Reparatur-Lauf aus, erst ein wirklich stummes
+    const t0 = Date.now()
+    for(;;){
       if(await tsxAugeFrisch()) return { ok: true }
-      if(i < 2) await new Promise(res => setTimeout(res, 300 + Math.random() * 400))
+      if(Date.now() - t0 >= TSX_START_WARTEN_MS) break
+      await new Promise(res => setTimeout(res, 300 + Math.random() * 400))
     }
     let r = null
     try{ r = await tvV2Lesen(konto, 45, plan, { auge_reparieren: true }) }catch(e){ r = { ok: false, msg: String((e && e.message) || e) } }
@@ -30626,17 +30645,18 @@
     const pc = hedgePcId()
     const meine = (tp || []).filter(p => p && p.route === 'tsv2' && p.status === 'open' && p.mt5Baseline && p.mt5Baseline.hedge
       && p.mt5Baseline.hedge.status === 'offen' && p.mt5Baseline.hedge.pc === pc)
-    if(!meine.length){ _tsxBlindSeit = 0; return }   // kein offener Topstep-Hedge: Blind-Uhr zurück (sonst wäre der nächste sofort „fällig")
+    if(!meine.length){ tsxBlindZurueck(); _tsxTraege = { ab: 0, max: 0 }; return }   // kein offener Topstep-Hedge: Blind-Uhr zurück (sonst wäre der nächste sofort „fällig")
     const verwerfen = () => { for(const p of meine){ _tsxSchnellKonto.delete(String(p.id)); _tsxSchnellLeer.delete(String(p.id)) } }
-    if(hedgePulsUnterwegs()){ verwerfen(); _tsxBlindSeit = 0; return }   // Puls unterwegs → Auge blind (wie beim Orbit-Reader), keine Reparatur
+    if(hedgePulsUnterwegs()){ verwerfen(); tsxBlindZurueck(); return }   // Puls unterwegs → Auge blind (wie beim Orbit-Reader), keine Reparatur
     _tsxSchnellBusy = true
     try{
       let r = null
       try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 800 }) }catch(_){ r = null }
       const st = r && r.ok === true && r.stand && typeof r.stand === 'object' ? r.stand : null
+      if(st) tsxTraegeMerken(r.alter_s, st)
       const blindTick = (grund) => {   // Auge blind (29.10.2026): nie schließen; nach TSX_BLIND_MS Reparatur über den Heimweg
-        const u = tsxBlindUrteil(_tsxBlindSeit, true, Date.now()); _tsxBlindSeit = u.seit
-        if(u.faellig && tsxReloginAnstossen(meine[0], 'blind')) console.info('[hedgeTsx] Auge blind seit', Math.round((Date.now() - u.seit) / 100) / 10, 's —', grund)
+        const u = tsxBlindUrteil(_tsxBlindSeit, _tsxBlindN, true, Date.now()); _tsxBlindSeit = u.seit; _tsxBlindN = u.n
+        if(u.faellig && tsxReloginAnstossen(meine[0], 'blind')) console.info('[hedgeTsx] Auge blind seit', Math.round((Date.now() - u.seit) / 100) / 10, 's (', u.n, 'Abfragen) —', grund)
       }
       if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= 1.0)){
         verwerfen(); if(++_tsxStandFehler === 1200) console.warn('[hedgeTsx] kein frischer Stand vom TopstepX-Auge (Userscript tsx-auge im Puls-Chrome?)')
@@ -30644,10 +30664,10 @@
         return
       }
       _tsxStandFehler = 0
-      if(hedgePulsUnterwegs()){ verwerfen(); _tsxBlindSeit = 0; return }   // während des Holens losgelaufen
-      if(st.ausgeloggt === true){ verwerfen(); _tsxBlindSeit = 0; tsxReloginAnstossen(meine[0], 'ausgeloggt'); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
+      if(hedgePulsUnterwegs()){ verwerfen(); tsxBlindZurueck(); return }   // während des Holens losgelaufen
+      if(st.ausgeloggt === true){ verwerfen(); tsxBlindZurueck(); tsxReloginAnstossen(meine[0], 'ausgeloggt'); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
       if(!(st.konto && st.konto.kontonr)){ verwerfen(); blindTick('kein Konto im Auge'); return }   // frisch, aber ohne Konto = blind
-      _tsxBlindSeit = 0
+      tsxBlindZurueck()
       const k = st.konto || {}, liste = tsxStandListe(st), jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
@@ -50549,7 +50569,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1858'
+  const OS_TAB_BUILD = '2026-09-22.1859'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
