@@ -1676,13 +1676,20 @@ TAB_URL_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{2,5}/[A-Za-z0-9._/
 # Kennung im Puls-Chrome liegt, liest das Panel per CDP (window._tabHerzId der Prophos-Seiten, nur lesen). ══
 TAB_HAUPT_FRISCH_S = 5 * 60   # Hysterese (S2 30.10.2026): Chrome drosselt verdeckte Tabs auf ~1 Abfrage/min oder friert sie kurz ein
 TAB_PULS_PRUEF_S = 5 * 60
+TAB_HAUPT_SICHER_S = 60   # kein anderer Tab fragte so lange → der fragende wird sofort Haupt-Tab (Master 30.10.2026)
+TAB_ZAEHL_FRISCH_S = 90   # Doppel-Tab-Zählung: nur Kennungen, die eben noch gefragt haben (Spur Chris: alte Kennungen zählten 5 min mit)
 _TABS = {}   # tid → {"at", "login", "url", "puls": True/False/None}
 _TAB_HAUPT = {"tid": "", "puls_at": 0.0, "meldung": ""}
 
 
-def haupt_tab_waehlen(tabs, jetzt, bisher=""):
+def haupt_tab_waehlen(tabs, jetzt, bisher="", ich=""):
     """REIN RECHNEND (testbar): Kennung des Haupt-Tabs ('' = keiner lebt). Lebend = Abfrage ≤ TAB_HAUPT_FRISCH_S her. Rang: angemeldet,
-    dann im Puls-Chrome (puls True); bei gleichem Rang bleibt der bisherige, sonst der zuletzt fragende."""
+    dann im Puls-Chrome (puls True); bei gleichem Rang bleibt der bisherige, sonst der zuletzt fragende.
+    SICHERUNG (Master 30.10.2026, nie eine Phase ohne Haupt-Tab): fragt gerade der Tab „ich" und hat KEIN anderer Tab in den letzten
+    TAB_HAUPT_SICHER_S gefragt, wird „ich" sofort Haupt-Tab — die 5-min-Hysterese gilt nur, wenn ein anderer Tab nachweislich lebt
+    (z. B. nach einem Deploy: alte, stille Kennungen halten den frisch geladenen Tab nie im „nur ansehen")."""
+    if ich and ich in (tabs or {}) and not any(t != ich and jetzt - float(z.get("at") or 0) <= TAB_HAUPT_SICHER_S for t, z in tabs.items()):
+        return ich
     lebend = {t: z for t, z in (tabs or {}).items() if jetzt - float(z.get("at") or 0) <= TAB_HAUPT_FRISCH_S}
     if not lebend:
         return ""
@@ -1708,7 +1715,7 @@ def tab_gesehen(user_agent, query=None):
         _TABS[tid] = {"at": jetzt, "login": w("login") == "1", "url": w("url"), "puls": alt.get("puls"), "neben_at": alt.get("neben_at")}
         for t in [t for t, z in _TABS.items() if jetzt - max(float(z.get("at") or 0), float(z.get("neben_at") or 0)) > 3600]:
             _TABS.pop(t, None)
-        _TAB_HAUPT["tid"] = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"])
+        _TAB_HAUPT["tid"] = haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT["tid"], tid)
         if _TAB_HAUPT["tid"] != tid:
             return False
     _TAB_OEFFNEN["zuletzt"] = time.time()
@@ -2085,8 +2092,9 @@ def _tabs_puls_lesen(liste):
 def _haupt_tab_runde(pc, liste, jetzt):
     """Puls-Kennzeichen der lebenden Tabs nachziehen (nur bei ≥ 2 lebenden Tabs, höchstens je TAB_PULS_PRUEF_S, sonst sobald eine Kennung
     noch unbekannt ist) und zweite Tabs einmal in Log/Spur melden."""
-    lebend = [t for t, z in _TABS.items() if jetzt - float(z.get("at") or 0) <= TAB_HAUPT_FRISCH_S
-              or jetzt - float(z.get("neben_at") or 0) <= TAB_HAUPT_FRISCH_S * 2]
+    # für Zählung/Meldung nur FRISCHE Kennungen (Haupt-Tab fragt alle 5–30 s, „nur ansehen" alle 50–70 s) — die Hysterese der Wahl bleibt 5 min
+    lebend = [t for t, z in _TABS.items() if jetzt - float(z.get("at") or 0) <= TAB_ZAEHL_FRISCH_S
+              or jetzt - float(z.get("neben_at") or 0) <= TAB_ZAEHL_FRISCH_S + 60]
     if len(lebend) >= 2 and (any(_TABS[t].get("puls") is None for t in lebend) or jetzt - _TAB_HAUPT["puls_at"] >= TAB_PULS_PRUEF_S):
         tids = _tabs_puls_lesen(liste)
         _TAB_HAUPT["puls_at"] = jetzt

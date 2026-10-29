@@ -112,7 +112,7 @@ def main():
     import time as _t
     hz = {"re": re, "time": _t}
     exec(bloecke(os.path.join(HIER, "..", "mt5-copier", "panel.py"), ["haupt_tab_waehlen", "tab_gesehen", "neben_tab_frei"],
-                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "_TABS", "_TAB_HAUPT"]), hz)
+                 ["_TAB_OEFFNEN", "TAB_URL_RE", "TAB_HAUPT_FRISCH_S", "TAB_HAUPT_SICHER_S", "_TABS", "_TAB_HAUPT"]), hz)
     hz["tab_gesehen"]("Mozilla/5.0", {"tab": ["1"], "login": ["1"], "url": ["http://localhost:5000/"]})
     check(hz["_TAB_OEFFNEN"]["zuletzt"] == 0.0, "Panel-Seite im Browser zählt nicht als Tab")
     hz["tab_gesehen"]("python-requests/2.32", {"tab": ["1"], "login": ["0"], "url": ["http://127.0.0.1:5000/"], "tid": ["abc"]})
@@ -143,6 +143,22 @@ def main():
     check(H({"a": {"at": j1 - 301, "login": True}}, j1, "a") == "", "kein Tab fragt ≤ 5 min → keiner")
     check(H({"a": {"at": j1 - 240, "login": True, "puls": True}, "b": {"at": j1 - 1, "login": True, "puls": False}}, j1, "a") == "a",
           "Hysterese (S2): gedrosselter Haupt-Tab im Puls-Chrome (4 min still) bleibt Haupt-Tab, kein Neuladen im Kreis")
+    # NEULADEN / DEPLOY (Master 30.10.2026: nie eine Phase ohne Haupt-Tab)
+    T.clear(); hz["_TAB_HAUPT"]["tid"] = ""
+    q = lambda tid, login="1": {"tab": ["1"], "login": [login], "url": ["http://localhost:5000/"], "tid": [tid]}   # noqa: E731
+    check(hz["tab_gesehen"]("python-requests/2.32", q("s1")) is True, "erster Tab → Haupt-Tab")
+    T["s1"]["puls"] = True
+    T["s1"]["at"] -= 20                                             # Strg+F5: 20 s Pause, dieselbe Kennung (sessionStorage)
+    check(hz["tab_gesehen"]("python-requests/2.32", q("s1")) is True and hz["_TAB_HAUPT"]["tid"] == "s1", "Neuladen → bleibt Haupt-Tab (gleiche Kennung)")
+    T.clear(); jj = _t.time()
+    for i, alt in enumerate((100, 160, 240)):                      # Deploy: 3 alte Kennungen, still seit 100–240 s, eine davon im Puls-Chrome
+        T[f"alt{i}"] = {"at": jj - alt, "login": True, "puls": i == 0}
+    hz["_TAB_HAUPT"]["tid"] = "alt0"
+    check(hz["tab_gesehen"]("python-requests/2.32", q("neu")) is True and hz["_TAB_HAUPT"]["tid"] == "neu",
+          "Deploy, 3 alte Kennungen still (> 60 s) → der neue Tab wird sofort Haupt-Tab, kein „nur ansehen“")
+    T["anders"] = {"at": _t.time() - 10, "login": True, "puls": True}
+    hz["_TAB_HAUPT"]["tid"] = "anders"
+    check(hz["tab_gesehen"]("python-requests/2.32", q("neu")) is False, "lebt ein anderer Tab nachweislich (< 60 s) → Hysterese/Rang gilt weiter")
     N = hz["neben_tab_frei"]
     check(N(tabs, "b", False, j1, "a") is False and N(tabs, "b", True, j1, "a") is True and N({"a": {"at": j1 - 120, "login": True}}, "b", False, j1, "a") is False
           and N({"a": {"at": j1 - 301, "login": True}}, "b", False, j1, "a") is True,
@@ -163,6 +179,12 @@ def main():
     check('== "puls_login"' in rt and '|puls-login"' in rt and "< 86400" in rt and 'alarm_senden(3, "puls_login_fehlt"' in rt,
           "Railway: ⚪ „Prophos im Puls-Chrome nicht angemeldet“ je PC höchstens 1× am Tag, eigene Drossel neben tab-heil")
     check("_tabNebenSofort" in html and "window._tabNeben " not in html and "window._tabNeben)" not in html, "Sofort-Flag heißt window._tabNebenSofort (Master)")
+
+    html = open(os.path.join(HIER, "..", "prophos.html"), encoding="utf-8").read()
+    check("sessionStorage.getItem('prophos_tab_id')" in html, "Tab-Kennung übersteht Neuladen (sessionStorage je Tab)")
+    pq0 = open(os.path.join(HIER, "..", "mt5-copier", "panel.py"), encoding="utf-8").read()
+    check("TAB_ZAEHL_FRISCH_S" in pq0 and "haupt_tab_waehlen(_TABS, jetzt, _TAB_HAUPT[\"tid\"], tid)" in pq0,
+          "Doppel-Tab-Zählung nur frische Kennungen; Sicherung bekommt die fragende Kennung")
 
     an = {"_ap_ts": lambda r: datetime.fromisoformat(str(r).replace("Z", "+00:00")) if r else None}
     exec(bloecke(os.path.join(HIER, "..", "app.py"), ["tab_stand_riegel"]), an)

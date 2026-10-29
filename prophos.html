@@ -24000,7 +24000,12 @@
   // haupt_tab:false und lädt sich im ruhigen Moment als ?neben=1 neu: dann ohne PC-Rollen (MT5_LOCAL false — kein mt5_live, keine Claims,
   // kein Puls), nur ansehen. Geschlossen wird er nie. Stirbt der Haupt-Tab (oder rangiert dieser höher), wird er wieder Haupt-Tab.
   const TAB_NEBEN = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && /[?&]neben=1(&|$)/.test(location.search)
-  window._tabHerzId = window._tabHerzId || Math.random().toString(36).slice(2, 10)   // Kennung je Tab (Panel liest sie im Puls-Chrome per CDP)
+  // Kennung je Tab (Panel liest sie im Puls-Chrome per CDP). In sessionStorage (30.10.2026, Spur Chris pc-c19p2l „4–6 Prophos-Tabs"): sie
+  // übersteht das Neuladen — mit einer neuen Kennung je Laden blieb die alte 5 min Haupt-Tab und der frisch geladene Tab wurde „nur ansehen"
+  window._tabHerzId = window._tabHerzId || (() => {
+    try{ let t = sessionStorage.getItem('prophos_tab_id'); if(!t){ t = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('prophos_tab_id', t) } return t }
+    catch(_){ return Math.random().toString(36).slice(2, 10) }
+  })()
   const MT5_LOCAL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && !TAB_NEBEN
   function tabNebenWerden(){
     // nie mitten in einem Lauf: dieselbe Ruhe-Prüfung wie das Sofort-Update — nur „Tab im Hintergrund" zählt hier nicht (nur-ansehen-Tab)
