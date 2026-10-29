@@ -21864,7 +21864,8 @@ def ap_echte_balancen(plan):
     """REIN RECHNEND (testbar): (vorher, nachher, quelle) aus ECHTEN Lesungen, sonst None.
     Echo V2 (mt5v2): vorher = mt5_baseline.master_balance (Copier beim Start), nachher = bal_nach.balance (Nachlesung, ok) bzw.
     final.master_balance. Orbit V2 (tvv2): vorher = tv.balance_start, nachher = final.balance_end nur mit final.quelle 'puls'
-    (Puls-Endlesung) — Demo-, Hand-, Level- und Reader-Werte zählen nie."""
+    (Puls-Endlesung) — Demo-, Hand-, Level- und Reader-Werte zählen nie. Topstep V2 (tsv2) zusätzlich final.quelle 'auge' (29.10.2026:
+    Endlesung aus dem TopstepX-Auge mit Flach-Beweis, exaktem Konto, zwei gleichen RP&L-Lesungen und Balance-Diff = RP&L-Delta)."""
     bl = plan.get("mt5_baseline") if isinstance((plan or {}).get("mt5_baseline"), dict) else {}
     fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
     route = str((plan or {}).get("route") or "")
@@ -21878,6 +21879,8 @@ def ap_echte_balancen(plan):
         tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
         vorher = _wd_num(tv.get("balance_start"))
         nachher, q = (_wd_num(fin.get("balance_end")), "puls") if fin.get("quelle") == "puls" else (None, None)
+        if nachher is None and route == "tsv2" and fin.get("quelle") == "auge":   # Nova-Endlesung aus dem TopstepX-Auge (29.10.2026, prophos.html tsxAugeEndeUrteil)
+            nachher, q = _wd_num(fin.get("balance_end")), "auge"
     else:
         return None
     if not vorher or vorher <= 0 or not nachher or nachher <= 0:
@@ -22056,7 +22059,7 @@ def ap_blow_auto_tick(force=False):
 # ein Trade oder wartet einer aufs Abhaken (open/review), bleibt alles wie bisher. Kein Push. Aus nur per regeln.blow_konto_auto = false.
 AP_BLOW_KONTO_S = 300
 AP_BLOW_KONTO_RE = re.compile(r"geblasen|geblowt|Polster aufgebraucht", re.I)   # = istBlow in tplBraucht (prophos.html)
-AP_BLOW_KONTO_QUELLEN = (None, "", "puls", "mt5")   # tv_balance_quelle einer eigenen Lesung; null = Puls (vor F11, 27.09.2026)
+AP_BLOW_KONTO_QUELLEN = (None, "", "puls", "mt5", "auge")   # tv_balance_quelle einer eigenen Lesung; null = Puls (vor F11, 27.09.2026); auge = TopstepX-Auge (29.10.2026)
 _ap_blow_konto = {"at": 0.0, "n": 0, "fehler": "", "letzt": []}
 
 

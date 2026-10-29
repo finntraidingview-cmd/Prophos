@@ -80,6 +80,13 @@ def main():
     check(f(echo, {"account_type": "phase2"}, None) == {"pl": 1250.0, "quelle": "mt5_nachlesung", "grund": "phase_phase2"},
           "Echo V2: Phase 1 → Phase 2 mit Nachlesung → abhaken")
 
+    # Nova-Endlesung aus dem TopstepX-Auge (29.10.2026): tsv2 mit final.quelle 'auge' zählt als echte Lesung, tvv2 nie
+    auge = {"status": "review", "route": "tsv2", "konto_typ": "challenge",
+            "mt5_baseline": {"tv": {"balance_start": 150000}, "final": {"balance_end": 150018.78, "quelle": "auge"}}}
+    check(f(auge, {"account_type": "funded"}, None) == {"pl": 18.78, "quelle": "auge", "grund": "phase_funded"}, "Topstep V2 mit Auge-Endlesung → abhaken wie Puls")
+    tv_auge = dict(auge, route="tvv2")
+    check(f(tv_auge, {"account_type": "funded"}, None) is None, "Orbit V2 mit quelle 'auge' → nie (nur Topstep)")
+
     print("OK" if ok else "FEHLER")
     sys.exit(0 if ok else 1)
 

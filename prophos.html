@@ -26448,12 +26448,16 @@
       return false
     }
     try{
-      const upd = { tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString(), tv_balance_quelle: 'puls' }
+      // b.quelle 'auge' (Nova-Endlesung aus dem TopstepX-Auge, 29.10.2026) — sonst wie immer 'puls'
+      const upd = { tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString(),
+                    tv_balance_quelle: b.quelle === 'auge' ? 'auge' : 'puls' }
       let { error } = await supabase.from('accounts').update(upd).eq('id', accountId)
+      // 'auge' noch nicht im Check (sql/2026-10-29_plan_gelesen_auge.sql) → als 'puls' schreiben, nie ohne Quelle
+      if(error && upd.tv_balance_quelle === 'auge' && /tv_balance_quelle/.test(String(error.message || ''))){ upd.tv_balance_quelle = 'puls'; ({ error } = await supabase.from('accounts').update(upd).eq('id', accountId)) }
       // Spalte tv_balance_quelle noch nicht angelegt (F11, 27.09.2026) → ohne sie schreiben
       if(error && /tv_balance_quelle/.test(String(error.message || ''))){ delete upd.tv_balance_quelle; ({ error } = await supabase.from('accounts').update(upd).eq('id', accountId)) }
       if(error){ console.warn('[tv-balance] Konto', error.message || error); return false }
-      const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(a){ a.tvBalance = b.balance; a.tvBalanceAt = upd.tv_balance_at; a.tvBalanceQuelle = 'puls' }
+      const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(a){ a.tvBalance = b.balance; a.tvBalanceAt = upd.tv_balance_at; a.tvBalanceQuelle = upd.tv_balance_quelle || 'puls' }
       return true
     }catch(e){ console.warn('[tv-balance] Konto', e); return false }
   }
@@ -29441,7 +29445,7 @@
       let neu = null
       try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[nova-auge] final-Patch', (e && e.message) || e); return }
       if(!neu) return   // inzwischen erledigt — Finns Wert gilt
-      if(w.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: w.balance, equity: w.balance, relativ: w.balance_relativ }, nowIso, w.konto)
+      if(w.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: w.balance, equity: w.balance, relativ: w.balance_relativ, quelle: 'auge' }, nowIso, w.konto)
       try{ _autoPnlCache.delete(pid) }catch(_){}
       const { m } = await tvV2MasterPlAusBalance(pid, p0, fin0, neu)
       const txt = m != null ? `${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $` : `${w.master_pl} $`
@@ -39287,7 +39291,7 @@
       wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
       // Live-Balance aus TradingView (26.09.2026, Puls-Lesung bei Start/Nachlesung) — jüngste Quelle für die Hedge-Staffel
       tvBalance: row.tv_balance != null ? Number(row.tv_balance) : null, tvBalanceAt: row.tv_balance_at || null,
-      tvBalanceQuelle: row.tv_balance_quelle || null,   // 'puls' | 'dashboard' (F11, 27.09.2026); null = Puls
+      tvBalanceQuelle: row.tv_balance_quelle || null,   // 'puls' | 'dashboard' | 'mt5' | 'auge' (TopstepX-Auge, 29.10.2026); null = Puls
       // Kontogröße (26.09.2026, F9): starting_balance statt der manuellen Balance — Rückfall ist der Kontoname („150k")
       startingBalance: row.starting_balance != null ? Number(row.starting_balance) : null,
       // WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
@@ -50408,7 +50412,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1856'
+  const OS_TAB_BUILD = '2026-09-22.1857'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
