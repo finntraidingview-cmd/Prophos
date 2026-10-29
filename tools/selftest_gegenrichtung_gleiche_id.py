@@ -74,7 +74,10 @@ check(m2 and "tpIstWdPlan" not in m2.group(0) and "tpIstOrbitV3" not in m2.group
 
 i = HTML.index("  async function rkVerschieben(")
 rvs = HTML[i:HTML.index("\n  }\n", i)]
-check("if(!aufgeben && tpIstWdPlan(neu)) await tpWdTagesplanStartSetzen(neu.id, neu.startUm)" in rvs and "async function tpWdTagesplanStartSetzen(" in HTML,
+# seit dem Hedge-Bündel (.1870) über tpWdZaehlt = tpIstWdPlan && !tpIstApexHedge: jeder echte WD zieht weiter mit, nur Apex mit Hedge (ohne
+# Farmer-Tagesplan) nicht
+check("if(!aufgeben && tpWdZaehlt(neu)) await tpWdTagesplanStartSetzen(neu.id, neu.startUm)" in rvs and "async function tpWdTagesplanStartSetzen(" in HTML
+      and "const tpWdZaehlt = p => tpIstWdPlan(p) && !tpIstApexHedge(p)" in HTML,
       "WD-Plan geschoben → Startzeit im wd_tagesplan mitgezogen (Prüfer T3)")
 i = HTML.index("  async function tpWdTagesplanStartSetzen(")
 ts = HTML[i:HTML.index("\n  }\n", i)]

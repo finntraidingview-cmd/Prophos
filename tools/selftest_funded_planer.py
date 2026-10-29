@@ -363,7 +363,7 @@ def big_trade(ns):
     prophos.html bigTradePlan (Heim-Wache, Prio 1/2) über JavaScriptCore. Die DB-Funktion prophos_big_trade sieht dieselben Felder."""
     print("Big Trade wie von Hand (Heim-Wache, Puls bleibt zu Hause)")
     ns2 = {"_wd_num": ns["_wd_num"]}
-    exec(block("puls_heim_big_trades"), ns2)
+    exec(block("plan_ist_apex_hedge") + "\n" + block("puls_heim_big_trades"), ns2)   # Apex mit Hedge zählt dort als WD (30.10.2026)
     U1 = "00000000-0000-4000-a000-0000000000a1"
     konto = {"id": "kb", "user_id": U1, "name": "150k PAAPEX000000000077 → Funded", "firm": "Apex Trader", "account_type": "funded",
              "auto_planer": True, "tv_balance": 150000, "tv_balance_at": "2026-10-27T01:00:00+00:00"}

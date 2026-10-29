@@ -63,10 +63,12 @@ def js_zeile(src, anfang):
 
 def main():
     src = open(HTML, encoding="utf-8").read()
-    teile = [js_zeile(src, "const HEDGE_DLL_VOR_PKT"), js_zeile(src, "const hedgeLiqDllFelder")]
+    teile = [js_zeile(src, "const HEDGE_DLL_VOR_PKT"), js_zeile(src, "const hedgeLiqDllFelder"),
+             # Hedge Teil 2 (30.10.2026): hedgeIstWd/hedgeLiqLevel fragen nach finalem Tradeify (S4) und Apex mit Hedge (S1)
+             js_zeile(src, "const hedgeIstTradeifyFinal"), js_zeile(src, "const tpIstApexHedge")]
     # istTradeifyCfd: firmNormRichtung fragt seit .1726 danach (Tradeify CFD eigene Firma)
     teile += [js_funktion(src, n) for n in ("istTradeifyCfd", "firmNormRichtung", "tvV2Handelstag", "liqRegelWaehlen", "liqDailyLoss", "hedgeTagesstart",
-                                            "hedgeLiqDll", "hedgeLiqStart", "hedgeLiqLevel")]
+                                            "hedgeLiqDll", "hedgeLiqDllApex", "hedgeLiqStart", "hedgeLiqLevel")]
     acc = [
         {"id": "marc", "name": "150k PAAPEX6843320000001 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": None},
         {"id": "a100", "name": "100k PAAPEX0000000000099 → Funded", "firm": "Apex Trader", "type": "winning_days", "startingBalance": 100000},

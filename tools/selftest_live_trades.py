@@ -26,7 +26,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
                    + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "plan_balance_relativ", "konto_basis_balance",
-                                           "plan_ist_wd", "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
+                                           "plan_ist_wd", "plan_ist_apex_hedge", "ah_dll_balance", "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl", "tsx_zeile_ueberlagern",
                                            "tv_bracket_ueberlagern", "lt_pl_balance")]), ns)
     return ns
 
