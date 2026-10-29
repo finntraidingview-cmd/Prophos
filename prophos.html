@@ -9958,6 +9958,18 @@
               </label>
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-wd-trade-hint">Kleiner Tages-Trade auf dem Funded — die Statistik rechnet ihn getrennt vom Big Trade.</div>
             </div>
+            <!-- Konto gleich umstellen (29.10.2026, Finn: „Ich will aber auch noch gleich die Option, hinzuzufügen, dass er jetzt zu Winning Days
+                 verschoben wird. Bei Echo genau das Gleiche: dass er jetzt zu Waiting for Payout verschoben wird. Also ich kann das dann auch
+                 optional anklicken"): Master-Konto Funded (Futures) → Winning Days bzw. Funded CFD → Waiting for Payout — dieselben Bedingungen
+                 und Wege wie die Knöpfe neben dem Typ-Chip in Accounts (accWdToggleHtml → accWdUmstellen / accWartetUmstellen). Standard aus,
+                 gefüllt von tcKontoUmPrepare, ausgeführt beim „Erledigt" (nicht bei „geblowt"). -->
+            <div class="field" style="grid-column:span 2" id="tc-konto-um-wrap" hidden>
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+                <input type="checkbox" id="tc-konto-um" style="width:16px;height:16px;flex-shrink:0">
+                <span style="color:var(--ink);font-weight:500" id="tc-konto-um-label"></span>
+              </label>
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-konto-um-hint"></div>
+            </div>
             <!-- WD-Farm-Haken nach dem Trade (23.09.2026, Finn: „oder nach dem Trade einen Haken setzen") -->
             <div class="field" style="grid-column:span 2" id="tc-wd-farm-wrap" hidden>
               <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
@@ -50254,7 +50266,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1855'
+  const OS_TAB_BUILD = '2026-09-22.1856'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66566,6 +66578,25 @@
   }
   /* Winning-Day-Kennzeichen am Trade (25.09.2026): Haken nur bei Funded/Live-Master. Vorbelegung = gespeicherter
    * Wert; nie gesetzt → Faustregel wie im Backend (_hq_typ_trade): Master-Risiko < 1.000 $, ohne Risiko |Master-P&L|. */
+  /* Konto gleich umstellen (29.10.2026): Bedingung wie accWdToggleHtml — Funded einer Futures-Firma → Winning Days, Funded CFD ohne
+   * Waiting → Waiting for Payout; Master-Konto des Plans, nie bei Polar. Haken steht immer aus. */
+  function tcKontoUmPrepare(p){
+    const wrap = document.getElementById('tc-konto-um-wrap'), cb = document.getElementById('tc-konto-um')
+    const lbl = document.getElementById('tc-konto-um-label'), hint = document.getElementById('tc-konto-um-hint')
+    if(!wrap || !cb || !lbl) return
+    cb.checked = false; cb.dataset.ziel = ''; wrap.hidden = true
+    const a = p && p.route !== 'polar' ? (accounts || []).find(x => String(x.id) === String(p.masterAccountId)) : null
+    if(!a) return
+    const futures = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
+    if(a.type === 'funded' && futures){
+      cb.dataset.ziel = 'winning_days'; lbl.textContent = 'Konto jetzt zu Winning Days verschieben'
+      if(hint) hint.textContent = `${a.name} — Big Trade gewonnen, dieselbe Konto-Zeile wird zum Winning-Days-Konto.`
+    }else if(a.type === 'funded_cfd' && !a.waitingPayoutSince){
+      cb.dataset.ziel = 'waiting'; lbl.textContent = 'Konto jetzt zu Waiting for Payout'
+      if(hint) hint.textContent = `${a.name} — Konto ist im Plus und wartet nur auf den Payout; springt beim Payout-Anfragen von selbst zurück.`
+    }else return
+    wrap.hidden = false
+  }
   function tcWdTradePrepare(p){
     const wrap = document.getElementById('tc-wd-trade-wrap'), cb = document.getElementById('tc-wd-trade'), hint = document.getElementById('tc-wd-trade-hint')
     if(!wrap || !cb) return
@@ -66977,6 +67008,7 @@
     tcWinningDayPrepare(p)
     tcWdFarmPrepare(p)
     tcWdTradePrepare(p)
+    tcKontoUmPrepare(p)   // Konto gleich umstellen (29.10.2026)
     tcPolarBlownPrepare(p)
 
     tcRecompute()
@@ -67846,6 +67878,13 @@
       const _fmCb = document.getElementById('tc-wd-farm'), _fmWrap = document.getElementById('tc-wd-farm-wrap')
       if(_fmCb && _fmWrap && !_fmWrap.hidden && masterAcc && !!masterAcc.wdFarm !== _fmCb.checked){
         try{ await wdFarmSetzen(masterAcc.id, _fmCb.checked) }catch(e){ console.warn('[wd-farm]', e) }
+      }
+      // Konto gleich umstellen (29.10.2026): nur mit Haken, nur wenn der Status unverändert bleibt (nicht geblowt, nicht bestanden → Nachfolger-Wizard; Prüfer S7) — dieselben Wege wie die Knöpfe in Accounts (Toast kommt von dort)
+      const _kuCb = document.getElementById('tc-konto-um'), _kuWrap = document.getElementById('tc-konto-um-wrap')
+      if(_kuCb && _kuWrap && !_kuWrap.hidden && _kuCb.checked && masterAcc && statusChoice === 'none'){
+        const _kuAkt = (accounts || []).find(a => String(a.id) === String(masterAcc.id)) || masterAcc   // frischer Stand: inzwischen woanders umgestellt → nichts tun
+        if(_kuCb.dataset.ziel === 'winning_days' && _kuAkt.type === 'funded') await accWdUmstellen(masterAcc.id, 'winning_days')
+        else if(_kuCb.dataset.ziel === 'waiting' && _kuAkt.type === 'funded_cfd' && !_kuAkt.waitingPayoutSince) await accWartetUmstellen(masterAcc.id, true)
       }
 
       renderTradePlans()
