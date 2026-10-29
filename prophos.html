@@ -51402,7 +51402,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1876'
+  const OS_TAB_BUILD = '2026-09-22.1877'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57440,7 +57440,10 @@
       .filter(p => isFinite(p.min)).sort((a, b) => a.min - b.min)
     const bot = d.bot || {}
     const autoStart = bot.auto_start ?? (d.einstellung && d.einstellung.auto_start) ?? (d.ausgleich && d.ausgleich.auto_start) ?? null
-    return { d, offen, geplant, umpl, L, S, netto, brutto, band, jetzt, verlauf, bot, autoStart, imBand: band == null ? null : Math.abs(netto) <= band + 1e-9, einheit: eur ? '€' : '€/Pkt' }
+    // Hedge-Schalter (Echo/Apex/Tradeify-Final) lesen v.echo_hedge … — durchreichen (Vorfall 30.10.2026 .1874/.1875: die Felder kamen vom Backend,
+    // blieben aber in v.d, die drei Schalter neben „Bot an" erschienen nie)
+    return { d, offen, geplant, umpl, L, S, netto, brutto, band, jetzt, verlauf, bot, autoStart, imBand: band == null ? null : Math.abs(netto) <= band + 1e-9, einheit: eur ? '€' : '€/Pkt',
+             echo_hedge: d.echo_hedge, apex_hedge: d.apex_hedge, tradeify_final_hedge: d.tradeify_final_hedge }
   }
   function apdZeichnen(){
     tplSpaeter()   // Trade-Planer-Seite zeigt Kacheln + Zeitstrahl aus denselben Daten
