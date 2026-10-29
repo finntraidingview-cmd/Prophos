@@ -30742,9 +30742,11 @@
   function tsxReloginAnstossen(plan, art){
     const jetzt = Date.now(), blind = art === 'blind'
     if(jetzt - _tsxReloginAt < TSX_RELOGIN_ABSTAND_MS) return false
+    if(blind && !tsxReparaturFrei()) return false   // Auge-Reparatur höchstens 1× je 30 min je PC (30.10.2026, s. tsxAugeUrteil)
     if(hedgePulsUnterwegs() || (typeof polarLaeuft === 'function' && polarLaeuft())) return false   // belegt → nächster Takt
     if(typeof bigTradeHeimPlanen !== 'function') return false
     _tsxReloginAt = jetzt
+    if(blind) tsxLs.set('prophos_tsx_auge_rep_at', jetzt)
     console.warn(`[hedgeTsx] TopstepX-${blind ? 'Auge blind' : 'ausgeloggt'} — kein Schließen über das Auge, Puls repariert über den Heimweg`, (plan && (plan.masterName || plan.id)) || '')
     if(typeof atToast === 'function') atToast(`TopstepX ${blind ? '-Auge blind — Puls lädt den Tab neu bzw. öffnet ihn neu' : 'ausgeloggt — Puls loggt sich wieder ein'} (${(plan && plan.masterName) || 'Topstep-Trade'}); Radar und Fusion-Level schließen weiter`, 'end')
     bigTradeHeimPlanen('', blind ? 'TopstepX-Auge blind — Reparatur' : 'TopstepX ausgeloggt — Rück-Login', true, 'tsx')
@@ -30765,12 +30767,50 @@
       wurzel: (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(x.symbol)) : String(x.symbol), menge_zahl: Math.abs(x.menge), richtung: x.seite || null }))
   }
   window._tsxStandListe = tsxStandListe
-  // Auge frisch? (29.10.2026, Nova-Startsperre) — Stand ≤ 1 s, nicht ausgeloggt, mit Konto; Fehler = nicht frisch
+  /* AUGE NIE GESEHEN ≠ BLIND (30.10.2026, Master: PC von Mike ohne TopstepX-Auge — 14× „Nova nicht gestartet: TopstepX-Auge blind (Neuladen +
+   * neuer Tab ohne Erfolg)" alle ~16 min von 10:00 bis 13:52 Dubai, jedes Mal ein Reparaturlauf ohne Chance). Jetzt:
+   *   - je gesehen = dieser PC-Tab hat je einen frischen Stand gesehen (localStorage prophos_tsx_auge_gesehen_at) ODER das Panel hat seit
+   *     seinem Start je einen Stand bekommen (/api/tsx-stand jemals_s, panel.py ab diesem Stand).
+   *   - nie gesehen → KEIN Reparaturlauf. Einmal je 24 h eine Probe: ein normales Lesen öffnet den TopstepX-Tab (kein Neuladen, kein
+   *     Tab-Schließen) — meldet das Auge auch danach nie, gilt es als nicht installiert (prophos_tsx_auge_fehlt_at): 🟠 an die Master-IDs
+   *     (Railway /alarm/userscript-update fehlt, 24 h je PC), Fehlstart 'auge_fehlt' ohne Deckel und OHNE Neuversuch im 15-min-Takt —
+   *     sfBehoben plant erst neu ein, wenn das Auge meldet.
+   *   - war da, jetzt blind → Reparatur höchstens 1× je TSX_REP_ABSTAND_MS = 30 min je PC (prophos_tsx_auge_rep_at, gilt für Startsperre
+   *     und Heimweg „Auge blind"), dazwischen Fehlstart ohne Reparatur.
+   * localStorage nur mit try/catch; fehlt er, bleibt das Panel-Feld als Beleg. */
+  const TSX_REP_ABSTAND_MS = 30 * 60000, TSX_FEHLT_MS = 24 * 3600000
+  const tsxLs = { get: k => { try{ return Number(localStorage.getItem(k)) || 0 }catch(_){ return 0 } },
+                  set: (k, v) => { try{ localStorage.setItem(k, String(v)) }catch(_){} }, weg: k => { try{ localStorage.removeItem(k) }catch(_){} } }
+  let _tsxLage = null, _tsxGesehenGemerkt = 0
+  function tsxAugeGesehenMerken(){
+    const jetzt = Date.now(); if(jetzt - _tsxGesehenGemerkt < 60000) return
+    _tsxGesehenGemerkt = jetzt; tsxLs.set('prophos_tsx_auge_gesehen_at', jetzt); tsxLs.weg('prophos_tsx_auge_fehlt_at')
+  }
+  // REIN RECHNEND (window._tsxAugeUrteil): Lage für die Nova-Startsperre → 'gesehen' | 'nie' | 'fehlt' (nie + Probe < 24 h ohne Auge)
+  function tsxAugeUrteil(gesehenAt, fehltAt, jemalsS, jetzt){
+    if(gesehenAt > 0 || jemalsS != null) return 'gesehen'
+    return fehltAt > 0 && jetzt - fehltAt < TSX_FEHLT_MS ? 'fehlt' : 'nie'
+  }
+  window._tsxAugeUrteil = tsxAugeUrteil
+  const tsxReparaturFrei = () => Date.now() - tsxLs.get('prophos_tsx_auge_rep_at') >= TSX_REP_ABSTAND_MS
+  function tsxAugeFehltMelden(grund){
+    if(Date.now() - tsxLs.get('prophos_tsx_auge_fehlt_gemeldet_at') < TSX_FEHLT_MS) return
+    tsxLs.set('prophos_tsx_auge_fehlt_gemeldet_at', Date.now())
+    ;(async () => { try{
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ art: 'tsx', fehlt: true, pc: hedgePcId() || '', msg: String(grund || '').slice(0, 180) }) })
+    }catch(e){ console.warn('[hedgeTsx] Auge-fehlt melden', (e && e.message) || e) } })()
+  }
+  // Auge frisch? (29.10.2026, Nova-Startsperre) — Stand ≤ 1 s, nicht ausgeloggt, mit Konto; Fehler = nicht frisch. Merkt die Lage (_tsxLage)
   async function tsxAugeFrisch(){
     try{
       const r = await window.mtcApi('tsx-stand', { timeoutMs: 800 })
-      return !!(r && r.ok === true && typeof r.alter_s === 'number' && r.alter_s <= 1.0 && r.stand && r.stand.ausgeloggt !== true
+      _tsxLage = r && typeof r === 'object' && !r._httpFail ? r : _tsxLage
+      const f = !!(r && r.ok === true && typeof r.alter_s === 'number' && r.alter_s <= 1.0 && r.stand && r.stand.ausgeloggt !== true
         && r.stand.konto && r.stand.konto.kontonr)
+      if(f) tsxAugeGesehenMerken()
+      return f
     }catch(_){ return false }
   }
   const TSX_START_WARTEN_MS = 10000
@@ -30783,6 +30823,25 @@
       if(Date.now() - t0 >= TSX_START_WARTEN_MS) break
       await new Promise(res => setTimeout(res, 300 + Math.random() * 400))
     }
+    const je = () => (_tsxLage && 'jemals_s' in _tsxLage) ? _tsxLage.jemals_s : null
+    let lage = tsxAugeUrteil(tsxLs.get('prophos_tsx_auge_gesehen_at'), tsxLs.get('prophos_tsx_auge_fehlt_at'), je(), Date.now())
+    if(lage === 'fehlt') return { ok: false, fehlt: true, grund: 'nie gemeldet, Probe vor < 24 h ohne Auge' }
+    if(lage === 'nie'){
+      // Probe statt Reparatur: normales Lesen öffnet/zeigt den TopstepX-Tab — ein installiertes Auge meldet dann binnen Sekunden
+      try{ await tvV2Lesen(konto, 45, plan) }catch(_){}
+      const t1 = Date.now()
+      while(Date.now() - t1 < 6000){ if(await tsxAugeFrisch()) return { ok: true, repariert: true }; await new Promise(res => setTimeout(res, 400 + Math.random() * 400)) }
+      if(je() == null && !tsxLs.get('prophos_tsx_auge_gesehen_at')){
+        tsxLs.set('prophos_tsx_auge_fehlt_at', Date.now())
+        tsxAugeFehltMelden('nach dem Öffnen des TopstepX-Tabs kein Stand')
+        return { ok: false, fehlt: true, grund: 'nach dem Öffnen des TopstepX-Tabs kein Stand' }
+      }
+    }
+    if(!tsxReparaturFrei()){
+      const vor = Math.round((Date.now() - tsxLs.get('prophos_tsx_auge_rep_at')) / 60000)
+      return { ok: false, grund: `letzte Reparatur vor ${vor} min — höchstens 1× je 30 min` }
+    }
+    tsxLs.set('prophos_tsx_auge_rep_at', Date.now())
     let r = null
     try{ r = await tvV2Lesen(konto, 45, plan, { auge_reparieren: true }) }catch(e){ r = { ok: false, msg: String((e && e.message) || e) } }
     if(r && r.ok && r.auge_ok === true && await tsxAugeFrisch()) return { ok: true, repariert: true }
@@ -30817,7 +30876,7 @@
       if(hedgePulsUnterwegs()){ verwerfen(); tsxBlindZurueck(); return }   // während des Holens losgelaufen
       if(st.ausgeloggt === true){ verwerfen(); tsxBlindZurueck(); tsxReloginAnstossen(meine[0], 'ausgeloggt'); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
       if(!(st.konto && st.konto.kontonr)){ verwerfen(); blindTick('kein Konto im Auge'); return }   // frisch, aber ohne Konto = blind
-      tsxBlindZurueck()
+      tsxBlindZurueck(); tsxAugeGesehenMerken()
       const k = st.konto || {}, liste = tsxStandListe(st), jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
@@ -51475,6 +51534,14 @@
       // 'auge_blind' zählt nicht gegen den Fehlstart-Deckel (SF_OHNE_DECKEL) — sfTick versucht es im 15-min-Takt neu.
       if(plan.route === 'tsv2' && Number(plan.hedgeEur) > 0 && MT5_LOCAL){
         const ag = await tsxAugeStartBereit(plan, extId)
+        if(!ag.ok && ag.fehlt){
+          // nie gesehen (30.10.2026): kein Neuversuch im 15-min-Takt — sfBehoben plant neu ein, sobald das Auge meldet
+          const wo = (typeof pcLabel === 'function') ? pcLabel(hedgePcId()) : hedgePcId()
+          tsxAugeFehltMelden(ag.grund)
+          await fehler(`⛔ Nova nicht gestartet: TopstepX-Auge auf PC ${wo || '?'} nicht installiert (${ag.grund}) — Nova dort nicht startbar, nichts gesendet. Plan bleibt Geplant und startet, sobald das Auge meldet.`,
+            { ok: false, code: 'auge_fehlt', schritt: 'auge_fehlt', retry_ok: true })
+          return
+        }
         if(!ag.ok){
           await fehler(`⛔ Nova nicht gestartet: TopstepX-Auge blind (${ag.grund}) — nichts gesendet, Plan bleibt Geplant; Neuversuch im Fehlstart-Takt.`,
             { ok: false, code: 'auge_blind', schritt: 'auge_blind', retry_ok: true })
@@ -55404,7 +55471,7 @@
   const SF_MAX = 3, SF_WARTE_MS = 15 * 60000, SF_TAKT_MS = 60000, SF_ABGLEICH_MS = 2 * 60000
   // WARTEN IST KEIN FEHLER (19.10.2026, Puls bleibt zu Hause): ein Big Trade kann stundenlang knapp unter dem TP pendeln — diese Schritte
   // zählen nicht gegen SF_MAX, der Plan wird bis zum Ende des Start-Fensters alle 15 min neu versucht
-  const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar', 'auge_blind'])   // auge_blind (29.10.2026): Nova wartet auf ein sehendes TopstepX-Auge
+  const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar', 'auge_blind', 'auge_fehlt'])   // auge_blind (29.10.2026): Nova wartet auf ein sehendes TopstepX-Auge
   // WINNING DAY NAH ≠ 15 MIN (22.10.2026, Prüf-Agent nach .1718): seit „Puls bleibt zu Hause" auch für Winning Days gilt, sperrt ein WD
   // ≤ 100 $ vor TP/Liq den Puls meist nur 1–4 min — mit 15 min + 2–6 min Wartezeit riss das Futures-Paare (2–10 min) auseinander.
   // Railway schreibt den Grund mit „Winning Day …" an den Anfang (app.py puls_heim_pruefen); fehler() setzt nur „⛔ " davor. Dann
@@ -55513,6 +55580,12 @@
   async function sfBehoben(plan, f){
     if(f.unklar || f.schritt === 'ziel_erreicht' || f.schritt === 'manuelle_arbeit') return null   // Ziel erreicht / Manuelle Arbeit: nie von selbst neu einplanen
     if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
+    // TopstepX-Auge nicht installiert (30.10.2026): erst neu einplanen, wenn das Auge an diesem PC meldet — kein 15-min-Takt
+    if(f.schritt === 'auge_fehlt'){
+      const r = (typeof window.mtcApi === 'function') ? await window.mtcApi('tsx-stand', { timeoutMs: 800 }).catch(() => null) : null
+      if(r && (r.ok === true || r.jemals_s != null)){ tsxLs.weg('prophos_tsx_auge_fehlt_at'); return 'TopstepX-Auge meldet jetzt' }
+      return null
+    }
     // Master nie gefüllt (08.10.2026): nach 15 min nur, wenn der Puls-Chrome-Reader das Konto JETZT flach zeigt — kam der Master doch
     // noch (oder ist das Konto nicht im Blick), kein zweiter Trade
     if(f.schritt === 'master_nie'){
@@ -55636,7 +55709,7 @@
   // Handy-Meldung für einen Fehlstart, der sich NICHT von selbst behebt (21.10.2026): einmal je Plan + Fehler-Zeitpunkt, sobald er länger als
   // SF_HAENGT_MS ohne Neuversuch steht — vorher meldete sfMelden jeden Fehlstart sofort, auch die, die zwei Minuten später durchliefen
   function sfHaengtMelden(p, f){
-    if(!f || sfVersuchtErneut(f) || f.status !== 'rot' || f.schritt === 'ziel_erreicht') return
+    if(!f || sfVersuchtErneut(f) || f.status !== 'rot' || f.schritt === 'ziel_erreicht' || f.schritt === 'auge_fehlt') return   // auge_fehlt: 🟠 je PC/24 h statt je Plan
     if(sfIstUac(f) && !sfDeckelVoll(f)) return   // Windows-Abfrage: sfMelden hat schon gemeldet, der Plan startet danach von selbst neu
     const k = 'prophos_sf_gemeldet_' + String(p.id)
     try{ if(localStorage.getItem(k) === String(f.at || '')) return; localStorage.setItem(k, String(f.at || '')) }catch(_){}
@@ -57851,6 +57924,7 @@
       case 'big_trade_nah': return sfIstWdSperre({ msg: m })
         ? `Nichts tun — auf dem PC${pc} steht ein Winning Day kurz vor TP/Liq (100 $), Puls bleibt in dessen Konto. Der Plan versucht es in 2–4 min wieder.`
         : `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq (2.000 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
+      case 'auge_fehlt': return `TopstepX-Auge am PC${pc} nicht installiert (meldet nie, auch nicht nach dem Öffnen des TopstepX-Tabs) — im Puls-Chrome http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und in Tampermonkey installieren; der Plan startet dann von selbst.`
       case 'auge_blind': return `TopstepX-Auge am PC${pc} blind (Userscript tsx-auge meldet nichts Frisches) — Puls hat neu geladen bzw. den Tab neu geöffnet, ohne Erfolg. Tampermonkey im Puls-Chrome prüfen (Skript an?); der Plan versucht es in 15 min wieder, nichts gesendet.`
       case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {

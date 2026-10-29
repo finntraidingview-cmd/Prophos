@@ -3594,6 +3594,13 @@ def tsx_dateien_holen(jetzt=None):
     return None, None
 
 
+# AUGE JE GESEHEN (30.10.2026, PC von Mike ohne TopstepX-Auge: 14× Reparaturlauf ohne Chance): wann kam seit dem Panel-Start überhaupt je
+# ein Stand an? Der PC-Tab trennt damit „Auge nie da" (nicht installiert → keine Reparatur) von „war da, jetzt blind". Stände selbst fallen
+# nach TSX_STAND_ALT_S weg, dieser Zeitpunkt nicht.
+_tsx_jemals = {"ts": None}
+_TSX_PANEL_START = time.time()
+
+
 def tsx_stand_merken(daten, jetzt=None):
     """REIN RECHNEND bis auf den Speicher: Meldung des Userscripts ablegen. → (ok, grund)."""
     if not isinstance(daten, dict) or not isinstance(daten.get("stand"), dict):
@@ -3603,6 +3610,7 @@ def tsx_stand_merken(daten, jetzt=None):
         return False, "tab fehlt"
     jetzt = time.time() if jetzt is None else jetzt
     with _tsx_stand_lock:
+        _tsx_jemals["ts"] = jetzt
         _tsx_stand[tab] = {"ts": jetzt, "stand": daten["stand"], "script": str(daten.get("script") or "")[:24],
                            "lader": tsx_lader_kurz(daten.get("lader")) if isinstance(daten.get("lader"), dict) else None}   # 0.3.0
         for t in [t for t, v in _tsx_stand.items() if jetzt - v["ts"] > TSX_STAND_ALT_S]:
@@ -3622,15 +3630,17 @@ def tsx_lader_kurz(l):
 
 
 def tsx_stand_ausgabe(jetzt=None):
-    """Jüngster Stand aller Tabs mit Alter in Sekunden (Panel-Uhr) — {ok:false}, solange keiner meldet."""
+    """Jüngster Stand aller Tabs mit Alter in Sekunden (Panel-Uhr) — {ok:false}, solange keiner meldet. Immer dabei (30.10.2026):
+    jemals_s = Sekunden seit dem letzten Stand überhaupt seit dem Panel-Start (None = nie), panel_s = Laufzeit des Panels."""
     jetzt = time.time() if jetzt is None else jetzt
     with _tsx_stand_lock:
+        je = {"jemals_s": None if _tsx_jemals["ts"] is None else round(jetzt - _tsx_jemals["ts"], 1), "panel_s": round(jetzt - _TSX_PANEL_START)}
         if not _tsx_stand:
-            return {"ok": False, "grund": "kein TopstepX-Auge meldet"}
+            return dict({"ok": False, "grund": "kein TopstepX-Auge meldet"}, **je)
         tab = max(_tsx_stand, key=lambda t: _tsx_stand[t]["ts"])
         v = _tsx_stand[tab]
-        return {"ok": True, "tab": tab, "tabs": len(_tsx_stand), "alter_s": round(jetzt - v["ts"], 3), "script": v["script"],
-                "stand": v["stand"], "lader": v.get("lader")}
+        return dict({"ok": True, "tab": tab, "tabs": len(_tsx_stand), "alter_s": round(jetzt - v["ts"], 3), "script": v["script"],
+                     "stand": v["stand"], "lader": v.get("lader")}, **je)
 
 
 class Handler(BaseHTTPRequestHandler):

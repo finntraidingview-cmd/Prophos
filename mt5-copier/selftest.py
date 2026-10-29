@@ -2062,6 +2062,7 @@ def main():
     results.append(test_login_wache())
     results.append(test_login_eigenes_konto())
     results.append(test_tsx_auge_reparatur())
+    results.append(test_tsx_auge_jemals())
     results.append(test_windows_abfrage_vorbeugen())
     results.append(test_tv_neuladen())
     results.append(test_tv_tm_update())
@@ -2528,6 +2529,36 @@ def test_login_eigenes_konto():
     if ok:
         print("✓ Login eigenes Konto: Dialog der eigenen anderen Installation per invoke bestaetigt (Prozess belegt, 1× je Lauf), "
               "Fremdnummer/falsches Terminal nie; Panel-Wache bei stehendem Login-Fenster, gedeckelt")
+    return ok
+
+
+def test_tsx_auge_jemals():
+    """30.10.2026, PC von Mike ohne TopstepX-Auge (14× Reparaturlauf ohne Chance): /api/tsx-stand sagt immer, ob seit dem Panel-Start je ein Stand
+    kam (jemals_s, None = nie) — auch nachdem die Stände nach TSX_STAND_ALT_S weggefallen sind. Der PC-Tab trennt so „nie da" von „blind"."""
+    import panel
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ TopstepX-Auge je gesehen: " + name); ok = False
+    alt_stand, alt_je = dict(panel._tsx_stand), dict(panel._tsx_jemals)
+    try:
+        panel._tsx_stand.clear(); panel._tsx_jemals["ts"] = None
+        t = 1_000_000.0
+        a = panel.tsx_stand_ausgabe(t)
+        chk(a.get("ok") is False and a.get("jemals_s") is None and isinstance(a.get("panel_s"), (int, float)), "nie gemeldet → jemals_s None, panel_s da")
+        panel.tsx_stand_merken({"tab": "tsx-a", "script": "0.3.1", "stand": {"flach": True}}, t)
+        b = panel.tsx_stand_ausgabe(t + 2)
+        chk(b.get("ok") is True and b.get("jemals_s") == 2.0 and b.get("alter_s") == 2.0, "Stand da → jemals_s = Alter")
+        panel.tsx_stand_merken({"tab": "tsx-b", "script": "0.3.1", "stand": {}}, t + panel.TSX_STAND_ALT_S + 50)   # tsx-a fällt weg
+        panel._tsx_stand.clear()
+        c = panel.tsx_stand_ausgabe(t + panel.TSX_STAND_ALT_S + 60)
+        chk(c.get("ok") is False and c.get("jemals_s") == 10.0, "Stände weg → jemals_s bleibt (war da, jetzt blind)")
+    finally:
+        panel._tsx_stand.clear(); panel._tsx_stand.update(alt_stand); panel._tsx_jemals.update(alt_je)
+    if ok:
+        print("✓ TopstepX-Auge je gesehen: jemals_s None bis zum ersten Stand, bleibt danach (Panel-Start-Zeitraum)")
     return ok
 
 

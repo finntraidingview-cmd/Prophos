@@ -3936,6 +3936,19 @@ def alarm_userscript_update():
         except Exception as e:
             print(f"[tm] ⚠️ übersprungen loggen: {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": True})
+    # TOPSTEPX-AUGE FEHLT (30.10.2026, Master: PC von Mike ohne Auge, 14× Reparaturlauf): der PC-Tab meldet einmal, dass auf diesem PC
+    # nie ein Auge gemeldet hat — 🟠 an die Master-IDs, 24 h je PC (_tm_melde_frei), Nova startet dort nicht
+    if tsx and d.get("fehlt") is True:
+        key = f"tm|{pc}|tsx|fehlt"
+        if not _tm_melde_frei(key):
+            return jsonify({"ok": True, "gedrosselt": True})
+        pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
+        wer_pc = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
+        alarm_senden(2, "tsx_auge_fehlt", f"TopstepX-Auge fehlt: {wer_pc}"[:120],
+                     f"TopstepX-Auge auf {wer_pc} nicht installiert — Nova dort nicht startbar. Bitte im Puls-Chrome {link} öffnen und in "
+                     f"Tampermonkey installieren; danach startet der Plan von selbst ({msg or 'kein Stand seit dem Panel-Start'}).",
+                     uid=uid, daten=daten, schluessel=key)
+        return jsonify({"ok": True})
     key = f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}" + ("" if d.get("ok") is True else "|fehl")
     if not _tm_melde_frei(key):
         return jsonify({"ok": True, "gedrosselt": True})
