@@ -3449,6 +3449,54 @@ def tsx_stand_herkunft_ok(origin):
     return o.scheme in ("http", "https") and host in ("127.0.0.1", "localhost")
 
 
+# ══ TOPSTEPX-AUGE: LADER (29.10.2026, Finn 10:20: „Ich will, dass sich das Auge automatisch aktualisiert … Ich will nicht jedes Script von
+# Hand aktualisieren"). Das Auge ab 0.3.0 ist Lader + eingebauter Kern (wie tv-reader.user.js 0.10.x). Das Panel liefert hier — es ist auf
+# jedem PC da und per Code-Sync aktuell — aus dem deployten Repo-Stand (Railway /code/datei, X-Code-Token dieses PCs, beide Dateien vom
+# SELBEN Commit): /userscript/tsx-kern.json = {version, sha, kern}, kern = aktuelle augen_tsx.js + das Stück zwischen KERN-START/KERN-ENDE
+# (in einer new Function: PROPHOS_AUGEN_TSX ist dort lokal, die nachgeladene Fassung liest also mit der augen_tsx.js IHRES Stands), sha =
+# SHA-256 über kern; dazu die ganze .user.js/.meta.js für Tampermonkeys @updateURL/@downloadURL (Puls klickt einmal je PC „Aktualisieren").
+# Nur lesen, 60 s gemerkt; Herkunft wie tsx-stand (Tampermonkey, topstepx.com, lokal).
+TSX_KERN_MERK = {"s": 0.0, "wert": None, "datei": None}
+
+
+def tsx_kern_aus(userscript, augen):
+    """REIN RECHNEND (testbar): tsx-auge.user.js + augen_tsx.js → {ok, version, sha, kern} oder None (Marker fehlen/doppelt, keine
+    Version, augen_tsx.js leer oder ohne PROPHOS_AUGEN_TSX)."""
+    import hashlib
+    t = userscript.decode("utf-8") if isinstance(userscript, (bytes, bytearray)) else str(userscript or "")
+    a = augen.decode("utf-8") if isinstance(augen, (bytes, bytearray)) else str(augen or "")
+    k0, k1 = "// ==KERN-START==\n", "// ==KERN-ENDE=="
+    if t.count(k0) != 1 or t.count(k1) != 1 or t.index(k0) > t.index(k1) or "var PROPHOS_AUGEN_TSX" not in a:
+        return None
+    teil = t[t.index(k0) + len(k0):t.index(k1)]
+    m = re.search(r"var SCRIPT = '([0-9][0-9.]{2,20})'", teil)
+    if not m:
+        return None
+    kern = a.rstrip() + "\n;\n" + teil
+    return {"ok": True, "version": m.group(1), "sha": hashlib.sha256(kern.encode("utf-8")).hexdigest(), "kern": kern}
+
+
+def tsx_dateien_holen(jetzt=None):
+    """(userscript_bytes, augen_bytes) vom deployten Stand (beide mit demselben ?sha=), 60 s gemerkt — (None, None) ohne Netz/Schlüssel."""
+    jetzt = time.time() if jetzt is None else jetzt
+    if TSX_KERN_MERK["datei"] is not None and jetzt - TSX_KERN_MERK["s"] < 60:
+        return TSX_KERN_MERK["datei"]
+    sha = None
+    try:
+        roh = code_holen("/code/stand", timeout=8)
+        sha = (json.loads(roh.decode("utf-8")) or {}).get("sha") if roh else None
+    except Exception:
+        sha = None
+    if not (sha and re.fullmatch(r"[0-9a-f]{40}", str(sha))):
+        return None, None
+    us = code_holen(f"/code/datei/tv-reader/tsx-auge.user.js?sha={sha}")
+    au = code_holen(f"/code/datei/mt5-copier/augen_tsx.js?sha={sha}")
+    if us and au:
+        TSX_KERN_MERK.update(s=jetzt, datei=(us, au), wert=tsx_kern_aus(us, au))
+        return us, au
+    return None, None
+
+
 def tsx_stand_merken(daten, jetzt=None):
     """REIN RECHNEND bis auf den Speicher: Meldung des Userscripts ablegen. → (ok, grund)."""
     if not isinstance(daten, dict) or not isinstance(daten.get("stand"), dict):
@@ -3458,12 +3506,22 @@ def tsx_stand_merken(daten, jetzt=None):
         return False, "tab fehlt"
     jetzt = time.time() if jetzt is None else jetzt
     with _tsx_stand_lock:
-        _tsx_stand[tab] = {"ts": jetzt, "stand": daten["stand"], "script": str(daten.get("script") or "")[:24]}
+        _tsx_stand[tab] = {"ts": jetzt, "stand": daten["stand"], "script": str(daten.get("script") or "")[:24],
+                           "lader": tsx_lader_kurz(daten.get("lader")) if isinstance(daten.get("lader"), dict) else None}   # 0.3.0
         for t in [t for t, v in _tsx_stand.items() if jetzt - v["ts"] > TSX_STAND_ALT_S]:
             _tsx_stand.pop(t, None)
         while len(_tsx_stand) > TSX_STAND_TABS:
             _tsx_stand.pop(min(_tsx_stand, key=lambda t: _tsx_stand[t]["ts"]), None)
     return True, ""
+
+
+def tsx_lader_kurz(l):
+    """REIN RECHNEND: Lader-Status des Auges auf sechs kurze Felder stutzen (wie lader_kurz im reader-server)."""
+    out = {}
+    for k in ("v", "eval", "laeuft", "quelle", "bereit", "fehler"):
+        x = l.get(k) if isinstance(l, dict) else None
+        out[k] = x if (x is None or isinstance(x, (bool, int, float))) else str(x)[:80]
+    return out
 
 
 def tsx_stand_ausgabe(jetzt=None):
@@ -3475,7 +3533,7 @@ def tsx_stand_ausgabe(jetzt=None):
         tab = max(_tsx_stand, key=lambda t: _tsx_stand[t]["ts"])
         v = _tsx_stand[tab]
         return {"ok": True, "tab": tab, "tabs": len(_tsx_stand), "alter_s": round(jetzt - v["ts"], 3), "script": v["script"],
-                "stand": v["stand"]}
+                "stand": v["stand"], "lader": v.get("lader")}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -3502,9 +3560,23 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        path = urlparse(self.path).path
+        if path in ("/userscript/tsx-kern.json", "/userscript/tsx-auge.user.js", "/userscript/tsx-auge.meta.js"):
+            # TopstepX-Auge-Lader (29.10.2026, s. tsx_kern_aus): Herkunft wie tsx-stand (Tampermonkey/topstepx.com/lokal), Host lokal
+            host = (self.headers.get("Host") or "").split(":")[0].lower()
+            if host not in ("127.0.0.1", "localhost") or not tsx_stand_herkunft_ok(self.headers.get("Origin")):
+                return self._send(403, json.dumps({"ok": False, "msg": "nur lokal"}))
+            us, au = tsx_dateien_holen()
+            if path.endswith(".json"):
+                w = TSX_KERN_MERK["wert"] if us else None
+                if not w:
+                    return self._send(502, json.dumps({"ok": False, "msg": "Auge nicht ladbar (kein Schlüssel / Railway / Marker)"}))
+                return self._send(200, json.dumps(w, ensure_ascii=False))
+            if not us:
+                return self._send(502, json.dumps({"ok": False, "msg": "Auge nicht ladbar (kein Schlüssel / Railway nicht erreichbar)"}))
+            return self._send(200, us, "text/javascript; charset=utf-8")
         if not self._local_ok():
             return self._send(403, json.dumps({"error": "nur lokal"}))
-        path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             return self._send(200, PAGE, "text/html; charset=utf-8")
         if polar_panel and path == "/api/polar-stand":   # POLAR (13.10.2026): Zustand des Polar-Prozesses dieses PCs
@@ -4167,6 +4239,8 @@ class Handler(BaseHTTPRequestHandler):
             bc = base_config()
             cmd = {k: str(bc.get(k) or "").strip() for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
             cmd["grund"] = str(body.get("grund") or "").strip()[:80]
+            if str(body.get("tab") or "") == "tsx":           # Auge-Lader (29.10.2026): TopstepX-Tab bzw. TopstepX-Auge statt TV-Reader
+                cmd["tab"] = cmd["art"] = "tsx"
             if not TV_ORDER_LOCK.acquire(blocking=False):
                 return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
                     "msg": "Es laeuft schon ein TradingView-Lauf — spaeter erneut."}, ensure_ascii=False))

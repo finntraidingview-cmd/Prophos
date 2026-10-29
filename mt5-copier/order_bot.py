@@ -21580,10 +21580,16 @@ def modus_tvkontenliste(cmd):
 
 # ══ TV-TAB NEU LADEN FÜR EIN USERSCRIPT-UPDATE (29.10.2026, Finn 05:20: „dass das Tampermonkey-Script immer automatisch und schneller
 # aktualisiert wird"). Der Lader im Puls-Chrome (Userscript ≥ 0.10.0) merkt eine neuere Fassung, sie läuft aber erst nach dem nächsten Laden
-# des TradingView-Tabs. Dieser Modus lädt NUR die Seite neu (_cdp_seite_neu_laden: Page.reload, warten bis sie steht, augen.js neu)
+# des TradingView-Tabs. Seit 29.10.2026 (Auge-Lader, Finn 10:20) mit cmd tab='tsx' genauso der TopstepX-Tab (Auge ≥ 0.3.0).
+# Dieser Modus lädt NUR die Seite neu (_cdp_seite_neu_laden: Page.reload, warten bis sie steht, augen.js neu)
 # — kein Klick, kein Konto, keine Order, kein Fenster nach vorn (Prüfer 29.10.2026): Sitzung mit tv_riegel=False (so schließt
 # _cdp_kachel_weg die Werbe-Kachel NICHT per Maus), ohne _cdp_sitzung_holen (der holt das Fenster groß/öffnet Tabs) und ohne Puls-Chrome-
 # Start (läuft keins oder steht keine TV-Seite da → nichts tun). Der PC-Tab ruft ihn nur, wenn nichts läuft (tvNeuladenFrei). → {ok, aktiv, trail}
+def tsx_target_waehlen(liste):
+    """REIN RECHNEND (testbar): die angemeldete TopstepX-Seite aus /json/list (tsx_targets: …/trade zuerst), nie eine Login-Seite. -> dict | None"""
+    return next((t for t in tsx_targets(liste) if not tsx_url_login(t.get("url"))), None)
+
+
 def modus_tvneuladen(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "aktiv": "", "quelle": "cdp"}
     trail = _StempelSpur()
@@ -21602,15 +21608,18 @@ def modus_tvneuladen(cmd):
     if _handlauf_aktiv():
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nicht neu geladen.")
     try:
-        if not augen_target_waehlen(_cdp_http("/json/list")):
-            return raus("kein_tab", "Puls-Chrome aus oder keine TradingView-Seite offen — nichts neu geladen.")
-        sitz = _AugenSitzung(trail, tv_riegel=False)
+        tsx = str(cmd.get("tab") or "") == "tsx"
+        liste = _cdp_http("/json/list")
+        ziel = tsx_target_waehlen(liste) if tsx else augen_target_waehlen(liste)
+        if not ziel:
+            return raus("kein_tab", "Puls-Chrome aus oder keine " + ("TopstepX" if tsx else "TradingView") + "-Seite offen — nichts neu geladen.")
+        sitz = _AugenSitzung(trail, ziel=ziel, js_datei="augen_tsx.js" if tsx else "augen.js", tv_riegel=False)
         st = _cdp_seite_neu_laden(sitz, {}, trail, f"Userscript-Update ({str(cmd.get('grund') or 'neuere Fassung bereit')[:60]})")
         if st is None:
-            return raus("neu_laden", "TradingView-Seite ließ sich nicht neu laden.")
+            return raus("neu_laden", ("TopstepX" if tsx else "TradingView") + "-Seite ließ sich nicht neu laden.")
         res["aktiv"] = str(((st.get("konto") or {}) if isinstance(st.get("konto"), dict) else {}).get("aktiv") or "")[:80]
         res["ok"] = True
-        return raus("", "TradingView-Seite neu geladen" + (f" (Konto '{res['aktiv'][:40]}')" if res["aktiv"] else ""))
+        return raus("", ("TopstepX" if tsx else "TradingView") + "-Seite neu geladen" + (f" (Konto '{res['aktiv'][:40]}')" if res["aktiv"] else ""))
     except Exception as e:
         _cdp_tabs_spur(e, trail)
         return raus("cdp_fehler", f"Puls-Chrome/CDP: {type(e).__name__}: {str(e)[:160]}")
@@ -21627,6 +21636,7 @@ def modus_tvneuladen(cmd):
 # „Installieren" wird NIE gedrückt (das wäre ein zweites Script neben dem alten: doppelte Reader, doppeltes Schließen), „Neu installieren"
 # = schon aktuell, „Downgrade" nie. Danach eigene Tabs zu, TV-Tab neu laden (wie tvneuladen). Kein Konto, keine Order.
 TM_USERSCRIPT_URL = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
+TM_TSX_URL = "http://127.0.0.1:8770/userscript/tsx-auge.user.js"   # TopstepX-Auge (≥ 0.3.0 mit Lader) — vom Panel dieses PCs
 TM_LESE_JS = r"""(() => { const vis = e => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e)
     return r.width > 4 && r.height > 4 && cs.visibility !== 'hidden' && cs.display !== 'none' }
   const kn = [...document.querySelectorAll('button, input[type=button], input[type=submit], [role=button]')].filter(vis).map(e => {
@@ -21681,10 +21691,10 @@ def tm_knopf_wahl(lesung, soll):
     return "unklar", None, "kein Aktualisieren-Knopf (" + ", ".join(art(k) for k in kn[:6]) + ")"
 
 
-def _tm_soll_holen(trail):
+def _tm_soll_holen(trail, url=TM_USERSCRIPT_URL):
     import urllib.request
     try:
-        with urllib.request.urlopen(TM_USERSCRIPT_URL.replace(".user.js", ".meta.js"), timeout=20) as r:
+        with urllib.request.urlopen(url.replace(".user.js", ".meta.js"), timeout=20) as r:
             soll = tm_soll_aus(r.read())
     except Exception as e:
         trail.append(f"Userscript vom Reader nicht ladbar ({type(e).__name__})")
@@ -21695,12 +21705,16 @@ def _tm_soll_holen(trail):
 
 
 def modus_tvtmupdate(cmd):
-    """→ {ok, code, msg, trail, soll, geklickt}. ok = Tampermonkey hat aktualisiert (oder hatte die Fassung schon), TV-Tab neu geladen."""
+    """→ {ok, code, msg, trail, soll, geklickt}. ok = Tampermonkey hat aktualisiert (oder hatte die Fassung schon), Tab neu geladen.
+    cmd art='tsx' (29.10.2026): dasselbe für das TopstepX-Auge (.user.js vom Panel 8770), danach wird der TopstepX-Tab neu geladen."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "soll": "", "geklickt": False, "quelle": "cdp"}
     trail = _StempelSpur()
     t0 = time.time()
     _start_versatz(trail)
     eigene, ws, tv_id, sitz_tm = [], None, None, None
+    tsx = str((cmd or {}).get("art") or "") == "tsx"
+    tm_url = TM_TSX_URL if tsx else TM_USERSCRIPT_URL
+    neu_ziel = [None]                                     # tsx: der TopstepX-Tab, der danach neu geladen wird
 
     def raus(code, msg, ok=False):
         res["ok"], res["code"], res["msg"] = ok, code, msg
@@ -21724,7 +21738,8 @@ def modus_tvtmupdate(cmd):
             laden = False
         if laden:
             try:
-                sitz = _AugenSitzung(trail, tv_riegel=False)
+                sitz = (_AugenSitzung(trail, ziel=neu_ziel[0], js_datei="augen_tsx.js", tv_riegel=False) if tsx and neu_ziel[0]
+                        else _AugenSitzung(trail, tv_riegel=False))
                 try:
                     if _cdp_seite_neu_laden(sitz, {}, trail, "Tampermonkey-Update") is None:
                         res["msg"] += " — TV-Tab ließ sich nicht neu laden (läuft beim nächsten Laden)"
@@ -21743,15 +21758,19 @@ def modus_tvtmupdate(cmd):
     try:
         liste = _cdp_http("/json/list")
         tv = augen_target_waehlen(liste)
-        if not tv:
+        if tsx:
+            neu_ziel[0] = tsx_target_waehlen(liste)
+            if not neu_ziel[0]:
+                return raus("kein_tab", "Puls-Chrome aus oder keine TopstepX-Seite offen — nichts angefasst.")
+        elif not tv:
             return raus("kein_tab", "Puls-Chrome aus oder keine TradingView-Seite offen — nichts angefasst.")
-        tv_id = tv.get("id")
-        soll = _tm_soll_holen(trail)
+        tv_id = (tv or neu_ziel[0]).get("id")             # danach wieder vorn: der Chart (Reader), sonst der TopstepX-Tab
+        soll = _tm_soll_holen(trail, tm_url)
         if not soll:
             return raus("soll_fehlt", "Userscript nicht vom lokalen Reader ladbar.")
         res["soll"] = soll["version"]
         vorher = {t.get("id") for t in liste if isinstance(t, dict)}
-        neu = _cdp_tab_neu(TM_USERSCRIPT_URL, trail)
+        neu = _cdp_tab_neu(tm_url, trail)
         if not neu:
             return raus("tab_neu", "Neuer Tab im Puls-Chrome ließ sich nicht öffnen.")
         eigene.append(neu.get("id"))

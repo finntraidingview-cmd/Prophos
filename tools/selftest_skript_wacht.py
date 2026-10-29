@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
-FUNKTIONEN = ("_version_neuer", "skript_wacht_pruefen", "skript_wacht_ht_filter")
+FUNKTIONEN = ("_version_neuer", "skript_wacht_pruefen", "skript_wacht_ht_filter", "tsx_wacht_zeilen")
 KONSTANTEN = ("SKRIPT_WACHT_TAKT_S", "SKRIPT_WACHT_KARENZ_S", "SKRIPT_WACHT_WIEDER_S")
 
 
@@ -52,6 +52,17 @@ def main():
     ok(ns["skript_wacht_pruefen"](gefiltert, "0.10.1", jetzt, jetzt - 3600, {("pc-aaaa01", "0.10.1"): jetzt - 100}) == [],
        "Wache: (PC, Soll) in 24 h schon gemeldet → still")
     ok(ns["_version_neuer"]("0.10.1", "0.9.13") and not ns["_version_neuer"]("0.9.13", "0.10.1"), "Versionsvergleich je Stelle (0.10 > 0.9)")
+    # TopstepX-Auge: Zeilen aus mt5_live.status.tsx_auge (jüngste je PC, laeuft vor script), dann dieselbe Wache
+    live_tsx = [{"pc_name": "pc-aaaa01", "updated_at": iso(30), "user_id": "ht-1", "tsx": {"script": "0.3.0", "laeuft": "0.2.0"}},
+                {"pc_name": "pc-aaaa01", "updated_at": iso(90), "user_id": "ht-1", "tsx": {"script": "0.1.0"}},
+                {"pc_name": "pc-aaaa02", "updated_at": iso(30), "user_id": "ht-2", "tsx": None},
+                {"pc_name": "pc-aaaa03", "updated_at": iso(30), "user_id": "emin-1", "tsx": {"script": "0.2.0"}},
+                {"pc_name": "pc-aaaa05", "updated_at": iso(30), "user_id": "ht-3", "tsx": {"script": "0.3.0", "laeuft": "0.3.0"}}]
+    z = ns["tsx_wacht_zeilen"](live_tsx)
+    ok([(r["pc_name"], r["script_version"]) for r in z] == [("pc-aaaa01", "0.2.0"), ("pc-aaaa03", "0.2.0"), ("pc-aaaa05", "0.3.0")],
+       f"Auge-Zeilen: jüngste je PC, laeuft zählt, PC ohne Auge raus ({z})")
+    tz = ns["skript_wacht_pruefen"](ns["skript_wacht_ht_filter"](z, live_tsx, fremd), "0.3.0", jetzt, jetzt - 3600, {})
+    ok(tz == [("pc-aaaa01", "0.2.0")], f"Auge-Wache: alter Kern auf HT-PC gemeldet, Emin-PC und aktueller PC still ({tz})")
     for t in f:
         print("✗", t)
     print("alle Tests bestanden" if not f else f"FEHLER ({len(f)})")

@@ -3885,22 +3885,24 @@ def alarm_userscript_update():
     d = request.get_json(silent=True) or {}
     kurz = lambda k, n: re.sub(r"\s+", " ", str(d.get(k) or ""))[:n]   # noqa: E731
     pc, soll, von, code, msg = kurz("pc", 20), kurz("soll", 16), kurz("von", 16), kurz("code", 30), kurz("msg", 200)
+    tsx = str(d.get("art") or "") == "tsx"
+    was, link = ("TopstepX-Auge", "http://127.0.0.1:8770/userscript/tsx-auge.user.js") if tsx else ("Userscript", _TM_LINK)
     if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
         pc = ""
     namen, _aus = _ap_namen()
     if str(uid) in _aus or _alarm_fremd_verwaltet(uid):   # nur Hermann-Technologies-IDs melden (wie alarm_tick), Emin-Gruppe nie
         return jsonify({"ok": True})
     wer = f"{namen.get(uid, uid[:8])}" + (f" · {pc}" if pc else "")
-    daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg}
+    daten = {"pc": pc, "soll": soll, "von": von, "code": code, "msg": msg, "art": "tsx" if tsx else "tv"}
     if d.get("ok") is True:
         alarm_senden(3, "userscript_tm_ok", f"Tampermonkey aktualisiert auf {wer}",
-                     f"{wer}: Puls hat das Userscript in Tampermonkey aktualisiert ({von or '?'} → {soll or '?'}). Ab jetzt kommen Updates über den Lader.",
-                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}")
+                     f"{wer}: Puls hat das {was} in Tampermonkey aktualisiert ({von or '?'} → {soll or '?'}). Ab jetzt kommen Updates über den Lader.",
+                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}")
     else:
         alarm_senden(3, "userscript_tm_fehl", f"Tampermonkey-Update von Hand: {wer}",
-                     f"{wer}: Puls konnte das Userscript nicht aktualisieren ({code or '?'}: {msg or 'keine Antwort'}). Bitte einmal am PC im "
-                     f"Puls-Chrome {_TM_LINK} öffnen und „Aktualisieren\" drücken — danach geht es von selbst.",
-                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}|fehl")
+                     f"{wer}: Puls konnte das {was} nicht aktualisieren ({code or '?'}: {msg or 'keine Antwort'}). Bitte einmal am PC im "
+                     f"Puls-Chrome {link} öffnen und „Aktualisieren\" drücken — danach geht es von selbst.",
+                     uid=uid, daten=daten, schluessel=f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}|fehl")
     return jsonify({"ok": True})
 
 
@@ -15212,6 +15214,31 @@ SKRIPT_WACHT_TAKT_S, SKRIPT_WACHT_KARENZ_S, SKRIPT_WACHT_WIEDER_S = 300, 1800, 8
 _SKRIPT_WACHT = {"start_s": time.time(), "letzt_s": 0.0, "gemeldet": {}, "soll": None}
 
 
+def tsx_auge_version_soll():
+    """SCRIPT des TopstepX-Auges im deployten Stand (tv-reader/tsx-auge.user.js, im Kern) — None, wenn nicht lesbar."""
+    try:
+        with open(os.path.join(_CODE_WURZEL, "tv-reader", "tsx-auge.user.js"), encoding="utf-8") as f:
+            m = re.search(r"var SCRIPT = '([0-9][0-9.]{2,20})'", f.read())
+        return m.group(1) if m else None
+    except OSError:
+        return None
+
+
+def tsx_wacht_zeilen(live):
+    """REIN RECHNEND (testbar): mt5_live-Zeilen (absteigend nach updated_at, Feld tsx = status.tsx_auge) → je PC die jüngste Zeile MIT
+    Auge-Stand als {pc_name, script_version, updated_at} für skript_wacht_pruefen (laeuft vor script: die Fassung, die wirklich läuft)."""
+    aus, gesehen = [], set()
+    for z in live or []:
+        pc, t = str((z or {}).get("pc_name") or ""), (z or {}).get("tsx")
+        if not pc or pc in gesehen or not isinstance(t, dict):
+            continue
+        gesehen.add(pc)
+        v = str(t.get("laeuft") or t.get("script") or "").strip()[:16]
+        if v:
+            aus.append({"pc_name": pc, "script_version": v, "updated_at": z.get("updated_at")})
+    return aus
+
+
 def skript_version_soll():
     """@version der deployten tv-reader.user.js (beim ersten Aufruf gelesen) → '0.10.0' | None."""
     if _SKRIPT_WACHT["soll"] is None:
@@ -15283,13 +15310,19 @@ def skript_wacht_tick(jetzt=None):
     # nur PCs von Hermann-Technologies-IDs (Master 29.10.2026: „PCs der Emin-Gruppe wie bei den übrigen Master-Alarmen über
     # _alarm_fremd_verwaltet ausfiltern"). PC → ID aus mt5_live (jüngste Zeile je PC); ohne bekannte ID keine Meldung (nie raten).
     try:
-        live = sb_select("mt5_live", {"select": "pc_name,user_id:status->>user_id", "order": "updated_at.desc", "limit": "1000"}) or []
+        live = sb_select("mt5_live", {"select": "pc_name,updated_at,user_id:status->>user_id,tsx:status->tsx_auge", "order": "updated_at.desc",
+                                      "limit": "1000"}) or []
         _n, aus = _ap_namen()
     except Exception as e:
         print(f"[skript-wacht] ⚠️ mt5_live/IDs: {type(e).__name__}", flush=True)
         return []
-    rows = skript_wacht_ht_filter(rows, live, lambda u: str(u) in aus or _alarm_fremd_verwaltet(u))
+    fremd = lambda u: str(u) in aus or _alarm_fremd_verwaltet(u)   # noqa: E731
+    rows = skript_wacht_ht_filter(rows, live, fremd)
     treffer = skript_wacht_pruefen(rows, soll, jetzt, _SKRIPT_WACHT["start_s"], _SKRIPT_WACHT["gemeldet"])
+    # TopstepX-Auge (29.10.2026, Finn 10:20): dieselbe Wache über mt5_live.status.tsx_auge (der PC-Tab meldet, welches Auge läuft)
+    soll_tsx = tsx_auge_version_soll()
+    treffer_tsx = skript_wacht_pruefen(skript_wacht_ht_filter(tsx_wacht_zeilen(live), live, fremd), soll_tsx, jetzt, _SKRIPT_WACHT["start_s"],
+                                       _SKRIPT_WACHT.setdefault("gemeldet_tsx", {}))
     namen = {}
     try:
         namen = _rw_pc_namen() or {}
@@ -15303,7 +15336,15 @@ def skript_wacht_tick(jetzt=None):
                      f"http://127.0.0.1:8790/userscript/tv-reader.user.js öffnen und „Aktualisieren\" klicken (einmal, danach lädt der Lader selbst).",
                      schluessel=f"userscript|{pc}|{soll}", daten={"pc": pc, "ist": ist, "soll": soll})
         print(f"[skript-wacht] ⚪ {pc}: Userscript {ist} statt {soll}", flush=True)
-    return treffer
+    for pc, ist in treffer_tsx:
+        _SKRIPT_WACHT["gemeldet_tsx"][(pc, soll_tsx)] = jetzt
+        wer = namen.get(pc) or pc
+        alarm_senden(3, "tsx_auge_alt", f"TopstepX-Auge alt auf {wer}",
+                     f"{wer} ({pc}): TopstepX-Auge {ist} statt {soll_tsx} — TopstepX-Tab im Puls-Chrome neu laden; hilft das nicht, im Puls-Chrome "
+                     f"http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und „Aktualisieren\" klicken (einmal, danach lädt der Lader selbst).",
+                     schluessel=f"tsx_auge|{pc}|{soll_tsx}", daten={"pc": pc, "ist": ist, "soll": soll_tsx})
+        print(f"[skript-wacht] ⚪ {pc}: TopstepX-Auge {ist} statt {soll_tsx}", flush=True)
+    return treffer + treffer_tsx
 
 
 def reader_wacht_tick(jetzt=None):

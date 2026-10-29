@@ -11,13 +11,17 @@ Das Panel muss mindestens den Stand mit der Route `/api/tsx-stand` haben (kommt 
 
 ## 1. Script installieren
 
-Im **Puls-Chrome** diese Adresse öffnen:
+**Seit 0.3.0 (29.10.2026) aktualisiert sich das Auge selbst:** Der Lader holt neue Fassungen vom Panel dieses PCs, und Prophos lädt
+den TopstepX-Tab neu, wenn nichts läuft. Ein PC mit einem älteren Auge (0.2.0 und davor) bekommt die Lader-Fassung einmal von Puls
+(Tampermonkey-Knopf „Aktualisieren“). Klappt das nicht, kommt eine ⚪-Meldung, dann einmal von Hand:
+
+Im **Puls-Chrome** diese Adresse öffnen (das Panel liefert die Datei aus):
 
 ```
-https://prophos.pages.dev/tv-reader/tsx-auge.user.js
+http://127.0.0.1:8770/userscript/tsx-auge.user.js
 ```
 
-Tampermonkey zeigt „Installieren“ → **Installieren** drücken. Nur im Puls-Chrome, nicht im normalen Chrome.
+Tampermonkey zeigt „Installieren“ (neu) bzw. „Aktualisieren“ → drücken. Nur im Puls-Chrome, nicht im normalen Chrome.
 
 ## 2. TopstepX-Tab neu laden
 

@@ -10089,6 +10089,26 @@ def test_tv_neuladen():
         chk(r3["ok"] is False and r3["code"] == "handlauf" and not g3 and s3.zu_n == 0, "tvneuladen: K3-Handlauf → nichts angefasst")
         r4, _, _ = lauf({}, wirft=True)
         chk(r4["ok"] is False and r4["code"] == "cdp_fehler" and "9333" in r4["msg"], f"tvneuladen: Puls-Chrome weg → cdp_fehler ({r4['msg'][:60]})")
+        # TopstepX-Tab (Auge-Lader 29.10.2026): tab='tsx' lädt die angemeldete TopstepX-Seite, nie die Login-Seite, nie den Chart
+        L = [{"id": "TV", "type": "page", "url": "https://www.tradingview.com/chart/x"},
+             {"id": "LOGIN", "type": "page", "url": "https://topstepx.com/login"}, {"id": "TSX", "type": "page", "url": "https://topstepx.com/trade"}]
+        chk(ob.tsx_target_waehlen(L)["id"] == "TSX" and ob.tsx_target_waehlen(L[:2]) is None and ob.tsx_target_waehlen(None) is None,
+            "tsx_target_waehlen: angemeldete TopstepX-Seite, nie Login-Seite, ohne TopstepX None")
+        g7 = {}
+        ob._cdp_http = lambda pfad, **k: [dict(t) for t in L]
+        ob._AugenSitzung = lambda trail, **k: (g7.update(k) or _S())
+        ob._cdp_seite_neu_laden = lambda s_, o_, t_, g_: {"konto": {"aktiv": "TSX-KONTO"}}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ob.modus_tvneuladen({"tab": "tsx", "grund": "TopstepX-Auge 0.3.0 → 0.3.1"})
+        r7 = json.loads(buf.getvalue().strip().splitlines()[-1])
+        chk(r7["ok"] and (g7.get("ziel") or {}).get("id") == "TSX" and g7.get("js_datei") == "augen_tsx.js" and g7.get("tv_riegel") is False
+            and r7["msg"].startswith("TopstepX-Seite neu geladen"), f"tvneuladen tab=tsx: TopstepX-Tab mit augen_tsx.js, tv_riegel aus ({r7['msg'][:50]})")
+        ob._cdp_http = lambda pfad, **k: [dict(L[0])]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ob.modus_tvneuladen({"tab": "tsx"})
+        chk(json.loads(buf.getvalue().strip().splitlines()[-1])["code"] == "kein_tab", "tvneuladen tab=tsx ohne TopstepX-Seite → kein_tab, nichts geladen")
         q = _i.getsource(ob.modus_tvneuladen)
         chk("klick" not in q.lower().replace("kein klick", "") and "Input.dispatch" not in q and "order" not in q.lower().replace("keine order", ""),
             "tvneuladen: Quelltext ohne Klick/Taste/Order")
@@ -10144,8 +10164,11 @@ def test_tv_tm_update():
         def zu(self):
             pass
 
-    def lauf(seite, beweis=True, schliesst=True, tm_kommt=True, win=False, win_ok=True):
-        welt = {"tabs": [dict(TV)], "seite": seite, "beweis": beweis, "schliesst": schliesst, "maus": [], "zu": [], "neu_geladen": 0, "win_ok": win_ok}
+    TSXT = {"id": "TSX", "type": "page", "url": "https://topstepx.com/trade", "webSocketDebuggerUrl": "ws://tsx"}
+
+    def lauf(seite, beweis=True, schliesst=True, tm_kommt=True, win=False, win_ok=True, art="", ohne_tsx=False):
+        welt = {"tabs": [dict(TV)] + ([] if ohne_tsx or art != "tsx" else [dict(TSXT)]), "seite": seite, "beweis": beweis, "schliesst": schliesst,
+                "maus": [], "zu": [], "neu_geladen": 0, "win_ok": win_ok}
         ob._WIN_EINGABE = win
 
         def http(pfad, methode="GET", timeout=2.0):
@@ -10180,12 +10203,19 @@ def test_tv_tm_update():
                 welt["zu_sitz"] = welt.get("zu_sitz", 0) + 1
         ob._cdp_http, ob._cdp_tab_neu = http, tab_neu
         ob._CdpVerbindung = lambda url, timeout=8.0: _Ws(welt)
-        ob._tm_soll_holen = lambda trail: dict(soll)
-        ob._AugenSitzung = lambda trail, **k: _Sitz(k.get("ziel"))
+        def _soll(trail, url=ob.TM_USERSCRIPT_URL):
+            welt["soll_url"] = url
+            return {"name": "Prophos TopstepX-Auge", "version": "0.3.0"} if art == "tsx" else dict(soll)
+        ob._tm_soll_holen = _soll
+        def _sitz(trail, **k):
+            if k.get("js_datei") == "augen_tsx.js":
+                welt["neu_ziel"] = (k.get("ziel") or {}).get("id")
+            return _Sitz(k.get("ziel"))
+        ob._AugenSitzung = _sitz
         ob._cdp_seite_neu_laden = lambda s_, o_, t_, g_: (welt.__setitem__("neu_geladen", welt["neu_geladen"] + 1) or {"konto": {}})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            ob.modus_tvtmupdate({})
+            ob.modus_tvtmupdate({"art": art} if art else {})
         return json.loads(buf.getvalue().strip().splitlines()[-1]), welt
 
     namen = ("_cdp_http", "_cdp_tab_neu", "_CdpVerbindung", "_tm_soll_holen", "_AugenSitzung", "_cdp_seite_neu_laden", "_handlauf_aktiv",
@@ -10214,6 +10244,13 @@ def test_tv_tm_update():
         chk(r7["ok"] and not w7["maus"] and wk and wk[0] == "TM" and wk[1] == [100, 200, 80, 30] and "install" in wk[2]["tabu"]
             and w7.get("zu_sitz", 0) >= 1 and w7.get("aktiviert") == ["TV"],
             f"tm-update Windows: echte Maus über _AugenSitzung.klick mit Ziel-Beweis (Tabu install/downgrade), kein CDP-Klick, Fenster wieder zu ({r7['code']})")
+        # TopstepX-Auge (29.10.2026): .user.js vom Panel 8770, danach der TopstepX-Tab neu geladen, Chart wieder vorn
+        r9, w9 = lauf(L([K("Aktualisieren")], text="Prophos TopstepX-Auge 0.3.0"), art="tsx")
+        chk(r9["ok"] and w9["url"] == ob.TM_TSX_URL and w9["soll_url"] == ob.TM_TSX_URL and w9["neu_ziel"] == "TSX" and w9.get("aktiviert") == ["TV"]
+            and "TSX" not in w9["zu"] and "TV" not in w9["zu"],
+            f"tm-update art=tsx: Auge vom Panel, TopstepX-Tab neu geladen, Chart wieder vorn, keinen fremden Tab geschlossen ({r9['code']})")
+        r10, w10 = lauf(L([K("Aktualisieren")], text="Prophos TopstepX-Auge 0.3.0"), art="tsx", ohne_tsx=True)
+        chk(not r10["ok"] and r10["code"] == "kein_tab" and not w10["maus"] and "url" not in w10, "tm-update art=tsx ohne TopstepX-Tab → kein_tab, nichts geöffnet")
         r8, w8 = lauf(L([K("Aktualisieren")]), win=True, win_ok=False)
         chk(not r8["ok"] and r8["code"] == "tm_kein_druck" and not r8["geklickt"] and not w8["maus"], "tm-update Windows: Ziel-Beweis fehlt → kein Druck, ehrlich gemeldet")
     finally:

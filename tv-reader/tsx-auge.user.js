@@ -1,16 +1,18 @@
 // ==UserScript==
 // @name         Prophos TopstepX-Auge
 // @namespace    prophos
-// @version      0.2.0
+// @version      0.3.0
 // @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,1 s und bei jeder Änderung an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
 // @match        https://topstepx.com/*
 // @match        https://*.topstepx.com/*
 // @require      https://prophos.pages.dev/mt5-copier/augen_tsx.js?v=tsx-0.6.3
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @connect      127.0.0.1
 // @run-at       document-idle
-// @updateURL    https://prophos.pages.dev/tv-reader/tsx-auge.user.js
-// @downloadURL  https://prophos.pages.dev/tv-reader/tsx-auge.user.js
+// @updateURL    http://127.0.0.1:8770/userscript/tsx-auge.meta.js
+// @downloadURL  http://127.0.0.1:8770/userscript/tsx-auge.user.js
 // ==/UserScript==
 
 /* TOPSTEPX-AUGE (27.10.2026, Finn: „Für das Schließen fehlen saubere Wege. In erster Instanz ein Tampermonkey-Script im TopstepX-Tab, bei
@@ -36,10 +38,26 @@
  * AUSGELOGGT (Finn: „Wenn TopstepX ausgeloggt ist, soll nicht aus Panik geschlossen werden, sondern Puls geht auf TopstepX und loggt sich
  * wieder ein"): stand.ausgeloggt = true auf der Login-Seite (Adresse …/login|signin|sign-in, wie tsx_url_login im Bot), bei sichtbarem
  * Passwortfeld mit Login-Knopf oder einem Dialog „session expired / logged out". Prophos schließt dann nie über das Auge (auch ohne dieses
- * Feld nicht: ohne Konto-Auslöser fehlt die Kennung) und stößt den Rück-Login des Bots an (hedgeTsxSchnellTick). */
+ * Feld nicht: ohne Konto-Auslöser fehlt die Kennung) und stößt den Rück-Login des Bots an (hedgeTsxSchnellTick).
+ * 0.3.0 LADER (29.10.2026, Finn 10:20: „Ich will, dass sich das Auge automatisch aktualisiert — sowohl bei Topstep als auch beim
+ * TradingView-Script für Orbit. Ich will nicht jedes Script von Hand aktualisieren."): dasselbe Prinzip wie tv-reader.user.js 0.10.x. Die
+ * Datei ist Lader + eingebauter Kern; der Kern (zwischen KERN-START und KERN-ENDE) ist das Auge 0.2.0 Zeichen für Zeichen — nur SCRIPT,
+ * der Doppellauf-Riegel ganz oben und das Feld „lader" in der Meldung sind neu. Der Lader holt im Hintergrund vom Panel DIESES PCs
+ * (http://127.0.0.1:8770/userscript/tsx-kern.json: Kern + die aktuelle augen_tsx.js in einem Stück, SHA-256) eine NEUERE Fassung,
+ * merkt sie in GM_setValue und fährt sie beim nächsten Laden des TopstepX-Tabs (das stößt Prophos an, nur wenn nichts läuft). eval
+ * gesperrt (MV3), nichts gemerkt oder Fehler → die eingebaute Fassung mit der @require-augen_tsx.js, nie schlechter als vorher. Update
+ * der Datei selbst (neuer Lader) holt Tampermonkey über @updateURL am Panel bzw. Puls einmal je PC (Knopf „Aktualisieren"). */
+
+/* ══ LADER 0.3.0 (s. oben): prophosKern ist das eigentliche Auge. Alles zwischen den Markern KERN-START und KERN-ENDE holt der Lader
+ * neuer nach (Panel /userscript/tsx-kern.json) — die Marker nie verschieben oder doppeln (Selbsttest prueft sie). ══ */
+function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, PROPHOS_LADER) {
+// ==KERN-START==
 (function () {
   'use strict';
-  var SCRIPT = '0.2.0';
+  // 0.3.0 DOPPELLAUF-RIEGEL: nie zwei Kerne in einer Seite (eingebaute UND nachgeladene Fassung) — lieber blind als doppelt
+  if (unsafeWindow.__prophosTsxKernAn) return;
+  unsafeWindow.__prophosTsxKernAn = true;
+  var SCRIPT = '0.3.0';
   var PANEL = 'http://127.0.0.1:8770/api/tsx-stand';
   var TAKT_MS = 100;                               // 0.2.0: 250 → 100 ms (Finn 29.10.2026)
   var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
@@ -102,7 +120,9 @@
     var a = auge();
     if (!a || typeof a.stand !== 'function') { letzterFehler = 'augen_tsx.js nicht geladen'; return; }
     var paket;
-    try { paket = { tab: TAB, script: SCRIPT, stand: kurz(a.stand({})) }; }
+    try { paket = { tab: TAB, script: SCRIPT, stand: kurz(a.stand({})),
+      lader: (typeof PROPHOS_LADER !== 'undefined' && PROPHOS_LADER) ? Object.assign({}, PROPHOS_LADER) : null };   // 0.3.0: Lader-Stand
+    }
     catch (e) { letzterFehler = 'Lesen: ' + String(e).slice(0, 80); return; }
     unterwegs = true;
     GM_xmlhttpRequest({
@@ -135,4 +155,74 @@
   tick();
   // Lebenszeichen in der Konsole des Tabs (kein Badge im TopstepX-Bild — die Augen des Bots lesen die Seite)
   setInterval(function () { console.info('[Prophos TopstepX-Auge ' + SCRIPT + '] Takt ' + takt + ' · gesendet ' + gesendetN + (letzterFehler ? ' · ' + letzterFehler : '')); }, 60000);
+})();
+// ==KERN-ENDE==
+}
+
+(function prophosLader() {
+  'use strict';
+  const LADER_V = 1;
+  const EINGEBAUT = '0.3.0';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
+  const KERN_URL = 'http://127.0.0.1:8770/userscript/tsx-kern.json';
+  const MERK = 'prophos_tsx_kern_v1';         // GM-Speicher: {version, sha, code, at}
+  const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
+  // REIN RECHNEND: '0.10.0' > '0.9.12' (Zahl je Stelle)
+  function neuer(a, b) {
+    const x = String(a || '').split('.').map(Number), y = String(b || '').split('.').map(Number);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      const d = (x[i] || 0) - (y[i] || 0);
+      if (d) return d > 0;
+    }
+    return false;
+  }
+  let evalOk = false;
+  try { evalOk = new Function('return 1')() === 1; } catch (e) { info.fehler = 'eval gesperrt: ' + String((e && e.message) || e).slice(0, 80); }
+  info.eval = evalOk;
+  const PARAM = ['GM_xmlhttpRequest', 'GM_getValue', 'GM_setValue', 'unsafeWindow', 'PROPHOS_LADER'];
+  const gm = () => [GM_xmlhttpRequest, GM_getValue, GM_setValue, (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window)];
+  let laeuft = false;
+  if (evalOk) {
+    let m = null;
+    try { m = GM_getValue(MERK, null); } catch (_) {}
+    if (m && typeof m.code === 'string' && m.version && neuer(m.version, EINGEBAUT)) {
+      let fn = null;
+      try { fn = new Function(...PARAM, m.code); } catch (e) { info.fehler = 'gemerkte Fassung ' + m.version + ' nicht lesbar: ' + String((e && e.message) || e).slice(0, 80); }
+      if (fn) {
+        info.laeuft = m.version; info.quelle = 'nachgeladen';
+        try { fn(...gm(), info); laeuft = true; }
+        catch (e) { info.laeuft = EINGEBAUT; info.quelle = 'eingebaut'; info.fehler = 'gemerkte Fassung ' + m.version + ' warf: ' + String((e && e.message) || e).slice(0, 80); }
+      }
+      if (!laeuft) { try { GM_setValue(MERK, null); } catch (_) {} }   // kaputte Fassung nie wieder starten
+    }
+  }
+  if (!laeuft) {
+    const uw = gm()[3];
+    if (uw && uw.__prophosTsxKernAn) { info.quelle = 'blind (Riegel)'; info.fehler += ' — Doppellauf-Riegel: eingebaute Fassung nicht gestartet'; }
+    prophosKern(...gm(), info);
+  }
+  if (!evalOk) return;                          // ohne eval nie etwas nachladen — die eingebaute Fassung bleibt
+  // Hintergrund: neuere Fassung vom Panel dieses PCs holen, pruefen, fuer das NAECHSTE Laden merken (nie zwei Kerne in einer Seite)
+  async function sha256(t) {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+    return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  function holen() {
+    try {
+      GM_xmlhttpRequest({ method: 'GET', url: KERN_URL, timeout: 8000, onload: async (r) => {
+        try {
+          if (r.status !== 200) { info.fehler = 'tsx-kern.json HTTP ' + r.status; return; }
+          const j = JSON.parse(r.responseText);
+          if (!j || typeof j.kern !== 'string' || !j.version || !/^[0-9a-f]{64}$/.test(String(j.sha || ''))) { info.fehler = 'tsx-kern.json unvollstaendig'; return; }
+          if (!neuer(j.version, info.laeuft)) { info.bereit = null; return; }   // nichts Neues
+          if ((await sha256(j.kern)) !== j.sha) { info.fehler = 'Pruefsumme passt nicht (' + j.version + ')'; return; }
+          try { new Function(...PARAM, j.kern); } catch (e) { info.fehler = 'Fassung ' + j.version + ' nicht lesbar'; return; }
+          GM_setValue(MERK, { version: j.version, sha: j.sha, code: j.kern, at: Date.now() });
+          info.bereit = j.version; info.fehler = '';
+        } catch (e) { info.fehler = 'tsx-kern.json: ' + String((e && e.message) || e).slice(0, 80); }
+      }, onerror: () => { info.fehler = 'Panel nicht erreichbar (tsx-kern.json)'; } });
+    } catch (e) { info.fehler = 'holen: ' + String((e && e.message) || e).slice(0, 80); }
+  }
+  // gestreut (Jitter-Regel): erster Blick 10–40 s nach dem Laden, dann alle 20–40 min
+  const naechster = (a, b) => a + Math.random() * (b - a);
+  setTimeout(function takt() { holen(); setTimeout(takt, naechster(20 * 60000, 40 * 60000)); }, naechster(10000, 40000));
 })();
