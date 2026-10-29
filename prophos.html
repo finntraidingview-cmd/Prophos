@@ -14012,6 +14012,16 @@
                 <input type="radio" name="mwd-erl-status" value="passed">
                 <span style="color:var(--ink)">✅ Phase bestanden — Nachfolger anlegen</span>
               </label>
+              <!-- Funded-Konten (29.10.2026, Finn am Radar-Dialog: „Dass ich hier direkt zu ‚Waiting for Payout' oder ‚Winning Day' den Typ ändern
+                   kann"): Regeln wie der Haken im Trades-Dialog (tcKontoUmPrepare), sichtbar nur, wenn sie passen; das Backend stellt um -->
+              <label class="tc-status-opt" id="mwd-erl-status-waiting" style="display:none;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+                <input type="radio" name="mwd-erl-status" value="waiting">
+                <span style="color:var(--ink)">⏳ Waiting for Payout — Konto bleibt, wartet auf Payout</span>
+              </label>
+              <label class="tc-status-opt" id="mwd-erl-status-wd" style="display:none;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer">
+                <input type="radio" name="mwd-erl-status" value="winning_days">
+                <span style="color:var(--ink)">🏆 → Winning Days — Kontotyp umstellen</span>
+              </label>
             </div>
           </div>
           <div class="modal-msg" id="mwdErledigtMsg"></div>
@@ -34287,6 +34297,16 @@
       const rb = stPassed.querySelector('input'), keins = document.querySelector('input[name="mwd-erl-status"][value="none"]')
       if(_mwdErlWd && rb && rb.checked && keins) keins.checked = true
     }
+    // Funded-Konten (29.10.2026): ⏳ nur Funded CFD, 🏆 nur Funded einer Futures-Firma — wie tcKontoUmPrepare; nie Polar, nie vorbelegt
+    const _kt = String(pw.konto_typ || '').toLowerCase()
+    const umZeilen = { 'mwd-erl-status-waiting': !_mwdErlPolar && _kt === 'funded_cfd',
+      'mwd-erl-status-wd': !_mwdErlPolar && _kt === 'funded' && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(k.firma) }
+    Object.entries(umZeilen).forEach(([id, an]) => {
+      const z = document.getElementById(id); if(!z) return
+      z.style.display = an ? 'flex' : 'none'
+      const rb = z.querySelector('input'), keins = document.querySelector('input[name="mwd-erl-status"][value="none"]')
+      if(!an && rb && rb.checked && keins) keins.checked = true
+    })
     mwdErlWdVorschau()
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
     document.getElementById('mwdErledigtModal')?.classList.add('open')
@@ -34388,8 +34408,23 @@
       const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
       const ar = d.archiv || null
       if(ar && ar.fehler && typeof atToast === 'function') atToast(ar.fehler, 'end')
-      const arTxt = (ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : ''
-      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : _mwdErlPolar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, 'ok')
+      const um = d.konto_umstellen || null   // 29.10.2026: ⏳ Waiting for Payout / 🏆 Winning Days (Backend stellt um, auch fremde IDs)
+      // Fehler hängt am Erledigt-Toast (atToast räumt vorige Toasts weg — ein eigener Hinweis wäre sofort überdeckt)
+      const umFehl = !!(um && (um.fehler || um.umgestellt === false))
+      const umTxt = (um && um.umgestellt) ? (um.ziel === 'waiting' ? ' · ⏳ Waiting for Payout' : ' · 🏆 jetzt Winning Days')
+        : umFehl ? ` · ⚠ ${um.fehler || `Konto nicht umgestellt: ${um.grund || 'passt nicht'}`}` : ''
+      if(um && um.umgestellt){
+        // eigenes Konto sofort nachziehen (fremde stehen nicht in accounts) — dieselben Felder wie accWartetUmstellen/accWdUmstellen
+        try{
+          const ai = (accounts || []).findIndex(x => String(x.id) === String(um.konto_id))
+          if(ai >= 0){
+            if(um.ziel === 'waiting') accounts[ai].waitingPayoutSince = new Date().toISOString(); else accounts[ai].type = 'winning_days'
+            if(typeof renderAccounts === 'function') renderAccounts()
+          }
+        }catch(_){}
+      }
+      const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '') + umTxt
+      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : _mwdErlPolar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, umFehl ? 'end' : 'ok')
       // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
       // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
       try{
@@ -51418,7 +51453,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1880'
+  const OS_TAB_BUILD = '2026-09-22.1881'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

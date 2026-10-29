@@ -13392,6 +13392,31 @@ def _wd_plan_mit_hedge(plan):
     return (_wd_zahl(plan.get("hedge_eur")) or 0) > 0 or bool(base.get("hedge"))
 
 
+def wd_erl_konto_umstellen_upd(konto, ziel, jetzt_iso, heute_de):
+    """REIN RECHNEND (testbar): Konto-Umstellung beim Abhaken im Radar (29.10.2026, Finn am Radar-Dialog „Trade erledigt": „Dass ich
+    hier direkt zu ‚Waiting for Payout' oder ‚Winning Day' den Typ ändern kann"). Dieselben Regeln wie der Haken im Trades-Dialog
+    (tcKontoUmPrepare) und dieselben Felder wie accWartetUmstellen/accWdUmstellen im Frontend — nur serverseitig, weil der Radar auch
+    fremde IDs abhakt (RLS: der Mac schreibt nur eigene Konten).
+    ziel 'waiting'      → nur Funded CFD ohne waiting_payout_since: {waiting_payout_since: jetzt}
+    ziel 'winning_days' → nur Funded einer Futures-Firma: {account_type: 'winning_days', notes: ohne alte „Winning Days seit …" + neue Zeile}
+    -> (upd | None, grund)"""
+    if not konto:
+        return None, "Konto nicht gefunden"
+    typ = str(konto.get("account_type") or "").strip().lower()
+    if ziel == "waiting":
+        if typ != "funded_cfd":
+            return None, "nur bei Funded CFD"
+        if str(konto.get("waiting_payout_since") or "").strip():
+            return None, "steht schon auf Waiting for Payout"
+        return {"waiting_payout_since": jetzt_iso}, ""
+    if ziel == "winning_days":
+        if typ != "funded" or ap_klasse(None, konto.get("firm")) != "futures":
+            return None, "nur bei Funded einer Futures-Firma"
+        alt = [z for z in str(konto.get("notes") or "").split("\n") if not z.strip().startswith("Winning Days seit ")]
+        return {"account_type": "winning_days", "notes": "\n".join(alt + [f"Winning Days seit {heute_de}"]).strip() or None}, ""
+    return None, "Ziel unbekannt"
+
+
 def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
     """REIN RECHNEND (testbar): Update für „Winning Day erledigt" (Abschluss-Popup vom Mac, 25.09.2026).
     Route 'tvv2', seit 30.09.2026 auch 'mt5v2' (Echo V2) und 'tsv2' (Topstep V2) — Finn will im Radar ALLES abhaken, auch
@@ -14203,8 +14228,10 @@ def admin_wd_plaene():
             # Account-Status wie im großen Erledigt-Popup (02.10.2026, Finn im Radar bei einem fremden Trade): 'none' = Konto bleibt,
             # 'blown' = Plan blown + Master-Konto im Archiv des BESITZERS ('blown'), 'passed' = Archiv 'passed_pending' — der Besitzer
             # trägt den Nachfolger bei sich nach („🎉 Account-Daten nachtragen"). Serverseitig, weil der Mac fremde Archive nicht schreibt.
+            # 29.10.2026: dazu 'waiting' (Funded CFD → Waiting for Payout) und 'winning_days' (Funded Futures → Winning Days) — Konto bleibt,
+            # nur Feld/Typ am Master-Konto wechselt (wd_erl_konto_umstellen_upd), kein Archiv
             konto_status = str(daten.get("konto_status") or "none")
-            if konto_status not in ("none", "blown", "passed"):
+            if konto_status not in ("none", "blown", "passed", "waiting", "winning_days"):
                 return jsonify({"error": "konto_status unbekannt"}), 400
             blown = konto_status == "blown"
             if len(pid) < 10:
@@ -14353,21 +14380,40 @@ def admin_wd_plaene():
                         except Exception as e:
                             return {"fehler": f"Konto nicht archiviert ({type(e).__name__}) — im Account von Hand archivieren"}
 
+                    def _umstellen():
+                        aid = str(plan.get("master_account_id") or "")
+                        if not aid:
+                            return {"fehler": "Konto nicht umgestellt (Plan ohne Master-Konto) — im Account von Hand umstellen"}
+                        try:
+                            kr = sb_select("accounts", {"select": "id,account_type,firm,notes,waiting_payout_since", "id": f"eq.{aid}", "limit": "1"})
+                            heute_de = datetime.strptime(_berlin_heute(), "%Y-%m-%d").strftime("%d.%m.%Y")
+                            k_upd, grund = wd_erl_konto_umstellen_upd(kr[0] if kr else None, konto_status, jetzt_iso, heute_de)
+                            if not k_upd:
+                                return {"umgestellt": False, "ziel": konto_status, "grund": grund}
+                            sb_update("accounts", {"id": f"eq.{aid}"}, k_upd)
+                            return {"umgestellt": True, "ziel": konto_status, "konto_id": aid}
+                        except Exception as e:
+                            return {"fehler": f"Konto nicht umgestellt ({type(e).__name__}) — im Account von Hand umstellen"}
+
                     # Apex mit Hedge (ah_tick) läuft wie ein WD, ist aber keiner — konto_typ bleibt leer, kein Good Day
                     f_typ = pool.submit(_konto_typ) if str(plan.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(plan) else None
                     f_buch = pool.submit(_buchen)
                     f_gd = pool.submit(_good_day)
-                    f_arch = pool.submit(_archivieren) if konto_status != "none" else None
+                    f_arch = pool.submit(_archivieren) if konto_status in ("blown", "passed") else None
+                    f_um = pool.submit(_umstellen) if konto_status in ("waiting", "winning_days") else None
                     buchung, buchung_fehler = f_buch.result()
                     good_day = f_gd.result()
                     if f_typ:
                         f_typ.result()
                     archiv = f_arch.result() if f_arch else None
+                    umstellen = f_um.result() if f_um else None
                 finally:
                     pool.shutdown(wait=False)
                 out = {"ok": True, "plan_id": pid, "status": "completed", "buchung": buchung}
                 if archiv:
                     out["archiv"] = archiv
+                if umstellen:
+                    out["konto_umstellen"] = umstellen
                 if good_day:
                     out["good_day"] = good_day
                 if buchung_fehler:
