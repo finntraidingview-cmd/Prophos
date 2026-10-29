@@ -10316,14 +10316,18 @@ def test_puls_fehlerfoto():
         and W("mousetest") is None and W("fehlerfoto") is None and W("augen") is None and W("") is None,
         "fehlerfoto_weg: TopstepX/TradingView mit Tab, Echo nur Bildschirm, Diagnose-Modi nie")
     E, t = ob.fehlerfoto_entscheid, 1_000_000.0
-    j1, m1 = E(None, "tvorder", "konto", t)
-    j2, m2 = E(m1, "tvorder", "konto", t + 60)
-    j3, _ = E(m2, "tvorder", "konto", t + 601)
-    j4, _ = E(m1, "tvorder", "ratlos", t + 60)
-    j5, _ = E(None, "tvlesen", "puls_beschaeftigt", t)
+    j1, m1, g1 = E(None, "tvorder", "konto", t)
+    j2, m2, g2 = E(m1, "tvorder", "konto", t + 60)
+    j3, _, _ = E(m2, "tvorder", "konto", t + 601)
+    j4, _, _ = E(m1, "tvorder", "ratlos", t + 60)
+    j5, _, g5 = E(None, "tvlesen", "puls_beschaeftigt", t)
     voll = {"zeiten": [t - i for i in range(ob.FEHLERFOTO_STUNDE)], "je": {}}
-    j6, _ = E(voll, "tsxorder", "neu", t)
-    chk(j1 and not j2 and j3 and j4 and not j5 and not j6, "fehlerfoto_entscheid: 10 min je Weg+Code, anderer Code sofort, belegt nie, Stundendeckel")
+    j6, _, g6 = E(voll, "tsxorder", "neu", t)
+    chk(j1 and not j2 and j3 and j4 and not j5 and not j6 and g1 == "" and "10 min" in g2 and "zählt nicht" in g5 and "Stunde" in g6,
+        "fehlerfoto_entscheid: 10 min je Weg+Code, anderer Code sofort, belegt nie, Stundendeckel — mit Grund für die Spur")
+    F = ob.fehlerfoto_handlauf_frei
+    chk(F("", 111, False) is True and F("111", 111, True) is None and F("222", 111, True) is False,
+        "Handlauf: keine Sperre → Foto, eigene Sperre → warten, Sperre eines anderen Laufs → kein Foto")
     i = ob.fehlerfoto_id(1793232000.0, "abc123")
     chk(i == "20261029-000000-abc123" and ob.fehlerfoto_praefix("pc-7ftp5l", i) == "pc-7ftp5l/2026-10-29/20261029-000000-abc123",
         f"fehlerfoto_id/praefix: UTC-Datum im Namen und im Ordner ({i})")
@@ -10338,29 +10342,31 @@ def test_puls_fehlerfoto():
     alt = ob.fehlerfoto_anstossen
     gerufen = []
     try:
-        ob.fehlerfoto_anstossen = lambda weg, tab, code: (gerufen.append((weg, tab, code)) or "pc-abcd/2026-10-29/20261029-000000-abc123")
+        ob.fehlerfoto_anstossen = lambda weg, tab, code: (gerufen.append((weg, tab, code)) or ("pc-abcd/2026-10-29/20261029-000000-abc123", ""))
         echt = io.StringIO()
         h = ob._FehlerfotoAusgabe(echt, "tsxorder", "tsx")
         print("Spur-Zeile ohne JSON", file=h)
         h.write(json.dumps({"ok": True, "msg": "gut"}))
         h.write("\n")
-        print(json.dumps({"ok": False, "code": "haenger", "msg": "hing — ü"}), file=h)
+        print(json.dumps({"ok": False, "code": "haenger", "msg": "hing — ü", "trail": "start → klick"}), file=h)
         print(json.dumps({"ok": False, "code": "zweite"}), file=h)
         h.write('{"ok": false, "code": "rest"}')
         zeilen = echt.getvalue().splitlines()
         d = json.loads(zeilen[2])
         chk(zeilen[0] == "Spur-Zeile ohne JSON" and json.loads(zeilen[1]) == {"ok": True, "msg": "gut"}
             and d["fehlerbild"] == "pc-abcd/2026-10-29/20261029-000000-abc123" and d["msg"] == "hing — ü" and gerufen == [("tsxorder", "tsx", "haenger")]
+            and d["trail"] == "start → klick → Fehlerfoto angestoßen → pc-abcd/2026-10-29/20261029-000000-abc123 (bildschirm + tab)"
             and "fehlerbild" not in json.loads(zeilen[3]) and len(zeilen) == 4,
             f"Hülle: nur die erste ok-false-Antwort bekommt fehlerbild, Rest unverändert, Teilzeile wartet ({len(zeilen)} Zeilen)")
         h.rest_ausgeben()
         chk(echt.getvalue().endswith('{"ok": false, "code": "rest"}') and len(gerufen) == 1, "Hülle: Rest ohne Zeilenende geht beim Ende raus, kein zweites Foto")
-        ob.fehlerfoto_anstossen = lambda weg, tab, code: None
+        ob.fehlerfoto_anstossen = lambda weg, tab, code: (None, "Deckel: 12 Fotos in der letzten Stunde")
         echt2 = io.StringIO()
         h2 = ob._FehlerfotoAusgabe(echt2, "echo", None)
-        roh = json.dumps({"ok": False, "code": "konto"})
-        print(roh, file=h2)
-        chk(echt2.getvalue() == roh + "\n", "Hülle: Deckel sagt nein → Antwort Zeichen für Zeichen unverändert")
+        print(json.dumps({"ok": False, "code": "konto", "trail": ["a", "b"]}), file=h2)
+        d2 = json.loads(echt2.getvalue())
+        chk("fehlerbild" not in d2 and d2["trail"] == ["a", "b", "kein Fehlerfoto: Deckel: 12 Fotos in der letzten Stunde"] and d2["code"] == "konto",
+            "Hülle: Deckel sagt nein → kein fehlerbild, Grund als Spur-Zeile (trail als Liste)")
     finally:
         ob.fehlerfoto_anstossen = alt
     return ok

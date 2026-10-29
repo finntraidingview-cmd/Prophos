@@ -1059,6 +1059,10 @@ def _puls_diagnose_senden(spur=None, schritt=""):
 # Nie im Klick-/Order-Pfad: die Hülle greift erst an der fertigen Antwort (letzte JSON-Zeile), der Lauf wartet nicht auf das Foto.
 # Fehler beim Foto werden geschluckt (Zeile in fehlerfoto.log neben dem Bot). Deckel: dasselbe (Weg, Code) höchstens alle 10 min, je PC
 # höchstens FEHLERFOTO_STUNDE Fotos je Stunde; „belegt"-Antworten (Puls/Polar beschäftigt, kaputter Befehl) nie.
+# Spur (Master 29.10.2026: „damit wir sehen, ob es auf den PCs läuft"): die Antwort trägt in trail „Fehlerfoto angestoßen → <pfad>" bzw.
+# „kein Fehlerfoto: <grund>"; je Foto meldet Railway das Ergebnis in puls_fehlerbild_log („bildschirm 143 KB" bzw. der Grund, warum keins —
+# PowerShell-Fehler, kein Puls-Chrome-Tab, Puls läuft wieder). Läuft schon der nächste Puls-Lauf (Handlauf-Sperre eines anderen
+# Prozesses), wird nicht fotografiert — nie ein Foto mitten in einen Login.
 # ═══════════════════════════════════════════════════════════════════════════
 FEHLERFOTO_OHNE = frozenset({"mousetest", "inspect", "augen", "fehlerfoto", "loginok", "tvfokus"})
 FEHLERFOTO_CODES_OHNE = frozenset({"puls_beschaeftigt", "puls_belegt", "polar_aktiv", "befehl"})
@@ -1083,16 +1087,20 @@ def fehlerfoto_weg(argv1):
 
 
 def fehlerfoto_entscheid(merk, weg, code, jetzt):
-    """REIN RECHNEND (testbar): Foto machen? -> (ja, merk_neu). merk = {'zeiten': [t…], 'je': {'weg|code': t}} aus fehlerfoto_merk.json."""
+    """REIN RECHNEND (testbar): Foto machen? -> (ja, merk_neu, grund). merk = {'zeiten': [t…], 'je': {'weg|code': t}} aus fehlerfoto_merk.json;
+    grund = '' bei ja, sonst der Text für die Spur."""
     m = merk if isinstance(merk, dict) else {}
     zahl = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
     zeiten = [t for t in (m.get("zeiten") or []) if zahl(t) and 0 <= jetzt - t < 3600]
     je = {k: v for k, v in (m.get("je") or {}).items() if isinstance(k, str) and zahl(v) and 0 <= jetzt - v < FEHLERFOTO_GLEICH_S}
     key = f"{weg}|{code or '-'}"[:80]
-    if str(code or "") in FEHLERFOTO_CODES_OHNE or key in je or len(zeiten) >= FEHLERFOTO_STUNDE:
-        return False, {"zeiten": zeiten, "je": je}
+    grund = (f"Code {code} zählt nicht" if str(code or "") in FEHLERFOTO_CODES_OHNE
+             else f"Deckel: derselbe Fehler ({key}) vor < {int(FEHLERFOTO_GLEICH_S // 60)} min schon fotografiert" if key in je
+             else f"Deckel: {FEHLERFOTO_STUNDE} Fotos in der letzten Stunde" if len(zeiten) >= FEHLERFOTO_STUNDE else "")
+    if grund:
+        return False, {"zeiten": zeiten, "je": je}, grund
     je[key] = jetzt
-    return True, {"zeiten": zeiten + [jetzt], "je": je}
+    return True, {"zeiten": zeiten + [jetzt], "je": je}, ""
 
 
 def fehlerfoto_id(jetzt=None, zufall=None):
@@ -1131,32 +1139,32 @@ def _fehlerfoto_log(text):
 
 def fehlerfoto_anstossen(weg, tab, code):
     """Nach der fertigen Antwort eines Laufs mit ok false: entscheiden (Deckel), id würfeln, Foto-Prozess ENTKOPPELT starten.
-    -> Präfix für „fehlerbild" oder None. Nie ein Fehler nach außen."""
+    -> (Präfix für „fehlerbild" | None, Grund ohne Foto). Nie ein Fehler nach außen."""
     try:
         pc = _fehlerfoto_pc()
         if not pc:
-            return None
+            return None, "keine pc_id (pc_id.json fehlt)"
         p = os.path.join(_FEHLERFOTO_HIER, "fehlerfoto_merk.json")
         try:
             with open(p, "r", encoding="utf-8") as f:
                 merk = json.load(f)
         except Exception:
             merk = None
-        ja, merk = fehlerfoto_entscheid(merk, weg, code, time.time())
+        ja, merk, grund = fehlerfoto_entscheid(merk, weg, code, time.time())
         if not ja:
-            return None
+            return None, grund
         with open(p, "w", encoding="utf-8") as f:
             json.dump(merk, f)
         bid = fehlerfoto_id()
         import subprocess
         flags = 0x00000008 | 0x00000200 | 0x08000000 | 0x00004000   # DETACHED, NEW_PROCESS_GROUP, NO_WINDOW, BELOW_NORMAL (wie augen_anstossen)
         subprocess.Popen([sys.executable, os.path.abspath(__file__), "fehlerfoto",
-                          json.dumps({"id": bid, "tab": tab, "weg": weg, "code": str(code or "")[:40]})], creationflags=flags,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
-        return fehlerfoto_praefix(pc, bid)
+                          json.dumps({"id": bid, "tab": tab, "weg": weg, "code": str(code or "")[:40], "eltern": os.getpid()})],
+                         creationflags=flags, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        return fehlerfoto_praefix(pc, bid), ""
     except Exception as e:
         _fehlerfoto_log(f"anstoßen gescheitert: {type(e).__name__}: {e}")
-        return None
+        return None, f"Anstoß gescheitert ({type(e).__name__})"
 
 
 class _FehlerfotoAusgabe:
@@ -1176,10 +1184,12 @@ class _FehlerfotoAusgabe:
         if not isinstance(d, dict) or d.get("ok") is not False or d.get("fehlerbild"):
             return z
         self._fertig = True
-        bild = fehlerfoto_anstossen(self._weg, self._tab, d.get("code") or d.get("schritt"))
-        if not bild:
-            return z
-        d["fehlerbild"] = bild
+        bild, grund = fehlerfoto_anstossen(self._weg, self._tab, d.get("code") or d.get("schritt"))
+        zeile = (f"Fehlerfoto angestoßen → {bild} (bildschirm{' + tab' if self._tab else ''})" if bild else f"kein Fehlerfoto: {grund}")
+        t = d.get("trail")
+        d["trail"] = (t + [zeile]) if isinstance(t, list) else (f"{t} → {zeile}" if t else zeile)
+        if bild:
+            d["fehlerbild"] = bild
         return json.dumps(d, ensure_ascii=True)
 
     def write(self, s):
@@ -1196,18 +1206,24 @@ class _FehlerfotoAusgabe:
             pass
 
     def rest_ausgeben(self):
-        if self._puffer:
-            z, self._puffer = self._puffer, ""
-            self._echt.write(self._zeile(z))
-        self.flush()
+        try:
+            if self._puffer:
+                z, self._puffer = self._puffer, ""
+                self._echt.write(self._zeile(z))
+            self.flush()
+        except Exception:
+            pass
 
     def __getattr__(self, n):
         return getattr(self._echt, n)
 
 
 def fehlerfoto_huelle_einbauen(argv1):
-    """In main(): sys.stdout umhüllen, wenn der Modus fotografiert. Rest im Puffer geht beim Ende raus (atexit). Nie ein Fehler."""
+    """In main(): sys.stdout umhüllen, wenn der Modus fotografiert. Rest im Puffer geht beim Ende raus (atexit). Nie ein Fehler.
+    Nur, wenn order_bot.py selbst der gestartete Prozess ist — ruft ein Test main() im eigenen Prozess, bleibt stdout unberührt (kein Foto)."""
     try:
+        if os.path.abspath(str(getattr(sys.modules.get("__main__"), "__file__", "") or "")) != os.path.abspath(__file__):
+            return
         wt = fehlerfoto_weg(argv1)
         if not wt or isinstance(sys.stdout, _FehlerfotoAusgabe):
             return
@@ -1247,6 +1263,25 @@ def fehlerfoto_ps_skript(pfad, breite=FEHLERFOTO_BREITE, qualitaet=FEHLERFOTO_QU
     if "'" in p or "\n" in p:
         raise ValueError("Pfad ungeeignet")
     return FEHLERFOTO_PS.replace("__BREITE__", str(int(breite))).replace("__QUALITAET__", str(int(qualitaet))).replace("__PFAD__", p)
+
+
+def _fehlerfoto_status(pc, bid, art, grund):
+    """Foto gescheitert/ausgelassen → Grund an Railway (puls_fehlerbild_log), damit sichtbar ist, ob das Foto auf den PCs läuft. Still."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"{PULS_BACKEND}/puls-fehlerbild-status/{pc}", method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps({"id": bid, "art": art, "grund": str(grund)[:200]}).encode("utf-8"))
+        urllib.request.urlopen(req, timeout=10).read()
+    except Exception:
+        pass
+
+
+def fehlerfoto_handlauf_frei(inhalt, eltern_pid, frisch):
+    """REIN RECHNEND (testbar): darf fotografiert werden? Sperre nicht frisch → ja; Sperre des fehlgeschlagenen Laufs selbst (pid = eltern)
+    → warten (None); Sperre eines anderen Laufs → nein (der nächste Puls-Lauf ist schon unterwegs, evtl. mitten im Login)."""
+    if not frisch:
+        return True
+    return None if str(inhalt or "").strip() == str(eltern_pid) else False
 
 
 def _fehlerfoto_hochladen(pc, bid, art, roh):
@@ -1306,15 +1341,36 @@ def modus_fehlerfoto(cmd):
     pc, bid = _fehlerfoto_pc(), str((cmd or {}).get("id") or "")
     if not pc or not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}", bid):
         return
+    # Handlauf-Sperre: die des fehlgeschlagenen Laufs selbst geht gleich weg (bis 6 s warten); die eines ANDEREN Laufs heißt: Puls ist
+    # schon wieder unterwegs → kein Foto (nie mitten in einen Login)
+    p_sperre = os.path.join(_AUGEN_HIER, HANDLAUF_SPERRE)
+    for _ in range(12):
+        try:
+            with open(p_sperre, "r") as f:
+                inhalt = f.read()
+            frisch = handlauf_sperre_frisch(os.path.getmtime(p_sperre), time.time())
+        except OSError:
+            inhalt, frisch = "", False
+        frei = fehlerfoto_handlauf_frei(inhalt, (cmd or {}).get("eltern"), frisch)
+        if frei is not None:
+            break
+        time.sleep(0.5)
+    if frei is not True:
+        grund = "Puls läuft wieder (Handlauf-Sperre) — kein Foto" if frei is False else "Sperre des Laufs nach 6 s noch da — kein Foto"
+        _fehlerfoto_status(pc, bid, "bildschirm", grund)
+        _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)}: {grund}")
+        return
     teile = []
     for art, fn in (("bildschirm", lambda: _fehlerfoto_bildschirm(pc, bid)),
                     ("tab", (lambda: _fehlerfoto_tab(pc, bid, cmd.get("tab"))) if cmd.get("tab") in ("tv", "tsx") else None)):
         if fn is None:
             continue
         try:
-            teile.append(f"{art} {fn() // 1024} KB")
+            teile.append(f"{art} {fn() // 1024} KB")      # Erfolg schreibt Railway selbst in puls_fehlerbild_log
         except Exception as e:
-            teile.append(f"{art} FEHLER {type(e).__name__}: {str(e)[:120]}")
+            grund = f"{type(e).__name__}: {str(e)[:150]}"
+            teile.append(f"{art} FEHLER {grund}")
+            _fehlerfoto_status(pc, bid, art, grund)
     _fehlerfoto_log(f"{fehlerfoto_praefix(pc, bid)} ({cmd.get('weg') or '?'} {cmd.get('code') or '-'}): " + " · ".join(teile))
 
 

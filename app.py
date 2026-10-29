@@ -15581,9 +15581,15 @@ def puls_diagnose_schreiben(pc_id):
 # Ablage: privater Bucket puls-fehlerbilder ohne Policies (nur Service-Key, sql/2026-10-29_puls_fehlerbilder.sql), Pfad
 # <pc>/<JJJJ-MM-TT>/<id>-<art>.jpg. Den Präfix <pc>/<JJJJ-MM-TT>/<id> gibt der Bot im Ergebnis als „fehlerbild" zurück → order_signale.ergebnis
 # und puls_fehlstarts.bild_pfad. Ansehen: GET /admin/puls-fehlerbild?pfad=<präfix>&art=bildschirm|tab → Link 5 min gültig.
+# Master 29.10.2026: nur pc_ids, die Prophos kennt (Herzschlag in mt5_live.pc_name, 30 Tage — sonst könnte jeder mit erfundenen
+# Kennungen den Bucket füllen), dazu ein Deckel über alle PCs (PULS_FEHLERBILD_STUNDE_ALLE). Geloggt wird nur pc_id + Größe. Jedes Foto
+# (und jeder Grund, warum keins — POST /puls-fehlerbild-status/<pc>) landet in puls_fehlerbild_log, damit sichtbar ist, ob es läuft.
 PULS_FEHLERBILD_BUCKET = "puls-fehlerbilder"
 PULS_FEHLERBILD_MAX = 400 * 1024
 PULS_FEHLERBILD_STUNDE = 30
+PULS_FEHLERBILD_STUNDE_ALLE = 200
+PULS_FEHLERBILD_PC_TAGE = 30
+_puls_fehlerbild_pcs = {"bis": 0.0, "versucht": 0.0, "pcs": None}
 PULS_FEHLERBILD_ID_RE = re.compile(r"(\d{4})(\d{2})(\d{2})-\d{6}-[0-9a-f]{6}")
 PULS_FEHLERBILD_PRAEFIX_RE = re.compile(r"(pc-[a-z0-9]{4,12})/(\d{4}-\d{2}-\d{2})/(\d{8}-\d{6}-[0-9a-f]{6})")
 _puls_fehlerbild_zeiten = {}
@@ -15614,6 +15620,56 @@ def puls_fehlerbild_erlaubt(zeiten, pc_id, jetzt_s, je_stunde=PULS_FEHLERBILD_ST
     return True
 
 
+def _puls_fehlerbild_pc_bekannt(pc_id):
+    """Kennt Prophos diesen PC? Herzschlag-Zeile in mt5_live (pc_name) aus den letzten PULS_FEHLERBILD_PC_TAGE Tagen; 5 min gemerkt, ein
+    unbekannter PC frischt höchstens einmal je Minute nach. Lesefehler ohne bekannten Stand → Exception (Aufrufer 503, nie offen)."""
+    jetzt = time.time()
+    with _puls_fehlerbild_lock:
+        c = dict(_puls_fehlerbild_pcs)
+    if c["pcs"] is not None and pc_id in c["pcs"] and jetzt < c["bis"]:
+        return True
+    if c["pcs"] is not None and jetzt - c["versucht"] < 60:
+        return pc_id in c["pcs"]
+    with _puls_fehlerbild_lock:
+        _puls_fehlerbild_pcs["versucht"] = jetzt
+    seit = (datetime.now(timezone.utc) - timedelta(days=PULS_FEHLERBILD_PC_TAGE)).isoformat()
+    try:
+        rows = sb_select("mt5_live", {"select": "pc_name", "pc_name": "like.pc-*", "updated_at": f"gte.{seit}", "limit": "5000"}) or []
+    except Exception:
+        if c["pcs"] is None:
+            raise
+        return pc_id in c["pcs"]
+    pcs = frozenset(str(z.get("pc_name")) for z in rows if isinstance(z, dict) and z.get("pc_name"))
+    with _puls_fehlerbild_lock:
+        _puls_fehlerbild_pcs.update(bis=jetzt + 300, pcs=pcs)
+    return pc_id in pcs
+
+
+def _puls_fehlerbild_tor(pc_id):
+    """Gemeinsames Tor von Upload und Status: bekannter PC, Deckel je PC und über alle. → None (frei) oder (Antwort, Status)."""
+    try:
+        if not _puls_fehlerbild_pc_bekannt(pc_id):
+            return jsonify({"ok": False, "msg": "pc_id unbekannt"}), 403
+    except Exception:
+        return jsonify({"ok": False, "msg": "PC-Liste nicht lesbar"}), 503
+    with _puls_fehlerbild_lock:
+        jetzt = time.time()
+        if not puls_fehlerbild_erlaubt(_puls_fehlerbild_zeiten, "*", jetzt, PULS_FEHLERBILD_STUNDE_ALLE):
+            return jsonify({"ok": False, "msg": "zu viele Bilder in dieser Stunde (alle PCs)"}), 429
+        if not puls_fehlerbild_erlaubt(_puls_fehlerbild_zeiten, pc_id, jetzt):
+            _puls_fehlerbild_zeiten["*"] = _puls_fehlerbild_zeiten["*"][:-1]   # der Gesamtzähler zählt nur Durchgelassene
+            return jsonify({"ok": False, "msg": "zu viele Bilder in dieser Stunde"}), 429
+    return None
+
+
+def _puls_fehlerbild_protokoll(pc_id, bild_id, art, kb=None, grund=None):
+    """Zeile in puls_fehlerbild_log (Service-Key). Fehlt die Tabelle (SQL steht aus) oder hakt es: still."""
+    try:
+        sb_insert("puls_fehlerbild_log", {"pc": pc_id, "bild_id": bild_id, "art": art, "kb": kb, "grund": (str(grund)[:200] if grund else None)})
+    except Exception:
+        pass
+
+
 @app.route("/puls-fehlerbild/<pc_id>", methods=["POST"])
 def puls_fehlerbild_hochladen(pc_id):
     """POST /puls-fehlerbild/<pc_id>?id=<JJJJMMTT-hhmmss-xxxxxx>&art=bildschirm|tab, Körper = JPEG → {ok, pfad}. Siehe Block oben."""
@@ -15622,12 +15678,14 @@ def puls_fehlerbild_hochladen(pc_id):
         return jsonify({"ok": False, "msg": "pc_id/id/art ungültig"}), 400
     if (request.content_length or 0) > PULS_FEHLERBILD_MAX:
         return jsonify({"ok": False, "msg": "zu groß"}), 413
+    tor = _puls_fehlerbild_tor(pc_id)
+    if tor:
+        return tor
     roh = request.get_data(cache=False) or b""
-    if len(roh) > PULS_FEHLERBILD_MAX or not roh.startswith(b"\xff\xd8\xff"):
-        return jsonify({"ok": False, "msg": "kein JPEG oder zu groß"}), 400
-    with _puls_fehlerbild_lock:
-        if not puls_fehlerbild_erlaubt(_puls_fehlerbild_zeiten, pc_id, time.time()):
-            return jsonify({"ok": False, "msg": "zu viele Bilder in dieser Stunde"}), 429
+    if len(roh) > PULS_FEHLERBILD_MAX:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    if not roh.startswith(b"\xff\xd8\xff"):
+        return jsonify({"ok": False, "msg": "kein JPEG"}), 400
     if not SUPABASE_SERVICE_KEY:
         return jsonify({"ok": False, "msg": "Server nicht konfiguriert"}), 503
     try:
@@ -15638,7 +15696,23 @@ def puls_fehlerbild_hochladen(pc_id):
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     if r.status_code >= 300:
         return jsonify({"ok": False, "msg": f"nicht speicherbar (HTTP {r.status_code})"}), 502
+    print(f"[puls-fehlerbild] {pc_id} {len(roh) // 1024} KB", flush=True)   # nur pc_id + Größe (Master 29.10.2026)
+    _puls_fehlerbild_protokoll(pc_id, request.args.get("id"), request.args.get("art"), kb=len(roh) // 1024)
     return jsonify({"ok": True, "pfad": pfad})
+
+
+@app.route("/puls-fehlerbild-status/<pc_id>", methods=["POST"])
+def puls_fehlerbild_status(pc_id):
+    """POST /puls-fehlerbild-status/<pc_id> {id, art, grund} — der Foto-Prozess meldet, warum es KEIN Bild gab (PowerShell-Fehler, kein
+    Puls-Chrome-Tab, Puls läuft wieder). Gleiches Tor wie der Upload; nur ins Protokoll."""
+    b = request.get_json(silent=True) or {}
+    if (request.content_length or 0) > 2000 or not puls_fehlerbild_pfad(pc_id, b.get("id"), b.get("art")):
+        return jsonify({"ok": False, "msg": "ungültig"}), 400
+    tor = _puls_fehlerbild_tor(pc_id)
+    if tor:
+        return tor
+    _puls_fehlerbild_protokoll(pc_id, b.get("id"), b.get("art"), grund=str(b.get("grund") or "ohne Grund"))
+    return jsonify({"ok": True})
 
 
 @app.route("/admin/puls-fehlerbild", methods=["GET", "OPTIONS"])

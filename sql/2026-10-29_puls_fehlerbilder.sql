@@ -15,6 +15,21 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('puls-fehlerbilder', 'puls-fehlerbilder', false, 409600, array['image/jpeg'])
 on conflict (id) do nothing;
 
+-- 1b) Protokoll je Foto (Master 29.10.2026: „damit wir sehen, ob es auf den PCs läuft"): Railway schreibt mit dem Service-Key je hochgeladenem
+--     Bild eine Zeile (kb) und je ausgelassenem/gescheitertem Foto den Grund (POST /puls-fehlerbild-status). RLS an, KEINE Policies →
+--     nur Service-Key schreibt/liest (Supabase MCP der Routine ebenso). Kein Löschen nötig: eine Zeile je Foto, gedeckelt (≤ 200/h).
+create table if not exists public.puls_fehlerbild_log (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  pc text not null check (pc ~ '^pc-[a-z0-9]{4,12}$'),
+  bild_id text not null check (bild_id ~ '^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$'),
+  art text not null check (art in ('bildschirm', 'tab')),
+  kb integer,
+  grund text
+);
+create index if not exists puls_fehlerbild_log_at on public.puls_fehlerbild_log (at desc);
+alter table public.puls_fehlerbild_log enable row level security;
+
 -- 2) Spalte an puls_fehlstarts (bestehende RLS: insert/select nur eigene Zeilen — gilt unverändert auch für bild_pfad).
 alter table public.puls_fehlstarts add column if not exists bild_pfad text;
 alter table public.puls_fehlstarts drop constraint if exists puls_fehlstarts_bild_pfad_form;
@@ -53,3 +68,6 @@ create or replace view public.puls_fehler_muster with (security_invoker = true) 
 -- select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and qual ilike '%puls-fehlerbilder%';   -- 0
 -- select muster, n_24h, zuletzt, bild from public.puls_fehler_muster order by zuletzt desc limit 10;
 -- select name, created_at, metadata->>'size' from storage.objects where bucket_id = 'puls-fehlerbilder' order by created_at desc limit 20;
+-- select pc, count(*) filter (where kb is not null) bilder, count(*) filter (where grund is not null) ohne_bild, max(at)
+--   from public.puls_fehlerbild_log where at > now() - interval '24 hours' group by pc order by 4 desc;
+-- select count(*) from pg_policies where schemaname = 'public' and tablename = 'puls_fehlerbild_log';   -- 0

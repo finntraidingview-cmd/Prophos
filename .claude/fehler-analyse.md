@@ -53,16 +53,32 @@ curl -s "https://web-production-bec81.up.railway.app/puls-fehlerbild-datei?pfad=
 
   `art=tab` für das Bild des Puls-Chrome-Tabs. Der Token steht in der Railway-Variable `PULS_FEHLERBILD_TOKEN` (fehlt sie → 404).
   Im Browser mit Admin-Login geht auch `GET /admin/puls-fehlerbild?pfad=<pfad>&art=bildschirm` (5-min-Link, Gate wie Admin → Mail).
+- **Nur Hermann Technologies auswerten** (Standing-Regel, Master 29.10.2026): gespeichert werden Bilder aller PCs, ausgewertet nur Fehler
+  von IDs der Gruppe Hermann Technologies — die Emin-Gruppe (Gruppen MIT Verwalter in `id_gruppen`) nie. Immer über `user_id` filtern:
 - **Welche Fehler haben Bilder?**
 
 ```sql
-select at, pc, quelle, schritt, left(msg, 80) msg, bild_pfad from puls_fehler_ereignisse
-where bild_pfad is not null and at > now() - interval '24 hours' order by at desc;
-select name, created_at from storage.objects where bucket_id = 'puls-fehlerbilder' order by created_at desc limit 20;
+with nicht_ht as (
+  select verwalter_user_id uid from id_gruppen where verwalter_user_id is not null
+  union select m.user_id from id_gruppe_mitglied m join id_gruppen g on g.id = m.gruppe_id where g.verwalter_user_id is not null)
+select e.at, e.pc, e.quelle, e.schritt, left(e.msg, 80) msg, e.bild_pfad from puls_fehler_ereignisse e
+where e.bild_pfad is not null and e.at > now() - interval '24 hours' and e.user_id not in (select uid from nicht_ht)
+order by e.at desc;
 ```
 
-- **Kein Bild, obwohl Fehler?** Auf dem PC liegt neben dem Bot `fehlerfoto.log` (je Foto eine Zeile: Größe oder Fehler — PowerShell,
-  kein Puls-Chrome, Upload). Gegen Spam greift der Deckel (siehe oben).
+  Das Muster-View `puls_fehler_muster` mischt alle IDs — für HT-Auswertungen mit Bild die Ereignisse oben nehmen, nicht `bild` aus dem Muster.
+- **Läuft das Foto auf den PCs?** In der Antwort jedes fehlgeschlagenen Laufs (`order_signale.ergebnis->>'trail'`) steht am Ende
+  „Fehlerfoto angestoßen → <pfad>" oder „kein Fehlerfoto: <grund>" (Deckel, Code zählt nicht). Je Foto schreibt Railway eine Zeile in
+  `puls_fehlerbild_log` — mit `kb` (hochgeladen) oder `grund` (PowerShell-Fehler, kein Puls-Chrome-Tab, Puls läuft wieder):
+
+```sql
+select pc, count(*) filter (where kb is not null) bilder, count(*) filter (where grund is not null) ohne_bild,
+       (array_agg(grund order by at desc) filter (where grund is not null))[1] letzter_grund, max(at)
+from puls_fehlerbild_log where at > now() - interval '24 hours' group by pc order by max(at) desc;
+```
+
+  Uploads nehmen nur PCs an, die einen Herzschlag in `mt5_live` haben (30 Tage). Auf dem PC liegt neben dem Bot zusätzlich
+  `fehlerfoto.log`.
 - Ein Bild ist ein Beleg, kein Beweis für die Ursache: immer mit `trail`/`puls_diagnose` derselben Minute zusammen lesen.
 
 ## Vorgehen
