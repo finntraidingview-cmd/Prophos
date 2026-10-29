@@ -12235,7 +12235,7 @@
             <div class="vp-zeile" style="margin-top:10px">
               <span>Tag</span> <input type="date" class="input mono vp-in" id="wd-tag" style="width:140px;text-align:left">
               <button class="btn btn-primary btn-mini" id="wdWuerfel" data-ht-global title="Alle IDs mit Funded-Futures-Konten eintragen, Blöcke würfeln (Reihenfolge, Startzeiten, Richtung) und sofort alle Pläne anlegen">🎲 Würfeln</button>
-              <button class="btn btn-ghost btn-mini" id="wdSave" data-ht-global title="Haken, TP/SL, Zeiten und Richtungen speichern — Pläne werden sofort nachgezogen">Änderungen speichern</button>
+              <button class="btn btn-ghost btn-mini" id="wdSave" title="Haken, TP/SL, Zeiten und Richtungen speichern — Pläne werden sofort nachgezogen">Änderungen speichern</button>
               <button class="btn btn-ghost btn-mini" id="wdReload">Neu laden</button>
             </div>
             <div class="modal-msg" id="wdMsg"></div>
@@ -12266,7 +12266,7 @@
           <div class="panel" id="wd-nd" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
               <div class="panel-title">Heute nicht drin <span style="font-weight:400;color:var(--sub);font-size:12px">· Winning-Days-Konten ohne Platz im heutigen Tagesplan <span id="wd-nd-sub"></span></span></div>
-              <button type="button" class="btn btn-ghost btn-mini" id="wdNdAlle" data-ht-global hidden title="alle Konten mit Haken, die heute nicht drin sind, je eins zu seiner ID dazuwürfeln (eigene Zufallszeit, Richtung gleich/gegen den Block je 1/2) — Konten mit Haken aus bleiben draußen">🎲 Alle würfeln</button>
+              <button type="button" class="btn btn-ghost btn-mini" id="wdNdAlle" hidden title="alle Konten mit Haken, die heute nicht drin sind, je eins zu seiner ID dazuwürfeln (eigene Zufallszeit, Richtung gleich/gegen den Block je 1/2) — Konten mit Haken aus bleiben draußen">🎲 Alle würfeln</button>
             </div>
             <div class="wd-po-grid" id="wd-nd-grid"></div>
           </div>
@@ -51618,7 +51618,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1894'
+  const OS_TAB_BUILD = '2026-09-22.1895'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -65465,6 +65465,15 @@
   // Gruppen-Verwalter (09.10.2026, Prüfer K5): „🎲 Würfeln" und „Änderungen speichern" sind für ihn ausgeblendet (CSS .adm-verwalter
   // [data-ht-global]) — die Hinweistexte des Reiters verweisen dann nicht darauf. Dieselbe Bedingung wie das Ausblenden.
   const wdVerwalter = () => !!document.querySelector('#dashboard-view section.view[data-view="kasse"].adm-verwalter')
+  /* VERWALTER BEARBEITET SEINE GRUPPE (30.10.2026, Finn als Emin: „Warum kann Emin nichts ändern? Der soll ja ändern können."): bis hier war
+   * der Reiter für Verwalter komplett lesend (09.10.2026). Jetzt gelten Haken/„alle", „nur heute", Startzeit, BUY/SELL, TP/Risiko je Konto,
+   * „Änderungen speichern" und das 🎲 in „Heute nicht drin" für jede ID seiner Gruppe (wdSichtOk = _admGruppeOk) — wie HT für HT.
+   * HT-weit bleiben (data-ht-global bzw. wdVerwalter()): großes 🎲 Würfeln (taktet den ganzen Tag über alle IDs), Block-Reihenfolge,
+   * Risiko für alle, Einstellungen, ids_aus, SCHARF. Riegel dahinter: wdDarf, Railway /admin/wd-plaene (Gruppen-Gate je Zeile) und
+   * sql/2026-10-30_wd_verwalter_riegel.sql (RPC wd_konto_setzen + RLS wd_tagesplan/wd_farmer_regeln). */
+  const wdNurLesen = uid => wdVerwalter() && !wdSichtOk(uid)
+  const wdKarteUid = el => { const k = el && el.closest('.wd-karte'); return k ? (k.dataset.wdUser || k.dataset.wdErw || '') : '' }
+  window._wdNurLesen = uid => wdNurLesen(uid)   // Test-Haken
   async function wdDarf(uid, streng){
     if(String(uid || '') === String((typeof currentUserId !== 'undefined' && currentUserId) || '#')) return true
     if(!(await wdNurGruppe())) return true
@@ -66327,10 +66336,8 @@
   function wdKarte(x, erw){
     const r = _wd.regeln || {}, de = wdDe
     const fest = !erw && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst')
-    // Verwalter (Master 09.10.2026, Entscheidung a): Zeit, Richtung, TP/SL nur Anzeige — speichern kann sie nur Hermann Technologies,
-    // ein Bearbeiten ohne Speichern-Knopf verwirrt nur. Nachzug .1390: auch Haken und „nur heute" — der Reiter ist für Verwalter KOMPLETT
-    // lesend (Master: halb bedienbar ist unklarer als klar lesend)
-    const nurLesen = wdVerwalter()
+    // Verwalter: seit 30.10.2026 bedienbar für IDs seiner Gruppe (wdNurLesen) — nur fremde IDs bleiben Anzeige (09.10.2026: komplett lesend)
+    const nurLesen = wdNurLesen(x.user_id)
     const uid = escapeHtml(String(x.user_id))
     const zeiten = (!erw && x.start_um) ? wdKontoZeiten((x.konten || []).map(k => ({ ...k })), x.start_um, r) : new Map()
     const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
@@ -66522,7 +66529,7 @@
     const fest = erw || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
     const txt = x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
     const kl = x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
-    if(fest || wdVerwalter()) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'   // Verwalter: nur Anzeige (Master 09.10.2026)
+    if(fest || wdNurLesen(x.user_id)) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'   // fremde ID beim Verwalter: nur Anzeige (30.10.2026)
     return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="anklicken: Richtung für alle Konten von ${escapeHtml(x.name || 'dieser ID')} umdrehen">${txt}</button>`
   }
   async function wdRichtungUmschalten(uid){
@@ -66624,17 +66631,17 @@
     // Richtungs-Chip in der ID-Zeile: Klick dreht BUY↔SELL (05.10.2026) — eigene Verdrahtung, Zeilen-Klick ignoriert Knöpfe
     box.querySelectorAll('[data-wd-flip]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
-      if(!b.disabled && !wdVerwalter()) wdRichtungUmschalten(b.dataset.wdFlip)
+      if(!b.disabled && !wdNurLesen(b.dataset.wdFlip)) wdRichtungUmschalten(b.dataset.wdFlip)
     }))
     box.querySelectorAll('[data-wd-dir]').forEach(b => b.addEventListener('click', () => {
-      if(b.disabled || wdVerwalter()) return
+      if(b.disabled || wdNurLesen(wdKarteUid(b))) return
       b.parentElement.querySelectorAll('[data-wd-dir]').forEach(x => x.classList.toggle('active', x === b))
     }))
     box.querySelectorAll('.wd-konten tr').forEach(tr => {
       const cb = tr.querySelector('[data-wd-konto]'); if(!cb) return
       tr.classList.toggle('klick', !cb.disabled)
       tr.addEventListener('click', ev => {
-        if(cb.disabled || wdVerwalter() || ev.target.closest('input,button,select,a,label')) return
+        if(cb.disabled || wdNurLesen(wdKarteUid(tr)) || ev.target.closest('input,button,select,a,label')) return
         cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', { bubbles: true }))
         tr.classList.toggle('aus', !cb.checked)
       })
@@ -66648,19 +66655,19 @@
     box.querySelectorAll('[data-wd-konto]').forEach(cb => cb.addEventListener('change', () => {
       const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
       if(cb.disabled) return
-      if(wdVerwalter()){ cb.checked = !cb.checked; return }
+      if(wdNurLesen(wdKarteUid(cb))){ cb.checked = !cb.checked; return }
       if(uid) wdKontoHaken(uid, cb.dataset.wdKonto, cb.checked)
       else if(karte && karte.dataset.wdErw) wdKontoHakenOhneZeile(cb.dataset.wdKonto, cb.checked)   // ID noch nicht eingetragen (26.09.2026)
     }))
     // „nur heute raus" / „heute wieder rein" (26.09.2026) — eigene Verdrahtung je Knopf
     box.querySelectorAll('[data-wd-heute]').forEach(b => b.addEventListener('click', ev => {
       ev.stopPropagation()
-      if(wdVerwalter()) return
+      if(wdNurLesen(wdKarteUid(b))) return
       const karte = b.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
       if(uid) wdKontoHeute(uid, b.dataset.wdHeute, b.dataset.wdHeuteRein === '1')
     }))
     box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', async () => {
-      if(wdVerwalter()){ cb.checked = !cb.checked; return }
+      if(wdNurLesen(wdKarteUid(cb))){ cb.checked = !cb.checked; return }
       const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser, an = cb.checked
       const ids = [...(karte ? karte.querySelectorAll('[data-wd-konto]') : [])].filter(x => !x.disabled && x.checked !== an).map(x => x.dataset.wdKonto)
       for(const id of ids) await wdKontoHaken(uid, id, an)   // nacheinander — eine Zeile, keine Schreib-Rennen
@@ -66740,7 +66747,7 @@
     if(!h) return { txt: kd.wd_farm ? '' : 'nicht im Farm', offen: false }
     const k = h.k, x = h.x
     if(!wdAktiv(k)){
-      const rein = !!(k.farm && k.ext && !k.archiviert && !k.naechster_lauf && x.status !== 'laeuft' && x.status !== 'fertig' && !wdVerwalter())
+      const rein = !!(k.farm && k.ext && !k.archiviert && !k.naechster_lauf && x.status !== 'laeuft' && x.status !== 'fertig' && !wdNurLesen(x.user_id))
       return { txt: !k.farm ? 'nicht im Farm' : k.naechster_lauf ? 'ab nächstem Tageslauf' : 'heute raus', offen: false, rein }
     }
     if(!k.plan_id) return { txt: 'heute ohne Plan', offen: false }
@@ -67002,7 +67009,7 @@
     const p = document.getElementById('wd-ueb'); if(!p) return
     p.addEventListener('click', ev => {
       const rein = ev.target.closest('[data-wd-ueb-rein]')
-      if(rein){ ev.stopPropagation(); if(!wdVerwalter()){ rein.disabled = true; wdKontoHeute(rein.dataset.wdUebUid, rein.dataset.wdUebRein, true) } return }
+      if(rein){ ev.stopPropagation(); if(!wdNurLesen(rein.dataset.wdUebUid)){ rein.disabled = true; wdKontoHeute(rein.dataset.wdUebUid, rein.dataset.wdUebRein, true) } return }
       const fi = ev.target.closest('[data-wd-ueb-firma]'); if(fi){ _wdUeb.firma = fi.dataset.wdUebFirma; wdUebRender(); return }
       if(ev.target.closest('#wd-ueb-po-mehr')){ _wdUeb.alle = !_wdUeb.alle; wdUebRender(); return }
       const ze = ev.target.closest('[data-wd-ueb-zeit]'); if(ze){ _wdUeb.zeit = ze.dataset.wdUebZeit; wdUebStatistik(); return }
@@ -67041,7 +67048,7 @@
       else if(!x) grund = 'ID heute noch nicht eingetragen'
       else if(!kz) grund = 'heute noch nicht in der Zeile der ID'
       else grund = kz.hinweis || (kz.naechster_lauf ? WD_HINWEIS_TAGESLAUF : 'nur heute raus (von Hand)')
-      const kann = !fest && !!String(kd.ext || '').trim() && !wdVerwalter()
+      const kann = !fest && !!String(kd.ext || '').trim() && !wdNurLesen(kd.user_id)   // Verwalter: Konten seiner Gruppe (30.10.2026)
       out.push({ kd, x, kz, grund, po: angefragt.has(String(kd.name || '').trim()), kann, farm: !!kd.wd_farm, firma: wdUebFirma(kd.firm) })
     }
     return out.sort((a, b) => (b.kann - a.kann) || (b.farm - a.farm) || String(a.kd.person || '').localeCompare(String(b.kd.person || '')) || String(a.kd.name || '').localeCompare(String(b.kd.name || '')))
@@ -67052,7 +67059,7 @@
     if(liste === null){ box.innerHTML = `<div class="wd-ueb-leer">${_wd.datenFehler ? 'Konten nicht ladbar (' + escapeHtml(_wd.datenFehler) + ')' : 'Lädt …'}</div>`; if(alle) alle.hidden = true; if(sub) sub.textContent = ''; return }
     const wuerfelbar = liste.filter(e => e.kann && e.farm)
     if(sub) sub.textContent = liste.length ? `· ${liste.length} ${liste.length === 1 ? 'Konto' : 'Konten'}${wuerfelbar.length ? ` · ${wuerfelbar.length} nachwürfelbar` : ''}` : ''
-    if(alle){ alle.hidden = !wuerfelbar.length || wdVerwalter(); alle.textContent = `🎲 Alle würfeln (${wuerfelbar.length})` }
+    if(alle){ alle.hidden = !wuerfelbar.length; alle.textContent = `🎲 Alle würfeln (${wuerfelbar.length})` }
     if(!liste.length){ box.innerHTML = '<div class="wd-ueb-leer">Alle Winning-Days-Konten dieser Sicht sind heute drin.</div>'; return }
     box.innerHTML = liste.map(e => {
       const kd = e.kd, uid = escapeHtml(String(kd.user_id)), live = kd.live_balance
@@ -67208,7 +67215,7 @@
     p.addEventListener('click', async ev => {
       const rein = ev.target.closest('[data-wd-nd-rein]')
       if(rein){
-        ev.stopPropagation(); if(wdVerwalter() || _wd.busy) return
+        ev.stopPropagation(); if(wdNurLesen(rein.dataset.wdNdUid) || _wd.busy) return
         rein.disabled = true; rein.textContent = 'würfelt …'; _wd.busy = true
         try{
           const z = await wdKontoEinwuerfeln(rein.dataset.wdNdUid, rein.dataset.wdNdRein)
@@ -67219,7 +67226,7 @@
         finally{ _wd.busy = false; try{ wdNdRender() }catch(_){} }
         return
       }
-      if(ev.target.closest('#wdNdAlle')){ ev.stopPropagation(); if(!wdVerwalter()) wdNdAlle(); return }
+      if(ev.target.closest('#wdNdAlle')){ ev.stopPropagation(); wdNdAlle(); return }   // Liste ist schon auf die Sicht + kann gefiltert
       const ka = ev.target.closest('[data-wd-nd-id]'); if(ka) wdUebOeffnen(ka.dataset.wdNdId)
     })
     p.addEventListener('keydown', ev => { if(ev.target.closest('button')) return; const ka = ev.target.closest('[data-wd-nd-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdNdId) } })
@@ -67749,7 +67756,7 @@
     // Umsortierte Blöcke (Drag & Drop, 08.10.2026): reihenfolge + start_um je verschobener Zeile — nur Zeilen, die nicht laufen/fertig sind;
     // die aufgeklappte Karte oben hat ihre Zeile mit demselben start_um schon geschrieben, ein zweites Update ist harmlos
     let verschoben = 0
-    if(_wd.umsortiert && _wd.umsortiert.size){
+    if(_wd.umsortiert && _wd.umsortiert.size && !wdVerwalter()){   // Reihenfolge bleibt HT-weit (30.10.2026) — der Verwalter speichert nur seine Blöcke
       for(const [uid, e] of _wd.umsortiert){
         if(!(await wdDarf(uid))) continue   // Riegel auch hier (Prüfer K3, 09.10.2026) — falls ein Aufrufer sich später ändert
         const x = (_wd.rows || []).find(q => String(q.user_id) === uid); if(!x || wdFest(x)) continue
