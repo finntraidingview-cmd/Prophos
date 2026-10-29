@@ -40,7 +40,7 @@ create table if not exists public.kapital_gk_quellen (
 );
 alter table public.kapital_gk_quellen enable row level security;
 
--- Emin-Gruppe: Sheet „Buchhaltung 2026" (Besitzer obuyel1@gmail.com), Hälfte gehört Finn
+-- Emin-Gruppe: Sheet „Buchhaltung 2026" (Besitzer: Emins Buchhaltungs-Konto), Hälfte gehört Finn
 insert into public.kapital_gk_quellen (gruppe_id, sheet_id, titel, anteil_hinweis)
 values ('90c616f3-3ec1-49cb-b3ba-8a267d0a43df', '1FovCPMmEujv_SoZ6TWlT9D2UduUvEZMgJ3C4ubQnWdE', 'Buchhaltung 2026', '50 % Finn')
 on conflict (gruppe_id) do nothing;
