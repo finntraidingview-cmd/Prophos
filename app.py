@@ -18041,7 +18041,7 @@ def pc_tv_konten_auftrag_erledigt():
         if tr:
             erg["trail"] = tr
         fb = str(b.get("fehlerbild") or "").strip()
-        if re.fullmatch(r"[a-z0-9-]{3,24}/\d{4}-\d{2}-\d{2}/[A-Za-z0-9_.-]{4,60}", fb):
+        if PULS_FEHLERBILD_PRAEFIX_RE.fullmatch(fb):   # dasselbe Muster wie die Fehlerfoto-Route (S2 29.10.2026)
             erg["fehlerbild"] = fb
         sch = str(b.get("schritt") or "")[:40]
         if sch:
