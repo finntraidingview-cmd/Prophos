@@ -2060,6 +2060,7 @@ def main():
     results.append(test_quickedit())
     results.append(test_login_wache())
     results.append(test_login_eigenes_konto())
+    results.append(test_tsx_auge_reparatur())
     results.append(test_windows_abfrage_vorbeugen())
     results.append(test_tv_neuladen())
     results.append(test_tv_tm_update())
@@ -2525,6 +2526,103 @@ def test_login_eigenes_konto():
     if ok:
         print("✓ Login eigenes Konto: Dialog der eigenen anderen Installation per invoke bestaetigt (Prozess belegt, 1× je Lauf), "
               "Fremdnummer/falsches Terminal nie; Panel-Wache bei stehendem Login-Fenster, gedeckelt")
+    return ok
+
+
+def test_tsx_auge_reparatur():
+    """TopstepX-Auge blind (Finn 29.10.2026: „zurückgehen, reparieren, zur Not den Tab schließen und neu öffnen … aus Panik nicht insta
+    schließen"): Urteil frisch/blind, Ablauf Neuladen → alle TopstepX-Tabs zu + einer neu mit Login, auge_ok nur im Reparatur-Weg."""
+    import order_bot as ob, panel, inspect
+    ok = True
+
+    def chk(bed, name):
+        nonlocal ok
+        if not bed:
+            print("✗ TopstepX-Auge-Reparatur: " + name); ok = False
+    U = ob.tsx_auge_frisch_urteil
+    K = {"konto": {"kontonr": "S1OCT2900001"}}
+    chk(U({"ok": True, "alter_s": 0.2, "stand": K})[0] is True and U({"ok": True, "alter_s": 0.2, "stand": K}, "s1-oct29-00001")[0] is True,
+        "frisch ≤ 1 s mit Konto (Ziel normalisiert)")
+    chk(U({"ok": True, "alter_s": 0.2, "stand": K}, "S1OCT2900002")[0] is False, "falsches Konto → nicht frisch")
+    chk(U({"ok": True, "alter_s": 0.2, "stand": {}})[0] is False, "ohne Konto → nicht frisch")
+    chk(U({"ok": True, "alter_s": 1.5, "stand": K})[0] is False and U({"ok": True, "alter_s": None})[0] is False, "zu alt / ohne Alter → blind")
+    chk(U({"ok": True, "alter_s": 0.2, "stand": dict(K, ausgeloggt=True)})[0] is False, "ausgeloggt → nicht frisch")
+    chk(U({"ok": False, "grund": "kein TopstepX-Auge meldet"})[0] is False and U(None)[0] is False and U("x")[0] is False, "keine Antwort → blind")
+    chk(U({"ok": True, "alter_s": True, "stand": K})[0] is False, "bool als Alter zählt nicht")
+
+    class Ws:
+        def __init__(self): self.rufe_n = []
+        def rufe(self, m, params=None, timeout=10.0): self.rufe_n.append(m)
+
+    class Sitz:
+        def __init__(self): self.ws, self.zu_n = Ws(), 0
+        def zu(self): self.zu_n += 1
+    namen = ("_tsx_auge_lesen", "_tsx_tabs_schliessen", "_tsx_sitzung_waehlen", "_warte", "_tsx_auge_konto", "_cdp_http",
+             "_augen_json_lesen", "_augen_json_schreiben")
+    orig = {k: getattr(ob, k) for k in namen}
+    alt_time = ob.time.time            # ob.time IST das time-Modul — Original sichern, im finally zurück
+    EXT = "S1OCT2900001"
+    frisch, blind = {"ok": True, "alter_s": 0.3, "stand": K}, {"ok": True, "alter_s": 9.0, "stand": K}
+    try:
+        ob._warte = lambda a, b=0: None
+        ob._augen_json_lesen = lambda n: {}
+        ob._augen_json_schreiben = lambda n, d: None
+        log = []
+        ob._tsx_auge_konto = lambda s, ext, trail: (log.append("konto"), None)[1]
+        ob._cdp_http = lambda pfad, methode="GET", timeout=2.0: (log.append("neu-tab"), {"id": "T9"})[1] if pfad.startswith("/json/new") else []
+        ob._tsx_tabs_schliessen = lambda trail=None, ausser=None: (log.append(f"zu ausser {ausser}"), 2)[1]
+        ob._tsx_sitzung_waehlen = lambda trail, sitz: (log.append("sitzung"), sitz.__setitem__(0, Sitz()), (sitz[0], True))[2]
+        # a) schon frisch → nichts tun
+        folge = iter([frisch]); ob._tsx_auge_lesen = lambda: next(folge, frisch)
+        s = Sitz(); sitz = [s]; tr = []
+        chk(ob._tsx_auge_reparieren(s, tr, sitz, EXT)[0] is True and not s.ws.rufe_n and not log, "frisch: kein Neuladen, kein Tab zu")
+        # b) blind → Neuladen (+ Bereit/Konto) → frisch
+        folge = iter([blind, frisch]); ob._tsx_auge_lesen = lambda: next(folge, frisch)
+        s = Sitz(); sitz = [s]; tr = []; log.clear()
+        r = ob._tsx_auge_reparieren(s, tr, sitz, EXT)
+        chk(r == (True, EXT) and s.ws.rufe_n == ["Page.reload"] and log == ["konto"]
+            and any("neu geladen" in z for z in tr), "blind → Neuladen + Konto reicht, kein Tab zu")
+        # c) blind nach Neuladen → erst neuer Tab, dann die übrigen zu, Login, Konto, frisch
+        t0 = [0.0]
+        ob.time.time = lambda: t0.__setitem__(0, t0[0] + 5.0) or t0[0]
+        folge = iter([blind] * 5 + [frisch]); ob._tsx_auge_lesen = lambda: next(folge, frisch)
+        s = Sitz(); sitz = [s]; tr = []; log.clear()
+        r = ob._tsx_auge_reparieren(s, tr, sitz, EXT)
+        chk(r[0] is True and s.ws.rufe_n == ["Page.reload"] and log == ["konto", "neu-tab", "zu ausser T9", "sitzung", "konto"]
+            and s.zu_n == 1 and sitz[0] is not s and any("2 alte(r) TopstepX-Tab(s)" in z for z in tr),
+            "Neuladen hilft nicht → alte Sitzung zu, ERST neuer Tab, dann übrige TopstepX-Tabs zu, Login + Konto")
+        # d) bleibt blind → False
+        ob._tsx_auge_lesen = lambda: blind
+        s = Sitz(); sitz = [s]; tr = []; log.clear()
+        chk(ob._tsx_auge_reparieren(s, tr, sitz, EXT) == (False, None) and "zu ausser T9" in log, "bleibt blind → auge_ok false")
+        # e) Auge frisch, aber im falschen Konto → bleibt blind
+        falsch = {"ok": True, "alter_s": 0.2, "stand": {"konto": {"kontonr": "S1OCT2900002"}}}
+        ob._tsx_auge_lesen = lambda: falsch
+        s = Sitz(); sitz = [s]; tr = []; log.clear()
+        chk(ob._tsx_auge_reparieren(s, tr, sitz, EXT)[0] is False and any("nicht im Ziel-Konto" in z for z in tr), "falsches Konto → nicht ok")
+        # f) /json/new ohne Antwort → nichts schließen
+        ob._tsx_auge_lesen = lambda: blind
+        ob._cdp_http = lambda pfad, methode="GET", timeout=2.0: None
+        s = Sitz(); sitz = [s]; tr = []; log.clear()
+        chk(ob._tsx_auge_reparieren(s, tr, sitz, EXT)[0] is False and not any(z.startswith("zu") for z in log), "kein neuer Tab → kein Tab zu")
+        # g) Login im neuen Tab scheitert → False, kein weiteres Warten
+        ob._cdp_http = lambda pfad, methode="GET", timeout=2.0: {"id": "T9"} if pfad.startswith("/json/new") else []
+        ob._tsx_sitzung_waehlen = lambda trail, sitz: (None, "Login-Seite ohne Autofill")
+        s = Sitz(); sitz = [s]; tr = []
+        chk(ob._tsx_auge_reparieren(s, tr, sitz, EXT)[0] is False and any("Login gescheitert" in z for z in tr), "neuer Tab/Login scheitert → false mit Grund")
+    finally:
+        for k, v in orig.items():
+            setattr(ob, k, v)
+        ob.time.time = alt_time
+    q = inspect.getsource(ob.modus_tsxlesen_cdp)
+    chk('(cmd or {}).get("auge_reparieren") is True' in q and "_tsx_auge_reparieren(s, trail, sitz, ext)" in q, "tsx-lesen repariert nur mit auge_reparieren")
+    q = inspect.getsource(ob._tsx_auge_reparieren) + inspect.getsource(ob._tsx_auge_warten)
+    chk("sleep(" not in q and "_warte(" in q and "random.uniform" in q and q.index("Page.reload") < q.index("/json/new") < q.index("_tsx_tabs_schliessen(None, ausser=neu_id)"),
+        "Reparatur: erst Neuladen, dann neuer Tab, dann übrige zu; Wartezeiten gestreut, kein fester sleep")
+    qp = inspect.getsource(panel)
+    chk('body.get("auge_reparieren") is True' in qp and 'cmd["auge_reparieren"] = True' in qp, "Panel reicht auge_reparieren an tsx-lesen durch")
+    if ok:
+        print("✓ TopstepX-Auge-Reparatur: frisch/blind-Urteil mit Ziel-Konto, Neuladen → einer neu + übrige zu, Login + Konto, auge_ok nur im Reparatur-Weg")
     return ok
 
 

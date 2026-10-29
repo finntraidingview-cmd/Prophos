@@ -4052,10 +4052,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
                     "msg": "Feld 'konto' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))
             cmd = {"konto": konto, "firma": str(body.get("firma") or "").strip()[:60]}
+            if modus == "tsxlesen" and body.get("auge_reparieren") is True:
+                cmd["auge_reparieren"] = True   # 29.10.2026: Heimweg „TopstepX-Auge blind" — Bot lädt neu / öffnet den Tab neu (order_bot._tsx_auge_reparieren)
             if not TV_ORDER_LOCK.acquire(blocking=False):
                 return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
                     "msg": "Es laeuft schon ein Browser-Lauf (Order/Konto/Lesen) — spaeter erneut."}, ensure_ascii=False))
-            to = 150
+            to = 150 + (110 if cmd.get("auge_reparieren") else 0)   # Auge-Reparatur: Bot-Wachhund +100 s (29.10.2026, 240 s < 260 s)
             try:
                 bot = os.path.join(HERE, "order_bot.py")
                 if not os.path.exists(bot):

@@ -17067,11 +17067,12 @@ def _cdp_tab_schliessen(target_id):
         return False
 
 
-def _tsx_tabs_schliessen(trail=None):
-    """Alle TopstepX-Tabs im Puls-Chrome schließen (Rückschaltung auf den alten Weg — keine zweite Sitzung). -> Anzahl"""
+def _tsx_tabs_schliessen(trail=None, ausser=None):
+    """Alle TopstepX-Tabs im Puls-Chrome schließen (Rückschaltung auf den alten Weg — keine zweite Sitzung), außer der Tab-id `ausser`
+    (Auge-Reparatur 29.10.2026: der eben geöffnete bleibt). -> Anzahl"""
     n = 0
     for t in tsx_targets(_cdp_http("/json/list", timeout=1.0)):
-        if t.get("id") and _cdp_tab_schliessen(t.get("id")):
+        if t.get("id") and t.get("id") != ausser and _cdp_tab_schliessen(t.get("id")):
             n += 1
     if n and trail is not None:
         trail.append(f"Topstep wieder über den alten Weg — {n} TopstepX-Tab(s) im Puls-Chrome geschlossen")
@@ -19257,6 +19258,134 @@ def _start_versatz(trail):
         pass
 
 
+# AUGE-REPARATUR (Finn 29.10.2026, gesprochen: „Dann soll der Puls einfach direkt zurückgehen dahin und sollte reparieren und, zur Not, den Tab
+# schließen und wieder neu öffnen, um sich wieder zu versuchen einzuloggen … aus Panik nicht insta schließen"). Meldet das TopstepX-Auge
+# (Userscript tsx-auge im Puls-Chrome, POST an das Panel) während eines laufenden Topstep-Trades nichts Frisches mehr, schickt der PC-Tab den
+# Heimweg tsx-lesen mit auge_reparieren=true. Nach der normalen Lesung (Login, Konto) dann: Panel-Stand /api/tsx-stand frisch (≤ 1 s, nicht
+# ausgeloggt, Konto = Ziel-Konto)? → fertig. Sonst (1) TopstepX-Tab neu laden (Page.reload), Bereit-Probe + Login/Konto wie im Hauptweg, bis
+# ~10 s gestreut auf frischen Stand warten; (2) weiter blind → genau EINEN TopstepX-Tab neu öffnen und ERST DANN alle übrigen TopstepX-Tabs
+# im Puls-Chrome schließen (Master 29.10.: jeder TopstepX-Tab, nicht nur bot-eigene — Puls-Chrome gehört dem Bot, eine Position liegt
+# serverseitig; Gegenprüfung: erst neu, dann zu — sonst schließt Chrome mit dem letzten Fenster), bestehender Login-Weg (Autofill-Beweis,
+# _tsx_sitzung_waehlen), Bereit-Probe + Konto-Wechsel (K2) ins Ziel-Konto, bis ~15 s warten.
+# Antwort auge_ok true/false, Spur je Schritt. Nie ein Tab außerhalb TopstepX, nie das normale Chrome (nur Port 9333). Nur in diesem Weg.
+TSX_AUGE_FRISCH_S, TSX_AUGE_RELOAD_WARTEN_S, TSX_AUGE_NEU_WARTEN_S, TSX_AUGE_WACHHUND_PLUS_S = 1.0, 10.0, 15.0, 100.0
+
+
+def tsx_auge_frisch_urteil(a, ext=None):
+    """REIN RECHNEND (testbar): Antwort von GET /api/tsx-stand → (frisch, Text für die Spur). Frisch = ok, Stand ≤ TSX_AUGE_FRISCH_S alt,
+    nicht ausgeloggt und mit Konto — mit ext genau dieses Konto (Gegenprüfung 29.10.2026: ein Auge im falschen Konto nützt dem Trade nichts)."""
+    if not isinstance(a, dict) or a.get("ok") is not True:
+        return False, f"Auge meldet nicht ({str((a or {}).get('grund') or 'keine Antwort')[:60] if isinstance(a, dict) else 'keine Antwort'})"
+    al = a.get("alter_s")
+    if not isinstance(al, (int, float)) or isinstance(al, bool) or al > TSX_AUGE_FRISCH_S:
+        return False, f"Auge-Stand {al if isinstance(al, (int, float)) else '?'} s alt"
+    st = a.get("stand") if isinstance(a.get("stand"), dict) else {}
+    if st.get("ausgeloggt") is True:
+        return False, "Auge meldet: TopstepX ausgeloggt"
+    ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
+    nr = str(ko.get("kontonr") or "").strip()
+    if not nr:
+        return False, "Auge meldet kein Konto"
+    if ext and _nur_alnum(nr) != _nur_alnum(str(ext)):
+        return False, f"Auge steht im Konto {nr[:40]}, nicht im Ziel-Konto"
+    return True, f"Auge frisch ({float(al):.2f} s, Konto {nr[:40]})"
+
+
+def _tsx_auge_lesen():
+    """GET http://127.0.0.1:<PANEL_PORT>/api/tsx-stand (nur lokal, nur lesen) → dict; Fehler → {ok: False, grund}."""
+    import urllib.request
+    try:
+        port = int(os.environ.get("PANEL_PORT") or 8770)
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tsx-stand", timeout=1.5) as r:
+            return json.loads(r.read().decode("utf-8", "replace") or "{}")
+    except Exception as e:
+        return {"ok": False, "grund": type(e).__name__}
+
+
+def _tsx_auge_warten(sekunden, ext=None):
+    """bis `sekunden` (gestreut abgefragt) auf einen frischen Auge-Stand (im Ziel-Konto) warten → (frisch, Text)."""
+    ende = time.time() + sekunden
+    while True:
+        ok, txt = tsx_auge_frisch_urteil(_tsx_auge_lesen(), ext)
+        if ok or time.time() >= ende:
+            return ok, txt
+        _warte(0.8, 0.4)
+
+
+def _tsx_auge_konto(s, ext, trail):
+    """nach Neuladen/neuem Tab wie im Hauptweg: Bereit-Probe, Login nachholen (Login-Seite erst nach dem Lade-Schirm), Konto-Wechsel (K2)
+    ins Ziel-Konto. -> None | Fehlertext"""
+    st, bereit = _tsx_bereit_warten(s, trail)
+    if not bereit:
+        bl = s.lese_js(TSX_K0_BLICK_JS) or {}
+        if isinstance(bl, dict) and isinstance(bl.get("login"), dict) and bl["login"].get("seite"):
+            trail.append("Auge-Reparatur: nach der Ladephase steht die TopstepX-Login-Seite da — Login-Weg")
+            lg = _tsx_cdp_login(s, trail)
+            if lg is not True:
+                return str(lg)
+            st, bereit = _tsx_bereit_warten(s, trail)
+    ko = st.get("konto") if isinstance(st, dict) and isinstance(st.get("konto"), dict) else {}
+    if (bereit or tsx_ladeschirm(ko)) and TSX_K2_AKTIV and tsx_konto_urteil(ko, ext) in ("nein", "vielleicht"):
+        trail.append(f"Auge-Reparatur K2: im Tab steht '{str(ko.get('kontonr') or ko.get('aktiv') or '-')[:40]}', Ziel {ext} — Konto wechseln")
+        ok2, _c2, m2, _st, _ex2 = _tsx_konto_sichern(s, ext, st, trail)
+        if not ok2:
+            return f"Konto-Wechsel gescheitert: {str(m2)[:80]}"
+    return None
+
+
+def _tsx_auge_reparieren(s, trail, sitz, ext):
+    """Auge blind → neu laden → einer neu + übrige TopstepX-Tabs zu, mit Login + Konto. -> (True, Konto), wenn das Auge danach frisch im
+    Ziel-Konto meldet, sonst (False, None)."""
+    def konto_aus():
+        st = (_tsx_auge_lesen() or {}).get("stand") or {}
+        return str(((st.get("konto") or {}) if isinstance(st, dict) else {}).get("kontonr") or "") or None
+
+    ok, txt = tsx_auge_frisch_urteil(_tsx_auge_lesen(), ext)
+    trail.append(f"Auge-Reparatur: {txt}")
+    if ok:
+        return True, konto_aus()
+    try:
+        s.ws.rufe("Page.reload", {"ignoreCache": False}, timeout=8)
+        trail.append("Auge-Reparatur: TopstepX-Tab neu geladen")
+        fe = _tsx_auge_konto(s, ext, trail)
+        if fe:
+            trail.append(f"Auge-Reparatur nach dem Neuladen: {fe}")
+    except Exception as e:
+        trail.append(f"Auge-Reparatur: Neuladen fehlgeschlagen ({type(e).__name__})")
+    ok, txt = _tsx_auge_warten(TSX_AUGE_RELOAD_WARTEN_S + random.uniform(0.0, 2.0), ext)
+    trail.append(f"Auge-Reparatur nach dem Neuladen: {txt}")
+    if ok:
+        return True, konto_aus()
+    try:
+        if sitz[0]:
+            sitz[0].zu()
+    except Exception:
+        pass
+    sitz[0] = None
+    # erst EINEN neuen TopstepX-Tab öffnen, dann alle anderen schließen (sonst schließt ein Puls-Chrome ohne weiteren Tab ganz)
+    neu = _cdp_http("/json/new?" + TSX_URL, methode="PUT")
+    neu_id = str(neu.get("id")) if isinstance(neu, dict) and neu.get("id") else None
+    if not neu_id:
+        trail.append("Auge-Reparatur: neuer TopstepX-Tab ohne Antwort (/json/new) — alte Tabs bleiben")
+        return False, None
+    eigene = [x for x in ((_augen_json_lesen("tsx_tabs.json") or {}).get("ids") or []) if isinstance(x, str)][-9:]
+    _augen_json_schreiben("tsx_tabs.json", {"ids": eigene + [neu_id]})   # bot-eigen (wie _tsx_tab_sicher)
+    n = _tsx_tabs_schliessen(None, ausser=neu_id)
+    trail.append(f"Auge-Reparatur: neuer TopstepX-Tab offen, {n} alte(r) TopstepX-Tab(s) im Puls-Chrome geschlossen")
+    _warte(1.0, 1.0)
+    s2, lg = _tsx_sitzung_waehlen(trail, sitz)
+    if s2 is None or lg is not True:
+        trail.append(f"Auge-Reparatur: neuer TopstepX-Tab/Login gescheitert ({str(lg)[:80]})")
+        return False, None
+    fe = _tsx_auge_konto(s2, ext, trail)
+    if fe:
+        trail.append(f"Auge-Reparatur im neuen Tab: {fe}")
+        return False, None
+    ok, txt = _tsx_auge_warten(TSX_AUGE_NEU_WARTEN_S + random.uniform(0.0, 3.0), ext)
+    trail.append(f"Auge-Reparatur nach dem neuen Tab: {txt}")
+    return (True, konto_aus()) if ok else (False, None)
+
+
 def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
     """order (K3a, 01.10.2026): geprüfter tsx_order_befehl ohne scharf — nach der Lesung füllt _tsx_k3_probe das Ticket (Contract, Menge)
     und endet vor dem Order-Knopf; Antwort wie tsx-konto (gesendet false, retry_ok), Wachhund TSX_K3_WACHHUND_S.
@@ -19271,6 +19400,8 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
         res.update(etappe="K3", gesendet=False, retry_ok=True, scharf=False, plattform="tsx")
     k4 = bool(order and order.get("scharf") is True and TSX_K4_AKTIV)     # K4 (05.10.2026): scharfer Lauf — die Kette davor ist dieselbe
     wachhund_s = TSX_K3_WACHHUND_S if order else TSX_K1_WACHHUND_S
+    if not order and (cmd or {}).get("auge_reparieren") is True:
+        wachhund_s += TSX_AUGE_WACHHUND_PLUS_S   # Auge-Reparatur (29.10.2026): Neuladen + Bereit/Konto + Tab neu/zu + Login + Konto + Warten
     if frist_s:
         # Neustart (07.10.2026): der zweite Versuch nach einem Chrome-Neustart bekommt nur die Restzeit des Panels (tsx-konto 170 s) —
         # nie länger als die Standard-Frist; K4 rechnet seine Restzeit über _tsx_frist(trail) gegen genau diese Frist
@@ -19454,6 +19585,14 @@ def modus_tsxlesen_cdp(cmd, order=None, order_cmd=None, frist_s=None):
             msg += f" — Konto „{res['konto_hinweis']}“ (nur gelesen)"
         if res.get("konto_geblowt"):
             msg += f" — GEBLOWT ({res['konto_geblowt'].get('text') or res['konto_geblowt'].get('art')})"
+        if (cmd or {}).get("auge_reparieren") is True:      # Heimweg „Auge blind" (29.10.2026, s. _tsx_auge_reparieren) — nur dieser Weg
+            res["schritt"] = "auge"
+            aok, akonto = _tsx_auge_reparieren(s, trail, sitz, ext)
+            res["auge_ok"] = bool(aok)
+            if aok:
+                # das Auge sieht das Ziel-Konto (Urteil mit ext) — konto_aktiv wie im Lesevertrag = External ID (Frontend: includes(ext))
+                res["konto_aktiv"], res["auge_konto"] = ext, akonto
+            msg += " — Auge " + ("meldet wieder" if res["auge_ok"] else "bleibt BLIND (Neuladen + neuer Tab ohne Erfolg)")
         return raus("", msg + ("" if frisch else " — Seite nicht frisch bewiesen"), "fertig", ok=True)
     except Exception as e:
         _cdp_tabs_spur(e, trail)   # nur Lesen: welche Tabs leben noch (09.10.2026)
