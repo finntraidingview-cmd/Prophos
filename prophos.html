@@ -51701,7 +51701,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1898'
+  const OS_TAB_BUILD = '2026-09-22.1899'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -56790,7 +56790,21 @@
    *       bleiben unberührt in der Schlange; je Plan und Tag genau eine Meldung „unbestätigt, nicht gestartet" (Merker im
    *       localStorage, kein Toast-Spam). */
   const SU_PAUSE_MIN_MS = 5000, SU_PAUSE_STREU_MS = 25000, SU_CLAIM_PAUSE_MS = 30000, SU_HAENGER_MS = 10 * 60000
-  const _suTabSeit = Date.now()        // seit wann dieser Tab läuft — die zu_spaet-Meldung darf „Tab lief nicht" nur sagen, wenn es stimmt (14.10.2026)
+  // seit wann dieser Tab läuft — die zu_spaet-Meldung darf „Tab lief nicht" nur sagen, wenn es stimmt (14.10.2026). ÜBER DAS NEULADEN
+  // (Fehler-Muster 29.10.2026, Master: 8× „zu_spaet … der Prophos-Tab am PC lief nicht (offen erst seit 13:59)" auf Ina/Mike/Marco in
+  // 12 s — der Tab lief seit Stunden, Puls für Topstep war aus; das Update-Neuladen um 16:59 Dubai setzte die Uhr auf 0 und löschte den
+  // Warte-Grund): Stempel und Warte-Gründe liegen im sessionStorage, der location.reload überlebt, ein neuer Tab beginnt bei jetzt
+  const SU_TAB_SEIT_SS = 'prophos_su_tab_seit', SU_WARTE_SS = 'prophos_su_warte'
+  const _suTabSeit = (() => {
+    const jetzt = Date.now()
+    try{
+      const alt = Number(sessionStorage.getItem(SU_TAB_SEIT_SS))
+      if(alt > 0 && alt <= jetzt && jetzt - alt < 7 * 86400000) return alt
+      sessionStorage.setItem(SU_TAB_SEIT_SS, String(jetzt))
+    }catch(_){}
+    return jetzt
+  })()
+  const _suNeuGeladen = Date.now()     // dieses Laden der Seite (≠ _suTabSeit, wenn der Tab nur neu geladen wurde)
   const _suClaimGrund = new Map()      // planId → { grund, um }: jüngste Claim-Verweigerung eines DB-Triggers (auto_plan_umplanung)
   const _suClaimGrundGemeldet = new Map()   // planId → grund, schon als Toast gemeldet
   /* CLAIM VERWEIGERT — GRUND ZEIGEN (14.10.2026, Befund Chris/Jacob 13.–14.10.: die Claim-Trigger auf trade_plans — [Big Trade],
@@ -56917,6 +56931,36 @@
    * Grund, der am längsten hielt — eine Meldung, eine Ursache (Finn /Goal 09.10.2026). Nur Merker im Tab, keine DB. */
   const _suWarte = new Map()        // planId → { erst, letzt, gruende: Map grund → ms }
   const _suGesehen = new Map()      // planId → ms, seit wann der Plan (geplant, ungeclaimt) in der Liste dieses Tabs steht
+  // Merker über das Neuladen (s. _suTabSeit): je Plan { e: erst, l: letzt, s: gesehen, g: { grund: ms } }, höchstens 60 Pläne, ≤ 24 h
+  let _suWarteGespeichert = 0
+  function suWarteLaden(){
+    try{
+      const roh = JSON.parse(sessionStorage.getItem(SU_WARTE_SS) || '{}'), jetzt = Date.now()
+      for(const [id, w] of Object.entries(roh || {})){
+        if(!w || !(Number(w.l) > 0) || jetzt - Number(w.l) > 24 * 3600000) continue
+        if(Number(w.s) > 0) _suGesehen.set(id, Number(w.s))
+        const g = new Map()
+        for(const [grund, ms] of Object.entries(w.g || {})) if(Number(ms) > 0) g.set(String(grund).slice(0, 300), Number(ms))
+        // letzt = jetzt: die Zeit, in der die Seite neu lud, zählt keinem Grund zu
+        if(Number(w.e) > 0) _suWarte.set(id, { erst: Number(w.e), letzt: jetzt, gruende: g })
+      }
+    }catch(_){}
+  }
+  function suWarteSpeichern(now){
+    if(now - _suWarteGespeichert < 30000) return
+    _suWarteGespeichert = now
+    try{
+      const aus = {}
+      const ids = [...new Set([..._suWarte.keys(), ..._suGesehen.keys()])]
+        .sort((a, b) => ((_suWarte.get(b) || {}).letzt || 0) - ((_suWarte.get(a) || {}).letzt || 0)).slice(0, 60)
+      for(const id of ids){
+        const w = _suWarte.get(id)
+        aus[id] = { e: w ? w.erst : 0, l: w ? w.letzt : now, s: _suGesehen.get(id) || 0, g: w ? Object.fromEntries(w.gruende) : {} }
+      }
+      sessionStorage.setItem(SU_WARTE_SS, JSON.stringify(aus))
+    }catch(_){}
+  }
+  suWarteLaden()
   const _suVorcheckGrund = new Map()   // planId → letzter Grund der Slave-Vorprüfung
   const suPulsWeg = p => !!p && (routeIstOrbit(p.route) || routeIstEcho(p.route) || p.route === 'polar')
   // Grund für EINEN fälligen Plan — global (PC beschäftigt …) gewinnt, sonst der erste Riegel in der Reihenfolge von suKandidaten
@@ -56961,6 +57005,7 @@
       if(grund) w.gruende.set(grund, (w.gruende.get(grund) || 0) + dt)
     }
     if(_suWarte.size > 300) for(const [k, w] of [..._suWarte.entries()]) if(now - w.letzt > 24 * 3600000) _suWarte.delete(k)
+    suWarteSpeichern(now)
   }
   // Längster Grund seit der Startzeit → { grund, ms } oder null
   function suWarteHaupt(planId){
@@ -56969,7 +57014,8 @@
     for(const [g, ms] of w.gruende) if(!best || ms > best.ms) best = { grund: g, ms }
     return best && best.ms >= 1000 ? best : null
   }
-  window._suWarte = { tick: suWarteTick, haupt: suWarteHaupt, grundFuer: suWarteGrundFuer, karte: _suWarte, gesehen: _suGesehen }   // Test-Haken
+  window._suWarte = { tick: suWarteTick, haupt: suWarteHaupt, grundFuer: suWarteGrundFuer, karte: _suWarte, gesehen: _suGesehen,
+    laden: suWarteLaden, speichern: suWarteSpeichern, tabSeit: _suTabSeit }   // Test-Haken
   // Punkt 7: überfällige unbestätigte Vorschläge melden — je Plan und Tag genau einmal (Merker planId → Tag im localStorage, damit ein
   // Neuladen des Tabs nicht erneut meldet; der Plan selbst bleibt unberührt: kein Claim, kein Start, Startzeit steht)
   const SU_VORSCHLAG_LS = 'prophos_su_vorschlag_gemeldet'
@@ -57159,6 +57205,7 @@
           // kam als „offen erst seit verpasst (17:13)" an — tpStartUmText ist für Startzeiten gedacht und stempelt alles > 10 min als „verpasst")
           : _suTabSeit > startMs0 ? `der Prophos-Tab am PC lief nicht (offen erst seit ${suUhr(_suTabSeit)})`
           : wh ? `${Math.max(1, Math.round(wh.ms / 60000))} min lang: ${wh.grund.slice(0, 220)}`
+          : _suNeuGeladen > startMs0 ? `der Prophos-Tab lief (seit ${suUhr(_suTabSeit)}), wurde aber ${suUhr(_suNeuGeladen)} neu geladen (Update) — Warte-Grund davor nicht bekannt`
           : gesehen > startMs0 + 60000 ? `der Plan kam erst ${suUhr(gesehen)} in die Liste dieses Tabs (Startzeit ${tpStartUmText(plan.startUm)}) → Pläne neu laden lassen`
           : 'der Prophos-Tab lief, bekam aber keinen Claim (Grund nicht gemeldet — Umplanungs-Protokoll des Plans lesen)'
         if(rkGilt(plan) || (plan.route === 'tsv2' && !tpIstWdPlan(plan) && (plan.richtung === 'buy' || plan.richtung === 'sell'))) await sfMelden(plan, { schritt: 'zu_spaet', msg: `Startzeit um ${Math.round(verspaetet / 60000)} min verpasst — ${ursache}` })   // START-FEHLER (07.10.2026): sfTick plant neu ein
