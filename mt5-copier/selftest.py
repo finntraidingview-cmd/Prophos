@@ -2062,6 +2062,7 @@ def main():
     results.append(test_windows_abfrage_vorbeugen())
     results.append(test_tv_neuladen())
     results.append(test_tv_tm_update())
+    results.append(test_hedge_closed_at_ms())
 
     print()
     ok = sum(1 for r in results if r)
@@ -2628,6 +2629,44 @@ def test_hedge_bereit():
         panel.HERE = alt_here
     if ok:
         print("✓ Neustart-Sperre 'Start steht bevor': Restzeit, abgelaufen/kaputt = 0, Deckel 900 s, Panel verkuerzt nie")
+    return ok
+
+
+def test_hedge_closed_at_ms():
+    """29.10.2026: closed_at der Hedge-Schluesse in UTC mit Millisekunden; echte Fill-Zeit aus time_msc (Server-Zeit → UTC)."""
+    import copier
+    from datetime import datetime
+    ok = True
+    def chk(cond, text):
+        nonlocal ok
+        if not cond:
+            print(f"✗ {text}"); ok = False
+    jetzt = 1793232000.0   # fester Zeitpunkt (UTC)
+    z = copier.utc_iso_ms(jetzt + 0.3456)
+    chk(z.endswith("Z") and "." in z and len(z.split(".")[1]) == 4, f"utc_iso_ms: Millisekunden + Z ({z})")
+    chk(abs(datetime.fromisoformat(z.replace("Z", "+00:00")).timestamp() - (jetzt + 0.345)) < 0.0015, f"utc_iso_ms: Wert stimmt ({z})")
+    chk(copier.utc_iso_ms().endswith("Z"), "utc_iso_ms ohne Argument = jetzt, mit Z")
+    # Broker GMT+2: Server-Uhr 2 h vor UTC (Tick 3 s alt), Fill 0,3 s vor jetzt
+    srv = jetzt + 7200 - 3
+    t = copier.deal_zeit_utc(int((jetzt - 0.3 + 7200) * 1000), srv, jetzt)
+    chk(t is not None and abs(t - (jetzt - 0.3)) < 0.002, f"deal_zeit_utc GMT+2: echte Fill-Zeit in UTC ({t})")
+    # Broker GMT+3, Fill 40 s her
+    t = copier.deal_zeit_utc(int((jetzt - 40 + 10800) * 1000), jetzt + 10800, jetzt)
+    chk(t is not None and abs(t - (jetzt - 40)) < 0.002, f"deal_zeit_utc GMT+3 ({t})")
+    # Server in UTC (Versatz 0)
+    t = copier.deal_zeit_utc(int((jetzt - 1.25) * 1000), jetzt, jetzt)
+    chk(t is not None and abs(t - (jetzt - 1.25)) < 0.002, f"deal_zeit_utc Versatz 0 ({t})")
+    # Unplausibel → None (Aufrufer nimmt jetzt): alter Wochenend-Tick, Fill weit weg, fehlender Tick, time_msc 0, Muell
+    chk(copier.deal_zeit_utc(int((jetzt - 0.3 + 7200) * 1000), jetzt + 7200 - 2 * 86400, jetzt) is None, "deal_zeit_utc: alter Tick (2 Tage) → None")
+    chk(copier.deal_zeit_utc(int((jetzt - 3600 + 7200) * 1000), jetzt + 7200, jetzt) is None, "deal_zeit_utc: Fill 1 h her (ausserhalb Fenster) → None")
+    chk(copier.deal_zeit_utc(int((jetzt + 60 + 7200) * 1000), jetzt + 7200, jetzt) is None, "deal_zeit_utc: Fill in der Zukunft → None")
+    chk(copier.deal_zeit_utc(int(jetzt * 1000), None, jetzt) is None, "deal_zeit_utc: kein Tick → None")
+    chk(copier.deal_zeit_utc(0, jetzt, jetzt) is None, "deal_zeit_utc: time_msc 0 → None")
+    chk(copier.deal_zeit_utc("x", jetzt, jetzt) is None, "deal_zeit_utc: Muell → None, keine Ausnahme")
+    # utc_iso (Sekunden) bleibt unveraendert fuer alle anderen Stempel
+    chk("." not in copier.utc_iso(), "utc_iso bleibt sekundengenau")
+    if ok:
+        print("✓ Hedge-Schluss closed_at: UTC + Millisekunden, echte Fill-Zeit aus time_msc (Server-Zeit → UTC), Rueckfall jetzt")
     return ok
 
 

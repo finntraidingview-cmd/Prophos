@@ -864,6 +864,33 @@ def utc_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def utc_iso_ms(ts=None):
+    """Hedge-Schluss-Zeitstempel in UTC mit Millisekunden und 'Z' (29.10.2026, Finn: Radar soll bei Notfall-SL zeigen,
+    wie viele Sekunden nach dem Master Fusion zu war, z. B. „0,3 s"). ts = Unix-Sekunden (float), None = jetzt.
+    Nur fuer closed_at der Hedge-Schluesse — utc_iso (Sekunden) bleibt fuer alles andere unveraendert."""
+    d = datetime.now(timezone.utc) if ts is None else datetime.fromtimestamp(float(ts), timezone.utc)
+    return d.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def deal_zeit_utc(time_msc, server_jetzt_s, jetzt_s, fenster_s=600.0):
+    """Echte Fill-Zeit eines MT5-Deals in Unix-Sekunden (UTC, ms-genau) — oder None.
+    MT5 liefert time_msc in der SERVER-Zeit des Brokers (z. B. GMT+2/+3, als waere es UTC). Der Versatz kommt aus
+    server_jetzt_s (symbol_info_tick().time, Server-Uhr in Sekunden) gegen jetzt_s, auf 15 min gerundet. Ergebnis nur,
+    wenn es plausibel ist (zwischen jetzt − fenster_s und jetzt + 5 s), sonst None → Aufrufer nimmt „jetzt" wie bisher
+    (alter Tick am Wochenende, fehlender Tick, time_msc 0). Rein rechnend, ohne MetaTrader testbar."""
+    try:
+        msc, srv, jetzt = int(time_msc or 0), float(server_jetzt_s or 0), float(jetzt_s)
+    except (TypeError, ValueError):
+        return None
+    if msc <= 0 or srv <= 0:
+        return None
+    versatz = round((srv - jetzt) / 900.0) * 900.0
+    if abs(versatz) > 14 * 3600:
+        return None
+    t = msc / 1000.0 - versatz
+    return t if (jetzt - float(fenster_s)) <= t <= (jetzt + 5.0) else None
+
+
 SOLO_ZU = "hedge_solo_zu.json"      # Ring der selbst erkannten Abschluesse + zuletzt bekannte Tickets (neustart-fest)
 SOLO_ZU_MAX = 20
 
@@ -1462,6 +1489,20 @@ def main():
 
     import MetaTrader5 as mt5
 
+    def deal_closed_at(deal, symbol=None):
+        """closed_at eines Hedge-Schlusses (29.10.2026): echte Fill-Zeit des Close-Deals (time_msc, Server-Zeit → UTC
+        ueber den frischen Tick, deal_zeit_utc) in ms; geht das nicht, „jetzt" in ms — nie eine Ausnahme."""
+        jetzt = time.time()
+        t = None
+        try:
+            msc = int(getattr(deal, "time_msc", 0) or 0) if deal is not None else 0
+            sym_ = symbol or (str(getattr(deal, "symbol", "") or "") if deal is not None else "")
+            tick_ = mt5.symbol_info_tick(sym_) if (msc and sym_) else None
+            t = deal_zeit_utc(msc, float(getattr(tick_, "time", 0) or 0) if tick_ else None, jetzt)
+        except Exception:
+            t = None
+        return utc_iso_ms(t if t is not None else jetzt)
+
     # ── Hedge-Terminal bei Bedarf selbst starten (15.08.2026, Autostart-Stack) ──
     # Der Login ist bei MT5 gespeichert; nach einem PC-Neustart muss niemand mehr
     # klicken. Laeuft es schon, passiert hier nichts (pids-Pruefung — ein zweiter
@@ -1807,7 +1848,7 @@ def main():
             # profit + commission + swap des Close-Deals = was wirklich auf dem
             # Hedge-Konto ankommt
             "profit": float(deal.profit) + float(deal.commission) + float(deal.swap),
-            "closed_at": datetime.now().isoformat(timespec="seconds"),
+            "closed_at": deal_closed_at(deal, h.get("symbol")),   # ms + UTC, echte Fill-Zeit (29.10.2026)
         })
         del m.closed[:-50]
         write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets)
@@ -1900,7 +1941,9 @@ def main():
         for e in weg:
             pl, grund, exit_preis = solo_pl_aus_history(e["ticket"])
             eintrag = {"ticket": int(e["ticket"]), "pl": pl, "grund": grund or "unbekannt", "fill_close": exit_preis,
-                       "closed_at": utc_iso(),
+                       # ms + UTC, echte Fill-Zeit des Close-Deals (29.10.2026: Radar „Fusion 0,3 s nach dem Master");
+                       # Historie hinkt (kein Deal) → jetzt in ms
+                       "closed_at": deal_closed_at(solo_letzter_deal.pop(int(e["ticket"]), None), e.get("symbol")),
                        "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung"), "fill": e.get("fill"),
                        "plan8": e.get("plan8"), "plan_id": e.get("plan_id")}
             ring = solo_zu_ring(ring, eintrag)
@@ -1937,6 +1980,8 @@ def main():
         except Exception as e:
             log(f"⚠ Solo-Ergebnis {cmd_id} nicht geschrieben: {type(e).__name__}: {e}")
 
+    solo_letzter_deal = {}   # Ticket → letzter OUT-Deal aus solo_pl_aus_history (nur fuer closed_at, wird beim Lesen entfernt)
+
     def solo_pl_aus_history(ticket):
         """Realisierter P&L der Position aus der Deal-Historie (Profit + Kommission
         + Swap + Gebuehr) — der Beweis fuer slave_pl — plus GRUND des Schliessens
@@ -1954,6 +1999,9 @@ def main():
                     letzter = out[-1]
                     pl = round(sum(float(d.profit) + float(d.commission) + float(d.swap)
                                    + float(getattr(d, "fee", 0.0) or 0.0) for d in deals), 2)
+                    solo_letzter_deal[int(ticket)] = letzter   # fuer closed_at im Ring (29.10.2026), Signatur bleibt
+                    while len(solo_letzter_deal) > 50:   # Close-Befehle lesen ihn nie ab → klein halten
+                        solo_letzter_deal.pop(next(iter(solo_letzter_deal)))
                     return pl, solo_deal_grund(getattr(letzter, "reason", None)), float(getattr(letzter, "price", 0.0) or 0.0)
             time.sleep(0.25)
         return None, None, None
@@ -2674,7 +2722,7 @@ def main():
                                         "volume": float(d.volume),
                                         "profit": float(d.profit) + float(d.commission) + float(d.swap),
                                         "note": "notfall_close",
-                                        "closed_at": datetime.now().isoformat(timespec="seconds"),
+                                        "closed_at": deal_closed_at(d),   # ms + UTC, echte Fill-Zeit (29.10.2026)
                                     })
                                 del m.closed[:-50]
                                 log(f"🛡 [{m.file}] Notfall-Close: Broker hat SL/TP auf dem Hedge "
@@ -2691,7 +2739,7 @@ def main():
                                 f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
                             m.closed.append({"ident": ident_i, "note": "extern_geschlossen",
                                              "profit": None,
-                                             "closed_at": datetime.now().isoformat(timespec="seconds")})
+                                             "closed_at": utc_iso_ms()})   # ms + UTC (29.10.2026), kein Deal → jetzt
                             del m.closed[:-50]
                             # Hand-Close ist endgueltig (25.08.2026, Finns Ansage beim
                             # ersten Live-Kontakt: von Hand geschlossene Hedges muessen
