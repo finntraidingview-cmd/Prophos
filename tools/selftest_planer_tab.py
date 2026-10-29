@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Selbsttest PLANER-TAB Schritt 1 (30.10.2026): Struktur in prophos.html — Seitenleisten-Link, Chip-Leiste, Hülle Funded CFD, Planer-Modus
+der Admin-Section (gleiche Sperre/Rechte), Verweis-Reiter, Übersicht erst nach dem Planer. Nur Text-/Strukturprüfung, ohne Browser.
+Aufruf: python3 tools/selftest_planer_tab.py"""
+import os
+import re
+import sys
+
+HTML = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prophos.html")
+
+
+def main():
+    s = open(HTML, encoding="utf-8").read()
+    f = []
+    ok = lambda b, t: f.append(t) if not b else None   # noqa: E731
+    # Seitenleiste: unter TRADING, standardmäßig versteckt, eine Datei
+    i_trading, i_link, i_admin = s.find('<div class="sb-section">Trading</div>'), s.find('data-view="planer" style="display:none"'), s.find('<button class="sb-link" data-view="kasse">')
+    ok(0 < i_trading < i_link < i_admin, "Link „Planer“ unter TRADING, vor Admin, versteckt bis entsperrt")
+    ok("planer:    ['Planer'," in s, "viewTitles kennt planer (#planer beim Start)")
+    # Chip-Leiste: vier Planer in fester Reihenfolge, Design-System .subtabs/.subtab
+    chips = re.findall(r'data-planerchip="(\w+)"', s[s.find('id="adm-planer-chips"'):s.find('id="adm-planer-chips"') + 900])
+    ok(chips == ["wd", "planer", "fplaner", "fcfd"], f"Chips {chips}")
+    ok('class="subtabs nav-gruppe-tabs adm-planer-chips"' in s, "Chip-Leiste im Stil der Navigations-Gruppen")
+    # Hülle Funded CFD: Gerüst, keine Abfrage
+    i = s.find('<div id="adm-pane-fcfd" hidden>')
+    huelle = s[i:s.find('<div id="adm-pane-kompass" hidden>', i)]
+    for teil in ("Zeitstrahl", "Läuft · 0", "Braucht dich · 0", "Wartet auf Start · 0", "Zu bestätigen · 0", "kommt"):
+        ok(teil in huelle, "Hülle Funded CFD: " + teil)
+    ok("fetch" not in huelle and "apdApi" not in huelle, "Hülle ohne Abfragen")
+    ok('data-admtab="fcfd" data-reiter-aus="1"' in s and "$('adm-pane-fcfd').hidden     = name !== 'fcfd'" in s, "Reiter fcfd nur im Planer, Pane geschaltet")
+    # Planer-Modus = Admin-Section (dieselbe Sperre/Rechte), Chips nach kasseReiterErlaubt
+    ok("v.dataset.view === name || (name === 'planer' && v.dataset.view === 'kasse')" in s, "Planer aktiviert die Admin-Section")
+    ok("if((name === 'kasse' || name === 'planer') && typeof kasseOnEnter === 'function') kasseOnEnter()" in s, "Planer geht durch kasseOnEnter (Code-Sperre)")
+    ok("['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec))" in s, "Chips/Link nach kasseReiterErlaubt")
+    ok("link.style.display = unlocked && frei.length ? '' : 'none'" in s, "Link nur entsperrt + erlaubt")
+    ok("section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}" in s, "Admin-Reiter im Planer-Modus aus")
+    # Verweis im Admin, Merker nur sessionStorage
+    ok("if(['wd', 'planer', 'fplaner', 'fcfd'].includes(name) && !planerModus()){" in s and "switchView('planer'); return" in s, "Admin-Reiter = Verweis auf Planer")
+    ok(s.count('title="→ jetzt unter Planer"') == 3, "drei Verweis-Reiter")
+    ok("localStorage" not in s[s.find("const PLANER_CHIP_SS"):s.find("function showLocked()")], "Chip-Merker ohne localStorage")
+    ok("sessionStorage.getItem(PLANER_CHIP_SS)" in s, "Chip-Merker in sessionStorage")
+    # Lazy: Übersicht im Planer-Modus erst nach dem Planer
+    ok("if(planerJetzt) setTimeout(() => { if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad() }, 2500)" in s,
+       "Übersicht im Planer-Modus verzögert")
+    for t in f:
+        print("✗", t)
+    print("OK" if not f else f"\n{len(f)} FEHLER")
+    sys.exit(1 if f else 0)
+
+
+if __name__ == "__main__":
+    main()
