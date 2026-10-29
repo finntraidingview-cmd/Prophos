@@ -18214,6 +18214,9 @@
       $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}${heuteN ? ` · ${heuteN} Funded Futures heute offen` : ''}`
       $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
       const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
+      // „Trade planen" für andere IDs nie auf einem PC-Tab (S2/Master 29.10.2026): das fremde Konto stünde sonst, solange das Popup offen ist,
+      // in `accounts` eines Puls-PCs, und dessen Hintergrund-Abläufe lesen diese Liste. Gleiche Erkennung wie MT5_LOCAL.
+      const admPcTab = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', passed_pending: '🎉 Bestanden · Daten fehlen', manual: '📦 Archiviert' }
       tb.innerHTML = sortiert.map(a => {
         const r = zu.get(a)
@@ -18238,7 +18241,7 @@
         return `
           <tr style="${r.archived ? 'opacity:.55' : ''}">
             <td style="padding-left:20px">
-              <div style="font-weight:600;color:var(--ink)">${escapeHtml(a.name || '')}${archBadge}${(!r.archived && a.type !== 'live') ? `<button type="button" class="btn btn-ghost adm-k-plan" data-adm-k-plan="${escapeHtml(String(a.id))}" data-adm-k-uid="${escapeHtml(String(r.user_id))}" data-adm-k-person="${escapeHtml(r.person || '')}" title="Trade-Popup für dieses Konto öffnen — Plan landet bei ${escapeHtml(r.person || 'dieser ID')}, ohne die ID zu wechseln" style="padding:2px 8px;font-size:11px;margin-left:8px;vertical-align:middle">Trade planen</button>` : ''}</div>
+              <div style="font-weight:600;color:var(--ink)">${escapeHtml(a.name || '')}${archBadge}${(!r.archived && a.type !== 'live' && !admPcTab) ? `<button type="button" class="btn btn-ghost adm-k-plan" data-adm-k-plan="${escapeHtml(String(a.id))}" data-adm-k-uid="${escapeHtml(String(r.user_id))}" data-adm-k-person="${escapeHtml(r.person || '')}" title="Trade-Popup für dieses Konto öffnen — Plan landet bei ${escapeHtml(r.person || 'dieser ID')}, ohne die ID zu wechseln" style="padding:2px 8px;font-size:11px;margin-left:8px;vertical-align:middle">Trade planen</button>` : ''}</div>
               ${meta}
             </td>
             <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(r.user_id)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
@@ -51415,7 +51418,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1879'
+  const OS_TAB_BUILD = '2026-09-22.1880'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61674,6 +61677,10 @@
   }
   async function tpFuerOeffnen(accountId, uid, name){
     if(!accountId || !uid) return
+    if(location.hostname === 'localhost' || location.hostname === '127.0.0.1'){   // PC-Tab (MT5_LOCAL): nie ein fremdes Konto in accounts eines Puls-PCs
+      if(typeof atToast === 'function') atToast('Trade planen für andere IDs nur am Mac/Handy — nicht am PC-Tab.', 'end')
+      return
+    }
     tpFuerEnde()
     let acc = null
     try{
