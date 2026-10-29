@@ -713,12 +713,31 @@ def _schreibe_datei(stand):
     os.replace(tmp, DATEI)
 
 
+def script_version_waehlen(tabs, jetzt_s, fallback_v, fallback_s):
+    """REIN RECHNEND (testbar, 30.10.2026, Befund Master/Slave 5 am PC von Finn + Pascal pc-2zc2we: Puls-Chrome mit 0.10.2, echoplus_live
+    meldete 0.9.10). script_version war der LETZTE Payload irgendeines Tabs — laeuft am PC ein zweites Chrome mit TradingView und altem
+    Tampermonkey-Script (anderes Profil), gewinnt mal der eine, mal der andere; die Versions-Wache (Railway) meldete dann falsch.
+    Jetzt: der juengste Puls-Chrome-Tab ('puls-…', POST <= 60 s) mit Version — das ist der Tab, der Hedges schliesst und den Schritt D
+    aktualisiert. Ohne Puls-Tab (Feed-PC, Reader-Chrome) wie bisher der letzte Payload. -> (version, zeit_s)"""
+    kand = [(float(t.get("last_s") or 0), str(t.get("version")).strip()[:16]) for tid, t in (tabs or {}).items()
+            if str(tid).startswith("puls-") and isinstance(t, dict) and isinstance(t.get("version"), str) and t.get("version").strip()
+            and jetzt_s - float(t.get("last_s") or 0) <= 60]
+    if kand:
+        s_, v_ = max(kand)
+        return v_, s_
+    return fallback_v, fallback_s
+
+
 def _versionen(jetzt_s=None):
-    """Die drei Versions-Felder fuer jede Antwort (GET /positions, GET /bedienfeld)."""
+    """Die Versions-Felder fuer jede Antwort (GET /positions, GET /bedienfeld). script_versionen = je Tab (Diagnose, <= 10 min)."""
     jetzt_s = time.time() if jetzt_s is None else jetzt_s
+    v, s_ = script_version_waehlen(_tabs, jetzt_s, _script_version, _script_s)
+    je_tab = {str(tid)[:40]: str(t.get("version"))[:16] for tid, t in _tabs.items()
+              if isinstance(t, dict) and t.get("version") and jetzt_s - float(t.get("last_s") or 0) <= 600}
     return {"reader_version": READER_VERSION,
-            "script_version": _script_version,
-            "script_alter_s": round(jetzt_s - _script_s, 3) if _script_s else None}
+            "script_version": v,
+            "script_alter_s": round(jetzt_s - s_, 3) if s_ else None,
+            "script_versionen": je_tab}
 
 
 def _script_merken(daten, jetzt_s):

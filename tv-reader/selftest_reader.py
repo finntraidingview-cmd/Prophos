@@ -121,8 +121,23 @@ def main():
     v3, t3 = rs._script_merken({"version": 7}, 600.0)
     check(v3 == "0.8.0" and t3 == 500.0, "_script_merken: Unsinn im Feld wird ignoriert")
     aus = rs._versionen(512.0)
-    check(aus == {"reader_version": rs.READER_VERSION, "script_version": "0.8.0", "script_alter_s": 12.0},
-          "_versionen: reader_version, script_version, script_alter_s")
+    check(aus == {"reader_version": rs.READER_VERSION, "script_version": "0.8.0", "script_alter_s": 12.0, "script_versionen": {}},
+          "_versionen: reader_version, script_version, script_alter_s (+ script_versionen je Tab)")
+    # 30.10.2026 (pc-2zc2we: Puls-Chrome 0.10.2, echoplus_live 0.9.10): script_version = juengster Puls-Tab, nicht der letzte Payload
+    sw = rs.script_version_waehlen
+    tabs_ = {"puls-a": {"version": "0.10.2", "last_s": 990.0}, "feed-x": {"version": "0.9.10", "last_s": 999.0}}
+    check(sw(tabs_, 1000.0, "0.9.10", 999.0) == ("0.10.2", 990.0), "Puls-Tab schlaegt den juengeren Fremd-Tab mit altem Script")
+    check(sw({"puls-a": {"version": "0.10.2", "last_s": 900.0}}, 1000.0, "0.9.10", 999.0) == ("0.9.10", 999.0), "Puls-Tab > 60 s still → letzter Payload")
+    check(sw({"feed-x": {"version": "0.9.10", "last_s": 999.0}}, 1000.0, "0.9.10", 999.0) == ("0.9.10", 999.0), "ohne Puls-Tab wie bisher")
+    check(sw({"puls-a": {"version": "0.10.1", "last_s": 980.0}, "puls-b": {"version": "0.10.2", "last_s": 995.0}}, 1000.0, None, 0.0) == ("0.10.2", 995.0),
+          "zwei Puls-Tabs: der juengste")
+    check(sw({"puls-a": {"version": "", "last_s": 999.0}, "puls-b": {"last_s": 999.0}}, 1000.0, "0.9.7", 5.0) == ("0.9.7", 5.0), "Puls-Tab ohne Version zaehlt nicht")
+    alt_tabs = dict(rs._tabs); rs._tabs.clear(); rs._tabs.update(tabs_)
+    rs._script_version, rs._script_s = "0.9.10", 999.0
+    a2 = rs._versionen(1000.0)
+    check(a2["script_version"] == "0.10.2" and a2["script_alter_s"] == 10.0 and a2["script_versionen"] == {"puls-a": "0.10.2", "feed-x": "0.9.10"},
+          f"_versionen nimmt den Puls-Tab, script_versionen zeigt beide ({a2})")
+    rs._tabs.clear(); rs._tabs.update(alt_tabs); rs._script_version, rs._script_s = "0.8.0", 500.0
     rs._script_version, rs._script_s = None, 0.0
     check(rs._versionen(1.0)["script_version"] is None and rs._versionen(1.0)["script_alter_s"] is None,
           "_versionen: nie ein Script gesehen → null, null")
