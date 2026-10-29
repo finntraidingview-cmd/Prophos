@@ -31141,14 +31141,26 @@
     const a = _kurzAnker.get(String(kontoPlan || '').trim().toUpperCase()) || {}
     const e = kurzEndeEntscheid({ b0: Number(tv.balance_start), b1: bq.balance, eq1: bq.equity, einstieg,
       kontrakte: Number(p.masterContracts) || 0, pv: wz === 'MNQ' ? 2 : 20, dir: p.richtung === 'buy' ? 1 : (p.richtung === 'sell' ? -1 : 0), lo: f.lo, hi: f.hi })
-    return Object.assign(e, { anker: a.quelle || null, b1: bq.balance, eq1: bq.equity, lo: f.lo, hi: f.hi })
+    // BALANCE-LABEL BELEGEN (30.10.2026, Master/Slave 5: „Balance fehlt" 4× auf Jacob/Marc mit Script 0.10.x, b1 null — accounts.tv_balance_quelle
+    // seit 5 Tagen nie 'reader'): ohne Balance die Label-Namen der Reader-Zusammenfassung mitgeben (nur Namen, keine Beträge), damit
+    // tvBalanceAus gezielt auf das echte TradingView-Label nachgezogen werden kann
+    const sk = bq.balance == null ? summaryKeysKurz(st.summary) : undefined
+    return Object.assign(e, { anker: a.quelle || null, b1: bq.balance, eq1: bq.equity, lo: f.lo, hi: f.hi }, sk !== undefined ? { summary_keys: sk } : {})
   }
+  // REIN RECHNEND (Test-Haken window._summaryKeysKurz): Label-Namen der Reader-Zusammenfassung → höchstens 24 Namen à 40 Zeichen | 'keine Zusammenfassung'
+  function summaryKeysKurz(summary){
+    if(!summary || typeof summary !== 'object' || Array.isArray(summary)) return 'keine Zusammenfassung'
+    const k = Object.keys(summary)
+    return k.length ? k.slice(0, 24).map(x => String(x).replace(/\s+/g, ' ').trim().slice(0, 40)) : 'Zusammenfassung leer'
+  }
+  window._summaryKeysKurz = summaryKeysKurz
   // Abgelehntes Ende bei gekürztem Text: Konsole höchstens alle 10 s, am Hedge höchstens jede Minute (Auswertung, warum nicht geschlossen)
   const _kurzMeldAt = new Map()
   function kurzEndeMelden(p, kurz){
     const pid = String(p.id), t = _kurzMeldAt.get(pid) || { k: 0, db: 0 }, jetzt = Date.now()
     if(jetzt - t.k >= 10000){ t.k = jetzt; console.info('[hedge] gekürztes Konto: Master weg, aber kein Balance-Beweis —', kurz.grund, kurz) }
-    if(jetzt - t.db >= 60000){ t.db = jetzt; try{ hedgeAmPlanSchreiben(p.id, { reader_kurz_nein: { grund: kurz.grund, anker: kurz.anker, exit: kurz.exit || null, b1: kurz.b1 || null, lo: kurz.lo || null, hi: kurz.hi || null, at: new Date(jetzt).toISOString() } }).catch(() => {}) }catch(_){} }
+    if(jetzt - t.db >= 60000){ t.db = jetzt; try{ hedgeAmPlanSchreiben(p.id, { reader_kurz_nein: Object.assign({ grund: kurz.grund, anker: kurz.anker, exit: kurz.exit || null, b1: kurz.b1 || null, lo: kurz.lo || null, hi: kurz.hi || null, at: new Date(jetzt).toISOString() },
+      kurz.summary_keys !== undefined ? { summary_keys: kurz.summary_keys } : {}) }).catch(() => {}) }catch(_){} }
     _kurzMeldAt.set(pid, t)
   }
   window._kurzAnker = { gilt: kurzAnkerGilt, stand: () => ({ anker: Object.fromEntries(_kurzAnker), fenster: Object.fromEntries(_kurzFenster) }), fill: kurzFillPasst, pflegen: kurzAnkerPflegen, ende: kurzEndeKontoPasst, neu: kurzFensterNeu, frieren: kurzFensterFrieren, beweis: kurzEndeBeweis }   // Test-Haken
