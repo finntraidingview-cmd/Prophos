@@ -86,7 +86,7 @@ except Exception:
 c = e["chris_alt"]
 soll("Chris (Altdaten, ohne grund_tab): Hand schneller → Weg userscript", c["hs"] == "userscript" and c["s"]["weg"] == "userscript")
 soll("Chris: Weg-Text „Userscript (Hand schneller)“", c["s"]["wegTxt"] == "Userscript (Hand schneller)" and c["s"]["handSchneller"] is True)
-soll("Chris: kein Overshoot (Hand-Schluss liegt nicht am Level)", c["s"]["overPkt"] is None and c["s"]["overEur"] is None)
+soll("Chris: kein Overshoot (Hand-Schluss liegt nicht am Level)", c["s"]["diffEur"] is None)
 soll("Chris: Grund-Text nennt Reader + Hand schneller", "Reader" in c["text"] and "Hand schneller" in c["text"])
 soll("grund_tab sl_feed → Weg radar", e["mit_grund_tab"]["s"]["weg"] == "radar" and "Radar" in e["mit_grund_tab"]["text"])
 for k, txt in (("grund_tab_hand", "Tab selbst meldete hand"), ("ohne_close_at", "kein Schließbefehl"), ("nicht_schon_zu", "nicht schon zu"),

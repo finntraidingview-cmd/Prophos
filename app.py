@@ -12239,6 +12239,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # Ende-Grund am Plan: final.quelle ('close' = Schliessen/Auto-Close, sonst Rundgang-Ende) — nur wenn ein Ende da ist
         "grund": (final.get("quelle") or ("rundgang" if final else None)) if (final or p.get("ended_at")) else None,
         "hedge_eur": _wd_num(p.get("hedge_eur")), "hedge_faktor": _wd_num(p.get("hedge_faktor")),
+        # Plan-Gewinn von Fusion beim Blow aus der Vorschau (tfh_tick/ah_tick, z. B. 1650a0e3 675 €) — Overshoot gegen Plan im Radar (30.10.2026)
+        "hedge_plan_sl_eur": _wd_num((base.get("hedge_vorschau") or {}).get("blow_eur")) if isinstance(base.get("hedge_vorschau"), dict) else None,
         "quelle": "farmer" if (p.get("notes") or "") == "Winning-Day-Farmer" else "manuell",
         "verknuepft": bool(p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at")),
         "handelstag": _cme_handelstag(p.get("started_at") or p.get("start_um") or p.get("planned_for") or p.get("created_at")),

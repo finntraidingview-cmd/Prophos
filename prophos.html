@@ -13039,7 +13039,7 @@
           <div class="rst-kopf">
             <div>
               <div class="panel-title">Radar-Statistik · Schließwege der Fusion-Hedges</div>
-              <div class="panel-sub" id="rst-sub">Über welchen Weg der Fusion-Hedge zu ging, wie weit der Schluss hinter dem Level lag und wie lange der Hedge offen war</div>
+              <div class="panel-sub" id="rst-sub">Über welchen Weg der Fusion-Hedge zu ging, wie weit der Fusion-P&amp;L vom Plan abwich und wie lange der Hedge offen war</div>
             </div>
             <div class="seg" id="rst-tage"><button type="button" data-rst-tage="1">Heute</button><button type="button" data-rst-tage="7" class="active">7 Tage</button><button type="button" data-rst-tage="14">14 Tage</button></div>
             <button class="btn btn-ghost" id="rst-refresh" title="Neu laden" style="padding:6px 10px">↻</button>
@@ -37448,9 +37448,7 @@
    * MT5-Terminal gefüllt = Airbag) · radar = tp_feed / sl_feed / master_ende (Wächter im PC-Tab: Kurs-Feed bzw. Plan-Ende) · hand · sonst
    * (master_nie_da, stopout, close, unbekannt). Level in CFD-Preisen: hedge.sl = Fusion-SL = Master-TP-Seite, hedge.tp = Fusion-TP =
    * Master-SL/Liq-Seite (tp 0 = Master ohne SL). Welche Seite galt: level_tp/tp_feed → TP-Seite, level_sl/sl_feed → SL-Seite, sonst das
-   * dem Schluss nähere Level. Overshoot = echter Schluss (fill_close) hinter dem Level in Fusion-Punkten — Hedge buy: Schluss unter dem Level
-   * ist teurer, Hedge sell: Schluss über dem Level; € = Punkte × lots × wert_pro_punkt; % = € / hedge.eur (geplanter Hedge-Einsatz am
-   * Master-TP). Positiv = teurer als geplant (Reibung, Memory prophos-reibung-merkzahlen). Zeiten: offen = opened_at → closed_at,
+   * dem Schluss nähere Level. Overshoot = echter Fusion-P&L gegen den Plan (diffEur, s. unten; bis 30.10.2026 Abstand zum Level). Zeiten: offen = opened_at → closed_at,
    * verzug = close_at (Schließbefehl des Tabs) → closed_at (Copier bestätigt); schon_zu = das Terminal hatte schon gefüllt. */
   const SW_WEGE = [['userscript', 'Userscript'], ['notfall', 'Notfall-SL'], ['radar', 'Radar'], ['hand', 'von Hand'], ['sonst', 'Sonstiges']]
   const SW_WEG_TXT = Object.fromEntries(SW_WEGE)
@@ -37462,31 +37460,29 @@
     // Hand schneller (30.10.2026, s. hedgeHandSchneller): Weg = der von Prophos erkannte, Text mit Zusatz; Overshoot nicht (Hand-Schluss)
     const hs = hedgeHandSchneller(h)
     const g = hedgeGrundEcht(h), weg = hs || SW_WEG_VON[g] || 'sonst'   // Altdaten level_mt5 + close = unser Close (LABEL-RADAR-STATT-NOTFALL)
-    // sl/tp 0 = kein Level gesetzt (der Tab schreibt beim Öffnen `res.sl || 0`, z. B. ohne Notfall-SL) → null, sonst wäre Level 0 und der Overshoot ~24.000 Pkt
-    const fusionSl = n(h.sl) || null, fusionTp = n(h.tp) || null, zu = n(h.fill_close), buy = h.richtung === 'buy'
-    const lots = n(h.lots), wpp = n(h.wert_pro_punkt), eur = n(h.eur)
+    // sl/tp 0 = kein Level gesetzt (der Tab schreibt beim Öffnen `res.sl || 0`, z. B. ohne Notfall-SL) → null, sonst stimmt die Seite nicht
+    const fusionSl = n(h.sl) || null, fusionTp = n(h.tp) || null, zu = n(h.fill_close)
+    const eur = n(h.eur)
     let seite = (g === 'level_tp' || g === 'tp_feed') ? 'tp' : (g === 'level_sl' || g === 'sl_feed') ? 'sl' : null
     if(!seite && zu != null){
       seite = (fusionSl != null && fusionTp != null) ? (Math.abs(zu - fusionTp) < Math.abs(zu - fusionSl) ? 'sl' : 'tp') : fusionSl != null ? 'tp' : fusionTp != null ? 'sl' : null
     }
-    const level = seite === 'tp' ? fusionSl : seite === 'sl' ? fusionTp : null
-    // Overshoot nur, wo ein Level den Schluss ausgelöst hat (Userscript · Notfall · Radar); von Hand oder „Master nie da" schließen irgendwo
-    // dazwischen — dort wäre der Abstand zum Level kein Overshoot, sondern Zufall → null, zählt in keinen Schnitt. master_ende (Plan-Ende über den
-    // Tab) ebenso: die Hedge-Wache setzt ihn bei jedem nicht mehr offenen Plan, auch nach Hand-Schluss des Masters oder Auto-Close
-    const overPkt = (level != null && zu != null && !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende') ? (buy ? level - zu : zu - level) : null
-    const overEur = (overPkt != null && lots != null && wpp != null) ? overPkt * lots * wpp : null
-    const overPct = (overEur != null && eur) ? overEur / Math.abs(eur) * 100 : null
-    // WIRKUNG FÜR UNS (30.10.2026, Finn ~08:31: „Overshoot +1,3 Pkt · +6,43 €" ist immer rot, obwohl + nach Gewinn aussieht): over* zählt
-    // „teurer als geplant" positiv; angezeigt wird jetzt die Wirkung = −over*: + = besser als geplant (Fusion schloss hinter seinem TP bzw.
-    // vor seinem SL) → grün, − = schlechter (Undershoot) → rot. Beleg 52b79294 (Apex …0003, Master SL): Fusion-TP 28.831,87, Schluss 28.830,56
-    // → over +1,31 Pkt · +6,43 € = 6,43 € weniger Gewinn als geplant → Wirkung −6,43 € (Undershoot, rot).
-    const wirk = v => v == null ? null : (v === 0 ? 0 : -v)
+    /* OVERSHOOT GEGEN PLAN (Finn 30.10.2026 13:5x: „Was hätte ich verlieren oder machen sollen? Was habe ich verloren oder gemacht? Davon die Differenz"): ersetzt
+     * den Abstand zum Fusion-Level. diffEur = echter Fusion-P&L (slave_pl = Summe aller Versuche, sonst hedge.pl) − geplanter Fusion-P&L. Plan Master-TP: −hedge.eur.
+     * Plan Master-SL/Liq: gespeicherter Blow-Wert der Vorschau (t.hedge_plan_sl_eur, Tradeify-Final/Apex: 1650a0e3 675 €), sonst dieselbe Rechnung wie hedge.eur auf
+     * die SL-Punkte = eur ÷ punkte × sl_punkte (trifft funded_plan.hedge_sl_eur: b74d6b68 483,4/483,39 · 52b79294 204,16/204,17, und e5fec901 slave_risk 960). Keine Zahl
+     * ohne Plan oder bei Schluss von Hand/Hand schneller/„Master nie da"/master_ende (irgendwo dazwischen, kein Ausgang). − = schlechter = Overshoot, + = besser = Undershoot. */
+    const punkte = n(h.punkte), slPkt = n(h.sl_punkte), ist = n(t.slave_pl) ?? n(h.pl)
+    const planSl = n(t.hedge_plan_sl_eur) ?? ((eur && punkte > 0 && slPkt > 0) ? Math.abs(eur) / punkte * slPkt : null)
+    const mitPlan = !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende'
+    const planEur = !mitPlan ? null : seite === 'tp' ? (eur ? -Math.abs(eur) : null) : seite === 'sl' ? planSl : null
+    const diffEur = (planEur != null && ist != null) ? Math.round((ist - planEur) * 100) / 100 : null
     const ms = (a, b) => { const x = Date.parse(a || ''), y = Date.parse(b || ''); return (isNaN(x) || isNaN(y)) ? null : Math.max(0, y - x) }
     const mFill = h.master_exit && typeof h.master_exit === 'object' && !isNaN(Date.parse(h.master_exit.at || '')) ? h.master_exit.at : null
     const mEnde = mFill || h.master_weg_at || null
-    return { weg, wegTxt: SW_WEG_TXT[weg] + (hs ? ' (Hand schneller)' : ''), handSchneller: !!hs, grund: g, seite, level, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
+    return { weg, wegTxt: SW_WEG_TXT[weg] + (hs ? ' (Hand schneller)' : ''), handSchneller: !!hs, grund: g, seite, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
       masterTp: n(h.tp_level_nq), masterSl: n(h.sl_level_nq), liq: h.sl_art === 'liquidation',
-      overPkt, overEur, overPct, wirkPkt: wirk(overPkt), wirkEur: wirk(overEur), wirkPct: wirk(overPct), offenMs: ms(h.opened_at || h.at, h.closed_at), verzugMs: h.close_at ? ms(h.close_at, h.closed_at) : null,
+      planEur, istEur: ist, diffEur, offenMs: ms(h.opened_at || h.at, h.closed_at), verzugMs: h.close_at ? ms(h.close_at, h.closed_at) : null,
       // echtes Master-Ende (30.10.2026): Exit-Fill aus TradingViews Meldung (hedge.master_exit.at) vor dem Erkennungs-Stempel, sonst ab Schließbefehl
       bisZuMs: mEnde ? ms(mEnde, h.closed_at) : null,
       // Fusion vor dem erkannten Master-Ende zu (Notfall-Level im Terminal schneller als Feed/Reader) → „vor Master" statt „0,0 s nach Master"
@@ -37570,37 +37566,33 @@
     // oder das 110-%-Level") — seit 28.10.2026 (Finn: „genau angezeigt, über welchen Weg der Trade geschlossen wurde und was der eigentliche
     // TP/SL war … die Overshoots … bei allen Trades, die gegengehedgt werden, im Radar unter Erledigt") eine volle Zeile unter dem Trade
     // (Grid-Area sw, CSS .wdl-z-sw) statt der Mini-Pille in der P&L-Zelle: Weg mit Farbpunkt · Master-TP und -SL/Liq (NQ) · Fusion-Level →
-    // echter Schluss (CFD) · Overshoot in Punkten, % und € · Hedge offen · Verzug Schließbefehl → bestätigt. Rechnung in swAuswertung (REIN),
+    // echter Schluss (CFD) · Differenz zum Plan in € · Hedge offen · Verzug Schließbefehl → bestätigt. Rechnung in swAuswertung (REIN),
     // der lange Grund-Text (hedgeGrundText) und die Rechenregel stehen im Tooltip. Die Zeile bekommt dazu die Klasse wdl-z-sw-da (Raster).
     // KOMPAKT seit 29.10.2026 (Finn 09:45 am Screenshot: „nur den Overshoot oder Undershoot plus über welchen Weg geschlossen wurde. Die
     // ganzen extra Texte brauchst du nicht … in der nächsten Spalte, wie viele Sekunden es bis zum Schließen gedauert hat"): Chip „Weg ·
-    // Dauer" (feste Breite, fluchtet über alle Zeilen) + „Overshoot +0,3 Pkt · +0,64 €" bzw. „Undershoot −0,4 Pkt · −1,03 €". Dauer = hedge.close_at
+    // Dauer" (feste Breite, fluchtet über alle Zeilen) + „Overshoot −2,81 €" bzw. „Undershoot +1,03 €". Dauer = hedge.close_at
     // (Prophos erkennt das Master-Ende/Level und schickt den Schließbefehl) → hedge.closed_at (Copier meldet Fusion zu) — echte Zeitstempel,
     // keine Schätzung; den Master-Exit-Fill selbst speichert Prophos nicht (Befund 29.10.). TP/Liq/Fusion-Level/Schluss/„im Terminal gefüllt"/
     // offen stehen nur noch im Tooltip. Rechnung unverändert in swAuswertung.
     const zuWegZ = t => {
       const s = swAuswertung(t); if(!s) return ''
-      const f1 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
       const vor = s.vorMasterMs != null
       const bisZu = vor ? s.vorMasterMs : s.bisZuMs != null ? s.bisZuMs : s.verzugMs, bisTxt = swBisZuTxt(bisZu, s.zuGrob)
       const abMaster = s.bisZuMs != null   // ab Master-Ende-Stempel (29.10.2026) → „0,8 s nach Master", sonst ab Schließbefehl
       const nachTxt = vor ? ' vor Master' : abMaster ? ' nach Master' : ''
       let over = ''
-      if(s.wirkPkt != null){
-        // Farbe und Wort allein am Vorzeichen der Wirkung in € (Pkt nur Info; ohne € die Punkte): + grün „Overshoot", − rot „Undershoot", 0 neutral
-        const w = s.wirkEur != null ? s.wirkEur : s.wirkPkt, eps = s.wirkEur != null ? Math.abs(s.wirkEur) < 0.005 : Math.abs(s.wirkPkt) < 0.05, plus = w > 0
-        const vzv = v => v > 0 ? '+' : v < 0 ? '−' : '±'
-        over = `<span class="wdl-sw-over${eps ? '' : plus ? ' is-guenstig' : ' is-teuer'}">${eps || plus ? 'Overshoot' : 'Undershoot'} ${vzv(Math.abs(s.wirkPkt) < 0.05 ? 0 : s.wirkPkt)}${f1(Math.abs(s.wirkPkt))} Pkt`
-          + (s.wirkEur != null ? ` · ${vzv(eps ? 0 : s.wirkEur)}${Math.abs(s.wirkEur).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '') + `</span>`
+      if(s.diffEur != null){
+        // Nur die Differenz zum Plan in € (Finn 30.10.2026): − rot „Overshoot", + grün „Undershoot", unter 1 Cent neutral
+        const eps = Math.abs(s.diffEur) < 0.005, plus = s.diffEur > 0
+        over = `<span class="wdl-sw-over${eps ? '' : plus ? ' is-guenstig' : ' is-teuer'}">${plus && !eps ? 'Undershoot' : 'Overshoot'} ${eps ? '±' : plus ? '+' : '−'}${f2(Math.abs(s.diffEur))} €</span>`
       }
-      const levelTxt = s.level != null ? `Fusion-${s.seite === 'sl' ? 'TP' : 'SL'} ${f2(s.level)} → Schluss ${f2(s.zu)}` : `Schluss ${f2(s.zu)}`
       const tip = `${s.lang} (grund ${s.grund})`
         + (abMaster ? ` · ${bisTxt}${nachTxt}: ${SW_MASTER_QUELLE[s.masterQuelle] || 'Master-Ende erkannt'}${vor ? ' — Fusion war schon vorher zu (Level im Terminal schneller)' : ' → Fusion zu (Copier bestätigt; der Master-Fill selbst wird nicht gemessen)'}`
           : bisZu != null ? ` · ${bisTxt} ab Schließbefehl → Fusion zu (kein Master-Ende-Stempel)` : ' · Dauer unbekannt (weder Master-Ende-Stempel noch Schließbefehl)')
         + (s.zuGrob ? ' · Copier meldet die Schluss-Zeit nur sekundengenau' : '')
-        + ` · Master-TP ${f2(s.masterTp)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${f2(s.masterSl)}` : ' · ohne SL'} · ${levelTxt}`
-        + (s.wirkPct != null ? ` · ${s.wirkPct < 0 ? '−' : '+'}${f1(Math.abs(s.wirkPct))} % vom geplanten Hedge-Einsatz${s.eur != null ? ` (${f2(s.eur)} €)` : ''}` : '')
-        + ` · Overshoot (+) = Fusion schloss besser als am Level geplant, Undershoot (−) = schlechter · offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : ''}`
+        + ` · Master-TP ${f2(s.masterTp)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${f2(s.masterSl)}` : ' · ohne SL'}`
+        + (s.diffEur != null ? ` · Fusion geplant ${s.planEur < 0 ? '−' : '+'}${f2(Math.abs(s.planEur))} € · echt ${s.istEur < 0 ? '−' : '+'}${f2(Math.abs(s.istEur))} € · Overshoot (−) = schlechter als geplant, Undershoot (+) = besser` : '')
+        + ` · offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : ''}`
       return `<span class="wdl-z-sw" title="${escapeHtml(tip)}"><b class="wdl-sw-${s.weg}">${escapeHtml(s.wegTxt)} · ${escapeHtml(bisTxt)}${nachTxt}</b>${over}</span>`
     }
     // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
@@ -38414,7 +38406,7 @@
    * Standard-Sicht (Gruppen MIT Verwalter, also Emins Gruppe, ausgeblendet) = Hermann Technologies; der Gruppen-Chip im Admin-Kopf greift
    * hier bewusst nicht (Memory prophos-amir-nicht-ht). Die Route kappt bei 14 Tagen (sie lädt zu jedem Start die Minutenkerzen) — darum
    * Heute · 7 · 14 Tage, nicht 30. Gezählt wird jeder Trade mit geschlossenem Fusion-Hedge (swAuswertung), Modell egal (Orbit, Winning Day,
-   * Nova, Echo). Kacheln: Anteil je Weg mit Balken, Ø/Median Hedge-Dauer, Ø Overshoot in Pkt und %, Σ Mehrkosten; darunter die letzten
+   * Nova, Echo). Kacheln: Anteil je Weg mit Balken, Ø/Median Hedge-Dauer, Ø und Σ Overshoot gegen Plan in €; darunter die letzten
    * Trades als Zeilen. Reine Anzeige, keine Bewertung. Cache 60 s, ↻ lädt sofort. Stub: window._rstStub({trades:[…]}). */
   const rst = { tage: 7, daten: null, fehler: '', laedt: false, at: 0 }
   async function rstLaden(){
@@ -38442,14 +38434,14 @@
     const pct = (a, b) => b ? Math.round(a / b * 100) : 0
     const mw = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null
     const med = a => { if(!a.length) return null; const b = [...a].sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2 }
-    // Wirkung für uns (30.10.2026, s. swAuswertung wirk*): + = besser als geplant → grün, − = Undershoot → rot
-    const kl = v => v == null ? '' : v > 0.05 ? 'is-guenstig' : v < -0.05 ? 'is-teuer' : ''
+    // Differenz zum Plan in € (30.10.2026, s. swAuswertung diffEur): + = besser als geplant → grün, − = Overshoot → rot
+    const kl = v => v == null ? '' : v >= 0.005 ? 'is-guenstig' : v <= -0.005 ? 'is-teuer' : ''
     if(msg){
       const txt = rst.fehler ? `Nicht geladen: ${rst.fehler}` : (rst.laedt && !rst.daten) ? 'Lade Schließwege …' : (rst.daten && !alle.length) ? `Keine geschlossenen Fusion-Hedges (${zeitraum}).` : ''
       msg.hidden = !txt; msg.textContent = txt
     }
     if(!alle.length){ kpis.innerHTML = ''; wege.innerHTML = ''; liste.innerHTML = ''; if(lk) lk.hidden = true; return }
-    const n = alle.length, offen = alle.map(x => x.s.offenMs).filter(v => v != null), overP = alle.map(x => x.s.wirkPct).filter(v => v != null), overE = alle.map(x => x.s.wirkEur).filter(v => v != null)
+    const n = alle.length, offen = alle.map(x => x.s.offenMs).filter(v => v != null), overE = alle.map(x => x.s.diffEur).filter(v => v != null)
     const modell = {}; for(const x of alle){ const m = typeof wdlWeg === 'function' ? wdlWeg(x.t) : '?'; modell[m] = (modell[m] || 0) + 1 }
     const modellTxt = Object.entries(modell).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')
     const us = alle.filter(x => x.s.weg === 'userscript').length, nf = alle.filter(x => x.s.weg === 'notfall').length
@@ -38457,33 +38449,33 @@
     kpis.innerHTML = kpi('Gehedgte Trades · zu', `${n}`, `${escapeHtml(modellTxt)} · ${zeitraum}`, 'Trades mit geschlossenem Fusion-Hedge im Zeitraum, in der Admin-Sicht dieses Logins (Standard: Gruppe Hermann Technologies)')
       + kpi('Userscript', `${pct(us, n)}<small>%</small>`, `${us} von ${n} · Notfall-SL ${pct(nf, n)} %`, 'Anteil der Hedges, die das Tampermonkey-Userscript (Reader sah den Master zu) geschlossen hat')
       + kpi('Hedge offen · Median', escapeHtml(swDauerTxt(med(offen))), `Ø ${escapeHtml(swDauerTxt(mw(offen)))} · Fusion-Fill → zu`, 'Zeit vom Fusion-Fill bis zum bestätigten Schluss, Median und Mittelwert über alle Wege')
-      + kpi('Overshoot · Ø', `<span class="${kl(mw(overP))}">${sig(mw(overP), '%')}</span>`, `Σ ${sig(overE.length ? overE.reduce((a, b) => a + b, 0) : null, '€', 0)} gegen Plan · Median ${sig(med(overP), '%')}`, 'Wirkung des echten Schlusses gegen das Fusion-Level, in % des geplanten Hedge-Einsatzes — positiv = besser als geplant (Overshoot), negativ = Undershoot; nur Userscript · Notfall-SL · Radar (von Hand/Sonstiges schließen nicht am Level)')
+      + kpi('Overshoot · Ø', `<span class="${kl(mw(overE))}">${sig(mw(overE), '€', 2)}</span>`, `Σ ${sig(overE.length ? overE.reduce((a, b) => a + b, 0) : null, '€', 2)} gegen Plan · Median ${sig(med(overE), '€', 2)}`, 'Echter Fusion-P&L minus geplanter Fusion-P&L je Trade — negativ = schlechter als geplant (Overshoot), positiv = besser (Undershoot). Ohne Schluss von Hand, „Master nie da“ und Trades ohne Planwert')
     wege.innerHTML = SW_WEGE.map(([key, name]) => {
       const a = alle.filter(x => x.s.weg === key), k = a.length
-      const of = a.map(x => x.s.offenMs).filter(v => v != null), op = a.map(x => x.s.wirkPct).filter(v => v != null), ok = a.map(x => x.s.wirkPkt).filter(v => v != null), oe = a.map(x => x.s.wirkEur).filter(v => v != null)
+      const of = a.map(x => x.s.offenMs).filter(v => v != null), oe = a.map(x => x.s.diffEur).filter(v => v != null)
       const gruende = {}; for(const x of a) gruende[x.s.grund] = (gruende[x.s.grund] || 0) + 1
       const tip = k ? `grund: ${Object.entries(gruende).sort((x, y) => y[1] - x[1]).map(([g, v]) => `${g} ${v}`).join(' · ')}` : 'im Zeitraum kein Trade über diesen Weg'
       return `<div class="rst-weg is-${key}${k ? '' : ' is-leer'}" title="${escapeHtml(tip)}"><div class="rst-weg-kopf">${escapeHtml(name)}</div>`
         + `<div class="rst-weg-wert">${pct(k, n)}<small>% · ${k}</small></div><div class="rst-bar"><i style="width:${pct(k, n)}%"></i></div>`
         + `<div class="rst-weg-z"><span>offen Median · Ø</span><b>${escapeHtml(swDauerTxt(med(of)))} · ${escapeHtml(swDauerTxt(mw(of)))}</b></div>`
-        + `<div class="rst-weg-z"><span>Overshoot Ø</span><b class="${kl(mw(op))}">${sig(mw(ok), 'Pkt')} · ${sig(mw(op), '%')}</b></div>`
-        + `<div class="rst-weg-z"><span>gegen Plan Σ</span><b class="${kl(oe.length ? oe.reduce((x, y) => x + y, 0) : null)}">${sig(oe.length ? oe.reduce((x, y) => x + y, 0) : null, '€', 0)}</b></div></div>`
+        + `<div class="rst-weg-z"><span>Overshoot Ø</span><b class="${kl(mw(oe))}">${sig(mw(oe), '€', 2)}</b></div>`
+        + `<div class="rst-weg-z"><span>gegen Plan Σ</span><b class="${kl(oe.length ? oe.reduce((x, y) => x + y, 0) : null)}">${sig(oe.length ? oe.reduce((x, y) => x + y, 0) : null, '€', 2)}</b></div></div>`
     }).join('')
-    // Letzte Trades (neueste zuerst, höchstens 40): Zeit · Person · Konto · Modell · Weg · Level → Schluss · Overshoot · offen
+    // Letzte Trades (neueste zuerst, höchstens 40): Zeit · Person · Konto · Modell · Weg · Fusion geplant → echt · Overshoot · offen
     const zeit = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'; const u = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); return d.toDateString() === new Date().toDateString() ? u : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + u }
     const sortiert = [...alle].sort((a, b) => String(b.s.zuAt || b.t.ended_at || '').localeCompare(String(a.s.zuAt || a.t.ended_at || '')))
     const zeilen = sortiert.slice(0, 40)
     if(lk){ lk.hidden = false; if(ls) ls.textContent = zeilen.length < n ? `· ${zeilen.length} von ${n}` : `· ${n}` }
-    liste.innerHTML = `<div class="rst-z rst-z-kopf"><span>Zu</span><span>Person</span><span>Konto</span><span>Modell</span><span>Weg</span><span>Fusion-Level → Schluss</span><span class="rst-r">Overshoot</span><span class="rst-r">offen</span></div>`
+    liste.innerHTML = `<div class="rst-z rst-z-kopf"><span>Zu</span><span>Person</span><span>Konto</span><span>Modell</span><span>Weg</span><span>Fusion geplant → echt</span><span class="rst-r">Overshoot</span><span class="rst-r">offen</span></div>`
       + zeilen.map(({ t, s }) => {
         const k = t.konto || {}, konto = `${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
         const farbe = typeof wdlIdFarbe === 'function' ? wdlIdFarbe(t) : 'var(--sub)'
-        const tipZ = `${s.lang} (grund ${s.grund}) · Master-TP ${de(s.masterTp, 2)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${de(s.masterSl, 2)}` : ''} · Fusion ${sig(s.pl, '€', 2)}${s.eur != null ? ` · geplant −${de(s.eur, 2)} €` : ''}${s.schonZu ? ' · im Terminal gefüllt' : s.verzugMs != null ? ` · bestätigt nach ${swDauerTxt(s.verzugMs)}` : ''}`
+        const tipZ = `${s.lang} (grund ${s.grund}) · Master-TP ${de(s.masterTp, 2)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${de(s.masterSl, 2)}` : ''} · Fusion ${sig(s.istEur, '€', 2)}${s.planEur != null ? ` · geplant ${sig(s.planEur, '€', 2)}` : ''}${s.schonZu ? ' · im Terminal gefüllt' : s.verzugMs != null ? ` · bestätigt nach ${swDauerTxt(s.verzugMs)}` : ''}`
         return `<div class="rst-z" title="${escapeHtml(tipZ)}"><span>${escapeHtml(zeit(s.zuAt || t.ended_at))}</span>`
           + `<span><i class="rst-id" style="--rst-id:${farbe}"></i>${escapeHtml(String(t.person || '?'))}</span><span title="${escapeHtml(String(k.name || konto))}">${escapeHtml(konto)}</span>`
           + `<span>${escapeHtml(typeof wdlWeg === 'function' ? wdlWeg(t) : '')}</span><span class="rst-weg-chip is-${s.weg}">${escapeHtml(s.wegTxt)}</span>`
-          + `<span>${s.level != null ? `${de(s.level, 2)} → ${de(s.zu, 2)}` : de(s.zu, 2)}</span>`
-          + `<span class="rst-r ${kl(s.wirkEur != null ? s.wirkEur : s.wirkPkt)}">${s.wirkPkt == null ? '–' : `${sig(s.wirkPkt, 'Pkt')}${s.wirkPct != null ? ` · ${sig(s.wirkPct, '%')}` : ''}`}</span>`
+          + `<span>${s.planEur != null ? `${sig(s.planEur, '€', 2)} → ` : ''}${sig(s.istEur, '€', 2)}</span>`
+          + `<span class="rst-r ${kl(s.diffEur)}">${s.diffEur == null ? '–' : sig(s.diffEur, '€', 2)}</span>`
           + `<span class="rst-r">${escapeHtml(swDauerTxt(s.offenMs))}</span></div>`
       }).join('')
   }
