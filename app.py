@@ -30373,6 +30373,8 @@ def ap_waage_zeile_zaehlt(z, jetzt_min, pc_lebt=None, laufend=False):
     geplant nur, wenn er in ≤ AP_WAAGE_BALD_MIN startet (oder geclaimt ist und noch nicht 15 min drüber) und sein PC lebt."""
     if z.get("richtung") not in ("buy", "sell") or z.get("gehedgt") or str(z.get("typ") or "") not in AP_TYPEN:
         return False
+    if z.get("tage_mini"):
+        return False          # TAGE-MINI (30.10.2026, Befund S6): 0,01 Lot „Tage sammeln" zählt nie in der Waage — weder laufend noch geplant
     if laufend:
         return True
     if z.get("folgetag") or z.get("start_min") is None:
@@ -30704,6 +30706,15 @@ def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
     out = {"klasse": kl, "zaehlt": (not z.get("gehedgt")) and str(z.get("typ") or "") in AP_TYPEN,
            "vorher": {f: vor.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "passt", "grund")}}
     gegen = "sell" if richtung == "buy" else "buy"
+    if z.get("tage_mini"):
+        # TAGE-MINI OHNE WAAGE (30.10.2026, Befund S6: FundedNext Phase 1 …9859, 0,01 Lot / 3,6 $ SL, hing seit 07:01 an „CFD-Waage: 1 Short
+        # laufen, kein Long — kein Gegen-Trade vorziehbar"): startet wie geplant wie Apex/WD, nur der Richtungsschutz dreht
+        g = "Tage sammeln (Mini) zählt nicht in der Waage — startet ohne Waage-Prüfung"
+        out.update(zaehlt=False, ohne_waage=True)
+        for name, r in (("nachher", richtung), ("gegen", gegen)):
+            out[name] = {"richtung": r, "passt": True, "besser": False, "grund": g,
+                         **{f: vor.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}
+        return out
     if ap_waage_ohne(z, ap_waage_ohne_liste(stand)):
         # APEX OHNE WAAGE (19.10.2026): startet wie geplant, zieht nichts vor, dreht nur der Richtungsschutz — der PC-Tab sieht „passt"
         g = f"{z.get('firma') or 'Firma'} zählt nicht in der Waage (Apex, Finn 19.10.2026) — startet ohne Waage-Prüfung"

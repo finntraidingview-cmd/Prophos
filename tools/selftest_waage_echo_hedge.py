@@ -127,8 +127,10 @@ def planer_unveraendert(src, ns):
             out.append(" ".join(z.split()))
         return "\n".join(out)
     if alt:
+        # TAGE-MINI (30.10.2026, Befund S6): ap_waage_zeile_zaehlt bekam bewusst den Ausschluss der Tage-sammeln-Minis — Vergleich ohne ihn
+        ohne_tm = lambda t: re.sub(r"\n    if z\.get\(\"tage_mini\"\):\n        return False[^\n]*", "", t)   # noqa: E731
         anders = [n for n in PLANER_FUNKTIONEN
-                  if (ohne_gruppe(fn(src, n)) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else fn(src, n) != fn(alt, n))]
+                  if (ohne_gruppe(fn(src, n)) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]
         ok(not anders, f"Planer-/Waage-Rechnung identisch mit {BASIS} ({anders or 'alle gleich'})")
     ok("ap_eh_richtungen_mischen" not in src and "eh_an" not in fn(src, "ap_planen"), "kein Würfel-Code, ap_planen kennt den Schalter nicht")
     W, N = ns["ap_klassen_waage"], ns["ap_waage_nachschub"]
