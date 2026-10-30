@@ -52594,7 +52594,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1933'
+  const OS_TAB_BUILD = '2026-09-22.1934'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57109,6 +57109,13 @@
   function rkGilt(p){
     return !!p && (p.route === 'tvv2' || p.route === 'mt5v2' || p.route === 'tsv2') && (p.richtung === 'buy' || p.richtung === 'sell')
   }
+  /* FUNDED-CFD-ECHO DREHT WIE EIN WD (Finn 30.10.2026 über den Master, „ECHO-DREHEN-AM-START"): Echo-Pläne des Funded-CFD-Planers
+   * (mt5_baseline.funded_plan.art 'cfd', Echo mt5/mt5v2, über Fusion gehedgt) werden am Start auf die laufende Richtung derselben ID × Firma
+   * gedreht statt verschoben — wie Winning Days (.1503). Challenge-Echos nicht (Richtung nur vom Planer). TP/SL/Hedge stehen in $/€ am Plan,
+   * Level und Fusion-Gegenrichtung rechnet der Echo-Start erst aus plan.richtung — gedreht wird vor Claim und Preflight. */
+  const rkFcfd = p => !!p && (p.route === 'mt5' || p.route === 'mt5v2') && (p.richtung === 'buy' || p.richtung === 'sell')
+    && !!(p.mt5Baseline && p.mt5Baseline.funded_plan && p.mt5Baseline.funded_plan.art === 'cfd')
+  window._rkFcfd = rkFcfd   // Test-Haken
   const rkFlag = p => (p && p.mt5Baseline && p.mt5Baseline.richtung_konflikt) || null
   // RICHTUNG VON HAND (16.10.2026, Master nach Prüfung Slave 2): im Admin-Planer gedreht (mt5_baseline.richtung_hand) — der Bot fasst den Plan
   // nicht mehr an, die harten Riegel hier am Start dürfen weiter drehen, sagen dann aber sichtbar, dass sie Finns Klick überstimmen
@@ -57326,7 +57333,7 @@
     }catch(_){}
   }
   async function rkVorStart(plan){
-    if(!rkGilt(plan)) return null
+    if(!rkGilt(plan) && !rkFcfd(plan)) return null   // + Funded-CFD-Echo (route mt5, 30.10.2026)
     let k = null
     try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){ return null }
     const meine = plan.richtung === 'sell' ? 'short' : 'long', alt = rkFlag(plan)
@@ -57449,22 +57456,23 @@
     // Richtung. Saldo nicht lesbar (Railway weg, älter als 15 min) → drehen wie bisher, damit kein Start stumm hängen bleibt.
     let saldoSperrt = null
     if(sd && ((ziel === 'buy' && sd.netto > 0) || (ziel === 'sell' && sd.netto < 0))) saldoSperrt = sd.netto   // .1507: ein Stand je Start (rkSaldo)
-    if(saldoSperrt != null && !tpIstWdPlan(plan)){   // WD: gehedgt, zählt im Saldo nicht, läuft immer (.1503)
+    if(saldoSperrt != null && !tpIstWdPlan(plan) && !rkFcfd(plan)){   // WD: gehedgt, zählt im Saldo nicht, läuft immer (.1503); Funded-CFD-Echo ebenso (30.10.2026)
       const kS = { ...k, text: `${k.text} — NICHT auf ${ziel.toUpperCase()} gedreht: alle IDs sind heute schon ${saldoSperrt > 0 ? 'long' : 'short'} (${Math.round(saldoSperrt).toLocaleString('de-DE')} € Tages-Saldo), ${plan.richtung.toUpperCase()} bleibt und wartet, bis der Gegen-Trade zu ist` }
       await rkVerschieben(plan, kS, false, 'start')
       return 'verschoben'
     }
     // .1503: Winning Day immer drehen, auch mit Hand-Werten (Finn 13.10.2026: „Winning Days müssen immer gemacht werden")
-    if((plan.autoPlan && !plan.handWerteAt) || tpIstWdPlan(plan)){
+    if((plan.autoPlan && !plan.handWerteAt) || tpIstWdPlan(plan) || rkFcfd(plan)){
+      const was = tpIstWdPlan(plan) ? 'Winning Day' : rkFcfd(plan) ? 'Funded-CFD-Echo' : 'Auto-Plan'
       const { data, error } = await supabase.from('trade_plans').update({ richtung: ziel })
         .eq('id', plan.id).eq('status', 'planned').eq('richtung', plan.richtung).is('start_um_gestartet_at', null).select('*')
       if(!error && data && data.length){
         rkPlanErsetzen(data[0])
         const durch = k.quelle === 'plan' ? 'vorher geplant' : 'läuft schon', hand = rkHandTxt(plan)
         try{ await baselinePatch(plan.id, { richtung_konflikt: { quelle: 'start', status: 'gedreht', um: new Date().toISOString(), von: plan.richtung, nach: ziel, text: k.text + hand } }, 'planned') }catch(_){}
-        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert)${hand}.`, 'start')
+        if(typeof atToast === 'function') atToast(`⇅ Richtungsschutz — „${plan.masterName || 'Plan'}": bei dieser ID+Firma ${durch} ${k.lauf.toUpperCase()} → ${was} auf ${ziel.toUpperCase()} gedreht und gestartet (TP/SL in $ unverändert)${hand}.`, 'start')
         rkProtokoll(plan, { von_richtung: plan.richtung, nach_richtung: ziel, von_start: plan.startUm, nach_start: plan.startUm,
-          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — ${tpIstWdPlan(plan) ? 'Winning Day' : 'Auto-Plan'} gedreht${hand}` })
+          grund: `Richtungsschutz am Start: ${durch} ${k.lauf} — ${was} gedreht${hand}` })
         try{ renderTradePlans() }catch(_){}
         return { plan: tradePlans.find(x => String(x.id) === String(plan.id)) || rowToPlan(data[0]) }
       }
