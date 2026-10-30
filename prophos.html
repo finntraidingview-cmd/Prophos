@@ -4169,6 +4169,8 @@
     #adm-pane-wd #wd-uebersicht .pz-radar .pz-pz{white-space:nowrap;flex-wrap:nowrap} }
   #wd-uebersicht .pz-radar .pz-z-kopf .pz-tp,#wd-uebersicht .pz-radar .pz-z-kopf .pz-sl{white-space:normal;line-height:1.25}
   #wd-uebersicht .ap-gr-live{font-size:12px;font-weight:600;color:var(--good);white-space:nowrap}
+  #wd-uebersicht .wd-ue-pl{display:inline-flex;flex-direction:column;align-items:flex-end;margin-right:10px;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25;white-space:nowrap}
+  #wd-uebersicht .wd-ue-pl small{font-size:11px;font-weight:500}
   #wd-uebersicht .pz-radar .pz-k1 .pz-typ{display:none}   /* hier ist jedes Konto Winning Days — der Chip kostete nur Breite */
   #wd-uebersicht [data-ap-zur]{display:none}   /* WD-Pläne werden nicht bestätigt — „↩ zurück" (Auto-Plan) hat hier keine Funktion */
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 12px 18px;background:var(--surface-tint)}
@@ -68563,6 +68565,8 @@
    * Block „Hedge-Freigabe" (window._ahfWdZeilen, dieselbe Zeile + derselbe ✓ → POST /admin/auto-plan/hedge-freigabe). WD-Pläne selbst
    * brauchen kein ✓. Karten-Optik wie im Planer (ap-adm-karte/-kopf/-grp). */
   const WD_UE_UEBERFAELLIG_MS = 10 * 60000
+  // Lesung da? (Befund 30.10.2026: alle 8 Trades unter „wartet auf Nachlesung" waren längst nachgelesen, standen nur bis zum Abhaken in review)
+  const wdEndlesungDa = p => { const f = p && p.anz_final; return !!f && typeof f === 'object' && (f.balance_end != null || ['puls', 'reader_leer', 'plattform'].includes(String(f.quelle || ''))) }
   function wdUebersichtDaten(rows){
     const jetzt = Date.now(), out = { laeuft: [], braucht: [], warten: [] }
     for(const x of (rows || [])){
@@ -68572,7 +68576,7 @@
         if(!p){ if(wdAktiv(k) && k.hinweis) out.braucht.push({ ...e, grund: String(k.hinweis) }); continue }
         const st = String(p.status || ''), su = Date.parse(p.start_um || '') || null
         if(st === 'open') out.laeuft.push(e)
-        else if(st === 'review') out.braucht.push({ ...e, grund: 'zu Ende — wartet auf Nachlesung' })
+        else if(st === 'review') out.braucht.push({ ...e, grund: wdEndlesungDa(p) ? 'zu Ende — abhaken' : 'zu Ende — wartet auf Nachlesung' })
         else if(st === 'planned' && !p.start_um_gestartet_at && su && su < jetzt - WD_UE_UEBERFAELLIG_MS) out.braucht.push({ ...e, grund: `Start ${wdHhmm(p.start_um)} überfällig — nicht gestartet` })
         else if(st === 'planned') out.warten.push(e)
       }
@@ -68626,10 +68630,10 @@
     const mitFusion = l => l.map(e => { const kd = wdKontoDaten(e.k && e.k.id); return { ...e, fusion: wdPlanFusion(e.p, e.p && e.p.master_contracts), balance: kd ? kd.live_balance ?? null : null, ext: (kd && kd.ext) || e.k.ext || '', richtung: wdKontoRichtung(e.k, e.x.richtung) } })
     let pb = null; try{ if(typeof window._apWdBloecke === 'function') pb = window._apWdBloecke({ laeuft: mitFusion(d.laeuft), warten: mitFusion(d.warten), braucht: mitFusion(d.braucht) }, {
       laeuft: `<div class="ap-adm-kopf"><b>Läuft · ${d.laeuft.length}</b><span>live</span></div>`, warten: `<div class="ap-adm-kopf"><b>Wartet auf Start · ${d.warten.length}</b><span>geplant · Zeiten Dubai</span></div>`,
-      braucht: `<div class="ap-adm-kopf"><b>Braucht dich · ${d.braucht.length}</b><span>Nachlesung, überfällig, Hinweis am Konto</span></div>` }) }catch(e){ console.warn('[wd] Karten', e); pb = null }
+      braucht: `<div class="ap-adm-kopf"><b>Braucht dich · ${d.braucht.length}</b><span>Abhaken, Nachlesung, überfällig, Hinweis am Konto</span></div>` }) }catch(e){ console.warn('[wd] Karten', e); pb = null }
     const laeuftHtml = pb && d.laeuft.length ? pb.laeuft : wdUebersichtBlock('laeuft', 'Läuft', 'live', d.laeuft)
     const wartenHtml = pb && d.warten.length ? pb.warten : wdUebersichtBlock('warten', 'Wartet auf Start', 'geplant · Zeiten Dubai', d.warten)
-    const brauchtHtml = pb && d.braucht.length ? pb.braucht : wdUebersichtBlock('braucht', 'Braucht dich', 'Nachlesung, überfällig, Hinweis am Konto', d.braucht)
+    const brauchtHtml = pb && d.braucht.length ? pb.braucht : wdUebersichtBlock('braucht', 'Braucht dich', 'Abhaken, Nachlesung, überfällig, Hinweis am Konto', d.braucht)
     box.innerHTML = wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD mit Hedge — startet erst nach ✓ · Zeiten Dubai', offen, alleKnopf)
       + laeuftHtml
       + brauchtHtml
@@ -80733,6 +80737,18 @@
 
   /* Ein Block (art offen | warten | laeuft): je ID eine Gruppe (Farbpunkt · Name · Zähler · „✓ alle n" nur bei offen), darin die Firmen-Blöcke
    * (planFirmenBloecke) mit planZeileHtml-Zeilen. Balance/Rest/Stufe: Trade-Zeile → Lauf-Zeile → notes-Text → eigenes Konto. */
+  // Live-Zeile eines laufenden Plans: Hypo-Zeile, sonst gehedgt (FINAL-PNL-FEHLT, Kommentar im Läuft-Zweig). Registriert den Live-Takt (_tpl.lzHedge → lzLiveTick).
+  const apIdsLaufWert = (e, hJe) => { const t = e.t || {}, id = String(e.z.plan_id), hz = hJe.get(id)
+    if(hz) return hz
+    const lzHedge = _tpl.lzHedge || (_tpl.lzHedge = new Map()), zahlOd = v => { const w = v && typeof v === 'object' ? v.wert : v; return w == null || w === '' || !isFinite(Number(w)) ? null : Number(w) }
+    const r = _tpl.lt.get(id) || null, echo = !!(r && r.plattform === 'echo') || /^mt5/.test(String(e.z.route || '')), kt = zahlOd(r && r.kt) ?? e.z.menge, wurzel = (r && r.symbol_root) || 'NQ'
+    const ein = r && zahlOd(r.einstieg_nq) > 1000 ? zahlOd(r.einstieg_nq) : null, kurs = tplKursJetzt()
+    let pl = echo ? zahlOd(r && r.pl_live) : null
+    if(!echo && ein != null && kurs && kt && typeof wdMasterLive === 'function'){ const mm = wdMasterLive(e.z.richtung, ein, kt, wurzel, kurs); pl = mm ? mm.pl : null }
+    if(pl == null) pl = zahlOd(r && r.master_pl) ?? e.pl
+    lzHedge.set(id, { hedge: true, echo, einstieg: ein, kt, wurzel, richtung: e.z.richtung })
+    return { plan_id: id, key: id, user: e.z.user || t.user, user_id: e.z.user_id, firma: e.z.firma, konto: e.z.konto, ende4: e.z.ende4, richtung: e.z.richtung,
+      kt: e.z.menge, wurzel: 'NQ', echo: /^mt5/.test(String(e.z.route || '')), pl, hypo: null, fusion: zahlOd(r && r.slave_pl_live), gehedgt: true, start: t.start } }
   function apIdsBlockHtml(art, liste, kopf, opt){
     const karten = !!(opt && opt.karten), geplant = art === 'offen' || art === 'warten'   // karten: WD-Reiter, auch Läuft/Braucht dich als Plan-Zeilen, Klicks gibt es dort nicht
     const leer = { offen: 'nichts zu bestätigen – nächste Vorschläge mit dem Nachtlauf', warten: 'Nichts bestätigt.', laeuft: 'Nichts läuft.', braucht: 'Alles in Ordnung.' }[art]
@@ -80746,17 +80762,7 @@
       /* GEHEDGTE IN „LÄUFT" (FINAL-PNL-FEHLT, Finn 30.10.2026 09:16: Marc Tradeify …7231, Orbit + Hedge, zeigte „–"): tplHypo überspringt gehedgte Trades
        * (Hypo-Wert 0, Risiko liegt bei Fusion) — die Zeile hatte so gar keinen P&L. Master $ wie Orbit V2 aus Einstieg + Kurs (wdMasterLive; ohne Kurs Rundgang
        * master_pl), Echo pl_live; darunter Fusion € (slave_pl_live, /admin/live-trades). Nicht in der Summe: die rechnet nur den Hypo-Wert. Live-Takt: _tpl.lzHedge. */
-      const lzHedge = _tpl.lzHedge || (_tpl.lzHedge = new Map()), zahlOd = v => { const w = v && typeof v === 'object' ? v.wert : v; return w == null || w === '' || !isFinite(Number(w)) ? null : Number(w) }
-      const zl = liste.map(e => { const t = e.t || {}, id = String(e.z.plan_id), hz = hJe.get(id)
-        if(hz) return hz
-        const r = _tpl.lt.get(id) || null, echo = !!(r && r.plattform === 'echo') || /^mt5/.test(String(e.z.route || '')), kt = zahlOd(r && r.kt) ?? e.z.menge, wurzel = (r && r.symbol_root) || 'NQ'
-        const ein = r && zahlOd(r.einstieg_nq) > 1000 ? zahlOd(r.einstieg_nq) : null, kurs = tplKursJetzt()
-        let pl = echo ? zahlOd(r && r.pl_live) : null
-        if(!echo && ein != null && kurs && kt && typeof wdMasterLive === 'function'){ const mm = wdMasterLive(e.z.richtung, ein, kt, wurzel, kurs); pl = mm ? mm.pl : null }
-        if(pl == null) pl = zahlOd(r && r.master_pl) ?? e.pl
-        lzHedge.set(id, { hedge: true, echo, einstieg: ein, kt, wurzel, richtung: e.z.richtung })
-        return { plan_id: id, key: id, user: e.z.user || t.user, user_id: e.z.user_id, firma: e.z.firma, konto: e.z.konto, ende4: e.z.ende4, richtung: e.z.richtung,
-          kt: e.z.menge, wurzel: 'NQ', echo: /^mt5/.test(String(e.z.route || '')), pl, hypo: null, fusion: zahlOd(r && r.slave_pl_live), gehedgt: true, start: t.start } })
+      const zl = liste.map(e => apIdsLaufWert(e, hJe))
         .sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))
       _apIds.laufQ = new Map(liste.map(e => [String(e.z.plan_id), { z: e.z, t: e.t || {} }]))
       const eintr = tplLaufEintraege(zl, D), mitWert = zl.some(z => z.hypo != null)
@@ -80764,6 +80770,9 @@
       return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}${laufZeilenHtml(eintr, { titel: 'ID · Konto', kurs: tplKursJetzt(), summe: mitWert ? { usd, eur } : null,
         attr: e => `data-ap-lauf="${escapeHtml(String(e.z.plan_id))}"` })}</div>`
     }
+    // WD-Karten, Läuft: Live-P&L in der letzten Spalte (data-lz-*: lzLiveTick schreibt alle 2 s nach, Finn 30.10.2026)
+    let lauf = null; if(karten && art === 'laeuft'){ const D = apIdsHeute(); let hz = []; try{ hz = tplHypo(D).zeilen || [] }catch(_){}
+      const hJe = new Map(hz.map(z => [String(z.plan_id), z])); lauf = new Map(liste.map(e => [String(e.z.plan_id), apIdsLaufWert(e, hJe)])) }
     const jeZ = new Map(), je = new Map()
     const plaene = liste.map(e => { const z = e.z, tz = e.t || (karten ? null : apIdsTrade(z)) || {}, g = apIdsLaufZeile(z) || {}, nz = apIdsAusNotes(z.notes)
       // Finn-Screenshot .1210: fast alle Admin-Zeilen „–", nur Konten des letzten Laufs hatten Werte → Kette bis zum notes-Text
@@ -80806,6 +80815,8 @@
       } else if(art === 'warten'){
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
       } else if(art === 'braucht') akt = `<span class="pz-zustand"><small class="wd-ue-grund" title="${escapeHtml(String(grund || ''))}">${escapeHtml(String(grund || ''))}</small></span>`
+      else if(lauf){ const w = lauf.get(id) || {}, fw = w.gehedgt ? w.fusion : w.hypo
+        akt = `<span class="pz-zustand"><span class="wd-ue-pl" data-lz-plan="${escapeHtml(id)}" title="Live: Master $${w.gehedgt ? ' · darunter Fusion €' : ' · darunter hypothetisch €'}"><span data-lz-usd style="color:${lzFarbe(w.pl)}">${lzUsd(w.pl)}</span><small data-lz-eur style="color:${lzFarbe(fw)}">${lzEur(fw)}</small></span><span class="ap-gr-live">● läuft</span></span>` }
       else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
       // RICHTUNG PER KLICK (16.10.2026, Auftrag Master — Finn 14.10.: Aurels Tradeify-Short vor dem Start auf BUY drehen ging nur per SQL):
       // nur geplant und ungestartet (Zu bestätigen / Wartet auf Start), Prüfung + Drehen im Backend (apIdsRichtung). Gesperrt → ⛔ mit Grund.
@@ -80824,7 +80835,7 @@
     const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-id-karte" style="--id:${idFarbe(g.uid)}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} ${wort}${art === 'offen' && g.live < g.plaene.length ? ` · ${g.plaene.length - g.live} Balance nicht live` : ''}</span>
           ${art === 'offen' && g.live ? `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID mit liver Balance bestätigen">✓ alle ${g.live}</button>` : ''}</div>`
         + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true, stil: 'radar', kopfFusion: karten }) + '</div>').join('')   // Radar-Optik der Zeilen (08.10.2026)
-    return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}${gruppen}</div>`
+    return `<div class="ap-adm-karte ap-geplant ap-gr-${art}${lauf ? ' lz-tab' : ''}">${kopf}${gruppen}</div>`
   }
   function apIdsOffenHtml(){
     // nicht-live Balance (08.10.2026): raus aus „Zu bestätigen" (steht in der Box „Braucht dich"), Zähler/„alle n"/„Alle n" ohne sie
