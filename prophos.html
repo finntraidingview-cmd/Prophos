@@ -35777,11 +35777,12 @@
       // Eigenes Konto: Archiv-Eintrag lokal nachziehen (sonst zweiter Echo-Löschauftrag beim Anlegen) und Assistent öffnen wie im Trades-Dialog. Fremdes bleibt beim Besitzer.
       try{
         if(kontoStatus === 'passed' && ar && ar.archiviert && ar.konto_id && (accounts || []).some(x => String(x.id) === String(ar.konto_id))){
+          await archivCloudAbgleich()   // Server meldet archiviert auch bei „war schon"; der Tab kann einen Nachfolger aus einem anderen Tab noch nicht kennen (S2 zu 9f3788bb)
           const arch = getArchive()
           if(!(arch[ar.konto_id] && arch[ar.konto_id].archived)){ arch[ar.konto_id] = { archived: true, reason: 'passed_pending', at: new Date().toISOString() }; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(arch)) }
           if(typeof renderAccounts === 'function') renderAccounts()
           if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender()
-          setTimeout(() => openSuccessorWizard(ar.konto_id), 200)
+          if(nachfolgerNochOffen(arch[ar.konto_id])) setTimeout(() => openSuccessorWizard(ar.konto_id), 200)
         }
       }catch(e){ console.warn('[abhaken] Nachfolger öffnen', e) }
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
@@ -41292,7 +41293,9 @@
    * archiviert hat (_archNeu), bleibt. Nur lokal schreiben, kein Upload. Nur ein Lesen je Takt und nur bei offenem Radar. */
   async function archivCloudAbgleich(){
     let cloud = null
+    const uidVor = currentUserId, standVor = localStorage.getItem(ARCH_LS)
     try{ cloud = await fetchSetting('archive') }catch(_){ return false }
+    if(currentUserId !== uidVor || localStorage.getItem(ARCH_LS) !== standVor) return false   // ID gewechselt oder Archiv hier geändert (Entarchivieren) während des Lesens: verwerfen, nächster Takt
     if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return false } }
     if(!cloud || typeof cloud !== 'object' || Array.isArray(cloud)) return false
     const neu = { ...cloud, ..._archNeu }
@@ -41301,6 +41304,8 @@
     try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
     return true
   }
+  // Hat das Konto schon einen Nachfolger, darf „Anlegen" keine zweite Zeile erzeugen und successorId nicht überschreiben (S2 zu 9f3788bb). passed_pending ohne Nachfolger: weiter öffnen.
+  function nachfolgerNochOffen(e){ return !(e && e.successorId) }
   // Nur archived je Konto zählt: Reihenfolge und Zeitstempel im Blob dürfen keinen Neuaufbau auslösen
   function archivStandGleich(a, b){
     const an = o => Object.keys(o || {}).filter(k => o[k] && o[k].archived).sort().map(k => k + '|' + (o[k].reason || '')).join(',')
