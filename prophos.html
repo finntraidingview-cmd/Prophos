@@ -32413,6 +32413,13 @@
     return fehltAt > 0 && jetzt - fehltAt < TSX_FEHLT_MS ? 'fehlt' : 'nie'
   }
   window._tsxAugeUrteil = tsxAugeUrteil
+  // REIN RECHNEND (30.10.2026, nur Nova braucht das Auge): Startsperre nur für den Topstep Big Trade mit Hedge — Winning Days (orbit_v3 false) nie
+  const tsxStartBrauchtAuge = p => !!p && tpIstNova(p) && Number(p.hedgeEur) > 0
+  window._tsxStartBrauchtAuge = tsxStartBrauchtAuge
+  // REIN RECHNEND (30.10.2026): Reparatur bei blindem Auge nur, wenn ein Nova-Hedge offen ist oder das Auge an diesem PC je gemeldet hat. bigTradePlan zählt
+  // einen WD als Heimkonto (Prio 2) — ein offener WD-Hedge auf einem PC ohne Auge löste sonst alle 10 min einen Lauf aus (Tab neu laden, sonst Tabs zu)
+  const tsxBlindReparaturErlaubt = (nova, gesehenAt, fehltAt, jemalsS, jetzt) => !!nova || tsxAugeUrteil(gesehenAt, fehltAt, jemalsS, jetzt) === 'gesehen'
+  window._tsxBlindReparaturErlaubt = tsxBlindReparaturErlaubt
   const tsxReparaturFrei = () => Date.now() - tsxLs.get('prophos_tsx_auge_rep_at') >= TSX_REP_ABSTAND_MS
   function tsxAugeFehltMelden(grund){
     if(Date.now() - tsxLs.get('prophos_tsx_auge_fehlt_gemeldet_at') < TSX_FEHLT_MS) return
@@ -32526,6 +32533,7 @@
       const st = r && r.ok === true && r.stand && typeof r.stand === 'object' ? r.stand : null
       if(st) tsxTraegeMerken(r.alter_s, st)
       const blindTick = (grund) => {   // Auge blind (29.10.2026): nie schließen; nach TSX_BLIND_MS Reparatur über den Heimweg
+        if(!tsxBlindReparaturErlaubt(meine.some(tpIstNova), tsxLs.get('prophos_tsx_auge_gesehen_at'), tsxLs.get('prophos_tsx_auge_fehlt_at'), r && r.jemals_s != null ? r.jemals_s : null, Date.now())){ tsxBlindZurueck(); return }   // WD ohne Auge: Radar/Notfall schließen wie bis 29.10.
         const u = tsxBlindUrteil(_tsxBlindSeit, _tsxBlindN, true, Date.now()); _tsxBlindSeit = u.seit; _tsxBlindN = u.n
         if(u.faellig && tsxReloginAnstossen(meine[0], 'blind')) console.info('[hedgeTsx] Auge blind seit', Math.round((Date.now() - u.seit) / 100) / 10, 's (', u.n, 'Abfragen) —', grund)
       }
@@ -54044,7 +54052,10 @@
       // frisch meldet (≤ 1 s) — sonst schließt nachher niemand schnell. Blind → erst der Reparatur-Weg (tsx-lesen mit auge_reparieren: Neuladen,
       // sonst Tabs zu + einer neu mit Login), dann neu prüfen; bleibt es blind: nicht starten, nichts gesendet, Plan bleibt Geplant, schritt
       // 'auge_blind' zählt nicht gegen den Fehlstart-Deckel (SF_OHNE_DECKEL) — sfTick versucht es im 15-min-Takt neu.
-      if(plan.route === 'tsv2' && Number(plan.hedgeEur) > 0 && MT5_LOCAL){
+      // NUR NOVA (Finn 30.10.2026 16:0x über den Master: „Bei Topstep die Winning Days wieder aktivieren, so wie es die letzten Tage war"): die Sperre traf
+      // jeden tsv2-Plan mit Hedge, also auch Winning Days (Beleg: letzter Topstep-WD 29.10. 05:08 Dubai, Pläne e747db14/76aeece7/b884a6ca hingen).
+      // WD: Start, Hedge, Schluss über Radar/Notfall wie bis 29.10.
+      if(tsxStartBrauchtAuge(plan) && MT5_LOCAL){
         const ag = await tsxAugeStartBereit(plan, extId)
         if(!ag.ok && ag.fehlt){
           // nie gesehen (30.10.2026): kein Neuversuch im 15-min-Takt — sfBehoben plant neu ein, sobald das Auge meldet
@@ -58211,6 +58222,8 @@
   async function sfBehoben(plan, f){
     if(f.unklar || f.schritt === 'ziel_erreicht' || f.schritt === 'manuelle_arbeit') return null   // Ziel erreicht / Manuelle Arbeit: nie von selbst neu einplanen
     if(f.schritt === 'zu_spaet') return 'Prophos-Tab am PC läuft wieder'
+    // Winning Day, von der Auge-Sperre angehalten (Sperre seit 30.10.2026 nur noch Nova): braucht kein Auge, sofort regelkonform nachholen
+    if((f.schritt === 'auge_fehlt' || f.schritt === 'auge_blind') && !tsxStartBrauchtAuge(plan)) return 'Winning Day braucht kein TopstepX-Auge'
     // TopstepX-Auge nicht installiert (30.10.2026): erst neu einplanen, wenn das Auge an diesem PC meldet — kein 15-min-Takt
     if(f.schritt === 'auge_fehlt'){
       const r = (typeof window.mtcApi === 'function') ? await window.mtcApi('tsx-stand', { timeoutMs: 800 }).catch(() => null) : null
