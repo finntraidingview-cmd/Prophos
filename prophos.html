@@ -3789,6 +3789,15 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-karte{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px;min-width:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts .apg-karte{margin-bottom:18px}
+  /* P&L von heute (Challenge, 30.10.2026): Kennzahlen rechts im Kartenkopf, Chart volle Breite */
+  :is(#ap-ids-root.ap-guestly) .apg-pl .apg-karte-kopf{align-items:center}
+  :is(#ap-ids-root.ap-guestly) .apg-plks{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
+  :is(#ap-ids-root.ap-guestly) .apg-plk{display:flex;flex-direction:column;align-items:flex-end;min-width:0}
+  :is(#ap-ids-root.ap-guestly) .apg-plk small{color:var(--g-sub);font-size:12px}
+  :is(#ap-ids-root.ap-guestly) .apg-plk b{font-size:22px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--g-text)}
+  :is(#ap-ids-root.ap-guestly) .apg-plk b.gut{color:var(--g-gut)} :is(#ap-ids-root.ap-guestly) .apg-plk b.rot{color:var(--g-rot)}
+  @media (max-width:820px){ :is(#ap-ids-root.ap-guestly) .apg-pl .apg-karte-kopf{flex-wrap:wrap} :is(#ap-ids-root.ap-guestly) .apg-plks{order:3;flex-basis:100%;margin-left:0;gap:var(--m-gap, 10px);justify-content:space-between}
+    :is(#ap-ids-root.ap-guestly) .apg-plk{align-items:flex-start} :is(#ap-ids-root.ap-guestly) .apg-plk b{font-size:18px} }
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-karte-kopf{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-titel{font-size:18px;font-weight:600;color:var(--g-text)}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-sub{color:var(--g-sub);font-size:12.5px;margin-top:3px}
@@ -79888,7 +79897,7 @@
    * Einstellungs-Leiste (Stand der Schalter + EIN Hauptknopf „Nachplanen", Schalter aufklappbar) · Zeitstrahl · Zu bestätigen · Läuft · Braucht
    * dich · Wartet auf Start · Heute beendet. 7/30 Tage bräuchten neue Abfragen → ausgegraut („kommt"). Farben als Tokens --g-* nur unter
    * #ap-ids-root.ap-guestly, dunkel über html[data-theme="dark"] (Sonnen-Schalter). Charts: Chart.js 4 (schon geladen). ══ */
-  const _apg = { charts: [], schalterAuf: false, daten: null }
+  const _apg = { charts: [], schalterAuf: false, daten: null, pl: null }
   function apgChartsWeg(){ for(const c of _apg.charts){ try{ c.destroy() }catch(_){} } _apg.charts = [] }
   const APG_WELLE = '<svg class="apg-welle" viewBox="0 0 48 20" aria-hidden="true"><path d="M1 14c5 0 6-9 11-9s6 11 11 11 6-13 12-13 6 7 12 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
   const apgIcon = d => `<svg class="apg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`
@@ -79941,7 +79950,8 @@
       ${apgKpi({ icon: APG_ICON.hand, name: 'Braucht dich', zahl: String(T.brauchtN), cls: T.brauchtN ? 'rot' : '', ziel: 'braucht', unter: T.brauchtN ? 'Handgriffe offen' : 'alles erledigt' })}
       ${apgKpi({ icon: APG_ICON.warte, name: 'Wartet auf Start', zahl: String(wL.length), ziel: 'warten', unter: naechst ? 'nächster Start ' + apIdsWann(new Date(naechst).toISOString()) : 'nichts bestätigt' })}
     </div>`
-    // ── 3. Chart-Reihe: Long oben / Short unten je ID · Starts je Stunde (Dubai)
+    // ── 3. Challenge: EIN P&L-Chart über die volle Breite (Finn 30.10.2026 ~06:55: „P&L von heute — wie gut/schlecht der Tag läuft",
+    // ersetzt Long · Short je ID + Starts je Stunde, apgPlHeute). Funded Futures behält die Chart-Reihe Long/Short je ID · Starts je Stunde.
     const je = new Map()
     for(const t of trades){ const k = String(t.user_id || '?'); if(!je.has(k)) je.set(k, { name: t.user || k.slice(0, 6), L: 0, S: 0 }); je.get(k)[t.long ? 'L' : 'S']++ }
     const ls = [...je.values()].sort((a, b) => (b.L + b.S) - (a.L + a.S)).slice(0, 15)
@@ -79949,9 +79959,10 @@
     const std = Array(24).fill(0)
     for(const t of trades){ const ms = Date.parse((DF.tag || T.D.tag) + 'T00:00:00Z') + ((Number(t.start) || 0) - off) * 60000; if(isFinite(ms)) std[Number(_apgStd.format(new Date(ms))) % 24]++ }
     const total = std.reduce((a, b) => a + b, 0), peak = total ? std.indexOf(Math.max(...std)) : -1
-    _apg.daten = { ls, std }
+    _apg.daten = fd ? { ls, std } : null
+    _apg.pl = fd ? null : apgPlHeute({ tag, uid: u, firma: fs ? fs.firma : 'alle' })
     const nL = ls.reduce((a, z) => a + z.L, 0), nS = ls.reduce((a, z) => a + z.S, 0)
-    const charts = `<div class="apg-charts">
+    const charts = !fd ? apgPlKarteHtml(_apg.pl) : `<div class="apg-charts">
       <div class="apg-karte"><div class="apg-karte-kopf"><div><div class="apg-titel">Long · Short je ID</div><div class="apg-sub"><span class="lila">${nL} Long</span> · <span class="tuerkis">${nS} Short</span> · ${tag === 'morgen' ? 'morgen' : 'heute'}, alle Trades der Sicht</div></div>
         <span class="apg-i" title="Long oben, Short unten — je ID die Trades des Tages (geplant, bestätigt, läuft, beendet), ohne Winning Days. Je Tag über 7/30 Tage kommt mit dem Zeitraum.">i</span></div>
         <div class="apg-legende"><span><i class="lila"></i>Long</span><span><i class="tuerkis"></i>Short</span></div>
@@ -79983,6 +79994,101 @@
     const zs = `<div class="apg-karte apg-zs">${T.zeitstrahl}</div>`
     const listen = `<div data-apg-anker="offen">${x.ow.offen || ''}</div><div data-apg-anker="laeuft">${x.ow.laeuft || ''}</div><div data-apg-anker="braucht">${T.braucht || ''}</div><div data-apg-anker="warten">${x.ow.warten || ''}</div>${x.heuteHb || ''}`
     return kopf + kpis + charts + leiste + zs + listen
+  }
+  /* P&L VON HEUTE (30.10.2026, Finn ~06:55 über den Master: „P&L von heute — wie gut/schlecht der Tag läuft"): dieselben Radar-Zeilen wie die
+   * Heute-Bilanz (_tpl.lt aus /admin/live-trades, schon Sicht je Gruppe) — Start heute (Dubai), ohne Winning Day, Polar, Tage-Mini; dazu
+   * ID-Filter (apSichtUid), Firmen-Filter, Kontoart CFD/Futures (apArtPasst) und nur Challenge-/Phase-Konten (TPL_TYPEN). Master $ = master_pl.wert, Fusion € wie das Abhak-Popup
+   * (mklWdErledigtOeffnen): Hedge zu → slave_pl (Summe aller Versuche), sonst hedge.pl; Echo/tvplus → slave_pl. Laufende zählen mit
+   * Live-Wert (master_pl Rundgang, slave_pl_live) nur im letzten Punkt „jetzt" (gestrichelt). Kumuliert wie die WD-Statistik (wdUebStatistik):
+   * Nullpunkt 00:00 Dubai, ein Punkt je Trade-Ende. Netto in € fehlt bewusst — Master ist $, ein Kurs dafür steht hier nicht. Nur Anzeige. */
+  function apgPlHeute(o){
+    const zahl = v => { const w = v && typeof v === 'object' ? v.wert : v; return w == null || w === '' || !isFinite(Number(w)) ? null : Number(w) }
+    const tagD = v => { const d = new Date(v || ''); return !v || isNaN(d) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' }) }
+    const heute = tagD(new Date().toISOString()), mitte = Date.parse(heute + 'T00:00:00+04:00')
+    const aus = { heute, morgen: o.tag === 'morgen', punkte: [], m: 0, f: 0, mN: 0, fN: 0, fertig: 0, offen: 0, ohnePl: 0, mLive: 0, fLive: 0 }
+    if(aus.morgen || !(_tpl.lt && _tpl.lt.size)) return aus
+    const fusion = (t, live) => {
+      if(t.route === 'polar') return null
+      const h = t.hedge && typeof t.hedge === 'object' ? t.hedge : null
+      if(live) return zahl(t.slave_pl_live) ?? (h ? zahl(h.pl) : null)
+      if(h && zahl(h.pl) != null) return h.status === 'geschlossen' && zahl(t.slave_pl) != null ? zahl(t.slave_pl) : zahl(h.pl)
+      return (t.route === 'mt5' || t.route === 'tvplus' || h) ? zahl(t.slave_pl) : null
+    }
+    const fertig = []
+    for(const t of _tpl.lt.values()){
+      if(!t || tagD(t.started_at) !== heute) continue
+      if(t.route === 'polar' || t.plattform === 'polar' || t.tage_mini || (typeof wdlWeg === 'function' && wdlWeg(t) === 'Winning Day')) continue
+      const firma = String((t.konto && t.konto.firma) || t.firma || '')
+      if(o.uid && String(t.user_id) !== String(o.uid)) continue
+      if(o.firma && o.firma !== 'alle' && firma !== o.firma) continue
+      if(!apArtPasst({ firma, route: t.route })) continue
+      if(t.konto_typ && !TPL_TYPEN.includes(String(t.konto_typ))) continue   // nur Challenge-/Phase-Konten wie der übrige Planer (Funded hat seinen eigenen)
+      if(t.status === 'open'){
+        aus.offen++
+        const mp = zahl(t.master_pl), fe = fusion(t, true)
+        if(mp != null) aus.mLive += mp
+        if(fe != null) aus.fLive += fe
+        continue
+      }
+      const ende = Date.parse(t.ended_at || t.completed_at || '')
+      const mp = zahl(t.master_pl), fe = fusion(t, false)
+      if(mp == null && fe == null){ aus.ohnePl++; continue }
+      fertig.push({ ende: isFinite(ende) ? ende : Date.now(), mp, fe })
+    }
+    fertig.sort((a, b) => a.ende - b.ende)
+    // x = Stunden seit 00:00 Dubai (lineare Achse — Chart.js hier ohne Datums-Adapter)
+    const std = ms => Math.max(0, (ms - mitte) / 3600000)
+    aus.punkte.push({ x: 0, m: 0, f: 0 })
+    for(const z of fertig){
+      if(z.mp != null){ aus.m += z.mp; aus.mN++ }
+      if(z.fe != null){ aus.f += z.fe; aus.fN++ }
+      aus.fertig++
+      aus.punkte.push({ x: std(z.ende), m: aus.m, f: aus.f })
+    }
+    aus.punkte.push({ x: std(Date.now()), m: aus.m + aus.mLive, f: aus.f + aus.fLive, jetzt: true })
+    return aus
+  }
+  function apgPlKarteHtml(d){
+    const kz = (name, wert, cls, tip) => `<div class="apg-plk"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small>${name}</small><b class="${cls || ''}">${wert}</b></div>`
+    const farbe = v => v > 0 ? 'gut' : v < 0 ? 'rot' : ''
+    const mJ = d.m + d.mLive, fJ = d.f + d.fLive, leer = d.morgen || (!d.fertig && !d.offen && !d.ohnePl)
+    const sub = d.morgen ? 'morgen gibt es noch keinen P&amp;L' : `heute (Dubai) · ${d.fertig} beendet · ${d.offen} läuft${d.ohnePl ? ` · ${d.ohnePl} ohne P&amp;L` : ''}`
+    const kpis = leer ? '' : `<div class="apg-plks">
+        ${kz('Master', apgUsd(mJ), farbe(mJ), `Master-P&L $ · beendet ${apgUsd(d.m)}${d.offen ? ` + laufend ${apgUsd(d.mLive)}` : ''}`)}
+        ${kz('Fusion', apgEur(fJ), farbe(fJ), `Fusion-Hedge-P&L € · beendet ${apgEur(d.f)}${d.offen ? ` + laufend ${apgEur(d.fLive)}` : ''}`)}
+        ${kz('Trades', `${d.fertig + d.offen + d.ohnePl}`, '', `${d.fertig} beendet · ${d.offen} läuft${d.ohnePl ? ` · ${d.ohnePl} ohne P&L` : ''}`)}</div>`
+    return `<div class="apg-karte apg-pl"><div class="apg-karte-kopf"><div><div class="apg-titel">P&amp;L von heute</div><div class="apg-sub">${sub}</div></div>
+        ${kpis}<span class="apg-i" title="Kumuliert über den Tag (Dubai): Master-P&L in $ (rechte Achse) und Fusion-P&L in € (linke Achse), je Trade-Ende ein Punkt. Der letzte, gestrichelte Abschnitt rechnet die laufenden Trades mit ihrem Live-Wert dazu. Ohne Winning Days, Polar und Tage-Mini; folgt ID, Firma und CFD/Futures.">i</span></div>
+        <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion €</span></div>
+        <div class="apg-chart">${leer ? `<div class="apg-leer">${d.morgen ? 'morgen kommt erst' : 'heute noch kein Trade gestartet'}</div>` : '<canvas id="apg-c-pl"></canvas>'}</div></div>`
+  }
+  function apgPlMalen(root, d, ablage){
+    const cv = root.querySelector('#apg-c-pl'); if(!cv || !d || typeof window.Chart !== 'function') return
+    const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
+    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a4 = tok('--g-a4') || '#16c8c6'
+    const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
+    const uhr = h => { const m = Math.round(h * 60); return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
+    const letzt = d.punkte.length - 1, live = d.offen > 0
+    const reihe = (k, farbe, label, achseId) => ({ label, yAxisID: achseId, data: d.punkte.map(p => ({ x: p.x, y: Math.round(p[k] * 100) / 100 })), borderColor: farbe, backgroundColor: farbe,
+      borderWidth: 2, pointRadius: d.punkte.map((_, i) => i === 0 ? 0 : 3), pointHoverRadius: 5, tension: 0,
+      segment: { borderDash: c => live && c.p1DataIndex === letzt ? [5, 4] : undefined } })
+    const max = Math.max(1, Math.ceil(d.punkte[letzt].x))
+    // Null beider Achsen auf derselben Höhe — sonst liegt „0 €" oben und „0 $" unten und die Linien lesen sich falsch herum
+    const spanne = k => { const w = d.punkte.map(p => p[k]); return [Math.min(0, ...w), Math.max(0, ...w)] }
+    const [mLo, mHi] = spanne('m'), [fLo, fHi] = spanne('f'), anteil = (lo, hi) => hi - lo > 0 ? hi / (hi - lo) : 0.5
+    const pm = anteil(mLo, mHi), pf = anteil(fLo, fHi)   // Anteil der Achse über der Null je Reihe; gemeinsam = Mittel, jede Achse wird passend verlängert
+    const f = pm >= 1 && pf >= 1 ? 1 : pm <= 0 && pf <= 0 ? 0 : Math.min(0.85, Math.max(0.15, (pm + pf) / 2))
+    const grenzen = (lo, hi) => f >= 1 ? { min: 0 } : f <= 0 ? { max: 0 } : (lo === 0 && hi === 0) ? { min: -(1 - f) / f, max: 1 }
+      : { min: Math.min(lo, -(1 - f) / f * hi) * 1.08, max: Math.max(hi, f / (1 - f) * -lo) * 1.08 }
+    ablage.push(new Chart(cv.getContext('2d'), { type: 'line',
+      data: { datasets: [reihe('m', a1, 'Master', 'm'), reihe('f', a4, 'Fusion', 'f')] },
+      options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', axis: 'x', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, boxPadding: 4,
+          callbacks: { title: c => c.length ? (d.punkte[c[0].dataIndex].jetzt ? `jetzt ${uhr(c[0].parsed.x)}${live ? ' · mit laufenden' : ''}` : c[0].dataIndex === 0 ? '00:00 · Tagesbeginn' : uhr(c[0].parsed.x)) : '',
+            label: c => ` ${c.dataset.label}: ${c.dataset.yAxisID === 'm' ? apgUsd(c.parsed.y) : apgEur(c.parsed.y)}` } } },
+        scales: { x: Object.assign({}, achse, { type: 'linear', min: 0, max, grid: { display: false }, ticks: { color: sub, font: { size: 10 }, stepSize: max > 12 ? 2 : 1, maxRotation: 0, callback: v => uhr(v) } }),
+          m: Object.assign({}, achse, grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, callback: v => apgUsd(v) } }),
+          f: Object.assign({}, achse, grenzen(fLo, fHi), { position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, callback: v => apgEur(v) } }) } } }))
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
@@ -80239,6 +80345,7 @@
     root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
     apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })
+    try{ apgPlMalen(root, _apg.pl, _apg.charts) }catch(e){ console.warn('[apg] P&L-Chart', e) }   // Challenge: P&L von heute (30.10.2026)
   }
   /* Chart-Reihe im Guestly-Look (30.10.2026, aus apGuestlyVerdrahten herausgezogen, damit WD und Funded CFD dieselben Charts zeichnen):
    * d.ls = [{ name, L, S }] → Spiegelbalken (oben d.namen[0], unten d.namen[1], Standard Long/Short); d.std = 24 Werte je Stunde ODER
