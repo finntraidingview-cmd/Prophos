@@ -54,6 +54,12 @@ with app.app.test_request_context("/admin/auto-plan/bestaetigen", method="POST")
     WER["uid"] = "jacob"
     check(app._planer_admin_auth()[1] is not None, "Jacob nicht")
 
+cl = app.app.test_client()
+for uid, soll in (("jacob", False), ("pascal", True), ("amir", True)):
+    WER["uid"] = uid
+    d = cl.get("/admin/planer-rechte", headers={"sb-token": "x"}).get_json()
+    check(d.get("ok") and d.get("schreiben") is soll, f"GET /admin/planer-rechte {uid} → schreiben {d.get('schreiben')}")
+
 print("3) Quelltext: Riegel an allen Schreib-Routen, Automatik frei")
 src = open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read()
 

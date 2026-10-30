@@ -23951,6 +23951,20 @@ def _planer_schreib_gate():
     return jsonify({"ok": False, "error": msg, "msg": msg, "nur_ansehen": True}), 403
 
 
+@app.route("/admin/planer-rechte", methods=["GET", "OPTIONS"])
+def admin_planer_rechte():
+    """GET → {ok, schreiben, grund?} — darf dieser Login in den Planern ändern (PLANER-RECHTE HT, _planer_schreib_gate)? Für das Ausgrauen der
+    Knöpfe im Frontend (S3); der Server prüft an jeder Schreib-Route trotzdem selbst. Nicht prüfbar → schreiben false."""
+    if request.method == "OPTIONS":
+        return "", 200
+    e = _planer_schreib_gate()
+    if e is not None and e[1] == 401:
+        return e
+    out = jsonify({"ok": True, "schreiben": e is None, **({} if e is None else {"grund": (e[0].get_json(silent=True) or {}).get("msg")})})
+    out.headers["Cache-Control"] = "no-store"
+    return out
+
+
 def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht, verwalter=False):
     """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
     Admin oder ID im Planer. Die kurze Öffnung für jeden Login mit sicht="admin" (.1248) ist seit Option A (Finn 08.10.2026) wieder zu —
