@@ -80668,7 +80668,7 @@
     return konten + `<div class="fcr-unten">${regeln.replace('<details class="apg-schalter" data-fcfd-regeln', news + '<details class="apg-schalter" data-fcfd-regeln')}</div>`
   }
   /* NEWS-KACHEL (Master 30.10.2026, Regeln Finn ~07:28 / S8 8427eda9): im Regelteil die News-Regel für Funded CFD — rote USD-News (Forex Factory,
-   * impact High): 20–30 min vorher keine Starts, laufende Trades bis t−6/t−10 zu, 6–15 min danach keine Starts. An/Aus aus GET
+   * impact High): seit Finn ~07:47 2 h vorher keine neuen Starts, laufende bis spätestens 6 min (V2: 10 min) vorher zu, frühestens 15 min danach. An/Aus aus GET
    * /admin/funded-cfd-plan (news_regel), Schalten nur Admin über POST /admin/funded-cfd-plan/einstellung {news_regel} (gilt für alle Gruppen).
    * Dazu der nächste rote USD-Termin und der Zustand des Kalenders aus /news/calendar (frisch · unvollständig · alt · nicht ladbar). Nur Anzeige
    * + dieser eine Schalter. */
@@ -80701,7 +80701,7 @@
     const farbe = { gut: 'var(--good-ink, #15803d)', amber: 'var(--warn-ink, #b45309)', rot: 'var(--danger-ink, #b91c1c)' }[zustand[0]] || 'var(--g-sub)'
     const schalter = `<label class="fcr-news-schalter" title="${admin ? 'News-Regel für alle Gruppen an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-fcfd-news${an ? ' checked' : ''}${!admin || an == null || _fcfdNews.schaltet ? ' disabled' : ''}><span class="switch-slider"></span></span>${an == null ? 'Stand unbekannt' : an ? 'an' : 'aus'}</label>`
     return `<div class="fcr-grid fcr-news"><div class="fcr-karte"><div class="fcr-kopf">News-Regel<small>rote USD-News · Forex Factory</small></div>
-        <ul class="fcr-gem"><li>20–30 min vorher keine Starts</li><li>laufende Trades bis t−6 bzw. t−10 min zu</li><li>6–15 min danach keine Starts</li></ul>
+        <ul class="fcr-gem"><li>nur Red-Folder-USD-News</li><li>2 h vorher keine neuen Funded-CFD-Starts</li><li>laufende bis spätestens 6 min (V2: 10 min) vorher zu</li><li>frühestens 15 min danach wieder Starts</li></ul>
         <div class="fcr-z"><span>Schalter</span><em>${schalter}</em><span>Nächster Termin</span><em>${nTxt || '–'}</em><span>Kalender</span><em style="color:${farbe}">${escapeHtml(zustand[1])}</em></div>
         <div class="fcr-hinweis">gilt für alle Gruppen · nur Funded CFD</div></div></div>`
   }
