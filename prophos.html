@@ -80077,7 +80077,7 @@
   function fcfdTpText(tp){
     if(!tp) return null
     if(typeof tp === 'string') return tp
-    if(tp.art === 'erst_payout') return `vor 1. Payout ${fcfdSpanne(tp.erst, ' $')} · danach ${fcfdSpanne(tp.danach, ' $')}`
+    if(tp.art === 'erst_payout') return `vor dem 1. Payout fest ${fcfdSpanne(tp.erst, ' $')} · danach ${tp.danach ? fcfdSpanne(tp.danach, ' $') : 'aufs Ziel'}`
     if(tp.art === 'ziel') return 'aufs Ziel · nach Verlust am nächsten Tag wieder aufs Ziel'
     return tp.text ? String(tp.text) : null
   }
@@ -80085,7 +80085,7 @@
     if(_fcfdR.fehler) return 'Regeln nicht ladbar — ' + _fcfdR.fehler.slice(0, 80)
     if(!_fcfdR.d) return _fcfdR.laedt ? 'Regeln laden …' : 'Funded-CFD-Planer kommt — Regeln je Firma noch nicht hinterlegt'
     const f = _fcfdR.d.firmen || []
-    return `Regeln je Firma × Größe · ${f.map(x => x.firma).join(' · ') || 'keine Firma'} · Planer plant noch nicht`
+    return `Regeln je Firma × Größe · ${f.map(x => x.firma).join(' · ') || 'keine Firma'} · Planer ${_fcfdR.d.aktiv ? 'an' : 'aus'}`
   }
   function fcfdRegelnHtml(){
     const D = _fcfdR.d
@@ -80096,7 +80096,7 @@
       `${g.trades_je_tag != null ? escapeHtml(String(g.trades_je_tag)) : '1'} Trade pro Tag je Konto · Echo mit Fusion-Gegenhedge`,
       'Uhrzeit und Long/Short gewürfelt — läuft bei derselben ID × Firma schon ein Trade, nimmt der Funded-Trade dieselbe Richtung (Richtungsschutz)',
       `Bestätigen ${g.auto_bestaetigen ? 'automatisch' : 'von Hand'}, wie im Challenge-Planer`,
-      'Ziel gemessen an der Starting Balance (Kontogröße): erreicht → Waiting for Payout · Waiting for Payout wird nie geplant',
+      `Ziel gemessen an der Starting Balance (Kontogröße) · erreicht → Waiting for Payout ${g.ziel_auto_wartet ? 'automatisch' : 'von Hand (Knopf am Konto)'} · Waiting for Payout wird nie geplant`,
       ...(Array.isArray(g.hinweise) ? g.hinweise.map(String) : [])
     ]
     const gemKarte = `<div class="fcr-karte"><div class="fcr-kopf">Gemeinsam<small>alle Firmen</small></div><ul class="fcr-gem">${gem.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`
@@ -80113,12 +80113,29 @@
     return `<div class="fcr-grid">${gemKarte}${(D.firmen || []).map(firmaKarte).join('')}</div>`
   }
   // Rohdaten aus der DB → normalisiert (Adapter, sobald S4 die Struktur geliefert hat)
-  function fcfdRegelnNorm(roh){ return roh && typeof roh === 'object' && Array.isArray(roh.firmen) ? roh : null }
+  // Quelle (S4, 30.10.2026): GET /admin/funded-cfd-plan — Tabelle funded_cfd_plan_regeln hat RLS ohne Policy, also nur über die Route.
+  // firmen[] = { name, an, namen, ohne_namen, je_groesse: { "<Größe>": { ziel, tp_erster, sl, sl_1pct, lots, hedge_eur, dd, daily_loss } } },
+  // dazu aktiv, auto_bestaetigen, ziel_auto_wartet, zeiten { von, bis, tz, firma_abstand_min, abstand_id_min }. Schon normalisiert (Stub) bleibt so.
+  function fcfdRegelnNorm(roh){
+    if(!roh || typeof roh !== 'object' || !Array.isArray(roh.firmen)) return null
+    if(roh.gemeinsam || !roh.firmen.some(f => f && f.je_groesse)) return roh
+    const z = roh.zeiten || {}, hin = []
+    if(z.von && z.bis) hin.push(`Startfenster ${z.von}–${z.bis}${z.tz ? ' ' + String(z.tz).replace('Asia/', '') : ''}${z.firma_abstand_min != null ? ` · ≥ ${z.firma_abstand_min} min je Firma` : ''}${z.abstand_id_min != null ? ` · ≥ ${z.abstand_id_min} min je ID` : ''}`)
+    return { aktiv: !!roh.aktiv,
+      gemeinsam: { auto_bestaetigen: !!roh.auto_bestaetigen, ziel_auto_wartet: !!roh.ziel_auto_wartet, hinweise: hin },
+      firmen: roh.firmen.filter(f => f && f.je_groesse && typeof f.je_groesse === 'object').map(f => ({
+        firma: String(f.name || '?'),
+        hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', (f.ohne_namen || []).length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
+        groessen: Object.entries(f.je_groesse).map(([gr, x]) => ({ groesse: Number(gr), ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
+          hedge_eur: x.hedge_eur, hedge_dd: x.dd, daily_loss: x.daily_loss,
+          tp: x.tp_erster ? { art: 'erst_payout', erst: x.tp_erster } : { art: 'ziel' } })) })) }
+  }
+  const fcfdQuelle = () => typeof window._fcfdRegelnQuelle === 'function' ? window._fcfdRegelnQuelle() : apdApi('GET', '', null, '/admin/funded-cfd-plan')
   async function fcfdRegelnLaden(neu){
     if(_fcfdR.laedt || (!neu && _fcfdR.d && Date.now() - _fcfdR.at < 300000)) return
-    if(typeof window._fcfdRegelnQuelle !== 'function') return   // Quelle folgt (S4)
+    if(!currentUserId && typeof window._fcfdRegelnQuelle !== 'function') return
     _fcfdR.laedt = true; _fcfdR.fehler = ''
-    try{ _fcfdR.d = fcfdRegelnNorm(await window._fcfdRegelnQuelle()); _fcfdR.at = Date.now() }
+    try{ _fcfdR.d = fcfdRegelnNorm(await fcfdQuelle()); _fcfdR.at = Date.now() }
     catch(e){ _fcfdR.fehler = (e && e.message) || String(e) }
     finally{ _fcfdR.laedt = false; if(document.getElementById('apg-fcfd')?.offsetParent) apgFcfdRender() }
   }
