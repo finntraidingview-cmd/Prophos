@@ -66976,7 +66976,9 @@
   }
   // Mac: fehlende IDs für den Tag eintragen, bestehende Zeilen um neue Konten ergänzen und den Haken-Stand
   // nachziehen (nur Konten ohne Plan) — nie eine laufende/fertige Zeile anfassen
-  async function wdAlleEintragen(tag){
+  // opt.nurUngewuerfelt (WD AUTOMATISCH DRIN, 30.10.2026): schon gewürfelte Zeilen (start_um) nicht anfassen — neue Konten dort kommen
+  // nur über „Heute nicht drin" (+) bzw. am nächsten Tag; neue IDs bekommen ihre Zeile immer
+  async function wdAlleEintragen(tag, opt){
     const erw = wdErwartet()
     if(erw === null) return { fehler: `Konten nicht ladbar${_wd.datenFehler ? ' (' + _wd.datenFehler + ')' : ''} — ich kenne nur IDs, deren PC-Tab sich eingetragen hat.` }
     const rows = await wdRowsLaden(tag), byUid = new Map(rows.map(x => [String(x.user_id), x]))
@@ -66987,7 +66989,7 @@
     const wuerfeln = k => { const kd = wdKontoDaten(k.id); if(!kd || !wdAktiv(k)) return false
       let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: kd.live_balance, slaveCurrency: '€', fx: fxW, regeln: vpW.regeln, zufall: 0.5 }) }catch(_){}
       return wdKontoWuerfel(k, kd, vpW, z) }
-    for(const e of await wdNurErlaubte(erw)){   // eingeschränkt: nur IDs der eigenen Sicht (Prüfer M1, 08.10.2026)
+    for(const e of await wdNurErlaubte(opt && opt.nurSicht ? erw.filter(x => wdSichtOk(x.user_id)) : erw)){   // eingeschränkt: nur IDs der eigenen Sicht (Prüfer M1, 08.10.2026); automatisch zusätzlich die Admin-Sicht (Gruppen-Chip)
       const jetzt = new Date().toISOString(), x = byUid.get(e.user_id)
       if(!x){
         for(const k of e.konten) wuerfeln(k)
@@ -66997,6 +66999,7 @@
         continue
       }
       if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
+      if(opt && opt.nurUngewuerfelt && x.start_um) continue
       const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
       // .1487: TP + Kontrakte je Konto ohne Plan würfeln/nachziehen — „Plan heute Nacht“ zeigt dann den fertigen Trade
       for(const k of konten){ if(!k.plan_id && wuerfeln(k)) ge = true }
@@ -67055,6 +67058,29 @@
     if(error) return String(error.code) === '23505' ? { schon: true } : { fehler: error.message }
     return { row: data && data[0] }
   }
+  /* WD AUTOMATISCH DRIN (Finn 30.10.2026 ~08:28 über den Master: „Wenn ich ein Konto auf Typ Winning Days stelle, soll es im Farmer
+   * AUTOMATISCH drin sein — Haken gesetzt, die ID automatisch im Farmer; raus nur von Hand, und das bleibt"). Haken = accounts.wd_farm
+   * (DB-Standard true), ID raus = wd_farmer_regeln.ids_aus — beides unverändert. Lücke war die Tageszeile: wdRegistrieren legt sie nur EINMAL
+   * an (INSERT, danach nie wieder) — ein Konto, das danach auf Winning Days gestellt wurde, fehlte am Lauf-Tag bis zum Würfeln von Hand.
+   * Jetzt ergänzt der PC-Tab seine eigene, noch nicht gewürfelte Zeile (kein start_um) um neue Konten (alle 5 min, wdTick). Bestehende
+   * Konten bleiben, wie sie sind (Haken, „nur heute raus", Pläne). */
+  async function wdRegistrierenNachziehen(tag){
+    let uid; try{ uid = String(currentUserId || '') }catch(_){ uid = '' }
+    if(!uid) return 0
+    const { data: x, error } = await supabase.from('wd_tagesplan').select('konten,status,start_um,updated_at').eq('tag', tag).eq('user_id', uid).maybeSingle()
+    if(error || !x || x.start_um || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') return 0
+    const da = new Set((x.konten || []).map(k => String(k && k.id)))
+    const neu = (wdKandidaten().konten || []).filter(k => k && !da.has(String(k.id)))
+    if(!neu.length) return 0
+    const konten = [...(x.konten || []), ...neu]
+    const { error: e2 } = await supabase.from('wd_tagesplan').update({ konten, status: konten.some(wdAktiv) ? 'geplant' : 'leer', updated_at: new Date().toISOString() })
+      .eq('tag', tag).eq('user_id', uid).is('start_um', null).not('status', 'in', '(laeuft,fertig,verpasst)')
+      .eq('updated_at', x.updated_at)   // Prüfung 30.10.2026: nur auf genau den gelesenen Stand schreiben — dazwischen geändert → nächster Takt
+    if(e2){ console.warn('[wd] nachziehen', e2.message); return 0 }
+    console.log(`[wd] ${neu.length} neue(s) WD-Konto(en) in die Zeile ${tag} aufgenommen`)
+    return neu.length
+  }
+  window._wdRegistrierenNachziehen = wdRegistrierenNachziehen   // Test-Haken
   // Offene Zeilen des Tages würfeln und schreiben. alleNeu = echter Zufall für alles, was noch nicht läuft.
   async function wdWuerfelnSchreiben(tag, alleNeu){
     const rows = await wdRowsLaden(tag), r = _wd.regeln || {}
@@ -67507,6 +67533,8 @@
       // meldet seine Fundeds für den nächsten Lauf-Tag — eine Zeile ohne Zeiten tut nichts, bis gewürfelt ist.
       const tagZiel = wdNaechsterTag(r, j)
       if(_wd.registriertTag !== tagZiel){ const x = await wdRegistrieren(tagZiel); if(!x.fehler) _wd.registriertTag = tagZiel; else console.warn('[wd] eintragen', x.fehler) }
+      // WD AUTOMATISCH DRIN (30.10.2026): neue WD-Konten dieser ID in die noch nicht gewürfelte Zeile (alle 5 min, eine kleine Abfrage)
+      else if(Date.now() - (_wd.nachgezogenAt || 0) > 5 * 60000){ _wd.nachgezogenAt = Date.now(); try{ if(await wdRegistrierenNachziehen(tagZiel)) _wd.eigeneAt = 0 }catch(e){ console.warn('[wd] nachziehen', e) } }
       // Automatik = nachts um 00:10 selbst würfeln (deterministisch, damit zwei Tabs dasselbe schreiben)
       if(r.aktiv && wdHandelstag(j.wochentag) && wdTickEntscheidung(j, r, null).wuerfeln && tagZiel === j.tag){
         const rows = await wdRowsLaden(j.tag); if(rows.some(x => x.status === 'geplant' && !x.start_um)){ await wdWuerfelnSchreiben(j.tag, false); _wd.eigeneAt = 0 }   // gewürfelt → eigene Zeilen sofort lesen (01.10.2026)
@@ -69375,7 +69403,42 @@
         else rows = await wdZeilenHeilen(tag, rows)
       }catch(e){ console.warn('[wd] heilen', e) }
       _wd.rows = wdUmsortiertAuflegen(rows.map(wdMitLive)); wdRender(); wdCacheSchreiben(tag)
+      if(!nurGruppe && d) wdAutoEintragen(tag)   // WD AUTOMATISCH DRIN (30.10.2026) — im Hintergrund, zeichnet nach dem Schreiben neu
     }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
+  }
+  /* WD AUTOMATISCH DRIN, Admin-Seite (30.10.2026): IDs ohne laufenden PC-Tab bekamen ihre Tageszeile nur über 🎲 Würfeln. Der HT-Admin-Reiter
+   * (nicht der Verwalter — der schreibt nur die eigene Zeile, Nachbesserung A 08.10.2026; Emins IDs ziehen ihre PC-Tabs selbst nach) trägt bei
+   * Automatik an alle fehlenden IDs + neue Konten seiner Sicht ein (wdAlleEintragen, nur ungewürfelte Zeilen), höchstens alle 5 min, nur für
+   * heute/den nächsten Lauf-Tag. Ist der Tageslauf heute schon vorbei, würfelt er die neuen Zeilen gleich (nur Zeilen ohne start_um,
+   * deterministisch wie die PC-Tabs) und legt bei SCHARF die Pläne an. Ausgelassene IDs (ids_aus), Konten ohne Haken (wd_farm) und
+   * archivierte bleiben draußen — dieselben Regeln wie 🎲 Würfeln. */
+  const WD_AUTO_SCHREIBER = new Set(['Finn + Pascal', 'Pascal'])
+  async function wdAutoEintragen(tag){
+    const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD)
+    if(!r.aktiv || !j || _wd.busy || _wd.autoLaeuft || Date.now() - (_wd.autoAt || 0) < 5 * 60000) return
+    if(tag !== j.tag && tag !== wdNaechsterTag(r, j)) return
+    if(tag === j.tag && !wdHandelstag(j.wochentag)) return   // Wochenende: keine Zeilen (Prüfung 30.10.2026)
+    if(typeof window._admNurGruppe === 'function' && window._admNurGruppe()) return
+    _wd.autoLaeuft = true; _wd.autoAt = Date.now()
+    try{
+      // PLANER SCHREIBEN NUR MASTER-LOGINS (Master 30.10.2026: „in HT dürfen nur ‚Finn + Pascal' und ‚Pascal' in den Planern schreiben, alle
+      // anderen nur ansehen"): vorläufig am Login-Namen, bis das Backend ein Feld liefert (S4)
+      let ich = ''; try{ const { data: { user } } = await supabase.auth.getUser(); ich = String((user && user.user_metadata && user.user_metadata.name) || '').trim() }catch(_){}
+      if(!WD_AUTO_SCHREIBER.has(ich)) return
+      const e = await wdAlleEintragen(tag, { nurUngewuerfelt: true, nurSicht: true })
+      if(e.fehler || !(e.neu || e.aktualisiert)) return
+      let txt = `Automatisch eingetragen: ${e.neu || 0} ID${e.neu === 1 ? '' : 's'} neu, ${e.aktualisiert || 0} Zeile${e.aktualisiert === 1 ? '' : 'n'} um neue Konten ergänzt`
+      // Würfeln nur, solange im Fenster noch Platz ist (Prüfung 30.10.2026: sonst landete eine neue ID nach „Spätestens" direkt hinter dem letzten Block)
+      const fe = wdFensterMs(r, tag, Date.now())
+      if(tag === j.tag && wdHandelstag(j.wochentag) && wdTickEntscheidung(j, r, null).wuerfeln && fe.lo < fe.hi){
+        const n = await wdWuerfelnSchreiben(tag, false)
+        if(n) txt += ` · ${n} gewürfelt`
+        if(n && r.scharf && _wd.daten && _wd.daten.rail){ try{ const a = await wdPlaeneAnlegen(tag); if(a && a.angelegt) txt += ` · ${a.angelegt} Plan${a.angelegt === 1 ? '' : 'e'} angelegt` }catch(err){ txt += ' · Pläne nicht angelegt: ' + ((err && err.message) || err) } }
+      }
+      wdSay(txt + '.', 'ok')
+      _wd.rows = wdUmsortiertAuflegen((await wdRowsLaden(tag)).map(wdMitLive)); wdRender(); wdCacheSchreiben(tag)
+    }catch(err){ console.warn('[wd] automatisch eintragen', err) }
+    finally{ _wd.autoLaeuft = false }
   }
   /* Selbstheilung beim Laden (23.09.2026, Finn: „immer noch nicht — alle Konten sind einfach off"): der Server räumt
    * tote Farmer-Pläne früherer Tage weg und meldet belegt (Konto → Grund) und plaene_tag (Farmer-Pläne für diesen Tag).
