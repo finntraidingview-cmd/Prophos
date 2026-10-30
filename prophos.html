@@ -52420,7 +52420,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1928'
+  const OS_TAB_BUILD = '2026-09-22.1929'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -80281,26 +80281,43 @@
       ? `<div class="apg-konten">${[...jeFirma.entries()].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0], 'de')).map(fKachel).join('')}</div>`
       : '<div class="apg-leer" style="padding:18px 0">keine Funded-CFD-Konten in dieser Sicht</div>')
   }
-  /* WAITING FOR PAYOUT (Master 30.10.2026 nach .1926): alle Funded-CFD-Konten mit waiting_payout_since — je Konto seit wann und „Payout anfragbar
-   * jetzt / in N Tagen" aus Finns Feld „Payout anfragbar ab" (accounts.payout_ready_at, /admin/overview payout_at). Fehlt das Datum, steht
-   * „Datum fehlt" — eine Regel je Firma (z. B. Tradeify CFD 14 Tage nach dem ersten Funded-Trade) gibt es in den Daten nicht. Nur Anzeige. */
+  /* WAITING FOR PAYOUT (Master 30.10.2026 nach .1926): alle Funded-CFD-Konten mit waiting_payout_since — je Konto seit wann und ab wann der
+   * Payout anfragbar ist. Erste Wahl Finns Feld „Payout anfragbar ab" (accounts.payout_ready_at, /admin/overview payout_at, in der DB
+   * automatisiert). PAYOUT-FRIST (Finn 30.10.2026 über den Master): NUR wenn das Feld leer ist, selbst gerechnet — jede Firma frühestens alle
+   * 14 Tage, FundedNext den 1. Payout erst nach 21 Tagen, gezählt ab dem letzten Payout (verlauf art payout je Konto) bzw. dem Konto-Start
+   * (created). Frist = frühester Termin, kein Muss; gerechnete Termine tragen den Hinweis „gerechnet". Nur Anzeige. */
+  function fcfdPayoutAb(r, verlauf){
+    const ab = String(r.payout_at || '')
+    if(/^\d{4}-\d{2}-\d{2}$/.test(ab)) return { ab, gerechnet: false }
+    const letzter = (verlauf || []).filter(v => v && v.art === 'payout' && String(v.aid) === String(r.id) && v.datum).map(v => String(v.datum).slice(0, 10)).sort().pop() || ''
+    const basis = letzter || String(r.created || '').slice(0, 10)
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(basis)) return { ab: '', gerechnet: false }
+    const fnErster = !letzter && /fundednext/i.test(String(r.firm || r.firm_raw || '').replace(/\s+/g, '')), n = fnErster ? 21 : 14
+    const d = new Date(basis + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n)
+    return { ab: d.toISOString().slice(0, 10), gerechnet: true,
+      grund: `${n} Tage ab ${letzter ? 'letztem Payout' : 'Konto-Start'} ${new Date(basis + 'T12:00:00Z').toLocaleDateString('de-DE')}${fnErster ? ' (FundedNext: 1. Payout nach 21 Tagen)' : ' (frühestens alle 14 Tage)'}` }
+  }
   function fcfdWartetHtml(k){
     const heute = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' }), tage = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5)
+    const verlauf = (window._admData && window._admData.verlauf) || []
     const w = k.filter(e => e.wartet).map(e => {
-      const seit = String(e.r.waiting_payout_since || '').slice(0, 10), ab = /^\d{4}-\d{2}-\d{2}$/.test(String(e.r.payout_at || '')) ? String(e.r.payout_at) : ''
-      return { e, seitN: seit ? Math.max(0, tage(seit, heute)) : null, inN: ab ? tage(heute, ab) : null, ab }
+      const seit = String(e.r.waiting_payout_since || '').slice(0, 10), pa = fcfdPayoutAb(e.r, verlauf)
+      return { e, seitN: seit ? Math.max(0, tage(seit, heute)) : null, inN: pa.ab ? tage(heute, pa.ab) : null, ab: pa.ab, gerechnet: pa.gerechnet, grund: pa.grund || '' }
     }).sort((a, b) => (a.inN ?? 1e9) - (b.inN ?? 1e9) || (b.seitN ?? 0) - (a.seitN ?? 0))
-    const ohneDatum = w.filter(x => x.inN == null).length, jetzt = w.filter(x => x.inN != null && x.inN <= 0).length
+    const ohneDatum = w.filter(x => x.inN == null).length, jetzt = w.filter(x => x.inN != null && x.inN <= 0).length, nGer = w.filter(x => x.gerechnet).length
     const tagTxt = n => n === 1 ? '1 Tag' : n + ' Tagen'
+    const datum = ab => new Date(ab + 'T12:00:00Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
     const kachel = x => { const e = x.e
-      const pille = e.angefragt ? apgPille('lila', '💸 angefragt') : x.inN == null ? apgPille('', 'Datum fehlt', '„Payout anfragbar ab" am Konto eintragen') : x.inN <= 0 ? apgPille('tuerkis', '✓ jetzt anfragbar')
-        : apgPille('', `in ${tagTxt(x.inN)}`, 'Payout anfragbar ab ' + new Date(x.ab).toLocaleDateString('de-DE'))
+      const tip = x.gerechnet ? 'gerechnet: ' + x.grund + ' — frühester Termin, kein Muss' : x.ab ? 'Payout anfragbar ab (Feld am Konto)' : 'kein Datum und kein Konto-Start bekannt'
+      const pille = e.angefragt ? apgPille('lila', '💸 angefragt') : x.inN == null ? apgPille('', 'Datum fehlt', tip) : x.inN <= 0 ? apgPille('tuerkis', '✓ jetzt anfragbar', tip)
+        : apgPille('', `in ${tagTxt(x.inN)}`, tip)
+      const abTxt = !x.ab ? 'Waiting for Payout' : x.inN <= 0 ? 'jetzt anfragbar' : `anfragbar ab ${datum(x.ab)} (in ${tagTxt(x.inN)})`
       return `<div class="apg-konto" title="${escapeHtml(e.r.name || '')}"><div class="apg-konto-kopf"><span>${escapeHtml(e.person)} · ${escapeHtml(e.firma)}</span><span>${pille}</span></div>
         <div class="apg-konto-name">${escapeHtml(e.r.name || '–')}</div>
-        <div class="apg-konto-zahl"><b>${x.seitN == null ? '–' : 'seit ' + tagTxt(x.seitN)}</b><span>${x.ab ? 'anfragbar ab ' + escapeHtml(new Date(x.ab).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })) : 'Waiting for Payout'}</span></div></div>` }
-    return `<div data-apg-anker="wartet">${apgKarte(`Waiting for Payout · ${w.length}`, w.length ? `${jetzt} jetzt anfragbar${ohneDatum ? ` · ${ohneDatum} ohne „Payout anfragbar ab"` : ''} · werden nie geplant` : 'keins in dieser Sicht',
+        <div class="apg-konto-zahl"><b>${x.seitN == null ? '–' : 'seit ' + tagTxt(x.seitN)}</b><span title="${escapeHtml(tip)}">${escapeHtml(abTxt)}${x.gerechnet ? ' · gerechnet' : ''}</span></div></div>` }
+    return `<div data-apg-anker="wartet">${apgKarte(`Waiting for Payout · ${w.length}`, w.length ? `${jetzt} jetzt anfragbar${nGer ? ` · ${nGer} gerechnet` : ''}${ohneDatum ? ` · ${ohneDatum} ohne Datum` : ''} · werden nie geplant` : 'keins in dieser Sicht',
       w.length ? `<div class="apg-konten">${w.map(kachel).join('')}</div>` : '<div class="apg-leer" style="padding:18px 0">kein Konto wartet auf den Payout</div>',
-      'Funded-CFD-Konten mit „Waiting for Payout" — anfragbar ab Finns Feld „Payout anfragbar ab" am Konto')}</div>`
+      'Funded-CFD-Konten mit „Waiting for Payout" — anfragbar ab dem Feld am Konto; ist es leer, gerechnet: frühestens 14 Tage nach dem letzten Payout bzw. Konto-Start, FundedNext 1. Payout nach 21 Tagen')}</div>`
   }
   // Unter den Listen im Reiter Funded Planer → CFD: Waiting for Payout · Firmen · Regeln (ganz unten, klappbar wie bei Winning Days)
   function fcfdUnterHtml(u){
