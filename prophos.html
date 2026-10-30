@@ -26791,8 +26791,11 @@
     try{
       const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
       if(!tok || !bt || !bt.id) return
+      // Wache-Grund nur beim ersten Alarm eines Heim-Wache-Heimwegs, danach weg (30.10.2026, s. hwWacheInfo)
+      const wache = /Heim-Wache/.test(String(grund || '')) ? _hwWacheInfo : null
+      if(wache) _hwWacheInfo = null
       await fetch(`${WATCHER_HOME}/alarm/heimweg`, { method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
-        body: JSON.stringify({ plan_id: bt.id, ok, grund, dauer_ms: dauerMs, lesung_ms: lesungMs, msg: msg || '', pc: hedgePcId() || '' }) })
+        body: JSON.stringify(Object.assign({ plan_id: bt.id, ok, grund, dauer_ms: dauerMs, lesung_ms: lesungMs, msg: msg || '', pc: hedgePcId() || '' }, wache ? { wache } : {})) })
     }catch(e){ console.warn('[big-trade] Heimweg melden', (e && e.message) || e) }
   }
   async function bigTradeHeim(grund, fenster){
@@ -26868,6 +26871,21 @@
   const hwZufall = (a, b) => a + Math.random() * (b - a)
   let _hwFremdSeit = 0, _hwNaechsterHeimweg = 0, _hwWiederN = 0, _hwWiederTimer = null, _hwFehlN = 0, _hwPulsWegAt = 0, _hwLetzteFehlMeldung = 0
   let _hwOkVoll = false, _hwOkAt = 0, _hwOkPlan = '', _hwOkOffen = false, _hwOkFremdN = 0, _hwAus = { plan: '', bis: 0 }
+  /* WACHE-GRUND IM HEIMWEG-ALARM (30.10.2026, Master nach Chris pc-c19p2l: sechs Rundläufe à ~100 s, aus alarm_log nicht erklärbar): warum
+   * die Wache heimgeschickt hat — art fremd|blind, Konto-Text, Bezug zum Plan-Konto, Alter des Belegs, letzte Puls-Aktion (Grund + Alter),
+   * Dauer der Lage. Nur Kennungen und Sekunden, keine Beträge. Geht mit dem ersten Heimweg-Alarm dieses Anstoßes mit (Wiederholungen ohne). */
+  let _hwWacheInfo = null
+  function hwWacheInfo(art, st, konto, seitMs){
+    try{
+      const jetzt = Date.now(), s = x => (x ? Math.round((jetzt - x) / 1000) : null)
+      // nur die Kontonummer, höchstens so lang wie die Plan-ID — bei „klebt" hängt sonst der Balance-Anfang dran (Gegenprüfung 30.10.2026)
+      const wort = (String((st && st.konto) || '').trim().split(/[^A-Za-z0-9]+/)[0] || '').slice(0, Math.max(1, String(konto || '').trim().length))
+      return { art, text: wort.slice(0, 40), bezug: kontoTextBezug(st && st.konto, konto) || '',
+        beleg_ext_passt: !!_kontoBeleg.ext && _kontoBeleg.ext === String(konto || '').trim().toUpperCase(), beleg_alter_s: s(_kontoBeleg.at),
+        puls_aktiv_vor_s: s(_pulsAktivAt), puls_aktiv_grund: String(_pulsAktivGrund || '').slice(0, 40), lage_s: Math.round((Number(seitMs) || 0) / 1000),
+        blind_grund: art === 'blind' ? String((st && st.blind_grund) || '').replace(/\| Konto: .*$/, '').trim().slice(0, 60) : undefined }
+    }catch(_){ return { art } }
+  }
   /* ERST LESEN, DANN HEIM (28.10.2026, Finn nach pc-2zc2we): endet ein Trade in dem Konto, in dem der Puls-Chrome gerade steht, liest
    * tvV2EndlesungAnstossen die End-Balance sofort dort (ohne Kontowechsel) — so lange hält die Wache still (_hwEndHalt, höchstens
    * HW_END_HALT_MS = 150 s: 1–60 s Wartezeit + Lesung), danach geht der Heimweg zur höchsten Prio. Ohne den Halt zog die Wache den Puls 3 s nach dem Prio-Wechsel weg, und
@@ -26966,13 +26984,15 @@
         _hwBlindErledigt = pid; _hwBlindPlaene.set(pid, jetztB)
         if(!_bthAnstoss) _bthAnstoss = _hwBlindSeit
         console.info(`[heim-wache] Reader blind seit ${((jetztB - _hwBlindSeit) / 1000).toFixed(0)} s — einmal Heimweg zu „${bt.masterName || konto}"`)
+        _hwWacheInfo = hwWacheInfo('blind', st, konto, jetztB - _hwBlindSeit)
         bigTradeHeim('Heim-Wache (Reader blind)')
         return
       }
       _hwBlindSeit = 0; _hwBlindErledigt = ''   // _hwBlindPlaene bleibt: ein flackernder Stand löst keinen neuen Blind-Heimweg aus (28.10.2026)
       const jetzt = Date.now()
       // steht zu Hause — auch mit gekürztem/angeklebtem Kontotext (27.10.2026, WD-Plan 4a1a8a79: 56 unnötige Heimwege, s. heimKontoPasst)
-      if(heimKontoPasst(st.konto, konto)){ _hwFremdSeit = 0; _hwWiederN = 0; _hwOkOffen = false; _hwOkFremdN = 0; return }
+      // Plan-Position als Beweis (30.10.2026, Chris pc-c19p2l: 7 Apex mit gleichem gekürzten Text, s. heimPositionPasst) — sonst 90-s-Rundläufe
+      if(heimKontoPasst(st.konto, konto) || heimPositionPasst(st, bt, konto, tradePlans)){ _hwFremdSeit = 0; _hwWiederN = 0; _hwOkOffen = false; _hwOkFremdN = 0; return }
       // „ok" gemeldet, aber der Reader zeigt weiter ein fremdes Konto, ohne dass Puls seitdem woanders war → Konto-Text passt nie (Punkt 1)
       if(_hwOkOffen && _hwOkPlan === pid && jetzt - _hwOkAt < 60000 && !(_hwPulsWegAt > _hwOkAt)){
         _hwOkOffen = false
@@ -26989,6 +27009,7 @@
       _hwFremdSeit = 0
       if(!_bthAnstoss) _bthAnstoss = fremdSeit
       console.info(`[heim-wache] Puls-Chrome zeigt „${String(st.konto).slice(0, 40)}" statt „${bt.masterName || konto}" (seit ${((jetzt - fremdSeit) / 1000).toFixed(1)} s) — Heimweg`)
+      _hwWacheInfo = hwWacheInfo('fremd', st, konto, jetzt - fremdSeit)
       bigTradeHeim('Heim-Wache')
     }catch(e){ console.warn('[heim-wache]', (e && e.message) || e) }
   }
@@ -31486,8 +31507,21 @@
   // bewiesenem Listen-Klick, .1752). Gilt nur, solange Puls seitdem nichts getan hat — jede Puls-Aktion kann das Konto gewechselt haben.
   // Nur für die Heim-Wache (spart einen Klick), nie für das Reader-Ende: einen Hand-Wechsel bemerkt der Beleg nicht (Prüfer S2).
   const _kontoBeleg = { ext: '', at: 0, voll: false }   // voll: order_bot meldete konto_aktiv mit der vollen ID (Listen-Klick, 28.10.2026)
-  let _pulsAktivAt = 0
-  setInterval(() => { try{ if(hedgePulsUnterwegs()) _pulsAktivAt = Date.now() }catch(_){} }, 250)   // jede Puls-Aktion dauert Sekunden
+  let _pulsAktivAt = 0, _pulsAktivGrund = ''
+  /* NUR TRADINGVIEW-AKTIONEN ENTWERTEN DEN BELEG (30.10.2026, Chris pc-c19p2l, Orbit f35ba6ae Apex …0005: Echo-Signal 81bc9461 — Order und
+   * Close nur im MT5-Terminal — entwertete den Beleg, die Heim-Wache hielt das gekürzte „PAAPEX668794000000" (7 Apex-Konten mit diesem
+   * Anfang) für fremd → 90 s → Rück-Login; zwischen 03:23 und 03:47 UTC sechs solche Rundläufe à ~100 s). Ein Signal-Lauf, dessen Plan
+   * nur MT5 oder TopstepX bedient (mt5, mt5v2, tsv2), fasst den TradingView-Tab nie an → zählt hier nicht. Fail-closed: Plan nicht
+   * gefunden, andere Route oder gleichzeitig eine Balance-Lesung → zählt wie bisher. hedgePulsUnterwegs selbst bleibt unverändert. */
+  const PULS_OHNE_TV_ROUTEN = new Set(['mt5', 'mt5v2', 'tsv2'])
+  function pulsSignalOhneTv(){
+    try{
+      if(!_osActive || !_osActive.planId || (_tvBalLesenLaeuft && _tvBalLesenLaeuft.size)) return false
+      const p = (tradePlans || []).find(x => x && String(x.id) === String(_osActive.planId))
+      return !!(p && PULS_OHNE_TV_ROUTEN.has(String(p.route || '')))
+    }catch(_){ return false }
+  }
+  setInterval(() => { try{ const g = hedgePulsUnterwegs(); if(g && !(g === 'Signal-Lauf' && pulsSignalOhneTv())){ _pulsAktivAt = Date.now(); _pulsAktivGrund = g } }catch(_){} }, 250)   // jede Puls-Aktion dauert Sekunden
   function kontoBelegMerken(extId, voll){ _kontoBeleg.ext = String(extId || '').trim().toUpperCase(); _kontoBeleg.at = Date.now(); _kontoBeleg.voll = !!voll }
   function kontoBelegGilt(extId){
     try{ return !!_kontoBeleg.ext && _kontoBeleg.ext === String(extId || '').trim().toUpperCase() && _kontoBeleg.at >= _pulsAktivAt && !hedgePulsUnterwegs() }catch(_){ return false }
@@ -31499,6 +31533,41 @@
     if(!b) return false
     return kontoTextEindeutig(kontoText, extId, kontoExtIds()) || kontoBelegGilt(extId)
   }
+  /* PLAN-POSITION ALS HEIM-BEWEIS (30.10.2026, Master nach Chris pc-c19p2l): bei gekürztem Text mit mehreren gleichen Präfixen beweist die
+   * Plan-Position im Reader, dass der Puls-Chrome zu Hause steht — Wurzel, Richtung und volle Kontraktzahl, Avg Fill auf den Tick, wo der
+   * Plan einen echten Fill hat (kurzPlanFill). Nur für die Heim-Wache (spart den Rück-Login), nie fürs Reader-Ende. Fail-closed: Text ohne
+   * Bezug zum Plan-Konto, Stand nicht frisch/nicht aus dem Puls-Chrome, Puls unterwegs, oder die Position passt auch auf einen ANDEREN
+   * offenen Plan derselben ID (gleiche Wurzel/Richtung/Kontrakte, Fill gleich oder unbekannt), oder mehr als eine Zeile trifft → kein Beweis.
+   * Test-Haken window._heimPositionPasst. */
+  function heimPlanPosition(p){
+    const sym = (p && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || (p && p.masterSymbol) || ''
+    const wz = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(sym) : ''
+    return { wz: wz || '', richtung: (p && (p.richtung === 'buy' || p.richtung === 'sell')) ? p.richtung : '', kt: Number(p && p.masterContracts) || 0, fill: kurzPlanFill(p) }
+  }
+  function heimPositionTrifft(x, s){
+    if(!x || !s.wz || !s.richtung || !(s.kt > 0)) return false
+    const wz = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : '')
+    if(wz !== s.wz || x.richtung !== s.richtung || Math.abs(Number(x.menge_zahl)) !== s.kt) return false
+    return !(s.fill > 1000) || Math.abs(Number(x.avg_fill) - s.fill) < 0.01
+  }
+  function heimPositionPasst(st, p, extId, plaene){
+    try{
+      if(!st || !p || !kontoTextBezug(st.konto, extId)) return false
+      if(!/^puls-/.test(String(st.positionen_tab || '')) || st.positionen_ok !== true || !Array.isArray(st.positionen)) return false
+      if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 5) || hedgePulsUnterwegs()) return false
+      const s = heimPlanPosition(p), treffer = st.positionen.filter(x => heimPositionTrifft(x, s))
+      if(treffer.length !== 1) return false
+      // alle anderen offenen Pläne dieses Tabs (= dieser ID; mehr Pläne zu prüfen ist nur strenger) — Echo/CFD-Pläne fallen über die Wurzel raus
+      // auch review (Ende gemeldet, Position im Nachbarkonto evtl. noch offen); ein TV-Plan ohne lesbare Wurzel/Richtung/Kontrakte zählt als
+      // Doppelgänger (Gegenprüfung 30.10.2026) — nur MT5-/TopstepX-Pläne können nie in der TradingView-Tabelle stehen
+      const andere = (plaene || []).filter(x => x && String(x.id) !== String(p.id) && (x.status === 'open' || x.status === 'review'))
+      return !andere.some(x => { const sx = heimPlanPosition(x)
+        if(!sx.wz || !sx.richtung || !(sx.kt > 0)) return !PULS_OHNE_TV_ROUTEN.has(String(x.route || ''))
+        if(sx.wz !== s.wz || sx.richtung !== s.richtung || sx.kt !== s.kt) return false
+        return !(sx.fill > 1000 && s.fill > 1000) || Math.abs(sx.fill - s.fill) < 0.01 })
+    }catch(_){ return false }
+  }
+  window._heimPositionPasst = heimPositionPasst
   // REIN RECHNEND: stehen die angeklebten Ziffern ('klebt') genau für den Anfang der Balance vor dem ersten Tausender-Komma?
   // 156,981.20 → „156", 1,056,981 → „1". Ziffern + Balance oder Equity aus der Reader-Zusammenfassung (st.summary).
   function kontoKlebtBalance(kontoText, extId, betraege){
@@ -52604,7 +52673,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1935'
+  const OS_TAB_BUILD = '2026-09-22.1936'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -4316,6 +4316,24 @@ def zwilling_tick(aus, jetzt_ts):
                      daten=daten)
 
 
+def heimweg_wache_daten(w):
+    """REIN RECHNEND (testbar): Wache-Grund aus dem PC-Tab (30.10.2026, Chris pc-c19p2l: sechs Heim-Wache-Rundläufe à ~100 s, aus alarm_log
+    nicht erklärbar) → nur bekannte Felder, Texte gekürzt, Zahlen als int — None, wenn nichts Brauchbares kam."""
+    if not isinstance(w, dict):
+        return None
+    out = {}
+    for k, n in (("art", 10), ("text", 40), ("bezug", 10), ("puls_aktiv_grund", 40), ("blind_grund", 60)):
+        if isinstance(w.get(k), str) and w[k].strip():
+            out[k] = w[k].strip()[:n]
+    for k in ("beleg_alter_s", "puls_aktiv_vor_s", "lage_s"):
+        v = w.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < 10 ** 9:
+            out[k] = int(v)
+    if isinstance(w.get("beleg_ext_passt"), bool):
+        out["beleg_ext_passt"] = w["beleg_ext_passt"]
+    return out or None
+
+
 @app.route("/alarm/heimweg", methods=["POST", "OPTIONS"])
 def alarm_heimweg():
     """PC-Tab meldet jeden Heimweg ins Big-Trade-Konto (bigTradeHeim): ok → Info mit Dauer, nicht ok → 🔴 an die Master-IDs.
@@ -4342,6 +4360,9 @@ def alarm_heimweg():
     konto = f"{plan.get('master_firm') or ''} {plan.get('master_name') or ''}".strip()
     anlass = re.sub(r"\s+", " ", str(d.get("grund") or ""))[:60]
     daten = {"dauer_ms": dauer, "lesung_ms": lesung, "anlass": anlass, "pc": str(d.get("pc") or "")[:20]}
+    w = heimweg_wache_daten(d.get("wache"))
+    if w:
+        daten["wache"] = w
     if d.get("ok") is True:
         text = f"{wer} · {konto}: Puls zurück nach {anlass or 'fremdem Konto'}" + (f" in {dauer / 1000:.1f} s" if dauer is not None else "")
         alarm_senden(3, "heimweg_ok", "Puls zurück im Big-Trade-Konto", text, uid=uid, plan_id=pid, daten=daten)
