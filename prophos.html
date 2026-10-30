@@ -4855,6 +4855,8 @@
   #dashboard-view .wdl-z-wer{grid-area:wer}
   /* Herkunft-Chip (30.10.2026): breite Spalte neben dem Weg, Konto darunter; schmale Spalte und Handy unter dem Konto */
   #dashboard-view .wdl-z-wer:has(.wdl-pf-herk){container-type:inline-size}
+  /* Form wie .wdl-pf, die Farbe kommt von .type-* (.wdl-pf würde sie überschreiben) */
+  #dashboard-view .wdl-pf-herk{margin:0 0 0 8px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.03em;font-style:normal;vertical-align:1px}
   #dashboard-view .wdl-pf-herk-n{display:none}
   #dashboard-view .wdl-pf-herk-u{display:block;width:fit-content;max-width:100%;margin:3px 0 0;white-space:normal;line-height:1.25}
   @container (min-width:330px){
@@ -36733,7 +36735,10 @@
   }
   window._wdlHerkunft = wdlHerkunft   // Test-Haken
   // pos 'n' neben dem Weg, 'u' unter dem Konto: die CSS-Regel zeigt je nach Spaltenbreite genau einen (.wdl-pf-herk), so bricht die Konto-Zeile nie um
-  function wdlHerkunftChip(t, pos){ const h = wdlHerkunft(t); return h ? `<i class="wdl-pf wdl-pf-herk wdl-pf-herk-${pos}" title="Geplant vom ${escapeHtml(h)}">${escapeHtml(h)}</i>` : '' }
+  // Farbe = Kontotyp unter Accounts (Finn 30.10.2026 15:0x): dieselben Klassen wie die Typ-Pillen, also auch Dunkel und Guestly gleich
+  const WDL_HERKUNFT_FARBE = { 'Funded Planer CFD': 'type-funded_cfd', 'Funded Planer Futures': 'type-funded', 'Funded Planer Winning Days': 'type-winning_days',
+    'Challenge Planer CFD': 'type-phase1', 'Challenge Planer Futures': 'type-challenge' }
+  function wdlHerkunftChip(t, pos){ const h = wdlHerkunft(t); return h ? `<i class="wdl-pf-herk wdl-pf-herk-${pos} ${WDL_HERKUNFT_FARBE[h]}" title="Geplant vom ${escapeHtml(h)}">${escapeHtml(h)}</i>` : '' }
   function wdlSltpChip(t){
     if(!t || t.status !== 'open') return ''
     let h = ''
