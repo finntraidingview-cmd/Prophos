@@ -4007,9 +4007,29 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
                         f"Endlesung sieht die Position noch offen — Plan wieder unter Läuft. In {'TopstepX' if p.get('route') == 'tsv2' else 'TradingView'} "
                         f"prüfen und schließen.", uid, pid))
         if hst == "geschlossen" and h.get("grund") in ALARM_RADAR_GRUENDE and str(h.get("closed_at") or "") > seit_iso:
+            # Text nur, wenn er stimmt (Auswertung 30.10.2026: bei 2 von 3 Radar-Alarmen hatte das Userscript das Ende gesehen, der Beweis lehnte ab)
+            rkn = h.get("reader_kurz_nein") if isinstance(h.get("reader_kurz_nein"), dict) else None
+            warum = (f"das Userscript sah das Master-Ende, Schluss abgelehnt: {str(rkn.get('grund') or '?')[:80]}" if rkn
+                     else "das Userscript hat das Master-Ende nicht zuerst gesehen (Puls im falschen Konto / Tab zu?)")
             out.append((f"{pid}|radar", 2, "radar_schloss", "Radar hat geschlossen",
-                        f"{wer} · {konto}: Radar hat den Hedge {ALARM_RADAR_GRUENDE[h.get('grund')]} geschlossen — das Userscript hat das "
-                        f"Master-Ende nicht zuerst gesehen (Puls im falschen Konto / Tab zu?).", uid, pid))
+                        f"{wer} · {konto}: Radar hat den Hedge {ALARM_RADAR_GRUENDE[h.get('grund')]} geschlossen — {warum}.", uid, pid))
+        # BALANCE NUR NOCH NACHKONTROLLE (30.10.2026, Finn „Idee 1"; „4 Punkte ist ja gar nichts, lieber 10, 15, 20 Punkte"): gekürztes Konto, Hedge zu, obwohl der Balance-Beweis
+        # durchfiel oder fehlte (hedge.reader_kurz.ok false, prophos.html kurzEndeBeweis). Ausstieg > 20 Pkt neben dem Kurs-Fenster → 🔴, könnte ein Hand-Wechsel aufs Nachbarkonto sein;
+        # ≤ 20 Pkt → still; nicht rechenbar (Balance fehlt, 5 von 9 am 30.10.) → nur 🟠. Einmal je Plan
+        rk = h.get("reader_kurz") if isinstance(h.get("reader_kurz"), dict) else None
+        # Master DOCH noch offen (Gegenprüfung 30.10.2026): Plan mit Hedge holt die Endlesung nie zurück (tvV2NochOffenRegel), Puls sieht die Position aber zweimal offen → 🔴, einmal je Plan
+        if hst == "geschlossen" and rk and rk.get("ok") is False and st == "review" and (_wd_num(p.get("puls_offen_n")) or 0) >= 2:
+            out.append((f"{pid}|kurz_master_offen", 1, "kurz_master_offen", "Hedge zu, Master noch offen",
+                        f"{wer} · {konto}: Hedge ist zu (Balance-Nachkontrolle nicht bestanden), Puls sieht die Master-Position noch offen — sofort von Hand prüfen und schließen.", uid, pid))
+        if hst == "geschlossen" and rk and rk.get("ok") is False and str(h.get("closed_at") or "") > seit_iso:
+            ex, lo, hi = _wd_num(rk.get("exit")), _wd_num(rk.get("lo")), _wd_num(rk.get("hi"))
+            if ex is None or lo is None or hi is None:
+                out.append((f"{pid}|kurz_balance", 2, "kurz_balance_fehlt", "Hedge zu, Balance nicht geprüft",
+                            f"{wer} · {konto}: Hedge geschlossen, die Balance-Nachkontrolle ging nicht: {str(rk.get('grund') or '?')[:80]}.", uid, pid))
+            elif max(lo - ex, ex - hi) > 20.0:
+                out.append((f"{pid}|kurz_balance", 1, "kurz_balance_nein", "Hedge zu, Balance passt nicht",
+                            f"{wer} · {konto}: Hedge geschlossen, Balance passt nicht zum Ausstieg: {ex:.2f} liegt {max(lo - ex, ex - hi):.1f} Pkt neben dem Kurs-Fenster {lo:.2f}–{hi:.2f}"
+                            f"{' (Balance ' + str(rk.get('b1')) + ')' if rk.get('b1') is not None else ''} — von Hand prüfen, ob der Master noch läuft.", uid, pid))
     return out
 
 
@@ -4043,7 +4063,7 @@ def alarm_tick():
     jetzt = datetime.now(timezone.utc)
     seit = max(datetime.fromtimestamp(_alarm["start"], timezone.utc), jetzt - timedelta(minutes=20)).isoformat()
     sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,master_account_id,richtung,master_contracts,master_tp,started_at,updated_at,"
-           "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
+           "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,puls_offen_n:mt5_baseline->final->>puls_offen_n,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
            "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at,"
