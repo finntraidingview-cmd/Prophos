@@ -17095,18 +17095,176 @@ def puls_heim_wd_schwellen(regel):
     return (PULS_HEIM_WD_USD if tp is None else tp, PULS_HEIM_WD_USD if liq is None else liq)
 
 
-def puls_heim_pruefen(pc, ausser=None):
+# ══ NUR TRADINGVIEW WARTET + ZWEI ORBIT (30.10.2026, Auftrag ZWEI-ORBIT Stück 1, Bauplan S5 + Befund S6 „Heim nur TV"; Finn ~07:50:
+# „Puls muss nur zu Hause bleiben bei Aktionen, die den TradingView-Account wechseln. Echo und Topstep dürfen trotzdem" + „2 Orbit je
+# Fenster, Spanne 2.500 $ für den Start des Zweiten und für fremde Puls-Aktionen"). Zwei Teile:
+#  (1) ROUTE-BEWUSST: die anfragende Aktion trägt ihre Route. tvv2 (TradingView) wartet nur auf nahe Big Trades / WDs im TV-Fenster,
+#      tsv2 (TopstepX, eigenes Fenster mit eigenem Auge) nur auf nahe im TopstepX-Fenster, Echo (mt5/mt5v2) nie. Route unbekannt (Plan nicht
+#      lesbar, alter Aufrufer) = wie bisher alle Fenster (fail-closed).
+#  (2) ZWEITER BIG TRADE FREI? Beim Start eines Big Trades (Plan planned): läuft auf DERSELBEN ID im selben Fenster schon einer, ist der
+#      Start nur frei, wenn puls_heim_regel.big_max_je_id ≥ 2 (Standard 1 = heute), höchstens big_max_je_id − 1 andere laufen und jeder davon
+#      mehr als zweit_usd (2.500 $) vor TP UND vor der Liq steht. Sonst code zweit_wartet (Grund + Rest-$), nicht prüfbar = big_trade_unklar.
+#      In /richtung/frei (Klick-Riegel) und GET /admin/zweit-frei?plan= (Sofort-Start-Wächter im Tab, S7). Die Spanne für fremde Aktionen
+#      (tp_usd/liq_usd) bleibt in der Regel — 2.500 $ erst auf Finns Wort.
+PULS_HEIM_CODE_ZWEIT = "zweit_wartet"
+PULS_HEIM_ZWEIT_USD = 2500.0
+PULS_HEIM_ECHO_ROUTEN = ("mt5", "mt5v2", "dup")
+
+
+def puls_heim_fenster(route):
+    """REIN RECHNEND (testbar): Fenster einer Aktion/eines Plans wie prophos_big_trade_fenster — 'tsx' (tsv2), 'tv' (tvv2, polar, tvplus),
+    None = Echo (mt5/mt5v2/dup: kein TradingView-Kontowechsel, wartet nie). Leer/unbekannt → 'alle' (wie bisher)."""
+    r = str(route or "").strip().lower()
+    if not r:
+        return "alle"
+    if r in PULS_HEIM_ECHO_ROUTEN:
+        return None
+    return "tsx" if r == "tsv2" else "tv"
+
+
+def puls_heim_im_fenster(plaene, fenster):
+    """REIN RECHNEND (testbar): nur die Pläne im Fenster der Aktion ('alle' = keine Auswahl)."""
+    if fenster == "alle":
+        return list(plaene or ())
+    return [p for p in plaene or () if puls_heim_fenster(p.get("route")) == fenster]
+
+
+def puls_heim_ist_big(p):
+    """REIN RECHNEND (testbar): Big Trade wie prophos_big_trade(route, hedge_eur, orbit_v3, prophos_wd_wie(...)) — tvv2/tsv2 mit Hedge-Weg
+    oder polar, kein Winning Day, keine Apex-Challenge auf dem WD-Weg."""
+    p = p or {}
+    if p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days" or plan_ist_apex_hedge(p):
+        return False
+    r = str(p.get("route") or "")
+    if r == "polar":
+        return True
+    return r in ("tvv2", "tsv2") and ((_wd_num(p.get("hedge_eur")) or 0) > 0 or p.get("orbit_v3") is True)
+
+
+def puls_heim_zweit_regel(regel):
+    """REIN RECHNEND (testbar): (big_max_je_id, zweit_usd) aus puls_heim_regel — Standard (1, 2.500). Ungültiges → Standard (1 = heute)."""
+    r = regel if isinstance(regel, dict) else {}
+    try:
+        mx = int(r.get("big_max_je_id")) if r.get("big_max_je_id") is not None else 1
+    except (TypeError, ValueError):
+        mx = 1
+    z = _wd_num(r.get("zweit_usd"))
+    return max(1, mx), (float(z) if z is not None and z >= 0 else PULS_HEIM_ZWEIT_USD)
+
+
+def puls_heim_zweit_urteil(andere, max_je_id, zweit_usd):
+    """REIN RECHNEND (testbar): darf ein weiterer Big Trade derselben ID im selben Fenster starten? andere = [{name, art, nah, rest_tp_usd,
+    rest_liq_usd, gesendet}] der schon laufenden (nah wie puls_heim_nah mit Schwellen (zweit_usd, zweit_usd); gesendet = Order gerade raus,
+    noch nicht offen). → {frei, code?, grund?, rest_tp_usd?, rest_liq_usd?}."""
+    andere = list(andere or ())
+    if not andere:
+        return {"frei": True}
+    if len(andere) >= int(max_je_id):
+        a = andere[0]
+        return {"frei": False, "code": PULS_HEIM_CODE_ZWEIT,
+                "grund": (f"Big Trade „{a.get('name') or '?'}“{(' (' + a['art'] + ')') if a.get('art') else ''} läuft schon in diesem Fenster — höchstens {int(max_je_id)} gleichzeitig"
+                          if int(max_je_id) <= 1 else f"schon {len(andere)} Big Trades in diesem Fenster — höchstens {int(max_je_id)}")}
+    for a in andere:
+        if a.get("gesendet"):
+            return {"frei": False, "code": PULS_HEIM_CODE_ZWEIT, "grund": f"Big Trade {a.get('name')} wurde gerade gesendet — erst wenn er offen ist"}
+        if a.get("nah") is None:
+            return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR,
+                    "grund": f"Big Trade {a.get('name')} ({a.get('art')}) nicht prüfbar: {a.get('grund') or 'kein Kurs/Level'} — zweiter Start wartet"}
+        if a.get("nah"):
+            return {"frei": False, "code": PULS_HEIM_CODE_ZWEIT, "rest_tp_usd": a.get("rest_tp_usd"), "rest_liq_usd": a.get("rest_liq_usd"),
+                    "grund": f"1. Trade {a.get('name')} ({a.get('art')}) ist {a.get('grund')} — zweiter Start wartet (Spanne {format(float(zweit_usd), ',.0f').replace(',', '.')} $)"}
+    return {"frei": True}
+
+
+PULS_HEIM_FELDER = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
+                    "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,started_at,ended_at,completed_at,"
+                    "planned_for,created_at,mt5_baseline,konto_typ,orbit_v3,winning_day,blown,orbit_gesendet_at,start_um_gestartet_at")
+
+
+def _puls_heim_naehe(plaene, schwellen_je):
+    """[(plan, n, info, name, art)] — Nähe je Plan wie puls_heim_pruefen (Live-Trades-Zeile, frischer Kurs). schwellen_je(acc, plan)."""
+    ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
+    accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at",
+                                                                 "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
+    fruehere = _wd_fruehere_trades(ids)
+    liq_regeln, liq_verlauf, liq_kw = _liq_regeln_laden(), _liq_verlauf_laden(ids), _liq_kw_laden()
+    kurse = _kurs_jetzt()
+    out = []
+    for p in plaene:
+        acc = accs.get(str(p.get("master_account_id") or ""))
+        z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
+        kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
+        n = puls_heim_nah(z, kurs, schwellen_je(acc, p))
+        name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Big Trade'} …{str((acc or {}).get('external_id') or '')[-4:]}"
+        art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'NQ'}"
+        info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
+                "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"]}
+        out.append((p, n, info, name, art))
+    return out
+
+
+def puls_heim_zweit_pruefen(plan):
+    """Darf dieser (geplante) Big Trade jetzt starten? → {frei, code?, grund?, big_trade?, max_je_id, zweit_usd}. Kein Big Trade / nicht
+    geplant → frei. Andere Big Trades DERSELBEN ID im selben Fenster: open (Nähe mit zweit_usd) oder gerade gesendet/geclaimt (wie
+    prophos_big_trade_laeuft). Fehler → nicht frei (big_trade_unklar)."""
+    p = plan or {}
+    if str(p.get("status") or "") != "planned" or not puls_heim_ist_big(p):
+        return {"frei": True}
+    regel = _puls_heim_regel()
+    mx, zu = puls_heim_zweit_regel(regel)
+    try:
+        f = puls_heim_fenster(p.get("route"))
+        rows = _sb_all("trade_plans", {"select": PULS_HEIM_FELDER, "user_id": f"eq.{p.get('user_id')}", "status": "in.(open,planned)",
+                                       "route": "in.(tvv2,tsv2,polar)"}) or []
+        jetzt = datetime.now(timezone.utc)
+        def frisch(iso, minuten):
+            try:
+                return bool(iso) and (jetzt - datetime.fromisoformat(str(iso).replace("Z", "+00:00"))).total_seconds() < minuten * 60
+            except ValueError:
+                return False
+        andere = [r for r in puls_heim_im_fenster(rows, f) if str(r.get("id")) != str(p.get("id")) and puls_heim_ist_big(r)
+                  and (r.get("status") == "open" or frisch(r.get("orbit_gesendet_at"), 10)
+                       or (frisch(r.get("start_um_gestartet_at"), 2) and not r.get("started_at")))]
+        if not andere:
+            return {"frei": True, "max_je_id": mx, "zweit_usd": zu}
+        offen = [r for r in andere if r.get("status") == "open"]
+        naehe = {str(x[0].get("id")): x for x in _puls_heim_naehe(offen, lambda _a, _p: (zu, zu))} if (offen and len(andere) < mx) else {}
+        liste = []
+        for r in andere:
+            x = naehe.get(str(r.get("id")))
+            if x:
+                liste.append({"name": x[3], "art": x[4], "nah": x[1]["nah"], "grund": x[1]["grund"], "rest_tp_usd": x[1]["rest_tp_usd"],
+                              "rest_liq_usd": x[1]["rest_liq_usd"], "info": x[2]})
+            else:
+                liste.append({"name": r.get("master_name") or r.get("master_firm") or "?", "art": str(r.get("richtung") or "").upper(),
+                              "gesendet": r.get("status") != "open", "nah": None})
+        u = puls_heim_zweit_urteil(liste, mx, zu)
+        if not u.get("frei"):
+            erst = next((a.get("info") for a in liste if a.get("info")), None)
+            if erst:
+                u["big_trade"] = erst
+        return dict(u, max_je_id=mx, zweit_usd=zu)
+    except Exception as e:
+        print(f"[puls-heim] ⚠️ Zweit-Prüfung {str(p.get('id'))[:8]}: {type(e).__name__}: {str(e)[:160]}", flush=True)
+        return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "max_je_id": mx, "zweit_usd": zu,
+                "grund": f"Zweit-Prüfung gerade nicht möglich ({type(e).__name__}) — Start wartet"}
+
+
+def puls_heim_pruefen(pc, ausser=None, route=None):
     """Darf der Puls auf diesem PC das Konto wechseln? → {frei, code?, grund?, big_trade?}. Riegel aus (Tabelle fehlt, aktiv false, kein PC,
-    kein Big Trade hier) → frei. Big Trade nah oder nicht prüfbar → nicht frei. Fehler beim Rechnen → nicht frei (fail-closed), Grund im Text."""
+    kein Big Trade hier) → frei. Big Trade nah oder nicht prüfbar → nicht frei. Fehler beim Rechnen → nicht frei (fail-closed), Grund im Text.
+    route (30.10.2026, NUR TV WARTET): Route der anfragenden Aktion — Echo (mt5/mt5v2) immer frei, tvv2 sieht nur das TV-Fenster, tsv2 nur
+    TopstepX; ohne Route alle Fenster wie bisher."""
     regel = _puls_heim_regel()
     if not isinstance(regel, dict) or regel.get("aktiv") is False or not pc:
         return {"frei": True}
+    fenster = puls_heim_fenster(route)
+    if fenster is None:
+        return {"frei": True}            # Echo: kein TradingView-Kontowechsel, das Auge liest weiter (Befund S6)
     try:
-        felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
-                  "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,started_at,ended_at,completed_at,"
-                  "planned_for,created_at,mt5_baseline,konto_typ,orbit_v3,winning_day,blown")
-        rows = _sb_all("trade_plans", {"select": felder, "status": "eq.open", "route": "in.(tvv2,tsv2)",
+        rows = _sb_all("trade_plans", {"select": PULS_HEIM_FELDER, "status": "eq.open", "route": "in.(tvv2,tsv2)",
                                        "mt5_baseline->hedge->>pc": f"eq.{pc}"})
+        rows = puls_heim_im_fenster(rows, fenster)
         big = puls_heim_big_trades(rows, pc, ausser)
         wd_schw = puls_heim_wd_schwellen(regel)
         wds = puls_heim_wd_trades(rows, pc, ausser) if wd_schw else []
@@ -17171,7 +17329,44 @@ def admin_puls_heim():
     pc = str(request.args.get("pc") or "").strip()[:40]
     if not re.fullmatch(r"pc-[a-z0-9]{4,12}", pc):
         return jsonify({"ok": False, "msg": "pc fehlt (pc-xxxxxx)"}), 400
-    out = jsonify(dict({"ok": True}, **puls_heim_pruefen(pc)))
+    # route (30.10.2026, NUR TV WARTET): tvv2 = TradingView-Lesung, tsv2 = TopstepX-Lesung, mt5/mt5v2 = Echo (frei); ohne = alle Fenster
+    route = str(request.args.get("route") or "").strip().lower()[:10] or None
+    out = jsonify(dict({"ok": True}, **puls_heim_pruefen(pc, route=route)))
+    out.headers["Cache-Control"] = "no-store"
+    return out
+
+
+@app.route("/admin/zweit-frei", methods=["GET", "OPTIONS"])
+def admin_zweit_frei():
+    """GET /admin/zweit-frei?plan=<uuid> → {ok, frei, code?, grund?, big_trade?, max_je_id, zweit_usd} — ZWEI ORBIT (30.10.2026, Stück 1):
+    darf dieser geplante Big Trade jetzt starten (puls_heim_zweit_pruefen)? Für den Sofort-Start-Wächter im PC-Tab (S7, alle 20–40 s
+    gewürfelt). Auth wie /admin/puls-heim (eingeloggt); nur eigene Pläne bzw. Pläne der eigenen Sicht. Fehler → frei false."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    pid = str(request.args.get("plan") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f-]{36}", pid):
+        return jsonify({"ok": False, "msg": "plan fehlt"}), 400
+    try:
+        plan = (sb_select("trade_plans", {"select": "id,user_id,status,route,hedge_eur,orbit_v3,winning_day,konto_typ,mt5_baseline->apex_hedge",
+                                          "id": f"eq.{pid}"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": True, "frei": False, "code": PULS_HEIM_CODE_UNKLAR, "grund": f"Plan nicht lesbar ({type(e).__name__})"}), 200
+    if not plan:
+        return jsonify({"ok": False, "msg": "Plan nicht gefunden"}), 404
+    if str(plan.get("user_id")) != str(me):
+        try:
+            sicht, _v = admin_sicht_lesen(str(me))
+        except Exception:
+            return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
+        _m, aerr = _admin_auth()
+        if not ((aerr is None and sicht is None) or (sicht is not None and str(plan.get("user_id")) in {str(u) for u in sicht})):
+            return jsonify({"ok": False, "msg": "nur eigene Pläne"}), 403
+    if isinstance(plan.get("apex_hedge"), dict):
+        plan["ah_status"] = plan["apex_hedge"].get("status")
+    out = jsonify(dict({"ok": True}, **puls_heim_zweit_pruefen(plan)))
     out.headers["Cache-Control"] = "no-store"
     return out
 
@@ -17212,10 +17407,27 @@ def richtung_frei():
     antwort = {"ok": True, "frei": erg.get("frei") is True, "code": None if erg.get("frei") is True else "gegenrichtung", "grund": erg.get("grund"),
                "firma": erg.get("firma"), "plan": erg.get("plan"), "uid": wer[0], "pc": wer[1]}
     if antwort["frei"]:
+        # NUR TV WARTET + ZWEI ORBIT (30.10.2026): Route/Art des Plans für die Heim-Prüfung (Fenster) und die Zweit-Prüfung. Nicht lesbar →
+        # Heim-Prüfung über alle Fenster (wie bisher) und Zweit-Prüfung nicht frei (fail-closed)
+        try:
+            plan = (sb_select("trade_plans", {"select": "id,user_id,status,route,hedge_eur,orbit_v3,winning_day,konto_typ,mt5_baseline->apex_hedge",
+                                              "id": f"eq.{pid}"}) or [None])[0]
+            if isinstance(plan, dict) and isinstance(plan.get("apex_hedge"), dict):
+                plan["ah_status"] = plan["apex_hedge"].get("status")
+        except Exception as e:
+            print(f"[puls-heim] ⚠️ Plan {pid[:8]} nicht lesbar: {type(e).__name__}: {str(e)[:120]}", flush=True)
+            plan = False
         # PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq → Puls verlässt das Konto nicht (puls_heim_pruefen)
-        heim = puls_heim_pruefen(wer[1], pid)
+        heim = puls_heim_pruefen(wer[1], pid, (plan or {}).get("route") if plan else None)
+        if heim.get("frei"):
+            heim = (puls_heim_zweit_pruefen(plan) if plan else {"frei": True}) if plan is not False else \
+                {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "grund": "Plan nicht lesbar — Zweit-Prüfung nicht möglich, nichts gesendet"}
         if not heim.get("frei"):
-            antwort.update(frei=False, code=heim.get("code"), grund=heim.get("grund"), big_trade=heim.get("big_trade"))
+            # zweit_wartet geht als big_trade_nah raus (Panel + PC-Tab kennen nur die Heim-Codes: Plan bleibt Geplant, kein Start-Fehler-Rot);
+            # die Unterscheidung holt der Sofort-Start-Wächter des Tabs über GET /admin/zweit-frei (S7), zweit: true für neuere Panels
+            code = PULS_HEIM_CODE_NAH if heim.get("code") == PULS_HEIM_CODE_ZWEIT else heim.get("code")
+            antwort.update(frei=False, code=code, grund=heim.get("grund"), big_trade=heim.get("big_trade"),
+                           zweit=heim.get("code") == PULS_HEIM_CODE_ZWEIT)
             print(f"[puls-heim] ⛔ PC {wer[1]} Plan {pid[:8]}: {heim.get('grund')}", flush=True)
     out = jsonify(antwort)
     out.headers["Cache-Control"] = "no-store"

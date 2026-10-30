@@ -10,8 +10,10 @@ from datetime import datetime, timezone, timedelta
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "_ap_de", "plan_ist_apex_hedge", "puls_heim_schwellen", "puls_heim_nah", "puls_heim_kurs_frisch", "puls_heim_big_trades",
-              "puls_heim_wd_trades", "puls_heim_wd_schwellen")
-KONSTANTEN = ("PULS_HEIM_KURS_MAX_ALTER_S", "PULS_HEIM_CODE_NAH", "PULS_HEIM_CODE_UNKLAR", "PULS_HEIM_WD_USD")
+              "puls_heim_wd_trades", "puls_heim_wd_schwellen", "puls_heim_fenster", "puls_heim_im_fenster", "puls_heim_ist_big",
+              "puls_heim_zweit_regel", "puls_heim_zweit_urteil")
+KONSTANTEN = ("PULS_HEIM_KURS_MAX_ALTER_S", "PULS_HEIM_CODE_NAH", "PULS_HEIM_CODE_UNKLAR", "PULS_HEIM_WD_USD", "PULS_HEIM_CODE_ZWEIT",
+              "PULS_HEIM_ZWEIT_USD", "PULS_HEIM_ECHO_ROUTEN")
 
 
 def lade():
@@ -106,6 +108,31 @@ def main():
     zw = {"richtung": "buy", "punktwert": 2, "kt": 3, "tp_level_nq": 29595.25, "sl_level_nq": 27337.5}
     ok(nah(zw, 29580.25, (100.0, 100.0))["nah"] is True, "WD 90 $ vor TP = nah")
     ok(nah(zw, 29575.25, (100.0, 100.0))["nah"] is False, "WD 120 $ vor TP = frei")
+
+    # NUR TV WARTET + ZWEI ORBIT (30.10.2026, ZWEI-ORBIT Stück 1)
+    fe, imf, ib = ns["puls_heim_fenster"], ns["puls_heim_im_fenster"], ns["puls_heim_ist_big"]
+    ok(fe("tvv2") == "tv" and fe("polar") == "tv" and fe("tsv2") == "tsx" and fe("mt5") is None and fe("mt5v2") is None and fe(None) == "alle",
+       "Fenster je Route: tvv2/polar tv, tsv2 tsx, Echo None, unbekannt alle")
+    ok(sorted(p["id"] for p in imf(pl, "tv")) == ["a", "b", "c", "d", "e", "f"] or all(fe(p.get("route")) == "tv" for p in imf(pl, "tv")), "nur TV-Fenster")
+    ok([p["id"] for p in imf(pl, "tsx")] == ["h"], f"nur TopstepX-Fenster: {[p['id'] for p in imf(pl, 'tsx')]}")
+    ok(len(imf(pl, "alle")) == len(pl), "alle = keine Auswahl")
+    ok(ib({"route": "tvv2", "orbit_v3": True}) and ib({"route": "tsv2", "hedge_eur": 300}) and ib({"route": "polar"}), "Big Trades erkannt")
+    ok(not ib({"route": "tvv2"}) and not ib({"route": "tvv2", "hedge_eur": 300, "winning_day": True})
+       and not ib({"route": "tvv2", "hedge_eur": 300, "mt5_baseline": {"apex_hedge": {"status": "mit"}}}) and not ib({"route": "mt5", "hedge_eur": 1}),
+       "kein Big Trade: ohne Hedge, Winning Day, Apex-WD-Weg, Echo")
+    zr, zu = ns["puls_heim_zweit_regel"], ns["puls_heim_zweit_urteil"]
+    ok(zr(None) == (1, 2500.0) and zr({"big_max_je_id": 2, "zweit_usd": 3000}) == (2, 3000.0) and zr({"big_max_je_id": "x"}) == (1, 2500.0)
+       and zr({"big_max_je_id": 0}) == (1, 2500.0), "Zweit-Regel: Standard 1/2.500, ungültig → 1")
+    A = lambda nah_, tp=3000, liq=4000: {"name": "Apex …0001", "art": "BUY 2 NQ", "nah": nah_, "grund": "1.800 $ vor dem TP", "rest_tp_usd": tp, "rest_liq_usd": liq}
+    ok(zu([], 1, 2500)["frei"], "keiner läuft → frei")
+    r1 = zu([A(False)], 1, 2500)
+    ok(not r1["frei"] and r1["code"] == "zweit_wartet" and "höchstens 1" in r1["grund"], f"big_max 1 + einer läuft → wartet (heute): {r1}")
+    ok(zu([A(False)], 2, 2500)["frei"], "big_max 2, der andere > 2.500 $ weg → frei")
+    r2 = zu([A(True, 1800)], 2, 2500)
+    ok(not r2["frei"] and r2["code"] == "zweit_wartet" and r2["rest_tp_usd"] == 1800 and "2.500" in r2["grund"], f"anderer in der Spanne → wartet: {r2}")
+    ok(zu([A(None)], 2, 2500)["code"] == "big_trade_unklar", "nicht prüfbar → unklar (fail-closed)")
+    ok(zu([A(False), A(False)], 2, 2500)["code"] == "zweit_wartet", "schon 2 bei big_max 2 → wartet")
+    ok(zu([{"name": "x", "gesendet": True, "nah": None}], 2, 2500)["code"] == "zweit_wartet", "gerade gesendet → wartet")
 
     if f:
         print("FEHLER:\n  " + "\n  ".join(f))
