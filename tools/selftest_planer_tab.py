@@ -14,12 +14,22 @@ def main():
     f = []
     ok = lambda b, t: f.append(t) if not b else None   # noqa: E731
     # Seitenleiste: unter TRADING, standardmäßig versteckt, eine Datei
-    i_trading, i_link, i_admin = s.find('<div class="sb-section">Trading</div>'), s.find('data-view="planer" style="display:none"'), s.find('<button class="sb-link" data-view="kasse">')
+    i_trading, i_link, i_admin = s.find('<div class="sb-section">Trading</div>'), s.find('data-view="planer" data-planerhaupt="challenge" style="display:none"'), s.find('<button class="sb-link" data-view="kasse">')
     ok(0 < i_trading < i_link < i_admin, "Link „Planer“ unter TRADING, vor Admin, versteckt bis entsperrt")
     ok("planer:    ['Planer'," in s, "viewTitles kennt planer (#planer beim Start)")
     # Chip-Leiste: vier Planer in fester Reihenfolge, Design-System .subtabs/.subtab
-    chips = re.findall(r'data-planerchip="(\w+)"', s[s.find('id="adm-planer-chips"'):s.find('id="adm-planer-chips"') + 900])
-    ok(chips == ["wd", "planer", "fplaner", "fcfd"], f"Chips {chips}")
+    # PLANER-GLIEDERUNG (30.10.2026): zwei Einträge in der Navigation, je Gruppe ihre Reiter
+    ok(s.count('class="sb-link" data-view="planer" data-planerhaupt=') == 2 and "Challenge Planer\n" in s and "Funded Planer\n" in s, "zwei Einträge Challenge Planer · Funded Planer")
+    i_ch = s.find('id="adm-planer-chips"')
+    reiter = re.findall(r'data-planerchip="([\w-]+)" data-haupt="(\w+)"', s[i_ch:i_ch + 900])
+    ok(reiter == [("planer-cfd", "challenge"), ("planer-fut", "challenge"), ("fcfd", "funded"), ("fplaner", "funded"), ("wd", "funded")], f"Reiter {reiter}")
+    ok("'planer-cfd': { reiter: 'planer', art: 'cfd', haupt: 'challenge' }" in s and "wd: { reiter: 'wd', haupt: 'funded' }" in s, "Reiter → Admin-Reiter + Kontoart + Gruppe")
+    ok("l.addEventListener('click', () => { planerHauptWahl = l.dataset.planerhaupt }, true)" in s, "Gruppe vor switchView gemerkt (Capture)")
+    # Kontoart filtert nur den Challenge-Planer im Planer-Modus, an denselben Stellen wie die ID-Sicht
+    ok("if((a !== 'cfd' && a !== 'futures') || _apIdsArtWert !== 'challenge') return null" in s, "Kontoart nur im Challenge-Planer")
+    ok("return _apIds.offen.filter(z => (!u || String(z.user_id) === u) && apArtPasst(z))" in s, "Zu bestätigen nach Kontoart")
+    ok(s.count("return apArtD(u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D)") == 2, "Kopf + Wartet/Läuft nach Kontoart")
+    ok("String(z.user_id) === b.dataset.apOkId && apArtPasst(z)" in s, "„✓ alle n“ je ID nur die sichtbare Kontoart")
     ok('class="subtabs nav-gruppe-tabs adm-planer-chips"' in s, "Chip-Leiste im Stil der Navigations-Gruppen")
     # Hülle Funded CFD: Gerüst, keine Abfrage
     # seit 30.10.2026 (Planer Schritt 2) baut apgHuelleHtml die Hülle mit den Guestly-Bausteinen in #apg-fcfd
@@ -35,7 +45,7 @@ def main():
     ok("if((name === 'kasse' || name === 'planer') && typeof kasseOnEnter === 'function') kasseOnEnter()" in s, "Planer geht durch kasseOnEnter (Code-Sperre)")
     ok("['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec) ||" in s, "Chips/Link nach kasseReiterErlaubt")
     ok("link.style.display = currentUserId ? '' : 'none'" in s, "Link für jede eingeloggte ID (Sperre kommt im Planer)")
-    ok("pl.style.display = 'none' }   // PLANER-TAB: Link weg" in s, "Abmelden: Link weg")
+    ok("forEach(pl => { pl.style.display = 'none' })   // PLANER-TAB: Link weg" in s, "Abmelden: Link weg")
     ok("section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}" in s, "Admin-Reiter im Planer-Modus aus")
     # Verweis im Admin, Merker nur sessionStorage
     ok("if(['wd', 'planer', 'fplaner', 'fcfd'].includes(name) && !planerModus()){" in s and "switchView('planer'); return" in s, "Admin-Reiter = Verweis auf Planer")

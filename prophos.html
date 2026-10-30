@@ -3096,6 +3096,8 @@
   #dashboard-view #kasse-content > .subtabs,#dashboard-view .nav-gruppe-tabs{overflow-x:auto;scrollbar-width:thin}
   /* PLANER-TAB (30.10.2026): im Planer-Modus statt der Admin-Reiter die Chip-Leiste der vier Planer */
   #dashboard-view section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}
+  /* PLANER-GLIEDERUNG (30.10.2026): nur die Reiter der gewählten Gruppe (Challenge Planer | Funded Planer) */
+  #adm-planer-chips[data-haupt="challenge"] [data-haupt]:not([data-haupt="challenge"]),#adm-planer-chips[data-haupt="funded"] [data-haupt]:not([data-haupt="funded"]){display:none}
   /* Planer-Modus: nie ein Admin-Pane (Übersicht, Payouts …), solange die Verwalter-Erkennung aussteht auch kein Planer-Pane */
   #dashboard-view section.view.adm-planer-modus #kasse-content [id^="adm-pane-"]:not(#adm-pane-planer):not(#adm-pane-wd):not(#adm-pane-fcfd),
   #dashboard-view section.view.adm-planer-warten #kasse-content [id^="adm-pane-"]{display:none !important}
@@ -8125,9 +8127,15 @@
            derselbe Admin-Bereich (section data-view="kasse") im Planer-Modus — Code-Sperre, Verwalter-Sicht und Rechte wie im Admin.
            Seit 30.10.2026 für JEDE eingeloggte ID sichtbar (Finn als Emin: „Bei den IDs soll kein Unterschied sein"): der Klick öffnet den
            Planer-Modus, dort Code-Sperre und danach die Reiter-Rechte wie im Admin (planerChipsSync). -->
-      <button class="sb-link" data-view="planer" style="display:none">
+      <!-- PLANER-GLIEDERUNG (30.10.2026, Finn über den Master: „In der Navigationsleiste zwei Einträge: Challenge Planer → CFD · Futures,
+           Funded Planer → CFD · Futures · Winning Days"): beide öffnen denselben Planer-Modus, data-planerhaupt wählt die Reiter-Gruppe -->
+      <button class="sb-link" data-view="planer" data-planerhaupt="challenge" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="7" y1="14" x2="13" y2="14"/><line x1="7" y1="17.5" x2="16" y2="17.5"/></svg>
-        Planer
+        Challenge Planer
+      </button>
+      <button class="sb-link" data-view="planer" data-planerhaupt="funded" style="display:none">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><polyline points="8 15 11 18 16 12"/></svg>
+        Funded Planer
       </button>
       <!-- „Winning Days" (25.09.2026, Finn): vorher „Markt" — Live-Chart NQ/MNQ + Winning Days des Handelstags. Position direkt
            nach Accounts (seit 30.09.2026 nach Radar); data-view="markt" und #markt bleiben intern (Links, Stubs, gespeicherte Ansicht). -->
@@ -12126,11 +12134,16 @@
         </div>
         <!-- PLANER-TAB (30.10.2026): Chip-Leiste der vier Planer — nur im Planer-Modus (statt der Admin-Reiter). Ein Chip klickt den
              bestehenden Admin-Reiter (wd / planer / fplaner / fcfd): dieselben Panes, dieselben Lader. Rechte je Chip wie der Reiter. -->
+        <!-- PLANER-GLIEDERUNG (30.10.2026, Finn über den Master: zwei Einträge in der Navigation — „Challenge Planer“ mit den Reitern CFD · Futures,
+             „Funded Planer“ mit CFD · Futures · Winning Days): eine Reiter-Reihe, data-haupt der Leiste blendet die Reiter der anderen Gruppe aus.
+             Challenge CFD/Futures = derselbe Challenge-Planer, nur nach Kontoart gefiltert (window._apArt); Funded CFD = Entwurf,
+             Funded Futures = Funded-Planer, Winning Days = Farmer. -->
         <div class="subtabs nav-gruppe-tabs adm-planer-chips" id="adm-planer-chips" role="tablist" aria-label="Planer" hidden>
-          <button class="subtab" data-planerchip="wd">Winning Days</button>
-          <button class="subtab" data-planerchip="planer">Challenge</button>
-          <button class="subtab" data-planerchip="fplaner">Funded Futures</button>
-          <button class="subtab" data-planerchip="fcfd">Funded CFD</button>
+          <button class="subtab" data-planerchip="planer-cfd" data-haupt="challenge">CFD</button>
+          <button class="subtab" data-planerchip="planer-fut" data-haupt="challenge">Futures</button>
+          <button class="subtab" data-planerchip="fcfd" data-haupt="funded">CFD</button>
+          <button class="subtab" data-planerchip="fplaner" data-haupt="funded">Futures</button>
+          <button class="subtab" data-planerchip="wd" data-haupt="funded">Winning Days</button>
         </div>
         <div id="adm-planer-warte" class="kis-s" style="color:var(--sub);font-size:13px;padding:22px 2px" hidden>Lade Planer …</div>
 
@@ -15375,7 +15388,7 @@
     wdlive:    ['Radar', 'Trades aller IDs'],   // seit 30.09.2026 auch Echo (CFD)
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
-    planer:    ['Planer', 'Winning Days · Challenge · Funded'],   // PLANER-TAB (30.10.2026): kasse-Section im Planer-Modus
+    planer:    ['Planer', 'Challenge · Funded · Winning Days'],   // PLANER-TAB (30.10.2026): kasse-Section im Planer-Modus
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
   let _detailAccountId = null  // Account-Detail-View State
@@ -15769,13 +15782,37 @@
     // Vor der Übersicht kennt kasseReiterErlaubt einen Verwalter noch nicht (eigener Code = „nur eigene"); ist er in dieser Sitzung schon als
     // Verwalter erkannt (planerRolle), gelten seine Rechte gleich — Planer-Reiter sind für Verwalter frei (nicht KASSE_REITER_HT)
     const planerErlaubt = ec => ['wd', 'planer', 'fplaner', 'fcfd'].filter(n => kasseReiterErlaubt(n, ec) || (!admData && ec && planerRolle() === 'verwalter' && !KASSE_REITER_HT.has(n)))
+    /* PLANER-GLIEDERUNG (30.10.2026, Finn über den Master: „In der Navigationsleiste zwei Einträge: Challenge Planer → CFD · Futures,
+     * Funded Planer → CFD · Futures · Winning Days"): Reiter-Schlüssel → bestehender Admin-Reiter (+ Kontoart für den Challenge-Planer) und
+     * Gruppe (= Seitenleisten-Eintrag). Rechte bleiben je Admin-Reiter (planerErlaubt). */
+    const PLANER_CHIPS = { 'planer-cfd': { reiter: 'planer', art: 'cfd', haupt: 'challenge' }, 'planer-fut': { reiter: 'planer', art: 'futures', haupt: 'challenge' },
+      fcfd: { reiter: 'fcfd', haupt: 'funded' }, fplaner: { reiter: 'fplaner', haupt: 'funded' }, wd: { reiter: 'wd', haupt: 'funded' } }
+    const PLANER_HAUPT = { challenge: ['planer-cfd', 'planer-fut'], funded: ['fcfd', 'fplaner', 'wd'] }
+    const PLANER_HAUPT_TITEL = { challenge: 'Challenge Planer', funded: 'Funded Planer' }
+    const PLANER_UNTER_SS = 'prophos_planer_unter'   // je Gruppe der zuletzt gewählte Reiter
+    // alter Merker / Admin-Sprung nennt den Reiter („planer") → Reiter mit der gerade gewählten Kontoart (Standard CFD)
+    const planerChipVon = n => PLANER_CHIPS[n] ? n : n === 'planer' ? (window._apArt === 'futures' ? 'planer-fut' : 'planer-cfd') : null
+    function planerChipsMarkieren(reiter){
+      const key = planerChipVon(reiter), haupt = key ? PLANER_CHIPS[key].haupt : null, an = planerModus()
+      const leiste = document.getElementById('adm-planer-chips'); if(leiste && haupt) leiste.dataset.haupt = haupt
+      document.querySelectorAll('#adm-planer-chips [data-planerchip]').forEach(c => c.classList.toggle('active', c.dataset.planerchip === key))
+      // Seitenleiste: nur der Eintrag der offenen Gruppe aktiv (switchView markiert beide data-view="planer"); Titel wie der Eintrag
+      if(an && haupt){
+        document.querySelectorAll('#dashboard-view .sb-link[data-planerhaupt]').forEach(l => l.classList.toggle('active', l.dataset.planerhaupt === haupt))
+        const h = document.querySelector('#dashboard-view section.view[data-view="kasse"] .view-head .view-title'); if(h) h.textContent = PLANER_HAUPT_TITEL[haupt]
+        const t = document.getElementById('topbarTitle'); if(t) t.textContent = PLANER_HAUPT_TITEL[haupt]
+      }
+      if(key && an){ try{ sessionStorage.setItem(PLANER_CHIP_SS, key); const m = JSON.parse(sessionStorage.getItem(PLANER_UNTER_SS) || '{}') || {}; m[haupt] = key; sessionStorage.setItem(PLANER_UNTER_SS, JSON.stringify(m)) }catch(_){} }
+    }
+    // Klick auf „Challenge Planer" / „Funded Planer": Gruppe merken, BEVOR der allgemeine Seitenleisten-Handler switchView('planer') ruft (Capture)
+    let planerHauptWahl = null
+    document.querySelectorAll('#dashboard-view .sb-link[data-planerhaupt]').forEach(l => l.addEventListener('click', () => { planerHauptWahl = l.dataset.planerhaupt }, true))
     function planerChipsSync(ec){
-      const frei = planerErlaubt(ec)
-      document.querySelectorAll('#adm-planer-chips [data-planerchip]').forEach(c => { c.hidden = !frei.includes(c.dataset.planerchip) })
-      const link = document.querySelector('#dashboard-view .sb-nav > .sb-link[data-view="planer"]')
+      const frei = planerErlaubt(ec), chipFrei = k => frei.includes(PLANER_CHIPS[k].reiter)
+      document.querySelectorAll('#adm-planer-chips [data-planerchip]').forEach(c => { c.hidden = !chipFrei(c.dataset.planerchip) })
       // LINK FÜR JEDE ID (30.10.2026, Finn als Emin eingeloggt: „Bei den IDs soll kein Unterschied sein — jede ID sieht dieselben Planer wie ich"):
       // nie mehr vor dem Entsperren verbergen — die Code-Sperre kommt im Planer-Modus, danach gelten die Reiter-Rechte (Server-Gate unverändert)
-      if(link) link.style.display = currentUserId ? '' : 'none'
+      document.querySelectorAll('#dashboard-view .sb-nav > .sb-link[data-view="planer"]').forEach(link => { link.style.display = currentUserId ? '' : 'none' })
       return frei
     }
     function planerLinkSync(){
@@ -15787,10 +15824,20 @@
       if(!frei.length){   // kein Planer erlaubt (erst nach der Verwalter-Erkennung sicher) → Admin wie bisher, mit Hinweis
         if(admData && typeof atToast === 'function') atToast('Planer sind für diese ID nicht freigegeben — Admin geöffnet', 'end')
         if(typeof switchView === 'function') switchView('kasse'); return }
-      let ziel = name
-      if(!ziel){ try{ ziel = sessionStorage.getItem(PLANER_CHIP_SS) }catch(_){} }
-      if(!frei.includes(ziel)) ziel = frei.includes('planer') ? 'planer' : frei[0]
-      document.querySelector(`.adm-tab[data-admtab="${ziel}"]`)?.click()
+      const chipFrei = k => !!k && !!PLANER_CHIPS[k] && frei.includes(PLANER_CHIPS[k].reiter)
+      let ziel = planerChipVon(name)
+      // ohne Ziel: Gruppe aus dem Seitenleisten-Klick → ihr zuletzt gewählter Reiter, sonst der erste erlaubte; ohne Klick der letzte Reiter
+      const wahl = planerHauptWahl; planerHauptWahl = null
+      if(!ziel && wahl && PLANER_HAUPT[wahl]){ let m = {}; try{ m = JSON.parse(sessionStorage.getItem(PLANER_UNTER_SS) || '{}') || {} }catch(_){}
+        ziel = chipFrei(m[wahl]) && PLANER_HAUPT[wahl].includes(m[wahl]) ? m[wahl] : PLANER_HAUPT[wahl].find(chipFrei) }
+      if(!ziel){ try{ ziel = planerChipVon(sessionStorage.getItem(PLANER_CHIP_SS)) }catch(_){} }
+      if(!chipFrei(ziel)) ziel = Object.keys(PLANER_CHIPS).find(chipFrei)
+      const c = PLANER_CHIPS[ziel]; if(!c) return
+      if(c.art) window._apArt = c.art   // PLANER-GLIEDERUNG: Kontoart des Challenge-Planers (apArtFilter im Planer-Block)
+      const tab = document.querySelector(`.adm-tab[data-admtab="${c.reiter}"]`); if(!tab) return
+      // Challenge CFD ↔ Futures bei offenem Reiter: nur neu zeichnen (dieselben Daten), kein erneutes Laden
+      if(tab.classList.contains('active') && planerModus() && c.reiter === 'planer'){ planerChipsMarkieren('planer'); window._apIdsRender?.(); window._ahfZeichnen?.(); return }
+      tab.click()
     }
     window._planerChipOeffnen = planerChipOeffnen
     // Rolle je ID für diese Browser-Sitzung ('ht' | 'verwalter' | 'eigen') — gesetzt von admLoad, gelesen nur für das Warten oben
@@ -21754,8 +21801,7 @@
           switchView('planer'); return
         }
         if(planerModus() && !['wd', 'planer', 'fplaner', 'fcfd'].includes(name)) return   // im Planer-Modus nur Planer-Reiter
-        document.querySelectorAll('#adm-planer-chips [data-planerchip]').forEach(c => c.classList.toggle('active', c.dataset.planerchip === name))
-        if(planerModus()){ try{ sessionStorage.setItem(PLANER_CHIP_SS, name) }catch(_){} }
+        planerChipsMarkieren(name)   // PLANER-GLIEDERUNG: Hauptpunkt + Unterwahl markieren, Merker setzen
         document.querySelectorAll('.adm-tab').forEach(x => {
           const on = x === t
           x.classList.toggle('active', on)
@@ -52334,7 +52380,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1924'
+  const OS_TAB_BUILD = '2026-09-22.1925'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58992,7 +59038,9 @@
     const f = o => d.toLocaleString('de-DE', Object.assign({ timeZone: 'Asia/Dubai' }, o)), heute = new Date().toLocaleDateString('de-DE', { timeZone: 'Asia/Dubai', day: '2-digit', month: '2-digit' })
     const t = f({ day: '2-digit', month: '2-digit' }), u = f({ hour: '2-digit', minute: '2-digit' }); return t === heute ? u : `${t} ${u}` }
   const ahfEur = v => { const n = Number(v); return isFinite(n) && v != null ? (n < 0 ? '−' : '+') + Math.round(Math.abs(n)).toLocaleString('de-DE') + ' €' : '–' }
-  const ahfAltlast = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.auto_bestaetigt_at)
+  // + Kontoart (PLANER-GLIEDERUNG 30.10.2026): im Challenge Planer · CFD/Futures nur Hedge-Trades dieser Art — Liste, Zähler und alle drei
+  // Knöpfe (✓ einzeln, ✓ alle n je ID, ✓ Alle n) lesen von hier, freigegeben werden also nur die gezeigten
+  const ahfAltlast = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.auto_bestaetigt_at && (typeof window._apArtPasst !== 'function' || window._apArtPasst({ firma: z.master_firm, route: z.route })))
   /* Hedge-Spalten in derselben Zeile von „Zu bestätigen" / „Wartet auf Start" (EIN BESTÄTIGEN, 30.10.2026): z aus /admin/auto-plan/ids
    * {hedge_art, hedge_vorschau, hedge_frei}. Lots · Blow € / Pass € — oder der Grund, warum kein Hedge rechenbar ist. Normale Pläne: ''. */
   function ahfHedgeKurz(z, art){
@@ -59085,6 +59133,7 @@
   window._ahfSicherstellen = () => { const r = document.getElementById('ahf-root'); if(r && !r.dataset.an) window._ahfOeffnen(true) }
   window._ahfOeffnen = an => { const r = document.getElementById('ahf-root'); if(!r) return; if(an){ r.dataset.an = '1'; ahfRender(); ahfLaden() } else { delete r.dataset.an; r.hidden = true } }
   window._ahfNeu = () => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an) ahfLaden() }   // nach ✓ in „Zu bestätigen"
+  window._ahfZeichnen = () => ahfRender()   // PLANER-GLIEDERUNG: Wechsel CFD ↔ Futures zeichnet ohne Abruf neu
   window._ahfStub = d => { _ahf.d = d; _ahf.fehler = ''; const r = document.getElementById('ahf-root'); if(r) r.dataset.an = '1'; ahfRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an && !document.hidden && document.getElementById('adm-pane-planer')?.offsetParent) ahfLaden() }, 60000)
   const TPL_LAUFZEIT = 180                               // ap_ausgleich_param.laufzeit_min (Standard), wenn der Lauf keinen Wert mitschickt
@@ -60928,7 +60977,8 @@
   function tplHeuteKarteHtml(D){
     if(!D || D.tag !== D.heute) return ''   // nur am Tag „heute" — „morgen" hat nichts Beendetes
     const ids = D.sicht instanceof Set ? D.sicht : null
-    const alle = tplHeuteZeilen(ids); if(!alle) return ''
+    const alle0 = tplHeuteZeilen(ids); if(!alle0) return ''
+    const alle = typeof D.artPasst === 'function' ? alle0.filter(D.artPasst) : alle0   // Challenge Planer · CFD/Futures (PLANER-GLIEDERUNG 30.10.2026)
     /* FILTER FIRMA + ID (08.10.2026, Finn: „Mach da auch, dass ich nach Prop-Firmen filtern kann und nach Namen filtern kann"): je eine
      * Chip-Reihe (Stil der ID-Chips .adm-vl-chip), eine Wahl je Reihe, nochmal klicken = alle; Summe und Liste folgen dem Filter.
      * Zustand _tpl.hbFirma / _tpl.hbId (nur dieser Tab), Verdrahtung im Klick-Handler der Seite (data-hb-firma / data-hb-id). */
@@ -73799,7 +73849,7 @@
     notes = []
     if(typeof renderNotes === 'function') renderNotes()
     { const mb = document.getElementById('sb-badge-mail'); if(mb) mb.hidden = true }   // Mail-Reiter: Zahl des alten Logins weg
-    { const pl = document.querySelector('#dashboard-view .sb-nav > .sb-link[data-view="planer"]'); if(pl) pl.style.display = 'none' }   // PLANER-TAB: Link weg
+    document.querySelectorAll('#dashboard-view .sb-nav > .sb-link[data-view="planer"]').forEach(pl => { pl.style.display = 'none' })   // PLANER-TAB: Link weg
     return _origShowLogin.apply(this, arguments)
   }
 
@@ -79323,14 +79373,33 @@
     try{ window._apIdsSichtPruefen?.() }catch(_){}   // stehen noch Daten der eigenen Sicht im Reiter → alle IDs nachladen (Sicht-Wächter)
   }
   window.apSichtSetzen = apSichtSetzen
-  const apIdsOffenSicht = () => { const u = apSichtUid(); return u ? _apIds.offen.filter(z => String(z.user_id) === u) : _apIds.offen }
+  /* KONTOART CFD · FUTURES (PLANER-GLIEDERUNG 30.10.2026, Finn über den Master: „Challenge → Challenge CFD · Challenge Futures"): nur im Tab Planer
+   * und nur im Challenge-Planer filtert die Unterwahl (window._apArt) dieselben Stellen wie die ID-Sicht — Kopf/Zeitstrahl (apIdsDaten),
+   * Wartet/Läuft (apIdsHeute, apIdsWartenLaeuft), Zu bestätigen (apIdsOffenSicht) und „✓ alle n". Nur Anzeige: Daten, Lader, Routen gleich.
+   * Art je Zeile nach der Firma wie im Konto-Formular (tpFirmIstFutures, Tradeify CFD nie Futures); ohne Firma nach dem Weg. */
+  const apArtJetzt = () => { const a = window._apArt
+    if((a !== 'cfd' && a !== 'futures') || _apIdsArtWert !== 'challenge') return null
+    return document.querySelector('#dashboard-view section.view[data-view="kasse"].adm-planer-modus') ? a : null }
+  const apArtVon = o => { const f = String((o && (o.firma || o.firm)) || '').trim()
+    if(f) return ((typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(f)) || (/tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(f) && !istTradeifyCfd(f))) ? 'futures' : 'cfd'
+    return /^(tv|ts|orbit|polar|nova)/i.test(String((o && o.route) || '')) ? 'futures' : 'cfd' }
+  const apArtPasst = o => { const a = apArtJetzt(); return !a || apArtVon(o) === a }
+  function apArtD(D){   // wie tplSichtFilter: Trades + Summen L/S nur dieser Kontoart
+    if(!D || !apArtJetzt()) return D
+    const trades = D.trades.filter(apArtPasst)
+    let L = 0, S = 0
+    for(const t of trades) if(tplAktiv(t) && !t.gehedgt){ if(t.long) L += t.einsatz || 0; else S += t.einsatz || 0 }
+    return { ...D, trades, L, S, artPasst: apArtPasst }   // artPasst: Karte „Heute beendet" filtert heute_beendet nach derselben Art
+  }
+  const apIdsOffenSicht = () => { const u = apSichtUid(); return _apIds.offen.filter(z => (!u || String(z.user_id) === u) && apArtPasst(z)) }
+  window._apArtPasst = apArtPasst   // Hedge-Freigabe (ahfAltlast) liegt in einem anderen Block
   function apIdsDaten(){
     // Tag ohne Delta (morgen): Zeilen aus /ids offen[]+bestaetigt[] (15.10.2026) — als Objekt mitgegeben, weil _apIds in einem eigenen
     // Block lebt und aus tplDaten nicht sichtbar ist (Stub-Befund: „_apIds is not defined“, vom stillen catch geschluckt)
     const alt = _tpl.tag; _tpl.tag = apIdsTag(); _tpl.idsRueckfall = { offen: _apIds.offen || [], bestaetigt: _apIds.bestaetigt || [] }
     let D; try{ D = tplDaten() } finally{ _tpl.tag = alt; _tpl.idsRueckfall = null }
     const u = apSichtUid()
-    return u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D
+    return apArtD(u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D)   // + Kontoart (PLANER-GLIEDERUNG)
   }
   // laeuft = fertiger „Läuft"-Block (apIdsOffenHtml) — steht seit 08.10.2026 direkt unter den Charts (Finn: „den Läuft-Block packen und
   // unter PNL hypothetisch heute da drunter packen"); ohne Kopf (Fehler/fehlende Bausteine) kommt er trotzdem
@@ -79419,7 +79488,7 @@
   function apIdsHeute(){
     const alt = _tpl.tag; _tpl.tag = 'heute'
     let D; try{ D = tplDaten() } finally{ _tpl.tag = alt }
-    const u = apSichtUid(); return u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D
+    const u = apSichtUid(); return apArtD(u && typeof tplSichtFilter === 'function' ? tplSichtFilter(D, new Set([u])) : D)   // + Kontoart (PLANER-GLIEDERUNG)
   }
   // Trade-Zeile (tplDaten) → Zeile im Format von /ids offen[] (start_um aus den Minuten deutscher Zeit, wie tplListeHtml)
   // notes/stufe/boden/balance: Delta-Zeile (boden; notes/balance, sobald das Backend sie mitgibt) → eigener Plan (notes) → notes-Gedächtnis aus
@@ -79444,7 +79513,7 @@
       if(lIds.has(id) || Date.parse(e.z.start_um || '') < jetzt - 1200000 || (Array.isArray(_apIds.bestaetigt) && _apIds.bestaetigtT0 > e.at)){ _apIds.warteLokal.delete(id); continue }
       if(!w.has(id)) w.set(id, { z: e.z })
     }
-    const sicht = e => !u || String(e.z.user_id) === u
+    const sicht = e => (!u || String(e.z.user_id) === u) && apArtPasst(e.z)   // + Kontoart (PLANER-GLIEDERUNG)
     const warten = [...w.values()].filter(e => sicht(e) && !lIds.has(String(e.z.plan_id)) && !_apIds.zurLokal.has(String(e.z.plan_id)))
     let plJe = new Map(); try{ plJe = new Map((tplHypo(D).zeilen || []).map(z => [String(z.plan_id), z.pl])) }catch(_){}
     return { warten, laeuft: laeuft.map(t => ({ z: apIdsAusTrade(t, D), t, pl: plJe.get(String(t.plan_id)) ?? null })) }
@@ -80157,7 +80226,7 @@
       // ID-Details (apIdDetailRender) seit 08.10.2026 nicht mehr unter der Leiste: die ganze Seite filtert nach der ID (Finns Reihenfolge)
     root.style.padding = '6px 0'; root.style.color = ''
     try{ _apIds.D = apIdsDaten() }catch(_){ _apIds.D = null }   // Trades des gewählten Tags (und der gewählten ID) einmal je Zeichnen (Kopf + Vorschlags-Zeilen)
-    window._apOffenNichtLive = _apIds.offen.filter(z => z.balance_live === false)   // Box „Braucht dich" (tplBraucht) zeigt sie mit ↻ Balance lesen — auch für morgen, wo das Delta nichts kennt
+    window._apOffenNichtLive = _apIds.offen.filter(z => z.balance_live === false && apArtPasst(z))   // Box „Braucht dich" (tplBraucht) zeigt sie mit ↻ Balance lesen — auch für morgen, wo das Delta nichts kennt
     const leisteX = root.querySelector('.ap-idr')?.scrollLeft || 0   // Handy: Wisch-Position der Leiste über das Neuzeichnen (Klick, Takt) halten
     let heuteHb = ''; try{ heuteHb = tplHeuteKarteHtml(apIdsHeute()) }catch(e){ console.warn('[ap-ids] Heute beendet', e) }   // gefiltert nach der gewählten ID
     let ow = { laeuft: '', rest: '' }; try{ ow = apIdsOffenHtml() }catch(e){ console.warn('[ap-ids] Vorschläge/Läuft', e) }
@@ -80211,7 +80280,7 @@
     root.querySelectorAll('[data-ap-ok]').forEach(b => b.addEventListener('click', () => ok([b.dataset.apOk], b)))
     root.querySelectorAll('[data-ap-zur]').forEach(b => b.addEventListener('click', () => { b.disabled = true; apIdsZurueck(b.dataset.apZur) }))   // Wartet auf Start → ↩ zurück
     root.querySelectorAll('[data-ap-ri]').forEach(b => b.addEventListener('click', () => { b.disabled = true; apIdsRichtung(b.dataset.apRi) }))   // Richtung per Klick (16.10.2026)
-    root.querySelectorAll('[data-ap-ok-id]').forEach(b => b.addEventListener('click', () => ok(_apIds.offen.filter(z => String(z.user_id) === b.dataset.apOkId && !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), b)))
+    root.querySelectorAll('[data-ap-ok-id]').forEach(b => b.addEventListener('click', () => ok(_apIds.offen.filter(z => String(z.user_id) === b.dataset.apOkId && apArtPasst(z) && !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), b)))
     root.querySelector('#ap-ids-alle-ok')?.addEventListener('click', e => ok(apIdsOffenSicht().filter(z => !_apIds.okLaeuft.has(String(z.plan_id)) && z.balance_live !== false && (() => { const t = apIdsTrade(z); return !t || tplPlanLive(t) })()).map(z => String(z.plan_id)), e.currentTarget))
     root.querySelectorAll('[data-ap-id]').forEach(cb => cb.addEventListener('change', async () => {
       cb.disabled = true
