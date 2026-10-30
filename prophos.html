@@ -41223,25 +41223,28 @@
   document.getElementById('suc-name')?.addEventListener('input', () => { _sucNameHand = true })
   /* MAX DRAWDOWN OHNE WERT AM VORGÄNGER (Finn 30.10.2026 14:5x: „Max Drawdown ist bei CFDs von Phase 1 zu Phase 2 immer genau das Gleiche, auch wenn es noch nicht
    * hinterlegt ist"; Reihenfolge Master): nur CFD-Firmen, nur wenn der Vorgänger leer ist. Erst die Schablone Firma × Größe × Zieltyp; für Phase 2 (nicht Funded) auch die der
-   * anderen Phase, wenn sie sich einig sind — dann die Firmen-Regel Größe × % (regelWert vom Server, FundingPips mit Standard/Flex liefert dort nichts). → { wert, quelle } | null */
+   * anderen Phase, jeweils nur wenn sie sich einig sind — dann die Firmen-Regel Größe × % (regelWert vom Server). FundingPips bleibt immer leer. → { wert, quelle } | null */
   const sucFirmaKey = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')   // accounts „The5%ers", Schablone ggf. „The5ers"
   const sucIstCfd = acc => !(tpFirmIstFutures(acc.firm) && !istTradeifyCfd(acc.firm))
+  // FundingPips (S2 30.10.2026): max_drawdown schaltet die Planer-Regel Standard/Flex um (app.py ap_konto_flex) — der Wert ist Wissen je Konto, nie vorbelegen
+  const sucDdNieRaten = acc => sucFirmaKey(acc.firm) === 'fundingpips'
   function sucDdVorschlag(acc, zielTyp, vorlagen, regelWert){
     const pos = v => (Number(v) > 0 ? Number(v) : null), firma = sucFirmaKey(acc && acc.firm)
-    if(!firma || pos(acc.maxDrawdown) || !sucIstCfd(acc)) return null
+    if(!firma || pos(acc.maxDrawdown) || !sucIstCfd(acc) || sucDdNieRaten(acc)) return null
     const gr = Number(kontoGroesseAnzeige(acc.name, acc.startingBalance)) || 0
     const sch = (vorlagen || []).filter(v => gr && sucFirmaKey(v.firm) === firma && Number(v.account_size || v.starting_balance) === gr && pos(v.max_drawdown))
-    const ziel = sch.find(v => v.account_type === zielTyp)
+    const ziel = sch.filter(v => v.account_type === zielTyp)
     const phasen = zielTyp === 'phase1' || zielTyp === 'phase2' ? sch.filter(v => v.account_type === 'phase1' || v.account_type === 'phase2') : []
-    const v = ziel || (new Set(phasen.map(x => pos(x.max_drawdown))).size === 1 ? phasen[0] : null)
-    if(v) return { wert: pos(v.max_drawdown), quelle: `Schablone „${v.name || v.firm}"` }
+    const liste = ziel.length ? ziel : phasen, einig = new Set(liste.map(x => pos(x.max_drawdown))).size === 1
+    if(liste.length && !einig) return null   // Schablonen uneinig: dann ist auch die Regel kein sicherer Wert
+    if(einig) return { wert: pos(liste[0].max_drawdown), quelle: `Schablone „${liste[0].name || liste[0].firm}"` }
     return pos(regelWert) ? { wert: pos(regelWert), quelle: 'Firmen-Regel (Größe × Drawdown-%)' } : null
   }
   window._sucDdVorschlag = sucDdVorschlag   // Test-Haken
   async function sucDdNachtragen(acc, zielTyp){
     const hint = document.getElementById('suc-maxdd-hint'), el = document.getElementById('suc-maxdd')
     if(hint) hint.textContent = 'Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.'
-    if(!el || Number(acc.maxDrawdown) > 0 || !sucIstCfd(acc)) return
+    if(!el || Number(acc.maxDrawdown) > 0 || !sucIstCfd(acc) || sucDdNieRaten(acc)) return
     let vorlagen = []; try{ vorlagen = await kontoVorlagenLaden() }catch(_){}
     let d = sucDdVorschlag(acc, zielTyp, vorlagen, null)
     if(!d){

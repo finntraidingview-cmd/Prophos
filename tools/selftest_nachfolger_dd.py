@@ -20,7 +20,8 @@ fn = html[i:html.index("window._sucDdVorschlag", i)]
 ein = html[html.index("async function sucDdNachtragen("):html.index("function openSuccessorWizard(")]
 check("pos(acc.maxDrawdown) || !sucIstCfd(acc)" in fn, "Vorgänger mit Wert oder Futures: kein Rückfall")
 check("tpFirmIstFutures(acc.firm) && !istTradeifyCfd(acc.firm)" in html[i - 400:i], "nur CFD-Firmen, Tradeify CFD zählt als CFD")
-check(".size === 1 ? phasen[0] : null" in fn and "zielTyp === 'phase1' || zielTyp === 'phase2'" in fn, "andere Phase nur für Phase 1/2 und nur bei einem Wert, Funded nur mit eigener Schablone")
+check("if(liste.length && !einig) return null" in fn and "zielTyp === 'phase1' || zielTyp === 'phase2'" in fn, "Schablonen uneinig: leer; andere Phase nur für Phase 1/2, Funded nur mit eigener Schablone")
+check("sucDdNieRaten(acc)) return null" in fn and "sucDdNieRaten(acc)) return" in ein and "=== 'fundingpips'" in html, "FundingPips mit Schablone: leer, auf beiden Wegen (schaltet sonst Standard/Flex im Planer um)")
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
 ns = {"ap_regel_finden": lambda fs, f: next((x for x in fs if f in x["namen"]), None)}
 k = src.index("\ndef konto_dd_aus_regel(") + 1
