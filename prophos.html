@@ -58525,7 +58525,15 @@
   // #tpl-view fragt alle IDs (?sicht=alle) nur noch für Admin-Logins (ADMIN_EMAILS, _ap.admin === true) — ein normaler Login bekommt vom
   // Backend nur die eigene ID, damit auch keine ID-Chips. Der Admin-Reiter „Trade-Planer" (#adm-pane-planer, Admin-Code) schickt
   // ?sicht=admin: dort bleibt die Alle-IDs-Sicht für jeden Login außer admin_zugang „nur eigene" (Gate wie /admin/auto-plan/ids).
-  const tplAdminReiterSichtbar = () => { const p = document.getElementById('adm-pane-planer'); return !!(p && !p.hidden && p.offsetParent !== null) }
+  // PLANER-MODUS WARTET (30.10.2026, Finn als Emin: „Delta-Daten nicht geladen (HTTP 403) — keine Daten", überall 0): bis die Verwalter-
+  // Erkennung steht, blendet die Section-Klasse adm-planer-warten alle Panes aus (display:none → offsetParent null). Lauf + Delta gingen
+  // in dieser Zeit OHNE ?sicht=admin raus, der Server sperrte den Verwalter (403), und der Fehler blieb bis zum 60-s-Takt stehen. Ein offener
+  // Planer-Reiter zählt deshalb auch während des Wartens als sichtbar — der Server entscheidet die Sicht (Verwalter = seine Gruppe).
+  const tplAdminReiterSichtbar = () => {
+    const p = document.getElementById('adm-pane-planer'); if(!p || p.hidden) return false
+    if(p.offsetParent !== null) return true
+    const s = p.closest('section.view'); return !!(s && s.classList.contains('active') && s.classList.contains('adm-planer-warten'))
+  }
   // Gruppenfilter (Admin-Gruppen 08.10.2026): im Admin-Reiter hängt Finns Gruppen-Chip ?gruppe= an Lauf + Delta — der Server filtert
   // die Listen (ein Verwalter bekommt mit sicht=admin ohnehin nur seine Gruppe)
   window._tplSicht = () => tplAdminReiterSichtbar() ? '?sicht=admin' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')

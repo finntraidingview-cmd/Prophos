@@ -30926,7 +30926,10 @@ def _ap_zugang(admin_reiter=False):
         return admin, uid, None, (jsonify({"ok": False, "msg": "auto_plan_regeln fehlt"}), 503)
     if not admin and str(uid) not in [str(u) for u in (reg.get("user_ids") or [])]:
         ok = False
-        if admin_reiter and _ap_sicht_param() == AP_SICHT_ADMIN:
+        # VERWALTER OHNE 403 (30.10.2026, Finn als Emin: „Delta-Daten nicht geladen (HTTP 403)"): ein Verwalter liest auch OHNE ?sicht=admin
+        # (Abruf beim Login, Planer-Modus vor der Verwalter-Erkennung) — dann nur die eigene ID (_ap_sicht_aus_anfrage), mit sicht=admin seine
+        # Gruppe. Jeder andere Login außerhalb des Planers bleibt gesperrt; Eingriffe prüfen ihre Rechte danach selbst (darf/gruppe_e).
+        if admin_reiter:
             nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → kein Verwalter, gesperrt
             ok = ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN, verwalter=bool(gruppe))
         if not ok:
@@ -35004,7 +35007,8 @@ def admin_auto_plan():
         # Admin-Reiter (08.10.2026): GET mit sicht=admin auch ohne Planer-Mitgliedschaft (ap_admin_reiter_ok); POST bleibt Planer-only.
         # Admin-Gruppen (08.10.2026): ein Verwalter liest hier seine Gruppe (ap_sicht_uid), „Jetzt planen" bleibt HT
         nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → gesperrt
-        darf = request.method == "GET" and ap_admin_reiter_ok(False, False, nur, _ap_sicht_param(), verwalter=bool(gruppe))
+        # Verwalter ohne 403 (30.10.2026, wie _ap_zugang): GET auch ohne ?sicht=admin — dann nur die eigene ID (_ap_sicht_aus_anfrage unten)
+        darf = request.method == "GET" and ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN, verwalter=bool(gruppe))
         if not darf:
             return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
