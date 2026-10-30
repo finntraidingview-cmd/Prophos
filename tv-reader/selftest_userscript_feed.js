@@ -170,7 +170,10 @@ check(!!h5.leerStrukturPasst({ textContent: KOPF + "Nothing here", querySelector
 // Pruefer S2 30.10.2026: nur ganze Leer-Phrasen am Anfang — Zustandstexte mit Einzelwoertern (yet/keine/empty/leer/nothing) nie leer
 ["Keine Berechtigung", "Keine Daten", "Account not ready yet", "Positions are not available yet", "Broker not authorized yet",
  "Empty response", "Market closed — nothing to show", "Market closed - nothing to show", "Leer", "Noch nicht verbunden", "Not yet loaded",
- "Nothing", "No access", "Keine Verbindung zum Broker", "Positions empty"].forEach(function (t) {
+ "Nothing", "No access", "Keine Verbindung zum Broker", "Positions empty",
+ "No position data available", "No position information", "No position", "No positions — permission denied", "Nothing here. Account restricted",
+ "Nothing here, broker not supported", "No positions available for this broker", "Keine Positionen verfügbar", "Nothing to show: access disabled",
+ "Keine offenen Positionen (Zugriff verweigert)"].forEach(function (t) {
   check(!!h5.leerStrukturPasst(tabelle(KOPF + t)) === false, "Struktur: Zustandstext '" + t + "' → nicht flach");
 });
 ["Nothing to show yet. You have no open positions", "Nothing here yet", "No open positions", "No positions", "Make your first trade",

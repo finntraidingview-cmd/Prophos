@@ -1150,8 +1150,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   //   · und DIESELBE Lesung (gleicher Leer-Text) steht zweimal hintereinander mit ≥ LEER_STRUKTUR_MS Abstand (leerBeweis) — eine Tabelle,
   //     die gerade laedt oder neu aufbaut (Kopf da, Zeilen noch nicht), darf nie als leer gelten (Master 30.10.2026: „fail-closed").
   const RX_LEER_KOPF_ALLE = /positions?[\s-]*id/gi;
-  const RX_LEER_WORT = /^(nothing\s+(to\s+show|here)|no\s+(open\s+)?positions?|make\s+your\s+first\s+trade|keine\s+(offenen\s+)?positionen|noch\s+keine\s+positionen)\b/i;
-  const RX_LEER_NICHT = /load|lade|laed|connect|verbind|wait|warte|sync|retry|erneut|error|fehler|fail|wrong|offline|timeout|expired|log\s*in|sign\s*in|anmeld|fetch|abruf|aktualis|unavailable|nicht verf|…|\.\.\./i;
+  const RX_LEER_WORT = /^(nothing\s+(to\s+show|here)|no\s+(open\s+)?positions|make\s+your\s+first\s+trade|keine\s+(offenen\s+)?positionen|noch\s+keine\s+positionen)\b/i;
+  const RX_LEER_NICHT = /load|lade|laed|connect|verbind|wait|warte|sync|retry|erneut|error|fehler|fail|wrong|offline|timeout|expired|log\s*in|sign\s*in|anmeld|fetch|abruf|aktualis|unavailable|nicht verf|denied|restrict|permission|berechtig|support|unterst|disabled|deaktiv|available|verfügbar|data|daten|info|access|zugriff|…|\.\.\./i;
   const LEER_STRUKTUR_MS = 400;
   // REIN RECHNEND (testbar): Positions-Tabelle (Element) → Leer-Text (Schluessel fuer die zweite Lesung) | '' (kein Beweis)
   function leerStrukturPasst(tabelle) {
