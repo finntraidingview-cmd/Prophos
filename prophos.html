@@ -34,6 +34,15 @@
     },
     toggle:function(){this.set(this.get()==='dark'?'light':'dark')}
   };
+  // GUESTLY-FARBEN (Finn 30.10.2026 ~09:22): eigenes Farbschema, je Browser (localStorage), Standard aus — PC-Tabs ändern sich nicht
+  var GK='prophos-farben';
+  function farben(an){if(an)document.documentElement.setAttribute('data-farben','guestly');else document.documentElement.removeAttribute('data-farben')}
+  try{farben(localStorage.getItem(GK)==='guestly')}catch(e){}
+  window.prophosFarben={
+    an:function(){return document.documentElement.getAttribute('data-farben')==='guestly'},
+    set:function(an){farben(!!an);try{if(an)localStorage.setItem(GK,'guestly');else localStorage.removeItem(GK)}catch(e){}
+      window.dispatchEvent(new CustomEvent('prophos:theme',{detail:{theme:window.prophosTheme.get()}}))}
+  };
 })();
 </script>
 <link rel="manifest" href='data:application/manifest+json,{"name":"Prophos","short_name":"Prophos","start_url":"https://prophos.pages.dev/prophos","display":"standalone","background_color":"#FAFBFC","theme_color":"#FAFBFC","icons":[{"src":"https://prophos.pages.dev/prophos-icon-192.png","sizes":"192x192","type":"image/png","purpose":"any%20maskable"},{"src":"https://prophos.pages.dev/prophos-icon-512.png","sizes":"512x512","type":"image/png","purpose":"any%20maskable"}]}' />
@@ -125,6 +134,35 @@
     --shadow-input-focus: 0 0 0 4px rgba(116,104,240,.28);
     --weg-echo:var(--teal); --weg-orbit:var(--violet-soft); --weg-wd:var(--good); --weg-polar:var(--blue);
     --weg-nova:#f5885c;
+  }
+  /* GUESTLY-FARBEN (Finn 30.10.2026 ~09:22: „ganz Prophos im Farbdesign der Guestly-Vorlage“, .claude/design-vorlagen-guestly.md, Werte wie die
+     --g-*-Tokens des Planers): nur Farben, Schalter in Settings → Darstellung (je Browser, Standard aus). Bewusst NICHT hier: --good/--danger/
+     --good-ink/--danger-ink/--warn* (Plus/Minus bleibt exakt wie heute), --weg-* und die ID-Farben. */
+  html[data-farben="guestly"]{
+    --violet:#5447CE; --violet-dark:#4539B8; --violet-soft:#887CFC; --violet-tint:#EFEDFD; --blue:#4996FF; --teal:#16C8C6;
+    --ink:#101828; --ink-2:#1D2939; --sub:#667085; --sub-2:#98A2B3;
+    --border:#ECEEF3; --border-soft:#F3F4F8; --surface:#FFFFFF; --surface-tint:#F3F4F8; --bg:#FFFFFF;
+    --shadow-card:0 10px 24px rgba(16,24,40,.06),0 2px 6px rgba(16,24,40,.04);
+    --shadow-card-hover:0 12px 28px rgba(16,24,40,.08),0 2px 6px rgba(16,24,40,.05);
+    --shadow-input-focus:0 0 0 4px rgba(84,71,206,.14);
+  }
+  html[data-farben="guestly"][data-theme="dark"]{
+    --violet:#887CFC; --violet-dark:#A79FFF; --violet-soft:#B3AAFF; --violet-tint:rgba(136,124,252,.16); --blue:#4996FF; --teal:#16C8C6;
+    --ink:#E7EAF0; --ink-2:#D5DAE3; --sub:#98A2B3; --sub-2:#6F7A8C;
+    --border:#252C3B; --border-soft:#1F2636; --surface:#151A24; --surface-tint:#1A2030; --bg:#10141D;
+    --shadow-card:0 10px 24px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25);
+    --shadow-card-hover:0 12px 28px rgba(0,0,0,.42),0 2px 6px rgba(0,0,0,.28);
+    --shadow-input-focus:0 0 0 4px rgba(136,124,252,.26);
+  }
+  /* Hauptknopf schwarz wie in der Vorlage (hell) bzw. hell auf dunkel */
+  html[data-farben="guestly"] #dashboard-view .btn-primary{background:#101828;color:#fff;box-shadow:0 1px 2px rgba(16,24,40,.12)}
+  html[data-farben="guestly"] #dashboard-view .btn-primary:hover{background:#1D2939}
+  html[data-farben="guestly"][data-theme="dark"] #dashboard-view .btn-primary{background:#F4F5F8;color:#101828}
+  html[data-farben="guestly"][data-theme="dark"] #dashboard-view .btn-primary:hover{background:#E4E7EC}
+  /* Handy: Karten liegen auf --bg ohne Rand (Mobil-Schicht) — Träger bleibt daher hellgrau statt weiß, sonst verschwinden die Karten */
+  @media (max-width:820px){
+    html[data-farben="guestly"]{--bg:#F3F4F8;--surface-tint:#E9EBF1}
+    html[data-farben="guestly"][data-theme="dark"]{--bg:#0B0E15;--surface-tint:#1F2636}
   }
 
   *{box-sizing:border-box}
@@ -13968,6 +14006,14 @@
             <button type="button" data-theme-wahl="light">Hell</button>
             <button type="button" data-theme-wahl="dark">Dunkel</button>
           </div>
+        </div>
+        <!-- Guestly-Farben (Finn 30.10.2026 ~09:22): nur Farben, nur dieses Gerät, Standard aus — PC-Tabs bleiben, wie sie sind -->
+        <div class="panel-head" style="margin-top:10px;margin-bottom:0">
+          <div>
+            <div class="panel-title">Guestly-Farben</div>
+            <div class="panel-sub">Farbschema der Guestly-Vorlage ansehen · nur dieses Gerät · Plus/Minus und ID-Farben bleiben</div>
+          </div>
+          <label class="switch" title="Guestly-Farben an/aus"><input type="checkbox" id="farbenGuestly"><span class="switch-slider"></span></label>
         </div>
       </div>
       <!-- Radar-Zeitbudget (29.10.2026): an/aus je Gerät (localStorage), Standard an; am PC-Tab ohne Wirkung -->
@@ -85825,6 +85871,9 @@
   });
   window.addEventListener('prophos:theme',zeigen);
   zeigen();
+  // Guestly-Farben (30.10.2026): Schalter in Settings → Darstellung
+  var gf=document.getElementById('farbenGuestly'),F=window.prophosFarben;
+  if(gf&&F){gf.checked=F.an();gf.addEventListener('change',function(){F.set(gf.checked)})}
 })();
 </script>
 
