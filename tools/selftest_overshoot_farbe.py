@@ -36,7 +36,7 @@ def zeile(anfang):
 # der Anzeige-Block der Radar-Zeile (zuWegZ) als eigene Funktion
 i = HTML.index("      if(s.wirkPkt != null){")
 block = HTML[i:HTML.index("\n      }\n", i) + 8]
-code = "\n".join([zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
+code = "\n".join(["const window = {}", js_funktion("hedgeHandSchneller"), zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
                   "function zeileOver(s){ const f1 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); let over = ''\n"
                   + block + "\n return over }"])
 H = lambda **k: {"hedge": dict({"status": "geschlossen"}, **k)}   # noqa: E731

@@ -28858,7 +28858,7 @@
     const passt = (fills || []).filter(f => f && typeof f.at === 'number' && f.at > (o.startMs || 0) + 1000 && f.at <= nach && f.at >= vor
       && f.seite === o.seite && Number(f.menge) === Number(o.menge) && Number(f.preis) > 0
       && (!f.symbol || !o.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(f.symbol)) : '') === o.wurzel)
-      && (typeof kontoTextBezug === 'function') && kontoTextBezug(f.konto, o.ext) === 'ja')
+      && (typeof kontoTextBezug === 'function') && (kontoTextBezug(f.konto, o.ext) === 'ja' || (kontoTextBezug(f.konto, o.ext) === 'kurz' && typeof o.kurzOk === 'function' && o.kurzOk(f))))
     return passt.sort((a, b) => b.at - a.at)[0] || null
   }
   window._hedgeExitFillWahl = hedgeExitFillWahl   // Test-Haken
@@ -28880,7 +28880,14 @@
         const ow = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p) : {}
         const wz = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(ow.symbol || p.masterSymbol || '')) : ''
         const f = hedgeExitFillWahl(fills, { ext: acc ? String(acc.externalId || '') : '', seite: p.richtung === 'buy' ? 'sell' : p.richtung === 'sell' ? 'buy' : null,
-          menge: ow.lots, wurzel: wz === 'MNQ' || wz === 'NQ' ? wz : null, startMs: Date.parse(p.startedAt || h.opened_at || h.at || '') || 0, endeMs })
+          menge: ow.lots, wurzel: wz === 'MNQ' || wz === 'NQ' ? wz : null, startMs: Date.parse(p.startedAt || h.opened_at || h.at || '') || 0, endeMs,
+          // GEKÜRZTES KONTO (30.10.2026, Chris f35ba6ae: „PAAPEX668794000000", 7 Apex — master_exit fehlte, auch beim Hand-Schluss des Masters):
+          // 'kurz' zählt, wenn der Text eindeutig ist oder der Fill-Preis zum Ausstieg aus dem Balance-Beweis passt (reader_kurz.exit ± 3 Pkt)
+          kurzOk: x => { try{ if(kontoTextEindeutig(x.konto, acc ? String(acc.externalId || '') : '', kontoExtIds())) return true
+            // Bündel im selben gekürzten Login (Gegenprüfung 30.10.2026): läuft/endete ein anderer Plan auf einem Konto mit demselben Text, nie
+            const geschw = (tradePlans || []).some(q => q && String(q.id) !== String(p.id) && (q.status === 'open' || q.status === 'review') && String(q.masterAccountId) !== String(p.masterAccountId)
+              && (() => { const aq = (accounts || []).find(a => String(a.id) === String(q.masterAccountId)); return !!(aq && aq.externalId && kontoTextBezug(x.konto, aq.externalId)) })())
+            const rk = h.reader_kurz; return !geschw && !!(rk && Number(rk.exit) > 1000 && Math.abs(Number(x.preis) - Number(rk.exit)) <= KURZ_TOL_PKT) }catch(_){ return false } } })
         if(!f) continue
         _hedgeExitFertig.add(String(p.id))
         const me = { at: new Date(f.at).toISOString(), preis: Number(f.preis), seite: f.seite, menge: Number(f.menge), symbol: f.symbol || null,
@@ -29327,7 +29334,25 @@
   // Lesbarer Schließ-Grund. Der Copier meldet aus MASTER-Sicht (Backend-Gegenprüfung 24.09.2026 spät — erste Fassung hatte
   // es vertauscht): level_tp = Master hat seinen TP erreicht (die Fusion-Gegenposition ist am SL gefüllt), level_sl = Master
   // am SL (Fusion am TP); dazu hand, stopout, close, unbekannt; level_mt5 = Frontend-Grund vor .470. Unbekanntes als Rohtext.
+  /* HAND SCHNELLER (30.10.2026, Chris pc-c19p2l Orbit f35ba6ae: Reader sah den Master zu 04:38:10,9 UTC, Schließbefehl 11,9 — der Copier
+   * fand Fusion schon zu, Finn hatte ~1 s vorher von Hand geschlossen; grund stand dann „hand", als hätte Prophos nichts getan). REIN:
+   * grund 'hand' + schon_zu + eigener Schließbefehl (close_at, Copier-Bestätigung ≤ 10 s danach) + ein ERKENNUNGS-Grund des Tabs:
+   * master_ende_reader → 'userscript', tp_feed/sl_feed → 'radar' (bei Altdaten ohne grund_tab: master_weg_quelle 'reader'). Gegenprüfung
+   * 30.10.2026: level_mt5 (Ticket aus der Liste weg = auch Hand-Schluss) und master_ende (jedes Plan-Ende, auch Hand/Auto-Close) sind KEINE
+   * Erkennung → bleiben „von Hand". Grenze: closed_at ist im Erfolgsweg die Schreibzeit, nicht die echte Copier-Zeit. Sonst ''. */
+  function hedgeHandSchneller(h){
+    try{
+      if(!h || h.grund !== 'hand' || h.schon_zu !== true || !h.close_at) return ''
+      const c = Date.parse(h.close_at), z = Date.parse(h.closed_at || '')
+      if(isNaN(c) || (!isNaN(z) && (z < c || z - c > 10000))) return ''
+      const gt = String(h.grund_tab || '')
+      if(gt) return ({ master_ende_reader: 'userscript', tp_feed: 'radar', sl_feed: 'radar' })[gt] || ''
+      return (h.master_weg_at && h.master_weg_quelle === 'reader') ? 'userscript' : ''
+    }catch(_){ return '' }
+  }
+  window._hedgeHandSchneller = hedgeHandSchneller   // Test-Haken
   function hedgeGrundText(g, h){
+    if(g === 'hand' && hedgeHandSchneller(h)) return `Master-Ende erkannt (${hedgeHandSchneller(h) === 'userscript' ? 'Reader' : 'Radar'}) → Schließbefehl gesendet — Fusion war schon von Hand zu (Hand schneller)`
     // Winning Day (F22): das zweite Level ist die Liquidation des Masters, kein Master-SL
     if(h && h.sl_art === 'liquidation' && (g === 'sl_feed' || g === 'level_sl')) return g === 'sl_feed' ? 'am Liquidations-Level über den Kurs-Feed geschlossen' : 'am Liquidations-Level geschlossen (Fusion-TP im Terminal gefüllt)'
     return g === 'tp_feed' ? 'am Master-TP über den Kurs-Feed geschlossen' : g === 'sl_feed' ? 'am Master-SL über den Kurs-Feed geschlossen'
@@ -29400,7 +29425,8 @@
         // Grund vom Copier (Vertrag .470: level_sl/level_tp/hand/stopout/close/unbekannt) schlägt den Frontend-Grund —
         // der Copier weiß aus der Deal-Historie, welches Level gefüllt hat. 'close'/'unbekannt' sagen nichts Neues.
         const grundEnd = (res.grund && res.grund !== 'close' && res.grund !== 'unbekannt') ? res.grund : grund
-        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, close_fehler: null, close_versuche: 0, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
+        // grund_tab (30.10.2026, s. hedgeHandSchneller): eigener Erkennungs-Grund des Tabs, auch wenn der Copier ihn mit „hand" überschreibt
+        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, grund_tab: grund || null, close_fehler: null, close_versuche: 0, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
         if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
         return { ok: true, pl }
       }
@@ -37216,7 +37242,9 @@
     const h = t && t.hedge && typeof t.hedge === 'object' ? t.hedge : null
     if(!h || h.status !== 'geschlossen' || !h.grund) return null
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    const g = String(h.grund), weg = SW_WEG_VON[g] || 'sonst'
+    // Hand schneller (30.10.2026, s. hedgeHandSchneller): Weg = der von Prophos erkannte, Text mit Zusatz; Overshoot nicht (Hand-Schluss)
+    const hs = hedgeHandSchneller(h)
+    const g = String(h.grund), weg = hs || SW_WEG_VON[g] || 'sonst'
     // sl/tp 0 = kein Level gesetzt (der Tab schreibt beim Öffnen `res.sl || 0`, z. B. ohne Notfall-SL) → null, sonst wäre Level 0 und der Overshoot ~24.000 Pkt
     const fusionSl = n(h.sl) || null, fusionTp = n(h.tp) || null, zu = n(h.fill_close), buy = h.richtung === 'buy'
     const lots = n(h.lots), wpp = n(h.wert_pro_punkt), eur = n(h.eur)
@@ -37228,7 +37256,7 @@
     // Overshoot nur, wo ein Level den Schluss ausgelöst hat (Userscript · Notfall · Radar); von Hand oder „Master nie da" schließen irgendwo
     // dazwischen — dort wäre der Abstand zum Level kein Overshoot, sondern Zufall → null, zählt in keinen Schnitt. master_ende (Plan-Ende über den
     // Tab) ebenso: die Hedge-Wache setzt ihn bei jedem nicht mehr offenen Plan, auch nach Hand-Schluss des Masters oder Auto-Close
-    const overPkt = (level != null && zu != null && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende') ? (buy ? level - zu : zu - level) : null
+    const overPkt = (level != null && zu != null && !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende') ? (buy ? level - zu : zu - level) : null
     const overEur = (overPkt != null && lots != null && wpp != null) ? overPkt * lots * wpp : null
     const overPct = (overEur != null && eur) ? overEur / Math.abs(eur) * 100 : null
     // WIRKUNG FÜR UNS (30.10.2026, Finn ~08:31: „Overshoot +1,3 Pkt · +6,43 €" ist immer rot, obwohl + nach Gewinn aussieht): over* zählt
@@ -37239,7 +37267,7 @@
     const ms = (a, b) => { const x = Date.parse(a || ''), y = Date.parse(b || ''); return (isNaN(x) || isNaN(y)) ? null : Math.max(0, y - x) }
     const mFill = h.master_exit && typeof h.master_exit === 'object' && !isNaN(Date.parse(h.master_exit.at || '')) ? h.master_exit.at : null
     const mEnde = mFill || h.master_weg_at || null
-    return { weg, wegTxt: SW_WEG_TXT[weg], grund: g, seite, level, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
+    return { weg, wegTxt: SW_WEG_TXT[weg] + (hs ? ' (Hand schneller)' : ''), handSchneller: !!hs, grund: g, seite, level, zu, fusionSl, fusionTp, eur, pl: n(h.pl),
       masterTp: n(h.tp_level_nq), masterSl: n(h.sl_level_nq), liq: h.sl_art === 'liquidation',
       overPkt, overEur, overPct, wirkPkt: wirk(overPkt), wirkEur: wirk(overEur), wirkPct: wirk(overPct), offenMs: ms(h.opened_at || h.at, h.closed_at), verzugMs: h.close_at ? ms(h.close_at, h.closed_at) : null,
       // echtes Master-Ende (30.10.2026): Exit-Fill aus TradingViews Meldung (hedge.master_exit.at) vor dem Erkennungs-Stempel, sonst ab Schließbefehl
