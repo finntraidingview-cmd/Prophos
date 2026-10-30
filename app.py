@@ -35577,7 +35577,7 @@ def fcp_richtung(fest, rnd):
 # Start klassisches Echo (route mt5 mit Slave) nicht dreht (rkGilt kennt nur tvv2/mt5v2/tsv2): ein LAUFENDER oder auf die Nachlesung
 # WARTENDER Trade derselben ID × Firma (open, review) gibt die Richtung weiter vor (FCP_RICHTUNG_LAUFEND_UEBERNEHMEN). Zwei Vorschläge
 # derselben ID × Firma in Gegenrichtung sind harmlos: der DB-Riegel (trade_plans_gegenhedge) hält den zweiten, bis der erste zu ist.
-FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = True
+FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = False   # aus seit .1934 (30.10.2026): fa00bea0 dreht Echo mt5 am Start (rkFcfd), S2 OK — Schutz macht der Start
 
 
 def fcp_fest_richtung(plaene, tag_iso=None):

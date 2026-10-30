@@ -188,12 +188,20 @@ check(t["sl"] <= 1000 and t.get("sl_gedeckelt"), f"The5ers mit max_risiko_trade 
 check(app.fcp_konto_rechnen(j, 100000, 100000, 1, True, 10.0, 0.85, random.Random(3), RF2, max_sl=700)["sl"] <= 700, "1-%-SL zusätzlich auf max_risiko_trade 700 gedeckelt")
 
 print("3) Richtungsschutz + Sicht")
+app.FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = True       # Logik der Übernahme (Schalter für den Rückweg) — danach wieder wie live
 fest = app.fcp_fest_richtung([{"user_id": "u1", "master_firm": "FundedNext", "status": "planned", "richtung": "sell"},
                               {"user_id": "u1", "master_firm": "FundedNext", "status": "open", "richtung": "buy"},
                               {"user_id": "u2", "master_firm": "The5%ers", "status": "completed", "richtung": "buy"}])
 check(fest == {"u1|" + app._ap_norm(app._firm_norm("FundedNext")): "buy"}, f"laufender Trade schlägt geplanten, beendete zählen nicht ({fest})")
 check(all(app.fcp_richtung("sell", random.Random(s)) == "sell" for s in range(20)), "feste Richtung wird übernommen")
 check({app.fcp_richtung(None, random.Random(s)) for s in range(40)} == {"buy", "sell"}, "ohne Trade gewürfelt")
+check(app.fcp_fest_richtung([{"user_id": "u1", "master_firm": "FundedNext", "status": "planned", "richtung": "sell"}]) == {},
+      "geplanter Plan gibt keine Richtung vor (Finn 30.10.2026 ~08:05)")
+app.FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = False
+check(app.fcp_fest_richtung([{"user_id": "u1", "master_firm": "FundedNext", "status": "open", "richtung": "sell"}]) == {},
+      "live (.1934): auch ein laufender Trade gibt keine Richtung mehr vor — der Start dreht (fa00bea0)")
+lo = sum(app.fcp_richtung(None, random.Random(s)) == "buy" for s in range(400))
+check(170 <= lo <= 230, f"50/50 gewürfelt ({lo} von 400 long)")
 gr = {"e1": frozenset({"e1", "e2"}), "e2": frozenset({"e1", "e2"})}
 von = lambda u: gr.get(u)   # noqa: E731
 check(app.fcp_gruppen_sicht("h1", ["h1", "h2", "e1", "e2"], von) == frozenset({"h1", "h2"}), "HT-Login sieht nur HT")
@@ -268,7 +276,11 @@ for z in erg["ausgelassen"]:
     print(f"     AUS  {z['konto']}: {z['grund']}")
 gp = {z["konto"]: z for z in erg["geplant"]}
 check(len(erg["geplant"]) == 5, f"5 Vorschläge ({len(erg['geplant'])})")
-check(gp["100k 1 → Funded"]["richtung"] == "sell" and gp["100k 2 → Funded"]["richtung"] == "sell", "H1 FundedNext: beide wie der laufende Short")
+_r = []
+for _s in range(12):
+    _e = app.fcp_planen(trocken=True, jetzt=JETZT, seed=_s)
+    _r += [z["richtung"] for z in _e["geplant"] if z["user_id"] in (H1, H2)]
+check(set(_r) == {"buy", "sell"}, "Konten derselben ID würfeln je selbst — auch neben einem laufenden Short (keine Bindung, kein Übernehmen)")
 check(gp["100k 1 → Funded"]["tp_art"] == "erster_payout_refund" and 2050 <= gp["100k 1 → Funded"]["tp"] <= 2150 and gp["100k 1 → Funded"]["hedge_eur"] == 5000,
       "Konto mit −2k ohne Payout: Refund-Ziel ganz nachholen (2.050–2.150), Hedge 5.000 €")
 check(gp["100k 7 → Funded"]["eins_prozent"] and gp["100k 7 → Funded"]["sl"] <= 780, "Emin-Konto mit 1-%-Regel: kleiner SL")
