@@ -12252,7 +12252,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         "good_day": _wd_good_day(acc, p.get("master_pl")),
         # BESTANDEN-FLAG (07.10.2026, Finn: „sobald bei Wartet/Überprüfen der Trade geflagt ist, dass er sehr wahrscheinlich gepasst
         # ist … neue Accounts hinzufügen braucht meine Handarbeit"): Kontotyp + Ziel-Balance der Ziel-Wache (zw_tick, 5-min-Takt)
-        "konto_typ": (acc or {}).get("account_type"), "ziel_usd": _zw["ziele"].get(str(p.get("master_account_id") or "")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
+        "konto_typ": (acc or {}).get("account_type"), "konto_waiting": bool((acc or {}).get("waiting_payout_since")),
+        "ziel_usd": _zw["ziele"].get(str(p.get("master_account_id") or "")),   # 01.10.2026: Tradeify-WD über 250 $ → „Good Day" in Erledigt
         # Blow-Grenze aus den Kernwerten (Ziel-Wache, 08.10.2026) — die Ziel-Spanne in Überprüfen/Manuelle Arbeit, v. a. für Echo ohne Liq
         "boden_usd": (_zw.get("boeden") or {}).get(str(p.get("master_account_id") or "")),
         # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
@@ -13657,7 +13658,7 @@ def admin_live_trades():
             teil = (ids + slave_ids)[i:i + 80]
             if not teil:
                 break
-            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at,currency"   # max_daily_drawdown: Apex mit Hedge (ah_dll_balance)
+            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at,currency,waiting_payout_since"   # max_daily_drawdown: Apex mit Hedge (ah_dll_balance)
             try:
                 _lt_rows = sb_select("accounts", {"select": _lt_sel + ",rest_planer_at", "id": f"in.({','.join(teil)})"})   # Rest zurück im Planer (20.10.2026)
             except requests.exceptions.HTTPError as e:
@@ -34094,10 +34095,51 @@ def zw_markierung_juenger(ziel_erreicht_at, bal_stand):
     return bool(m and b and m > b)
 
 
+def fcp_konto_ziel_boden(regel, groesse, zyklus, name=None):
+    """REIN RECHNEND (testbar): FUNDED CFD ZIEL IM RADAR (Finn 30.10.2026 14:1x: „Die Funded-CFD-Trades haben doch auch ein Ziel") → (Ziel-Balance,
+    Boden) | None. Genau die Planer-Regel aus fcp_konto_rechnen: Ziel erreicht ab Kontogröße + ziel[von], im 1. Zyklus der Refund-Firmen das
+    kleine Ziel (fcp_erster_payout), Boden = Kontogröße − dd. Keine Regel (Firma/Größe/Flex) → None, dann bleibt die Zeile wie bisher."""
+    jg = fcp_je_groesse(regel, groesse)
+    if not jg or any(w and w in str(name or "").lower() for w in ((regel or {}).get("ohne_namen") or [])):
+        return None
+    ep = fcp_erster_payout(regel) if int(zyklus or 1) == 1 else None
+    bereich, dd = fcp_bereich((ep or jg).get("ziel")), _wd_num(jg.get("dd"))
+    if not bereich or not dd:
+        return None
+    return float(groesse) + bereich[0], float(groesse) - float(dd)
+
+
+def zw_funded_cfd():
+    """Ziel + Boden der Funded-CFD-Konten für die Radar-Zeilen (ziel_usd, boden_usd), im Takt der Ziel-Wache. Nur Anzeige und Vorschlag im
+    Abhak-Popup — hier wird nichts umgestellt. Payouts/Regeln nicht lesbar → alte Werte bleiben."""
+    reg = _fcp_regeln_laden()
+    firmen = [f for f in ((reg or {}).get("firmen") or []) if isinstance(f, dict)]
+    if not firmen:
+        return
+    konten = _sb_all("accounts", {"select": "id,name,firm,starting_balance", "account_type": "eq.funded_cfd"}) or []
+    ids = [str(a["id"]) for a in konten]
+    pend, verw, buch = [], [], []
+    for i in range(0, len(ids), 80):
+        teil = "in.(" + ",".join(ids[i:i + 80]) + ")"
+        pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id", "account_id": teil}) or []
+        verw += _sb_all("managed_payouts", {"select": "account_id", "account_id": teil}) or []
+        buch += _sb_all("transactions", {"select": "id,account_id", "kind": "eq.payout", "account_id": teil}) or []
+    n = fcp_payouts_zaehlen(pend, verw, buch)
+    for a in konten:
+        aid = str(a["id"])
+        zb = fcp_konto_ziel_boden(ap_regel_finden(firmen, a.get("firm")), _wd_konto_groesse(a), n.get(aid, 0) + 1, a.get("name"))
+        if zb:
+            _zw["ziele"][aid], _zw["boeden"][aid] = zb
+
+
 def zw_tick(force=False):
     if not force and time.time() - _zw["at"] < ZW_TAKT_S:
         return
     _zw["at"] = time.time()
+    try:
+        zw_funded_cfd()      # eigener try: darf die Ziel-Wache der Challenges nie stören (30.10.2026)
+    except Exception as e:
+        print(f"[ziel-wache] ⚠️ Funded CFD: {type(e).__name__}: {str(e)[:160]}", flush=True)
     reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
     firmen = ((reg or {}).get("regeln") or {}).get("firmen") or []
     if not firmen:

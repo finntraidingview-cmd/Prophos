@@ -35422,7 +35422,7 @@
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     // Blow erkannt (02.10.2026) / Konto weg (05.10.2026): „geblowt" vorbelegen — seit 20.10.2026 dieselbe Wahrheit wie die Radar-Gruppe
     // „Geblowt · archivieren" (wdlGeblowtUrteil: Balance an/unter der Liquidation, Konto weg, abgehakt geblowt); Finn kann umstellen
-    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : _tw ? 'passed' : 'none'}"]`); if(stVor) stVor.checked = true
+    const stVor = document.querySelector(`input[name="mwd-erl-status"][value="${(!_mwdErlPolar && typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil(pw)) ? 'blown' : _tw ? 'passed' : (!_mwdErlPolar && wdlFcfdZielErreicht(pw)) ? 'waiting' : 'none'}"]`); if(stVor) stVor.checked = true
     // Polar: zwei Konten zweier IDs — wer geblowt ist, entscheidet das große Erledigt-Popup im Login der ID (Backend lehnt hier ≠ none ab)
     const stFeld = document.querySelector('input[name="mwd-erl-status"]')?.closest('.field'); if(stFeld) stFeld.hidden = _mwdErlPolar
     // Winning Day (Finn 23.10.2026: „‚Account bestanden, Nachfolger anlegen' macht gar keinen Sinn"): bei einem WD-Konto keine Bestanden-Zeile,
@@ -35435,7 +35435,8 @@
       const rb = stPassed.querySelector('input'), keins = document.querySelector('input[name="mwd-erl-status"][value="none"]')
       if(_mwdErlWd && rb && rb.checked && keins) keins.checked = true
     }
-    // Funded-Konten (29.10.2026): ⏳ nur Funded CFD, 🏆 nur Funded einer Futures-Firma — wie tcKontoUmPrepare; nie Polar, nie vorbelegt
+    // Funded-Konten (29.10.2026): ⏳ nur Funded CFD, 🏆 nur Funded einer Futures-Firma — wie tcKontoUmPrepare; nie Polar. Vorbelegt nur ⏳ bei
+    // erreichtem Ziel (wdlFcfdZielErreicht, 30.10.2026), abwählbar wie jede andere Zeile
     const _kt = String(pw.konto_typ || '').toLowerCase()
     const umZeilen = { 'mwd-erl-status-waiting': !_mwdErlPolar && _kt === 'funded_cfd',
       'mwd-erl-status-wd': !_mwdErlPolar && _kt === 'funded' && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(k.firma) }
@@ -36996,6 +36997,16 @@
     const rest = Number(ziel) - Number(bal)
     return { erreicht: rest <= 0, rest: Math.max(0, rest) }
   }
+  /* FUNDED CFD AM ZIEL (Finn 30.10.2026 14:1x: „Wenn das Ziel erreicht wird und ich auf Abhaken gehe, soll automatisch schon Waiting for Payout
+   * gesetzt sein"): Balance nach dem Trade ≥ Ziel (ziel_usd aus den Regeln des Funded-CFD-Planers, app.py zw_funded_cfd), Konto noch nicht auf
+   * Waiting, nicht geblowt. Nur die Vorauswahl im Abhak-Popup — geschrieben wird erst beim Abhaken über den vorhandenen Weg (konto_status 'waiting'). */
+  function wdlFcfdZielErreicht(t){
+    if(!t || String(t.konto_typ || '') !== 'funded_cfd' || t.konto_waiting) return false
+    const b = wdlBlowStand(t), zr = b && !b.geblowt ? zielRest(b.bal, t.ziel_usd) : null
+    return !!(zr && zr.erreicht)
+  }
+  window._wdlFcfdZielErreicht = wdlFcfdZielErreicht
+  window._wdlFcfdZielVonPlan = pid => wdlFcfdZielErreicht(((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)))
   function wdlBestandenChip(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
@@ -70617,6 +70628,8 @@
     }else if(a.type === 'funded_cfd' && !a.waitingPayoutSince){
       cb.dataset.ziel = 'waiting'; lbl.textContent = 'Konto jetzt zu Waiting for Payout'
       if(hint) hint.textContent = `${a.name} — Konto ist im Plus und wartet nur auf den Payout; springt beim Payout-Anfragen von selbst zurück.`
+      // Ziel erreicht (30.10.2026): vorausgewählt wie im Radar-Popup; ohne Radar-Daten bleibt der Haken aus
+      try{ if(window._wdlFcfdZielVonPlan(p.id)){ cb.checked = true; if(hint) hint.textContent += ' Ziel erreicht — vorausgewählt.' } }catch(_){}
     }else return
     wrap.hidden = false
   }
