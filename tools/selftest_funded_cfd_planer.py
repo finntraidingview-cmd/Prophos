@@ -118,6 +118,21 @@ check(app.fcp_tp_deckel(RP, jg("FundingPips", 50000), 2) == (2000.0, "ziel_plus"
       "Deckel FundingPips 50k 2.000, Tradeify CFD 3.500 (auch Zyklus 1)")
 check(app.fcp_tp_deckel(dict(R5, tp_zyklen=[500, 900]), j5, 5) == (900.0, "zyklus"), "tp_zyklen aus der Regel gewinnt (letzter Wert gilt weiter)")
 
+print("2c) 1-%-Konto über den Namen + SL nie über max_risiko_trade (Vorfall Jacob …7924, 30.10.2026)")
+E = app.fcp_eins_prozent
+check(E({"name": "100k 14197924 → Funded · 1% RULE"}) and E({"name": "x 1%-RULE"}) and E({"name": "x 1 % rule"}) and E({"max_risiko_trade": 1000}),
+      "1-%-Konto: Name „1% RULE“ (alle Schreibweisen) oder max_risiko_trade")
+check(not E({"name": "100k → Funded"}) and not E({"name": "11% rule"}) and not E({"name": "x", "max_risiko_trade": 0}), "kein 1-%-Konto ohne Kennung")
+RF2 = app.ap_regel_finden(FIRMEN, "FundedNext")
+jj = app.fcp_konto_rechnen(j, 96882, 100000, 1, E({"name": "100k 14197924 → Funded · 1% RULE"}), 10.0, 0.85, random.Random(4), RF2)
+check(jj["eins_prozent"] and 670 <= jj["sl"] <= 780, f"Jacob …7924 ohne max_risiko_trade, nur Name: SL {jj['sl']} (670–780 statt 2.417)")
+for s_ in range(20):
+    t = app.fcp_konto_rechnen(j5, 100000, 100000, 2, False, 1.0, 0.85, random.Random(s_), R5, max_sl=1000)
+    if t["sl"] > 1000:
+        break
+check(t["sl"] <= 1000 and t.get("sl_gedeckelt"), f"The5ers mit max_risiko_trade 1.000: SL {t['sl']} (nie darüber, auch ohne sl_1pct)")
+check(app.fcp_konto_rechnen(j, 100000, 100000, 1, True, 10.0, 0.85, random.Random(3), RF2, max_sl=700)["sl"] <= 700, "1-%-SL zusätzlich auf max_risiko_trade 700 gedeckelt")
+
 print("3) Richtungsschutz + Sicht")
 fest = app.fcp_fest_richtung([{"user_id": "u1", "master_firm": "FundedNext", "status": "planned", "richtung": "sell"},
                               {"user_id": "u1", "master_firm": "FundedNext", "status": "open", "richtung": "buy"},

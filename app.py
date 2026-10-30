@@ -35291,7 +35291,8 @@ def admin_funded_plan_ids():
 #    (FundedNext 100k −2k → TP ≈ 3,5–3,85k). The5ers im 1. Payout-Zyklus (kein Payout in pending/managed_payouts) fest tp_erster 750 $:
 #    die Consistency Rule (größter Tag ≤ 50 %) wird beim Payout nicht zurückgesetzt (Finn 30.10.2026).
 #    Je Trade gedeckelt (FCP_TP_ZYKLEN_STANDARD / FCP_TP_DECKEL_PLUS_STANDARD, fcp_tp_deckel) — der Rest kommt an den nächsten Tagen.
-#  - SL und Lots gewürfelt in ihrem Bereich; FundedNext mit 1-%-Risk-Limit (accounts.max_risiko_trade gesetzt, z. B. Jacob) → sl_1pct.
+#  - SL und Lots gewürfelt in ihrem Bereich; FundedNext mit 1-%-Risk-Limit (accounts.max_risiko_trade gesetzt oder „1% RULE" im Namen,
+#    fcp_eins_prozent) → sl_1pct; der SL liegt nie über max_risiko_trade (jede Firma).
 #  - Hedge: hedge_eur € auf dd $ Drawdown → master_risk = dd, slave_risk = hedge_eur, multiplier wie gp_multiplikator (Echo-Popup).
 #  - Uhrzeit zufällig im Fenster des Challenge-Planers (fdp_fenster), Richtung gewürfelt — RICHTUNGSSCHUTZ: hat dieselbe ID × Firma schon einen
 #    laufenden/wartenden/geplanten Trade, nimmt der Vorschlag dessen Richtung; mehrere Konten derselben ID × Firma im Lauf = eine Richtung.
@@ -35352,11 +35353,20 @@ def fcp_tp_deckel(regel, jg, zyklus):
     return (lohi[1] if lohi else 0.0) + (plus if plus is not None else FCP_TP_DECKEL_PLUS_STANDARD), "ziel_plus"
 
 
-def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None):
+def fcp_eins_prozent(konto):
+    """REIN RECHNEND (testbar): 1-%-Risk-Limit am Konto? accounts.max_risiko_trade gesetzt ODER der Name trägt „1% RULE" (klein/groß,
+    auch „1%-RULE", „1 % rule") — FAIL-SAFE kleinerer SL (Vorfall 30.10.2026: Jacob FundedNext 100k …7924 „→ Funded · 1% RULE" ohne
+    max_risiko_trade bekam SL 2.417 $, das Konto erlaubt 1.000 $)."""
+    k = konto or {}
+    return bool((_wd_num(k.get("max_risiko_trade")) or 0) > 0 or re.search(r"(?<![0-9])1\s*%\s*-?\s*rule", str(k.get("name") or ""), re.I))
+
+
+def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
     jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), zyklus = Payout-Zyklus (bisherige Payouts + 1;
     True/False = 1./späterer, alte Aufrufe), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt
-    je Fusion-Lot, regel = Firmen-Regel (TP-Deckel, fcp_tp_deckel)."""
+    je Fusion-Lot, regel = Firmen-Regel (TP-Deckel, fcp_tp_deckel), max_sl = accounts.max_risiko_trade — der SL liegt nie darüber (30.10.2026,
+    jede Firma)."""
     if isinstance(zyklus, bool):
         zyklus = 1 if zyklus else 2
     zyklus = max(1, int(zyklus or 1))
@@ -35394,6 +35404,10 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     basis["tp_deckel"] = deckel
     sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") else jg.get("sl")
     sl = fcp_wuerfel(sl_b, rnd)
+    ms = _wd_num(max_sl)
+    if sl and ms and ms > 0 and sl > ms:
+        sl = float(int(ms))                  # nie über das Risiko-Limit des Kontos (Vorfall Jacob …7924, 30.10.2026)
+        basis["sl_gedeckelt"] = True
     lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
     if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
         return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
@@ -35582,7 +35596,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             aus("keine Balance — ↻ Balance lesen"); continue
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
-        r = fcp_konto_rechnen(jg, float(bal), g, len(payouts.get(aid) or []) + 1, bool(_wd_num(a.get("max_risiko_trade"))), mppl, sppl, rnd, regel)
+        r = fcp_konto_rechnen(jg, float(bal), g, len(payouts.get(aid) or []) + 1, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
+                              max_sl=a.get("max_risiko_trade"))
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=len(payouts.get(aid) or []))
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
