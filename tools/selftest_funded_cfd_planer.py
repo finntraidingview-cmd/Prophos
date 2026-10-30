@@ -97,7 +97,7 @@ check(rt["aktion"] == "planen" and 3000 <= rt["tp"] <= 4000 and 2.5 <= rt["lots"
       f"Tradeify CFD 100k nach −1.500: TP {rt.get('tp')} (3.000–4.000), {rt.get('lots')} Lot, SL {rt.get('sl')}")
 
 print("2b) TP-Deckel beim Nachholen (Finn 30.10.2026 ~07:20)")
-R5 = app.ap_regel_finden(FIRMEN, "The5%ers")
+R5 = dict(app.ap_regel_finden(FIRMEN, "The5%ers"), tp_modus="zyklen")   # alte Zyklus-Deckel nur noch mit ausdrücklichem Modus
 j52 = jg("The5%ers", 200000)
 for z, soll in ((1, 750), (2, 1500), (3, 3000), (4, 6000), (7, 6000)):
     t = app.fcp_konto_rechnen(j52, 185977, 200000, z, False, 1.0, 0.85, random.Random(1), R5)
@@ -117,6 +117,35 @@ RP, RT = app.ap_regel_finden(FIRMEN, "FundingPips"), app.ap_regel_finden(FIRMEN,
 check(app.fcp_tp_deckel(RP, jg("FundingPips", 50000), 2) == (2000.0, "ziel_plus") and app.fcp_tp_deckel(RT, jg("Tradeify CFD", 100000), 1) == (3500.0, "ziel_plus"),
       "Deckel FundingPips 50k 2.000, Tradeify CFD 3.500 (auch Zyklus 1)")
 check(app.fcp_tp_deckel(dict(R5, tp_zyklen=[500, 900]), j5, 5) == (900.0, "zyklus"), "tp_zyklen aus der Regel gewinnt (letzter Wert gilt weiter)")
+
+print("2d) The5ers-Consistency (Finn 30.10.2026 ~07:40): TP = min(Rest, max(Rest/2, Gewinne))")
+RC = app.ap_regel_finden(FIRMEN, "The5%ers")
+check(app.fcp_tp_modus(RC) == "consistency50" and app.fcp_tp_modus(app.ap_regel_finden(FIRMEN, "FundedNext")) is None, "Standard: nur The5ers consistency50")
+GM = app.fcp_gewinne([{"status": "completed", "master_pl": 635.70}, {"status": "completed", "master_pl": 603.84}, {"status": "completed", "master_pl": 61.05},
+                      {"status": "completed", "master_pl": -1315.00}, {"status": "planned", "master_pl": None}])
+check(GM == 1300.59, f"Gewinne Moritz …2352 = 635,70 + 603,84 + 61,05 = {GM} (Verlust und geplanter zählen nicht)")
+check(app.fcp_gewinne([{"status": "completed", "master_pl": 500}, {"status": "completed", "master_pl": None}]) is None, "beendeter Trade ohne P&L → nicht lesbar")
+
+
+class Fest:            # Ziel genau auf einen Wert würfeln (Beispiele aus Finns Diktat)
+    def __init__(self, ziel):
+        self.z = ziel
+    def uniform(self, lo, hi):
+        return self.z if lo <= self.z <= hi else (lo + hi) / 2
+
+
+tm = app.fcp_konto_rechnen(j5, 98685, 100000, 2, False, 1.0, 0.85, Fest(1310), RC, gewinne=GM)
+check(tm["tp"] == 1312 and tm["tp_art"] == "consistency", f"Moritz …2352: Rest 2.625, Gewinne 1.300,59 → TP {tm['tp']} (Soll 1.312)")
+tf = app.fcp_konto_rechnen(j5, 95354, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=0.0)
+check(tf["tp"] == 3073, f"Finn + Pascal …5250: keine Gewinne, Rest 6.146 → TP {tf['tp']} (Soll 3.073)")
+tf2 = app.fcp_konto_rechnen(j5, 95354 + 3073, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=3073.0)
+check(tf2["tp"] == 3073, f"…5250 danach: Rest 3.073, Gewinne 3.073 → TP {tf2['tp']} (Soll 3.073)")
+tx = app.fcp_konto_rechnen(j5, 95354, 100000, 1, False, 1.0, 0.85, Fest(1500), RC, gewinne=None)
+check(tx["tp"] == 3073 and tx["tp_art"] == "consistency_ohne_gewinne", "Gewinne nicht lesbar → Rest/2 (fail-closed)")
+tg = app.fcp_konto_rechnen(j5, 100500, 100000, 3, False, 1.0, 0.85, Fest(1400), RC, gewinne=5000.0)
+check(tg["tp"] == 900, f"große Gewinne: TP nie über den Rest ({tg['tp']} = 900)")
+tk = app.fcp_konto_rechnen(j, 98000, 100000, 2, False, 10.0, 0.85, random.Random(7), app.ap_regel_finden(FIRMEN, "FundedNext"), gewinne=0.0)
+check(tk["tp"] == 2850 and tk["tp_art"] == "gedeckelt", "FundedNext unverändert (Ziel + tp_deckel_plus)")
 
 print("2c) 1-%-Konto über den Namen + SL nie über max_risiko_trade (Vorfall Jacob …7924, 30.10.2026)")
 E = app.fcp_eins_prozent
@@ -217,7 +246,8 @@ check(len(erg["geplant"]) == 5, f"5 Vorschläge ({len(erg['geplant'])})")
 check(gp["100k 1 → Funded"]["richtung"] == "sell" and gp["100k 2 → Funded"]["richtung"] == "sell", "H1 FundedNext: beide wie der laufende Short")
 check(gp["100k 1 → Funded"]["tp_art"] == "gedeckelt" and gp["100k 1 → Funded"]["tp"] == 2850, "Konto mit −2k holt nach, gedeckelt auf 2.850")
 check(gp["100k 7 → Funded"]["eins_prozent"] and gp["100k 7 → Funded"]["sl"] <= 780, "Emin-Konto mit 1-%-Regel: kleiner SL")
-check(gp["200k 3 → Funded"]["tp"] == 750, "The5ers 200k ohne Payout: TP 750")
+z3 = gp["200k 3 → Funded"]
+check(z3["tp_art"] == "consistency" and 650 <= z3["tp"] <= 750, f"The5ers 200k frisch, ohne Gewinne: TP {z3['tp']} = Rest/2 (Consistency)")
 check([z["konto"] for z in erg["ziel"]] == ["100k 4 → Funded"], "The5ers +1.600 → Ziel (Waiting for Payout)")
 aus = {z["konto"]: z["grund"] for z in erg["ausgelassen"]}
 check("Flex" in aus.get("100k Flex 6 → Funded", ""), "Flex nicht geplant")

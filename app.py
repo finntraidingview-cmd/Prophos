@@ -35311,6 +35311,12 @@ FCP_TP_MIN_USD = 250          # Rest bis Ziel kleiner (z. B. Gewinn 1.290, Ziel 
 #  - andere Firmen (keine Consistency): ziel[bis] + tp_deckel_plus (1.000 $); der Rest kommt an den nächsten Tagen.
 # Werte je Firma in funded_cfd_plan_regeln.firmen[] (sql/2026-10-30_funded_cfd_tp_deckel.sql); fehlen sie, gelten diese Standards.
 FCP_TP_ZYKLEN_STANDARD = {"the5ers": [750, 1500, 3000, 6000]}
+# THE5ERS-CONSISTENCY (Finn 30.10.2026 ~07:40, ersetzt tp_erster 750 + tp_zyklen bei The5ers): TP = min(Rest, max(Rest / 2, Gewinne)) —
+# Rest = Ziel (gewürfelt in ziel[von, bis]) − Balance, Gewinne = Summe aller Gewinn-Trades des Kontos (trade_plans completed, master_pl > 0,
+# alle bisherigen, auch vor einem Payout — die 50-%-Regel wird nie zurückgesetzt; Verluste zählen nicht). Beispiele: Moritz …2352
+# Gewinne 635,70 + 603,84 + 61,05, Rest 2.625 → TP 1.312; Finn + Pascal …5250 ohne Gewinne, Rest 6.146 → 3.073, danach wieder 3.073.
+# Fail-closed: Gewinne nicht sicher lesbar (beendeter Trade ohne master_pl) → Rest / 2. Schalter regel.tp_modus = "consistency50".
+FCP_TP_MODUS_STANDARD = {"the5ers": "consistency50"}
 FCP_TP_DECKEL_PLUS_STANDARD = 1000
 _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 
@@ -35361,7 +35367,27 @@ def fcp_eins_prozent(konto):
     return bool((_wd_num(k.get("max_risiko_trade")) or 0) > 0 or re.search(r"(?<![0-9])1\s*%\s*-?\s*rule", str(k.get("name") or ""), re.I))
 
 
-def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None):
+def fcp_gewinne(plaene):
+    """REIN RECHNEND (testbar): Summe der Gewinn-Trades eines Kontos (status completed, master_pl > 0) — None, wenn ein beendeter Trade
+    keinen master_pl hat (nicht sicher lesbar → fail-closed Rest / 2)."""
+    summe = 0.0
+    for p in plaene or ():
+        if p.get("status") != "completed":
+            continue
+        pl = _wd_num(p.get("master_pl"))
+        if pl is None:
+            return None
+        if pl > 0:
+            summe += pl
+    return round(summe, 2)
+
+
+def fcp_tp_modus(regel):
+    """Modus der Firma: regel.tp_modus, sonst Standard je Firmen-Schlüssel (The5ers consistency50), sonst None (Deckel-Logik)."""
+    return (regel or {}).get("tp_modus") or FCP_TP_MODUS_STANDARD.get((((regel or {}).get("namen") or [""])[0]))
+
+
+def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None, max_sl=None, gewinne=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
     jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), zyklus = Payout-Zyklus (bisherige Payouts + 1;
     True/False = 1./späterer, alte Aufrufe), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt
@@ -35391,7 +35417,16 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
     ziel = max(ziel, ziel_b[0])
     deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus)
-    if erster_zyklus and _wd_num(jg.get("tp_erster")):
+    if fcp_tp_modus(regel) == "consistency50":
+        rest = float(round(ziel - gewinn))
+        g_ok = _wd_num(gewinne) if gewinne is not None else None
+        tp = float(round(min(rest, max(rest / 2.0, g_ok or 0.0))))
+        tp_art = "consistency" if g_ok is not None else "consistency_ohne_gewinne"
+        deckel = None
+        basis["gewinne"] = g_ok
+        if tp < FCP_TP_MIN_USD:
+            tp, tp_art = float(FCP_TP_MIN_USD), "mindest"
+    elif erster_zyklus and _wd_num(jg.get("tp_erster")):
         tp, tp_art = float(jg["tp_erster"]), "erster_payout"        # The5ers Zyklus 1: immer genau 750 (= tp_zyklen[0])
     elif erster_zyklus and deckel_art == "zyklus":
         tp, tp_art = deckel, "erster_payout"
@@ -35525,7 +35560,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,started_at,ended_at,completed_at,start_um,"
                                                     "master_pl,slave_pl,route,richtung,master_contracts,master_tp,master_sl,multiplier,auto_bestaetigt_at,"
                                                     "created_at,planned_for,notes,funded_plan:mt5_baseline->funded_plan,final:mt5_baseline->final",
-                                          "master_account_id": f"in.({teil})", "created_at": "gte." + (jetzt - timedelta(days=120)).isoformat()}) or []
+                                          "master_account_id": f"in.({teil})"}) or []    # alle Trades des Kontos (Gewinne, The5ers-Consistency)
         for z in _sb_all("pending_payouts", {"select": "account_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []:
             payouts.setdefault(str(z.get("account_id")), []).append(z.get("requested_at") or z.get("created_at"))
         for z in _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []:
@@ -35597,7 +35632,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
         r = fcp_konto_rechnen(jg, float(bal), g, len(payouts.get(aid) or []) + 1, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
-                              max_sl=a.get("max_risiko_trade"))
+                              max_sl=a.get("max_risiko_trade"), gewinne=fcp_gewinne(pl))
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=len(payouts.get(aid) or []))
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
@@ -35650,7 +35685,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
                                                                          "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
-                                                                         "zyklus", "tp_deckel")},
+                                                                         "zyklus", "tp_deckel", "gewinne")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))
