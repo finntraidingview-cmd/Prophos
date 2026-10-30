@@ -81453,14 +81453,15 @@
       const usd = tp && tpPkt ? tp / tpPkt : sl && slPkt ? sl / slPkt : null
       const groesse = zahl(x.groesse), dd = zahl(x.dd), boden = groesse && dd ? groesse - dd : null
       const rest = zahl(x.ziel) != null && zahl(x.balance) != null ? Math.max(0, zahl(x.ziel) - zahl(x.balance)) : null
-      const stufe = [{ erster_payout: 'TP fest vor dem 1. Payout', ziel: 'TP aufs Ziel', nachholen: 'TP holt den Verlust nach' }[x.tp_art] || '',
+      const stufe = [{ erster_payout: 'TP fest vor dem 1. Payout', erster_payout_refund: 'TP aufs Refund-Ziel (1. Payout)', ziel: 'TP aufs Ziel', nachholen: 'TP holt den Verlust nach' }[x.tp_art] || '',
         zahl(x.gewinn) != null ? `Gewinn ${zahl(x.gewinn) < 0 ? '−' : '+'}${$txt(x.gewinn)} $` : '', x.eins_prozent ? '1-%-Regel' : '', x.richtung_geschuetzt ? 'Richtung wie laufender Trade' : ''].filter(Boolean).join(' · ') || null
       const minus = zahl(x.hedge_tp_eur) != null ? Math.abs(zahl(x.hedge_tp_eur)) : null, plus = zahl(x.hedge_sl_eur) != null ? Math.abs(zahl(x.hedge_sl_eur)) : null
       const fusion = (minus != null || plus != null || zahl(x.hedge_lots) != null) ? { lots: zahl(x.hedge_lots), minus, plus, gedeckt: zahl(x.hedge_eur), tpPkt, slPkt } : null
       // REFUND (Finn 30.10.2026 ~08:02): erster Payout-Zyklus einer Refund-Firma — Feld vom Backend (S4), sonst wie accRefundChipHtml:
       // FTMO / FundedNext (nicht Futures) und payouts_n = 0 aus der Admin-Übersicht; unbekannt → kein Chip
       // Feld laut S4: erster_payout (bool) in geplant[]/ziel[] und plaene[] (aus mt5_baseline.funded_plan — fehlt nach dem Echo-Start, dann Rückfall)
-      const refund = typeof x.erster_payout === 'boolean' ? x.erster_payout : (() => { const f = String(x.firma || '')
+      // tp_art „erster_payout_refund“ (S4 087c8db8) ist ebenfalls ein sicheres Zeichen für den ersten Zyklus
+      const refund = typeof x.erster_payout === 'boolean' ? (x.erster_payout || x.tp_art === 'erster_payout_refund') : x.tp_art === 'erster_payout_refund' ? true : (() => { const f = String(x.firma || '')
         if(!(/ftmo/i.test(f) || (/f(ou|u)nded\s*next/i.test(f) && !/futures/i.test(f)))) return false
         const r = adKonten.get(String(x.konto_id || '')); return r && r.payouts_n != null ? Number(r.payouts_n) === 0 : null })()
       return Object.assign({ fusion, refund, plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || String(x.user || ''),
