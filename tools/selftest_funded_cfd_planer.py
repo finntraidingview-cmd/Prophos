@@ -72,7 +72,7 @@ for firma, g in (("The5%ers", 100000), ("The5%ers", 200000), ("FundedNext", 5000
 
 print("2) Beispielrechnungen")
 j = jg("FundedNext", 100000)
-r = app.fcp_konto_rechnen(j, 98000, 100000, True, False, 10.0, 0.85, random.Random(7), {"namen": ["fundednext"], "tp_deckel_plus": 99999})
+r = app.fcp_konto_rechnen(j, 98000, 100000, False, False, 10.0, 0.85, random.Random(7), {"namen": ["fundednext"], "tp_deckel_plus": 99999})
 check(r["aktion"] == "planen" and 3500 <= r["tp"] <= 3850 and r["tp_art"] == "nachholen", f"FundedNext 100k nach −2k ohne Deckel (alter Aufruf ohne Regel): TP {r.get('tp')} (3.500–3.850)")
 print(f"     → Balance 98.000 · Ziel {r['ziel']:.0f} · TP {r['tp']:.0f} $ ({r['tp_pkt']} Pkt) · SL {r['sl']:.0f} $ · {r['lots']} Lot · "
       f"Hedge {r['hedge_lots']} Lot Fusion, {r['hedge_eur']:.0f} € auf {r['dd']:.0f} $ DD → am SL +{r['hedge_sl_eur']:.0f} €, am TP {r['hedge_tp_eur']:.0f} €")
@@ -146,6 +146,27 @@ tg = app.fcp_konto_rechnen(j5, 100500, 100000, 3, False, 1.0, 0.85, Fest(1400), 
 check(tg["tp"] == 900, f"große Gewinne: TP nie über den Rest ({tg['tp']} = 900)")
 tk = app.fcp_konto_rechnen(j, 98000, 100000, 2, False, 10.0, 0.85, random.Random(7), app.ap_regel_finden(FIRMEN, "FundedNext"), gewinne=0.0)
 check(tk["tp"] == 2850 and tk["tp_art"] == "gedeckelt", "FundedNext unverändert (Ziel + tp_deckel_plus)")
+
+print("2e) Erster Payout = Refund (Finn 30.10.2026 ~08:00, nur FundedNext)")
+RFN = app.ap_regel_finden(FIRMEN, "FundedNext")
+for gg, hed in ((50000, 2500), (100000, 5000), (200000, 10000)):
+    t = app.fcp_konto_rechnen(jg("FundedNext", gg), gg, gg, 1, False, 10.0, 0.85, random.Random(2), RFN)
+    check(t["erster_payout"] and 50 <= t["tp"] <= 150 and t["hedge_eur"] == hed and t["tp_art"] == "erster_payout_refund",
+          f"FundedNext {gg // 1000}k ohne Payout: TP {t['tp']} (50–150), Hedge {t['hedge_eur']} € (Soll {hed})")
+t = app.fcp_konto_rechnen(j, 100100, 100000, 1, False, 10.0, 0.85, random.Random(2), RFN)
+check(t["aktion"] == "ziel", "ohne Payout ab +50 → Ziel erreicht (Waiting for Payout)")
+t = app.fcp_konto_rechnen(j, 97500, 100000, 1, False, 10.0, 0.85, Fest(100) if "Fest" in dir() else random.Random(3), RFN)
+check(2550 <= t["tp"] <= 2650 and t.get("tp_deckel") is None, f"ohne Payout nach −2.500: TP {t['tp']} = ganzer Rest, kein Deckel")
+t = app.fcp_konto_rechnen(j, 100030, 100000, 1, False, 10.0, 0.85, Fest(51) if "Fest" in dir() else random.Random(3), RFN)
+check(t["tp"] >= 25, f"Rest winzig → mindestens 25 $ ({t['tp']})")
+t = app.fcp_konto_rechnen(j, 100000, 100000, 2, False, 10.0, 0.85, random.Random(2), RFN)
+check(not t["erster_payout"] and 1500 <= t["tp"] <= 1850 and t["hedge_eur"] == 1500, f"ab dem 1. Payout normal: TP {t['tp']}, Hedge {t['hedge_eur']}")
+t = app.fcp_konto_rechnen(j, 100000, 100000, 1, True, 10.0, 0.85, random.Random(3), RFN)
+check(t["erster_payout"] and 670 <= t["sl"] <= 780, "1-%-Regel bleibt (SL 670–780) auch im Refund-Zyklus")
+check(not app.fcp_konto_rechnen(j5, 100000, 100000, 1, False, 1.0, 0.85, random.Random(2), app.ap_regel_finden(FIRMEN, "The5%ers"))["erster_payout"],
+      "The5ers: kein Refund-Modus")
+check(not app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, random.Random(2), dict(RFN, erster_payout=False))["erster_payout"],
+      "erster_payout false in der Regel → aus")
 
 print("2c) 1-%-Konto über den Namen + SL nie über max_risiko_trade (Vorfall Jacob …7924, 30.10.2026)")
 E = app.fcp_eins_prozent
@@ -244,7 +265,8 @@ for z in erg["ausgelassen"]:
 gp = {z["konto"]: z for z in erg["geplant"]}
 check(len(erg["geplant"]) == 5, f"5 Vorschläge ({len(erg['geplant'])})")
 check(gp["100k 1 → Funded"]["richtung"] == "sell" and gp["100k 2 → Funded"]["richtung"] == "sell", "H1 FundedNext: beide wie der laufende Short")
-check(gp["100k 1 → Funded"]["tp_art"] == "gedeckelt" and gp["100k 1 → Funded"]["tp"] == 2850, "Konto mit −2k holt nach, gedeckelt auf 2.850")
+check(gp["100k 1 → Funded"]["tp_art"] == "erster_payout_refund" and 2050 <= gp["100k 1 → Funded"]["tp"] <= 2150 and gp["100k 1 → Funded"]["hedge_eur"] == 5000,
+      "Konto mit −2k ohne Payout: Refund-Ziel ganz nachholen (2.050–2.150), Hedge 5.000 €")
 check(gp["100k 7 → Funded"]["eins_prozent"] and gp["100k 7 → Funded"]["sl"] <= 780, "Emin-Konto mit 1-%-Regel: kleiner SL")
 z3 = gp["200k 3 → Funded"]
 check(z3["tp_art"] == "consistency" and 650 <= z3["tp"] <= 750, f"The5ers 200k frisch, ohne Gewinne: TP {z3['tp']} = Rest/2 (Consistency)")

@@ -35383,6 +35383,14 @@ FCP_TP_ZYKLEN_STANDARD = {"the5ers": [750, 1500, 3000, 6000]}
 # Gewinne 635,70 + 603,84 + 61,05, Rest 2.625 → TP 1.312; Finn + Pascal …5250 ohne Gewinne, Rest 6.146 → 3.073, danach wieder 3.073.
 # Fail-closed: Gewinne nicht sicher lesbar (beendeter Trade ohne master_pl) → Rest / 2. Schalter regel.tp_modus = "consistency50".
 FCP_TP_MODUS_STANDARD = {"the5ers": "consistency50"}
+# ERSTER PAYOUT = REFUND (Finn 30.10.2026 ~08:00, nur FundedNext — FTMO folgt, sobald es im Planer ist): solange das Konto noch keinen
+# Payout hatte (Zyklus 1, dieselbe Zählung wie bei The5ers: pending_payouts + managed_payouts), gilt ein kleines Ziel (+50 bis +150 $,
+# TP aufs Ziel, auch nach Verlust ganz nachholen — der TP-Deckel und der Mindest-TP greifen hier nicht) und ein großer Hedge: hedge_eur_je_dd
+# € je $ Drawdown (0,5 → 100k 5.000 € auf 10.000 $, 50k 2.500 € auf 5.000 $, 200k 10.000 € auf 20.000 $). Ab dem ersten Payout die
+# normalen FundedNext-Regeln. SL/Lots/1-%-Regel unverändert. Werte je Firma in funded_cfd_plan_regeln.firmen[].erster_payout
+# (sql/2026-10-30_funded_cfd_erster_payout.sql); fehlt der Schlüssel, gilt dieser Standard.
+FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5}}
+FCP_ERSTER_PAYOUT_TP_MIN_USD = 25    # Rest bis zum kleinen Ziel winzig → wenigstens 25 $ (≈ 1,5–2,5 Pkt bei 1–1,75 Lot)
 FCP_TP_DECKEL_PLUS_STANDARD = 1000
 _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 
@@ -35448,6 +35456,15 @@ def fcp_gewinne(plaene):
     return round(summe, 2)
 
 
+def fcp_erster_payout(regel):
+    """Erster-Payout-Werte der Firma ({ziel, hedge_eur_je_dd}) — regel.erster_payout (false = aus), sonst Standard je Firmen-Schlüssel, sonst None."""
+    r = regel or {}
+    if "erster_payout" in r:
+        ep = r.get("erster_payout")
+        return ep if isinstance(ep, dict) and fcp_bereich(ep.get("ziel")) else None
+    return FCP_ERSTER_PAYOUT_STANDARD.get(((r.get("namen") or [""])[0]))
+
+
 def fcp_tp_modus(regel):
     """Modus der Firma: regel.tp_modus, sonst Standard je Firmen-Schlüssel (The5ers consistency50), sonst None (Deckel-Logik)."""
     return (regel or {}).get("tp_modus") or FCP_TP_MODUS_STANDARD.get((((regel or {}).get("namen") or [""])[0]))
@@ -35468,12 +35485,17 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-CFD-Planer"}
     if balance is None:
         return {"aktion": "aus", "grund": "keine Balance"}
+    ep = fcp_erster_payout(regel) if erster_zyklus else None
+    if ep and _wd_num(jg.get("dd")):
+        # ERSTER PAYOUT = REFUND: kleines Ziel + Hedge je $ DD statt der normalen Werte (SL/Lots bleiben)
+        je = _wd_num(ep.get("hedge_eur_je_dd"))
+        jg = dict(jg, ziel=ep.get("ziel"), **({"hedge_eur": round(je * float(jg["dd"]), 2)} if je and je > 0 else {}))
     ziel_b, dd = fcp_bereich(jg.get("ziel")), _wd_num(jg.get("dd"))
     if not ziel_b or not dd:
         return {"aktion": "aus", "grund": "Regel unvollständig (ziel / dd)"}
     gewinn = round(float(balance) - g, 2)
     basis = {"balance": round(float(balance), 2), "start": g, "gewinn": gewinn, "ziel_von": g + ziel_b[0], "ziel_bis": g + ziel_b[1],
-             "dd": dd, "erster_zyklus": bool(erster_zyklus), "zyklus": zyklus, "eins_prozent": bool(eins_prozent)}
+             "dd": dd, "erster_zyklus": bool(erster_zyklus), "zyklus": zyklus, "eins_prozent": bool(eins_prozent), "erster_payout": bool(ep)}
     if balance <= g - dd:
         return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ am/unter dem Boden ({_liq_de(g - dd)} $) — geblowt?")
     if gewinn > 2 * ziel_b[1] + dd:
@@ -35483,7 +35505,9 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
     ziel = max(ziel, ziel_b[0])
     deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus)
-    if fcp_tp_modus(regel) == "consistency50":
+    if ep:
+        tp, tp_art, deckel = max(float(round(ziel - gewinn)), float(FCP_ERSTER_PAYOUT_TP_MIN_USD)), "erster_payout_refund", None
+    elif fcp_tp_modus(regel) == "consistency50":
         rest = float(round(ziel - gewinn))
         g_ok = _wd_num(gewinne) if gewinne is not None else None
         tp = float(round(min(rest, max(rest / 2.0, g_ok or 0.0))))
@@ -35752,7 +35776,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
                                                                          "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
-                                                                         "zyklus", "tp_deckel", "gewinne")},
+                                                                         "zyklus", "tp_deckel", "gewinne", "erster_payout")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))
