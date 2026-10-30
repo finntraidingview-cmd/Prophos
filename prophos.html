@@ -15800,6 +15800,9 @@
       ht: String((admGruppenListe().find(x => x.ht) || {}).id || '') })
     // eingeschränkt (Verwalter/eigener Code): Listen aus nutzerübergreifenden Tabellen nur über _admGruppeOk (Winning Days, 08.10.2026)
     window._admNurGruppe = () => admEingeschraenkt() || !!eigenerCode
+    // GEHÖRT ZU HT? (30.10.2026, Master: „jede Gruppe nur sich" — der HT-Automatismus im WD-Farmer fasst Emins Gruppe nie an): streng, ohne
+    // Gruppenliste (noch nie geladen) oder ohne HT-Gruppe = nein
+    window._admIstHtId = uid => { const gl = admGruppenListe(), ht = gl.find(y => y.ht); return !!ht && !(ht.ausser || []).map(String).includes(String(uid)) }
     // dasselbe, aber ohne vorher den Admin betreten zu haben: admin_zugang (eigene Zeile, RLS) einmal je Login nachladen (Prüfer M1,
     // 08.10.2026) — die Schreib-Wächter im Farmer/Markt (wdDarf) fragen das, bevor sie Tagesplan-Zeilen anderer IDs anfassen
     // nicht prüfbar (admin_zugang nicht lesbar, Prüfer K4) → im Zweifel eingeschränkt, wie der Kommentar an wdNurGruppe sagt
@@ -66993,7 +66996,8 @@
     const wuerfeln = k => { const kd = wdKontoDaten(k.id); if(!kd || !wdAktiv(k)) return false
       let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: kd.live_balance, slaveCurrency: '€', fx: fxW, regeln: vpW.regeln, zufall: 0.5 }) }catch(_){}
       return wdKontoWuerfel(k, kd, vpW, z) }
-    for(const e of await wdNurErlaubte(opt && opt.nurSicht ? erw.filter(x => wdSichtOk(x.user_id)) : erw)){   // eingeschränkt: nur IDs der eigenen Sicht (Prüfer M1, 08.10.2026); automatisch zusätzlich die Admin-Sicht (Gruppen-Chip)
+    const nurHt = uid => !(opt && opt.nurHt) || (typeof window._admIstHtId === 'function' && window._admIstHtId(uid))   // „jede Gruppe nur sich" (30.10.2026)
+    for(const e of await wdNurErlaubte((opt && opt.nurSicht ? erw.filter(x => wdSichtOk(x.user_id)) : erw).filter(x => nurHt(x.user_id)))){   // eingeschränkt: nur IDs der eigenen Sicht (Prüfer M1, 08.10.2026); automatisch zusätzlich die Admin-Sicht (Gruppen-Chip)
       const jetzt = new Date().toISOString(), x = byUid.get(e.user_id)
       if(!x){
         for(const k of e.konten) wuerfeln(k)
@@ -67019,8 +67023,13 @@
       }
       if(ge){
         const status = konten.some(wdAktiv) ? 'geplant' : 'leer'
-        jobs.push(supabase.from('wd_tagesplan').update({ konten, status, updated_at: jetzt }).eq('tag', tag).eq('user_id', x.user_id).neq('status', 'laeuft')
-          .then(({ error }) => { if(!error) aktualisiert++ }))
+        // S2-Stopp 30.10.2026: nur auf genau den gelesenen Stand schreiben (updated_at) und nie in eine laufende/fertige Zeile — sonst überschrieb
+        // eine alte konten-Kopie plan_id/g_versatz/w_richtung eines PC-Tabs, der eben gewürfelt hatte (Doppel-Pläne); automatisch zusätzlich nur
+        // ungewürfelt (start_um null). 0 Zeilen = jemand war schneller → nächster Takt
+        let q = supabase.from('wd_tagesplan').update({ konten, status, updated_at: jetzt }).eq('tag', tag).eq('user_id', x.user_id).not('status', 'in', '(laeuft,fertig,verpasst)')
+        if(x.updated_at) q = q.eq('updated_at', x.updated_at)
+        if(opt && opt.nurUngewuerfelt) q = q.is('start_um', null)
+        jobs.push(q.select('user_id').then(({ data, error }) => { if(!error && data && data.length) aktualisiert++ }))
       }
     }
     await Promise.all(jobs)
@@ -69451,7 +69460,10 @@
       // PLANER SCHREIBEN NUR MIT RECHT (Master 30.10.2026: „in HT dürfen nur ‚Finn + Pascal' und ‚Pascal' in den Planern schreiben, alle
       // anderen nur ansehen") — vom Server (S4, /admin/planer-rechte), nicht prüfbar = nichts schreiben
       if(!(await wdPlanerSchreiben())) return
-      const e = await wdAlleEintragen(tag, { nurUngewuerfelt: true, nurSicht: true })
+      // nur in der HT-Sicht (kein Verwalter-Gruppen-Chip gewählt) und nur HT-IDs — Emins Gruppe tragen ihre eigenen PC-Tabs ein
+      const gs = typeof window._admGruppeSicht === 'function' ? window._admGruppeSicht() : null
+      if(!gs || gs.eingeschraenkt || (gs.gruppe && gs.gruppe !== gs.ht)) return
+      const e = await wdAlleEintragen(tag, { nurUngewuerfelt: true, nurSicht: true, nurHt: true })
       if(e.fehler || !(e.neu || e.aktualisiert)) return
       let txt = `Automatisch eingetragen: ${e.neu || 0} ID${e.neu === 1 ? '' : 's'} neu, ${e.aktualisiert || 0} Zeile${e.aktualisiert === 1 ? '' : 'n'} um neue Konten ergänzt`
       // Würfeln nur, solange im Fenster noch Platz ist (Prüfung 30.10.2026: sonst landete eine neue ID nach „Spätestens" direkt hinter dem letzten Block)
