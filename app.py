@@ -29242,7 +29242,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
                                                                  "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler,"
                                                                  "pp:mt5_baseline->puls_pause,"   # Puls-Pause (Braucht dich, 20.10.2026)
-                                                                 "kt:mt5_baseline->kette,rh:mt5_baseline->richtung_hand",
+                                                                 "kt:mt5_baseline->kette,rh:mt5_baseline->richtung_hand,"
+                                                                 "tm:mt5_baseline->tage_mini",   # Tage-Mini bleibt Echo V2 (ap_eh_wird_hedgen, 30.10.2026)
                                                        "status": "eq.planned", "order": "id.asc",
                                                        "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
                     if str(p.get("user_id")) not in ausgeblendet and not ersetzt(p) and not ap_ist_waise(p)]   # Waise (09.10.2026)
@@ -29435,6 +29436,8 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  # TOPSTEP-KETTE (09.10.2026): Block mt5_baseline.kette (nr, tag_typ, tagesziel, verlust_grenze, t2_grund …) — die Planer-
                  # Seite beschriftet damit „Trade 1 · Reparatur-Tag" auch für fremde IDs (nur Anzeige)
                  kette=p.get("kt") if isinstance(p.get("kt"), dict) else None,
+                 # TAGE-MINI (30.10.2026, Prüfer S2): eh_tick lässt ihn Echo V2 ohne Hedge — die Waage darf ihn als Gegentrade ziehen
+                 tage_mini=bool(p.get("tm")),
                  balance_live=ap_balance_live(acc_balance_wahl(a, echo_bal, dup_bal)[3] if a else None,
                                               letzt_je.get(str(p.get("master_account_id") or ""))),   # 08.10.2026
                  # BODEN (08.10.2026, Balance-Balken Slave 4): Liquidations-Level aus den Firmen-Kernwerten wie im Planer

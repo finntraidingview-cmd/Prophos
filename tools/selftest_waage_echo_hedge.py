@@ -128,9 +128,40 @@ def planer_unveraendert(src, ns):
     ok(aend and all(a["von_richtung"] == a["nach_richtung"] for a in aend), "Waage dreht nie eine Richtung (von = nach), auch bei aus")
 
 
+def stand_zeilen(ns, src):
+    """Tage-Mini kommt wirklich in die Waage-Zeile (Prüfer S2 zu 58dbadfd): _ap_stand_laden mit der Fake-DB aus selftest_auto_delta."""
+    print("Waage-Zeile aus _ap_stand_laden (Select + basiszeile/z.update)")
+    import importlib.util
+    from datetime import datetime, timedelta, timezone
+    i = src.index("\ndef _ap_stand_laden(")
+    blk = src[i:src.index("\n\n\n", i)]
+    ok('"tm:mt5_baseline->tage_mini"' in blk and 'tage_mini=bool(p.get("tm"))' in blk, "Select liest mt5_baseline->tage_mini, Zeile setzt tage_mini")
+    spec = importlib.util.spec_from_file_location("sad", os.path.join(HIER, "selftest_auto_delta.py"))
+    d = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(d)
+    a = d.lade()
+    jetzt = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    basis = {"user_id": d.U1, "master_account_id": "k-2", "master_firm": "FundedNext", "status": "planned", "richtung": "sell",
+             "master_tp": 600, "master_sl": 300, "master_contracts": 0.2, "route": "mt5v2", "start_um": (jetzt + timedelta(minutes=30)).isoformat(),
+             "auto_plan": True, "auto_bestaetigt_at": jetzt.isoformat(), "created_at": jetzt.isoformat()}
+    geplant = [dict(basis, id="p-mini", tm={"tag": "2026-10-30"}),          # PostgREST liefert den Alias tm
+               dict(basis, id="p-norm", start_um=(jetzt + timedelta(minutes=45)).isoformat())]
+    reg, _ = d.db_stubs(a, jetzt, geplant)
+    reg["regeln"]["echo_hedge"] = {"an": True}
+    stand = a["_ap_stand_laden"](reg, jetzt=jetzt)
+    z = {r["plan_id"]: r for r in list(stand["geplant"]) + list(stand.get("folgetag") or [])}
+    ok(stand.get("eh_an") is True, "Stand trägt den Schalter echo_hedge an")
+    ok(z.get("p-mini", {}).get("tage_mini") is True and z.get("p-norm", {}).get("tage_mini") is False,
+       f"Zeilen: Tage-Mini {z.get('p-mini', {}).get('tage_mini')}, normaler Plan {z.get('p-norm', {}).get('tage_mini')}")
+    W = ns["ap_eh_wird_hedgen"]
+    ok(not W(z["p-mini"], True) and W(z["p-norm"], True),
+       "aus der echten Zeile: Tage-Mini bleibt Kandidat der Waage, die normale CFD-Challenge (eh_tick hedgt) nicht")
+
+
 def main():
     ns, src = lade()
     schleife(ns)
+    stand_zeilen(ns, src)
     planer_unveraendert(src, ns)
     print(f"\n{'ALLES OK' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
     sys.exit(1 if FEHLER else 0)
