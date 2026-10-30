@@ -4073,6 +4073,23 @@
   #adm-pane-wd .wd-ablauf-tab button.wd-dir-flip{border:0;font:inherit;cursor:pointer}
   #adm-pane-wd .wd-ablauf-tab button.wd-dir-flip:hover{filter:brightness(.94)}
   #adm-pane-wd .wd-ablauf-tab button.wd-dir-flip:disabled{cursor:default;filter:none}
+  /* RICHTUNG JE KONTO ruhig (30.10.2026, Finn ~07:55): gemischte ID = kleine Pfeile je Konto in neutralem Chip, gedreht = gedämpftes ⇅ mit Tooltip */
+  #adm-pane-wd .chip.wd-dir-mix{background:var(--surface-tint);color:var(--ink-2);letter-spacing:1px;font-variant-numeric:tabular-nums}
+  #adm-pane-wd .wd-dreh{color:var(--sub);font-size:11px;margin-left:3px;cursor:help}
+  /* WD-ÜBERSICHT (30.10.2026, Finn ~07:55): Zu bestätigen · Läuft · Braucht dich · Wartet auf Start wie im Challenge-/Funded-Planer (dieselben Karten) */
+  #wd-uebersicht{margin-top:14px}
+  #wd-uebersicht .ap-adm-karte{border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff);padding:14px 16px 10px;margin-bottom:14px}
+  #wd-uebersicht .ap-adm-kopf{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  #wd-uebersicht .ap-adm-kopf b{font-size:14px;color:var(--ink)} #wd-uebersicht .ap-adm-kopf span{font-size:12px;color:var(--sub)}
+  #wd-uebersicht .ap-adm-id{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px} #wd-uebersicht .ap-adm-id i{width:9px;height:9px;border-radius:50%;flex:none}
+  #wd-uebersicht .ap-adm-grp{display:flex;align-items:center;gap:10px;padding:10px 0 6px;margin-top:4px;border-top:1px solid var(--border-soft)}
+  #wd-uebersicht .ap-adm-kopf + .ap-adm-grp{border-top:0;margin-top:0} #wd-uebersicht .ap-adm-grp>span.n{font-size:12px;color:var(--sub)}
+  #wd-uebersicht .ap-adm-ok{padding:3px 9px;border-radius:7px;border:1px solid #A7F3D0;background:#ECFDF5;color:#047857;font-weight:600;font-size:12px;cursor:pointer}
+  #wd-uebersicht .ap-adm-ok:disabled{opacity:.5;cursor:default} #wd-uebersicht .ap-adm-kopf .ap-adm-ok{margin-left:auto}
+  #wd-uebersicht .ap-adm-scroll{overflow-x:auto} #wd-uebersicht .wd-tab{width:100%;min-width:520px}
+  #wd-uebersicht .wd-tab td.zahl,#wd-uebersicht .wd-tab th.zahl{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #wd-uebersicht .wd-ue-leer{color:var(--sub);font-size:12.5px;padding:2px 0 6px}
+  #wd-uebersicht .wd-ue-grund{color:var(--sub);font-size:12px}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 12px 18px;background:var(--surface-tint)}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail .wd-karte{border-color:var(--violet);margin-top:2px;background:var(--surface, #fff)}
   #adm-pane-wd .wd-konten tr.wd-ohne td{border-bottom:0;padding-top:6px}
@@ -12448,6 +12465,7 @@
               </div>
             </div>
             <div id="wd-ablauf"></div>
+            <div id="wd-uebersicht"></div>
             <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
           </div>
           <!-- HEUTE NICHT DRIN (28.10.2026, Finn: „alle Accounts, die Winning Days als Typ haben, aber heute nicht gehandelt werden … per Zufallsprinzip
@@ -59325,7 +59343,7 @@
     _ahf.laeuft = true
     try{ _ahf.d = await apdApi('GET', '/hedge-freigabe'); _ahf.fehler = ''; _ahf.at = Date.now() }
     catch(e){ _ahf.fehler = (e && e.status === 403) ? '' : ((e && e.message) || String(e)); if(e && (e.status === 403 || e.status === 404)) _ahf.d = { zeilen: [] } }
-    finally{ _ahf.laeuft = false; ahfRender() }
+    finally{ _ahf.laeuft = false; ahfRender(); try{ window._wdUebersichtNeu?.() }catch(_){} }
   }
   // Start in Dubai: heute nur die Uhrzeit, sonst Datum + Uhrzeit (wie „Zu bestätigen")
   const ahfWann = iso => { const d = new Date(iso || ''); if(isNaN(d)) return '–'
@@ -59369,6 +59387,25 @@
       + ` / TP <span style="color:var(--danger-ink)">${ahfEur(vs.pass_eur)}</span>${mult != null && isFinite(mult) ? ` · <small>×${zahl(mult, mult < 0.1 ? 3 : 2)}</small>` : ''}</span>`
   }
   window._ahfHedgeKurz = ahfHedgeKurz
+  function ahfZeileHtml(z){
+    const id = String(z.id), art = AHF_ART[z.art] || [z.art || '?', ''], vs = (z.vs && typeof z.vs === 'object') ? z.vs : {}
+    const ri = z.richtung === 'buy' ? '<b style="color:var(--good-ink)">BUY</b>' : z.richtung === 'sell' ? '<b style="color:var(--danger-ink)">SELL</b>' : '–'
+    // Namen beider Wege (S1 Apex: tp_eur statt pass_eur, Hinweis als {fehler, code}; S4 Tradeify: pass_eur, grund) — Pass/TP immer als −€
+    const hinweis = vs.grund || vs.fehler ? String(vs.grund || vs.fehler) + (vs.code ? ` (${vs.code})` : '') : ''
+    const passTp = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? -Math.abs(Number(vs.tp_eur)) : null
+    const hedge = vs.lots != null ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot` : Number(z.hedge_eur) > 0 ? ahfEur(z.hedge_eur).replace('+', '')
+      : hinweis ? `<small style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</small>` : '–'
+    const bp = vs.blow_eur != null || passTp != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>` : '–'
+    const unterwegs = _ahf.busy.has(id)
+    return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
+      <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
+      <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}</td><td>${ri}</td>
+      <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
+      <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
+      <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
+      <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>
+      <td class="zahl"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Freigeben — der Plan startet dann zur Startzeit mit Hedge">${unterwegs ? '…' : '✓'}</button></td></tr>`
+  }
   function ahfRender(){
     const root = document.getElementById('ahf-root'); if(!root) return
     const zs = ahfAltlast()
@@ -59379,25 +59416,7 @@
     }
     const je = new Map()
     for(const z of zs){ const k = String(z.user_id || ''); if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), z: [] }); je.get(k).z.push(z) }
-    const zeile = z => {
-      const id = String(z.id), art = AHF_ART[z.art] || [z.art || '?', ''], vs = (z.vs && typeof z.vs === 'object') ? z.vs : {}
-      const ri = z.richtung === 'buy' ? '<b style="color:var(--good-ink)">BUY</b>' : z.richtung === 'sell' ? '<b style="color:var(--danger-ink)">SELL</b>' : '–'
-      // Namen beider Wege (S1 Apex: tp_eur statt pass_eur, Hinweis als {fehler, code}; S4 Tradeify: pass_eur, grund) — Pass/TP immer als −€
-      const hinweis = vs.grund || vs.fehler ? String(vs.grund || vs.fehler) + (vs.code ? ` (${vs.code})` : '') : ''
-      const passTp = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? -Math.abs(Number(vs.tp_eur)) : null
-      const hedge = vs.lots != null ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot` : Number(z.hedge_eur) > 0 ? ahfEur(z.hedge_eur).replace('+', '')
-        : hinweis ? `<small style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</small>` : '–'
-      const bp = vs.blow_eur != null || passTp != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>` : '–'
-      const unterwegs = _ahf.busy.has(id)
-      return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
-        <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
-        <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}</td><td>${ri}</td>
-        <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
-        <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
-        <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
-        <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>
-        <td class="zahl"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Freigeben — der Plan startet dann zur Startzeit mit Hedge">${unterwegs ? '…' : '✓'}</button></td></tr>`
-    }
+    const zeile = ahfZeileHtml
     const kopf = `<div class="ap-adm-kopf"><b>Hedge-Freigabe offen · ${zs.length}</b><span>schon bestätigt, Hedge noch nicht freigegeben — startet erst nach ✓ · Zeiten Dubai</span>
       ${zs.length ? `<button type="button" class="ap-adm-ok" data-ahf-alle="1" style="margin-left:auto"${_ahf.busy.size ? ' disabled' : ''}>✓ Alle ${zs.length} bestätigen</button>` : ''}</div>`
     const fehl = _ahf.fehler ? `<div class="kis-s" style="color:var(--danger-ink)">${escapeHtml(_ahf.fehler)}</div>` : ''
@@ -59427,6 +59446,12 @@
   window._ahfSicherstellen = () => { const r = document.getElementById('ahf-root'); if(r && !r.dataset.an) window._ahfOeffnen(true) }
   window._ahfOeffnen = an => { const r = document.getElementById('ahf-root'); if(!r) return; if(an){ r.dataset.an = '1'; ahfRender(); ahfLaden() } else { delete r.dataset.an; r.hidden = true } }
   window._ahfNeu = () => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an) ahfLaden() }   // nach ✓ in „Zu bestätigen"
+  // WD-ÜBERSICHT (30.10.2026, Funded Planer → Winning Days „Zu bestätigen"): Apex-WD-Pläne ohne Hedge-Freigabe, dieselbe Zeile + derselbe ✓
+  window._ahfWdZeilen = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.art === 'apex' && /winning days/i.test(String(z.master_name || '')))
+  let _ahfWdVersuch = 0   // eigener Takt: auch ein gescheiterter Abruf (at bleibt alt) lädt höchstens alle 60 s neu — sonst Schleife über _wdUebersichtNeu
+  window._ahfWdLaden = () => { if(_ahf.laeuft || Date.now() - _ahfWdVersuch < 60000) return; _ahfWdVersuch = Date.now(); if(!_ahf.d || Date.now() - _ahf.at > 60000) ahfLaden() }
+  window._ahfZeileHtml = z => ahfZeileHtml(z)
+  window._ahfFreigebenIds = ids => ahfFreigeben(ids, false)
   window._ahfZeichnen = () => ahfRender()   // PLANER-GLIEDERUNG: Wechsel CFD ↔ Futures zeichnet ohne Abruf neu
   window._ahfStub = d => { _ahf.d = d; _ahf.fehler = ''; const r = document.getElementById('ahf-root'); if(r) r.dataset.an = '1'; ahfRender() }   // Stub ohne Login
   setInterval(() => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an && !document.hidden && document.getElementById('adm-pane-planer')?.offsetParent) ahfLaden() }, 60000)
@@ -66323,22 +66348,23 @@
   // 29.10. …0393 SELL→BUY mit Hedge SELL). Die alte rote Warnung „Start würde am Riegel scheitern" war für WDs falsch — jetzt der Hinweis,
   // in welche Richtung er beim Start gedreht wird. Scheitert das Drehen (Plan nicht mehr planned/Richtung geändert), bleibt der Start gesperrt.
   // JE KONTO (Finn 30.10.2026 ~07:18, Richtung je Konto): verglichen wird jedes aktive Konto mit dem Lauf SEINER Firma, nicht die ID-Zeile.
+  // RUHIG (Finn 30.10.2026 ~07:55: gelbe Sätze „zu hässlich"): kein Text mehr in der ID-Zeile — nur ein kleines ⇅ (gedämpft) mit Tooltip,
+  // die Erklärung je Konto steht in der aufgeklappten Konto-Zeile (wdKontoDrehHtml).
+  const wdKontoDreh = (x, k) => {   // läuft bei der Firma dieses Kontos die Gegenrichtung? → { richtung, firma, durch } | null
+    const f = ((((_wd.daten || {}).richtung_fest) || {})[`${x.user_id}|${wdFirmaNorm(k && k.firm)}`])
+    if(!k || !wdAktiv(k) || !f || (f.richtung !== 'buy' && f.richtung !== 'sell') || wdKontoRichtung(k, x.richtung) === f.richtung) return null
+    return { richtung: f.richtung, firma: k.firm, durch: f.durch || 'läuft gerade' }
+  }
+  const wdDrehTip = d => `${d.firma} ${d.durch} ${d.richtung === 'buy' ? 'long' : 'short'} — dieser Winning Day startet deshalb ${d.richtung.toUpperCase()} (Richtungsschutz derselben ID × Firma), TP/SL in $ bleiben, der Fusion-Hedge geht in die Gegenrichtung.`
   function wdRichtungGrundHtml(x){
-    const fest = ((_wd.daten || {}).richtung_fest) || {}
-    const v = wdRichtungVorgabe(fest, String(x.user_id), x.konten)
     if(!x.richtung) return ''
     const dreh = new Map()
-    for(const k of (x.konten || []).filter(wdAktiv)){
-      const f = fest[`${x.user_id}|${wdFirmaNorm(k.firm)}`]
-      if(!f || (f.richtung !== 'buy' && f.richtung !== 'sell') || wdKontoRichtung(k, x.richtung) === f.richtung) continue
-      if(!dreh.has(wdFirmaNorm(k.firm))) dreh.set(wdFirmaNorm(k.firm), { firma: k.firm, richtung: f.richtung, durch: f.durch || 'läuft gerade' })
-    }
-    if(!dreh.size) return v ? `<span class="kf" title="${escapeHtml(v.grund)}"> · ${escapeHtml(v.grund)}</span>` : ''
-    const liste = [...dreh.values()]
-    const tip = liste.map(d => `${d.firma} ${d.durch} ${d.richtung === 'buy' ? 'long' : 'short'}`).join(' · ')
-      + ' — der Winning Day dieser Firma wird beim Start auf diese Richtung gedreht (Richtungsschutz derselben ID × Firma), TP/SL in $ bleiben, der Fusion-Hedge geht in die Gegenrichtung.'
-    return `<span class="kf" style="color:var(--warn)" title="${escapeHtml(tip)}"> · ⇅ Richtung gedreht: ${liste.map(d => `${escapeHtml(d.firma)} ${d.richtung === 'buy' ? 'long' : 'short'} läuft → startet ${d.richtung.toUpperCase()}`).join(' · ')}</span>`
+    for(const k of (x.konten || [])){ const d = wdKontoDreh(x, k); if(d && !dreh.has(wdFirmaNorm(d.firma))) dreh.set(wdFirmaNorm(d.firma), d) }
+    if(!dreh.size) return ''
+    return ` <span class="wd-dreh" title="${escapeHtml([...dreh.values()].map(wdDrehTip).join('\n'))}">⇅</span>`
   }
+  const wdKontoDrehHtml = (x, k) => { const d = wdKontoDreh(x, k); return d ? ` <span class="wd-dreh" title="${escapeHtml(wdDrehTip(d))}">⇅</span>` : '' }
+
   /* BÜNDEL JE ID GEWÜRFELT (28.10.2026, Finn per Sprachnachricht: „heute startet bei Jacob einer um 16:01 und einer um 16:02 … an manchen
    * Tagen alle auf einmal, an anderen nicht — z. B. zwei Longs um 16 Uhr und schon um 7 Uhr morgens ein Short, an einem anderen Tag alle
    * drei zu verschiedenen Uhrzeiten"). Bis hier fuhr jede ID ihre aktiven Konten als EIN Block in EINER Richtung (Blockstart + 80 s je Konto;
@@ -67642,9 +67668,10 @@
         ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-heute="${escapeHtml(String(k.id))}" data-wd-heute-rein="${k.aktiv === false ? '1' : ''}" title="${k.aktiv === false ? 'für diesen Tag wieder mitfahren lassen' : 'nur an diesem Tag auslassen — morgen fährt das Konto wieder mit'}">${k.aktiv === false ? 'heute wieder rein' : 'nur heute raus'}</button>` : ''
       const start = (k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—')
         // BÜNDEL (28.10.2026): Gruppe + ihre Richtung, sobald eine ID heute in mehreren Gruppen fährt
-        + ((k.gruppe && wdAktiv(k)) ? `<div class="kf">Gruppe ${k.gruppe}${x.richtung ? ' · ' + (wdKontoRichtung(k, x.richtung) === 'buy' ? 'BUY' : 'SELL') : ''}</div>` : '')
-        // RICHTUNG JE KONTO (30.10.2026): eigene Richtung auch ohne Gruppe am Konto zeigen
-        + ((!k.gruppe && wdAktiv(k) && (k.w_richtung === 'buy' || k.w_richtung === 'sell')) ? `<div class="kf">${k.w_richtung === 'buy' ? '▲ BUY' : '▼ SELL'}</div>` : '')
+        + ((k.gruppe && wdAktiv(k)) ? `<div class="kf">Gruppe ${k.gruppe}${x.richtung ? ' · ' + (wdKontoRichtung(k, x.richtung) === 'buy' ? 'BUY' : 'SELL') : ''}${wdKontoDrehHtml(x, k)}</div>` : '')
+        // RICHTUNG JE KONTO (30.10.2026): eigene Richtung auch ohne Gruppe am Konto zeigen, gedreht → kleines ⇅ mit Tooltip
+        + ((!k.gruppe && wdAktiv(k) && (k.w_richtung === 'buy' || k.w_richtung === 'sell')) ? `<div class="kf">${k.w_richtung === 'buy' ? '▲ BUY' : '▼ SELL'}${wdKontoDrehHtml(x, k)}</div>` : '')
+        + ((!k.gruppe && wdAktiv(k) && k.w_richtung !== 'buy' && k.w_richtung !== 'sell' && wdKontoDreh(x, k)) ? `<div class="kf">${wdKontoDrehHtml(x, k).trim()}</div>` : '')
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
       const slWert = kd.sl_vorgabe || ''   // Vorgabe für Risiko Master (Lot-Rechnung) — kein Stop am Plan (25.09.2026)
       // RISIKO MASTER FEHLT (08.10.2026, Master: alle 11 WD-Konten ohne wd_sl/max_risiko_trade → hedgeMultAusRisiko fällt auf den TP zurück =
@@ -67872,12 +67899,16 @@
    * geplanten, nicht gestarteten Pläne sofort umdrehen. Läuft/fertig/verpasst oder noch nicht eingetragen: gesperrt. */
   function wdRichtungChip(x, erw){
     const fest = erw || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
-    // RICHTUNG JE KONTO (30.10.2026): fahren die Konten der ID in verschiedene Richtungen, zeigt der Kopf „gemischt" (Klick dreht jedes Konto)
-    const gemischt = new Set((x.konten || []).filter(wdAktiv).map(k => wdKontoRichtung(k, x.richtung)).filter(Boolean)).size > 1
-    const txt = gemischt ? '▲▼ gemischt' : x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
-    const kl = gemischt ? '' : x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
-    if(fest || wdNurLesen(x.user_id)) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'   // fremde ID beim Verwalter: nur Anzeige (30.10.2026)
-    return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="anklicken: Richtung für alle Konten von ${escapeHtml(x.name || 'dieser ID')} umdrehen">${txt}</button>`
+    // RICHTUNG JE KONTO (30.10.2026): fahren die Konten der ID in verschiedene Richtungen, zeigt der Kopf je Konto einen kleinen Pfeil
+    // (▲▼▼, Finn ~07:55: „ruhig") — welches Konto wohin steht im Tooltip und in der aufgeklappten Konto-Zeile (Klick dreht jedes Konto)
+    const akt = (x.konten || []).filter(wdAktiv), ri = akt.map(k => wdKontoRichtung(k, x.richtung)).filter(Boolean)
+    const gemischt = new Set(ri).size > 1
+    const txt = gemischt ? ri.map(r => r === 'buy' ? '▲' : '▼').join('') : x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
+    const kl = gemischt ? 'wd-dir-mix' : x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
+    const vg = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, String(x.user_id), x.konten)
+    const tipJe = (gemischt ? akt.map(k => `${k.firm || 'Konto'}${k.name ? ' · ' + String(k.name).slice(0, 26) : ''}: ${wdKontoRichtung(k, x.richtung) === 'buy' ? 'BUY' : 'SELL'}`).join(' · ') : '') + (vg ? (gemischt ? '\n' : '') + vg.grund : '')
+    if(fest || wdNurLesen(x.user_id)) return x.richtung ? `<span class="chip ${kl}"${tipJe ? ` title="${escapeHtml(tipJe)}"` : ''}>${txt}</span>` : '<span class="kf">—</span>'   // fremde ID beim Verwalter: nur Anzeige (30.10.2026)
+    return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="${escapeHtml((tipJe ? tipJe + '\n' : '') + 'anklicken: Richtung für alle Konten von ' + (x.name || 'dieser ID') + ' umdrehen')}">${txt}</button>`
   }
   async function wdRichtungUmschalten(uid){
     if(!(await wdDarf(uid))) return wdSay('Nur Blöcke deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
@@ -67915,6 +67946,71 @@
       x._dirBusy = false; wdAblauf(_wd.rows || [], wdFehlend())
     }
   }
+  /* WD-ÜBERSICHT (Finn 30.10.2026 ~07:55 über den Master, Screenshot Funded Planer → Winning Days: „dieselbe Übersicht wie in Challenge Planer /
+   * Funded CFD: Zu bestätigen · Läuft · Braucht dich · Wartet auf Start — mit den WD-Plänen"). Nur Anzeige, aus den Farmer-Daten dieses Reiters
+   * (_wd.rows + _wd.daten.plaene über wdPlanLive), Sicht je Gruppe (wdSichtOk). Zu bestätigen = Apex-WD-Pläne ohne Hedge-Freigabe aus dem
+   * Block „Hedge-Freigabe" (window._ahfWdZeilen, dieselbe Zeile + derselbe ✓ → POST /admin/auto-plan/hedge-freigabe). WD-Pläne selbst
+   * brauchen kein ✓. Karten-Optik wie im Planer (ap-adm-karte/-kopf/-grp). */
+  const WD_UE_UEBERFAELLIG_MS = 10 * 60000
+  function wdUebersichtDaten(rows){
+    const jetzt = Date.now(), out = { laeuft: [], braucht: [], warten: [] }
+    for(const x of (rows || [])){
+      if(!wdSichtOk(x.user_id)) continue
+      for(const k of (x.konten || [])){
+        const p = wdPlanLive(k), e = { x, k, p }
+        if(!p){ if(wdAktiv(k) && k.hinweis) out.braucht.push({ ...e, grund: String(k.hinweis) }); continue }
+        const st = String(p.status || ''), su = Date.parse(p.start_um || '') || null
+        if(st === 'open') out.laeuft.push(e)
+        else if(st === 'review') out.braucht.push({ ...e, grund: 'zu Ende — wartet auf Nachlesung' })
+        else if(st === 'planned' && !p.start_um_gestartet_at && su && su < jetzt - WD_UE_UEBERFAELLIG_MS) out.braucht.push({ ...e, grund: `Start ${wdHhmm(p.start_um)} überfällig — nicht gestartet` })
+        else if(st === 'planned') out.warten.push(e)
+      }
+    }
+    const zeit = e => Date.parse((e.p && (e.p.started_at || e.p.start_um)) || e.k.start_um || '') || 0
+    for(const l of Object.values(out)) l.sort((a, b) => zeit(a) - zeit(b))
+    return out
+  }
+  window._wdUebersichtDaten = wdUebersichtDaten   // Test-Haken
+  function wdUebersichtZeile(e, art){
+    const { x, k, p } = e, ri = (p && p.richtung) || wdKontoRichtung(k, x.richtung)
+    const pfeil = ri === 'buy' ? '<b style="color:var(--good-ink)">▲ BUY</b>' : ri === 'sell' ? '<b style="color:var(--danger-ink)">▼ SELL</b>' : '–'
+    const kt = p && p.master_contracts != null ? Number(p.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : (k.kt || '–')
+    const tp = (p && Number(p.master_tp) > 0) ? Number(p.master_tp) : Number(k.tp) > 0 ? Number(k.tp) : null
+    const wann = art === 'laeuft' ? (p && p.started_at ? 'seit ' + wdHhmm(p.started_at) : '–') : wdHhmm((p && p.start_um) || k.start_um) || '–'
+    const konto = `${escapeHtml(String(k.firm || ''))} · ${escapeHtml(String(k.name || (p && p.master_name) || '').slice(0, 34))}`
+    return `<tr><td class="zahl">${escapeHtml(wann)}</td><td title="${escapeHtml(String((p && p.master_name) || k.name || ''))}">${konto}${wdKontoDrehHtml(x, k)}</td><td>${pfeil}</td>
+      <td class="zahl">${escapeHtml(String(kt))}</td><td class="zahl">${tp != null ? Math.round(tp).toLocaleString('de-DE') + ' $' : '–'}</td>
+      ${art === 'braucht' ? `<td class="wd-ue-grund">${escapeHtml(e.grund || '')}</td>` : ''}</tr>`
+  }
+  function wdUebersichtBlock(art, titel, unter, liste, extraKopf){
+    const leer = { offen: 'Nichts zu bestätigen — Winning Days starten ohne ✓.', laeuft: 'Nichts läuft.', braucht: 'Alles in Ordnung.', warten: 'Nichts geplant.' }[art]
+    const kopf = `<div class="ap-adm-kopf"><b>${escapeHtml(titel)} · ${liste.length}</b><span>${escapeHtml(unter)}</span>${extraKopf || ''}</div>`
+    if(!liste.length) return `<div class="ap-adm-karte">${kopf}<div class="wd-ue-leer">${leer}</div></div>`
+    const je = new Map()
+    for(const e of liste){ const uid = String(art === 'offen' ? e.user_id : e.x.user_id); if(!je.has(uid)) je.set(uid, { uid, name: art === 'offen' ? (e.user || uid.slice(0, 8)) : (e.x.name || uid.slice(0, 8)), l: [] }); je.get(uid).l.push(e) }
+    const kopfZeile = art === 'offen' ? '<th class="zahl">Start</th><th>Konto</th><th>Weg</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th><th class="zahl">Hedge</th><th class="zahl">Blow / Pass/TP</th><th></th>'
+      : `<th class="zahl">${art === 'laeuft' ? 'Seit' : 'Start'}</th><th>Konto</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th>${art === 'braucht' ? '<th>Was</th>' : ''}`
+    const farbe = uid => (typeof window.idFarbe === 'function') ? window.idFarbe(uid) : 'var(--sub)'
+    const gruppen = [...je.values()].map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${farbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.l.length} Trade${g.l.length === 1 ? '' : 's'}</span></div>
+      <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr>${kopfZeile}</tr></thead><tbody>${g.l.map(e => art === 'offen' ? (typeof window._ahfZeileHtml === 'function' ? window._ahfZeileHtml(e) : '') : wdUebersichtZeile(e, art)).join('')}</tbody></table></div>`).join('')
+    return `<div class="ap-adm-karte">${kopf}${gruppen}</div>`
+  }
+  function wdUebersicht(){
+    const box = document.getElementById('wd-uebersicht'); if(!box) return
+    if(!_wd.daten || !Array.isArray(_wd.rows)){ box.innerHTML = ''; return }
+    try{ window._ahfWdLaden?.() }catch(_){}
+    const d = wdUebersichtDaten(_wd.rows)
+    const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id))
+    const alleKnopf = offen.length > 1 ? `<button type="button" class="ap-adm-ok" data-wd-ue-alle="1">✓ Alle ${offen.length} freigeben</button>` : ''
+    box.innerHTML = wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD mit Hedge — startet erst nach ✓ · Zeiten Dubai', offen, alleKnopf)
+      + wdUebersichtBlock('laeuft', 'Läuft', 'live', d.laeuft)
+      + wdUebersichtBlock('braucht', 'Braucht dich', 'Nachlesung, überfällig, Hinweis am Konto', d.braucht)
+      + wdUebersichtBlock('warten', 'Wartet auf Start', 'geplant · Zeiten Dubai', d.warten)
+    const b = box.querySelector('[data-wd-ue-alle]')
+    if(b) b.addEventListener('click', () => { if(confirm(`Alle ${offen.length} Apex-WD-Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)){ b.disabled = true; window._ahfFreigebenIds?.(offen.map(z => String(z.id))) } })
+  }
+  window._wdStub = (rows, daten) => { _wd.rows = rows || []; _wd.daten = daten || { plaene: [] }; wdAblauf(_wd.rows, []) }   // Stub ohne Login (Test-Haken, 30.10.2026)
+  window._wdUebersichtNeu = () => { try{ if(document.getElementById('wd-uebersicht')) wdUebersicht() }catch(e){ console.warn('[wd] Übersicht', e) } }
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
     const box = document.getElementById('wd-ablauf'); if(!box) return
@@ -68027,6 +68123,7 @@
       const ids = [...(karte ? karte.querySelectorAll('[data-wd-konto]') : [])].filter(x => !x.disabled && x.checked !== an).map(x => x.dataset.wdKonto)
       for(const id of ids) await wdKontoHaken(uid, id, an)   // nacheinander — eine Zeile, keine Schreib-Rennen
     }))
+    window._wdUebersichtNeu()   // WD-ÜBERSICHT (30.10.2026) unter der IDs-Tabelle
   }
   // „2× archiviert · 1× schon Plan" — warum in einem Block nichts drin ist
   function wdGruende(konten){
