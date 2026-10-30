@@ -27298,6 +27298,51 @@ def ap_hedge_freigabe_ids(zeilen):
     return aus
 
 
+# FREIGABE NACH DEM START (30.10.2026, Befund S5, Marc …7231: Freigabe 37 min nach start_um): tfh_tick/ah_tick stellen nur im Fenster −nachlauf/+vorlauf
+# um. Kam die Freigabe später, lief der Claim ohne Umstellung in trade_plans_a_final_halten → start_um +1 Tag. Jetzt setzt die Freigabe einen schon
+# überfälligen Start auf jetzt + 3–6 min (gewürfelt, Puls-Jitter-Regel) — damit liegt er wieder im Fenster, der Takt stellt um und der Plan startet
+# heute. Ein Start in der Zukunft wird NIE vorgezogen.
+HEDGE_FREIGABE_START_S = (180, 360)
+
+
+def hedge_freigabe_start(start_um, jetzt, rnd=None):
+    """REIN RECHNEND (testbar): neuer start_um (ISO) für einen freigegebenen Plan oder None (nicht anfassen): nur wenn start_um schon vorbei ist;
+    kein start_um oder Start in der Zukunft → None."""
+    try:
+        t = datetime.fromisoformat(str(start_um).replace("Z", "+00:00")) if start_um else None
+    except ValueError:
+        return None
+    if t is None or t > jetzt:
+        return None
+    r = rnd or random
+    return (jetzt + timedelta(seconds=r.uniform(*HEDGE_FREIGABE_START_S))).astimezone(timezone.utc).isoformat()
+
+
+def _hedge_freigabe_schreiben(ids, basis, uid):
+    """Freigabe je Plan schreiben (basis = Guard) → Anzahl. Liest start_um frisch; überfällige Pläne bekommen im selben Update den neuen Start."""
+    jetzt_dt = datetime.now(timezone.utc)
+    jetzt, n = jetzt_dt.isoformat(), 0
+    wert = {"hedge_freigabe_at": jetzt, "hedge_freigabe_von": str(uid or "")[:80]}
+    for j in range(0, len(ids), 100):
+        teil = ids[j:j + 100]
+        neu = {}
+        for z in sb_select("trade_plans", {"select": "id,start_um", "id": "in.(" + ",".join(teil) + ")"}) or []:
+            st = hedge_freigabe_start(z.get("start_um"), jetzt_dt)
+            if st:
+                neu[str(z.get("id"))] = st
+        rest = [i for i in teil if i not in neu]
+        if rest:
+            n += len(sb_update("trade_plans", dict(basis, id="in.(" + ",".join(rest) + ")"), wert) or [])
+        for i, st in neu.items():
+            # start_um-Guard: nur der gelesene überfällige Stand — ein Hand-Eingriff dazwischen bleibt
+            zeilen = sb_update("trade_plans", dict(basis, id=f"eq.{i}", start_um=f"lte.{jetzt}"), dict(wert, start_um=st)) or []
+            if not zeilen:
+                zeilen = sb_update("trade_plans", dict(basis, id=f"eq.{i}"), wert) or []
+            n += len(zeilen)
+            print(f"[hedge-freigabe] Plan {i[:8]} war überfällig — neuer Start {st[11:19]} UTC", flush=True)
+    return n
+
+
 def _ap_hedge_mit_freigeben(zeilen, uid):
     """EIN BESTÄTIGEN JE TRADE (Finn 30.10.2026, über Master: „Ich werde die Trades einmal bestätigen … dann werden sie abgespielt"):
     „Bestätigen" eines Hedge-Plans im Admin → Challenge-Planer setzt auto_bestaetigt_at UND hedge_freigabe_at/_von in einem Schritt.
@@ -27313,9 +27358,8 @@ def _ap_hedge_mit_freigeben(zeilen, uid):
         ids = [i for i in ids if uid_je.get(i) not in aus]
         if not ids:
             return 0
-        return len(sb_update("trade_plans", {"id": "in.(" + ",".join(ids) + ")", "status": "eq.planned", "start_um_gestartet_at": "is.null",
-                                             "hedge_freigabe_at": "is.null", "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"},
-                             {"hedge_freigabe_at": _wt_now_iso(), "hedge_freigabe_von": str(uid or "")[:80]}) or [])
+        return _hedge_freigabe_schreiben(ids, {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
+                                               "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}, uid)
     except Exception as e:
         print(f"[auto-plan] ⚠️ Hedge-Freigabe beim Bestätigen: {type(e).__name__}: {e}", flush=True)
         return 0
@@ -27351,11 +27395,7 @@ def admin_auto_plan_hedge_freigabe():
             ids = [str(x) for x in (body.get("ids") or []) if str(x) in frei]
         if not ids:
             return jsonify({"ok": False, "msg": "nichts zu bestätigen (schon freigegeben, gestartet oder nicht in der Liste)"}), 400
-        jetzt = _wt_now_iso()
-        n = 0
-        for j in range(0, len(ids), 100):
-            n += len(sb_update("trade_plans", dict(basis, id="in.(" + ",".join(ids[j:j + 100]) + ")"),
-                               {"hedge_freigabe_at": jetzt, "hedge_freigabe_von": str(uid or "")[:80]}) or [])
+        n = _hedge_freigabe_schreiben(ids, basis, uid)
         print(f"[hedge-freigabe] {n} Plan/Pläne freigegeben ({str(uid or '')[:8]})", flush=True)
         return jsonify({"ok": True, "freigegeben": n})
     except Exception as e:
