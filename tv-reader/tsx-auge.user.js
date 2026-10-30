@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TopstepX-Auge
 // @namespace    prophos
-// @version      0.3.1
+// @version      0.3.2
 // @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,1 s und bei jeder Änderung an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
 // @match        https://topstepx.com/*
 // @match        https://*.topstepx.com/*
@@ -53,7 +53,11 @@
  * stand.flach_folge = Zahl aufeinanderfolgender EIGENER Messungen mit flach-Beweis im selben Konto (nicht ausgeloggt); jede andere Messung
  * setzt auf 0. stand.flach_seit = Zeitpunkt (ms) der ersten Messung dieser Serie. Gemessen wird in JEDEM Takt, auch wenn die vorige Meldung
  * noch unterwegs ist (dann wird nur nicht gesendet) — sonst fiele genau die Messung weg, die das Flackern zeigt. Prophos schließt erst ab
- * flach_folge ≥ 3 über ≥ 200 ms; ohne das Feld (Auge < 0.3.1) gilt dort die alte 5-s-Regel. Kommt per Lader, kein Handgriff am PC. */
+ * flach_folge ≥ 3 über ≥ 200 ms; ohne das Feld (Auge < 0.3.1) gilt dort die alte 5-s-Regel. Kommt per Lader, kein Handgriff am PC.
+ * 0.3.2 (30.10.2026, PC von Marco: „TopstepX-Auge blind", Stand 15,9 s alt, 975 Ticks, 2 Sends, kein Timeout, Konsole „worker-tot"): (1) worker-tot ist nicht mehr endgültig (s. Worker-Wache);
+ * (2) von außen sichtbar: letzter_fehler + letzter_fehler_vor_s (bleibt nach Erfolg stehen), fehler_n (Summe), unterwegs_ms (Dauer des letzten Requests), haenger_n, stand_ms, worker_tot_n;
+ * (3) Riegel: ein Request, dessen Rückmeldung > 3 s ausbleibt, wird abgebrochen und freigegeben (bisher blockierte er jede weitere Meldung). Weil dann zwei Meldungen unterwegs sein können,
+ * verwirft das Panel eine ältere als die gemerkte (panel.py tsx_stand_merken). (4) Flach-Folge: Lücke > 0,5 s beendet die Serie, keine Messungs-Salve nach einem Hänger. Kommt per Lader. */
 
 /* ══ LADER 0.3.0 (s. oben): prophosKern ist das eigentliche Auge. Alles zwischen den Markern KERN-START und KERN-ENDE holt der Lader
  * neuer nach (Panel /userscript/tsx-kern.json) — die Marker nie verschieben oder doppeln (Selbsttest prueft sie). ══ */
@@ -64,12 +68,14 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   // 0.3.0 DOPPELLAUF-RIEGEL: nie zwei Kerne in einer Seite (eingebaute UND nachgeladene Fassung) — lieber blind als doppelt
   if (unsafeWindow.__prophosTsxKernAn) return;
   unsafeWindow.__prophosTsxKernAn = true;
-  var SCRIPT = '0.3.1';
+  var SCRIPT = '0.3.2';
   var PANEL = 'http://127.0.0.1:8770/api/tsx-stand';
   var TAKT_MS = 100;                               // 0.2.0: 250 → 100 ms (Finn 29.10.2026)
   var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
   var TAB = 'tsx-' + Math.random().toString(36).slice(2, 10);
   var unterwegs = false, fehlerN = 0, gesendetN = 0, letzterFehler = '';
+  var UNTERWEGS_MAX_MS = 3000, unterwegsSeit = 0, anfrage = 0, laufend = null, haengerN = 0, rttMs = null, standMs = null, fehlerMerk = { text: '', at: 0 };   // 0.3.2
+  function fehlerSetzen(t) { letzterFehler = t; fehlerN++; fehlerMerk = { text: t, at: Date.now() }; }
   var workerTicks = 0, workerLetzt = 0, timeouts = [];   // 0.3.1 Diagnose: Worker-Ticks, letzte Panel-Timeouts (ms-Zeitstempel)
 
   function auge() {
@@ -96,12 +102,14 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   }
 
   // FLACH-FOLGE (0.3.1, s. Kopf): Zähler über die eigenen Messungen — REIN bis auf die drei Variablen
-  var flachFolge = 0, flachSeit = null, flachKonto = null;
+  // 0.3.2 (Gegenprüfung): > 0,5 s zwischen zwei Messungen beendet die Serie — nach einem Hänger läge sonst der Abstand ≥ 200 ms über der Lücke, obwohl danach kaum beobachtet wurde
+  var flachFolge = 0, flachSeit = null, flachKonto = null, flachLetzt = 0, FOLGE_LUECKE_MS = 500;
   function folgeZaehlen(s, aus) {
-    var k = (s && s.konto && s.konto.kontonr) || null, ts = (s && s.ts) || Date.now();
+    var k = (s && s.konto && s.konto.kontonr) || null, ts = (s && s.ts) || Date.now(), jetzt = Date.now();
     if (s && s.flach === true && k && !aus && (flachFolge === 0 || k === flachKonto)) {
+      if (flachFolge > 0 && jetzt - flachLetzt > FOLGE_LUECKE_MS) flachFolge = 0;
       if (flachFolge === 0) flachSeit = ts;
-      flachFolge += 1; flachKonto = k;
+      flachFolge += 1; flachKonto = k; flachLetzt = jetzt;
     } else { flachFolge = 0; flachSeit = null; flachKonto = k; }
   }
 
@@ -128,6 +136,9 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
       ausgeloggt: aus,
       flach_folge: flachFolge, flach_seit: flachSeit,
       takt: takt, gesendet_n: gesendetN, worker_ticks: workerTicks, panel_timeouts: timeouts.slice(),   // 0.3.1: von außen sichtbar
+      // 0.3.2: warum es hakt (letzterFehler allein stand nur in der Konsole und wurde beim nächsten Erfolg gelöscht)
+      letzter_fehler: fehlerMerk.text ? fehlerMerk.text.slice(0, 100) : null, letzter_fehler_vor_s: fehlerMerk.at ? Math.round((Date.now() - fehlerMerk.at) / 1000) : null,
+      fehler_n: fehlerN, unterwegs_ms: rttMs, haenger_n: haengerN, stand_ms: standMs, worker_tot_n: workerTotN,
       fehler: s.fehler ? s.fehler.slice(0, 4).map(function (f) { return String(f).slice(0, 80); }) : null
     };
   }
@@ -136,53 +147,82 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   function tick() {
     letzterTick = Date.now();
     var a = auge();
-    if (!a || typeof a.stand !== 'function') { letzterFehler = 'augen_tsx.js nicht geladen'; folgeZaehlen(null, false); return; }
+    if (!a || typeof a.stand !== 'function') { fehlerSetzen('augen_tsx.js nicht geladen'); folgeZaehlen(null, false); return; }
     var paket;
     try {
-      var s = a.stand({}), aus = ausgeloggt();
+      var t0Stand = Date.now(), s = a.stand({}), aus = ausgeloggt();
+      standMs = Date.now() - t0Stand;
       folgeZaehlen(s, aus);                         // 0.3.1: JEDE Messung zählt, auch wenn gleich nicht gesendet wird
       paket = { tab: TAB, script: SCRIPT, stand: kurz(s, aus),
         lader: (typeof PROPHOS_LADER !== 'undefined' && PROPHOS_LADER) ? Object.assign({}, PROPHOS_LADER) : null };   // 0.3.0: Lader-Stand
     }
-    catch (e) { letzterFehler = 'Lesen: ' + String(e).slice(0, 80); folgeZaehlen(null, false); return; }
-    if (unterwegs) return;                         // ein Request zur Zeit — ein hängendes Panel staut sonst Meldungen auf (gemessen ist schon)
-    unterwegs = true;
-    GM_xmlhttpRequest({
-      method: 'POST', url: PANEL, timeout: 2000, data: JSON.stringify(paket), headers: { 'Content-Type': 'application/json' },
-      onload: function (r) { unterwegs = false; if (r.status === 200) { gesendetN++; fehlerN = 0; letzterFehler = ''; } else { fehlerN++; letzterFehler = 'Panel HTTP ' + r.status; } },
-      onerror: function () { unterwegs = false; fehlerN++; letzterFehler = 'Panel nicht erreichbar'; },
-      ontimeout: function () { unterwegs = false; fehlerN++; letzterFehler = 'Panel Timeout'; timeouts.push(Date.now()); if (timeouts.length > 5) timeouts.shift(); }
-    });
+    catch (e) { fehlerSetzen('Lesen: ' + String(e).slice(0, 80)); folgeZaehlen(null, false); return; }
+    if (unterwegs) {                               // ein Request zur Zeit — ein hängendes Panel staut sonst Meldungen auf (gemessen ist schon)
+      if (Date.now() - unterwegsSeit <= UNTERWEGS_MAX_MS) return;
+      haengerN++; fehlerSetzen('Request ohne Rückmeldung > 3 s');   // 0.3.2: über dem Timeout von 2 s = die Rückmeldung selbst kam nicht
+      anfrage++;                                   // vor abort(): ruft es onerror sofort auf, zählt das nicht mehr
+      try { if (laufend && laufend.abort) laufend.abort(); } catch (_) {}
+      unterwegs = false;
+    }
+    var id = ++anfrage, seit = Date.now();
+    unterwegs = true; unterwegsSeit = seit;
+    // Späte Rückmeldung eines aufgegebenen Requests gibt den Riegel des neuen nie frei
+    var fertig = function () { if (id !== anfrage) return false; unterwegs = false; rttMs = Date.now() - seit; return true; };
+    try {
+      laufend = GM_xmlhttpRequest({
+        method: 'POST', url: PANEL, timeout: 2000, data: JSON.stringify(paket), headers: { 'Content-Type': 'application/json' },
+        onload: function (r) { if (!fertig()) return; if (r.status === 200) { gesendetN++; letzterFehler = ''; } else fehlerSetzen('Panel HTTP ' + r.status); },
+        onerror: function () { if (fertig()) fehlerSetzen('Panel nicht erreichbar'); },
+        ontimeout: function () { if (!fertig()) return; fehlerSetzen('Panel Timeout'); timeouts.push(Date.now()); if (timeouts.length > 5) timeouts.shift(); }
+      });
+    } catch (e) { unterwegs = false; fehlerSetzen('Senden: ' + String(e).slice(0, 80)); }
   }
 
   // WORKER-WACHE (0.3.1, PC von Marco 29.10.2026: Stand im Panel 2–6,5 s alt trotz takt 'worker'): new Worker(blob:) wirft bei einer
   // CSP-Sperre NICHT — der Fehler kommt später als error-Event, getickt hätte dann nur noch der MutationObserver (im Hintergrund selten).
-  // Jetzt: onerror, Anlauf-Wache (kein Worker-Tick in 0,5 s) und Dauer-Wache (Worker > 2 s stumm) → setInterval zusätzlich, takt ehrlich
-  // 'worker-tot'. Doppelte Ticks schaden nicht (ein Request zur Zeit; Prophos verlangt für den Schnellschluss auch ≥ 200 ms Folge).
-  var ersatzAn = false;
-  function workerTot(grund) {
-    if (ersatzAn) return;
-    ersatzAn = true; takt = 'worker-tot'; letzterFehler = 'Worker: ' + grund;
-    setInterval(tick, TAKT_MS);
+  // Jetzt: onerror, Anlauf-Wache (kein Worker-Tick in 0,5 s) und Dauer-Wache (Worker > 2 s stumm) → setInterval zusätzlich.
+  // 0.3.2 NICHT MEHR ENDGÜLTIG (Konsole Marco 30.10.2026: dauerhaft „worker-tot", obwohl worker_ticks weiter stiegen): die Wache läuft im selben Hauptfaden wie die
+  // Worker-Nachrichten, ein Hänger der Seite > 2 s löste sie aus, ohne dass der Worker tot war; danach tickten Worker UND Ersatz (doppelte stand()-Last). Jetzt: der nächste Worker-Tick
+  // beendet den Ersatz (takt wieder 'worker'); bleibt der Worker wirklich stumm, Neustart nach 10 s, dann 20 s … höchstens alle 5 min.
+  var wAkt = null, blobUrl = null, ersatzId = null, workerStartAt = 0, neustartWarte = 10000, workerTotN = 0;
+  function ersatzStart(grund) {
+    if (ersatzId !== null) return;
+    ersatzId = setInterval(function () { if (Date.now() - letzterTick >= 80) tick(); }, TAKT_MS);
+    workerTotN++; takt = 'worker-tot'; fehlerSetzen('Worker: ' + grund);
+  }
+  function workerTick() {
+    workerTicks++; workerLetzt = Date.now(); neustartWarte = 10000;
+    if (ersatzId !== null) { clearInterval(ersatzId); ersatzId = null; }
+    takt = 'worker';
+    if (Date.now() - letzterTick >= 80) tick();   // gestaute Worker-Nachrichten nach einem Hänger nicht als Salve messen (zählt sonst als Flach-Folge)
+  }
+  function workerStart() {
+    workerStartAt = Date.now();
+    try {
+      if (wAkt && wAkt.terminate) wAkt.terminate();
+      if (!blobUrl) blobUrl = URL.createObjectURL(new Blob(['let id=null;onmessage=e=>{if(id)clearInterval(id);id=setInterval(()=>postMessage(0),e.data)}'], { type: 'text/javascript' }));
+      var w = new Worker(blobUrl);
+      wAkt = w;
+      w.onmessage = function () { if (w === wAkt) workerTick(); };
+      w.onerror = function () { if (w === wAkt) ersatzStart('Fehler beim Start (CSP?)'); };
+      w.postMessage(TAKT_MS);
+      return true;
+    } catch (_) { return false; }
   }
   function starteTakt() {
-    try {
-      var quelle = 'let id=null;onmessage=e=>{if(id)clearInterval(id);id=setInterval(()=>postMessage(0),e.data)}';
-      var w = new Worker(URL.createObjectURL(new Blob([quelle], { type: 'text/javascript' })));
-      w.onmessage = function () { workerTicks++; workerLetzt = Date.now(); tick(); };
-      w.onerror = function () { workerTot('Fehler beim Start (CSP?)'); };
-      w.postMessage(TAKT_MS);
-      setTimeout(function () { if (!workerTicks) workerTot('kein Tick in 0,5 s'); }, 500);
-      setInterval(function () { if (workerTicks && Date.now() - workerLetzt > 2000) workerTot('über 2 s stumm'); }, 1000);
-      return 'worker';
-    } catch (_) {
-      setInterval(tick, TAKT_MS);
-      return 'interval';
-    }
+    var ok = workerStart();
+    if (!ok) ersatzStart('nicht startbar');
+    else setTimeout(function () { if (!workerTicks) ersatzStart('kein Tick in 0,5 s'); }, 500);
+    setInterval(function () {
+      var jetzt = Date.now();
+      if (ersatzId === null) { if (workerTicks && jetzt - workerLetzt > 2000) ersatzStart('über 2 s stumm'); return; }
+      if (jetzt - Math.max(workerLetzt, workerStartAt) > neustartWarte) { neustartWarte = Math.min(neustartWarte * 2, 300000); workerStart(); }
+    }, 1000);
+    return ok ? 'worker' : 'interval';
   }
 
   var t0 = starteTakt();
-  if (!ersatzAn) takt = t0;                        // onerror kann nicht vorher feuern (asynchron) — sicher ist sicher
+  if (t0 === 'interval' || ersatzId === null) takt = t0;   // onerror kann nicht vorher feuern (asynchron) — sicher ist sicher
   // MutationObserver (0.2.0): jede DOM-Änderung meldet sofort — höchstens alle MO_ABSTAND_MS, ein Request zur Zeit (tick prüft unterwegs)
   try {
     new MutationObserver(function () { if (Date.now() - letzterTick >= MO_ABSTAND_MS) tick(); })
@@ -198,7 +238,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.3.1';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.3.2';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8770/userscript/tsx-kern.json';
   const MERK = 'prophos_tsx_kern_v1';         // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
