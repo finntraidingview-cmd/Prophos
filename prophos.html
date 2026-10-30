@@ -33808,7 +33808,7 @@
         const wegFalsch = !!(p && p.route && !['tvv2', 'mt5v2', 'tsv2'].includes(String(p.route)))
         const st = !k.plan_id ? 'kein_plan' : wegFalsch ? 'falscher_weg' : p ? String(p.status || '') : P.plaene ? 'fehlt' : ({ planned: 'planned', open: 'open', review: 'review', completed: 'completed' })[k.status] || 'unbekannt'
         out.push({ uid: String(x.user_id), name: x.name || '?', nr: i + 1, n: ks.length, konto: k, plan: p, status: st,
-                   richtung: (p && p.richtung) || (typeof wdKontoRichtung === 'function' ? wdKontoRichtung(k, x.richtung) : x.richtung) || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
+                   richtung: (p && p.richtung) || (typeof window._wdKontoRichtung === 'function' ? window._wdKontoRichtung(k, x.richtung) : x.richtung) || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
                    tp: (p && p.master_tp != null) ? p.master_tp : k.tp, kt: (p && p.kt != null) ? p.kt : k.kt,
                    root: (p && p.symbol_root) || (p && /^MNQ/i.test(String(p.master_symbol || '')) ? 'MNQ' : p && /^NQ/i.test(String(p.master_symbol || '')) ? 'NQ' : null),
                    // Start-Stempel (Puls hat zugegriffen) — ab da nicht mehr bearbeitbar (F33); live-trades nennt ihn „verknuepft"
@@ -33984,16 +33984,19 @@
         if(!x.geaendert) return fehler('Nicht gespeichert — Plan ist nicht mehr geplant oder schon gestartet')
         if('master_contracts' in upd && x.plan && Number(x.plan.master_contracts) !== kt) hinweise.push('Kontrakte speichert das Backend noch nicht (B39)')
       }
-      // Richtung je ID: alle noch geplanten, nicht gestarteten Pläne der ID + die Tagesplan-Zeile
+      // Richtung je ID × FIRMA (30.10.2026, Richtung je Konto — vorher je ID): alle noch geplanten, nicht gestarteten Pläne dieser ID bei
+      // derselben Firma (gegeneinander dürften sie nie laufen) + w_richtung an genau diesen Konten; die übrigen Konten behalten ihre Richtung
+      const fN = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, ''), dirFirma = fN(t.konto && t.konto.firm)
       if(dirNeu){
-        for(const q of mklWdPlanTrades(P).filter(q => q.uid === t.uid && q.status === 'planned' && !q.gestartet && q.konto.plan_id)){
+        for(const q of mklWdPlanTrades(P).filter(q => q.uid === t.uid && fN(q.konto.firm) === dirFirma && q.status === 'planned' && !q.gestartet && q.konto.plan_id)){
           try{ await wdApi('PATCH', { id: String(q.konto.plan_id), upd: { richtung: dirNeu } }) }catch(err){ hinweise.push(`Richtung ${q.name}: ${(err && err.message) || err}`) }
         }
       }
       // Tagesplan mitziehen (wie wdPlaeneNachziehen: k.tp; dazu k.kt) — Farmer-Tab und Plan bleiben gleich
       const row = t.row
       const konten = (row.konten || []).map(k => String(k.plan_id || '') === e.id ? Object.assign({}, k, 'master_tp' in upd ? { tp } : {}, ('master_contracts' in upd && !hinweise.length) ? { kt } : {}) : k)
-      const tpUpd = { konten, updated_at: new Date().toISOString() }; if(dirNeu) tpUpd.richtung = dirNeu
+        .map(k => (dirNeu && k && fN(k.firm) === dirFirma) ? { ...k, w_richtung: dirNeu } : k)
+      const tpUpd = { konten, updated_at: new Date().toISOString() }
       const { error } = await supabase.from('wd_tagesplan').update(tpUpd).eq('tag', row.tag).eq('user_id', row.user_id).neq('status', 'laeuft')
       if(error) hinweise.push('Tagesplan: ' + (error.message || error))
     }catch(err){
@@ -66049,12 +66052,28 @@
     return { richtung: erst.richtung, firma: erst.firma, grund: `Richtung übernommen: ${erst.firma} ${erst.durch} ${seite}${widerspruch ? ' (andere Firma dieser ID läuft entgegen — bitte prüfen)' : ''}` }
   }
   window._wdRichtungVorgabe = wdRichtungVorgabe
-  // Hinweis im Block (Darstellung): übernommene Richtung bzw. Warnung, wenn die gewürfelte Richtung inzwischen gegen den Lauf steht
+  // Hinweis im Block (Darstellung): übernommene Richtung bzw. Hinweis, wenn die gewürfelte Richtung inzwischen gegen den Lauf steht.
+  // RICHTUNG GEDREHT STATT „SCHEITERT" (Finn 30.10.2026 ~07:14 über den Master, Mike 15:01 BUY gegen Apex-Short: „Wenn ein WD wegen
+  // Richtungsschutz nicht losgehen kann, dreht die Richtung einfach um … wir sind eh gegengehedgt"): das Drehen am Start gibt es seit .1503
+  // (rkVorStart vor dem Claim, tpOrbitStartenKern bei Karten-/Fern-Start; Fusion-Hedge nimmt die Gegenrichtung des gedrehten Plans, Beleg
+  // 29.10. …0393 SELL→BUY mit Hedge SELL). Die alte rote Warnung „Start würde am Riegel scheitern" war für WDs falsch — jetzt der Hinweis,
+  // in welche Richtung er beim Start gedreht wird. Scheitert das Drehen (Plan nicht mehr planned/Richtung geändert), bleibt der Start gesperrt.
+  // JE KONTO (Finn 30.10.2026 ~07:18, Richtung je Konto): verglichen wird jedes aktive Konto mit dem Lauf SEINER Firma, nicht die ID-Zeile.
   function wdRichtungGrundHtml(x){
-    const v = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, String(x.user_id), x.konten)
-    if(!v || !x.richtung) return ''
-    if(v.richtung === x.richtung) return `<span class="kf" title="${escapeHtml(v.grund)}"> · ${escapeHtml(v.grund)}</span>`
-    return `<span class="kf" style="color:var(--danger)" title="${escapeHtml(v.grund)}"> · ⚠ gegen ${escapeHtml(v.firma)} (${v.richtung === 'buy' ? 'long' : 'short'} läuft) — Start würde am Riegel scheitern</span>`
+    const fest = ((_wd.daten || {}).richtung_fest) || {}
+    const v = wdRichtungVorgabe(fest, String(x.user_id), x.konten)
+    if(!x.richtung) return ''
+    const dreh = new Map()
+    for(const k of (x.konten || []).filter(wdAktiv)){
+      const f = fest[`${x.user_id}|${wdFirmaNorm(k.firm)}`]
+      if(!f || (f.richtung !== 'buy' && f.richtung !== 'sell') || wdKontoRichtung(k, x.richtung) === f.richtung) continue
+      if(!dreh.has(wdFirmaNorm(k.firm))) dreh.set(wdFirmaNorm(k.firm), { firma: k.firm, richtung: f.richtung, durch: f.durch || 'läuft gerade' })
+    }
+    if(!dreh.size) return v ? `<span class="kf" title="${escapeHtml(v.grund)}"> · ${escapeHtml(v.grund)}</span>` : ''
+    const liste = [...dreh.values()]
+    const tip = liste.map(d => `${d.firma} ${d.durch} ${d.richtung === 'buy' ? 'long' : 'short'}`).join(' · ')
+      + ' — der Winning Day dieser Firma wird beim Start auf diese Richtung gedreht (Richtungsschutz derselben ID × Firma), TP/SL in $ bleiben, der Fusion-Hedge geht in die Gegenrichtung.'
+    return `<span class="kf" style="color:var(--warn)" title="${escapeHtml(tip)}"> · ⇅ Richtung gedreht: ${liste.map(d => `${escapeHtml(d.firma)} ${d.richtung === 'buy' ? 'long' : 'short'} läuft → startet ${d.richtung.toUpperCase()}`).join(' · ')}</span>`
   }
   /* BÜNDEL JE ID GEWÜRFELT (28.10.2026, Finn per Sprachnachricht: „heute startet bei Jacob einer um 16:01 und einer um 16:02 … an manchen
    * Tagen alle auf einmal, an anderen nicht — z. B. zwei Longs um 16 Uhr und schon um 7 Uhr morgens ein Short, an einem anderen Tag alle
@@ -66110,8 +66129,33 @@
   window._wdBuendelAnKonten = wdBuendelAnKonten
   // Versatz (min) und Richtung eines Kontos aus seiner Gruppe — ohne Gruppe: Blockstart und Richtung der Zeile
   const wdKontoVersatzMin = k => (k && k.gruppe && Number.isFinite(+k.g_versatz_min)) ? Math.round(+k.g_versatz_min) : 0
-  const wdKontoRichtung = (k, richtung) => (k && k.gruppe && k.g_gegen && (richtung === 'buy' || richtung === 'sell')) ? (richtung === 'buy' ? 'sell' : 'buy') : richtung
+  /* RICHTUNG JE KONTO (Finn 30.10.2026 ~07:18 über den Master: „Nicht die ganze ID hat eine Richtung. JEDER Winning-Day-Trade … bekommt
+   * seine Richtung per Zufall eigenständig gewürfelt — z. B. Mike: Tradeify long, Apex short, Topstep long. Einzige Bindung: Richtungsschutz
+   * je ID × Firma"). k.w_richtung (buy|sell) am Konto überstimmt Zeile und Gruppe; fehlt es (Zeilen von vorher, fest eingeplante Blöcke),
+   * gilt wie bisher die Zeile bzw. bei g_gegen die Gegenrichtung. app.py wd_konto_gruppe spiegelt das. */
+  const wdKontoRichtung = (k, richtung) => (k && (k.w_richtung === 'buy' || k.w_richtung === 'sell')) ? k.w_richtung
+    : (k && k.gruppe && k.g_gegen && (richtung === 'buy' || richtung === 'sell')) ? (richtung === 'buy' ? 'sell' : 'buy') : richtung
   window._wdKontoRichtung = wdKontoRichtung
+  const wdFirmaNorm = f => (typeof firmNormRichtung === 'function') ? firmNormRichtung(f) : String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  /* REIN RECHNEND (window._wdKontoRichtungenWuerfeln): je aktivem Konto in Zeilen-Reihenfolge — läuft bei seiner Firma schon etwas
+   * (fest = richtung_fest „uid|firma" aus GET /admin/wd-plaene), dessen Richtung; hat ein früheres Konto derselben ID × Firma schon eine,
+   * dieselbe (gegeneinander dürfte es nie laufen, rkVorStart dreht am Start ohnehin); sonst gewürfelt. rnd() wird je Konto IMMER gezogen —
+   * die Seed-Folge bleibt für alle Tabs gleich. → Map konto-id → 'buy'|'sell' */
+  function wdKontoRichtungenWuerfeln(konten, rnd, fest, uid){
+    const je = new Map(), out = new Map()
+    for(const k of (konten || []).filter(wdAktiv)){
+      const gew = rnd() < 0.5 ? 'buy' : 'sell'
+      const key = `${uid}|${wdFirmaNorm(k.firm)}`, f = fest && fest[key]
+      const r = (f && (f.richtung === 'buy' || f.richtung === 'sell')) ? f.richtung : (je.get(key) || gew)
+      if(!je.has(key)) je.set(key, r)
+      out.set(String(k.id), r)
+    }
+    return out
+  }
+  window._wdKontoRichtungenWuerfeln = wdKontoRichtungenWuerfeln
+  // Richtungen an die Konten schreiben (Kopie); nur aktive Konten aus der Map, die übrigen behalten, was sie haben
+  const wdKontoRichtungAnKonten = (konten, m) => (konten || []).map(k => (k && m && m.has(String(k.id))) ? { ...k, w_richtung: m.get(String(k.id)) } : k)
+  window._wdKontoRichtungAnKonten = wdKontoRichtungAnKonten
   function wdWuerfeln(rows, regeln, tag, seed, alleNeu, jetztMs, richtungFest){
     const r = regeln || {}, rnd = seed != null ? wdMulberry(seed) : Math.random
     const nAkt = x => (x.konten || []).filter(wdAktiv).length
@@ -66136,7 +66180,10 @@
       const v = wdRichtungVorgabe(richtungFest, String(x.user_id), x.konten)   // RICHTUNG ÜBERNEHMEN (08.10.2026) statt würfeln
       const t0 = Math.round(t / 60000) * 60000
       const buendel = wdBuendelWuerfeln(x.konten, rnd, t0, lo, hi, belegt, gap, !!v)
-      out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(t0).toISOString(), richtung: v ? v.richtung : gew, status: 'geplant', richtung_grund: v ? v.grund : null, buendel })
+      // RICHTUNG JE KONTO (30.10.2026): jedes Konto eigenständig, Bindung nur ID × Firma; die Zeile trägt die Richtung des ersten Kontos
+      const kontoRichtung = wdKontoRichtungenWuerfeln(x.konten, rnd, richtungFest, String(x.user_id))
+      const erste = (x.konten || []).filter(wdAktiv).map(k => kontoRichtung.get(String(k.id)))[0]
+      out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(t0).toISOString(), richtung: erste || (v ? v.richtung : gew), status: 'geplant', richtung_grund: v ? v.grund : null, buendel, kontoRichtung })
     })
     for(const x of rows || []){
       if(out.has(String(x.user_id)) || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
@@ -66573,9 +66620,11 @@
       const upd = { reihenfolge: e.reihenfolge, start_um: e.start_um, richtung: e.richtung, status: e.status, updated_at: new Date().toISOString() }
       if(geloest.has(String(x.user_id))) upd.konten = x.konten
       // BÜNDEL (28.10.2026): Gruppen an die Konten — nur schreiben, wenn sich etwas ändert (eine Gruppe = Felder weg)
-      if(e.buendel){
-        const neu = wdBuendelAnKonten(x.konten, e.buendel)
-        const sig = ks => JSON.stringify((ks || []).map(k => [k && k.id, k && k.gruppe, k && k.g_versatz_min, k && k.g_gegen]))
+      // RICHTUNG JE KONTO (30.10.2026): w_richtung je Konto mit in dieselbe Schreibung
+      if(e.buendel || e.kontoRichtung){
+        let neu = e.buendel ? wdBuendelAnKonten(x.konten, e.buendel) : x.konten
+        if(e.kontoRichtung) neu = wdKontoRichtungAnKonten(neu, e.kontoRichtung)
+        const sig = ks => JSON.stringify((ks || []).map(k => [k && k.id, k && k.gruppe, k && k.g_versatz_min, k && k.g_gegen, k && k.w_richtung]))
         if(sig(neu) !== sig(x.konten)) upd.konten = neu
       }
       let q = supabase.from('wd_tagesplan').update(upd).eq('tag', tag).eq('user_id', x.user_id)
@@ -66714,7 +66763,9 @@
         }
         const upd = {}, soll = zeiten.get(String(k.id)), kd = wdKontoDaten(k.id)
         const kr = wdKontoRichtung(k, row.richtung)   // BÜNDEL (28.10.2026): Richtung der Gruppe
-        if(kr && p.richtung !== kr) upd.richtung = kr
+        // nie zurückdrehen, was der Start-Schutz gedreht hat (30.10.2026) — GET /admin/wd-plaene liefert dafür richtung_konflikt (Alias auf mt5_baseline)
+        const rkG = p.richtung_konflikt || (p.mt5_baseline && p.mt5_baseline.richtung_konflikt)
+        if(kr && p.richtung !== kr && !(rkG && rkG.status === 'gedreht')) upd.richtung = kr
         if(soll && wdStartUmNachziehbar(p.start_um, soll)) upd.start_um = soll   // nie in die Vergangenheit zurückziehen (14.10.2026)
         if(kd && kd.tp_vorgabe > 0 && Number(p.master_tp) !== kd.tp_vorgabe) upd.master_tp = kd.tp_vorgabe
         if(p.master_sl != null) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen
@@ -66897,7 +66948,9 @@
           set(k, 'plan_id', String(p.plan.id)); set(k, 'start_um', startIso); set(k, 'tp', p.plan.masterTp); set(k, 'sl', p.plan.masterSl); set(k, 'slave', p.plan.slaveRisk); set(k, 'live', p.z.live); set(k, 'plus', p.z.plus); set(k, 'status', 'planned')
         }else if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
           const upd = {}, z = zVon.get(String(k.id))
-          if(plan.richtung !== wdKontoRichtung(k, row.richtung)) upd.richtung = wdKontoRichtung(k, row.richtung)   // Richtung der Gruppe (28.10.2026)
+          // nie zurückdrehen, was der Richtungsschutz am Start gedreht hat (30.10.2026, mt5_baseline.richtung_konflikt.status 'gedreht')
+          const gedreht = plan.mt5Baseline && plan.mt5Baseline.richtung_konflikt && plan.mt5Baseline.richtung_konflikt.status === 'gedreht'
+          if(!gedreht && plan.richtung !== wdKontoRichtung(k, row.richtung)) upd.richtung = wdKontoRichtung(k, row.richtung)   // Richtung der Gruppe (28.10.2026)
           if(wdStartUmNachziehbar(plan.startUm, startIso)) upd.start_um = startIso   // nie in die Vergangenheit zurückziehen (14.10.2026)
           // Slave nach Live-Balance: der Mac kannte beim Anlegen evtl. keinen Live-Stand (kleinste Stufe)
           if(plan.route === 'tvv2'){
@@ -67314,6 +67367,8 @@
       const start = (k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—')
         // BÜNDEL (28.10.2026): Gruppe + ihre Richtung, sobald eine ID heute in mehreren Gruppen fährt
         + ((k.gruppe && wdAktiv(k)) ? `<div class="kf">Gruppe ${k.gruppe}${x.richtung ? ' · ' + (wdKontoRichtung(k, x.richtung) === 'buy' ? 'BUY' : 'SELL') : ''}</div>` : '')
+        // RICHTUNG JE KONTO (30.10.2026): eigene Richtung auch ohne Gruppe am Konto zeigen
+        + ((!k.gruppe && wdAktiv(k) && (k.w_richtung === 'buy' || k.w_richtung === 'sell')) ? `<div class="kf">${k.w_richtung === 'buy' ? '▲ BUY' : '▼ SELL'}</div>` : '')
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
       const slWert = kd.sl_vorgabe || ''   // Vorgabe für Risiko Master (Lot-Rechnung) — kein Stop am Plan (25.09.2026)
       // RISIKO MASTER FEHLT (08.10.2026, Master: alle 11 WD-Konten ohne wd_sl/max_risiko_trade → hedgeMultAusRisiko fällt auf den TP zurück =
@@ -67388,7 +67443,9 @@
     const vorgabe = wdRichtungVorgabe(((_wd.daten || {}).richtung_fest) || {}, String(x.user_id), x.konten)   // Richtung übernehmen (08.10.2026)
     const start = new Date(s.start_ms).toISOString(), richtung = vorgabe ? vorgabe.richtung : (Math.random() < 0.5 ? 'buy' : 'sell')
     const rf = Math.max(0, ...(_wd.rows || []).map(q => +q.reihenfolge || 0)) + 1
-    const konten = (x.konten || []).map(k => wdAktiv(k) ? { ...k, start_um: start } : k)
+    // RICHTUNG JE KONTO (30.10.2026): jedes Konto eigenständig gewürfelt (Bindung ID × Firma) — alte w_richtung würde sonst überstimmen
+    const kr = wdKontoRichtungenWuerfeln(x.konten, Math.random, ((_wd.daten || {}).richtung_fest) || {}, String(x.user_id))
+    const konten = wdKontoRichtungAnKonten((x.konten || []).map(k => wdAktiv(k) ? { ...k, start_um: start } : k), kr)
     const { data, error } = await supabase.from('wd_tagesplan').update({ start_um: start, richtung, reihenfolge: rf, status: 'geplant', konten, updated_at: new Date().toISOString() })
       .eq('tag', x.tag).eq('user_id', x.user_id).is('start_um', null).neq('status', 'laeuft').select('*')
     if(error) throw error
@@ -67539,8 +67596,10 @@
    * geplanten, nicht gestarteten Pläne sofort umdrehen. Läuft/fertig/verpasst oder noch nicht eingetragen: gesperrt. */
   function wdRichtungChip(x, erw){
     const fest = erw || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
-    const txt = x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
-    const kl = x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
+    // RICHTUNG JE KONTO (30.10.2026): fahren die Konten der ID in verschiedene Richtungen, zeigt der Kopf „gemischt" (Klick dreht jedes Konto)
+    const gemischt = new Set((x.konten || []).filter(wdAktiv).map(k => wdKontoRichtung(k, x.richtung)).filter(Boolean)).size > 1
+    const txt = gemischt ? '▲▼ gemischt' : x.richtung === 'buy' ? '▲ BUY' : x.richtung === 'sell' ? '▼ SELL' : '—'
+    const kl = gemischt ? '' : x.richtung === 'buy' ? 'chip-good' : x.richtung === 'sell' ? 'chip-bad' : ''
     if(fest || wdNurLesen(x.user_id)) return x.richtung ? `<span class="chip ${kl}">${txt}</span>` : '<span class="kf">—</span>'   // fremde ID beim Verwalter: nur Anzeige (30.10.2026)
     return `<button type="button" class="chip ${kl} wd-dir-flip" data-wd-flip="${escapeHtml(String(x.user_id))}" title="anklicken: Richtung für alle Konten von ${escapeHtml(x.name || 'dieser ID')} umdrehen">${txt}</button>`
   }
@@ -67548,25 +67607,33 @@
     if(!(await wdDarf(uid))) return wdSay('Nur Blöcke deiner Gruppe.', 'err')   // Prüfer M1 (08.10.2026)
     const x = (_wd.rows || []).find(q => String(q.user_id) === String(uid)); if(!x || x._dirBusy) return
     if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') return wdSay('Block läuft schon — Richtung nicht mehr änderbar.', 'err')
-    const alt = x.richtung || null, neu = alt === 'buy' ? 'sell' : 'buy'
-    x._dirBusy = true; x.richtung = neu; wdAblauf(_wd.rows || [], wdFehlend())
+    const alt = x.richtung || null, neu = alt === 'buy' ? 'sell' : 'buy', kontenAlt = x.konten
+    // RICHTUNG JE KONTO (30.10.2026): jedes Konto mit eigener Richtung (w_richtung) wird mitgedreht — das Muster bleibt, nur umgekehrt.
+    // Konten frisch aus der DB (nicht aus dem Tab-Stand), damit plan_id/status/start_um eines anderen Tabs nicht überschrieben werden
+    let kontenDb = kontenAlt
+    x._dirBusy = true   // schon vor dem Lesen: Doppelklick wartet nicht auf die DB
+    try{ const { data: fr } = await supabase.from('wd_tagesplan').select('konten').eq('tag', x.tag).eq('user_id', x.user_id).maybeSingle(); if(fr && Array.isArray(fr.konten)) kontenDb = fr.konten }catch(_){}
+    const kontenNeu = (kontenDb || []).map(k => (k && (k.w_richtung === 'buy' || k.w_richtung === 'sell')) ? { ...k, w_richtung: k.w_richtung === 'buy' ? 'sell' : 'buy' } : k)
+    const mitKonten = kontenNeu.some((k, i) => k !== (kontenDb || [])[i])
+    x._dirBusy = true; x.richtung = neu; if(mitKonten) x.konten = kontenNeu; wdAblauf(_wd.rows || [], wdFehlend())
     const hinweise = []
     try{
-      const { data, error } = await supabase.from('wd_tagesplan').update({ richtung: neu, updated_at: new Date().toISOString() })
+      const { data, error } = await supabase.from('wd_tagesplan').update({ richtung: neu, ...(mitKonten ? { konten: kontenNeu } : {}), updated_at: new Date().toISOString() })
         .eq('tag', x.tag).eq('user_id', x.user_id).not('status', 'in', '(laeuft,fertig,verpasst)').select('user_id')
       if(error) throw error
       if(!data || !data.length) throw new Error('Block läuft schon oder ist weg')
       if(_wd.daten && _wd.daten.rail){
         for(const k of (x.konten || [])){
-          const p = wdPlanLive(k); if(!p || p.status !== 'planned' || p.start_um_gestartet_at || p.richtung === neu) continue
-          try{ const r = await wdApi('PATCH', { id: String(k.plan_id), upd: { richtung: neu } }); if(r && r.geaendert) p.richtung = neu; else hinweise.push(`${k.name || 'Konto'}: schon gestartet`) }
+          const ziel = wdKontoRichtung(k, neu)   // je Konto (w_richtung / Gruppe), nicht pauschal die Zeile
+          const p = wdPlanLive(k); if(!p || p.status !== 'planned' || p.start_um_gestartet_at || p.richtung === ziel) continue
+          try{ const r = await wdApi('PATCH', { id: String(k.plan_id), upd: { richtung: ziel } }); if(r && r.geaendert) p.richtung = ziel; else hinweise.push(`${k.name || 'Konto'}: schon gestartet`) }
           catch(e){ hinweise.push(`${k.name || 'Konto'}: ${(e && e.message) || e}`) }
         }
       }
-      wdSay(`${x.name || 'ID'}: Richtung jetzt ${neu === 'buy' ? 'BUY' : 'SELL'}${hinweise.length ? ' · Plan nicht gedreht: ' + hinweise.join(' · ') : ''}`, hinweise.length ? 'err' : 'ok')
+      wdSay(`${x.name || 'ID'}: Richtung jetzt ${mitKonten ? 'je Konto umgedreht' : neu === 'buy' ? 'BUY' : 'SELL'}${hinweise.length ? ' · Plan nicht gedreht: ' + hinweise.join(' · ') : ''}`, hinweise.length ? 'err' : 'ok')
       wdCacheSchreiben(x.tag)
     }catch(e){
-      x.richtung = alt
+      x.richtung = alt; if(mitKonten) x.konten = kontenAlt
       wdSay('Richtung nicht gespeichert: ' + ((e && e.message) || e), 'err')
     }finally{
       x._dirBusy = false; wdAblauf(_wd.rows || [], wdFehlend())
@@ -68259,6 +68326,14 @@
         for(const q of andere) if(!q.gruppe){ q.gruppe = 1; q.g_versatz_min = 0; q.g_gegen = false }
         Object.assign(kn, { gruppe: nr, g_versatz_min: s.versatz_min, g_gegen: v ? false : Math.random() < 0.5 })
       }
+      // RICHTUNG JE KONTO (30.10.2026): das neue Konto bekommt eine eigene Richtung — Lauf seiner Firma, sonst die eines anderen aktiven
+      // Kontos derselben ID × Firma, sonst gewürfelt (Bindung nur ID × Firma, wie wdKontoRichtungenWuerfeln)
+      {
+        const ffk = (((_wd.daten || {}).richtung_fest) || {})[`${uid}|${wdFirmaNorm(kn.firm)}`]
+        const gleich = andere.find(q => wdFirmaNorm(q.firm) === wdFirmaNorm(kn.firm))
+        kn.w_richtung = (ffk && (ffk.richtung === 'buy' || ffk.richtung === 'sell')) ? ffk.richtung
+          : gleich ? wdKontoRichtung(gleich, richtung) : (Math.random() < 0.5 ? 'buy' : 'sell')
+      }
       if(!kn.plan_id) kn.start_um = new Date(s.start_ms).toISOString()
       const status = x.status === 'leer' || !x.status ? 'geplant' : x.status
       const { data, error } = await supabase.from('wd_tagesplan').update({ konten, status, richtung, start_um: startUm, updated_at: new Date().toISOString() })
@@ -68836,6 +68911,9 @@
       // Eingabe ist Dubai-Zeit am gewählten Tag (nicht Gerätezeit — die PC-Tabs stehen in Deutschland)
       const start_um = zeit ? wdZeitpunkt(tag, zeit, WD_TZ_STD).toISOString() : x.start_um
       const aktiv = konten.some(wdAktiv), status = aktiv ? 'geplant' : 'leer'
+      // RICHTUNG JE KONTO (30.10.2026): BUY/SELL der ID von Hand geändert → gilt für jedes aktive Konto (w_richtung), sonst überstimmte
+      // die alte Konto-Richtung den Klick und wdPlaeneNachziehen zöge die Pläne zurück
+      if((richtung === 'buy' || richtung === 'sell') && richtung !== x.richtung) for(let i = 0; i < konten.length; i++) if(wdAktiv(konten[i])) konten[i] = { ...konten[i], w_richtung: richtung }
       const upd = { konten, richtung: richtung || null, start_um: aktiv ? start_um : null, status, updated_at: new Date().toISOString() }
       const { error } = await supabase.from('wd_tagesplan').update(upd).eq('tag', tag).eq('user_id', x.user_id).neq('status', 'laeuft')
       if(error) return wdSay('Speichern fehlgeschlagen: ' + error.message, 'err')
