@@ -14,8 +14,8 @@ def main():
     f = []
     ok = lambda b, t: f.append(t) if not b else None   # noqa: E731
     ok("const guestly = apSchlankJetzt() && (_apIdsArtWert === 'challenge' || apSchlankFunded())" in s, "Challenge + Funded Futures im Planer-Gerüst (WD + Funded CFD eigene Bauer)")
-    ok("funded: _apIdsArtWert === 'funded'" in s and "vorschau ? 'Vorschau' : 'Zu bestätigen'" in s, "Funded: Vorschau statt Zu bestätigen")
-    ok("let schalter = ''; if(!fd)" in s and "teile.push(Q ? (Q.aktiv ? 'Funded-Planer an'" in s, "Funded: Einstellungen = Funded-Regeln, keine Challenge-Schalter")
+    ok("funded: apIstFunded()" in s and "vorschau ? 'Vorschau' : 'Zu bestätigen'" in s, "Funded: Vorschau statt Zu bestätigen")
+    ok("let schalter = ''; if(!fd)" in s and "teile.push(Q ? (Q.aktiv ? nm + ' an'" in s, "Funded: Einstellungen = Funded-Regeln, keine Challenge-Schalter")
     ok("function apgZeilenSchmuecken(root, x)" in s and "apgZeilenSchmuecken(root, ow)" in s, "Weg-Chips in den Zeilen")
     ok("if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){" in s and "['Echo + Hedge', 'hedge'," in s and "'Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`" in s,
        "Echo-Vorschlag mit Vorschau + Schalter an → „Echo + Hedge“, mit Grund → „Echo V2 · ⚠ Grund“")
@@ -23,7 +23,7 @@ def main():
     # Master | Fusion (30.10.2026): Fusion-Werte in Lots/TP/SL neben den Master-Werten, Kopf „Master | Fusion", Chip entfällt
     i = s.index("function apgMasterFusion(root, je){")
     mf = s[i:s.index("\n  }\n", s.index("tab.querySelectorAll('.pz-z[data-plan-id]')", i))]
-    ok("if(_apIdsArtWert !== 'funded') apgMasterFusion(root, je)" in s, "nur Challenge (Funded hat die Spalte Fusion)")
+    ok("if(!apIstFunded()) apgMasterFusion(root, je)" in s, "nur Challenge (Funded hat die Spalte Fusion)")
     ok("[[3, 'Lots'], [6, 'TP'], [7, 'SL']]" in mf and "Master <i>|</i> Fusion" in mf, "Köpfe Lots/TP/SL mit Master | Fusion")
     ok("zellen.tp.appendChild(fus(passTp != null ? ahfEur(passTp)" in mf and "zellen.sl.appendChild(fus(vs.blow_eur != null ? ahfEur(vs.blow_eur)" in mf, "TP = Fusion am Master-TP, SL = Fusion am Master-SL/Blow")
     ok("fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')" in mf and "fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')" in mf, "ohne Vorschau „—“, mit Grund „⚠“ + Tooltip")
@@ -78,7 +78,12 @@ def main():
     ok(c.count("apgKpi({ gross: true") == 2 and c.count("apgKpi({ icon:") == 3, "Funded CFD: 2 große + 3 kleine KPI-Karten")
     ok('id="apg-fc-ls"' in c and 'id="apg-fc-firma"' in c, "Funded CFD: Charts je ID + je Firma")
     ok('class="apg-haupt" disabled' in c, "Funded CFD: Planen bleibt gesperrt")
-    ok("if(name === 'fcfd') window._apgFcfdOeffnen?.()" in s, "Funded CFD: beim Öffnen des Reiters gezeichnet")
+    ok("if(name === 'fcfd') window._fcfdNebenLaden?.()" in s, "Funded CFD: beim Öffnen Übersicht + Regeln nachladen")
+    # Funded CFD im Challenge-Gerüst (30.10.2026, Master nach .1926): dritte Quelle wie Funded Futures, Knöpfe über die eigene Route
+    ok("fcfd: { basis: '/admin/funded-cfd-plan'" in s and "bauen: d => fcpQuelleBauen(d)" in s, "Funded CFD: Quelle + Route je Art")
+    ok("? fdpArt().basis : null" in s, "Funded CFD: Bestätigen/Zurück/Löschen über /admin/funded-cfd-plan")
+    ok("name === 'fcfd' ? 'fcfd' : 'challenge'" in s, "Reiter fcfd schaltet die Quelle")
+    ok("unten = fcfdUnterHtml(u)" in s and "Planer aus — Vorschläge kommen, sobald Finn ihn einschaltet" in s, "Funded CFD: Waiting · Firmen · Regeln unten, Leer-Hinweis")
     ok("apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })" in s, "Challenge zeichnet über denselben Helfer")
     for t in f:
         print("✗", t)

@@ -42,7 +42,7 @@ def main():
     for teil in ("Zeitstrahl", "'Zu bestätigen', 'Läuft', 'Braucht dich', 'Wartet auf Start'", "kommt", "Long · Short je ID", "Starts je Stunde"):
         ok(teil in huelle, "Hülle Funded CFD: " + teil)
     ok("fetch" not in huelle and "apdApi" not in huelle and "disabled" in huelle, "Hülle ohne Abfragen, Knöpfe gesperrt")
-    ok('data-admtab="fcfd" data-reiter-aus="1"' in s and "$('adm-pane-fcfd').hidden     = name !== 'fcfd'" in s, "Reiter fcfd nur im Planer, Pane geschaltet")
+    ok('data-admtab="fcfd" data-reiter-aus="1"' in s and "$('adm-pane-fcfd').hidden     = true" in s and "name !== 'planer' && name !== 'fplaner' && name !== 'fcfd'" in s, "Reiter fcfd nur im Planer, im Planer-Bereich")
     # Planer-Modus = Admin-Section (dieselbe Sperre/Rechte), Chips nach kasseReiterErlaubt
     ok("v.dataset.view === name || (name === 'planer' && v.dataset.view === 'kasse')" in s, "Planer aktiviert die Admin-Section")
     ok("if((name === 'kasse' || name === 'planer') && typeof kasseOnEnter === 'function') kasseOnEnter()" in s, "Planer geht durch kasseOnEnter (Code-Sperre)")
