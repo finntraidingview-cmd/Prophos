@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.4
+// @version      0.10.5
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
+//                      localStorage prophos_puls_chrome = '1' der Puls-Augen (augen.js ≥ 0.8.8, nur per CDP im Puls-Chrome) schaltet ihn ein,
+//                      ausser der Schalter steht ausdruecklich auf aus (pulsChromeModus). Neue Leer-Phrase „(Your trading) activity will appear
+//                      here". Leer-Text nur aus td-Zellen (nie Spaltenkoepfe). Kein freier Leer-Text nach einer Position (Pruefer S2).
 //   0.10.4 30.10.2026  LEER-BEWEIS OHNE FESTEN TEXT (Simon pc-pmqd8g mit 0.10.3 weiter blind, Tabelle „…Position IDNothi…"): leer gilt
 //                      auch, wenn in table[data-name$="positions-table"] nach dem Spaltenkopf „Position ID" ein Leer-Block mit Wort-Text
 //                      steht, keine td[data-label] Text traegt und der Text nicht nach Laden/Verbinden/Fehler klingt (leerStrukturPasst).
@@ -186,11 +190,21 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.4';
+  const VERSION    = '0.10.5';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
+  // 0.10.4 (30.10.2026, Simon pc-pmqd8g): der Schalter fehlte nach einer Tampermonkey-Neuinstallation (Abzeichen „● Reader · 1 Pos" statt
+  // „● Orbit V3 · Puls-Chrome") → Tab-Kennung „t…", der reader-server nahm keinen Stand, Fusion schloss nie uebers Script. Jetzt zusaetzlich die
+  // Marke localStorage prophos_puls_chrome = '1', die NUR die Puls-Augen (augen.js ≥ 0.8.8, per CDP im Puls-Chrome) setzen — zaehlt nur,
+  // solange der Schalter nicht ausdruecklich AUS steht (false); ein nie gesetzter Schalter (null) folgt der Marke
   let PULS_CHROME = false;
-  try { PULS_CHROME = GM_getValue('prophos_puls_chrome', false) === true; } catch (_) {}
+  try { PULS_CHROME = pulsChromeModus(GM_getValue('prophos_puls_chrome', null), (() => { try { return localStorage.getItem('prophos_puls_chrome'); } catch (_) { return null; } })()); } catch (_) {}
+  // REIN RECHNEND (testbar): Schalter (true | false | null = nie gesetzt) + Marke der Puls-Augen → Puls-Chrome-Modus?
+  function pulsChromeModus(schalter, marke) {
+    if (schalter === true) return true;
+    if (schalter === false) return false;
+    return marke === '1';
+  }
   try {
     GM_registerMenuCommand(PULS_CHROME ? '✓ Puls-Chrome (Orbit V3) — ausschalten' : 'Puls-Chrome (Orbit V3) — einschalten', () => {
       try { GM_setValue('prophos_puls_chrome', !PULS_CHROME); } catch (_) {}
@@ -1150,10 +1164,12 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   //   · und DIESELBE Lesung (gleicher Leer-Text) steht zweimal hintereinander mit ≥ LEER_STRUKTUR_MS Abstand (leerBeweis) — eine Tabelle,
   //     die gerade laedt oder neu aufbaut (Kopf da, Zeilen noch nicht), darf nie als leer gelten (Master 30.10.2026: „fail-closed").
   const RX_LEER_KOPF_ALLE = /positions?[\s-]*id/gi;
-  const RX_LEER_WORT = /^(nothing\s+(to\s+show|here)|no\s+(open\s+)?positions|make\s+your\s+first\s+trade|keine\s+(offenen\s+)?positionen|noch\s+keine\s+positionen)\b/i;
+  const RX_LEER_WORT = /^(nothing\s+(to\s+show|here)|no\s+(open\s+)?positions|make\s+your\s+first\s+trade|keine\s+(offenen\s+)?positionen|noch\s+keine\s+positionen|(your\s+)?(trading\s+)?activity\s+will\s+appear\s+here)\b/i;   // „…ctivity will appear here" Simon 30.10.2026
   const RX_LEER_NICHT = /load|lade|laed|connect|verbind|wait|warte|sync|retry|erneut|error|fehler|fail|wrong|offline|timeout|expired|log\s*in|sign\s*in|anmeld|fetch|abruf|aktualis|unavailable|nicht verf|denied|restrict|permission|berechtig|support|unterst|disabled|deaktiv|available|verfügbar|data|daten|info|access|zugriff|…|\.\.\./i;
   const LEER_STRUKTUR_MS = 400;
-  // REIN RECHNEND (testbar): Positions-Tabelle (Element) → Leer-Text (Schluessel fuer die zweite Lesung) | '' (kein Beweis)
+  // REIN RECHNEND (testbar): Positions-Tabelle (Element) → Leer-Text (Schluessel fuer die zweite Lesung) | '' (kein Beweis).
+  // Kein „freier" Leer-Text, auch nicht nach einer gerade gesehenen Position (Pruefer S2 30.10.2026: dann waere die Sperrliste der einzige
+  // Riegel — „Updating", „Pending", „Market closed", „Positions hidden" … galten als leer); nur die ganzen Leer-Phrasen aus RX_LEER_WORT
   function leerStrukturPasst(tabelle) {
     if (!tabelle) return '';
     const text = String(tabelle.textContent || '');
@@ -1161,7 +1177,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     RX_LEER_KOPF_ALLE.lastIndex = 0;
     while ((m = RX_LEER_KOPF_ALLE.exec(text))) ende = m.index + m[0].length;
     if (ende < 0) return '';
-    const rest = text.slice(ende).replace(/\s+/g, ' ').trim();
+    // Leer-Text NUR aus den Tabellenzellen (td) — nie aus Spaltenkoepfen (th): steht „Position ID" nicht ganz hinten (Spalten umgestellt),
+    // laege hinter dem Treffer sonst „Avg Fill Price Profit …" als „Wort-Text" (Pruefung 30.10.2026)
+    let tdsAlle; try { tdsAlle = tabelle.querySelectorAll('td'); } catch (_) { return ''; }
+    const rest = [...(tdsAlle || [])].map((td) => String(td.textContent || '')).join(' ').replace(/\s+/g, ' ').trim();
     if (!RX_LEER_WORT.test(rest) || RX_LEER_NICHT.test(rest) || /\d/.test(rest)) return '';
     let zellen, zeilen;
     try { zellen = tabelle.querySelectorAll('td[data-label]'); zeilen = tabelle.querySelectorAll('tr'); } catch (_) { return ''; }
@@ -1205,7 +1224,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     } catch (_) { struktur = ''; }
     // 0.10.4: Struktur-Beweis erst bei der ZWEITEN gleichen Lesung ≥ LEER_STRUKTUR_MS nach der ersten; jede andere Lesung startet neu.
     // Das Konto gehoert zum Schluessel: derselbe Leer-Text im naechsten Konto (Wechsel) ist eine NEUE erste Lesung
-    if (struktur) struktur = String(kontoMerk.text || '') + '|' + struktur;
+    if (struktur) struktur = String(kontoMerk.text || '') + '|' + struktur;   // voller Umschalter-Text (auch gekuerzte Namen bleiben getrennt)
     if (!wert && struktur) {
       if (strukturMerk.key !== struktur) strukturMerk = { key: struktur, seit: jetzt };
       else if (jetzt - strukturMerk.seit >= LEER_STRUKTUR_MS) wert = true;
@@ -1219,7 +1238,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       // muss unmittelbar auf eine leere folgen, nie ueber eine Position oder einen Kontowechsel hinweg
       if (!kontoAngemeldet(Date.now())) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'kein Konto angemeldet'; }
       if (leseBefund.unklar) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'pnl unlesbar in ' + leseBefund.unklar + ' Zeile(n)'; }
-      if (positionen.length) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return null; }
+      if (positionen.length) {
+        strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false };
+        return null;
+      }
       if (leerBeweis()) return null;
       // 0.10.4: Grund getrennt — „Reiter" repariert ein Heimweg (Puls klickt Positions), „Leer-Text" nicht (die Heim-Wache laesst dann
       // den Blind-Heimweg weg, wenn Puls belegt im Plan-Konto steht; sonst blockierte der Heimweg 1–4 min den Hedge-Schluss, Simon 30.10.)
@@ -1940,7 +1962,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.4';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.5';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

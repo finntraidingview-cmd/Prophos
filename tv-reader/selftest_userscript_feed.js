@@ -98,8 +98,8 @@ h4.kontoMerk.text = "FNFTFAMUSTERMUSTERAB\u2026"; h4.kontoMerk.ts = T;
 check(h4.kontoAngemeldet(T + 1000), "gekuerzt: kontoAngemeldet (nicht mehr blind)");
 // 0.9.12 (29.10.2026): Leer-Beweis — TradingViews generischer Text 'Nothing to show yet' zaehlt nur in der Positions-Tabelle
 var codeLeer = stueck("const RX_LEER_POS", "function blindGrund");
-var harnessLeer = "var leerMerkMs = 0, schritt = 1000; var kontoMerk = {text: 'KONTO-A', ts: 0}; var document = {body:{}, getElementById:function(){return null}}; var Date = {now:function(){ leerMerkMs += schritt; return leerMerkMs; }};" + codeLeer +
-  "; return {leerBeweis:leerBeweis, leerStrukturPasst:leerStrukturPasst, setSchritt:function(n){ schritt = n; }, setKonto:function(k){ kontoMerk.text = k; }, leerTextPasst:leerTextPasst, setDoc:function(d){ document = d; }};";
+var harnessLeer = "var leerMerkMs = 0, schritt = 1000; var kontoMerk = {text: 'KONTO-A', ts: 0}; function kontoNrAus(t) { return String(t).match(/^[A-Z][A-Z-]*[0-9]{5,}/); } var document = {body:{}, getElementById:function(){return null}}; var Date = {now:function(){ leerMerkMs += schritt; return leerMerkMs; }};" + codeLeer +
+  "; return {leerBeweis:leerBeweis, leerStrukturPasst:leerStrukturPasst, uhr:function(){ return leerMerkMs; }, setSchritt:function(n){ schritt = n; }, setKonto:function(k){ kontoMerk.text = k; }, leerTextPasst:leerTextPasst, setDoc:function(d){ document = d; }};";
 var h5 = new Function(harnessLeer)();
 function el(text, kinder, tabelle) {   // Element-Attrappe: textContent, parentElement (wird verkettet), querySelector findet die Tabelle
   var e = { textContent: text, parentElement: null, querySelector: function (sel) { return (sel.indexOf("positions-table") >= 0) ? (tabelle || null) : null; } };
@@ -129,7 +129,12 @@ var r6 = reiter("false"); var p6 = el("Positions " + tabLeer.textContent, [r6], 
 check(h5.leerBeweis() === false, "leerBeweis: Reiter Positions nicht aktiv → nicht flach");
 // 0.10.3 (30.10.2026): dritte Leer-Ansicht „Make …" mit Buy/Sell-Knoepfen — nur in der Positions-Tabelle, direkt nach „Position ID", ohne Datenzelle
 function td(label, text) { return { textContent: text, getAttribute: function (a) { return a === "data-label" ? label : null; } }; }
-function tabelle(text, zellen, zeilen) { return { textContent: text, querySelectorAll: function (sel) { return sel === "td[data-label]" ? (zellen || []) : sel === "tr" ? (zeilen || []) : []; } }; }
+// td-Zellen: ohne Angabe der Text hinter dem LETZTEN Spaltenkopf „Position ID" als eine Leer-Zelle (Form der echten Leer-Ansicht)
+function restNachKopf(text) { var m, re = /positions?[\s-]*id/gi, e = -1; while ((m = re.exec(text))) e = m.index + m[0].length; return e < 0 ? "" : text.slice(e); }
+function tabelle(text, zellen, zeilen, tds) {
+  var r = tds || (restNachKopf(text).trim() ? [{ textContent: restNachKopf(text) }] : []);
+  return { textContent: text, querySelectorAll: function (sel) { return sel === "td[data-label]" ? (zellen || []) : sel === "tr" ? (zeilen || []) : sel === "td" ? r : []; } };
+}
 function tr(texte) { return { querySelectorAll: function (sel) { return sel === "td" ? texte.map(function (t) { return { textContent: t }; }) : []; } }; }
 var KOPF = "SymbolSideQtyAvg Fill PriceProfitUpdate TimePosition ID";
 var tabMake = tabelle(KOPF + "Make your first trade SellBuy");
@@ -188,7 +193,7 @@ check(!!h5.leerStrukturPasst({ textContent: KOPF + "Nothing here", querySelector
 check(!!h5.leerStrukturPasst(tabelle(KOPF + "MNQZ6 Long 1 29,086.50 -8.50 USD 4470324 Nothing")) === false,
       "Struktur: Datenzeile als div-Grid (ohne tr/td/data-label) mit Ziffern → nicht flach");
 check(!!h5.leerStrukturPasst(tabelle(KOPF + "Nothing to show yet 1")) === false, "Struktur: irgendeine Ziffer im Leer-Block → nicht flach");
-check(!!h5.leerStrukturPasst(tabelle("SymbolSideQtyPosition IDAvg Fill PriceProfitUpdate Time")) === false,
+check(!!h5.leerStrukturPasst(tabelle("SymbolSideQtyPosition IDAvg Fill PriceProfitUpdate Time", [], [], [])) === false,
       "Struktur: Spalten umgestellt, Tabelle laedt (nur Kopf-Namen nach Position ID) → nicht flach");
 check(!!h5.leerStrukturPasst(tabelle("SymbolSideQtyPosition IDAvg Fill PriceProfitUpdate TimeNothing to show yet")) === false,
       "Struktur: Spalten umgestellt (Phrase nicht direkt nach Position ID) → kein Struktur-Beweis (fail-closed)");
@@ -225,6 +230,35 @@ check(h5.leerBeweis() === false && h5.leerBeweis() === false, "Struktur/leerBewe
 // alter Text bleibt sofort gueltig (keine zweite Lesung noetig, wie bis 0.10.3)
 var r16 = reiter("true"); var p16 = el("Positions Orders No open positions", [r16]); h5.setDoc(doc(r16));
 check(h5.leerBeweis() === true, "leerBeweis: 'No open positions' weiter sofort flach");
+// Pruefer S2 30.10.2026 (Stopp 335ed221): KEIN freier Leer-Text — auch nicht nach einer gerade gesehenen Position; Zustandstexte nie leer
+["Updating", "Refreshing", "Initializing", "Pending", "Broker unreachable", "Session closed", "Maintenance in progress", "Please refresh the page",
+ "Trading halted", "Account suspended", "Market closed", "Unauthorized", "Positions hidden", "Server busy", "Paused", "Broker not responding",
+ "Reauthorize", "Your recent orders show up below"].forEach(function (t) {
+  check(!!h5.leerStrukturPasst(tabelle(KOPF + t)) === false, "Struktur: Zustandstext '" + t + "' → nie leer");
+  check(!!h5.leerStrukturPasst(tabelle(KOPF + t, [], [tr([t])], [{ textContent: t }])) === false, "Struktur (td/tr): Zustandstext '" + t + "' → nie leer");
+});
+h5.setSchritt(1000); h5.setKonto("KONTO-A");
+var tabAkt = tabelle(KOPF + "Updating"); var rU = reiter("true"); var pU = el("Positions " + tabAkt.textContent, [rU], tabAkt); h5.setDoc(doc(rU));
+check(h5.leerBeweis() === false && h5.leerBeweis() === false && h5.leerBeweis() === false, "leerBeweis: 'Updating' dreimal → nie flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Your trading activity will appear here")) === true && !!h5.leerStrukturPasst(tabelle(KOPF + "Activity will appear here")) === true,
+      "Phrase: '(Your trading) activity will appear here' → flach (nach zweiter Lesung)");
+var tabAct = tabelle(KOPF + "Your trading activity will appear here"); var rA = reiter("true"); var pA = el("Positions x", [rA], tabAct); h5.setDoc(doc(rA));
+check(h5.leerBeweis() === false && h5.leerBeweis() === true, "leerBeweis: Simons Leer-Text → erste Lesung nein, zweite ja");
+// Pruefung 30.10.2026 zu 0.10.5: Kopf-Namen hinter „Position ID" (th) zaehlen nie als Leer-Text
+var tabTh = tabelle("SymbolSideQtyPosition IDAvg Fill PriceProfitUpdate Time", [], [], []);
+var rTh = reiter("true"); var pTh = el("Positions x", [rTh], tabTh); h5.setDoc(doc(rTh));
+check(h5.leerBeweis() === false && h5.leerBeweis() === false, "Spalten umgestellt, nur Kopf (th) → nie flach");
+// zweite Lesung: Schluessel mit vollem Umschalter-Text — Wechsel zwischen zwei gekuerzten Konten desselben Prefix = neue erste Lesung
+var tabP = tabelle(KOPF + "Nothing here yet"); var rP = reiter("true"); var pP = el("Positions x", [rP], tabP); h5.setDoc(doc(rP));
+h5.setKonto("FTDFYSLX15037290\u2026149,346.24USD");
+check(h5.leerBeweis() === false && h5.leerBeweis() === true, "Phrase bei gekuerztem Konto: erste/zweite Lesung → flach");
+h5.setKonto("FTDFYSLX15037290\u2026151,002.10USD");
+check(h5.leerBeweis() === false, "Wechsel auf zweites Konto mit gleichem Prefix (andere Balance) → neue erste Lesung");
+h5.setKonto("KONTO-A");
+// 0.10.4: Puls-Chrome-Modus aus Schalter + Marke der Puls-Augen
+var hP = new Function(stueck("function pulsChromeModus", "  const ENDPOINT") + "; return pulsChromeModus;")();
+check(hP(true, null) === true && hP(false, "1") === false && hP(null, "1") === true && hP(null, null) === false && hP(undefined, "1") === true && hP(null, "0") === false,
+      "pulsChromeModus: Schalter an → an; ausdruecklich aus → aus (Marke egal); nie gesetzt → Marke '1'");
 // 0.9.13 (29.10.2026): Konto-Liste aus dem offenen Umschalter — nur volle Nummern als erstes Wort, nie gekuerzt/angeklebt
 var codeKonten = stueck("function kontenAusEintraegen", "// 0.9.13 ENDE kontenAusEintraegen");
 var h6 = new Function("var RX_KONTO_KURZ=" + stueck("const RX_KONTO_KURZ = ", ";\n").replace("const RX_KONTO_KURZ = ", "") + ";" +

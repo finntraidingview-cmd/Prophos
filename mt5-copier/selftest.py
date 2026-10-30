@@ -5086,7 +5086,7 @@ def test_cdp_konto_regression_865():
     js = open(_os.path.join(_os.path.dirname(_os.path.abspath(ob.__file__)), "augen.js"), encoding="utf-8").read()
     chk("function kontoSchalter()" in js and "r.top >= lr.top - 4" in js and "var s = kontoSchalter();" in js
         and "(eintraege.length === 1 && !!s.el && !eintraege[0].aktiv)" in js and "panel_lage: lage" in js
-        and "VERSION = '0.8.7'" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
+        and "VERSION = '0.8.8'" in js and "localStorage.setItem('prophos_puls_chrome', '1')" in js and "function txtK(el)" in js and "nimm(/^(usd|eur|gbp|chf|aud|cad|jpy)$/i)" in js and "entdoppeln(txtK(s.el))" in js,
         "augen.js 0.7.4+: Umschalter unter der Broker-Leiste (beide Lagen), panel_lage, Liste nur mit Umschalter; 0.8.3 txtK (spans mit Leerzeichen)")
     # augen.js 0.8.5 (26.10.2026, Routine Puls-Fehler, UNKLAR auf 2 PCs mit kleinem Fenster): Meldungsprotokoll (role=log) je Textknoten,
     # meldungenAus läuft über l.texte — Browser-Probe: node tools/selftest_augen_meldungsprotokoll.js
