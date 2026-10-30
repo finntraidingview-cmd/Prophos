@@ -3789,6 +3789,34 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-karte{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px;min-width:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts .apg-karte{margin-bottom:18px}
+  /* Challenges (CHALLENGE-CHART-NEU 30.10.2026): Kennzahlen-Reihe heute/7 Tage, 14-Tage-Chart, „Am nächsten am Pass" */
+  #ap-ids-root.ap-guestly .apg-cv-hypo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  #ap-ids-root.ap-guestly .apg-cv-hypo > div{background:var(--g-kpi);border-radius:12px;padding:12px 14px;min-width:0}
+  #ap-ids-root.ap-guestly .apg-cv-hypo small{display:block;color:var(--g-sub);font-size:12.5px}
+  #ap-ids-root.ap-guestly .apg-cv-hypo b{display:block;font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums;color:var(--g-text)}
+  #ap-ids-root.ap-guestly .apg-cv-hypo b.gut{color:var(--g-gut)} #ap-ids-root.ap-guestly .apg-cv-hypo b.rot{color:var(--g-rot)}
+  #ap-ids-root.ap-guestly .apg-cv-hypo span{color:var(--g-sub);font-size:11.5px}
+  #ap-ids-root.ap-guestly .apg-cv .apg-legende i.tuerkis{background:var(--g-a4)}
+  #ap-ids-root.ap-guestly .apg-cv .apg-legende{flex-wrap:wrap;gap:6px 14px} #ap-ids-root.ap-guestly .apg-cv .apg-legende span{white-space:nowrap}
+  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv-hypo b{font-size:24px} }
+  #ap-ids-root.ap-guestly .apg-cvks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-top:14px}
+  #ap-ids-root.ap-guestly .apg-cvk{background:var(--g-kpi);border-radius:12px;padding:10px 12px;min-width:0}
+  #ap-ids-root.ap-guestly .apg-cvk small{display:block;color:var(--g-sub);font-size:12px}
+  #ap-ids-root.ap-guestly .apg-cvk b{display:block;font-size:24px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--g-text)}
+  #ap-ids-root.ap-guestly .apg-cvk b.gut{color:var(--g-gut)} #ap-ids-root.ap-guestly .apg-cvk b.rot{color:var(--g-rot)}
+  #ap-ids-root.ap-guestly .apg-cvk span{color:var(--g-sub);font-size:11.5px}
+  #ap-ids-root.ap-guestly .apg-cv .apg-legende i.gut{background:var(--g-gut);opacity:.75} #ap-ids-root.ap-guestly .apg-cv .apg-legende i.rot{background:var(--g-rot);opacity:.45}
+  #ap-ids-root.ap-guestly .apg-cv .apg-legende i.grau{background:var(--g-sub);opacity:.8}
+  #ap-ids-root.ap-guestly .apg-cv-nah{margin-top:14px;padding-top:12px;border-top:1px solid var(--g-rand)}
+  #ap-ids-root.ap-guestly .apg-cv-nah-t{font-size:13px;font-weight:600;color:var(--g-text);margin-bottom:6px}
+  #ap-ids-root.ap-guestly .apg-cv-nz{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(80px,1fr) auto;gap:12px;align-items:center;padding:5px 0;font-size:12.5px;color:var(--g-sub)}
+  #ap-ids-root.ap-guestly .apg-cv-nz .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--g-text)}
+  #ap-ids-root.ap-guestly .apg-cv-nz .nm i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  #ap-ids-root.ap-guestly .apg-cv-nz .bar{height:6px;border-radius:3px;background:var(--g-rand);overflow:hidden}
+  #ap-ids-root.ap-guestly .apg-cv-nz .bar i{display:block;height:100%;background:var(--g-gut);opacity:.7}
+  #ap-ids-root.ap-guestly .apg-cv-nz b{font-weight:600;color:var(--g-text);font-variant-numeric:tabular-nums}
+  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cvks{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--m-gap, 8px)} #ap-ids-root.ap-guestly .apg-cvk b{font-size:20px}
+    #ap-ids-root.ap-guestly .apg-cv-nz{grid-template-columns:minmax(0,1fr) auto} #ap-ids-root.ap-guestly .apg-cv-nz .bar{grid-column:1/-1;order:3} }
   /* P&L von heute (Challenge, 30.10.2026): Kennzahlen rechts im Kartenkopf, Chart volle Breite */
   :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-pl .apg-karte-kopf{align-items:center}
   :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plks{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
@@ -80575,9 +80603,14 @@
     _apg.daten = fd ? { ls, std } : null
     // Funded CFD (30.10.2026, Master: „EIN großer Chart wie im Challenge Planer“): derselbe P&L-Chart; unter fdpTausch stehen TPL_TYPEN auf
     // funded_cfd und _tpl.lt auf den Funded-CFD-Plänen — apgPlHeute zeigt also nur diese Trades. Funded Futures behält die zwei Charts.
-    _apg.pl = fd && !fc ? null : apgPlHeute({ tag, uid: u, firma: fs ? fs.firma : 'alle' })
+    // CHALLENGE-CHART-NEU (Finn 30.10.2026 ~08:25: „P&L von heute sagt im Challenge Planer nichts"): Challenge zeigt Kennzahlen + 14-Tage-Verlauf
+    // (bestanden/geblowt/gewonnen/verloren) + „Am nächsten am Pass" (apgCv*); der P&L-Chart bleibt für Funded CFD (und Winning Days)
+    // nur Challenge → Futures (Finn 30.10.2026: „Challenge → CFD behält vorerst den P&L-Chart")
+    const cvAn = !fd && apArtJetzt() === 'futures'
+    _apg.pl = (fc || (!fd && !cvAn)) ? apgPlHeute({ tag, uid: u, firma: fs ? fs.firma : 'alle' }) : null
+    _apg.cv = cvAn ? apgCvDaten({ uid: u, trades: T.D.trades, laeuft: lL.length }) : null
     const nL = ls.reduce((a, z) => a + z.L, 0), nS = ls.reduce((a, z) => a + z.S, 0)
-    const charts = !fd || fc ? apgPlKarteHtml(_apg.pl) : `<div class="apg-charts">
+    const charts = cvAn ? apgCvHtml(_apg.cv) : (!fd || fc) ? apgPlKarteHtml(_apg.pl) : `<div class="apg-charts">
       <div class="apg-karte"><div class="apg-karte-kopf"><div><div class="apg-titel">Long · Short je ID</div><div class="apg-sub"><span class="lila">${nL} Long</span> · <span class="tuerkis">${nS} Short</span> · ${tag === 'morgen' ? 'morgen' : 'heute'}, alle Trades der Sicht</div></div>
         <span class="apg-i" title="Long oben, Short unten — je ID die Trades des Tages (geplant, bestätigt, läuft, beendet), ohne Winning Days. Je Tag über 7/30 Tage kommt mit dem Zeitraum.">i</span></div>
         <div class="apg-legende"><span><i class="lila"></i>Long</span><span><i class="tuerkis"></i>Short</span></div>
@@ -80729,6 +80762,111 @@
         scales: { x: Object.assign({}, achse, { type: 'linear', min: 0, max, grid: { display: false }, ticks: { color: sub, font: { size: 10 }, stepSize: max > 12 ? 2 : 1, maxRotation: 0, callback: v => uhr(v) } }),
           m: Object.assign({}, achse, fx ? grenzen(Math.min(mLo, fLo), Math.max(mHi, fHi)) : grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, callback: v => apgUsd(v) } }),
           f: Object.assign({}, achse, grenzen(fLo, fHi), { display: !fx, position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, callback: v => apgEur(v) } }) } } }))
+  }
+  /* CHALLENGE-VERLAUF (CHALLENGE-CHART-NEU, Finn 30.10.2026 ~08:25 über den Master). Quelle: GET /admin/auto-plan/verlauf-eur?tage=14 (Sicht +
+   * Gruppe wie der Planer) — je beendetem Challenge-/Phase-Trade (app.py: nur AP_TYPEN) Dubai-Tag, Firma, $ und art. „bestanden" setzt app.py
+   * ap_hb_zeile, wenn die End-Balance das Phasenziel erreicht, das Konto als passed archiviert ist oder accounts.ziel_erreicht_at (Ziel-Wache) nach
+   * dem Start liegt; „geblowt", wenn als blown archiviert oder der Verlust das Polster frisst. Gewonnen/verloren = $ > 0 / < 0 (bestanden zählt als
+   * gewonnen, geblowt als verloren). Folgt ID (apSichtUid) und CFD/Futures (apArtPasst). „Am nächsten am Pass" aus den Trade-Zeilen des Planers
+   * (Balance + Rest bis Ziel je Konto). Nur Anzeige, eigene Abfrage höchstens alle 2 min. */
+  const _apgCv = { d: null, at: 0, q: '', laeuft: false, nr: 0, fehler: '' }
+  const apgCvQuery = () => '?sicht=admin&tage=14' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
+  async function apgCvLaden(){
+    const q = apgCvQuery()
+    // auch nach einem Fehler höchstens alle 2 min (sonst Schleife Laden → Fehler → apIdsRender → Laden, Gegenprüfung 30.10.2026)
+    if(_apgCv.laeuft || (_apgCv.q === q && Date.now() - _apgCv.at < 120000)) return
+    const nr = ++_apgCv.nr; _apgCv.laeuft = true
+    try{ const d = await apdApi('GET', '/verlauf-eur' + q); if(nr !== _apgCv.nr || q !== apgCvQuery()) return; _apgCv.d = d; _apgCv.q = q; _apgCv.at = Date.now(); _apgCv.fehler = '' }
+    catch(e){ if(nr === _apgCv.nr){ if(_apgCv.q !== q) _apgCv.d = null; _apgCv.fehler = (e && e.message) || String(e); _apgCv.at = Date.now(); _apgCv.q = q } }   // Gruppenwechsel + Fehler: keine alten Zahlen
+    finally{ if(nr === _apgCv.nr){ _apgCv.laeuft = false; try{ if(_apIdsArtWert === 'challenge' && !apIdsLiveRuhe()) apIdsRender() }catch(_){} } }
+  }
+  function apgCvDaten(o){
+    try{ apgCvLaden() }catch(_){}
+    const d = _apgCv.d && _apgCv.q === apgCvQuery() ? _apgCv.d : null
+    const heute = (d && d.heute) || new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)
+    const tagNr = t => Math.round(Date.parse(t + 'T00:00:00Z') / 864e5), ausNr = n => new Date(n * 864e5).toISOString().slice(0, 10), bis = tagNr(heute)
+    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, eur: 0, eurN: 0, ohne: 0 })
+    const jeTag = new Map(tage.map(t => [t.tag, t]))
+    for(const z of (d && d.zeilen) || []){
+      const t = z && jeTag.get(z.tag); if(!t) continue
+      if(o.uid && String(z.user_id) !== String(o.uid)) continue
+      if(!apArtPasst({ firma: z.firma })) continue
+      t.n++
+      const usd = z.usd == null || !isFinite(Number(z.usd)) ? null : Number(z.usd), name = [z.firma, z.konto].filter(Boolean).join(' · ') || 'Konto'
+      if(z.art === 'offen'){ t.offen++; continue }
+      // HYPO € (Finn ~08:23: „wie viel Geld wir heute hypothetisch gewonnen haben"): eur = ap_hb_zeile/hypo_bilanz_zeile — P&L $ × Kontowert-Satz,
+      // geblowt −Kontowert; ohne Satz null (zählt nicht, nur als Hinweis) — dieselbe Zahl wie die Kachel „Heute" / Verlauf in €
+      const eur = z.eur == null || !isFinite(Number(z.eur)) ? null : Number(z.eur)
+      if(eur != null){ t.eur += eur; t.eurN++ } else t.ohne++
+      if(z.art === 'bestanden') t.best.push(name)
+      if(z.art === 'geblowt') t.blow.push(name)
+      if(z.art === 'bestanden' || (z.art !== 'geblowt' && usd > 0)) t.plus++
+      else if(z.art === 'geblowt' || usd < 0) t.minus++
+    }
+    const summe = arr => arr.reduce((a, t) => ({ n: a.n + t.n, plus: a.plus + t.plus, minus: a.minus + t.minus, best: a.best + t.best.length, blow: a.blow + t.blow.length,
+      eur: a.eur + t.eur, eurN: a.eurN + t.eurN, ohne: a.ohne + t.ohne }), { n: 0, plus: 0, minus: 0, best: 0, blow: 0, eur: 0, eurN: 0, ohne: 0 })
+    // „Am nächsten am Pass": je Konto die Trade-Zeile mit Balance + Rest (Planer-Lauf / Delta), kleinster Rest zuerst
+    const konten = new Map()
+    for(const t of o.trades || []){
+      if(t.wd || t.rest == null || !(Number(t.rest) > 0) || t.balance == null) continue
+      if(o.uid && String(t.user_id) !== String(o.uid)) continue
+      if(!apArtPasst(t) || (t.typ && !TPL_TYPEN.includes(String(t.typ)))) continue
+      const k = String(t.konto_id || (t.user_id + '|' + t.konto)); const alt = konten.get(k)
+      if(!alt || Number(t.rest) < Number(alt.rest)) konten.set(k, t)
+    }
+    const nah = [...konten.values()].sort((a, b) => Number(a.rest) - Number(b.rest)).slice(0, 5)
+    return { geladen: !!d, fehler: !d && _apgCv.fehler ? _apgCv.fehler : '', tage, heute: summe(tage.slice(-1)), sieben: summe(tage.slice(-7)), laeuft: o.laeuft || 0, nah }
+  }
+  function apgCvHtml(c){
+    const kz = (name, h, s, cls, tip) => `<div class="apg-cvk" title="${escapeHtml(tip)}"><small>${name}</small><b class="${h ? cls || '' : ''}">${h}</b><span>${s} in 7 Tagen</span></div>`
+    const hy = (x, wann) => `${x.eurN} Trade${x.eurN === 1 ? '' : 's'} mit Kontowert-Satz ${wann}${x.ohne ? ` · ${x.ohne} ohne Satz (zählt nicht)` : ''}`
+    const hypo = `<div class="apg-cv-hypo" title="${escapeHtml('Hypothetisch gewonnen: Master-P&L $ × Kontowert-Satz (€ je $, Kontowert ÷ Polster) je beendetem Challenge-Trade, geblowt = −Kontowert vor dem Trade — dieselbe Rechnung wie die Hypo-Bilanz / Kachel „Heute“ (app.py hypo_bilanz_zeile). Ohne Hedge.')}">
+        <div><small>Hypothetisch heute</small><b class="${c.heute.eur > 0 ? 'gut' : c.heute.eur < 0 ? 'rot' : ''}">${c.heute.eurN ? apgEur(c.heute.eur) : '–'}</b><span>${hy(c.heute, 'heute')}</span></div>
+        <div><small>Letzte 7 Tage</small><b class="${c.sieben.eur > 0 ? 'gut' : c.sieben.eur < 0 ? 'rot' : ''}">${c.sieben.eurN ? apgEur(c.sieben.eur) : '–'}</b><span>${hy(c.sieben, 'in 7 Tagen')}</span></div></div>`
+    const kpis = hypo + `<div class="apg-cvks">
+        ${kz('Trades beendet', c.heute.n, c.sieben.n, '', `heute beendete Challenge-/Phase-Trades der Sicht${c.laeuft ? ` · dazu ${c.laeuft} laufend` : ''}`)}
+        ${kz('Gewonnen', c.heute.plus, c.sieben.plus, 'gut', 'Master-P&L > 0 (bestandene zählen mit)')}
+        ${kz('Verloren', c.heute.minus, c.sieben.minus, 'rot', 'Master-P&L < 0 (geblowte zählen mit)')}
+        ${kz('Bestanden', c.heute.best, c.sieben.best, 'gut', 'Konto hat mit diesem Trade sein Phasenziel erreicht (End-Balance ≥ Ziel, als passed archiviert oder Ziel-Wache)')}
+        ${kz('Geblowt', c.heute.blow, c.sieben.blow, 'rot', 'Konto mit diesem Trade aufgebraucht oder als blown archiviert')}</div>`
+    const leer = !c.geladen ? (c.fehler ? '⚠ Verlauf nicht ladbar: ' + escapeHtml(c.fehler.slice(0, 120)) : 'lädt …') : c.tage.some(t => t.n) ? '' : 'in den letzten 14 Tagen nichts beendet'
+    const rest = v => Math.round(Number(v)).toLocaleString('de-DE') + ' $'
+    const nah = c.nah.length ? `<div class="apg-cv-nah"><div class="apg-cv-nah-t">Am nächsten am Pass</div>${c.nah.map(t => {
+        let g = 0; try{ g = Number(kontoGroesseAnzeige(t.konto, null, null)) || 0 }catch(_){}
+        const ziel = Number(t.balance) + Number(t.rest), pct = g > 0 && ziel > g ? Math.max(0, Math.min(100, (Number(t.balance) - g) / (ziel - g) * 100)) : null
+        return `<div class="apg-cv-nz" title="${escapeHtml(`${t.user || ''} · ${t.konto || ''} — Balance ${rest(t.balance)} → Ziel ${rest(ziel)}`)}"><span class="nm"><i style="background:${idFarbe(t.user_id)}"></i>${escapeHtml(t.user || '')} · ${escapeHtml(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(t.firma) : String(t.firma || ''))}${t.ende4 ? ' …' + escapeHtml(String(t.ende4)) : ''}</span>`
+          + `<span class="bar">${pct != null ? `<i style="width:${pct.toFixed(1)}%"></i>` : ''}</span><b>noch ${rest(t.rest)}</b></div>` }).join('')}</div>` : ''
+    return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Futures · heute und letzte 14 Tage (Dubai) · beendete Trades der Sicht</div></div>
+        <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile) über 14 Tage. Bestanden = End-Balance ≥ Phasenziel, als passed archiviert oder Ziel-Wache (accounts.ziel_erreicht_at) nach dem Start; geblowt = als blown archiviert oder Verlust frisst das Polster. Folgt ID und CFD/Futures.">i</span></div>
+        ${kpis}
+        <div class="apg-legende"><span><i class="tuerkis"></i>Hypo € je Tag</span><span><i class="gut"></i>bestanden</span><span><i class="rot"></i>geblowt</span><span><i class="lila"></i>gewonnen</span><span><i class="grau"></i>verloren</span></div>
+        <div class="apg-chart">${leer ? `<div class="apg-leer">${leer}</div>` : '<canvas id="apg-c-cv"></canvas>'}</div>${nah}</div>`
+  }
+  function apgCvMalen(root, c, ablage){
+    const cv = root.querySelector('#apg-c-cv'); if(!cv || !c || typeof window.Chart !== 'function') return
+    const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
+    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a4 = tok('--g-a4') || '#16c8c6'
+    const gut = tok('--g-gut') || '#12b76a', rot = tok('--g-rot') || '#f04438'
+    const alpha = (f, a) => { const m = String(f).match(/^#([0-9a-f]{6})/i); return m ? `rgba(${[0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(',')},${a})` : f }
+    const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
+    const labels = c.tage.map(t => t.tag.slice(8, 10) + '.' + t.tag.slice(5, 7) + '.')
+    const linie = (label, k, farbe) => ({ type: 'line', label, data: c.tage.map(t => t[k]), borderColor: alpha(farbe, 0.55), backgroundColor: alpha(farbe, 0.55), borderWidth: 1, borderDash: [3, 3], pointRadius: 0, pointHoverRadius: 3, tension: 0, order: 0 })
+    ablage.push(new Chart(cv.getContext('2d'), { type: 'bar',
+      data: { labels, datasets: [
+        { label: 'bestanden', data: c.tage.map(t => t.best.length), backgroundColor: alpha(gut, 0.75), borderRadius: 4, stack: 'k', barPercentage: .6, order: 1 },
+        { label: 'geblowt', data: c.tage.map(t => t.blow.length), backgroundColor: alpha(rot, 0.45), borderRadius: 4, stack: 'k', barPercentage: .6, order: 1 },
+        linie('gewonnen', 'plus', a1), linie('verloren', 'minus', alpha(sub, 0.8)),
+        { type: 'line', label: 'Hypo €', data: c.tage.map(t => t.eurN ? Math.round(t.eur) : null), yAxisID: 'e', borderColor: a4, backgroundColor: a4, borderWidth: 2.5, pointRadius: 3, tension: 0, spanGaps: true, order: -1 }] },
+      options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, boxPadding: 4,
+          callbacks: { title: x => x.length ? c.tage[x[0].dataIndex].tag.split('-').reverse().join('.') : '',
+            label: x => ` ${x.dataset.label}: ${x.dataset.yAxisID === 'e' ? apgEur(x.parsed.y) : x.parsed.y}`,
+            afterBody: x => { const t = x.length ? c.tage[x[0].dataIndex] : null; if(!t) return []
+              return [...(t.best.length ? ['', 'Bestanden:', ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []), ...(t.blow.length ? ['', 'Geblowt:', ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []),
+                ...(t.offen ? ['', `${t.offen} ohne gelesenes Ergebnis`] : [])] } } } },
+        scales: { x: Object.assign({}, achse, { grid: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } }),
+          y: Object.assign({}, achse, { beginAtZero: true, ticks: { color: sub, font: { size: 11 }, precision: 0 } }),
+          e: Object.assign({}, achse, { position: 'right', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, callback: v => apgEur(v) } }) } } }))
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
@@ -81172,7 +81310,8 @@
     root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
     apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })
-    try{ apgPlMalen(root, _apg.pl, _apg.charts) }catch(e){ console.warn('[apg] P&L-Chart', e) }   // Challenge: P&L von heute (30.10.2026)
+    try{ apgPlMalen(root, _apg.pl, _apg.charts) }catch(e){ console.warn('[apg] P&L-Chart', e) }   // Funded CFD: P&L von heute (30.10.2026)
+    try{ apgCvMalen(root, _apg.cv, _apg.charts) }catch(e){ console.warn('[apg] Challenge-Verlauf', e) }   // Challenge: 14 Tage (CHALLENGE-CHART-NEU)
   }
   /* Chart-Reihe im Guestly-Look (30.10.2026, aus apGuestlyVerdrahten herausgezogen, damit WD und Funded CFD dieselben Charts zeichnen):
    * d.ls = [{ name, L, S }] → Spiegelbalken (oben d.namen[0], unten d.namen[1], Standard Long/Short); d.std = 24 Werte je Stunde ODER

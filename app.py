@@ -23088,7 +23088,9 @@ def ap_verlauf_zeilen(zeilen, tz_name=AP_HB_TZ):
         if e is None:
             continue
         out.append({"tag": e.astimezone(tz).date().isoformat(), "user_id": str(z.get("user_id") or ""), "firma": ap_firma_kurz(z.get("firma")),
-                    "eur": None if z.get("art") == "offen" else z.get("eur"), "usd": z.get("ergebnis_usd"), "art": z.get("art")})
+                    "eur": None if z.get("art") == "offen" else z.get("eur"), "usd": z.get("ergebnis_usd"), "art": z.get("art"),
+                    # Kontoname für den Tooltip im Challenge-Verlauf (CHALLENGE-CHART-NEU, Finn 30.10.2026 ~08:25) — nur Anzeige
+                    "konto": z.get("konto") or ""})
     out.sort(key=lambda r: r["tag"])
     return out
 
