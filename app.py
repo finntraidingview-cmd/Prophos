@@ -22491,7 +22491,7 @@ def admin_hypo_bilanz():
         firmen = (reg.get("regeln") or {}).get("firmen") or []
         # Satz je (Tag, Konto) aus den echten Läufen (kein Probelauf); spätester Lauf des Tages gewinnt
         lauf = {}
-        for l in _sb_all("auto_plan_lauf", {"select": "tag,at,ergebnis", "tag": f"gte.{seit[:10]}", "order": "at.asc"}):
+        for l in _sb_all("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,at,ergebnis", tag=f"gte.{seit[:10]}", order="at.asc")):
             e = l.get("ergebnis") if isinstance(l.get("ergebnis"), dict) else {}
             if e.get("trocken"):
                 continue
@@ -22719,8 +22719,8 @@ def _ap_hb_laden(firmen, jetzt=None, ab=None):
     tage = sorted({t for t in tag_je.values() if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t)})
     if tage:
         try:
-            for l in _sb_all("auto_plan_lauf", {"select": "tag,at,trocken:ergebnis->trocken,geplant:ergebnis->geplant",
-                                                "tag": "in.(" + ",".join(tage) + ")", "order": "at.asc"}):
+            for l in _sb_all("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,at,trocken:ergebnis->trocken,geplant:ergebnis->geplant",
+                                                    tag="in.(" + ",".join(tage) + ")", order="at.asc")):
                 if l.get("trocken") is True:
                     continue
                 for g in l.get("geplant") or []:
@@ -23999,6 +23999,13 @@ def ap_blow_konto_pruefen(zeile, acc, plaene_konto, archiviert=False):
     return {"balance": round(bal, 2), "boden": round(boden, 2), "at": str(at), "quelle": acc.get("tv_balance_quelle") or "puls"}
 
 
+# NUR CHALLENGE-LÄUFE (30.10.2026, Befund S3): der Funded-Planer (quelle 'funded') und der Funded-CFD-Planer ('funded_cfd') schreiben ihre
+# Läufe ebenfalls in auto_plan_lauf. Wer den letzten Lauf des CHALLENGE-Planers liest (GET /admin/auto-plan, /ids, Nachplanen, Balance-Takt,
+# Blow-Takt, Hypo-Bilanz), nahm sonst den jüngsten Funded-CFD-Lauf (Waiting-for-Payout-Zeilen in Challenge „Braucht dich"). Ältere Zeilen
+# ohne quelle bleiben drin. Funded-Läufe liest niemand aus dieser Tabelle zurück (fdp/fcp rechnen frisch).
+AP_LAUF_NUR_CHALLENGE = {"or": "(quelle.is.null,quelle.not.in.(funded,funded_cfd))"}
+
+
 def ap_blow_konto_tick(force=False):
     """Alle AP_BLOW_KONTO_S: Geblowt-Zeilen des letzten Planer-Laufs prüfen (ap_blow_konto_pruefen) und das Konto als geblowt archivieren.
     → Anzahl neu archivierter Konten | None (nicht dran)."""
@@ -24008,7 +24015,7 @@ def ap_blow_konto_tick(force=False):
     reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}
     if reg.get("blow_konto_auto") is False:
         return 0
-    rows = sb_select("auto_plan_lauf", {"select": "tag,at,ergebnis", "order": "at.desc", "limit": "1"})   # derselbe Lauf wie GET /admin/auto-plan
+    rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,at,ergebnis", order="at.desc", limit="1"))   # derselbe Lauf wie GET /admin/auto-plan
     erg = (rows[0].get("ergebnis") if rows else None) or {}
     zeilen = [z for z in (erg.get("ausgelassen") if isinstance(erg, dict) else None) or []
               if isinstance(z, dict) and z.get("konto_id") and AP_BLOW_KONTO_RE.search(str(z.get("grund") or ""))]
@@ -31472,7 +31479,7 @@ def admin_auto_plan_ids():
     for r in _sb_all("accounts", {"select": "id,user_id", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"}):
         if str(r.get("id")) not in archiv:
             konten[str(r.get("user_id"))] = konten.get(str(r.get("user_id")), 0) + 1
-    rows = sb_select("auto_plan_lauf", {"select": "tag,ergebnis", "order": "at.desc", "limit": "1"})
+    rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,ergebnis", order="at.desc", limit="1"))
     erg, tag = ((rows[0].get("ergebnis") or {}), rows[0].get("tag")) if rows else ({}, None)
     # Zahl „ausgelassen" wie die Zeilen in Braucht dich (Master 09.10.2026, Folge zu .1402): ohne seit dem Lauf archivierte Konten und ohne
     # Konten, die für den Lauftag inzwischen einen Plan haben — sonst zeigte die ID-Leiste eine Zahl, zu der unten keine Zeile steht
@@ -32769,7 +32776,7 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
                                      "user_id": in_uids,
                                      "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
                                      "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", tag=f"eq.{tag}", order="at.desc", limit="1"))
     letzter = ap_nachplan_letzter(rows)
     # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet — aber
     # je Tag und Regel-Stand nur EINMAL (ap_nachplan_regeln_at): danach gelten die Regel-Gründe wieder als fest, bis die Regeln sich erneut
@@ -33093,7 +33100,7 @@ def ap_bal_auto_tick(jetzt, reg=None):
     echo_bal, dup_bal = _ap_balance_karten()
     archiv = _ap_archiviert()
     # (A)/(B) rund um die Uhr (16.10.2026) — vorher nur im Nachplan-Fenster
-    rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "tag": f"eq.{tag}", "order": "at.desc", "limit": "1"})
+    rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", tag=f"eq.{tag}", order="at.desc", limit="1"))
     letzter = ap_nachplan_letzter(rows)
     plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,ended_at,completed_at", "user_id": in_uids,
                                      "status": "in.(planned,review,completed)",
@@ -36169,7 +36176,7 @@ def admin_auto_plan():
             ll = gr_lauf.get("letzter_lauf") if isinstance(gr_lauf.get("letzter_lauf"), dict) else {}
             rows = [{"tag": ll.get("tag"), "quelle": ll.get("quelle"), "at": ll.get("at"), "ergebnis": ll}] if ll else []
         else:
-            rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "order": "at.desc", "limit": "1"})
+            rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", order="at.desc", limit="1"))
         erg = (rows[0].get("ergebnis") if rows else None) or {}
         try:
             erg = ap_ohne_archiv(erg, _ap_archiviert())   # seit dem Lauf archiviert → nicht mehr in Braucht dich (08.10.2026)

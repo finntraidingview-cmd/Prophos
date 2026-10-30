@@ -122,6 +122,13 @@ check('"msg": "Funded-Planer nur für Hermann Technologies"' not in src[i:i + 25
 j = src.index('def admin_funded_plan_ids():')
 check('body.get("drin") and admin_lese_gruppe_menge' in src[j:j + 2500], "POST /admin/funded-plan/ids lehnt Gruppen-IDs nur beim Hinzufügen ab")
 
+import re as _re
+_zl = src.splitlines()
+leser = [_zl[i] + _zl[i + 1] for i, z in enumerate(_zl) if _re.search(r'(sb_select|_sb_all)\("auto_plan_lauf"', z)]   # mit Folgezeile
+ohne = [z.strip()[:90] for z in leser if "AP_LAUF_NUR_CHALLENGE" not in z and "eq.nacht" not in z]
+check(not ohne, f"jeder Challenge-Leser von auto_plan_lauf filtert Funded-Läufe weg ({len(leser)} Leser; ohne: {ohne})")
+check('"(quelle.is.null,quelle.not.in.(funded,funded_cfd))"' in src, "Filter: alte Zeilen ohne quelle bleiben, funded/funded_cfd raus")
+
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)
