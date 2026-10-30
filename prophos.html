@@ -31475,7 +31475,8 @@
   // REIN RECHNEND (Test-Haken window._kurzEndeEntscheid): Ausstieg aus dem Balance-Sprung im Kurs-Fenster? → { ok, exit, grund }
   function kurzEndeEntscheid(o){
     if(!o || !(o.b0 > 1000) || !(o.b1 > 1000)) return { ok: false, grund: 'Balance fehlt' }
-    if(typeof o.eq1 !== 'number' || Math.abs(o.b1 - o.eq1) > 0.011) return { ok: false, grund: 'Balance ≠ Equity (noch offen?)' }
+    // flachTabelle (30.10.2026, Prüfer S2): Balance aus dem Umschalter, Flach-Beweis aus der Tabelle (0 Positionen + Leer-Beweis) statt Balance = Equity
+    if(!o.flachTabelle && (typeof o.eq1 !== 'number' || Math.abs(o.b1 - o.eq1) > 0.011)) return { ok: false, grund: 'Balance ≠ Equity (noch offen?)' }
     if(!(o.einstieg > 1000) || !(o.kontrakte > 0) || !(o.pv > 0) || !(o.dir === 1 || o.dir === -1)) return { ok: false, grund: 'Plan-Werte fehlen' }
     if(!(o.lo > 0) || !(o.hi >= o.lo)) return { ok: false, grund: 'kein Kurs-Fenster' }
     const exit = o.einstieg + (o.b1 - o.b0) / (o.dir * o.kontrakte * o.pv)
@@ -31483,6 +31484,21 @@
     return { ok, exit: Math.round(exit * 100) / 100, grund: ok ? '' : `Ausstieg ${exit.toFixed(2)} außerhalb ${o.lo}–${o.hi} ± ${KURZ_TOL_PKT}` }
   }
   window._kurzEndeEntscheid = kurzEndeEntscheid
+  /* UMSCHALTER-BALANCE FÜRS KURZ-ENDE (30.10.2026, Simon pc-pmqd8g Test 5, Plan 2cb6c973: reader_kurz_nein „Balance fehlt" — Tradeify/Tradovate
+   * zeigt in der Reader-Zusammenfassung kein Balance-Label; summary_keys Total P/L, Open P/L, Net Liq, … Margin …, USD, Equity, Profit). Prüfer S2:
+   * KEIN Rückfall in tvBalanceAus (Open P/L und alle Margins standen in derselben Lesung bei OFFENER Position auf 0,00 — Augen 01:27:52 UTC; und
+   * Equity/Net Liq weichen ab: USD 149.344,09 · Equity 149.355,59 · Net Liq 149.356,54). Der Umschalter-Betrag („USD") ist der Live-Stand
+   * (Balance + offener G&V − Gebühren) und flach die echte Balance — gleiche Größe wie balance_start (beim Start: 149.356,54). Hier NUR im
+   * Kurz-Ende, das erst nach hedgeMasterWegEntscheid true läuft, und nur mit Flach-Beweis aus der TABELLE: positionen_ok === true und
+   * 0 Positionen (der Reader meldet flach nur mit Leer-Beweis), Zusammenfassung ≤ 3 s alt. REIN RECHNEND (Test-Haken window._kurzUmschalterBalance). */
+  function kurzUmschalterBalance(st){
+    if(!st || st.positionen_ok !== true || !Array.isArray(st.positionen) || st.positionen.length !== 0) return null
+    if(!(typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 3) || !st.summary || typeof st.summary !== 'object') return null
+    const k = Object.keys(st.summary).find(x => /^usd$/i.test(String(x).trim()))
+    const v = k != null ? tvGeldText(st.summary[k]) : null
+    return (typeof v === 'number' && v > 1000) ? v : null
+  }
+  window._kurzUmschalterBalance = kurzUmschalterBalance
   // Ende-Beweis für einen Plan mit gekürztem Konto-Text (nach hedgeMasterWegEntscheid true)
   function kurzEndeBeweis(p, kontoPlan, st, wz){
     const tv = (p.mt5Baseline && p.mt5Baseline.tv) || {}, h = (p.mt5Baseline && p.mt5Baseline.hedge) || {}
@@ -31498,15 +31514,16 @@
     const geschwister = (tradePlans || []).some(x => x && String(x.id) !== String(p.id) && x.status === 'open' && String(x.masterAccountId) !== String(p.masterAccountId)
       && (() => { const ax = (accounts || []).find(a => String(a.id) === String(x.masterAccountId)); return !!(ax && ax.externalId && kontoTextBezug(text, ax.externalId)) })())
     if(geschwister) return { ok: false, grund: 'anderer offener Plan im selben gekürzten Login' }
-    const bq = tvBalanceAus(st.summary)
+    let bq = tvBalanceAus(st.summary), flachTabelle = false
+    if(bq.balance == null){ const u = kurzUmschalterBalance(st); if(u != null){ bq = { balance: u, equity: null }; flachTabelle = true } }   // s. kurzUmschalterBalance
     const a = _kurzAnker.get(String(kontoPlan || '').trim().toUpperCase()) || {}
-    const e = kurzEndeEntscheid({ b0: Number(tv.balance_start), b1: bq.balance, eq1: bq.equity, einstieg,
+    const e = kurzEndeEntscheid({ b0: Number(tv.balance_start), b1: bq.balance, eq1: bq.equity, flachTabelle, einstieg,
       kontrakte: Number(p.masterContracts) || 0, pv: wz === 'MNQ' ? 2 : 20, dir: p.richtung === 'buy' ? 1 : (p.richtung === 'sell' ? -1 : 0), lo: f.lo, hi: f.hi })
     // BALANCE-LABEL BELEGEN (30.10.2026, Master/Slave 5: „Balance fehlt" 4× auf Jacob/Marc mit Script 0.10.x, b1 null — accounts.tv_balance_quelle
     // seit 5 Tagen nie 'reader'): ohne Balance die Label-Namen der Reader-Zusammenfassung mitgeben (nur Namen, keine Beträge), damit
     // tvBalanceAus gezielt auf das echte TradingView-Label nachgezogen werden kann
     const sk = bq.balance == null ? summaryKeysKurz(st.summary) : undefined
-    return Object.assign(e, { anker: a.quelle || null, b1: bq.balance, eq1: bq.equity, lo: f.lo, hi: f.hi }, sk !== undefined ? { summary_keys: sk } : {})
+    return Object.assign(e, { anker: a.quelle || null, b1: bq.balance, eq1: bq.equity, lo: f.lo, hi: f.hi }, flachTabelle ? { b1_quelle: 'umschalter' } : {}, sk !== undefined ? { summary_keys: sk } : {})
   }
   // REIN RECHNEND (Test-Haken window._summaryKeysKurz): Label-Namen der Reader-Zusammenfassung → höchstens 24 Namen à 40 Zeichen | 'keine Zusammenfassung'.
   // Ziffern maskiert (Prüfer S2 zu f5b81959: das Userscript lässt „Net Liq $51,234.56" oder „Balance 48.512,30" als Label durch) — nie ein Betrag am Hedge
@@ -31641,7 +31658,7 @@
       // Topstep (27.10.2026): das Userscript im TradingView-Tab kennt kein TopstepX-Konto — bis zu 3,5 s Warten für nichts; die End-Balance
       // liest Puls in TopstepX nach (tvV2EndeSetzen → tvV2EndlesungAnstossen)
       // Gekürzter Text (28.10.2026): readerKontoPasst kennt 'kurz' nicht → End-Balance direkt aus dem Beweis (flach, Balance = Equity)
-      if(kurz && kurz.ok && kurz.b1 > 1000) _balR = { balance_end: kurz.b1, equity_end: kurz.eq1, balance_quelle: 'reader', balance_at: new Date().toISOString(), balance_relativ: false }
+      if(kurz && kurz.ok && kurz.b1 > 1000) _balR = { balance_end: kurz.b1, equity_end: kurz.eq1 != null ? kurz.eq1 : kurz.b1,   /* Umschalter-Weg: flach laut Tabelle → Equity = Balance */ balance_quelle: 'reader', balance_at: new Date().toISOString(), balance_relativ: false }
       else if(p.route !== 'tsv2'){ try{ _balR = await hedgeReaderEndBalance(kontoPlan) }catch(_){} }
       try{ if(_balR && typeof tvKontoBalanceSchreiben === 'function') tvKontoBalanceSchreiben(p.masterAccountId, { balance: _balR.balance_end, equity: _balR.equity_end, relativ: false }, _balR.balance_at) }catch(_){}
       try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(pa, null, 'reader_leer', _balR || undefined); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === pid) || pa; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
