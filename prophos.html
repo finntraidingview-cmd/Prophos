@@ -26780,6 +26780,22 @@
     _hwWiederTimer = setTimeout(takt, hwZufall(HW_WIEDER_MIN_MS, HW_WIEDER_MAX_MS))
     return true
   }
+  // REIN RECHNEND (Test-Haken window._hwNurLeerText): ist der Reader NUR deshalb blind, weil er TradingViews Leer-Text nicht kennt — und
+  // zwar JETZT, im Plan-Konto? (Userscript ≥ 0.10.4, s. heimWacheTick 30.10.2026). Alles muss stimmen, sonst false (= Heimweg wie bisher):
+  //   · blind_grund „kein Leer-Beweis: Leer-Text nicht erkannt | Konto: <Umschalter>" und kontoPasst(<Umschalter>) — der reader-server friert
+  //     bei blind den Stand ein, st.konto wäre das letzte SEHENDE Konto; ein Handwechsel in ein fremdes Konto bliebe sonst unbemerkt,
+  //   · der Puls-Tab meldet frisch (st.tabs-Eintrag von positionen_tab, alter_s ≤ 10) — ein abgestürzter/zugegangener Tab behält seinen
+  //     letzten Grund, dann muss der Heimweg (startet auch das Puls-Chrome) laufen,
+  //   · der eingefrorene Stand trägt kein pnl_unklar.
+  function hwNurLeerText(st, kontoPasst){
+    if(!st) return false
+    const m = String(st.blind_grund || '').match(/Leer-Text nicht erkannt \| Konto: (.+)$/)
+    if(!m || typeof kontoPasst !== 'function' || !kontoPasst(m[1].trim())) return false
+    const tab = Array.isArray(st.tabs) ? st.tabs.find(t => t && t.tab_id === st.positionen_tab) : null
+    if(!tab || !(typeof tab.alter_s === 'number' && tab.alter_s <= 10)) return false
+    return !(Array.isArray(st.positionen) && st.positionen.some(x => x && x.pnl_unklar))
+  }
+  window._hwNurLeerText = hwNurLeerText
   async function heimWacheTick(){
     try{
       if(typeof window.mtcApi !== 'function' || !MT5_LOCAL) return
@@ -26806,7 +26822,14 @@
         const jetztB = Date.now()
         if(!_hwBlindSeit){ _hwBlindSeit = jetztB; _hwBlindSchwelle = hwZufall(HW_BLIND_MIN_MS, HW_BLIND_MAX_MS); return }
         if(_hwBlindErledigt === pid || jetztB - (_hwBlindPlaene.get(pid) || 0) < HW_BLIND_PAUSE_MS || jetztB - _hwBlindSeit < _hwBlindSchwelle || jetztB < _hwNaechsterHeimweg) return
+        // KEIN BLIND-HEIMWEG BEI REINEM LEER-TEXT (30.10.2026, Simon pc-pmqd8g, Master „kein Blind-Heimweg, solange Puls laut Konto-Beleg schon im
+        // Plan-Konto steht"): der Reader war blind, weil er TradingViews Leer-Text nicht kannte — jeder Heimweg (47–230 s) änderte daran nichts,
+        // hielt aber hedgePulsUnterwegs() ('Rück-Login') wach, und der Schnell-Wächter brach ganz oben ab; Finns Hand-Schluss 00:16:07 UTC fiel
+        // genau in so ein Fenster, Fusion blieb offen. Userscript ≥ 0.10.4 trennt den Grund: „Leer-Text nicht erkannt" → mit Beleg kein Heimweg;
+        // „Reiter Positions nicht aktiv", pnl unlesbar, kein Konto (und der alte Sammel-Grund bis 0.10.3) → Heimweg räumt weiter auf
         if(!pnlBlind && kontoBelegGilt(konto)){ _hwBlindErledigt = pid; return }   // Puls hat seitdem nichts getan und stand zuletzt bewiesen dort (bei pnl-blind trotzdem aufräumen)
+        // OHNE Sperre (_hwBlindErledigt bleibt leer): wird der Beleg ungültig, wechselt das Konto oder geht der Tab still, greift der nächste Tick
+        if(pnlBlind && kontoBelegGilt(konto) && hwNurLeerText(st, t => heimKontoPasst(t, konto))) return
         _hwBlindErledigt = pid; _hwBlindPlaene.set(pid, jetztB)
         if(!_bthAnstoss) _bthAnstoss = _hwBlindSeit
         console.info(`[heim-wache] Reader blind seit ${((jetztB - _hwBlindSeit) / 1000).toFixed(0)} s — einmal Heimweg zu „${bt.masterName || konto}"`)
