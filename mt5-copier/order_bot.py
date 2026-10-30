@@ -24595,15 +24595,23 @@ def _puls_ergebnis_senden(art, stufe, cmd, res, trail):
 TAB_WACHE_MAX_S = 60.0
 TAB_WACHE_ANTWORT_S = 5.0
 TAB_WACHE_NOETIG = 2
-TAB_WACHE_KLICK_BIS_S = 230.0   # Panel beendet den Bot nach 260 s: der Klick braucht danach noch Zeit für den Beweis — die Wartezeit vor dem Senden wird darauf gekappt
-TAB_WACHE_MIN_S = 8.0           # reicht einem wachen Tab (zwei Marken, gemessen ≤ 3,5 s je Abfrage); ist auch das zu viel, bricht der Lauf eben vor dem Klick ab
+# Nie knapp vor dem Panel-Ende senden (S2 30.10.2026): Panel beendet den Bot nach 260 s, Klick → Ende des Laufs gemessen höchstens 20,3 s (486 tvv2-Läufe, 10 Tage, p99 16,5 s).
+# 225 s = 260 − 10 s Luft (wie PULS_NEUSTART_BUDGET_S) − 25 s. Später wird vor dem Klick abgebrochen, ohne Zeit für den Beweis wäre die Order UNKLAR.
+TAB_WACHE_KLICK_BIS_S = 225.0
+TAB_WACHE_BLICK_S = 5.0         # frischer Blick auf Ticket, Konto und Knopf zwischen der Prüfung und dem Klick
+TAB_WACHE_MIN_S = 8.0           # reicht einem wachen Tab (zwei Marken, gemessen ≤ 3,5 s je Abfrage)
 # Kein Chrome-Neustart nach diesem Abbruch (PULS_NEUSTART_NIE): das Problem ist der Tab, nicht das Puls-Chrome.
 _TAB_WACHE_T0 = time.time()     # Prozess-Start, je Bot-Lauf ein Prozess
 
 
 def tab_wache_grenze(verstrichen):
-    """REIN RECHNEND (testbar): höchste Wartezeit in s nach 'verstrichen' s Laufzeit."""
-    return max(TAB_WACHE_MIN_S, min(TAB_WACHE_MAX_S, TAB_WACHE_KLICK_BIS_S - float(verstrichen)))
+    """REIN RECHNEND (testbar): höchste Wartezeit in s nach 'verstrichen' s Laufzeit; 0 = die Prüfung passt nicht mehr vor den spätesten Klick."""
+    rest = TAB_WACHE_KLICK_BIS_S - TAB_WACHE_BLICK_S - float(verstrichen)
+    return min(TAB_WACHE_MAX_S, rest) if rest >= TAB_WACHE_MIN_S else 0.0
+
+
+def tab_wache_aktiv(cmd):
+    return str((cmd or {}).get("tab_wache") or "") in ("1", "true", "True")
 
 
 def tab_wache_warten(schreibe_ping, lies_pong, uhr=time.time, schlaf=time.sleep, zufall=random.random, max_s=TAB_WACHE_MAX_S):
@@ -24641,7 +24649,7 @@ def tab_wache_warten(schreibe_ping, lies_pong, uhr=time.time, schlaf=time.sleep,
 
 def _tab_wache_pruefen(cmd, trail, stufe):
     """Datei-Weg zu tab_wache_warten: Marke puls_ergebnisse/tab_ping.json (atomar), Antwort tab_pong.json. → None = erreichbar, sonst Text. Ohne Marke tab_wache None."""
-    if str(cmd.get("tab_wache") or "") not in ("1", "true", "True"):
+    if not tab_wache_aktiv(cmd):
         return None
     ordner = os.path.join(_AUGEN_HIER, "puls_ergebnisse")
     ping, pong = os.path.join(ordner, "tab_ping.json"), os.path.join(ordner, "tab_pong.json")
@@ -24762,6 +24770,8 @@ def modus_tvkette_cdp(cmd):
                         "probe", tv_symbol=kk.get("symbol"))
 
         # Tab-Wächter VOR dem frischen Blick (30.10.2026): dauert das Warten, beruhen Rücklesung, Knopf und Konto trotzdem auf dem Stand direkt vor dem Klick
+        if tab_wache_aktiv(cmd) and not tab_wache_grenze(time.time() - _TAB_WACHE_T0):
+            return raus("zeit", f"Lauf schon {int(time.time() - _TAB_WACHE_T0)} s alt, zu spät für Tab-Prüfung und Klick vor dem Panel-Ende — nichts gesendet.", "tab_wache_zeit")
         tab_text = _tab_wache_pruefen(cmd, trail, "vor dem Senden")
         if tab_text:
             return tab_abbruch(tab_text)
@@ -24796,6 +24806,8 @@ def modus_tvkette_cdp(cmd):
         if u_offen["urteil"] == "offen":
             _puls_diagnose_senden(spur=trail, schritt="konto_offen")
             return raus("konto_offen", u_offen["text"], "konto_offen", positionen_offen=u_offen["offen"])
+        if tab_wache_aktiv(cmd) and time.time() - _TAB_WACHE_T0 > TAB_WACHE_KLICK_BIS_S:   # letzte Tür: der frische Blick dauerte länger als gedacht
+            return raus("zeit", f"Lauf schon {int(time.time() - _TAB_WACHE_T0)} s alt, zu knapp vor dem Panel-Ende für den Fill-Beweis — nichts gesendet.", "tab_wache_zeit")
         menge0 = cdp_zeilen_menge(k3_zeilen(st.get("positionen"), root), plan["richtung"])
         vorher_m = [k3_meldung_schluessel(m) for m in ((st.get("toasts") or {}).get("meldungen") or []) if isinstance(m, dict)]
         trail.append(f"Knopf EXAKT '{kk.get('text')}', nicht gesperrt, Konto {ext}, kein Popup, vorher {menge0:g} {plan['richtung']} offen — EIN Klick")

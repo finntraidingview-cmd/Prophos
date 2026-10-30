@@ -20606,20 +20606,33 @@ def puls_ergebnis_schreiben(pc_id):
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
     # TAB-WÄCHTER (30.10.2026, order_bot tab_wache_warten): der Tab schläft, also meldet hier der Bot — 🔴 an die Master-IDs. Wirft nie (alarm_senden, try)
     if zeile["art"] == "order" and zeile["ergebnis"].get("code") == "tab_nicht_erreichbar":
-        try:
-            pl = (sb_select("trade_plans", {"select": "user_id,master_name,master_firm", "id": f"eq.{zeile['plan_id']}"}) or [{}])[0]
-            uid = str(pl.get("user_id") or "")
-            if uid and not _alarm_fremd_verwaltet(uid):
-                namen = _ap_namen()[0]
-                pn = (_pc_namen_daten().get(pc_id) or {}).get("name")
-                wer_pc = f"PC von {pn or namen.get(uid, uid[:8])} ({pc_id})"
-                alarm_senden(1, "tab_nicht_erreichbar", f"Order abgebrochen, Tab schläft: {wer_pc}"[:120],
-                             f"{pl.get('master_firm') or ''} {pl.get('master_name') or ''}: der Prophos-Tab auf {wer_pc} hat während des Starts 60 s nicht geantwortet. "
-                             f"Nichts gesendet, Plan bleibt Geplant. Tab am PC nach vorn holen; der Plan versucht es danach wieder.",
-                             uid=uid, plan_id=zeile["plan_id"], schluessel=f"{zeile['plan_id']}|tab_nicht_erreichbar|{zeile['at'][:16]}")
-        except Exception as e:
-            print(f"[puls-ergebnis] Tab-Wächter-Alarm: {type(e).__name__}: {str(e)[:160]}", flush=True)
+        tab_wache_alarm(zeile, pc_id)
     return jsonify({"ok": True})
+
+
+def tab_wache_alarm(zeile, pc_id):
+    """🔴 „Order abgebrochen, Tab schläft" EINMAL je Vorfall (S2 30.10.2026: der Plan versucht es im 15-min-Takt ohne Deckel, ein Schlüssel mit der Minute hätte
+    jedes Mal gemeldet): Schlüssel Plan + PC + Tag, vorher im alarm_log nachsehen wie alarm_ereignisse. alarm_log nicht lesbar → senden, lieber doppelt als eine 🔴
+    verschluckt. Wirft nie."""
+    try:
+        schluessel = f"{zeile['plan_id']}|{pc_id}|tab_nicht_erreichbar|{str(zeile.get('at') or '')[:10]}"
+        schon = alarm_im_log([schluessel], 86400)
+        if schon and schluessel in schon:
+            return False
+        pl = (sb_select("trade_plans", {"select": "user_id,master_name,master_firm", "id": f"eq.{zeile['plan_id']}"}) or [{}])[0]
+        uid = str(pl.get("user_id") or "")
+        if not uid or _alarm_fremd_verwaltet(uid):
+            return False
+        pn = (_pc_namen_daten().get(pc_id) or {}).get("name")
+        wer_pc = f"PC von {pn or _ap_namen()[0].get(uid, uid[:8])} ({pc_id})"
+        grund = str(zeile["ergebnis"].get("msg") or "Prophos-Tab hat während des Starts nicht geantwortet — nichts gesendet.")[:200]
+        alarm_senden(1, "tab_nicht_erreichbar", f"Order abgebrochen, Tab schläft: {wer_pc}"[:120],
+                     f"{pl.get('master_firm') or ''} {pl.get('master_name') or ''} auf {wer_pc}: {grund} Tab am PC nach vorn holen; der Plan versucht es danach wieder.",
+                     uid=uid, plan_id=zeile["plan_id"], schluessel=schluessel)
+        return True
+    except Exception as e:
+        print(f"[puls-ergebnis] Tab-Wächter-Alarm: {type(e).__name__}: {str(e)[:160]}", flush=True)
+        return False
 
 
 @app.route("/puls-augen/<pc_id>", methods=["POST", "OPTIONS"])

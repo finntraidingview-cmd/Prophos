@@ -29126,6 +29126,7 @@
    * REIN RECHNEND → Alter in s, wenn zu spät, sonst null. */
   const HEDGE_SPAET_MAX_MS = 90000
   function hedgeSpaetAlterS(plan, r, jetzt){
+    if(!plan || plan.route !== 'tvv2') return null   // Entscheidung Master 30.10.2026: nur Orbit, Nova und Topstep-WD bleiben unberührt
     if(r && (r.manuell || r.rueckkehr)) return null
     const k = Number(r && r.order_klick_ms)
     const klick = k > 1e12 ? k : (Date.parse((r && r.klick_at) || '') || 0)
@@ -30091,7 +30092,7 @@
       // 450 s statt 90 s (30.10.2026, Befund Marc 04:25 und Marco 14:38 UTC: Klick 134 bzw. 161 s nach dem Laufstart — Login/Kontowechsel davor —,
       // die Wache war schon abgelaufen). Sie muss den Lauf überdauern, sonst bräche der Tab-Wächter einen gesunden Start ab: bis 150 s Warten auf einen
       // belegten Puls + Proxy-Limit tv-konto 270 s; am Lauf-Ende beendet sie w.stop (finally im Aufrufer).
-      const bis = Date.now() + 450000
+      const bis = Date.now() + (plan.route === 'tvv2' ? 450000 : 90000)   // Nova und Topstep-WD unverändert
       let cloudAt = 0, pong = ''   // pong: Marke des Tab-Wächters (order_bot tab_wache_warten) — bei der nächsten Abfrage zurück, beweist dem Bot: dieser Tab lebt
       while(!w.stop && Date.now() < bis){
         // LOKAL ZUERST (01.10.2026, Finn: „alles rausholen, an Supabase vorbei"): Puls legt die Klick-Meldung als letzt_order.json ab,
@@ -32854,7 +32855,8 @@
               try{ await hedgeAmPlanSchreiben(p.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nicht nachgeholt: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
               continue
             }
-            try{ await hedgeSoloOeffnen(p, { klick_at: p.startedAt || null, nachgeholt: true, einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || undefined }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
+            // Klickzeit aus dem Plan, sonst der Start. Ohne beide Werte wird weiter wie bisher geöffnet, dann begrenzt nur das Fenster 20–180 s oben.
+            try{ await hedgeSoloOeffnen(p, { klick_at: (p.mt5Baseline.tv && p.mt5Baseline.tv.klick_at) || p.startedAt || null, nachgeholt: true, einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || undefined }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
           }
         }
       }
@@ -61191,7 +61193,7 @@
         : `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq (2.000 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
       case 'auge_fehlt': return `TopstepX-Auge am PC${pc} nicht installiert (meldet nie, auch nicht nach dem Öffnen des TopstepX-Tabs) — im Puls-Chrome http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und in Tampermonkey installieren; der Plan startet dann von selbst.`
       case 'auge_blind': return `TopstepX-Auge am PC${pc} blind (Userscript tsx-auge meldet nichts Frisches) — Puls hat neu geladen bzw. den Tab neu geöffnet, ohne Erfolg. Tampermonkey im Puls-Chrome prüfen (Skript an?); der Plan versucht es in 15 min wieder, nichts gesendet.`
-      case 'tab_nicht_erreichbar': return `Prophos-Tab am PC${pc} hat während des Starts nicht geantwortet (60 s gewartet, Tab schläft im Hintergrund) — nichts gesendet. Den Tab am PC nach vorn holen; der Plan versucht es in 15 min wieder.`
+      case 'tab_nicht_erreichbar': return `Prophos-Tab am PC${pc} hat während des Starts nicht geantwortet (Tab schläft im Hintergrund) — nichts gesendet. Den Tab am PC nach vorn holen; der Plan versucht es in 15 min wieder.`
       case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]

@@ -63,12 +63,13 @@ class Sim:
 def main():
     ns = {"time": __import__("time"), "random": random, "TAB_WACHE_MAX_S": None}
     src_bot = open(BOT, encoding="utf-8").read()
-    for name in ("TAB_WACHE_MAX_S", "TAB_WACHE_ANTWORT_S", "TAB_WACHE_NOETIG", "TAB_WACHE_KLICK_BIS_S", "TAB_WACHE_MIN_S"):
+    for name in ("TAB_WACHE_MAX_S", "TAB_WACHE_ANTWORT_S", "TAB_WACHE_NOETIG", "TAB_WACHE_KLICK_BIS_S", "TAB_WACHE_BLICK_S", "TAB_WACHE_MIN_S"):
         exec(re.search(rf"^{name} = .*$", src_bot, re.M).group(0), ns)
     exec(funktion(BOT, "tab_wache_warten"), ns)
     exec(funktion(BOT, "tab_wache_grenze"), ns)
     g = ns["tab_wache_grenze"]
-    check(g(5) == 60 and g(200) == 30 and g(229) == 8 and g(400) == 8, "Wartezeit wird auf das Zeitbudget gekappt, Klick spätestens ~230 s")
+    check(g(5) == 60 and g(200) == 20 and g(212) == 8 and g(213) == 0 and g(400) == 0, "Wartezeit wird gekappt, passt die Prüfung nicht mehr: 0")
+    check(225 + 20.3 < 250, "spätester Klick 225 s + längster gemessener Beweis 20,3 s bleibt unter 250 s (Panel 260 s − 10 s Luft)")
     check('"tab_nicht_erreichbar"' in re.search(r"^PULS_NEUSTART_NIE = .*?\)\)", src_bot, re.M | re.S).group(0), "kein Chrome-Neustart nach dem Abbruch")
     pan = {}
     exec(funktion(PANEL, "tab_wache_antwort"), pan)
@@ -117,6 +118,33 @@ def main():
     pruef = [x.start() for x in re.finditer(r"_tab_wache_pruefen\(cmd, trail", m)]
     klick = m.index('res["gesendet"], res["retry_ok"] = True, False')
     check(len(pruef) == 2 and all(p < klick for p in pruef), "zwei Prüfungen, beide vor dem Senden; keine danach")
+    tuer = m.index("time.time() - _TAB_WACHE_T0 > TAB_WACHE_KLICK_BIS_S")
+    check(pruef[1] < tuer < klick and 'raus("zeit"' in m[tuer:klick], "letzte Tür: zu spät → Abbruch vor dem Klick, gesendet bleibt falsch")
+
+    # Alarm: je Vorfall einmal
+    a_src = open(os.path.join(HIER, "..", "app.py"), encoding="utf-8").read()
+    i = a_src.index("def tab_wache_alarm(")
+    gesendet, log = [], set()
+
+    def fake_senden(prio, art, titel, text, **kw):
+        gesendet.append((prio, art, text, kw["schluessel"]))
+        log.add(kw["schluessel"])
+    an = {"sb_select": lambda *a, **k: [{"user_id": "u1", "master_name": "Konto", "master_firm": "Firma"}], "_alarm_fremd_verwaltet": lambda u: False,
+          "_pc_namen_daten": lambda: {"pc-xxxxxx": {"name": "Wer"}}, "_ap_namen": lambda: ({}, set()), "alarm_senden": fake_senden,
+          "alarm_im_log": lambda k, s: {x for x in k if x in log}}
+    exec(a_src[i:a_src.index('@app.route("/puls-augen/<pc_id>"')], an)
+    z = {"plan_id": "p1", "at": "2026-10-30T10:00:00+00:00", "ergebnis": {"msg": "Prophos-Tab antwortet nicht (30 s gewartet) — nichts gesendet."}}
+    an["tab_wache_alarm"](z, "pc-xxxxxx")
+    an["tab_wache_alarm"](dict(z, at="2026-10-30T10:15:00+00:00"), "pc-xxxxxx")
+    an["tab_wache_alarm"](dict(z, at="2026-10-30T10:30:00+00:00"), "pc-xxxxxx")
+    check(len(gesendet) == 1 and gesendet[0][0] == 1, "drei Versuche im 15-min-Takt: ein 🔴")
+    check("30 s gewartet" in gesendet[0][2] and "60 s" not in gesendet[0][2], "Text nennt die echte Wartezeit")
+    an["tab_wache_alarm"](dict(z, at="2026-10-31T10:00:00+00:00"), "pc-xxxxxx")
+    an["tab_wache_alarm"](z, "pc-yyyyyy")
+    check(len(gesendet) == 3, "neuer Tag und anderer PC: je ein neuer Vorfall")
+    an["alarm_im_log"] = lambda k, s: None
+    an["tab_wache_alarm"](z, "pc-xxxxxx")
+    check(len(gesendet) == 4, "alarm_log nicht lesbar: lieber doppelt als verschluckt")
     check(pruef[1] < m.index("AB HIER UNUMKEHRBAR"), "zweite Prüfung vor dem frischen Blick auf Ticket, Knopf und Konto")
     ab = m[m.index("def tab_abbruch"):m.index("if scharf and symbol:\n        tab_text")]
     check('gesendet=False' in ab and 'retry_ok=True' in ab and "_puls_ergebnis_senden" in ab and 'schritt="tab_nicht_erreichbar"' in ab, "Abbruch: nichts gesendet, eigener Schritt, Meldung an Railway")
@@ -128,7 +156,7 @@ def main():
     check(src.count("_tabWacheMarke") == 3, "tsx-konto und Echo bleiben ohne Marke")
     check("r.code === 'tab_nicht_erreichbar'" in src and "'tab_nicht_erreichbar'])" in src, "Tab: Plan bleibt Geplant, zählt nicht als Fehlversuch")
     app = open(os.path.join(HIER, "..", "app.py"), encoding="utf-8").read()
-    check('alarm_senden(1, "tab_nicht_erreichbar"' in app, "🔴 an die Master-IDs")
+    check('alarm_senden(1, "tab_nicht_erreichbar"' in app and "tab_wache_alarm(zeile, pc_id)" in app, "🔴 an die Master-IDs")
 
 
 if __name__ == "__main__":
