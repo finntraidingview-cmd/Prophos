@@ -36167,11 +36167,11 @@ FCP_TP_MODUS_STANDARD = {"the5ers": "consistency50"}
 # € je $ Drawdown (0,5 → 100k 5.000 € auf 10.000 $, 50k 2.500 € auf 5.000 $, 200k 10.000 € auf 20.000 $). Ab dem ersten Payout die
 # normalen FundedNext-Regeln. SL/Lots/1-%-Regel unverändert. Werte je Firma in funded_cfd_plan_regeln.firmen[].erster_payout
 # (sql/2026-10-30_funded_cfd_erster_payout.sql); fehlt der Schlüssel, gilt dieser Standard.
-FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5, "lots_faktor": 0.5}}
-# REFUND-LOTS HALBIEREN (Finn 30.10.2026 14:2x, Anlass EzPoker a1ad322f: „Der Take Profit ist ganz klein, da kauft er viel zu viele Lots, das verdirbt die
-# Show"): im Refund-Zyklus Lots × lots_faktor, abgerundet auf FCP_LOT_SCHRITT, mindestens ein Schritt. TP-$ und SL-$ bleiben (doppelte Punkte). Hedge: der
+FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5, "lots_faktor": 0.2}}
+# REFUND-LOTS ÷ 5 (Finn 30.10.2026 14:49: „Refund-Trades: Lot-Anzahl runter, durch 5." — ersetzt ÷ 2 von 14:2x, Anlass EzPoker a1ad322f): im Refund-Zyklus
+# Lots × lots_faktor, abgerundet auf FCP_LOT_SCHRITT, mindestens ein Schritt. TP-$ und SL-$ bleiben (Punkte × 5, z. B. 0,26 Lot: SL 2.374 $ = 913 Pkt). Hedge: der
 # multiplier hängt nur an hedge_eur ÷ dd, die Fusion-Lots folgen den Master-Lots — € je $ Master, also auch Hedge-€ am TP/SL, bleiben gleich.
-FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.5
+FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.2
 FCP_LOT_SCHRITT = 0.01
 FCP_ERSTER_PAYOUT_TP_MIN_USD = 25    # Rest bis zum kleinen Ziel winzig → wenigstens 25 $ (≈ 1,5–2,5 Pkt bei 1–1,75 Lot)
 FCP_TP_DECKEL_PLUS_STANDARD = 1000
