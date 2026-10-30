@@ -15118,6 +15118,17 @@ def admin_payout_calc():
         return jsonify({"error": f"Nicht gespeichert ({type(e).__name__})"}), 502
 
 
+def payout_konto_felder(naechster, waiting_leeren):
+    """REIN RECHNEND (testbar): Konto-Felder beim Abhaken eines Payouts — payout_ready_at nur mit nächstem Termin (ein stehender Termin
+    fällt nie still auf null), waiting_payout_since = null nur auf Wunsch (waiting_leeren true). Leer = Konto nicht anfassen."""
+    out = {}
+    if naechster:
+        out["payout_ready_at"] = naechster
+    if waiting_leeren is True:
+        out["waiting_payout_since"] = None
+    return out
+
+
 @app.route("/admin/payout-erhalten", methods=["PATCH", "OPTIONS"])
 def admin_payout_erhalten():
     """Payout-Anfrage im Admin abhaken (29.10.2026, Finn: „dass ich im Admin die Payouts schon abhaken kann und dann gleich auf den
@@ -15131,7 +15142,10 @@ def admin_payout_erhalten():
     3) received_tx_id nachtragen; 4) accounts.payout_ready_at = nächster Termin NUR wenn einer mitkommt (leer = Termin am Konto bleibt;
        Finanzen schreibt auch nur bei Änderung — Prüfer 29.10.2026: ein stehender Termin darf nicht still auf null fallen).
     Kontotyp und waiting_payout_since bleiben unangetastet (Finanzen fasst sie beim Abhaken auch nicht an; das Flag leert die Anfrage).
-    Body {pending_id, erhalten_am (JJJJ-MM-TT, Standard heute Berlin), naechster_payout (JJJJ-MM-TT | leer)}.
+    WAITING LEEREN (30.10.2026, Funded Planer → CFD, S3 b3a7b10b): mit waiting_leeren: true setzt derselbe Konto-Schritt zusätzlich
+    waiting_payout_since = null (der Funded-CFD-Planer plant das Konto wieder) — gleiches Konto, gleiche Rechte (Anfrage der eigenen Gruppe).
+    Scheitert das, bleibt die Buchung stehen, Antwort waiting_geleert false + termin_fehler.
+    Body {pending_id, erhalten_am (JJJJ-MM-TT, Standard heute Berlin), naechster_payout (JJJJ-MM-TT | leer), waiting_leeren (bool)}.
     Auth: ADMIN_EMAILS oder voller Admin-Reiter-Login (_admin_voll, 30.10.2026 „Finn + Pascal") — sonst Verwalter für Anfragen SEINER Gruppe."""
     if request.method == "OPTIONS":
         return "", 200
@@ -15218,16 +15232,21 @@ def admin_payout_erhalten():
     konto = None
     termin_fehler = None
     aid = str(p.get("account_id") or "")
-    if aid and naechster:
+    leeren = b.get("waiting_leeren") is True
+    waiting_geleert = False
+    k_upd = payout_konto_felder(naechster, leeren)
+    if aid and k_upd:
         try:
-            z = sb_update("accounts", {"id": f"eq.{aid}", "select": "id,payout_ready_at,waiting_payout_since,account_type"},
-                          {"payout_ready_at": naechster})
+            z = sb_update("accounts", {"id": f"eq.{aid}", "user_id": f"eq.{besitzer}", "select": "id,payout_ready_at,waiting_payout_since,account_type"},
+                          k_upd)
             konto = z[0] if z else None
+            waiting_geleert = bool(leeren and konto is not None and konto.get("waiting_payout_since") is None)
         except Exception as e:
             termin_fehler = f"{type(e).__name__}: {e}"
-            print(f"[payout-erhalten] ⚠️ accounts.payout_ready_at {aid}: {termin_fehler}", flush=True)
+            print(f"[payout-erhalten] ⚠️ accounts {aid} ({', '.join(k_upd)}): {termin_fehler}", flush=True)
     return jsonify({"ok": True, "tx": tx, "pending": upd[0] if upd else None, "account": konto,
-                    "termin_fehler": termin_fehler, "erhalten_am": erhalten_am, "naechster_payout": naechster})
+                    "termin_fehler": termin_fehler, "erhalten_am": erhalten_am, "naechster_payout": naechster,
+                    "waiting_geleert": waiting_geleert})
 
 
 @app.route("/watcher/status", methods=["GET", "OPTIONS"])
