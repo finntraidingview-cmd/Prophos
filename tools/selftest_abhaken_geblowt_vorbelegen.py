@@ -107,8 +107,8 @@ def main():
 
     # Quelltext-Vertrag: eine Wahrheit für Gruppe und beide Dialoge
     check("const istGeblowt = wdlGeblowtUrteil" in html, 'Radar-Gruppe „Geblowt · archivieren" fragt wdlGeblowtUrteil')
-    # seit 21.10.2026: Polar-Pläne ausgenommen (!_mwdErlPolar), dazwischen „TP + weg" → 'passed' (_tw) — geblowt bleibt die erste Wahl
-    check(re.search(r"mwd-erl-status\"\]\[value=\"\$\{\((?:!_mwdErlPolar && )?typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil\(pw\)\) \? 'blown' : (?:_tw \? 'passed' : )?'none'\}", html) is not None,
+    # seit 30.10.2026: danach Funded CFD am Ziel → 'waiting' (fb90d54f); seit 21.10.2026: Polar-Pläne ausgenommen (!_mwdErlPolar), dazwischen „TP + weg" → 'passed' (_tw) — geblowt bleibt die erste Wahl
+    check(re.search(r"mwd-erl-status\"\]\[value=\"\$\{\((?:!_mwdErlPolar && )?typeof wdlGeblowtUrteil === 'function' && wdlGeblowtUrteil\(pw\)\) \? 'blown' : (?:_tw \? 'passed' : )?(?:\(!_mwdErlPolar && wdlFcfdZielErreicht\(pw\)\) \? 'waiting' : )?'none'\}", html) is not None,
           "Radar-Dialog (fremde Pläne) belegt mwd-erl-status aus wdlGeblowtUrteil vor")
     i = html.index("function openTradeCompleteModal(")
     block = html[i:html.index("tcWinningDayPrepare(p)", i)]

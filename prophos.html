@@ -36842,9 +36842,12 @@
   function wdlBlowStand(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return null
-    let bal = n(t.balance_end), quelle = 'Balance nach dem Trade'
+    // BALANCE 0 = NICHT GELESEN (Prüfer S2 30.10.2026): eine Copier-Balance ≤ 0 stünde sonst als „geblowt" vorbelegt. Nicht bei Topstep (tsv2): TopstepX
+    // zeigt Express-Konten 0-basiert, 0 und negativ sind dort echte Stände (ist_topstep_express, T1-B 05.10.2026)
+    const nb = v => { const x = n(v); return x != null && x <= 0 && t.route !== 'tsv2' ? null : x }
+    let bal = nb(t.balance_end), quelle = 'Balance nach dem Trade'
     if(bal == null){
-      const kb = n(t.konto_balance), kAt = Date.parse(t.konto_balance_at || '') || 0, ende = Date.parse(t.ended_at || t.completed_at || '') || 0
+      const kb = nb(t.konto_balance), kAt = Date.parse(t.konto_balance_at || '') || 0, ende = Date.parse(t.ended_at || t.completed_at || '') || 0
       if(kb != null && kAt && (!ende || kAt >= ende)){ bal = kb; quelle = 'Konto-Balance ' + new Date(kAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
     }
     if(bal == null){
