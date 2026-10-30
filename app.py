@@ -14498,7 +14498,7 @@ def admin_wd_plaene():
         tag = (request.args.get("tag") or "").strip()[:10]
         try:
             disp, excluded = _wd_personen()
-            archiv = _acc_plan_archiviert()
+            archiv = _acc_plan_archiviert() | _ap_deaktiviert_ids()   # deaktiviert (30.10.2026): nicht im Farmer, wie archiviert — nur diese Liste
             accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at,wd_tp,wd_sl,max_risiko_trade"})
             konten = []
             for a in accs:
@@ -22483,7 +22483,42 @@ def ap_ext_fehlt(a, regel):
     return route in ("tvv2", "tsv2") and not str((a or {}).get("external_id") or "").strip()
 
 
+# KONTO DEAKTIVIERT (Finn 30.10.2026 14:2x, The5ers erlaubt nur ein 200k-Konto gleichzeitig): accounts.deaktiviert_at, sql/2026-10-30_konto_deaktiviert.sql. Alle Planer-Wege fragen schon
+# auto_planer — deshalb setzt ap_deaktiviert_anwenden im GELESENEN Konto auto_planer False + deaktiviert True (nie in der DB, Finns Haken bleibt). Kontowert, Kapital und Archiv
+# lesen das nicht. Spalte fehlt → niemand deaktiviert; andere Lesefehler fliegen durch (der Lauf bricht ab, statt ein deaktiviertes Konto zu planen).
+_ap_deakt_merk = {"bis": 0.0, "ids": frozenset()}
+
+
+def _ap_deaktiviert_ids():
+    if time.time() < _ap_deakt_merk["bis"]:
+        return _ap_deakt_merk["ids"]
+    try:
+        ids = frozenset(str(z.get("id")) for z in _sb_all("accounts", {"select": "id", "deaktiviert_at": "not.is.null"}) or [])
+    except requests.exceptions.HTTPError as e:
+        if "deaktiviert_at" not in str(getattr(e.response, "text", "") or e):
+            raise
+        ids = frozenset()
+    _ap_deakt_merk.update(bis=time.time() + 30, ids=ids)
+    return ids
+
+
+def ap_deaktiviert_anwenden(konten, ids=None):
+    """Markiert deaktivierte Konten im gelesenen Stand (testbar mit ids): auto_planer False, deaktiviert True. → dieselbe Liste."""
+    ids = _ap_deaktiviert_ids() if ids is None else ids
+    for a in konten or ():
+        if str(a.get("id")) in ids:
+            a["auto_planer"], a["deaktiviert"] = False, True
+    return konten
+
+
+AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts „Aktivieren\""
+
+
 def _ap_konten_laden(params):
+    return ap_deaktiviert_anwenden(_ap_konten_lesen(params))
+
+
+def _ap_konten_lesen(params):
     """accounts für den Planer — mit consistency_pct (07.10.2026); solange die Spalte fehlt (SQL noch nicht eingespielt),
     ohne sie, damit der Nachtlauf nicht stehen bleibt."""
     try:
@@ -25335,7 +25370,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         if ist_topstep_express(a):
             continue                                   # Topstep Express/XFA (Finn 07.10.2026: nur Combine im Auto-Plan), keine Meldung
         if a.get("auto_planer") is False:              # Haken im Konto aus (Finn 08.10.2026, accounts.auto_planer) — sichtbar ausgelassen
-            ausgelassen.append(dict(zeile, grund="vom Auto-Planer ausgenommen (Haken im Konto aus)"))
+            ausgelassen.append(dict(zeile, grund=AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "vom Auto-Planer ausgenommen (Haken im Konto aus)"))
             continue
         if ap_firma_gesperrt(a, sperren):              # Muster-Portfolio (16.10.2026): Firma bei der ID gesperrt — sichtbar ausgelassen
             ausgelassen.append(dict(zeile, grund=AP_GRUND_GESPERRT))
@@ -25930,8 +25965,8 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
     frueh = ((jetzt + timedelta(minutes=GP_VORLAUF_MIN)) - mitternacht).total_seconds() / 60.0
     in_uids = "in.(" + ",".join(uids) + ")"
     firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
-    konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",purchase_cost", "user_id": in_uids, "order": "id.asc",
-                                  "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
+    konten = ap_deaktiviert_anwenden(_sb_all("accounts", {"select": AP_KONTO_FELDER + ",purchase_cost", "user_id": in_uids, "order": "id.asc",
+                                                          "account_type": "in.(" + ",".join(AP_TYPEN) + ")"}))
     roh = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,master_sl,blown,route,"
                                          "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,start_um,planned_for,"
                                          "started_at,orbit_gesendet_at,mt5_baseline->final", "order": "id.asc",
@@ -25985,7 +26020,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
             continue                                   # Futures/Topstep/ohne Regel: nicht Sache des Gruppen-Planers (Echo = CFD)
         aus = lambda grund, **x: ausgelassen.append(dict(zeile_k, grund=grund, **x))   # noqa: E731
         if a.get("auto_planer") is False:
-            aus("vom Auto-Planer ausgenommen (Haken im Konto aus)")
+            aus(AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "vom Auto-Planer ausgenommen (Haken im Konto aus)")
             continue
         if ap_firma_gesperrt(a, sperren):
             aus(AP_GRUND_GESPERRT)
@@ -35556,7 +35591,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     konten = _sb_all("accounts", {"select": "id,user_id,name,firm,external_id,account_type,auto_planer,tv_balance,tv_balance_at,"
                                             "max_drawdown,waiting_payout_since,starting_balance,created_at",
                                   "user_id": "in.(" + ",".join(uids) + ")", "account_type": "eq.funded"})
-    konten = [a for a in konten or [] if ap_regel_finden(an, a.get("firm"))]
+    konten = [a for a in ap_deaktiviert_anwenden(konten) or [] if ap_regel_finden(an, a.get("firm"))]
     archiv = _ap_archiviert()
     konten = [a for a in konten if str(a.get("id")) not in archiv]
     ids = [str(a["id"]) for a in konten]
@@ -35603,7 +35638,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         g = _wd_konto_groesse(a)
         jg = fdp_je_groesse(regel, g)
         if a.get("auto_planer") is False:
-            erg["ausgelassen"].append(dict(zeile, grund="Haken „Auto-Planer“ am Konto aus")); continue
+            erg["ausgelassen"].append(dict(zeile, grund=AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus")); continue
         if a.get("waiting_payout_since"):
             erg["ausgelassen"].append(dict(zeile, grund="wartet auf Payout")); continue
         if not jg:
@@ -36405,7 +36440,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade",
                                   "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
     archiv = _ap_archiviert()
-    konten = [a for a in konten if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
+    konten = [a for a in ap_deaktiviert_anwenden(konten) if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
     ids = [str(a["id"]) for a in konten]
     plaene, pend, verw, buch = [], [], [], []
     payouts_ok = True                    # Payout-Quellen nicht lesbar → nie Refund-Modus (Zyklus gilt als „schon ausgezahlt", fail-closed)
@@ -36461,7 +36496,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         if any(w and w in str(a.get("name") or "").lower() for w in (regel.get("ohne_namen") or [])):
             aus("Flex-Konto — plant der Funded-CFD-Planer noch nicht"); continue
         if a.get("auto_planer") is False:
-            aus("Haken „Auto-Planer“ am Konto aus"); continue
+            aus(AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else "Haken „Auto-Planer“ am Konto aus"); continue
         if a.get("waiting_payout_since"):
             aus("Waiting for Payout — Payout anfragen, danach plant der Planer wieder"); continue
         g = _wd_konto_groesse(a)

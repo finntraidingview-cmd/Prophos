@@ -63,6 +63,9 @@ def lade():
         except Exception:
             pass
     a["_abw_echt"] = echt.get("acc_balance_wahl")
+    # KONTO DEAKTIVIERT (30.10.2026): _ap_konten_laden liest über _ap_konten_lesen; Merker hier neutral, eigener Test selftest_konto_deaktiviert
+    exec(block("_ap_konten_lesen"), a)
+    a["ap_deaktiviert_anwenden"] = lambda k, ids=None: k
     return a
 
 

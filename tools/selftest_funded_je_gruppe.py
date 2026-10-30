@@ -57,6 +57,8 @@ ANGEFRAGT = {}
 
 
 def sb_all(tab, par):
+    if tab == "accounts" and par.get("deaktiviert_at"):
+        return []                # KONTO DEAKTIVIERT (30.10.2026): keins
     if tab == "accounts":
         ANGEFRAGT["accounts"] = par.get("user_id")
         return [dict(a) for a in konten if a["user_id"] in par.get("user_id", "")]

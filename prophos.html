@@ -41621,6 +41621,7 @@
       payoutReadyAt:  row.payout_ready_at || null,
       // Waiting for Payout (29.09.2026): seit wann, null = nein — nur Funded CFD
       waitingPayoutSince: row.waiting_payout_since || null,
+      deaktiviertAt: row.deaktiviert_at || null,   // Konto deaktiviert (30.10.2026), bewusst nicht in accountToRow: nur accDeaktUmstellen schreibt
       // Consistency je Konto (07.10.2026): null = Standard der Firma (40 %), sonst z. B. 50 bei Addon-Konten
       consistencyPct: row.consistency_pct != null ? Number(row.consistency_pct) : null,
       zielErreichtAt: row.ziel_erreicht_at || null,   // Ziel-Wache (07.10.2026, app.py zw_tick)
@@ -42341,6 +42342,27 @@
     }catch(e){ if(cb) cb.checked = !an; if(typeof atToast === 'function') atToast('Auto-Planer nicht gespeichert: ' + ((e && e.message) || e), 'end') }
   }
   // Typ-Chip der Accounts-Tabelle: Funded CFD mit Waiting for Payout zeigt den Zustand statt des Typs (29.09.2026), „seit" im Tooltip
+  /* KONTO DEAKTIVIERT (Finn 30.10.2026 14:2x, The5ers erlaubt nur ein 200k-Konto gleichzeitig): nur ein Merker — kein Vorschlag, kein Start, zählt in Kapital/Gesamtwert weiter.
+   * Knopf Deaktivieren/Aktivieren neben dem Typ, sofort in die DB wie accWartetUmstellen. */
+  const accDeaktChipHtml = a => (a && a.deaktiviertAt) ? ' <span class="type-badge" style="margin-left:6px;background:var(--border);color:var(--sub);vertical-align:middle" title="Konto deaktiviert — kein Vorschlag, kein Start">Deaktiviert</span>' : ''
+  const accDeaktToggleHtml = a => !a ? '' : ` <button type="button" class="acc-wd-toggle" data-acc-deakt="${escapeHtml(String(a.id))}" data-ziel="${a.deaktiviertAt ? 'aus' : 'an'}" data-stop-row-click="1" title="${a.deaktiviertAt ? 'Konto wieder aktivieren — Planer und Puls nehmen es wieder mit' : 'Konto vorübergehend deaktivieren: kein Vorschlag, kein Start. Bleibt in Kapital und Gesamtwert.'}">${a.deaktiviertAt ? 'Aktivieren' : 'Deaktivieren'}</button>`
+  const planKontoDeaktiviert = p => { const a = p && (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); return !!(a && a.deaktiviertAt) }
+  async function accDeaktUmstellen(accId, an, opts){
+    const acc = accounts.find(a => String(a.id) === String(accId)); if(!acc) return false
+    const btn = opts && opts.btn; if(btn) btn.disabled = true
+    try{
+      const { data, error } = await supabase.from('accounts').update({ deaktiviert_at: an ? new Date().toISOString() : null }).eq('id', acc.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(acc.id)); if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof atToast === 'function') atToast(an ? `${acc.name}: deaktiviert — kein Vorschlag, kein Start` : `${acc.name}: wieder aktiv`)
+      return true
+    }catch(e){
+      const t = 'Nicht umgestellt: ' + (e && e.message || e)
+      if(typeof atToast === 'function') atToast(t); else alert(t)
+      return false
+    }finally{ if(btn) btn.disabled = false }
+  }
   function accTypChipHtml(a){
     if(a && a.type === 'funded_cfd' && a.waitingPayoutSince){
       const d = new Date(a.waitingPayoutSince)
@@ -42991,7 +43013,7 @@
             </button>`
 
         // Archivierte ausgrauen
-        const rowOpacity = isArchived ? 'opacity:.55' : ''
+        const rowOpacity = (isArchived || a.deaktiviertAt) ? 'opacity:.55' : ''
 
         return `
           <tr data-acc-id="${a.id}" style="cursor:pointer;${rowOpacity}" data-acc-detail="${a.id}">
@@ -43000,7 +43022,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}${accDeaktToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td data-stop-row-click="1">${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived)) : accPlanerZelleHtml(a, isArchived)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -43121,6 +43143,9 @@
       accEls.table.querySelectorAll('[data-acc-ap]').forEach(cb => {
         cb.addEventListener('click', e => e.stopPropagation())
         cb.addEventListener('change', e => { e.stopPropagation(); accAutoPlanerUmstellen(cb.dataset.accAp, cb.checked, cb) })
+      })
+      accEls.table.querySelectorAll('[data-acc-deakt]').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); accDeaktUmstellen(btn.dataset.accDeakt, btn.dataset.ziel === 'an', { btn }) })
       })
       // Funded CFD ⇄ Waiting for Payout (29.09.2026): gleiches Muster, eigener Handler
       accEls.table.querySelectorAll('[data-acc-wartet]').forEach(btn => {
@@ -53479,6 +53504,11 @@
   async function faVorStart(plan){
     if(!plan || !plan.id) return null
     if(plan.orbitGesendetAt || plan.startedAt) return null   // Order schon draußen — nie eingreifen (Prüfer 08.10.2026: kein Doppel-Kauf)
+    if(planKontoDeaktiviert(plan)){   // Hand-Start (kein Claim): 30.10.2026, Konto deaktiviert
+      const t = `„${plan.masterName || '—'}": Konto ist deaktiviert — erst unter Accounts „Aktivieren"`
+      if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
+      return t
+    }
     if(Date.now() - (_faFrei.get(String(plan.id)) || 0) < 30000) return null
     // Beide DB-Prüfungen unabhängig: fehlt eine Funktion (nicht eingespielt) oder ist offline, gilt sie als frei, die andere zählt weiter
     const frage = async (fn, wofuer) => {
@@ -58354,6 +58384,7 @@
     if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p)) return 'Topstep V2 — startet nur von Hand'
     if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
+    if(planKontoDeaktiviert(p)) return 'Konto deaktiviert'   // 30.10.2026; DB-Netz am Claim: trade_plans_a00_konto_deaktiviert
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
     { const ns = newsStartSperre(p); if(ns) return ns.text }   // NEWS-REGEL FUNDED CFD (30.10.2026): Plan wartet, startet nach dem Block
     return ''
@@ -61024,6 +61055,7 @@
         if(!a || !TPL_TYPEN.includes(a.type) || /fusion/i.test(String(a.firm || '')) || (arch[a.id] && arch[a.id].archived)) continue
         if(tplManRaus(man, currentUserId, a.id, a.name)) continue   // Konto in Manueller Arbeit (08.10.2026)
         if(a.zielErreichtAt){ zielIds.add(String(a.id)); continue }
+        if(a.deaktiviertAt) continue   // Konto deaktiviert (30.10.2026)
         if(a.type === 'funded_cfd' && a.waitingPayoutSince) continue   // Waiting for Payout braucht keinen Trade (Funded Planer → CFD, 30.10.2026)   // Ziel erreicht → nie hier (Finn 08.10.2026, s. TPL_ZIEL_RE) — über die Konto-ID, nie den Namen
         // EXTERNAL ID FEHLT bei eigenen Futures-Konten (08.10.2026, Fehler-Muster 49 Orbit-Fehlstarts): vorab als Zeile mit Knopf, noch bevor
         // der Planer läuft — der Planer lässt das Konto ohnehin aus (app.py ap_ext_fehlt); die Balance-Zeile entfällt dafür

@@ -50,7 +50,7 @@ REIN = ("_ap_plan_am_tag", "tfh_param", "eh_param", "ap_tradeify_final_halten", 
         "ap_balance_live", "ap_letzt_je_konto", "_ap_boden", "ap_boden_konto", "ap_boden_sicher", "ap_boden_zeile", "_ap_notes_kurz", "_ap_hand_spalte_fehlt", "_ap_plaene_mit_hand", "liq_peak", "_ap_peaks", "_liq_verlauf_laden", "ap_kette_mll_belegt", "_ap_kette_mlls")   # 08.10.2026: Balance live (Guard/Delta/ids), Boden für den Balance-Balken
 IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "ap_richtung_hand_fest", "_ap_stand_laden", "_ap_stand_plaene", "_ap_min_iso",
       "_ap_umplanungen_heute", "_ap_bot_stand", "_ap_bot_hat_arbeit", "_ap_bot_tick", "ap_kette_tick", "ap_kette_startwert_neu", "ap_kette_letzter_trade", "ap_kette_tagesende", "_ap_kette_t1_stand", "ap_kette_abhaken", "_wd_erledigt_upd", "_cme_handelstag", "_ap_kette_grund", "_ap_kette_takt", "ap_delta_antwort", "_ap_aenderungen_anwenden", "pc_stand_zusammenfassen", "_ap_pc_lebt", "_ap_verpufft", "_ap_zug_nach_vorn", "ap_zuege_je_id", "_ap_dubai_versatz", "ap_ausgleichen",
-      "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "ap_blow_ausschluss", "_ap_rk_flag",
+      "_ap_probelauf", "ap_planen", "_ap_tz", "_ap_eur_bei", "_ap_konten_laden", "_ap_konten_lesen", "ap_einsatz_kontext", "ap_richtung_fest_plan", "ap_letzter_trade_geblasen", "ap_blow_ausschluss", "_ap_rk_flag",
       "ap_richtungsschutz", "ap_startwert_frisch", "liq_konto_groesse", "_wd_konto_groesse", "_ap_konten_mit_trade", "_ap_login_zwillinge",
       "ap_richtung_bloecke", "ap_fest_am_start", "ap_id_firma_einseitig", "_ap_fest_ref", "_ap_ts", "_ap_gegen_eigen", "ap_claim_laeuft",
       "ap_kontowert_grund", "ap_grund_ohne_balance", "ap_startwert_kandidat")   # 09.10.2026: genauer Kontowert-/Balance-Grund
@@ -58,7 +58,8 @@ IO = ("_ap_gehedgt_plan", "_ap_bewerten", "_ap_iso_min", "ap_richtung_hand_fest"
 
 def lade():
     src = open(APP, encoding="utf-8").read()
-    ns = {"re": re, "random": random, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "json": json,
+    # KONTO DEAKTIVIERT (30.10.2026): eigener Test tools/selftest_konto_deaktiviert.py
+    ns = {"ap_deaktiviert_anwenden": lambda k, ids=None: k, "re": re, "random": random, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "json": json,
           "hashlib": hashlib, "time": __import__("time")}
     # ap_delta_antwort meldet seit 43d7096e den Echo-Hedge-Schalter (eh_stand, liest Regeln/Takt-Zustand) — hier ein fester Stand, der Test prüft das Delta
     ns["eh_stand"] = lambda regeln=None: {"an": False}
