@@ -113,7 +113,7 @@ pf, _a = app.fdp_eingriff_filter("bestaetigen", ["11111111-2222-4333-8444-555555
 pc, _a = app.fdp_eingriff_filter("bestaetigen", ["11111111-2222-4333-8444-555555555555"], art="cfd")
 check(pf["mt5_baseline->funded_plan->>art"] == "is.null" and pc["mt5_baseline->funded_plan->>art"] == "eq.cfd",
       "Funded-Routen fassen nur Apex-Vorschläge an, CFD-Routen nur CFD")
-check(app.fcp_schreib_sicht("e1", frozenset({"h1"})) == frozenset(), "eigene ID außerhalb der Gruppe → nichts")
+check(app.fcp_schreib_sicht("e1", frozenset({"h1"})) == "e1", "eigene ID bleibt eigene ID (nur eigene Pläne)")
 
 print("4) Ganzer Lauf gegen nachgebaute DB")
 JETZT = datetime(2026, 11, 2, 4, 0, tzinfo=timezone.utc)          # Montag 08:00 Dubai
@@ -190,8 +190,16 @@ for z in erg["geplant"]:
     mins.setdefault(z["user_id"], []).append(datetime.fromisoformat(z["start_um"]))
 check(all(abs((a - b).total_seconds()) >= 600 for v in mins.values() for i, a in enumerate(v) for b in v[i + 1:]), "≥ 10 min zwischen Starts derselben ID")
 check(not GESCHRIEBEN, "Trockenlauf schreibt nichts")
-check(app.fcp_planen(trocken=True, jetzt=datetime(2026, 10, 31, 6, 0, tzinfo=timezone.utc)).get("msg", "").startswith("Wochenende"),
-      "Samstag: nichts geplant")
+_alt = app._sb_all
+PLAN_OFFEN = {"id": "p1", "user_id": H1, "master_account_id": KONTEN[0]["id"], "master_firm": "FundedNext", "status": "open", "richtung": "sell",
+              "started_at": "2026-10-31T05:00:00+00:00", "master_contracts": 1.2, "multiplier": 1.5, "notes": "Funded-CFD-Planer · Vorschlag"}
+app._sb_all = lambda t, p: [dict(PLAN_OFFEN)] if t == "trade_plans" and "master_account_id" in p else _alt(t, p)
+ws = app.fcp_planen(trocken=True, jetzt=datetime(2026, 10, 31, 6, 0, tzinfo=timezone.utc))
+app._sb_all = _alt
+check(ws.get("msg", "").startswith("Wochenende") and not ws["geplant"], "Samstag: nichts geplant")
+pw = (ws.get("plaene") or [{}])[0]
+check(len(ws.get("plaene") or []) == 1 and pw.get("funded_cfd_plan") and pw.get("groesse") == 100000 and pw.get("dd") == 10000 and pw.get("balance") == 98000,
+      "Samstag: bestehender Plan trotzdem in plaene, mit Größe/DD/Balance (Notiz als Kennung)")
 erg2 = app.fcp_planen(trocken=False, jetzt=JETZT, seed=42)
 zeilen = [z for t, z in GESCHRIEBEN if t == "trade_plans"]
 check(len(zeilen) == 5 and all(z["start_um"] is None and z["auto_bestaetigt_at"] is None and z["route"] == "mt5" and z["auto_plan"] is False

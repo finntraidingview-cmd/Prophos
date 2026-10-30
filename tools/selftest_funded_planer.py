@@ -36,7 +36,9 @@ def laden():
     """Hilfsfunktionen aus app.py + der ganze FUNDED-PLANER-Block (bis zur Route)."""
     i, j = SRC.index("FDP_TAKT_S = 300"), SRC.index('@app.route("/admin/funded-plan"')
     ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta, "random": random, "time": time,
-          "GP_SLAVE_PPL": 0.85, "_firm_norm": lambda x: str(x or "")}
+          "GP_SLAVE_PPL": 0.85, "_firm_norm": lambda x: str(x or ""),
+          # FUNDED-PLANER JE GRUPPE (30.10.2026): ohne Gruppen = reiner HT-Lauf wie bisher (selftest_funded_je_gruppe prüft die Gruppen)
+          "ap_planer_gruppen_ids": lambda: set(), "admin_gruppen_daten": lambda: {}}
     exec("\n".join(block(n) for n in HILFEN) + "\n" + SRC[i:j], ns)
     return ns
 

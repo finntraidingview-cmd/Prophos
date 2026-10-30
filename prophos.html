@@ -52420,7 +52420,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1929'
+  const OS_TAB_BUILD = '2026-09-22.1930'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -80873,7 +80873,10 @@
     if(_fdpPlantGerade) return
     _fdpPlantGerade = true; apIdsRender()
     try{
-      const A = fdpArt(), d = await apdApi('POST', '/planen', { tag: 'auto' }, A.basis)
+      // sicht:'admin' wie bei den Bestätigen-Knöpfen (30.10.2026, FUNDED-PLANER JE GRUPPE): ein Verwalter plant so seine ganze Gruppe;
+      // Basis je Reiter (Futures /admin/funded-plan, CFD /admin/funded-cfd-plan) aus fdpArt() (.1928)
+      const sichtP = (typeof window._tplSichtParam === 'function' && window._tplSichtParam()) ? { sicht: 'admin' } : {}
+      const A = fdpArt(), d = await apdApi('POST', '/planen', Object.assign({ tag: 'auto' }, sichtP), A.basis)
       const g = (d.geplant || []).length, a = (d.ausgelassen || []).length
       if(typeof atToast === 'function') atToast(`🤖 ${A.name} (${d.tag === 'morgen' ? 'nächster Handelstag' : 'heute'}): ${g} Vorschl${g === 1 ? 'ag' : 'äge'} angelegt, ${a} ausgelassen — Bestätigen unter „Zu bestätigen"`, g ? 'start' : 'end')
     }catch(e){ if(typeof atToast === 'function') atToast(fdpArt().name + ' nicht gelaufen: ' + ((e && e.message) || e), 'end') }
