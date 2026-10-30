@@ -37261,8 +37261,8 @@
     const overPct = (overEur != null && eur) ? overEur / Math.abs(eur) * 100 : null
     // WIRKUNG FÜR UNS (30.10.2026, Finn ~08:31: „Overshoot +1,3 Pkt · +6,43 €" ist immer rot, obwohl + nach Gewinn aussieht): over* zählt
     // „teurer als geplant" positiv; angezeigt wird jetzt die Wirkung = −over*: + = besser als geplant (Fusion schloss hinter seinem TP bzw.
-    // vor seinem SL) → grün, − = schlechter (Slippage) → rot. Beleg 52b79294 (Apex …0003, Master SL): Fusion-TP 28.831,87, Schluss 28.830,56
-    // → over +1,31 Pkt · +6,43 € = 6,43 € weniger Gewinn als geplant → Wirkung −6,43 € (Slippage, rot).
+    // vor seinem SL) → grün, − = schlechter (Undershoot) → rot. Beleg 52b79294 (Apex …0003, Master SL): Fusion-TP 28.831,87, Schluss 28.830,56
+    // → over +1,31 Pkt · +6,43 € = 6,43 € weniger Gewinn als geplant → Wirkung −6,43 € (Undershoot, rot).
     const wirk = v => v == null ? null : (v === 0 ? 0 : -v)
     const ms = (a, b) => { const x = Date.parse(a || ''), y = Date.parse(b || ''); return (isNaN(x) || isNaN(y)) ? null : Math.max(0, y - x) }
     const mFill = h.master_exit && typeof h.master_exit === 'object' && !isNaN(Date.parse(h.master_exit.at || '')) ? h.master_exit.at : null
@@ -37370,10 +37370,10 @@
       const nachTxt = vor ? ' vor Master' : abMaster ? ' nach Master' : ''
       let over = ''
       if(s.wirkPkt != null){
-        // Farbe und Wort allein am Vorzeichen der Wirkung in € (Pkt nur Info; ohne € die Punkte): + grün „Overshoot", − rot „Slippage", 0 neutral
+        // Farbe und Wort allein am Vorzeichen der Wirkung in € (Pkt nur Info; ohne € die Punkte): + grün „Overshoot", − rot „Undershoot", 0 neutral
         const w = s.wirkEur != null ? s.wirkEur : s.wirkPkt, eps = s.wirkEur != null ? Math.abs(s.wirkEur) < 0.005 : Math.abs(s.wirkPkt) < 0.05, plus = w > 0
         const vzv = v => v > 0 ? '+' : v < 0 ? '−' : '±'
-        over = `<span class="wdl-sw-over${eps ? '' : plus ? ' is-guenstig' : ' is-teuer'}">${eps || plus ? 'Overshoot' : 'Slippage'} ${vzv(Math.abs(s.wirkPkt) < 0.05 ? 0 : s.wirkPkt)}${f1(Math.abs(s.wirkPkt))} Pkt`
+        over = `<span class="wdl-sw-over${eps ? '' : plus ? ' is-guenstig' : ' is-teuer'}">${eps || plus ? 'Overshoot' : 'Undershoot'} ${vzv(Math.abs(s.wirkPkt) < 0.05 ? 0 : s.wirkPkt)}${f1(Math.abs(s.wirkPkt))} Pkt`
           + (s.wirkEur != null ? ` · ${vzv(eps ? 0 : s.wirkEur)}${Math.abs(s.wirkEur).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '') + `</span>`
       }
       const levelTxt = s.level != null ? `Fusion-${s.seite === 'sl' ? 'TP' : 'SL'} ${f2(s.level)} → Schluss ${f2(s.zu)}` : `Schluss ${f2(s.zu)}`
@@ -37383,7 +37383,7 @@
         + (s.zuGrob ? ' · Copier meldet die Schluss-Zeit nur sekundengenau' : '')
         + ` · Master-TP ${f2(s.masterTp)}${s.masterSl != null ? ` · ${s.liq ? 'Liq' : 'SL'} ${f2(s.masterSl)}` : ' · ohne SL'} · ${levelTxt}`
         + (s.wirkPct != null ? ` · ${s.wirkPct < 0 ? '−' : '+'}${f1(Math.abs(s.wirkPct))} % vom geplanten Hedge-Einsatz${s.eur != null ? ` (${f2(s.eur)} €)` : ''}` : '')
-        + ` · Overshoot (+) = Fusion schloss besser als am Level geplant, Slippage (−) = schlechter · offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : ''}`
+        + ` · Overshoot (+) = Fusion schloss besser als am Level geplant, Undershoot (−) = schlechter · offen ${swDauerTxt(s.offenMs)}${s.schonZu ? ' · im Terminal gefüllt' : ''}`
       return `<span class="wdl-z-sw" title="${escapeHtml(tip)}"><b class="wdl-sw-${s.weg}">${escapeHtml(s.wegTxt)} · ${escapeHtml(bisTxt)}${nachTxt}</b>${over}</span>`
     }
     // laufend (01.10.2026 abends, Finn: „bei Modellen mit Gegenhedge live beide P&Ls"): Fusion schwebend aus mt5_live, wdlFusionLive schreibt nach
@@ -38225,7 +38225,7 @@
     const pct = (a, b) => b ? Math.round(a / b * 100) : 0
     const mw = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null
     const med = a => { if(!a.length) return null; const b = [...a].sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2 }
-    // Wirkung für uns (30.10.2026, s. swAuswertung wirk*): + = besser als geplant → grün, − = Slippage → rot
+    // Wirkung für uns (30.10.2026, s. swAuswertung wirk*): + = besser als geplant → grün, − = Undershoot → rot
     const kl = v => v == null ? '' : v > 0.05 ? 'is-guenstig' : v < -0.05 ? 'is-teuer' : ''
     if(msg){
       const txt = rst.fehler ? `Nicht geladen: ${rst.fehler}` : (rst.laedt && !rst.daten) ? 'Lade Schließwege …' : (rst.daten && !alle.length) ? `Keine geschlossenen Fusion-Hedges (${zeitraum}).` : ''
@@ -38240,7 +38240,7 @@
     kpis.innerHTML = kpi('Gehedgte Trades · zu', `${n}`, `${escapeHtml(modellTxt)} · ${zeitraum}`, 'Trades mit geschlossenem Fusion-Hedge im Zeitraum, in der Admin-Sicht dieses Logins (Standard: Gruppe Hermann Technologies)')
       + kpi('Userscript', `${pct(us, n)}<small>%</small>`, `${us} von ${n} · Notfall-SL ${pct(nf, n)} %`, 'Anteil der Hedges, die das Tampermonkey-Userscript (Reader sah den Master zu) geschlossen hat')
       + kpi('Hedge offen · Median', escapeHtml(swDauerTxt(med(offen))), `Ø ${escapeHtml(swDauerTxt(mw(offen)))} · Fusion-Fill → zu`, 'Zeit vom Fusion-Fill bis zum bestätigten Schluss, Median und Mittelwert über alle Wege')
-      + kpi('Overshoot · Ø', `<span class="${kl(mw(overP))}">${sig(mw(overP), '%')}</span>`, `Σ ${sig(overE.length ? overE.reduce((a, b) => a + b, 0) : null, '€', 0)} gegen Plan · Median ${sig(med(overP), '%')}`, 'Wirkung des echten Schlusses gegen das Fusion-Level, in % des geplanten Hedge-Einsatzes — positiv = besser als geplant (Overshoot), negativ = Slippage; nur Userscript · Notfall-SL · Radar (von Hand/Sonstiges schließen nicht am Level)')
+      + kpi('Overshoot · Ø', `<span class="${kl(mw(overP))}">${sig(mw(overP), '%')}</span>`, `Σ ${sig(overE.length ? overE.reduce((a, b) => a + b, 0) : null, '€', 0)} gegen Plan · Median ${sig(med(overP), '%')}`, 'Wirkung des echten Schlusses gegen das Fusion-Level, in % des geplanten Hedge-Einsatzes — positiv = besser als geplant (Overshoot), negativ = Undershoot; nur Userscript · Notfall-SL · Radar (von Hand/Sonstiges schließen nicht am Level)')
     wege.innerHTML = SW_WEGE.map(([key, name]) => {
       const a = alle.filter(x => x.s.weg === key), k = a.length
       const of = a.map(x => x.s.offenMs).filter(v => v != null), op = a.map(x => x.s.wirkPct).filter(v => v != null), ok = a.map(x => x.s.wirkPkt).filter(v => v != null), oe = a.map(x => x.s.wirkEur).filter(v => v != null)

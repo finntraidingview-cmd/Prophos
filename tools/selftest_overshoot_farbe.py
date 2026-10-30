@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Selbsttest OVERSHOOT-FARBE (30.10.2026, Finn ~08:31: „Overshoot +1,3 Pkt · +6,43 €" ist immer rot): Radar-Zeile und Radar-Statistik
-zeigen die WIRKUNG für uns (+ = besser als geplant → grün „Overshoot", − = Slippage → rot, 0 neutral). Echte Hedges aus trade_plans:
-  52b79294 (Apex …0003, Master SL, sl_feed, buy): Fusion-TP 28.831,87, Schluss 28.830,56 → −1,3 Pkt · −6,43 € Slippage (rot)
+zeigen die WIRKUNG für uns (+ = besser als geplant → grün „Overshoot", − = Undershoot → rot, 0 neutral). Echte Hedges aus trade_plans:
+  52b79294 (Apex …0003, Master SL, sl_feed, buy): Fusion-TP 28.831,87, Schluss 28.830,56 → −1,3 Pkt · −6,43 € Undershoot (rot)
   10ea8c26 (Apex …0006, Master SL, level_sl, buy): Fusion-TP 29.464,02, Schluss 29.464,48 → +0,5 Pkt Overshoot (grün)
-  2b521c4e (Apex …0001 WD, Master TP, level_tp, buy): Fusion-SL 29.509,99, Schluss 29.509,23 → −0,8 Pkt Slippage (rot)
+  2b521c4e (Apex …0001 WD, Master TP, level_tp, buy): Fusion-SL 29.509,99, Schluss 29.509,23 → −0,8 Pkt Undershoot (rot)
 Aufruf:  python3 tools/selftest_overshoot_farbe.py"""
 import json
 import os
@@ -63,20 +63,20 @@ except Exception:
 
 a = e["52b79294"]
 soll("52b79294: Rechnung unverändert (over +1,31 Pkt, +6,43 €)", round(a["s"]["overPkt"], 2) == 1.31 and round(a["s"]["overEur"], 2) == 6.43)
-soll("52b79294: Wirkung −6,43 € → rot „Slippage −1,3 Pkt · −6,43 €“", "is-teuer" in a["html"] and "Slippage −1,3 Pkt · −6,43 €" in a["html"])
+soll("52b79294: Wirkung −6,43 € → rot „Undershoot −1,3 Pkt · −6,43 €“", "is-teuer" in a["html"] and "Undershoot −1,3 Pkt · −6,43 €" in a["html"])
 b = e["10ea8c26"]
 soll("10ea8c26: Fusion hinter seinem TP → grün „Overshoot +0,5 Pkt · +2,26 €“", "is-guenstig" in b["html"] and "Overshoot +0,5 Pkt · +2,26 €" in b["html"])
 c = e["2b521c4e"]
-soll("2b521c4e: Master TP, Fusion hinter seinem SL → rot Slippage", "is-teuer" in c["html"] and "Slippage −0,8 Pkt" in c["html"])
+soll("2b521c4e: Master TP, Fusion hinter seinem SL → rot Undershoot", "is-teuer" in c["html"] and "Undershoot −0,8 Pkt" in c["html"])
 d = e["sell_tp_besser"]
 soll("Hedge sell, Schluss unter seinem TP → grün Overshoot", "is-guenstig" in d["html"] and d["html"].count("Overshoot +") == 1)
 z = e["null"]
 soll("genau am Level → neutral „Overshoot ±0,0 Pkt · ±0,00 €“", "is-" not in z["html"] and "Overshoot ±0,0 Pkt · ±0,00 €" in z["html"])
 o = e["ohne_eur"]
-soll("ohne € → Farbe nach Punkten, kein €-Teil", "is-teuer" in o["html"] and "Slippage −2,0 Pkt" in o["html"] and "€" not in o["html"])
+soll("ohne € → Farbe nach Punkten, kein €-Teil", "is-teuer" in o["html"] and "Undershoot −2,0 Pkt" in o["html"] and "€" not in o["html"])
 soll("Radar-Statistik: kl grün bei +, rot bei −", "const kl = v => v == null ? '' : v > 0.05 ? 'is-guenstig' : v < -0.05 ? 'is-teuer' : ''" in HTML)
 soll("Radar-Statistik nutzt wirk*-Felder", HTML.count("x.s.wirkPct") == 2 and HTML.count("x.s.wirkEur") == 2 and "x.s.wirkPkt" in HTML)
-soll("kein „Undershoot“ mehr in der Anzeige", "'Undershoot'" not in HTML)
+soll("kein „Slippage“ in der Anzeige (Finn: Undershoot)", "'Slippage'" not in HTML)
 
 print(f"\n{'ALLES OK' if not fehler else f'{fehler} FEHLER'}")
 sys.exit(1 if fehler else 0)
