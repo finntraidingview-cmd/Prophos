@@ -36,6 +36,9 @@ def main():
     ok('<div id="adm-pane-fcfd" hidden><div id="apg-fcfd" class="ap-guestly"></div></div>' in s, "Hülle-Container Funded CFD")
     i = s.find("function apgHuelleHtml(){")
     huelle = s[i:s.find("function apGuestlyVerdrahten(root){", i)]
+    # Funded-CFD-Regeln (30.10.2026) laden bewusst über GET /admin/funded-cfd-plan — ihr Block zählt nicht als „neue Abfrage" des Gerüsts
+    _a, _b = huelle.find("/* FUNDED-CFD-REGELN"), huelle.find("window._fcfdRegelnStub")
+    if 0 <= _a < _b: huelle = huelle[:_a] + huelle[_b:]
     for teil in ("Zeitstrahl", "'Zu bestätigen', 'Läuft', 'Braucht dich', 'Wartet auf Start'", "kommt", "Long · Short je ID", "Starts je Stunde"):
         ok(teil in huelle, "Hülle Funded CFD: " + teil)
     ok("fetch" not in huelle and "apdApi" not in huelle and "disabled" in huelle, "Hülle ohne Abfragen, Knöpfe gesperrt")

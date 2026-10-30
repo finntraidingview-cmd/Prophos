@@ -52395,7 +52395,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1926'
+  const OS_TAB_BUILD = '2026-09-22.1927'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60332,7 +60332,7 @@
       // GELESEN (Finn 09.10.2026: „Die Balance bei EzPoker wurde jetzt gelesen. Ich will, dass es auch visuell verschwindet"): das Backend markiert
       // „Balance fehlt"-Zeilen mit frischer Balance seit dem Lauf (balance_gelesen_at, ap_bal_gelesen) — das nächste Nachplanen nimmt sie mit
       if(x.balance_gelesen_at && /keine Balance|Balance fehlt|nicht live/i.test(g)){
-        if(!(ids && !ids.has(String(x.user_id || ''))) && !tplManRaus(man, x.user_id, x.konto_id, x.konto)) gelesenN++
+        if(!(ids && !ids.has(String(x.user_id || ''))) && !tplManRaus(man, x.user_id, x.konto_id, x.konto) && !(artPasst && String(x.firma || '').trim() && !artPasst(x))) gelesenN++   // + Kontoart
         continue
       }
       // TAGESDECKEL RAUS (Finn 19.10.2026, Admin-Reiter: 18 Apex-Zeilen „Tagesdeckel der Firma — höchstens 2 Konten je ID und Tag“ — „Ich weiß ja,
@@ -80069,11 +80069,13 @@
    * { gemeinsam: {…}, firmen: [{ firma, symbol, hinweis, groessen: [{ groesse, ziel, tp, sl, sl_1pct, lots, hedge_eur, hedge_dd, daily_loss, hinweis }] }] };
    * Spannen als [von, bis]. Nur Anzeige, kein Schreibweg. */
   const _fcfdR = { d: null, at: 0, laedt: false, fehler: '', auf: false }
-  const fcfdSpanne = (v, einheit) => { if(v == null || v === '') return null
-    const z = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 3 })
-    if(Array.isArray(v)) return v.length > 1 && Number(v[1]) !== Number(v[0]) ? `${z(v[0])} – ${z(v[1])}${einheit}` : `${z(v[0])}${einheit}`
-    return isFinite(Number(v)) ? z(v) + einheit : String(v) }
-  const fcfdGroesse = g => { const n = Number(g); return n >= 1000 ? Math.round(n / 1000) + 'k' : String(g || '?') }
+  // Spanne [von, bis] oder Einzelwert → „1.300 – 1.500 $" (vor = Vorzeichen je Zahl, z. B. '+'); Text aus der DB immer escaped
+  const fcfdSpanne = (v, einheit, vor = '') => { if(v == null || v === '') return null
+    const z = x => vor + Number(x).toLocaleString('de-DE', { maximumFractionDigits: 3 })
+    if(Array.isArray(v)){ const w = v.filter(x => x != null && x !== '' && isFinite(Number(x))); if(!w.length) return null
+      return w.length > 1 && Number(w[1]) !== Number(w[0]) ? `${z(w[0])} – ${z(w[1])}${einheit}` : `${z(w[0])}${einheit}` }
+    return isFinite(Number(v)) ? z(v) + einheit : escapeHtml(String(v)) }
+  const fcfdGroesse = g => { const n = Number(g); return n >= 1000 ? Math.round(n / 1000) + 'k' : escapeHtml(String(g || '?')) }
   function fcfdTpText(tp){
     if(!tp) return null
     if(typeof tp === 'string') return tp
@@ -80103,7 +80105,7 @@
     const firmaKarte = f => {
       const ton = typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)'
       const gr = (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse)).map(x => `<div class="fcr-gr"><b>${escapeHtml(fcfdGroesse(x.groesse))}</b><div class="fcr-z">
-          ${zeile('Ziel → Waiting', fcfdSpanne(x.ziel, ' $') && '+' + fcfdSpanne(x.ziel, ' $'))}${zeile('TP', escapeHtml(fcfdTpText(x.tp) || ''))}
+          ${zeile('Ziel → Waiting', fcfdSpanne(x.ziel, ' $', '+'))}${zeile('TP', escapeHtml(fcfdTpText(x.tp) || ''))}
           ${zeile('Stop-Loss', fcfdSpanne(x.sl, ' $'))}${zeile('SL mit 1-%-Regel', fcfdSpanne(x.sl_1pct, ' $'))}${zeile('Lots', fcfdSpanne(x.lots, f.symbol ? ' · ' + escapeHtml(String(f.symbol)) : ''))}
           ${zeile('Hedge', x.hedge_eur != null ? `${fcfdSpanne(x.hedge_eur, ' €')}${x.hedge_dd != null ? ` auf ${fcfdSpanne(x.hedge_dd, ' $')} DD` : ''}` : null)}${zeile('Daily Loss', fcfdSpanne(x.daily_loss, ' $'))}</div>
           ${x.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(x.hinweis))}</div>` : ''}</div>`).join('')
@@ -80118,15 +80120,15 @@
   // dazu aktiv, auto_bestaetigen, ziel_auto_wartet, zeiten { von, bis, tz, firma_abstand_min, abstand_id_min }. Schon normalisiert (Stub) bleibt so.
   function fcfdRegelnNorm(roh){
     if(!roh || typeof roh !== 'object' || !Array.isArray(roh.firmen)) return null
-    if(roh.gemeinsam || !roh.firmen.some(f => f && f.je_groesse)) return roh
+    if(roh.gemeinsam) return roh   // schon normalisiert (Stub)
     const z = roh.zeiten || {}, hin = []
     if(z.von && z.bis) hin.push(`Startfenster ${z.von}–${z.bis}${z.tz ? ' ' + String(z.tz).replace('Asia/', '') : ''}${z.firma_abstand_min != null ? ` · ≥ ${z.firma_abstand_min} min je Firma` : ''}${z.abstand_id_min != null ? ` · ≥ ${z.abstand_id_min} min je ID` : ''}`)
     return { aktiv: !!roh.aktiv,
       gemeinsam: { auto_bestaetigen: !!roh.auto_bestaetigen, ziel_auto_wartet: !!roh.ziel_auto_wartet, hinweise: hin },
       firmen: roh.firmen.filter(f => f && f.je_groesse && typeof f.je_groesse === 'object').map(f => ({
         firma: String(f.name || '?'),
-        hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', (f.ohne_namen || []).length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
-        groessen: Object.entries(f.je_groesse).map(([gr, x]) => ({ groesse: Number(gr), ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
+        hinweis: [f.an === false ? 'aus — wird nicht geplant' : '', Array.isArray(f.ohne_namen) && f.ohne_namen.length ? `nicht geplant: Konten mit „${f.ohne_namen.join('“, „')}“ im Namen` : ''].filter(Boolean).join(' · '),
+        groessen: Object.entries(f.je_groesse).filter(([, x]) => x && typeof x === 'object').map(([gr, x]) => ({ groesse: Number(gr), ziel: x.ziel, sl: x.sl, sl_1pct: x.sl_1pct, lots: x.lots,
           hedge_eur: x.hedge_eur, hedge_dd: x.dd, daily_loss: x.daily_loss,
           tp: x.tp_erster ? { art: 'erst_payout', erst: x.tp_erster } : { art: 'ziel' } })) })) }
   }

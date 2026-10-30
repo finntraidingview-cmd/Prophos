@@ -42,6 +42,9 @@ def main():
     # Aufbau in der Reihenfolge der Vorgabe
     i = s.index("function apGuestlyHtml(x){")
     g = s[i:s.index("function apGuestlyVerdrahten(root){", i)]
+    # Funded-CFD-Regeln (30.10.2026) laden bewusst über GET /admin/funded-cfd-plan — ihr Block zählt nicht als „neue Abfrage" des Gerüsts
+    _a, _b = g.find("/* FUNDED-CFD-REGELN"), g.find("window._fcfdRegelnStub")
+    if 0 <= _a < _b: g = g[:_a] + g[_b:]
     ok(g.rstrip().endswith("return kopf + kpis + charts + leiste + zs + listen\n  }") or "return kopf + kpis + charts + leiste + zs + listen" in g, "Reihenfolge Kopf · KPI · Charts · Einstellungen · Zeitstrahl · Listen")
     ok('<button type="button" disabled title="kommt">7 Tage</button><button type="button" disabled title="kommt">30 Tage</button>' in g, "7/30 Tage ausgegraut mit „kommt“")
     ok("data-ap-tag" in g and "data-apg-id" in g and "data-apg-firma" in g, "Zeitraum + Filter ID/Firma")
