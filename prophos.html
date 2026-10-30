@@ -36468,6 +36468,11 @@
   const _bstLokal = new Map()   // konto_id → { z, at }
   function bstLokalAnwenden(d){
     if(!d || !_bstLokal.size) return
+    // Inzwischen archiviert (Nachfolger angelegt): Zeile weg, der Server führt das Konto nie mehr, sie stünde sonst bis BST_LOKAL_MS in Review
+    for(const kid of [..._bstLokal.keys()]){
+      const t = ((wdl.daten && wdl.daten.trades) || []).find(x => String(x.konto_id || '') === kid)
+      if(wdlKontoArchiviert(t)){ _bstLokal.delete(kid); if(Array.isArray(d.radar_bestanden)) d.radar_bestanden = d.radar_bestanden.filter(z => !(z && z.lokal && String(z.konto_id) === kid)) }
+    }
     const liste = Array.isArray(d.radar_bestanden) ? d.radar_bestanden : (d.radar_bestanden = [])
     const jetzt = Date.now()
     for(const [kid, x] of [..._bstLokal]){
@@ -36479,6 +36484,7 @@
     try{
       const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid))
       const kid = t && String(t.konto_id || '')
+      // Archiviertes Konto (Finn 30.10.2026, Simon Topstep …9002: Nachfolger 17:46, Trade abgehakt 18:08 → „Review … bestanden 18:08"): wdlBestandenChip ist dort leer
       if(t && kid && (!status || status === 'none') && wdlBestandenChip(t)){
         const k = t.konto || {}, bal = (wdlBlowStand(t) || {}).bal ?? (wdlTpUndWeg(t) || {}).bal
         _bstLokal.set(kid, { at: Date.now(), z: { art: 'bestanden', lokal: true, user_id: wdlUid(t), user: t.person || '', konto_id: kid, firma: k.firma || '',
@@ -37086,9 +37092,16 @@
   }
   window._wdlFcfdZielErreicht = wdlFcfdZielErreicht
   window._wdlFcfdZielVonPlan = pid => wdlFcfdZielErreicht(((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)))
+  // Konto schon archiviert (Nachfolger angelegt, Archiv der EIGENEN ID): fremde IDs kennt nur der Server (/admin/live-trades konto.archiviert), eigene das lokale Archiv
+  function wdlKontoArchiviert(t){
+    if(!t) return false
+    if((t.konto || {}).archiviert) return true
+    try{ const a = getArchive() || {}, e = a[String(t.konto_id || '')]; return !!(e && e.archived) }catch(_){ return false }
+  }
   function wdlBestandenChip(t){
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     if(!t || t.status === 'open' || t.status === 'planned') return ''
+    if(wdlKontoArchiviert(t)) return ''   // Konto ist weiter: normaler Trade in Abhaken, nicht mehr „Trade abhaken" und kein Review (30.10.2026)
     const tw = wdlTpUndWeg(t)   // TP + nicht mehr im Dropdown (21.10.2026): eigener Chip, auch ohne bekannten Kontotyp
     if(tw){
       const de = v => Math.round(v).toLocaleString('de-DE'), ueb = WDL_UEBERGANG[String(t.konto_typ || '')]
@@ -37289,7 +37302,7 @@
   // GEPARKT (12.10.2026, Finn: „geparkte Accounts … dauert oft 1–2 Tage, bis die freigegeben werden"): dasselbe Kennzeichen manuell
   // mit schritt 'geparkt' — kein neuer Backend-Weg (das Backend speichert schritt als freien Text). Die Zeile steht dann in
   // Überprüfen → Geparkt statt in Manuelle Arbeit; Abhaken/zurück wie dort.
-  const wdlGeparkt = t => { const m = wdlManuell(t); return !!(m && !m.neu && m.schritt === 'geparkt') }
+  const wdlGeparkt = t => { const m = wdlManuell(t); return !!(m && !m.neu && m.schritt === 'geparkt') && !wdlKontoArchiviert(t) }   // archiviert: nicht mehr unter Review
   function wdlParken(pid){
     pid = String(pid || ''); if(!pid || _wdlManBusy.has(pid)) return
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
