@@ -14846,7 +14846,7 @@ def admin_wd_plaene():
                 # _wd_personen bleibt im Request-Thread (liest g über _admin_nur_uid), die Pool-Threads fassen g nie an.
                 pool = concurrent.futures.ThreadPoolExecutor(max_workers=6)
                 try:
-                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,konto_typ,hedge_eur,"
+                    plan_sel = {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,konto_typ,hedge_eur,winning_day,"
                                           "updated_at,ended_at,completed_at", "id": f"eq.{pid}", "limit": "1"}
                     # Welle 1: nur die plan_id nötig
                     f_plan = pool.submit(sb_select, "trade_plans", plan_sel)
@@ -14956,6 +14956,9 @@ def admin_wd_plaene():
                             kr = f_kk.result()
                             kk = kr[0] if kr else None
                             if wd_hand:
+                                # Prüfer S2 (30.10.2026): Plan ist schon ein Winning Day → kein zweites +1 von Hand (Doppelzählung, auch über Tagesgrenzen)
+                                if plan.get("winning_day") is True:
+                                    return {"fehler": "Winning Day nicht gezählt — dieser Trade ist schon als Winning Day markiert"}
                                 if not wd_hand_erlaubt(kk):
                                     return {"fehler": "Winning Day nicht gezählt — nur bei Funded/Winning Days einer Futures-Firma"}
                             elif not _wd_good_day(kk, mpl):
