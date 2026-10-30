@@ -52741,7 +52741,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1936'
+  const OS_TAB_BUILD = '2026-09-22.1937'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -53550,7 +53550,9 @@
       // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
       // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
       // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
-      const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true, plan_id: String(plan.id),
+      // richtung als echtes Feld (ORBIT-RICHTUNG-RIEGEL 30.10.2026, Befund S5): das Panel prüft /richtung/frei mit body.richtung — nur als
+      // Marke kam sie dort leer an, richtung_frei ließ dann frei durch. Der Bot nimmt das Feld vor der Marke (tv_bruecke_auspacken), gleicher Wert.
+      const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, richtung: dir, scharf: true, plan_id: String(plan.id),
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen. plan_id (29.09.2026): der Bot meldet sein Ergebnis damit
           // zusätzlich selbst an puls_ergebnisse — geht die Antwort an diesen Tab verloren, übernimmt pulsErgebnisseUebernehmen.
           geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
