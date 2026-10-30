@@ -35773,6 +35773,17 @@
         if(!abArt && kontoStatus === 'none') abhakWdFlug(abhakWdStand(gd, wdPlan))
       }catch(_){}
       try{ abhakZielNachziehen(pid, kontoStatus) }catch(_){}   // sofort in Bestanden + Ziel-Wache, Bestanden nachladen (27.10.2026)
+      // „Phase bestanden — Nachfolger anlegen" (30.10.2026, Marco …8364): der Server trug nur passed_pending ein, der Assistent ging nie auf und dieser Tab kannte das Archiv nicht.
+      // Eigenes Konto: Archiv-Eintrag lokal nachziehen (sonst zweiter Echo-Löschauftrag beim Anlegen) und Assistent öffnen wie im Trades-Dialog. Fremdes bleibt beim Besitzer.
+      try{
+        if(kontoStatus === 'passed' && ar && ar.archiviert && ar.konto_id && (accounts || []).some(x => String(x.id) === String(ar.konto_id))){
+          const arch = getArchive()
+          if(!(arch[ar.konto_id] && arch[ar.konto_id].archived)){ arch[ar.konto_id] = { archived: true, reason: 'passed_pending', at: new Date().toISOString() }; _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(arch)) }
+          if(typeof renderAccounts === 'function') renderAccounts()
+          if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender()
+          setTimeout(() => openSuccessorWizard(ar.konto_id), 200)
+        }
+      }catch(e){ console.warn('[abhaken] Nachfolger öffnen', e) }
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
@@ -36609,7 +36620,7 @@
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
       // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) — nach dem Laden neu zeichnen, wenn der Radar offen ist
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); bstLokalAnwenden(d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); bstLokalAnwenden(d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) await archivCloudAbgleich() }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
     finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
   }
@@ -38145,10 +38156,11 @@
           typ: String(a.type || ''), name: a.name, seit: a.zielErreichtAt, ...st }
       })
       const eigeneIds = new Set(ks.map(a => String(a.id)))
+      let archB = {}; try{ archB = getArchive() || {} }catch(_){}
       // .1480 (13.10.2026, Finn in Moritz' Login: FundingPips 20429722 Phase 1 hatte seit 09.10. das Ziel, stand aber in keinem Radar):
       // /admin/handarbeit liefert {gruppen:{bestanden:[…]}} — hier stand _hand.d.bestanden, also immer leer → fremde Konten fehlten seit 09.10.
       // .1520: radar_bestanden = bestandene Konten ALLER IDs (auch im Login ohne Admin-E-Mail); ältere Backends → gruppen.bestanden
-      const fremd = (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])).filter(z => z && !eigeneIds.has(String(z.konto_id)))   // EIGENE ID AUCH (14.10.2026, Finn: „dass ich immer alles auch von meiner eigenen ID sehe" — FundedNext …7926 fiel durch, weil `accounts` den Ziel-Tag noch nicht kannte): ein eigenes Konto, das bstKonten (lokal) nicht hat, kommt aus der Server-Liste — mit lokalem Konto als volle eigene Zeile samt Knopf (unten), ohne lokales Konto als Lese-Zeile
+      const fremd = (((typeof _hand !== 'undefined' && _hand.d && (_hand.d.radar_bestanden || (_hand.d.gruppen && _hand.d.gruppen.bestanden))) || [])).filter(z => bstServerZeileGilt(z, eigeneIds, archB))   // EIGENE ID AUCH (14.10.2026, Finn: „dass ich immer alles auch von meiner eigenen ID sehe" — FundedNext …7926 fiel durch, weil `accounts` den Ziel-Tag noch nicht kannte): ein eigenes Konto, das bstKonten (lokal) nicht hat, kommt aus der Server-Liste — mit lokalem Konto als volle eigene Zeile samt Knopf (unten), ohne lokales Konto als Lese-Zeile
         .map(z => {
           const lok = String(z.user_id) === ich ? (accounts || []).find(a => a && String(a.id) === String(z.konto_id)) : null
           if(lok){   // eigenes Konto, lokal ohne Ziel-Tag → Tag der Ziel-Wache übernehmen und wie bstKonten zeichnen (Knopf → Phase/Funded)
@@ -41275,6 +41287,25 @@
       saveArchive({ ...basis, ..._archNeu })   // lokal + Upload (Write-through)
     })()
   }
+  /* OFFENE TABS (Finn 30.10.2026): das Archiv kam nur beim Laden. Ein Konto, das ein anderer Tab, das Handy oder der Server archiviert hat (Abhaken „Phase bestanden"), stand
+   * hier weiter in Review, weil bstKonten nur das lokale Archiv kennt. Der Radar gleicht es im Handarbeit-Takt ab: Cloud gewinnt wie beim Login, was dieser Tab selbst
+   * archiviert hat (_archNeu), bleibt. Nur lokal schreiben, kein Upload. Nur ein Lesen je Takt und nur bei offenem Radar. */
+  async function archivCloudAbgleich(){
+    let cloud = null
+    try{ cloud = await fetchSetting('archive') }catch(_){ return false }
+    if(typeof cloud === 'string'){ try{ cloud = JSON.parse(cloud) }catch(_){ return false } }
+    if(!cloud || typeof cloud !== 'object' || Array.isArray(cloud)) return false
+    const neu = { ...cloud, ..._archNeu }
+    if(archivStandGleich(getArchive(), neu)) return false
+    try{ _origLocalStorageSetItem.call(localStorage, ARCH_LS, JSON.stringify(neu)) }catch(_){ return false }
+    try{ if(typeof renderAccounts === 'function') renderAccounts() }catch(_){}
+    return true
+  }
+  // Nur archived je Konto zählt: Reihenfolge und Zeitstempel im Blob dürfen keinen Neuaufbau auslösen
+  function archivStandGleich(a, b){
+    const an = o => Object.keys(o || {}).filter(k => o[k] && o[k].archived).sort().map(k => k + '|' + (o[k].reason || '')).join(',')
+    return an(a) === an(b)
+  }
   function setParent(childId, parentId){
     const par = getParents()
     par[childId] = parentId
@@ -41616,12 +41647,21 @@
     if(typeof renderDashboardTodos === 'function') renderDashboardTodos()
     const cb = _afterSuccessorCallback
     closeSuccessorWizard()
+    nachfolgerRadarNachziehen()
     if(typeof showSyncBanner === 'function'){
       showSyncBanner('✓ Vorgänger archiviert — neue Account-Daten kannst du später über die Erinnerung auf dem Dashboard nachtragen.', 'ok')
       if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(6000)
     }
     if(cb) cb(null)
   })
+
+  // Nach „Anlegen" und „Später eintragen", egal von wo der Assistent kam (Radar, Accounts, Reiter Bestanden, Dashboard, Abhaken): Radar sofort neu zeichnen, die
+  // Serverliste jetzt und nach Ablauf ihres Caches nachladen (30.10.2026). Die Callbacks der Aufrufer zeichnen nur teils den Radar neu.
+  function nachfolgerRadarNachziehen(){
+    try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(e){ console.warn('[nachfolger] Radar neu zeichnen', e) }
+    try{ handLaden() }catch(_){}
+    setTimeout(() => { try{ handLaden() }catch(_){} }, 32000)
+  }
 
   /* NACHFOLGER = TRADE ABHAKEN (22.10.2026, Finn am Radar, Aurel Tradeify 150k …4872/…9050: „→ Review" gedrückt, Nachfolger angelegt —
    * die bestandenen Trades standen trotzdem weiter in „Bestanden → Trade abhaken", weil der Assistent nur das Konto archiviert, der Plan
@@ -41833,6 +41873,7 @@
       // danach lief deshalb nie (der „Später eintragen"-Weg sicherte ihn schon so)
       const cb = _afterSuccessorCallback
       closeSuccessorWizard()
+      nachfolgerRadarNachziehen()
       if(cb) cb(created)
     } catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e)
@@ -48860,6 +48901,13 @@
     if(t === 'phase1') return 'phase2'
     if(t === 'phase2' || t === 'challenge') return (typeof tpFirmIstFutures === 'function' && !tpFirmIstFutures(a.firm)) ? 'funded_cfd' : 'funded'
     return null
+  }
+  // Zeile aus /admin/handarbeit: nicht doppelt und nicht, wenn das Konto hier schon archiviert ist (Finn 30.10.2026: „mal verschwindet was, mal nicht"): die Liste
+  // ist bis 60 s Takt + 30 s Server-Cache alt, ein gerade archiviertes eigenes Konto kam sonst darüber als volle Zeile mit Nachfolger-Knopf zurück
+  function bstServerZeileGilt(z, eigeneIds, arch){
+    if(!z || eigeneIds.has(String(z.konto_id))) return false
+    const e = (arch || {})[String(z.konto_id)]
+    return !(e && e.archived)
   }
   function bstKonten(){
     let arch = {}; try{ arch = getArchive() || {} }catch(_){}
