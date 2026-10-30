@@ -22547,7 +22547,7 @@ def ap_deaktiviert_anwenden(konten, ids=None):
     return konten
 
 
-AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts „Aktivieren\""
+AP_GRUND_DEAKTIVIERT = "Konto deaktiviert — unter Accounts am Stift ausschalten"
 
 
 def _ap_konten_laden(params):

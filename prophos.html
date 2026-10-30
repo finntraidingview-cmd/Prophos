@@ -14475,6 +14475,11 @@
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="ac-auto-planer" checked> Auto-Planer darf dieses Konto einplanen</label>
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Geplant werden nur Challenge / Phase 1 / Phase 2 von Firmen mit Kernwerten. Haken aus = nie automatisch, auch wenn alles andere passt.</div>
         </div>
+        <!-- Konto deaktiviert (30.10.2026, Finn: „Irgendwo unter den Account-Einstellungen, ein Slider“): nur beim Bearbeiten, schreibt sofort -->
+        <div class="field" style="grid-column:1/-1" id="ac-deakt-row" hidden>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"><span class="switch"><input type="checkbox" id="ac-deaktiviert"><span class="switch-slider"></span></span> Konto deaktiviert</label>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Kein Vorschlag, kein Start. Zählt in Kapital und Gesamtwert weiter. Gilt sofort.</div>
+        </div>
         <!-- Consistency je Konto (07.10.2026, Finn: Futures-Challenges haben standardmäßig 40 % — größter Tag ≤ 40 % des Ziels —,
              mit Addon gekauft sind es 50 %). Spalte accounts.consistency_pct, leer = Standard. Nur Futures-Firma + Challenge/Phase,
              Sichtbarkeit in toggleAcBloecke, Lesen/Schreiben über acConsWert/acConsSetzen. -->
@@ -41838,6 +41843,7 @@
     maxDd:    document.getElementById('ac-max-drawdown'),
     maxRisiko: document.getElementById('ac-max-risiko'),   // Max Risiko / Trade (07.10.2026)
     autoPlaner: document.getElementById('ac-auto-planer'),   // Auto-Planer-Haken (08.10.2026)
+    deakt: document.getElementById('ac-deaktiviert'), deaktRow: document.getElementById('ac-deakt-row'),   // Konto deaktiviert (30.10.2026)
     extId:    document.getElementById('ac-ext-id'),
     wdFarm:   document.getElementById('ac-wd-farm'),
     goalKind:      document.getElementById('ac-goal-kind'),
@@ -42435,9 +42441,8 @@
   }
   // Typ-Chip der Accounts-Tabelle: Funded CFD mit Waiting for Payout zeigt den Zustand statt des Typs (29.09.2026), „seit" im Tooltip
   /* KONTO DEAKTIVIERT (Finn 30.10.2026 14:2x, The5ers erlaubt nur ein 200k-Konto gleichzeitig): nur ein Merker — kein Vorschlag, kein Start, zählt in Kapital/Gesamtwert weiter.
-   * Knopf Deaktivieren/Aktivieren neben dem Typ, sofort in die DB wie accWartetUmstellen. */
+   * Schalter im Bearbeiten-Dialog (Finn 30.10.2026 15:1x: „passiert ja fast nie“, kein Knopf in der Liste), schreibt sofort in die DB wie accWartetUmstellen. Die Liste zeigt nur die graue Pille. */
   const accDeaktChipHtml = a => (a && a.deaktiviertAt) ? ' <span class="type-badge" style="margin-left:6px;background:var(--border);color:var(--sub);vertical-align:middle" title="Konto deaktiviert — kein Vorschlag, kein Start">Deaktiviert</span>' : ''
-  const accDeaktToggleHtml = a => !a ? '' : ` <button type="button" class="acc-wd-toggle" data-acc-deakt="${escapeHtml(String(a.id))}" data-ziel="${a.deaktiviertAt ? 'aus' : 'an'}" data-stop-row-click="1" title="${a.deaktiviertAt ? 'Konto wieder aktivieren — Planer und Puls nehmen es wieder mit' : 'Konto vorübergehend deaktivieren: kein Vorschlag, kein Start. Bleibt in Kapital und Gesamtwert.'}">${a.deaktiviertAt ? 'Aktivieren' : 'Deaktivieren'}</button>`
   const planKontoDeaktiviert = p => { const a = p && (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); return !!(a && a.deaktiviertAt) }
   async function accDeaktUmstellen(accId, an, opts){
     const acc = accounts.find(a => String(a.id) === String(accId)); if(!acc) return false
@@ -42450,8 +42455,11 @@
       if(typeof atToast === 'function') atToast(an ? `${acc.name}: deaktiviert — kein Vorschlag, kein Start` : `${acc.name}: wieder aktiv`)
       return true
     }catch(e){
-      const t = 'Nicht umgestellt: ' + (e && e.message || e)
-      if(typeof atToast === 'function') atToast(t); else alert(t)
+      // Spalte noch nicht eingespielt (sql/2026-10-30_konto_deaktiviert.sql): PATCH antwortet PGRST204, sonst 42703 — verständlich statt Rohtext
+      const spalteFehlt = e && (e.code === 'PGRST204' || e.code === '42703') && /deaktiviert_at/.test(e.message || '')
+      const t = spalteFehlt ? 'Nicht umgestellt: Die Datenbank kennt „deaktiviert“ noch nicht, das SQL fehlt noch. Das Konto bleibt, wie es war.' : 'Nicht umgestellt: ' + (e && e.message || e)
+      if(typeof atToast === 'function') atToast(t, 'warn'); else alert(t)
+      if(opts && opts.msg){ opts.msg.textContent = t; opts.msg.className = 'modal-msg err' }
       return false
     }finally{ if(btn) btn.disabled = false }
   }
@@ -43114,7 +43122,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}${accDeaktToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td data-stop-row-click="1">${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived)) : accPlanerZelleHtml(a, isArchived)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -43236,9 +43244,6 @@
         cb.addEventListener('click', e => e.stopPropagation())
         cb.addEventListener('change', e => { e.stopPropagation(); accAutoPlanerUmstellen(cb.dataset.accAp, cb.checked, cb) })
       })
-      accEls.table.querySelectorAll('[data-acc-deakt]').forEach(btn => {
-        btn.addEventListener('click', e => { e.stopPropagation(); accDeaktUmstellen(btn.dataset.accDeakt, btn.dataset.ziel === 'an', { btn }) })
-      })
       // Funded CFD ⇄ Waiting for Payout (29.09.2026): gleiches Muster, eigener Handler
       accEls.table.querySelectorAll('[data-acc-wartet]').forEach(btn => {
         btn.addEventListener('click', e => { e.stopPropagation(); accWartetUmstellen(btn.dataset.accWartet, btn.dataset.ziel === 'an', { btn }) })
@@ -43286,6 +43291,7 @@
   }
   function openAccountModal(prefillType, editAccount){
     _editingAccountId = editAccount?.id || null
+    if(accEls.deaktRow) accEls.deaktRow.hidden = !editAccount   // Konto deaktiviert (30.10.2026): nur bestehende Konten
 
     // Modal-Title je nach Modus
     // Titel hängt direkt als #addAccountTitle im Modal (kein .modal-head) — die alte Abfrage fand ihn nie, das Popup hieß beim
@@ -43304,6 +43310,7 @@
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.maxRisiko) accEls.maxRisiko.value = editAccount.maxRisikoTrade != null ? editAccount.maxRisikoTrade : ''
       if(accEls.autoPlaner) accEls.autoPlaner.checked = editAccount.autoPlaner !== false
+      if(accEls.deakt) accEls.deakt.checked = !!editAccount.deaktiviertAt
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       if(accEls.wdFarm) accEls.wdFarm.checked = !!editAccount.wdFarm
       // Fortschritts-Ziel vorausfüllen (Min-Gewinn/Schon-erledigt seit 10.09. ohne Feld)
@@ -44011,6 +44018,12 @@
 
   /* ── Event bindings ── */
   if(accEls.addBtn)  accEls.addBtn.addEventListener('click', () => openAccountModal())
+  // Konto deaktiviert (30.10.2026): schreibt sofort, unabhängig von „Speichern“; scheitert es, springt der Schalter zurück
+  if(accEls.deakt) accEls.deakt.addEventListener('change', async () => {
+    const cb = accEls.deakt, an = cb.checked
+    accEls.msg.textContent = ''; accEls.msg.className = 'modal-msg'
+    if(!(await accDeaktUmstellen(_editingAccountId, an, { btn: cb, msg: accEls.msg }))) cb.checked = !an
+  })
   if(accEls.cancel)  accEls.cancel.addEventListener('click', closeAccountModal)
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
@@ -53597,7 +53610,7 @@
     if(!plan || !plan.id) return null
     if(plan.orbitGesendetAt || plan.startedAt) return null   // Order schon draußen — nie eingreifen (Prüfer 08.10.2026: kein Doppel-Kauf)
     if(planKontoDeaktiviert(plan)){   // Hand-Start (kein Claim): 30.10.2026, Konto deaktiviert
-      const t = `„${plan.masterName || '—'}": Konto ist deaktiviert — erst unter Accounts „Aktivieren"`
+      const t = `„${plan.masterName || '—'}": Konto ist deaktiviert — erst unter Accounts am Stift ausschalten`
       if(typeof atToast === 'function') atToast('⏳ ' + t, 'end')
       return t
     }
