@@ -13211,6 +13211,17 @@ def lt_balance_sprung(route, tv, fin):
     return {"balance": bal, "tages": tages, "differenz": round(bal - tages, 2)}
 
 
+def lt_planer_quelle(notes):
+    """REIN RECHNEND (testbar): Aus welchem Planer kommt der Plan? (Radar-Chip, Finn 30.10.2026 14:1x) Jeder Planer schreibt seinen Namen an den Anfang
+    von notes: ap_notiz „Auto-Planer · …", fdp_planen „Funded-Planer …", fcp „Funded-CFD-Planer …", Farmer „Winning-Day-Farmer"; Hedge-Schritte hängen nur
+    hinten an. → challenge | ffut | fcfd | wd | None (von Hand oder unbekannt: kein Chip)."""
+    n = str(notes or "").strip()
+    for start, q in (("Auto-Planer", "challenge"), ("Funded-CFD-Planer", "fcfd"), ("Funded-Planer", "ffut"), ("Winning-Day-Farmer", "wd")):
+        if n.startswith(start):
+            return q
+    return None
+
+
 def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None, regeln=None, fruehere=None, verlauf=None, kw_firmen=None):
     z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
@@ -13757,6 +13768,7 @@ def admin_live_trades():
             z["apex_hedge"] = plan_ist_apex_hedge(q)     # Apex mit Hedge (ah_tick): WD-Weg, aber eigenes Label, zählt nicht als WD
             z["kette_tag"] = (((q.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende")
                               if isinstance(q.get("mt5_baseline"), dict) else None)   # Topstep: Tagesergebnis für die Radar-Karte (30.10.2026)
+            z["planer_quelle"] = lt_planer_quelle(q.get("notes"))   # Radar-Chip „Challenge Planer CFD" … (30.10.2026)
             if mit_echo and isinstance(z.get("konto"), dict):
                 z["konto"]["archiviert"] = str(q.get("master_account_id") or "") in _lt_archiv
         if mit_echo:

@@ -4853,6 +4853,15 @@
   }
   #dashboard-view .wdl-z > span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .wdl-z-wer{grid-area:wer}
+  /* Herkunft-Chip (30.10.2026): breite Spalte neben dem Weg, Konto darunter; schmale Spalte und Handy unter dem Konto */
+  #dashboard-view .wdl-z-wer:has(.wdl-pf-herk){container-type:inline-size}
+  #dashboard-view .wdl-pf-herk-n{display:none}
+  #dashboard-view .wdl-pf-herk-u{display:block;width:fit-content;max-width:100%;margin:3px 0 0;white-space:normal;line-height:1.25}
+  @container (min-width:330px){
+    #dashboard-view .wdl-pf-herk-n{display:inline-block}
+    #dashboard-view .wdl-pf-herk-u{display:none}
+    #dashboard-view .wdl-z-wer small[data-wdl-konto]{display:block;margin:2px 0 0 17px}
+  }
   #dashboard-view .wdl-z-wer b{font-weight:600;color:var(--ink)}
   #dashboard-view .wdl-z-wer small{margin-left:8px;font-size:12.5px;color:var(--sub)}
   #dashboard-view .wdl-z-wer small[data-wdl-konto]{cursor:pointer;text-decoration:underline dotted transparent;text-underline-offset:3px}   /* Konto-Popup (08.10.2026) */
@@ -36683,6 +36692,21 @@
   // ROTE CHIPS IN „LÄUFT“ (29.10.2026, NOVA-ENDE-NUR-MIT-BEWEIS): t.ohne_sltp {risk, tp} = Nova ohne bewiesene Brackets (Backend wie
   // tsxBracketsFehlen), t.wieder_offen = die Endlesung sah die Position nach einem Ende noch offen, Plan ist zurück auf open. Bleibt, bis
   // Puls/Hand die Brackets nachweist (tv.brackets_ok_at) bzw. der Plan endet. Nur Anzeige.
+  /* HERKUNFT IM RADAR (Finn 30.10.2026 14:1x: „da soll dann stehen ‚Funded Planer CFD' … ‚Challenge Planer CFD'"): Chip neben dem Weg. Planer aus dem Anfang der
+   * Notiz (app.py lt_planer_quelle), Challenge CFD/Futures aus dem Weg, die Firma muss dazu passen. Von Hand oder Widerspruch: kein Chip, lieber keiner als ein falscher. */
+  const WDL_HERKUNFT = { fcfd: 'Funded Planer CFD', ffut: 'Funded Planer Futures', wd: 'Funded Planer Winning Days' }
+  function wdlHerkunft(t){
+    const q = t && t.planer_quelle
+    if(WDL_HERKUNFT[q]) return WDL_HERKUNFT[q]
+    if(q !== 'challenge' || (t.konto_typ && !['challenge', 'phase1', 'phase2'].includes(String(t.konto_typ)))) return ''
+    const r = String(t.route || ''), artW = /^mt5/.test(r) ? 'cfd' : /^(tv|ts)/.test(r) ? 'futures' : null, f = String((t.konto && t.konto.firma) || '').trim()
+    const artF = !f ? null : ((tpFirmIstFutures(f) || /tradeify|apex|topstep|futur|mffu|lucid|alpha ?future/i.test(f)) && !istTradeifyCfd(f)) ? 'futures' : 'cfd'
+    if(!artW || (artF && artF !== artW)) return ''
+    return artW === 'cfd' ? 'Challenge Planer CFD' : 'Challenge Planer Futures'
+  }
+  window._wdlHerkunft = wdlHerkunft   // Test-Haken
+  // pos 'n' neben dem Weg, 'u' unter dem Konto: die CSS-Regel zeigt je nach Spaltenbreite genau einen (.wdl-pf-herk), so bricht die Konto-Zeile nie um
+  function wdlHerkunftChip(t, pos){ const h = wdlHerkunft(t); return h ? `<i class="wdl-pf wdl-pf-herk wdl-pf-herk-${pos}" title="Geplant vom ${escapeHtml(h)}">${escapeHtml(h)}</i>` : '' }
   function wdlSltpChip(t){
     if(!t || t.status !== 'open') return ''
     let h = ''
@@ -37790,7 +37814,7 @@
       // Überprüfen-Zeilen sind ziehbar (08.10.2026, HTML5-Drag nach „Manuelle Arbeit"; Handler unten am Listen-Container)
       const sw = zuWegZ(t)   // Schließweg-Zeile (28.10.2026): nur bei geschlossenem Fusion-Hedge, dann zweite Rasterzeile (wdl-z-sw-da)
       return `<div class="wdl-z wdl-z-${art}${echo ? ' wdl-z-echo' : ''}${polar ? ' wdl-z-polar' : ''}${an ? ' is-aktiv' : ''}${sw ? ' wdl-z-sw-da' : ''}${extra ? ' ' + extra : ''}" style="--wdl-id:${wdlIdFarbe(t)}" data-wdl-trade="${escapeHtml(wdlTid(t))}"${art === 'pruef' ? ` draggable="true" data-wdl-drag="${escapeHtml(wdlTid(t))}"` : ''} title="${escapeHtml(tip)}">`
-        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlSltpChip(t)}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${polSlaveWer}</span>`
+        + `<span class="wdl-z-wer"><span class="wdl-z-punkt"></span><b>${escapeHtml(String(t.person || '?'))}</b><i class="wdl-pf">${wegSymbol(wdlWeg(t))}${escapeHtml(wdlWeg(t))}</i>${wdlHerkunftChip(t, 'n')}${wdlSltpChip(t)}${wdlPaarChip(t)}<small data-wdl-konto="${escapeHtml(wdlTid(t))}" title="Konto ansehen">${escapeHtml(konto).replace(' …', ' …⁠')}</small>${wdlHerkunftChip(t, 'u')}${polSlaveWer}</span>`
         + (art === 'man' ? '' : ri) + miZ + kontoZ + plZ + zeitZ + sw + '</div>'   // Manuelle Arbeit ohne Richtung/Menge (08.10.2026) — die Notiz bekommt den Platz
     }
     // Gruppe = ein Kasten, oben einmal die Spaltenköpfe im selben Raster wie die Zeilen
