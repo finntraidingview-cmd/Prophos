@@ -36524,7 +36524,7 @@
       if(sp && echo){ const pkt = wdlEchoPunkt(t, sp); mi = wdlSpanneHtml(sp, pkt ? pkt.v : null, farbe, wdlEchoSpTip(t, sp, pkt)) }
       else if(sp){ const lg = v => v != null ? ' · ' + wdlSpBetrag(v, true) : ''
         mi = wdlSpanneHtml(sp, kp, farbe, `${sp.art === 'SL' ? 'SL' : sp.art === 'Tag' ? 'Tageslimit' : 'Liquidation'} ${f2(sp.links)}${lg(sp.plLinks)}${sp.regel ? (sp.regelPur ? ' · ' : ' · Regel: ') + sp.regel : ''}${sp.ein != null ? ' · Einstieg ' + f2(sp.ein) : ''} · TP ${f2(sp.rechts)}${lg(sp.plRechts)}${kp != null ? ' · Kurs ' + f2(kp) : ''}`) }   // MLL/DLL hinter dem SL (21.10.2026)
-      const pl = `<span class="wdl-z-pl"><span data-lz-usd style="color:${farbe}">${usd(e.pl)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(e.eur)}" title="hypothetisch: Kontowert-Satz × Live-P&amp;L">${eur(e.eur)}</small></span>`
+      const pl = `<span class="wdl-z-pl"><span data-lz-usd style="color:${farbe}">${usd(e.pl)}</span><small class="wdl-z-slave" data-lz-eur style="color:${col(e.eur)}" title="${e.fusion ? 'Fusion-Hedge-P&amp;L live' : 'hypothetisch: Kontowert-Satz × Live-P&amp;L'}">${eur(e.eur)}</small></span>`
       const ab = zeit(t.started_at || t.start_um)
       const z = `<span class="wdl-z-zeit" title="${escapeHtml(ab ? 'läuft seit ' + ab : 'Startzeit unbekannt')}">${ab ? `<span class="wdl-z-ab">${ab} · </span>` : ''}<span class="wdl-z-dauer" data-lz-dauer>${t.started_at ? wdlDauer(t.started_at) : '–'}</span></span>`
       const tip = [t.person, k.name || konto, k.kontonr || '', echo ? 'Echo (MT5)' : ''].filter(Boolean).join(' · ')
@@ -36566,17 +36566,18 @@
       for(const tab of tabs){
         let su = 0, se = 0, nu = 0, ne = 0
         for(const z of tab.querySelectorAll('[data-lz-plan]')){
-          const id = z.getAttribute('data-lz-plan'), c = _tpl.hypoJe.get(id), r = _tpl.lt.get(id) || null
+          const id = z.getAttribute('data-lz-plan'), c = _tpl.hypoJe.get(id) || (_tpl.lzHedge && _tpl.lzHedge.get(id)), r = _tpl.lt.get(id) || null
           const du = z.querySelector('[data-lz-dauer]'); if(du && r && r.started_at) setz(du, wdlDauer(r.started_at))
           if(!c) continue
           let pl = null
           if(c.echo) pl = r ? lzZahl(r.pl_live) : null
           else if(c.einstieg != null && kp && c.kt && typeof wdMasterLive === 'function'){ const mm = wdMasterLive(c.richtung, c.einstieg, c.kt, c.wurzel, kp); pl = mm ? lzZahl(mm.pl) : null }
           if(pl == null) continue                          // ohne neuen Wert bleibt die gezeichnete Zahl stehen
-          const eur = c.satz != null ? c.satz * pl : null
+          // gehedgt (c.hedge): darunter Fusion € statt Hypo-Wert, nicht in der Summe
+          const eur = c.hedge ? (r ? lzZahl(r.slave_pl_live) : null) : c.satz != null ? c.satz * pl : null
           setz(z.querySelector('[data-lz-usd]'), lzUsd(pl), lzFarbe(pl))
           setz(z.querySelector('[data-lz-eur]'), lzEur(eur), lzFarbe(eur))
-          su += pl; nu++; if(eur != null){ se += eur; ne++ }
+          if(!c.hedge){ su += pl; nu++; if(eur != null){ se += eur; ne++ } }
           // Punkt der Spanne: Orbit am Kurs, Echo am Kurs ≈ bzw. aus dem Live-P&L (wie wdlEchoPunkt) — Farbe wie der P&L
           const pk = z.querySelector('.wdl-sp-punkt'), sp = pk && r ? wdlSpanne(r) : null
           const v = !sp ? null : c.echo ? (wdlEchoPunkt(r, sp) || {}).v : kp, pos = sp && v != null ? wdlSpPos(sp, v) : null
@@ -61721,7 +61722,7 @@
       const t = r ? Object.assign({}, r, { person: r.person || z.user, user_id: r.user_id || z.user_id, kt: r.kt ?? z.kt, symbol_root: r.symbol_root || z.wurzel })
         : { person: z.user, user_id: z.user_id, konto: { firma: z.firma, name: z.konto, kontonr_ende: z.ende4 }, richtung: z.richtung, kt: z.kt, lots: z.kt,
             symbol_root: z.wurzel, plattform: z.echo ? 'echo' : '', route: tr.route || null, status: 'open' }
-      return { t, pl: z.pl != null && isFinite(z.pl) ? z.pl : null, eur: z.hypo, key: String(z.key || z.plan_id), z }
+      return { t, pl: z.pl != null && isFinite(z.pl) ? z.pl : null, eur: z.gehedgt ? z.fusion : z.hypo, fusion: !!z.gehedgt, key: String(z.key || z.plan_id), z }
     })
   }
   // Liste „Läuft" (Radar-Zeilen) aus tplHypo — unter dem Hypo-Chart (alt) bzw. seit 08.10.2026 als eigene Karte (tplLaeuftKarteHtml)
@@ -80524,13 +80525,24 @@
     if(art === 'laeuft' && typeof laufZeilenHtml === 'function' && typeof tplLaufEintraege === 'function'){
       const D = apIdsHeute(); let hz = []; try{ hz = tplHypo(D).zeilen || [] }catch(_){}
       const hJe = new Map(hz.map(z => [String(z.plan_id), z]))
-      const zl = liste.map(e => { const t = e.t || {}, id = String(e.z.plan_id)
-        return hJe.get(id) || { plan_id: id, key: id, user: e.z.user || t.user, user_id: e.z.user_id, firma: e.z.firma, konto: e.z.konto, ende4: e.z.ende4, richtung: e.z.richtung,
-          kt: e.z.menge, wurzel: 'NQ', echo: /^mt5/.test(String(e.z.route || '')), pl: e.pl, hypo: null, start: t.start } })
+      /* GEHEDGTE IN „LÄUFT" (FINAL-PNL-FEHLT, Finn 30.10.2026 09:16: Marc Tradeify …7231, Orbit + Hedge, zeigte „–"): tplHypo überspringt gehedgte Trades
+       * (Hypo-Wert 0, Risiko liegt bei Fusion) — die Zeile hatte so gar keinen P&L. Master $ wie Orbit V2 aus Einstieg + Kurs (wdMasterLive; ohne Kurs Rundgang
+       * master_pl), Echo pl_live; darunter Fusion € (slave_pl_live, /admin/live-trades). Nicht in der Summe: die rechnet nur den Hypo-Wert. Live-Takt: _tpl.lzHedge. */
+      const lzHedge = _tpl.lzHedge || (_tpl.lzHedge = new Map()), zahlOd = v => { const w = v && typeof v === 'object' ? v.wert : v; return w == null || w === '' || !isFinite(Number(w)) ? null : Number(w) }
+      const zl = liste.map(e => { const t = e.t || {}, id = String(e.z.plan_id), hz = hJe.get(id)
+        if(hz) return hz
+        const r = _tpl.lt.get(id) || null, echo = !!(r && r.plattform === 'echo') || /^mt5/.test(String(e.z.route || '')), kt = zahlOd(r && r.kt) ?? e.z.menge, wurzel = (r && r.symbol_root) || 'NQ'
+        const ein = r && zahlOd(r.einstieg_nq) > 1000 ? zahlOd(r.einstieg_nq) : null, kurs = tplKursJetzt()
+        let pl = echo ? zahlOd(r && r.pl_live) : null
+        if(!echo && ein != null && kurs && kt && typeof wdMasterLive === 'function'){ const mm = wdMasterLive(e.z.richtung, ein, kt, wurzel, kurs); pl = mm ? mm.pl : null }
+        if(pl == null) pl = zahlOd(r && r.master_pl) ?? e.pl
+        lzHedge.set(id, { hedge: true, echo, einstieg: ein, kt, wurzel, richtung: e.z.richtung })
+        return { plan_id: id, key: id, user: e.z.user || t.user, user_id: e.z.user_id, firma: e.z.firma, konto: e.z.konto, ende4: e.z.ende4, richtung: e.z.richtung,
+          kt: e.z.menge, wurzel: 'NQ', echo: /^mt5/.test(String(e.z.route || '')), pl, hypo: null, fusion: zahlOd(r && r.slave_pl_live), gehedgt: true, start: t.start } })
         .sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))
       _apIds.laufQ = new Map(liste.map(e => [String(e.z.plan_id), { z: e.z, t: e.t || {} }]))
       const eintr = tplLaufEintraege(zl, D), mitWert = zl.some(z => z.hypo != null)
-      const usd = zl.reduce((a, z) => a + (z.pl != null && isFinite(z.pl) ? z.pl : 0), 0), eur = zl.reduce((a, z) => a + (z.hypo != null && isFinite(z.hypo) ? z.hypo : 0), 0)
+      const usd = zl.reduce((a, z) => a + (!z.gehedgt && z.pl != null && isFinite(z.pl) ? z.pl : 0), 0), eur = zl.reduce((a, z) => a + (z.hypo != null && isFinite(z.hypo) ? z.hypo : 0), 0)
       return `<div class="ap-adm-karte ap-geplant ap-gr-${art}">${kopf}${laufZeilenHtml(eintr, { titel: 'ID · Konto', kurs: tplKursJetzt(), summe: mitWert ? { usd, eur } : null,
         attr: e => `data-ap-lauf="${escapeHtml(String(e.z.plan_id))}"` })}</div>`
     }
