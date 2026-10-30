@@ -35828,7 +35828,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                               if _wd_num(p.get("multiplier")) and _wd_num(p.get("master_contracts")) else None,
                               "funded_cfd_plan": von_fcp,
                               "vorschlag": bool(fp and fp.get("art") == FCP_ART) and not p.get("auto_bestaetigt_at") and p.get("status") == "planned",
-                              **({x: fp.get(x) for x in ("ziel", "gewinn", "tp_art", "hedge_eur", "hedge_tp_eur", "hedge_sl_eur", "eins_prozent")} if fp else {})})
+                              **({x: fp.get(x) for x in ("ziel", "gewinn", "tp_art", "hedge_eur", "hedge_tp_eur", "hedge_sl_eur", "eins_prozent", "erster_payout")} if fp else {})})
     if ruhe:
         erg["msg"] = ruhe
     return erg
