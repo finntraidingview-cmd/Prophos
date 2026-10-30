@@ -57,7 +57,7 @@
  * 0.3.2 (30.10.2026, PC von Marco: „TopstepX-Auge blind", Stand 15,9 s alt, 975 Ticks, 2 Sends, kein Timeout, Konsole „worker-tot"): (1) worker-tot ist nicht mehr endgültig (s. Worker-Wache);
  * (2) von außen sichtbar: letzter_fehler + letzter_fehler_vor_s (bleibt nach Erfolg stehen), fehler_n (Summe), unterwegs_ms (Dauer des letzten Requests), haenger_n, stand_ms, worker_tot_n;
  * (3) Riegel: ein Request, dessen Rückmeldung > 3 s ausbleibt, wird abgebrochen und freigegeben (bisher blockierte er jede weitere Meldung). Weil dann zwei Meldungen unterwegs sein können,
- * verwirft das Panel eine ältere als die gemerkte (panel.py tsx_stand_merken). (4) Flach-Folge: Lücke > 0,5 s beendet die Serie, keine Messungs-Salve nach einem Hänger. Kommt per Lader. */
+ * prüft der Schnell-Wächter in Prophos auch das Alter der Messung selbst (stand.ts, tsxStandFrisch). (4) Flach-Folge: Lücke > 0,5 s beendet eine Serie unter 5 s, keine Messungs-Salve nach einem Hänger. Kommt per Lader. */
 
 /* ══ LADER 0.3.0 (s. oben): prophosKern ist das eigentliche Auge. Alles zwischen den Markern KERN-START und KERN-ENDE holt der Lader
  * neuer nach (Panel /userscript/tsx-kern.json) — die Marker nie verschieben oder doppeln (Selbsttest prueft sie). ══ */
@@ -102,15 +102,17 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   }
 
   // FLACH-FOLGE (0.3.1, s. Kopf): Zähler über die eigenen Messungen — REIN bis auf die drei Variablen
-  // 0.3.2 (Gegenprüfung): > 0,5 s zwischen zwei Messungen beendet die Serie — nach einem Hänger läge sonst der Abstand ≥ 200 ms über der Lücke, obwohl danach kaum beobachtet wurde
-  var flachFolge = 0, flachSeit = null, flachKonto = null, flachLetzt = 0, FOLGE_LUECKE_MS = 500;
+  // 0.3.2 (Gegenprüfung): > 0,5 s zwischen zwei Messungen beendet die Serie — nach einem Hänger läge sonst der Abstand ≥ 200 ms über der Lücke, obwohl danach kaum beobachtet wurde.
+  // Aber nur, solange die ununterbrochen flache Zeit < 5 s ist (Prüfer S2): sonst schlösse das Auge bei dauerhaft langsamem Takt nie mehr; nach 5 s flach zählt jede Messung (alte 5-s-Regel)
+  var flachFolge = 0, flachSeit = null, flachKonto = null, flachLetzt = 0, flachSerieAb = 0, FOLGE_LUECKE_MS = 500, FOLGE_RUHE_MS = 5000;
   function folgeZaehlen(s, aus) {
     var k = (s && s.konto && s.konto.kontonr) || null, ts = (s && s.ts) || Date.now(), jetzt = Date.now();
     if (s && s.flach === true && k && !aus && (flachFolge === 0 || k === flachKonto)) {
-      if (flachFolge > 0 && jetzt - flachLetzt > FOLGE_LUECKE_MS) flachFolge = 0;
+      if (!flachSerieAb) flachSerieAb = jetzt;
+      if (flachFolge > 0 && jetzt - flachLetzt > FOLGE_LUECKE_MS && jetzt - flachSerieAb < FOLGE_RUHE_MS) flachFolge = 0;
       if (flachFolge === 0) flachSeit = ts;
       flachFolge += 1; flachKonto = k; flachLetzt = jetzt;
-    } else { flachFolge = 0; flachSeit = null; flachKonto = k; }
+    } else { flachFolge = 0; flachSeit = null; flachKonto = k; flachSerieAb = 0; }
   }
 
   // Nur was der Schließer braucht (klein halten: 10 Meldungen je Sekunde). Rechtecke, Inventar und Chart bleiben weg.

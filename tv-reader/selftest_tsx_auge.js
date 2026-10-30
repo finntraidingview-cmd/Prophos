@@ -178,6 +178,19 @@ check(f3 === 1, "0.3.2 Flach-Folge: Lücke > 0,5 s beginnt neu");
 var nE = E.gesendet.length;
 uhr += 2; E.worker[0].onmessage();
 check(E.gesendet.length === nE, "0.3.2 Salve: Worker-Tick 2 ms nach dem letzten misst nicht");
+// Prüfer S2: dauerhaft langsamer Takt (1 s), flach → das Auge schließt trotzdem nach ≥ 5 s (alte 5-s-Regel), nicht nie
+var E2 = lauf32(); E2.gesendet[0].onload({ status: 200 });
+var folgen2 = [];
+for (var i2 = 0; i2 < 7; i2++) { uhr += 1000; E2.worker[0].onmessage(); var g2 = E2.gesendet[E2.gesendet.length - 1]; folgen2.push(JSON.parse(g2.data).stand.flach_folge); g2.onload({ status: 200 }); }
+check(folgen2[2] === 1 && folgen2[3] === 1 && folgen2[folgen2.length - 1] >= 3, "0.3.2 Takt 1 s: unter 5 s flach beginnt jede Lücke neu, danach zählt es weiter bis ≥ 3 (" + folgen2.join(",") + ")");
+// Position dazwischen setzt auch die 5-s-Uhr zurück
+var flachJetzt = true, standE = globalThis.PROPHOS_AUGEN_TSX.stand;
+globalThis.PROPHOS_AUGEN_TSX.stand = function () { var s0 = standE(); s0.flach = flachJetzt; return s0; };
+uhr += 1000; flachJetzt = false; E2.worker[0].onmessage(); var g3 = E2.gesendet[E2.gesendet.length - 1]; g3.onload({ status: 200 });
+flachJetzt = true; uhr += 1000; E2.worker[0].onmessage(); var g4 = E2.gesendet[E2.gesendet.length - 1]; g4.onload({ status: 200 });
+uhr += 1000; E2.worker[0].onmessage(); var g5 = E2.gesendet[E2.gesendet.length - 1];
+check(JSON.parse(g3.data).stand.flach_folge === 0 && JSON.parse(g5.data).stand.flach_folge === 1, "0.3.2 Position dazwischen: 5-s-Uhr beginnt neu");
+globalThis.PROPHOS_AUGEN_TSX.stand = standE;
 // GM wirft synchron: Riegel sofort frei, Grund sichtbar
 var wurf = true, G = [];
 var F = lauf32(function (req) { if (wurf) { wurf = false; throw new Error("gm kaputt"); } G.push(req); return {}; });

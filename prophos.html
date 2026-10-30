@@ -32347,6 +32347,12 @@
    * mindestens TSX_BLIND_MIN_ABFRAGEN Abfragen dieses Tabs im Fenster (sonst war der Prophos-Tab gedrosselt, nicht das Auge). Jede frische
    * Meldung setzt zurück. Träge (Lücken > 1 s) nur als Spur „[hedgeTsx] Auge träge, max alter X s/min" (tsxTraegeMerken), keine Aktion. */
   const TSX_BLIND_MS = 15000, TSX_BLIND_MIN_ABFRAGEN = 10
+  // REIN (Prüfer S2 30.10.2026, Auge 0.3.2 gibt hängende Requests auf): alter_s zählt ab Ankunft im Panel. Ein spät ankommendes altes „flach" sähe frisch aus und überschriebe ein neueres
+  // „offen" → auch die Messung selbst (stand.ts, gleiche PC-Uhr) muss ≤ 1 s alt sein. Ohne ts kein Beweis (fail-closed)
+  function tsxStandFrisch(alterS, st, jetzt){
+    return typeof alterS === 'number' && alterS <= 1.0 && !!st && typeof st.ts === 'number' && jetzt - st.ts <= 1000
+  }
+  window._tsxStandFrisch = tsxStandFrisch   // Test-Haken
   let _tsxBlindSeit = 0, _tsxBlindN = 0
   const tsxBlindZurueck = () => { _tsxBlindSeit = 0; _tsxBlindN = 0 }
   let _tsxTraege = { ab: 0, max: 0 }
@@ -32537,7 +32543,7 @@
         const u = tsxBlindUrteil(_tsxBlindSeit, _tsxBlindN, true, Date.now()); _tsxBlindSeit = u.seit; _tsxBlindN = u.n
         if(u.faellig && tsxReloginAnstossen(meine[0], 'blind')) console.info('[hedgeTsx] Auge blind seit', Math.round((Date.now() - u.seit) / 100) / 10, 's (', u.n, 'Abfragen) —', grund)
       }
-      if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= 1.0)){
+      if(!st || !tsxStandFrisch(r.alter_s, st, Date.now())){
         verwerfen(); if(++_tsxStandFehler === 1200) console.warn('[hedgeTsx] kein frischer Stand vom TopstepX-Auge (Userscript tsx-auge im Puls-Chrome?)')
         if(!hedgePulsUnterwegs()) blindTick(st ? `Stand ${r.alter_s} s alt` : 'kein Stand')
         return

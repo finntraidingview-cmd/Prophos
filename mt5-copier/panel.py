@@ -4392,12 +4392,6 @@ def tsx_stand_merken(daten, jetzt=None):
         return False, "tab fehlt"
     jetzt = time.time() if jetzt is None else jetzt
     with _tsx_stand_lock:
-        # AUßER DER REIHE (30.10.2026, Auge 0.3.2 gibt einen hängenden Request nach 3 s auf — abort() garantiert nichts): eine spät ankommende ältere Meldung desselben Tabs
-        # („flach") darf die neuere („Position offen") nie überschreiben, alter_s zählt ab Ankunft und sähe frisch aus. Ohne ts (alte Meldung) wie bisher
-        alt = (_tsx_stand.get(tab) or {}).get("stand") or {}
-        ts_neu, ts_alt = daten["stand"].get("ts"), alt.get("ts")
-        if isinstance(ts_neu, (int, float)) and isinstance(ts_alt, (int, float)) and ts_neu < ts_alt:
-            return True, "aelter als der gemerkte Stand"
         _tsx_jemals["ts"] = jetzt
         _tsx_stand[tab] = {"ts": jetzt, "stand": daten["stand"], "script": str(daten.get("script") or "")[:24],
                            "lader": tsx_lader_kurz(daten.get("lader")) if isinstance(daten.get("lader"), dict) else None}   # 0.3.0
