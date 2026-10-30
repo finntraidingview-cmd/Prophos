@@ -25014,7 +25014,26 @@ def modus_tvclose_cdp(cmd):
         res["positionen_vorher"] = cdp_positionen_vertrag([p for p in st.get("positionen") or [] if isinstance(p, dict) and p.get("sichtbar")])
         if not vorher:
             if not sichtbar or n_flach < 2:
-                return raus("tabelle_unklar", "Positions-Tabelle im Puls-Chrome nicht sicher lesbar — nichts geklickt.", "lesen")
+                # FLACH OHNE TABELLE VOR DEM KLICK (Routine „Puls-Fehler" 30.10.2026 05:30 Dubai, Muster „close: positions-tabelle im
+                # puls-chrome nicht sicher lesbar — nichts geklickt" 6× auf 5 PCs in 7 Tagen, zuletzt 30.10. 01:30 UTC): seit dem
+                # TradingView-Update zeigt ein Konto OHNE Position keinen Tabellenkopf mehr (augen.js positionen_sichtbar false), ein Close
+                # auf ein schon flaches Konto (von Hand zu, TP/SL getroffen, Wiederholungs-Close) endete darum immer als „nicht lesbar".
+                # Jetzt derselbe Leer-Beweis wie in der Endlesung (cdp_flach_ohne_tabelle): Panel offen, Reiter Positions, keine Zeile
+                # im DOM, Profit 0,00, Balance = Equity — zweimal mit Pause. Sonst ehrlich tabelle_unklar mit dem Grund; nie ein Klick.
+                ja, grund = cdp_flach_ohne_tabelle(st)
+                if not ja:
+                    trail.append(f"kein Flach-Beweis ohne Tabelle: {grund}")
+                    return raus("tabelle_unklar", f"Positions-Tabelle im Puls-Chrome nicht sicher lesbar (flach nicht bewiesen: {grund}) "
+                                "— nichts geklickt.", "lesen")
+                _warte(2.5, 1.0)
+                st2 = s.stand(opts)
+                ja2, grund2 = cdp_flach_ohne_tabelle(st2)
+                if not ja2 or k3_zeilen(st2.get("positionen"), root):
+                    trail.append(f"flach ohne Tabelle: zweiter Blick widerspricht ({grund2})")
+                    return raus("tabelle_unklar", f"Positions-Tabelle im Puls-Chrome nicht sicher lesbar (zweiter Blick: {grund2}) "
+                                "— nichts geklickt.", "lesen")
+                trail.append(f"flach ohne Tabelle (TradingView-Update): {grund2} — zweimal bewiesen")
+                st = st2
             t_info = _cdp_today_info(s, opts, trail)
             return raus("schon_flach", f"Keine offene Position {root} auf {res['konto_aktiv'][:40]} — nichts geklickt"
                         + (f", Total P/L {t_info['today_pnl']:g}" if t_info["today_pnl"] is not None else ""),

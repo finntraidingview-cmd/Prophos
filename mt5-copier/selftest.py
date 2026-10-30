@@ -2036,6 +2036,7 @@ def main():
     results.append(test_puls_fehler_1800())
     results.append(test_puls_fehler_1850())
     results.append(test_puls_fehler_1887())
+    results.append(test_puls_fehler_1924())
     results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
@@ -11141,6 +11142,42 @@ def test_puls_fehler_1850():
         "tvclose: Rückfrage-Riegel, Knopf-Beweis und Doktrin (kein blinder zweiter Klick) unverändert, Wartezeiten nur über _warte")
     chk("Flach nicht bewiesen:" in q and "cdp_meldung_text(m) for m in neu_c" in q, "tvclose: Diagnose-Zeile im Unklar-Fall (Zeile/Tabelle/Meldungen)")
     print(("✓" if ok else "✗") + " Puls-Fehler .1850: Close flach — leeres Konto zeigt keine Tabelle → Beweis über TradingViews Close-Fill-Meldung, sonst UNKLAR mit Diagnose")
+    return ok
+
+
+def test_puls_fehler_1924():
+    """Routine „Puls-Fehler" 30.10.2026 05:30 Dubai (.1924): Muster „close: positions-tabelle im puls-chrome nicht sicher lesbar — nichts
+    geklickt" 6× auf 5 PCs in 7 Tagen. Ursache: ein Konto ohne Position zeigt seit dem TradingView-Update keinen Tabellenkopf mehr
+    (positionen_sichtbar false) — ein Close auf ein schon flaches Konto (von Hand zu, TP/SL getroffen, Wiederholungs-Close) endete darum
+    vor dem Klick immer als „nicht lesbar". Jetzt vor dem Klick derselbe Leer-Beweis wie in der Endlesung (cdp_flach_ohne_tabelle, zweimal
+    mit Pause) → schon_flach; jeder Widerspruch bleibt tabelle_unklar mit Grund. Riegel (ein Klick, Rückfrage, Doktrin) unverändert. Kein Windows."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1924: " + text)
+            ok = False
+    q = _i.getsource(ob.modus_tvclose_cdp)
+    chk(q.count("cdp_flach_ohne_tabelle(") == 2 and q.count("flach nicht bewiesen:") == 1 and q.count("zweiter Blick:") == 1
+        and "zweimal bewiesen" in q and 'raus("schon_flach"' in q,
+        "tvclose: Leer-Beweis vor dem Klick zweimal (cdp_flach_ohne_tabelle), beide Widersprüche bleiben tabelle_unklar mit Grund")
+    chk("k3_zeilen(st2.get(\"positionen\"), root)" in q, "tvclose: zweiter Blick — eine Zeile der Wurzel im DOM widerspricht dem Leer-Beweis")
+    # Leer-Beweis selbst: leeres Konto (Reiter Positions, Panel offen, Profit 0, Balance = Equity) ja — jede Lücke nein
+    leer = {"konto": {"panel": "offen", "aktiv": "FTDFYSLX1503729032… 149,346.64 USD"}, "positionen": [],
+            "konto_summary": {"reiter": "positions", "profit": {"wert": 0.0, "text": "0.00"},
+                              "texte": {"USD": "149,346.64", "Equity": "149,346.64"}}}
+    chk(ob.cdp_flach_ohne_tabelle(leer)[0] is True, "Leer-Beweis: leeres Konto mit Profit 0 und Balance = Equity → flach")
+    offen = dict(leer, positionen=[{"symbol": "MNQZ6", "seite": "buy", "menge": 1, "sichtbar": True}])
+    chk(ob.cdp_flach_ohne_tabelle(offen)[0] is False, "Leer-Beweis: Positions-Zeile im DOM → kein Flach")
+    mit_pl = dict(leer, konto_summary=dict(leer["konto_summary"], profit={"wert": -11.5, "text": "−11.50"}))
+    chk(ob.cdp_flach_ohne_tabelle(mit_pl)[0] is False, "Leer-Beweis: Profit ≠ 0 (Position offen, Tabelle nur nicht im Bild) → kein Flach")
+    # Riegel: Ablauf nach dem Klick unverändert, Wartezeiten nur über _warte
+    chk(q.count("k3_flach_beweis(") == 2 and q.count('raus("bestaetigung_unklar"') == 4 and 'raus("close_knopf_unklar"' in q
+        and "time.sleep" not in q and "_warte(2.5, 1.0)" in q,
+        "tvclose: Beweis nach dem Klick, Rückfrage-Riegel und Doktrin unverändert, Pause des Leer-Beweises über _warte")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1924: Close auf schon flaches Konto — Leer-Beweis (zweimal) statt „Tabelle nicht sicher lesbar“")
     return ok
 
 
