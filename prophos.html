@@ -52423,7 +52423,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1930'
+  const OS_TAB_BUILD = '2026-09-22.1931'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -66764,8 +66764,15 @@
         const upd = {}, soll = zeiten.get(String(k.id)), kd = wdKontoDaten(k.id)
         const kr = wdKontoRichtung(k, row.richtung)   // BÜNDEL (28.10.2026): Richtung der Gruppe
         // nie zurückdrehen, was der Start-Schutz gedreht hat (30.10.2026) — GET /admin/wd-plaene liefert dafür richtung_konflikt (Alias auf mt5_baseline)
-        const rkG = p.richtung_konflikt || (p.mt5_baseline && p.mt5_baseline.richtung_konflikt)
-        if(kr && p.richtung !== kr && !(rkG && rkG.status === 'gedreht')) upd.richtung = kr
+        // S2-Stopp 30.10.2026: _wd.daten.plaene trägt mt5_baseline nicht → zusätzlich der lokale Plan (tradePlans[].mt5Baseline) wie wdPlaeneAnlegen
+        const tpL = (tradePlans || []).find(q => String(q.id) === String(k.plan_id))
+        const rkG = p.richtung_konflikt || (p.mt5_baseline && p.mt5_baseline.richtung_konflikt) || (tpL && tpL.mt5Baseline && tpL.mt5Baseline.richtung_konflikt)
+        if(kr && p.richtung !== kr && !(rkG && rkG.status === 'gedreht')){
+          // nur wenn sich die Richtung ändern würde: Vermerk frisch aus der DB (der Mac-Stand von tradePlans kann alt sein) — Lesefehler = nicht drehen
+          let frischG = null
+          try{ const { data: fr, error: ef } = await supabase.from('trade_plans').select('rk:mt5_baseline->richtung_konflikt').eq('id', k.plan_id).maybeSingle(); frischG = ef ? 'fehler' : (fr && fr.rk) || null }catch(_){ frischG = 'fehler' }
+          if(frischG !== 'fehler' && !(frischG && frischG.status === 'gedreht')) upd.richtung = kr
+        }
         if(soll && wdStartUmNachziehbar(p.start_um, soll)) upd.start_um = soll   // nie in die Vergangenheit zurückziehen (14.10.2026)
         if(kd && kd.tp_vorgabe > 0 && Number(p.master_tp) !== kd.tp_vorgabe) upd.master_tp = kd.tp_vorgabe
         if(p.master_sl != null) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen
@@ -66950,7 +66957,12 @@
           const upd = {}, z = zVon.get(String(k.id))
           // nie zurückdrehen, was der Richtungsschutz am Start gedreht hat (30.10.2026, mt5_baseline.richtung_konflikt.status 'gedreht')
           const gedreht = plan.mt5Baseline && plan.mt5Baseline.richtung_konflikt && plan.mt5Baseline.richtung_konflikt.status === 'gedreht'
-          if(!gedreht && plan.richtung !== wdKontoRichtung(k, row.richtung)) upd.richtung = wdKontoRichtung(k, row.richtung)   // Richtung der Gruppe (28.10.2026)
+          if(!gedreht && plan.richtung !== wdKontoRichtung(k, row.richtung)){   // Richtung der Gruppe (28.10.2026)
+            // wie wdPlaeneNachziehen: Vermerk frisch aus der DB (lokaler tradePlans-Stand kann alt sein), Lesefehler = nicht drehen
+            let frischG = null
+            try{ const { data: fr, error: ef } = await supabase.from('trade_plans').select('rk:mt5_baseline->richtung_konflikt').eq('id', plan.id).maybeSingle(); frischG = ef ? 'fehler' : (fr && fr.rk) || null }catch(_){ frischG = 'fehler' }
+            if(frischG !== 'fehler' && !(frischG && frischG.status === 'gedreht')) upd.richtung = wdKontoRichtung(k, row.richtung)
+          }
           if(wdStartUmNachziehbar(plan.startUm, startIso)) upd.start_um = startIso   // nie in die Vergangenheit zurückziehen (14.10.2026)
           // Slave nach Live-Balance: der Mac kannte beim Anlegen evtl. keinen Live-Stand (kleinste Stufe)
           if(plan.route === 'tvv2'){
