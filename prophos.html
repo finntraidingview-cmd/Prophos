@@ -4532,10 +4532,15 @@
   #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-r{transform:translateX(-100%)} #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-l{transform:none}
   #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-minus{bottom:calc(100% + 5px);color:var(--danger-ink, #b91c1c)}
   #dashboard-view .pz-bahn2 > .pz-bahn-fus.is-plus{top:calc(100% + 5px);color:var(--good-ink, #15803d)}
-  /* Spalte „Fusion" und die kleine Zeile unter TP/SL: wo Fusion zumacht (Fusion-SL am Master-TP, Fusion-TP am Master-SL) */
-  #dashboard-view .pz-z > .pz-tp.mit-fus,#dashboard-view .pz-z > .pz-sl.mit-fus{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
-  #dashboard-view .pz-z > .mit-fus .pz-fus-u{font-size:10.5px;font-weight:500;color:var(--sub)}
+  /* Spalte „Fusion": Lots + gedeckte Kosten (die kleinen Fusion-SL/-TP-Texte unter TP/SL sind seit 30.10.2026 die Paar-Zeile .pz-paare) */
   #dashboard-view .pz-art.pz-fus b{color:var(--ink)}
+  /* Ausgänge als Paare (30.10.2026): eigene Zeile unter der Plan-Zeile, je Ausgang „Master … ↔ Fusion …", Farben dezent */
+  #dashboard-view .pz-z > .pz-paare{grid-column:1/-1;order:9;display:flex;flex-direction:column;gap:3px;margin-top:6px;padding-top:7px;border-top:1px dashed var(--border);font-size:12.5px;color:var(--sub);flex-basis:100%}
+  #dashboard-view .pz-paar{display:grid;grid-template-columns:170px 22px max-content;align-items:baseline;white-space:nowrap}
+  #dashboard-view .pz-paar > i{font-style:normal;opacity:.55;text-align:center}
+  #dashboard-view .pz-paar b{font-weight:600;font-variant-numeric:tabular-nums}
+  #dashboard-view .pz-paar b.gut{color:color-mix(in srgb, var(--good-ink, #15803d) 80%, var(--sub))} #dashboard-view .pz-paar b.rot{color:color-mix(in srgb, var(--danger-ink, #b91c1c) 80%, var(--sub))}
+  @media (max-width:820px){ #dashboard-view .pz-paar{grid-template-columns:max-content 18px max-content;white-space:normal} }
   /* ID-Hierarchie (08.10.2026): Karte je ID mit Rand in ID-Farbe, großer sticky Kopf, Firmen-Kopf darunter 13 px grau */
   #dashboard-view .ap-id-karte{border-left:3px solid var(--id,var(--border));padding:0 0 4px 14px;margin:0 0 18px}
   #dashboard-view .ap-id-karte > .ap-adm-grp{position:sticky;top:0;z-index:4;background:var(--surface);padding:10px 0 8px;margin-top:0;border-top:0}
@@ -47472,8 +47477,10 @@
     const fu = a.fusion && (a.fusion.minus != null || a.fusion.plus != null) ? a.fusion : null
     const eur = v => Math.round(Number(v)).toLocaleString('de-DE') + ' €'
     const fuMarke = (p, wo, txt) => `<i class="pz-bahn-mk is-${wo}" style="left:${p.toFixed(1)}%"></i><small class="pz-bahn-fus is-${wo}${p > 72 ? ' is-r' : p < 28 ? ' is-l' : ''}" style="left:${p.toFixed(1)}%">${txt}</small>`
-    const fuHtml = !fu ? '' : (tpUsd && fu.minus != null ? fuMarke(pTp, 'minus', 'Fusion −' + eur(fu.minus)) : '')
-      + (slUsd && fu.plus != null ? fuMarke(pct(istV - slUsd), 'plus', 'Fusion +' + eur(fu.plus)) : '')
+    // PAARE STATT MARKEN (30.10.2026, Finn ~07:10: „erkenne nicht, was zusammengehört"): die Fusion-Werte stehen jetzt als Paar-Zeile unter
+    // der Plan-Zeile (planZeileHtml, .pz-paare) — der Balken zeigt nur noch Balance → Ziel; fuMarke bleibt für einen Rückweg stehen
+    const fuHtml = AP_FUS_AM_BALKEN && fu ? (tpUsd && fu.minus != null ? fuMarke(pTp, 'minus', 'Fusion −' + eur(fu.minus)) : '')
+      + (slUsd && fu.plus != null ? fuMarke(pct(istV - slUsd), 'plus', 'Fusion +' + eur(fu.plus)) : '') : ''
     const fuTitel = !fu ? '' : `${fu.minus != null && tpUsd ? ' · nach TP Fusion −' + eur(fu.minus) : ''}${fu.plus != null && slUsd ? ' · nach SL Fusion +' + eur(fu.plus) : ''}${fu.gedeckt != null ? ' · an der Liq Fusion +' + eur(fu.gedeckt) : ''}`
     const html = `<i class="pz-bahn pz-bahn2${boden != null ? ' mit-liq' : ''}${fuHtml ? ' mit-fus' : ''}" title="${escapeHtml(titel + fuTitel)}">`
       + (Math.max(pIst, verlB) > 0 ? `<i class="pz-bahn-fuell" style="width:${Math.max(pIst, verlB).toFixed(1)}%;background:${farbe}"></i>` : '')
@@ -47484,6 +47491,7 @@
     return { html, prozent, titel }
   }
   window._pzBahnHtml = pzBahnHtml
+  const AP_FUS_AM_BALKEN = false   // true = alte Fusion-Marken am Balken zurück (vor 30.10.2026)
   function planZeileBoden(p, konto, o, groesse){
     const ok = v => (v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null
     if(ok(o && o.boden) != null) return ok(o.boden)
@@ -47629,9 +47637,15 @@
       // der Fusion-SL liegt auf dem Master-TP, der Fusion-TP auf dem Master-SL (der Schließer macht Fusion mit dem Master zu)
       const fu = o.fusion, eur = v => Math.round(Number(v)).toLocaleString('de-DE') + ' €', pkt = v => v != null ? Math.round(v).toLocaleString('de-DE') + ' Pkt' : ''
       const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
-      const fuUnter = (wo, txt, tip) => fu && txt ? `<small class="pz-fus-u is-${wo}" title="${escapeHtml(tip)}">${txt}</small>` : ''
-      const fuTp = fu && fu.minus != null ? fuUnter('minus', 'Fusion-SL', `Am Master-TP (${pkt(fu.tpPkt)} vom Einstieg) schließt Fusion mit −${eur(fu.minus)}`) : ''
-      const fuSl = fu && fu.plus != null ? fuUnter('plus', 'Fusion-TP', `Am Master-SL (${pkt(fu.slPkt)} vom Einstieg) schließt Fusion mit +${eur(fu.plus)}`) : ''
+      // AUSGÄNGE ALS PAARE (30.10.2026, Finn ~07:10: „was gehört zusammen?"): je Ausgang eine Zeile über die volle Breite —
+      // Master TP ↔ Fusion SL, Master SL ↔ Fusion TP; Master immer $, Fusion immer €, dieselben Felder wie vorher (fu.minus / fu.plus)
+      const paar = (wo, mName, mWert, mVz, fName, fWert, fVz, tip) => `<span class="pz-paar is-${wo}" title="${escapeHtml(tip)}">`
+        + `<span>Master ${mName} <b class="${mVz > 0 ? 'gut' : 'rot'}">${mWert != null ? (mVz > 0 ? '+' : '−') + geldZ(mWert) + ' $' : '–'}</b></span><i aria-hidden="true">↔</i>`
+        + `<span>Fusion ${fName} <b class="${fVz > 0 ? 'gut' : 'rot'}">${fWert != null ? (fVz > 0 ? '+' : '−') + eur(fWert) : '–'}</b></span></span>`
+      const paare = fu && (fu.minus != null || fu.plus != null) ? `<div class="pz-paare">`
+        + paar('tp', 'TP', p.masterTp > 0 ? p.masterTp : null, 1, 'SL', fu.minus, -1, `Master trifft den Take Profit${fu.tpPkt != null ? ` (${pkt(fu.tpPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-SL`)
+        + paar('sl', 'SL', p.masterSl > 0 ? p.masterSl : null, -1, 'TP', fu.plus, 1, `Master trifft den Stop Loss${fu.slPkt != null ? ` (${pkt(fu.slPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-TP`)
+        + `</div>` : ''
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
@@ -47639,9 +47653,9 @@
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
         ${fuZelle || artZelle}
-        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${fu ? ' mit-fus' : ''}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}${fuTp}</span>
-        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${fu ? ' mit-fus' : ''}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}${fuSl}</span>
-        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>${paare}
       </div>`
     }
     return `
