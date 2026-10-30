@@ -4124,6 +4124,7 @@
   #wd-uebersicht .wd-tab td.zahl,#wd-uebersicht .wd-tab th.zahl{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   #wd-uebersicht .wd-ue-leer{color:var(--sub);font-size:12.5px;padding:2px 0 6px}
   #wd-uebersicht .wd-ue-grund{color:var(--sub);font-size:12px}
+  #wd-uebersicht [data-ap-zur]{display:none}   /* WD-Pläne werden nicht bestätigt — „↩ zurück" (Auto-Plan) hat hier keine Funktion */
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 12px 18px;background:var(--surface-tint)}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail .wd-karte{border-color:var(--violet);margin-top:2px;background:var(--surface, #fff)}
   #adm-pane-wd .wd-konten tr.wd-ohne td{border-bottom:0;padding-top:6px}
@@ -59770,7 +59771,8 @@
     // nur die Trades, die nicht gegengehedgt werden … Das bitte weglassen — auch wenn es läuft"): Winning Days, Funded und Funded CFD
     // erscheinen auf der Seite nirgends — nicht im Zeitstrahl (auch nicht in „Weitere"), nicht in Kacheln, Netto-Chart, Hypo-P&L,
     // Braucht-dich, Geplant-Liste, Abdeckung. Das Frontend filtert selbst (Typ aus Delta/Lauf/Plan/Konto), unabhängig vom Backend.
-    const raus = trades.filter(t => !TPL_TYPEN.includes(String(t.typ || '')) || t.wd)
+    // WD-KARTEN WIE RADAR (30.10.2026): nur für den WD-Reiter (window._apWdBloecke setzt _tpl.nurWd für einen Aufruf) genau umgekehrt — nur Winning Days
+    const raus = trades.filter(t => _tpl.nurWd ? !t.wd : (!TPL_TYPEN.includes(String(t.typ || '')) || t.wd))
     for(const t of raus){ const i = trades.indexOf(t); if(i >= 0) trades.splice(i, 1) }
     let L = 0, S = 0
     for(const t of trades){
@@ -62184,6 +62186,8 @@
     tplZeichnen()
     tplCacheSchreiben()
   }
+  // WD-KARTEN WIE RADAR (30.10.2026): der WD-Reiter braucht dieselben Daten (Delta, live-trades, Hypo) — höchstens alle 60 s, danach neu zeichnen
+  window._tplSicherstellen = () => { if(_tpl.laeuft || _tpl.stub || Date.now() - (_tpl.geladen || 0) < 60000) return; tplLaden().then(() => { try{ window._wdUebersichtNeu?.() }catch(_){} }) }
   /* Admin-Eingriff an Vorschlägen fremder IDs (07.10.2026): POST /admin/auto-plan/bestaetigen {plan_ids} | zurueck {plan_id} |
    * loeschen {plan_id} — Service-Key hinter dem Admin-Gate (RLS lässt den Browser nur an eigene Zeilen). Antwort n = wirklich
    * geänderte Zeilen (Guard: planned, Auto-Plan, unbestätigt bzw. ungestartet). Eigene Pläne gehen weiter per supabase-js. */
@@ -68198,10 +68202,19 @@
     const d = wdUebersichtDaten(_wd.rows)
     const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id))
     const alleKnopf = offen.length > 1 ? `<button type="button" class="ap-adm-ok" data-wd-ue-alle="1">✓ Alle ${offen.length} freigeben</button>` : ''
+    // WD-KARTEN WIE RADAR (30.10.2026): Läuft/Wartet aus denselben Bausteinen wie Radar/Challenge-Planer (window._apWdBloecke); kennt
+    // tplDaten einen Plan noch nicht (Daten noch nicht geladen), bleibt für diesen Block die schlichte Tabelle
+    try{ window._tplSicherstellen?.() }catch(_){}
+    const pid = e => String(e.k && e.k.plan_id)
+    let pb = null; try{ if(typeof window._apWdBloecke === 'function') pb = window._apWdBloecke(d.laeuft.map(pid), d.warten.map(pid),
+      `<div class="ap-adm-kopf"><b>Läuft · ${d.laeuft.length}</b><span>live</span></div>`, `<div class="ap-adm-kopf"><b>Wartet auf Start · ${d.warten.length}</b><span>geplant · Zeiten Dubai</span></div>`) }catch(e){ console.warn('[wd] Radar-Karten', e); pb = null }
+    const fehlt = new Set((pb && pb.fehlt) || [])
+    const laeuftHtml = pb && d.laeuft.length && !d.laeuft.some(e => fehlt.has(pid(e))) ? pb.laeuft : wdUebersichtBlock('laeuft', 'Läuft', 'live', d.laeuft)
+    const wartenHtml = pb && d.warten.length && !d.warten.some(e => fehlt.has(pid(e))) ? pb.warten : wdUebersichtBlock('warten', 'Wartet auf Start', 'geplant · Zeiten Dubai', d.warten)
     box.innerHTML = wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD mit Hedge — startet erst nach ✓ · Zeiten Dubai', offen, alleKnopf)
-      + wdUebersichtBlock('laeuft', 'Läuft', 'live', d.laeuft)
+      + laeuftHtml
       + wdUebersichtBlock('braucht', 'Braucht dich', 'Nachlesung, überfällig, Hinweis am Konto', d.braucht)
-      + wdUebersichtBlock('warten', 'Wartet auf Start', 'geplant · Zeiten Dubai', d.warten)
+      + wartenHtml
     const b = box.querySelector('[data-wd-ue-alle]')
     if(b) b.addEventListener('click', () => { if(confirm(`Alle ${offen.length} Apex-WD-Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)){ b.disabled = true; window._ahfFreigebenIds?.(offen.map(z => String(z.id))) } })
   }
@@ -80258,6 +80271,23 @@
     let plJe = new Map(); try{ plJe = new Map((tplHypo(D).zeilen || []).map(z => [String(z.plan_id), z.pl])) }catch(_){}
     return { warten, laeuft: laeuft.map(t => ({ z: apIdsAusTrade(t, D), t, pl: plJe.get(String(t.plan_id)) ?? null })) }
   }
+  /* WD-KARTEN WIE RADAR (Finn 30.10.2026 ~08:30 über den Master, Screenshot .1935 Funded Planer → Winning Days: „Läuft und Wartet auf Start
+   * sind schlichte Tabellen — soll genau dieselbe Darstellung wie im Radar bzw. in den Planer-Karten"). Für den WD-Reiter dieselben Blöcke
+   * (apIdsBlockHtml: Läuft = Radar-Zeilen laufZeilenHtml, Wartet = planZeileHtml mit Balken und Paar-Spalten) aus tplDaten (Tag heute),
+   * gefiltert auf die Plan-IDs, die der Farmer kennt. → { laeuft, warten, fehlt } — fehlt = Plan-IDs, die tplDaten (noch) nicht kennt. */
+  window._apWdBloecke = (laufIds, wartIds, kopfL, kopfW) => {
+    _tpl.nurWd = true   // tplDaten nur Winning Days — für den ganzen Aufbau, apIdsBlockHtml('laeuft') ruft apIdsHeute selbst noch einmal
+    try{
+      const D = apIdsHeute(), lS = new Set((laufIds || []).map(String)), wS = new Set((wartIds || []).map(String))
+      let plJe = new Map(); try{ plJe = new Map((tplHypo(D).zeilen || []).map(z => [String(z.plan_id), z.pl])) }catch(_){}
+      const laeuft = D.trades.filter(t => t.status === 'laeuft' && lS.has(String(t.plan_id))).map(t => ({ z: apIdsAusTrade(t, D), t, pl: plJe.get(String(t.plan_id)) ?? null }))
+      const warten = D.trades.filter(t => (t.status === 'offen' || t.status === 'bestaetigt') && wS.has(String(t.plan_id))).map(t => ({ z: apIdsAusTrade(t, D), t }))
+      const da = new Set([...laeuft, ...warten].map(e => String(e.z.plan_id)))
+      return { laeuft: apIdsBlockHtml('laeuft', laeuft, kopfL), warten: apIdsBlockHtml('warten', warten, kopfW),
+               fehlt: [...lS, ...wS].filter(id => !da.has(id)) }
+    } finally{ _tpl.nurWd = false }
+  }
+
   /* Ein Block (art offen | warten | laeuft): je ID eine Gruppe (Farbpunkt · Name · Zähler · „✓ alle n" nur bei offen), darin die Firmen-Blöcke
    * (planFirmenBloecke) mit planZeileHtml-Zeilen. Balance/Rest/Stufe: Trade-Zeile → Lauf-Zeile → notes-Text → eigenes Konto. */
   function apIdsBlockHtml(art, liste, kopf){
