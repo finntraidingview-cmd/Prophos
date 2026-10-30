@@ -18338,9 +18338,12 @@
      * /admin/payout-erhalten (transactions + pending received + accounts.payout_ready_at, Besitzer-ID). Danach nur den lokalen
      * admData-Stand nachziehen (Anfrage raus, Buchung in „erhalten", Termin im Kalender) und admFinRender() — kein Neuladen nötig.
      * Balance nach dem Payout wie Finanzen (finBalanceNachPayout) nur anstoßen: /admin/konto-balance-lesen, Fehler als Toast. ── */
-    let _admReceive = null
-    function admPayoutErhaltenOeffnen(t){
-      _admReceive = t
+    let _admReceive = null, _admReceiveO = {}
+    // o (Funded Planer → CFD, „Erhalten“ in „Payouts auf dem Weg“, Finn 30.10.2026 ~08:16): naechsterTage = „Payout anfragbar ab“ vorbelegt mit
+    // Erhalten-Tag + N (folgt dem Datum, bis Finn das Feld selbst ändert), waitingLeeren = Konto raus aus Waiting for Payout, nachher = neu zeichnen
+    const admReceivePlus = (tag, n) => { const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+    function admPayoutErhaltenOeffnen(t, o){
+      _admReceive = t; _admReceiveO = o || {}
       $('adm-receive-amt').textContent = admEur.format(Number(t.amount) || 0)
       const acc = $('adm-receive-acc')
       acc.textContent = `${admShortName(t.person || '—')} · ${t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : 'ohne Account'}`
@@ -18350,6 +18353,8 @@
       // ihn ein. Leer gelassen bleibt der Termin am Konto, wie er ist (der Server schreibt nur, wenn ein Datum mitkommt).
       const konto = t.account_id ? (admData?.accounts || []).find(r => String(r.id) === String(t.account_id)) : null
       $('adm-receive-next').value = konto && konto.payout_at ? String(konto.payout_at).slice(0, 10) : ''
+      if(_admReceiveO.naechsterTage && t.account_id){ $('adm-receive-next').value = admReceivePlus($('adm-receive-am').value, _admReceiveO.naechsterTage); $('adm-receive-next').dataset.auto = '1' }
+      else delete $('adm-receive-next').dataset.auto
       $('adm-receive-next').disabled = !t.account_id
       const msg = $('admReceiveMsg'); msg.textContent = ''; msg.className = 'modal-msg'
       $('admReceiveSave').disabled = false
@@ -18360,6 +18365,11 @@
     $('admReceiveCancel')?.addEventListener('click', admPayoutErhaltenZu)
     $('admReceiveModal')?.addEventListener('click', e => { if(e.target === $('admReceiveModal')) admPayoutErhaltenZu() })
     $('admReceiveSave')?.addEventListener('click', () => admPayoutErhaltenBuchen())
+    // vorbelegter Termin (Erhalten + N Tage) folgt dem Erhalten-Datum, bis Finn ihn selbst ändert
+    $('adm-receive-am')?.addEventListener('change', () => { const n = $('adm-receive-next'), am = $('adm-receive-am').value
+      if(n && n.dataset.auto && _admReceiveO.naechsterTage && /^\d{4}-\d{2}-\d{2}$/.test(am)) n.value = admReceivePlus(am, _admReceiveO.naechsterTage) })
+    $('adm-receive-next')?.addEventListener('input', e => { delete e.target.dataset.auto })
+    window._admPayoutErhaltenOeffnen = (t, o) => admPayoutErhaltenOeffnen(t, o)   // Funded Planer → CFD, „Payouts auf dem Weg“ (30.10.2026)
     async function admPayoutErhaltenBuchen(){
       const t = _admReceive; if(!t || !admData) return
       const msg = $('admReceiveMsg'), btn = $('admReceiveSave')
@@ -18373,7 +18383,7 @@
         if(!tok) throw new Error('nicht angemeldet')
         const res = await fetch(`${WATCHER_HOME}/admin/payout-erhalten?ansicht=admin`, {
           method:'PATCH', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
-          body: JSON.stringify({ pending_id: t.id, erhalten_am: am, naechster_payout: next || null })
+          body: JSON.stringify({ pending_id: t.id, erhalten_am: am, naechster_payout: next || null, ...(_admReceiveO.waitingLeeren ? { waiting_leeren: true } : {}) })
         })
         d = await res.json().catch(() => ({}))
         if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
@@ -18393,8 +18403,19 @@
         for(const r of (admData.payout_ready || [])) if(String(r.account_id) === String(t.account_id)) r.ready_at = next
         for(const r of (admData.accounts || [])) if(String(r.id) === String(t.account_id)){ r.payout_at = next; r.payout_ready_at = next }   // beide Felder (Waiting-Tabelle Funded CFD liest payout_ready_at)
       }
+      // WAITING LEEREN (Funded Planer → CFD, 30.10.2026): das Backend leert waiting_payout_since, wenn es waiting_leeren kennt (d.waiting_geleert);
+      // eigenes Konto zusätzlich über den bestehenden Weg wartetPayoutClear (wie beim Payout-Buchen in Finanzen). Lokal nur bei Erfolg.
+      const o = _admReceiveO || {}
+      let waitingWeg = false
+      if(o.waitingLeeren && t.account_id){
+        if(d.waiting_geleert === true) waitingWeg = true
+        else if(String(t.user_id) === String(currentUserId) && typeof wartetPayoutClear === 'function'){ try{ await wartetPayoutClear(t.account_id); waitingWeg = true }catch(_){} }
+        if(waitingWeg) for(const r of (admData.accounts || [])) if(String(r.id) === String(t.account_id)) r.waiting_payout_since = null
+      }
       admPayoutErhaltenZu()
       admFinRender()
+      try{ o.nachher?.({ waitingWeg }) }catch(_){}
+      if(o.waitingLeeren && t.account_id && !waitingWeg && typeof atToast === 'function') atToast('Waiting for Payout bleibt am Konto — der Server leert es (noch) nicht; im Konto „→ Waiting for Payout“ zurücksetzen', 'end')
       if(typeof atToast === 'function'){
         const wann = new Date(am + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric' })
         atToast(`✓ Payout ${admEur.format(Number(t.amount) || 0)} bei ${admShortName(t.person || '—')} gebucht (${wann})`
@@ -80931,8 +80952,10 @@
         <td style="font-weight:600;color:var(--warn-ink, #b45309);font-family:var(--mono);white-space:nowrap">${escapeHtml(geld(t))}</td>
         <td style="white-space:nowrap">${d && !isNaN(d) ? escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' })) : '—'}</td>
         <td style="white-space:nowrap;color:${tage != null && tage >= 14 ? 'var(--danger-ink, #b91c1c)' : 'var(--sub)'}">${tage == null ? '—' : tage === 0 ? 'heute' : `seit ${tage} Tag${tage === 1 ? '' : 'en'}`}</td>
-        <td style="padding-right:20px;color:var(--sub)">${escapeHtml(t.liegt_bei || '—')}</td></tr>` }
-    const tabelle = `<div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Firma</th><th>Betrag</th><th>Angefragt am</th><th>Seit</th><th style="padding-right:20px">Liegt bei</th></tr></thead>
+        <td style="color:var(--sub)">${escapeHtml(t.liegt_bei || '—')}</td>
+        <td style="padding-right:20px;text-align:right;white-space:nowrap">${t.id && typeof window._admPayoutErhaltenOeffnen === 'function'
+          ? `<button type="button" class="btn ${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'btn-primary' : 'btn-ghost'} btn-xs" data-fcfd-erhalten="${escapeHtml(String(t.id))}" title="${/^gesendet\b/i.test(String(t.liegt_bei || '')) ? 'Laut Mail-Abgleich ausgezahlt (z. B. „You got paid“) — ' : ''}Payout als erhalten buchen (Rückfrage im Fenster) · Konto raus aus Waiting for Payout · „Payout anfragbar ab“ = Erhalten + 14 Tage">✓ Erhalten</button>` : ''}</td></tr>` }
+    const tabelle = `<div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Firma</th><th>Betrag</th><th>Angefragt am</th><th>Seit</th><th>Liegt bei</th><th style="padding-right:20px"></th></tr></thead>
       <tbody>${zeilen.map(zeile).join('')}</tbody></table></div>`
     return `<div data-apg-anker="unterwegs">${apgKarte(`Payouts auf dem Weg · ${zeilen.length}`, zeilen.length ? `${sumTxt} angefragt, noch nicht erhalten · älteste zuerst` : 'angefragt, noch nicht erhalten',
       zeilen.length ? `<div class="fcfd-wartet-tab">${tabelle}</div>` : '<div class="apg-leer" style="padding:18px 0">Keine Payouts unterwegs</div>',
@@ -81116,7 +81139,12 @@
     root.querySelector('[data-apg-firma]')?.addEventListener('change', e => { tplFirmaWaehlen(e.target.value || 'alle'); apIdsRender() })
     root.querySelector('details[data-apg-schalter]')?.addEventListener('toggle', e => { _apg.schalterAuf = !!e.target.open })
     root.querySelector('details[data-fcfd-regeln]')?.addEventListener('toggle', e => { _fcfdR.auf = !!e.target.open })   // Funded CFD: Regeln offen halten
-    { const t = root.querySelector('.fcfd-wartet-tab'); if(t) try{ window._admKontenVerdrahten?.(t) }catch(_){} }   // Waiting-Tabelle: Klicks wie im Admin
+    { const t = root.querySelector('[data-apg-anker="wartet"] .fcfd-wartet-tab'); if(t) try{ window._admKontenVerdrahten?.(t) }catch(_){} }   // Waiting-Tabelle: Klicks wie im Admin
+    // „✓ Erhalten“ in „Payouts auf dem Weg“ (Finn 30.10.2026 ~08:16): bestehendes Admin-Fenster „Payout erhalten“ (= Rückfrage), bucht über
+    // /admin/payout-erhalten; „Payout anfragbar ab“ = Erhalten + 14 Tage, Konto raus aus Waiting for Payout, danach neu zeichnen
+    root.querySelectorAll('[data-fcfd-erhalten]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation()
+      const t = ((window._admData && window._admData.pending_payouts) || []).find(x => String(x.id) === b.dataset.fcfdErhalten); if(!t) return
+      window._admPayoutErhaltenOeffnen?.(t, { naechsterTage: 14, waitingLeeren: true, nachher: () => window._apIdsRender?.() }) }))
     root.querySelector('[data-fcfd-news]')?.addEventListener('change', e => { e.stopPropagation(); fcfdNewsSchalten(e.target.checked) })   // News-Regel (nur Admin)
     root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
