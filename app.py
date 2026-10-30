@@ -31643,6 +31643,7 @@ def ap_kette_tick(jetzt=None, rnd=None):
                 beste = (m, r)
         if beste is None:
             gruende[pid] = f"kein regelkonformer Start für Trade 2 bis {kette['t2_bis']} dt"
+            _ap_kette_grund(t1, gruende[pid])   # sichtbar am Trade 1, der bis t2_bis in Überprüfen wartet (S2 30.10.2026); schreibt nur bei Änderung
             continue
         m, r = beste
         start = stand["mitternacht"] + timedelta(minutes=m)

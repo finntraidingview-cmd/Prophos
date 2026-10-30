@@ -189,6 +189,7 @@ def main():
 
     # ── Anzeige: Feld kommt im Radar an ──
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
+    check("dt\"\n            _ap_kette_grund(t1, gruende[pid])" in src, "kein regelkonformer Start: Grund steht sichtbar an Trade 1")
     check('z["kette_tag"]' in src, "/admin/live-trades liefert kette_tag")
     check('.get("tagesende")):\n                        blow_auto = False' in src, "Abhaken im Radar: Tagesende entscheidet über geblowt, nicht die Boden-Rechnung ab Trade 2")
     check('"konto_typ", "ended_at") if x in upd' in src, "Tagesende schreibt ended_at, falls leer (Richtungs-Riegel)")
