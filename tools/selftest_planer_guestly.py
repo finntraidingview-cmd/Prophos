@@ -23,7 +23,7 @@ def main():
     # Master | Fusion (30.10.2026): Fusion-Werte in Lots/TP/SL neben den Master-Werten, Kopf „Master | Fusion", Chip entfällt
     i = s.index("function apgMasterFusion(root, je){")
     mf = s[i:s.index("\n  }\n", s.index("tab.querySelectorAll('.pz-z[data-plan-id]')", i))]
-    ok("if(!apIstFunded()) apgMasterFusion(root, je)" in s, "nur Challenge (Funded hat die Spalte Fusion)")
+    ok("if(!apIstFunded()){ apgMasterFusion(root, je); apgHedgePaare(root, je, x) }" in s, "nur Challenge (Funded hat die Spalte Fusion)")
     ok("[[3, 'Lots'], [6, 'TP'], [7, 'SL']]" in mf and "Master <i>|</i> Fusion" in mf, "Köpfe Lots/TP/SL mit Master | Fusion")
     ok("zellen.tp.appendChild(fus(passTp != null ? ahfEur(passTp)" in mf and "zellen.sl.appendChild(fus(vs.blow_eur != null ? ahfEur(vs.blow_eur)" in mf, "TP = Fusion am Master-TP, SL = Fusion am Master-SL/Blow")
     ok("fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')" in mf and "fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')" in mf, "ohne Vorschau „—“, mit Grund „⚠“ + Tooltip")
@@ -70,7 +70,7 @@ def main():
     ok("'apg-wd-ls'" in w or 'id="apg-wd-ls"' in w, "WD: Long/Short-Chart")
     ok('id="apg-wd-std"' in w and "_apgWd.charts" in w and "c.destroy()" in w, "WD: Starts je Stunde, Charts vor dem Neuzeichnen zerstört")
     ok("fetch(" not in w and "supabase" not in w and "localStorage" not in w, "WD: keine Abfrage, kein Speicher")
-    ok("window._apgBau = { apgKpi, apgPille, APG_ICON, apgKarte, apgChartsMalen, apgZahl, schlank: () => AP_SCHLANK }" in s, "Bausteine exportiert")
+    ok("window._apgBau = { apgKpi, apgPille, APG_ICON, apgKarte, apgChartsMalen, apgZahl, schlank: () => AP_SCHLANK" in s, "Bausteine exportiert")
     ok("#adm-pane-wd.ap-guestly:has(#apg-wd .apg-kpis) #wd-ueb-heute{display:none}" in s, "WD: alte Kopf-Kacheln im Gerüst ausgeblendet (gleiche Zahlen oben)")
     i = s.index("function apgFcfdHtml(ad){")
     c = s[i:s.index("function apgFcfdRender(){", i)]

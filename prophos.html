@@ -3855,6 +3855,8 @@
   #ap-ids-root.ap-guestly .pz-tab.pz-radar{grid-template-columns:minmax(260px,1.7fr) 118px 92px minmax(170px,1.1fr) 84px 76px 76px minmax(150px,auto);border:0;background:transparent;row-gap:8px;overflow:visible}
   #ap-ids-root.ap-guestly .pz-radar .pz-z-kopf{display:none}
   /* Master | Fusion (30.10.2026): Kopfzeile wieder da, Lots/TP/SL breiter, Fusion gedämpft rechts daneben */
+  /* KARTE EINZEILIG (30.10.2026): TP/SL tragen „+71 $ ↔ −36 €“ (pzPaarZelle) → beide Spalten breiter, Konto/Balance geben Platz ab */
+  #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.pz-pz):not(:has(.apg-mfz)){grid-template-columns:minmax(180px,1.3fr) 110px 84px minmax(110px,1fr) 76px 112px 112px minmax(100px,auto);column-gap:12px}
   #ap-ids-root.ap-guestly .pz-tab.pz-radar:has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 84px 135px 135px minmax(100px,auto);column-gap:14px}
   #ap-ids-root.ap-guestly .pz-tab.pz-radar:not(:has(.pz-fus)):has(.apg-mfz){grid-template-columns:minmax(200px,1.3fr) 165px 72px minmax(120px,1fr) 135px 135px minmax(100px,auto)}
   #ap-ids-root.ap-guestly .pz-radar:has(.apg-mfz) .pz-z-kopf > *{text-align:left;justify-content:flex-start}
@@ -4561,6 +4563,13 @@
   /* Ausgänge als Paare (30.10.2026): eigene Zeile unter der Plan-Zeile, je Ausgang „Master … ↔ Fusion …", Farben dezent */
   #dashboard-view .pz-z > .pz-paare{grid-column:1/-1;order:9;display:flex;flex-direction:column;gap:3px;margin-top:6px;padding-top:7px;border-top:1px dashed var(--border);font-size:12.5px;color:var(--sub);flex-basis:100%}
   #dashboard-view .pz-paar{display:grid;grid-template-columns:170px 22px max-content;align-items:baseline;white-space:nowrap}
+  /* KARTE EINZEILIG (30.10.2026): Ausgang kompakt in der TP-/SL-Spalte — „+71 $ ↔ −36 €“, Handy darf umbrechen */
+  #dashboard-view .pz-pz{display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap;font-size:12.5px}
+  #dashboard-view .pz-pz > i{font-style:normal;opacity:.5}
+  #dashboard-view .pz-pz b{font-weight:600;font-variant-numeric:tabular-nums}
+  #dashboard-view .pz-pz b.gut{color:color-mix(in srgb, var(--good-ink, #15803d) 80%, var(--sub))} #dashboard-view .pz-pz b.rot{color:color-mix(in srgb, var(--danger-ink, #b91c1c) 80%, var(--sub))}
+  #dashboard-view .pz-pz b + i + b{font-weight:500}
+  @media (max-width:820px){ #dashboard-view .pz-pz{white-space:normal;flex-wrap:wrap;gap:2px 5px} }
   #dashboard-view .pz-paar > i{font-style:normal;opacity:.55;text-align:center}
   #dashboard-view .pz-paar b{font-weight:600;font-variant-numeric:tabular-nums}
   #dashboard-view .pz-paar b.gut{color:color-mix(in srgb, var(--good-ink, #15803d) 80%, var(--sub))} #dashboard-view .pz-paar b.rot{color:color-mix(in srgb, var(--danger-ink, #b91c1c) 80%, var(--sub))}
@@ -47776,6 +47785,15 @@
         + `<span>Fusion ${x.fName} <b class="${fVz > 0 ? 'gut' : 'rot'}">${x.fWert != null && isFinite(Number(x.fWert)) ? (fVz > 0 ? '+' : '−') + de(Math.abs(x.fWert)) + ' €' : '–'}</b></span></span>` }
     return `<div class="pz-paare">${liste.map(paar).join('')}${extra || ''}</div>`
   }
+  /* KARTE EINZEILIG (Finn 30.10.2026 ~08:25: „doppelt, zwei Zeilen — alles in EINER Zeile, cleaner“): ein Ausgang als kompakte Zelle für die
+   * Spalten TP / SL — „+71 $ ↔ −36 €“ (Master $ ↔ Fusion €, grün/rot dezent), Tooltip „Master TP ↔ Fusion SL“. Gleiche Felder wie pzPaareHtml. */
+  function pzPaarZelle(x){
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE'), mVz = x.wo === 'tp' ? 1 : -1, fVz = -mVz
+    const m = x.mText ? escapeHtml(x.mText) : x.mWert != null ? (mVz > 0 ? '+' : '−') + de(Math.abs(x.mWert)) + ' $' : '–'
+    const f = x.fWert != null && isFinite(Number(x.fWert)) ? (fVz > 0 ? '+' : '−') + de(Math.abs(x.fWert)) + ' €' : '–'
+    const tip = `Master ${x.mName} ↔ Fusion ${x.fName}${x.tip ? ' — ' + x.tip : ''}`
+    return `<span class="pz-pz is-${x.wo}" title="${escapeHtml(tip)}"><b class="${mVz > 0 ? 'gut' : 'rot'}">${m}</b><i aria-hidden="true">↔</i><b class="${fVz > 0 ? 'gut' : 'rot'}">${f}</b></span>`
+  }
   function planZeileHtml(p, konto, o){
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const notiz = o.notiz !== undefined ? o.notiz : p.autoPlan ? planAutoNotiz(p.notes) : null
@@ -47917,9 +47935,10 @@
       const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
       // AUSGÄNGE ALS PAARE (30.10.2026, Finn ~07:10: „was gehört zusammen?"): je Ausgang eine Zeile über die volle Breite —
       // Master TP ↔ Fusion SL, Master SL ↔ Fusion TP; Master immer $, Fusion immer €, dieselben Felder wie vorher (fu.minus / fu.plus)
-      const paare = fu && (fu.minus != null || fu.plus != null) ? pzPaareHtml([
+      // KARTE EINZEILIG (Finn 30.10.2026 ~08:25): die Paare stehen jetzt IN den Spalten TP / SL (pzPaarZelle) statt als zweite Zeile darunter
+      const paarL = fu && (fu.minus != null || fu.plus != null) ? [
         { wo: 'tp', mName: 'TP', mWert: p.masterTp > 0 ? p.masterTp : null, mText: p.masterTp > 0 ? '+' + geldZ(p.masterTp) + ' $' : null, fName: 'SL', fWert: fu.minus, tip: `Master trifft den Take Profit${fu.tpPkt != null ? ` (${pkt(fu.tpPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-SL` },
-        { wo: 'sl', mName: 'SL', mWert: p.masterSl > 0 ? p.masterSl : null, mText: p.masterSl > 0 ? '−' + geldZ(p.masterSl) + ' $' : null, fName: 'TP', fWert: fu.plus, tip: `Master trifft den Stop Loss${fu.slPkt != null ? ` (${pkt(fu.slPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-TP` }]) : ''
+        { wo: 'sl', mName: 'SL', mWert: p.masterSl > 0 ? p.masterSl : null, mText: p.masterSl > 0 ? '−' + geldZ(p.masterSl) + ' $' : null, fName: 'TP', fWert: fu.plus, tip: `Master trifft den Stop Loss${fu.slPkt != null ? ` (${pkt(fu.slPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-TP` }] : null
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
@@ -47927,9 +47946,9 @@
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
         ${fuZelle || artZelle}
-        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
-        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
-        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>${paare}
+        <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${paarL ? ' mit-pz' : ''}${pzwZ('tp')}>${paarL ? pzPaarZelle(paarL[0]) : p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
+        <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${paarL ? ' mit-pz' : ''}${pzwZ('sl')}>${paarL ? pzPaarZelle(paarL[1]) : p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
+        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
       </div>`
     }
     return `
@@ -80739,7 +80758,7 @@
   function apgHedgePaare(root, je, x){
     const warten = new Set((x.wartenListe || []).map(e => String(e.z && e.z.plan_id)))
     root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
-      if(r.querySelector('.pz-paare')) return
+      if(r.querySelector('.pz-paare, .pz-pz')) return
       const z = je.get(String(r.dataset.planId)); if(!z || !AHF_ART_KURZ[z.hedge_art]) return
       const vs = z.hedge_vorschau && typeof z.hedge_vorschau === 'object' ? z.hedge_vorschau : {}
       const pass = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? Number(vs.tp_eur) : null, blow = vs.blow_eur != null ? Number(vs.blow_eur) : null
@@ -80748,13 +80767,17 @@
       if(!z.hedge_frei) hinweis = warten.has(String(z.plan_id))
         ? `<button type="button" class="pz-frei" data-apg-frei="1" title="Bestätigt, aber der Fusion-Hedge ist noch nicht freigegeben — ohne Freigabe startet der Trade nicht. Klick: zum Block „Hedge-Freigabe offen“">⏳ wartet auf Hedge-Freigabe →</button>`
         : '<span class="pz-frei leise" title="✓ bestätigt den Trade und gibt den Hedge in einem Schritt frei">✓ gibt den Hedge mit frei</span>'
-      const d = document.createElement('div')
-      d.innerHTML = pzPaareHtml([
+      // KARTE EINZEILIG (Finn 30.10.2026 ~08:25): Paare in die Spalten TP / SL (pzPaarZelle); als eigene Zeile bleibt nur der Freigabe-Hinweis
+      const liste = [
         { wo: 'tp', mName: 'TP', mWert: tp, fName: 'SL', fWert: pass, tip: 'Master trifft den Take Profit → Fusion schließt mit Verlust (Pass)' },
         sl ? { wo: 'sl', mName: 'SL', mWert: sl, fName: 'TP', fWert: blow, tip: 'Master trifft den Stop Loss → Fusion schließt mit Gewinn' }
-           : { wo: 'sl', mName: 'Blow', mText: 'Konto weg', fName: 'TP', fWert: blow, tip: 'Konto geblowt (Liquidation) → Fusion schließt mit Gewinn und deckt den Kontowert' }], hinweis)
+           : { wo: 'sl', mName: 'Blow', mText: 'Konto weg', fName: 'TP', fWert: blow, tip: 'Konto geblowt (Liquidation) → Fusion schließt mit Gewinn und deckt den Kontowert' }]
+      const zTp = r.querySelector('.pz-tp'), zSl = r.querySelector('.pz-sl')
+      if(zTp && zSl){ zTp.innerHTML = pzPaarZelle(liste[0]); zSl.innerHTML = pzPaarZelle(liste[1]); zTp.classList.add('mit-pz'); zSl.classList.add('mit-pz'); zTp.classList.remove('is-leer'); zSl.classList.remove('is-leer') }
+      r.querySelectorAll('.ahf-kurz').forEach(c => c.remove())   // dieselben Zahlen stehen jetzt in TP / SL, „Freigabe offen" im Hinweis
+      if(!hinweis) return
+      const d = document.createElement('div'); d.innerHTML = `<div class="pz-paare">${hinweis}</div>`
       const box = d.firstElementChild; if(!box) return
-      r.querySelectorAll('.ahf-kurz').forEach(c => c.remove())   // dieselben Zahlen stehen jetzt in den Paaren, „Freigabe offen" im Hinweis
       r.appendChild(box)
       box.querySelector('[data-apg-frei]')?.addEventListener('click', ev => { ev.stopPropagation()
         const ziel = document.getElementById('ahf-root'); try{ window._ahfOeffnen?.(true) }catch(_){}
