@@ -69425,7 +69425,21 @@
    * heute/den nächsten Lauf-Tag. Ist der Tageslauf heute schon vorbei, würfelt er die neuen Zeilen gleich (nur Zeilen ohne start_um,
    * deterministisch wie die PC-Tabs) und legt bei SCHARF die Pläne an. Ausgelassene IDs (ids_aus), Konten ohne Haken (wd_farm) und
    * archivierte bleiben draußen — dieselben Regeln wie 🎲 Würfeln. */
-  const WD_AUTO_SCHREIBER = new Set(['Finn + Pascal', 'Pascal'])
+  /* PLANER-RECHTE (Master/S4 30.10.2026: in HT schreiben in den Planern nur ADMIN_EMAILS + admin_voll — „Finn + Pascal", „Pascal" — und
+   * Verwalter-Gruppen in ihrer Sicht): GET /admin/planer-rechte → {ok, schreiben}. Alles andere (404 vor dem Deploy, Netz, kein Login) = false,
+   * fail-closed. 5 min gemerkt. Gilt hier nur für das automatische Eintragen; die Railway-Schreibrouten prüfen dieselbe Regel selbst. */
+  let _wdRechte = { at: 0, schreiben: false }
+  async function wdPlanerSchreiben(){
+    if(Date.now() - _wdRechte.at < 5 * 60000) return _wdRechte.schreiben
+    let ok = false
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(tok){ const r = await fetch(`${WATCHER_HOME}/admin/planer-rechte`, { headers: { 'sb-token': tok } }); const d = r.ok ? await r.json().catch(() => ({})) : {}; ok = !!(d && d.ok && d.schreiben === true) }
+    }catch(_){ ok = false }
+    _wdRechte = { at: Date.now(), schreiben: ok }
+    return ok
+  }
   async function wdAutoEintragen(tag){
     const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD)
     if(!r.aktiv || !j || _wd.busy || _wd.autoLaeuft || Date.now() - (_wd.autoAt || 0) < 5 * 60000) return
@@ -69434,10 +69448,9 @@
     if(typeof window._admNurGruppe === 'function' && window._admNurGruppe()) return
     _wd.autoLaeuft = true; _wd.autoAt = Date.now()
     try{
-      // PLANER SCHREIBEN NUR MASTER-LOGINS (Master 30.10.2026: „in HT dürfen nur ‚Finn + Pascal' und ‚Pascal' in den Planern schreiben, alle
-      // anderen nur ansehen"): vorläufig am Login-Namen, bis das Backend ein Feld liefert (S4)
-      let ich = ''; try{ const { data: { user } } = await supabase.auth.getUser(); ich = String((user && user.user_metadata && user.user_metadata.name) || '').trim() }catch(_){}
-      if(!WD_AUTO_SCHREIBER.has(ich)) return
+      // PLANER SCHREIBEN NUR MIT RECHT (Master 30.10.2026: „in HT dürfen nur ‚Finn + Pascal' und ‚Pascal' in den Planern schreiben, alle
+      // anderen nur ansehen") — vom Server (S4, /admin/planer-rechte), nicht prüfbar = nichts schreiben
+      if(!(await wdPlanerSchreiben())) return
       const e = await wdAlleEintragen(tag, { nurUngewuerfelt: true, nurSicht: true })
       if(e.fehler || !(e.neu || e.aktualisiert)) return
       let txt = `Automatisch eingetragen: ${e.neu || 0} ID${e.neu === 1 ? '' : 's'} neu, ${e.aktualisiert || 0} Zeile${e.aktualisiert === 1 ? '' : 'n'} um neue Konten ergänzt`
