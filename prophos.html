@@ -49974,6 +49974,45 @@
     return wartbar && seitMs <= (r.grund === 'terminal_heilt' ? 180000 : 90000)
   }
   window._mt5OrderWiederholen = mt5OrderWiederholen   // Test-Haken
+  /* ECHO-FENSTER VOR DER ORDER (30.10.2026, Befund Slave 8: zwei Echo-mit-Hedge-Master liefen ohne Hedge — FundingPips 50k und
+   * FundedNext, Order 23:07 / 00:05 UTC). plan?file (öffnet das Trade-Fenster im plans.json des Panels) ging ungeprüft raus: mtcApi wirft
+   * nie, das catch war tot, ein 503/Zeitlimit blieb unsichtbar; master-order feuerte bei alive && !note, ohne dass der Copier ein offenes
+   * Fenster meldete. Jetzt: Antwort prüfen (ok + Plan geplant/laufend), sonst gestreut wiederholen; die Order geht erst raus, wenn der
+   * Copier für DIESE config status.armed === true meldet (copier.py: Fenster offen oder immer_scharf), höchstens ECHO_SCHARF_MAX_MS
+   * warten — sonst keine Order, sondern Start-Fehler. REIN bis auf echoFensterSchreiben (Test-Haken window._echoFenster). */
+  const ECHO_SCHARF_MAX_MS = 30000
+  function echoFensterOk(r){
+    const st = String(((r && r.plan) || {}).status || '')
+    return !!(r && r.ok === true && (st === 'geplant' || st === 'laufend'))
+  }
+  function echoFensterGrund(r){
+    if(!r) return 'keine Antwort vom Panel'
+    if(r.ok === true) return `Panel legte das Fenster mit Status „${String(((r.plan) || {}).status || 'leer')}" an`
+    return String(r.msg || r.error || 'Panel meldet Fehler ohne Text').slice(0, 160)
+  }
+  // 'scharf' | 'warten' | 'fehlt' — seitMs = seit wann das Terminal bereit ist (alive, keine note). altLaufend (Prüf-Agent 30.10.2026):
+  // das Panel gab einen ALTEN „laufend"-Plan zurück (upsert_plan setzt ihn nicht auf „geplant") — bei flachem Master beendet ihn der
+  // Plan-Ticker des Panels binnen 5 s, das Fenster wäre vor dem Fill zu. Dann gilt armed erst, wenn ein neues „geplant" bestätigt ist.
+  function echoScharfUrteil(inst, seitMs, altLaufend){
+    const st = (inst && inst.status) || {}
+    const flach = !((Array.isArray(st.master_positions) ? st.master_positions : []).length)
+    if(st.armed === true && !(altLaufend && flach)) return 'scharf'
+    return seitMs > ECHO_SCHARF_MAX_MS ? 'fehlt' : 'warten'
+  }
+  async function echoFensterSchreiben(file, multiplier, versuche){
+    let r = null
+    for(let i = 0; i < (versuche || 3); i++){
+      if(i) await new Promise(res => setTimeout(res, 1500 + Math.random() * 1500))   // gestreut (Jitter-Regel)
+      try{
+        r = await window.mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ multiplier: String(Number(multiplier)) }) })
+      }catch(e){ r = { ok:false, error: String((e && e.message) || e) } }
+      if(echoFensterOk(r)) return { ok:true, r }
+    }
+    return { ok:false, r, grund: echoFensterGrund(r) }
+  }
+  window._echoFenster = { ok: echoFensterOk, grund: echoFensterGrund, urteil: echoScharfUrteil, schreiben: echoFensterSchreiben, MAX_MS: ECHO_SCHARF_MAX_MS }   // Test-Haken
   async function tpPreflightMt5(plan){
     _pfMt5StopTimer()
     // Verdrängt dieser Check einen noch offenen Remote-Lauf eines ANDEREN
@@ -50328,12 +50367,17 @@
             }
           }catch(e){ console.warn('[pf/mt5] route persist:', e) }
         }
-        try{
-          await window.mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ multiplier: String(Number(plan.multiplier)) }) })
-        }catch(_){}
+        // Trade-Fenster für den Copier (30.10.2026, s. echoFensterSchreiben): Antwort geprüft, bis zu 3 Versuche gestreut — bleibt es zu,
+        // gibt es keinen Ticker und keine Order, sondern einen Start-Fehler mit genau dieser Ursache
+        const fen = await echoFensterSchreiben(file, plan.multiplier, 3)
+        if(!fen.ok){
+          const grund = `Echo-Trade-Fenster nicht offen (${fen.grund}) — nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Panel/Copier prüfen, dann „Erneut versuchen".`
+          _pfSet('m5term', 'err', escapeHtml(grund))
+          hardFail = true
+          if(vonTick) await sfMelden(plan, { schritt: 'm5fenster', msg: grund, unklar: false })
+        }
 
+        if(!hardFail){
         // Bereitschafts-Ticker: eigener instances-Fetch alle 1s (25.08.2026,
         // Finns Tempo-Wunsch — vorher 3s, zusammen mit dem Status-Takt kostete
         // das bis zu 6s Bot-Verzögerung), scope-gebunden (Abbruch bei
@@ -50341,6 +50385,8 @@
         _pfSet('m5term', 'warn', '⏳ Terminal startet, Login automatisch…')
         const t0 = Date.now()
         let _pfTickBusy = false
+        let scharfAb = 0, fensterNeuAb = 0   // Scharf-Beweis (30.10.2026): seit wann bereit, wann plan?file erneut
+        let altLaufend = String((((fen.r || {}).plan) || {}).status || '') === 'laufend'   // s. echoScharfUrteil
         _pfMt5Timer = setInterval(async () => {
           // Überlappungs-Riegel (Review-Fund 15.08.2026): dauert ein Tick länger
           // als 3s (langsamer instances-Fetch), darf kein zweiter parallel laufen —
@@ -50383,6 +50429,35 @@
             return
           }
           if(inst2 && inst2.alive && !note){
+            // SCHARF-BEWEIS (30.10.2026, s. echoFensterSchreiben): Terminal bereit heißt noch nicht, dass der Copier hedgt — erst mit
+            // status.armed === true für diese config geht es weiter (Bot-Order wie Hand-Trade). Solange es fehlt, plan?file gestreut alle
+            // 8–12 s erneut (ein Fenster, das das Panel vor dem Fill schon wieder auf „beendet" gesetzt hat, wird so neu angelegt);
+            // nach ECHO_SCHARF_MAX_MS keine Order, sondern Start-Fehler.
+            if(!scharfAb) scharfAb = Date.now()
+            const urteil = echoScharfUrteil(inst2, Date.now() - scharfAb, altLaufend)
+            if(urteil === 'fehlt'){
+              _pfMt5StopTimer()
+              if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null   // nie später abfeuern
+              const grund = `Copier nicht scharf — ${Math.round(ECHO_SCHARF_MAX_MS / 1000)} s nach dem Terminal-Start meldet Echo für diese Config kein offenes Trade-Fenster (armed ${String(((inst2.status) || {}).armed)}). Nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Copier-Log prüfen, dann „Weiter" → „Starten" erneut.`
+              _pfSet('m5term', 'err', escapeHtml(grund))
+              const feS = document.getElementById('pf-final')
+              if(feS){ feS.style.display = 'block'; feS.className = 'pf-final err'; feS.textContent = '✗ Copier nicht scharf — es wurde NICHTS gesendet.' }
+              _pfRemoteMelde(plan.id, { ok:false, check_fail:true, msg: grund })
+              _pfCheckStatus[String(plan.id)] = { state: 'issue', at: Date.now() }   // Plakette nicht auf „Ready" stehen lassen (Prüf-Agent)
+              _pfStatusSave()
+              try{ renderTradePlans() }catch(_){}
+              if(vonTick) await sfMelden(plan, { schritt: 'm5scharf', msg: grund, unklar: false })
+              return
+            }
+            if(urteil === 'warten'){
+              if(Date.now() >= fensterNeuAb){
+                if(fensterNeuAb) echoFensterSchreiben(file, plan.multiplier, 1)   // nicht beim ersten Tick (eben geschrieben)
+                  .then(x => { if(x && x.ok && String(x.r.plan.status) === 'geplant') altLaufend = false }, () => {})
+                fensterNeuAb = Date.now() + 8000 + Math.random() * 4000   // gestreut (Jitter-Regel)
+              }
+              _pfSet('m5term', 'warn', `⏳ Terminal bereit — ${altLaufend ? 'altes Trade-Fenster („laufend") wird erneuert' : 'warte, bis der Copier das Trade-Fenster scharf meldet'}… (${Math.round((Date.now() - scharfAb) / 1000)}s)`)
+              return
+            }
             _pfMt5StopTimer()
             const fe = document.getElementById('pf-final')
             // Bot-Order gemerkt? Dann übernimmt jetzt der Bot (15.08.2026, Finns
@@ -50527,6 +50602,7 @@
           }
           }finally{ _pfTickBusy = false }
         }, 1000)
+        }
       }
     }
 
