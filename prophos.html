@@ -52380,7 +52380,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1925'
+  const OS_TAB_BUILD = '2026-09-22.1926'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60238,7 +60238,12 @@
     const pcAus = new Map()   // uid → { pc, alt_s, konten: [] }
     const tplPcAus = uid => { const z = _pcStand.daten ? _pcStand.daten[String(uid)] : null; if(!z) return null
       const alt = Number(z.alt_s) || 0, aus = z.aus != null ? !!z.aus : alt >= (Number(_pcStand.ausS) || 600); return aus ? { pc: z.pc_name || '', alt_s: alt } : null }
+    // KONTOART (Fix BRAUCHT-DICH-FILTER, Finn auf .1925: unter „Challenge Planer → CFD" standen Apex/Topstep/FTMO-Futures-Zeilen): im
+    // Challenge Planer · CFD/Futures liefert apIdsDaten D.artPasst (apArtVon nach Firma) — Zeilen der anderen Art fallen hier raus, damit auch
+    // Zähler und ID-Gruppen stimmen. PC-aus-Bündel (Firma „PC") und Zeilen ohne Firma bleiben in beiden Reitern. Ohne D.artPasst wie bisher.
+    const artPasst = typeof (D && D.artPasst) === 'function' ? D.artPasst : null
     const add = (uid, name, z) => { const k = String(uid || ''); if(!k || (ids && !ids.has(k))) return
+      if(artPasst && z && z.art !== 'pc_aus' && String(z.firma || '').trim() && !artPasst(z)) return
       if(!je.has(k)) je.set(k, { uid: k, name: name || '', zeilen: [] }); const o = je.get(k); if(!o.name && name) o.name = name; o.zeilen.push(z) }
     const roh = D.roh, tagGleich = roh && String(roh.tag || '') === D.tag, konten = new Set(), zielIds = new Set()   // zielIds: Konto-IDs mit erreichtem Ziel
     if(currentUserId){
