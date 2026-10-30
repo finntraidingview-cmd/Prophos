@@ -5139,7 +5139,7 @@
   #dashboard-view .wdl-ug + .wdl-ug{margin-top:0;border-top:none}
   /* Phase im Abschnitt „Bestanden" als Klartext „Phase 1 → Phase 2" (09.10.2026) + fremde Konten „im Login von …" */
   #dashboard-view .wdl-bst-phase{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--bg);border:1px solid var(--border-soft);font-size:11px;font-weight:600;color:var(--ink-2);white-space:nowrap}
-  #dashboard-view .wdl-bst-fremd{font-size:11px;color:var(--sub);white-space:nowrap}
+  #dashboard-view .wdl-bst-fremd{font-size:11px;line-height:1.25;color:var(--sub);white-space:normal;text-align:right}   /* umbricht statt abzuschneiden (30.10.2026, Jacob, Marco) */
   /* „🎯 bestanden · Phase 1 → Phase 2" (09.10.2026) ist länger: in der Ergebnis-Zelle eigene Zeile, Knöpfe darunter */
   #dashboard-view .wdl-z-akt:has(.wdl-bestanden){flex-wrap:wrap;row-gap:4px}
   #dashboard-view .wdl-z-akt > span:has(> .wdl-bestanden){flex-basis:100%;text-align:right}
@@ -5173,6 +5173,15 @@
      Name ab 100 px — zusammen 908 px statt 862 */
   #dashboard-view .wdl-tab-bst .wdl-z{grid-template-columns:minmax(100px,1fr) 140px 216px 80px 88px 116px 96px;grid-template-areas:"wer ri mi konto datum pl zeit"}
   #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer ri mi konto datum pl pl" "wer ri mi zeit zeit zeit zeit"}
+  /* NOTIZ JE KONTO IN REVIEW (Finn 30.10.2026: „OK, warten auf KYC"): eigene Spalte neben dem Status; dafür Mitte, Tage und Status schmaler, Zeit breiter für „im Login von …" */
+  #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z{grid-template-columns:minmax(90px,1fr) 140px 168px 36px 76px 68px minmax(100px,1.2fr) 112px;column-gap:10px;grid-template-areas:"wer ri mi konto datum pl notiz zeit"}
+  #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z.wdl-z-sw-da{grid-template-areas:"wer ri mi konto datum pl notiz zeit" "sw sw sw sw sw sw sw sw"}
+  #dashboard-view .wdl-z-notiz{grid-area:notiz;min-width:0;font-size:11.5px}
+  #dashboard-view .wdl-z > .wdl-z-notiz{white-space:normal;overflow:visible}   /* schlägt „.wdl-z > span → nowrap" (1,1,1): lange Notiz bricht um */
+  #dashboard-view .wdl-bst-notiz{display:block;width:100%;background:none;border:0;padding:0;font:inherit;font-size:11.5px;line-height:1.3;color:var(--ink-2);text-align:left;cursor:text;overflow-wrap:anywhere}
+  #dashboard-view .wdl-bst-notiz.ist-leer{color:var(--sub);cursor:pointer}
+  #dashboard-view .wdl-bst-notiz.ist-leer:hover{color:var(--violet)}
+  #dashboard-view .wdl-bst-notiz-feld{width:100%;box-sizing:border-box;font:inherit;font-size:11.5px;padding:2px 6px;border:1px solid var(--violet);border-radius:6px;background:var(--surface);color:var(--ink);outline:none}
   #dashboard-view .wdl-z-datum{grid-area:datum;text-align:right;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
   #dashboard-view .wdl-z-datum b{font-weight:600;color:var(--ink-2)}   /* „heute 17:06" fett — der ist heute reingelaufen */
   #dashboard-view .wdl-z-kopf .wdl-z-datum{color:inherit;font-size:inherit}
@@ -5343,6 +5352,10 @@
     #dashboard-view .wdl-tab-bst .wdl-z-rvh{grid-template-areas:"wer wer wer wer" "datum datum datum datum" "ri mi mi mi" "pl pl pl pl" "zeit zeit zeit zeit"}
     #dashboard-view .wdl-z-datum{text-align:left;padding-left:14px}
     #dashboard-view .wdl-tab-bst .wdl-z-kopf .wdl-z-datum{display:none}
+    #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z{grid-template-columns:84px minmax(0,1fr) minmax(0,1fr) 88px;column-gap:4px;grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit" "notiz notiz notiz notiz"}
+    #dashboard-view .wdl-tab-bst.wdl-tab-sek-review .wdl-z.wdl-z-sw-da{grid-template-areas:"wer wer wer pl" "datum datum datum datum" "ri mi mi zeit" "notiz notiz notiz notiz" "sw sw sw sw"}
+    #dashboard-view .wdl-tab-bst .wdl-z-kopf .wdl-z-notiz{display:none}
+    #dashboard-view .wdl-z-notiz{padding-left:14px}
     #dashboard-view .wdl-z-lauf .wdl-z-pl{font-size:14px}
     #dashboard-view .wdl-z > .wdl-sp{gap:6px;padding:0 4px}
     #dashboard-view .wdl-sp small i:not(:only-child){display:none}   /* Handy: nur der Betrag, das Label nur ohne Betrag */
@@ -36738,7 +36751,7 @@
       const r = await fetch(`${WATCHER_HOME}/admin/handarbeit?ansicht=admin${gq}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
       const d = await r.json().catch(() => null)
       // Radar-Abschnitt Bestanden nutzt _hand.d (09.10.2026) — nach dem Laden neu zeichnen, wenn der Radar offen ist
-      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); bstLokalAnwenden(d); try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) await archivCloudAbgleich() }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
+      if(r.ok && d && d.ok){ _hand.d = d; _hand.at = Date.now(); _hand.fehler = ''; handZielAbgleich(d); bstLokalAnwenden(d); try{ bstNotizAbgleich(d) }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) await archivCloudAbgleich() }catch(_){} try{ if(typeof wdlAktiv === 'function' && wdlAktiv()) wdlRender() }catch(_){} } else _hand.fehler = (d && d.error) || ('HTTP ' + r.status)
     }catch(e){ _hand.fehler = (e && e.message) || String(e) }
     finally{ _hand.laedt = false; handKnopf(); if(document.getElementById('handModal')?.classList.contains('open')) handRender() }
   }
@@ -37320,6 +37333,53 @@
   window._wdlFcfdZielErreicht = wdlFcfdZielErreicht
   window._wdlFcfdZielVonPlan = pid => wdlFcfdZielErreicht(((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === String(pid)))
   // Konto schon archiviert (Nachfolger angelegt, Archiv der EIGENEN ID): fremde IDs kennt nur der Server (/admin/live-trades konto.archiviert), eigene das lokale Archiv
+  /* NOTIZ JE KONTO IN REVIEW (Finn 30.10.2026: „Bei Review noch Notizen schreiben können, zum Beispiel bei Marc: ‚OK, warten auf KYC'"): accounts.review_notiz, gelesen aus
+   * /admin/handarbeit (review_notizen, nur Konten der Sicht), geschrieben über PATCH /admin/wd-plaene. Reine Anzeige, kein Planer, kein Abhaken. Tippen überlebt den Neuaufbau: der
+   * Text liegt in _bstNotizEdit, wdlRender zeichnet das Feld wieder und fokussiert es. _bstNotizNeu hält den Stand, bis die Serverliste ihn führt. */
+  const BST_NOTIZ_MAX = 120, BST_NOTIZ_HALTEN_MS = 120000
+  const _bstNotizNeu = new Map()   // konto_id → { text, at }
+  let _bstNotizEdit = null         // { kid, uid, text }
+  function bstNotizText(kid){
+    const o = _bstNotizNeu.get(String(kid)); if(o) return o.text
+    return String((((typeof _hand !== 'undefined' && _hand.d) || {}).review_notizen || {})[String(kid)] || '')
+  }
+  function bstNotizZelle(kid, uid){
+    if(!kid) return ''
+    if(_bstNotizEdit && _bstNotizEdit.kid === String(kid)) return `<span class="wdl-z-notiz"><input type="text" class="wdl-bst-notiz-feld" data-wdl-bst-notiz-feld="${escapeHtml(String(kid))}" maxlength="${BST_NOTIZ_MAX}" value="${escapeHtml(_bstNotizEdit.text)}" placeholder="Notiz" aria-label="Notiz zum Konto"></span>`
+    // Ohne Serverstand (Handarbeit noch nicht geladen) kein „+ Notiz": ein leeres Feld könnte eine vorhandene Notiz überschreiben
+    if(!_bstNotizNeu.has(String(kid)) && !(typeof _hand !== 'undefined' && _hand.d && _hand.d.review_notizen)) return '<span class="wdl-z-notiz"></span>'
+    const t = bstNotizText(kid)
+    return `<span class="wdl-z-notiz"><button type="button" class="wdl-bst-notiz${t ? '' : ' ist-leer'}" data-wdl-bst-notiz="${escapeHtml(String(kid))}" data-wdl-bst-notiz-uid="${escapeHtml(String(uid || ''))}" title="${t ? 'Notiz bearbeiten' : 'Notiz zu diesem Konto schreiben'}">${t ? escapeHtml(t) : '+ Notiz'}</button></span>`
+  }
+  function bstNotizAbgleich(d){
+    const am = (d && d.review_notizen) || {}, jetzt = Date.now()
+    for(const [kid, o] of [..._bstNotizNeu]){ if(String(am[kid] || '') === o.text || jetzt - o.at > BST_NOTIZ_HALTEN_MS) _bstNotizNeu.delete(kid) }
+  }
+  async function bstNotizSpeichern(kid, uid, roh){
+    const text = String(roh || '').trim().slice(0, BST_NOTIZ_MAX)
+    if(text === bstNotizText(kid)){ wdlRender(); return }
+    const vorher = _bstNotizNeu.get(kid)
+    _bstNotizNeu.set(kid, { text, at: Date.now() }); wdlRender()
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const fremd = !!uid && String(uid) !== String(currentUserId || '')
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${fremd ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'review_notiz', account_id: kid, notiz: text }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      _bstNotizNeu.set(kid, { text: String(d.notiz || ''), at: Date.now() })
+      try{ handLaden() }catch(_){}
+    }catch(e){
+      if(vorher) _bstNotizNeu.set(kid, vorher); else _bstNotizNeu.delete(kid)
+      if(typeof atToast === 'function') atToast('Notiz nicht gespeichert: ' + ((e && e.message) || e), 'end')
+      wdlRender()
+    }
+  }
+  function bstNotizFertig(i){
+    if(!_bstNotizEdit || _bstNotizEdit.kid !== i.getAttribute('data-wdl-bst-notiz-feld')) return
+    const { kid, uid } = _bstNotizEdit, txt = i.value
+    _bstNotizEdit = null
+    bstNotizSpeichern(kid, uid, txt)
+  }
   function wdlKontoArchiviert(t){
     if(!t) return false
     if((t.konto || {}).archiviert) return true
@@ -38322,6 +38382,7 @@
             + (fehlt ? bstHeuteZelle(x.uid, x.kid, x.e4) : bstDatumZelle(x.seit, bstLetzterTrade(x.uid, x.kid, x.e4), x.firma))   // Tage sammeln: „Heute getradet" statt Bestanden (22.10.2026)
             + `<span class="wdl-z-pl ${fehlt ? 'wdl-bst-warte' : 'wdl-bst-ok'}" title="${escapeHtml(statusTip)}">${x.eigen ? zielStationChipHtml(x.a).replace(/>Tage sammeln \d+\/\d+</, '>Tage sammeln<') : fehlt ? `<span class="type-badge acc-ziel-chip acc-tage-chip" title="Mindesttage: ${Math.min(mt.count, mt.target)} von ${mt.target}">Tage sammeln</span>` : `<span class="type-badge acc-ziel-chip">Review</span>`}${mini ? `<small class="wdl-bst-mini">${escapeHtml(mini.status === 'open' ? 'Mini läuft' : 'Mini ' + miniUhr)}</small>` : ''}</span>`
             + `<span class="wdl-z-zeit">${knopf}</span>`
+            + (fehlt ? '' : bstNotizZelle(x.kid, x.uid))
             + '</div>' }
         })
     }
@@ -38329,7 +38390,7 @@
     // die komplett Ready"): Ziel erreicht, Mindesttage fehlen → „Tage farmen" (amber, der Auto-Planer legt je Handelstag einen Mini);
     // Ziel + Tage voll → „Bestanden · Phase umstellen" mit dem Nachfolger-Knopf. Dieselben Zeilen (bstZeilen), nur getrennt nach fehlt.
     const bstTab = (zz, titel, tip, klasse, datumKopf) => !zz.length ? '' : `<div class="wdl-tab wdl-tab-konto wdl-tab-bst ${klasse}"><div class="wdl-z wdl-z-kopf"><span class="wdl-z-wer" title="${tip}">${titel} · ${zz.length}</span><span class="wdl-z-ri">Phase</span>`
-        + ['Balance → Ziel', 'Tage', datumKopf || 'Bestanden', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'datum', 'pl', 'zeit'][i]}">${x}</span>`).join('') + `</div>${zz.map(z => z.html).join('')}</div>`
+        + ['Balance → Ziel', 'Tage', datumKopf || 'Bestanden', 'Status', ''].map((x, i) => `<span class="wdl-z-${['mi', 'konto', 'datum', 'pl', 'zeit'][i]}">${x}</span>`).join('') + (klasse === 'wdl-tab-sek-review' ? '<span class="wdl-z-notiz">Notiz</span>' : '') + `</div>${zz.map(z => z.html).join('')}</div>`
     // EINE GRUPPE „BESTANDEN" (.1509, Finn 13.10.2026 18:42 Dubai, Radar in Moritz' Login: „es gibt ‚Bestanden · Phase umstellen' und
     // darüber nochmal eine Gruppe für bestandene Trades — beide in eine Gruppe, nicht zwei, die genau das Gleiche sind"): die
     // Untergruppe „Bestanden" in Überprüfen ist weg. Hier stehen jetzt beide Schritte untereinander: oben die bestandenen Trades zum
@@ -38428,7 +38489,7 @@
       const tsVon = t => bstZeitVon((kontoVon(t) || {}).zielErreichtAt, t).ts
       const zeileDatum = t => zeile(t, '').replace(/<\/div>$/, bstDatumZelle((kontoVon(t) || {}).zielErreichtAt, t, (t.konto || {}).firma) + '</div>')
       const nachZiel = arr => [...arr].map(t => ({ t, ts: tsVon(t) })).sort(bstTsSort).map(x => x.t)
-      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, ts: tsVon(t), html: zeileDatum(t) }))
+      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, ts: tsVon(t), html: zeileDatum(t).replace(/<\/div>$/, bstNotizZelle(String(t.konto_id || ''), wdlUid(t)) + '</div>') }))
       let rvh = []; try{ rvh = rvhZeilen(alleTr) }catch(e){ console.warn('[radar] Rest von Hand', (e && e.message) || e); rvh = [] }
       const kaesten = gruppe('Trade abhaken', nachZiel(bestTr || []), ['Ergebnis', 'Konto · Boden → Ziel', 'Bestanden', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden', null, bestAlle || [], null, zeileDatum)
         + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
@@ -38524,11 +38585,16 @@
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
+    if(_bstNotizEdit){ const i = liste.querySelector('[data-wdl-bst-notiz-feld]'); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } else _bstNotizEdit = null }
     if(_wdlManNotiz){ const i = liste.querySelector('[data-wdl-man-notiz]'); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } else _wdlManNotiz = null }
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
   document.getElementById('wdl-liste')?.addEventListener('click', ev => {
+    // Notiz je Konto in Review (30.10.2026): Klick öffnet das Feld in der Zeile; Klick ins Feld bleibt dort
+    if(ev.target.closest('[data-wdl-bst-notiz-feld]')) return
+    const bn = ev.target.closest('[data-wdl-bst-notiz]')
+    if(bn){ const kid = bn.getAttribute('data-wdl-bst-notiz'); _bstNotizEdit = { kid, uid: bn.getAttribute('data-wdl-bst-notiz-uid') || '', text: bstNotizText(kid) }; wdlRender(); return }
     // REST VON HAND (20.10.2026): „→ Planer", „Abhaken" (derselbe Dialog wie die Erledigt-Zeilen, eigene/fremde Konten) und „Balance lesen"
     const rab = ev.target.closest('[data-wdl-rvh-abhaken]')
     if(rab){
@@ -38661,6 +38727,18 @@
     _wdlManNotiz = null
     wdlManuellSchreiben(pid, txt, schritt)
   }
+  // Notiz je Konto in Review (30.10.2026): Enter oder Klick daneben speichert, Esc verwirft, leer löscht
+  document.getElementById('wdl-liste')?.addEventListener('input', ev => { const i = ev.target.closest && ev.target.closest('[data-wdl-bst-notiz-feld]'); if(i && _bstNotizEdit) _bstNotizEdit.text = i.value })
+  document.getElementById('wdl-liste')?.addEventListener('keydown', ev => {
+    const i = ev.target.closest && ev.target.closest('[data-wdl-bst-notiz-feld]'); if(!i) return
+    ev.stopPropagation()
+    if(ev.key === 'Enter'){ ev.preventDefault(); bstNotizFertig(i) }
+    else if(ev.key === 'Escape'){ ev.preventDefault(); _bstNotizEdit = null; wdlRender() }
+  })
+  document.getElementById('wdl-liste')?.addEventListener('focusout', ev => {
+    const i = ev.target.closest && ev.target.closest('[data-wdl-bst-notiz-feld]'); if(!i) return
+    setTimeout(() => { if(document.contains(i) && _bstNotizEdit) bstNotizFertig(i) }, 0)   // Neuaufbau nimmt das Feld aus dem DOM: dann nicht speichern, wdlRender zeichnet es wieder
+  })
   document.getElementById('wdl-liste')?.addEventListener('keydown', ev => {
     const i = ev.target.closest && (ev.target.closest('[data-wdl-man-notiz]') || ev.target.closest('[data-wdl-man-schritt]')); if(!i) return
     const zelle = i.closest('.wdl-z-akt'), inp = zelle && zelle.querySelector('[data-wdl-man-notiz]'); if(!inp) return

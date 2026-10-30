@@ -14301,6 +14301,24 @@ _hand_cache = {}
 _hand_lock = threading.Lock()
 
 
+REVIEW_NOTIZ_MAX = 120
+
+
+def _review_notizen_lesen():
+    """accounts.review_notiz (sql/2026-10-30_review_notiz.sql) → {konto_id: Text}. Ein Lesefehler kostet nur die Notizen, nie den Radar."""
+    try:
+        return {str(a.get("id")): a.get("review_notiz") for a in _sb_all("accounts", {"select": "id,review_notiz", "review_notiz": "not.is.null"}) or []}
+    except Exception as e:
+        print(f"[handarbeit] ⚠️ Notizen: {type(e).__name__}", flush=True)
+        return {}
+
+
+def hand_review_notizen(notizen, radar_best, reviews):
+    """REIN RECHNEND (testbar): nur Notizen von Konten, die dieser Login im Radar sieht (Bestanden-Zeilen + Trades in Überprüfen) — keine fremde Gruppe."""
+    sichtbar = {str(z.get("konto_id")) for z in radar_best or () if z.get("konto_id")} | {str(p.get("master_account_id")) for p in reviews or () if p.get("master_account_id")}
+    return {k: v for k, v in (notizen or {}).items() if v and k in sichtbar}
+
+
 def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt, lauf=None, tage_je=None):
     """REIN RECHNEND (testbar): die vier Handarbeit-Gruppen. konten_ziel = accounts mit ziel_erreicht_at; reviews = trade_plans review
     (mit manuell); blown = trade_plans blown=true; letzte = {konto_id: (plan_id, started_at)} jüngster gestarteter Plan je Konto;
@@ -14490,7 +14508,7 @@ def admin_handarbeit():
         gelesen = gr.pop("planer_gelesen", 0)
         radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, ausgeblendet, datetime.now(timezone.utc), None, tage_je)["bestanden"]
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
-                   "planer_gelesen": gelesen, "radar_bestanden": radar_best}
+                   "planer_gelesen": gelesen, "radar_bestanden": radar_best, "review_notizen": hand_review_notizen(_review_notizen_lesen(), radar_best, reviews)}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
         alt = stand_alt_holen(("handarbeit", schluessel), e)    # Supabase kurz weg (09.10.2026) → letzter guter Stand dieser Sicht
@@ -14568,7 +14586,7 @@ def admin_wd_plaene():
                 else:
                     if akt in ("endlesung_stand", "balance_stand"):
                         tab, key = "order_signale", str(d.get("signal_id") or "").strip()
-                    elif akt in ("farm", "balance", "rest_planer", "rest_planer_weg"):
+                    elif akt in ("farm", "balance", "rest_planer", "rest_planer_weg", "review_notiz"):
                         tab, key = "accounts", str(d.get("account_id") or "").strip()
                     elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
                         tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
@@ -14906,6 +14924,21 @@ def admin_wd_plaene():
                 if "rest_planer_at" in str(getattr(getattr(e, "response", None), "text", "") or e):
                     return jsonify({"error": "Spalte accounts.rest_planer_at fehlt — sql/2026-10-20_accounts_rest_planer.sql einspielen"}), 409
                 return jsonify({"error": f"Feld nicht gesetzt ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "review_notiz":
+            # NOTIZ JE KONTO IN REVIEW (Finn 30.10.2026: „OK, warten auf KYC"): nur Anzeige im Radar, Besitz/Gruppe oben geprüft. Leer löscht.
+            aid = str(daten.get("account_id") or "").strip()
+            if len(aid) < 10:
+                return jsonify({"error": "account_id fehlt"}), 400
+            txt = str(daten.get("notiz") or "").strip()[:REVIEW_NOTIZ_MAX]
+            try:
+                rows = sb_update("accounts", {"id": f"eq.{aid}"}, {"review_notiz": txt or None})
+            except Exception as e:
+                if "review_notiz" in str(getattr(getattr(e, "response", None), "text", "") or ""):
+                    return jsonify({"error": "Spalte accounts.review_notiz fehlt — sql/2026-10-30_review_notiz.sql einspielen"}), 409
+                return jsonify({"error": f"Notiz nicht gespeichert ({type(e).__name__})"}), 502
+            with _hand_lock:
+                _hand_cache.clear()    # Radar lädt direkt danach, andere Geräte im nächsten Takt
+            return jsonify({"ok": True, "account_id": aid, "notiz": txt, "n": len(rows or [])})
         if daten.get("aktion") in ("endlesung_stand", "balance_stand"):
             # Stand eines Endlesungs-/Balance-Signals (der Mac liest fremde order_signale per RLS nicht)
             sid = str(daten.get("signal_id") or "").strip()
@@ -24358,7 +24391,8 @@ def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
 # /admin/auto-plan/start-protokoll, /admin/auto-plan/waage-start, alle GET. Fail-closed: Rechte nicht lesbar → 502, nichts geändert.
 # Grenze: eigene Pläne schreibt das Frontend teils direkt per supabase-js (RLS) — das deckt dieser Riegel nicht (Frontend graut aus, S3).
 # ansehen = Puls nur hinnavigieren, ändert nichts (Prüfung S4 zu 1e3a83ae)
-PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden", "ansehen")
+# review_notiz (30.10.2026): Radar-Notiz ändert nichts am Planer; jede ID schreibt ihre eigene, die Besitz-Prüfung der Route gilt weiter
+PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden", "ansehen", "review_notiz")
 # Nachholen verpasster Pläne (POST /admin/auto-plan/plan aktion nachholen) ruft sfTick in JEDEM PC-Tab automatisch — gesperrt fiele der Tab auf
 # start_um per supabase-js zurück, OHNE die Prüfungen von ap_nachhol_minute (Richtungsschutz, Abstände). Deshalb nie gesperrt.
 PLANER_PLAN_AUTOMATIK = ("nachholen",)
