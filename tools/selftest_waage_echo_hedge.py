@@ -115,8 +115,20 @@ def planer_unveraendert(src, ns):
     def fn(t, name):
         i = t.index(f"\ndef {name}(") + 1
         return t[i:t.find("\n\n\n", i)]
+    def ohne_gruppe(t):
+        """GRUPPE WIE HT (30.10.2026, Slave 3): ap_planen bekam den Parameter gruppe (Verwalter-Gruppe mit eigenem Stand) — der HT-Weg
+        (gruppe=None) muss Zeichen für Zeichen gleich bleiben. Vergleich ohne Docstring, Kommentare und Gruppen-Zeilen/-Zusätze."""
+        t = re.sub(r'^(def [^\n]*\n(?:[^\n]*\n)*?)\s+"""[\s\S]*?"""\n', r"\1", t, count=1)
+        out = []
+        for z in t.replace(", gruppe=None", "").split("\n"):
+            z = re.sub(r"\s+#.*$", "", z).replace(" and not gruppe", "")
+            if "gruppe" in z or not z.strip():
+                continue
+            out.append(" ".join(z.split()))
+        return "\n".join(out)
     if alt:
-        anders = [n for n in PLANER_FUNKTIONEN if fn(src, n) != fn(alt, n)]
+        anders = [n for n in PLANER_FUNKTIONEN
+                  if (ohne_gruppe(fn(src, n)) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else fn(src, n) != fn(alt, n))]
         ok(not anders, f"Planer-/Waage-Rechnung identisch mit {BASIS} ({anders or 'alle gleich'})")
     ok("ap_eh_richtungen_mischen" not in src and "eh_an" not in fn(src, "ap_planen"), "kein Würfel-Code, ap_planen kennt den Schalter nicht")
     W, N = ns["ap_klassen_waage"], ns["ap_waage_nachschub"]

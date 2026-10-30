@@ -79603,12 +79603,12 @@
       const P = _gp.probe && String(_gp.probe.gruppe_id) === String(g.gruppe_id) ? _gp.probe : null
       const zeile = `<div class="gp-leiste"><b>🤖 Gruppen-Planer ${escapeHtml(g.name || '')}</b>
         <span class="${g.aktiv ? 'gp-an' : 'gp-aus'}">${g.aktiv ? 'an' : 'aus'}</span>
-        <span>Echo mit Hedge · CFD · Start ${escapeHtml(z.von || '07:00')}–${escapeHtml(z.bis || '17:20')} dt · bestätigen unten</span>
+        <span>plant wie Hermann Technologies (Nachtlauf, eigene Long/Short-Waage) · bestätigen unten</span>
         <span>${lauf}</span>
         <span class="gp-r"><button type="button" class="btn btn-ghost" data-gp="probe:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Rechnet, wie er jetzt planen würde — legt nichts an">Probelauf</button>
           <button type="button" class="btn btn-ghost" data-gp="planen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant jetzt alle Konten ohne Plan für heute (unbestätigt)">Jetzt planen</button>
           <button type="button" class="btn btn-ghost" data-gp="morgen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant schon jetzt den nächsten Handelstag (unbestätigt) — Konten mit laufendem Trade bleiben draußen">Morgen vorplanen</button>
-          <button type="button" class="btn btn-ghost" data-gp="aktiv:${gid}" title="Automatisch ab ${escapeHtml(z.lauf || '06:00')} dt alle 15 min">${g.aktiv ? 'Ausschalten' : 'Einschalten'}</button></span></div>`
+          <button type="button" class="btn btn-ghost" data-gp="aktiv:${gid}" title="Nachtlauf dieser Gruppe zur selben Zeit wie Hermann Technologies (30.10.2026: derselbe Planer, die Gruppe wiegt für sich)">${g.aktiv ? 'Ausschalten' : 'Einschalten'}</button></span></div>`
       const msg = _gp.msg ? `<div class="gp-msg">${escapeHtml(_gp.msg)}</div>` : ''
       let liste = ''
       if(_gp.auf === 'aus:' + g.gruppe_id){

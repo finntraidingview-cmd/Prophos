@@ -24570,7 +24570,7 @@ def ap_tradeify_final_halten(regeln, firma, w):
 
 
 def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, sicht_uid=None, fingerabdruck=None, ids=None,
-              nur_konten=None):
+              nur_konten=None, gruppe=None):
     """Plant den Tag `tag` (Dubai-Datum, Standard heute) für alle IDs aus auto_plan_regeln. trocken = nur rechnen.
     quelle 'nacht' claimt den Tag (ein Lauf je Tag). Hand-Lauf am selben Tag: unbestätigte Auto-Pläne werden ersetzt,
     Startzeiten frühestens jetzt + 10 min. → Ergebnis-Dict (auch in auto_plan_lauf).
@@ -24586,12 +24586,20 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     nur_konten (NACHPLANEN, 08.10.2026, Finn setzte um 01:20 fünf IDs in den Planer — sie bekamen bis zum nächsten Nachtlauf
     nichts): nur GENAU diese Konto-IDs werden gerechnet und angelegt; bestehende Vorschläge/bestätigte Pläne zählen als
     vorhanden und werden NIE gelöscht oder ersetzt (anders als Hand-/Nachtlauf), Startzeiten frühestens jetzt + 15 min,
-    Protokoll in auto_plan_lauf nur, wenn etwas geplant wurde (kein Log-Spam alle 10 min). Delta/Richtung: dieselbe Strecke."""
+    Protokoll in auto_plan_lauf nur, wenn etwas geplant wurde (kein Log-Spam alle 10 min). Delta/Richtung: dieselbe Strecke.
+    gruppe (GRUPPE WIE HT, 30.10.2026, Finn: „Emins Trades sollen eins zu eins mit der gleichen Logik geplant werden wie bei Hermann
+    Technologies … er bestätigt sie einzeln" + „Emin hat eine eigene Waage zwischen Long und Short … jede Gruppe wiegt für sich"):
+    {gruppe_id, name, ids} einer Verwalter-Gruppe (ap_planer_gruppen) — geplant werden GENAU ihre IDs statt auto_plan_regeln.user_ids,
+    mit derselben Strecke (Regeln, Zeiten, Tagesdeckel, Richtung/Delta, Abstände). Der Live-Stand (laufende/geplante Trades, Waage,
+    Firma × Tag, PC-Belegung) kommt nur aus der Gruppe (ap_gruppe_ausgeblendet), HT blendet die Gruppe weiter aus. Kein Nacht-Claim und
+    kein Protokoll in auto_plan_lauf (HTs „letzter Lauf" bleibt HT) — Claim und Protokoll schreibt ap_gruppe_planen in auto_plan_gruppe."""
     reg = (sb_select("auto_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
     if not reg:
         return {"ok": False, "msg": "auto_plan_regeln fehlt (SQL 2026-10-05_auto_planer.sql einspielen)"}
     alle_ids = bool(ids) and ap_ids_alle(ids, trocken)      # PROBELAUF-ALLE-IDS (07.10.2026): nur im Probelauf, nie beim Anlegen
     uids = ap_ids_laden() if alle_ids else [str(u) for u in (reg.get("user_ids") or [])]
+    if gruppe:
+        uids = sorted(str(u) for u in (gruppe.get("ids") or ()))   # GRUPPE WIE HT (30.10.2026): genau die IDs der Verwalter-Gruppe
     if nur_uid and nur_uid not in uids:
         return {"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}
     if not uids:
@@ -24604,7 +24612,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     tag_d = datetime.strptime(tag, "%Y-%m-%d")
     if tag_d.weekday() >= 5:
         return {"ok": True, "tag": tag, "msg": "Wochenende — nichts geplant", "geplant": [], "ausgelassen": []}
-    if quelle == "nacht" and not trocken:
+    if quelle == "nacht" and not trocken and not gruppe:      # Gruppe: Claim in auto_plan_gruppe (ap_gruppe_planen)
         try:
             sb_insert("auto_plan_lauf", {"tag": tag, "quelle": "nacht"})
         except requests.exceptions.HTTPError as e:
@@ -24671,6 +24679,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
     namen, ausgeblendet = _ap_namen()   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
+    if gruppe:
+        ausgeblendet = ap_gruppe_ausgeblendet(namen, uids)   # jede Gruppe wiegt für sich (Finn 30.10.2026): Stand nur aus der Gruppe
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
     rnd = random.Random(seed)
 
@@ -25014,7 +25024,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
             # Tausender-Punkt nur für Rest und Balance (09.10.2026): das alte .replace(",", ".") über die ganze Notiz machte aus der
             # Klein-Trade-Stufe „0,18 Lots" ein „0.18 Lots" (Stufen mit Tausendern formatieren sich selbst, z. B. Topstep-Kette)
             "notes": ap_notiz(w["stufe"], rest_txt, k["bal"], k["bal_quelle"])})
-        if param["auto_start"]:      # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt
+        if param["auto_start"] and not gruppe:   # regeln.ausgleich.auto_start (Standard aus): Plan gilt sofort als bestätigt — Gruppe nie (Finn 30.10.: „er bestätigt sie einzeln")
             zeilen[-1]["auto_bestaetigt_at"] = jetzt.isoformat()
         d = dinfo.get((key, str(a["id"]))) or {}
         dd = d.get("delta_eur_pkt")
@@ -25023,7 +25033,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                             tages_grenze_usd=w.get("tages_grenze_usd"),
                             delta_eur_pkt=(round(abs(dd), 3) * (1 if richtung[key] == "buy" else -1)) if dd is not None else None,
                             einsatz_eur=round(float((d.get("g") or {}).get("verlust_eur") or 0)) * (1 if richtung[key] == "buy" else -1),
-                            tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]),
+                            tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]) and not gruppe,
                             **ap_boden_sicher(None, a, k["bal"], peaks, regel=k["regel"])))   # Boden für den Balance-Balken (08.10.2026)
     geplant.sort(key=lambda g: (g["start"], g["konto_id"]))
     fp = hashlib.sha1(json.dumps([[g["konto_id"], g["start"], g["richtung"], g["tp"], g["sl"], g["menge"]] for g in geplant],
@@ -25066,7 +25076,9 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         except Exception as e:      # die Ansicht baut notfalls aus geplant[] — der Probelauf selbst scheitert nicht daran
             print(f"[auto-plan] ⚠️ Probelauf-Zusatz: {type(e).__name__}: {e}", flush=True)
             erg["probelauf_fehler"] = f"{type(e).__name__}: {e}"
-    if not trocken and not (nachplanen and not geplant):      # NACHPLANEN ohne Treffer: kein Lauf-Eintrag, kein Log
+    if gruppe:
+        erg.update(gruppe_id=str(gruppe.get("gruppe_id") or ""), gruppe=gruppe.get("name"))
+    if not trocken and not (nachplanen and not geplant) and not gruppe:   # NACHPLANEN ohne Treffer: kein Lauf-Eintrag, kein Log
         try:
             if quelle == "nacht":
                 sb_update("auto_plan_lauf", {"tag": f"eq.{tag}", "quelle": "eq.nacht"}, {"ergebnis": erg})
@@ -25604,6 +25616,119 @@ def gp_verwalter_karte():
     return {str(m.get("user_id")): verw[str(m.get("gruppe_id"))] for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) in verw}
 
 
+# ══ GRUPPE WIE HT (30.10.2026, Finn 04:24: „Emins Trades sollen eins zu eins mit der gleichen Logik geplant werden wie bei Hermann
+# Technologies, bei Echo genauso … Die Trades werden geplant, er bestätigt sie einzeln" + „Emin hat eine eigene Waage zwischen Long und
+# Short … Jede Gruppe wiegt für sich"). Statt des eigenen Gruppen-Planers (gp_planen/gp_tick, abgeschaltet, nicht gelöscht) plant der
+# HT-Planer (ap_planen) jede Verwalter-Gruppe mit Zeile in auto_plan_gruppe getrennt: gleicher Nachtlauf-Zeitpunkt, gleiche Regeln,
+# Stand/Waage/Abstände nur aus der Gruppe. Echo mit Hedge, finaler Tradeify und Apex-Hedge stellen ihre Pläne um wie bei HT
+# (ap_planer_gruppen_ids). Bestätigen bleibt einzeln (Auto-Bestätigen gilt nur auto_plan_regeln.user_ids). Firmen-Abstand und
+# Gegenrichtungs-Riegel bleiben in der DB je Gruppe (prophos_gruppe_von). Claim + Protokoll je Gruppe in auto_plan_gruppe.letzter_lauf. ══
+def ap_planer_gruppen_ids():
+    """IDs aller Verwalter-Gruppen mit Planer-Zeile (Verwalter + Mitglieder) als set — sie laufen seit 30.10.2026 wie HT durch die Umsteller."""
+    k = gp_verwalter_karte()
+    return {str(u) for u in k} | {str(u) for u in k.values()}
+
+
+def ap_gruppe_ausgeblendet(namen, ids):
+    """REIN RECHNEND: Ausblendung für den Stand EINER Gruppe — alle bekannten IDs außer ihren (jede Gruppe wiegt für sich)."""
+    return {str(u) for u in (namen or ())} - {str(u) for u in (ids or ())}
+
+
+def ap_planer_gruppen(nur_aktiv=False):
+    """[{gruppe_id, name, ids (frozenset), aktiv, letzter_lauf}] — Verwalter-Gruppen mit Zeile in auto_plan_gruppe."""
+    daten = admin_gruppen_daten()
+    zeilen = {str(z.get("gruppe_id")): z for z in sb_select("auto_plan_gruppe", {"select": "gruppe_id,aktiv,letzter_lauf"}) or []}
+    out = []
+    for x in daten.get("gruppen") or ():
+        gid, z = str(x.get("id")), zeilen.get(str(x.get("id")))
+        if not x.get("verwalter_id") or not z or (nur_aktiv and not z.get("aktiv")):
+            continue
+        ids = frozenset({str(x["verwalter_id"])} | {str(m.get("user_id")) for m in daten.get("mitglieder") or ()
+                                                    if str(m.get("gruppe_id")) == gid})
+        out.append({"gruppe_id": gid, "name": x.get("name"), "ids": ids, "aktiv": bool(z.get("aktiv")), "letzter_lauf": z.get("letzter_lauf")})
+    return out
+
+
+_ap_gruppen_cache = {"bis": 0.0, "liste": None}
+
+
+def ap_gruppe_von_uid(uid, gruppen=None):
+    """Planer-Gruppe (ap_planer_gruppen-Zeile) dieser ID oder None (= HT). Ohne gruppen: Liste 30 s gemerkt — GET /admin/auto-plan fragt
+    das je PC-Tab beim Laden; Claim/Protokoll (ap_gruppe_planen, Nachtlauf) lesen immer frisch."""
+    if gruppen is None:
+        with _kurz_cache_lock:
+            if _ap_gruppen_cache["liste"] is not None and _ap_gruppen_cache["bis"] > time.time():
+                gruppen = _ap_gruppen_cache["liste"]
+        if gruppen is None:
+            gruppen = ap_planer_gruppen()
+            with _kurz_cache_lock:
+                _ap_gruppen_cache.update(bis=time.time() + 30, liste=gruppen)
+    for gr in gruppen:
+        if str(uid) in gr["ids"]:
+            return gr
+    return None
+
+
+def ap_gruppe_tag(tag, jetzt=None):
+    """tag aus Knopf/Body → Planer-Tag (Dubai-Datum wie ap_planen): None/'' = heute, 'heute', 'morgen' (nächster Handelstag) oder JJJJ-MM-TT."""
+    t = str(tag or "").strip().lower()
+    if not t or t == "heute":
+        return None
+    jetzt = jetzt or datetime.now(timezone.utc)
+    return gp_tag_wahl(t, jetzt.astimezone(_ap_tz(AP_TZ_LAUF))).isoformat()
+
+
+def ap_gruppe_planen(gruppe_id, trocken=False, quelle="hand", tag=None, seed=None):
+    """Plant eine Verwalter-Gruppe mit dem HT-Planer (ap_planen gruppe=…). Nicht trocken: Ergebnis in auto_plan_gruppe.letzter_lauf
+    (nacht_tag bleibt erhalten — er ist der Nacht-Claim der Gruppe). → Ergebnis-Dict wie ap_planen."""
+    gr = next((x for x in ap_planer_gruppen() if x["gruppe_id"] == str(gruppe_id)), None)
+    if not gr:
+        return {"ok": False, "msg": "Gruppe ohne Planer-Zeile (auto_plan_gruppe) oder ohne Verwalter"}
+    try:
+        tag = ap_gruppe_tag(tag)
+    except ValueError:
+        return {"ok": False, "msg": "tag = heute | morgen | JJJJ-MM-TT"}
+    erg = ap_planen(tag, trocken=trocken, quelle=quelle, seed=seed, gruppe=gr)
+    if not trocken and erg.get("ok"):
+        alt = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
+        merk = dict(erg, nacht_tag=erg.get("tag") if quelle == "nacht" else alt.get("nacht_tag"))
+        try:
+            sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gr['gruppe_id']}"}, {"letzter_lauf": merk,
+                                                                                 "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            print(f"[gruppen-plan] ⚠️ Protokoll {str(gr['gruppe_id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+    return erg
+
+
+_ap_gruppen_nacht = {"fehler": "", "letzt": {}}
+
+
+def ap_gruppen_nacht_tick(jetzt, zustand):
+    """Nachtlauf der Verwalter-Gruppen (aus ap_loop, jede Minute): derselbe fällige Tag wie HT (ap_nacht_ziel mit zeiten.nachtlauf aus
+    zustand, ap_nacht_tick liest sie) — je aktiver Gruppe einmal ap_gruppe_planen(quelle='nacht'), Claim = letzter_lauf.nacht_tag.
+    Unabhängig vom HT-Schalter auto_plan_regeln.aktiv: es gilt der Schalter der Gruppe (auto_plan_gruppe.aktiv)."""
+    param = zustand.get("nacht_param") or dict(AP_NACHT_STANDARD)
+    faellig, _naechster = ap_nacht_ziel(jetzt, param)
+    if not faellig:
+        return None
+    tag = faellig[0].isoformat()
+    if _ap_gruppen_nacht.get("tag") == tag and time.time() - (_ap_gruppen_nacht.get("geprueft") or 0) < 600:
+        return None
+    _ap_gruppen_nacht.update(tag=tag, geprueft=time.time())
+    for gr in ap_planer_gruppen(nur_aktiv=True):
+        ll = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
+        if ll.get("nacht_tag") == tag:
+            continue
+        try:
+            erg = ap_gruppe_planen(gr["gruppe_id"], quelle="nacht", tag=tag)
+            _ap_gruppen_nacht["letzt"][gr["gruppe_id"]] = {"tag": tag, "geplant": len(erg.get("geplant") or []), "msg": erg.get("msg")}
+            _ap_gruppen_nacht["fehler"] = ""
+        except Exception as e:
+            _ap_gruppen_nacht["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[gruppen-plan] ⚠️ Nachtlauf {str(gr['gruppe_id'])[:8]}: {_ap_gruppen_nacht['fehler']}", flush=True)
+    return True
+
+
 def gp_push_senden(verwalter, meldungen):
     """meldungen [(titel, text)] an die Geräte des Verwalters — mehr als 3 in einem Takt als EINE Sammelmeldung."""
     if not meldungen:
@@ -25980,10 +26105,9 @@ def _eh_tick_lauf(jetzt):
                                   "order": "start_um.asc"})
     _eh["gesehen"] = {str(p["id"]): str(p.get("updated_at") or "") for p in roh}   # für eh_schnell_tick: so schon gesehen
     namen, aus = _ap_namen()
-    verwaltet = gp_verwalter_karte()
-    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]
-    _eh["aus"] = aus                # eh_schnell_tick: Emin-/Verwalter-Pläne stoßen nie einen Lauf an
+    _eh["aus"] = aus                # eh_schnell_tick: ausgeblendete IDs (ADMIN_EXCLUDE ohne Planer-Gruppen, seit 30.10.2026) stoßen nie einen Lauf an
     erg = {"umgestellt": 0, "ohne": 0}
     firmen = regeln.get("firmen") or []
     try:
@@ -26169,8 +26293,7 @@ def ehv_tick(jetzt=None, force=False):
                                   "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
                                   "hand_werte_at": "is.null", "start_um": f"gte.{(jetzt - timedelta(hours=12)).isoformat()}", "order": "start_um.asc"})
     _namen, aus = _ap_namen()
-    verwaltet = gp_verwalter_karte()
-    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]
     erg = {"geschrieben": 0}
     if not plaene:
@@ -26414,8 +26537,7 @@ def tfh_tick(jetzt=None, force=False):
                                   "status": "eq.planned", "route": "eq.tvv2", "orbit_v3": "not.is.true", "auto_plan": "is.true",
                                   "start_um_gestartet_at": "is.null", "master_firm": "ilike.*tradeify*", "order": "start_um.asc"})
     namen, aus = _ap_namen()
-    verwaltet = gp_verwalter_karte()
-    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus and not _ist_tradeify_cfd(p.get("master_firm"))]
     erg = {"umgestellt": 0, "ohne": 0}
     if not plaene:
@@ -26808,8 +26930,7 @@ def ah_tick(jetzt=None, force=False):
         freigabe_da = False
     roh = [p for p in roh if _firm_norm(p.get("master_firm") or "") == _firm_norm(AH_FIRMA)]
     namen, aus = _ap_namen()
-    verwaltet = gp_verwalter_karte()
-    aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
+    aus = set(aus) - ap_planer_gruppen_ids()   # GRUPPE WIE HT (30.10.2026): Verwalter-Gruppen mit Planer-Zeile laufen hier wie HT
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]
     erg = {"umgestellt": 0, "ohne": 0, "vorgemerkt": 0}
     if not plaene:
@@ -30049,6 +30170,22 @@ def ap_waage_tick(regeln_param=None):
     _ap_waage.update(sig=sig, voll_at=time.time(), letzter_lauf=datetime.now(timezone.utc).isoformat(), fehler=fehler or "",
                      letztes={"waage": {k: {f: v.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "passt", "grund")}
                                         for k, v in waage.items()}, "info": info, "gezogen": len(umpl)})
+    # JEDE GRUPPE WIEGT FÜR SICH (Finn 30.10.2026: „Emin hat eine eigene Waage zwischen Long und Short … Jede Gruppe wiegt für sich"):
+    # dieselbe Waage je Verwalter-Gruppe mit Planer-Zeile, Stand nur aus ihren IDs — HT oben sieht die Gruppen weiter nicht (eigener try)
+    try:
+        namen, _aus = _ap_namen()
+        for gr in ap_planer_gruppen(nur_aktiv=True):
+            st_g = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
+            w_g = ap_klassen_waage(st_g, pc_lebt=pc)
+            a_g, i_g = ap_waage_nachschub(st_g, w_g, random.SystemRandom(), pc_lebt=pc, dubai_min=_ap_dubai_versatz(st_g["mitternacht"]))
+            u_g, f_g = _ap_aenderungen_anwenden(st_g, a_g, "bot") if a_g else ([], None)
+            umpl = list(umpl) + list(u_g or [])
+            _ap_waage.setdefault("gruppen", {})[gr["gruppe_id"]] = {
+                "name": gr.get("name"), "fehler": f_g or "", "gezogen": len(u_g or []), "info": i_g,
+                "waage": {k: {f: v.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "passt", "grund")} for k, v in w_g.items()}}
+    except Exception as e:
+        _ap_waage["gruppen_fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[waage] ⚠️ Gruppen: {_ap_waage['gruppen_fehler']}", flush=True)
     return umpl
 
 
@@ -31043,7 +31180,14 @@ def admin_auto_plan_delta():
         return err
     try:
         # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene"), sonst wie bisher Admin alle / eigene ID
-        stand = _ap_stand_laden(reg)
+        sicht_d = _ap_sicht_aus_anfrage(admin, uid)
+        if isinstance(sicht_d, frozenset):
+            # GRUPPEN-SICHT (30.10.2026, Emin gleich wie Finn): Verwalter mit sicht=admin bzw. Finns Gruppen-Chip — Stand nur aus genau
+            # diesen IDs. Vorher lud der Stand mit der Standard-Ausblendung (ADMIN_EXCLUDE), dem Verwalter fehlten seine eigenen Pläne.
+            namen, _aus = _ap_namen()
+            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, sicht_d))
+        else:
+            stand = _ap_stand_laden(reg)
         # HEUTE BEENDET (Finn 08.10.2026, ID-Detail + Kachel „Heute"): eigener try — fällt es aus, bleibt das übrige Delta unberührt
         try:
             stand["heute_beendet"], stand["heute_ab"] = ap_heute_beendet_gemerkt((reg.get("regeln") or {}).get("firmen") or [])
@@ -31052,7 +31196,6 @@ def admin_auto_plan_delta():
             print(f"[auto-plan] ⚠️ heute beendet: {stand['heute_beendet_fehler']}", flush=True)
         ap_tages_saldo(stand)                     # TAGES-SALDO (.1552): netto_eur/Band für PC-Tab und Kachel wiegen den ganzen Tag
         stand["fremd"] = fp_delta_zeilen()        # FREMD-POSITIONEN (08.10.2026): Hand-Positionen ohne Plan, „Braucht dich"
-        sicht_d = _ap_sicht_aus_anfrage(admin, uid)
         nur, gruppe = _ap_gruppe_lesen(uid)
         # SUMMEN NUR ÜBER DIE SICHT (Master 08.10.2026, Nachbesserung B: „HT-Gesamtsummen sind HT-Daten"): ein eingeschränkter Login
         # (Verwalter, Mitglied) und Finns Gruppenfilter bekommen Netto/Band/Long/Short/Verlauf/Szenario nur aus ihren Zeilen; eine
@@ -31292,7 +31435,8 @@ def admin_gruppen_plan():
                 return jsonify({"ok": True, "aktiv": bool(body.get("an"))})
             if aktion not in ("planen", "probe"):
                 return jsonify({"ok": False, "msg": "aktion = planen | probe | aktiv"}), 400
-            return jsonify(gp_planen(gid, trocken=aktion == "probe", quelle="hand", tag=body.get("tag")))   # tag: heute | morgen (13.10.2026)
+            # GRUPPE WIE HT (30.10.2026): „Jetzt planen"/„Probelauf" rechnen mit dem HT-Planer (ap_gruppe_planen), nicht mehr gp_planen
+            return jsonify(ap_gruppe_planen(gid, trocken=aktion == "probe", quelle="hand", tag=body.get("tag")))   # tag: heute | morgen
         # Finn 13.10.2026: „nur bei Emin ändern, bei meinem Hermann-Technologies-Account bitte nix" — die Zeile im Admin-Reiter sieht nur
         # der Verwalter; ein Admin-Login bekommt sie nur ausdrücklich mit ?alle=1 (POST bleibt für Admin offen)
         if admin and str(request.args.get("alle") or "") != "1":
@@ -31930,7 +32074,13 @@ def admin_auto_plan_waage_start():
         param = ap_ausgleich_param(reg.get("regeln"))
         if not param.get("waage"):
             return jsonify({"ok": True, "waage_an": False})
-        stand = _ap_stand_laden(reg)
+        # JEDE GRUPPE WIEGT FÜR SICH (30.10.2026): Plan einer Verwalter-Gruppe → Waage nur aus ihren IDs, sonst HT wie bisher
+        gr = ap_gruppe_von_uid(plan.get("user_id"))
+        if gr:
+            namen, _aus = _ap_namen()
+            stand = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
+        else:
+            stand = _ap_stand_laden(reg)
         pc = _ap_pc_lebt_gecacht()
         lage = ap_waage_start_lage(stand, pid, richtung, pc_lebt=pc)
         if lage is None:
@@ -34006,10 +34156,12 @@ def ap_loop():
         except Exception as e:
             _ap_info["nachplan_fehler"] = f"{type(e).__name__}: {e}"
             print(f"[auto-plan] ⚠️ Nachplanen: {e}", flush=True)
+        # GRUPPEN-PLANER gp_tick AUS (30.10.2026, Finn: Emins Gruppe „eins zu eins mit der gleichen Logik wie Hermann Technologies") —
+        # Funktion bleibt; jetzt plant der HT-Planer jede Verwalter-Gruppe getrennt zum Nachtlauf-Zeitpunkt (ap_gruppen_nacht_tick)
         try:
-            gp_tick()                         # GRUPPEN-PLANER (Emin-Gruppe, 13.10.2026) — eigener try, HT-Planer bleibt unberührt
+            ap_gruppen_nacht_tick(datetime.now(timezone.utc), _ap_info)
         except Exception as e:
-            _gp_info["fehler"] = f"{type(e).__name__}: {e}"
+            _ap_gruppen_nacht["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ {e}", flush=True)
         try:
             fdp_tick()                        # FUNDED-PLANER (27.10.2026) — eigener try, nur bei funded_plan_regeln.aktiv
@@ -35110,7 +35262,14 @@ def admin_auto_plan():
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
     if request.method == "GET":
         sicht = _ap_sicht_aus_anfrage(admin, uid)   # seit 08.10.2026: Nicht-Admin alle IDs nur mit ?sicht=admin (Admin-Reiter), sonst eigene
-        rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "order": "at.desc", "limit": "1"})
+        # GRUPPE WIE HT (30.10.2026): ein Verwalter (bzw. eine ID seiner Gruppe) sieht den letzten Lauf SEINER Gruppe (auto_plan_gruppe.
+        # letzter_lauf, geschrieben von ap_gruppe_planen) — nie den HT-Lauf; HT-Logins lesen wie bisher auto_plan_lauf
+        gr_lauf = None if admin else ap_gruppe_von_uid(uid)
+        if gr_lauf:
+            ll = gr_lauf.get("letzter_lauf") if isinstance(gr_lauf.get("letzter_lauf"), dict) else {}
+            rows = [{"tag": ll.get("tag"), "quelle": ll.get("quelle"), "at": ll.get("at"), "ergebnis": ll}] if ll else []
+        else:
+            rows = sb_select("auto_plan_lauf", {"select": "tag,quelle,at,ergebnis", "order": "at.desc", "limit": "1"})
         erg = (rows[0].get("ergebnis") if rows else None) or {}
         try:
             erg = ap_ohne_archiv(erg, _ap_archiviert())   # seit dem Lauf archiviert → nicht mehr in Braucht dich (08.10.2026)
@@ -35152,7 +35311,8 @@ def admin_auto_plan():
                         nachplan_laeuft=_ap_nachplan_lock.locked())
         except Exception as e:
             print(f"[auto-plan] ⚠️ Countdown: {type(e).__name__}: {e}", flush=True)
-        return jsonify({"ok": True, "admin": admin, "aktiv": bool(reg.get("aktiv")), "ids": len(reg.get("user_ids") or []),
+        return jsonify({"ok": True, "admin": admin, "aktiv": bool(gr_lauf.get("aktiv")) if gr_lauf else bool(reg.get("aktiv")),
+                        "ids": len(gr_lauf["ids"]) if gr_lauf else len(reg.get("user_ids") or []),
                         "im_planer": im_planer or admin, "letzter": letzter,
                         "sicht": "alle" if sicht is None else "eigene" if isinstance(sicht, str) else "gruppe", "info": info})
     body = request.get_json(silent=True) or {}

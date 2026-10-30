@@ -166,7 +166,7 @@ def takt():
     ns = lade({
         "sb_select": db.sb_select, "_sb_all": db._sb_all, "sb_update": db.sb_update,
         "alarm_senden": lambda *a, **k: db.alarme.append((a, k)), "_wt_now_iso": lambda: "2026-10-29T12:00:00+00:00",
-        "_ap_namen": lambda: ({"U1": "Mike", "U2": "Ina", "UE": "Emin"}, set()), "gp_verwalter_karte": lambda: {"UE": "UE"},
+        "_ap_namen": lambda: ({"U1": "Mike", "U2": "Ina", "UE": "Emin"}, set()), "gp_verwalter_karte": lambda: {"UE": "UE"}, "ap_planer_gruppen_ids": lambda: {"UE"},
         "AP_KONTO_FELDER": "id", "GP_HEDGE_KEY": "echo_hedge_account", "GP_SLAVE_PPL": 0.85,
         "ap_ppl_karte": lambda rows, norm=None: ({}, {}), "_ap_norm": lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower()),
         "_firm_norm": lambda s: s, "_ap_balance_karten": lambda: ({}, {}), "_ap_kauf_echt": lambda ids: {},
@@ -187,7 +187,11 @@ def takt():
     ok("P3" not in um and "P12" not in um, "Start in 40 min bzw. vor 45 min → nicht angefasst (Fenster −30 … +20 min)")
     ok("P13" not in um, "unbestätigter Vorschlag → nicht angefasst")
     ok("P4" not in um, "Futures (Tradeify, tvv2-Regel) → nicht angefasst")
-    ok("P5" not in um, "Verwalter-Gruppe (Emin) → nicht angefasst")
+    # GRUPPE WIE HT (30.10.2026, Finn: Emins Gruppe „eins zu eins … bei Echo genauso"): Verwalter-Gruppen laufen durch eh_tick wie HT —
+    # Emin hat hier kein Fusion-Konto (user_settings nur U1) → wie jede HT-ID ohne Konto: bleibt Echo V2, Grund am Plan
+    p5 = next(p for p in plaene if p["id"] == "P5")
+    ok("P5" in um and p5["route"] == "mt5v2" and p5["mt5_baseline"]["echo_hedge"]["code"] == "kein_konto",
+       "Verwalter-Gruppe (Emin) → wie HT behandelt (ohne Fusion-Konto: Echo V2 mit Grund)")
     ok("P7" not in um, "geclaimt → nicht angefasst")
     p8 = next(p for p in plaene if p["id"] == "P8")
     ok("P8" in um and p8["route"] == "mt5" and p8["mt5_baseline"]["echo_hedge"]["status"] == "mit",
@@ -207,9 +211,10 @@ def takt():
     ns["eh_tick"](jetzt=jetzt, force=True)
     ok(len(db.updates) == n, "zweiter Takt: gleicher Grund-Code → kein neues Update")
     ns["eh_tick"](jetzt=jetzt + timedelta(minutes=10), force=True)
-    ok(len(db.alarme) == 1 and db.alarme[0][0][0] == 3 and db.alarme[0][1]["plan_id"] == "P6", "P6 in 2 min → eine ⚪-Meldung, Tage-Mini still")
+    ok(sorted(a[1]["plan_id"] for a in db.alarme) == ["P5", "P6"] and all(a[0][0] == 3 for a in db.alarme),
+       "P5 (Emin, wie HT) und P6 in ≤ 3 min → je eine ⚪-Meldung, Tage-Mini still")
     ns["eh_tick"](jetzt=jetzt + timedelta(minutes=11), force=True)
-    ok(len(db.alarme) == 1, "keine zweite Meldung")
+    ok(len(db.alarme) == 2, "keine zweite Meldung")
 
     print("60-Lot-Grenze mit vorgemerkten")
     les["488579"]["offen"] = {"buy": 50.0, "sell": 7.9}
@@ -282,7 +287,7 @@ def nie_still():
     ns = lade({
         "sb_select": db.sb_select, "_sb_all": alle, "sb_update": update,
         "alarm_senden": lambda *a, **k: db.alarme.append((a, k)), "_wt_now_iso": lambda: "2026-10-30T00:00:00+00:00",
-        "_ap_namen": lambda: ({"U1": "Chris", "UE": "Emin"}, set()), "gp_verwalter_karte": lambda: {"UE": "UE"},
+        "_ap_namen": lambda: ({"U1": "Chris", "UE": "Emin"}, set()), "gp_verwalter_karte": lambda: {"UE": "UE"}, "ap_planer_gruppen_ids": lambda: {"UE"},
         "AP_KONTO_FELDER": "id", "GP_HEDGE_KEY": "echo_hedge_account", "GP_SLAVE_PPL": 0.85,
         "ap_ppl_karte": lambda rows, norm=None: ({}, {}), "_ap_norm": lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower()),
         "_firm_norm": lambda s: s, "_ap_balance_karten": lambda: ({}, {}), "_ap_kauf_echt": lambda ids: {},
@@ -302,7 +307,8 @@ def nie_still():
     erg = ns["eh_tick"](jetzt=jetzt, force=True)
     rot = [k for a, k in db.alarme if a[0] == 1]
     ids = sorted(k["plan_id"] for k in rot)
-    ok(ids == ["C1", "K1", "K2", "K4"], f"🔴 genau für K1 (Konto fehlt), K2 (Umstellung wirft), K4 (Rechnung wirft), C1 (ohne Spur geclaimt) — {ids}")
+    ok(ids == ["C1", "C2", "K1", "K2", "K4"], f"🔴 genau für K1 (Konto fehlt), K2 (Umstellung wirft), K4 (Rechnung wirft), C1 + C2 (ohne Spur geclaimt; "
+       f"C2 = Emin, seit 30.10.2026 wie HT) — {ids}")
     ok(next(p for p in plaene if p["id"] == "K5")["route"] == "mt5", "ein kaputter Plan (K4) stoppt die übrigen nicht (K5 umgestellt)")
     ok("C7" not in ids, "Verbrauchs-Claim (verpasst/Ziel erreicht) → kein 🔴, es wurde nichts gesendet")
     txt = {k["plan_id"]: a[3] for a, k in db.alarme if a[0] == 1}
@@ -310,7 +316,7 @@ def nie_still():
        "Grund steht im Alarm")
     ok("OHNE Fusion-Hedge gestartet" in txt["C1"] and "Hedge in Fusion" in txt["C1"], f"C1: Start ohne Umstellung + was tun ({txt['C1'][:80]}…)")
     ok(all(k.get("schluessel", "").startswith("eh-rot-") for a, k in db.alarme if a[0] == 1), "Schlüssel eh-rot-… (alarm_log, übersteht Neustart)")
-    ok(erg.get("rot") == 3 and erg.get("rot_start") == 1, f"Ergebnis zählt die Meldungen ({erg})")
+    ok(erg.get("rot") == 3 and erg.get("rot_start") == 2, f"Ergebnis zählt die Meldungen ({erg})")
     n = len(db.alarme)
     ns["eh_tick"](jetzt=jetzt + timedelta(seconds=30), force=True)
     ok(len(db.alarme) == n, "zweiter Lauf → keine zweite 🔴-Meldung")
