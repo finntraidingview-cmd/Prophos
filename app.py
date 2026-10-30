@@ -14414,7 +14414,9 @@ def admin_wd_plaene():
                         # PC-Rückfall, Jacob) auch bei fremden IDs
                         "select": "id,user_id,master_account_id,status,route,master_contracts,start_um,start_um_gestartet_at,orbit_gesendet_at,"
                                   "ended_at,master_pl,master_tp,master_risk,slave_risk,multiplier,richtung,master_symbol,"
-                                  "slave_name,master_name,updated_at",
+                                  # richtung_konflikt (30.10.2026, S7 Richtung je Konto): am Start gedrehte Pläne dreht wdPlaeneNachziehen
+                                  # nicht auf die Konto-Richtung zurück
+                                  "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt",
                         "id": f"in.({chunk})"})
             # Admin-Gruppen (08.10.2026): die Tagesplan-Zeilen sind nutzerübergreifend (RLS offen) — Pläne fremder IDs nicht an einen
             # eingeschränkten Login bzw. nicht in Finns Gruppenfilter
@@ -28178,13 +28180,18 @@ def ap_wd_block_starts(rows, mitternacht, firmen, bekannt=()):
 
 def wd_konto_gruppe(k, richtung):
     """REIN RECHNEND (28.10.2026): (Versatz in min zum Blockstart, Richtung) eines Farmer-Kontos aus seiner Gruppe — ohne Gruppe
-    (0, Richtung der Zeile). Wie prophos.html wdKontoVersatzMin + wdKontoRichtung."""
+    (0, Richtung der Zeile). Wie prophos.html wdKontoVersatzMin + wdKontoRichtung.
+    RICHTUNG JE KONTO (30.10.2026, S7 366d0252): k.w_richtung ('buy'|'sell', im Tab gewürfelt mit Richtungsschutz je ID × Firma) überstimmt
+    Zeilen-Richtung und g_gegen; der Versatz bleibt. Ohne w_richtung (alte Zeilen) wie bisher."""
+    fest = k.get("w_richtung") if isinstance(k, dict) and k.get("w_richtung") in ("buy", "sell") else None
     if not isinstance(k, dict) or not k.get("gruppe"):
-        return 0, richtung
+        return 0, (fest or richtung)
     try:
         v = int(round(float(k.get("g_versatz_min") or 0)))
     except (TypeError, ValueError):
         v = 0
+    if fest:
+        return v, fest
     if k.get("g_gegen") and richtung in ("buy", "sell"):
         richtung = "sell" if richtung == "buy" else "buy"
     return v, richtung

@@ -209,6 +209,17 @@ def main():
     check(py_ok, "app.py ap_wd_block_starts = JS wdKontoZeiten/wdKontoRichtung (Minute + Richtung je Konto, 300 Tage)")
     v, rr = ns["wd_konto_gruppe"]({"id": "x"}, "buy")
     check((v, rr) == (0, "buy"), "Python: Konto ohne Gruppe → (0, Richtung der Zeile)")
+    # RICHTUNG JE KONTO (30.10.2026, S7 366d0252): k.w_richtung überstimmt Zeile und g_gegen, Versatz bleibt
+    G = ns["wd_konto_gruppe"]
+    check(G({"id": "x", "w_richtung": "sell"}, "buy") == (0, "sell"), "Python: w_richtung ohne Gruppe überstimmt die Zeile")
+    check(G({"id": "x", "gruppe": "a", "g_versatz_min": 7, "g_gegen": True, "w_richtung": "buy"}, "buy") == (7, "buy"),
+          "Python: w_richtung überstimmt g_gegen, Versatz bleibt")
+    check(G({"id": "x", "gruppe": "a", "g_versatz_min": 7, "g_gegen": True, "w_richtung": "quer"}, "buy") == (7, "sell"),
+          "Python: ungültige w_richtung → wie bisher (g_gegen)")
+    row = {"status": "geplant", "start_um": mitternacht.isoformat(), "richtung": "buy", "user_id": "u", "name": "u",
+           "konten": [{"id": "k1", "aktiv": True, "w_richtung": "sell", "firm": "Tradeify"}, {"id": "k2", "aktiv": True, "firm": "Tradeify"}]}
+    rj = {s["key"].split(":")[2]: s["richtung"] for s in ns["ap_wd_block_starts"]([row], mitternacht, {})}
+    check(rj.get("k1") == "sell" and rj.get("k2") == "buy", f"ap_wd_block_starts nimmt die Konto-Richtung ({rj})")
 
     print()
     if FEHLER:
