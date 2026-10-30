@@ -17,8 +17,8 @@ def main():
     ok("funded: apIstFunded()" in s and "vorschau ? 'Vorschau' : 'Zu bestätigen'" in s, "Funded: Vorschau statt Zu bestätigen")
     ok("let schalter = ''; if(!fd)" in s and "teile.push(Q ? (Q.aktiv ? nm + ' an'" in s, "Funded: Einstellungen = Funded-Regeln, keine Challenge-Schalter")
     ok("function apgZeilenSchmuecken(root, x)" in s and "apgZeilenSchmuecken(root, ow)" in s, "Weg-Chips in den Zeilen")
-    ok("if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){" in s and "['Echo + Hedge', 'hedge'," in s and "'Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`" in s,
-       "Echo-Vorschlag mit Vorschau + Schalter an → „Echo + Hedge“, mit Grund → „Echo V2 · ⚠ Grund“")
+    ok("if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){" in s and "['Echo', 'hedge', 'wird ~20 min vor dem Start" in s and "'Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`" in s,
+       "Echo-Vorschlag mit Vorschau + Schalter an → „Echo“ (Echo-Namen 30.10.2026), mit Grund → „Echo V2 · ⚠ Grund“")
     ok("if(v && v.echo_hedge && v.echo_hedge.an === false) return ''" in s, "Echo-Hedge aus → kein Vorschau-Chip")
     # Master | Fusion (30.10.2026): Fusion-Werte in Lots/TP/SL neben den Master-Werten, Kopf „Master | Fusion", Chip entfällt
     i = s.index("function apgMasterFusion(root, je){")

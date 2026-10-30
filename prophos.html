@@ -47693,7 +47693,11 @@
     const typ = String((konto && konto.type) || p.kontoTyp || '').toLowerCase()
     const typName = typ ? ((typeof typeLabel === 'function' && typeLabel(typ)) || typ) : ''
     const typKurz = { challenge: 'CH', phase1: 'P1', phase2: 'P2', funded: 'F', funded_cfd: 'CFD', winning_days: 'WD', live: 'Live' }[typ] || typName
-    const typChip = (typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : '') + accZielChipHtml(konto)
+    // REFUND (Finn 30.10.2026 ~08:02): neben „Funded CFD“ der Chip „Refund“ im ersten Payout-Zyklus einer Refund-Firma — eigene Konten über
+    // accRefundChipHtml (wie Accounts), fremde über o.refund (Funded Planer → CFD: Backend-Feld bzw. Firma + payouts_n der Admin-Übersicht)
+    const refundChip = typ === 'funded_cfd' ? (o && o.refund != null ? (o.refund ? ' <span class="type-badge acc-refund-chip" title="Noch kein Payout erhalten — der erste Payout kommt mit Refund der Gebühr">Refund</span>' : '')
+      : (konto && typeof accRefundChipHtml === 'function' ? accRefundChipHtml(konto) : '')) : ''
+    const typChip = (typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ">${escapeHtml(typName)}</span>` : '') + refundChip + accZielChipHtml(konto)
     const typChipHandy = typ ? `<span class="type-badge type-${escapeHtml(typ)} pz-typ pz-typ-m" title="${escapeHtml(typName)}">${escapeHtml(typKurz)}</span>` : ''
     // Start: Uhrzeit klickbar (ändern), ✕ nimmt sie raus — dieselben Handler wie auf der Karte
     // AP-FIX 05.10.2026: tpStartUmText liefert an einem anderen Tag „06.10. 02:01" bzw. „verpasst (16:40)" — das lief in die
@@ -80087,7 +80091,7 @@
           title="${escapeHtml(riG ? riG + ' — Klick prüft erneut' : `anklicken: nur diesen Plan auf ${ziel} drehen (Richtungsschutz ID × Firma wird vorher geprüft)`)}"><em class="${p.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${riL ? '…' : (riG ? '⛔ ' : '') + (p.richtung === 'buy' ? 'BUY' : 'SELL')}</em></button>`
       }
       const hChip = art !== 'laeuft' && typeof window._ahfHedgeKurz === 'function' ? window._ahfHedgeKurz(z, art) : ''   // EIN BESTÄTIGEN (30.10.2026)
-      return planZeileHtml(p, konto, { name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: hChip, akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
+      return planZeileHtml(p, konto, { refund: z.refund != null ? !!z.refund : undefined, name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: hChip, akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: art !== 'laeuft' ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
@@ -80568,15 +80572,15 @@
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
     if(z && (z.hedge_art === 'apex')) return ['WD-Weg + Hedge', 'hedge']
-    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit + Hedge', 'hedge']   // ORBIT-NAMEN (Finn 30.10.2026): „Orbit" = mit Fusion-Hedge
+    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit', 'hedge']   // ORBIT-NAMEN (Finn 30.10.2026): „Orbit" = mit Fusion-Hedge, ohne Zusatz
     // ECHO + HEDGE (30.10.2026, Finn: „Warum steht bei jedem Trade ‚Echo V2'? Wir machen jetzt Echo (mit Hedge)"): ein HT-CFD-Vorschlag auf Echo V2
     // mit Vorschau (ehv_tick) wird bei Schalter echo_hedge an kurz vor dem Start auf Echo mit Hedge umgestellt → „Echo + Hedge"; „Echo V2" nur,
     // wenn er ohne Hedge laufen wird (Schalter aus oder Vorschau mit Grund → „Echo V2 · ⚠ Grund")
     if(r === 'mt5v2' && z && z.hedge_weg === 'echo' && apgEchoHedgeAn()){
       const g = z.hedge_vorschau && z.hedge_vorschau.grund
       // Grund steht ausgeschrieben im Hedge-Chip derselben Zeile — hier kurz, ganz im Tooltip
-      return g ? ['Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`] : ['Echo + Hedge', 'hedge', 'wird ~20 min vor dem Start auf Echo mit Fusion-Gegenhedge umgestellt'] }
-    return r === 'tvv2' ? ['Orbit V2', ''] : r === 'mt5v2' ? ['Echo V2', ''] : r === 'mt5' ? ['Echo + Hedge', 'hedge'] : r === 'tsv2' ? ['Topstep V2', ''] : r ? [r, ''] : null }
+      return g ? ['Echo V2 · ⚠ ohne Hedge', 'warn', `startet ohne Hedge (Echo V2): ${String(g)}`] : ['Echo', 'hedge', 'wird ~20 min vor dem Start auf Echo mit Fusion-Gegenhedge umgestellt'] }   // ECHO-NAMEN (Finn 30.10.2026 ~08:02): „Echo" = mit Hedge
+    return r === 'tvv2' ? ['Orbit V2', ''] : r === 'mt5v2' ? ['Echo V2', ''] : r === 'mt5' ? ['Echo', 'hedge'] : r === 'tsv2' ? ['Topstep V2', ''] : r ? [r, ''] : null }
   const apgEchoHedgeAn = () => { try{ const v = apdDaten(); return !!(v && v.echo_hedge && v.echo_hedge.an === true) }catch(_){ return false } }
   function apgZeilenSchmuecken(root, x){
     const je = new Map([...(x.offenListe || []).map(z => [String(z.plan_id), z]), ...(x.wartenListe || []).map(e => [String(e.z && e.z.plan_id), e.z])])
@@ -81284,6 +81288,7 @@
     for(const z of [...(d.geplant || []), ...(d.ziel || []), ...(d.ausgelassen || [])]) if(z && z.user_id && z.user && !namen.has(String(z.user_id))) namen.set(String(z.user_id), String(z.user))
     try{ for(const r of (window._admData && window._admData.accounts) || []) if(r && r.user_id && r.person && !namen.has(String(r.user_id))) namen.set(String(r.user_id), String(r.person)) }catch(_){}
     const zahl = v => v == null || v === '' || !isFinite(Number(v)) ? null : Number(v)
+    const adKonten = new Map(((window._admData && window._admData.accounts) || []).map(r => [String(r.id), r]))
     const $txt = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
     const zeile = (x, extra) => {
       const lots = zahl(x.lots), tp = zahl(x.tp), sl = zahl(x.sl), tpPkt = zahl(x.tp_pkt), slPkt = zahl(x.sl_pkt)
@@ -81294,7 +81299,12 @@
         zahl(x.gewinn) != null ? `Gewinn ${zahl(x.gewinn) < 0 ? '−' : '+'}${$txt(x.gewinn)} $` : '', x.eins_prozent ? '1-%-Regel' : '', x.richtung_geschuetzt ? 'Richtung wie laufender Trade' : ''].filter(Boolean).join(' · ') || null
       const minus = zahl(x.hedge_tp_eur) != null ? Math.abs(zahl(x.hedge_tp_eur)) : null, plus = zahl(x.hedge_sl_eur) != null ? Math.abs(zahl(x.hedge_sl_eur)) : null
       const fusion = (minus != null || plus != null || zahl(x.hedge_lots) != null) ? { lots: zahl(x.hedge_lots), minus, plus, gedeckt: zahl(x.hedge_eur), tpPkt, slPkt } : null
-      return Object.assign({ fusion, plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || String(x.user || ''),
+      // REFUND (Finn 30.10.2026 ~08:02): erster Payout-Zyklus einer Refund-Firma — Feld vom Backend (S4), sonst wie accRefundChipHtml:
+      // FTMO / FundedNext (nicht Futures) und payouts_n = 0 aus der Admin-Übersicht; unbekannt → kein Chip
+      const refund = typeof x.refund_zyklus === 'boolean' ? x.refund_zyklus : (() => { const f = String(x.firma || '')
+        if(!(/ftmo/i.test(f) || (/f(ou|u)nded\s*next/i.test(f) && !/futures/i.test(f)))) return false
+        const r = adKonten.get(String(x.konto_id || '')); return r && r.payouts_n != null ? Number(r.payouts_n) === 0 : null })()
+      return Object.assign({ fusion, refund, plan_id: String(x.plan_id || ('vorschau:' + x.konto_id)), user_id: String(x.user_id), user: namen.get(String(x.user_id)) || String(x.user || ''),
         firma: x.firma, konto: x.konto, ende4: fdpEnde4(x.konto), typ: 'funded_cfd', richtung: x.richtung || null, route: x.route || 'mt5', start_um: x.start_um || null, start: x.start_um || null,
         menge: lots, tp, sl, notes: stufe ? 'Funded-CFD-Planer · ' + stufe : null, stufe, balance: x.balance ?? null, rest,
         konto_id: String(x.konto_id || ''), balance_live: true, boden, boden_min: boden, boden_art: null,
