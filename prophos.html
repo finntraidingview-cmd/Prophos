@@ -35442,7 +35442,9 @@
       // läuft nur bei offener Ansicht (wdlTakt/wdlAktiv), deshalb fest mit WDL_SICHT; dazu nur Klick-Wege des Radars (Abhaken, Jetzt lesen,
       // Ansehen, Manuell/Parken, → Planer, Balance lesen, Polar-Stand). Finn (ohne Einschränkung) und Mitglieder sehen damit genau dasselbe
       // wie vorher; der PC-Tab-Takt (?tage=1&nur_eigene=1&status=open) und alles, was am PC Orders/Endlesungen auslöst, bleibt ohne.
-      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=${wdl.tage}&echo=1&${WDL_SICHT}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      // &radar=1 (30.10.2026, Finn: „Emin soll immer auch im Radar sein"): Finns Standard-Sicht zeigt hier auch Emins Gruppe (app.py
+      // admin_live_trades) — nur der Radar, Radar-Statistik und Planer fragen ohne und bleiben bei Hermann Technologies
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=${wdl.tage}&echo=1&${WDL_SICHT}&radar=1`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
       clearTimeout(tm)
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
@@ -52130,7 +52132,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1917'
+  const OS_TAB_BUILD = '2026-09-22.1918'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

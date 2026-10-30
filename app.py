@@ -13373,6 +13373,13 @@ def admin_live_trades():
         nur_offen = str(request.args.get("status") or "").lower() == "open"
         mit_echo = str(request.args.get("echo") or "") in ("1", "true", "ja")
         disp, excluded = _wd_personen()
+        # RADAR MIT EMINS GRUPPE (30.10.2026, Finn: „Emin soll immer auch im Radar sein … Emins Gruppe soll ab jetzt ganz genau gleich
+        # behandelt werden wie Hermann Technologies"): ?radar=1 (nur der Radar selbst, wdlLaden) zeigt in der Standard-Sicht eines
+        # uneingeschränkten Logins auch die Gruppen MIT Verwalter (Verwalter + Mitglieder, sonst über ADMIN_EXCLUDE/_admin_standard_aus
+        # raus). Radar-Statistik, Planer und PC-Tab-Takt fragen ohne den Parameter und bleiben bei HT; ein eingeschränkter Login
+        # (Verwalter = seine Gruppe) und Finns Gruppen-Chip (_admin_sicht) bleiben, wie sie sind.
+        if str(request.args.get("radar") or "") in ("1", "true", "ja") and _admin_sicht() is None:
+            excluded = set(excluded) - _admin_verwalter_gruppen_ids(admin_gruppen_daten())
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
