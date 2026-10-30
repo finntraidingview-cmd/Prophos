@@ -14458,6 +14458,7 @@
         <div class="field">
           <label>Max Drawdown ($, optional)</label>
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
+          <div id="ac-maxdd-hint" hidden style="font-size:11px;color:var(--sub);margin-top:4px"></div>
         </div>
         <!-- Max Risiko / Trade (07.10.2026, Finn: manche Fundeds haben eine 1-%-Regel — nie mehr als X $ pro Trade).
              Spalte accounts.max_risiko_trade, gilt nur für dieses Konto (die Trade-Limits im Bulk-Add gelten für alle).
@@ -41275,20 +41276,24 @@
     return pos(regelWert) ? { wert: pos(regelWert), quelle: 'Firmen-Regel (Größe × Drawdown-%)' } : null
   }
   window._sucDdVorschlag = sucDdVorschlag   // Test-Haken
+  // Schablone, sonst Regel vom Server — gemeinsam für Nachfolger und Account-Modal. Ohne Antwort null, das Feld bleibt dann leer
+  async function sucDdErmitteln(acc, zielTyp){
+    if(Number(acc.maxDrawdown) > 0 || !sucIstCfd(acc) || sucDdNieRaten(acc)) return null
+    let vorlagen = []; try{ vorlagen = await kontoVorlagenLaden() }catch(_){}
+    const d = sucDdVorschlag(acc, zielTyp, vorlagen, null)
+    if(d) return d
+    try{
+      const tok = await _pushTok()
+      const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      const j = r.ok ? await r.json() : null
+      return sucDdVorschlag(acc, zielTyp, vorlagen, j && j.dd)
+    }catch(_){ return null }
+  }
   async function sucDdNachtragen(acc, zielTyp){
     const hint = document.getElementById('suc-maxdd-hint'), el = document.getElementById('suc-maxdd')
     if(hint) hint.textContent = 'Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.'
-    if(!el || Number(acc.maxDrawdown) > 0 || !sucIstCfd(acc) || sucDdNieRaten(acc)) return
-    let vorlagen = []; try{ vorlagen = await kontoVorlagenLaden() }catch(_){}
-    let d = sucDdVorschlag(acc, zielTyp, vorlagen, null)
-    if(!d){
-      try{
-        const tok = await _pushTok()
-        const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
-        const j = r.ok ? await r.json() : null
-        d = sucDdVorschlag(acc, zielTyp, vorlagen, j && j.dd)
-      }catch(_){}   // ohne Antwort bleibt das Feld leer, das Pflichtfeld fragt dann nach
-    }
+    if(!el) return
+    const d = await sucDdErmitteln(acc, zielTyp)
     if(!d || String(_successorParentAccId) !== String(acc.id) || String(el.value || '').trim() !== '') return   // nichts gefunden, Assistent anders oder von Hand gefüllt
     el.value = d.wert
     if(hint) hint.textContent = `Vorgänger ohne Wert — übernommen aus ${d.quelle}. Bitte prüfen, änderbar.`
@@ -43293,6 +43298,7 @@
     setTimeout(() => { const f = accEls.payoutReady; if(f && f.offsetParent){ f.scrollIntoView({ block: 'center', behavior: 'smooth' }); f.focus() } }, 80)
   }
   function openAccountModal(prefillType, editAccount){
+    _acDdAuto = null; _acDdLauf++; { const h = document.getElementById('ac-maxdd-hint'); if(h) h.hidden = true }
     _editingAccountId = editAccount?.id || null
     if(accEls.deaktRow) accEls.deaktRow.hidden = !editAccount   // Konto deaktiviert (30.10.2026): nur bestehende Konten
 
@@ -43390,8 +43396,24 @@
   // NAMENSREGEL im Konto-Popup (.1472): beim ANLEGEN eines Prop-Firm-Kontos ist der Name reine Vorschau aus Größe · External ID · Typ
   // · Zusatz (readonly, getönt). Live-Konten (Fusion-Hedge) behalten den freien Namen. Beim BEARBEITEN bleibt der gespeicherte Name
   // editierbar; ändert Finn den Typ, wird nur der Teil hinter „→" ersetzt (Phase 1 → Phase 2), ändert er Größe/Zusatz, nur die.
+  /* MAX DRAWDOWN VORSCHLAGEN (Finn 30.10.2026: Phase 1 entstand hier ohne Wert, die Nachfolger erbten nichts): neues CFD-Konto, sobald Firma, Typ und Größe stehen, gleicher Weg wie
+   * der Nachfolger (sucDdErmitteln). Eigener Vorschlag darf sich mit den Feldern ändern, ein anderer Wert im Feld (Hand, Schablone aus der Mail) bleibt. Kein Pflichtfeld. */
+  let _acDdAuto = null, _acDdLauf = 0, _acDdTimer = null
+  const acDdFremd = () => { const v = String(accEls.maxDd?.value || '').trim(); return v !== '' && v !== String(_acDdAuto) }
+  function acDdPlanen(){ clearTimeout(_acDdTimer); _acDdTimer = setTimeout(acDdVorschlag, 300) }
+  async function acDdVorschlag(){
+    const el = accEls.maxDd, hint = document.getElementById('ac-maxdd-hint')
+    if(!el || _editingAccountId || acDdFremd()) return
+    const typ = accEls.type?.value || '', gr = parseFloat(accEls.groesse?.value), firm = String(accEls.firm?.value || '').trim(), lauf = ++_acDdLauf
+    const d = firm && gr > 0 && ['phase1', 'phase2', 'funded_cfd'].includes(typ)
+      ? await sucDdErmitteln({ firm, name: accEls.name?.value || '', startingBalance: gr * 1000, maxDrawdown: null }, typ) : null
+    if(lauf !== _acDdLauf || _editingAccountId || acDdFremd()) return   // Felder inzwischen anders oder von Hand gefüllt
+    el.value = d ? d.wert : ''; _acDdAuto = d ? String(d.wert) : null
+    if(hint){ hint.hidden = !d; hint.textContent = d ? `Vorschlag aus ${d.quelle}. Bitte prüfen, änderbar.` : '' }
+  }
   function acNameVorschlag(){
     if(!accEls.name) return
+    acDdPlanen()
     const typ = accEls.type?.value || '', neu = !_editingAccountId, auto = neu && typ !== 'live'
     accEls.name.readOnly = auto
     accEls.name.style.background = auto ? 'var(--surface-tint)' : ''
@@ -44033,6 +44055,9 @@
   if(accEls.type)    accEls.type.addEventListener('change', toggleAcBloecke)
   // Namensregel .1472: Größe / External ID / Typ / Zusatz → Name neu bauen (eigene Verdrahtung, nur dieses Popup)
   if(accEls.type)    accEls.type.addEventListener('change', acNameVorschlag)
+  accEls.firm?.addEventListener('input', acDdPlanen)
+  accEls.firm?.addEventListener('change', acDdPlanen)
+  accEls.maxDd?.addEventListener('input', () => { _acDdAuto = null; _acDdLauf++; const h = document.getElementById('ac-maxdd-hint'); if(h) h.hidden = true })   // Hand-Eingabe gewinnt
   accEls.groesse?.addEventListener('input', acNameVorschlag)
   accEls.zusatz?.addEventListener('input', acNameVorschlag)
   accEls.extId?.addEventListener('input', acNameVorschlag)

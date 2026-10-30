@@ -21,7 +21,7 @@ ein = html[html.index("async function sucDdNachtragen("):html.index("function op
 check("pos(acc.maxDrawdown) || !sucIstCfd(acc)" in fn, "Vorgänger mit Wert oder Futures: kein Rückfall")
 check("tpFirmIstFutures(acc.firm) && !istTradeifyCfd(acc.firm)" in html[i - 400:i], "nur CFD-Firmen, Tradeify CFD zählt als CFD")
 check("if(liste.length && !einig) return null" in fn and "zielTyp === 'phase1' || zielTyp === 'phase2'" in fn, "Schablonen uneinig: leer; andere Phase nur für Phase 1/2, Funded nur mit eigener Schablone")
-check("sucDdNieRaten(acc)) return null" in fn and "sucDdNieRaten(acc)) return" in ein and "=== 'fundingpips'" in html, "FundingPips mit Schablone: leer, auf beiden Wegen (schaltet sonst Standard/Flex im Planer um)")
+check("sucDdNieRaten(acc)) return null" in fn and "sucDdNieRaten(acc)) return null" in html[html.index("async function sucDdErmitteln("):] and "=== 'fundingpips'" in html, "FundingPips mit Schablone: leer, auf beiden Wegen (schaltet sonst Standard/Flex im Planer um)")
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
 ns = {"ap_regel_finden": lambda fs, f: next((x for x in fs if f in x["namen"]), None)}
 k = src.index("\ndef konto_dd_aus_regel(") + 1
@@ -37,5 +37,9 @@ check('"/konto/dd-vorschlag"' in src and "_uid, err = _wd_login()" in src, "Rout
 check("String(el.value || '').trim() !== ''" in ein and "String(_successorParentAccId) !== String(acc.id)" in ein, "Hand-Eingabe und anderer Vorgänger werden nie überschrieben")
 check(re.search(r"sucWdBlockRender\(acc\)\n\s+sucDdNachtragen\(acc, sucType\.value\)", html) is not None, "Assistent ruft den Rückfall mit dem Zieltyp auf")
 check("if(!maxDrawdown){" in html and "Max Drawdown ist nötig" in html, "Pflichtfeld bleibt: Futures ohne Wert wird weiter abgelehnt")
+m = html[html.index("async function acDdVorschlag("):html.index("  function acNameVorschlag(){")]
+check("sucDdErmitteln(" in m and "sucDdVorschlag(" not in m, "Account-Modal rechnet nicht selbst, gleicher Weg wie der Nachfolger")
+check("_editingAccountId || acDdFremd()" in m and "_acDdAuto = null; _acDdLauf++" in html, "Modal: Bearbeiten, Hand-Eingabe und Schablonen-Wert bleiben unangetastet")
+check("Größe (k) ist Pflicht" in html and "Max Drawdown ($, optional)" in html, "Modal: Drawdown bleibt optional")
 print(f"\n{'selftest_nachfolger_dd: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
 sys.exit(1 if FEHLER else 0)
