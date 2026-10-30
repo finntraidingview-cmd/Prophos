@@ -10398,7 +10398,7 @@
             <div class="field">
               <label>Max Drawdown ($)</label>
               <input type="number" class="input mono" id="suc-maxdd" step="1" placeholder="4500">
-              <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.</div>
+              <div id="suc-maxdd-hint" style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.</div>
             </div>
             <div class="field" style="grid-column:span 2">
               <label>External ID (neue Nummer, Pflicht)</label>
@@ -41221,6 +41221,41 @@
   document.getElementById('suc-extid')?.addEventListener('input', sucNameVorschlag)
   document.getElementById('suc-type')?.addEventListener('change', sucNameVorschlag)
   document.getElementById('suc-name')?.addEventListener('input', () => { _sucNameHand = true })
+  /* MAX DRAWDOWN OHNE WERT AM VORGÄNGER (Finn 30.10.2026 14:5x: „Max Drawdown ist bei CFDs von Phase 1 zu Phase 2 immer genau das Gleiche, auch wenn es noch nicht
+   * hinterlegt ist"; Reihenfolge Master): nur CFD-Firmen, nur wenn der Vorgänger leer ist. Erst die Schablone Firma × Größe × Zieltyp; für Phase 2 (nicht Funded) auch die der
+   * anderen Phase, wenn sie sich einig sind — dann die Firmen-Regel Größe × % (regelWert vom Server, FundingPips mit Standard/Flex liefert dort nichts). → { wert, quelle } | null */
+  const sucFirmaKey = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')   // accounts „The5%ers", Schablone ggf. „The5ers"
+  const sucIstCfd = acc => !(tpFirmIstFutures(acc.firm) && !istTradeifyCfd(acc.firm))
+  function sucDdVorschlag(acc, zielTyp, vorlagen, regelWert){
+    const pos = v => (Number(v) > 0 ? Number(v) : null), firma = sucFirmaKey(acc && acc.firm)
+    if(!firma || pos(acc.maxDrawdown) || !sucIstCfd(acc)) return null
+    const gr = Number(kontoGroesseAnzeige(acc.name, acc.startingBalance)) || 0
+    const sch = (vorlagen || []).filter(v => gr && sucFirmaKey(v.firm) === firma && Number(v.account_size || v.starting_balance) === gr && pos(v.max_drawdown))
+    const ziel = sch.find(v => v.account_type === zielTyp)
+    const phasen = zielTyp === 'phase1' || zielTyp === 'phase2' ? sch.filter(v => v.account_type === 'phase1' || v.account_type === 'phase2') : []
+    const v = ziel || (new Set(phasen.map(x => pos(x.max_drawdown))).size === 1 ? phasen[0] : null)
+    if(v) return { wert: pos(v.max_drawdown), quelle: `Schablone „${v.name || v.firm}"` }
+    return pos(regelWert) ? { wert: pos(regelWert), quelle: 'Firmen-Regel (Größe × Drawdown-%)' } : null
+  }
+  window._sucDdVorschlag = sucDdVorschlag   // Test-Haken
+  async function sucDdNachtragen(acc, zielTyp){
+    const hint = document.getElementById('suc-maxdd-hint'), el = document.getElementById('suc-maxdd')
+    if(hint) hint.textContent = 'Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.'
+    if(!el || Number(acc.maxDrawdown) > 0 || !sucIstCfd(acc)) return
+    let vorlagen = []; try{ vorlagen = await kontoVorlagenLaden() }catch(_){}
+    let d = sucDdVorschlag(acc, zielTyp, vorlagen, null)
+    if(!d){
+      try{
+        const tok = await _pushTok()
+        const r = await fetch(`${WATCHER_HOME}/konto/dd-vorschlag?firma=${encodeURIComponent(acc.firm || '')}&groesse=${encodeURIComponent(kontoGroesseAnzeige(acc.name, acc.startingBalance) || '')}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        const j = r.ok ? await r.json() : null
+        d = sucDdVorschlag(acc, zielTyp, vorlagen, j && j.dd)
+      }catch(_){}   // ohne Antwort bleibt das Feld leer, das Pflichtfeld fragt dann nach
+    }
+    if(!d || String(_successorParentAccId) !== String(acc.id) || String(el.value || '').trim() !== '') return   // nichts gefunden, Assistent anders oder von Hand gefüllt
+    el.value = d.wert
+    if(hint) hint.textContent = `Vorgänger ohne Wert — übernommen aus ${d.quelle}. Bitte prüfen, änderbar.`
+  }
   function openSuccessorWizard(parentAccountId, callback, zielTyp){
     const acc = accounts.find(a => String(a.id) === String(parentAccountId))
     if(!acc) return
@@ -41287,11 +41322,13 @@
     sucNameVorschlag()
     // Übergang Funded ⇄ Winning Days (25.09.2026, Finns vierte Kontoart): kein neues Konto, dieselbe Zeile wechselt die Art
     sucWdBlockRender(acc)
+    sucDdNachtragen(acc, sucType.value)
 
     document.getElementById('successorMsg').textContent = ''
     document.getElementById('successorModal').classList.add('open')
   }
 
+  window._sucOeffnen = openSuccessorWizard   // Test-Haken (Stub)
   function closeSuccessorWizard(){
     document.getElementById('successorModal').classList.remove('open')
     _successorParentAccId = null

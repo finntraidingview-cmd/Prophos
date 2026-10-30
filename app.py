@@ -20652,6 +20652,17 @@ def ap_regel_finden(firmen, firm):
     return None
 
 
+def konto_dd_aus_regel(firmen, firm, groesse):
+    """REIN RECHNEND (testbar): Max Drawdown in $ aus der Firmen-Regel für den Nachfolger-Assistenten (Finn 30.10.2026 14:5x): Größe × dd_pct, nur CFD-Firmen (dd_pct).
+    Firma mit Standard/Flex (FundingPips, regel.flex) → None: welcher Wert gilt, hängt am Konto, lieber leer als falsch."""
+    regel = ap_regel_finden(firmen, firm)
+    if not regel or regel.get("flex") or not (float(groesse or 0) > 0):
+        return None
+    jg = (regel.get("je_groesse") or {}).get(str(int(float(groesse))))
+    pct = (jg.get("dd_pct") if isinstance(jg, dict) else None) or regel.get("dd_pct")
+    return round(float(groesse) * float(pct) / 100.0) if pct else None
+
+
 def ap_groesse(groessen, balance):
     """Kontogröße aus der Balance (Finn: „bei 105.000 muss es ein 100k-Account sein") — nächste Regel-Größe, sonst None."""
     best = None
@@ -32034,6 +32045,22 @@ def _ap_zugang(admin_reiter=False):
         if not ok:
             return admin, uid, reg, (jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403)
     return admin, uid, reg, None
+
+
+@app.route("/konto/dd-vorschlag", methods=["GET", "OPTIONS"])
+def konto_dd_vorschlag():
+    """GET ?firma=&groesse= → {ok, dd} aus der Firmen-Regel (konto_dd_aus_regel). auto_plan_regeln liest nur der Server, jeder Login darf diese eine Zahl."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _uid, err = _wd_login()
+    if err:
+        return err
+    try:
+        reg = (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0]
+        dd = konto_dd_aus_regel((reg.get("regeln") or {}).get("firmen") or [], request.args.get("firma"), _wd_num(request.args.get("groesse")))
+        return jsonify({"ok": True, "dd": dd})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
 
 
 @app.route("/admin/auto-plan/delta", methods=["GET", "OPTIONS"])
