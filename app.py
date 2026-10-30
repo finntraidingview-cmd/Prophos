@@ -17210,6 +17210,8 @@ def puls_heim_zweit_pruefen(plan):
     p = plan or {}
     if str(p.get("status") or "") != "planned" or not puls_heim_ist_big(p):
         return {"frei": True}
+    if p.get("orbit_gesendet_at") or p.get("started_at"):
+        return {"frei": True}            # wie prophos_big_trade_halten: Order schon gesendet — Nachklick/Neustart nie sperren (Prüfung S4)
     regel = _puls_heim_regel()
     mx, zu = puls_heim_zweit_regel(regel)
     try:
@@ -17350,8 +17352,8 @@ def admin_zweit_frei():
     if not re.fullmatch(r"[0-9a-f-]{36}", pid):
         return jsonify({"ok": False, "msg": "plan fehlt"}), 400
     try:
-        plan = (sb_select("trade_plans", {"select": "id,user_id,status,route,hedge_eur,orbit_v3,winning_day,konto_typ,mt5_baseline->apex_hedge",
-                                          "id": f"eq.{pid}"}) or [None])[0]
+        plan = (sb_select("trade_plans", {"select": "id,user_id,status,route,hedge_eur,orbit_v3,winning_day,konto_typ,orbit_gesendet_at,started_at,"
+                                                    "apex_hedge:mt5_baseline->apex_hedge", "id": f"eq.{pid}"}) or [None])[0]
     except Exception as e:
         return jsonify({"ok": True, "frei": False, "code": PULS_HEIM_CODE_UNKLAR, "grund": f"Plan nicht lesbar ({type(e).__name__})"}), 200
     if not plan:
@@ -17410,8 +17412,8 @@ def richtung_frei():
         # NUR TV WARTET + ZWEI ORBIT (30.10.2026): Route/Art des Plans für die Heim-Prüfung (Fenster) und die Zweit-Prüfung. Nicht lesbar →
         # Heim-Prüfung über alle Fenster (wie bisher) und Zweit-Prüfung nicht frei (fail-closed)
         try:
-            plan = (sb_select("trade_plans", {"select": "id,user_id,status,route,hedge_eur,orbit_v3,winning_day,konto_typ,mt5_baseline->apex_hedge",
-                                              "id": f"eq.{pid}"}) or [None])[0]
+            plan = (sb_select("trade_plans", {"select": "id,user_id,status,route,hedge_eur,orbit_v3,winning_day,konto_typ,orbit_gesendet_at,started_at,"
+                                                        "apex_hedge:mt5_baseline->apex_hedge", "id": f"eq.{pid}"}) or [None])[0]
             if isinstance(plan, dict) and isinstance(plan.get("apex_hedge"), dict):
                 plan["ah_status"] = plan["apex_hedge"].get("status")
         except Exception as e:

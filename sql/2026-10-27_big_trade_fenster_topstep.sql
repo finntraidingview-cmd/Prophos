@@ -1,3 +1,10 @@
+-- ⛔ ÜBERHOLT (30.10.2026, Prüfung S4 zu ZWEI ORBIT): diese Fassung von prophos_big_trade_laeuft kennt prophos_wd_wie nicht — eingespielt
+-- würde sie Apex-mit-Hedge wieder zum Big Trade machen. Gültig ist sql/2026-10-30_big_trade_fenster_zurueck.sql (Fenster + prophos_wd_wie).
+-- Der Block unten bricht deshalb sofort ab; der alte Text bleibt nur zum Nachlesen.
+do $ueberholt$ begin
+  raise exception 'sql/2026-10-27_big_trade_fenster_topstep.sql ist überholt — sql/2026-10-30_big_trade_fenster_zurueck.sql einspielen';
+end $ueberholt$;
+
 -- BIG TRADE JE FENSTER: TOPSTEPX UND TRADINGVIEW GETRENNT (27.10.2026, Finn: „Okay, parallel zu Big Trade für Topstep").
 --
 -- Regel 4 der Hedge-Kategorien (sql/2026-10-12_hedge_kategorien_regel.sql): höchstens EIN Big Trade je Fenster, weil das Auge (Userscript)

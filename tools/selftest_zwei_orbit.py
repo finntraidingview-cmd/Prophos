@@ -58,6 +58,10 @@ NAEHE["a"] = nah(False)
 check(app.puls_heim_zweit_pruefen(NEU)["code"] == "zweit_wartet", "zweiter gerade gesendet → schon 2 bei big_max 2 → wartet")
 ZEILEN[1]["orbit_gesendet_at"] = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
 check(app.puls_heim_zweit_pruefen(NEU)["frei"], "alter Sende-Stempel zählt nicht")
+NAEHE["a"] = nah(True, 1000)
+check(app.puls_heim_zweit_pruefen(dict(NEU, orbit_gesendet_at="2026-10-30T08:00:00+00:00"))["frei"],
+      "eigener Plan schon gesendet → frei (Nachklick/Neustart nie sperren, wie prophos_big_trade_halten)")
+NAEHE["a"] = nah(False)
 app._sb_all = lambda t, p: (_ for _ in ()).throw(RuntimeError("DB weg"))
 check(app.puls_heim_zweit_pruefen(NEU)["code"] == "big_trade_unklar", "DB-Fehler → nicht frei (fail-closed)")
 app._sb_all = sb_all

@@ -224,12 +224,15 @@ begin
   end if;
   -- ZWEI ORBIT (30.10.2026): bis big_max_je_id gleichzeitig — die 2.500-$-Prüfung macht der Klick-Riegel (/richtung/frei, puls_heim_zweit_pruefen)
   mx := public.prophos_big_trade_max();
+  if pl.route = 'polar' then
+    mx := 1;          -- Polar startet ohne Panel-Klick (kein /richtung/frei, keine 2.500-$-Prüfung) → nie als weiterer Big Trade
+  end if;
   if mx > 1 then
     n := public.prophos_big_trade_anzahl(pl.id, pl.user_id);
     if n < mx then
       return jsonb_build_object('frei', true, 'zweit', true, 'grund', 'weiterer Big Trade erlaubt — Abstand zum laufenden prüft der Klick');
     end if;
-    ziel := now() + interval '1 minute' + make_interval(secs => floor(random() * 30));
+    ziel := greatest(now() + interval '1 minute' + make_interval(secs => floor(random() * 30)), coalesce(pl.start_um, now()));   -- nie vorziehen
     update public.trade_plans
        set start_um = ziel, start_um_gestartet_at = null,
            mt5_baseline = coalesce(mt5_baseline, '{}'::jsonb) || jsonb_build_object('start_sperre', jsonb_build_object(
@@ -281,6 +284,9 @@ begin
   -- ZWEI ORBIT (30.10.2026): bis big_max_je_id gleichzeitig (Claim geht durch, den 2.500-$-Abstand prüft der Klick-Riegel). Voll →
   -- Marke start_sperre art 'zweit' + Start in 1–1,5 min statt 15 min (der Sofort-Start-Wächter im Tab fragt /admin/zweit-frei)
   mx := public.prophos_big_trade_max();
+  if new.route = 'polar' then
+    mx := 1;          -- Polar startet ohne Panel-Klick (kein /richtung/frei, keine 2.500-$-Prüfung) → nie als weiterer Big Trade
+  end if;
   if mx > 1 then
     n := public.prophos_big_trade_anzahl(new.id, new.user_id);
     if n < mx then
