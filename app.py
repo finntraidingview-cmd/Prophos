@@ -61,50 +61,109 @@ def version():
 # FF hat keine offizielle API, aber einen öffentlichen JSON-Feed pro Woche.
 # Wir proxien + cachen serverseitig (30 min), damit der Browser weder CORS noch
 # Rate-Limit trifft. Nur USD-Events werden durchgereicht.
-_news_cache = {"ts": 0, "data": None}
+_news_cache = {"ts": 0, "data": None, "ttl": 30 * 60, "fehl_bis": 0.0}
 _news_lock = threading.Lock()
 NEWS_TTL = 30 * 60
+NEWS_TTL_OHNE_NAECHSTE = 5 * 60      # nur nextweek fehlt: liefern + cachen, aber bald neu versuchen
+NEWS_PAUSE_NACH_FEHLER_S = 120      # thisweek gescheitert: so lange nicht neu bei FF fragen (sonst holt jeder Tab-Aufruf neue 429)
+NEWS_ALARM_NACH_S = 2 * 3600         # thisweek so lange am Stück gescheitert → einmal 🟠 (nur bei aktivem Funded-CFD-Planer)
 FF_URLS = [
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
     "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
 ]
+_news_regel = {"at": 0.0, "an": True, "aktiv": False}
+_news_fehl = {"seit": 0.0, "gemeldet": False}
+
+
+def news_antwort(ok_diese, ok_naechste, events, alt, now):
+    """REIN RECHNEND (testbar): NEWS-REGEL FUNDED CFD (30.10.2026, S8 8427eda9 — Funded-CFD-Starts sperren rund um rote USD-News, leerer
+    Kalender = fail-closed im Tab). Vorher cachte ein Abruf, bei dem beide FF-URLs ≠ 200 lieferten (429), {"events": []} 30 min als frisch.
+    → (payload, http_status, cache) mit cache = (payload, ttl_s) zum Schreiben oder None (nicht schreiben).
+    thisweek nicht ok: alter Cache → der, mit unvollstaendig true (fetched unverändert, nicht überschreiben); sonst 502 ohne Cache.
+    nur nextweek nicht ok: liefern + cachen mit kurzer TTL, unvollstaendig false. Beide ok: wie immer, unvollstaendig false."""
+    if not ok_diese:
+        if alt is not None:
+            return dict(alt, unvollstaendig=True), 200, None
+        return {"error": "News-Kalender (diese Woche) nicht lesbar", "events": [], "unvollstaendig": True}, 502, None
+    payload = {"events": list(events or []), "fetched": now, "unvollstaendig": False}
+    return payload, 200, (payload, NEWS_TTL if ok_naechste else NEWS_TTL_OHNE_NAECHSTE)
+
+
+def _news_regel_lesen():
+    """funded_cfd_plan_regeln.news_regel (60 s gemerkt) → (an, planer_aktiv). Lesefehler / Spalte fehlt = an (Regel bleibt an)."""
+    if time.time() - _news_regel["at"] < 60:
+        return _news_regel["an"], _news_regel["aktiv"]
+    an, aktiv = True, _news_regel["aktiv"]
+    try:
+        z = (sb_select("funded_cfd_plan_regeln", {"select": "aktiv,news_regel", "id": "eq.1"}) or [{}])[0]
+        an, aktiv = z.get("news_regel") is not False, bool(z.get("aktiv"))
+    except Exception:
+        pass
+    _news_regel.update(at=time.time(), an=an, aktiv=aktiv)
+    return an, aktiv
+
+
+def _news_fehl_merken(ok_diese, now, planer_aktiv):
+    """🟠 einmal, wenn thisweek > NEWS_ALARM_NACH_S am Stück scheitert und der Funded-CFD-Planer aktiv ist (ein Ort statt je PC-Tab)."""
+    if ok_diese:
+        _news_fehl.update(seit=0.0, gemeldet=False)
+        return
+    if not _news_fehl["seit"]:
+        _news_fehl["seit"] = now
+    if planer_aktiv and not _news_fehl["gemeldet"] and now - _news_fehl["seit"] > NEWS_ALARM_NACH_S:
+        _news_fehl["gemeldet"] = True
+        try:
+            alarm_senden(2, "news_kalender_fehlt", "News-Kalender fehlt — Funded-CFD-Starts gesperrt",
+                         f"Forex-Factory diese Woche seit {int((now - _news_fehl['seit']) // 60)} min nicht lesbar — die News-Regel sperrt "
+                         "Funded-CFD-Starts (fail-closed), bis der Kalender wieder da ist.")
+        except Exception as e:
+            print(f"[news] ⚠️ Alarm: {type(e).__name__}: {e}", flush=True)
+
 
 @app.route("/news/calendar", methods=["GET", "OPTIONS"])
 def news_calendar():
     if request.method == "OPTIONS":
         return "", 200
     now = time.time()
+    regel_an, planer_aktiv = _news_regel_lesen()
     with _news_lock:
-        if _news_cache["data"] is not None and (now - _news_cache["ts"]) < NEWS_TTL:
-            return jsonify(_news_cache["data"])
-    events = []
-    try:
-        for url in FF_URLS:
+        if _news_cache["data"] is not None and (now - _news_cache["ts"]) < (_news_cache.get("ttl") or NEWS_TTL):
+            return jsonify(dict(_news_cache["data"], news_regel=regel_an))
+        alt = _news_cache["data"]
+        if now < (_news_cache.get("fehl_bis") or 0):
+            p, st, _c = news_antwort(False, False, [], alt, now)
+            return jsonify(dict(p, news_regel=regel_an)), st
+    events, ok = [], []
+    for url in FF_URLS:
+        gut = False
+        try:
             r = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0 (Prophos)"})
-            if r.status_code != 200:
-                continue
-            for ev in (r.json() or []):
-                if str(ev.get("country") or "").upper() != "USD":
-                    continue
-                events.append({
-                    "id": ev.get("id") or (str(ev.get("title")) + str(ev.get("date"))),
-                    "title": ev.get("title"),
-                    "country": ev.get("country"),
-                    "date": ev.get("date"),
-                    "impact": ev.get("impact"),
-                    "forecast": ev.get("forecast"),
-                    "previous": ev.get("previous"),
-                })
-    except Exception as e:
-        with _news_lock:
-            if _news_cache["data"] is not None:
-                return jsonify(_news_cache["data"])  # stale liefern statt Fehler
-        return jsonify({"error": str(e), "events": []}), 502
-    payload = {"events": events, "fetched": now}
+            daten = r.json() if r.status_code == 200 else None
+            if isinstance(daten, list):
+                gut = True
+                for ev in daten:
+                    if not isinstance(ev, dict) or str(ev.get("country") or "").upper() != "USD":
+                        continue
+                    events.append({
+                        "id": ev.get("id") or (str(ev.get("title")) + str(ev.get("date"))),
+                        "title": ev.get("title"),
+                        "country": ev.get("country"),
+                        "date": ev.get("date"),
+                        "impact": ev.get("impact"),
+                        "forecast": ev.get("forecast"),
+                        "previous": ev.get("previous"),
+                    })
+        except Exception as e:
+            print(f"[news] ⚠️ {url.rsplit('/', 1)[-1]}: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        ok.append(gut)
+    _news_fehl_merken(ok[0], now, planer_aktiv)
+    payload, status, cache = news_antwort(ok[0], ok[1] if len(ok) > 1 else True, events, alt, now)
     with _news_lock:
-        _news_cache["data"] = payload
-        _news_cache["ts"] = now
-    return jsonify(payload)
+        if cache:
+            _news_cache.update(data=cache[0], ts=now, ttl=cache[1], fehl_bis=0.0)
+        elif not ok[0]:
+            _news_cache["fehl_bis"] = now + NEWS_PAUSE_NACH_FEHLER_S
+    return jsonify(dict(payload, news_regel=regel_an)), status
 
 # ── Futures-Kurse NQ / MNQ (30.08.2026, Finns Wunsch „NQ-Live-Stand ablesen") ──
 # Quelle ist der oeffentliche Yahoo-Chart-Endpoint: kein Schluessel, kein Konto,
@@ -35535,6 +35594,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"   # noqa: E731
     auto_ok = reg.get("auto_bestaetigen") is True
     erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "auto_bestaetigen": auto_ok,
+           "news_regel": reg.get("news_regel") is not False,       # NEWS-REGEL (30.10.2026, S8): Kachel im Regelteil
            "ziel_auto_wartet": reg.get("ziel_auto_wartet") is True, "at": jetzt.isoformat(), "tag": plan_tag,
            "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
            # Regel-Feld im Reiter „Funded Planer → CFD" (S3) liest die Werte von hier — die Tabelle hat keine Policy (nur Railway)
@@ -35923,6 +35983,29 @@ def admin_funded_cfd_plan_zurueck():
 @app.route("/admin/funded-cfd-plan/loeschen", methods=["POST", "OPTIONS"])
 def admin_funded_cfd_plan_loeschen():
     return _fcp_eingriff("loeschen")
+
+
+@app.route("/admin/funded-cfd-plan/einstellung", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_einstellung():
+    """POST {news_regel: bool} — Kachel „News-Regel (rote USD-News)" im Funded Planer → CFD (S8 8427eda9). Der Schalter gilt für alle Gruppen
+    (eine Zeile funded_cfd_plan_regeln) → nur Admin. /news/calendar liefert ihn nach ≤ 60 s als news_regel."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, _lese, _schreib, err = _fcp_login()
+    if err:
+        return err
+    if not admin:
+        return jsonify({"ok": False, "msg": "Die News-Regel gilt für alle Gruppen — nur Admin"}), 403
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body.get("news_regel"), bool):
+        return jsonify({"ok": False, "msg": "news_regel = true | false"}), 400
+    try:
+        zeilen = sb_update("funded_cfd_plan_regeln", {"id": "eq.1"}, {"news_regel": body["news_regel"], "updated_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {str(e)[:160]} — sql/2026-10-30_news_regel_schalter.sql eingespielt?"}), 502
+    _news_regel["at"] = 0.0                  # /news/calendar liest sofort neu
+    print(f"[funded-cfd] News-Regel {'AN' if body['news_regel'] else 'AUS'} durch Admin {str(uid)[:8]}", flush=True)
+    return jsonify({"ok": True, "news_regel": body["news_regel"], "n": len(zeilen or [])})
 
 
 @app.route("/admin/funded-cfd-plan/planen", methods=["POST", "OPTIONS"])
