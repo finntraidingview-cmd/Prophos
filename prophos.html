@@ -3830,10 +3830,29 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts .apg-karte{margin-bottom:18px}
   /* Challenges (CHALLENGE-CHART-NEU 30.10.2026): großer 14-Tage-Chart, „Am nächsten am Pass" */
-  #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:520px} @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:360px} }
+  #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:380px} @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:320px} }
+  #ap-ids-root.ap-guestly .apg-cv-kz{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+  #ap-ids-root.ap-guestly .apg-cv-k{background:var(--g-kpi);border-radius:12px;padding:12px 14px;min-width:0}
+  #ap-ids-root.ap-guestly .apg-cv-k small{display:block;color:var(--g-sub);font-size:12.5px}
+  #ap-ids-root.ap-guestly .apg-cv-k b{display:block;font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.2;margin-top:2px;font-variant-numeric:tabular-nums;color:var(--g-text)}
+  #ap-ids-root.ap-guestly .apg-cv-k b.gut{color:var(--g-gut)} #ap-ids-root.ap-guestly .apg-cv-k b.rot{color:var(--g-rot)}
+  #ap-ids-root.ap-guestly .apg-cv-k span{display:block;color:var(--g-sub);font-size:12px;margin-top:4px;font-variant-numeric:tabular-nums}
+  #ap-ids-root.ap-guestly .apg-cv-k span.hinweis{opacity:.8;margin-top:2px}
+  /* Handy: Zahl links, Kleines rechts — sonst schieben drei hohe Kacheln den Chart aus dem Bild */
+  @media (max-width:560px){ #ap-ids-root.ap-guestly .apg-cv-kz{grid-template-columns:minmax(0,1fr);gap:8px} #ap-ids-root.ap-guestly .apg-cv-k{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:12px;padding:9px 12px;align-items:start}
+    #ap-ids-root.ap-guestly .apg-cv-k small{grid-column:1;grid-row:1} #ap-ids-root.ap-guestly .apg-cv-k b{grid-column:1;grid-row:2 / span 3;font-size:20px;white-space:nowrap} #ap-ids-root.ap-guestly .apg-cv-k span{grid-column:2;text-align:right;margin-top:0;font-size:11.5px} #ap-ids-root.ap-guestly .apg-cv-k span.hinweis{margin-top:0} }
+  #ap-ids-root.ap-guestly .apg-cv .apg-legende i.linie{width:14px;height:2px;border-radius:1px;vertical-align:3px;background:var(--g-text)}
+  #ap-ids-root.ap-guestly .apg-cv-tip{position:absolute;top:12px;left:0;max-width:100%;pointer-events:none;z-index:2;background:#101828;color:#e4e7ec;border:1px solid var(--g-rand);border-radius:8px;padding:5px 9px;font-size:12px;line-height:1.45;font-variant-numeric:tabular-nums}
+  #ap-ids-root.ap-guestly .apg-cv-tip b{color:#fff;font-weight:600}
+  #ap-ids-root.ap-guestly .apg-cv-tag{margin-top:10px;font-size:12.5px;color:var(--g-sub)}
+  #ap-ids-root.ap-guestly .apg-cv-tag-k{display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--g-text);font-weight:600;font-variant-numeric:tabular-nums}
+  #ap-ids-root.ap-guestly .apg-cv-tag-k button{border:0;background:none;color:var(--g-sub);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px}
+  #ap-ids-root.ap-guestly .apg-cv-tag-l{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px;margin-top:8px} @media (max-width:560px){ #ap-ids-root.ap-guestly .apg-cv-tag-l{grid-template-columns:minmax(0,1fr)} }
+  #ap-ids-root.ap-guestly .apg-cv-tag-l div div{padding:2px 0;color:var(--g-text);overflow-wrap:anywhere}
+  #ap-ids-root.ap-guestly .apg-cv-tag-t{font-weight:600;color:var(--g-sub);margin-bottom:2px}
   #ap-ids-root.ap-guestly .apg-cv .apg-legende i.tuerkis{background:var(--g-a4)}
   #ap-ids-root.ap-guestly .apg-cv .apg-legende{flex-wrap:wrap;gap:6px 14px} #ap-ids-root.ap-guestly .apg-cv .apg-legende span{white-space:nowrap}
-  #ap-ids-root.ap-guestly .apg-cv .apg-legende i.gut{background:var(--g-gut);opacity:.75} #ap-ids-root.ap-guestly .apg-cv .apg-legende i.rot{background:var(--g-rot);opacity:.45}
+  #ap-ids-root.ap-guestly .apg-cv .apg-legende i.gut{background:var(--g-gut)} #ap-ids-root.ap-guestly .apg-cv .apg-legende i.rot{background:var(--g-rot)}
   #ap-ids-root.ap-guestly .apg-cv .apg-legende i.grau{background:var(--g-sub);opacity:.8}
   #ap-ids-root.ap-guestly .apg-cv-nah{margin-top:14px;padding-top:12px;border-top:1px solid var(--g-rand)}
   #ap-ids-root.ap-guestly .apg-cv-nah-t{font-size:13px;font-weight:600;color:var(--g-text);margin-bottom:6px}
@@ -81550,7 +81569,7 @@
    * dem Start liegt; „geblowt", wenn als blown archiviert oder der Verlust das Polster frisst. Gewonnen/verloren = $ > 0 / < 0 (bestanden zählt als
    * gewonnen, geblowt als verloren). Folgt ID (apSichtUid) und CFD/Futures (apArtPasst). „Am nächsten am Pass" aus den Trade-Zeilen des Planers
    * (Balance + Rest bis Ziel je Konto). Nur Anzeige, eigene Abfrage höchstens alle 2 min. */
-  const _apgCv = { d: null, at: 0, q: '', laeuft: false, nr: 0, fehler: '' }
+  const _apgCv = { d: null, at: 0, q: '', laeuft: false, nr: 0, fehler: '', tag: null }
   const apgCvQuery = () => '?sicht=admin&tage=14' + (typeof window._admGruppeQ === 'function' ? window._admGruppeQ('&') : '')
   async function apgCvLaden(){
     const q = apgCvQuery()
@@ -81599,6 +81618,31 @@
     const nah = [...konten.values()].sort((a, b) => Number(a.rest) - Number(b.rest)).slice(0, 5)
     return { geladen: !!d, fehler: !d && _apgCv.fehler ? _apgCv.fehler : '', tage, nah }
   }
+  /* CHART ÜBERSICHTLICH (Finn 30.10.2026 Auftrag C1: „Bei dem Chart erkennt man gar nichts", Foto: zwei Skalen, keine Zahl ohne Hover, Tooltip verdeckt die letzten
+   * Tage). Fusion hypothetisch ist die Hauptsache: Kacheln Heute / 7 / 14 Tage ohne Hover, ein Chart auf EINER €-Skala (Balken je Tag, Linie Summe), Master nur noch
+   * als Zahl in den Kacheln. Rechenwerte unverändert aus apgCvDaten (t.fh, t.usd). Die Tag-Infos stehen in einem Band ÜBER der Zeichenfläche, Kontolisten erst nach Klick. */
+  const apgCvFarbe = v => v > 0 ? 'gut' : v < 0 ? 'rot' : ''
+  const apgCvDatum = tag => tag.split('-').reverse().join('.')
+  const apgCvAnz = (n, eins, viele) => `${n} ${n === 1 ? eins : viele}`
+  // Summe bis zu diesem Tag (Linie, Band, Klick-Zeile): dieselbe Rundung wie vorher die Fusion-Linie
+  const apgCvCent = v => Math.round(v * 100) / 100   // Kachel, Band, Klick-Zeile und Linie runden gleich, sonst stehen dort je nach Float 1 € Unterschied (Gegenprüfung)
+  function apgCvSummen(c){ let s = 0; return c.tage.map(t => { s += t.fh; return apgCvCent(s) }) }
+  function apgCvKacheln(c){
+    return `<div class="apg-cv-kz">${[['Heute', 1], ['7 Tage', 7], ['14 Tage', 14]].map(([name, n]) => {
+      const x = c.tage.slice(-n).reduce((a, t) => ({ fh: a.fh + t.fh, usd: a.usd + t.usd, n: a.n + t.n, best: a.best + t.best.length, blow: a.blow + t.blow.length, ohne: a.ohne + t.offen + t.ohne, hedge: a.hedge + t.gehedgt }),
+        { fh: 0, usd: 0, n: 0, best: 0, blow: 0, ohne: 0, hedge: 0 })
+      const hinweis = [x.ohne ? `${x.ohne} ohne Hypo-Wert` : '', x.hedge ? `${x.hedge} mit Hedge` : ''].filter(Boolean).join(' · ')
+      return `<div class="apg-cv-k"><small>${name}</small><b class="${apgCvFarbe(apgCvCent(x.fh))}">${apgEur(apgCvCent(x.fh))}</b>
+        <span>Master ${apgUsd(x.usd)}</span><span>${x.n}&nbsp;beendet · ${x.best}&nbsp;bestanden · ${x.blow}&nbsp;geblowt</span>${hinweis ? `<span class="hinweis" title="ohne Hypo-Wert: zählt nicht in der Fusion-Zahl. Mit Hedge: echter Hedge, zählt nicht in der Fusion-Zahl, aber beim Master.">${hinweis}</span>` : ''}</div>` }).join('')}</div>`
+  }
+  function apgCvTagHtml(c){
+    const i = _apgCv.tag ? c.tage.findIndex(t => t.tag === _apgCv.tag) : -1
+    if(i < 0) return 'Auf einen Tag klicken: Konten des Tages'
+    const t = c.tage[i], liste = (kopf, zeichen, namen) => namen.length ? `<div><div class="apg-cv-tag-t">${kopf} (${namen.length})</div>${namen.map(n => `<div>${zeichen} ${escapeHtml(n)}</div>`).join('')}</div>` : ''
+    const rest = [t.gehedgt ? `${t.gehedgt} mit Hedge (nicht in der Fusion-Zahl)` : '', t.offen || t.ohne ? `${t.offen + t.ohne} ohne Hypo-Wert` : ''].filter(Boolean).join(' · ')
+    return `<div class="apg-cv-tag-k"><span>${apgCvDatum(t.tag)} · Tag ${apgEur(apgCvCent(t.fh))} · Summe ${apgEur(apgCvSummen(c)[i])}</span><button type="button" data-apg-cv-zu aria-label="Tag schließen" title="Tag schließen">×</button></div>
+      ${t.best.length || t.blow.length ? `<div class="apg-cv-tag-l">${liste('Bestanden', '✓', t.best)}${liste('Geblowt', '✗', t.blow)}</div>` : '<div style="margin-top:6px">An diesem Tag nichts bestanden oder geblowt.</div>'}${rest ? `<div style="margin-top:6px">${rest}</div>` : ''}`
+  }
   function apgCvHtml(c){
     const leer = !c.geladen ? (c.fehler ? '⚠ Verlauf nicht ladbar: ' + escapeHtml(c.fehler.slice(0, 120)) : 'lädt …') : c.tage.some(t => t.n) ? '' : 'in den letzten 14 Tagen nichts beendet'
     const rest = v => Math.round(Number(v)).toLocaleString('de-DE') + ' $'
@@ -81607,35 +81651,58 @@
         const ziel = Number(t.balance) + Number(t.rest), pct = g > 0 && ziel > g ? Math.max(0, Math.min(100, (Number(t.balance) - g) / (ziel - g) * 100)) : null
         return `<div class="apg-cv-nz" title="${escapeHtml(`${t.user || ''} · ${t.konto || ''} — Balance ${rest(t.balance)} → Ziel ${rest(ziel)}`)}"><span class="nm"><i style="background:${idFarbe(t.user_id)}"></i>${escapeHtml(t.user || '')} · ${escapeHtml(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(t.firma) : String(t.firma || ''))}${t.ende4 ? ' …' + escapeHtml(String(t.ende4)) : ''}</span>`
           + `<span class="bar">${pct != null ? `<i style="width:${pct.toFixed(1)}%"></i>` : ''}</span><b>noch ${rest(t.rest)}</b></div>` }).join('')}</div>` : ''
-    return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Futures · letzte 14 Tage kumuliert (Dubai) · beendete Trades der Sicht</div></div>
-        <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile) über 14 Tage. Master $ = alle beendeten Trades. Fusion hypothetisch € = Master-P&amp;L $ × Kontowert-Satz, geblowt = −Kontowert, nur Trades ohne Hedge; Trades mit Hedge zählen dort nicht. Folgt ID und CFD/Futures.">i</span></div>
-        <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion hypothetisch €</span></div>
-        <div class="apg-chart">${leer ? `<div class="apg-leer">${leer}</div>` : '<canvas id="apg-c-cv"></canvas>'}</div>${nah}</div>`
+    return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Fusion hypothetisch in € · Futures · letzte 14 Tage (Dubai) · beendete Trades der Sicht</div></div>
+        <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile). Fusion hypothetisch € = Master-P&amp;L $ × Kontowert-Satz, geblowt = −Kontowert, nur Trades ohne Hedge; Trades mit Hedge zählen dort nicht. Master $ = alle beendeten Trades. Heute zählt mit in den 7 und 14 Tagen. Folgt ID und CFD/Futures.">i</span></div>
+        ${c.geladen ? apgCvKacheln(c) : ''}
+        <div class="apg-legende"><span><i class="gut"></i>Tag im Plus</span><span><i class="rot"></i>Tag im Minus</span><span><i class="linie"></i>Summe</span></div>
+        <div class="apg-chart">${leer ? `<div class="apg-leer">${leer}</div>` : '<div class="apg-cv-tip" hidden></div><canvas id="apg-c-cv" role="img" aria-label="Fusion hypothetisch in Euro je Tag und als Summe über 14 Tage"></canvas>'}</div>
+        ${leer ? '' : `<div class="apg-cv-tag">${apgCvTagHtml(c)}</div>`}${nah}</div>`
   }
-  // ZWEI LINIEN (Finn 30.10.2026 ~09:18, ersetzt die Balken): kumuliert über 14 Tage Master $ (rechte Achse) und „Fusion hypothetisch" € (linke Achse: Hypo €,
-  // nur Trades ohne Hedge, NUR CHART 30.10.2026 14:0x). Baustein wie „P&L von heute": zwei Achsen, Nullen auf gleicher Höhe, keine Balken. Tooltip: Tageswert + Summe.
   function apgCvMalen(root, c, ablage){
     const cv = root.querySelector('#apg-c-cv'); if(!cv || !c || typeof window.Chart !== 'function') return
     const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
-    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a4 = tok('--g-a4') || '#16c8c6'
-    const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
-    const labels = c.tage.map(t => t.tag.slice(8, 10) + '.' + t.tag.slice(5, 7) + '.')
-    let sm = 0, sf = 0
-    const kum = c.tage.map(t => { sm += t.usd; sf += t.fh; return { m: Math.round(sm * 100) / 100, f: Math.round(sf * 100) / 100 } })
-    const reihe = (k, farbe, label, id) => ({ label, yAxisID: id, data: kum.map(p => p[k]), borderColor: farbe, backgroundColor: farbe, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0 })
-    const sp = k => [Math.min(0, ...kum.map(p => p[k])), Math.max(0, ...kum.map(p => p[k]))], [mLo, mHi] = sp('m'), [fLo, fHi] = sp('f'), grenzen = apgNullGrenzen(mLo, mHi, fLo, fHi)
-    ablage.push(new Chart(cv.getContext('2d'), { type: 'line',
-      data: { labels, datasets: [reihe('m', a1, 'Master', 'm'), reihe('f', a4, 'Fusion hypothetisch', 'f')] },
+    // Farben bei jedem Zeichnen frisch: der Theme-Knopf ruft nur chart.update('none'), und die Summen-Linie in --g-text wäre nach Hell → Dunkel fast unsichtbar (Gegenprüfung)
+    const sub = () => tok('--g-sub') || '#667085', gitter = () => tok('--g-gitter') || 'rgba(16,24,40,.06)', text = () => tok('--g-text') || '#101828', karte = () => tok('--g-karte') || '#fff'
+    const gut = () => tok('--g-gut') || '#12a150', rot = () => tok('--g-rot') || '#e5484d', flaeche = () => tok('--g-kpi') || '#f3f4f8'
+    const tipEl = root.querySelector('.apg-cv-tip'), tagEl = root.querySelector('.apg-cv-tag')
+    const schmal = cv.parentElement.clientWidth < 620
+    const labels = c.tage.map((t, i) => i === c.tage.length - 1 ? 'Heute' : t.tag.slice(8, 10) + '.' + t.tag.slice(5, 7) + '.')
+    const summen = apgCvSummen(c), werte = c.tage.map(t => apgCvCent(t.fh))
+    const kurz = v => { const a = Math.abs(v); return (v > 0 ? '+' : '−') + (a >= 1000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : Math.round(a)) }
+    const gewaehlt = () => _apgCv.tag ? c.tage.findIndex(t => t.tag === _apgCv.tag) : -1
+    let hoverI = -1
+    // Spalte des Tages hinterlegen (Hover und gewählter Tag), darunter die Balken
+    const spalte = { id: 'apgCvSpalte', beforeDatasetsDraw(ch){ const a = ch.chartArea, x = ch.scales.x, breit = x.getPixelForValue(1) - x.getPixelForValue(0), g = ch.ctx
+      new Set([gewaehlt(), hoverI]).forEach(i => { if(i < 0) return; g.save(); g.fillStyle = flaeche(); g.fillRect(x.getPixelForValue(i) - breit / 2, a.top, breit, a.bottom - a.top); g.restore() }) } }
+    // Tageswert direkt am Balken, im Schmalen ohne (zu wenig Platz); Rand in Kartenfarbe, damit die Summen-Linie die Zahl nicht unlesbar macht
+    const zahlen = { id: 'apgCvZahlen', afterDatasetsDraw(ch){ if(schmal) return; const g = ch.ctx, bars = ch.getDatasetMeta(1).data; g.save(); g.font = '600 11px system-ui,sans-serif'; g.textAlign = 'center'; g.lineJoin = 'round'
+      werte.forEach((v, i) => { if(!Math.round(v) || !bars[i]) return; const y = v < 0 ? bars[i].y + 4 : bars[i].y - 4; g.textBaseline = v < 0 ? 'top' : 'bottom'
+        g.lineWidth = 3; g.strokeStyle = karte(); g.strokeText(kurz(v), bars[i].x, y); g.fillStyle = text(); g.fillText(kurz(v), bars[i].x, y) }); g.restore() } }
+    const tip = ctx => { const m = ctx.tooltip; if(!tipEl) return
+      const pt = m.opacity && m.dataPoints && m.dataPoints[0]; if(!pt){ tipEl.hidden = true; if(hoverI !== -1){ hoverI = -1; ctx.chart.draw() } return }
+      const i = pt.dataIndex, t = c.tage[i]
+      tipEl.innerHTML = `<div><b>${apgCvDatum(t.tag)}</b> · Tag <b>${apgEur(apgCvCent(t.fh))}</b> · Summe <b>${apgEur(summen[i])}</b></div><div>${t.n}&nbsp;beendet · ${t.plus}&nbsp;gewonnen · ${t.minus}&nbsp;verloren · ${t.best.length}&nbsp;bestanden · ${t.blow.length}&nbsp;geblowt</div>`
+      tipEl.hidden = false; tipEl.style.left = '0'   // Breite ohne altes left messen und aufrunden, sonst bricht das Band am rechten Rand um und ragt in den Chart (Gegenprüfung)
+      const breite = Math.ceil(tipEl.getBoundingClientRect().width), platz = cv.parentElement.clientWidth
+      tipEl.style.left = Math.max(0, Math.min(platz - breite, m.caretX - breite / 2)) + 'px'
+      if(hoverI !== i){ hoverI = i; ctx.chart.draw() } }
+    const tagZeigen = () => { if(tagEl){ tagEl.innerHTML = apgCvTagHtml(c); tagEl.querySelector('[data-apg-cv-zu]')?.addEventListener('click', () => { _apgCv.tag = null; tagZeigen(); chart.update('none') }) } }
+    const chart = new Chart(cv.getContext('2d'), { type: 'bar', plugins: [spalte, zahlen],
+      data: { labels, datasets: [
+        { type: 'line', label: 'Summe', order: 0, data: summen, borderColor: text, backgroundColor: text, borderWidth: 2, tension: 0, pointRadius: summen.map((_, i) => i === summen.length - 1 ? 3 : 0), pointHoverRadius: 4 },
+        { label: 'Tag', order: 1, data: werte, borderRadius: 4, categoryPercentage: .72, barPercentage: 1, maxBarThickness: 44,
+          backgroundColor: x => { const g = gewaehlt(), f = Number(x.raw) < 0 ? rot() : gut(); return g < 0 || g === x.dataIndex ? f : f + '80' } }] },
       options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, boxPadding: 4,
-          callbacks: { title: x => x.length ? c.tage[x[0].dataIndex].tag.split('-').reverse().join('.') : '',
-            label: x => { const t = c.tage[x.dataIndex], m = x.dataset.yAxisID === 'm'; return ` ${x.dataset.label}: Tag ${m ? apgUsd(t.usd) : apgEur(t.fh)} · Summe ${m ? apgUsd(x.parsed.y) : apgEur(x.parsed.y)}` },
-            afterBody: x => { const t = x.length ? c.tage[x[0].dataIndex] : null; if(!t) return []
-              return ['', ` ${t.n} beendet · ${t.plus} gewonnen · ${t.minus} verloren`, ...(t.best.length ? ['', `Bestanden (${t.best.length}):`, ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []),
-                ...(t.blow.length ? ['', `Geblowt (${t.blow.length}):`, ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []), ...(t.gehedgt ? ['', `${t.gehedgt} mit Hedge (nicht in der Fusion-Linie)`] : []), ...(t.offen || t.ohne ? ['', `${t.offen + t.ohne} ohne Hypo-Wert`] : [])] } } } },
-        scales: { x: Object.assign({}, achse, { grid: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } }),
-          m: Object.assign({}, achse, grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, maxTicksLimit: 6, callback: v => apgUsd(v) } }),
-          f: Object.assign({}, achse, grenzen(fLo, fHi), { position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, maxTicksLimit: 6, callback: v => apgEur(v) } }) } } }))
+        // Platz oben für das Tag-Band (.apg-cv-tip): so verdeckt es nie einen Tag, auch nicht die letzten
+        layout: { padding: { top: schmal ? 72 : 50 } },
+        onHover: (e, el) => { if(e.native && e.native.target) e.native.target.style.cursor = el.length ? 'pointer' : 'default' },
+        onClick: (e, _el, ch) => { const hit = ch.getElementsAtEventForMode(e, 'index', { intersect: false }, false)[0]; if(!hit) return
+          const tag = c.tage[hit.index].tag; _apgCv.tag = _apgCv.tag === tag ? null : tag; tagZeigen(); ch.update('none') },
+        plugins: { legend: { display: false }, tooltip: { enabled: false, external: tip } },
+        scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } },
+          y: { border: { display: false }, grace: '6%', grid: { drawTicks: false, color: g => g.tick && g.tick.value === 0 ? sub() : gitter() }, ticks: { color: sub, font: { size: 11 }, maxTicksLimit: 6, callback: v => apgEur(v) } } } } })
+    ablage.push(chart)
+    tagZeigen()
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
