@@ -81021,8 +81021,8 @@
     const kz = (name, h, s, cls, tip) => `<div class="apg-cvk" title="${escapeHtml(tip)}"><small>${name}</small><b class="${h ? cls || '' : ''}">${h}</b><span>${s} in 7 Tagen</span></div>`
     const hy = (x, wann) => `${x.eurN} Trade${x.eurN === 1 ? '' : 's'} mit Kontowert-Satz ${wann}${x.ohne ? ` · ${x.ohne} ohne Satz (zählt nicht)` : ''}`
     const hypo = `<div class="apg-cv-hypo" title="${escapeHtml('Hypothetisch gewonnen: Master-P&L $ × Kontowert-Satz (€ je $, Kontowert ÷ Polster) je beendetem Challenge-Trade, geblowt = −Kontowert vor dem Trade — dieselbe Rechnung wie die Hypo-Bilanz / Kachel „Heute“ (app.py hypo_bilanz_zeile). Ohne Hedge.')}">
-        <div><small>Hypothetisch heute</small><b class="${c.heute.eur > 0 ? 'gut' : c.heute.eur < 0 ? 'rot' : ''}">${c.heute.eurN ? apgEur(c.heute.eur) : '–'}</b><span>${hy(c.heute, 'heute')}</span></div>
-        <div><small>Letzte 7 Tage</small><b class="${c.sieben.eur > 0 ? 'gut' : c.sieben.eur < 0 ? 'rot' : ''}">${c.sieben.eurN ? apgEur(c.sieben.eur) : '–'}</b><span>${hy(c.sieben, 'in 7 Tagen')}</span></div></div>`
+        <div><small>Hypothetisch heute</small><b class="${c.heute.eur > 0 ? 'gut' : c.heute.eur < 0 ? 'rot' : ''}">${apgEur(c.heute.eur)}</b><span>${hy(c.heute, 'heute')}</span></div>
+        <div><small>Letzte 7 Tage</small><b class="${c.sieben.eur > 0 ? 'gut' : c.sieben.eur < 0 ? 'rot' : ''}">${apgEur(c.sieben.eur)}</b><span>${hy(c.sieben, 'in 7 Tagen')}</span></div></div>`
     const kpis = hypo + `<div class="apg-cvks">
         ${kz('Trades beendet', c.heute.n, c.sieben.n, '', `heute beendete Challenge-/Phase-Trades der Sicht${c.laeuft ? ` · dazu ${c.laeuft} laufend` : ''}`)}
         ${kz('Gewonnen', c.heute.plus, c.sieben.plus, 'gut', 'Master-P&L > 0 (bestandene zählen mit)')}
@@ -81039,34 +81039,36 @@
     return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Futures · heute und letzte 14 Tage (Dubai) · beendete Trades der Sicht</div></div>
         <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile) über 14 Tage. Bestanden = End-Balance ≥ Phasenziel, als passed archiviert oder Ziel-Wache (accounts.ziel_erreicht_at) nach dem Start; geblowt = als blown archiviert oder Verlust frisst das Polster. Folgt ID und CFD/Futures.">i</span></div>
         ${kpis}
-        <div class="apg-legende"><span><i class="tuerkis"></i>Hypo € je Tag</span><span><i class="gut"></i>bestanden</span><span><i class="rot"></i>geblowt</span><span><i class="lila"></i>gewonnen</span><span><i class="grau"></i>verloren</span></div>
         <div class="apg-chart">${leer ? `<div class="apg-leer">${leer}</div>` : '<canvas id="apg-c-cv"></canvas>'}</div>${nah}</div>`
   }
+  // EINFACH (Finn 30.10.2026 zu .1937: „mies hässlich, man erkennt nix — einfach simplen Chart"): EIN Balken je Tag = Hypo €, grün über 0 /
+  // rot unter 0, Wert über dem Balken; bestanden/geblowt/gewonnen/verloren nur in den Kacheln und im Tooltip. Keine Linien, keine zweite Achse.
   function apgCvMalen(root, c, ablage){
     const cv = root.querySelector('#apg-c-cv'); if(!cv || !c || typeof window.Chart !== 'function') return
     const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
-    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a4 = tok('--g-a4') || '#16c8c6'
+    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', text = tok('--g-text') || '#101828'
     const gut = tok('--g-gut') || '#12b76a', rot = tok('--g-rot') || '#f04438'
     const alpha = (f, a) => { const m = String(f).match(/^#([0-9a-f]{6})/i); return m ? `rgba(${[0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(',')},${a})` : f }
-    const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
     const labels = c.tage.map(t => t.tag.slice(8, 10) + '.' + t.tag.slice(5, 7) + '.')
-    const linie = (label, k, farbe) => ({ type: 'line', label, data: c.tage.map(t => t[k]), borderColor: alpha(farbe, 0.55), backgroundColor: alpha(farbe, 0.55), borderWidth: 1, borderDash: [3, 3], pointRadius: 0, pointHoverRadius: 3, tension: 0, order: 0 })
-    ablage.push(new Chart(cv.getContext('2d'), { type: 'bar',
-      data: { labels, datasets: [
-        { label: 'bestanden', data: c.tage.map(t => t.best.length), backgroundColor: alpha(gut, 0.75), borderRadius: 4, stack: 'k', barPercentage: .6, order: 1 },
-        { label: 'geblowt', data: c.tage.map(t => t.blow.length), backgroundColor: alpha(rot, 0.45), borderRadius: 4, stack: 'k', barPercentage: .6, order: 1 },
-        linie('gewonnen', 'plus', a1), linie('verloren', 'minus', alpha(sub, 0.8)),
-        { type: 'line', label: 'Hypo €', data: c.tage.map(t => t.eurN ? Math.round(t.eur) : null), yAxisID: 'e', borderColor: a4, backgroundColor: a4, borderWidth: 2.5, pointRadius: 3, tension: 0, spanGaps: true, order: -1 }] },
-      options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, boxPadding: 4,
+    const werte = c.tage.map(t => Math.round(t.eur))
+    const kurz = v => { const a = Math.abs(v); return (v > 0 ? '+' : v < 0 ? '−' : '') + (a >= 10000 ? Math.round(a / 1000) + 'k' : a >= 1000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : String(a)) }
+    // Wert über (bzw. unter) dem Balken — kleines Plugin nur für dieses Chart
+    // schmal (Handy): ohne „€" und kleiner, sonst überlappen 14 Beschriftungen
+    const werteZeigen = { id: 'apgCvWerte', afterDatasetsDraw(ch){ const ctx = ch.ctx, meta = ch.getDatasetMeta(0), schmal = ch.width < 520; ctx.save(); ctx.font = `600 ${schmal ? 9 : 11}px Inter, system-ui, sans-serif`; ctx.textAlign = 'center'
+      meta.data.forEach((b, i) => { const t = c.tage[i]; if(!t || !t.eurN) return; const v = werte[i]; ctx.fillStyle = v > 0 ? gut : v < 0 ? rot : sub
+        ctx.textBaseline = v < 0 ? 'top' : 'bottom'; ctx.fillText(kurz(v) + (schmal ? '' : ' €'), b.x, v < 0 ? b.y + 4 : b.y - 4) }); ctx.restore() } }
+    const span = Math.max(1, ...werte.map(Math.abs))
+    ablage.push(new Chart(cv.getContext('2d'), { type: 'bar', plugins: [werteZeigen],
+      data: { labels, datasets: [{ label: 'Hypo €', data: werte, backgroundColor: werte.map(v => v >= 0 ? alpha(gut, 0.75) : alpha(rot, 0.6)), borderRadius: 5, barPercentage: .6 }] },
+      options: { animation: false, responsive: true, maintainAspectRatio: false, layout: { padding: { top: 18, bottom: 4, right: 10 } },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, displayColors: false,
           callbacks: { title: x => x.length ? c.tage[x[0].dataIndex].tag.split('-').reverse().join('.') : '',
-            label: x => ` ${x.dataset.label}: ${x.dataset.yAxisID === 'e' ? apgEur(x.parsed.y) : x.parsed.y}`,
+            label: x => { const t = c.tage[x.dataIndex]; return t.eurN ? ` Hypo ${apgEur(t.eur)}` : ' kein Hypo-Wert' },
             afterBody: x => { const t = x.length ? c.tage[x[0].dataIndex] : null; if(!t) return []
-              return [...(t.best.length ? ['', 'Bestanden:', ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []), ...(t.blow.length ? ['', 'Geblowt:', ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []),
-                ...(t.offen ? ['', `${t.offen} ohne gelesenes Ergebnis`] : [])] } } } },
-        scales: { x: Object.assign({}, achse, { grid: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } }),
-          y: Object.assign({}, achse, { beginAtZero: true, ticks: { color: sub, font: { size: 11 }, precision: 0 } }),
-          e: Object.assign({}, achse, { position: 'right', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, callback: v => apgEur(v) } }) } } }))
+              return [` ${t.n} beendet · ${t.plus} gewonnen · ${t.minus} verloren`, ...(t.best.length ? ['', `Bestanden (${t.best.length}):`, ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []),
+                ...(t.blow.length ? ['', `Geblowt (${t.blow.length}):`, ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []), ...(t.offen || t.ohne ? ['', `${t.offen + t.ohne} ohne Hypo-Wert`] : [])] } } } },
+        scales: { x: { ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 }, grid: { display: false }, border: { display: false } },
+          y: { suggestedMin: -span * 0.15, suggestedMax: span * 1.15, ticks: { color: sub, font: { size: 11 }, maxTicksLimit: 5, callback: v => apgEur(v) }, grid: { color: gitter, drawTicks: false }, border: { display: false } } } } }))
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
