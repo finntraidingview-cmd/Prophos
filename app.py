@@ -36110,7 +36110,12 @@ FCP_TP_MODUS_STANDARD = {"the5ers": "consistency50"}
 # € je $ Drawdown (0,5 → 100k 5.000 € auf 10.000 $, 50k 2.500 € auf 5.000 $, 200k 10.000 € auf 20.000 $). Ab dem ersten Payout die
 # normalen FundedNext-Regeln. SL/Lots/1-%-Regel unverändert. Werte je Firma in funded_cfd_plan_regeln.firmen[].erster_payout
 # (sql/2026-10-30_funded_cfd_erster_payout.sql); fehlt der Schlüssel, gilt dieser Standard.
-FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5}}
+FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5, "lots_faktor": 0.5}}
+# REFUND-LOTS HALBIEREN (Finn 30.10.2026 14:2x, Anlass EzPoker a1ad322f: „Der Take Profit ist ganz klein, da kauft er viel zu viele Lots, das verdirbt die
+# Show"): im Refund-Zyklus Lots × lots_faktor, abgerundet auf FCP_LOT_SCHRITT, mindestens ein Schritt. TP-$ und SL-$ bleiben (doppelte Punkte). Hedge: der
+# multiplier hängt nur an hedge_eur ÷ dd, die Fusion-Lots folgen den Master-Lots — € je $ Master, also auch Hedge-€ am TP/SL, bleiben gleich.
+FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.5
+FCP_LOT_SCHRITT = 0.01
 FCP_ERSTER_PAYOUT_TP_MIN_USD = 25    # Rest bis zum kleinen Ziel winzig → wenigstens 25 $ (≈ 1,5–2,5 Pkt bei 1–1,75 Lot)
 FCP_TP_DECKEL_PLUS_STANDARD = 1000
 _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
@@ -36204,6 +36209,12 @@ def fcp_erster_payout(regel):
     return FCP_ERSTER_PAYOUT_STANDARD.get(((r.get("namen") or [""])[0]))
 
 
+def fcp_lots_faktor(lots, faktor, schritt=FCP_LOT_SCHRITT):
+    """REIN RECHNEND (testbar): Lots × Faktor, ABgerundet auf die Schrittweite (nie mehr als gewollt), mindestens ein Schritt."""
+    n = int(float(lots) * float(faktor) / schritt + 1e-9)
+    return round(max(n, 1) * schritt, 2)
+
+
 def fcp_tp_modus(regel):
     """Modus der Firma: regel.tp_modus, sonst Standard je Firmen-Schlüssel (The5ers consistency50), sonst None (Deckel-Logik)."""
     return (regel or {}).get("tp_modus") or FCP_TP_MODUS_STANDARD.get((((regel or {}).get("namen") or [""])[0]))
@@ -36273,6 +36284,9 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         sl = float(int(ms))                  # nie über das Risiko-Limit des Kontos (Vorfall Jacob …7924, 30.10.2026)
         basis["sl_gedeckelt"] = True
     lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
+    if ep and lots:
+        fk = _wd_num(ep.get("lots_faktor"))
+        lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else FCP_ERSTER_PAYOUT_LOTS_FAKTOR)
     if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
         return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
     if not mppl:
