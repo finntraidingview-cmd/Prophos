@@ -58604,7 +58604,7 @@
   function apdTradeifyHedgeSchalterHtml(v, admin){
     const th = v && v.tradeify_final_hedge
     if(!th || typeof th.an !== 'boolean') return ''
-    const tip = admin ? `Finaler Tradeify-Trade startet als Orbit V3 mit Fusion-Gegenhedge (Faktor ${th.netto_faktor}, gemeinsam max. ${th.max_lots} Lot je Fusion-Login) — aus = finale Trades werden weiter gehalten` : 'nur Admin'
+    const tip = admin ? `Finaler Tradeify-Trade startet als Orbit mit Fusion-Gegenhedge (Faktor ${th.netto_faktor}, gemeinsam max. ${th.max_lots} Lot je Fusion-Login) — aus = finale Trades werden weiter gehalten` : 'nur Admin'
     return `<label title="${escapeHtml(tip)}"><span class="switch"><input type="checkbox" data-apd-schalter="tradeify_final_hedge"${th.an ? ' checked' : ''}${admin ? (_apd.busy.has('tradeify_final_hedge') ? ' disabled' : '') : ' disabled'}><span class="switch-slider"></span></span>${th.an ? 'Tradeify-Final-Hedge an' : 'Tradeify-Final-Hedge aus'}</label>`
   }
   const apdBotMeldungHtml = () => _apd.meldung && _apd.meldung.ort === 'bot' ? `<span class="kpi-delta apd-rot" style="white-space:normal" title="${escapeHtml(_apd.meldung.text)}">⚠ ${escapeHtml(_apd.meldung.text)}</span>` : ''
@@ -59024,7 +59024,7 @@
    * _ap_hedge_mit_freigeben). Dieser Block zeigt nur noch die Altlast: schon bestätigt (z. B. vom Bot oder vor dem Umbau), Freigabe fehlt —
    * derselbe eine Knopf gibt frei. Unbestätigte Hedge-Pläne zeigt er nicht mehr (die stehen in „Zu bestätigen"). ══ */
   const _ahf = { d: null, laeuft: false, at: 0, busy: new Set(), fehler: '' }
-  const AHF_ART = { tradeify_final: ['Tradeify final', 'Finaler Tradeify-Trade: startet als Orbit V3 mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],
+  const AHF_ART = { tradeify_final: ['Tradeify final', 'Finaler Tradeify-Trade: startet als Orbit mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],
                     apex: ['Apex WD', 'Apex Winning Day mit Fusion-Hedge'] }
   async function ahfLaden(){
     if(_ahf.laeuft) return
@@ -59801,7 +59801,7 @@
    * Detail darunter (Richtung/Start/Löschen). Schließen: ✕, Klick daneben, Esc, Scrollen, Größe ändern. Eigene Verdrahtung, kein Modal-Handler. */
   const _tk = { el: null, anker: null, root: null, key: null, gruppe: null, busy: false, meldung: '' }
   const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2')
-    : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
+    : (p1 && p1.orbitV3) ? 'Orbit' : 'Orbit V2'   // ORBIT-NAMEN (Finn 30.10.2026): mit Hedge „Orbit", ohne Hedge „Orbit V2"
   function tkStand(){ const zs = _tk.root && _tpl.zs && _tpl.zs[_tk.root.id]; return zs || { trades: new Map(), v: 0 } }
   function tkEinzelHtml(t, v){
     const r1 = (_tpl.lt && _tpl.lt.get(String(t.plan_id))) || null, p1 = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
@@ -79972,7 +79972,7 @@
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
     if(z && (z.hedge_art === 'apex')) return ['WD-Weg + Hedge', 'hedge']
-    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit V3 + Hedge', 'hedge']
+    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit + Hedge', 'hedge']   // ORBIT-NAMEN (Finn 30.10.2026): „Orbit" = mit Fusion-Hedge
     // ECHO + HEDGE (30.10.2026, Finn: „Warum steht bei jedem Trade ‚Echo V2'? Wir machen jetzt Echo (mit Hedge)"): ein HT-CFD-Vorschlag auf Echo V2
     // mit Vorschau (ehv_tick) wird bei Schalter echo_hedge an kurz vor dem Start auf Echo mit Hedge umgestellt → „Echo + Hedge"; „Echo V2" nur,
     // wenn er ohne Hedge laufen wird (Schalter aus oder Vorschau mit Grund → „Echo V2 · ⚠ Grund")
