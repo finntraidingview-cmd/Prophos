@@ -122,7 +122,7 @@ def planer_unveraendert(src, ns):
         out = []
         for z in t.replace(", gruppe=None", "").split("\n"):
             z = re.sub(r"\s+#.*$", "", z).replace(" and not gruppe", "")
-            if "gruppe" in z or not z.strip():
+            if "gruppe" in z.lower() or not z.strip():
                 continue
             out.append(" ".join(z.split()))
         return "\n".join(out)

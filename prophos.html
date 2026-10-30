@@ -79606,8 +79606,8 @@
         <span>plant wie Hermann Technologies (Nachtlauf, eigene Long/Short-Waage) · bestätigen unten</span>
         <span>${lauf}</span>
         <span class="gp-r"><button type="button" class="btn btn-ghost" data-gp="probe:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Rechnet, wie er jetzt planen würde — legt nichts an">Probelauf</button>
-          <button type="button" class="btn btn-ghost" data-gp="planen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant jetzt alle Konten ohne Plan für heute (unbestätigt)">Jetzt planen</button>
-          <button type="button" class="btn btn-ghost" data-gp="morgen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant schon jetzt den nächsten Handelstag (unbestätigt) — Konten mit laufendem Trade bleiben draußen">Morgen vorplanen</button>
+          <button type="button" class="btn btn-ghost" data-gp="planen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant heute neu wie der Nachtlauf (unbestätigt) — ersetzt unbestätigte Vorschläge der Gruppe, bestätigte bleiben">Jetzt planen</button>
+          <button type="button" class="btn btn-ghost" data-gp="morgen:${gid}"${_gp.laeuft ? ' disabled' : ''} title="Plant schon jetzt den nächsten Handelstag (unbestätigt) — ersetzt unbestätigte Vorschläge der Gruppe (auch heutige), bestätigte bleiben">Morgen vorplanen</button>
           <button type="button" class="btn btn-ghost" data-gp="aktiv:${gid}" title="Nachtlauf dieser Gruppe zur selben Zeit wie Hermann Technologies (30.10.2026: derselbe Planer, die Gruppe wiegt für sich)">${g.aktiv ? 'Ausschalten' : 'Einschalten'}</button></span></div>`
       const msg = _gp.msg ? `<div class="gp-msg">${escapeHtml(_gp.msg)}</div>` : ''
       let liste = ''

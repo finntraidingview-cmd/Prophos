@@ -24679,6 +24679,8 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     archiv = _ap_archiviert()
     echo_bal, dup_bal = _ap_balance_karten()
     namen, ausgeblendet = _ap_namen()   # direkt aus der Nutzerliste — _wd_personen braucht einen Request (Nachtlauf hat keinen)
+    if gruppe and not namen:   # Nutzerliste nicht lesbar → Ausblendung wäre leer, die Gruppe plante gegen den ganzen HT-Stand (Prüfung 30.10.2026)
+        return {"ok": False, "tag": tag, "msg": "Nutzerliste nicht lesbar — Gruppe nicht geplant (sonst gegen den HT-Stand)"}
     if gruppe:
         ausgeblendet = ap_gruppe_ausgeblendet(namen, uids)   # jede Gruppe wiegt für sich (Finn 30.10.2026): Stand nur aus der Gruppe
     seed = int(seed) if seed not in (None, "") else random.SystemRandom().randrange(1, 2 ** 31)
@@ -25684,14 +25686,34 @@ def ap_gruppe_planen(gruppe_id, trocken=False, quelle="hand", tag=None, seed=Non
     gr = next((x for x in ap_planer_gruppen() if x["gruppe_id"] == str(gruppe_id)), None)
     if not gr:
         return {"ok": False, "msg": "Gruppe ohne Planer-Zeile (auto_plan_gruppe) oder ohne Verwalter"}
-    try:
-        tag = ap_gruppe_tag(tag)
-    except ValueError:
-        return {"ok": False, "msg": "tag = heute | morgen | JJJJ-MM-TT"}
+    if quelle == "nacht":
+        # Nachtlauf (Prüfung 30.10.2026): der fällige Tag kommt fertig aus ap_nacht_ziel — nie über gp_tag_wahl klemmen (zwischen
+        # Dubai-Mitternacht und 01:00 Dubai wäre „heute in Dubai" schon T+1, nacht_tag ≠ Takt-Tag → alle 10 min neu gewürfelt).
+        # Claim VOR dem Lauf wie HT (auto_plan_lauf-Insert): nur wer nacht_tag in derselben Anfrage setzt, plant — zweiter Container/
+        # Takt bekommt keine Zeile zurück. Schlägt das Planen danach fehl, bleibt der Claim (wie HT: kein Neuwürfeln im Minutentakt).
+        tag = str(tag or "")
+        alt = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", tag):
+            return {"ok": False, "msg": "Nachtlauf ohne Tag"}
+        try:
+            claim = sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gr['gruppe_id']}",
+                                                   "or": f"(letzter_lauf.is.null,letzter_lauf->>nacht_tag.is.null,letzter_lauf->>nacht_tag.neq.{tag})"},
+                              {"letzter_lauf": dict(alt, nacht_tag=tag, nacht_claim_at=datetime.now(timezone.utc).isoformat()),
+                               "updated_at": datetime.now(timezone.utc).isoformat()})
+        except Exception as e:
+            print(f"[gruppen-plan] ⚠️ Nacht-Claim {str(gr['gruppe_id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+            return {"ok": False, "msg": f"Nacht-Claim nicht möglich: {type(e).__name__}"}
+        if not claim:
+            return {"ok": True, "tag": tag, "msg": "schon geplant (anderer Lauf)", "geplant": [], "ausgelassen": []}
+    else:
+        try:
+            tag = ap_gruppe_tag(tag)
+        except ValueError:
+            return {"ok": False, "msg": "tag = heute | morgen | JJJJ-MM-TT"}
     erg = ap_planen(tag, trocken=trocken, quelle=quelle, seed=seed, gruppe=gr)
     if not trocken and erg.get("ok"):
         alt = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
-        merk = dict(erg, nacht_tag=erg.get("tag") if quelle == "nacht" else alt.get("nacht_tag"))
+        merk = dict(erg, nacht_tag=tag if quelle == "nacht" else alt.get("nacht_tag"))
         try:
             sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gr['gruppe_id']}"}, {"letzter_lauf": merk,
                                                                                  "updated_at": datetime.now(timezone.utc).isoformat()})
@@ -25706,7 +25728,7 @@ _ap_gruppen_nacht = {"fehler": "", "letzt": {}}
 def ap_gruppen_nacht_tick(jetzt, zustand):
     """Nachtlauf der Verwalter-Gruppen (aus ap_loop, jede Minute): derselbe fällige Tag wie HT (ap_nacht_ziel mit zeiten.nachtlauf aus
     zustand, ap_nacht_tick liest sie) — je aktiver Gruppe einmal ap_gruppe_planen(quelle='nacht'), Claim = letzter_lauf.nacht_tag.
-    Unabhängig vom HT-Schalter auto_plan_regeln.aktiv: es gilt der Schalter der Gruppe (auto_plan_gruppe.aktiv)."""
+    Es gelten beide Schalter: auto_plan_regeln.aktiv (HT-Pause pausiert auch die Gruppen) und auto_plan_gruppe.aktiv."""
     param = zustand.get("nacht_param") or dict(AP_NACHT_STANDARD)
     faellig, _naechster = ap_nacht_ziel(jetzt, param)
     if not faellig:
@@ -25715,6 +25737,9 @@ def ap_gruppen_nacht_tick(jetzt, zustand):
     if _ap_gruppen_nacht.get("tag") == tag and time.time() - (_ap_gruppen_nacht.get("geprueft") or 0) < 600:
         return None
     _ap_gruppen_nacht.update(tag=tag, geprueft=time.time())
+    # eins zu eins wie HT (Prüfung 30.10.2026): pausiert Finn den Planer (auto_plan_regeln.aktiv = false), plant auch keine Gruppe
+    if not (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0].get("aktiv"):
+        return None
     for gr in ap_planer_gruppen(nur_aktiv=True):
         ll = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
         if ll.get("nacht_tag") == tag:
@@ -30174,7 +30199,7 @@ def ap_waage_tick(regeln_param=None):
     # dieselbe Waage je Verwalter-Gruppe mit Planer-Zeile, Stand nur aus ihren IDs — HT oben sieht die Gruppen weiter nicht (eigener try)
     try:
         namen, _aus = _ap_namen()
-        for gr in ap_planer_gruppen(nur_aktiv=True):
+        for gr in (ap_planer_gruppen(nur_aktiv=True) if namen else []):   # ohne Nutzerliste keine Gruppen-Waage (nie gegen HT wiegen)
             st_g = _ap_stand_laden(reg, namen=namen, ausgeblendet=ap_gruppe_ausgeblendet(namen, gr["ids"]))
             w_g = ap_klassen_waage(st_g, pc_lebt=pc)
             a_g, i_g = ap_waage_nachschub(st_g, w_g, random.SystemRandom(), pc_lebt=pc, dubai_min=_ap_dubai_versatz(st_g["mitternacht"]))
@@ -31181,7 +31206,7 @@ def admin_auto_plan_delta():
     try:
         # 07.10.2026 TRADE-PLANER-ALLE-IDS: ?sicht=alle → alle IDs (außer „nur eigene"), sonst wie bisher Admin alle / eigene ID
         sicht_d = _ap_sicht_aus_anfrage(admin, uid)
-        if isinstance(sicht_d, frozenset):
+        if isinstance(sicht_d, frozenset) and sicht_d and sicht_d <= _admin_verwalter_gruppen_ids(admin_gruppen_daten()):
             # GRUPPEN-SICHT (30.10.2026, Emin gleich wie Finn): Verwalter mit sicht=admin bzw. Finns Gruppen-Chip — Stand nur aus genau
             # diesen IDs. Vorher lud der Stand mit der Standard-Ausblendung (ADMIN_EXCLUDE), dem Verwalter fehlten seine eigenen Pläne.
             namen, _aus = _ap_namen()
@@ -35264,7 +35289,11 @@ def admin_auto_plan():
         sicht = _ap_sicht_aus_anfrage(admin, uid)   # seit 08.10.2026: Nicht-Admin alle IDs nur mit ?sicht=admin (Admin-Reiter), sonst eigene
         # GRUPPE WIE HT (30.10.2026): ein Verwalter (bzw. eine ID seiner Gruppe) sieht den letzten Lauf SEINER Gruppe (auto_plan_gruppe.
         # letzter_lauf, geschrieben von ap_gruppe_planen) — nie den HT-Lauf; HT-Logins lesen wie bisher auto_plan_lauf
-        gr_lauf = None if admin else ap_gruppe_von_uid(uid)
+        try:
+            gr_lauf = None if admin else ap_gruppe_von_uid(uid)
+        except Exception as e:      # Gruppen nicht lesbar → wie bisher HT-Lauf, nie HTTP 500 für jeden PC-Tab (Prüfung 30.10.2026)
+            print(f"[auto-plan] ⚠️ Gruppe für den Lauf: {type(e).__name__}: {e}", flush=True)
+            gr_lauf = None
         if gr_lauf:
             ll = gr_lauf.get("letzter_lauf") if isinstance(gr_lauf.get("letzter_lauf"), dict) else {}
             rows = [{"tag": ll.get("tag"), "quelle": ll.get("quelle"), "at": ll.get("at"), "ergebnis": ll}] if ll else []

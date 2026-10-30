@@ -47,22 +47,33 @@ GRUPPEN_DATEN = {"gruppen": [{"id": "g-emin", "name": "Emin", "verwalter_id": "u
 ZEILEN = [{"gruppe_id": "g-emin", "aktiv": True, "letzter_lauf": {"tag": "2026-10-29", "nacht_tag": "2026-10-29"}}]
 UPDATES, PLAENE = [], []
 
-ns = {"datetime": datetime, "timedelta": timedelta, "timezone": timezone, "time": time, "threading": threading,
+ns = {"re": re, "datetime": datetime, "timedelta": timedelta, "timezone": timezone, "time": time, "threading": threading,
       "_kurz_cache_lock": threading.Lock(), "AP_TZ_LAUF": "Asia/Dubai", "AP_NACHT_STANDARD": {"uhr": "01:00", "tz": "Asia/Dubai"},
       "admin_gruppen_daten": lambda: GRUPPEN_DATEN, "_ap_tz": ZoneInfo, "print": lambda *a, **k: None}
 
 
+HT_AKTIV = {"aktiv": True}
+
+
 def sb_select(tab, params):
+    if tab == "auto_plan_regeln":
+        return [dict(HT_AKTIV)]
     assert tab == "auto_plan_gruppe"
     return [dict(z) for z in ZEILEN]
 
 
 def sb_update(tab, filt, upd):
-    UPDATES.append((tab, filt, upd))
+    out = []
     for z in ZEILEN:
-        if f"eq.{z['gruppe_id']}" == filt.get("gruppe_id"):
-            z.update(upd)
-    return [1]
+        if f"eq.{z['gruppe_id']}" != filt.get("gruppe_id"):
+            continue
+        m = re.search(r"nacht_tag\.neq\.([0-9-]+)\)", filt.get("or") or "")
+        if m and (z.get("letzter_lauf") or {}).get("nacht_tag") == m.group(1):
+            continue                  # Claim schon vergeben (PostgREST: Bedingung trifft nicht)
+        z.update(upd)
+        out.append(dict(z))
+    UPDATES.append((tab, filt, upd))
+    return out
 
 
 def ap_planen(tag=None, trocken=False, quelle="hand", seed=None, gruppe=None, **kw):
@@ -108,7 +119,14 @@ ok(not UPDATES, "trocken: kein Protokoll")
 ns["ap_gruppe_planen"]("g-emin", quelle="hand")
 ok(UPDATES and UPDATES[-1][2]["letzter_lauf"].get("nacht_tag") == "2026-10-29", "Hand-Lauf: nacht_tag (Claim) bleibt erhalten")
 ns["ap_gruppe_planen"]("g-emin", quelle="nacht", tag="2026-11-02")
-ok(UPDATES[-1][2]["letzter_lauf"].get("nacht_tag") == "2026-11-02", "Nachtlauf: nacht_tag = geplanter Tag")
+ok(UPDATES[-2][1].get("or") and UPDATES[-2][2]["letzter_lauf"].get("nacht_tag") == "2026-11-02", "Nachtlauf: Claim (nacht_tag) VOR dem Planen")
+ok(UPDATES[-1][2]["letzter_lauf"].get("nacht_tag") == "2026-11-02", "Nachtlauf: Protokoll mit nacht_tag = geplanter Tag")
+n_pl = len(PLAENE)
+e2 = ns["ap_gruppe_planen"]("g-emin", quelle="nacht", tag="2026-11-02")
+ok(len(PLAENE) == n_pl and "schon geplant" in str(e2.get("msg")), "zweiter Nachtlauf desselben Tags (anderer Container) → Claim fehlt, nichts geplant")
+PLAENE.clear()
+ns["ap_gruppe_planen"]("g-emin", quelle="nacht", tag="2026-11-04")
+ok(PLAENE[-1]["tag"] == "2026-11-04", "Nachtlauf: Tag wird nie über gp_tag_wahl geklemmt (Dubai-Mitternacht)")
 ok(ns["ap_gruppe_planen"]("g-unbekannt").get("ok") is False, "fremde/unbekannte Gruppe → ok False")
 ok(ns["ap_gruppe_planen"]("g-emin", tag="quatsch").get("ok") is False, "ungültiger Tag → ok False")
 
@@ -126,6 +144,12 @@ ns["ap_gruppen_nacht_tick"](fr, {})
 ok(len(PLAENE) == 1, "nach der Bremse: nacht_tag schon gesetzt → übersprungen")
 ns["ap_nacht_ziel"] = lambda jetzt, param: (None, None)
 ok(ns["ap_gruppen_nacht_tick"](fr, {}) is None, "nichts fällig → nichts")
+PLAENE.clear(); HT_AKTIV["aktiv"] = False
+ns["ap_nacht_ziel"] = lambda jetzt, param: ((date(2026, 11, 5), jetzt), None)
+ns["_ap_gruppen_nacht"]["geprueft"] = 0
+ns["ap_gruppen_nacht_tick"](fr, {})
+ok(not PLAENE, "HT-Planer pausiert (auto_plan_regeln.aktiv false) → auch keine Gruppe")
+HT_AKTIV["aktiv"] = True
 
 print("Quelltext-Verträge")
 ap = fn_text("ap_planen")
@@ -133,6 +157,7 @@ ok("gruppe=None" in ap.split("\n")[0] + ap.split("\n")[1], "ap_planen hat den Pa
 ok('uids = sorted(str(u) for u in (gruppe.get("ids") or ()))' in ap, "ap_planen: IDs = Gruppe")
 ok('if quelle == "nacht" and not trocken and not gruppe:' in ap, "ap_planen: kein HT-Nacht-Claim für die Gruppe")
 ok("ausgeblendet = ap_gruppe_ausgeblendet(namen, uids)" in ap, "ap_planen: Stand nur aus der Gruppe")
+ok("if gruppe and not namen:" in ap, "ap_planen: ohne Nutzerliste keine Gruppe (nie gegen HT)")
 ok("and not gruppe:   # NACHPLANEN ohne Treffer" in ap, "ap_planen: kein auto_plan_lauf-Protokoll für die Gruppe")
 ok('if param["auto_start"] and not gruppe:' in ap, "ap_planen: Gruppen-Pläne nie automatisch bestätigt")
 for n in ("_eh_tick_lauf", "ehv_tick", "tfh_tick", "ah_tick"):
@@ -148,7 +173,10 @@ ok('"eh_an": eh_param(regeln)["an"]' in fn_text("_ap_stand_laden"), "_ap_stand_l
 ok("stand.get(\"eh_an\")" in fn_text("ap_waage_nachschub") and "ap_eh_wird_hedgen(z, eh_an)" in fn_text("_ap_waage_kandidat"),
    "Waage-Fix 30.10. (nie einen Plan vorziehen, den eh_tick hedgt) greift über ap_waage_nachschub auch in der Gruppen-Waage")
 ok("ap_gruppe_von_uid(plan.get(\"user_id\"))" in fn_text("admin_auto_plan_waage_start"), "Waage-Start: Gruppen-Plan wiegt mit der Gruppe")
-ok("isinstance(sicht_d, frozenset)" in fn_text("admin_auto_plan_delta"), "Delta: Gruppen-Sicht lädt den Gruppen-Stand")
+ok("sicht_d <= _admin_verwalter_gruppen_ids(admin_gruppen_daten())" in fn_text("admin_auto_plan_delta"),
+   "Delta: Gruppen-Stand nur für Verwalter-Gruppen (Finns HT-Chip unverändert)")
+ok("gr_lauf = None\n" in fn_text("admin_auto_plan") or "gr_lauf = None" in fn_text("admin_auto_plan").split("except Exception")[1],
+   "GET /admin/auto-plan: Gruppen-Lesefehler → HT-Lauf, kein HTTP 500")
 ok("ap_gruppe_planen(gid" in fn_text("admin_gruppen_plan"), "Gruppen-Knöpfe rechnen mit dem HT-Planer")
 ok("ap_gruppe_von_uid(uid)" in fn_text("admin_auto_plan"), "GET /admin/auto-plan: Verwalter sieht den Lauf seiner Gruppe")
 
