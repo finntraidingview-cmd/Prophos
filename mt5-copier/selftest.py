@@ -11245,7 +11245,7 @@ def test_magic_zwilling():
     chk(i_teil > 0 and q.find("eigene_idents_fortschreiben(m.eigene_idents, snap[\"positions\"])") < i_teil, "erst eigene idents merken, dann teilen")
     chk(0 < i_teil < q.find("for ident_, prev_v in m.hedge_last_vol.items():") < q.find("actions, warns = plan_actions("),
         "Schwund-Wächter und plan_actions sehen nur die geteilten (eigenen) Hedges")
-    chk(q.count("hedges_teilen(book.get(m.magic, {}), m.eigene_set)") == 5 and "book.get(m.magic, {})\n" not in q,
+    chk(q.count("hedges_teilen(book.get(m.magic, {}), m.eigene_set)") == 3 and "book.get(m.magic, {})\n" not in q,
         "auch Falsch-Login- und Ohne-Snapshot-Status zählen Zwillinge nicht als eigene Hedges")
     chk("if ident_ not in m.eigene_set:" in q and '"note": "zwilling_geschlossen"' in q and "m.zwilling_zu[ident_i]" in q
         and "n_zw >= ZWILLING_ZU_MAX" in q, "Schwund: Alt-Baseline-Zwilling übersprungen, Zwillings-Close verbucht, keine Hand-Sperre bis zum Deckel")

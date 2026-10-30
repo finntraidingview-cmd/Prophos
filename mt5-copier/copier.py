@@ -190,6 +190,7 @@ def _copier_code_stand():
 
 NEUSTART_BREMSE_MAX = 3            # so viele Neustarts auf denselben Zielstand, dann Pause
 NEUSTART_BREMSE_S = 6 * 3600
+NEUSTART_ABSTAND_S = 300           # Prüfer S2 30.10.2026: zwischen zwei Versuchen auf denselben Stand mindestens 5 min
 NEUSTART_MERKER = "copier_update_versuch.json"
 
 
@@ -204,7 +205,7 @@ def neustart_bremse(merker, ziel, jetzt):
         n, at = 0, 0.0
     if m.get("ziel") != ziel or jetzt - at > NEUSTART_BREMSE_S:
         n = 0
-    if n >= NEUSTART_BREMSE_MAX:
+    if n >= NEUSTART_BREMSE_MAX or (n > 0 and jetzt - at < NEUSTART_ABSTAND_S):
         return False, m
     return True, {"ziel": ziel, "n": n + 1, "at": jetzt}
 
@@ -1373,6 +1374,18 @@ def find_notfall_deals(deals, schon_verbucht, *, out_entries, reason_sl, reason_
 # nach dem Neustart weiter zumacht. magic_base je PC kommt spaeter (Master 30.10.2026) — das hier schuetzt auch ohne.
 EIGENE_DECKEL = 500   # so viele idents je Instanz merken (jede Master-Position einmal) — reicht fuer Monate, Sidecar bleibt klein
 ZWILLING_ZU_MAX = 3   # so oft darf ein Zwilling (alter Copier auf einem anderen PC) den Hedge schliessen, dann Sperre (Pingpong-Kosten)
+
+
+def solo_haelt_auf(solo):
+    """REIN RECHNEND (testbar): haelt die Solo-Lage den Selbst-Update-Neustart auf? None = nicht lesbar (Lesefehler, noch nie gelesen) ist kein Beweis fuer flach."""
+    return solo is None or bool(solo)
+
+
+def hedges_halten_auf(partition, eigene, alt_unklar):
+    """REIN RECHNEND (testbar): Bestand dieser magic → haelt er den Neustart auf? Eigen, oder Besitzer unklar: ein alter Sidecar hat noch keine eigene_idents, ein
+    eigener Alt-Hedge steht dann in alt_unklar (Prüfer S2 30.10.2026). Sidecar-Schluessel sind str, Bestand-Schluessel int. Ein gewoehnlicher Zwilling haelt nicht auf."""
+    eig, zw = hedges_teilen(partition, eigene)
+    return bool(eig) or any(str(i) in alt_unklar for i in zw)
 
 
 def eigene_idents_fortschreiben(eigene, positionen, deckel=EIGENE_DECKEL):
@@ -2566,7 +2579,7 @@ def main():
                         log(f"↻ Update {_LAUF['version']} → {rv} — alle Master flach, starte neu "
                             f"(start-copier.bat laedt die neuen Dateien).")
                         break
-                    busy = [f"{NEUSTART_BREMSE_MAX} Neustarts ohne neuen Code — Download/Dateitausch pruefen (start-copier.bat)"]
+                    busy = ["Neustart ohne neuen Code — Bremse (hoechstens 3 je Stand, 5 min Abstand), Download/Dateitausch pruefen (start-copier.bat)"]
                 if not update_waiting:
                     update_waiting = True
                     update_warte["seit"] = time.time()
@@ -2624,7 +2637,11 @@ def main():
             # Hedge-Konto tragen Familien-Magics und sind kein Alarm.
             fremde, solo = [], []
             try:
-                for p_ in (mt5.positions_get() or []):
+                # None = Lesefehler, kein leeres Konto (Prüfer S2 30.10.2026): sonst stünde solo=[] = flach, und der Copier startete mit offenem Solo-Hedge neu
+                _pos_alle = mt5.positions_get()
+                if _pos_alle is None:
+                    raise RuntimeError("positions_get None")
+                for p_ in _pos_alle:
                     mg = int(getattr(p_, "magic", 0) or 0)
                     if FAMILIE_MIN <= mg <= FAMILIE_MAX:
                         continue
@@ -2802,7 +2819,7 @@ def main():
                             st["standby"] = False
                             st["wrong_login"] = snap["login"]
                             write_status(m.status_path, st)
-                    m.busy = bool(hedges_teilen(book.get(m.magic, {}), m.eigene_set)[0]) or bool(hedge_acc.get("solo"))
+                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
                     continue
                 if snap is None:
                     if now - m.last_status > 1.0:
@@ -2819,7 +2836,7 @@ def main():
                             # garantiert frisch (Tick waere sonst uebersprungen).
                             known, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)   # Zwillinge nie als eigene (30.10.2026)
                             write_status(m.status_path, master_status(m, None, known, False))
-                    m.busy = bool(hedges_teilen(book.get(m.magic, {}), m.eigene_set)[0]) or bool(hedge_acc.get("solo"))
+                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
                     continue
 
                 # ── Eigene Hedges von Magic-Zwillingen trennen (30.10.2026, s. hedges_teilen) ──
@@ -3027,7 +3044,7 @@ def main():
                 if not snap_fresh:
                     # Offene Hedges halten den Selbst-Update-Neustart weiter auf;
                     # die eingefrorene Positionsliste zaehlt dafuer nicht.
-                    m.busy = bool(hedges) or bool(hedge_acc.get("solo"))
+                    m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
                     if time.time() - m.last_status > 1.0:
                         m.last_status = time.time()
                         if os.path.exists(m.cfg_path):
@@ -3207,7 +3224,7 @@ def main():
                 # solange wird kein Selbst-Update-Neustart ausgefuehrt.
                 # Solo-Hedge offen (24.09.2026): der Close-Auftrag braucht einen laufenden
                 # Copier — ein Update-Neustart wartet, bis auch die Solo-Position zu ist.
-                m.busy = bool(snap["positions"]) or bool(hedges) or bool(hedge_acc.get("solo"))
+                m.busy = bool(snap["positions"]) or hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf(hedge_acc.get("solo"))
 
                 if time.time() - m.last_status > 1.0:
                     m.last_status = time.time()

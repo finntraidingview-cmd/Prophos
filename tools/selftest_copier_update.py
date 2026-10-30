@@ -27,8 +27,9 @@ def funktionen(pfad, namen, ns):
 
 cp_pfad = os.path.join(WURZEL, "mt5-copier", "copier.py")
 cp_src = open(cp_pfad, encoding="utf-8").read()
-ns = funktionen(cp_pfad, {"update_schritt", "code_kennung", "neustart_bremse"}, {"hashlib": hashlib, "NEUSTART_BREMSE_MAX": 3, "NEUSTART_BREMSE_S": 21600})
-us, ck, nb = ns["update_schritt"], ns["code_kennung"], ns["neustart_bremse"]
+ns = funktionen(cp_pfad, {"update_schritt", "code_kennung", "neustart_bremse", "hedges_teilen", "hedges_halten_auf", "solo_haelt_auf"},
+                {"hashlib": hashlib, "NEUSTART_BREMSE_MAX": 3, "NEUSTART_BREMSE_S": 21600, "NEUSTART_ABSTAND_S": 300})
+us, ck, nb, hh, sh = ns["update_schritt"], ns["code_kennung"], ns["neustart_bremse"], ns["hedges_halten_auf"], ns["solo_haelt_auf"]
 
 
 def nie():
@@ -50,13 +51,22 @@ chk(us("v3", "v1", False, lambda: False) == ("v3", False), "Commit zurückgenomm
 chk(ck(b"a\r\nb\r\n") == ck(b"\xef\xbb\xbfa\nb\n") and len(ck(b"x")) == 12 and ck(b"a") != ck(b"b"), "Code-Kennung: unabhängig von Zeilenende/BOM, 12 Zeichen")
 
 mk, frei = None, []
-for _ in range(5):
-    e_, mk = nb(mk, "z1", 1000.0)
+for i_ in range(5):
+    e_, mk = nb(mk, "z1", 1000.0 + i_ * 301)
     frei.append(e_)
 chk(frei == [True, True, True, False, False], "Bremse: 3 Neustarts auf denselben Stand, dann keiner mehr")
-chk(nb(mk, "z2", 1000.0)[0] is True and nb(mk, "z1", 1000.0 + 21601)[0] is True, "Bremse: neuer Stand oder nach 6 h wieder frei")
+chk(nb(mk, "z2", 1000.0)[0] is True and nb(mk, "z1", 1000.0 + 2 * 301 + 21601)[0] is True, "Bremse: neuer Stand oder nach 6 h wieder frei")
+m1 = nb(None, "z1", 1000.0)[1]
+chk(nb(m1, "z1", 1000.0 + 299)[0] is False and nb(m1, "z1", 1000.0 + 301)[0] is True and nb(m1, "z2", 1001.0)[0] is True, "Bremse: 5 min Abstand je Stand, neuer Stand sofort")
+# S2: offene Hedges bei altem Sidecar, Solo-Lesefehler
+h_ = {111: [{"ticket": 1}]}
+chk(hh(h_, {"111"}, set()) is True and hh(h_, set(), {"111"}) is True, "eigener Hedge und Alt-Hedge (alt_unklar, str gegen int) halten auf")
+chk(hh(h_, set(), set()) is False and hh(None, set(), {"111"}) is False and hh({}, {"111"}, {"111"}) is False, "gewöhnlicher Zwilling und leerer Bestand halten nicht auf")
+chk(sh(None) is True and sh([{"ticket": 1}]) is True and sh([]) is False, "Solo: nicht lesbar und offen halten auf, nur gelesen-leer ist flach")
+chk('_pos_alle = mt5.positions_get()' in cp_src and 'if _pos_alle is None:' in cp_src and "for p_ in (mt5.positions_get() or [])" not in cp_src, "positions_get None wird zu solo=None")
 chk(nb("kaputt", "z1", 5.0)[0] is True and nb({"n": "x", "ziel": "z1"}, "z1", 5.0)[0] is True, "Bremse: kaputter Merker sperrt nicht")
-chk('getattr(m, "busy", True)' in cp_src and cp_src.count('m.busy = bool(hedges_teilen(book.get(m.magic, {}), m.eigene_set)[0])') == 2, "Unbekannt zählt nicht als flach, Wege ohne Snapshot melden ihre Hedges")
+chk('getattr(m, "busy", True)' in cp_src and cp_src.count("m.busy = hedges_halten_auf(book.get(m.magic), m.eigene_set, m.alt_unklar) or solo_haelt_auf") == 3
+    and 'bool(hedge_acc.get("solo"))' not in cp_src, "Unbekannt zählt nicht als flach, alle Wege nutzen dieselbe Prüfung")
 chk('rv and _REMOTE_VERSION.get("neustart")' in cp_src and "rv != my_version" not in cp_src, "Hauptschleife fragt nur die Entscheidung, Standard ist kein Neustart")
 chk('"copier_lauf": _LAUF["version"]' in cp_src and '"copier_code": _LAUF["code"]' in cp_src and '"update_wartet":' in cp_src, "Status trägt copier_lauf, copier_code, update_wartet")
 chk("busy = [m.file for m in masters" in cp_src and "if not busy:" in cp_src, "Selbst-Update wartet weiter auf flache Master")
