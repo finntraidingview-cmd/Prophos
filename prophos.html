@@ -25108,6 +25108,13 @@
             hedge_currency: s.hedge_currency ?? null,
             hedge_konto: s.hedge_konto ?? null,   // Fusion-Marge (06.10.2026): {margin_free, marge_je_lot, …} für den Popup-Hinweis am Mac/Handy
             hedge_fremde: s.hedge_fremde ?? null,
+            // Copier-Zustand für die Ferndiagnose (30.10.2026, Befund ECHO-FENSTER-FEHLT: Chris …9091 / Marc …8075 liefen ohne Hedge, und
+            // aus mt5_live war nicht zu sehen, ob das Trade-Fenster zu war, Echo pausiert, die Position gesperrt oder ein Magic-Zwilling auf
+            // einem anderen PC den Hedge geschlossen hatte) — magic, Fenster (armed), Pause, gesperrte Master-Positionen, Zwillings-Hedges
+            magic: s.magic ?? null, armed: (typeof s.armed === 'boolean') ? s.armed : null, paused: (typeof s.paused === 'boolean') ? s.paused : null,
+            blocked: (Array.isArray(s.blocked) && s.blocked.length) ? s.blocked : null,
+            zwilling: (Array.isArray(s.zwilling) && s.zwilling.length) ? s.zwilling : null, zwilling_grund: s.zwilling_grund || null,
+            zwilling_gesperrt: (Array.isArray(s.zwilling_gesperrt) && s.zwilling_gesperrt.length) ? s.zwilling_gesperrt : null,
             // Solo-Hedge (25.09.2026): offene Positionen + Abschluss-Ring — fehlten im Push, der Mac konnte Live-P&L und Ring nie sehen
             hedge_solo: Array.isArray(s.hedge_solo) ? s.hedge_solo : null,
             hedge_solo_zu: Array.isArray(s.hedge_solo_zu) ? s.hedge_solo_zu : null,

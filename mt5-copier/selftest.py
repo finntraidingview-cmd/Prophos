@@ -2072,6 +2072,7 @@ def main():
     results.append(test_hedge_closed_at_ms())
     results.append(test_puls_fehlerfoto())
     results.append(test_fehlerfoto_luecken())
+    results.append(test_magic_zwilling())
 
     print()
     ok = sum(1 for r in results if r)
@@ -11140,6 +11141,88 @@ def test_puls_fehler_1850():
         "tvclose: Rückfrage-Riegel, Knopf-Beweis und Doktrin (kein blinder zweiter Klick) unverändert, Wartezeiten nur über _warte")
     chk("Flach nicht bewiesen:" in q and "cdp_meldung_text(m) for m in neu_c" in q, "tvclose: Diagnose-Zeile im Unklar-Fall (Zeile/Tabelle/Meldungen)")
     print(("✓" if ok else "✗") + " Puls-Fehler .1850: Close flach — leeres Konto zeigt keine Tabelle → Beweis über TradingViews Close-Fill-Meldung, sonst UNKLAR mit Diagnose")
+    return ok
+
+
+def test_magic_zwilling():
+    """Magic-Zwillinge (30.10.2026, Befund ECHO-FENSTER-FEHLT): zwei Instanzen auf zwei PCs, gleiche magic, ein Fusion-Konto.
+    Die flache Instanz darf das Hedge-Ticket der anderen nie schliessen; der eigene Hedge geht beim Master-Close weiter zu (auch
+    nach Neustart, eigene_idents im Sidecar); ein Close durch den Zwilling ist kein Hand-Close. Ohne MetaTrader."""
+    import copier as cp, inspect as _i, tempfile
+    from types import SimpleNamespace as _NS
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Magic-Zwilling: " + text)
+            ok = False
+    # Fusion-Partition der gemeinsamen magic: Hedge von Instanz A (Master-Pos 500000001) — B hat dieselbe magic, eigene Positionen nie
+    buch = {500000001: [{"ticket": 243200001, "symbol": "NAS100", "type": 0, "volume": 0.84}]}
+    pos_a = [{"ident": 500000001, "symbol": "NAS100", "type": 1, "volume": 0.84, "contract_size": 1.0}]
+    eig_a, geaendert = cp.eigene_idents_fortschreiben([], pos_a)
+    chk(eig_a == ["500000001"] and geaendert, "eigene idents: Position des eigenen Snapshots wird gemerkt (als str)")
+    chk(cp.eigene_idents_fortschreiben(eig_a, pos_a) == (eig_a, False), "schon bekannt → unverändert, nichts zu schreiben")
+    lang, _ = cp.eigene_idents_fortschreiben([str(i) for i in range(cp.EIGENE_DECKEL)], [{"ident": 99999}])
+    chk(len(lang) == cp.EIGENE_DECKEL and lang[-1] == "99999" and lang[0] == "1", "Deckel: älteste fallen raus, neueste bleibt")
+    # B: flach, eigene idents aus einem früheren Trade (anderer ident)
+    hb, zb = cp.hedges_teilen(buch, {"500000002"})
+    akt_b, _ = plan_actions([], hb, multiplier=1.0, symbol_map=MAP, sym_info=sym)
+    chk(hb == {} and list(zb) == [500000001] and akt_b == [], "flacher Zwilling B: fremdes Ticket ist Zwilling, KEIN Close")
+    alt_b, _ = plan_actions([], buch, multiplier=1.0, symbol_map=MAP, sym_info=sym)
+    chk([a["ticket"] for a in alt_b if a["kind"] == "close"] == [243200001], "Gegenprobe alter Weg: ungeteilt hätte B das Ticket geschlossen")
+    chk(cp.zwilling_liste(zb) == [{"ident": 500000001, "ticket": 243200001, "volume": 0.84, "symbol": "NAS100", "unklar": False}],
+        "Zwillings-Liste für Status/mt5_live: ident, Ticket, Lots, Symbol")
+    # Grund-Satz: Zwilling / Alt-Hedge mit unklarem Besitzer (erster Start nach dem Update) / Sperre nach Pingpong
+    li_u = cp.zwilling_liste(zb, {"500000001"})
+    g_zw = cp.zwilling_grund(770005, 21099091, cp.zwilling_liste(zb))
+    g_u = cp.zwilling_grund(770005, 21099091, li_u)
+    g_sp = cp.zwilling_grund(770005, 21099091, li_u, {500000001})
+    chk(li_u[0]["unklar"] and cp.zwilling_grund(770005, 1, []) is None, "Alt-Baseline-ident als unklar markiert; ohne Zwilling kein Grund")
+    chk("doppelt am Hedge-Konto" in g_zw and "Besitzer unklar" in g_u and "OHNE Hedge" in g_sp and "500000001" in g_sp,
+        "Grund nennt EINE Ursache: Zwilling, unklarer Alt-Hedge oder Sperre (Master ungehedgt)")
+    # A: eigener Hedge — offen bleibt er, beim Master-Close geht er zu
+    ha, za = cp.hedges_teilen(buch, set(eig_a))
+    chk(ha == buch and za == {}, "Besitzer A sieht das Ticket als eigen")
+    chk(plan_actions(pos_a, ha, multiplier=1.0, symbol_map=MAP, sym_info=sym)[0] == [], "A mit Master offen: nichts zu tun")
+    zu_a, _ = plan_actions([], ha, multiplier=1.0, symbol_map=MAP, sym_info=sym)
+    chk([a["ticket"] for a in zu_a if a["kind"] == "close"] == [243200001], "A nach Master-Close: eigener Hedge wird geschlossen")
+    # Neustart: eigene_idents überleben im closed-Sidecar, alte Sidecars ohne Feld → []
+    with tempfile.TemporaryDirectory() as d:
+        pf = os.path.join(d, "closed-x.json")
+        cp.write_closed(pf, [{"deal": 1}], {"500000001": 0.84}, {"500000001": [243200001]}, eig_a)
+        chk(cp.load_eigene(pf) == eig_a and cp.load_closed(pf)[1] == {"500000001": 0.84}, "Sidecar: eigene_idents + Baseline neustart-fest")
+        with open(pf, "w", encoding="utf-8") as f:
+            f.write('{"closed": [], "last_vol": {}, "last_tickets": {}}')
+        chk(cp.load_eigene(pf) == [] and cp.load_eigene(os.path.join(d, "fehlt.json")) == [], "alter/fehlender Sidecar → leere Liste")
+    # Zwillings-Close: Copier-Order (REASON_EXPERT=3) mit eigener magic zählt; Hand (0), Stop-Out (6), fremde magic, IN, verbucht nicht
+    deals = [_NS(ticket=11, entry=1, reason=3, magic=770005), _NS(ticket=12, entry=1, reason=0, magic=0),
+             _NS(ticket=13, entry=1, reason=6, magic=770005), _NS(ticket=14, entry=1, reason=3, magic=770099),
+             _NS(ticket=15, entry=0, reason=3, magic=770005), _NS(ticket=16, entry=1, reason=3, magic=770005)]
+    zw = cp.find_zwilling_deals(deals, {16}, magic=770005, out_entries=(1, 2), reason_expert=3)
+    chk([int(x.ticket) for x in zw] == [11] and cp.find_zwilling_deals(None, set(), magic=1, out_entries=(1,), reason_expert=3) == [],
+        "Zwillings-Close nur: OUT-Deal, Copier-Order, gleiche magic, unverbucht")
+    # Verdrahtung in der Hauptschleife
+    q = _i.getsource(cp.main)
+    i_teil = q.find("hedges, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)")
+    chk(i_teil > 0 and q.find("eigene_idents_fortschreiben(m.eigene_idents, snap[\"positions\"])") < i_teil, "erst eigene idents merken, dann teilen")
+    chk(0 < i_teil < q.find("for ident_, prev_v in m.hedge_last_vol.items():") < q.find("actions, warns = plan_actions("),
+        "Schwund-Wächter und plan_actions sehen nur die geteilten (eigenen) Hedges")
+    chk(q.count("hedges_teilen(book.get(m.magic, {}), m.eigene_set)") == 3 and "book.get(m.magic, {})\n" not in q,
+        "auch Falsch-Login- und Ohne-Snapshot-Status zählen Zwillinge nicht als eigene Hedges")
+    chk("if ident_ not in m.eigene_set:" in q and '"note": "zwilling_geschlossen"' in q and "m.zwilling_zu[ident_i]" in q
+        and "n_zw >= ZWILLING_ZU_MAX" in q, "Schwund: Alt-Baseline-Zwilling übersprungen, Zwillings-Close verbucht, keine Hand-Sperre bis zum Deckel")
+    i_zw = q.find('"note": "zwilling_geschlossen"')
+    chk(i_zw < q.find("Hand-Close wird respektiert") and q.find("find_zwilling_deals(") < i_zw, "Zwillings-Check vor der Hand-Close-Sperre")
+    chk(q.count("write_closed(") == 3 and q.count("m.hedge_last_tickets, m.eigene_idents)") == 3,
+        "jeder write_closed-Aufruf gibt eigene_idents mit (sonst verschwänden sie beim nächsten Schreiben)")
+    chk('"zwilling": zwilling_liste(m.zwilling, m.alt_unklar)' in q and '"zwilling_gesperrt": sorted(m.zwilling_gesperrt)' in q
+        and '"zwilling_grund": zwilling_grund(' in q, "Status trägt zwilling, zwilling_gesperrt, zwilling_grund")
+    qm = _i.getsource(cp.Master.__init__)
+    chk("self.alt_unklar = set() if self.eigene_idents else set(self.hedge_last_vol)" in qm and "m.alt_unklar -= m.eigene_set" in q
+        and "m.zwilling_gesperrt.add(ident_i)" in q and "m.zwilling_gesperrt.discard(ident)" in q,
+        "Alt-Baseline nur beim ersten Start unklar, eigene idents fallen raus; Zwillings-Sperre gemerkt und beim eigenen Close gelöst")
+    print(("✓" if ok else "✗") + " Magic-Zwilling: flacher Zwilling schließt das fremde Ticket nie, eigener Hedge geht zu, Zwillings-Close ist kein Hand-Close")
     return ok
 
 

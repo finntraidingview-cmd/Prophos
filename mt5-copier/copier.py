@@ -481,12 +481,23 @@ def load_closed(path):
         return [], {}, {}
 
 
-def write_closed(path, entries, last_vol=None, last_tickets=None):
+def load_eigene(path):
+    """eigene_idents aus dem closed-Sidecar (30.10.2026, Magic-Zwillinge) → Liste str. Fehlt/kaputt → [] (alte Sidecars)."""
+    try:
+        data = load_json(path)
+        ei = data.get("eigene_idents") if isinstance(data, dict) else None
+        return [str(i) for i in ei] if isinstance(ei, list) else []
+    except Exception:
+        return []
+
+
+def write_closed(path, entries, last_vol=None, last_tickets=None, eigene=None):
+    # eigene (30.10.2026): JEDER Aufrufer gibt m.eigene_idents mit — fehlt es, waere die Liste nach dem naechsten Schreiben weg
     try:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"closed": entries[-50:], "last_vol": last_vol or {},
-                       "last_tickets": last_tickets or {}},
+                       "last_tickets": last_tickets or {}, "eigene_idents": list(eigene or [])},
                       f, ensure_ascii=False, indent=1)
         os.replace(tmp, path)
     except Exception as e:
@@ -1292,6 +1303,87 @@ def find_notfall_deals(deals, schon_verbucht, *, out_entries, reason_sl, reason_
     return out
 
 
+# ── Magic-Zwillinge am geteilten Hedge-Konto (30.10.2026) ──────────────────────
+# Befund ECHO-FENSTER-FEHLT (Chris FundingPips …9091 / Marc FundedNext …8075, 29./30.10.2026: Master offen, hedges {}, keine
+# Fremd-Hedges): alle PCs hedgen auf DASSELBE Fusion-Konto, und die magic-Bloecke wurden nie je PC vergeben — in mt5_live stand
+# dasselbe Hedge-Ticket gleichzeitig unter drei Configs auf drei PCs. hedge_book ordnet nur nach magic+prefix zu; ein Zwilling
+# mit frischem, flachem Snapshot sah den fremden Hedge als „Master weg" und schloss ihn, der Besitzer wertete das als Hand-Close
+# und sperrte (siehe MAGIC_UMZUG). Master-Auftrag: „Master weg" schliesst nur noch EIGENE Hedges, ein fremdes Ticket mit
+# derselben magic wird nie angefasst, und ein Schluss durch einen Zwilling ist beim Besitzer kein Hand-Close.
+# EIGEN = der ident (Master-Positions-Kennung im Hedge-Kommentar) lag schon einmal im EIGENEN Snapshot dieser Instanz (Login
+# geprueft). Persistiert im closed-Sidecar (eigene_idents), damit ein Master-Close in einer Copier-Downtime den eigenen Hedge
+# nach dem Neustart weiter zumacht. magic_base je PC kommt spaeter (Master 30.10.2026) — das hier schuetzt auch ohne.
+EIGENE_DECKEL = 500   # so viele idents je Instanz merken (jede Master-Position einmal) — reicht fuer Monate, Sidecar bleibt klein
+ZWILLING_ZU_MAX = 3   # so oft darf ein Zwilling (alter Copier auf einem anderen PC) den Hedge schliessen, dann Sperre (Pingpong-Kosten)
+
+
+def eigene_idents_fortschreiben(eigene, positionen, deckel=EIGENE_DECKEL):
+    """REIN RECHNEND (testbar): idents der eigenen Master-Positionen an die Liste haengen (Reihenfolge = zuerst gesehen,
+    aelteste fallen ueber dem Deckel raus) → (neue Liste als str, geaendert?)."""
+    alt = [str(i) for i in (eigene or [])]
+    bekannt = set(alt)
+    neu = list(alt)
+    for p in positionen or []:
+        i = str(p.get("ident"))
+        if i not in bekannt:
+            bekannt.add(i)
+            neu.append(i)
+    if len(neu) > deckel:
+        neu = neu[-deckel:]
+    return neu, neu != alt
+
+
+def hedges_teilen(hedges, eigene):
+    """REIN RECHNEND (testbar): Hedge-Partition dieser magic → (eigene, zwilling). Eigen ist ein ident, der schon einmal im
+    eigenen Snapshot lag (eigene = Menge der idents als str); alles andere traegt nur zufaellig dieselbe magic."""
+    eig, zw = {}, {}
+    for ident, hs in (hedges or {}).items():
+        (eig if str(ident) in eigene else zw)[ident] = hs
+    return eig, zw
+
+
+def zwilling_liste(zw, unklar=frozenset()):
+    """REIN RECHNEND (testbar): Zwillings-Hedges fuer Status/mt5_live → [{ident, ticket, volume, symbol, unklar}], nach Ticket sortiert.
+    unklar = idents aus der Alt-Baseline des ersten Starts nach dem Update (s. Master.alt_unklar): eigener Alt-Hedge ODER Zwilling."""
+    out = [{"ident": ident, "ticket": int(h.get("ticket") or 0), "volume": h.get("volume"), "symbol": h.get("symbol"),
+            "unklar": str(ident) in unklar}
+           for ident, hs in (zw or {}).items() for h in (hs or [])]
+    return sorted(out, key=lambda z: z["ticket"])
+
+
+def zwilling_grund(magic, master_login, liste, gesperrt=()):
+    """REIN RECHNEND (testbar): EIN Satz fuer Status/Prophos (None = alles sauber). Sperre zuerst — dann laeuft der Master ungehedgt."""
+    if gesperrt:
+        return (f"Hedge von Master-Pos {', '.join(str(i) for i in sorted(gesperrt))} gesperrt: {ZWILLING_ZU_MAX}x von einem Copier mit "
+                f"derselben magic {magic} auf einem anderen PC geschlossen — Master laeuft OHNE Hedge. Zwilling-PC updaten, dann Copier "
+                f"hier neu starten.")
+    if not liste:
+        return None
+    unklar = [z for z in liste if z.get("unklar")]
+    if unklar and len(unklar) == len(liste):
+        return (f"{len(unklar)} Alt-Hedge(s) mit magic {magic}, Besitzer unklar (erster Start nach dem Update): eigener Hedge eines "
+                f"schon geschlossenen Masters {master_login} ODER Zwilling auf einem anderen PC — wird nicht angefasst, im "
+                f"Hedge-Terminal pruefen und ggf. von Hand schliessen.")
+    return (f"magic {magic} doppelt am Hedge-Konto — {len(liste)} fremde(s) Hedge-Ticket(s) mit dieser magic, gehoeren nicht "
+            f"zu Master {master_login}; werden nicht angefasst.")
+
+
+def find_zwilling_deals(deals, schon_verbucht, *, magic, out_entries, reason_expert):
+    """REIN RECHNEND (testbar): Close-Deals, die ein ANDERER Copier mit derselben magic ausgefuehrt hat. Ein Copier schliesst
+    per Order mit seiner magic (DEAL_REASON_EXPERT); ein Hand-Close im Terminal traegt REASON_CLIENT/MOBILE/WEB und magic 0, ein
+    Stop-Out REASON_SO — die bleiben 'extern' wie bisher. Der eigene Close ist schon ueber own_close_mark ausgenommen."""
+    out = []
+    for d in deals or []:
+        if int(getattr(d, "entry", -1)) not in out_entries:
+            continue
+        if int(getattr(d, "reason", -1)) != reason_expert or int(getattr(d, "magic", 0) or 0) != int(magic):
+            continue
+        if int(d.ticket) in schon_verbucht:
+            continue
+        out.append(d)
+    return out
+
+
 # ── Ein Master = eine config*.json ──────────────────────────────────────────────
 class Master:
     def __init__(self, cfg_path):
@@ -1353,6 +1445,18 @@ class Master:
         # nur so erkennt der Schwund-Waechter auch Closes, die WAEHREND einer
         # Copier-Downtime passiert sind (Review-Fund 15.08.2026).
         self.own_close_mark = {}  # ident -> Zeitpunkt des letzten EIGENEN erfolgreichen Close
+        # Magic-Zwillinge (30.10.2026, s. hedges_teilen): eigene idents (neustart-fest), Zwillings-Hedges dieses Ticks, schon
+        # geloggte Zwillings-Tickets und wie oft ein Zwilling einen eigenen Hedge geschlossen hat (ident → n)
+        self.eigene_idents = load_eigene(self.closed_path)
+        self.eigene_set = set(self.eigene_idents)
+        self.zwilling = {}
+        self.zwilling_gemeldet = set()
+        self.zwilling_zu = {}
+        self.zwilling_gesperrt = set()   # idents, die nach ZWILLING_ZU_MAX Zwillings-Closes gesperrt wurden (Grund fuer Status/Prophos)
+        # ERSTER START NACH DEM UPDATE (Review-Fund 30.10.2026): ein alter Sidecar hat noch keine eigene_idents. idents der Alt-Baseline,
+        # die nicht im ersten Snapshot liegen, koennen ein eigener Hedge sein, dessen Master in einer Copier-Downtime zuging — oder ein
+        # Zwilling (die Alt-Baseline enthielt beide). Nicht raten, nicht schliessen: als „Besitzer unklar" melden, Finn prueft von Hand.
+        self.alt_unklar = set() if self.eigene_idents else set(self.hedge_last_vol)
 
     def reload(self, initial=False):
         cfg = load_json(self.cfg_path)
@@ -1851,7 +1955,7 @@ def main():
             "closed_at": deal_closed_at(deal, h.get("symbol")),   # ms + UTC, echte Fill-Zeit (29.10.2026)
         })
         del m.closed[:-50]
-        write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets)
+        write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets, m.eigene_idents)
 
     # ── Hauptschleife ───────────────────────────────────────────────────────────
     poll = float(ref.get("poll_interval", 0.5))
@@ -2301,6 +2405,11 @@ def main():
             "master_positions": (snap or {}).get("positions") or [],
             "hedges": {str(k): v for k, v in (hedges or {}).items()},
             "blocked": sorted(m.blocked),
+            # Magic-Zwillinge (30.10.2026): Hedges mit DIESER magic, die nicht zu diesem Master gehoeren — ein anderer PC am
+            # selben Fusion-Konto traegt dieselbe magic (oder Alt-Hedge vor dem Update). Werden nie angefasst; Prophos meldet 🔴.
+            "zwilling": zwilling_liste(m.zwilling, m.alt_unklar),
+            "zwilling_gesperrt": sorted(m.zwilling_gesperrt),
+            "zwilling_grund": zwilling_grund(m.magic, m.master_login, zwilling_liste(m.zwilling, m.alt_unklar), m.zwilling_gesperrt),
             "note": note,
             "standby": standby,
             # P&L-Beweisdaten (15.08.2026, Etappe 3): Master-Seite aus dem
@@ -2599,7 +2708,7 @@ def main():
                     if now - m.last_status > 1.0:
                         m.last_status = now
                         if os.path.exists(m.cfg_path):
-                            known = book.get(m.magic, {})
+                            known, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)   # Zwillinge nie als eigene (30.10.2026)
                             st = master_status(m, None, known, False)
                             st["note"] = (f"Master-Terminal ist im FALSCHEN Konto eingeloggt: "
                                           f"{snap['login']} statt {m.master_login} — Trade in "
@@ -2624,11 +2733,28 @@ def main():
                             # Loesch-Riegel des Panels wuerde eine Instanz mit
                             # offenen Hedges sonst fuer leer halten. book ist hier
                             # garantiert frisch (Tick waere sonst uebersprungen).
-                            known = book.get(m.magic, {})
+                            known, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)   # Zwillinge nie als eigene (30.10.2026)
                             write_status(m.status_path, master_status(m, None, known, False))
                     continue
 
-                hedges = book.get(m.magic, {})
+                # ── Eigene Hedges von Magic-Zwillingen trennen (30.10.2026, s. hedges_teilen) ──
+                # Erst die idents des eigenen Snapshots (Login oben geprueft) als EIGEN merken, dann teilen. Alles Weitere —
+                # Schwund-Waechter, plan_actions („Master weg"), Notfall-Level, busy, Status — sieht nur noch eigene Hedges.
+                _eig_neu, _eig_geaendert = eigene_idents_fortschreiben(m.eigene_idents, snap["positions"])
+                if _eig_geaendert:
+                    m.eigene_idents = _eig_neu
+                    m.eigene_set = set(_eig_neu)
+                    m.alt_unklar -= m.eigene_set
+                    write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets, m.eigene_idents)
+                hedges, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)
+                for z_ in zwilling_liste(m.zwilling):
+                    if z_["ticket"] not in m.zwilling_gemeldet:
+                        m.zwilling_gemeldet.add(z_["ticket"])
+                        log(f"👯 [{m.file}] Hedge-Ticket {z_['ticket']} (Master-Pos {z_['ident']}, {z_['volume']} "
+                            f"{z_['symbol']}) traegt meine magic {m.magic}, liegt aber nicht im Snapshot von Master "
+                            f"{m.master_login} — " + ("Alt-Hedge aus der Zeit vor dem Update, Besitzer unklar (eigener "
+                            f"Hedge eines schon geschlossenen Masters ODER Zwilling)" if z_["unklar"] else "Zwilling auf "
+                            f"einem anderen PC am selben Hedge-Konto") + ". Wird nie angefasst; Prophos meldet es.")
 
                 if m.seen_seq is None:
                     log(f"✓ [{m.file}] Snapshot verbunden — Master {snap['login']} @ {snap['server']}, "
@@ -2685,6 +2811,10 @@ def main():
                 for ident_, prev_v in m.hedge_last_vol.items():
                     now_v = cur_vol.get(ident_, 0.0)
                     if now_v < prev_v - TOL:
+                        if ident_ not in m.eigene_set:
+                            # Alt-Baseline (30.10.2026): vor dem Zwillings-Schutz landeten auch Zwillings-Hedges in
+                            # hedge_last_vol — ihr Verschwinden ist kein Schwund DIESES Masters (kein extern, keine Sperre)
+                            continue
                         try:
                             ident_i = int(ident_)
                         except (TypeError, ValueError):
@@ -2703,11 +2833,13 @@ def main():
                             geb = {int(c.get("deal") or 0) for c in m.closed} \
                                   | m.booked_deals.get(ident_i, set())
                             nf = []
+                            ds_je_tk = {}   # Deals je Ticket — auch fuer den Zwillings-Check unten (30.10.2026), nur einmal lesen
                             for tk in m.hedge_last_tickets.get(ident_, []):
                                 try:
                                     ds = mt5.history_deals_get(position=int(tk)) or []
                                 except Exception:
                                     ds = []
+                                ds_je_tk[int(tk)] = ds
                                 nf += [(int(tk), d) for d in find_notfall_deals(
                                     ds, geb,
                                     out_entries=(mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY),
@@ -2734,6 +2866,38 @@ def main():
                                 # er praktisch sicher auch zu), stellt der naechste Tick
                                 # den Schutz-Hedge bewusst wieder her.
                                 continue
+                            # ZWILLINGS-CLOSE (30.10.2026, Befund ECHO-FENSTER-FEHLT): hat ein ANDERER Copier mit derselben magic
+                            # (anderer PC am selben Fusion-Konto, alter Stand ohne Zwillings-Schutz) den Hedge zugemacht, ist das
+                            # KEIN Hand-Close — Deal verbuchen, nicht sperren, der naechste Tick stellt den Hedge wieder her. Nur
+                            # gegen Pingpong (jeder Wiederaufbau kostet Spread): nach ZWILLING_ZU_MAX Mal doch sperren, laut.
+                            zw_ = [(tk, d) for tk, ds in ds_je_tk.items() for d in find_zwilling_deals(
+                                ds, geb, magic=m.magic,
+                                out_entries=(mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY),
+                                reason_expert=getattr(mt5, "DEAL_REASON_EXPERT", 3))]
+                            if zw_:
+                                for tk, d in zw_:
+                                    m.booked_deals.setdefault(ident_i, set()).add(int(d.ticket))
+                                    m.closed.append({
+                                        "ident": ident_i, "ticket": tk, "deal": int(d.ticket),
+                                        "symbol": str(getattr(d, "symbol", "") or ""),
+                                        "volume": float(d.volume),
+                                        "profit": float(d.profit) + float(d.commission) + float(d.swap),
+                                        "note": "zwilling_geschlossen",
+                                        "closed_at": deal_closed_at(d),
+                                    })
+                                del m.closed[:-50]
+                                n_zw = m.zwilling_zu[ident_i] = m.zwilling_zu.get(ident_i, 0) + 1
+                                if n_zw >= ZWILLING_ZU_MAX:
+                                    m.blocked.add(ident_i)
+                                    m.zwilling_gesperrt.add(ident_i)
+                                    log(f"⛔ [{m.file}] Hedge von Master-Pos {ident_} zum {n_zw}. Mal von einem Copier mit "
+                                        f"derselben magic {m.magic} geschlossen (anderer PC) — gesperrt, sonst Pingpong. Den "
+                                        f"Zwilling-PC updaten, dann Copier hier neu starten.")
+                                else:
+                                    log(f"👯 [{m.file}] Hedge von Master-Pos {ident_} wurde von einem ANDEREN Copier mit "
+                                        f"derselben magic {m.magic} geschlossen (Zwilling, {n_zw}/{ZWILLING_ZU_MAX}) — "
+                                        f"KEIN Hand-Close, P&L verbucht, Hedge wird wieder aufgebaut.")
+                                continue
                             log(f"⚠ [{m.file}] Hedge-Bestand von Master-Pos {ident_} extern "
                                 f"geschrumpft ({prev_v} → {now_v}) — Stop-Out oder Hand-Close "
                                 f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
@@ -2758,7 +2922,7 @@ def main():
                     # nur bei Aenderung, nicht jeden 0,5-s-Tick.
                     m.hedge_last_vol = cur_vol
                     m.hedge_last_tickets = cur_tickets
-                    write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets)
+                    write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets, m.eigene_idents)
 
                 # ── Eingefrorener Snapshot = keine Order-Basis (25.08.2026) ─────
                 # Live-Fund beim ersten Echtgeld-Kontakt: Master 10000005 war
@@ -2881,6 +3045,7 @@ def main():
                             m.open_done.pop(ident, None); m.open_last.pop(ident, None)
                             m.open_seen.pop(ident, None)
                             m.blocked.discard(ident)
+                            m.zwilling_gesperrt.discard(ident)
                             # Eigener bestaetigter Close: dem Schwund-Waechter
                             # melden (sonst saehe der naechste Tick den Schwund
                             # und stempelte ihn 'extern') und den Deal aus dem
