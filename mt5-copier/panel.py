@@ -4567,6 +4567,19 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            # POLAR-MASTER AM PANEL (30.10.2026, Master nach Crosscheck S5: Railway prüft beim /polar/start, das Panel bisher nicht): vor dem
+            # Start des Master-Prozesses derselbe Riegel wie bei tv-konto — Plan-UUID + buy/sell Pflicht, richtung_frei fail-closed. Nur die
+            # Master-Seite: das Slave-Signal trägt zwar dieselbe plan_id, die gehört aber der Master-ID (falsche ID × Firma) — der Slave braucht
+            # den Konto-Modus an /richtung/frei (S4). polar_bot und sein Feuer-Timing bleiben unberührt (Prüfung VOR dem Popen).
+            if u.path == "/api/polar-start" and str(body.get("seite") or "") == "master":
+                _pid = str(body.get("plan_id") or "").strip()
+                _ri = str(body.get("richtung") or "").strip().lower()
+                _fehlt = riegel_pflicht_fehlt(_pid, _ri)
+                _frei, _msg, _code = (False, _fehlt, "riegel_unerreichbar") if _fehlt else richtung_frei(_pid, _ri)
+                if not _frei:
+                    print(f"[panel] polar-start master RIEGEL {_code} {_ri}: {_msg[:160]}", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "code": _code, "retry_ok": True, "gesendet": False, "msg": _msg},
+                                                      ensure_ascii=False))
             code, antwort = polar_panel.behandle_post(u.path, body, beschaeftigt=_bot_lauf_aktiv())
             return self._send(code, json.dumps(antwort, ensure_ascii=False, default=str))
         if u.path == "/api/provision":
