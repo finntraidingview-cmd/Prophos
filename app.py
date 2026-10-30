@@ -35571,9 +35571,20 @@ def fcp_richtung(fest, rnd):
     return fest if fest in ("buy", "sell") else rnd.choice(("buy", "sell"))
 
 
+# RICHTUNG REIN GEWÜRFELT (Finn 30.10.2026 ~08:05, Screenshot: fast alle Funded-CFD-Vorschläge LONG): je Konto 50/50. Raus: die Bindung
+# „weitere Konten derselben ID × Firma im Lauf = dieselbe Richtung" und die Übernahme der Richtung GEPLANTER Pläne (Vorschläge,
+# Challenge-Pläne) — beides zog alles auf eine Seite. Den Richtungsschutz macht künftig der Start (dreht um, S7). FAIL-SAFE, solange der
+# Start klassisches Echo (route mt5 mit Slave) nicht dreht (rkGilt kennt nur tvv2/mt5v2/tsv2): ein LAUFENDER oder auf die Nachlesung
+# WARTENDER Trade derselben ID × Firma (open, review) gibt die Richtung weiter vor (FCP_RICHTUNG_LAUFEND_UEBERNEHMEN). Zwei Vorschläge
+# derselben ID × Firma in Gegenrichtung sind harmlos: der DB-Riegel (trade_plans_gegenhedge) hält den zweiten, bis der erste zu ist.
+FCP_RICHTUNG_LAUFEND_UEBERNEHMEN = True
+
+
 def fcp_fest_richtung(plaene, tag_iso=None):
-    """REIN RECHNEND (testbar): {uid|firmkey: richtung} aus Plänen [{user_id, master_firm, status, richtung, started_at, start_um, fp_start}].
-    Laufend/wartend (open, review) zuerst, sonst ein geplanter (bestätigt oder Vorschlag) — dieselbe ID × Firma darf nie gegeneinander."""
+    """REIN RECHNEND (testbar): {uid|firmkey: richtung} aus Plänen [{user_id, master_firm, status, richtung, …}] — nur LAUFENDE bzw. auf die
+    Nachlesung wartende (open, review); geplante zählen seit 30.10.2026 ~08:05 nicht mehr. Leer, wenn FCP_RICHTUNG_LAUFEND_UEBERNEHMEN aus."""
+    if not FCP_RICHTUNG_LAUFEND_UEBERNEHMEN:
+        return {}
     out, prio = {}, {}
     for p in plaene or ():
         r = p.get("richtung")
@@ -35582,8 +35593,6 @@ def fcp_fest_richtung(plaene, tag_iso=None):
         st = p.get("status")
         if st in ("open", "review"):
             pr = 0
-        elif st == "planned":
-            pr = 1
         else:
             continue
         k = str(p.get("user_id")) + "|" + _ap_norm(_firm_norm(p.get("master_firm")))
@@ -35781,8 +35790,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         auto_k = auto_ok and uid not in gr_ids_fcp         # Auto-Bestätigen nie für eine Gruppe — sie bestätigt immer selbst (S4)
         tkey = uid + "|" + _ap_norm(_firm_norm(a.get("firm")))
         richtung = fcp_richtung(fest_je.get(tkey), rnd)
-        geschuetzt = tkey in fest_je
-        fest_je[tkey] = richtung                         # weitere Konten derselben ID × Firma in diesem Lauf: dieselbe Richtung
+        geschuetzt = tkey in fest_je                     # keine Bindung weiterer Konten im Lauf mehr (30.10.2026 ~08:05) — jedes würfelt selbst
         start = mitternacht + timedelta(minutes=m)
         start_iso = start.astimezone(timezone.utc).isoformat()
         hid = hedge_ids[uid]
