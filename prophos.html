@@ -45892,15 +45892,20 @@
   setInterval(() => { newsFetch() }, 30*60*1000)   // alle 30 Min neu laden (Backend cached ohnehin)
   newsFetch()   // beim Start laden, damit Alerts app-weit laufen (auch ohne den Tab zu öffnen)
 
-  /* ══ NEWS-REGEL FUNDED CFD (30.10.2026, Finn ~07:28 über den Master: rote USD-News — 20–30 min vorher kein neuer Funded-CFD-Trade,
-   * laufende spätestens 10 min vorher zu, 0–15 min danach kein neuer Start; Tradeify verbietet Öffnen/Schließen ±5 min). Gilt NUR für
+  /* ══ NEWS-REGEL FUNDED CFD (30.10.2026, Finn ~07:28 über den Master: rote USD-News — vorher kein neuer Funded-CFD-Trade (seit ~07:47:
+   * 120 min), laufende spätestens 10 min vorher zu, danach 15–18 min kein neuer Start; Tradeify verbietet Öffnen/Schließen ±5 min). Gilt NUR für
    * Funded CFD (Plan mit mt5_baseline.funded_plan.art = 'cfd' bzw. Konto funded_cfd) — Challenges, Apex, Winning Days unberührt.
    * Quelle ist der vorhandene Forex-Factory-Kalender (/news/calendar, nur USD), hier nur impact High. Fenster je Termin DETERMINISTISCH
    * gewürfelt (Hash aus Zeit + Titel): jeder PC-Tab und der Mac sehen dieselben Grenzen, gestreut wird je Termin (Jitter-Regel).
    * Termine, deren Fenster sich berühren (FOMC 14:00 + Pressekonferenz 14:30), verschmelzen zu einem Block.
    * FAIL-CLOSED: kein Kalender oder älter als 12 h → keine neuen Funded-CFD-Starts (Grund sichtbar); offene Trades schließt die Regel dann
    * NICHT (ohne Termin kein Anlass). Schalter: newsState.regelAn (aus /news/calendar, Standard an). Schließen: acNewsTick (bei acTick). ══ */
-  const NEWS_REGEL = { vorMin: 20, vorSpanne: 10, nachMin: 0, nachSpanne: 15, zuVorMin: 16, zuVorSpanne: 6, kein_klick_min: 6, nach_zu_bis_min: 60, alt_ms: 12 * 3600000 }
+  // Regelwerte an EINER Stelle (Finn ~07:47 über den Master: Start-Sperre 120 min vor bis 15 min nach der News — „ein kurz vorher geöffneter
+  // Trade würde eh wieder geschlossen"; danach 15–18 min gewürfelt wegen Jitter-Regel). vor/nach = Start-Sperre, zuVor = Beginn Schließen,
+  // kein_klick = ±min ohne Klick (Tradeify ±5 + 1), v2_ende_vor = Echo V2 fängt ab t − 10 nicht mehr an, frist_rest_s = so viel Rest bis
+  // t − 6 braucht ein Schließ-Versuch mindestens, markt_sperre_vor = Market-Close fasst Funded CFD ab t − 10 nicht mehr an.
+  const NEWS_REGEL = { vorMin: 120, vorSpanne: 0, nachMin: 15, nachSpanne: 3, zuVorMin: 16, zuVorSpanne: 6, kein_klick_min: 6, v2_ende_vor_min: 10,
+    frist_rest_s: 45, markt_sperre_vor_min: 10, nach_zu_bis_min: 60, alt_ms: 12 * 3600000 }
   function newsHash01(text, salz){   // FNV-1a → [0, 1): gleiche Eingabe = gleicher Wurf auf jedem Gerät
     let h = 2166136261
     const t = String(salz || '') + '|' + String(text || '')
@@ -45915,7 +45920,7 @@
       const t = Date.parse(e.date); if(!isFinite(t)) continue
       const k = String(e.date) + '|' + String(e.title || '')
       const vor = (R.vorMin + newsHash01(k, 'vor') * R.vorSpanne) * 60000
-      // 0–15 min gewürfelt, aber nie unter +6 min: ein Start ist auch ein Klick, und ±5 min verbietet Tradeify (1 min Puffer wie beim Schließen)
+      // gewürfelt (nachMin + 0…nachSpanne), nie unter kein_klick_min: ein Start ist auch ein Klick, ±5 min verbietet Tradeify
       const nach = Math.max(R.kein_klick_min, R.nachMin + newsHash01(k, 'nach') * R.nachSpanne) * 60000
       const zuAb = (R.zuVorMin + newsHash01(k, 'zu') * R.zuVorSpanne) * 60000
       roh.push({ t, titel: String(e.title || 'News'), vor, nach, zuAb, t0: t - vor, t1: t + nach })
@@ -45976,7 +45981,8 @@
   function newsKeinKlick(now){
     const st = newsRegelStand(now)
     if(!st.an || !st.ok) return null
-    return st.bloecke.flatMap(b => b.termine).find(y => Math.abs(now - y.t) < NEWS_REGEL.kein_klick_min * 60000) || null
+    const R = NEWS_REGEL, M = 60000   // ab t − 10 (nicht erst t − 6): ein Market-Close-Versuch hat keine Frist (Gegenprüfung Nachtrag 30.10.2026)
+    return st.bloecke.flatMap(b => b.termine).find(y => now > y.t - R.markt_sperre_vor_min * M && now < y.t + R.kein_klick_min * M) || null
   }
   // „Trotzdem starten" im News-Toast (wie bei Ziel erreicht): nur Hand-Start auf der Karte, 10 min je Plan
   const _newsTrotzdem = new Map()
@@ -54615,8 +54621,14 @@
   }
 
   // -> { ok, msg, retry, unklar, beendet, pausiert, ticket, profit, trail } — nie werfen, immer ein Ergebnis
-  async function v2SchliessenAmPc(plan){
+  // opts.frist (ms, NEWS-REGEL 30.10.2026, Prüfer-Stopp S2): bis dahin muss jeder Klick vorbei sein — 409-Warteschleife und Puls-timeout_s
+  // richten sich danach; reicht der Rest nicht, wird nichts angefangen ({ retry: true }). Ohne opts unverändert.
+  async function v2SchliessenAmPc(plan, opts){
     if(!plan || plan.status !== 'open' || !routeIstV2(plan.route)) return { ok:false, msg:'Plan läuft nicht (mehr) — nichts geschlossen.', retry:false }
+    const frist = (opts && Number(opts.frist) > 0) ? Number(opts.frist) : 0
+    const restS = () => frist ? Math.floor((frist - Date.now()) / 1000) : Infinity
+    const zuKnapp = { ok:false, retry:true, msg:'Frist vor der News zu knapp — nichts angefangen, später erneut.' }
+    if(restS() < 20) return zuKnapp
     if(typeof window.mtcApi !== 'function') return { ok:false, msg:'Copier-Backend am PC nicht erreichbar.', retry:true }
     const pid = String(plan.id)
     if(planIstPuls(plan)){   // Orbit V2 bzw. Topstep V2 mit Puls (F23: tsx-close in TopstepX)
@@ -54634,12 +54646,15 @@
         // Konto-Kontext (25.09.2026): Geschwister/Firma/Username wie beim Start — sonst scheitert das Schließen, wenn ein anderes Konto desselben Logins aktiv ist
         const _clKk = tvV2KontoKontext(plan)   // plan_id über die Brücke (29.09.2026, puls_ergebnisse) — vorn, das Panel kappt bei 60
         _clKk.geschwister = ['@plan_id=' + String(plan.id), ...((_clKk && _clKk.geschwister) || [])]
-        const _clBody = JSON.stringify(Object.assign({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '', plan_id: String(plan.id) }, _clKk))
+        const _clTo = Math.min(90, restS() - 10)
+        if(_clTo < 15) return zuKnapp
+        const _clBody = JSON.stringify(Object.assign({ konto, symbol, timeout_s: _clTo, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '', plan_id: String(plan.id) }, _clKk))
         const _clT0 = Date.now()
         for(;;){
           r = await window.mtcApi(pulsApiName(plan, 'close'), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: _clBody })
           const beschaeftigt = !!(r && !r.ok && !r._httpFail && r.code === 'puls_beschaeftigt')
           if(!beschaeftigt || Date.now() - _clT0 > 150000) break
+          if(frist && restS() - 14 < _clTo + 10) break   // Frist: kein weiterer Versuch, der über t − 6 laufen könnte
           await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
         }
       }catch(e){
@@ -54707,6 +54722,7 @@
       ticket = t.ticket; beschr = t.beschr
     }
     let r = null
+    if(restS() < 15) return zuKnapp   // Frist (News): Instanz-Abfrage hat gedauert
     try{
       r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
         headers:{ 'Content-Type':'application/json' },
@@ -56151,8 +56167,10 @@
   }
 
   // Echo: derselbe Weg wie „Schließen" auf der Karte (lokal, ohne Popup). -> {ok, msg, retry}
-  async function acEchoSchliessen(plan){
+  // opts.frist (NEWS-REGEL 30.10.2026): nach der Instanz-Abfrage nur noch klicken, wenn bis zur Frist genug Rest bleibt; ohne opts wie bisher
+  async function acEchoSchliessen(plan, opts){
     if(typeof window.mtcApi !== 'function') return { ok: false, msg: 'Copier-Backend nicht erreichbar', retry: true }
+    const frist = (opts && Number(opts.frist) > 0) ? Number(opts.frist) : 0
     if(typeof _rsAktiv !== 'undefined' && _rsAktiv) return { ok: false, msg: 'Remote-Lauf aktiv — später', retry: true }
     const symbol = plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')
     const dd = await window.mtcApi('instances')
@@ -56161,6 +56179,7 @@
     if(!route) return { ok: false, msg: 'Plan gehört zu keiner Copier-Instanz auf diesem PC', retry: false }
     const t = tpClosePosAufloesen(plan, route, symbol)
     if(t.fehler) return { ok: false, msg: t.fehler, retry: /frisch|schon zu/i.test(t.fehler) }
+    if(frist && frist - Date.now() < 30000) return { ok: false, msg: 'Frist vor der News zu knapp — nichts angefangen, später erneut.', retry: true }
     const r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: t.ticket, symbol }) })
     if(r && r.ok) return { ok: true, msg: `#${t.ticket} ${t.beschr} geschlossen · ${r.msg || ''}`.trim(), retry: false }
@@ -56182,18 +56201,22 @@
   function acNewsFaellig(plaene, now){   // rein (Test-Haken): [{ plan, x, phase: 'zu' | 'warten' }]
     const st = newsRegelStand(now)
     if(!st.an || !st.ok || !st.bloecke.length) return []
-    const R = NEWS_REGEL, out = []
-    // ±6 min gegen JEDEN roten Termin, auch aus einem anderen Block (NFP 14:30 + Presse 15:00: um 14:56 nichts klicken, obwohl NFP
-    // schon „danach" ist — Befund Selbsttest 30.10.2026)
-    const nah = st.bloecke.flatMap(b => b.termine).find(y => Math.abs(now - y.t) < R.kein_klick_min * 60000) || null
+    const R = NEWS_REGEL, out = [], alle = st.bloecke.flatMap(b => b.termine), M = 60000
+    // Frist = nächstes t − 6 min: kein Schließ-Aufruf darf darüber hinaus laufen (Prüfer-Stopp S2 zu 8427eda9)
+    const frist = alle.map(y => y.t - R.kein_klick_min * M).filter(f => f > now).sort((a, b) => a - b)[0] || null
     for(const p of (plaene || [])){
       if(!p || p.status !== 'open' || !routeIstEcho(p.route) || !newsIstFundedCfd(p)) continue
+      // ±6 min gegen JEDEN roten Termin, auch aus einem anderen Block (NFP 14:30 + Presse 15:00: um 14:56 nichts klicken, obwohl NFP
+      // schon „danach" ist — Befund Selbsttest 30.10.2026). Echo V2 schon ab t − 10 nicht mehr anfangen (S2 30.10.2026: ein V2-Schließen
+      // kann länger dauern als ein Echo-master-close) — der Rest wird dann ab t + 6 geschlossen.
+      const vorMin = routeIstV2(p.route) ? R.v2_ende_vor_min : R.kein_klick_min
+      const nah = alle.find(y => now > y.t - vorMin * M && now < y.t + R.kein_klick_min * M) || null
       const gestartet = Date.parse(p.startedAt || '') || 0
       for(const b of st.bloecke){
         if(gestartet && gestartet >= b.t0) continue
-        const x = b.termine.find(y => (now >= y.t - y.zuAb && now <= y.t + R.nach_zu_bis_min * 60000))
+        const x = b.termine.find(y => (now >= y.t - y.zuAb && now <= y.t + R.nach_zu_bis_min * M))
         if(!x) continue
-        out.push({ plan: p, x: nah || x, phase: nah ? 'warten' : 'zu' })
+        out.push({ plan: p, x: nah || x, phase: nah ? 'warten' : 'zu', frist })
         break
       }
     }
@@ -56204,7 +56227,7 @@
     if(!MT5_LOCAL || _ac.laeuft || polarLaeuft()) return false
     let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
     const now = Date.now(), liste = acNewsFaellig(_tp, now)
-    for(const { plan, x, phase } of liste){
+    for(const { plan, x, phase, frist } of liste){
       const pid = String(plan.id), schl = pid + '|' + x.t
       if(phase === 'warten'){
         if(!_acNews.gemeldet[schl]){
@@ -56216,14 +56239,15 @@
         continue
       }
       if((_acNews.naechster[pid] || 0) > now) continue
+      if(frist && frist - now < NEWS_REGEL.frist_rest_s * 1000) continue   // zu knapp vor t − 6: nicht mehr anfangen, ab t + 6 weiter
       _ac.laeuft = true
       try{
         let erg
         if(typeof _rsAktiv !== 'undefined' && _rsAktiv) erg = { ok: false, msg: 'Remote-Lauf aktiv — später', retry: true }
         else if(routeIstV2(plan.route)){
           if(typeof _tpOrbitLaeuft !== 'undefined' && _tpOrbitLaeuft) erg = { ok: false, msg: 'Orbit-Lauf aktiv — später', retry: true }
-          else erg = await v2SchliessenAmPc(plan)
-        } else erg = await acEchoSchliessen(plan)
+          else erg = await v2SchliessenAmPc(plan, { frist })
+        } else erg = await acEchoSchliessen(plan, { frist })
         const vorNach = now < x.t ? `vor ${x.titel} ${newsUhr(x.t)}` : `nach ${x.titel} ${newsUhr(x.t)}`
         await acLog(plan, erg.ok, `News (${vorNach}): ${erg.msg}`)
         // Handy nur einmal je Plan × Termin × Ergebnis (Gegenprüfung 30.10.2026: sonst bis zu Dutzende ✗-Pushes, wenn der Copier fehlt);
@@ -56232,6 +56256,7 @@
         if(!_acNews.gemeldet[mk]){ _acNews.gemeldet[mk] = true; acBenachrichtigen(erg.ok ? 'News-Regel ✓' : 'News-Regel ✗', `${plan.masterName || pid} ${vorNach}: ${erg.msg}`) }
         // nach Erfolg wartet der Plan auf die Ende-Erkennung; ohne retry dreifacher Abstand (wie Auto-Close)
         _acNews.naechster[pid] = Date.now() + (15 + Math.random() * 15) * 1000 * (erg.ok ? 4 : erg.retry ? 1 : 3)
+        _ac.naechster[pid] = Math.max(_ac.naechster[pid] || 0, _acNews.naechster[pid])   // S2: Market-Close schließt nicht gleich ein zweites Mal
         try{ loadTradePlansFromSupabase() }catch(_){}
       }catch(e){
         await acLog(plan, false, 'News: Fehler: ' + (e && e.message || e))
@@ -56243,8 +56268,10 @@
   }
   async function acTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
+    // NEWS-REGEL FUNDED CFD (30.10.2026): vor dem Market-Close-Fenster und vor dem Laden seiner Regel — schließt auch, wenn
+    // auto_close_regeln nicht lesbar ist (S2 zu 8427eda9)
+    if(await acNewsTick()) return
     if(!_ac.geladen){ if(!(await acLaden())) return }
-    if(await acNewsTick()) return   // NEWS-REGEL FUNDED CFD (30.10.2026): vor dem Market-Close-Fenster, unabhängig von dessen Schalter
     const r = _ac.regel
     acStatusZeile()
     if(!r || !r.aktiv || !MT5_LOCAL || _ac.laeuft) return
@@ -56259,7 +56286,8 @@
     // NEWS-REGEL (Gegenprüfung 30.10.2026): ±6 min um eine rote USD-News kein Klick auf Funded CFD — auch nicht vom Market-Close
     // (ab 01.11. liegt die FOMC-Pressekonferenz 14:30 ET auf 23:30 Dubai = Fensterbeginn)
     const _nk = newsKeinKlick(Date.now())
-    const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(acHaken(p)) && !(_nk && newsIstFundedCfd(p)))
+    const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(acHaken(p)) && !(_nk && newsIstFundedCfd(p))
+      && !((_acNews.naechster[String(p.id)] || 0) > Date.now()))   // eben von der News-Regel geschlossen: _ac.naechster setzt der Fensterwechsel zurück, diese Map nicht
     if(!offen.length) return
     const now = Date.now()
     // V2 (24.09.2026, Vollumstieg): Echo V2 über master-close (ohne Hedge), Orbit V2 über tv-close —
