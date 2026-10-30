@@ -14,8 +14,10 @@ APP = os.path.join(os.path.dirname(HIER), "app.py")
 def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "datetime": datetime, "timezone": timezone}
-    i = re.search(r"^ZWILLING_FRISCH_S = ", src, re.M).start()
-    teile = [src[i:src.index("\n", i)]]
+    teile = []
+    for k in ("ZWILLING_FRISCH_S", "ZWILLING_BESITZER_S"):
+        i = re.search(rf"^{k} = ", src, re.M).start()
+        teile.append(src[i:src.index("\n", i)])
     i = src.index("\ndef zwilling_ereignisse(") + 1
     teile.append(src[i:src.find("\n\n\n", i)])
     exec("\n".join(teile), ns)
@@ -68,6 +70,17 @@ def main():
     check([e[2] for e in ev2] == ["Alt-Hedge, Besitzer unklar", "Hedge gesperrt: Magic-Zwilling"] and [e[1] for e in ev2] == [1, 1]
           and "vor dem Copier-Update" in ev2[0][3] and ev2[1][0] == "zwilling_sperre|pc-ffffff|config-f.json|500000002" and "OHNE Hedge" in ev2[1][3],
           "unklarer Alt-Hedge 🔴 mit eigenem Titel; Sperre (Master ungehedgt) eigenes 🔴 mit dem Grund des Copiers")
+    # Besitzer-PC lädt gerade neu (Zeile 10 min alt): Ticket bleibt sicher (⚪); erst über 15 min → 🔴 ohne Besitzer; Zwilling selbst zu alt → still
+    bes = lambda s_vor: {"pc_name": "pc-bbbbbb", "config_file": "config-b.json", "master_login": "10000002", "updated_at": iso(s_vor),
+                         "user_id": "u2", "mg": 770005, "hd": {"500000001": [{"ticket": 900001, "volume": 0.84}]}, "zw": None}
+    zwr = lambda s_vor: {"pc_name": "pc-aaaaaa", "config_file": "config-a.json", "master_login": "10000001", "updated_at": iso(s_vor),
+                         "user_id": "u1", "mg": 770005, "hd": {}, "zw": zw(900001)}
+    e10 = ns["zwilling_ereignisse"]([zwr(20), bes(600)], set(), jetzt)
+    e16 = ns["zwilling_ereignisse"]([zwr(20), bes(960)], set(), jetzt)
+    eal = ns["zwilling_ereignisse"]([zwr(300), bes(10)], set(), jetzt)
+    check([(e[0], e[1]) for e in e10] == [("zwilling|900001|besitzer", 3)] and [(e[0], e[1]) for e in e16] == [("zwilling|900001", 1)] and eal == [],
+          "Besitzer-Zeile bis 15 min alt zählt (Tab-Neuladen nach Push → ⚪, kein 🔴); älter → 🔴; Zwillings-Zeile > 180 s → still")
+    check("ZWILLING_BESITZER_S, timezone.utc)" in src, "zwilling_tick liest mt5_live bis 15 min zurück (sonst fehlten die Besitzer-Zeilen)")
     kaputt = [{"pc_name": "pc-x", "updated_at": "kaputt", "zw": zw(1)},
               {"pc_name": "pc-y", "updated_at": iso(1), "zw": [{"ticket": "x"}, "nix", {"ticket": 0}], "hd": ["falsch"]}]
     check(ns["zwilling_ereignisse"](kaputt, set(), jetzt) == [], "kaputte Zeilen/Felder werfen nicht und melden nichts")

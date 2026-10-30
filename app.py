@@ -4150,6 +4150,9 @@ def echo_frost_tick(rows, namen, jetzt_ts):
 # fremde Tickets mit seiner magic seit diesem Stand nicht mehr an und meldet sie in status.zwilling (mt5_live, Push des PC-Tabs). Hier: 🔴 an die
 # Master-IDs, einmal je PC × Config × Ticket in 24 h. Nur lesen, ein Read mt5_live je Takt.
 ZWILLING_FRISCH_S = 180
+# Besitzer-Zeilen dürfen älter sein (Master 30.10.2026): jeder Push lädt die PC-Tabs neu — ein paar Minuten ohne frische Zeile des Besitzer-PCs
+# dürfen ein sicheres Ticket nicht zu 🔴 „ohne Besitzer" machen. Zwillings-Zeilen (der Auslöser) bleiben ≤ ZWILLING_FRISCH_S.
+ZWILLING_BESITZER_S = 900
 
 
 def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
@@ -4159,16 +4162,20 @@ def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
     Fehlalarme): führt ein Besitzer das Ticket als eigenes, ist der Hedge sicher → ⚪ EINMAL je Ticket (Schlüssel ohne PC/Config); 🔴 nur ohne
     Besitzer (Besitzer unklar / alter Copier-Stand) — ebenfalls einmal je Ticket — und bei der Sperre nach wiederholtem Zwillings-Close."""
     pc_namen = pc_namen or {}
-    frisch = []
+    frisch, besitzer_rows = [], []
     for r in rows or []:
         try:
             alter = jetzt_ts - datetime.fromisoformat(str(r.get("updated_at")).replace("Z", "+00:00")).timestamp()
         except (TypeError, ValueError):
             continue
-        if alter <= ZWILLING_FRISCH_S and str(r.get("user_id") or "") not in aus:
+        if str(r.get("user_id") or "") in aus:
+            continue
+        if alter <= ZWILLING_FRISCH_S:
             frisch.append(r)
+        if alter <= ZWILLING_BESITZER_S:
+            besitzer_rows.append(r)
     besitzer = {}
-    for r in frisch:
+    for r in besitzer_rows:
         for hs in (r.get("hd") or {}).values() if isinstance(r.get("hd"), dict) else []:
             for h in hs or []:
                 if isinstance(h, dict) and h.get("ticket"):
@@ -4210,7 +4217,7 @@ def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
 
 
 def zwilling_tick(aus, jetzt_ts):
-    ab = datetime.fromtimestamp(jetzt_ts - ZWILLING_FRISCH_S, timezone.utc).isoformat()
+    ab = datetime.fromtimestamp(jetzt_ts - ZWILLING_BESITZER_S, timezone.utc).isoformat()   # Besitzer-Zeilen bis 15 min, Zwillinge filtert zwilling_ereignisse
     rows = _sb_all("mt5_live", {"select": "pc_name,config_file,master_login,updated_at,user_id:status->>user_id,mg:status->magic,"
                                           "hd:status->hedges,zw:status->zwilling,zs:status->zwilling_gesperrt,zg:status->>zwilling_grund",
                                 "updated_at": f"gte.{ab}"}) or []
