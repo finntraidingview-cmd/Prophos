@@ -45720,7 +45720,14 @@
     try{
       const r = await fetch(`${TS_BACKEND}/news/calendar`)
       const d = await r.json()
+      // NEWS-REGEL FUNDED CFD (30.10.2026): 502 ohne Cache kommt als { error, events: [] } — dann den letzten Stand behalten statt den
+      // Kalender zu leeren (sonst sähe die Start-Sperre „keine News" statt „Kalender fehlt"). fetched = Sekunden des Backend-Abrufs.
+      if(d && d.error && !d.fetched) throw new Error(d.error)
       newsState.events = Array.isArray(d.events) ? d.events : []
+      // Gegenprüfung 30.10.2026: scheitern beide FF-Adressen ohne Ausnahme (429), cacht das Backend {events: []} als frisch — eine Woche
+      // ohne einen einzigen USD-Termin gibt es bei Forex Factory nicht. Leer oder vom Backend als unvollständig markiert = Kalender fehlt.
+      newsState.fetched = (newsState.events.length && d.unvollstaendig !== true) ? (Number(d.fetched) > 0 ? Number(d.fetched) * 1000 : Date.now()) : 0
+      newsState.regelAn = d.news_regel !== false   // Schalter (funded_cfd_plan_regeln.news_regel über /news/calendar); fehlt das Feld = an
       newsState.loaded = true
     }catch(e){ console.warn('News-Fetch fehlgeschlagen', e) }
     finally{ newsState.loading = false }
@@ -45884,6 +45891,102 @@
   setInterval(newsTick, 10000)
   setInterval(() => { newsFetch() }, 30*60*1000)   // alle 30 Min neu laden (Backend cached ohnehin)
   newsFetch()   // beim Start laden, damit Alerts app-weit laufen (auch ohne den Tab zu öffnen)
+
+  /* ══ NEWS-REGEL FUNDED CFD (30.10.2026, Finn ~07:28 über den Master: rote USD-News — 20–30 min vorher kein neuer Funded-CFD-Trade,
+   * laufende spätestens 10 min vorher zu, 0–15 min danach kein neuer Start; Tradeify verbietet Öffnen/Schließen ±5 min). Gilt NUR für
+   * Funded CFD (Plan mit mt5_baseline.funded_plan.art = 'cfd' bzw. Konto funded_cfd) — Challenges, Apex, Winning Days unberührt.
+   * Quelle ist der vorhandene Forex-Factory-Kalender (/news/calendar, nur USD), hier nur impact High. Fenster je Termin DETERMINISTISCH
+   * gewürfelt (Hash aus Zeit + Titel): jeder PC-Tab und der Mac sehen dieselben Grenzen, gestreut wird je Termin (Jitter-Regel).
+   * Termine, deren Fenster sich berühren (FOMC 14:00 + Pressekonferenz 14:30), verschmelzen zu einem Block.
+   * FAIL-CLOSED: kein Kalender oder älter als 12 h → keine neuen Funded-CFD-Starts (Grund sichtbar); offene Trades schließt die Regel dann
+   * NICHT (ohne Termin kein Anlass). Schalter: newsState.regelAn (aus /news/calendar, Standard an). Schließen: acNewsTick (bei acTick). ══ */
+  const NEWS_REGEL = { vorMin: 20, vorSpanne: 10, nachMin: 0, nachSpanne: 15, zuVorMin: 16, zuVorSpanne: 6, kein_klick_min: 6, nach_zu_bis_min: 60, alt_ms: 12 * 3600000 }
+  function newsHash01(text, salz){   // FNV-1a → [0, 1): gleiche Eingabe = gleicher Wurf auf jedem Gerät
+    let h = 2166136261
+    const t = String(salz || '') + '|' + String(text || '')
+    for(let i = 0; i < t.length; i++){ h ^= t.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+    return (h >>> 0) / 4294967296
+  }
+  // Rote USD-Termine als Blöcke { t0, t1, termine:[{ t, titel, vor, nach, zuAb }] } (rein — events/now als Parameter, Test-Haken)
+  function newsBloecke(events){
+    const R = NEWS_REGEL, roh = []
+    for(const e of (events || [])){
+      if(!e || e.impact !== 'High' || String(e.country || 'USD').toUpperCase() !== 'USD') continue
+      const t = Date.parse(e.date); if(!isFinite(t)) continue
+      const k = String(e.date) + '|' + String(e.title || '')
+      const vor = (R.vorMin + newsHash01(k, 'vor') * R.vorSpanne) * 60000
+      // 0–15 min gewürfelt, aber nie unter +6 min: ein Start ist auch ein Klick, und ±5 min verbietet Tradeify (1 min Puffer wie beim Schließen)
+      const nach = Math.max(R.kein_klick_min, R.nachMin + newsHash01(k, 'nach') * R.nachSpanne) * 60000
+      const zuAb = (R.zuVorMin + newsHash01(k, 'zu') * R.zuVorSpanne) * 60000
+      roh.push({ t, titel: String(e.title || 'News'), vor, nach, zuAb, t0: t - vor, t1: t + nach })
+    }
+    roh.sort((a, b) => a.t0 - b.t0)
+    const out = []
+    for(const x of roh){
+      const b = out[out.length - 1]
+      if(b && x.t0 <= b.t1){ b.t1 = Math.max(b.t1, x.t1); b.termine.push(x) }
+      else out.push({ t0: x.t0, t1: x.t1, termine: [x] })
+    }
+    return out
+  }
+  // Kalender-Zustand: { an, ok, bloecke, grund } — ok=false heißt fail-closed (Starts gesperrt)
+  function newsRegelStand(now){
+    const an = newsState.regelAn !== false
+    if(!an) return { an: false, ok: true, bloecke: [] }
+    if(!newsState.loaded || !newsState.fetched) return { an, ok: false, bloecke: [], grund: 'News-Kalender noch nicht geladen' }
+    const alt = (now || Date.now()) - newsState.fetched
+    if(alt > NEWS_REGEL.alt_ms) return { an, ok: false, bloecke: [], grund: `News-Kalender ${Math.round(alt / 3600000)} h alt` }
+    return { an, ok: true, bloecke: newsBloecke(newsState.events) }
+  }
+  // Funded CFD? Plan-Kennung des Planers, Kontotyp am Plan oder das Konto im Cache
+  function newsIstFundedCfd(p){
+    if(!p) return false
+    if(p.fundedCfd || p.kontoTyp === 'funded_cfd') return true
+    let acc = null; try{ acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) }catch(_){}
+    return !!acc && String(acc.type || '').toLowerCase() === 'funded_cfd'
+  }
+  const newsUhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  // Start-Sperre für Plan p jetzt → { text, bis } | null
+  function newsStartSperre(p, now){
+    if(!newsIstFundedCfd(p)) return null
+    now = now || Date.now()
+    const st = newsRegelStand(now)
+    if(!st.an) return null
+    if(!st.ok) return { text: `🔴 ${st.grund} — kein Funded-CFD-Start, bis der Kalender wieder da ist`, bis: 0, kalender: true }
+    const b = st.bloecke.find(x => x.t0 <= now && now < x.t1)
+    if(!b) return null
+    const tt = b.termine.map(x => `${x.titel} ${newsUhr(x.t)}`).join(', ')
+    return { text: `🔴 USD-News ${tt} — kein Funded-CFD-Start bis ${newsUhr(b.t1)}`, bis: b.t1 }
+  }
+  // NACHHOLEN (Master 30.10.2026, Vorschlag ja): liegt die Startzeit in einem News-Block, zählt das Start-Fenster ab dem Block-Ende —
+  // sonst wäre ein Plan nach bis zu 45 min Sperre „verpasst". → Bezugszeit in ms
+  // Auch die Fail-closed-Sperre (Kalender fehlt) zählt: solange sie hält, gilt jetzt als Bezug; danach der letzte gesperrte Moment je Plan
+  // (Gegenprüfung 30.10.2026 — sonst wäre ein Plan nach Rückkehr des Kalenders sofort „verpasst", obwohl der Text „wartet" versprach)
+  const _newsKalenderGesperrt = new Map()   // planId → ms, zuletzt wegen fehlendem Kalender gesperrt
+  function newsStartBezug(p){
+    const s = new Date(p && p.startUm).getTime()
+    if(!isFinite(s) || !newsIstFundedCfd(p)) return s
+    const now = Date.now(), st = newsRegelStand(now)
+    if(!st.an) return s
+    if(!st.ok){ if(s <= now){ _newsKalenderGesperrt.set(String(p.id), now); return now } return s }
+    const b = st.bloecke.find(x => x.t0 <= s && s < x.t1)
+    return Math.max(s, b ? b.t1 : s, _newsKalenderGesperrt.get(String(p.id)) || 0)
+  }
+  // Steht gerade ein roter Termin in ±6 min? → Termin | null (Market-Close-Zweig fasst Funded CFD dann nicht an)
+  function newsKeinKlick(now){
+    const st = newsRegelStand(now)
+    if(!st.an || !st.ok) return null
+    return st.bloecke.flatMap(b => b.termine).find(y => Math.abs(now - y.t) < NEWS_REGEL.kein_klick_min * 60000) || null
+  }
+  // „Trotzdem starten" im News-Toast (wie bei Ziel erreicht): nur Hand-Start auf der Karte, 10 min je Plan
+  const _newsTrotzdem = new Map()
+  const newsTrotzdemAn = id => {
+    const t = _newsTrotzdem.get(String(id))
+    if(t && Date.now() - t < 10 * 60000) return true
+    _newsTrotzdem.delete(String(id)); return false
+  }
+  window._news = { hash: newsHash01, bloecke: newsBloecke, stand: newsRegelStand, sperre: newsStartSperre, bezug: newsStartBezug,
+    istCfd: newsIstFundedCfd, state: newsState, regel: NEWS_REGEL, keinKlick: newsKeinKlick }   // Test-Haken
 
   // Time helper
   function timeAgo(iso){
@@ -46631,6 +46734,8 @@
       // dieselben Riegel (suStartetNichtWeil, roter Rand, „Startet erst nach Bestätigung"). In der DB bleibt auto_plan false (planToRow
       // schreibt das Feld nie); nach dem Bestätigen ist er ein normaler Plan mit Startzeit.
       fundedVorschlag: !!(row.mt5_baseline && row.mt5_baseline.funded_plan) && !row.auto_bestaetigt_at && row.status === 'planned',
+      // NEWS-REGEL (30.10.2026): Funded-CFD-Plan (Kennung des Funded-CFD-Planers, app.py fcp_planen) — Start-Sperre + Schließen vor roten USD-News
+      fundedCfd: !!(row.mt5_baseline && row.mt5_baseline.funded_plan && row.mt5_baseline.funded_plan.art === 'cfd') || row.konto_typ === 'funded_cfd',
       autoPlan: row.auto_plan === true || (!!(row.mt5_baseline && row.mt5_baseline.funded_plan) && !row.auto_bestaetigt_at && row.status === 'planned'),
       autoBestaetigtAt: row.auto_bestaetigt_at || null,   // Orbit V3 (01.10.2026, sql/2026-10-01_trade_plans_orbit_v3.sql) — wie hedge_eur nur vom Plan-Popup geschrieben
       handWerteAt: row.hand_werte_at || null,   // TP/SL/Größe von Hand (08.10.2026) — der Start-Wächter dreht solche Pläne nie (09.10.2026)
@@ -47369,14 +47474,16 @@
   // Toast einer Konto-Sperre; bei „Ziel erreicht" mit Knopf „Trotzdem starten" (nochmal = derselbe Hand-Start erneut, jetzt mit Freigabe)
   function planSperreToast(plan, sp, nochmal){
     if(typeof atToast !== 'function') return
-    if(sp.art !== 'ziel' || typeof nochmal !== 'function') return atToast((sp.art === 'ziel' ? '🎯 ' : '✍ ') + sp.text, 'end')
-    const el = atToast('🎯 ' + sp.text, 'end', 12000)
+    const news = sp.art === 'news'   // NEWS-REGEL (30.10.2026): News-Sperre hat denselben „Trotzdem starten"-Knopf, eigener Merker
+    if((sp.art !== 'ziel' && !news) || typeof nochmal !== 'function') return atToast((sp.art === 'ziel' ? '🎯 ' : news ? '' : '✍ ') + sp.text, 'end')
+    const el = atToast((news ? '' : '🎯 ') + sp.text, 'end', 12000)
     if(!el) return
     el.classList.add('undo')   // dieselbe Klick-Freigabe wie „Plan gelöscht · Rückgängig"
     const b = document.createElement('button')
     b.type = 'button'; b.className = 'at-undo'; b.textContent = 'Trotzdem starten'
     b.addEventListener('click', () => {
       el.remove()
+      if(news){ _newsTrotzdem.set(String(plan.id), Date.now()); console.log(`[news-trotzdem] ${plan.masterName || plan.id}: News-Sperre für diesen Hand-Start übersprungen`); nochmal(); return }
       _zielTrotzdem.set(String(plan.id), Date.now())
       console.log(`[ziel-trotzdem] ${plan.masterName || plan.id}: Ziel-Sperre für diesen Hand-Start übersprungen`)
       nochmal()
@@ -47394,7 +47501,18 @@
    * tradePlans), nie stumm durchwinken, wenn der Cache etwas weiß. Genutzt von tpStartUmTick, tpOrbitStartenKern, tpJetztStarten,
    * tpPreflightAndStart. → { art: 'ziel' | 'manuell', text, z? } | null
    * opts.hand (Hand-Start) + Knopf „Trotzdem starten" für diesen Plan bzw. opts.zielTrotzdem (Signal vom Absender) → Ziel-Sperre aus (26.10.2026) */
+  // NEWS-REGEL FUNDED CFD (30.10.2026): nach den Konto-Sperren (Archiv/Waise/Manuell/Ziel behalten Vorrang) die News-Sperre — jeder
+  // Startweg (Karte, Plan, Duplikum, Signal vom Mac) fragt hier. Freigabe nur über „Trotzdem starten" im Toast beim Hand-Start (opts.hand).
   async function planKontoSperre(plan, opts){
+    const sp = await planKontoSperreKern(plan, opts)
+    if(sp) return sp
+    // Schon geclaimt (Startzeit-Tick hat die News-Sperre direkt vor dem Claim geprüft): nicht nochmal sperren — sonst wäre der Plan
+    // verbraucht, ohne zu starten und ohne nachgeholt zu werden (Gegenprüfung 30.10.2026). Der Schließ-Zweig fängt einen Grenzfall ab.
+    const ns = plan && plan.startUmGestartetAt ? null : newsStartSperre(plan)
+    if(ns && !(opts && opts.hand && newsTrotzdemAn(plan && plan.id))) return { art: 'news', text: `„${(plan && plan.masterName) || 'Konto'}": ${ns.text}.` }
+    return null
+  }
+  async function planKontoSperreKern(plan, opts){
     const zielFrei = !!(opts && (opts.zielTrotzdem || (opts.hand && plan && zielTrotzdemAn(plan.id))))
     const kid = plan && plan.masterAccountId ? String(plan.masterAccountId) : ''
     const name = (plan && plan.masterName) || 'Konto'
@@ -56050,9 +56168,83 @@
     return { ok: false, msg: (r && (r.msg || r.error)) || 'keine Antwort vom Bot', retry: !!(r && r.retry_ok) || pausiert }
   }
 
+  /* NEWS-REGEL FUNDED CFD — SCHLIESSEN (30.10.2026, Finn ~07:28 über den Master: „laufende Funded-CFD-Trades spätestens 10 min vor der
+   * News schließen"). Derselbe Weg wie Auto-Close vor Market Close: Echo mit Hedge über acEchoSchliessen (master-close, der Copier zieht den
+   * Fusion-Hedge mit), Echo V2 über v2SchliessenAmPc. Unabhängig vom Auto-Close-Schalter (auto_close_regeln), eigener Schalter
+   * newsState.regelAn. Je roter Termin t (Zeiten gewürfelt in newsBloecke, auf allen PCs gleich):
+   *   t − 16…22 min bis t − 6 min  → schließen (ein Trade je Tick, nächster Versuch 15–30 s) — Puffer, damit auch ein zweiter Versuch
+   *                                  und mehrere offene Pläne vor t − 10 zu sind (Gegenprüfung 30.10.2026); t − 6 bleibt die harte Grenze
+   *   t − 6 bis t + 6 min           → NICHTS klicken (Tradeify verbietet Schließen ±5 min, 1 min Puffer), einmal 🔴 aufs Handy
+   *   t + 6 bis t + 60 min          → schließen, was noch offen ist (Master 30.10.2026: „ab +6 min automatisch schließen = ja")
+   * Nur Trades, die VOR dem Sperr-Block gestartet sind — ein Trade nach „Trotzdem starten" im Block bleibt Finns Entscheidung.
+   * Ohne Kalender (fail-closed) wird nichts geschlossen. → true, wenn ein Schließ-Versuch lief (Market-Close-Zweig wartet dann einen Tick). */
+  const _acNews = { naechster: {}, gemeldet: {} }
+  function acNewsFaellig(plaene, now){   // rein (Test-Haken): [{ plan, x, phase: 'zu' | 'warten' }]
+    const st = newsRegelStand(now)
+    if(!st.an || !st.ok || !st.bloecke.length) return []
+    const R = NEWS_REGEL, out = []
+    // ±6 min gegen JEDEN roten Termin, auch aus einem anderen Block (NFP 14:30 + Presse 15:00: um 14:56 nichts klicken, obwohl NFP
+    // schon „danach" ist — Befund Selbsttest 30.10.2026)
+    const nah = st.bloecke.flatMap(b => b.termine).find(y => Math.abs(now - y.t) < R.kein_klick_min * 60000) || null
+    for(const p of (plaene || [])){
+      if(!p || p.status !== 'open' || !routeIstEcho(p.route) || !newsIstFundedCfd(p)) continue
+      const gestartet = Date.parse(p.startedAt || '') || 0
+      for(const b of st.bloecke){
+        if(gestartet && gestartet >= b.t0) continue
+        const x = b.termine.find(y => (now >= y.t - y.zuAb && now <= y.t + R.nach_zu_bis_min * 60000))
+        if(!x) continue
+        out.push({ plan: p, x: nah || x, phase: nah ? 'warten' : 'zu' })
+        break
+      }
+    }
+    return out
+  }
+  window._acNewsFaellig = acNewsFaellig   // Test-Haken
+  async function acNewsTick(){
+    if(!MT5_LOCAL || _ac.laeuft || polarLaeuft()) return false
+    let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+    const now = Date.now(), liste = acNewsFaellig(_tp, now)
+    for(const { plan, x, phase } of liste){
+      const pid = String(plan.id), schl = pid + '|' + x.t
+      if(phase === 'warten'){
+        if(!_acNews.gemeldet[schl]){
+          _acNews.gemeldet[schl] = true
+          const t = `${plan.masterName || pid}: Funded CFD noch offen vor ${x.titel} ${newsUhr(x.t)} — ±${NEWS_REGEL.kein_klick_min} min wird nichts geklickt, ab ${newsUhr(x.t + NEWS_REGEL.kein_klick_min * 60000)} schließt Puls von selbst.`
+          await acLog(plan, false, 'News: ' + t)
+          acBenachrichtigen('🔴 News-Regel', t)
+        }
+        continue
+      }
+      if((_acNews.naechster[pid] || 0) > now) continue
+      _ac.laeuft = true
+      try{
+        let erg
+        if(typeof _rsAktiv !== 'undefined' && _rsAktiv) erg = { ok: false, msg: 'Remote-Lauf aktiv — später', retry: true }
+        else if(routeIstV2(plan.route)){
+          if(typeof _tpOrbitLaeuft !== 'undefined' && _tpOrbitLaeuft) erg = { ok: false, msg: 'Orbit-Lauf aktiv — später', retry: true }
+          else erg = await v2SchliessenAmPc(plan)
+        } else erg = await acEchoSchliessen(plan)
+        const vorNach = now < x.t ? `vor ${x.titel} ${newsUhr(x.t)}` : `nach ${x.titel} ${newsUhr(x.t)}`
+        await acLog(plan, erg.ok, `News (${vorNach}): ${erg.msg}`)
+        // Handy nur einmal je Plan × Termin × Ergebnis (Gegenprüfung 30.10.2026: sonst bis zu Dutzende ✗-Pushes, wenn der Copier fehlt);
+        // das Log bekommt jeden Versuch
+        const mk = schl + '|' + (erg.ok ? 'ok' : 'nein')
+        if(!_acNews.gemeldet[mk]){ _acNews.gemeldet[mk] = true; acBenachrichtigen(erg.ok ? 'News-Regel ✓' : 'News-Regel ✗', `${plan.masterName || pid} ${vorNach}: ${erg.msg}`) }
+        // nach Erfolg wartet der Plan auf die Ende-Erkennung; ohne retry dreifacher Abstand (wie Auto-Close)
+        _acNews.naechster[pid] = Date.now() + (15 + Math.random() * 15) * 1000 * (erg.ok ? 4 : erg.retry ? 1 : 3)
+        try{ loadTradePlansFromSupabase() }catch(_){}
+      }catch(e){
+        await acLog(plan, false, 'News: Fehler: ' + (e && e.message || e))
+        _acNews.naechster[pid] = Date.now() + (15 + Math.random() * 15) * 1000
+      }finally{ _ac.laeuft = false }
+      return true   // ein Trade je Tick — ein Terminal, eine Maus
+    }
+    return false
+  }
   async function acTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(!_ac.geladen){ if(!(await acLaden())) return }
+    if(await acNewsTick()) return   // NEWS-REGEL FUNDED CFD (30.10.2026): vor dem Market-Close-Fenster, unabhängig von dessen Schalter
     const r = _ac.regel
     acStatusZeile()
     if(!r || !r.aktiv || !MT5_LOCAL || _ac.laeuft) return
@@ -56064,7 +56256,10 @@
     let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
     // V2 hängt an denselben Haken (24.09.2026): Echo V2 zählt als „Echo", Orbit V2 als „Orbit"
     const acHaken = p => (p.route === 'tvplus' || p.route === 'tvv2') ? 'tvplus' : (p.route === 'mt5' || p.route === 'mt5v2') ? 'mt5' : ''
-    const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(acHaken(p)))
+    // NEWS-REGEL (Gegenprüfung 30.10.2026): ±6 min um eine rote USD-News kein Klick auf Funded CFD — auch nicht vom Market-Close
+    // (ab 01.11. liegt die FOMC-Pressekonferenz 14:30 ET auf 23:30 Dubai = Fensterbeginn)
+    const _nk = newsKeinKlick(Date.now())
+    const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(acHaken(p)) && !(_nk && newsIstFundedCfd(p)))
     if(!offen.length) return
     const now = Date.now()
     // V2 (24.09.2026, Vollumstieg): Echo V2 über master-close (ohne Hedge), Orbit V2 über tv-close —
@@ -56375,7 +56570,7 @@
         // aufgegebene Richtungskonflikte stehen als „Offen" in der Hover-Karte — ohne Countdown, ohne Overlay, ohne „Puls in n"
         const t = Date.parse(p.startUm) || 0, grund = suStartetNichtWeil(p, scharf)
         if(!t) continue
-        if(!grund){ if(jetzt - t <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p }) }
+        if(!grund){ if(jetzt - newsStartBezug(p) <= pulsStartFenster(p)) out.push({ t, art: 'Start', plan: p }) }   // News: nachgeholt = ab Block-Ende
         else if(jetzt - t <= 6 * 3600000) out.push({ t, art: 'Offen', plan: p, grund })
         continue
       }
@@ -56437,7 +56632,7 @@
     }
     for(const p of plaene){
       if(!p || p.status !== 'planned' || !p.startUmGestartetAt || !p.startUm) continue
-      const g = Date.parse(p.startUmGestartetAt) || 0, s0 = Date.parse(p.startUm) || 0
+      const g = Date.parse(p.startUmGestartetAt) || 0, s0 = newsStartBezug(p) || 0   // News: nachgeholter Plan zählt ab Block-Ende
       if(!g || jetzt - g > PULS_CLAIM_MAX_MS) continue
       // verpasst (Claim nach dem Start-Fenster bzw. Slave-Vorprüfung aufgegeben) = kein Lauf
       if(s0 && g - s0 > pulsStartFenster(p)) continue
@@ -57659,6 +57854,7 @@
     if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
+    { const ns = newsStartSperre(p); if(ns) return ns.text }   // NEWS-REGEL FUNDED CFD (30.10.2026): Plan wartet, startet nach dem Block
     return ''
   }
   const suStartetVonSelbst = (p, scharf) => !suStartetNichtWeil(p, scharf)
@@ -57890,11 +58086,13 @@
     _suLaeuft = true; _suLaufSeit = Date.now(); _suLaufName = plan.masterName || ''; _suLaufId = String(plan.id)
     let gelaufen = false
     try{
-      const verspaetet = now - new Date(plan.startUm).getTime()
+      // NEWS-REGEL (30.10.2026): Startzeit im News-Block → Start-Fenster zählt ab Block-Ende (nachholen statt „verpasst")
+      const verspaetet = now - newsStartBezug(plan)
       const fenster = pulsStartFenster(plan)
       // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026, planKontoSperre — frisch aus der DB): Claim setzen (feuert nie wieder),
       // Start-Fehler für „Braucht dich", Toast + Handy — nichts starten
       const sperre = await planKontoSperre(plan)
+      if(sperre && sperre.art === 'news') return   // NEWS-REGEL (30.10.2026): Block begann seit suKandidaten — kein Claim, Plan wartet
       const zielOk = sperre && sperre.art === 'ziel' ? sperre.z : null
       // ARCHIVIERT (09.10.2026): nie starten, sondern entfernen wie beim Archivieren. Klappt das Löschen nicht, Claim setzen — sonst
       // stünde der Plan als faellig[0] vorne und hielte jeden weiteren Start dieses Tabs auf
