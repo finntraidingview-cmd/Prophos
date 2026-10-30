@@ -44,7 +44,7 @@ def main():
     o = t[t.index("WIEDERHOLEN BEI „TERMINAL HEILT“") if "WIEDERHOLEN BEI „TERMINAL HEILT“" in t else t.index('WIEDERHOLEN BEI „TERMINAL HEILT"'):]
     check("for(;;){" in o and "if(!mt5OrderWiederholen(r, Date.now() - t0)) break" in o and "5000 + Math.random() * 2000" in o
           and "String(_pfPlanId) !== String(plan.id)" in o, "tpPreflightMt5: Schleife, gestreut 5–7 s, bricht ab, wenn das Popup zu ist")
-    check("const vonTick = _rkTickStart.delete(String(plan.id))" in t and t.count("if(vonTick") >= 2 and "schritt: 'm5order'" in t,
+    check("const vonTick = _rkTickStart.delete(String(plan.id))" in t and "if(!vonTick || sfSchon) return" in t and t.count("sfEinmal({ schritt: 'm5order'") >= 2,   # seit ECHO-STILL-HAENGT über sfEinmal
           "Start zur Startzeit → Start-Fehler (sfMelden) statt stillem Claim, auch bei gestörtem Abschuss (unklar)")
     heilt = {"ok": False, "retry_ok": True, "grund": "terminal_heilt", "msg": "Terminal wird gerade geheilt"}
     ok = {"ok": True, "price": 1.0, "ticket": 7}

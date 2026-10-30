@@ -49143,6 +49143,12 @@
    * nur Hinweise (⚠ übersprungen), keine Blocker. */
   const _pfSleep = ms => new Promise(r => setTimeout(r, ms))
   let _pfPlanId = null
+  // CHECK LEBT (30.10.2026, Prüf-Agent zu ECHO-STILL-HAENGT): _pfPlanId bleibt nach jedem Abbruch mit offenem Popup stehen und taugt nicht
+  // als „hier läuft ein Check". Jeder Echo-mit-Hedge-Check erneuert seinen Merker (Ticker je Runde, vor jeder master-order bis 340 s) und
+  // löscht ihn beim Ausstieg; eine unerwartete Ausnahme lässt ihn von selbst ablaufen → die Nachkontrolle (sfStillPruefen) greift dann
+  const _pfLebtBis = new Map()
+  const pfLebt = (id, ms) => { if(ms > 0) _pfLebtBis.set(String(id), Date.now() + ms); else _pfLebtBis.delete(String(id)) }
+  const pfLebtJetzt = id => (_pfLebtBis.get(String(id)) || 0) > Date.now()
   // Plan-ID für automatischen Preflight-Neustart, nachdem Finn aus dem Check heraus einen
   // Account bearbeitet hat (External ID nachtragen). Wird vom Account-Save konsumiert,
   // von closeAccountModal (Abbruch) verworfen.
@@ -50034,6 +50040,12 @@
     _pfErrLog = []
     _pfPlanId = plan.id
     const vonTick = _rkTickStart.delete(String(plan.id))   // Start zur Startzeit (tpStartUmTick) → Start-Fehler melden (30.10.2026, wie V2)
+    // NIE STILL HÄNGEN (30.10.2026, Master ECHO-STILL-HAENGT: f47544cf/e7e9782d blieben geclaimt auf planned, ohne Start-Fehler): jeder
+    // Ausstieg dieses Checks nach einem Claim meldet genau EINEN Start-Fehler — auch Check-Abbrüche, Popup zu, falsches Konto, 240 s
+    // Terminal. unklar nur, wo eine Order unterwegs sein kann; „nichts gesendet" plant sfTick neu ein (wie V2)
+    let sfSchon = false
+    const sfEinmal = async f => { pfLebt(plan.id, 0); if(!vonTick || sfSchon) return; sfSchon = true; await sfMelden(plan, f) }
+    pfLebt(plan.id, 120000)
 
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
@@ -50352,6 +50364,7 @@
       const mAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
       const mc = (mAcc && mAcc.creds) || {}
       const sendCreds = !!(mc.login && mc.password && String(mc.login) === String(route.masterLogin))
+      pfLebt(plan.id, 120000)
       const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(sendCreds
@@ -50381,7 +50394,7 @@
           const grund = `Echo-Trade-Fenster nicht offen (${fen.grund}) — nichts platziert, der Copier würde nicht hedgen. → Echo-Ansicht am PC: Panel/Copier prüfen, dann „Erneut versuchen".`
           _pfSet('m5term', 'err', escapeHtml(grund))
           hardFail = true
-          if(vonTick) await sfMelden(plan, { schritt: 'm5fenster', msg: grund, unklar: false })
+          await sfEinmal({ schritt: 'm5fenster', msg: grund, unklar: false })
         }
 
         if(!hardFail){
@@ -50400,12 +50413,15 @@
           // sonst schließt der eine das Modal, während der andere die Order feuert.
           if(_pfTickBusy) return
           _pfTickBusy = true
+          pfLebt(plan.id, 30000)   // Ticker lebt (s. pfLebt)
           try{
           if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
             // Abbruch heißt auch: gemerkte Bot-Order verwerfen — sonst würde ein
             // späterer Check desselben Plans sie unerwartet abfeuern.
             _tpPendingOrder = null
-            _pfMt5StopTimer(); return
+            _pfMt5StopTimer()
+            await sfEinmal({ schritt: 'm5abbruch', msg: 'Check-Popup geschlossen oder von einem anderen Plan übernommen, bevor eine Order gesendet wurde — nichts platziert.', unklar: false })
+            return
           }
           const d2 = await window.mtcApi('instances')
           const inst2 = (d2.instances || []).find(x => x.file === file)
@@ -50433,6 +50449,7 @@
               _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
                 msg:'Terminal ist im FALSCHEN Konto eingeloggt — nichts platziert. Am PC von Hand ins richtige Konto wechseln.' })
             }
+            if(!(sendCreds && sec <= 25)) await sfEinmal({ schritt: 'm5login', msg: `Terminal im falschen Konto eingeloggt (${String(wrongLogin)} statt ${String(route.masterLogin)}) — nichts platziert.`, unklar: false })
             return
           }
           if(inst2 && inst2.alive && !note){
@@ -50453,7 +50470,7 @@
               _pfCheckStatus[String(plan.id)] = { state: 'issue', at: Date.now() }   // Plakette nicht auf „Ready" stehen lassen (Prüf-Agent)
               _pfStatusSave()
               try{ renderTradePlans() }catch(_){}
-              if(vonTick) await sfMelden(plan, { schritt: 'm5scharf', msg: grund, unklar: false })
+              await sfEinmal({ schritt: 'm5scharf', msg: grund, unklar: false })
               return
             }
             if(urteil === 'warten'){
@@ -50476,7 +50493,10 @@
               // hat gerade auf die instances-Antwort gewartet — hat der User das
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
-                 || String(_pfPlanId) !== String(plan.id)) return
+                 || String(_pfPlanId) !== String(plan.id)){
+                await sfEinmal({ schritt: 'm5abbruch', msg: 'Check-Popup kurz vor dem Abschuss geschlossen — nichts platziert.', unklar: false })
+                return
+              }
               // Remote-Lauf: ab hier ist die Order unterwegs — ein „Popup zu"
               // meldet nicht mehr „verworfen", das Ergebnis kommt vom Order-
               // Pfad selbst; der Absender sieht den Schritt „Puls platziert…"
@@ -50501,6 +50521,7 @@
                 const t0 = Date.now()
                 let r = null
                 for(;;){
+                  pfLebt(plan.id, 340000)   // master-order darf bis 320 s brauchen (s. pfLebt)
                   r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                     headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
@@ -50516,6 +50537,7 @@
                 // Check-Ende zu warten (18.08.2026, Finns Punkt). Gilt auch, wenn
                 // nur SL/TP scheiterte: price+ticket heißt, die Position ist offen.
                 pulsSpurSchreiben(plan.id, r)   // Spur am Plan (07.10.2026)
+                pfLebt(plan.id, 0)
                 if(r && (r.ok || (r.price && r.ticket))) mt5PlanAufOpen(plan.id)
                 if(r && r.ok){
                   if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}${r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP (von Hand setzen)'}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
@@ -50555,7 +50577,8 @@
                     offen: !!(r && r.price && r.ticket),
                     msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
                   // START-FEHLER statt stillem Claim (30.10.2026, wie V2): Start kam von der Startzeit und keine Position offen
-                  if(vonTick && !(r && r.price && r.ticket) && !echoAus) await sfMelden(plan, { schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
+                  if(!(r && r.price && r.ticket) && echoAus) await sfEinmal({ schritt: 'm5pause', msg: 'Echo ist pausiert (Not-Aus) — nichts gesendet.', unklar: false })
+                  if(!(r && r.price && r.ticket) && !echoAus) await sfEinmal({ schritt: 'm5order', msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot'), unklar: !retryOk, bild: r && r.fehlerbild })
                 }
               }catch(e){
                 _pfSet('m5term', 'err', 'Order-Abschuss gestört: ' + escapeHtml(String(e && e.message || e)))
@@ -50563,7 +50586,7 @@
                   fe.textContent = '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
                 _pfRemoteMelde(plan.id, { ok:false, unklar:true,
                   msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) + ' — im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut senden.' })
-                if(vonTick) await sfMelden(plan, { schritt: 'm5order', msg: 'Order-Abschuss gestört: ' + String(e && e.message || e), unklar: true })   // Start-Fehler (unklar) statt stillem Claim
+                await sfEinmal({ schritt: 'm5order', msg: 'Order-Abschuss gestört: ' + String(e && e.message || e), unklar: true })   // Start-Fehler (unklar) statt stillem Claim
               }
               return
             }
@@ -50585,6 +50608,7 @@
             _pfSet('m5term', 'err', 'Terminal liefert nach 4 Minuten nichts — Details-Log der Copier-Karte prüfen (und im Terminal: Reiter „Experten").')
             _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
               msg:'Terminal liefert nach 4 Minuten nichts — Check hängt am PC, nichts platziert.' })
+            await sfEinmal({ schritt: 'm5term', msg: `Terminal liefert nach 4 Minuten nichts${note ? ' (' + note + ')' : ''} — nichts platziert.`, unklar: false })
             return
           }
           // Broker-Wartefall (Review-Fund 15.08.2026): der Text 'Login-Fenster …
@@ -50623,6 +50647,8 @@
         msg: 'Trade-Start-Check fehlgeschlagen: ' + (_pfErrLog.slice(0, 4).join(' · ') || 'Details am PC')
            + ' — nichts platziert. Popup am PC ist offen.' })
       _pfFinish(false, 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.')
+      // Check-Abbruch nach Claim = Start-Fehler (30.10.2026, s. sfEinmal) — bis hier ging nie eine Order raus
+      await sfEinmal({ schritt: 'm5check', msg: 'Trade-Start-Check rot: ' + (_pfErrLog.slice(0, 3).join(' · ') || 'Details am PC') + ' — nichts platziert.', unklar: false })
     } else {
       // NICHT auto-schließen (_pfFinish(true) würde nach 1,6s zumachen und den
       // Bereitschafts-Ticker unsichtbar machen) — Fuß mit "Schließen" anbieten.
@@ -57179,6 +57205,14 @@
       if(w && w.ok && w.consent === true) return null
       if(w && w.ok && w.consent === false) return 'Windows-Abfrage am PC beantwortet'
     }
+    // STILLER CLAIM (30.10.2026, Prüf-Agent): m5still erst neu einplanen, wenn der lokale Copier das Master-Konto JETZT flach zeigt —
+    // eine verwaiste Order kann nach der Meldung noch gefüllt worden sein (Plan blieb planned, z. B. zwei Pläne auf einem Master)
+    if(f.schritt === 'm5still'){
+      const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+      const ri = (dd && !dd.copier_offline && !dd._httpFail) ? mt5RouteResolve(plan, dd.instances || []) : null
+      const st = (ri && ri.inst && ri.inst.status) || {}
+      if(!(ri && ri.inst.alive && !st.note && Array.isArray(st.master_positions) && st.master_positions.length === 0)) return null
+    }
     // EA-Selbstheilung lief noch (08.10.2026, ff8c2412): nichts gesendet, das Terminal ist meist Sekunden später gesund → 3 statt 15 min
     const warte = /Selbstheilung|terminal_heilt/i.test(String(f.msg || '')) ? 3 * 60000 : SF_WARTE_MS
     return Date.now() - (Date.parse(f.at) || 0) >= warte ? `${Math.round(warte / 60000)} min später neuer Versuch` : null
@@ -57234,6 +57268,51 @@
     try{ renderTradePlans() }catch(_){}
     return 'neu'
   }
+  /* NACHKONTROLLE STILLER CLAIM (30.10.2026, Master ECHO-STILL-HAENGT: f47544cf am PC von Finn + Pascal und e7e9782d am PC von Marco
+   * blieben nach „Terminal wird gerade geheilt" geclaimt auf planned — kein Start-Fehler, kein Neu-Einplanen, kein Alarm; beide Tabs
+   * fuhren einen Stand vor der Wiederholschleife, und ein neu geladener/abgebrochener Check meldet sich ohnehin nie). Echo mit Hedge
+   * (route mt5), Claim älter als SF_STILL_MS, nicht gestartet, nach dem Claim kein Start-Fehler, hier läuft kein Check für den Plan →
+   * Start-Fehler. unklar = false (sfTick plant neu ein) nur mit Beleg „nichts gesendet": Order-Antwort nach dem Claim sagt es, oder es
+   * gibt keine und der Copier zeigt das Master-Konto flach; sonst unklar (keine Doppel-Order). REIN — Test-Haken window._sf.still. */
+  const SF_STILL_MS = 4 * 60000
+  function sfStillUrteil(p, jetzt, laeuftHier, masterFlach){
+    if(!p || p.route !== 'mt5' || p.status !== 'planned' || !p.startUmGestartetAt || p.startedAt || p.orbitGesendetAt || laeuftHier) return null
+    const claim = Date.parse(p.startUmGestartetAt) || 0
+    if(!claim || jetzt - claim < SF_STILL_MS || jetzt - claim > 24 * 3600000) return null   // älter als 24 h: Altlast, kein Alarm
+    const f = sfFlag(p)
+    if(f && (Date.parse(f.at) || 0) >= claim - 5000) return null   // nach diesem Claim schon gemeldet
+    const sp = (p.mt5Baseline && p.mt5Baseline.puls_spur) || null
+    const spNach = !!(sp && (Date.parse(sp.at) || 0) >= claim)
+    const spNichts = spNach && !sp.ok && /nichts gesendet|nichts platziert/i.test(String(sp.msg || ''))
+    const min = Math.round((jetzt - claim) / 60000)
+    if(spNichts) return { unklar: false, msg: `Geclaimt vor ${min} min, danach still — letzte Order-Antwort: ${String(sp.msg).slice(0, 220)}` }
+    if(!spNach && masterFlach === true) return { unklar: false, msg: `Geclaimt vor ${min} min, danach keine Order-Antwort (Check abgebrochen oder Tab neu geladen) — Master-Konto laut Copier flach, nichts offen.` }
+    return { unklar: true, msg: spNach
+      ? `Geclaimt vor ${min} min, Plan nicht offen — letzte Order-Antwort: ${String(sp.msg || (sp.ok ? 'ok' : '—')).slice(0, 200)} → im Master-Terminal prüfen, ob eine Order liegt.`
+      : `Geclaimt vor ${min} min, danach keine Order-Antwort und Master-Konto ${masterFlach === false ? 'NICHT flach' : 'nicht lesbar'} → im Master-Terminal prüfen, ob eine Order liegt.` }
+  }
+  async function sfStillPruefen(){
+    const jetzt = Date.now()
+    const kand = (tradePlans || []).filter(p => sfStillUrteil(p, jetzt, pfLebtJetzt(p && p.id), null))
+    if(!kand.length) return
+    const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+    if(!dd || dd.copier_offline || dd._httpFail) return   // Panel nicht lesbar → nächster Takt (sonst wüsste dieser PC nicht, ob der Plan ihm gehört)
+    for(const p0 of kand){
+      const ri = mt5RouteResolve(p0, dd.instances || [])
+      if(!ri) continue   // Plan gehört nicht zu diesem PC — dessen Tab prüft selbst
+      const { data: row } = await supabase.from('trade_plans').select('*').eq('id', p0.id).maybeSingle()
+      if(!row || row.start_claim_art === 'verbrauch'
+         || (!row.start_claim_art && Date.parse(row.start_um_gestartet_at) - Date.parse(row.start_um) > 30 * 60000)) continue   // verpasst: meldet tpStartUmTick selbst (Toast + Handy, von Hand starten)
+      const p = rowToPlan(row)
+      const st = (ri.inst && ri.inst.status) || {}
+      const flach = (ri.inst && ri.inst.alive && !st.note && Array.isArray(st.master_positions)) ? st.master_positions.length === 0 : null
+      const u = sfStillUrteil(p, Date.now(), pfLebtJetzt(p0.id), flach)
+      if(!u) continue
+      // Plan von einem früheren Tag: sfTick plant nur heutige neu ein und meldet nur heutige als hängend → unklar (Handy-Meldung, von Hand)
+      const alt = !!(p.startUm && sfTagDt(p.startUm) !== sfTagDt(new Date().toISOString()))
+      await sfMelden(p, { schritt: 'm5still', msg: u.msg + (alt ? ' (Plan von einem früheren Tag — von Hand entscheiden)' : ''), unklar: u.unklar || alt })
+    }
+  }
   let _sfLaeuft = false, _sfAbgleichAt = 0
   async function sfTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
@@ -57269,6 +57348,7 @@
         const r = await sfNeuEinplanen(p, grund, false)
         if(r === 'tagesende'){ try{ await baselinePatch(p.id, { start_fehler: Object.assign({}, f, { status: 'tagesende' }) }, 'planned') }catch(_){} }
       }
+      await sfStillPruefen()   // geclaimt + still → Start-Fehler (30.10.2026)
     }catch(e){ console.warn('[start-fehler] tick', (e && e.message) || e) }
     finally{ _sfLaeuft = false }
   }
@@ -57283,7 +57363,7 @@
       'https://prophos.pages.dev/prophos#trades', 'sf-' + String(p.id).slice(0, 8)) }catch(_){}
   }
   setInterval(sfTick, SF_TAKT_MS)
-  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre,
+  window._sf = { melden: sfMelden, neu: sfNeuEinplanen, behoben: sfBehoben, tagesEnde: sfTagesEnde, tick: sfTick, wd: sfIstWdSperre, still: sfStillUrteil, STILL_MS: SF_STILL_MS,
     uac: sfIstUac, uacText: sfIstUacText, fehl: sfFehlversuche, deckel: sfDeckelVoll, tun: (sf, wer) => typeof tplSfTun === 'function' ? tplSfTun(sf, wer) : null }   // Test-Haken
   /* PULS-SPUR AM PLAN (07.10.2026, Finn: „Echo ein Tick schneller" — ohne Messung wird nichts gekürzt): die Stempel-Spur des
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
@@ -57773,7 +57853,7 @@
       gelaufen = true
       if(plan.route === 'polar'){ if(POLAR_AUTO && typeof polarStartenAmPc === 'function') await polarStartenAmPc(plan) }   // POLAR (13.10.2026): Master-PC; manuell nie
       else if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id, null, { vonStartUm: true })
-      else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id) }
+      else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function'){ _rkTickStart.add(String(plan.id)); await tpJetztStarten(plan.id); _rkTickStart.delete(String(plan.id)) }   // nicht verbraucht (früher Ausstieg) → kein späterer Hand-Start gilt als Startzeit-Start
     }catch(e){ console.warn('[start-um]', e) }
     finally{
       if(lauf === _suLauf){

@@ -73,7 +73,7 @@ def main():
     a = t.index("const fen = await echoFensterSchreiben(file, plan.multiplier, 3)")
     b = t.index("if(!hardFail){\n        // Bereitschafts-Ticker")
     f = t[a:b]
-    check("hardFail = true" in f and "schritt: 'm5fenster'" in f and "unklar: false" in f and "if(vonTick)" in f and a < b,
+    check("hardFail = true" in f and "schritt: 'm5fenster'" in f and "unklar: false" in f and "await sfEinmal({ schritt: 'm5fenster'" in f and a < b,   # sfEinmal = nur nach Start zur Startzeit (ECHO-STILL-HAENGT)
           "Fenster zu → hardFail (kein Ticker, keine Order) + Start-Fehler m5fenster bei Start zur Startzeit")
     k = t[t.index("if(inst2 && inst2.alive && !note){"):]
     i_u, i_o = k.index("echoScharfUrteil(inst2, Date.now() - scharfAb, altLaufend)"), k.index("master-order?file=")
