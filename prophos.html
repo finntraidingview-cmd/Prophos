@@ -35536,6 +35536,12 @@
     mwdErlWdhVorschlag()
     mwdErlWdVorschau()
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
+    // EIN KLICK (Finn 30.10.2026 18:0x): unauffälliger Trade (wdlEinKlickGrund) speichert mit genau dieser Vorbelegung, ohne das Popup zu zeigen. Sagt die Vorbelegung
+    // doch etwas anderes (Status, fehlender P&L, Winning-Day-Vorschlag), öffnet sich das Popup wie immer
+    if(opts && opts.einKlick){
+      const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
+      if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ mklWdErledigtSpeichern(); return }
+    }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
   }
@@ -35618,6 +35624,7 @@
     const kontoStatus = _mwdErlPolar ? 'none' : (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none')
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
+    const sicht = _mwdErlSicht, ohneHedge = _mwdErlOhneHedge, polar = _mwdErlPolar, fusionAmPlan = _mwdErlFusionAmPlan   // Ein Klick: der nächste Klick setzt sie während des await neu
     const wdHand = !_mwdErlPolar && _mwdErlWdhAn && document.getElementById('mwd-erl-wdh')?.hidden === false && !!document.getElementById('mwd-erl-wdh-cb')?.checked   // „war ein Winning Day" (30.10.2026)
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
@@ -35634,7 +35641,7 @@
     if(typeof atToast === 'function') atToast('✓ Erledigt · wird gebucht …', 'ok')
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
-      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${_mwdErlSicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${sicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
         body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus, ...(wdHand ? { wd_zaehlen: true } : {}),
                                // Hand-Betrag (08.10.2026): ohne Vorbelegung oder davon abweichend → pl_quelle 'hand' am Plan
                                ...((plHand) ? { pl_quelle: 'hand' } : {}) }) })
@@ -35666,7 +35673,7 @@
       const gdH = wdHand ? (d.good_day || null) : null   // „war ein Winning Day": Stand aus der Antwort (gezaehlt/stand/ziel) oder Fehler
       const wdhTxt = !gdH ? '' : gdH.gezaehlt ? ` · 🏆 Winning Day ${gdH.stand}/${gdH.ziel}` : gdH.fehler ? '' : ' · 🏆 Winning Day heute schon gezählt'
       const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '') + umTxt + wdhTxt
-      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : _mwdErlPolar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, umFehl ? 'end' : 'ok')
+      if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : ohneHedge ? 'Erledigt' : polar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (fusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, umFehl ? 'end' : 'ok')
       // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
       // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
       try{
@@ -37372,6 +37379,32 @@
     if(!t || t.status !== 'review' || wdlManuell(t)) return
     _wdlManNotiz = { pid, neu: true }; wdlRender()
   }
+  /* EIN KLICK BEIM ABHAKEN (Finn 30.10.2026 18:0x: „Trades, bei denen nichts passiert … immer ein Klick zu viel"): → '' = unauffällig, sonst der Grund für das Popup. Eigene Pläne
+   * laufen über den Trades-Dialog mit eigenem Speichern, sie bleiben beim Popup. Echte Lesung = Balance nachher − vorher (pl_balance); master_pl allein kann Schätzung sein (Fall b4712b0c). */
+  function wdlEinKlickGrund(t){
+    if(!t || t.status !== 'review') return 'nicht in Überprüfen'
+    if(wdlIstPolar(t)) return 'Polar'
+    if(mklWdEigenerPlan(wdlTid(t))) return 'eigener Plan'
+    if(wdlAbhakenSperre(t)) return 'gesperrt'
+    if(wdlManuell(t)) return 'manuell'
+    if(wdlGeblowtUrteil(t) || wdlKontoWeg(t) || wdlKontoWegErg(t)) return 'geblowt oder Konto weg'
+    if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlFehltChip(t)) return 'Ziel erreicht oder nah'
+    if(wdlFcfdZielErreicht(t)) return 'Funded-CFD-Ziel erreicht'
+    if(t.tage_mini) return 'Tage-Mini'
+    if(t.balance_sprung) return 'Balance-Sprung'
+    if(wdlWartet(t)) return 'wartet auf Lesung'
+    const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
+    if(!zahl(t.pl_balance) || !(Number(t.balance_end) > 0) || wdlPlGesch(t) || e.balance_quelle === 'folgetrade' || e.puls_aufgegeben) return 'keine echte Lesung'   // Balance 0 ergäbe P&L = −Start
+    const dm = t.demo || {}
+    if(dm.status === 'beide_in_minute') return 'TP/Liq unklar'
+    if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t)) return 'Demo an der Liq, Lesung ohne Blow'
+    if(t.hedge && t.hedge.status !== 'geschlossen') return 'Hedge offen'
+    const fusionAmPlan = t.route === 'mt5' || t.route === 'tvplus'
+    if((t.hedge || Number(t.hedge_eur) > 0 || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
+    return ''
+  }
+  window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken
+  let _wdlEinKlickAt = 0
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
     // seit 02.10.2026 auch Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus) — Finn: „natürlich will ich auch Echo-Trades hier abhaken"
@@ -38329,7 +38362,10 @@
     if(ab){
       if(ab.disabled) return
       const pid = ab.getAttribute('data-wdl-abhaken'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
-      if(t) mklWdErledigtOeffnen(pid, t, { sicht: true })   // Radar = Admin-Ansicht (27.10.2026)
+      // Doppelklick: die Zeile ist nach dem ersten Klick weg, die nächste rückt unter den Mauszeiger und würde ohne Popup mitgebucht (Gegenprüfung 30.10.2026)
+      if(Date.now() - _wdlEinKlickAt < 600) return
+      const ein = !!t && !wdlEinKlickGrund(t); if(ein) _wdlEinKlickAt = Date.now()
+      if(t) mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: ein })   // Radar = Admin-Ansicht (27.10.2026)
       return
     }
     // Konto-Popup (08.10.2026, Master-Auftrag): Klick auf den Konto-Namen (nicht auf Knöpfe/Notiz) öffnet das Popup des Admin-Trade-Planers
