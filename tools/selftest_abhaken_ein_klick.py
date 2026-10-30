@@ -49,7 +49,7 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("ohne ziel_usd", {"ziel_usd": None}, False), ("ohne Liq/Boden", {"_ohneLiq": True}, False), ("wdlZielMarkiert", {"_ziel": True}, False),
           ("ziel_erreicht_at am Konto", {"konto_aktuell": {"typ": "phase1", "ziel_erreicht_at": "2026-10-30T10:00:00Z"}}, False),
           ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt", {"konto_aktuell": None}, False),
-          ("P&L weit über TP", {"pl_balance": 5000}, False), ("Verlust weit über SL", {"pl_balance": -5000}, False), ("ohne TP/SL am Plan", {"master_tp": None, "master_sl": None}, False),
+          ("P&L weit über TP", {"pl_balance": 5000}, False), ("Verlust weit über SL", {"pl_balance": -5000}, False), ("ohne TP/SL am Plan", {"master_tp": None, "master_sl": None}, False), ("P&L genau 0", {"pl_balance": 0}, False), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, False),
           ("t2_grund unplausibel", {"kette_grund": "Ergebnis unplausibel (−148.000 $)"}, False), ("Funded Futures", {"konto_typ": "funded", "konto_aktuell": {"typ": "funded"}}, False),
           ("Funded CFD unauffällig", {"konto_typ": "funded_cfd", "konto_aktuell": {"typ": "funded_cfd"}, "ziel_usd": None, "route": "mt5", "slave_pl": 0}, True),
           ("Balance 0", {"balance_end": 0, "pl_balance": -100000}, False), ("Hedge offen", {"hedge": {"status": "offen"}}, False), ("Lesung fehlt", {"pl_balance": None}, False)]

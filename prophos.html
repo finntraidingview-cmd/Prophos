@@ -37415,7 +37415,7 @@
     if((t.hedge || Number(t.hedge_eur) > 0 || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
     // Falscher P&L: Grenze wie ap_normal_tpsl_ende, TP bzw. SL + 15 %, mindestens 50 $ Luft. Ohne Bezugswert kein Ein Klick
     const pl = Number(t.pl_balance), bezug = Math.abs(Number(pl > 0 ? t.master_tp : t.master_sl)) || 0
-    if(pl !== 0 && (!bezug || Math.abs(pl) > bezug + Math.max(50, bezug * 0.15))) return 'P&L passt nicht zu TP/SL'
+    if(pl === 0 || !bezug || Math.abs(pl) > bezug + Math.max(50, bezug * 0.15)) return 'P&L passt nicht zu TP/SL'   // genau 0: kein Ergebnis, Finn soll es sehen (S2)
     return ''
   }
   window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken
