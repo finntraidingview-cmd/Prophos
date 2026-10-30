@@ -3096,6 +3096,8 @@
   #dashboard-view #kasse-content > .subtabs,#dashboard-view .nav-gruppe-tabs{overflow-x:auto;scrollbar-width:thin}
   /* PLANER-TAB (30.10.2026): im Planer-Modus statt der Admin-Reiter die Chip-Leiste der vier Planer */
   #dashboard-view section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}
+  /* PLANER-RECHTE (30.10.2026): ohne Schreibrecht Schreib-Elemente ausgegraut (Klick fängt der Riegel ab) */
+  .pr-nur-ansehen .pr-gesperrt{opacity:.45 !important;cursor:not-allowed !important;filter:grayscale(.4)}
   /* PLANER-GLIEDERUNG (30.10.2026): nur die Reiter der gewählten Gruppe (Challenge Planer | Funded Planer) */
   #adm-planer-chips[data-haupt="challenge"] [data-haupt]:not([data-haupt="challenge"]),#adm-planer-chips[data-haupt="funded"] [data-haupt]:not([data-haupt="funded"]){display:none}
   /* Planer-Modus: nie ein Admin-Pane (Übersicht, Payouts …), solange die Verwalter-Erkennung aussteht auch kein Planer-Pane */
@@ -15915,6 +15917,7 @@
     let planerHauptWahl = null
     document.querySelectorAll('#dashboard-view .sb-link[data-planerhaupt]').forEach(l => l.addEventListener('click', () => { planerHauptWahl = l.dataset.planerhaupt }, true))
     function planerChipsSync(ec){
+      try{ window._planerSchreiben?.() }catch(_){}   // PLANER-RECHTE: Schreibrecht holen (5 min gemerkt), markiert danach selbst
       const frei = planerErlaubt(ec), chipFrei = k => frei.includes(PLANER_CHIPS[k].reiter)
       document.querySelectorAll('#adm-planer-chips [data-planerchip]').forEach(c => { c.hidden = !chipFrei(c.dataset.planerchip) })
       // LINK FÜR JEDE ID (30.10.2026, Finn als Emin eingeloggt: „Bei den IDs soll kein Unterschied sein — jede ID sieht dieselben Planer wie ich"):
@@ -15947,6 +15950,93 @@
       tab.click()
     }
     window._planerChipOeffnen = planerChipOeffnen
+    /* PLANER-RECHTE-ANZEIGE (Master 30.10.2026, Server-Sperre S4: in HT dürfen nur „Finn + Pascal“ und „Pascal“ in Challenge Planer, Funded Planer
+     * (CFD + Futures) und Winning Days ändern; Emins Verwalter-Login für seine Gruppe weiter ja). Quelle GET /admin/planer-rechte → {ok, schreiben,
+     * grund?}; 404/Fehler/kein Login = false (fail-closed), 5 min gemerkt (wie S7 49d213c2). Ohne Recht:
+     * (1) Schreib-Elemente ausgegraut + Tooltip „nur ansehen“ (nach jedem Neuzeichnen, MutationObserver je Bereich);
+     * (2) Klick/Änderung darauf wird in der Capture-Phase abgefangen — das ist der einzige Riegel für die supabase-js-Direktwege (eigene Pläne
+     *     bestätigen/abhaken, wd_tagesplan, wd_farmer_regeln, RPC wd_konto_setzen), die der Server nicht sieht.
+     * Ansehen, Filter, Tag, ↻, Balance lesen, Endlesung bleiben frei (Knopfliste S4, Notizordner 2026-10-30_S4_funded_cfd_planer.md). */
+    // + .tpl-kasten: Trade-Kasten (Zeitstrahl-Pille) und Mini-Popup TP/SL/Größe/Start hängen am #dashboard-view, nicht im Bereich (Gegenprüfung)
+    const PR_BEREICHE = '#adm-pane-planer, #adm-pane-wd, #adm-pane-fcfd, #tpl-view, .tpl-kasten'
+    const PR_SCHREIB = [
+      // Challenge / Funded (Futures + CFD)
+      '[data-ap-ok]', '[data-ap-ok-id]', '#ap-ids-alle-ok', '[data-ap-zur]', '[data-ap-ri]', '[data-ap-id]', '[data-tpl-nachplan]', '[data-tpl-probe]', '[data-tpl-probe-alle]',
+      '[data-apd-schalter]', '[data-apd-ok]', '[data-apd-tausch]', '[data-apd-start]', '[data-apd-x]', '[data-ahf-ok]', '[data-ahf-id]', '[data-ahf-alle]', '[data-fcfd-news]', '[data-fcfd-erhalten]',
+      '[data-pzw-plan]', '[data-pzw]', '[data-tpl-akt]:not([data-tpl-akt="zu"]):not([data-tpl-akt="x"])', '[data-tpl-zur]', '[data-tk="ok"]', '[data-apd="v-ok"]',
+      '.pzw form button[type="submit"]', '.pzw form input', '.pzw form select', '[data-tpl-zedit]', '[data-tpl-zdel]', '[data-tpl-ok]', '[data-tpl-ok-id]', '[data-tpl-neu]', '[data-tpl-jetzt]',
+      '[data-tpl-haken]', '[data-tpl-blowarch]', '[data-gp]',
+      // Winning Days
+      '#wdWuerfel', '#wdSave', '#wdRiskAlle', '#wdRegelnSave', '#wdNdAlle', '#wdHedgeSave', '#wdHedgeSave2', '#wd-staffel-reset', '#wd-staffel-add', '#ws-knopf',
+      '[data-wd-dir]', '[data-wd-flip]', '[data-wd-zeit]', '[data-wd-tp]', '[data-wd-sl]', '[data-wd-sx]', '[data-wd-se]', '[data-wd-sv]', '[data-wd-konto]', '[data-wd-id-alle]',
+      '[data-wd-heute]', '[data-wd-heute-rein]', '[data-wd-rauf]', '[data-wd-runter]', '[data-wd-drag]', '[data-wd-aus-weg]', '[data-wd-nd-rein]', '[data-wd-ueb-rein]', '[data-wd-ue-alle]',
+      '[data-wd-fu]', '[data-wd-kt]', '[data-wd-staffel-wahl]', '#wd-aus-add', '#wd-aus-wahl', '#adm-pane-wd .wd-set-grid input', '#adm-pane-wd .wd-set-grid select'
+    ].join(', ')
+    // Rückfall über den Knopftext (Knöpfe ohne eigenes Merkmal: Würfeln je ID, Abhaken, Manuell, Rest zurück, Hedge zu …)
+    const PR_TEXT = /^(🎲|✓ ?bestätig|bestätig|↶|zurück|🗑|lösch|jetzt planen|nachplanen|so planen|jetzt ausgleichen|neu starten|erledigt|abhaken|manuell|rest zurück|hedge zu|würfeln|speichern|freigeben)/i
+    let _prRechte = { at: 0, schreiben: false, grund: '', laedt: null, uid: '' }
+    async function planerSchreiben(neu){
+      if(_prRechte.uid !== String(currentUserId || '')) _prRechte = { at: 0, schreiben: false, grund: '', laedt: null, uid: String(currentUserId || '') }   // anderer Login: neu fragen
+      if(!neu && _prRechte.at && Date.now() - _prRechte.at < 5 * 60000) return _prRechte.schreiben
+      if(_prRechte.laedt) return _prRechte.laedt
+      const uid0 = String(currentUserId || '')   // Rennen beim ID-Wechsel: Antwort nur für den Login, der gefragt hat
+      _prRechte.laedt = (async () => {
+        let ok = false, grund = ''
+        try{ const { data: { session } } = await supabase.auth.getSession(), tok = session?.access_token
+          if(tok){ const r = await fetch(`${WATCHER_HOME}/admin/planer-rechte`, { headers: { 'sb-token': tok } }), d = r.ok ? await r.json().catch(() => ({})) : {}
+            ok = !!(d && d.ok && d.schreiben === true); grund = String((d && d.grund) || '') } }
+        catch(_){ ok = false }
+        if(uid0 !== String(currentUserId || '')){ _prRechte.laedt = null; return false }   // inzwischen anderer Login → verwerfen
+        _prRechte = { at: Date.now(), schreiben: ok, grund, laedt: null, uid: uid0 }
+        prMarkieren()
+        return ok })()
+      return _prRechte.laedt
+    }
+    window._planerSchreiben = planerSchreiben
+    window._planerDarf = () => _prRechte.at > 0 && _prRechte.schreiben && _prRechte.uid === String(currentUserId || '')
+    const prIstSchreib = el => { if(!el || !el.closest || !el.closest(PR_BEREICHE)) return null
+      const z = el.closest(PR_SCHREIB); if(z) return z
+      const k = el.closest('button, [role="button"]'); return k && PR_TEXT.test(String(k.textContent || '').trim()) ? k : null }
+    const prTip = () => 'nur ansehen' + (_prRechte.grund ? ' — ' + _prRechte.grund : ' — ändern dürfen nur „Finn + Pascal“ und „Pascal“')
+    function prMarkieren(){
+      const darf = window._planerDarf()
+      if(darf && !document.querySelector('.pr-gesperrt')){ document.querySelectorAll('.pr-nur-ansehen').forEach(b => b.classList.remove('pr-nur-ansehen')); return }   // Schreibrecht: nichts zu tun
+      document.querySelectorAll(PR_BEREICHE).forEach(b => {
+        b.classList.toggle('pr-nur-ansehen', !darf)
+        const ziele = new Set([...b.querySelectorAll(PR_SCHREIB)])
+        b.querySelectorAll('button, [role="button"]').forEach(k => { if(PR_TEXT.test(String(k.textContent || '').trim())) ziele.add(k) })
+        for(const el of ziele){
+          const feld = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)
+          if(!darf){ if(el.dataset.prTitel == null) el.dataset.prTitel = el.getAttribute('title') || ''
+            el.setAttribute('title', prTip()); el.classList.add('pr-gesperrt'); el.setAttribute('aria-disabled', 'true')
+            if(feld && !el.disabled){ el.disabled = true; el.dataset.prDis = '1' } }
+          else if(el.classList.contains('pr-gesperrt')){ el.classList.remove('pr-gesperrt'); el.removeAttribute('aria-disabled')
+            if(el.dataset.prTitel != null){ el.setAttribute('title', el.dataset.prTitel); delete el.dataset.prTitel }
+            if(el.dataset.prDis){ el.disabled = false; delete el.dataset.prDis } }
+        }
+      })
+    }
+    // Riegel: Klick/Änderung auf ein Schreib-Element ohne Recht → nichts passiert (Capture vor jedem Handler der Bereiche)
+    for(const typ of ['click', 'change', 'input', 'pointerdown', 'dragstart', 'submit']){
+      document.addEventListener(typ, e => {
+        if(window._planerDarf()) return
+        const z = typ === 'submit' ? (e.target && e.target.closest && e.target.closest(PR_BEREICHE) ? e.target : null) : prIstSchreib(e.target); if(!z) return
+        e.preventDefault(); e.stopImmediatePropagation()
+        // Recht noch nicht geladen (oder anderer Login) → jetzt fragen; dieser Klick bleibt gesperrt (fail-closed)
+        const ungeprueft = !_prRechte.at || _prRechte.uid !== String(currentUserId || '')
+        if(ungeprueft) try{ planerSchreiben() }catch(_){}
+        if(typ === 'click' && typeof atToast === 'function') atToast(ungeprueft ? 'Schreibrecht wird geprüft — gleich nochmal klicken' : 'Nur ansehen — ändern dürfen in den Planern nur „Finn + Pascal“ und „Pascal“', 'end')
+        if(typ === 'change' && z.matches('input[type="checkbox"]')) try{ z.checked = !z.checked }catch(_){}
+      }, true)
+    }
+    // nach jedem Neuzeichnen der Bereiche erneut markieren (gebündelt)
+    let _prPlan = 0
+    const prBeobachten = () => { if(_prPlan) return; _prPlan = setTimeout(() => { _prPlan = 0; try{ prMarkieren() }catch(_){} }, 30) }   // Timer statt rAF (läuft auch im Hintergrund-Tab)
+    try{ const mo = new MutationObserver(recs => { if(recs.every(r => r.target && r.target.closest && r.target.closest('[data-tpl-cd]'))) return; prBeobachten() })   // Countdown tickt jede Sekunde — kein Neu-Markieren
+      document.querySelectorAll('#adm-pane-planer, #adm-pane-wd, #adm-pane-fcfd, #tpl-view').forEach(b => mo.observe(b, { childList: true, subtree: true }))
+      // Kästen hängen direkt am #dashboard-view: nur dessen Kinder beobachten, neuer Kasten → auch sein Inhalt
+      const dv = document.getElementById('dashboard-view'); if(dv) new MutationObserver(recs => { for(const r of recs) for(const n of r.addedNodes) if(n.nodeType === 1 && n.classList.contains('tpl-kasten')){ mo.observe(n, { childList: true, subtree: true }); prBeobachten() } }).observe(dv, { childList: true })
+    }catch(_){}
     // Rolle je ID für diese Browser-Sitzung ('ht' | 'verwalter' | 'eigen') — gesetzt von admLoad, gelesen nur für das Warten oben
     const PLANER_ROLLE_SS = 'prophos_planer_rolle'
     const planerRolle = () => { try{ const r = JSON.parse(sessionStorage.getItem(PLANER_ROLLE_SS) || 'null'); return r && r.uid === currentUserId ? r.rolle : null }catch(_){ return null } }
@@ -52823,7 +52913,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1938'
+  const OS_TAB_BUILD = '2026-09-22.1939'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
