@@ -52572,7 +52572,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1932'
+  const OS_TAB_BUILD = '2026-09-22.1933'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60607,7 +60607,20 @@
     }catch(e){ console.warn('[tpl] Balance nach Trade', e) }
     const archEigen = (typeof getArchive === 'function') ? (getArchive() || {}) : {}
     let gelesenN = 0   // seit dem Lauf gelesene „Balance fehlt"-Konten (09.10.2026) — nicht mehr hier, Zeile „n Konten gelesen ✓" im Kopf
+    // NUR KONTEN DER PLANER-ART (Finn 30.10.2026 07:52, Challenge Planer → CFD → „Braucht dich 22“ mit Funded-CFD-Konten „Waiting for Payout —
+    // Payout anfragen …“ / „Flex-Konto — plant der Funded-CFD-Planer noch nicht“): der Funded-CFD-Planer schreibt seinen Lauf in dieselbe Tabelle
+    // auto_plan_lauf, der Challenge-Lauf kann ihn liefern. Jede Ausgelassen-Zeile zählt nur, wenn ihre Kontoart in TPL_TYPEN steht (Challenge:
+    // challenge/phase1/phase2; unter fdpTausch funded bzw. funded_cfd) — Art aus der Zeile, sonst aus den Konten (eigene + Admin-Übersicht);
+    // ohne bekannte Art fallen nur Zeilen mit Funded-CFD-Gründen im Challenge Planer weg
+    const artVonKonto = kid => { if(!kid) return ''
+      const a = (accounts || []).find(q => String(q.id) === String(kid)); if(a && a.type) return String(a.type)
+      try{ const r = ((window._admData && window._admData.accounts) || []).find(q => String(q.id) === String(kid)); if(r && r.type) return String(r.type) }catch(_){}
+      return '' }
+    const FCP_GRUND = /Funded-CFD-Planer|^Waiting for Payout — Payout anfragen/
+    const fremdeArt = x => { const t = String(x.typ || artVonKonto(x.konto_id) || '')
+      return t ? !TPL_TYPEN.includes(t) : (!TPL_TYPEN.includes('funded_cfd') && FCP_GRUND.test(String(x.grund || ''))) }
     if(tagGleich) for(const x of roh.ausgelassen || []){
+      if(fremdeArt(x)) continue
       const g = String(x.grund || '')
       // GELESEN (Finn 09.10.2026: „Die Balance bei EzPoker wurde jetzt gelesen. Ich will, dass es auch visuell verschwindet"): das Backend markiert
       // „Balance fehlt"-Zeilen mit frischer Balance seit dem Lauf (balance_gelesen_at, ap_bal_gelesen) — das nächste Nachplanen nimmt sie mit
