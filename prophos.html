@@ -3819,6 +3819,8 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter .apd-schalter{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs > :first-child{margin-top:0}
   /* FUNDED-CFD-REGELFELD (30.10.2026): Regeln je Firma × Größe als Karten wie die WD-Einstellungen (wd-set-card), klappbar wie „Schalter" */
+  #ap-ids-root.ap-guestly .fcr-grid.fcr-news{flex-basis:100%;margin:4px 0 6px;grid-template-columns:minmax(0,560px)}   /* News-Kachel im Regelteil (30.10.2026) */
+  #ap-ids-root.ap-guestly .fcr-news-schalter{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
   #ap-ids-root.ap-guestly .fcfd-wartet-tab{margin-top:12px;overflow-x:auto}   /* Waiting for Payout als Accounts-Tabelle (30.10.2026) */
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-top:12px}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-karte{background:var(--g-kpi);border-radius:14px;padding:12px 14px;min-width:0}
@@ -80662,7 +80664,56 @@
     const konten = ad ? fcfdWartetHtml(k) + fcfdFirmenHtml(k) : apgKarte('Waiting for Payout', 'Konten-Übersicht lädt …', '<div class="apg-leer" style="padding:18px 0">lädt …</div>')
     const regeln = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Regeln je Prop-Firma</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
         <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Regeln</summary>${fcfdRegelnHtml()}</details></div>`
-    return konten + `<div class="fcr-unten">${regeln}</div>`
+    let news = ''; try{ news = fcfdNewsKarteHtml() }catch(e){ console.warn('[apg] News-Kachel', e) }
+    return konten + `<div class="fcr-unten">${regeln.replace('<details class="apg-schalter" data-fcfd-regeln', news + '<details class="apg-schalter" data-fcfd-regeln')}</div>`
+  }
+  /* NEWS-KACHEL (Master 30.10.2026, Regeln Finn ~07:28 / S8 8427eda9): im Regelteil die News-Regel für Funded CFD — rote USD-News (Forex Factory,
+   * impact High): 20–30 min vorher keine Starts, laufende Trades bis t−6/t−10 zu, 6–15 min danach keine Starts. An/Aus aus GET
+   * /admin/funded-cfd-plan (news_regel), Schalten nur Admin über POST /admin/funded-cfd-plan/einstellung {news_regel} (gilt für alle Gruppen).
+   * Dazu der nächste rote USD-Termin und der Zustand des Kalenders aus /news/calendar (frisch · unvollständig · alt · nicht ladbar). Nur Anzeige
+   * + dieser eine Schalter. */
+  const _fcfdNews = { d: null, at: 0, laedt: false, fehler: '', schaltet: false }
+  async function fcfdNewsLaden(neu){
+    if(_fcfdNews.laedt || (!neu && _fcfdNews.at && Date.now() - _fcfdNews.at < 300000)) return
+    _fcfdNews.laedt = true
+    try{ const r = await fetch(`${TS_BACKEND}/news/calendar`), d = await r.json().catch(() => ({}))
+      _fcfdNews.d = d; _fcfdNews.fehler = r.ok ? '' : (d.error || ('HTTP ' + r.status)) }
+    catch(e){ _fcfdNews.fehler = (e && e.message) || String(e) }
+    finally{ _fcfdNews.laedt = false; _fcfdNews.at = Date.now(); if(_apIdsArtWert === 'fcfd' && document.getElementById('ap-ids-root')?.offsetParent) window._apIdsRender?.() }
+  }
+  function fcfdNewsKarteHtml(){
+    if(!_fcfdNews.at && !_fcfdNews.laedt) setTimeout(() => fcfdNewsLaden(false), 0)
+    const Q = typeof _fdpQ !== 'undefined' ? _fdpQ : null, d = _fcfdNews.d || {}
+    const an = Q && typeof Q.newsRegel === 'boolean' ? Q.newsRegel : typeof d.news_regel === 'boolean' ? d.news_regel : null
+    const admin = !!window._fcfdAdmin
+    const jetzt = Date.now(), ev = (Array.isArray(d.events) ? d.events : []).filter(e => String(e.impact || '').toLowerCase() === 'high' && String(e.country || '').toUpperCase() === 'USD')
+      .map(e => ({ e, t: Date.parse(e.date || '') })).filter(x => isFinite(x.t) && x.t > jetzt - 15 * 60000).sort((a, b) => a.t - b.t)
+    const n = ev[0]
+    const nTxt = n ? `${new Date(n.t).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' })} Dubai · ${escapeHtml(String(n.e.title || '–'))}${n.t <= jetzt ? ' · läuft gerade' : ` · in ${Math.round((n.t - jetzt) / 60000) >= 120 ? Math.round((n.t - jetzt) / 3600000) + ' h' : Math.round((n.t - jetzt) / 60000) + ' min'}`}`
+      : (_fcfdNews.d && !_fcfdNews.fehler ? 'keiner im Kalender (diese + nächste Woche)' : '')
+    const fetchedMs = typeof d.fetched === 'number' ? (d.fetched < 1e12 ? d.fetched * 1000 : d.fetched) : Date.parse(d.fetched || '')
+    const alterMin = isFinite(fetchedMs) ? Math.round((jetzt - fetchedMs) / 60000) : null
+    const zustand = _fcfdNews.laedt && !_fcfdNews.d ? ['', 'lädt …']
+      : _fcfdNews.fehler && !(Array.isArray(d.events) && d.events.length) ? ['rot', 'nicht ladbar — ' + _fcfdNews.fehler.slice(0, 80)]
+      : d.unvollstaendig ? ['amber', 'unvollständig — diese Woche nicht lesbar, alter Stand']
+      : alterMin != null && alterMin > 60 ? ['amber', `alt — Stand vor ${alterMin >= 120 ? Math.round(alterMin / 60) + ' h' : alterMin + ' min'}`]
+      : ['gut', `frisch${alterMin != null ? ' — Stand vor ' + alterMin + ' min' : ''}`]
+    const farbe = { gut: 'var(--good-ink, #15803d)', amber: 'var(--warn-ink, #b45309)', rot: 'var(--danger-ink, #b91c1c)' }[zustand[0]] || 'var(--g-sub)'
+    const schalter = `<label class="fcr-news-schalter" title="${admin ? 'News-Regel für alle Gruppen an/aus' : 'nur Admin'}"><span class="switch"><input type="checkbox" data-fcfd-news${an ? ' checked' : ''}${!admin || an == null || _fcfdNews.schaltet ? ' disabled' : ''}><span class="switch-slider"></span></span>${an == null ? 'Stand unbekannt' : an ? 'an' : 'aus'}</label>`
+    return `<div class="fcr-grid fcr-news"><div class="fcr-karte"><div class="fcr-kopf">News-Regel<small>rote USD-News · Forex Factory</small></div>
+        <ul class="fcr-gem"><li>20–30 min vorher keine Starts</li><li>laufende Trades bis t−6 bzw. t−10 min zu</li><li>6–15 min danach keine Starts</li></ul>
+        <div class="fcr-z"><span>Schalter</span><em>${schalter}</em><span>Nächster Termin</span><em>${nTxt || '–'}</em><span>Kalender</span><em style="color:${farbe}">${escapeHtml(zustand[1])}</em></div>
+        <div class="fcr-hinweis">gilt für alle Gruppen · nur Funded CFD</div></div></div>`
+  }
+  window._fcfdNewsLaden = neu => fcfdNewsLaden(neu)   // Test-Haken (Stub)
+  async function fcfdNewsSchalten(an){
+    if(_fcfdNews.schaltet) return
+    _fcfdNews.schaltet = true
+    try{ await apdApi('POST', '/einstellung', { news_regel: !!an }, '/admin/funded-cfd-plan')
+      if(_fdpQ && _fdpQ.fcfd) _fdpQ.newsRegel = !!an
+      if(typeof atToast === 'function') atToast(`📰 News-Regel ${an ? 'an' : 'aus'} — gilt für alle Gruppen`, an ? 'start' : 'end') }
+    catch(e){ if(typeof atToast === 'function') atToast('News-Regel nicht geschaltet: ' + ((e && e.message) || e), 'end') }
+    finally{ _fcfdNews.schaltet = false; fcfdNewsLaden(true); window._apIdsLaden?.() }
   }
   window._fcfdRegelnStub = d => { _fcfdR.d = fcfdRegelnNorm(d); _fcfdR.at = Date.now(); apgFcfdRender(); window._apIdsRender?.() }   // Stub ohne Login
   function apgFcfdDaten(ad){
@@ -80763,6 +80814,7 @@
     root.querySelector('details[data-apg-schalter]')?.addEventListener('toggle', e => { _apg.schalterAuf = !!e.target.open })
     root.querySelector('details[data-fcfd-regeln]')?.addEventListener('toggle', e => { _fcfdR.auf = !!e.target.open })   // Funded CFD: Regeln offen halten
     { const t = root.querySelector('.fcfd-wartet-tab'); if(t) try{ window._admKontenVerdrahten?.(t) }catch(_){} }   // Waiting-Tabelle: Klicks wie im Admin
+    root.querySelector('[data-fcfd-news]')?.addEventListener('change', e => { e.stopPropagation(); fcfdNewsSchalten(e.target.checked) })   // News-Regel (nur Admin)
     root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
     apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })
@@ -81121,6 +81173,7 @@
       .map(x => ({ user_id: String(x.user_id), user: namen.get(String(x.user_id)) || '', konto: x.konto, konto_id: x.konto_id, firma: x.firma, typ: 'funded_cfd', grund: x.grund || '' }))
     return {
       vorschau: false, aktiv, regelnQuelle: null, zeiten: d.zeiten || {}, fcfd: true, zielAutoWartet: !!d.ziel_auto_wartet,
+      newsRegel: typeof d.news_regel === 'boolean' ? d.news_regel : null,   // NEWS-KACHEL (30.10.2026): S4 6583d221, älteres Backend → null
       apIds: { rows, offen, bestaetigt, bestaetigtT0: Date.now(), aktiv, tag: heute, D: null, fehler: '', offenFehler: '', ...FDP_ART.fcfd.merker },
       ap: { letzter: { tag: heute, at: d.at, trocken: false, quelle: 'funded_cfd', geplant: [], ausgelassen: ausg },
             info: { auto_bestaetigen: { aktiv: !!d.auto_bestaetigen } } },
@@ -81200,6 +81253,7 @@
     if(!apIstFunded()) return apIdsRenderChallenge()
     const root = document.getElementById('ap-ids-root'); if(!root) return
     if(!_fdpQ){ root.style.padding = '22px 2px'; root.innerHTML = _fdpFehler ? `<div style="color:var(--danger)">⚠ ${escapeHtml(_fdpFehler)}</div>` : 'Lade ' + fdpArt().name + '…'; return }
+    try{ window._fcfdAdmin = apdAdmin() }catch(_){ window._fcfdAdmin = false }   // News-Regel-Schalter (nur Admin) — vor dem Tausch gelesen
     fdpMitQuelle(apIdsRenderChallenge)
     fdpNachbereiten(root)
     fdpKlickWache(root)
