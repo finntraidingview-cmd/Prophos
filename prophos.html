@@ -3819,6 +3819,7 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter .apd-schalter{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs > :first-child{margin-top:0}
   /* FUNDED-CFD-REGELFELD (30.10.2026): Regeln je Firma × Größe als Karten wie die WD-Einstellungen (wd-set-card), klappbar wie „Schalter" */
+  #ap-ids-root.ap-guestly .fcfd-wartet-tab{margin-top:12px;overflow-x:auto}   /* Waiting for Payout als Accounts-Tabelle (30.10.2026) */
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-top:12px}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-karte{background:var(--g-kpi);border-radius:14px;padding:12px 14px;min-width:0}
   :is(#apg-fcfd,#ap-ids-root.ap-guestly) .fcr-kopf{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--g-text);margin-bottom:4px}
@@ -18366,7 +18367,7 @@
       })
       if(t.account_id && next && !d.termin_fehler){
         for(const r of (admData.payout_ready || [])) if(String(r.account_id) === String(t.account_id)) r.ready_at = next
-        for(const r of (admData.accounts || [])) if(String(r.id) === String(t.account_id)) r.payout_at = next
+        for(const r of (admData.accounts || [])) if(String(r.id) === String(t.account_id)){ r.payout_at = next; r.payout_ready_at = next }   // beide Felder (Waiting-Tabelle Funded CFD liest payout_ready_at)
       }
       admPayoutErhaltenZu()
       admFinRender()
@@ -18561,52 +18562,73 @@
       if(Date.now() - (_tpl.ltAt || 0) > 50000) admKontenTradesLaden()   // Trade-Spalte (20.10.2026): Live-Trades nachziehen, zeichnet danach neu
       $('adm-k-count').textContent = `${sortiert.length} Account${sortiert.length === 1 ? '' : 's'}${heuteN ? ` · ${heuteN} Funded Futures heute offen` : ''}`
       $('adm-k-empty').style.display = sortiert.length ? 'none' : 'block'
-      const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
       // „Trade planen" für andere IDs nie auf einem PC-Tab (S2/Master 29.10.2026): das fremde Konto stünde sonst, solange das Popup offen ist,
       // in `accounts` eines Puls-PCs, und dessen Hintergrund-Abläufe lesen diese Liste. Gleiche Erkennung wie MT5_LOCAL.
       const admPcTab = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-      const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', passed_pending: '🎉 Bestanden · Daten fehlen', manual: '📦 Archiviert' }
-      tb.innerHTML = sortiert.map(a => {
-        const r = zu.get(a)
-        const metaParts = []
-        try{ const z = zielBadgeHtml(a, false); if(z) metaParts.push(z) }catch(_){}
-        // Payout (16.10.2026): Funded CFD → „Payout ab"-Chip aus payout_ready_at (eigene Konten klickbar), sonst der allgemeine Termin-Chip
-        try{ const eigen = String(r.user_id) === String(currentUserId); const p = a.type === 'funded_cfd' ? payoutAbBadgeHtml(a, { offen: !!r.po_offen }, eigen) : payoutReadyBadgeHtml(a); if(p) metaParts.push(p) }catch(_){}
-        const meta = metaParts.length
-          ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
-        const archBadge = r.archived
-          ? `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:color-mix(in srgb, var(--sub-2) 13.33%, transparent);color:var(--ink-2);margin-left:8px;vertical-align:middle">${reasonMap[r.arch_reason] || '📦 Archiviert'}</span>` : ''
-        const quelle = r.balance_src === 'TV' && /topstep/i.test(String(r.firm || '')) ? 'TopstepX' : (QUELLE[r.balance_src] || r.balance_src || '')
-        const balCell = r.balance != null
-          ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
-             <div style="font-size:11px;color:var(--sub);margin-top:2px"><span style="font-weight:500">Stand · ${escapeHtml(quelle)}</span>${r.balance_at ? `<span style="margin-left:6px">${escapeHtml(timeAgo(r.balance_at))}</span>` : ''}</div>`
-          : '<span class="mono" style="color:var(--sub-2)">—</span>'
-        let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
-        let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
-        let trade = ''; try{ trade = admKontoTradeChipHtml(a, r) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026)
-        // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
-        try{ if(a.type === 'funded' && !r.archived && r.heute_traden){ const h = heuteKompaktHtml(r.heute_traden); if(h) planer = h } }catch(_){}
-        return `
-          <tr style="${r.archived ? 'opacity:.55' : ''}">
-            <td style="padding-left:20px">
-              <div style="font-weight:600;color:var(--ink)">${escapeHtml(a.name || '')}${archBadge}${(!r.archived && a.type !== 'live' && !admPcTab) ? `<button type="button" class="btn btn-ghost adm-k-plan" data-adm-k-plan="${escapeHtml(String(a.id))}" data-adm-k-uid="${escapeHtml(String(r.user_id))}" data-adm-k-person="${escapeHtml(r.person || '')}" title="Trade-Popup für dieses Konto öffnen — Plan landet bei ${escapeHtml(r.person || 'dieser ID')}, ohne die ID zu wechseln" style="padding:2px 8px;font-size:11px;margin-left:8px;vertical-align:middle">Trade planen</button>` : ''}</div>
-              ${meta}
-            </td>
-            <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(r.user_id)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
-            <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${typ}</td>
-            <td>${balCell}</td>
-            <td>${trade}</td>
-            <td>${admLetzterTradeHtml(r, jetztIso)}</td>
-            <td style="padding-right:20px">${planer}</td>
-          </tr>`
-      }).join('')
+      tb.innerHTML = sortiert.map(a => admKontoZeileHtml(a, zu.get(a), jetztIso, { pcTab: admPcTab })).join('')
+      admKontenVerdrahten(tb)
+    }
+    function admKontenVerdrahten(tb){
       tb.querySelectorAll('[data-acc-po]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); accPayoutFeldOeffnen(el.dataset.accPo) }))   // nur eigene Konten
       tb.querySelectorAll('[data-adm-k-radar]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); admKontoRadarOeffnen(el.dataset.admKRadar) }))   // Trade-Chip → Radar (20.10.2026)
       // Trade planen für diese ID (29.10.2026, Finn): bestehendes Trade-Popup im Fremd-Modus — Plan landet beim Besitzer, kein ID-Wechsel
       tb.querySelectorAll('[data-adm-k-plan]').forEach(el => el.addEventListener('click', e => { e.preventDefault()
         if(typeof window._tpFuerOeffnen === 'function') window._tpFuerOeffnen(el.dataset.admKPlan, el.dataset.admKUid, el.dataset.admKPerson) }))
     }
+    /* Eine Zeile von Admin → Alle Accounts (aus admKontenRender herausgezogen, 30.10.2026) — auch der Block „Waiting for Payout“ im Funded Planer
+     * → CFD zeichnet damit (Finn 07:30: „einfach die normale Ansicht unter Accounts da hin“). o.pcTab: „Trade planen“ aus; o.poGer: gerechnete Frist */
+    const QUELLE = { TSX: 'TopstepX', MT5: 'MT5', Echo: 'MT5', TV: 'TradingView', Duplikum: 'Duplikum' }
+    const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', passed_pending: '🎉 Bestanden · Daten fehlen', manual: '📦 Archiviert' }
+    function admKontoZeileHtml(a, r, jetztIso, o = {}){
+      const admPcTab = !!o.pcTab
+      const metaParts = []
+      try{ const z = zielBadgeHtml(a, false); if(z) metaParts.push(z) }catch(_){}
+      // Payout (16.10.2026): Funded CFD → „Payout ab"-Chip aus payout_ready_at (eigene Konten klickbar), sonst der allgemeine Termin-Chip
+      // o.poGer (Funded Planer → CFD, 30.10.2026): fehlt „Payout anfragbar ab“, zeigt der Chip den gerechneten frühesten Termin + „· gerechnet“
+      try{ const eigen = String(r.user_id) === String(currentUserId), ger = a.type === 'funded_cfd' && !a.payoutReadyAt && o.poGer && o.poGer.ab ? o.poGer : null
+        const p = a.type === 'funded_cfd' ? payoutAbBadgeHtml(ger ? Object.assign({}, a, { payoutReadyAt: ger.ab }) : a, { offen: !!r.po_offen }, eigen && !ger) : payoutReadyBadgeHtml(a)
+        if(p) metaParts.push(ger && !r.po_offen ? `${p} <span class="acc-po acc-po-sub" title="${escapeHtml('gerechnet: ' + (ger.grund || '') + ' — frühester Termin, kein Muss; „Payout anfragbar ab“ am Konto ist leer')}">· gerechnet</span>` : p) }catch(_){}
+      const meta = metaParts.length
+        ? `<div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;flex-direction:column;gap:1px">${metaParts.map(p => `<div>${p}</div>`).join('')}</div>` : ''
+      const archBadge = r.archived
+        ? `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:color-mix(in srgb, var(--sub-2) 13.33%, transparent);color:var(--ink-2);margin-left:8px;vertical-align:middle">${reasonMap[r.arch_reason] || '📦 Archiviert'}</span>` : ''
+      const quelle = r.balance_src === 'TV' && /topstep/i.test(String(r.firm || '')) ? 'TopstepX' : (QUELLE[r.balance_src] || r.balance_src || '')
+      const balCell = r.balance != null
+        ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
+           <div style="font-size:11px;color:var(--sub);margin-top:2px"><span style="font-weight:500">Stand · ${escapeHtml(quelle)}</span>${r.balance_at ? `<span style="margin-left:6px">${escapeHtml(timeAgo(r.balance_at))}</span>` : ''}</div>`
+        : '<span class="mono" style="color:var(--sub-2)">—</span>'
+      let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
+      let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
+      let trade = ''; try{ trade = admKontoTradeChipHtml(a, r) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026)
+      // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
+      try{ if(a.type === 'funded' && !r.archived && r.heute_traden){ const h = heuteKompaktHtml(r.heute_traden); if(h) planer = h } }catch(_){}
+      return `
+        <tr style="${r.archived ? 'opacity:.55' : ''}">
+          <td style="padding-left:20px">
+            <div style="font-weight:600;color:var(--ink)">${escapeHtml(a.name || '')}${archBadge}${(!r.archived && a.type !== 'live' && !admPcTab) ? `<button type="button" class="btn btn-ghost adm-k-plan" data-adm-k-plan="${escapeHtml(String(a.id))}" data-adm-k-uid="${escapeHtml(String(r.user_id))}" data-adm-k-person="${escapeHtml(r.person || '')}" title="Trade-Popup für dieses Konto öffnen — Plan landet bei ${escapeHtml(r.person || 'dieser ID')}, ohne die ID zu wechseln" style="padding:2px 8px;font-size:11px;margin-left:8px;vertical-align:middle">Trade planen</button>` : ''}</div>
+            ${meta}
+          </td>
+          <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(r.user_id)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(r.person || '–')}</td>
+          <td>${escapeHtml(a.firm || '–')}</td>
+          <td>${typ}</td>
+          <td>${balCell}</td>
+          <td>${trade}</td>
+          <td>${admLetzterTradeHtml(r, jetztIso)}</td>
+          <td style="padding-right:20px">${planer}</td>
+        </tr>`
+    }
+    // FUNDED PLANER → CFD, WAITING FOR PAYOUT (30.10.2026): dieselbe Tabelle wie Admin → Alle Accounts (Kopf aus dem Admin-DOM, ohne Sortier-IDs),
+    // Zeilen = [{ r: Zeile aus /admin/overview, poGer }] — Reihenfolge bestimmt der Aufrufer. Klicks wie im Admin (admKontenVerdrahten).
+    window._admKontenTabelleHtml = paare => {
+      // Kopf ohne Sortier-Bedienung des Admins (Klasse/Titel von „Letzter Trade“, Pfeile) — hier sortiert die Waiting-Reihenfolge
+      const kopf = (document.getElementById('adm-k-table')?.closest('table')?.querySelector('thead')?.outerHTML || '').replace(/ id="[^"]*"/g, '')
+        .replace(/ class="adm-k-lt-kopf"/g, '').replace(/ title="Wann zuletzt ein Trade lief[^"]*"/g, '').replace(/Letzter Trade [↑↓]/g, 'Letzter Trade')
+      const jetztIso = new Date().toISOString(), pcTab = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+      return `<div class="table-wrap"><table class="t">${kopf}<tbody>${paare.map(x => admKontoZeileHtml(admKontoAusZeile(x.r), x.r, jetztIso, { pcTab, poGer: x.poGer })).join('')}</tbody></table></div>`
+    }
+    window._admKontenVerdrahten = admKontenVerdrahten
+    window._admKontoAusZeile = admKontoAusZeile
+
     { const cb = $('adm-k-payout'); if(cb) cb.checked = poSortLesen('prophos_adm_payout_zuerst') }   // Haken gemerkt (16.10.2026)
     { const cb = $('adm-k-heute'); if(cb) cb.checked = poSortLesen('prophos_adm_heute_zuerst') }     // Heute offen zuerst (16.10.2026)
     { const cb = $('adm-k-pause'); if(cb) cb.checked = poSortLesen('prophos_adm_pause_zuerst') }   // Längste Trade-Pause zuerst (27.10.2026)
@@ -52423,7 +52445,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1931'
+  const OS_TAB_BUILD = '2026-09-22.1932'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -80377,7 +80399,7 @@
    * 14 Tage, FundedNext den 1. Payout erst nach 21 Tagen, gezählt ab dem letzten Payout (verlauf art payout je Konto) bzw. dem Konto-Start
    * (created). Frist = frühester Termin, kein Muss; gerechnete Termine tragen den Hinweis „gerechnet". Nur Anzeige. */
   function fcfdPayoutAb(r, verlauf){
-    const ab = String(r.payout_at || '')
+    const ab = String(r.payout_ready_at || r.payout_at || '').slice(0, 10)   // wie Admin → Alle Accounts (admKontoAusZeile liest payout_ready_at)
     if(/^\d{4}-\d{2}-\d{2}$/.test(ab)) return { ab, gerechnet: false }
     const letzter = (verlauf || []).filter(v => v && v.art === 'payout' && String(v.aid) === String(r.id) && v.datum).map(v => String(v.datum).slice(0, 10)).sort().pop() || ''
     const basis = letzter || String(r.created || '').slice(0, 10)
@@ -80387,27 +80409,23 @@
     return { ab: d.toISOString().slice(0, 10), gerechnet: true,
       grund: `${n} Tage ab ${letzter ? 'letztem Payout' : 'Konto-Start'} ${new Date(basis + 'T12:00:00Z').toLocaleDateString('de-DE')}${fnErster ? ' (FundedNext: 1. Payout nach 21 Tagen)' : ' (frühestens alle 14 Tage)'}` }
   }
+  // WAITING-ALS-TABELLE (Finn 30.10.2026 07:30: „das ist mies hässlich — einfach die normale Ansicht unter Accounts da hin“): dieselbe Tabelle
+  // wie Admin → Alle Accounts (window._admKontenTabelleHtml / admKontoZeileHtml), nur Funded-CFD-Konten mit waiting_payout_since der Sicht.
+  // Reihenfolge: jetzt anfragbar → nach Tagen bis „anfragbar ab“ → angefragt → ohne Datum. Fehlt „Payout anfragbar ab“, rechnet fcfdPayoutAb.
   function fcfdWartetHtml(k){
     const heute = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' }), tage = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5)
     const verlauf = (window._admData && window._admData.verlauf) || []
     const w = k.filter(e => e.wartet).map(e => {
-      const seit = String(e.r.waiting_payout_since || '').slice(0, 10), pa = fcfdPayoutAb(e.r, verlauf)
-      return { e, seitN: seit ? Math.max(0, tage(seit, heute)) : null, inN: pa.ab ? tage(heute, pa.ab) : null, ab: pa.ab, gerechnet: pa.gerechnet, grund: pa.grund || '' }
-    }).sort((a, b) => (a.inN ?? 1e9) - (b.inN ?? 1e9) || (b.seitN ?? 0) - (a.seitN ?? 0))
-    const ohneDatum = w.filter(x => x.inN == null).length, jetzt = w.filter(x => x.inN != null && x.inN <= 0).length, nGer = w.filter(x => x.gerechnet).length
-    const tagTxt = n => n === 1 ? '1 Tag' : n + ' Tagen'
-    const datum = ab => new Date(ab + 'T12:00:00Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
-    const kachel = x => { const e = x.e
-      const tip = x.gerechnet ? 'gerechnet: ' + x.grund + ' — frühester Termin, kein Muss' : x.ab ? 'Payout anfragbar ab (Feld am Konto)' : 'kein Datum und kein Konto-Start bekannt'
-      const pille = e.angefragt ? apgPille('lila', '💸 angefragt') : x.inN == null ? apgPille('', 'Datum fehlt', tip) : x.inN <= 0 ? apgPille('tuerkis', '✓ jetzt anfragbar', tip)
-        : apgPille('', `in ${tagTxt(x.inN)}`, tip)
-      const abTxt = !x.ab ? 'Waiting for Payout' : x.inN <= 0 ? 'jetzt anfragbar' : `anfragbar ab ${datum(x.ab)} (in ${tagTxt(x.inN)})`
-      return `<div class="apg-konto" title="${escapeHtml(e.r.name || '')}"><div class="apg-konto-kopf"><span>${escapeHtml(e.person)} · ${escapeHtml(e.firma)}</span><span>${pille}</span></div>
-        <div class="apg-konto-name">${escapeHtml(e.r.name || '–')}</div>
-        <div class="apg-konto-zahl"><b>${x.seitN == null ? '–' : 'seit ' + tagTxt(x.seitN)}</b><span title="${escapeHtml(tip)}">${escapeHtml(abTxt)}${x.gerechnet ? ' · gerechnet' : ''}</span></div></div>` }
-    return `<div data-apg-anker="wartet">${apgKarte(`Waiting for Payout · ${w.length}`, w.length ? `${jetzt} jetzt anfragbar${nGer ? ` · ${nGer} gerechnet` : ''}${ohneDatum ? ` · ${ohneDatum} ohne Datum` : ''} · werden nie geplant` : 'keins in dieser Sicht',
-      w.length ? `<div class="apg-konten">${w.map(kachel).join('')}</div>` : '<div class="apg-leer" style="padding:18px 0">kein Konto wartet auf den Payout</div>',
-      'Funded-CFD-Konten mit „Waiting for Payout" — anfragbar ab dem Feld am Konto; ist es leer, gerechnet: frühestens 14 Tage nach dem letzten Payout bzw. Konto-Start, FundedNext 1. Payout nach 21 Tagen')}</div>`
+      const pa = fcfdPayoutAb(e.r, verlauf), inN = pa.ab ? tage(heute, pa.ab) : null
+      return { e, inN, gerechnet: pa.gerechnet, poGer: pa.gerechnet ? { ab: pa.ab, grund: pa.grund } : null,
+        rang: e.angefragt ? 2 : inN == null ? 3 : inN <= 0 ? 0 : 1, seit: String(e.r.waiting_payout_since || '') }
+    }).sort((a, b) => a.rang - b.rang || (a.inN ?? 0) - (b.inN ?? 0) || a.seit.localeCompare(b.seit))
+    const jetzt = w.filter(x => x.rang === 0).length, nGer = w.filter(x => x.gerechnet && x.rang !== 2).length, ohne = w.filter(x => x.rang === 3).length
+    let tabelle = ''
+    try{ tabelle = w.length && typeof window._admKontenTabelleHtml === 'function' ? window._admKontenTabelleHtml(w.map(x => ({ r: x.e.r, poGer: x.poGer }))) : '' }catch(e){ console.warn('[apg] Waiting-Tabelle', e) }
+    return `<div data-apg-anker="wartet">${apgKarte(`Waiting for Payout · ${w.length}`, w.length ? `${jetzt} jetzt anfragbar${nGer ? ` · ${nGer} Frist gerechnet` : ''}${ohne ? ` · ${ohne} ohne Datum` : ''} · werden nie geplant` : 'keins in dieser Sicht',
+      w.length ? `<div class="fcfd-wartet-tab">${tabelle || '<div class="apg-leer" style="padding:18px 0">Tabelle nicht verfügbar</div>'}</div>` : '<div class="apg-leer" style="padding:18px 0">kein Konto wartet auf den Payout</div>',
+      'Dieselbe Ansicht wie Admin → Alle Accounts, nur Funded-CFD-Konten mit „Waiting for Payout“ — Payout-Termin aus „Payout anfragbar ab“; ist es leer, gerechnet: frühestens 14 Tage nach dem letzten Payout bzw. Konto-Start, FundedNext 1. Payout nach 21 Tagen')}</div>`
   }
   // Unter den Listen im Reiter Funded Planer → CFD: Waiting for Payout · Firmen · Regeln (ganz unten, klappbar wie bei Winning Days)
   function fcfdUnterHtml(u){
@@ -80517,6 +80535,7 @@
     root.querySelector('[data-apg-firma]')?.addEventListener('change', e => { tplFirmaWaehlen(e.target.value || 'alle'); apIdsRender() })
     root.querySelector('details[data-apg-schalter]')?.addEventListener('toggle', e => { _apg.schalterAuf = !!e.target.open })
     root.querySelector('details[data-fcfd-regeln]')?.addEventListener('toggle', e => { _fcfdR.auf = !!e.target.open })   // Funded CFD: Regeln offen halten
+    { const t = root.querySelector('.fcfd-wartet-tab'); if(t) try{ window._admKontenVerdrahten?.(t) }catch(_){} }   // Waiting-Tabelle: Klicks wie im Admin
     root.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => root.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
     apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })
