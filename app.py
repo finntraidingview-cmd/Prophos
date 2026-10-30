@@ -23421,7 +23421,9 @@ def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht, verwalter=False):
     """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
     Admin oder ID im Planer. Die kurze Öffnung für jeden Login mit sicht="admin" (.1248) ist seit Option A (Finn 08.10.2026) wieder zu —
     sicht ist ein Client-Parameter; was eine Planer-ID dann sieht (alle oder eigene), entscheidet ap_sicht_uid.
-    ADMIN-GRUPPEN (08.10.2026): dazu ein Verwalter im Admin-Reiter (sicht="admin") — er sieht dort nur seine Gruppe (ap_sicht_uid)."""
+    ADMIN-GRUPPEN (08.10.2026): dazu ein Verwalter im Admin-Reiter (sicht="admin") — er sieht dort nur seine Gruppe (ap_sicht_uid).
+    Seit 30.10.2026 übergeben beide Aufrufer (_ap_zugang, GET /admin/auto-plan) für den Verwalter fest AP_SICHT_ADMIN: er liest auch ohne
+    ?sicht=admin, dann nur die eigene ID (Finn als Emin: „Delta-Daten nicht geladen (HTTP 403)")."""
     # seit Option A (Finn 08.10.2026): sicht=admin öffnet für Logins außerhalb des Planers nichts mehr — außer für Verwalter (Gruppe)
     return bool(admin) or bool(im_planer) or (bool(verwalter) and str(sicht or "").strip().lower() == AP_SICHT_ADMIN)
 
@@ -30910,7 +30912,8 @@ def _ap_bot_tick(d):
 def _ap_zugang(admin_reiter=False):
     """Gate wie /admin/auto-plan: Admin oder eine ID, die selbst im Auto-Planer ist (nur lesen, nur eigene Zeilen).
     admin_reiter=True (nur Lese-Routen, 08.10.2026): auch jeder andere Login mit sicht=admin, der nicht „nur eigene" ist (ap_admin_reiter_ok)
-    — seit den Admin-Gruppen (08.10.2026) dazu ein Verwalter (sieht dort nur seine Gruppe).
+    — seit den Admin-Gruppen (08.10.2026) dazu ein Verwalter (sieht dort mit sicht=admin seine Gruppe; seit 30.10.2026 ohne sicht=admin
+    nur die eigene ID statt 403).
     → (admin, uid, reg, None) oder (…, Fehler-Antwort)."""
     mail, err = _admin_auth()
     uid = request.environ.get("prophos.admin_uid")
