@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.3
+// @version      0.10.4
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,12 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.4 30.10.2026  LEER-BEWEIS OHNE FESTEN TEXT (Simon pc-pmqd8g mit 0.10.3 weiter blind, Tabelle „…Position IDNothi…"): leer gilt
+//                      auch, wenn in table[data-name$="positions-table"] nach dem Spaltenkopf „Position ID" ein Leer-Block mit Wort-Text
+//                      steht, keine td[data-label] Text traegt und der Text nicht nach Laden/Verbinden/Fehler klingt (leerStrukturPasst).
+//                      Gilt erst bei der ZWEITEN gleichen Lesung (Konto + Text) >= 0,4 s nach der ersten; Position/kein Konto/unklar
+//                      dazwischen startet neu. Leer-Muster mit \s+ (geschuetzte Leerzeichen). Reiter Positions muss weiter gewaehlt sein.
+//                      Blind-Grund getrennt: „kein Leer-Beweis: Reiter Positions nicht aktiv" | „…: Leer-Text nicht erkannt | Konto: <Umschalter>".
 //   0.10.3 30.10.2026  LEER-BEWEIS „Make …" (Finn: „Tampermonkey-Script schliesst nicht"): TradingView zeigt in der leeren Positions-
 //                      Tabelle neu „Make …" mit Buy-/Sell-Knoepfen statt „Nothing to show yet" — kein Leer-Beweis, Reader blind, Radar/
 //                      Notfall schlossen statt des Userscripts. Zaehlt jetzt nur in table[data-name$="positions-table"], direkt nach
@@ -180,7 +186,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.3';
+  const VERSION    = '0.10.4';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   let PULS_CHROME = false;
@@ -1105,9 +1111,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // 0.9.11 (29.10.2026): TradingView zeigt in der leeren Positions-Tabelle seit dem Update vom 26./27.10. „Nothing to show yet. You …"
   // (Inventar pc-7ftp5l 28.10. 23:19 Dubai); vorher „No open positions". Ohne den Text gab es keinen Leer-Beweis → blind → kein Reader-Ende.
   // 0.9.12: der alte Text ist tabellen-eindeutig; der neue, generische zaehlt nur in der Positions-Tabelle (oder mit „Position ID" daneben)
-  const RX_LEER_POS = /no open positions|keine offenen positionen|keine positionen/i;
-  const RX_LEER_NEU = /nothing to show yet/i;
-  const RX_LEER_KOPF = /position id/i;
+  // 0.10.4: \s+ statt Leerzeichen — TradingView setzt teils geschuetzte Leerzeichen (U+00A0), die ein ' ' im Muster nie trifft
+  const RX_LEER_POS = /no\s+open\s+positions|keine\s+offenen\s+positionen|keine\s+positionen/i;
+  const RX_LEER_NEU = /nothing\s+to\s+show\s+yet/i;
+  const RX_LEER_KOPF = /position\s*id/i;
   const SEL_POS_TABELLE = 'table[data-name$="positions-table"]';
   // 0.10.3 (30.10.2026): DRITTER Leer-Text. TradingView rollt seit 29.10. eine neue Leer-Ansicht aus: die leere Positions-Tabelle zeigt
   // direkt unter dem Spaltenkopf „Make …" mit eigenen Buy-/Sell-Knoepfen (Augen-Inventar 29.10. abends: pc-7ftp5l, -auzre5, -2zc2we,
@@ -1115,7 +1122,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Beweis blieb jedes flache Konto blind → 14× reader_wartet „kein Leer-Beweis" in 48 h, 0 Userscript-Schluesse. Nur in der Positions-
   // Tabelle selbst: der Text muss UNMITTELBAR auf den Spaltenkopf „Position ID" folgen (eine Datenzeile stuende mit ihrem Symbol dazwischen)
   // und keine Zelle Symbol/Position ID darf Text tragen. Fehlt etwas davon → kein Beweis (blind wie bisher, nie ein falsches „flach").
-  const RX_LEER_MAKE = /position id\s*make\b/i;
+  const RX_LEER_MAKE = /position\s*id\s*make\b/i;
   // REIN RECHNEND (testbar): Positions-Tabelle (Element) → neue „Make …"-Leer-Ansicht bewiesen?
   function leerMakePasst(tabelle) {
     if (!tabelle) return false;
@@ -1128,6 +1135,47 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     }
     return true;
   }
+  // 0.10.4 (30.10.2026, Simon pc-pmqd8g: mit 0.10.3 weiter blind, seine leere Tabelle zeigt „…Position IDNothi…", trotzdem kein Beweis —
+  // TradingView hat den Leer-Text binnen vier Tagen dreimal geaendert, jede Aenderung legte den Userscript-Schluss still): Leer-Beweis
+  // OHNE festen Text, nur aus dem Aufbau der Positions-Tabelle. Alles muss stimmen, sonst kein Beweis (blind wie bisher):
+  //   · Spaltenkopf „Position ID" (auch „Positions-ID") steht in der Tabelle,
+  //   · keine einzige Zelle td[data-label] traegt Text (jede Datenzeile hat mindestens Symbol, Menge, Position ID),
+  //   · nach dem Spaltenkopf steht ein Leer-Block mit Wort-Text, OHNE eine einzige Ziffer (jede Datenzeile traegt Menge, Preis, ID —
+  //     auch wenn TradingView sie einmal ohne tr/td/data-label rendert; Pruefung 30.10.2026),
+  //   · der Text BEGINNT mit einer ganzen Leer-Phrase (nothing to show / nothing here / no (open) positions / make your first trade /
+  //     keine (offenen) Positionen / noch keine Positionen) — Positiv-Liste ganzer Phrasen, verankert direkt nach dem Spaltenkopf
+  //     (Pruefer S2 30.10.2026: Einzelwoerter liessen „Keine Berechtigung", „Account not ready yet", „Empty response", „Market closed —
+  //     nothing to show" als leer gelten); „Something went wrong", „Request failed", „Log in to see positions" usw. sind nie leer,
+  //   · und klingt NICHT nach Laden/Verbinden/Fehler (dann ist die Liste noch nicht da, nicht leer),
+  //   · und DIESELBE Lesung (gleicher Leer-Text) steht zweimal hintereinander mit ≥ LEER_STRUKTUR_MS Abstand (leerBeweis) — eine Tabelle,
+  //     die gerade laedt oder neu aufbaut (Kopf da, Zeilen noch nicht), darf nie als leer gelten (Master 30.10.2026: „fail-closed").
+  const RX_LEER_KOPF_ALLE = /positions?[\s-]*id/gi;
+  const RX_LEER_WORT = /^(nothing\s+(to\s+show|here)|no\s+(open\s+)?positions?|make\s+your\s+first\s+trade|keine\s+(offenen\s+)?positionen|noch\s+keine\s+positionen)\b/i;
+  const RX_LEER_NICHT = /load|lade|laed|connect|verbind|wait|warte|sync|retry|erneut|error|fehler|fail|wrong|offline|timeout|expired|log\s*in|sign\s*in|anmeld|fetch|abruf|aktualis|unavailable|nicht verf|…|\.\.\./i;
+  const LEER_STRUKTUR_MS = 400;
+  // REIN RECHNEND (testbar): Positions-Tabelle (Element) → Leer-Text (Schluessel fuer die zweite Lesung) | '' (kein Beweis)
+  function leerStrukturPasst(tabelle) {
+    if (!tabelle) return '';
+    const text = String(tabelle.textContent || '');
+    let ende = -1, m;
+    RX_LEER_KOPF_ALLE.lastIndex = 0;
+    while ((m = RX_LEER_KOPF_ALLE.exec(text))) ende = m.index + m[0].length;
+    if (ende < 0) return '';
+    const rest = text.slice(ende).replace(/\s+/g, ' ').trim();
+    if (!RX_LEER_WORT.test(rest) || RX_LEER_NICHT.test(rest) || /\d/.test(rest)) return '';
+    let zellen, zeilen;
+    try { zellen = tabelle.querySelectorAll('td[data-label]'); zeilen = tabelle.querySelectorAll('tr'); } catch (_) { return ''; }
+    if (!zellen || !zeilen) return '';
+    for (const td of zellen) if (String(td.textContent || '').trim()) return '';
+    // zweiter Riegel, unabhaengig von data-label: eine Datenzeile hat mehrere Zellen mit Text (Symbol, Seite, Menge, Preis …), der
+    // Leer-Block hoechstens eine — sonst kein Beweis (fiele data-label je weg, saehe der Reader 0 Positionen UND einen „Leer-Block")
+    for (const tr of zeilen) {
+      let tds; try { tds = tr.querySelectorAll('td'); } catch (_) { return ''; }
+      let n = 0;
+      for (const td of (tds || [])) if (String(td.textContent || '').trim() && ++n > 1) return '';
+    }
+    return rest.slice(0, 200);
+  }
   // REIN RECHNEND (testbar): Vorfahr-Text + Positions-Tabelle darin (Element oder null) → flach bewiesen?
   function leerTextPasst(text, tabelle) {
     const t = String(text || '');
@@ -1138,10 +1186,11 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     return RX_LEER_KOPF.test(t);                                               // kein Tabellen-Element gefunden: Spaltenkopf „Position ID" muss dabeistehen
   }
   let leerMerk = { ms: 0, wert: false };
+  let strukturMerk = { key: '', seit: 0 };   // 0.10.4: erste Lesung des Struktur-Beweises (Text + Zeit)
   function leerBeweis() {
     const jetzt = Date.now();
     if (jetzt - leerMerk.ms < 150) return leerMerk.wert;   // 0.9.6: höchstens alle 0,15 s neu suchen (0.9.5: 0,5 s)
-    let wert = false;
+    let wert = false, struktur = '';
     try {
       const r = document.getElementById('positions');
       if (r && r.getAttribute('aria-selected') === 'true') {
@@ -1150,18 +1199,36 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
         for (let i = 0; el && i < 8 && el !== document.body; i++, el = el.parentElement) {
           let tab = null; try { tab = el.querySelector(SEL_POS_TABELLE); } catch (_) {}
           if (leerTextPasst(el.textContent, tab)) { wert = true; break; }
+          if (!struktur && tab) struktur = leerStrukturPasst(tab);
         }
       }
-    } catch (_) {}
+    } catch (_) { struktur = ''; }
+    // 0.10.4: Struktur-Beweis erst bei der ZWEITEN gleichen Lesung ≥ LEER_STRUKTUR_MS nach der ersten; jede andere Lesung startet neu.
+    // Das Konto gehoert zum Schluessel: derselbe Leer-Text im naechsten Konto (Wechsel) ist eine NEUE erste Lesung
+    if (struktur) struktur = String(kontoMerk.text || '') + '|' + struktur;
+    if (!wert && struktur) {
+      if (strukturMerk.key !== struktur) strukturMerk = { key: struktur, seit: jetzt };
+      else if (jetzt - strukturMerk.seit >= LEER_STRUKTUR_MS) wert = true;
+    } else if (!wert) strukturMerk = { key: '', seit: 0 };
     leerMerk = { ms: jetzt, wert };
     return wert;
   }
   function blindGrund(positionen) {
     if (PULS_CHROME) {   // 0.9.3: strenger — ohne Konto kein Urteil, flach nur mit Beweis (auch verdeckt)
-      if (!kontoAngemeldet(Date.now())) return 'kein Konto angemeldet';
-      if (leseBefund.unklar) return 'pnl unlesbar in ' + leseBefund.unklar + ' Zeile(n)';
-      if (positionen.length) return null;
-      return leerBeweis() ? null : 'kein Leer-Beweis (Reiter Positions nicht aktiv oder Leer-Text fehlt)';
+      // 0.10.4: jede Lesung OHNE Leer-Beweis-Versuch (kein Konto, unklar, Position da) verwirft die erste Struktur-Lesung — die zweite
+      // muss unmittelbar auf eine leere folgen, nie ueber eine Position oder einen Kontowechsel hinweg
+      if (!kontoAngemeldet(Date.now())) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'kein Konto angemeldet'; }
+      if (leseBefund.unklar) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'pnl unlesbar in ' + leseBefund.unklar + ' Zeile(n)'; }
+      if (positionen.length) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return null; }
+      if (leerBeweis()) return null;
+      // 0.10.4: Grund getrennt — „Reiter" repariert ein Heimweg (Puls klickt Positions), „Leer-Text" nicht (die Heim-Wache laesst dann
+      // den Blind-Heimweg weg, wenn Puls belegt im Plan-Konto steht; sonst blockierte der Heimweg 1–4 min den Hedge-Schluss, Simon 30.10.)
+      let reiterAn = false;
+      try { const r = document.getElementById('positions'); reiterAn = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
+      // das AKTUELLE Konto steht beim Leer-Text-Grund dabei: der reader-server friert bei blind den Stand ein (konto = letztes sehendes
+      // Konto) — ohne diese Angabe saehe die Heim-Wache einen Handwechsel in ein fremdes Konto nicht (Pruefung 30.10.2026)
+      return reiterAn ? 'kein Leer-Beweis: Leer-Text nicht erkannt | Konto: ' + String(kontoMerk.text || '').slice(0, 64)
+                      : 'kein Leer-Beweis: Reiter Positions nicht aktiv';
     }
     // 0.8.4: Zeilen mit Symbol + Menge ohne lesbaren G&V = die Liste kann einen offenen Master verbergen
     if (leseBefund.unklar) return leseBefund.pnl_spalte
@@ -1873,7 +1940,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.3';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.4';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

@@ -98,8 +98,8 @@ h4.kontoMerk.text = "FNFTFAMUSTERMUSTERAB\u2026"; h4.kontoMerk.ts = T;
 check(h4.kontoAngemeldet(T + 1000), "gekuerzt: kontoAngemeldet (nicht mehr blind)");
 // 0.9.12 (29.10.2026): Leer-Beweis — TradingViews generischer Text 'Nothing to show yet' zaehlt nur in der Positions-Tabelle
 var codeLeer = stueck("const RX_LEER_POS", "function blindGrund");
-var harnessLeer = "var leerMerkMs = 0; var document = {body:{}, getElementById:function(){return null}}; var Date = {now:function(){ leerMerkMs += 1000; return leerMerkMs; }};" + codeLeer +
-  "; return {leerBeweis:leerBeweis, leerTextPasst:leerTextPasst, setDoc:function(d){ document = d; }};";
+var harnessLeer = "var leerMerkMs = 0, schritt = 1000; var kontoMerk = {text: 'KONTO-A', ts: 0}; var document = {body:{}, getElementById:function(){return null}}; var Date = {now:function(){ leerMerkMs += schritt; return leerMerkMs; }};" + codeLeer +
+  "; return {leerBeweis:leerBeweis, leerStrukturPasst:leerStrukturPasst, setSchritt:function(n){ schritt = n; }, setKonto:function(k){ kontoMerk.text = k; }, leerTextPasst:leerTextPasst, setDoc:function(d){ document = d; }};";
 var h5 = new Function(harnessLeer)();
 function el(text, kinder, tabelle) {   // Element-Attrappe: textContent, parentElement (wird verkettet), querySelector findet die Tabelle
   var e = { textContent: text, parentElement: null, querySelector: function (sel) { return (sel.indexOf("positions-table") >= 0) ? (tabelle || null) : null; } };
@@ -129,7 +129,8 @@ var r6 = reiter("false"); var p6 = el("Positions " + tabLeer.textContent, [r6], 
 check(h5.leerBeweis() === false, "leerBeweis: Reiter Positions nicht aktiv → nicht flach");
 // 0.10.3 (30.10.2026): dritte Leer-Ansicht „Make …" mit Buy/Sell-Knoepfen — nur in der Positions-Tabelle, direkt nach „Position ID", ohne Datenzelle
 function td(label, text) { return { textContent: text, getAttribute: function (a) { return a === "data-label" ? label : null; } }; }
-function tabelle(text, zellen) { return { textContent: text, querySelectorAll: function (sel) { return sel === "td[data-label]" ? (zellen || []) : []; } }; }
+function tabelle(text, zellen, zeilen) { return { textContent: text, querySelectorAll: function (sel) { return sel === "td[data-label]" ? (zellen || []) : sel === "tr" ? (zeilen || []) : []; } }; }
+function tr(texte) { return { querySelectorAll: function (sel) { return sel === "td" ? texte.map(function (t) { return { textContent: t }; }) : []; } }; }
 var KOPF = "SymbolSideQtyAvg Fill PriceProfitUpdate TimePosition ID";
 var tabMake = tabelle(KOPF + "Make your first trade SellBuy");
 var r7 = reiter("true"); var p7 = el("Positions Orders " + tabMake.textContent, [r7], tabMake); h5.setDoc(doc(r7));
@@ -140,10 +141,87 @@ check(h5.leerTextPasst("x", tabelle(KOPF + "MNQZ6Long129,086.50-8.50USD4470324 M
       "leerTextPasst: Datenzeile zwischen Kopf und 'Make' → nicht flach");
 check(h5.leerTextPasst("x", tabelle(KOPF + "Make ", [td("Symbol", "MNQZ6")])) === false, "leerTextPasst: 'Make' direkt nach Kopf, aber Symbol-Zelle mit Text → nicht flach");
 check(h5.leerTextPasst("x", tabelle(KOPF + "Make ", [td("Symbol", " "), td("Update Time", "")])) === true, "leerTextPasst: leere Zellen stoeren nicht");
-check(h5.leerTextPasst("x", tabelle(KOPF + "Makeover")) === false && h5.leerTextPasst("x", tabelle(KOPF)) === false, "leerTextPasst: 'Makeover'/nur Kopf → nicht flach");
+check(h5.leerTextPasst("x", tabelle(KOPF)) === false, "leerTextPasst: nur Kopf → nicht flach");
 check(h5.leerTextPasst("x", { textContent: KOPF + "Make ", querySelectorAll: function () { throw "kaputt"; } }) === false, "leerTextPasst: querySelectorAll wirft → nicht flach (fail-closed)");
 var r8 = reiter("false"); var p8 = el("Positions " + tabMake.textContent, [r8], tabMake); h5.setDoc(doc(r8));
 check(h5.leerBeweis() === false, "leerBeweis: 'Make …' bei nicht gewaehltem Reiter Positions → nicht flach");
+// 0.10.4 (30.10.2026): Leer-Beweis ohne festen Text — Aufbau der Positions-Tabelle; geschuetzte Leerzeichen in den Texten
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Nothing here yet. Place an order to get started")) === true, "Struktur: unbekannter Leer-Text nach dem Kopf → flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Nothing to show yet. You")) === true, "Struktur/NBSP: 'Nothing to show yet' mit U+00A0 → flach");
+check(h5.leerTextPasst("Positions Nothing to show yet", tabelle(KOPF + "Nothing to show yet")) === true, "RX_LEER_NEU trifft U+00A0");
+check(!!h5.leerStrukturPasst(tabelle("SymbolSideQtyAvg Fill PriceProfitUpdate TimePositions-IDKeine Positionen")) === true, "Struktur: deutscher Kopf 'Positions-ID' → flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Loading positions")) === false, "Struktur: 'Loading' → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Positionen werden geladen")) === false, "Struktur: 'geladen' → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Connecting to broker")) === false && !!h5.leerStrukturPasst(tabelle(KOPF + "Something went wrong, error 500")) === false,
+      "Struktur: Verbinden/Fehler → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Bitte warten…")) === false && !!h5.leerStrukturPasst(tabelle(KOPF + "Please wait...")) === false, "Struktur: Ellipse/warten → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF)) === false && !!h5.leerStrukturPasst(tabelle(KOPF + " 12 ")) === false, "Struktur: kein Wort-Text unter dem Kopf → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle("Symbol Side Qty Profit Nothing here")) === false, "Struktur: ohne Spaltenkopf Position ID → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "MNQZ6Long129,086.50-8.50USD4470324", [td("Symbol", "MNQZ6"), td("Qty", "1"), td("Position ID", "4470324")])) === false,
+      "Struktur: Datenzeile mit Text → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Nothing here", [td("Update Time", "00:16:07")])) === false, "Struktur: irgendeine data-label-Zelle mit Text → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Nothing here", [td("Symbol", "  "), td("Update Time", "")])) === true, "Struktur: nur leere data-label-Zellen → flach");
+check(!!h5.leerStrukturPasst({ textContent: KOPF + "Nothing here", querySelectorAll: function () { throw "kaputt"; } }) === false, "Struktur: querySelectorAll wirft → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "MNQZ6Long129,086.50-8.50USD4470324", [], [tr(["MNQZ6", "Long", "1", "29,086.50", "-8.50USD", "", "4470324"])])) === false,
+      "Struktur: Datenzeile OHNE data-label (mehrere Zellen mit Text) → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Make your first trade SellBuy", [], [tr(["Make your first trade SellBuy"])])) === true, "Struktur: eine Leer-Zelle in der Zeile → flach");
+check(!!h5.leerStrukturPasst({ textContent: KOPF + "Nothing here", querySelectorAll: function (s) { return s === "tr" ? [{ querySelectorAll: function () { throw "kaputt"; } }] : []; } }) === false,
+      "Struktur: Zeile nicht lesbar → nicht flach");
+// Pruefer S2 30.10.2026: nur ganze Leer-Phrasen am Anfang — Zustandstexte mit Einzelwoertern (yet/keine/empty/leer/nothing) nie leer
+["Keine Berechtigung", "Keine Daten", "Account not ready yet", "Positions are not available yet", "Broker not authorized yet",
+ "Empty response", "Market closed — nothing to show", "Market closed - nothing to show", "Leer", "Noch nicht verbunden", "Not yet loaded",
+ "Nothing", "No access", "Keine Verbindung zum Broker", "Positions empty"].forEach(function (t) {
+  check(!!h5.leerStrukturPasst(tabelle(KOPF + t)) === false, "Struktur: Zustandstext '" + t + "' → nicht flach");
+});
+["Nothing to show yet. You have no open positions", "Nothing here yet", "No open positions", "No positions", "Make your first trade",
+ "Keine offenen Positionen", "Noch keine Positionen"].forEach(function (t) {
+  check(!!h5.leerStrukturPasst(tabelle(KOPF + t)) === true, "Struktur: Leer-Phrase '" + t + "' → flach (nach zweiter Lesung)");
+});
+// Pruefung 30.10.2026: Positiv-Liste statt Sperrliste, keine Ziffer, Zeilen ohne tr/td
+["Something went wrong", "Request failed", "Log in to see positions", "Session expired", "Offline", "Timeout", "Fetching positions",
+ "Positionen abrufen", "Aktualisieren", "Please reconnect", "Update Time", "Account Summary"].forEach(function (t) {
+  check(!!h5.leerStrukturPasst(tabelle(KOPF + t)) === false, "Struktur: '" + t + "' → nicht flach");
+});
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "MNQZ6 Long 1 29,086.50 -8.50 USD 4470324 Nothing")) === false,
+      "Struktur: Datenzeile als div-Grid (ohne tr/td/data-label) mit Ziffern → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle(KOPF + "Nothing to show yet 1")) === false, "Struktur: irgendeine Ziffer im Leer-Block → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle("SymbolSideQtyPosition IDAvg Fill PriceProfitUpdate Time")) === false,
+      "Struktur: Spalten umgestellt, Tabelle laedt (nur Kopf-Namen nach Position ID) → nicht flach");
+check(!!h5.leerStrukturPasst(tabelle("SymbolSideQtyPosition IDAvg Fill PriceProfitUpdate TimeNothing to show yet")) === false,
+      "Struktur: Spalten umgestellt (Phrase nicht direkt nach Position ID) → kein Struktur-Beweis (fail-closed)");
+check(h5.leerTextPasst("x", tabelle("SymbolPosition IDMake your first trade")) === true, "RX_LEER_MAKE trifft U+00A0 im Kopf");
+check(h5.leerTextPasst("x", tabelle(KOPF + "Nothing here yet")) === false, "leerTextPasst allein kennt den Struktur-Beweis nicht (nur ueber leerBeweis mit zweiter Lesung)");
+var tabNeu = tabelle(KOPF + "Nothing here yet");
+var r9 =reiter("true"); var p9 = el("Positions Orders " + tabNeu.textContent, [r9], tabNeu); h5.setDoc(doc(r9));
+h5.setSchritt(1000);
+check(h5.leerBeweis() === false, "Struktur/leerBeweis: ERSTE Lesung → noch nicht flach");
+check(h5.leerBeweis() === true, "Struktur/leerBeweis: dieselbe Lesung 1 s spaeter → flach");
+// Zweite Lesung zu frueh (Uhr 0,2 s, Merkzeit 0,15 s ueberschritten) → noch nicht; ab 0,4 s → flach
+var tabNeu2 = tabelle(KOPF + "Nothing here at all");
+var r11 = reiter("true"); var p11 = el("Positions " + tabNeu2.textContent, [r11], tabNeu2); h5.setDoc(doc(r11));
+h5.setSchritt(200);
+check(h5.leerBeweis() === false && h5.leerBeweis() === false && h5.leerBeweis() === true, "Struktur/leerBeweis: erst ab ≥ 0,4 s nach der ersten gleichen Lesung flach");
+// Aufbau: erst nur Kopf (kein Leer-Block) → nie flach; danach Leer-Block → wieder erste Lesung
+var tabKopf = tabelle(KOPF); var r12 = reiter("true"); var p12 = el("Positions " + KOPF, [r12], tabKopf); h5.setDoc(doc(r12));
+h5.setSchritt(1000);
+check(h5.leerBeweis() === false && h5.leerBeweis() === false, "Struktur/leerBeweis: Tabelle laedt (Kopf da, Zeilen/Leer-Block noch nicht) → nie flach");
+var tabLaed = tabelle(KOPF + "Loading"); var r13 = reiter("true"); var p13 = el("Positions " + tabLaed.textContent, [r13], tabLaed); h5.setDoc(doc(r13));
+check(h5.leerBeweis() === false && h5.leerBeweis() === false, "Struktur/leerBeweis: 'Loading' zweimal → nie flach");
+var r14 = reiter("true"); var p14 = el("Positions " + tabNeu.textContent, [r14], tabNeu); h5.setDoc(doc(r14));
+check(h5.leerBeweis() === false, "Struktur/leerBeweis: nach dem Laden zuerst wieder nur ERSTE Lesung");
+check(h5.leerBeweis() === true, "Struktur/leerBeweis: zweite gleiche Lesung → flach");
+// Kontowechsel mit demselben Leer-Text → neue erste Lesung
+h5.setKonto("KONTO-B");
+check(h5.leerBeweis() === false && h5.leerBeweis() === true, "Struktur/leerBeweis: Kontowechsel, gleicher Leer-Text → erst wieder erste Lesung");
+h5.setKonto("KONTO-A");
+// Text wechselt zwischen den Lesungen → neue erste Lesung
+var tabNeu3 = tabelle(KOPF + "Nothing here right now"); var r15 = reiter("true"); var p15 = el("Positions " + tabNeu3.textContent, [r15], tabNeu3); h5.setDoc(doc(r15));
+check(h5.leerBeweis() === false, "Struktur/leerBeweis: anderer Leer-Text → wieder erste Lesung");
+var r10 = reiter("false"); var p10 = el("Positions " + tabNeu.textContent, [r10], tabNeu); h5.setDoc(doc(r10));
+check(h5.leerBeweis() === false && h5.leerBeweis() === false, "Struktur/leerBeweis: Reiter nicht gewaehlt → nie flach");
+// alter Text bleibt sofort gueltig (keine zweite Lesung noetig, wie bis 0.10.3)
+var r16 = reiter("true"); var p16 = el("Positions Orders No open positions", [r16]); h5.setDoc(doc(r16));
+check(h5.leerBeweis() === true, "leerBeweis: 'No open positions' weiter sofort flach");
 // 0.9.13 (29.10.2026): Konto-Liste aus dem offenen Umschalter — nur volle Nummern als erstes Wort, nie gekuerzt/angeklebt
 var codeKonten = stueck("function kontenAusEintraegen", "// 0.9.13 ENDE kontenAusEintraegen");
 var h6 = new Function("var RX_KONTO_KURZ=" + stueck("const RX_KONTO_KURZ = ", ";\n").replace("const RX_KONTO_KURZ = ", "") + ";" +
