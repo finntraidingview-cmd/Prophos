@@ -27303,33 +27303,49 @@ def ap_hedge_freigabe_ids(zeilen):
 # überfälligen Start auf jetzt + 3–6 min (gewürfelt, Puls-Jitter-Regel) — damit liegt er wieder im Fenster, der Takt stellt um und der Plan startet
 # heute. Ein Start in der Zukunft wird NIE vorgezogen.
 HEDGE_FREIGABE_START_S = (180, 360)
+HEDGE_FREIGABE_MAX_H = 12            # Prüfer S2: älter, anderer Handelstag, Wochenende oder unbestätigt → Start bleibt stehen (kein Überraschungs-Start)
 
 
-def hedge_freigabe_start(start_um, jetzt, rnd=None):
-    """REIN RECHNEND (testbar): neuer start_um (ISO) für einen freigegebenen Plan oder None (nicht anfassen): nur wenn start_um schon vorbei ist;
-    kein start_um oder Start in der Zukunft → None."""
+def hedge_freigabe_start(start_um, jetzt, rnd=None, plan=None):
+    """REIN RECHNEND (testbar): (neuer start_um als ISO | None, grund | None) für einen freigegebenen Plan. Gezogen wird nur ein überfälliger Start
+    (Prüfer S2 zu 92bbd2c3): überfällig ≤ HEDGE_FREIGABE_MAX_H, gleicher CME-Handelstag wie jetzt, dieser Tag Mo–Fr und der Plan bestätigt
+    (plan.auto_bestaetigt_at gesetzt oder plan.auto_plan false). Sonst bleibt start_um, grund sagt warum. Kein start_um / Zukunft → (None, None)."""
     try:
         t = datetime.fromisoformat(str(start_um).replace("Z", "+00:00")) if start_um else None
     except ValueError:
-        return None
+        return None, None
     if t is None or t > jetzt:
-        return None
+        return None, None
+    if (jetzt - t).total_seconds() > HEDGE_FREIGABE_MAX_H * 3600:
+        return None, f"zu alt, nicht neu gestartet (über {HEDGE_FREIGABE_MAX_H} h überfällig)"
+    tag = _cme_handelstag(jetzt.isoformat())
+    if not tag or _cme_handelstag(t.isoformat()) != tag:
+        return None, "zu alt, nicht neu gestartet (anderer Handelstag)"
+    if datetime.strptime(tag, "%Y-%m-%d").weekday() >= 5:
+        return None, "zu alt, nicht neu gestartet (kein Handelstag)"
+    p = plan or {}
+    if not p.get("auto_bestaetigt_at") and p.get("auto_plan") is not False:
+        return None, "nicht neu gestartet (Plan noch unbestätigt)"
     r = rnd or random
-    return (jetzt + timedelta(seconds=r.uniform(*HEDGE_FREIGABE_START_S))).astimezone(timezone.utc).isoformat()
+    return (jetzt + timedelta(seconds=r.uniform(*HEDGE_FREIGABE_START_S))).astimezone(timezone.utc).isoformat(), None
 
 
 def _hedge_freigabe_schreiben(ids, basis, uid):
-    """Freigabe je Plan schreiben (basis = Guard) → Anzahl. Liest start_um frisch; überfällige Pläne bekommen im selben Update den neuen Start."""
+    """Freigabe je Plan schreiben (basis = Guard) → (Anzahl, {plan_id: grund} der überfälligen Pläne, deren Start stehen blieb). Liest start_um
+    frisch; überfällige Pläne, die hedge_freigabe_start zulässt, bekommen im selben Update den neuen Start."""
     jetzt_dt = datetime.now(timezone.utc)
-    jetzt, n = jetzt_dt.isoformat(), 0
+    jetzt, n, stehen = jetzt_dt.isoformat(), 0, {}
     wert = {"hedge_freigabe_at": jetzt, "hedge_freigabe_von": str(uid or "")[:80]}
     for j in range(0, len(ids), 100):
         teil = ids[j:j + 100]
         neu = {}
-        for z in sb_select("trade_plans", {"select": "id,start_um", "id": "in.(" + ",".join(teil) + ")"}) or []:
-            st = hedge_freigabe_start(z.get("start_um"), jetzt_dt)
+        for z in sb_select("trade_plans", {"select": "id,start_um,auto_bestaetigt_at,auto_plan", "id": "in.(" + ",".join(teil) + ")"}) or []:
+            st, grund = hedge_freigabe_start(z.get("start_um"), jetzt_dt, plan=z)
             if st:
                 neu[str(z.get("id"))] = st
+            elif grund:
+                stehen[str(z.get("id"))] = grund
+                print(f"[hedge-freigabe] Plan {str(z.get('id'))[:8]}: {grund}", flush=True)
         rest = [i for i in teil if i not in neu]
         if rest:
             n += len(sb_update("trade_plans", dict(basis, id="in.(" + ",".join(rest) + ")"), wert) or [])
@@ -27340,7 +27356,7 @@ def _hedge_freigabe_schreiben(ids, basis, uid):
                 zeilen = sb_update("trade_plans", dict(basis, id=f"eq.{i}"), wert) or []
             n += len(zeilen)
             print(f"[hedge-freigabe] Plan {i[:8]} war überfällig — neuer Start {st[11:19]} UTC", flush=True)
-    return n
+    return n, stehen
 
 
 def _ap_hedge_mit_freigeben(zeilen, uid):
@@ -27359,7 +27375,7 @@ def _ap_hedge_mit_freigeben(zeilen, uid):
         if not ids:
             return 0
         return _hedge_freigabe_schreiben(ids, {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
-                                               "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}, uid)
+                                               "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}, uid)[0]
     except Exception as e:
         print(f"[auto-plan] ⚠️ Hedge-Freigabe beim Bestätigen: {type(e).__name__}: {e}", flush=True)
         return 0
@@ -27395,9 +27411,9 @@ def admin_auto_plan_hedge_freigabe():
             ids = [str(x) for x in (body.get("ids") or []) if str(x) in frei]
         if not ids:
             return jsonify({"ok": False, "msg": "nichts zu bestätigen (schon freigegeben, gestartet oder nicht in der Liste)"}), 400
-        n = _hedge_freigabe_schreiben(ids, basis, uid)
+        n, stehen = _hedge_freigabe_schreiben(ids, basis, uid)
         print(f"[hedge-freigabe] {n} Plan/Pläne freigegeben ({str(uid or '')[:8]})", flush=True)
-        return jsonify({"ok": True, "freigegeben": n})
+        return jsonify({"ok": True, "freigegeben": n, "nicht_neu_gestartet": stehen})
     except Exception as e:
         print(f"[hedge-freigabe] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500

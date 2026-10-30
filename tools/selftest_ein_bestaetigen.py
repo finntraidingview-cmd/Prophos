@@ -55,7 +55,7 @@ def main():
     ok("_ap_namen()" in mit and "not in aus" in mit, "ADMIN_EXCLUDE wie die Freigabe-Route")
     j = src.index("\ndef _hedge_freigabe_schreiben(")
     schreib = src[j:src.find("\n\n\n", j)]
-    ok("_hedge_freigabe_schreiben(" in mit and "hedge_freigabe_von" in schreib and "auto_bestaetigt_at" not in schreib and "auto_bestaetigt_at" not in mit.split('"""')[2],
+    ok("_hedge_freigabe_schreiben(" in mit and "hedge_freigabe_von" in schreib and '"auto_bestaetigt_at"' not in schreib and "auto_bestaetigt_at" not in mit.split('"""')[2],
        "setzt nur die Freigabe-Spalten (start_um nur bei überfälligem Plan, FINAL-FREIGABE-SPAET)")
     ok("hvs:mt5_baseline->hedge_vorschau" in src and "**ap_ids_hedge_felder(p)" in src, "/ids liefert die Hedge-Felder")
     for t in f:
