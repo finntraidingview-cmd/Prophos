@@ -34259,6 +34259,11 @@ def ap_loop():
             _fdp_info["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[funded-plan] ⚠️ {e}", flush=True)
         try:
+            fcp_tick()                        # FUNDED-CFD-PLANER (30.10.2026) — eigener try, nur bei funded_cfd_plan_regeln.aktiv
+        except Exception as e:
+            _fcp_info["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[funded-cfd] ⚠️ {e}", flush=True)
+        try:
             if eh_tick() is not None:         # HT ECHO-HEDGE B2 (29.10.2026): HT-CFD kurz vor dem Start auf Echo mit Hedge — eigener try
                 _eh["fehler"] = ""
         except Exception as e:
@@ -34985,12 +34990,15 @@ def fdp_vorschlaege_aufraeumen(jetzt):
     return n
 
 
-def fdp_eingriff_filter(aktion, plan_ids, sicht_uid=None):
+def fdp_eingriff_filter(aktion, plan_ids, sicht_uid=None, art=None):
     """REIN RECHNEND (testbar): PostgREST-Filter für /admin/funded-plan/{bestaetigen | zurueck | loeschen} → (params, art) oder
     (None, Fehlertext). Guard in derselben Anfrage wie bei ap_eingriff_filter, aber auf die Funded-Kennung statt auf auto_plan:
     planned + mt5_baseline.funded_plan + nie geclaimt/gestartet; bestaetigen zusätzlich unbestätigt und ohne Puls-Pause.
-    sicht_uid wie ap_eingriff_sicht (None alle, str eine ID, Menge eine Gruppe)."""
-    basis = {"status": "eq.planned", "mt5_baseline->funded_plan": "not.is.null", "start_um_gestartet_at": "is.null", "started_at": "is.null"}
+    sicht_uid wie ap_eingriff_sicht (None alle, str eine ID, Menge eine Gruppe). art (30.10.2026, Funded-CFD-Planer): None = nur Pläne des
+    Funded-Planers (funded_plan.art leer) — die Funded-Routen fassen CFD-Vorschläge nie an (sonst Bestätigen über die Gruppe hinaus mit
+    Apex-Abständen, Prüfung S4); „cfd" = nur die des Funded-CFD-Planers."""
+    basis = {"status": "eq.planned", "mt5_baseline->funded_plan": "not.is.null", "start_um_gestartet_at": "is.null", "started_at": "is.null",
+             "mt5_baseline->funded_plan->>art": f"eq.{art}" if art else "is.null"}
     bed = {"bestaetigen": (dict(basis, auto_bestaetigt_at="is.null", **{"mt5_baseline->puls_pause": "is.null"}), "patch"),
            "zurueck": (basis, "patch"), "loeschen": (basis, "delete")}.get(str(aktion or ""))
     if not bed:
@@ -35231,6 +35239,580 @@ def admin_funded_plan_ids():
     sb_update("funded_plan_regeln", {"id": "eq.1"}, {"user_ids": neu, "updated_at": datetime.now(timezone.utc).isoformat()})
     print(f"[funded-plan] IDs: {u[:8]} {'rein' if body.get('drin') else 'raus'} ({len(neu)} IDs)", flush=True)
     return jsonify({"ok": True, "user_id": u, "drin": bool(body.get("drin")), "n": len(neu)})
+
+
+# ══ FUNDED-CFD-PLANER (30.10.2026, Finn ~07:00 Dubai: „Ja, bauen"; Regeln diktiert 05:10–06:55, .claude/master/funded-cfd-planer-regeln.md).
+# Konten mit account_type funded_cfd (The5ers, FundedNext, FundingPips Standard — Flex später; Tradeify CFD 100k, Nachtrag 30.10.2026 —
+# exakter Firmen-Schlüssel tradeifycfd, nie Tradeify-Futures) bekommen 1 Trade je Konto und Tag als
+# VORSCHLAG: klassisches Echo mit Fusion-Gegenhedge (route mt5, Slave = echo_hedge_account der ID, wie der Gruppen-Planer), Finn bestätigt
+# von Hand (Testphase alles von Hand, 29.10.2026). Werte je Firma × Größe in public.funded_cfd_plan_regeln (sql/2026-10-30_funded_cfd_planer.sql):
+#  - Ziel = Gewinn über der Kontogröße (Starting Balance; nach dem Payout steht die Balance wieder dort). Gewinn ≥ ziel[0] → Ziel erreicht →
+#    „Waiting for Payout" (nur angezeigt, umgestellt nur mit ziel_auto_wartet; der Knopf im Konto setzt waiting_payout_since wie bisher).
+#    Konten mit waiting_payout_since plant der Planer nie.
+#  - TP immer aufs Ziel: Ziel (je Trade gewürfelt in ziel[von, bis]) − bisheriger Gewinn — nach einem Verlusttag entsprechend höher
+#    (FundedNext 100k −2k → TP ≈ 3,5–3,85k). The5ers im 1. Payout-Zyklus (kein Payout in pending/managed_payouts) fest tp_erster 750 $:
+#    die Consistency Rule (größter Tag ≤ 50 %) wird beim Payout nicht zurückgesetzt (Finn 30.10.2026).
+#  - SL und Lots gewürfelt in ihrem Bereich; FundedNext mit 1-%-Risk-Limit (accounts.max_risiko_trade gesetzt, z. B. Jacob) → sl_1pct.
+#  - Hedge: hedge_eur € auf dd $ Drawdown → master_risk = dd, slave_risk = hedge_eur, multiplier wie gp_multiplikator (Echo-Popup).
+#  - Uhrzeit zufällig im Fenster des Challenge-Planers (fdp_fenster), Richtung gewürfelt — RICHTUNGSSCHUTZ: hat dieselbe ID × Firma schon einen
+#    laufenden/wartenden/geplanten Trade, nimmt der Vorschlag dessen Richtung; mehrere Konten derselben ID × Firma im Lauf = eine Richtung.
+#  - Symbol = das der Challenges der Firma (Finn: „immer das Gleiche") → master_symbol bleibt leer wie beim Challenge-/Gruppen-Planer.
+#  - Kennung mt5_baseline.funded_plan {art: "cfd", start_um …} — dieselbe wie der Funded-Planer: das Frontend sperrt unbestätigte Vorschläge
+#    damit schon (rowToPlan fundedVorschlag), fdp_vorschlaege_aufraeumen räumt alte weg. auto_plan = false → Waage, eh_tick, Richtungs-Bot und
+#    Nachtlauf fassen die Pläne nicht an. Bestätigen/Zurück/Löschen über /admin/funded-cfd-plan/… (nur art cfd).
+#  - IDs: user_ids der Regel (HT + Emins Gruppe); jede Antwort nur die Sicht des Logins (Gruppe für sich), Firmen-Abstand je Gruppe.
+FCP_TAKT_S = 300
+FCP_ZEITEN_STANDARD = {"firma_abstand_min": 15, "abstand_id_min": 10, "vorlauf_min": 15}
+FCP_ART = "cfd"
+FCP_TP_MIN_USD = 250          # Rest bis Ziel kleiner (z. B. Gewinn 1.290, Ziel 1.300 → 10 $ ≈ Spread): TP 250 $, kleiner Overshoot (Prüfung S4)
+_fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
+
+
+def fcp_je_groesse(regel, groesse):
+    """Werte je Kontogröße (ziel, sl, lots, hedge_eur, dd …) der Firmen-Regel oder None."""
+    if not regel or not groesse:
+        return None
+    return (regel.get("je_groesse") or {}).get(str(int(groesse)))
+
+
+def fcp_bereich(b):
+    """REIN RECHNEND: [von, bis] | Zahl → (von, bis) als float oder None."""
+    if isinstance(b, (int, float)) and not isinstance(b, bool):
+        return float(b), float(b)
+    if isinstance(b, (list, tuple)) and len(b) == 2 and all(_wd_num(x) is not None for x in b):
+        lo, hi = sorted(float(x) for x in b)
+        return lo, hi
+    return None
+
+
+def fcp_wuerfel(b, rnd, stellen=0):
+    """REIN RECHNEND (testbar): Zufallswert im Bereich, gerundet auf stellen (0 = ganze $). rnd None → Mitte."""
+    lohi = fcp_bereich(b)
+    if not lohi:
+        return None
+    lo, hi = lohi
+    x = (lo + hi) / 2.0 if rnd is None else rnd.uniform(lo, hi)
+    return round(x, stellen) if stellen else float(round(x))
+
+
+def fcp_konto_rechnen(jg, balance, groesse, erster_zyklus, eins_prozent, mppl, sppl, rnd=None):
+    """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
+    jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), erster_zyklus = noch kein Payout (nur für
+    tp_erster), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt je Fusion-Lot."""
+    g = float(groesse or 0)
+    if not jg or not g:
+        return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-CFD-Planer"}
+    if balance is None:
+        return {"aktion": "aus", "grund": "keine Balance"}
+    ziel_b, dd = fcp_bereich(jg.get("ziel")), _wd_num(jg.get("dd"))
+    if not ziel_b or not dd:
+        return {"aktion": "aus", "grund": "Regel unvollständig (ziel / dd)"}
+    gewinn = round(float(balance) - g, 2)
+    basis = {"balance": round(float(balance), 2), "start": g, "gewinn": gewinn, "ziel_von": g + ziel_b[0], "ziel_bis": g + ziel_b[1],
+             "dd": dd, "erster_zyklus": bool(erster_zyklus), "eins_prozent": bool(eins_prozent)}
+    if balance <= g - dd:
+        return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ am/unter dem Boden ({_liq_de(g - dd)} $) — geblowt?")
+    if gewinn > 2 * ziel_b[1] + dd:
+        return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k — ↻ Balance neu lesen")
+    if gewinn >= ziel_b[0] - 0.005:
+        return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
+    ziel = fcp_wuerfel(jg.get("ziel"), rnd)
+    ziel = max(ziel, ziel_b[0])
+    if erster_zyklus and _wd_num(jg.get("tp_erster")):
+        tp, tp_art = float(jg["tp_erster"]), "erster_payout"
+    else:
+        tp, tp_art = float(round(ziel - gewinn)), ("nachholen" if gewinn < 0 else "ziel")
+        if tp < FCP_TP_MIN_USD:
+            tp, tp_art = float(FCP_TP_MIN_USD), "mindest"
+    sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") else jg.get("sl")
+    sl = fcp_wuerfel(sl_b, rnd)
+    lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
+    if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
+        return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
+    if not mppl:
+        return dict(basis, aktion="aus", grund="kein Punktwert der Firma ($/Pkt je Lot in den Firmen-Einstellungen dieser ID)")
+    h, grund = gp_hedge(dd, _wd_num(jg.get("hedge_eur")), lots, mppl, sppl or GP_SLAVE_PPL)
+    if grund:
+        return dict(basis, aktion="aus", grund=grund)
+    q = float(h["slave_risk"]) / float(dd)                 # € Hedge je $ Master
+    return dict(basis, aktion="planen", grund="", ziel=g + ziel, tp=tp, sl=sl, lots=lots, tp_art=tp_art,
+                tp_pkt=round(tp / (mppl * lots), 1), sl_pkt=round(sl / (mppl * lots), 1),
+                hedge_eur=h["slave_risk"], hedge_lots=h["lots"], master_risk=h["master_risk"], slave_risk=h["slave_risk"],
+                multiplier=h["multiplier"], hedge_tp_eur=round(-q * tp, 2), hedge_sl_eur=round(q * sl, 2))
+
+
+def fcp_richtung(fest, rnd):
+    """REIN RECHNEND (testbar): Richtungsschutz — fest (buy|sell aus einem Trade derselben ID × Firma) gewinnt, sonst gewürfelt."""
+    return fest if fest in ("buy", "sell") else rnd.choice(("buy", "sell"))
+
+
+def fcp_fest_richtung(plaene, tag_iso=None):
+    """REIN RECHNEND (testbar): {uid|firmkey: richtung} aus Plänen [{user_id, master_firm, status, richtung, started_at, start_um, fp_start}].
+    Laufend/wartend (open, review) zuerst, sonst ein geplanter (bestätigt oder Vorschlag) — dieselbe ID × Firma darf nie gegeneinander."""
+    out, prio = {}, {}
+    for p in plaene or ():
+        r = p.get("richtung")
+        if r not in ("buy", "sell"):
+            continue
+        st = p.get("status")
+        if st in ("open", "review"):
+            pr = 0
+        elif st == "planned":
+            pr = 1
+        else:
+            continue
+        k = str(p.get("user_id")) + "|" + _ap_norm(_firm_norm(p.get("master_firm")))
+        if k not in prio or pr < prio[k]:
+            prio[k], out[k] = pr, r
+    return out
+
+
+def _fcp_regeln_laden():
+    """funded_cfd_plan_regeln (id 1) → Zeile | None (Tabelle fehlt = SQL noch nicht eingespielt; Meldung höchstens stündlich)."""
+    try:
+        return (sb_select("funded_cfd_plan_regeln", {"select": "*", "id": "eq.1"}) or [None])[0]
+    except Exception as e:
+        if time.time() - (_fcp_info.get("regeln_fehlt_at") or 0) > 3600:
+            _fcp_info["regeln_fehlt_at"] = time.time()
+            print(f"[funded-cfd] funded_cfd_plan_regeln nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — SQL eingespielt?", flush=True)
+        return None
+
+
+def _fcp_gruppe_je_uid(uids):
+    """{user_id: gruppen_id} aus id_gruppe_mitglied (Firmen-Abstand je Gruppe wie der DB-Trigger). Lesefehler → leer (dann eine Gruppe)."""
+    try:
+        return {str(m.get("user_id")): str(m.get("gruppe_id")) for m in _sb_all("id_gruppe_mitglied", {"select": "user_id,gruppe_id",
+                                                                                                        "user_id": "in.(" + ",".join(uids) + ")"}) or []}
+    except Exception as e:
+        print(f"[funded-cfd] ⚠️ Gruppen: {type(e).__name__}: {e}", flush=True)
+        return {}
+
+
+def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
+    """Ein Lauf des Funded-CFD-Planers. trocken=True: nur rechnen (GET /admin/funded-cfd-plan), sonst Vorschläge anlegen.
+    → {ok, geplant[], ziel[], ausgelassen[], plaene[], …} über alle IDs der Regel (nur_ids: nur diese, „Jetzt planen" einer Gruppe) —
+    die Routen filtern die Antwort nach Sicht."""
+    jetzt = jetzt or datetime.now(timezone.utc)
+    reg = _fcp_regeln_laden()
+    if not reg:
+        return {"ok": False, "msg": "funded_cfd_plan_regeln fehlt — sql/2026-10-30_funded_cfd_planer.sql einspielen"}
+    zeiten = dict(FCP_ZEITEN_STANDARD, **(reg.get("zeiten") or {}))
+    try:
+        ap_zeiten = (sb_select("auto_plan_regeln", {"select": "zeiten", "id": "eq.1"}) or [{}])[0].get("zeiten") or {}
+    except Exception as e:
+        print(f"[funded-cfd] ⚠️ Fenster des Challenge-Planers nicht gelesen ({type(e).__name__}: {e}) — Rückfall", flush=True)
+        ap_zeiten = {}
+    tzname, von_min, bis_min = fdp_fenster(ap_zeiten)
+    firmen = [f for f in (reg.get("firmen") or []) if isinstance(f, dict)]
+    an = [f for f in firmen if f.get("an")]
+    uids = [str(u) for u in (reg.get("user_ids") or []) if nur_ids is None or str(u) in nur_ids]
+    tz = _ap_tz(tzname)
+    lokal = jetzt.astimezone(tz)
+    mitternacht = lokal.replace(hour=0, minute=0, second=0, microsecond=0)
+    jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
+    ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
+    plan_tag = _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat())
+    f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
+    id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 10)
+    hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"   # noqa: E731
+    auto_ok = reg.get("auto_bestaetigen") is True
+    erg = {"ok": True, "trocken": bool(trocken), "aktiv": bool(reg.get("aktiv")), "auto_bestaetigen": auto_ok,
+           "ziel_auto_wartet": reg.get("ziel_auto_wartet") is True, "at": jetzt.isoformat(), "tag": plan_tag,
+           "zeiten": dict(zeiten, tz=tzname, von=hhmm(von_min), bis=hhmm(bis_min)),
+           # Regel-Feld im Reiter „Funded Planer → CFD" (S3) liest die Werte von hier — die Tabelle hat keine Policy (nur Railway)
+           "firmen": [{"name": f.get("name") or (f.get("namen") or [""])[0], "an": bool(f.get("an")), "namen": f.get("namen") or [],
+                       "ohne_namen": f.get("ohne_namen") or [], "je_groesse": f.get("je_groesse") or {}} for f in firmen],
+           "geplant": [], "ziel": [], "ausgelassen": [], "plaene": []}
+    if not uids or not an:
+        erg["msg"] = "keine ID bzw. keine Firma an"
+        return erg
+    if datetime.strptime(plan_tag, "%Y-%m-%d").weekday() >= 5:      # wie fdp_planen: NAS100-CFD am Wochenende zu
+        erg["msg"] = "Wochenende — kein Handelstag"
+        return erg
+    in_uids = "in.(" + ",".join(uids) + ")"
+    konten = _sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since,max_risiko_trade",
+                                  "user_id": in_uids, "account_type": "eq.funded_cfd"}) or []
+    archiv = _ap_archiviert()
+    konten = [a for a in konten if ap_regel_finden(an, a.get("firm")) and str(a.get("id")) not in archiv]
+    ids = [str(a["id"]) for a in konten]
+    plaene, payouts = [], {}
+    for i in range(0, len(ids), 80):
+        teil = ",".join(ids[i:i + 80])
+        plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,started_at,ended_at,completed_at,start_um,"
+                                                    "master_pl,slave_pl,route,richtung,master_contracts,master_tp,master_sl,multiplier,auto_bestaetigt_at,"
+                                                    "created_at,planned_for,notes,funded_plan:mt5_baseline->funded_plan,final:mt5_baseline->final",
+                                          "master_account_id": f"in.({teil})", "created_at": "gte." + (jetzt - timedelta(days=120)).isoformat()}) or []
+        for z in _sb_all("pending_payouts", {"select": "account_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []:
+            payouts.setdefault(str(z.get("account_id")), []).append(z.get("requested_at") or z.get("created_at"))
+        for z in _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []:
+            payouts.setdefault(str(z.get("account_id")), []).append(z.get("payout_date") or z.get("created_at"))
+    # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
+    offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
+                                         "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
+    fest_je = fcp_fest_richtung(offen_alle)
+    gruppe_je = _fcp_gruppe_je_uid(uids)
+    echo_bal, dup_bal = _ap_balance_karten()
+    ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
+                                  norm=lambda n: _ap_norm(_firm_norm(n)))
+    ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
+    hedge_ids = {}
+    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}) or []:
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        if v.get("accountId"):
+            hedge_ids[str(r.get("user_id"))] = str(v["accountId"])
+    hedge_acc = {str(x["id"]): x for x in (_sb_all("accounts", {"select": "id,name,firm", "id": "in.(" + ",".join(sorted(set(hedge_ids.values()))) + ")"})
+                                           if hedge_ids else [])}
+    try:
+        namen = _ap_namen()[0]
+    except Exception:
+        namen = {}
+    je_plan = {}
+    for p in plaene:
+        je_plan.setdefault(str(p.get("master_account_id")), []).append(p)
+    rnd = random.Random(seed if seed is not None else f"fcp-{plan_tag}-{int(jetzt.timestamp() // FCP_TAKT_S)}")
+    kand = []
+    for a in konten:
+        aid, uid, pl = str(a["id"]), str(a.get("user_id")), je_plan.get(str(a["id"]), [])
+        regel = ap_regel_finden(an, a.get("firm"))
+        fkey = (regel.get("namen") or [""])[0]
+        if fkey.startswith("tradeify") and not _ist_tradeify_cfd(a.get("firm")):
+            continue                     # Tradeify-Futures nie hier (Regel-Schlüssel „tradeify" ohne cfd hat keine Zeile, doppelt gesichert)
+        zeile = {"konto_id": aid, "user_id": uid, "user": namen.get(uid) or uid[:8], "konto": a.get("name"), "firma": a.get("firm"), "firma_key": fkey}
+        aus = lambda grund, **x: erg["ausgelassen"].append(dict(zeile, aktion="aus", grund=grund, **x))   # noqa: E731
+        if any(w and w in str(a.get("name") or "").lower() for w in (regel.get("ohne_namen") or [])):
+            aus("Flex-Konto — plant der Funded-CFD-Planer noch nicht"); continue
+        if a.get("auto_planer") is False:
+            aus("Haken „Auto-Planer“ am Konto aus"); continue
+        if a.get("waiting_payout_since"):
+            aus("Waiting for Payout — Payout anfragen, danach plant der Planer wieder"); continue
+        g = _wd_konto_groesse(a)
+        jg = fcp_je_groesse(regel, g)
+        if not jg:
+            aus(f"keine Werte für {int(g / 1000) if g else '?'}k im Funded-CFD-Planer"); continue
+        if not hedge_ids.get(uid) or hedge_ids[uid] not in hedge_acc:
+            aus("kein Echo-Hedge-Konto (Fusion) bei dieser ID — im Echo-Popup das Hedge-Konto wählen"); continue
+        lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
+        if lauf:
+            aus({"planned": "schon geplant", "open": "läuft gerade", "review": "wartet auf Nachlesung (Überprüfen)"}.get(lauf[0].get("status"), "Plan offen"),
+                plan_id=lauf[0].get("id")); continue
+        if any(p.get("started_at") and _cme_handelstag(p["started_at"]) == plan_tag for p in pl):
+            aus("heute schon getradet"); continue
+        bal, _ccy, bal_quelle, stand = acc_balance_wahl(a, echo_bal, dup_bal)
+        letzt = max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None
+        if letzt and (bal is None or not ap_balance_live(stand, letzt)):
+            fin = next((p.get("final") for p in sorted(pl, key=lambda p: str(p.get("ended_at") or p.get("completed_at") or ""), reverse=True)
+                        if isinstance(p.get("final"), dict)), None)
+            be = _wd_num((fin or {}).get("balance_end"))
+            if not be:
+                aus("Balance nicht live (seit dem letzten Trade nicht nachgelesen) — ↻ Balance lesen"); continue
+            bal, bal_quelle = be, "Nachlesung"
+        if bal is None:
+            aus("keine Balance — ↻ Balance lesen"); continue
+        mppl = ap_cfd_ppl(ctx_ppl, a)
+        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+        r = fcp_konto_rechnen(jg, float(bal), g, not payouts.get(aid), bool(_wd_num(a.get("max_risiko_trade"))), mppl, sppl, rnd)
+        r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=len(payouts.get(aid) or []))
+        if r["aktion"] == "ziel":
+            erg["ziel"].append(r)
+        elif r["aktion"] != "planen":
+            erg["ausgelassen"].append(r)
+        else:
+            r["letzter_trade"] = max([str(p.get("started_at")) for p in pl if p.get("started_at")] or [str(a.get("created_at") or "")]) or None
+            kand.append((a, r))
+    # Startzeiten (Minuten ab Mitternacht der Fenster-Zone): Firmen-Abstand je Gruppe, Abstand je ID (ein PC) gegen alle Starts der IDs
+    belegt_id, belegt_firma = {}, {}
+    for b in offen_alle:
+        t = b.get("started_at") if b.get("status") == "open" else (b.get("start_um") or b.get("fp_start"))
+        if not t or b.get("status") == "review":
+            continue
+        m = _ap_iso_min(t, mitternacht)
+        if m is None:
+            continue
+        u = str(b.get("user_id"))
+        belegt_id.setdefault(u, []).append(m)
+        belegt_firma.setdefault(gruppe_je.get(u, "") + "|" + _ap_norm(_firm_norm(b.get("master_firm"))), []).append(m)
+    im_tag = lambda m: _cme_handelstag((mitternacht + timedelta(minutes=m)).astimezone(timezone.utc).isoformat()) == plan_tag   # noqa: E731
+    kmap = {str(a["id"]): (a, r) for a, r in kand}
+    minuten, ohne = fdp_zeiten([(str(a["user_id"]), str(a["id"]), gruppe_je.get(str(a["user_id"]), "") + "|" + _ap_norm(_firm_norm(a.get("firm"))))
+                                for a, _r in kand], belegt_id, belegt_firma, ab_min, float(bis_min), id_abst, f_abst, rnd,
+                               erlaubt=im_tag, letzt={str(a["id"]): r.get("letzter_trade") for a, r in kand})
+    for aid in ohne:
+        erg["ausgelassen"].append(dict(kmap[aid][1], aktion="aus", grund="kein freier Slot mehr im Fenster heute (Firmen-Abstand / Abstand je ID)"))
+    zeilen = []
+    for aid, m in sorted(minuten.items(), key=lambda x: x[1]):
+        a, r = kmap[aid]
+        uid = str(a["user_id"])
+        tkey = uid + "|" + _ap_norm(_firm_norm(a.get("firm")))
+        richtung = fcp_richtung(fest_je.get(tkey), rnd)
+        geschuetzt = tkey in fest_je
+        fest_je[tkey] = richtung                         # weitere Konten derselben ID × Firma in diesem Lauf: dieselbe Richtung
+        start = mitternacht + timedelta(minutes=m)
+        start_iso = start.astimezone(timezone.utc).isoformat()
+        hid = hedge_ids[uid]
+        notiz = (f"Funded-CFD-Planer{'' if auto_ok else ' · Vorschlag'} · Gewinn {_liq_de(r['gewinn'])} $ → Ziel {_liq_de(r['ziel'])} $"
+                 f" · TP {r['tp_art']} · Hedge {_liq_de(r['hedge_eur'])} € auf {_liq_de(r['dd'])} $ DD"
+                 + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else ""))
+        zeilen.append({
+            "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
+            "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
+            "master_contracts": r["lots"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
+            "master_tp": r["tp"], "master_sl": r["sl"], "richtung": richtung, "route": "mt5", "konto_typ": "funded_cfd",
+            # Vorschlag (Standard): ohne start_um startet kein PC-Tab den Plan — erst „Bestätigen" setzt die Startzeit
+            "start_um": start_iso if auto_ok else None, "status": "planned", "priority": "medium", "planned_for": plan_tag,
+            "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_ok else None, "notes": notiz,
+            "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
+                                                                         "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus")},
+                                                 art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
+        erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
+                                   vorschlag=not auto_ok, hedge_konto=hedge_acc[hid].get("name")))
+    if not trocken:
+        for z in zeilen:
+            try:
+                # Rennen mit einem Hand-Plan seit dem Laden: nur anlegen, wenn das Konto weiter keinen offenen Plan hat
+                if sb_select("trade_plans", {"select": "id", "master_account_id": f"eq.{z['master_account_id']}",
+                                             "status": "in.(planned,open,review)", "limit": "1"}):
+                    continue
+                sb_insert("trade_plans", z)
+            except Exception as e:
+                erg["ausgelassen"].append({"konto_id": z["master_account_id"], "konto": z["master_name"], "user_id": str(z["user_id"]),
+                                           "aktion": "aus", "grund": f"Anlegen fehlgeschlagen: {str(e)[:160]}"})
+                print(f"[funded-cfd] ⚠️ Plan {z['master_name']}: {e}", flush=True)
+        if reg.get("ziel_auto_wartet") is True:
+            for r in erg["ziel"]:
+                try:          # wie der Knopf „→ Waiting for Payout" im Konto (accWartetUmstellen): nur waiting_payout_since
+                    sb_update("accounts", {"id": f"eq.{r['konto_id']}", "account_type": "eq.funded_cfd", "waiting_payout_since": "is.null"},
+                              {"waiting_payout_since": jetzt.isoformat()})
+                except Exception as e:
+                    print(f"[funded-cfd] ⚠️ Waiting for Payout {r.get('konto')}: {e}", flush=True)
+        if zeilen:
+            try:
+                sb_insert("auto_plan_lauf", {"tag": plan_tag, "quelle": "funded_cfd", "ergebnis": {k: erg[k] for k in ("geplant", "ziel", "ausgelassen")}})
+            except Exception as e:
+                print(f"[funded-cfd] ⚠️ auto_plan_lauf: {e}", flush=True)
+    # Pläne der Funded-CFD-Konten (geplant/laufend/wartend oder seit 30 h gestartet/beendet) für „Zu bestätigen", „Läuft", „Heute beendet"
+    seit = (jetzt - timedelta(hours=30)).isoformat()
+    km = {str(a["id"]): a for a in konten}
+    for p in plaene:
+        if not (p.get("status") in ("planned", "open", "review") or str(p.get("started_at") or p.get("ended_at") or "") >= seit):
+            continue
+        fp = p.get("funded_plan") if isinstance(p.get("funded_plan"), dict) else None
+        # Echo klassisch: der Start schreibt mt5_baseline neu (Kennung weg) — die Notiz „Funded-CFD-Planer …" bleibt als Rückfall
+        von_fcp = bool(fp and fp.get("art") == FCP_ART) or str(p.get("notes") or "").startswith("Funded-CFD-Planer")
+        k = km.get(str(p.get("master_account_id"))) or {}
+        erg["plaene"].append({"plan_id": str(p.get("id")), "user_id": str(p.get("user_id") or k.get("user_id") or ""), "konto_id": str(p.get("master_account_id")),
+                              "konto": k.get("name"), "firma": k.get("firm"), "status": p.get("status"), "richtung": p.get("richtung"), "route": p.get("route"),
+                              "start_um": p.get("start_um") or (fp or {}).get("start_um"), "started_at": p.get("started_at"),
+                              "ended_at": p.get("ended_at") or p.get("completed_at"), "lots": _wd_num(p.get("master_contracts")),
+                              "tp": _wd_num(p.get("master_tp")), "sl": _wd_num(p.get("master_sl")), "pl": _wd_num(p.get("master_pl")),
+                              "hedge_pl": _wd_num(p.get("slave_pl")), "hedge_lots": round(_wd_num(p.get("multiplier")) * _wd_num(p.get("master_contracts")), 2)
+                              if _wd_num(p.get("multiplier")) and _wd_num(p.get("master_contracts")) else None,
+                              "funded_cfd_plan": von_fcp,
+                              "vorschlag": bool(fp and fp.get("art") == FCP_ART) and not p.get("auto_bestaetigt_at") and p.get("status") == "planned",
+                              **({x: fp.get(x) for x in ("ziel", "gewinn", "tp_art", "hedge_eur", "hedge_tp_eur", "hedge_sl_eur", "eins_prozent")} if fp else {})})
+    return erg
+
+
+def fcp_sicht(erg, sicht):
+    """REIN RECHNEND (testbar): Antwort nur mit den Zeilen der Sicht (None alle, str eine ID, Menge eine Gruppe)."""
+    if sicht is None:
+        return erg
+    out = dict(erg)
+    for f in ("geplant", "ziel", "ausgelassen", "plaene"):
+        out[f] = [z for z in erg.get(f) or [] if admin_in_sicht(z.get("user_id"), sicht)]
+    out["sicht"] = "eigene" if isinstance(sicht, str) else "gruppe"
+    return out
+
+
+def fcp_tick(jetzt=None):
+    """Takt aus ap_loop: alle FCP_TAKT_S, nur wenn funded_cfd_plan_regeln.aktiv. Legt Vorschläge an; unbestätigte Vorschläge früherer Tage
+    räumt fdp_vorschlaege_aufraeumen weg (dieselbe Kennung mt5_baseline.funded_plan)."""
+    if time.time() - (_fcp_info.get("at") or 0) < FCP_TAKT_S:
+        return None
+    _fcp_info["at"] = time.time()
+    reg = _fcp_regeln_laden()
+    if not reg or not reg.get("aktiv"):
+        return None
+    jetzt = jetzt or datetime.now(timezone.utc)
+    try:
+        fdp_vorschlaege_aufraeumen(jetzt)
+    except Exception as e:
+        print(f"[funded-cfd] ⚠️ Aufräumen: {type(e).__name__}: {e}", flush=True)
+    erg = fcp_planen(trocken=False, jetzt=jetzt)
+    _fcp_info.update(letzter=dict({k: erg.get(k) for k in ("at", "tag")}, geplant=len(erg.get("geplant") or []), ziel=len(erg.get("ziel") or [])),
+                     fehler="" if erg.get("ok") else str(erg.get("msg") or ""))
+    if erg.get("geplant"):
+        print(f"[funded-cfd] {len(erg['geplant'])} Vorschläge, {len(erg.get('ziel') or [])} Ziel erreicht", flush=True)
+    return erg
+
+
+def fcp_gruppen_sicht(uid, alle_ids, gruppe_von, nur_eigene=False):
+    """REIN RECHNEND (testbar): SICHT JE GRUPPE (Finn 30.10.2026 05:08: „Eine ID von Hermann Technologies soll … nur alle Trades von Hermann
+    Technologies sehen, auch im Planer. Eine ID von Emin … nur die Trades von Emins IDs"). → frozenset der IDs, die dieser Login im
+    Funded-CFD-Planer sieht. gruppe_von(uid) → IDs der Gruppe MIT Verwalter (admin_lese_gruppe_menge) | None. In einer solchen Gruppe: die
+    Gruppe; eingeschränkt ohne Gruppe („nur eigene"): nur er; sonst HT = alle IDs der Regel ohne die IDs aller Verwalter-Gruppen."""
+    gr = gruppe_von(str(uid)) if uid else None
+    if gr:
+        return frozenset(str(u) for u in gr)
+    if nur_eigene:
+        return frozenset({str(uid)}) if uid else frozenset()
+    return frozenset(str(u) for u in (alle_ids or ()) if not gruppe_von(str(u)))
+
+
+def fcp_schreib_sicht(eingriff, lese):
+    """REIN RECHNEND (testbar): Schreib-Sicht = ap_eingriff_sicht (None alle | str eine ID | Menge) geschnitten mit der Gruppen-Sicht —
+    auch ein Admin bestätigt hier nie über die Gruppe hinaus."""
+    if eingriff is None:
+        return lese
+    if isinstance(eingriff, str):
+        return eingriff if eingriff in lese else frozenset()
+    return frozenset(eingriff) & lese
+
+
+def _fcp_login():
+    """Gate wie _fdp_login (im_planer = funded_cfd_plan_regeln.user_ids) → (admin, uid, lese, schreib, err). lese = Gruppen-Sicht
+    (fcp_gruppen_sicht), schreib = fcp_schreib_sicht — beide nie None (immer eine Gruppe)."""
+    _mail, err = _admin_auth()
+    admin = err is None
+    uid = str(request.environ.get("prophos.admin_uid") or "") if admin else None
+    if not admin:
+        if err[1] != 403:
+            return False, None, None, None, err
+        uid, err2 = _wd_login()
+        if err2:
+            return False, None, None, None, err2
+    try:
+        sicht_l, verwalter = admin_sicht_lesen(str(uid))
+        nur, gruppe = sicht_l is not None, (sicht_l if verwalter else None)
+        reg = _fcp_regeln_laden() or {}
+        im_planer = False if admin else str(uid) in [str(u) for u in (reg.get("user_ids") or [])]
+        daten = admin_gruppen_daten()
+        von = lambda u: admin_lese_gruppe_menge(u, daten)   # noqa: E731 — echte Gruppen mit Verwalter, nicht nur mit Planer-Zeile
+        lese = fcp_gruppen_sicht(uid, reg.get("user_ids") or [], von, nur_eigene=nur and not admin)
+        schreib = fcp_schreib_sicht(ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param(), gruppe), lese)
+    except Exception:
+        return admin, uid, None, None, (jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502)
+    return admin, uid, lese, schreib, None
+
+
+@app.route("/admin/funded-cfd-plan", methods=["GET", "OPTIONS"])
+def admin_funded_cfd_plan():
+    """Vorschau des Funded-CFD-Planers (Trockenlauf, nichts geschrieben) + bestehende Vorschläge/Pläne für den Reiter „Funded Planer → CFD"."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _admin, _uid, sicht, _schreib, err = _fcp_login()
+    if err:
+        return err
+    try:
+        erg = fcp_planen(trocken=True)
+    except Exception as e:
+        print(f"[funded-cfd] ⚠️ Vorschau: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
+    erg = fcp_sicht(erg, sicht)
+    erg["info"] = {k: _fcp_info.get(k) for k in ("letzter", "fehler")}
+    return jsonify(erg), (200 if erg.get("ok") else 503)
+
+
+def _fcp_eingriff(aktion):
+    """POST /admin/funded-cfd-plan/{bestaetigen {plan_ids} | zurueck {plan_id} | loeschen {plan_id}} — Guard fdp_eingriff_filter + art cfd.
+    Bestätigen: Balance live (ap_bal_guard), Startzeiten gestreut (fdp_start_verteilen: Firmen-Abstand je Firma, Abstand je ID gegen alle
+    geplanten/laufenden Pläne der ID — Echo braucht den PC der ID), dann start_um + auto_bestaetigt_at."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, _lese, sicht, err = _fcp_login()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
+    params, art = fdp_eingriff_filter(aktion, ids, sicht, art=FCP_ART)
+    if params is None:
+        return jsonify({"ok": False, "msg": art}), 400
+    try:
+        if sicht is not None:
+            fremd = [z for z in sb_select("trade_plans", {"select": "id,user_id", "id": params["id"]}) if not admin_in_sicht(z.get("user_id"), sicht)]
+            if fremd:
+                return jsonify({"ok": False, "msg": "nur eigene Pläne" if isinstance(sicht, str) else "nur Pläne der eigenen Gruppe"}), 403
+        jetzt = datetime.now(timezone.utc)
+        if aktion == "bestaetigen":
+            sperre = ap_bal_guard(lambda: _ap_bal_guard_laden(params["id"]))
+            if sperre:
+                return jsonify({"ok": False, "msg": sperre[1]}), sperre[0]
+            zt = dict(FCP_ZEITEN_STANDARD, **((_fcp_regeln_laden() or {}).get("zeiten") or {}))
+            neu = sb_select("trade_plans", dict(params, select="id,user_id,master_firm,fp_start:mt5_baseline->funded_plan->>start_um")) or []
+            ids_neu = {str(p["id"]) for p in neu}
+            # Firmen-Abstand gegen ALLE geplanten/laufenden Starts (je Gruppe wie der DB-Trigger), Abstand je ID über die user_id (Prüfung S4)
+            daten = admin_gruppen_daten()
+            gk = lambda u, f: ",".join(sorted(admin_lese_gruppe_menge(u, daten) or ())) + "|" + _ap_norm(_firm_norm(f))   # noqa: E731
+            belegt = []
+            for b in sb_select("trade_plans", {"select": "id,user_id,master_firm,status,start_um,started_at", "status": "in.(planned,open)",
+                                               "planned_for": f"gte.{(jetzt - timedelta(days=1)).date().isoformat()}"}) or []:
+                t = b.get("started_at") if b.get("status") == "open" else b.get("start_um")
+                if str(b.get("id")) in ids_neu or not t:
+                    continue
+                try:
+                    t = datetime.fromisoformat(str(t).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                belegt.append((gk(b.get("user_id"), b.get("master_firm")), str(b.get("user_id")), True, t))
+            starts = fdp_start_verteilen([dict(p, firma=gk(p.get("user_id"), p.get("master_firm"))) for p in neu], belegt, jetzt,
+                                         60 * float(zt.get("firma_abstand_min") or 15), 60 * float(zt.get("abstand_id_min") or 10))
+            zeilen = []
+            for p in neu:
+                zeilen += sb_update("trade_plans", dict(params, id=f"eq.{p['id']}"),
+                                    {"auto_bestaetigt_at": jetzt.isoformat(), "start_um": starts.get(str(p["id"])) or fdp_start_bestaetigt(p.get("fp_start"), jetzt),
+                                     "start_um_gestartet_at": None})
+        elif art == "delete":
+            zeilen = sb_delete("trade_plans", params)
+        else:
+            zeilen = sb_update("trade_plans", params, {"auto_bestaetigt_at": None, "start_um": None})
+        print(f"[funded-cfd] {aktion}: {len(zeilen)} Zeile(n) durch {'Admin' if admin else 'ID ' + str(uid)[:8]}", flush=True)
+        return jsonify({"ok": True, "aktion": aktion, "n": len(zeilen), "zeilen": zeilen})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 502
+
+
+@app.route("/admin/funded-cfd-plan/bestaetigen", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_bestaetigen():
+    return _fcp_eingriff("bestaetigen")
+
+
+@app.route("/admin/funded-cfd-plan/zurueck", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_zurueck():
+    return _fcp_eingriff("zurueck")
+
+
+@app.route("/admin/funded-cfd-plan/loeschen", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_loeschen():
+    return _fcp_eingriff("loeschen")
+
+
+@app.route("/admin/funded-cfd-plan/planen", methods=["POST", "OPTIONS"])
+def admin_funded_cfd_plan_planen():
+    """POST {tag: auto | heute | morgen} — „Jetzt planen" wie beim Funded-Planer (Vorschläge ohne Startzeit). Nur bei aktiv = true; legt für
+    alle IDs der Regel an (jede Gruppe für sich), die Antwort zeigt nur die Sicht des Logins."""
+    if request.method == "OPTIONS":
+        return "", 200
+    admin, uid, sicht, schreib, err = _fcp_login()
+    if err:
+        return err
+    if isinstance(schreib, str) or not schreib:
+        return jsonify({"ok": False, "msg": "Jetzt planen nur im Admin-Reiter (alle IDs der Gruppe)"}), 403
+    reg = _fcp_regeln_laden()
+    if not reg:
+        return jsonify({"ok": False, "msg": "funded_cfd_plan_regeln fehlt — SQL einspielen"}), 503
+    if not reg.get("aktiv"):
+        return jsonify({"ok": False, "msg": "Funded-CFD-Planer ist aus (funded_cfd_plan_regeln.aktiv)"}), 409
+    body = request.get_json(silent=True) or {}
+    bezug, wort = fdp_plan_jetzt(body.get("tag"), datetime.now(timezone.utc))
+    try:
+        erg = fcp_sicht(fcp_planen(trocken=False, jetzt=bezug, nur_ids=schreib), sicht)
+    except Exception as e:
+        print(f"[funded-cfd] ⚠️ Jetzt planen: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
+    kurz = lambda z: {k: z.get(k) for k in ("konto", "konto_id", "user_id", "start", "start_um", "richtung", "tp", "sl", "lots", "hedge_lots", "grund")}   # noqa: E731
+    print(f"[funded-cfd] Jetzt planen ({wort}) durch {'Admin' if admin else 'ID ' + str(uid)[:8]}: {len(erg.get('geplant') or [])} Vorschläge", flush=True)
+    return jsonify({"ok": bool(erg.get("ok")), "tag": wort, "plan_tag": erg.get("tag"), "msg": erg.get("msg"),
+                    "geplant": [kurz(z) for z in erg.get("geplant") or []], "ziel": [kurz(z) for z in erg.get("ziel") or []],
+                    "ausgelassen": [kurz(z) for z in erg.get("ausgelassen") or []]})
 
 
 def start_auto_planer():
