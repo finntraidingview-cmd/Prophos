@@ -79,8 +79,10 @@ for f in ("admin_auto_plan_start_protokoll", "admin_auto_plan_waage_start"):
         check("_planer_schreib_gate()" not in rumpf(f), f"kein Riegel in {f} (PC-Tab beim Start)")
     except ValueError:
         pass
-check(set(app.PLANER_WD_AUTOMATIK) == {"ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden"},
-      "wd-plaene: PC-Tab-Automatik (ende, endlesung, Stände, balance, tab_neu_laden) nie gesperrt")
+check(set(app.PLANER_WD_AUTOMATIK) == {"ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden", "ansehen"},
+      "wd-plaene: PC-Tab-Automatik (ende, endlesung, Stände, balance, tab_neu_laden) + ansehen nie gesperrt")
+check(app.PLANER_PLAN_AUTOMATIK == ("nachholen",) and "not in PLANER_PLAN_AUTOMATIK" in rumpf("admin_auto_plan_eingriff"),
+      "auto-plan/plan: nachholen (sfTick) nie gesperrt — sonst Rückfall ohne ap_nachhol_minute")
 check("trocken" in rumpf("admin_auto_plan").split("_planer_schreib_gate()")[0][-400:], "Probelauf (trocken) bleibt für alle offen")
 
 print()

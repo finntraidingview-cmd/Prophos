@@ -23910,7 +23910,11 @@ def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
 # NIE gesperrt (PC-Tab-Automatik der ID selbst): wd-plaene ende/endlesung/endlesung_stand/balance/balance_stand/tab_neu_laden,
 # /admin/auto-plan/start-protokoll, /admin/auto-plan/waage-start, alle GET. Fail-closed: Rechte nicht lesbar → 502, nichts geändert.
 # Grenze: eigene Pläne schreibt das Frontend teils direkt per supabase-js (RLS) — das deckt dieser Riegel nicht (Frontend graut aus, S3).
-PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden")
+# ansehen = Puls nur hinnavigieren, ändert nichts (Prüfung S4 zu 1e3a83ae)
+PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden", "ansehen")
+# Nachholen verpasster Pläne (POST /admin/auto-plan/plan aktion nachholen) ruft sfTick in JEDEM PC-Tab automatisch — gesperrt fiele der Tab auf
+# start_um per supabase-js zurück, OHNE die Prüfungen von ap_nachhol_minute (Richtungsschutz, Abstände). Deshalb nie gesperrt.
+PLANER_PLAN_AUTOMATIK = ("nachholen",)
 
 
 def planer_schreib_recht(admin, uid, gruppe_menge, voll_uids):
@@ -32313,9 +32317,10 @@ def admin_auto_plan_eingriff():
     Seit 08.10.2026 auch aktion 'werte' {tp_usd?, sl_usd?, groesse?} (Mini-Popup): Admin alle Pläne, jede andere ID nur eigene."""
     if request.method == "OPTIONS":
         return "", 200
-    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
-    if _gs is not None:
-        return _gs
+    if str((request.get_json(silent=True) or {}).get("aktion") or "").strip() not in PLANER_PLAN_AUTOMATIK:
+        _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026) — nachholen ausgenommen (PC-Tab-Automatik)
+        if _gs is not None:
+            return _gs
     body = request.get_json(silent=True) or {}
     if str(body.get("aktion") or "").strip() in ("werte", "nachholen"):   # nachholen (08.10.2026): verpasste Pläne, gleiches Gate
         # eigenes Gate: auch IDs außerhalb des Auto-Planers dürfen ihre eigenen geplanten Trades ändern
