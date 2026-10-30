@@ -25498,6 +25498,9 @@
             tab_gleich: window._bwGleich || null,
             // Copier-/Bot-Stand des PCs (25.09.2026, Koordination: hedge_solo war null, Copier-Version aus der Cloud unklar) — /api/instances liefert version + bot_version
             copier_version: dd.version || null, bot_version: dd.bot_version || null,
+            // Was der Copier-PROZESS wirklich ausführt (30.10.2026, COPIER-UPDATE-FIX): copier_version ist nur die VERSION-Datei und lief bei Marco
+            // (pc-t8wg97) auf .1940, obwohl der Prozess noch alten Code hatte; update_wartet = Update wartet auf flache Master (app.py meldet ⚪ nach 1 h)
+            copier_lauf: s.copier_lauf || null, copier_code: s.copier_code || null, update_wartet: s.update_wartet || null,
             // Stilles MT5-Update des PCs (08.10.2026, UAC „Client Terminal AVX2" bei Chris): {aufgabe_ok, ausstehend, ordner, abgelehnt, laeuft}
             // — per SQL je PC lesbar (mt5_live.status.mt5_update), welche PCs die Aufgabe nicht haben bzw. wo Builds warten
             mt5_update: dd.mt5_update || null,

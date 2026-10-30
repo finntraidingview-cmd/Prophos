@@ -34,6 +34,7 @@ ueber Modi hat nur Klicks gekostet. Ein "mode"-Feld in Alt-Configs wird
 still ignoriert. Vor dem Start Duplikum fuer die Paare abschalten.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -150,24 +151,79 @@ def _repo_sha(timeout=8):
         return None
 
 
-def _copier_code_geaendert():
-    """Wuerde ein Neustart den LAUFENDEN Copier-Code aendern? copier.py aus GENAU dem
-    neuesten Stand (Commit-Kennung) gegen die laufende Datei. True auch bei
-    Unsicherheit (kein Netz) — dann gilt der alte Weg: Neustart."""
+def code_kennung(roh):
+    """REIN RECHNEND (testbar): Kennung eines copier.py-Stands — unabhaengig von Zeilenenden/BOM, 12 Zeichen reichen zum Vergleichen und Lesen."""
+    glatt = roh.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
+    return hashlib.sha256(glatt).hexdigest()[:12]
+
+
+def _lauf_kennung():
+    """Kennung des LAUFENDEN Codes, EINMAL beim Prozess-Start gelesen (start-copier.bat tauscht die Datei nur vor dem Start)."""
+    try:
+        with open(os.path.abspath(__file__), "rb") as f:
+            return code_kennung(f.read())
+    except OSError:
+        return None
+
+
+# Was dieser Prozess wirklich ausfuehrt (30.10.2026, COPIER-UPDATE-FIX). version = neueste VERSION, deren copier.py nachweislich gleich dem
+# laufenden Code ist; code = Kennung des laufenden Codes. Beides geht in den Status (copier_lauf, copier_code) — die VERSION-Datei taugt nicht als
+# Beleg, das Panel zieht sie nach, auch wenn hier noch alter Code laeuft (Marco pc-t8wg97, 30.10.2026: meldete .1940 und lief ohne Zwillings-Schutz).
+_LAUF = {"version": None, "code": _lauf_kennung(), "ziel": None}
+
+
+def _copier_code_stand():
+    """Weicht copier.py aus GENAU dem neuesten Stand (Commit-Kennung) vom LAUFENDEN Code ab? True/False, None = nicht pruefbar (kein Netz, kaputter Download)."""
     sha = _repo_sha()
-    if not sha:
-        return True
+    if not sha or not _LAUF["code"]:
+        return None
     try:
         neu = _code_holen(f"/code/datei/mt5-copier/copier.py?sha={sha}") or \
             urllib.request.urlopen(f"https://raw.githubusercontent.com/{_REPO}/{sha}/mt5-copier/copier.py", timeout=10).read()
         if len(neu) < 10000 or b"def main" not in neu:
-            return True
-        with open(os.path.abspath(__file__), "rb") as f:
-            alt = f.read()
-        glatt = lambda b: b.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
-        return glatt(neu) != glatt(alt)
+            return None
+        _LAUF["ziel"] = code_kennung(neu)
+        return _LAUF["ziel"] != _LAUF["code"]
     except Exception:
-        return True
+        return None
+
+
+NEUSTART_BREMSE_MAX = 3            # so viele Neustarts auf denselben Zielstand, dann Pause
+NEUSTART_BREMSE_S = 6 * 3600
+NEUSTART_MERKER = "copier_update_versuch.json"
+
+
+def neustart_bremse(merker, ziel, jetzt):
+    """REIN RECHNEND (testbar): darf der Copier fuer Zielstand ziel neu starten? → (erlaubt, neuer Merker).
+    Gegenpruefung 30.10.2026: scheitert der copier.py-Download oder der Dateitausch in start-copier.bat (still), bliebe der Code ungleich und der Copier
+    startete bei flachen Mastern alle ~70 s neu — jeder Start reisst das Hedge-Terminal nach vorn. Nach 3 Versuchen 6 h Pause, Status meldet es."""
+    m = merker if isinstance(merker, dict) else {}
+    try:
+        n, at = int(m.get("n") or 0), float(m.get("at") or 0)
+    except (TypeError, ValueError):
+        n, at = 0, 0.0
+    if m.get("ziel") != ziel or jetzt - at > NEUSTART_BREMSE_S:
+        n = 0
+    if n >= NEUSTART_BREMSE_MAX:
+        return False, m
+    return True, {"ziel": ziel, "n": n + 1, "at": jetzt}
+
+
+def update_schritt(remote, lauf_version, erster, stand_holen):
+    """REIN RECHNEND (testbar, stand_holen = Aufruf von _copier_code_stand): ein Takt des Update-Waechters → (neue lauf_version, neustart) —
+    neustart None = nichts Neues, die letzte Entscheidung bleibt.
+    COPIER-UPDATE-FIX (30.10.2026): verglichen wird gegen den Stand DIESES PROZESSES, nicht gegen die VERSION-Datei. Das Panel zieht die Datei nach,
+    sobald panel.py gleich ist — der Copier sah danach „nichts Neues", prüfte copier.py nie und ein reiner copier.py-Commit blieb liegen (Marco).
+    Der erste Takt prüft immer: auch bei gleicher Nummer kann alter Code laufen (Download beim Start gescheitert, Datei schon nachgezogen).
+    Unsicher (None): wie bisher Neustart, sobald flach — ausser im ersten Takt ohne neue Nummer, da gibt es keinen Anlass."""
+    if not remote or (remote == lauf_version and not erster):
+        return lauf_version, None
+    stand = stand_holen()
+    if stand is False:
+        return remote, False     # gleicher Code: Nummer nachziehen, kein Neustart
+    if stand is None and remote == lauf_version:
+        return lauf_version, None
+    return lauf_version, True
 
 
 def _version_uebernehmen(version):
@@ -189,6 +245,7 @@ def _version_watcher():
     # sich per initialize() ans Hedge-Terminal, was dessen Fenster nach vorn reisst.
     # Gleicher Code im neuesten Commit → nur die VERSION-Datei nachziehen.
     # _REMOTE_VERSION["neustart"] traegt die Entscheidung in die Hauptschleife.
+    erster = True
     while True:
         try:
             roh = _code_holen("/code/datei/mt5-copier/VERSION")
@@ -196,17 +253,18 @@ def _version_watcher():
                 with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
                     roh = r.read()
             remote = roh.decode("utf-8", "replace").strip()
-            lokal = local_version()
-            if remote and lokal and remote != lokal:
-                if _copier_code_geaendert():
-                    _REMOTE_VERSION.update(v=remote, neustart=True)
-                else:
+            alt = _LAUF["version"]
+            neu, neustart = update_schritt(remote, alt, erster, _copier_code_stand)
+            erster = False
+            _LAUF["version"] = neu
+            if neustart is False:
+                if local_version() != remote:
                     _version_uebernehmen(remote)
-                    log(f"↻ Update {lokal} → {remote}: copier.py unveraendert — kein Neustart, "
-                        f"VERSION nachgezogen.")
-                    _REMOTE_VERSION.update(v=remote, neustart=False)
-            else:
-                _REMOTE_VERSION["v"] = remote
+                if remote != alt:
+                    log(f"↻ Update {alt} → {remote}: copier.py unveraendert — kein Neustart.")
+            _REMOTE_VERSION["v"] = remote
+            if neustart is not None:
+                _REMOTE_VERSION["neustart"] = neustart
         except Exception:
             pass  # kein Internet o.ae. — einfach beim alten Stand bleiben
         time.sleep(60)
@@ -1355,8 +1413,8 @@ def zwilling_grund(magic, master_login, liste, gesperrt=()):
     """REIN RECHNEND (testbar): EIN Satz fuer Status/Prophos (None = alles sauber). Sperre zuerst — dann laeuft der Master ungehedgt."""
     if gesperrt:
         return (f"Hedge von Master-Pos {', '.join(str(i) for i in sorted(gesperrt))} gesperrt: {ZWILLING_ZU_MAX}x von einem Copier mit "
-                f"derselben magic {magic} auf einem anderen PC geschlossen — Master laeuft OHNE Hedge. Zwilling-PC updaten, dann Copier "
-                f"hier neu starten.")
+                f"derselben magic {magic} auf einem anderen PC geschlossen — Master laeuft OHNE Hedge. Copier auf dem PC updaten, dessen "
+                f"Konsole den HEDGE CLOSE dieses Tickets zeigt, dann Copier hier neu starten.")
     if not liste:
         return None
     unklar = [z for z in liste if z.get("unklar")]
@@ -1967,11 +2025,12 @@ def main():
     last_dir_check = time.time()
     known_files = {os.path.basename(p) for p in cfg_paths}
     restart = False
-    my_version = local_version()
+    my_version = _LAUF["version"] = local_version()
     if my_version:
-        log(f"Version {my_version} · Selbst-Update aktiv (prueft GitHub jede Minute)")
+        log(f"Code {_LAUF['code']} · Version {my_version} · Selbst-Update aktiv (prueft GitHub jede Minute)")
         threading.Thread(target=_version_watcher, daemon=True).start()
     update_waiting = False
+    update_warte = {"seit": None, "auf": None, "grund": []}   # fuer den Status: Prophos meldet ⚪, wenn ein Update > 1 h auf flach wartet
     log(f"Warte auf Snapshots von {len(masters)} Master-Terminal(s)…")
 
     # ── Solo-Hedge: Auftraege vom Panel abarbeiten (24.09.2026 abends) ─────────
@@ -2410,6 +2469,11 @@ def main():
             "zwilling": zwilling_liste(m.zwilling, m.alt_unklar),
             "zwilling_gesperrt": sorted(m.zwilling_gesperrt),
             "zwilling_grund": zwilling_grund(m.magic, m.master_login, zwilling_liste(m.zwilling, m.alt_unklar), m.zwilling_gesperrt),
+            # Was dieser Prozess wirklich ausfuehrt (30.10.2026, COPIER-UPDATE-FIX) und ob ein Update auf flach wartet
+            "copier_lauf": _LAUF["version"],
+            "copier_code": _LAUF["code"],
+            "update_wartet": ({"seit": update_warte["seit"], "auf": update_warte["auf"], "grund": update_warte["grund"]}
+                              if update_warte["seit"] else None),
             "note": note,
             "standby": standby,
             # P&L-Beweisdaten (15.08.2026, Etappe 3): Master-Seite aus dem
@@ -2475,21 +2539,40 @@ def main():
             # Selbst-Update: neue Version auf GitHub → sauber neu starten, aber
             # NUR wenn kein Master eine Position oder einen Hedge offen hat.
             rv = _REMOTE_VERSION["v"]
-            if my_version and rv and rv != my_version and _REMOTE_VERSION.get("neustart", True):
-                busy = [m.file for m in masters if getattr(m, "busy", False)]
+            if not (my_version and rv and _REMOTE_VERSION.get("neustart")):
+                update_waiting = False
+                update_warte.update(seit=None, auf=None, grund=[])
+            else:
+                # Noch unbekannt zaehlt NICHT als flach (Gegenpruefung 30.10.2026): sonst Neustart bei offenen Hedges, solange die Verbindung stoert
+                busy = [m.file for m in masters if getattr(m, "busy", True)]
                 # „Start steht bevor" (25.09.2026): nach einem Puls-Start folgt der Hedge-Open — so lange
                 # kein Neustart, sonst trifft der Open auf 'copier_alt' (Finns Test pc-iiiiii 20:51:14)
                 _bereit = hedge_bereit_rest(os.path.join(here, HEDGE_BEREIT), time.time())
                 if _bereit > 0:
                     busy.append(f"Start steht bevor (noch {int(_bereit)} s)")
                 if not busy:
-                    log(f"↻ Update {my_version} → {rv} — alle Master flach, starte neu "
-                        f"(start-copier.bat laedt die neuen Dateien).")
-                    break
+                    _merker_pfad = os.path.join(here, NEUSTART_MERKER)
+                    try:
+                        _merker = load_json(_merker_pfad)
+                    except (OSError, ValueError):
+                        _merker = None
+                    _erlaubt, _merker_neu = neustart_bremse(_merker, _LAUF.get("ziel") or rv, time.time())
+                    if _erlaubt:
+                        try:
+                            with open(_merker_pfad, "w", encoding="utf-8") as f:
+                                json.dump(_merker_neu, f)
+                        except OSError:
+                            pass
+                        log(f"↻ Update {_LAUF['version']} → {rv} — alle Master flach, starte neu "
+                            f"(start-copier.bat laedt die neuen Dateien).")
+                        break
+                    busy = [f"{NEUSTART_BREMSE_MAX} Neustarts ohne neuen Code — Download/Dateitausch pruefen (start-copier.bat)"]
                 if not update_waiting:
                     update_waiting = True
-                    log(f"↻ Update {my_version} → {rv} verfuegbar — warte, bis alle Master "
+                    update_warte["seit"] = time.time()
+                    log(f"↻ Update {_LAUF['version']} → {rv} verfuegbar — warte, bis alle Master "
                         f"flach sind ({', '.join(busy)}).")
+                update_warte.update(auf=rv, grund=busy[:6])
 
             # Neue/geloeschte config*.json → Neustart, damit die Flotten-Pruefung
             # und die Startpruefungen fuer den neuen Master laufen.
@@ -2719,6 +2802,7 @@ def main():
                             st["standby"] = False
                             st["wrong_login"] = snap["login"]
                             write_status(m.status_path, st)
+                    m.busy = bool(hedges_teilen(book.get(m.magic, {}), m.eigene_set)[0]) or bool(hedge_acc.get("solo"))
                     continue
                 if snap is None:
                     if now - m.last_status > 1.0:
@@ -2735,6 +2819,7 @@ def main():
                             # garantiert frisch (Tick waere sonst uebersprungen).
                             known, m.zwilling = hedges_teilen(book.get(m.magic, {}), m.eigene_set)   # Zwillinge nie als eigene (30.10.2026)
                             write_status(m.status_path, master_status(m, None, known, False))
+                    m.busy = bool(hedges_teilen(book.get(m.magic, {}), m.eigene_set)[0]) or bool(hedge_acc.get("solo"))
                     continue
 
                 # ── Eigene Hedges von Magic-Zwillingen trennen (30.10.2026, s. hedges_teilen) ──
@@ -2892,7 +2977,7 @@ def main():
                                     m.zwilling_gesperrt.add(ident_i)
                                     log(f"⛔ [{m.file}] Hedge von Master-Pos {ident_} zum {n_zw}. Mal von einem Copier mit "
                                         f"derselben magic {m.magic} geschlossen (anderer PC) — gesperrt, sonst Pingpong. Den "
-                                        f"Zwilling-PC updaten, dann Copier hier neu starten.")
+                                        f"Copier auf dem PC mit dem HEDGE CLOSE updaten, dann Copier hier neu starten.")
                                 else:
                                     log(f"👯 [{m.file}] Hedge von Master-Pos {ident_} wurde von einem ANDEREN Copier mit "
                                         f"derselben magic {m.magic} geschlossen (Zwilling, {n_zw}/{ZWILLING_ZU_MAX}) — "
@@ -2942,7 +3027,7 @@ def main():
                 if not snap_fresh:
                     # Offene Hedges halten den Selbst-Update-Neustart weiter auf;
                     # die eingefrorene Positionsliste zaehlt dafuer nicht.
-                    m.busy = bool(hedges)
+                    m.busy = bool(hedges) or bool(hedge_acc.get("solo"))
                     if time.time() - m.last_status > 1.0:
                         m.last_status = time.time()
                         if os.path.exists(m.cfg_path):

@@ -4089,6 +4089,10 @@ def alarm_tick():
         zwilling_tick(aus, jetzt.timestamp())
     except Exception as e:
         print(f"[alarm] ⚠️ Zwillings-Wache: {type(e).__name__}: {e}", flush=True)
+    try:
+        update_wartet_tick(aus, jetzt.timestamp())
+    except Exception as e:
+        print(f"[alarm] ⚠️ Update-Wache: {type(e).__name__}: {e}", flush=True)
     if jetzt.minute == 7 and jetzt.hour == 3:          # einmal am Tag aufräumen
         try:
             sb_delete("alarm_log", {"at": f"lt.{(jetzt - timedelta(days=ALARM_LOG_TAGE)).isoformat()}"})
@@ -4324,6 +4328,57 @@ def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
             out.setdefault(key, (key, 1, "Hedge gesperrt: Magic-Zwilling", text, str(r.get("user_id") or "") or None,
                                  {"pc": pc, "config": cfg, "ident": ident, "magic": r.get("mg")}))
     return list(out.values())
+
+
+# UPDATE WARTET (30.10.2026, COPIER-UPDATE-FIX, Marco pc-t8wg97: …4755 seit 04:21 offen, Copier blieb 10 h auf altem Code und schloss fremde Hedges): der Copier
+# startet nur neu, wenn alle Master flach sind. Wartet ein Update länger als 1 h, ⚪ an die Master-IDs, einmal je PC × Zielstand in 24 h.
+UPDATE_WARTET_ALARM_S = 3600
+
+
+def update_wartet_ereignisse(rows, jetzt_ts, pc_namen=None):
+    """REIN RECHNEND (testbar): frische mt5_live-Zeilen → [(schluessel, text, uid, daten)] je PC × Zielstand. Ein Copier-Prozess bedient alle Configs des PCs,
+    alle Zeilen eines PCs melden dasselbe — der Grund kommt aus der ersten."""
+    pc_namen = pc_namen or {}
+    out = {}
+    for r in rows or []:
+        w, pc = r.get("uw"), str(r.get("pc_name") or "")
+        if not isinstance(w, dict) or not pc:
+            continue
+        try:
+            warte = jetzt_ts - float(w.get("seit"))
+        except (TypeError, ValueError):
+            continue
+        if warte < UPDATE_WARTET_ALARM_S:
+            continue
+        auf = str(w.get("auf") or "?")
+        # je PC × laufendem Code, nicht × Zielnummer: sonst neue ⚪ bei jedem Frontend-Bump (Gegenprüfung 30.10.2026); alarm_im_log begrenzt auf eine je 24 h
+        key = f"update_wartet|{pc}|{r.get('cc') or '?'}"
+        if key in out:
+            continue
+        name = (pc_namen.get(pc) or {}).get("name") if isinstance(pc_namen.get(pc), dict) else None
+        wer = f"PC von {name} ({pc})" if name else pc
+        grund = ", ".join(str(g) for g in (w.get("grund") or [])[:4] if g) or "offene Master"
+        text = (f"{wer}: Copier-Update auf {auf} wartet seit {int(warte // 3600)} h auf flache Master ({grund}). Bis dahin läuft Code "
+                f"{r.get('cc') or '?'} (Stand {r.get('cl') or '?'}).")
+        out[key] = (key, text, str(r.get("user_id") or "") or None, {"pc": pc, "auf": auf, "grund": w.get("grund"), "code": r.get("cc")})
+    return list(out.values())
+
+
+def update_wartet_tick(aus, jetzt_ts):
+    ab = datetime.fromtimestamp(jetzt_ts - ZWILLING_FRISCH_S, timezone.utc).isoformat()
+    rows = _sb_all("mt5_live", {"select": "pc_name,user_id:status->>user_id,uw:status->update_wartet,cl:status->>copier_lauf,cc:status->>copier_code",
+                                "status->>update_wartet": "not.is.null", "updated_at": f"gte.{ab}"}) or []
+    # nur eigene Gruppe, wie alarm_tick und zwilling_tick (Emin-Gruppe nie)
+    rows = [r for r in rows if str(r.get("user_id")) not in set(aus or ()) and not _alarm_fremd_verwaltet(r.get("user_id"))]
+    if not rows:
+        return
+    evs = [ev for ev in update_wartet_ereignisse(rows, jetzt_ts, _pc_namen_daten()) if ev[0] not in _alarm["gemeldet"]]
+    schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()
+    for key, text, uid, daten in evs:
+        _alarm["gemeldet"][key] = time.time()
+        if schon and key in schon:
+            continue
+        alarm_senden(3, "copier_update_wartet", "Copier-Update wartet", text, uid=uid, schluessel=key, tag=f"alarm-update-{daten.get('pc')}", daten=daten)
 
 
 def zwilling_tick(aus, jetzt_ts):

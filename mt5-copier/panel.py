@@ -6270,6 +6270,9 @@ def _panel_code_geaendert(sha):
     return False
 
 
+VERSION_NACHZIEHEN_S = 90
+
+
 def _version_uebernehmen(version):
     """VERSION-Datei nachziehen, ohne Neustart — der Chip im MT5-Tab zeigt dann die
     Wahrheit: laufender Code == neuester Code, Nummer == neueste Nummer."""
@@ -6355,6 +6358,14 @@ def _version_watcher(my_version):
             if neuester not in upd["code"]:   # je Stand nur einmal holen (Prüfer: sonst panel.py+provision.py bei jedem Warte-Takt)
                 upd["code"] = {neuester: _panel_code_geaendert(neuester)}
             if not upd["code"][neuester]:
+                # COPIER-UPDATE-FIX (30.10.2026): erst nach 90 s nachziehen. Copier VOR diesem Stand vergleichen noch die VERSION-Datei (Takt 60 s) und
+                # uebersehen sonst einen reinen copier.py-Commit; so sehen auch sie den Unterschied. Neue Copier haengen nicht mehr an der Datei.
+                # Je VERSION eigene Uhr: upd["seit"] bleibt ueber mehrere Bumps stehen und liesse den zweiten sofort durch (Gegenpruefung 30.10.2026)
+                _nz = upd.get("nachziehen") or {}
+                if remote not in _nz:
+                    upd["nachziehen"] = _nz = {remote: time.time()}
+                if time.time() - _nz[remote] < VERSION_NACHZIEHEN_S:
+                    continue
                 _version_uebernehmen(remote)
                 print(f"[panel] Update {my_version} → {remote}: Panel-Code unveraendert — kein Neustart.", flush=True)
                 my_version = remote
