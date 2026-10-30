@@ -267,6 +267,19 @@ def richtung_frei(plan_id, richtung, timeout=6):
     return False, f"Riegel-Prüfung (Gegenrichtung) nicht erreichbar: {fehler} — nichts gesendet, der Start wird später erneut versucht.", "riegel_unerreichbar"
 
 
+def riegel_pflicht_fehlt(plan_id, richtung):
+    """FAIL-CLOSED VOR DEM SCHARFEN KLICK (30.10.2026, ORBIT-RICHTUNG-RIEGEL, Befund S5: Orbit schickte die Richtung nur als Marke
+    @richtung= — richtung_frei bekam '' und gab frei, 0 Riegel-Fehlstarts bei tvv2). richtung_frei laesst Proben ohne Plan/Richtung
+    durch; bei einer Order-Aktion (scharf) darf das nicht sein. -> Fehlermeldung (str) oder '' wenn beides da ist."""
+    pid = str(plan_id or "").strip().lower()
+    r = str(richtung or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f-]{36}", pid) and r in ("buy", "sell"):
+        return ""
+    fehlt = " und ".join(x for x, ok in (("Plan-ID", re.fullmatch(r"[0-9a-f-]{36}", pid)), ("Richtung", r in ("buy", "sell"))) if not ok)
+    return (f"Richtungs-Riegel nicht pruefbar: die Order kam ohne {fehlt} (alter Prophos-Tab?) — den Prophos-Tab an diesem PC neu "
+            "laden. Nichts gesendet.")
+
+
 def repo_sha(timeout=8):
     """Kennung des neuesten Commits auf main — oder None (kein Netz o.ae.). Zuerst Railway, sonst GitHub."""
     roh = code_holen("/code/stand", timeout)
@@ -4852,6 +4865,15 @@ class Handler(BaseHTTPRequestHandler):
             # Marke @plan_id= mit. Nicht frei / nicht pruefbar -> kein Bot-Start, beweisbar nichts gesendet (richtung_frei).
             if cmd["scharf"] or "@scharf=1" in cmd["geschwister"]:
                 _pid = next((x[9:] for x in cmd["geschwister"] if x.startswith("@plan_id=")), body.get("plan_id"))
+                # Richtung: echtes Feld, sonst die Bruecken-Marke @richtung= (so schickte der Orbit-Tab bis 30.10.2026); fehlt beides
+                # oder die Plan-ID -> gesperrt statt frei (riegel_pflicht_fehlt). Der Bot bekommt dieselbe Richtung wie der Riegel.
+                if not cmd["richtung"]:
+                    cmd["richtung"] = next((x[10:] for x in cmd["geschwister"] if x.startswith("@richtung=")), "").strip().lower()[:8]
+                _fehlt = riegel_pflicht_fehlt(_pid, cmd["richtung"])
+                if _fehlt:
+                    print(f"[panel] tv-konto RIEGEL ohne plan_id/richtung @{cmd['ext_id']} -> gesperrt", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "code": "riegel_unerreichbar", "retry_ok": True, "gesendet": False,
+                                                       "msg": _fehlt}, ensure_ascii=False))
                 _frei, _msg, _code = richtung_frei(_pid, cmd["richtung"])
                 if not _frei:
                     print(f"[panel] tv-konto RIEGEL {_code} @{cmd['ext_id']} {cmd['richtung']}: {_msg[:160]}", flush=True)
@@ -4904,6 +4926,11 @@ class Handler(BaseHTTPRequestHandler):
             # HARTE LINIE (13.10.2026, Anlass Mike: Topstep-Short laeuft, zwei Longs geplant): vor dem scharfen Klick fragt das Panel
             # Railway/DB selbst (richtung_frei) — unabhaengig vom Waechter im Tab. Nicht frei / nicht pruefbar -> nichts gesendet.
             if cmd["scharf"]:
+                _fehlt = riegel_pflicht_fehlt(cmd.get("plan_id"), cmd.get("richtung"))   # 30.10.2026: ohne Plan/Richtung gesperrt
+                if _fehlt:
+                    print(f"[panel] tsxorder RIEGEL ohne plan_id/richtung @{cmd.get('ext_id')} -> gesperrt", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "code": "riegel_unerreichbar", "retry_ok": True, "gesendet": False,
+                                                       "msg": _fehlt}, ensure_ascii=False))
                 _frei, _msg, _code = richtung_frei(cmd.get("plan_id"), cmd.get("richtung"))
                 if not _frei:
                     print(f"[panel] tsxorder RIEGEL {_code} @{cmd.get('ext_id')} {cmd.get('richtung')}: {_msg[:160]}", flush=True)
@@ -5312,6 +5339,17 @@ class Handler(BaseHTTPRequestHandler):
                    "probe": bool(body.get("probe"))}
             if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            # HARTE LINIE AUCH HIER (30.10.2026, ORBIT-RICHTUNG-RIEGEL, Gegenpruefung): der alte Orbit-Weg platziert echt, ruft prophos.html
+            # nicht mehr auf, ist aber ueber Panel/Railway-Proxy erreichbar und hatte keinen Gegenrichtungs-Riegel. Ohne Plan-UUID/Richtung
+            # oder nicht frei -> gesperrt, beweisbar nichts gesendet. Probe (klickt nie) bleibt frei.
+            if not cmd["probe"]:
+                _pid = str(body.get("plan_id") or "").strip()
+                _fehlt = riegel_pflicht_fehlt(_pid, cmd["richtung"])
+                _frei, _msg, _code = (False, _fehlt, "riegel_unerreichbar") if _fehlt else richtung_frei(_pid, cmd["richtung"])
+                if not _frei:
+                    print(f"[panel] tv-order RIEGEL {_code} @{cmd['ext_id']} {cmd['richtung']}: {_msg[:160]}", flush=True)
+                    return self._send(200, json.dumps({"ok": False, "code": _code, "grund": _code, "retry_ok": True, "gesendet": False,
+                                                       "msg": _msg}, ensure_ascii=False))
             # Neustart-Sperre (25.09.2026): nach einem echten Puls-Start folgt der Hedge-Open —
             # 3 min kein Copier-Update-Neustart, damit er einen frischen Copier vorfindet
             if not cmd["probe"]:
