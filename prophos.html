@@ -3886,6 +3886,10 @@
   #ap-ids-root.ap-guestly .pz-radar .pz-k1 b{font-size:14px}
   #ap-ids-root.ap-guestly .apg-weg{display:inline-flex;align-items:center;margin-left:8px;vertical-align:1px;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;background:var(--g-lila-bg);color:var(--g-lila);white-space:nowrap}
   #ap-ids-root.ap-guestly .apg-weg.hedge{background:var(--g-tuerkis-bg);color:var(--g-tuerkis)}
+  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-weg{white-space:normal;max-width:100%;margin-left:0;margin-top:3px} }   /* langer Chip („Orbit + Hedge") läuft sonst über die Lots-Spalte */
+  #ap-ids-root.ap-guestly .apg-weg.final{margin-left:4px;background:transparent;border:1px solid currentColor;color:var(--g-tuerkis);padding:1px 7px}
+  #dashboard-view .pz-paare > .pz-frei{align-self:flex-start;margin-top:3px;border:0;border-radius:999px;padding:3px 10px;font:600 12px/1.3 inherit;background:rgba(245,158,11,.14);color:var(--warn-ink, #b45309);cursor:pointer}
+  #dashboard-view .pz-paare > .pz-frei.leise{background:transparent;padding:0;font-weight:500;color:var(--sub);cursor:default}
   #ap-ids-root.ap-guestly .apg-weg.warn{background:rgba(245,158,11,.14);color:var(--warn-ink, #b45309)}
   #ap-ids-root.ap-guestly .pz-radar .pz-ok,#ap-ids-root.ap-guestly .pz-radar .tc2-btn{border-radius:10px}
   #ap-ids-root.ap-guestly .pz-radar .pz-ok:not(.is-ok){background:var(--g-knopf);color:var(--g-knopf-text);border:0;font-weight:600}
@@ -47672,6 +47676,16 @@
     const dd = ok(konto && konto.maxDrawdown)
     return dd != null && groesse > 0 && dd >= groesse * 0.01 && dd <= groesse * 0.15 ? groesse - dd : null
   }
+  /* PAARE MASTER ↔ FUSION (30.10.2026): gemeinsamer Baustein für Funded-Zeilen (planZeileHtml) und Challenge-Hedge-Zeilen (apgZeilenSchmuecken).
+   * liste = [{ wo: 'tp'|'sl', mName, mWert ($, Betrag ohne Vorzeichen), mText (statt Betrag, z. B. „Konto weg"), fName, fWert (€, Betrag), tip }]:
+   * Ausgang tp = Master +, Fusion −; Ausgang sl = Master −, Fusion +. extra = HTML hinten in der Box (Freigabe-Hinweis). */
+  function pzPaareHtml(liste, extra){
+    const de = v => Math.round(Number(v)).toLocaleString('de-DE')
+    const paar = x => { const mVz = x.wo === 'tp' ? 1 : -1, fVz = -mVz
+      return `<span class="pz-paar is-${x.wo}" title="${escapeHtml(x.tip || '')}"><span>Master ${x.mName} <b class="${mVz > 0 ? 'gut' : 'rot'}">${x.mText ? escapeHtml(x.mText) : x.mWert != null ? (mVz > 0 ? '+' : '−') + de(Math.abs(x.mWert)) + ' $' : '–'}</b></span><i aria-hidden="true">↔</i>`
+        + `<span>Fusion ${x.fName} <b class="${fVz > 0 ? 'gut' : 'rot'}">${x.fWert != null && isFinite(Number(x.fWert)) ? (fVz > 0 ? '+' : '−') + de(Math.abs(x.fWert)) + ' €' : '–'}</b></span></span>` }
+    return `<div class="pz-paare">${liste.map(paar).join('')}${extra || ''}</div>`
+  }
   function planZeileHtml(p, konto, o){
     const de = v => Math.round(Number(v)).toLocaleString('de-DE')
     const notiz = o.notiz !== undefined ? o.notiz : p.autoPlan ? planAutoNotiz(p.notes) : null
@@ -47813,13 +47827,9 @@
       const fuZelle = fu ? `<span class="pz-art pz-art-kette pz-fus" title="${escapeHtml(`Fusion-Gegenhedge: ${fu.lots != null ? fu.lots.toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Lot NAS100, ' : ''}Gegenrichtung zum Master.${fu.gedeckt != null ? ` Gehedged werden ${eur(fu.gedeckt)} offene Kosten — so viel holt Fusion, wenn das Konto an der Liquidation endet.` : ''}${fu.plus != null ? ` Master-SL → Fusion +${eur(fu.plus)}.` : ''}${fu.minus != null ? ` Master-TP → Fusion −${eur(fu.minus)}.` : ''}`)}"><span><b>${fu.lots != null ? fu.lots.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' Lot' : '– Lot'}</b></span><small>${fu.gedeckt != null ? 'Hedge ' + eur(fu.gedeckt) : 'Fusion'}</small></span>` : ''
       // AUSGÄNGE ALS PAARE (30.10.2026, Finn ~07:10: „was gehört zusammen?"): je Ausgang eine Zeile über die volle Breite —
       // Master TP ↔ Fusion SL, Master SL ↔ Fusion TP; Master immer $, Fusion immer €, dieselben Felder wie vorher (fu.minus / fu.plus)
-      const paar = (wo, mName, mWert, mVz, fName, fWert, fVz, tip) => `<span class="pz-paar is-${wo}" title="${escapeHtml(tip)}">`
-        + `<span>Master ${mName} <b class="${mVz > 0 ? 'gut' : 'rot'}">${mWert != null ? (mVz > 0 ? '+' : '−') + geldZ(mWert) + ' $' : '–'}</b></span><i aria-hidden="true">↔</i>`
-        + `<span>Fusion ${fName} <b class="${fVz > 0 ? 'gut' : 'rot'}">${fWert != null ? (fVz > 0 ? '+' : '−') + eur(fWert) : '–'}</b></span></span>`
-      const paare = fu && (fu.minus != null || fu.plus != null) ? `<div class="pz-paare">`
-        + paar('tp', 'TP', p.masterTp > 0 ? p.masterTp : null, 1, 'SL', fu.minus, -1, `Master trifft den Take Profit${fu.tpPkt != null ? ` (${pkt(fu.tpPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-SL`)
-        + paar('sl', 'SL', p.masterSl > 0 ? p.masterSl : null, -1, 'TP', fu.plus, 1, `Master trifft den Stop Loss${fu.slPkt != null ? ` (${pkt(fu.slPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-TP`)
-        + `</div>` : ''
+      const paare = fu && (fu.minus != null || fu.plus != null) ? pzPaareHtml([
+        { wo: 'tp', mName: 'TP', mWert: p.masterTp > 0 ? p.masterTp : null, mText: p.masterTp > 0 ? '+' + geldZ(p.masterTp) + ' $' : null, fName: 'SL', fWert: fu.minus, tip: `Master trifft den Take Profit${fu.tpPkt != null ? ` (${pkt(fu.tpPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-SL` },
+        { wo: 'sl', mName: 'SL', mWert: p.masterSl > 0 ? p.masterSl : null, mText: p.masterSl > 0 ? '−' + geldZ(p.masterSl) + ' $' : null, fName: 'TP', fWert: fu.plus, tip: `Master trifft den Stop Loss${fu.slPkt != null ? ` (${pkt(fu.slPkt)} vom Einstieg)` : ''} → Fusion schließt am Fusion-TP` }]) : ''
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
@@ -52594,7 +52604,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1934'
+  const OS_TAB_BUILD = '2026-09-22.1935'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -60088,7 +60098,7 @@
     const acc1 = t.konto_id ? (accounts || []).find(x => String(x.id) === String(t.konto_id)) : null, b1 = acc1 ? tplKontoBalance(acc1) : null
     const menge1 = t.menge == null ? '—' : Number(t.menge).toLocaleString('de-DE', { maximumFractionDigits: 2 })
     const symbol1 = /^(mt5|mt5v2)$/.test(String(t.route || '')) ? `${menge1} Lot` : `${menge1} × ${(r1 && r1.symbol_root) || (Number(t.usd) === 20 ? 'NQ' : Number(t.usd) === 2 ? 'MNQ' : 'NQ')}`
-    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2') : (p1 && p1.orbitV3) ? 'Orbit V3' : 'Orbit V2'
+    const weg1 = (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2') : (p1 && p1.orbitV3) ? 'Orbit V3' : window._apHedgeArt?.(t.plan_id) === 'tradeify_final' ? 'Orbit + Hedge · Final' : 'Orbit V2'
     const einstieg1 = (r1 && Number(r1.einstieg_nq) > 1000) ? Number(r1.einstieg_nq).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
     const quelle1 = (r1 && r1.einstieg_quelle) || (t.auto ? 'Auto-Planer' : 'Hand')
     const zeit1 = t.status === 'laeuft' ? `${tplUhr(t.start, v)} · läuft` : (t.status === 'beendet' || t.status === 'vorbei') ? `${tplUhr(t.start, v)} – ${t.ende != null ? tplUhr(t.ende, v) : '?'}` : `Start ${tplUhr(t.start, v)}`
@@ -60132,7 +60142,7 @@
    * Detail darunter (Richtung/Start/Löschen). Schließen: ✕, Klick daneben, Esc, Scrollen, Größe ändern. Eigene Verdrahtung, kein Modal-Handler. */
   const _tk = { el: null, anker: null, root: null, key: null, gruppe: null, busy: false, meldung: '' }
   const tkWeg = (t, r1, p1) => (r1 && typeof wdlWeg === 'function') ? wdlWeg(r1) : t.route === 'mt5v2' ? 'Echo V2' : t.route === 'mt5' ? 'Echo' : t.wd ? 'Winning Day' : t.route === 'tsv2' ? ((p1 && p1.orbitV3) ? 'Nova' : 'Topstep V2')
-    : (p1 && p1.orbitV3) ? 'Orbit' : 'Orbit V2'   // ORBIT-NAMEN (Finn 30.10.2026): mit Hedge „Orbit", ohne Hedge „Orbit V2"
+    : (p1 && p1.orbitV3) ? 'Orbit' : window._apHedgeArt?.(t.plan_id) === 'tradeify_final' ? 'Orbit + Hedge · Final' : 'Orbit V2'   // ORBIT-NAMEN (Finn 30.10.2026): mit Hedge „Orbit", ohne Hedge „Orbit V2"; FINAL-ANZEIGE
   function tkStand(){ const zs = _tk.root && _tpl.zs && _tpl.zs[_tk.root.id]; return zs || { trades: new Map(), v: 0 } }
   function tkEinzelHtml(t, v){
     const r1 = (_tpl.lt && _tpl.lt.get(String(t.plan_id))) || null, p1 = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null
@@ -80015,12 +80025,17 @@
     const D = apIdsHeute(), u = apSichtUid(), jetzt = Date.now()
     const laeuft = D.trades.filter(t => t.status === 'laeuft' && t.auto && apIdsEcht(t))
     const lIds = new Set(laeuft.map(t => String(t.plan_id))), w = new Map()
-    for(const t of D.trades) if(t.status === 'bestaetigt' && t.auto && apIdsEcht(t)) w.set(String(t.plan_id), { z: apIdsAusTrade(t, D), t })
+    // FINAL-ANZEIGE (30.10.2026): die Trade-Zeile kennt hedge_art/-vorschau/-frei nicht — aus /ids bestaetigt[] derselben plan_id dazu
+    const hJe = new Map((_apIds.bestaetigt || []).map(z => [String(z.plan_id), z]))
+    const mitHedge = (z, id) => { const b = hJe.get(id); if(!b) return z
+      const h = {}; for(const k of ['hedge_art', 'hedge_vorschau', 'hedge_frei', 'hedge_weg']) if(b[k] !== undefined) h[k] = b[k]; return Object.assign({}, z, h) }
+    for(const t of D.trades) if(t.status === 'bestaetigt' && t.auto && apIdsEcht(t)) w.set(String(t.plan_id), { z: mitHedge(apIdsAusTrade(t, D), String(t.plan_id)), t })
     for(const z of _apIds.bestaetigt || []) if(!w.has(String(z.plan_id))) w.set(String(z.plan_id), { z })
     for(const [id, e] of _apIds.warteLokal){
       // lokaler Merker: weg, sobald der Plan läuft, der Start 20 min vorbei ist oder (mit /ids bestaetigt[]) der Server ihn kennt bzw. nicht mehr kennt
       if(lIds.has(id) || Date.parse(e.z.start_um || '') < jetzt - 1200000 || (Array.isArray(_apIds.bestaetigt) && _apIds.bestaetigtT0 > e.at)){ _apIds.warteLokal.delete(id); continue }
-      if(!w.has(id)) w.set(id, { z: e.z })
+      // ✓ in „Zu bestätigen" gibt einen Hedge-Plan zugleich frei — lokal also nicht „wartet auf Hedge-Freigabe" zeigen (FINAL-ANZEIGE 30.10.2026)
+      if(!w.has(id)) w.set(id, { z: e.z && e.z.hedge_art ? Object.assign({}, e.z, { hedge_frei: true }) : e.z })
     }
     const sicht = e => (!u || String(e.z.user_id) === u) && apArtPasst(e.z)   // + Kontoart (PLANER-GLIEDERUNG)
     const warten = [...w.values()].filter(e => sicht(e) && !lIds.has(String(e.z.plan_id)) && !_apIds.zurLokal.has(String(e.z.plan_id)))
@@ -80580,7 +80595,8 @@
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
     if(z && (z.hedge_art === 'apex')) return ['WD-Weg + Hedge', 'hedge']
-    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit', 'hedge']   // ORBIT-NAMEN (Finn 30.10.2026): „Orbit" = mit Fusion-Hedge, ohne Zusatz
+    // FINAL-ANZEIGE (Finn 30.10.2026 ~08:10: „sieht nicht, dass dort gegengehedgt wird"): „Orbit + Hedge" + Abzeichen „Final" (apgZeilenSchmuecken)
+    if(z && (z.hedge_art === 'tradeify_final')) return ['Orbit + Hedge', 'hedge', 'Finaler Tradeify-Trade: Orbit mit Fusion-Gegenhedge — der Blow deckt den Kontowert']
     // ECHO + HEDGE (30.10.2026, Finn: „Warum steht bei jedem Trade ‚Echo V2'? Wir machen jetzt Echo (mit Hedge)"): ein HT-CFD-Vorschlag auf Echo V2
     // mit Vorschau (ehv_tick) wird bei Schalter echo_hedge an kurz vor dem Start auf Echo mit Hedge umgestellt → „Echo + Hedge"; „Echo V2" nur,
     // wenn er ohne Hedge laufen wird (Schalter aus oder Vorschau mit Grund → „Echo V2 · ⚠ Grund")
@@ -80594,9 +80610,41 @@
     const je = new Map([...(x.offenListe || []).map(z => [String(z.plan_id), z]), ...(x.wartenListe || []).map(e => [String(e.z && e.z.plan_id), e.z])])
     root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
       const z = je.get(String(r.dataset.planId)), w = apgWeg(z), ort = r.querySelector('.pz-k2') || r.querySelector('.pz-k1'); if(!w || !ort || ort.querySelector('.apg-weg')) return
-      const c = document.createElement('span'); c.className = 'apg-weg' + (w[1] ? ' ' + w[1] : ''); c.textContent = w[0]; if(w[2]) c.title = w[2]; ort.appendChild(c) })
-    if(!apIstFunded()) apgMasterFusion(root, je)
+      const c = document.createElement('span'); c.className = 'apg-weg' + (w[1] ? ' ' + w[1] : ''); c.textContent = w[0]; if(w[2]) c.title = w[2]; ort.appendChild(c)
+      if(z && z.hedge_art === 'tradeify_final'){ const f = document.createElement('span'); f.className = 'apg-weg final'; f.textContent = 'Final'; f.title = 'Finaler Trade dieses Tradeify-Kontos'; ort.appendChild(f) } })
+    if(!apIstFunded()){ apgMasterFusion(root, je); apgHedgePaare(root, je, x) }
   }
+  /* FINAL-ANZEIGE (Finn 30.10.2026 ~08:10, über den Master): Hedge-Pläne (hedge_art 'tradeify_final' | 'apex') zeigen ihre Ausgänge als Paare wie
+   * die Funded-Zeilen (pzPaareHtml) — Master TP ↔ Fusion SL (pass_eur), Master SL bzw. Blow ↔ Fusion TP (blow_eur). Ohne Freigabe (hedge_frei
+   * false): in „Wartet auf Start" „⏳ wartet auf Hedge-Freigabe →" (Sprung zum Block #ahf-root), in „Zu bestätigen" der Hinweis, dass ✓ freigibt. */
+  function apgHedgePaare(root, je, x){
+    const warten = new Set((x.wartenListe || []).map(e => String(e.z && e.z.plan_id)))
+    root.querySelectorAll('.pz-z[data-plan-id]').forEach(r => {
+      if(r.querySelector('.pz-paare')) return
+      const z = je.get(String(r.dataset.planId)); if(!z || !AHF_ART_KURZ[z.hedge_art]) return
+      const vs = z.hedge_vorschau && typeof z.hedge_vorschau === 'object' ? z.hedge_vorschau : {}
+      const pass = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? Number(vs.tp_eur) : null, blow = vs.blow_eur != null ? Number(vs.blow_eur) : null
+      const tp = Number(z.tp) > 0 ? Number(z.tp) : null, sl = Number(z.sl) > 0 ? Number(z.sl) : null
+      let hinweis = ''
+      if(!z.hedge_frei) hinweis = warten.has(String(z.plan_id))
+        ? `<button type="button" class="pz-frei" data-apg-frei="1" title="Bestätigt, aber der Fusion-Hedge ist noch nicht freigegeben — ohne Freigabe startet der Trade nicht. Klick: zum Block „Hedge-Freigabe offen“">⏳ wartet auf Hedge-Freigabe →</button>`
+        : '<span class="pz-frei leise" title="✓ bestätigt den Trade und gibt den Hedge in einem Schritt frei">✓ gibt den Hedge mit frei</span>'
+      const d = document.createElement('div')
+      d.innerHTML = pzPaareHtml([
+        { wo: 'tp', mName: 'TP', mWert: tp, fName: 'SL', fWert: pass, tip: 'Master trifft den Take Profit → Fusion schließt mit Verlust (Pass)' },
+        sl ? { wo: 'sl', mName: 'SL', mWert: sl, fName: 'TP', fWert: blow, tip: 'Master trifft den Stop Loss → Fusion schließt mit Gewinn' }
+           : { wo: 'sl', mName: 'Blow', mText: 'Konto weg', fName: 'TP', fWert: blow, tip: 'Konto geblowt (Liquidation) → Fusion schließt mit Gewinn und deckt den Kontowert' }], hinweis)
+      const box = d.firstElementChild; if(!box) return
+      r.querySelectorAll('.ahf-kurz').forEach(c => c.remove())   // dieselben Zahlen stehen jetzt in den Paaren, „Freigabe offen" im Hinweis
+      r.appendChild(box)
+      box.querySelector('[data-apg-frei]')?.addEventListener('click', ev => { ev.stopPropagation()
+        const ziel = document.getElementById('ahf-root'); try{ window._ahfOeffnen?.(true) }catch(_){}
+        setTimeout(() => (ziel && !ziel.hidden ? ziel : document.querySelector('[data-apg-anker="warten"]'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60) })
+    })
+  }
+  const AHF_ART_KURZ = { tradeify_final: 1, apex: 1 }
+  // Weg-Name im Zeitstrahl-Kasten (tkWeg/weg1 sehen _apIds nicht): Hedge-Art eines Plans aus /ids (offen + bestaetigt)
+  window._apHedgeArt = id => { const k = String(id || ''); const z = [...(_apIds.offen || []), ...(_apIds.bestaetigt || [])].find(y => String(y.plan_id) === k); return (z && z.hedge_art) || null }
   /* MASTER | FUSION NEBENEINANDER (30.10.2026, Finn am Echo-Chip: „Master-TP und rechts daneben Slave-TP, dann SL genauso, und die Lot-Anzahl —
    * gerade ist es unübersichtlich, was die Slave-Werte sind"): statt des einen Hedge-Chips stehen die Fusion-Werte in den Spalten Lots / TP / SL
    * neben den Master-Werten (gedämpft), Kopf je Spalte „Master | Fusion". Quelle mt5_baseline.hedge_vorschau (Echo: ehv_tick, Apex/Tradeify:
@@ -80619,6 +80667,8 @@
         Object.values(zellen).forEach(c => c.classList.add('apg-mfz'))
         r.querySelectorAll('.ahf-kurz').forEach(c => { if(!/Freigabe offen/.test(c.textContent)) c.remove() })   // der Chip steht jetzt in den Spalten
         const grund = vs && vs.lots == null ? String(vs.grund || vs.fehler || '') : ''
+        if(AHF_ART_KURZ[z.hedge_art] && vs && vs.lots != null){   // FINAL-ANZEIGE: TP/SL als Paar-Zeile (apgHedgePaare), hier nur Lots
+          zellen.lots.appendChild(fus(`${z2(vs.lots, 2)}`, `Fusion-Gegenhedge: ${z2(vs.lots, 2)} Lot NAS100${vs.q ? ` · q ${vs.q} €/$` : ''}`)); return }
         const art = z.hedge_weg === 'echo' ? 'Echo-Hedge' : z.hedge_art === 'apex' ? 'Apex-Hedge (WD-Weg)' : z.hedge_art === 'tradeify_final' ? 'Tradeify-Final-Hedge' : 'Hedge'
         if(!vs || (!grund && vs.lots == null)){ for(const c of Object.values(zellen)) c.appendChild(fus('—', 'keine Fusion-Vorschau für diesen Plan', 'leer')); return }
         if(grund){ for(const c of Object.values(zellen)) c.appendChild(fus('⚠', `${art} nicht rechenbar: ${grund}`, 'warn')); return }
