@@ -4325,6 +4325,21 @@ def alarm_userscript_update():
                      f"Tampermonkey installieren; danach startet der Plan von selbst ({msg or 'kein Stand seit dem Panel-Start'}).",
                      uid=uid, daten=daten, schluessel=key)
         return jsonify({"ok": True})
+    # USERSCRIPT NICHT IM PULS-CHROME-MODUS (30.10.2026, Simon pc-pmqd8g: im Puls-Chrome lief das Userscript im normalen Modus — Abzeichen
+    # „● Reader · 1 Pos", Tab „t…" mit Rolle feed + Broker-Login, kein Tab „puls-…"; der reader-server nahm keinen Stand, Fusion schloss bei
+    # drei Tests nie übers Script): der PC-Tab meldet einmal je 24 h — 🟠 an die Master-IDs mit PC-Namen und dem Klick, der es behebt
+    if not tsx and d.get("puls_modus_fehlt") is True:
+        key = f"tm|{pc}|tv|pulsmodus"
+        if not _tm_melde_frei(key):
+            return jsonify({"ok": True, "gedrosselt": True})
+        pn = (_pc_namen_daten().get(pc) or {}).get("name") if pc else ""
+        wer_pc = f"PC von {pn or namen.get(uid, uid[:8])}" + (f" ({pc})" if pc else "")
+        alarm_senden(2, "userscript_pulsmodus", f"Userscript nicht im Puls-Chrome-Modus: {wer_pc}"[:120],
+                     f"Auf {wer_pc} läuft das Userscript im Puls-Chrome im normalen Modus ({msg or 'kein Tab puls-…'}) — der Hedge-Wächter sieht dort "
+                     f"keine Positionen, Fusion schließt nicht übers Userscript. Bitte im Puls-Chrome im TradingView-Tab auf das Tampermonkey-Symbol → "
+                     f"„Puls-Chrome (Orbit V3) — einschalten“; danach steht unten rechts „● Orbit V3 · Puls-Chrome“.",
+                     uid=uid, daten=daten, schluessel=key)
+        return jsonify({"ok": True})
     key = f"tm|{pc}|{soll}|{'tsx' if tsx else 'tv'}" + ("" if d.get("ok") is True else "|fehl")
     if not _tm_melde_frei(key):
         return jsonify({"ok": True, "gedrosselt": True})

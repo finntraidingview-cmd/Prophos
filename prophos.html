@@ -31874,6 +31874,46 @@
         body: JSON.stringify({ art: 'tsx', fehlt: true, pc: hedgePcId() || '', msg: String(grund || '').slice(0, 180) }) })
     }catch(e){ console.warn('[hedgeTsx] Auge-fehlt melden', (e && e.message) || e) } })()
   }
+  /* USERSCRIPT NICHT IM PULS-CHROME-MODUS (30.10.2026, Master: „Prophos meldet je PC mit Namen ‚Userscript nicht im Puls-Chrome-Modus‘, wenn ein
+   * PC Puls-Pläne hat, aber kein Tab ‚puls-…‘ meldet"). Anlass Simon pc-pmqd8g: /positions zeigte nur einen Tab „t…" (Rolle feed, login_im_feed
+   * = Plan-Konto), positionen_tab null — Fusion schloss bei drei Tests nie übers Userscript. Hier: Orbit-Plan (tvv2) dieses PCs geplant/offen,
+   * Lage ≥ 2 min stabil → einmal je 24 h (localStorage + Railway-Drossel) ein Hinweis im PC-Tab und 🟠 an die Master-IDs (/alarm/userscript-update). */
+  const PULSMODUS_SEIT_MS = 120000, PULSMODUS_MELDE_MS = 24 * 3600000
+  let _pmFehltSeit = 0
+  // REIN RECHNEND (Test-Haken window._pulsModusFehlt): Reader-Stand (/positions) → der fehlbelegte Tab | null. Fehlt nur, wenn KEIN frischer
+  // Tab „puls-…" (alter_s ≤ 120) meldet, aber ein frischer anderer Tab mit Broker-Login (login_im_feed oder Rolle broker)
+  function pulsModusFehlt(st){
+    const tabs = st && Array.isArray(st.tabs) ? st.tabs : null
+    if(!tabs) return null
+    const frisch = t => !!t && typeof t.alter_s === 'number' && t.alter_s <= 120
+    if(tabs.some(t => frisch(t) && /^puls-/.test(String(t.tab_id || '')))) return null
+    return tabs.find(t => frisch(t) && !/^puls-/.test(String(t.tab_id || '')) && (t.login_im_feed || t.rolle === 'broker')) || null
+  }
+  window._pulsModusFehlt = pulsModusFehlt
+  async function pulsModusTick(){
+    try{
+      if(window._tabNebenSofort || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
+      const plaene = (tradePlans || []).some(p => p && p.route === 'tvv2' && (p.status === 'planned' || p.status === 'open')
+        && (typeof tvV2EndlesungPcPasst !== 'function' || tvV2EndlesungPcPasst(p)))
+      if(!plaene){ _pmFehltSeit = 0; return }
+      if(typeof window._epLokalHolen === 'function'){ try{ await window._epLokalHolen() }catch(_){} }
+      const tab = pulsModusFehlt(window._epLokal && window._epLokal.stand)
+      if(!tab){ _pmFehltSeit = 0; return }
+      const jetzt = Date.now()
+      if(!_pmFehltSeit){ _pmFehltSeit = jetzt; return }
+      if(jetzt - _pmFehltSeit < PULSMODUS_SEIT_MS) return
+      let alt = 0; try{ alt = Number(localStorage.getItem('prophos_pulsmodus_gemeldet_at')) || 0 }catch(_){ return }
+      if(jetzt - alt < PULSMODUS_MELDE_MS) return
+      try{ localStorage.setItem('prophos_pulsmodus_gemeldet_at', String(jetzt)) }catch(_){ return }
+      const msg = `Tab ${String(tab.tab_id || '?').slice(0, 8)} · Rolle ${tab.rolle || '?'} · Script ${tab.version || '?'}${tab.login_im_feed ? ' · Konto ' + String(tab.login_im_feed).slice(0, 24) : ''}`
+      console.warn('[puls-modus] Userscript nicht im Puls-Chrome-Modus —', msg)
+      if(typeof atToast === 'function') atToast(`Userscript nicht im Puls-Chrome-Modus (${msg}) — im Puls-Chrome im TradingView-Tab: Tampermonkey-Symbol → „Puls-Chrome (Orbit V3) — einschalten“. Sonst schließt Fusion nicht übers Userscript.`, 'end')
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return
+      await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ art: 'tv', puls_modus_fehlt: true, pc: hedgePcId() || '', msg: msg.slice(0, 180) }) })
+    }catch(e){ console.warn('[puls-modus]', (e && e.message) || e) }
+  }
+  setInterval(pulsModusTick, 60000 + Math.floor(Math.random() * 30000))   // gestreut (Jitter-Regel)
   // Auge frisch? (29.10.2026, Nova-Startsperre) — Stand ≤ 1 s, nicht ausgeloggt, mit Konto; Fehler = nicht frisch. Merkt die Lage (_tsxLage)
   async function tsxAugeFrisch(){
     try{
