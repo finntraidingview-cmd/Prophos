@@ -37,7 +37,7 @@ def main():
     ok('html[data-theme="dark"] :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly){' in s, "dunkle Tokens am Sonnen-Schalter (auch WD)")
     ok(not re.search(r":root\{[^}]*--g-a1", s), "keine globalen --g-Tokens")
     css = "\n".join(z for z in s.splitlines() if "apg-" in z and "{" in z and z.lstrip().startswith(("#", "@", "html", ":is(")))
-    ok(all(("#ap-ids-root.ap-guestly" in z or z.lstrip().startswith("#adm-pane-wd.ap-guestly")) for z in css.splitlines() if z.lstrip().startswith(("#", ":is(")) and "apg-" in z), "apg-Stile nur im Planer-Bereich")
+    ok(all(("#ap-ids-root.ap-guestly" in z or z.lstrip().startswith(("#adm-pane-wd.ap-guestly", "#apg-fcfd "))) for z in css.splitlines() if z.lstrip().startswith(("#", ":is(")) and "apg-" in z), "apg-Stile nur im Planer-Bereich")
     ok("border-radius:16px" in css, "Karten 16 px Radius")
     # Aufbau in der Reihenfolge der Vorgabe
     i = s.index("function apGuestlyHtml(x){")

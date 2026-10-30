@@ -2405,11 +2405,11 @@
   /* TRADE-PLANER (07.10.2026; seit 08.10.2026 gelten die Styles über :is() auch im Admin-Reiter „Trade-Planer" #adm-pane-planer — gleiche Bausteine, keine zweite Kopie; Finn: Tagesplan des Auto-Planers clean und visuell): eigene Seite #tpl-view — Kacheln Long/Short/Netto in
      € Einsatz + Bot-Kachel, Zeitstrahl je ID (Dubai), Netto-Einsatz über den Tag, Konten-Abdeckung; darunter Auto-Planer-Leiste und
      Delta-Monitor (umgezogen aus Trades → Geplant). Nur :is(#tpl-view,#adm-pane-planer), eigene tpl-*-Klassen; Firmentöne wie die Vorrat-Seite. */
-  :is(#tpl-view,#adm-pane-planer){--vr-f0:var(--violet);--vr-f1:color-mix(in oklch,var(--violet) 70%,var(--blue));--vr-f2:color-mix(in oklch,var(--violet) 45%,var(--blue));
+  :is(#tpl-view,#adm-pane-planer,#adm-pane-fcfd){--vr-f0:var(--violet);--vr-f1:color-mix(in oklch,var(--violet) 70%,var(--blue));--vr-f2:color-mix(in oklch,var(--violet) 45%,var(--blue));
     --vr-f3:color-mix(in oklch,var(--violet) 75%,var(--violet-soft));--vr-f4:color-mix(in oklch,var(--violet) 75%,var(--danger));
     --vr-f5:color-mix(in oklch,var(--violet) 50%,var(--sub));--vr-f6:color-mix(in oklch,var(--violet) 60%,var(--sub-2))}
   @supports (color: oklch(from red l c h)){
-    :is(#tpl-view,#adm-pane-planer){--vr-f1:oklch(from var(--violet) l c calc(h - 14));--vr-f2:oklch(from var(--violet) l c calc(h - 28));
+    :is(#tpl-view,#adm-pane-planer,#adm-pane-fcfd){--vr-f1:oklch(from var(--violet) l c calc(h - 14));--vr-f2:oklch(from var(--violet) l c calc(h - 28));
       --vr-f3:oklch(from var(--violet) l calc(c * .8) calc(h + 14));--vr-f4:oklch(from var(--violet) l c calc(h + 32));
       --vr-f5:oklch(from var(--violet) l calc(c * .55) calc(h - 40));--vr-f6:oklch(from var(--violet) l calc(c * .4) h)}
   }
@@ -3809,6 +3809,21 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter[open] > summary::after{content:'▴'}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-schalter .apd-schalter{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px 18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs > :first-child{margin-top:0}
+  /* FUNDED-CFD-REGELFELD (30.10.2026): Regeln je Firma × Größe als Karten wie die WD-Einstellungen (wd-set-card), klappbar wie „Schalter" */
+  #apg-fcfd .fcr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-top:12px}
+  #apg-fcfd .fcr-karte{background:var(--g-kpi);border-radius:14px;padding:12px 14px;min-width:0}
+  #apg-fcfd .fcr-kopf{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--g-text);margin-bottom:4px}
+  #apg-fcfd .fcr-kopf i{width:9px;height:9px;border-radius:50%;flex:0 0 9px}
+  #apg-fcfd .fcr-kopf small{font-weight:400;color:var(--g-sub);font-size:11.5px;margin-left:auto;white-space:nowrap}
+  #apg-fcfd .fcr-gr{border-top:1px solid var(--g-rand);padding:8px 0 4px;margin-top:6px}
+  #apg-fcfd .fcr-gr > b{font-size:12.5px;color:var(--g-text)}
+  #apg-fcfd .fcr-z{display:grid;grid-template-columns:104px minmax(0,1fr);gap:3px 10px;font-size:12px;margin-top:5px}
+  #apg-fcfd .fcr-z span{color:var(--g-sub)}
+  #apg-fcfd .fcr-z em{font-style:normal;color:var(--g-text);font-variant-numeric:tabular-nums}
+  #apg-fcfd .fcr-hinweis{font-size:11.5px;color:var(--g-sub);margin-top:6px;line-height:1.4}
+  #apg-fcfd .fcr-gem{margin:4px 0 0;padding:0 0 0 16px;font-size:12px;color:var(--g-text);line-height:1.55}
+  #apg-fcfd .fcr-gem li::marker{color:var(--g-sub)}
+  #apg-fcfd .fcr-leer{font-size:12.5px;color:var(--g-sub);margin-top:10px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs .tpl-karte{border:0;box-shadow:none;background:transparent;padding:0;margin:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-karte,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .tpl-bd,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-hb-klapp{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-kopf b{font-size:18px;font-weight:600}
@@ -80049,6 +80064,65 @@
    * Konten-Kacheln je ID. Keine eigene Abfrage — fehlt die Übersicht, stößt das Öffnen einmal _admLaden an (wie der WD-Farmer). Kein Klick
    * auf ein Konto, keine Schreibwege; Planer-Teile (Zeitstrahl, Listen) bleiben „kommt". */
   const _apgFcfd = { charts: [], laedt: false }
+  /* FUNDED-CFD-REGELN (30.10.2026, Auftrag Master / Finn ~06:55): Anzeige der Planer-Regeln je Firma × Größe (Ziel bis Waiting for Payout,
+   * TP-Regel, SL, Lots, Hedge € auf DD, Daily Loss, Sonderfälle) + gemeinsame Regeln. Quelle: DB (S4 legt die Werte an) — normalisiert auf
+   * { gemeinsam: {…}, firmen: [{ firma, symbol, hinweis, groessen: [{ groesse, ziel, tp, sl, sl_1pct, lots, hedge_eur, hedge_dd, daily_loss, hinweis }] }] };
+   * Spannen als [von, bis]. Nur Anzeige, kein Schreibweg. */
+  const _fcfdR = { d: null, at: 0, laedt: false, fehler: '', auf: false }
+  const fcfdSpanne = (v, einheit) => { if(v == null || v === '') return null
+    const z = x => Number(x).toLocaleString('de-DE', { maximumFractionDigits: 3 })
+    if(Array.isArray(v)) return v.length > 1 && Number(v[1]) !== Number(v[0]) ? `${z(v[0])} – ${z(v[1])}${einheit}` : `${z(v[0])}${einheit}`
+    return isFinite(Number(v)) ? z(v) + einheit : String(v) }
+  const fcfdGroesse = g => { const n = Number(g); return n >= 1000 ? Math.round(n / 1000) + 'k' : String(g || '?') }
+  function fcfdTpText(tp){
+    if(!tp) return null
+    if(typeof tp === 'string') return tp
+    if(tp.art === 'erst_payout') return `vor 1. Payout ${fcfdSpanne(tp.erst, ' $')} · danach ${fcfdSpanne(tp.danach, ' $')}`
+    if(tp.art === 'ziel') return 'aufs Ziel · nach Verlust am nächsten Tag wieder aufs Ziel'
+    return tp.text ? String(tp.text) : null
+  }
+  function fcfdRegelnSub(){
+    if(_fcfdR.fehler) return 'Regeln nicht ladbar — ' + _fcfdR.fehler.slice(0, 80)
+    if(!_fcfdR.d) return _fcfdR.laedt ? 'Regeln laden …' : 'Funded-CFD-Planer kommt — Regeln je Firma noch nicht hinterlegt'
+    const f = _fcfdR.d.firmen || []
+    return `Regeln je Firma × Größe · ${f.map(x => x.firma).join(' · ') || 'keine Firma'} · Planer plant noch nicht`
+  }
+  function fcfdRegelnHtml(){
+    const D = _fcfdR.d
+    if(!D) return `<div class="fcr-leer">${escapeHtml(fcfdRegelnSub())}</div>`
+    const g = D.gemeinsam || {}, zeile = (l, v) => v == null || v === '' ? '' : `<span>${l}</span><em>${v}</em>`
+    // gemeinsame Regeln: Werte aus der DB, wo es sie gibt; der Rest beschreibt, was der Planer tut (Finns Antworten 30.10.2026)
+    const gem = [
+      `${g.trades_je_tag != null ? escapeHtml(String(g.trades_je_tag)) : '1'} Trade pro Tag je Konto · Echo mit Fusion-Gegenhedge`,
+      'Uhrzeit und Long/Short gewürfelt — läuft bei derselben ID × Firma schon ein Trade, nimmt der Funded-Trade dieselbe Richtung (Richtungsschutz)',
+      `Bestätigen ${g.auto_bestaetigen ? 'automatisch' : 'von Hand'}, wie im Challenge-Planer`,
+      'Ziel gemessen an der Starting Balance (Kontogröße): erreicht → Waiting for Payout · Waiting for Payout wird nie geplant',
+      ...(Array.isArray(g.hinweise) ? g.hinweise.map(String) : [])
+    ]
+    const gemKarte = `<div class="fcr-karte"><div class="fcr-kopf">Gemeinsam<small>alle Firmen</small></div><ul class="fcr-gem">${gem.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul></div>`
+    const firmaKarte = f => {
+      const ton = typeof apdFirmaTon === 'function' ? apdFirmaTon(f.firma) : 'var(--g-a2)'
+      const gr = (f.groessen || []).slice().sort((a, b) => Number(a.groesse) - Number(b.groesse)).map(x => `<div class="fcr-gr"><b>${escapeHtml(fcfdGroesse(x.groesse))}</b><div class="fcr-z">
+          ${zeile('Ziel → Waiting', fcfdSpanne(x.ziel, ' $') && '+' + fcfdSpanne(x.ziel, ' $'))}${zeile('TP', escapeHtml(fcfdTpText(x.tp) || ''))}
+          ${zeile('Stop-Loss', fcfdSpanne(x.sl, ' $'))}${zeile('SL mit 1-%-Regel', fcfdSpanne(x.sl_1pct, ' $'))}${zeile('Lots', fcfdSpanne(x.lots, f.symbol ? ' · ' + escapeHtml(String(f.symbol)) : ''))}
+          ${zeile('Hedge', x.hedge_eur != null ? `${fcfdSpanne(x.hedge_eur, ' €')}${x.hedge_dd != null ? ` auf ${fcfdSpanne(x.hedge_dd, ' $')} DD` : ''}` : null)}${zeile('Daily Loss', fcfdSpanne(x.daily_loss, ' $'))}</div>
+          ${x.hinweis ? `<div class="fcr-hinweis">${escapeHtml(String(x.hinweis))}</div>` : ''}</div>`).join('')
+      return `<div class="fcr-karte"><div class="fcr-kopf"><i style="background:${ton}"></i>${escapeHtml(f.firma)}<small>${(f.groessen || []).map(x => fcfdGroesse(x.groesse)).join(' · ')}</small></div>
+        ${f.hinweis ? `<div class="fcr-hinweis" style="margin-top:0">${escapeHtml(String(f.hinweis))}</div>` : ''}${gr || '<div class="fcr-leer">keine Größe hinterlegt</div>'}</div>`
+    }
+    return `<div class="fcr-grid">${gemKarte}${(D.firmen || []).map(firmaKarte).join('')}</div>`
+  }
+  // Rohdaten aus der DB → normalisiert (Adapter, sobald S4 die Struktur geliefert hat)
+  function fcfdRegelnNorm(roh){ return roh && typeof roh === 'object' && Array.isArray(roh.firmen) ? roh : null }
+  async function fcfdRegelnLaden(neu){
+    if(_fcfdR.laedt || (!neu && _fcfdR.d && Date.now() - _fcfdR.at < 300000)) return
+    if(typeof window._fcfdRegelnQuelle !== 'function') return   // Quelle folgt (S4)
+    _fcfdR.laedt = true; _fcfdR.fehler = ''
+    try{ _fcfdR.d = fcfdRegelnNorm(await window._fcfdRegelnQuelle()); _fcfdR.at = Date.now() }
+    catch(e){ _fcfdR.fehler = (e && e.message) || String(e) }
+    finally{ _fcfdR.laedt = false; if(document.getElementById('apg-fcfd')?.offsetParent) apgFcfdRender() }
+  }
+  window._fcfdRegelnStub = d => { _fcfdR.d = fcfdRegelnNorm(d); _fcfdR.at = Date.now(); apgFcfdRender() }   // Stub ohne Login
   function apgFcfdDaten(ad){
     const rows = ((ad && ad.accounts) || []).filter(r => r && r.type === 'funded_cfd' && !r.archived)
     return rows.map(r => {
@@ -80093,7 +80167,19 @@
       ${apgKarte('Konten je Firma', `Total: ${k.length}${fListe.length ? ` · Peak: ${escapeHtml(fListe[0][0])} (${fListe[0][1]})` : ''}`,
         `<div class="apg-chart">${fListe.length ? '<canvas id="apg-fc-firma"></canvas>' : '<div class="apg-leer">keine Konten</div>'}</div>`, 'Funded-CFD-Konten je Prop-Firma, ohne archivierte')}
     </div>`
-    const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">Funded-CFD-Planer kommt — Regeln je Firma folgen (Firmen-Schema, Bugliste #10)</div></div><button type="button" class="apg-haupt" disabled title="kommt mit dem Planer">Jetzt planen</button></div>`
+    // REGEL-FELD (30.10.2026, Finn ~06:55 über den Master: „dasselbe Regel-Feld wie bei Winning Days"): klappbar wie „Schalter" im Challenge-Planer,
+    // Werte aus der DB (fcfdRegelnLaden) — keine zweite Wahrheit im HTML; solange nichts hinterlegt ist, steht das dort
+    const leiste = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Einstellungen</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
+        <button type="button" class="apg-haupt" disabled title="Der Funded-CFD-Planer plant noch nicht — die Regeln stehen schon">Jetzt planen</button>
+        <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Regeln</summary>${fcfdRegelnHtml()}</details></div>`
+    // ÜBERSICHT JE FIRMA (Finn ~06:55: „Kacheln statt Tabelle"): Konten · planbar (Funded CFD ohne Waiting) · Waiting for Payout
+    const jeFirma = new Map()
+    for(const e of k){ if(!jeFirma.has(e.firma)) jeFirma.set(e.firma, { n: 0, w: 0 }); const o = jeFirma.get(e.firma); o.n++; if(e.wartet) o.w++ }
+    const fKachel = ([f, o]) => `<div class="apg-konto"><div class="apg-konto-kopf"><span style="display:inline-flex;align-items:center;gap:6px"><i style="width:8px;height:8px;border-radius:50%;background:${typeof apdFirmaTon === 'function' ? apdFirmaTon(f) : 'var(--g-a2)'}"></i>${escapeHtml(f)}</span><span>${o.w ? apgPille('tuerkis', `⏳ ${o.w} Waiting`) : ''}</span></div>
+        <div class="apg-konto-zahl"><b>${o.n - o.w}</b><span>planbar</span></div><div class="apg-konto-name">${o.n} ${o.n === 1 ? 'Konto' : 'Konten'}${o.w ? ` · ${o.w} Waiting for Payout` : ''}</div></div>`
+    const firmenKarte = apgKarte(`Firmen · ${jeFirma.size}`, 'je Prop-Firma · planbar = Funded CFD ohne Waiting for Payout (Waiting wird nie geplant)', jeFirma.size
+      ? `<div class="apg-konten">${[...jeFirma.entries()].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0], 'de')).map(fKachel).join('')}</div>`
+      : '<div class="apg-leer" style="padding:18px 0">keine Funded-CFD-Konten in dieser Sicht</div>')
     const geld = e => e.bal == null ? '–' : (e.ccy === 'EUR' ? apgZahl(e.bal) + ' €' : apgZahl(e.bal) + ' $')
     const kachel = e => `<div class="apg-konto" title="${escapeHtml(e.r.name || '')}">
         <div class="apg-konto-kopf"><span>${escapeHtml(e.firma)}</span><span>${e.wartet ? apgPille('tuerkis', '⏳ Waiting') : e.angefragt ? apgPille('lila', '💸 angefragt') : ''}</span></div>
@@ -80104,7 +80190,7 @@
       ? sortiert.map(o => `<div class="apg-id-kopf">${escapeHtml(o.name)} · ${o.konten.length}</div><div class="apg-konten">${o.konten.slice().sort((a, b) => (b.ueber ?? -1e12) - (a.ueber ?? -1e12)).map(kachel).join('')}</div>`).join('')
       : '<div class="apg-leer" style="padding:18px 0">keine Funded-CFD-Konten in dieser Sicht</div>')
     const zs = apgKarte('Zeitstrahl', 'kommt', '<div class="apg-leer" style="padding:18px 0">Noch keine Trades — der Planer ist noch nicht gebaut.</div>')
-    return kopf + kpis + charts + leiste + `<div data-apg-anker="konten">${liste}</div>` + zs + ['Zu bestätigen', 'Läuft', 'Braucht dich', 'Wartet auf Start'].map(t => apgKarte(`${t} · 0`, 'kommt')).join('')
+    return kopf + kpis + leiste + firmenKarte + charts + `<div data-apg-anker="konten">${liste}</div>` + zs + ['Zu bestätigen', 'Läuft', 'Braucht dich', 'Wartet auf Start'].map(t => apgKarte(`${t} · 0`, 'kommt')).join('')
   }
   function apgFcfdRender(){
     const el = document.getElementById('apg-fcfd'); if(!el) return
@@ -80114,7 +80200,8 @@
     el.innerHTML = apgFcfdHtml(ad)
     el.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => el.querySelector(`[data-apg-anker="${k.dataset.apgZiel}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
-    el.querySelector('[data-apg-fcfd-neu]')?.addEventListener('click', ev => { ev.currentTarget.disabled = true; apgFcfdLaden(true) })
+    el.querySelector('[data-apg-fcfd-neu]')?.addEventListener('click', ev => { ev.currentTarget.disabled = true; apgFcfdLaden(true); fcfdRegelnLaden(true) })
+    el.querySelector('details[data-fcfd-regeln]')?.addEventListener('toggle', e => { _fcfdR.auf = !!e.target.open })
     try{ apgChartsMalen(el, _apgFcfd.daten, { ls: '#apg-fc-ls', balken: '#apg-fc-firma', ablage: _apgFcfd.charts }) }catch(e){ console.warn('[apg] Funded CFD Charts', e) }
   }
   function apgFcfdLaden(neu){
@@ -80123,7 +80210,7 @@
     _apgFcfd.laedt = true
     Promise.resolve().then(() => window._admLaden()).catch(() => {}).then(() => { _apgFcfd.laedt = false; apgFcfdRender() })
   }
-  window._apgFcfdOeffnen = () => { try{ apgFcfdLaden(false) }catch(e){ console.warn('[apg] Funded CFD', e) } }
+  window._apgFcfdOeffnen = () => { try{ apgFcfdLaden(false); fcfdRegelnLaden(false) }catch(e){ console.warn('[apg] Funded CFD', e) } }
   // Bausteine für das WD-Gerüst (apgWdRender steht im Farmer-Block, der diesen Block nicht sieht) — nur Darstellung
   window._apgBau = { apgKpi, apgPille, APG_ICON, apgKarte, apgChartsMalen, apgZahl, schlank: () => AP_SCHLANK }
   function apGuestlyVerdrahten(root){
