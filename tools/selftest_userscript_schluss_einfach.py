@@ -46,7 +46,7 @@ const kurzPolar = () => false
 const _kurzAnker = new Map(), _kurzFenster = new Map()
 """
 code = "\n".join([UMGEBUNG, zeile("  const KURZ_TOL_PKT"), js_funktion("kontoTextBezug"), js_funktion("kurzPlanFill"), js_funktion("kurzEndeEntscheid"), js_funktion("kurzUmschalterBalance"),
-                  js_funktion("summaryKeysKurz"), zeile("  const kurzEndeSperrt ="), js_funktion("kurzEndeBeweis"), js_funktion("kurzAnkerGilt"), js_funktion("kurzEndeKontoPasst"),
+                  js_funktion("summaryKeysKurz"), zeile("  const kurzEndeSperrt ="), js_funktion("kurzEndeBeweis"), js_funktion("kurzAnkerGilt"), js_funktion("kurzEndeKontoPasst"), zeile("  function kurzStandAlt("),
                   zeile("  const PULS_OHNE_TV_ROUTEN"), js_funktion("pulsSignalOhneTv"), js_funktion("hedgeTvUnterwegs")])
 
 # echte Werte: mt5_baseline.tv und hedge.reader_kurz_nein
@@ -90,6 +90,7 @@ _pulsAktivAt = 2000; out.anker_nach_puls = kurzEndeKontoPasst(c.konto, c.ext, st
 ank({ text: 'PAAPEX670837000000' }); out.anker_anderer_text = kurzEndeKontoPasst(c.konto, c.ext, st)
 _kurzAnker.clear(); out.anker_fehlt = kurzEndeKontoPasst(c.konto, c.ext, st)
 ank(); out.anker_nicht_puls_tab = kurzEndeKontoPasst(c.konto, c.ext, stand(c, { positionen_tab: 't1' }))
+out.alt = { kurz_1s: kurzStandAlt(true, { positionen_alter_s: 1 }), kurz_2s: kurzStandAlt(true, { positionen_alter_s: 2 }), kurz_3s: kurzStandAlt(true, { positionen_alter_s: 3 }), kurz_ohne: kurzStandAlt(true, {}), kurz_null: kurzStandAlt(true, null), voll_9s: kurzStandAlt(false, { positionen_alter_s: 9 }) }
 // Signal-Lauf ohne TV (Echo/Nova): für Anker und Ende-Pfade nicht unterwegs; alles andere bleibt unterwegs
 const sig = (route, o) => { tradePlans = [p, { id: 's', route, status: 'open' }]; _osActive = { planId: (o && o.plan) || 's' }; _unterwegs = (o && o.g) || 'Signal-Lauf'; _tvBalLesenLaeuft = new Set((o && o.bal) ? ['x'] : [])
   ank(); const r = { u: hedgeTvUnterwegs(), anker: kurzEndeKontoPasst(c.konto, c.ext, st) }; _unterwegs = ''; _osActive = null; _tvBalLesenLaeuft = new Set(); return r }
@@ -133,6 +134,11 @@ soll("Schnell-Wächter fragt nur hedgeTvUnterwegs", "hedgeTvUnterwegs()" in _r a
 soll("1-s-Wächter fragt nur hedgeTvUnterwegs", "const unterwegs = hedgeTvUnterwegs()" in HTML and "const unterwegs = hedgePulsUnterwegs()" not in HTML)
 _h = js_funktion("hedgePulsUnterwegs")
 soll("hedgePulsUnterwegs selbst unverändert", "if(_osActive) return 'Signal-Lauf'" in _h)
+
+_a = e["alt"]
+soll("Hand-F5: gekürzt, Stand > 2 s oder unbekannt → Konto-Ruhe neu", _a["kurz_3s"] is True and _a["kurz_ohne"] is True and _a["kurz_null"] is True)
+soll("Hand-F5: gekürzt, Stand ≤ 2 s → bleibt; voller Text unberührt", _a["kurz_1s"] is False and _a["kurz_2s"] is False and _a["voll_9s"] is False)
+soll("1-s-Wächter: Konto-Ruhe und Leer-Zeit fragen kurzStandAlt", "const standAlt = kurzStandAlt(kontoKurz, st)" in HTML and "if(kontoFrisch && kontoPasst && !unterwegs && !standAlt){" in HTML and "if(listeLeer && !unterwegs && !standAlt){" in HTML)
 
 # Verdrahtung beider Ende-Pfade
 soll("Schnell-Wächter: nur Sperre hält auf", "if(kurzEndeSperrt(kurz)){ kurzEndeMelden(p, kurz); continue }" in HTML)

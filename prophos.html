@@ -31883,6 +31883,10 @@
   function kurzEndeKontoPasst(kontoText, extId, st){
     return kontoTextBezug(kontoText, extId) === 'kurz' && !!st && /^puls-/.test(String(st.positionen_tab || '')) && kurzAnkerGilt(extId, kontoText)
   }
+  // HAND-F5 IM 10-S-FENSTER (Prüfer S2 30.10.2026 zu 0d09ebb0): der 1-s-Wächter lässt Konto-Text ≤ 10 s gelten — ein Hand-F5 im Puls-Chrome unter 10 s ließ _hedgeKontoSeit stehen (≥ 90 s = ruhig),
+  // 1 s Leer-Text danach war „weg", bei gekürztem Konto seit der Balance-Nachkontrolle ohne Riegel. Gekürzt zählt die Konto-Ruhe nur mit Positions-Stand ≤ 2 s, sonst beginnt sie neu. REIN
+  function kurzStandAlt(kontoKurz, st){ return !!kontoKurz && !(st && typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 2) }
+  window._kurzStandAlt = kurzStandAlt   // Test-Haken
   // REIN RECHNEND: steht die Plan-Position mit Fill-Bindung in der Liste? (Avg Fill auf den Tick, volle Kontraktzahl, Plan-Richtung)
   function kurzFillPasst(liste, wz, richtung, kontrakte, einstieg){
     if(!Array.isArray(liste) || !(kontrakte > 0) || !(einstieg > 1000)) return false
@@ -32875,11 +32879,12 @@
             const kontoPasst = kontoVoll || kontoKurz
             const pidK = String(p.id)
             const unterwegs = hedgeTvUnterwegs()   // 16.10.2026: Puls unterwegs → Reader blind, Ruhe beginnt danach neu; 30.10.2026: nur TradingView zählt
-            if(kontoFrisch && kontoPasst && !unterwegs){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
+            const standAlt = kurzStandAlt(kontoKurz, st)   // s. kurzStandAlt
+            if(kontoFrisch && kontoPasst && !unterwegs && !standAlt){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
             else { _hedgeKontoSeit.delete(pidK); _hedgeLeerSeit.delete(pidK) }
             const kontoStabilMs = _hedgeKontoSeit.has(pidK) ? Date.now() - _hedgeKontoSeit.get(pidK).seit : 0
             const listeLeer = !!(st && frisch && kontoFrisch && kontoPasst && Array.isArray(st.positionen) && !st.positionen.some(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : ''); if(xw !== wz) return false; if(richtung && x.richtung && x.richtung !== richtung) return false; const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs((typeof tvKursZahl === 'function') ? (tvKursZahl(x.menge) || 0) : (Number(x.menge) || 0)); return m > 0 }))
-            if(listeLeer && !unterwegs){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()); kurzFensterFrieren(pidK) } else _hedgeLeerSeit.delete(String(p.id))
+            if(listeLeer && !unterwegs && !standAlt){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()); kurzFensterFrieren(pidK) } else _hedgeLeerSeit.delete(String(p.id))
             // Master seit dem Open im Reader gesehen? (Voraussetzung der schnellen Regel)
             if(st && frisch && kontoFrisch && kontoPasst && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){ _hedgeMasterGesehen.add(pidK); kurzFensterNeu(pidK, wz) }
             const schnell = !!(st && /^puls-/.test(String(st.positionen_tab || '')))
