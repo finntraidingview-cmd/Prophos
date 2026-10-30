@@ -25604,6 +25604,16 @@ def gp_tick(jetzt=None):
 # Schalter auto_plan_regeln.regeln.echo_hedge.an (Admin → Trade-Planer neben „Bot an/aus", POST /admin/auto-plan/ausgleich-einstellung
 # {echo_hedge}); aus → noch nicht gestartete umgestellte Pläne zurück auf Echo V2. Nur HT (ohne ADMIN_EXCLUDE und Verwalter-Gruppen).
 # Der DB-Riegel trade_plans_kontoart_weg lässt Auto-Challenges auf mt5 mit Slave nur bei an durch (sql/2026-10-29_ht_echo_hedge.sql).
+# NIE STILL OHNE HEDGE (30.10.2026, Finn: „bei FundedNext läuft der Trade schon zum zweiten Mal ohne Hedge", Befund S3): (1) Chris 4e9a26ac —
+# Finn verschob 23 s nach dem Bestätigen nur die Startzeit, _ap_werte_setzen setzte hand_werte_at, eh_tick filterte darauf → still Echo V2.
+# hand_werte_at blockiert hier jetzt nicht mehr (wie tfh_tick, Marc 880b8b11): eh_tick schreibt nur route, slave_*, multiplier,
+# slave_risk, mt5_baseline.echo_hedge und eine Notiz-Zeile — nie master_tp/master_sl/master_contracts/richtung/start_um — und rechnet die
+# Hedge-Lots aus den (von Hand gesetzten) master_contracts. hand_werte_at bleibt bei jeder Hand-Änderung gesetzt, damit der Planer
+# Finns Startzeit nicht löscht oder verschiebt (AP_FEST_HAND). (2) Was trotzdem durchrutscht, meldet 🔴 statt Stille: fällig in
+# EH_MELDEN_MIN und noch ohne Umstellung/Grund, oder als HT-CFD-Challenge ohne echo_hedge-Spur geclaimt (EH_ROT_FENSTER_MIN). (3) FundingPips
+# b9c1c395 — 56 s nach dem Bestätigen geclaimt, eh_tick lief nur jede Minute: eh_schnell_tick schaut alle EH_SCHNELL_S nach bestätigten,
+# fälligen Plänen ohne echo_hedge-Spur, die eh_tick so noch nicht gesehen hat, und stößt ihn sofort an (Bestätigen läuft per supabase-js,
+# app.py sieht es nicht). Ganz dicht wäre nur ein DB-Halte-Riegel am Claim — Rest-Lücke ein Claim in den ~5 s danach → 🔴 aus (2).
 EH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "max_lots": 60.0, "vorlauf_min": 20.0, "nachlauf_min": 30.0}
 EH_TAKT_S = 60
 EH_LESUNG_MAX_S = 180         # Fusion-Lesung älter → ohne Hedge (Start-Check im PC-Tab nimmt 2 min)
@@ -25611,7 +25621,11 @@ EH_MARGE_RESERVE = 0.20       # wie FUSION_MARGE_RESERVE im PC-Tab
 EH_TYPEN = ("challenge", "phase1", "phase2")
 EH_MELDEN_MIN = 3             # ⚪ „ohne Hedge" erst, wenn der Start so nah ist (oder vorbei)
 EH_VORGEMERKT_CLAIM_MIN = 5   # geclaimt, Hedge noch nicht in der Fusion-Lesung (≤ 3 min alt): so lange zählt er als vorgemerkt
-_eh = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
+EH_SCHNELL_S = 5              # eh_schnell_tick: frisch bestätigte/fällige Pläne ohne Spur → eh_tick sofort (30.10.2026)
+EH_ROT_FENSTER_MIN = 15       # 🔴 „ohne Umstellung gestartet": Claims der letzten 15 min prüfen
+_eh = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": [], "an": False, "par": None, "gesehen": {},
+       "rot": set(), "schnell_fehler": "", "aus": set()}
+_eh_lock = threading.Lock()   # eh_tick läuft in ap_loop und aus eh_schnell_loop — nie zweimal gleichzeitig
 
 
 def eh_param(regeln):
@@ -25691,9 +25705,10 @@ def _eh_spur(text):
 
 
 def _eh_guard(p, route="mt5v2"):
-    """Update-Guard: noch geplant, nicht geclaimt, keine Hand-Werte, Route wie gelesen, seitdem unverändert (updated_at)."""
+    """Update-Guard: noch geplant, nicht geclaimt, Route wie gelesen, seitdem unverändert (updated_at). hand_werte_at blockiert seit
+    30.10.2026 nicht mehr (Chris 4e9a26ac, s. o.) — eine Hand-Änderung NACH dem Lesen fängt updated_at ab."""
     g = {"id": f"eq.{p['id']}", "status": "eq.planned", "route": f"eq.{route}", "auto_plan": "is.true",
-         "start_um_gestartet_at": "is.null", "hand_werte_at": "is.null"}
+         "start_um_gestartet_at": "is.null"}
     if p.get("updated_at"):
         g["updated_at"] = f"eq.{p['updated_at']}"
     return g
@@ -25729,6 +25744,72 @@ def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
         alarm_senden(3, "echo_hedge_ohne", "Echo-Hedge ausgelassen",
                      f"{wer} · {p.get('master_name') or '—'}: startet als Echo V2 ohne Hedge — {grund}",
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"eh-ohne-{p['id']}")
+
+
+def eh_plan_zaehlt(konto, regel):
+    """REIN RECHNEND (testbar): gehört der Plan zum Echo-Hedge-Weg? HT-CFD-Challenge (EH_TYPEN) einer Firma mit Planer-Route mt5v2.
+    Dieselbe Auswahl wie eh_tick vor der Hedge-Rechnung — Tage-Mini und ID-Filter (HT) prüft der Aufrufer."""
+    return bool(konto) and (konto.get("account_type") or "") in EH_TYPEN and bool(regel) and str(regel.get("route") or "mt5v2") == "mt5v2"
+
+
+def eh_rot_kandidaten(plaene, konten, firmen, aus, regel_finden):
+    """REIN RECHNEND (testbar): geclaimte HT-CFD-Challenges auf Echo V2 ohne echo_hedge-Spur — eh_tick hat sie nie umgestellt und nie
+    begründet (Hand-Werte vor 30.10., Spätbestätigung, Fehler). plaene: Zeilen mit route mt5v2 + start_um_gestartet_at. → [Plan, …]."""
+    out = []
+    for p in plaene or []:
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        if str(p.get("user_id")) in aus or base.get("echo_hedge") or base.get("tage_mini") or not p.get("start_um_gestartet_at"):
+            continue
+        a = konten.get(str(p.get("master_account_id")))
+        if eh_plan_zaehlt(a, regel_finden(firmen, (a or {}).get("firm"))):
+            out.append(p)
+    return out
+
+
+def _eh_rot_schon(key):
+    """Schon gemeldet? Speicher, sonst alarm_log.schluessel (übersteht einen Neustart; Lesefehler → nein)."""
+    if key in _eh["rot"]:
+        return True
+    try:
+        if sb_select("alarm_log", {"select": "id", "schluessel": f"eq.{key}", "limit": "1"}):
+            _eh["rot"].add(key)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _eh_rot(p, art, text, wer):
+    """🔴 einmal je Plan und Art (Speicher + alarm_log.schluessel, übersteht einen Neustart). → True, wenn gesendet."""
+    key = f"eh-rot-{art}-{p['id']}"
+    if _eh_rot_schon(key):
+        return False
+    _eh["rot"].add(key)
+    _eh_spur(f"🔴 {wer} · {p.get('master_name') or '—'}: {text}")
+    alarm_senden(1, "echo_hedge_rot", "Echo-Hedge fehlt", f"{wer} · {p.get('master_name') or '—'}: {text}",
+                 uid=p.get("user_id"), plan_id=p.get("id"), schluessel=key)
+    return True
+
+
+def eh_rot_start_pruefen(jetzt, firmen, aus, namen):
+    """🔴 für HT-CFD-Challenges, die in den letzten EH_ROT_FENSTER_MIN als Echo V2 ohne echo_hedge-Spur geclaimt wurden. → Anzahl."""
+    roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,start_um,start_um_gestartet_at,mt5_baseline",
+                                  "status": "in.(planned,open)", "route": "eq.mt5v2", "auto_plan": "is.true",
+                                  "auto_bestaetigt_at": "not.is.null", "mt5_baseline->echo_hedge": "is.null",
+                                  "or": "(start_claim_art.is.null,start_claim_art.eq.start)",   # Verbrauch (verpasst, Ziel …) sendet nichts
+                                  "start_um_gestartet_at": f"gte.{(jetzt - timedelta(minutes=EH_ROT_FENSTER_MIN)).isoformat()}"})
+    roh = [p for p in roh if str(p.get("user_id")) not in aus]
+    if not roh:
+        return 0
+    konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,firm,account_type", "id": "in.(" + ",".join(
+        sorted({str(p["master_account_id"]) for p in roh if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
+    n = 0
+    for p in eh_rot_kandidaten(roh, konten, firmen, aus, ap_regel_finden):
+        if _eh_rot_schon(f"eh-rot-faellig-{p['id']}"):
+            continue                                      # schon vor dem Start mit Grund 🔴 gemeldet
+        n += _eh_rot(p, "start", "als Echo V2 OHNE Fusion-Hedge gestartet — die Umstellung kam nicht vor dem Claim (kein Grund am Plan). "
+                     "→ Hedge in Fusion von Hand prüfen/öffnen", namen.get(str(p["user_id"]), str(p["user_id"])[:8]))
+    return n
 
 
 def eh_zurueck():
@@ -25773,29 +25854,43 @@ def hedge_vorgemerkt(von, jetzt):
 def eh_tick(jetzt=None, force=False):
     """Jede Minute (ap_loop): fällige HT-CFD-Auto-Pläne (Start in −nachlauf_min … +vorlauf_min, bestätigt, nicht geclaimt) auf Echo mit Hedge umstellen bzw. mit
     Grund als Echo V2 lassen; Schalter aus → zurück. → {umgestellt, ohne} oder None (Takt nicht fällig)."""
-    if not force and time.time() - _eh["at"] < EH_TAKT_S:
-        return None
-    _eh["at"] = time.time()
-    jetzt = jetzt or datetime.now(timezone.utc)
+    with _eh_lock:
+        if not force and time.time() - _eh["at"] < EH_TAKT_S:
+            return None
+        _eh["at"] = time.time()
+        return _eh_tick_lauf(jetzt or datetime.now(timezone.utc))
+
+
+def _eh_tick_lauf(jetzt):
+    """Ein Lauf von eh_tick (unter _eh_lock)."""
     regeln = _eh_regeln()
     par = eh_param(regeln)
+    _eh["an"], _eh["par"] = par["an"], par
     if not par["an"]:
         return {"umgestellt": 0, "ohne": 0, "zurueck": eh_zurueck()}
     von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
+    # hand_werte_at filtert hier bewusst NICHT (30.10.2026, Chris 4e9a26ac — s. Kopf des Abschnitts)
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,master_contracts,master_risk,richtung,"
                                             "start_um,notes,mt5_baseline,updated_at",
                                   "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true", "start_um_gestartet_at": "is.null",
                                   "auto_bestaetigt_at": "not.is.null",          # unbestätigte Vorschläge starten nie (SU_CLAIM_GUARD)
-                                  "hand_werte_at": "is.null", "and": f"(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()})",
+                                  "and": f"(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()})",
                                   "order": "start_um.asc"})
+    _eh["gesehen"] = {str(p["id"]): str(p.get("updated_at") or "") for p in roh}   # für eh_schnell_tick: so schon gesehen
     namen, aus = _ap_namen()
     verwaltet = gp_verwalter_karte()
     aus = set(aus) | {str(u) for u in verwaltet} | {str(u) for u in verwaltet.values()}
     plaene = [p for p in roh if str(p.get("user_id")) not in aus]
+    _eh["aus"] = aus                # eh_schnell_tick: Emin-/Verwalter-Pläne stoßen nie einen Lauf an
     erg = {"umgestellt": 0, "ohne": 0}
+    firmen = regeln.get("firmen") or []
+    try:
+        erg["rot_start"] = eh_rot_start_pruefen(jetzt, firmen, aus, namen)   # NIE STILL (2): ohne Spur geclaimt → 🔴
+    except Exception as e:
+        _eh_spur(f"⚠️ Start-Prüfung: {type(e).__name__}: {e}")
     if not plaene:
         return erg
-    firmen = regeln.get("firmen") or []
+    offen = {}                      # NIE STILL (2): fällige Pläne, die dieser Lauf weder umgestellt noch begründet hat → Grund
     konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(
         sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
     uids = sorted({str(p["user_id"]) for p in plaene})
@@ -25822,62 +25917,108 @@ def eh_tick(jetzt=None, force=False):
     # Fusion-Lesung den Hedge zeigt). Verpasste/liegengebliebene Pläne zählen nicht (Prüfung Subagent 29.10.2026).
     vorgemerkt = hedge_vorgemerkt(von, jetzt)   # Echo + finaler Tradeify + Apex — eine 60-Lot-Grenze je Fusion-Login (30.10.2026)
     for p in plaene:
-        a = konten.get(str(p.get("master_account_id")))
-        if not a or (a.get("account_type") or "") not in EH_TYPEN:
-            continue
-        regel = ap_regel_finden(firmen, a.get("firm"))
-        if not regel or str(regel.get("route") or "mt5v2") != "mt5v2":
-            continue                                      # nur CFD-Firmen auf Echo V2
-        uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
-        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
-        if base.get("tage_mini"):
-            _eh_ohne(p, "mini", "Tage sammeln (Mini-Trade, sofort zu)", wer, jetzt, melden=False)
-            continue
-        hid, login = hedge.get(uid, (None, ""))
-        if not hid or hid not in hedge_acc:
-            _eh_ohne(p, "kein_konto", "kein Echo-Hedge-Konto (Fusion) bei dieser ID", wer, jetzt)
-            continue
-        login = login or str(hedge_acc[hid].get("external_id") or "")
-        bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
-        if bal is None:
-            _eh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
-            continue
-        kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
-        sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
-        h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
-                            par["netto_faktor"], par["min_lot"])
-        if grund:
-            _eh_ohne(p, "groesse", grund + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""), wer, jetzt)
-            continue
-        les = lesungen.get(login)
-        if not les or jetzt.timestamp() - float(les.get("at") or 0) > EH_LESUNG_MAX_S:
-            _eh_ohne(p, "lesung", f"keine frische Fusion-Lesung ({login or '?'}, älter als {EH_LESUNG_MAX_S // 60} min)", wer, jetzt)
-            continue
-        ok, grund = eh_marge(les, h["lots"], p.get("richtung"), vorgemerkt.get(login, 0.0), par["max_lots"])
-        if not ok:
-            _eh_ohne(p, "grenze" if "gleichzeitig" in grund else "marge", grund, wer, jetzt)
-            continue
-        info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"],
-                "satz": kw.get("satz_eur_pro_usd"), "kontowert_eur": kw.get("wert_eur"), "balance": round(float(bal), 2), "login": login,
-                "netto_faktor": par["netto_faktor"]}
-        upd = {"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
-               "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, echo_hedge=info),
-               "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Echo mit Hedge: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                         f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()}
         try:
-            if not sb_update("trade_plans", _eh_guard(p), upd):
-                continue                                  # inzwischen geclaimt/geändert → nächster Takt sieht den neuen Stand
-        except Exception as e:
-            _eh_spur(f"⚠️ {wer} · {p.get('master_name') or '—'} nicht umgestellt: {type(e).__name__}: {str(e)[:200]}")
-            continue
-        vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
-        erg["umgestellt"] += 1
-        _eh["umgestellt"] += 1
-        _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Echo mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']})")
-        ab = ehv_abweichung(base.get("hedge_vorschau"), h["lots"])   # ECHO-VORSCHAU (30.10.2026): > 5 % anders als die Vorschau → Spur
-        if ab:
-            _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Umstellung weicht von der Vorschau ab — {ab}")
+            a = konten.get(str(p.get("master_account_id")))
+            if not a:
+                offen[str(p["id"])] = (p, "Konto des Plans nicht lesbar (accounts) — Hedge nicht rechenbar")
+                continue
+            if not eh_plan_zaehlt(a, ap_regel_finden(firmen, a.get("firm"))):
+                continue                                      # nur CFD-Challenges von Firmen auf Echo V2
+            uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
+            base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+            if base.get("tage_mini"):
+                _eh_ohne(p, "mini", "Tage sammeln (Mini-Trade, sofort zu)", wer, jetzt, melden=False)
+                continue
+            hid, login = hedge.get(uid, (None, ""))
+            if not hid or hid not in hedge_acc:
+                _eh_ohne(p, "kein_konto", "kein Echo-Hedge-Konto (Fusion) bei dieser ID", wer, jetzt)
+                continue
+            login = login or str(hedge_acc[hid].get("external_id") or "")
+            bal = acc_balance_wahl(a, echo_bal, dup_bal)[0]
+            if bal is None:
+                _eh_ohne(p, "balance", "Balance des Kontos nicht lesbar (Kontowert für die Hedge-Größe)", wer, jetzt)
+                continue
+            kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
+            sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
+            h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
+                                par["netto_faktor"], par["min_lot"])
+            if grund:
+                _eh_ohne(p, "groesse", grund + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""), wer, jetzt)
+                continue
+            les = lesungen.get(login)
+            if not les or jetzt.timestamp() - float(les.get("at") or 0) > EH_LESUNG_MAX_S:
+                _eh_ohne(p, "lesung", f"keine frische Fusion-Lesung ({login or '?'}, älter als {EH_LESUNG_MAX_S // 60} min)", wer, jetzt)
+                continue
+            ok, grund = eh_marge(les, h["lots"], p.get("richtung"), vorgemerkt.get(login, 0.0), par["max_lots"])
+            if not ok:
+                _eh_ohne(p, "grenze" if "gleichzeitig" in grund else "marge", grund, wer, jetzt)
+                continue
+            info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"],
+                    "satz": kw.get("satz_eur_pro_usd"), "kontowert_eur": kw.get("wert_eur"), "balance": round(float(bal), 2), "login": login,
+                    "netto_faktor": par["netto_faktor"]}
+            upd = {"route": "mt5", "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
+                   "multiplier": h["multiplier"], "slave_risk": h["slave_risk"], "mt5_baseline": dict(base, echo_hedge=info),
+                   "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Echo mit Hedge: {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
+                             f"(Kontowert {kw.get('wert_eur') or 0:.0f} € ÷ Polster ÷ {par['netto_faktor']})").replace(".", ",")).strip()}
+            try:
+                if not sb_update("trade_plans", _eh_guard(p), upd):
+                    # inzwischen geändert → eh_schnell_tick sieht das neue updated_at gleich wieder; geclaimt → eh_rot_start_pruefen (🔴)
+                    continue
+            except Exception as e:
+                _eh_spur(f"⚠️ {wer} · {p.get('master_name') or '—'} nicht umgestellt: {type(e).__name__}: {str(e)[:200]}")
+                offen[str(p["id"])] = (p, f"Umstellung fehlgeschlagen ({type(e).__name__}: {str(e)[:120]})")
+                continue
+            vorgemerkt[login] = vorgemerkt.get(login, 0.0) + h["lots"]
+            erg["umgestellt"] += 1
+            _eh["umgestellt"] += 1
+            _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Echo mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']})")
+            ab = ehv_abweichung(base.get("hedge_vorschau"), h["lots"])   # ECHO-VORSCHAU (30.10.2026): > 5 % anders als die Vorschau → Spur
+            if ab:
+                _eh_spur(f"{wer} · {p.get('master_name') or '—'}: Umstellung weicht von der Vorschau ab — {ab}")
+        except Exception as e:      # NIE STILL (Prüfung 30.10.2026): ein kaputter Plan stoppt nicht die übrigen und nicht ihren 🔴
+            _eh_spur(f"⚠️ {str(p['id'])[:8]}: {type(e).__name__}: {str(e)[:160]}")
+            offen[str(p["id"])] = (p, f"Hedge-Rechnung fehlgeschlagen ({type(e).__name__}: {str(e)[:120]})")
+    for pid, (p, grund) in offen.items():          # NIE STILL (2): startet gleich ohne Umstellung und ohne Grund → 🔴
+        try:
+            nah = (datetime.fromisoformat(str(p.get("start_um")).replace("Z", "+00:00")) - jetzt).total_seconds() <= EH_MELDEN_MIN * 60
+        except (TypeError, ValueError):
+            nah = True
+        if nah:
+            erg["rot"] = erg.get("rot", 0) + _eh_rot(p, "faellig", f"startet gleich als Echo V2 ohne Fusion-Hedge — {grund}",
+                                                     namen.get(str(p["user_id"]), str(p["user_id"])[:8]))
     return erg
+
+
+def eh_schnell_tick(jetzt=None):
+    """NIE STILL (3), alle EH_SCHNELL_S (eh_schnell_loop): bestätigte, fällige HT-Echo-V2-Pläne ohne echo_hedge-Spur, die eh_tick so
+    (id + updated_at) noch nicht gesehen hat — frisch bestätigt, Startzeit von Hand, eben ins Fenster gerückt → eh_tick sofort statt
+    erst im Minutentakt. Erst, wenn eh_tick einmal lief (Anlaufsperre) und der Schalter an ist. → True, wenn angestoßen."""
+    par = _eh.get("par")
+    if not _eh["at"] or not _eh.get("an") or not par:
+        return False
+    jetzt = jetzt or datetime.now(timezone.utc)
+    von, bis = jetzt - timedelta(minutes=par["nachlauf_min"]), jetzt + timedelta(minutes=par["vorlauf_min"])
+    roh = _sb_all("trade_plans", {"select": "id,user_id,updated_at", "status": "eq.planned", "route": "eq.mt5v2", "auto_plan": "is.true",
+                                  "start_um_gestartet_at": "is.null", "auto_bestaetigt_at": "not.is.null",
+                                  "mt5_baseline->echo_hedge": "is.null",
+                                  "and": f"(start_um.gte.{von.isoformat()},start_um.lte.{bis.isoformat()})"})
+    gesehen, aus = _eh.get("gesehen") or {}, _eh.get("aus") or set()
+    if not any(gesehen.get(str(p["id"])) != str(p.get("updated_at") or "") for p in roh if str(p.get("user_id")) not in aus):
+        return False
+    eh_tick(jetzt=jetzt, force=True)
+    return True
+
+
+def eh_schnell_loop():
+    while True:
+        time.sleep(EH_SCHNELL_S)
+        try:
+            eh_schnell_tick()
+            _eh["schnell_fehler"] = ""
+        except Exception as e:
+            _eh["schnell_fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[echo-hedge] ⚠️ schnell: {_eh['schnell_fehler']}", flush=True)
+            time.sleep(30)
 
 
 # ══ ECHO-HEDGE-VORSCHAU (30.10.2026, Finn 02:12 am Planer → Challenge → Zu bestätigen: „hier auch immer der Fusion-SL und Fusion-TP …
@@ -25887,7 +26028,7 @@ def eh_tick(jetzt=None, force=False):
 # Rechnung wie das Umstellen (eh_hedge, Kontowert-Satz, netto_faktor aus regeln.echo_hedge), nur ohne Umstellen und ohne Marge/Lesung
 # (die prüft erst eh_tick). blow_eur = Hedge-Gewinn am Master-SL (slave_risk = q × master_risk $), pass_eur = Hedge-Verlust am Master-TP
 # (−q × master_tp $). Neu geschrieben nur bei anderem Grund oder > 1 % Abweichung (tfh_vorschau_neu). KEIN hedge_art (Echo braucht keine
-# Extra-Freigabe). Eigener Takt neben eh_tick, Guard wie eh_tick (_eh_guard: planned, ungeclaimt, keine Hand-Werte, updated_at).
+# Extra-Freigabe). Eigener Takt neben eh_tick, Guard wie eh_tick (_eh_guard: planned, ungeclaimt, updated_at; Hand-Werte filtert die Abfrage).
 EHV_TAKT_S = 120
 _ehv = {"at": 0.0, "fehler": "", "geschrieben": 0}
 
@@ -34737,6 +34878,7 @@ def start_auto_planer():
     _ap_started = True
     _ap_info["started"] = True
     threading.Thread(target=ap_loop, daemon=True).start()
+    threading.Thread(target=eh_schnell_loop, daemon=True).start()   # ECHO-HEDGE NIE STILL (30.10.2026): wartet, bis eh_tick einmal lief
     if not _fp["started"]:                    # Fremd-Positionen-Wache (08.10.2026) — eigener Takt, nur Railway wie der Planer
         _fp["started"] = True
         threading.Thread(target=fp_loop, daemon=True).start()
