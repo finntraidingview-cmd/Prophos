@@ -71,7 +71,8 @@ def lade():
              "_admin_darf_uid", "_admin_verwalter", "_admin_standard_aus", "_wd_login", "_wd_personen", "_admin_basis", "_ap_namen",
              "ap_sicht", "ap_sicht_uid", "ap_eingriff_sicht", "ap_eingriff_admin_reiter", "ap_admin_reiter_ok", "ap_eingriff_filter",
              "_ap_gruppe_lesen", "_ap_sicht_param", "konto_balance_darf", "_wd_num", "ap_hb_gewicht", "ap_tages_saldo", "ap_stand_sicht", "ap_lauf_ohne_summen",
-             "admin_pc_stand", "admin_prop_baum", "_ap_sperren", "ap_firma_gesperrt", "admin_wd_plaene", "admin_auto_plan_ids"]
+             "admin_pc_stand", "admin_prop_baum", "_ap_sperren", "ap_firma_gesperrt", "admin_wd_plaene", "admin_auto_plan_ids",
+             "admin_lese_gruppe_menge", "admin_radar_lese_sicht", "ap_lese_gruppe"]   # SICHT JE GRUPPE (30.10.2026)
     # PC_AUS_S (20.10.2026, Prüfer S2): admin_pc_stand nutzt seit e61516c1 („PC aus", 19.10.) die Schwelle PC_AUS_S — ohne sie NameError im Lader
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
                                 "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S", "PC_AUS_S")]
@@ -349,7 +350,11 @@ def main():
     r = c.get("/admin/auto-plan/ids", headers=h(VERW))
     check(r.status_code == 403, "A: /ids GET ohne Admin-Ansicht → 403 (wie bis .1380)")
     r = c.get(f"/admin/auto-plan/ids?{AA}", headers=h(MITGL))
-    check(r.status_code == 403, "/ids GET: Mitglied ohne Admin → 403")
+    # SICHT JE GRUPPE (Finn 30.10.2026 05:08: „Eine ID von Emin soll … im Planer genau das Gleiche"): Mitglied liest in der Admin-Ansicht
+    # die Planer-Liste seiner Gruppe (nur GET) — vorher 403
+    check(r.status_code not in (403, 500), f"/ids GET: Mitglied liest in der Admin-Ansicht seine Gruppe (seit 30.10.2026, Gate durch — Status {r.status_code} aus der Fake-DB)")
+    r = c.post(f"/admin/auto-plan/ids?{AA}", headers=h(MITGL), json={"user_id": MITGL, "drin": True})
+    check(r.status_code == 403, "/ids POST: Mitglied darf Planer-Haken nicht ändern")
 
     # B: Summen im Trade-Planer nur über die Sicht
     # richtung je Zeile: seit .1552 (718e3ef6, Tages-Saldo) rechnet ap_tages_saldo die Basis aus richtung + Einsatz neu, sobald

@@ -3368,6 +3368,29 @@ def admin_sicht_menge(uid, nur_eigene, daten):
     return None, False
 
 
+def admin_lese_gruppe_menge(uid, daten):
+    """REIN RECHNEND (testbar, SICHT JE GRUPPE 30.10.2026): IDs der Gruppe MIT Verwalter, zu der uid gehört (als Verwalter oder Mitglied),
+    als frozenset — sonst None (Hermann Technologies)."""
+    uid = str(uid)
+    daten = daten or {}
+    mit_v = {str(x.get("id")): str(x.get("verwalter_id")) for x in daten.get("gruppen") or () if x.get("verwalter_id")}
+    for gid, v in mit_v.items():
+        ids = {v} | {str(m.get("user_id")) for m in daten.get("mitglieder") or () if str(m.get("gruppe_id")) == gid}
+        if uid in ids:
+            return frozenset(ids)
+    return None
+
+
+def admin_radar_lese_sicht(uid):
+    """SICHT JE GRUPPE (Finn 30.10.2026 05:08: „Eine ID von Hermann Technologies soll im Radar nur alle Trades von Hermann Technologies
+    sehen … Eine ID von Emin soll im Radar nur alle Trades von Emins IDs sehen"): Lese-Sicht des Radars für einen EINGESCHRÄNKTEN Login
+    in der Admin-Ansicht — die ganze Gruppe MIT Verwalter, zu der er gehört (auch ein Mitglied ohne Code, das sonst nur sich selbst sah).
+    Nur lesen: Schreiben prüft weiter _admin_darf_uid (Mitglied = nur er). None = nichts ändern (HT, PC-Tab-Wege ohne ?ansicht=admin)."""
+    if _admin_eingeschraenkt() is None or not _admin_ansicht():
+        return None
+    return admin_lese_gruppe_menge(uid, admin_gruppen_daten())
+
+
 def admin_sicht_lesen(uid):
     """(sicht, verwalter) je Login (admin_sicht_menge): admin_zugang 60 s je uid, Gruppen 60 s. Fehler werfen (Aufrufer 502).
     sicht is not None = im Admin eingeschränkt (nie alle IDs) — die Frage, die bis .1380 admin_zugang_nur_eigene allein beantwortete."""
@@ -7877,6 +7900,9 @@ def admin_build_overview(kapitel_id=None):
     try:
         if _admin_nur_uid():
             gruppen_info = {"sicht_ids": sorted(_admin_sicht() or ()), "verwalter": _admin_verwalter(), "gruppen": []}
+            # SICHT JE GRUPPE (30.10.2026): Mitglied einer Verwalter-Gruppe → Challenge-Planer lesend (Frontend kasseReiterErlaubt)
+            if not _admin_verwalter():
+                gruppen_info["lese_gruppe"] = bool(ap_lese_gruppe(_admin_nur_uid()))
             # Namen der eigenen Gruppe(n) (29.10.2026, Kachel „Gesamtkosten": Start je Gruppe nach id_gruppen.name) — nur die eigene,
             # keine fremden IDs; Verwalter = verwalter_id, Mitglied = Zeile in id_gruppe_mitglied. Nicht lesbar → Feld fehlt (Kachel ohne Start).
             try:
@@ -13481,13 +13507,12 @@ def admin_live_trades():
         nur_offen = str(request.args.get("status") or "").lower() == "open"
         mit_echo = str(request.args.get("echo") or "") in ("1", "true", "ja")
         disp, excluded = _wd_personen()
-        # RADAR MIT EMINS GRUPPE (30.10.2026, Finn: „Emin soll immer auch im Radar sein … Emins Gruppe soll ab jetzt ganz genau gleich
-        # behandelt werden wie Hermann Technologies"): ?radar=1 (nur der Radar selbst, wdlLaden) zeigt in der Standard-Sicht eines
-        # uneingeschränkten Logins auch die Gruppen MIT Verwalter (Verwalter + Mitglieder, sonst über ADMIN_EXCLUDE/_admin_standard_aus
-        # raus). Radar-Statistik, Planer und PC-Tab-Takt fragen ohne den Parameter und bleiben bei HT; ein eingeschränkter Login
-        # (Verwalter = seine Gruppe) und Finns Gruppen-Chip (_admin_sicht) bleiben, wie sie sind.
-        if str(request.args.get("radar") or "") in ("1", "true", "ja") and _admin_sicht() is None:
-            excluded = set(excluded) - _admin_verwalter_gruppen_ids(admin_gruppen_daten())
+        # SICHT JE GRUPPE (Finn 30.10.2026 05:08, ersetzt ?radar=1 aus a3bbfba9 — „Emin soll immer im Radar sein" hieß: in EMINS Radar):
+        # HT-Logins sehen nur HT (Standard-Ausblendung oben), ein Login einer Gruppe MIT Verwalter in der Admin-Ansicht die ganze Gruppe —
+        # auch ein Mitglied ohne Code (bisher nur er selbst). Nur Lesen; Schreiben prüft weiter _admin_darf_uid.
+        lese = None if nur_eigene else admin_radar_lese_sicht(me)
+        if lese:
+            excluded = set(disp) - set(lese)
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
@@ -14144,6 +14169,12 @@ def admin_handarbeit():
     if err:
         return err
     sicht = _admin_sicht()
+    try:
+        lese_g = admin_radar_lese_sicht(me)     # SICHT JE GRUPPE (30.10.2026): Mitglied einer Verwalter-Gruppe sieht im Radar die ganze Gruppe
+    except Exception as e:
+        return jsonify({"error": f"Gruppen nicht lesbar ({type(e).__name__})"}), 502
+    if lese_g:
+        sicht = lese_g
     if sicht is None:
         try:
             mail = str((_auth_user_anfrage((request.headers.get("sb-token") or "").strip()).json() or {}).get("email") or "").strip().lower()
@@ -14171,7 +14202,7 @@ def admin_handarbeit():
         # E-Mail sieht in /admin/handarbeit nur sich selbst (sicht = {me}, s. oben) — der Radar zeigt aber Trades aller IDs. Gelesen wird
         # deshalb mit der echten Login-Einschränkung (Verwalter/Mitglied, _admin_eingeschraenkt); die Gruppe „bestanden" des Popups bleibt
         # auf die Sicht gefiltert, der Radar bekommt die volle Liste als radar_bestanden.
-        ein = _admin_eingeschraenkt()
+        ein = lese_g or _admin_eingeschraenkt()
         uq_ziel = {"user_id": admin_sicht_filter(ein)} if (ein is not None and admin_sicht_filter(ein)) else {}
         ziel_alle = _sb_all("accounts", dict(uq_ziel, select="id,user_id,name,firm,account_type,external_id,starting_balance,"
                                                           "ziel_erreicht_at,ziel_erreicht_bal,ziel_usd,goal_kind,goal_target,goal_min_profit,goal_manual,"
@@ -14227,6 +14258,8 @@ def admin_handarbeit():
                 if t:
                     tage_je[str(a.get("id"))] = t
         namen, ausgeblendet = _wd_personen()
+        if lese_g:      # SICHT JE GRUPPE (30.10.2026): Mitglied — _wd_personen blendet sonst alle außer ihm aus
+            ausgeblendet = set(namen) - set(lese_g)
         gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf, tage_je)
         gelesen = gr.pop("planer_gelesen", 0)
         radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, ausgeblendet, datetime.now(timezone.utc), None, tage_je)["bestanden"]
@@ -23351,6 +23384,15 @@ def _ap_sicht_param():
     return str(s or "").strip().lower()
 
 
+def ap_lese_gruppe(uid):
+    """SICHT JE GRUPPE (30.10.2026): Lese-Gruppe einer ID für die Planer-Lese-Routen (admin_lese_gruppe_menge) — Fehler → None (eigene)."""
+    try:
+        return admin_lese_gruppe_menge(uid, admin_gruppen_daten())
+    except Exception as e:
+        print(f"[auto-plan] Lese-Gruppe nicht lesbar ({type(e).__name__}: {e}) — Sicht bleibt eigene", flush=True)
+        return None
+
+
 def _ap_sicht_aus_anfrage(admin, uid):
     """sicht-ID für die GET-Antwort aus ?sicht=admin (ap_sicht_uid). admin_zugang wird nur gelesen, wenn ein Nicht-Admin alle IDs
     verlangt (60-s-Cache); schlägt die Lesung fehl, bleibt es bei der eigenen Sicht — nie versehentlich alle IDs."""
@@ -23359,6 +23401,8 @@ def _ap_sicht_aus_anfrage(admin, uid):
     if not admin and s == AP_SICHT_ADMIN:
         nur, gruppe = _ap_gruppe_lesen(uid)
         im_planer = _ap_im_planer(uid)
+        if nur and not gruppe:
+            gruppe = ap_lese_gruppe(uid)   # SICHT JE GRUPPE (30.10.2026): Mitglied liest die ganze Gruppe — diese Sicht gilt nur für GET-Antworten
     erg = ap_sicht_uid(admin, uid, nur, s, im_planer, gruppe)
     if erg is None:
         # Finns Gruppenfilter (?gruppe=, Admin-Gruppen 08.10.2026) — nur wer ohnehin alle IDs sieht, filtert damit; nicht lesbar →
@@ -31204,7 +31248,9 @@ def _ap_zugang(admin_reiter=False):
         # Gruppe. Jeder andere Login außerhalb des Planers bleibt gesperrt; Eingriffe prüfen ihre Rechte danach selbst (darf/gruppe_e).
         if admin_reiter:
             nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → kein Verwalter, gesperrt
-            ok = ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN, verwalter=bool(gruppe))
+            # SICHT JE GRUPPE (30.10.2026): ein Mitglied einer Verwalter-Gruppe liest wie der Verwalter (Gruppe mit sicht=admin) —
+            # Eingriffe prüfen danach weiter selbst (ap_eingriff_sicht: Mitglied = nur eigene Pläne)
+            ok = ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN, verwalter=bool(gruppe) or bool(nur and ap_lese_gruppe(uid)))
         if not ok:
             return admin, uid, reg, (jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403)
     return admin, uid, reg, None
@@ -31320,6 +31366,10 @@ def admin_auto_plan_ids():
         nur, gruppe = _ap_gruppe_lesen(uid)
         if gruppe and not _admin_ansicht():
             gruppe = None                     # Gruppe nur aus der Admin-Ansicht (?ansicht=admin, Nachbesserung A)
+        if nur and not gruppe and request.method == "GET" and _admin_ansicht():
+            # SICHT JE GRUPPE (Finn 30.10.2026 05:08: „Eine ID von Emin soll … im Planer genau das Gleiche"): ein Mitglied einer Gruppe MIT
+            # Verwalter liest im Planer die ganze Gruppe — nur GET, POST (Planer-Haken) bleibt unten gesperrt
+            gruppe = ap_lese_gruppe(uid)
         if nur and not gruppe:
             return jsonify({"ok": False, "msg": "Diese ID sieht im Admin nur sich selbst"}), 403
         if gruppe and request.method == "POST":
@@ -35296,7 +35346,8 @@ def admin_auto_plan():
         # Admin-Gruppen (08.10.2026): ein Verwalter liest hier seine Gruppe (ap_sicht_uid), „Jetzt planen" bleibt HT
         nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → gesperrt
         # Verwalter ohne 403 (30.10.2026, wie _ap_zugang): GET auch ohne ?sicht=admin — dann nur die eigene ID (_ap_sicht_aus_anfrage unten)
-        darf = request.method == "GET" and ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN, verwalter=bool(gruppe))
+        darf = request.method == "GET" and ap_admin_reiter_ok(False, False, nur, AP_SICHT_ADMIN,
+                                                              verwalter=bool(gruppe) or bool(nur and ap_lese_gruppe(uid)))   # Mitglied liest (30.10.)
         if not darf:
             return jsonify({"ok": False, "msg": "Diese ID ist nicht im Auto-Planer"}), 403
     sicht = None if admin else str(uid)        # 06.10.2026: Nicht-Admin (Test-ID) sieht nur die eigenen Zeilen
