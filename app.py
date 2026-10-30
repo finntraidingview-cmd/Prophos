@@ -22977,6 +22977,10 @@ def ap_hb_zeile(p, acc, firmen, lauf_satz, kw_heute, namen, archiv=None, letzter
            "satz_quelle": None, "kontowert_eur": None, "art": "offen", "grund": None,
            # .1553 Tages-Waage: Eröffnungs-Gewicht wie ap_trade_gewicht (min(Satz × SL, Kontowert), ohne SL = Kontowert)
            "sl_usd": _wd_num(p.get("master_sl")), "tp_usd": _wd_num(p.get("master_tp")), "satz_kw": None}
+    # Echter Fusion-P&L bei Trades mit echtem Hedge (Ticket am Plan), Summe aller Versuche vor dem letzten — Challenge Planer → Futures rechnet
+    # damit statt mit dem Hypo-Wert (Finn 30.10.2026 ~09:18). Nur dieses Feld, eur/art bleiben wie die Hypo-Bilanz.
+    _h = base.get("hedge") if isinstance(base.get("hedge"), dict) else None
+    out["fusion_eur"] = (_wd_num(p.get("slave_pl")) if _wd_num(p.get("slave_pl")) is not None else _wd_num(_h.get("pl"))) if (_h and _h.get("ticket")) else None
     # Kontowert + Polster VOR dem Trade (ap_kontowert, dieselbe Formel wie live): Balance vorher = Start-Lesung, sonst Ende − P&L
     pl = z["pl_usd"] if z else None
     kp = ap_kw_param(ap_regel_finden(firmen, acc.get("firm") or p.get("master_firm")))
@@ -23047,7 +23051,7 @@ def _ap_hb_laden(firmen, jetzt=None, ab=None):
     ab_q = ab.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # ohne „+" (würde im or-Filter zum Leerzeichen)
     namen, aus = _ap_namen()
     roh = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,master_firm,route,richtung,status,auto_plan,master_pl,"
-                                            "pl_quelle,konto_typ,started_at,ended_at,completed_at,master_sl,master_tp,"   # .1553: Eröffnungs-Gewicht
+                                            "pl_quelle,slave_pl,konto_typ,started_at,ended_at,completed_at,master_sl,master_tp,"   # .1553: Eröffnungs-Gewicht
                                             "tv:mt5_baseline->tv,final:mt5_baseline->final,bstart:mt5_baseline->balance_start,bn:mt5_baseline->bal_nach",
                                   "status": "in.(completed,review)", "or": f"(ended_at.gte.{ab_q},completed_at.gte.{ab_q})",
                                   "order": "started_at.asc"})
@@ -23219,7 +23223,7 @@ def ap_verlauf_zeilen(zeilen, tz_name=AP_HB_TZ):
         out.append({"tag": e.astimezone(tz).date().isoformat(), "user_id": str(z.get("user_id") or ""), "firma": ap_firma_kurz(z.get("firma")),
                     "eur": None if z.get("art") == "offen" else z.get("eur"), "usd": z.get("ergebnis_usd"), "art": z.get("art"),
                     # Kontoname für den Tooltip im Challenge-Verlauf (CHALLENGE-CHART-NEU, Finn 30.10.2026 ~08:25) — nur Anzeige
-                    "konto": z.get("konto") or ""})
+                    "konto": z.get("konto") or "", "fusion": z.get("fusion_eur")})
     out.sort(key=lambda r: r["tag"])
     return out
 

@@ -52951,7 +52951,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1939'
+  const OS_TAB_BUILD = '2026-09-22.1940'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -81071,6 +81071,13 @@
         <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion €</span></div>
         <div class="apg-chart">${leer ? `<div class="apg-leer">${d.morgen ? 'morgen kommt erst' : 'heute noch kein Trade gestartet'}</div>` : '<canvas id="apg-c-pl"></canvas>'}</div></div>`
   }
+  // Null beider Achsen auf gleicher Höhe (P&L von heute, Challenges): Anteil über der Null je Reihe, gemeinsam = Mittel; jede Achse wird passend verlängert
+  function apgNullGrenzen(mLo, mHi, fLo, fHi){
+    const anteil = (lo, hi) => hi - lo > 0 ? hi / (hi - lo) : 0.5, pm = anteil(mLo, mHi), pf = anteil(fLo, fHi)
+    const f = pm >= 1 && pf >= 1 ? 1 : pm <= 0 && pf <= 0 ? 0 : Math.min(0.85, Math.max(0.15, (pm + pf) / 2))
+    return (lo, hi) => f >= 1 ? { min: 0 } : f <= 0 ? { max: 0 } : (lo === 0 && hi === 0) ? { min: -(1 - f) / f, max: 1 }
+      : { min: Math.min(lo, -(1 - f) / f * hi) * 1.08, max: Math.max(hi, f / (1 - f) * -lo) * 1.08 }
+  }
   function apgPlMalen(root, d, ablage, opt){
     const cv = root.querySelector('#' + ((opt && opt.id) || 'apg-c-pl')); if(!cv || !d || typeof window.Chart !== 'function') return
     const fx = opt && Number(opt.fx) > 0 ? Number(opt.fx) : null
@@ -81087,11 +81094,7 @@
     const max = Math.max(1, Math.ceil(d.punkte[letzt].x))
     // Null beider Achsen auf derselben Höhe — sonst liegt „0 €" oben und „0 $" unten und die Linien lesen sich falsch herum
     const spanne = k => { const w = d.punkte.map(p => p[k]); return [Math.min(0, ...w), Math.max(0, ...w)] }
-    const [mLo, mHi] = spanne('m'), [fLo, fHi] = spanne('f'), anteil = (lo, hi) => hi - lo > 0 ? hi / (hi - lo) : 0.5
-    const pm = anteil(mLo, mHi), pf = anteil(fLo, fHi)   // Anteil der Achse über der Null je Reihe; gemeinsam = Mittel, jede Achse wird passend verlängert
-    const f = pm >= 1 && pf >= 1 ? 1 : pm <= 0 && pf <= 0 ? 0 : Math.min(0.85, Math.max(0.15, (pm + pf) / 2))
-    const grenzen = (lo, hi) => f >= 1 ? { min: 0 } : f <= 0 ? { max: 0 } : (lo === 0 && hi === 0) ? { min: -(1 - f) / f, max: 1 }
-      : { min: Math.min(lo, -(1 - f) / f * hi) * 1.08, max: Math.max(hi, f / (1 - f) * -lo) * 1.08 }
+    const [mLo, mHi] = spanne('m'), [fLo, fHi] = spanne('f'), grenzen = apgNullGrenzen(mLo, mHi, fLo, fHi)
     ablage.push(new Chart(cv.getContext('2d'), { type: 'line',
       data: { datasets: [reihe('m', a1, 'Master', 'm'), reihe('f', a4, fx ? 'Fusion in $' : 'Fusion', fx ? 'm' : 'f')] },
       options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', axis: 'x', intersect: false },
@@ -81124,7 +81127,7 @@
     const d = _apgCv.d && _apgCv.q === apgCvQuery() ? _apgCv.d : null
     const heute = (d && d.heute) || new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)
     const tagNr = t => Math.round(Date.parse(t + 'T00:00:00Z') / 864e5), ausNr = n => new Date(n * 864e5).toISOString().slice(0, 10), bis = tagNr(heute)
-    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, eur: 0, eurN: 0, ohne: 0 })
+    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, eur: 0, eurN: 0, ohne: 0, usd: 0, fh: 0 })
     const jeTag = new Map(tage.map(t => [t.tag, t]))
     for(const z of (d && d.zeilen) || []){
       const t = z && jeTag.get(z.tag); if(!t) continue
@@ -81137,6 +81140,10 @@
       // geblowt −Kontowert; ohne Satz null (zählt nicht, nur als Hinweis) — dieselbe Zahl wie die Kachel „Heute" / Verlauf in €
       const eur = z.eur == null || !isFinite(Number(z.eur)) ? null : Number(z.eur)
       if(eur != null){ t.eur += eur; t.eurN++ } else t.ohne++
+      // Chart (Finn ~09:18): Master $ und „Fusion hypothetisch" = Hypo €, bei Trades mit echtem Hedge der echte Fusion-P&L (Backend-Feld fusion)
+      if(usd != null) t.usd += usd
+      const fEcht = z.fusion == null || !isFinite(Number(z.fusion)) ? null : Number(z.fusion)
+      t.fh += fEcht != null ? fEcht : (eur != null ? eur : 0)
       if(z.art === 'bestanden') t.best.push(name)
       if(z.art === 'geblowt') t.blow.push(name)
       if(z.art === 'bestanden' || (z.art !== 'geblowt' && usd > 0)) t.plus++
@@ -81178,36 +81185,33 @@
     return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Futures · heute und letzte 14 Tage (Dubai) · beendete Trades der Sicht</div></div>
         <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile) über 14 Tage. Bestanden = End-Balance ≥ Phasenziel, als passed archiviert oder Ziel-Wache (accounts.ziel_erreicht_at) nach dem Start; geblowt = als blown archiviert oder Verlust frisst das Polster. Folgt ID und CFD/Futures.">i</span></div>
         ${kpis}
+        <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion hypothetisch €</span></div>
         <div class="apg-chart">${leer ? `<div class="apg-leer">${leer}</div>` : '<canvas id="apg-c-cv"></canvas>'}</div>${nah}</div>`
   }
-  // EINFACH (Finn 30.10.2026 zu .1937: „mies hässlich, man erkennt nix — einfach simplen Chart"): EIN Balken je Tag = Hypo €, grün über 0 /
-  // rot unter 0, Wert über dem Balken; bestanden/geblowt/gewonnen/verloren nur in den Kacheln und im Tooltip. Keine Linien, keine zweite Achse.
+  // ZWEI LINIEN (Finn 30.10.2026 ~09:18, ersetzt die Balken): kumuliert über 14 Tage Master $ (rechte Achse) und „Fusion hypothetisch" € (linke Achse: Hypo €,
+  // bei echtem Hedge der echte Fusion-P&L). Baustein wie „P&L von heute": zwei Achsen, Nullen auf gleicher Höhe, keine Balken. Tooltip: Tageswert + Summe.
   function apgCvMalen(root, c, ablage){
     const cv = root.querySelector('#apg-c-cv'); if(!cv || !c || typeof window.Chart !== 'function') return
     const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
-    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', text = tok('--g-text') || '#101828'
-    const gut = tok('--g-gut') || '#12b76a', rot = tok('--g-rot') || '#f04438'
-    const alpha = (f, a) => { const m = String(f).match(/^#([0-9a-f]{6})/i); return m ? `rgba(${[0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(',')},${a})` : f }
+    const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a4 = tok('--g-a4') || '#16c8c6'
+    const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
     const labels = c.tage.map(t => t.tag.slice(8, 10) + '.' + t.tag.slice(5, 7) + '.')
-    const werte = c.tage.map(t => Math.round(t.eur))
-    const kurz = v => { const a = Math.abs(v); return (v > 0 ? '+' : v < 0 ? '−' : '') + (a >= 10000 ? Math.round(a / 1000) + 'k' : a >= 1000 ? (a / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + 'k' : String(a)) }
-    // Wert über (bzw. unter) dem Balken — kleines Plugin nur für dieses Chart
-    // schmal (Handy): ohne „€" und kleiner, sonst überlappen 14 Beschriftungen
-    const werteZeigen = { id: 'apgCvWerte', afterDatasetsDraw(ch){ const ctx = ch.ctx, meta = ch.getDatasetMeta(0), schmal = ch.width < 520; ctx.save(); ctx.font = `600 ${schmal ? 9 : 11}px Inter, system-ui, sans-serif`; ctx.textAlign = 'center'
-      meta.data.forEach((b, i) => { const t = c.tage[i]; if(!t || !t.eurN) return; const v = werte[i]; ctx.fillStyle = v > 0 ? gut : v < 0 ? rot : sub
-        ctx.textBaseline = v < 0 ? 'top' : 'bottom'; ctx.fillText(kurz(v) + (schmal ? '' : ' €'), b.x, v < 0 ? b.y + 4 : b.y - 4) }); ctx.restore() } }
-    const span = Math.max(1, ...werte.map(Math.abs))
-    ablage.push(new Chart(cv.getContext('2d'), { type: 'bar', plugins: [werteZeigen],
-      data: { labels, datasets: [{ label: 'Hypo €', data: werte, backgroundColor: werte.map(v => v >= 0 ? alpha(gut, 0.75) : alpha(rot, 0.6)), borderRadius: 5, barPercentage: .6 }] },
-      options: { animation: false, responsive: true, maintainAspectRatio: false, layout: { padding: { top: 18, bottom: 4, right: 10 } },
-        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, displayColors: false,
+    let sm = 0, sf = 0
+    const kum = c.tage.map(t => { sm += t.usd; sf += t.fh; return { m: Math.round(sm * 100) / 100, f: Math.round(sf * 100) / 100 } })
+    const reihe = (k, farbe, label, id) => ({ label, yAxisID: id, data: kum.map(p => p[k]), borderColor: farbe, backgroundColor: farbe, borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0 })
+    const sp = k => [Math.min(0, ...kum.map(p => p[k])), Math.max(0, ...kum.map(p => p[k]))], [mLo, mHi] = sp('m'), [fLo, fHi] = sp('f'), grenzen = apgNullGrenzen(mLo, mHi, fLo, fHi)
+    ablage.push(new Chart(cv.getContext('2d'), { type: 'line',
+      data: { labels, datasets: [reihe('m', a1, 'Master', 'm'), reihe('f', a4, 'Fusion hypothetisch', 'f')] },
+      options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, boxPadding: 4,
           callbacks: { title: x => x.length ? c.tage[x[0].dataIndex].tag.split('-').reverse().join('.') : '',
-            label: x => { const t = c.tage[x.dataIndex]; return t.eurN ? ` Hypo ${apgEur(t.eur)}` : ' kein Hypo-Wert' },
+            label: x => { const t = c.tage[x.dataIndex], m = x.dataset.yAxisID === 'm'; return ` ${x.dataset.label}: Tag ${m ? apgUsd(t.usd) : apgEur(t.fh)} · Summe ${m ? apgUsd(x.parsed.y) : apgEur(x.parsed.y)}` },
             afterBody: x => { const t = x.length ? c.tage[x[0].dataIndex] : null; if(!t) return []
-              return [` ${t.n} beendet · ${t.plus} gewonnen · ${t.minus} verloren`, ...(t.best.length ? ['', `Bestanden (${t.best.length}):`, ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []),
+              return ['', ` ${t.n} beendet · ${t.plus} gewonnen · ${t.minus} verloren`, ...(t.best.length ? ['', `Bestanden (${t.best.length}):`, ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []),
                 ...(t.blow.length ? ['', `Geblowt (${t.blow.length}):`, ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []), ...(t.offen || t.ohne ? ['', `${t.offen + t.ohne} ohne Hypo-Wert`] : [])] } } } },
-        scales: { x: { ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 }, grid: { display: false }, border: { display: false } },
-          y: { suggestedMin: -span * 0.15, suggestedMax: span * 1.15, ticks: { color: sub, font: { size: 11 }, maxTicksLimit: 5, callback: v => apgEur(v) }, grid: { color: gitter, drawTicks: false }, border: { display: false } } } } }))
+        scales: { x: Object.assign({}, achse, { grid: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } }),
+          m: Object.assign({}, achse, grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, maxTicksLimit: 6, callback: v => apgUsd(v) } }),
+          f: Object.assign({}, achse, grenzen(fLo, fHi), { position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, maxTicksLimit: 6, callback: v => apgEur(v) } }) } } }))
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
