@@ -43512,7 +43512,7 @@
     setTimeout(() => { const f = accEls.payoutReady; if(f && f.offsetParent){ f.scrollIntoView({ block: 'center', behavior: 'smooth' }); f.focus() } }, 80)
   }
   function openAccountModal(prefillType, editAccount){
-    _acDdAuto = null; _acDdLauf++; { const h = document.getElementById('ac-maxdd-hint'); if(h) h.hidden = true }
+    _acDdAuto = null; _acZielAusRegel = null; _acDdLauf++; { const h = document.getElementById('ac-maxdd-hint'); if(h) h.hidden = true }
     _editingAccountId = editAccount?.id || null
     if(accEls.deaktRow) accEls.deaktRow.hidden = !editAccount   // Konto deaktiviert (30.10.2026): nur bestehende Konten
 
@@ -43613,6 +43613,7 @@
   /* MAX DRAWDOWN VORSCHLAGEN (Finn 30.10.2026: Phase 1 entstand hier ohne Wert, die Nachfolger erbten nichts): neues CFD-Konto, sobald Firma, Typ und Größe stehen, gleicher Weg wie
    * der Nachfolger (sucDdErmitteln). Eigener Vorschlag darf sich mit den Feldern ändern, ein anderer Wert im Feld (Hand, Schablone aus der Mail) bleibt. Kein Pflichtfeld. */
   let _acDdAuto = null, _acDdLauf = 0, _acDdTimer = null
+  let _acZielAusRegel = null   // Vorbelegung der Firmenregel im Formular, solange das Feld unverändert ist (toggleAcBloecke)
   const acDdFremd = () => { const v = String(accEls.maxDd?.value || '').trim(); return v !== '' && v !== String(_acDdAuto) }
   function acDdPlanen(){ clearTimeout(_acDdTimer); _acDdTimer = setTimeout(acDdVorschlag, 300) }
   async function acDdVorschlag(){
@@ -43684,9 +43685,13 @@
     const istCfd = typ === 'funded_cfd'
     if(accEls.goalSec)   accEls.goalSec.hidden   = !istPhase   // Mindesttage auch für Futures-Challenges/Phasen (09.10.2026, Finn: Feld „Mindesttage“, zählt automatisch)
     // Firmenregel vorbelegen (20.10.2026): FundedNext Phase 1/2 → „Trading Days" 5, solange das Feld leer ist (Finn kann es ändern)
+    // Vorbelegung zurücknehmen, wenn die Firma sich ändert und das Feld noch unverändert ist: beim Tippen steht kurz „FTMO", „FTMO Futures" behielte sonst die 4 Tage (Gegenprüfung M1, 30.10.2026)
+    if(_acZielAusRegel && accEls.goalKind?.value === _acZielAusRegel.kind && accEls.goalTarget?.value === String(_acZielAusRegel.target)){ accEls.goalKind.value = ''; accEls.goalTarget.value = '' }
+    _acZielAusRegel = null
     if(istPhase && accEls.goalKind && !accEls.goalKind.value){
-      const mt = kontoMindesttage(firm, typ)
-      if(mt){ accEls.goalKind.value = mt.kind; if(accEls.goalTarget && !accEls.goalTarget.value) accEls.goalTarget.value = mt.target }
+      const mt = acMindesttage(firm, typ)
+      if(mt){ accEls.goalKind.value = mt.kind; if(accEls.goalTarget && !accEls.goalTarget.value) accEls.goalTarget.value = mt.target
+        if(accEls.goalTarget && accEls.goalTarget.value === String(mt.target)) _acZielAusRegel = { kind: mt.kind, target: mt.target } }
     }
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures && !istCfd)
     if(accEls.payoutSec) accEls.payoutSec.hidden = !((istFunded && !istFutures) || istCfd)
@@ -43907,7 +43912,7 @@
     // (Finn: "das da weg") — bestehende DB-Werte werden beim Bearbeiten
     // unveraendert weitergetragen, solange der Zieltyp gesetzt bleibt.
     // Firmenregel als Rückfall (20.10.2026): bleibt das Ziel-Feld leer, zählt FundedNext Phase 1/2 trotzdem 5 Trading Days
-    const mtFirma       = (!accEls.goalKind?.value && typeof kontoMindesttage === 'function') ? kontoMindesttage(firm, type) : null
+    const mtFirma       = (!accEls.goalKind?.value && typeof kontoMindesttage === 'function') ? acMindesttage(firm, type) : null
     const goalKindVal   = accEls.goalKind?.value || (mtFirma ? mtFirma.kind : null)
     const goalTargetNum = mtFirma ? mtFirma.target : parseInt(accEls.goalTarget?.value, 10)
     const goalSinceVal  = accEls.goalSince?.value || null
@@ -52295,7 +52300,8 @@
   // → seit 25.10.2026 GEWINNTAGE (Finn: „bei 100k musst du 3 Tage machen, wo du 500 $ machst" — …601805 stand bei uns auf 3/3, bei Blue
   // Guardian auf 1/3, weil zwei Mini-Tage keine 500 $ brachten): winning_days 3 mit goal_min_profit 500 (0,5 % von 100k, nur 100k im Planer).
   // Der Planer (app.py ap_tage_ist / ap_konto_rechnen regel.gewinntage) sammelt die Tage mit Trades um 1.000 $ zuerst, dann die Big Trades.
-  const MINDESTTAGE_JE_FIRMA = { fundednext: 5 }
+  // FTMO (Finn 30.10.2026: „Bei FTMO gibt's ab jetzt auch 4, in Phase 1 4 und in Phase 2 4"): 2-Step-CFD-Phasen = 4 Trading Days; „FTMO Futures" ist eine eigene Firma (Schlüssel und tpFirmIstFutures), bleibt ohne
+  const MINDESTTAGE_JE_FIRMA = { fundednext: 5, ftmo: 4 }
   const GEWINNTAGE_JE_FIRMA = { 'blue guardian': { target: 3, minProfit: 500 } }
   function kontoMindesttage(firm, typ){
     const n = String(firm || '').trim().toLowerCase()
@@ -52305,6 +52311,12 @@
     if(gt) return { kind: 'winning_days', target: gt.target, minProfit: gt.minProfit }
     const ziel = MINDESTTAGE_JE_FIRMA[n] || MINDESTTAGE_JE_FIRMA[n.replace(/\s+/g, '')]
     return ziel > 0 ? { kind: 'trading_days', target: ziel, minProfit: null } : null
+  }
+  // Formular: bestehende FTMO-Konten bekommen die Tage nur über sql/2026-10-30_ftmo_mindesttage.sql — ein bloßes Speichern würde ohne goal_since/Offset zählen und bei Ziel erreicht
+  // die Planer-Sperre öffnen (Mini-Trades ohne Finns Ja, Gegenprüfung M1, 30.10.2026). Neue Konten und FundedNext wie bisher.
+  function acMindesttage(firm, typ){
+    if(_editingAccountId && String(firm || '').trim().toLowerCase() === 'ftmo') return null
+    return kontoMindesttage(firm, typ)
   }
   function tpFirmIstCfd(firm){
     const TP_CFD_FIRMEN = ['fundednext', 'ftmo', 'fundingpips', 'the5%ers', 'the5ers', 'fusion markets', 'thinkmarkets', 'icmarkets', 'ic markets']
