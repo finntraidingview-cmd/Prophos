@@ -35456,6 +35456,24 @@ def fcp_gewinne(plaene):
     return round(summe, 2)
 
 
+def fcp_payouts_zaehlen(pending, managed, buchungen):
+    """REIN RECHNEND (testbar): Payouts je Konto → {account_id: Anzahl}. Quellen (Prüfer S2 30.10.2026 zu 087c8db8): pending_payouts
+    (Anfragen), managed_payouts UND transactions kind 'payout' mit account_id — ein Payout direkt als „Erhalten" gebucht hat keinen
+    pending-Eintrag (prophos.html Buchen). Eine Buchung, auf die ein pending_payouts.received_tx_id zeigt, zählt nur einmal."""
+    n, verbucht = {}, set()
+    for z in pending or ():
+        if z.get("received_tx_id"):
+            verbucht.add(str(z["received_tx_id"]))
+        n[str(z.get("account_id"))] = n.get(str(z.get("account_id")), 0) + 1
+    for z in managed or ():
+        n[str(z.get("account_id"))] = n.get(str(z.get("account_id")), 0) + 1
+    for t in buchungen or ():
+        if str(t.get("id")) in verbucht or not t.get("account_id"):
+            continue
+        n[str(t.get("account_id"))] = n.get(str(t.get("account_id")), 0) + 1
+    return n
+
+
 def fcp_erster_payout(regel):
     """Erster-Payout-Werte der Firma ({ziel, hedge_eur_je_dd}) — regel.erster_payout (false = aus), sonst Standard je Firmen-Schlüssel, sonst None."""
     r = regel or {}
@@ -35645,17 +35663,22 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     archiv = _ap_archiviert()
     konten = [a for a in konten if ap_regel_finden(firmen, a.get("firm")) and str(a.get("id")) not in archiv]   # alle Regel-Firmen (plaene)
     ids = [str(a["id"]) for a in konten]
-    plaene, payouts = [], {}
+    plaene, pend, verw, buch = [], [], [], []
+    payouts_ok = True                    # Payout-Quellen nicht lesbar → nie Refund-Modus (Zyklus gilt als „schon ausgezahlt", fail-closed)
     for i in range(0, len(ids), 80):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_firm,status,started_at,ended_at,completed_at,start_um,"
                                                     "master_pl,slave_pl,route,richtung,master_contracts,master_tp,master_sl,multiplier,auto_bestaetigt_at,"
                                                     "created_at,planned_for,notes,funded_plan:mt5_baseline->funded_plan,final:mt5_baseline->final",
                                           "master_account_id": f"in.({teil})"}) or []    # alle Trades des Kontos (Gewinne, The5ers-Consistency)
-        for z in _sb_all("pending_payouts", {"select": "account_id,requested_at,created_at", "account_id": f"in.({teil})"}) or []:
-            payouts.setdefault(str(z.get("account_id")), []).append(z.get("requested_at") or z.get("created_at"))
-        for z in _sb_all("managed_payouts", {"select": "account_id,payout_date,created_at", "account_id": f"in.({teil})"}) or []:
-            payouts.setdefault(str(z.get("account_id")), []).append(z.get("payout_date") or z.get("created_at"))
+        try:
+            pend += _sb_all("pending_payouts", {"select": "account_id,received_tx_id", "account_id": f"in.({teil})"}) or []
+            verw += _sb_all("managed_payouts", {"select": "account_id", "account_id": f"in.({teil})"}) or []
+            buch += _sb_all("transactions", {"select": "id,account_id", "kind": "eq.payout", "account_id": f"in.({teil})"}) or []
+        except Exception as e:
+            payouts_ok = False
+            print(f"[funded-cfd] ⚠️ Payouts nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — kein Refund-Modus in diesem Lauf", flush=True)
+    payout_n = fcp_payouts_zaehlen(pend, verw, buch)
     # alle geplanten/laufenden/wartenden Pläne der IDs (jede Firma, jeder Planer): Richtungsschutz, Firmen-Abstand, Abstand je ID
     offen_alle = _sb_all("trade_plans", {"select": "user_id,master_firm,status,richtung,start_um,started_at,fp_start:mt5_baseline->funded_plan->>start_um",
                                          "user_id": in_uids, "status": "in.(planned,open,review)"}) or []
@@ -35722,9 +35745,9 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             aus("keine Balance — ↻ Balance lesen"); continue
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
-        r = fcp_konto_rechnen(jg, float(bal), g, len(payouts.get(aid) or []) + 1, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
+        r = fcp_konto_rechnen(jg, float(bal), g, (payout_n.get(aid, 0) + 1) if payouts_ok else 2, fcp_eins_prozent(a), mppl, sppl, rnd, regel,
                               max_sl=a.get("max_risiko_trade"), gewinne=fcp_gewinne(pl))
-        r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=len(payouts.get(aid) or []))
+        r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=payout_n.get(aid, 0) if payouts_ok else None)
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
         elif r["aktion"] != "planen":

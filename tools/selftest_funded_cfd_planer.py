@@ -168,6 +168,10 @@ check(not app.fcp_konto_rechnen(j5, 100000, 100000, 1, False, 1.0, 0.85, random.
 check(not app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, random.Random(2), dict(RFN, erster_payout=False))["erster_payout"],
       "erster_payout false in der Regel → aus")
 
+PZ = app.fcp_payouts_zaehlen([{"account_id": "k1", "received_tx_id": "t1"}], [{"account_id": "k2"}],
+                              [{"id": "t1", "account_id": "k1"}, {"id": "t2", "account_id": "k3"}, {"id": "t3", "account_id": None}])
+check(PZ == {"k1": 1, "k2": 1, "k3": 1}, f"Payouts zählen: Anfrage + verknüpfte Buchung einmal, managed, nur gebucht (Prüfer S2) — {PZ}")
+
 print("2c) 1-%-Konto über den Namen + SL nie über max_risiko_trade (Vorfall Jacob …7924, 30.10.2026)")
 E = app.fcp_eins_prozent
 check(E({"name": "100k 14197924 → Funded · 1% RULE"}) and E({"name": "x 1%-RULE"}) and E({"name": "x 1 % rule"}) and E({"max_risiko_trade": 1000}),
@@ -279,6 +283,21 @@ for z in erg["geplant"]:
     mins.setdefault(z["user_id"], []).append(datetime.fromisoformat(z["start_um"]))
 check(all(abs((a - b).total_seconds()) >= 600 for v in mins.values() for i, a in enumerate(v) for b in v[i + 1:]), "≥ 10 min zwischen Starts derselben ID")
 check(not GESCHRIEBEN, "Trockenlauf schreibt nichts")
+# Konto 100k 2 (FundedNext, frisch) hatte einen Payout, der nur als transactions-Buchung steht → kein Refund-Modus
+_a0 = app._sb_all
+app._sb_all = lambda t, p: ([{"id": "tx9", "account_id": KONTEN[1]["id"]}] if t == "transactions" else _a0(t, p))
+_e = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
+_z = {z["konto"]: z for z in _e["geplant"]}
+check(not _z["100k 2 → Funded"]["erster_payout"] and _z["100k 2 → Funded"]["hedge_eur"] == 1500 and _z["100k 1 → Funded"]["erster_payout"],
+      "Payout nur als Buchung (transactions kind payout) → normale Regeln, Hedge 1.500 statt 5.000")
+def _kaputt(t, p):
+    if t == "transactions":
+        raise RuntimeError("weg")
+    return _a0(t, p)
+app._sb_all = _kaputt
+_e = app.fcp_planen(trocken=True, jetzt=JETZT, seed=42)
+check(not any(z["erster_payout"] for z in _e["geplant"]), "Payouts nicht lesbar → kein Refund-Modus (fail-closed)")
+app._sb_all = _a0
 _alt = app._sb_all
 PLAN_OFFEN = {"id": "p1", "user_id": H1, "master_account_id": KONTEN[0]["id"], "master_firm": "FundedNext", "status": "open", "richtung": "sell",
               "started_at": "2026-10-31T05:00:00+00:00", "master_contracts": 1.2, "multiplier": 1.5, "notes": "Funded-CFD-Planer · Vorschlag"}
