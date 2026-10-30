@@ -3949,6 +3949,13 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             elif hst in HEDGE_LEBT and h.get("close_fehler"):
                 out.append((f"{pid}|close_fehler", 1, "hedge_close_fehler", "Hedge-Close scheitert",
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
+        # GEGENRICHTUNG GESTARTET (30.10.2026, RIEGEL-LOCK, sql/2026-10-30_riegel_lock.sql): ein Start ohne Claim (Hand-Start) lief, obwohl
+        # dieselbe ID × Firma in Gegenrichtung läuft — der DB-Trigger trade_plans_gegenrichtung_start hält es an der Zeile fest → 🔴 einmal je Plan
+        rv = p.get("rv") if isinstance(p.get("rv"), dict) else {}
+        if rv.get("at") and str(rv.get("at")) > seit_iso:
+            out.append((f"{pid}|richtung_verstoss", 1, "gegenrichtung_gestartet", "Gegenrichtung gestartet",
+                        f"{wer} · {konto}: {str(rv.get('richtung') or '').upper()} gestartet, obwohl {str(rv.get('grund') or 'dieselbe ID × Firma in Gegenrichtung läuft')[:180]}"
+                        f"{' (Prüfung unklar)' if rv.get('unklar') else ''} — sofort prüfen, ggf. einen der beiden schließen.", uid, pid))
         # FINALER TRADEIFY GEHALTEN (29.10.2026): der DB-Trigger hat den Start verschoben (start_sperre art final_halten) → ⚪ einmal je Plan
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else {}
         # HEDGE-TRADE OHNE FREIGABE (29.10.2026, trade_plans_a0_hedge_freigabe): ⚪ einmal je Plan
@@ -4039,7 +4046,8 @@ def alarm_tick():
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
-           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at")
+           "tv_bdb:mt5_baseline->tv->>bracket_dialog_bild,tfh:mt5_baseline->tradeify_hedge,ahm:mt5_baseline->apex_hedge,eg:mt5_baseline->>echo_pos_gesehen_at,"
+           "rv:mt5_baseline->richtung_verstoss")
     rows = _sb_all("trade_plans", {"select": sel, "or": f"(status.eq.open,updated_at.gte.{(jetzt - timedelta(hours=3)).isoformat()})"}) or []
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
