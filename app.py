@@ -13733,7 +13733,7 @@ def admin_live_trades():
             teil = (ids + slave_ids)[i:i + 80]
             if not teil:
                 break
-            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at,currency,waiting_payout_since"   # max_daily_drawdown: Apex mit Hedge (ah_dll_balance)
+            _lt_sel = "id,user_id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at,currency,waiting_payout_since,ziel_erreicht_at"   # max_daily_drawdown: Apex mit Hedge (ah_dll_balance)
             try:
                 _lt_rows = sb_select("accounts", {"select": _lt_sel + ",rest_planer_at", "id": f"in.({','.join(teil)})"})   # Rest zurück im Planer (20.10.2026)
             except requests.exceptions.HTTPError as e:
@@ -13845,6 +13845,11 @@ def admin_live_trades():
             z["kette_tag"] = (((q.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende")
                               if isinstance(q.get("mt5_baseline"), dict) else None)   # Topstep: Tagesergebnis für die Radar-Karte (30.10.2026)
             z["planer_quelle"] = lt_planer_quelle(q.get("notes"))   # Radar-Chip „Challenge Planer CFD" … (30.10.2026)
+            # Ein Klick beim Abhaken (S2 30.10.2026): Konto-Stand jetzt und der Grund der Kette, fehlt etwas, öffnet der Radar das Popup
+            _ak = accs.get(str(q.get("master_account_id") or "")) or {}
+            z["konto_aktuell"] = {"typ": _ak.get("account_type"), "ziel_erreicht_at": _ak.get("ziel_erreicht_at")} if _ak else None
+            z["kette_grund"] = (((q.get("mt5_baseline") or {}).get("kette") or {}).get("t2_grund")
+                                if isinstance(q.get("mt5_baseline"), dict) else None)
             if mit_echo and isinstance(z.get("konto"), dict):
                 z["konto"]["archiviert"] = str(q.get("master_account_id") or "") in _lt_archiv
         if mit_echo:
@@ -14991,6 +14996,9 @@ def admin_wd_plaene():
                         if _versuch:
                             rows = sb_select("trade_plans", plan_sel)
                         plan = rows[0] if rows else None
+                        # Ein Klick ohne Popup (S2 30.10.2026): nur aus Überprüfen — sonst überschriebe er einen schon abgehakten P&L (zweiter Tab)
+                        if daten.get("nur_review") is True and plan and plan.get("status") != "review":
+                            return jsonify({"error": "Trade ist nicht mehr in Überprüfen", "plan_id": pid}), 409
                         jetzt = datetime.now(timezone.utc)
                         jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
                         upd, fehler = _wd_erledigt_upd(plan, mpl, spl, jetzt_iso, _cme_handelstag())
@@ -15027,7 +15035,8 @@ def admin_wd_plaene():
                                 konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN, f_archiv.result())
                                 login_quelle = login or f"{WD_HEDGE_LOGIN} (Standard)"
                         # Welle 3: der Plan selbst
-                        filt = {"id": f"eq.{pid}", "route": f"in.({','.join(WD_ERLEDIGT_ROUTEN)})", "status": "in.(open,review,completed)"}
+                        filt = {"id": f"eq.{pid}", "route": f"in.({','.join(WD_ERLEDIGT_ROUTEN)})",
+                                "status": "eq.review" if daten.get("nur_review") is True else "in.(open,review,completed)"}
                         if plan.get("updated_at"):
                             filt["updated_at"] = f"eq.{plan['updated_at']}"
                         z = sb_update("trade_plans", filt, upd)

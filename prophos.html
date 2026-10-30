@@ -35540,7 +35540,7 @@
     // doch etwas anderes (Status, fehlender P&L, Winning-Day-Vorschlag), öffnet sich das Popup wie immer
     if(opts && opts.einKlick){
       const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
-      if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ mklWdErledigtSpeichern(); return }
+      if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ _mwdErlEinKlick = true; mklWdErledigtSpeichern(); return }
     }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -35613,8 +35613,10 @@
   plFeldVerdrahten('mwd-erl-master', 'mwd-erl-master-pm', 'mwd-erl-master-hinweis')
   plFeldVerdrahten('mwd-erl-fusion', 'mwd-erl-fusion-pm', 'mwd-erl-fusion-hinweis')
   function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null }
+  let _mwdErlEinKlick = false   // nur_review: Ein Klick darf nichts überschreiben, was schon abgehakt ist (S2 30.10.2026)
   async function mklWdErledigtSpeichern(){
     const pid = _mwdErlId; if(!pid) return
+    const einKlick = _mwdErlEinKlick; _mwdErlEinKlick = false
     const msg = document.getElementById('mwdErledigtMsg'), btn = document.getElementById('mwdErledigtSave')
     const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
     const zahl = id => plZahl(document.getElementById(id)?.value)
@@ -35642,7 +35644,7 @@
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${sicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus, ...(wdHand ? { wd_zaehlen: true } : {}),
+        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus, ...(wdHand ? { wd_zaehlen: true } : {}), ...(einKlick ? { nur_review: true } : {}),
                                // Hand-Betrag (08.10.2026): ohne Vorbelegung oder davon abweichend → pl_quelle 'hand' am Plan
                                ...((plHand) ? { pl_quelle: 'hand' } : {}) }) })
       const d = await r.json().catch(() => ({}))
@@ -37388,12 +37390,22 @@
     if(wdlAbhakenSperre(t)) return 'gesperrt'
     if(wdlManuell(t)) return 'manuell'
     if(wdlGeblowtUrteil(t) || wdlKontoWeg(t) || wdlKontoWegErg(t)) return 'geblowt oder Konto weg'
-    if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlFehltChip(t)) return 'Ziel erreicht oder nah'
+    const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
+    // Blow-Beweis wie ap_normal_auto_pruefen (S2 30.10.2026), final-Gründe aus AP_NORMAL_HAND_GRUENDE ohne die Hand-Schließungen: selbst geschlossen ist für Finn unauffällig
+    if(e.konto_geblowt || e.konto_weg || e.konto_weg_vermutet || /^konto_(nicht_erreicht|weg|geblowt)/.test(String(e.puls_fehler || ''))
+       || ['tsx_geblowt', 'demo_liq', 'demo_beide', 'demo_unklar', 'demo_konto_weg', 'demo_konto_unklar', 'konto_weg'].includes(String(e.grund || ''))) return 'Blow-Beweis oder unklares Ende'
+    if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlZielMarkiert(t)) return 'Ziel erreicht oder nah'
+    const ka = t.konto_aktuell, typ = String(t.konto_typ || (ka && ka.typ) || '')
+    if(!ka) return 'Konto-Stand unbekannt'
+    if(ka.ziel_erreicht_at) return 'Ziel erreicht'
+    if(t.konto_typ && ka.typ && String(t.konto_typ) !== String(ka.typ)) return 'Konto in anderer Phase'
+    if(typ === 'funded') return 'Funded Futures: Winning Days anbieten'
     if(wdlFcfdZielErreicht(t)) return 'Funded-CFD-Ziel erreicht'
+    if(['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0 && (wdlBlowStand(t) || {}).liq != null)) return 'Ziel oder Boden unbekannt'
+    if(/unplausibel|Balance-Sprung/i.test(String(t.kette_grund || ''))) return 'Ergebnis unplausibel'
     if(t.tage_mini) return 'Tage-Mini'
     if(t.balance_sprung) return 'Balance-Sprung'
     if(wdlWartet(t)) return 'wartet auf Lesung'
-    const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
     if(!zahl(t.pl_balance) || !(Number(t.balance_end) > 0) || wdlPlGesch(t) || e.balance_quelle === 'folgetrade' || e.puls_aufgegeben) return 'keine echte Lesung'   // Balance 0 ergäbe P&L = −Start
     const dm = t.demo || {}
     if(dm.status === 'beide_in_minute') return 'TP/Liq unklar'
@@ -37401,6 +37413,9 @@
     if(t.hedge && t.hedge.status !== 'geschlossen') return 'Hedge offen'
     const fusionAmPlan = t.route === 'mt5' || t.route === 'tvplus'
     if((t.hedge || Number(t.hedge_eur) > 0 || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
+    // Falscher P&L: Grenze wie ap_normal_tpsl_ende, TP bzw. SL + 15 %, mindestens 50 $ Luft. Ohne Bezugswert kein Ein Klick
+    const pl = Number(t.pl_balance), bezug = Math.abs(Number(pl > 0 ? t.master_tp : t.master_sl)) || 0
+    if(pl !== 0 && (!bezug || Math.abs(pl) > bezug + Math.max(50, bezug * 0.15))) return 'P&L passt nicht zu TP/SL'
     return ''
   }
   window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken
