@@ -13,7 +13,7 @@ def main():
     s = open(HTML, encoding="utf-8").read()
     f = []
     ok = lambda b, t: f.append(t) if not b else None   # noqa: E731
-    ok("const guestly = apSchlankJetzt() && (_apIdsArtWert === 'challenge' || apSchlankFunded())" in s, "Challenge + Funded Futures (WD unverändert)")
+    ok("const guestly = apSchlankJetzt() && (_apIdsArtWert === 'challenge' || apSchlankFunded())" in s, "Challenge + Funded Futures im Planer-Gerüst (WD + Funded CFD eigene Bauer)")
     ok("funded: _apIdsArtWert === 'funded'" in s and "vorschau ? 'Vorschau' : 'Zu bestätigen'" in s, "Funded: Vorschau statt Zu bestätigen")
     ok("let schalter = ''; if(!fd)" in s and "teile.push(Q ? (Q.aktiv ? 'Funded-Planer an'" in s, "Funded: Einstellungen = Funded-Regeln, keine Challenge-Schalter")
     ok("function apgZeilenSchmuecken(root, x)" in s and "apgZeilenSchmuecken(root, ow)" in s, "Weg-Chips in den Zeilen")
@@ -34,10 +34,10 @@ def main():
     # Tokens nur unter #ap-ids-root.ap-guestly, dunkel über den Sonnen-Schalter, Guestly-Farben
     for c in ("--g-a1:#5447ce", "--g-a2:#887cfc", "--g-a3:#4996ff", "--g-a4:#16c8c6"):
         ok(c in s, "Farbe " + c)
-    ok('html[data-theme="dark"] :is(#ap-ids-root.ap-guestly,#apg-fcfd){' in s, "dunkle Tokens am Sonnen-Schalter")
+    ok('html[data-theme="dark"] :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly){' in s, "dunkle Tokens am Sonnen-Schalter (auch WD)")
     ok(not re.search(r":root\{[^}]*--g-a1", s), "keine globalen --g-Tokens")
     css = "\n".join(z for z in s.splitlines() if "apg-" in z and "{" in z and z.lstrip().startswith(("#", "@", "html", ":is(")))
-    ok(all("#ap-ids-root.ap-guestly" in z for z in css.splitlines() if z.lstrip().startswith(("#", ":is(")) and "apg-" in z), "apg-Stile nur im Planer-Bereich")
+    ok(all(("#ap-ids-root.ap-guestly" in z or z.lstrip().startswith("#adm-pane-wd.ap-guestly")) for z in css.splitlines() if z.lstrip().startswith(("#", ":is(")) and "apg-" in z), "apg-Stile nur im Planer-Bereich")
     ok("border-radius:16px" in css, "Karten 16 px Radius")
     # Aufbau in der Reihenfolge der Vorgabe
     i = s.index("function apGuestlyHtml(x){")
@@ -57,6 +57,26 @@ def main():
     ok("fetch(" not in g and "apdApi(" not in g, "keine neue Abfrage")
     ok("apgChartsWeg()" in s and "c.destroy()" in s, "Charts vor dem Neuzeichnen zerstört")
     ok("localStorage" not in g and "localStorage" not in s[s.index("function apGuestlyVerdrahten(root){"):s.index("function apIdsRenderChallenge(){")], "kein localStorage")
+    # WD + Funded CFD im Guestly-Gerüst (30.10.2026, Bugliste #8/#9)
+    ok('<div id="apg-wd" hidden></div>' in s, "WD: Container für Kopf/KPI/Charts im Pane")
+    ok("try{ apgWdRender(liste) }catch(e)" in s, "WD: Aufruf aus wdUebRender, Fehler stören die Kacheln nicht")
+    i = s.index("function apgWdRender(liste){")
+    w = s[i:s.index("  window._wdUebNeu = () =>", i)]
+    ok("B = window._apgBau" in w and "if(!an || !wdSichtbar()) return" in w, "WD: Bausteine über window._apgBau, nur sichtbar gezeichnet")
+    ok(w.count("apgKpi({ gross: true") == 2 and w.count("apgKpi({ icon:") == 3, "WD: 2 große + 3 kleine KPI-Karten")
+    ok("'apg-wd-ls'" in w or 'id="apg-wd-ls"' in w, "WD: Long/Short-Chart")
+    ok('id="apg-wd-std"' in w and "_apgWd.charts" in w and "c.destroy()" in w, "WD: Starts je Stunde, Charts vor dem Neuzeichnen zerstört")
+    ok("fetch(" not in w and "supabase" not in w and "localStorage" not in w, "WD: keine Abfrage, kein Speicher")
+    ok("window._apgBau = { apgKpi, apgPille, APG_ICON, apgKarte, apgChartsMalen, apgZahl, schlank: () => AP_SCHLANK }" in s, "Bausteine exportiert")
+    ok("#adm-pane-wd.ap-guestly:has(#apg-wd .apg-kpis) #wd-ueb-heute{display:none}" in s, "WD: alte Kopf-Kacheln im Gerüst ausgeblendet (gleiche Zahlen oben)")
+    i = s.index("function apgFcfdHtml(ad){")
+    c = s[i:s.index("function apgFcfdRender(){", i)]
+    ok("r.type === 'funded_cfd' && !r.archived" in s and "fetch(" not in c, "Funded CFD: Konten aus /admin/overview, keine eigene Abfrage")
+    ok(c.count("apgKpi({ gross: true") == 2 and c.count("apgKpi({ icon:") == 3, "Funded CFD: 2 große + 3 kleine KPI-Karten")
+    ok('id="apg-fc-ls"' in c and 'id="apg-fc-firma"' in c, "Funded CFD: Charts je ID + je Firma")
+    ok('class="apg-haupt" disabled' in c, "Funded CFD: Planen bleibt gesperrt")
+    ok("if(name === 'fcfd') window._apgFcfdOeffnen?.()" in s, "Funded CFD: beim Öffnen des Reiters gezeichnet")
+    ok("apgChartsMalen(root, _apg.daten, { ls: '#apg-c-ls', balken: '#apg-c-std', ablage: _apg.charts })" in s, "Challenge zeichnet über denselben Helfer")
     for t in f:
         print("✗", t)
     print("OK" if not f else f"\n{len(f)} FEHLER")
