@@ -14305,18 +14305,44 @@ REVIEW_NOTIZ_MAX = 120
 
 
 def _review_notizen_lesen():
-    """accounts.review_notiz (sql/2026-10-30_review_notiz.sql) → {konto_id: Text}. Ein Lesefehler kostet nur die Notizen, nie den Radar."""
+    """accounts.review_notiz (sql/2026-10-30_review_notiz.sql) → Zeilen {id, user_id, review_notiz}. Ein Lesefehler kostet nur die Notizen, nie den Radar."""
     try:
-        return {str(a.get("id")): a.get("review_notiz") for a in _sb_all("accounts", {"select": "id,review_notiz", "review_notiz": "not.is.null"}) or []}
+        return _sb_all("accounts", {"select": "id,user_id,review_notiz", "review_notiz": "not.is.null"}) or []
     except Exception as e:
         print(f"[handarbeit] ⚠️ Notizen: {type(e).__name__}", flush=True)
-        return {}
+        return []
 
 
-def hand_review_notizen(notizen, radar_best, reviews):
-    """REIN RECHNEND (testbar): nur Notizen von Konten, die dieser Login im Radar sieht (Bestanden-Zeilen + Trades in Überprüfen) — keine fremde Gruppe."""
-    sichtbar = {str(z.get("konto_id")) for z in radar_best or () if z.get("konto_id")} | {str(p.get("master_account_id")) for p in reviews or () if p.get("master_account_id")}
-    return {k: v for k, v in (notizen or {}).items() if v and k in sichtbar}
+def hand_review_notizen(zeilen, ein, ausgeblendet):
+    """REIN RECHNEND (testbar): {konto_id: Text} nach Besitzer, unabhängig von den Radar-Zeilen (S2 zu a75eeea7: sonst fehlte eine Notiz in einer sichtbaren Zeile und wurde
+    blind überschrieben). ein = Einschränkung des Logins, wenn gesetzt, gilt allein; sonst alle außer ausgeblendet (Gruppen mit Verwalter)."""
+    aus = set(ausgeblendet or ())
+    out = {}
+    for a in zeilen or ():
+        uid = str(a.get("user_id") or "")
+        if a.get("review_notiz") and a.get("id") and (uid in ein if ein is not None else uid not in aus):
+            out[str(a["id"])] = a["review_notiz"]
+    return out
+
+
+def review_notiz_recht(ein, gruppen_ids):
+    """REIN RECHNEND (testbar): wessen Notiz darf dieser Login schreiben? {"nur": [...]} eingeschränkt (Verwalter = Gruppe, Mitglied = er), sonst {"aus": [...]} (alle außer Gruppen mit Verwalter)."""
+    return {"nur": sorted(str(x) for x in ein)} if ein is not None else {"aus": sorted(str(x) for x in gruppen_ids or ())}
+
+
+def review_notiz_darf(recht, uid):
+    """REIN RECHNEND (testbar): darf dieser Login die Notiz eines Kontos dieser ID schreiben?"""
+    uid = str(uid or "")
+    return uid in recht["nur"] if "nur" in recht else uid not in recht["aus"]
+
+
+def _hand_mit_recht(antwort):
+    """Schreibrecht je Anfrage an die Handarbeit-Antwort: der Cache-Schlüssel gilt für eine ganze Gruppe, das Recht hängt am Login. Nicht lesbar → ohne, der Server prüft beim Schreiben."""
+    try:
+        return dict(antwort, notiz_recht=review_notiz_recht(_admin_eingeschraenkt(), _admin_verwalter_gruppen_ids(admin_gruppen_daten())))
+    except Exception as e:
+        print(f"[handarbeit] ⚠️ Notiz-Recht: {type(e).__name__}", flush=True)
+        return antwort
 
 
 def hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, jetzt, lauf=None, tage_je=None):
@@ -14434,8 +14460,8 @@ def admin_handarbeit():
     schluessel = ("*-" + ",".join(sorted(std_aus))) if sicht is None else ",".join(sorted(sicht))
     with _hand_lock:
         c = _hand_cache.get(schluessel)
-        if c and c[0] > time.time():
-            return jsonify(c[1])
+    if c and c[0] > time.time():
+        return jsonify(_hand_mit_recht(c[1]))
     try:
         f = admin_sicht_filter(sicht) or (("not.in.(" + ",".join(sorted(std_aus)) + ")") if std_aus else None)
         uq = {"user_id": f} if f else {}
@@ -14508,7 +14534,7 @@ def admin_handarbeit():
         gelesen = gr.pop("planer_gelesen", 0)
         radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, ausgeblendet, datetime.now(timezone.utc), None, tage_je)["bestanden"]
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
-                   "planer_gelesen": gelesen, "radar_bestanden": radar_best, "review_notizen": hand_review_notizen(_review_notizen_lesen(), radar_best, reviews)}
+                   "planer_gelesen": gelesen, "radar_bestanden": radar_best, "review_notizen": hand_review_notizen(_review_notizen_lesen(), ein, ausgeblendet)}
     except Exception as e:
         print(f"[handarbeit] ⚠️ {type(e).__name__}: {e}", flush=True)
         alt = stand_alt_holen(("handarbeit", schluessel), e)    # Supabase kurz weg (09.10.2026) → letzter guter Stand dieser Sicht
@@ -14519,7 +14545,7 @@ def admin_handarbeit():
     with _hand_lock:
         _hand_cache[schluessel] = (time.time() + HAND_CACHE_S, antwort)
     stand_alt_merken(("handarbeit", schluessel), antwort)
-    return jsonify(antwort)
+    return jsonify(_hand_mit_recht(antwort))
 
 
 # ══ WD-SICHT FÜR JEDEN LOGIN (30.10.2026, Finn: „Emin soll nur die IDs von ihm sehen und wir nur die IDs von uns" — dringlich, seit Emin
@@ -14930,6 +14956,16 @@ def admin_wd_plaene():
             if len(aid) < 10:
                 return jsonify({"error": "account_id fehlt"}), 400
             txt = str(daten.get("notiz") or "").strip()[:REVIEW_NOTIZ_MAX]
+            # Der Besitz-Riegel oben gilt nur für eingeschränkte Logins: HT-Logins ohne admin_zugang kämen sonst an jedes Konto, auch der Gruppen mit Verwalter (S2 zu a75eeea7)
+            try:
+                bes = sb_select("accounts", {"select": "user_id", "id": f"eq.{aid}", "limit": "1"})
+                recht = review_notiz_recht(_admin_eingeschraenkt(), _admin_verwalter_gruppen_ids(admin_gruppen_daten()))
+            except Exception as e:
+                return jsonify({"error": f"Besitz nicht prüfbar ({type(e).__name__})"}), 502
+            if not bes:
+                return jsonify({"error": "Konto nicht gefunden"}), 404
+            if not review_notiz_darf(recht, bes[0].get("user_id")):
+                return jsonify({"error": "Diese ID darfst du nicht bearbeiten"}), 403
             try:
                 rows = sb_update("accounts", {"id": f"eq.{aid}"}, {"review_notiz": txt or None})
             except Exception as e:

@@ -5181,6 +5181,7 @@
   #dashboard-view .wdl-bst-notiz{display:block;width:100%;background:none;border:0;padding:0;font:inherit;font-size:11.5px;line-height:1.3;color:var(--ink-2);text-align:left;cursor:text;overflow-wrap:anywhere}
   #dashboard-view .wdl-bst-notiz.ist-leer{color:var(--sub);cursor:pointer}
   #dashboard-view .wdl-bst-notiz.ist-leer:hover{color:var(--violet)}
+  #dashboard-view .wdl-bst-notiz.ist-lesen{cursor:default}
   #dashboard-view .wdl-bst-notiz-feld{width:100%;box-sizing:border-box;font:inherit;font-size:11.5px;padding:2px 6px;border:1px solid var(--violet);border-radius:6px;background:var(--surface);color:var(--ink);outline:none}
   #dashboard-view .wdl-z-datum{grid-area:datum;text-align:right;color:var(--sub);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:12px}
   #dashboard-view .wdl-z-datum b{font-weight:600;color:var(--ink-2)}   /* „heute 17:06" fett — der ist heute reingelaufen */
@@ -37343,12 +37344,18 @@
     const o = _bstNotizNeu.get(String(kid)); if(o) return o.text
     return String((((typeof _hand !== 'undefined' && _hand.d) || {}).review_notizen || {})[String(kid)] || '')
   }
+  function bstNotizDarf(uid){
+    const r = (typeof _hand !== 'undefined' && _hand.d && _hand.d.notiz_recht) || null, u = String(uid || '')
+    if(!r) return true   // Antwort ohne Recht (letzter guter Stand): der Server prüft beim Speichern
+    return Array.isArray(r.nur) ? r.nur.includes(u) : !(r.aus || []).includes(u)
+  }
   function bstNotizZelle(kid, uid){
     if(!kid) return ''
     if(_bstNotizEdit && _bstNotizEdit.kid === String(kid)) return `<span class="wdl-z-notiz"><input type="text" class="wdl-bst-notiz-feld" data-wdl-bst-notiz-feld="${escapeHtml(String(kid))}" maxlength="${BST_NOTIZ_MAX}" value="${escapeHtml(_bstNotizEdit.text)}" placeholder="Notiz" aria-label="Notiz zum Konto"></span>`
     // Ohne Serverstand (Handarbeit noch nicht geladen) kein „+ Notiz": ein leeres Feld könnte eine vorhandene Notiz überschreiben
     if(!_bstNotizNeu.has(String(kid)) && !(typeof _hand !== 'undefined' && _hand.d && _hand.d.review_notizen)) return '<span class="wdl-z-notiz"></span>'
     const t = bstNotizText(kid)
+    if(!bstNotizDarf(uid)) return `<span class="wdl-z-notiz">${t ? `<span class="wdl-bst-notiz ist-lesen">${escapeHtml(t)}</span>` : ''}</span>`   // Speichern gäbe 403 (Mitglied einer Gruppe, fremde ID)
     return `<span class="wdl-z-notiz"><button type="button" class="wdl-bst-notiz${t ? '' : ' ist-leer'}" data-wdl-bst-notiz="${escapeHtml(String(kid))}" data-wdl-bst-notiz-uid="${escapeHtml(String(uid || ''))}" title="${t ? 'Notiz bearbeiten' : 'Notiz zu diesem Konto schreiben'}">${t ? escapeHtml(t) : '+ Notiz'}</button></span>`
   }
   function bstNotizAbgleich(d){
@@ -37371,6 +37378,8 @@
     }catch(e){
       if(vorher) _bstNotizNeu.set(kid, vorher); else _bstNotizNeu.delete(kid)
       if(typeof atToast === 'function') atToast('Notiz nicht gespeichert: ' + ((e && e.message) || e), 'end')
+      // Getipptes bleibt im Feld, ohne den Fokus zu holen (Klick daneben löste das Speichern aus); Esc verwirft
+      if(!_bstNotizEdit) _bstNotizEdit = { kid, uid, text, keinFokus: true }
       wdlRender()
     }
   }
@@ -38489,7 +38498,7 @@
       const tsVon = t => bstZeitVon((kontoVon(t) || {}).zielErreichtAt, t).ts
       const zeileDatum = t => zeile(t, '').replace(/<\/div>$/, bstDatumZelle((kontoVon(t) || {}).zielErreichtAt, t, (t.konto || {}).firma) + '</div>')
       const nachZiel = arr => [...arr].map(t => ({ t, ts: tsVon(t) })).sort(bstTsSort).map(x => x.t)
-      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, ts: tsVon(t), html: zeileDatum(t).replace(/<\/div>$/, bstNotizZelle(String(t.konto_id || ''), wdlUid(t)) + '</div>') }))
+      const zz = bstZeilen(), rev = (revTr || []).map(t => ({ fehlt: false, ts: tsVon(t), html: zeileDatum(t).replace(/<\/div>$/, () => bstNotizZelle(String(t.konto_id || ''), wdlUid(t)) + '</div>') }))
       let rvh = []; try{ rvh = rvhZeilen(alleTr) }catch(e){ console.warn('[radar] Rest von Hand', (e && e.message) || e); rvh = [] }
       const kaesten = gruppe('Trade abhaken', nachZiel(bestTr || []), ['Ergebnis', 'Konto · Boden → Ziel', 'Bestanden', 'P&amp;L', 'Zu'], 'wdl-tab-konto wdl-tab-bst wdl-tab-sek-bestanden', null, bestAlle || [], null, zeileDatum)
         + bstTab(rvh, 'Rest von Hand', 'Noch nicht bestanden — es fehlen ein paar Dollar bis zum Ziel. „→ Planer": der Bot holt den Rest; „Abhaken": den Rest von Hand holen, als manuell nachtragen und den Nachfolger anlegen', 'wdl-tab-sek-rvh')
@@ -38585,7 +38594,7 @@
       : `<div class="mwd-leer">${wdl.daten ? (wdl.modell ? `Keine ${escapeHtml(wdl.modell)}-Trades im Zeitraum.` : 'Keine Trades im Zeitraum.') : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     for(const e of liste.querySelectorAll('[data-wdl-kp]')){ const x = kpScroll.get(e.getAttribute('data-wdl-kp')); if(x) e.scrollLeft = x }
     // Offenes Notiz-Feld (Manuelle Arbeit) nach dem Neuaufbau wieder fokussieren — Cursor ans Ende
-    if(_bstNotizEdit){ const i = liste.querySelector('[data-wdl-bst-notiz-feld]'); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } else _bstNotizEdit = null }
+    if(_bstNotizEdit && !_bstNotizEdit.keinFokus){ const i = liste.querySelector('[data-wdl-bst-notiz-feld]'); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } else _bstNotizEdit = null }
     if(_wdlManNotiz){ const i = liste.querySelector('[data-wdl-man-notiz]'); if(i){ i.focus(); try{ i.setSelectionRange(i.value.length, i.value.length) }catch(_){} } else _wdlManNotiz = null }
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
@@ -38728,7 +38737,7 @@
     wdlManuellSchreiben(pid, txt, schritt)
   }
   // Notiz je Konto in Review (30.10.2026): Enter oder Klick daneben speichert, Esc verwirft, leer löscht
-  document.getElementById('wdl-liste')?.addEventListener('input', ev => { const i = ev.target.closest && ev.target.closest('[data-wdl-bst-notiz-feld]'); if(i && _bstNotizEdit) _bstNotizEdit.text = i.value })
+  document.getElementById('wdl-liste')?.addEventListener('input', ev => { const i = ev.target.closest && ev.target.closest('[data-wdl-bst-notiz-feld]'); if(i && _bstNotizEdit){ _bstNotizEdit.text = i.value; _bstNotizEdit.keinFokus = false } })
   document.getElementById('wdl-liste')?.addEventListener('keydown', ev => {
     const i = ev.target.closest && ev.target.closest('[data-wdl-bst-notiz-feld]'); if(!i) return
     ev.stopPropagation()
@@ -53619,7 +53628,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1960'
+  const OS_TAB_BUILD = '2026-09-22.1961'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
