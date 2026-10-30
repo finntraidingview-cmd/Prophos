@@ -8071,6 +8071,10 @@ def admin_build_kapitel():
                   "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day,"
                   # Winning-Days-Statistik (26.09.2026): Herkunft, TP, Kontrakte, Zeiten, Schließgrund des Fusion-Hedges
                   "notes,master_tp,master_contracts,started_at,ended_at,hedge_grund:mt5_baseline->hedge->>grund,"
+                  # Altdaten level_mt5 + close = unser Close (hedge_grund_echt, LABEL-RADAR-STATT-NOTFALL 30.10.2026)
+                  "h_gc:mt5_baseline->hedge->>grund_copier,h_close_at:mt5_baseline->hedge->>close_at,h_tab:mt5_baseline->hedge->>grund_tab,"
+                  "h_mq:mt5_baseline->hedge->>master_weg_quelle,h_seite:mt5_baseline->hedge->>master_weg_seite,h_ausl:mt5_baseline->hedge->>ausloeser,"
+                  "h_kurs:mt5_baseline->hedge->>kurs_bei_close,h_tp:mt5_baseline->hedge->>tp_level_nq,h_sl:mt5_baseline->hedge->>sl_level_nq,"
                   "ah_status:mt5_baseline->apex_hedge->>status")
     # konto_typ (25.09.2026, Kontotyp zum Zeitpunkt des Trades): fehlt die Spalte noch (SQL nicht eingespielt), ohne sie laden —
     # die Statistik darf daran nie kippen
@@ -8200,7 +8204,7 @@ def admin_build_kapitel():
                     "master_pl": _f(p.get("master_pl")), "fusion_eur": _f(p.get("slave_pl")),
                     "hedge_eur": _f(p.get("hedge_eur")), "master_tp": _f(p.get("master_tp")),
                     "kt": _f(p.get("master_contracts")), "richtung": str(p.get("richtung") or "").lower(),
-                    "grund": p.get("hedge_grund") or None, "blown": bool(p.get("blown")),
+                    "grund": hedge_grund_echt(p) or None, "blown": bool(p.get("blown")),
                     # 29.10.2026 (Finn: „ich will nur die Winning Days angezeigt kriegen"): das Frontend (Admin → Winning Days, Statistik-Box)
                     # trennt damit echte Winning Days (Plan-Haken; WD-Konto nur über den Frontend-Schalter WD_UEB_NUR_FLAG) von Funded-Big-Trades, die hier nur über hedge_eur > 0 drin sind
                     "winning_day": bool(p.get("winning_day")), "konto_typ": str(p.get("konto_typ") or "") or None,
@@ -13863,6 +13867,28 @@ def _wd_zahl(v):
 # Winning Day anhaken"): Firma (Teilstring, klein) → Master-P&L in $, AB dem (echt darüber) der Tag als Winning Day zählt.
 # Nur Konten vom Typ 'winning_days'; andere Firmen zählen weiter von Hand über das 🏆-Häkchen.
 WD_GOOD_DAY_MIN = {"tradeify": 250.0, "lucid": 250.0, "fundednext futures": 250.0, "topstep": 150.0, "apex": {"100000": 300.0, "150000": 350.0}}   # Lucid 250 $ wie Tradeify (Finn 23.10.2026: „1:1 gleiche Regeln"); Apex je Größe 100k 300 $ / 150k 350 $ (Finn 17.10.2026); Topstep 150 $ (Finn 14.10.2026 ~23:50 Dubai: „bei Topstep ist Winning Day nur 150, Tradeify 250"); FundedNext Futures 250 $ wie Tradeify (Finn 16.10.2026)
+
+
+def hedge_grund_echt(p):
+    """REIN RECHNEND (testbar): Schließweg einer Kapitel-Zeile — dieselbe Regel wie hedgeGrundEcht im Frontend (LABEL-RADAR-STATT-NOTFALL, Befund S5
+    30.10.2026): level_mt5 + grund_copier 'close' + close_at = unser Close, nicht das Notfall-Level. Nur beim Lesen, alte Pläne bleiben."""
+    g = str(p.get("hedge_grund") or "")
+    if g != "level_mt5" or str(p.get("h_gc") or "") != "close" or not p.get("h_close_at"):
+        return g
+    gt = str(p.get("h_tab") or "")
+    if gt and gt != "level_mt5":
+        return gt
+    if p.get("h_mq") in ("reader", "fill") or (p.get("h_mq") != "feed" and not p.get("h_ausl")):
+        return "master_ende_reader"
+    if p.get("h_seite") in ("tp", "sl"):
+        return p["h_seite"] + "_feed"
+    try:
+        k, tp, sl = float(p.get("h_kurs") or 0), float(p.get("h_tp") or 0), float(p.get("h_sl") or 0)
+    except (TypeError, ValueError):
+        return "master_ende"
+    if k > 0 and tp > 0 and sl > 0:
+        return "tp_feed" if abs(k - tp) <= abs(k - sl) else "sl_feed"
+    return "master_ende"
 
 
 def _wd_good_day(konto, master_pl):

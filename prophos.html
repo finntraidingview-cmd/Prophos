@@ -29357,7 +29357,8 @@
     // ÖFFNEN ZUERST (01.10.2026, Finn: „instant"): der 'oeffnet'-Merker geht parallel zur Order in die DB, nicht mehr davor (eine
     // Supabase-Rundreise weniger vor dem Copier); vor jedem weiteren Hedge-Eintrag wird er abgewartet, damit nichts zurückfällt.
     _hedgeWegGestempelt.delete(String(plan.id))   // neuer Hedge = neues Master-Ende (29.10.2026): alten Stempel aus einem falschen Reader-Ende nie weiterrechnen
-    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
+    // grund, grund_tab, close_at (30.10.2026): Reste eines früheren Close dürfen den neuen Hedge nicht beschriften (hedgeZuAusRing liest sie)
+    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', grund: null, grund_tab: null, close_at: null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
@@ -29453,7 +29454,27 @@
     }catch(_){ return '' }
   }
   window._hedgeHandSchneller = hedgeHandSchneller   // Test-Haken
+  /* GRUND ECHT (LABEL-RADAR-STATT-NOTFALL, Befund S5 30.10.2026: Marc Apex f77f23c8 zeigte „Notfall-SL", geschlossen hat Radar — grund_copier close,
+   * final.grund tp_feed, Schluss 3,37 Pkt VOR dem Notfall-Level; 18 solche Fälle in 14 Tagen). level_mt5 kam aus hedgeZuAusRing, wenn ein Tab den eigenen
+   * Schließbefehl nicht kannte. REIN, nur beim Lesen, alte Pläne bleiben: level_mt5 + grund_copier 'close' (der Copier meldet ein Level als tp/sl, nie
+   * als close) + close_at (Schließbefehl des Tabs) = unser Close → grund_tab, sonst master_weg_quelle 'reader' → master_ende_reader; Feed (quelle feed
+   * oder ausloeser) → tp_feed/sl_feed nach master_weg_seite bzw. dem kurs_bei_close näheren Master-Level, ohne Anhalt master_ende; kein Feed-Zeichen →
+   * master_ende_reader (Beleg: alle Altfälle ohne Feed-Zeichen tragen final.quelle reader_leer). Dieselbe Regel in app.py hedge_grund_echt. */
+  function hedgeGrundEcht(h){
+    const g = String((h && h.grund) || '')
+    if(g !== 'level_mt5' || String(h.grund_copier || '') !== 'close' || !h.close_at) return g
+    const gt = String(h.grund_tab || ''); if(gt && gt !== 'level_mt5') return gt
+    if(h.master_weg_quelle === 'reader' || h.master_weg_quelle === 'fill') return 'master_ende_reader'   // fill = Exit-Fill-Meldung, schließt als master_ende_reader (S6)
+    if(h.master_weg_quelle !== 'feed' && !h.ausloeser) return 'master_ende_reader'
+    if(h.master_weg_seite === 'tp') return 'tp_feed'
+    if(h.master_weg_seite === 'sl') return 'sl_feed'
+    const k = Number(h.kurs_bei_close), tp = Number(h.tp_level_nq), sl = Number(h.sl_level_nq)
+    if(k > 0 && tp > 0 && sl > 0) return Math.abs(k - tp) <= Math.abs(k - sl) ? 'tp_feed' : 'sl_feed'
+    return 'master_ende'
+  }
+  window._hedgeGrundEcht = hedgeGrundEcht   // Test-Haken
   function hedgeGrundText(g, h){
+    if(h && g === 'level_mt5') g = hedgeGrundEcht(h)   // Altdaten: unser Close, nicht das Level
     if(g === 'hand' && hedgeHandSchneller(h)) return `Master-Ende erkannt (${hedgeHandSchneller(h) === 'userscript' ? 'Reader' : 'Radar'}) → Schließbefehl gesendet — Fusion war schon von Hand zu (Hand schneller)`
     // Winning Day (F22): das zweite Level ist die Liquidation des Masters, kein Master-SL
     if(h && h.sl_art === 'liquidation' && (g === 'sl_feed' || g === 'level_sl')) return g === 'sl_feed' ? 'am Liquidations-Level über den Kurs-Feed geschlossen' : 'am Liquidations-Level geschlossen (Fusion-TP im Terminal gefüllt)'
@@ -29594,9 +29615,25 @@
     const pl = (typeof zu.pl === 'number' && isFinite(zu.pl)) ? zu.pl : null
     // Lief gerade unser eigener Close (status 'schliesst', z. B. tp_feed) und die Antwort ging verloren, meldet der Ring nur 'close' —
     // dann bleibt unser Grund stehen, nie level_mt5 (Prüfliste 13)
-    const hAkt = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+    // FRISCH AUS DER DB (LABEL-RADAR-STATT-NOTFALL 30.10.2026, Beleg e5fec901: um 02:38 master_ende_reader, danach level_mt5): der Plan im Speicher
+    // dieses Tabs kennt 'schliesst'/'geschlossen' oft noch nicht (anderer Tab hat geschlossen, Pläne stale). Lesefehler → Speicher wie bisher.
+    let hAkt = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+    try{ const { data: z, error: ze } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+      if(!ze && z && z.mt5_baseline){ hAkt = z.mt5_baseline.hedge || null; if(plan.mt5Baseline) plan.mt5Baseline.hedge = hAkt } }catch(_){}   // Speicher mit: sonst liest jeder Takt neu
+    // Ring-Meldung zu einem alten Ticket (Hedge inzwischen neu geöffnet): nichts anfassen — der neue Hedge ist offen
+    if(!hAkt) return   // Plan zurückgesetzt: kein Hedge mehr am Plan, kein Geister-„geschlossen" aus einem alten Tab
+    if(hAkt && hAkt.ticket && zu.ticket && Number(hAkt.ticket) !== Number(zu.ticket)) return
+    // Schon geschlossen (derselbe Hedge): Grund, Zeit und Tab bleiben — nur ein fehlendes P&L aus dem Ring nachtragen
+    if(hAkt && hAkt.status === 'geschlossen'){
+      if(pl != null && hAkt.pl == null) await hedgeAmPlanSchreiben(plan.id, { pl, pl_offen: false, fill_close: hAkt.fill_close || zu.fill_close || null }, { slave_pl: hedgePlGesamt(plan.mt5Baseline, pl) })
+      return
+    }
+    if(hAkt.status !== 'offen' && hAkt.status !== 'schliesst') return   // z. B. 'oeffnet' mit altem Ticket: nur laufende Hedges abschließen
+    // Eigener Schließbefehl, auch wenn seine Antwort verloren ging (hedgeSoloSchliessen schreibt dann 'offen', grund + close_at bleiben): sein Grund gilt —
+    // 'hand' und 'master_nie_da' gehen so weiter ihre eigenen Wege (Flach-Beweis), nie als Reader-Ende (Gegenprüfung 30.10.2026)
     const grundEnd = (zu.grund && zu.grund !== 'close' && zu.grund !== 'unbekannt') ? zu.grund
-      : (hAkt && hAkt.status === 'schliesst' && hAkt.grund) ? hAkt.grund : 'level_mt5'
+      : ((hAkt.status === 'schliesst' || hAkt.close_at) && hAkt.grund && hAkt.grund !== 'level_mt5') ? hAkt.grund
+      : hedgeGrundEcht(Object.assign({}, hAkt, { grund: 'level_mt5', grund_copier: zu.grund }))   // Schließbefehl unterwegs (close_at) → Radar/Reader, sonst level_mt5
     const extra = (pl != null) ? { slave_pl: hedgePlGesamt(plan.mt5Baseline, pl) } : null   // immer aus hedge.pl (+ versuche_alt), auch über eine 0 hinweg
     await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: zu.grund || null, pl, pl_offen: pl == null, fill_close: zu.fill_close || null,
       schon_zu: true, closed_at: zu.closed_at || new Date().toISOString(), msg: 'vom Copier erkannt' }, extra)
@@ -37377,7 +37414,7 @@
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     // Hand schneller (30.10.2026, s. hedgeHandSchneller): Weg = der von Prophos erkannte, Text mit Zusatz; Overshoot nicht (Hand-Schluss)
     const hs = hedgeHandSchneller(h)
-    const g = String(h.grund), weg = hs || SW_WEG_VON[g] || 'sonst'
+    const g = hedgeGrundEcht(h), weg = hs || SW_WEG_VON[g] || 'sonst'   // Altdaten level_mt5 + close = unser Close (LABEL-RADAR-STATT-NOTFALL)
     // sl/tp 0 = kein Level gesetzt (der Tab schreibt beim Öffnen `res.sl || 0`, z. B. ohne Notfall-SL) → null, sonst wäre Level 0 und der Overshoot ~24.000 Pkt
     const fusionSl = n(h.sl) || null, fusionTp = n(h.tp) || null, zu = n(h.fill_close), buy = h.richtung === 'buy'
     const lots = n(h.lots), wpp = n(h.wert_pro_punkt), eur = n(h.eur)

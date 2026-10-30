@@ -37,7 +37,7 @@ const window = {}, KONTO_KURZ_MIN = 12
 function hedgeKontoPasst(t, id){ return String(t).split(/[^A-Z0-9]+/).includes(id) }
 function tvSymbolWurzel(s){ return /^MNQ/.test(String(s)) ? 'MNQ' : /^NQ/.test(String(s)) ? 'NQ' : '' }
 """
-code = "\n".join([UMGEBUNG, js_funktion("kontoTextBezug"), js_funktion("hedgeHandSchneller"), js_funktion("hedgeGrundText"),
+code = "\n".join([UMGEBUNG, js_funktion("kontoTextBezug"), js_funktion("hedgeHandSchneller"), js_funktion("hedgeGrundEcht"), js_funktion("hedgeGrundText"),
                   zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
                   js_funktion("hedgeExitFillWahl")])
 # echter Hedge f35ba6ae (gekürzt auf die Felder der Rechnung)
