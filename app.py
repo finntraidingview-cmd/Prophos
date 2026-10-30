@@ -35283,6 +35283,7 @@ def admin_funded_plan_ids():
 #  - TP immer aufs Ziel: Ziel (je Trade gewürfelt in ziel[von, bis]) − bisheriger Gewinn — nach einem Verlusttag entsprechend höher
 #    (FundedNext 100k −2k → TP ≈ 3,5–3,85k). The5ers im 1. Payout-Zyklus (kein Payout in pending/managed_payouts) fest tp_erster 750 $:
 #    die Consistency Rule (größter Tag ≤ 50 %) wird beim Payout nicht zurückgesetzt (Finn 30.10.2026).
+#    Je Trade gedeckelt (FCP_TP_ZYKLEN_STANDARD / FCP_TP_DECKEL_PLUS_STANDARD, fcp_tp_deckel) — der Rest kommt an den nächsten Tagen.
 #  - SL und Lots gewürfelt in ihrem Bereich; FundedNext mit 1-%-Risk-Limit (accounts.max_risiko_trade gesetzt, z. B. Jacob) → sl_1pct.
 #  - Hedge: hedge_eur € auf dd $ Drawdown → master_risk = dd, slave_risk = hedge_eur, multiplier wie gp_multiplikator (Echo-Popup).
 #  - Uhrzeit zufällig im Fenster des Challenge-Planers (fdp_fenster), Richtung gewürfelt — RICHTUNGSSCHUTZ: hat dieselbe ID × Firma schon einen
@@ -35296,6 +35297,13 @@ FCP_TAKT_S = 300
 FCP_ZEITEN_STANDARD = {"firma_abstand_min": 15, "abstand_id_min": 10, "vorlauf_min": 15}
 FCP_ART = "cfd"
 FCP_TP_MIN_USD = 250          # Rest bis Ziel kleiner (z. B. Gewinn 1.290, Ziel 1.300 → 10 $ ≈ Spread): TP 250 $, kleiner Overshoot (Prüfung S4)
+# TP-DECKEL BEIM NACHHOLEN (Finn 30.10.2026 ~07:20, Anlass Trockenlauf: The5ers 200k −14.023 → TP 15.410 $): je Trade höchstens
+#  - The5ers (Consistency 50 %, wird beim Payout nicht zurückgesetzt): nach Payout-Zyklus tp_zyklen[Zyklus − 1], ab dem letzten Wert dieser —
+#    Zyklus 1 (noch kein Payout) immer genau 750 $ (auch nach Verlust), 2: 1.500, 3: 3.000, ab 4: 6.000. Zyklus = bisherige Payouts + 1.
+#  - andere Firmen (keine Consistency): ziel[bis] + tp_deckel_plus (1.000 $); der Rest kommt an den nächsten Tagen.
+# Werte je Firma in funded_cfd_plan_regeln.firmen[] (sql/2026-10-30_funded_cfd_tp_deckel.sql); fehlen sie, gelten diese Standards.
+FCP_TP_ZYKLEN_STANDARD = {"the5ers": [750, 1500, 3000, 6000]}
+FCP_TP_DECKEL_PLUS_STANDARD = 1000
 _fcp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0}
 
 
@@ -35326,10 +35334,26 @@ def fcp_wuerfel(b, rnd, stellen=0):
     return round(x, stellen) if stellen else float(round(x))
 
 
-def fcp_konto_rechnen(jg, balance, groesse, erster_zyklus, eins_prozent, mppl, sppl, rnd=None):
+def fcp_tp_deckel(regel, jg, zyklus):
+    """REIN RECHNEND (testbar): (deckel $, art) je Trade — ('zyklus', The5ers-Stufe) oder ('ziel_plus', ziel[bis] + plus). zyklus ≥ 1."""
+    key = ((regel or {}).get("namen") or [""])[0]
+    stufen = (regel or {}).get("tp_zyklen") or FCP_TP_ZYKLEN_STANDARD.get(key)
+    if isinstance(stufen, list) and stufen and all(_wd_num(x) for x in stufen):
+        return float(stufen[min(max(int(zyklus), 1), len(stufen)) - 1]), "zyklus"
+    plus = _wd_num((regel or {}).get("tp_deckel_plus"))
+    lohi = fcp_bereich((jg or {}).get("ziel"))
+    return (lohi[1] if lohi else 0.0) + (plus if plus is not None else FCP_TP_DECKEL_PLUS_STANDARD), "ziel_plus"
+
+
+def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rnd=None, regel=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-CFD-Kontos → {aktion: planen|ziel|aus, grund, …}.
-    jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), erster_zyklus = noch kein Payout (nur für
-    tp_erster), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt je Fusion-Lot."""
+    jg = fcp_je_groesse, balance = Live-Balance, groesse = Kontogröße (= Starting Balance), zyklus = Payout-Zyklus (bisherige Payouts + 1;
+    True/False = 1./späterer, alte Aufrufe), eins_prozent = 1-%-Risk-Limit am Konto, mppl = $/Pkt je Master-Lot (firm_specs), sppl = €/Pkt
+    je Fusion-Lot, regel = Firmen-Regel (TP-Deckel, fcp_tp_deckel)."""
+    if isinstance(zyklus, bool):
+        zyklus = 1 if zyklus else 2
+    zyklus = max(1, int(zyklus or 1))
+    erster_zyklus = zyklus == 1
     g = float(groesse or 0)
     if not jg or not g:
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-CFD-Planer"}
@@ -35340,7 +35364,7 @@ def fcp_konto_rechnen(jg, balance, groesse, erster_zyklus, eins_prozent, mppl, s
         return {"aktion": "aus", "grund": "Regel unvollständig (ziel / dd)"}
     gewinn = round(float(balance) - g, 2)
     basis = {"balance": round(float(balance), 2), "start": g, "gewinn": gewinn, "ziel_von": g + ziel_b[0], "ziel_bis": g + ziel_b[1],
-             "dd": dd, "erster_zyklus": bool(erster_zyklus), "eins_prozent": bool(eins_prozent)}
+             "dd": dd, "erster_zyklus": bool(erster_zyklus), "zyklus": zyklus, "eins_prozent": bool(eins_prozent)}
     if balance <= g - dd:
         return dict(basis, aktion="aus", grund=f"Balance {_liq_de(balance)} $ am/unter dem Boden ({_liq_de(g - dd)} $) — geblowt?")
     if gewinn > 2 * ziel_b[1] + dd:
@@ -35349,12 +35373,18 @@ def fcp_konto_rechnen(jg, balance, groesse, erster_zyklus, eins_prozent, mppl, s
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Waiting for Payout")
     ziel = fcp_wuerfel(jg.get("ziel"), rnd)
     ziel = max(ziel, ziel_b[0])
+    deckel, deckel_art = fcp_tp_deckel(regel, jg, zyklus)
     if erster_zyklus and _wd_num(jg.get("tp_erster")):
-        tp, tp_art = float(jg["tp_erster"]), "erster_payout"
+        tp, tp_art = float(jg["tp_erster"]), "erster_payout"        # The5ers Zyklus 1: immer genau 750 (= tp_zyklen[0])
+    elif erster_zyklus and deckel_art == "zyklus":
+        tp, tp_art = deckel, "erster_payout"
     else:
         tp, tp_art = float(round(ziel - gewinn)), ("nachholen" if gewinn < 0 else "ziel")
+        if deckel and tp > deckel:
+            tp, tp_art = float(deckel), "gedeckelt"                # Rest an den nächsten Tagen (Finn 30.10.2026)
         if tp < FCP_TP_MIN_USD:
             tp, tp_art = float(FCP_TP_MIN_USD), "mindest"
+    basis["tp_deckel"] = deckel
     sl_b = jg.get("sl_1pct") if eins_prozent and jg.get("sl_1pct") else jg.get("sl")
     sl = fcp_wuerfel(sl_b, rnd)
     lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
@@ -35545,7 +35575,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             aus("keine Balance — ↻ Balance lesen"); continue
         mppl = ap_cfd_ppl(ctx_ppl, a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
-        r = fcp_konto_rechnen(jg, float(bal), g, not payouts.get(aid), bool(_wd_num(a.get("max_risiko_trade"))), mppl, sppl, rnd)
+        r = fcp_konto_rechnen(jg, float(bal), g, len(payouts.get(aid) or []) + 1, bool(_wd_num(a.get("max_risiko_trade"))), mppl, sppl, rnd, regel)
         r.update(zeile, groesse=g, bal_quelle=bal_quelle, payouts=len(payouts.get(aid) or []))
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)
@@ -35597,7 +35627,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             "start_um": start_iso if auto_k else None, "status": "planned", "priority": "medium", "planned_for": plan_tag,
             "auto_plan": False, "auto_bestaetigt_at": jetzt.isoformat() if auto_k else None, "notes": notiz,
             "mt5_baseline": {"funded_plan": dict({k: r.get(k) for k in ("start", "gewinn", "ziel", "ziel_von", "dd", "tp_art", "eins_prozent",
-                                                                         "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus")},
+                                                                         "hedge_eur", "hedge_lots", "hedge_tp_eur", "hedge_sl_eur", "erster_zyklus",
+                                                                         "zyklus", "tp_deckel")},
                                                  art=FCP_ART, start_um=start_iso, richtung_geschuetzt=geschuetzt)}})
         erg["geplant"].append(dict(r, start=start.strftime("%H:%M"), start_um=start_iso, richtung=richtung, richtung_geschuetzt=geschuetzt,
                                    vorschlag=not auto_k, hedge_konto=hedge_acc[hid].get("name")))

@@ -72,8 +72,8 @@ for firma, g in (("The5%ers", 100000), ("The5%ers", 200000), ("FundedNext", 5000
 
 print("2) Beispielrechnungen")
 j = jg("FundedNext", 100000)
-r = app.fcp_konto_rechnen(j, 98000, 100000, True, False, 10.0, 0.85, random.Random(7))
-check(r["aktion"] == "planen" and 3500 <= r["tp"] <= 3850 and r["tp_art"] == "nachholen", f"FundedNext 100k nach −2k: TP {r.get('tp')} (3.500–3.850, nachholen)")
+r = app.fcp_konto_rechnen(j, 98000, 100000, True, False, 10.0, 0.85, random.Random(7), {"namen": ["fundednext"], "tp_deckel_plus": 99999})
+check(r["aktion"] == "planen" and 3500 <= r["tp"] <= 3850 and r["tp_art"] == "nachholen", f"FundedNext 100k nach −2k ohne Deckel (alter Aufruf ohne Regel): TP {r.get('tp')} (3.500–3.850)")
 print(f"     → Balance 98.000 · Ziel {r['ziel']:.0f} · TP {r['tp']:.0f} $ ({r['tp_pkt']} Pkt) · SL {r['sl']:.0f} $ · {r['lots']} Lot · "
       f"Hedge {r['hedge_lots']} Lot Fusion, {r['hedge_eur']:.0f} € auf {r['dd']:.0f} $ DD → am SL +{r['hedge_sl_eur']:.0f} €, am TP {r['hedge_tp_eur']:.0f} €")
 r1 = app.fcp_konto_rechnen(j, 100000, 100000, True, True, 10.0, 0.85, random.Random(3))
@@ -95,6 +95,28 @@ check(app.ap_regel_finden(FIRMEN, "Tradeify") is None and app.ap_regel_finden(FI
 rt = app.fcp_konto_rechnen(jg("Tradeify CFD", 100000), 98500, 100000, True, False, 10.0, 0.85, random.Random(5))
 check(rt["aktion"] == "planen" and 3000 <= rt["tp"] <= 4000 and 2.5 <= rt["lots"] <= 3.1 and 1750 <= rt["sl"] <= 2400,
       f"Tradeify CFD 100k nach −1.500: TP {rt.get('tp')} (3.000–4.000), {rt.get('lots')} Lot, SL {rt.get('sl')}")
+
+print("2b) TP-Deckel beim Nachholen (Finn 30.10.2026 ~07:20)")
+R5 = app.ap_regel_finden(FIRMEN, "The5%ers")
+j52 = jg("The5%ers", 200000)
+for z, soll in ((1, 750), (2, 1500), (3, 3000), (4, 6000), (7, 6000)):
+    t = app.fcp_konto_rechnen(j52, 185977, 200000, z, False, 1.0, 0.85, random.Random(1), R5)
+    check(t["tp"] == soll, f"The5ers 200k …4186 bei −14.023, Zyklus {z}: TP {t['tp']} (Deckel {soll})")
+t = app.fcp_konto_rechnen(j5, 93326, 100000, 2, False, 1.0, 0.85, random.Random(1), R5)
+check(t["tp"] == 1500 and t["tp_art"] == "gedeckelt", f"The5ers 100k …8441 bei −6.674, Zyklus 2 (1 Payout): TP {t['tp']} statt 8.089")
+t = app.fcp_konto_rechnen(j5, 100500, 100000, 3, False, 1.0, 0.85, random.Random(1), R5)
+check(800 <= t["tp"] <= 1000 and t["tp_art"] == "ziel", f"The5ers Zyklus 3 mit +500: Rest bis Ziel {t['tp']} (unter dem Deckel)")
+t = app.fcp_konto_rechnen(j5, 92000, 100000, True, False, 1.0, 0.85, random.Random(1), R5)
+check(t["tp"] == 750, "The5ers Zyklus 1 nach −8.000: TP bleibt 750")
+RF = app.ap_regel_finden(FIRMEN, "FundedNext")
+t = app.fcp_konto_rechnen(j, 95000, 100000, 2, False, 10.0, 0.85, random.Random(1), RF)
+check(t["tp"] == 1850 + 1000 and t["tp_art"] == "gedeckelt", f"FundedNext 100k −5.000: TP {t['tp']} = ziel[bis] 1.850 + 1.000")
+t = app.fcp_konto_rechnen(j, 98000, 100000, 2, False, 10.0, 0.85, random.Random(7), RF)
+check(t["tp"] == 2850 and t["tp_art"] == "gedeckelt", f"FundedNext 100k −2.000: TP {t['tp']} (Deckel 2.850, Rest morgen)")
+RP, RT = app.ap_regel_finden(FIRMEN, "FundingPips"), app.ap_regel_finden(FIRMEN, "Tradeify CFD")
+check(app.fcp_tp_deckel(RP, jg("FundingPips", 50000), 2) == (2000.0, "ziel_plus") and app.fcp_tp_deckel(RT, jg("Tradeify CFD", 100000), 1) == (3500.0, "ziel_plus"),
+      "Deckel FundingPips 50k 2.000, Tradeify CFD 3.500 (auch Zyklus 1)")
+check(app.fcp_tp_deckel(dict(R5, tp_zyklen=[500, 900]), j5, 5) == (900.0, "zyklus"), "tp_zyklen aus der Regel gewinnt (letzter Wert gilt weiter)")
 
 print("3) Richtungsschutz + Sicht")
 fest = app.fcp_fest_richtung([{"user_id": "u1", "master_firm": "FundedNext", "status": "planned", "richtung": "sell"},
@@ -178,7 +200,7 @@ for z in erg["ausgelassen"]:
 gp = {z["konto"]: z for z in erg["geplant"]}
 check(len(erg["geplant"]) == 5, f"5 Vorschläge ({len(erg['geplant'])})")
 check(gp["100k 1 → Funded"]["richtung"] == "sell" and gp["100k 2 → Funded"]["richtung"] == "sell", "H1 FundedNext: beide wie der laufende Short")
-check(gp["100k 1 → Funded"]["tp_art"] == "nachholen", "Konto mit −2k holt nach")
+check(gp["100k 1 → Funded"]["tp_art"] == "gedeckelt" and gp["100k 1 → Funded"]["tp"] == 2850, "Konto mit −2k holt nach, gedeckelt auf 2.850")
 check(gp["100k 7 → Funded"]["eins_prozent"] and gp["100k 7 → Funded"]["sl"] <= 780, "Emin-Konto mit 1-%-Regel: kleiner SL")
 check(gp["200k 3 → Funded"]["tp"] == 750, "The5ers 200k ohne Payout: TP 750")
 check([z["konto"] for z in erg["ziel"]] == ["100k 4 → Funded"], "The5ers +1.600 → Ziel (Waiting for Payout)")
