@@ -3829,22 +3829,10 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-karte{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px;min-width:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts .apg-karte{margin-bottom:18px}
-  /* Challenges (CHALLENGE-CHART-NEU 30.10.2026): Kennzahlen-Reihe heute/7 Tage, 14-Tage-Chart, „Am nächsten am Pass" */
-  #ap-ids-root.ap-guestly .apg-cv-hypo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
-  #ap-ids-root.ap-guestly .apg-cv-hypo > div{background:var(--g-kpi);border-radius:12px;padding:12px 14px;min-width:0}
-  #ap-ids-root.ap-guestly .apg-cv-hypo small{display:block;color:var(--g-sub);font-size:12.5px}
-  #ap-ids-root.ap-guestly .apg-cv-hypo b{display:block;font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums;color:var(--g-text)}
-  #ap-ids-root.ap-guestly .apg-cv-hypo b.gut{color:var(--g-gut)} #ap-ids-root.ap-guestly .apg-cv-hypo b.rot{color:var(--g-rot)}
-  #ap-ids-root.ap-guestly .apg-cv-hypo span{color:var(--g-sub);font-size:11.5px}
+  /* Challenges (CHALLENGE-CHART-NEU 30.10.2026): großer 14-Tage-Chart, „Am nächsten am Pass" */
+  #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:520px} @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv .apg-chart{height:360px} }
   #ap-ids-root.ap-guestly .apg-cv .apg-legende i.tuerkis{background:var(--g-a4)}
   #ap-ids-root.ap-guestly .apg-cv .apg-legende{flex-wrap:wrap;gap:6px 14px} #ap-ids-root.ap-guestly .apg-cv .apg-legende span{white-space:nowrap}
-  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv-hypo b{font-size:24px} }
-  #ap-ids-root.ap-guestly .apg-cvks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-top:14px}
-  #ap-ids-root.ap-guestly .apg-cvk{background:var(--g-kpi);border-radius:12px;padding:10px 12px;min-width:0}
-  #ap-ids-root.ap-guestly .apg-cvk small{display:block;color:var(--g-sub);font-size:12px}
-  #ap-ids-root.ap-guestly .apg-cvk b{display:block;font-size:24px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--g-text)}
-  #ap-ids-root.ap-guestly .apg-cvk b.gut{color:var(--g-gut)} #ap-ids-root.ap-guestly .apg-cvk b.rot{color:var(--g-rot)}
-  #ap-ids-root.ap-guestly .apg-cvk span{color:var(--g-sub);font-size:11.5px}
   #ap-ids-root.ap-guestly .apg-cv .apg-legende i.gut{background:var(--g-gut);opacity:.75} #ap-ids-root.ap-guestly .apg-cv .apg-legende i.rot{background:var(--g-rot);opacity:.45}
   #ap-ids-root.ap-guestly .apg-cv .apg-legende i.grau{background:var(--g-sub);opacity:.8}
   #ap-ids-root.ap-guestly .apg-cv-nah{margin-top:14px;padding-top:12px;border-top:1px solid var(--g-rand)}
@@ -3855,8 +3843,7 @@
   #ap-ids-root.ap-guestly .apg-cv-nz .bar{height:6px;border-radius:3px;background:var(--g-rand);overflow:hidden}
   #ap-ids-root.ap-guestly .apg-cv-nz .bar i{display:block;height:100%;background:var(--g-gut);opacity:.7}
   #ap-ids-root.ap-guestly .apg-cv-nz b{font-weight:600;color:var(--g-text);font-variant-numeric:tabular-nums}
-  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cvks{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--m-gap, 8px)} #ap-ids-root.ap-guestly .apg-cvk b{font-size:20px}
-    #ap-ids-root.ap-guestly .apg-cv-nz{grid-template-columns:minmax(0,1fr) auto} #ap-ids-root.ap-guestly .apg-cv-nz .bar{grid-column:1/-1;order:3} }
+  @media (max-width:820px){ #ap-ids-root.ap-guestly .apg-cv-nz{grid-template-columns:minmax(0,1fr) auto} #ap-ids-root.ap-guestly .apg-cv-nz .bar{grid-column:1/-1;order:3} }
   /* P&L von heute (Challenge, 30.10.2026): Kennzahlen rechts im Kartenkopf, Chart volle Breite */
   :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-pl .apg-karte-kopf{align-items:center}
   :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plks{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
@@ -80980,12 +80967,12 @@
     _apg.daten = fd ? { ls, std } : null
     // Funded CFD (30.10.2026, Master: „EIN großer Chart wie im Challenge Planer“): derselbe P&L-Chart; unter fdpTausch stehen TPL_TYPEN auf
     // funded_cfd und _tpl.lt auf den Funded-CFD-Plänen — apgPlHeute zeigt also nur diese Trades. Funded Futures behält die zwei Charts.
-    // CHALLENGE-CHART-NEU (Finn 30.10.2026 ~08:25: „P&L von heute sagt im Challenge Planer nichts"): Challenge zeigt Kennzahlen + 14-Tage-Verlauf
-    // (bestanden/geblowt/gewonnen/verloren) + „Am nächsten am Pass" (apgCv*); der P&L-Chart bleibt für Funded CFD (und Winning Days)
+    // CHALLENGE-CHART-NEU (Finn 30.10.2026 ~08:25: „P&L von heute sagt im Challenge Planer nichts"): Challenge zeigt den 14-Tage-Verlauf (seit 30.10.2026 14:0x nur noch Chart, keine Kacheln)
+    // + „Am nächsten am Pass" (apgCv*); der P&L-Chart bleibt für Funded CFD (und Winning Days)
     // nur Challenge → Futures (Finn 30.10.2026: „Challenge → CFD behält vorerst den P&L-Chart")
     const cvAn = !fd && apArtJetzt() === 'futures'
     _apg.pl = (fc || (!fd && !cvAn)) ? apgPlHeute({ tag, uid: u, firma: fs ? fs.firma : 'alle' }) : null
-    _apg.cv = cvAn ? apgCvDaten({ uid: u, trades: T.D.trades, laeuft: lL.length }) : null
+    _apg.cv = cvAn ? apgCvDaten({ uid: u, trades: T.D.trades }) : null
     const nL = ls.reduce((a, z) => a + z.L, 0), nS = ls.reduce((a, z) => a + z.S, 0)
     const charts = cvAn ? apgCvHtml(_apg.cv) : (!fd || fc) ? apgPlKarteHtml(_apg.pl) : `<div class="apg-charts">
       <div class="apg-karte"><div class="apg-karte-kopf"><div><div class="apg-titel">Long · Short je ID</div><div class="apg-sub"><span class="lila">${nL} Long</span> · <span class="tuerkis">${nS} Short</span> · ${tag === 'morgen' ? 'morgen' : 'heute'}, alle Trades der Sicht</div></div>
@@ -81165,7 +81152,7 @@
     const d = _apgCv.d && _apgCv.q === apgCvQuery() ? _apgCv.d : null
     const heute = (d && d.heute) || new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)
     const tagNr = t => Math.round(Date.parse(t + 'T00:00:00Z') / 864e5), ausNr = n => new Date(n * 864e5).toISOString().slice(0, 10), bis = tagNr(heute)
-    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, hypoN: 0, echtN: 0, ohne: 0, usd: 0, fh: 0 })
+    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, gehedgt: 0, ohne: 0, usd: 0, fh: 0 })
     const jeTag = new Map(tage.map(t => [t.tag, t]))
     for(const z of (d && d.zeilen) || []){
       const t = z && jeTag.get(z.tag); if(!t) continue
@@ -81177,17 +81164,15 @@
       // HYPO € (Finn ~08:23: „wie viel Geld wir heute hypothetisch gewonnen haben"): eur = ap_hb_zeile/hypo_bilanz_zeile — P&L $ × Kontowert-Satz,
       // geblowt −Kontowert; ohne Satz null (zählt nicht, nur als Hinweis) — dieselbe Zahl wie die Kachel „Heute" / Verlauf in €
       const eur = z.eur == null || !isFinite(Number(z.eur)) ? null : Number(z.eur)
-      // Chart + Kacheln (Finn ~09:18, Kachel „mitziehen" ~09:35): EINE Größe t.fh = Hypo €, bei Trades mit echtem Hedge der echte Fusion-P&L (Backend-Feld fusion)
+      // NUR CHART (Finn 30.10.2026 14:0x: „den P&L nicht dazu … nur bei Futures, wo nicht gegengehedgt wird"): Trades mit echtem Hedge (Backend-Feld fusion, gesetzt
+      // genau bei Hedge-Ticket) zählen in der Fusion-Linie gar nicht, weder echter Fusion-P&L noch Hypo €. Die Master-Linie behält alle Trades.
       if(usd != null) t.usd += usd
-      const fEcht = z.fusion == null || !isFinite(Number(z.fusion)) ? null : Number(z.fusion)
-      if(fEcht != null){ t.fh += fEcht; t.echtN++ } else if(eur != null){ t.fh += eur; t.hypoN++ } else t.ohne++
+      if(z.fusion != null) t.gehedgt++; else if(eur != null) t.fh += eur; else t.ohne++
       if(z.art === 'bestanden') t.best.push(name)
       if(z.art === 'geblowt') t.blow.push(name)
       if(z.art === 'bestanden' || (z.art !== 'geblowt' && usd > 0)) t.plus++
       else if(z.art === 'geblowt' || usd < 0) t.minus++
     }
-    const summe = arr => arr.reduce((a, t) => ({ n: a.n + t.n, plus: a.plus + t.plus, minus: a.minus + t.minus, best: a.best + t.best.length, blow: a.blow + t.blow.length,
-      fh: a.fh + t.fh, hypoN: a.hypoN + t.hypoN, echtN: a.echtN + t.echtN, ohne: a.ohne + t.ohne }), { n: 0, plus: 0, minus: 0, best: 0, blow: 0, fh: 0, hypoN: 0, echtN: 0, ohne: 0 })
     // „Am nächsten am Pass": je Konto die Trade-Zeile mit Balance + Rest (Planer-Lauf / Delta), kleinster Rest zuerst
     const konten = new Map()
     for(const t of o.trades || []){
@@ -81198,20 +81183,9 @@
       if(!alt || Number(t.rest) < Number(alt.rest)) konten.set(k, t)
     }
     const nah = [...konten.values()].sort((a, b) => Number(a.rest) - Number(b.rest)).slice(0, 5)
-    return { geladen: !!d, fehler: !d && _apgCv.fehler ? _apgCv.fehler : '', tage, heute: summe(tage.slice(-1)), sieben: summe(tage.slice(-7)), laeuft: o.laeuft || 0, nah }
+    return { geladen: !!d, fehler: !d && _apgCv.fehler ? _apgCv.fehler : '', tage, nah }
   }
   function apgCvHtml(c){
-    const kz = (name, h, s, cls, tip) => `<div class="apg-cvk" title="${escapeHtml(tip)}"><small>${name}</small><b class="${h ? cls || '' : ''}">${h}</b><span>${s} in 7 Tagen</span></div>`
-    const hy = x => [`${x.hypoN} mit Kontowert-Satz`, x.echtN ? `${x.echtN} mit echtem Fusion-P&amp;L` : '', x.ohne ? `${x.ohne} ohne Satz (zählt nicht)` : ''].filter(Boolean).join(' · ')
-    const hypo = `<div class="apg-cv-hypo" title="${escapeHtml('Hypothetisch gewonnen, dieselbe Zahl wie die Linie „Fusion hypothetisch“: je beendetem Challenge-Trade Master-P&L $ × Kontowert-Satz (€ je $, Kontowert ÷ Polster), geblowt = −Kontowert vor dem Trade (Hypo-Bilanz) — bei Trades mit echtem Hedge stattdessen der echte Fusion-P&L.')}">
-        <div><small>Hypothetisch heute</small><b class="${c.heute.fh > 0 ? 'gut' : c.heute.fh < 0 ? 'rot' : ''}">${apgEur(c.heute.fh)}</b><span>${hy(c.heute)}</span></div>
-        <div><small>Letzte 7 Tage</small><b class="${c.sieben.fh > 0 ? 'gut' : c.sieben.fh < 0 ? 'rot' : ''}">${apgEur(c.sieben.fh)}</b><span>${hy(c.sieben)}</span></div></div>`
-    const kpis = hypo + `<div class="apg-cvks">
-        ${kz('Trades beendet', c.heute.n, c.sieben.n, '', `heute beendete Challenge-/Phase-Trades der Sicht${c.laeuft ? ` · dazu ${c.laeuft} laufend` : ''}`)}
-        ${kz('Gewonnen', c.heute.plus, c.sieben.plus, 'gut', 'Master-P&L > 0 (bestandene zählen mit)')}
-        ${kz('Verloren', c.heute.minus, c.sieben.minus, 'rot', 'Master-P&L < 0 (geblowte zählen mit)')}
-        ${kz('Bestanden', c.heute.best, c.sieben.best, 'gut', 'Konto hat mit diesem Trade sein Phasenziel erreicht (End-Balance ≥ Ziel, als passed archiviert oder Ziel-Wache)')}
-        ${kz('Geblowt', c.heute.blow, c.sieben.blow, 'rot', 'Konto mit diesem Trade aufgebraucht oder als blown archiviert')}</div>`
     const leer = !c.geladen ? (c.fehler ? '⚠ Verlauf nicht ladbar: ' + escapeHtml(c.fehler.slice(0, 120)) : 'lädt …') : c.tage.some(t => t.n) ? '' : 'in den letzten 14 Tagen nichts beendet'
     const rest = v => Math.round(Number(v)).toLocaleString('de-DE') + ' $'
     const nah = c.nah.length ? `<div class="apg-cv-nah"><div class="apg-cv-nah-t">Am nächsten am Pass</div>${c.nah.map(t => {
@@ -81219,14 +81193,13 @@
         const ziel = Number(t.balance) + Number(t.rest), pct = g > 0 && ziel > g ? Math.max(0, Math.min(100, (Number(t.balance) - g) / (ziel - g) * 100)) : null
         return `<div class="apg-cv-nz" title="${escapeHtml(`${t.user || ''} · ${t.konto || ''} — Balance ${rest(t.balance)} → Ziel ${rest(ziel)}`)}"><span class="nm"><i style="background:${idFarbe(t.user_id)}"></i>${escapeHtml(t.user || '')} · ${escapeHtml(typeof tplFirmaKurz === 'function' ? tplFirmaKurz(t.firma) : String(t.firma || ''))}${t.ende4 ? ' …' + escapeHtml(String(t.ende4)) : ''}</span>`
           + `<span class="bar">${pct != null ? `<i style="width:${pct.toFixed(1)}%"></i>` : ''}</span><b>noch ${rest(t.rest)}</b></div>` }).join('')}</div>` : ''
-    return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Futures · heute und letzte 14 Tage (Dubai) · beendete Trades der Sicht</div></div>
-        <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile) über 14 Tage. Bestanden = End-Balance ≥ Phasenziel, als passed archiviert oder Ziel-Wache (accounts.ziel_erreicht_at) nach dem Start; geblowt = als blown archiviert oder Verlust frisst das Polster. Folgt ID und CFD/Futures.">i</span></div>
-        ${kpis}
+    return `<div class="apg-karte apg-cv"><div class="apg-karte-kopf"><div><div class="apg-titel">Challenges</div><div class="apg-sub">Futures · letzte 14 Tage kumuliert (Dubai) · beendete Trades der Sicht</div></div>
+        <span class="apg-i" title="Quelle: dieselbe Rechnung wie „Heute beendet“ (app.py ap_hb_zeile) über 14 Tage. Master $ = alle beendeten Trades. Fusion hypothetisch € = Master-P&amp;L $ × Kontowert-Satz, geblowt = −Kontowert, nur Trades ohne Hedge; Trades mit Hedge zählen dort nicht. Folgt ID und CFD/Futures.">i</span></div>
         <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion hypothetisch €</span></div>
         <div class="apg-chart">${leer ? `<div class="apg-leer">${leer}</div>` : '<canvas id="apg-c-cv"></canvas>'}</div>${nah}</div>`
   }
   // ZWEI LINIEN (Finn 30.10.2026 ~09:18, ersetzt die Balken): kumuliert über 14 Tage Master $ (rechte Achse) und „Fusion hypothetisch" € (linke Achse: Hypo €,
-  // bei echtem Hedge der echte Fusion-P&L). Baustein wie „P&L von heute": zwei Achsen, Nullen auf gleicher Höhe, keine Balken. Tooltip: Tageswert + Summe.
+  // nur Trades ohne Hedge, NUR CHART 30.10.2026 14:0x). Baustein wie „P&L von heute": zwei Achsen, Nullen auf gleicher Höhe, keine Balken. Tooltip: Tageswert + Summe.
   function apgCvMalen(root, c, ablage){
     const cv = root.querySelector('#apg-c-cv'); if(!cv || !c || typeof window.Chart !== 'function') return
     const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
@@ -81245,7 +81218,7 @@
             label: x => { const t = c.tage[x.dataIndex], m = x.dataset.yAxisID === 'm'; return ` ${x.dataset.label}: Tag ${m ? apgUsd(t.usd) : apgEur(t.fh)} · Summe ${m ? apgUsd(x.parsed.y) : apgEur(x.parsed.y)}` },
             afterBody: x => { const t = x.length ? c.tage[x[0].dataIndex] : null; if(!t) return []
               return ['', ` ${t.n} beendet · ${t.plus} gewonnen · ${t.minus} verloren`, ...(t.best.length ? ['', `Bestanden (${t.best.length}):`, ...t.best.slice(0, 8).map(n => '  ✓ ' + n)] : []),
-                ...(t.blow.length ? ['', `Geblowt (${t.blow.length}):`, ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []), ...(t.offen || t.ohne ? ['', `${t.offen + t.ohne} ohne Hypo-Wert`] : [])] } } } },
+                ...(t.blow.length ? ['', `Geblowt (${t.blow.length}):`, ...t.blow.slice(0, 8).map(n => '  ✗ ' + n)] : []), ...(t.gehedgt ? ['', `${t.gehedgt} mit Hedge (nicht in der Fusion-Linie)`] : []), ...(t.offen || t.ohne ? ['', `${t.offen + t.ohne} ohne Hypo-Wert`] : [])] } } } },
         scales: { x: Object.assign({}, achse, { grid: { display: false }, ticks: { color: sub, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } }),
           m: Object.assign({}, achse, grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, maxTicksLimit: 6, callback: v => apgUsd(v) } }),
           f: Object.assign({}, achse, grenzen(fLo, fHi), { position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, maxTicksLimit: 6, callback: v => apgEur(v) } }) } } }))
