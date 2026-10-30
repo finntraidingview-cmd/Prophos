@@ -13755,6 +13755,8 @@ def admin_live_trades():
             q = je_id.get(str(z.get("id"))) or {}
             z["orbit_v3"], z["konto_typ"] = bool(q.get("orbit_v3")), q.get("konto_typ")
             z["apex_hedge"] = plan_ist_apex_hedge(q)     # Apex mit Hedge (ah_tick): WD-Weg, aber eigenes Label, zählt nicht als WD
+            z["kette_tag"] = (((q.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende")
+                              if isinstance(q.get("mt5_baseline"), dict) else None)   # Topstep: Tagesergebnis für die Radar-Karte (30.10.2026)
             if mit_echo and isinstance(z.get("konto"), dict):
                 z["konto"]["archiviert"] = str(q.get("master_account_id") or "") in _lt_archiv
         if mit_echo:
@@ -14890,6 +14892,10 @@ def admin_wd_plaene():
                     if rows and str(rows[0].get("route") or "") == "polar" and konto_status != "none":
                         return jsonify({"error": "Polar: Konto-Status nur im Login der ID (zwei Konten) — hier nur „Nichts ändern\"", "plan_id": pid}), 400
                     blow_auto = (not blown) and bool(rows) and str(rows[0].get("route") or "") != "polar" and _ap_blow_beim_abhaken(rows[0], mpl)
+                    # Tagesende der Topstep-Kette (30.10.2026, Gegenprüfung): ob geblowt, hat ap_kette_abhaken aus MLL und Tag entschieden. Die Boden-Rechnung hier
+                    # ginge vom Start von Trade 2 aus (T1 +2.650, T2 am SL, Ende 147.225: Boden 148.150, MLL 145.500) und meldete fälschlich geblowt
+                    if blow_auto and (((rows[0].get("mt5_baseline") or {}).get("kette") or {}).get("tagesende")):
+                        blow_auto = False
                     for _versuch in range(3):
                         if _versuch:
                             rows = sb_select("trade_plans", plan_sel)
@@ -23488,7 +23494,8 @@ def ap_aus_ohne_plan_laden(erg):
         ab = (datetime.fromisoformat(str(erg["tag"])[:10]) - timedelta(days=3)).strftime("%Y-%m-%d")
         plaene = []
         for j in range(0, len(kids), 150):
-            plaene += _sb_all("trade_plans", {"select": "master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at",
+            plaene += _sb_all("trade_plans", {"select": "master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at,"
+                                                        "kette_te:mt5_baseline->kette->tagesende",
                                               "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")",
                                               "status": "in.(planned,open,review,completed)", "created_at": f"gte.{ab}"})
         return ap_aus_ohne_plan(erg, plaene, _ap_tz(AP_TZ_TAG))
@@ -25241,11 +25248,16 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
         return ap_plan_verfallen(p, _grenze, jetzt)
     roh_plaene = _ap_plaene_mit_hand({"select": "id,user_id,master_account_id,master_firm,status,richtung,master_tp,master_pl,blown,"
                                                 "ended_at,completed_at,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,"
-                                                "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final,mt5_baseline->start_fehler", "order": "id.asc",
+                                                "start_um,planned_for,started_at,orbit_gesendet_at,mt5_baseline->final,mt5_baseline->start_fehler,"
+                                                "kette_te:mt5_baseline->kette->tagesende", "order": "id.asc",
                                       "user_id": in_uids, "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
     verfallen = [{"plan_id": p.get("id"), "user_id": p.get("user_id"), "konto_id": p.get("master_account_id"), "firma": p.get("master_firm"),
                   "start_um": p.get("start_um")} for p in roh_plaene if _liegengeblieben(p)]
     plaene = [p for p in roh_plaene if not _vorschlag(p) and not _liegengeblieben(p) and not ap_ist_waise(p)]   # Waise: Konto gelöscht (09.10.2026)
+    # Letzter Topstep-Trade des Tages (kette_te, Finn 30.10.2026): Ergebnis genau gelesen, wartet nur auf Finns Haken — für den Planer wie abgehakt:
+    # heute „schon gehandelt", am Folgetag frei, geblowt über blown ausgeschlossen. Nur im Speicher, in der DB bleibt er in Überprüfen
+    plaene = [dict(p, status="completed", completed_at=p.get("completed_at") or p.get("ended_at"))
+              if p.get("status") == "review" and isinstance(p.get("kette_te"), dict) else p for p in plaene]
     # Nachtlauf: Leichen mit Fusion-Spread aus Leer-Versuchen nach „Überprüfen" (_ap_leichen_abschliessen) — Probelauf/Hand/Nachplanen nicht
     leichen_zu = _ap_leichen_abschliessen([v["plan_id"] for v in verfallen], jetzt) if (not trocken and quelle == "nacht") else []
     for v in verfallen:
@@ -31607,6 +31619,8 @@ def ap_kette_tick(jetzt=None, rnd=None):
             gruende[pid] = grund
             _ap_kette_grund(t1, grund)
             continue
+        if ((t1.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"):
+            continue                                  # Tag ist abgeschlossen und wartet auf Finns Haken — kein Trade 2 mehr (30.10.2026)
         if stand is None:
             stand = _ap_stand_laden(reg, jetzt)
         ende_min = (datetime.fromisoformat(str(t1["ended_at"]).replace("Z", "+00:00")) - stand["mitternacht"]).total_seconds() / 60.0
@@ -31679,19 +31693,67 @@ def ap_kette_tick(jetzt=None, rnd=None):
     return {"neu": neu, "gruende": gruende, "abgehakt": abgehakt}
 
 
+def ap_kette_letzter_trade(k, bal, regel, kette):
+    """REIN RECHNEND (testbar): War das der letzte Trade des Tages dieses Kontos? (Finn 30.10.2026 13:41: „Nach dem ersten Trade nicht,
+    weil ja beide Trades am Tag durchlaufen müssen, aber nach dem zweiten dann, dass ich das Endresultat vom Tag sehe und das auch noch
+    abhaken muss.") Kette 2/2 und Reparatur-Tag immer; ein 1/2 nur, wenn ap_kette_trade2 keinen Trade 2 mehr gibt (geblowt, Tagesziel,
+    Tageslimit …) — dieselbe Rechnung, die sonst Trade 2 anlegt. Ohne Kettenregel bleibt 1/2 automatisch wie bisher."""
+    k = k or {}
+    if int(k.get("nr") or 0) == 2 or k.get("reparatur") or k.get("ein_trade"):
+        return True
+    if not regel or not kette:
+        return False
+    _w, grund = ap_kette_trade2(k, bal[0], bal[1], regel, kette, 0.5)
+    return bool(grund)
+
+
+def ap_kette_tagesende(k, bal, mpl, e_tag, blown, jetzt_iso):
+    """REIN RECHNEND (testbar): mt5_baseline.kette.tagesende — das Tagesergebnis, das die Radar-Karte zeigt (/admin/live-trades kette_tag).
+    Trade 1 aus kette.e1 (genaue Lesung beim Anlegen von Trade 2), sonst Tag − Trade 2."""
+    zwei = int((k or {}).get("nr") or 0) == 2
+    e1 = _wd_num((k or {}).get("e1"))
+    t1 = (e1 if e1 is not None else round(float(e_tag) - float(mpl), 2)) if zwei else float(mpl)
+    return {"tag_pl": round(float(e_tag), 2), "t1_pl": t1, "t2_pl": float(mpl) if zwei else None, "trades": 2 if zwei else 1,
+            "balance": float(bal[1]), "blown": bool(blown), "at": jetzt_iso}
+
+
+def _ap_kette_t1_stand(p, kette, tz, jetzt, sperren):
+    """Trade 1, nach dem rechnerisch ein Trade 2 kommt (S2 30.10.2026): → "weiter" (Trade 2 steht, abhaken wie immer), "warten" (noch nicht angelegt, bleibt
+    in Überprüfen, der Tick kann ihn auch von dort anlegen) oder "letzter" (Firma gesperrt oder Fenster bis t2_bis vorbei: es kommt keiner mehr). Vorher
+    war Trade 1 schon erledigt, wenn der Tick scheiterte, und der Tag stand ohne Ergebnis da. Lesefehler → "weiter", die Kette darf nicht stehen bleiben."""
+    try:
+        if sb_select("trade_plans", {"select": "id", "mt5_baseline->kette->>vor": f"eq.{p['id']}", "limit": "1"}):
+            return "weiter"
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Topstep-Kette Trade 2 lesen: {type(e).__name__}: {e}", flush=True)
+        return "weiter"
+    if ap_firma_gesperrt({"user_id": p.get("user_id"), "firm": p.get("master_firm")}, sperren):
+        return "letzter"
+    d = jetzt.astimezone(tz)
+    ende = _ap_ts(p.get("ended_at"))
+    if ende and ende.astimezone(tz).date() != d.date():
+        return "letzter"
+    return "letzter" if d.hour * 60 + d.minute >= float(_ap_hhmm(kette["t2_bis"])) else "warten"
+
+
 def ap_kette_abhaken(jetzt=None):
     """AUTOMATISCH ABHAKEN (Finn 08.10.2026: „die Trades bei Topstep werden automatisch abgehakt — läuft durch, wird in 1–35 min per
     Zufall überprüft, und sobald überprüft, direkt für den zweiten Trade freigeschaltet, sodass ich sie im Radar nicht mehr abhaken
     muss"): Ketten-Trades (tsv2, mt5_baseline.kette nr 1/2) in Überprüfen, deren Balance Puls GENAU nachgelesen hat (ap_kette_t1_fertig),
     gehen auf Erledigt — wie „Erledigt" im Radar (_wd_erledigt_upd): master_pl = Balance danach − davor ($), pl_quelle 'tv',
     completed_at, ended_at falls leer; Blow (Tagesverlust ab Tagesstart ≥ DD − 50 $) setzt blown am Plan (das Konto archiviert Finn wie bisher im
-    Radar). Optimistische Sperre über updated_at. → [plan_id …]"""
+    Radar). Optimistische Sperre über updated_at. → [plan_id …]
+    Seit 30.10.2026 (Finn 13:41) nur noch Trades, nach denen am Tag noch einer kommt: der letzte Trade (ap_kette_letzter_trade) bekommt
+    P&L, blown und kette.tagesende, bleibt aber in Überprüfen, bis Finn das Tagesergebnis im Radar abhakt."""
     jetzt = jetzt or datetime.now(timezone.utc)
     rows = sb_select("trade_plans", {"select": "id,route,status,user_id,master_account_id,master_firm,master_pl,mt5_baseline,updated_at,"
                                                "ended_at,completed_at,konto_typ", "route": "eq.tsv2", "status": "eq.review",
                                      "mt5_baseline->kette->>nr": "in.(1,2)"}) or []
     fertig = []
+    firmen = sperren = None
     for p in rows:
+        if ((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"):
+            continue                                  # wartet schon auf Finns Haken — nicht jede Minute neu schreiben
         bal, grund = ap_kette_t1_fertig(p)
         if grund:
             continue
@@ -31751,6 +31813,42 @@ def ap_kette_abhaken(jetzt=None):
         filt = {"id": f"eq.{p['id']}", "status": "eq.review"}
         if p.get("updated_at"):
             filt["updated_at"] = f"eq.{p['updated_at']}"
+        if firmen is None:
+            try:
+                firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
+            except Exception as e:                    # Lesefehler → 1/2 läuft weiter automatisch, die Kette darf nicht stehen bleiben
+                firmen = []
+                print(f"[auto-plan] ⚠️ Topstep-Kette Regeln: {type(e).__name__}: {e}", flush=True)
+        regel = ap_regel_finden(firmen, p.get("master_firm"))
+        kette_r = ap_kette_regel(regel) if regel else None
+        letzter = bool(upd.get("blown")) or ap_kette_letzter_trade(k, bal, regel, kette_r)
+        if not letzter and kette_r:
+            if sperren is None:
+                sperren = _ap_sperren()
+            t1_stand = _ap_kette_t1_stand(p, kette_r, _ap_tz(AP_TZ_TAG), jetzt, sperren)
+            if t1_stand == "warten":
+                if p.get("master_pl") is None:        # P&L schon eintragen: gelesener Trade sperrt den Richtungs-Riegel nicht (prophos_plan_gelesen)
+                    try:
+                        sb_update("trade_plans", filt, {x: upd[x] for x in ("master_pl", "pl_quelle", "konto_typ", "ended_at") if x in upd})
+                    except Exception as e:
+                        print(f"[auto-plan] ⚠️ Topstep-Kette P&L {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+                continue
+            letzter = t1_stand == "letzter"
+        if letzter:
+            # Letzter Trade des Tages (Finn 30.10.2026): bleibt in Überprüfen. master_pl + final puls lassen den Richtungs-Riegel frei
+            # (prophos_plan_gelesen), blown wirkt sofort im Planer; tagesende zuletzt, damit ein gescheiterter Schritt im nächsten Takt nachläuft
+            halb = {x: upd[x] for x in ("master_pl", "pl_quelle", "blown", "konto_typ", "ended_at") if x in upd}   # ended_at: sonst bleibt der Richtungs-Riegel zu (prophos_plan_gelesen)
+            try:
+                if sb_update("trade_plans", filt, halb):
+                    r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                                    json={"p_plan": str(p["id"]), "p_key": "kette", "p_status": None,
+                                          "p_patch": {"tagesende": ap_kette_tagesende(k, bal, mpl, e_tag, upd.get("blown"), jetzt_iso)}})
+                    _sb_pruefen(r)
+                    print(f"[auto-plan] Topstep-Kette: {str(p['id'])[:8]} letzter Trade des Tages — P&L {mpl:+.2f} $, Tag {e_tag:+.2f} $"
+                          f"{' (geblowt)' if upd.get('blown') else ''}, wartet auf Abhaken", flush=True)
+            except Exception as e:
+                print(f"[auto-plan] ⚠️ Topstep-Kette Tagesende {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+            continue
         try:
             if sb_update("trade_plans", filt, upd):
                 fertig.append(str(p["id"]))
@@ -33026,9 +33124,11 @@ def _ap_plan_am_tag(p, tag, tz):
     """REIN RECHNEND: belegt dieser Plan das Konto für den Tag? Laufend/Überprüfen immer; geplant, wenn planned_for oder start_um
     (in tz) auf den Tag fällt — ein Plan ohne beides blockt vorsichtshalber auch."""
     st = str(p.get("status") or "")
-    if st in ("open", "review"):
+    # letzter Topstep-Trade des Tages (kette_te, 30.10.2026): nur sein Tag ist belegt, auch wenn Finn ihn noch nicht abgehakt hat
+    te = st == "review" and isinstance(p.get("kette_te"), dict)
+    if st in ("open", "review") and not te:
         return True
-    if st == "completed":
+    if st == "completed" or te:
         # 08.10.2026 EIN TRADE PRO KONTO UND TAG (Finn: „Es wird immer nur maximal ein Trade pro Tag gemacht?“): ein heute schon
         # beendeter (abgehakter) Trade belegt das Konto für den Rest des Tages. Vorfall: Inas drei Apex-Konten endeten 03:57 Dubai
         # im Tagesstopp, das Nachplanen legte um 07:20 Dubai für dieselben Konten neue Trades für HEUTE an (08:47/17:04/18:06).
@@ -33328,7 +33428,8 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
         return None, []
     in_uids = "in.(" + ",".join(uids) + ")"
     konten = _ap_konten_laden({"user_id": in_uids, "order": "id.asc", "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})
-    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at",
+    plaene = _sb_all("trade_plans", {"select": "id,master_account_id,status,start_um,planned_for,started_at,ended_at,completed_at,"
+                                               "kette_te:mt5_baseline->kette->tagesende",   # letzter Topstep-Trade sperrt den Folgetag nicht (30.10.2026)
                                      "user_id": in_uids,
                                      "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
                                      "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})

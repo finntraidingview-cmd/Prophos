@@ -331,10 +331,20 @@ def main():
     a["_ap_kette_grund"] = lambda t_, g: gruende_ab.append((t_["id"], g))
     a["sb_select"] = lambda t, prm: [dict(x) for x in rev] if prm.get("status") == "eq.review" else []
     a["sb_update"] = lambda t, f, u: upds.append((f, u)) or [u]
+    # seit 30.10.2026 (Finn 13:41): der letzte Trade des Tages bleibt in Überprüfen (kein status im Update) und bekommt kette.tagesende per RPC
+    rpcs = []
+
+    class _Antwort:
+        status_code = 200
+    a["_sb_anfrage"] = lambda m, url, **kw: rpcs.append(kw["json"]) or _Antwort()
+    a["_sb_pruefen"] = lambda r: None
+    a["_sb_headers"] = lambda: {}
+    a["SUPABASE_URL"] = "http://test"
     weg = a["ap_kette_abhaken"](jetzt)
     u1 = next((u for f, u in upds if f["id"] == "eq.r-t1"), {})
     u2 = next((u for f, u in upds if f["id"] == "eq.r-t2"), {})
-    check(sorted(weg) == ["r-dll", "r-dllmll", "r-mll", "r-rep1", "r-rep2", "r-rep3", "r-rep4", "r-t1", "r-t2", "r-t2b", "r-tol1", "r-tol2", "r-tol3"]
+    check(sorted(weg) == ["r-t1"] and sorted(r["p_plan"] for r in rpcs) == ["r-dll", "r-dllmll", "r-mll", "r-rep1", "r-rep2", "r-rep3", "r-rep4", "r-t2", "r-t2b", "r-tol1", "r-tol2", "r-tol3"]
+          and all("status" not in u for f, u in upds if f["id"] != "eq.r-t1")
           and u1.get("status") == "completed" and u1.get("master_pl") == -2500.0
           and u1.get("pl_quelle") == "tv" and u1.get("konto_typ") == "challenge" and not u1.get("blown")
           and all(f.get("status") == "eq.review" and f.get("updated_at") for f, _u in upds),
@@ -347,27 +357,27 @@ def main():
     check("eq.r-warte" not in [f["id"] for f, _u in upds], "ohne genaue Puls-Lesung bleibt der Trade in Überprüfen")
     ud = next((u for f, u in upds if f["id"] == "eq.r-dll"), {})
     um = next((u for f, u in upds if f["id"] == "eq.r-mll"), {})
-    check(ud.get("status") == "completed" and ud.get("master_pl") == -1750.0 and not ud.get("blown"),
+    check(ud.get("master_pl") == -1750.0 and not ud.get("blown"),
           f"DLL: Tag −3.000 (147.000, MLL 145.500) → erledigt, NICHT blown — Tageslimit ({ud})")
-    check(um.get("status") == "completed" and um.get("blown") is True, f"MLL: Tag −3.600 endet bei 147.400 ≤ MLL 147.500 → blown ({um})")
+    check(um.get("blown") is True, f"MLL: Tag −3.600 endet bei 147.400 ≤ MLL 147.500 → blown ({um})")
     udm = next((u for f, u in upds if f["id"] == "eq.r-dllmll"), {})
-    check(udm.get("status") == "completed" and not udm.get("blown"), f"reiner DLL-Tag (−3.000) genau am MLL → Tageslimit, nicht blown ({udm})")
+    check(udm.get("master_pl") is not None and not udm.get("blown"), f"reiner DLL-Tag (−3.000) genau am MLL → Tageslimit, nicht blown ({udm})")
     ur = {i: next((u for f, u in upds if f["id"] == f"eq.{i}"), {}) for i in ("r-rep1", "r-rep2", "r-rep3", "r-rep4")}
-    check(ur["r-rep1"].get("status") == "completed" and ur["r-rep1"].get("master_pl") == -1500.0 and ur["r-rep1"].get("blown") is True,
+    check(ur["r-rep1"].get("master_pl") == -1500.0 and ur["r-rep1"].get("blown") is True,
           f"Reparatur-Tag: T1 endet am MLL (Tag −1.500, unter DLL + 50) → blown ({ur['r-rep1']})")
     check(ur["r-rep2"].get("master_pl") == -3800.0 and ur["r-rep2"].get("blown") is True,
           f"Reparatur-Tag: T2 nach T1 +2.300 am MLL (eigener P&L −3.800) → plausibel, blown ({ur['r-rep2']})")
-    check(ur["r-rep3"].get("status") == "completed" and ur["r-rep3"].get("master_pl") == 4030.0 and not ur["r-rep3"].get("blown"),
+    check(ur["r-rep3"].get("master_pl") == 4030.0 and not ur["r-rep3"].get("blown"),
           f"Reparatur-Tag am Tagesziel (150.030) → erledigt, nicht blown ({ur['r-rep3']})")
     check(ur["r-rep4"].get("master_pl") == -2350.0 and ur["r-rep4"].get("blown") is True
           and not any(i == "r-rep4" and "unplausibel" in g for i, g in gruende_ab),
           f"Abstand 50 (Verlustgrenze 250, ohne Flag abgeleitet): T2 −2.350 am MLL → nicht unplausibel, blown ({ur['r-rep4']})")
     ut = {i: next((u for f, u in upds if f["id"] == f"eq.{i}"), {}) for i in ("r-tol1", "r-tol2", "r-tol3")}
-    check(ut["r-tol1"].get("status") == "completed" and ut["r-tol1"].get("blown") is True,
+    check(ut["r-tol1"].get("blown") is True,
           f"angefressen: Ende 30 $ über dem MLL (Toleranz 50) → blown ({ut['r-tol1']})")
-    check(ut["r-tol2"].get("status") == "completed" and not ut["r-tol2"].get("blown"),
+    check(ut["r-tol2"].get("master_pl") is not None and not ut["r-tol2"].get("blown"),
           f"angefressen: Ende 60 $ über dem MLL → nicht blown ({ut['r-tol2']})")
-    check(ut["r-tol3"].get("status") == "completed" and not ut["r-tol3"].get("blown"),
+    check(ut["r-tol3"].get("master_pl") is not None and not ut["r-tol3"].get("blown"),
           f"gesund: Ende 30 $ über dem MLL, Tag −3.470 → ohne Toleranz nicht blown ({ut['r-tol3']})")
     check("eq.r-relativ" not in [f["id"] for f, _u in upds] and any(i == "r-relativ" and "unplausibel" in g for i, g in gruende_ab),
           "Start absolut 150.000, Ende relativ 2.000 → nicht abgehakt, Grund „unplausibel — von Hand abhaken“ (Prüfer Slave 2)")

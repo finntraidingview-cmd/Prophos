@@ -5112,6 +5112,7 @@
   #dashboard-view .wdl-z-akt:has(> .wdl-erg) .el-knopf{padding:3px 8px}
   #dashboard-view .wdl-z-akt:has(> .wdl-erg) .wdl-man-text{flex-basis:0}   /* Manuelle Arbeit: Notiz bricht selbst um, statt die Knöpfe in eine 3. Zeile zu schieben */
   #dashboard-view .wdl-z-akt > .wdl-erg{flex-basis:100%;text-align:right;font-size:12px;line-height:1.3}
+  #dashboard-view .wdl-kette-tag{display:block;font-variant-numeric:tabular-nums}   /* zweizeilig: Summe, darunter Balance — passt in die schmale Ergebnis-Spalte */
   #dashboard-view .wdl-z-akt > .wdl-erg > b{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}   /* „…" am Chip selbst; ein angehängtes „→ Review" bricht lieber um, als zu verschwinden */
   /* Radar-Abschnitt „Bestanden" (09.10.2026): Phase-Chip in der ri-Spalte, Balance → Ziel in mi, Tage in konto, Status in pl, Knopf in zeit */
   #dashboard-view .wdl-z-bst .wdl-z-ri .type-badge{font-size:11px;padding:1px 7px}
@@ -36839,7 +36840,7 @@
     const vonBoden = liqNq == null && !basisVerschieden && n(t.boden_usd) != null
     const liq = vonBoden ? n(t.boden_usd) : liqNq
     const tagLiq = basisVerschieden ? null : soft ? n(t.liq_regel_nur_balance) : null
-    const geblowt = liq != null && bal <= liq + (vonBoden ? 0 : 25)
+    const geblowt = (t.kette_tag && typeof t.kette_tag === 'object') ? t.kette_tag.blown === true : liq != null && bal <= liq + (vonBoden ? 0 : 25)
     // Tagesstopp erreicht (APEX-EVAL-SOFTBREACH 07.10.2026): bis 10 % des Tageslimits darüber zählt noch — der $-SL der Order wird
     // von TradingView auf Ticks gerundet (Apex-150k-Eval: SL 2.000 $ → −1.884,30 $, Balance 148.097 bei Tagesstopp 147.981)
     const bs = n(t.balance_start), tagTol = (tagLiq != null && bs != null && bs > tagLiq) ? Math.max(25, (bs - tagLiq) * 0.1) : 25
@@ -36862,6 +36863,20 @@
   const WDL_TAGESLIMIT_ERG = '<span style="color:var(--warn-ink, #b45309);opacity:.8" title="Tageslimit erreicht — Soft-Breach: der Tag stoppt, das Konto lebt weiter">⏸ Tageslimit</span>'
   // Eigene Spalten (02.10.2026, Finn: „eine eigene Spalte für den Kontostand und eine für geblowt/Take Profit"): Ergebnis-Wort
   // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
+  // TAGESERGEBNIS TOPSTEP (Finn 30.10.2026 13:41: „dass ich das Endresultat vom Tag sehe und das auch noch abhaken muss"): der letzte Trade des
+  // Tages bleibt in Überprüfen, die Karte zeigt Trade 1 + Trade 2 = Summe plus Balance (app.py ap_kette_tagesende, Feld kette_tag)
+  function wdlKetteTagChip(t){
+    const k = t && t.kette_tag
+    if(!k || typeof k !== 'object') return ''
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const tag = n(k.tag_pl), bal = n(k.balance), t1 = n(k.t1_pl), t2 = n(k.t2_pl)
+    if(tag == null) return ''
+    const de = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
+    const sg = v => `${v < 0 ? '−' : '+'}${de(v)} $`
+    const summe = `<b style="color:${tag < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}">${sg(tag)}</b>`
+    const weg = (t1 != null && t2 != null) ? `${sg(t1)} ${t2 < 0 ? '−' : '+'} ${de(t2)} $ = ${summe}` : `(1 Trade) ${summe}`
+    return `<span class="wdl-kette-tag" title="Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart">Tag ${weg}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
+  }
   function wdlBlowErg(t){
     // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
     if(t && t.blown === true) return '<b style="color:var(--danger-ink, #b91c1c)">💀 geblowt</b>'
@@ -36913,7 +36928,9 @@
    * dieselbe Regel wie die Radar-Gruppe — abgehakt geblowt, Balance nach dem Trade an/unter der Liquidation (wdlBlowStand: Liq-Regel am
    * Trade, sonst Konto-Boden; das Tageslimit ist kein Blow) oder Konto weg. Gruppe UND beide Abhak-Dialoge (Radar-Dialog für fremde Pläne,
    * Trades-Dialog für eigene) fragen hier — der Trades-Dialog belegte bisher nur bei „Konto weg" vor. Nur Vorbelegung, Finn bestätigt. */
-  function wdlGeblowtUrteil(t){ return !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t))) }
+  // Tagesende der Topstep-Kette (S2 30.10.2026): kette_tag.blown entscheidet. Die Boden-Rechnung ginge vom Start von Trade 2 aus und belegte ein lebendes Konto mit „geblowt" vor
+  function wdlGeblowtUrteil(t){ if(t && t.kette_tag && typeof t.kette_tag === 'object') return t.blown === true || t.kette_tag.blown === true
+    return !!(t && (t.blown === true || (wdlBlowStand(t) || {}).geblowt || wdlKontoWeg(t))) }
   const WDL_KONTO_WEG_ERG = '<span style="color:var(--warn-ink, #b45309)" title="Konto bei Tradovate nicht mehr vorhanden — vermutlich geblowt. Nichts mehr lesbar.">Konto weg</span>'
   // Radar-Ergebnis „Konto weg" nach dem Urteil (29.10.2026): vermutlich bestanden (grün) · bitte prüfen (amber) · sonst wie bisher (nahe Liq / alter Stand)
   function wdlKontoWegErg(t){
@@ -37716,7 +37733,7 @@
           : `<button type="button" class="wdl-man-text" data-wdl-man-edit="${escapeHtml(pid)}" title="${escapeHtml((m.notiz ? m.notiz + ' — ' : '') + 'klicken: Schritt/Notiz bearbeiten')}">${schrittTxt ? `<b>${escapeHtml(schrittTxt)}</b>` : ''}${schrittTxt && m.notiz ? ' · ' : ''}${m.notiz ? escapeHtml(String(m.notiz)) : (schrittTxt ? '' : '<i>Notiz …</i>')}</button>`
         // Ergebnis-Wort auch hier (Master 21.10.2026): Finn sah bei Apex …0008 „fehlen noch 34 $" nirgends — gleiche Reihenfolge wie Überprüfen
         const ergM = polar ? wdlPolarErg(t).html : wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWegErg(t) ? wdlKontoWegErg(t) : echo ? '' : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '')
-        miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
+        miZ = zelle('mi wdl-z-akt', `${ergM && !edit ? `<span class="wdl-erg">${ergM}${wdlKetteTagChip(t) ? ' ' + wdlKetteTagChip(t) : ''}</span>` : ''}${notizHtml}${seit ? `<small class="wdl-man-seit" title="${escapeHtml((wdlGeparkt(t) ? 'geparkt seit ' : 'in Manuelle Arbeit seit ') + zeit(m.at))}">${seit}</small>` : ''}`
           + (edit ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${(sperre || busy) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen, verbuchen und Nachfolger anlegen')}">Abhaken</button>`
           + `<button type="button" class="btn btn-ghost el-knopf" data-wdl-man-zurueck="${escapeHtml(pid)}"${busy ? ' disabled' : ''} title="Kennzeichen entfernen — zurück nach „Überprüfen"">zurück</button>`))
         plZ = zelle('pl', (wdlPlGesch(t) ? '≈ ' : '') + sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: wdlPlTip(t, echo, pb) })   // ≈ = Topstep-Schätzung (27.10.2026)
@@ -37734,6 +37751,7 @@
         // — er bringt nur einen Handelstag, das Konto steht schon in Bestanden → Tage sammeln und bleibt dort
         if(t.tage_mini && !wdlSprungErg(t) && !wdlBlowErg(t)) erg = `<b class="wdl-bestanden" style="color:var(--warn-ink, #b45309);background:var(--warn-bg, #FFFBEB);white-space:nowrap" title="Mini-Trade zum Tage sammeln (0,01 Lot) — Abhaken verbucht nur den Mini; das Konto bleibt in Bestanden → Tage sammeln, bis die Mindesttage voll sind">Tage-Mini</b>`
         else if(erg && !wdlSprungErg(t) && wdlBestandenChip(t)){ const ka = (accounts || []).find(x => x && String(x.id) === String(t.konto_id || '')); if(ka) erg += ' ' + zielStationChipHtml(ka, '→ ') }
+        if(wdlKetteTagChip(t)) erg = (erg ? erg + ' ' : '') + wdlKetteTagChip(t)
         kontoZ = wdlKontoZ(t)
         // „→ manuell" (08.10.2026): Handy/Touch hat kein Drag — derselbe Weg wie das Ablegen in „Manuelle Arbeit"
         miZ = zelle('mi wdl-z-akt', `${erg ? `<span class="wdl-erg">${erg}</span>` : ''}<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${sperre ? ' disabled' : ''} title="${escapeHtml(sperre || 'Abhaken — P&L prüfen und Trade erledigen')}">Abhaken</button>`
@@ -37761,7 +37779,7 @@
           plZ = zelle('pl', sig(pb, '$', 2) + slaveZ(t), { f: col(pb), tip: num(t.pl_balance) != null ? 'MT5-Balance nachher − vorher' : pb != null ? 'P&L am Plan' : 'noch keine End-Balance' })
         } else {
         const erg = wdlSprungErg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlBlowErg(t) || (wdlKontoWegErg(t) ? wdlKontoWegErg(t) : d.status === 'tp' ? 'TP ✓' : d.status === 'liquidiert' ? (d.stop === 'sl' ? 'SL' : wdlLiqIstTag(t) ? WDL_TAGESLIMIT_ERG : 'Liq') : d.status === 'beide_in_minute' ? 'TP/Liq ?' : '–')
-        miZ = zelle('mi', erg, { tip: demoTip(d) })
+        miZ = zelle('mi', erg + (wdlKetteTagChip(t) ? ' ' + wdlKetteTagChip(t) : ''), { tip: demoTip(d) })
         kontoZ = wdlKontoZ(t)
         // Balance-Sprung (08.10.2026): erledigt zählt der P&L am Plan (von Hand entschieden), sonst der Tages-P&L — nie die Differenz
         const pbZu = t.balance_sprung ? (num(t.master_pl && t.master_pl.wert) ?? t.balance_sprung.tages) : t.pl_balance
