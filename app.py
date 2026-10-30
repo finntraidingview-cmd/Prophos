@@ -14393,6 +14393,10 @@ def wd_sicht():
 def admin_wd_plaene():
     if request.method == "OPTIONS":
         return "", 200
+    if request.method in ("POST", "DELETE") or (request.method == "PATCH" and str((request.get_json(silent=True) or {}).get("aktion") or "") not in PLANER_WD_AUTOMATIK):
+        _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
+        if _gs is not None:
+            return _gs
     me, err = _wd_login()
     if err:
         return err
@@ -18648,6 +18652,9 @@ def admin_plan_anlegen():
     """POST {account_id, row:{…}, sofort?} → {ok, plan} | 400/403/404/409 (Richtungsschutz/DB-Riegel mit Grund)/502. Siehe Block oben."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     erlaubt, err = _admin_konto_gate()
     if err:
         return err
@@ -23886,6 +23893,64 @@ def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
     return bool(admin) or ap_eingriff_sicht(False, uid, im_planer, nur_eigene, sicht) is None
 
 
+# ══ PLANER-RECHTE HT (Finn 30.10.2026 ~08:30): in der Gruppe Hermann Technologies dürfen NUR „Finn + Pascal" und „Pascal" in Challenge
+# Planer, Funded Planer (CFD + Futures) und Winning Days etwas ändern — bestätigen, Hedge freigeben, abhaken, zurück/löschen, Jetzt planen,
+# Schalter, Einstellungen, Richtung/Start/TP. Alle anderen HT-IDs nur ansehen (403). Pascal bekommt dabei genau die Rechte von „Finn + Pascal"
+# (Anlass: Hedge-Freigabe beim Bestätigen griff bei Pascal nicht, Marc …7231 — admin_voll war nie eingespielt). Regel = Tabelle admin_voll
+# (sql/2026-10-30_planer_rechte_ht.sql legt sie an, falls sie fehlt, und füllt „Finn + Pascal" + „Pascal" aus admin_mail_leser), keine
+# festen IDs im Code. Gruppen MIT Verwalter (Emin) unverändert: Verwalter/Mitglieder schreiben wie bisher in ihrer Sicht.
+# NIE gesperrt (PC-Tab-Automatik der ID selbst): wd-plaene ende/endlesung/endlesung_stand/balance/balance_stand/tab_neu_laden,
+# /admin/auto-plan/start-protokoll, /admin/auto-plan/waage-start, alle GET. Fail-closed: Rechte nicht lesbar → 502, nichts geändert.
+# Grenze: eigene Pläne schreibt das Frontend teils direkt per supabase-js (RLS) — das deckt dieser Riegel nicht (Frontend graut aus, S3).
+PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden")
+
+
+def planer_schreib_recht(admin, uid, gruppe_menge, voll_uids):
+    """REIN RECHNEND (testbar): darf dieser Login in den Planern ändern? admin = ADMIN_EMAILS bzw. admin_voll (_planer_admin_auth),
+    gruppe_menge = IDs seiner Gruppe MIT Verwalter (admin_lese_gruppe_menge) oder None (HT), voll_uids = admin_voll."""
+    if admin:
+        return True
+    if gruppe_menge:
+        return True                      # Emins Gruppe: unverändert (Rechte je Route wie bisher, Sicht je Gruppe)
+    return bool(uid) and str(uid) in (voll_uids or ())
+
+
+def _planer_admin_auth():
+    """Wie _admin_auth (→ (mail, None) | (None, Fehler)), in den Planer-Routen aber auch für admin_voll (admin_voll_frei: „Finn + Pascal",
+    „Pascal") — beide gelten dort wie ein Admin. Rechnungen/Kasse nutzen weiter _admin_auth."""
+    mail, err = _admin_auth()
+    if err is None or err[1] != 403:
+        return mail, err
+    uid = str(request.environ.get("prophos.admin_uid") or "")
+    try:
+        frei = admin_voll_frei(uid, admin_voll_uids(), admin_sicht_lesen(uid)[0]) if uid else False
+    except Exception:
+        return None, (jsonify({"ok": False, "error": "Anmeldung nicht prüfbar", "msg": "Anmeldung nicht prüfbar"}), 502)
+    return (f"admin_voll {uid[:8]}", None) if frei else (None, err)
+
+
+def _planer_schreib_gate():
+    """Schreib-Riegel der Planer-Routen (PLANER-RECHTE HT): None = darf, sonst die Fehler-Antwort (401/403/502)."""
+    _mail, err = _planer_admin_auth()
+    if err is None:
+        return None
+    if err[1] != 403:
+        return err
+    uid, err2 = _wd_login()
+    if err2:
+        return err2
+    try:
+        ok = planer_schreib_recht(False, uid, admin_lese_gruppe_menge(str(uid), admin_gruppen_daten()), admin_voll_uids())
+    except Exception as e:
+        print(f"[planer-rechte] ⚠️ nicht prüfbar ({type(e).__name__}) — gesperrt", flush=True)
+        return jsonify({"ok": False, "error": "Rechte nicht prüfbar", "msg": "Rechte nicht prüfbar — nichts geändert"}), 502
+    if ok:
+        return None
+    msg = "Nur „Finn + Pascal“ und „Pascal“ dürfen im Planer etwas ändern — diese ID kann hier nur ansehen"
+    print(f"[planer-rechte] ⛔ {str(uid)[:8]} {request.method} {request.path}", flush=True)
+    return jsonify({"ok": False, "error": msg, "msg": msg, "nur_ansehen": True}), 403
+
+
 def ap_admin_reiter_ok(admin, im_planer, nur_eigene, sicht, verwalter=False):
     """REIN RECHNEND (08.10.2026): darf dieser Login die LESE-Routen des Trade-Planers (/admin/auto-plan GET, /delta) nutzen?
     Admin oder ID im Planer. Die kurze Öffnung für jeden Login mit sicht="admin" (.1248) ist seit Option A (Finn 08.10.2026) wieder zu —
@@ -27120,6 +27185,10 @@ def _ap_hedge_mit_freigeben(zeilen, uid):
 def admin_auto_plan_hedge_freigabe():
     if request.method == "OPTIONS":
         return "", 200
+    if request.method == "POST":
+        _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
+        if _gs is not None:
+            return _gs
     uid, err = _admin_voll()   # ADMIN_EMAILS oder voller Admin-Reiter-Login (30.10.2026, „Finn + Pascal")
     if err:
         return (jsonify({"ok": False, "msg": "Nur für Admins"}), 403) if err[1] == 403 else err
@@ -31558,7 +31627,7 @@ def _ap_zugang(admin_reiter=False):
     — seit den Admin-Gruppen (08.10.2026) dazu ein Verwalter (sieht dort mit sicht=admin seine Gruppe; seit 30.10.2026 ohne sicht=admin
     nur die eigene ID statt 403).
     → (admin, uid, reg, None) oder (…, Fehler-Antwort)."""
-    mail, err = _admin_auth()
+    mail, err = _planer_admin_auth()
     uid = request.environ.get("prophos.admin_uid")
     admin = err is None
     if not admin:
@@ -31655,6 +31724,9 @@ def admin_auto_plan_ausgleichen():
     """POST {trocken, seed?} → Ausgleichs-Bot sofort einmal (auch wenn ausgleich.aktiv aus ist). Nur Admin."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, reg, err = _ap_zugang()
     if err:
         return err
@@ -31679,12 +31751,16 @@ def admin_auto_plan_ids():
     POST {user_id, drin} → ID in auto_plan_regeln.user_ids rein/raus (nur dieses Feld, Regeln/Zeiten unberührt)."""
     if request.method == "OPTIONS":
         return "", 200
+    if request.method == "POST":
+        _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
+        if _gs is not None:
+            return _gs
     # Gate wie die anderen Admin-Reiter (Finn 08.10.2026, als „Finn + Pascal" eingeloggt: „ich komm nicht rein — mach, dass man aus
     # jedem Tab reinkommt, wenn der Admin-Code stimmt"): Admin (ADMIN_EMAILS) ODER jeder eingeloggte Login, der nicht admin_zugang
     # „nur eigene" ist — den Admin-Code prüft die Oberfläche beim Entsperren, wie bei Übersicht/Auftrag/Winning Days.
     # ADMIN-GRUPPEN (08.10.2026): ein Verwalter liest hier seine Gruppe (gruppe = Menge), schreibt aber NICHT — user_ids gehört zu
     # auto_plan_regeln (HT-weit, der Planer gleicht alle IDs gemeinsam aus). Finn filtert mit ?gruppe= (lese_sicht).
-    mail, err = _admin_auth()
+    mail, err = _planer_admin_auth()
     gruppe, lese_sicht = None, None
     if err:
         if err[1] != 403:
@@ -31829,7 +31905,11 @@ def admin_gruppen_plan():
     planen = jetzt Konten ohne Plan einplanen, probe = nur rechnen, aktiv = Takt an/aus. Fremde Gruppen → 403."""
     if request.method == "OPTIONS":
         return "", 200
-    _mail, err = _admin_auth()
+    if request.method == "POST":
+        _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
+        if _gs is not None:
+            return _gs
+    _mail, err = _planer_admin_auth()
     admin, uid = err is None, None
     if not admin:
         if err[1] != 403:
@@ -32200,10 +32280,13 @@ def admin_auto_plan_eingriff():
     Seit 08.10.2026 auch aktion 'werte' {tp_usd?, sl_usd?, groesse?} (Mini-Popup): Admin alle Pläne, jede andere ID nur eigene."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     body = request.get_json(silent=True) or {}
     if str(body.get("aktion") or "").strip() in ("werte", "nachholen"):   # nachholen (08.10.2026): verpasste Pläne, gleiches Gate
         # eigenes Gate: auch IDs außerhalb des Auto-Planers dürfen ihre eigenen geplanten Trades ändern
-        _mail, err = _admin_auth()
+        _mail, err = _planer_admin_auth()
         admin = err is None
         uid = request.environ.get("prophos.admin_uid") if admin else None
         if not admin:
@@ -32524,6 +32607,9 @@ def admin_auto_plan_ausgleich_einstellung():
     auto_plan_regeln.aktiv (Nachtlauf) bleibt unberührt."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, reg, err = _ap_zugang()
     if err:
         return err
@@ -35453,6 +35539,9 @@ def _fdp_eingriff(aktion):
     fdp_start_bestaetigt(vorgeschlagene Zeit) + auto_bestaetigt_at. Zurück: start_um und auto_bestaetigt_at wieder leer (Vorschlag)."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, sicht, err = _fdp_login()
     if err:
         return err
@@ -35547,6 +35636,9 @@ def admin_funded_plan_planen():
     Wunsch für den nächsten Handelstag. Nur bei aktiv = true. Gate wie /admin/funded-plan/ids (HT-weit)."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, sicht, err = _fdp_login()
     if err:
         return err
@@ -35578,6 +35670,9 @@ def admin_funded_plan_ids():
     oder ein HT-Login ohne Einschränkung; Verwalter einer anderen Gruppe nicht (die Liste ist HT-weit)."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, sicht, err = _fdp_login()
     if err:
         return err
@@ -36182,7 +36277,7 @@ def _fd_login(regeln_laden):
     """Gemeinsames Gate beider Funded-Planer (Futures fdp_*, CFD fcp_*) → (admin, uid, lese, schreib, nur, err). im_planer = user_ids der
     Regel ODER Mitglied einer Planer-Gruppe. lese = Gruppen-Sicht (fcp_gruppen_sicht: HT nur HT, Emins Gruppe nur sich), schreib =
     fcp_schreib_sicht (Admin nie über die eigene Gruppe hinaus, Verwalter mit sicht=admin seine Gruppe, sonst nur die eigene ID)."""
-    _mail, err = _admin_auth()
+    _mail, err = _planer_admin_auth()
     admin = err is None
     uid = str(request.environ.get("prophos.admin_uid") or "") if admin else None
     if not admin:
@@ -36236,6 +36331,9 @@ def _fcp_eingriff(aktion):
     geplanten/laufenden Pläne der ID — Echo braucht den PC der ID), dann start_um + auto_bestaetigt_at."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, _lese, sicht, err = _fcp_login()
     if err:
         return err
@@ -36309,6 +36407,9 @@ def admin_funded_cfd_plan_einstellung():
     (eine Zeile funded_cfd_plan_regeln) → nur Admin. /news/calendar liefert ihn nach ≤ 60 s als news_regel."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, _lese, _schreib, err = _fcp_login()
     if err:
         return err
@@ -36332,6 +36433,9 @@ def admin_funded_cfd_plan_planen():
     alle IDs der Regel an (jede Gruppe für sich), die Antwort zeigt nur die Sicht des Logins."""
     if request.method == "OPTIONS":
         return "", 200
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
     admin, uid, sicht, schreib, err = _fcp_login()
     if err:
         return err
@@ -36380,7 +36484,10 @@ def _ap_eingriff(aktion):
     selbst per supabase-js (RLS)."""
     if request.method == "OPTIONS":
         return "", 200
-    _mail, err = _admin_auth()
+    _gs = _planer_schreib_gate()              # PLANER-RECHTE HT (30.10.2026)
+    if _gs is not None:
+        return _gs
+    _mail, err = _planer_admin_auth()
     admin = err is None
     uid = str(request.environ.get("prophos.admin_uid") or "") if admin else None
     if not admin:
@@ -36453,7 +36560,11 @@ def admin_auto_plan():
     POST {trocken:true, ids:"alle"}: Probelauf über alle IDs mit planbaren Konten — nur Admin (ap_ids_modus, 07.10.2026)."""
     if request.method == "OPTIONS":
         return "", 200
-    mail, err = _admin_auth()
+    if request.method == "POST" and not ((request.get_json(silent=True) or {}).get("trocken") is True):
+        _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
+        if _gs is not None:
+            return _gs
+    mail, err = _planer_admin_auth()
     uid = request.environ.get("prophos.admin_uid")
     admin = err is None
     if not admin:

@@ -75,7 +75,10 @@ def lade():
              "admin_lese_gruppe_menge", "admin_radar_lese_sicht", "ap_lese_gruppe"]   # SICHT JE GRUPPE (30.10.2026)
     # PC_AUS_S (20.10.2026, Prüfer S2): admin_pc_stand nutzt seit e61516c1 („PC aus", 19.10.) die Schwelle PC_AUS_S — ohne sie NameError im Lader
     teile = [konst(k) for k in ("AP_SICHT_ADMIN", "AP_EINGRIFF_MAX", "AUTH_LISTE_CACHE_S", "ADMIN_GRUPPE_HT", "AP_NUR_PLANER_TXT",
-                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S", "PC_AUS_S")]
+                                "ADMIN_ANSICHT", "AP_LAUF_SUMMEN", "ADMIN_RUECKFALL_S", "PC_AUS_S", "PLANER_WD_AUTOMATIK")]
+    # PLANER-RECHTE HT (30.10.2026): der Schreib-Riegel lässt Verwalter/Mitglieder durch — hier Platzhalter, eigener Test
+    # tools/selftest_planer_rechte_ht.py prüft ihn
+    teile += ["def _planer_schreib_gate():\n    return None", "def _planer_admin_auth():\n    return _admin_auth()"]
     teile += ["_admin_zugang_cache = {}", '_admin_gruppe_cache = {"bis": 0.0, "daten": None, "letzte": None}']
     teile += [block(n) for n in namen]
     ns = {"re": re, "time": time, "threading": threading, "requests": requests, "request": request, "jsonify": jsonify, "g": g,
