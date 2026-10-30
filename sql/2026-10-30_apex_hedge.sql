@@ -128,6 +128,12 @@ returns boolean language sql immutable as $$
   select coalesce(p_winning_day, false) or coalesce(p_baseline->'apex_hedge'->>'status', '') = 'mit'
 $$;
 
+-- Fenster-Klausel (27.10.2026) seit sql/2026-10-30_big_trade_fenster_zurueck.sql wieder drin — DIESELBE Fassung wie dort (Zeichen für Zeichen).
+create or replace function public.prophos_big_trade_fenster(p_route text) returns text
+language sql immutable as $$
+  select case when coalesce(p_route, '') = 'tsv2' then 'tsx' else 'tv' end
+$$;
+
 CREATE OR REPLACE FUNCTION public.prophos_big_trade_laeuft(p_id uuid, p_user uuid)
  RETURNS TABLE(plan_id uuid, name text, seit timestamp with time zone)
  LANGUAGE sql
@@ -139,12 +145,16 @@ AS $function$
    where p.id <> p_id
      and p.user_id = p_user
      and public.prophos_big_trade(p.route, p.hedge_eur, p.orbit_v3, public.prophos_wd_wie(p.winning_day, p.mt5_baseline))
+     -- 27.10.2026: nur dasselbe Fenster (TopstepX bzw. TradingView) — ohne eigenen Plan (unbekannte ID) wie bisher die ganze ID
+     and (not exists (select 1 from public.trade_plans s where s.id = p_id)
+          or public.prophos_big_trade_fenster(p.route) = (select public.prophos_big_trade_fenster(s.route) from public.trade_plans s where s.id = p_id))
      and (p.status = 'open'
           or (p.status = 'planned' and (p.orbit_gesendet_at > now() - interval '10 minutes'
                                         or (p.start_um_gestartet_at > now() - interval '2 minutes' and p.started_at is null))))
    order by 3 desc
    limit 1
 $function$;
+revoke all on function public.prophos_big_trade_laeuft(uuid, uuid) from public;
 
 CREATE OR REPLACE FUNCTION public.prophos_big_trade_halten(p_plan uuid)
  RETURNS jsonb
