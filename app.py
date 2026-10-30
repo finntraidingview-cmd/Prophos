@@ -14578,6 +14578,9 @@ def admin_wd_plaene():
                         # PC-Rückfall, Jacob) auch bei fremden IDs
                         "select": "id,user_id,master_account_id,status,route,master_contracts,start_um,start_um_gestartet_at,orbit_gesendet_at,"
                                   "ended_at,master_pl,master_tp,master_risk,slave_risk,multiplier,richtung,master_symbol,"
+                                  # WD-ANSICHT (30.10.2026): Karten Läuft/Wartet/Braucht dich zeigen Fusion-Werte und „seit" — eigene Namen anz_*, weil
+                                  # wdPlaeneNachziehen und „Plan heute Nacht" auf hedge_eur/master_sl reagieren würden (WD hat nie einen Master-SL)
+                                  "anz_hedge_eur:hedge_eur,anz_started_at:started_at,anz_vorschau:mt5_baseline->hedge_vorschau,"
                                   # richtung_konflikt (30.10.2026, S7 Richtung je Konto): am Start gedrehte Pläne dreht wdPlaeneNachziehen
                                   # nicht auf die Konto-Richtung zurück
                                   "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt",
