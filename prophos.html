@@ -5412,6 +5412,11 @@
   #dashboard-view .mwd-erl-wd{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 12px;margin-top:10px;padding:10px 14px;border-radius:12px;
     border:1px solid var(--border);background:var(--bg);animation:tcWdRmEin .22s ease-out}
   #dashboard-view .mwd-erl-wd[hidden]{display:none}
+  #dashboard-view .mwd-erl-wdh{display:flex;align-items:flex-start;gap:10px;margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer}
+  #dashboard-view .mwd-erl-wdh[hidden]{display:none}
+  #dashboard-view .mwd-erl-wdh input{width:16px;height:16px;margin-top:2px;flex:none}
+  #dashboard-view .mwd-erl-wdh b{display:block;font-size:13px;font-weight:600;color:var(--ink)}
+  #dashboard-view .mwd-erl-wdh small{display:block;font-size:11px;color:var(--sub-2);margin-top:2px}
   #dashboard-view .mwd-erl-wd.ist-wd{border-color:color-mix(in srgb,var(--good) 35%,var(--border));background:color-mix(in srgb,var(--good) 7%,var(--surface))}
   #dashboard-view .mwd-erl-wd b{font-size:14px;font-weight:600;color:var(--ink)}
   #dashboard-view .mwd-erl-wd small{grid-column:1;font-size:11px;color:var(--sub-2)}
@@ -14279,6 +14284,13 @@
           <!-- Winning Day (23.10.2026): fremde WDs zählt das Backend nur als Good Day (Master-P&L über der Firmen-Linie) — Vorschau aus
                derselben Regel, gefüllt von mwdErlWdVorschau; nach dem Speichern fliegt der echte Stand aus der Antwort (abhakWdFlug) -->
           <div class="mwd-erl-wd" id="mwd-erl-wd" role="status" aria-live="polite" hidden></div>
+          <!-- Winning Day von Hand (ABHAKEN-WD-OPTIONEN, Finn 30.10.2026 ~08:42: nach einem Big Trade musste er das Konto umstellen UND einen WD
+               nachtragen, weil der Trade schon ein WD war): nur bei Funded einer Futures-Firma (wie „→ Winning Days" unten), Standard aus, Vorschlag
+               ab der Good-Day-Linie der Firma; das Backend zählt mit demselben Weg wie den Good Day (goal_done_offset +1, einmal je Tag) -->
+          <label class="mwd-erl-wdh" id="mwd-erl-wdh" hidden>
+            <input type="checkbox" id="mwd-erl-wdh-cb">
+            <span><b>🏆 Dieser Trade war ein Winning Day</b><small id="mwd-erl-wdh-hint">zählt +1 auf den Stand des Kontos (einmal pro Tag)</small></span>
+          </label>
           <!-- Account-Status wie im großen Erledigt-Popup (02.10.2026, Finn: „muss auch die Möglichkeit haben, Account wurde geblowt");
                das Backend archiviert beim Besitzer der ID (auch fremde Trades) -->
           <div class="field" style="margin-top:12px">
@@ -35166,6 +35178,7 @@
   let _mwdErlSicht = false   // aus dem Radar geöffnet (27.10.2026): Speichern mit ?ansicht=admin — Verwalter hakt Pläne seiner Gruppe ab
   let _mwdErlVor = null   // vorbelegter Master-Wert — weicht der gespeicherte ab, war es Hand (pl_quelle 'hand', 08.10.2026)
   let _mwdErlWd = false, _mwdErlWdKonto = null   // Winning-Day-Plan + Konto für die Good-Day-Vorschau (23.10.2026)
+  let _mwdErlWdhAn = false, _mwdErlWdhAngefasst = false   // „Dieser Trade war ein Winning Day" (30.10.2026): sichtbar / von Hand angefasst
   function mklWdErledigtOeffnen(pid, extra, opts){
     _mwdErlSicht = !!(opts && opts.sicht)   // jedes Öffnen setzt neu — nur die Radar-Knöpfe geben sicht mit
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
@@ -35262,6 +35275,21 @@
       const rb = z.querySelector('input'), keins = document.querySelector('input[name="mwd-erl-status"][value="none"]')
       if(!an && rb && rb.checked && keins) keins.checked = true
     })
+    // Winning Day von Hand (30.10.2026): dieselbe Bedingung wie die Zeile „→ Winning Days" (Funded einer Futures-Firma), Standard aus
+    _mwdErlWdhAn = umZeilen['mwd-erl-status-wd']; _mwdErlWdhAngefasst = false
+    const wdh = document.getElementById('mwd-erl-wdh'), wdhCb = document.getElementById('mwd-erl-wdh-cb')
+    if(wdh) wdh.hidden = !_mwdErlWdhAn
+    if(wdhCb) wdhCb.checked = false
+    // Schreibrecht (GET /admin/planer-rechte, gemeinsamer Haken von S3: window._planerSchreiben → Promise<bool>, 5 min gemerkt): ohne Recht
+    // kein Haken — fail-closed, auch wenn der Haken (noch) fehlt oder die Abfrage scheitert. Bis die Antwort da ist, bleibt er verborgen.
+    if(_mwdErlWdhAn){
+      const fuer = _mwdErlId; if(wdh) wdh.hidden = true
+      Promise.resolve().then(() => typeof window._planerSchreiben === 'function' ? window._planerSchreiben() : false).then(ok => ok === true, () => false).then(ok => {
+        if(fuer !== _mwdErlId) return
+        if(ok){ if(wdh) wdh.hidden = false; return }
+        _mwdErlWdhAn = false; if(wdh) wdh.hidden = true; if(wdhCb) wdhCb.checked = false })
+    }
+    mwdErlWdhVorschlag()
     mwdErlWdVorschau()
     mwdErlStatusUI()   // Rahmen = Punkt (20.10.2026): Vorbelegung und Hervorhebung aus derselben Quelle, kein alter Anstrich
     document.getElementById('mwdErledigtModal')?.classList.add('open')
@@ -35295,6 +35323,18 @@
     el.hidden = false
   }
   document.getElementById('mwd-erl-master')?.addEventListener('input', mwdErlWdVorschau)
+  // Vorschlag „war ein Winning Day" (30.10.2026): Master-P&L über der Good-Day-Linie der Firma (tcGoodDayGrenze, dieselbe Tabelle wie das
+  // Backend) → angehakt; hat Finn den Haken selbst angefasst, bleibt er, wie er ist
+  function mwdErlWdhVorschlag(){
+    const cb = document.getElementById('mwd-erl-wdh-cb'), hint = document.getElementById('mwd-erl-wdh-hint'); if(!cb || !_mwdErlWdhAn) return
+    const grenze = typeof tcGoodDayGrenze === 'function' ? tcGoodDayGrenze(_mwdErlWdKonto) : null
+    const mpl = plZahl(document.getElementById('mwd-erl-master')?.value)
+    const ueber = grenze != null && mpl != null && isFinite(mpl) && mpl > grenze   // wie _wd_good_day im Backend: echt darüber
+    if(!_mwdErlWdhAngefasst) cb.checked = ueber
+    if(hint) hint.textContent = (ueber && !_mwdErlWdhAngefasst ? `vorgeschlagen: Master-P&L über ${grenze} $ (Winning-Day-Linie) · ` : '') + 'zählt +1 auf den Stand des Kontos (einmal pro Tag)'
+  }
+  document.getElementById('mwd-erl-master')?.addEventListener('input', mwdErlWdhVorschlag)
+  document.getElementById('mwd-erl-wdh-cb')?.addEventListener('change', () => { _mwdErlWdhAngefasst = true; mwdErlWdhVorschlag() })
   window._mwdErlStatusUI = mwdErlStatusUI   // Test-Haken (Stub)
   window._mklWdErledigtOeffnen = mklWdErledigtOeffnen   // Test-Haken (Stub, 20.10.2026: Vorbelegung „geblowt" ohne Login prüfen)
   // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
@@ -35334,6 +35374,7 @@
     const kontoStatus = _mwdErlPolar ? 'none' : (document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none')
     const plHand = _mwdErlVor == null || !isFinite(Number(_mwdErlVor)) || Math.abs(mpl - Number(_mwdErlVor)) >= 0.005
     const wdPlan = _mwdErlWd   // für den WD-Flug nach der Antwort (23.10.2026) — der Dialog ist dann schon zu
+    const wdHand = !_mwdErlPolar && _mwdErlWdhAn && document.getElementById('mwd-erl-wdh')?.hidden === false && !!document.getElementById('mwd-erl-wdh-cb')?.checked   // „war ein Winning Day" (30.10.2026)
     if(btn) btn.disabled = true; say('')
     // SOFORT ZU (01.10.2026 abends, Finn: „Abhaken dauert 5–6 s"): Popup zu und Zeile nach „Erledigt", das Backend speichert dahinter;
     // scheitert es, Hinweis + Liste neu laden (die Zeile springt zurück) — das Popup lässt sich dann erneut öffnen
@@ -35350,7 +35391,7 @@
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene${_mwdErlSicht ? '?ansicht=admin' : ''}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus,
+        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl, konto_status: kontoStatus, ...(wdHand ? { wd_zaehlen: true } : {}),
                                // Hand-Betrag (08.10.2026): ohne Vorbelegung oder davon abweichend → pl_quelle 'hand' am Plan
                                ...((plHand) ? { pl_quelle: 'hand' } : {}) }) })
       const d = await r.json().catch(() => ({}))
@@ -35378,7 +35419,9 @@
           }
         }catch(_){}
       }
-      const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '') + umTxt
+      const gdH = wdHand ? (d.good_day || null) : null   // „war ein Winning Day": Stand aus der Antwort (gezaehlt/stand/ziel) oder Fehler
+      const wdhTxt = !gdH ? '' : gdH.gezaehlt ? ` · 🏆 Winning Day ${gdH.stand}/${gdH.ziel}` : gdH.fehler ? '' : ' · 🏆 Winning Day heute schon gezählt'
+      const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '') + umTxt + wdhTxt
       if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : _mwdErlOhneHedge ? 'Erledigt' : _mwdErlPolar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (_mwdErlFusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, umFehl ? 'end' : 'ok')
       // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
       // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
@@ -70430,12 +70473,14 @@
     const cb = document.getElementById('tc-winning-day'), wrap = document.getElementById('tc-winning-day-wrap'), hint = document.getElementById('tc-winning-day-hint')
     if(!cb || !wrap || wrap.hidden || cb.disabled || _tcGoodDayHand) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
-    if(!a || a.type !== 'winning_days' || String(a.id) !== String(_tcWinningAccId)) return
+    // + Funded einer Futures-Firma (ABHAKEN-WD-OPTIONEN 30.10.2026): Big Trade über der Linie → „war ein Winning Day" vorgeschlagen (Finn musste
+    // ihn sonst danach von Hand nachtragen); zählt wie bisher erst beim Speichern über zielManuellPlus
+    if(!a || !(a.type === 'winning_days' || a.type === 'funded') || String(a.id) !== String(_tcWinningAccId)) return
     const grenze = tcGoodDayGrenze(a)
     const good = isFinite(mPl) && grenze != null && mPl > grenze
     if(good === cb.checked) return
     cb.checked = good
-    if(hint) hint.textContent = good ? `🏆 Good Day — Master-P&L über ${grenze != null ? grenze : 250} $, automatisch angehakt.` : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
+    if(hint) hint.textContent = good ? (a.type === 'funded' ? `Vorgeschlagen: Big Trade über der Winning-Day-Linie (${grenze} $) — Haken raus, wenn er nicht zählt.` : `🏆 Good Day — Master-P&L über ${grenze != null ? grenze : 250} $, automatisch angehakt.`) : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
     tcWdRmVorschau()
   }
   document.getElementById('tc-winning-day')?.addEventListener('change', () => { _tcGoodDayHand = true; tcWdRmVorschau() })

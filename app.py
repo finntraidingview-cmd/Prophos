@@ -13889,6 +13889,15 @@ def _wd_good_day(konto, master_pl):
     return False
 
 
+def wd_hand_erlaubt(konto):
+    """REIN RECHNEND (testbar): „Dieser Trade war ein Winning Day" von Hand (Radar-Dialog, 30.10.2026) — wie zielKonfig im Frontend
+    (manuell gezählte Winning Days): Konto Funded oder Winning Days einer Futures-Firma, nie Tradeify CFD."""
+    if not isinstance(konto, dict):
+        return False
+    typ = str(konto.get("account_type") or "").strip().lower()
+    return typ in ("funded", "winning_days") and not _ist_tradeify_cfd(konto.get("firm")) and ap_klasse(None, konto.get("firm")) == "futures"
+
+
 def _wd_good_day_konto_upd(konto, heute):
     """REIN RECHNEND (testbar): Konto-Update für „Winning Day +1" — gleiche Felder und Regel wie zielManuellPlus im Frontend:
     höchstens einmal je Berlin-Tag (goal_manual_last), goal_kind/goal_manual/goal_target werden mitgeschrieben (Futures-Funded
@@ -14820,6 +14829,10 @@ def admin_wd_plaene():
             if konto_status not in ("none", "blown", "passed", "waiting", "winning_days"):
                 return jsonify({"error": "konto_status unbekannt"}), 400
             blown = konto_status == "blown"
+            # WINNING DAY VON HAND (ABHAKEN-WD-OPTIONEN, Finn 30.10.2026 ~08:42): „Dieser Trade war ein Winning Day" im Radar-Dialog — derselbe
+            # Schreibweg wie der Good Day (_wd_good_day_konto_upd: goal_done_offset +1, einmal je Berlin-Tag), nur ohne Good-Day-Schwelle und
+            # auch für ein Funded-Konto einer Futures-Firma (Big Trade, danach oft → Winning Days). plan.winning_day bleibt unangetastet.
+            wd_hand = daten.get("wd_zaehlen") is True
             if len(pid) < 10:
                 return jsonify({"error": "plan_id fehlt"}), 400
             if mpl is None:
@@ -14937,14 +14950,18 @@ def admin_wd_plaene():
                     def _good_day():
                         # Good Day (01.10.2026): Tradeify-WD mit Master-P&L über 250 $ → Plan winning_day = true und Winning Day +1 am
                         # Konto (einmal je Berlin-Tag). Fehler hier stoppen das Abhaken nicht — sie stehen in der Antwort.
-                        if f_kk is None or plan_ist_apex_hedge(plan):
+                        if f_kk is None or (plan_ist_apex_hedge(plan) and not wd_hand):
                             return None
                         try:
                             kr = f_kk.result()
                             kk = kr[0] if kr else None
-                            if not _wd_good_day(kk, mpl):
+                            if wd_hand:
+                                if not wd_hand_erlaubt(kk):
+                                    return {"fehler": "Winning Day nicht gezählt — nur bei Funded/Winning Days einer Futures-Firma"}
+                            elif not _wd_good_day(kk, mpl):
                                 return None
-                            sb_update("trade_plans", {"id": f"eq.{pid}"}, {"winning_day": True})
+                            else:
+                                sb_update("trade_plans", {"id": f"eq.{pid}"}, {"winning_day": True})
                             k_upd = _wd_good_day_konto_upd(kk, _berlin_heute())
                             if k_upd:
                                 sb_update("accounts", {"id": f"eq.{kk['id']}"}, k_upd)
