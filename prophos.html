@@ -80651,6 +80651,36 @@
     return { ab: d.toISOString().slice(0, 10), gerechnet: true,
       grund: `${n} Tage ab ${letzter ? 'letztem Payout' : 'Konto-Start'} ${new Date(basis + 'T12:00:00Z').toLocaleDateString('de-DE')}${fnErster ? ' (FundedNext: 1. Payout nach 21 Tagen)' : ' (frühestens alle 14 Tage)'}` }
   }
+  /* PAYOUTS AUF DEM WEG (Finn 30.10.2026 ~07:56 über den Master, statt der Firmen-Kacheln): alle offenen Payout-Anfragen (pending_payouts
+   * status pending aus /admin/overview — dieselbe Liste wie Admin → Finanzen „Payouts unterwegs“) für Funded-CFD-Konten der Sicht. Konto
+   * über account_id, sonst über den Kontonamen (so wie der Planer „angefragt“ erkennt). Tabelle in derselben Optik wie „Waiting for Payout“:
+   * Konto · ID · Firma · Betrag · angefragt am · seit · liegt bei. Älteste Anfrage zuerst. Nur Anzeige (Abhaken bleibt in Finanzen). */
+  function fcfdUnterwegsHtml(ad, k, u){
+    const ids = new Set(k.map(e => String(e.r.id))), namen = new Map(k.map(e => [String(e.r.name || '').trim(), e]))
+    const jeId = new Map(k.map(e => [String(e.r.id), e]))
+    const zeilen = ((ad && ad.pending_payouts) || []).map(t => ({ t, e: (t.account_id && jeId.get(String(t.account_id))) || namen.get(String(t.account_name || '').trim()) || null }))
+      .filter(x => x.e && (!u || String(x.t.user_id || x.e.r.user_id) === String(u)))
+      .sort((a, b) => String(a.t.requested_at || '').localeCompare(String(b.t.requested_at || '')))
+    const geld = t => { const v = Number(t.amount) || 0, c = String(t.currency || 'EUR').toUpperCase()
+      try{ return new Intl.NumberFormat('de-DE', { style: 'currency', currency: c, maximumFractionDigits: 0 }).format(v) }catch(_){ return Math.round(v).toLocaleString('de-DE') + ' ' + c } }
+    const summe = new Map(); for(const x of zeilen){ const c = String(x.t.currency || 'EUR').toUpperCase(); summe.set(c, (summe.get(c) || 0) + (Number(x.t.amount) || 0)) }
+    const sumTxt = [...summe.entries()].map(([c, v]) => geld({ amount: v, currency: c })).join(' + ')
+    const zeile = ({ t, e }) => {
+      const d = t.requested_at ? new Date(t.requested_at) : null, tage = d && !isNaN(d) ? Math.max(0, Math.floor((Date.now() - d.getTime()) / 864e5)) : null
+      const uid = String(t.user_id || e.r.user_id || '')
+      return `<tr><td style="padding-left:20px"><div style="font-weight:600;color:var(--ink)">${escapeHtml(t.account_name || e.r.name || '–')}</div></td>
+        <td style="white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${idFarbe(uid)};margin-right:6px;vertical-align:middle"></span>${escapeHtml(t.person || e.person || '–')}</td>
+        <td>${escapeHtml(t.account_firm || e.firma || '–')}</td>
+        <td style="font-weight:600;color:var(--warn-ink, #b45309);font-family:var(--mono);white-space:nowrap">${escapeHtml(geld(t))}</td>
+        <td style="white-space:nowrap">${d && !isNaN(d) ? escapeHtml(d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' })) : '—'}</td>
+        <td style="white-space:nowrap;color:${tage != null && tage >= 14 ? 'var(--danger-ink, #b91c1c)' : 'var(--sub)'}">${tage == null ? '—' : tage === 0 ? 'heute' : `seit ${tage} Tag${tage === 1 ? '' : 'en'}`}</td>
+        <td style="padding-right:20px;color:var(--sub)">${escapeHtml(t.liegt_bei || '—')}</td></tr>` }
+    const tabelle = `<div class="table-wrap"><table class="t"><thead><tr><th style="padding-left:20px">Konto</th><th>ID</th><th>Firma</th><th>Betrag</th><th>Angefragt am</th><th>Seit</th><th style="padding-right:20px">Liegt bei</th></tr></thead>
+      <tbody>${zeilen.map(zeile).join('')}</tbody></table></div>`
+    return `<div data-apg-anker="unterwegs">${apgKarte(`Payouts auf dem Weg · ${zeilen.length}`, zeilen.length ? `${sumTxt} angefragt, noch nicht erhalten · älteste zuerst` : 'angefragt, noch nicht erhalten',
+      zeilen.length ? `<div class="fcfd-wartet-tab">${tabelle}</div>` : '<div class="apg-leer" style="padding:18px 0">Keine Payouts unterwegs</div>',
+      'Offene Payout-Anfragen (Finanzen → Payouts unterwegs) der Funded-CFD-Konten dieser Sicht — abhaken („✓ erhalten“) unter Admin → Finanzen')}</div>`
+  }
   // WAITING-ALS-TABELLE (Finn 30.10.2026 07:30: „das ist mies hässlich — einfach die normale Ansicht unter Accounts da hin“): dieselbe Tabelle
   // wie Admin → Alle Accounts (window._admKontenTabelleHtml / admKontoZeileHtml), nur Funded-CFD-Konten mit waiting_payout_since der Sicht.
   // Reihenfolge: jetzt anfragbar → nach Tagen bis „anfragbar ab“ → angefragt → ohne Datum. Fehlt „Payout anfragbar ab“, rechnet fcfdPayoutAb.
@@ -80674,7 +80704,8 @@
     const ad = window._admData
     let k = []; try{ k = ad && Array.isArray(ad.accounts) ? apgFcfdDaten(ad) : [] }catch(_){ k = [] }
     if(u) k = k.filter(e => String(e.r.user_id) === String(u))
-    const konten = ad ? fcfdWartetHtml(k) + fcfdFirmenHtml(k) : apgKarte('Waiting for Payout', 'Konten-Übersicht lädt …', '<div class="apg-leer" style="padding:18px 0">lädt …</div>')
+    // PAYOUTS AUF DEM WEG statt „Firmen · n“ (Finn 30.10.2026 ~07:56 über den Master)
+    const konten = ad ? fcfdWartetHtml(k) + fcfdUnterwegsHtml(ad, k, u) : apgKarte('Waiting for Payout', 'Konten-Übersicht lädt …', '<div class="apg-leer" style="padding:18px 0">lädt …</div>')
     const regeln = `<div class="apg-karte apg-einst"><div class="apg-einst-l"><div class="apg-titel">Regeln je Prop-Firma</div><div class="apg-sub">${escapeHtml(fcfdRegelnSub())}</div></div>
         <details class="apg-schalter" data-fcfd-regeln${_fcfdR.auf ? ' open' : ''}><summary>Regeln</summary>${fcfdRegelnHtml()}</details></div>`
     let news = ''; try{ news = fcfdNewsKarteHtml() }catch(e){ console.warn('[apg] News-Kachel', e) }
