@@ -57,7 +57,7 @@
  * 0.3.2 (30.10.2026, PC von Marco: „TopstepX-Auge blind", Stand 15,9 s alt, 975 Ticks, 2 Sends, kein Timeout, Konsole „worker-tot"): (1) worker-tot ist nicht mehr endgültig (s. Worker-Wache);
  * (2) von außen sichtbar: letzter_fehler + letzter_fehler_vor_s (bleibt nach Erfolg stehen), fehler_n (Summe), unterwegs_ms (Dauer des letzten Requests), haenger_n, stand_ms, worker_tot_n;
  * (3) Riegel: ein Request, dessen Rückmeldung > 3 s ausbleibt, wird abgebrochen und freigegeben (bisher blockierte er jede weitere Meldung). Weil dann zwei Meldungen unterwegs sein können,
- * prüft der Schnell-Wächter in Prophos auch das Alter der Messung selbst (stand.ts, tsxStandFrisch). (4) Flach-Folge: Lücke > 0,5 s beendet eine Serie unter 5 s, keine Messungs-Salve nach einem Hänger. Kommt per Lader. */
+ * prüft der Schnell-Wächter in Prophos am Schließ-Punkt auch das Alter der Messung selbst (stand.ts, tsxMessungJung). (4) Flach-Folge: Lücke > 0,5 s beendet eine Serie unter 5 s, keine Messungs-Salve nach einem Hänger. Kommt per Lader. */
 
 /* ══ LADER 0.3.0 (s. oben): prophosKern ist das eigentliche Auge. Alles zwischen den Markern KERN-START und KERN-ENDE holt der Lader
  * neuer nach (Panel /userscript/tsx-kern.json) — die Marker nie verschieben oder doppeln (Selbsttest prueft sie). ══ */
