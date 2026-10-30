@@ -31446,6 +31446,13 @@
       if(pr > 0) return pr
       const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[wz] : null
       if(k && hedgeKursAlterJetzt(k) <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return k.preis
+      // CLOUD-KURS (30.10.2026, Simon pc-pmqd8g Test 4, Plan a92dde45): im Puls-Chrome-Modus liefert das Userscript keine Kurse, mkl.kursJe war
+      // leer — kurzKursJetzt gab 0, kurzFensterNeu LÖSCHTE das Fenster bei jeder Master-Sichtung, reader_kurz_nein „Fenster nicht eingefroren",
+      // Fusion blieb offen, obwohl der Reader flach meldete. Jetzt wie hedgeKursAktuell die Cloud (tv_kurse, hedgeKursLesen — höchstens eine
+      // Abfrage je 3 s, gemerkt): ≤ 5 s alt ab Cloud-Ankunft, nie delayed, NQ ≈ MNQ (< 1 Pkt, Toleranz des Balance-Beweises ± KURZ_TOL_PKT)
+      const c = _hedgeKurs && _hedgeKurs.wert
+      if(c && c.preis > 0 && (c.wurzel === 'NQ' || c.wurzel === 'MNQ') && (Number(c.alter_ms) || 0) + (Date.now() - _hedgeKurs.at) <= 5000) return c.preis
+      try{ hedgeKursLesen().catch(() => {}) }catch(_){}   // für den nächsten Takt auffrischen
     }catch(_){}
     return 0
   }
@@ -52304,7 +52311,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1920'
+  const OS_TAB_BUILD = '2026-09-22.1921'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
