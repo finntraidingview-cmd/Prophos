@@ -3790,14 +3790,14 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts .apg-karte{margin-bottom:18px}
   /* P&L von heute (Challenge, 30.10.2026): Kennzahlen rechts im Kartenkopf, Chart volle Breite */
-  :is(#ap-ids-root.ap-guestly) .apg-pl .apg-karte-kopf{align-items:center}
-  :is(#ap-ids-root.ap-guestly) .apg-plks{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
-  :is(#ap-ids-root.ap-guestly) .apg-plk{display:flex;flex-direction:column;align-items:flex-end;min-width:0}
-  :is(#ap-ids-root.ap-guestly) .apg-plk small{color:var(--g-sub);font-size:12px}
-  :is(#ap-ids-root.ap-guestly) .apg-plk b{font-size:22px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--g-text)}
-  :is(#ap-ids-root.ap-guestly) .apg-plk b.gut{color:var(--g-gut)} :is(#ap-ids-root.ap-guestly) .apg-plk b.rot{color:var(--g-rot)}
-  @media (max-width:820px){ :is(#ap-ids-root.ap-guestly) .apg-pl .apg-karte-kopf{flex-wrap:wrap} :is(#ap-ids-root.ap-guestly) .apg-plks{order:3;flex-basis:100%;margin-left:0;gap:var(--m-gap, 10px);justify-content:space-between}
-    :is(#ap-ids-root.ap-guestly) .apg-plk{align-items:flex-start} :is(#ap-ids-root.ap-guestly) .apg-plk b{font-size:18px} }
+  :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-pl .apg-karte-kopf{align-items:center}
+  :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plks{display:flex;gap:22px;margin-left:auto;flex-wrap:wrap}
+  :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk{display:flex;flex-direction:column;align-items:flex-end;min-width:0}
+  :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk small{color:var(--g-sub);font-size:12px}
+  :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk b{font-size:22px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--g-text)}
+  :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk b.gut{color:var(--g-gut)} :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk b.rot{color:var(--g-rot)}
+  @media (max-width:820px){ :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-pl .apg-karte-kopf{flex-wrap:wrap} :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plks{order:3;flex-basis:100%;margin-left:0;gap:var(--m-gap, 10px);justify-content:space-between}
+    :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk{align-items:flex-start} :is(#ap-ids-root.ap-guestly,#adm-pane-wd.ap-guestly) .apg-plk b{font-size:18px} }
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-karte-kopf{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-titel{font-size:18px;font-weight:600;color:var(--g-text)}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-sub{color:var(--g-sub);font-size:12.5px;margin-top:3px}
@@ -68474,7 +68474,7 @@
         wdUebKpi('Payout anfragbar', bereit.length ? `${bereit.length} ${bereit.length === 1 ? 'Konto' : 'Konten'}` : '–', bereit.length ? escapeHtml([...new Set(bereit.map(e => e.firma))].join(' · ')) + (geld ? ` · ≈ ${wdDe(geld)} $` : '') : 'noch keins', bereit.length ? 'var(--good-ink, #15803d)' : '') +
         wdUebKpi('Nächster Payout', naechst ? escapeHtml(wdUebTag(naechst.frueh)) : '–', naechst ? `${escapeHtml(naechst.k.person || '')} · ${escapeHtml(naechst.firma)} · noch ${naechst.fehlt}` : '—', '', 'frühester Tag, wenn ab jetzt jeder Handelstag ein Gewinntag wird')
     }
-    try{ apgWdRender(liste) }catch(e){ console.warn('[apg] WD-Gerüst', e) }   // Guestly-Gerüst (30.10.2026) — nur Anzeige, stört die Kacheln nie
+    _apgWd.liste = liste; try{ apgWdRender(liste) }catch(e){ console.warn('[apg] WD-Gerüst', e) }   // Guestly-Gerüst (30.10.2026) — nur Anzeige, stört die Kacheln nie
     wdUebPayouts(liste)
     wdUebStatistik()
   }
@@ -68531,12 +68531,19 @@
       ${apgKarte('Starts je Stunde', `Dubai · Total: ${total}${peak >= 0 ? ` · Peak: ${String(peak).padStart(2, '0')}:00 (${std[peak]})` : ''}`,
         `<div class="apg-chart">${total ? '<canvas id="apg-wd-std"></canvas>' : '<div class="apg-leer">noch keine Starts</div>'}</div>`, 'Startzeit (Dubai) je Konto im Tagesplan')}
     </div>`
-    box.innerHTML = kopf + kpis + charts
+    // WD-PNL-CHART (Finn 30.10.2026 ~08:12): statt Long·Short je ID + Starts je Stunde EIN Chart „P&L von heute" (Bausteine des Challenge Planers),
+    // nur Winning Days der Sicht, Fusion zusätzlich in $ (fx_usd_eur aus der Admin-Übersicht bzw. den Einstellungen) + Netto $
+    const fx = Number(window._admData && window._admData.fx_usd_eur) || Number(window._fxUsdEur) || 0.85
+    const fxStand = window._admData && window._admData.fx_usd_eur ? 'Admin-Übersicht' + (window._admData.generated ? ' ' + new Date(window._admData.generated).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '') : window._fxUsdEur ? 'Einstellungen' : 'Standard 0,85'
+    const plD = typeof B.apgPlWd === 'function' ? B.apgPlWd(uid => wdSichtOk(uid)) : null, plOpt = { fx, fxStand, id: 'apg-wd-pl' }
+    box.innerHTML = kopf + kpis + (plD ? B.apgPlKarteHtml(plD, plOpt) : charts)
     const anker = { ablauf: document.getElementById('wd-ablauf'), ueb: document.getElementById('wd-ueb') }
     box.querySelectorAll('[data-apg-ziel]').forEach(k => { const geh = () => anker[k.dataset.apgZiel]?.closest('.panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       k.addEventListener('click', geh); k.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); geh() } }) })
-    apgChartsMalen(pane, { ls, std }, { ls: '#apg-wd-ls', balken: '#apg-wd-std', ablage: _apgWd.charts })
+    if(plD){ try{ B.apgPlMalen(pane, plD, _apgWd.charts, plOpt) }catch(e){ console.warn('[apg] WD P&L-Chart', e) } }
+    else apgChartsMalen(pane, { ls, std }, { ls: '#apg-wd-ls', balken: '#apg-wd-std', ablage: _apgWd.charts })
   }
+  window._apgWdNeu = () => { try{ if(wdSichtbar()) apgWdRender(_apgWd.liste || []) }catch(e){ console.warn('[apg] WD neu', e) } }   // nach frisch geladenen Radar-Zeilen (P&L-Chart)
   window._wdUebNeu = () => { try{ if(_wd.daten && wdSichtbar()) wdUebStatistik() }catch(e){ console.warn('[wd] Überblick', e) } }
   // Eigene Verdrahtung des Überblicks (ein Listener je Kasten, Delegation nur innerhalb des eigenen Panels)
   ;(() => {
@@ -80519,12 +80526,17 @@
     const fertig = []
     for(const t of _tpl.lt.values()){
       if(!t || tagD(t.started_at) !== heute) continue
-      if(t.route === 'polar' || t.plattform === 'polar' || t.tage_mini || (typeof wdlWeg === 'function' && wdlWeg(t) === 'Winning Day')) continue
+      // o.nurWd (WD-PNL-CHART, Finn 30.10.2026 ~08:12): Funded Planer → Winning Days zeigt nur die Winning Days, sonst bleiben sie draußen
+      const istWd = typeof wdlWeg === 'function' && wdlWeg(t) === 'Winning Day'
+      if(t.route === 'polar' || t.plattform === 'polar' || t.tage_mini || (o.nurWd ? !istWd : istWd)) continue
       const firma = String((t.konto && t.konto.firma) || t.firma || '')
       if(o.uid && String(t.user_id) !== String(o.uid)) continue
+      if(o.passt && !o.passt(t.user_id)) continue   // Sicht der WD-Seite (wdSichtOk)
       if(o.firma && o.firma !== 'alle' && firma !== o.firma) continue
-      if(!apArtPasst({ firma, route: t.route })) continue
-      if(t.konto_typ && !TPL_TYPEN.includes(String(t.konto_typ))) continue   // nur Challenge-/Phase-Konten wie der übrige Planer (Funded hat seinen eigenen)
+      if(!o.nurWd){
+        if(!apArtPasst({ firma, route: t.route })) continue
+        if(t.konto_typ && !TPL_TYPEN.includes(String(t.konto_typ))) continue   // nur Challenge-/Phase-Konten wie der übrige Planer (Funded hat seinen eigenen)
+      }
       if(t.status === 'open'){
         aus.offen++
         const mp = zahl(t.master_pl), fe = fusion(t, true)
@@ -80550,11 +80562,25 @@
     aus.punkte.push({ x: std(Date.now()), m: aus.m + aus.mLive, f: aus.f + aus.fLive, jetzt: true })
     return aus
   }
-  function apgPlKarteHtml(d){
+  /* opt (WD-PNL-CHART 30.10.2026): { fx: USD→EUR-Kurs, fxStand, id: Canvas-ID, wd: true } — mit fx steht Fusion zusätzlich in $ (÷ fx), beide Linien
+   * auf EINER $-Achse, Kennzahl Netto $ = Master $ + Fusion $; ohne opt unverändert (Challenge / Funded CFD). */
+  function apgPlKarteHtml(d, opt){
     const kz = (name, wert, cls, tip) => `<div class="apg-plk"${tip ? ` title="${escapeHtml(tip)}"` : ''}><small>${name}</small><b class="${cls || ''}">${wert}</b></div>`
     const farbe = v => v > 0 ? 'gut' : v < 0 ? 'rot' : ''
     const mJ = d.m + d.mLive, fJ = d.f + d.fLive, leer = d.morgen || (!d.fertig && !d.offen && !d.ohnePl)
     const sub = d.morgen ? 'morgen gibt es noch keinen P&amp;L' : `heute (Dubai) · ${d.fertig} beendet · ${d.offen} läuft${d.ohnePl ? ` · ${d.ohnePl} ohne P&amp;L` : ''}`
+    const fx = opt && Number(opt.fx) > 0 ? Number(opt.fx) : null, cid = (opt && opt.id) || 'apg-c-pl'
+    if(fx){
+      const fUsd = fJ / fx, netto = mJ + fUsd, kurs = `Kurs ${fx.toLocaleString('de-DE', { maximumFractionDigits: 4 })} € je $ (fx_usd_eur${opt.fxStand ? ', ' + opt.fxStand : ''}) — 1 € = ${(1 / fx).toLocaleString('de-DE', { maximumFractionDigits: 4 })} $`
+      const kpisFx = leer ? '' : `<div class="apg-plks">
+        ${kz('Master', apgUsd(mJ), farbe(mJ), `Master-P&L $ · beendet ${apgUsd(d.m)}${d.offen ? ` + laufend ${apgUsd(d.mLive)}` : ''}`)}
+        ${kz('Fusion', `${apgEur(fJ)} <small style="font-size:12px;font-weight:500">≈ ${apgUsd(fUsd)}</small>`, farbe(fJ), `Fusion-Hedge-P&L € · beendet ${apgEur(d.f)}${d.offen ? ` + laufend ${apgEur(d.fLive)}` : ''} · in $ umgerechnet: ${kurs}`)}
+        ${kz('Netto', apgUsd(netto), farbe(netto), `Master $ + Fusion $ (Fusion-Verlust zieht ab) · ${kurs}`)}</div>`
+      return `<div class="apg-karte apg-pl"><div class="apg-karte-kopf"><div><div class="apg-titel">P&amp;L von heute</div><div class="apg-sub">${sub}${d.morgen ? '' : ' · Winning Days'}</div></div>
+        ${kpisFx}<span class="apg-i" title="${escapeHtml(`Kumuliert über den Tag (Dubai), nur Winning Days der Sicht: Master-P&L $ und Fusion-P&L umgerechnet in $ auf einer Achse, je Trade-Ende ein Punkt; der letzte, gestrichelte Abschnitt rechnet die laufenden mit ihrem Live-Wert dazu. ${kurs}.`)}">i</span></div>
+        <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion in $</span></div>
+        <div class="apg-chart">${leer ? `<div class="apg-leer">${d.morgen ? 'morgen kommt erst' : 'heute noch kein Winning Day gestartet'}</div>` : `<canvas id="${cid}"></canvas>`}</div></div>`
+    }
     const kpis = leer ? '' : `<div class="apg-plks">
         ${kz('Master', apgUsd(mJ), farbe(mJ), `Master-P&L $ · beendet ${apgUsd(d.m)}${d.offen ? ` + laufend ${apgUsd(d.mLive)}` : ''}`)}
         ${kz('Fusion', apgEur(fJ), farbe(fJ), `Fusion-Hedge-P&L € · beendet ${apgEur(d.f)}${d.offen ? ` + laufend ${apgEur(d.fLive)}` : ''}`)}
@@ -80564,8 +80590,11 @@
         <div class="apg-legende"><span><i class="lila"></i>Master $</span><span><i class="tuerkis"></i>Fusion €</span></div>
         <div class="apg-chart">${leer ? `<div class="apg-leer">${d.morgen ? 'morgen kommt erst' : 'heute noch kein Trade gestartet'}</div>` : '<canvas id="apg-c-pl"></canvas>'}</div></div>`
   }
-  function apgPlMalen(root, d, ablage){
-    const cv = root.querySelector('#apg-c-pl'); if(!cv || !d || typeof window.Chart !== 'function') return
+  function apgPlMalen(root, d, ablage, opt){
+    const cv = root.querySelector('#' + ((opt && opt.id) || 'apg-c-pl')); if(!cv || !d || typeof window.Chart !== 'function') return
+    const fx = opt && Number(opt.fx) > 0 ? Number(opt.fx) : null
+    // $-Variante (WD): Fusion ÷ fx auf dieselbe $-Achse — Netto lässt sich dann direkt ablesen
+    if(fx) d = Object.assign({}, d, { punkte: d.punkte.map(p => Object.assign({}, p, { f: p.f / fx })) })
     const css = getComputedStyle(root), tok = n => (css.getPropertyValue(n) || '').trim()
     const sub = tok('--g-sub') || '#667085', gitter = tok('--g-gitter') || 'rgba(16,24,40,.06)', a1 = tok('--g-a1') || '#5447ce', a4 = tok('--g-a4') || '#16c8c6'
     const achse = { ticks: { color: sub, font: { size: 11 } }, grid: { color: gitter, drawTicks: false }, border: { display: false } }
@@ -80583,14 +80612,14 @@
     const grenzen = (lo, hi) => f >= 1 ? { min: 0 } : f <= 0 ? { max: 0 } : (lo === 0 && hi === 0) ? { min: -(1 - f) / f, max: 1 }
       : { min: Math.min(lo, -(1 - f) / f * hi) * 1.08, max: Math.max(hi, f / (1 - f) * -lo) * 1.08 }
     ablage.push(new Chart(cv.getContext('2d'), { type: 'line',
-      data: { datasets: [reihe('m', a1, 'Master', 'm'), reihe('f', a4, 'Fusion', 'f')] },
+      data: { datasets: [reihe('m', a1, 'Master', 'm'), reihe('f', a4, fx ? 'Fusion in $' : 'Fusion', fx ? 'm' : 'f')] },
       options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', axis: 'x', intersect: false },
         plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', titleColor: '#fff', bodyColor: '#e4e7ec', padding: 10, cornerRadius: 8, boxPadding: 4,
           callbacks: { title: c => c.length ? (d.punkte[c[0].dataIndex].jetzt ? `jetzt ${uhr(c[0].parsed.x)}${live ? ' · mit laufenden' : ''}` : c[0].dataIndex === 0 ? '00:00 · Tagesbeginn' : uhr(c[0].parsed.x)) : '',
-            label: c => ` ${c.dataset.label}: ${c.dataset.yAxisID === 'm' ? apgUsd(c.parsed.y) : apgEur(c.parsed.y)}` } } },
+            label: c => ` ${c.dataset.label}: ${c.dataset.yAxisID === 'm' ? apgUsd(c.parsed.y) : apgEur(c.parsed.y)}${fx && c.datasetIndex === 1 ? ` (${apgEur(c.parsed.y * fx)})` : ''}` } } },
         scales: { x: Object.assign({}, achse, { type: 'linear', min: 0, max, grid: { display: false }, ticks: { color: sub, font: { size: 10 }, stepSize: max > 12 ? 2 : 1, maxRotation: 0, callback: v => uhr(v) } }),
-          m: Object.assign({}, achse, grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, callback: v => apgUsd(v) } }),
-          f: Object.assign({}, achse, grenzen(fLo, fHi), { position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, callback: v => apgEur(v) } }) } } }))
+          m: Object.assign({}, achse, fx ? grenzen(Math.min(mLo, fLo), Math.max(mHi, fHi)) : grenzen(mLo, mHi), { position: 'right', ticks: { color: a1, font: { size: 11 }, includeBounds: false, callback: v => apgUsd(v) } }),
+          f: Object.assign({}, achse, grenzen(fLo, fHi), { display: !fx, position: 'left', grid: { display: false }, ticks: { color: a4, font: { size: 11 }, includeBounds: false, callback: v => apgEur(v) } }) } } }))
   }
   // Weg je Plan (route + Hedge) als kurzer Chip in der Konto-Zelle — nur Anzeige
   const apgWeg = z => { const r = String((z && z.route) || '').toLowerCase()
@@ -81010,7 +81039,9 @@
     Promise.resolve().then(() => window._admLaden()).catch(() => {}).then(() => { _apgFcfd.laedt = false; if(fcfdReiterOffen()) window._apIdsRender?.() })
   }
   // Bausteine für das WD-Gerüst (apgWdRender steht im Farmer-Block, der diesen Block nicht sieht) — nur Darstellung
-  window._apgBau = { apgKpi, apgPille, APG_ICON, apgKarte, apgChartsMalen, apgZahl, schlank: () => AP_SCHLANK }
+  // WD-PNL-CHART (30.10.2026): Radar-Zeilen (_tpl.lt) auch auf der WD-Seite frisch halten — höchstens alle 50 s (tplLiveLaden drosselt selbst)
+  const apgPlWd = passt => { try{ if(Date.now() - (_tpl.ltHolAt || 0) > 50000){ const vor = _tpl.ltHolAt; Promise.resolve(tplLiveLaden()).then(() => { if(_tpl.ltHolAt !== vor) window._apgWdNeu?.() }).catch(() => {}) } }catch(_){} return apgPlHeute({ tag: 'heute', nurWd: true, passt }) }
+  window._apgBau = { apgKpi, apgPille, APG_ICON, apgKarte, apgChartsMalen, apgZahl, schlank: () => AP_SCHLANK, apgPlWd, apgPlKarteHtml, apgPlMalen }
   function apGuestlyVerdrahten(root){
     root.querySelector('[data-apg-id]')?.addEventListener('change', e => apSichtSetzen(e.target.value || null))
     root.querySelector('[data-apg-firma]')?.addEventListener('change', e => { tplFirmaWaehlen(e.target.value || 'alle'); apIdsRender() })
