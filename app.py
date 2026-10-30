@@ -22495,7 +22495,9 @@ def _ap_deaktiviert_ids():
     try:
         ids = frozenset(str(z.get("id")) for z in _sb_all("accounts", {"select": "id", "deaktiviert_at": "not.is.null"}) or [])
     except requests.exceptions.HTTPError as e:
-        if "deaktiviert_at" not in str(getattr(e.response, "text", "") or e):
+        # nur die Antwort lesen: str(e) enthält die URL samt deaktiviert_at, auch bei 500 mit leerem Body (S2 zu 76497131)
+        txt = str(getattr(e.response, "text", "") or "")
+        if "deaktiviert_at" not in txt or ("42703" not in txt and "does not exist" not in txt):
             raise
         ids = frozenset()
     _ap_deakt_merk.update(bis=time.time() + 30, ids=ids)

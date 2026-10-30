@@ -46,6 +46,23 @@ app._sb_all = fehlt
 app._ap_deakt_merk.update(bis=0.0)
 check(app._ap_deaktiviert_ids() == frozenset(), "Spalte fehlt → niemand deaktiviert")
 app._ap_deakt_merk.update(bis=0.0)
+
+
+def leer(t, p):
+    # S2 zu 76497131: 500 mit leerem Body, str(e) enthält die URL samt deaktiviert_at — darf nicht als „Spalte fehlt“ gelten
+    e = requests.exceptions.HTTPError("500 Server Error for url: /rest/v1/accounts?deaktiviert_at=not.is.null")
+    e.response = type("L", (), {"text": ""})()
+    raise e
+
+
+app._sb_all = leer
+try:
+    app._ap_deaktiviert_ids()
+    fl = False
+except requests.exceptions.HTTPError:
+    fl = True
+check(fl, "HTTP-Fehler mit leerem Body fliegt durch, trotz deaktiviert_at in der URL")
+app._ap_deakt_merk.update(bis=0.0)
 app._sb_all = lambda t, p: (_ for _ in ()).throw(RuntimeError("DB weg"))
 try:
     app._ap_deaktiviert_ids()

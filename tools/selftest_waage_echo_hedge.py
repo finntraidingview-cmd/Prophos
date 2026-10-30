@@ -131,8 +131,10 @@ def planer_unveraendert(src, ns):
         ohne_tm = lambda t: re.sub(r"\n    if z\.get\(\"tage_mini\"\):\n        return False[^\n]*", "", t)   # noqa: E731
         # TAGESENDE TOPSTEP (30.10.2026, S3): ap_planen liest kette_te und wertet den letzten Ketten-Trade wie abgehakt — bewusst, Vergleich ohne diese zwei Stellen
         ohne_te = lambda t: re.sub(r"\n    plaene = \[dict\(p, status=\"completed\"[^\n]*\n[^\n]*for p in plaene\]", "", re.sub(r',"\n\s+"kette_te:mt5_baseline->kette->tagesende", "order"', '", "order"', t))   # noqa: E731
+        # KONTO DEAKTIVIERT (30.10.2026, S4): ap_planen nennt für deaktivierte Konten einen eigenen Grund, die Rechnung bleibt — Vergleich ohne diese Weiche
+        ohne_dk = lambda t: t.replace('AP_GRUND_DEAKTIVIERT if a.get("deaktiviert") else ', "")   # noqa: E731
         anders = [n for n in PLANER_FUNKTIONEN
-                  if (ohne_gruppe(ohne_te(fn(src, n))) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]
+                  if (ohne_gruppe(ohne_te(ohne_dk(fn(src, n)))) != ohne_gruppe(fn(alt, n)) if n == "ap_planen" else ohne_tm(fn(src, n)) != fn(alt, n))]
         ok(not anders, f"Planer-/Waage-Rechnung identisch mit {BASIS} ({anders or 'alle gleich'})")
     ok("ap_eh_richtungen_mischen" not in src and "eh_an" not in fn(src, "ap_planen"), "kein Würfel-Code, ap_planen kennt den Schalter nicht")
     W, N = ns["ap_klassen_waage"], ns["ap_waage_nachschub"]
