@@ -31493,6 +31493,9 @@
    * 0 Positionen (der Reader meldet flach nur mit Leer-Beweis), Zusammenfassung ≤ 3 s alt. REIN RECHNEND (Test-Haken window._kurzUmschalterBalance). */
   function kurzUmschalterBalance(st){
     if(!st || st.positionen_ok !== true || !Array.isArray(st.positionen) || st.positionen.length !== 0) return null
+    // nur der Puls-Chrome-Tab („puls-…") meldet flach ausschließlich mit Leer-Beweis — ein normaler Tab „t…" kann flach ohne Beweis melden
+    // (Reiter Orders/History); der Umschalter-Wert ist LIVE, ein falsches „0 Positionen" läge mitten im Trade fast immer im Fenster (Prüfer S2)
+    if(!/^puls-/.test(String(st.positionen_tab || '')) || !(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 3)) return null
     if(!(typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 3) || !st.summary || typeof st.summary !== 'object') return null
     const k = Object.keys(st.summary).find(x => /^usd$/i.test(String(x).trim()))
     const v = k != null ? tvGeldText(st.summary[k]) : null
@@ -52331,7 +52334,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1922'
+  const OS_TAB_BUILD = '2026-09-22.1923'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

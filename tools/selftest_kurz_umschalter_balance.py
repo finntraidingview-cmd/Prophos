@@ -48,7 +48,8 @@ def main():
     src = open(HTML, encoding="utf-8").read()
     i = src.index("const KURZ_TOL_PKT")
     tol = src[i:src.index("\n", i)]
-    flach_st = lambda usd, **u: dict({"positionen_ok": True, "positionen": [], "summary_alter_s": 1.2, "summary": summary(usd)}, **u)
+    flach_st = lambda usd, **u: dict({"positionen_ok": True, "positionen": [], "positionen_tab": "puls-abc123", "positionen_alter_s": 0.4,
+                                      "summary_alter_s": 1.2, "summary": summary(usd)}, **u)
     # Ausstieg 28.873,00 bei Long 1 MNQ: G&V (28873 − 28875,75) × 2 = −5,50, Gebühren 2 × 0,95 = −1,90 → USD = 149.356,54 − 7,40 = 149.349,14
     st_ok = flach_st("149,349.14")
     faelle_u = [
@@ -59,6 +60,10 @@ def main():
         ("Summary 5 s alt → nie", dict(st_ok, summary_alter_s=5), None),
         ("ohne USD-Feld → nie", dict(st_ok, summary={k: v for k, v in summary("x").items() if k != "USD"}), None),
         ("USD unlesbar → nie", flach_st("—"), None),
+        ("Tab t… (normaler Modus) mit 0 Positionen → nie", dict(st_ok, positionen_tab="tmvu6eqsyft4461"), None),
+        ("ohne positionen_tab → nie", {k: v for k, v in st_ok.items() if k != "positionen_tab"}, None),
+        ("Positions-Stand 5 s alt → nie", dict(st_ok, positionen_alter_s=5), None),
+        ("positionen_alter_s fehlt → nie", {k: v for k, v in st_ok.items() if k != "positionen_alter_s"}, None),
         ("kein Stand → nie", None, None),
     ]
     code = "\n".join(js_funktion(src, n) for n in ("tvGeldText", "tvBalanceAus", "kurzUmschalterBalance", "kurzEndeEntscheid")) + "\n" + tol + \
