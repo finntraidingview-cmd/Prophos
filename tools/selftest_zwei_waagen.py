@@ -14,12 +14,12 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "random": random}
     teile = []
-    for k in ("WD_FUTURES_FIRMEN", "WD_BALANCE_FUTURES", "AP_TYPEN", "AP_CFD_ROUTEN", "AP_KLASSE_TXT"):
+    for k in ("WD_FUTURES_FIRMEN", "WD_BALANCE_FUTURES", "AP_TYPEN", "AP_CFD_ROUTEN", "AP_KLASSE_TXT", "EH_TYPEN"):
         teile.append(re.search(rf"^{k} = .*$", src, re.M).group(0).split("  #")[0])
     for z in re.findall(r"^AP_WAAGE_[A-Z_]+ = .*$", src, re.M):
         teile.append(z.split("  #")[0])
     for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_an", "ap_waage_ohne_liste", "ap_waage_ohne", "ap_waage_folgt", "_ap_waage_gewicht", "_ap_waage_startet", "ap_waage_zeile_zaehlt",
-                 "_ap_eur_txt", "ap_waage_passt", "ap_waage_deckel", "_ap_waage_note", "ap_klassen_waage", "_ap_waage_kandidat", "_ap_waage_rs_frei",
+                 "_ap_eur_txt", "ap_waage_passt", "ap_waage_deckel", "_ap_waage_note", "ap_klassen_waage", "ap_eh_wird_hedgen", "_ap_waage_kandidat", "_ap_waage_rs_frei",
                  "_ap_waage_zielminute", "ap_waage_nachschub", "ap_waage_start_lage"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])

@@ -29486,6 +29486,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     brutto_einsatz = sum(abs(z["einsatz_eur"]) for z in offen_rows if z.get("einsatz_eur") is not None)
     return {"tag": tag, "mitternacht": mitternacht, "jetzt": jetzt, "jetzt_min": jetzt_min, "zeiten": zeiten, "firmen": firmen,
             "param": param, "ctx": ctx, "namen": namen, "offen": offen_rows, "geplant": geplant_rows, "folgetag": folge_rows,
+            "eh_an": eh_param(regeln)["an"],          # Echo-Hedge an: HT-CFD-Challenges auf mt5v2 hedgt eh_tick (Waage zieht sie nie vor)
             "starts_heute": starts_heute, "id_fest": id_fest, "hinweise": hinweise,
             "basis_netto": round(sum(ds), 3), "basis_brutto": round(sum(abs(d) for d in ds), 3),
             "basis_einsatz": round(basis_einsatz, 1), "brutto_einsatz": round(brutto_einsatz, 1)}
@@ -29768,11 +29769,23 @@ def ap_klassen_waage(stand, pc_lebt=None, extra=None):
     return out
 
 
-def _ap_waage_kandidat(z, klasse, richtung, jm, pc_lebt, schon, ohne=()):
+def ap_eh_wird_hedgen(z, eh_an):
+    """REIN RECHNEND (testbar): wird eh_tick diesen geplanten Plan vor dem Start auf Echo mit Hedge umstellen? Schalter an, Echo V2
+    (mt5v2), CFD-Challenge (EH_TYPEN), kein Tage-Mini. Dann zählt er in der Waage nach dem Start als gehedgt (0)."""
+    return bool(eh_an) and str(z.get("route") or "") == "mt5v2" and str(z.get("typ") or "") in EH_TYPEN and not z.get("tage_mini")
+
+
+def _ap_waage_kandidat(z, klasse, richtung, jm, pc_lebt, schon, ohne=(), eh_an=False):
     """Darf dieser geplante Plan als Gegentrade vorgezogen werden? Nur änderbare Auto-Pläne (keine Hand-Werte, keine Kette,
     nicht fällig, keine Hand-Richtung) der eigenen Kontoarten, später als jetzt + 3 min, heute, PC lebt, kein roter Start-Fehler.
-    Firmen ohne Waage (Apex, 19.10.2026) nie — ein 50-€-Konto ist kein Gegengewicht."""
+    Firmen ohne Waage (Apex, 19.10.2026) nie — ein 50-€-Konto ist kein Gegengewicht.
+    Nie einen Plan, den eh_tick gleich hedgt (30.10.2026, Befund S3 „nur Shorts"): er zählte danach als gehedgt 0, die Waage sah
+    wieder „1 Long, kein Short" und zog den nächsten Short vor — zehn Shorts in 30 min. Ein Gegentrade mit Hedge gleicht nichts aus.
+    Richtungen und Startzeiten des Planers bleiben unberührt (Finn 30.10.2026: „An der Logik, wie viele Longs und wie viele Shorts,
+    soll sich nichts ändern … Der alte Trade-Planer war perfekt"); die Waage verschiebt nur keine solchen Pläne mehr."""
     if not (z.get("aenderbar") and z.get("auto_plan")) or z.get("gehedgt") or z.get("folgetag") or ap_waage_ohne(z, ohne):
+        return False
+    if ap_eh_wird_hedgen(z, eh_an):
         return False
     if str(z.get("typ") or "") not in AP_TYPEN or z.get("richtung") != richtung or z.get("start_min") is None:
         return False
@@ -29883,7 +29896,7 @@ def ap_waage_nachschub(stand, waage, rnd, pc_lebt=None, dubai_min=0.0, nur_klass
         schwer = "sell" if leicht == "buy" else "buy"
         schwer_firmen = set((w.get("firmen") or {}).get(schwer) or ())
         luecke = abs(float(w.get("long_eur") or 0) - float(w.get("short_eur") or 0))
-        kand = [z for z in stand.get("geplant") or () if _ap_waage_kandidat(z, kl, leicht, jm, pc_lebt, schon, ohne)]
+        kand = [z for z in stand.get("geplant") or () if _ap_waage_kandidat(z, kl, leicht, jm, pc_lebt, schon, ohne, stand.get("eh_an"))]
         kand.sort(key=lambda z: (0 if z.get("bestaetigt") else 1, 0 if z.get("firma_key") not in schwer_firmen else 1,
                                  float(z["start_min"]), str(z.get("plan_id"))))
         dazu, n = 0.0, 0
