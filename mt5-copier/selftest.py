@@ -2037,6 +2037,7 @@ def main():
     results.append(test_puls_fehler_1850())
     results.append(test_puls_fehler_1887())
     results.append(test_puls_fehler_1924())
+    results.append(test_puls_fehler_1953())
     results.append(test_puls_fehler_1698())
     results.append(test_cdp_connect_zweiter_versuch())
     results.append(test_tsx_k0())
@@ -11142,6 +11143,49 @@ def test_puls_fehler_1850():
         "tvclose: Rückfrage-Riegel, Knopf-Beweis und Doktrin (kein blinder zweiter Klick) unverändert, Wartezeiten nur über _warte")
     chk("Flach nicht bewiesen:" in q and "cdp_meldung_text(m) for m in neu_c" in q, "tvclose: Diagnose-Zeile im Unklar-Fall (Zeile/Tabelle/Meldungen)")
     print(("✓" if ok else "✗") + " Puls-Fehler .1850: Close flach — leeres Konto zeigt keine Tabelle → Beweis über TradingViews Close-Fill-Meldung, sonst UNKLAR mit Diagnose")
+    return ok
+
+
+def test_puls_fehler_1953():
+    """Routine „Puls-Fehler" 30.10.2026 20:35 Dubai (.1953): Muster „m5order: abbruch vor dem order-knopf: symbol '#' steht nicht
+    bestaetigt im dialog (gelesen: 'eurusd …')" 4× auf 4 PCs in 2 Tagen — bei 3 davon lief laut trade_plans ein zweiter Echo-Start auf
+    demselben PC zur selben Zeit (zwei Bots tippen in zwei Terminals, Tasten gehen ans Vordergrund-Fenster). Jetzt eine PC-weite
+    Tipp-Sperre (benannter Mutex) um Order- und Close-Lauf, Freigabe erst nach dem Heimweg; belegt → gestreut warten, nach
+    ECHO_TIPP_WARTE_MAX_S retry_ok „nichts gesendet". Riegel unverändert. Kein Windows: Sperre 'unbekannt' = wie bisher."""
+    import order_bot as ob, inspect as _i
+    ok = True
+
+    def chk(bed, text):
+        nonlocal ok
+        if not bed:
+            print("  ✗ Puls-Fehler .1953: " + text)
+            ok = False
+    u = ob.echo_tipp_sperre_urteil
+    chk(u(0, 0) == "frei" and u(0x80, 3) == "frei" and u("0", 0) == "frei", "WAIT_OBJECT_0 / WAIT_ABANDONED (Vorbesitzer tot) = frei")
+    chk(u(0x102, 0) == "warten" and u(0x102, 149.9) == "warten", "WAIT_TIMEOUT vor der Grenze = warten")
+    chk(u(0x102, 150) == "aufgeben" and u(0x102, 999, max_s=10) == "aufgeben", "WAIT_TIMEOUT ab der Grenze = aufgeben")
+    chk(u(None, 0) == "unbekannt" and u(0xFFFFFFFF, 0) == "unbekannt" and u("x", 0) == "unbekannt", "kein Windows / WAIT_FAILED = unbekannt")
+    chk(ob.ECHO_TIPP_WARTE_MAX_S <= 180, "Wartegrenze unter dem 300-s-Deckel des Panels (Warten + Lauf ≤ 300 s)")
+    # ohne Windows: kein ctypes.windll → 'unbekannt', nichts gehalten, Freigabe wirft nicht
+    trail = []
+    chk(ob._echo_tipp_sperre_holen(trail) == "unbekannt" and trail == [] and ob._ECHO_TIPP.get("gehalten") is False, "ohne Windows: unbekannt, Spur leer")
+    ob._echo_tipp_sperre_frei()
+    chk(ob._ECHO_TIPP.get("h") is None and ob._ECHO_TIPP.get("gehalten") is False, "Freigabe ohne Sperre harmlos")
+    a = ob._echo_tipp_sperre_antwort(151.2, ["x"])
+    chk(a["ok"] is False and a["retry_ok"] is True and a["code"] == "puls_beschaeftigt" and a["grund"] == "pc_tipp_sperre"
+        and "nichts gesendet" in a["msg"] and "151 s" in a["msg"] and a.get("trail"), "Aufgeben-Antwort: retry_ok, nichts gesendet, kein Fehlerfoto-Code")
+    chk("puls_beschaeftigt" in ob.FEHLERFOTO_CODES_OHNE, "Belegt-Antwort bekommt nie ein Fehlerfoto")
+    # Reihenfolge im Code: Sperre VOR Login/Lesen in run und run_close, Freigabe in main NACH dem Heimweg
+    q_run = _i.getsource(ob.run)
+    chk(0 < q_run.find("_echo_tipp_sperre_holen(trail)") < q_run.find("_login_dann_lesen("), "run: Sperre vor Login/Lesen")
+    q_close = _i.getsource(ob.run_close)
+    chk(0 < q_close.find("_echo_tipp_sperre_holen()") < q_close.find("_login_dann_lesen("), "run_close: Sperre vor Login/Lesen")
+    q_main = _i.getsource(ob.main)
+    chk(0 < q_main.find("heim = _zurueck_zu_prophos()") < q_main.find("_echo_tipp_sperre_frei()") < q_main.find("print(json.dumps(res))"),
+        "main: Freigabe nach dem Heimweg, vor der Antwort")
+    chk("_warte(" in _i.getsource(ob._echo_tipp_sperre_holen) and "time.sleep" not in _i.getsource(ob._echo_tipp_sperre_holen),
+        "Warten nur über _warte (Zufalls-Streuung), kein fester sleep")
+    print(("✓" if ok else "✗") + " Puls-Fehler .1953: PC-Tipp-Sperre — Urteil, Antwort, Reihenfolge, ohne Windows unverändert")
     return ok
 
 

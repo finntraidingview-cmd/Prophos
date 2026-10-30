@@ -51058,7 +51058,8 @@
   // REIN RECHNEND (window._mt5OrderWiederholen, 30.10.2026): master-order-Antwort + Sekunden seit dem ersten Versuch → erneut versuchen?
   // Nur bei retry_ok (beweisbar nichts gesendet) und Terminal-Gründen; terminal_heilt bis 180 s, sonst 90 s — wie der Echo-V2-Weg
   function mt5OrderWiederholen(r, seitMs){
-    const wartbar = !!(r && !r.ok && r.retry_ok === true && (r.grund === 'terminal_heilt' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
+    // pc_tipp_sperre (30.10.2026, Routine „Puls-Fehler“ .1953): ein anderer Echo-Lauf an diesem PC tippt noch — der Bot hat gewartet und nichts gesendet, 90 s wie Terminal-Gründe
+    const wartbar = !!(r && !r.ok && r.retry_ok === true && (r.grund === 'terminal_heilt' || r.grund === 'pc_tipp_sperre' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
     return wartbar && seitMs <= (r.grund === 'terminal_heilt' ? 180000 : 90000)
   }
   window._mt5OrderWiederholen = mt5OrderWiederholen   // Test-Haken
@@ -53339,7 +53340,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1952'
+  const OS_TAB_BUILD = '2026-09-22.1953'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

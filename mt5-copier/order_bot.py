@@ -12806,6 +12806,95 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     return erg
 
 
+# ══ PC-TIPP-SPERRE (Routine „Puls-Fehler" 30.10.2026 20:35 Dubai, .1953) ══
+# ANLASS: Muster „m5order: abbruch vor dem order-knopf (nichts platziert): symbol '#' steht nicht bestaetigt im dialog (gelesen:
+# 'eurusd, …')" — 4 Fälle in 2 Tagen auf 4 PCs. Bei 3 davon (pc-xxxxxx 29.10. 09:27, 30.10. 04:15 und 14:58 UTC) lief laut
+# trade_plans zur selben Zeit ein ZWEITER Echo-Start auf demselben PC (Claims 2–40 s auseinander, Läufe 20–110 s): zwei Bots tippen in
+# zwei Terminals, Tasten gehen immer ans Vordergrund-Fenster — der eine holt seinen F9-Dialog nach vorn (.1887), der andere zieht
+# sein Terminal zurück, das Symbol-Feld bleibt 'EURUSD'. Dazu passt „F9-TP-Ruecklesen zeigt '2.00' statt 28408.80" eine Minute
+# später am selben PC (Tasten verschluckt → UNKLAR). Das Panel sperrt nur je Instanz (MASTER_ORDER_LOCKS je config_file), der Heimweg
+# „zurueck in Prophos" jedes Laufs holt obendrein Chrome nach vorn. Jetzt EIN benannter Windows-Mutex je PC um den ganzen Echo-Lauf
+# (Order und Close, bis nach dem Heimweg): der zweite Lauf wartet in _warte-Takten, bis der erste fertig ist; dauert es länger als
+# ECHO_TIPP_WARTE_MAX_S, antwortet er retry_ok „nichts gesendet, gleich erneut" (grund pc_tipp_sperre, kein Fehlerfoto). Stirbt ein
+# Bot, gibt Windows den Mutex frei (WAIT_ABANDONED zählt als frei). Ohne Windows/ctypes → 'unbekannt' = wie bisher ohne Sperre.
+# Riegel (Rücklese-Beweis, Doktrin „nie blind zweimal") unverändert — die Sperre reiht nur ein.
+ECHO_TIPP_MUTEX = "Local\\ProphosEchoTipp"
+ECHO_TIPP_WARTE_MAX_S = 150.0
+_ECHO_TIPP = {"h": None, "gehalten": False}
+
+
+def echo_tipp_sperre_urteil(rc, gewartet_s, max_s=ECHO_TIPP_WARTE_MAX_S):
+    """REIN RECHNEND (testbar): rc = Rückgabe von WaitForSingleObject (0 = WAIT_OBJECT_0, 0x80 = WAIT_ABANDONED = Vorbesitzer tot,
+    0x102 = WAIT_TIMEOUT = belegt; None/anderes = kein Windows oder Fehler) → 'frei' (Sperre gehört uns), 'warten' (belegt, noch Zeit),
+    'aufgeben' (belegt, gewartet_s ≥ max_s), 'unbekannt' (ohne Sperre weiter, wie bisher)."""
+    try:
+        rc = int(rc)
+    except (TypeError, ValueError):
+        return "unbekannt"
+    if rc in (0, 0x80):
+        return "frei"
+    if rc == 0x102:
+        return "aufgeben" if float(gewartet_s or 0) >= float(max_s) else "warten"
+    return "unbekannt"
+
+
+def _echo_tipp_sperre_holen(trail=None):
+    """PC-weite Tipp-Sperre holen (s. Block oben). Wartet gestreut (_warte 1.5 + 0..1.0 s) bis frei oder ECHO_TIPP_WARTE_MAX_S;
+    Wartezeit steht in der Spur. → 'frei' | 'aufgeben' | 'unbekannt'. Wirft nie."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateMutexW(None, False, ECHO_TIPP_MUTEX)
+        if not h:
+            return "unbekannt"
+        _ECHO_TIPP["h"] = h
+        t0 = time.time()
+        gemeldet = False
+        while True:
+            rc = k32.WaitForSingleObject(h, 0)
+            u = echo_tipp_sperre_urteil(rc, time.time() - t0)
+            if u == "warten":
+                if not gemeldet and trail is not None:
+                    trail.append("PC-Tipp-Sperre belegt (anderer Echo-Lauf an diesem PC tippt gerade) — warte")
+                gemeldet = True
+                _warte(1.5, 1.0)
+                continue
+            if u == "frei":
+                _ECHO_TIPP["gehalten"] = True
+                if gemeldet and trail is not None:
+                    trail.append(f"PC-Tipp-Sperre frei nach {time.time() - t0:.0f} s")
+            return u
+    except Exception:
+        return "unbekannt"
+
+
+def _echo_tipp_sperre_frei():
+    """Sperre nach dem Heimweg freigeben (main, jeder Ausgang). Wirft nie; ohne Sperre nichts zu tun."""
+    h = _ECHO_TIPP.pop("h", None)
+    gehalten = _ECHO_TIPP.pop("gehalten", False)
+    _ECHO_TIPP.update(h=None, gehalten=False)
+    if not h:
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        if gehalten:
+            k32.ReleaseMutex(h)
+        k32.CloseHandle(h)
+    except Exception:
+        pass
+
+
+def _echo_tipp_sperre_antwort(gewartet_s, trail=None):
+    """Antwort, wenn die Sperre nach ECHO_TIPP_WARTE_MAX_S noch belegt ist: nichts gesendet, der Tab darf gleich erneut."""
+    r = {"ok": False, "retry_ok": True, "code": "puls_beschaeftigt", "grund": "pc_tipp_sperre",
+         "msg": f"Puls tippt an diesem PC gerade an einem anderen Terminal (PC-Tipp-Sperre seit {gewartet_s:.0f} s belegt) — "
+                "nichts gesendet, gleich erneut."}
+    if trail is not None:
+        r["trail"] = _spur(trail)
+    return r
+
+
 def run(cfg_path, cmd):
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -12849,6 +12938,11 @@ def run(cfg_path, cmd):
     trail = _StempelSpur()
     _spur_wache(trail, "v2order_zeit")   # Spur-Wache (23.10.2026): die Spur überlebt den 300-s-Deckel des Panels, s. _spur_wache
     trail.append(maus_hand_text())
+    # PC-TIPP-SPERRE (30.10.2026, s. echo_tipp_sperre_urteil): nie zwei Echo-Läufe gleichzeitig an einem PC — vor dem ersten Schritt,
+    # der ein Fenster anfasst (Login-Dialog, Terminal betreten, F9). Freigabe in main nach dem Heimweg.
+    _sperre_t0 = time.time()
+    if _echo_tipp_sperre_holen(trail) == "aufgeben":
+        return _echo_tipp_sperre_antwort(time.time() - _sperre_t0, trail)
     # 1) LESEND: Kurs + Positionsstand VORHER (+ Login-Kontrolle)
     lese = _login_dann_lesen(path, expected, trail=trail, symbol=symbol)
     if "fehler" in lese:
@@ -13727,6 +13821,10 @@ def run_close(cfg_path, cmd):
     ticket = int(cmd["ticket"])
     symbol = str(cmd.get("symbol") or "").strip()
 
+    # PC-TIPP-SPERRE (30.10.2026, s. echo_tipp_sperre_urteil): auch der Close tippt/klickt ins Vordergrund-Fenster
+    _sperre_t0 = time.time()
+    if _echo_tipp_sperre_holen() == "aufgeben":
+        return _echo_tipp_sperre_antwort(time.time() - _sperre_t0)
     # 1) LESEND: gibt es die Position ueberhaupt (noch)? Login-Guard inklusive.
     lese = _login_dann_lesen(path, expected)
     if "fehler" in lese:
@@ -28770,6 +28868,7 @@ def main():
     # Abbruch, SL/TP-Warnung) denselben Heimweg nimmt. mousetest/inspect
     # bleiben bewusst aussen vor: wer diagnostiziert, will am Terminal bleiben.
     heim = _zurueck_zu_prophos()
+    _echo_tipp_sperre_frei()   # PC-Tipp-Sperre erst NACH dem Heimweg frei (30.10.2026): der nächste Echo-Lauf am PC darf jetzt tippen
     res["trail"] = (res["trail"] + " → " + heim) if res.get("trail") else heim
     print(json.dumps(res))
     return 0 if res.get("ok") else 1
