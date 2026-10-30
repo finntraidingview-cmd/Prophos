@@ -226,6 +226,20 @@ def code_holen(pfad_url, timeout=15):
         return None
 
 
+def tab_wache_antwort(pid, pong, ping, jetzt):
+    """REIN RECHNEND (testbar): /api/puls-klick → ({tab_wache, ping?}, Antwort-Zeile für tab_pong.json | None). Nur die Marke DIESES Plans, nur jünger als 5 min."""
+    felder, zeile = {"tab_wache": 1}, None
+    try:
+        frisch = isinstance(ping, dict) and pid and str(ping.get("plan_id") or "") == pid and jetzt - float(ping.get("at") or 0) <= 300
+    except (TypeError, ValueError):
+        frisch = False
+    if frisch and ping.get("marke"):
+        felder["ping"] = str(ping["marke"])
+        if pong and pong == felder["ping"]:
+            zeile = {"plan_id": pid, "marke": pong, "at": jetzt}
+    return felder, zeile
+
+
 def richtung_frei(plan_id, richtung, timeout=6):
     """HARTE LINIE VOR JEDEM SCHARFEN KLICK (13.10.2026, Finn: „wenn der Wächter ausfällt … dass da nie was passieren kann"):
     fragt Railway POST /richtung/frei (X-Code-Token wie /code/stand; dort service role -> DB-Funktion prophos_gegenrichtung_frei):
@@ -4493,9 +4507,19 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(urlparse(self.path).query)
             pid = (q.get("plan_id") or [""])[0].strip()
             d = read_json(os.path.join(HERE, "puls_ergebnisse", "letzt_order.json"), None)
+            # TAB-WÄCHTER (30.10.2026, order_bot tab_wache_warten): Marke des Bots mitgeben, Antwort des Tabs für den Bot ablegen; tab_wache:1 = dieses Panel kann es
+            wache, pong = tab_wache_antwort(pid, (q.get("pong") or [""])[0].strip(), read_json(os.path.join(HERE, "puls_ergebnisse", "tab_ping.json"), None), time.time())
+            if pong:
+                try:
+                    ziel = os.path.join(HERE, "puls_ergebnisse", "tab_pong.json")
+                    with open(ziel + ".tmp", "w", encoding="utf-8") as f:
+                        json.dump(pong, f)
+                    os.replace(ziel + ".tmp", ziel)
+                except OSError as e:
+                    print(f"[panel] tab_pong nicht geschrieben: {e}", flush=True)   # der Bot sieht dann keine Antwort und sendet nicht
             if not pid or not isinstance(d, dict) or str(d.get("plan_id") or "") != pid:
-                return self._send(200, json.dumps({"ok": False, "plan_id": pid or None}))
-            return self._send(200, json.dumps({"ok": True, "paket": d}, ensure_ascii=False, default=str))
+                return self._send(200, json.dumps(dict({"ok": False, "plan_id": pid or None}, **wache)))
+            return self._send(200, json.dumps(dict({"ok": True, "paket": d}, **wache), ensure_ascii=False, default=str))
         if path == "/api/pc-id":
             # PC-Kennung für alle Browser-Profile dieses PCs (25.09.2026) — null, solange keine eingetragen ist
             import socket

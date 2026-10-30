@@ -8586,7 +8586,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
 
 
 TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf",
-                     "plan_id")        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
+                     "plan_id",        # 29.09.2026: Plan-ID für puls_ergebnis (Ergebnis überlebt einen neu geladenen Prophos-Tab)
+                     "tab_wache")      # 30.10.2026: Orbit mit Fusion-Hedge — vor dem Senden muss der Prophos-Tab antworten (tab_wache_warten)
 
 
 def tv_bruecke_auspacken(cmd):
@@ -24584,6 +24585,87 @@ def _puls_ergebnis_senden(art, stufe, cmd, res, trail):
         pass
 
 
+# ══ TAB-WÄCHTER (30.10.2026, Finn: „Pre-Check beim Start; ist der Tab während des Starts nicht erreichbar, wird die Order abgebrochen oder gewartet, bis er
+# wieder erreichbar ist"). Anlass: 4 Orbit-Hedges 262–296 s zu spät, Tab im Lauf auf einen Timer-Takt je Minute gedrosselt (Chris 30.10. ab 11:54:24 exakt :24), die
+# Früh-Wache fragte nie nach dem Klick. Beweis ist eine ANTWORT AUF DIESEN LAUF, kein alter Herzschlag: der Bot legt eine Zufallsmarke ab (tab_ping.json), die
+# Früh-Wache des Tabs holt sie über /api/puls-klick und gibt sie bei der nächsten Abfrage zurück (tab_pong.json, schreibt das Panel). Frisch = zwei Marken nacheinander,
+# jede in ≤ 5 s: gemessen 40 Hedge-Läufe 29./30.10. (Edge-Log, Abstand der Früh-Wache-Abfragen) höchstens 3,5 s bei wachem Tab, keiner ≥ 5 s; gedrosselt 60 s. Eine
+# Einzelantwort reicht nicht: ein gedrosselter Tab kann zufällig gerade am Minuten-Takt liegen. Keine Antwort: gestreut weiter bis 60 s, dann Abbruch vor dem Klick.
+# Der Wächter verhindert nur das Senden — nach dem Senden-Klick läuft er nie, schließt und ändert nichts. Nur mit Marke tab_wache (Tab + Panel können es). ══
+TAB_WACHE_MAX_S = 60.0
+TAB_WACHE_ANTWORT_S = 5.0
+TAB_WACHE_NOETIG = 2
+TAB_WACHE_KLICK_BIS_S = 230.0   # Panel beendet den Bot nach 260 s: der Klick braucht danach noch Zeit für den Beweis — die Wartezeit vor dem Senden wird darauf gekappt
+TAB_WACHE_MIN_S = 8.0           # reicht einem wachen Tab (zwei Marken, gemessen ≤ 3,5 s je Abfrage); ist auch das zu viel, bricht der Lauf eben vor dem Klick ab
+# Kein Chrome-Neustart nach diesem Abbruch (PULS_NEUSTART_NIE): das Problem ist der Tab, nicht das Puls-Chrome.
+_TAB_WACHE_T0 = time.time()     # Prozess-Start, je Bot-Lauf ein Prozess
+
+
+def tab_wache_grenze(verstrichen):
+    """REIN RECHNEND (testbar): höchste Wartezeit in s nach 'verstrichen' s Laufzeit."""
+    return max(TAB_WACHE_MIN_S, min(TAB_WACHE_MAX_S, TAB_WACHE_KLICK_BIS_S - float(verstrichen)))
+
+
+def tab_wache_warten(schreibe_ping, lies_pong, uhr=time.time, schlaf=time.sleep, zufall=random.random, max_s=TAB_WACHE_MAX_S):
+    """REIN (Datei und Uhr als Parameter, testbar): → (erreichbar, Text). schreibe_ping(marke), lies_pong() → Marke der letzten Antwort oder None.
+    Wirft schreibe_ping/lies_pong, gilt das als „keine Antwort" (kein Beweis = kein Senden)."""
+    t0, gut, n = uhr(), 0, 0
+    letzt = None
+    while uhr() - t0 < max_s:
+        n += 1
+        marke = f"{int(uhr() * 1000):x}-{n}-{int(zufall() * 1e9):x}"
+        ab = uhr()
+        try:
+            schreibe_ping(marke)
+        except Exception:
+            schlaf(0.5 + zufall())
+            continue
+        beantwortet = False
+        while uhr() - ab <= TAB_WACHE_ANTWORT_S and uhr() - t0 < max_s:
+            try:
+                beantwortet = lies_pong() == marke
+            except Exception:
+                beantwortet = False
+            if beantwortet:
+                break
+            schlaf(0.1 + zufall() * 0.15)
+        if beantwortet:
+            gut, letzt = gut + 1, round(uhr() - ab, 2)
+            if gut >= TAB_WACHE_NOETIG:
+                return True, f"Prophos-Tab antwortet ({gut} Marken, letzte in {letzt} s, nach {round(uhr() - t0, 1)} s)"
+        else:
+            gut = 0                                   # keine Antwort in der Frist: wieder zwei am Stück verlangen
+            schlaf(0.5 + zufall())
+    return False, f"Prophos-Tab antwortet nicht ({int(max_s)} s gewartet, verlangt: {TAB_WACHE_NOETIG} Antworten je ≤ {int(TAB_WACHE_ANTWORT_S)} s)"
+
+
+def _tab_wache_pruefen(cmd, trail, stufe):
+    """Datei-Weg zu tab_wache_warten: Marke puls_ergebnisse/tab_ping.json (atomar), Antwort tab_pong.json. → None = erreichbar, sonst Text. Ohne Marke tab_wache None."""
+    if str(cmd.get("tab_wache") or "") not in ("1", "true", "True"):
+        return None
+    ordner = os.path.join(_AUGEN_HIER, "puls_ergebnisse")
+    ping, pong = os.path.join(ordner, "tab_ping.json"), os.path.join(ordner, "tab_pong.json")
+    plan_id = str(cmd.get("plan_id") or "")
+
+    def schreibe(marke):
+        os.makedirs(ordner, exist_ok=True)
+        with open(ping + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({"plan_id": plan_id, "marke": marke, "at": time.time()}, f)
+        os.replace(ping + ".tmp", ping)
+
+    def lies():
+        with open(pong, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d.get("marke") if str(d.get("plan_id") or "") == plan_id else None
+    ok, text = tab_wache_warten(schreibe, lies, max_s=tab_wache_grenze(time.time() - _TAB_WACHE_T0))
+    try:
+        os.remove(ping)
+    except OSError:
+        pass
+    trail.append(f"Tab-Wächter {stufe}: {text}")
+    return None if ok else text
+
+
 def modus_tvkette_cdp(cmd):
     """tvkonto über das Puls-Chrome (CDP): Konto (mit Auto-Login) → Ticket ausfüllen und beweisen → mit Marke 'scharf' EIN Klick
     auf den Senden-Knopf + Beweis (K4, Block-Kopf). Ohne 'scharf' Probelauf wie K2."""
@@ -24625,6 +24707,19 @@ def modus_tvkette_cdp(cmd):
     trail.append("Weg: Puls-Chrome (CDP" + (", SCHARF" if scharf and symbol else ", Probelauf — kein Senden" if symbol else "") + ")")
     if _handlauf_aktiv():                    # K3-Handlauf (29.09.2026): nicht ins laufende Ticket/Dropdown klicken
         return raus("handlauf", "K3-Handlauf läuft im Puls-Chrome — nichts geklickt, bitte gleich erneut anstoßen.", "sperre")
+
+    def tab_abbruch(text):
+        # Der Tab bekommt die Antwort womöglich nie: Railway alarmiert aus dieser Zeile, der neu geladene Tab legt daraus den Start-Fehler an
+        res.update(code="tab_nicht_erreichbar", schritt="tab_nicht_erreichbar", gesendet=False, retry_ok=True,
+                   msg=f"{text} — nichts gesendet, Plan bleibt Geplant.")
+        res["trail"] = " > ".join(trail)
+        _puls_ergebnis_senden("order", "ende", cmd, res, trail)
+        _puls_diagnose_senden(spur=trail, schritt="tab_nicht_erreichbar")
+        return raus(res["code"], res["msg"], res["schritt"])
+    if scharf and symbol:
+        tab_text = _tab_wache_pruefen(cmd, trail, "vor dem Lauf")
+        if tab_text:
+            return tab_abbruch(tab_text)
     try:
         s = sitz[0] = _cdp_sitzung_holen(cmd, trail)          # kein TradingView-Tab offen → einer wird geöffnet (Auto-Login)
         ok, code, msg, st, extra = _cdp_konto_mit_login(sitz, ext, opts, cmd, trail, res, frisch=True)
@@ -24666,6 +24761,10 @@ def modus_tvkette_cdp(cmd):
             return raus("", f"PROBELAUF (CDP): Ticket steht — Knopf zeigt '{str(kk.get('text'))[:50]}', {tpsl}. NICHT gesendet.",
                         "probe", tv_symbol=kk.get("symbol"))
 
+        # Tab-Wächter VOR dem frischen Blick (30.10.2026): dauert das Warten, beruhen Rücklesung, Knopf und Konto trotzdem auf dem Stand direkt vor dem Klick
+        tab_text = _tab_wache_pruefen(cmd, trail, "vor dem Senden")
+        if tab_text:
+            return tab_abbruch(tab_text)
         # ═══ K4: AB HIER UNUMKEHRBAR — vorher alles noch einmal aus EINEM frischen Blick, dann genau EIN Klick ═══════════════
         _warte(0.3, 0.2)
         st = s.stand(opts)
@@ -27750,7 +27849,7 @@ PULS_NEUSTART_NIE_VOR_KLICK = frozenset(("ticket", "konto", "konto_nicht_erreich
 # konto_offen (08.10.2026, KONTO OFFEN): eine offene (Hand-)Position am Konto ist kein Chrome-Problem — nie neu starten, nie ein zweiter
 # Versuch im selben Lauf; neu eingeplant wird über start_fehler/sfTick
 PULS_NEUSTART_NIE = frozenset(("befehl", "handlauf", "sperre", "cdp_folgt", "markt_zu", "zeit", "haenger", "abgelehnt",
-                               "puls_beschaeftigt", "bot_fehlt", "konto_offen"))
+                               "puls_beschaeftigt", "bot_fehlt", "konto_offen", "tab_nicht_erreichbar"))
 
 
 def neustart_entscheid(res, weg, verstrichen_s, schon=False, lesung_moeglich=True, budget_s=None, min_rest_s=None,

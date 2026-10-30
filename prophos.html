@@ -22654,6 +22654,23 @@
     document.addEventListener('visibilitychange', () => { if(!document.hidden && !bwTimer) bwPruefen() })
   })()
 
+  /* KONTENLISTE VOR „KEINE EXTERNAL ID" (30.10.2026, Vorfall Marco Plan 27ef28f4: Konto 14:32:28 angelegt, die DB hatte die ID, der Tab lud accounts nur
+   * beim Boot → 14:33–14:34 drei Fehlstarts „hat keine External ID"). Fehlt das Konto oder seine ID, die Liste einmal neu laden und erneut suchen;
+   * höchstens einmal je 15 s, damit ein Konto ohne ID die Liste nicht bei jedem Start neu lädt. → Konto oder undefined */
+  let _tpKontoNeuAt = 0, _tpKontoNeuP = null
+  async function tpKontoMitExtId(plan){
+    const such = () => (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    const a = such()
+    if(a && a.externalId && String(a.externalId).trim()) return a
+    if(_tpKontoNeuP){ await _tpKontoNeuP; return such() }   // paralleler Start desselben Kontos wartet auf den laufenden Reload
+    if(Date.now() - _tpKontoNeuAt < 15000) return a
+    _tpKontoNeuAt = Date.now()
+    _tpKontoNeuP = loadAccountsFromSupabase()
+    try{ await _tpKontoNeuP }finally{ _tpKontoNeuP = null }
+    return such()
+  }
+  window._tpKontoMitExtId = tpKontoMitExtId   // Test-Haken
+
   /* ========== DASHBOARD MOUNT ========== */
   // Tables und KPIs werden jetzt direkt in renderAccounts() / renderOverviewKpis()
   // gerendert (aus Supabase-Daten). Diese Funktion bleibt als Hook für
@@ -29100,6 +29117,39 @@
     const pid = String(plan.id), pid8 = pid.slice(0, 8)
     return liste.find(q => q && q.ticket && (String(q.plan_id || '') === pid || String(q.plan_id || q.plan8 || '').slice(0, 8) === pid8)) || null
   }
+  /* KEIN SPÄTER HEDGE VON SELBST (30.10.2026, Master nach Marco Plan 27ef28f4: Order 14:38:49, Tab hing, Tab-Neustart 14:43:16, Nachholen öffnete
+   * 14,9 Lot um 14:43:42 — Finn hatte schon von Hand gehedgt und schloss die Verdopplung von Hand; 4 Fälle in 2 Tagen, alle 262–296 s Verzug).
+   * Ist der Order-Klick älter als 90 s, öffnet der Tab nicht mehr selbst: Status 'uebersprungen' + grund_code 'zu_spaet' am Plan → Hinweis
+   * „Hedge fehlt, von Hand prüfen" auf der Karte, 🔴 an die Master-IDs (app.py alarm_ereignisse). Gilt für alle Selbst-Wege (Früh-Wache, Lauf-Ende,
+   * Nachholen, Selbstheilung, Wiederholschleife); nicht für den Knopf „Hedge öffnen" (manuell) und die Rückkehr-Wache (Reader sieht den Master
+   * wieder, Hedge war eben noch offen). Unter 90 s alles wie bisher. Zeit unbekannt = wie bisher.
+   * REIN RECHNEND → Alter in s, wenn zu spät, sonst null. */
+  const HEDGE_SPAET_MAX_MS = 90000
+  function hedgeSpaetAlterS(plan, r, jetzt){
+    if(r && (r.manuell || r.rueckkehr)) return null
+    const k = Number(r && r.order_klick_ms)
+    const klick = k > 1e12 ? k : (Date.parse((r && r.klick_at) || '') || 0)
+    if(!klick) return null
+    const alt = jetzt - klick
+    return alt > HEDGE_SPAET_MAX_MS ? Math.round(alt / 1000) : null
+  }
+  window._hedgeSpaetAlterS = hedgeSpaetAlterS   // Test-Haken
+  const _hedgeSpaetToast = new Set()   // Früh-Wache und Lauf-Ende kommen beide hier an — ein Toast je Plan
+  // → Hedge-Eintrag, wenn dieser Start schon einen hat (dann nichts anfassen), sonst null nach dem Vermerk
+  async function hedgeSpaetVermerken(plan, alterS){
+    const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+    const hz = (z && z.mt5_baseline && z.mt5_baseline.hedge) || null
+    // Wie „EIN HEDGE JE START" im Kern: geschlossen zählt nur, wenn er vor < 10 min geöffnet wurde — sonst ist es das Ticket eines früheren Versuchs (Neu starten)
+    const seitOffen = hz ? Date.now() - (Date.parse(hz.opened_at || '') || 0) : Infinity
+    if(hz && (['offen', 'oeffnet', 'schliesst', 'unklar'].includes(hz.status) || (hz.ticket && hz.status === 'geschlossen' && seitOffen < 10 * 60000))) return hz
+    const msg = `Hedge fehlt, von Hand prüfen: Order ist ${alterS} s alt (Grenze ${HEDGE_SPAET_MAX_MS / 1000} s), Prophos öffnet nicht mehr von selbst — erst im Fusion-Terminal nachsehen, ob schon ein Hand-Hedge liegt`
+    await hedgeAmPlanSchreiben(plan.id, { status: 'uebersprungen', grund_code: 'zu_spaet', alter_s: alterS, msg, eur: plan.hedgeEur, pc: hedgePcId(), at: new Date().toISOString() })
+    if(!_hedgeSpaetToast.has(String(plan.id))){
+      _hedgeSpaetToast.add(String(plan.id))
+      if(typeof atToast === 'function') atToast(`⚠ ${plan.masterName || 'Plan'}: ${msg}`, 'end')
+    }
+    return null
+  }
   // Wrapper (25.09.2026, Live-Befund Plan 2089a033: „hedge = NULL, nichts geschrieben"): jeder Ausstieg bei einem Plan mit
   // hedge_eur > 0 hinterlässt eine Spur am Plan — Guard → status 'uebersprungen' + Grund + roter Toast, Exception → 'fehler'.
   async function hedgeSoloOeffnen(plan, r){
@@ -29114,7 +29164,12 @@
       if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + grund, 'end')
       return null
     }
-    try{ return await hedgeSoloOeffnenKern(plan, r) }
+    try{
+      // Liegt schon eine Position mit der Kennung dieses Plans, läuft der Kern weiter: er übernimmt sie (Copier-Riegel schon_offen), kein zweiter Open
+      const spaetS = hedgeSpaetAlterS(plan, r, Date.now())
+      if(spaetS != null && !hedgeSoloEigen(plan)) return await hedgeSpaetVermerken(plan, spaetS)
+      return await hedgeSoloOeffnenKern(plan, r)
+    }
     catch(e){
       const msg = 'Hedge-Pfad abgebrochen: ' + String(e && e.message || e)
       console.warn('[hedgeSolo]', e)
@@ -29470,6 +29525,8 @@
       try{ await hedgeAmPlanSchreiben(plan.id, { status: 'wartet', at: new Date().toISOString(), code: res.code || null, versuche: versuch, pc: hedgePcId(),
         msg: `Copier startet neu (${res.code}) — neuer Versuch in ${Math.round(warte / 1000)} s` }) }catch(_){}
       await new Promise(ok => setTimeout(ok, warte))
+      const spaetS = hedgeSpaetAlterS(plan, r, Date.now())   // 30.10.2026: die Wiederholung darf die 90-s-Grenze nicht aushebeln
+      if(spaetS != null && !hedgeSoloEigen(plan)) return await hedgeSpaetVermerken(plan, spaetS)
     }
     if(res && res.ok){
       // Hand-Wert (Entry/TP), der WÄHREND des Opens gesetzt wurde (bis 90 s Wiederholung): frisch lesen, dann Schließ-Level/Puffer NICHT schreiben
@@ -30031,8 +30088,11 @@
   function hedgeFruehWache(plan, t0){
     const w = { stop: false, gefeuert: false, promise: null }
     w.promise = (async () => {
-      const bis = Date.now() + 90000
-      let cloudAt = 0
+      // 450 s statt 90 s (30.10.2026, Befund Marc 04:25 und Marco 14:38 UTC: Klick 134 bzw. 161 s nach dem Laufstart — Login/Kontowechsel davor —,
+      // die Wache war schon abgelaufen). Sie muss den Lauf überdauern, sonst bräche der Tab-Wächter einen gesunden Start ab: bis 150 s Warten auf einen
+      // belegten Puls + Proxy-Limit tv-konto 270 s; am Lauf-Ende beendet sie w.stop (finally im Aufrufer).
+      const bis = Date.now() + 450000
+      let cloudAt = 0, pong = ''   // pong: Marke des Tab-Wächters (order_bot tab_wache_warten) — bei der nächsten Abfrage zurück, beweist dem Bot: dieser Tab lebt
       while(!w.stop && Date.now() < bis){
         // LOKAL ZUERST (01.10.2026, Finn: „alles rausholen, an Supabase vorbei"): Puls legt die Klick-Meldung als letzt_order.json ab,
         // das Panel liefert sie unter /api/puls-klick — alle 0,1 s, nur localhost. Supabase (über Railway) nur noch alle 2 s als Rückfall
@@ -30041,7 +30101,8 @@
         if(w.stop) break
         let z = null
         try{
-          const lo = await window.mtcApi('puls-klick?plan_id=' + encodeURIComponent(String(plan.id)), { timeoutMs: 1500 })
+          const lo = await window.mtcApi('puls-klick?plan_id=' + encodeURIComponent(String(plan.id)) + (pong ? '&pong=' + encodeURIComponent(pong) : ''), { timeoutMs: 1500 })
+          pong = (lo && lo.ping) ? String(lo.ping) : ''
           if(lo && lo.ok && lo.paket && lo.paket.ergebnis) z = { ergebnis: lo.paket.ergebnis }
         }catch(_){}
         if(!z && Date.now() - cloudAt >= 2000){
@@ -33092,6 +33153,11 @@
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:var(--warn-ink, #b45309)">unklar</span>`, 'color-mix(in srgb, var(--warn) 12%, transparent)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
       if(h.status === 'wartet') return box(`<span style="font-size:11px;color:var(--warn-ink, #b45309)">wartet…</span>`, 'color-mix(in srgb, var(--warn) 12%, transparent)', `Fusion-Hedge: ${h.msg || 'neuer Versuch gleich'}`)
+      if(h.status === 'uebersprungen' && h.grund_code === 'zu_spaet'){   // 30.10.2026: der Knopf bleibt der Weg von Hand (Bestätigung, Doppel-Open-Riegel im Kern)
+        const btn = (p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
+          ? ` <button type="button" class="btn btn-ghost tc2-btn" data-plan-hedge-oeffnen="${escapeHtml(String(p.id))}" title="Fusion-Gegenposition jetzt öffnen — nur, wenn im Fusion-Terminal noch kein Hand-Hedge liegt" style="color:#0E7A78">Hedge öffnen</button>` : ''
+        return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">Hedge fehlt, von Hand prüfen</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', h.msg || 'Hedge fehlt, von Hand prüfen') + btn
+      }
       if(h.status === 'uebersprungen') return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">nicht geöffnet</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', `Fusion-Hedge übersprungen: ${h.msg || '?'}`)
       // „Hedge öffnen" (25.09.2026): nur bei sicherem Fehler (nichts gesendet), laufendem Plan, am PC des Plans — eigener Handler
       const oeffnenBtn = (h.status === 'fehler' && hedgeFehlerSicher(h) && p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
@@ -33151,7 +33217,9 @@
   async function hedgeOeffnenKlick(btn){
     const p = tradePlans.find(x => String(x.id) === String(btn.getAttribute('data-plan-hedge-oeffnen')))
     if(!p || p.status !== 'open') return
-    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?`)) return
+    const _hs = p.mt5Baseline && p.mt5Baseline.hedge
+    const _spaetHin = (_hs && _hs.grund_code === 'zu_spaet') ? '\n\nDie Order ist älter als 90 s: erst im Fusion-Terminal nachsehen, ob schon ein Hand-Hedge liegt, sonst ist die Position doppelt.' : ''
+    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?${_spaetHin}`)) return
     btn.disabled = true; btn.textContent = 'öffnet…'
     try{ await hedgeSoloOeffnen(p, { klick_at: new Date().toISOString(), manuell: true }) }finally{ try{ renderTradePlans() }catch(_){} }
   }
@@ -53966,7 +54034,7 @@
     }
     if(typeof window.mtcApi !== 'function')
       return fehler('Copier-Backend am PC nicht erreichbar — nichts gestartet.')
-    const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    const masterAcc = await tpKontoMitExtId(plan)
     extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
     if(!extId)
       return fehler(`„${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches ${plan.route === 'tsv2' ? 'TopstepX-Konto' : 'Tradovate-Unterkonto'} er wählen soll: unter Accounts nachtragen.`)
@@ -54085,11 +54153,17 @@
       // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
       // richtung als echtes Feld (ORBIT-RICHTUNG-RIEGEL 30.10.2026, Befund S5): das Panel prüft /richtung/frei mit body.richtung — nur als
       // Marke kam sie dort leer an, richtung_frei ließ dann frei durch. Der Bot nimmt das Feld vor der Marke (tv_bruecke_auspacken), gleicher Wert.
+      // TAB-WÄCHTER (30.10.2026, Finn; nur Orbit mit Fusion-Hedge): Marke @tab_wache → der Bot sendet nur, wenn dieser Tab während des Laufs frisch antwortet. Nur setzen,
+      // wenn das Panel es kann (tab_wache:1 in /api/puls-klick) — ein Panel vor dem Neustart gäbe die Antwort nie weiter, der Bot bräche jede Order ab
+      let _tabWacheMarke = []
+      if(plan.route === 'tvv2' && plan.hedgeEur > 0 && MT5_LOCAL){
+        try{ const pk = await window.mtcApi('puls-klick?plan_id=' + encodeURIComponent(String(plan.id)), { timeoutMs: 1500 }); if(pk && pk.tab_wache === 1) _tabWacheMarke = ['@tab_wache=1'] }catch(_){}
+      }
       const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, richtung: dir, scharf: true, plan_id: String(plan.id),
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen. plan_id (29.09.2026): der Bot meldet sein Ergebnis damit
           // zusätzlich selbst an puls_ergebnisse — geht die Antwort an diesen Tab verloren, übernimmt pulsErgebnisseUebernehmen.
           geschwister: ['@scharf=1', '@plan_id=' + String(plan.id), '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
-            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] })
+            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ..._tabWacheMarke, ...geschwister] })
       // PULS-WARTESCHLEIFE (Cross-Check V2-Kette, 24.09.2026): hält der Rundgang (tv-lesen, bis ~2,5 min je
       // Konto) oder ein tv-close gerade den TV-Lock im Panel, antwortet /api/tv-konto mit 409
       // puls_beschaeftigt — bisher brach der Start hart ab („Nichts platziert"), obwohl nur zu warten war.
@@ -54144,7 +54218,7 @@
         if(ag.repariert && typeof atToast === 'function') atToast('TopstepX-Auge repariert (Neuladen/neuer Tab) — Nova startet', 'start')
       }
       const _hedgeFrueh = ((plan.route === 'tvv2' || plan.route === 'tsv2') && plan.hedgeEur > 0 && MT5_LOCAL && typeof hedgeFruehWache === 'function') ? hedgeFruehWache(plan, _tvT0) : null   // tsv2 seit .1493 (K4 schreibt letzt_order.json wie Orbit)
-      for(;;){
+      try{ for(;;){
         // Topstep V2 (F23): TopstepX-Order über /api/tsx-konto (Vertrag B16, Etappe 2), sonst TradingView wie bisher.
         // Kennt das Panel die Route noch nicht (404 vor jedem Klick), ehrlich „kommt mit Etappe 2" — nichts gesendet.
         r = plan.route === 'tsv2'
@@ -54172,7 +54246,7 @@
         const sek = Math.round((Date.now() - _tvT0) / 1000)
         if(imPopup) _pfSet('ob-order', 'warn', `⏳ Puls ist gerade beschäftigt (Rundgang/Schließen in TradingView) — die Order wartet, neuer Versuch gleich… (${sek}s)`)
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
-      }
+      } }finally{ if(_hedgeFrueh) _hedgeFrueh.stop = true }   // 30.10.2026: auch bei einer Ausnahme — die Wache lebt sonst bis 280 s und sähe einen Neustart desselben Plans
       if(_hedgeFrueh) _hedgeFrueh.stop = true   // Lauf zu Ende: nicht mehr schauen (ein schon ausgelöster Open läuft zu Ende)
       // HARTE LINIE AM PC (13.10.2026, Finn nach Mikes Topstep-Short + zwei geplanten Longs: „wenn aus irgendeinem Grund der Wächter
       // ausfällt … dass da nie was passieren kann"): das Panel fragt vor jedem scharfen Klick selbst Railway/DB (prophos_gegenrichtung_frei)
@@ -54182,7 +54256,7 @@
       // big_trade_nah (Big Trade dieses PCs ≤ 2.000 $ vor TP/Liq, puls_heim_regel) bzw. big_trade_unklar (kein frischer Kurs/kein Level) —
       // kein Kontowechsel, nichts gesendet, der Plan bleibt Geplant; sfTick versucht es 15 min später wieder (Start-Fehler-Weg, schritt = code;
       // Winning Day seit 22.10.2026 nach 2–4 min, s. sfIstWdSperre)
-      if(r && !r.ok && !r.gesendet && (r.code === 'gegenrichtung' || r.code === 'riegel_unerreichbar' || r.code === 'big_trade_nah' || r.code === 'big_trade_unklar')){
+      if(r && !r.ok && !r.gesendet && (r.code === 'gegenrichtung' || r.code === 'riegel_unerreichbar' || r.code === 'big_trade_nah' || r.code === 'big_trade_unklar' || r.code === 'tab_nicht_erreichbar')){
         await fehler((r.code === 'gegenrichtung' || r.code === 'big_trade_nah' ? '⛔ ' : '⚠ ') + String(r.msg || 'Riegel am PC: nichts gesendet') + ' — Plan bleibt Geplant.', Object.assign({}, r, { retry_ok: true }))
         return
       }
@@ -55342,7 +55416,8 @@
     if(typeof window.mtcApi !== 'function') return { ok:false, msg:'Copier-Backend am PC nicht erreichbar.', retry:true }
     const pid = String(plan.id)
     if(planIstPuls(plan)){   // Orbit V2 bzw. Topstep V2 mit Puls (F23: tsx-close in TopstepX)
-      const konto = tvV2Konto(plan)
+      let konto = tvV2Konto(plan)
+      if(!konto){ await tpKontoMitExtId(plan); konto = tvV2Konto(plan) }   // 30.10.2026: neues Konto bei offenem Tab, s. tpKontoMitExtId
       if(!konto) return { ok:false, msg:'Master-Konto hat keine External ID — unter Accounts nachtragen.', retry:false }
       const symbol = tpOrbitWerte(plan).symbol || ''
       let r = null
@@ -55485,6 +55560,11 @@
         if(i >= 0) tradePlans[i] = plan; else tradePlans.push(plan)
         const name = plan.masterName || 'Plan'
         if(z.art === 'order'){
+          // TAB-WÄCHTER (30.10.2026): der Bot brach vor dem Klick ab und der Tab schlief — die Antwort kam nie an, dieser (neu geladene) Tab legt den Start-Fehler nach
+          if(e.code === 'tab_nicht_erreichbar' && plan.status === 'planned' && !e.gesendet){
+            const sf0 = sfFlag(plan)
+            if(!(sf0 && sf0.schritt === 'tab_nicht_erreichbar' && Date.parse(sf0.at || '') >= Date.parse(z.at || ''))) await sfMelden(plan, { schritt: 'tab_nicht_erreichbar', msg: String(e.msg || 'Prophos-Tab hat nicht geantwortet — nichts gesendet') })
+          }
           if(plan.status !== 'planned' || !(e.gesendet || e.ok)){ await pulsErgebnisAbgeholt(z.plan_id, 'order'); continue }
           // MASTER NIE GEFÜLLT (08.10.2026, Slave-2-Prüfung): Ergebnis eines Starts, der schon zurückgesetzt wurde (versuche_alt) → nie als
           // neuer Start übernehmen; der Klick muss NACH dem letzten Zurücksetzen liegen
@@ -55534,7 +55614,7 @@
               }
             }catch(err){ console.warn('[puls-ergebnisse] Hedge', err) }
           }
-          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? ' · Fusion-Hedge wird nachgeholt' : ''}${(plan.route === 'tsv2' && e.warnung) ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
+          if(typeof atToast === 'function') atToast(`⚠ ${name}: Puls hatte die Order platziert, die Antwort ging verloren — Plan jetzt „Läuft"${e.einstieg ? ' (Einstieg ' + e.einstieg + ')' : ''}${plan.hedgeEur > 0 ? (hedgeSpaetAlterS(plan, { order_klick_ms: e.order_klick_ms, klick_at: klickIso }, Date.now()) != null ? ' · Fusion-Hedge NICHT nachgeholt (zu spät, von Hand prüfen)' : ' · Fusion-Hedge wird nachgeholt') : ''}${(plan.route === 'tsv2' && e.warnung) ? ' · ⚠ Brackets in TopstepX prüfen' : ''}`, 'start')
           try{ renderTradePlans() }catch(_){}
         } else if(z.art === 'close'){
           if(plan.status !== 'open'){ await pulsErgebnisAbgeholt(z.plan_id, 'close'); continue }
@@ -58184,7 +58264,7 @@
   const SF_MAX = 3, SF_WARTE_MS = 15 * 60000, SF_TAKT_MS = 60000, SF_ABGLEICH_MS = 2 * 60000
   // WARTEN IST KEIN FEHLER (19.10.2026, Puls bleibt zu Hause): ein Big Trade kann stundenlang knapp unter dem TP pendeln — diese Schritte
   // zählen nicht gegen SF_MAX, der Plan wird bis zum Ende des Start-Fensters alle 15 min neu versucht
-  const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar', 'auge_blind', 'auge_fehlt'])   // auge_blind (29.10.2026): Nova wartet auf ein sehendes TopstepX-Auge
+  const SF_OHNE_DECKEL = new Set(['big_trade_nah', 'big_trade_unklar', 'auge_blind', 'auge_fehlt', 'tab_nicht_erreichbar'])   // auge_blind (29.10.2026): Nova wartet auf ein sehendes TopstepX-Auge
   // WINNING DAY NAH ≠ 15 MIN (22.10.2026, Prüf-Agent nach .1718): seit „Puls bleibt zu Hause" auch für Winning Days gilt, sperrt ein WD
   // ≤ 100 $ vor TP/Liq den Puls meist nur 1–4 min — mit 15 min + 2–6 min Wartezeit riss das Futures-Paare (2–10 min) auseinander.
   // Railway schreibt den Grund mit „Winning Day …" an den Anfang (app.py puls_heim_pruefen); fehler() setzt nur „⛔ " davor. Dann
@@ -61111,6 +61191,7 @@
         : `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq (2.000 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
       case 'auge_fehlt': return `TopstepX-Auge am PC${pc} nicht installiert (meldet nie, auch nicht nach dem Öffnen des TopstepX-Tabs) — im Puls-Chrome http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und in Tampermonkey installieren; der Plan startet dann von selbst.`
       case 'auge_blind': return `TopstepX-Auge am PC${pc} blind (Userscript tsx-auge meldet nichts Frisches) — Puls hat neu geladen bzw. den Tab neu geöffnet, ohne Erfolg. Tampermonkey im Puls-Chrome prüfen (Skript an?); der Plan versucht es in 15 min wieder, nichts gesendet.`
+      case 'tab_nicht_erreichbar': return `Prophos-Tab am PC${pc} hat während des Starts nicht geantwortet (60 s gewartet, Tab schläft im Hintergrund) — nichts gesendet. Den Tab am PC nach vorn holen; der Plan versucht es in 15 min wieder.`
       case 'big_trade_unklar': return `Big Trade am PC${pc} gerade nicht prüfbar (kein frischer NQ-Kurs oder kein Level) — Puls bleibt vorsichtshalber im Konto. Reader-Feed am PC prüfen; der Plan versucht es in 15 min wieder.`
       case 'konto_offen': {
         const pos = (m.match(/offene Position \(([^)]*)\)/) || [])[1]

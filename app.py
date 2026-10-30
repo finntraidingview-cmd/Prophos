@@ -3949,6 +3949,12 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             elif hst in HEDGE_LEBT and h.get("close_fehler"):
                 out.append((f"{pid}|close_fehler", 1, "hedge_close_fehler", "Hedge-Close scheitert",
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
+        # HEDGE ZU SPÄT (30.10.2026, hedgeSpaetVermerken im PC-Tab): Order älter als 90 s, der Tab öffnet nicht mehr von selbst → 🔴 einmal je Plan;
+        # läuft der Master weiter, erinnert ohne_hedge oben im Takt
+        if hst == "uebersprungen" and h.get("grund_code") == "zu_spaet" and str(h.get("at") or "") > seit_iso:
+            out.append((f"{pid}|hedge_zu_spaet", 1, "hedge_zu_spaet", "Hedge fehlt, von Hand prüfen",
+                        f"{wer} · {konto}: Order ist {h.get('alter_s') or '?'} s alt, Prophos öffnet den Fusion-Hedge nicht mehr von selbst "
+                        f"(Grenze 90 s) — im Fusion-Terminal prüfen, ob schon ein Hand-Hedge liegt, sonst auf der Karte „Hedge öffnen“.", uid, pid))
         # GEGENRICHTUNG GESTARTET (30.10.2026, RIEGEL-LOCK, sql/2026-10-30_riegel_lock.sql): ein Start ohne Claim (Hand-Start) lief, obwohl
         # dieselbe ID × Firma in Gegenrichtung läuft — der DB-Trigger trade_plans_gegenrichtung_start hält es an der Zeile fest → 🔴 einmal je Plan
         rv = p.get("rv") if isinstance(p.get("rv"), dict) else {}
@@ -20598,6 +20604,21 @@ def puls_ergebnis_schreiben(pc_id):
         sb_upsert("puls_ergebnisse", zeile, kritisch=True)   # an der Supabase-Bremse vorbei: der Bot wiederholt nicht
     except Exception as e:
         return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    # TAB-WÄCHTER (30.10.2026, order_bot tab_wache_warten): der Tab schläft, also meldet hier der Bot — 🔴 an die Master-IDs. Wirft nie (alarm_senden, try)
+    if zeile["art"] == "order" and zeile["ergebnis"].get("code") == "tab_nicht_erreichbar":
+        try:
+            pl = (sb_select("trade_plans", {"select": "user_id,master_name,master_firm", "id": f"eq.{zeile['plan_id']}"}) or [{}])[0]
+            uid = str(pl.get("user_id") or "")
+            if uid and not _alarm_fremd_verwaltet(uid):
+                namen = _ap_namen()[0]
+                pn = (_pc_namen_daten().get(pc_id) or {}).get("name")
+                wer_pc = f"PC von {pn or namen.get(uid, uid[:8])} ({pc_id})"
+                alarm_senden(1, "tab_nicht_erreichbar", f"Order abgebrochen, Tab schläft: {wer_pc}"[:120],
+                             f"{pl.get('master_firm') or ''} {pl.get('master_name') or ''}: der Prophos-Tab auf {wer_pc} hat während des Starts 60 s nicht geantwortet. "
+                             f"Nichts gesendet, Plan bleibt Geplant. Tab am PC nach vorn holen; der Plan versucht es danach wieder.",
+                             uid=uid, plan_id=zeile["plan_id"], schluessel=f"{zeile['plan_id']}|tab_nicht_erreichbar|{zeile['at'][:16]}")
+        except Exception as e:
+            print(f"[puls-ergebnis] Tab-Wächter-Alarm: {type(e).__name__}: {str(e)[:160]}", flush=True)
     return jsonify({"ok": True})
 
 
