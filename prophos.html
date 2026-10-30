@@ -81127,7 +81127,7 @@
     const d = _apgCv.d && _apgCv.q === apgCvQuery() ? _apgCv.d : null
     const heute = (d && d.heute) || new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)
     const tagNr = t => Math.round(Date.parse(t + 'T00:00:00Z') / 864e5), ausNr = n => new Date(n * 864e5).toISOString().slice(0, 10), bis = tagNr(heute)
-    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, eur: 0, eurN: 0, ohne: 0, usd: 0, fh: 0 })
+    const tage = []; for(let n = bis - 13; n <= bis; n++) tage.push({ tag: ausNr(n), best: [], blow: [], plus: 0, minus: 0, n: 0, offen: 0, hypoN: 0, echtN: 0, ohne: 0, usd: 0, fh: 0 })
     const jeTag = new Map(tage.map(t => [t.tag, t]))
     for(const z of (d && d.zeilen) || []){
       const t = z && jeTag.get(z.tag); if(!t) continue
@@ -81139,18 +81139,17 @@
       // HYPO € (Finn ~08:23: „wie viel Geld wir heute hypothetisch gewonnen haben"): eur = ap_hb_zeile/hypo_bilanz_zeile — P&L $ × Kontowert-Satz,
       // geblowt −Kontowert; ohne Satz null (zählt nicht, nur als Hinweis) — dieselbe Zahl wie die Kachel „Heute" / Verlauf in €
       const eur = z.eur == null || !isFinite(Number(z.eur)) ? null : Number(z.eur)
-      if(eur != null){ t.eur += eur; t.eurN++ } else t.ohne++
-      // Chart (Finn ~09:18): Master $ und „Fusion hypothetisch" = Hypo €, bei Trades mit echtem Hedge der echte Fusion-P&L (Backend-Feld fusion)
+      // Chart + Kacheln (Finn ~09:18, Kachel „mitziehen" ~09:35): EINE Größe t.fh = Hypo €, bei Trades mit echtem Hedge der echte Fusion-P&L (Backend-Feld fusion)
       if(usd != null) t.usd += usd
       const fEcht = z.fusion == null || !isFinite(Number(z.fusion)) ? null : Number(z.fusion)
-      t.fh += fEcht != null ? fEcht : (eur != null ? eur : 0)
+      if(fEcht != null){ t.fh += fEcht; t.echtN++ } else if(eur != null){ t.fh += eur; t.hypoN++ } else t.ohne++
       if(z.art === 'bestanden') t.best.push(name)
       if(z.art === 'geblowt') t.blow.push(name)
       if(z.art === 'bestanden' || (z.art !== 'geblowt' && usd > 0)) t.plus++
       else if(z.art === 'geblowt' || usd < 0) t.minus++
     }
     const summe = arr => arr.reduce((a, t) => ({ n: a.n + t.n, plus: a.plus + t.plus, minus: a.minus + t.minus, best: a.best + t.best.length, blow: a.blow + t.blow.length,
-      eur: a.eur + t.eur, eurN: a.eurN + t.eurN, ohne: a.ohne + t.ohne }), { n: 0, plus: 0, minus: 0, best: 0, blow: 0, eur: 0, eurN: 0, ohne: 0 })
+      fh: a.fh + t.fh, hypoN: a.hypoN + t.hypoN, echtN: a.echtN + t.echtN, ohne: a.ohne + t.ohne }), { n: 0, plus: 0, minus: 0, best: 0, blow: 0, fh: 0, hypoN: 0, echtN: 0, ohne: 0 })
     // „Am nächsten am Pass": je Konto die Trade-Zeile mit Balance + Rest (Planer-Lauf / Delta), kleinster Rest zuerst
     const konten = new Map()
     for(const t of o.trades || []){
@@ -81165,10 +81164,10 @@
   }
   function apgCvHtml(c){
     const kz = (name, h, s, cls, tip) => `<div class="apg-cvk" title="${escapeHtml(tip)}"><small>${name}</small><b class="${h ? cls || '' : ''}">${h}</b><span>${s} in 7 Tagen</span></div>`
-    const hy = (x, wann) => `${x.eurN} Trade${x.eurN === 1 ? '' : 's'} mit Kontowert-Satz ${wann}${x.ohne ? ` · ${x.ohne} ohne Satz (zählt nicht)` : ''}`
-    const hypo = `<div class="apg-cv-hypo" title="${escapeHtml('Hypothetisch gewonnen: Master-P&L $ × Kontowert-Satz (€ je $, Kontowert ÷ Polster) je beendetem Challenge-Trade, geblowt = −Kontowert vor dem Trade — dieselbe Rechnung wie die Hypo-Bilanz / Kachel „Heute“ (app.py hypo_bilanz_zeile). Ohne Hedge.')}">
-        <div><small>Hypothetisch heute</small><b class="${c.heute.eur > 0 ? 'gut' : c.heute.eur < 0 ? 'rot' : ''}">${apgEur(c.heute.eur)}</b><span>${hy(c.heute, 'heute')}</span></div>
-        <div><small>Letzte 7 Tage</small><b class="${c.sieben.eur > 0 ? 'gut' : c.sieben.eur < 0 ? 'rot' : ''}">${apgEur(c.sieben.eur)}</b><span>${hy(c.sieben, 'in 7 Tagen')}</span></div></div>`
+    const hy = x => [`${x.hypoN} mit Kontowert-Satz`, x.echtN ? `${x.echtN} mit echtem Fusion-P&amp;L` : '', x.ohne ? `${x.ohne} ohne Satz (zählt nicht)` : ''].filter(Boolean).join(' · ')
+    const hypo = `<div class="apg-cv-hypo" title="${escapeHtml('Hypothetisch gewonnen, dieselbe Zahl wie die Linie „Fusion hypothetisch“: je beendetem Challenge-Trade Master-P&L $ × Kontowert-Satz (€ je $, Kontowert ÷ Polster), geblowt = −Kontowert vor dem Trade (Hypo-Bilanz) — bei Trades mit echtem Hedge stattdessen der echte Fusion-P&L.')}">
+        <div><small>Hypothetisch heute</small><b class="${c.heute.fh > 0 ? 'gut' : c.heute.fh < 0 ? 'rot' : ''}">${apgEur(c.heute.fh)}</b><span>${hy(c.heute)}</span></div>
+        <div><small>Letzte 7 Tage</small><b class="${c.sieben.fh > 0 ? 'gut' : c.sieben.fh < 0 ? 'rot' : ''}">${apgEur(c.sieben.fh)}</b><span>${hy(c.sieben)}</span></div></div>`
     const kpis = hypo + `<div class="apg-cvks">
         ${kz('Trades beendet', c.heute.n, c.sieben.n, '', `heute beendete Challenge-/Phase-Trades der Sicht${c.laeuft ? ` · dazu ${c.laeuft} laufend` : ''}`)}
         ${kz('Gewonnen', c.heute.plus, c.sieben.plus, 'gut', 'Master-P&L > 0 (bestandene zählen mit)')}
