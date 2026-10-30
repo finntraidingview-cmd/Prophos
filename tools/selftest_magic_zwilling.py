@@ -46,28 +46,33 @@ def main():
         {"pc_name": "pc-eeeeee", "config_file": "config-e.json", "master_login": "10000005", "updated_at": iso(5), "user_id": "u3",
          "mg": 770007, "hd": {}, "zw": zw(900004)},                                  # Besitzer nicht gemeldet
     ]
+    # zweiter Zwilling (dritter PC, gleiche magic) sieht dasselbe Ticket mit Besitzer → kein zweites Ereignis
+    rows.append({"pc_name": "pc-gggggg", "config_file": "config-g.json", "master_login": "10000007", "updated_at": iso(8), "user_id": "u1",
+                 "mg": 770005, "hd": {}, "zw": zw(900001)})
     ev = ns["zwilling_ereignisse"](rows, {"emin"}, jetzt, {"pc-aaaaaa": {"name": "Anna"}, "pc-bbbbbb": {"name": "Bert"}})
     keys = [e[0] for e in ev]
-    check(keys == ["zwilling|pc-aaaaaa|config-a.json|900001", "zwilling|pc-eeeeee|config-e.json|900004"],
-          "je frischem Zwillings-Ticket ein Ereignis, Schlüssel PC|Config|Ticket; alte Zeile und ausgeblendete Gruppe still")
-    t = ev[0][2]
+    check(keys == ["zwilling|900001|besitzer", "zwilling|900004"],
+          "je Ticket EIN Ereignis (Schlüssel ohne PC/Config — zwei Zwillinge, eine Meldung); alte Zeile und ausgeblendete Gruppe still")
+    check([e[1] for e in ev] == [3, 1] and ev[0][2] == "Magic-Zwilling (Hedge sicher)" and ev[1][2] == "Magic-Zwilling ohne Besitzer",
+          "Besitzer führt das Ticket als eigenes → ⚪ (Hedge sicher); ohne Besitzer → 🔴")
+    t = ev[0][3]
     check("PC von Anna (pc-aaaaaa)" in t and "Fusion-Ticket 900001" in t and "magic 770005" in t
           and "als eigener Hedge gemeldet von PC von Bert (pc-bbbbbb) · config-b.json (Master …0002)" in t,
           "Text nennt PC mit Namen, Ticket, magic und den PC, der das Ticket als eigenen Hedge führt")
-    check("Besitzer nicht gemeldet" in ev[1][2] and ev[1][3] == "u3" and ev[0][4]["besitzer_pc"] == "pc-bbbbbb",
+    check("Besitzer nicht gemeldet" in ev[1][3] and ev[1][4] == "u3" and ev[0][5]["besitzer_pc"] == "pc-bbbbbb",
           "ohne Besitzer-Zeile ehrlich „nicht gemeldet“; uid und daten (besitzer_pc) gesetzt")
     zu = [{"pc_name": "pc-ffffff", "config_file": "config-f.json", "master_login": "10000006", "updated_at": iso(3), "user_id": "u1",
            "mg": 770009, "hd": {}, "zw": [{"ident": 7, "ticket": 900009, "volume": 0.5, "symbol": "NAS100", "unklar": True}],
            "zs": [500000002], "zg": "Hedge von Master-Pos 500000002 gesperrt: 3x … Master laeuft OHNE Hedge."}]
     ev2 = ns["zwilling_ereignisse"](zu, set(), jetzt)
-    check([e[1] for e in ev2] == ["Alt-Hedge, Besitzer unklar", "Hedge gesperrt: Magic-Zwilling"]
-          and "vor dem Copier-Update" in ev2[0][2] and ev2[1][0] == "zwilling_sperre|pc-ffffff|config-f.json|500000002" and "OHNE Hedge" in ev2[1][2],
-          "unklarer Alt-Hedge eigener Titel; Sperre (Master ungehedgt) eigenes 🔴 mit dem Grund des Copiers")
+    check([e[2] for e in ev2] == ["Alt-Hedge, Besitzer unklar", "Hedge gesperrt: Magic-Zwilling"] and [e[1] for e in ev2] == [1, 1]
+          and "vor dem Copier-Update" in ev2[0][3] and ev2[1][0] == "zwilling_sperre|pc-ffffff|config-f.json|500000002" and "OHNE Hedge" in ev2[1][3],
+          "unklarer Alt-Hedge 🔴 mit eigenem Titel; Sperre (Master ungehedgt) eigenes 🔴 mit dem Grund des Copiers")
     kaputt = [{"pc_name": "pc-x", "updated_at": "kaputt", "zw": zw(1)},
               {"pc_name": "pc-y", "updated_at": iso(1), "zw": [{"ticket": "x"}, "nix", {"ticket": 0}], "hd": ["falsch"]}]
     check(ns["zwilling_ereignisse"](kaputt, set(), jetzt) == [], "kaputte Zeilen/Felder werfen nicht und melden nichts")
     q = src[src.index("\ndef zwilling_tick("):src.index('\n@app.route("/alarm/heimweg"')]
-    check('alarm_senden(1, "magic_zwilling"' in q and "alarm_im_log(" in q and '_alarm["gemeldet"]' in q and "_alarm_fremd_verwaltet" in q,
+    check('alarm_senden(prio, "magic_zwilling"' in q and "for key, prio, titel, text, uid, daten in evs:" in q and "alarm_im_log(" in q and '_alarm["gemeldet"]' in q and "_alarm_fremd_verwaltet" in q,
           "zwilling_tick: 🔴 an die Master-IDs, entprellt (Speicher + alarm_log 24 h), Emin-Gruppe raus")
     check("zwilling_tick(aus, jetzt.timestamp())" in src[src.index("\ndef alarm_tick("):src.index("\ndef echo_frost_urteil(")],
           "läuft im alarm_tick neben der Echo-Snapshot-Wache")

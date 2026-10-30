@@ -4153,8 +4153,11 @@ ZWILLING_FRISCH_S = 180
 
 
 def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
-    """REIN RECHNEND (testbar): frische mt5_live-Zeilen → [(schluessel, titel, text, uid, daten)] je Zwillings-Ticket. Der Besitzer des Tickets
-    ist die Zeile, deren eigene hedges das Ticket tragen (seit dem Zwillings-Schutz stehen dort nur noch eigene). aus = ausgeblendete uids."""
+    """REIN RECHNEND (testbar): frische mt5_live-Zeilen → [(schluessel, prio, titel, text, uid, daten)] je Zwillings-Ticket. Der Besitzer des
+    Tickets ist die Zeile, deren eigene hedges das Ticket tragen (seit dem Zwillings-Schutz stehen dort nur noch eigene). aus = ausgeblendete uids.
+    STUFEN (S2-Hinweis 30.10.2026: nach dem Update sieht jeder weitere PC × Config mit derselben magic jeden Echo-Hedge — ~2 🔴 je Trade wären
+    Fehlalarme): führt ein Besitzer das Ticket als eigenes, ist der Hedge sicher → ⚪ EINMAL je Ticket (Schlüssel ohne PC/Config); 🔴 nur ohne
+    Besitzer (Besitzer unklar / alter Copier-Stand) — ebenfalls einmal je Ticket — und bei der Sperre nach wiederholtem Zwillings-Close."""
     pc_namen = pc_namen or {}
     frisch = []
     for r in rows or []:
@@ -4171,7 +4174,7 @@ def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
                 if isinstance(h, dict) and h.get("ticket"):
                     besitzer[int(h["ticket"])] = r
     pc_txt = lambda pc: f"PC von {(pc_namen.get(pc) or {}).get('name') or '?'} ({pc})"
-    out = []
+    out = {}
     for r in frisch:
         for z in r.get("zw") or [] if isinstance(r.get("zw"), list) else []:
             try:
@@ -4192,16 +4195,18 @@ def zwilling_ereignisse(rows, aus, jetzt_ts, pc_namen=None):
                 text = (f"{pc_txt(pc)} · {cfg} (magic {r.get('mg') or '?'}): Fusion-Ticket {tk} (Master-Pos {z.get('ident')}, {z.get('volume')} "
                         f"{z.get('symbol') or ''}) stammt aus der Zeit vor dem Copier-Update, Besitzer unklar — eigener Hedge eines schon "
                         f"geschlossenen Masters oder Zwilling. Wird nicht angefasst → im Fusion-Terminal prüfen, ggf. von Hand schließen.")
-            out.append((f"zwilling|{pc}|{cfg}|{tk}", "Alt-Hedge, Besitzer unklar" if (z.get("unklar") and not b) else "Magic-Zwilling am Fusion-Konto",
-                        text, str(r.get("user_id") or "") or None,
-                        {"pc": pc, "config": cfg, "ticket": tk, "magic": r.get("mg"), "besitzer_pc": (b or {}).get("pc_name")}))
+            key = f"zwilling|{tk}|besitzer" if b else f"zwilling|{tk}"
+            titel = ("Magic-Zwilling (Hedge sicher)" if b else "Alt-Hedge, Besitzer unklar" if z.get("unklar") else "Magic-Zwilling ohne Besitzer")
+            out.setdefault(key, (key, 3 if b else 1, titel, text, str(r.get("user_id") or "") or None,
+                                 {"pc": pc, "config": cfg, "ticket": tk, "magic": r.get("mg"), "besitzer_pc": (b or {}).get("pc_name")}))
         # Sperre nach wiederholtem Zwillings-Close: der Master läuft ungehedgt — Grund kommt fertig vom Copier (zwilling_grund)
         for ident in r.get("zs") or [] if isinstance(r.get("zs"), list) else []:
             pc, cfg = str(r.get("pc_name") or ""), str(r.get("config_file") or "")
             text = f"{pc_txt(pc)} · {cfg} (Master …{str(r.get('master_login') or '')[-4:]}): {r.get('zg') or 'Hedge nach Zwillings-Close gesperrt.'}"
-            out.append((f"zwilling_sperre|{pc}|{cfg}|{ident}", "Hedge gesperrt: Magic-Zwilling", text, str(r.get("user_id") or "") or None,
-                        {"pc": pc, "config": cfg, "ident": ident, "magic": r.get("mg")}))
-    return out
+            key = f"zwilling_sperre|{pc}|{cfg}|{ident}"
+            out.setdefault(key, (key, 1, "Hedge gesperrt: Magic-Zwilling", text, str(r.get("user_id") or "") or None,
+                                 {"pc": pc, "config": cfg, "ident": ident, "magic": r.get("mg")}))
+    return list(out.values())
 
 
 def zwilling_tick(aus, jetzt_ts):
@@ -4214,11 +4219,11 @@ def zwilling_tick(aus, jetzt_ts):
     aus = set(aus or ()) | {str(r.get("user_id")) for r in rows if r.get("user_id") and _alarm_fremd_verwaltet(r.get("user_id"))}
     evs = [ev for ev in zwilling_ereignisse(rows, aus, jetzt_ts, _pc_namen_daten()) if ev[0] not in _alarm["gemeldet"]]
     schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()
-    for key, titel, text, uid, daten in evs:
+    for key, prio, titel, text, uid, daten in evs:
         _alarm["gemeldet"][key] = time.time()
         if schon and key in schon:
             continue
-        alarm_senden(1, "magic_zwilling", titel, text, uid=uid, schluessel=key, tag=f"alarm-zwilling-{daten.get('ticket') or daten.get('ident')}",
+        alarm_senden(prio, "magic_zwilling", titel, text, uid=uid, schluessel=key, tag=f"alarm-zwilling-{daten.get('ticket') or daten.get('ident')}",
                      daten=daten)
 
 
