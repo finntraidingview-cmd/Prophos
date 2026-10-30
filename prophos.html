@@ -45902,10 +45902,11 @@
    * NICHT (ohne Termin kein Anlass). Schalter: newsState.regelAn (aus /news/calendar, Standard an). Schließen: acNewsTick (bei acTick). ══ */
   // Regelwerte an EINER Stelle (Finn ~07:47 über den Master: Start-Sperre 120 min vor bis 15 min nach der News — „ein kurz vorher geöffneter
   // Trade würde eh wieder geschlossen"; danach 15–18 min gewürfelt wegen Jitter-Regel). vor/nach = Start-Sperre, zuVor = Beginn Schließen,
-  // kein_klick = ±min ohne Klick (Tradeify ±5 + 1), v2_ende_vor = Echo V2 fängt ab t − 10 nicht mehr an, frist_rest_s = so viel Rest bis
-  // t − 6 braucht ein Schließ-Versuch mindestens, markt_sperre_vor = Market-Close fasst Funded CFD ab t − 10 nicht mehr an.
-  const NEWS_REGEL = { vorMin: 120, vorSpanne: 0, nachMin: 15, nachSpanne: 3, zuVorMin: 16, zuVorSpanne: 6, kein_klick_min: 6, v2_ende_vor_min: 10,
-    frist_rest_s: 45, markt_sperre_vor_min: 10, nach_zu_bis_min: 60, alt_ms: 12 * 3600000 }
+  // kein_klick = ±min ohne Klick (Tradeify ±5 + 1), ende_vor = letzter Beginn eines Schließ-Versuchs vor der News (master-close ist ein
+  // Klick-Bot mit bis zu 300 s Laufzeit: t − 12 + 5 min + Puffer → Klick ≤ t − 6, Prüfer-Stopp S2 zu c8e33b2d), frist_rest_s = so viel Rest
+  // bis t − 6 braucht ein Schließ-Versuch mindestens, markt_sperre_vor = Market-Close fasst Funded CFD ab t − 12 nicht mehr an.
+  const NEWS_REGEL = { vorMin: 120, vorSpanne: 0, nachMin: 15, nachSpanne: 3, zuVorMin: 16, zuVorSpanne: 6, kein_klick_min: 6, ende_vor_min: 12,
+    frist_rest_s: 45, markt_sperre_vor_min: 12, nach_zu_bis_min: 60, alt_ms: 12 * 3600000 }
   function newsHash01(text, salz){   // FNV-1a → [0, 1): gleiche Eingabe = gleicher Wurf auf jedem Gerät
     let h = 2166136261
     const t = String(salz || '') + '|' + String(text || '')
@@ -45981,7 +45982,7 @@
   function newsKeinKlick(now){
     const st = newsRegelStand(now)
     if(!st.an || !st.ok) return null
-    const R = NEWS_REGEL, M = 60000   // ab t − 10 (nicht erst t − 6): ein Market-Close-Versuch hat keine Frist (Gegenprüfung Nachtrag 30.10.2026)
+    const R = NEWS_REGEL, M = 60000   // ab t − 12 (nicht erst t − 6): ein Market-Close-Versuch hat keine Frist (Gegenprüfung Nachtrag 30.10.2026, S2)
     return st.bloecke.flatMap(b => b.termine).find(y => now > y.t - R.markt_sperre_vor_min * M && now < y.t + R.kein_klick_min * M) || null
   }
   // „Trotzdem starten" im News-Toast (wie bei Ziel erreicht): nur Hand-Start auf der Karte, 10 min je Plan
@@ -56191,9 +56192,9 @@
    * News schließen"). Derselbe Weg wie Auto-Close vor Market Close: Echo mit Hedge über acEchoSchliessen (master-close, der Copier zieht den
    * Fusion-Hedge mit), Echo V2 über v2SchliessenAmPc. Unabhängig vom Auto-Close-Schalter (auto_close_regeln), eigener Schalter
    * newsState.regelAn. Je roter Termin t (Zeiten gewürfelt in newsBloecke, auf allen PCs gleich):
-   *   t − 16…22 min bis t − 6 min  → schließen (ein Trade je Tick, nächster Versuch 15–30 s) — Puffer, damit auch ein zweiter Versuch
-   *                                  und mehrere offene Pläne vor t − 10 zu sind (Gegenprüfung 30.10.2026); t − 6 bleibt die harte Grenze
-   *   t − 6 bis t + 6 min           → NICHTS klicken (Tradeify verbietet Schließen ±5 min, 1 min Puffer), einmal 🔴 aufs Handy
+   *   t − 16…22 min bis t − 12 min → Schließ-Versuche beginnen (ein Trade je Tick, nächster Versuch 15–30 s); letzter Beginn t − 12, weil
+   *                                  master-close bis 300 s läuft → Klick ≤ t − 6 (Prüfer-Stopp S2 zu c8e33b2d); Frist t − 6 zusätzlich
+   *   t − 12 bis t + 6 min          → nichts Neues anfangen (Tradeify verbietet Schließen ±5 min), einmal 🔴 aufs Handy
    *   t + 6 bis t + 60 min          → schließen, was noch offen ist (Master 30.10.2026: „ab +6 min automatisch schließen = ja")
    * Nur Trades, die VOR dem Sperr-Block gestartet sind — ein Trade nach „Trotzdem starten" im Block bleibt Finns Entscheidung.
    * Ohne Kalender (fail-closed) wird nichts geschlossen. → true, wenn ein Schließ-Versuch lief (Market-Close-Zweig wartet dann einen Tick). */
@@ -56207,9 +56208,9 @@
     for(const p of (plaene || [])){
       if(!p || p.status !== 'open' || !routeIstEcho(p.route) || !newsIstFundedCfd(p)) continue
       // ±6 min gegen JEDEN roten Termin, auch aus einem anderen Block (NFP 14:30 + Presse 15:00: um 14:56 nichts klicken, obwohl NFP
-      // schon „danach" ist — Befund Selbsttest 30.10.2026). Echo V2 schon ab t − 10 nicht mehr anfangen (S2 30.10.2026: ein V2-Schließen
-      // kann länger dauern als ein Echo-master-close) — der Rest wird dann ab t + 6 geschlossen.
-      const vorMin = routeIstV2(p.route) ? R.v2_ende_vor_min : R.kein_klick_min
+      // schon „danach" ist — Befund Selbsttest 30.10.2026). Vor der News fängt KEINE Echo-Route ab t − 12 mehr an (S2 zu c8e33b2d:
+      // master-close läuft bis 300 s) — der Rest wird dann ab t + 6 geschlossen.
+      const vorMin = R.ende_vor_min
       const nah = alle.find(y => now > y.t - vorMin * M && now < y.t + R.kein_klick_min * M) || null
       const gestartet = Date.parse(p.startedAt || '') || 0
       for(const b of st.bloecke){
@@ -56232,7 +56233,7 @@
       if(phase === 'warten'){
         if(!_acNews.gemeldet[schl]){
           _acNews.gemeldet[schl] = true
-          const t = `${plan.masterName || pid}: Funded CFD noch offen vor ${x.titel} ${newsUhr(x.t)} — ±${NEWS_REGEL.kein_klick_min} min wird nichts geklickt, ab ${newsUhr(x.t + NEWS_REGEL.kein_klick_min * 60000)} schließt Puls von selbst.`
+          const t = `${plan.masterName || pid}: Funded CFD noch offen vor ${x.titel} ${newsUhr(x.t)} — von ${newsUhr(x.t - NEWS_REGEL.ende_vor_min * 60000)} bis ${newsUhr(x.t + NEWS_REGEL.kein_klick_min * 60000)} wird nichts angefangen, ab ${newsUhr(x.t + NEWS_REGEL.kein_klick_min * 60000)} schließt Puls von selbst.`
           await acLog(plan, false, 'News: ' + t)
           acBenachrichtigen('🔴 News-Regel', t)
         }
