@@ -17425,6 +17425,72 @@ def admin_zweit_frei():
     return out
 
 
+def polar_slave_riegel_urteil(lauf, wer_uid, richtung, konto):
+    """REIN RECHNEND (testbar): POLAR-SLAVE-RIEGEL (30.10.2026, Bauplan S8) — prüft die Anfrage des Slave-PCs gegen den Polar-Lauf, bevor die
+    DB gefragt wird. → (None, status, antwort) wenn abgelehnt, sonst ((user, firma, richtung, plan_id, account_id), None, None).
+    lauf = polar_lauf-Zeile {plan_id, slave_user_id, slave {auftrag {account_id, richtung, …}}}, konto = accounts-Zeile {id, user_id, firm}."""
+    if not isinstance(lauf, dict):
+        return None, 400, {"ok": False, "msg": "Polar-Lauf unbekannt"}
+    su = str(lauf.get("slave_user_id") or "")
+    if not su or su != str(wer_uid or ""):
+        return None, 403, {"ok": False, "msg": "Polar-Lauf gehört nicht zu dieser ID (Slave)"}
+    sl = lauf.get("slave") if isinstance(lauf.get("slave"), dict) else {}
+    auf = sl.get("auftrag") if isinstance(sl.get("auftrag"), dict) else {}
+    aid = str(auf.get("account_id") or "")
+    if not aid or not isinstance(konto, dict) or str(konto.get("id")) != aid or str(konto.get("user_id") or "") != su:
+        return None, 400, {"ok": False, "msg": "Slave-Konto des Laufs nicht lesbar oder passt nicht zur Slave-ID"}
+    if richtung not in ("buy", "sell"):
+        return None, 400, {"ok": False, "msg": "richtung fehlt"}
+    if str(auf.get("richtung") or "").lower() != richtung:
+        return None, 200, {"ok": True, "frei": False, "code": "gegenrichtung", "grund": "Richtung passt nicht zum Polar-Lauf — nichts gesendet"}
+    return (su, konto.get("firm") or auf.get("firm") or "", richtung, str(lauf.get("plan_id") or "") or None, aid), None, None
+
+
+def _richtung_frei_polar_slave(d, wer):
+    """/richtung/frei im KONTO-MODUS für den Polar-Slave-PC (30.10.2026, Bauplan S8): Body {polar_lauf, seite: slave, richtung}. Der
+    Polar-Plan gehört der MASTER-ID — geprüft wird hier Slave-ID × Slave-Firma (CFD) mit prophos_gegenrichtung_frei_konto, dieselbe
+    Regel wie polar_app _richtung_konto beim /polar/start. Keine Heim-/Zweit-Prüfung (Slave = MT5, wie master-order). Fehler → 503/400,
+    das Panel klickt dann nicht (fail-closed)."""
+    lid = str(d.get("polar_lauf") or "").strip().lower()
+    r = str(d.get("richtung") or "").strip().lower()
+    if str(d.get("seite") or "") != "slave" or not re.fullmatch(r"[0-9a-f-]{36}", lid):
+        return jsonify({"ok": False, "msg": "polar_lauf/seite fehlt"}), 400
+    try:
+        lauf = (sb_select("polar_lauf", {"select": "id,plan_id,slave_user_id,slave", "id": f"eq.{lid}", "limit": "1"}) or [None])[0]
+        aid = str((((lauf or {}).get("slave") or {}).get("auftrag") or {}).get("account_id") or "") if isinstance(lauf, dict) else ""
+        konto = (sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{aid}", "limit": "1"}) or [None])[0] if re.fullmatch(r"[0-9a-f-]{36}", aid) else None
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"DB nicht erreichbar: {str(e)[:120]}"}), 503
+    arg, status, antwort = polar_slave_riegel_urteil(lauf, wer[0], r, konto)
+    if arg is None:
+        if status != 200:
+            print(f"[polar-slave] ⛔ {lid[:8]} PC {wer[1]}: {antwort.get('msg')}", flush=True)
+        out = jsonify(dict(antwort, uid=wer[0], pc=wer[1]) if status == 200 else antwort)
+        out.headers["Cache-Control"] = "no-store"
+        return out, status
+    su, firma, richt, pid, aid = arg
+    try:
+        resp = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/prophos_gegenrichtung_frei_konto", headers=_sb_headers(), timeout=(5, 15),
+                           json={"p_user": su, "p_firma": firma, "p_richtung": richt, "p_ausser_plan": pid, "p_ausser_konto": aid})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"DB nicht erreichbar: {str(e)[:120]}"}), 503
+    if resp.status_code != 200:
+        return jsonify({"ok": False, "msg": f"DB-Antwort {resp.status_code}: {(resp.text or '')[:160]}"}), 503
+    try:
+        erg = resp.json()
+    except ValueError:
+        return jsonify({"ok": False, "msg": "DB-Antwort kein JSON"}), 503
+    if not isinstance(erg, dict) or "frei" not in erg:
+        return jsonify({"ok": False, "msg": "DB-Antwort unerwartet"}), 503
+    frei = erg.get("frei") is True
+    out = jsonify({"ok": True, "frei": frei, "code": None if frei else "gegenrichtung", "grund": erg.get("grund"), "firma": erg.get("firma") or firma,
+                   "plan": erg.get("plan"), "uid": wer[0], "pc": wer[1], "polar_lauf": lid, "seite": "slave"})
+    out.headers["Cache-Control"] = "no-store"
+    if not frei:
+        print(f"[polar-slave] ⛔ {lid[:8]} PC {wer[1]}: {erg.get('grund')}", flush=True)
+    return out
+
+
 @app.route("/richtung/frei", methods=["POST"])
 def richtung_frei():
     """HARTE LINIE FÜR DEN PULS-KLICK (13.10.2026, Finn nach Mikes Topstep-Short + zwei geplanten Longs: „wenn aus irgendeinem Grund
@@ -17441,6 +17507,8 @@ def richtung_frei():
     if not wer:
         return jsonify({"ok": False, "msg": "kein gültiger Schlüssel"}), 403
     d = request.get_json(silent=True) or {}
+    if d.get("polar_lauf") is not None or str(d.get("seite") or "") == "slave":
+        return _richtung_frei_polar_slave(d, wer)
     pid = str(d.get("plan_id") or "").strip().lower()
     r = str(d.get("richtung") or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f-]{36}", pid) or r not in ("buy", "sell"):
