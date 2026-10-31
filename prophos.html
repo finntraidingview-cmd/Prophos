@@ -11236,6 +11236,36 @@
       </div>
     </div>
 
+    <!-- Payout anfragen aus Admin → Payouts (31.10.2026): derselbe Eintrag wie „Angefragt" unter Finanzen, für die ID der Zeile (POST /admin/payout-anfragen) -->
+    <div class="modal-bg" id="admAnfrageModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Payout anfragen</h3>
+          <button class="modal-x" id="admAnfrageClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--sub)" id="adm-anfrage-acc">–</div>
+          <p class="modal-sub" style="margin-top:10px">Trägt die Anfrage bei dieser ID ein, wie unter Finanzen „Angefragt": zählt noch nicht als Geld, Winning Days starten neu. Bei der Firma wird nichts ausgelöst, es geht keine Mail raus.</p>
+          <div style="display:grid;grid-template-columns:1fr 110px;gap:10px;margin-top:12px">
+            <div class="field"><label>Betrag</label><input class="input mono" id="adm-anfrage-amt" type="number" step="0.01" min="0" autocomplete="off"></div>
+            <div class="field"><label>Währung</label><select class="input" id="adm-anfrage-ccy"><option value="USD">USD ($)</option><option value="EUR">EUR (€)</option><option value="GBP">GBP (£)</option></select></div>
+          </div>
+          <div class="field" style="margin-top:12px"><label>Liegt bei / kommt von</label><input class="input" id="adm-anfrage-bei" list="adm-anfrage-bei-list" placeholder="z.B. Pascal, Rumänen" autocomplete="off"><datalist id="adm-anfrage-bei-list"></datalist></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+            <div class="field"><label>Angefragt am</label><input class="input mono" id="adm-anfrage-am" type="date" autocomplete="off"></div>
+            <div class="field"><label>Nächster Payout ab <span style="font-weight:400;color:var(--sub)">(optional)</span></label><input class="input mono" id="adm-anfrage-next" type="date" autocomplete="off"></div>
+          </div>
+          <div class="modal-msg" id="admAnfrageMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="admAnfrageCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="admAnfrageSave">Anfrage eintragen</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="finReceiveModal">
       <div class="modal" style="max-width:440px">
         <div class="modal-head">
@@ -18646,19 +18676,103 @@
       }
       // Balance nach dem Payout neu lesen (wie finBalanceNachPayout): nur anstoßen, nie blockieren. Sofort, dann nach 5 und 30 min
       // (Prüfer 29.10.2026, wie .1481 unter Finanzen: die Firma bucht den Abzug erst, wenn die Anfrage dort durch ist), solange der Tab offen ist.
-      if(t.account_id){
-        const lesen = async (laut) => {
-          try{
-            const { data: { session } } = await supabase.auth.getSession()
-            // ?ansicht=admin: die Verwalter-Gruppe gilt dort nur mit dem Marker, sonst 403 für Nicht-ADMIN_EMAILS (Prüfer 29.10.2026)
-            const res = await fetch(`${WATCHER_HOME}/admin/konto-balance-lesen?ansicht=admin`, { method:'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type':'application/json' }, body: JSON.stringify({ aktion:'start', account_id: t.account_id }) })
-            const b = await res.json().catch(() => ({}))
-            if(!res.ok && laut && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + (b.error || ('HTTP ' + res.status)), 'end')
-          }catch(e){ if(laut && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + ((e && e.message) || e), 'end') }
-        }
-        lesen(true)
-        for(const min of [5, 30]) setTimeout(() => { lesen(false) }, min * 60000)   // Nachlesungen still — Fehler nur beim ersten Start als Toast
+      if(t.account_id) admBalanceAnstossen(t.account_id)
+    }
+    function admBalanceAnstossen(kontoId){
+      const lesen = async (laut) => {
+        try{
+          const { data: { session } } = await supabase.auth.getSession()
+          // ?ansicht=admin: die Verwalter-Gruppe gilt dort nur mit dem Marker, sonst 403 für Nicht-ADMIN_EMAILS (Prüfer 29.10.2026)
+          const res = await fetch(`${WATCHER_HOME}/admin/konto-balance-lesen?ansicht=admin`, { method:'POST', headers: { 'sb-token': session?.access_token || '', 'Content-Type':'application/json' }, body: JSON.stringify({ aktion:'start', account_id: kontoId }) })
+          const b = await res.json().catch(() => ({}))
+          if(!res.ok && laut && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + (b.error || ('HTTP ' + res.status)), 'end')
+        }catch(e){ if(laut && typeof atToast === 'function') atToast('Balance-Lesung nicht gestartet: ' + ((e && e.message) || e), 'end') }
       }
+      lesen(true)
+      for(const min of [5, 30]) setTimeout(() => { lesen(false) }, min * 60000)   // Nachlesungen still — Fehler nur beim ersten Start als Toast
+    }
+
+    /* PAYOUT ANFRAGEN aus Admin → Payouts (31.10.2026, Finn: „wenn ich auf Anfragen drücke, direkt aus dem Admin-Terminal die Payouts anfragen"). Klick auf den Chip
+     * „anfragbar" → Popup, vorbelegt mit dem Betrag der Spalte Anfragbar; ✓ legt über /admin/payout-anfragen dieselbe Anfrage an wie der Login der ID unter Finanzen.
+     * Offene Anfrage des Kontos: Chip „angefragt <Betrag> · <Datum>", verschwindet beim Erhalten mit der Anfrage aus admData.pending_payouts. */
+    let _admAnfrage = null
+    const admAnfrageVon = r => (admData?.pending_payouts || []).filter(t => t.account_id ? String(t.account_id) === String(r.account_id) : String(t.account_name || '').trim() === String(r.account_name || '').trim() && String(t.user_id) === String(r.user_id)).pop() || null
+    function admAnfrageChip(st, r){
+      const t = admAnfrageVon(r)
+      if(t){
+        const chip = document.createElement('span'); chip.className = 'chip chip-warn'; chip.style.marginLeft = '8px'
+        const tag = t.requested_at ? new Date(String(t.requested_at).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) : ''
+        chip.textContent = `angefragt ${admGeld(Number(t.amount) || 0, t.currency)}${tag ? ' · ' + tag : ''}`
+        chip.title = t.liegt_bei ? 'Liegt bei ' + t.liegt_bei : 'Anfrage offen, noch nicht erhalten'
+        st.appendChild(chip)
+      }else if(r.wd_ready){
+        const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip chip-good'
+        chip.style.cssText = 'margin-left:8px;border:0;cursor:pointer'
+        chip.textContent = 'anfragbar'; chip.title = `Payout für ${admShortName(r.person || '—')} anfragen`
+        chip.addEventListener('click', e => { e.stopPropagation(); admAnfrageOeffnen(r) })
+        st.appendChild(chip)
+      }
+    }
+    function admAnfrageOeffnen(r){
+      _admAnfrage = r
+      const a = r.calc && r.calc.anf, betrag = a && a.erhalten > 0 ? Math.round(a.erhalten * 100) / 100 : null
+      $('adm-anfrage-acc').textContent = `${admShortName(r.person || '—')} · ${String(r.account_name || '').replace(/\s*→.*$/, '').trim() || '—'} · ${r.account_firm || '–'}`
+      $('adm-anfrage-amt').value = betrag != null ? String(betrag) : ''
+      $('adm-anfrage-ccy').value = ['EUR', 'USD', 'GBP'].includes(r.calc && r.calc.ccy) ? r.calc.ccy : 'USD'
+      $('adm-anfrage-bei').value = ''
+      $('adm-anfrage-bei-list').innerHTML = [...new Set((admData?.pending_payouts || []).map(t => String(t.liegt_bei || '').trim()).filter(Boolean))].map(v => `<option value="${escapeHtml(v)}"></option>`).join('')
+      $('adm-anfrage-am').value = _deTodayStr()
+      $('adm-anfrage-next').value = ''
+      const msg = $('admAnfrageMsg'); msg.textContent = ''; msg.className = 'modal-msg'
+      $('admAnfrageSave').disabled = false
+      $('admAnfrageModal').classList.add('open')
+      $('adm-anfrage-amt').focus()
+    }
+    function admAnfrageZu(){ _admAnfrage = null; $('admAnfrageModal').classList.remove('open') }
+    $('admAnfrageClose')?.addEventListener('click', admAnfrageZu)
+    $('admAnfrageCancel')?.addEventListener('click', admAnfrageZu)
+    $('admAnfrageModal')?.addEventListener('click', e => { if(e.target === $('admAnfrageModal')) admAnfrageZu() })
+    $('admAnfrageSave')?.addEventListener('click', () => admAnfrageSpeichern())
+    async function admAnfrageSpeichern(){
+      const r = _admAnfrage; if(!r || !admData) return
+      const msg = $('admAnfrageMsg'), btn = $('admAnfrageSave'), betrag = Number($('adm-anfrage-amt').value), am = $('adm-anfrage-am').value || ''
+      if(!(betrag > 0)){ msg.textContent = 'Betrag fehlt.'; msg.className = 'modal-msg err'; return }
+      if(!am){ msg.textContent = 'Datum fehlt.'; msg.className = 'modal-msg err'; return }
+      btn.disabled = true; msg.textContent = ''; msg.className = 'modal-msg'
+      let d
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const res = await fetch(`${WATCHER_HOME}/admin/payout-anfragen?ansicht=admin`, { method:'POST', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
+          body: JSON.stringify({ account_id: r.account_id, amount: betrag, currency: $('adm-anfrage-ccy').value, liegt_bei: $('adm-anfrage-bei').value.trim() || null, requested_at: am, naechster_payout: $('adm-anfrage-next').value || null }) })
+        d = await res.json().catch(() => ({}))
+        if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+      }catch(e){
+        msg.textContent = 'Nicht eingetragen: ' + ((e && e.message) || e); msg.className = 'modal-msg err'
+        btn.disabled = false
+        return
+      }
+      // Lokalen Stand nachziehen — dieselben Felder, die /admin/overview liefert
+      const z = d.pending || {}, k = d.account
+      ;(admData.pending_payouts = admData.pending_payouts || []).push({ id: String(z.id || ''), account_id: r.account_id, user_id: r.user_id, person: r.person, person_mail: '', amount: Number(z.amount) || betrag,
+        currency: z.currency || $('adm-anfrage-ccy').value, liegt_bei: z.liegt_bei || '', requested_at: z.requested_at || am, account_name: z.account_name || r.account_name, account_firm: z.account_firm || r.account_firm, notes: '' })
+      admData.pending_payouts.sort((a, b) => String(a.requested_at).localeCompare(String(b.requested_at)))
+      r.payouts_n = (Number(r.payouts_n) || 0) + 1
+      if(k){
+        if(d.zaehler_neu){ r.wd_count = 0; r.wd_ready = false }
+        r.ready_at = String(k.payout_ready_at || '').slice(0, 10); r.waiting_since = String(k.waiting_payout_since || '').slice(0, 10)
+        for(const a of (admData.accounts || [])) if(String(a.id) === String(r.account_id)){ a.payout_at = r.ready_at; a.payout_ready_at = r.ready_at; a.waiting_payout_since = k.waiting_payout_since || null; if(d.zaehler_neu) a.goal_done_offset = 0 }
+      }
+      admAnfrageZu()
+      admFinRender()
+      if(typeof atToast === 'function') atToast(`Payout ${admGeld(Number(z.amount) || betrag, z.currency || 'USD')} für ${admShortName(r.person || '—')} angefragt${d.konto_fehler ? ' — Konto NICHT nachgezogen (Winning Days, Termin), im Account-Modal prüfen' : ''}`, d.konto_fehler ? 'end' : 'start')
+      if(d.balance_lesen) admBalanceAnstossen(r.account_id)
+      // Eigene ID in diesem Tab: Konten und Finanzen frisch laden, sonst zählte ein +1 vom alten Stand weiter (5 + 1 statt 0 + 1, Prüfung 31.10.2026)
+      if(String(r.user_id) === String(currentUserId)) try{
+        if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase()
+        if(typeof loadTransactionsFromSupabase === 'function') await loadTransactionsFromSupabase()
+      }catch(_){}
     }
 
     const admK = { person: '', firm: '', type: '', ziel: '', payout: false, q: '', arch: false }
@@ -19264,7 +19378,7 @@
             s.textContent = `🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}`
             st.appendChild(s)
             const d = dots(r); if(d) st.appendChild(d)
-            if(r.wd_ready){ const chip = document.createElement('span'); chip.className = 'chip chip-good'; chip.style.marginLeft = '8px'; chip.textContent = 'anfragbar'; st.appendChild(chip) }
+            admAnfrageChip(st, r)
           }
           admBalanceZelle(tr.querySelector('.c-bal'), r, c)
           admCalAnfragbarCell(tr.querySelector('.c-anf'), r)

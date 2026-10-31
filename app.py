@@ -15421,6 +15421,128 @@ def admin_payout_erhalten():
                     "waiting_geleert": waiting_geleert})
 
 
+def payout_anfrage_konto_felder(konto, naechster, morgen):
+    """REIN RECHNEND (testbar): Konto-Felder beim Anlegen einer Payout-Anfrage — dieselben Schritte wie der Login der ID unter Finanzen (finModalSave):
+    zielPayoutReset (Winning Days starten neu: manuell Stand 0 + letzter Haken weg, sonst goal_since morgen, Bedingung wie zielKonfig),
+    payoutReadySetzen (Termin setzen, ohne Termin einen stehenden leeren), wartetPayoutClear. morgen = Berlin-Datum JJJJ-MM-TT."""
+    konto = konto or {}
+    typ, firm, kind = str(konto.get("account_type") or ""), str(konto.get("firm") or ""), str(konto.get("goal_kind") or "")
+    try:
+        ziel = int(konto.get("goal_target") or 0)
+    except (TypeError, ValueError):
+        ziel = 0
+    futures = any(k in firm.lower() for k in WD_BALANCE_FUTURES) and not _ist_tradeify_cfd(firm)
+    out = {}
+    if typ != "live":
+        if futures and typ in ("funded", "winning_days"):
+            out.update(goal_done_offset=0, goal_manual_last=None, goal_kind="winning_days", goal_manual=True, goal_target=ziel if ziel > 0 else 5)
+        elif kind == "winning_days" and ziel > 0:
+            if konto.get("goal_manual"):
+                out.update(goal_done_offset=0, goal_manual_last=None, goal_kind="winning_days", goal_manual=True, goal_target=ziel)
+            else:
+                out["goal_since"] = morgen
+    if naechster:
+        out["payout_ready_at"] = naechster
+    elif konto.get("payout_ready_at"):
+        out["payout_ready_at"] = None
+    if konto.get("waiting_payout_since"):
+        out["waiting_payout_since"] = None
+    return out
+
+
+@app.route("/admin/payout-anfragen", methods=["POST", "OPTIONS"])
+def admin_payout_anfragen():
+    """Payout-Anfrage aus Admin → Payouts für die ID der Zeile (31.10.2026, Finn: „wenn ich auf Anfragen drücke, direkt aus dem Admin-Terminal die Payouts
+    anfragen"). Derselbe Eintrag wie im Login der ID unter Finanzen (finModalSave, pending_payouts status pending), nur mit Service-Key, weil RLS dort
+    auth.uid() = user_id verlangt. Nur der Eintrag in Prophos: keine Buchung (die entsteht erst beim Erhalten), bei der Firma passiert nichts, keine Mail.
+    user_id kommt aus dem Konto, nie aus dem Body. Offene Anfrage auf demselben Konto → 409.
+    Body {account_id, amount, currency, liegt_bei, requested_at (JJJJ-MM-TT, Standard heute Berlin), naechster_payout (JJJJ-MM-TT | leer)}.
+    Auth wie /admin/payout-erhalten: ADMIN_EMAILS oder voller Admin-Reiter-Login, aber nicht für Gruppen mit Verwalter; Verwalter nur für IDs SEINER Gruppe."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_voll()
+    gruppe = None
+    if err:
+        if err[1] != 403:
+            return err
+        _uid, err2 = _wd_login()
+        if err2:
+            return err2
+        if not _admin_verwalter():
+            return err
+        gruppe = getattr(g, "admin_sicht", None)
+    b = request.get_json(silent=True) or {}
+    aid = str(b.get("account_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", aid):
+        return jsonify({"error": "account_id fehlt/ungültig"}), 400
+    try:
+        betrag = float(b.get("amount"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Betrag fehlt"}), 400
+    if not (0 < betrag < 10000000):
+        return jsonify({"error": "Betrag muss größer als 0 sein"}), 400
+    waehrung = str(b.get("currency") or "").strip().upper()
+    if waehrung not in ("EUR", "USD", "GBP"):
+        return jsonify({"error": "Währung muss EUR, USD oder GBP sein"}), 400
+    from zoneinfo import ZoneInfo
+    jetzt_b = datetime.now(ZoneInfo("Europe/Berlin"))
+    angefragt = str(b.get("requested_at") or "").strip()[:10] or jetzt_b.strftime("%Y-%m-%d")
+    naechster = str(b.get("naechster_payout") or "").strip()[:10] or None
+    for name, wert in (("requested_at", angefragt), ("naechster_payout", naechster)):
+        if wert and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", wert):
+            return jsonify({"error": f"{name} muss JJJJ-MM-TT sein"}), 400
+    try:
+        rows = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,goal_kind,goal_target,goal_manual,payout_ready_at,waiting_payout_since",
+                                      "id": f"eq.{aid}", "limit": "1"}) or []
+    except Exception as e:
+        return jsonify({"error": f"Konto nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
+    if not rows:
+        return jsonify({"error": "Konto nicht gefunden"}), 404
+    konto = rows[0]
+    besitzer = str(konto.get("user_id") or "")
+    if gruppe is not None:
+        if besitzer not in gruppe:
+            return jsonify({"error": "Nur Konten der eigenen Gruppe"}), 403
+    else:
+        try:
+            aussen = _admin_standard_aus()
+        except Exception as e:
+            return jsonify({"error": f"Gruppen nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
+        if besitzer in aussen:
+            return jsonify({"error": "Diese ID gehört zu einer Gruppe mit Verwalter — nur deren Verwalter fragt an"}), 403
+    try:
+        offen = sb_select("pending_payouts", {"select": "id,amount,currency,requested_at", "account_id": f"eq.{aid}", "status": "eq.pending", "limit": "1"}) or []
+    except Exception as e:
+        return jsonify({"error": f"Offene Anfragen nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
+    if offen:
+        return jsonify({"error": f"Für dieses Konto ist seit {offen[0].get('requested_at') or '?'} schon eine Anfrage offen — nichts angelegt", "offen": offen[0]}), 409
+    try:
+        zeile = sb_insert("pending_payouts", {
+            "user_id": besitzer, "account_id": aid, "account_name": konto.get("name") or None, "account_firm": konto.get("firm") or None,
+            "amount": betrag, "currency": waehrung, "liegt_bei": str(b.get("liegt_bei") or "").strip()[:120] or None, "requested_at": angefragt, "notes": None,
+        })
+    except Exception as e:
+        print(f"[payout-anfragen] ⚠️ pending_payouts {aid}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Anfrage nicht gespeichert ({type(e).__name__})"}), 502
+    morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
+    felder = payout_anfrage_konto_felder(konto, naechster, morgen)
+    konto_neu, konto_fehler = None, None
+    if felder:
+        try:
+            z = sb_update("accounts", {"id": f"eq.{aid}", "user_id": f"eq.{besitzer}",
+                                       "select": "id,goal_done_offset,goal_target,goal_since,payout_ready_at,waiting_payout_since"}, felder)
+            konto_neu = z[0] if z else None
+            if not z:
+                konto_fehler = "Konto nicht aktualisiert"
+        except Exception as e:
+            konto_fehler = f"{type(e).__name__}: {e}"
+            print(f"[payout-anfragen] ⚠️ accounts {aid} ({', '.join(felder)}): {konto_fehler}", flush=True)
+    typ, firm = str(konto.get("account_type") or ""), str(konto.get("firm") or "")
+    balance_lesen = typ == "funded_cfd" or _ist_tradeify_cfd(firm) or not any(k in firm.lower() for k in WD_BALANCE_FUTURES)   # wie finKontoIstCfd: nur CFD
+    return jsonify({"ok": True, "pending": zeile, "account": konto_neu, "zaehler_neu": "goal_done_offset" in felder,
+                    "konto_fehler": konto_fehler, "balance_lesen": balance_lesen})
+
+
 @app.route("/watcher/status", methods=["GET", "OPTIONS"])
 def watcher_status():
     """Frontend-Gate: läuft der Server-Wächter, schaltet der Browser seine eigene
