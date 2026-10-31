@@ -2010,6 +2010,7 @@ def main():
     results.append(test_kerze_fortschreiben())
     results.append(test_solo_level_und_grund())
     results.append(test_echo_hedge_sl_nachziehen())
+    results.append(test_aendern_dialog_diagnose())
     results.append(test_solo_zu_ring())
     results.append(test_solo_plan_kennung())
     results.append(test_solo_riegel())
@@ -2235,6 +2236,102 @@ def test_kerze_fortschreiben():
         print(f"✗ Wurzelwechsel falsch: {k3} vor={v3}"); ok = False
     if ok:
         print("✓ Kerzen-Aggregation: o/h/l/c/n, Minuten- und Wurzelwechsel")
+    return ok
+
+
+def test_aendern_dialog_diagnose():
+    """J2: fremdes Fenster an der Stelle/vorn = kein Klick, Grund + Fensterzustand in der Spur, Foto beim Abbruch, Level bleiben."""
+    import order_bot as ob
+    import time
+    namen = ("_punkt_unter_pid", "_klick_absolut", "_maus_fahren", "_warte", "_fremde_dialoge_schliessen", "_finde_aendern_dialog", "_aendern_vorn",
+             "_kontextmenue_aendern_klicken", "_handel_tab_aktivieren", "_fenster_zustand_text", "is_paused", "fehlerfoto_anstossen", "_kommission_lesen",
+             "_api_lesen", "_EchoUnruhe", "_el_tasten", "_sltp_klicken")
+    alt = {n: getattr(ob, n) for n in namen}
+    klicks, fotos = [], []
+
+    class R:
+        left, top, right, bottom = 0, 0, 2000, 1000
+
+    class Info:
+        process_id = 5
+
+    class W:
+        element_info = Info()
+
+        def rectangle(self):
+            return R()
+
+        def descendants(self, **k):
+            return []
+    lage = {"unter": 5, "vorn": "ok"}
+
+    class Stumm:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    try:
+        ok = ob.aendern_punkt_urteil(5, 5) == "frei" and ob.aendern_punkt_urteil(9, 5) == "verdeckt" \
+            and ob.aendern_punkt_urteil(None, 5) == "unbekannt" and ob.aendern_punkt_urteil(5, 0) == "unbekannt"
+        ob._punkt_unter_pid = lambda x, y: lage["unter"]
+        ob._klick_absolut = lambda x, y, **k: klicks.append((x, y)) or True
+        ob._maus_fahren = lambda *a, **k: None
+        ob._warte = lambda *a, **k: None
+        ob._fremde_dialoge_schliessen = lambda w: None
+        ob._finde_aendern_dialog = lambda w, timeout=0: None
+        ob._aendern_vorn = lambda w, t: lage["vorn"]
+        ob._kontextmenue_aendern_klicken = lambda timeout=0: "kein_menue"
+        ob._handel_tab_aktivieren = lambda *a, **k: False
+        ob._fenster_zustand_text = lambda w: "2000x1000 @0,0, maximiert"
+        ob.is_paused = lambda: False
+        ob._el_tasten = lambda *a, **k: None
+        # Stelle verdeckt: kein einziger Klick, Zähler in der Spur, Stand beim Abbruch
+        lage["unter"] = 9
+        t = []
+        k = ob._sltp_klicken(W(), 7, "NAS100", "1", "2", t, anker_pfad=None)
+        ok = ok and k["dialog"] is False and not klicks and any("fremdes Fenster an der Stelle" in x for x in t) \
+            and any(x.startswith("Ändern-Start: 2000x1000") for x in t) and any(x.startswith("Stand beim Abbruch:") for x in t)
+        # Terminal kommt nicht nach vorn: kein Klick
+        lage.update(unter=5, vorn="fremd")
+        t = []
+        k = ob._sltp_klicken(W(), 7, "NAS100", "1", "2", t, anker_pfad=None)
+        ok = ok and k["dialog"] is False and not klicks and "fremdes Fenster" in k["msg"]
+        # Stelle frei: Scan klickt, höchstens AENDERN_MAX_PUNKTE
+        lage["vorn"] = "ok"
+        t = []
+        ob._sltp_klicken(W(), 7, "NAS100", "1", "2", t, anker_pfad=None)
+        ok = ok and len(klicks) > 0 and all(y >= 500 for _x, y in klicks) and any(x.startswith("Punkte: ") and "kein Dialog" in x for x in t)
+        # Baum-Suche frisst die Frist nicht: Frist 0,2 s, Tab-Schritt 0,3 s — der Scan bekommt trotzdem Punkte
+        frist, n0 = ob.AENDERN_FRIST_S, len(klicks)
+        ob.AENDERN_FRIST_S = 0.2
+        ob._handel_tab_aktivieren = lambda *a, **k: time.sleep(0.3) or False
+        try:
+            k = ob._sltp_klicken(W(), 7, "NAS100", "1", "2", [], anker_pfad=None)
+        finally:
+            ob.AENDERN_FRIST_S = frist
+        ok = ok and len(klicks) > n0 and k["dialog"] is False
+        # Nach bewiesenem Menü-Klick länger warten (kein Klick), Dialog der Position zählt
+        ob._handel_tab_aktivieren = lambda *a, **k: False
+        ob._kontextmenue_aendern_klicken = lambda timeout=0: "geklickt"
+        warte = []
+        ob._finde_aendern_dialog = lambda w, timeout=0: warte.append(timeout) or None
+        ob._reihen_scan(W(), 7, [], 0, bis=time.time() + 60, max_punkte=1)
+        ok = ok and warte[:1] == [ob.AENDERN_NACH_MENUE_S] and ob.AENDERN_NACH_MENUE_S > 1.2
+        # Nachziehen: Abbruch → Foto + Pfad im Ergebnis, Level bleiben, Lauf ok
+        ob.fehlerfoto_anstossen = lambda weg, tab, code: fotos.append((weg, code)) or ("pc/x/y", "")
+        ob._kommission_lesen = lambda *a: 0.0
+        ob._api_lesen = lambda p, e: {"positionen": [{"ticket": 7}]}
+        ob._EchoUnruhe = Stumm
+        ob._sltp_klicken = lambda *a, **k: {"ok": False, "dialog": False, "msg": "Dialog zu"}
+        t = []
+        e = ob._sltp_nachziehen_lauf(None, "x", 1, {"ticket": 7}, {"richtung": "buy", "sl_usd": 1000.0, "tp_usd": 2000.0}, "NAS100", 20000.0, 1.0, 10.0, 2, 19880.0, 20200.0, t, "a")
+        ok = ok and e["ok"] and e["sl"] == 19880.0 and e.get("fehlerbild") == "pc/x/y" and fotos == [("echo", "aendern_dialog")] \
+            and any("Fehlerfoto angestoßen" in x for x in t) and any("Offene Positionen im Terminal: 1" in x for x in t)
+    finally:
+        for n, f in alt.items():
+            setattr(ob, n, f)
+    print(("✓" if ok else "✗") + " Ändern-Dialog: fremdes Fenster = kein Klick, Fenster + Foto beim Abbruch in der Spur, Level bleiben")
     return ok
 
 

@@ -142,6 +142,11 @@ NACHZIEHEN_VERSUCHE = 2          # Ändern-Dialog höchstens so oft (dazwischen 
 # Dialogs hat eine Grenze — danach Abbruch mit Grund in der Spur, die groben Level bleiben.
 AENDERN_FRIST_S = 20.0           # Ändern-Dialog öffnen: höchstens so lange je _sltp_klicken (Anker, Tab, Band-Scan, UIA-Zeilen, Geometrie)
 AENDERN_MAX_PUNKTE = 10          # Band-Punkte je Scan (je Punkt Rechtsklick-Menü + Doppelklick) — der Anker vom Treffer macht den nächsten Lauf schnell
+# J2 (31.10.2026, Spuren 27.–29.10.): Marco 00abacc0 und Ina f3179a62 „1–2 Punkte, 0x ausgegraut, 0x kein Menue" = Menüpunkt ausgelöst (Beweis: Menü zu), aber in
+# 1,2 s kein Dialog — dann ESC, das auch einen noch öffnenden Dialog schließt. Solche PCs sind träge (Marco ok-Lauf 4cedb87b: Punkt 1 braucht 23,6 s). Nach einem
+# bewiesenen Menü-Klick darum länger nur WARTEN (kein Klick): 5 s. Ein Treffer kommt sofort zurück, Kosten nur beim Fehlschlag.
+AENDERN_NACH_MENUE_S = 5.0
+AENDERN_TAB_ANRECHNUNG_MAX_S = 30.0   # J2: so viel Tab-Suche zählt höchstens nicht gegen die Frist (Spuren: bis 28 s) — der ganze Versuch bleibt begrenzt
 # TAGESGRENZE (Finn 26.10.2026: SL/TP nach dem Fill nur nachziehen, wenn „der SL so groß ist, dass das Daily Loss Limit in Gefahr ist"
 # oder der TP übers Ziel schießt): der PC-Tab schickt cmd.tages_grenze_usd = höchstens erlaubter Verlust dieses Trades bis zur Tagesgrenze
 # ($). Liegt der echte Verlust bis zum gesetzten SL (ab dem Fill, + Kommission) darüber, wird der SL am Fill nachgezogen — auch ohne final.
@@ -11941,6 +11946,124 @@ def _anker_schreiben(pfad, **felder):
         pass
 
 
+# ÄNDERN-DIALOG: KLICK NUR INS EIGENE FENSTER + FENSTER IN DIE SPUR (J2, Finn 31.10.2026: „ob Fullscreen nicht an war, dann waren die Klicks woanders").
+# _klick_absolut klickt Bildschirm-Koordinaten — bis hier prüfte nichts, ob an der Stelle überhaupt das Terminal liegt (Chrome/Prophos vorn, Fenster
+# kleiner oder teils außerhalb). Jetzt: Terminal vor dem ersten Klick nach vorn (einmal), je Punkt WindowFromPoint gegen den Terminal-Prozess; fremd = kein
+# Klick, in der Spur gezählt. Nicht lesbar (kein Windows) = wie bisher. Fensterzustand steht am Anfang und beim Abbruch in der Spur (Vergleich gegen Foto).
+def aendern_punkt_urteil(unter_pid, terminal_pid):
+    """REIN RECHNEND (testbar): 'frei' (an der Stelle liegt ein Fenster des Terminal-Prozesses, auch ein Menü/Dialog davon), 'verdeckt' (fremder Prozess
+    → kein Klick), 'unbekannt' (nicht lesbar → wie bisher)."""
+    try:
+        u, t = int(unter_pid or 0), int(terminal_pid or 0)
+    except (TypeError, ValueError):
+        return "unbekannt"
+    if not u or not t:
+        return "unbekannt"
+    return "frei" if u == t else "verdeckt"
+
+
+_U32_AENDERN = None
+
+
+def _u32_aendern():
+    """Eigene user32-Instanz mit festen Typen (HWND 64-Bit-sicher, wie polar_bot) — ctypes.windll teilt seine Funktionsobjekte mit dem ganzen Bot,
+    dort restype zu setzen träfe andere Aufrufer."""
+    global _U32_AENDERN
+    if _U32_AENDERN is None:
+        import ctypes
+        import ctypes.wintypes as wt
+        u = ctypes.WinDLL("user32")
+        u.WindowFromPoint.restype, u.WindowFromPoint.argtypes = ctypes.c_void_p, [wt.POINT]
+        u.GetForegroundWindow.restype, u.GetForegroundWindow.argtypes = ctypes.c_void_p, []
+        u.GetWindowThreadProcessId.restype, u.GetWindowThreadProcessId.argtypes = wt.DWORD, [ctypes.c_void_p, ctypes.POINTER(wt.DWORD)]
+        u.IsIconic.restype, u.IsIconic.argtypes = wt.BOOL, [ctypes.c_void_p]
+        u.IsZoomed.restype, u.IsZoomed.argtypes = wt.BOOL, [ctypes.c_void_p]
+        _U32_AENDERN = u
+    return _U32_AENDERN
+
+
+def _hwnd_pid(h):
+    """Prozess eines Fensters | 0. Wirft nicht selbst abgefangen — nur innerhalb der try-Blöcke unten."""
+    import ctypes
+    import ctypes.wintypes as wt
+    pid = wt.DWORD(0)
+    if h:
+        _u32_aendern().GetWindowThreadProcessId(h, ctypes.byref(pid))
+    return int(pid.value)
+
+
+def _punkt_unter_pid(x, y):
+    """Prozess des Fensters an einem Bildschirmpunkt | None (nicht lesbar). Nur lesen, wirft nie."""
+    try:
+        import ctypes.wintypes as wt
+        return _hwnd_pid(_u32_aendern().WindowFromPoint(wt.POINT(int(x), int(y)))) or None
+    except Exception:
+        return None
+
+
+def _terminal_pid(w):
+    try:
+        return int(w.element_info.process_id or 0)
+    except Exception:
+        return 0
+
+
+def _punkt_frei(w, x, y):
+    return aendern_punkt_urteil(_punkt_unter_pid(x, y), _terminal_pid(w)) != "verdeckt"
+
+
+def _fenster_zustand_text(w):
+    """Fenster für die Spur: Größe, Lage, maximiert/minimiert, wer vorn liegt, Bildschirm. Nur lesen, wirft nie."""
+    teile = []
+    try:
+        r = w.rectangle()
+        teile.append(f"{r.right - r.left}x{r.bottom - r.top} @{r.left},{r.top}")
+    except Exception:
+        teile.append("Rechteck nicht lesbar")
+    try:
+        u32 = _u32_aendern()
+        h = int(w.handle)
+        teile.append("minimiert" if u32.IsIconic(h) else "maximiert" if u32.IsZoomed(h) else "nicht maximiert")
+        teile.append(f"Bildschirm {u32.GetSystemMetrics(0)}x{u32.GetSystemMetrics(1)}")
+        vorn = u32.GetForegroundWindow() or 0
+        u = f9_tipp_vorn_urteil(_hwnd_pid(vorn), _terminal_pid(w), vorn)
+        teile.append("Terminal vorn" if u == "ok" else "Vordergrund unbekannt" if u == "unbekannt"
+                     else f"FREMD vorn: '{str(_vordergrund_titel() or '')[:30] or '?'}'")
+    except Exception:
+        pass
+    return ", ".join(teile)
+
+
+def _aendern_vorn(w, trail):
+    """Terminal vor dem Klicken nach vorn: minimiert → wiederherstellen, fremdes Fenster vorn → set_focus (einmal), nachlesen.
+    -> 'ok' | 'fremd' | 'unbekannt'. Wirft nie."""
+    try:
+        u32 = _u32_aendern()
+
+        def lage():
+            v = u32.GetForegroundWindow() or 0
+            return f9_tipp_vorn_urteil(_hwnd_pid(v), _terminal_pid(w), v)
+        try:
+            if w.is_minimized():
+                w.restore()
+                _warte(0.2, 0.25)
+                trail.append("Terminal war minimiert — wiederhergestellt")
+        except Exception:
+            pass
+        u = lage()
+        if u != "fremd":
+            return u
+        trail.append(f"Fremdes Fenster vorn ('{str(_vordergrund_titel() or '')[:30] or '?'}') — hole das Terminal nach vorn")
+        try:
+            w.set_focus()
+        except Exception:
+            pass
+        _warte(0.25, 0.3)
+        return lage()
+    except Exception:
+        return "unbekannt"
+
+
 def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False, bis=None, max_punkte=None):
     """Finns Weg als Band-Scan, OHNE jeden UIA-Anker (18.08.2026: auf diesem
     Build sind Handel-Liste, Kontostand-Zeile UND der Position-aendern-Reiter
@@ -12002,8 +12125,15 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
     # traf (pc-t8wg97 26.10.: 218 s). Jetzt je Punkt: markieren → Rechtsklick → nur einen LESBAREN, aktiven Punkt „Ändern…" klicken;
     # Menü nicht lesbar → ESC und Doppelklick an derselben Stelle; „ausgegraut" = Klick lag in der Liste, aber neben der Zeile → nächster
     # Punkt (ein Doppelklick dort öffnet nichts). Höchstens max_punkte Punkte und nie über bis hinaus — dann Abbruch mit Grund.
-    grau = kein = n = 0
+    grau = kein = n = verdeckt = 0
     t0, abbruch = time.time(), ""
+    verlauf = []                          # J2 (31.10.2026): je Punkt Ergebnis + Dauer in die Spur — bisher nur Summen, „Dialog fremd" und „Menü geklickt, kein Dialog" blieben unsichtbar
+    t_p = t0
+
+    def notiz(name, was):
+        nonlocal t_p
+        verlauf.append(f"{name} {was} {time.time() - t_p:.1f}s")
+        t_p = time.time()
     for pname, px_, py_ in punkte:
         if is_paused():
             trail.append("⏸ Echo pausiert — Zeilen-Scan abgebrochen")
@@ -12015,6 +12145,11 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
             abbruch = f"Grenze {AENDERN_FRIST_S:g} s"
             break
         n += 1
+        t_p = time.time()
+        if not _punkt_frei(w, px_, py_):      # J2 (31.10.2026): an dieser Stelle liegt nicht das Terminal — kein Klick
+            verdeckt += 1
+            notiz(pname, "fremdes Fenster")
+            continue
         _maus_fahren(px_, py_, schritte=3)
         _warte(*klick_zoegern())          # 28.10.2026: angekommen, kurz stehen, dann drücken (Scan-Punkt selbst bleibt)
         # Finns Schritt 1: Zeile markieren, dann erst oeffnen
@@ -12026,7 +12161,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
             st_menue = _kontextmenue_aendern_klicken(timeout=0.8)
             if st_menue == "geklickt":
                 weg = "Rechtsklick-Menue"
-                d = _finde_aendern_dialog(w, timeout=1.2)
+                d = _finde_aendern_dialog(w, timeout=AENDERN_NACH_MENUE_S)
             else:
                 try:
                     _el_tasten(w, "{ESC}", set_foreground=False)
@@ -12034,6 +12169,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
                     pass
                 if st_menue == "ausgegraut":
                     grau += 1
+                    notiz(pname, "ausgegraut")
                     continue
                 kein += 1
         if not weg:
@@ -12041,10 +12177,12 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
                 abbruch = f"Grenze {AENDERN_FRIST_S:g} s"
                 break
             if not _klick_absolut(px_, py_, doppel=True):
+                notiz(pname, "Klick abgelehnt")
                 continue
             weg = "Doppelklick"
             d = _finde_aendern_dialog(w, timeout=1.2)
         if d is None:
+            notiz(pname, f"{weg}: kein Dialog")
             # kein Dialog (Punkt lag neben der Zeile) — Menue NICHT offen stehen lassen (Fund aus Finns Screenshot 18.08.)
             try:
                 _el_tasten(w, "{ESC}", set_foreground=False)
@@ -12057,6 +12195,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
                              x_frac=(px_ - hr.left) / max(1, hr.right - hr.left),
                              y_off=hr.bottom - py_)
             return d
+        notiz(pname, f"{weg}: Dialog einer anderen Position")
         try:
             _el_tasten(d, "{ESC}", set_foreground=False)
         except Exception:
@@ -12065,12 +12204,15 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
     # Selbst-Diagnose in die Spur (30.08.2026, seit 26.10.2026 mit Zeit, Menü-Zähler und Abbruchgrund): nur ausgegraute Punkte = alle
     # Klicks lagen in der Liste neben der Zeile; nur „kein Menü" = das Menü ist auf diesem Build nicht lesbar und auch der Doppelklick
     # öffnete nichts (Klick-Weg/Geometrie)
-    zaehler = f"{n} Punkte in {time.time() - t0:.1f} s, {grau}x ausgegraut, {kein}x kein Menue" + (f" — abgebrochen ({abbruch})" if abbruch else "")
+    zaehler = f"{n} Punkte in {time.time() - t0:.1f} s, {grau}x ausgegraut, {kein}x kein Menue" + (f", {verdeckt}x fremdes Fenster an der Stelle" if verdeckt else "") \
+        + (f" — abgebrochen ({abbruch})" if abbruch else "")
     if nur_anker:
         trail.append(f"Anker-Schnellweg ohne Treffer ({zaehler})")
     else:
         trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
                      f"Band -60..-{band_max}px, x={gx}, {zaehler})")
+    if verlauf:
+        trail.append("Punkte: " + " · ".join(verlauf))
     return None
 
 
@@ -12112,7 +12254,7 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
             wr = w.rectangle()
             tx = wr.left + int(a["handel_x_off"])
             ty = wr.bottom - int(a["handel_y_off"])
-            if maus_grenze is None or ty >= maus_grenze:
+            if (maus_grenze is None or ty >= maus_grenze) and _punkt_frei(w, tx, ty):
                 _maus_fahren(tx, ty, schritte=4)
                 _klick_absolut(tx, ty)
                 if trail is not None:
@@ -12124,6 +12266,7 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
     # Breit suchen: je nach MT5-Build ist der Toolbox-Reiter TabItem, Custom,
     # Button oder Text — notfalls der ganze Baum (None). Alle Treffer sammeln.
     treffer = []
+    t_suche = time.time()
     for ct in ("TabItem", "Custom", "Button", "Text", None):
         try:
             els = w.descendants(control_type=ct) if ct else w.descendants()
@@ -12137,6 +12280,8 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
                 continue
         if treffer:
             break
+    if trail is not None:
+        trail.append(f"Handel-Tab-Suche {time.time() - t_suche:.1f} s")   # J2: wie viel der Frist die Baum-Suche frisst
     if not treffer:
         if trail is not None:
             trail.append("Handel-Tab: kein Element gefunden — Positions-Scan wie gehabt")
@@ -12156,6 +12301,8 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
             unten = (maus_grenze is None) or (r.top >= maus_grenze)
             if unten and r.width() > 0 and r.height() > 0:
                 cx, cy = _echo_klickziel(r, deckel=(20.0, 6.0))   # 28.10.2026: gewürfelt nahe der Reiter-Mitte statt exakt
+                if not _punkt_frei(w, cx, cy):    # J2: fremdes Fenster über dem Reiter — kein Klick
+                    continue
                 _maus_fahren(cx, cy, schritte=4)
                 _warte(*klick_zoegern())
                 _klick_absolut(cx, cy)
@@ -12209,6 +12356,13 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         trail.append("⏸ Echo pausiert — keine SL/TP-Klicks")
         return None
 
+    # J2 (31.10.2026, Block über aendern_punkt_urteil): Fenster in die Spur, Terminal nach vorn — bleibt ein fremdes Fenster vorn, kein einziger Klick
+    trail.append("Ändern-Start: " + _fenster_zustand_text(w))
+    if _aendern_vorn(w, trail) == "fremd":
+        grund = "Aendern-Dialog nicht versucht: Terminal kommt nicht nach vorn — kein Klick in ein fremdes Fenster"
+        trail.append(grund + " (" + _fenster_zustand_text(w) + ")")
+        return {"ok": False, "dialog": False, "msg": grund}
+
     # 0) Anker-SCHNELLWEG zuerst (01.09.2026, Finns Tempo-Beschwerde: 'von
     # Popup oeffnen bis SL setzen soll das grob in 10 Sekunden gehen'). Die
     # Tab-Aktivierung stand bisher VOR jedem Scan und bezahlte auf Builds mit
@@ -12228,7 +12382,11 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     if dlg is None:
         # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar
         # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
+        # J2 (31.10.2026, Mike 427fea01, Marco 00abacc0: 15–28 s bis „Handel-Tab geklickt", danach blieb Zeit für nur einen Punkt): die Baum-Suche klickt nicht,
+        # sie zählt nicht gegen die Frist — die Klicks behalten ihre AENDERN_FRIST_S
+        t_tab = time.time()
         tab_weg = _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
+        bis = min(bis + time.time() - t_tab, t_start + AENDERN_FRIST_S + AENDERN_TAB_ANRECHNUNG_MAX_S)
         dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad, bis=bis, max_punkte=AENDERN_MAX_PUNKTE)
         if dlg is None and tab_weg == "anker" and time.time() < bis:
             # Der gemerkte Tab-Punkt hat NICHT in die Handel-Liste gefuehrt
@@ -12242,8 +12400,10 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             _anker_schreiben(anker_pfad, handel_x_off=None, handel_y_off=None,
                              handel_x_frac=None)
             trail.append("Tab-Anker verworfen (Scan fand nach Anker-Klick keine Handel-Zeile)")
-            if _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad,
-                                      anker_nutzen=False) == "suche":
+            t_tab = time.time()
+            tab_zweit = _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad, anker_nutzen=False)
+            bis = min(bis + time.time() - t_tab, t_start + AENDERN_FRIST_S + AENDERN_TAB_ANRECHNUNG_MAX_S)
+            if tab_zweit == "suche":
                 dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad, bis=bis, max_punkte=AENDERN_MAX_PUNKTE)
 
     kandidaten, ticket_da = [], False
@@ -12291,7 +12451,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         # Chart und Ein-Klick-Panel — ein Doppelklick dort waere im
         # schlimmsten Fall eine ORDER (18.08.2026, nach dem Navigator-Fund).
         maus_ok = (mx is not None and maus_grenze is not None
-                   and r.top >= maus_grenze)
+                   and r.top >= maus_grenze and _punkt_frei(w, mx, my))
         if maus_ok:
             _maus_fahren(mx, my, schritte=8)
             _warte(*klick_zoegern())      # 28.10.2026: kurz stehen vor dem Druck (Zeilen-Punkt bleibt)
@@ -12392,6 +12552,8 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                     break
                 if time.time() >= bis:
                     break
+                if not _punkt_frei(w, gx, gy):    # J2: fremdes Fenster an der Stelle — kein Klick
+                    continue
                 _maus_fahren(gx, gy, schritte=6)
                 # Finns Hand-Weg (18.08.2026, Schritt fuer Schritt vorgemacht):
                 # Zeile ANKLICKEN (markieren) -> RECHTSKLICK -> 'Aendern oder
@@ -12437,8 +12599,9 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         # Abbruch MIT Grund (26.10.2026): wie lange, und ob die Frist griff — die Zähler je Scan stehen schon in der Spur
         dauer = time.time() - t_start
         grund = (f"Aendern-Dialog nach {dauer:.0f} s nicht offen — Frist {AENDERN_FRIST_S:g} s erreicht, abgebrochen statt weiter blind zu klicken"
-                 if dauer >= AENDERN_FRIST_S else f"Aendern-Dialog liess sich nicht oeffnen ({dauer:.0f} s, alle Wege ohne Treffer)")
+                 if time.time() >= bis else f"Aendern-Dialog liess sich nicht oeffnen ({dauer:.0f} s, alle Wege ohne Treffer)")
         trail.append(grund)
+        trail.append("Stand beim Abbruch: " + _fenster_zustand_text(w))   # J2: gegen das Fehlerfoto prüfbar
         return {"ok": False, "dialog": False, "msg": grund}
 
     # 3) SL/TP-Felder nach Beschriftung, sonst die ersten beiden Edits
@@ -12787,6 +12950,18 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
         if k is None:                          # Echo pausiert — kein Klick, kein zweiter Anlauf
             break
         if k.get("dialog") is False:           # Dialog ging in der Frist nicht auf (26.10.2026) — ein zweiter Anlauf wäre derselbe blinde Scan
+            # J2 (31.10.2026): Foto wie bei Fehlern, obwohl der Lauf als platziert gilt; kurz stehen bleiben, damit es das Terminal zeigt, nicht den Heimweg
+            try:
+                st_d = _api_lesen(path, expected)
+                if "fehler" not in st_d:
+                    trail.append(f"Offene Positionen im Terminal: {len(st_d['positionen'])}")
+            except Exception:
+                pass
+            bild, ogrund = fehlerfoto_anstossen("echo", None, "aendern_dialog")
+            trail.append(f"Fehlerfoto angestoßen → {bild} (bildschirm)" if bild else f"kein Fehlerfoto: {ogrund}")
+            if bild:
+                erg["fehlerbild"] = bild
+                _warte(2.0, 1.0)
             break
         stand, ende = None, time.time() + 10
         with _EchoUnruhe():                    # nur lesen — Maus wandert (07.10.2026)

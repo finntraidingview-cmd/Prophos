@@ -58777,11 +58777,22 @@
    * Order-Bots (Station · Sekunden) kam bisher nur ins Panel-Log am PC. Jetzt steht sie am Plan in mt5_baseline.puls_spur
    * {at, pc, ok, s, trail, msg}, ohne Status-Guard (der Plan ist je nach Weg schon „open"). Bei Fehlern steckt die Spur im
    * Meldungstext in eckigen Klammern — die wird herausgelöst. Die Routine „Puls-Fehler" liest daraus, welche Station Zeit frisst. */
+  // SPUR NIE AM ENDE ABGESCHNITTEN (J2, 31.10.2026: 11 von 50 Nachzieh-Spuren endeten mitten im Lauf — slice(0, 1500) warf genau das Ergebnis weg): lang =
+  // Anfang + Ende. Ergebnis des Nachziehens zusätzlich als eigenes Feld (nachzug), das bisher nie in der DB ankam. REIN.
+  const PULS_SPUR_MAX = 4000
+  const pulsSpurKurz = t => { t = String(t || ''); if(t.length <= PULS_SPUR_MAX) return t
+    return t.slice(0, 2400) + ' … [gekürzt] … ' + t.slice(-(PULS_SPUR_MAX - 2400 - 16)) }   // Anfang lang: Final:/SL:-Zeilen liest die Justage-View
+  const pulsNachzugKurz = n => { if(!n || typeof n !== 'object') return null
+    const o = {}; for(const k of ['nachgezogen', 'ok', 'seiten', 'versuche', 'abw_usd', 'sl', 'tp', 'soll_sl', 'soll_tp', 'komm', 'sl_check', 'tagesgrenze', 'fehlerbild']) if(n[k] !== undefined) o[k] = n[k]
+    if(n.grund) o.grund = String(n.grund).slice(0, 300)
+    return o }
+  window._pulsSpurKurz = pulsSpurKurz; window._pulsNachzugKurz = pulsNachzugKurz   // Test-Haken
   function pulsSpurSchreiben(planId, r, zeiten){
     try{
       const msg = String((r && (r.msg || r.error)) || ''), sek = /·\s*(\d+)s\b/.exec(msg), klammer = /\[([^\]]{20,})\]\s*$/.exec(msg)
       const spur = { at: new Date().toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, ok: !!(r && r.ok),
-        s: sek ? Number(sek[1]) : null, trail: String((r && r.trail) || (klammer && klammer[1]) || '').slice(0, 1500), msg: msg.slice(0, 600) }
+        s: sek ? Number(sek[1]) : null, trail: pulsSpurKurz((r && r.trail) || (klammer && klammer[1]) || ''), msg: msg.slice(0, 600) }
+      const nz = pulsNachzugKurz(r && r.nachzug); if(nz) spur.nachzug = nz
       if(zeiten && typeof zeiten === 'object') spur.zeiten = zeiten   // ms je Schritt des Echo-V2-Checks (08.10.2026)
       if(!spur.trail && !spur.msg) return
       baselinePatch(planId, { puls_spur: spur }, null).catch(e => console.warn('[puls-spur]', (e && e.message) || e))
