@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Selbsttest: POST /admin/payout-anfragen (31.10.2026, Admin → Payouts). Anfrage geht auf die ID des Kontos, keine doppelte, ohne Recht 403, keine Buchung.
 Ohne Netz: Auth und Supabase-Aufrufe ersetzt. Aufruf: PROPHOS_FRONTEND=1 python3 tools/selftest_payout_anfragen.py"""
+import json
 import os
+import re
+import subprocess
 import sys
 
 HIER = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +33,24 @@ check(F({"account_type": "funded_cfd", "firm": "Tradeify CFD"}, None, "M") == {}
 check(F({"account_type": "funded_cfd", "firm": "FTMO", "payout_ready_at": "2026-10-30"}, None, "M") == {"payout_ready_at": None}, "ohne Termin: stehender wird geleert")
 check(F({"account_type": "funded_cfd", "firm": "FTMO", "payout_ready_at": "2026-10-30"}, "2026-11-13", "M") == {"payout_ready_at": "2026-11-13"}, "mit Termin: gesetzt")
 check(F({"account_type": "funded_cfd", "firm": "FTMO", "waiting_payout_since": "2026-10-25"}, None, "M") == {"waiting_payout_since": None}, "Waiting geleert")
+
+print("1b) payout_anfrage_notiz (rein)")
+N = app.payout_anfrage_notiz
+K = {"goal_done_offset": 5, "payout_ready_at": "2026-10-30", "waiting_payout_since": "2026-10-25T00:00:00+00:00"}
+check(N(K, {"goal_done_offset": 0, "goal_target": 5, "payout_ready_at": None, "waiting_payout_since": None}) == "Aus Admin angefragt · vorher: Winning Days 5/5 · Termin 2026-10-30 · Waiting seit 2026-10-25", "alte Werte in der Notiz")
+check(N({}, {}) == "Aus Admin angefragt", "nichts geändert: nur die Herkunft")
+check(N({"goal_since": None}, {"goal_since": "M"}) == "Aus Admin angefragt · vorher: zählt ab leer", "goal_since leer")
+
+print("1c) Vorbelegung im Popup (prophos.html, JavaScriptCore)")
+JSC = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc"
+html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+m = re.search(r"const admAnfrageVorbelegung = .*", html)
+check(bool(m), "Funktion gefunden")
+js = m.group(0) + "\nprint(JSON.stringify([admAnfrageVorbelegung(4050,'USD',0.85), admAnfrageVorbelegung(4050,'EUR',0.85), admAnfrageVorbelegung(100,'GBP',0.85), admAnfrageVorbelegung(0,'USD',0.85), admAnfrageVorbelegung(4050,'USD',0)]))"
+werte = json.loads(subprocess.run([JSC, "-e", js], capture_output=True, text=True, check=True).stdout)
+check(werte == [3442.5, 4050, None, None, None], f"4.050 $ → 3.442,50 €, € bleibt, ohne Kurs/Betrag leer: {werte}")
+check(re.search(r"\$\('adm-anfrage-ccy'\)\.value = 'EUR'", html) is not None, "Popup belegt EUR vor")
+check(html.index('<option value="EUR">EUR (€)</option><option value="USD">USD ($)</option><option value="GBP">GBP (£)</option></select></div>') > 0, "USD/GBP bleiben wählbar")
 
 print("2) Route")
 AID, OWN, ADMIN = "aaaaaaaa-1111-2222-3333-444444444444", "u-besitzer", "u-admin"
@@ -68,7 +89,7 @@ app.sb_select, app.sb_insert, app.sb_update = sel, ins, upd
 app._admin_standard_aus = lambda: S["aussen"]
 app._admin_voll = lambda: (ADMIN, None)
 cl = app.app.test_client()
-OK = {"account_id": AID, "amount": 4050, "currency": "USD", "liegt_bei": "Pascal", "requested_at": "2026-10-31"}
+OK = {"account_id": AID, "amount": 3442.5, "currency": "EUR", "liegt_bei": "Pascal", "requested_at": "2026-10-31"}
 
 
 def post(**ueber):
@@ -82,9 +103,10 @@ check(r.status_code == 200 and d.get("ok"), "angelegt")
 t, zeile = S["inserts"][0]
 check(t == "pending_payouts" and len(S["inserts"]) == 1, "nur pending_payouts, keine Buchung in transactions")
 check(zeile["user_id"] == OWN, "ID des Kontos, nicht Admin und nicht user_id aus dem Body")
-check(zeile["amount"] == 4050 and zeile["currency"] == "USD" and zeile["liegt_bei"] == "Pascal" and zeile["requested_at"] == "2026-10-31", "Betrag, Währung, liegt bei, Datum")
+check(zeile["amount"] == 3442.5 and zeile["currency"] == "EUR" and zeile["liegt_bei"] == "Pascal" and zeile["requested_at"] == "2026-10-31", "Betrag, Währung, liegt bei, Datum")
 check(zeile["account_id"] == AID and zeile["account_name"].startswith("150k") and zeile["account_firm"] == "Tradeify", "Konto-Felder wie der Login")
 check("status" not in zeile, "status bleibt beim Tabellen-Standard pending")
+check(zeile["notes"] == "Aus Admin angefragt · vorher: Winning Days 0/5 · Termin 2026-10-30", "Notiz mit den alten Werten")
 kt, kp, kb = S["updates"][0]
 check(kt == "accounts" and kp["user_id"] == f"eq.{OWN}" and kb["goal_done_offset"] == 0 and kb["payout_ready_at"] is None, "Konto wie der Login: Zähler 0, Termin geleert, Guard Besitzer")
 check(d["zaehler_neu"] is True and d["balance_lesen"] is False, "Antwort: Zähler neu, Futures ohne Balance-Lesung")

@@ -11247,11 +11247,12 @@
         </div>
         <div class="modal-body">
           <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--sub)" id="adm-anfrage-acc">–</div>
-          <p class="modal-sub" style="margin-top:10px">Trägt die Anfrage bei dieser ID ein, wie unter Finanzen „Angefragt": zählt noch nicht als Geld, Winning Days starten neu. Bei der Firma wird nichts ausgelöst, es geht keine Mail raus.</p>
+          <p class="modal-sub" id="adm-anfrage-text" style="margin-top:10px"></p>
           <div style="display:grid;grid-template-columns:1fr 110px;gap:10px;margin-top:12px">
             <div class="field"><label>Betrag</label><input class="input mono" id="adm-anfrage-amt" type="number" step="0.01" min="0" autocomplete="off"></div>
-            <div class="field"><label>Währung</label><select class="input" id="adm-anfrage-ccy"><option value="USD">USD ($)</option><option value="EUR">EUR (€)</option><option value="GBP">GBP (£)</option></select></div>
+            <div class="field"><label>Währung</label><select class="input" id="adm-anfrage-ccy"><option value="EUR">EUR (€)</option><option value="USD">USD ($)</option><option value="GBP">GBP (£)</option></select></div>
           </div>
+          <div id="adm-anfrage-urspr" class="tnum" style="font-size:11.5px;color:var(--sub);margin-top:4px"></div>
           <div class="field" style="margin-top:12px"><label>Liegt bei / kommt von</label><input class="input" id="adm-anfrage-bei" list="adm-anfrage-bei-list" placeholder="z.B. Pascal, Rumänen" autocomplete="off"><datalist id="adm-anfrage-bei-list"></datalist></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
             <div class="field"><label>Angefragt am</label><input class="input mono" id="adm-anfrage-am" type="date" autocomplete="off"></div>
@@ -18696,6 +18697,8 @@
      * „anfragbar" → Popup, vorbelegt mit dem Betrag der Spalte Anfragbar; ✓ legt über /admin/payout-anfragen dieselbe Anfrage an wie der Login der ID unter Finanzen.
      * Offene Anfrage des Kontos: Chip „angefragt <Betrag> · <Datum>", verschwindet beim Erhalten mit der Anfrage aus admData.pending_payouts. */
     let _admAnfrage = null
+    // Vorbelegung (S2 31.10.2026): Finanzen laufen in Euro, alle Summen zur Anfrage rechnen ohne Umrechnung → Betrag in €, Kurs wie überall _fxUsdEur. Ohne Kurs (GBP): leer, Finn trägt ein.
+    const admAnfrageVorbelegung = (wert, ccy, fx) => { const v = Number(wert), r2 = x => Math.round(x * 100) / 100; if(!(v > 0)) return null; return ccy === 'EUR' ? r2(v) : ccy === 'USD' && Number(fx) > 0 ? r2(v * Number(fx)) : null }
     const admAnfrageVon = r => (admData?.pending_payouts || []).filter(t => t.account_id ? String(t.account_id) === String(r.account_id) : String(t.account_name || '').trim() === String(r.account_name || '').trim() && String(t.user_id) === String(r.user_id)).pop() || null
     function admAnfrageChip(st, r){
       const t = admAnfrageVon(r)
@@ -18715,10 +18718,19 @@
     }
     function admAnfrageOeffnen(r){
       _admAnfrage = r
-      const a = r.calc && r.calc.anf, betrag = a && a.erhalten > 0 ? Math.round(a.erhalten * 100) / 100 : null
+      const a = r.calc && r.calc.anf, ur = a && a.erhalten > 0 ? Math.round(a.erhalten * 100) / 100 : null, urCcy = (r.calc && r.calc.ccy) || 'USD', fx = Number(window._fxUsdEur) > 0 ? Number(window._fxUsdEur) : 0.85
+      const eur = admAnfrageVorbelegung(ur, urCcy, fx), f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), tagTxt = v => new Date(String(v).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' })
       $('adm-anfrage-acc').textContent = `${admShortName(r.person || '—')} · ${String(r.account_name || '').replace(/\s*→.*$/, '').trim() || '—'} · ${r.account_firm || '–'}`
-      $('adm-anfrage-amt').value = betrag != null ? String(betrag) : ''
-      $('adm-anfrage-ccy').value = ['EUR', 'USD', 'GBP'].includes(r.calc && r.calc.ccy) ? r.calc.ccy : 'USD'
+      $('adm-anfrage-amt').value = eur != null ? String(eur) : ''
+      $('adm-anfrage-ccy').value = 'EUR'
+      $('adm-anfrage-urspr').textContent = ur == null || urCcy === 'EUR' ? '' : eur != null ? `${admGeld(ur, urCcy)} = ${f2(eur)} € (Kurs ${String(fx).replace('.', ',')})` : `Anfragbar ${admGeld(ur, urCcy)} — kein Kurs, Betrag bitte eintragen`
+      // Wechselt Finn die Währung, solange der Betrag unberührt ist: Ursprungswert bzw. € (USD/GBP bleiben wie im alten Weg wählbar)
+      _admAnfrage = Object.assign(r, { _anfVorschlag: { eur, ur, urCcy } })
+      $('adm-anfrage-amt').dataset.auto = '1'
+      // Popup nennt, was sich am Konto ändert (S2 31.10.2026); die alten Werte schreibt der Server in die Notiz der Anfrage
+      $('adm-anfrage-text').textContent = 'Trägt die Anfrage bei dieser ID ein, wie unter Finanzen „Angefragt", zählt noch nicht als Geld. Am Konto ändert sich: '
+        + [r.wd_target > 0 ? `Winning-Days-Zähler ${r.wd_count}/${r.wd_target} → 0/${r.wd_target}` : '', r.ready_at ? `Termin ${tagTxt(r.ready_at)} → leer oder das Datum unten` : 'Termin nur mit Datum unten', r.waiting_since ? `Waiting for Payout seit ${tagTxt(r.waiting_since)} → aus` : ''].filter(Boolean).join(' · ')
+        + '. Die alten Werte stehen in der Notiz der Anfrage. Bei der Firma wird nichts ausgelöst, es geht keine Mail raus.'
       $('adm-anfrage-bei').value = ''
       $('adm-anfrage-bei-list').innerHTML = [...new Set((admData?.pending_payouts || []).map(t => String(t.liegt_bei || '').trim()).filter(Boolean))].map(v => `<option value="${escapeHtml(v)}"></option>`).join('')
       $('adm-anfrage-am').value = _deTodayStr()
@@ -18733,6 +18745,9 @@
     $('admAnfrageCancel')?.addEventListener('click', admAnfrageZu)
     $('admAnfrageModal')?.addEventListener('click', e => { if(e.target === $('admAnfrageModal')) admAnfrageZu() })
     $('admAnfrageSave')?.addEventListener('click', () => admAnfrageSpeichern())
+    $('adm-anfrage-amt')?.addEventListener('input', e => { delete e.target.dataset.auto })
+    $('adm-anfrage-ccy')?.addEventListener('change', e => { const n = $('adm-anfrage-amt'), v = _admAnfrage && _admAnfrage._anfVorschlag; if(!n.dataset.auto || !v) return
+      const w = e.target.value === 'EUR' ? v.eur : e.target.value === v.urCcy ? v.ur : null; n.value = w != null ? String(w) : '' })
     async function admAnfrageSpeichern(){
       const r = _admAnfrage; if(!r || !admData) return
       const msg = $('admAnfrageMsg'), btn = $('admAnfrageSave'), betrag = Number($('adm-anfrage-amt').value), am = $('adm-anfrage-am').value || ''
@@ -18756,7 +18771,7 @@
       // Lokalen Stand nachziehen — dieselben Felder, die /admin/overview liefert
       const z = d.pending || {}, k = d.account
       ;(admData.pending_payouts = admData.pending_payouts || []).push({ id: String(z.id || ''), account_id: r.account_id, user_id: r.user_id, person: r.person, person_mail: '', amount: Number(z.amount) || betrag,
-        currency: z.currency || $('adm-anfrage-ccy').value, liegt_bei: z.liegt_bei || '', requested_at: z.requested_at || am, account_name: z.account_name || r.account_name, account_firm: z.account_firm || r.account_firm, notes: '' })
+        currency: z.currency || $('adm-anfrage-ccy').value, liegt_bei: z.liegt_bei || '', requested_at: z.requested_at || am, account_name: z.account_name || r.account_name, account_firm: z.account_firm || r.account_firm, notes: z.notes || '' })
       admData.pending_payouts.sort((a, b) => String(a.requested_at).localeCompare(String(b.requested_at)))
       r.payouts_n = (Number(r.payouts_n) || 0) + 1
       if(k){
@@ -18766,7 +18781,7 @@
       }
       admAnfrageZu()
       admFinRender()
-      if(typeof atToast === 'function') atToast(`Payout ${admGeld(Number(z.amount) || betrag, z.currency || 'USD')} für ${admShortName(r.person || '—')} angefragt${d.konto_fehler ? ' — Konto NICHT nachgezogen (Winning Days, Termin), im Account-Modal prüfen' : ''}`, d.konto_fehler ? 'end' : 'start')
+      if(typeof atToast === 'function') atToast(`Payout ${admGeld(Number(z.amount) || betrag, z.currency || 'EUR')} für ${admShortName(r.person || '—')} angefragt${d.konto_fehler ? ' — Konto NICHT nachgezogen (Winning Days, Termin), im Account-Modal prüfen' : ''}`, d.konto_fehler ? 'end' : 'start')
       if(d.balance_lesen) admBalanceAnstossen(r.account_id)
       // Eigene ID in diesem Tab: Konten und Finanzen frisch laden, sonst zählte ein +1 vom alten Stand weiter (5 + 1 statt 0 + 1, Prüfung 31.10.2026)
       if(String(r.user_id) === String(currentUserId)) try{

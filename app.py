@@ -15450,6 +15450,21 @@ def payout_anfrage_konto_felder(konto, naechster, morgen):
     return out
 
 
+def payout_anfrage_notiz(konto, felder):
+    """REIN RECHNEND (testbar): Notiz der Anfrage aus dem Admin — die alten Konto-Werte, die der Eintrag ändert, damit ein Fehlklick nachvollziehbar bleibt (S2 31.10.2026)."""
+    konto, felder = konto or {}, felder or {}
+    teile = []
+    if "goal_done_offset" in felder:
+        teile.append(f"Winning Days {konto.get('goal_done_offset') or 0}/{felder.get('goal_target')}")
+    if "goal_since" in felder:
+        teile.append(f"zählt ab {str(konto.get('goal_since') or 'leer')[:10]}")
+    if "payout_ready_at" in felder:
+        teile.append(f"Termin {str(konto.get('payout_ready_at') or 'leer')[:10]}")
+    if "waiting_payout_since" in felder:
+        teile.append(f"Waiting seit {str(konto.get('waiting_payout_since'))[:10]}")
+    return "Aus Admin angefragt" + (" · vorher: " + " · ".join(teile) if teile else "")
+
+
 @app.route("/admin/payout-anfragen", methods=["POST", "OPTIONS"])
 def admin_payout_anfragen():
     """Payout-Anfrage aus Admin → Payouts für die ID der Zeile (31.10.2026, Finn: „wenn ich auf Anfragen drücke, direkt aus dem Admin-Terminal die Payouts
@@ -15492,7 +15507,7 @@ def admin_payout_anfragen():
         if wert and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", wert):
             return jsonify({"error": f"{name} muss JJJJ-MM-TT sein"}), 400
     try:
-        rows = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,goal_kind,goal_target,goal_manual,payout_ready_at,waiting_payout_since",
+        rows = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,goal_kind,goal_target,goal_manual,goal_done_offset,goal_since,payout_ready_at,waiting_payout_since",
                                       "id": f"eq.{aid}", "limit": "1"}) or []
     except Exception as e:
         return jsonify({"error": f"Konto nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
@@ -15516,16 +15531,16 @@ def admin_payout_anfragen():
         return jsonify({"error": f"Offene Anfragen nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
     if offen:
         return jsonify({"error": f"Für dieses Konto ist seit {offen[0].get('requested_at') or '?'} schon eine Anfrage offen — nichts angelegt", "offen": offen[0]}), 409
+    morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
+    felder = payout_anfrage_konto_felder(konto, naechster, morgen)
     try:
         zeile = sb_insert("pending_payouts", {
             "user_id": besitzer, "account_id": aid, "account_name": konto.get("name") or None, "account_firm": konto.get("firm") or None,
-            "amount": betrag, "currency": waehrung, "liegt_bei": str(b.get("liegt_bei") or "").strip()[:120] or None, "requested_at": angefragt, "notes": None,
+            "amount": betrag, "currency": waehrung, "liegt_bei": str(b.get("liegt_bei") or "").strip()[:120] or None, "requested_at": angefragt, "notes": payout_anfrage_notiz(konto, felder),
         })
     except Exception as e:
         print(f"[payout-anfragen] ⚠️ pending_payouts {aid}: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Anfrage nicht gespeichert ({type(e).__name__})"}), 502
-    morgen = (jetzt_b + timedelta(days=1)).strftime("%Y-%m-%d")
-    felder = payout_anfrage_konto_felder(konto, naechster, morgen)
     konto_neu, konto_fehler = None, None
     if felder:
         try:
