@@ -129,8 +129,8 @@ def berechne_sl_tp(richtung, ref_preis, volumen, contract_size, sl_usd, tp_usd, 
 # daneben — Blue Guardian 5,2 Lot sell, ref 29.394,17 → Fill 29.399,11 = +4,94 Pkt × 5,2 × 10 $ = +257 $ (Plan 6.063 → +6.390);
 # FundedNext 3,2 Lot −3,17 Pkt = −101,28 $ auf den Cent. Ab dem Fill gerechnet trifft der $/Pkt/Lot die Kontraktgröße (BG 10,04 ·
 # FTMO 1,00 · FundingPips 20,05 · The5ers 1,01); Kommission ist bei den Index-CFDs praktisch 0. Jetzt: nach dem Fill exakt vom Fill
-# (+ gelesene Kommission), Ändern-Dialog wie Polar, sonst bleibt der grobe F9-TP stehen. Nur Echo V2 (cmd ohne_hedge) — Echo mit
-# Fusion-Hedge bleibt, wie es ist.
+# (+ gelesene Kommission), Ändern-Dialog wie Polar, sonst bleibt der grobe F9-TP stehen. Echo V2 (cmd ohne_hedge) voll; Echo mit
+# Fusion-Hedge seit 31.10.2026 nur die SL-Seite bei „Plan + 15 %" (s. nachzieh_cmd).
 NACHZIEHEN_AB_USD = 3.0          # kleinere Abweichung (TP oder SL) lohnt keinen Ändern-Dialog
 NACHZIEHEN_VERSUCHE = 2          # Ändern-Dialog höchstens so oft (dazwischen gewürfelte Pause), dann aufgeben — grobe Level bleiben
 # ÄNDERN-DIALOG MIT HARTER GRENZE (Finn 26.10.2026: „geh sicher, dass man beim Doppelklick bzw. Rechtsklick auf die Order danach auch
@@ -191,6 +191,19 @@ def sl_ausloeser(verlust_usd, sl_usd, grenze_usd=None):
         return "plan", f"SL: Verlust bis SL {v:g} $ > Plan {plan:g} $ + {NACHZIEH_SL_TOLERANZ * 100:g} % → am Fill"
     return None, (f"SL ok ({v:g} ≤ {plan:g} × {1 + NACHZIEH_SL_TOLERANZ:g}".replace(".", ",")
                   + (f", ≤ Tagesgrenze {g:g})" if g is not None else ")"))
+
+
+# SL-KLICK AUCH FÜR ECHO MIT HEDGE (Finn 31.10.2026 über den Master: „bei Echo V2 und bei Echo, dass es eine generelle Regel ist"; Befund: 0 von 94
+# Echo-mit-Hedge-Trades seit 26.10. liefen durchs Nachziehen, Vorfall Marco …6321 Plan b6be307e: Plan-SL 2.211 $, Verlust −3.063 $). Nur der Auslöser
+# „Plan + 15 %" und nur die SL-Seite: final und Tagesgrenze gelten bei Echo mit Hedge nicht, der TP wird unverändert mitgetippt. Der Hedge läuft unabhängig
+# vom Bot: der Copier öffnet ihn aus dem EA-Snapshot und rechnet seine Notfall-Level in jedem Tick aus dem SL/TP der Master-Position (copier.plan_sltp) —
+# der neue SL zieht das Hedge-Level also von selbst mit, Lots/Richtung/Formel bleiben.
+def nachzieh_cmd(cmd):
+    """REIN RECHNEND (testbar): der Auftrag für _sltp_nachziehen. Echo V2: derselbe cmd. Echo mit Hedge: Kopie ohne final/final_grund/tages_grenze_usd,
+    damit nur sl_ausloeser 'plan' einen Klick auslöst."""
+    if cmd.get("ohne_hedge"):
+        return cmd
+    return dict(cmd, final=None, final_grund="", tages_grenze_usd=None)
 
 
 def sl_tagesgrenze_vom_fill(richtung, fill, volumen, contract_size, sl_usd, grenze_usd, komm_usd=0.0, digits=2):
@@ -12806,6 +12819,21 @@ def _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, vol, contract_size
     return erg
 
 
+def _sltp_nachziehen_lauf(w, path, expected, p, cmd, symbol, fill, vol, contract_size, digits, sl_alt, tp_alt, trail, anker_pfad):
+    """_sltp_nachziehen mit nachzieh_cmd. Echo mit Hedge: die Position ist da und der Hedge läuft — ein Fehler hier darf den Lauf nicht abbrechen, die
+    groben Level bleiben, der Grund steht in der Spur. Echo V2 wie bisher ohne diesen Fang."""
+    c = nachzieh_cmd(cmd)
+    if cmd.get("ohne_hedge"):
+        return _sltp_nachziehen(w, path, expected, p, c, symbol, fill, vol, contract_size, digits, sl_alt, tp_alt, trail, anker_pfad)
+    try:
+        return _sltp_nachziehen(w, path, expected, p, c, symbol, fill, vol, contract_size, digits, sl_alt, tp_alt, trail, anker_pfad)
+    except Exception as e:
+        grund = f"{type(e).__name__}: {str(e)[:120]} — grobe F9-Level bleiben"
+        trail.append("Nachziehen: " + grund)
+        return {"sl": sl_alt, "tp": tp_alt, "ok": True, "nachgezogen": False, "final": None, "seiten": None, "komm": None, "abw_usd": 0.0,
+                "soll_sl": sl_alt, "soll_tp": tp_alt, "versuche": 0, "grund": grund, "tagesgrenze": None, "sl_check": None}
+
+
 # ══ PC-TIPP-SPERRE (Routine „Puls-Fehler" 30.10.2026 20:35 Dubai, .1953) ══
 # ANLASS: Muster „m5order: abbruch vor dem order-knopf (nichts platziert): symbol '#' steht nicht bestaetigt im dialog (gelesen:
 # 'eurusd, …')" — 4 Fälle in 2 Tagen auf 4 PCs. Bei 3 davon (pc-xxxxxx 29.10. 09:27, 30.10. 04:15 und 14:58 UTC) lief laut
@@ -13392,26 +13420,25 @@ def run(cfg_path, cmd):
                     pass
                 trail.append(f"SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)} "
                              f"direkt im F9-Dialog gesetzt")
-                # ECHO V2: grobe F9-Level (ab Kurs VOR dem Klick) am echten Fill nachziehen (21.10.2026, s. sltp_vom_fill). Echo mit
-                # Fusion-Hedge (ohne cmd ohne_hedge, auch altes Panel) bleibt exakt wie bisher.
+                # grobe F9-Level (ab Kurs VOR dem Klick) am echten Fill nachziehen (21.10.2026, s. sltp_vom_fill). Echo V2 wie bisher; Echo mit Fusion-Hedge
+                # seit 31.10.2026 nur SL bei Plan + 15 % (nachzieh_cmd). Der Hedge hängt nicht an diesem Schritt: der Copier hat ihn aus dem Snapshot geöffnet.
                 sl_end, tp_end, nz, zusatz = sl_f9, tp_f9, None, ""
-                if cmd.get("ohne_hedge"):
-                    _warte(0.2, 0.25)
-                    anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
-                                              "anker-" + os.path.basename(cfg_path))
-                    nz = _sltp_nachziehen(w, path, expected, p, cmd, symbol, fill, float(p["volumen"] or vol), contract_size, digits,
-                                          sl_f9, tp_f9, trail, anker_pfad)
-                    sl_end, tp_end = nz["sl"], nz["tp"]
-                    if not nz["ok"]:
-                        return {"ok": False, "retry_ok": False,
-                                "msg": f"Position ist OFFEN @ {fill}, aber nach dem Nachziehen fehlt ein Level ({nz['grund']}) — im "
-                                       f"Terminal SL {fmt_preis(nz['soll_sl'], digits)} / TP {fmt_preis(nz['soll_tp'], digits)} SOFORT "
-                                       f"von Hand nachtragen! Spur: [" + _spur(trail) + "]",
-                                "trail": _spur(trail), "symbol": symbol, "richtung": "buy" if kauf else "sell",
-                                "volumen": p["volumen"], "price": fill, "sl": nz["soll_sl"], "tp": nz["soll_tp"],
-                                "ticket": p["ticket"], "nachzug": nz}
-                    zusatz = (", am Fill nachgezogen" if nz["nachgezogen"] else
-                              "" if not nz["grund"] else f" — Nachziehen: {nz['grund']}")
+                _warte(0.2, 0.25)
+                anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
+                                          "anker-" + os.path.basename(cfg_path))
+                nz = _sltp_nachziehen_lauf(w, path, expected, p, cmd, symbol, fill, float(p["volumen"] or vol), contract_size, digits,
+                                           sl_f9, tp_f9, trail, anker_pfad)
+                sl_end, tp_end = nz["sl"], nz["tp"]
+                if not nz["ok"]:
+                    return {"ok": False, "retry_ok": False,
+                            "msg": f"Position ist OFFEN @ {fill}, aber nach dem Nachziehen fehlt ein Level ({nz['grund']}) — im "
+                                   f"Terminal SL {fmt_preis(nz['soll_sl'], digits)} / TP {fmt_preis(nz['soll_tp'], digits)} SOFORT "
+                                   f"von Hand nachtragen! Spur: [" + _spur(trail) + "]",
+                            "trail": _spur(trail), "symbol": symbol, "richtung": "buy" if kauf else "sell",
+                            "volumen": p["volumen"], "price": fill, "sl": nz["soll_sl"], "tp": nz["soll_tp"],
+                            "ticket": p["ticket"], "nachzug": nz}
+                zusatz = (", am Fill nachgezogen" if nz["nachgezogen"] else
+                          "" if not nz["grund"] else f" — Nachziehen: {nz['grund']}")
                 res = {"ok": True, "retry_ok": False, "verified": True, "mode": "f9",
                        "msg": "per Klick platziert, SL/TP direkt im Order-Dialog "
                               f"gesetzt{zusatz} · {trail.sekunden():.0f}s",

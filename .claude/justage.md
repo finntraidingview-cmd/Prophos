@@ -9,6 +9,7 @@ bauen. Es geht nur darum, ob die Technik greift.
 | Weg | Code | Wann sie greift | Ergebnis steht in |
 |---|---|---|---|
 | Echo V2 (`mt5v2`) | `order_bot._sltp_nachziehen` → `_sltp_klicken` | `final` pass (TP), blow (SL), beide; ab .1751 für jeden Trade mit SL: echter Verlust bis SL ab Fill > Plan + 15 % (ausloeser `plan`) oder > `tages_grenze_usd` (ausloeser `tagesgrenze`, SL auf min(Plan-SL, Grenze)) | `trade_plans.mt5_baseline.puls_spur` (msg + trail) |
+| Echo mit Hedge (`mt5`), seit 31.10.2026 | `order_bot._sltp_nachziehen_lauf` → `_sltp_nachziehen` | nur SL, nur Auslöser Plan + 15 % (`nachzieh_cmd`: kein final, keine Tagesgrenze) | wie Echo V2; Hedge-Level zieht der Copier selbst nach (`plan_sltp`) |
 | Orbit (`tvv2`) — **seit .1749 raus** | `order_bot._cdp_nachziehen` (Revert) | bis .1748: Marken `@final=pass` (TP schießt übers Ziel) / `@tages_grenze_usd=` (SL kostet mehr als die Grenze) | `order_signale.ergebnis.trail` (params.aktion = orbit), Zeile „Nachziehen am Fill: …“ |
 | Polar | `polar_bot` Slave → `_sltp_klicken` | immer nach dem Fill: Airbag aus beiden Fills, sonst Plan-Abstände | `polar_lauf.slave.level` + `slave.schritte` |
 

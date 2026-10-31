@@ -2009,6 +2009,7 @@ def main():
     results.append(test_vordergrund_waechter_ohne_windows())
     results.append(test_kerze_fortschreiben())
     results.append(test_solo_level_und_grund())
+    results.append(test_echo_hedge_sl_nachziehen())
     results.append(test_solo_zu_ring())
     results.append(test_solo_plan_kennung())
     results.append(test_solo_riegel())
@@ -2234,6 +2235,78 @@ def test_kerze_fortschreiben():
         print(f"✗ Wurzelwechsel falsch: {k3} vor={v3}"); ok = False
     if ok:
         print("✓ Kerzen-Aggregation: o/h/l/c/n, Minuten- und Wurzelwechsel")
+    return ok
+
+
+def test_echo_hedge_sl_nachziehen():
+    """Echo mit Hedge: SL-Klick nur über Plan + 15 %, nur SL, Klick misslingt → Level bleiben, platziert; Echo V2 unverändert; Hedge-Level folgt dem Master-SL."""
+    import copier
+    import order_bot as ob
+    alt = (ob._kommission_lesen, ob._sltp_klicken, ob._api_lesen, ob._warte, ob._EchoUnruhe)
+    klicks = []
+    lage = {"klick": "ok"}
+
+    class Stumm:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def klick(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
+        klicks.append((sl_text, tp_text))
+        if lage["klick"] == "wirft":
+            raise RuntimeError("Fenster weg")
+        return {"dialog": False, "msg": "Dialog ging nicht auf"} if lage["klick"] == "aus" else {"ok": True}
+
+    def lesen(path, expected):
+        k = klicks[-1]
+        return {"positionen": [{"ticket": 7, "sl": float(k[0]), "tp": float(k[1])}]}
+
+    def lauf(abstand, cmd_extra=None):
+        klicks.clear()
+        spur = []
+        cmd = dict({"richtung": "buy", "sl_usd": 1000.0, "tp_usd": 2000.0}, **(cmd_extra or {}))
+        # 1 Lot × Kontrakt 10 = 10 $/Pkt → Plan-SL 100 Pkt; TP absichtlich vom Fill daneben (20210): muss unverändert mitgetippt werden
+        erg = ob._sltp_nachziehen_lauf(None, "x", 1, {"ticket": 7}, cmd, "NAS100", 20000.0, 1.0, 10.0, 2, 20000.0 - abstand, 20210.0, spur, "a")
+        return erg, spur
+    try:
+        ob._kommission_lesen, ob._sltp_klicken, ob._api_lesen = (lambda *a: 0.0), klick, lesen
+        ob._warte, ob._EchoUnruhe = (lambda *a, **k: None), Stumm
+        e14, s14 = lauf(114.0)
+        ok = e14["ok"] and not klicks and not e14["nachgezogen"] and e14["sl"] == 19886.0 and any("Final: keins" in x for x in s14)
+        e16, s16 = lauf(116.0)
+        ok = ok and e16["nachgezogen"] and klicks == [("19900.00", "20210.00")] and e16["sl"] == 19900.0 and e16["tp"] == 20210.0 \
+            and any("(SL wegen Plan + 15 %)" in x for x in s16)
+        # final/Tagesgrenze gelten bei Echo mit Hedge nicht: 14 % + final pass + Grenze 500 $ → kein Klick
+        e_f, _ = lauf(114.0, {"final": "pass", "tages_grenze_usd": 500.0})
+        ok = ok and not klicks and not e_f["nachgezogen"]
+        lage["klick"] = "aus"
+        ea, sa = lauf(116.0)
+        ok = ok and ea["ok"] and not ea["nachgezogen"] and ea["sl"] == 19884.0 and ea["tp"] == 20210.0 and "grobe F9-Level bleiben" in ea["grund"]
+        lage["klick"] = "wirft"
+        ew, sw = lauf(116.0)
+        ok = ok and ew["ok"] and ew["sl"] == 19884.0 and "RuntimeError" in ew["grund"] and any("Nachziehen: RuntimeError" in x for x in sw)
+        # Echo V2 unverändert: derselbe cmd, final bleibt, TP wird nachgezogen, Fehler steigen weiter auf
+        v2 = {"ohne_hedge": True, "final": "pass", "tages_grenze_usd": 500.0}
+        ok = ok and ob.nachzieh_cmd(v2) is v2
+        lage["klick"] = "ok"
+        ev, _ = lauf(100.0, {"ohne_hedge": True, "final": "pass"})
+        ok = ok and ev["nachgezogen"] and klicks[-1][1] == "20200.00"
+        lage["klick"] = "wirft"
+        try:
+            lauf(116.0, {"ohne_hedge": True})
+            ok = False
+        except RuntimeError:
+            pass
+    finally:
+        ob._kommission_lesen, ob._sltp_klicken, ob._api_lesen, ob._warte, ob._EchoUnruhe = alt
+    # Hedge: das Notfall-TP steht hinter dem Master-SL und folgt ihm (Hedge-Formel unverändert)
+    mp = {"price_open": 20000.0, "sl": 19884.0, "tp": 20210.0, "type": 0}
+    z1 = copier.plan_sltp(mp, faktor=105, min_puffer_punkte=1.0, point=0.01, digits=2)
+    z2 = copier.plan_sltp(dict(mp, sl=19900.0), faktor=105, min_puffer_punkte=1.0, point=0.01, digits=2)
+    ok = ok and z1["tp"] == 19878.2 and z2["tp"] == 19895.0 and z1["sl"] == z2["sl"]
+    print(("✓" if ok else "✗") + " Echo mit Hedge: SL-Klick 14 % nein / 16 % ja, nur SL, Fehler → Level bleiben; Echo V2 unverändert; Hedge-Level folgt dem Master-SL")
     return ok
 
 
