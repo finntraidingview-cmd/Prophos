@@ -20982,8 +20982,21 @@ def ap_groesse(groessen, balance):
     return best
 
 
-def _ap_spanne(sp, u, faktor=1.0):
-    """[von, bis] mit Zufallsanteil u (0..1) → Wert × faktor. sp None → None."""
+def _ap_spanne(sp, u, faktor=1.0, gewichte=None):
+    """[von, bis] mit Zufallsanteil u (0..1) → Wert × faktor. sp None → None.
+    gewichte (TSX-MENGE, Finn 02.11.2026: Topstep-Challenge 20 % 1 NQ, 70 % 2 NQ, 10 % 3 NQ): {"1": 20, "2": 70, "3": 10} statt der Spanne, aufsteigend kumuliert —
+    u 0 = kleinster, u 1 = größter Wert, darum stimmen die Grenzen von ap_menge_fix weiter. Ungültig oder leer → Spanne wie bisher. Nur Topstep trägt den Schlüssel."""
+    try:
+        z = sorted((float(m), float(g)) for m, g in (gewichte or {}).items() if float(g) > 0 and float(m) > 0)
+    except (TypeError, ValueError, AttributeError):
+        z = []
+    if z:
+        x, summe = float(u) * sum(g for _m, g in z), 0.0
+        for m, g in z:
+            summe += g
+            if x < summe:
+                return m * faktor
+        return z[-1][0] * faktor
     if not sp:
         return None
     lo, hi = float(sp[0]), float(sp[1] if len(sp) > 1 else sp[0])
@@ -21137,7 +21150,7 @@ def ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=None, mll_bele
     angefressen = bool(daily and mll is not None and balance - mll < daily)
     reparatur = angefressen
     rest = ziel - balance
-    menge = _ap_runden(_ap_spanne(kette.get("menge"), u["menge"]), 1)
+    menge = _ap_runden(_ap_spanne(kette.get("menge"), u["menge"], gewichte=kette.get("menge_gewichte")), 1)
     puffer = round(_ap_spanne(kette.get("puffer"), u["puffer"]) or 0)
     # letzter Tag (Rest ≤ Tagesziel): Rest + Puffer, damit das Konto sicher über das Phasenziel kommt (159.000 statt 158.990) —
     # gilt auch am Reparatur-Tag (Finn 13.10.2026: „bei 156k den Take Profit so anpassen, dass sie bei 9.000 rauskommen")
@@ -21249,7 +21262,7 @@ def ap_kette_trade2(t1_kette, balance_start, balance_end, regel, kette, u_menge)
     tp2, sl2 = round(tagesziel - e1), round(verlust + e1)
     if sl2 < 100:
         return None, f"SL für Trade 2 wäre nur {sl2} $ — von Hand prüfen"
-    menge = _ap_runden(_ap_spanne(kette.get("t2_menge") or kette.get("menge"), u_menge), 1)   # Trade 2: 3–4 NQ (Finn 08.10.2026)
+    menge = _ap_runden(_ap_spanne(kette.get("t2_menge") or kette.get("menge"), u_menge, gewichte=kette.get("t2_menge_gewichte")), 1)   # Trade 2: eigene Menge (Finn 08.10.2026), Gewichte seit 02.11.2026
     out = {"e1": e1, "tp": tp2, "sl": sl2, "menge": menge, "tagesziel": round(tagesziel), "verlust_grenze": round(verlust),
            "mll": mll, "daily_usd": (t1_kette or {}).get("daily_usd")}
     if not angefressen and (t1_kette or {}).get("dll_puffer"):
@@ -21522,7 +21535,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     kette = ap_kette_regel(regel) if phase == "challenge" else None
     if kette:                                 # TOPSTEP-KETTE: Trade 1 statt eines Trades ohne SL (Finn 08.10.2026)
         return ap_kette_trade1(regel, kette, groesse, ziel, balance, u, peak=peak, mll_belegt=mll_belegt)   # peak: MLL der Kette (DLL 3.000, 08.10.2026); mll_belegt: Lesung/Tagesschluss (15.10.2026)
-    menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f), ph.get("menge_schritt") or 1)
+    menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f, gewichte=ph.get("menge_gewichte")), ph.get("menge_schritt") or 1)
     pjm = ph.get("puffer_je_menge")
     psp = (pjm or {}).get(str(int(menge))) if pjm else ph.get("puffer")
     puffer = round(_ap_spanne(psp, u["puffer"], 1.0 if pjm else f) or 0)
