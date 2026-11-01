@@ -146,7 +146,12 @@ if($backend -eq 'Running'){
   # Normale Eingabe statt SecureString (Pilot pc 01.11.2026: Rechtsklick-Einfuegen lieferte in der SecureString-Abfrage nur ein
   # Zeichen). Read-Host landet nicht in der PSReadLine-Chronik; die Konsole wird nach dem Beitritt geleert. Deshalb KEIN Parameter
   # fuer den Key: eine getippte Befehlszeile mit Key stuende in ConsoleHost_history.txt.
-  Write-Host 'Der Key ist beim Einfuegen sichtbar; die Konsole wird nach dem Beitritt geleert.' -ForegroundColor Yellow
+  # Mit der GPO 'PowerShell-Transkription' schriebe Windows die Eingabe in eine Textdatei (Pruefer S9, 02.11.2026): dann abbrechen
+  $tr = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription' -ErrorAction SilentlyContinue
+  if($tr -and $tr.EnableTranscripting -eq 1){
+    throw 'PowerShell-Transkription ist per Richtlinie an, der Auth-Key landete im Transkript -> Richtlinie aus (gpedit: Windows PowerShell > PowerShell-Transkription aktivieren = Deaktiviert), dann nochmal'
+  }
+  Write-Host 'Der Key ist beim Einfuegen sichtbar; die Konsole wird nach dem Beitritt geleert. Kein Start-Transcript laufen lassen.' -ForegroundColor Yellow
   $key = (Read-Host 'Tailscale Auth-Key (tskey-auth-...)').Trim()
   $r = $null
   try {
@@ -175,7 +180,9 @@ Schritt 'Firewall: Port 22 nur aus dem Tailnet'
 # OpenSSH-Server anlegen, falls noetig. Erst das winget-Paket (Pilot pc 01.11.2026, Windows 11 25H2: Add-WindowsCapability
 # OpenSSH.Server lief fehlerfrei durch, der Dienst sshd fehlte trotzdem; Microsoft.OpenSSH.Preview brachte ihn sofort),
 # die Windows-Capability nur als Rueckfall. Fehlt der Dienst nach beidem, steht der Capability-State mit in der Meldung.
-# Beide Wege legen eine Firewall-Regel an, die Port 22 fuer alle oeffnet, und starten den Dienst: beides geht gleich darunter aus.
+# Beide Wege legen eine Firewall-Regel an, die Port 22 fuer alle oeffnet, und starten den Dienst mit Standard-Konfiguration
+# (Passwort an): fuer Sekunden, bis Stop-Service und das Abschalten der Freigaben unten greifen. REIHENFOLGE NICHT UMSTELLEN
+# (Pruefer S9, 02.11.2026): Installation -> Stop-Service -> fremde Freigaben aus -> Allow nur Tailnet -> Keys/Config -> Start.
 $sshdDienst = { Get-Service -Name sshd -ErrorAction SilentlyContinue }
 if(-not (& $sshdDienst)){
   $wg = Get-Command winget -ErrorAction SilentlyContinue
@@ -212,6 +219,15 @@ if($fremd.Count){
   # je Regel einzeln: eine Regel, die sich nicht abschalten laesst, darf den Lauf hier (sshd ist gestoppt) nicht abbrechen
   foreach($fr in $fremd){ try { $fr | Disable-NetFirewallRule } catch { Write-Warning "Port-22-Freigabe '$($fr.DisplayName)' nicht abschaltbar: $($_.Exception.Message) -> im Pilot von aussen auf Port 22 pruefen" } }
   Write-Host "Fremde Port-22-Freigaben aus: $(($fremd | ForEach-Object { $_.DisplayName }) -join ', ')"
+}
+# Bereichsregeln wie 20-25 decken Port 22 mit, ohne '22' zu enthalten (Pruefer S9, 02.11.2026): nur melden, nicht abschalten,
+# so eine Regel hat jemand mit Absicht breit angelegt
+$bereich = @(Get-NetFirewallPortFilter | Where-Object { $_.Protocol -eq 'TCP' -and (@($_.LocalPort) | Where-Object { $_ -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 22 -and [int]$Matches[2] -ge 22 }) } |
+  Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' -and $_.Enabled -eq 'True' })
+foreach($br in $bereich){ Write-Warning "Bereichsregel '$($br.DisplayName)' deckt Port 22 -> von Hand pruefen (Windows-Firewall, eingehende Regeln)" }
+# 'Ohne Allow-Regel = blockiert' gilt nur, wenn das Profil an ist und eingehend standardmaessig blockt (Pruefer S9, 02.11.2026)
+foreach($pf in @(Get-NetFirewallProfile | Where-Object { $_.Enabled -ne 'True' -or $_.DefaultInboundAction -eq 'Allow' })){
+  Write-Warning "Firewall-Profil '$($pf.Name)': Enabled=$($pf.Enabled), eingehend=$($pf.DefaultInboundAction) -> Port 22 waere dort offen; Profil einschalten bzw. eingehend auf Blockieren (Windows-Sicherheit > Firewall)"
 }
 # Nur nach Absender-Adresse, NICHT an den Tailscale-Adapter gebunden (Gegenpruefung 01.11.2026): Windows merkt sich den Adapter
 # ueber seine Kennung; legt ein Tailscale-Update ihn neu an, griffe die Regel nicht mehr und jeder PC waere still unerreichbar.
