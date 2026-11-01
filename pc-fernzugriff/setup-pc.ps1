@@ -320,7 +320,9 @@ if((Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd('\') -ieq $zielOrdner)
   # Nur die bekannten Dateien, nie '*' (Pruefer S9, 01.11.2026): liegt das Skript z. B. in Downloads, waere sonst der ganze Ordner
   # (Installer, Kontoauszuege) nach fernzugriff gewandert. Fehlt ein Teil, klar sagen, aber weiterlaufen: die anderen Teile
   # kommen aus eigenen Auftraegen und koennen beim Pilot noch fehlen.
-  $bekannt = @('setup-pc.ps1', 'rueckbau-pc.ps1', 'diagnose.ps1', 'foto')   # foto\ komplett (foto-aufgabe.ps1, foto-schuss.py, foto.ps1)
+  # foto\ und agent\ komplett (Repo-Kopien, Ziel wird vorher geleert). Laufzeitdateien des Agents (auftraege\, ergebnisse\,
+  # agent.log) liegen laut agent\README.md NEBEN agent\, nicht darin, und bleiben so erhalten (S13 56d95c59, 02.11.2026).
+  $bekannt = @('setup-pc.ps1', 'rueckbau-pc.ps1', 'diagnose.ps1', 'foto', 'agent')
   $fehlt = @()
   foreach($name in $bekannt){
     $quelle = Join-Path $PSScriptRoot $name
