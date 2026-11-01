@@ -19163,7 +19163,10 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 return _raus("konto_nicht_erreicht", f"Konto {ext} in der TopstepX-Liste: {grund} ({n}×) — nichts gewählt, Esc.", st,
                              konto_zeilen=_zeilen(ko), konto_treffer=n)
             r = list(cdp_rect(x.get("rect")))[:4]
-            pruef = {"rect": r, "text": str(x.get("id") or x.get("id_kurz") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}   # 2.4.32: Karte zeigt nur „EXPRES...9147"
+            # 2.4.32 (S9 02.11.2026): Karte zeigt nur „EXPRES...9147" — ob mit drei Punkten oder „…" (U+2026), ist ohne DOM unbekannt; darum
+            # ist der Ziel-Beweis bei Karten ohne volle Kennung NUR die Endung („9147"): sie steht in jedem Fall im Kartentext und ist in
+            # der Liste eindeutig (sonst hätte tsx_k2_eintrag die Karte nicht gewählt)
+            pruef = {"rect": r, "text": str(x.get("id") or x.get("endung") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
             _tsx_pause()                                  # die offene Liste steht 1–2 s da, dann erst die Zeile (Finn 01.10.2026)
             if not s.klick(r, f"Konto {ext}", pruef=pruef):
                 _cdp_esc(s, st, trail, "Konto-Zeile nicht gedrückt")

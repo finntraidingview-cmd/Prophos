@@ -622,7 +622,8 @@ var PROPHOS_AUGEN_TSX = (function () {
       var sel = attr(li, 'aria-selected'), mark = sel ? sel === 'true' : (hatKlasse(li, 'Mui-selected') ? true : null);
       if (mark !== null) belegt = true;
       out.push({ text: t.slice(0, 160), label: ml ? ml[1].replace(/[^\w$.,)-]+$/g, '').replace(/\s+/g, ' ').trim() : null, id: id, endung: endung,   // Stift ✎ hinter dem Namen weg
-                 id_kurz: mk ? (mk[1] + '...' + mk[2]).toUpperCase() : (mv ? mv[1].toUpperCase() : null), bal: mb ? mb[1].replace(/\s+/g, '') : null,
+                 id_kurz: mk ? mk[0].replace(/^ACCT\s*:\s*/i, '').replace(/\s+/g, '').toUpperCase() : (mv ? mv[1].toUpperCase() : null),   // exakt wie im DOM („EXPRES...9147" oder „EXPRES…9147")
+                 bal: mb ? mb[1].replace(/\s+/g, '') : null,
                  abschnitt: abschnitt, markiert: mark, ineligible: inel, hinweis: inel ? 'Ineligible' : null, format: 'neu',
                  aus: attr(li, 'aria-disabled') === 'true' || hatKlasse(li, 'Mui-disabled'), rect: rect(li), zu: zustand(li) });
     });
