@@ -14259,12 +14259,41 @@ def tsx_konto_sichtbar(text):
 
 TSX_RX_OHNE_ID = re.compile(r"^\s*((?:\$\s*\d+(?:[.,]\d+)?\s*K\b|\d+(?:[.,]\d+)?\s*K\s+[A-Z])[^|$]*?)\s*\|?\s*(…|\.\.\.)?\s*$", re.I)
 
+# TOPSTEPX 2.4.32 (02.11.2026, Finn 02.11.2026 nach Fotos 00:05/03:29 Dubai; Anlass: vorgezogener Topstep-Start Ina 150k …1849 gegen die
+# neue Oberfläche — OHNE echten DOM gebaut, Inas PC hat keinen Fernzugriff): Kopf links „150K DLL Express (...9147) ▾" (kein „|", nur die
+# ENDUNG), Konto-Dropdown als Kartenliste „150K DLL Express · ACCT: EXPRES...9147 · BAL: $-2,861.34" in Abschnitten „Express Funded
+# Accounts (4)" / „Ineligible Accounts (2)" (Schalter „Hide"). Die alten Muster bleiben zuerst (Rückfall); neu dazu: die Endung aus Kopf
+# bzw. Karte. Beweis fürs Konto: Endung = Ende der External ID UND in der gelesenen Liste genau EINE Karte mit dieser Endung
+# (_TSX_ENDUNG_BEWIESEN, je Lauf gemerkt) — sonst nur „vielleicht", nie „ja". UNSICHER ohne DOM: ob die volle Kennung irgendwo im DOM
+# steht (augen_tsx.js kennungAusAttributen), ob die Karten role=option tragen, wie „Hide" wirkt.
+TSX_RX_AUSLOESER_NEU = re.compile(r"^(.*?\d+(?:[.,]\d+)?\s*K\b[^(|]*?)\s*\(\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\s*\)", re.I)
+TSX_RX_KARTE_ACCT = re.compile(r"ACCT\s*:\s*([A-Z0-9-]*?)\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\b", re.I)
+_TSX_ENDUNG_BEWIESEN = {}          # External ID (alnum) → True, wenn die Liste DIESES Kontowechsels genau EINE Karte mit der Endung zeigte (_tsx_konto_sichern leert es am Anfang)
+
+
+def tsx_konto_endung(text):
+    """REIN RECHNEND (testbar, 2.4.32): Kopf „150K DLL Express (...9147)" → ('150K DLL EXPRESS', '9147'); Karte „… ACCT: EXPRES...9147 …" →
+    ('', '9147'); sonst ('', '')."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    m = TSX_RX_AUSLOESER_NEU.search(t)
+    if m:
+        return m.group(1).strip().upper(), m.group(2).upper()
+    m = TSX_RX_KARTE_ACCT.search(t)
+    return ("", m.group(2).upper()) if m else ("", "")
+
+
+def tsx_endung_passt(endung, ext_id):
+    """REIN RECHNEND (testbar): Endung (≥ 3 Zeichen) = Ende der External ID?"""
+    e, z = _nur_alnum(endung), _nur_alnum(ext_id)
+    return len(e) >= 3 and len(z) > len(e) and z.endswith(e)
+
 
 def tsx_label(text):
     """REIN RECHNEND (testbar, B22): Produkt-Label vor dem '|' („$150K TRADING COMBINE"), normalisiert; '' ohne Label."""
     # B23: ohne Anker am Textanfang — Listeneinträge tragen vorne womöglich Haken/Symbole oder die Kennung
-    m = re.search(r"((?:\$\s*\d+(?:[.,]\d+)?\s*K\b|\d+(?:[.,]\d+)?\s*K\s+[A-Z])[^|$]*)", str(text or ""), re.I)
-    return re.sub(r"\s+", " ", m.group(1)).strip().upper() if m else ""
+    # 2.4.32 (02.11.2026): „(...9147)" und „ACCT:" gehören nicht zum Label
+    m = re.search(r"((?:\$\s*\d+(?:[.,]\d+)?\s*K\b|\d+(?:[.,]\d+)?\s*K\s+[A-Z])[^|$(]*?)(?=\s*\(|\s*ACCT\s*:|\s*BAL\s*:|\s*\||\s*\$|$)", str(text or ""), re.I)
+    return re.sub(r"\s+", " ", re.sub(r"[^\w$.,)\-]+$", "", m.group(1))).strip().upper() if m else ""   # 2.4.32: Stift ✎ hinter dem Namen weg
 
 
 def tsx_eintrag_label(eintrag, roh):
@@ -14302,6 +14331,9 @@ def tsx_konto_steht(text, ext_id):
     beweist es), 'nein'."""
     k, kurz = tsx_konto_sichtbar(text)
     if not k:
+        _lbl, endung = tsx_konto_endung(text)                          # 2.4.32: „(...9147)" → nur die Endung
+        if endung:
+            return "vielleicht" if tsx_endung_passt(endung, ext_id) else "nein"
         return "unbekannt" if TSX_RX_OHNE_ID.match(str(text or "")) else "nein"
     if not kurz:
         return "ja" if _nur_alnum(k) == _nur_alnum(ext_id) else "nein"
@@ -14424,7 +14456,7 @@ def tsx_verletzungen_aus_liste(liste):
     for x in (liste or []):
         if not isinstance(x, dict):
             continue
-        k = str(x.get("id") or "").strip().upper()
+        k = str(x.get("id") or x.get("id_kurz") or "").strip().upper()       # 2.4.32: ohne volle Kennung die Kurzform „EXPRES...9147"
         hw = str(x.get("hinweis") or ("Ineligible" if x.get("ineligible") else "")).strip()
         art = tsx_konto_verletzung(hw)
         if k and art:
@@ -18663,6 +18695,14 @@ def tsx_konto_urteil(ko, ext):
         return "fehlt"
     nr = _nur_alnum(ko.get("kontonr"))
     if not nr:
+        # 2.4.32 (02.11.2026): Kopf nur mit Endung („(...9147)", augen_tsx.js endung oder aus dem Text) — 'ja' NUR, wenn die Endung passt
+        # UND dieser Lauf in der Liste genau eine Karte mit der Endung gesehen hat (_TSX_ENDUNG_BEWIESEN, setzt tsx_k2_eintrag); sonst
+        # 'vielleicht' (der Bot öffnet die Liste und beweist es dort), bei fremder Endung 'nein'.
+        endung = str(ko.get("endung") or "") or tsx_konto_endung(ko.get("aktiv"))[1]
+        if endung:
+            if not tsx_endung_passt(endung, ext):
+                return "nein"
+            return "ja" if _TSX_ENDUNG_BEWIESEN.get(_nur_alnum(ext)) else "vielleicht"
         return tsx_konto_steht(ko.get("aktiv"), ext)           # nur der Auslöser-Text ('$150K … | KENNUNG')
     if nr == _nur_alnum(ext) and ko.get("abgekuerzt") is not True:
         return "ja"
@@ -18679,6 +18719,25 @@ def tsx_k2_eintrag(liste, ext):
     if len(ziel) < 5:
         return None, 0, "External ID fehlt"
     treffer = [x for x in (liste or []) if isinstance(x, dict) and _nur_alnum(x.get("id")) == ziel]
+    if len(treffer) == 1 and any(isinstance(x, dict) and x.get("format") == "neu" for x in (liste or [])):
+        # 2.4.32: Karte über die volle Kennung getroffen, der Kopf zeigt danach evtl. nur „(...9147)" — Endungs-Eindeutigkeit mitmerken
+        e_ziel = ziel[-4:]
+        gleich = [x for x in (liste or []) if isinstance(x, dict) and _nur_alnum(x.get("endung") or x.get("id") or "")[-4:] == e_ziel]
+        _TSX_ENDUNG_BEWIESEN[ziel] = len(gleich) == 1
+    if not treffer:
+        # 2.4.32 (02.11.2026): Karten ohne volle Kennung — über die Endung („ACCT: EXPRES...9147"); genau EINE Karte mit passender Endung
+        # beweist das Konto für diesen Lauf (_TSX_ENDUNG_BEWIESEN), zwei = nicht eindeutig (dann hilft nur die volle Kennung)
+        def _endung(x):
+            e = str(x.get("endung") or "") or tsx_konto_endung(x.get("text"))[1]
+            return _nur_alnum(e) if e else ""
+        mit_e = [x for x in (liste or []) if isinstance(x, dict) and _endung(x)]
+        kand = [x for x in mit_e if tsx_endung_passt(_endung(x), ext)]
+        if len(kand) == 1:
+            _TSX_ENDUNG_BEWIESEN[ziel] = True
+            treffer = kand
+        elif len(kand) > 1:
+            _TSX_ENDUNG_BEWIESEN[ziel] = False
+            return None, len(kand), f"Konto-Endung …{_endung(kand[0])[-4:]} {len(kand)}× in der Liste — nicht eindeutig (volle Kennung fehlt)"
     if not treffer:
         return None, 0, "Konto nicht in der Liste"
     if len(treffer) > 1:
@@ -19031,6 +19090,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
     alle Pausen über _warte (Jitter). Beweis nach dem Wechsel: (1) Liste zu (aria-expanded), (2) Auslöser trägt die volle Ziel-Kennung
     (tsx_konto_urteil 'ja'), (3) die Kopfzeile macht der Aufrufer frisch (Bereit-Probe + zwei gleiche Lesungen, tsx_kopf_gleich)."""
     st = st if isinstance(st, dict) else {}
+    _TSX_ENDUNG_BEWIESEN.clear()                 # 2.4.32 (Prüfer 02.11.2026): Endungs-Beweis gilt nur für DIESEN Wechsel, nie aus einem früheren Lauf
     geklickt = False
     fremd_esc = False
     gewaehlt = None
@@ -19074,7 +19134,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
             if bd_res.get("blow_dialog"):
                 ex["blow_dialog"] = bd_res["blow_dialog"]
             if gewaehlt is not None:
-                ex["konto_gewechselt"] = {"von": von, "zu": str(gewaehlt.get("id") or ext)[:80]}
+                ex["konto_gewechselt"] = {"von": von, "zu": str(gewaehlt.get("id") or gewaehlt.get("id_kurz") or ext)[:80]}
                 # Hinweis des gewählten Eintrags („Ineligible", „MAXIMUM_LOSS Violation" …) — Lesen ist erlaubt, der PC-Tab archiviert
                 hw = str(gewaehlt.get("hinweis") or ("Ineligible" if gewaehlt.get("ineligible") else "")).strip()
                 if hw:
@@ -19103,7 +19163,7 @@ def _tsx_konto_sichern(s, ext, st, trail):
                 return _raus("konto_nicht_erreicht", f"Konto {ext} in der TopstepX-Liste: {grund} ({n}×) — nichts gewählt, Esc.", st,
                              konto_zeilen=_zeilen(ko), konto_treffer=n)
             r = list(cdp_rect(x.get("rect")))[:4]
-            pruef = {"rect": r, "text": str(x.get("id") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
+            pruef = {"rect": r, "text": str(x.get("id") or x.get("id_kurz") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}   # 2.4.32: Karte zeigt nur „EXPRES...9147"
             _tsx_pause()                                  # die offene Liste steht 1–2 s da, dann erst die Zeile (Finn 01.10.2026)
             if not s.klick(r, f"Konto {ext}", pruef=pruef):
                 _cdp_esc(s, st, trail, "Konto-Zeile nicht gedrückt")

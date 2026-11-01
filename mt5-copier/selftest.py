@@ -7784,6 +7784,34 @@ def test_tsx_k2():
         and U({"aktiv": "$150K Express|" + E1, "kontonr": E1, "abgekuerzt": False}, E2) == "nein"
         and U({"aktiv": "$150K Express|EXPRESS-…", "kontonr": "EXPRESS", "abgekuerzt": True}, E1) == "vielleicht"
         and U({"aktiv": None, "kontonr": None}, E1) == "fehlt" and U(None, E1) == "fehlt", "Konto-Urteil ja/nein/vielleicht/fehlt")
+    # ── TopstepX 2.4.32 (02.11.2026): Kopf nur mit Endung, Karten „ACCT: EXPRES...9147" ──
+    ob._TSX_ENDUNG_BEWIESEN.clear()
+    chk(ob.tsx_konto_endung("150K DLL Express (...9147) ▾") == ("150K DLL EXPRESS", "9147")
+        and ob.tsx_konto_endung("150K DLL Express ACCT: EXPRES...9147 BAL: $-2,861.34") == ("", "9147")
+        and ob.tsx_konto_endung("$150K EXPRESS | EXPRESS-V2-000000-10000001") == ("", "")
+        and ob.tsx_endung_passt("9147", "EXPRESS-V2-682437-17759147") and not ob.tsx_endung_passt("9147", "EXPRESS-V2-682437-17759148")
+        and ob.tsx_label("150K DLL Express (...9147)") == "150K DLL EXPRESS" and ob.tsx_label("$150K TRADING COMBINE | 150KTC-…") == "$150K TRADING COMBINE",
+        "2.4.32: Endung aus Kopf/Karte, Label ohne (...9147)")
+    EN = "EXPRESS-V2-682437-17759147"
+    kopf_neu = {"aktiv": "150K DLL Express (...9147)", "kontonr": None, "abgekuerzt": True, "endung": "9147"}
+    chk(U(kopf_neu, EN) == "vielleicht" and U(kopf_neu, "EXPRESS-V2-682437-17759148") == "nein"
+        and U({"aktiv": "150K DLL Express (...9147)", "kontonr": None, "abgekuerzt": True}, EN) == "vielleicht"
+        and ob.tsx_konto_steht("150K DLL Express (...9147)", EN) == "vielleicht",
+        "2.4.32: Kopf mit Endung → vielleicht (passt) / nein (fremd), auch ohne endung-Feld")
+    karte = lambda i, kurz, endung, inel=False: {"text": "150K DLL Express ACCT: " + kurz + "..." + endung + " BAL: $0.00", "label": "150K DLL Express", "id": None,
+                                                 "endung": endung, "id_kurz": kurz + "..." + endung, "ineligible": inel, "hinweis": "Ineligible" if inel else None,
+                                                 "aus": False, "rect": [17, 47 + 60 * i, 416, 56], "zu": {"disabled": False, "verdeckt": False, "oben": None}}
+    x, n, g = ob.tsx_k2_eintrag([karte(0, "EXPRES", "9147"), karte(1, "EXPRES", "0001"), karte(2, "150KTC", "0003", True)], EN)
+    chk(x is not None and x["id_kurz"] == "EXPRES...9147" and n == 1 and g == "" and U(kopf_neu, EN) == "ja",
+        f"2.4.32: Karte über die Endung genau einmal → bewiesen, Kopf-Urteil danach 'ja' ({g})")
+    ob._TSX_ENDUNG_BEWIESEN.clear()
+    x, n, g = ob.tsx_k2_eintrag([karte(0, "EXPRES", "9147"), karte(1, "EXPRES", "9147")], EN)
+    chk(x is None and n == 2 and "nicht eindeutig" in g and U(kopf_neu, EN) == "vielleicht", f"2.4.32: Endung doppelt → nicht eindeutig, Kopf bleibt 'vielleicht' ({g})")
+    x, n, g = ob.tsx_k2_eintrag([karte(0, "EXPRES", "0001")], EN)
+    chk(x is None and n == 0 and "nicht in der Liste" in g, f"2.4.32: Endung fehlt → nicht in der Liste ({g})")
+    chk(ob.tsx_verletzungen_aus_liste([karte(2, "150KTC", "0003", True)]) == {"150KTC...0003": {"art": "ineligible", "text": "Ineligible"}},
+        "2.4.32: Ineligible-Abschnitt → Verletzung unter der Kurzform")
+    ob._TSX_ENDUNG_BEWIESEN.clear()
     W = ob.tsx_k2_eintrag
     liste = [zeile(0, E1), zeile(1, E2), zeile(2, C3), zeile(3, C4)]
     x, n, g = W(liste, E2)
@@ -8625,7 +8653,8 @@ def test_tsx_k3a():
     # Version 0.6.2 → 0.6.3 nachgezogen (S4 21.10.2026): 4af8c460 (19.10.) hob augen_tsx.js für das Symbol-X der Login-Meldung auf
     # tsx-0.6.3, ohne diese Prüfung mitzunehmen — seitdem rot, obwohl Contract-/Ticket-Lesung unverändert und weiter klickfrei ist.
     # tsx-0.6.4 (29.10.2026 abends, S5): Stift ✎ je Risk-/To-Make-Zelle gemeldet — Contract-/Ticket-Lesung unverändert
-    chk("var VERSION = 'tsx-0.6.4'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
+    # tsx-0.7.0 (02.11.2026, S15): TopstepX 2.4.32 Kopf/Karten-Erkennung als Rückfall — Contract-/Ticket-Lesung unverändert
+    chk("var VERSION = 'tsx-0.7.0'" in js and "contract-selector-input-select-contract" in js and "order-card-input-field-contracts" in js
         and "order-card-click-button-buy" in js and "k3: true" in js
         and "filter(function (z) { return RX_CODE.test(z); })" in js    # DOM-Test 01.10.2026: vor dem Code steht „■" — nie nur Zeile 1
         and ".click(" not in js.split("function contractLesen")[1].split("function ticketLesen")[0],
@@ -9215,10 +9244,10 @@ def test_tsx_k4():
     js = open(os.path.join(os.path.dirname(os.path.abspath(ob.__file__)), "augen_tsx.js"), encoding="utf-8").read()
     neu_js = js.split("function reiterLesen()")[1].split("function positionAus")[0]
     # tsx-0.6.3 seit 4af8c460 (19.10.2026, Symbol-X der Login-Meldung) — Reiter/Positions-Tabelle unberührt (S4 21.10.2026)
-    # tsx-0.6.4: dazu feld().stift (Rechteck des ✎) — weiter nur lesend
-    chk("var VERSION = 'tsx-0.6.4'" in js and "stift: stift" in neu_js and "r.left >= wr - 2" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
+    # tsx-0.6.4: dazu feld().stift (Rechteck des ✎) — weiter nur lesend; tsx-0.7.0 (02.11.2026): Konto-Erkennung 2.4.32, Reiter/Tabelle unberührt
+    chk("var VERSION = 'tsx-0.7.0'" in js and "stift: stift" in neu_js and "r.left >= wr - 2" in neu_js and "-tab-positionTab$" in neu_js and "'risk'" in neu_js and "'to make'" in neu_js and "close_rect" in neu_js
         and "o.ticket.k4 = true" in js and ".click(" not in neu_js and "dispatchEvent" not in neu_js and ".focus(" not in neu_js
-        and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
+        and not re.search(r"\.value\s*=[^=]", neu_js), "augen_tsx.js tsx-0.6.x/0.7.0: Reiter + Positions-Tabelle (Risk / To Make, Bearbeiten-Zustand) — nur lesend")
     chk("zuletzt" in js and "15000" in js and "e.zuletzt = jetzt; m.erst_gesehen = e.erst;" in js, "augen_tsx.js 0.6.1: Meldungs-Merker vergisst nach 15 s (Prüfer 06.10.2026)")
     chk("s._druck_versucht = False" in q4 and q4.index("s._druck_versucht = False") < q4.index("s.klick(") and "< 30.0" in q4
         and "< 27.0" in _i.getsource(ob._tsx_k4_feld) and q4.index('raus("", msg, "fertig", ok=True)') < q4.index('_puls_ergebnis_senden("order", "ende"')

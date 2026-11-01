@@ -36,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.6.4';
+  var VERSION = 'tsx-0.7.0';   // 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -348,12 +348,43 @@ var PROPHOS_AUGEN_TSX = (function () {
   //   „$150K EXPRESS | EXPRESS-…"                    → sichtbare Kennung ohne Rest-Striche, abgekuerzt true (volle ID erst in der Liste)
   //   „$150K TRADING COMBINE |"                      → TopstepX lässt die Kennung bei langen Namen ganz weg (UIA-Inventar 11:24 UTC):
   //                                                    kontonr null, abgekuerzt true — auch hier beweist erst die Liste das Konto
+  // TOPSTEPX 2.4.32 (tsx-0.7.0, 02.11.2026, Finns Fotos 00:05/03:29 Dubai — OHNE echten DOM gebaut, Inas PC hat keinen Fernzugriff):
+  //   Kopf:  „150K DLL Express (...9147) ▾"            → kein „|", keine volle Kennung, nur die ENDUNG (letzte 4 Zeichen) in Klammern
+  //   Karte: „150K DLL Express ACCT: EXPRES...9147 BAL: $-2,861.34" (Stift) in einem Abschnitt „Express Funded Accounts (4)";
+  //          darunter „Ineligible Accounts (2)" mit Schalter „Hide" — der Hinweis steht nicht mehr je Zeile, sondern als Überschrift.
+  // Die alte Form (Label | KENNUNG) bleibt zuerst; die neue liefert kontonr null, abgekuerzt true und dazu endung/label/format, der Bot
+  // beweist das Konto dann über die Endung + Eindeutigkeit in der Liste (order_bot.py tsx_konto_urteil/tsx_k2_eintrag).
+  var RX_AUSLOESER_NEU = /^(.*?\d+(?:[.,]\d+)?\s*K\b[^(|]*?)\s*\(\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\s*\)/i;
+  var RX_KARTE_ACCT = /ACCT\s*:\s*([A-Z0-9-]*?)\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\b/i;                 // „ACCT: EXPRES...9147"
+  var RX_KARTE_ACCT_VOLL = /ACCT\s*:\s*([A-Z0-9][A-Z0-9-]{5,}(?:-\d{6}-\d{8})?)(?![.…A-Z0-9-])/i;      // falls die volle Kennung doch da steht
+  var RX_KARTE_BAL = /BAL\s*:\s*([-−(]?\s*\$?\s*[-−]?[\d,]+(?:\.\d+)?\)?)/i;
+  var RX_KARTE_LABEL = /(\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|$(]*?)\s*(?=ACCT\s*:|BAL\s*:|$)/i;
+  var RX_ABSCHNITT_INELIGIBLE = /^\s*ineligible\b/i;
+  var RX_ABSCHNITT = /^\s*[a-z][a-z ]{2,40}\(\d+\)\s*$/i;                                              // „Trading Combines (3)", „Express Funded Accounts (1)", „Ineligible Accounts (2)" (Foto Ina 02.11.2026)
   function kontoAusText(t) {
     t = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
     var m = RX_AUSLOESER.exec(t);
     if (m) { var k = m[1].toUpperCase(); return { aktiv: t, kontonr: m[2] ? k.replace(/-+$/, '') : k, abgekuerzt: !!m[2] }; }
+    var n = RX_AUSLOESER_NEU.exec(t);
+    if (n) return { aktiv: t, kontonr: null, abgekuerzt: true, endung: n[2].toUpperCase(), label: n[1].replace(/\s+/g, ' ').trim().toUpperCase(), format: 'neu' };
     if (RX_OHNE_ID.test(t)) return { aktiv: t, kontonr: null, abgekuerzt: true };
     return { aktiv: t || null, kontonr: null, abgekuerzt: null };
+  }
+  // Volle Kennung aus Attributen des Auslösers/der Karte (title, aria-label, data-*), wenn der Text nur die Endung zeigt — unsicher ohne DOM
+  function kennungAusAttributen(el, endung) {
+    if (!el || !endung) return null;
+    var e = el, tiefe = 0, rx = /[A-Z0-9][A-Z0-9-]{2,}-\d{6}-\d{8}(?![0-9])/g;   // nur die Topstep-Form …-USERID-NUMMER (Prüfer 02.11.2026: nie Klassen-/Testid-Token)
+    while (e && tiefe < 4) {
+      try {
+        var at = e.attributes || [];
+        for (var i = 0; i < at.length; i++) {
+          var v = String(at[i].value || '').toUpperCase(), m;
+          while ((m = rx.exec(v))) { if (m[0].replace(/[^A-Z0-9]/g, '').slice(-endung.length) === endung) return m[0]; }
+        }
+      } catch (_) {}
+      e = e.parentElement; tiefe++;
+    }
+    return null;
   }
 
   // Sichtbare Blatt-Texte eines Bereichs in DOM-Reihenfolge (für die Kopfzeile: „BAL:" · „$" · „154,504.88")
@@ -397,7 +428,25 @@ var PROPHOS_AUGEN_TSX = (function () {
 
   function ankerKonto() {                            // Konto-Auslöser oben links
     var w = q1(tid('account-selector-input-select-account')) || q1(tid('account-selector-container'));
-    return w ? (q1('[role="combobox"]', w) || w) : null;
+    if (w) return q1('[role="combobox"]', w) || w;
+    return ankerKontoNeu();
+  }
+  // Rückfall 2.4.32 (tsx-0.7.0): kleinstes sichtbares Element in den oberen 160 px, dessen Text wie der neue Kopf aussieht
+  // („150K DLL Express (...9147)") — oder wie der alte („… | KENNUNG"), falls TopstepX nur den data-testid gewechselt hat
+  function b_istToast(e) { try { return !!e.closest('[role="alert"],[role="status"],[role="dialog"],.MuiSnackbar-root,.MuiAlert-root,.Toastify__toast'); } catch (_) { return false; } }
+  function ankerKontoNeu() {
+    var best = null, bestA = Infinity;
+    alle('button,[role="button"],[role="combobox"],[aria-haspopup],div,span').forEach(function (e) {
+      if (best && e.contains(best)) return;
+      var r;
+      try { r = e.getBoundingClientRect(); } catch (_) { return; }
+      if (!r.width || r.top > 160 || r.height > 90 || !sichtbar(e)) return;
+      var t = txt(e);
+      if (t.length > 60 || !(RX_AUSLOESER_NEU.test(t) || RX_OHNE_ID.test(t)) || b_istToast(e)) return;
+      var a = r.width * r.height;
+      if (a < bestA) { best = e; bestA = a; }
+    });
+    return best;
   }
   function ankerKopf() { return q1(tid('navbar-container')); }                               // Kopfzeile (Rückfall über Texte)
   function ankerPositionen() { return q1(tid('order-card-display-value-no-position')); }   // „No Active Position"
@@ -508,7 +557,7 @@ var PROPHOS_AUGEN_TSX = (function () {
 
   // Offene Konto-Liste (für K2): nur Einträge, die wie ein Konto aussehen (Label|Kennung) — die Order-Typ-/Contract-Listen
   // sind auch role=option. rect = ganze Zeile (Klickziel), zu = verdeckt/disabled, hinweis = Klammer-Zusatz („Ineligible").
-  function kontoListe() {
+  function kontoListe(ausloeser) {
     var out = [], belegt = false;
     alle('[role="listbox"] [role="option"],li[role="option"]').filter(sichtbar).slice(0, 40).forEach(function (li) {
       var t = txt(li), m = RX_LISTE.exec(t);
@@ -520,6 +569,64 @@ var PROPHOS_AUGEN_TSX = (function () {
                  hinweis: hinweis, aus: attr(li, 'aria-disabled') === 'true' || hatKlasse(li, 'Mui-disabled'), rect: rect(li), zu: zustand(li) });
     });
     if (belegt) out.forEach(function (o) { if (o.markiert === null) o.markiert = false; });
+    return out.length ? out : kontoListeNeu(ausloeser);
+  }
+  // KARTEN-LISTE 2.4.32 (tsx-0.7.0, 02.11.2026, ohne echten DOM): je Karte „<Label> ACCT: <kurz>...<Endung> BAL: <Betrag>". Gesucht wird
+  // vom Blatt „ACCT:" aufwärts bis zum kleinsten Vorfahren, der auch das Label trägt (die Karte); Abschnitt = nächste Überschrift
+  // DAVOR in DOM-Reihenfolge („Express Funded Accounts (4)" / „Ineligible Accounts (2)") → ineligible + hinweis wie der alte Klammertext.
+  // id = volle Kennung nur, wenn sie wirklich da steht (Text „ACCT: <voll>" oder ein Attribut), sonst null; dazu immer endung + id_kurz.
+  var SEL_OVERLAY = '[role="presentation"],[role="listbox"],[role="menu"],[role="dialog"],.MuiPopover-root,.MuiMenu-root,.MuiPopper-root,.MuiModal-root,.MuiDrawer-root';
+  var SEL_NIE = '[role="grid"],[role="tabpanel"],[role="tab"],.dock-layout,.dock-panel,.dock-content,[data-testid="navbar-container"]';
+  function kontoListeNeu(ausloeser) {
+    // Prüfer 02.11.2026: läuft bei JEDER Lesung (bei zuer Liste ist der alte Weg leer) — darum nur Karten, die in einem Overlay liegen
+    // ODER unterhalb des Auslösers stehen, und nie aus Dock-Reitern/Tabellen (ein „ACCT:" im Accounts-Reiter hieße sonst „Liste offen")
+    var karten = [], gesehen = [];
+    var ar = ausloeser ? ausloeser.getBoundingClientRect() : null;
+    alle('span,div,p,td,li,b,strong').forEach(function (b) {
+      if (b.children.length || !/ACCT\s*:/i.test(b.textContent || '') || !sichtbar(b)) return;
+      if (b.closest(SEL_NIE)) return;
+      var imOverlay = !!b.closest(SEL_OVERLAY), br = b.getBoundingClientRect();
+      if (!imOverlay && !(ar && br.top >= ar.bottom - 2 && br.top - ar.bottom < 700)) return;
+      var e = b, tiefe = 0, karte = null;
+      while (e && tiefe < 7) {
+        var t = txt(e), r = e.getBoundingClientRect();
+        if (r.height > 220) break;
+        if (RX_KARTE_LABEL.test(t) && RX_KARTE_ACCT.test(t) || RX_KARTE_LABEL.test(t) && RX_KARTE_ACCT_VOLL.test(t)) { karte = e; break; }
+        e = e.parentElement; tiefe++;
+      }
+      if (!karte || gesehen.indexOf(karte) >= 0) return;
+      gesehen.push(karte);
+      karten.push(karte);
+    });
+    if (!karten.length) return [];
+    // Abschnitts-Überschriften (kurze, kinderlose Texte wie „Ineligible Accounts (2)")
+    var koepfe = alle('span,div,p,h1,h2,h3,h4,h5,h6,b,strong,label').filter(function (e) {
+      return !e.children.length && sichtbar(e) && !e.closest(SEL_NIE) && RX_ABSCHNITT.test(txt(e)) && txt(e).length <= 40;
+    });
+    function abschnittVon(karte) {
+      var best = null, kr = karte.getBoundingClientRect();
+      koepfe.forEach(function (h) {
+        if (karte.contains(h)) return;
+        var hr = h.getBoundingClientRect();
+        if (hr.top > kr.top || kr.top - hr.top > 600) return;                              // nur Köpfe knapp ÜBER der Karte (nicht der Dock-Reiter „Accounts")
+        if (h.compareDocumentPosition(karte) & Node.DOCUMENT_POSITION_FOLLOWING) best = h;   // h liegt vor der Karte; der letzte vor ihr gewinnt
+      });
+      return best ? txt(best) : null;
+    }
+    var out = [], belegt = false;
+    karten.slice(0, 40).forEach(function (li) {
+      var t = txt(li), mv = RX_KARTE_ACCT_VOLL.exec(t), mk = RX_KARTE_ACCT.exec(t), ml = RX_KARTE_LABEL.exec(t), mb = RX_KARTE_BAL.exec(t);
+      var endung = mk ? mk[2].toUpperCase() : (mv ? mv[1].replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() : null);
+      var id = mv ? mv[1].toUpperCase() : kennungAusAttributen(li, endung);
+      var abschnitt = abschnittVon(li), inel = !!(abschnitt && RX_ABSCHNITT_INELIGIBLE.test(abschnitt));
+      var sel = attr(li, 'aria-selected'), mark = sel ? sel === 'true' : (hatKlasse(li, 'Mui-selected') ? true : null);
+      if (mark !== null) belegt = true;
+      out.push({ text: t.slice(0, 160), label: ml ? ml[1].replace(/[^\w$.,)-]+$/g, '').replace(/\s+/g, ' ').trim() : null, id: id, endung: endung,   // Stift ✎ hinter dem Namen weg
+                 id_kurz: mk ? (mk[1] + '...' + mk[2]).toUpperCase() : (mv ? mv[1].toUpperCase() : null), bal: mb ? mb[1].replace(/\s+/g, '') : null,
+                 abschnitt: abschnitt, markiert: mark, ineligible: inel, hinweis: inel ? 'Ineligible' : null, format: 'neu',
+                 aus: attr(li, 'aria-disabled') === 'true' || hatKlasse(li, 'Mui-disabled'), rect: rect(li), zu: zustand(li) });
+    });
+    if (belegt) out.forEach(function (o) { if (o.markiert === null) o.markiert = false; });
     return out;
   }
 
@@ -528,8 +635,14 @@ var PROPHOS_AUGEN_TSX = (function () {
     var k = KONTO_LEER();
     if (!K1_ANKER) return k;
     var el = ankerKonto();
-    if (el) { k = kontoAusText(txt(el)); k.rect = rect(el); k.zu = zustand(el); }
-    k.liste = kontoListe();
+    if (el) {
+      k = kontoAusText(txt(el)); k.rect = rect(el); k.zu = zustand(el);
+      if (!k.kontonr && k.endung) { var voll = kennungAusAttributen(el, k.endung); if (voll) { k.kontonr = voll; k.abgekuerzt = false; } }
+    }
+    k.liste = kontoListe(el);
+    if (k.liste.length && k.liste[0].format === 'neu') {
+      k.abschnitte = []; k.liste.forEach(function (o) { if (o.abschnitt && k.abschnitte.indexOf(o.abschnitt) < 0) k.abschnitte.push(o.abschnitt); });
+    }
     var offen = el ? attr(el, 'aria-expanded') : '';      // belegt: „false"/„true" am Auslöser; fehlt es, zählen die Zeilen
     k.liste_offen = offen === 'true' ? true : (offen === 'false' ? false : k.liste.length > 0);
     return k;
