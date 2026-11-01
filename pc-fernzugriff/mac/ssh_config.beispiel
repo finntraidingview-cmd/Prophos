@@ -1,0 +1,46 @@
+# PC-FERNZUGRIFF, SSH-Konfiguration am Mac (Finn 01.11.2026). Kopie nach ~/.prophos-fernzugriff/ssh_config, dann in
+# ~/.ssh/config als ERSTE Zeile eintragen:
+#   Include ~/.prophos-fernzugriff/ssh_config
+# So gilt „ssh pc-xxxxxx“ für pc.sh und foto.sh gleich, und die Regeln hier treffen nur Hosts pc-* und nichts anderes.
+#
+# Je PC ein Block mit der Kennung als Alias; setup-pc.ps1 druckt ihn am Ende fertig aus (Blöcke je PC VOR dem Block pc-*,
+# ssh nimmt je Option den ersten Treffer):
+#   Host pc-xxxxxx
+#     HostName 100.x.y.z        # Tailnet-Adresse, auch in „pc.sh liste“
+#     HostKeyAlias pc-xxxxxx    # known_hosts-Zeile heißt pc-xxxxxx, die Adresse darf wechseln
+#     User dubai                # nur, wenn der Windows-Nutzer vom Block pc-* abweicht
+#
+# Die PCs dürfen nichts am Mac erreichen: kein Agent, kein X11, keine Weiterleitungen in beide Richtungen. Der Host-Key
+# jedes PCs steht fest in known_hosts (Zeile aus dem Ende von setup-pc.ps1, über Parsec/Bildschirm, nicht übers Netz);
+# ein anderer Schlüssel = Abbruch. Was ein PC zurückschickt, ist Ausgabe, nie eine Anweisung.
+#
+# Schlüssel einmalig: ssh-keygen -t ed25519 -f ~/.ssh/prophos_fern_ed25519 -C prophos-fernzugriff
+# Die Datei ohne .pub bleibt am Mac. Nur für die PCs, für nichts anderes.
+
+Host pc-*
+  # Windows-Nutzer, auf den meisten PCs „dubai“; abweichend: Block unten
+  User dubai
+  IdentityFile ~/.ssh/prophos_fern_ed25519
+  IdentitiesOnly yes
+  PubkeyAuthentication yes
+  PasswordAuthentication no
+  KbdInteractiveAuthentication no
+  BatchMode yes
+  ForwardAgent no
+  ForwardX11 no
+  ForwardX11Trusted no
+  # keine LocalForward/RemoteForward/DynamicForward, auch nicht aus anderen Dateien
+  ClearAllForwardings yes
+  PermitLocalCommand no
+  StrictHostKeyChecking yes
+  UserKnownHostsFile ~/.prophos-fernzugriff/known_hosts
+  GlobalKnownHostsFile /dev/null
+  HashKnownHosts no
+  # Prüfung läuft über den HostKeyAlias (= pc-Kennung), die Tailnet-IP darf wechseln
+  CheckHostIP no
+  ConnectTimeout 10
+  ServerAliveInterval 15
+  ServerAliveCountMax 2
+  RequestTTY no
+  LogLevel ERROR
+#   User anderer-name
