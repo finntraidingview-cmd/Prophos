@@ -143,10 +143,13 @@ if($backend -eq 'Running'){
   $r = Nativ $TS_EXE @('set',"--hostname=$PcId",'--accept-dns=false','--accept-routes=false','--exit-node=','--shields-up=false')
   if($r.code -ne 0){ throw "tailscale set fehlgeschlagen: $($r.text)" }
 } else {
-  $sicher = Read-Host 'Tailscale Auth-Key (tskey-auth-..., Eingabe unsichtbar)' -AsSecureString
-  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sicher)
+  # Normale Eingabe statt SecureString (Pilot pc 01.11.2026: Rechtsklick-Einfuegen lieferte in der SecureString-Abfrage nur ein
+  # Zeichen). Read-Host landet nicht in der PSReadLine-Chronik; die Konsole wird nach dem Beitritt geleert. Deshalb KEIN Parameter
+  # fuer den Key: eine getippte Befehlszeile mit Key stuende in ConsoleHost_history.txt.
+  Write-Host 'Der Key ist beim Einfuegen sichtbar; die Konsole wird nach dem Beitritt geleert.' -ForegroundColor Yellow
+  $key = (Read-Host 'Tailscale Auth-Key (tskey-auth-...)').Trim()
+  $r = $null
   try {
-    $key = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr).Trim()
     if($key -notlike 'tskey-auth-*'){ throw 'Das ist kein Auth-Key (beginnt mit tskey-auth-)' }
     # accept-dns/accept-routes aus und kein Exit-Node: Internet-Weg, DNS und damit die IP des PCs bleiben, wie sie sind.
     # unattended: Tailscale bleibt auch ohne angemeldeten Nutzer im Netz (Neustart vor dem Autologon).
@@ -155,7 +158,10 @@ if($backend -eq 'Running'){
     $r = Nativ $TS_EXE @('up',"--auth-key=$key","--hostname=$PcId","--advertise-tags=$TAG_PC",'--accept-dns=false','--accept-routes=false','--unattended','--reset')
   } finally {
     $key = $null
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    try { Clear-Host } catch {}
+    # Konsole leer, aber der Key liegt noch in der Zwischenablage (und evtl. im Win+V-Verlauf): Einmal-Key, trotzdem sagen
+    Write-Host "== Tailscale: Konsole geleert, der Key stand sichtbar darin. Zwischenablage selbst leeren." -ForegroundColor Cyan
+    if($r){ Write-Host "tailscale up fuer $PcId ist gelaufen (Code $($r.code))." }
   }
   if($r.code -ne 0){ throw "tailscale up fehlgeschlagen: $($r.text)" }
 }
@@ -166,31 +172,56 @@ Write-Host "Im Tailnet als $PcId, Adresse $tsIp"
 
 # ---------- Firewall VOR dem ersten sshd-Start ----------
 Schritt 'Firewall: Port 22 nur aus dem Tailnet'
-# OpenSSH-Server anlegen, falls noetig. Seine Standard-Regel oeffnet Port 22 fuer alle, die geht sofort danach aus.
-if(-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)){
-  $cap = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' } | Select-Object -First 1
-  if(-not $cap){ throw 'Windows bietet OpenSSH.Server nicht an (Get-WindowsCapability ohne Treffer)' }
-  Add-WindowsCapability -Online -Name $cap.Name | Out-Null
-  if(-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)){ throw "OpenSSH-Dienst fehlt auch nach Add-WindowsCapability $($cap.Name)" }
+# OpenSSH-Server anlegen, falls noetig. Erst das winget-Paket (Pilot pc 01.11.2026, Windows 11 25H2: Add-WindowsCapability
+# OpenSSH.Server lief fehlerfrei durch, der Dienst sshd fehlte trotzdem; Microsoft.OpenSSH.Preview brachte ihn sofort),
+# die Windows-Capability nur als Rueckfall. Fehlt der Dienst nach beidem, steht der Capability-State mit in der Meldung.
+# Beide Wege legen eine Firewall-Regel an, die Port 22 fuer alle oeffnet, und starten den Dienst: beides geht gleich darunter aus.
+$sshdDienst = { Get-Service -Name sshd -ErrorAction SilentlyContinue }
+if(-not (& $sshdDienst)){
+  $wg = Get-Command winget -ErrorAction SilentlyContinue
+  $wgText = 'winget fehlt'
+  if($wg){
+    $r = Nativ $wg.Source @('install','-e','--id','Microsoft.OpenSSH.Preview','--silent','--accept-package-agreements','--accept-source-agreements')
+    $wgText = "winget Code $($r.code)"
+  }
+  Stop-Service -Name sshd -ErrorAction SilentlyContinue
+  if(-not (& $sshdDienst)){
+    Write-Warning "OpenSSH per winget nicht da ($wgText) -> Rueckfall Windows-Capability"
+    $cap = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' } | Select-Object -First 1
+    if($cap){ try { Add-WindowsCapability -Online -Name $cap.Name | Out-Null } catch { Write-Warning "Add-WindowsCapability $($cap.Name): $($_.Exception.Message)" } }
+    Stop-Service -Name sshd -ErrorAction SilentlyContinue
+  }
+  if(-not (& $sshdDienst)){
+    $state = (Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' } | ForEach-Object { "$($_.Name)=$($_.State)" }) -join ', '
+    throw "OpenSSH-Dienst sshd fehlt nach winget ($wgText) und Capability (State: $(if($state){ $state } else { 'kein OpenSSH.Server angeboten' })) -> Neustart und nochmal, sonst winget install -e --id Microsoft.OpenSSH.Preview von Hand"
+  }
 }
 Stop-Service -Name sshd -ErrorAction SilentlyContinue
-Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP','sshd' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
 Get-NetFirewallRule -Group $FW_GRUPPE -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+# Jede FREMDE eingehende Freigabe auf TCP 22 aus (die der Capability, die des winget-Pakets, eine alte von Hand). Nur Regeln mit
+# genau Port 22, nie Regeln mit 'Any' (das waeren Programm-Freigaben wie Parsec oder Chrome). Namen in fw_deaktiviert.json,
+# damit der Rueckbau sie wieder einschalten kann.
+# Ohne -PolicyStore ActiveStore: der liefert auch GPO-Regeln, die sich nicht abschalten lassen (Gegenpruefung 02.11.2026)
+$fremd = @(Get-NetFirewallPortFilter | Where-Object { $_.Protocol -eq 'TCP' -and (@($_.LocalPort) -contains '22') } |
+  Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' -and $_.Enabled -eq 'True' -and $_.Group -ne $FW_GRUPPE })
+if($fremd.Count){
+  $merk = Join-Path $WURZEL 'fw_deaktiviert.json'
+  $alt = @(); if(Test-Path -LiteralPath $merk){ try { $alt = @(Get-Content -LiteralPath $merk -Raw | ConvertFrom-Json) } catch { $alt = @() } }
+  $namen = @($alt + ($fremd | ForEach-Object { $_.Name }) | Select-Object -Unique)
+  [IO.File]::WriteAllText($merk, (ConvertTo-Json @($namen)), $UTF8_OHNE_BOM)
+  # je Regel einzeln: eine Regel, die sich nicht abschalten laesst, darf den Lauf hier (sshd ist gestoppt) nicht abbrechen
+  foreach($fr in $fremd){ try { $fr | Disable-NetFirewallRule } catch { Write-Warning "Port-22-Freigabe '$($fr.DisplayName)' nicht abschaltbar: $($_.Exception.Message) -> im Pilot von aussen auf Port 22 pruefen" } }
+  Write-Host "Fremde Port-22-Freigaben aus: $(($fremd | ForEach-Object { $_.DisplayName }) -join ', ')"
+}
 # Nur nach Absender-Adresse, NICHT an den Tailscale-Adapter gebunden (Gegenpruefung 01.11.2026): Windows merkt sich den Adapter
 # ueber seine Kennung; legt ein Tailscale-Update ihn neu an, griffe die Regel nicht mehr und jeder PC waere still unerreichbar.
 New-NetFirewallRule -DisplayName 'Prophos Fernzugriff SSH aus dem Tailnet' -Group $FW_GRUPPE -Direction Inbound -Action Allow `
   -Protocol TCP -LocalPort 22 -RemoteAddress '100.64.0.0/10' -Profile Any | Out-Null
-# Zusatzriegel: Block schlaegt in Windows jede Allow-Regel, auch eine alte, die Port 22 breit oeffnet. Sicher ist der PC auch
-# ohne ihn (Windows blockt eingehend von Haus aus, die breite OpenSSH-Regel ist aus, der Schluessel traegt from=Tailnet), darum
-# darf ein Nein der Firewall zu diesen Adressbereichen den Lauf nicht abbrechen. Zwei Regeln, IPv4 und IPv6 getrennt.
-$blockWarnung = ''
-try {
-  New-NetFirewallRule -DisplayName 'Prophos Fernzugriff SSH sonst gesperrt (IPv4)' -Group $FW_GRUPPE -Direction Inbound -Action Block `
-    -Protocol TCP -LocalPort 22 -RemoteAddress @('0.0.0.0-100.63.255.255','100.128.0.0-255.255.255.255') -Profile Any | Out-Null
-  New-NetFirewallRule -DisplayName 'Prophos Fernzugriff SSH sonst gesperrt (IPv6)' -Group $FW_GRUPPE -Direction Inbound -Action Block `
-    -Protocol TCP -LocalPort 22 -RemoteAddress '::/0' -Profile Any | Out-Null
-} catch { $blockWarnung = "Block-Regel nicht angelegt ($($_.Exception.Message)) -> Allow-Regel allein, im Pilot von aussen auf Port 22 pruefen" }
-if($blockWarnung){ Write-Warning $blockWarnung } else { Write-Host 'Regeln gesetzt.' }
+# KEINE Block-Regel mehr (Pilot pc 01.11.2026: 'Mindestens ein Adresspraefix ist ungueltig' fuer den Bereich ab 0.0.0.0).
+# Sie war Guertel zu Hosentraeger: Windows blockt eingehend von Haus aus alles ohne Allow-Regel, die fremden Port-22-Freigaben
+# sind oben aus, und der Schluessel traegt from=Tailnet. ListenAddress <Tailnet-IP> in der sshd_config waere der andere Weg,
+# aber sshd startet nach einem Neustart vor dem Tailscale-Adapter und kaeme dann mit einer noch fehlenden Adresse nicht hoch.
+Write-Host 'Allow-Regel gesetzt: Port 22 nur aus 100.64.0.0/10.'
 
 # ---------- Schluessel-Datei ----------
 Schritt 'Schluessel-Datei und sshd-Konfiguration'
@@ -273,7 +304,7 @@ if((Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd('\') -ieq $zielOrdner)
   # Nur die bekannten Dateien, nie '*' (Pruefer S9, 01.11.2026): liegt das Skript z. B. in Downloads, waere sonst der ganze Ordner
   # (Installer, Kontoauszuege) nach fernzugriff gewandert. Fehlt ein Teil, klar sagen, aber weiterlaufen: die anderen Teile
   # kommen aus eigenen Auftraegen und koennen beim Pilot noch fehlen.
-  $bekannt = @('setup-pc.ps1', 'rueckbau-pc.ps1', 'diagnose.ps1', 'foto')
+  $bekannt = @('setup-pc.ps1', 'rueckbau-pc.ps1', 'diagnose.ps1', 'foto')   # foto\ komplett (foto-aufgabe.ps1, foto-schuss.py, foto.ps1)
   $fehlt = @()
   foreach($name in $bekannt){
     $quelle = Join-Path $PSScriptRoot $name
@@ -288,6 +319,22 @@ if((Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd('\') -ieq $zielOrdner)
   }
   Write-Host "Kopiert nach ${zielOrdner}: $(($bekannt | Where-Object { $fehlt -notcontains $_ }) -join ', ')"
   if($fehlt.Count){ Write-Warning "Nicht neben setup-pc.ps1 gefunden, daher nicht kopiert: $($fehlt -join ', ') -> den ganzen Ordner pc-fernzugriff aus dem Repo auf den PC legen und nochmal starten" }
+}
+
+# ---------- Foto-Aufgabe (S13) ----------
+# foto\foto-aufgabe.ps1 traegt die Aufgabe 'Prophos Foto' fuer den Nutzer ein, der sie ausfuehrt ($env:USERNAME), und muss darum
+# als der am Desktop angemeldete Nutzer laufen. Bei Autologon mit einem Admin-Konto ist das dieser Lauf; sonst (anderer Admin)
+# klar sagen, was noch fehlt (Pilot pc 01.11.2026: foto.ps1 Exit 2, Aufgabe fehlte).
+Schritt 'Foto-Aufgabe'
+$fotoAufgabe = Join-Path $zielOrdner 'foto\foto-aufgabe.ps1'
+if(-not (Test-Path -LiteralPath $fotoAufgabe)){
+  Write-Warning "NOCH OFFEN: $fotoAufgabe fehlt (Ordner foto\ nicht mitkopiert) -> Repo-Ordner komplett auf den PC, nochmal starten"
+} elseif($env:USERNAME.ToLowerInvariant() -ne $kurz){
+  Write-Warning "NOCH OFFEN: dieses Fenster laeuft als $env:USERNAME, angemeldet ist $kurz -> als $kurz ausfuehren: powershell -NoProfile -ExecutionPolicy Bypass -File $fotoAufgabe"
+} else {
+  $r = Nativ 'powershell.exe' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$fotoAufgabe)
+  if($r.code -eq 0){ Write-Host "Foto-Aufgabe angelegt. $($r.text)" }
+  else { Write-Warning "NOCH OFFEN: Foto-Aufgabe nicht angelegt (Code $($r.code)): $($r.text) -> Ursache beheben, dann: powershell -NoProfile -ExecutionPolicy Bypass -File $fotoAufgabe" }
 }
 
 # ---------- Fertig: was am Mac einzutragen ist ----------
