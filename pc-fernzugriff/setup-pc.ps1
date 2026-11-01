@@ -339,21 +339,27 @@ if((Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd('\') -ieq $zielOrdner)
   if($fehlt.Count){ Write-Warning "Nicht neben setup-pc.ps1 gefunden, daher nicht kopiert: $($fehlt -join ', ') -> den ganzen Ordner pc-fernzugriff aus dem Repo auf den PC legen und nochmal starten" }
 }
 
-# ---------- Foto-Aufgabe (S13) ----------
-# foto\foto-aufgabe.ps1 traegt die Aufgabe 'Prophos Foto' fuer den Nutzer ein, der sie ausfuehrt ($env:USERNAME), und muss darum
-# als der am Desktop angemeldete Nutzer laufen. Bei Autologon mit einem Admin-Konto ist das dieser Lauf; sonst (anderer Admin)
-# klar sagen, was noch fehlt (Pilot pc 01.11.2026: foto.ps1 Exit 2, Aufgabe fehlte).
-Schritt 'Foto-Aufgabe'
-$fotoAufgabe = Join-Path $zielOrdner 'foto\foto-aufgabe.ps1'
-if(-not (Test-Path -LiteralPath $fotoAufgabe)){
-  Write-Warning "NOCH OFFEN: $fotoAufgabe fehlt (Ordner foto\ nicht mitkopiert) -> Repo-Ordner komplett auf den PC, nochmal starten"
-} elseif($env:USERNAME.ToLowerInvariant() -ne $kurz){
-  Write-Warning "NOCH OFFEN: dieses Fenster laeuft als $env:USERNAME, angemeldet ist $kurz -> als $kurz ausfuehren: powershell -NoProfile -ExecutionPolicy Bypass -File $fotoAufgabe"
-} else {
-  $r = Nativ 'powershell.exe' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$fotoAufgabe)
-  if($r.code -eq 0){ Write-Host "Foto-Aufgabe angelegt. $($r.text)" }
-  else { Write-Warning "NOCH OFFEN: Foto-Aufgabe nicht angelegt (Code $($r.code)): $($r.text) -> Ursache beheben, dann: powershell -NoProfile -ExecutionPolicy Bypass -File $fotoAufgabe" }
+# ---------- Foto- und Agent-Aufgabe (S13) ----------
+# foto\foto-aufgabe.ps1 und agent\agent-aufgabe.ps1 tragen ihre Aufgaben ('Prophos Foto', 'Prophos Agent') fuer den Nutzer ein,
+# der sie ausfuehrt ($env:USERNAME), und muessen darum als der am Desktop angemeldete Nutzer laufen. Bei Autologon mit einem
+# Admin-Konto ist das dieser Lauf; sonst (anderer Admin) klar sagen, was noch fehlt (Pilot pc 01.11.2026: foto.ps1 Exit 2,
+# Aufgabe fehlte). Agent nach einem erneuten Setup noetig, damit der frisch kopierte Code laeuft (agent\README.md). Reihenfolge
+# erst Foto, dann Agent: der Agent prueft foto\foto-schuss.py (Betrieb 1, 02.11.2026).
+function Nutzer-Aufgabe([string]$titel, [string]$skript){
+  Schritt $titel
+  $befehl = "powershell -NoProfile -ExecutionPolicy Bypass -File $skript"
+  if(-not (Test-Path -LiteralPath $skript)){
+    Write-Warning "NOCH OFFEN: $skript fehlt (Ordner nicht mitkopiert) -> Repo-Ordner komplett auf den PC, nochmal starten"
+  } elseif($env:USERNAME.ToLowerInvariant() -ne $kurz){
+    Write-Warning "NOCH OFFEN: dieses Fenster laeuft als $env:USERNAME, angemeldet ist $kurz -> als $kurz ausfuehren: $befehl"
+  } else {
+    $r = Nativ 'powershell.exe' @('-NoProfile','-ExecutionPolicy','Bypass','-File',$skript)
+    if($r.code -eq 0){ Write-Host "$titel angelegt. $($r.text)" }
+    else { Write-Warning "NOCH OFFEN: $titel nicht angelegt (Code $($r.code)): $($r.text) -> Ursache beheben, dann: $befehl" }
+  }
 }
+Nutzer-Aufgabe 'Foto-Aufgabe'  (Join-Path $zielOrdner 'foto\foto-aufgabe.ps1')
+Nutzer-Aufgabe 'Agent-Aufgabe' (Join-Path $zielOrdner 'agent\agent-aufgabe.ps1')
 
 # ---------- Fertig: was am Mac einzutragen ist ----------
 # Host-Key und Adresse kommen ueber diesen Bildschirm (Parsec / vor Ort) zum Mac, nicht ueber das Netz: so prueft der Mac beim
