@@ -85,7 +85,7 @@ Am PC als Administrator, nicht über SSH:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\rueckbau-pc.ps1
 ```
-Nimmt weg: OpenSSH-Server, Schlüssel-Datei, Firewall-Regeln, Tailscale (abgemeldet + deinstalliert), Foto-Aufgabe, `C:\ProgramData\prophos-fernzugriff` und `C:\mt5-copier\fernzugriff` (der Ordner, den `setup-pc.ps1` anlegt, mit den Fotos darin). Alles andere in `C:\mt5-copier` bleibt. Danach in der Verwaltung → **Machines** den PC löschen und am Mac die Zeile des PCs aus `~/.prophos-fernzugriff/known_hosts` nehmen.
+Nimmt weg: OpenSSH-Server (das winget-Paket `Microsoft.OpenSSH.Preview` und, falls genutzt, das Windows-Feature, aber nur wenn `setup-pc.ps1` es angelegt hat), Schlüssel-Datei, unsere Firewall-Regeln (fremde Port-22-Freigaben, die das Setup abgeschaltet hatte, gehen wieder an), Tailscale (abgemeldet + deinstalliert), Foto-Aufgabe, `C:\ProgramData\prophos-fernzugriff` und `C:\mt5-copier\fernzugriff` (der Ordner, den `setup-pc.ps1` anlegt, mit den Fotos darin). Alles andere in `C:\mt5-copier` bleibt. Danach in der Verwaltung → **Machines** den PC löschen und am Mac die Zeile des PCs aus `~/.prophos-fernzugriff/known_hosts` nehmen.
 
 Nach Rückbau und erneutem `setup-pc.ps1` hat der PC einen neuen Host-Key. Der Mac meldet dann „REMOTE HOST IDENTIFICATION HAS CHANGED“: alte Zeile aus `known_hosts` löschen, neue vom Ende des Setups eintragen.
 

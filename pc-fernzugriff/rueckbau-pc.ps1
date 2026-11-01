@@ -1,5 +1,6 @@
 # PC-FERNZUGRIFF, Rueckbau (Finn 01.11.2026, Slave 14): nimmt alles wieder weg, was setup-pc.ps1 angelegt hat.
-#   - OpenSSH-Server: Dienst gestoppt, deaktiviert, Windows-Feature entfernt, C:\ProgramData\ssh weg
+#   - OpenSSH-Server: Dienst gestoppt, deaktiviert, winget-Paket Microsoft.OpenSSH.Preview und/oder Windows-Feature entfernt, C:\ProgramData\ssh weg
+#   - fremde Port-22-Freigaben, die setup-pc.ps1 abgeschaltet hat (fw_deaktiviert.json), wieder an
 #   - administrators_authorized_keys: unsere Zeile raus (Marker prophos-fernzugriff), fremde Zeilen bleiben; leer -> Datei weg
 #   - Firewall: alle Regeln der Gruppe 'Prophos Fernzugriff' weg
 #   - Tailscale: abgemeldet (Geraet verlaesst das Tailnet) und deinstalliert
@@ -89,12 +90,23 @@ if(Test-Path -LiteralPath $AUTH_KEYS){
 } else { Write-Host 'keine Schluessel-Datei da' }
 
 Schritt 'Firewall'
+# sshd zuerst aus: die fremden Port-22-Freigaben gehen gleich wieder an, da soll nichts mehr auf Port 22 lauschen
+Stop-Service -Name sshd -Force -ErrorAction SilentlyContinue
 $regeln = @(Get-NetFirewallRule -Group $FW_GRUPPE -ErrorAction SilentlyContinue)
 if($regeln.Count -gt 0){ $regeln | Remove-NetFirewallRule; Write-Host "$($regeln.Count) Regel(n) der Gruppe '$FW_GRUPPE' entfernt" }
 else { Write-Host 'keine Regeln der Gruppe da' }
-# setup-pc.ps1 hat die Standard-Regel des OpenSSH-Servers abgeschaltet; bleibt sshd (sshBehalten), kommt sie wieder
-if($sshBehalten){
-  foreach($n in @(Feld $stand 'fw_regeln_aktiv')){ if($n){ Enable-NetFirewallRule -Name $n -ErrorAction SilentlyContinue } }
+# setup-pc.ps1 (seit 9a71bbe3) schaltet jede fremde eingehende Port-22-Freigabe aus (Capability, winget-Paket, alte von Hand)
+# und merkt ihre Namen in fw_deaktiviert.json. Genau diese kommen wieder an, auch wenn OpenSSH gleich darunter weggeht:
+# eine Regel, die vorher an war, war nicht unsere. Fehlt eine (Paket inzwischen deinstalliert), nur eine Warnung.
+$merk = Join-Path $WURZEL 'fw_deaktiviert.json'
+$wiederAn = @()
+if(Test-Path -LiteralPath $merk){ try { $wiederAn = @(Get-Content -LiteralPath $merk -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { Write-Warning "fw_deaktiviert.json nicht lesbar: $($_.Exception.Message)" } }
+# aelterer Stand von setup-pc.ps1: fw_regeln_aktiv in stand.json (nur 'OpenSSH-Server-In-TCP'/'sshd')
+$wiederAn = @($wiederAn + @(Feld $stand 'fw_regeln_aktiv') | Where-Object { $_ } | Select-Object -Unique)
+foreach($n in $wiederAn){
+  $regel = Get-NetFirewallRule -Name $n -ErrorAction SilentlyContinue
+  if($regel){ try { $regel | Enable-NetFirewallRule; Write-Host "Port-22-Freigabe '$($regel.DisplayName)' wieder an" } catch { Write-Warning "Regel '$n' nicht einschaltbar: $($_.Exception.Message)" } }
+  else { Write-Warning "Regel '$n' aus fw_deaktiviert.json gibt es nicht mehr (Paket wohl deinstalliert), nichts zu tun" }
 }
 
 Schritt 'OpenSSH-Server'
@@ -114,10 +126,21 @@ if($dienst){
     Write-Host 'OpenSSH war vorher schon da: Konfiguration und Dienst-Zustand von vorher wiederhergestellt (-Alles entfernt ihn trotzdem).'
   } else {
     Set-Service -Name sshd -StartupType Disabled
+    # setup-pc.ps1 (seit 9a71bbe3) installiert OpenSSH zuerst als winget-Paket Microsoft.OpenSSH.Preview, die Windows-Capability
+    # nur als Rueckfall. Remove-WindowsCapability laesst das winget-MSI (sshd.exe + Dienst) stehen, darum beides. Hier gilt
+    # openssh_war_da = false aus stand.json (sonst sshBehalten oben), also hat setup-pc.ps1 das Paket angelegt, nicht Finn.
+    $wg = Get-Command winget -ErrorAction SilentlyContinue
+    if($wg){
+      $r = Nativ $wg.Source @('list','-e','--id','Microsoft.OpenSSH.Preview','--accept-source-agreements')
+      if($r.code -eq 0 -and $r.text -match 'Microsoft\.OpenSSH\.Preview'){
+        $r = Nativ $wg.Source @('uninstall','-e','--id','Microsoft.OpenSSH.Preview','--silent','--accept-source-agreements')
+        if($r.code -ne 0){ Write-Warning "winget uninstall Microsoft.OpenSSH.Preview (Code $($r.code)): $($r.text)" } else { Write-Host 'winget-Paket Microsoft.OpenSSH.Preview deinstalliert' }
+      }
+    } else { Write-Warning 'winget fehlt: falls OpenSSH als Paket Microsoft.OpenSSH.Preview da ist, unter Einstellungen, Apps deinstallieren' }
     $cap = Get-WindowsCapability -Online | Where-Object { $_.Name -like 'OpenSSH.Server*' -and $_.State -eq 'Installed' } | Select-Object -First 1
-    if($cap){ Remove-WindowsCapability -Online -Name $cap.Name | Out-Null }
+    if($cap){ Remove-WindowsCapability -Online -Name $cap.Name | Out-Null; Write-Host "Windows-Capability $($cap.Name) entfernt" }
     if(-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)){ Write-Host 'OpenSSH-Server entfernt' }
-    else { Write-Warning 'sshd-Dienst ist nach Remove-WindowsCapability noch da: Windows raeumt ihn beim naechsten Neustart weg. Er ist gestoppt und deaktiviert.' }
+    else { Write-Warning 'sshd-Dienst ist nach winget uninstall / Remove-WindowsCapability noch da: Windows raeumt ihn beim naechsten Neustart weg. Er ist gestoppt und deaktiviert.' }
     # Host-Keys, sshd_config, Protokolle: alles aus unserer Installation
     if(Test-Path -LiteralPath $SSH_DIR){ Remove-Item -LiteralPath $SSH_DIR -Recurse -Force -ErrorAction SilentlyContinue }
   }
