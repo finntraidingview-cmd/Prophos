@@ -61,7 +61,9 @@ err="$lokal_dir/.do-fehler.txt"
 py_merk="$D/python.$pc"
 holen_py(){
   local p; p=$("${SSH[@]}" -n "$pc" "type $PY_TXT" 2>"$err" | tr -d '\r' | head -n1)
-  [[ $p == [A-Za-z]:\\*python.exe ]] || fehler "python.txt fehlt auf $pc oder ist kein python.exe-Pfad ('$p') → agent-aufgabe.ps1 auf dem PC ausführen. $(tr -d '\r' < "$err")" 3
+  # Enges Muster (S9 02.11.2026): keine cmd-Sonderzeichen (" & | ^ < > %) im Pfad — der Inhalt von python.txt landet in der Befehlszeile
+  local re='^[A-Za-z]:\\[^"&|^<>%]+python\.exe$'   # Muster in Variable: bash 3.2 stolpert über Escapes im [[ =~ ]]-Literal
+  [[ $p =~ $re ]] || fehler "python.txt fehlt auf $pc oder ist kein python.exe-Pfad ('$p') → agent-aufgabe.ps1 auf dem PC ausführen. $(tr -d '\r' < "$err")" 3
   printf '%s\n' "$p" > "$py_merk"; chmod 600 "$py_merk"
 }
 [ -s "$py_merk" ] || holen_py
