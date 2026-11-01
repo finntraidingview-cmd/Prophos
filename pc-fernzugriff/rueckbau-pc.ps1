@@ -141,6 +141,14 @@ if($dienst){
     if($cap){ Remove-WindowsCapability -Online -Name $cap.Name | Out-Null; Write-Host "Windows-Capability $($cap.Name) entfernt" }
     if(-not (Get-Service -Name sshd -ErrorAction SilentlyContinue)){ Write-Host 'OpenSSH-Server entfernt' }
     else { Write-Warning 'sshd-Dienst ist nach winget uninstall / Remove-WindowsCapability noch da: Windows raeumt ihn beim naechsten Neustart weg. Er ist gestoppt und deaktiviert.' }
+    # fw_deaktiviert.json entsteht in setup-pc.ps1 NACH der OpenSSH-Installation: bei openssh_war_da=false steht darin auch die
+    # Regel, die das winget-Paket oder die Capability selbst angelegt hat ('OpenSSH-Server-In-TCP' bzw. 'sshd'). Oben ist sie
+    # wieder an; raeumt das MSI sie nicht selbst weg, bliebe eine aktive Port-22-Freigabe ohne Dienst zurueck (S9, 02.11.2026).
+    # Darum hier weg bzw. aus. Alle anderen Namen aus der Datei (alte Regel von Hand) bleiben an.
+    foreach($pr in @(Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP','sshd' -ErrorAction SilentlyContinue)){
+      try { $pr | Remove-NetFirewallRule; Write-Host "Paket-Regel '$($pr.DisplayName)' entfernt" }
+      catch { try { $pr | Disable-NetFirewallRule; Write-Warning "Paket-Regel '$($pr.DisplayName)' nicht entfernbar, nur deaktiviert: $($_.Exception.Message)" } catch { Write-Warning "Paket-Regel '$($pr.DisplayName)' bleibt AKTIV: $($_.Exception.Message) -> von Hand unter Windows-Firewall abschalten" } }
+    }
     # Host-Keys, sshd_config, Protokolle: alles aus unserer Installation
     if(Test-Path -LiteralPath $SSH_DIR){ Remove-Item -LiteralPath $SSH_DIR -Recurse -Force -ErrorAction SilentlyContinue }
   }
