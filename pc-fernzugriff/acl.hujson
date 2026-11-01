@@ -29,8 +29,10 @@
 // Ein Gerät mit tag:pc besitzt keinen Tag, kann sich also weder tag:mac geben noch einen anderen PC umtaggen.
 // Die Tags selbst sind nur in der Verwaltung (Machines → Edit ACL tags) und über Admin-Auth-Keys zu vergeben.
 //
-// Not-Aus: die eine acls-Zeile löschen ("acls": []) und speichern, dann erreicht niemand mehr etwas. Den Tag tag:mac am Mac
-// zu entfernen geht nicht, ein getaggtes Gerät behält immer mindestens einen Tag (Doku „Tags“).
+// Not-Aus: "acls": [] UND "tests": [] setzen (beide Listen leeren) und speichern, dann erreicht niemand mehr etwas.
+// Nur acls zu leeren geht nicht: der erste Test unten verlangt accept für tag:pc:22, er schlüge fehl und Tailscale
+// lehnte das Speichern ab (S9, 01.11.2026). Den Tag tag:mac am Mac zu entfernen geht auch nicht, ein getaggtes Gerät
+// behält immer mindestens einen Tag (Doku „Tags“).
 //
 // Port 8770 = Panel (mt5-copier/panel.py). Es hört heute nur auf 127.0.0.1; über das Tailnet erreichbar wird es erst,
 // wenn es auf der Tailnet-Adresse lauscht. Die Freigabe steht trotzdem schon hier, damit die ACL dann nicht nochmal muss.

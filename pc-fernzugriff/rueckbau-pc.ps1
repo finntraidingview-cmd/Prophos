@@ -3,13 +3,13 @@
 #   - administrators_authorized_keys: unsere Zeile raus (Marker prophos-fernzugriff), fremde Zeilen bleiben; leer -> Datei weg
 #   - Firewall: alle Regeln der Gruppe 'Prophos Fernzugriff' weg
 #   - Tailscale: abgemeldet (Geraet verlaesst das Tailnet) und deinstalliert
-#   - Foto-Aufgabe 'Prophos Foto' (und der alte Name ProphosFernzugriffFoto) weg, dazu C:\ProgramData\prophos-fernzugriff und C:\mt5-copier\fotos
-#     (C:\mt5-copier\fernzugriff mit foto.ps1 bleibt laut Vorgabe stehen: in C:\mt5-copier nur der Ordner fotos)
+#   - Foto-Aufgabe 'Prophos Foto' (und der alte Name ProphosFernzugriffFoto) weg, dazu C:\ProgramData\prophos-fernzugriff
+#   - C:\mt5-copier\fernzugriff weg: den Ordner legt setup-pc.ps1 an (Kopie des Repo-Ordners), darin liegen auch die Fotos (foto\)
 #
 # Aufruf als Administrator, am PC selbst (Parsec oder vor Ort), wiederholbar:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\rueckbau-pc.ps1
 #
-# In C:\mt5-copier wird nur der Ordner fotos angefasst. Copier, Puls, Chrome-Profile, MT5, pc_id.json bleiben unberuehrt.
+# In C:\mt5-copier wird nur der Ordner fernzugriff angefasst. Copier, Puls, Chrome-Profile, MT5, pc_id.json bleiben unberuehrt.
 # War Tailscale oder OpenSSH laut stand.json schon VOR setup-pc.ps1 da, bleibt es stehen (nur unsere Teile gehen weg).
 # Mit -Alles geht trotzdem alles weg.
 #
@@ -31,7 +31,7 @@ $TS_EXE    = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 $FW_GRUPPE = 'Prophos Fernzugriff'
 $AUFGABEN  = @('ProphosFernzugriffFoto', 'Prophos Foto')   # 'Prophos Foto' legt foto/foto-aufgabe.ps1 (S13) an; der erste Name stammt aus einem frueheren Entwurf von setup-pc.ps1
 $MARKER    = 'prophos-fernzugriff'
-$FOTOS_MT5 = 'C:\mt5-copier\fotos'
+$FERN_MT5  = 'C:\mt5-copier\fernzugriff'   # einziger Ordner in C:\mt5-copier, den setup-pc.ps1 anlegt (S9, 01.11.2026)
 $UTF8_OHNE_BOM = New-Object System.Text.UTF8Encoding($false)
 
 function Schritt([string]$text){ Write-Host "`n== $text" -ForegroundColor Cyan }
@@ -73,7 +73,7 @@ foreach($name in $AUFGABEN){
     Write-Host "Aufgabe $name entfernt"
   }
 }
-if(Test-Path -LiteralPath $FOTOS_MT5){ Remove-Item -LiteralPath $FOTOS_MT5 -Recurse -Force; Write-Host "$FOTOS_MT5 entfernt" }
+if(Test-Path -LiteralPath $FERN_MT5){ Remove-Item -LiteralPath $FERN_MT5 -Recurse -Force; Write-Host "$FERN_MT5 entfernt" }
 
 Schritt 'Schluessel des Macs'
 if(Test-Path -LiteralPath $AUTH_KEYS){

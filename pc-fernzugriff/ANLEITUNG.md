@@ -57,9 +57,8 @@ bash pc-fernzugriff/mac/pc.sh pc-7ftp5l -- hostname
 ```
 Erwartet: der PC antwortet mit seinem Namen. Danach ein Foto:
 ```bash
-bash pc-fernzugriff/foto/mac/foto.sh pc-7ftp5l <nutzer>@<tailnet-ip-des-pcs>
+bash pc-fernzugriff/foto/mac/foto.sh pc-7ftp5l
 ```
-Das zweite Argument ist nötig, weil `foto.sh` den Host sonst in `~/.ssh/config` sucht, wo die PCs mit Absicht nicht stehen (Stand 01.11.2026, Abgleich zwischen `pc.sh` und `foto.sh` steht noch aus).
 Erwartet: ein PNG am Mac, und **am PC bewegt sich nichts**: kein Fenster blitzt auf, Puls behält den Fokus. Das ist der wichtigste Punkt des Piloten, am Parsec-Bild beobachten.
 
 Dann die Sperre prüfen, vom Mac aus:
@@ -82,9 +81,11 @@ Am PC als Administrator, nicht über SSH:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\rueckbau-pc.ps1
 ```
-Nimmt weg: OpenSSH-Server, Schlüssel-Datei, Firewall-Regeln, Tailscale (abgemeldet + deinstalliert), Foto-Aufgabe, `C:\ProgramData\prophos-fernzugriff`, `C:\mt5-copier\fotos`. Alles andere in `C:\mt5-copier` bleibt, auch `C:\mt5-copier\fernzugriff` mit `foto.ps1` (Vorgabe: dort nur den Ordner `fotos` anfassen; bei Bedarf von Hand löschen). Danach in der Verwaltung → **Machines** den PC löschen.
+Nimmt weg: OpenSSH-Server, Schlüssel-Datei, Firewall-Regeln, Tailscale (abgemeldet + deinstalliert), Foto-Aufgabe, `C:\ProgramData\prophos-fernzugriff` und `C:\mt5-copier\fernzugriff` (der Ordner, den `setup-pc.ps1` anlegt, mit den Fotos darin). Alles andere in `C:\mt5-copier` bleibt. Danach in der Verwaltung → **Machines** den PC löschen und am Mac die Zeile des PCs aus `~/.prophos-fernzugriff/known_hosts` nehmen.
 
-**Sofort alle PCs sperren, ohne Rückbau:** Verwaltung → **Access controls** → die Zeile unter `"acls"` löschen, sodass `"acls": []` dasteht → Save. Ohne Regel erreicht niemand mehr etwas, auch der Mac nicht; die PCs laufen weiter. (Den Tag `tag:mac` am Mac zu entfernen geht nicht: ein getaggtes Gerät muss laut Tailscale-Doku mindestens einen Tag behalten.) Zurück: `acl.hujson` wieder komplett einsetzen.
+Nach Rückbau und erneutem `setup-pc.ps1` hat der PC einen neuen Host-Key. Der Mac meldet dann „REMOTE HOST IDENTIFICATION HAS CHANGED“: alte Zeile aus `known_hosts` löschen, neue vom Ende des Setups eintragen.
+
+**Sofort alle PCs sperren, ohne Rückbau:** Verwaltung → **Access controls** → beide Listen leeren, sodass `"acls": []` und `"tests": []` dasteht → Save. Nur `acls` leeren reicht nicht: der erste Test verlangt den Zugang des Macs und würde das Speichern blockieren. Ohne Regel erreicht niemand mehr etwas, auch der Mac nicht; die PCs laufen weiter. (Den Tag `tag:mac` am Mac zu entfernen geht nicht: ein getaggtes Gerät muss laut Tailscale-Doku mindestens einen Tag behalten.) Zurück: `acl.hujson` wieder komplett einsetzen.
 
 ---
 
