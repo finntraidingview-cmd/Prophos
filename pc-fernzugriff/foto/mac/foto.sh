@@ -6,7 +6,7 @@
 # ~/Prophos-Fernzugriff/quarantaene/<pc>/ holen und den lokalen Pfad als letzte Zeile ausgeben.
 # Nur fotografieren: kein Klick, keine Taste, kein Fokus. Keine Zugangsdaten hier — SSH-Schlüssel und Hosts kommen
 # aus derselben Datei wie bei mac/pc.sh (S11): ~/.prophos-fernzugriff/ssh_config, per `ssh -F`, Host = PC-Kennung.
-# Notweg: 2. Argument user@ip (dann ohne diese Datei, Schlüssel aus ~/.ssh wie üblich).
+# Notweg: 2. Argument user@ip (dann ohne diese Datei, Schlüssel + known_hosts aus ~/.ssh; unbekannter Host-Key = Abbruch mit Hinweis).
 #
 #   bash pc-fernzugriff/foto/mac/foto.sh pc-7ftp5l
 #   bash pc-fernzugriff/foto/mac/foto.sh pc-7ftp5l finn@100.64.1.23
@@ -28,12 +28,15 @@ fi
 
 # Ohne 2. Argument läuft alles über die gemeinsame ssh_config (-F); mit Notweg user@ip ohne sie.
 cfg=()
+notweg=0
 if [[ -z "${2:-}" ]]; then
     if [[ ! -r "$ssh_config" ]]; then
         echo "Fehlt: $ssh_config (legt mac/pc.sh an) — oder Notweg: $0 $pc user@ip" >&2
         exit 2
     fi
     cfg=(-F "$ssh_config")
+else
+    notweg=1
 fi
 
 lokal_dir="$HOME/Prophos-Fernzugriff/quarantaene/$pc"
@@ -47,10 +50,21 @@ rc=$?
 pfad="$(tr -d '\r' < "$roh" | grep -E '^[A-Za-z]:\\' | tail -n 1)"
 rm -f "$roh"
 if [[ -z "$pfad" ]]; then
-    echo "Kein Foto von $pc (ssh/foto.ps1 Exit $rc): $(tr -d '\r' < "$lokal_dir/.letzter-fehler.txt")" >&2
+    fehler="$(tr -d '\r' < "$lokal_dir/.letzter-fehler.txt")"
+    echo "Kein Foto von $pc (ssh/foto.ps1 Exit $rc): $fehler" >&2
+    # Notweg ohne ssh_config: BatchMode lehnt unbekannte Host-Keys still ab — klar sagen, was fehlt (Prüfer-Hinweis 01.11.2026).
+    if [[ $notweg -eq 1 && "$fehler" == *"Host key verification failed"* ]]; then
+        echo "Notweg $ziel: Host-Key unbekannt. Entweder über die ssh_config ($ssh_config, Host $pc) gehen oder den Host-Key" >&2
+        echo "des PCs vorher in ~/.ssh/known_hosts eintragen (ssh-keyscan). foto.sh nimmt nie von selbst einen Host-Key an." >&2
+    fi
     exit 3
 fi
 
+# Nur ein PNG aus dem Foto-Ordner holen — der Pfad kommt aus der stdout des PCs (Review 01.11.2026).
+if [[ "$pfad" != 'C:\mt5-copier\fernzugriff\fotos\'*.png || "$pfad" == *'..'* ]]; then
+    echo "Unerwarteter Pfad vom PC, nichts geholt: $pfad" >&2
+    exit 3
+fi
 # Windows-Pfad für scp: Backslashes → Schrägstriche (OpenSSH auf Windows versteht C:/…), damit keine Shell sie schluckt.
 pfad_scp="${pfad//\\//}"
 name="$(basename "$pfad_scp")"
@@ -62,5 +76,7 @@ if ! scp -q ${cfg[@]+"${cfg[@]}"} -o BatchMode=yes -o ConnectTimeout=10 "$ziel:$
     exit 4
 fi
 chmod 600 "$lokal"
+# Hinweise des PCs (z. B. „Rückfall PrintWindow“: Bild zeigt nur EIN Fenster) auf stderr durchreichen, nicht verschlucken.
+grep -a '^Hinweis:' "$lokal_dir/.letzter-fehler.txt" 2>/dev/null | tr -d '\r' >&2
 rm -f "$lokal_dir/.letzter-fehler.txt"
 echo "$lokal"
