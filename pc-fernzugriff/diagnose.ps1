@@ -41,7 +41,7 @@ function Maskieren([string]$s) {
     $s = [regex]::Replace($s, '[0-9a-f-]{36}\.(pc-[a-z0-9]{4,12}|host-[a-z0-9-]{1,30})\.[0-9a-f]{40}', '<PC-SCHLUESSEL>')   # code_token / feed_token
     $s = [regex]::Replace($s, 'eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}', '<JWT>')                    # Supabase/TSX-JWTs
     $s = [regex]::Replace($s, 'sb_(publishable|secret)_[A-Za-z0-9_-]{6,}', '<SB-KEY>')
-    $s = [regex]::Replace($s, '(?i)(password|passwort|pass|pwd|token|secret|apikey|api_key)\s*[=:]\s*\S+', '$1=<WEG>')
+    $s = [regex]::Replace($s, '(?i)(password|passwort|pass|pwd|token|secret|apikey|api_key)["'']?\s*[=:]\s*["'']?\S+', '$1=<WEG>')   # auch JSON-Form "token": "x" (S9 01.11.2026)
     $s = [regex]::Replace($s, '(?i)Bearer\s+\S+', 'Bearer <WEG>')
     return $s
 }
@@ -207,8 +207,9 @@ if ($readerOrdner) { foreach ($n in @('reader-server.py', 'tv_verbinder.py', 'tv
 
 Kopf 'Puls-Spur (augen_*.json, puls_*.json — kompakt)'
 foreach ($n in @('augen_regel.json', 'augen_stand.json', 'augen_letzt.json', 'puls_fenster.json', 'puls_tsx_bleiben.json')) { Z ('{0}: {1}' -f $n, (Kompakt (Join-Path $Ordner $n))) }
+# login_*.json nur als Metadaten (S9 01.11.2026): enthält den Broker-Benutzernamen, der soll nicht an den Mac. Kein Passwort drin, trotzdem sparsam.
 $loginSpuren = @(Get-ChildItem -LiteralPath $Ordner -Filter 'login_*.json' | Sort-Object LastWriteTime -Descending | Select-Object -First 2)
-foreach ($f in $loginSpuren) { Z ('{0}: {1}' -f $f.Name, (Kompakt $f.FullName 400)) }
+foreach ($f in $loginSpuren) { Z ('{0}: {1}' -f $f.Name, (DateiInfo $f.FullName)) }
 
 Kopf 'Echo-Status (status*.json je Master — kompakt)'
 $st = @(Get-ChildItem -LiteralPath $Ordner -Filter 'status*.json' | Sort-Object Name)
