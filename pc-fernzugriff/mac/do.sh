@@ -17,6 +17,7 @@ set -uo pipefail
 
 D=${PC_FERN_DIR:-$HOME/.prophos-fernzugriff}
 AGENT_PY=${DO_AUFTRAG_PY:-'C:\mt5-copier\fernzugriff\agent\auftrag.py'}
+PY_TXT='C:\mt5-copier\fernzugriff\python.txt'    # schreibt agent-aufgabe.ps1: echtes python.exe (nie der Store-Stub)
 WARTE=${DO_WARTE_S:-20}
 [[ $WARTE =~ ^[0-9]+$ ]] || { echo "DO_WARTE_S muss eine Zahl sein" >&2; exit 2; }
 fehler(){ echo "$1" >&2; exit "${2:-2}"; }
@@ -55,9 +56,25 @@ SCP=(scp -q -o ControlMaster=auto -o "ControlPath=$D/cm/%C" -o ControlPersist=10
 
 t0=$(python3 -c 'import time; print(time.time())')
 err="$lokal_dir/.do-fehler.txt"
+# Python-Pfad des PCs: einmal aus python.txt holen (agent-aufgabe.ps1 legt sie ab), dann lokal gemerkt → keine Extra-Verbindung mehr.
+# Prüfer S9 02.11.2026: „python“ ohne Pfad kann in der SSH-Sitzung der Microsoft-Store-Stub sein (Text statt JSON).
+py_merk="$D/python.$pc"
+holen_py(){
+  local p; p=$("${SSH[@]}" -n "$pc" "type $PY_TXT" 2>"$err" | tr -d '\r' | head -n1)
+  [[ $p == [A-Za-z]:\\*python.exe ]] || fehler "python.txt fehlt auf $pc oder ist kein python.exe-Pfad ('$p') → agent-aufgabe.ps1 auf dem PC ausführen. $(tr -d '\r' < "$err")" 3
+  printf '%s\n' "$p" > "$py_merk"; chmod 600 "$py_merk"
+}
+[ -s "$py_merk" ] || holen_py
+py=$(head -n1 "$py_merk")
 # auftrag.py druckt genau eine JSON-Zeile; alles andere (Fehler) geht auf stderr
-aus=$("${SSH[@]}" -n "$pc" "python \"$AGENT_PY\" $b64 $WARTE" 2>"$err" | tr -d '\r')
+aus=$("${SSH[@]}" -n "$pc" "\"$py\" \"$AGENT_PY\" $b64 $WARTE" 2>"$err" | tr -d '\r')
 rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ] && grep -qiE 'nicht gefunden|not recognized|cannot find|No such file' "$err"; then
+  # gemerkter Pfad stimmt nicht mehr (Python neu installiert): einmal frisch holen und nochmal
+  holen_py; py=$(head -n1 "$py_merk")
+  aus=$("${SSH[@]}" -n "$pc" "\"$py\" \"$AGENT_PY\" $b64 $WARTE" 2>"$err" | tr -d '\r')
+  rc=${PIPESTATUS[0]}
+fi
 if [ "$rc" -ne 0 ] || [ -z "$aus" ]; then
   fehler "Kein Ergebnis von $pc (Exit $rc): $(tr -d '\r' < "$err")" 3
 fi

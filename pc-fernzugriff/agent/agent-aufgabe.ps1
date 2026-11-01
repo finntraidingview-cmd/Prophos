@@ -23,6 +23,8 @@ if (-not $py -or $py -like '*\WindowsApps\*' -or -not (Test-Path $py)) {
 }
 $pyw = Join-Path (Split-Path $py) 'pythonw.exe'
 if (-not (Test-Path $pyw)) { throw "pythonw.exe fehlt neben $py" }
+# Für do.sh am Mac: denselben python.exe-Pfad ablegen (Prüfer S9: „python“ ohne Pfad könnte in der SSH-Sitzung der Store-Stub sein).
+[IO.File]::WriteAllText('C:\mt5-copier\fernzugriff\python.txt', $py, (New-Object Text.UTF8Encoding $false))
 
 $alt = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($alt) { Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500 }

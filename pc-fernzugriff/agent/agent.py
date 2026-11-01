@@ -24,6 +24,7 @@ import ctypes
 import importlib.util
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -34,11 +35,19 @@ AUFTRAEGE = os.path.join(WURZEL, "auftraege")
 ERGEBNISSE = os.path.join(WURZEL, "ergebnisse")
 LOG = os.path.join(WURZEL, "agent.log")
 PULS_LOCK = r"C:\mt5-copier\puls_handlauf.lock"
-# Handelsfenster: Titel-Teile wie Puls sie erkennt (order_bot.py: TradingView, TopstepX-Tab „topstepx“ bzw. „NQZ26 $… ▲“, Tradovate-
-# Login „login to your account“/„sign in to your account“/„anmeldung bei“, MetaTrader). Review 02.11.2026: TopstepX fehlte.
+# HANDELSFENSTER — dieselben Erkennungen wie Puls (order_bot.py), Prüfer S9 02.11.2026: der geladene TopstepX-Tab heißt nur
+# „NQZ26 $30,921.75 ▲ +0.50%“ (TSX_RX_TITEL: Kontrakt mit zweistelligem Jahr + „$“), ein TradingView-Chart „NQZ2026 30,787.00 ▲ +0.01%
+# Unnamed“ (Pfeil + Prozent, bzw. TV_RX_CHART_TITEL ohne Pfeil bei 0 %). Dazu die Wort-Liste (Tradovate-Login-Seiten wie in Puls).
 PULS_TITEL = ("tradingview", "metatrader", "tradovate", "topstepx", "login to your account", "sign in to your account", "anmeldung bei")
+TSX_RX_TITEL = re.compile(r"^\s*(?:\(\d+\)\s*)?[A-Z]{1,5}[FGHJKMNQUVXZ]\d{2}\s+\$\s?\d")
+TV_RX_CHART_TITEL = re.compile(r"^(\(\d+\)\s*)?[A-Za-z][A-Za-z0-9!:._-]{1,24}\s+[\d.,]+\s+(▲|▼)?\s*[−\-+]?[\d.,]+\s*%")
+# Außerdem JEDES Fenster des Puls-Chrome-Prozesses, egal welcher Tab vorn ist (ein TV-Tab im Hintergrund ist am Titel unsichtbar):
+# Puls merkt sein Fenster in C:\mt5-copier\puls_fenster.json (hwnd, pid, profil — order_bot.py _puls_merk_schreiben).
+PULS_FENSTER_JSON = r"C:\mt5-copier\puls_fenster.json"
 PULS_LOCK_FRISCH_S = 15 * 60               # wie Puls selbst (order_bot.py: Lock jünger als 15 min = Handlauf läuft); älter = liegengeblieben
+BROWSER_KLASSEN = ("Chrome_WidgetWin_1", "MozillaWindowClass")
 CHROME_KLASSE = "Chrome_WidgetWin_1"
+KOMBIS_SCHLIESSEN = ("ctrl+w", "ctrl+shift+w", "ctrl+f4", "alt+f4")   # schließen Tab/Fenster — in Chrome wie schliessen behandeln
 FREI_IMMER = ("foto", "fenster", "warte")  # auch bei gesetztem Riegel erlaubt (nur lesen / nichts tun)
 POLL_S = 0.2
 ERGEBNIS_TAGE = 1                          # alte Ergebnisse/PNGs weg
@@ -167,8 +176,51 @@ def vorne_titel():
     return fenster_titel(h) if h else ""
 
 
-def ist_handelsfenster(titel):
-    return any(p in str(titel or "").lower() for p in PULS_TITEL)
+def puls_fenster_merk():
+    """{hwnd, pid, profil} aus puls_fenster.json oder None. Jedes Mal frisch gelesen (Puls kann das Fenster wechseln)."""
+    try:
+        with open(PULS_FENSTER_JSON, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) and d.get("pid") else None
+    except Exception:
+        return None
+
+
+def ist_handelstitel(titel):
+    """REIN RECHNEND (testbar): Titel eines Handelsfensters nach den Puls-Regeln?"""
+    t = str(titel or "")
+    low = t.lower()
+    if any(p in low for p in PULS_TITEL):
+        return True
+    if TSX_RX_TITEL.match(t):
+        return True
+    if ("▲" in t or "▼" in t) and "%" in t:
+        return True
+    return bool(TV_RX_CHART_TITEL.match(t))
+
+
+def ist_handelsfenster(titel, klasse=None, pid=None, hwnd=None, merk=None):
+    """REIN RECHNEND (testbar): Handelsfenster = Handelstitel ODER ein Browser-Fenster des Puls-Chrome (pid/hwnd aus puls_fenster.json)."""
+    if ist_handelstitel(titel):
+        return True
+    m = puls_fenster_merk() if merk is None else merk
+    if not m:
+        return False
+    if hwnd and m.get("hwnd") and int(hwnd) == int(m["hwnd"]):
+        return True
+    if pid and m.get("pid") and int(pid) == int(m["pid"]) and (klasse is None or klasse in BROWSER_KLASSEN):
+        return True
+    return False
+
+
+def fenster_info(hwnd):
+    """(titel, klasse, pid) eines Fensters."""
+    from ctypes import wintypes as wt
+    u = u32()
+    k, pid = ctypes.create_unicode_buffer(128), wt.DWORD(0)
+    u.GetClassNameW(hwnd, k, 128)
+    u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return fenster_titel(hwnd), k.value, pid.value
 
 
 def riegel_grund():
@@ -179,30 +231,33 @@ def riegel_grund():
             return "Puls-Handlauf läuft (puls_handlauf.lock jünger als 15 min)"
     except OSError:
         pass
-    t = vorne_titel()
-    if ist_handelsfenster(t):
-        return "Handelsfenster vorn: %s" % t[:60]
+    h = u32().GetForegroundWindow()
+    if h:
+        t, k, pid = fenster_info(h)
+        if ist_handelsfenster(t, k, pid, int(h)):
+            return "Handelsfenster vorn: %s" % (t[:60] or "(%s, Puls-Chrome)" % k)
     return None
 
 
 def fenster_unter(x, y):
-    """Top-Level-Fenster unter dem Punkt (WindowFromPoint → GetAncestor GA_ROOT) → Titel oder ''."""
+    """Top-Level-Fenster unter dem Punkt (WindowFromPoint → GetAncestor GA_ROOT) → (hwnd, titel, klasse, pid) oder None."""
     from ctypes import wintypes as wt
     u = u32()
     h = u.WindowFromPoint(wt.POINT(int(x), int(y)))
     if not h:
-        return ""
+        return None
     wurzel = u.GetAncestor(h, 2) or h   # GA_ROOT
-    return fenster_titel(wurzel)
+    t, k, pid = fenster_info(wurzel)
+    return (int(wurzel), t, k, pid)
 
 
 def _ziel_pruefen(x, y, puls_ok):
     """Klick/Rad nie auf ein Handelsfenster, auch wenn es nicht vorn ist (Review 02.11.2026) — außer puls_ok."""
     if puls_ok:
         return
-    t = fenster_unter(x, y)
-    if ist_handelsfenster(t):
-        raise RuntimeError("Unter dem Zeiger liegt ein Handelsfenster: %s — kein Klick (puls_ok fehlt)" % t[:60])
+    f = fenster_unter(x, y)
+    if f and ist_handelsfenster(f[1], f[2], f[3], f[0]):
+        raise RuntimeError("Unter dem Zeiger liegt ein Handelsfenster: %s — kein Klick (puls_ok fehlt)" % (f[1][:60] or f[2]))
 
 
 # ── Eingabe (SendInput) ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -228,7 +283,16 @@ def _senden(eingaben):
     arr = (_INPUT * len(eingaben))(*eingaben)
     n = u32().SendInput(len(eingaben), ctypes.byref(arr), ctypes.sizeof(_INPUT))
     if n != len(eingaben):
-        raise RuntimeError("SendInput: %d von %d angenommen (Fehler %d)" % (n, len(eingaben), ctypes.get_last_error()))
+        fehler = ctypes.get_last_error()
+        # Teilannahme (Prüfer S9 02.11.2026): ein LEFTDOWN ohne LEFTUP bliebe stehen → Maustasten sicherheitshalber lösen
+        try:
+            if any(e.type == 0 for e in eingaben):
+                ups = [_maus_ereignis(0x0004), _maus_ereignis(0x0010)]   # LEFTUP, RIGHTUP
+                arr2 = (_INPUT * 2)(*ups)
+                u32().SendInput(2, ctypes.byref(arr2), ctypes.sizeof(_INPUT))
+        except Exception:
+            pass
+        raise RuntimeError("SendInput: %d von %d angenommen (Fehler %d)" % (n, len(eingaben), fehler))
 
 
 def _maus_ereignis(flags, daten=0):
@@ -357,12 +421,19 @@ def ak_klick(a, aid, nr, puls_ok=False):
     return {"x": int(a["x"]), "y": int(a["y"]), "art": a.get("art", "links")}
 
 
-def ak_tasten(a, *_):
+def ak_tasten(a, aid, nr, puls_ok=False):
     _fenster_pruefen(a, True)
     if a.get("text") is not None:
         text_tippen(a["text"], a.get("fenster"))
         return {"getippt": len(str(a["text"])), "fenster": vorne_titel()[:60]}
     if a.get("kombi"):
+        k = "+".join(t.strip().lower() for t in str(a["kombi"]).split("+") if t.strip())
+        if k in KOMBIS_SCHLIESSEN and not puls_ok:
+            # Prüfer S9: ctrl+w/alt+f4 in Chrome schließen Tab/Fenster — ein TV-Tab im selben Fenster kann so weg sein; gleiche Regel wie schliessen
+            h = u32().GetForegroundWindow()
+            t, kl, pid = fenster_info(h) if h else ("", "", 0)
+            if kl == CHROME_KLASSE or ist_handelsfenster(t, kl, pid, int(h) if h else None):
+                raise RuntimeError("%s in Chrome/Handelsfenster „%s“ nur mit puls_ok" % (k, t[:50]))
         kombi_druecken(a["kombi"])
         return {"kombi": a["kombi"], "fenster": vorne_titel()[:60]}
     raise ValueError("tasten braucht 'text' oder 'kombi'")
@@ -389,8 +460,8 @@ def ak_schliessen(a, aid, nr, puls_ok=False):
     f = fenster_finden(a.get("fenster"))
     if not f:
         raise RuntimeError("kein Fenster mit „%s“" % a.get("fenster"))
-    if ist_handelsfenster(f["titel"]):
-        raise RuntimeError("Handelsfenster werden nie geschlossen: %s" % f["titel"][:60])
+    if ist_handelsfenster(f["titel"], f["klasse"], f["pid"], f["hwnd"]):
+        raise RuntimeError("Handelsfenster werden nie geschlossen: %s" % (f["titel"][:60] or "(Puls-Chrome)"))
     if f["klasse"] == CHROME_KLASSE and not puls_ok:
         # Der Chrome-Titel ist nur der AKTIVE Tab; WM_CLOSE schließt das ganze Fenster samt TradingView-Hintergrund-Tab.
         raise RuntimeError("Chrome-Fenster „%s“ nicht per WM_CLOSE (schließt alle Tabs) — Tab mit tasten ctrl+w oder puls_ok" % f["titel"][:50])
@@ -433,7 +504,7 @@ def auftrag_ausfuehren(auftrag):
             grund = None if art in FREI_IMMER or puls_ok else riegel_grund()
             if grund:
                 raise RuntimeError("Riegel: %s — nur foto/fenster erlaubt (puls_ok fehlt)" % grund)
-            e.update(AKTIONEN[art](a, aid, nr, puls_ok) if art in ("klick", "scroll", "schliessen") else AKTIONEN[art](a, aid, nr))
+            e.update(AKTIONEN[art](a, aid, nr, puls_ok) if art in ("klick", "scroll", "schliessen", "tasten") else AKTIONEN[art](a, aid, nr))
             e["ok"] = True
             if e.get("bild"):
                 bilder.append(e["bild"])
