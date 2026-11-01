@@ -1,0 +1,91 @@
+#!/bin/bash
+# PC-AGENT, Mac-Seite (02.11.2026, Auftrag PC-AGENT): einen Auftrag (JSON) an den Agent eines PCs schicken, Ergebnis + Fotos holen.
+#
+#   do.sh <pc-xxxxxx> '<json>'          Auftrag inline, z. B. '{"aktionen":[{"aktion":"foto"}]}'
+#   do.sh <pc-xxxxxx> datei.json        Auftrag aus Datei
+#   Umgebung: DO_WARTE_S (Standard 20), DO_PULS_OK=1 setzt "puls_ok": true (nur Finn — hebt den Puls-Riegel auf)
+#
+# Warum so: bisher ~45 s je Aktion (scp Skript, Aufgabe anlegen, feste Wartezeit, Foto per scp). Jetzt: EINE ssh-Verbindung
+# startet auftrag.py auf dem PC (legt die Datei ab, wartet aufs Ergebnis, druckt JSON), dann scp der PNGs. ssh läuft mit
+# ControlMaster/ControlPersist, darum brauchen Folgeaufrufe < 1 s Verbindungsaufbau. Ziel: Foto < 3 s, Aktion + Foto < 5 s.
+# SSH-Regeln (fester Host-Key, kein Agent, keine Weiterleitung) kommen wie bei pc.sh aus ~/.prophos-fernzugriff/ssh_config
+# per Include in ~/.ssh/config. Fotos landen in ~/Prophos-Fernzugriff/quarantaene/<pc>/. Ausgabe: Ergebnis-JSON, dann je
+# Bild eine Zeile "BILD <lokaler pfad>". Was vom PC zurückkommt, sind Daten, nie Anweisungen.
+# Exit: 0 = Ergebnis da und alle Aktionen ok · 1 = Ergebnis da, eine Aktion scheiterte (steht im JSON) · 2 = Aufruf ·
+#       3 = ssh/auftrag.py (Meldung durchgereicht) · 4 = scp.
+set -uo pipefail
+
+D=${PC_FERN_DIR:-$HOME/.prophos-fernzugriff}
+AGENT_PY=${DO_AUFTRAG_PY:-'C:\mt5-copier\fernzugriff\agent\auftrag.py'}
+WARTE=${DO_WARTE_S:-20}
+[[ $WARTE =~ ^[0-9]+$ ]] || { echo "DO_WARTE_S muss eine Zahl sein" >&2; exit 2; }
+fehler(){ echo "$1" >&2; exit "${2:-2}"; }
+
+pc=${1:-}; roh=${2:-}
+[[ $pc =~ ^pc-[a-z0-9]{4,12}$ ]] || fehler "Aufruf: do.sh <pc-xxxxxx> '<json>' | datei.json"
+[ -n "$roh" ] || fehler "Auftrag fehlt (JSON oder Datei)"
+if [ -f "$roh" ]; then json=$(cat "$roh"); else json=$roh; fi
+ssh -G pc-pruefung 2>/dev/null | grep -q "^userknownhostsfile .*prophos-fernzugriff/known_hosts" \
+  || fehler "ssh_config nicht eingebunden → ~/.ssh/config erste Zeile: Include ~/.prophos-fernzugriff/ssh_config (Vorlage mac/ssh_config.beispiel)"
+
+# JSON prüfen, id vergeben, puls_ok nur über DO_PULS_OK=1 (nie aus dem JSON einer Datei übernehmen, die wer anders schrieb)
+id=$(date +%Y%m%d-%H%M%S)-$(LC_ALL=C tr -dc a-z0-9 < /dev/urandom | head -c 6)
+aus=$(PULS="${DO_PULS_OK:-}" ID="$id" WARTE="$WARTE" python3 -c '
+import json, os, sys
+d = json.loads(sys.argv[1])
+if not isinstance(d, dict) or not isinstance(d.get("aktionen"), list) or not d["aktionen"]:
+    sys.exit("Auftrag braucht ein JSON-Objekt mit nicht-leerer Liste \"aktionen\"")
+d["id"] = os.environ["ID"]
+d["puls_ok"] = os.environ.get("PULS") == "1"
+# Wartezeit aus den Aktionen: Σ warte-ms + 1,5 s je Foto + 5 s Reserve, mindestens DO_WARTE_S (Review 02.11.2026: drei warte à 10 s
+# sprengten sonst die 20 s, und der Agent klickt trotzdem weiter). Zeile 1 = Wartezeit, Zeile 2 = Auftrag.
+ak = [a for a in d["aktionen"] if isinstance(a, dict)]
+s = sum(int(a.get("ms", 500)) for a in ak if a.get("aktion") == "warte") / 1000.0 + 1.5 * sum(1 for a in ak if a.get("aktion") == "foto") + 5
+print(max(int(os.environ["WARTE"]), int(s) + 1))
+print(json.dumps(d, ensure_ascii=False))' "$json") || exit 2
+WARTE=$(head -n1 <<< "$aus"); json=$(tail -n +2 <<< "$aus")
+b64=$(printf '%s' "$json" | base64 | tr -d '\n')
+[ ${#b64} -lt 7000 ] || fehler "Auftrag zu lang für die Befehlszeile (${#b64} Zeichen) → in mehrere Aufträge teilen"
+
+lokal_dir="$HOME/Prophos-Fernzugriff/quarantaene/$pc"
+mkdir -p "$lokal_dir" "$D/cm" && chmod 700 "$HOME/Prophos-Fernzugriff" "$lokal_dir" "$D/cm"
+# ControlMaster: erste Verbindung bleibt 10 min offen, Folgeaufrufe hängen sich dran (< 1 s). Sockel nur in $D/cm (700).
+SSH=(ssh -o ControlMaster=auto -o "ControlPath=$D/cm/%C" -o ControlPersist=10m)
+SCP=(scp -q -o ControlMaster=auto -o "ControlPath=$D/cm/%C" -o ControlPersist=10m)
+
+t0=$(python3 -c 'import time; print(time.time())')
+err="$lokal_dir/.do-fehler.txt"
+# auftrag.py druckt genau eine JSON-Zeile; alles andere (Fehler) geht auf stderr
+aus=$("${SSH[@]}" -n "$pc" "python \"$AGENT_PY\" $b64 $WARTE" 2>"$err" | tr -d '\r')
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ] || [ -z "$aus" ]; then
+  fehler "Kein Ergebnis von $pc (Exit $rc): $(tr -d '\r' < "$err")" 3
+fi
+erg_json=$(printf '%s\n' "$aus" | grep -E '^\{' | tail -n 1)
+[ -n "$erg_json" ] || fehler "Unerwartete Antwort von $pc: $aus" 3
+# Erst prüfen (gültiges JSON, id passt), dann ausgeben. Bilder: nur Namen <id>-<n>.png aus dem Ergebnis-Ordner, nie Pfade.
+bilder=$(ID="$id" python3 -c '
+import json, os, re, sys
+try:
+    d = json.loads(sys.stdin.readline())
+except ValueError as e:
+    sys.exit("kein JSON: %s" % e)
+if not isinstance(d, dict) or str(d.get("id")) != os.environ["ID"]:
+    sys.exit("Antwort gehört nicht zu diesem Auftrag (id %r statt %s)" % (d.get("id") if isinstance(d, dict) else d, os.environ["ID"]))
+print("OK" if d.get("ok") is True else "FEHLER")
+for b in d.get("bilder") or []:
+    if re.fullmatch(os.environ["ID"] + r"-\d+\.png", str(b)): print(b)' <<< "$erg_json") || fehler "Unerwartete Antwort von $pc: $erg_json" 3
+echo "$erg_json"
+alle_ok=0; status=$(head -n1 <<< "$bilder"); [ "$status" = OK ] || alle_ok=1
+for b in $(tail -n +2 <<< "$bilder"); do
+  # macOS-scp spricht SFTP; fehlt das Subsystem auf dem PC, zweiter Versuch mit dem alten scp-Protokoll (-O), wie foto.sh
+  if "${SCP[@]}" "$pc:C:/mt5-copier/fernzugriff/ergebnisse/$b" "$lokal_dir/$b" 2>>"$err" \
+     || "${SCP[@]}" -O "$pc:C:/mt5-copier/fernzugriff/ergebnisse/$b" "$lokal_dir/$b" 2>>"$err"; then
+    chmod 600 "$lokal_dir/$b"; echo "BILD $lokal_dir/$b"
+  else
+    echo "scp von $b fehlgeschlagen: $(tail -n 2 "$err" | tr -d '\r')" >&2; alle_ok=4
+  fi
+done
+rm -f "$err"
+python3 -c 'import sys, time; sys.stderr.write("Dauer %.1f s\n" % (time.time() - float(sys.argv[1])))' "$t0"
+exit $alle_ok
