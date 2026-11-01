@@ -4,7 +4,8 @@
 #   - administrators_authorized_keys: unsere Zeile raus (Marker prophos-fernzugriff), fremde Zeilen bleiben; leer -> Datei weg
 #   - Firewall: alle Regeln der Gruppe 'Prophos Fernzugriff' weg
 #   - Tailscale: abgemeldet (Geraet verlaesst das Tailnet) und deinstalliert
-#   - Foto-Aufgabe 'Prophos Foto' (und der alte Name ProphosFernzugriffFoto) weg, dazu C:\ProgramData\prophos-fernzugriff
+#   - Aufgaben 'Prophos Foto' und 'Prophos Agent' (und der alte Name ProphosFernzugriffFoto) weg, laufender agent.py-Prozess beendet,
+#     dazu C:\ProgramData\prophos-fernzugriff
 #   - C:\mt5-copier\fernzugriff weg: den Ordner legt setup-pc.ps1 an (Kopie des Repo-Ordners), darin liegen auch die Fotos (foto\)
 #
 # Aufruf als Administrator, am PC selbst (Parsec oder vor Ort), wiederholbar:
@@ -30,7 +31,7 @@ $SSH_DIR   = Join-Path $env:ProgramData 'ssh'
 $AUTH_KEYS = Join-Path $SSH_DIR 'administrators_authorized_keys'
 $TS_EXE    = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 $FW_GRUPPE = 'Prophos Fernzugriff'
-$AUFGABEN  = @('ProphosFernzugriffFoto', 'Prophos Foto')   # 'Prophos Foto' legt foto/foto-aufgabe.ps1 (S13) an; der erste Name stammt aus einem frueheren Entwurf von setup-pc.ps1
+$AUFGABEN  = @('ProphosFernzugriffFoto', 'Prophos Foto', 'Prophos Agent')   # 'Prophos Foto' aus foto/foto-aufgabe.ps1, 'Prophos Agent' aus agent/agent-aufgabe.ps1 (beide S13); der erste Name aus einem frueheren Entwurf von setup-pc.ps1
 $MARKER    = 'prophos-fernzugriff'
 $FERN_MT5  = 'C:\mt5-copier\fernzugriff'   # einziger Ordner in C:\mt5-copier, den setup-pc.ps1 anlegt (S9, 01.11.2026)
 $UTF8_OHNE_BOM = New-Object System.Text.UTF8Encoding($false)
@@ -66,12 +67,23 @@ if(Test-Path -LiteralPath $STAND){
 $tsBehalten  = (-not $Alles) -and [bool](Feld $stand 'tailscale_war_da')
 $sshBehalten = (-not $Alles) -and [bool](Feld $stand 'openssh_war_da')
 
-Schritt 'Foto-Aufgabe'
+Schritt 'Foto- und Agent-Aufgabe'
 foreach($name in $AUFGABEN){
   if(Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue){
     Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $name -Confirm:$false
     Write-Host "Aufgabe $name entfernt"
+  }
+}
+# PC-Agent (S13, agent/agent-aufgabe.ps1): laeuft als pythonw.exe agent.py dauerhaft in der angemeldeten Sitzung. Die Aufgabe
+# ist weg, der Prozess kann trotzdem noch laufen und haette den Ordner unten offen. Nur den Prozess beenden, dessen
+# Kommandozeile agent.py im fernzugriff-Ordner traegt: andere pythonw (Copier, Puls) nie anfassen.
+$agentMuster = [regex]::Escape((Join-Path $FERN_MT5 'agent\agent.py'))
+foreach($proz in @(Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe'" -ErrorAction SilentlyContinue)){
+  $cmd = Feld $proz 'CommandLine'
+  if($cmd -and $cmd -match $agentMuster){
+    try { Stop-Process -Id $proz.ProcessId -Force -ErrorAction Stop; Write-Host "Agent-Prozess $($proz.ProcessId) beendet" }
+    catch { Write-Warning "Agent-Prozess $($proz.ProcessId) nicht beendet: $($_.Exception.Message)" }
   }
 }
 if(Test-Path -LiteralPath $FERN_MT5){ Remove-Item -LiteralPath $FERN_MT5 -Recurse -Force; Write-Host "$FERN_MT5 entfernt" }
