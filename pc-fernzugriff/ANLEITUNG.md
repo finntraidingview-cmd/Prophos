@@ -32,19 +32,23 @@ Dateien: `acl.hujson` (Tailscale-Regeln), `setup-pc.ps1` (Einrichtung je PC), `r
    ssh-keygen -t ed25519 -f ~/.ssh/prophos_fern_ed25519 -C prophos-fernzugriff
    ```
    Die Datei **ohne** `.pub` bleibt am Mac und kommt nirgends hin. Die `.pub` kommt in Schritt 3 auf jeden PC.
-4. `mac/ssh_config.beispiel` als `~/.prophos-fernzugriff/ssh_config` ablegen (Anleitung steht in der Datei). Nicht in `~/.ssh/config`: die PC-Regeln sollen nur für `pc.sh` gelten. Dazu `~/.prophos-fernzugriff/known_hosts` mit der Host-Key-Zeile, die `setup-pc.ps1` am Ende zeigt (vom Parsec-Bild abtippen, nicht übers Netz holen).
+4. `mac/ssh_config.beispiel` als `~/.prophos-fernzugriff/ssh_config` ablegen und in `~/.ssh/config` als **erste Zeile** eintragen:
+   ```
+   Include ~/.prophos-fernzugriff/ssh_config
+   ```
+   Die Regeln darin gelten nur für Hosts `pc-*`, sonst nichts am Mac. `pc.sh` prüft das Include vor jedem Verbinden und verweigert ohne. Je PC kommt ein Block `Host pc-xxxxxx` dazu, den `setup-pc.ps1` am Ende fertig ausdruckt, und die Host-Key-Zeile für `~/.prophos-fernzugriff/known_hosts` (beides vom Parsec-Bild abtippen, nicht übers Netz holen).
 5. **Prüfpunkt, bleibt so:** Systemeinstellungen → Allgemein → Teilen → **Entfernte Anmeldung AUS**. In der Tailscale-App **Tailscale SSH AUS** (Menüleiste → Tailscale-Symbol, kein Haken bei „Tailscale SSH“; er ist in der App-Store-Version gar nicht anwählbar). Der Mac ist Absender, nie Ziel.
 
 ## 3. Je PC (zuerst nur der Pilot-PC)
 
-1. Per Parsec auf den PC. `setup-pc.ps1` auf den PC bringen (z. B. in `C:\Users\<nutzer>\Downloads`).
+1. Per Parsec auf den PC. Den **kompletten Ordner** `pc-fernzugriff` aus dem Repo (mit Unterordner `foto\` und `mac\`) als eigenen Ordner auf den PC bringen, z. B. nach `C:\Users\<nutzer>\Desktop\pc-fernzugriff`. Nicht lose in Downloads: `setup-pc.ps1` kopiert den Ordner, in dem es liegt, nach `C:\mt5-copier\fernzugriff`, und `foto.sh` erwartet dort `foto\foto.ps1`.
 2. Start → „PowerShell“ tippen → **Als Administrator ausführen**.
-3. Im Ordner der Datei:
+3. In diesem Ordner:
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\setup-pc.ps1
    ```
 4. Wenn das Skript fragt: den Inhalt von `~/.ssh/prophos_fern_ed25519.pub` einfügen (eine Zeile, beginnt mit `ssh-ed25519`), danach den Auth-Key aus Schritt 1.3 (Eingabe unsichtbar).
-5. Das Skript nennt am Ende, was am Mac einzutragen ist. Das machen.
+5. Das Skript nennt am Ende, was am Mac einzutragen ist: den Block `Host pc-xxxxxx` für `~/.prophos-fernzugriff/ssh_config` (vor den Block `Host pc-*`) und die Zeile für `known_hosts`. Beides abtippen.
 6. Verwaltung → **Machines**: der PC steht da mit `tag:pc`, Name = PC-Kennung (z. B. `pc-7ftp5l`).
 
 Das Skript ist wiederholbar. Es läuft nur am PC selbst, nicht über SSH.
