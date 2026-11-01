@@ -1,0 +1,66 @@
+// PC-FERNZUGRIFF, Tailscale-Regeln (Finn 01.11.2026, gebaut von Slave 14)
+//
+// Zweck: Claude am Mac erreicht die Windows-PCs per SSH. Einbahnstraße: nur der Mac darf zu den PCs,
+// die PCs erreichen nichts, auch nicht den Mac und nicht sich gegenseitig.
+//
+// Einspielen: Tailscale-Verwaltung → Access controls → diesen Inhalt einsetzen → Save.
+// Tailscale lässt die "tests" unten beim Speichern mitlaufen und lehnt die Datei ab, wenn einer fehlschlägt.
+// Diese Datei ersetzt die Standard-Regel „jeder darf alles“ (src "*" → dst "*:*"). Die darf hier NICHT stehen.
+//
+// Warum das dicht ist (Tailscale-Doku „Access control lists (ACLs)“, tailscale.com/kb/1018/acls, Stand 29.10.2026;
+// Syntax-Referenz tailscale.com/docs/reference/syntax/policy-file, Stand 08.04.2026):
+//  - ACLs sind „deny by default“: ohne passende accept-Regel kommt kein Paket an. Es gibt nur "accept", kein "deny".
+//  - Regeln wirken in eine Richtung (src → dst). Antwortpakete einer angenommenen Verbindung lässt Tailscale durch,
+//    dafür braucht es keine Rückregel. Darum reicht die eine Zeile unten: PC → Mac gibt es nicht.
+//  - Jeder Knoten setzt die Regeln selbst durch (WireGuard-Filter am PC und am Mac), nicht ein zentraler Server.
+//  - Ohne Regel mit src tag:pc erreichen PCs weder den Mac noch einander, auch nicht Port 22.
+//
+// Wie ein PC beitritt (Doku „Auth keys“, tailscale.com/kb/1085/auth-keys, Stand 30.06.2026; „Tags“, tailscale.com/kb/1068/tags, Stand 04.12.2025):
+//  - Finn erzeugt je PC einen Auth-Key: Tags = tag:pc, Pre-approved, NICHT reusable, Ablauf 7 Tage.
+//    Nicht reusable: der Key gilt für genau einen Beitritt und ist danach verbrannt; ein gestohlener Key bringt nichts mehr.
+//    Pre-approved: das Gerät ist sofort freigeschaltet, falls Device approval an ist.
+//    Getaggt: das Gerät tritt als tag:pc bei, nicht als Finns Nutzer. Es erbt damit keine Nutzer-Rechte,
+//    und die Schlüssel-Ablaufzeit (Key expiry) ist bei getaggten Geräten aus, der PC fällt nicht nach 180 Tagen raus.
+//    7 Tage Ablauf des Auth-Keys betrifft nur den Beitritt; ein schon beigetretener PC bleibt drin.
+//  - setup-pc.ps1 ruft `tailscale up --auth-key=... --advertise-tags=tag:pc`. Der Key steht in keiner Datei.
+//
+// Warum ein PC den Tag nicht ändern kann: einen Tag darf nur setzen, wer in tagOwners als Besitzer steht
+// (oder Owner/Admin/Network admin der Verwaltung ist). tag:pc und tag:mac gehören nur autogroup:admin, also Finn.
+// Ein Gerät mit tag:pc besitzt keinen Tag, kann sich also weder tag:mac geben noch einen anderen PC umtaggen.
+// Die Tags selbst sind nur in der Verwaltung (Machines → Edit ACL tags) und über Admin-Auth-Keys zu vergeben.
+//
+// Not-Aus: die eine acls-Zeile löschen ("acls": []) und speichern, dann erreicht niemand mehr etwas. Den Tag tag:mac am Mac
+// zu entfernen geht nicht, ein getaggtes Gerät behält immer mindestens einen Tag (Doku „Tags“).
+//
+// Port 8770 = Panel (mt5-copier/panel.py). Es hört heute nur auf 127.0.0.1; über das Tailnet erreichbar wird es erst,
+// wenn es auf der Tailnet-Adresse lauscht. Die Freigabe steht trotzdem schon hier, damit die ACL dann nicht nochmal muss.
+{
+  // Wer einen Tag vergeben darf. Nur die Admins der Verwaltung, kein Nutzer-Konto und kein anderer Tag.
+  "tagOwners": {
+    "tag:mac": ["autogroup:admin"],
+    "tag:pc":  ["autogroup:admin"]
+  },
+
+  "acls": [
+    // Die einzige Regel: Finns Mac → alle PCs, nur SSH (22) und Panel (8770), nur TCP.
+    { "action": "accept", "proto": "tcp", "src": ["tag:mac"], "dst": ["tag:pc:22,8770"] }
+  ],
+
+  // Keine Tailscale-SSH-Regeln ("ssh": []): wir nutzen den OpenSSH-Server von Windows mit Finns ed25519-Schlüssel,
+  // nicht Tailscale SSH. So bleibt die Anmeldung am Schlüssel hängen, nicht am Tailscale-Konto.
+
+  // Prüfungen beim Speichern. Schlägt eine fehl, nimmt Tailscale die Datei nicht an.
+  "tests": [
+    {
+      // Der Mac kommt auf 22 und 8770, auf nichts anderes (kein RDP 3389, kein Flask 5000, kein Reader 8771).
+      "src": "tag:mac",
+      "accept": ["tag:pc:22", "tag:pc:8770"],
+      "deny":   ["tag:pc:3389", "tag:pc:5000", "tag:pc:8771", "tag:pc:445"]
+    },
+    {
+      // Ein PC erreicht keinen anderen PC und nicht den Mac, auch nicht auf 22.
+      "src": "tag:pc",
+      "deny": ["tag:pc:22", "tag:pc:8770", "tag:pc:3389", "tag:mac:22", "tag:mac:5000", "tag:mac:8770"]
+    }
+  ]
+}
