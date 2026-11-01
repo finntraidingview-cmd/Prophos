@@ -65,7 +65,9 @@ if($WindowsBenutzer){
   $konto = (Get-CimInstance Win32_ComputerSystem).UserName    # Get-CimInstance, nicht wmic: fehlt auf 24H2+ teils
   if(-not $konto){ throw 'Niemand an der Konsole angemeldet (RDP zaehlt nicht) -> -WindowsBenutzer <name> mitgeben' }
 }
-$kurz = ($konto -split '\\')[-1]
+# klein geschrieben (Pruefer S9, 01.11.2026): Win32-OpenSSH vergleicht AllowUsers in Kleinschreibung; mit 'Dubai' kaeme niemand
+# rein, und sshd -t merkt das nicht
+$kurz = (($konto -split '\\')[-1]).ToLowerInvariant()
 if($kurz -notmatch '^[A-Za-z0-9._][A-Za-z0-9._ -]*$'){ throw "Windows-Nutzer '$kurz' enthaelt Zeichen, die dieses Skript nicht abdeckt" }
 Write-Host "PC $PcId, Windows-Nutzer $konto"
 
@@ -268,8 +270,24 @@ if((Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd('\') -ieq $zielOrdner)
   Write-Host 'Skript laeuft schon aus dem Zielordner, nichts zu kopieren.'
 } else {
   if(-not (Test-Path -LiteralPath $zielOrdner)){ New-Item -ItemType Directory -Path $zielOrdner | Out-Null }
-  Copy-Item -Path (Join-Path $PSScriptRoot '*') -Destination $zielOrdner -Recurse -Force
-  Write-Host "Kopiert nach $zielOrdner"
+  # Nur die bekannten Dateien, nie '*' (Pruefer S9, 01.11.2026): liegt das Skript z. B. in Downloads, waere sonst der ganze Ordner
+  # (Installer, Kontoauszuege) nach fernzugriff gewandert. Fehlt ein Teil, klar sagen, aber weiterlaufen: die anderen Teile
+  # kommen aus eigenen Auftraegen und koennen beim Pilot noch fehlen.
+  $bekannt = @('setup-pc.ps1', 'rueckbau-pc.ps1', 'diagnose.ps1', 'foto')
+  $fehlt = @()
+  foreach($name in $bekannt){
+    $quelle = Join-Path $PSScriptRoot $name
+    if(-not (Test-Path -LiteralPath $quelle)){ $fehlt += $name; continue }
+    if(Test-Path -LiteralPath $quelle -PathType Container){
+      $zielUnter = Join-Path $zielOrdner $name
+      if(Test-Path -LiteralPath $zielUnter){ Remove-Item -LiteralPath $zielUnter -Recurse -Force }   # alter Stand komplett weg
+      Copy-Item -LiteralPath $quelle -Destination $zielUnter -Recurse -Force
+    } else {
+      Copy-Item -LiteralPath $quelle -Destination (Join-Path $zielOrdner $name) -Force
+    }
+  }
+  Write-Host "Kopiert nach ${zielOrdner}: $(($bekannt | Where-Object { $fehlt -notcontains $_ }) -join ', ')"
+  if($fehlt.Count){ Write-Warning "Nicht neben setup-pc.ps1 gefunden, daher nicht kopiert: $($fehlt -join ', ') -> den ganzen Ordner pc-fernzugriff aus dem Repo auf den PC legen und nochmal starten" }
 }
 
 # ---------- Fertig: was am Mac einzutragen ist ----------
