@@ -53877,7 +53877,8 @@
       richtung: _tpOrderDir,
       master_contracts: lots,
       master_tp: autoSltp ? tp : null,
-      master_symbol: symbol.toUpperCase() === stdSym.toUpperCase() ? null : symbol
+      // Winning Days behalten das Symbol (S9 02.11.2026): bei Apex ist NQ der Firmen-Standard, NULL nähme dem Recoverer den Chip, und ohne Symbol rechnet der Hedge mit der Tab-Pille (.1712)
+      master_symbol: (plan.winningDay !== true && symbol.toUpperCase() === stdSym.toUpperCase()) ? null : symbol
     }
     // Nur bei eingeschaltetem Schalter überschreiben: „Order pur" soll den
     // zuletzt eingetippten Stop nicht stillschweigend wegwerfen — ob mit oder
@@ -68290,6 +68291,8 @@
   // Recoverer fährt 1 NQ (Finn 02.11.2026), der Frontmonat bleibt: „MNQZ6“ → „NQZ6“. Normale Pläne unverändert.
   // Menge: instr_kt gehört zu instr (1 NQ), kt ist die ältere Vorgabe der Regel (sonst Firmen-Spanne)
   function wdRecovererKt(zy){ return !zy ? null : (zy.instr === 'nq' && Number(zy.instr_kt) >= 1) ? Number(zy.instr_kt) : Number(zy.kt) >= 1 ? Number(zy.kt) : null }
+  // NQ nur mit bewiesener Menge (S9 02.11.2026: k.kt ist in den meisten Tageszeilen leer, die Firmen-Spanne machte daraus NQ + 3 Kontrakte, TP 1.499 $ = 25 Pkt, ~21 Lot). REIN RECHNEND
+  const wdNqOhneMenge = (instr, menge) => instr === 'nq' && !(Number(menge) >= 1)
   const wdRecovererSymbol = (symbol, instr) => instr === 'nq' ? String(symbol || '').replace(/^M?NQ/i, 'NQ') : symbol
   /* RECOVERER-ALTPLAN (02.11.2026, Finn 05:34, Mike 150k PAAPEX…0001, Plan a5e60a7f von 20:11 UTC, vor dem Einspielen der Regel 01:13 UTC): der unbestätigte
    * Plan trug 376 $ / 175 €, Popup und Regel sagten 1.499 $ / 450 €. REIN RECHNEND: noch nicht freigegebener Farmer-Plan mit Hedge, keine Hand-Werte, keine
@@ -68812,6 +68815,7 @@
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
     // 1 NQ (Finn 02.11.2026): mit extra (Rückfall, Selbstheilung) gehören Symbol und Menge zusammen zur Tageszeile, sonst entstünden 3 NQ; der Altplan-Weg stellt danach um. Ohne extra die Regel
     const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null) : (zyA && zyA.instr === 'nq' ? 'nq' : null)
+    if(wdNqOhneMenge(instrA, extra ? extra.master_contracts : wdRecovererKt(zyA))) return { fehler: 'Recoverer: Menge für NQ nicht bekannt, kein Plan angelegt' }
     const symbol = wdRecovererSymbol((vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : ''), instrA)
     const row = tpVorplanPlanRow(acc, slave, z, wdRecovererKt(zyA) || wdKontrakteFuer(acc.firm, vp, acc), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
@@ -69038,7 +69042,8 @@
               const passtH = handH || (!zyH && !recK) || (zyH && recK && Math.abs((Number(k.tp) || 0) - Number(zyH.ziel)) <= 0.5)
               if(acc && !passtH){ console.warn('[wd] Selbstheilung ausgelassen: Recoverer passt nicht zum Plan', k.plan_id); wdRecovererAlarm(k.id, wdZyklusUngeklaert(k) ? 'stand' : 'passt_nicht', 0) }
               else if(acc){
-                const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt, instr: (k.wuerfel && k.wuerfel.instr) || null })
+                const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt || (k.wuerfel && k.wuerfel.kt), instr: (k.wuerfel && k.wuerfel.instr) || null })
+                if(p && p.fehler){ console.warn('[wd] Selbstheilung', k.plan_id, p.fehler); wdRecovererAlarm(k.id, 'passt_nicht', 0) }
                 if(p && p.plan){ plan = p.plan; if(String(p.plan.id) !== String(k.plan_id)) set(k, 'plan_id', String(p.plan.id)); set(k, 'hinweis', ''); console.warn('[wd] Plan neu angelegt (Selbstheilung)', k.plan_id) }
               }
             }

@@ -200,7 +200,8 @@ var acc = { wdTp: null, wdSl: null, maxRisikoTrade: 0 }, zy = { ziel: 1499, hedg
 function mit(o, p){ var r = {}, k; for(k in o) r[k] = o[k]; for(k in p) r[k] = p[k]; return r }
 var ZN = mit(zy, {instr: 'nq', instr_kt: 1}), P2 = mit(plan, {masterTp: 1499, masterRisk: 1499, slaveRisk: 449.93, hedgeEur: 450.2, multiplier: 0.7062}), K2 = {slave: 449.93, wuerfel: {tp: 1499, kt: 3, quelle: 'recoverer'}};
 var U0 = wdRecovererAltplanUpd, U = function(p, c, y, zz, an, dd, kk){ return U0(p, c, y, zz, an, dd, kk === undefined ? K : kk) }, a = U(plan, acc, zy, z, true, []);
-return JSON.stringify({ a: a,
+var hK = {kt: null, wuerfel: {kt: 1, instr: 'nq'}}, hLeer = {kt: null, wuerfel: {instr: 'nq'}}, hMenge = function(k){ return k.kt || (k.wuerfel && k.wuerfel.kt) };
+return JSON.stringify({ a: a, hk: hMenge(hK), nqSperre: [wdNqOhneMenge('nq', hMenge(hLeer)), wdNqOhneMenge('nq', 0), wdNqOhneMenge('nq', hMenge(hK)), wdNqOhneMenge(null, undefined)],
   freigabe: U(mit(plan, {hedgeFreigabeAt: 'x'}), acc, zy, z, true, []), auto: U(mit(plan, {autoBestaetigtAt: 'x'}), acc, zy, z, true, []),
   hand: U(mit(plan, {handWerteAt: 'x'}), acc, zy, z, true, []), vorgabe: U(plan, mit(acc, {wdTp: 500}), zy, z, true, []),
   gestartet: U(mit(plan, {startUmGestartetAt: 'x'}), acc, zy, z, true, []), keinwd: U(mit(plan, {winningDay: false}), acc, zy, z, true, []),
@@ -230,6 +231,7 @@ return JSON.stringify({ a: a,
             for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handslave", "handhedge", "ohnemult", "schonrec", "ohnewuerfel", "keink"):
                 check(r[fall] is None, f"Altplan: {fall} → nichts ändern")
             check(r["kt"]["upd"]["master_contracts"] == 4, "Altplan: Kontrakte aus der Regel, wenn sie welche vorgibt")
+            check(r["hk"] == 1 and r["nqSperre"] == [True, True, False, False], f"1 NQ: k.kt leer → Menge 1 aus dem Würfel; ohne Menge kein NQ-Plan, MNQ unberührt ({r['hk']}, {r['nqSperre']})")
             n2 = r["nq2"]
             check(n2 and n2["upd"]["master_symbol"] == "NQZ6" and n2["upd"]["master_contracts"] == 1 and n2["upd"]["master_tp"] == 1499 and n2["instr"] == "nq",
                   f"1 NQ: Mike schon auf 1.499 $ / 3 MNQ wird einmal umgestellt ({n2 and n2['upd']})")
@@ -262,6 +264,8 @@ return JSON.stringify({ a: a,
           "Markierung: nur Apex-WD auf NQ ist Recoverer")
     q_h = html
     q_an = q_h[q_h.index("  async function wdPlanAnlegen("):q_h.index("  async function wdAbgleich(")]
+    check("master_contracts: k.kt || (k.wuerfel && k.wuerfel.kt), instr:" in q_ab + q_h and "if(wdNqOhneMenge(instrA, extra ? extra.master_contracts : wdRecovererKt(zyA))) return { fehler:" in q_an, "1 NQ: Heilung holt die Menge aus dem Würfel, ohne Menge kein Plan")
+    check("(plan.winningDay !== true && symbol.toUpperCase() === stdSym.toUpperCase()) ? null : symbol" in q_h, "1 NQ: Popup leert das Symbol bei Winning Days nicht")
     check("const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null)" in q_an, "1 NQ: Selbstheilung nimmt Symbol und Menge zusammen aus der Tageszeile, nie 3 NQ")
     check("recoverer: !!window._planIstRecoverer?.(" in q_h and "if(p && typeof p.recoverer === 'boolean') return p.recoverer" in q_h, "Markierung: Läuft/Wartet-Karten prüfen das echte Symbol, nicht den NQ-Rückfall")
     check(q_h.count("window._planRecovererChipHtml?.(") >= 5 and "_planRecovererChipHtml = planRecovererChipHtml" in q_h, "Markierung: Chip in Zu bestätigen, Winning-Days-Übersicht und beiden Plan-Zeilen")
