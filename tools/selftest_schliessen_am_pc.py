@@ -141,6 +141,33 @@ uhr[0] += 2.1
 ns["_scharf_runde"](stand(), uhr[0])
 check(len(auftraege()) == 2, "ohne Quittung nach 2 s ein zweiter close-Auftrag (Copier antwortet schon_zu, wenn zu)")
 
+# APEX gekürzt (Chris pc-c19p2l a6f5c630 …0007, 02.11.2026 19:20): Reader „PAAPEX668794000000“ passt auf 7 Konten der ID → nur mit Puls-Beleg
+APX = ["PAAPEX668794000000" + str(i) for i in range(1, 8)]
+def apex_lauf(beleg_res):
+    if os.path.exists(ns["SCHARF_PFAD"]):
+        os.remove(ns["SCHARF_PFAD"])
+    ns["scharf_setzen"]({"ext_id": "PAAPEX6687940000007", "wurzel": "MNQ", "nachbarn": APX}, "a6f5c630", 900, READER)
+    ns["puls_beleg_merken"](beleg_res)
+    uhr[0] += 5
+    lauf([lambda: stand(konto="PAAPEX668794000000", pos=POS)] * 2)
+    t0 = uhr[0]
+    t = lauf([lambda: stand(konto="PAAPEX668794000000")] * 15)
+    return None if t is None else t - t0
+d = apex_lauf({"ok": True, "konto_aktiv": "PAAPEX6687940000007"})
+check(d is not None and d <= 1.0, f"Apex gekürzt + Puls-Beleg „…0007“ (letzter Lauf bewiesen) → Close {d:.2f} s nach der ersten flachen Lesung" if d is not None else "Apex mit Beleg → Close")
+check(apex_lauf({"ok": True, "konto_aktiv": "PAAPEX6687940000005"}) is None, "Beleg auf ein anderes Apex-Konto → nie schließen")
+check(apex_lauf({"ok": True, "konto_aktiv": "PAAPEX668794000000…"}) is None and apex_lauf({"ok": False, "konto_aktiv": "PAAPEX6687940000007"}) is None,
+      "Beleg nur gekürzt bzw. Lauf nicht ok → leer → nie")
+check(apex_lauf({}) is None, "danach ein TradingView-Lauf ohne Beleg (Konto unbekannt) → nie")
+check(SRC.count("puls_beleg_merken(res)   # PULS-BELEG") == 5, "Beleg nach jedem TV-Lauf: tv-konto, tv-lesen, tv-konten-liste, tv-close, tv-order")
+# NACHHOLEN
+k = SRC.index('if u.path == "/api/hedge-scharf":')
+w = SRC[k:SRC.index('if u.path == "/api/hedge-solo":', k)]
+check("scharf_copier_tickets()" in w and "ticket not in offen" in w and '"schon": True' in w and "scharf_setzen(" in w,
+      "Panel /api/hedge-scharf: nur mit offenem Ticket im Copier, schon scharf → nichts")
+check("async function hedgeScharfNachholen(_tp)" in HTML and "await hedgeScharfNachholen(_tp)" in HTML and "window.mtcApi('hedge-scharf'" in HTML,
+      "Tab meldet offene TV-Hedges dieses PCs nach (einmal je Ticket, Fehler → 60 s)")
+
 # S9: nur Puls-Chrome, Flach nur mit Leer-Beweis
 frisch_scharf(700)
 uhr[0] += 5

@@ -29808,6 +29808,38 @@
     return Object.assign({ sl_punkte: pkt, sl_level_nq: lvl, sl_art: 'liquidation', liq_balance: liq, sl_usd_hedge: usd, liq_quelle: st.quelle, liq_balance_start: st.balance }, dllFelder)
   }
   window._hedgeLiqLevel = hedgeLiqLevel   // Test-Haken
+  // SCHARF SCHALTEN (02.11.2026): Konto, Wurzel und Konten der ID für die Schließ-Wache im Panel — nur TradingView-Trades (tvv2). REIN bis auf accounts.
+  function hedgeScharfDaten(plan){
+    if(!plan || plan.route !== 'tvv2') return null
+    try{
+      const acc = (accounts || []).find(a => a && String(a.id) === String(plan.masterAccountId))
+      const ext = acc ? String(acc.externalId || '').trim() : ''
+      if(!ext) return null
+      const sym = (plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || plan.masterSymbol || ''
+      const wurzel = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
+      return { ext_id: ext, wurzel, nachbarn: (accounts || []).filter(a => a && !a._fremd).map(a => a.externalId).filter(Boolean) }
+    }catch(_){ return null }
+  }
+  // SCHARF NACHHOLEN (02.11.2026, Eingang nach Chris a6f5c630): ein offener TV-Hedge dieses PCs, den das Panel nicht kennt (Open auf altem Build, Panel neu …),
+  // wird einmal je Tab und Ticket nachgemeldet; das Panel nimmt ihn nur, wenn das Ticket im Copier offen ist. Fehler → nach 60 s erneut.
+  const _hedgeScharfNach = new Map()   // `${plan}|${ticket}` → true (erledigt) | Zeitpunkt des letzten Versuchs
+  async function hedgeScharfNachholen(_tp){
+    if(typeof window.mtcApi !== 'function') return
+    const pc = (typeof hedgePcId === 'function') ? hedgePcId() : ''
+    for(const p of (_tp || [])){
+      const hx = p && p.mt5Baseline && p.mt5Baseline.hedge
+      if(!p || p.status !== 'open' || p.route !== 'tvv2' || !hx || hx.status !== 'offen' || !hx.ticket || (hx.pc && pc && hx.pc !== pc)) continue
+      const key = String(p.id) + '|' + String(hx.ticket), alt = _hedgeScharfNach.get(key)
+      if(alt === true || (alt && Date.now() - alt < 60000)) continue
+      const sch = hedgeScharfDaten(p); if(!sch){ _hedgeScharfNach.set(key, true); continue }
+      _hedgeScharfNach.set(key, Date.now())
+      try{
+        const r = await window.mtcApi('hedge-scharf', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: String(p.id), ticket: Number(hx.ticket), scharf: sch }), timeoutMs: 8000 })
+        if(r && (r.ok || r.code === 'nicht_offen')) _hedgeScharfNach.set(key, true)
+      }catch(_){}
+    }
+  }
   async function hedgeSoloOeffnenKern(plan, r){
     // Regeln höchstens 2 s abwarten (08.10.2026): direkt nach dem Neuladen rechnete das Open schliesst_bei_nq/Puffer/Notfall mit Standard-
     // werten. Das Open selbst nie blockieren — lieber Standard als kein Hedge; der Level-Abgleich zieht Level und Schließ-Abstand danach nach
@@ -29924,17 +29956,7 @@
     const pufferOpen = (levelVorlaeufig && slPunkte > 0) ? Math.max(hedgePuffer(), Math.round(slPunkte * 0.2 * 100) / 100) : hedgePuffer()
     // SCHARF SCHALTEN (02.11.2026, Finn „Zurück zu den Basics“, Vorfall Simon 88b28130): bei TradingView-Trades (tvv2) gibt der Tab dem Panel Konto, Wurzel und
     // die Konten der ID mit — das Panel merkt sie auf Platte und schließt den Hedge selbst, sobald die Position im Konto weg ist, auch ohne diesen Tab
-    const scharfOpen = (() => {
-      if(plan.route !== 'tvv2') return null
-      try{
-        const acc = (accounts || []).find(a => a && String(a.id) === String(plan.masterAccountId))
-        const ext = acc ? String(acc.externalId || '').trim() : ''
-        if(!ext) return null
-        const sym = (plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || plan.masterSymbol || ''
-        const wurzel = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
-        return { ext_id: ext, wurzel, nachbarn: (accounts || []).filter(a => a && !a._fremd).map(a => a.externalId).filter(Boolean) }
-      }catch(_){ return null }
-    })()
+    const scharfOpen = hedgeScharfDaten(plan)
     const openBody = JSON.stringify(Object.assign({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: pufferOpen, notfall_faktor: notfallOpen, symbol: 'NAS100', plan_id: String(plan.id) }, scharfOpen ? { scharf: scharfOpen } : {}))
     // WIEDERHOLUNG (25.09.2026): bei sicher nicht gesendeten Fehlern (HEDGE_SICHER) bis 90 s nach dem ersten Versuch alle 10–15 s
     // (Streuung) erneut — Status solange 'wartet'. Vor jedem neuen Versuch: steht schon eine Position mit der Kennung dieses Plans
@@ -33524,6 +33546,7 @@
       // verlorene Hedge sein) — Status 'unklar' mit Ticket, Mensch prüft. Liste nicht lesbar → nichts tun.
       if(amPc){
         try{ await hedgeRueckkehrWache(_tp) }catch(e){ console.warn('[hedge] Rückkehr-Wache', e) }   // .1560: falsches Reader-Ende heilen
+        try{ await hedgeScharfNachholen(_tp) }catch(e){ console.warn('[hedge] Scharf nachholen', e) }   // 02.11.2026: Schließ-Wache im Panel
         const liste0 = hedgeSoloListeFrisch()
         // Copier b30d580: plan_id (aus dem open-Auftrag) oder plan8 (aus dem Kommentar 'PXsolo:<plan8>')
         const kennung = q => (q && q.plan_id) ? String(q.plan_id).slice(0, 8) : (q && q.plan8) ? String(q.plan8).slice(0, 8) : null

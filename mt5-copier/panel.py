@@ -2176,16 +2176,32 @@ def scharf_konto_bezug(text, ext):
     return ""
 
 
-def scharf_konto_sicher(text, ext, nachbarn):
-    """REIN RECHNEND (testbar): steht der Reader sicher im scharfen Konto? Voller Text immer; gekürzt/angeklebt nur, wenn kein anderes Konto der ID
-    (nachbarn = External IDs) im selben Bezug steht (Apex-Falle: alle beginnen gleich → nie sicher, dann schließt nur der Tab)."""
+# PULS-BELEG (02.11.2026, Chris pc-c19p2l a6f5c630 Apex …0007: Reader „PAAPEX668794000000“ passt auf alle 7 Apex-Konten der ID — das Panel war scharf, traute
+# dem gekürzten Text aber nie, der Tab schloss nach 31 s): „Puls weiß, in welches Konto er klickt“ (Finn). Jeder TradingView-Lauf von Puls (tv-konto, tv-lesen,
+# tv-close, tv-konten-liste, tv-order) setzt den Beleg neu — volle Kennung aus res.konto_aktiv (order_bot meldet sie nur nach bewiesenem Listen-Klick, .1752),
+# sonst leer. Ein gekürzter, mehrdeutiger Text gilt als das scharfe Konto nur, wenn der LETZTE Puls-Lauf genau dieses Konto bewiesen hat.
+_PULS_BELEG = {"text": "", "at": 0.0}
+
+
+def puls_beleg_merken(res):
+    """Nach jedem TradingView-Lauf von Puls: Beleg = volle Kennung des bewiesen gewählten Kontos, sonst leer (der Lauf kann gewechselt haben)."""
+    k = str((res or {}).get("konto_aktiv") or "").strip() if isinstance(res, dict) and res.get("ok") else ""
+    _PULS_BELEG.update(text=k if (k and "…" not in k and len(re.sub(r"[^A-Za-z0-9]", "", k)) >= 10) else "", at=time.time())
+
+
+def scharf_konto_sicher(text, ext, nachbarn, beleg=None):
+    """REIN RECHNEND (testbar): steht der Reader sicher im scharfen Konto? Voller Text immer; gekürzt/angeklebt, wenn kein anderes Konto der ID
+    (nachbarn = External IDs) im selben Bezug steht, oder — Apex-Falle, alle beginnen gleich — wenn der letzte Puls-Lauf genau dieses Konto bewiesen gewählt
+    hat (beleg = volle Kennung aus PULS-BELEG). Sonst nie (dann schließt nur der Tab)."""
     b = scharf_konto_bezug(text, ext)
     if b == "ja":
         return True
     if not b:
         return False
     eid = str(ext or "").strip().upper()
-    return not any(scharf_konto_bezug(text, n) for n in (nachbarn or ()) if str(n or "").strip().upper() not in ("", eid))
+    if not any(scharf_konto_bezug(text, n) for n in (nachbarn or ()) if str(n or "").strip().upper() not in ("", eid)):
+        return True
+    return bool(beleg) and scharf_konto_bezug(beleg, ext) == "ja"
 
 
 def _scharf_version_ok(st):
@@ -2210,12 +2226,12 @@ def _scharf_wurzel_da(st, wurzel):
     return False
 
 
-def scharf_entscheid(e, st, jetzt):
+def scharf_entscheid(e, st, jetzt, beleg=None):
     """REIN RECHNEND (testbar): ein scharfer Eintrag + Reader-Stand → (zu: bool, e_neu, grund). e: {at, ext_id, wurzel, nachbarn, gesehen,
     flach_seit, flach_ts[]}. Jede unsichere Lesung setzt die Flach-Strecke zurück, ein Kontowechsel auch „gesehen“ (muss im Konto neu gesehen werden)."""
     e = dict(e)
     st = st if isinstance(st, dict) else {}
-    konto_ok = scharf_konto_sicher(st.get("konto"), e.get("ext_id"), e.get("nachbarn"))
+    konto_ok = scharf_konto_sicher(st.get("konto"), e.get("ext_id"), e.get("nachbarn"), beleg)
     alter = st.get("alter_s")
     # S9 02.11.2026: nur der Positions-Tab im Puls-Chrome zählt (ein TradingView im normalen Chrome mit demselben Konto nie)
     frisch = (st.get("an") is not False and st.get("positionen_ok") is True and not st.get("blind") and isinstance(alter, (int, float))
@@ -2370,7 +2386,7 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
             continue
         if st is None:
             continue
-        zu, e2, grund = scharf_entscheid(e, st, jetzt)
+        zu, e2, grund = scharf_entscheid(e, st, jetzt, _PULS_BELEG.get("text") or None)
         if zu:
             e2.update(status="schliesst", cmd_id=_scharf_close_senden(e2), zu_at=jetzt, grund_zu=grund)
             n += 1
@@ -5360,6 +5376,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "msg": f"TV-Konto-Pruefung fehlgeschlagen: {e}"}
             finally:
                 TV_ORDER_LOCK.release()
+            puls_beleg_merken(res)   # PULS-BELEG (02.11.2026): welches Konto Puls zuletzt bewiesen gewählt hat (Schließ-Wache, gekürzte Apex-Texte)
             print(f"[panel] TV-Konto {cmd['firma']} @{cmd['ext_id']} -> {res.get('ok')} "
                   f"[{res.get('zustand')}] ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
@@ -5557,6 +5574,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "code": "bot_fehlt", "msg": f"TV-Lesen fehlgeschlagen: {e}"}
             finally:
                 TV_ORDER_LOCK.release()
+            puls_beleg_merken(res)   # PULS-BELEG (02.11.2026): welches Konto Puls zuletzt bewiesen gewählt hat (Schließ-Wache, gekürzte Apex-Texte)
             http = 200
             if not res.get("ok"):
                 http = {"konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
@@ -5626,6 +5644,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "code": "bot_fehlt", "msg": f"TV-Konten lesen fehlgeschlagen: {e}"}
             finally:
                 TV_ORDER_LOCK.release()
+            puls_beleg_merken(res)   # PULS-BELEG (02.11.2026): welches Konto Puls zuletzt bewiesen gewählt hat (Schließ-Wache, gekürzte Apex-Texte)
             print(f"[panel] tv-konten-liste {konto}: " + (f"{len(res.get('konten') or [])} Name(n)" if res.get("ok")
                   else f"FEHLER {res.get('code') or '?'} — {str(res.get('msg') or '')[:140]}"), flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
@@ -5759,6 +5778,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg": f"TV-Schliessen fehlgeschlagen: {e}"}
             finally:
                 TV_ORDER_LOCK.release()
+            puls_beleg_merken(res)   # PULS-BELEG (02.11.2026): welches Konto Puls zuletzt bewiesen gewählt hat (Schließ-Wache, gekürzte Apex-Texte)
             http = 200
             if not res.get("ok"):
                 http = {"konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
@@ -5886,6 +5906,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "retry_ok": False, "msg": f"TV-Order-Start fehlgeschlagen: {e}"}
             finally:
                 TV_ORDER_LOCK.release()
+            puls_beleg_merken(res)   # PULS-BELEG (02.11.2026): welches Konto Puls zuletzt bewiesen gewählt hat (Schließ-Wache, gekürzte Apex-Texte)
             print(f"[panel] TV-Order {cmd['richtung']} {cmd['volumen']} {cmd['symbol']} "
                   f"@{cmd['ext_id']} -> {res.get('ok')} ({res.get('schritt')}: {res.get('msg')})",
                   flush=True)
@@ -5926,6 +5947,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, json.dumps({"ok": False, "msg": f"code_token.txt nicht schreibbar: {e}"}))
             print("[panel] PC-Schluessel fuer die Code-Quelle abgelegt.", flush=True)
             return self._send(200, json.dumps({"ok": True}))
+        if u.path == "/api/hedge-scharf":
+            # SCHARF NACHHOLEN (02.11.2026, Eingang: Hedge offen, aber nie scharf — Tab beim Open noch auf altem Build, Panel neu gestartet …): der PC-Tab
+            # meldet je offenem TV-Hedge dieses PCs einmal {plan_id, ticket, scharf}. Nur wenn das Ticket im Copier offen ist; schon scharf → nichts.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                ticket = int(body.get("ticket") or 0)
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            if any(int(x.get("ticket") or 0) == ticket for x in scharf_laden()):
+                return self._send(200, json.dumps({"ok": True, "schon": True}))
+            offen = scharf_copier_tickets()
+            if offen is None or ticket not in offen:
+                return self._send(200, json.dumps({"ok": False, "code": "nicht_offen" if offen is not None else "copier_alt",
+                                                   "msg": "Ticket im Copier nicht offen" if offen is not None else "Copier-Liste nicht lesbar"}))
+            try:
+                rs = _scharf_stand_lesen()
+            except Exception:
+                rs = None
+            ok = scharf_setzen(body.get("scharf"), str(body.get("plan_id") or "")[:64], ticket, rs)
+            return self._send(200, json.dumps({"ok": bool(ok), "code": "" if ok else "nicht_scharf"}))
+
         if u.path == "/api/hedge-solo":
             # Solo-Hedge auf dem Fusion-Hedge-Terminal (24.09.2026 abends, Winning Days
             # gegenhedgen ohne Duplikum — Finn: „direkt nach der Puls-Order auf Fusion
