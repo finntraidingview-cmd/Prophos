@@ -33,17 +33,28 @@ def zeile(anfang):
 
 i = HTML.index("      if(s.diffEur != null){")
 block = HTML[i:HTML.index("\n      }\n", i) + 8]
-code = "\n".join(["const window = {}", js_funktion("hedgeHandSchneller"), js_funktion("hedgeGrundEcht"), zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
+code = "\n".join(["const window = {}", "function tpWdSlavePpl(){ return 0.85 }", "function hedgePplFuer(s){ return /^MNQ/.test(s) ? 2 : /^NQ/.test(s) ? 20 : 0 }", js_funktion("hedgeHandSchneller"), js_funktion("hedgeGrundEcht"), zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
                   "function zeileOver(s){ const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); let over = ''\n" + block + "\n return over }"])
 
 
-def T(slave_pl, master_tp, master_pl, **h):
-    return {"slave_pl": slave_pl, "master_tp": master_tp, "master_pl": master_pl, "hedge": dict({"status": "geschlossen"}, **h)}
+def T(slave_pl, master_tp, master_pl, kt=None, root=None, firma="Tradeify", typ="winning_days", **h):
+    return {"slave_pl": slave_pl, "master_tp": master_tp, "master_pl": master_pl, "kt": kt, "symbol_root": root, "konto": {"firma": firma}, "konto_typ": typ, "hedge": dict({"status": "geschlossen"}, **h)}
+
+
+def A(slave_pl, master_pl, grund="sl_feed", lots=0.71, **k):   # Apex-Challenge 2 NQ, hedge.eur = Kaufpreis 45 €
+    return T(slave_pl, 6040, master_pl, kt=2, root="NQ", firma="Apex Trader", typ="challenge", grund=grund, eur=45, lots=lots, pl=slave_pl, **k)
 
 
 # Prüfwerte Finn 02.11.2026 (alle TP, echte Pläne): Satz = eur ÷ master_tp, Plan = −Satz × master_pl
 faelle = {
     "0431": (T(-118.53, 278, 271.80, grund="master_ende_reader", eur=111.06, pl=-118.53), -9.95),
+    "0431_lots": (T(-118.53, 278, 271.80, kt=3, root="MNQ", grund="master_ende_reader", eur=111.06, lots=2.82, pl=-118.53), -9.95),
+    # Apex-Challenges (Finn 02.11.2026): Satz 0,71 × 0,85 ÷ 40 = 0,01509 €/$
+    "apex_0044": (A(19.42, -1526.20), -3.61),
+    "apex_0010": (A(18.98, -1546.20), -4.35),
+    "apex_0015": (A(20.30, -1576.20), -3.48),   # Finns −3,49 rechnet mit dem gerundeten Satz 0,01509; genau 0,0150875 × 1.576,20 = 23,78
+    "apex_0009": (A(21.14, -1500.00, grund="level_sl"), -1.49),   # Finns −1,50 ebenso, genau 22,63
+    "apex_ohne_lots": (A(19.42, -1526.20, lots=None), None),
     "3058": (T(-132.92, 275, 270.05, grund="level_tp", eur=127.78, pl=-132.92), -7.44),
     "2833": (T(-132.31, 276, 272.20, grund="master_ende_reader", eur=124.34, pl=-132.31), -9.68),
     "3656": (T(-139.80, 275, 267.30, grund="level_tp", eur=125.06, pl=-139.8), -18.24),
@@ -83,7 +94,7 @@ for k in ("0431", "3058", "2833", "3656", "1889", "tradeify_500"):
 soll("SL-Seite …3058: grün „Undershoot +34,99 €“", "is-guenstig" in e["sl_3058"]["html"] and "Undershoot +34,99 €" in e["sl_3058"]["html"])
 soll("Tradeify 250 $ → genau 100 €: neutral „Overshoot ±0,00 €“", "is-" not in e["tradeify"]["html"] and "Overshoot ±0,00 €" in e["tradeify"]["html"])
 soll("ohne Punkte gerechnet", "punkte" not in code.split("function swAuswertung")[1].split("const diffEur")[0].split("*/")[-1])
-for k in ("hand", "nie_da", "master_ende", "ohne_master_pl", "ohne_master_tp", "ohne_eur"):
+for k in ("hand", "nie_da", "master_ende", "ohne_master_pl", "ohne_master_tp", "ohne_eur", "apex_ohne_lots"):
     soll(f"{k}: keine Zahl", e[k]["html"] == "")
 soll("keine Punkte, keine % in der Zeile", all("Pkt" not in e[k]["html"] and "%" not in e[k]["html"] for k in faelle))
 soll("alte Felder weg", not any(x in HTML for x in ("s.wirkEur", "s.wirkPkt", "s.wirkPct", "overPkt", "overEur", "overPct")))

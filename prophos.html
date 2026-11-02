@@ -38389,11 +38389,15 @@
     }
     /* OVERSHOOT GEGEN PLAN (Finn 30.10.2026 13:5x: „Was hätte ich verlieren oder machen sollen? Was habe ich verloren oder gemacht? Davon die Differenz"). diffEur = echter Fusion-P&L (slave_pl = Summe aller Versuche,
      * sonst hedge.pl) − geplanter Fusion-P&L. OHNE PUNKTE (Finn 02.11.2026: „Tradeify auf 250 $ soll genau 100 € machen. Wenn wir am Ende 500 $ machen, sollten wir genau 200 € verlieren. Ganz simpel, nichts mit Punkten."):
-     * Satz = hedge.eur ÷ master_tp (€ je $ am Plan), Plan = −Satz × echter master_pl, für TP- und SL-Seite gleich. …0431: 111,06 ÷ 278 × 271,80 = −108,58, echt −118,53 → −9,95 €. Keine Zahl ohne master_pl oder master_tp
+     * Satz = € je Master-$ (s. unten, aus den echten Lots), Plan = −Satz × echter master_pl, für TP- und SL-Seite gleich. …0431: 111,06 ÷ 278 × 271,80 = −108,58, echt −118,53 → −9,95 €. Keine Zahl ohne master_pl oder master_tp
      * und bei Schluss von Hand/Hand schneller/„Master nie da"/master_ende. − = schlechter = Overshoot, + = besser = Undershoot. */
     const ist = n(t.slave_pl) ?? n(h.pl), mTp = n(t.master_tp)
     const mPl = n(t.master_pl && typeof t.master_pl === 'object' ? t.master_pl.wert : t.master_pl)   // /admin/live-trades liefert {wert, at, quelle} (Stopp S9 02.11.2026)
-    const satz = (eur && mTp > 0) ? Math.abs(eur) / mTp : null
+    // SATZ AUS DEN ECHTEN LOTS (Finn 02.11.2026): bei Apex-Challenges ist hedge.eur der Kaufpreis (45 €), nicht der Fusion-Verlust am TP, eur ÷ TP ergab dort 0,00745 statt 0,0151 €/$.
+    // Satz = Lots × €/Pkt und Lot (wie die Lots-Formel) ÷ (Kontrakte × $/Pkt des Master-Symbols). WD …0431: 2,82 × 0,85 ÷ 6 = 0,3995 = 111,06 ÷ 278. Ohne Lots/Kontrakte eur ÷ TP, nur nicht bei Apex-Challenges
+    const lots = n(h.lots), kt = n(t.kt ?? t.kontrakte), ppl = hedgePplFuer(t.symbol_root || h.symbol_nq || '')
+    const apexChallenge = /apex/i.test(String((t.konto && t.konto.firma) || t.master_firm || '')) && t.konto_typ === 'challenge'
+    const satz = (lots > 0 && kt > 0 && ppl > 0) ? lots * tpWdSlavePpl() / (kt * ppl) : (!apexChallenge && eur && mTp > 0) ? Math.abs(eur) / mTp : null
     const mitPlan = !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende'
     const planEur = (mitPlan && satz != null && mPl != null) ? Math.round(-satz * mPl * 100) / 100 : null
     const diffEur = (planEur != null && ist != null) ? Math.round((ist - planEur) * 100) / 100 : null

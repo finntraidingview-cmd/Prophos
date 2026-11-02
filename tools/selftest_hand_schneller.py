@@ -38,7 +38,7 @@ function hedgeKontoPasst(t, id){ return String(t).split(/[^A-Z0-9]+/).includes(i
 function tvSymbolWurzel(s){ return /^MNQ/.test(String(s)) ? 'MNQ' : /^NQ/.test(String(s)) ? 'NQ' : '' }
 """
 code = "\n".join([UMGEBUNG, js_funktion("kontoTextBezug"), js_funktion("hedgeHandSchneller"), js_funktion("hedgeGrundEcht"), js_funktion("hedgeGrundText"),
-                  zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
+                  "function tpWdSlavePpl(){ return 0.85 }", "function hedgePplFuer(s){ return /^MNQ/.test(s) ? 2 : /^NQ/.test(s) ? 20 : 0 }", zeile("  const SW_WEGE ="), zeile("  const SW_WEG_TXT ="), zeile("  const SW_WEG_VON ="), js_funktion("swAuswertung"),
                   js_funktion("hedgeExitFillWahl")])
 # echter Hedge f35ba6ae (gekürzt auf die Felder der Rechnung)
 CHRIS = {"status": "geschlossen", "grund": "hand", "grund_copier": "hand", "schon_zu": True, "richtung": "sell", "sl": 28888.2, "tp": 28668.92,
