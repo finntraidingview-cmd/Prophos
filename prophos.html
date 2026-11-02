@@ -29367,6 +29367,9 @@
     const tp = Number(plan && plan.masterTp); return tp > 0 ? { risk: tp, quelle: 'tp' } : null
   }
   function hedgeMultAusRisiko(plan, kt, ppl){
+    // Apex mit Hedge (02.11.2026, Prüfer S17): der Server setzt multiplier aus dem Satz, er ist die Wahrheit. slave_risk ist numeric(10,2): bei kleinem
+    // Polster riebe die Neurechnung die Lots hoch (150k, 2 NQ, Plan 1,84 Lot: Polster 0,5 $ → 1,88; 0,14 $ → 3,36)
+    if(typeof tpIstApexHedge === 'function' && tpIstApexHedge(plan) && Number(plan.multiplier) > 0) return null
     const sr = Number(plan && plan.slaveRisk); if(!(sr > 0 && kt > 0 && ppl > 0)) return null
     const q = hedgeRisikoMaster(plan); if(!q) return null
     const pkt = q.risk / (ppl * kt), lots = sr / (0.85 * pkt), mult = lots / kt
@@ -53652,7 +53655,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1970'
+  const OS_TAB_BUILD = '2026-09-22.1971'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

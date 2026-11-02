@@ -40,7 +40,7 @@ def wd_num(x):
 
 ns = {"_wd_num": wd_num, "_wt_now_iso": lambda: "2026-10-30T10:00:00+00:00"}
 exec("\n".join([konst(k) for k in ("EH_STANDARD", "EH_MARGE_RESERVE", "AH_STANDARD")]
-               + [block(f) for f in ("eh_param", "eh_hedge", "eh_marge", "ah_param", "ah_master_ppl", "ah_vorschau",
+               + [block(f) for f in ("eh_param", "eh_hedge", "eh_marge", "ah_param", "ah_master_ppl", "ah_werte", "ah_vorschau",
                                      "plan_ist_wd", "plan_ist_apex_hedge", "plan_wd_zaehlt", "puls_heim_big_trades", "puls_heim_wd_trades", "puls_heim_apex_trades",
                                      "ah_dll_balance", "_lt_liq_balance")]), ns)
 
@@ -80,6 +80,19 @@ offen = dict(ap, id="a", status="open", mt5_baseline={"apex_hedge": {"status": "
 soll("Heim-Wache: Apex nicht als Big Trade (2.000 $) …", ns["puls_heim_big_trades"]([offen], "pc-1") == [])
 soll("… nicht mehr als Winning Day (eigene Stufe, 02.11.2026) …", ns["puls_heim_wd_trades"]([offen], "pc-1") == [])
 soll("… sondern in der Apex-Stufe", ns["puls_heim_apex_trades"]([offen], "pc-1") == [offen])
+# Satz und Boden nicht aus dem gerundeten Wert (02.11.2026, Moritz 150k Polster 12 $, Simon 100k Polster 1.506 $)
+w150 = ns["ah_werte"]({"satz_eur_pro_usd": 0.0375, "wert_eur": 0, "polster_usd": 12.1})
+soll("150k, Wert auf 0 € gerundet: Satz bleibt, Wert 0,45 €", w150 == (0.0375, 0.45, 12.1))
+h150, _g = ns["eh_hedge"](0.0375, 2, 20, 0.85, 12.1, 1.0, 0.01)
+soll("150k: 2 NQ → 1,76 Lot wie im Konstrukt", h150 and h150["lots"] == 1.76)
+v150 = ns["ah_vorschau"](h150, 0.45, 12.1, round(146012.1 - 12.1, 2), 13028)
+soll("150k Vorschau: Blow 0,45 €, TP −488,55 €, Boden genau 146.000", v150["blow_eur"] == 0.45 and v150["tp_eur"] == -488.55 and v150["liq_balance"] == 146000.0)
+w100 = ns["ah_werte"]({"satz_eur_pro_usd": 0.015, "wert_eur": 23, "polster_usd": 1505.7})
+soll("100k: Polster direkt, Boden genau 97.000 statt 96.972", w100 == (0.015, 22.59, 1505.7) and round(98505.7 - w100[2], 2) == 97000.0)
+soll("ohne Polster oder Satz: kein Wert", ns["ah_werte"]({"satz_eur_pro_usd": 0.015, "polster_usd": 0}) is None and ns["ah_werte"]({"polster_usd": 12.1}) is None and ns["ah_werte"](None) is None)
+soll("Wert auf 0,00 € gerundet: kein Wert, Code polster greift", ns["ah_werte"]({"satz_eur_pro_usd": 0.015, "polster_usd": 0.3}) is None and ns["ah_werte"]({"satz_eur_pro_usd": 0.015, "polster_usd": 0.34}) == (0.015, 0.01, 0.34))
+soll("Tab: Apex-Lots bleiben beim Server-Multiplikator (slave_risk numeric(10,2))", "tpIstApexHedge(plan) && Number(plan.multiplier) > 0) return null" in HTML)
+soll("Polster 0: eigener Code und Text", '("polster", f"kein Polster: Balance' in APP and '"polster_genau": round(polster, 2)' in APP)
 soll("Tab: Sperr-Grund Apex-Challenge wartet kurz wie der WD (Text aus puls_heim_pruefen)",
      "/^\\W*(Winning Day|Apex-Challenge)\\b/" in HTML and "(Big Trade|Winning Day|Apex-Challenge) .*(vor dem TP" in HTML and 'art_name} {name} ({art}) ist' in APP)
 

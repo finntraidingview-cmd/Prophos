@@ -22473,7 +22473,7 @@ def ap_kontowert(typ, balance, p, kauf_eur=None, peak=None):
                 return {"wert": round(v), "satz": round(v / dd, 4), "polster": round(dd), "groesse": groesse, "kauf": round(kauf),
                         "wie": f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × (1+Etappe/{dd:,.0f}) bis +{g:,.0f} $".replace(",", ".")}
             polster = max(0.0, dd + g)
-            return {"wert": round(wert * polster / dd), "satz": round(wert / dd, 4), "polster": round(polster), "groesse": groesse,
+            return {"wert": round(wert * polster / dd), "satz": round(wert / dd, 4), "polster": round(polster), "polster_genau": round(polster, 2), "groesse": groesse,
                     "kauf": round(kauf), "wie": f"{'Kauf' if ph == phasen[0] else 'Phasenstart'} {wert:.0f} × Polster/{dd:,.0f}".replace(",", ".")}
         if kette and ph == "challenge":
             wert = wert / k0["chance"]                # bestanden: Kauf ÷ Pass-Chance (fairer Markt, frisch 25 % → 4 × Kauf)
@@ -23102,7 +23102,7 @@ def ap_kontowert_konto(a, bal, firmen, kauf_eur=None, archiviert=False, peak=Non
     echt = bool(kauf_eur) and round(float(kauf_eur)) == kv["kauf"]
     return {"wert_eur": kv["wert"], "stufe": ap_kw_stufe(typ, bal, p, kv), "satz_eur_pro_usd": kv["satz"],
             "quelle": "kauf_echt" if echt else "kernwerte", "hinweis": None, "wie": kv["wie"], "kauf_eur": kv["kauf"],
-            "balance_usd": bal}
+            "balance_usd": bal, "polster_usd": kv.get("polster_genau", kv.get("polster"))}
 
 
 def admin_build_kontowerte(sicht=None):
@@ -28142,6 +28142,19 @@ def ah_zurueck():
     return n
 
 
+def ah_werte(kw):
+    """REIN RECHNEND (testbar): (satz €/$, wert €, polster $) aus der Kontowert-Zeile | None. Polster kommt direkt aus ap_kontowert, der Wert ist
+    Satz × Polster. Bis 02.11.2026 Polster = gerundeter Wert ÷ Satz: Moritz 150k, Polster 12 $ → Wert 0,45 € → gerundet 0 € → „kein Satz";
+    Simon 100k, Polster 1.506 $ → 23 € ÷ 0,015 → 1.533 $ → Boden 96.972 statt 97.000, der Hedge wäre 28 $ hinter dem Boden geschlossen worden."""
+    satz, polster = _wd_num((kw or {}).get("satz_eur_pro_usd")), _wd_num((kw or {}).get("polster_usd"))
+    if not satz or satz <= 0 or not polster or polster <= 0:
+        return None
+    wert = round(satz * polster, 2)
+    if wert <= 0:                                      # Polster unter ~0,33 $: hedge_eur 0 ergäbe Marke „mit" ohne Hedge, der Riegel hielte den Plan ohne Grund (Prüfer S17)
+        return None
+    return satz, wert, float(polster)
+
+
 def ah_vorschau(h, wert, polster, liq, master_tp):
     """REIN RECHNEND (testbar): Vorschau für den Bestätigen-Block (Admin → Challenge-Planer, S4): Hedge-Lots, Kontowert €, was der Fusion-Hedge
     beim Blow bringt (+slave_risk ≈ Kontowert ÷ netto_faktor) und was er am Master-TP kostet (−TP $ × q)."""
@@ -28215,10 +28228,12 @@ def ah_tick(jetzt=None, force=False):
         if bal is None:
             return None, None, None, None, None, ("balance", "Balance des Kontos nicht lesbar (Kontowert und Boden für den Hedge)")
         kw = ap_kontowert_konto(a, float(bal), firmen, kauf.get(str(a["id"])))
-        satz, wert = _wd_num(kw.get("satz_eur_pro_usd")), _wd_num(kw.get("wert_eur"))
-        if not satz or satz <= 0 or not wert or wert <= 0:
+        werte = ah_werte(kw)
+        if not werte:
+            if _wd_num(kw.get("satz_eur_pro_usd")):
+                return None, None, None, bal, None, ("polster", f"kein Polster: Balance {_ap_de(float(bal), 0)} $ steht am Boden — Konto prüfen, Balance neu lesen")
             return None, None, None, bal, None, ("groesse", "kein Kontowert-Satz (Kaufpreis ÷ Max DD)" + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""))
-        polster = wert / satz                              # $ bis zum Boden (Apex statisch: Max DD + Gewinn über der Größe)
+        satz, wert, polster = werte                        # polster: $ bis zum Boden (Apex statisch: Max DD + Gewinn über der Größe)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
         h, grund = eh_hedge(satz, p.get("master_contracts"), ah_master_ppl(p), sppl, polster, par["netto_faktor"], par["min_lot"])
         if grund:
@@ -28232,7 +28247,8 @@ def ah_tick(jetzt=None, force=False):
         h, wert, polster, _bal, liq, fehl = rechnen(p, a)
         vs = ah_vorschau(h, wert, polster, liq, p.get("master_tp")) if h else {"fehler": fehl[1], "code": fehl[0], "at": _wt_now_iso()}
         alt = base.get("hedge_vorschau") if isinstance(base.get("hedge_vorschau"), dict) else {}
-        if base.get("hedge_art") == "apex" and (alt.get("lots") == vs.get("lots")) and (alt.get("code") == vs.get("code")):
+        if base.get("hedge_art") == "apex" and (alt.get("lots") == vs.get("lots")) and (alt.get("code") == vs.get("code")) \
+                and alt.get("polster_usd") == vs.get("polster_usd"):   # Boden und Blow-€ stimmen auch bei gleichen Lots (02.11.2026, s. ah_werte)
             continue
         try:
             neu = sb_update("trade_plans", _ah_guard(p), {"mt5_baseline": dict(base, hedge_art="apex", hedge_vorschau=vs)})
@@ -28288,7 +28304,7 @@ def ah_tick(jetzt=None, force=False):
         upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": round(polster, 2), "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
                "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Apex mit Hedge (WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                         f"(Kontowert {wert:.0f} € ÷ Polster {polster:.0f} $ ÷ {par['netto_faktor']}) · Hedge zu am Boden {liq:.0f} $").replace(".", ",")).strip()}
+                         f"(Kontowert {wert:.2f} € ÷ Polster {polster:.0f} $ ÷ {par['netto_faktor']}) · Hedge zu am Boden {liq:.0f} $").replace(".", ",")).strip()}
         g = _ah_guard(p)
         g["hedge_freigabe_at"] = "not.is.null"
         try:
