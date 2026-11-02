@@ -6,6 +6,7 @@
 Aufruf: python3 tools/selftest_hedge_schneller.py"""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -163,7 +164,7 @@ check(e["lesung_offen"] == "offen", "Wache: Position da → offen")
 check(all(e[k] == "unklar" for k in ("lesung_blind", "lesung_alt", "lesung_fremd", "lesung_feedtab")), "Wache: blind, alt, fremdes Konto, Feed-Tab → unklar")
 
 check("hedgeToastSchluss(p, kontoPlan, wz, richtung, tf).catch(" in tick and "await hedgeToastSchluss" not in tick, "Takt wartet nicht auf den Schluss")
-check(tick.index("readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst") < tick.index("hedgeToastBeweis(st.fills") < tick.index("hedgeMasterWegEntscheid({"), "Konto-Riegel zuerst, dann Toast, Flach-Weg dahinter")
+check(tick.index("!hedgeReaderEinfachKonto(st.konto, kontoPlan)") < tick.index("hedgeToastBeweis(st.fills") < tick.index("hedgeReaderEinfachEntscheid({"), "Konto-Riegel zuerst, dann Toast, Flach-Weg dahinter")
 check("hedgeToastAn() && richtung && p.status === 'open' && readerKontoPasst(st.konto, kontoPlan, st) && kontoMs >= 2000" in tick, "Toast nur im Plan-Konto, nie gekürzt, Konto ≥ 2 s stabil")
 check("pulsMs: _pulsAktivAt" in tick and "offen: _hedgeToastMenge.get(pid)" in tick, "Puls-Zeit und größte gesehene Menge gehen in den Beweis")
 check("!HEDGE_REVIEW_SPAET[h.grund] || hedgeToastOhneFlach(h)" in HTML and "(HEDGE_REVIEW_SPAET[h.grund] && !hedgeToastOhneFlach(h))" in HTML, "60-s-Nachzügler sperrt, Beweis-Weg übernimmt")
@@ -180,7 +181,7 @@ check(s.index("hedgeSoloSchliessen") < s.index("hedgeToastWache") < s.index("hed
 check("if(urteil === 'flach'){ await hedgeMasterWegAusfuehren(tradePlans.find" in s and "if(!(rs && rs.ok)){" in s, "Plan-Ende nur nach flach, frische Zeile; Close gescheitert → Flach-Weg")
 check("hedgeMasterWegStempeln(p, 'fill', f.at)" in s, "Quelle fill, Master-Ende ab Fill-Zeit")
 check("PULS_CHROME ? 80 + Math.random() * 40 : 250 + Math.random() * 250" in US, "Toast-Takt im Puls-Chrome ~0,1 s, sonst unverändert")
-check(US.count("0.10.7") >= 3 and "// @version      0.10.7" in US and "const VERSION    = '0.10.7'" in US and "const EINGEBAUT = '0.10.7'" in US, "Userscript-Version überall 0.10.7")
+check(re.search(r"const VERSION    = '([\d.]+)'", US).group(1) == re.search(r"const EINGEBAUT = '([\d.]+)'", US).group(1) == re.search(r"// @version +([\d.]+)", US).group(1), "Userscript-Version überall gleich")
 
 sys.path.insert(0, HIER)
 import selftest_alarme

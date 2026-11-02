@@ -141,7 +141,7 @@ soll("Hand-F5: gekürzt, Stand ≤ 2 s → bleibt; voller Text unberührt", _a["
 soll("1-s-Wächter: Konto-Ruhe und Leer-Zeit fragen kurzStandAlt", "const standAlt = kurzStandAlt(kontoKurz, st)" in HTML and "if(kontoFrisch && kontoPasst && !unterwegs && !standAlt){" in HTML and "if(listeLeer && !unterwegs && !standAlt){" in HTML)
 
 # Verdrahtung beider Ende-Pfade
-soll("Schnell-Wächter: nur Sperre hält auf", "if(kurzEndeSperrt(kurz)){ kurzEndeMelden(p, kurz); continue }" in HTML)
+soll("Schnell-Wächter: Balance-Beweis hält nichts mehr auf (Schluss einfach 02.11.2026)", "if(kurzEndeSperrt(kurz)){ kurzEndeMelden(p, kurz); continue }" not in HTML and "hedgeReaderEinfachEntscheid({" in HTML)
 soll("1-s-Wächter: nur Sperre hält auf", "if(kurzEndeSperrt(kurz)) kurzEndeMelden(p, kurz)\n              else {" in HTML)
 soll("Kein 3,6-s-Warten bei gekürztem Text", "else if(!kurz && p.route !== 'tsv2'){ try{ _balR = await hedgeReaderEndBalance" in HTML)
 soll("Busy/Backoff: Ergebnis wird trotzdem geschrieben", "if(zusatzKurz && !(rsW && rsW.ok))" in HTML)

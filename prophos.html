@@ -27593,7 +27593,7 @@
   function tvnBlickTv(){
     const st = tvnPulsStand(); if(!st) return null
     const tab = (st.tabs || []).find(t => t && t.tab_id === st.positionen_tab)
-    const blind = st.positionen_ok !== true || !Array.isArray(st.positionen)
+    const blind = st.positionen_ok !== true || st.leer_beweis === false || !Array.isArray(st.positionen)   // leer_beweis (0.10.8): leere Tabelle ohne Leer-Text ist hier keine Aussage
     return { art: 'tv', lader: (st.lader && typeof st.lader === 'object') ? st.lader : null, version: (tab && tab.version) || '', blind,
       posGrund: blind ? '' : st.positionen.length ? 'Position offen' : '' }
   }
@@ -27613,7 +27613,7 @@
   const TVTM_LADER_SOLL = 1, TVTM_TSX_LADER_SOLL = 1
   // GESPERRTES EVAL (Finn 02.11.2026): TradingViews CSP verbietet eval, der Lader tauscht dort den Kern nie (lader.eval false, quelle eingebaut). Dann kommt jede Fassung über diesen Weg:
   // TVTM_VERSION_SOLL = VERSION im Userscript (Selbsttest prüft es), ein Versuch je PC und Fassung, nur in Ruhe (tvnRuhe). Scheitert er, meldet Railway ⚪; die nächste Fassung versucht es neu.
-  const TVTM_VERSION_SOLL = '0.10.7'
+  const TVTM_VERSION_SOLL = '0.10.8'
   const tvTmSoll = art => art === 'tsx' ? TVTM_TSX_LADER_SOLL : TVTM_LADER_SOLL
   const tvTmKey = art => art === 'tsx' ? 'prophos_tvtm_tsx_l' + TVTM_TSX_LADER_SOLL : 'prophos_tvtm_l' + TVTM_LADER_SOLL + '_v' + TVTM_VERSION_SOLL
   const tvTmZiel = art => art === 'tsx' ? `Lader ${TVTM_TSX_LADER_SOLL}` : TVTM_VERSION_SOLL
@@ -30026,7 +30026,7 @@
   const NIE_DA_LESUNGEN = 6, NIE_DA_BEWEIS_MS = 60000, NIE_DA_LUECKE_MS = 15000, NIE_DA_FRIST_MS = 10 * 60000
   // REIN: eine Reader-Lesung für den Beweis → 'flach' | 'position' | null (keine Aussage)
   function nieDaLesung(st, kontoPlan, wurzel){
-    if(!st || st.an === false || st.positionen_ok === false || !Array.isArray(st.positionen)) return null
+    if(!st || st.an === false || st.positionen_ok === false || st.leer_beweis === false || !Array.isArray(st.positionen)) return null   // leer_beweis (0.10.8): s. tvnBlickTv
     if(!/^puls-/.test(String(st.positionen_tab || ''))) return null
     if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 3)) return null
     const id = String(kontoPlan || '').trim(), kt = String(st.konto || '').trim()
@@ -32595,6 +32595,33 @@
     if(urteil === 'flach'){ await hedgeMasterWegAusfuehren(tradePlans.find(x => String(x.id) === pid) || p, kontoPlan, null, null); return }   // frische Zeile: Hedge steht dort auf 'geschlossen', kein zweiter Close
     if(urteil === 'offen' && typeof atToast === 'function') atToast(`🔴 Fusion ist zu, die Tabelle zeigt nach ${HEDGE_TOAST_WACHE_MS / 1000} s noch eine Position (${p.masterName || pid.slice(0, 8)}) — in TradingView prüfen`, 'end')
   }
+  /* SCHLUSS EINFACH (02.11.2026, Finn: „wieder zum Laufen kriegen, dass es so funktioniert wie am Anfang. Direkt schließen, Kontoerkennung, indem man auf den Puls draufklickt. Fertig").
+   * Konto bekannt: Text exakt, eindeutig (gekürzt/angeklebt), oder Puls hat es belegt angeklickt und das Kontowort ist seitdem gleich. Die Balance entscheidet nichts mehr, kurzEndeBeweis ist nur Nachkontrolle.
+   * Grenze: Handwechsel auf ein Nachbarkonto mit demselben gekürzten Wort sieht der Text nicht; dafür bleiben Nachkontrolle (🔴 kurz_balance_nein), Rückkehr-Wache, Radar und Notfall-Level. */
+  function hedgeReaderEinfachKonto(kontoText, extId){
+    const b = kontoTextBezug(kontoText, extId)
+    if(b === 'ja') return true
+    if(!b) return false
+    if(kontoTextEindeutig(kontoText, extId, kontoExtIds())) return true
+    if(!kontoBelegGilt(extId)) return false
+    const wort = (String(kontoText).trim().toUpperCase().split(/[^A-Z0-9]+/)[0]) || ''
+    if(_kontoBeleg.wortAt !== _kontoBeleg.at){ _kontoBeleg.wort = wort; _kontoBeleg.wortAt = _kontoBeleg.at }   // erster Blick nach dem Klick
+    return _kontoBeleg.wort === wort
+  }
+  window._hedgeReaderEinfachKonto = hedgeReaderEinfachKonto   // Test-Haken
+  // REIN RECHNEND: Position weg? Puls ruhig (Vorfall e6914376), Hedge ≥ 3 s offen, Position in DIESEM Konto-Zeitraum gesehen (Vorfall Mike 15.10., .1560: Sichtung nur vor dem Login-Wechsel zählt nicht),
+  // keine Zeile der Plan-Wurzel (auch ohne lesbaren P&L, auch Gegenrichtung), ≥ 0,3 s und ≥ 2 Lesungen. Nur Reader-Schluss, TopstepX bleibt bei hedgeMasterWegEntscheid.
+  const HEDGE_EINFACH_LEER_MS = 300, HEDGE_EINFACH_LESUNGEN = 2
+  function hedgeReaderEinfachEntscheid(o){
+    if(!o || o.unterwegs || !o.kontoOk || !Array.isArray(o.liste)) return false
+    if(!(o.sekundenSeitOpen >= 3) || o.gesehenImZeitraum !== true) return false
+    const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
+    if(o.liste.some(x => x && (x.wurzel || tvSymbolWurzel(x.symbol || '')) === w)) return false
+    if(o.liste.some(x => x && !x.wurzel && !tvSymbolWurzel(x.symbol || ''))) return false   // Zeile ohne erkennbare Wurzel könnte die Position sein
+    return o.leerSeitMs >= HEDGE_EINFACH_LEER_MS && o.lesungen >= HEDGE_EINFACH_LESUNGEN
+  }
+  window._hedgeReaderEinfachEntscheid = hedgeReaderEinfachEntscheid   // Test-Haken
+  const _hedgeSchnellLesungen = new Map()   // plan-id → { seit, n, ts }: Lesungen seit „flach seit"
   async function hedgeReaderSchnellTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(_hedgeSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
@@ -32627,7 +32654,7 @@
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         if(kontoPlan) kurzAnkerPflegen(p, kontoPlan, st, wz)   // gekürzter Text: Anker aus Dropdown-Beleg oder Fill-Bindung (28.10.2026)
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
-        if(!kontoPlan || !(readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst(st.konto, kontoPlan, st))){
+        if(!kontoPlan || !hedgeReaderEinfachKonto(st.konto, kontoPlan)){
           _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid)
           // gekürzter Text ohne Anker (oder Nachbarkonto im selben Login) — bis .1800 stumm, Marcs Apex/FTDFYSLX 28.10.2026
           if(kontoPlan && _hedgeMasterGesehen.has(pid) && kontoTextBezug(st.konto, kontoPlan) === 'kurz' && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) == null)
@@ -32672,26 +32699,24 @@
           continue
         }
         kurzFensterFrieren(pid)   // erste flache Lesung: Kurs-Fenster fürs Kurz-Ende einfrieren (28.10.2026)
-        if(st.positionen.some(x => x && x.pnl_unklar)) continue
         if(!_hedgeMasterGesehen.has(pid)) continue
+        if(st.positionen.some(x => x && (x.wurzel || tvSymbolWurzel(x.symbol || '')) === wz)){ _hedgeSchnellLeer.delete(pid); continue }   // Gegenrichtung oder Menge 0: Zeile da, kein „weg"
         if(!_hedgeSchnellLeer.has(pid)) _hedgeSchnellLeer.set(pid, jetzt)
+        const leerSeit = _hedgeSchnellLeer.get(pid)
+        let les = _hedgeSchnellLesungen.get(pid)
+        if(!les || les.seit !== leerSeit){ les = { seit: leerSeit, n: 0, ts: null }; _hedgeSchnellLesungen.set(pid, les) }
+        const standTs = st.positionen_ts || st.ts || jetzt
+        if(les.ts !== standTs){ les.ts = standTs; les.n++ }
         const offenSeit = jetzt - (Date.parse(h.opened_at || h.at || '') || jetzt)
-        // DIESELBE REGEL WIE DER 1-s-WÄCHTER (16.10.2026, Vorfall e6914376): bis dahin schloss dieser Weg nach 0,1 s leer + 2 s Konto und
-        // umging .1560/.1563 (30 s leer im Wechsel-Fenster, 1 s erst nach 90 s Ruhe auf dem Plan-Konto) — jetzt entscheidet hedgeMasterWegEntscheid
-        const weg = hedgeMasterWegEntscheid({ liste: st.positionen, positionenOk: st.positionen_ok, alterMs: st.positionen_alter_s * 1000,
-          sekundenSeitOpen: offenSeit / 1000, wurzel: wz, richtung, kontoPlan, kontoAktiv: st.konto, kontoBewiesen: true, kontenAnzahl: 99,   // readerKontoPasst oben
-          kontoStabilMs: jetzt - _hedgeSchnellKonto.get(pid), leerSeitMs: jetzt - _hedgeSchnellLeer.get(pid), schnell: true, gesehen: true,
-          gesehenImZeitraum: (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid) })
-        if(!weg && jetzt - _hedgeSchnellLeer.get(pid) >= 1000){
-          const kMs = jetzt - _hedgeSchnellKonto.get(pid), lMs = jetzt - _hedgeSchnellLeer.get(pid)
-          const imZr = (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid)
-          const grund = kMs < 2000 ? 'Konto erst kurz im Reader' : ((kMs < 90000 && !imZr) ? 'Wechsel-Fenster: 30 s flach nötig (Master in diesem Konto-Zeitraum nicht gesehen)' : 'Regel sagt nein')
-          hedgeReaderWartetMelden(p, grund, { konto_ms: kMs, leer_ms: lMs, gesehen_im_zeitraum: imZr })
+        const imZr = (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid)
+        const weg = hedgeReaderEinfachEntscheid({ unterwegs: hedgeTvUnterwegs(), kontoOk: true, liste: st.positionen, wurzel: wz, sekundenSeitOpen: offenSeit / 1000,
+          gesehenImZeitraum: imZr, leerSeitMs: jetzt - leerSeit, lesungen: les.n })
+        if(!weg && jetzt - leerSeit >= 1000){
+          hedgeReaderWartetMelden(p, imZr ? 'Regel sagt nein' : 'Position in diesem Konto-Zeitraum nicht gesehen', { konto_ms: jetzt - _hedgeSchnellKonto.get(pid), leer_ms: jetzt - leerSeit, gesehen_im_zeitraum: imZr })
         }
         if(weg && p.status === 'open'){
-          // Gekürzter Text: zusätzlich Balance-Sprung im Kurs-Fenster (Hand-Wechsel auf ein Konto desselben Logins, 28.10.2026)
+          // Gekürzter Text: Balance-Sprung nur noch als Nachkontrolle am Hedge (🔴 kurz_balance_nein), er hält den Schluss nie auf
           const kurz = kontoTextBezug(st.konto, kontoPlan) === 'kurz' ? kurzEndeBeweis(p, kontoPlan, st, wz) : null
-          if(kurzEndeSperrt(kurz)){ kurzEndeMelden(p, kurz); continue }   // nur Bündel; Balance ist Nachkontrolle (30.10.2026, s. kurzEndeBeweis)
           hedgeMasterWegStempeln(p, 'reader', _hedgeSchnellLeer.get(pid))   // Master-Ende ab „flach seit" (29.10.2026)
           _hedgeSchnellLeer.delete(pid)
           console.info('[hedgeSchnell] Master weg laut Reader — Fusion wird geschlossen', p.masterName || pid, kurz || '')
@@ -33352,7 +33377,7 @@
             // Teilschluss (Tradovate nettet je Symbol): nur Hinweis am Chip, schließen erst bei 0
             const teil = (st && frisch) ? hedgeMasterTeilweise(st.positionen, wz, richtung, Number(p.masterContracts) || 0) : null
             if((teil != null) !== (h.master_teil != null)){ try{ await hedgeAmPlanSchreiben(p.id, { master_teil: teil }) }catch(_){} }
-            const weg = hedgeMasterWegEntscheid({ liste: st ? st.positionen : null, positionenOk: st ? st.positionen_ok : null,
+            const weg = hedgeMasterWegEntscheid({ liste: st ? st.positionen : null, positionenOk: st ? (st.leer_beweis === false ? false : st.positionen_ok) : null,
               alterMs: st ? ((typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s * 1000 : Date.now() - (epLokal.ab || 0)) : Infinity,
               sekundenSeitOpen: (Date.now() - (Date.parse(h.opened_at || h.at || '') || 0)) / 1000, wurzel: wz, richtung,
               kontoPlan, kontoAktiv, kontoBewiesen: !!kontoPlan && kontoPasst, kontenAnzahl, kontoStabilMs,
