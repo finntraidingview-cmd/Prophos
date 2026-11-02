@@ -14068,6 +14068,291 @@ def _berlin_heute():
     except Exception:   # pragma: no cover — tzdata fehlt → UTC
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+# ── RECOVERER: Apex-Winning-Days nach Verlusttag im Payout-Zyklus (02.11.2026, Finn 04:30 „ja, bauen"; Konstrukt
+# .claude/master/berichte/2026-11-01_apex-wd-konstrukt.md, Variante B). Anlass Mike 150k …0001: −3.998 $ am 30.10., Admin zeigte 3.000 $
+# anfragbar, Apex zahlt aber erst, wenn Zyklus-Profit ≥ 2 × bester Tag. Gerechnet wird HIER (alle IDs lesbar, eine Rechnung für Mac,
+# PC-Tab und Admin), ohne Speicherung: je Apex-WD-Konto ein Feld `zyklus` in /admin/wd-plaene (Farmer) und GET /wd-zyklus (Admin-Liste,
+# Payout-Kachel, PC-Tab). Fehlt das Feld (Regel aus, andere Firma, altes Backend), läuft alles wie heute. Keine Regel-Prüfung, keine Sperre.
+WD_ZYKLUS_VORGABE = {"stuetz": [{"v": 2000, "ziel": 750, "satz": 400}, {"v": 4000, "ziel": 1500, "satz": 300}],
+                     "firmen": ["apex", "apex100"], "ab_zyklus": 2, "bis": "2x_bester", "satz_normal": None, "kt": None, "aktiv": True}
+WD_ZYKLUS_FU = {"apex": (370, 390), "apex100": (320, 340)}          # wie TP_VP_VORGABE.fu im Frontend
+WD_ZYKLUS_STAFFEL_VON = (0, 2000, 4000, 6000, 8000)                 # altes 5-Zahlen-Format der Staffel
+WD_ZYKLUS_STAFFEL_STD = (50, 60, 70, 80, 90)
+
+
+def _wd_berlin_tag(iso):
+    """ISO-Zeit → deutscher Kalendertag 'JJJJ-MM-TT' (Europe/Berlin), None wenn unlesbar."""
+    if not iso:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d.astimezone(ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%d")
+    except Exception:
+        return str(iso)[:10] or None
+
+
+def wd_plan_pnl(p):
+    """REIN RECHNEND: Master-P&L eines beendeten Plans in $ oder None — dieselbe Rangfolge wie _wd_heute_zeile (master_pl am Plan,
+    Topstep V2 über wd_tsx_master_pl, sonst final.today_pnl − tv.today_pnl_start am selben Tag, sonst final.today_pnl)."""
+    if not isinstance(p, dict):
+        return None
+    if _wd_num(p.get("master_pl")) is not None:
+        return _wd_num(p.get("master_pl"))
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = p.get("tv") if isinstance(p.get("tv"), dict) else (base.get("tv") if isinstance(base.get("tv"), dict) else {})
+    fin = p.get("fin") if isinstance(p.get("fin"), dict) else (base.get("final") if isinstance(base.get("final"), dict) else {})
+    if p.get("route") == "tsv2":
+        m = wd_tsx_master_pl(tv, fin)
+        return m["wert"] if m else None
+    ende = _wd_num(fin.get("today_pnl"))
+    if ende is None:
+        return None
+    start = _wd_num(tv.get("today_pnl_start"))
+    if start is not None and fin.get("datum") and fin.get("datum") == tv.get("datum_start"):
+        return round(ende - start, 2)
+    return ende
+
+
+def wd_zyklus_stand(plaene, payouts):
+    """REIN RECHNEND (testbar): Zyklus eines Kontos. payouts = pending_payouts-Zeilen des Kontos (status pending/received, requested_at
+    date), plaene = beendete trade_plans des Kontos (status completed/review). Zyklus-Nr = Anfragen + 1; Start = jüngstes requested_at;
+    Tage = Pläne mit Start-Tag (Berlin) NACH dem Anfrage-Tag, je Tag summiert (ein Trade am Anfrage-Tag zählt zum alten Zyklus —
+    requested_at hat keine Uhrzeit, Konstrukt Abschnitt 2). Verlust = Betrag des schlechtesten Einzeltags (nicht der Netto-Stand, Finn).
+    → {nr, start, tage: [{tag, pnl}], profit, bester, schlechtester, verlust}"""
+    anf = sorted(str(t.get("requested_at") or "")[:10] for t in (payouts or ()) if t.get("requested_at")
+                 and str(t.get("status") or "pending") in ("pending", "received"))
+    nr = len(anf) + 1
+    start = anf[-1] if anf else None
+    je_tag = {}
+    if start:
+        for p in plaene or ():
+            if str(p.get("status") or "") not in ("completed", "review"):
+                continue
+            tag = _wd_berlin_tag(p.get("started_at") or p.get("ended_at") or p.get("completed_at"))
+            if not tag or tag <= start:
+                continue
+            pnl = wd_plan_pnl(p)
+            if pnl is None:
+                continue
+            je_tag[tag] = round(je_tag.get(tag, 0.0) + pnl, 2)
+    tage = [{"tag": t, "pnl": je_tag[t]} for t in sorted(je_tag)]
+    werte = [x["pnl"] for x in tage]
+    profit = round(sum(werte), 2) if werte else 0.0
+    bester = max(werte) if werte else None
+    schlechtester = min(werte) if werte else None
+    verlust = round(-schlechtester, 2) if (schlechtester is not None and schlechtester < 0) else 0.0
+    return {"nr": nr, "start": start, "tage": tage, "profit": profit, "bester": bester, "schlechtester": schlechtester, "verlust": verlust}
+
+
+def _wd_staffel_eur(plus, staffel):
+    """Staffel-Betrag (€) zum Plus über der Kontogröße — wie tpVorplanStaffel/tpStaffelListe: Liste [{von, eur}] oder 5 Zahlen."""
+    if isinstance(staffel, list) and staffel and isinstance(staffel[0], dict):
+        liste = sorted(((_wd_num(z.get("von")) or 0, _wd_num(z.get("eur")) or 0) for z in staffel), key=lambda x: x[0])
+    else:
+        s = staffel if (isinstance(staffel, list) and len(staffel) == 5) else list(WD_ZYKLUS_STAFFEL_STD)
+        liste = list(zip(WD_ZYKLUS_STAFFEL_VON, [(_wd_num(x) or 0) for x in s]))
+    if not liste:
+        return 0.0
+    eur, p = liste[0][1], _wd_num(plus) or 0
+    for von, e in liste:
+        if p > von:
+            eur = e
+    return float(eur)
+
+
+def wd_zyklus_firma_key(konto):
+    """apex / apex100 (100k nach Name bzw. Startbalance, wie tpVpApex100) — None für alles andere."""
+    firm = str((konto or {}).get("firm") or "").lower()
+    if "apex" not in firm:
+        return None
+    g = _wd_konto_groesse(konto)
+    return "apex100" if (g is not None and abs(g - 100000) < abs(g - 150000)) else "apex"
+
+
+def wd_zyklus_normal(konto, vorplan, live):
+    """REIN RECHNEND: Normalwerte „heute" für ein Apex-Konto — Ziel_normal = Mitte der Firmen-Spanne (vorplan.regeln.fu), Staffel-€ nach
+    Plus (live − Größe), Satz_normal = Staffel ÷ Ziel_normal × 1000 (€ je 1.000 $). → {key, ziel_normal, staffel_eur, satz_normal, plus}"""
+    key = wd_zyklus_firma_key(konto) or "apex"
+    regeln = (vorplan or {}).get("regeln") if isinstance((vorplan or {}).get("regeln"), dict) else {}
+    fu = (regeln.get("fu") or {}).get(key) if isinstance(regeln.get("fu"), dict) else None
+    von, bis = (fu if (isinstance(fu, list) and len(fu) == 2) else WD_ZYKLUS_FU[key])
+    von, bis = (_wd_num(von) or 0), (_wd_num(bis) or 0)
+    ziel_normal = round((von + max(von, bis)) / 2)
+    g = _wd_konto_groesse(konto)
+    plus = (round(float(live) - g) if (live is not None and g) else 0)
+    sf = regeln.get("staffelFirma") if isinstance(regeln.get("staffelFirma"), dict) else {}
+    staffel_eur = _wd_staffel_eur(plus, sf.get(key) or regeln.get("staffel"))
+    satz_normal = round(staffel_eur / ziel_normal * 1000, 1) if ziel_normal > 0 else 0.0
+    return {"key": key, "ziel_normal": ziel_normal, "staffel_eur": staffel_eur, "satz_normal": satz_normal, "plus": plus}
+
+
+def wd_zyklus_werte(verlust, regel, ziel_normal, satz_normal):
+    """REIN RECHNEND (testbar): Ziel(V) und Satz(V) linear durch (0, normal) und die Stützpunkte, über dem letzten Stützpunkt Deckel.
+    Stützpunkt 0 für den Satz = regel.satz_normal (fest) oder max(satz_normal, Satz des ersten Stützpunkts) — der Satz sinkt beim ersten
+    Verlust nie (Befund Konstrukt Abschnitt 7, Finns „fest 450" offen). → {ziel, satz, hedge_eur}"""
+    st = sorted(((_wd_num(x.get("v")) or 0, _wd_num(x.get("ziel")) or 0, _wd_num(x.get("satz")) or 0)
+                 for x in ((regel or {}).get("stuetz") or WD_ZYKLUS_VORGABE["stuetz"]) if isinstance(x, dict)), key=lambda x: x[0])
+    v = max(0.0, _wd_num(verlust) or 0.0)
+    satz0 = _wd_num((regel or {}).get("satz_normal"))
+    if satz0 is None:
+        satz0 = max(float(satz_normal or 0), st[0][2] if st else 0)
+    punkte = [(0.0, float(ziel_normal or 0), float(satz0))] + [(a, b, c) for a, b, c in st if a > 0]
+    ziel, satz = punkte[-1][1], punkte[-1][2]
+    for (v0, z0, s0), (v1, z1, s1) in zip(punkte, punkte[1:]):
+        if v <= v1:
+            t = (v - v0) / (v1 - v0) if v1 > v0 else 1.0
+            ziel, satz = z0 + (z1 - z0) * t, s0 + (s1 - s0) * t
+            break
+    # Hedge aus den ungerundeten Werten (Mike: 1.499,31 $ × 300,09 € = 449,93 €; gerundet wären es 449,70 €)
+    return {"ziel": round(ziel), "satz": round(satz), "satz_genau": round(satz, 2), "hedge_eur": round(ziel * satz / 1000, 2)}
+
+
+def wd_zyklus_bis(profit, bester, ziel):
+    """REIN RECHNEND: wie viele Gewinntage mit dem Regel-Ziel, bis Profit ≥ 2 × bester Tag (Ziel-Tage werden selbst zum besten Tag).
+    → (tage, brutto noch zu verdienen) oder (None, None); Deckel 60 Tage."""
+    z = _wd_num(ziel)
+    if not z or z <= 0:
+        return None, None
+    p, b = float(profit or 0), max(float(bester or 0), z)
+    for n in range(0, 61):
+        if p + n * z >= 2 * b:
+            return n, round(n * z, 2)
+    return None, None
+
+
+def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts):
+    """REIN RECHNEND (testbar): das Feld `zyklus` eines Kontos. Aktiv = wd_farm ∧ Apex ∧ Nr ≥ ab_zyklus ∧ Verlust > 0 ∧ Profit < 2 × bester;
+    Schalter accounts.wd_zyklus_regel: 'aus' → nie, 'an' → auch ohne Automatik-Bedingungen (außer wd_farm + Apex), null = automatisch.
+    regel None = Spalte zyklus_regel fehlt (SQL nicht eingespielt) → aktiv False mit Grund, Zahlen trotzdem da (Anzeige)."""
+    st = wd_zyklus_stand(plaene, payouts)
+    key = wd_zyklus_firma_key(konto)
+    live = _wd_num((konto or {}).get("live_balance") if "live_balance" in (konto or {}) else (konto or {}).get("tv_balance"))
+    norm = wd_zyklus_normal(konto, vorplan, live)
+    schalter = str((konto or {}).get("wd_zyklus_regel") or "").strip().lower() or None
+    r = regel if isinstance(regel, dict) else None
+    ab = int(_wd_num((r or WD_ZYKLUS_VORGABE).get("ab_zyklus")) or 2)
+    firmen = (r or WD_ZYKLUS_VORGABE).get("firmen") or WD_ZYKLUS_VORGABE["firmen"]
+    bester = st["bester"] or 0.0
+    erfuellt = bool(st["tage"]) and st["profit"] >= 2 * bester
+    farm = bool((konto or {}).get("wd_farm"))
+    # EINE festgestellte Ursache je Zustand (Finn /Goal 09.10.2026)
+    if r is None:
+        aktiv, code, grund = False, "keine_regel", "Recoverer nicht eingerichtet (zyklus_regel fehlt) → sql/2026-11-02_recoverer.sql einspielen"
+    elif not r.get("aktiv", True):
+        aktiv, code, grund = False, "regel_aus", "Recoverer-Regel aus (wd_farmer_regeln.zyklus_regel.aktiv)"
+    elif not farm:
+        aktiv, code, grund = False, "kein_farm", "Konto nicht im Winning-Day-Farmer (Haken aus)"
+    elif key not in firmen:
+        aktiv, code, grund = False, "firma", "keine Apex-Firma"
+    elif schalter == "aus":
+        aktiv, code, grund = False, "schalter_aus", "Schalter am Konto: aus"
+    elif schalter == "an":
+        aktiv, code, grund = True, "schalter_an", (f"Schalter am Konto: an · Zyklus {st['nr']}" + (f", Verlusttag −{st['verlust']:,.0f} $" if st["verlust"] > 0 else ", kein Verlusttag (Normalwerte)")).replace(",", ".")
+    elif st["nr"] < ab:
+        aktiv, code, grund = False, "zyklus_1", f"Zyklus {st['nr']} (vor dem {ab - 1}. Payout gilt die Regel nicht)"
+    elif st["verlust"] <= 0:
+        aktiv, code, grund = False, "kein_verlust", f"Zyklus {st['nr']}: kein Verlusttag"
+    elif erfuellt:
+        aktiv, code, grund = False, "erfuellt", (f"Zyklus {st['nr']}: erfüllt — Profit {st['profit']:,.0f} $ ≥ 2 × bester Tag {bester:,.0f} $").replace(",", ".")
+    else:
+        aktiv, code, grund = True, "profit", (f"Zyklus {st['nr']}: Verlusttag −{st['verlust']:,.0f} $, Profit {st['profit']:,.0f} $ < 2 × bester Tag {bester:,.0f} $").replace(",", ".")
+    # Schalter „an“ ohne Verlusttag: V = 0 → Normalwerte (Konstrukt Abschnitt 6), also kein Ziel/Hedge aus der Regel
+    w = wd_zyklus_werte(st["verlust"], r, norm["ziel_normal"], norm["satz_normal"]) if (aktiv and st["verlust"] > 0) else None
+    n_tage, rest = wd_zyklus_bis(st["profit"], bester, w["ziel"]) if (w and not erfuellt) else (None, None)
+    out = dict(st)
+    out.update({"aktiv": aktiv, "grund": grund, "grund_code": code, "erfuellt": erfuellt, "schalter": schalter, "firma_key": key,
+                "ziel": w["ziel"] if w else None, "satz": w["satz_genau"] if w else None, "hedge_eur": w["hedge_eur"] if w else None,
+                "kt": (_wd_num(r.get("kt")) if (w and r) else None),
+                "ziel_normal": norm["ziel_normal"], "satz_normal": norm["satz_normal"], "staffel_eur": norm["staffel_eur"], "plus": norm["plus"],
+                "rest_bis_erfuellt": rest, "tage_geschaetzt": n_tage})
+    return out
+
+
+def _wd_zyklus_regelzeile():
+    """wd_farmer_regeln id 1 → (zyklus_regel | None, vorplan | {}). Spalte fehlt (SQL nicht eingespielt) → (None, vorplan)."""
+    try:
+        rows = sb_select("wd_farmer_regeln", {"select": "vorplan,zyklus_regel", "id": "eq.1"}) or []
+        z = rows[0] if rows else {}
+        return (z.get("zyklus_regel") if isinstance(z.get("zyklus_regel"), dict) else None), (z.get("vorplan") if isinstance(z.get("vorplan"), dict) else {})
+    except requests.exceptions.HTTPError as e:
+        if "zyklus_regel" not in str(getattr(e.response, "text", "") or e):
+            raise
+        rows = sb_select("wd_farmer_regeln", {"select": "vorplan", "id": "eq.1"}) or []
+        return None, ((rows[0].get("vorplan") if rows and isinstance(rows[0].get("vorplan"), dict) else {}))
+
+
+def _wd_zyklus_anhaengen(konten):
+    """Hängt `zyklus` an jedes Apex-Winning-Days-Konto der Liste (dicts wie in /admin/wd-plaene: id, firm, wd_farm, live_balance …).
+    Zwei Abfragen für alle Konten zusammen (pending_payouts, trade_plans seit dem ältesten Zyklus-Start). Ein Fehler lässt die Konten
+    ohne Feld (Frontend: wie heute) und steht im Log."""
+    apex = [k for k in konten or () if wd_zyklus_firma_key(k)]
+    if not apex:
+        return
+    try:
+        regel, vorplan = _wd_zyklus_regelzeile()
+        ids = [str(k["id"]) for k in apex]
+        pay = {}
+        for t in _sb_all("pending_payouts", {"select": "account_id,requested_at,status", "account_id": f"in.({','.join(ids)})",
+                                             "status": "in.(pending,received)"}):
+            pay.setdefault(str(t.get("account_id")), []).append(t)
+        starts = [str(t.get("requested_at") or "")[:10] for v in pay.values() for t in v if t.get("requested_at")]
+        plaene = {}
+        if starts:
+            seit = min(starts) + "T00:00:00+00:00"
+            for p in _sb_all("trade_plans", {"select": "id,master_account_id,status,route,started_at,ended_at,completed_at,master_pl,"
+                                                       "tv:mt5_baseline->tv,fin:mt5_baseline->final",
+                                             "master_account_id": f"in.({','.join(ids)})", "status": "in.(completed,review)",
+                                             "started_at": f"gte.{seit}"}):
+                plaene.setdefault(str(p.get("master_account_id")), []).append(p)
+        for k in apex:
+            k["zyklus"] = wd_zyklus_konto(k, regel, vorplan, plaene.get(str(k["id"]), []), pay.get(str(k["id"]), []))
+    except Exception as e:
+        print(f"[wd-zyklus] ⚠️ {type(e).__name__}: {e}", flush=True)
+
+
+@app.route("/wd-zyklus", methods=["GET", "OPTIONS"])
+def wd_zyklus_route():
+    """GET ?ids=a,b → {ok, at, zyklus: {account_id: {…}}} für Apex-Winning-Days-Konten; ohne ids alle der Sicht. Gate: eingeloggt;
+    eingeschränkte Logins nur Konten ihrer Sicht (PC-Tab: das eigene). Leser: Accounts-Liste (Typ-Chip), Admin-Payout-Kachel, PC-Tab-Würfel."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    ids = [x.strip() for x in str(request.args.get("ids") or "").split(",") if len(x.strip()) >= 10][:60]
+    felder = "id,user_id,name,firm,account_type,starting_balance,wd_farm,tv_balance"
+    params = {"select": felder + ",wd_zyklus_regel", "account_type": "eq.winning_days", "firm": "ilike.*apex*"}
+    if ids:
+        params["id"] = f"in.({','.join(ids)})"
+    try:
+        try:
+            accs = _sb_all("accounts", params)
+        except requests.exceptions.HTTPError as e:
+            if "wd_zyklus_regel" not in str(getattr(e.response, "text", "") or e):
+                raise
+            params["select"] = felder
+            accs = _sb_all("accounts", params)
+    except Exception as e:
+        return jsonify({"error": f"Konten nicht ladbar ({type(e).__name__})"}), 502
+    nur, sicht = _admin_nur_uid(), _admin_sicht()
+    konten = []
+    for a in accs:
+        uid = str(a.get("user_id"))
+        if nur and not (uid == str(me) or admin_in_sicht(uid, sicht or frozenset({nur}))):
+            continue
+        if not nur and sicht is not None and uid not in sicht:
+            continue
+        konten.append({"id": str(a["id"]), "user_id": uid, "name": a.get("name") or "", "firm": a.get("firm") or "",
+                       "starting_balance": _wd_num(a.get("starting_balance")), "wd_farm": bool(a.get("wd_farm")),
+                       "live_balance": _wd_num(a.get("tv_balance")) if (_wd_num(a.get("tv_balance")) or 0) > 0 else None,
+                       "wd_zyklus_regel": a.get("wd_zyklus_regel")})
+    _wd_zyklus_anhaengen(konten)
+    return jsonify({"ok": True, "at": datetime.now(timezone.utc).isoformat(),
+                    "zyklus": {k["id"]: k["zyklus"] for k in konten if k.get("zyklus")}})
+
 
 WD_ERLEDIGT_ROUTEN = ("tvv2", "mt5v2", "tsv2", "mt5", "tvplus", "polar")   # 30.09.2026: Orbit, Echo V2, Topstep V2 — seit 02.10.2026 auch
 # Echo mit Fusion-Hedge (mt5) und Duplikum (tvplus), Finn: „natürlich will ich auch Echo-Trades hier abhaken"
@@ -14644,7 +14929,14 @@ def admin_wd_plaene():
         try:
             disp, excluded = _wd_personen()
             archiv = _acc_plan_archiviert() | _ap_deaktiviert_ids()   # deaktiviert (30.10.2026): nicht im Farmer, wie archiviert — nur diese Liste
-            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at,wd_tp,wd_sl,max_risiko_trade"})
+            # wd_zyklus_regel (Recoverer, 02.11.2026) tolerant — solange die Spalte fehlt (SQL nicht eingespielt), ohne sie
+            _felder = "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at,wd_tp,wd_sl,max_risiko_trade"
+            try:
+                accs = _sb_all("accounts", {"select": _felder + ",wd_zyklus_regel"})
+            except requests.exceptions.HTTPError as e:
+                if "wd_zyklus_regel" not in str(getattr(e.response, "text", "") or e):
+                    raise
+                accs = _sb_all("accounts", {"select": _felder})
             konten = []
             for a in accs:
                 typ = (a.get("account_type") or "").lower()
@@ -14672,7 +14964,9 @@ def admin_wd_plaene():
                     # dafür die Vorgaben des Kontos — bis dahin kannte nur die RPC wd_konten_alle wd_tp/wd_sl
                     "tp_vorgabe": _wd_num(a.get("wd_tp")), "sl_vorgabe": _wd_num(a.get("wd_sl")),
                     "max_risiko_trade": _wd_num(a.get("max_risiko_trade")),
+                    "wd_zyklus_regel": a.get("wd_zyklus_regel"),   # Recoverer-Schalter je Konto (02.11.2026): null / an / aus
                 })
+            _wd_zyklus_anhaengen(konten)   # RECOVERER (02.11.2026): Feld `zyklus` je Apex-WD-Konto — Farmer nimmt Ziel + Hedge daraus
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
             # laufen über route=mt5 und haben einen anderen Slave — die zählen hier nicht)
             slaves = {}
