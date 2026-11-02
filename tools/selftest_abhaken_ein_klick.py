@@ -23,7 +23,7 @@ check("kette_tag" not in fn, "Topstep-Tagesergebnis allein erzwingt kein Popup")
 oe = html[html.index("function mklWdErledigtOeffnen("):html.index("function mwdErlStatusUI(")]
 check("opts.einKlick" in oe and "mklWdErledigtSpeichern(); return" in oe and "!wdhCb?.checked" in oe, "Ein Klick speichert über den Popup-Weg, Winning-Day-Vorschlag öffnet das Popup")
 check(oe.index("opts.einKlick") < oe.index("getElementById('mwdErledigtModal')?.classList.add('open')"), "Prüfung läuft vor dem Öffnen")
-check("wdlEinKlickGrund(t); if(ein)" in html and "Date.now() - _wdlEinKlickAt < 600" in html, "Klick fragt die Prüfung, Doppelklick bucht die nächste Zeile nicht mit")
+check("const ein = !!t && !grund; if(ein)" in html and "Date.now() - _wdlEinKlickAt < 600" in html, "Klick fragt die Prüfung, Doppelklick bucht die nächste Zeile nicht mit")
 check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "dm.status" not in fn and "P&L passt nicht" not in fn and "Ziel oder Boden unbekannt" not in fn, "Balance 0 → Popup; Tage-Mini, Demo, P&L-Abweichung, Ziel/Boden unbekannt nicht mehr (Finn 02.11.2026)")
 check("const sicht = _mwdErlSicht, ohneHedge" in html, "Werte für Anfrage und Toast vor dem await festgehalten")
 sp = html[html.index("async function mklWdErledigtSpeichern("):html.index("document.getElementById('mwdErledigtClose')")]
@@ -68,6 +68,42 @@ erg = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else []
 for (name, _f, soll), g in zip(FAELLE, erg):
     check((g == "") is soll, f"{name}: {'Ein Klick' if not g else 'Popup: ' + g}")
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
+# ── VORMERKEN statt Popup ohne Lesung (Finn 02.11.2026): Abhaken ohne Lesung → vorgemerkt, versteckt → Lesung kommt → Ein-Klick-Weg mit echtem Wert ──
+check("WDL_VORMERK_GRUENDE.has(grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }" in html, "Klick ohne Lesung merkt vor statt Popup")
+check("if(opts.nurStill){ _mwdErlId = null; return }" in oe, "vorgemerkt: der Takt öffnet nie ein Popup von selbst")
+check('"vorgemerkt": base.get("abhaken_vorgemerkt")' in src and '"p_patch": {"abhaken_vorgemerkt": vm}, "p_status": "review"' in src and '"vormerken", "vormerken_weg"' in src, "Railway: Kennzeichen nur an Plänen in Überprüfen, live-trades liefert es")
+check("wdl.daten = d; wdl.fehler = ''\n      setTimeout(() => { try{ wdlVorgemerktTick() }" in html, "Takt nach jedem Radar-Abruf")
+vm = html[html.index("  const WDL_VORMERK_GRUENDE"):html.index("  function wdlAbhakenSperre(")]
+vm = vm[:vm.index("  async function wdlVormerken(")] + vm[vm.index("  // Abhaken, sobald die Lesung da ist"):]
+js2 = STUBS + fn + """
+const window = {};
+const document = { getElementById: () => ({ classList: { contains: () => false } }) };
+let geoeffnet = []; function mklWdErledigtOeffnen(pid, t, o){ geoeffnet.push([pid, !!o.einKlick, !!o.nurStill]) }
+const wdl = { daten: { trades: [] } };
+""" + vm + """
+const T = """ + json.dumps(dict(BASIS, id="v1", pl_balance=None)) + """;
+const vorher = wdlEinKlickGrund(T);
+T.vorgemerkt = { at: '2026-11-02T10:00:00Z', grund: vorher }; wdl.daten.trades = [T];
+const versteckt = wdlVorgemerktVersteckt(T); wdlVorgemerktTick(); const ohneLesung = geoeffnet.length;
+T.pl_balance = 650; T.balance_end = 100650;
+const sichtbar = !wdlVorgemerktVersteckt(T); wdlVorgemerktTick(); const nachLesung = geoeffnet.slice(); wdlVorgemerktTick();
+const B = """ + json.dumps(dict(BASIS, id="v2", pl_balance=None)) + """; B.vorgemerkt = { at: 'x' }; wdl.daten.trades = [B];
+B.pl_balance = 650; B._blow = true; const blowSichtbar = !wdlVorgemerktVersteckt(B); wdlVorgemerktTick();
+print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar }));
+"""
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d2:
+    d2.write(js2)
+r2 = subprocess.run(["/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc", d2.name], capture_output=True, text=True)
+os.unlink(d2.name)
+try:
+    v = json.loads(r2.stdout.strip().splitlines()[-1])
+except Exception:
+    v = {}
+    print("JS:", r2.stdout[-600:], r2.stderr[-600:])
+check(v.get("vorher") == "keine echte Lesung" and v.get("versteckt") is True and v.get("ohneLesung") == 0, "ohne Lesung: vorgemerkt, aus „Erledigt“ raus, nichts abgehakt")
+check(v.get("sichtbar") is True and v.get("nachLesung") == [["v1", True, True]] and v.get("zweimal") == 1, "Lesung da: genau ein stiller Ein-Klick mit der echten Lesung, kein zweiter binnen 60 s")
+check(v.get("blowSichtbar") is True and v.get("zweimal") == 1, "nach der Lesung Blow: zurück in „Erledigt“, kein stilles Abhaken (Popup beim Klick)")
+
 check('daten.get("nur_review") is True and plan and plan.get("status") != "review"' in src and "einKlick ? { nur_review: true }" in html, "nur_review: Ein Klick bekommt 409, wenn der Trade nicht mehr in Überprüfen steht")
 print(f"\n{'selftest_abhaken_ein_klick: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
 sys.exit(1 if FEHLER else 0)

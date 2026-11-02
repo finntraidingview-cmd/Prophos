@@ -12392,6 +12392,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # MANUELLE ARBEIT (08.10.2026, Finn: Plan aus „Überprüfen" parken — „noch ein paar Winning Days mit 0,01 fahren, Notiz dran,
         # in zwei Tagen abhaken"): mt5_baseline.manuell {at, notiz, von} komplett oder null — das Radar baut daraus die Gruppe
         "manuell": base.get("manuell") if isinstance(base.get("manuell"), dict) else None,
+        "vorgemerkt": base.get("abhaken_vorgemerkt") if isinstance(base.get("abhaken_vorgemerkt"), dict) else None,   # Ein Klick ohne Lesung (02.11.2026)
         # Mini-Trade zum Tage sammeln (13.10.2026, Finn: „Mini-Trades nicht mit den bestandenen mischen"): das Radar zeigt ihn als normalen
         # Trade in Erledigt → Abhaken, das Konto bleibt in „Tage sammeln" stehen
         "tage_mini": bool(base.get("tage_mini")),
@@ -15037,7 +15038,7 @@ def admin_wd_plaene():
                         tab, key = "order_signale", str(d.get("signal_id") or "").strip()
                     elif akt in ("farm", "balance", "rest_planer", "rest_planer_weg", "review_notiz"):
                         tab, key = "accounts", str(d.get("account_id") or "").strip()
-                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg"):
+                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg", "vormerken", "vormerken_weg"):
                         tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
                     else:
                         tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
@@ -15443,6 +15444,25 @@ def admin_wd_plaene():
                 if not r.json():
                     return jsonify({"error": "Plan hat sich inzwischen geändert — nichts geschrieben"}), 409
                 return jsonify({"ok": True, "plan_id": pid, "manuell": m})
+            except Exception as e:
+                return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
+        if daten.get("aktion") in ("vormerken", "vormerken_weg"):
+            # VORGEMERKT (Finn 02.11.2026: ohne echte Lesung beim Abhaken kein Popup, „direkt weg"): Kennzeichen mt5_baseline.abhaken_vorgemerkt {at, von, grund}, der Plan
+            # BLEIBT in Überprüfen, nichts wird verbucht. Darum laufen alle Endlesungen weiter (die schreiben nur in review); ist die Lesung da, hakt der Radar ihn über den
+            # normalen Ein-Klick-Weg ab. Ein Abhaken mit Schätzung wäre endgültig: für erledigte Pläne liest Puls nicht mehr nach. Atomar wie „manuell".
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                vm = None
+                if daten.get("aktion") == "vormerken":
+                    vm = {"at": datetime.now(timezone.utc).isoformat(), "von": str(me), "grund": str(daten.get("grund") or "").strip()[:60] or None}
+                r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                                json={"p_plan": pid, "p_patch": {"abhaken_vorgemerkt": vm}, "p_status": "review"})
+                _sb_pruefen(r)
+                if not r.json():
+                    return jsonify({"error": "Nur Pläne in Überprüfen lassen sich vormerken"}), 409
+                return jsonify({"ok": True, "plan_id": pid, "vorgemerkt": vm})
             except Exception as e:
                 return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
         if daten.get("aktion") == "erledigt":

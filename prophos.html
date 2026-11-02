@@ -36208,6 +36208,7 @@
     if(opts && opts.einKlick){
       const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
       if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ _mwdErlEinKlick = true; mklWdErledigtSpeichern(); return }
+      if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
     }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -36814,6 +36815,7 @@
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       wdl.daten = d; wdl.fehler = ''
+      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} }, 0)   // vorgemerkte Pläne mit frischer Lesung abhaken (02.11.2026)
       wdlLokalAnwenden()   // eben abgehakte/verschobene Zeilen nie mit einem älteren Backend-Stand zurückholen (08.10.2026)
       try{ await wdlPolarLaden() }catch(_){}   // Polar (20.10.2026): Stand je laufendem Polar-Plan (/polar/stand), 404 = Hand-Polar
     }catch(e){ wdl.fehler = String((e && e.message) || e) }
@@ -36858,6 +36860,7 @@
       let offen = false
       if(l.status && t.status !== l.status){ t.status = l.status; offen = true }
       if('manuell' in l && !!(t.manuell) !== !!(l.manuell)){ t.manuell = l.manuell; offen = true }
+      if('vorgemerkt' in l && !!(t.vorgemerkt) !== !!(l.vorgemerkt)){ t.vorgemerkt = l.vorgemerkt; offen = true }
       if(!offen) _wdlLokal.delete(pid)                                          // Backend meldet es selbst → Merker weg
     }
   }
@@ -38157,6 +38160,38 @@
     return ''
   }
   window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken
+  /* VORMERKEN STATT POPUP (Finn 02.11.2026: bei „ohne Lesung" auch direkt weg): der Klick merkt den Plan vor (Railway mt5_baseline.abhaken_vorgemerkt), er bleibt in Überprüfen
+   * und verschwindet aus „Erledigt". Kommt die Lesung, hakt der Radar ihn über den Ein-Klick-Weg ab (wdlVorgemerktTick), mit der echten Lesung als Wert. Braucht er dann doch eine
+   * Aktion (Blow, Ziel …), steht er wieder in „Erledigt" und öffnet beim Klick das Popup. Geschätzt wird nie etwas gebucht. */
+  const WDL_VORMERK_GRUENDE = new Set(['wartet auf Lesung', 'keine echte Lesung', 'Hedge-P&L fehlt'])
+  const wdlVorgemerkt = t => !!(t && t.status === 'review' && t.vorgemerkt && t.vorgemerkt.at)
+  const wdlVorgemerktVersteckt = t => wdlVorgemerkt(t) && WDL_VORMERK_GRUENDE.has(wdlEinKlickGrund(t))
+  window._wdlVorgemerktVersteckt = wdlVorgemerktVersteckt   // Test-Haken
+  async function wdlVormerken(pid, t, grund){
+    const vm = { at: new Date().toISOString(), grund }
+    t.vorgemerkt = vm; wdlLokalMerken(pid, { vorgemerkt: vm }); wdlRender()
+    if(typeof atToast === 'function') atToast('Vorgemerkt — wird abgehakt, sobald die Lesung da ist (nichts geschätzt gebucht)', 'ok')
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?${WDL_SICHT}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aktion: 'vormerken', plan_id: pid, grund }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status))
+    }catch(e){
+      t.vorgemerkt = null; wdlLokalMerken(pid, { vorgemerkt: null }); wdlRender()
+      if(typeof atToast === 'function') atToast('Nicht vorgemerkt: ' + String((e && e.message) || e), 'end')
+    }
+  }
+  // Abhaken, sobald die Lesung da ist: nur über den Ein-Klick-Weg mit nurStill (öffnet nie ein Popup von selbst), einer zur Zeit, je Plan höchstens alle 60 s,
+  // nie während Finn selbst ein Abhak-Popup offen hat. Läuft, solange irgendwo ein Radar offen ist (wdlLaden-Takt)
+  const _wdlVmVersuch = new Map()
+  function wdlVorgemerktTick(){
+    if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlVorgemerkt(x) && !wdlEinKlickGrund(x) && Date.now() - (_wdlVmVersuch.get(wdlTid(x)) || 0) > 60000)
+    if(!t) return
+    _wdlVmVersuch.set(wdlTid(t), Date.now())
+    try{ mklWdErledigtOeffnen(wdlTid(t), t, { sicht: true, einKlick: true, nurStill: true }) }catch(e){ console.warn('[radar] vorgemerkt abhaken', e) }
+  }
   let _wdlEinKlickAt = 0
   function wdlAbhakenSperre(t){
     // seit 30.09.2026 (Finn wollte einen Echo-Trade von Mike abhaken, Knopf war gesperrt): Orbit/Echo/Topstep V2 aller IDs
@@ -38448,7 +38483,8 @@
     wdlModelleRender(alleTrades)
     const modellTrades = alleTrades.filter(wdlModellPasst)
     wdlIdsRender(modellTrades)
-    const trades = modellTrades.filter(wdlPasst)
+    const vorgemerktN = modellTrades.filter(wdlPasst).filter(wdlVorgemerktVersteckt).length   // vorgemerkt (02.11.2026): aus „Erledigt" raus, nur gezählt
+    const trades = modellTrades.filter(wdlPasst).filter(t => !wdlVorgemerktVersteckt(t))
     const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
@@ -39038,7 +39074,7 @@
         + manuell(g, a)
       const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep), [...g.pr, ...g.er])   // Rest von Hand (20.10.2026): beendete + abgehakte Zeilen
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
-        + og3('Erledigt', erledigtN, erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt', 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
+        + og3('Erledigt', erledigtN, (erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt') + (vorgemerktN ? ` · ${vorgemerktN} vorgemerkt, P&L vorläufig — wird abgehakt, sobald die Lesung da ist` : ''), 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
         + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
         + verlaufOg(a.er)
     }
@@ -39128,7 +39164,9 @@
       const pid = ab.getAttribute('data-wdl-abhaken'), t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === pid)
       // Doppelklick: die Zeile ist nach dem ersten Klick weg, die nächste rückt unter den Mauszeiger und würde ohne Popup mitgebucht (Gegenprüfung 30.10.2026)
       if(Date.now() - _wdlEinKlickAt < 600) return
-      const ein = !!t && !wdlEinKlickGrund(t); if(ein) _wdlEinKlickAt = Date.now()
+      const grund = t ? wdlEinKlickGrund(t) : 'kein Trade'
+      if(t && WDL_VORMERK_GRUENDE.has(grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }   // ohne Lesung: vormerken, nie schätzen (02.11.2026)
+      const ein = !!t && !grund; if(ein) _wdlEinKlickAt = Date.now()
       if(t) mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: ein })   // Radar = Admin-Ansicht (27.10.2026)
       return
     }
