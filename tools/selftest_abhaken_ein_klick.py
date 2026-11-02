@@ -24,7 +24,7 @@ oe = html[html.index("function mklWdErledigtOeffnen("):html.index("function mwdE
 check("opts.einKlick" in oe and "mklWdErledigtSpeichern(); return" in oe and "!wdhCb?.checked" in oe, "Ein Klick speichert über den Popup-Weg, Winning-Day-Vorschlag öffnet das Popup")
 check(oe.index("opts.einKlick") < oe.index("getElementById('mwdErledigtModal')?.classList.add('open')"), "Prüfung läuft vor dem Öffnen")
 check("const ein = !!t && !grund; if(ein)" in html and "Date.now() - _wdlEinKlickAt < 600" in html, "Klick fragt die Prüfung, Doppelklick bucht die nächste Zeile nicht mit")
-check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "dm.status" not in fn and "P&L passt nicht" not in fn and "Ziel oder Boden unbekannt" not in fn, "Balance 0 → Popup; Tage-Mini, Demo, P&L-Abweichung, Ziel/Boden unbekannt nicht mehr (Finn 02.11.2026)")
+check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "beide_in_minute" not in fn and "P&L passt nicht" in fn and "Ziel oder Boden unbekannt" in fn and "dm.status === 'liquidiert'" in fn, "Balance 0 → Popup; Tage-Mini und TP/Liq unklar nicht mehr, Schutz der Buchung bleibt (S9 02.11.2026)")
 check("const sicht = _mwdErlSicht, ohneHedge" in html, "Werte für Anfrage und Toast vor dem await festgehalten")
 sp = html[html.index("async function mklWdErledigtSpeichern("):html.index("document.getElementById('mwdErledigtClose')")]
 check("wdlLokalVergessen(pid)" in sp and "Abhaken nicht gespeichert" in sp, "Fehler: Toast und Zeile zurück")
@@ -46,17 +46,17 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("SL getroffen", {"pl_balance": -700}, True), ("15 % + über TP in der Grenze", {"pl_balance": 800}, True),
           ("konto_geblowt", {"endlesung": {"konto_geblowt": {"x": 1}}}, False), ("grund tsx_geblowt", {"endlesung": {"grund": "tsx_geblowt"}}, False),
           ("puls_fehler konto_weg", {"endlesung": {"puls_fehler": "konto_weg: fehlt"}}, False), ("puls_fehler konto_nicht_erreicht", {"endlesung": {"puls_fehler": "konto_nicht_erreicht"}}, False),
-          ("ohne ziel_usd", {"ziel_usd": None}, True), ("ohne Liq/Boden", {"_ohneLiq": True}, True), ("wdlZielMarkiert", {"_ziel": True}, False),
+          ("ohne ziel_usd", {"ziel_usd": None}, False), ("ohne Liq/Boden", {"_ohneLiq": True}, False), ("wdlZielMarkiert", {"_ziel": True}, False),
           ("ziel_erreicht_at am Konto", {"konto_aktuell": {"typ": "phase1", "ziel_erreicht_at": "2026-10-30T10:00:00Z"}}, False),
-          ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt", {"konto_aktuell": None}, True),
-          ("P&L weit über TP", {"pl_balance": 5000}, True), ("Verlust weit über SL", {"pl_balance": -5000}, True), ("ohne TP/SL am Plan", {"master_tp": None, "master_sl": None}, True), ("P&L genau 0", {"pl_balance": 0}, True), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, True),
+          ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt", {"konto_aktuell": None}, False),
+          ("P&L weit über TP", {"pl_balance": 5000}, False), ("Verlust weit über SL", {"pl_balance": -5000}, False), ("ohne TP/SL am Plan", {"master_tp": None, "master_sl": None}, False), ("P&L genau 0", {"pl_balance": 0}, False), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, False),
           ("t2_grund unplausibel", {"kette_grund": "Ergebnis unplausibel (−148.000 $)"}, False), ("Funded Futures", {"konto_typ": "funded", "konto_aktuell": {"typ": "funded"}}, False),
           ("Funded CFD unauffällig", {"konto_typ": "funded_cfd", "konto_aktuell": {"typ": "funded_cfd"}, "ziel_usd": None, "route": "mt5", "slave_pl": 0}, True),
           ("Balance 0", {"balance_end": 0, "pl_balance": -100000}, False), ("Hedge offen", {"hedge": {"status": "offen"}}, False), ("Lesung fehlt", {"pl_balance": None}, False),
           # Finn 02.11.2026: nichts passiert → direkt weg; Lesung/Hedge-P&L fehlen → Popup bleibt (Ein Klick würde eine Schätzung endgültig buchen)
-          ("Tage-Mini", {"tage_mini": {"ist": 2}}, True), ("Demo an der Liq ohne Blow", {"demo": {"status": "liquidiert", "stop": "liq"}}, True), ("TP/Liq in derselben Minute", {"demo": {"status": "beide_in_minute"}}, True),
+          ("Tage-Mini", {"tage_mini": {"ist": 2}}, True), ("Demo an der Liq ohne Blow", {"demo": {"status": "liquidiert", "stop": "liq"}}, False), ("Demo an der Liq, Tageslimit", {"demo": {"status": "liquidiert", "stop": "liq"}, "_tag": True}, True), ("TP/Liq in derselben Minute", {"demo": {"status": "beide_in_minute"}}, True),
           ("Balance-Sprung", {"balance_sprung": True}, False), ("wartet auf Lesung", {"_wart": True}, False), ("geschätzter P&L", {"_gesch": True}, False), ("Folgetrade-Balance", {"endlesung": {"balance_quelle": "folgetrade"}}, False),
-          ("Hedge-P&L fehlt", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen"}}, False), ("Hedge-P&L da", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen", "pl": -120}}, True),
+          ("Hedge-P&L fehlt", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen"}}, False), ("Hedge-P&L da", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen", "pl": -120}}, True), ("Lesung im falschen Konto (+40k)", {"pl_balance": 40000}, False),
           ("Funded-CFD-Ziel", {"_fz": True}, False), ("Konto weg", {"_weg": True}, False), ("geblowt", {"_blow": True}, False), ("bestanden-Chip", {"_best": True}, False), ("Polar", {"_polar": True}, False), ("manuell", {"_man": True}, False)]
 js = STUBS + fn + "\nconst F = " + json.dumps([dict(BASIS, **f[1]) for f in FAELLE], ensure_ascii=False) + "; print(JSON.stringify(F.map(wdlEinKlickGrund)));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
@@ -89,7 +89,9 @@ T.pl_balance = 650; T.balance_end = 100650;
 const sichtbar = !wdlVorgemerktVersteckt(T); wdlVorgemerktTick(); const nachLesung = geoeffnet.slice(); wdlVorgemerktTick();
 const B = """ + json.dumps(dict(BASIS, id="v2", pl_balance=None)) + """; B.vorgemerkt = { at: 'x' }; wdl.daten.trades = [B];
 B.pl_balance = 650; B._blow = true; const blowSichtbar = !wdlVorgemerktVersteckt(B); wdlVorgemerktTick();
-print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar }));
+const F = """ + json.dumps(dict(BASIS, id="v3", pl_balance=None)) + """; F.vorgemerkt = { at: 'x' }; wdl.daten.trades = [F];
+F.pl_balance = 40000; const falschSichtbar = !wdlVorgemerktVersteckt(F); wdlVorgemerktTick();
+print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar, falschSichtbar }));
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d2:
     d2.write(js2)
@@ -103,6 +105,7 @@ except Exception:
 check(v.get("vorher") == "keine echte Lesung" and v.get("versteckt") is True and v.get("ohneLesung") == 0, "ohne Lesung: vorgemerkt, aus „Erledigt“ raus, nichts abgehakt")
 check(v.get("sichtbar") is True and v.get("nachLesung") == [["v1", True, True]] and v.get("zweimal") == 1, "Lesung da: genau ein stiller Ein-Klick mit der echten Lesung, kein zweiter binnen 60 s")
 check(v.get("blowSichtbar") is True and v.get("zweimal") == 1, "nach der Lesung Blow: zurück in „Erledigt“, kein stilles Abhaken (Popup beim Klick)")
+check(v.get("falschSichtbar") is True and v.get("zweimal") == 1, "Lesung im falschen Konto (+40k): kein stilles Abhaken, zurück in „Erledigt“ mit Popup")
 
 check('daten.get("nur_review") is True and plan and plan.get("status") != "review"' in src and "einKlick ? { nur_review: true }" in html, "nur_review: Ein Klick bekommt 409, wenn der Trade nicht mehr in Überprüfen steht")
 print(f"\n{'selftest_abhaken_ein_klick: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
