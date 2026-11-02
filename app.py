@@ -20188,6 +20188,8 @@ def code_tab_stand(pc):
         print(f"[tab-stand] {pc}: {spur}", flush=True)
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
                     "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
+                    # Lotse (Eingang 02.11.2026): TradingView und MT5 nur ohne offenen Plan. None = IDs dieses PCs unbekannt, gilt beim Agenten als unklar, also gesperrt.
+                    "plaene_offen": (sum(1 for x in plaene if str(x.get("status")) == "open") if uids else None),
                     "auftrag": tab_auftrag_offen(_tab_auftrag.get(pc), time.time())})
 
 

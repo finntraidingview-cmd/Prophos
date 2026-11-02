@@ -30,6 +30,10 @@ TAB_PRO = {"type": "page", "title": "Prophos", "url": "http://localhost:5000/", 
 TAB_ANMELD = {"type": "page", "title": "Sign in", "url": "https://topstepx.com/login", "webSocketDebuggerUrl": "ws://127.0.0.1:9333/devtools/page/GH-4"}
 TABS = [TAB_TSX, TAB_TV, TAB_PRO, TAB_ANMELD]
 
+LEER = {"tv": None, "mt5": None, "plan": None}
+_frei0 = a.freigabe
+a.freigabe = lambda *x, **y: _frei0(*x, **dict({"handel": LEER} if len(x) < 10 else {}, **y))   # Handelsstand frei, außer der Test setzt ihn
+
 # ── Titel und Fenster ──
 for name, t, k, e in (("TopstepX-Kursitel", "NQZ26 $28,677.00 ▲ +0.50% - Google Chrome", KL, CHROME), ("TopstepX ohne Pfeil", "MNQZ26 $28,677.00", KL, CHROME), ("Wort TopstepX", "TopstepX - Google Chrome", KL, CHROME),
                       ("Wort Topstep im Edge", "Topstep Dashboard - Microsoft Edge", KL, "msedge.exe"), ("Desktop-App", "TopstepX", "App", "topstepx.exe"), ("mit Zähler", "(2) NQZ26 $28,677.00", KL, CHROME),
@@ -37,7 +41,7 @@ for name, t, k, e in (("TopstepX-Kursitel", "NQZ26 $28,677.00 ▲ +0.50% - Googl
                       ("Konsole mit Python", "python", "ConsoleWindowClass", "python.exe")):
     pruefe("gesperrt: " + name, a.freigabe(t, k, e, 111, 222, {})[0] is None)
 for name, t, k, e, soll in (("TradingView", "NQ1! 28,683.25 … Unnamed - Google Chrome", KL, CHROME, "browser"), ("TradingView mit Prozent", "NQZ2026 30,787.00 ▲ +0.01% Unnamed - Google Chrome", KL, CHROME, "browser"),
-                            ("MT5", "14348534 - FundedNext-Server 2 - Hedge - FundedNext Ltd", MT5K, "terminal64.exe", "frei"), ("MT5-Dialog", "Anmeldung", "#32770", "terminal64.exe", "frei"),
+                            ("MT5", "14348534 - FundedNext-Server 2 - Hedge - FundedNext Ltd", MT5K, "terminal64.exe", "mt5"), ("MT5-Dialog", "Anmeldung", "#32770", "terminal64.exe", "mt5"),
                             ("Prophos", "Prophos - Google Chrome", KL, CHROME, "browser"), ("Apex-Seite", "Apex Trader Funding - Google Chrome", KL, CHROME, "browser"), ("Explorer", "mt5-copier", "CabinetWClass", "explorer.exe", "frei"),
                             ("Taskleiste", "", "Shell_TrayWnd", "explorer.exe", "frei"), ("Chrome-Menü", "", "Chrome_WidgetWin_2", CHROME, "frei"), ("PowerShell", "Windows PowerShell", "ConsoleWindowClass", "powershell.exe", "konsole"),
                             ("Terminal", "Administrator: Windows PowerShell", "CASCADIA_HOSTING_WINDOW_CLASS", "windowsterminal.exe", "konsole"), ("Einstellungen", "Einstellungen", "ApplicationFrameWindow", "applicationframehost.exe", "frei")):
@@ -63,8 +67,45 @@ NETSTAT = "  TCP    0.0.0.0:135   0.0.0.0:0   ABHÖREN   1096\n  TCP    127.0.0.
 pruefe("netstat: Port 9333", a.netstat_lauscher_pid(NETSTAT, 9333) == 6144)
 pruefe("Browser-Kopf", a.im_browser_kopf(129, 0) and not a.im_browser_kopf(130, 0) and a.im_browser_kopf(100, -8) and a.im_browser_kopf(190, 0, 144))
 
+# ── Riegel Handel: Position oder offener Plan ──
+MT5T = "14348534 - FundedNext-Server 2 - Hedge - FundedNext Ltd"
+for name, ha in (("TradingView-Position", dict(LEER, tv="TradingView: 1 Position(en) offen")), ("Plan offen", dict(LEER, plan="1 offene(r) Plan")), ("Stand fehlt", None), ("Teil fehlt", {"plan": None})):
+    pruefe("Puls-Chrome gesperrt: " + name, _frei0(TVT, KL, CHROME, 500, 9, {"pid": 500}, None, True, TABS, ha)[0] is None)
+    pruefe("TradingView in anderem Chrome gesperrt: " + name, _frei0(TVT, KL, CHROME, 700, 9, {}, None, True, None, ha)[0] is None)
+for name, ha in (("MT5-Position", dict(LEER, mt5="MT5: Position")), ("Plan offen", dict(LEER, plan="1 Plan")), ("Stand fehlt", None)):
+    pruefe("MT5 gesperrt: " + name, _frei0(MT5T, MT5K, "terminal64.exe", 700, 9, {}, None, True, None, ha)[0] is None)
+    pruefe("MT5-Dialog gesperrt: " + name, _frei0("Anmeldung", "#32770", "terminal64.exe", 700, 9, {}, None, True, None, ha)[0] is None)
+pruefe("MT5-Position sperrt TradingView nicht", _frei0(TVT, KL, CHROME, 500, 9, {"pid": 500}, None, True, TABS, dict(LEER, mt5="MT5: Position"))[0] == "puls_chrome")
+pruefe("Prophos in anderem Chrome bleibt frei bei Position", _frei0("Prophos - Google Chrome", KL, CHROME, 700, 9, {}, None, True, None, dict(LEER, tv="x", plan="y"))[0] == "browser")
+pruefe("Explorer bleibt frei bei Position", _frei0("Ordner", "CabinetWClass", "explorer.exe", 700, 9, {}, None, True, None, dict(LEER, tv="x", mt5="y", plan="z"))[0] == "frei")
+OKR = {"positionen_ok": True, "positionen": [], "positionen_alter_s": 1.2}
+pruefe("Reader leer und frisch", a.reader_auswerten(OKR) is None)
+for name, d in (("Position", dict(OKR, positionen=[{"symbol": "NQ"}])), ("blind", dict(OKR, positionen_ok=False)), ("alt", dict(OKR, positionen_alter_s=99)), ("ohne Alter", dict(OKR, positionen_alter_s=None)), ("ohne Liste", {"positionen_ok": True}), ("Unsinn", "x")):
+    pruefe("Reader sperrt: " + name, a.reader_auswerten(d) is not None)
+I = {"name": "A", "age": 3, "status": {"running": True, "master_positions": [], "hedges": {}}}
+pruefe("MT5 leer und frisch", a.mt5_auswerten({"instances": [I]}) is None)
+pruefe("MT5 Lese-EA frisch", a.mt5_auswerten({"instances": [{"name": "B", "age": 900, "status": {"lesen": True, "master_positions": [], "hedges": {}}}]}) is None)
+for name, d in (("Position", [dict(I, status=dict(I["status"], master_positions=[{"s": 1}]))]), ("Hedge", [dict(I, status=dict(I["status"], hedges={"1": [1]}))]), ("alt", [dict(I, age=900)]), ("Warnung", [dict(I, status=dict(I["status"], note="x"))]),
+                ("keine Instanz", []), ("ohne Status", [{"name": "A"}]), ("zweite offen", [I, dict(I, status=dict(I["status"], master_positions=[1]))])):
+    pruefe("MT5 sperrt: " + name, a.mt5_auswerten({"instances": d}) is not None)
+pruefe("MT5 sperrt: Unsinn", a.mt5_auswerten("x") is not None)
+pruefe("Plan frei", a.plan_auswerten({"ok": True, "riegel": "", "plaene_offen": 0}) is None)
+for name, d in (("offen", {"ok": True, "riegel": "", "plaene_offen": 2}), ("Start nah", {"ok": True, "riegel": "Start in ≤ 5 min", "plaene_offen": 0}), ("Feld fehlt", {"ok": True, "riegel": ""}), ("IDs unbekannt", {"ok": True, "riegel": "", "plaene_offen": None}), ("Fehler", {"ok": False})):
+    pruefe("Plan sperrt: " + name, a.plan_auswerten(d) is not None)
+_jh = a._json_holen
+
+
+def jh_kaputt(url, kopf=None, timeout=2.0):
+    raise OSError("weg")
+
+
+a._json_holen = jh_kaputt
+HS = a.handel_stand()
+pruefe("Reader, Panel, Railway weg: alles unklar", all(HS[x] for x in ("tv", "mt5", "plan")), HS)
+a._json_holen = _jh
+
 # ── Tasten, start, Punkte, Felder ──
-for k, art in (("ctrl+w", "browser"), ("w+strg", "puls_chrome"), ("alt+f4", "browser"), ("ctrl+shift+w", "puls_chrome"), ("f4+ctrl", "browser")):
+for k, art in (("ctrl+w", "browser"), ("w+strg", "puls_chrome"), ("alt+f4", "browser"), ("ctrl+shift+w", "puls_chrome"), ("f4+ctrl", "browser"), ("alt+f4", "mt5"), ("f4+alt", "mt5")):
     try:
         a.kombi_pruefen(k, art)
         pruefe("Kombi gesperrt: %s in %s" % (k, art), False)
@@ -92,12 +133,12 @@ pruefe("Tab-Liste ohne Token", "geheim" not in json.dumps(a.tab_kurz(TAB_TSX)))
 pruefe("Tab-Wahl", a.tab_waehlen(TABS, "topstepx.com/trade")[1].endswith("AB-1"))
 
 # ── Ablauf mit Attrappen ──
-WELT = SimpleNamespace(vorne=1, unter=1, fenster={}, oben=0, gesendet=[], bewegt=[], gestartet=[], lauf=None, panel="frei", cdp_rufe=[], wm=[], tabs=TABS, tabs_frisch=None)
+WELT = SimpleNamespace(vorne=1, unter=1, fenster={}, oben=0, gesendet=[], bewegt=[], gestartet=[], lauf=None, panel="frei", cdp_rufe=[], wm=[], tabs=TABS, tabs_frisch=None, handel=LEER)
 a.vorne_hwnd = lambda: WELT.vorne
 a.fenster_unter = lambda x, y: WELT.unter
 a.fenster_info = lambda h: WELT.fenster[h][:3]
 a.exe_name = lambda pid: next((f[3] for f in WELT.fenster.values() if f[2] == pid), "")
-a.puls_stand = lambda: (500, True, WELT.tabs)
+a.puls_stand = lambda: (500, True, WELT.tabs, WELT.handel)
 a.puls_tabs = lambda: WELT.tabs_frisch
 a.puls_fenster_merk = lambda: None
 a.fenster_oben = lambda h: WELT.oben
@@ -140,7 +181,20 @@ for hw, wort in ((PTSX, "NQZ26"), (PANM, "Sign in"), (NTSX, "TopstepX"), (BOT, "
         pruefe("unter dem Zeiger %s: %s kein Ereignis" % (wort, name), e["ok"] is False and not WELT.gesendet and not WELT.bewegt, e)
     pruefe("schliessen %s verweigert" % wort, lauf([{"aktion": "schliessen", "fenster": wort}], vorne=EXPL)["ok"] is False and not WELT.wm)
 
-# Jetzt erlaubt: TradingView im Puls-Chrome, MT5, Prophos, Rechtsklick
+# Riegel Handel im Ablauf: kein Ereignis bei TradingView und MT5, Explorer bleibt
+for wort, ha in (("TradingView-Position", dict(LEER, tv="TradingView: 1 Position")), ("offener Plan", dict(LEER, plan="1 Plan")), ("Stand unklar", {"tv": "unklar", "mt5": "unklar", "plan": "unklar"})):
+    WELT.handel = ha
+    for name, ak in MAUSARTEN + [("text", {"aktion": "tasten", "fenster": "NQ1!", "text": "x"}), ("kombi", {"aktion": "tasten", "fenster": "NQ1!", "kombi": "enter"})]:
+        pruefe("%s: %s in TradingView kein Ereignis" % (wort, name), lauf([ak], vorne=PTV)["ok"] is False and not WELT.gesendet and not WELT.bewegt)
+    pruefe("%s: Explorer vorn, TradingView unter dem Zeiger kein Klick" % wort, lauf([KLICK], vorne=EXPL, unter=PTV)["ok"] is False and not WELT.gesendet)
+    pruefe("%s: Klick im Explorer geht" % wort, lauf([KLICK])["ok"])
+WELT.handel = dict(LEER, mt5="MT5: Position")
+pruefe("MT5-Position: Klick in MT5 gesperrt", lauf([KLICK], vorne=MT5)["ok"] is False and not WELT.gesendet)
+WELT.handel = LEER
+pruefe("MT5 nie schliessen, auch ohne Position", lauf([{"aktion": "schliessen", "fenster": "14348534"}], vorne=EXPL)["ok"] is False and not WELT.wm)
+pruefe("alt+f4 in MT5 gesperrt", lauf([{"aktion": "tasten", "fenster": "14348534", "kombi": "alt+f4"}], vorne=MT5)["ok"] is False and not WELT.gesendet)
+
+# Ohne Position und Plan erlaubt: TradingView im Puls-Chrome, MT5, Prophos, Rechtsklick
 for hw, wort in ((PTV, "TradingView im Puls-Chrome"), (MT5, "MT5"), (PROPH, "Prophos"), (EXPL, "Explorer")):
     pruefe("Klick in %s" % wort, lauf([KLICK], vorne=hw)["ok"] and WELT.gesendet == [3])
     pruefe("Rechtsklick in %s" % wort, lauf([dict(KLICK, art="rechts")], vorne=hw)["ok"] and WELT.gesendet == [3])

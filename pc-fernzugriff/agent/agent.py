@@ -15,6 +15,7 @@ Aktionen: foto · tabs · fenster · maus · klick · tasten · start · vorhole
 NUR TOPSTEPX GESPERRT (Finn 02.11.2026 05:55: „Die Klicksperre kannst du aufheben. In TradingView darfst du klicken. In TopstepX nichts klicken, nur Fotos und
 zugucken.“; ersetzt die Erlaubt-Liste von 04:42): Eingaben gehen überall hin, nur nie an TopstepX, geprüft am Vordergrund UND am Fenster unter dem Zielpunkt. Im
 Puls-Chrome zählt der aktive Tab, gelesen per CDP; nicht lesbar = gesperrt. Solange Puls läuft, gibt es keine Eingabe (lauf_grund). puls_ok und browser_ok bleiben entfernt.
+RIEGEL HANDEL (Eingang 02.11.2026): In TradingView, im Puls-Chrome und in MT5 nur, wenn weder Position noch offener Plan da ist; unklarer Stand = gesperrt. MT5 wird nie geschlossen.
 REGEL, nicht technisch erkennbar: Der Lotse setzt, ändert und schließt keine Orders oder Positionen. Ein Order-Knopf in TradingView oder MT5 sieht für diesen Agenten aus
 wie jeder andere Punkt im Fenster. Auch Panel-Aufrufe (z. B. /api/tsx-lesen, die Puls klicken lässt) und SSH-Befehle sperrt er nicht; scharf:true löst der Lotse nie aus.
 `tasten` tippt zusätzlich NUR, wenn das Vordergrundfenster den erwarteten Titel trägt (Pflichtfeld "fenster"); Vorfall 01.11.2026:
@@ -43,9 +44,19 @@ AUFTRAEGE = os.path.join(WURZEL, "auftraege")
 ERGEBNISSE = os.path.join(WURZEL, "ergebnisse")
 LOG = os.path.join(WURZEL, "agent.log")
 PULS_LOCK = r"C:\mt5-copier\puls_handlauf.lock"
-STAND = "2026-11-02-nur-topstepx"            # steht in jedem Ergebnis: so sieht der Mac, ob der neue Agent wirklich läuft
+STAND = "2026-11-02-handel-riegel"            # steht in jedem Ergebnis: so sieht der Mac, ob der neue Agent wirklich läuft
 # TOPSTEPX — Erkennung wie Puls (order_bot.py): Der geladene Tab heißt nur „NQZ26 $30,921.75 ▲ +0.50%“ (TSX_RX_TITEL: Kontrakt mit zweistelligem Jahr + „$“).
 TSX_RX_TITEL = re.compile(r"^\s*(?:\(\d+\)\s*)?[A-Z]{1,5}[FGHJKMNQUVXZ]\d{2}\s+\$\s?\d")
+# TradingView außerhalb des Puls-Chrome: „NQZ2026 30,787.00 ▲ +0.01% Unnamed“, „NQ1! 28,683.25 … Unnamed“.
+TV_RX_TITEL = re.compile(r"^(\(\d+\)\s*)?[A-Z][A-Z0-9!:._-]{0,24}\s+\$?\d[\d,.]*[.,]\d{1,5}(\s|$)")
+MT5_KLASSE_ANFANG = "metaquotes::"
+MT5_EXE = ("terminal64.exe", "terminal.exe")
+READER_STAND = "http://127.0.0.1:8790/positions"
+PANEL_INSTANZEN = "http://127.0.0.1:8770/api/instances"
+RAILWAY = "https://web-production-bec81.up.railway.app"
+CODE_TOKEN = r"C:\mt5-copier\code_token.txt"
+PC_ID_DATEI = r"C:\mt5-copier\pc_id.json"
+READER_FRISCH_S = 15
 # Im Puls-Chrome entscheidet der aktive Tab: Die Adresse steht in der CDP-Liste, der Titel des Fensters sagt, welcher Tab es ist.
 # Puls merkt sein Fenster in C:\mt5-copier\puls_fenster.json (hwnd, pid, profil — order_bot.py _puls_merk_schreiben). Die Datei kann
 # alt sein, darum zusätzlich der Prozess, der den CDP-Port 9333 hält (puls_browser_pid).
@@ -272,12 +283,63 @@ def puls_tab_stand(fenster_titel, tabs):
     return "topstepx" if any("topstep" in str(x.get("url") or "").lower() for x in treffer) else "frei"
 
 
-def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, puls_pid_sicher=True, tabs=None):
-    """REIN RECHNEND (testbar): → (art, grund). art = puls_chrome | browser | konsole | frei, wenn Eingaben erlaubt sind; sonst None + Grund.
-    Finn 02.11.2026 05:55: gesperrt ist nur TopstepX. Dazu die Betriebs-Konsolen, das ist keine Handelssperre: Ein Klick hält dort das Programm an."""
+def reader_auswerten(d):
+    """REIN RECHNEND (testbar): Antwort des Readers → Grund oder None. Nur eine sehende, frische, leere Liste zählt als „keine Position“."""
+    if not isinstance(d, dict) or d.get("positionen_ok") is not True or not isinstance(d.get("positionen"), list):
+        return "TradingView-Stand unklar (Reader ohne Urteil)"
+    alter = d.get("positionen_alter_s")
+    if not isinstance(alter, (int, float)) or alter > READER_FRISCH_S:
+        return "TradingView-Stand unklar (Reader-Stand alt)"
+    return "TradingView: %d Position(en) offen" % len(d["positionen"]) if d["positionen"] else None
+
+
+def mt5_auswerten(d):
+    """REIN RECHNEND (testbar): Antwort von /api/instances → Grund oder None. Maßstab wie im Panel: Beweis nur aus frischem Copier-Stand oder frischem Lese-EA. Keine Instanz
+    heißt nicht „keine Position“: Das Terminal ist dann unbekannt."""
+    if not isinstance(d, dict) or not isinstance(d.get("instances"), list) or not d["instances"]:
+        return "MT5-Stand unklar (keine Instanz im Panel)"
+    for i in d["instances"]:
+        st = i.get("status") if isinstance(i, dict) else None
+        if not isinstance(st, dict):
+            return "MT5-Stand unklar (Instanz ohne Status)"
+        if st.get("master_positions"):
+            return "MT5: Position offen (%s)" % str(i.get("name"))[:30]
+        if any(st.get("hedges").values()) if isinstance(st.get("hedges"), dict) else st.get("hedges"):
+            return "MT5: Hedge offen (%s)" % str(i.get("name"))[:30]
+        frisch = st.get("lesen") is True or (st.get("running") and isinstance(i.get("age"), (int, float)) and i["age"] <= 15)
+        if not frisch or st.get("note"):
+            return "MT5-Stand unklar (%s nicht frisch)" % str(i.get("name"))[:30]
+    return None
+
+
+def plan_auswerten(d):
+    """REIN RECHNEND (testbar): Antwort von /code/tab-stand → Grund oder None. riegel: Signal läuft, Start ≤ 5 min, Hedge öffnet. plaene_offen: Pläne im Status open."""
+    if not isinstance(d, dict) or d.get("ok") is not True or type(d.get("plaene_offen")) is not int:
+        return "Plan-Stand unklar (Railway)"
+    if d["plaene_offen"]:
+        return "%d offene(r) Plan/Pläne" % d["plaene_offen"]
+    return "Plan: %s" % str(d["riegel"])[:60] if d.get("riegel") else None
+
+
+def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, puls_pid_sicher=True, tabs=None, handel=None):
+    """REIN RECHNEND (testbar): → (art, grund). art = mt5 | puls_chrome | browser | konsole | frei, wenn Eingaben erlaubt sind; sonst None + Grund.
+    Finn 02.11.2026 05:55: hart gesperrt ist TopstepX. Eingang 02.11.2026: TradingView, Puls-Chrome und MT5 nur ohne Position und offenen Plan. handel = {"tv": Grund|None,
+    "mt5": Grund|None, "plan": Grund|None}; fehlt es, ist der Stand unklar, also gesperrt. Dazu die Betriebs-Konsolen, keine Handelssperre: Ein Klick hält dort das Programm an."""
+    def handel_grund(*teile):
+        if not isinstance(handel, dict):
+            return "Handelsstand unklar"
+        for x in teile + ("plan",):
+            if x not in handel:
+                return "Handelsstand unklar"
+            if handel[x]:
+                return handel[x]
+        return None
     t, k, e = str(titel or ""), str(klasse or ""), str(exe or "").lower()
     if ist_topstepx_titel(t):
         return None, "TopstepX: %s" % t[:60]
+    if k.lower().startswith(MT5_KLASSE_ANFANG) or e in MT5_EXE:     # auch MT5-Dialoge: gleiche Klasse wie überall (#32770), aber terminal64.exe
+        g = handel_grund("mt5")
+        return (None, "MT5 gesperrt: %s" % g) if g else ("mt5", "")
     browser = k in BROWSER_KLASSEN and (e in BROWSER_EXE or not e)
     if browser and not puls_pid_sicher:
         return None, "Puls-Chrome nicht bestimmbar (netstat) — Browser gesperrt"
@@ -287,8 +349,13 @@ def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, 
             return None, "TopstepX im Puls-Chrome: %s" % t[:60]
         if st == "unklar":
             return None, "%s (CDP) — gesperrt: %s" % (PULS_UNKLAR, t[:60])
-        return "puls_chrome", ""
+        g = handel_grund("tv")
+        return (None, "Puls-Chrome gesperrt: %s" % g) if g else ("puls_chrome", "")
     if browser:
+        if "tradingview" in t.lower() or TV_RX_TITEL.match(t) or (("▲" in t or "▼" in t) and "%" in t):
+            g = handel_grund("tv")
+            if g:
+                return None, "TradingView gesperrt: %s" % g
         return "browser", ""
     if k in KONSOLEN_KLASSEN:
         if e not in KONSOLEN_EXE or any(w in t.lower() for w in BOT_KONSOLEN_WORTE):
@@ -332,10 +399,36 @@ def puls_tabs():
     return tabs if isinstance(tabs, list) else None
 
 
+def _json_holen(url, kopf=None, timeout=2.0):
+    """JSON von lokalem Dienst oder Railway, ohne Proxy. Jeder Fehler landet beim Aufrufer und heißt dort „unklar“."""
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with op.open(urllib.request.Request(url, headers=kopf or {}), timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def handel_stand():
+    """{"tv", "mt5", "plan"}: je Grund oder None. Unklar ist ein Grund. /api/instances mit diesem User-Agent zählt nicht als Tab-Herzschlag (panel.py tab_gesehen)."""
+    aus = {}
+    for name, url, wert in (("tv", READER_STAND, reader_auswerten), ("mt5", PANEL_INSTANZEN, mt5_auswerten)):
+        try:
+            aus[name] = wert(_json_holen(url))
+        except Exception as ex:
+            aus[name] = "%s-Stand unklar (%s)" % (name.upper(), type(ex).__name__)
+    try:
+        with open(CODE_TOKEN, "r", encoding="utf-8") as f:
+            tok = f.readline().strip()
+        with open(PC_ID_DATEI, "r", encoding="utf-8") as f:
+            pc = json.load(f)["pc_id"]
+        aus["plan"] = plan_auswerten(_json_holen("%s/code/tab-stand/%s" % (RAILWAY, pc), {"X-Code-Token": tok, "User-Agent": "prophos-agent"}, 5.0))
+    except Exception as ex:
+        aus["plan"] = "Plan-Stand unklar (%s)" % type(ex).__name__
+    return aus
+
+
 def puls_stand():
-    """(pid, sicher, tabs). Prozess hinter Port 9333 und Tabs des Puls-Chrome."""
+    """(pid, sicher, tabs, handel). Prozess hinter Port 9333, Tabs des Puls-Chrome, Handelsstand. Alles vor dem Lesen der Fenster: Es kostet Netz."""
     pid, sicher = puls_browser_pid()
-    return pid, sicher, puls_tabs()
+    return pid, sicher, puls_tabs(), handel_stand()
 
 
 def fenster_info(hwnd):
@@ -358,14 +451,14 @@ def fenster_freigabe(hwnd, pp=None):
         t, k, pid = fenster_info(hwnd)
         e = exe_name(pid)
         if pp is None:
-            pp = puls_stand() if k in BROWSER_KLASSEN else (None, True, None)
-        art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], pp[2])
+            pp = puls_stand() if (k in BROWSER_KLASSEN or k.lower().startswith(MT5_KLASSE_ANFANG) or e in MT5_EXE) else (None, True, None, {})
+        art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], pp[2], pp[3])
         if not art and grund.startswith(PULS_UNKLAR):
             # Prüfer S9 02.11.2026: TradingView trägt den Kurs im Titel, die Tabliste ist bei offenem Markt schnell älter als der Fenstertitel. Einmal frisch lesen, dann den
             # Titel direkt danach nochmal. Das lockert nichts: Passt er wieder nicht, bleibt es gesperrt.
             tabs = puls_tabs()
             t, k, pid = fenster_info(hwnd)
-            art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], tabs)
+            art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], tabs, pp[3])
         return art, grund, t
     except Exception as ex:
         return None, "Fenster nicht lesbar (%s)" % type(ex).__name__, ""
@@ -502,8 +595,8 @@ def kombi_pruefen(kombi, art):
     menge = set(teile)
     mods = [m for m in ("ctrl", "shift", "alt", "win") if m in menge]
     k = "+".join(mods + sorted(menge - set(mods)))
-    if art in ("browser", "puls_chrome") and k in KOMBIS_SCHLIESSEN:
-        raise RuntimeError("Gesperrt: %s schließt im Browser Tab oder Fenster" % k)
+    if art in ("browser", "puls_chrome", "mt5") and k in KOMBIS_SCHLIESSEN:
+        raise RuntimeError("Gesperrt: %s schließt Tab oder Fenster (Browser, MT5)" % k)
     return k
 
 
@@ -924,6 +1017,8 @@ def ak_schliessen(a, *_):
     if art in ("browser", "puls_chrome"):
         # Der Chrome-Titel ist nur der AKTIVE Tab; WM_CLOSE schließt das ganze Fenster samt Hintergrund-Tabs.
         raise RuntimeError("Browser-Fenster „%s“ wird nie geschlossen (schließt alle Tabs)" % f["titel"][:50])
+    if art == "mt5":
+        raise RuntimeError("MT5 wird nie geschlossen (Eingang 02.11.2026)")
     if f["klasse"] == "CASCADIA_HOSTING_WINDOW_CLASS":
         raise RuntimeError("Windows Terminal wird nicht geschlossen: In einem hinteren Tab kann eine Betriebs-Konsole laufen")
     u32().PostMessageW(f["hwnd"], 0x0010, 0, 0)   # WM_CLOSE — sauber, das Programm darf nachfragen

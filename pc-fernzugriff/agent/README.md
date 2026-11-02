@@ -22,7 +22,7 @@ Auf dem PC liegt alles unter `C:\mt5-copier\fernzugriff\` (`agent\`, `foto\` als
 |---|---|---|
 | `foto` | optional `fenster` (Titel-Teil) oder `tab` (Text aus Titel/Adresse) | PNG aller Monitore, nur dieses Fenster (PrintWindow) oder ein Tab des Puls-Chrome ohne Tabwechsel |
 | `tabs` | — | Tabs des Puls-Chrome: Titel und Adresse ohne Query |
-| `fenster` | — | Liste sichtbarer Fenster: titel, klasse, x/y/w/h, pid, minimiert, vorne, `erlaubt` (puls_chrome/browser/konsole/frei oder null = gesperrt); plus `vorne` |
+| `fenster` | — | Liste sichtbarer Fenster: titel, klasse, x/y/w/h, pid, minimiert, vorne, `erlaubt` (mt5/puls_chrome/browser/konsole/frei oder null = gesperrt); plus `vorne` |
 | `maus` | `x`, `y` | Zeiger setzen (Pixel wie im Foto, bei einem Monitor mit Ursprung 0/0); nicht auf TopstepX |
 | `klick` | `x`, `y` (ganze Zahlen im Bildschirm), `art` links/rechts/doppelt, optional `fenster` | Klick, nie auf TopstepX, mit `fenster` nur, wenn dieses vorn ist |
 | `tasten` | `fenster` (PFLICHT), `text` oder `kombi` | tippt nur, wenn das Vordergrundfenster diesen Titel trägt und nicht TopstepX ist; sonst Fehler, nichts getippt |
@@ -52,7 +52,7 @@ bash pc-fernzugriff/mac/do.sh pc-7ftp5l '{"aktionen":[{"aktion":"klick","x":640,
 Ergebnis (eine Zeile JSON), dann `BILD /Users/…/quarantaene/pc-7ftp5l/20261102-101500-ab12cd-4.png`:
 ```json
 {"id":"20261102-101500-ab12cd","ok":true,"aktionen":[{"nr":1,"aktion":"start","ok":true,"gestartet":"powershell.exe","ms":120},…],
- "bilder":["20261102-101500-ab12cd-4.png"],"ms":1480,"vorne":"Windows PowerShell","riegel":null,"stand":"2026-11-02-nur-topstepx","zeit":"2026-11-02 10:15:01"}
+ "bilder":["20261102-101500-ab12cd-4.png"],"ms":1480,"vorne":"Windows PowerShell","riegel":null,"stand":"2026-11-02-handel-riegel","zeit":"2026-11-02 10:15:01"}
 ```
 
 ## Sperre: nur TopstepX (Finn 02.11.2026 05:55)
@@ -60,18 +60,21 @@ Ergebnis (eine Zeile JSON), dann `BILD /Users/…/quarantaene/pc-7ftp5l/20261102
 
 Das ersetzt die Erlaubt-Liste von 04:42.
 
+**Eingang 02.11.2026 dazu:** In TradingView und MT5 nur, wenn weder Position noch offener Plan da ist. Unklarer Stand = gesperrt. MT5 wird nie geschlossen.
+
 **Regel, die der Agent nicht prüfen kann: Der Lotse setzt, ändert und schließt keine Orders oder Positionen.** Ein Order-Knopf in TradingView oder MT5 ist für den Agenten nur ein Punkt im Fenster, und in TradingView kann schon ein Klick eine Order auslösen. Darum dort nur klicken, wenn klar ist, was unter dem Punkt liegt, und vorher ein Foto ansehen.
 
 **Hart gesperrt** für `klick`, `maus`, `scroll`, `tasten`, `schliessen`, `vorholen`, geprüft am Vordergrund UND am Fenster unter dem Zielpunkt:
 - **TopstepX:** Titel mit „topstep“ oder Kurs-Titel wie „NQZ26 $28,677.00 ▲ +0.50%“.
 - **Puls-Chrome mit TopstepX vorn:** Der Fenstertitel wird in der CDP-Liste (Port 9333) gesucht, die Adresse des Tabs entscheidet. Passt kein Tab, wird die Liste einmal frisch gelesen, weil der Kurs im Titel läuft. Passt danach keiner oder ist CDP nicht lesbar: gesperrt.
+- **TradingView, jeder Tab im Puls-Chrome und MT5 mit Dialogen, solange etwas offen ist:** Position laut Reader (`/positions`: sehend, höchstens 15 s alt, leer) bzw. MT5-Position oder Hedge laut Panel (`/api/instances`: frischer Copier- oder Lese-EA-Stand, Terminal ohne Instanz gilt als unklar), dazu offene Pläne der IDs dieses PCs und `riegel` aus Railway (`/code/tab-stand`, braucht `code_token.txt`). Fällt eine Quelle aus, ist es gesperrt. Explorer, Konsole und Prophos im normalen Chrome bleiben davon frei.
 - **Tab-Leiste und Adressleiste des Puls-Chrome:** Dort kann ein hinterer TopstepX-Tab liegen, auch sein ×.
 - **Betriebs-Konsolen** (Titel mit copier, panel, prophos, reader, puls, polar, order_bot, mt5-update): keine Handelssperre, ein Klick hält dort per QuickEdit das Programm an.
 - **Während eines Laufs** (`puls_handlauf.lock` jünger als 15 min oder `/api/beschaeftigt` belegt) gehen überall nur `foto`, `tabs`, `fenster`, `warte`. Geprüft wird vor der Aktion und nochmal direkt vor jedem Senden, beim Tippen je Paket. Das Panel meldet auch kurze Aufrufe als belegt, dann bricht eine Eingabe mit „Riegel“ ab und wird einfach wiederholt. Antwortet das Panel nicht, gilt das als Lauf. Lehnt der Port ab, läuft das Panel nicht, also auch kein Lauf.
 
 **Bleibt außerdem:**
 - `tasten` tippt nur, wenn das Vordergrundfenster den Titel aus `fenster` trägt. Beim Tippen wird vor jedem Paket neu geprüft.
-- Schließ-Kombis (`ctrl+w`, `alt+f4` …) und `schliessen` gehen nie an einen Browser, `schliessen` auch nicht an Windows Terminal: Hinten kann ein anderer Tab liegen.
+- Schließ-Kombis (`ctrl+w`, `alt+f4` …) und `schliessen` gehen nie an einen Browser, `schliessen` auch nicht an Windows Terminal: Hinten kann ein anderer Tab liegen. MT5 wird nie geschlossen, auch nicht per `alt+f4`.
 - `start` nimmt nur Explorer, Konsolen und `ms-settings:`, kein Browser: Er könnte im Puls-Chrome landen oder einen zweiten Prophos-Tab öffnen.
 - Ein Auftrag mit `puls_ok` oder `browser_ok` wird ganz abgelehnt, auch mit `false`.
 - `do.sh` schickt vor Eingaben eine Probe und sendet nichts an einen Agenten ohne `stand`.
@@ -79,7 +82,8 @@ Das ersetzt die Erlaubt-Liste von 04:42.
 **Foto eines hinteren Tabs:** `foto` mit `tab` ruft nur `Page.captureScreenshot` auf dem Tab, ohne Tabwechsel. Das ist der Weg für „bei TopstepX zugucken“. Verweigert wird es im Lauf und bei ausgeschaltetem Panel. Nur Tabs des Puls-Chrome.
 
 ### Was die Sperre NICHT abdeckt
-- **Order-Knöpfe** in TradingView, MT5 und Prophos (siehe Regel oben).
+- **Order-Knöpfe** in TradingView, MT5 und Prophos (siehe Regel oben). Der Riegel senkt das Risiko auf flache PCs, ein Klick kann trotzdem eine neue Order setzen.
+- **Reader sieht nur das gewählte Konto:** Position auf einem anderen Konto meldet er nicht. Offene Pläne fangen das ab, eine Hand-Position ohne Plan nicht.
 - **SSH-Befehle mit Admin-Rechten** (`pc.sh`): Sie können alles, auch den Agenten beenden oder diese Datei ändern.
 - **Panel-Aufrufe:** Finn 02.11.2026: „Der Lotse darf nicht selber aktiv klicken, aber der Puls-Bot darf. Der Lotse darf dem Puls-Bot Aufgaben geben.“ `/api/tsx-lesen` und `/api/tsx-konto` sind erlaubt und klicken über Puls. **Scharfe Orders (`scharf:true`) löst der Lotse nie aus.** Auch das ist nur Regel.
 - **TopstepX in einem anderen Chrome oder in einem nicht erkannten Puls-Chrome:** Ohne CDP ist nur der Titel des aktiven Tabs sichtbar. Ein Tab, dessen Titel nichts von TopstepX verrät, wäre dort nicht erkannt. Das betrifft ein Puls-Chrome, wenn nichts auf Port 9333 lauscht und `puls_fenster.json` alt ist.
@@ -88,7 +92,7 @@ Das ersetzt die Erlaubt-Liste von 04:42.
 ## Prüfen
 - Agent läuft? `pc.sh <pc> -- "(Get-ScheduledTask 'Prophos Agent').State; Get-Content C:\mt5-copier\fernzugriff\agent.log -Tail 5"`
 - Nach einem erneuten `setup-pc.ps1` (kopiert `agent\` neu): `agent-aufgabe.ps1` nochmal, damit der neue Code läuft.
-- Läuft der neue Stand? Jedes Ergebnis trägt `"stand"`, hier `2026-11-02-nur-topstepx`. Probe: `do.sh <pc> '{"aktionen":[{"aktion":"warte","ms":1}]}'`.
+- Läuft der neue Stand? Jedes Ergebnis trägt `"stand"`, hier `2026-11-02-handel-riegel`. Probe: `do.sh <pc> '{"aktionen":[{"aktion":"warte","ms":1}]}'`.
 - Selbsttest am Mac, ohne Windows: `python3 pc-fernzugriff/agent/selbsttest_sperre.py`. Nur auf echtem Windows prüfbar: dass der Titel des Puls-Chrome-Fensters den Tab in der CDP-Liste trifft (sonst ist es immer gesperrt), dass `vorholen` durchkommt, dass das Panel-Aus-Erkennen unter 3 s bleibt und dass ein hinterer TradingView-Tab ein aktuelles Bild liefert. `fenster` zeigt je Fenster `erlaubt`, das zuerst am Pilot-PC ansehen.
 - Nur `agent.py` aktualisieren, ohne Puls zu stören (nicht auf Windows getestet). Vom Mac per SSH aus einem Checkout auf origin/main, nie von pages.dev. Es startet nur der Agent neu, `setup-pc.ps1` ist dafür nicht nötig (es startet sshd neu):
   Der Befehl steht bewusst ganz links: `<<'BLOCK'` verlangt seine Endmarke am Zeilenanfang.
