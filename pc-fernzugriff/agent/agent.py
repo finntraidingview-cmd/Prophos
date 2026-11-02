@@ -62,6 +62,7 @@ KONSOLEN_EXE = ("cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "opencon
 # (Windows-QuickEdit), Strg+C beendet es. Titel aus start-copier/-panel/-prophos/-reader.bat.
 BOT_KONSOLEN_WORTE = ("copier", "panel", "prophos", "reader", "puls", "polar", "order_bot", "mt5-update")
 # Puls-Chrome: Tab-Leiste und Adressleiste bleiben gesperrt, ein Klick dort kann einen hinteren TopstepX-Tab treffen (auch sein ×). Der Titel zeigt nur den aktiven Tab.
+PULS_UNKLAR = "Puls-Chrome: aktiver Tab nicht lesbar"
 BROWSER_KOPF_PX = 130                      # Tab-Leiste + Adressleiste + Lesezeichen bei 100 % (Chrome ~115)
 BROWSER_ZUSATZ_RX = re.compile(r"\s+[-–—]\s+(Audiowiedergabe|Audio wird wiedergegeben|Audio playing|Tab stummgeschaltet|Tab muted)$")
 BROWSER_ENDE_RX = re.compile(r"\s+[-–—]\s+(Google Chrome|Chromium|Microsoft\u200b? Edge)(\s+[-–—]\s+.{1,40})?$")
@@ -285,7 +286,7 @@ def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, 
         if st == "topstepx":
             return None, "TopstepX im Puls-Chrome: %s" % t[:60]
         if st == "unklar":
-            return None, "Puls-Chrome: aktiver Tab nicht lesbar (CDP) — gesperrt: %s" % t[:60]
+            return None, "%s (CDP) — gesperrt: %s" % (PULS_UNKLAR, t[:60])
         return "puls_chrome", ""
     if browser:
         return "browser", ""
@@ -322,14 +323,19 @@ def puls_browser_pid():
         return None, False
 
 
-def puls_stand():
-    """(pid, sicher, tabs). Prozess hinter Port 9333 und Tabs des Puls-Chrome; tabs = None, wenn CDP nicht antwortet."""
-    pid, sicher = puls_browser_pid()
+def puls_tabs():
+    """Tabs des Puls-Chrome oder None, wenn CDP nicht antwortet."""
     try:
         tabs = cdp_json("/json/list", timeout=1.5)
     except Exception:
-        tabs = None
-    return pid, sicher, tabs if isinstance(tabs, list) else None
+        return None
+    return tabs if isinstance(tabs, list) else None
+
+
+def puls_stand():
+    """(pid, sicher, tabs). Prozess hinter Port 9333 und Tabs des Puls-Chrome."""
+    pid, sicher = puls_browser_pid()
+    return pid, sicher, puls_tabs()
 
 
 def fenster_info(hwnd):
@@ -354,6 +360,12 @@ def fenster_freigabe(hwnd, pp=None):
         if pp is None:
             pp = puls_stand() if k in BROWSER_KLASSEN else (None, True, None)
         art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], pp[2])
+        if not art and grund.startswith(PULS_UNKLAR):
+            # Prüfer S9 02.11.2026: TradingView trägt den Kurs im Titel, die Tabliste ist bei offenem Markt schnell älter als der Fenstertitel. Einmal frisch lesen, dann den
+            # Titel direkt danach nochmal. Das lockert nichts: Passt er wieder nicht, bleibt es gesperrt.
+            tabs = puls_tabs()
+            t, k, pid = fenster_info(hwnd)
+            art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], tabs)
         return art, grund, t
     except Exception as ex:
         return None, "Fenster nicht lesbar (%s)" % type(ex).__name__, ""
@@ -409,6 +421,14 @@ def lauf_grund():
         pass
     st = panel_stand()
     return None if st in ("frei", "aus") else st
+
+
+def lauf_pruefen():
+    """Unmittelbar vor jedem Senden (Prüfer S9 02.11.2026): Die Prüfung am Anfang der Aktion ist bei der Eingabe schon alt, dazwischen liegen netstat, CDP und die Fensterprüfung.
+    Startet Puls in dieser Zeit, träfe der Lotse dessen Lauf im TradingView-Tab. Die Fensterprüfung läuft davor: Das Panel antwortet in Millisekunden, sonst sperrt es."""
+    g = lauf_grund()
+    if g:
+        raise RuntimeError("Riegel direkt vor der Eingabe: %s — nichts gesendet" % g)
 
 
 def riegel_grund():
@@ -694,6 +714,7 @@ def _bewegen_und_pruefen(x, y, pp):
     if tuple(zeiger_lesen()) != (x, y):
         raise RuntimeError("Gesperrt: Zeiger steht nicht auf (%d, %d)" % (x, y))
     ziel_pruefen(x, y, pp)        # nochmal: Puls oder ein Popup kann in den 30 ms nach vorn gekommen sein
+    lauf_pruefen()
 
 
 def _ziel_ereignis(x, y, rahmen):
@@ -736,11 +757,12 @@ def text_tippen(text, fenster_soll=None, pp=None):
             ist = vorne_titel()
             if str(fenster_soll).lower() not in ist.lower():
                 raise RuntimeError("Vordergrund wechselte zu „%s“ nach %d Zeichen — Rest nicht getippt" % (ist[:60], i // 2))
+        lauf_pruefen()
         _senden(folge[i:i + 40])
         time.sleep(0.01)
 
 
-def kombi_druecken(kombi):
+def kombi_druecken(kombi, pp=None):
     """'ctrl+l', 'alt+f4' (nur mit fenster-Prüfung), 'enter', 'win+r' … Loslassen IMMER (finally): bleibt nach einem Teilfehler
     Strg/Alt gedrückt, würde der nächste Puls-Klick ein Strg-Klick (Review 02.11.2026)."""
     teile = [t.strip().lower() for t in str(kombi).split("+") if t.strip()]
@@ -751,6 +773,8 @@ def kombi_druecken(kombi):
         if t not in VK:
             raise ValueError("unbekannte Taste: %s" % t)
         vks.append(VK[t])
+    kombi_pruefen(kombi, vorne_pruefen(pp))
+    lauf_pruefen()            # ein Fehler hier liegt vor dem try: Es wurde noch nichts gedrückt, also nichts loszulassen
     try:
         _senden([_taste(v) for v in vks])
     finally:
@@ -847,8 +871,7 @@ def ak_tasten(a, *_):
         return {"getippt": len(str(a["text"])), "fenster": vorne_titel()[:60]}
     if a.get("kombi"):
         kombi_pruefen(a["kombi"], art)
-        kombi_pruefen(a["kombi"], vorne_pruefen(pp))   # direkt vor dem Drücken nochmal, ohne netstat dazwischen
-        kombi_druecken(a["kombi"])
+        kombi_druecken(a["kombi"], pp)                 # prüft direkt vor dem Drücken nochmal, ohne netstat dazwischen
         return {"kombi": a["kombi"], "fenster": vorne_titel()[:60]}
     raise ValueError("tasten braucht 'text' oder 'kombi'")
 

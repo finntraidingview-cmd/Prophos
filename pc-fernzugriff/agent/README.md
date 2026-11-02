@@ -64,10 +64,10 @@ Das ersetzt die Erlaubt-Liste von 04:42.
 
 **Hart gesperrt** für `klick`, `maus`, `scroll`, `tasten`, `schliessen`, `vorholen`, geprüft am Vordergrund UND am Fenster unter dem Zielpunkt:
 - **TopstepX:** Titel mit „topstep“ oder Kurs-Titel wie „NQZ26 $28,677.00 ▲ +0.50%“.
-- **Puls-Chrome mit TopstepX vorn:** Der Fenstertitel wird in der CDP-Liste (Port 9333) gesucht, die Adresse des Tabs entscheidet. Kein passender Tab oder CDP nicht lesbar: gesperrt.
+- **Puls-Chrome mit TopstepX vorn:** Der Fenstertitel wird in der CDP-Liste (Port 9333) gesucht, die Adresse des Tabs entscheidet. Passt kein Tab, wird die Liste einmal frisch gelesen, weil der Kurs im Titel läuft. Passt danach keiner oder ist CDP nicht lesbar: gesperrt.
 - **Tab-Leiste und Adressleiste des Puls-Chrome:** Dort kann ein hinterer TopstepX-Tab liegen, auch sein ×.
 - **Betriebs-Konsolen** (Titel mit copier, panel, prophos, reader, puls, polar, order_bot, mt5-update): keine Handelssperre, ein Klick hält dort per QuickEdit das Programm an.
-- **Während eines Laufs** (`puls_handlauf.lock` jünger als 15 min oder `/api/beschaeftigt` belegt) gehen überall nur `foto`, `tabs`, `fenster`, `warte`. Antwortet das Panel nicht, gilt das als Lauf. Lehnt der Port ab, läuft das Panel nicht, also auch kein Lauf.
+- **Während eines Laufs** (`puls_handlauf.lock` jünger als 15 min oder `/api/beschaeftigt` belegt) gehen überall nur `foto`, `tabs`, `fenster`, `warte`. Geprüft wird vor der Aktion und nochmal direkt vor jedem Senden, beim Tippen je Paket. Das Panel meldet auch kurze Aufrufe als belegt, dann bricht eine Eingabe mit „Riegel“ ab und wird einfach wiederholt. Antwortet das Panel nicht, gilt das als Lauf. Lehnt der Port ab, läuft das Panel nicht, also auch kein Lauf.
 
 **Bleibt außerdem:**
 - `tasten` tippt nur, wenn das Vordergrundfenster den Titel aus `fenster` trägt. Beim Tippen wird vor jedem Paket neu geprüft.
@@ -82,7 +82,7 @@ Das ersetzt die Erlaubt-Liste von 04:42.
 - **Order-Knöpfe** in TradingView, MT5 und Prophos (siehe Regel oben).
 - **SSH-Befehle mit Admin-Rechten** (`pc.sh`): Sie können alles, auch den Agenten beenden oder diese Datei ändern.
 - **Panel-Aufrufe:** Finn 02.11.2026: „Der Lotse darf nicht selber aktiv klicken, aber der Puls-Bot darf. Der Lotse darf dem Puls-Bot Aufgaben geben.“ `/api/tsx-lesen` und `/api/tsx-konto` sind erlaubt und klicken über Puls. **Scharfe Orders (`scharf:true`) löst der Lotse nie aus.** Auch das ist nur Regel.
-- **TopstepX in einem anderen Chrome:** Ohne CDP ist nur der Titel des aktiven Tabs sichtbar. Ein Tab, dessen Titel nichts von TopstepX verrät, wäre dort nicht erkannt.
+- **TopstepX in einem anderen Chrome oder in einem nicht erkannten Puls-Chrome:** Ohne CDP ist nur der Titel des aktiven Tabs sichtbar. Ein Tab, dessen Titel nichts von TopstepX verrät, wäre dort nicht erkannt. Das betrifft ein Puls-Chrome, wenn nichts auf Port 9333 lauscht und `puls_fenster.json` alt ist.
 - **Zeitfenster:** Zwischen letzter Prüfung und Windows-Eingabe liegen wenige Millisekunden. Kommt genau dann TopstepX nach vorn, trifft die Eingabe dieses.
 
 ## Prüfen

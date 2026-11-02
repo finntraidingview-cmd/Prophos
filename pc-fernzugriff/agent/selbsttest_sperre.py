@@ -92,12 +92,13 @@ pruefe("Tab-Liste ohne Token", "geheim" not in json.dumps(a.tab_kurz(TAB_TSX)))
 pruefe("Tab-Wahl", a.tab_waehlen(TABS, "topstepx.com/trade")[1].endswith("AB-1"))
 
 # ── Ablauf mit Attrappen ──
-WELT = SimpleNamespace(vorne=1, unter=1, fenster={}, oben=0, gesendet=[], bewegt=[], gestartet=[], lauf=None, panel="frei", cdp_rufe=[], wm=[], tabs=TABS)
+WELT = SimpleNamespace(vorne=1, unter=1, fenster={}, oben=0, gesendet=[], bewegt=[], gestartet=[], lauf=None, panel="frei", cdp_rufe=[], wm=[], tabs=TABS, tabs_frisch=None)
 a.vorne_hwnd = lambda: WELT.vorne
 a.fenster_unter = lambda x, y: WELT.unter
 a.fenster_info = lambda h: WELT.fenster[h][:3]
 a.exe_name = lambda pid: next((f[3] for f in WELT.fenster.values() if f[2] == pid), "")
 a.puls_stand = lambda: (500, True, WELT.tabs)
+a.puls_tabs = lambda: WELT.tabs_frisch
 a.puls_fenster_merk = lambda: None
 a.fenster_oben = lambda h: WELT.oben
 a.fenster_dpi = lambda h: 96
@@ -191,6 +192,54 @@ a._senden = _s
 a.zeiger_lesen, _z = (lambda: (0, 0)), a.zeiger_lesen
 pruefe("Zeiger geklemmt: kein Klick", lauf([KLICK])["ok"] is False and not WELT.gesendet)
 a.zeiger_lesen = _z
+
+# Puls startet, NACHDEM die Aktion begonnen hat: direkt vor dem Senden fällt es auf
+_ps = a.puls_stand
+
+
+def stand_dann_lauf():
+    WELT.lauf = "Panel belegt: TV_ORDER_LOCK"
+    return _ps()
+
+
+a.puls_stand = stand_dann_lauf
+for name, ak in (("klick", KLICK), ("scroll", {"aktion": "scroll", "x": 300, "y": 400}), ("text", {"aktion": "tasten", "fenster": "NQ1!", "text": "ab"}), ("kombi", {"aktion": "tasten", "fenster": "NQ1!", "kombi": "enter"})):
+    WELT.lauf = None
+    e = lauf([ak], vorne=PTV)
+    pruefe("Lauf beginnt nach puls_stand: %s nichts gesendet" % name, e["ok"] is False and not WELT.gesendet and "Riegel" in e["aktionen"][0].get("fehler", ""), e)
+a.puls_stand = _ps
+WELT.lauf = None
+
+# Puls startet mitten im Text: Rest bleibt ungetippt
+_s2 = a._senden
+
+
+def senden_dann_lauf(ev):
+    _s2(ev)
+    WELT.lauf = "Panel belegt"
+
+
+a._senden = senden_dann_lauf
+e = lauf([{"aktion": "tasten", "fenster": "Explorer", "text": "x" * 60}])
+pruefe("Lauf beginnt mitten im Text: nur ein Paket", e["ok"] is False and len(WELT.gesendet) == 1, e)
+a._senden = _s2
+WELT.lauf = None
+pruefe("Kombi ohne Lauf geht", lauf([{"aktion": "tasten", "fenster": "NQ1!", "kombi": "enter"}], vorne=PTV)["ok"] and WELT.gesendet)
+
+# Kurs läuft weiter: Tabliste alt, einmal frisch lesen. Das lockert nichts.
+ALT = [dict(TAB_TV, title="NQ1! 28,600.00 … Unnamed"), TAB_TSX, TAB_PRO]
+WELT.tabs, WELT.tabs_frisch = ALT, TABS
+pruefe("unklar: frische Tabliste passt, Klick geht", lauf([KLICK], vorne=PTV)["ok"] and WELT.gesendet == [3])
+WELT.tabs_frisch = ALT
+e = lauf([KLICK], vorne=PTV)
+pruefe("unklar: auch frisch kein Treffer, gesperrt", e["ok"] is False and not WELT.gesendet, e)
+WELT.tabs_frisch = None
+pruefe("unklar: CDP frisch aus, gesperrt", lauf([KLICK], vorne=PTV)["ok"] is False and not WELT.gesendet)
+WELT.fenster[9] = ("Sign in - Google Chrome", KL, 500, CHROME)
+WELT.tabs, WELT.tabs_frisch = [dict(TAB_ANMELD, title="Alt")], TABS
+pruefe("unklar: frisch zeigt TopstepX, gesperrt", lauf([KLICK], vorne=9)["ok"] is False and not WELT.gesendet)
+del WELT.fenster[9]
+WELT.tabs, WELT.tabs_frisch = TABS, None
 
 # Puls läuft: nur foto, tabs, fenster, warte
 a.foto_modul = lambda: SimpleNamespace(bildschirm=lambda: (b"", 1, 1), bgra_zu_rgb=lambda b, w, h: b"", png_bauen=lambda r, w, h: b"PNG")
