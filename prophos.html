@@ -54517,19 +54517,21 @@
   window._kontoWegUrteil = kontoWegUrteil   // Test-Haken
   /* URTEIL AUS DEM LETZTEN TRADE (Finn 02.11.2026, Vorfall Ina Tradeify 150k …622221: Plan 7085e82a +1.989 $ am TP, Konto verschwand 16:33 aus der Kontoliste, die Lesung
    * stand noch auf 157.051 von 14:14 → kein Urteil „bestanden“, Abhaken archivierte, das Konto fehlte im Review). Wie der letzte Trade zuging, entscheidet vor der Balance:
-   *   'tp'   → bestanden (Review, Ziel markieren, nie archivieren) · 'sl' (SL oder Liquidation) → geblowt · 'hand' (Hand-Schluss, unklar) → prüfen · null → alte Balance-Regel.
+   *   'tp'   → bestanden (Review, Ziel markieren, nie archivieren) · 'liq' (Liquidation) → geblowt · 'sl' → geblowt nur, wenn der Stand am Boden liegt, sonst prüfen
+   *   (Stopp S9: ein SL ist bei Challenges oft kein Blow — Klein-Trade, Mindesttage, Daily-Loss-Stop) · 'hand' (Hand-Schluss, unklar) → prüfen · null → alte Balance-Regel.
    * Quellen: final.grund (Demo/Level/Feed), sonst hedge.grund, sonst P&L gegen TP bzw. SL am Plan (Grenze wie ap_normal_tpsl_ende: max(50 $, 15 %)). REIN RECHNEND */
-  const KW_ENDE_TP = new Set(['demo_tp', 'level_tp', 'tp_feed']), KW_ENDE_SL = new Set(['demo_sl', 'demo_liq', 'level_sl', 'sl_feed'])
+  const KW_ENDE_TP = new Set(['demo_tp', 'level_tp', 'tp_feed']), KW_ENDE_SL = new Set(['demo_sl', 'level_sl', 'sl_feed'])
   const KW_ENDE_HAND = new Set(['hand', 'beendet_knopf', 'tagesende_unklar', 'master_nie_da', 'demo_unklar', 'demo_beide', 'close'])
   function kontoWegLetztesEnde(p){
     if(!p) return null
     const n = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
     const b = p.mt5Baseline || {}, f = b.final || {}, h = b.hedge || {}, g = String(f.grund || ''), hg = String(h.grund || '')
     if(KW_ENDE_TP.has(g)) return 'tp'
+    if(g === 'demo_liq') return 'liq'
     if(KW_ENDE_SL.has(g)) return 'sl'
     if(KW_ENDE_HAND.has(g) || /^(close|hand)$/.test(String(f.ende_quelle || ''))) return 'hand'
     if(hg === 'level_tp' || hg === 'tp_feed') return 'tp'
-    if(hg === 'level_sl' || hg === 'sl_feed') return 'sl'
+    if(hg === 'level_sl' || hg === 'sl_feed') return h.sl_art === 'liquidation' ? 'liq' : 'sl'   // WD/Apex: das SL-Level des Hedges ist das Liq-Level
     if(hg === 'hand') return 'hand'
     const pl = n(p.masterPl) ?? n(f.master_pl_schaetzung), tp = n(p.masterTp), sl = n(p.masterSl)
     if(pl == null) return null
@@ -54582,13 +54584,17 @@
       // Letzter Trade zuerst (02.11.2026): sein Ende am TP/SL entscheidet, die Balance-Regel nur ohne bekanntes Ende
       const ts = v => Date.parse(v || '') || 0
       const letzt = (tradePlans || []).filter(p => p && String(p.masterAccountId) === id && p.startedAt).sort((a, b) => ts(b.startedAt) - ts(a.startedAt))[0] || null
-      const ende = kontoWegLetztesEnde(letzt)
+      // Nur ein frischer Trade sagt etwas über das Verschwinden (Stopp S9): endete nach der letzten Konto-Lesung bzw. in den letzten 24 h, sonst Balance-Regel
+      const endeAt = letzt ? ts(letzt.endedAt || (letzt.mt5Baseline && letzt.mt5Baseline.final && letzt.mt5Baseline.final.at)) : 0
+      const frisch = !!endeAt && (endeAt > ts(acc.tvBalanceAt) || Date.now() - endeAt < 24 * 3600000)
+      const ende = frisch ? kontoWegLetztesEnde(letzt) : null
       const pruefPhase = /^(challenge|phase1|phase2)$/.test(String(acc.type || ''))
       if(ende === 'tp'){
         urteil = pruefPhase ? 'bestanden' : 'pruefen'   // Funded „besteht" nicht
         // Stand nach dem TP: lag die Lesung vor dem Trade und fehlt sein P&L, kommt der TP dazu (Ina: 157.051 + 1.989)
         if(st && st.unsicher && Number(letzt.masterTp) > 0) st = { stand: Number(st.stand) + Number(letzt.masterTp), quelle: st.quelle + ' + TP des letzten Trades' }
-      }else if(ende === 'sl') urteil = 'blown'
+      }else if(ende === 'liq') urteil = 'blown'
+      else if(ende === 'sl') urteil = (st && !st.unsicher && kontoWegUrteil(st.stand, start, boden, null) === 'blown') ? 'blown' : 'pruefen'   // SL nur am Boden = Blow
       else if(ende === 'hand') urteil = 'pruefen'
       else{
         urteil = kontoWegUrteil(st && st.stand, start, boden, acc.zielUsd)
