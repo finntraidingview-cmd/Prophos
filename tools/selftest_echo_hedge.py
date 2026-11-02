@@ -43,7 +43,10 @@ def lade(extra=None):
     gp = src[k:src.find("\n\n\n", k)]
     ns = {"_wd_num": _wd_num, "time": time, "threading": threading, "datetime": datetime, "timedelta": timedelta, "timezone": timezone, "re": re}
     ns.update(extra or {})
-    exec(gp + "\n" + src[i:j], ns)
+    # Riegel „Hedge-Konto nur der eigenen ID“ (02.11.2026): _eh_tick_lauf liest echo_hedge_account durch gp_hedge_settings_eigen
+    h0 = src.index("\n_gp_hedge_fremd = {}") + 1
+    h1 = src.index("\n\n\n", src.index("\ndef gp_hedge_settings_eigen(") + 1)
+    exec(gp + "\n" + src[h0:h1] + "\n" + src[i:j], ns)
     return ns
 
 
@@ -132,7 +135,7 @@ class DB:
                     {"id": "A2", "user_id": "U1", "name": "Tradeify 150k", "firm": "Tradeify", "account_type": "challenge", "external_id": "T1"},
                     {"id": "A3", "user_id": "UE", "name": "Emin FTMO", "firm": "FTMO", "account_type": "phase1", "external_id": "E1"},
                     {"id": "A4", "user_id": "U2", "name": "FTMO ohne Hedge", "firm": "FTMO", "account_type": "phase1", "external_id": "512"},
-                    {"id": "H1", "name": "Fusion Echo", "firm": "Fusion Markets", "external_id": "488579"}]
+                    {"id": "H1", "user_id": "U1", "name": "Fusion Echo", "firm": "Fusion Markets", "external_id": "488579"}]   # Besitzer U1: der Riegel „nur eigene ID“ (02.11.2026) prüft ihn
         if t == "user_settings":
             return [{"user_id": "U1", "value": {"accountId": "H1", "hedgeLogin": "488579"}}]
         return []

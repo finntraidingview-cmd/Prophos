@@ -26661,6 +26661,75 @@ GP_VORLAUF_MIN = 15          # Startzeiten frühestens jetzt + 15 min (wie Nachp
 GP_TAKT_S = 900              # Takt auf Railway: alle 15 min Konten ohne Plan nachplanen (ab zeiten.lauf bis bis − Vorlauf)
 GP_DD_PLAUSIBEL = 0.3        # Max-DD am Konto über 30 % der Größe (Tippfehler wie 100.000 auf 100k) → Kernwert der Firma
 GP_HEDGE_KEY = "echo_hedge_account"
+_gp_hedge_fremd = {}   # uid → Grund, warum die Hedge-Einstellung verworfen wurde (Spur, gp_hedge_settings_eigen)
+
+
+def gp_hedge_settings_eigen_rechnen(rows, konten, eigene, links=None):
+    """REIN RECHNEND (testbar) — HEDGE-KONTO NUR DER EIGENEN ID (Finn 02.11.2026 ~18:15 „fix das, dass es nie wieder kommt“; Emin 6cceb3f3: 8 Auto-Pläne trugen
+    slave_account_id 704925f0 „Fusion Live“ der ID fb42b5c3 — gleicher Fusion-Login 430095, Emins eigenes Konto ist 901a4804; mt5_links liefert dem PC-Tab per RLS
+    nur eigene Zeilen, der Hedge-Login fand sich nie, alle Starts verfielen mit „kein Copier passt“).
+    rows = user_settings-Zeilen echo_hedge_account {user_id, value {accountId, hedgeLogin}}; konten = {account_id: {user_id, external_id}};
+    eigene = {(user_id, login): [account_id, …]} (eigene Konten der ID mit diesem MT5-Login); links = {(user_id, login): account_id} aus mt5_links der ID.
+    → (rows neu, {user_id: grund}). Gehört das Konto der ID → unverändert. Sonst das eigene Konto mit demselben Login (Einstellung oder external_id des fremden):
+    zuerst die eigene mt5_links-Verknüpfung (dieselbe Zuordnung, mit der der PC-Tab den Hedge-Login findet), sonst das einzige eigene Konto → ersetzt; sonst verworfen (die Planer planen dann ohne Hedge-Konto bzw. gar nicht, wie bei fehlender Einstellung). Unbekanntes Konto → verworfen."""
+    neu, grund = [], {}
+    for r in rows or ():
+        v = r.get("value") if isinstance(r.get("value"), dict) else {}
+        uid, acc = str(r.get("user_id") or ""), str(v.get("accountId") or "")
+        if not acc:
+            neu.append(r)
+            continue
+        k = konten.get(acc)
+        if k is not None and str(k.get("user_id") or "") == uid:
+            neu.append(r)
+            continue
+        login = str(v.get("hedgeLogin") or (k or {}).get("external_id") or "").strip()
+        kand = sorted(set(eigene.get((uid, login)) or ())) if login else []
+        ln = (links or {}).get((uid, login)) if login else None
+        if ln and ln in kand:
+            kand = [ln]
+        if len(kand) == 1:
+            neu.append(dict(r, value=dict(v, accountId=kand[0], hedgeLogin=login, ersetzt_von=acc)))
+            grund[uid] = f"Hedge-Konto {acc[:8]} gehört einer anderen ID — eigenes Konto {kand[0][:8]} mit Login {login} genommen"
+        else:
+            grund[uid] = (f"Hedge-Konto {acc[:8]} gehört einer anderen ID" if k is not None else f"Hedge-Konto {acc[:8]} nicht gefunden") \
+                + (f" — {len(kand)} eigene Konten mit Login {login}, keins eindeutig" if kand else f" — kein eigenes Konto mit Login {login or '?'}")
+    return neu, grund
+
+
+def gp_hedge_settings_eigen(rows):
+    """Lädt Besitzer und Logins zu den echo_hedge_account-Zeilen und wendet gp_hedge_settings_eigen_rechnen an (02.11.2026). Lesefehler → keine Zeile (fail-closed:
+    ohne Hedge-Konto plant kein Planer einen Hedge-Trade). Gründe bleiben in _gp_hedge_fremd und einmal im Log."""
+    rows = list(rows or ())
+    accs = sorted({str((r.get("value") or {}).get("accountId")) for r in rows if isinstance(r.get("value"), dict) and (r.get("value") or {}).get("accountId")})
+    if not accs:
+        return rows
+    try:
+        konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": "id,user_id,external_id", "id": "in.(" + ",".join(accs) + ")"})}
+        logins = {str((r.get("value") or {}).get("hedgeLogin") or "") for r in rows if isinstance(r.get("value"), dict)} \
+            | {str(k.get("external_id") or "") for k in konten.values()}
+        logins = sorted(x for x in logins if re.fullmatch(r"[0-9A-Za-z_-]{3,40}", x))
+        uids = sorted({str(r.get("user_id")) for r in rows if r.get("user_id")})
+        eigene = {}
+        if logins and uids:
+            for a in _sb_all("accounts", {"select": "id,user_id,external_id", "user_id": "in.(" + ",".join(uids) + ")",
+                                          "external_id": "in.(" + ",".join(logins) + ")"}):
+                eigene.setdefault((str(a.get("user_id")), str(a.get("external_id") or "")), []).append(str(a["id"]))
+        links = {}
+        if logins and uids:
+            for l in _sb_all("mt5_links", {"select": "user_id,mt5_login,account_id", "user_id": "in.(" + ",".join(uids) + ")",
+                                           "mt5_login": "in.(" + ",".join(logins) + ")"}):
+                links[(str(l.get("user_id")), str(l.get("mt5_login") or ""))] = str(l.get("account_id") or "")
+    except Exception as e:
+        print(f"[hedge-konto] Besitzer nicht lesbar, keine Hedge-Einstellung übernommen: {type(e).__name__}: {e}", flush=True)
+        return []
+    neu, grund = gp_hedge_settings_eigen_rechnen(rows, konten, eigene, links)
+    for uid, g in grund.items():
+        if _gp_hedge_fremd.get(uid) != g:
+            print(f"[hedge-konto] {uid[:8]}: {g}", flush=True)
+    _gp_hedge_fremd.clear()
+    _gp_hedge_fremd.update(grund)
+    return neu
 
 
 def gp_multiplikator(master_risk, menge, slave_risk, master_ppl, slave_ppl):
@@ -26882,7 +26951,7 @@ def gp_planen(gruppe_id, trocken=False, quelle="hand", seed=None, tag=None):
                                   norm=lambda n: _ap_norm(_firm_norm(n)))
     ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
     hedge_ids, hedge_login = {}, {}
-    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}):
+    for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})):
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         if v.get("accountId"):
             hedge_ids[str(r.get("user_id"))] = str(v["accountId"])
@@ -27751,7 +27820,7 @@ def _eh_tick_lauf(jetzt):
     uids = sorted({str(p["user_id"]) for p in plaene})
     in_uids = "in.(" + ",".join(uids) + ")"
     hedge = {}
-    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}):
+    for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})):
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         if v.get("accountId"):
             hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
@@ -27933,7 +28002,7 @@ def ehv_tick(jetzt=None, force=False):
     konten = {str(a["id"]): a for a in _sb_all("accounts", {"select": AP_KONTO_FELDER, "id": "in.(" + ",".join(
         sorted({str(p["master_account_id"]) for p in plaene if p.get("master_account_id")}) or ["00000000-0000-0000-0000-000000000000"]) + ")"})}
     in_uids = "in.(" + ",".join(sorted({str(p["user_id"]) for p in plaene})) + ")"
-    hedge = {str(r["user_id"]) for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})
+    hedge = {str(r["user_id"]) for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}))
              if isinstance(r.get("value"), dict) and r["value"].get("accountId")}
     ppl, ppl_firma = ap_ppl_karte(_sb_all("firm_specs", {"select": "user_id,name,symbol,ppl,unit", "user_id": in_uids}),
                                   norm=lambda n: _ap_norm(_firm_norm(n)))
@@ -28212,7 +28281,7 @@ def tfh_tick(jetzt=None, force=False):
         return erg
     uids = sorted({str(p["user_id"]) for p, _a in finale})
     hedge = {}
-    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": "in.(" + ",".join(uids) + ")"}):
+    for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": "in.(" + ",".join(uids) + ")"})):
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         if v.get("accountId"):
             hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
@@ -28977,7 +29046,7 @@ def ah_tick(jetzt=None, force=False):
     uids = sorted({str(p["user_id"]) for p in plaene})
     in_uids = "in.(" + ",".join(uids) + ")"
     hedge = {}
-    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}):
+    for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})):
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         if v.get("accountId"):
             hedge[str(r["user_id"])] = (str(v["accountId"]), str(v.get("hedgeLogin") or ""))
@@ -38027,7 +38096,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                                   norm=lambda n: _ap_norm(_firm_norm(n)))
     ctx_ppl = {"ppl": ppl, "ppl_firma": ppl_firma}
     hedge_ids = {}
-    for r in _sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids}) or []:
+    for r in gp_hedge_settings_eigen(_sb_all("user_settings", {"select": "user_id,value", "key": f"eq.{GP_HEDGE_KEY}", "user_id": in_uids})) or []:
         v = r.get("value") if isinstance(r.get("value"), dict) else {}
         if v.get("accountId"):
             hedge_ids[str(r.get("user_id"))] = str(v["accountId"])

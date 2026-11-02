@@ -24310,13 +24310,19 @@
    * Detailseite erreichbar (Chip MT5-COPIER bzw. "+ verknüpfen"). */
   const MT5_LINKS_LS = 'prophos_mt5_links'
 
+  // SPEICHER ZUERST (02.11.2026, Finn „fix das, dass es nie wieder kommt“): der zuletzt aus der Tabelle geladene Stand gilt auch, wenn localStorage voll ist
+  // (ID-Wechsel stumm = Quota) — sonst lieferte ein voller Speicher still den alten Stand
+  let _mt5LinksMem = null
   function mt5GetLinks(){
+    if(_mt5LinksMem) return Object.assign({}, _mt5LinksMem)
     try { return JSON.parse(localStorage.getItem(MT5_LINKS_LS) || '{}') }
     catch { return {} }
   }
   function mt5CacheLinks(links){
     // NUR Cache — der Key steht bewusst nicht in SYNC_KEYS, Quelle ist die Tabelle
-    localStorage.setItem(MT5_LINKS_LS, JSON.stringify(links))
+    _mt5LinksMem = Object.assign({}, links || {})
+    try { localStorage.setItem(MT5_LINKS_LS, JSON.stringify(links)) }
+    catch(e){ console.warn('[mt5links] Cache nicht schreibbar (Speicher voll?) — Stand bleibt im Speicher:', (e && e.message) || e) }
   }
 
   // Beim Login/Boot: Tabelle → Cache. Wird aus initialSyncFromSupabase() mitgerufen,
@@ -24328,9 +24334,30 @@
     if(error){ console.warn('[mt5links] Laden fehlgeschlagen:', error.message); return }
     const links = {}
     for(const r of (data || [])) links[String(r.mt5_login)] = String(r.account_id)
+    const neu = JSON.stringify(links) !== JSON.stringify(mt5GetLinks())
     mt5CacheLinks(links)
-    mt5RefreshAfterLink()
+    _mt5LinksAt = Date.now()
+    // eigener Hedge-Login (user_settings echo_hedge_account) für den Rückfall in planMt5Route — gleiche Runde, nie eine fremde Einstellung (RLS: nur eigene)
+    try{
+      const { data: hs } = await supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'echo_hedge_account').maybeSingle()
+      _mt5HedgeLoginEigen = (hs && hs.value && hs.value.hedgeLogin) ? String(hs.value.hedgeLogin) : null
+    }catch(_){}
+    if(neu || !_mt5LinksErst) mt5RefreshAfterLink()
+    _mt5LinksErst = true
   }
+  /* LINKS NICHT NUR BEIM BOOT (02.11.2026, Aurel pc-pw1put 16:27–16:46): die Verknüpfung 14367785 → Konto entstand um 16:25 auf einem anderen Gerät, der PC-Tab
+   * lief seit vorher und kannte sie nie — jedes Signal verfiel mit „kein Copier auf diesem PC passt zum Plan“, bis jemand den Tab neu lud. Jetzt: findet
+   * planMt5Route für einen Plan mit Konten keinen Login, lädt der Tab die Tabelle nach (höchstens alle MT5_LINKS_NACHLADEN_MS); dazu ruhig alle 4–6 min. */
+  const MT5_LINKS_NACHLADEN_MS = 30000
+  let _mt5LinksAt = 0, _mt5LinksLaeuft = null, _mt5LinksErst = false, _mt5HedgeLoginEigen = null
+  function mt5LinksNachladen(grund){
+    if(!currentUserId || _mt5LinksLaeuft || Date.now() - _mt5LinksAt < MT5_LINKS_NACHLADEN_MS) return _mt5LinksLaeuft
+    _mt5LinksAt = Date.now()
+    _mt5LinksLaeuft = mt5LoadLinks().catch(e => console.warn('[mt5links] Nachladen (' + (grund || '?') + '):', (e && e.message) || e)).finally(() => { _mt5LinksLaeuft = null })
+    return _mt5LinksLaeuft
+  }
+  window._mt5LinksNachladen = mt5LinksNachladen
+  ;(function mt5LinksRuhig(){ setTimeout(() => { try{ if(currentUserId) mt5LinksNachladen('ruhig') }catch(_){} mt5LinksRuhig() }, 240000 + Math.floor(Math.random() * 120000)) })()
 
   // Link setzen — löst vorher Alt-Links desselben manuellen Accounts (1 Account ↔
   // 1 Login, wie beim Duplikum-Verknüpfen). unique(user_id, account_id) in der
@@ -24700,9 +24727,17 @@
   function planMt5Route(plan, remoteOk){
     if(!plan || (!MT5_LOCAL && !remoteOk)) return null
     const masterLogin = mt5LoginForAccount(plan.masterAccountId)
-    const hedgeLogin  = mt5LoginForAccount(plan.slaveAccountId)
-    if(!masterLogin || !hedgeLogin) return null
-    return { masterLogin, hedgeLogin }
+    let hedgeLogin  = mt5LoginForAccount(plan.slaveAccountId)
+    // RÜCKFALL HEDGE-LOGIN (02.11.2026, Emin pc-onkrbk 6cceb3f3: slave_account_id zeigte auf „Fusion Live“ einer anderen ID, mt5_links liefert per RLS nur eigene
+    // Zeilen): fehlt der Login zum Slave-Konto, gilt der Hedge-Login aus der EIGENEN Einstellung echo_hedge_account — mt5RouteResolve nimmt ihn nur, wenn genau
+    // eine Instanz Master-Login + diesen Hedge-Login hat
+    let hedgeRueckfall = false
+    if(!hedgeLogin && plan.slaveAccountId && _mt5HedgeLoginEigen){ hedgeLogin = _mt5HedgeLoginEigen; hedgeRueckfall = true }
+    if(!masterLogin || !hedgeLogin){
+      if(plan.masterAccountId && typeof mt5LinksNachladen === 'function') mt5LinksNachladen('plan ' + String(plan.id || '').slice(0, 8))   // Link evtl. nach dem Boot angelegt
+      return null
+    }
+    return hedgeRueckfall ? { masterLogin, hedgeLogin, hedgeRueckfall } : { masterLogin, hedgeLogin }
   }
 
   // Plan + Instanzliste → konkrete Copier-Instanz. Master-Login matcht gegen
@@ -24710,12 +24745,16 @@
   function mt5RouteResolve(plan, instances, remoteOk){
     const linkRoute = planMt5Route(plan, remoteOk)
     if(!linkRoute) return null
-    const inst = (instances || []).find(x => {
+    const passt = x => {
       if(!x) return false
       const s = x.status || {}
       return String(s.master_login || x.master_expected || '') === linkRoute.masterLogin
           && String(s.hedge_login  || x.hedge_expected  || '') === linkRoute.hedgeLogin
-    }) || null
+    }
+    const treffer = (instances || []).filter(passt)
+    // Rückfall über den eigenen Hedge-Login nur eindeutig (02.11.2026): zwei passende Instanzen → keine Zuordnung, nie raten
+    if(linkRoute.hedgeRueckfall && treffer.length !== 1) return null
+    const inst = treffer[0] || null
     if(!inst) return null
     return { inst, masterLogin: linkRoute.masterLogin, hedgeLogin: linkRoute.hedgeLogin }
   }
@@ -53478,6 +53517,11 @@
   async function tpHedgeInDb(accId, hLogin){
     if(!currentUserId || !accId) return
     if(String(_tpHedgeDbStand || '') === String(accId)) return   // nichts Neues
+    // NUR EIGENE KONTEN (02.11.2026, Emin 6cceb3f3: echo_hedge_account zeigte auf „Fusion Live“ der ID fb42b5c3, die Auto-Pläne übernahmen es als
+    // slave_account_id): ein Konto, das nicht in der eigenen Kontoliste steht (oder aus „Trade planen für andere ID“ kommt), wird nie gespeichert
+    if(!(accounts || []).some(a => a && !a._fremd && String(a.id) === String(accId))){
+      console.warn('[echo-hedge] Hedge-Konto', String(accId).slice(0, 8), 'gehört nicht zu dieser ID — nicht gespeichert'); return
+    }
     try{
       const { error } = await supabase.from('user_settings').upsert({
         user_id: currentUserId, key: TP_HEDGE_KEY,
@@ -53567,7 +53611,8 @@
       // manuellen Accounts gematcht und der Link gleich persistiert — dann
       // steht der Slave ab sofort überall fest. Mehrdeutig oder kein Treffer
       // → Dropdown bleibt bewusst frei (nie raten).
-      const cand = (accounts || []).filter(a => !a.archived
+      // nur eigene Konten (02.11.2026): ein Konto aus „Trade planen für andere ID“ (_fremd) ist nie das Hedge-Konto dieser ID
+      const cand = (accounts || []).filter(a => !a.archived && !a._fremd
         && (String(a.externalId || '') === hLogin || String(a.ma?.login || '') === hLogin))
       if(cand.length === 1){
         _tpMt5HedgeAccId = String(cand[0].id)
@@ -64566,6 +64611,7 @@
           if(role === 'master' && !tpKontoartPasstZumWeg(a)) return false
           if(routeIstEcho(_tpRoute)){   // Echo V2 (23.09.2026): dieselben Master wie Echo, nur ohne Hedge
             if(!_mt5Ids.has(String(a.id))) return false
+            if(role === 'slave' && a._fremd) return false   // Hedge nie ein Konto einer anderen ID (02.11.2026, Emin 6cceb3f3)
             if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
             if(role === 'master' && _tpMt5HedgeAccId && String(a.id) === String(_tpMt5HedgeAccId)) return false
             if(role === 'master' && _mt5LokalMasters){
