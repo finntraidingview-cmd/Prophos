@@ -44,6 +44,7 @@ JS = "\n".join([
     "let MT5_LOCAL = true, currentUserId = 'u-aurel', _ls = {}, _lsVoll = false, _tabelle = [], _hedgeEinst = null, _ladungen = 0",
     "const localStorage = { getItem: k => (k in _ls ? _ls[k] : null), setItem: (k, v) => { if(_lsVoll) throw new Error('QuotaExceeded'); _ls[k] = v } }",
     "const mt5RefreshAfterLink = () => {}",
+    "let accounts = []",
     r"""function kette(tab){ const k = { select: () => k, eq: () => k, maybeSingle: async () => ({ data: _hedgeEinst ? { value: _hedgeEinst } : null }),
   then: (f, r) => { _ladungen++; return Promise.resolve({ data: _tabelle, error: null }).then(f, r) } }; return k }
 const supabase = { from: t => kette(t) }""",
@@ -86,6 +87,13 @@ const o = {}
   o.emin_eine = mt5RouteResolve(pe, [inst('5551234', '430095'), inst('999', '430095')])
   o.emin_zwei = mt5RouteResolve(pe, [inst('5551234', '430095'), inst('5551234', '430095')])
   o.emin_ohne = mt5RouteResolve(pe, [inst('5551234', '488579')])
+  // S9: eigenes Slave-Konto mit ANDEREM Login (488579) → kein Rückfall; eigenes mit DEMSELBEN Login → Rückfall
+  accounts = [{ id: 'fusion-488579', externalId: '488579' }, { id: 'fusion-430095', externalId: '430095' }]
+  o.eigen_anders = mt5RouteResolve({ id: 'p-a', masterAccountId: 'emin-master', slaveAccountId: 'fusion-488579' }, [inst('5551234', '430095')])
+  o.eigen_gleich = mt5RouteResolve({ id: 'p-b', masterAccountId: 'emin-master', slaveAccountId: 'fusion-430095' }, [inst('5551234', '430095')])
+  accounts.push({ id: '704925f0-fremd', externalId: '430095', _fremd: true })
+  o.fremd_markiert = mt5RouteResolve(pe, [inst('5551234', '430095')])
+  accounts = []
   _hedgeEinst = null; _uhr += 31000; await mt5LoadLinks()
   o.emin_ohne_einst = mt5RouteResolve(pe, [inst('5551234', '430095')])
   print(JSON.stringify(o))
@@ -109,6 +117,9 @@ check(o["gedrosselt"] == 1 and o["nach_30s"] == 2, f"Nachladen gedrosselt: zwei 
 check(o["voll"] == "777", "localStorage voll: der frisch geladene Stand gilt aus dem Speicher")
 check(o["emin_eine"] and o["emin_eine"]["hedgeLogin"] == "430095", "Emin: fremdes Slave-Konto, eigener Hedge-Login 430095, genau eine Instanz → aufgelöst")
 check(o["emin_zwei"] is None, "Emin: zwei passende Instanzen → keine Zuordnung (nie raten)")
+check(o["eigen_anders"] is None, "S9: eigenes Slave-Konto mit anderem Login (488579) → kein Rückfall auf 430095")
+check(o["eigen_gleich"] and o["eigen_gleich"]["hedgeLogin"] == "430095", "eigenes Slave-Konto mit demselben Login, nur ohne Link → Rückfall")
+check(o["fremd_markiert"] and o["fremd_markiert"]["hedgeLogin"] == "430095", "fremdes Slave-Konto (_fremd) → Rückfall")
 check(o["emin_ohne"] is None and o["emin_ohne_einst"] is None, "ohne passende Instanz bzw. ohne eigene Einstellung → keine Zuordnung")
 check("if(role === 'slave' && a._fremd) return false" in HTML and "!a.archived && !a._fremd" in HTML and "gehört nicht zu dieser ID — nicht gespeichert" in HTML,
       "Tab: Hedge-Konto nur aus eigenen Konten (Dropdown, Auto-Verknüpfung, Speichern)")
@@ -135,5 +146,15 @@ check(neu4[0]["value"]["accountId"] == "901a4804" and "nicht gefunden" not in g4
 check(len(re.findall(r'gp_hedge_settings_eigen\(_sb_all\("user_settings", \{"select": "user_id,value", "key": f"eq\.\{GP_HEDGE_KEY\}"', APP)) == 6
       and len(re.findall(r'_sb_all\("user_settings", \{"select": "user_id,value", "key": f"eq\.\{GP_HEDGE_KEY\}"', APP)) == 6,
       "alle sechs Planer-Stellen (Gruppe, Echo-Hedge, ehv, Tradeify-Final, Apex, Funded-CFD) lesen die Einstellung nur durch den Riegel")
+import types as _t
+ns2 = {"_sb_all": lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 500")), "re": re, "print": lambda *a, **k: None}
+i2 = APP.index("\n_gp_hedge_fremd = {}") + 1
+exec(APP[i2:APP.index("\n\n\n", APP.index("\ndef gp_hedge_settings_eigen(") + 1)], ns2)
+try:
+    ns2["gp_hedge_settings_eigen"]([{"user_id": "u", "value": {"accountId": "a", "hedgeLogin": "1"}}])
+    geworfen = False
+except RuntimeError:
+    geworfen = True
+check(geworfen, "S9: Lesefehler beim Besitzer → Ausnahme, der Planer-Lauf bricht ab (nie Pläne ohne Hedge-Konto)")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)

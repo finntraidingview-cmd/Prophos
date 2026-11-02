@@ -24732,7 +24732,12 @@
     // Zeilen): fehlt der Login zum Slave-Konto, gilt der Hedge-Login aus der EIGENEN Einstellung echo_hedge_account — mt5RouteResolve nimmt ihn nur, wenn genau
     // eine Instanz Master-Login + diesen Hedge-Login hat
     let hedgeRueckfall = false
-    if(!hedgeLogin && plan.slaveAccountId && _mt5HedgeLoginEigen){ hedgeLogin = _mt5HedgeLoginEigen; hedgeRueckfall = true }
+    // S9 02.11.2026: nur, wenn das Slave-Konto fremd ist (nicht in der eigenen Liste) oder selbst diesen Login trägt — ein eigenes Konto mit ANDEREM Login
+    // (live zwei Fusion-Logins 488579/430095) öffnete sonst auf B und buchte auf A
+    if(!hedgeLogin && plan.slaveAccountId && _mt5HedgeLoginEigen){
+      let sk = null; try{ sk = (accounts || []).find(a => a && !a._fremd && String(a.id) === String(plan.slaveAccountId)) || null }catch(_){ sk = null }
+      if(!sk || String(sk.externalId || '') === String(_mt5HedgeLoginEigen)){ hedgeLogin = _mt5HedgeLoginEigen; hedgeRueckfall = true }
+    }
     if(!masterLogin || !hedgeLogin){
       if(plan.masterAccountId && typeof mt5LinksNachladen === 'function') mt5LinksNachladen('plan ' + String(plan.id || '').slice(0, 8))   // Link evtl. nach dem Boot angelegt
       return null
@@ -54303,7 +54308,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1988'
+  const OS_TAB_BUILD = '2026-09-22.1989'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

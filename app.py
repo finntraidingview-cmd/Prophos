@@ -26698,8 +26698,8 @@ def gp_hedge_settings_eigen_rechnen(rows, konten, eigene, links=None):
 
 
 def gp_hedge_settings_eigen(rows):
-    """Lädt Besitzer und Logins zu den echo_hedge_account-Zeilen und wendet gp_hedge_settings_eigen_rechnen an (02.11.2026). Lesefehler → keine Zeile (fail-closed:
-    ohne Hedge-Konto plant kein Planer einen Hedge-Trade). Gründe bleiben in _gp_hedge_fremd und einmal im Log."""
+    """Lädt Besitzer und Logins zu den echo_hedge_account-Zeilen und wendet gp_hedge_settings_eigen_rechnen an (02.11.2026). Lesefehler → Ausnahme, der Planer-Lauf
+    bricht ab (fail-closed, S9). Gründe bleiben in _gp_hedge_fremd und einmal im Log."""
     rows = list(rows or ())
     accs = sorted({str((r.get("value") or {}).get("accountId")) for r in rows if isinstance(r.get("value"), dict) and (r.get("value") or {}).get("accountId")})
     if not accs:
@@ -26721,8 +26721,10 @@ def gp_hedge_settings_eigen(rows):
                                            "mt5_login": "in.(" + ",".join(logins) + ")"}):
                 links[(str(l.get("user_id")), str(l.get("mt5_login") or ""))] = str(l.get("account_id") or "")
     except Exception as e:
-        print(f"[hedge-konto] Besitzer nicht lesbar, keine Hedge-Einstellung übernommen: {type(e).__name__}: {e}", flush=True)
-        return []
+        # S9 02.11.2026: weiterwerfen statt [] — sonst legten gp_planen/fcp_planen Pläne ohne Hedge-Konto an, das bliebe am Plan. Der Lauf bricht ab, der nächste
+        # Takt versucht es neu
+        print(f"[hedge-konto] Besitzer nicht lesbar, Lauf abgebrochen: {type(e).__name__}: {e}", flush=True)
+        raise
     neu, grund = gp_hedge_settings_eigen_rechnen(rows, konten, eigene, links)
     for uid, g in grund.items():
         if _gp_hedge_fremd.get(uid) != g:
