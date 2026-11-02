@@ -2408,8 +2408,15 @@ def _browser_und_mt5_frei(tv_eigen=False):
 
 
 def _tab_stand_holen(pc, spur):
-    from urllib.parse import quote
-    roh = code_holen(f"/code/tab-stand/{pc}" + (f"?panel={quote(spur[:200])}" if spur else ""), timeout=10)
+    from urllib.parse import urlencode
+    # NEULADE-GRUND JE PC (02.11.2026, Prüfauftrag Betrieb 1: [tab-neuladen] steht nur in der Konsole): letztes Ergebnis mitschicken, Railway zeigt es in /admin/pc-stand.
+    # Über das Panel, nicht über den Tab: Ein hängender alter Tab schreibt kein neues Feld, gerade den will man sehen.
+    q = {}
+    if spur:
+        q["panel"] = spur[:200]
+    if TAB_NL.get("ergebnis"):
+        q.update(ergebnis=str(TAB_NL["ergebnis"])[:300], ergebnis_at=int(TAB_NL.get("ergebnis_at") or 0))
+    roh = code_holen(f"/code/tab-stand/{pc}" + ("?" + urlencode(q) if q else ""), timeout=10)
     try:
         return json.loads(roh.decode("utf-8")) if roh else None
     except Exception:
@@ -2503,7 +2510,7 @@ def _tab_neulade_waechter():
                             ok, msg = _prophos_tab_neuladen_cdp()
                             msg = f"per CDP im Puls-Chrome: {msg}"
                     grund = f"{grund} → {'neu geladen' if ok else 'NICHT neu geladen'}: {msg}"
-                    TAB_NL["ergebnis"] = grund
+                    TAB_NL.update(ergebnis=grund, ergebnis_at=jetzt)
                 elif puls_da:
                     # PROPHOS IM PULS-CHROME HALTEN (30.10.2026): lebt der Haupt-Tab woanders und fehlt er im Puls-Chrome → dort öffnen
                     riegel = str((stand or {}).get("riegel") or "").strip() if isinstance(stand, dict) and stand.get("ok") else "Tab-Stand von Railway nicht lesbar"

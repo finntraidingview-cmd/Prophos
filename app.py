@@ -14619,6 +14619,9 @@ def admin_pc_stand():
     else:   # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter raus
         std_aus = _admin_standard_aus()
         stand = {k: v for k, v in stand.items() if str(k) not in std_aus}
+    for v in stand.values():   # Neulade-Grund und letztes Ergebnis des Panels je PC (02.11.2026), Hinweis im Admin-Reiter PC-Tabs
+        for pc, z in (v.get("je_pc") or {}).items():
+            z["tab_nl"] = _tab_nl_stand.get(pc)
     return jsonify({"ok": True, "at": jetzt.isoformat(), "lebt_s": PC_STAND_LEBT_S, "aus_s": PC_AUS_S, "stand": stand})
 
 
@@ -20054,6 +20057,22 @@ def code_datei(pfad):
 # selbst neu (Strg+F5 im Prophos-Fenster). Hier nur Lesen: Tab-Stand aus mt5_live + Riegel des Servers für diesen PC. ?panel= ist die
 # letzte Entscheidung des Panels — geloggt bei Änderung (Spur im Railway-Log).
 _tab_stand_spur = {}
+_tab_nl_stand = {}   # pc → {grund, grund_at, ergebnis, ergebnis_at}: dieselbe Spur für /admin/pc-stand (02.11.2026); nach einem Railway-Neustart spätestens in 1 min wieder da
+
+
+def tab_nl_merken(merk, pc, spur, ergebnis, ergebnis_at, jetzt):
+    """REIN RECHNEND auf merk (testbar): Neulade-Grund und letztes Ergebnis des Panels je PC. Leere Spur = Tab aktuell, Grund weg; das letzte Ergebnis bleibt stehen.
+    ergebnis_at = Zeit des Panels in s, unlesbar → jetzt beim ersten Sehen."""
+    z = merk.setdefault(pc, {"grund": "", "grund_at": None, "ergebnis": "", "ergebnis_at": None})
+    if spur != z["grund"]:
+        z.update(grund=spur, grund_at=jetzt)
+    if ergebnis and ergebnis != z["ergebnis"]:
+        try:
+            at = float(ergebnis_at)
+        except (TypeError, ValueError):
+            at = 0.0
+        z.update(ergebnis=ergebnis, ergebnis_at=at if at > 0 else jetzt)
+    return z
 
 
 def tab_stand_riegel(signale_laeuft, plaene, pc, jetzt):
@@ -20211,6 +20230,8 @@ def code_tab_stand(pc):
     if spur and _tab_stand_spur.get(pc) != spur:
         _tab_stand_spur[pc] = spur
         print(f"[tab-stand] {pc}: {spur}", flush=True)
+    if request.headers.get("User-Agent") != "prophos-agent":   # der Lotse-Agent schickt keine Spur, sonst wäre der Grund bei jeder Eingabe leer
+        tab_nl_merken(_tab_nl_stand, pc, spur, (request.args.get("ergebnis") or "").strip()[:300], request.args.get("ergebnis_at"), time.time())
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
                     "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
                     **lotse_plan_stand(sig, plaene, uids, pc, jetzt),

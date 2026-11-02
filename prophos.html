@@ -36639,6 +36639,12 @@
                               : { farbe: 'gelb', text: `lädt gleich (${min(seit)} min)`, titel: `Ziel ${bw.ziel || neu}${grund}` }
   }
   window._admPcsUrteil = admPcsUrteil   // Test-Haken
+  // NEULADE-GRUND JE PC (02.11.2026): Was das Panel zum Neuladen zuletzt entschieden hat, aus /admin/pc-stand tab_nl. REIN → Text für den Hinweis, '' ohne Stand.
+  function admPcsNlText(nl){
+    if(!nl || typeof nl !== 'object') return ''
+    const uhr = s => { const d = new Date(Number(s) * 1000); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
+    return [nl.grund ? `Panel: ${nl.grund}` : '', nl.ergebnis ? `Letzter Neulade-Versuch ${uhr(nl.ergebnis_at)}: ${nl.ergebnis}` : ''].filter(Boolean).join('\n')
+  }
   // MT5-UPDATE JE PC (08.10.2026, Master/Finn: fehlende PCs sehen): mt5_live.status.mt5_update {aufgabe_ok, ausstehend, abgelehnt} aus dem
   // Copier-Panel (stille Aufgabe „Prophos MT5-Update", .930/.1337). ✗ → am PC im Copier-Panel „MT5-Updates ohne Nachfrage einrichten" klicken.
   function admPcsMt5UpdZelle(m){
@@ -36673,6 +36679,7 @@
     let aktuell = 0, lebend = 0
     tb.innerHTML = zeilen.map(q => {
       const u = admPcsUrteil(q, neu, jetzt) || { farbe: 'grau', text: '–', titel: '' }
+      u.titel = [u.titel, admPcsNlText(q && q.tab_nl)].filter(Boolean).join('\n')
       if(q.lebt){ lebend++; if(u.farbe === 'gruen') aktuell++ }
       const key = `${q.uid}|${q.pc_name || ''}`, ges = _admPcs.gesendet.get(key)
       const knopf = !q.pc_name || !q.lebt ? '' : ges && jetzt - ges < 3 * 60000
