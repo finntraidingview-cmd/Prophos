@@ -53,6 +53,7 @@ ok('sig["params"]["nur_snapshot"] = True' in t and 'warum="offener Trade dieser 
 html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prophos.html"), encoding="utf-8").read()
 ok("pm.nur_snapshot === true ? { nurSnapshot: true }" in html, "Tab öffnet dann kein Terminal")
 ok('"echo_hedge_ablauf"' in fn("alarm_ereignisse"), "⚪ beim Ablauf")
+ok("AP_BAL_AUTO_PROBE_ABSTAND_S = 1800" in src and t.index("AP_BAL_AUTO_PROBE_ABSTAND_S") < t.index('["nur_snapshot"] = True'), "Terminal-Probe höchstens alle 30 min")
 ns.update(_ap_ts=lambda v: datetime.fromisoformat(v), AP_BAL_AUTO_OHNE_USERNAME="x"); exec(fn("ap_bal_auto_db_stand"), ns)
 zt = "2026-11-02T09:00:00+00:00"; zz = lambda **k: dict({"plan_id": "konto:k", "created_at": zt, "status": "fehler"}, **k)
 ok(ns["ap_bal_auto_db_stand"]([zz(params={"von": "auto_planer", "nur_snapshot": True}, ergebnis={"code": "nicht_offen"})], 0)["k"]["versuche"] == [], "Terminal zu zählt nicht als Versuch")

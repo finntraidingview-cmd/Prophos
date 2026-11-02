@@ -34559,6 +34559,7 @@ def ap_gruppen_nachplan_tick(jetzt, zustand):
 AP_BAL_AUTO_TAKT_S = 600
 AP_BAL_AUTO_MAX_TAG = 3
 AP_BAL_AUTO_ABSTAND_S = 5400          # 90 min zwischen zwei Aufträgen desselben Kontos
+AP_BAL_AUTO_PROBE_ABSTAND_S = 1800    # 30 min zwischen zwei Lesungen bei offenem Trade (nur_snapshot, Gruppen-Takt)
 AP_BAL_AUTO_OHNE_LESUNG = ("ext_fehlt", "express")   # Gründe, bei denen eine Lesung nichts bringt
 # Quelle (A) — BALANCE SELBST 2 (Finn 16.10.2026, „was der Bot kann, macht der Bot"): neben „Balance fehlt/nicht live" auch die Auslasser,
 # die nur eine Lesung klärt — „Ergebnis vom … nie gelesen" und „… geblowt?" (ap_letzter_trade_geblasen); bisher half dort nur ↻ von Hand
@@ -34921,6 +34922,12 @@ def _ap_bal_auto_senden(kand, accs, d, tag, merk, uids_offen=None, wer=""):
                 if sig["params"]["aktion"] != "mt5_balance":
                     ueber.append(dict(zeile, warum="offener Trade dieser ID — Puls-Lesung wartet"))
                     continue
+                # Terminal-zu-Proben zählen nicht gegen Deckel und 90 min (ap_bal_auto_db_stand), darum eigene Bremse: sonst alle 10 min ein Auftrag je Konto (Frage Betrieb 1, 02.11.2026)
+                proben = merk.setdefault("proben", {})
+                if jetzt_s - proben.get(kid, 0) < AP_BAL_AUTO_PROBE_ABSTAND_S:
+                    ueber.append(dict(zeile, warum="offener Trade dieser ID — nächste Terminal-Probe später"))
+                    continue
+                proben[kid] = jetzt_s
                 sig["params"]["nur_snapshot"] = True
             if sig["params"]["aktion"] == "mt5_balance":
                 ort = _mt5_ort_fehler(sig["user_id"], sig["params"]["login"])
