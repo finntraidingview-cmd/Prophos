@@ -12308,10 +12308,11 @@
           <!-- Auftrag ausgeblendet (Finn 08.10.2026: „Admin → Auftrag komplett weg, brauche ich nicht") — Pane, JS (aufLaden/aufRender) und Backend bleiben, nur der Reiter ist weg; der 120-s-Takt startet erst mit _aufTabOeffnen, also nie -->
           <button class="subtab adm-tab" data-admtab="auftrag" style="display:none">Auftrag</button>
           <!-- Challenge-Planer (27.10.2026, Finn: „Im Admin den Reiter Trade-Planer umbenennen … und einen eigenen Reiter für die Funded bauen") -->
-          <!-- seit 30.10.2026 Verweise „→ jetzt unter Planer" (Klick im Admin öffnet den Tab Planer mit diesem Planer, PLANER-TAB) -->
-          <button class="subtab adm-tab" data-admtab="planer" title="→ jetzt unter Planer">Challenge-Planer →</button>
-          <button class="subtab adm-tab" data-admtab="fplaner" title="→ jetzt unter Planer">Funded-Planer →</button>
-          <button class="subtab adm-tab" data-admtab="wd" title="→ jetzt unter Planer">Winning Days →</button>
+          <!-- Im Admin ausgeblendet (Finn 02.11.2026: „Die drei kannst du visuell alle rausmachen. Die gibt's jetzt ja unter Challenge-Planer/Funded-Planer."). Die Knöpfe bleiben im DOM:
+               die Planer-Chips und Sprünge wie Trades → Winning Days schalten über sie (.adm-tab[data-admtab=…]), Tab Planer und Sidebar unverändert. -->
+          <button class="subtab adm-tab" data-admtab="planer" data-reiter-aus="1" style="display:none">Challenge-Planer →</button>
+          <button class="subtab adm-tab" data-admtab="fplaner" data-reiter-aus="1" style="display:none">Funded-Planer →</button>
+          <button class="subtab adm-tab" data-admtab="wd" data-reiter-aus="1" style="display:none">Winning Days →</button>
           <!-- Funded CFD (30.10.2026): nur im Tab Planer (Chip), im Admin nie sichtbar -->
           <button class="subtab adm-tab" data-admtab="fcfd" data-reiter-aus="1" style="display:none">Funded CFD</button>
           <!-- Kapitel/Statistik ohne Emojis (Finn 30.09.2026: „die Emojis weg, die nerven") -->
