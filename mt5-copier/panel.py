@@ -2144,7 +2144,7 @@ def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
 # ≥ 0,3 s → close-Auftrag an den Copier (hedge_solo_auftrag.json, wie /api/hedge-solo). Fail-safe: Konto nicht sicher, Stand blind/alt, Userscript < 0.10.8
 # oder Position nie gesehen → nichts, der bestehende Weg im Tab greift. Der Tab bucht weiter und darf selbst schließen (doppelt: Copier antwortet schon_zu).
 # Gelöst wird ein Eintrag beim Close des Tabs (/api/hedge-solo close mit dem Ticket), nach dem eigenen Close (ok/schon_zu) oder nach 12 h.
-# Ort Panel statt reader-server: das Panel läuft dauerhaft, schreibt ohnehin die Copier-Aufträge und hält die Puls-Locks (Konto fest, unten). ══
+# Ort Panel statt reader-server: das Panel läuft dauerhaft, schreibt ohnehin die Copier-Aufträge und hält die Puls-Locks. ══
 SCHARF_PFAD = os.path.join(HERE, "hedge_scharf.json")
 SCHARF_LOCK = threading.Lock()
 SCHARF_TAKT_S = 0.1
@@ -2283,7 +2283,7 @@ def scharf_loesen(ticket, grund):
 
 
 def scharf_konto_fest():
-    """Offene scharfe Einträge → [ext_id] (für KONTO FEST)."""
+    """Offene scharfe Einträge → [ext_id] (für „kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge“)."""
     jetzt = time.time()
     return [str(x.get("ext_id")) for x in scharf_laden() if jetzt - float(x.get("at") or 0) < SCHARF_MAX_S]
 
@@ -2369,28 +2369,30 @@ def _scharf_wache():
         time.sleep(SCHARF_TAKT_S)
 
 
-# ══ KONTO FEST (Teil A, Finn 02.11.2026 /goal, Simon 17:45–17:47: Balance-/Endlesungen und der Topstep-Lauf wechselten bei offenem Trade das Konto bzw.
-# starteten das Puls-Chrome neu): Solange ein scharfer Eintrag lebt, wählt Puls im Puls-Chrome kein anderes TradingView-Konto — tv-lesen, tv-konten-liste und
-# tv-close für ein anderes Konto antworten puls_beschaeftigt (retry_ok, der Aufrufer wartet wie bei einem laufenden Lauf); das Trade-Konto selbst bleibt frei.
-# Kein Puls-Chrome-Neustart solange (tsx-*, tv-konto bekommen kein_neustart). Ein NEUER TradingView-Start auf demselben PC (tv-konto anderes Konto) wird NICHT
-# gesperrt (Finn entscheidet), nur im Log genannt. ══
-def konto_fest_sperre(konto):
-    """REIN-ish: (gesperrt: bool, msg). konto = External ID des Laufs."""
-    fest = scharf_konto_fest()
-    if not fest:
-        return False, ""
-    k = str(konto or "").strip().upper()
-    if k and any(k == str(f).strip().upper() for f in fest):
-        return False, ""
-    return True, (f"Konto fest: offener TradingView-Trade mit Fusion-Hedge im Konto {', '.join(fest)} — Puls wechselt bis zum Ende kein Konto "
-                  f"(Lauf für {konto or '?'} wartet)")
+# ══ LESE-SPERRE UM DAS MARKET OPENING (Finn 02.11.2026, Korrektur über den Eingang: kein „Konto fest bei offenem Trade“ — die Heim-Wache-Regel bleibt, Puls
+# bleibt zu Hause, wenn der Trade ≤ 2.000 $ vor TP/Liq steht): 18:30–18:40 Asia/Dubai keine Lesungen und keine Kontowechsel in TradingView. tv-lesen,
+# tv-konten-liste und tv-close antworten in dem Fenster puls_beschaeftigt (retry_ok, der Aufrufer wartet wie bei einem laufenden Lauf). Trade-Starts (tv-konto)
+# sind nicht betroffen. Dazu bleibt: bei offenem TradingView-Trade mit Fusion-Hedge (scharfer Eintrag) kein Puls-Chrome-Neustart (Simon 18:31, s. tv-konto/tsx-*). ══
+LESE_SPERRE_VON = (18, 30)
+LESE_SPERRE_BIS = (18, 40)
+DUBAI_UTC_OFFSET_S = 4 * 3600   # Dubai ohne Sommerzeit
 
 
-def _konto_fest_antwort(konto, pfad):
-    gesperrt, msg = konto_fest_sperre(konto)
+def lese_sperre_markt(jetzt_ts):
+    """REIN RECHNEND (testbar): (gesperrt, msg) — 18:30 ≤ Dubai-Uhrzeit < 18:40."""
+    sek = int(jetzt_ts + DUBAI_UTC_OFFSET_S) % 86400
+    von, bis = LESE_SPERRE_VON[0] * 3600 + LESE_SPERRE_VON[1] * 60, LESE_SPERRE_BIS[0] * 3600 + LESE_SPERRE_BIS[1] * 60
+    if von <= sek < bis:
+        return True, (f"Market Opening: {LESE_SPERRE_VON[0]}:{LESE_SPERRE_VON[1]:02d}–{LESE_SPERRE_BIS[0]}:{LESE_SPERRE_BIS[1]:02d} Dubai keine Lesungen "
+                      f"und keine Kontowechsel in TradingView — wartet noch {int((bis - sek) // 60) + 1} min")
+    return False, ""
+
+
+def _lese_sperre_antwort(konto, pfad):
+    gesperrt, msg = lese_sperre_markt(time.time())
     if gesperrt:
-        print(f"[konto-fest] {pfad} @{konto}: wartet", flush=True)
-        return json.dumps({"ok": False, "code": "puls_beschaeftigt", "konto_fest": True, "retry_ok": True, "gesendet": False, "msg": msg},
+        print(f"[lese-sperre] {pfad} @{konto}: wartet (Market Opening)", flush=True)
+        return json.dumps({"ok": False, "code": "puls_beschaeftigt", "lese_sperre": True, "retry_ok": True, "gesendet": False, "msg": msg},
                           ensure_ascii=False)
     return None
 
@@ -5260,11 +5262,8 @@ class Handler(BaseHTTPRequestHandler):
             # Schritt 4b (22.09.2026): NUR mit dieser Marke klickt der Bot den Kauf-Knopf.
             # Ein altes Panel kennt sie nicht — dann reist sie ueber die Bruecke (@scharf=1).
             cmd["scharf"] = body.get("scharf") is True
-            _fest = scharf_konto_fest()   # KONTO FEST (02.11.2026): kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge; ein Start in ein anderes Konto nur gemeldet
-            if _fest:
+            if scharf_konto_fest():   # 02.11.2026: kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge (Simon 18:31); der Start selbst läuft wie immer
                 cmd["kein_neustart"] = True
-                if cmd["ext_id"] and cmd["ext_id"].upper() not in [str(x).upper() for x in _fest]:
-                    print(f"[konto-fest] tv-konto @{cmd['ext_id']} bei offenem Trade in {', '.join(_fest)} — nicht gesperrt (Finn entscheidet)", flush=True)
             # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
             # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
@@ -5332,7 +5331,7 @@ class Handler(BaseHTTPRequestHandler):
             felder = ("ext_id", "firma", "symbol", "richtung", "volumen", "tp_usd", "sl_usd", "plan_id")
             cmd = {k: body.get(k) for k in felder}
             cmd["scharf"] = body.get("scharf") is True
-            if scharf_konto_fest():   # KONTO FEST (02.11.2026): bei offenem TV-Trade mit Hedge nie das Puls-Chrome neu starten (Simon 18:31)
+            if scharf_konto_fest():   # 02.11.2026: bei offenem TV-Trade mit Hedge nie das Puls-Chrome neu starten (Simon 18:31)
                 cmd["kein_neustart"] = True
             # HARTE LINIE (13.10.2026, Anlass Mike: Topstep-Short laeuft, zwei Longs geplant): vor dem scharfen Klick fragt das Panel
             # Railway/DB selbst (richtung_frei) — unabhaengig vom Waechter im Tab. Nicht frei / nicht pruefbar -> nichts gesendet.
@@ -5395,7 +5394,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
                     "msg": "Feld 'konto' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))
             cmd = {"konto": konto, "firma": str(body.get("firma") or "").strip()[:60]}
-            if scharf_konto_fest():   # KONTO FEST (02.11.2026): kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge
+            if scharf_konto_fest():   # 02.11.2026: kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge (Simon 18:31)
                 cmd["kein_neustart"] = True
             if modus == "tsxlesen" and body.get("auge_reparieren") is True:
                 cmd["auge_reparieren"] = True   # 29.10.2026: Heimweg „TopstepX-Auge blind" — Bot lädt neu / öffnet den Tab neu (order_bot._tsx_auge_reparieren)
@@ -5449,7 +5448,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
-            _kf = _konto_fest_antwort(konto, u.path)   # KONTO FEST (02.11.2026): offener TV-Trade mit Hedge → anderes Konto wartet
+            _kf = _lese_sperre_antwort(konto, u.path)   # LESE-SPERRE (02.11.2026): 18:30–18:40 Dubai keine Lesung/kein Kontowechsel in TradingView
             if _kf:
                 return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
@@ -5540,7 +5539,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or "").strip()[:60]
-            _kf = _konto_fest_antwort(konto, u.path)   # KONTO FEST (02.11.2026): offener TV-Trade mit Hedge → anderes Konto wartet
+            _kf = _lese_sperre_antwort(konto, u.path)   # LESE-SPERRE (02.11.2026): 18:30–18:40 Dubai keine Lesung/kein Kontowechsel in TradingView
             if _kf:
                 return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
@@ -5652,7 +5651,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
-            _kf = _konto_fest_antwort(konto, u.path)   # KONTO FEST (02.11.2026): offener TV-Trade mit Hedge → anderes Konto wartet
+            _kf = _lese_sperre_antwort(konto, u.path)   # LESE-SPERRE (02.11.2026): 18:30–18:40 Dubai keine Lesung/kein Kontowechsel in TradingView
             if _kf:
                 return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:

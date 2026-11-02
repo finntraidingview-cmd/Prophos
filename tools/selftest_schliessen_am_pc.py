@@ -138,20 +138,28 @@ uhr[0] += 2.1
 ns["_scharf_runde"](stand(), uhr[0])
 check(len(auftraege()) == 2, "ohne Quittung nach 2 s ein zweiter close-Auftrag (Copier antwortet schon_zu, wenn zu)")
 
-# KONTO FEST
+# LESE-SPERRE Market Opening (Finn-Korrektur 02.11.2026: kein „Konto fest bei offenem Trade“)
+import calendar
+def dubai(h, m):   # 02.11.2026 h:m Dubai → epoch
+    return calendar.timegm((2026, 11, 2, h, m, 0)) - 4 * 3600
+L = ns["lese_sperre_markt"]
+check(L(dubai(18, 30))[0] and L(dubai(18, 39) + 59)[0], "18:30–18:39:59 Dubai gesperrt")
+check(not L(dubai(18, 29) + 59)[0] and not L(dubai(18, 40))[0] and not L(dubai(17, 0))[0], "18:29:59, 18:40 und 17:00 frei (kein 17:00-Fenster)")
+uhr[0] = dubai(18, 35)
+r = json.loads(ns["_lese_sperre_antwort"]("ANDERES123456", "/api/tv-lesen"))
+check(r["code"] == "puls_beschaeftigt" and r["retry_ok"] and r["lese_sperre"] and "Market Opening" in r["msg"], "Antwort wie ein laufender Lauf (puls_beschaeftigt, retry_ok) → der Aufrufer wartet")
+uhr[0] = dubai(18, 45)
+check(ns["_lese_sperre_antwort"]("X12345", "/api/tv-lesen") is None, "außerhalb des Fensters → frei")
 frisch_scharf(666)
-g, m = ns["konto_fest_sperre"]("FTDFYSLX150811169999")
-check(g and "Konto fest" in m, "offener Trade: Balance/Endlesung eines anderen Kontos → wartet")
-check(ns["konto_fest_sperre"](ID)[0] is False, "das Trade-Konto selbst bleibt frei")
-r = json.loads(ns["_konto_fest_antwort"]("ANDERES123456", "/api/tv-lesen"))
-check(r["code"] == "puls_beschaeftigt" and r["retry_ok"] and r["konto_fest"], "Antwort wie ein laufender Lauf (puls_beschaeftigt, retry_ok) → der Aufrufer wartet")
-ns["scharf_loesen"](666, "test")
-check(ns["konto_fest_sperre"]("FTDFYSLX150811169999")[0] is False, "nach dem Ende → frei")
+uhr[0] = dubai(19, 0)
+check(ns["_lese_sperre_antwort"]("ANDERES123456", "/api/tv-lesen") is None, "offener Trade allein sperrt keine Lesung mehr (Heim-Wache-Regel bleibt)")
+check("konto_fest_sperre" not in SRC and "_konto_fest_antwort" not in SRC, "kein „Konto fest bei offenem Trade“ mehr im Panel")
 for pfad in ("/api/tv-lesen", "/api/tv-konten-liste", "/api/tv-close"):
     k = SRC.index(f'if u.path == "{pfad}":')
-    check("_konto_fest_antwort(konto, u.path)" in SRC[k:k + 2500], f"{pfad} prüft KONTO FEST vor dem Lauf")
-check(SRC.count('cmd["kein_neustart"] = True') == 3, "tv-konto, tsx-konto, tsx-lesen: kein Puls-Chrome-Neustart bei offenem Trade")
-check('nicht gesperrt (Finn entscheidet)' in SRC, "neuer TV-Start in ein anderes Konto wird nur gemeldet, nicht gesperrt")
+    check("_lese_sperre_antwort(konto, u.path)" in SRC[k:k + 2500], f"{pfad} prüft die Lese-Sperre vor dem Lauf")
+k = SRC.index('if u.path == "/api/tv-konto":')
+check("_lese_sperre_antwort" not in SRC[k:SRC.index('if u.path == "/api/tsx-konto":')], "Trade-Starts (tv-konto) nicht betroffen")
+check(SRC.count('cmd["kein_neustart"] = True') == 3, "bleibt: kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge (tv-konto, tsx-konto, tsx-lesen)")
 
 # order_bot: Neustart verboten
 bns = {}

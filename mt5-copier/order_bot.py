@@ -28557,9 +28557,9 @@ def _puls_lauf_abfangen(fn, *args, **kw):
 
 
 def kein_neustart_grund(cmd):
-    """REIN RECHNEND (testbar) — KONTO FEST (Finn 02.11.2026, Simon 18:31: der Neustart im TopstepX-Lauf schloss den Prophos-Tab während eines Big Trades mit
+    """REIN RECHNEND (testbar) — KEIN NEUSTART BEI OFFENEM TRADE (02.11.2026, Simon 18:31: der Neustart im TopstepX-Lauf schloss den Prophos-Tab während eines Big Trades mit
     offenem Fusion-Hedge): setzt das Panel kein_neustart (scharfer TradingView-Trade auf diesem PC), startet der Lauf das Puls-Chrome nie neu. → Grund | None"""
-    return ("kein Neustart: offener TradingView-Trade mit Fusion-Hedge auf diesem PC (Konto fest, Panel)"
+    return ("kein Neustart: offener TradingView-Trade mit Fusion-Hedge auf diesem PC (Panel)"
             if isinstance(cmd, dict) and cmd.get("kein_neustart") is True else None)
 
 
@@ -28578,7 +28578,7 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
     budget = PULS_NEUSTART_BUDGET_S.get(weg, 0.0)
     roh1, r1 = erster()
     art, grund, rest = neustart_entscheid(r1, weg, jetzt() - t0, lesung_moeglich=lesung is not None)
-    if verboten and art != "nein":                       # KONTO FEST (02.11.2026): der erste Versuch bleibt die Antwort
+    if verboten and art != "nein":                       # 02.11.2026: offener TV-Trade mit Hedge → kein Neustart, der erste Versuch bleibt die Antwort
         art, grund = "nein", str(verboten)
     if art == "nein":
         if isinstance(r1, dict) and r1 and not r1.get("ok"):
