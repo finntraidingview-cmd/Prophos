@@ -1711,6 +1711,7 @@ TAB_OEFFNEN_MAX_TAG = 8
 TAB_URL = "http://localhost:5000/"
 _TAB_OEFFNEN = {"zuletzt": 0.0, "start": time.time(), "geoeffnet": [], "tag": "", "url": "", "login": None, "tid": "", "geoeffnet_at": 0.0}
 TAB_URL_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{2,5}/[A-Za-z0-9._/-]*$")
+TAB_URL_V_RE = re.compile(r"^http://(localhost|127\.0\.0\.1):\d{2,5}/\?v=[0-9A-Za-z._-]{1,40}$")   # nur fürs Öffnen mit Build (Puls-Wache 02.11.2026)
 
 
 # ══ HAUPT-TAB (30.10.2026, Master nach Befund C: Ina pc-xc5c52 — Prophos lag nicht im Puls-Chrome, F1 fand ihn per CDP nicht; die Tabs
@@ -1819,6 +1820,76 @@ def tab_oeffnen_entscheiden(jetzt, zuletzt, start, fenster_da, letzter_versuch, 
 def _build_nr(v):
     m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.(\d+)", str(v or "").strip())
     return (m.group(1), int(m.group(2))) if m else None
+
+
+# ══ PROPHOS-TAB IM PULS-CHROME FEHLT → SOFORT NEU (Finn 02.11.2026 ~18:40 Dubai „Ja, einbauen“; Simon pc-pmqd8g 18:31:06: der TopstepX-Lauf bekam im
+# 1. Versuch einen ConnectionError, der PULS-CHROME-NEUSTART (order_bot _puls_chrome_neustart, Browser.close) startete das Puls-Chrome nur mit topstepx.com
+# neu — der Prophos-Tab war weg, während Finns Big Trade 88b28130 mit offenem Fusion-Hedge lief, bis Finn localhost:5000 von Hand öffnete). Der bisherige Weg
+# (tab_oeffnen_entscheiden) wartet 5 min Stille und 120 s ohne Eingabe, puls_tab_entscheiden zusätzlich auf Server-Riegel — beides hält bei offenem Trade.
+# Diese Wache: steht im Puls-Chrome (CDP erreichbar) PULS_WACHE_FEHLT_S lang keine Seite auf localhost:5000/127.0.0.1:5000, öffnet das Panel eine — auch bei
+# offenem Trade (Finn ausdrücklich), aber nie während Puls/Polar/MT5-Order (dann nach dem Lauf), höchstens 1× je PULS_WACHE_ABSTAND_S. Nur öffnen: kein Tab
+# zu, kein Klick, kein Login (lädt die Seite, tippt nichts), neues Fenster im Hintergrund (Target.createTarget background, wie _tab_oeffnen). Läuft das
+# Puls-Chrome nicht, startet es diese Wache nicht. ══
+PULS_WACHE_FEHLT_S = 60
+PULS_WACHE_ABSTAND_S = 5 * 60
+_PULS_WACHE = {"fehlt_seit": None, "letzter": 0.0, "grund": ""}
+
+
+def puls_wache_entscheiden(jetzt, erreichbar, n_prophos, fehlt_seit, letzter, lock_frei):
+    """REIN RECHNEND (testbar): (öffnen, grund, fehlt_seit_neu). erreichbar = CDP-Liste des Puls-Chrome lesbar, n_prophos = Seiten auf :5000."""
+    if not erreichbar or n_prophos > 0:
+        return False, "", None
+    fehlt_seit = fehlt_seit or jetzt
+    warum = f"kein Prophos-Tab im Puls-Chrome seit {int(jetzt - fehlt_seit)} s"
+    if jetzt - fehlt_seit < PULS_WACHE_FEHLT_S:
+        return False, "", fehlt_seit
+    if letzter and jetzt - letzter < PULS_WACHE_ABSTAND_S:
+        return False, f"{warum} — zuletzt vor {int(jetzt - letzter)} s geöffnet (höchstens 1 je {PULS_WACHE_ABSTAND_S // 60} min)", fehlt_seit
+    if not lock_frei:
+        return False, f"{warum} — wartet: Puls/Polar/MT5-Order läuft, öffnet danach", fehlt_seit
+    return True, warum, fehlt_seit
+
+
+def _puls_wache_url():
+    """localhost:5000 mit ?v=<Build> wie die Neulade-Wege des Tabs (frischer Tab-Stand von Railway, sonst OS_TAB_BUILD der lokalen prophos.html)."""
+    b = str(((TAB_NL.get("stand") or {}) if time.time() - float(TAB_NL.get("stand_at") or 0) < 600 else {}).get("origin") or "")
+    if not re.fullmatch(r"[0-9A-Za-z._-]{1,40}", b):
+        try:
+            with open(os.path.join(os.path.dirname(HERE), "prophos.html"), encoding="utf-8") as f:
+                m = re.search(r"const OS_TAB_BUILD = '([0-9A-Za-z._-]{1,40})'", f.read())
+            b = m.group(1) if m else ""
+        except OSError:
+            b = ""
+    return TAB_URL + (f"?v={b}" if b else f"?v={int(time.time())}")
+
+
+def _puls_wache_schritt(pc):
+    """Eine Runde der Puls-Wache (im Tab-Wächter, vor allem anderen nach dem Fern-Auftrag). Wirft nie."""
+    try:
+        try:
+            liste = _cdp_get("/json/list")
+            erreichbar = isinstance(liste, list)
+        except Exception:
+            liste, erreichbar = [], False
+        n = sum(1 for t in (liste or []) if isinstance(t, dict) and t.get("type") == "page" and _PROPHOS_URL_RE.match(str(t.get("url") or "")))
+        jetzt = time.time()
+        auf, grund, _PULS_WACHE["fehlt_seit"] = puls_wache_entscheiden(jetzt, erreichbar, n, _PULS_WACHE["fehlt_seit"], _PULS_WACHE["letzter"],
+                                                                      _browser_und_mt5_frei())
+        if auf:
+            ok, msg = _tab_oeffnen(_puls_wache_url())
+            if ok or "lokales Backend" not in str(msg):    # Backend gerade im Neustart → nächste Runde neu, sonst zählt der Versuch
+                _PULS_WACHE["letzter"] = jetzt
+            if ok:
+                _TAB_OEFFNEN["geoeffnet"].append(datetime.now().isoformat(timespec="seconds"))
+                _TAB_OEFFNEN["geoeffnet_at"] = jetzt
+            grund = f"{grund} → {'geöffnet' if ok else 'NICHT geöffnet'}: {msg}"
+        if grund and grund != _PULS_WACHE["grund"]:
+            _PULS_WACHE["grund"] = grund
+            print(f"[puls-wache] {grund}", flush=True)
+            if pc and auf:
+                _tab_stand_holen(pc, f"Puls-Wache: {grund}"[:200])   # Spur an Railway ([tab-stand] im Log)
+    except Exception as e:
+        print(f"[puls-wache] Fehler: {type(e).__name__}: {e}", flush=True)
 
 
 def tab_neuladen_entscheiden(stand, jetzt, hinter_seit, letzter_versuch, idle_s, lock_frei, lokal_still_s=None):
@@ -2026,7 +2097,7 @@ def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
     Puls-Chrome nicht, startet es order_bot._puls_chrome_sicher (minimiert, nie ein zweiter Start). Steht schon ein Prophos-Tab im
     Puls-Chrome, wird keiner geöffnet."""
     import urllib.request
-    url = url if TAB_URL_RE.fullmatch(str(url or "")) else TAB_URL
+    url = url if (TAB_URL_RE.fullmatch(str(url or "")) or TAB_URL_V_RE.fullmatch(str(url or ""))) else TAB_URL
     try:
         urllib.request.urlopen(url, timeout=5).close()
     except Exception as e:
@@ -2438,6 +2509,7 @@ def _tab_neulade_waechter():
                 _tab_auftrag_schritt()
             except Exception as e:
                 print(f"[tab-auftrag] Fehler: {type(e).__name__}: {e}", flush=True)
+            _puls_wache_schritt(pc)   # PULS-WACHE (02.11.2026): fehlender Prophos-Tab im Puls-Chrome → nach 60 s neu, auch bei offenem Trade
             jetzt0 = time.time()
             tag = datetime.now().strftime("%Y-%m-%d")
             if _TAB_OEFFNEN["tag"] != tag:
