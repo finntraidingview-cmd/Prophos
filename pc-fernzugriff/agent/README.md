@@ -89,3 +89,21 @@ Diese Wege laufen nicht durch `freigabe()`, hier gilt nur die Regel:
 - Nach einem erneuten `setup-pc.ps1` (kopiert `agent\` neu): `agent-aufgabe.ps1` nochmal, damit der neue Code läuft.
 - Läuft der neue Stand? Jedes Ergebnis trägt `"stand"`, hier `2026-11-02-klickverbot`. Probe: `do.sh <pc> '{"aktionen":[{"aktion":"warte","ms":1}]}'`.
 - Selbsttest am Mac, ohne Windows: `python3 pc-fernzugriff/agent/selbsttest_klickverbot.py`. Nur auf echtem Windows prüfbar: dass die echten Fenster die erwarteten Klassen und Programme melden, dass `vorholen` durchkommt, dass das Panel-Aus-Erkennen unter 3 s bleibt und dass ein hinterer TradingView-Tab ein aktuelles Bild liefert. `fenster` zeigt je Fenster `erlaubt`, das zuerst am Pilot-PC ansehen.
+- Nur `agent.py` aktualisieren, ohne Puls zu stören (nicht auf Windows getestet). Vom Mac per SSH aus einem Checkout auf origin/main, nie von pages.dev. Es startet nur der Agent neu, `setup-pc.ps1` ist dafür nicht nötig (es startet sshd neu):
+  ```bash
+  pc=pc-xxxxxx; hash=$(shasum -a 256 pc-fernzugriff/agent/agent.py | cut -d' ' -f1)
+  scp pc-fernzugriff/agent/agent.py "$pc:C:/mt5-copier/fernzugriff/agent/agent.py.neu" || scp -O pc-fernzugriff/agent/agent.py "$pc:C:/mt5-copier/fernzugriff/agent/agent.py.neu"
+  bash pc-fernzugriff/mac/pc.sh "$pc" -- "$(sed "s/HASHWERT/$hash/" <<'BLOCK'
+  $b = Invoke-RestMethod -TimeoutSec 5 http://127.0.0.1:8770/api/beschaeftigt; if(-not $b.frei){ throw 'Panel belegt, spaeter nochmal' }
+  if(Get-ChildItem C:\mt5-copier\fernzugriff\auftraege\*.lauf -ErrorAction SilentlyContinue){ throw 'Auftrag laeuft' }
+  $z = 'C:\mt5-copier\fernzugriff\agent\agent.py'
+  if((Get-FileHash "$z.neu" -Algorithm SHA256).Hash -ne 'HASHWERT'){ throw 'Hash falsch, nichts ersetzt' }
+  Stop-ScheduledTask -TaskName 'Prophos Agent' -ErrorAction SilentlyContinue
+  Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" | Where-Object { $_.CommandLine -match 'fernzugriff\\agent\\agent\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  for($i = 0; $i -lt 20 -and (Get-ScheduledTask -TaskName 'Prophos Agent').State -eq 'Running'; $i++){ Start-Sleep -Milliseconds 500 }
+  try { Move-Item -Force "$z.neu" $z } finally { Start-ScheduledTask -TaskName 'Prophos Agent' }
+  'erledigt'
+  BLOCK
+  )"
+  ```
+  Den Beleg liefert danach `do.sh <pc> '{"aktionen":[{"aktion":"warte","ms":1}]}'` mit dem Feld `stand`.

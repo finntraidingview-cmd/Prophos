@@ -41,7 +41,7 @@ Dateien: `acl.hujson` (Tailscale-Regeln), `setup-pc.ps1` (Einrichtung je PC), `r
 
 ## 3. Je PC (zuerst nur der Pilot-PC)
 
-1. Per Parsec auf den PC. Den **kompletten Ordner** `pc-fernzugriff` aus dem Repo (mit Unterordner `foto\` und `mac\`) als eigenen Ordner auf den PC bringen, z. B. nach `C:\Users\<nutzer>\Desktop\pc-fernzugriff`. Nicht lose in Downloads: `setup-pc.ps1` kopiert den Ordner, in dem es liegt, nach `C:\mt5-copier\fernzugriff`, und `foto.sh` erwartet dort `foto\foto.ps1`.
+1. Per Parsec auf den PC. Den **kompletten Ordner** `pc-fernzugriff` aus dem Repo (mit Unterordner `foto\` und `mac\`) als eigenen Ordner auf den PC bringen, z. B. nach `C:\Users\<nutzer>\Desktop\pc-fernzugriff`. Bei einem neuen PC liegt er dort schon aus dem Paket von `NEUER-PC-EINRICHTEN.md` Schritt 2. Von prophos.pages.dev geht es nicht: Pages liefert den Ordner nicht mehr aus und antwortet stattdessen mit der Startseite, auch ein alter Einfüge-Block mit `iwr` von dort speichert nur diese. Nicht lose in Downloads: `setup-pc.ps1` kopiert den Ordner, in dem es liegt, nach `C:\mt5-copier\fernzugriff`, und `foto.sh` erwartet dort `foto\foto.ps1`.
 2. Start → „PowerShell“ tippen → **Als Administrator ausführen**.
 3. In diesem Ordner:
    ```powershell

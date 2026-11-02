@@ -88,10 +88,14 @@ rem angefasst -- sie koennten in diesem Moment selbst laufen, und eine
 rem laufende Batchdatei zu ueberschreiben ist unter Windows undefiniert.
 rem Sie halten sich seit .190 selbst aktuell (Update in ihrem eigenen Start).
 rem Reader fehlt ganz (14.10.2026, Marcos PC pc-t8wg97: nur drei Fenster, TradingView-Abzeichen "Reader startet ..." fuer
-rem immer): dann EINMAL start-reader.bat + reader-server.py von pages.dev nach C:\Prophos\tv-reader holen. Seit dem 01.10. laeuft
+rem immer): dann EINMAL start-reader.bat + reader-server.py nach C:\Prophos\tv-reader holen. Seit dem 01.10. laeuft
 rem das Userscript auf allen PCs, kein PC soll mehr ohne Reader sein. Nichts sonst geaendert: Update und Start darunter wie bisher.
+rem 02.11.2026 (Eingang, Pages-Sperre): ueber Railway mit code_token.txt statt von pages.dev. Pages antwortet auf fehlende Pfade mit HTTP 200 und der Startseite,
+rem der Download haette die still als .bat gespeichert. Darum erst .neu, dann Groessenpruefung, dann ersetzen. Ohne Schluessel klare Meldung, beim naechsten Start wieder.
+rem Eine alte Fassung dieser Datei kann die Startseite als start-reader.bat gespeichert haben. So eine Datei weg, sonst wird der Reader nie mehr geholt.
+if exist "C:\Prophos\tv-reader\start-reader.bat" for %%A in ("C:\Prophos\tv-reader\start-reader.bat") do if %%~zA LSS 200 del "%%~A"
 if not exist "C:\tv-reader\start-reader.bat" if not exist "C:\Prophos\tv-reader\start-reader.bat" (
-  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$d='C:\Prophos\tv-reader';New-Item -ItemType Directory -Force $d|Out-Null;foreach($f in @('start-reader.bat','reader-server.py')){try{Invoke-WebRequest ('https://prophos.pages.dev/tv-reader/'+$f) -OutFile (Join-Path $d $f) -TimeoutSec 25 -UseBasicParsing}catch{}}"
+  powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$t='';try{$t=(Get-Content 'code_token.txt' -TotalCount 1 -EA Stop).Trim()}catch{};if(-not $t){Write-Host '[Reader] fehlt, und noch kein code_token.txt: erst im Prophos-Tab einloggen, beim naechsten Start wird er geholt.';exit};$d='C:\Prophos\tv-reader';New-Item -ItemType Directory -Force $d|Out-Null;foreach($f in @('reader-server.py','start-reader.bat')){$n=Join-Path $d ($f+'.neu');try{Invoke-WebRequest ('https://web-production-bec81.up.railway.app/code/datei/tv-reader/'+$f) -Headers @{'X-Code-Token'=$t} -OutFile $n -TimeoutSec 25 -UseBasicParsing;if((Get-Item $n).Length -lt 200){throw 'Datei zu klein'};Move-Item $n (Join-Path $d $f) -Force}catch{Remove-Item $n -Force -EA SilentlyContinue;Write-Host ('[Reader] '+$f+' nicht geholt: '+$_.Exception.Message)}}"
 )
 rem Reader-Ordner (01.10.2026): alt C:\tv-reader, seit der Userscript-Einrichtung per PowerShell C:\Prophos\tv-reader
 set "_tvr=C:\tv-reader"
@@ -118,7 +122,8 @@ rem startet start-verbinder.bat von Hand.
 rem (15.08.2026) Nur PCs mit ALTEM Backend-Setup betrifft das -- seit 01.09.2026
 rem steht der Hinweis deshalb hinter einer Pruefung, statt auf jedem frischen
 rem Rechner Ratlosigkeit zu stiften (Finn am neuen PC: "warum geht es nicht mehr").
-if exist "C:\prophos" (
+rem 02.11.2026: nach app.py gefragt statt nach dem Ordner. Windows unterscheidet nicht nach Schreibweise, C:\Prophos\tv-reader loeste den Hinweis sonst auf jedem PC aus.
+if exist "C:\prophos\app.py" (
   echo.
   echo   ACHTUNG, alter Backend-Ordner C:\prophos gefunden:
   echo   Nicht nur das alte start-local-backend-Fenster schliessen -- auch die

@@ -4,8 +4,8 @@ Stand 14.10.2026, Version .1542. Ersetzt den Stand vom 08.10. Jeder Schritt ist 
 Block zum Kopieren (Strg+C) und Einfügen (Strg+V, dann Enter). Darunter steht, wann
 der Schritt fertig ist.
 
-Alles läuft aus **einem Ordner: `C:\mt5-copier`**. `start-alles.bat` öffnet drei
-Fenster: **Copier** (Echo), **Panel** (Port 8770), **Backend** (Port 5000).
+Alles läuft aus **einem Ordner: `C:\mt5-copier`**. `start-alles.bat` öffnet vier
+Fenster: **Copier** (Echo), **Panel** (Port 8770), **Backend** (Port 5000), **TV-Reader** (Port 8790).
 
 > Repo ist privat. Updates holt der PC erst, wenn `code_token.txt` im Ordner liegt.
 > Die Datei legt der Prophos-Tab nach dem Login auf localhost:5000 selbst ab (Schritt 4).
@@ -58,19 +58,29 @@ python --version; pip --version
 Fertig, wenn beide eine Version zeigen. Kommt „python wurde nicht gefunden“: Python-Installer
 von Hand starten und **„Add python.exe to PATH“** anhaken.
 
-## 2. Prophos-Dateien holen (normale PowerShell)
+## 2. Prophos-Dateien aufspielen
 
-```powershell
-$d='C:\mt5-copier'; New-Item -ItemType Directory -Force $d | Out-Null; $ProgressPreference='SilentlyContinue'; $b='https://prophos.pages.dev/'; 'start-alles.bat','start-copier.bat','start-panel.bat','start-prophos.bat','autostart-einrichten.bat','puls-chrome-starten.bat','copier.py','panel.py','provision.py','order_bot.py','augen.js','augen_tsx.js','ProphosHedgeReader.mq5','config.vorlage.json','VERSION' | % { iwr ($b+'mt5-copier/'+$_) -OutFile "$d\$_" -UseBasicParsing }; 'app.py','prophos.html','firm_rules.json' | % { iwr ($b+$_) -OutFile "$d\$_" -UseBasicParsing }; python -m pip install flask requests signalrcore MetaTrader5 pywinauto; Get-ChildItem $d | Select Name,Length
+Seit 02.11.2026 gibt es dafür keinen Download von pages.dev mehr. Railway liefert Code nur mit dem Schlüssel `code_token.txt`, und den legt erst der eingeloggte Prophos-Tab ab (Schritt 4). Der erste Stand kommt deshalb als Paket vom Mac. Danach holt sich der PC jedes Update selbst über Railway.
+
+Am Mac das Paket bauen. Es liegt danach auf dem Schreibtisch und enthält keine Zugangsdaten:
+
+```bash
+git -C /Applications/Prophos fetch -q origin && git -C /Applications/Prophos archive --format=zip -o "$HOME/Desktop/prophos-pc-paket.zip" origin/main mt5-copier/start-alles.bat mt5-copier/start-copier.bat mt5-copier/start-panel.bat mt5-copier/start-prophos.bat mt5-copier/autostart-einrichten.bat mt5-copier/puls-chrome-starten.bat mt5-copier/copier.py mt5-copier/panel.py mt5-copier/provision.py mt5-copier/order_bot.py mt5-copier/augen.js mt5-copier/augen_tsx.js mt5-copier/ProphosHedgeReader.mq5 mt5-copier/config.vorlage.json mt5-copier/VERSION app.py prophos.html tv-reader/start-reader.bat tv-reader/reader-server.py tv-reader/tv_verbinder.py tv-reader/tv_snapshot.py tv-reader/start-verbinder.bat tv-reader/verbinder.config.example.json pc-fernzugriff
 ```
 
-Fertig, wenn 18 Dateien stehen. Kontrolle auf leere Dateien:
+`prophos-pc-paket.zip` per Parsec auf den Schreibtisch des PCs legen. Geht die Dateiübertragung dort nicht: USB-Stick oder Drive. Dann auf dem PC (normale PowerShell):
+
+```powershell
+& { $ErrorActionPreference='Stop'; $w=[Environment]::GetFolderPath('Desktop'); $z="$w\prophos-pc-paket.zip"; if(-not (Test-Path $z)){ throw "Paket fehlt: $z" }; $t="$env:TEMP\prophos-paket"; if(Test-Path $t){ Remove-Item $t -Recurse -Force }; Expand-Archive $z $t; $k=@(Get-ChildItem "$t\mt5-copier","$t\tv-reader","$t\app.py","$t\prophos.html" -File | Where-Object { $_.Length -lt 200 -and $_.Name -ne 'VERSION' }); if($k.Count){ throw "Paket unbrauchbar, Datei zu klein: $($k.Name -join ', ')" }; if((Get-Content "$t\mt5-copier\VERSION" -TotalCount 1) -notmatch '^[0-9-]+\.[0-9]+$'){ throw 'Paket unbrauchbar: VERSION falsch' }; $d='C:\mt5-copier'; $r='C:\Prophos\tv-reader'; New-Item -ItemType Directory -Force $d,$r | Out-Null; Copy-Item "$t\mt5-copier\*","$t\app.py","$t\prophos.html" $d -Force; Copy-Item "$t\tv-reader\*" $r -Force; Copy-Item "$t\pc-fernzugriff" $w -Recurse -Force; python -m pip install flask requests signalrcore MetaTrader5 pywinauto; if($LASTEXITCODE){ throw 'pip fehlgeschlagen: Block nochmal starten' }; Get-ChildItem $d | Select Name,Length }
+```
+
+Fertig, wenn in `C:\mt5-copier` 17 Dateien stehen. Bricht der Block mit „Paket unbrauchbar“ ab, ist nichts kopiert: Paket am Mac neu bauen und neu ablegen. Kontrolle auf leere Dateien:
 
 ```powershell
 Get-ChildItem C:\mt5-copier | Where-Object Length -eq 0
 ```
 
-Fertig, wenn **nichts** ausgegeben wird. Wird eine Datei genannt, Schritt 2 wiederholen.
+Fertig, wenn **nichts** ausgegeben wird.
 
 ## 3. Starten + Autostart
 
@@ -78,7 +88,7 @@ Fertig, wenn **nichts** ausgegeben wird. Wird eine Datei genannt, Schritt 2 wied
 cd C:\mt5-copier; cmd /c autostart-einrichten.bat; Start-Process C:\mt5-copier\start-alles.bat
 ```
 
-Fertig, wenn drei Fenster offen sind: „MT5-Hedge-Copier“, „Copier-Panel“, „Prophos-Backend“.
+Fertig, wenn vier Fenster offen sind: „MT5-Hedge-Copier“, „Copier-Panel“, „Prophos-Backend“, „Prophos TV-Reader“.
 **Minimieren, nicht schließen.** Der erste Start dauert ein paar Minuten (Backend lädt Pakete).
 
 Kontrolle nach 2–3 Minuten:
@@ -195,11 +205,10 @@ Trade startet, nicht am PC arbeiten. Popups und Toasts räumt Puls selbst weg (.
 
 ## 7. TV-Reader (lokal, für Userscript + Orbit V3)
 
-Seit .1543 holt `start-alles.bat` den Reader beim Start selbst von pages.dev, wenn er fehlt, und
-startet ihn mit (viertes Fenster „Prophos TV-Reader“). Von Hand nur nötig, wenn das Fenster fehlt:
+Der Reader kommt aus dem Paket von Schritt 2, `start-alles.bat` startet ihn mit (viertes Fenster „Prophos TV-Reader“). Fehlt er auf einem PC, holt ihn `start-alles.bat` beim Start selbst über Railway, sobald `code_token.txt` da ist. Von Hand nur nötig, wenn das Fenster danach fehlt:
 
 ```powershell
-$d='C:\Prophos\tv-reader'; New-Item -ItemType Directory -Force $d | Out-Null; $ProgressPreference='SilentlyContinue'; 'reader-server.py','tv_verbinder.py','tv_snapshot.py','start-reader.bat','start-verbinder.bat','verbinder.config.example.json' | % { iwr ('https://prophos.pages.dev/tv-reader/'+$_) -OutFile "$d\$_" -UseBasicParsing }
+& { $ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $c='C:\mt5-copier\code_token.txt'; if(-not (Test-Path $c)){ throw 'code_token.txt fehlt: erst auf http://localhost:5000 einloggen, nach bis zu 5 min liegt der Schluessel da' }; $s=(Get-Content $c -TotalCount 1).Trim(); $d='C:\Prophos\tv-reader'; New-Item -ItemType Directory -Force $d | Out-Null; 'reader-server.py','tv_verbinder.py','tv_snapshot.py','start-reader.bat','start-verbinder.bat','verbinder.config.example.json' | ForEach-Object { $n="$d\$_.neu"; Invoke-WebRequest ('https://web-production-bec81.up.railway.app/code/datei/tv-reader/'+$_) -Headers @{'X-Code-Token'=$s} -OutFile $n -UseBasicParsing; if((Get-Item $n).Length -lt 200){ Remove-Item $n; throw "$_ ist zu klein, keine echte Datei. Nichts ersetzt." }; Move-Item $n "$d\$_" -Force }; Start-Process "$d\start-reader.bat" }
 ```
 
 Tampermonkey + Userscript im Puls-Chrome: siehe `PULS-CHROME-USERSCRIPT.md`.
@@ -219,7 +228,7 @@ Tampermonkey + Userscript im Puls-Chrome: siehe `PULS-CHROME-USERSCRIPT.md`.
 | Puls bricht beim Login-Wechsel ab | Passwort nicht für **trader.tradovate.com** gespeichert → Schritt 6b Punkt 3 |
 | TopstepX „anker_fehlt“ | rechts steht das DOM statt der Order-Karte → Schritt 6b Punkt 4 |
 | Tab hängt auf alter Version | **F5** am PC |
-| Ordner `C:\prophos` existiert noch | alter Backend-Starter: Fenster schließen **und** die Aufgabenplanungs-Task löschen |
+| `C:\prophos\app.py` existiert noch | alter Backend-Starter: Fenster schließen **und** die Aufgabenplanungs-Task löschen |
 
 Nützliche Prüfbefehle jederzeit:
 
