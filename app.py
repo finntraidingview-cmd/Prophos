@@ -14571,7 +14571,8 @@ def wd_erl_konto_umstellen_upd(konto, ziel, jetzt_iso, heute_de):
         if typ != "funded" or ap_klasse(None, konto.get("firm")) != "futures":
             return None, "nur bei Funded einer Futures-Firma"
         alt = [z for z in str(konto.get("notes") or "").split("\n") if not z.strip().startswith("Winning Days seit ")]
-        return {"account_type": "winning_days", "notes": "\n".join(alt + [f"Winning Days seit {heute_de}"]).strip() or None}, ""
+        # wd_farm (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden“), wie der DB-Trigger
+        return {"account_type": "winning_days", "wd_farm": True, "notes": "\n".join(alt + [f"Winning Days seit {heute_de}"]).strip() or None}, ""
     return None, "Ziel unbekannt"
 
 
@@ -15040,6 +15041,14 @@ def admin_handarbeit():
 # filterte nur über ids_aus. Eine normale ID darf die Mitglieder ihrer Gruppe nicht lesen (RLS id_gruppe_mitglied: nur eigene Zeile) —
 # deshalb sagt Railway jedem Login seine Sicht: Mitglied/Verwalter einer Gruppe MIT Verwalter → genau diese Gruppe (ids); jeder andere =
 # Hermann Technologies → alles außer den Verwalter-Gruppen (ausser). Nur IDs, keine Namen, kein Geld. ══
+def wd_cme_tag_start(tag):
+    """REIN RECHNEND (testbar): Beginn des CME-Handelstags `tag` (YYYY-MM-DD) = Vortag 17:00 Chicago, als ISO (UTC). Die Blöcke des Farmers laufen am Lauf-Tag
+    ab ~02:00–03:00 Dubai, also in genau diesem Handelstag (Winter: 17:00 CT = 23:00 UTC = 03:00 Dubai). Montag → Sonntag 17:00. Ungültig → ValueError."""
+    from zoneinfo import ZoneInfo
+    d = datetime.strptime(str(tag)[:10], "%Y-%m-%d") - timedelta(days=1)
+    return datetime(d.year, d.month, d.day, 17, 0, tzinfo=ZoneInfo("America/Chicago")).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def wd_sicht_fuer(uid, daten):
     """REIN RECHNEND (testbar): Sicht eines Logins → {art: 'gruppe', ids: […]} (Verwalter-Gruppe inkl. Verwalter) | {art: 'ht', ausser: […]}."""
     daten = daten or {}
@@ -15160,7 +15169,22 @@ def admin_wd_plaene():
                     "max_risiko_trade": _wd_num(a.get("max_risiko_trade")),
                     "wd_zyklus_regel": a.get("wd_zyklus_regel"),   # Recoverer-Schalter je Konto (02.11.2026): null / an / aus
                 })
-            zyklus_ok = _wd_zyklus_anhaengen(konten)   # RECOVERER (02.11.2026): Feld `zyklus` je Apex-WD-Konto — Farmer nimmt Ziel + Hedge daraus
+            zyklus_ok = _wd_zyklus_anhaengen(konten)
+            # HEUTE SCHON GETRADET (Finn 03.11.2026 ~01:30 Dubai: „Für den heutigen Tag soll aber kein Trade mehr gemacht werden, weil da eh schon einer gemacht
+            # wurde, aber für die zukünftigen ja"): je Konto der späteste Start eines Plans im CME-Handelstag des Lauf-Tags (wd_cme_tag_start) — der Farmer
+            # nimmt das Konto dann heute nicht (prophos.html wdErwartet/wdKandidaten), am nächsten Handelstag wieder. Lesefehler → ohne Feld (Log)
+            if tag and konten:
+                try:
+                    ab = wd_cme_tag_start(tag)
+                    ids = [k["id"] for k in konten]
+                    for i in range(0, len(ids), 80):
+                        for p in sb_select("trade_plans", {"select": "master_account_id,started_at", "started_at": f"gte.{ab}",
+                                                           "master_account_id": "in.(" + ",".join(ids[i:i + 80]) + ")"}) or []:
+                            k = next((x for x in konten if x["id"] == str(p.get("master_account_id"))), None)
+                            if k is not None and str(p.get("started_at") or "") > str(k.get("heute_gestartet") or ""):
+                                k["heute_gestartet"] = p.get("started_at")
+                except Exception as e:
+                    print(f"[wd] ⚠️ heute gestartet: {type(e).__name__}: {e}", flush=True)   # RECOVERER (02.11.2026): Feld `zyklus` je Apex-WD-Konto — Farmer nimmt Ziel + Hedge daraus
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
             # laufen über route=mt5 und haben einen anderen Slave — die zählen hier nicht)
             slaves = {}

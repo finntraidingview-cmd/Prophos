@@ -43017,7 +43017,7 @@
       max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null,
       max_loss_per_trade:   a.maxLossPerTrade   != null ? a.maxLossPerTrade   : null,
       max_profit_per_trade: a.maxProfitPerTrade != null ? a.maxProfitPerTrade : null,
-      wd_farm: !!a.wdFarm,
+      wd_farm: !!a.wdFarm || a.type === 'winning_days',   // neu als Winning Days angelegt → Haken an (Finn 03.11.2026), wie der DB-Trigger
       goal_kind:        a.goalKind       || null,
       goal_target:      a.goalTarget     != null ? a.goalTarget     : null,
       goal_min_profit:  a.goalMinProfit  != null ? a.goalMinProfit  : null,
@@ -43841,7 +43841,9 @@
     const notes = (ziel === 'winning_days' ? alt.concat([`Winning Days seit ${heute}`]) : alt).join('\n').trim() || null
     const btn = opts && opts.btn; if(btn) btn.disabled = true
     try{
-      const { data, error } = await supabase.from('accounts').update({ account_type: ziel, notes }).eq('id', acc.id).select('*').single()
+      // WD-HAKEN VON SELBST (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden“) — DB-Trigger
+      // sql/2026-11-03_wd_farm_bei_wechsel.sql macht dasselbe; hier zusätzlich, damit die lokale Zeile sofort stimmt. Zurück auf Funded lässt den Haken, wie er ist
+      const { data, error } = await supabase.from('accounts').update({ account_type: ziel, notes, ...(ziel === 'winning_days' && acc.type !== 'winning_days' ? { wd_farm: true } : {}) }).eq('id', acc.id).select('*').single()
       if(error) throw error
       const idx = accounts.findIndex(x => String(x.id) === String(acc.id)); if(idx >= 0) accounts[idx] = rowToAccount(data)
       if(typeof renderAccounts === 'function') renderAccounts()
@@ -45198,7 +45200,8 @@
           max_profit_per_trade: acc.maxProfitPerTrade,
           max_risiko_trade: acc.maxRisikoTrade,
           auto_planer: acc.autoPlaner !== false,   // Auto-Planer-Haken (08.10.2026)
-          wd_farm: !!acc.wdFarm,
+          // Typ wechselt auf Winning Days → Haken an (Finn 03.11.2026, s. accWdUmstellen); sonst der Haken aus dem Popup (Ausschalten bleibt möglich)
+          wd_farm: !!acc.wdFarm || (acc.type === 'winning_days' && String((accounts.find(x => String(x.id) === String(_editingAccountId)) || {}).type || '') !== 'winning_days'),
           external_id: acc.externalId,
           goal_kind:        acc.goalKind,
           goal_target:      acc.goalTarget,
@@ -46621,7 +46624,7 @@
           external_id: x.id, account_size: gr, starting_balance: gr,
           purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
           max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
-          wd_farm: false,   // nie beim Anlegen, auch wenn die Vorlage wd_farm true hat (F17-Ergänzung, 27.09.2026)
+          wd_farm: typRow === 'winning_days',   // F17 (27.09.2026): nie beim Anlegen — außer Typ Winning Days (Finn 03.11.2026: Haken von selbst), wie der DB-Trigger
           ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null }
             : (() => { const mt = kontoMindesttage(firm, typRow); return mt ? { goal_kind: mt.kind, goal_target: mt.target, goal_min_profit: mt.minProfit } : {} })()),   // Firmenregel (20.10.2026): FundedNext-Phasen ohne Vorlage
         }
@@ -54562,7 +54565,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2003'
+  const OS_TAB_BUILD = '2026-09-22.2004'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -69063,7 +69066,8 @@
       // „archiviert" markiert (fahren nicht mit, zeigen den Grund) — vorher fielen sie stumm raus und
       // standen dann als „Konto nicht (mehr) gefunden" da (Finn 23.09.2026: „wo ist Block 2?")
       const ok = new Set(rail.konten.map(k => String(k.id)))
-      for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false }
+      const heute = new Map(rail.konten.filter(k => k && k.heute_gestartet).map(k => [String(k.id), k.heute_gestartet]))   // heute schon getradet (03.11.2026, app.py)
+      for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false; if(heute.has(k.id)) k.heute_gestartet = heute.get(k.id) }
     }
     if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: k.tp_vorgabe > 0 ? Number(k.tp_vorgabe) : null, sl_vorgabe: k.sl_vorgabe > 0 ? Number(k.sl_vorgabe) : null, winning_days: null,
       // live_balance/starting_balance aus Railway übernehmen, falls geliefert (Backend B8, F10 26.09.2026) — vorher hart null
@@ -69134,6 +69138,18 @@
   const WD_HINWEIS_ARCHIV = 'archiviert (Konto-Archiv) — fährt nicht mit'
   const WD_HINWEIS_TAGESLAUF = `kommt im nächsten Tageslauf dazu (${WD_TAGESLAUF_HHMM} Dubai)`
   const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden']   // vom Server gesetzt, nicht von Finn
+  /* HEUTE SCHON GETRADET (Finn 03.11.2026 ~01:30 Dubai: „Wenn ein Konto zu Winning Days hinzugefügt wird, soll der Haken automatisch gesetzt werden. Für den
+   * heutigen Tag soll aber kein Trade mehr gemacht werden, weil da eh schon einer gemacht wurde, aber für die zukünftigen ja."): ein Konto, auf dem im
+   * CME-Handelstag des Lauf-Tags (Vortag 17:00 Chicago, wie app.py wd_cme_tag_start) schon ein Plan gestartet ist, kommt heute nicht dazu — aktiv false mit
+   * Hinweis, am nächsten Handelstag wieder normal. Quelle: Mac app.py heute_gestartet, PC-Tab die eigenen tradePlans. „Heute wieder rein" von Hand bleibt. */
+  const WD_HINWEIS_HEUTE = 'heute schon getradet — ab dem nächsten Handelstag'
+  const wdCmeTagStart = tag => { try{ return wdZeitpunkt(wdTagPlus(tag, -1), '17:00', 'America/Chicago').getTime() }catch(_){ return 0 } }
+  function wdHeuteGestartet(accId, tag){
+    if(!tag) return false
+    const ab = wdCmeTagStart(tag); if(!ab) return false
+    return (typeof tradePlans !== 'undefined' ? tradePlans : []).some(p => p && String(p.masterAccountId) === String(accId) && (Date.parse(p.startedAt || '') || 0) >= ab)
+  }
+  window._wdCmeTagStart = wdCmeTagStart   // Test-Haken
 
   /* ── Erwartete Blöcke (Mac): alle IDs mit Funded/Live-Konten bei Futures-Firmen — aus der RPC/Railway,
    *    sonst aus der Admin-Übersicht. Konten ohne Farm-Haken bleiben sichtbar, aber abgewählt. ── */
@@ -69141,9 +69157,10 @@
     const proId = new Map()
     const add = (uid, person, k) => { const e = proId.get(uid) || { user_id: uid, name: person || uid.slice(0, 8), konten: [] }; e.konten.push(k); proId.set(uid, e) }
     const konto = (r, firm, farm) => {
-      const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm, r), arch = !!r.archiviert
-      return { id: String(r.id), name: r.name || '', firm, ext, farm: farm && !arch, aktiv: !!(farm && !arch && ext), tpVon: sp[0], tpBis: sp[1], archiviert: arch,
-               hinweis: arch ? WD_HINWEIS_ARCHIV : !farm ? WD_HINWEIS_FARM : ext ? '' : WD_HINWEIS_EXT }
+      const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm, r), arch = !!r.archiviert, heute = !!r.heute_gestartet   // heute schon getradet (03.11.2026)
+      return { id: String(r.id), name: r.name || '', firm, ext, farm: farm && !arch, aktiv: !!(farm && !arch && ext && !heute), tpVon: sp[0], tpBis: sp[1], archiviert: arch,
+               ...(heute ? { heute: true } : {}),
+               hinweis: arch ? WD_HINWEIS_ARCHIV : !farm ? WD_HINWEIS_FARM : !ext ? WD_HINWEIS_EXT : heute ? WD_HINWEIS_HEUTE : '' }
     }
     const d = _wd.daten, aus = wdIdsAus()
     if(d && Array.isArray(d.konten)){
@@ -69194,7 +69211,10 @@
         if(!v){ wuerfeln(k); konten.push(k); ge = true; continue }
         if(v.plan_id) continue
         if(v.farm !== k.farm || (v.ext || '') !== k.ext || !!v.archiviert !== !!k.archiviert){
-          v.farm = k.farm; v.ext = k.ext; v.archiviert = k.archiviert; v.aktiv = !!(k.farm && k.ext); v.hinweis = k.hinweis; ge = true
+          // heute schon getradet (03.11.2026): der Haken springt per Trigger an, das Konto fährt trotzdem erst am nächsten Handelstag
+          v.farm = k.farm; v.ext = k.ext; v.archiviert = k.archiviert; v.aktiv = !!(k.farm && k.ext && !k.heute); v.hinweis = k.hinweis; if(k.heute) v.heute = true; ge = true
+        }else if(k.heute && !v.heute){
+          v.heute = true; v.aktiv = false; v.hinweis = WD_HINWEIS_HEUTE; ge = true   // einmal je Tag; „heute wieder rein" von Hand danach bleibt
         }
       }
       if(ge){
@@ -69213,7 +69233,7 @@
     return { neu, aktualisiert, erwartet: erw.length }
   }
   // PC-Tab: eigene Funded-Konten mit Vorschau (Rückfall, wenn der Mac nicht eingetragen hat)
-  function wdKandidaten(){
+  function wdKandidaten(tag){
     const sl = wdFusionGegenstueck()
     const sPreset = sl.fehler ? null : (FIRM_PRESETS[firmToPreset(sl.slave.firm)] || FIRM_PRESETS.projectx)
     const fx = window._fxUsdEur || 0.85, vp = wdVorplanRegeln()
@@ -69226,6 +69246,7 @@
       if(!farm){ konten.push({ ...basis, aktiv: false, tpVon: sp[0], tpBis: sp[1], hinweis: WD_HINWEIS_FARM }); continue }
       if(sl.fehler){ konten.push({ ...basis, aktiv: !!basis.ext, tpVon: sp[0], tpBis: sp[1], hinweis: basis.ext ? '' : WD_HINWEIS_EXT }); continue }
       if(k.belegt){ konten.push({ ...basis, aktiv: false, hinweis: 'hat schon einen geplanten/laufenden Plan' }); continue }
+      if(wdHeuteGestartet(k.acc.id, tag)){ konten.push({ ...basis, aktiv: false, heute: true, hinweis: WD_HINWEIS_HEUTE }); continue }   // 03.11.2026
       let ziel = null; try{ ziel = zielFortschritt(k.acc) }catch(_){}
       if(ziel && ziel.done){ konten.push({ ...basis, aktiv: false, hinweis: 'Ziel schon voll' }); continue }
       const z = tpVorplanZeile(k.acc, { live: tpVorplanLive(k.acc), slaveCurrency: sPreset.currency, fx, regeln: vp.regeln, zufall: 0.5 })
@@ -69238,7 +69259,7 @@
     const { data: { user } } = await supabase.auth.getUser()
     if(!user) return { fehler: 'nicht angemeldet' }
     if(!((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){ try{ await dupLoadAccounts() }catch(_){} }
-    const kand = wdKandidaten()
+    const kand = wdKandidaten(tag)
     const name = user.user_metadata?.name || String(user.email || '').split('@')[0] || 'ID'
     const jetzt = new Date().toISOString()
     const row = { tag, user_id: user.id, name, konten: kand.konten, status: kand.konten.some(wdAktiv) ? 'geplant' : 'leer',
@@ -69259,7 +69280,7 @@
     const { data: x, error } = await supabase.from('wd_tagesplan').select('konten,status,start_um,updated_at').eq('tag', tag).eq('user_id', uid).maybeSingle()
     if(error || !x || x.start_um || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') return 0
     const da = new Set((x.konten || []).map(k => String(k && k.id)))
-    const neu = (wdKandidaten().konten || []).filter(k => k && !da.has(String(k.id)))
+    const neu = (wdKandidaten(tag).konten || []).filter(k => k && !da.has(String(k.id)))
     if(!neu.length) return 0
     const konten = [...(x.konten || []), ...neu]
     const { error: e2 } = await supabase.from('wd_tagesplan').update({ konten, status: konten.some(wdAktiv) ? 'geplant' : 'leer', updated_at: new Date().toISOString() })

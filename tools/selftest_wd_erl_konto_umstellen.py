@@ -50,7 +50,7 @@ def main():
     check(upd is None, "Waiting nicht bei Winning Days")
 
     upd, g = f({"account_type": "funded", "firm": "Apex Trader", "notes": None}, "winning_days", T, H)
-    check(upd == {"account_type": "winning_days", "notes": f"Winning Days seit {H}"}, "Funded Apex → Winning Days + notes")
+    check(upd == {"account_type": "winning_days", "wd_farm": True, "notes": f"Winning Days seit {H}"}, "Funded Apex → Winning Days + notes + Haken (03.11.2026)")
     upd, g = f({"account_type": "funded", "firm": "Tradeify", "notes": "Kauf 01.10.\nWinning Days seit 05.10.2026"}, "winning_days", T, H)
     check(upd and upd["notes"] == f"Kauf 01.10.\nWinning Days seit {H}", "alte „Winning Days seit …\" ersetzt, Rest bleibt")
     # wie accWdUmstellen (split → filter → concat → join → trim): eine Leerzeile mittendrin bleibt stehen, nur außen wird getrimmt
