@@ -37438,6 +37438,22 @@ def fd_gruppen_schluessel(uid, daten):
     return g[0] if g else "ohne"
 
 
+def fd_plan_tag(jetzt, cme_fenster, ap_zeiten):
+    """Planungstag der Funded-Planer (Apex/FTMO Futures fdp_planen, Funded CFD fcp_planen) → 'YYYY-MM-DD'. Vorfall 03.11.2026 (Finn ~02:30 Dubai: „heute ist der 3.
+    schon … jetzt wurde quasi schon der nächste Tag geplant"): Nachtlauf 1105 um 21:30 UTC plante den 03.11., der Funded-Lauf 1119 um 22:11 UTC rechnete mit dem
+    CME-Tag des Fensterbeginns (02:26 Dubai = noch 02.11.) und zählte die Trades vom 02.11. — „heute schon getradet" und Tagesdeckel je ID für Chris/Ina.
+    Jetzt der spätere von CME-Tag des Fensters und dem Tag des Challenge-Nachtlaufs (ap_nacht_ziel, dieselbe Funktion wie der Nachtlauf): ab dessen Lauf-Zeitpunkt
+    gilt der neue Tag. Die Tagesgrenze der Startzeiten (CME 03:00 Dubai im Winter, im_tag) bleibt. Lesefehler/Wochenende → CME-Tag wie bisher."""
+    try:
+        faellig, _n = ap_nacht_ziel(jetzt, ap_nacht_param(ap_zeiten))
+        nacht = faellig[0].isoformat() if faellig else None
+    except Exception as e:
+        print(f"[funded-plan] ⚠️ Nachtlauf-Tag nicht rechenbar ({type(e).__name__}: {e}) — CME-Tag", flush=True)
+        nacht = None
+    tage = [t for t in (cme_fenster, nacht) if t]
+    return max(tage) if tage else cme_fenster
+
+
 def fdp_je_groesse(regel, groesse):
     """Werte je Kontogröße aus der Firmen-Regel (ziel_gewinn, max_trade, kosten_eur, dd) oder None."""
     if not regel or not groesse:
@@ -37798,7 +37814,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     # Plan-Tag = CME-Handelstag des Fensters (ab jetzt): nachts vor dem Fenster plant der Lauf schon den kommenden Handelstag
     jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
     ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
-    cme_heute = _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat())
+    cme_heute = fd_plan_tag(jetzt, _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat()), ap_zeiten)   # 03.11.2026, s. fd_plan_tag
     max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 90)
@@ -38698,7 +38714,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     mitternacht = lokal.replace(hour=0, minute=0, second=0, microsecond=0)
     jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
     ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
-    plan_tag = _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat())
+    plan_tag = fd_plan_tag(jetzt, _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat()), ap_zeiten)   # 03.11.2026, s. fd_plan_tag
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 10)
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"   # noqa: E731
