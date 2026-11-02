@@ -29885,7 +29885,8 @@
         return { ok: true, pl }
       }
       const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
-      const verbindung = !res || ['verbindung', 'copier_alt', 'copier_stumm'].includes(String(res.code || '')) || /nicht erreichbar|ConnectionError|Failed to fetch|NetworkError|timeout|abort/i.test(msg)
+      // backend_neustart (02.11.2026): App oder Panel startet neu, „nichts gesendet“ (503) — kein Nein des Brokers, also 1 s statt 10 s Backoff im Neustart-Fenster
+      const verbindung = !res || ['verbindung', 'copier_alt', 'copier_stumm', 'backend_neustart'].includes(String(res.code || '')) || /nicht erreichbar|ConnectionError|Failed to fetch|NetworkError|timeout|abort/i.test(msg)
       await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1,
         close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt', close_zeiten: closeZeiten })
       // bei Verbindungsfehlern nicht jede Sekunde einen Hinweis — nur beim ersten Versuch
@@ -53762,7 +53763,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1974'
+  const OS_TAB_BUILD = '2026-09-22.1975'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
