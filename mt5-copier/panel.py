@@ -2163,25 +2163,34 @@ READER_STAND_URL = "http://127.0.0.1:8790/"
 # Höchstens SCHARF_SPUR_MAX Zeilen, ältere fallen vorne weg.
 SCHARF_SPUR_PFAD = os.path.join(HERE, "scharf_spur.log")
 SCHARF_SPUR_MAX = 2000
-_SCHARF_SPUR_LETZT = {}   # ticket → letzter geschriebener Grund
+SCHARF_SPUR_KUERZEN_JE = 200       # nur alle N Zeilen auf SCHARF_SPUR_MAX kürzen (S9 02.11.2026: vorher ganze Datei je Zeile, bis 10 Rewrites/s)
+SCHARF_SPUR_LAGE_MIN_S = 1.0       # Lage-Zeile je Ticket höchstens 1×/s, auch wenn der Grund flackert
+SCHARF_SPUR_LOCK = threading.Lock()   # Handler-Thread (/api/hedge-solo, /api/hedge-scharf) und Wache schreiben in dieselbe Datei
+_SCHARF_SPUR_LETZT = {}   # ticket → (letzter Grund, Zeit)
+_SCHARF_SPUR_N = [0]
 
 
 def scharf_spur(ticket, ereignis, grund="", nur_bei_wechsel=False):
-    """Eine Zeile in scharf_spur.log; nur_bei_wechsel: nur, wenn sich der Grund für dieses Ticket geändert hat. Wirft nie."""
+    """Eine Zeile an scharf_spur.log anhängen; nur_bei_wechsel: nur bei neuem Grund für dieses Ticket und höchstens 1×/s. Wirft nie."""
     try:
-        if nur_bei_wechsel:
-            if _SCHARF_SPUR_LETZT.get(ticket) == grund:
-                return
-            _SCHARF_SPUR_LETZT[ticket] = grund
-        zeit = datetime.utcfromtimestamp(time.time() + 4 * 3600).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        zeile = f"{zeit} Dubai · Ticket {ticket} · {ereignis}" + (f" · {grund}" if grund else "")
-        alt = []
-        if os.path.exists(SCHARF_SPUR_PFAD):
-            with open(SCHARF_SPUR_PFAD, "r", encoding="utf-8", errors="replace") as f:
-                alt = f.read().splitlines()[-(SCHARF_SPUR_MAX - 1):]
-        with open(SCHARF_SPUR_PFAD + ".tmp", "w", encoding="utf-8") as f:
-            f.write("\n".join(alt + [zeile]) + "\n")
-        os.replace(SCHARF_SPUR_PFAD + ".tmp", SCHARF_SPUR_PFAD)
+        with SCHARF_SPUR_LOCK:
+            if nur_bei_wechsel:
+                alt = _SCHARF_SPUR_LETZT.get(ticket)
+                jetzt = time.time()
+                if alt and (alt[0] == grund or jetzt - alt[1] < SCHARF_SPUR_LAGE_MIN_S):
+                    return
+                _SCHARF_SPUR_LETZT[ticket] = (grund, jetzt)
+            zeit = datetime.utcfromtimestamp(time.time() + 4 * 3600).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            with open(SCHARF_SPUR_PFAD, "a", encoding="utf-8") as f:
+                f.write(f"{zeit} Dubai · Ticket {ticket} · {ereignis}" + (f" · {grund}" if grund else "") + "\n")
+            _SCHARF_SPUR_N[0] += 1
+            if _SCHARF_SPUR_N[0] % SCHARF_SPUR_KUERZEN_JE == 0:
+                with open(SCHARF_SPUR_PFAD, "r", encoding="utf-8", errors="replace") as f:
+                    zeilen = f.read().splitlines()
+                if len(zeilen) > SCHARF_SPUR_MAX:
+                    with open(SCHARF_SPUR_PFAD + ".tmp", "w", encoding="utf-8") as f:
+                        f.write("\n".join(zeilen[-SCHARF_SPUR_MAX:]) + "\n")
+                    os.replace(SCHARF_SPUR_PFAD + ".tmp", SCHARF_SPUR_PFAD)
     except Exception:
         pass
 

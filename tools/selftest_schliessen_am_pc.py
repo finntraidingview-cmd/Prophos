@@ -257,5 +257,20 @@ check("gemerkt" in sp and "CLOSE gesendet" in sp and "Fusion zu" in sp and "gel�
       "Spur auf Platte (scharf_spur.log): gemerkt, Lage-Wechsel, Puls-Beleg, CLOSE gesendet, Fusion zu, gelöst")
 n_zeilen = len(sp.splitlines())
 check(0 < n_zeilen < 600, f"Spur nur bei Wechseln, kein Takt-Spam ({n_zeilen} Zeilen für den ganzen Test)")
+# S9: Spur anhängen, gedrosselt, gekürzt
+for f in (ns["SCHARF_SPUR_PFAD"],):
+    os.remove(f)
+ns["_SCHARF_SPUR_LETZT"].clear()
+for k in range(30):   # Grund flackert 30× in 3 s
+    ns["scharf_spur"](1, "Lage", "a" if k % 2 else "b", nur_bei_wechsel=True)
+    uhr[0] += 0.1
+n_lage = len(open(ns["SCHARF_SPUR_PFAD"], encoding="utf-8").read().splitlines())
+check(1 <= n_lage <= 4, f"flackernder Grund: höchstens 1 Lage-Zeile je s ({n_lage} Zeilen in 3 s)")
+for k in range(2500):
+    ns["scharf_spur"](2, "x", str(k))
+n_ges = len(open(ns["SCHARF_SPUR_PFAD"], encoding="utf-8").read().splitlines())
+check(n_ges <= ns["SCHARF_SPUR_MAX"] + ns["SCHARF_SPUR_KUERZEN_JE"], f"Datei bleibt bei ~2.000 Zeilen ({n_ges})")
+w = SRC[SRC.index("def scharf_spur("):SRC.index("def scharf_konto_bezug(")]
+check('open(SCHARF_SPUR_PFAD, "a"' in w and "with SCHARF_SPUR_LOCK:" in w, "anhängen statt neu schreiben, ein Lock für Handler und Wache")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)
