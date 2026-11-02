@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.7
+// @version      0.10.9
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,14 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.9 02.11.2026  KEIN RUECKSTAU (Lotse Simon: /positions.ts lief der Uhr 101 → 323 s hinterher, 1:1 wachsend): je Endpunkt hoechstens EIN offener POST (postEinzeln),
+//                      ein Tick waehrend des Laufs merkt nur den neuesten Stand und schickt ihn sofort nach der Antwort — nie eine Warteschlange. Plakette
+//                      zeigt die Laufzeit des letzten POST in ms.
+//   0.10.9 02.11.2026  NUR DIE POSITIONS-TABELLE (Finn-Test Simon 69900aaa: Master zu 15:29:31, Schluss erst 15:30:07; Lotse-Spur): Im Puls-Chrome liest lesePositionen nur Zeilen
+//                      aus SEL_POS_TABELLE bei aktivem Reiter Positions. Vorher zaehlten alle td[data-label] im Dokument, auch die Orders-Tabelle: ihre Zeilen fielen
+//                      zwar als Order raus, hielten aber leseBefund.zeilen > 0, die leere Tabelle galt nie als flach, der Tab meldete blind, der Stand fror ein.
+//                      Dazu: Im Puls-Chrome laeuft der Takt nur auf /chart/-Seiten (die Seite „Refer-a-Friend“ war ein zweiter Broker-Tab ohne Konto).
+//   0.10.8 02.11.2026  SCHLUSS EINFACH (Finn: „direkt schliessen, Kontoerkennung, indem man auf den Puls draufklickt“): flach = Reiter Positions aktiv, Tabelle da, keine Zeile, kein Laden-/Fehlertext. Kein Leer-Text mehr noetig; leer_beweis sagt den strengeren Lesern, ob er da war.
 //   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre im GM-Speicher, ueberlebt Neuladen und neuen Tab). Teil-Fill zaehlt nicht. Zeile ohne P&L ist nur bei aktivem Reiter Positions nicht blind.
 //   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
 //   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
@@ -192,7 +200,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.7';
+  const VERSION    = '0.10.9';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   // 0.10.4 (30.10.2026, Simon pc-pmqd8g): der Schalter fehlte nach einer Tampermonkey-Neuinstallation (Abzeichen „● Reader · 1 Pos" statt
@@ -313,7 +321,16 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   function lesePositionen() {
     const rows = new Map();
     const labels = new Set();
-    document.querySelectorAll('td[data-label]').forEach((td) => {
+    // 0.10.9: im Puls-Chrome nur die Positions-Tabelle bei aktivem Reiter Positions — nie die Orders-Tabelle oder andere Reiter im selben Dokument.
+    // Kein Reiter oder keine Tabelle: keine Zeile, blindGrund meldet dann „Reiter nicht aktiv“ bzw. keinen Leer-Beweis (nie flach)
+    let quelle = document;
+    if (PULS_CHROME) {
+      let reiter = false, tabelle = null;
+      try { const r = document.getElementById('positions'); reiter = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
+      try { tabelle = reiter ? document.querySelector(SEL_POS_TABELLE) : null; } catch (_) {}
+      quelle = tabelle;
+    }
+    (quelle ? quelle.querySelectorAll('td[data-label]') : []).forEach((td) => {
       const tr = td.closest('tr');
       if (!tr) return;
       if (!rows.has(tr)) rows.set(tr, {});
@@ -1071,6 +1088,29 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // den Stand ein und antwortet an:false; Wiedereinschalten greift so sofort.
   let tickNr = 0;
 
+  /* KEIN RUECKSTAU (0.10.9, Lotse Simon 02.11.2026): Im Puls-Chrome tickt das Script alle 50 ms und schickte je Tick einen POST. Antwortet der Weg langsamer, stauten sich
+   * die Anfragen in Tampermonkey, der Reader bekam Minuten alte Staende. Jetzt je Endpunkt hoechstens EIN offener POST; was waehrenddessen kommt, ersetzt nur den
+   * gemerkten neuesten Stand und geht sofort nach der Antwort (onload/onerror/ontimeout) raus. REIN bis auf den uebergebenen Sender (Selbsttest mit langsamem Fake). */
+  const POST_HAENGT_MS = 10000;
+  const _postLauf = {};   // url → { busy, neu: opts | null, ms, start }
+  function postEinzeln(opts, senden) {
+    const z = _postLauf[opts.url] || (_postLauf[opts.url] = { busy: false, neu: null, ms: null, start: 0, nr: 0 });
+    if (z.busy && Date.now() - z.start < POST_HAENGT_MS) { z.neu = opts; return false; }   // ohne jede Antwort nach 10 s gilt der Lauf als verloren
+    z.neu = null;   // S9: beim 10-s-Ausweg gilt nur dieser neueste Stand, ein aelterer gemerkter darf nicht hinterher
+    const nr = ++z.nr;
+    z.busy = true; z.start = Date.now();
+    const fertig = (h) => (r) => {
+      try { if (h) h(r); } catch (_) {}
+      if (nr !== z.nr) return;   // spaete Antwort eines aufgegebenen Laufs: gibt den laufenden nicht frei
+      z.ms = Date.now() - z.start; z.busy = false;
+      const n = z.neu; z.neu = null;
+      if (n) postEinzeln(n, senden);
+    };
+    (senden || GM_xmlhttpRequest)(Object.assign({}, opts, { onload: fertig(opts.onload), onerror: fertig(opts.onerror), ontimeout: fertig(opts.ontimeout), onabort: fertig(opts.onabort) }));
+    return true;
+  }
+  const postMs = (url) => (_postLauf[url] && _postLauf[url].ms != null) ? ` · ${_postLauf[url].ms} ms` : '';
+
   function sendeBedienfeld() {
     let bf;
     try {
@@ -1082,7 +1122,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     }
     // 0.8.5: Herkunft fuers reader-server-Routing (Puls klickt im Tab mit Fokus)
     try { bf.tab_id = TAB_ID; bf.rolle = tabRolle(Date.now()); bf.fokus = document.hasFocus(); bf.version = bf.version || VERSION; } catch (_) {}
-    GM_xmlhttpRequest({
+    postEinzeln({
       method: 'POST', url: BEDIENFELD,
       headers: { 'Content-Type': 'application/json' },
       data: JSON.stringify(bf), timeout: 2500,
@@ -1240,7 +1280,23 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   }
   // REIN RECHNEND (Selbsttest, 0.10.7): wie viele Zeilen ohne P&L machen die Lesung blind?
   function unklarBlind(befund, reiterPositions) { return reiterPositions ? (befund.unklar_fest || 0) : (befund.unklar || 0); }
+  // REIN (Selbsttest, 0.10.8): flach nur, wenn der Reader keine Zeile gelesen hat, die Tabelle da ist, keine Datenzeile in ihr steht (Zeile mit mehr als einer gefuellten Zelle, wie leerStrukturPasst)
+  // und nichts nach Laden/Verbinden/Fehler klingt. Stopp S9: aendert TradingView die Tabelle (kein data-label, Filter verwirft die Zeile), waere sonst jede offene Position „weg“.
+  function tabelleFlach(befund, tabelle) {
+    if (!befund || befund.zeilen !== 0 || !tabelle) return false;
+    let tds, zeilen; try { tds = tabelle.querySelectorAll('td'); zeilen = tabelle.querySelectorAll('tr'); } catch (_) { return false; }
+    if (!tds || !zeilen) return false;
+    for (const tr of zeilen) {
+      let zellen; try { zellen = tr.querySelectorAll('td'); } catch (_) { return false; }
+      let n = 0;
+      for (const td of (zellen || [])) if (String(td.textContent || '').trim() && ++n > 1) return false;
+    }
+    const rest = [...tds].map((td) => String(td.textContent || '')).join(' ').replace(/\s+/g, ' ').trim();
+    return !RX_LEER_NICHT.test(rest) && !/\d/.test(rest);   // Ziffer = moeglicher Wert einer Zeile, wie leerStrukturPasst (S9)
+  }
+  let leerBeweisMerk = true;   // 0.10.8: fuer leer_beweis im Payload — die anderen Leser (1-s-Waechter, Master-nie-da, Neuladen) bleiben beim Leer-Text
   function blindGrund(positionen) {
+    leerBeweisMerk = true;
     if (PULS_CHROME) {   // 0.9.3: strenger — ohne Konto kein Urteil, flach nur mit Beweis (auch verdeckt)
       // 0.10.4: jede Lesung OHNE Leer-Beweis-Versuch (kein Konto, unklar, Position da) verwirft die erste Struktur-Lesung — die zweite
       // muss unmittelbar auf eine leere folgen, nie ueber eine Position oder einen Kontowechsel hinweg
@@ -1261,6 +1317,9 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       // den Blind-Heimweg weg, wenn Puls belegt im Plan-Konto steht; sonst blockierte der Heimweg 1–4 min den Hedge-Schluss, Simon 30.10.)
       let reiterAn = false;
       try { const r = document.getElementById('positions'); reiterAn = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
+      let tabelleOk = false;
+      try { tabelleOk = reiterAn && tabelleFlach(leseBefund, document.querySelector(SEL_POS_TABELLE)); } catch (_) {}
+      if (tabelleOk) { leerBeweisMerk = false; return null; }   // 0.10.8: Reiter + leere Tabelle reichen
       // das AKTUELLE Konto steht beim Leer-Text-Grund dabei: der reader-server friert bei blind den Stand ein (konto = letztes sehendes
       // Konto) — ohne diese Angabe saehe die Heim-Wache einen Handwechsel in ein fremdes Konto nicht (Pruefung 30.10.2026)
       return reiterAn ? 'kein Leer-Beweis: Leer-Text nicht erkannt | Konto: ' + String(kontoMerk.text || '').slice(0, 64)
@@ -1875,6 +1934,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   }
 
   function tick() {
+    // 0.10.9: im Puls-Chrome nur auf Chart-Seiten — eine andere TradingView-Seite (Refer-a-Friend, Konto, Preise) liest nichts und meldet sich nicht beim Reader
+    if (PULS_CHROME && !/^\/chart(\/|$)/.test(location.pathname)) { setBadge('● Puls-Chrome · keine Chart-Seite, Reader aus', 'pause'); return; }
     if (PULS_CHROME && document.readyState !== 'complete' && Date.now() - SCRIPT_START_MS < 15000) return;   // 0.9.5/0.9.7: Seite lädt — höchstens 15 s schonen
     // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
     // er liefert nur Kurse/Kerzen (die Positions-Felder schickt er seit 0.8.5 ohnehin nicht)
@@ -1898,7 +1959,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     // Konto; der reader-server nimmt von ihm nur Kurse/Kerzen (ein fehlendes Feld ist nie 'flach')
     const posFelder = rolle === 'broker' ? {
       positionen,
-      blind: !!blind, blind_grund: blind || '',
+      blind: !!blind, blind_grund: blind || '', leer_beweis: leerBeweisMerk,
       // 0.8.3: Beweis-Felder fuer den Master-zu-Waechter — positionen_ts nur bei VOLLSTAENDIGER
       // Lesung (nicht blind), positionen_ok = diese Liste ist eine Aussage; konto aus dem Umschalter
       positionen_ts: blind ? null : Date.now(),
@@ -1934,7 +1995,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
     if (!PULS_CHROME) { try { pxKerzenSenden(); } catch (_) { feed.fehler++; } }   // 0.8.0: wartende Bars gebuendelt an /kerzen
 
-    GM_xmlhttpRequest({
+    postEinzeln({
       method: 'POST',
       url: ENDPOINT,
       headers: { 'Content-Type': 'application/json' },
@@ -1946,9 +2007,9 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
         else if (feedLogin)  setBadge(`⚠ Feed-Tab: Broker-Konto angemeldet (${feedLogin}) — hier nie handeln, bitte abmelden`, 'warn');   // 0.8.8
         else if (rolle !== 'broker') setBadge(PULS_CHROME ? `● Orbit V3 · Puls-Chrome · kein Konto angemeldet` : `● Feed-Tab ohne Konto — nur Kurse`, PULS_CHROME ? 'warn' : 'ok');   // 0.8.7: keine Warnung ohne Konto
-        else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
+        else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen${postMs(ENDPOINT)}`, 'warn');
         // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen
-        else if (PULS_CHROME) setBadge(`● Orbit V3 · Puls-Chrome · ${positionen.length} Pos`, 'ok');
+        else if (PULS_CHROME) setBadge(`● Orbit V3 · Puls-Chrome · ${positionen.length} Pos${postMs(ENDPOINT)}`, 'ok');
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
       onerror:   () => setBadge(`● Reader · ${positionen.length} Pos · Copier OFFLINE`, 'warn'),
@@ -1994,7 +2055,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.7';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.9';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

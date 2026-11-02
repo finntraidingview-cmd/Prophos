@@ -10,7 +10,7 @@ import tempfile
 W = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JSC = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
 HTML = open(os.path.join(W, "prophos.html"), encoding="utf-8").read()
-US = open(os.path.join(W, "tools", "userscript-test", "tv-reader-0.10.9.user.js"), encoding="utf-8").read()   # bis zum Rollout nur Testgerät
+US = open(os.path.join(W, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()   # seit dem Rollout 0.10.9 (02.11.2026) die Flotten-Datei
 MAIN = open(os.path.join(W, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()
 FEHLER = []
 
@@ -99,7 +99,7 @@ _alt = t[t.index("if(!einfach){"):t.index("if(st.positionen.some(x => x && (x.wu
 check("hedgeMasterWegEntscheid({" in _alt and "if(kurzEndeSperrt(kurz)){ kurzEndeMelden(p, kurz); continue }" in _alt and "if(st.positionen.some(x => x && x.pnl_unklar)) continue" in _alt and "continue\n        }" in _alt, "alte Regel unverändert im eigenen Zweig")
 _neu = t[t.index("if(st.positionen.some(x => x && (x.wurzel || tvSymbolWurzel(x.symbol || '')) === wz))"):]
 check("kurzEndeSperrt(" not in _neu and "hedgeReaderEinfachEntscheid({" in _neu, "neue Regel: Balance entscheidet nicht")
-check("const TVTM_VERSION_SOLL = '0.10.7'" in HTML and "const VERSION    = '0.10.7'" in MAIN and "leer_beweis" not in MAIN and "const VERSION    = '0.10.9'" in US and "const EINGEBAUT = '0.10.9'" in US, "main bleibt 0.10.7, Rollout-Soll 0.10.7, 0.10.9 nur im Testordner")
+check("const TVTM_VERSION_SOLL = '0.10.9'" in HTML and "const VERSION    = '0.10.9'" in MAIN and "const EINGEBAUT = '0.10.9'" in MAIN and "leer_beweis" in MAIN, "Rollout: Flotten-Datei 0.10.9, Soll 0.10.9")
 check("if(hedgeTvUnterwegs()){ verwerfen(); return }" in t, "Puls unterwegs setzt Konto-Zeitraum zurück")
 check("jetzt - _hedgeSchnellKonto.get(pid) >= 5000) _hedgeSchnellGesehenAt.set" in t, "Sichtung zählt ab 5 s im Konto")
 i = HTML.index("async function hedgeTsxSchnellTick(")

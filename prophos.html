@@ -27637,7 +27637,7 @@
   const TVTM_LADER_SOLL = 1, TVTM_TSX_LADER_SOLL = 1
   // GESPERRTES EVAL (Finn 02.11.2026): TradingViews CSP verbietet eval, der Lader tauscht dort den Kern nie (lader.eval false, quelle eingebaut). Dann kommt jede Fassung über diesen Weg:
   // TVTM_VERSION_SOLL = VERSION im Userscript (Selbsttest prüft es), ein Versuch je PC und Fassung, nur in Ruhe (tvnRuhe). Scheitert er, meldet Railway ⚪; die nächste Fassung versucht es neu.
-  const TVTM_VERSION_SOLL = '0.10.7', TVTM_TSX_VERSION_SOLL = '0.3.3'   // TSX = SCRIPT im Auge (02.11.2026: 2.4.32-Fassung kommt sonst nie an)
+  const TVTM_VERSION_SOLL = '0.10.9', TVTM_TSX_VERSION_SOLL = '0.3.3'   // TSX = SCRIPT im Auge (02.11.2026: 2.4.32-Fassung kommt sonst nie an)
   const tvTmSoll = art => art === 'tsx' ? TVTM_TSX_LADER_SOLL : TVTM_LADER_SOLL
   const tvTmVersionSoll = art => art === 'tsx' ? TVTM_TSX_VERSION_SOLL : TVTM_VERSION_SOLL
   const tvTmKey = art => (art === 'tsx' ? 'prophos_tvtm_tsx_l' : 'prophos_tvtm_l') + tvTmSoll(art) + '_v' + tvTmVersionSoll(art)
@@ -54187,7 +54187,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1983'
+  const OS_TAB_BUILD = '2026-09-22.1984'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

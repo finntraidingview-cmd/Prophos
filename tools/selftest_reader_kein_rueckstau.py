@@ -10,7 +10,7 @@ import tempfile
 
 W = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JSC = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
-US = open(os.path.join(W, "tools", "userscript-test", "tv-reader-0.10.9.user.js"), encoding="utf-8").read()
+US = open(os.path.join(W, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()
 FEHLER = []
 
 
