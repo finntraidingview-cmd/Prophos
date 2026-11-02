@@ -28716,7 +28716,7 @@ def admin_auto_plan_hedge_freigabe():
 AH_STANDARD = {"an": False, "netto_faktor": 0.89, "min_lot": 0.01, "vorlauf_min": 20.0, "nachlauf_min": 30.0}
 AH_TAKT_S = 60
 AH_FIRMA = "Apex Trader"
-_ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": []}
+_ah = {"at": 0.0, "fehler": "", "umgestellt": 0, "ohne": 0, "zurueck": 0, "letzt": [], "hand": set()}
 
 
 def ah_param(regeln):
@@ -29027,7 +29027,8 @@ def ah_tick(jetzt=None, force=False):
         upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": h["abstand"], "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
                "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Apex mit Hedge (WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                         f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · Hedge zu am Boden {liq:.0f} $").replace(".", ",")).strip()}
+                         f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · "
+                         + (f"Hedge zu am Daily Loss {float(bal) - h['abstand']:.0f} $ (Boden {liq:.0f} $)" if h["abstand_art"] == "daily_loss" else f"Hedge zu am Boden {liq:.0f} $")).replace(".", ",")).strip()}
         g = _ah_guard(p)
         g["hedge_freigabe_at"] = "not.is.null"
         try:
@@ -29049,6 +29050,13 @@ def ah_tick(jetzt=None, force=False):
         wer = namen.get(str(p["user_id"]), str(p["user_id"])[:8])
         base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
         alt = base.get("apex_hedge") if isinstance(base.get("apex_hedge"), dict) else {}
+        # HAND-WERTE (S9 02.11.2026): Das Plan-Popup setzt hand_werte_at nicht. Weicht der Multiplikator vom zuletzt von ah_tick geschriebenen ab, hat ihn jemand
+        # von Hand gesenkt oder geändert → nie zurücksetzen, einmal in die Spur
+        if abs((_wd_num(p.get("multiplier")) or 0) - (_wd_num(alt.get("multiplier")) or 0)) > 0.0005:
+            if str(p["id"]) not in _ah["hand"]:
+                _ah["hand"].add(str(p["id"]))
+                _ah_spur(f"{wer} · {p.get('master_name') or '—'}: nicht nachgezogen — Multiplikator {p.get('multiplier')} von Hand (ah_tick schrieb {alt.get('multiplier')})")
+            continue
         h, wert, polster, bal, liq, fehl = rechnen(p, a)
         if fehl or abs((_wd_num(p.get("master_risk")) or 0) - h["abstand"]) < 1 and abs((_wd_num(alt.get("lots")) or 0) - h["lots"]) < 0.005:
             continue

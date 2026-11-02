@@ -78,5 +78,12 @@ check('"start_um_gestartet_at": "is.null"' in t and 'g = _ah_guard(p, mit=True)'
       "Nachziehen nur ungeclaimt und planned (Guard), laufende nie")
 check("eh_marge(les, h[\"lots\"], p.get(\"richtung\"), max(0.0, vorgemerkt.get(login, 0.0) - " in t, "Nachziehen prüft die Marge ohne die eigenen alten Lots doppelt")
 check('plaene = [p for p in plaene if not p.get("_ah_nach")]' in t, "Vormerken und Umstellen sehen die nachzuziehenden Pläne nicht")
+check("abs((_wd_num(p.get(\"multiplier\")) or 0) - (_wd_num(alt.get(\"multiplier\")) or 0)) > 0.0005" in t and t.index('_ah["hand"].add(') < t.index("h, wert, polster, bal, liq, fehl = rechnen(p, a)\n        if fehl or abs("),
+      "Nachziehen: Multiplikator von Hand geändert → überspringen, einmal Spur, vor dem Rechnen")
+check('Hedge zu am Daily Loss {float(bal) - h[\'abstand\']:.0f} $ (Boden {liq:.0f} $)' in t, "Notiz nennt bei Daily Loss den Daily-Loss-Stand, sonst den Boden")
+# Hand-Riegel gegen eine Kopie des Schritts (3): nur der Vergleich, ohne DB
+def hand(plan_mult, alt_mult):
+    return abs((wd_num(plan_mult) or 0) - (wd_num(alt_mult) or 0)) > 0.0005
+check(hand(0.3, 0.7059) and not hand(0.7059, 0.7059) and not hand("0.7059", 0.70588) and hand(0.7059, None), "Hand-Vergleich: gesenkt → Hand, gerundet gleich → kein Hand, alte Marke ohne Wert → Hand")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)
