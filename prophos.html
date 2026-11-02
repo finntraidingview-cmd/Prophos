@@ -32516,16 +32516,15 @@
     return true
   }
   window._hedgeToastVersionOk = hedgeToastVersionOk   // Test-Haken
-  // REIN RECHNEND (S9 02.11.2026): f.konto ist der Umschalter beim Lesen, die Meldung trägt kein Konto. Ein anderer offener Plan desselben PCs/derselben ID mit gleicher Wurzel, Richtung und Menge
-  // könnte gemeint sein → Flach-Weg. Auch derselbe Master-Account.
-  function hedgeToastNachbar(plaene, p, wurzel, pc){
-    const wz = v => (tvSymbolWurzel(String(v || '')) === 'MNQ' ? 'MNQ' : 'NQ')
+  // REIN RECHNEND (S9 02.11.2026): f.konto ist der Umschalter beim Lesen, die Meldung trägt kein Konto. Der Tab lädt nur Pläne der eigenen ID, also ist jeder andere offene Plan in der Liste
+  // mit gleicher Wurzel, Richtung und Menge möglich gemeint (auch ohne Hedge) → Flach-Weg. Derselbe Master-Account immer. Wurzel nicht bestimmbar = Nachbar.
+  function hedgeToastNachbar(plaene, p, wurzel){
     return (plaene || []).some(q => {
       if(!q || String(q.id) === String(p.id) || q.status !== 'open') return false
       if(String(q.masterAccountId) === String(p.masterAccountId)) return true
-      const hq = (q.mt5Baseline && q.mt5Baseline.hedge) || {}
-      if(!(hq.pc === pc || (q.userId && q.userId === p.userId))) return false
-      return wz(hq.symbol_nq || q.masterSymbol) === wurzel && q.richtung === p.richtung && Number(q.masterContracts) === Number(p.masterContracts)
+      const hq = (q.mt5Baseline && q.mt5Baseline.hedge) || {}, w = tvSymbolWurzel(String(hq.symbol_nq || q.masterSymbol || ''))
+      if(!w) return true
+      return w === wurzel && q.richtung === p.richtung && Number(q.masterContracts) === Number(p.masterContracts)
     })
   }
   window._hedgeToastNachbar = hedgeToastNachbar   // Test-Haken
@@ -32645,7 +32644,7 @@
         if(hedgeToastAn() && richtung && p.status === 'open' && readerKontoPasst(st.konto, kontoPlan, st) && kontoMs >= 2000
            && (kontoMs >= 90000 || (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid))
            && _hedgeMasterGesehen.has(pid) && !_hedgeToastGeloest.has(pid) && !_hedgeWegLaeuft.has(pid)
-           && hedgeToastVersionOk(st) && !hedgeToastNachbar(tp, p, wz, pc)){
+           && hedgeToastVersionOk(st) && !hedgeToastNachbar(tp, p, wz)){
           const tf = hedgeToastBeweis(st.fills, { kurs: hedgeKursDerWurzel(wz) || hedgeKursDerWurzel(wz === 'MNQ' ? 'NQ' : 'MNQ'), ext: kontoPlan, extIds: kontoExtIds(), seite: richtung === 'buy' ? 'sell' : 'buy', menge: Number(p.masterContracts), wurzel: wz,
             startMs: Date.parse(p.startedAt || h.opened_at || h.at || '') || 0, openMs: Date.parse(h.opened_at || h.at || '') || 0, pulsMs: _pulsAktivAt, jetzt: Date.now(), offen: _hedgeToastMenge.get(pid) })
           if(tf){
@@ -53910,7 +53909,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1980'
+  const OS_TAB_BUILD = '2026-09-22.1981'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

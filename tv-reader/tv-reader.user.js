@@ -28,7 +28,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
-//   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre ueberlebt Neuladen). Teil-Fill zaehlt nicht. Zeile ohne P&L ist nur bei aktivem Reiter Positions nicht blind.
+//   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre im GM-Speicher, ueberlebt Neuladen und neuen Tab). Teil-Fill zaehlt nicht. Zeile ohne P&L ist nur bei aktivem Reiter Positions nicht blind.
 //   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
 //   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
 //                      localStorage prophos_puls_chrome = '1' der Puls-Augen (augen.js ≥ 0.8.8, nur per CDP im Puls-Chrome) schaltet ihn ein,
@@ -1778,7 +1778,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   const RX_F_SYMBOL = /\b((?:MNQ|NQ|MES|ES|MYM|YM|M2K|RTY)[FGHJKMNQUVXZ]\d{1,2})\b|\b((?:MNQ|NQ|MES|ES)1!)/;
   const FILL_START_MS = 15000, FILL_SPERRE_KEY = 'prophos_fill_sperre';
   const fillMerk = { fills: [], vorher: null, fehler: 0, naechst: 0, sperre: {} };
-  try { fillMerk.sperre = JSON.parse(sessionStorage.getItem(FILL_SPERRE_KEY) || '{}') || {}; } catch (_) {}   // ueberlebt das Neuladen des Tabs
+  try { fillMerk.sperre = JSON.parse(GM_getValue(FILL_SPERRE_KEY, '{}') || '{}') || {}; } catch (_) {}   // GM-Speicher (S9): ueberlebt Neuladen und neuen Tab
   function fillZahl(t) {
     t = String(t || '').replace(/\s/g, '');
     if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, '');            // 30,801.00
@@ -1868,7 +1868,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       const g = fillsSperren(n.neu, alle_, fillMerk.sperre, Date.now(), Date.now() - SCRIPT_START_MS);
       const merkNeu = Object.keys(g.sperre).length !== Object.keys(fillMerk.sperre).length;
       fillMerk.sperre = g.sperre;
-      if (merkNeu) { try { sessionStorage.setItem(FILL_SPERRE_KEY, JSON.stringify(g.sperre)); } catch (_) {} }
+      if (merkNeu) { try { GM_setValue(FILL_SPERRE_KEY, JSON.stringify(g.sperre)); } catch (_) {} }
       if (g.neu.length) fillMerk.fills = fillsMerken(fillMerk.fills, g.neu, Date.now(), kontoMerk.text);
     } catch (_) { fillMerk.fehler++; }
     return fillMerk.fills.slice(-FILL_MAX);

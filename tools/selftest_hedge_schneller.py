@@ -39,13 +39,13 @@ def js_funktion(src, name):
     raise ValueError(name)
 
 
-FILL_TEIL = US[US.index("  const FILL_MAX = 10"):US.index("  function fillsLesen() {")].replace("sessionStorage.getItem(FILL_SPERRE_KEY)", "null")
+FILL_TEIL = US[US.index("  const FILL_MAX = 10"):US.index("  function fillsLesen() {")].replace("GM_getValue(FILL_SPERRE_KEY, '{}')", "null")
 JS = "\n".join(["const window = {}", "const HEDGE_TOAST_FRISCH_MS = 3000, KONTO_KURZ_MIN = 12"]
                + ["const HEDGE_TOAST_KURS_PKT = 10, HEDGE_TOAST_MIN_VERSION = '0.10.7'"] + [js_funktion(HTML, n) for n in ("hedgeToastVersionOk", "hedgeToastNachbar", "hedgeToastOhneFlach", "hedgeKontoPasst", "kontoTextBezug", "kontoTextEindeutig", "tvSymbolWurzel", "hedgeMasterTeilweise",
                                                   "hedgeToastBeweis", "hedgeToastLesung")]
                + ["const readerKontoPasst = (k, e) => ['ja', 'klebt'].includes(kontoTextBezug(k, e))", FILL_TEIL, r"""
 const ID = 'TDFYSL150000000000', START = 1000000, JETZT = START + 60000
-const NP = { id: 'p', status: 'open', masterAccountId: 'a', userId: 'u', richtung: 'buy', masterContracts: 2, masterSymbol: 'MNQZ6', mt5Baseline: { hedge: { pc: 'pc1', symbol_nq: 'MNQZ6' } } }
+const NP = { id: 'p', status: 'open', masterAccountId: 'a', richtung: 'buy', masterContracts: 2, masterSymbol: 'MNQZ6', mt5Baseline: { hedge: { pc: 'pc1', symbol_nq: 'MNQZ6' } } }
 const O = x => Object.assign({ ext: ID, extIds: [ID, 'TDFYSL150000000099'], seite: 'sell', menge: 1, wurzel: 'MNQ', startMs: START, openMs: START + 500, jetzt: JETZT, offen: null, kurs: 28739 }, x || {})
 const F = x => Object.assign({ at: JETZT - 100, seite: 'sell', menge: 1, preis: 28738.5, symbol: 'MNQZ6', konto: ID + ' 151,407.70 USD' }, x || {})
 const ja = (f, o) => !!hedgeToastBeweis([f], O(o))
@@ -88,12 +88,15 @@ print(JSON.stringify({
   ver_fremd_tab: hedgeToastVersionOk({ positionen_tab: 'p', script_version: '0.10.7', tabs: [{ tab_id: 'x', version: '0.10.7' }, { tab_id: 'p', version: '0.10.5' }] }),
   ver_fehlt: hedgeToastVersionOk({ positionen_tab: 'p', tabs: [{ tab_id: 'p' }] }),
   ver_ohne_tabs: hedgeToastVersionOk({ positionen_tab: 'p', version: '0.10.7' }),
-  nb_gleich: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b' })], NP, 'MNQ', 'pc1'),
-  nb_menge: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b', masterContracts: 3 })], NP, 'MNQ', 'pc1'),
-  nb_richtung: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b', richtung: 'sell' })], NP, 'MNQ', 'pc1'),
-  nb_anderer_pc: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b', userId: 'v', mt5Baseline: { hedge: { pc: 'pc2', symbol_nq: 'MNQZ6' } } })], NP, 'MNQ', 'pc1'),
-  nb_gleiches_konto: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterContracts: 9 })], NP, 'MNQ', 'pc1'),
-  nb_allein: hedgeToastNachbar([NP], NP, 'MNQ', 'pc1'),
+  nb_gleich: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b' })], NP, 'MNQ'),
+  nb_ohne_hedge: hedgeToastNachbar([NP, { id: 'q', status: 'open', masterAccountId: 'b', richtung: 'buy', masterContracts: 2, masterSymbol: 'MNQZ6' }], NP, 'MNQ'),
+  nb_ohne_wurzel: hedgeToastNachbar([NP, { id: 'q', status: 'open', masterAccountId: 'b', richtung: 'sell', masterContracts: 9 }], NP, 'MNQ'),
+  nb_menge: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b', masterContracts: 3 })], NP, 'MNQ'),
+  nb_richtung: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b', richtung: 'sell' })], NP, 'MNQ'),
+  nb_andere_wurzel: hedgeToastNachbar([NP, { id: 'q', status: 'open', masterAccountId: 'b', richtung: 'buy', masterContracts: 2, masterSymbol: 'NQZ6' }], NP, 'MNQ'),
+  nb_geplant: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterAccountId: 'b', status: 'planned' })], NP, 'MNQ'),
+  nb_gleiches_konto: hedgeToastNachbar([NP, Object.assign({}, NP, { id: 'q', masterContracts: 9 })], NP, 'MNQ'),
+  nb_allein: hedgeToastNachbar([NP], NP, 'MNQ'),
   puls_gerade: ja(F({ at: JETZT - 100 }), { pulsMs: JETZT - 500 }),
   puls_vorbei: ja(F({ at: JETZT - 100 }), { pulsMs: JETZT - 2000 }),
   zukauf_gesehen: ja(F(), { offen: 2 }),
@@ -148,8 +151,11 @@ check(e["sperre_neu"] == 1 and e["sperre_abgelaufen"] == 1, "wirklich neue Meldu
 check(e["ver_ok"] and e["ver_neuer"], "Fassung ab 0.10.7: ja")
 check(not any(e[k] for k in ("ver_alt", "ver_fremd_tab", "ver_fehlt", "ver_ohne_tabs")), "älter, nur anderer Tab, unbekannt: Flach-Weg")
 check(e["nb_gleich"] and e["nb_gleiches_konto"], "anderer Plan gleiche Wurzel/Richtung/Menge oder gleiches Konto: Flach-Weg")
-check(not e["nb_menge"] and not e["nb_richtung"] and not e["nb_anderer_pc"] and not e["nb_allein"], "andere Menge, Richtung, anderer PC, allein: Toast erlaubt")
-check("hedgeToastVersionOk(st) && !hedgeToastNachbar(tp, p, wz, pc)" in tick and "kurs: hedgeKursDerWurzel(wz)" in tick, "Takt prüft Version, Nachbar, Kurs")
+check(e["nb_ohne_hedge"], "Plan ohne Hedge und ohne userId ist Nachbar")
+check(e["nb_ohne_wurzel"], "Wurzel nicht bestimmbar: Nachbar")
+check(not any(e[k] for k in ("nb_menge", "nb_richtung", "nb_andere_wurzel", "nb_geplant", "nb_allein")), "andere Menge, Richtung, Wurzel, nur geplant, allein: Toast erlaubt")
+check("GM_setValue(FILL_SPERRE_KEY" in US and "sessionStorage.setItem(FILL_SPERRE_KEY" not in US, "Fill-Sperre im GM-Speicher")
+check("hedgeToastVersionOk(st) && !hedgeToastNachbar(tp, p, wz)" in tick and "kurs: hedgeKursDerWurzel(wz)" in tick, "Takt prüft Version, Nachbar, Kurs")
 check("Object.assign({}, HEDGE_WEG_LEER, { toast_beweis_at: null })" in HTML, "abgelehnter Close nimmt die Stempel zurück")
 check("default false" in open(os.path.join(WURZEL, "sql", "2026-11-02_hedge_toast_schluss.sql"), encoding="utf-8").read(), "SQL Standard aus")
 check(e["lesung_flach"] == "flach" and e["lesung_klebt"] == "flach", "Wache: flach, auch mit angehängten Ziffern")
