@@ -389,12 +389,14 @@ def big_trade(ns):
         i = html.index("  function " + name + "(")
         return html[i:html.index("\n  }\n", i) + 4]
     js = ("var accounts = [], tradePlans = []; function tvV2Konto(){ return 'X' } function bthFenster(r){ return r === 'tsv2' ? 'tsx' : 'tv' }"
-          " function wdHeimWahl(l, j){ return j(l) }\n" + fn("tpIstWdPlan") + "\n" + fn("bigTradePlan") + "\n"
+          " function wdHeimWahl(l, j){ return j(l) } function tpIstApexHedge(p){ return !!p.apex }\n" + fn("tpIstWdPlan") + "\n" + fn("bigTradePlan") + "\n"
           "var F = { id: 'funded', status: 'open', route: 'tvv2', orbitV3: " + ("true" if fp["orbit_v3"] else "false") + ", hedgeEur: " + str(fp["hedge_eur"])
           + ", winningDay: null, startedAt: '2026-10-27T10:00:00Z' }\n"
           "var W = { id: 'wd', status: 'open', route: 'tvv2', orbitV3: false, hedgeEur: 175, winningDay: true, startedAt: '2026-10-27T11:00:00Z' }\n"
+          "var A = { id: 'apex', apex: true, status: 'open', route: 'tvv2', orbitV3: false, hedgeEur: 150, winningDay: false, startedAt: '2026-10-27T12:00:00Z' }\n"
           "tradePlans = [W, F]; var a = bigTradePlan('tv'); tradePlans = [W]; var b = bigTradePlan('tv');"
-          " print((a && a.id) + ' ' + (b && b.id) + ' ' + tpIstWdPlan(F))")
+          " tradePlans = [W, A, F]; var c = bigTradePlan('tv'); tradePlans = [W, A]; var d = bigTradePlan('tv'); tradePlans = [A]; var e = bigTradePlan('tv');"
+          " print((a && a.id) + ' ' + (b && b.id) + ' ' + tpIstWdPlan(F) + ' ' + c.id + ' ' + d.id + ' ' + e.id)")
     import subprocess, tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
         f.write(js)
@@ -402,7 +404,7 @@ def big_trade(ns):
         out = subprocess.run([jsc, f.name], capture_output=True, text=True, timeout=30).stdout.strip()
     finally:
         os.unlink(f.name)
-    check(out == "funded wd false", f"prophos.html bigTradePlan: Funded = Prio 1 vor dem Winning Day, kein WD-Plan ({out})")
+    check(out == "funded wd false funded apex apex", f"prophos.html bigTradePlan: Funded = Prio 1, Apex-Challenge vor dem Winning Day, kein WD-Plan ({out})")
 
 
 def balance_selbst(ns):

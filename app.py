@@ -17466,7 +17466,7 @@ def puls_heim_big_trades(plaene, pc, ausser=None):
         if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2"):
             continue
         if p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days" or plan_ist_apex_hedge(p):
-            continue                                       # Apex mit Hedge: läuft als Winning Day (puls_heim_wd_trades)
+            continue                                       # Apex mit Hedge: eigene Stufe unter dem Big Trade (puls_heim_apex_trades)
         if not ((_wd_num(p.get("hedge_eur")) or 0) > 0 or p.get("orbit_v3") is True):
             continue
         h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
@@ -17489,14 +17489,14 @@ PULS_HEIM_WD_USD = 100.0
 
 def puls_heim_wd_trades(plaene, pc, ausser=None):
     """REIN RECHNEND (testbar): laufende Winning Days DIESES PCs — open, tvv2/tsv2, winning_day bzw. konto_typ winning_days, Hedge auf
-    diesem PC (mt5_baseline.hedge.pc), nicht der Plan selbst."""
+    diesem PC (mt5_baseline.hedge.pc), nicht der Plan selbst. Apex mit Hedge nicht mehr hier (puls_heim_apex_trades, 02.11.2026)."""
     out = []
     for p in plaene or ():
         if str(p.get("id")) == str(ausser or ""):
             continue
         if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2"):
             continue
-        if not (p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days" or plan_ist_apex_hedge(p)):
+        if plan_ist_apex_hedge(p) or not (p.get("winning_day") is True or str(p.get("konto_typ") or "") == "winning_days"):
             continue
         h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
         if not isinstance(h, dict) or str(h.get("pc") or "") != str(pc or ""):
@@ -17511,6 +17511,35 @@ def puls_heim_wd_schwellen(regel):
         return None
     tp, liq = _wd_num(regel.get("wd_tp_usd")), _wd_num(regel.get("wd_liq_usd"))
     return (PULS_HEIM_WD_USD if tp is None else tp, PULS_HEIM_WD_USD if liq is None else liq)
+
+
+# ══ PRIO-STUFE APEX-CHALLENGE (Finn 02.11.2026 04:05: „gleiche Logik wie Winning Days, nur eine Priorität höher: unter Big Trades, unter
+# Orbit-Trades, über Winning Days"). Rangfolge im Riegel und beim Heimkonto: Big Trade → Apex-Challenge → Winning Day. Apex ist weiter KEIN
+# Big Trade (puls_heim_ist_big): er zählt nicht in die Zwei-Orbit-Grenze und nicht in prophos_big_trade, sonst sperrte er den Big Trade
+# derselben ID. Grenze wie beim WD (100 $, nicht prüfbar = frei), bis Finn anders sagt; optional eigene Spalten apex_tp_usd/apex_liq_usd. ══
+def puls_heim_apex_trades(plaene, pc, ausser=None):
+    """REIN RECHNEND (testbar): laufende Apex-Challenges mit Hedge DIESES PCs (plan_ist_apex_hedge) — open, tvv2/tsv2, Hedge auf diesem PC
+    (mt5_baseline.hedge.pc), nicht der Plan selbst."""
+    out = []
+    for p in plaene or ():
+        if str(p.get("id")) == str(ausser or ""):
+            continue
+        if str(p.get("status") or "") != "open" or str(p.get("route") or "") not in ("tvv2", "tsv2") or not plan_ist_apex_hedge(p):
+            continue
+        h = (p.get("mt5_baseline") or {}).get("hedge") if isinstance(p.get("mt5_baseline"), dict) else None
+        if not isinstance(h, dict) or str(h.get("pc") or "") != str(pc or ""):
+            continue
+        out.append(p)
+    return out
+
+
+def puls_heim_apex_schwellen(regel):
+    """REIN RECHNEND (testbar): (tp_usd, liq_usd) für Apex-Challenges — apex_tp_usd/apex_liq_usd, wenn gesetzt, sonst wie Winning Days. None = aus."""
+    wd = puls_heim_wd_schwellen(regel)
+    if wd is None:
+        return None
+    tp, liq = _wd_num(regel.get("apex_tp_usd")), _wd_num(regel.get("apex_liq_usd"))
+    return (wd[0] if tp is None else tp, wd[1] if liq is None else liq)
 
 
 # ══ NUR TRADINGVIEW WARTET + ZWEI ORBIT (30.10.2026, Auftrag ZWEI-ORBIT Stück 1, Bauplan S5 + Befund S6 „Heim nur TV"; Finn ~07:50:
@@ -17688,9 +17717,11 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
         big = puls_heim_big_trades(rows, pc, ausser)
         wd_schw = puls_heim_wd_schwellen(regel)
         wds = puls_heim_wd_trades(rows, pc, ausser) if wd_schw else []
-        if not big and not wds:
+        apex_schw = puls_heim_apex_schwellen(regel)
+        apexe = puls_heim_apex_trades(rows, pc, ausser) if apex_schw else []
+        if not big and not wds and not apexe:
             return {"frei": True}
-        ids = sorted({str(p.get("master_account_id")) for p in big + wds if p.get("master_account_id")})
+        ids = sorted({str(p.get("master_account_id")) for p in big + apexe + wds if p.get("master_account_id")})
         accs = {str(a["id"]): a for a in (sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,max_daily_drawdown,tv_balance,tv_balance_at",
                                                                      "id": f"in.({','.join(ids)})"}) or [])} if ids else {}
         fruehere = _wd_fruehere_trades(ids)
@@ -17711,23 +17742,25 @@ def puls_heim_pruefen(pc, ausser=None, route=None):
             if n["nah"]:
                 return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
                         "grund": f"Big Trade {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
-        for p in wds:   # Winning Days (22.10.2026): eigene 100-$-Grenze, nicht prüfbar = frei (s. oben)
+        # Apex-Challenge (02.11.2026) vor den Winning Days; beide: eigene 100-$-Grenze, nicht prüfbar = frei (s. oben)
+        for p, schw, art_name, art_info in ([(x, apex_schw, "Apex-Challenge", {"apex_hedge": True}) for x in apexe]
+                                            + [(x, wd_schw, "Winning Day", {"winning_day": True}) for x in wds]):
             acc = accs.get(str(p.get("master_account_id") or ""))
             z = _lt_zeile(p, acc, {}, {}, wd_vorher_waehlen(p, fruehere), regeln=liq_regeln, fruehere=fruehere, verlauf=liq_verlauf, kw_firmen=liq_kw)
             kurs = puls_heim_kurs_frisch(kurse, z.get("symbol_root"))
-            n = puls_heim_nah(z, kurs, wd_schw)
+            n = puls_heim_nah(z, kurs, schw)
             # Liq-Level unbekannt → puls_heim_nah sagt „nicht prüfbar“, obwohl der TP-Rest feststeht: dann zählt der TP allein (Prüfer 22.10.2026)
-            tp_nah = n["nah"] is None and n["rest_tp_usd"] is not None and n["rest_tp_usd"] <= wd_schw[0]
+            tp_nah = n["nah"] is None and n["rest_tp_usd"] is not None and n["rest_tp_usd"] <= schw[0]
             if not (n["nah"] or tp_nah):
                 continue
             if tp_nah:
-                n["grund"] = f"{_ap_de(max(0.0, n['rest_tp_usd']), 0)} $ vor dem TP (Grenze {_ap_de(wd_schw[0], 0)} $)"
-            name = f"{(acc or {}).get('firm') or p.get('master_firm') or 'Winning Day'} …{str((acc or {}).get('external_id') or '')[-4:]}"
+                n["grund"] = f"{_ap_de(max(0.0, n['rest_tp_usd']), 0)} $ vor dem TP (Grenze {_ap_de(schw[0], 0)} $)"
+            name = f"{(acc or {}).get('firm') or p.get('master_firm') or art_name} …{str((acc or {}).get('external_id') or '')[-4:]}"
             art = f"{str(z.get('richtung') or '').upper()} {int(z['kt']) if _wd_num(z.get('kt')) else '?'} {z.get('symbol_root') or 'MNQ'}"
             info = {"plan": str(p.get("id")), "konto": name, "art": art, "kurs": kurs, "tp_level": n["tp_level"], "liq_level": n["liq_level"],
-                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], "winning_day": True}
+                    "rest_tp_usd": n["rest_tp_usd"], "rest_liq_usd": n["rest_liq_usd"], **art_info}
             return {"frei": False, "code": PULS_HEIM_CODE_NAH, "big_trade": info,
-                    "grund": f"Winning Day {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
+                    "grund": f"{art_name} {name} ({art}) ist {n['grund']} — Puls bleibt im Konto, nichts gesendet"}
         return {"frei": True}
     except Exception as e:
         print(f"[puls-heim] ⚠️ Prüfung PC {pc}: {type(e).__name__}: {str(e)[:160]}", flush=True)

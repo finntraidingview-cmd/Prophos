@@ -27139,9 +27139,12 @@
     const offen = (tradePlans || []).filter(p => p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p)
       && (!fenster || bthFenster(p.route) === fenster))
     const juengster = l => l.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
-    const istWd = p => p.winningDay === true || p.kontoTyp === 'winning_days' || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p))
-    const big = juengster(offen.filter(p => !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
-    return big || wdHeimWahl(offen.filter(istWd), juengster)
+    // PRIO-STUFE APEX-CHALLENGE (Finn 02.11.2026 04:05: „gleiche Logik wie Winning Days, nur eine Priorität höher: unter Big Trades, unter
+    // Orbit-Trades, über Winning Days"): Big Trade → Apex-Challenge → Winning Day. Unter mehreren Apex wie bei den WDs der nächste am TP/an der Liq.
+    const istApex = p => typeof tpIstApexHedge === 'function' && tpIstApexHedge(p)
+    const istWd = p => !istApex(p) && (p.winningDay === true || p.kontoTyp === 'winning_days' || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p)))
+    const big = juengster(offen.filter(p => !istApex(p) && !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
+    return big || wdHeimWahl(offen.filter(istApex), juengster) || wdHeimWahl(offen.filter(istWd), juengster)
   }
   // $-Rest eines Winning Days bis TP oder Liq (der kleinere), aus dem Live-Kurs der Plan-Wurzel → Zahl oder null (kein Kurs/Level)
   const BTH_WD_WECHSEL_USD = 30, BTH_WD_HALTEN_MS = 60000   // Umschalten nur bei klar näherem WD und nicht öfter als einmal je Minute
@@ -27171,7 +27174,7 @@
     if(String(best.p.id) !== _bthWdWahl.id){
       _bthWdWahl = { id: String(best.p.id), at: jetzt }
       try{ _hwPulsWegAt = jetzt }catch(_){}   // Heim-Wache: der Prio-Wechsel zählt wie eine Puls-Aktion → Umzug nach 3 s, nicht erst nach 90 s
-      console.info(`[big-trade] Heimkonto = Winning Day „${best.p.masterName || best.p.id}" (${Math.round(best.a)} $ bis TP/Liq, ${wds.length} WDs offen)`)
+      console.info(`[big-trade] Heimkonto = ${typeof tpIstApexHedge === 'function' && tpIstApexHedge(best.p) ? 'Apex-Challenge' : 'Winning Day'} „${best.p.masterName || best.p.id}" (${Math.round(best.a)} $ bis TP/Liq, ${wds.length} offen)`)
     }
     return best.p
   }
@@ -53628,7 +53631,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1964'
+  const OS_TAB_BUILD = '2026-09-22.1965'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58560,7 +58563,9 @@
   // ≤ 100 $ vor TP/Liq den Puls meist nur 1–4 min — mit 15 min + 2–6 min Wartezeit riss das Futures-Paare (2–10 min) auseinander.
   // Railway schreibt den Grund mit „Winning Day …" an den Anfang (app.py puls_heim_pruefen); fehler() setzt nur „⛔ " davor. Dann
   // plant sfTick beim nächsten Takt neu ein, das Backend legt den Start auf jetzt + 2–4 min (Zufall, ap_nachhol_minute). Big Trades wie bisher.
-  const sfIstWdSperre = f => !!f && /^\W*Winning Day\b/.test(String(f.msg || ''))
+  // Apex-Challenge (02.11.2026): eigene Stufe im Riegel, gleiche 100-$-Grenze und gleiches kurzes Warten wie der Winning Day (app.py puls_heim_pruefen)
+  const sfIstApexSperre = f => !!f && /^\W*Apex-Challenge\b/.test(String(f.msg || ''))
+  const sfIstWdSperre = f => !!f && /^\W*(Winning Day|Apex-Challenge)\b/.test(String(f.msg || ''))
   /* WINDOWS-ABFRAGE ≠ FEHLVERSUCH (Master 23.10.2026, Finn: „die zwei Fehler, die bei dir liegen — echt versuchen zu eliminieren"; Chris
    * FundingPips 03:33/05:09 und Mike: consent.exe offen, je 3 Versuche „IPC timeout … Sicherheitsabfrage offen", danach lag der Plan): der
    * Bot stellt die Abfrage fest (order_bot verbindung_ursache/desktop_sperre_ursache: „Windows-Sicherheitsabfrage offen (consent.exe läuft)").
@@ -58692,7 +58697,7 @@
     // Orbit V2 / Topstep V2 (08.10.2026): Puls-Schritte (pc, login, konto, asset, ticket, knopf, ruecklesung, popup, werte, zeitlimit …)
     // — keine Prüfung möglich, ob die Ursache weg ist (Puls-Chrome/TradingView sieht nur der Bot): wie bisher 15 min später neuer
     // Versuch, höchstens SF_MAX (sfTick). 'unklar' kommt hier nie an (oben). Gilt auch für Echo-Schritte v2term/v2hedge/v2dir/v2order.
-    if(f.schritt === 'big_trade_nah' && sfIstWdSperre(f)) return 'Winning Day nah am TP/an der Liq — neuer Versuch in 2–4 min'   // s. sfIstWdSperre
+    if(f.schritt === 'big_trade_nah' && sfIstWdSperre(f)) return `${sfIstApexSperre(f) ? 'Apex-Challenge' : 'Winning Day'} nah am TP/an der Liq — neuer Versuch in 2–4 min`   // s. sfIstWdSperre
     // Windows-Abfrage (23.10.2026, s. sfIstUac): neu einplanen, sobald consent.exe am PC weg ist — das Backend legt den Start auf jetzt +
     // 2–4 min (Zufall + Regeln). Kennt das Panel die Frage nicht (alter Stand/offline), bleibt es beim Zeit-Weg unten.
     if(sfIstUac(f)){
@@ -61489,7 +61494,7 @@
       // Text „Konto hat schon eine offene Position (BUY 2 MNQ) — nichts gesendet"): bisher nur der allgemeine „Check am PC war rot"-Text
       // PULS BLEIBT ZU HAUSE (19.10.2026): Big Trade dieses PCs nah am TP/an der Liq (puls_heim_regel 2.000 $) — Warten ist richtig
       case 'big_trade_nah': return sfIstWdSperre({ msg: m })
-        ? `Nichts tun — auf dem PC${pc} steht ein Winning Day kurz vor TP/Liq (100 $), Puls bleibt in dessen Konto. Der Plan versucht es in 2–4 min wieder.`
+        ? `Nichts tun — auf dem PC${pc} steht ${sfIstApexSperre({ msg: m }) ? 'eine Apex-Challenge' : 'ein Winning Day'} kurz vor TP/Liq (100 $), Puls bleibt in dessen Konto. Der Plan versucht es in 2–4 min wieder.`
         : `Nichts tun — auf dem PC${pc} läuft ein Big Trade kurz vor TP/Liq (2.000 $), Puls bleibt in dessen Konto (Reader liest). Der Plan versucht es in 15 min wieder; sobald der Big Trade zu ist, geht es weiter.`
       case 'auge_fehlt': return `TopstepX-Auge am PC${pc} nicht installiert (meldet nie, auch nicht nach dem Öffnen des TopstepX-Tabs) — im Puls-Chrome http://127.0.0.1:8770/userscript/tsx-auge.user.js öffnen und in Tampermonkey installieren; der Plan startet dann von selbst.`
       case 'auge_blind': return `TopstepX-Auge am PC${pc} blind (Userscript tsx-auge meldet nichts Frisches) — Puls hat neu geladen bzw. den Tab neu geöffnet, ohne Erfolg. Tampermonkey im Puls-Chrome prüfen (Skript an?); der Plan versucht es in 15 min wieder, nichts gesendet.`
@@ -62038,7 +62043,7 @@
     if(z.art === 'plan' && z.code) return { w: TPL_GRUND_WORT[z.code] || 'kein Kontowert', ton: 'rot', r: 8 }   // genauer Grund (09.10.2026)
     if(z.art === 'plan'){
       if(/^nicht gestartet/i.test(t) && /offene Position/i.test(t)) return { w: 'Position offen', ton: 'gelb', r: 6 }   // konto_offen (09.10.2026)
-      if(/^nicht gestartet/i.test(t) && /(Big Trade|Winning Day) .*(vor dem TP|vor der Liq|nicht prüfbar)/i.test(t)) return { w: /Winning Day/i.test(t) ? 'Winning Day nah' : 'Big Trade nah', ton: 'gelb', r: 6 }   // big_trade_nah (19.10.2026; Winning Day seit 22.10.2026)
+      if(/^nicht gestartet/i.test(t) && /(Big Trade|Winning Day|Apex-Challenge) .*(vor dem TP|vor der Liq|nicht prüfbar)/i.test(t)) return { w: /Apex-Challenge/i.test(t) ? 'Apex-Challenge nah' : /Winning Day/i.test(t) ? 'Winning Day nah' : 'Big Trade nah', ton: 'gelb', r: 6 }   // big_trade_nah (19.10.2026; Winning Day seit 22.10.2026)
       if(/^nicht gestartet/i.test(t)) return { w: 'Start-Fehler', ton: 'rot', r: 6 }
       if(/^verpasst/i.test(t)) return { w: 'verpasst', ton: 'rot', r: 6 }
       if(/Endlesung|Ergebnis nie gelesen|Login prüfen/i.test(t)) return { w: 'Endlesung', ton: 'gelb', r: 7 }

@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 HIER = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(os.path.dirname(HIER), "app.py")
 FUNKTIONEN = ("_wd_num", "_ap_norm", "_ap_de", "plan_ist_apex_hedge", "puls_heim_schwellen", "puls_heim_nah", "puls_heim_kurs_frisch", "puls_heim_big_trades",
-              "puls_heim_wd_trades", "puls_heim_wd_schwellen", "puls_heim_fenster", "puls_heim_im_fenster", "puls_heim_ist_big",
+              "puls_heim_wd_trades", "puls_heim_wd_schwellen", "puls_heim_apex_trades", "puls_heim_apex_schwellen", "puls_heim_fenster", "puls_heim_im_fenster", "puls_heim_ist_big",
               "puls_heim_zweit_regel", "puls_heim_zweit_urteil")
 KONSTANTEN = ("PULS_HEIM_KURS_MAX_ALTER_S", "PULS_HEIM_CODE_NAH", "PULS_HEIM_CODE_UNKLAR", "PULS_HEIM_WD_USD", "PULS_HEIM_CODE_ZWEIT",
               "PULS_HEIM_ZWEIT_USD", "PULS_HEIM_ECHO_ROUTEN")
@@ -103,6 +103,20 @@ def main():
     ok(sorted(p["id"] for p in big(pl2, "pc-1")) == ["a", "b", "h"], "WDs bleiben aus der Big-Trade-Liste")
     ok(wds({"aktiv": True}) == (100.0, 100.0), "WD-Standard 100/100")
     ok(wds({"aktiv": True, "wd_tp_usd": 150, "wd_liq_usd": 80}) == (150.0, 80.0), "WD aus der Regel")
+    # Prio-Stufe Apex-Challenge (02.11.2026): eigene Liste, Grenze wie WD, bis Finn anders sagt
+    apt, aps = ns["puls_heim_apex_trades"], ns["puls_heim_apex_schwellen"]
+    ax = {"id": "x", "status": "open", "route": "tvv2", "hedge_eur": 50, "mt5_baseline": {"apex_hedge": {"status": "mit"}, "hedge": {"pc": "pc-1"}}}
+    ay = dict(ax, id="y", mt5_baseline={"apex_hedge": {"status": "mit"}, "hedge": {"pc": "pc-2"}})
+    az = dict(ax, id="z", mt5_baseline={"hedge_art": "apex", "apex_hedge": {"status": "ohne"}, "hedge": {"pc": "pc-1"}})
+    ok([p["id"] for p in apt(pl2 + [ax, ay], "pc-1")] == ["x"], "Apex-Stufe: nur Apex mit Hedge dieses PCs")
+    ok(apt([ax], "pc-1", ausser="x") == [], "Apex ausser")
+    ok(apt([dict(ax, status="planned")], "pc-1") == [], "Apex nur offen")
+    ok("x" not in [p["id"] for p in wdt(pl2 + [ax], "pc-1")] and "x" not in [p["id"] for p in big(pl2 + [ax], "pc-1")], "Apex nicht in WD- und Big-Liste")
+    ok(apt([az], "pc-1") == [], "vorgemerkt ohne Umstellung zählt nicht als Apex-Hedge")
+    ok(aps({"aktiv": True}) == (100.0, 100.0), "Apex-Standard wie WD")
+    ok(aps({"aktiv": True, "wd_tp_usd": 150, "wd_liq_usd": 80}) == (150.0, 80.0), "Apex folgt der WD-Grenze")
+    ok(aps({"aktiv": True, "apex_tp_usd": 300, "apex_liq_usd": 0}) == (300.0, 0.0), "eigene Apex-Spalten gehen vor")
+    ok(aps({"aktiv": True, "wd_aktiv": False}) is None and aps(None) is None, "Apex aus, wenn die WD-Grenze aus ist")
     ok(wds({"aktiv": True, "wd_aktiv": False}) is None and wds({"aktiv": False}) is None and wds(None) is None, "WD aus")
     # MNQ-WD BUY 3 Kt, TP 29.595,25: 15 Pkt davor = 90 $ → nah; 20 Pkt = 120 $ → frei
     zw = {"richtung": "buy", "punktwert": 2, "kt": 3, "tp_level_nq": 29595.25, "sl_level_nq": 27337.5}

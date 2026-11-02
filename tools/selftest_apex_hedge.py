@@ -41,7 +41,7 @@ def wd_num(x):
 ns = {"_wd_num": wd_num, "_wt_now_iso": lambda: "2026-10-30T10:00:00+00:00"}
 exec("\n".join([konst(k) for k in ("EH_STANDARD", "EH_MARGE_RESERVE", "AH_STANDARD")]
                + [block(f) for f in ("eh_param", "eh_hedge", "eh_marge", "ah_param", "ah_master_ppl", "ah_vorschau",
-                                     "plan_ist_wd", "plan_ist_apex_hedge", "plan_wd_zaehlt", "puls_heim_big_trades", "puls_heim_wd_trades",
+                                     "plan_ist_wd", "plan_ist_apex_hedge", "plan_wd_zaehlt", "puls_heim_big_trades", "puls_heim_wd_trades", "puls_heim_apex_trades",
                                      "ah_dll_balance", "_lt_liq_balance")]), ns)
 
 # Teil A
@@ -78,7 +78,10 @@ soll("vorgemerkt (hedge_art apex, ohne Umstellung) ist noch kein Apex-Hedge",
      not ns["plan_ist_apex_hedge"]({"mt5_baseline": {"hedge_art": "apex", "apex_hedge": {"status": "ohne"}}}))
 offen = dict(ap, id="a", status="open", mt5_baseline={"apex_hedge": {"status": "mit"}, "hedge": {"pc": "pc-1"}})
 soll("Heim-Wache: Apex nicht als Big Trade (2.000 $) …", ns["puls_heim_big_trades"]([offen], "pc-1") == [])
-soll("… sondern als Winning Day (100 $)", ns["puls_heim_wd_trades"]([offen], "pc-1") == [offen])
+soll("… nicht mehr als Winning Day (eigene Stufe, 02.11.2026) …", ns["puls_heim_wd_trades"]([offen], "pc-1") == [])
+soll("… sondern in der Apex-Stufe", ns["puls_heim_apex_trades"]([offen], "pc-1") == [offen])
+soll("Tab: Sperr-Grund Apex-Challenge wartet kurz wie der WD (Text aus puls_heim_pruefen)",
+     "/^\\W*(Winning Day|Apex-Challenge)\\b/" in HTML and "(Big Trade|Winning Day|Apex-Challenge) .*(vor dem TP" in HTML and 'art_name} {name} ({art}) ist' in APP)
 
 acc100 = {"account_type": "challenge", "max_daily_drawdown": 1500, "max_drawdown": 3000}
 soll("Daily Loss aus dem Konto ab Tagesstart", ns["ah_dll_balance"](acc100, 99500)[0] == 98000.0 and ns["ah_dll_balance"]({}, 99500) == (None, None))

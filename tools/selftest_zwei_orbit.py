@@ -83,6 +83,34 @@ r = app.puls_heim_pruefen("pc-abcd", route="tsv2")
 check(not r["frei"] and r["code"] == "big_trade_unklar", f"TopstepX-Aktion: TopstepX-Big-Trade ohne Kurs → unklar wie bisher ({r.get('code')})")
 check(not app.puls_heim_pruefen("pc-abcd")["frei"], "ohne Route: alle Fenster wie bisher")
 
+print("3) Rangfolge Big Trade → Apex-Challenge → Winning Day (02.11.2026)")
+hd = {"hedge": {"pc": "pc-abcd"}}
+B = {"id": "b1", "status": "open", "route": "tvv2", "hedge_eur": 400, "orbit_v3": True, "master_account_id": None, "mt5_baseline": hd}
+A = {"id": "a1", "status": "open", "route": "tvv2", "hedge_eur": 50, "master_account_id": None, "mt5_baseline": dict(hd, apex_hedge={"status": "mit"})}
+W = {"id": "w1", "status": "open", "route": "tvv2", "hedge_eur": 100, "winning_day": True, "master_account_id": None, "mt5_baseline": hd}
+NAH = {}
+app._lt_zeile = lambda p, *a, **k: {"id": p["id"], "richtung": "buy", "kt": 2, "symbol_root": "NQ"}
+app.puls_heim_kurs_frisch = lambda kurse, w: 20000.0
+app.puls_heim_nah = lambda z, kurs, schw: dict(nah(NAH.get(z["id"], False)), schw=schw)
+app._sb_all = lambda t, p: [dict(z) for z in pc_zeilen]
+pc_zeilen[:] = [W, A, B]
+check(app.puls_heim_pruefen("pc-abcd", route="tvv2")["frei"], "keiner nah → frei")
+NAH.update(a1=True, w1=True)
+r = app.puls_heim_pruefen("pc-abcd", route="tvv2")
+check(not r["frei"] and r["code"] == "big_trade_nah" and r["grund"].startswith("Apex-Challenge") and r["big_trade"]["plan"] == "a1" and r["big_trade"].get("apex_hedge") is True,
+      f"Apex und WD nah → Apex zuerst ({r.get('grund')})")
+NAH.update(b1=True)
+check(app.puls_heim_pruefen("pc-abcd", route="tvv2")["big_trade"]["plan"] == "b1", "Big Trade nah → Big Trade zuerst")
+NAH.clear(); NAH.update(w1=True)
+r = app.puls_heim_pruefen("pc-abcd", route="tvv2")
+check(r["big_trade"]["plan"] == "w1" and r["big_trade"].get("winning_day") is True and r["grund"].startswith("Winning Day"), "nur WD nah → wie bisher")
+NAH.clear(); NAH.update(a1=None)
+check(app.puls_heim_pruefen("pc-abcd", route="tvv2")["frei"], "Apex nicht prüfbar → frei wie beim WD (Rest bis TP über der Grenze)")
+pc_zeilen[:] = [A]
+NAH.clear(); NAH.update(a1=True)
+check(not app.puls_heim_pruefen("pc-abcd", route="tvv2")["frei"], "Apex allein nah → nicht frei")
+check(app.puls_heim_pruefen("pc-abcd", ausser="a1", route="tvv2")["frei"], "der Plan selbst sperrt sich nicht")
+
 print()
 print("FEHLER: " + "; ".join(FEHLER) if FEHLER else "ALLES GRÜN")
 sys.exit(1 if FEHLER else 0)
