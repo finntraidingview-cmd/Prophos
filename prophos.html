@@ -27842,7 +27842,7 @@
       let r = null; try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 1500 }) }catch(_){ r = null }
       const pc = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
       const jetzt = Date.now()
-      const z = tsxLiveZeile(r, pc, jetzt, kontoExtIds()); if(!z) return
+      const z = tsxLiveZeile(r, pc, jetzt, tsxKontoExtIdsJetzt()); if(!z) return
       // Puls unterwegs (Rundgang, Endlesung, Rück-Login, Start …) → keine Aussage; danach erst nach TSX_LIVE_RUHE_MS Ruhe und zwei gleichen Lesungen
       let unterwegs = ''; try{ unterwegs = (typeof hedgePulsUnterwegs === 'function') ? hedgePulsUnterwegs() : '' }catch(_){ unterwegs = 'unbekannt' }
       if(unterwegs){ _tsxLive.pulsAt = jetzt; _tsxLive.kand = null }
@@ -31186,7 +31186,7 @@
     const st = r.stand, k = st.konto || {}, kp = st.kopf || {}
     if(st.ausgeloggt) return weg('TopstepX ausgeloggt')
     // Konto wie im TopstepX-Hedge-Wächter: volle Kennung (abgekuerzt === false), Liste zu, gleich ohne Trennzeichen; Puls nicht unterwegs
-    if(!tsxKontoPasst(k, ext, kontoExtIds())) return weg('Auge steht nicht im Konto des Plans (exakt oder eindeutige Endung)')
+    if(!tsxKontoPasst(k, ext, tsxKontoExtIdsJetzt())) return weg('Auge steht nicht im Konto des Plans (exakt oder eindeutige Endung)')
     let unterwegs = ''; try{ unterwegs = (typeof hedgePulsUnterwegs === 'function') ? hedgePulsUnterwegs() : '' }catch(_){ unterwegs = 'Zustand nicht lesbar' }
     if(unterwegs) return weg('Puls ist unterwegs: ' + unterwegs)
     if(st.flach !== true || !Array.isArray(st.positionen) || st.positionen.length) return weg('kein Flach-Beweis des Auges')
@@ -32872,6 +32872,9 @@
     for(const x of extIds || []){ const v = n(x); if(v.endsWith(e) && !je.has(v)) je.set(v, String(x).trim()) }
     return je.size === 1 ? [...je.values()][0] : ''
   }
+  // Nur TopstepX-Konten der ID: Endungen wiederholen sich über Firmen hinweg (02.11.2026: 41 ID+Endung-Paare), sonst bliebe „eindeutig“ blind oder eine Hand-Position käme unter ein Konto einer anderen Firma
+  function tsxKontoExtIds(konten){ return (konten || []).filter(a => a && a.externalId && /topstep/i.test(String(a.firm || ''))).map(a => a.externalId) }
+  function tsxKontoExtIdsJetzt(){ try{ return tsxKontoExtIds(accounts) }catch(_){ return [] } }
   function tsxKontoPasst(k, ext, extIds){
     if(!k || k.liste_offen || !ext) return false
     if(k.kontonr) return k.abgekuerzt === false && tsxKontoGleich(k.kontonr, ext)
@@ -33051,7 +33054,7 @@
         const pid = String(p.id), h = p.mt5Baseline.hedge
         const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-        if(!kontoPlan || !tsxKontoPasst(k, kontoPlan, kontoExtIds())){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
+        if(!kontoPlan || !tsxKontoPasst(k, kontoPlan, tsxKontoExtIdsJetzt())){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
         if(!_tsxSchnellKonto.has(pid)) _tsxSchnellKonto.set(pid, jetzt)
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || p.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
