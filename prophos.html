@@ -29205,7 +29205,7 @@
     const passt = (fills || []).filter(f => f && typeof f.at === 'number' && f.at > (o.startMs || 0) + 1000 && f.at <= nach && f.at >= vor
       && f.seite === o.seite && Number(f.menge) === Number(o.menge) && Number(f.preis) > 0
       && (!f.symbol || !o.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(String(f.symbol)) : '') === o.wurzel)
-      && (typeof kontoTextBezug === 'function') && (kontoTextBezug(f.konto, o.ext) === 'ja' || (kontoTextBezug(f.konto, o.ext) === 'kurz' && typeof o.kurzOk === 'function' && o.kurzOk(f))))
+      && (typeof kontoTextBezug === 'function') && (kontoTextBezug(f.konto, o.ext) === 'ja' || ((kontoTextBezug(f.konto, o.ext) === 'kurz' || kontoTextBezug(f.konto, o.ext) === 'klebt') && typeof o.kurzOk === 'function' && o.kurzOk(f))))   // 'klebt' 02.11.2026: TDFYSL bekam nie ein master_exit
     return passt.sort((a, b) => b.at - a.at)[0] || null
   }
   window._hedgeExitFillWahl = hedgeExitFillWahl   // Test-Haken
@@ -32100,6 +32100,23 @@
     return (betraege || []).some(x => { if(!(typeof x === 'number' && x >= 1)) return false
       const ganz = String(Math.floor(x)); return ganz.slice(0, (ganz.length % 3) || 3) === rest })
   }
+  /* ANGEKLEBTE ZIFFERN = LIVE-STAND DES UMSCHALTERS (02.11.2026, Simon Tradeify-Final …4357: Master-TP 00:03:20 UTC im Reader, Hedge erst per Notfall-SL, am Hedge kein reader_wartet;
+   * seit 30.10. 5 Tradeify-Finals, 0 × Userscript). Die Ziffern hängen am Umschalter-Betrag, und der enthält den offenen G&V: „…155“ beim Einstieg, „…159“ am TP. Tradovate hat kein
+   * Balance-Label, und Equity bleibt im Trade stehen (f2519ee5: USD 149.344,09, Equity 149.355,59 bei Profit −11,50). Ab dem ersten Tausender-Wechsel galt das Plan-Konto deshalb als fremd:
+   * der Schnell-Wächter löschte still seine Konto-Uhr und sah den Master nicht mehr. Deshalb zählt zusätzlich das Summary-Feld „USD“ (derselbe Betrag wie im Text). ±1 Tausender, weil Konto
+   * und Zusammenfassung in getrennten POSTs kommen: eine einzige Lesung mitten im Wechsel würde die Konto-Uhr neu starten, und dann gälten wieder 30 s flach (bei Simon wechselte es rund
+   * 3 Pkt vor dem TP). Der Schutz aus readerKontoPasst bleibt: ein nicht erfasstes Konto „ID + Ziffern“ zeigt diese Ziffern VOR seiner eigenen Balance, sein Rest liegt also mindestens 10 neben dem eigenen Tausender-Anfang (Prüfung 02.11.2026). REIN RECHNEND. */
+  function kontoKlebtLive(kontoText, extId, summary){
+    if(!summary || typeof summary !== 'object') return false
+    const id = String(extId || '').trim().toUpperCase()
+    const rest = ((String(kontoText || '').trim().toUpperCase().split(/[^A-Z0-9]+/)[0]) || '').slice(id.length)
+    if(!/^[1-9]\d{0,2}$/.test(rest)) return false   // eine Balance beginnt nie mit 0: „…050“ wäre ein fremdes Konto „ID + 0“ mit 50k
+    const k = Object.keys(summary).find(x => /^usd$/i.test(String(x).trim()))
+    const v = k != null ? tvGeldText(summary[k]) : null
+    if(!(typeof v === 'number' && v >= 1)) return false
+    const ganz = String(Math.floor(v))
+    return Math.abs(Number(rest) - Number(ganz.slice(0, (ganz.length % 3) || 3))) <= 1
+  }
   /* GEKÜRZTE KENNUNG FÜRS READER-ENDE (28.10.2026, Vorfall Ina Apex …0005, Plan a37fcf6f: Master 17:37 Dubai im SL, Fusion erst 17:40:54
    * über den Radar — das Userscript las richtig, aber der Reader liefert „PAAPEX678096000000" (TradingView kürzt seit dem Update 27.10.),
    * und 'kurz' war fürs Reader-Ende gesperrt. Seit 27.10. 07:10 UTC: Apex 0/9, FTDFYSLX 0/18 Userscript-Schlüsse, davor 30 %.)
@@ -32287,9 +32304,9 @@
     if(b !== 'klebt' || !kontoTextEindeutig(kontoText, extId, kontoExtIds())) return false
     if(!st || !(typeof st.summary_alter_s === 'number' && st.summary_alter_s <= 10)) return false
     const bq = tvBalanceAus(st.summary)
-    return kontoKlebtBalance(kontoText, extId, [bq.balance, bq.equity])
+    return kontoKlebtBalance(kontoText, extId, [bq.balance, bq.equity]) || kontoKlebtLive(kontoText, extId, st.summary)
   }
-  window._kontoTextBezug = kontoTextBezug; window._kontoTextEindeutig = kontoTextEindeutig; window._kontoKlebtBalance = kontoKlebtBalance
+  window._kontoTextBezug = kontoTextBezug; window._kontoTextEindeutig = kontoTextEindeutig; window._kontoKlebtBalance = kontoKlebtBalance; window._kontoKlebtLive = kontoKlebtLive
   window._kontoBeleg = { merken: kontoBelegMerken, gilt: kontoBelegGilt, heim: heimKontoPasst, reader: readerKontoPasst, stand: () => Object.assign({ pulsAktivAt: _pulsAktivAt }, _kontoBeleg) }   // Test-Haken
   /* PULS UNTERWEGS = READER BLIND (16.10.2026, Vorfall e6914376 Aurel pc-pw1put, Tradeify-WD …2766: Order 09:53:26 UTC fertig, Position im
    * Reiter Positions bewiesen; 20 s später Rück-Login ins Orbit-V3-Big-Trade-Konto …3078 (bigTradeHeim, Prio 1) — mitten im Kontowechsel
@@ -53631,7 +53648,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1966'
+  const OS_TAB_BUILD = '2026-09-22.1967'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
