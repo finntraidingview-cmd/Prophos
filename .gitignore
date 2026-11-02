@@ -6,3 +6,5 @@
   venv/
   .env
   .DS_Store
+# Cloudflare-Pages-Ausgabe, erzeugt tools/pages_ausgabe.sh (02.11.2026)
+_pages/
