@@ -6880,6 +6880,14 @@ def test_cdp_connect_zweiter_versuch():
         blicke[0] = [bl, bl, {"dialoge": [], "umgebung": []}]
         s5, t5 = _S([False, True]), []
         r5 = ob._cdp_dialog_verbinden(s5, False, t5)
+        # FREMDES FENSTER VORN (02.11.2026, Routine „Puls-Fehler": Admin-Konsole „Administrator: Windows PowerShell" vorn, 34+34 Connect- und
+        # 24 F9-Fälle in 24 h auf 5 PCs — die Meldung sagte „Maus nicht bewiesen … am Punkt liegt 'span…'"): der Klick-Grund steht an der
+        # Sitzung (_klick_grund), die Meldung nennt das Fenster ZUERST (Muster-Schlüssel = 90 Zeichen); Versuche wie bisher zwei
+        blicke[0] = [bl]
+        s6, t6 = _S([False, False]), []
+        s6._klick_grund = ("Puls-Chrome kommt nicht in den Vordergrund (vorn: 'Administrator: Windows PowerShell' 332540, "
+                           "Klasse 'ConsoleWindowClass', PID 12308, Lage 52,52–1045,571, erwartet 197184)")
+        r6 = ob._cdp_dialog_verbinden(s6, False, t6)
     finally:
         for n_, f_ in alt.items():
             setattr(ob, n_, f_)
@@ -6887,6 +6895,19 @@ def test_cdp_connect_zweiter_versuch():
         and k1 == 2 and any("zweiter Versuch" in x for x in t1), f"Connect nicht gedrückt → Kachel-Prüfung, Neulesen, EIN zweiter Klick mit frischem Rechteck ({s1.klicks}, {t1})")
     chk(r2[0] == "connect" and "zweimal" in r2[1] and "div.toastItem-abc" in r2[1] and len(s2.klicks) == 2 and any("am Connect-Punkt liegt" in x for x in t2)
         and any("elementFromPoint" in a for a in s2.js), f"zweimal nicht gedrückt → Fehler mit dem, was am Punkt liegt ({r2[1]})")
+    chk(r6[0] == "connect" and r6[1] == "vorn 'Administrator: Windows PowerShell', ConsoleWindowClass statt Puls-Chrome — Connect zweimal nicht gedrückt, nicht verbunden."
+        and len(s6.klicks) == 2, f"zweimal nicht gedrückt, fremdes Fenster vorn → Meldung nennt das Fenster zuerst ({r6[1]})")
+    _g = s6._klick_grund
+    chk(ob.klick_vorn_fremd(_g) == "vorn 'Administrator: Windows PowerShell', ConsoleWindowClass"
+        and ob.klick_vorn_fremd("F9 ohne Dialog: vorn 'Administrator: Windows PowerShell' 264656, Klasse 'ConsoleWindowClass', PID 8344, Lage 256,256–1375,903 statt Terminal 68406")
+            == "vorn 'Administrator: Windows PowerShell', ConsoleWindowClass"
+        and ob.klick_vorn_fremd("F9 ohne Dialog: Terminal selbst vorn (68406)") == "" and ob.klick_vorn_fremd("") == ""
+        and ob.klick_vorn_fremd("Puls-Chrome-Fenster nicht eindeutig gefunden") == "" and ob.klick_vorn_fremd("Puls-Chrome kommt nicht in den Vordergrund") == "fremdes Fenster vorn",
+        "klick_vorn_fremd: Titel + Klasse aus Klick- und F9-Grund, sonst leer")
+    chk(_i.getsource(ob.run).count("f9_fremd") == 3 and "klick_vorn_fremd(diag)" in _i.getsource(ob.run)
+        and _i.getsource(ob._AugenSitzung.klick).count('self._klick_grund = ""') == 1
+        and _i.getsource(ob._AugenSitzung._win_klick).count("self._klick_grund = grund") == 2,
+        "F9-Weg: fremdes Fenster vorn in der Spur-Klammer; Klick-Grund je Klick neu, bei nicht-nach-vorn gemerkt")
     chk(r3[0] == "" and len(s3.klicks) == 1 and k3 == 1, f"gelungener Klick: wie bisher ein Klick, Kachel einmal vor dem Dialog geprüft ({s3.klicks}, {k3})")
     chk(r4[0] == "connect" and len(s4.klicks) == 1 and "kein zweiter Versuch" in r4[1], f"Demo nach dem Fehlversuch nicht an → kein zweiter Klick ({r4[1]})")
     chk(r5[0] == "connect" and len(s5.klicks) == 1, "Dialog nach dem Fehlversuch weg → kein zweiter Klick")

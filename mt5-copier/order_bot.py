@@ -13202,6 +13202,7 @@ def run(cfg_path, cmd):
         diag, vorn = _f9_diagnose(w)
         if diag:
             trail.append(diag)
+        f9_fremd = klick_vorn_fremd(diag)   # 02.11.2026: fremdes Fenster vorn (z. B. Admin-Konsole) → vorn in der Meldung, s. klick_vorn_fremd
         # KEIN FENSTER VORN (Routine „Puls-Fehler" 21.10.2026 05:30 Dubai, s. desktop_sperre_ursache): consent.exe (Sicherheitsabfrage) oder
         # LogonUI.exe (Sperrbildschirm) benennen statt „Evtl." — dieselbe Prozess-Lesung wie der IPC-Pfad, nur lesen, kein Wegklicken.
         sperre = None
@@ -13233,7 +13234,8 @@ def run(cfg_path, cmd):
                 dlg = _finde_order_dialog(w)
         if dlg is None:
             return {"ok": False, "retry_ok": True,
-                    "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"
+                    "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + (f9_fremd + " statt Terminal → " if f9_fremd else "")
+                           + _spur(trail) + "]"
                            + (" — " + sperre[1] if sperre else " — " + _UAC_HINWEIS if vorn == 0 else "") + f9_zusatz}
     trail.append("F9-Dialog offen")
     # Kurze Setz-Zeit NACH dem Fund (02.09.2026, Finns Fund direkt nach dem
@@ -21309,6 +21311,29 @@ def _vorn_fremd_hinweis(hwnd):
         return ""
 
 
+def klick_vorn_fremd(grund):
+    """REIN RECHNEND (testbar): kurzer Zusatz für die MELDUNG, wenn ein Klick oder F9 am fremden Vordergrund-Fenster scheiterte —
+    „vorn 'Titel', Klasse" aus dem Grund der Spur („Puls-Chrome kommt nicht in den Vordergrund (vorn: 'Titel' 123, Klasse 'X', …)" bzw.
+    „F9 ohne Dialog: vorn 'Titel' 123, Klasse 'X', … statt Terminal 7"); '' bei jedem anderen Grund.
+    ANLASS (Routine „Puls-Fehler" 02.11.2026 20:50 Dubai, Muster „konto: tradovate-login '#' nicht geschafft (connect): connect ließ sich
+    zweimal nicht klicken (maus nicht bewiesen über dem knopf; am punkt liegt 'span…')" 34+34 Fälle in 24 h auf 5 PCs und „m5still: … f9-dialog
+    nicht gefunden" 24 Fälle auf 4 PCs): in JEDER Spur stand der wahre Grund — ein Konsolenfenster „Administrator: Windows PowerShell"
+    (ConsoleWindowClass, als Administrator gestartet) lag vorn, und ein normal gestarteter Bot kann kein Fenster davor holen (Windows
+    schützt erhöhte Fenster). Die Meldung sagte aber „Maus nicht bewiesen … am Punkt liegt 'span.content-…'" bzw. nur „F9-Dialog nicht
+    gefunden" — die Muster-View bündelte nach dem Symptom, nicht nach der Ursache. Jetzt nennt die Meldung das Fenster, und zwar
+    ZUERST (die View schneidet den Schlüssel nach 90 Zeichen, „Tradovate-Login '…' nicht geschafft (connect): " belegt schon 47);
+    Riegel, Versuche und Wartezeiten unverändert, der Handgriff (Fenster schließen/minimieren) bleibt bei Finn."""
+    g = str(grund or "")
+    if "kommt nicht in den Vordergrund" not in g and "statt Terminal" not in g:
+        return ""
+    m = re.search(r"vorn:? '([^']*)' \d+(?:, Klasse '([^']*)')?", g)
+    if not m:
+        return "fremdes Fenster vorn"
+    t = (m.group(1) or "").strip()[:40] or "?"
+    k = (m.group(2) or "").strip()
+    return f"vorn '{t}'" + (f", {k}" if k else "")
+
+
 def _win_nach_vorn(hwnd):
     """Fenster in den Vordergrund (pywinautos set_focus wie beim UIA-Puls, sonst SetForegroundWindow)."""
     try:
@@ -21585,6 +21610,7 @@ class _AugenSitzung:
         """pruef (K0, 30.09.2026): {rect, text, aria, tabu} — gedrückt wird nur, wenn am Zielpunkt genau dieser Kandidat liegt
         (win_ziel_pruef_js); ohne pruef wie bisher (nur :hover). doppel (K4, 05.10.2026): Doppelklick, nur zusammen mit pruef
         (Zellen Risk / To Make der TopstepX-Positions-Tabelle) — Standard False = unverändert ein Klick."""
+        self._klick_grund = ""                        # 02.11.2026: Grund des letzten Nicht-Klicks (s. klick_vorn_fremd) — je Klick neu
         if _WIN_EINGABE:
             tv = getattr(self, "tv_riegel", True)          # TopstepX-Tab (K0): nichts TradingView-Eigenes wegklicken
             if tv:
@@ -21917,6 +21943,7 @@ class _AugenSitzung:
         Ziels beweisen, dann EIN SendInput-Druck. Ohne Beweis kein Druck. druck=False = nur hinfahren (Hover)."""
         hwnd, grund = self._win_vorn()
         if not hwnd:
+            self._klick_grund = grund                 # 02.11.2026: der Aufrufer nennt den wahren Grund in der Meldung (klick_vorn_fremd)
             self.trail.append(f"{name}: {grund} — nichts geklickt")
             return False
         p = cdp_klickpunkt(rect)
@@ -21964,6 +21991,7 @@ class _AugenSitzung:
             _warte(0.3, 0.2)
             hwnd, grund = self._win_vorn()
             if not hwnd:
+                self._klick_grund = grund
                 self.trail.append(f"{name}: {grund} — nichts geklickt")
                 return False
             g = self.lese_js(WIN_GEO_JS) or {}
@@ -27482,8 +27510,10 @@ def _cdp_dialog_verbinden(s, merken, trail):
         d2 = cdp_connect_dialog(ort.blick())
         r2 = cdp_rect((d2 or {}).get("connect"))
         demo_an = bool(d2 and len(d2["demo"]) == 1 and d2["demo"][0].get("an") is True)
+        fremd = klick_vorn_fremd(getattr(s, "_klick_grund", ""))   # 02.11.2026: fremdes Fenster vorn → das steht in der Meldung (s. klick_vorn_fremd)
         if not (r2 and demo_an):
-            return "connect", ("Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden"
+            return "connect", ((f"{fremd} statt Puls-Chrome — Connect nicht gedrückt, nicht verbunden" if fremd else
+                                "Connect ließ sich nicht klicken (Maus nicht bewiesen über dem Knopf) — nicht verbunden")
                                + ("; danach Connect-Dialog oder Demo nicht mehr eindeutig, kein zweiter Versuch" if not (r2 and demo_an) else "") + "."), None
         trail.append("[Login] Connect nicht gedrückt — Dialog neu gelesen, Demo an: ein zweiter Versuch")
         vorher["ms"] = time.time() * 1000.0
@@ -27496,6 +27526,9 @@ def _cdp_dialog_verbinden(s, merken, trail):
                 was = ""
             if was:
                 trail.append(f"[Login] am Connect-Punkt liegt: '{was}'")
+            fremd = klick_vorn_fremd(getattr(s, "_klick_grund", "")) or fremd
+            if fremd:
+                return "connect", f"{fremd} statt Puls-Chrome — Connect zweimal nicht gedrückt, nicht verbunden.", None
             return "connect", ("Connect ließ sich zweimal nicht klicken (Maus nicht bewiesen über dem Knopf"
                                + (f"; am Punkt liegt '{was}'" if was else "") + ") — nicht verbunden."), None
     return "", "", vorher
@@ -27876,6 +27909,7 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
         bo = ort.blick() or {}
         lb_e = bo.get("login") if isinstance(bo.get("login"), dict) else {}
         tv = (_K3Ort("TradingView-Seite", s.ws, s, "").blick() or {}) if ort.eigen else bo
+        st_tv = s.stand(opts)             # nur lesen — kein Panel-Klick, der Blick entscheidet nichts (Selbsttest „klappt das Panel auf", 02.11.2026)
         liste = _cdp_http("/json/list", timeout=1.5) or []
         gesehen = {
             "tradovate": ({"url": str(bo.get("url") or "")[:70], "formular": bool(lb_e),
@@ -27885,7 +27919,7 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
             "tradingview": {"dialoge": [{"titel": str(d_.get("titel") or "")[:40], "text": str(d_.get("text") or "")[:80]}
                                         for d_ in (tv.get("dialoge") or []) if isinstance(d_, dict)][:3],
                             "leiste": str(tv.get("leiste") or "")[:40], "url": str(tv.get("url") or "")[:70],
-                            "konto": str(cdp_konto_verbunden(s.stand(opts)) or "")[:40]},
+                            "konto": str(cdp_konto_verbunden(st_tv) or "")[:40]},
             "tabs": [str(t.get("url"))[:50] for t in liste if isinstance(t, dict) and t.get("type") == "page"][:6],
         }
         trail.append("[Login] nach 40 s gesehen: " + json.dumps(gesehen, ensure_ascii=False)[:700])
