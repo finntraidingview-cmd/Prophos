@@ -58390,7 +58390,7 @@
           versuche: Number(s.versuche) || 1, at: s.at }
     // ECHO OHNE HEDGE HÄLT (02.11.2026, DB-Riegel trade_plans_a1_echo_hedge): Hedge vorgesehen, aber gerade nicht rechenbar; nach 8 h aufgegeben, dann läuft der Plan ab
     if(s.art === 'echo_hedge') return s.status === 'aufgegeben'
-      ? { kurz: '⛔ Echo-Hedge nicht rechenbar — nicht gestartet', marke: '⛔ Wartet auf Hedge', voll: `Nicht gestartet: ${text}. Nach 8 h gibt der Riegel auf, der Plan läuft ab.`, versuche: Number(s.versuche) || 1, at: s.at }
+      ? { kurz: '⛔ Echo-Hedge nicht rechenbar — nicht gestartet', marke: '⛔ Wartet auf Hedge', voll: `Nicht gestartet: ${text}. ${s.ablauf === 'fenster' ? 'Das CFD-Startfenster ist zu Ende' : 'Nach 8 h gibt der Riegel auf'}, der Plan läuft ab.`, versuche: Number(s.versuche) || 1, at: s.at }
       : { kurz: `⛔ Wartet auf Echo-Hedge${um ? ` · neuer Versuch ${um}` : ''}`, marke: '⛔ Wartet auf Hedge', voll: `Wartet: ${text}. Startet von selbst mit Hedge, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`, versuche: Number(s.versuche) || 1, at: s.at }
     // Apex immer mit Hedge (30.10.2026, DB-Riegel trade_plans_a1_apex_hedge): wartet, bis Railway den Hedge rechnen kann — nie ohne Hedge
     if(s.art === 'apex_hedge'){ if(p.mt5Baseline.apex_hedge && p.mt5Baseline.apex_hedge.status === 'mit') return null

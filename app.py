@@ -3976,8 +3976,9 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
                             f"bzw. „Hedge-Freigabe offen“) — startet erst danach.", uid, pid))
         # ECHO OHNE HEDGE ABGELAUFEN (02.11.2026, trade_plans_a1_echo_hedge): nach 8 h gibt der Riegel auf, der Plan startet nicht mehr → ⚪ einmal je Plan
         if st == "planned" and ss.get("art") == "echo_hedge" and ss.get("status") == "aufgegeben" and str(ss.get("at") or "") > seit_iso:
+            wann = "Startfenster zu Ende" if ss.get("ablauf") == "fenster" else "nach 8 h"
             out.append((f"{pid}|echo_hedge_ablauf", 3, "echo_hedge_ablauf", "Echo-Trade abgelaufen",
-                        f"{wer} · {konto}: nach 8 h nicht gestartet, {str(ss.get('text') or 'Echo-Hedge nicht rechenbar')[:160]} — Plan läuft ab, neu planen.", uid, pid))
+                        f"{wer} · {konto}: nicht gestartet ({wann}), {str(ss.get('text') or 'Echo-Hedge nicht rechenbar')[:160]} — Plan läuft ab, neu planen.", uid, pid))
         # APEX OHNE HEDGE GEHALTEN (30.10.2026, trade_plans_a1_apex_hedge): ⚪ einmal je Plan — nur, wenn ah_tick den Grund nicht schon selbst
         # gemeldet hat (_ah_ohne, apex_hedge.gemeldet), z. B. weil Railway den Plan noch nicht gesehen hat
         ahm = p.get("ahm") if isinstance(p.get("ahm"), dict) else {}
@@ -27451,6 +27452,12 @@ def _eh_guard(p, route="mt5v2"):
 EH_HALT_CODES = ("balance", "lesung", "groesse")
 
 
+def eh_aufgegeben(base):
+    """REIN RECHNEND (testbar): hat der Claim-Riegel trade_plans_a1_echo_hedge diesen Plan aufgegeben?"""
+    ss = (base or {}).get("start_sperre") if isinstance(base, dict) else None
+    return isinstance(ss, dict) and ss.get("art") == "echo_hedge" and ss.get("status") == "aufgegeben"
+
+
 def eh_grund_code(grund):
     """REIN RECHNEND (testbar): Grund von eh_hedge → Code. Nur der Text „Hedge … Lot unter … Lot" ist klein, alles andere groesse."""
     return "klein" if re.match(r"Hedge .* Lot unter ", str(grund or "")) else "groesse"
@@ -27458,7 +27465,7 @@ def eh_grund_code(grund):
 
 def eh_ohne_text(code, grund):
     """REIN RECHNEND (testbar): ⚪-Text zu einem Plan ohne Hedge — hält der Riegel oder startet er wirklich ohne."""
-    return (f"startet nicht, bis der Hedge rechenbar ist (Start rückt je 15–30 min, höchstens 8 h) — {grund}" if code in EH_HALT_CODES
+    return (f"startet nicht, bis der Hedge rechenbar ist (Start rückt je 15–30 min, höchstens 8 h und bis Fensterende) — {grund}" if code in EH_HALT_CODES
             else f"startet als Echo V2 ohne Hedge — {grund}")
 
 
@@ -27673,6 +27680,8 @@ def _eh_tick_lauf(jetzt):
                 continue                                      # nur CFD-Challenges von Firmen auf Echo V2
             uid, wer = str(p["user_id"]), namen.get(str(p["user_id"]), str(p["user_id"])[:8])
             base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+            if eh_aufgegeben(base):
+                continue                                      # Riegel hat aufgegeben: nicht mehr umstellen, sonst startete er trotzdem, z. B. nach dem CFD-Fensterende
             if base.get("tage_mini"):
                 _eh_ohne(p, "mini", "Tage sammeln (Mini-Trade, sofort zu)", wer, jetzt, melden=False)
                 continue
