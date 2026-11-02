@@ -12035,9 +12035,11 @@ def _wd_login():
         return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
 
 
-def _wd_personen():
+def _wd_personen(radar=False):
     """user_id → Anzeigename (user_metadata.name, sonst E-Mail-Kürzel) und die
-    Menge der ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — wie in der Übersicht."""
+    Menge der ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — wie in der Übersicht.
+    radar=True (Finn 02.11.2026, Julian aus Emins Gruppe stand im HT-Radar unter Bestanden): Finns Gruppen-Chip des Admin-Reiters zählt nicht, nur die
+    Einschränkung des Logins — wie /admin/live-trades für Läuft/Erledigt, das den Chip nie mitschickt."""
     disp, excluded = {}, set()
     r = _auth_liste_anfrage()
     for u in (r.json() or {}).get("users", []):
@@ -12048,13 +12050,14 @@ def _wd_personen():
         if mail.strip().lower() in ADMIN_EXCLUDE_EMAILS:
             excluded.add(uid)
     nur = _admin_nur_uid()
-    sicht = _admin_sicht()
+    sicht = _admin_eingeschraenkt() if radar else _admin_sicht()
     if nur:   # nur eigene Daten (27.09.2026) — seit 08.10.2026 die eigene Gruppe (Verwalter): alle anderen raus
         excluded = set(disp) - set(sicht or {nur})
     elif sicht is not None:   # Finns ?gruppe=-Filter (08.10.2026): HT zusätzlich zur Ausblendung, Verwalter-Gruppe genau die Gruppe (C)
         excluded = (set(excluded) | (set(disp) - set(sicht))) if _admin_filter_ist_ht() else (set(disp) - set(sicht))
     else:   # Standard-Sicht HT (09.10.2026): Gruppen MIT Verwalter raus wie in _admin_basis
-        excluded = set(excluded) | _admin_standard_aus()
+        # radar: _admin_standard_aus wäre bei gesetztem Chip leer, darum die Verwalter-Gruppen direkt
+        excluded = set(excluded) | (_admin_verwalter_gruppen_ids(admin_gruppen_daten()) if radar else _admin_standard_aus())
     return disp, excluded
 
 
@@ -14873,6 +14876,7 @@ def admin_handarbeit():
     except Exception as e:
         return jsonify({"error": f"Gruppen nicht lesbar ({type(e).__name__})"}), 502
     schluessel = ("*-" + ",".join(sorted(std_aus))) if sicht is None else ",".join(sorted(sicht))
+    schluessel += "|g=" + str(request.args.get("gruppe") or "").strip().lower()   # der Chip ändert die Antwort: sonst bekam ein Gerät ohne Chip die Antwort eines Geräts mit „Emin“ (02.11.2026)
     with _hand_lock:
         c = _hand_cache.get(schluessel)
     if c and c[0] > time.time():
@@ -14947,7 +14951,11 @@ def admin_handarbeit():
             ausgeblendet = set(namen) - set(lese_g)
         gr = hand_gruppen(konten_ziel, reviews, blown, letzte, accs, archiv, namen, ausgeblendet, datetime.now(timezone.utc), lauf, tage_je)
         gelesen = gr.pop("planer_gelesen", 0)
-        radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, ausgeblendet, datetime.now(timezone.utc), None, tage_je)["bestanden"]
+        # Radar Bestanden: Sicht wie Läuft (Gruppe des Logins, HT ohne Verwalter-Gruppen), nie der Admin-Chip
+        _n_r, aus_radar = _wd_personen(radar=True)
+        if lese_g:
+            aus_radar = set(namen) - set(lese_g)
+        radar_best = hand_gruppen(ziel_alle, reviews, [], {}, {}, archiv, namen, aus_radar, datetime.now(timezone.utc), None, tage_je)["bestanden"]
         antwort = {"ok": True, "at": datetime.now(timezone.utc).isoformat(), "n": sum(len(v) for v in gr.values()), "gruppen": gr,
                    "planer_gelesen": gelesen, "radar_bestanden": radar_best, "review_notizen": hand_review_notizen(_review_notizen_lesen(), ein, ausgeblendet)}
     except Exception as e:
