@@ -31607,6 +31607,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
         return {"plan_id": str(p.get("id")), "user_id": str(p.get("user_id")), "user": wer(p),
                 "firma": (a or {}).get("firm") or p.get("master_firm"), "firma_key": fkey(p), "konto": (a or {}).get("name") or p.get("master_name"),
                 "ende4": _ap_ende4(a), "typ": (a or {}).get("account_type"), "route": p.get("route"), "richtung": p.get("richtung"),
+                "groesse_key": ap_waage_groesse((a or {}).get("name"), (a or {}).get("account_size")),   # wie die DB: nur das Konto
                 "menge": _wd_num(p.get("master_contracts")), "delta_eur_pkt": b["delta_eur_pkt"], "usd_pro_pkt": b["usd_pro_pkt"],
                 "punktwert_quelle": b["punktwert_quelle"], "tp_punkte": b["tp_punkte"], "sl_punkte": b["sl_punkte"],
                 "wert_eur": (b["kw"] or {}).get("wert"), "satz_eur_je_usd": (b["kw"] or {}).get("satz"),
@@ -31981,25 +31982,44 @@ def ap_waage_passt(klasse, w):
     return True, None, None
 
 
-def ap_waage_deckel(klasse, w, richtung, max_abstand=2.0):
+AP_WAAGE_GROESSE_RE = re.compile(r"(?:^|[^0-9])(\d{2,3})\s*k(?:\b|tc)", re.I)
+
+
+def ap_waage_groesse(name, account_size):
+    """REIN RECHNEND (testbar) — Waage-Deckel je Kontogröße (Finn 02.11.2026): „150k“ aus dem Namen zuerst (auch Topstep „150KTC-…“), sonst
+    account_size, sonst „unbekannt“. Dieselbe Regel wie sql/2026-11-02_waage_deckel_je_groesse.sql prophos_waage_groesse; starting_balance nie."""
+    m = AP_WAAGE_GROESSE_RE.search(str(name or ""))
+    if m:
+        return f"{int(m.group(1))}k"
+    g = _wd_num(account_size)
+    return f"{int(round(g / 1000))}k" if g and g > 0 else "unbekannt"
+
+
+def ap_waage_deckel(klasse, w, richtung, max_abstand=2.0, groesse=None):
     """REIN RECHNEND (testbar) — WAAGE-DECKEL (Finn 23.10.2026, live 1 Long : 7 Short: „4:1 ist too much, 7:1 sowieso. Dann lieber gar keinen
     Trade starten. Verschieben geht" — „Mach die Regel mit ‚würde‘" — ~14:05: „Nie mehr als 2 darf der Abstand sein. 3:1 okay, 4:1 nicht okay.
     2:0 okay, 3:0 nicht mehr. Immer 2 darf der Abstand sein.").
     w = Futures-Waage MIT diesem Start (ap_klassen_waage extra / start_lage nachher). Ein automatischer Start, nach dem seine Seite mehr als
     max_abstand Trades über der anderen liegt, startet nicht — keine Ausnahme durch „Gegentrade folgt", Paar oder Drehen. Nur Futures (CFD hat
     die €-Waage), nur die Seite, die er schwerer macht: ein Start in die leichte Seite ist nie gesperrt. 3 : 1 / 2 : 0 / 6 : 4 frei,
-    4 : 1 / 3 : 0 / 7 : 4 gesperrt. → (sperrt, grund)"""
+    4 : 1 / 3 : 0 / 7 : 4 gesperrt. → (sperrt, grund)
+    JE KONTOGRÖSSE (Finn 02.11.2026): mit groesse zählt nur w["je_groesse"][groesse] — ein 50k-Long gleicht keinen 150k-Short aus. „unbekannt“ sperrt
+    immer (eigene Waage, nie frei). Ohne groesse wie bisher über die ganze Klasse."""
     if klasse != "futures" or richtung not in ("buy", "sell"):
         return False, None
     try:
         m = max(1.0, float(max_abstand))
     except (TypeError, ValueError):
         m = 2.0
+    if groesse is not None:
+        if groesse == "unbekannt":
+            return True, "Futures: Kontogröße unbekannt (Name ohne „…k“, account_size leer) — eigene Waage, startet nie automatisch"
+        w = dict((w.get("je_groesse") or {}).get(groesse) or {"n_long": 0, "n_short": 0}, groesse=groesse)
     nl, ns = int(w.get("n_long") or 0), int(w.get("n_short") or 0)
     seite, andere = (nl, ns) if richtung == "buy" else (ns, nl)
     if seite - andere <= m:
         return False, None
-    return True, (f"Futures würde {nl} Long : {ns} Short (Abstand höchstens {m:g}) — der {'Long' if richtung == 'buy' else 'Short'} "
+    return True, (f"Futures{' ' + w['groesse'] if w.get('groesse') else ''} würde {nl} Long : {ns} Short (Abstand höchstens {m:g}) — der {'Long' if richtung == 'buy' else 'Short'} "
                   f"startet nicht, bis das Buch es zulässt")
 
 
@@ -32015,7 +32035,7 @@ def ap_klassen_waage(stand, pc_lebt=None, extra=None):
     """REIN RECHNEND (testbar): {'futures'|'cfd': {long_eur, short_eur, n_long, n_short, delta_eur, passt, grund, leicht,
     plan_ids, firmen{buy, sell}}} aus stand['offen'] (laufend) + stand['geplant'] (Start in ≤ 2 min). extra = {plan_id, richtung}:
     dieser Plan zählt zusätzlich mit genau dieser Richtung (Start-Prüfung „was wäre, wenn er jetzt startet")."""
-    out = {k: {"long_eur": 0.0, "short_eur": 0.0, "n_long": 0, "n_short": 0, "plan_ids": [], "firmen": {"buy": [], "sell": []}}
+    out = {k: {"long_eur": 0.0, "short_eur": 0.0, "n_long": 0, "n_short": 0, "plan_ids": [], "firmen": {"buy": [], "sell": []}, "je_groesse": {}}
            for k in ("futures", "cfd")}
     jm = float(stand.get("jetzt_min") or 0)
     ex = str((extra or {}).get("plan_id") or "")
@@ -32026,12 +32046,15 @@ def ap_klassen_waage(stand, pc_lebt=None, extra=None):
             return
         w = out[ap_klasse(z.get("route"), z.get("firma"))]
         g = _ap_waage_gewicht(z)
+        jg = w["je_groesse"].setdefault(z.get("groesse_key") or "unbekannt", {"n_long": 0, "n_short": 0})   # Waage-Deckel je Kontogröße (02.11.2026)
         if r == "buy":
             w["long_eur"] += g
             w["n_long"] += 1
+            jg["n_long"] += 1
         else:
             w["short_eur"] += g
             w["n_short"] += 1
+            jg["n_short"] += 1
         w["plan_ids"].append(str(z.get("plan_id")))
         fk = z.get("firma_key") or ""
         if fk and fk not in w["firmen"][r]:
@@ -32293,7 +32316,9 @@ def ap_waage_start_lage(stand, plan_id, richtung, pc_lebt=None):
     for name, r in (("nachher", richtung), ("gegen", gegen)):
         w = ap_klassen_waage(stand, pc_lebt=pc_lebt, extra={"plan_id": plan_id, "richtung": r})[kl]
         _pa = stand.get("param") or {}
-        sperrt, dgrund = ap_waage_deckel(kl, w, r, _pa.get("waage_max_abstand") or 2.0) if _pa.get("waage_deckel_an", True) is not False else (False, None)
+        # groesse_key setzt _ap_stand_laden an jeder Zeile („unbekannt“, wenn nicht bestimmbar); fehlt das Feld ganz, gilt der Deckel wie vor dem 02.11. über die Klasse
+        sperrt, dgrund = ap_waage_deckel(kl, w, r, _pa.get("waage_max_abstand") or 2.0, z.get("groesse_key")) \
+            if _pa.get("waage_deckel_an", True) is not False else (False, None)
         out[name] = {"richtung": r, "passt": bool(w["passt"]), "besser": _ap_waage_note(kl, w) < _ap_waage_note(kl, vor), "grund": w["grund"],
                      "deckel_sperrt": bool(sperrt and out["zaehlt"]), "deckel_grund": dgrund if out["zaehlt"] else None,   # WAAGE-DECKEL (23.10.2026)
                      **{f: w.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short")}}

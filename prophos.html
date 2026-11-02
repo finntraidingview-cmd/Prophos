@@ -54253,7 +54253,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1985'
+  const OS_TAB_BUILD = '2026-09-22.1986'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61470,8 +61470,11 @@
       let kw
       if(wf){
         const leer = !(wf.n_long || wf.n_short), ok = wf.passt !== false
+        // DECKEL JE KONTOGRÖSSE (Finn 02.11.2026): der Hinweis nennt je Größe Long : Short — der Deckel (Abstand ≤ 2) gilt je Größe, nicht über alle
+        const jeG = Object.entries(wf.je_groesse || {}).sort((x, y) => (parseInt(y[0]) || 0) - (parseInt(x[0]) || 0)).map(([g, v]) => `${g} ${v.n_long || 0} : ${v.n_short || 0}`).join(' · ')
         kw = kS('Waage jetzt', leer ? '–' : `${wf.n_long || 0} : ${wf.n_short || 0}`, leer ? '' : ok ? 'tpl-gut' : 'tpl-rot',
-          leer ? 'Futures · leer' : `Futures ${ok ? '✓' : '⚠'}`, ok || leer ? 'Futures Long : Short (laufend + Starts in ≤ 2 min), Grenze 2 : 1' : String(wf.grund || ''))
+          leer ? 'Futures · leer' : `Futures ${ok ? '✓' : '⚠'}`, (ok || leer ? 'Futures Long : Short (laufend + Starts in ≤ 2 min), Grenze 2 : 1' : String(wf.grund || ''))
+            + (jeG ? ` — Deckel je Kontogröße (Abstand höchstens 2): ${jeG}` : ''))
       }else kw = kS(tag ? 'Netto heute' : 'Netto', vz(N), N > 0 ? 'tpl-gut' : N < 0 ? 'tpl-rot' : '', '')
       if(o.funded) return `<div class="kpis tpl-kpis3">${kS('Long im Spiel', '▲ ' + tplEur(Ll), 'tpl-gut', `${nL} laufend`)}${kS('Short im Spiel', '▼ ' + tplEur(Sl), 'tpl-rot', `${nS} laufend`)}${tplHypoKachelHtml(hy)}</div>`   // Funded: ohne Waage/Heute
       return `<div class="kpis tpl-kpis5">${kS('Long im Spiel', '▲ ' + tplEur(Ll), 'tpl-gut', `${nL} laufend`)}${kS('Short im Spiel', '▼ ' + tplEur(Sl), 'tpl-rot', `${nS} laufend`)}${kw}`

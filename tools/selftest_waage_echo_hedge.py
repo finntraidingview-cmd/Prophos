@@ -33,7 +33,7 @@ def lade():
         teile.append(z.split("  #")[0])
     for name in ("_wd_num", "_ap_hhmm_txt", "ap_klasse", "ap_waage_ohne_liste", "ap_waage_ohne", "ap_waage_folgt", "_ap_waage_gewicht",
                  "_ap_waage_startet", "ap_waage_zeile_zaehlt", "_ap_eur_txt", "ap_waage_passt", "ap_waage_deckel", "_ap_waage_note",
-                 "ap_klassen_waage", "ap_eh_wird_hedgen", "_ap_waage_kandidat", "_ap_waage_rs_frei", "_ap_waage_zielminute",
+                 "ap_waage_groesse", "ap_klassen_waage", "ap_eh_wird_hedgen", "_ap_waage_kandidat", "_ap_waage_rs_frei", "_ap_waage_zielminute",
                  "ap_waage_nachschub"):
         i = src.index(f"\ndef {name}(") + 1
         teile.append(src[i:src.find("\n\n\n", i)])
@@ -99,7 +99,7 @@ def schleife(ns):
 
 
 PLANER_FUNKTIONEN = ("ap_planen", "ap_richtungen_delta", "ap_zeiten_verteilen", "ap_paare_legen", "ap_dicht_paare", "_ap_gegen_dicht",
-                     "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_klassen_waage")
+                     "ap_fest_am_start", "ap_misch_bewerter", "ap_waage_passt", "ap_waage_zeile_zaehlt", "ap_waage_groesse", "ap_klassen_waage")
 BASIS = "f54267bf"     # Stand vor heute Nacht (30.10.2026 ~03:45 Dubai); ändert ein späterer Commit den Planer bewusst → nachziehen
 
 
