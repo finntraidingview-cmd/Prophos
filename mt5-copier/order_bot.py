@@ -19173,7 +19173,10 @@ def _tsx_konto_sichern(s, ext, st, trail):
             # 2.4.32 (S9 02.11.2026): Karte zeigt nur „EXPRES...9147" — ob mit drei Punkten oder „…" (U+2026), ist ohne DOM unbekannt; darum
             # ist der Ziel-Beweis bei Karten ohne volle Kennung NUR die Endung („9147"): sie steht in jedem Fall im Kartentext und ist in
             # der Liste eindeutig (sonst hätte tsx_k2_eintrag die Karte nicht gewählt)
-            pruef = {"rect": r, "text": str(x.get("id") or x.get("endung") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
+            # Ina 04:49 Dubai (.1966, wieder „kein Druck"): die Karte zeigt nie die volle Kennung. Kommt x.id aus einem Attribut (kennungAusAttributen),
+            # stünde der Prüftext nicht im Kartentext — darum bei neuen Karten immer die Endung, die Karte selbst bindet pruef.karte ans Rechteck
+            pruef_text = (x.get("endung") if x.get("format") == "neu" else None) or x.get("id") or x.get("endung") or ext
+            pruef = {"rect": r, "text": str(pruef_text)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
             if x.get("format") == "neu":
                 pruef["karte"] = r                           # 2.4.32 (Ina 04:09 Dubai, .1964): Karte ist kein Button — Ziel = Vorfahre mit dem Karten-Rechteck
             # 2.4.32 (S9 02.11.2026): der gestreute Klickpunkt traf in 0,8–7 % den Stift ✎ der Namenszeile (Umbenennen statt Kontowechsel) —

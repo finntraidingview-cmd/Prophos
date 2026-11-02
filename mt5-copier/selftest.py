@@ -7822,6 +7822,8 @@ def test_tsx_k2():
     _sp = ob.win_beweis_spur({"beweis": {"drin": True, "klein": False, "text_ok": True, "tabu": False, "karte_knopf": False, "ziel": [1, 2, 3, 4], "k": [1, 2, 9, 9], "k_tag": "div", "t": "6025"}})
     chk("klein NEIN" in _sp and "drin ja" in _sp and "'6025'" in _sp and ob.win_beweis_spur({}) == "" and ob.win_beweis_spur(None) == ""
         and "beweis:{drin:drin" in _js, "Ziel-Beweis: Einzelwerte in der Spur, ohne Werte leer")
+    chk('(x.get("endung") if x.get("format") == "neu" else None) or x.get("id")' in __import__("inspect").getsource(ob._tsx_konto_sichern),
+        "2.4.32: Prüftext neuer Karten ist die Endung, auch wenn eine volle Kennung aus einem Attribut kam")
     ob._TSX_ENDUNG_BEWIESEN.clear()
     W = ob.tsx_k2_eintrag
     liste = [zeile(0, E1), zeile(1, E2), zeile(2, C3), zeile(3, C4)]
