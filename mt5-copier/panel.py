@@ -2217,6 +2217,14 @@ def puls_beleg_merken(res):
         scharf_spur("-", "Puls-Beleg", _PULS_BELEG["text"] or "leer (Konto des Laufs nicht bewiesen)")
 
 
+def puls_beleg_gueltig(beleg_at, jetzt, idle_s):
+    """REIN RECHNEND (testbar, S9 02.11.2026): gilt der Puls-Beleg noch? Nur, wenn seit dem Beleg keine Eingabe am PC war (Puls' eigene Klicks liegen
+    vor dem Merken) — jede Hand-/Parsec-Eingabe danach kann ins Geschwister-Konto gewechselt haben, dann schließt nur der Tab. idle_s None → ungültig."""
+    if not beleg_at or idle_s is None:
+        return False
+    return float(idle_s) >= float(jetzt) - float(beleg_at)
+
+
 def scharf_konto_sicher(text, ext, nachbarn, beleg=None):
     """REIN RECHNEND (testbar): steht der Reader sicher im scharfen Konto? Voller Text immer; gekürzt/angeklebt, wenn kein anderes Konto der ID
     (nachbarn = External IDs) im selben Bezug steht, oder — Apex-Falle, alle beginnen gleich — wenn der letzte Puls-Lauf genau dieses Konto bewiesen gewählt
@@ -2368,9 +2376,9 @@ def _scharf_close_senden(e):
     return auftrag["cmd_id"]
 
 
-def scharf_copier_tickets():
-    """Offene Solo-Hedge-Tickets aus den frischen Copier-Status-Dateien (status.hedge_solo) → set | None (nicht prüfbar)."""
-    tickets, geprueft = set(), False
+def scharf_copier_solo():
+    """Offene Solo-Hedges aus den frischen Copier-Status-Dateien → {ticket: plan8 | ''} | None (nicht prüfbar). plan8 aus dem Kommentar bzw. plan_id[:8]."""
+    out, geprueft = {}, False
     for inst in instances():
         st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
         try:
@@ -2380,8 +2388,16 @@ def scharf_copier_tickets():
         if not st.get("running") or age > 15 or not isinstance(st.get("hedge_solo"), list):
             continue
         geprueft = True
-        tickets |= {int(x.get("ticket") or 0) for x in st["hedge_solo"] if isinstance(x, dict)}
-    return tickets if geprueft else None
+        for x in st["hedge_solo"]:
+            if isinstance(x, dict) and x.get("ticket"):
+                out[int(x["ticket"])] = str(x.get("plan8") or str(x.get("plan_id") or "")[:8] or "")
+    return out if geprueft else None
+
+
+def scharf_copier_tickets():
+    """Offene Solo-Hedge-Tickets aus den frischen Copier-Status-Dateien (status.hedge_solo) → set | None (nicht prüfbar)."""
+    solo = scharf_copier_solo()
+    return set(solo) if solo is not None else None
 
 
 def _scharf_stand_lesen():
@@ -2419,9 +2435,14 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
             continue
         if st is None:
             continue
-        zu, e2, grund = scharf_entscheid(e, st, jetzt, _PULS_BELEG.get("text") or None)
+        try:
+            _idle = _win_leerlauf_s()
+        except Exception:
+            _idle = None
+        beleg = (_PULS_BELEG.get("text") or None) if puls_beleg_gueltig(_PULS_BELEG.get("at"), jetzt, _idle) else None
+        zu, e2, grund = scharf_entscheid(e, st, jetzt, beleg)
         scharf_spur(e.get("ticket"), "Lage", f"{grund} · Reader-Konto {str(st.get('konto') or '-')[:40]} · Tab {str(st.get('positionen_tab') or '-')[:24]}"
-                    f" · Beleg {_PULS_BELEG.get('text') or '-'}", nur_bei_wechsel=True)
+                    f" · Beleg {beleg or ('-' if not _PULS_BELEG.get('text') else 'ungültig (Eingabe am PC seit dem Beleg)')}", nur_bei_wechsel=True)
         if zu:
             e2.update(status="schliesst", cmd_id=_scharf_close_senden(e2), zu_at=jetzt, grund_zu=grund)
             n += 1
@@ -5994,10 +6015,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             if any(int(x.get("ticket") or 0) == ticket for x in scharf_laden()):
                 return self._send(200, json.dumps({"ok": True, "schon": True}))
-            offen = scharf_copier_tickets()
+            offen = scharf_copier_solo()
             if offen is None or ticket not in offen:
                 return self._send(200, json.dumps({"ok": False, "code": "nicht_offen" if offen is not None else "copier_alt",
                                                    "msg": "Ticket im Copier nicht offen" if offen is not None else "Copier-Liste nicht lesbar"}))
+            # S9 02.11.2026: nur der Hedge DIESES Plans — der Copier kennt je Solo-Ticket plan8/plan_id; fehlt sie oder passt sie nicht → fremd, nichts setzen
+            if not offen[ticket] or offen[ticket] != str(body.get("plan_id") or "")[:8]:
+                scharf_spur(ticket, "NICHT gemerkt (Nachholen)", f"Ticket gehört laut Copier zu {offen[ticket] or '?'}, nicht zu {str(body.get('plan_id') or '')[:8]}")
+                return self._send(200, json.dumps({"ok": False, "code": "fremd", "msg": "Ticket gehört laut Copier zu einem anderen Plan"}))
             try:
                 rs = _scharf_stand_lesen()
             except Exception:

@@ -27,9 +27,10 @@ def check(ok, name):
 
 
 tmp = tempfile.mkdtemp()
+IDLE = [1e9]   # Sekunden ohne Eingabe am PC (Attrappe für _win_leerlauf_s)
 uhr = [10000.0]
 ns = {"os": os, "re": re, "json": json, "random": random, "threading": threading, "HERE": tmp, "datetime": __import__("datetime").datetime, "time": types.SimpleNamespace(time=lambda: uhr[0], sleep=lambda s: None),
-      "HEDGE_SOLO_LOCK": threading.Lock(), "print": lambda *a, **k: None}
+      "HEDGE_SOLO_LOCK": threading.Lock(), "print": lambda *a, **k: None, "_win_leerlauf_s": lambda: IDLE[0]}
 for n in ast.parse(SRC).body:
     if isinstance(n, ast.FunctionDef) and n.name == "read_json":
         exec(ast.get_source_segment(SRC, n), ns)
@@ -159,12 +160,21 @@ check(apex_lauf({"ok": True, "konto_aktiv": "PAAPEX6687940000005"}) is None, "Be
 check(apex_lauf({"ok": True, "konto_aktiv": "PAAPEX668794000000…"}) is None and apex_lauf({"ok": False, "konto_aktiv": "PAAPEX6687940000007"}) is None,
       "Beleg nur gekürzt bzw. Lauf nicht ok → leer → nie")
 check(apex_lauf({}) is None, "danach ein TradingView-Lauf ohne Beleg (Konto unbekannt) → nie")
+# S9: Beleg nur ohne Eingabe am PC seit dem Beleg
+IDLE[0] = 2.0
+d2 = apex_lauf({"ok": True, "konto_aktiv": "PAAPEX6687940000007"})
+check(d2 is None, "Eingabe am PC nach dem Beleg (Hand/Parsec) → Beleg ungültig → nie (Tab schließt)")
+IDLE[0] = 1e9
+G = ns["puls_beleg_gueltig"]
+check(G(100.0, 110.0, 10.0) and not G(100.0, 110.0, 9.9) and not G(100.0, 110.0, None) and not G(0, 110.0, 50.0),
+      "puls_beleg_gueltig: Ruhe seit dem Beleg → gültig; Eingabe danach / Leerlauf unbekannt / kein Beleg → ungültig")
 check(SRC.count("puls_beleg_merken(res)   # PULS-BELEG") == 5, "Beleg nach jedem TV-Lauf: tv-konto, tv-lesen, tv-konten-liste, tv-close, tv-order")
 # NACHHOLEN
 k = SRC.index('if u.path == "/api/hedge-scharf":')
 w = SRC[k:SRC.index('if u.path == "/api/hedge-solo":', k)]
-check("scharf_copier_tickets()" in w and "ticket not in offen" in w and '"schon": True' in w and "scharf_setzen(" in w,
+check("scharf_copier_solo()" in w and "ticket not in offen" in w and '"schon": True' in w and "scharf_setzen(" in w,
       "Panel /api/hedge-scharf: nur mit offenem Ticket im Copier, schon scharf → nichts")
+check("offen[ticket] != str(body.get(\"plan_id\") or \"\")[:8]" in w and '"code": "fremd"' in w, "Nachholen nur, wenn der Copier das Ticket diesem Plan zuordnet (plan8), sonst fremd")
 check("async function hedgeScharfNachholen(_tp)" in HTML and "await hedgeScharfNachholen(_tp)" in HTML and "window.mtcApi('hedge-scharf'" in HTML,
       "Tab meldet offene TV-Hedges dieses PCs nach (einmal je Ticket, Fehler → 60 s)")
 
