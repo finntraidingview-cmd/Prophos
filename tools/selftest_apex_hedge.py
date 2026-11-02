@@ -122,8 +122,9 @@ soll("Umstellen nur mit hedge_freigabe_at + auto_bestaetigt_at",
 soll("Spalte hedge_freigabe_at fehlt → nichts umstellen", "freigabe_da = False" in t and "if not freigabe_da:" in t)
 z = block("ah_zurueck")
 soll("Schalter aus: Marke + Vorschau weg", 'base.pop("hedge_art", None)' in z and 'base.pop("hedge_vorschau", None)' in z)
-soll("Tick: winning_day false, hedge_eur = Kontowert, master_risk = Polster, Marke mit Boden",
-     all(x in t for x in ('"winning_day": False', '"hedge_eur": round(wert, 2)', '"master_risk": round(polster, 2)', '"liq_balance": liq', 'apex_hedge=info')))
+# 02.11.2026: master_risk = Abstand bis zum Trade-Ende (ah_abstand, Daily Loss oder Boden), nicht mehr das ganze Polster — tools/selftest_apex_abstand.py
+soll("Tick: winning_day false, hedge_eur = Kontowert, master_risk = Abstand, Marke mit Boden",
+     all(x in t for x in ('"winning_day": False', '"hedge_eur": round(wert, 2)', '"master_risk": h["abstand"]', '"liq_balance": liq', 'apex_hedge=info')))
 soll("Tick: Boden = Balance − Polster", "round(float(bal) - polster, 2)" in t)
 soll("Tick: Werte von vorher gemerkt (Rückweg)", '"vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}' in t)
 soll("Tick: gemeinsame Vorgemerkt-Zählung + Marge", "hedge_vorgemerkt(von, jetzt)" in t and "eh_marge(" in t)

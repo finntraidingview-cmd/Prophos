@@ -28848,13 +28848,27 @@ def ah_werte(kw):
     return satz, wert, float(polster)
 
 
+def ah_abstand(bal, polster, acc):
+    """REIN RECHNEND (testbar): $-Abstand bis zum Ende des Trades → (abstand, art) | (None, None). Ende = das engere von Challenge-Boden (Polster) und
+    Daily Loss ab heute (ah_dll_balance, Tagesstart ≈ Balance beim Planen). ABSTAND STATT POLSTER (02.11.2026, Finn/Eingang, Geld-Pfad): Der Hedge war
+    auf den ganzen DD gerechnet (3.000 $), der Master endet aber am Tageslimit (1.500 $): …0044/…0010/…0015/…0009 brachten +19 bis +21 € statt 45 €."""
+    b, pol = _wd_num(bal), _wd_num(polster)
+    if b is None or not pol or pol <= 0:
+        return None, None
+    d_bal, _t = ah_dll_balance(acc, b)
+    dll = round(b - d_bal, 2) if d_bal is not None else None
+    if dll is not None and 0 < dll < pol:
+        return dll, "daily_loss"
+    return round(float(pol), 2), "boden"
+
+
 def ah_vorschau(h, wert, polster, liq, master_tp):
     """REIN RECHNEND (testbar): Vorschau für den Bestätigen-Block (Admin → Challenge-Planer, S4): Hedge-Lots, Kontowert €, was der Fusion-Hedge
     beim Blow bringt (+slave_risk ≈ Kontowert ÷ netto_faktor) und was er am Master-TP kostet (−TP $ × q)."""
     tp = _wd_num(master_tp)
     return {"lots": h["lots"], "q": h["q"], "eur": round(float(wert), 2), "blow_eur": h["slave_risk"],
             "tp_eur": (round(-tp * h["q"], 2) if tp and tp > 0 else None), "polster_usd": round(float(polster), 2), "liq_balance": liq,
-            "multiplier": h["multiplier"], "at": _wt_now_iso()}
+            "abstand_usd": h.get("abstand"), "multiplier": h["multiplier"], "at": _wt_now_iso()}
 
 
 def ah_tick(jetzt=None, force=False):
@@ -28882,6 +28896,10 @@ def ah_tick(jetzt=None, force=False):
     try:                                                     # hedge_freigabe_at baut S4 (Spalte + Bestätigen-Block) — fehlt sie, wird nichts umgestellt
         roh = _sb_all("trade_plans", {"select": felder + ",hedge_freigabe_at", **filt})
         freigabe_da = True
+        # NACHZIEHEN (02.11.2026): schon umgestellte, ungestartete Apex-Pläne kommen dazu, Schritt (3) rechnet sie auf den Abstand neu; laufende nie
+        nach_filt = dict(filt, **{"mt5_baseline->apex_hedge->>status": "eq.mit"})
+        nach_filt.pop("or")
+        roh += [dict(x, _ah_nach=True) for x in _sb_all("trade_plans", {"select": felder + ",hedge_freigabe_at,hedge_eur", **nach_filt})]
     except Exception as e:
         if "hedge_freigabe_at" not in str(e):
             raise
@@ -28913,6 +28931,12 @@ def ah_tick(jetzt=None, force=False):
                                    norm=lambda n: _ap_norm(_firm_norm(n)))
     echo_bal, dup_bal = _ap_balance_karten()
     kauf = _ap_kauf_echt(sorted(konten)) if konten else {}
+    # Daily Loss je Konto (max_daily_drawdown fehlt in AP_KONTO_FELDER); nicht lesbar → Abstand = Polster wie bisher
+    try:
+        dll_konto = {str(x["id"]): x for x in _sb_all("accounts", {"select": "id,max_daily_drawdown", "id": "in.(" + ",".join(sorted(konten)) + ")"})} if konten else {}
+    except Exception as e:
+        _ah_spur(f"⚠️ Daily Loss nicht lesbar, Abstand = Polster: {type(e).__name__}")
+        dll_konto = {}
 
     def rechnen(p, a):
         """→ (h, wert, polster, bal, liq, None) | (None, …, (code, grund))."""
@@ -28927,12 +28951,17 @@ def ah_tick(jetzt=None, force=False):
                 return None, None, None, bal, None, ("polster", f"kein Polster: Balance {_ap_de(float(bal), 0)} $ steht am Boden — Konto prüfen, Balance neu lesen")
             return None, None, None, bal, None, ("groesse", "kein Kontowert-Satz (Kaufpreis ÷ Max DD)" + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""))
         satz, wert, polster = werte                        # polster: $ bis zum Boden (Apex statisch: Max DD + Gewinn über der Größe)
+        abstand, art = ah_abstand(bal, polster, dll_konto.get(str(a["id"])) or a)
         sppl = ((ppl.get((uid, _ap_norm(_firm_norm("Fusion Markets")))) or (None,))[0]) or GP_SLAVE_PPL
-        h, grund = eh_hedge(satz, p.get("master_contracts"), ah_master_ppl(p), sppl, polster, par["netto_faktor"], par["min_lot"])
+        # Satz auf den Abstand bis zum Ende des Trades (ah_abstand): Ein Ende am Tageslimit bringt so den ganzen Kontowert, slave_risk bleibt der Kontowert
+        h, grund = eh_hedge(wert / abstand, p.get("master_contracts"), ah_master_ppl(p), sppl, abstand, par["netto_faktor"], par["min_lot"])
         if grund:
             return None, wert, polster, bal, None, ("groesse", grund)
+        h = dict(h, abstand=abstand, abstand_art=art)
         return h, wert, polster, bal, round(float(bal) - polster, 2), None
 
+    nachziehen = [p for p in plaene if p.get("_ah_nach")]
+    plaene = [p for p in plaene if not p.get("_ah_nach")]
     # (1) VORMERKEN — hedge_art + hedge_vorschau für den Bestätigen-Block
     for p in plaene:
         a = konten.get(str(p.get("master_account_id")))
@@ -28961,10 +28990,10 @@ def ah_tick(jetzt=None, force=False):
         return erg
     faellig = [p for p in plaene if p.get("hedge_freigabe_at") and p.get("auto_bestaetigt_at") and not p.get("_ah_kein_guard")
                and str(p.get("start_um") or "") <= bis.isoformat()]
-    if not faellig:
+    if not faellig and not nachziehen:
         return erg
     try:
-        lesungen = gp_fusion_lesungen({str(p["user_id"]) for p in faellig}, jetzt)
+        lesungen = gp_fusion_lesungen({str(p["user_id"]) for p in faellig + nachziehen}, jetzt)
     except Exception as e:
         _ah_spur(f"⚠️ Fusion-Lesung: {type(e).__name__}: {e}")
         lesungen = {}
@@ -28990,14 +29019,15 @@ def ah_tick(jetzt=None, force=False):
         if not ok:
             _ah_ohne(p, "grenze" if "gleichzeitig" in grund else "marge", grund, wer, jetzt)
             continue
-        info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"], "satz": round(wert / polster, 6),
-                "kontowert_eur": round(wert, 2), "polster_usd": round(polster, 2), "liq_balance": liq, "balance": round(float(bal), 2),
+        info = {"status": "mit", "at": _wt_now_iso(), "lots": h["lots"], "q": h["q"], "multiplier": h["multiplier"], "satz": round(wert / h["abstand"], 6),
+                "kontowert_eur": round(wert, 2), "polster_usd": round(polster, 2), "abstand_usd": h["abstand"], "abstand_art": h["abstand_art"],
+                "liq_balance": liq, "balance": round(float(bal), 2),
                 "login": login, "netto_faktor": par["netto_faktor"], "freigabe_at": p.get("hedge_freigabe_at"),
                 "vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}}
-        upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": round(polster, 2), "slave_risk": h["slave_risk"],
+        upd = {"hedge_eur": round(wert, 2), "winning_day": False, "master_risk": h["abstand"], "slave_risk": h["slave_risk"],
                "multiplier": h["multiplier"], "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info),
                "notes": (str(p.get("notes") or "").rstrip() + "\n" + (f"Apex mit Hedge (WD-Weg): {h['lots']:.2f} Lot Fusion · q {h['q']:.4f} €/$ "
-                         f"(Kontowert {wert:.2f} € ÷ Polster {polster:.0f} $ ÷ {par['netto_faktor']}) · Hedge zu am Boden {liq:.0f} $").replace(".", ",")).strip()}
+                         f"(Kontowert {wert:.2f} € ÷ {'Daily Loss' if h['abstand_art'] == 'daily_loss' else 'Polster'} {h['abstand']:.0f} $ ÷ {par['netto_faktor']}) · Hedge zu am Boden {liq:.0f} $").replace(".", ",")).strip()}
         g = _ah_guard(p)
         g["hedge_freigabe_at"] = "not.is.null"
         try:
@@ -29010,6 +29040,42 @@ def ah_tick(jetzt=None, force=False):
         erg["umgestellt"] += 1
         _ah["umgestellt"] += 1
         _ah_spur(f"{wer} · {p.get('master_name') or '—'}: Apex mit Hedge {h['lots']:.2f} Lot (×{h['multiplier']}, q {h['q']}, Boden {liq:.0f})")
+
+    # (3) NACHZIEHEN — umgestellt, nicht geclaimt: Lots auf den Abstand bis zum Trade-Ende (ah_abstand). Gleiche Marge-Prüfung wie (2), die eigenen alten Lots
+    # zählen dabei nicht doppelt. Passt die Marge nicht, bleibt der Plan wie er ist (kleinerer Hedge) und die Spur sagt warum.
+    erg["nachgezogen"] = 0
+    for p in nachziehen:
+        a = konten.get(str(p.get("master_account_id")))
+        wer = namen.get(str(p["user_id"]), str(p["user_id"])[:8])
+        base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+        alt = base.get("apex_hedge") if isinstance(base.get("apex_hedge"), dict) else {}
+        h, wert, polster, bal, liq, fehl = rechnen(p, a)
+        if fehl or abs((_wd_num(p.get("master_risk")) or 0) - h["abstand"]) < 1 and abs((_wd_num(alt.get("lots")) or 0) - h["lots"]) < 0.005:
+            continue
+        login = str(alt.get("login") or "")
+        les = lesungen.get(login)
+        if not les or jetzt.timestamp() - float(les.get("at") or 0) > EH_LESUNG_MAX_S:
+            continue                                      # nächster Takt, sobald die Lesung frisch ist
+        ok, grund = eh_marge(les, h["lots"], p.get("richtung"), max(0.0, vorgemerkt.get(login, 0.0) - (_wd_num(alt.get("lots")) or 0)), par["max_lots"])
+        if not ok:
+            _ah_spur(f"{wer} · {p.get('master_name') or '—'}: bleibt bei {alt.get('lots')} Lot, Abstand-Hedge {h['lots']:.2f} Lot passt nicht — {grund}")
+            continue
+        info = dict(alt, at=_wt_now_iso(), lots=h["lots"], q=h["q"], multiplier=h["multiplier"], satz=round(wert / h["abstand"], 6), kontowert_eur=round(wert, 2),
+                    polster_usd=round(polster, 2), abstand_usd=h["abstand"], abstand_art=h["abstand_art"], liq_balance=liq, balance=round(float(bal), 2),
+                    nachgezogen={"at": _wt_now_iso(), "lots_vorher": alt.get("lots"), "master_risk_vorher": p.get("master_risk")})
+        upd = {"hedge_eur": round(wert, 2), "master_risk": h["abstand"], "slave_risk": h["slave_risk"], "multiplier": h["multiplier"],
+               "hedge_faktor": round(h["multiplier"], 3), "mt5_baseline": dict(base, apex_hedge=info)}
+        g = _ah_guard(p, mit=True)
+        g["hedge_freigabe_at"] = "not.is.null"
+        try:
+            if not sb_update("trade_plans", g, upd):
+                continue
+        except Exception as e:
+            _ah_spur(f"⚠️ {wer} · {p.get('master_name') or '—'} nicht nachgezogen: {type(e).__name__}: {str(e)[:200]}")
+            continue
+        vorgemerkt[login] = vorgemerkt.get(login, 0.0) - (_wd_num(alt.get("lots")) or 0) + h["lots"]
+        erg["nachgezogen"] += 1
+        _ah_spur(f"{wer} · {p.get('master_name') or '—'}: nachgezogen {alt.get('lots')} → {h['lots']:.2f} Lot, master_risk {h['abstand']:.0f} $ ({h['abstand_art']})")
     return erg
 
 
