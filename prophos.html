@@ -83,6 +83,7 @@
     --good-ink:#15803d;
     --danger-ink:#b91c1c;
     --warn-ink:#b45309;
+    --krone:#B8860B;            /* Admin-Krone am Avatar (02.11.2026) */
     --warn-bg:#FFFBEB;          /* helle Amber-Fläche (Hinweis-Kästen) */
 
     --r-sm:10px;
@@ -126,6 +127,7 @@
     --good-ink:#6CE9A6;
     --danger-ink:#FDA29B;
     --warn-ink:#FEC84B;
+    --krone:#F2C94C;
     --warn-bg:#2A2111;
 
     --shadow-card: 0 1px 2px rgba(0,0,0,.35);
@@ -922,6 +924,13 @@
     color:#fff;font-weight:600;font-size:11px;
     display:grid;place-items:center;
   }
+  /* ADMIN-KRONE (Finn 02.11.2026: „bei jeder Admin-ID … eine Krone, rechts unten“): rein visuell, keine Rechte */
+  #dashboard-view .user-avatar-rahmen{position:relative;display:inline-flex;flex-shrink:0}
+  #dashboard-view .admin-krone{position:absolute;right:-4px;bottom:-3px;width:13px;height:13px;border-radius:50%;background:var(--surface);color:var(--krone);display:grid;place-items:center;box-shadow:0 0 0 1px var(--border-soft, rgba(0,0,0,.08));pointer-events:none}
+  #dashboard-view .admin-krone[hidden]{display:none}
+  #dashboard-view .admin-krone svg{width:9px;height:9px;display:block}
+  #dashboard-view .ud-item .admin-krone{right:-4px;bottom:-4px;width:11px;height:11px}
+  #dashboard-view .ud-item .admin-krone svg{width:8px;height:8px}
   #dashboard-view .user-name{
     font-size:12.5px;font-weight:500;color:var(--ink);
     max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -8515,7 +8524,7 @@
 
     <div class="user-menu">
       <button class="user-btn" id="userBtn">
-        <div class="user-avatar" id="userAvatar">?</div>
+        <span class="user-avatar-rahmen"><div class="user-avatar" id="userAvatar">?</div><span class="admin-krone" id="userKrone" title="Admin" hidden></span></span>
         <span class="user-name" id="userName">Loading…</span>
         <svg class="user-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
@@ -12319,7 +12328,7 @@
           <!-- Kapitel + Acc-Käufe ausgeblendet (Finn 08.10.2026: „Kapitel auch visuell weg und mach das einfach zu Statistik dazu" · „genau wie Acc-Käufe auch zu Statistik hinzufügen") — Inhalte stehen jetzt unter Statistik, Reiter nur display:none -->
           <button class="subtab adm-tab" data-admtab="kapitel" style="display:none">Kapitel</button>
           <button class="subtab adm-tab" data-admtab="stat">Statistik</button>
-          <button class="subtab adm-tab" data-admtab="radarstat">Radar-Statistik</button>
+          <button class="subtab adm-tab" data-admtab="radarstat" data-reiter-aus="1" style="display:none">Radar-Statistik</button><!-- ausgeblendet (Finn 02.11.2026: „Radar-Statistik bitte auch visuell rausmachen“), Daten und Route bleiben -->
           <button class="subtab adm-tab" data-admtab="buys" style="display:none">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Alle Accounts (13.10.2026, Finn: „alle Accounts von allen IDs auf einem Bündel, 1:1 wie unter Accounts, nur mit Filter nach Zielen und Typen") -->
@@ -15111,7 +15120,12 @@
   })
 
   /* ========== USER HYDRATION ========== */
+  // ADMIN-KRONE (02.11.2026): genau diese drei IDs, Finn + Pascal, Pascal, Emin. Bewusst feste Liste: admin_voll hat Finn + Pascal und Pascal (für den Browser nicht lesbar), admin_zugang nur Emin
+  const ADMIN_KRONE_IDS = new Set(['48f272b4-913e-4598-a06a-1dcc3d5679fb', '728b4d23-ff5c-45f9-b6de-9b75c1f9a78a', '6cceb3f3-dc78-48ee-8668-26081da3e70f'])
+  const ADMIN_KRONE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 7l4.5 4L12 4l4.5 7L21 7l-2 12H5L3 7z"/></svg>'
   function hydrateUser(user){
+    const krone = document.getElementById('userKrone')
+    if(krone){ krone.innerHTML = ADMIN_KRONE_SVG; krone.hidden = !ADMIN_KRONE_IDS.has(String(user && user.id)) }
     const email = user.email || '—'
     const initial = (email[0] || 'U').toUpperCase()
     const name = user.user_metadata?.name || email.split('@')[0]
@@ -15431,7 +15445,7 @@
       const n = reviewCounts[p.userId] || 0
       return `
       <button class="ud-item" data-prof-switch="${escapeHtml(p.userId)}" title="Zu ${escapeHtml(p.email)} wechseln">
-        <span style="width:18px;height:18px;border-radius:50%;background:var(--violet);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${escapeHtml((p.email[0]||'U').toUpperCase())}</span>
+        <span style="width:18px;height:18px;border-radius:50%;background:var(--violet);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;position:relative">${escapeHtml((p.email[0]||'U').toUpperCase())}${ADMIN_KRONE_IDS.has(String(p.userId)) ? `<span class="admin-krone" title="Admin">${ADMIN_KRONE_SVG}</span>` : ''}</span>
         <span style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name || p.email)}</span>
         ${n ? `<span title="${n} Trade${n===1?'':'s'} warten auf Bestätigung" style="background:var(--violet);color:#fff;border-radius:9px;min-width:17px;height:17px;padding:0 5px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">${n}</span>` : ''}
         <span data-prof-remove="${escapeHtml(p.userId)}" title="Aus der Liste entfernen" style="opacity:.45;font-size:15px;line-height:1;padding:8px 10px;margin:-8px -8px -8px 0">×</span>
