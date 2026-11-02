@@ -58378,7 +58378,7 @@
     if(tpWdWartetAufBestaetigung(p)) return { kurz: '⏳ Wartet auf Bestätigung · Funded-Planer → Winning Days', marke: '⏳ Bestätigung offen',
       voll: 'Wartet auf deine Bestätigung im Funded-Planer → Winning Days. Ohne Bestätigung startet der Trade nicht und läuft ab; bestätigt startet er zur Startzeit (schon vorbei: in 3–6 min, am selben Handelstag).', versuche: 1, at: null }
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
-    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
+    if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge', 'echo_hedge'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
     const text = String(s.text || '').replace(/\s+—\s+Start.*$/, '')
     // Ein finaler Tradeify je ID (21.10.2026): eigener Satz — gelöst wird es nicht durch Abhaken, sondern sobald der andere finale Trade gelesen ist
@@ -58388,6 +58388,10 @@
       : { kurz: `⛔ Wartet: Waage-Deckel${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,
           voll: `Wartet: ${text}. Startet von selbst, sobald das Futures-Buch es zulässt (höchstens 2 Trades Abstand); bis dahin neuer Versuch alle 10–20 min bis Fensterende.`,
           versuche: Number(s.versuche) || 1, at: s.at }
+    // ECHO OHNE HEDGE HÄLT (02.11.2026, DB-Riegel trade_plans_a1_echo_hedge): Hedge vorgesehen, aber gerade nicht rechenbar; nach 8 h aufgegeben, dann läuft der Plan ab
+    if(s.art === 'echo_hedge') return s.status === 'aufgegeben'
+      ? { kurz: '⛔ Echo-Hedge nicht rechenbar — nicht gestartet', marke: '⛔ Wartet auf Hedge', voll: `Nicht gestartet: ${text}. Nach 8 h gibt der Riegel auf, der Plan läuft ab.`, versuche: Number(s.versuche) || 1, at: s.at }
+      : { kurz: `⛔ Wartet auf Echo-Hedge${um ? ` · neuer Versuch ${um}` : ''}`, marke: '⛔ Wartet auf Hedge', voll: `Wartet: ${text}. Startet von selbst mit Hedge, sobald er rechenbar ist; bis dahin neuer Versuch alle 15–30 min.`, versuche: Number(s.versuche) || 1, at: s.at }
     // Apex immer mit Hedge (30.10.2026, DB-Riegel trade_plans_a1_apex_hedge): wartet, bis Railway den Hedge rechnen kann — nie ohne Hedge
     if(s.art === 'apex_hedge'){ if(p.mt5Baseline.apex_hedge && p.mt5Baseline.apex_hedge.status === 'mit') return null
       return { kurz: `⛔ Wartet auf Hedge${um ? ` · neuer Versuch ${um}` : ''}${Number(s.versuche) > 1 ? ` · Versuch ${Number(s.versuche)}` : ''}`,

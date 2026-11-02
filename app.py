@@ -27044,7 +27044,7 @@ def gp_push_ereignisse(plaene, namen, seit_iso):
         if sf and sf.get("status") == "rot" and str(sf.get("at") or "") > seit_iso and sf.get("schritt") != "ziel_erreicht":
             out.append((f"{pid}|sf|{sf.get('at')}", "⚠ Trade nicht gestartet", f"{wer} · {konto}: {str(sf.get('msg') or 'Start-Check rot')[:150]}"))
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else None
-        if ss and ss.get("art") in ("final_halten", "hedge_freigabe", "apex_hedge"):
+        if ss and ss.get("art") in ("final_halten", "hedge_freigabe", "apex_hedge", "echo_hedge"):   # echo_hedge: ⚪ kommt aus _eh_ohne
             ss = None                                # finaler Tradeify gehalten (29.10.2026): eigene ⚪-Meldung in alarm_ereignisse
         if ss and str(ss.get("at") or "") > seit_iso:
             out.append((pid + "|ss", "⛔ Order ging nicht durch — Richtungsschutz",
@@ -27441,6 +27441,18 @@ def _eh_guard(p, route="mt5v2"):
     return g
 
 
+# ECHO OHNE HEDGE HÄLT (Finn über Eingang 02.11.2026): Diese Gründe sind vorübergehend, der Hedge ist vorgesehen und kommt, sobald er rechenbar ist; der Claim-Riegel trade_plans_a1_echo_hedge
+# hält den Start (sql/2026-11-02_echo_ohne_hedge_riegel.sql). Bewusst NICHT: mini (Tage sammeln, gewollt), kein_konto (ID ohne Fusion, kommt nie von selbst), groesse (u. a. Hedge unter
+# 0,01 Lot, laut sql/2026-10-29_echo_hedge_an.sql gewollter Rückfall). Liste gleich halten mit der SQL-Datei.
+EH_HALT_CODES = ("balance", "lesung", "marge", "grenze")
+
+
+def eh_ohne_text(code, grund):
+    """REIN RECHNEND (testbar): ⚪-Text zu einem Plan ohne Hedge — hält der Riegel oder startet er wirklich ohne."""
+    return (f"startet nicht, bis der Hedge rechenbar ist (Start rückt je 15–30 min, höchstens 8 h) — {grund}" if code in EH_HALT_CODES
+            else f"startet als Echo V2 ohne Hedge — {grund}")
+
+
 def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
     """Plan bleibt (vorerst) Echo V2 ohne Hedge. Geschrieben wird nur bei neuem Grund-Code oder fälliger Meldung: mt5_baseline.echo_hedge
     {status ohne, code, grund}, Notiz beim ersten Grund; ⚪-Meldung einmal je Plan, sobald der Start ≤ EH_MELDEN_MIN entfernt ist."""
@@ -27469,7 +27481,7 @@ def _eh_ohne(p, code, grund, wer, jetzt, melden=True):
         _eh_spur(f"{wer} · {p.get('master_name') or '—'}: ohne Hedge — {grund}")
     if melden:
         alarm_senden(3, "echo_hedge_ohne", "Echo-Hedge ausgelassen",
-                     f"{wer} · {p.get('master_name') or '—'}: startet als Echo V2 ohne Hedge — {grund}",
+                     f"{wer} · {p.get('master_name') or '—'}: {eh_ohne_text(code, grund)}",
                      uid=p.get("user_id"), plan_id=p.get("id"), schluessel=f"eh-ohne-{p['id']}")
 
 
@@ -34858,9 +34870,6 @@ def _ap_bal_auto_senden(kand, accs, d, tag, merk, uids_offen=None, wer=""):
     for kid, grund in kand.items():
         a = accs[kid]
         zeile = {"konto_id": kid, "konto": a.get("name"), "user_id": str(a.get("user_id") or ""), "grund": grund}
-        if str(a.get("user_id") or "") in (uids_offen or ()):   # nur Gruppen-Weg: keine Lesung, solange diese ID einen Trade offen hat (Eingang 02.11.2026)
-            ueber.append(dict(zeile, warum="offener Trade dieser ID — Lesung wartet"))
-            continue
         st_db = (db_stand or {}).get(kid) or {}
         gesperrt, warum_u = ap_bal_auto_username_sperre(st_db, _ap_tv_username_da(tvu, a), jetzt_s)
         if gesperrt:
@@ -34893,6 +34902,10 @@ def _ap_bal_auto_senden(kand, accs, d, tag, merk, uids_offen=None, wer=""):
             sig, fehler = _wd_balance_signal(a, (ml[0] if ml else {}).get("mt5_login") or "")
             if fehler:
                 ueber.append(dict(zeile, warum=str(fehler[1])[:160]))
+                continue
+            # Nur Gruppen-Weg (Eingang 02.11.2026): Puls-Lesung wartet bei offenem Trade der ID, sie wechselt das Konto im Puls-Chrome; mt5_balance lässt Puls unberührt und läuft weiter
+            if sig["params"]["aktion"] != "mt5_balance" and str(a.get("user_id") or "") in (uids_offen or ()):
+                ueber.append(dict(zeile, warum="offener Trade dieser ID — Puls-Lesung wartet"))
                 continue
             if sig["params"]["aktion"] == "mt5_balance":
                 ort = _mt5_ort_fehler(sig["user_id"], sig["params"]["login"])
@@ -34937,6 +34950,13 @@ def ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, letzt, echo_bal
     return out
 
 
+def ap_bal_gruppe_funded_filter(konten, firmen_fdp, firmen_fcp):
+    """REIN RECHNEND (testbar): Funded → Firmen an im Funded-Planer, Funded CFD → Firmen an im Funded-CFD-Planer. Eine Firma, die kein Planer fährt, wird nicht gelesen."""
+    an = lambda fs: [f for f in fs or () if isinstance(f, dict) and f.get("an")]
+    fdp, fcp = an(firmen_fdp), an(firmen_fcp)
+    return [a for a in konten or () if ap_regel_finden(fcp if a.get("account_type") == "funded_cfd" else fdp, a.get("firm"))]
+
+
 def ap_bal_auto_gruppen_tick(jetzt, reg=None):
     """Ein Takt (aus ap_loop direkt nach ap_bal_auto_tick): alle AP_BAL_AUTO_TAKT_S, nur wenn auto_plan_regeln.aktiv, je Gruppe auto_plan_gruppe.aktiv."""
     if time.time() - (_ap_bal_auto_gr.get("at") or 0) < AP_BAL_AUTO_TAKT_S:
@@ -34960,7 +34980,17 @@ def ap_bal_auto_gruppen_tick(jetzt, reg=None):
     plaene = [p for p in plaene if p.get("status") != "open"]
     konten = {str(a.get("id")): a for a in _ap_konten_laden({"user_id": in_uids, "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})}
     echo_bal, dup_bal = _ap_balance_karten()
-    kand = ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, ap_letzt_je_konto(plaene), echo_bal, dup_bal, _ap_archiviert())
+    letzt, archiv = ap_letzt_je_konto(plaene), _ap_archiviert()
+    kand = ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, letzt, echo_bal, dup_bal, archiv)
+    # Funded + Funded CFD der Gruppe (Eingang 02.11.2026, Lücke aus S17): eigener try, ein Fehler lässt die Planer-Konten unberührt. Firmen wie die Funded-Planer (an), Regeln wie HT-Quelle (E).
+    try:
+        f_konten = ap_bal_gruppe_funded_filter(_sb_all("accounts", {"select": AP_KONTO_FELDER + ",waiting_payout_since", "user_id": in_uids, "account_type": "in.(funded,funded_cfd)"}),
+                                               (_fdp_regeln_laden() or {}).get("firmen"),
+                                               (sb_select("funded_cfd_plan_regeln", {"select": "firmen", "id": "eq.1"}) or [{}])[0].get("firmen"))
+        kand.update(ap_bal_auto_funded(f_konten, letzt, set(kand), echo_bal, dup_bal, archiv))
+        konten.update({str(a.get("id")): a for a in f_konten})
+    except Exception as e:
+        print(f"[balance-auto Gruppe] ⚠️ Funded-Konten nicht gelesen ({type(e).__name__}: {e}) — nur Planer-Konten", flush=True)
     if not kand:
         return None
     return _ap_bal_auto_senden(kand, konten, d, tag, _ap_bal_auto_gr, uids_offen=uids_offen, wer=" Gruppe")
