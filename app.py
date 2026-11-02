@@ -15066,8 +15066,14 @@ def admin_wd_plaene():
     if request.method == "OPTIONS":
         return "", 200
     # WD-ZEILE VON HAND (Finn 02.11.2026 19:20): „jede Admin-ID darf seine Slaves-IDs da editieren“ — eigene Rechte-Prüfung (wd_hand_darf), nicht das Planer-Gate
-    if request.method in ("POST", "DELETE") or (request.method == "PATCH" and str((request.get_json(silent=True) or {}).get("aktion") or "") not in PLANER_WD_AUTOMATIK + WD_HAND_AKTIONEN):
+    _akt = str((request.get_json(silent=True) or {}).get("aktion") or "") if request.method == "PATCH" else ""
+    if request.method in ("POST", "DELETE") or (request.method == "PATCH" and _akt not in PLANER_WD_AUTOMATIK + WD_HAND_AKTIONEN):
         _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
+        # EIGENE PLÄNE ABHAKEN (Finn 02.11.2026 ~19:30, Toast „Nur ‚Finn + Pascal‘ und ‚Pascal‘ dürfen im Planer etwas ändern“ beim Abhaken im Radar): das Gate
+        # sperrte seit 30.10. auch „erledigt“ & Co. auf EIGENEN Plänen — der Radar unter einer Mitglieds-ID und der PC-Tab (hakt eigene Trades ab) liefen ins 403.
+        # Eigene Pläne bleiben frei; fremde weiter nur für „Finn + Pascal“/„Pascal“ (Besitz-Prüfung unten wie bisher)
+        if _gs is not None and _gs[1] == 403 and _akt in WD_ABHAK_EIGEN and wd_plan_eigen(_wd_login_uid_still(), (request.get_json(silent=True) or {}).get("plan_id")):
+            _gs = None
         if _gs is not None:
             return _gs
     me, err = _wd_login()
@@ -25162,6 +25168,29 @@ PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balan
 # Nachholen verpasster Pläne (POST /admin/auto-plan/plan aktion nachholen) ruft sfTick in JEDEM PC-Tab automatisch — gesperrt fiele der Tab auf
 # start_um per supabase-js zurück, OHNE die Prüfungen von ap_nachhol_minute (Richtungsschutz, Abstände). Deshalb nie gesperrt.
 PLANER_PLAN_AUTOMATIK = ("nachholen",)
+# Abhak-Wege des Radars/PC-Tabs, die das Planer-Gate auf EIGENEN Plänen durchlässt (02.11.2026, s. admin_wd_plaene)
+WD_ABHAK_EIGEN = ("erledigt", "vormerken", "vormerken_weg", "manuell", "manuell_weg")
+
+
+def wd_plan_eigen(uid, plan_id):
+    """Gehört der Plan dem Login? (uid, plan_id) → bool. Nicht lesbar oder unklar → False (dann sperrt das Gate wie bisher)."""
+    pid = str(plan_id or "").strip()
+    if not uid or len(pid) < 10:
+        return False
+    try:
+        z = sb_select("trade_plans", {"select": "user_id", "id": f"eq.{pid}", "limit": "1"}) or []
+    except Exception:
+        return False
+    return bool(z) and str(z[0].get("user_id")) == str(uid)
+
+
+def _wd_login_uid_still():
+    """user_id des Logins ohne Fehler-Antwort (None, wenn nicht angemeldet)."""
+    try:
+        uid, err = _wd_login()
+        return None if err else uid
+    except Exception:
+        return None
 
 
 def planer_schreib_recht(admin, uid, gruppe_menge, voll_uids):
@@ -25206,6 +25235,12 @@ def _planer_schreib_gate():
     if ok:
         return None
     msg = "Nur „Finn + Pascal“ und „Pascal“ dürfen im Planer etwas ändern — diese ID kann hier nur ansehen"
+    try:   # welche ID angemeldet ist (02.11.2026: Finn sah den Toast, ohne zu wissen, unter welcher ID der Tab lief)
+        _nm = _ap_namen()[0].get(str(uid))
+        if _nm:
+            msg += f" (angemeldet: {_nm})"
+    except Exception:
+        pass
     print(f"[planer-rechte] ⛔ {str(uid)[:8]} {request.method} {request.path}", flush=True)
     return jsonify({"ok": False, "error": msg, "msg": msg, "nur_ansehen": True}), 403
 

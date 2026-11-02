@@ -38339,6 +38339,18 @@
    * Funded-CFD-Ziel (Waiting for Payout). Dazu die technischen Fälle (nicht in Überprüfen, Polar, eigener Plan mit eigenem Dialog, gesperrt, manuell, Hedge offen).
    * BLEIBT AUCH (belegt 02.11.2026): ohne echte Lesung, wartet auf Lesung, Hedge-P&L fehlt, unplausibel/Balance-Sprung. Der Ein Klick bucht die Vorbelegung (Schätzung, wenn keine Lesung
    * da ist) und setzt den Plan auf erledigt; danach liest Puls nicht mehr nach (tvV2EndlesungGrund: „erledigt — der P&L am Plan gilt"), der Wert wäre für immer falsch. */
+  /* ECHTE LESUNG AM TP SCHLÄGT DIE DEMO (Finn 02.11.2026 ~19:30, 8. Meldung, Foto: Moritz Tradeify 150k …9553, Plan 955c18be): Puls las +3.478,50 $ (TP 3.490 $),
+   * die Demo meldete 14:38 „demo_liq“ — der Kurs lief NACH dem TP bis an das Liq-Level, die Demo hatte den TP verpasst. Ergebnis: Popup „Blow-Beweis oder unklares Ende“
+   * und „Demo an der Liq“, obwohl nichts passiert war (24 h HT: 2 solche Pläne, beide Tradeify). Gilt nur, wenn ZWEI unabhängige Zahlen derselben Puls-Lesung
+   * zusammenpassen — Balance nachher − vorher (pl_balance) und Total P/L der Account summary (today_pnl) auf 5 $ — und beide am TP liegen (Toleranz wie unten).
+   * Eine Lesung im falschen Konto oder ein echter Blow trifft das nicht; Konto weg/geblowt/TopstepX-Blow bleiben eigene Gründe und haben ihr Popup. */
+  function wdlLesungAmTp(t){
+    const e = (t && t.endlesung) || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
+    if(e.quelle !== 'puls' || e.puls_aufgegeben || e.balance_quelle === 'folgetrade' || !(Number(t.balance_end) > 0) || !zahl(t.pl_balance) || !zahl(e.today_pnl)) return false
+    const pl = Number(t.pl_balance), tp = Math.abs(Number(t.master_tp)) || 0
+    return pl > 0 && tp > 0 && Math.abs(Number(e.today_pnl) - pl) <= 5 && Math.abs(pl - tp) <= Math.max(50, tp * 0.15)
+  }
+  window._wdlLesungAmTp = wdlLesungAmTp   // Test-Haken
   function wdlEinKlickGrund(t){
     if(!t || t.status !== 'review') return 'nicht in Überprüfen'
     if(wdlIstPolar(t)) return 'Polar'
@@ -38349,14 +38361,17 @@
     if(wdlGeblowtUrteil(t) || wdlKontoWeg(t) || wdlKontoWegErg(t)) return 'geblowt oder Konto weg'
     const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
     if(e.konto_geblowt || e.konto_weg || e.konto_weg_vermutet || /^konto_(nicht_erreicht|weg|geblowt)/.test(String(e.puls_fehler || ''))
-       || ['tsx_geblowt', 'demo_liq', 'demo_beide', 'demo_unklar', 'demo_konto_weg', 'demo_konto_unklar', 'konto_weg'].includes(String(e.grund || ''))) return 'Blow-Beweis oder unklares Ende'
+       || ['tsx_geblowt', 'demo_konto_weg', 'demo_konto_unklar', 'konto_weg'].includes(String(e.grund || ''))
+       || (['demo_liq', 'demo_beide', 'demo_unklar'].includes(String(e.grund || '')) && !wdlLesungAmTp(t))) return 'Blow-Beweis oder unklares Ende'
     // (b) Ziel erreicht / bestanden / Phasenwechsel
     if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlZielMarkiert(t)) return 'Ziel erreicht'
     const ka = t.konto_aktuell, typ = String(t.konto_typ || (ka && ka.typ) || '')
     if(ka && ka.ziel_erreicht_at) return 'Ziel erreicht'
     if(ka && t.konto_typ && ka.typ && String(t.konto_typ) !== String(ka.typ)) return 'Konto in anderer Phase'
     // (c) Funded Futures → Winning Days anbieten, Funded CFD am Ziel → Waiting for Payout
-    if(typ === 'funded') return 'Funded Futures: Winning Days anbieten'
+    // NUR BEI GEWONNENEM BIG TRADE (02.11.2026, 24 h HT: 17 Funded-Pläne, meist Tages-Trades −8,90/111 $ oder Verluste): „→ Winning Days“ heißt im Popup „Big Trade gewonnen
+    // → Konto bestanden“. Popup also nur, wenn der P&L am TP liegt (Toleranz wie unten) oder pl_balance fehlt (dann Popup wie bisher); ein Blow fängt die Prüfung oben
+    if(typ === 'funded' && (!zahl(t.pl_balance) || (Number(t.pl_balance) > 0 && Math.abs(Number(t.pl_balance)) >= (Math.abs(Number(t.master_tp)) || 0) - Math.max(50, (Math.abs(Number(t.master_tp)) || 0) * 0.15)))) return 'Funded Futures: Winning Days anbieten'
     if(wdlFcfdZielErreicht(t)) return 'Funded-CFD-Ziel erreicht'
     if(t.hedge && t.hedge.status !== 'geschlossen') return 'Hedge offen'
     // Schutz der Buchung (s. oben): nie eine Schätzung oder einen zweifelhaften Wert endgültig machen
@@ -38370,7 +38385,7 @@
     if(!ka) return 'Konto-Stand unbekannt'
     if(['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0 && (wdlBlowStand(t) || {}).liq != null)) return 'Ziel oder Boden unbekannt'
     const dm = t.demo || {}
-    if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t)) return 'Demo an der Liq, Lesung ohne Blow'
+    if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t) && !wdlLesungAmTp(t)) return 'Demo an der Liq, Lesung ohne Blow'   // Lesung am TP: s. wdlLesungAmTp
     // VERLUST OHNE SL (Finn 02.11.2026, Foto; 57 von 92 Futures-Plänen der letzten 3 Tage ohne master_sl, Fall Marco Apex …0011, Plan 07d2a045, −1.616,20 $): Bezug ist
     // dann master_risk (Apex: Tageslimit, sonst das geplante Risiko), sonst der Abstand Start → Liquidation. Fehlt alles, bleibt das Popup
     const pl = Number(t.pl_balance), stand = wdlBlowStand(t) || {}
@@ -54476,7 +54491,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1995'
+  const OS_TAB_BUILD = '2026-09-22.1996'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

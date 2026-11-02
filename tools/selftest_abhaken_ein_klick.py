@@ -14,7 +14,8 @@ def check(ok, name):
         FEHLER.append(name)
 
 
-fn = html[html.index("function wdlEinKlickGrund("):html.index("window._wdlEinKlickGrund")]
+# wdlLesungAmTp (02.11.2026, S20) steht direkt davor und gehört zur Rechnung
+fn = html[html.index("function wdlLesungAmTp("):html.index("window._wdlLesungAmTp")] + html[html.index("function wdlEinKlickGrund("):html.index("window._wdlEinKlickGrund")]
 for marker, name in (("wdlGeblowtUrteil(t)", "geblowt → Popup"), ("wdlBestandenChip(t)", "bestanden → Popup"), ("wdlFcfdZielErreicht(t)", "Funded-CFD-Ziel → Popup"),
                      ("zahl(t.pl_balance)", "ohne echte Lesung → Popup"), ("wdlManuell(t)", "manuell → Popup"),
                      ("t.hedge.status !== 'geschlossen'", "Hedge offen → Popup"), ("Hedge-P&L fehlt", "Hedge-P&L fehlt → Popup"), ("mklWdEigenerPlan(", "eigener Plan → Popup")):
