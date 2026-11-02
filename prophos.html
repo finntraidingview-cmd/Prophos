@@ -5220,6 +5220,7 @@
   #dashboard-view .wdl-og3-kopf b::before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--wdl-og);margin-right:10px;vertical-align:2px}
   #dashboard-view .wdl-og3-kopf span{font-size:13px;font-weight:700;padding:1px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border-soft);color:var(--ink-2);font-variant-numeric:tabular-nums}
   #dashboard-view .wdl-og3-kopf small{margin-left:auto;font-size:12px;color:var(--sub)}
+  #dashboard-view .wdl-og3-kopf .wdl-vm-weg{border:0;background:transparent;padding:0;font:inherit;color:var(--violet);cursor:pointer;text-decoration:underline dotted}   /* „n vorgemerkt ×“ (02.11.2026) */
   #dashboard-view .wdl-og3 > .wdl-tab + .wdl-tab{margin-top:12px}
   #dashboard-view .wdl-og3-lauf{--wdl-og:var(--blue,#2563eb)}
   #dashboard-view .wdl-og3-erledigt{--wdl-og:#ea580c}
@@ -38172,8 +38173,29 @@
    * und verschwindet aus „Erledigt". Kommt die Lesung, hakt der Radar ihn über den Ein-Klick-Weg ab (wdlVorgemerktTick), mit der echten Lesung als Wert. Braucht er dann doch eine
    * Aktion (Blow, Ziel …), steht er wieder in „Erledigt" und öffnet beim Klick das Popup. Geschätzt wird nie etwas gebucht. */
   const WDL_VORMERK_GRUENDE = new Set(['wartet auf Lesung', 'keine echte Lesung', 'Hedge-P&L fehlt'])
+  const WDL_VORMERK_FRIST_MS = 6 * 3600000   // Stopp S9 (02.11.2026): nie ewig versteckt — danach steht der Plan wieder in „Erledigt"
   const wdlVorgemerkt = t => !!(t && t.status === 'review' && t.vorgemerkt && t.vorgemerkt.at)
-  const wdlVorgemerktVersteckt = t => wdlVorgemerkt(t) && WDL_VORMERK_GRUENDE.has(wdlEinKlickGrund(t))
+  // Kommt der Wert noch? Nur solange Puls liest (wartet) bzw. der Hedge-P&L nachkommen kann. Aufgegeben, Folgetrade, Lesung fertig ohne Wert = endgültig → Popup
+  const wdlVormerkbar = (t, grund) => {
+    const e = (t && t.endlesung) || {}
+    if(!WDL_VORMERK_GRUENDE.has(grund) || e.puls_aufgegeben || e.balance_quelle === 'folgetrade') return false
+    return grund !== 'keine echte Lesung' || !!wdlWartet(t)
+  }
+  const wdlVorgemerktVersteckt = t => wdlVorgemerkt(t) && Date.now() - (Date.parse(t.vorgemerkt.at) || 0) < WDL_VORMERK_FRIST_MS && wdlVormerkbar(t, wdlEinKlickGrund(t))
+  // „n vorgemerkt" anklicken: alle zurück in „Erledigt" (vormerken_weg)
+  async function wdlVormerkenWeg(){
+    const liste = ((wdl.daten && wdl.daten.trades) || []).filter(wdlVorgemerktVersteckt)
+    for(const t of liste){ const pid = wdlTid(t); t.vorgemerkt = null; wdlLokalMerken(pid, { vorgemerkt: null }) }
+    wdlRender()
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      for(const t of liste){
+        const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?${WDL_SICHT}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ aktion: 'vormerken_weg', plan_id: wdlTid(t) }) })
+        if(!r.ok) throw new Error('HTTP ' + r.status)
+      }
+    }catch(e){ if(typeof atToast === 'function') atToast('Vormerkung nicht überall entfernt: ' + String((e && e.message) || e), 'end') }
+  }
   window._wdlVorgemerktVersteckt = wdlVorgemerktVersteckt   // Test-Haken
   async function wdlVormerken(pid, t, grund){
     const vm = { at: new Date().toISOString(), grund }
@@ -39082,7 +39104,7 @@
         + manuell(g, a)
       const best = bestanden(g.pr.filter(istBest), a.pr.filter(istBest), nachAblage(gep), [...g.pr, ...g.er])   // Rest von Hand (20.10.2026): beendete + abgehakte Zeilen
       return og3('Läuft', g.la.length, 'Trades am Markt', 'wdl-og3-lauf', gruppe('Am Markt', nachStart(g.la), ['Spanne', 'P&amp;L', 'Seit'], 'wdl-tab-lauf wdl-tab-sek-lauf', null, a.la) || '<div class="wdl-og3-leer">Gerade läuft nichts.</div>')
-        + og3('Erledigt', erledigtN, (erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt') + (vorgemerktN ? ` · ${vorgemerktN} vorgemerkt, P&L vorläufig — wird abgehakt, sobald die Lesung da ist` : ''), 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
+        + og3('Erledigt', erledigtN, (erledigtN ? 'zu — oben abhaken, was normal lief' : 'alles abgehakt') + (vorgemerktN ? ` · <button type="button" class="wdl-vm-weg" data-wdl-vm-weg="1" title="Alle zurück nach „Erledigt" — dann öffnet der Klick wieder das Popup">${vorgemerktN} vorgemerkt ×</button> P&L vorläufig, wird abgehakt, sobald die Lesung da ist` : ''), 'wdl-og3-erledigt', erledigt || '<div class="wdl-og3-leer">Nichts abzuhaken.</div>')
         + og3('Bestanden', best.n, 'Trade abhaken → Rest von Hand → Tage sammeln → Review', 'wdl-og3-bestanden', best.html)
         + verlaufOg(a.er)
     }
@@ -39166,6 +39188,7 @@
     }
     const an = ev.target.closest('[data-wdl-ansehen]')
     if(an){ if(!an.disabled) wdlAnsehen(an.getAttribute('data-wdl-ansehen')); return }
+    if(ev.target.closest('[data-wdl-vm-weg]')){ wdlVormerkenWeg(); return }   // „n vorgemerkt ×“ (02.11.2026)
     const ab = ev.target.closest('[data-wdl-abhaken]')
     if(ab){
       if(ab.disabled) return
@@ -39173,7 +39196,7 @@
       // Doppelklick: die Zeile ist nach dem ersten Klick weg, die nächste rückt unter den Mauszeiger und würde ohne Popup mitgebucht (Gegenprüfung 30.10.2026)
       if(Date.now() - _wdlEinKlickAt < 600) return
       const grund = t ? wdlEinKlickGrund(t) : 'kein Trade'
-      if(t && WDL_VORMERK_GRUENDE.has(grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }   // ohne Lesung: vormerken, nie schätzen (02.11.2026)
+      if(t && wdlVormerkbar(t, grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }   // ohne Lesung: vormerken, nie schätzen (02.11.2026)
       const ein = !!t && !grund; if(ein) _wdlEinKlickAt = Date.now()
       if(t) mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: ein })   // Radar = Admin-Ansicht (27.10.2026)
       return
@@ -54230,7 +54253,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1984'
+  const OS_TAB_BUILD = '2026-09-22.1985'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

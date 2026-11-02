@@ -69,7 +69,8 @@ for (name, _f, soll), g in zip(FAELLE, erg):
     check((g == "") is soll, f"{name}: {'Ein Klick' if not g else 'Popup: ' + g}")
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py"), encoding="utf-8").read()
 # ── VORMERKEN statt Popup ohne Lesung (Finn 02.11.2026): Abhaken ohne Lesung → vorgemerkt, versteckt → Lesung kommt → Ein-Klick-Weg mit echtem Wert ──
-check("WDL_VORMERK_GRUENDE.has(grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }" in html, "Klick ohne Lesung merkt vor statt Popup")
+check("if(t && wdlVormerkbar(t, grund)){ _wdlEinKlickAt = Date.now(); wdlVormerken(pid, t, grund); return }" in html, "Klick ohne Lesung merkt vor statt Popup, nur wenn der Wert noch kommen kann")
+check("if(ev.target.closest('[data-wdl-vm-weg]')){ wdlVormerkenWeg(); return }" in html and "aktion: 'vormerken_weg'" in html, "„n vorgemerkt ×“ nimmt die Vormerkung zurück")
 check("if(opts.nurStill){ _mwdErlId = null; return }" in oe, "vorgemerkt: der Takt öffnet nie ein Popup von selbst")
 check('"vorgemerkt": base.get("abhaken_vorgemerkt")' in src and '"p_patch": {"abhaken_vorgemerkt": vm}, "p_status": "review"' in src and '"vormerken", "vormerken_weg"' in src, "Railway: Kennzeichen nur an Plänen in Überprüfen, live-trades liefert es")
 check("wdl.daten = d; wdl.fehler = ''\n      setTimeout(() => { try{ wdlVorgemerktTick() }" in html, "Takt nach jedem Radar-Abruf")
@@ -81,17 +82,24 @@ const document = { getElementById: () => ({ classList: { contains: () => false }
 let geoeffnet = []; function mklWdErledigtOeffnen(pid, t, o){ geoeffnet.push([pid, !!o.einKlick, !!o.nurStill]) }
 const wdl = { daten: { trades: [] } };
 """ + vm + """
-const T = """ + json.dumps(dict(BASIS, id="v1", pl_balance=None)) + """;
+const T = """ + json.dumps(dict(BASIS, id="v1", pl_balance=None, _wart=True)) + """;
 const vorher = wdlEinKlickGrund(T);
-T.vorgemerkt = { at: '2026-11-02T10:00:00Z', grund: vorher }; wdl.daten.trades = [T];
+T.vorgemerkt = { at: new Date().toISOString(), grund: vorher }; wdl.daten.trades = [T];
 const versteckt = wdlVorgemerktVersteckt(T); wdlVorgemerktTick(); const ohneLesung = geoeffnet.length;
-T.pl_balance = 650; T.balance_end = 100650;
+T.pl_balance = 650; T.balance_end = 100650; T._wart = false;
 const sichtbar = !wdlVorgemerktVersteckt(T); wdlVorgemerktTick(); const nachLesung = geoeffnet.slice(); wdlVorgemerktTick();
-const B = """ + json.dumps(dict(BASIS, id="v2", pl_balance=None)) + """; B.vorgemerkt = { at: 'x' }; wdl.daten.trades = [B];
+const jetztIso = new Date().toISOString();
+const B = """ + json.dumps(dict(BASIS, id="v2", pl_balance=None)) + """; B.vorgemerkt = { at: jetztIso }; wdl.daten.trades = [B];
 B.pl_balance = 650; B._blow = true; const blowSichtbar = !wdlVorgemerktVersteckt(B); wdlVorgemerktTick();
-const F = """ + json.dumps(dict(BASIS, id="v3", pl_balance=None)) + """; F.vorgemerkt = { at: 'x' }; wdl.daten.trades = [F];
+const F = """ + json.dumps(dict(BASIS, id="v3", pl_balance=None)) + """; F.vorgemerkt = { at: jetztIso }; wdl.daten.trades = [F];
 F.pl_balance = 40000; const falschSichtbar = !wdlVorgemerktVersteckt(F); wdlVorgemerktTick();
-print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar, falschSichtbar }));
+const A = """ + json.dumps(dict(BASIS, id="v4", pl_balance=None, _wart=True)) + """; A.vorgemerkt = { at: jetztIso };
+const wartetVersteckt = wdlVorgemerktVersteckt(A);
+A.vorgemerkt = { at: new Date(Date.now() - 7 * 3600000).toISOString() }; const fristSichtbar = !wdlVorgemerktVersteckt(A);
+const P = """ + json.dumps(dict(BASIS, id="v5", pl_balance=None, endlesung={"puls_aufgegeben": True})) + """; P.vorgemerkt = { at: jetztIso };
+const aufgegebenSichtbar = !wdlVorgemerktVersteckt(P), aufgegebenVormerkbar = wdlVormerkbar(P, wdlEinKlickGrund(P));
+const K = """ + json.dumps(dict(BASIS, id="v6", pl_balance=None)) + """; const fertigOhneWert = wdlVormerkbar(K, wdlEinKlickGrund(K));
+print(JSON.stringify({ vorher, versteckt, ohneLesung, sichtbar, nachLesung, zweimal: geoeffnet.length, blowSichtbar, falschSichtbar, wartetVersteckt, fristSichtbar, aufgegebenSichtbar, aufgegebenVormerkbar, fertigOhneWert }));
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d2:
     d2.write(js2)
@@ -102,7 +110,9 @@ try:
 except Exception:
     v = {}
     print("JS:", r2.stdout[-600:], r2.stderr[-600:])
-check(v.get("vorher") == "keine echte Lesung" and v.get("versteckt") is True and v.get("ohneLesung") == 0, "ohne Lesung: vorgemerkt, aus „Erledigt“ raus, nichts abgehakt")
+check(v.get("vorher") == "wartet auf Lesung" and v.get("versteckt") is True and v.get("ohneLesung") == 0, "wartet auf Lesung: vorgemerkt, aus „Erledigt“ raus, nichts abgehakt")
+check(v.get("wartetVersteckt") is True and v.get("fristSichtbar") is True, "nach 6 h wieder sichtbar")
+check(v.get("aufgegebenSichtbar") is True and v.get("aufgegebenVormerkbar") is False and v.get("fertigOhneWert") is False, "Puls aufgegeben bzw. Lesung fertig ohne Wert: nie versteckt, Klick öffnet das Popup")
 check(v.get("sichtbar") is True and v.get("nachLesung") == [["v1", True, True]] and v.get("zweimal") == 1, "Lesung da: genau ein stiller Ein-Klick mit der echten Lesung, kein zweiter binnen 60 s")
 check(v.get("blowSichtbar") is True and v.get("zweimal") == 1, "nach der Lesung Blow: zurück in „Erledigt“, kein stilles Abhaken (Popup beim Klick)")
 check(v.get("falschSichtbar") is True and v.get("zweimal") == 1, "Lesung im falschen Konto (+40k): kein stilles Abhaken, zurück in „Erledigt“ mit Popup")
