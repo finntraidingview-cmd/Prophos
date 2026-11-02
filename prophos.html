@@ -18891,7 +18891,9 @@
         payoutReadyAt: r.payout_ready_at || null, waitingPayoutSince: r.waiting_payout_since || null,
         autoPlaner: r.auto_planer !== false, zielErreichtAt: r.ziel_erreicht_at || null, zielErreichtBal: n(r.ziel_erreicht_bal),
         zielUsd: n(r.ziel_usd), maxRisikoTrade: n(r.max_risiko_trade), tvBalanceQuelle: r.tv_balance_quelle || null,
-        restPlanerAt: r.rest_planer_at || null   // Rest zurück im Planer (20.10.2026)
+        restPlanerAt: r.rest_planer_at || null,   // Rest zurück im Planer (20.10.2026)
+        // WINNING DAYS AUTOMATISCH (03.11.2026): fremde Konten — Stand rechnet Railway (wd_stand), das Frontend kennt ihre Pläne nicht
+        ...(r.wd_stand != null ? { goalWdKorrektur: Number(r.goal_wd_korrektur) || 0, goalWdStand: Number(r.wd_stand), goalWdTage: Array.isArray(r.wd_tage) ? r.wd_tage : [] } : {})
       }
     }
     // Ziel-Stufe eines Kontos für den Filter — dieselben Zustände, die die Typ-Spalte als Chip zeigt
@@ -42967,6 +42969,10 @@
       // Manuelle Zählung (15.09.2026): Stand = goalDoneOffset, +1 per Häkchen
       goalManual:     !!row.goal_manual,
       goalManualLast: row.goal_manual_last || null,
+      // WINNING DAYS AUTOMATISCH (03.11.2026, zielWdAuto): undefined = Spalte fehlt noch (SQL) → alter Stand goal_done_offset
+      goalWdKorrektur: ('goal_wd_korrektur' in row) ? (row.goal_wd_korrektur != null ? Number(row.goal_wd_korrektur) : 0) : undefined,
+      goalWdSeit:     row.goal_wd_seit || null,
+      goalWdHandTage: Array.isArray(row.goal_wd_hand_tage) ? row.goal_wd_hand_tage.map(String) : [],   // Haken „war ein Winning Day" als CME-Tage (Stopp S9 zu b140ad39)
       // Payout-Termin (15.09.2026): ab wann der nächste Payout angefragt werden kann
       payoutReadyAt:  row.payout_ready_at || null,
       // Waiting for Payout (29.09.2026): seit wann, null = nein — nur Funded CFD
@@ -43026,7 +43032,8 @@
       goal_manual:      !!a.goalManual,
       goal_manual_last: a.goalManualLast || null,
       payout_ready_at:  a.payoutReadyAt  || null,
-      waiting_payout_since: a.waitingPayoutSince || null
+      waiting_payout_since: a.waitingPayoutSince || null,
+      ...(a.goalWdKorrektur !== undefined ? { goal_wd_korrektur: a.goalWdKorrektur || 0 } : {})   // nur wenn die Spalte gelesen wurde (03.11.2026)
     }
     if(a.creds){
       row.cred_login    = a.creds.login    || null
@@ -44655,7 +44662,9 @@
       if(accEls.goalDone) accEls.goalDone.value = editAccount.goalKind === 'trading_days'
         ? Math.max(0, zielTageAuto(editAccount.id, editAccount.goalSince).size + (Number(editAccount.goalDoneOffset) || 0)) : ''
       // Winning Days (Futures-Funded): Stand + Ziel aus dem Bestand, leer = 0 / 5
-      if(accEls.wdCount)  accEls.wdCount.value  = editAccount.goalDoneOffset != null ? Math.max(0, editAccount.goalDoneOffset) : ''
+      // automatisch (03.11.2026): das Feld zeigt den Gesamtstand (Tage + Korrektur); gespeichert wird nur die Korrektur
+      const _wdF = editAccount.goalWdKorrektur !== undefined ? zielFortschritt(editAccount) : null
+      if(accEls.wdCount)  accEls.wdCount.value  = _wdF && _wdF.auto ? _wdF.count : editAccount.goalDoneOffset != null ? Math.max(0, editAccount.goalDoneOffset) : ''
       if(accEls.wdTarget) accEls.wdTarget.value = editAccount.goalTarget > 0 ? editAccount.goalTarget : ''
       if(accEls.payoutReady) accEls.payoutReady.value = editAccount.payoutReadyAt ? String(editAccount.payoutReadyAt).slice(0,10) : ''
       if(accEls.wartetPayout) accEls.wartetPayout.checked = !!editAccount.waitingPayoutSince
@@ -45036,6 +45045,9 @@
     // Waiting for Payout (29.09.2026): nur Funded CFD; der alte Zeitstempel bleibt, solange der Haken bleibt
     const wartetPayoutVal = (type === 'funded_cfd' && accEls.wartetPayout?.checked) ? (vorher?.waitingPayoutSince || new Date().toISOString()) : null
     const wdCountNum  = parseInt(accEls.wdCount?.value, 10)
+    const _wdV = (vorher && vorher.goalWdKorrektur !== undefined) ? zielFortschritt(vorher) : null
+    const wdAuto = _wdV && _wdV.auto ? _wdV : null   // automatische WD-Zählung (03.11.2026)
+    const wdSpalte = (accounts || []).some(x => x && x.goalWdKorrektur !== undefined)   // neues Konto: Spalte da → Eingabe ist die Korrektur (keine Trades)
     const wdTargetNum = parseInt(accEls.wdTarget?.value, 10)
     // „Schon erreicht" (23.10.2026): Ausgleich = Eingabe − automatisch gezählte Tage. Unberührt (gleiche Vorbelegung, gleiches
     // „Zählt ab") oder leer = Bestand weitertragen wie bisher. Kleiner als automatisch → Meldung, kein stilles Kappen.
@@ -45075,10 +45087,13 @@
         goalKind: 'winning_days',
         goalTarget:     !isNaN(wdTargetNum) && wdTargetNum > 0 ? wdTargetNum : 5,
         goalMinProfit:  null,
-        goalDoneOffset: !isNaN(wdCountNum) && wdCountNum >= 0 ? wdCountNum : 0,
+        goalDoneOffset: wdAuto ? (vorher?.goalDoneOffset ?? null) : (!isNaN(wdCountNum) && wdCountNum >= 0 ? wdCountNum : 0),
         goalSince:      null,
         goalManual:     true,
-        goalManualLast: vorher?.goalManualLast || null
+        goalManualLast: vorher?.goalManualLast || null,
+        // AUTOMATISCH (03.11.2026): Eingabe = Gesamtstand → Korrektur = Eingabe − automatisch gezählte Tage (unberührt = Korrektur bleibt)
+        ...(wdAuto ? { goalWdKorrektur: (!isNaN(wdCountNum) && wdCountNum >= 0 && wdCountNum !== wdAuto.count) ? (Number(vorher.goalWdKorrektur) || 0) + wdCountNum - wdAuto.count : (Number(vorher.goalWdKorrektur) || 0) }
+          : (!vorher && wdSpalte) ? { goalWdKorrektur: !isNaN(wdCountNum) && wdCountNum >= 0 ? wdCountNum : 0 } : {})
       } : goalSecOn ? {
         goalKind: goalKindVal,
         goalTarget:     goalKindVal ? (!isNaN(goalTargetNum) && goalTargetNum > 0 ? goalTargetNum : 5) : null,
@@ -45210,6 +45225,7 @@
           goal_since:       acc.goalSince,
           goal_manual:      acc.goalManual,
           goal_manual_last: acc.goalManualLast,
+          ...(acc.goalWdKorrektur !== undefined ? { goal_wd_korrektur: acc.goalWdKorrektur } : {}),   // WD-Korrektur aus dem Modal (03.11.2026, Gegenprüfung: fehlte beim Bearbeiten)
           payout_ready_at:  acc.payoutReadyAt,
           waiting_payout_since: acc.waitingPayoutSince,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
@@ -54565,7 +54581,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2004'
+  const OS_TAB_BUILD = '2026-09-22.2005'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72288,12 +72304,48 @@
   function zielIstMindesttage(a, kind){
     return kind === 'trading_days' || (kind === 'winning_days' && Number(a && a.goalMinProfit) > 0 && /^(challenge|phase1|phase2)$/.test(String(a && a.type || '')))
   }
+  // Mindestgewinn eines Winning Days: goal_min_profit, sonst die Good-Day-Linie der Firma (wie WD_GOOD_DAY_MIN/TC_GOOD_DAY_MIN) — als Literal hier,
+  // keine Modul-Konstante: renderAccounts zeichnet vor deren Auswertung (TDZ, s. zielDotsHtml). null = jede Tagessumme > 0
+  function zielWdMin(a){
+    if(a && Number(a.goalMinProfit) > 0) return Number(a.goalMinProfit)
+    const firma = String((a && a.firm) || '').toLowerCase()
+    if(/tradeify/.test(firma) && /cfd/.test(firma)) return null
+    const t = [['tradeify', 250], ['lucid', 250], ['fundednext futures', 250], ['topstep', 150]]
+    for(const [k, v] of t) if(firma.includes(k)) return v
+    if(firma.includes('apex')){ const m = String((a && a.name) || '').match(/(\d{2,3})\s*k\b/i); return m && Number(m[1]) === 100 ? 300 : 350 }
+    return null
+  }
+  // → { count, tage[] } — eigene Konten aus tradePlans (Master, completed/review, Trade-Ende ab goal_wd_seit bzw. Anlage, je CME-Tag summiert),
+  // fremde (Admin) aus dem Railway-Stand goalWdStand
+  function zielWdAuto(a){
+    if(a.goalWdStand != null) return { count: Math.max(0, Number(a.goalWdStand) || 0), tage: a.goalWdTage || [] }
+    const seit = Date.parse(a.goalWdSeit || a.createdAt || '') || 0, minP = zielWdMin(a), je = {}
+    for(const p of (tradePlans || [])){
+      if(String(p.masterAccountId) !== String(a.id) || (p.status !== 'completed' && p.status !== 'review')) continue
+      const pl = p.masterPl, ende = p.endedAt || p.completedAt
+      if(pl == null || !isFinite(Number(pl)) || !ende) continue
+      const ts = Date.parse(ende); if(!ts || (seit && ts < seit)) continue
+      const tag = tvV2Handelstag(ende); je[tag] = (je[tag] || 0) + Number(pl)
+    }
+    // Hand-Tage (Haken) als Menge dazu — ein Tag zählt nie zweimal (Stopp S9 zu b140ad39); Hand-Tage vor dem Zyklus-Start nicht
+    const seitTag = seit ? tvV2Handelstag(seit) : null
+    const tage = [...new Set([...Object.keys(je).filter(t => minP ? je[t] >= minP : je[t] > 0), ...(a.goalWdHandTage || []).filter(t => !seitTag || t >= seitTag)])].sort()
+    return { count: Math.max(0, tage.length + (Number(a.goalWdKorrektur) || 0)), tage }
+  }
+  window._zielWdAuto = zielWdAuto   // Test-Haken
   function zielFortschritt(a){
     const k = zielKonfig(a)
     if(!k) return null
     const mindest = zielIstMindesttage(a, k.kind)
     // Manuelle Zählung (15.09.2026, Futures): Stand ist goal_done_offset, +1
     // kommt über das Häkchen im Trade-Abschluss — trade_plans zählen hier nicht.
+    if(k.manual && k.kind === 'winning_days' && a.goalWdKorrektur !== undefined){
+      // WINNING DAYS AUTOMATISCH (Finn 03.11.2026 ~01:35 Dubai, Fall Mike Apex 100k …0002: drei Gewinn-Tage, gezählt 2): jeder CME-Handelstag mit
+      // Tagessumme ≥ Mindestgewinn ab dem Zyklus-Start + Korrektur von Hand (goal_wd_korrektur) — dieselbe Rechnung wie app.py wd_auto_tage
+      const w = zielWdAuto(a), heute = tvV2Handelstag()
+      return { count: w.count, target: k.target, done: w.count >= k.target, kind: k.kind, mindest, manual: true, auto: true, tage: w.tage,
+               heuteAbgehakt: w.tage.includes(heute) || (!!a.goalManualLast && String(a.goalManualLast).slice(0,10) === _deTodayStr()) }
+    }
     if(k.manual){
       const count = Math.max(0, Number(a.goalDoneOffset) || 0)
       return { count, target: k.target, done: count >= k.target, kind: k.kind, mindest,
@@ -72626,6 +72678,7 @@
     // Manuelle Zählung (15.09.2026): Stand auf 0, letzter Haken weg — der
     // heutige Tag darf nach der Anfrage wieder abgehakt werden (neuer Zyklus).
     const patch = k.manual ? { goal_done_offset: 0, goal_manual_last: null, ...zielPersistFelder(k) } : { goal_since: morgen }
+    if(k.manual && a.goalWdKorrektur !== undefined) Object.assign(patch, { goal_wd_seit: new Date().toISOString(), goal_wd_korrektur: 0, goal_wd_hand_tage: [] })   // automatisch (03.11.2026): neuer Zyklus ab jetzt
     try{
       const { data, error } = await supabase
         .from('accounts').update(patch).eq('id', a.id).select('*').single()
@@ -72649,26 +72702,34 @@
    * +1 addiert"). Höchstens einmal pro Berlin-Tag (goal_manual_last) — zwei
    * Trades am selben Tag sind EIN Winning Day. Toast meldet den Stand, bei
    * erreichtem Ziel „Payout anfragbar". Fehler werden benannt. */
-  async function zielManuellPlus(accountId){
+  async function zielManuellPlus(accountId, masterPl, tradeEnde){
     const a = (accounts || []).find(x => String(x.id) === String(accountId))
     const k = zielKonfig(a)
     if(!a || !k || !k.manual) return
     const heute = _deTodayStr()
     if(a.goalManualLast && String(a.goalManualLast).slice(0,10) === heute) return
+    // AUTOMATISCH (03.11.2026): der Haken legt den CME-Tag des Trades in die Menge goal_wd_hand_tage — Stand = |Auto-Tage ∪ Hand-Tage| + Korrektur,
+    // ein Tag zählt nie zweimal, auch wenn ein zweiter Trade die Tagessumme später über/unter die Linie schiebt (Stopp S9 zu b140ad39)
+    const auto = k.kind === 'winning_days' && a.goalWdKorrektur !== undefined
+    void masterPl
     const neu = Math.max(0, Number(a.goalDoneOffset) || 0) + 1
+    const handTag = tvV2Handelstag(tradeEnde || undefined)
+    const patch = auto ? { goal_manual_last: heute, ...zielPersistFelder(k), goal_wd_hand_tage: [...new Set([...(a.goalWdHandTage || []), handTag])].sort() }
+      : { goal_done_offset: neu, goal_manual_last: heute, ...zielPersistFelder(k) }
     try{
       const { data, error } = await supabase
-        .from('accounts').update({ goal_done_offset: neu, goal_manual_last: heute, ...zielPersistFelder(k) }).eq('id', a.id).select('*').single()
+        .from('accounts').update(patch).eq('id', a.id).select('*').single()
       if(error) throw error
       const idx = accounts.findIndex(x => String(x.id) === String(a.id))
       if(idx >= 0) accounts[idx] = rowToAccount(data)
+      const neuAnz = auto ? (zielFortschritt(accounts[idx >= 0 ? idx : 0]) || {}).count ?? neu : neu
       if(typeof renderAccounts === 'function') renderAccounts()
       if(typeof renderFinanzen === 'function'){ try{ renderFinanzen() }catch(_){} }
       const ziel = k.target
       if(typeof atToast === 'function')
-        atToast(neu >= ziel
-          ? `🏆 ${Math.min(neu, ziel)}/${ziel} — Payout anfragbar · ${a.name}`
-          : `🏆 Winning Day abgehakt — ${neu}/${ziel} · ${a.name}`, 'start')
+        atToast(neuAnz >= ziel
+          ? `🏆 ${Math.min(neuAnz, ziel)}/${ziel} — Payout anfragbar · ${a.name}`
+          : `🏆 Winning Day abgehakt — ${neuAnz}/${ziel} · ${a.name}`, 'start')
     }catch(e){
       console.warn('[ziel] Winning Day +1 fehlgeschlagen:', e.message || e)
       if(typeof atToast === 'function')
@@ -74003,7 +74064,7 @@
       // hat und er nicht schon (disabled) für heute stand.
       const _wdCb = document.getElementById('tc-winning-day')
       if(_wdCb && _wdCb.checked && !_wdCb.disabled && _tcWinningAccId){
-        try{ await zielManuellPlus(_tcWinningAccId) }catch(_){}
+        try{ await zielManuellPlus(_tcWinningAccId, isFinite(mPl) ? mPl : null, p.endedAt || p.completedAt || null) }catch(_){}   // CME-Tag des Trades für die Hand-Tage (03.11.2026)
       }
       // WD-Farm-Haken (23.09.2026): direkt am Master-Konto setzen/entfernen, wenn er sich geändert hat
       const _fmCb = document.getElementById('tc-wd-farm'), _fmWrap = document.getElementById('tc-wd-farm-wrap')

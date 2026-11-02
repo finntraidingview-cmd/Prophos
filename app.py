@@ -7785,6 +7785,14 @@ def admin_build_overview(kapitel_id=None):
             r.update({k: x.get(k) for k in x if k != "id"})
             r["arch_reason"] = (ai_info.get(r["id"]) or {}).get("reason") or ""
             r["tage_ist"] = t[0] if t else None
+        # WINNING DAYS AUTOMATISCH (03.11.2026): Stand fremder Konten rechnet Railway (das Frontend kennt ihre Pläne nicht) → wd_stand
+        try:
+            wd_auto = wd_auto_staende([r["id"] for r in rows if not r["archived"] and (r.get("type") in ("funded", "winning_days") or r.get("goal_kind") == "winning_days")])
+            for r in rows:
+                if r["id"] in wd_auto:
+                    r["wd_stand"], r["wd_tage"], r["goal_wd_korrektur"] = wd_auto[r["id"]]["stand"], wd_auto[r["id"]]["tage"], wd_auto[r["id"]]["korrektur"]
+        except Exception as e:
+            print(f"[admin] ⚠️ wd-auto: {type(e).__name__}: {e}", flush=True)
     except Exception as e:
         alle_fehler = f"{type(e).__name__}: {e}"
         print(f"[admin] ⚠️ alle-accounts: {alle_fehler}", flush=True)
@@ -7961,6 +7969,11 @@ def admin_build_overview(kapitel_id=None):
         live_konten.append(z)
 
     payout_ready = []
+    # WINNING DAYS AUTOMATISCH (03.11.2026): Stand aus den Trades (wd_auto_staende), sonst goal_done_offset wie bisher
+    try:
+        wd_auto = wd_auto_staende([a["id"] for a in accounts if (a.get("account_type") or "") == "winning_days" or str(a.get("waiting_payout_since") or "").strip()])
+    except Exception:
+        wd_auto = {}
     for a in accounts:
         aid = str(a["id"])
         uid = str(a.get("user_id"))
@@ -7987,6 +8000,8 @@ def admin_build_overview(kapitel_id=None):
             count = max(0, int(a.get("goal_done_offset") or 0))
         except (TypeError, ValueError):
             count = 0
+        if aid in wd_auto:
+            count = wd_auto[aid]["stand"]
         payout_ready.append({
             "account_id": aid,
             "user_id": uid,
@@ -14134,10 +14149,13 @@ def wd_hand_erlaubt(konto):
     return typ in ("funded", "winning_days") and not _ist_tradeify_cfd(konto.get("firm")) and ap_klasse(None, konto.get("firm")) == "futures"
 
 
-def _wd_good_day_konto_upd(konto, heute):
+def _wd_good_day_konto_upd(konto, heute, master_pl=None, tag=None):
     """REIN RECHNEND (testbar): Konto-Update für „Winning Day +1" — gleiche Felder und Regel wie zielManuellPlus im Frontend:
     höchstens einmal je Berlin-Tag (goal_manual_last), goal_kind/goal_manual/goal_target werden mitgeschrieben (Futures-Funded
-    zählt implizit mit Ziel 5). None = heute schon gezählt (erneutes 'erledigt' zählt nie doppelt)."""
+    zählt implizit mit Ziel 5). None = heute schon gezählt (erneutes 'erledigt' zählt nie doppelt).
+    AUTOMATISCHE ZÄHLUNG (03.11.2026, s. wd_auto_konto): steht die Spalte goal_wd_korrektur am Konto, kommt der CME-Tag des Trades (tag, sonst
+    heute) in die MENGE goal_wd_hand_tage (Stopp S9 zu b140ad39: ein Haken je Trade gegen die Tagessumme der Automatik zählte doppelt oder ging
+    verloren) — Stand = |Auto-Tage ∪ Hand-Tage| + Korrektur, ein Tag zählt so nie zweimal. goal_done_offset bleibt dort als alter Stand."""
     if str(konto.get("goal_manual_last") or "")[:10] == heute:
         return None
     ziel = konto.get("goal_target")
@@ -14145,11 +14163,127 @@ def _wd_good_day_konto_upd(konto, heute):
         ziel = int(ziel) if ziel and int(ziel) > 0 else 5
     except (TypeError, ValueError):
         ziel = 5
+    if "goal_wd_korrektur" in konto:
+        hand = sorted({str(x) for x in (konto.get("goal_wd_hand_tage") or []) if x} | {str(tag or heute)[:10]})
+        return {"goal_manual_last": heute, "goal_kind": "winning_days", "goal_manual": True, "goal_target": ziel, "goal_wd_hand_tage": hand}
     try:
         stand = max(0, int(konto.get("goal_done_offset") or 0))
     except (TypeError, ValueError):
         stand = 0
     return {"goal_done_offset": stand + 1, "goal_manual_last": heute, "goal_kind": "winning_days", "goal_manual": True, "goal_target": ziel}
+
+
+# WINNING DAYS AUTOMATISCH (Finn 03.11.2026 ~01:35 Dubai über den Eingang: „kannst du das umbauen … dass es in Zukunft immer zählt“; Fall Mike Apex
+# 100k …0002: drei Gewinn-Tage, gezählt 2 — seit dem Ein-Klick-Abhaken und dem Funded-Popup nur am TP ging der Haken verloren). Für Konten mit manuell
+# gezählten Winning Days (wie zielKonfig: Futures-Funded/Winning Days, oder goal_kind winning_days + goal_manual) zählt jetzt jeder CME-Handelstag
+# (_cme_handelstag, Trade-Ende) mit Tagessumme der Master-P&L ≥ Mindestgewinn (goal_min_profit, sonst WD_GOOD_DAY_MIN der Firma, sonst > 0) ab dem
+# Zyklus-Start goal_wd_seit (Payout-Anfrage, sonst Konto-Anlage). Stand = |Auto-Tage ∪ goal_wd_hand_tage (Haken „war ein Winning Day“, CME-Tag des Trades)| +
+# goal_wd_korrektur (±1 im Konto-Modal). Mehrere Trades am Tag = ein Tag, ein Haken auf einem Auto-Tag zählt nicht doppelt (Stopp S9 zu b140ad39).
+# FUNDED-PHASE ZÄHLT MIT (Finn 03.11.2026 über den Eingang: Mike Apex …0002, Gewinn-Tage 29./30.10. noch als Funded → 3 statt 2): ab Funded-Beginn
+# (Anlage der Funded-Zeile, created_at) bzw. ab der letzten Payout-Anfrage, unabhängig vom Kontotyp (funded oder winning_days).
+# Aktiv, sobald die Spalten da sind (sql/2026-11-03_wd_auto_zaehlung.sql) — vorher gilt goal_done_offset wie bisher.
+WD_AUTO_KONTO_SEL = ("id,name,firm,account_type,goal_kind,goal_manual,goal_min_profit,goal_done_offset,goal_target,goal_manual_last,created_at,"
+                     "goal_wd_korrektur,goal_wd_seit,goal_wd_hand_tage")
+
+
+def wd_min_gewinn(konto):
+    """REIN RECHNEND (testbar): Mindestgewinn eines Winning Days in $ — goal_min_profit des Kontos, sonst WD_GOOD_DAY_MIN der Firma (Apex je Größe,
+    unbekannt = 150k-Wert), sonst None (dann zählt jede Tagessumme > 0)."""
+    k = konto or {}
+    gm = _wd_num(k.get("goal_min_profit"))
+    if gm and gm > 0:
+        return gm
+    if _ist_tradeify_cfd(k.get("firm")):
+        return None
+    firma = str(k.get("firm") or "").lower()
+    for key, grenze in WD_GOOD_DAY_MIN.items():
+        if key not in firma:
+            continue
+        if isinstance(grenze, dict):
+            m = re.search(r"(\d{2,3})\s*k\b", str(k.get("name") or ""), re.I)
+            grenze = grenze.get(str(int(m.group(1)) * 1000) if m else "", grenze.get("150000"))
+        return float(grenze) if grenze is not None else None
+    return None
+
+
+def wd_auto_konto(konto):
+    """REIN RECHNEND (testbar): zählt dieses Konto Winning Days automatisch? Spalte goal_wd_korrektur gelesen (SQL eingespielt) UND manuell gezählte
+    Winning Days wie zielKonfig im Frontend: Funded/Winning Days einer Futures-Firma (nie Tradeify CFD) oder goal_kind winning_days mit goal_manual."""
+    k = konto or {}
+    if "goal_wd_korrektur" not in k or str(k.get("account_type") or "") == "live":
+        return False
+    return wd_hand_erlaubt(k) or (str(k.get("goal_kind") or "") == "winning_days" and bool(k.get("goal_manual")))
+
+
+def _wd_iso_ts(roh):
+    try:
+        t = datetime.fromisoformat(str(roh).replace("Z", "+00:00"))
+        return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def wd_auto_tage(konto, plaene):
+    """REIN RECHNEND (testbar): gezählte Winning Days eines Kontos → [(tag, summe)] sortiert. plaene = trade_plans (master_account_id, status, master_pl,
+    ended_at, completed_at); nur completed/review mit master_pl, Trade-Ende ab goal_wd_seit (sonst created_at), je CME-Tag summiert."""
+    k = konto or {}
+    kid = str(k.get("id") or "")
+    seit = _wd_iso_ts(k.get("goal_wd_seit") or k.get("created_at"))
+    minp = wd_min_gewinn(k)
+    je = {}
+    for p in plaene or ():
+        if str(p.get("master_account_id") or "") != kid or p.get("status") not in ("completed", "review"):
+            continue
+        pl, ende = _wd_num(p.get("master_pl")), p.get("ended_at") or p.get("completed_at")
+        ts = _wd_iso_ts(ende)
+        if pl is None or ts is None or (seit is not None and ts < seit):
+            continue
+        tag = _cme_handelstag(ende)
+        if tag:
+            je[tag] = je.get(tag, 0.0) + pl      # ohne Zwischenrundung, wie Frontend und SQL (Gegenprüfung 03.11.2026)
+    return [(t, v) for t, v in sorted(je.items()) if (v >= minp if minp else v > 0)]
+
+
+def wd_gezaehlte_tage(konto, plaene):
+    """REIN RECHNEND (testbar): sortierte Menge Auto-Tage ∪ Hand-Tage (goal_wd_hand_tage) — Hand-Tage vor dem Zyklus-Start zählen nicht."""
+    k = konto or {}
+    roh = k.get("goal_wd_seit") or k.get("created_at")
+    seit_tag = _cme_handelstag(roh) if roh else None
+    hand = {str(x)[:10] for x in (k.get("goal_wd_hand_tage") or []) if x and (not seit_tag or str(x)[:10] >= seit_tag)}
+    return sorted({t for t, _v in wd_auto_tage(k, plaene)} | hand)
+
+
+def wd_auto_stand(konto, plaene):
+    """REIN RECHNEND (testbar): Stand = |Auto-Tage ∪ Hand-Tage| + goal_wd_korrektur, nie unter 0."""
+    return max(0, len(wd_gezaehlte_tage(konto, plaene)) + int(_wd_num((konto or {}).get("goal_wd_korrektur")) or 0))
+
+
+def wd_auto_staende(konto_ids):
+    """{konto_id: {stand, tage, korrektur, ziel}} für Konten im Automatik-Modus — eigene Abfragen. Spalte fehlt / Fehler → {} (dann gilt der alte Stand)."""
+    ids = sorted({str(x) for x in konto_ids or () if x})
+    if not ids:
+        return {}
+    try:
+        konten = []
+        for i in range(0, len(ids), 150):
+            konten += _sb_all("accounts", {"select": WD_AUTO_KONTO_SEL, "id": "in.(" + ",".join(ids[i:i + 150]) + ")"}) or []
+        konten = [k for k in konten if wd_auto_konto(k)]
+        kids, plaene = [str(k["id"]) for k in konten], []
+        for i in range(0, len(kids), 150):
+            plaene += _sb_all("trade_plans", {"select": "master_account_id,status,master_pl,ended_at,completed_at", "status": "in.(completed,review)",
+                                              "master_pl": "not.is.null", "master_account_id": "in.(" + ",".join(kids[i:i + 150]) + ")"}) or []
+    except Exception as e:
+        print(f"[wd-auto] ⚠️ nicht lesbar ({type(e).__name__}: {str(e)[:120]}) — alter Stand", flush=True)
+        return {}
+    je = {}
+    for p in plaene:
+        je.setdefault(str(p.get("master_account_id")), []).append(p)
+    out = {}
+    for k in konten:
+        tage = wd_gezaehlte_tage(k, je.get(str(k["id"]), []))
+        out[str(k["id"])] = {"stand": max(0, len(tage) + int(_wd_num(k.get("goal_wd_korrektur")) or 0)), "tage": tage,
+                             "korrektur": int(_wd_num(k.get("goal_wd_korrektur")) or 0), "ziel": int(_wd_num(k.get("goal_target")) or 5)}
+    return out
 
 
 def _berlin_heute():
@@ -15678,7 +15812,7 @@ def admin_wd_plaene():
                         if uid is None:
                             # Welle 2: was den Plan braucht — Good-Day-Konto, Konten der ID, Hedge-Login
                             if plan.get("master_account_id"):
-                                f_kk = pool.submit(sb_select, "accounts", {"select": "id,name,firm,account_type,goal_done_offset,goal_manual_last,goal_target",
+                                f_kk = pool.submit(sb_select, "accounts", {"select": "*",   # * statt Liste: mit goal_wd_korrektur, sobald die Spalte da ist (03.11.2026)
                                                                            "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
                             uid = str(plan.get("user_id") or "")
                             if not uid and plan.get("master_account_id"):
@@ -15763,9 +15897,14 @@ def admin_wd_plaene():
                                 return None
                             else:
                                 sb_update("trade_plans", {"id": f"eq.{pid}"}, {"winning_day": True})
-                            k_upd = _wd_good_day_konto_upd(kk, _berlin_heute())
+                            _ende = plan.get("ended_at") or plan.get("completed_at")
+                            k_upd = _wd_good_day_konto_upd(kk, _berlin_heute(), mpl, _cme_handelstag(_ende) if _ende else None)
                             if k_upd:
                                 sb_update("accounts", {"id": f"eq.{kk['id']}"}, k_upd)
+                            if wd_auto_konto(kk):   # automatische Zählung (03.11.2026): Stand frisch gerechnet, der Plan ist schon completed
+                                st = wd_auto_staende([kk["id"]]).get(str(kk["id"]))
+                                if st:
+                                    return {"gezaehlt": bool(k_upd), "stand": st["stand"], "ziel": st["ziel"], "konto": kk.get("name"), "auto": True}
                             return {"gezaehlt": bool(k_upd), "stand": (k_upd or {}).get("goal_done_offset", kk.get("goal_done_offset")),
                                     "ziel": (k_upd or {}).get("goal_target", kk.get("goal_target") or 5), "konto": kk.get("name")}
                         except Exception as e:
@@ -16109,6 +16248,9 @@ def payout_anfrage_konto_felder(konto, naechster, morgen):
     futures = any(k in firm.lower() for k in WD_BALANCE_FUTURES) and not _ist_tradeify_cfd(firm)
     out = {}
     if typ != "live":
+        if "goal_wd_korrektur" in konto and wd_auto_konto(konto):
+            # automatische Zählung (03.11.2026): neuer Zyklus ab jetzt, Korrektur auf 0 (goal_done_offset als alter Stand mit auf 0)
+            out.update(goal_wd_seit=datetime.now(timezone.utc).isoformat(), goal_wd_korrektur=0, goal_wd_hand_tage=[])
         if futures and typ in ("funded", "winning_days"):
             out.update(goal_done_offset=0, goal_manual_last=None, goal_kind="winning_days", goal_manual=True, goal_target=ziel if ziel > 0 else 5)
         elif kind == "winning_days" and ziel > 0:
@@ -16130,7 +16272,7 @@ def payout_anfrage_notiz(konto, felder):
     konto, felder = konto or {}, felder or {}
     teile = []
     if "goal_done_offset" in felder:
-        teile.append(f"Winning Days {konto.get('goal_done_offset') or 0}/{felder.get('goal_target')}")
+        teile.append(f"Winning Days {konto.get('goal_done_offset') or 0}/{felder.get('goal_target')}" + (" (alter Zähler)" if "goal_wd_korrektur" in felder else ""))
     if "goal_since" in felder:
         teile.append(f"zählt ab {str(konto.get('goal_since') or 'leer')[:10]}")
     if "payout_ready_at" in felder:
@@ -16182,8 +16324,7 @@ def admin_payout_anfragen():
         if wert and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", wert):
             return jsonify({"error": f"{name} muss JJJJ-MM-TT sein"}), 400
     try:
-        rows = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,goal_kind,goal_target,goal_manual,goal_done_offset,goal_since,payout_ready_at,waiting_payout_since",
-                                      "id": f"eq.{aid}", "limit": "1"}) or []
+        rows = sb_select("accounts", {"select": "*", "id": f"eq.{aid}", "limit": "1"}) or []   # * (03.11.2026): mit goal_wd_korrektur, sobald die Spalte da ist
     except Exception as e:
         return jsonify({"error": f"Konto nicht lesbar ({type(e).__name__}) — nichts angelegt"}), 502
     if not rows:
