@@ -37546,10 +37546,12 @@ def fdp_vorschlag_neu(plan, r):
 
 # FTMO FUTURES FUNDED (Finn 03.11.2026 ~02:30 Dubai über den Eingang): eigener Modus der Firmen-Regel (tp_modus „rest“, Werte je Größe in funded_plan_regeln,
 # sql/2026-11-03_funded_ftmo_futures.sql). Ziel = Start + ziel_gewinn [4.750, 5.000] je Konto fest gewürfelt (fdp_ziel_gewinn), 1 NQ, SL [750, 850] je Trade
-# gewürfelt — höchstens Daily Loss (daily_usd 1.000) − FDP_TAGES_PUFFER und höchstens Abstand zur Liquidation − FDP_TAGES_PUFFER —, TP immer der Rest bis zum Ziel (kein Deckel,
+# gewürfelt — höchstens Daily Loss (daily_usd 1.000) − FDP_TAGES_PUFFER und höchstens Abstand zur Liquidation − FDP_LIQ_PUFFER (unter FDP_LIQ_MIN_ABSTAND kein Trade) —, TP immer der Rest bis zum Ziel (kein Deckel,
 # kein Break-even: nach einem Verlusttag wächst der TP um den Verlust; der Max DD 3.000 $ beendet das Konto nach ~3 Verlusttagen), Hedge hedge_eur € je dd $
 # (450 € auf 3.000 $ = 0,15 € je $ Abstand zur Liquidation). Boden wie die FTMO-Futures-Challenge: nachziehend, Lock beim Start (lock_usd 0).
 FDP_TAGES_PUFFER = 100                    # $ zwischen SL und Daily Loss (Schlupf am Fill, wie AP_TAGES_PUFFER)
+FDP_LIQ_PUFFER = 50                       # $ zwischen SL und Liquidation (Eingang 03.11.2026 nach S9-Stopp zu b8e6dc2b: nie genau auf die Liq)
+FDP_LIQ_MIN_ABSTAND = 300                 # darunter kein Trade mehr: „zu nah an der Liquidation" (Eingang 03.11.2026)
 
 
 def fdp_ziel_gewinn(jg, konto_id=None):
@@ -37564,7 +37566,7 @@ def fdp_ziel_gewinn(jg, konto_id=None):
 
 
 def fdp_sl_rest(jg, balance, liq, rnd=None):
-    """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq − FDP_TAGES_PUFFER,
+    """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq − FDP_LIQ_PUFFER,
     ganze Dollar abgerundet. Ohne rnd die Mitte."""
     b = jg.get("sl") if isinstance(jg.get("sl"), (list, tuple)) and len(jg.get("sl")) == 2 else None
     if not b or liq is None:
@@ -37574,7 +37576,7 @@ def fdp_sl_rest(jg, balance, liq, rnd=None):
     d = _wd_num(jg.get("daily_usd"))
     if d:
         sl = min(sl, d - FDP_TAGES_PUFFER)
-    sl = min(sl, balance - liq - FDP_TAGES_PUFFER)   # S9-Stopp zu b8e6dc2b: nie genau an die Liquidation, Schlupf am Fill würde das Konto blasen
+    sl = min(sl, balance - liq - FDP_LIQ_PUFFER)   # S9-Stopp zu b8e6dc2b / Eingang: nie genau an die Liquidation, Schlupf am Fill würde das Konto blasen
     return float(int(sl)) if sl > 0 else None
 
 
@@ -37611,6 +37613,8 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if art == "ziel":
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
     if rest_modus:
+        if balance - liq < FDP_LIQ_MIN_ABSTAND:
+            return dict(basis, aktion="aus", grund=f"zu nah an der Liquidation ({_liq_de(balance - liq)} $ Abstand, unter {FDP_LIQ_MIN_ABSTAND} $)")
         sl = fdp_sl_rest(jg, balance, liq, rnd)
         if not sl or sl < FDP_SL_MIN_USD:
             return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")

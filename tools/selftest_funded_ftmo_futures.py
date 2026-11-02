@@ -79,10 +79,12 @@ check(v2["tp"] == zg + 1600 and v2["sl"] == 800 and v2["offen_eur"] == 210, f"na
 beispiele.append(("nach 2 Verlusttagen (−1.600)", v2))
 # nach drei Verlusttagen: Abstand 600 → SL 600 (= Liquidation)
 v3 = R(REGEL, jg, None, 47600, 50000, 0, 50000, 50000, None, konto_id=KID)
-check(v3["sl"] == 500 and v3["tp"] == zg + 2400, "nach 3 Verlusttagen: SL Abstand zur Liq − 100 (500), TP + 2.400")
+check(v3["sl"] == 550 and v3["tp"] == zg + 2400, "nach 3 Verlusttagen: SL Abstand zur Liq − 50 (550), TP + 2.400")
 beispiele.append(("nach 3 Verlusttagen (−2.400)", v3))
-v4 = R(REGEL, jg, None, 47150, 50000, 0, 50000, 50000, None, konto_id=KID)
-check(v4["aktion"] == "aus" and "zu klein" in v4["grund"], f"Abstand < 100 $: kein Trade ({v4['grund']})")
+v4 = R(REGEL, jg, None, 47299, 50000, 0, 50000, 50000, None, konto_id=KID)
+check(v4["aktion"] == "aus" and "zu nah an der Liquidation" in v4["grund"], f"Abstand < 300 $: kein Trade ({v4['grund']})")
+v5 = R(REGEL, jg, None, 47300, 50000, 0, 50000, 50000, None, konto_id=KID)
+check(v5["aktion"] == "planen" and v5["sl"] == 250, f"Abstand genau 300 $: SL 250 (= Abstand − 50) ({v5.get('sl')})")
 check(R(REGEL, jg, None, 46900, 50000, 0, 50000, 50000, None, konto_id=KID)["aktion"] == "aus", "unter der Liq: aus (geblowt?)")
 
 # SL gewürfelt, Tagesgrenze
