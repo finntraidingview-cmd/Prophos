@@ -32,13 +32,17 @@ def fn(name):
 
 
 JS = "\n".join([US[US.index("  const SPALTEN = {"):US.index("  function feld(")], US[US.index("  const ORDER_MERKMALE"):US.index("  function positionenAusZeilen(")],
-                US[US.index("  const RX_KURS_SYMBOL"):].split("\n")[0]] + [fn(n) for n in ("feld", "positionenAusZeilen", "seiteNorm", "zahlAusText", "kursWurzelAusText")] + [r"""
+                US[US.index("  const RX_KURS_SYMBOL"):].split("\n")[0]] + [fn(n) for n in ("feld", "positionenAusZeilen", "seiteNorm", "zahlAusText", "kursWurzelAusText", "unklarBlind")] + [r"""
 const L = (...a) => new Set(a)
 print(JSON.stringify({
   leer: positionenAusZeilen([{ Symbol: 'MNQZ6', Side: 'Buy', Qty: '2', Profit: '' }], L('Symbol', 'Side', 'Qty', 'Profit'), 1),
   ohne: positionenAusZeilen([{ Symbol: 'MNQZ6', Side: 'Buy', Qty: '2' }], L('Symbol', 'Side', 'Qty'), 1),
   seite: positionenAusZeilen([{ Symbol: 'MNQZ6', Qty: '2' }], L('Symbol', 'Qty'), 1),
   da: positionenAusZeilen([{ Symbol: 'MNQZ6', Side: 'Buy', Qty: '2', Profit: '+1,00 USD' }], L('Symbol', 'Side', 'Qty', 'Profit'), 1),
+  b_reiter: unklarBlind({ unklar: 1, unklar_fest: 0 }, true),
+  b_anderer: unklarBlind({ unklar: 1, unklar_fest: 0 }, false),
+  b_fest: unklarBlind({ unklar: 2, unklar_fest: 1 }, true),
+  b_nichts: unklarBlind({ unklar: 0, unklar_fest: 0 }, false),
   order: positionenAusZeilen([{ Symbol: 'MNQZ6', Side: 'Buy', Qty: '2', Status: 'Working' }], L('Symbol', 'Side', 'Qty', 'Status'), 1),
 }))
 """])
@@ -57,6 +61,7 @@ check(e["ohne"]["unklarFest"] == 0 and e["ohne"]["positionen"][0]["pnl_beleg"]["
 check(e["seite"]["unklarFest"] == 1, "Seite nicht lesbar: weiter blind")
 check(e["da"]["unklar"] == 0 and "pnl_beleg" not in e["da"]["positionen"][0], "P&L da: unverändert")
 check(e["order"]["positionen"] == [], "Order-Zeile fällt weiter raus")
-check("if (leseBefund.unklar_fest) {" in US and "if (leseBefund.unklar) return leseBefund.pnl_spalte" in US, "blind nur, wenn die Zeile selbst unlesbar ist; außerhalb des Puls-Chrome unverändert")
+check(e["b_reiter"] == 0 and e["b_anderer"] == 1 and e["b_fest"] == 1 and e["b_nichts"] == 0, "nicht blind nur bei Reiter Positions und lesbarer Zeile")
+check("const nBlind = unklarBlind(leseBefund, reiterPos);" in US and "if (leseBefund.unklar) return leseBefund.pnl_spalte" in US, "blindGrund nutzt das; außerhalb des Puls-Chrome unverändert")
 print("\nREADER-BLIND-PNL: alles grün" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)

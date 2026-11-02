@@ -28,7 +28,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
-//   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre ueberlebt Neuladen). Teil-Fill zaehlt nicht.
+//   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre ueberlebt Neuladen). Teil-Fill zaehlt nicht. Zeile ohne P&L ist nur bei aktivem Reiter Positions nicht blind.
 //   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
 //   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
 //                      localStorage prophos_puls_chrome = '1' der Puls-Augen (augen.js ≥ 0.8.8, nur per CDP im Puls-Chrome) schaltet ihn ein,
@@ -1238,14 +1238,20 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     leerMerk = { ms: jetzt, wert };
     return wert;
   }
+  // REIN RECHNEND (Selbsttest, 0.10.7): wie viele Zeilen ohne P&L machen die Lesung blind?
+  function unklarBlind(befund, reiterPositions) { return reiterPositions ? (befund.unklar_fest || 0) : (befund.unklar || 0); }
   function blindGrund(positionen) {
     if (PULS_CHROME) {   // 0.9.3: strenger — ohne Konto kein Urteil, flach nur mit Beweis (auch verdeckt)
       // 0.10.4: jede Lesung OHNE Leer-Beweis-Versuch (kein Konto, unklar, Position da) verwirft die erste Struktur-Lesung — die zweite
       // muss unmittelbar auf eine leere folgen, nie ueber eine Position oder einen Kontowechsel hinweg
       if (!kontoAngemeldet(Date.now())) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'kein Konto angemeldet'; }
       // 0.10.6: blind nur, wenn die Zeile selbst nicht lesbar ist — Symbol, Seite und Menge da = offene Position (Zweig unten). Der reader-server friert bei blind den Stand ein: die
-      // Position galt nie als gesehen, das Ende wurde nicht erkannt, Fusion schloss erst am Level (Aurel 02.11.2026).
-      if (leseBefund.unklar_fest) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'pnl unlesbar in ' + leseBefund.unklar_fest + ' Zeile(n)'; }
+      // Position galt nie als gesehen, das Ende wurde nicht erkannt, Fusion schloss erst am Level (Aurel 02.11.2026). 0.10.7 (S9): nur bei aktivem Reiter Positions — sonst kann die Zeile
+      // aus einem anderen Reiter stammen und waere ein falsches „gesehen“.
+      let reiterPos = false;
+      try { const r = document.getElementById('positions'); reiterPos = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
+      const nBlind = unklarBlind(leseBefund, reiterPos);
+      if (nBlind) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'pnl unlesbar in ' + nBlind + ' Zeile(n)'; }
       if (positionen.length) {
         strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false };
         return null;
