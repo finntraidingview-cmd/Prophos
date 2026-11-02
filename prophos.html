@@ -27573,7 +27573,7 @@
    * (tvNeuladenFrei, fail-closed: kein offener Plan dieser ID, kein Start in 45 min auch unbestätigt/geclaimt, Puls/Polar/Polar-Startsperre/
    * Signal/Fern-Lauf/Heimweg/Endlesung/Big Trade frei) und höchstens 1× je 30 min (localStorage, auch über Neuladen des Prophos-Tabs).
    * Ein Neuladen mitten in einem Trade wäre der schlimmste Fall. Während des Neuladens: hedgePulsUnterwegs → Reader blind, bwGrund → wartet. ══ */
-  const TVN_TAKT_MIN_MS = 60000, TVN_TAKT_MAX_MS = 120000, TVN_ABSTAND_MS = 30 * 60000, TVN_START_ABSTAND_MS = 45 * 60000, TVN_KEY = 'prophos_tvneu_at'
+  const TVN_TAKT_MIN_MS = 60000, TVN_TAKT_MAX_MS = 120000, TVN_ABSTAND_MS = 30 * 60000, TVN_START_ABSTAND_MS = 5 * 60000, TVN_KEY = 'prophos_tvneu_at'
   // Überfällige Starts: tpStartUmTick startet bis pulsStartFenster (30 min, Farmer 60 min) nach startUm → 65 min Puffer (Prüfer 29.10.2026)
   const TVN_UEBERFAELLIG_MS = 65 * 60000, TVN_PAAR_MAX = 2
   window._tvNeuLaeuft = false
@@ -27582,11 +27582,14 @@
     for(let i = 0; i < Math.max(x.length, y.length); i++){ const d = (x[i] || 0) - (y[i] || 0); if(d) return d > 0 } return false }
   // REIN RECHNEND: offener Plan, oder ein geplanter Start in < 45 min (auch unbestätigte Auto-Pläne; bis 65 min überfällig = noch im
   // Startfenster, geclaimt ohne startedAt = gerade im Start) → Grund, sonst ''. Test-Haken window._tvNeuladen.planSperre.
-  function tvnPlanSperre(plaene, jetzt){
-    if(plaene.some(p => p && p.status === 'open')) return 'offener Plan'
-    if(plaene.some(p => { if(!(p && p.status === 'planned' && p.startUm)) return false
+  // ROLLOUT SCHNELLER (Finn 02.11.2026: „MT5 Trades sind ja nicht unser Problem"): offene mt5/mt5v2 sperren nicht, sie klicken im MT5-Fenster, nicht im Chrome. Starts < 5 min statt 45 min (Eingriff ≤ 150 s).
+  // alleRouten (Tampermonkey: echte Maus, holt Chrome nach vorn, eine MT5-Order daneben kämpfte um den Vordergrund) zählt auch MT5-Starts; das Neuladen (nur Page.reload) nicht.
+  function tvnPlanSperre(plaene, jetzt, alleRouten){
+    const echo = p => p.route === 'mt5' || p.route === 'mt5v2'
+    if(plaene.some(p => p && p.status === 'open' && !echo(p))) return 'offener Plan'
+    if(plaene.some(p => { if(!(p && p.status === 'planned' && p.startUm) || (echo(p) && !alleRouten)) return false
       const d = Date.parse(p.startUm) - jetzt
-      return d < TVN_START_ABSTAND_MS && (d > -TVN_UEBERFAELLIG_MS || (!!p.startUmGestartetAt && !p.startedAt)) })) return 'Start in < 45 min'
+      return d < TVN_START_ABSTAND_MS && (d > -TVN_UEBERFAELLIG_MS || (!!p.startUmGestartetAt && !p.startedAt)) })) return 'Start in < 5 min'
     return ''
   }
   // Puls-Chrome-Reader dieses PCs: frisch (≤ 60 s), Tab 'puls-…' → Stand, sonst null
@@ -27620,9 +27623,11 @@
   function tvnBlickTsx(r){
     if(!(r && r.ok && typeof r.alter_s === 'number' && r.alter_s <= 10 && r.stand && typeof r.stand === 'object')) return null
     const sx = r.stand
+    // Finn 02.11.2026: „flach nicht bewiesen" oder ausgeloggt sperrt nur, wenn ein TopstepX-Trade läuft — sonst sperrte ein altes Auge auf 2.4.32 sein eigenes Update und das des TV-Readers. Gelesene Position sperrt immer.
+    const tsxTrade = (typeof tradePlans !== 'undefined' ? tradePlans : []).some(p => p && p.status === 'open' && p.route === 'tsv2')
+    const pos = Array.isArray(sx.positionen) && sx.positionen.length > 0
     return { art: 'tsx', lader: (r.lader && typeof r.lader === 'object') ? r.lader : null, version: String(r.script || ''),
-      posGrund: sx.ausgeloggt ? 'TopstepX ausgeloggt' : (sx.flach !== true || !Array.isArray(sx.positionen) || sx.positionen.length)
-        ? 'TopstepX: Position offen oder flach nicht bewiesen' : '' }
+      posGrund: pos ? 'TopstepX: Position offen' : (tsxTrade && sx.ausgeloggt) ? 'TopstepX ausgeloggt' : (tsxTrade && sx.flach !== true) ? 'TopstepX: flach nicht bewiesen' : '' }
   }
   /* TAMPERMONKEY EINMAL JE PC (29.10.2026, Master: „Puls öffnet über CDP den Lader-Link und klickt in Tampermonkey ‚Aktualisieren', nur
    * unter denselben Freigabe-Bedingungen, je PC einmal"). Nötig, solange im Puls-Chrome ein Script OHNE Lader (TV < 0.10.0, Auge < 0.3.0 —
@@ -27656,7 +27661,7 @@
       const n = tvTmNoetig(b); if(n) return n
       let schon = null; try{ schon = localStorage.getItem(tvTmKey(b.art)) }catch(_){ return 'localStorage nicht lesbar' }
       if(schon) return 'an diesem PC schon versucht'
-      return tvnRuhe(b)
+      return tvnRuhe(b, true)
     }catch(e){ return 'Zustand nicht lesbar' }   // fail-closed
   }
   function tvNeuladenFrei(b = tvnBlickTv()){
@@ -27672,14 +27677,14 @@
   }
   // Gemeinsame Freigabe aller Wege (Neuladen + Tampermonkey, TV + TopstepX): nichts läuft, nichts steht bevor — '' oder Grund. Wirft →
   // Aufrufer fail-closed. Das Abstands-Merkmal TVN_KEY gilt für beide Scripts: höchstens ein Puls-Eingriff je 30 min und PC.
-  function tvnRuhe(b){
+  function tvnRuhe(b, alleRouten){
     // Hand-Trades/Fremd-Positionen ohne Plan: mit sehender Lesung über die leere Positionsliste (Prüfer 29.10.2026). Blinder Reader (29.10.2026,
     // vom Master angenommen): TV-Hand-Trades ohne Plan sieht dann niemand — es zählt die DB-Freigabe (tvnDbFrei: Pläne, Hedges, Starts, Signale,
     // Fremd-Positionen MT5) im Tick; Tampermonkey/Neuladen schließen keine Position
     if(b.posGrund) return b.posGrund
     let letzt = 0; try{ letzt = Number(localStorage.getItem(TVN_KEY)) || 0 }catch(_){}
     if(Date.now() - letzt < TVN_ABSTAND_MS) return 'letztes Neuladen < 30 min'
-    const jetzt = Date.now(), ps = tvnPlanSperre(tradePlans || [], jetzt); if(ps) return ps
+    const jetzt = Date.now(), ps = tvnPlanSperre(tradePlans || [], jetzt, !!alleRouten); if(ps) return ps
     const u = hedgePulsUnterwegs(); if(u) return u
     if(typeof polarLaeuft === 'function' && polarLaeuft()) return 'Polar läuft'
     if(typeof polarStartSperre === 'function' && polarStartSperre()) return 'Polar bereitet vor'
@@ -27693,12 +27698,12 @@
   }
   // Ersatz-Freigabe bei blindem Reader (29.10.2026): Railway prüft Pläne/Hedges/Starts/Fremd-Positionen der ID und MT5-Positionen des PCs.
   // → '' (frei) oder Grund; jeder Fehler = nicht frei (fail-closed)
-  async function tvnDbFrei(){
+  async function tvnDbFrei(alleRouten){
     try{
       const pc = hedgePcId(); if(!pc) return 'PC-Kennung fehlt'
       const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return 'nicht angemeldet'
       const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 12000)
-      const r = await fetch(`${WATCHER_HOME}/alarm/userscript-frei?pc=${encodeURIComponent(pc)}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const r = await fetch(`${WATCHER_HOME}/alarm/userscript-frei?pc=${encodeURIComponent(pc)}${alleRouten ? '' : '&weg=neuladen'}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
       const d = r.ok ? await r.json().catch(() => null) : null
       if(!d || d.ok !== true) return 'Freigabe nicht prüfbar' + (r.ok ? '' : ` (HTTP ${r.status})`)
       return d.frei === true ? '' : String(d.grund || 'nicht frei').slice(0, 80)
@@ -27784,7 +27789,7 @@
     if(window._tvNeuLaeuft) return
     const blicke = [tvnBlickTv(), bTsx].filter(Boolean)
     // Blinder Reader (29.10.2026): Ersatz-Freigabe aus der DB, frisch vor jedem Eingriff — sonst kein Eingriff, Grund gemeldet
-    const dbFrei = async () => blicke.some(x => x.blind) ? tvnDbFrei() : ''
+    const dbFrei = async (alleRouten) => blicke.some(x => x.blind) ? tvnDbFrei(alleRouten) : ''
     // Nach dem Warten auf Railway (bis 12 s) die Blicke NEU lesen (Prüfung 29.10.2026: TV könnte inzwischen sehend mit Position sein, TopstepX
     // nicht mehr flach) → frischer Blick desselben Scripts, sofern alle Scripts weiter ohne Position; sonst null
     const frischerBlick = async art => {
@@ -27799,14 +27804,14 @@
       const g = tvTmFrei(b)
       if(g){ tvTmSkipMelden(b, g); continue }
       const anders = blicke.find(x => x !== b && x.posGrund); if(anders){ tvTmSkipMelden(b, anders.posGrund); return }
-      const gDb = await dbFrei(); if(gDb){ tvTmSkipMelden(b, 'Reader blind, ' + gDb); return }
+      const gDb = await dbFrei(true); if(gDb){ tvTmSkipMelden(b, 'Reader blind, ' + gDb); return }
       if(!blicke.some(x => x.blind)) return tvTmTick(b)   // sehend: kein Warten, Blick ist frisch
       const nb = await frischerBlick(b.art)
       if(window._tvNeuLaeuft || !nb || tvTmFrei(nb)) return   // nach dem Warten erneut prüfen (Start/Signal/Position könnte inzwischen da sein)
       return tvTmTick(nb)
     }
     for(const b of blicke) if(!tvNeuladenFrei(b)){
-      const gDb = await dbFrei(); if(gDb) return
+      const gDb = await dbFrei(false); if(gDb) return
       if(!blicke.some(x => x.blind)) return tvNeuladenLauf(b)
       const nb = await frischerBlick(b.art)
       if(window._tvNeuLaeuft || !nb || tvNeuladenFrei(nb)) return
@@ -54161,7 +54166,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1981'
+  const OS_TAB_BUILD = '2026-09-22.1982'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -76,8 +76,8 @@ def main():
        "PC-Tab: tvv2, tsv2, tvplus (Duplikum Puls), polar, dup, topstep und Pläne ohne route sperren weiter")
     ok("TVK_START_ABSTAND_MS" in blk, "PC-Tab: Start < 45 min bleibt für alle Routen")
     j = ph.index("  function tvnRuhe(")
-    ok("if(plaene.some(p => p && p.status === 'open')) return 'offener Plan'" in ph[ph.index("  function tvnPlanSperre("):j],
-       "TV-Neuladen/Tampermonkey (tvnPlanSperre) unverändert: jeder offene Plan sperrt")
+    ok("p.status === 'open' && !echo(p))) return 'offener Plan'" in ph[ph.index("  function tvnPlanSperre("):j],
+       "TV-Neuladen/Tampermonkey (tvnPlanSperre): offene Pläne außer mt5/mt5v2 sperren")
     for t in f:
         print("✗", t)
     print("alle Tests bestanden" if not f else f"FEHLER ({len(f)})")

@@ -44,19 +44,26 @@ def main():
     for hs in ("unklar", "fehler"):
         check(f([{"status": "review", "hedge_status": hs}], [], [], jetzt) != "", f"review mit Hedge {hs} → gesperrt (fail-closed)")
     check(f([{"status": "review", "hedge_status": "geschlossen"}], [], [], jetzt) == "", "review mit geschlossenem Hedge → frei")
-    check(f([{"status": "planned", "start_um": iso(1800)}], [], [], jetzt) == "Start in < 45 min", "Start in 30 min → gesperrt")
-    check(f([{"status": "planned", "start_um": iso(3000)}], [], [], jetzt) == "", "Start in 50 min → frei")
+    check(f([{"status": "planned", "start_um": iso(240)}], [], [], jetzt) == "Start in < 5 min", "Start in 4 min → gesperrt")
+    check(f([{"status": "planned", "start_um": iso(360)}], [], [], jetzt) == "", "Start in 6 min → frei")
+    for r in ("mt5", "mt5v2"):
+        check(f([{"status": "open", "route": r}], [], [], jetzt) == "", f"offener {r} → frei")
+        check(f([{"status": "review", "route": r, "hedge_status": "offen"}], [], [], jetzt) == "", f"{r} mit offenem Hedge → frei")
+        check(f([{"status": "planned", "route": r, "start_um": iso(240)}], [], [], jetzt) != "", f"{r} startet gleich, Tampermonkey → gesperrt")
+        check(f([{"status": "planned", "route": r, "start_um": iso(240)}], [], [], jetzt, None, False) == "", f"{r} startet gleich, Neuladen → frei")
+    for r in ("tvv2", "tsv2"):
+        check(f([{"status": "open", "route": r}], [], [], jetzt) == "offener Plan", f"offener {r} → gesperrt")
+        check(f([{"status": "planned", "route": r, "start_um": iso(240)}], [], [], jetzt, None, False) != "", f"{r} startet gleich, Neuladen → gesperrt")
     check(f([{"status": "planned", "start_um": iso(-3600)}], [], [], jetzt) != "", "60 min überfällig → noch im Startfenster, gesperrt")
     check(f([{"status": "planned", "start_um": iso(-4200)}], [], [], jetzt) == "", "70 min überfällig → frei")
     check(f([{"status": "planned", "start_um": iso(-9000), "start_um_gestartet_at": iso(-9000)}], [], [], jetzt) != "",
           "geclaimt ohne started_at → gesperrt")
-    check(f([{"status": "planned", "start_um": pg(600)}], [], [], jetzt) != "", "PostgREST-Zeit (+00, 5 Stellen) wird gelesen")
+    check(f([{"status": "planned", "start_um": pg(240)}], [], [], jetzt) != "", "PostgREST-Zeit (+00, 5 Stellen) wird gelesen")
     check(f([], [{"weg_at": None}], [], jetzt).startswith("Fremd-Position"), "Fremd-Position offen → gesperrt")
     check(f([], [{"weg_at": iso(-60)}], [], jetzt) == "", "Fremd-Position weg → frei")
-    check(f([], [], [{"updated_at": iso(-30), "n_pos": 1}], jetzt).startswith("MT5-Position"), "MT5-Position frisch → gesperrt")
-    check(f([], [], [{"updated_at": iso(-600), "n_pos": 1}], jetzt) == "", "MT5-Position 10 min alt → frei")
-    check(f([], [], [{"updated_at": "müll", "n_pos": 1}], jetzt).startswith("MT5-Position"), "MT5-Zeit unlesbar mit Position → gesperrt")
-    check(f([], [], [{"updated_at": "müll", "n_pos": 0}], jetzt) == "", "MT5-Zeit unlesbar ohne Position → frei")
+    check(f([], [], [{"updated_at": iso(-30), "n_pos": 1}], jetzt) == "", "MT5-Position sperrt nicht mehr")
+    check(f([], [{"weg_at": None, "quelle": "mt5"}], [], jetzt) == "", "MT5-Fremd-Position sperrt nicht mehr")
+    check(f([], [{"weg_at": None, "quelle": "tsx"}], [], jetzt).startswith("Fremd-Position"), "TopstepX-Fremd-Position sperrt")
     print(f"\n{'ALLE OK' if not FEHLER else str(len(FEHLER)) + ' FEHLER'}")
     return 1 if FEHLER else 0
 
