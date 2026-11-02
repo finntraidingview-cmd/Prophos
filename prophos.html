@@ -36343,7 +36343,8 @@
       }
       const gdH = wdHand ? (d.good_day || null) : null   // „war ein Winning Day": Stand aus der Antwort (gezaehlt/stand/ziel) oder Fehler
       const wdhTxt = !gdH ? '' : gdH.gezaehlt ? ` · 🏆 Winning Day ${gdH.stand}/${gdH.ziel}` : gdH.fehler ? '' : ' · 🏆 Winning Day heute schon gezählt'
-      const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '') + umTxt + wdhTxt
+      const arTxt = ((ar && ar.archiviert) ? (ar.grund === 'blown' ? ' · 💀 Account archiviert' : ' · ✅ bestanden — Nachfolger beim Besitzer nachtragen') : '')
+        + (d.review && d.review.konto_id ? ' · ✅ bestanden — Konto steht im Review' : '') + umTxt + wdhTxt   // bestanden → Review statt Archiv (02.11.2026)
       if(typeof atToast === 'function') atToast((bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : ohneHedge ? 'Erledigt' : polar ? `Erledigt · Polar Master ${mpl < 0 ? '−' : '+'}${Math.abs(mpl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $${spl != null ? ` · Slave ${spl < 0 ? '−' : '+'}${Math.abs(spl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : ''}` : (fusionAmPlan && spl != null) ? `Erledigt · Fusion ${fmtE(spl)} am Trade` : 'Erledigt · ohne Fusion-Buchung') + arTxt, umFehl ? 'end' : 'ok')
       // WD-Flug (23.10.2026, nur Anzeige): der vom Backend gezählte Stand (good_day) fliegt wie im eigenen Dialog — nicht bei bestanden/geblowt,
       // dort läuft schon die Abhak-Rückmeldung; Zähl-Fehler als Hinweis (vorher stand er nur in der Antwort)
@@ -54514,6 +54515,30 @@
     return 'pruefen'
   }
   window._kontoWegUrteil = kontoWegUrteil   // Test-Haken
+  /* URTEIL AUS DEM LETZTEN TRADE (Finn 02.11.2026, Vorfall Ina Tradeify 150k …622221: Plan 7085e82a +1.989 $ am TP, Konto verschwand 16:33 aus der Kontoliste, die Lesung
+   * stand noch auf 157.051 von 14:14 → kein Urteil „bestanden“, Abhaken archivierte, das Konto fehlte im Review). Wie der letzte Trade zuging, entscheidet vor der Balance:
+   *   'tp'   → bestanden (Review, Ziel markieren, nie archivieren) · 'sl' (SL oder Liquidation) → geblowt · 'hand' (Hand-Schluss, unklar) → prüfen · null → alte Balance-Regel.
+   * Quellen: final.grund (Demo/Level/Feed), sonst hedge.grund, sonst P&L gegen TP bzw. SL am Plan (Grenze wie ap_normal_tpsl_ende: max(50 $, 15 %)). REIN RECHNEND */
+  const KW_ENDE_TP = new Set(['demo_tp', 'level_tp', 'tp_feed']), KW_ENDE_SL = new Set(['demo_sl', 'demo_liq', 'level_sl', 'sl_feed'])
+  const KW_ENDE_HAND = new Set(['hand', 'beendet_knopf', 'tagesende_unklar', 'master_nie_da', 'demo_unklar', 'demo_beide', 'close'])
+  function kontoWegLetztesEnde(p){
+    if(!p) return null
+    const n = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
+    const b = p.mt5Baseline || {}, f = b.final || {}, h = b.hedge || {}, g = String(f.grund || ''), hg = String(h.grund || '')
+    if(KW_ENDE_TP.has(g)) return 'tp'
+    if(KW_ENDE_SL.has(g)) return 'sl'
+    if(KW_ENDE_HAND.has(g) || /^(close|hand)$/.test(String(f.ende_quelle || ''))) return 'hand'
+    if(hg === 'level_tp' || hg === 'tp_feed') return 'tp'
+    if(hg === 'level_sl' || hg === 'sl_feed') return 'sl'
+    if(hg === 'hand') return 'hand'
+    const pl = n(p.masterPl) ?? n(f.master_pl_schaetzung), tp = n(p.masterTp), sl = n(p.masterSl)
+    if(pl == null) return null
+    const nah = soll => Math.abs(pl - soll) <= Math.max(50, Math.abs(soll) * 0.15)
+    if(pl > 0 && tp > 0 && nah(tp)) return 'tp'
+    if(pl < 0 && sl > 0 && nah(-sl)) return 'sl'
+    return null
+  }
+  window._kontoWegLetztesEnde = kontoWegLetztesEnde   // Test-Haken
   function kontoWegStand(acc){
     const n = v => (v != null && v !== '' && isFinite(Number(v)) && Number(v) > 0) ? Number(v) : null
     const ts = v => Date.parse(v || '') || 0
@@ -54554,8 +54579,21 @@
       const start = (typeof kontoGroesseAnzeige === 'function' ? Number(kontoGroesseAnzeige(acc.name, acc.startingBalance, null)) : 0) || Number(acc.startingBalance) || null
       const dd = Number(acc.maxDrawdown) || 0
       const boden = start && dd >= start * 0.01 && dd <= start * 0.15 ? start - dd : null   // wie planZeileBoden: Größe − Drawdown, nur plausibel
-      urteil = kontoWegUrteil(st && st.stand, start, boden, acc.zielUsd)
-      if(urteil === 'bestanden' && (st.unsicher || !/^(challenge|phase1|phase2)$/.test(String(acc.type || '')))) urteil = 'pruefen'   // Funded „besteht" nicht; unsicherer Stand nie
+      // Letzter Trade zuerst (02.11.2026): sein Ende am TP/SL entscheidet, die Balance-Regel nur ohne bekanntes Ende
+      const ts = v => Date.parse(v || '') || 0
+      const letzt = (tradePlans || []).filter(p => p && String(p.masterAccountId) === id && p.startedAt).sort((a, b) => ts(b.startedAt) - ts(a.startedAt))[0] || null
+      const ende = kontoWegLetztesEnde(letzt)
+      const pruefPhase = /^(challenge|phase1|phase2)$/.test(String(acc.type || ''))
+      if(ende === 'tp'){
+        urteil = pruefPhase ? 'bestanden' : 'pruefen'   // Funded „besteht" nicht
+        // Stand nach dem TP: lag die Lesung vor dem Trade und fehlt sein P&L, kommt der TP dazu (Ina: 157.051 + 1.989)
+        if(st && st.unsicher && Number(letzt.masterTp) > 0) st = { stand: Number(st.stand) + Number(letzt.masterTp), quelle: st.quelle + ' + TP des letzten Trades' }
+      }else if(ende === 'sl') urteil = 'blown'
+      else if(ende === 'hand') urteil = 'pruefen'
+      else{
+        urteil = kontoWegUrteil(st && st.stand, start, boden, acc.zielUsd)
+        if(urteil === 'bestanden' && (st.unsicher || !pruefPhase)) urteil = 'pruefen'   // Funded „besteht" nicht; unsicherer Stand nie
+      }
     }catch(e){ console.warn('[konto-weg] Urteil', (e && e.message) || e); urteil = 'pruefen' }
     let archiviert = false
     if(urteil === 'blown'){
@@ -54565,7 +54603,7 @@
     }else{
       if(urteil === 'bestanden' && !acc.zielErreichtAt){
         try{
-          const bal = Math.round(Number(st.stand) * 100) / 100, nowZ = new Date().toISOString()
+          const bal = st && st.stand != null && isFinite(Number(st.stand)) ? Math.round(Number(st.stand) * 100) / 100 : null, nowZ = new Date().toISOString()
           const { data, error } = await supabase.from('accounts').update({ ziel_erreicht_at: nowZ, ziel_erreicht_bal: bal }).eq('id', id).is('ziel_erreicht_at', null).select('id')
           if(error) throw error
           if(!Array.isArray(data) || !data.length) throw new Error('0 Zeilen geschrieben')   // Prüfer: ohne Beleg nie „bestanden" melden

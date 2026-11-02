@@ -15474,7 +15474,7 @@ def admin_wd_plaene():
             mpl = _wd_zahl(daten.get("master_pl"))
             spl = None if daten.get("slave_pl") in (None, "") else _wd_zahl(daten.get("slave_pl"))
             # Account-Status wie im großen Erledigt-Popup (02.10.2026, Finn im Radar bei einem fremden Trade): 'none' = Konto bleibt,
-            # 'blown' = Plan blown + Master-Konto im Archiv des BESITZERS ('blown'), 'passed' = Archiv 'passed_pending' — der Besitzer
+            # 'blown' = Plan blown + Master-Konto im Archiv des BESITZERS ('blown'), 'passed' = seit 02.11.2026 Review statt Archiv (wd_erl_review_upd), vorher Archiv 'passed_pending' — der Besitzer
             # trägt den Nachfolger bei sich nach („🎉 Account-Daten nachtragen"). Serverseitig, weil der Mac fremde Archive nicht schreibt.
             # 29.10.2026: dazu 'waiting' (Funded CFD → Waiting for Payout) und 'winning_days' (Funded Futures → Winning Days) — Konto bleibt,
             # nur Feld/Typ am Master-Konto wechselt (wd_erl_konto_umstellen_upd), kein Archiv
@@ -15647,6 +15647,19 @@ def admin_wd_plaene():
                         except Exception as e:
                             return {"fehler": f"Konto nicht archiviert ({type(e).__name__}) — im Account von Hand archivieren"}
 
+                    def _review():
+                        # BESTANDEN → REVIEW STATT ARCHIV (Finn 02.11.2026, Vorfall Ina Tradeify …622221: Abhaken archivierte mit passed_pending, der Radar-Review zeigt
+                        # archivierte Konten nicht). Ziel markieren wie die Ziel-Wache, nur wenn leer; die Ziel-Wache lässt eine jüngere Markierung stehen
+                        aid = str(plan.get("master_account_id") or "")
+                        if not aid:
+                            return {"fehler": "Konto nicht ins Review gelegt (Plan ohne Master-Konto) — in Accounts von Hand"}
+                        try:
+                            filt, k_upd = wd_erl_review_upd(aid, plan, mpl, jetzt_iso)
+                            z = sb_update("accounts", filt, k_upd)
+                            return {"review": True, "konto_id": aid, "neu": bool(z), "bal": k_upd.get("ziel_erreicht_bal")}
+                        except Exception as e:
+                            return {"fehler": f"Konto nicht ins Review gelegt ({type(e).__name__}) — in Accounts von Hand"}
+
                     def _umstellen():
                         aid = str(plan.get("master_account_id") or "")
                         if not aid:
@@ -15666,19 +15679,23 @@ def admin_wd_plaene():
                     f_typ = pool.submit(_konto_typ) if str(plan.get("route") or "") == "tvv2" and not plan_ist_apex_hedge(plan) else None
                     f_buch = pool.submit(_buchen)
                     f_gd = pool.submit(_good_day)
-                    f_arch = pool.submit(_archivieren) if konto_status in ("blown", "passed") else None
+                    f_arch = pool.submit(_archivieren) if konto_status == "blown" else None
+                    f_rev = pool.submit(_review) if konto_status == "passed" else None
                     f_um = pool.submit(_umstellen) if konto_status in ("waiting", "winning_days") else None
                     buchung, buchung_fehler = f_buch.result()
                     good_day = f_gd.result()
                     if f_typ:
                         f_typ.result()
                     archiv = f_arch.result() if f_arch else None
+                    review = f_rev.result() if f_rev else None
                     umstellen = f_um.result() if f_um else None
                 finally:
                     pool.shutdown(wait=False)
                 out = {"ok": True, "plan_id": pid, "status": "completed", "buchung": buchung}
                 if archiv:
                     out["archiv"] = archiv
+                if review:
+                    out["review"] = review
                 if umstellen:
                     out["konto_umstellen"] = umstellen
                 if good_day:
@@ -28559,6 +28576,17 @@ def alarm_wd_bestaetigen(plaene, firmen, namen, jetzt):
                     f"{namen.get(uid, uid[:8])} · {konto}: wartet auf deine Bestätigung (Admin → Funded-Planer → Winning Days → „Zu bestätigen“) — "
                     f"startet erst danach, ohne Bestätigung läuft er ab.", uid, pid))
     return out
+
+
+def wd_erl_review_upd(aid, plan, mpl, jetzt_iso):
+    """REIN RECHNEND (testbar, 02.11.2026): Abhaken „bestanden“ → (Filter, accounts-Update) für das Review: ziel_erreicht_at/_bal wie die Ziel-Wache, nur wenn noch leer.
+    Balance nach dem Trade: final.balance_end, sonst tv.balance_start + Master-P&L, sonst leer."""
+    bl = (plan or {}).get("mt5_baseline") if isinstance((plan or {}).get("mt5_baseline"), dict) else {}
+    fin = bl.get("final") if isinstance(bl.get("final"), dict) else {}
+    tv = bl.get("tv") if isinstance(bl.get("tv"), dict) else {}
+    be, bs = _wd_num(fin.get("balance_end")), _wd_num(tv.get("balance_start"))
+    bal = be if be and be > 0 else (round(bs + mpl, 2) if bs and bs > 0 and mpl is not None else None)
+    return {"id": f"eq.{aid}", "ziel_erreicht_at": "is.null"}, {"ziel_erreicht_at": jetzt_iso, "ziel_erreicht_bal": bal}
 
 
 def hf_wd_sichtbar(zeile, firmen, gruppen_ids):
