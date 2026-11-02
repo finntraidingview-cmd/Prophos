@@ -5,8 +5,8 @@
 #   do.sh <pc-xxxxxx> datei.json        Auftrag aus Datei
 #   Umgebung: DO_WARTE_S (Standard 20)
 #
-# Klickverbot (Finn 02.11.2026): Eingaben gehen nur an Einstellungen, Explorer, CMD/PowerShell und Prophos, geprüft im Agenten auf dem PC.
-# Es gibt keine Ausnahme mehr: DO_PULS_OK und das Feld puls_ok sind entfernt, ein Auftrag damit wird schon hier abgelehnt.
+# Sperre (Finn 02.11.2026 05:55): In TopstepX wird nichts geklickt, geprüft im Agenten auf dem PC. Der Lotse setzt, ändert und schließt keine Orders oder Positionen.
+# Es gibt keine Ausnahme: DO_PULS_OK und das Feld puls_ok sind entfernt, ein Auftrag damit wird schon hier abgelehnt.
 #
 # Warum so: bisher ~45 s je Aktion (scp Skript, Aufgabe anlegen, feste Wartezeit, Foto per scp). Jetzt: EINE ssh-Verbindung
 # startet auftrag.py auf dem PC (legt die Datei ab, wartet aufs Ergebnis, druckt JSON), dann scp der PNGs. ssh läuft mit
@@ -32,7 +32,7 @@ if [ -f "$roh" ]; then json=$(cat "$roh"); else json=$roh; fi
 ssh -G pc-pruefung 2>/dev/null | grep -q "^userknownhostsfile .*prophos-fernzugriff/known_hosts" \
   || fehler "ssh_config nicht eingebunden → ~/.ssh/config erste Zeile: Include ~/.prophos-fernzugriff/ssh_config (Vorlage mac/ssh_config.beispiel)"
 
-[ -z "${DO_PULS_OK:-}" ] || fehler "DO_PULS_OK gibt es nicht mehr: Der Lotse klickt nie in Handelsfenster (Finn 02.11.2026)"
+[ -z "${DO_PULS_OK:-}" ] || fehler "DO_PULS_OK gibt es nicht mehr: keine Ausnahme von der Sperre (Finn 02.11.2026)"
 # JSON prüfen, id vergeben
 id=$(date +%Y%m%d-%H%M%S)-$(LC_ALL=C tr -dc a-z0-9 < /dev/urandom | head -c 6)
 aus=$(ID="$id" WARTE="$WARTE" python3 -c '
@@ -43,7 +43,7 @@ if not isinstance(d, dict) or not isinstance(d.get("aktionen"), list) or not d["
 for x in [d] + [a for a in d["aktionen"] if isinstance(a, dict)]:
     for f in ("puls_ok", "browser_ok"):
         if f in x:
-            sys.exit("Feld %s gibt es nicht mehr: Der Lotse klickt nie in Handelsfenster (Finn 02.11.2026)" % f)
+            sys.exit("Feld %s gibt es nicht mehr: keine Ausnahme von der Sperre (Finn 02.11.2026)" % f)
 d["id"] = os.environ["ID"]
 # Wartezeit aus den Aktionen: Σ warte-ms + 1,5 s je Foto + 5 s Reserve, mindestens DO_WARTE_S (Review 02.11.2026: drei warte à 10 s
 # sprengten sonst die 20 s, und der Agent klickt trotzdem weiter). Zeile 1 = Wartezeit, Zeile 2 = Auftrag.
@@ -75,7 +75,7 @@ holen_py(){
 }
 [ -s "$py_merk" ] || holen_py
 py=$(head -n1 "$py_merk")
-# Klickverbot-Absicherung (Gegenprüfung 02.11.2026): Ein PC mit altem Agent führt Klicks ohne Sperre aus. Vor jedem Auftrag mit Eingaben darum eine
+# Absicherung (Gegenprüfung 02.11.2026): Ein PC mit ganz altem Agent führt Klicks ohne Sperre aus. Vor jedem Auftrag mit Eingaben darum eine
 # warte-Probe; ohne Feld "stand" im Ergebnis geht nichts raus. foto, tabs, fenster und warte brauchen die Probe nicht.
 if EINGABE=$(python3 -c '
 import json, sys
@@ -87,7 +87,7 @@ try:
     print(json.loads(sys.stdin.readline()).get("stand") or "")
 except ValueError:
     print("")')
-  [ -n "$stand" ] || fehler "Agent auf $pc hat keinen Stand mit Klickverbot → erst aktualisieren (agent/README.md), nichts gesendet. $(tr -d '\r' < "$err")" 3
+  [ -n "$stand" ] || fehler "Agent auf $pc hat keinen Stand mit Sperre → erst aktualisieren (agent/README.md), nichts gesendet. $(tr -d '\r' < "$err")" 3
 fi
 # auftrag.py druckt genau eine JSON-Zeile; alles andere (Fehler) geht auf stderr
 aus=$("${SSH[@]}" -n "$pc" "\"$py\" \"$AGENT_PY\" $b64 $WARTE" 2>"$err" | tr -d '\r')

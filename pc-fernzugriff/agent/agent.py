@@ -12,13 +12,11 @@ Auftrag (eine Datei <id>.json):
   {"id": "…", "aktionen": [ {"aktion": "foto"}, {"aktion": "klick", "x": 100, "y": 200}, … ]}
 Aktionen: foto · tabs · fenster · maus · klick · tasten · start · vorholen · schliessen · warte · scroll (Details: README.md).
 
-KLICKVERBOT (Finn 02.11.2026: „Der Lotse darf auf TopstepX, TradingView, Prop-Firm-Seiten und Orders nichts klicken. Dort nur
-reingehen und Fotos machen. Er darf in Einstellungen, Explorer, CMD/PowerShell und Prophos. Ich habe Angst, dass er falsche Sachen
-anklickt und Orders platziert."): Eingaben gehen nur an Fenster auf der Erlaubt-Liste (freigabe()), geprüft am Vordergrund UND am
-Fenster unter dem Zielpunkt, unmittelbar vor dem Senden. Unklar = gesperrt. Es gibt keine Ausnahme mehr: Ein Auftrag mit puls_ok
-oder browser_ok wird ganz abgelehnt. foto, tabs, fenster und warte bleiben überall erlaubt.
-Klarstellung Finn 02.11.2026 04:52: „Der Lotse darf nicht selber aktiv klicken, aber der Puls-Bot darf. Der Lotse darf dem Puls-Bot Aufgaben geben.“
-Panel-Aufrufe wie /api/tsx-lesen sind also erlaubt; scharfe Orders (scharf:true) löst der Lotse nie aus. Das und SSH-Befehle sperrt dieser Agent nicht, das ist Regel.
+NUR TOPSTEPX GESPERRT (Finn 02.11.2026 05:55: „Die Klicksperre kannst du aufheben. In TradingView darfst du klicken. In TopstepX nichts klicken, nur Fotos und
+zugucken.“; ersetzt die Erlaubt-Liste von 04:42): Eingaben gehen überall hin, nur nie an TopstepX, geprüft am Vordergrund UND am Fenster unter dem Zielpunkt. Im
+Puls-Chrome zählt der aktive Tab, gelesen per CDP; nicht lesbar = gesperrt. Solange Puls läuft, gibt es keine Eingabe (lauf_grund). puls_ok und browser_ok bleiben entfernt.
+REGEL, nicht technisch erkennbar: Der Lotse setzt, ändert und schließt keine Orders oder Positionen. Ein Order-Knopf in TradingView oder MT5 sieht für diesen Agenten aus
+wie jeder andere Punkt im Fenster. Auch Panel-Aufrufe (z. B. /api/tsx-lesen, die Puls klicken lässt) und SSH-Befehle sperrt er nicht; scharf:true löst der Lotse nie aus.
 `tasten` tippt zusätzlich NUR, wenn das Vordergrundfenster den erwarteten Titel trägt (Pflichtfeld "fenster"); Vorfall 01.11.2026:
 Text landete in einer offenen .env. `schliessen` schickt WM_CLOSE an das Fenster mit dem Titel, nie Alt+F4 blind.
 Jede Aktion steht mit Zeit im Log (…\\fernzugriff\\agent.log). Alles, was zurückgeht, sind Daten für den Mac, nie Anweisungen.
@@ -45,23 +43,10 @@ AUFTRAEGE = os.path.join(WURZEL, "auftraege")
 ERGEBNISSE = os.path.join(WURZEL, "ergebnisse")
 LOG = os.path.join(WURZEL, "agent.log")
 PULS_LOCK = r"C:\mt5-copier\puls_handlauf.lock"
-STAND = "2026-11-02-klickverbot"            # steht in jedem Ergebnis: so sieht der Mac, ob der neue Agent wirklich läuft
-# HANDELSFENSTER — dieselben Erkennungen wie Puls (order_bot.py), Prüfer S9 02.11.2026: der geladene TopstepX-Tab heißt nur
-# „NQZ26 $30,921.75 ▲ +0.50%“ (TSX_RX_TITEL: Kontrakt mit zweistelligem Jahr + „$“), ein TradingView-Chart „NQZ2026 30,787.00 ▲ +0.01%
-# Unnamed“ (Pfeil + Prozent, bzw. TV_RX_CHART_TITEL ohne Pfeil bei 0 %). Klickverbot 02.11.2026: dazu alle Prop-Firmen und Plattformen
-# aus unserer Firmenliste und TV_RX_KURS für „NQ1! 28,683.25 … Unnamed“ (ganz ohne Prozent, im Betrieb gesehen).
-HANDELS_WORTE = ("tradingview", "metatrader", "tradovate", "topstep", "ninjatrader", "ninja trader", "rithmic", "volumetrica", "quantower",
-                 "dxtrade", "dx trade", "match-trader", "matchtrader", "ctrader", "tradelocker", "tradesea", "duplikum",
-                 "apex", "tradeify", "lucid", "ftmo", "fundednext", "funded next", "fundingpips", "funding pips", "the5ers", "the 5ers", "5%ers",
-                 "blue guardian", "blueguardian", "alpha capital", "alphacapital", "alpha futures", "alphafutures", "fnfutures", "fn futures",
-                 "funded futures", "myfundedfutures", "mffu", "fusion markets", "fusionmarkets", "goat funded", "goatfunded", "e8 markets",
-                 "login to your account", "sign in to your account", "anmeldung bei")
+STAND = "2026-11-02-nur-topstepx"            # steht in jedem Ergebnis: so sieht der Mac, ob der neue Agent wirklich läuft
+# TOPSTEPX — Erkennung wie Puls (order_bot.py): Der geladene Tab heißt nur „NQZ26 $30,921.75 ▲ +0.50%“ (TSX_RX_TITEL: Kontrakt mit zweistelligem Jahr + „$“).
 TSX_RX_TITEL = re.compile(r"^\s*(?:\(\d+\)\s*)?[A-Z]{1,5}[FGHJKMNQUVXZ]\d{2}\s+\$\s?\d")
-TV_RX_CHART_TITEL = re.compile(r"^(\(\d+\)\s*)?[A-Za-z][A-Za-z0-9!:._-]{1,24}\s+[\d.,]+\s+(▲|▼)?\s*[−\-+]?[\d.,]+\s*%")
-TV_RX_KURS = re.compile(r"^(\(\d+\)\s*)?[A-Z][A-Z0-9!:._-]{0,24}\s+\$?\d[\d,.]*[.,]\d{1,5}(\s|$)")
-HANDELS_KLASSE_ANFANG = "metaquotes::"     # MT5: MetaQuotes::MetaTrader::5.00, auch wenn der Titel nur „14348534 - … - FundedNext Ltd“ lautet
-HANDELS_EXE = ("terminal64.exe", "terminal.exe", "metaeditor64.exe", "ninjatrader.exe", "starter.exe")
-# Außerdem JEDES Fenster des Puls-Chrome-Prozesses, egal welcher Tab vorn ist (ein TV-Tab im Hintergrund ist am Titel unsichtbar):
+# Im Puls-Chrome entscheidet der aktive Tab: Die Adresse steht in der CDP-Liste, der Titel des Fensters sagt, welcher Tab es ist.
 # Puls merkt sein Fenster in C:\mt5-copier\puls_fenster.json (hwnd, pid, profil — order_bot.py _puls_merk_schreiben). Die Datei kann
 # alt sein, darum zusätzlich der Prozess, der den CDP-Port 9333 hält (puls_browser_pid).
 PULS_FENSTER_JSON = r"C:\mt5-copier\puls_fenster.json"
@@ -71,27 +56,18 @@ PANEL_BESCHAEFTIGT = "http://127.0.0.1:8770/api/beschaeftigt"
 PULS_LOCK_FRISCH_S = 15 * 60               # wie Puls selbst (order_bot.py: Lock jünger als 15 min = Handlauf läuft); älter = liegengeblieben
 BROWSER_KLASSEN = ("Chrome_WidgetWin_1",)
 BROWSER_EXE = ("chrome.exe", "msedge.exe")
-# ERLAUBT-LISTE (Finn: Einstellungen, Explorer, CMD/PowerShell, Prophos). Alles andere ist gesperrt, auch Taskleiste, Startmenü und Desktop:
-# ein Klick dort kann das Puls-Chrome oder MT5 nach vorn holen. Programme kommen über die Aktion start nach vorn.
-EXPLORER_KLASSEN = ("CabinetWClass", "ExploreWClass", "OperationStatusWindow")   # OperationStatusWindow: Kopieren/Ersetzen
 KONSOLEN_KLASSEN = ("ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS")
 KONSOLEN_EXE = ("cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "openconsole.exe", "windowsterminal.exe")
 # Die Konsolen von start-alles.bat sind Betrieb, kein Werkzeug: Ein Klick ins Fenster startet die Textauswahl und hält das Programm an
 # (Windows-QuickEdit), Strg+C beendet es. Titel aus start-copier/-panel/-prophos/-reader.bat.
 BOT_KONSOLEN_WORTE = ("copier", "panel", "prophos", "reader", "puls", "polar", "order_bot", "mt5-update")
-EINSTELLUNGEN_TITEL = ("einstellungen", "settings")
-# Chrome hängt bei Ton den Audio-Zusatz an; Prophos spielt Alarmtöne, ohne den Zusatz wäre Prophos genau dann gesperrt.
-PROPHOS_RX_TITEL = re.compile(r"^(\(\d+\)\s*)?Prophos(\s+[-–—]\s+(Audiowiedergabe|Audio wird wiedergegeben|Audio playing|Tab stummgeschaltet|Tab muted))?\s+[-–—]\s+(Google Chrome|Microsoft\u200b? Edge|Chromium)(\s+[-–—]\s+.{1,40})?$")
-BROWSER_KOPF_PX = 130                      # Tab-Leiste + Adressleiste + Lesezeichen bei 100 % (Chrome ~115): Ein Klick dort wechselt den Tab
+# Puls-Chrome: Tab-Leiste und Adressleiste bleiben gesperrt, ein Klick dort kann einen hinteren TopstepX-Tab treffen (auch sein ×). Der Titel zeigt nur den aktiven Tab.
+BROWSER_KOPF_PX = 130                      # Tab-Leiste + Adressleiste + Lesezeichen bei 100 % (Chrome ~115)
+BROWSER_ZUSATZ_RX = re.compile(r"\s+[-–—]\s+(Audiowiedergabe|Audio wird wiedergegeben|Audio playing|Tab stummgeschaltet|Tab muted)$")
+BROWSER_ENDE_RX = re.compile(r"\s+[-–—]\s+(Google Chrome|Chromium|Microsoft\u200b? Edge)(\s+[-–—]\s+.{1,40})?$")
 START_ERLAUBT = ("explorer.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wt.exe")
 VERBOTENE_FELDER = ("puls_ok", "browser_ok")   # früher Ausnahmen vom Riegel; Finn 02.11.2026: keine Ausnahme mehr
-KOMBIS_SCHLIESSEN = ("ctrl+w", "ctrl+shift+w", "ctrl+f4", "alt+f4")   # schließen Tab/Fenster — im Browser nie (Titel zeigt nur den aktiven Tab)
-# Mit win nur diese zwei: win+d, win+m, ctrl+win+d und win+1 holen Handelsfenster nach vorn oder nehmen Puls den Desktop weg. win+r ist bewusst nicht
-# dabei: Das Ausführen-Feld startet jede Adresse und jedes Programm, an start_pruefen vorbei (Gegenprüfung 02.11.2026).
-KOMBIS_WIN_ERLAUBT = ("win+e", "win+i")
-# Im Browser nur Tasten, die in der Seite bleiben: Strg+Tab, Strg+1…9, Strg+L, Strg+T, F6 führen in andere Tabs oder die Adressleiste.
-KOMBIS_BROWSER = ("enter", "tab", "shift+tab", "esc", "space", "backspace", "del", "home", "end", "pgup", "pgdn", "left", "right", "up", "down", "f5",
-                  "ctrl+a", "ctrl+c", "ctrl+v", "ctrl+x", "ctrl+z", "ctrl+f")
+KOMBIS_SCHLIESSEN = ("ctrl+w", "ctrl+shift+w", "ctrl+f4", "alt+f4")   # schließen Tab/Fenster — im Browser nie, der Titel zeigt nur den aktiven Tab
 TASTEN_GLEICH = {"strg": "ctrl", "umschalt": "shift", "return": "enter", "escape": "esc", "leer": "space", "delete": "del", "entf": "del", "pos1": "home",
                  "ende": "end", "links": "left", "rechts": "right", "hoch": "up", "runter": "down"}
 FREI_IMMER = ("foto", "tabs", "fenster", "warte")  # immer erlaubt (nur lesen / nichts tun)
@@ -262,62 +238,62 @@ def puls_fenster_merk():
         return None
 
 
-def ist_handelstitel(titel):
-    """REIN RECHNEND (testbar): Titel eines Handelsfensters nach den Puls-Regeln oder aus der Firmenliste?"""
+def ist_topstepx_titel(titel):
+    """REIN RECHNEND (testbar): Titel eines TopstepX-Fensters oder -Tabs?"""
     t = str(titel or "")
-    low = t.lower()
-    if any(p in low for p in HANDELS_WORTE):
-        return True
-    if TSX_RX_TITEL.match(t):
-        return True
-    if ("▲" in t or "▼" in t) and "%" in t:
-        return True
-    return bool(TV_RX_CHART_TITEL.match(t) or TV_RX_KURS.match(t))
+    return "topstep" in t.lower() or bool(TSX_RX_TITEL.match(t))
 
 
-def ist_handelsfenster(titel, klasse=None, pid=None, hwnd=None, merk=None, exe=None, puls_pid=None):
-    """REIN RECHNEND (testbar): Handelstitel, MT5 (Klasse oder Programm) oder ein Fenster des Puls-Chrome (pid/hwnd aus puls_fenster.json, Port 9333)."""
-    if ist_handelstitel(titel):
-        return True
-    if str(klasse or "").lower().startswith(HANDELS_KLASSE_ANFANG) or str(exe or "").lower() in HANDELS_EXE:
-        return True
+def ist_puls_chrome(klasse, pid=None, hwnd=None, merk=None, puls_pid=None):
+    """REIN RECHNEND (testbar): Hauptfenster des Puls-Chrome? Prozess hinter Port 9333 oder puls_fenster.json. Menüs und Popups haben eine andere Klasse;
+    für sie zählt der Vordergrund, den ziel_pruefen immer mit prüft."""
+    if klasse not in BROWSER_KLASSEN:
+        return False
     if pid and puls_pid and int(pid) == int(puls_pid):
         return True
     m = puls_fenster_merk() if merk is None else merk
     if not m:
         return False
-    if hwnd and m.get("hwnd") and int(hwnd) == int(m["hwnd"]):
-        return True
-    if pid and m.get("pid") and int(pid) == int(m["pid"]) and (klasse is None or klasse in BROWSER_KLASSEN):
-        return True
-    return False
+    return bool((hwnd and m.get("hwnd") and int(hwnd) == int(m["hwnd"])) or (pid and m.get("pid") and int(pid) == int(m["pid"])))
 
 
-def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, puls_pid_sicher=True):
-    """REIN RECHNEND (testbar): → (art, grund). art = explorer | konsole | einstellungen | prophos, wenn Eingaben erlaubt sind; sonst None + Grund.
-    Whitelist (Finn 02.11.2026): Was hier nicht ausdrücklich steht, ist gesperrt. Programm UND Klasse müssen passen, ein Titel allein reicht
-    nur zusammen mit beiden. Ein Handelsfenster gewinnt immer, auch gegen die Liste."""
+def puls_tab_stand(fenster_titel, tabs):
+    """REIN RECHNEND (testbar): aktiver Tab eines Puls-Chrome-Fensters → 'topstepx' | 'frei' | 'unklar'. Der Fenstertitel nennt den aktiven Tab, die CDP-Liste seine
+    Adresse. Findet sich kein Tab mit genau diesem Titel, ist unklar, was vorn ist: Das gilt als gesperrt. Haben mehrere Tabs denselben Titel, reicht ein TopstepX-Tab."""
+    if not isinstance(tabs, list):
+        return "unklar"
+    t = BROWSER_ZUSATZ_RX.sub("", BROWSER_ENDE_RX.sub("", str(fenster_titel or ""))).strip()
+    if not t:
+        return "unklar"
+    treffer = [x for x in tabs if isinstance(x, dict) and x.get("type") == "page" and str(x.get("title") or "").strip() == t]
+    if not treffer:
+        return "unklar"
+    return "topstepx" if any("topstep" in str(x.get("url") or "").lower() for x in treffer) else "frei"
+
+
+def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, puls_pid_sicher=True, tabs=None):
+    """REIN RECHNEND (testbar): → (art, grund). art = puls_chrome | browser | konsole | frei, wenn Eingaben erlaubt sind; sonst None + Grund.
+    Finn 02.11.2026 05:55: gesperrt ist nur TopstepX. Dazu die Betriebs-Konsolen, das ist keine Handelssperre: Ein Klick hält dort das Programm an."""
     t, k, e = str(titel or ""), str(klasse or ""), str(exe or "").lower()
-    if ist_handelsfenster(t, k, pid, hwnd, merk, e, puls_pid):
-        return None, "Handelsfenster: %s" % (t[:60] or k or "?")
-    if k in EXPLORER_KLASSEN and e == "explorer.exe":
-        return "explorer", ""
-    if k == "#32770" and e == "explorer.exe":        # „Ausführen“, Kopieren, Eigenschaften. MT5-Dialoge haben dieselbe Klasse, aber terminal64.exe
-        return "explorer", ""
-    if k in KONSOLEN_KLASSEN and e in KONSOLEN_EXE:
-        if any(w in t.lower() for w in BOT_KONSOLEN_WORTE):
-            return None, "Betriebs-Konsole: %s" % t[:60]
+    if ist_topstepx_titel(t):
+        return None, "TopstepX: %s" % t[:60]
+    browser = k in BROWSER_KLASSEN and (e in BROWSER_EXE or not e)
+    if browser and not puls_pid_sicher:
+        return None, "Puls-Chrome nicht bestimmbar (netstat) — Browser gesperrt"
+    if ist_puls_chrome(k, pid, hwnd, merk, puls_pid):
+        st = puls_tab_stand(t, tabs)
+        if st == "topstepx":
+            return None, "TopstepX im Puls-Chrome: %s" % t[:60]
+        if st == "unklar":
+            return None, "Puls-Chrome: aktiver Tab nicht lesbar (CDP) — gesperrt: %s" % t[:60]
+        return "puls_chrome", ""
+    if browser:
+        return "browser", ""
+    if k in KONSOLEN_KLASSEN:
+        if e not in KONSOLEN_EXE or any(w in t.lower() for w in BOT_KONSOLEN_WORTE):
+            return None, "Betriebs-Konsole: %s" % (t[:60] or e)
         return "konsole", ""
-    if t.strip().lower() in EINSTELLUNGEN_TITEL and ((k == "ApplicationFrameWindow" and e == "applicationframehost.exe")
-                                                     or (k == "Windows.UI.Core.CoreWindow" and e == "systemsettings.exe")):
-        return "einstellungen", ""
-    if k in BROWSER_KLASSEN and e in BROWSER_EXE:
-        if not PROPHOS_RX_TITEL.match(t):
-            return None, "Browser ohne eindeutigen Prophos-Titel: %s" % t[:60]
-        if not puls_pid_sicher:
-            return None, "Puls-Chrome nicht bestimmbar (netstat) — Browser gesperrt"
-        return "prophos", ""
-    return None, "nicht auf der Erlaubt-Liste: %s (%s, %s)" % (t[:50] or "ohne Titel", k or "?", e or "?")
+    return "frei", ""
 
 
 def im_browser_kopf(y, fenster_y, dpi=96):
@@ -346,6 +322,16 @@ def puls_browser_pid():
         return None, False
 
 
+def puls_stand():
+    """(pid, sicher, tabs). Prozess hinter Port 9333 und Tabs des Puls-Chrome; tabs = None, wenn CDP nicht antwortet."""
+    pid, sicher = puls_browser_pid()
+    try:
+        tabs = cdp_json("/json/list", timeout=1.5)
+    except Exception:
+        tabs = None
+    return pid, sicher, tabs if isinstance(tabs, list) else None
+
+
 def fenster_info(hwnd):
     """(titel, klasse, pid) eines Fensters."""
     from ctypes import wintypes as wt
@@ -357,16 +343,17 @@ def fenster_info(hwnd):
 
 
 def fenster_freigabe(hwnd, pp=None):
-    """→ (art, grund, titel) für ein echtes Fenster. Lesefehler = gesperrt. pp = vorab gelesenes puls_browser_pid(): netstat kostet ~100 ms und gehört
-    VOR das Lesen des Fensters, sonst ist die Prüfung beim Senden schon alt (Gegenprüfung 02.11.2026). Ohne pp nur für Anzeigen."""
+    """→ (art, grund, titel) für ein echtes Fenster. Lesefehler = gesperrt. pp = vorab gelesenes puls_stand(): netstat und CDP kosten Zeit und gehören
+    VOR das Lesen des Fensters, sonst ist die Prüfung beim Senden schon alt (Gegenprüfung 02.11.2026). Wechselt der Tab danach, passt der frische Titel nicht mehr zur Liste
+    und das Ergebnis ist „unklar“, also gesperrt. Ohne pp nur für Anzeigen."""
     if not hwnd:
         return None, "kein Fenster", ""
     try:
         t, k, pid = fenster_info(hwnd)
         e = exe_name(pid)
         if pp is None:
-            pp = puls_browser_pid() if k in BROWSER_KLASSEN else (None, True)
-        art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1])
+            pp = puls_stand() if k in BROWSER_KLASSEN else (None, True, None)
+        art, grund = freigabe(t, k, e, pid, int(hwnd), None, pp[0], pp[1], pp[2])
         return art, grund, t
     except Exception as ex:
         return None, "Fenster nicht lesbar (%s)" % type(ex).__name__, ""
@@ -377,10 +364,10 @@ def vorne_hwnd():
 
 
 def vorne_pruefen(pp=None):
-    """Vordergrund muss auf der Erlaubt-Liste stehen. → art, sonst Fehler."""
+    """Vordergrund darf nicht gesperrt sein. → art, sonst Fehler."""
     art, grund, _t = fenster_freigabe(vorne_hwnd(), pp)
     if not art:
-        raise RuntimeError("Klickverbot, Vordergrund gesperrt — %s" % grund)
+        raise RuntimeError("Gesperrt, Vordergrund: %s" % grund)
     return art
 
 
@@ -478,30 +465,25 @@ def abs_koord(x, y, rahmen):
 
 
 def ziel_pruefen(x, y, pp=None):
-    """Sperre für alles, was die Maus betrifft: Vordergrund UND Fenster unter dem Punkt müssen frei sein, im Browser nie Tab-Leiste oder Adressleiste."""
-    pp = puls_browser_pid() if pp is None else pp
+    """Sperre für alles, was die Maus betrifft: Vordergrund UND Fenster unter dem Punkt dürfen nicht TopstepX sein, im Puls-Chrome nie Tab-Leiste oder Adressleiste."""
+    pp = puls_stand() if pp is None else pp
     vorne_pruefen(pp)
     h = fenster_unter(x, y)
     art, grund, _t = fenster_freigabe(h, pp)
     if not art:
-        raise RuntimeError("Klickverbot, unter dem Zeiger gesperrt — %s" % grund)
-    if art == "prophos" and im_browser_kopf(y, fenster_oben(h), fenster_dpi(h)):
-        raise RuntimeError("Klickverbot: Tab-Leiste oder Adressleiste des Browsers (y=%d)" % int(y))
+        raise RuntimeError("Gesperrt, unter dem Zeiger: %s" % grund)
+    if art == "puls_chrome" and im_browser_kopf(y, fenster_oben(h), fenster_dpi(h)):
+        raise RuntimeError("Gesperrt: Tab-Leiste oder Adressleiste des Puls-Chrome (y=%d), dort kann ein TopstepX-Tab liegen" % int(y))
 
 
 def kombi_pruefen(kombi, art):
-    """REIN RECHNEND (testbar): Darf diese Tastenkombination in einem Fenster der Art art gedrückt werden? Vergleich als Menge, Reihenfolge und Schreibweise zählen
-    nicht: shift+alt+tab, d+win und ctrl+win+d rutschten an einer Liste fester Texte vorbei (Gegenprüfung 02.11.2026)."""
+    """REIN RECHNEND (testbar): Schließ-Kombis nie im Browser, dort kann ein anderer Tab mitgehen. Vergleich als Menge, Reihenfolge und Schreibweise zählen nicht."""
     teile = [TASTEN_GLEICH.get(t.strip().lower(), t.strip().lower()) for t in str(kombi).split("+") if t.strip()]
     menge = set(teile)
     mods = [m for m in ("ctrl", "shift", "alt", "win") if m in menge]
     k = "+".join(mods + sorted(menge - set(mods)))
-    if "win" in menge and k not in KOMBIS_WIN_ERLAUBT:
-        raise RuntimeError("Klickverbot: %s kann ein Handelsfenster nach vorn holen oder das Puls-Fenster verändern" % k)
-    if ("alt" in menge and menge & {"tab", "esc"}) or ("ctrl" in menge and "esc" in menge):
-        raise RuntimeError("Klickverbot: %s wechselt das Fenster" % k)
-    if art == "prophos" and (k in KOMBIS_SCHLIESSEN or k not in KOMBIS_BROWSER):
-        raise RuntimeError("Klickverbot: %s ist im Browser nicht erlaubt (nur Tasten, die in der Seite bleiben)" % k)
+    if art in ("browser", "puls_chrome") and k in KOMBIS_SCHLIESSEN:
+        raise RuntimeError("Gesperrt: %s schließt im Browser Tab oder Fenster" % k)
     return k
 
 
@@ -516,11 +498,11 @@ def start_pruefen(programm, ziel, ist_ordner=os.path.isdir):
             raise ValueError("ms-settings: nimmt kein Ziel")
         return p
     if p.lower() not in START_ERLAUBT:
-        raise RuntimeError("Klickverbot: start nur für %s und ms-settings:, nicht „%s“" % (", ".join(START_ERLAUBT), p[:60]))
+        raise RuntimeError("Gesperrt: start nur für %s und ms-settings:, nicht „%s“" % (", ".join(START_ERLAUBT), p[:60]))
     if ziel:
         z = str(ziel)
         if p.lower() != "explorer.exe" or not re.match(r"^[A-Za-z]:\\", z) or "::" in z or not ist_ordner(z):
-            raise RuntimeError("Klickverbot: Ziel „%s“ nur als vorhandener lokaler Ordner für explorer.exe" % z[:60])
+            raise RuntimeError("Gesperrt: Ziel „%s“ nur als vorhandener lokaler Ordner für explorer.exe" % z[:60])
     return p
 
 
@@ -710,7 +692,7 @@ def _bewegen_und_pruefen(x, y, pp):
     maus(x, y)
     time.sleep(0.03)
     if tuple(zeiger_lesen()) != (x, y):
-        raise RuntimeError("Klickverbot: Zeiger steht nicht auf (%d, %d)" % (x, y))
+        raise RuntimeError("Gesperrt: Zeiger steht nicht auf (%d, %d)" % (x, y))
     ziel_pruefen(x, y, pp)        # nochmal: Puls oder ein Popup kann in den 30 ms nach vorn gekommen sein
 
 
@@ -721,11 +703,13 @@ def _ziel_ereignis(x, y, rahmen):
 
 
 def klick(x, y, art, pp, rahmen):
-    if art not in ("links", "doppelt"):
-        # Rechtsklick nicht: Kontextmenüs stehen nicht auf der Erlaubt-Liste, das Menü bliebe offen und unbedienbar
-        raise ValueError("klick.art muss links oder doppelt sein")
+    if art not in ("links", "rechts", "doppelt"):
+        raise ValueError("klick.art muss links, rechts oder doppelt sein")
     _bewegen_und_pruefen(x, y, pp)
-    folge = [_maus_ereignis(0x0002), _maus_ereignis(0x0004)]                # LEFTDOWN, LEFTUP
+    if art == "rechts":
+        folge = [_maus_ereignis(0x0008), _maus_ereignis(0x0010)]            # RIGHTDOWN, RIGHTUP
+    else:
+        folge = [_maus_ereignis(0x0002), _maus_ereignis(0x0004)]            # LEFTDOWN, LEFTUP
     if art == "doppelt":
         folge = folge + folge
     _senden([_ziel_ereignis(x, y, rahmen)] + folge)
@@ -747,7 +731,7 @@ def text_tippen(text, fenster_soll=None, pp=None):
         for cp in (ord(z),) if ord(z) < 0x10000 else (0xD800 + ((ord(z) - 0x10000) >> 10), 0xDC00 + ((ord(z) - 0x10000) & 0x3FF)):
             folge += [_taste(0, cp, 0x0004), _taste(0, cp, 0x0004 | 0x0002)]   # KEYEVENTF_UNICODE (+ KEYUP)
     for i in range(0, len(folge), 40):
-        vorne_pruefen(pp)     # je Paket: Kommt mitten im Text ein Handelsfenster nach vorn, bleibt der Rest ungetippt
+        vorne_pruefen(pp)     # je Paket: Kommt mitten im Text TopstepX nach vorn, bleibt der Rest ungetippt
         if fenster_soll:
             ist = vorne_titel()
             if str(fenster_soll).lower() not in ist.lower():
@@ -828,7 +812,7 @@ def ak_tabs(a, *_):
 
 def ak_fenster(a, *_):
     # erlaubt: So sieht der Mac vorher, wo Eingaben gehen. Die Sperre selbst prüft unabhängig davon vor jedem Senden neu.
-    pp = puls_browser_pid()
+    pp = puls_stand()
     liste = []
     for f in fenster_liste():
         art = fenster_freigabe(f["hwnd"], pp)[0]
@@ -838,7 +822,7 @@ def ak_fenster(a, *_):
 
 def ak_maus(a, *_):
     x, y = punkt_lesen(a, bildschirm_rahmen())
-    ziel_pruefen(x, y, puls_browser_pid())
+    ziel_pruefen(x, y, puls_stand())
     maus(x, y)
     return {"x": x, "y": y}
 
@@ -848,7 +832,7 @@ def ak_klick(a, *_):
     x, y = punkt_lesen(a, rahmen)
     art = a.get("art", "links")
     _fenster_pruefen(a, False)
-    pp = puls_browser_pid()
+    pp = puls_stand()
     ziel_pruefen(x, y, pp)
     klick(x, y, art, pp, rahmen)
     return {"x": x, "y": y, "art": art}
@@ -856,7 +840,7 @@ def ak_klick(a, *_):
 
 def ak_tasten(a, *_):
     _fenster_pruefen(a, True)
-    pp = puls_browser_pid()
+    pp = puls_stand()
     art = vorne_pruefen(pp)
     if a.get("text") is not None:
         text_tippen(a["text"], a.get("fenster"), pp)
@@ -870,13 +854,12 @@ def ak_tasten(a, *_):
 
 
 def ak_vorholen(a, *_):
-    """Erlaubtes Fenster nach vorn, ohne Klick und ohne Taste (Gegenprüfung 02.11.2026: Ist TradingView vorn, wäre ein offenes Prophos sonst unerreichbar, die Taskleiste
-    ist gesperrt). Nimmt das erste passende Fenster, das frei ist: Ein Prophos-Tab im Puls-Chrome zählt nicht. Windows kann das aus einem Hintergrundprozess verweigern,
+    """Fenster nach vorn, ohne Klick und ohne Taste. Nimmt das erste passende Fenster, das nicht gesperrt ist; TopstepX nie. Windows kann das aus einem Hintergrundprozess verweigern,
     dann kommt ein Fehler und nichts ist passiert; Tastendruck-Tricks dagegen sind hier bewusst nicht gebaut, sie träfen Puls."""
     t = str(a.get("fenster") or "").lower()
     if not t:
         raise ValueError("vorholen braucht 'fenster' (Titel-Teil)")
-    pp = puls_browser_pid()
+    pp = puls_stand()
     gesperrt = None
     for f in fenster_liste():
         if t not in f["titel"].lower():
@@ -893,12 +876,12 @@ def ak_vorholen(a, *_):
         if vorne_hwnd() != f["hwnd"]:
             raise RuntimeError("Windows hat „%s“ nicht nach vorn gelassen" % f["titel"][:50])
         return {"vorn": f["titel"][:60], "art": art}
-    raise RuntimeError("Klickverbot, Fenster gesperrt — %s" % gesperrt if gesperrt else "kein Fenster mit „%s“" % a.get("fenster"))
+    raise RuntimeError("Gesperrt: %s" % gesperrt if gesperrt else "kein Fenster mit „%s“" % a.get("fenster"))
 
 
 def ak_start(a, *_):
     """Programm aus START_ERLAUBT oder ms-settings: per ShellExecute (Finn 02.11.2026: so kommen Einstellungen, Explorer, CMD/PowerShell nach vorn, ohne
-    dass auf die Taskleiste geklickt wird). Vor start prüft auftrag_ausfuehren lauf_grund(): mitten in einem Lauf nimmt kein neues Fenster den Fokus."""
+    dass erst etwas angeklickt werden muss). Vor start prüft auftrag_ausfuehren lauf_grund(): mitten in einem Lauf nimmt kein neues Fenster den Fokus."""
     ziel = a.get("ziel") or a.get("url")
     prog = start_pruefen(a.get("programm"), ziel)
     if ziel:
@@ -914,8 +897,8 @@ def ak_schliessen(a, *_):
         raise RuntimeError("kein Fenster mit „%s“" % a.get("fenster"))
     art, grund, _t = fenster_freigabe(f["hwnd"])
     if not art:
-        raise RuntimeError("Klickverbot, Fenster gesperrt — %s" % grund)
-    if art == "prophos":
+        raise RuntimeError("Gesperrt: %s" % grund)
+    if art in ("browser", "puls_chrome"):
         # Der Chrome-Titel ist nur der AKTIVE Tab; WM_CLOSE schließt das ganze Fenster samt Hintergrund-Tabs.
         raise RuntimeError("Browser-Fenster „%s“ wird nie geschlossen (schließt alle Tabs)" % f["titel"][:50])
     if f["klasse"] == "CASCADIA_HOSTING_WINDOW_CLASS":
@@ -936,7 +919,7 @@ def ak_scroll(a, *_):
     schritte = a.get("schritte", -3)
     if type(schritte) is not int:
         raise ValueError("schritte muss eine ganze Zahl sein")
-    pp = puls_browser_pid()
+    pp = puls_stand()
     ziel_pruefen(x, y, pp)
     scroll(x, y, schritte, pp, rahmen)
     return {"schritte": schritte}
@@ -954,7 +937,7 @@ def auftrag_ausfuehren(auftrag):
     if verboten:
         # Finn 02.11.2026: Kein Auftrag kann die Sperre öffnen. Der ganze Auftrag fällt weg, auch seine erlaubten Aktionen.
         log("%s ABGELEHNT: Feld %s" % (aid, verboten))
-        return {"id": aid, "ok": False, "fehler": "Klickverbot: Auftrag mit „%s“ abgelehnt, diese Ausnahme gibt es nicht mehr" % verboten, "aktionen": [], "bilder": [],
+        return {"id": aid, "ok": False, "fehler": "Gesperrt: Auftrag mit „%s“ abgelehnt, diese Ausnahme gibt es nicht mehr" % verboten, "aktionen": [], "bilder": [],
                 "ms": 0, "stand": STAND, "zeit": time.strftime("%Y-%m-%d %H:%M:%S")}
     ergebnisse, bilder = [], []
     t0 = time.time()
