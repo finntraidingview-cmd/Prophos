@@ -30067,7 +30067,8 @@
       // Panel/Copier NICHT ERREICHBAR (02.10.2026, Moritz: Close lief in den Panel-Neustart, nächster Versuch erst nach 10 s → Finn schloss
       // Fusion von Hand): der Auftrag kam gar nicht an — dann jede Sekunde neu. Langes Backoff nur bei echten Ablehnungen des Brokers.
       const n = Math.max(1, Number(h.close_versuche) || 1)
-      const warte = h.close_fehler_art === 'verbindung' ? 1000 : Math.min(60000, 10000 * Math.pow(2, n - 1))
+      // retry_ok des Copiers (Finn 02.11.2026, Simon 88b28130: MT5 lehnte den Close ab, 10 s Pause, Finn schloss von Hand): die ersten 3 Versuche nach 1 s
+      const warte = (h.close_fehler_art === 'verbindung' || (h.close_retry_ok === true && n <= 3)) ? 1000 : Math.min(60000, 10000 * Math.pow(2, n - 1))
       if(Date.now() - (Date.parse(h.close_fehler_at) || 0) < warte) return { ok: false, msg: `Backoff ${Math.round(warte / 1000)} s nach Close-Fehler` }
     }
     _hedgeBusy.add(pid)
@@ -30107,7 +30108,8 @@
       // backend_neustart (02.11.2026): App oder Panel startet neu, „nichts gesendet“ (503) — kein Nein des Brokers, also 1 s statt 10 s Backoff im Neustart-Fenster
       const verbindung = !res || ['verbindung', 'copier_alt', 'copier_stumm', 'backend_neustart'].includes(String(res.code || '')) || /nicht erreichbar|ConnectionError|Failed to fetch|NetworkError|timeout|abort/i.test(msg)
       await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1,
-        close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt', close_zeiten: closeZeiten })
+        close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt', close_zeiten: closeZeiten, close_retry_ok: !!(res && res.retry_ok),
+        close_fehler_letzter: { msg: msg.slice(0, 200), at: new Date().toISOString(), code: String((res && res.code) || ''), grund } })   // bleibt nach dem Erfolg stehen (close_fehler wird dann genullt)
       // bei Verbindungsfehlern nicht jede Sekunde einen Hinweis — nur beim ersten Versuch
       if(typeof atToast === 'function' && !(verbindung && (Number(h.close_versuche) || 0) > 0)) atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg + (verbindung ? ' — neuer Versuch jede Sekunde' : ''), 'end')
       return { ok: false, msg }
@@ -32692,6 +32694,29 @@
    * der Hedge ≥ 3 s offen und die Master-Position seit dem Open schon gesehen war. Alles andere bleibt beim 1-s-Wächter. */
   const _hedgeSchnellLeer = new Map(), _hedgeSchnellKonto = new Map(), _hedgeFillAusReader = new Set()
   const _hedgeSchnellGesehenAt = new Map()   // plan-id → letzte Lesung MIT Master-Position (für gesehenImZeitraum, 28.10.2026)
+  /* SICHT ÜBER NEULADEN (Finn 02.11.2026, Simon pc-pmqd8g Plan 88b28130): Konto-Ruhe und „Position gesehen" lebten nur im Speicher des Tabs. Nach einem Neuladen 10 s vor dem Exit galt
+   * deshalb die 30-s-Regel (Wechsel-Fenster), Fusion ging 34,5 s nach dem Master zu. Jetzt je Plan in localStorage {konto, kontoSeit, gesehenAt}; ein neuer Tab übernimmt sie nur, wenn
+   * der Reader GENAU denselben Kontotext zeigt, die Sichtung nach dem Hedge-Open lag und höchstens HEDGE_SICHT_MAX_MS her ist. Verlässt der Reader das Plan-Konto, wird sie gelöscht. */
+  const HEDGE_SICHT_LS = 'prophos_hedge_sicht', HEDGE_SICHT_MAX_MS = 10 * 60000
+  const _hedgeSichtSchrieb = new Map()
+  function hedgeSichtAlle(){ try{ const o = JSON.parse(localStorage.getItem(HEDGE_SICHT_LS) || '{}'); return o && typeof o === 'object' ? o : {} }catch(_){ return {} } }
+  const hedgeSichtLesen = pid => hedgeSichtAlle()[String(pid)] || null
+  function hedgeSichtMerken(pid, konto, kontoSeit, gesehenAt){
+    if(Date.now() - (_hedgeSichtSchrieb.get(String(pid)) || 0) < 2000) return   // höchstens alle 2 s schreiben
+    _hedgeSichtSchrieb.set(String(pid), Date.now())
+    try{ const o = hedgeSichtAlle(), jetzt = Date.now()
+      for(const k of Object.keys(o)){ if(!(jetzt - Number((o[k] || {}).gesehenAt) <= HEDGE_SICHT_MAX_MS)) delete o[k] }   // Altlasten weg
+      o[String(pid)] = { konto: String(konto || ''), kontoSeit, gesehenAt }; localStorage.setItem(HEDGE_SICHT_LS, JSON.stringify(o)) }catch(_){}
+  }
+  function hedgeSichtVergessen(pid){ try{ const o = hedgeSichtAlle(); if(o[String(pid)]){ delete o[String(pid)]; localStorage.setItem(HEDGE_SICHT_LS, JSON.stringify(o)) } }catch(_){} }
+  // REIN RECHNEND (Test-Haken): gemerkte Sicht → {kontoSeit, gesehenAt} oder null
+  function hedgeSichtWiederher(e, kontoJetzt, openedMs, jetzt){
+    if(!e || typeof e !== 'object' || !String(e.konto || '') || String(e.konto) !== String(kontoJetzt || '')) return null
+    const g = Number(e.gesehenAt), k = Number(e.kontoSeit)
+    if(!(g > 0) || !(k > 0) || k > g || !(g > openedMs) || !(jetzt - g <= HEDGE_SICHT_MAX_MS) || g > jetzt + 1000) return null
+    return { kontoSeit: k, gesehenAt: g }
+  }
+  window._hedgeSichtWiederher = hedgeSichtWiederher
   let _hedgeSchnellBusy = false
   /* WARUM SCHLIESST DER READER NICHT (28.10.2026): bei Marcs 4 Big Trades nach .1799 stand am Hedge kein einziges Zeichen, warum das
    * Userscript wartete. Master weg laut Reader, aber kein Schluss → Grund am Hedge (reader_wartet), erste Meldung sofort, dann je 60 s. */
@@ -32708,6 +32733,9 @@
    * eindeutig mit angeklebten Balance-Ziffern (TDFYSL…, nie gekürzt), Gegenrichtung, GENAU die volle Plan-Menge (Tabelle zeigt nicht mehr), Symbol mit
    * passender Wurzel, nach Plan-Start und Hedge-Open und höchstens HEDGE_TOAST_FRISCH_MS alt (alte Meldungen, Neustart, ein Wiedereinstieg zählen nie). REIN RECHNEND. */
   const HEDGE_TOAST_FRISCH_MS = 3000, HEDGE_TOAST_KURS_PKT = 10, HEDGE_TOAST_MIN_VERSION = '0.10.7'
+  // GEKÜRZTER NAME (Finn 02.11.2026, Ina Apex …0006: Exit-Toast 13:36:51,5, Fusion erst 13:36:55,7): die Meldung trägt nur das gekürzte Kontowort. Sie zählt dann nur, wenn ihr Preis
+  // am TP- oder SL-Level des Plans liegt (± HEDGE_TOAST_LEVEL_PKT) — dazu wie immer Menge, Seite, Wurzel, Frische, kein Nachbar-Plan und keine Bündel-Sperre im gekürzten Login
+  const HEDGE_TOAST_LEVEL_PKT = 5
   // REIN RECHNEND (S9 02.11.2026): läuft im Positions-Tab bewiesen eine Fassung mit den Meldungs-Fixes? tab.version = VERSION des laufenden Kerns aus dessen eigenem POST (reader-server _tab_merken), je Tab;
   // nicht script_version (jüngster Puls-Tab, kann ein anderer sein), nicht lader.laeuft (Angabe des Laders). Unbekannt oder älter → Flach-Weg.
   function hedgeToastVersionOk(st, minVersion){
@@ -32752,6 +32780,7 @@
       if(!f.symbol || tvSymbolWurzel(String(f.symbol)) !== o.wurzel) return false
       if(!(Number(o.kurs) > 0) || Math.abs(Number(f.preis) - Number(o.kurs)) > HEDGE_TOAST_KURS_PKT) return false   // alte Meldung oder Körpertext: Preis weit weg vom Kurs (S9 02.11.2026)
       const b = kontoTextBezug(f.konto, o.ext)
+      if(b === 'kurz' && Array.isArray(o.kurzLevel)) return o.kurzLevel.some(l => Number(l) > 0 && Math.abs(Number(f.preis) - Number(l)) <= HEDGE_TOAST_LEVEL_PKT)
       return b === 'ja' || (b === 'klebt' && kontoTextEindeutig(f.konto, o.ext, o.extIds))
     })
     return passt.sort((a, b) => b.at - a.at)[0] || null
@@ -32861,13 +32890,34 @@
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
         const einfach = hedgeReaderEinfachAn(st)
         if(!kontoPlan || !(einfach ? hedgeReaderEinfachKonto(st.konto, kontoPlan) : (readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst(st.konto, kontoPlan, st)))){
-          _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid)
+          _hedgeSchnellKonto.delete(pid); _hedgeSchnellLeer.delete(pid); hedgeSichtVergessen(pid)   // Konto weg vom Plan-Konto: gemerkte Sicht gilt nicht mehr
+          // Exit-Toast bei gekürztem Text (02.11.2026): Preis am TP/SL-Level, kein Nachbar, keine Bündel-Sperre → Fusion sofort zu (sonst wie bisher warten)
+          if(kontoPlan && _hedgeMasterGesehen.has(pid) && kontoTextBezug(st.konto, kontoPlan) === 'kurz' && richtung && p.status === 'open'){
+            hedgeToastSchalterHolen()
+            if(hedgeToastAn() && !_hedgeToastGeloest.has(pid) && !_hedgeWegLaeuft.has(pid) && hedgeToastVersionOk(st) && !hedgeToastNachbar(tp, p, wz)
+               && !kurzEndeSperrt(kurzEndeBeweis(p, kontoPlan, st, wz))){
+              const tfK = hedgeToastBeweis(st.fills, { kurs: hedgeKursDerWurzel(wz) || hedgeKursDerWurzel(wz === 'MNQ' ? 'NQ' : 'MNQ'), ext: kontoPlan, extIds: kontoExtIds(), seite: richtung === 'buy' ? 'sell' : 'buy',
+                menge: Number(p.masterContracts), wurzel: wz, startMs: Date.parse(p.startedAt || h.opened_at || h.at || '') || 0, openMs: Date.parse(h.opened_at || h.at || '') || 0, pulsMs: _pulsAktivAt, jetzt: Date.now(),
+                offen: _hedgeToastMenge.get(pid), kurzLevel: [h.tp_level_nq, h.sl_level_nq] })
+              if(tfK){
+                _hedgeToastGeloest.add(pid); _hedgeSchnellLeer.delete(pid)
+                console.info('[hedgeSchnell] Exit-Fill am Level bewiesen (gekürzter Name) — Fusion wird geschlossen', p.masterName || pid, tfK.text || '')
+                hedgeToastSchluss(p, kontoPlan, wz, richtung, tfK).catch(e => console.warn('[hedgeSchnell] Toast-Schluss', (e && e.message) || e))
+                continue
+              }
+            }
+          }
           // gekürzter Text ohne Anker (oder Nachbarkonto im selben Login) — bis .1800 stumm, Marcs Apex/FTDFYSLX 28.10.2026
           if(kontoPlan && _hedgeMasterGesehen.has(pid) && kontoTextBezug(st.konto, kontoPlan) === 'kurz' && hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) == null)
             hedgeReaderWartetMelden(p, 'gekürzter Kontoname: Plan-Position nicht sichtbar, kein Anker (evtl. Nachbarkonto im selben Login)', { konto: String(st.konto || '').slice(0, 40) })
           continue
         }
-        if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
+        if(!_hedgeSchnellKonto.has(pid)){
+          // NEU GELADENER TAB (Finn 02.11.2026, Simon 88b28130: Tab 10 s vor dem Exit neu offen → 30-s-Regel, Fusion 34,5 s nach dem Master): gemerkte Sicht desselben Kontos übernehmen
+          const alt = hedgeSichtWiederher(hedgeSichtLesen(pid), st.konto, Date.parse(h.opened_at || h.at || '') || 0, jetzt)
+          _hedgeSchnellKonto.set(pid, alt ? alt.kontoSeit : jetzt)
+          if(alt){ _hedgeMasterGesehen.add(pid); _hedgeSchnellGesehenAt.set(pid, alt.gesehenAt); console.info('[hedgeSchnell] Sicht nach Neuladen übernommen', p.masterName || pid, alt) }
+        }
         // HEDGE-SCHNELLER (02.11.2026): bewiesene Exit-Fill-Meldung → Fusion sofort zu, ohne await (hält andere Pläne dieses PCs nicht auf). Dieselben Konto-Riegel wie der Flach-Weg:
         // Reader steht jetzt im Plan-Konto (nie nur gekürzt), Konto ≥ 2 s stabil, Position in diesem Konto-Zeitraum gesehen, kein zweiter offener Plan im Konto, Fill nicht aus einem Puls-Lauf
         const mengeJetzt = hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9)
@@ -32893,7 +32943,7 @@
           const ohnePnl = st.positionen.find(x => x && x.pnl_unklar && x.pnl_beleg)
           if(ohnePnl) hedgeReaderWartetMelden(p, 'P&L nicht lesbar, Position lesbar', { pnl_beleg: ohnePnl.pnl_beleg })
           // erst ab 5 s im Konto zählt die Sichtung für gesehenImZeitraum — mitten im Wechsel kann die Tabelle noch die des Vorgängers sein (e6914376, Prüfer 28.10.2026)
-          if(jetzt - _hedgeSchnellKonto.get(pid) >= 5000) _hedgeSchnellGesehenAt.set(pid, jetzt)
+          if(jetzt - _hedgeSchnellKonto.get(pid) >= 5000){ _hedgeSchnellGesehenAt.set(pid, jetzt); hedgeSichtMerken(pid, st.konto, _hedgeSchnellKonto.get(pid), jetzt) }
           // FILL SOFORT (01.10.2026): der Hedge öffnete beim Senden-Klick mit dem Kurs zum Klick — der echte Avg Fill steht ~0,1–0,3 s nach
           // dem Fill in der Positions-Tabelle des Puls-Chrome; damit Entry + Level am Hedge, ohne auf „Show more" (~3 s) zu warten
           if(/^feed/.test(String(h.einstieg_quelle || '')) && !_hedgeFillAusReader.has(pid) && typeof hedgeEinstiegNachtragen === 'function'
