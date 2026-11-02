@@ -27447,8 +27447,13 @@ def _eh_guard(p, route="mt5v2"):
 
 # ECHO OHNE HEDGE HÄLT (Finn über Eingang 02.11.2026): Diese Gründe sind vorübergehend, der Hedge ist vorgesehen und kommt, sobald er rechenbar ist; der Claim-Riegel trade_plans_a1_echo_hedge
 # hält den Start (sql/2026-11-02_echo_ohne_hedge_riegel.sql). Bewusst NICHT: marge, grenze (Rückfall wie bisher, Finns Regel 29.10.), mini (Tage sammeln, gewollt), kein_konto (ID ohne Fusion).
-# Entscheid Eingang 02.11.2026. groesse hält mit, auch „Hedge unter 0,01 Lot". Liste gleich halten mit der SQL-Datei.
+# Entscheid Eingang 02.11.2026: groesse hält mit, aber „Hedge unter 0,01 Lot" ist eigener Code klein und startet wie bisher ohne Hedge (nicht kaufbar, Betrag vernachlässigbar). Liste gleich halten mit der SQL-Datei.
 EH_HALT_CODES = ("balance", "lesung", "groesse")
+
+
+def eh_grund_code(grund):
+    """REIN RECHNEND (testbar): Grund von eh_hedge → Code. Nur der Text „Hedge … Lot unter … Lot" ist klein, alles andere groesse."""
+    return "klein" if re.match(r"Hedge .* Lot unter ", str(grund or "")) else "groesse"
 
 
 def eh_ohne_text(code, grund):
@@ -27685,7 +27690,7 @@ def _eh_tick_lauf(jetzt):
             h, grund = eh_hedge(kw.get("satz_eur_pro_usd"), p.get("master_contracts"), ap_cfd_ppl(ctx_ppl, a), sppl, p.get("master_risk"),
                                 par["netto_faktor"], par["min_lot"])
             if grund:
-                _eh_ohne(p, "groesse", grund + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""), wer, jetzt)
+                _eh_ohne(p, eh_grund_code(grund), grund + (f" ({kw['hinweis']})" if kw.get("hinweis") else ""), wer, jetzt)
                 continue
             les = lesungen.get(login)
             if not les or jetzt.timestamp() - float(les.get("at") or 0) > EH_LESUNG_MAX_S:

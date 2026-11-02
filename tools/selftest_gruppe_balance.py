@@ -60,7 +60,11 @@ ok(len(ns["ap_bal_auto_db_stand"]([zz(params={"von": "auto_planer"}, ergebnis={"
 m = re.search(r"EH_HALT_CODES = \((.*?)\)", src); codes = re.findall(r'"(\w+)"', m.group(1))
 q = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sql", "2026-11-02_echo_ohne_hedge_riegel.sql"), encoding="utf-8").read()
 ok(codes == ["balance", "lesung", "groesse"] and "not in ('balance', 'lesung', 'groesse')" in q, "Halte-Gründe in app.py und SQL gleich; mini, kein_konto, marge, grenze nie")
-ns["EH_HALT_CODES"] = tuple(codes); exec(fn("eh_ohne_text"), ns)
+ns["EH_HALT_CODES"] = tuple(codes); exec(fn("eh_ohne_text"), ns); exec(fn("eh_grund_code"), ns)
+exec(fn("eh_hedge"), dict(ns, _wd_num=lambda x: x, EH_STANDARD={"netto_faktor": 0.89}), hg := {})
+kl = hg["eh_hedge"](0.001, 0.01, 1.0, 1.0, None, 1.0, 0.01)[1]
+ok(ns["eh_grund_code"](kl) == "klein" and "klein" not in codes, "echter Text von eh_hedge unter 0,01 Lot: klein, hält nicht")
+ok(ns["eh_grund_code"]("kein Kontowert-Satz (Kontowert ÷ Polster) für dieses Konto") == "groesse", "kein Kontowert-Satz bleibt groesse, hält")
 ok(ns["eh_ohne_text"]("balance", "x").startswith("startet nicht") and ns["eh_ohne_text"]("marge", "x").startswith("startet als Echo V2"), "⚪-Text passt zum Riegel")
 ok("start_claim_art, 'start') <> 'start'" in q and "interval '8 hours'" in q, "Verbrauchs-Claims gehen durch, höchstens 8 h")
 print("OK" if not fehler else f"{fehler} FEHLER"); sys.exit(1 if fehler else 0)
