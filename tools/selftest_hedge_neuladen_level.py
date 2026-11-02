@@ -49,12 +49,15 @@ JS = "\n".join(["const window = {}", "const KONTO_KURZ_MIN = 12", zeile("  const
 const OPEN = 1000000, EXIT = OPEN + 7200000
 // Simon: letzte Sichtung im alten Tab 6 min vor dem Exit, Tab 10 s vor dem Exit neu offen, Reader zeigt dasselbe Konto
 const KONTO = 'TDFYSL150000000000 151,407.70 USD'
-const alt = { konto: KONTO, kontoSeit: OPEN + 1000, gesehenAt: EXIT - 6 * 60000 }
-const neu = hedgeSichtWiederher(alt, KONTO, OPEN, EXIT - 10000)
-const ohne = hedgeSichtWiederher(null, KONTO, OPEN, EXIT - 10000)
-const anderesKonto = hedgeSichtWiederher(alt, 'TDFYSL150000000099 1.00 USD', OPEN, EXIT - 10000)
-const zuAlt = hedgeSichtWiederher(Object.assign({}, alt, { gesehenAt: EXIT - 11 * 60000 }), KONTO, OPEN, EXIT - 10000)
-const vorOpen = hedgeSichtWiederher(Object.assign({}, alt, { gesehenAt: OPEN - 1000, kontoSeit: OPEN - 5000 }), KONTO, OPEN, EXIT - 10000)
+// Simon: letzte Sichtung im alten Tab 20 s vor dem Neuladen, Tab 10 s vor dem Exit neu offen
+const T0 = EXIT - 10000
+const alt = { konto: KONTO, kontoSeit: OPEN + 1000, gesehenAt: T0 - 20000 }
+const neu = hedgeSichtWiederher(alt, KONTO, OPEN, T0, true)
+const ohne = hedgeSichtWiederher(null, KONTO, OPEN, T0, true)
+const anderesKonto = hedgeSichtWiederher(alt, 'TDFYSL150000000099 1.00 USD', OPEN, T0, true)
+const zuAlt = hedgeSichtWiederher(Object.assign({}, alt, { gesehenAt: T0 - 61000 }), KONTO, OPEN, T0, true)
+const vorOpen = hedgeSichtWiederher(Object.assign({}, alt, { gesehenAt: OPEN - 1000, kontoSeit: OPEN - 5000 }), KONTO, OPEN, T0, true)
+const gekuerzt = hedgeSichtWiederher(alt, KONTO, OPEN, T0, false)
 // Schluss-einfach-Regel mit übernommener Sicht: 0,3 s flach + 2 Lesungen
 const ent = (imZr, leer, n) => hedgeReaderEinfachEntscheid({ unterwegs: '', kontoOk: true, liste: [], sekundenSeitOpen: 7200, gesehenImZeitraum: imZr, wurzel: 'NQ', leerSeitMs: leer, lesungen: n })
 // Ina: gekürzter Apex-Name, Exit am TP 28.755 (TP-Level 28.754,5), 2 NQ long
@@ -62,7 +65,7 @@ const ID = 'PAAPEX6780960000006', KURZ = 'PAAPEX678096000000'
 const O = x => Object.assign({ ext: ID, extIds: [ID, 'PAAPEX6780960000007'], seite: 'sell', menge: 2, wurzel: 'NQ', startMs: OPEN, openMs: OPEN + 500, jetzt: EXIT + 100, offen: 2, kurs: 28750, kurzLevel: [28754.5, 28679.62] }, x || {})
 const F = x => Object.assign({ at: EXIT, seite: 'sell', menge: 2, preis: 28755, symbol: 'NQZ6', konto: KURZ }, x || {})
 const ja = (f, o) => !!hedgeToastBeweis([f], O(o))
-print(JSON.stringify({ bezug: kontoTextBezug(KURZ, ID), neu, ohne, anderesKonto, zuAlt, vorOpen, einfachMit: ent(true, 400, 2), einfachOhne: ent(false, 400, 2),
+print(JSON.stringify({ bezug: kontoTextBezug(KURZ, ID), T0, gekuerzt, neu, ohne, anderesKonto, zuAlt, vorOpen, einfachMit: ent(true, 400, 2), einfachOhne: ent(false, 400, 2),
   ina: ja(F()), inaSl: ja(F({ preis: 28681 }), { kurs: 28683 }), inaNeben: ja(F({ preis: 28745 })), inaOhneLevel: ja(F(), { kurzLevel: null }), inaMenge: ja(F({ menge: 1 })), inaSeite: ja(F({ seite: 'buy' })) }))
 """])
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
@@ -74,14 +77,15 @@ try:
 except Exception:
     print(r.stdout[-600:], r.stderr[-600:])
     sys.exit(1)
-check(e["neu"] is not None and e["neu"]["kontoSeit"] == 1001000, "Simon: neu geladener Tab übernimmt Konto-Ruhe und Sichtung desselben Kontos")
-check(e["ohne"] is None and e["anderesKonto"] is None and e["zuAlt"] is None and e["vorOpen"] is None, "kein Merker, anderes Konto, älter als 10 min oder vor dem Hedge-Open: nichts übernommen")
+check(e["neu"] is not None and e["neu"]["kontoSeit"] == e["T0"] - 2000 and e["neu"]["gesehenAt"] == e["T0"] - 2000, "Simon: Sichtung übernommen, Konto-Ruhe neu ab jetzt − 2 s (keine sofort erfüllte Ruhe, keine 30-s-Strafe)")
+check(e["ohne"] is None and e["anderesKonto"] is None and e["zuAlt"] is None and e["vorOpen"] is None, "kein Merker, anderes Konto, älter als 60 s oder vor dem Hedge-Open: nichts übernommen")
+check(e["gekuerzt"] is None, "nur bei vollem Kontotext, nie gekürzt (Nachbarkonten heißen gleich)")
 check(e["einfachMit"] is True and e["einfachOhne"] is False, "Simon-Fall: mit übernommener Sicht reichen 0,3 s flach + 2 Lesungen (< 1 s), ohne gilt die alte Wartezeit")
 check(e["ina"] is True and e["inaSl"] is True, "Ina: Exit-Toast mit gekürztem Namen am TP- bzw. SL-Level zählt")
 check(e["inaNeben"] is False and e["inaOhneLevel"] is False and e["inaMenge"] is False and e["inaSeite"] is False, "gekürzter Name neben dem Level, ohne Level, falsche Menge oder Seite: kein Beweis")
 
 # Quelltext: Einbau an den richtigen Stellen
-check("const alt = hedgeSichtWiederher(hedgeSichtLesen(pid), st.konto," in HTML and "hedgeSichtMerken(pid, st.konto, _hedgeSchnellKonto.get(pid), jetzt)" in HTML
+check("jetzt, readerKontoPasst(st.konto, kontoPlan, st))" in HTML and "const alt = hedgeSichtWiederher(hedgeSichtLesen(pid), st.konto," in HTML and "hedgeSichtMerken(pid, st.konto, _hedgeSchnellKonto.get(pid), jetzt)" in HTML
       and "_hedgeSchnellLeer.delete(pid); hedgeSichtVergessen(pid)" in HTML, "Schnell-Wächter: Sicht laden, merken, beim Kontowechsel löschen")
 check("kurzLevel: [h.tp_level_nq, h.sl_level_nq]" in HTML and "!kurzEndeSperrt(kurzEndeBeweis(p, kontoPlan, st, wz))" in HTML and "!hedgeToastNachbar(tp, p, wz)" in HTML,
       "gekürzter Toast nur ohne Nachbar-Plan und ohne Bündel-Sperre, hinter dem Schalter hedgeToastAn")

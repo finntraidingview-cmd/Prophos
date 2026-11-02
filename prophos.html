@@ -32696,8 +32696,10 @@
   const _hedgeSchnellGesehenAt = new Map()   // plan-id → letzte Lesung MIT Master-Position (für gesehenImZeitraum, 28.10.2026)
   /* SICHT ÜBER NEULADEN (Finn 02.11.2026, Simon pc-pmqd8g Plan 88b28130): Konto-Ruhe und „Position gesehen" lebten nur im Speicher des Tabs. Nach einem Neuladen 10 s vor dem Exit galt
    * deshalb die 30-s-Regel (Wechsel-Fenster), Fusion ging 34,5 s nach dem Master zu. Jetzt je Plan in localStorage {konto, kontoSeit, gesehenAt}; ein neuer Tab übernimmt sie nur, wenn
-   * der Reader GENAU denselben Kontotext zeigt, die Sichtung nach dem Hedge-Open lag und höchstens HEDGE_SICHT_MAX_MS her ist. Verlässt der Reader das Plan-Konto, wird sie gelöscht. */
-  const HEDGE_SICHT_LS = 'prophos_hedge_sicht', HEDGE_SICHT_MAX_MS = 10 * 60000
+   * der Reader GENAU denselben Kontotext zeigt, die Sichtung nach dem Hedge-Open lag und höchstens HEDGE_SICHT_MAX_MS her ist. Verlässt der Reader das Plan-Konto, wird sie gelöscht.
+   * Stopp S9: nur bei vollem Kontotext (readerKontoPasst: exakt oder eindeutig angeklebt, nie gekürzt — so heißen auch Nachbarkonten), höchstens 60 s alt (während eines langen Neuladens
+   * kann Puls das Konto gewechselt haben, der frische Tab kennt _pulsAktivAt nicht), und die Konto-Ruhe beginnt neu bei jetzt − 2 s: Sichtung gilt im Zeitraum, aber keine sofort erfüllte Ruhe. */
+  const HEDGE_SICHT_LS = 'prophos_hedge_sicht', HEDGE_SICHT_MAX_MS = 60000, HEDGE_SICHT_RUHE_MS = 2000
   const _hedgeSichtSchrieb = new Map()
   function hedgeSichtAlle(){ try{ const o = JSON.parse(localStorage.getItem(HEDGE_SICHT_LS) || '{}'); return o && typeof o === 'object' ? o : {} }catch(_){ return {} } }
   const hedgeSichtLesen = pid => hedgeSichtAlle()[String(pid)] || null
@@ -32710,11 +32712,12 @@
   }
   function hedgeSichtVergessen(pid){ try{ const o = hedgeSichtAlle(); if(o[String(pid)]){ delete o[String(pid)]; localStorage.setItem(HEDGE_SICHT_LS, JSON.stringify(o)) } }catch(_){} }
   // REIN RECHNEND (Test-Haken): gemerkte Sicht → {kontoSeit, gesehenAt} oder null
-  function hedgeSichtWiederher(e, kontoJetzt, openedMs, jetzt){
-    if(!e || typeof e !== 'object' || !String(e.konto || '') || String(e.konto) !== String(kontoJetzt || '')) return null
+  function hedgeSichtWiederher(e, kontoJetzt, openedMs, jetzt, kontoVoll){
+    if(kontoVoll !== true || !e || typeof e !== 'object' || !String(e.konto || '') || String(e.konto) !== String(kontoJetzt || '')) return null
     const g = Number(e.gesehenAt), k = Number(e.kontoSeit)
     if(!(g > 0) || !(k > 0) || k > g || !(g > openedMs) || !(jetzt - g <= HEDGE_SICHT_MAX_MS) || g > jetzt + 1000) return null
-    return { kontoSeit: k, gesehenAt: g }
+    const neu = jetzt - HEDGE_SICHT_RUHE_MS
+    return { kontoSeit: neu, gesehenAt: neu }   // gesehen im Zeitraum = ab dem neuen Konto-Start
   }
   window._hedgeSichtWiederher = hedgeSichtWiederher
   let _hedgeSchnellBusy = false
@@ -32914,7 +32917,7 @@
         }
         if(!_hedgeSchnellKonto.has(pid)){
           // NEU GELADENER TAB (Finn 02.11.2026, Simon 88b28130: Tab 10 s vor dem Exit neu offen → 30-s-Regel, Fusion 34,5 s nach dem Master): gemerkte Sicht desselben Kontos übernehmen
-          const alt = hedgeSichtWiederher(hedgeSichtLesen(pid), st.konto, Date.parse(h.opened_at || h.at || '') || 0, jetzt)
+          const alt = hedgeSichtWiederher(hedgeSichtLesen(pid), st.konto, Date.parse(h.opened_at || h.at || '') || 0, jetzt, readerKontoPasst(st.konto, kontoPlan, st))
           _hedgeSchnellKonto.set(pid, alt ? alt.kontoSeit : jetzt)
           if(alt){ _hedgeMasterGesehen.add(pid); _hedgeSchnellGesehenAt.set(pid, alt.gesehenAt); console.info('[hedgeSchnell] Sicht nach Neuladen übernommen', p.masterName || pid, alt) }
         }
