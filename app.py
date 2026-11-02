@@ -26717,8 +26717,10 @@ def gp_hedge_settings_eigen(rows):
                 eigene.setdefault((str(a.get("user_id")), str(a.get("external_id") or "")), []).append(str(a["id"]))
         links = {}
         if logins and uids:
+            # 02.11.2026 (Funded-Planer CFD .1990 brach mit HTTP 400 ab): mt5_links hat keine Spalte id, _sb_all sortiert sonst nach id.asc. Eindeutig ist
+            # (user_id, mt5_login) — onConflict im Frontend —, das gibt eine feste Reihenfolge beim Blättern
             for l in _sb_all("mt5_links", {"select": "user_id,mt5_login,account_id", "user_id": "in.(" + ",".join(uids) + ")",
-                                           "mt5_login": "in.(" + ",".join(logins) + ")"}):
+                                           "mt5_login": "in.(" + ",".join(logins) + ")", "order": "user_id.asc,mt5_login.asc"}):
                 links[(str(l.get("user_id")), str(l.get("mt5_login") or ""))] = str(l.get("account_id") or "")
     except Exception as e:
         # S9 02.11.2026: weiterwerfen statt [] — sonst legten gp_planen/fcp_planen Pläne ohne Hedge-Konto an, das bliebe am Plan. Der Lauf bricht ab, der nächste
