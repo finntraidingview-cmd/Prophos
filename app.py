@@ -6425,7 +6425,7 @@ def _admin_basis():
             raise
         accounts = _sb_all("accounts", {"select": felder})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
-    fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
+    fx_rows   = _sb_all("user_settings", {"select": "user_id,value", "key": "eq.fx_usd_eur"})   # user_id: Hand nur von Admin-IDs (S9 03.11.2026)
 
     # Archiv-Status liegt in user_settings (aus dem localStorage gesynct) und ist
     # zwischen Profilen historisch vermischt — unkritisch, weil Account-IDs global
@@ -6459,7 +6459,7 @@ def _admin_basis():
                     if not ai["successor"] and info.get("successorId"):
                         ai["successor"] = str(info["successorId"])
 
-    fx = fx_aus_zeilen(fx_rows)   # 03.11.2026: jüngster Live-Kurs gewinnt (USD→EUR LIVE), sonst erster Eintrag, sonst 0,85
+    fx = fx_aus_zeilen(fx_rows, _fx_admin_uids())   # 03.11.2026: jüngster Live-Kurs gewinnt (USD→EUR LIVE), sonst erster Eintrag, sonst 0,85
 
     by_id = {str(a["id"]): a for a in accounts}
     live_ids = {str(a["id"]) for a in accounts if (a.get("account_type") or "") == "live"}
@@ -12069,7 +12069,7 @@ def _wd_personen(radar=False):
 
 
 def _wd_fx():
-    return fx_aus_zeilen(_sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}))   # 03.11.2026 wie Admin (USD→EUR LIVE)
+    return fx_aus_zeilen(_sb_all("user_settings", {"select": "user_id,value", "key": "eq.fx_usd_eur"}), _fx_admin_uids())   # 03.11.2026 wie Admin (USD→EUR LIVE)
 
 
 def _wd_num(v):
@@ -39561,7 +39561,7 @@ def _lq_abrufen(warten=True):
 
 
 def _lq_fx():
-    return fx_aus_zeilen(_sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}))   # wie _admin_basis (03.11.2026 USD→EUR LIVE)
+    return fx_aus_zeilen(_sb_all("user_settings", {"select": "user_id,value", "key": "eq.fx_usd_eur"}), _fx_admin_uids())   # wie _admin_basis (03.11.2026 USD→EUR LIVE)
 
 
 def lq_kunde_flags(nutzer, zeilen, admin_mails):
@@ -39940,20 +39940,40 @@ def _fx_wert(v):
             "at": str(d.get("at") or "")[:19]}   # UTC „JJJJ-MM-TTTHH:MM:SS“ — Tab schreibt …Z, Railway …+00:00, darum gekürzt vergleichbar
 
 
-def fx_aus_zeilen(zeilen):
-    """REIN RECHNEND: fx_usd_eur-Zeilen (user_settings value) → Kurs. Der jüngste Live-Kurs gewinnt — außer eine Hand-Eingabe ist jünger als
-    er (S9 zu .2006, 03.11.2026: sonst wirkte „gilt bis zum nächsten Live-Kurs“ serverseitig nie, weil ab dem ersten Lauf jede ID einen
-    Live-Eintrag hat); sonst der erste gültige Eintrag, sonst FX_STANDARD."""
+def _fx_admin_uids():
+    """user_ids der ADMIN_EMAILS (aus der gemerkten Nutzerliste). Lesefehler → leer: dann zählt keine Hand-Eingabe, nur Live."""
+    try:
+        r = _auth_liste_anfrage()
+        users = (r.json() or {}).get("users") if r.status_code == 200 else []
+    except Exception:
+        users = []
+    return frozenset(str(u.get("id")) for u in (users or []) if str(u.get("email") or "").strip().lower() in ADMIN_EMAILS and u.get("id"))
+
+
+def fx_aus_zeilen(zeilen, admin_uids=frozenset(), jetzt=None):
+    """REIN RECHNEND: fx_usd_eur-Zeilen (user_settings user_id+value, alle IDs) → Kurs. Der jüngste Live-Kurs gewinnt — außer eine
+    Hand-Eingabe ist jünger als er (S9 zu .2006, 03.11.2026: sonst wirkte „gilt bis zum nächsten Live-Kurs“ serverseitig nie); sonst der
+    erste gültige Eintrag, sonst FX_STANDARD.
+    Hand zählt nur von admin_uids und mit at ≤ jetzt + 5 min (S9 zu 7be52976: per RLS schreibt jede ID ihre Zeile mit beliebigem at —
+    sonst setzte eine fremde ID, auch aus der Emin-Gruppe, Finns Admin-, Kapital-, Payout- und WD-Kurs, mit at in der Zukunft dauerhaft)."""
+    grenze = (jetzt or datetime.now(timezone.utc)).timestamp() + 300
+    def _vorbei(at):
+        try:
+            return datetime.fromisoformat(at + "+00:00").timestamp() <= grenze
+        except ValueError:
+            return False
     werte = [w for w in (_fx_wert((z or {}).get("value")) for z in (zeilen or [])) if w]
     live = [w for w in werte if w["quelle"] == "live" and w["datum"]]
-    hand = [w for w in werte if w["quelle"] == "hand" and w["at"]]
+    hand = [w for w in (dict(_fx_wert((z or {}).get("value")) or {}, uid=str((z or {}).get("user_id") or "")) for z in (zeilen or []))
+            if w.get("quelle") == "hand" and w.get("at") and w["uid"] in admin_uids and _vorbei(w["at"])]
     if live:
         l = max(live, key=lambda w: w["at"] or w["datum"])
         h = max(hand, key=lambda w: w["at"]) if hand else None
         return h["rate"] if h and h["at"] > (l["at"] or l["datum"]) else l["rate"]
     if hand:
         return max(hand, key=lambda w: w["at"])["rate"]
-    return werte[0]["rate"] if werte else FX_STANDARD
+    alt = [w for w in werte if w["quelle"] != "hand"]          # alte Einträge ohne Quelle wie bisher; fremde Hand nie
+    return alt[0]["rate"] if alt else FX_STANDARD
 
 
 def fx_live_pruefen(antwort):

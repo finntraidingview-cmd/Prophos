@@ -24,12 +24,14 @@ def check(bed, text):
 
 
 i, j = SRC.index("# ══ USD→EUR LIVE"), SRC.index("start_fx_live()\n\n")
-ns = {"json": json, "re": re, "os": os}
+import datetime as _dt
+ns = {"json": json, "re": re, "os": os, "datetime": _dt.datetime, "timezone": _dt.timezone}
 exec(SRC[i:j], ns)
 
 # Kurswahl
-zeile = lambda v: {"value": v}
-f = ns["fx_aus_zeilen"]
+zeile = lambda v, uid="admin": {"user_id": uid, "value": v}
+JETZT = _dt.datetime(2026, 11, 3, 2, 0, tzinfo=_dt.timezone.utc)
+f = lambda z: ns["fx_aus_zeilen"](z, frozenset({"admin"}), JETZT)
 check(f([]) == 0.85, "kein Eintrag → Standard 0,85")
 check(f([zeile({"rate": 0.8935})]) == 0.8935, "Hand-Eintrag ohne Quelle (alt) gilt")
 check(f([zeile(0.9)]) == 0.9 and f([zeile('{"rate": 0.88}')]) == 0.88, "alte Formen (Zahl, JSON-Text) gelten weiter")
@@ -45,7 +47,18 @@ check(f([zeile({"rate": 0.89158, "quelle": "live", "datum": "2026-11-02"}), zeil
 check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T00:10:00Z"}),
          zeile({"rate": 0.9, "quelle": "hand", "at": "2026-11-03T01:00:00Z"})]) == 0.9, "mehrere Hand-Eingaben → die jüngste")
 check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T00:10:00Z"}),
-         zeile({"rate": 0.8902, "quelle": "live", "datum": "2026-11-03", "at": "2026-11-03T16:00:00+00:00"})]) == 0.8902, "nächster Live-Kurs löst die Hand ab")
+         zeile({"rate": 0.8902, "quelle": "live", "datum": "2026-11-03", "at": "2026-11-03T01:30:00+00:00"})]) == 0.8902, "nächster Live-Kurs löst die Hand ab")
+# S9 zu 7be52976: Hand nur von Admin-IDs, at nicht in der Zukunft
+check(f([live2, zeile({"rate": 0.95, "quelle": "hand", "at": "2026-11-03T01:00:00Z"}, uid="emin")]) == 0.89158, "Hand einer Nicht-Admin-ID → ignoriert, Live gilt")
+check(f([zeile({"rate": 0.95, "quelle": "hand", "at": "2026-11-03T01:00:00Z"}, uid="emin")]) == 0.85, "nur fremde Hand, kein Live → Standard, nie die fremde Hand")
+check(f([live2, zeile({"rate": 0.95, "quelle": "hand", "at": "2027-01-01T00:00:00Z"})]) == 0.89158, "Admin-Hand mit at in der Zukunft → ignoriert")
+check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T02:04:00Z"})]) == 0.8935, "Admin-Hand ≤ 5 min voraus (Uhr-Drift) → gilt")
+check(ns["fx_aus_zeilen"]([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T01:00:00Z"})]) == 0.89158,
+      "ohne Admin-Liste (Lesefehler) → keine Hand, nur Live")
+src_admin = SRC[SRC.index("def _fx_admin_uids():"):SRC.index("def fx_aus_zeilen(")]
+check("ADMIN_EMAILS" in src_admin and "frozenset" in src_admin, "_fx_admin_uids: Admin-IDs aus ADMIN_EMAILS, Fehler → leer")
+check(SRC.count('"select": "user_id,value", "key": "eq.fx_usd_eur"') == 3 and SRC.count("_fx_admin_uids())") == 3,
+      "Admin, WD und Liquide lesen user_id mit und geben die Admin-IDs mit")
 
 # Plausibilität
 p = ns["fx_live_pruefen"]
@@ -102,7 +115,7 @@ for name, ezb in (("Abruf scheitert", None), ("unplausibel", {"date": "2026-11-0
 # Verdrahtung
 start = SRC[SRC.index("def start_fx_live():"):SRC.index("start_fx_live()\n\n")]
 check("RAILWAY_ENVIRONMENT" in start and "return" in start, "nur Railway startet den Abruf")
-check("fx = fx_aus_zeilen(fx_rows)" in SRC, "Admin-Übersicht/Kapitel lesen über fx_aus_zeilen")
+check("fx = fx_aus_zeilen(fx_rows, _fx_admin_uids())" in SRC, "Admin-Übersicht/Kapitel lesen über fx_aus_zeilen")
 for fn in ("def _wd_fx():", "def _lq_fx():"):
     k = SRC[SRC.index(fn):SRC.index(fn) + 200]
     check("fx_aus_zeilen(" in k, f"{fn[4:-3]} liest über fx_aus_zeilen (Kapital-Rückfall = _lq_fx)")
