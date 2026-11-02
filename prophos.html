@@ -32597,7 +32597,7 @@
   }
   /* SCHLUSS EINFACH (02.11.2026, Finn: „wieder zum Laufen kriegen, dass es so funktioniert wie am Anfang. Direkt schließen, Kontoerkennung, indem man auf den Puls draufklickt. Fertig").
    * Konto bekannt: Text exakt, eindeutig (gekürzt/angeklebt), oder Puls hat es belegt angeklickt und das Kontowort ist seitdem gleich. Die Balance entscheidet nichts mehr, kurzEndeBeweis ist nur Nachkontrolle.
-   * Grenze: Handwechsel auf ein Nachbarkonto mit demselben gekürzten Wort sieht der Text nicht; dafür bleiben Nachkontrolle (🔴 kurz_balance_nein), Rückkehr-Wache, Radar und Notfall-Level. */
+   * Grenze: Handwechsel auf ein Nachbarkonto mit demselben gekürzten Wort sieht der Text nicht; dafür bleiben Nachkontrolle (🔴 kurz_balance_nein), Radar, Notfall-Level und die Rückkehr-Wache, solange das Konto hier als bekannt gilt. */
   function hedgeReaderEinfachKonto(kontoText, extId){
     const b = kontoTextBezug(kontoText, extId)
     if(b === 'ja') return true
@@ -33039,11 +33039,12 @@
       if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 5)) return null
       const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
       const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-      if(!kontoPlan || !readerKontoPasst(st.konto, kontoPlan, st)) return null
+      if(!kontoPlan || !hedgeReaderEinfachKonto(st.konto, kontoPlan)) return null   // Schluss einfach (02.11.2026): dieselbe Konto-Regel wie der Schluss, sonst käme die Rückkehr-Wache bei gekürzten Konten nie
       const sym =(plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
       const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
       const richtung = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
       if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null) return true
+      if(st.leer_beweis === false || !readerKontoPasst(st.konto, kontoPlan, st)) return null   // „flach" verhindert einen nachgeholten Hedge: nur mit Leer-Text und voll belegtem Konto (Stopp S9)
       return /^puls-/.test(String(st.positionen_tab || '')) ? false : null   // flach zählt nur aus dem Puls-Chrome (Beweis-Modus)
     }catch(_){ return null }
   }

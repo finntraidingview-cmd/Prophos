@@ -1241,11 +1241,18 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   }
   // REIN RECHNEND (Selbsttest, 0.10.7): wie viele Zeilen ohne P&L machen die Lesung blind?
   function unklarBlind(befund, reiterPositions) { return reiterPositions ? (befund.unklar_fest || 0) : (befund.unklar || 0); }
-  // REIN (Selbsttest, 0.10.8): Tabelle da und ihre Zellen klingen nicht nach Laden/Verbinden/Fehler → eine leere Tabelle gilt als flach
-  function tabelleKeinLaden(tabelle) {
-    if (!tabelle) return false;
-    let tds; try { tds = tabelle.querySelectorAll('td'); } catch (_) { return false; }
-    const rest = [...(tds || [])].map((td) => String(td.textContent || '')).join(' ').replace(/\s+/g, ' ').trim();
+  // REIN (Selbsttest, 0.10.8): flach nur, wenn der Reader keine Zeile gelesen hat, die Tabelle da ist, keine Datenzeile in ihr steht (Zeile mit mehr als einer gefuellten Zelle, wie leerStrukturPasst)
+  // und nichts nach Laden/Verbinden/Fehler klingt. Stopp S9: aendert TradingView die Tabelle (kein data-label, Filter verwirft die Zeile), waere sonst jede offene Position „weg“.
+  function tabelleFlach(befund, tabelle) {
+    if (!befund || befund.zeilen !== 0 || !tabelle) return false;
+    let tds, zeilen; try { tds = tabelle.querySelectorAll('td'); zeilen = tabelle.querySelectorAll('tr'); } catch (_) { return false; }
+    if (!tds || !zeilen) return false;
+    for (const tr of zeilen) {
+      let zellen; try { zellen = tr.querySelectorAll('td'); } catch (_) { return false; }
+      let n = 0;
+      for (const td of (zellen || [])) if (String(td.textContent || '').trim() && ++n > 1) return false;
+    }
+    const rest = [...tds].map((td) => String(td.textContent || '')).join(' ').replace(/\s+/g, ' ').trim();
     return !RX_LEER_NICHT.test(rest);
   }
   let leerBeweisMerk = true;   // 0.10.8: fuer leer_beweis im Payload — die anderen Leser (1-s-Waechter, Master-nie-da, Neuladen) bleiben beim Leer-Text
@@ -1272,7 +1279,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       let reiterAn = false;
       try { const r = document.getElementById('positions'); reiterAn = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
       let tabelleOk = false;
-      try { tabelleOk = reiterAn && tabelleKeinLaden(document.querySelector(SEL_POS_TABELLE)); } catch (_) {}
+      try { tabelleOk = reiterAn && tabelleFlach(leseBefund, document.querySelector(SEL_POS_TABELLE)); } catch (_) {}
       if (tabelleOk) { leerBeweisMerk = false; return null; }   // 0.10.8: Reiter + leere Tabelle reichen
       // das AKTUELLE Konto steht beim Leer-Text-Grund dabei: der reader-server friert bei blind den Stand ein (konto = letztes sehendes
       // Konto) — ohne diese Angabe saehe die Heim-Wache einen Handwechsel in ein fremdes Konto nicht (Pruefung 30.10.2026)
