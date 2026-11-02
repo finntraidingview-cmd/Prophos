@@ -52,7 +52,8 @@ def main():
     ok("section.view.adm-planer-modus #kasse-content > .subtabs:not(.adm-planer-chips){display:none}" in s, "Admin-Reiter im Planer-Modus aus")
     # Verweis im Admin, Merker nur sessionStorage
     ok("if(['wd', 'planer', 'fplaner', 'fcfd'].includes(name) && !planerModus()){" in s and "switchView('planer'); return" in s, "Admin-Reiter = Verweis auf Planer")
-    ok(s.count('title="→ jetzt unter Planer"') == 3, "drei Verweis-Reiter")
+    # Finn 02.11.2026: die drei Verweise sind im Admin unsichtbar, die Knöpfe bleiben im DOM, weil Planer-Chips und Sprünge über sie schalten
+    ok(all(f'data-admtab="{n}" data-reiter-aus="1" style="display:none"' in s for n in ("planer", "fplaner", "wd")), "drei Verweis-Reiter ausgeblendet, Knöpfe bleiben")
     ok("localStorage" not in s[s.find("const PLANER_CHIP_SS"):s.find("function showLocked()")], "Chip-Merker ohne localStorage")
     ok("sessionStorage.getItem(PLANER_CHIP_SS)" in s, "Chip-Merker in sessionStorage")
     # Lazy: Übersicht im Planer-Modus erst nach dem Planer
