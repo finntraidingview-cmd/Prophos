@@ -24410,6 +24410,14 @@ def ap_eingriff_sicht(admin, uid, im_planer, nur_eigene, sicht=None, gruppe=None
     return str(uid)
 
 
+def ap_verwalter_sicht(gruppe, sicht):
+    """REIN RECHNEND (testbar, EMIN-BESTAETIGEN, Finn 02.11.2026 ~04:35: Emin kann von seiner ID aus Ahmads Trades nicht bestätigen): Sicht für die
+    Hand-Eingriffe in den Planern. Ein Verwalter (gruppe = seine Menge) greift immer in seine Gruppe ein, wie er seit 30.10.2026 auch ohne Marker liest.
+    sicht=admin kam nur mit, solange #adm-pane-planer sichtbar war (_tplSichtParam); ohne Marker gab es 403 „nur eigene Pläne". Alle anderen Logins
+    behalten ihre Sicht: Mitglieder haben gruppe None und bleiben bei der eigenen ID. Nur für Klick-Wege benutzen, nie für nachholen (PC-Tab-Automatik)."""
+    return AP_SICHT_ADMIN if gruppe else sicht
+
+
 def admin_voll_frei(uid, voll_uids, sicht_l):
     """REIN RECHNEND (testbar, ADMIN-VOLL 30.10.2026, Finn als „Finn + Pascal" — nicht in ADMIN_EMAILS, will keine Railway-Variablen pflegen):
     darf ein Login OHNE ADMIN_EMAILS „Payout erhalten" und die Hedge-Freigabe wie ein Admin? Nur, wenn er in der engen Liste admin_voll steht
@@ -33066,10 +33074,13 @@ def admin_auto_plan_eingriff():
         try:
             # Admin-Reiter (08.10.2026): sicht="admin" und nicht „nur eigene" → alle Pläne wie ein Admin (ap_eingriff_sicht);
             # Verwalter (Admin-Gruppen 08.10.2026) → Pläne seiner Gruppe (gruppe_e)
+            # EMIN-BESTAETIGEN (02.11.2026): werte ist ein Klick, der Verwalter braucht dafür keinen Marker (ap_verwalter_sicht). nachholen ruft der
+            # PC-Tab selbst: ohne Marker bleibt der Verwalter dort bei der eigenen ID (Anzeige ≠ Ausführung, 08.10.2026)
             alle, gruppe_e = admin, None
-            if not admin and _ap_sicht_param() == AP_SICHT_ADMIN:
+            ist_werte = str(body.get("aktion") or "").strip() == "werte"
+            if not admin and (_ap_sicht_param() == AP_SICHT_ADMIN or ist_werte):
                 nur, gruppe = _ap_gruppe_lesen(uid)
-                e_sicht = ap_eingriff_sicht(False, uid, _ap_im_planer(uid), nur, AP_SICHT_ADMIN, gruppe)
+                e_sicht = ap_eingriff_sicht(False, uid, _ap_im_planer(uid), nur, ap_verwalter_sicht(gruppe, _ap_sicht_param()), gruppe)
                 alle = e_sicht is None
                 gruppe_e = e_sicht if isinstance(e_sicht, frozenset) else None
             if str(body.get("aktion") or "").strip() == "nachholen":
@@ -33091,8 +33102,9 @@ def admin_auto_plan_eingriff():
     if not admin:
         nur, gruppe = _ap_gruppe_lesen(uid)   # nicht lesbar → (True, None) → nie fremde Pläne
         darf = ap_eingriff_admin_reiter(False, uid, nur, _ap_sicht_param(), _ap_im_planer(uid))
-        if not darf and gruppe and _ap_sicht_param() == AP_SICHT_ADMIN:
-            # Admin-Gruppen (08.10.2026): Verwalter greift ein, aber nur in Pläne seiner Gruppe (die Tranche gehört zu genau einer ID)
+        if not darf and gruppe:
+            # Admin-Gruppen (08.10.2026): Verwalter greift ein, aber nur in Pläne seiner Gruppe (die Tranche gehört zu genau einer ID).
+            # Seit 02.11.2026 ohne Marker (EMIN-BESTAETIGEN): apdPlanAktion schickt nie sicht=admin, alle Aktionen hier sind Klicks
             try:
                 darf = admin_in_sicht((sb_select("trade_plans", {"select": "user_id", "id": f"eq.{pid}"}) or [{}])[0].get("user_id"), gruppe)
             except Exception:
@@ -37118,7 +37130,7 @@ def _fd_login(regeln_laden):
         daten = admin_gruppen_daten()
         von = lambda u: admin_lese_gruppe_menge(u, daten)   # noqa: E731 — echte Gruppen mit Verwalter, nicht nur mit Planer-Zeile
         lese = fcp_gruppen_sicht(uid, alle, von, nur_eigene=nur and not admin)
-        schreib = fcp_schreib_sicht(ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param(), gruppe), lese)
+        schreib = fcp_schreib_sicht(ap_eingriff_sicht(admin, uid, im_planer, nur, ap_verwalter_sicht(gruppe, _ap_sicht_param()), gruppe), lese)   # Verwalter fest seine Gruppe (EMIN-BESTAETIGEN 02.11.2026)
     except Exception:
         return admin, uid, None, None, False, (jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502)
     return admin, uid, lese, schreib, bool(nur and not admin and not von(str(uid))), None
@@ -37327,7 +37339,7 @@ def _ap_eingriff(aktion):
     except Exception:
         return jsonify({"ok": False, "msg": "Anmeldung nicht prüfbar"}), 502
     body = request.get_json(silent=True) or {}
-    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur, _ap_sicht_param(), gruppe)   # sicht:"admin" im Body = Admin-Reiter (08.10.2026)
+    sicht = ap_eingriff_sicht(admin, uid, im_planer, nur, ap_verwalter_sicht(gruppe, _ap_sicht_param()), gruppe)   # sicht:"admin" im Body = Admin-Reiter (08.10.2026), Verwalter fest (02.11.2026)
     ids = body.get("plan_ids") if isinstance(body.get("plan_ids"), list) else [body.get("plan_id")]
     params, upd, art = ap_eingriff_filter(aktion, ids, sicht)
     if params is None:
