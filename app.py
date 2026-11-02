@@ -37387,7 +37387,7 @@ FDP_FIRMEN_STANDARD = [
     {"name": "Topstep", "namen": ["topstep"], "an": False},
     {"name": "Lucid Trading", "namen": ["lucidtrading", "lucid"], "an": False},
     {"name": "FundedNext Futures", "namen": ["fundednextfutures"], "an": False},
-    {"name": "FTMO Futures", "namen": ["ftmofutures"], "an": False},
+    {"name": "FTMO Futures", "namen": ["ftmofutures"], "an": False},   # Werte (tp_modus rest, 50k) kommen aus sql/2026-11-03_funded_ftmo_futures.sql
 ]
 _fdp_info = {"at": 0.0, "letzter": None, "fehler": "", "regeln_fehlt_at": 0.0, "aufgeraeumt": 0}
 FDP_BESTAETIGEN_VORLAUF_S = 120          # bestätigter Vorschlag mit vergangener Zeit startet frühestens 2 min nach dem Klick
@@ -37544,7 +37544,41 @@ def fdp_vorschlag_neu(plan, r):
     return {"master_tp": r["tp"], "master_sl": r["sl"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"], "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"]}
 
 
-def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None):
+# FTMO FUTURES FUNDED (Finn 03.11.2026 ~02:30 Dubai über den Eingang): eigener Modus der Firmen-Regel (tp_modus „rest“, Werte je Größe in funded_plan_regeln,
+# sql/2026-11-03_funded_ftmo_futures.sql). Ziel = Start + ziel_gewinn [4.750, 5.000] je Konto fest gewürfelt (fdp_ziel_gewinn), 1 NQ, SL [750, 850] je Trade
+# gewürfelt — höchstens Daily Loss (daily_usd 1.000) − FDP_TAGES_PUFFER und höchstens der Abstand zur Liquidation —, TP immer der Rest bis zum Ziel (kein Deckel,
+# kein Break-even: nach einem Verlusttag wächst der TP um den Verlust; der Max DD 3.000 $ beendet das Konto nach ~3 Verlusttagen), Hedge hedge_eur € je dd $
+# (450 € auf 3.000 $ = 0,15 € je $ Abstand zur Liquidation). Boden wie die FTMO-Futures-Challenge: nachziehend, Lock beim Start (lock_usd 0).
+FDP_TAGES_PUFFER = 100                    # $ zwischen SL und Daily Loss (Schlupf am Fill, wie AP_TAGES_PUFFER)
+
+
+def fdp_ziel_gewinn(jg, konto_id=None):
+    """REIN RECHNEND (testbar): Ziel-Gewinn des Kontos — Zahl wie bisher (Apex), Spanne [von, bis] je Konto FEST aus der Konto-ID gewürfelt (gleiches Ziel an jedem
+    Tag, kein Hin und Her zwischen den Takten), ganze Dollar. Ohne ID die Mitte."""
+    z = (jg or {}).get("ziel_gewinn")
+    if isinstance(z, (list, tuple)) and len(z) == 2 and _wd_num(z[0]) is not None and _wd_num(z[1]) is not None:
+        lo, hi = float(z[0]), float(z[1])
+        u = (int(hashlib.sha256(str(konto_id).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF) if konto_id else 0.5
+        return float(round(lo + (hi - lo) * u))
+    return float(_wd_num(z) or 0)
+
+
+def fdp_sl_rest(jg, balance, liq, rnd=None):
+    """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq,
+    ganze Dollar abgerundet. Ohne rnd die Mitte."""
+    b = jg.get("sl") if isinstance(jg.get("sl"), (list, tuple)) and len(jg.get("sl")) == 2 else None
+    if not b or liq is None:
+        return None
+    lo, hi = float(b[0]), float(b[1])
+    sl = rnd.uniform(lo, hi) if rnd is not None else (lo + hi) / 2.0
+    d = _wd_num(jg.get("daily_usd"))
+    if d:
+        sl = min(sl, d - FDP_TAGES_PUFFER)
+    sl = min(sl, balance - liq)
+    return float(int(sl)) if sl > 0 else None
+
+
+def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None, konto_id=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
     funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
     offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert),
@@ -37559,12 +37593,16 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     if liq is None:
         return {"aktion": "aus", "grund": "Balance nicht über der Liquidation — geblowt? (" + liq_text + ")", "liq_text": liq_text}
     start = float(start) if start else g
-    ziel = start + float(jg.get("ziel_gewinn") or 0)
+    rest_modus = (regel or {}).get("tp_modus") == "rest"           # FTMO Futures (03.11.2026), s. oben
+    ziel = start + fdp_ziel_gewinn(jg, konto_id)
     # Plausibel? (27.10.2026, Befund Chris 100k …0003 mit 150.074 $ = Endbalance seines 150k-Kontos, gekürzte Kennung in TradingView):
     # mehr als ein Trade über dem Ziel kann der Planer nicht erzeugt haben → Lesung anzweifeln statt „Ziel erreicht" zu melden
-    if balance > ziel + float(jg.get("max_trade") or 0):
+    if balance > ziel + float(jg.get("max_trade") or (dd if rest_modus else 0) or 0):
         return {"aktion": "aus", "grund": f"Balance {_liq_de(balance)} $ unplausibel für {int(g / 1000)}k (Ziel {_liq_de(ziel)} $) — ↻ Balance neu lesen"}
-    tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0)
+    if rest_modus:
+        tp, art = (round(ziel - balance, 2), "rest") if ziel - balance > 0.005 else (None, "ziel")   # kein Deckel, kein Break-even
+    else:
+        tp, art = fdp_tp(balance, start, ziel, jg.get("max_trade") or 0)
     gew = round(balance - start, 2)
     max_tag = max([v for v in (tage or {}).values() if v > 0], default=0.0)
     basis = {"balance": round(balance, 2), "start": round(start, 2), "ziel": round(ziel, 2), "liq": round(liq, 2), "liq_text": liq_text,
@@ -37572,6 +37610,19 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
              "consistency_pct": round(max_tag / gew * 100, 1) if gew > 0 and max_tag > 0 else None}
     if art == "ziel":
         return dict(basis, aktion="ziel", grund="Ziel erreicht → Winning Days")
+    if rest_modus:
+        sl = fdp_sl_rest(jg, balance, liq, rnd)
+        if not sl or sl < FDP_SL_MIN_USD:
+            return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")
+        kt = int(kt_fest) if kt_fest else fdp_kontrakte(jg.get("kontrakte") or {"1": 1}, None, rnd)
+        he, ddj = _wd_num(jg.get("hedge_eur")), _wd_num(jg.get("dd"))
+        offen_r = round(he / ddj * (balance - liq), 2) if he and ddj else offen       # € je $ Abstand fest (450 € auf 3.000 $)
+        h = fdp_hedge(offen_r, balance, liq, tp, sl, kt)
+        if not h:
+            return dict(basis, aktion="aus", grund="Hedge nicht rechenbar (hedge_eur / dd der Regel)")
+        dl = _wd_num(jg.get("daily_usd"))
+        return dict(basis, offen_eur=round(offen_r, 2), aktion="planen", grund="", tp=tp, sl=sl, kontrakte=kt, tp_art=art, stufe=None, dll=dl, minis=None,
+                    tp_pkt=round(tp / (FDP_NQ_PPL * kt), 2), sl_pkt=round(sl / (FDP_NQ_PPL * kt), 2), **h)
     dll, minis, nr = fdp_stufe(stufen, balance)
     if not dll:
         return dict(basis, aktion="aus", grund="keine Stufe (liq_regeln) für diese Größe")
@@ -37791,7 +37842,8 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         peak = liq_peak({}, a, balance, verlauf)
         lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
         stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
-        return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest), zy
+        return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest,
+                                 konto_id=str(a["id"])), zy
 
     for a in konten:
         aid, pl = str(a["id"]), je_plan.get(str(a["id"]), [])
@@ -37884,7 +37936,10 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         start = mitternacht + timedelta(minutes=m)
         richtung = rnd.choice(("buy", "sell"))          # Apex ohne Waage (AP_WAAGE_OHNE_FIRMEN), Gegenrichtung sperrt die DB
         notiz = (f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · Stufe {r['stufe']} "
-                 f"(Daily Loss {_liq_de(r['dll'])} $) · offene Kosten {_liq_de(r['offen_eur'])} €")
+                 f"(Daily Loss {_liq_de(r['dll'])} $) · offene Kosten {_liq_de(r['offen_eur'])} €") if r.get("tp_art") != "rest" else (
+                 # FTMO Futures (03.11.2026): keine Stufe, TP = Rest bis zum Ziel, Hedge fest € je $ Abstand zur Liquidation
+                 f"Funded-Planer{'' if auto_k else ' · Vorschlag'} · Zyklus {r['zyklus']} · Ziel {_liq_de(r['ziel'])} $ · Liq {_liq_de(r['liq'])} $ · "
+                 f"Daily Loss {_liq_de(r['dll'])} $ · TP = Rest bis Ziel · Hedge {_liq_de(r['offen_eur'])} € ({_ap_de(r['verhaeltnis'], 3)} € je $)")
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": aid, "master_name": a.get("name"), "master_firm": a.get("firm"),
             "master_contracts": r["kontrakte"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"],
