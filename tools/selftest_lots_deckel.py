@@ -68,8 +68,12 @@ check("tpLotsDeckelFrisch(plan)" in best and html.count("await tpWdBestaetigungF
 kern = html[html.index("async function hedgeSoloOeffnenKern("):]
 kern = kern[:kern.index("notfallOpen")]
 check("await tpLotsHedgeStop(plan" in kern and kern.index("await tpLotsHedgeStop(plan") < kern.index("plan.multiplier = Math.round") < kern.index("status: 'oeffnet'"), "Hedge: Stop in jedem Status, vor Frisch-Korrektur und 'oeffnet'-Merker")
-tick = html[html.index("async function hedgeLotsOkTick("):][:2600]
+tick = html[html.index("async function hedgeLotsOkTick("):]
+tick = tick[:tick.index("function hedgeLiqStart(")]
 check("seitStart" not in tick and "_hedgeNachgeholt" not in tick and "manuell: true" in tick and "lots_bestaetigt" in tick and "f.status !== 'open'" in tick, "Nach OK: öffnet unabhängig vom 3-min-Nachholen, nur solange der Master läuft")
+check("if(da !== true){" in tick and tick.index("if(da !== true){") < tick.index("hedgeSoloOeffnen(f") and "lots_ok_wartet" in tick, "Nach OK: öffnet nur bei gesichteter Position, sonst Vermerk und weiter prüfen")
+check("x.pc === pc" in tick and "Date.now() + 30000" in tick and tick.index("Date.now() + 30000") < tick.index("hedgeSoloOeffnen(f"), "Nach OK: nur am PC des Stops, ein gescheiterter Versuch kommt nach 30 s wieder")
+check("h.grund_code === 'lots_deckel'" in html, "Handknopf erscheint auch im Stop")
 klick = html[html.index("async function hedgeOeffnenKlick("):][:1400]
 check("${_lots} Lot" in klick and "lots_bestaetigt: _lotsUeber" in klick, "Handknopf: Lot-Zahl im confirm")
 check("lots_stops" in app and "D.lotsStops" in html, "Braucht dich: Stops auch für fremde laufende Pläne")

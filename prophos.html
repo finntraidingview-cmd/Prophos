@@ -29521,13 +29521,29 @@
     tpLotsStopMelden(plan, lots)
     return true
   }
-  /* NACH DEM OK ÖFFNEN: das OK kommt oft vom Mac, Pläne kommen ohne Realtime, also fragt der PC-Tab alle 5 s, aber nur solange hier ein Stop steht. Unabhängig vom 3-min-Nachholen und _hedgeNachgeholt. manuell umgeht die
-   * 90-s-Grenze: das OK ist die ausdrückliche Entscheidung. Nur solange der Master läuft. Je OK ein Versuch; scheitert das Open, gilt danach das übliche 🔴 „Master läuft ohne Hedge“. */
+  /* NACH DEM OK ÖFFNEN: das OK kommt oft vom Mac, Pläne kommen ohne Realtime, also fragt der PC des Stops alle 5 s, aber nur solange dort ein Stop steht. Unabhängig vom 3-min-Nachholen und _hedgeNachgeholt; manuell umgeht die
+   * 90-s-Grenze: das OK ist die ausdrückliche Entscheidung. Geöffnet wird NUR, wenn die Position im Master-Konto gerade zu sehen ist (Stopp S9 02.11.2026): Stop 10:00, Master am TP 10:20, OK 10:40 hieße sonst 20+ Lot Fusion ohne
+   * Master, und der Plan bleibt ohne Hedge auch nach dem Master-Ende oft „open“. Nicht zu sehen (Puls im anderen Konto, gekürzter Kontotext, flache Tabelle ohne Leer-Text): OK bleibt, weiter prüfen, Vermerk am Plan. Topstep: das Auge. */
+  function hedgeTsxMasterDaUrteil(plan, r, ext, extIds){   // REIN RECHNEND: true = Position gesehen, false = bewiesen flach, null = nicht zu sagen
+    const st = r && r.ok === true && r.stand && typeof r.stand === 'object' ? r.stand : null
+    if(!st || !(typeof r.alter_s === 'number' && r.alter_s <= 1) || st.ausgeloggt === true || !ext || !tsxKontoPasst(st.konto, ext, extIds)) return null
+    const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel((plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || plan.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
+    const liste = tsxStandListe(st)
+    if(hedgeMasterTeilweise(liste, wz, (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null, 1e9) != null) return true
+    return st.flach === true && !liste.length ? false : null
+  }
+  async function hedgeLotsMasterDa(plan){
+    if(plan.route !== 'tsv2') return hedgeReaderMasterDa(plan)
+    let r = null; try{ r = typeof window.mtcApi === 'function' ? await window.mtcApi('tsx-stand', { timeoutMs: 800 }) : null }catch(_){}
+    const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    return hedgeTsxMasterDaUrteil(plan, r, acc ? String(acc.externalId || '').trim() : '', tsxKontoExtIdsJetzt())
+  }
   let _hedgeLotsOkBusy = false
-  const _hedgeLotsOkVersucht = new Set()
+  const _hedgeLotsOkNaechst = new Map()   // OK → frühester nächster Versuch. Bricht der Kern vor 'oeffnet' ab, bleibt der Stop stehen und es geht alle 30 s weiter statt bis zum Neuladen nie mehr
   async function hedgeLotsOkTick(){
     if(!MT5_LOCAL || window._tabNebenSofort || _hedgeLotsOkBusy) return
-    const ids = (tradePlans || []).filter(p => p && (p.status === 'open' || p.status === 'planned') && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.status === 'fehler' && Number(p.mt5Baseline.hedge.lots_stop) > 0).map(p => p.id)
+    const pc = hedgePcId(), meinStop = x => !!x && x.status === 'fehler' && Number(x.lots_stop) > 0 && (!x.pc || x.pc === pc)   // am PC des Plans: sonst zöge ein zweiter PC der ID das Open, ohne Master im Blick
+    const ids = (tradePlans || []).filter(p => p && (p.status === 'open' || p.status === 'planned') && p.mt5Baseline && meinStop(p.mt5Baseline.hedge)).map(p => p.id)
     if(!ids.length) return
     _hedgeLotsOkBusy = true
     try{
@@ -29536,18 +29552,21 @@
       for(const row of (data || [])){
         const f = rowToPlan(row), i = tradePlans.findIndex(x => String(x.id) === String(f.id)); if(i >= 0) tradePlans[i] = f
         const b = f.mt5Baseline || {}, hx = b.hedge, ok = b.lots_ok
-        if(!hx || hx.status !== 'fehler' || !(Number(hx.lots_stop) > 0)) continue
+        if(!meinStop(hx)) continue
         tpLotsStopMelden(f, Number(hx.lots_stop))   // kam Railway beim ersten Mal nicht an, hier nochmal
         if(f.status !== 'open' || !ok || !(Number(ok.lots) + 0.011 >= Number(hx.lots_stop))) continue
-        const key = `${f.id}|${ok.at || ok.lots}`
-        if(_hedgeLotsOkVersucht.has(key)) continue
-        if(hedgeReaderMasterDa(f) === false){
-          _hedgeLotsOkVersucht.add(key)
-          try{ await hedgeAmPlanSchreiben(f.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nach Lots-OK nicht geöffnet: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
+        const da = await hedgeLotsMasterDa(f)
+        if(da === false){
+          try{ await hedgeAmPlanSchreiben(f.id, { status: 'uebersprungen', grund_code: 'master_flach', pc, at: new Date().toISOString(), msg: 'Hedge nach Lots-OK nicht geöffnet: das Master-Konto ist schon flach' }) }catch(_){}
           continue
         }
-        if(!(await hedgeSperre(f.id, 'lots_ok', 20))) continue
-        _hedgeLotsOkVersucht.add(key)
+        if(da !== true){
+          if(!hx.lots_ok_wartet) try{ await hedgeAmPlanSchreiben(f.id, { lots_ok_wartet: new Date().toISOString(), msg: `OK da (${ok.lots} Lot), wartet auf Sichtung der Position im Master-Konto. Hedge noch nicht geöffnet` }) }catch(_){}
+          continue
+        }
+        const key = `${f.id}|${ok.at || ok.lots}`
+        if((_hedgeLotsOkNaechst.get(key) || 0) > Date.now() || !(await hedgeSperre(f.id, 'lots_ok', 20))) continue
+        _hedgeLotsOkNaechst.set(key, Date.now() + 30000)
         const tv = b.tv || {}, ein = Number(tv.einstieg_nq)
         await hedgeSoloOeffnen(f, { klick_at: new Date().toISOString(), manuell: true, nachgeholt: true, lots_bestaetigt: Number(ok.lots), einstieg: ein > 1000 ? String(ein) : null, tv_symbol: tv.einstieg_symbol || null })
       }
@@ -29828,7 +29847,7 @@
     // Supabase-Rundreise weniger vor dem Copier); vor jedem weiteren Hedge-Eintrag wird er abgewartet, damit nichts zurückfällt.
     _hedgeWegGestempelt.delete(String(plan.id))   // neuer Hedge = neues Master-Ende (29.10.2026): alten Stempel aus einem falschen Reader-Ende nie weiterrechnen
     // grund, grund_tab, close_at (30.10.2026): Reste eines früheren Close dürfen den neuen Hedge nicht beschriften (hedgeZuAusRing liest sie)
-    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', grund: null, grund_tab: null, close_at: null, lots_stop: null, lots_bestaetigt: (r && r.lots_bestaetigt) || null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
+    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', grund: null, grund_tab: null, close_at: null, lots_stop: null, lots_ok_wartet: null, grund_code: null, lots_bestaetigt: (r && r.lots_bestaetigt) || null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
@@ -33722,8 +33741,8 @@
       }
       if(h.status === 'uebersprungen') return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">nicht geöffnet</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', `Fusion-Hedge übersprungen: ${h.msg || '?'}`)
       // „Hedge öffnen" (25.09.2026): nur bei sicherem Fehler (nichts gesendet), laufendem Plan, am PC des Plans — eigener Handler
-      const oeffnenBtn = (h.status === 'fehler' && hedgeFehlerSicher(h) && p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
-        ? ` <button type="button" class="btn btn-ghost tc2-btn" data-plan-hedge-oeffnen="${escapeHtml(String(p.id))}" title="Fusion-Gegenposition jetzt öffnen — beim ersten Versuch wurde sicher nichts gesendet (${escapeHtml(String(h.code || ''))})" style="color:#0E7A78">Hedge öffnen</button>` : ''
+      const oeffnenBtn = (h.status === 'fehler' && (hedgeFehlerSicher(h) || h.grund_code === 'lots_deckel') && p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
+        ? ` <button type="button" class="btn btn-ghost tc2-btn" data-plan-hedge-oeffnen="${escapeHtml(String(p.id))}" title="Fusion-Gegenposition jetzt öffnen — beim ersten Versuch wurde sicher nichts gesendet (${escapeHtml(String(h.code || h.grund_code || ''))})" style="color:#0E7A78">Hedge öffnen</button>` : ''
       return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">Fehler</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`) + oeffnenBtn
     }catch(_){ return '' }
   }
