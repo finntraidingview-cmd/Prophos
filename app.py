@@ -14326,6 +14326,46 @@ def _wd_zyklus_anhaengen(konten):
         return False
 
 
+@app.route("/alarm/recoverer", methods=["POST", "OPTIONS"])
+def alarm_recoverer():
+    """RECOVERER (Eingang 02.11.2026): ein Tab legt für ein Konto mit Recoverer-Zeile keinen Plan an, weil Stand oder Regel nicht passen — bisher fehlte der Winning Day
+    still. Einmal 🟠 an die Master-IDs, je Konto × Berlin-Tag, egal wie viele Tabs melden (_tm_melde_frei: Prozess + alarm_log). Konto und Name aus der DB, vom Tab nur ein
+    kurzer Fall. Melden darf der Besitzer oder eine Master-ID (Mac). Nur HT-IDs, wie alarm_tick. Ist Railway selbst weg, kommt die Meldung nicht an: das meldet der Tab
+    nicht, dafür gibt es keinen zweiten Weg."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    aid = str(d.get("account_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", aid):
+        return jsonify({"ok": False, "error": "account_id fehlt"}), 400
+    fall = str(d.get("fall") or "")
+    grund = {"stand": "Recoverer-Stand nicht ladbar", "passt_nicht": "Regel passt nicht mehr zum verschwundenen Plan"}.get(fall)
+    if not grund:
+        return jsonify({"ok": False, "error": "fall unbekannt"}), 400
+    try:
+        k = (sb_select("accounts", {"select": "id,user_id,name,firm", "id": f"eq.{aid}"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    if not k:
+        return jsonify({"ok": False, "error": "Konto unbekannt"}), 404
+    owner = str(k.get("user_id"))
+    if owner != str(uid) and str(uid) not in _alarm_empfaenger():
+        return jsonify({"ok": False, "error": "nicht dein Konto"}), 403
+    namen, aus = _ap_namen()
+    if owner in aus or _alarm_fremd_verwaltet(owner):
+        return jsonify({"ok": True})
+    key = f"recoverer_stand|{aid}|{_berlin_heute()}"
+    if not _tm_melde_frei(key):
+        return jsonify({"ok": True, "gedrosselt": True})
+    konto = f"{namen.get(owner, owner[:8])} · {k.get('firm') or ''} {k.get('name') or ''}".strip()
+    weg = "→ Railway-Log [wd-zyklus] ansehen, dann Admin → Winning Days neu laden" if fall == "stand" else "→ Admin → Winning Days: Konto für heute von Hand neu einwürfeln"
+    alarm_senden(2, "recoverer_stand", "Recoverer: Winning Day nicht angelegt", f"{konto}: {grund}. {weg}", uid=owner, schluessel=key, tag=f"recoverer-{aid}"[:60], daten={"fall": fall})
+    return jsonify({"ok": True})
+
+
 @app.route("/wd-zyklus", methods=["GET", "OPTIONS"])
 def wd_zyklus_route():
     """GET ?ids=a,b → {ok, at, zyklus: {account_id: {…}}} für Apex-Winning-Days-Konten; ohne ids alle der Sicht. Gate: eingeloggt;
