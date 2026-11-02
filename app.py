@@ -38106,7 +38106,7 @@ def admin_funded_plan_ids():
 
 
 # ══ FUNDED-CFD-PLANER (30.10.2026, Finn ~07:00 Dubai: „Ja, bauen"; Regeln diktiert 05:10–06:55, .claude/master/funded-cfd-planer-regeln.md).
-# Konten mit account_type funded_cfd (The5ers, FundedNext, FundingPips Standard — Flex später; Tradeify CFD 100k, Nachtrag 30.10.2026 —
+# Konten mit account_type funded_cfd (The5ers, FundedNext, FTMO seit 03.11.2026 — Schlüssel ftmo, nie FTMO Futures —, FundingPips Standard — Flex später; Tradeify CFD 100k, Nachtrag 30.10.2026 —
 # exakter Firmen-Schlüssel tradeifycfd, nie Tradeify-Futures) bekommen 1 Trade je Konto und Tag als
 # VORSCHLAG: klassisches Echo mit Fusion-Gegenhedge (route mt5, Slave = echo_hedge_account der ID, wie der Gruppen-Planer), Finn bestätigt
 # von Hand (Testphase alles von Hand, 29.10.2026). Werte je Firma × Größe in public.funded_cfd_plan_regeln (sql/2026-10-30_funded_cfd_planer.sql):
@@ -38143,13 +38143,14 @@ FCP_TP_ZYKLEN_STANDARD = {"the5ers": [750, 1500, 3000, 6000]}
 # Gewinne 635,70 + 603,84 + 61,05, Rest 2.625 → TP 1.312; Finn + Pascal …5250 ohne Gewinne, Rest 6.146 → 3.073, danach wieder 3.073.
 # Fail-closed: Gewinne nicht sicher lesbar (beendeter Trade ohne master_pl) → Rest / 2. Schalter regel.tp_modus = "consistency50".
 FCP_TP_MODUS_STANDARD = {"the5ers": "consistency50"}
-# ERSTER PAYOUT = REFUND (Finn 30.10.2026 ~08:00, nur FundedNext — FTMO folgt, sobald es im Planer ist): solange das Konto noch keinen
+# ERSTER PAYOUT = REFUND (Finn 30.10.2026 ~08:00 FundedNext; FTMO seit 03.11.2026, Ziel 50–100 $, sql/2026-11-03_funded_cfd_ftmo.sql): solange das Konto noch keinen
 # Payout hatte (Zyklus 1, dieselbe Zählung wie bei The5ers: pending_payouts + managed_payouts), gilt ein kleines Ziel (+50 bis +150 $,
 # TP aufs Ziel, auch nach Verlust ganz nachholen — der TP-Deckel und der Mindest-TP greifen hier nicht) und ein großer Hedge: hedge_eur_je_dd
 # € je $ Drawdown (0,5 → 100k 5.000 € auf 10.000 $, 50k 2.500 € auf 5.000 $, 200k 10.000 € auf 20.000 $). Ab dem ersten Payout die
 # normalen FundedNext-Regeln. SL/Lots/1-%-Regel unverändert. Werte je Firma in funded_cfd_plan_regeln.firmen[].erster_payout
 # (sql/2026-10-30_funded_cfd_erster_payout.sql); fehlt der Schlüssel, gilt dieser Standard.
-FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5, "lots_faktor": 0.1}}
+FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd": 0.5, "lots_faktor": 0.1},
+                              "ftmo": {"ziel": [50, 100], "hedge_eur_je_dd": 0.5}}   # FTMO (Finn 03.11.2026): Rückfall, falls die Regel ohne erster_payout steht
 # REFUND-LOTS ÷ 5 (Finn 30.10.2026 14:49: „Refund-Trades: Lot-Anzahl runter, durch 5." — ersetzt ÷ 2 von 14:2x, Anlass EzPoker a1ad322f): im Refund-Zyklus
 # Lots × lots_faktor, abgerundet auf FCP_LOT_SCHRITT, mindestens ein Schritt. TP-$ und SL-$ bleiben (Punkte × 5, z. B. 0,26 Lot: SL 2.374 $ = 913 Pkt). Hedge: der
 # multiplier hängt nur an hedge_eur ÷ dd, die Fusion-Lots folgen den Master-Lots — € je $ Master, also auch Hedge-€ am TP/SL, bleiben gleich.
