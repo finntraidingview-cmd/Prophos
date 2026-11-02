@@ -2147,7 +2147,8 @@ def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
 # Ort Panel statt reader-server: das Panel läuft dauerhaft, schreibt ohnehin die Copier-Aufträge und hält die Puls-Locks. ══
 SCHARF_PFAD = os.path.join(HERE, "hedge_scharf.json")
 SCHARF_LOCK = threading.Lock()
-SCHARF_TAKT_S = 0.05   # Eingang 02.11.2026 (Jacob 98c946a0 ≈ 1,0 s): 0,1 → 0,05 s, spart bis 0,05 s bis zur ersten flachen Lesung
+SCHARF_TAKT_S = 0.1          # Grundtakt bei offenem scharfem Eintrag
+SCHARF_TAKT_FLACH_S = 0.05   # Eingang 02.11.2026 (Jacob 98c946a0 ≈ 1,0 s; S9-Hinweis Last): 0,05 s nur ab der ersten flachen Lesung bis zur Entscheidung
 SCHARF_FILL_FRISCH_S = 3.0   # Exit-Fill zählt, wenn er höchstens so alt ist
 SCHARF_FLACH_S = 0.3
 SCHARF_FLACH_LESUNGEN = 2
@@ -2514,6 +2515,15 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
     return n
 
 
+def scharf_takt(liste):
+    """Takt der nächsten Runde: 0,05 s, solange ein offener Eintrag eine Flach-Strecke hat (erste flache Lesung bis Entscheidung), sonst 0,1 s.
+    Eingang 03.11.2026 (S9-Hinweis Last): davor kostet der langsamere Takt höchstens ~0,05 s bei der ersten flachen Lesung."""
+    for e in liste or []:
+        if isinstance(e, dict) and e.get("status") == "offen" and e.get("flach_seit"):
+            return SCHARF_TAKT_FLACH_S
+    return SCHARF_TAKT_S
+
+
 def _scharf_wache():
     """Thread: die Schließ-Wache (s. Block-Kopf). Wirft nie. Ohne scharfen Eintrag nur 1× je Sekunde ein Blick in die Datei."""
     while True:
@@ -2533,7 +2543,11 @@ def _scharf_wache():
         except Exception as ex:
             print(f"[scharf] Fehler: {type(ex).__name__}: {ex}", flush=True)
             time.sleep(1.0)
-        time.sleep(SCHARF_TAKT_S)
+        try:
+            takt = scharf_takt(scharf_laden())
+        except Exception:
+            takt = SCHARF_TAKT_S
+        time.sleep(takt)
 
 
 # ══ LESE-SPERRE UM DAS MARKET OPENING (Finn 02.11.2026, Korrektur über den Eingang: kein „Konto fest bei offenem Trade“ — die Heim-Wache-Regel bleibt, Puls

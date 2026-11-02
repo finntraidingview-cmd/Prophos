@@ -73,7 +73,7 @@ def lauf(folge, takt=0.1):
         n = ns["_scharf_runde"](mach(), uhr[0])
         if n:
             return uhr[0]
-        uhr[0] += takt
+        uhr[0] += takt if takt is not None else ns["scharf_takt"](ns["scharf_laden"]())
     return None
 
 
@@ -276,7 +276,7 @@ r = SRC[SRC.index("def _scharf_runde("):SRC.index("def _scharf_wache():")]
 check(r.index("_scharf_close_senden(e2)") < r.index('scharf_spur(e.get("ticket"), "Lage"'), "Lage-Zeile erst nach dem Close-Auftrag (Datei-Sperre bremst den Close nie)")
 # NACHSCHÄRFEN (Eingang 02.11.2026): Exit-Fill → schon bei der ersten flachen Lesung; Takt 0,05 s. Zeiten wie die Spuren (Exit = 0):
 # Jacob 98c946a0 erste flache Lesung +0,35 s (Mike e8f2c337, Jacob e6fadf3b ähnlich)
-def spur(fill, erste_flach=0.35, takt=0.05, **fk):
+def spur(fill, erste_flach=0.35, takt=None, **fk):   # takt None = wie die Wache (0,1 s, ab der ersten flachen Lesung 0,05 s)
     if os.path.exists(ns["SCHARF_PFAD"]):
         os.remove(ns["SCHARF_PFAD"])
     ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ", "nachbarn": [ID], "richtung": "buy", "menge": 1}, "98c946a0", 990, READER)
@@ -284,7 +284,7 @@ def spur(fill, erste_flach=0.35, takt=0.05, **fk):
     lauf([lambda: stand(pos=POS)] * 3, takt)
     exit_t = uhr[0]
     while uhr[0] < exit_t + erste_flach:
-        ns["_scharf_runde"](stand(pos=POS), uhr[0]); uhr[0] += takt
+        ns["_scharf_runde"](stand(pos=POS), uhr[0]); uhr[0] += takt if takt is not None else ns["scharf_takt"](ns["scharf_laden"]())
     f = dict({"tab_id": "puls-mvz4o89y50p23m", "seite": "sell", "menge": 1, "preis": 28774.5, "at": (exit_t + 0.10) * 1000, "symbol": "MNQZ6",
               "konto": ID, "art": "market"}, **fk) if fill else None
     t = lauf([lambda: dict(stand(), fills=[f] if f else [])] * 40, takt)
@@ -292,7 +292,13 @@ def spur(fill, erste_flach=0.35, takt=0.05, **fk):
 d_fill, d_ohne = spur(True), spur(False)
 check(d_fill is not None and d_fill <= 0.45, f"mit Exit-Fill: CLOSE {d_fill:.2f} s nach dem Exit (Ziel ≤ 0,45 s)" if d_fill is not None else "mit Exit-Fill")
 check(d_ohne is not None and d_ohne <= 0.75, f"ohne Fill: 2 flache Lesungen über 0,3 s → CLOSE {d_ohne:.2f} s nach dem Exit" if d_ohne is not None else "ohne Fill")
-check(ns["SCHARF_TAKT_S"] == 0.05 and ns["SCHARF_FLACH_LESUNGEN"] == 2 and ns["SCHARF_FLACH_S"] == 0.3, "Takt 0,05 s, Grundregel 2 Lesungen über 0,3 s")
+check(ns["SCHARF_TAKT_S"] == 0.1 and ns["SCHARF_TAKT_FLACH_S"] == 0.05 and ns["SCHARF_FLACH_LESUNGEN"] == 2 and ns["SCHARF_FLACH_S"] == 0.3,
+      "Takt 0,1 s, ab der ersten flachen Lesung 0,05 s, Grundregel 2 Lesungen über 0,3 s")
+check(ns["scharf_takt"]([]) == 0.1 and ns["scharf_takt"]([{"status": "offen", "flach_seit": None}]) == 0.1
+      and ns["scharf_takt"]([{"status": "offen", "flach_seit": 1.0}]) == 0.05 and ns["scharf_takt"]([{"status": "schliesst", "flach_seit": 1.0}]) == 0.1,
+      "scharf_takt: 0,05 s nur bei offenem Eintrag mit Flach-Strecke")
+w = SRC[SRC.index("def _scharf_wache():"):SRC.index("# ══ LESE-SPERRE")]
+check("scharf_takt(scharf_laden())" in w and "time.sleep(1.0)" in w, "Wache schläft nach scharf_takt, ohne Eintrag 1 s wie früher")
 for name, fk in (("Gleichrichtung", {"seite": "buy"}), ("Teilmenge", {"menge": 2}), ("alt (5 s)", {"at": (uhr[0] - 100) * 1000}),
                  ("normales Chrome", {"tab_id": "t1abc"}), ("anderes Konto", {"konto": "FTDFYSLX150811169999"}), ("andere Wurzel", {"symbol": "NQZ6"})):
     d = spur(True, **fk)
