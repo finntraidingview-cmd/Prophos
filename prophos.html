@@ -4370,6 +4370,8 @@
   #accountsTable .acc-ziel-chip[data-acc-ziel]{cursor:pointer}   /* .1474: Klick öffnet den Nachfolger-Wizard */
   #accountsTable .acc-ziel-chip[data-acc-ziel]:hover{background:#D1FAE5}
   /* Refund-Chip (21.10.2026): Funded CFD bei FTMO/FundedNext vor dem ersten erhaltenen Payout — Indigo-Outline wie Funded CFD, ohne Tint */
+  #dashboard-view .type-badge.acc-rec-chip{margin-left:6px;cursor:pointer;vertical-align:middle}   /* Recoverer (02.11.2026): Farben wie type-challenge */
+  #dashboard-view .type-badge.acc-rec-chip.acc-rec-aus{opacity:.55}
   #dashboard-view .type-badge.acc-refund-chip{margin-left:6px;background:#fff;border-color:#C9CBFF;color:#5049A2;vertical-align:middle}
   #dashboard-view .type-badge.acc-risk-chip{margin-left:6px;background:#fff;border-color:#f3c98b;color:#b45309;vertical-align:middle}
   /* Planer-Spalte (08.10.2026, Finn: „mies hässlich" zum Chip in der Typ-Spalte): eigene schmale Spalte — Haken (accounts.auto_planer)
@@ -12625,6 +12627,7 @@
                 <span id="wd-risk-fehlt" style="font-size:12px;color:var(--danger)"></span>
               </div>
             </div>
+            <div id="wd-rec-zeile" style="font-size:12px;color:var(--sub);margin:0 0 6px"></div>
             <div id="wd-ablauf"></div>
             <div id="wd-uebersicht"></div>
             <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
@@ -14788,6 +14791,25 @@
   </div>
 
   <!-- CREDENTIALS VIEW MODAL -->
+  <!-- RECOVERER (02.11.2026): Popup zum Chip in der Accounts-Liste, Zahlen von Railway, Schalter je Konto -->
+  <div class="modal-bg" id="recovererModal">
+    <div class="modal" style="max-width:400px">
+      <div class="modal-head">
+        <h3>Recoverer</h3>
+        <button class="modal-x" id="recovererClose" aria-label="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <div id="rec-konto" style="font-size:12.5px;color:var(--sub);margin-bottom:8px"></div>
+        <div id="rec-zeilen" style="font-size:13px"></div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:12px;font-size:12px;color:var(--sub)">Regel
+          <button type="button" class="btn btn-mini btn-ghost" data-rec-sch="">automatisch</button>
+          <button type="button" class="btn btn-mini btn-ghost" data-rec-sch="an">an</button>
+          <button type="button" class="btn btn-mini btn-ghost" data-rec-sch="aus">aus</button>
+        </div>
+        <div class="modal-msg" id="recovererMsg" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
   <div class="modal-bg" id="credModal">
     <div class="modal" style="max-width:460px">
       <div class="modal-head">
@@ -17625,6 +17647,15 @@
       const gedeckelt = deckel != null && roh > deckel
       const anfragbar = gedeckelt ? deckel : roh
       const geld = v => admGeld(v, c.ccy)
+      // RECOVERER (02.11.2026, Mike 150k …0001 zeigte 3.000 $ bei −2.851 $ im Zyklus): solange die Regel läuft, zahlt Apex nicht aus (Profit < 2 × bester
+      // Tag). Nur Zahl und Text — keine Sperre, der Chip „anfragbar" bleibt klickbar. Fehlt der Stand, wie bisher.
+      const zy = window._wdZyklusRoh?.(r.account_id)
+      if(zy && zy.aktiv && Number(zy.verlust) > 0 && !zy.erfuellt){
+        const n0 = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE')
+        const rest = Number(zy.rest_bis_erfuellt) > 0 ? `, noch ~${n0(zy.rest_bis_erfuellt)} $ / ~${zy.tage_geschaetzt} Tage` : ''
+        return { regel: Object.assign({}, regel, { deckel }), grund: '', roh: 0, gedeckelt: false, anfragbar: 0, erhalten: 0, apex: { puffer, ueber, nr },
+                 sub: `Zyklus ${zy.nr}: ${Number(zy.profit) < 0 ? '−' : ''}${n0(zy.profit)} $, bester Tag ${n0(zy.bester)} $${rest}` }
+      }
       const sub = `50 % von ${ueber >= 0 ? '+' : '−'}${geld(Math.abs(ueber))} über Puffer ${geld(puffer)} · Payout Nr. ${nr}`
         + (deckel != null ? ` max. ${geld(deckel)}` : ' ohne Deckel (Tabelle endet bei 6)')
       return { regel: Object.assign({}, regel, { deckel }), grund: '', roh, gedeckelt, anfragbar, erhalten: anfragbar * c.pct / 100, sub, apex: { puffer, ueber, nr } }
@@ -18921,6 +18952,7 @@
       admKontenRender()
     })
     function admKontenRender(){
+      window._admZyklusNachladen?.()
       const msg = $('adm-konten-msg'), body = $('adm-konten-body'), tb = $('adm-k-table')
       if(!msg || !tb) return
       if(!admData){ msg.style.display = ''; body.hidden = true; return }
@@ -18980,7 +19012,11 @@
       tb.innerHTML = sortiert.map(a => admKontoZeileHtml(a, zu.get(a), jetztIso, { pcTab: admPcTab })).join('')
       admKontenVerdrahten(tb)
     }
+    // RECOVERER (02.11.2026): Stand der ganzen Admin-Sicht nachladen; geändert → Alle Accounts und Payouts neu zeichnen
+    window._admZyklusNeuZeichnen = () => { try{ admKontenRender() }catch(_){} try{ admFinRender() }catch(_){} }
+    window._admZyklusNachladen = () => { window._wdZyklusLaden?.({ admin: true }).then(g => { if(g) window._admZyklusNeuZeichnen() }).catch(() => {}) }
     function admKontenVerdrahten(tb){
+      tb.querySelectorAll('[data-acc-rec]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); window._recovererOeffnen?.(el.dataset.accRec, el.dataset.recName) }))   // Recoverer-Chip (02.11.2026)
       tb.querySelectorAll('[data-acc-po]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); accPayoutFeldOeffnen(el.dataset.accPo) }))   // nur eigene Konten
       tb.querySelectorAll('[data-adm-k-radar]').forEach(el => el.addEventListener('click', e => { e.preventDefault(); admKontoRadarOeffnen(el.dataset.admKRadar) }))   // Trade-Chip → Radar (20.10.2026)
       // Trade planen für diese ID (29.10.2026, Finn): bestehendes Trade-Popup im Fremd-Modus — Plan landet beim Besitzer, kein ID-Wechsel
@@ -19009,7 +19045,7 @@
         ? `<div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${(r.balance_ccy && r.balance_ccy !== 'USD') ? dupFmtMoney(r.balance, r.balance_ccy) : fmtMoney(r.balance)}</div>
            <div style="font-size:11px;color:var(--sub);margin-top:2px"><span style="font-weight:500">Stand · ${escapeHtml(quelle)}</span>${r.balance_at ? `<span style="margin-left:6px">${escapeHtml(timeAgo(r.balance_at))}</span>` : ''}</div>`
         : '<span class="mono" style="color:var(--sub-2)">—</span>'
-      let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
+      let typ = ''; try{ typ = accTypChipHtml(a) + (r.archived ? '' : accRecovererChipHtml(a)) + (r.archived ? '' : accRefundChipHtml(a, r.payouts_n ?? 0)) + accZielChipHtml(a) + accRisikoChipHtml(a) }catch(_){ typ = escapeHtml(a.type || '–') }
       let planer = ''; try{ planer = accPlanerZelleHtml(a, true) }catch(_){ planer = '<span style="color:var(--sub-2)">—</span>' }
       let trade = ''; try{ trade = admKontoTradeChipHtml(a, r) }catch(_){ trade = '<span class="adm-k-trade-leer">–</span>' }   // Trade-Spalte (20.10.2026)
       // Heute traden (16.10.2026): bei Funded Futures das kompakte Zeichen in der Planer-Spalte (Ergebnis aus /admin/overview heute_traden)
@@ -19244,6 +19280,7 @@
       admCalRender()
 
       function admCalRender(){
+        window._admZyklusNachladen?.()   // RECOVERER (02.11.2026): zeichnet neu, wenn sich der Stand geändert hat
         // NUR WINNING DAYS + WAITING FOR PAYOUT (Finn 08.10.2026: „nur Accounts, die auch als Typ ‚Winning Day' sind, nicht alle ‚Funded' …
         // nur Typ ‚Winning Day' oder ‚Waiting for Payout'" + „es fehlen gerade die kompletten CFD-Accounts"). Gefiltert an der Quelle
         // (app.py payout_ready, waiting_since = accounts.waiting_payout_since); der Filter hier hält nur einen älteren Backend-Stand sauber.
@@ -34442,7 +34479,7 @@
       mklWdAdminMerken(farmerAdmin)
       let konten = null
       if(wdp.d){
-        konten = {}; for(const k of (wdp.d.konten || [])) konten[String(k.id)] = k
+        wdZyklusMerken(wdp.d.konten); konten = {}; for(const k of (wdp.d.konten || [])) konten[String(k.id)] = k
         if(plaene) for(const p of (wdp.d.plaene || [])){
           const id = String(p.id), da = plaene[id]
           plaene[id] = da ? Object.assign({}, da, { route: p.route || da.route, master_symbol: p.master_symbol, master_contracts: p.master_contracts, start_um_gestartet_at: p.start_um_gestartet_at, orbit_gesendet_at: p.orbit_gesendet_at })
@@ -34550,7 +34587,7 @@
       // Würfel aus der Zeile (.1487): steht in wd_tagesplan, braucht keine Farmer-Sicht
       const k = t.konto || {}, w = (k.wuerfel && num(k.wuerfel.tp) > 0 && num(k.wuerfel.kt) >= 1) ? k.wuerfel : null, vor = k.vor || null
       if(w){
-        out.ktTxt = `${f0(w.kt)} × ${rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : 'gewürfelt'
+        out.ktTxt = `${f0(w.kt)} × ${rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : w.quelle === 'recoverer' ? 'Recoverer' : 'gewürfelt'
         if(!out.hedgeAn) out.lotsSub = 'Gegenhedge aus'
         else if(vor && num(vor.lots) > 0){ out.lotsTxt = f2(vor.lots) + ' Lot'; out.lotsSub = `×${num(vor.mult) != null ? f3(vor.mult) : '–'}${num(vor.eur) != null ? ` · −${f0(vor.eur)} € am TP` : ''}` }
         else if(vor && num(vor.staffel) > 0){ out.lotsTxt = f0(vor.staffel) + ' €'; out.lotsSub = 'Staffel · Lots rechnet der Copier' }
@@ -34563,7 +34600,7 @@
       const sp = (a, b, f) => a === b ? f(a) : `${f(a)}–${f(b)}`
       out.ktTxt = `${sp(ka, kb, f0)} × ${root}`
       let z = null; try{ z = tpVorplanZeile(wdAccLike(kd), { live: num(kd.live_balance), regeln: vp.regeln, zufall: 0.5 }) }catch(_){}
-      const ok = z && !z.fehler, tpFix = num(kd.tp_vorgabe) || num(t.tp)
+      const ok = z && !z.fehler, tpFix = num(kd.tp_vorgabe) || num(t.tp) || (ok && z.basis === 'recoverer' ? num(z.tp) : null)
       const tp = tpFix != null ? tpFix : (ok ? Math.round((z.tpVon + z.tpBis) / 2) : null)
       out.tpTxt = tpFix != null ? f0(tpFix) + ' $' : (ok ? `${f0(z.tpVon)}–${f0(z.tpBis)} $` : '–')
       out.quelle = 'Spanne'
@@ -34573,7 +34610,7 @@
         // Lots = Staffel € ÷ (0,85 €/Pkt × TP-Punkte), TP-Punkte = TP $ ÷ ($/Pkt × Kontrakte) → mehr Kontrakte = mehr Lots
         const lots = k => Math.round(staffel * ppl * k / (tpWdSlavePpl() * tp) * 100) / 100
         out.lotsTxt = sp(lots(ka), lots(kb), f2) + ' Lot'
-        out.lotsSub = `Staffel ${f0(staffel)} €${z.hinweis ? ' · ' + z.hinweis : ''}`
+        out.lotsSub = `${z.basis === 'recoverer' ? 'Recoverer' : 'Staffel'} ${f0(staffel)} €${z.hinweis ? ' · ' + z.hinweis : ''}`
       } else out.lotsSub = (z && z.fehler) ? z.fehler : 'Staffel unbekannt'
     }catch(e){ out.lotsSub = 'Rechnung: ' + String((e && e.message) || e) }
     return out
@@ -42915,6 +42952,68 @@
       return false
     }finally{ if(btn) btn.disabled = false }
   }
+  /* RECOVERER-CHIP (02.11.2026, Finn: Name „Recoverer", neben dem Typ, Klick zeigt die Zahlen): bei aktiver Regel oder Schalter an; Schalter aus blass,
+   * sonst käme man an „automatisch" nicht mehr heran. Stil wie der Challenge-Chip. Stand aus window._wdZyklus, gerechnet auf Railway. */
+  function accRecovererChipHtml(a){
+    const z = a && window._wdZyklusRoh?.(a.id); if(!z) return ''
+    if(!(z.aktiv || z.schalter === 'an' || z.schalter === 'aus')) return ''
+    const aus = !z.aktiv
+    return ` <span class="type-badge type-challenge acc-rec-chip${aus ? ' acc-rec-aus' : ''}" data-acc-rec="${escapeHtml(String(a.id))}" data-rec-name="${escapeHtml(String(a.name || ''))}" data-stop-row-click="1" title="${escapeHtml(z.grund || 'Recoverer')} · klicken für Details">Recoverer</span>`
+  }
+  window._accRecovererChipHtml = accRecovererChipHtml   // Test-Haken
+  // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_setzen (wie wd_tp), die DB prüft das Recht.
+  let _recKonto = null
+  function recovererZeichnen(){
+    const box = document.getElementById('rec-zeilen'); if(!box || !_recKonto) return
+    const z = window._wdZyklusRoh(_recKonto.id), de = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE'), vz = v => Number(v) < 0 ? '−' : ''
+    document.getElementById('rec-konto').textContent = _recKonto.name || ''
+    if(!z){ box.innerHTML = '<div class="kf">Kein Stand vorhanden.</div>'; return }
+    const tagTxt = v => v ? new Date(String(v).slice(0, 10) + 'T12:00:00Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : ''
+    const schlecht = (z.tage || []).reduce((m, t) => (!m || Number(t.pnl) < Number(m.pnl)) ? t : m, null)
+    const zeilen = [
+      ['Zyklus', `${z.nr}${z.start ? ' · seit ' + tagTxt(z.start) : ''}`],
+      ['Verlusttag', Number(z.verlust) > 0 ? `−${de(z.verlust)} $${schlecht ? ' · ' + tagTxt(schlecht.tag) : ''}` : 'keiner'],
+      ['Profit im Zyklus', `${vz(z.profit)}${de(z.profit)} $`],
+      ['Bester Tag', z.bester != null ? `${vz(z.bester)}${de(z.bester)} $` : '–'],
+      ['Ziel je Tag', Number(z.ziel) > 0 ? `${de(z.ziel)} $` : `normal (~${de(z.ziel_normal)} $)`],
+      ['Hedge je Tag', Number(z.hedge_eur) > 0 ? `${de(z.hedge_eur)} €` : `normal (${de(z.staffel_eur)} €)`],
+    ]
+    if(Number(z.rest_bis_erfuellt) > 0) zeilen.push(['Bis Payout anfragbar', `noch ~${de(z.rest_bis_erfuellt)} $ / ~${z.tage_geschaetzt} Tage`])
+    box.innerHTML = zeilen.map(([k, v]) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0"><span style="color:var(--sub)">${escapeHtml(k)}</span><span class="tnum" style="font-weight:600">${escapeHtml(v)}</span></div>`).join('')
+      + `<div style="margin-top:8px;font-size:12px;color:var(--sub)">${escapeHtml(z.grund || '')}</div>`
+    document.querySelectorAll('#recovererModal [data-rec-sch]').forEach(b => { const an = (b.dataset.recSch || null) === (z.schalter || null) || (!b.dataset.recSch && !z.schalter); b.className = 'btn btn-mini ' + (an ? 'btn-primary' : 'btn-ghost') })
+  }
+  window._recovererOeffnen = (id, name) => {
+    _recKonto = { id: String(id), name: name || '' }
+    const m = document.getElementById('recovererMsg'); if(m){ m.textContent = ''; m.className = 'modal-msg' }
+    recovererZeichnen()
+    document.getElementById('recovererModal')?.classList.add('open')
+  }
+  const recovererZu = () => { _recKonto = null; document.getElementById('recovererModal')?.classList.remove('open') }
+  document.getElementById('recovererClose')?.addEventListener('click', recovererZu)
+  document.getElementById('recovererModal')?.addEventListener('click', e => { if(e.target === e.currentTarget) recovererZu() })
+  document.querySelectorAll('#recovererModal [data-rec-sch]').forEach(b => b.addEventListener('click', async () => {
+    if(!_recKonto) return
+    const m = document.getElementById('recovererMsg'), id = _recKonto.id, z0 = window._wdZyklusRoh(id)
+    b.disabled = true
+    try{
+      // dieselben Browser-Riegel wie die übrigen WD-Schreibwege: Gruppe (wdDarf, Prüfer M1) und Planer-Recht (S4); hart prüft die DB (wd_hand_recht)
+      if(!(await window._wdDarf(z0 && z0.user_id)) || !(await window._planerSchreiben?.())){
+        if(m){ m.textContent = 'Nur ansehen — den Schalter ändert die Admin-ID (HT) bzw. der Verwalter (Gruppe).'; m.className = 'modal-msg err' }
+        return
+      }
+      const { error } = await supabase.rpc('wd_konto_setzen', { p_account: id, p_zyklus_regel: b.dataset.recSch || '' })
+      if(error) throw error
+      await window._wdZyklusLaden({ ids: [id], neu: true })
+      recovererZeichnen()
+      if(m){ m.textContent = 'Gespeichert. Gilt beim nächsten Würfeln, ein schon geplanter Trade bleibt.'; m.className = 'modal-msg ok' }
+      if(typeof renderAccounts === 'function') renderAccounts()
+      window._admZyklusNeuZeichnen?.()
+    }catch(e){
+      const t = String((e && e.message) || e)
+      if(m){ m.textContent = /p_zyklus_regel|best candidate|Could not find/i.test(t) ? 'Schalter noch nicht verfügbar → sql/2026-11-02_recoverer.sql einspielen' : 'Nicht gespeichert: ' + t; m.className = 'modal-msg err' }
+    }finally{ b.disabled = false }
+  }))
   function accTypChipHtml(a){
     if(a && a.type === 'funded_cfd' && a.waitingPayoutSince){
       const d = new Date(a.waitingPayoutSince)
@@ -43574,7 +43673,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td>${accTypChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
+            <td>${accTypChipHtml(a)}${accRecovererChipHtml(a)}${accDeaktChipHtml(a)}${accRefundChipHtml(a)}${accZielChipHtml(a)}${accRisikoChipHtml(a)}${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td data-stop-row-click="1">${(a.type === 'funded' && !isArchived) ? ((() => { try{ return heuteKompaktHtml(accHeuteInfo(a)) }catch(_){ return '' } })() || accPlanerZelleHtml(a, isArchived)) : accPlanerZelleHtml(a, isArchived)}</td>
             <td>${(_mtcLogin && !isArchived && typeof mt5KontoIst === 'function' && mt5KontoIst(a)) ? `<div>${accTermBtnHtml(a.id)}</div>` : ''}${linksHtml}${accTermStatusHtml(a.id)}</td>
@@ -43637,6 +43736,9 @@
         openSuccessorWizard(a.id, () => { try{ renderAccounts() }catch(_){} try{ renderTradePlans() }catch(_){} }, neu)
       }))
       // Edit-Buttons
+      // Recoverer-Chip (02.11.2026): eigene Verdrahtung, Stand alle 5 min nachladen
+      accEls.table.querySelectorAll('[data-acc-rec]').forEach(el => el.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); window._recovererOeffnen?.(el.dataset.accRec, el.dataset.recName) }))
+      wdZyklusEigene().then(g => { if(g) renderAccounts() }).catch(() => {})
       // ↻ Balance lesen (F19) — eigener Handler je Knopf
       accEls.table.querySelectorAll('[data-acc-balref]').forEach(btn => btn.addEventListener('click', ev => { ev.stopPropagation(); accBalanceLesen(btn.dataset.accBalref) }))
       accEls.table.querySelectorAll('[data-acc-term]').forEach(btn => btn.addEventListener('click', ev => { ev.stopPropagation(); accTerminalOeffnen(btn.dataset.accTerm) }))
@@ -67032,6 +67134,56 @@
     return { 50000: 2000, 100000: 3000, 150000: 4500 }[g] || 4500
   }
   window._tpTopstepMll = tpTopstepMll   // Test-Haken
+  /* RECOVERER (02.11.2026, Finn 04:30 „ja, bauen"; Konstrukt berichte/2026-11-01_apex-wd-konstrukt.md): Apex-Winning-Days nach einem Verlusttag
+   * im Payout-Zyklus — Ziel und Hedge folgen dem schlechtesten Einzeltag, bis Profit ≥ 2 × bester Tag. Gerechnet wird NUR auf Railway (app.py
+   * wd_zyklus_konto), hier liegt der Stand je Konto: aus /admin/wd-plaene (Mac, Markt) bzw. GET /wd-zyklus (PC-Tab, Accounts, Admin-Payout).
+   * Fehlt das Feld (Regel aus, andere Firma, altes Backend), bleibt die Karte leer und alles läuft wie heute. Keine Prüfung, keine Sperre.
+   * window, weil Admin- und Farmer-Block in getrennten Geltungsbereichen liegen. */
+  window._wdZyklus = { map: {}, at: {}, geladen: false, laedt: {} }
+  const WD_ZYKLUS_ALTER_MS = 5 * 60000
+  window._wdKontoZeileTest = (acc, o) => tpVorplanZeile(acc, o)   // Test-Haken (REIN RECHNEND)
+  window._wdZyklusRoh = id => (id != null && window._wdZyklus.map[String(id)]) || null
+  // Regel greift mit eigenen Werten: aktiv UND Ziel da (Schalter „an“ ohne Verlusttag = Normalwerte, Konstrukt Abschnitt 6)
+  // als Funktion, nicht const: renderAccounts kann schon beim Laden des Moduls laufen, bevor diese Zeile dran ist
+  function wdZyklusVon(id){ const z = window._wdZyklusRoh?.(id); return (z && z.aktiv && Number(z.ziel) > 0 && Number(z.hedge_eur) > 0) ? z : null }
+  // Antwort von /admin/wd-plaene: je Konto Feld setzen oder entfernen
+  function wdZyklusMerken(konten){
+    if(!Array.isArray(konten)) return
+    for(const k of konten){ if(!k || k.id == null) continue; if(k.zyklus) window._wdZyklus.map[String(k.id)] = k.zyklus; else delete window._wdZyklus.map[String(k.id)] }
+    window._wdZyklus.geladen = true
+  }
+  /* GET /wd-zyklus, je Art höchstens alle 5 min. o.ids = nur diese Konten (eigener Tab), o.admin = ganze Admin-Sicht, o.neu = Cache übergehen.
+   * → true, wenn sich etwas geändert hat (Aufrufer zeichnet neu). 404 = altes Backend: gilt als geladen, Karte leer. Netzfehler = nicht geladen. */
+  window._wdZyklusLaden = async o => {
+    o = o || {}
+    const st = window._wdZyklus, art = o.admin ? 'admin' : (o.ids || []).join(',')
+    if(!o.admin && !(o.ids || []).length){ st.geladen = true; return false }   // keine Apex-WD-Konten: nichts zu fragen
+    if(!o.neu && st.at[art] && Date.now() - st.at[art] < WD_ZYKLUS_ALTER_MS) return false
+    if(st.laedt[art]) return st.laedt[art]
+    st.laedt[art] = (async () => {
+      try{
+        const { data: { session } } = await supabase.auth.getSession(), tok = session?.access_token
+        if(!tok) return false
+        const q = o.admin ? '?ansicht=admin' : `?ids=${encodeURIComponent((o.ids || []).join(','))}`
+        const r = await fetch(`${WATCHER_HOME}/wd-zyklus${q}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+        if(r.status === 404){ st.geladen = true; st.at[art] = Date.now(); return false }
+        if(!r.ok) return false
+        const d = await r.json().catch(() => null), neu = (d && d.zyklus) || {}
+        const vorher = JSON.stringify(st.map)
+        for(const id of (o.admin ? Object.keys(st.map) : o.ids)) if(!neu[id]) delete st.map[id]
+        Object.assign(st.map, neu)
+        st.geladen = true; st.at[art] = Date.now()
+        return JSON.stringify(st.map) !== vorher
+      }catch(e){ console.warn('[recoverer] laden', (e && e.message) || e); return false }
+      finally{ delete st.laedt[art] }
+    })()
+    return st.laedt[art]
+  }
+  // eigene Apex-Winning-Days-Konten dieses Logins (PC-Tab, Accounts-Liste)
+  function wdZyklusEigene(o){
+    if(!window._wdZyklusLaden) return Promise.resolve(false)
+    return window._wdZyklusLaden(Object.assign({ ids: (accounts || []).filter(a => a && a.type === 'winning_days' && /apex/i.test(String(a.firm || ''))).map(a => String(a.id)) }, o || {}))
+  }
   function tpVorplanZeile(acc, opt){
     const o = opt || {}
     const dd = Number(acc && acc.maxDrawdown) || tpTopstepMll(acc) || 0
@@ -67040,7 +67192,7 @@
     const funded = tpVorplanIstFunded(acc)
     const firma = tpVorplanFirmaKey(acc && acc.firm, acc)
     const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((regeln.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (regeln.ch || TP_VP_VORGABE.ch)))
-    let slaveEur, puffer = null, plus = null, live = null, groesse = 0, basis, hinweis = ''
+    let slaveEur, puffer = null, plus = null, live = null, groesse = 0, basis, hinweis = '', zyklus = null, zyklusTp = null
     if(funded){
       // Kontogröße aus starting_balance, sonst aus dem Namen — accounts.balance (manuelle Balance) wird nicht mehr gelesen (F9, 26.09.2026)
       const startRoh = Number(acc.startingBalance) || 0
@@ -67053,13 +67205,17 @@
       puffer = plus   // alter Feldname, bleibt für Anzeigen, die ihn noch lesen
       // Staffel je Firma (23.09.2026, Finn: „jede Prop soll ihre eigene Tabelle haben"): regeln.staffelFirma[firma], sonst Standard
       slaveEur = tpVorplanStaffel(plus, (regeln.staffelFirma && regeln.staffelFirma[firma]) || regeln.staffel); basis = 'staffel'
+      // RECOVERER (02.11.2026): Hedge statt Staffel, an EINER Stelle für alle Wege (Mac, PC-Tab-Rückfall, Nachziehen, Markt). Hand-TP schlägt das
+      // Ziel, der Regel-Satz bleibt (Konstrukt Zeile 9: 500 $ × 300 € = 150 €)
+      zyklus = wdZyklusVon(acc && acc.id)
+      if(zyklus){ zyklusTp = Number(acc.wdTp) > 0 ? Number(acc.wdTp) : Number(zyklus.ziel); slaveEur = Number(acc.wdTp) > 0 ? zyklusTp * Number(zyklus.satz) / 1000 : Number(zyklus.hedge_eur); basis = 'recoverer' }
     }else{
       if(!(o.gkEur > 0)) return { fehler: 'Gesamtkosten 0 — nichts reingesteckt?' }
       slaveEur = o.gkEur; basis = 'gesamtkosten'
     }
     const slaveRisk = tpVorplanSlaveWaehrung(slaveEur, o.slaveCurrency, o.fx)
     const r = (typeof o.zufall === 'number') ? o.zufall : Math.random()
-    const tp = Math.round(tpVon + r * (tpBis - tpVon))
+    const tp = zyklusTp != null ? zyklusTp : Math.round(tpVon + r * (tpBis - tpVon))
     return { phase: funded ? 'funded' : 'challenge', firma, tpVon, tpBis, tp: tp > 0 ? tp : null, masterRisk: dd, live, groesse, plus, puffer,
       slaveEur: Math.round(slaveEur * 100) / 100, slaveRisk, basis, hinweis }
   }
@@ -67738,9 +67894,11 @@
     const sp = wdTpSpanne(kd.firm, kd), [ka, kb] = wdKtSpanne(tpVorplanFirmaKey(kd.firm, kd), vp)
     const w = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { tp: Number(k.wuerfel.tp), kt: Number(k.wuerfel.kt) } : null
     const tpVor = Number(kd.tp_vorgabe) > 0 ? Number(kd.tp_vorgabe) : null
-    const tp = tpVor != null ? tpVor : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
-    const kt = (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp, kd)
-    const quelle = tpVor != null ? 'vorgabe' : 'wuerfel'
+    // RECOVERER (02.11.2026): Regel-Ziel statt Würfel, Hand-Vorgabe schlägt die Regel. Endet die Regel, liegt der alte Wert außerhalb der Spanne → neu gewürfelt
+    const zy = wdZyklusVon(kd.id), ktFest = (zy && Number(zy.kt) >= 1) ? Number(zy.kt) : null
+    const tp = tpVor != null ? tpVor : zy ? Number(zy.ziel) : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
+    const kt = ktFest != null ? ktFest : (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp, kd)
+    const quelle = tpVor != null ? 'vorgabe' : zy ? 'recoverer' : 'wuerfel'
     if(!w || w.tp !== tp || w.kt !== kt || (k.wuerfel || {}).quelle !== quelle){ k.wuerfel = { tp, kt, quelle, at: new Date().toISOString() }; ge = true }
     let vor = null
     if(z && !z.fehler){
@@ -67762,7 +67920,7 @@
     return ge
   }
   // Konto aus dem Profil (accounts[]) in die Form von _wd.daten.konten — für den Würfel am PC-Tab (wdAbgleich)
-  const wdKdAusAcc = acc => ({ firm: acc.firm, tp_vorgabe: Number(acc.wdTp) > 0 ? Number(acc.wdTp) : null, sl_vorgabe: Number(acc.wdSl) > 0 ? Number(acc.wdSl) : null,
+  const wdKdAusAcc = acc => ({ id: acc.id, firm: acc.firm, tp_vorgabe: Number(acc.wdTp) > 0 ? Number(acc.wdTp) : null, sl_vorgabe: Number(acc.wdSl) > 0 ? Number(acc.wdSl) : null,
                                max_risiko_trade: acc.maxRisikoTrade, max_drawdown: acc.maxDrawdown, max_daily_drawdown: acc.maxDailyDrawdown, max_loss_per_trade: acc.maxLossPerTrade })
   window._wdKontoWuerfel = wdKontoWuerfel   // Prüf-Haken (REIN RECHNEND)
   /* Farmer ohne Duplikum (26.09.2026, Finn: „die Winning Days werden gewürfelt wie im Admin-Terminal … und unter Winning Days mit der
@@ -67866,6 +68024,7 @@
       rail = d; _wd.railFehler = ''
     }catch(e){ _wd.railFehler = String(e.message || e); console.warn('[wd] Railway', e) } }
     await Promise.all([ladeRpc(), ladeRail()])
+    if(rail && Array.isArray(rail.konten)) wdZyklusMerken(rail.konten)   // RECOVERER (02.11.2026)
     // Prüfer M1 (08.10.2026): die RPC liefert die Konten ALLER IDs, Railway einem Verwalter nur seine Gruppe — fremde Konten fielen sonst
     // unten als „archiviert" auf und wdPlaeneAnlegen schriebe das in HT-Tagespläne. Für Eingeschränkte: nur Konten der eigenen Sicht.
     if(konten && await wdNurGruppe()) konten = await wdNurErlaubte(konten)
@@ -68162,7 +68321,7 @@
    *    Staffel über der Kontogröße, TP zufällig aus der Firmen-Spanne — außer das Konto hat eine TP-Vorgabe).
    *    Live-Balance aus dem dup_live-Spiegel (RPC); fehlt sie, kleinste Stufe mit Hinweis, und der PC-Tab
    *    zieht den Slave-Betrag nach, sobald er den Live-Stand hat. ── */
-  function wdAccLike(kd){ return { id: kd.id, name: kd.name, firm: kd.firm, type: kd.type, externalId: kd.ext, maxDrawdown: kd.max_drawdown, startingBalance: kd.starting_balance > 0 ? kd.starting_balance : null } }   // Größe aus starting_balance/Name, nie balance (F9)
+  function wdAccLike(kd){ return { id: kd.id, name: kd.name, firm: kd.firm, type: kd.type, externalId: kd.ext, maxDrawdown: kd.max_drawdown, startingBalance: kd.starting_balance > 0 ? kd.starting_balance : null, wdTp: kd.tp_vorgabe } }   // Größe aus starting_balance/Name, nie balance (F9)
   async function wdPlaeneAnlegen(tag){
     const d = _wd.daten
     if(!d || !d.rail) return { angelegt: 0, fehler: ['Railway nicht erreichbar — Pläne legen dann die PC-Tabs an (müssen offen sein)'] }
@@ -68454,7 +68613,8 @@
             // V2 (24.09.2026 abends): kein Slave mehr — nachgezogen wird nur der Fusion-Gegenhedge-Betrag (hedge_eur),
             // und nur, wenn der Plan schon einen trägt (Schalter AUS → bleibt NULL)
             // seit 26.09.2026 mit der Popup-Rechnung: Multiplikator/hedge_faktor/hedge_eur gemeinsam nachziehen
-            if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs((plan.slaveRisk || 0) - z.slaveEur) > 0.5){
+            // RECOVERER (02.11.2026): ohne geladenen Stand (Railway weg) einen Apex-Plan nicht anfassen — der Hedge fiele sonst auf die Staffel zurück
+            if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs((plan.slaveRisk || 0) - z.slaveEur) > 0.5 && (window._wdZyklus.geladen || !/apex/i.test(String(plan.masterFirm || '')))){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
               const h = { master_firm: plan.masterFirm, master_symbol: plan.masterSymbol, master_contracts: plan.masterContracts, master_tp: plan.masterTp, master_risk: plan.masterRisk }   // Symbol → Punktwert (.1712)
               wdFarmHedge(h, acc ? Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0 : 0, z.slaveEur, true, acc ? [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk] : [z.masterRisk])
@@ -68529,6 +68689,7 @@
     try{
       if(!_wd.geladen || Date.now() - _wd.letzteLadung > 5 * 60000){ if(!(await wdLaden())) return }
       const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD); if(!j) return
+      await wdZyklusEigene()   // RECOVERER (02.11.2026): vor Würfel und Nachziehen, alle 5 min
       if(wdIdsAus().has(String(uid))) return   // diese ID wird nie gefahren (ids_aus)
       // Eintragen IMMER (23.09.2026, Finn: „ich will von allen IDs alle Konten sehen"): jeder offene PC-Tab
       // meldet seine Fundeds für den nächsten Lauf-Tag — eine Zeile ohne Zeiten tut nichts, bis gewürfelt ist.
@@ -69996,7 +70157,16 @@
     })
     p.addEventListener('keydown', ev => { if(ev.target.closest('button')) return; const ka = ev.target.closest('[data-wd-nd-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdNdId) } })
   })()
+  // RECOVERER (02.11.2026): je Konto mit laufender Regel eine Zeile im Farmer-Kopf, nur in der Admin-Sicht — reine Anzeige
+  function wdRecovererZeile(){
+    const box = document.getElementById('wd-rec-zeile'); if(!box) return
+    const de = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE')
+    const z = ((_wd.daten && _wd.daten.konten) || []).filter(k => wdSichtOk(k.user_id)).map(k => [k, window._wdZyklusRoh(k.id)]).filter(([, y]) => y && y.aktiv)
+    box.innerHTML = z.map(([k, y]) => `<div>Recoverer · ${escapeHtml(String(k.person || ''))} ${escapeHtml(String(k.name || '').replace(/\s*→.*$/, ''))} · Zyklus ${y.nr}`
+      + (Number(y.verlust) > 0 ? ` · −${de(y.verlust)} $` : ' · Normalwerte') + (Number(y.tage_geschaetzt) > 0 ? ` · noch ${y.tage_geschaetzt} Tage` : '') + '</div>').join('')
+  }
   function wdRender(){
+    try{ wdRecovererZeile() }catch(e){ console.warn('[wd] Recoverer', e) }
     const rows = wdSichtRows(_wd.rows)   // .1773: Zähler-Zeile und Hinweise nur über die Admin-Sicht
     const erwartet = (e => e && e.filter(x => wdSichtOk(x.user_id)))(wdErwartet()), fehlend = wdFehlend()
     wdStatus()

@@ -57,6 +57,8 @@ def main():
     check(zwei["tage"] == [{"tag": "2026-11-02", "pnl": -600.0}] and zwei["verlust"] == 600.0, "mehrere Trades am Tag werden je Tag summiert")
     check(ns["wd_plan_pnl"]({"tv": {"today_pnl_start": 100, "datum_start": "x"}, "fin": {"today_pnl": 300, "datum": "x"}}) == 200, "ohne master_pl: Endlesung − Start am selben Tag")
     check(ns["wd_plan_pnl"]({"status": "completed"}) is None, "ohne Wert → None, kein 0")
+    check(ns["wd_plan_pnl"]({"master_pl": 356.2, "fin": {"today_pnl": 374.88}}) == 374.88, "Endlesung schlägt master_pl (Konstrukt Abschnitt 2)")
+    check(ns["wd_plan_pnl"]({"master_pl": 356.2, "fin": {}}) == 356.2, "ohne Endlesung: master_pl")
 
     # Beispiel 5 (Mike) inkl. „bis erfüllt“
     z = f(MIKE, REGEL, VORPLAN, mike, PAY)
@@ -107,6 +109,51 @@ def main():
     check(ns["wd_zyklus_firma_key"]({"firm": "Apex", "name": "100k x"}) == "apex100", "100k = apex100")
     h100 = f({"id": "k", "name": "100k x", "firm": "Apex", "wd_farm": True, "live_balance": 100000}, REGEL, VORPLAN, [plan("2026-10-27", 330), plan("2026-10-28", -1000)], PAY)
     check(h100["ziel_normal"] == 330 and h100["ziel"] == 540, f"apex100: Normal 330, −1.000 → 540 (ist {h100['ziel']})")
+
+    # _wd_zyklus_anhaengen gegen eine Fake-DB: Abfragen, Zuordnung je Konto, Fehlerweg
+    src = open(APP, encoding="utf-8").read()
+    i = src.index("def _wd_zyklus_regelzeile(")
+    exec(src[i:src.find("\n\n\n", i)], ns)
+    i = src.index("def _wd_zyklus_anhaengen(")
+    exec(src[i:src.find("\n\n\n", i)], ns)
+    fragen = []
+
+    class Fehler(Exception):
+        pass
+
+    class Req:
+        class exceptions:
+            HTTPError = Fehler
+
+    def sb_all(tab, params):
+        fragen.append((tab, dict(params)))
+        if tab == "pending_payouts":
+            return [{"account_id": "k1", "requested_at": "2026-10-26", "status": "received"}]
+        return [dict(plan("2026-10-27", 374.88), master_account_id="k1"), dict(plan("2026-10-30", -3998.16), master_account_id="k1")]
+    ns.update(requests=Req, _sb_all=sb_all, sb_select=lambda t, p: [{"vorplan": VORPLAN, "zyklus_regel": REGEL}])
+    ns["print"] = lambda *a, **k: None
+    ka = [dict(MIKE), {"id": "k2", "name": "150k x", "firm": "Tradeify", "wd_farm": True}, {"id": "k3", "name": "150k y", "firm": "Apex", "wd_farm": True, "live_balance": 151000}]
+    ns["_wd_zyklus_anhaengen"](ka)
+    check(ka[0]["zyklus"]["aktiv"] and ka[0]["zyklus"]["verlust"] == 3998.16, "Anhängen: Apex-Konto bekommt zyklus aus den Fake-Zeilen")
+    check("zyklus" not in ka[1], "Anhängen: andere Firma bekommt kein Feld (Frontend wie heute)")
+    check(ka[2]["zyklus"]["nr"] == 1 and not ka[2]["zyklus"]["aktiv"], "Anhängen: Konto ohne Anfrage = Zyklus 1")
+    check(any(t == "trade_plans" and p.get("started_at", "").startswith("gte.2026-10-26") for t, p in fragen), "Anhängen: Pläne ab dem ältesten Zyklus-Start")
+
+    def kaputt(tab, params):
+        raise RuntimeError("weg")
+    ns["_sb_all"] = kaputt
+    kb = [dict(MIKE)]
+    ns["_wd_zyklus_anhaengen"](kb)
+    check("zyklus" not in kb[0], "Anhängen: DB-Fehler lässt das Konto ohne Feld (wie heute), kein Absturz")
+
+    def ohne_spalte(t, p):
+        if "zyklus_regel" in p["select"]:
+            e = Fehler("zyklus_regel does not exist")
+            e.response = None
+            raise e
+        return [{"vorplan": VORPLAN}]
+    ns["sb_select"] = ohne_spalte
+    check(ns["_wd_zyklus_regelzeile"]() == (None, VORPLAN), "Regelzeile: Spalte fehlt → (None, vorplan), kein Fehler")
 
     print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
     return 1 if fehler else 0

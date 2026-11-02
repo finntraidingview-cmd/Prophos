@@ -14095,25 +14095,26 @@ def _wd_berlin_tag(iso):
 
 
 def wd_plan_pnl(p):
-    """REIN RECHNEND: Master-P&L eines beendeten Plans in $ oder None — dieselbe Rangfolge wie _wd_heute_zeile (master_pl am Plan,
-    Topstep V2 über wd_tsx_master_pl, sonst final.today_pnl − tv.today_pnl_start am selben Tag, sonst final.today_pnl)."""
+    """REIN RECHNEND: Master-P&L eines beendeten Plans in $ oder None. Rangfolge laut Konstrukt: erst die Endlesung (final.today_pnl, am
+    selben Tag minus tv.today_pnl_start; Topstep V2 über wd_tsx_master_pl), dann master_pl — master_pl kann von der Endlesung abweichen
+    (Analyse 01.11.2026, Plan bei Mike); so geht die Balance-Probe auf den Cent auf."""
     if not isinstance(p, dict):
         return None
-    if _wd_num(p.get("master_pl")) is not None:
-        return _wd_num(p.get("master_pl"))
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = p.get("tv") if isinstance(p.get("tv"), dict) else (base.get("tv") if isinstance(base.get("tv"), dict) else {})
     fin = p.get("fin") if isinstance(p.get("fin"), dict) else (base.get("final") if isinstance(base.get("final"), dict) else {})
     if p.get("route") == "tsv2":
         m = wd_tsx_master_pl(tv, fin)
-        return m["wert"] if m else None
-    ende = _wd_num(fin.get("today_pnl"))
-    if ende is None:
-        return None
-    start = _wd_num(tv.get("today_pnl_start"))
-    if start is not None and fin.get("datum") and fin.get("datum") == tv.get("datum_start"):
-        return round(ende - start, 2)
-    return ende
+        if m:
+            return m["wert"]
+    else:
+        ende = _wd_num(fin.get("today_pnl"))
+        if ende is not None:
+            start = _wd_num(tv.get("today_pnl_start"))
+            if start is not None and fin.get("datum") and fin.get("datum") == tv.get("datum_start"):
+                return round(ende - start, 2)
+            return ende
+    return _wd_num(p.get("master_pl"))
 
 
 def wd_zyklus_stand(plaene, payouts):
@@ -14258,12 +14259,12 @@ def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts):
     elif erfuellt:
         aktiv, code, grund = False, "erfuellt", (f"Zyklus {st['nr']}: erfüllt — Profit {st['profit']:,.0f} $ ≥ 2 × bester Tag {bester:,.0f} $").replace(",", ".")
     else:
-        aktiv, code, grund = True, "profit", (f"Zyklus {st['nr']}: Verlusttag −{st['verlust']:,.0f} $, Profit {st['profit']:,.0f} $ < 2 × bester Tag {bester:,.0f} $").replace(",", ".")
+        aktiv, code, grund = True, "profit", (f"Zyklus {st['nr']}: Verlusttag −{st['verlust']:,.0f} $, Profit {st['profit']:,.0f} $ < 2 × bester Tag {bester:,.0f} $").replace(",", ".").replace("-", "−")
     # Schalter „an“ ohne Verlusttag: V = 0 → Normalwerte (Konstrukt Abschnitt 6), also kein Ziel/Hedge aus der Regel
     w = wd_zyklus_werte(st["verlust"], r, norm["ziel_normal"], norm["satz_normal"]) if (aktiv and st["verlust"] > 0) else None
     n_tage, rest = wd_zyklus_bis(st["profit"], bester, w["ziel"]) if (w and not erfuellt) else (None, None)
     out = dict(st)
-    out.update({"aktiv": aktiv, "grund": grund, "grund_code": code, "erfuellt": erfuellt, "schalter": schalter, "firma_key": key,
+    out.update({"user_id": (konto or {}).get("user_id"), "aktiv": aktiv, "grund": grund, "grund_code": code, "erfuellt": erfuellt, "schalter": schalter, "firma_key": key,
                 "ziel": w["ziel"] if w else None, "satz": w["satz_genau"] if w else None, "hedge_eur": w["hedge_eur"] if w else None,
                 "kt": (_wd_num(r.get("kt")) if (w and r) else None),
                 "ziel_normal": norm["ziel_normal"], "satz_normal": norm["satz_normal"], "staffel_eur": norm["staffel_eur"], "plus": norm["plus"],
