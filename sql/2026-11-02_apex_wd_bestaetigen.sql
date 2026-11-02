@@ -9,7 +9,8 @@
 --
 -- SOLL: derselbe Bestätigungs-Weg wie bei den Hedge-Trades (sql/2026-10-29_hedge_freigabe.sql): trade_plans.hedge_freigabe_at. Bestätigen = POST
 -- /admin/auto-plan/hedge-freigabe (Admin, Service-Key), Knöpfe „Bestätigen" je Trade + „✓ alle" im WD-Block. Andere Firmen unverändert.
--- Der PC-Tab versucht einen unbestätigten Apex-WD gar nicht erst (suStartetNichtWeil). Dieser Riegel ist nur das NETZ für alte Tabs und unlesbare Regeln.
+-- Der PC-Tab versucht einen unbestätigten Apex-WD gar nicht erst (suStartetNichtWeil), auch Hand- und Fern-Start sind im Tab gesperrt (ohne Claim, darum nicht hier).
+-- Dieser Riegel ist nur das NETZ für alte Tabs und unlesbare Regeln.
 -- ANDERS als bei den Hedge-Arten rückt start_um NICHT weiter: ein unbestätigter WD läuft ab und wird wie jeder nie gestartete Farmer-Plan weggeräumt, sonst
 -- rollte er ohne Ende, das Konto bliebe belegt, und ein Bestätigen Tage später startete ihn sofort (Review 02.11.2026). Verbrauchs-Claims (verpasst, Ziel erreicht,
 -- Manuelle Arbeit) starten nichts und gehen im WD-Fall durch. Der Weg der Hedge-Arten bleibt Zeichen für Zeichen, wie er war.
@@ -44,6 +45,16 @@ language sql stable security definer set search_path = public as $$
           and length(regexp_replace(k.key, '[0-9]+$', '')) > 0
           and lower(coalesce(p_master_firm, '')) like '%' || lower(regexp_replace(k.key, '[0-9]+$', '')) || '%');
 $$;
+
+-- Für den PC-Tab (Prüfer S12, 02.11.2026): ist die EIGENE ID in einer Gruppe mit Verwalter? Dieselbe Menge wie oben, fragt nur nach auth.uid(), verrät keine fremden IDs.
+create or replace function public.wd_bestaetigen_ich_ausgenommen()
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.id_gruppen g where g.verwalter_user_id is not null and (g.verwalter_user_id = auth.uid()
+                 or exists (select 1 from public.id_gruppe_mitglied m where m.gruppe_id = g.id and m.user_id = auth.uid())));
+$$;
+revoke all on function public.wd_bestaetigen_ich_ausgenommen() from public;
+grant execute on function public.wd_bestaetigen_ich_ausgenommen() to authenticated;
 
 create or replace function public.trade_plans_a0_hedge_freigabe()
 returns trigger

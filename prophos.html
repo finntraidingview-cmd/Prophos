@@ -25227,6 +25227,7 @@
       const { data, error } = await supabase.from('wd_farmer_regeln').select('*').eq('id', 1).maybeSingle()
       if(error) throw error
       _wdRegeln = { at: Date.now(), row: data || null }
+      tpBestaetigenAusnahmeHolen().catch(() => {})   // APEX-WD BESTÄTIGEN: Ausnahme Verwalter-Gruppe, läuft nebenher
       return _wdRegeln.row
     })()
     try{ return await _wdRegelnHolt }finally{ _wdRegelnHolt = null }
@@ -54165,6 +54166,7 @@
       if(fern) fern.melde({ ok:false, msg: t }); else toast(t, 'end')
       return
     }
+    if(plan && await tpWdBestaetigungFehlt(plan)){ if(fern) fern.melde({ ok:false, msg: TP_WD_WARTET_TEXT }); else toast(TP_WD_WARTET_TEXT, 'end'); return }   // APEX-WD BESTÄTIGEN (02.11.2026)
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
       if(fern) fern.melde({ ok:false, msg: _tpOrbitLaeuft ? 'Am PC läuft schon ein Orbit-Start — nichts gesendet.' : 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' })
       return
@@ -54949,6 +54951,7 @@
     if(!plan || plan.status !== 'planned') return
     // Funded-Vorschlag (27.10.2026, H1): von Hand nie an „Bestätigen" vorbei — bestätigt wird nur unter Admin → Funded-Planer
     if(plan.fundedVorschlag){ if(typeof atToast === 'function') atToast('Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.', 'end'); return }
+    if(await tpWdBestaetigungFehlt(plan)){ if(typeof atToast === 'function') atToast(TP_WD_WARTET_TEXT, 'end'); return }   // APEX-WD BESTÄTIGEN (02.11.2026)
     { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
     // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — „Trotzdem starten" nur beim Karten-Klick
     // (opts.karte, 26.10.2026); Startzeit (tpStartUmTick), Neu starten und Radar rufen ohne karte und bleiben wie bisher
@@ -57636,7 +57639,26 @@
     return (Array.isArray(l) ? l : []).map(k => String(k || '').trim().toLowerCase().replace(/[0-9]+$/, '')).filter(Boolean) }
   const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || !tpIstFarmerPlan(p)) return false
     const s = p.mt5Baseline && p.mt5Baseline.start_sperre, firma = String(p.masterFirm || '').toLowerCase()
-    return (!!s && s.art === 'hedge_freigabe' && s.wo === 'wd') || tpBestaetigenFirmen().some(k => firma.includes(k)) }
+    return (!!s && s.art === 'hedge_freigabe' && s.wo === 'wd') || (!tpBestaetigenAusgenommen() && tpBestaetigenFirmen().some(k => firma.includes(k))) }
+  /* Verwalter-Gruppen sind ausgenommen (Prüfer S12, 02.11.2026): sie stehen nie in Finns Liste, ein Apex-WD der Gruppe wäre sonst nicht bestätigbar. Dieselbe Regel wie der DB-Riegel, RPC
+   * wd_bestaetigen_ich_ausgenommen() fragt nur nach der eigenen ID (10 min gemerkt, nur bei gesetzter Firmenliste). Unbekannt = nicht ausgenommen: lieber warten als ohne Bestätigung starten. */
+  var _wdBestAus = null
+  const tpUidSicher = () => { try{ return currentUserId || null }catch(_){ return null } }
+  const tpBestaetigenAusgenommen = () => !!_wdBestAus && _wdBestAus.uid === tpUidSicher() && _wdBestAus.aus === true
+  async function tpBestaetigenAusnahmeHolen(){
+    const uid = tpUidSicher(); if(!uid || !tpBestaetigenFirmen().length) return
+    if(_wdBestAus && _wdBestAus.uid === uid && Date.now() - _wdBestAus.at < 600000) return
+    try{ const { data, error } = await supabase.rpc('wd_bestaetigen_ich_ausgenommen'); if(!error) _wdBestAus = { uid, aus: data === true, at: Date.now() } }catch(_){}
+  }
+  /* HAND- UND FERN-START (Prüfer S12, 02.11.2026): Karte, Mac/Handy und Neu starten laufen ohne Claim, das DB-Netz greift dort nicht. Finn: „starten erst nach Klick" — also auch von Hand nicht
+   * vorbei. Pläne kommen ohne Realtime: steht der Plan hier noch als wartend, einmal frisch lesen, sonst bliebe er nach Finns „Bestätigen" bis zum nächsten Abgleich (≤ 2 min) gesperrt. Nicht lesbar = gesperrt. */
+  const TP_WD_WARTET_TEXT = 'Apex-Winning-Day — erst unter Funded-Planer → Winning Days bestätigen, dann startet er zur Startzeit.'
+  async function tpWdBestaetigungFehlt(plan){
+    if(!tpWdWartetAufBestaetigung(plan)) return false
+    try{ const { data, error } = await supabase.from('trade_plans').select('hedge_freigabe_at').eq('id', plan.id).maybeSingle()
+      if(!error && data && data.hedge_freigabe_at){ plan.hedgeFreigabeAt = data.hedge_freigabe_at; return false } }catch(_){}
+    return true
+  }
 
   /* NÄCHSTER PULS-EINSATZ (29.09.2026, Finn: „oben rechts unter Jacob: Nächster Puls-Impuls um die Uhrzeit, in so und so viel
    * Minuten — das gibt Puls den Spielraum, den er braucht"). Pille #tb-puls in der Kopfzeile, je ID aus den eigenen Plänen:
