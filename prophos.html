@@ -14714,7 +14714,7 @@
           <div class="field" style="grid-column:1/-1">
             <label>Payout anfragbar ab</label>
             <input class="input mono" id="ac-payout-ready" type="date" autocomplete="off">
-            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Beim Anfragen wird das Datum geleert — den nächsten Termin danach hier neu setzen.</div>
+            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Leer lassen: bei einem neuen Funded-CFD-Konto setzt Prophos Anlegetag + 14 Tage (FundedNext + 21). Beim Payout-Anfragen schlägt Prophos Anfrage-Datum + 14 Tage vor.</div>
           </div>
           <!-- Waiting for Payout (29.09.2026, Finn: „der Account ist schon im Plus, wir warten nur auf den Payout") — nur bei
                Funded CFD sichtbar (toggleAcBloecke), Spalte waiting_payout_since; beim Payout-Anfragen leert wartetPayoutClear(). -->
@@ -18806,12 +18806,26 @@
       $('adm-anfrage-bei').value = ''
       $('adm-anfrage-bei-list').innerHTML = [...new Set((admData?.pending_payouts || []).map(t => String(t.liegt_bei || '').trim()).filter(Boolean))].map(v => `<option value="${escapeHtml(v)}"></option>`).join('')
       $('adm-anfrage-am').value = _deTodayStr()
-      $('adm-anfrage-next').value = ''
+      admAnfrageNextVorschlag(true)
       const msg = $('admAnfrageMsg'); msg.textContent = ''; msg.className = 'modal-msg'
       $('admAnfrageSave').disabled = false
       $('admAnfrageModal').classList.add('open')
       $('adm-anfrage-amt').focus()
     }
+    /* NÄCHSTER PAYOUT VORBELEGT (Finn 03.11.2026 ~01:15 über den Eingang: „Ein Payout wird angefragt … ab dem Anfrage-Datum 14 Tage"): dieselbe Regel wie
+     * Finanzen → Payout (finNextPayoutVorschlag) — CFD (Funded CFD oder CFD-Firma) = Anfrage-Datum + 14, ein schon späteres Datum am Konto bleibt. Futures
+     * bleiben leer wie bisher (zahlen über Winning Days, Termin dort ohne Wirkung; Rückfrage an Finn offen). Ändert Finn „Angefragt am“, zieht der Vorschlag mit,
+     * solange das Feld unberührt ist. */
+    function admAnfrageNextVorschlag(neu){
+      const r = _admAnfrage, el = $('adm-anfrage-next'), ab = $('adm-anfrage-am').value || ''
+      if(!el) return
+      if(!neu && el.value !== (el.dataset.vorschlag || '')) return
+      const acc = r ? { type: r.type, firm: r.account_firm, payoutReadyAt: r.ready_at || null } : null
+      let v = ''
+      try{ v = acc && typeof window._finKontoIstCfd === 'function' && window._finKontoIstCfd(acc) && typeof window._finNextPayoutVorschlag === 'function' ? window._finNextPayoutVorschlag(acc, ab) : '' }catch(_){ v = '' }
+      el.value = v; el.dataset.vorschlag = v
+    }
+    $('adm-anfrage-am')?.addEventListener('change', () => admAnfrageNextVorschlag(false))
     function admAnfrageZu(){ _admAnfrage = null; $('admAnfrageModal').classList.remove('open') }
     $('admAnfrageClose')?.addEventListener('click', admAnfrageZu)
     $('admAnfrageCancel')?.addEventListener('click', admAnfrageZu)
@@ -54548,7 +54562,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2002'
+  const OS_TAB_BUILD = '2026-09-22.2003'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -75081,8 +75095,11 @@
   // CFD (29.10.2026, Finn: „wenn ich bei CFD ein Payout anfrage, soll das nächste Payout-Datum automatisch heute + 14 Tage gesetzt
   // werden"): der Zyklus startet mit der Anfrage neu → heute + 14, ein schon SPÄTERES Datum am Konto bleibt (nie vorziehen).
   // Ein früheres künftiges Datum gehört zum alten Zyklus. Futures unverändert.
-  function finNextPayoutVorschlag(acc){
-    const heute = (typeof _deTodayStr === 'function') ? _deTodayStr() : new Date().toISOString().slice(0, 10)
+  // AB DEM ANFRAGE-DATUM (Finn 03.11.2026 ~01:15 über den Eingang: „bei (b) ab dem Anfrage-Datum"): abTag = Datum im Fenster (Anfrage- bzw.
+  // Buchungstag), sonst heute. Nach einer Anfrage ist auch bei FundedNext schon der zweite Zyklus: 14 Tage (die 21 gelten nur ab dem Anlegen,
+  // sql/2026-11-03_payout_termin_beim_anlegen.sql). Ändert Finn das Datum oben, zieht der Vorschlag mit, solange das Feld unberührt ist.
+  function finNextPayoutVorschlag(acc, abTag){
+    const heute = /^\d{4}-\d{2}-\d{2}$/.test(String(abTag || '')) ? String(abTag) : (typeof _deTodayStr === 'function') ? _deTodayStr() : new Date().toISOString().slice(0, 10)
     const am = acc && acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0, 10) : ''
     const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 14)
     const plus14 = d.toISOString().slice(0, 10)
@@ -75106,9 +75123,16 @@
     const accId = document.getElementById('fin-account')?.value || '', nextRow = document.getElementById('fin-next-payout-row'), nextEl = document.getElementById('fin-next-payout')
     if(nextRow) nextRow.style.display = (isPayout && accId) ? '' : 'none'
     const accHint = document.getElementById('fin-account-hint'); if(accHint) accHint.style.display = (isPayout && !accId) ? '' : 'none'
-    if(nextEl && isPayout && accId && nextEl.dataset.fuer !== accId){ nextEl.value = finNextPayoutVorschlag((accounts || []).find(a => String(a.id) === accId)); nextEl.dataset.fuer = accId }
+    const abTag = document.getElementById('fin-date')?.value || ''
+    // neu vorbelegen bei anderem Account, oder bei anderem Datum, solange das Feld noch den letzten Vorschlag trägt (Hand-Datum bleibt)
+    if(nextEl && isPayout && accId && (nextEl.dataset.fuer !== accId || (nextEl.dataset.ab !== abTag && nextEl.value === (nextEl.dataset.vorschlag || '')))){
+      nextEl.value = finNextPayoutVorschlag((accounts || []).find(a => String(a.id) === accId), abTag)
+      nextEl.dataset.fuer = accId; nextEl.dataset.ab = abTag; nextEl.dataset.vorschlag = nextEl.value
+    }
     if(nextEl && !accId) nextEl.dataset.fuer = ''
   }
+  window._finKontoIstCfd = finKontoIstCfd
+  window._finNextPayoutVorschlag = finNextPayoutVorschlag   // Admin → Payouts „Anfragen" (admAnfrageOeffnen) + Test-Haken
   // Monatlich wiederholen (14.10.2026): nur ohne Payout sichtbar, Hinweis nennt den Zahltag aus dem Datum
   function updateFinWiederholen(){
     const row = document.getElementById('fin-wiederholen-row'), hint = document.getElementById('fin-wiederholen-hint')
@@ -75125,7 +75149,7 @@
     return `${ziel.getFullYear()}-${String(ziel.getMonth() + 1).padStart(2, '0')}-${String(ziel.getDate()).padStart(2, '0')}`
   }
   document.getElementById('fin-kind')?.addEventListener('change', () => { updateFinTitle(); updateFinSignHint(); updateFinPayoutFields(); updateFinWiederholen() })
-  document.getElementById('fin-date')?.addEventListener('change', updateFinWiederholen)
+  document.getElementById('fin-date')?.addEventListener('change', () => { updateFinWiederholen(); updateFinPayoutFields() })   // Vorschlag ab dem Anfrage-Datum (03.11.2026)
   document.getElementById('fin-po-status')?.addEventListener('change', updateFinPayoutFields)
   document.getElementById('fin-account')?.addEventListener('change', updateFinPayoutFields)
   // Payout-Termin am Konto nach einer Payout-Buchung/-Anfrage (08.10.2026): mit Datum aus „Nächster Payout ab" → setzen (EIN Update),
