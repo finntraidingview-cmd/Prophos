@@ -30068,7 +30068,8 @@
       // Fusion von Hand): der Auftrag kam gar nicht an — dann jede Sekunde neu. Langes Backoff nur bei echten Ablehnungen des Brokers.
       const n = Math.max(1, Number(h.close_versuche) || 1)
       // retry_ok des Copiers (Finn 02.11.2026, Simon 88b28130: MT5 lehnte den Close ab, 10 s Pause, Finn schloss von Hand): die ersten 3 Versuche nach 1 s
-      const warte = (h.close_fehler_art === 'verbindung' || (h.close_retry_ok === true && n <= 3)) ? 1000 : Math.min(60000, 10000 * Math.pow(2, n - 1))
+      // seit 02.11.2026 abends (Finn: „durchgedrückt werden, jede Millisekunde neu"): retry_ok → nach 200 ms neu, solange der Hedge offen ist; der Copier drückt selbst schon 5 s
+      const warte = h.close_retry_ok === true ? 200 : h.close_fehler_art === 'verbindung' ? 1000 : Math.min(60000, 10000 * Math.pow(2, n - 1))
       if(Date.now() - (Date.parse(h.close_fehler_at) || 0) < warte) return { ok: false, msg: `Backoff ${Math.round(warte / 1000)} s nach Close-Fehler` }
     }
     _hedgeBusy.add(pid)
@@ -30109,7 +30110,7 @@
       const verbindung = !res || ['verbindung', 'copier_alt', 'copier_stumm', 'backend_neustart'].includes(String(res.code || '')) || /nicht erreichbar|ConnectionError|Failed to fetch|NetworkError|timeout|abort/i.test(msg)
       await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1,
         close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt', close_zeiten: closeZeiten, close_retry_ok: !!(res && res.retry_ok),
-        close_fehler_letzter: { msg: msg.slice(0, 200), at: new Date().toISOString(), code: String((res && res.code) || ''), grund } })   // bleibt nach dem Erfolg stehen (close_fehler wird dann genullt)
+        close_fehler_letzter: { msg: msg.slice(0, 200), at: new Date().toISOString(), code: String((res && res.code) || ''), grund, versuche: (res && Array.isArray(res.versuche)) ? res.versuche.slice(-20) : null } })   // bleibt nach dem Erfolg stehen (close_fehler wird dann genullt)
       // bei Verbindungsfehlern nicht jede Sekunde einen Hinweis — nur beim ersten Versuch
       if(typeof atToast === 'function' && !(verbindung && (Number(h.close_versuche) || 0) > 0)) atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg + (verbindung ? ' — neuer Versuch jede Sekunde' : ''), 'end')
       return { ok: false, msg }

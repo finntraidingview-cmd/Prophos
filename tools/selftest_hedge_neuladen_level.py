@@ -89,8 +89,8 @@ check("jetzt, readerKontoPasst(st.konto, kontoPlan, st))" in HTML and "const alt
       and "_hedgeSchnellLeer.delete(pid); hedgeSichtVergessen(pid)" in HTML, "Schnell-Wächter: Sicht laden, merken, beim Kontowechsel löschen")
 check("kurzLevel: [h.tp_level_nq, h.sl_level_nq]" in HTML and "!kurzEndeSperrt(kurzEndeBeweis(p, kontoPlan, st, wz))" in HTML and "!hedgeToastNachbar(tp, p, wz)" in HTML,
       "gekürzter Toast nur ohne Nachbar-Plan und ohne Bündel-Sperre, hinter dem Schalter hedgeToastAn")
-check("(h.close_retry_ok === true && n <= 3)) ? 1000" in HTML and "close_retry_ok: !!(res && res.retry_ok)" in HTML and "close_fehler_letzter: {" in HTML,
-      "Close: retry_ok → 1 s für 3 Versuche, letzter Fehlertext in eigenem Feld")
+check("h.close_retry_ok === true ? 200 :" in HTML and "close_retry_ok: !!(res && res.retry_ok)" in HTML and "close_fehler_letzter: {" in HTML,
+      "Close: retry_ok → 200 ms, solange offen; letzter Fehlertext samt Versuchen in eigenem Feld")
 
 print("\nALLES GRÜN" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)

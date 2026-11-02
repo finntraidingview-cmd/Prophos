@@ -886,6 +886,32 @@ def solo_position_abwarten(positions_get, ticket, plan_id, symbol, *, schlafe, j
         schlafe(schritt_s)
 
 
+# CLOSE DURCHDRÜCKEN (Finn 02.11.2026: „Eine Close-Order darf nicht abgelehnt werden … dann muss sie durchgedrückt werden, jede Millisekunde neu“;
+# Simon pc-pmqd8g Plan 88b28130: MT5 lehnte den Close ab, der Tab wartete 10 s, Finn schloss von Hand). Nicht endgültige Ablehnungen (order_send None,
+# Requote, Preis geändert, kein Preis, Timeout, Kontext belegt …) sofort neu: frischer Tick, große deviation, wechselnde Filling-Modi, alle SOLO_CLOSE_TAKT_S
+# bis die Position zu ist oder SOLO_CLOSE_DRUECKEN_S vorbei sind. Endgültig (sinnlos zu wiederholen): ungültiger Auftrag/Menge, Handel aus, Markt zu, Algo-Handel aus.
+SOLO_CLOSE_DRUECKEN_S = 5.0
+SOLO_CLOSE_TAKT_S = 0.1
+SOLO_CLOSE_DEVIATION = 200          # Punkte Slippage, die der Close hinnimmt (Market-Close: zu ist wichtiger als der Preis)
+SOLO_CLOSE_ENDGUELTIG = {10013, 10014, 10017, 10018, 10027}
+
+
+def solo_close_durchdruecken(versuch, fehler, uhr, schlafe, max_s=SOLO_CLOSE_DRUECKEN_S, takt_s=SOLO_CLOSE_TAKT_S):
+    """TESTBAR: versuch(i) → Order-Result (zu), None (abgelehnt) oder "zu" (Position schon weg); fehler() → (retcode|None, Text).
+    -> (Result | "zu" | None, versuche[{n, ms, retcode, fehler}])"""
+    t0, versuche, i = uhr(), [], 0
+    while True:
+        r = versuch(i)
+        if r == "zu" or r:
+            return r, versuche
+        rc, txt = fehler()
+        versuche.append({"n": i + 1, "ms": int(round((uhr() - t0) * 1000)), "retcode": rc, "fehler": str(txt or "")[:120]})
+        i += 1
+        if rc in SOLO_CLOSE_ENDGUELTIG or uhr() - t0 >= max_s:
+            return None, versuche
+        schlafe(takt_s)
+
+
 def solo_sltp_setzen(senden, letzter_fehler, ticket, symbol, sl, tp, *, aktion, magic, text, schlafe, jetzt,
                      lokal_ms=SOLO_SLTP_LOKAL_MS, wieder_s=SOLO_SLTP_WIEDER_S):
     """TESTBAR: EIN SLTP-Request mit höchstens EINER Wiederholung nach wieder_s, wenn die Ablehnung lokal war (10013 oder
@@ -1916,6 +1942,7 @@ def main():
         # spiegelt Trade-Retcodes nicht zuverlaessig (oft "(1, 'Success')") — der Solo-Hedge
         # schreibt sl_fehler/tp_fehler deshalb aus diesem Merker (retcode + Broker-Kommentar).
         m.letzter_fehler = None
+        m.letzter_retcode = None   # 02.11.2026: Close-Schleife unterscheidet endgültige von wiederholbaren Ablehnungen
         r = mt5.order_send(req)
         if r is None:
             m.letzter_fehler = f"order_send None ({mt5.last_error()})"
@@ -1927,6 +1954,7 @@ def main():
                 hinweis = ("Algo-Handel im HEDGE-Terminal ist AUS — oben den "
                            "'Algo-Handel'-Knopf gruen schalten, sonst kann der Copier nicht hedgen!")
             m.letzter_fehler = f"retcode {r.retcode} {hinweis}".strip()
+            m.letzter_retcode = int(r.retcode)
             log(f"[{m.file}] ❌ abgelehnt {m.letzter_fehler} — {what}")
             return None
         log(f"[{m.file}] ✅ {what} · deal={r.deal}")
@@ -2374,18 +2402,34 @@ def main():
             return {"ok": False, "code": "fremd", "retry_ok": False,
                     "msg": f"Ticket {ticket} traegt magic {getattr(p, 'magic', 0)} — kein Solo-Hedge, wird NICHT angefasst"}
         sym = str(p.symbol)
-        tick = mt5.symbol_info_tick(sym)
         lang = int(p.type) == 0
         ctype = mt5.ORDER_TYPE_SELL if lang else mt5.ORDER_TYPE_BUY
-        price = (tick.bid if lang else tick.ask) if tick else 0.0
-        req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": float(p.volume),
-               "type": ctype, "position": ticket, "price": price,
-               "deviation": m.deviation, "magic": SOLO_MAGIC, "comment": SOLO_KOMMENTAR + "c",
-               "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_for(m, sym)}
-        r = send(m, req, f"SOLO CLOSE {float(p.volume)} {sym} (Ticket {ticket}, Grund {a.get('grund') or '?'})")
+        fillings = []
+        for f in (filling_for(m, sym), mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
+            if f not in fillings:
+                fillings.append(f)
+
+        def versuch(i):
+            if i and not mt5.positions_get(ticket=ticket):
+                return "zu"                                   # zwischen zwei Versuchen zu (Level, Hand) → wie oben „schon zu"
+            tick = mt5.symbol_info_tick(sym)                  # frischer Tick je Versuch
+            price = (tick.bid if lang else tick.ask) if tick else 0.0
+            req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": float(p.volume),
+                   "type": ctype, "position": ticket, "price": price,
+                   "deviation": max(int(getattr(m, "deviation", 0) or 0), SOLO_CLOSE_DEVIATION), "magic": SOLO_MAGIC, "comment": SOLO_KOMMENTAR + "c",
+                   "type_time": mt5.ORDER_TIME_GTC, "type_filling": fillings[i % len(fillings)]}
+            return send(m, req, f"SOLO CLOSE {float(p.volume)} {sym} (Ticket {ticket}, Grund {a.get('grund') or '?'}, Versuch {i + 1})")
+
+        r, versuche = solo_close_durchdruecken(versuch, lambda: (getattr(m, "letzter_retcode", None), getattr(m, "letzter_fehler", None) or mt5.last_error()),
+                                               time.time, time.sleep)
+        if r == "zu":
+            pl, grund, exit_preis = solo_pl_aus_history(ticket)
+            return {"ok": True, "schon_zu": True, "ticket": ticket, "pl": pl, "grund": grund, "fill_close": exit_preis, "versuche": versuche,
+                    "msg": "Position war schon zu" + (f" ({grund})" if grund else "") + (f" · P&L {pl}" if pl is not None else " · P&L noch nicht in der Historie")}
         if r is None:
-            return {"ok": False, "code": "abgelehnt", "retry_ok": True, "ticket": ticket,
-                    "msg": f"Close abgelehnt ({getattr(m, 'letzter_fehler', None) or mt5.last_error()})"}
+            letzt = versuche[-1] if versuche else {}
+            return {"ok": False, "code": "abgelehnt", "retry_ok": letzt.get("retcode") not in SOLO_CLOSE_ENDGUELTIG, "ticket": ticket, "versuche": versuche[-20:],
+                    "msg": f"Close abgelehnt nach {len(versuche)} Versuchen in {letzt.get('ms', 0)} ms ({letzt.get('fehler') or mt5.last_error()})"}
         pl, grund, exit_preis = solo_pl_aus_history(ticket)
         return {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0),
                 "fill_close": float(getattr(r, "price", 0.0) or 0.0) or exit_preis, "lots": float(p.volume), "pl": pl,
