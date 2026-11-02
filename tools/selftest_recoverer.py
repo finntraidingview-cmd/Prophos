@@ -57,7 +57,8 @@ def main():
     check(zwei["tage"] == [{"tag": "2026-11-02", "pnl": -600.0}] and zwei["verlust"] == 600.0, "mehrere Trades am Tag werden je Tag summiert")
     check(ns["wd_plan_pnl"]({"tv": {"today_pnl_start": 100, "datum_start": "x"}, "fin": {"today_pnl": 300, "datum": "x"}}) == 200, "ohne master_pl: Endlesung − Start am selben Tag")
     check(ns["wd_plan_pnl"]({"status": "completed"}) is None, "ohne Wert → None, kein 0")
-    check(ns["wd_plan_pnl"]({"master_pl": 356.2, "fin": {"today_pnl": 374.88}}) == 374.88, "Endlesung schlägt master_pl (Konstrukt Abschnitt 2)")
+    check(ns["wd_plan_pnl"]({"master_pl": 356.2, "tv": {"today_pnl_start": 0, "datum_start": "x"}, "fin": {"today_pnl": 374.88, "datum": "x"}}) == 374.88, "Endlesung am selben Tag schlägt master_pl (Konstrukt Abschnitt 2)")
+    check(ns["wd_plan_pnl"]({"master_pl": -3998.16, "tv": {"today_pnl_start": 0, "datum_start": "x"}, "fin": {"today_pnl": 0, "datum": "y"}}) == -3998.16, "Endlesung vom anderen Tag: master_pl, Verlusttag bleibt")
     check(ns["wd_plan_pnl"]({"master_pl": 356.2, "fin": {}}) == 356.2, "ohne Endlesung: master_pl")
 
     # Beispiel 5 (Mike) inkl. „bis erfüllt“
@@ -66,6 +67,13 @@ def main():
     check(abs(z["hedge_eur"] - 450) < 1, f"Mike → Hedge ~450 € (ist {z['hedge_eur']})")
     check(z["tage_geschaetzt"] == 4, f"Mike → 4 Tage bis erfüllt (ist {z['tage_geschaetzt']})")
     check(z["rest_bis_erfuellt"] == 5996, f"Mike → noch 5.996 $ (ist {z['rest_bis_erfuellt']})")
+
+    # Nur Verlusttage: erster Trade nach dem Payout (Gegenprüfung 02.11.2026)
+    nur = f(MIKE, REGEL, VORPLAN, [plan("2026-10-27", -3998.16)], PAY)
+    check(nur["aktiv"] and nur["ziel"] == 1499 and nur["tage_geschaetzt"] == 5, f"nur −3.998 im Zyklus: Regel an, nicht „erfüllt“ (ist {nur['grund_code']}, {nur['tage_geschaetzt']} Tage)")
+    nur2 = f(MIKE, REGEL, VORPLAN, [plan("2026-10-27", -1000), plan("2026-10-28", -1000)], PAY)
+    check(nur2["aktiv"] and not nur2["erfuellt"], "−1.000, −1.000: Regel an")
+    check("−" in f(MIKE, REGEL, VORPLAN, mike, PAY)["grund"] and "," not in f(MIKE, REGEL, VORPLAN, mike, PAY)["grund"].split(":")[1].replace(", Profit", ""), "Grundtext: deutsche Zahlen, echtes Minus")
 
     # Finns Satz: 4 × 400, dann −400 → aus
     s = f(MIKE, REGEL, VORPLAN, [plan("2026-11-0%d" % i, 400) for i in (2, 3, 4, 5)] + [plan("2026-11-06", -400)], PAY)
@@ -107,6 +115,7 @@ def main():
     check(not ohne["aktiv"] and ohne["grund_code"] == "keine_regel" and ohne["ziel"] is None, "Spalte zyklus_regel fehlt (SQL nicht drin) → aus")
     check(ns["wd_zyklus_firma_key"]({"firm": "Tradeify", "name": "150k"}) is None, "andere Firma: kein Schlüssel, bekommt kein Feld")
     check(ns["wd_zyklus_firma_key"]({"firm": "Apex", "name": "100k x"}) == "apex100", "100k = apex100")
+    check(ns["wd_zyklus_firma_key"]({"firm": "Apex", "name": "50k x"}) == "apex", "50k = apex, wie tpVpApex100")
     h100 = f({"id": "k", "name": "100k x", "firm": "Apex", "wd_farm": True, "live_balance": 100000}, REGEL, VORPLAN, [plan("2026-10-27", 330), plan("2026-10-28", -1000)], PAY)
     check(h100["ziel_normal"] == 330 and h100["ziel"] == 540, f"apex100: Normal 330, −1.000 → 540 (ist {h100['ziel']})")
 
@@ -128,7 +137,9 @@ def main():
     def sb_all(tab, params):
         fragen.append((tab, dict(params)))
         if tab == "pending_payouts":
-            return [{"account_id": "k1", "requested_at": "2026-10-26", "status": "received"}]
+            return [{"account_id": "k1", "requested_at": "2026-10-26", "status": "received", "received_tx_id": "tx1"}]
+        if tab == "transactions":
+            return [{"id": "tx1", "account_id": "k1", "occurred_at": "2026-10-30T10:00:00+00:00"}, {"id": "tx2", "account_id": "k4", "occurred_at": "2026-10-20T10:00:00+00:00"}]
         return [dict(plan("2026-10-27", 374.88), master_account_id="k1"), dict(plan("2026-10-30", -3998.16), master_account_id="k1")]
     ns.update(requests=Req, _sb_all=sb_all, sb_select=lambda t, p: [{"vorplan": VORPLAN, "zyklus_regel": REGEL}])
     ns["print"] = lambda *a, **k: None
@@ -137,14 +148,17 @@ def main():
     check(ka[0]["zyklus"]["aktiv"] and ka[0]["zyklus"]["verlust"] == 3998.16, "Anhängen: Apex-Konto bekommt zyklus aus den Fake-Zeilen")
     check("zyklus" not in ka[1], "Anhängen: andere Firma bekommt kein Feld (Frontend wie heute)")
     check(ka[2]["zyklus"]["nr"] == 1 and not ka[2]["zyklus"]["aktiv"], "Anhängen: Konto ohne Anfrage = Zyklus 1")
-    check(any(t == "trade_plans" and p.get("started_at", "").startswith("gte.2026-10-26") for t, p in fragen), "Anhängen: Pläne ab dem ältesten Zyklus-Start")
+    check(ka[0]["zyklus"]["nr"] == 2 and ka[0]["zyklus"]["start"] == "2026-10-26", "Anhängen: verknüpfte Buchung zählt nicht doppelt, Start bleibt die Anfrage")
+    kc = [{"id": "k4", "name": "150k z", "firm": "Apex", "wd_farm": True}]
+    ns["_wd_zyklus_anhaengen"](kc)
+    check(kc[0]["zyklus"]["nr"] == 2 and kc[0]["zyklus"]["start"] == "2026-10-20", "Anhängen: direkt gebuchter Payout ohne Anfrage zählt wie payouts_n")
+    check(any(t == "trade_plans" and p.get("started_at", "").startswith("gte.2026-10-20") for t, p in fragen), "Anhängen: Pläne ab dem ältesten Zyklus-Start")
 
     def kaputt(tab, params):
         raise RuntimeError("weg")
     ns["_sb_all"] = kaputt
     kb = [dict(MIKE)]
-    ns["_wd_zyklus_anhaengen"](kb)
-    check("zyklus" not in kb[0], "Anhängen: DB-Fehler lässt das Konto ohne Feld (wie heute), kein Absturz")
+    check(ns["_wd_zyklus_anhaengen"](kb) is False and "zyklus" not in kb[0], "Anhängen: DB-Fehler → False, Konto ohne Feld, kein Absturz")
 
     def ohne_spalte(t, p):
         if "zyklus_regel" in p["select"]:

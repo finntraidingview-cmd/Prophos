@@ -17,11 +17,11 @@
 --      kt          null | Zahl        Kontrakte bei Regel an; null = Firmen-Spanne bleibt (Wert erst auf Finns Wort)
 --      aktiv       true               Hauptschalter
 -- 2) accounts.wd_zyklus_regel (text): null = automatisch, 'an' = Regel auch ohne Automatik-Bedingungen (außer wd_farm + Apex),
---    'aus' = nie. Setzen über wd_konto_setzen (neuer Parameter p_zyklus_regel), wie wd_tp.
--- 3) wd_konto_setzen: alte 4-Parameter-Fassung wird ENTFERNT und durch die 5-Parameter-Fassung ersetzt — zwei Fassungen nebeneinander
---    kann PostgREST bei rpc('wd_konto_setzen', {p_account, p_wd_farm}) nicht auseinanderhalten („Could not choose the best candidate").
---    Der Riegel vom 02.11.2026 (sql/2026-11-02_wd_riegel_nur_admin.sql, wd_hand_recht) bleibt erhalten: greift, wenn die Funktion da ist;
---    ohne sie (Rückbau eingespielt) wie vorher nur „eingeloggt".
+--    'aus' = nie. Setzen über wd_konto_recoverer_setzen (Punkt 3).
+-- 3) Eigene RPC wd_konto_recoverer_setzen statt eines neuen Parameters an wd_konto_setzen (Gegenprüfung 02.11.2026): sql/2026-11-02_wd_riegel_nur_admin.sql
+--    und dessen Rückbau legen die 4-Parameter-Fassung per create or replace an. Liefe eines davon nach einer 5-Parameter-Fassung, gäbe es zwei Fassungen,
+--    PostgREST könnte rpc('wd_konto_setzen', {p_account, p_wd_farm}) nicht mehr auflösen, und alle Hand-Haken im Farmer fielen aus. wd_konto_setzen bleibt
+--    unangetastet. Der Riegel (wd_hand_recht) gilt auch hier, sobald die Funktion da ist; live seit 02.11.2026.
 -- Idempotent. Nicht einspielen: Betrieb 1 nach S9-OK, per apply_migration (DDL).
 
 -- 1) Regel-Parameter
@@ -43,38 +43,30 @@ alter table public.accounts add column if not exists wd_zyklus_regel text;
 alter table public.accounts drop constraint if exists accounts_wd_zyklus_regel_check;
 alter table public.accounts add constraint accounts_wd_zyklus_regel_check check (wd_zyklus_regel is null or wd_zyklus_regel in ('an', 'aus'));
 
--- 3) RPC mit dem neuen Parameter (p_zyklus_regel: null = nicht anfassen, '' = auf automatisch (null) setzen, 'an' / 'aus')
-drop function if exists public.wd_konto_setzen(uuid, boolean, numeric, numeric);
-create or replace function public.wd_konto_setzen(p_account uuid, p_wd_farm boolean default null, p_tp numeric default null,
-                                                  p_sl numeric default null, p_zyklus_regel text default null)
+-- 3) RPC für den Schalter (p_regel: '' = automatisch (null), 'an', 'aus')
+create or replace function public.wd_konto_recoverer_setzen(p_account uuid, p_regel text)
 returns boolean language plpgsql security definer set search_path = public as $$
 declare v_owner uuid; v_ok boolean := true;
 begin
   if auth.uid() is null then raise exception 'nicht angemeldet'; end if;
+  if p_regel is null or p_regel not in ('', 'an', 'aus') then
+    raise exception 'wd_zyklus_regel: erlaubt sind '''' (automatisch), ''an'', ''aus''';
+  end if;
   select a.user_id into v_owner from public.accounts a where a.id = p_account;
   if v_owner is null then return false; end if;
-  -- Riegel vom 02.11.2026, falls eingespielt (sonst wie vorher nur „eingeloggt")
   if to_regprocedure('public.wd_hand_recht(uuid)') is not null then
     execute 'select public.wd_hand_recht($1)' into v_ok using v_owner;
     if not coalesce(v_ok, false) then
       raise exception 'WD-Einstellungen ändert nur die Admin-ID (HT) bzw. der Verwalter (Gruppe)' using errcode = '42501';
     end if;
   end if;
-  if p_zyklus_regel is not null and p_zyklus_regel not in ('', 'an', 'aus') then
-    raise exception 'wd_zyklus_regel: erlaubt sind '''' (automatisch), ''an'', ''aus''';
-  end if;
-  update public.accounts
-     set wd_farm = coalesce(p_wd_farm, wd_farm),
-         wd_tp = case when p_tp is null then wd_tp when p_tp <= 0 then null else p_tp end,
-         wd_sl = case when p_sl is null then wd_sl when p_sl <= 0 then null else p_sl end,
-         wd_zyklus_regel = case when p_zyklus_regel is null then wd_zyklus_regel when p_zyklus_regel = '' then null else p_zyklus_regel end
-   where id = p_account;
+  update public.accounts set wd_zyklus_regel = nullif(p_regel, '') where id = p_account;
   return found;
 end $$;
-revoke all on function public.wd_konto_setzen(uuid, boolean, numeric, numeric, text) from public;
-grant execute on function public.wd_konto_setzen(uuid, boolean, numeric, numeric, text) to authenticated;
+revoke all on function public.wd_konto_recoverer_setzen(uuid, text) from public;
+grant execute on function public.wd_konto_recoverer_setzen(uuid, text) to authenticated;
 
 -- Probe nach dem Einspielen (nur lesen):
 --   select zyklus_regel from public.wd_farmer_regeln where id = 1;
---   select count(*) from pg_proc where proname = 'wd_konto_setzen';   -- muss 1 sein
---   select pg_get_functiondef('public.wd_konto_setzen(uuid,boolean,numeric,numeric,text)'::regprocedure) ilike '%wd_hand_recht%';
+--   select count(*) from pg_proc where proname = 'wd_konto_setzen';   -- bleibt 1
+--   select pg_get_functiondef('public.wd_konto_recoverer_setzen(uuid,text)'::regprocedure) ilike '%wd_hand_recht%';
