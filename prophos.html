@@ -27611,13 +27611,21 @@
    * läuft. Danach kommt jedes Update über den Lader + Neuladen. Ein Versuch je PC, Script und Lader-Stand (localStorage), Ergebnis an Railway
    * (/alarm/userscript-update: gescheitert → ⚪ „einmal von Hand"). REIN RECHNEND → '' (nötig) oder Grund. */
   const TVTM_LADER_SOLL = 1, TVTM_TSX_LADER_SOLL = 1
+  // GESPERRTES EVAL (Finn 02.11.2026): TradingViews CSP verbietet eval, der Lader tauscht dort den Kern nie (lader.eval false, quelle eingebaut). Dann kommt jede Fassung über diesen Weg:
+  // TVTM_VERSION_SOLL = VERSION im Userscript (Selbsttest prüft es), ein Versuch je PC und Fassung, nur in Ruhe (tvnRuhe). Scheitert er, meldet Railway ⚪; die nächste Fassung versucht es neu.
+  const TVTM_VERSION_SOLL = '0.10.6'
   const tvTmSoll = art => art === 'tsx' ? TVTM_TSX_LADER_SOLL : TVTM_LADER_SOLL
-  const tvTmKey = art => (art === 'tsx' ? 'prophos_tvtm_tsx_l' : 'prophos_tvtm_l') + tvTmSoll(art)
+  const tvTmKey = art => art === 'tsx' ? 'prophos_tvtm_tsx_l' + TVTM_TSX_LADER_SOLL : 'prophos_tvtm_l' + TVTM_LADER_SOLL + '_v' + TVTM_VERSION_SOLL
+  const tvTmZiel = art => art === 'tsx' ? `Lader ${TVTM_TSX_LADER_SOLL}` : TVTM_VERSION_SOLL
   const TVTM_NICHTS_ANGEFASST = ['puls_beschaeftigt', 'kein_tab', 'handlauf', 'soll_fehlt', 'tab_neu', 'nicht_gesendet', 'verbindung']
   function tvTmNoetig(b){
     if(!b) return 'kein frischer Stand'
     const l = b.lader, a = TVN_ART[b.art]
-    if(l) return Number(l.v || 0) < tvTmSoll(b.art) ? '' : 'Lader aktuell'
+    if(l){
+      if(Number(l.v || 0) < tvTmSoll(b.art)) return ''
+      const lauf = String(l.laeuft || b.version || '')
+      return (b.art === 'tv' && l.eval === false && lauf && tvnNeuer(TVTM_VERSION_SOLL, lauf)) ? '' : 'Lader aktuell'
+    }
     return (b.version && tvnNeuer(a.erster, b.version)) ? '' : a.name + '-Version unbekannt oder ≥ ' + a.erster
   }
   function tvTmFrei(b = tvnBlickTv()){
@@ -27690,7 +27698,7 @@
       const { data: { session } } = await supabase.auth.getSession(); const tok = session && session.access_token; if(!tok) return
       await fetch(`${WATCHER_HOME}/alarm/userscript-update`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
         body: JSON.stringify({ uebersprungen: true, grund: String(grund).slice(0, 80), von: (b.lader && b.lader.laeuft) || b.version || '',
-          soll: `Lader ${tvTmSoll(b.art)}`, pc: hedgePcId() || '', art: b.art, blind: !!b.blind }) })
+          soll: tvTmZiel(b.art), pc: hedgePcId() || '', art: b.art, blind: !!b.blind }) })
     }catch(e){ console.warn('[tv-neuladen] übersprungen melden', (e && e.message) || e) }
   }
   async function tvTmTick(b){
@@ -27701,7 +27709,7 @@
     let r = null
     try{
       r = await window.mtcApi('tv-tm-update', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grund: `Tampermonkey ${a.name} ${von || '?'} → Lader ${tvTmSoll(b.art)}`, tab: a.tab }), timeoutMs: 165000 })
+        body: JSON.stringify({ grund: `Tampermonkey ${a.name} ${von || '?'} → ${tvTmZiel(b.art)}`, tab: a.tab }), timeoutMs: 165000 })
     }catch(e){ r = { ok: false, code: 'verbindung', msg: String((e && e.message) || e) } }
     finally{ window._tvNeuLaeuft = false }
     if(r && !r.msg && r.error) r.msg = String(r.error)   // mtcApi meldet eigene Fehler in error

@@ -4560,7 +4560,7 @@ def alarm_userscript_update():
         return jsonify({"ok": True, "gedrosselt": True})
     if d.get("ok") is True:
         alarm_senden(3, "userscript_tm_ok", f"Tampermonkey aktualisiert auf {wer}",
-                     f"{wer}: Puls hat das {was} in Tampermonkey aktualisiert ({von or '?'} → {soll or '?'}). Ab jetzt kommen Updates über den Lader.",
+                     f"{wer}: Puls hat das {was} in Tampermonkey aktualisiert ({von or '?'} → {soll or '?'}).",
                      uid=uid, daten=daten, schluessel=key)
     else:
         alarm_senden(3, "userscript_tm_fehl", f"Tampermonkey-Update von Hand: {wer}",

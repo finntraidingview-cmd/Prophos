@@ -517,6 +517,9 @@ Aktive Verbindungen
     _lv, _soll = re.search(r"const LADER_V = (\d+);", _us), re.search(r"const TVTM_LADER_SOLL = (\d+)", _ph)
     check(_lv and _soll and _lv.group(1) == _soll.group(1),
           "Lader: TVTM_LADER_SOLL im PC-Tab = LADER_V im Userscript (neuer Lader → PC-Tab lässt Tampermonkey einmal je PC aktualisieren)")
+    _vs, _vu = re.search(r"const TVTM_VERSION_SOLL = '([\d.]+)'", _ph), re.search(r"const VERSION    = '([\d.]+)'", _us)
+    check(bool(_vs and _vu and _vs.group(1) == _vu.group(1)),
+          "Rollout: TVTM_VERSION_SOLL im PC-Tab = VERSION im Userscript (PCs mit gesperrtem eval bekommen jede Fassung über Tampermonkey)")
 
     lk = rs.lader_kurz({"v": 1, "eval": True, "laeuft": "0.10.0", "quelle": "eingebaut", "bereit": "0.10.1", "fehler": None, "code": "x" * 999, "z": {"a": 1}})
     check(lk == {"v": 1, "eval": True, "laeuft": "0.10.0", "quelle": "eingebaut", "bereit": "0.10.1", "fehler": None}
