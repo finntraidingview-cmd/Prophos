@@ -31,5 +31,7 @@ check("if(!_wdlRestRecht.ok) return" in html and "(_wdlRestN.get(pid) || 0) >= 3
 check("wdlVormerken(pid, t, grund, true)" in html and "if(!still && typeof atToast === 'function') atToast(" in html, "Vormerken aus dem Tick ohne Toast")
 check("if(still && e && e.status === 409)" in html and "_mwdErlStill = !!opts.nurStill" in html, "stiller Ein Klick schluckt 409 (schon abgehakt)")
 check("try{ wdlRestVorgaengerTick() }catch(_){}" in html, "Tick läuft im Lade-Takt")
+check("x.planer_plan === true" in html and '"planer_plan": bool(re.search(r"Funded-(CFD-)?Planer"' in app, "Funded-Planer-Pläne zählen nie als „Trade planen“")
+check("if(!/nicht mehr in Überprüfen/.test(String(e.message || ''))) wdlLokalVergessen(pid)" in html, "stiller 409: nur „nicht mehr in Überprüfen“ bleibt still, sonst kommt die Zeile zurück")
 print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
 sys.exit(1 if fehler else 0)

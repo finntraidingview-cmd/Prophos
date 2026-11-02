@@ -12337,6 +12337,8 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # „TRADE PLANEN“ AUS REST VON HAND (02.11.2026, Radar: Vorgänger eines Rest-Trades still abhaken nur nach Finns Klick — rest_hedge schreibt allein dieses Popup;
         # nie bei Auto-Planer/Farmer, Testphase „nichts auto-abhaken“). rest_hedge/auto_plan nur in /admin/live-trades geladen, sonst False/None
         "rest_hedge": p.get("rest_hedge") is True, "auto_plan": p.get("auto_plan"), "created_at": p.get("created_at"),
+        # Funded-Planer-Pläne nie als „Trade planen“ werten (S9 02.11.2026): Notiz „Funded-Planer“/„Funded-CFD-Planer“ oder mt5_baseline.funded_plan
+        "planer_plan": bool(re.search(r"Funded-(CFD-)?Planer", str(p.get("notes") or "")) or ((p.get("mt5_baseline") or {}).get("funded_plan") if isinstance(p.get("mt5_baseline"), dict) else None)),
         # farbe_key: derselbe Schluessel, mit dem die Flotte Personen faerbt (merken(w.uid) → mt5FleetFarbe(uid)) —
         # die user_id; das Frontend hasht wie gehabt
         "farbe_key": uid,

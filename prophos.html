@@ -36528,7 +36528,8 @@
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
-      if(still && e && e.status === 409){ try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){} return }   // schon abgehakt (anderer Tab) — still, nichts zu tun
+      // still nur bei „nicht mehr in Überprüfen“ (schon abgehakt, anderer Tab); jeder andere 409 (z. B. „gleichzeitig geändert“, Betrieb 1 02.11.2026) ruft die Zeile zurück
+      if(still && e && e.status === 409){ if(!/nicht mehr in Überprüfen/.test(String(e.message || ''))) wdlLokalVergessen(pid); try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){} return }
       if(typeof atToast === 'function') atToast('Abhaken nicht gespeichert: ' + (e && e.message || e) + ' — bitte noch einmal', 'end')
       wdlLokalVergessen(pid)   // nicht gebucht → die Zeile kommt mit dem nächsten Stand zurück nach „Überprüfen" (08.10.2026)
       try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){}
@@ -38472,7 +38473,7 @@
     // nie — Testphase „nichts auto-abhaken“; die Anzeige entdoppelt trotzdem für alle (wdlAktiveKonten)
     const alle = (wdl.daten && wdl.daten.trades) || [], neu = new Map()   // konto_id → [{ uid, at }]
     for(const x of alle){
-      if(!x || !x.konto_id || x.tage_mini || x.rest_hedge !== true || x.auto_plan === true || !(x.status === 'open' || x.status === 'planned')) continue
+      if(!x || !x.konto_id || x.tage_mini || x.rest_hedge !== true || x.auto_plan === true || x.planer_plan === true || !(x.status === 'open' || x.status === 'planned')) continue   // planer_plan: Funded-Planer (S9 02.11.2026)
       const k = String(x.konto_id); if(!neu.has(k)) neu.set(k, []); neu.get(k).push({ uid: wdlUid(x), at: Date.parse(x.created_at || '') || 0 })
     }
     if(!neu.size) return
@@ -54545,7 +54546,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1997'
+  const OS_TAB_BUILD = '2026-09-22.1998'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
