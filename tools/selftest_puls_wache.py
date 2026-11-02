@@ -12,6 +12,8 @@ import types
 W = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = open(os.path.join(W, "mt5-copier", "panel.py"), encoding="utf-8").read()
 FEHLER = []
+# Build wie die Wache ihn liest (Tab-Stand ist im Test nach 10 min alt → OS_TAB_BUILD der lokalen prophos.html); nie fest, sonst rot bei jedem Bump
+BUILD = re.search(r"const OS_TAB_BUILD = '([0-9A-Za-z._-]{1,40})'", open(os.path.join(W, "prophos.html"), encoding="utf-8").read()).group(1)
 
 
 def check(ok, name):
@@ -31,7 +33,7 @@ def cdp_get(p):
 
 
 ns = {"re": re, "os": os, "HERE": os.path.join(W, "mt5-copier"), "TAB_URL": "http://localhost:5000/",
-      "TAB_NL": {"stand": {"origin": "2026-09-22.1989"}, "stand_at": 1000.0}, "_TAB_OEFFNEN": {"geoeffnet": [], "geoeffnet_at": 0.0},
+      "TAB_NL": {"stand": {"origin": BUILD}, "stand_at": 1000.0}, "_TAB_OEFFNEN": {"geoeffnet": [], "geoeffnet_at": 0.0},
       "time": types.SimpleNamespace(time=lambda: uhr[0]), "datetime": __import__("datetime").datetime,
       "_PROPHOS_URL_RE": re.compile(r"^http://(localhost|127\.0\.0\.1):5000(/|$)"), "_cdp_get": cdp_get,
       "_browser_und_mt5_frei": lambda tv_eigen=False: welt["frei"], "_tab_oeffnen": lambda url: (welt["oeffnen"].append((uhr[0], url)), welt["antwort"])[1],
@@ -43,7 +45,7 @@ for n in ast.parse(SRC).body:
         exec(ast.get_source_segment(SRC, n), ns)
 schritt = ns["_puls_wache_schritt"]
 TV = {"type": "page", "url": "https://www.tradingview.com/chart/x/"}
-PRO = {"type": "page", "url": "http://localhost:5000/?v=2026-09-22.1989#accounts"}
+PRO = {"type": "page", "url": "http://localhost:5000/?v=" + BUILD + "#accounts"}
 
 
 def runden(sek, takt=65):
@@ -62,7 +64,7 @@ welt["liste"] = [TV, {"type": "page", "url": "https://topstepx.com/trade"}]
 t_weg = uhr[0]
 runden(200)
 check(len(welt["oeffnen"]) == 1 and 60 <= welt["oeffnen"][0][0] - t_weg <= 135, f"Tab weg → nach {welt['oeffnen'][0][0] - t_weg:.0f} s geöffnet (Takt des Tab-Wächters 60–70 s)" if welt["oeffnen"] else "Tab weg → geöffnet")
-check(welt["oeffnen"][0][1] == "http://localhost:5000/?v=2026-09-22.1989", f"URL mit ?v=<Build> ({welt['oeffnen'][0][1]})")
+check(welt["oeffnen"][0][1] == "http://localhost:5000/?v=" + BUILD, f"URL mit ?v=<Build> ({welt['oeffnen'][0][1]})")
 check(bool(ns["TAB_URL_V_RE"].fullmatch(welt["oeffnen"][0][1])) and "TAB_URL_V_RE.fullmatch(str(url or \"\"))" in SRC, "_tab_oeffnen lässt die URL mit ?v= durch (TAB_URL_V_RE)")
 # stirbt sofort wieder → höchstens 1 je 5 min
 runden(900)
@@ -97,7 +99,7 @@ runden(70)
 check(len(welt["oeffnen"]) == 1, "30 s ohne Eingabe → geöffnet (nicht erst nach 120 s)")
 # S9: Login-Adresse — der letzte Tab lief unter 127.0.0.1 → dieselbe Adresse
 ns["_TAB_OEFFNEN"]["url"] = "http://127.0.0.1:5000/"
-check(ns["_puls_wache_url"]() == "http://127.0.0.1:5000/?v=2026-09-22.1989" and ns["TAB_URL_V_RE"].fullmatch(ns["_puls_wache_url"]()),
+check(ns["_puls_wache_url"]() == "http://127.0.0.1:5000/?v=" + BUILD and ns["TAB_URL_V_RE"].fullmatch(ns["_puls_wache_url"]()),
       f"letzter Tab auf 127.0.0.1 → die Wache öffnet 127.0.0.1 (eigener Login) ({ns['_puls_wache_url']()})")
 ns["_TAB_OEFFNEN"]["url"] = ""
 check(ns["_puls_wache_url"]().startswith("http://localhost:5000/?v="), "ohne gemerkte Adresse → localhost:5000")
