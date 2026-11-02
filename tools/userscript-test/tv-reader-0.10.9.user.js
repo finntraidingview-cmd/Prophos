@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.8
+// @version      0.10.9
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.9 02.11.2026  NUR DIE POSITIONS-TABELLE (Finn-Test Simon 69900aaa: Master zu 15:29:31, Schluss erst 15:30:07; Lotse-Spur): Im Puls-Chrome liest lesePositionen nur Zeilen
+//                      aus SEL_POS_TABELLE bei aktivem Reiter Positions. Vorher zaehlten alle td[data-label] im Dokument, auch die Orders-Tabelle: ihre Zeilen fielen
+//                      zwar als Order raus, hielten aber leseBefund.zeilen > 0, die leere Tabelle galt nie als flach, der Tab meldete blind, der Stand fror ein.
+//                      Dazu: Im Puls-Chrome laeuft der Takt nur auf /chart/-Seiten (die Seite „Refer-a-Friend“ war ein zweiter Broker-Tab ohne Konto).
 //   0.10.8 02.11.2026  SCHLUSS EINFACH (Finn: „direkt schliessen, Kontoerkennung, indem man auf den Puls draufklickt“): flach = Reiter Positions aktiv, Tabelle da, keine Zeile, kein Laden-/Fehlertext. Kein Leer-Text mehr noetig; leer_beweis sagt den strengeren Lesern, ob er da war.
 //   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre im GM-Speicher, ueberlebt Neuladen und neuen Tab). Teil-Fill zaehlt nicht. Zeile ohne P&L ist nur bei aktivem Reiter Positions nicht blind.
 //   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
@@ -193,7 +197,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.8';
+  const VERSION    = '0.10.9';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   // 0.10.4 (30.10.2026, Simon pc-pmqd8g): der Schalter fehlte nach einer Tampermonkey-Neuinstallation (Abzeichen „● Reader · 1 Pos" statt
@@ -314,7 +318,16 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   function lesePositionen() {
     const rows = new Map();
     const labels = new Set();
-    document.querySelectorAll('td[data-label]').forEach((td) => {
+    // 0.10.9: im Puls-Chrome nur die Positions-Tabelle bei aktivem Reiter Positions — nie die Orders-Tabelle oder andere Reiter im selben Dokument.
+    // Kein Reiter oder keine Tabelle: keine Zeile, blindGrund meldet dann „Reiter nicht aktiv“ bzw. keinen Leer-Beweis (nie flach)
+    let quelle = document;
+    if (PULS_CHROME) {
+      let reiter = false, tabelle = null;
+      try { const r = document.getElementById('positions'); reiter = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
+      try { tabelle = reiter ? document.querySelector(SEL_POS_TABELLE) : null; } catch (_) {}
+      quelle = tabelle;
+    }
+    (quelle ? quelle.querySelectorAll('td[data-label]') : []).forEach((td) => {
       const tr = td.closest('tr');
       if (!tr) return;
       if (!rows.has(tr)) rows.set(tr, {});
@@ -1895,6 +1908,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   }
 
   function tick() {
+    // 0.10.9: im Puls-Chrome nur auf Chart-Seiten — eine andere TradingView-Seite (Refer-a-Friend, Konto, Preise) liest nichts und meldet sich nicht beim Reader
+    if (PULS_CHROME && !/^\/chart(\/|$)/.test(location.pathname)) { setBadge('● Puls-Chrome · keine Chart-Seite, Reader aus', 'pause'); return; }
     if (PULS_CHROME && document.readyState !== 'complete' && Date.now() - SCRIPT_START_MS < 15000) return;   // 0.9.5/0.9.7: Seite lädt — höchstens 15 s schonen
     // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
     // er liefert nur Kurse/Kerzen (die Positions-Felder schickt er seit 0.8.5 ohnehin nicht)
@@ -2014,7 +2029,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.8';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.9';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };
