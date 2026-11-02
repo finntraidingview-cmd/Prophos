@@ -889,15 +889,19 @@ def solo_position_abwarten(positions_get, ticket, plan_id, symbol, *, schlafe, j
 # CLOSE DURCHDRÜCKEN (Finn 02.11.2026: „Eine Close-Order darf nicht abgelehnt werden … dann muss sie durchgedrückt werden, jede Millisekunde neu“;
 # Simon pc-pmqd8g Plan 88b28130: MT5 lehnte den Close ab, der Tab wartete 10 s, Finn schloss von Hand). Nicht endgültige Ablehnungen (order_send None,
 # Requote, Preis geändert, kein Preis, Timeout, Kontext belegt …) sofort neu: frischer Tick, große deviation, wechselnde Filling-Modi, alle SOLO_CLOSE_TAKT_S
-# bis die Position zu ist oder SOLO_CLOSE_DRUECKEN_S vorbei sind. Endgültig (sinnlos zu wiederholen): ungültiger Auftrag/Menge, Handel aus, Markt zu, Algo-Handel aus.
-SOLO_CLOSE_DRUECKEN_S = 5.0
+# bis die Position zu ist, höchstens SOLO_CLOSE_DRUECKEN_S bzw. SOLO_CLOSE_MAX_N Versuche (Stopp S9: solo_close läuft in der Hauptschleife, länger hielte es Echo-Kopien
+# und andere Aufträge auf — den Rest übernimmt der Tab mit neuen Aufträgen). Endgültig (sinnlos zu wiederholen): ungültiger Auftrag/Menge, abgelehnt, kein Geld, Handel aus,
+# Markt zu, Server- oder Terminal-Algo aus. Zu viele Anfragen / keine Verbindung: nicht hämmern, sofort zurück, der Tab wartet ≥ 1 s (retry_ms).
+SOLO_CLOSE_DRUECKEN_S = 1.0
+SOLO_CLOSE_MAX_N = 5
 SOLO_CLOSE_TAKT_S = 0.1
 SOLO_CLOSE_DEVIATION = 200          # Punkte Slippage, die der Close hinnimmt (Market-Close: zu ist wichtiger als der Preis)
-SOLO_CLOSE_ENDGUELTIG = {10013, 10014, 10017, 10018, 10027}
+SOLO_CLOSE_ENDGUELTIG = {10006, 10013, 10014, 10017, 10018, 10019, 10026, 10027}
+SOLO_CLOSE_LANGSAM = {10024, 10031}  # zu viele Anfragen, keine Verbindung → ≥ 1 s Pause
 
 
-def solo_close_durchdruecken(versuch, fehler, uhr, schlafe, max_s=SOLO_CLOSE_DRUECKEN_S, takt_s=SOLO_CLOSE_TAKT_S):
-    """TESTBAR: versuch(i) → Order-Result (zu), None (abgelehnt) oder "zu" (Position schon weg); fehler() → (retcode|None, Text).
+def solo_close_durchdruecken(versuch, fehler, uhr, schlafe, max_s=SOLO_CLOSE_DRUECKEN_S, takt_s=SOLO_CLOSE_TAKT_S, max_n=SOLO_CLOSE_MAX_N):
+    """TESTBAR: versuch(i) → Order-Result (zu), None (abgelehnt oder Teil-Fill mit Rest) oder "zu" (Position schon weg); fehler() → (retcode|None, Text).
     -> (Result | "zu" | None, versuche[{n, ms, retcode, fehler}])"""
     t0, versuche, i = uhr(), [], 0
     while True:
@@ -907,7 +911,7 @@ def solo_close_durchdruecken(versuch, fehler, uhr, schlafe, max_s=SOLO_CLOSE_DRU
         rc, txt = fehler()
         versuche.append({"n": i + 1, "ms": int(round((uhr() - t0) * 1000)), "retcode": rc, "fehler": str(txt or "")[:120]})
         i += 1
-        if rc in SOLO_CLOSE_ENDGUELTIG or uhr() - t0 >= max_s:
+        if rc in SOLO_CLOSE_ENDGUELTIG or rc in SOLO_CLOSE_LANGSAM or i >= max_n or uhr() - t0 >= max_s:
             return None, versuche
         schlafe(takt_s)
 
@@ -2404,21 +2408,29 @@ def main():
         sym = str(p.symbol)
         lang = int(p.type) == 0
         ctype = mt5.ORDER_TYPE_SELL if lang else mt5.ORDER_TYPE_BUY
+        # RETURN nur, wenn das Symbol nichts anderes kann: RETURN lässt einen Rest stehen (Teil-Fill, Stopp S9)
         fillings = []
-        for f in (filling_for(m, sym), mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_RETURN):
+        for f in (filling_for(m, sym), mt5.ORDER_FILLING_IOC, mt5.ORDER_FILLING_FOK):
             if f not in fillings:
                 fillings.append(f)
 
         def versuch(i):
-            if i and not mt5.positions_get(ticket=ticket):
+            pos_jetzt = mt5.positions_get(ticket=ticket) if i else pos
+            if not pos_jetzt:
                 return "zu"                                   # zwischen zwei Versuchen zu (Level, Hand) → wie oben „schon zu"
+            vol = float(pos_jetzt[0].volume)                  # Volumen aus der aktuellen Position (nach einem Teil-Fill nur der Rest)
             tick = mt5.symbol_info_tick(sym)                  # frischer Tick je Versuch
             price = (tick.bid if lang else tick.ask) if tick else 0.0
-            req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": float(p.volume),
+            req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": vol,
                    "type": ctype, "position": ticket, "price": price,
                    "deviation": max(int(getattr(m, "deviation", 0) or 0), SOLO_CLOSE_DEVIATION), "magic": SOLO_MAGIC, "comment": SOLO_KOMMENTAR + "c",
                    "type_time": mt5.ORDER_TIME_GTC, "type_filling": fillings[i % len(fillings)]}
-            return send(m, req, f"SOLO CLOSE {float(p.volume)} {sym} (Ticket {ticket}, Grund {a.get('grund') or '?'}, Versuch {i + 1})")
+            r_ = send(m, req, f"SOLO CLOSE {vol} {sym} (Ticket {ticket}, Grund {a.get('grund') or '?'}, Versuch {i + 1})")
+            rest = mt5.positions_get(ticket=ticket) if r_ else None
+            if r_ and rest:                                   # Teil-Fill: Rest bleibt offen → weiter schließen, nie als zu melden
+                m.letzter_retcode, m.letzter_fehler = "teil", f"Teil-Fill, Rest {float(rest[0].volume)} offen"
+                return None
+            return r_
 
         r, versuche = solo_close_durchdruecken(versuch, lambda: (getattr(m, "letzter_retcode", None), getattr(m, "letzter_fehler", None) or mt5.last_error()),
                                                time.time, time.sleep)
@@ -2429,6 +2441,7 @@ def main():
         if r is None:
             letzt = versuche[-1] if versuche else {}
             return {"ok": False, "code": "abgelehnt", "retry_ok": letzt.get("retcode") not in SOLO_CLOSE_ENDGUELTIG, "ticket": ticket, "versuche": versuche[-20:],
+                    "retry_ms": 1000 if letzt.get("retcode") in SOLO_CLOSE_LANGSAM else 200,
                     "msg": f"Close abgelehnt nach {len(versuche)} Versuchen in {letzt.get('ms', 0)} ms ({letzt.get('fehler') or mt5.last_error()})"}
         pl, grund, exit_preis = solo_pl_aus_history(ticket)
         return {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0),
