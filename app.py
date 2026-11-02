@@ -39936,16 +39936,23 @@ def _fx_wert(v):
         return None
     if not (0.5 < f < 1.5):
         return None
-    return {"rate": f, "quelle": str(d.get("quelle") or ""), "datum": str(d.get("datum") or "")[:10]}
+    return {"rate": f, "quelle": str(d.get("quelle") or ""), "datum": str(d.get("datum") or "")[:10],
+            "at": str(d.get("at") or "")[:19]}   # UTC „JJJJ-MM-TTTHH:MM:SS“ — Tab schreibt …Z, Railway …+00:00, darum gekürzt vergleichbar
 
 
 def fx_aus_zeilen(zeilen):
-    """REIN RECHNEND: fx_usd_eur-Zeilen (user_settings value) → Kurs. Der jüngste Live-Kurs gewinnt, sonst der erste gültige Eintrag,
-    sonst FX_STANDARD."""
+    """REIN RECHNEND: fx_usd_eur-Zeilen (user_settings value) → Kurs. Der jüngste Live-Kurs gewinnt — außer eine Hand-Eingabe ist jünger als
+    er (S9 zu .2006, 03.11.2026: sonst wirkte „gilt bis zum nächsten Live-Kurs“ serverseitig nie, weil ab dem ersten Lauf jede ID einen
+    Live-Eintrag hat); sonst der erste gültige Eintrag, sonst FX_STANDARD."""
     werte = [w for w in (_fx_wert((z or {}).get("value")) for z in (zeilen or [])) if w]
     live = [w for w in werte if w["quelle"] == "live" and w["datum"]]
+    hand = [w for w in werte if w["quelle"] == "hand" and w["at"]]
     if live:
-        return max(live, key=lambda w: w["datum"])["rate"]
+        l = max(live, key=lambda w: w["at"] or w["datum"])
+        h = max(hand, key=lambda w: w["at"]) if hand else None
+        return h["rate"] if h and h["at"] > (l["at"] or l["datum"]) else l["rate"]
+    if hand:
+        return max(hand, key=lambda w: w["at"])["rate"]
     return werte[0]["rate"] if werte else FX_STANDARD
 
 

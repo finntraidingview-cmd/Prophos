@@ -36,6 +36,16 @@ check(f([zeile(0.9)]) == 0.9 and f([zeile('{"rate": 0.88}')]) == 0.88, "alte For
 check(f([zeile({"rate": 0.8935, "quelle": "hand"}), zeile({"rate": 0.8916, "quelle": "live", "datum": "2026-11-02"}),
          zeile({"rate": 0.8901, "quelle": "live", "datum": "2026-10-31"})]) == 0.8916, "jüngster Live-Kurs gewinnt (Admin = alle IDs gleich)")
 check(f([zeile({"rate": 3}), zeile({"rate": None}), zeile({"rate": 0.87})]) == 0.87, "unplausible Zeilen übersprungen")
+# S9 zu .2006: Hand-Eingabe jünger als der Live-Kurs gewinnt, ältere nicht (Formate wie Tab …Z und Railway …+00:00)
+live2 = zeile({"rate": 0.89158, "quelle": "live", "datum": "2026-11-02", "at": "2026-11-02T22:43:30.123456+00:00"})
+check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T00:10:00.000Z"})]) == 0.8935, "Hand nach dem Live-Lauf → Hand gilt")
+check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-02T20:10:00.000Z"})]) == 0.89158, "Hand vor dem Live-Lauf → Live gilt")
+check(f([zeile({"rate": 0.89158, "quelle": "live", "datum": "2026-11-02"}), zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-02T09:00:00Z"})]) == 0.8935,
+      "Live ohne at: Hand am EZB-Tag gilt")
+check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T00:10:00Z"}),
+         zeile({"rate": 0.9, "quelle": "hand", "at": "2026-11-03T01:00:00Z"})]) == 0.9, "mehrere Hand-Eingaben → die jüngste")
+check(f([live2, zeile({"rate": 0.8935, "quelle": "hand", "at": "2026-11-03T00:10:00Z"}),
+         zeile({"rate": 0.8902, "quelle": "live", "datum": "2026-11-03", "at": "2026-11-03T16:00:00+00:00"})]) == 0.8902, "nächster Live-Kurs löst die Hand ab")
 
 # Plausibilität
 p = ns["fx_live_pruefen"]
