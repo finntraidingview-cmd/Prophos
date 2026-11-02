@@ -53774,7 +53774,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1977'
+  const OS_TAB_BUILD = '2026-09-22.1978'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -68077,7 +68077,11 @@
     const w = k && k.wuerfel
     if(!w || w.quelle !== 'wuerfel' || Math.abs(Number(w.tp) - Number(plan.masterTp)) > 0.5 || Number(w.kt) !== Number(plan.masterContracts)) return null
     if(!(Math.abs(Number(k.slave) - Number(plan.slaveRisk)) <= 0.5)) return null
-    if(!(hedgePplFuer(plan.masterSymbol) > 0)) return null   // ohne Symbol rechnete wdFarmHedge mit der Tab-Pille (Vorfall Marc 32 statt 3,2 Lot, .1712)
+    const pplAlt = hedgePplFuer(plan.masterSymbol)
+    if(!(pplAlt > 0)) return null   // ohne Symbol rechnete wdFarmHedge mit der Tab-Pille (Vorfall Marc 32 statt 3,2 Lot, .1712)
+    // Hand-Betrag (S9 02.11.2026): das Plan-Popup ändert nur hedge_eur. Der Betrag muss zur eigenen Rechnung des Plans passen wie in wdFarmHedgeKern, sonst bleibt der Plan
+    const ktAlt = Number(plan.masterContracts), rechnung = (Math.round(ktAlt * Number(plan.multiplier) * 100) / 100) * tpWdSlavePpl() * (Number(plan.masterTp) / (pplAlt * ktAlt))
+    if(!(Math.abs(rechnung - Number(plan.hedgeEur)) <= 1)) return null
     if(plan.status !== 'planned' || plan.startUmGestartetAt || plan.orbitGesendetAt || plan.winningDay !== true) return null
     if(plan.hedgeFreigabeAt || plan.autoBestaetigtAt || plan.handWerteAt || Number(acc.wdTp) > 0) return null
     if((plan.route !== 'tvv2' && plan.route !== 'tsv2') || !(Number(plan.hedgeEur) > 0)) return null
@@ -68725,7 +68729,9 @@
           let altFrei = false
           if(alt){ try{ const { data: frA, error: frE } = await supabase.from('accounts').select('wd_tp').eq('id', k.id).maybeSingle(); altFrei = !frE && !!frA && !(Number(frA.wd_tp) > 0) }catch(_){} }
           if(alt && altFrei){
+            // Alte Werte im Riegel (S9 02.11.2026): Pläne haben hier kein Realtime, eine Hand-Änderung am Mac sähe der Tab nicht. 0 Zeilen → frisch lesen, sonst schriebe er bis zum Start vergeblich
             const { data: dAlt, error: eAlt } = await supabase.from('trade_plans').update(alt.upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null)
+              .eq('master_tp', plan.masterTp).eq('master_contracts', plan.masterContracts).eq('slave_risk', plan.slaveRisk).eq('hedge_eur', plan.hedgeEur)
               .is('orbit_gesendet_at', null).is('started_at', null).is('hedge_freigabe_at', null).is('auto_bestaetigt_at', null).is('hand_werte_at', null).select('*')
             if(eAlt) console.warn('[wd] Recoverer-Altplan', eAlt.message)
             if(dAlt && dAlt[0]){
@@ -68734,6 +68740,13 @@
               set(k, 'tp', alt.tp); set(k, 'kt', alt.kt); set(k, 'slave', alt.upd.slave_risk)
               console.log(`[wd] Recoverer: Plan ${String(plan.id).slice(0, 8)} auf ${alt.tp} $ / ${alt.vor.eur} € gebracht`)
               continue
+            }
+            if(!eAlt){
+              try{
+                const { data: frP } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle()
+                const ixF = tradePlans.indexOf(plan); if(frP && ixF >= 0) tradePlans[ixF] = rowToPlan(frP)
+              }catch(_){}
+              continue   // normaler Zweig erst im nächsten Takt, mit dem frischen Stand
             }
           }
           // nie zurückdrehen, was der Richtungsschutz am Start gedreht hat (30.10.2026, mt5_baseline.richtung_konflikt.status 'gedreht')

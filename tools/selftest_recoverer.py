@@ -179,6 +179,8 @@ def main():
     check("function wdRecovererAltplanUpd" in code and i_a > 0, "Altplan: Funktion liegt zwischen wdFarmHedgeKern und wdVorplanRegelnSpeichern")
     q_ab = html[html.index("  async function wdAbgleich("):]
     q_ab = q_ab[:q_ab.index("(3) Zustand spiegeln")]
+    check(".eq('master_tp', plan.masterTp).eq('master_contracts', plan.masterContracts).eq('slave_risk', plan.slaveRisk).eq('hedge_eur', plan.hedgeEur)" in q_ab and "select('*').eq('id', plan.id).maybeSingle()" in q_ab,
+          "Altplan: alte Werte im Riegel, bei 0 Zeilen frisch lesen statt vergeblich weiterschreiben")
     check(".is('orbit_gesendet_at', null).is('started_at', null).is('hedge_freigabe_at', null).is('auto_bestaetigt_at', null).is('hand_werte_at', null)" in q_ab and "select('wd_tp')" in q_ab and "wdRecovererAltplanUpd(plan" in q_ab,
           "Altplan: Schreiben mit Riegel in der DB, wurde er bestätigt oder von Hand geändert, bleibt er")
     if shutil.which("osascript"):
@@ -188,7 +190,7 @@ function hedgePplFuer(s){ return /^MNQ/.test(s || '') ? 2 : /^NQ/.test(s || '') 
 function tpCalcMultiplier(f, s, risk, kt, eur){ return Math.round(eur / (risk / (2 * kt) * kt * 0.85) * 10000) / 10000 }
 function wdFarmHedge(pr, riskMaster, slaveEur, an, ddListe){ return wdFarmHedgeKern(pr, riskMaster, slaveEur, an, ddListe) }
 """ + code + """
-var plan = { status: 'planned', winningDay: true, route: 'tvv2', hedgeEur: 170.99, slaveRisk: 175, masterTp: 376, masterContracts: 3, masterRisk: 376, masterFirm: 'Apex', masterSymbol: 'MNQZ6' };
+var plan = { status: 'planned', winningDay: true, route: 'tvv2', hedgeEur: 170.99, multiplier: 1.0695, slaveRisk: 175, masterTp: 376, masterContracts: 3, masterRisk: 376, masterFirm: 'Apex', masterSymbol: 'MNQZ6' };
 var K = { slave: 175, wuerfel: { tp: 376, kt: 3, quelle: 'wuerfel' } };
 var acc = { wdTp: null, wdSl: null, maxRisikoTrade: 0 }, zy = { ziel: 1499, hedge_eur: 449.93, kt: null }, z = { basis: 'recoverer', slaveEur: 449.93 };
 function mit(o, p){ var r = {}, k; for(k in o) r[k] = o[k]; for(k in p) r[k] = p[k]; return r }
@@ -199,7 +201,7 @@ return JSON.stringify({ a: a,
   gestartet: U(mit(plan, {startUmGestartetAt: 'x'}), acc, zy, z, true, []), keinwd: U(mit(plan, {winningDay: false}), acc, zy, z, true, []),
   ohneregel: U(plan, acc, null, z, true, []), staffel: U(plan, acc, zy, mit(z, {basis: 'staffel'}), true, []), ohnehedge: U(mit(plan, {hedgeEur: null}), acc, zy, z, true, []),
   ohnesymbol: U(mit(plan, {masterSymbol: ''}), acc, zy, z, true, []), handtp: U(mit(plan, {masterTp: 800}), acc, zy, z, true, []), handkt: U(mit(plan, {masterContracts: 4}), acc, zy, z, true, []),
-  handhedge: U(mit(plan, {slaveRisk: 150}), acc, zy, z, true, []), schonrec: U(plan, acc, zy, z, true, [], {slave: 175, wuerfel: {tp: 376, kt: 3, quelle: 'recoverer'}}),
+  handslave: U(mit(plan, {slaveRisk: 150}), acc, zy, z, true, []), handhedge: U(mit(plan, {hedgeEur: 300}), acc, zy, z, true, []), ohnemult: U(mit(plan, {multiplier: null}), acc, zy, z, true, []), schonrec: U(plan, acc, zy, z, true, [], {slave: 175, wuerfel: {tp: 376, kt: 3, quelle: 'recoverer'}}),
   ohnewuerfel: U(plan, acc, zy, z, true, [], {slave: 175}), keink: U(plan, acc, zy, z, true, [], null), kt: U(plan, acc, mit(zy, {kt: 4}), z, true, []) });
 }"""
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
@@ -217,7 +219,7 @@ return JSON.stringify({ a: a,
                   f"Altplan: Mike → 1.499 $ / ~450 €, altes Risiko 376 nicht übernommen ({a and a['upd']})")
             check(a and a["kt"] == 3 and a["upd"]["master_contracts"] == 3 and a["vor"]["eur"] == a["upd"]["hedge_eur"], "Altplan: Kontrakte bleiben, Vorschau passt zum Plan")
             check("hedge_freigabe_at" not in a["upd"] and "start_um" not in a["upd"] and "richtung" not in a["upd"], "Altplan: keine Freigabe, Start und Richtung unberührt")
-            for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handhedge", "schonrec", "ohnewuerfel", "keink"):
+            for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handslave", "handhedge", "ohnemult", "schonrec", "ohnewuerfel", "keink"):
                 check(r[fall] is None, f"Altplan: {fall} → nichts ändern")
             check(r["kt"]["upd"]["master_contracts"] == 4, "Altplan: Kontrakte aus der Regel, wenn sie welche vorgibt")
 
