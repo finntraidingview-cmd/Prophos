@@ -67183,6 +67183,9 @@
     })()
     return st.laedt[art]
   }
+  /* Zeile trägt einen Recoverer-Würfel, der Stand ist aber noch nie geladen (Tab-Start, Railway weg, zyklus_ok false): kein Plan anlegen. Der TP käme aus der
+   * Zeile (1.499 $), der Hedge aber aus der Staffel, weil wdZyklusVon null ist — also 100–175 € statt 450 € (Prüfer S16, 02.11.2026). Beim nächsten Takt neu. */
+  function wdZyklusUngeklaert(k){ return !window._wdZyklus?.geladen && (k && k.wuerfel || {}).quelle === 'recoverer' }
   // eigene Apex-Winning-Days-Konten dieses Logins (PC-Tab, Accounts-Liste)
   function wdZyklusEigene(o){
     if(!window._wdZyklusLaden) return Promise.resolve(false)
@@ -68360,6 +68363,7 @@
         if(!wdAktiv(k)){ if(k.farm && k.ext && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true } else continue }
         const kd = wdKontoDaten(k.id)
         if(!kd || kd.archiviert){ k.aktiv = false; k.hinweis = kd ? WD_HINWEIS_ARCHIV : 'Konto nicht (mehr) gefunden'; ge = true; continue }
+        if(wdZyklusUngeklaert(k)) continue   // RECOVERER: nie TP 1.499 $ mit Staffel-Hedge (S16, 02.11.2026)
         const accLike = wdAccLike(kd)
         const z = tpVorplanZeile(accLike, { live: kd.live_balance, slaveCurrency: sPreset.currency, fx: d.fx, regeln: vp.regeln })
         if(z.fehler){ k.aktiv = false; k.hinweis = z.fehler; ge = true; continue }
@@ -68606,6 +68610,7 @@
         if(!plan && !k.plan_id){
           if(frisch) continue
           const acc = (accounts || []).find(a => String(a.id) === String(k.id)); if(!acc) continue
+          if(wdZyklusUngeklaert(k)) continue   // RECOVERER: nie TP 1.499 $ mit Staffel-Hedge (S16, 02.11.2026)
           // .1487: genau der gewürfelte TP + die gewürfelten Kontrakte aus der Zeile — das, was „Plan heute Nacht“ schon zeigt
           const wf = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { master_tp: Number(k.wuerfel.tp), master_contracts: Number(k.wuerfel.kt) } : undefined
           const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, startIso, row.tag, wf)
@@ -68667,7 +68672,10 @@
             const { data: da } = await supabase.from('trade_plans').select('id').eq('id', String(k.plan_id)).limit(1)
             if(!(da && da.length)){
               const acc = (accounts || []).find(a => String(a.id) === String(k.id))
-              if(acc){
+              // RECOVERER (S16, 02.11.2026): k.tp ist der TP des verschwundenen Plans. Passt die Regel nicht mehr dazu (Stand ungeklärt oder Regel beendet), käme TP 1.499 $
+              // mit Staffel-Hedge heraus — dann nicht heilen; dieser eine Plan fehlt lieber, als mit falschem Geldbetrag zu starten
+              if(acc && (k.wuerfel || {}).quelle === 'recoverer' && !wdZyklusVon(k.id)) console.warn('[wd] Selbstheilung ausgelassen: Recoverer-Zeile ohne passenden Stand', k.plan_id)
+              else if(acc){
                 const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt })
                 if(p && p.plan){ plan = p.plan; if(String(p.plan.id) !== String(k.plan_id)) set(k, 'plan_id', String(p.plan.id)); set(k, 'hinweis', ''); console.warn('[wd] Plan neu angelegt (Selbstheilung)', k.plan_id) }
               }
