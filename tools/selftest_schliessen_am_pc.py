@@ -40,9 +40,12 @@ ID = "FTDFYSLX150811161322"
 NB = [ID, "FTDFYSLX150811161399", "FTDFYSLX150811169999", "APEX6416990000045"]   # …161399 beginnt wie ID: gekürzt mehrdeutig
 
 
-def stand(konto=ID, pos=None, ok=True, alter=0.05, ts=None, version="0.10.9", blind=False):
+def stand(konto=ID, pos=None, ok=True, alter=0.05, ts=None, version="0.10.9", blind=False, tab="puls-mvz4o89y50p23m", leer=True):
     return {"an": True, "konto": konto, "positionen": pos if pos is not None else [], "positionen_ok": ok, "alter_s": alter, "blind": blind,
-            "positionen_ts": ts if ts is not None else uhr[0] * 1000, "script_version": version}
+            "positionen_ts": ts if ts is not None else uhr[0] * 1000, "script_version": version, "positionen_tab": tab, "leer_beweis": leer}
+
+
+READER = {"tabs": [{"tab_id": "puls-mvz4o89y50p23m", "rolle": "broker", "version": "0.10.9"}]}
 
 
 POS = [{"symbol": "MNQZ6", "wurzel": "MNQ", "richtung": "sell", "menge_zahl": 1, "pnl": None}]
@@ -55,7 +58,7 @@ def frisch_scharf(ticket=111, ext=ID, nb=NB):
         p = os.path.join(tmp, f)
         if os.path.exists(p):
             os.remove(p)
-    return ns["scharf_setzen"]({"ext_id": ext, "wurzel": "MNQ", "nachbarn": nb}, "plan-88b28130", ticket)
+    return ns["scharf_setzen"]({"ext_id": ext, "wurzel": "MNQ", "nachbarn": nb}, "plan-88b28130", ticket, READER)
 
 
 def auftraege():
@@ -138,6 +141,37 @@ uhr[0] += 2.1
 ns["_scharf_runde"](stand(), uhr[0])
 check(len(auftraege()) == 2, "ohne Quittung nach 2 s ein zweiter close-Auftrag (Copier antwortet schon_zu, wenn zu)")
 
+# S9: nur Puls-Chrome, Flach nur mit Leer-Beweis
+frisch_scharf(700)
+uhr[0] += 5
+lauf([lambda: stand(pos=POS, tab="t1abc")] * 2)
+check(lauf([lambda: stand(tab="t1abc")] * 10) is None, "Reader-Tab im normalen Chrome (nicht „puls-“) → nie schließen")
+lauf([lambda: stand(pos=POS)] * 2)
+check(lauf([lambda: stand(leer=False)] * 10) is None, "flach ohne Leer-Beweis (leer_beweis false) → nie, der Tab entscheidet")
+check(lauf([lambda: stand()] * 10) is not None, "flach mit Leer-Beweis → schließt")
+# S9: liegengebliebener Eintrag
+frisch_scharf(701)
+uhr[0] += 10
+ns["_scharf_runde"](None, uhr[0], {999})
+check(len(ns["scharf_laden"]()) == 1, "Ticket fehlt in der Copier-Liste, Hedge jünger als 30 s → bleibt")
+uhr[0] += 25
+ns["_scharf_runde"](None, uhr[0], {999})
+check(ns["scharf_laden"]() == [], "Ticket nicht mehr offen im Copier (anders zugegangen) → gelöst")
+frisch_scharf(702)
+uhr[0] += 60
+ns["_scharf_runde"](None, uhr[0], None)
+check(len(ns["scharf_laden"]()) == 1, "Copier-Liste nicht prüfbar → nichts lösen")
+uhr[0] += 3 * 3600
+ns["_scharf_runde"](None, uhr[0], None)
+check(ns["scharf_laden"]() == [] and ns["SCHARF_MAX_S"] == 3 * 3600, "Verfall nach 3 h (statt 12 h)")
+# S9: scharf nur mit Puls-Reader ≥ 0.10.8
+if os.path.exists(ns["SCHARF_PFAD"]):
+    os.remove(ns["SCHARF_PFAD"])
+check(ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ"}, "p", 800, {"tabs": [{"tab_id": "puls-x", "version": "0.10.7"}]}) is False
+      and ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ"}, "p", 801, {"tabs": [{"tab_id": "t-x", "version": "0.10.9"}]}) is False
+      and ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ"}, "p", 802, None) is False, "kein Eintrag ohne Puls-Chrome-Reader ≥ 0.10.8 (alt, normales Chrome, Reader weg)")
+check(ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ"}, "p", 803, READER) is True, "Puls-Reader 0.10.9 → Eintrag")
+
 # LESE-SPERRE Market Opening (Finn-Korrektur 02.11.2026: kein „Konto fest bei offenem Trade“)
 import calendar
 def dubai(h, m):   # 02.11.2026 h:m Dubai → epoch
@@ -154,9 +188,11 @@ frisch_scharf(666)
 uhr[0] = dubai(19, 0)
 check(ns["_lese_sperre_antwort"]("ANDERES123456", "/api/tv-lesen") is None, "offener Trade allein sperrt keine Lesung mehr (Heim-Wache-Regel bleibt)")
 check("konto_fest_sperre" not in SRC and "_konto_fest_antwort" not in SRC, "kein „Konto fest bei offenem Trade“ mehr im Panel")
-for pfad in ("/api/tv-lesen", "/api/tv-konten-liste", "/api/tv-close"):
+for pfad in ("/api/tv-lesen", "/api/tv-konten-liste"):
     k = SRC.index(f'if u.path == "{pfad}":')
     check("_lese_sperre_antwort(konto, u.path)" in SRC[k:k + 2500], f"{pfad} prüft die Lese-Sperre vor dem Lauf")
+k = SRC.index('if u.path == "/api/tv-close":')
+check("_lese_sperre_antwort" not in SRC[k:SRC.index('if u.path == "/api/tv-order":')], "tv-close nie gesperrt, auch 18:30–18:40 (Schließen hat Vorrang)")
 k = SRC.index('if u.path == "/api/tv-konto":')
 check("_lese_sperre_antwort" not in SRC[k:SRC.index('if u.path == "/api/tsx-konto":')], "Trade-Starts (tv-konto) nicht betroffen")
 check(SRC.count('cmd["kein_neustart"] = True') == 3, "bleibt: kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge (tv-konto, tsx-konto, tsx-lesen)")
@@ -171,7 +207,7 @@ w2 = BOT[BOT.index("def _puls_mit_neustart("):BOT.index("def _puls_mit_neustart(
 check('if verboten and art != "nein":' in w2 and BOT.count("verboten=kein_neustart_grund(") == 2, "Neustart-Wrapper: verboten → kein Neustart (Orbit und Topstep)")
 # Tab
 check("scharf: scharfOpen" in HTML and "plan.route !== 'tvv2'" in HTML, "Tab schickt scharf nur bei TradingView-Trades (tvv2) mit dem Hedge-Open")
-check('scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"))' in SRC and 'scharf_loesen(auftrag.get("ticket")' in SRC,
+check('scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"), _rs)' in SRC and 'scharf_loesen(auftrag.get("ticket")' in SRC,
       "Panel: scharf nach der Open-Quittung, gelöst beim Close vom Tab")
 check("threading.Thread(target=_scharf_wache, daemon=True).start()" in SRC, "Schließ-Wache startet mit dem Panel")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")

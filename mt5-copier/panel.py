@@ -2152,7 +2152,8 @@ SCHARF_FLACH_S = 0.3
 SCHARF_FLACH_LESUNGEN = 2
 SCHARF_OFFEN_MIN_S = 3.0
 SCHARF_STAND_MAX_S = 1.0
-SCHARF_MAX_S = 12 * 3600
+SCHARF_MAX_S = 3 * 3600   # S9: 2–4 h statt 12 h — ein liegengebliebener Eintrag hält sonst „kein Neustart“ den halben Tag
+SCHARF_COPIER_KARENZ_S = 30   # so lange nach dem Open zählt ein fehlendes Ticket in der Copier-Liste noch nicht (Status-Takt)
 SCHARF_CLOSE_WIEDER_S = 2.0
 SCHARF_KONTO_KURZ_MIN = 12
 SCHARF_MIN_VERSION = (0, 10, 8)
@@ -2216,8 +2217,10 @@ def scharf_entscheid(e, st, jetzt):
     st = st if isinstance(st, dict) else {}
     konto_ok = scharf_konto_sicher(st.get("konto"), e.get("ext_id"), e.get("nachbarn"))
     alter = st.get("alter_s")
+    # S9 02.11.2026: nur der Positions-Tab im Puls-Chrome zählt (ein TradingView im normalen Chrome mit demselben Konto nie)
     frisch = (st.get("an") is not False and st.get("positionen_ok") is True and not st.get("blind") and isinstance(alter, (int, float))
-              and alter <= SCHARF_STAND_MAX_S and isinstance(st.get("positionen"), list) and _scharf_version_ok(st))
+              and alter <= SCHARF_STAND_MAX_S and isinstance(st.get("positionen"), list) and _scharf_version_ok(st)
+              and str(st.get("positionen_tab") or "").startswith("puls-"))
     if not konto_ok:
         e.update(gesehen=False, flach_seit=None, flach_ts=[])
         return False, e, "Konto nicht sicher"
@@ -2229,6 +2232,9 @@ def scharf_entscheid(e, st, jetzt):
         return False, e, "Position da"
     if not e.get("gesehen"):
         return False, e, "Position im Konto nie gesehen"
+    if st.get("leer_beweis") is False:   # S9: flach nur mit Leer-Beweis wie hedgeReaderMasterDa/1-s-Wächter im Tab; sonst entscheidet der Tab
+        e.update(flach_seit=None, flach_ts=[])
+        return False, e, "flach ohne Leer-Beweis"
     ts = st.get("positionen_ts") or st.get("ts")
     lesungen = list(e.get("flach_ts") or [])
     if ts not in lesungen:
@@ -2253,9 +2259,20 @@ def scharf_speichern(liste):
     os.replace(tmp, SCHARF_PFAD)
 
 
-def scharf_setzen(sch, plan_id, ticket):
+def scharf_puls_reader_ok(st):
+    """REIN RECHNEND (testbar, S9 02.11.2026): meldet ein Reader-Tab im Puls-Chrome (tab_id „puls-…“) Userscript ≥ 0.10.8? Sonst wäre der Eintrag nutzlos."""
+    for t in ((st or {}).get("tabs") or ()):
+        if isinstance(t, dict) and str(t.get("tab_id") or "").startswith("puls-") and _scharf_version_ok({"version": t.get("version")}):
+            return True
+    return False
+
+
+def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
     """Nach der Open-Quittung: Eintrag anlegen (gleiches Ticket ersetzt). sch = body.scharf vom Tab. → True, wenn gemerkt."""
     if not isinstance(sch, dict):
+        return False
+    if not scharf_puls_reader_ok(reader_stand):
+        print(f"[scharf] nicht gemerkt (Ticket {ticket}): kein Puls-Chrome-Reader ≥ 0.10.8", flush=True)
         return False
     ext = str(sch.get("ext_id") or "").strip()[:60]
     wurzel = str(sch.get("wurzel") or "").strip().upper()
@@ -2303,13 +2320,29 @@ def _scharf_close_senden(e):
     return auftrag["cmd_id"]
 
 
+def scharf_copier_tickets():
+    """Offene Solo-Hedge-Tickets aus den frischen Copier-Status-Dateien (status.hedge_solo) → set | None (nicht prüfbar)."""
+    tickets, geprueft = set(), False
+    for inst in instances():
+        st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+        try:
+            age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+        except (ValueError, TypeError):
+            continue
+        if not st.get("running") or age > 15 or not isinstance(st.get("hedge_solo"), list):
+            continue
+        geprueft = True
+        tickets |= {int(x.get("ticket") or 0) for x in st["hedge_solo"] if isinstance(x, dict)}
+    return tickets if geprueft else None
+
+
 def _scharf_stand_lesen():
     import urllib.request
     with urllib.request.urlopen(READER_STAND_URL, timeout=0.5) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
-def _scharf_runde(st, jetzt):
+def _scharf_runde(st, jetzt, offene_tickets=None):
     """Eine Runde der Schließ-Wache (testbar mit Attrappen): Einträge laden, je Eintrag entscheiden, Close senden bzw. Quittung prüfen, zurückschreiben.
     st = Reader-Stand oder None (nicht lesbar). → Anzahl gesendeter Close-Aufträge."""
     liste = scharf_laden()
@@ -2319,7 +2352,11 @@ def _scharf_runde(st, jetzt):
     geaendert, n = False, 0
     for i, e in enumerate(list(liste)):
         if jetzt - float(e.get("at") or 0) >= SCHARF_MAX_S:
-            scharf_loesen(e.get("ticket"), "12 h abgelaufen")
+            scharf_loesen(e.get("ticket"), "abgelaufen")
+            continue
+        # S9: anders zugegangen (Level im Terminal, Hand in MT5, Tab bucht über die Copier-Liste) → Ticket nicht mehr offen → lösen
+        if offene_tickets is not None and int(e.get("ticket") or 0) not in offene_tickets and jetzt - float(e.get("at") or 0) >= SCHARF_COPIER_KARENZ_S:
+            scharf_loesen(e.get("ticket"), "im Copier nicht mehr offen")
             continue
         if e.get("status") == "schliesst":
             q = erg_alle.get(e.get("cmd_id")) if isinstance(erg_alle, dict) else None
@@ -2362,7 +2399,11 @@ def _scharf_wache():
                 st = _scharf_stand_lesen()
             except Exception:
                 st = None
-            _scharf_runde(st, time.time())
+            try:
+                tickets = scharf_copier_tickets()
+            except Exception:
+                tickets = None
+            _scharf_runde(st, time.time(), tickets)
         except Exception as ex:
             print(f"[scharf] Fehler: {type(ex).__name__}: {ex}", flush=True)
             time.sleep(1.0)
@@ -2370,9 +2411,9 @@ def _scharf_wache():
 
 
 # ══ LESE-SPERRE UM DAS MARKET OPENING (Finn 02.11.2026, Korrektur über den Eingang: kein „Konto fest bei offenem Trade“ — die Heim-Wache-Regel bleibt, Puls
-# bleibt zu Hause, wenn der Trade ≤ 2.000 $ vor TP/Liq steht): 18:30–18:40 Asia/Dubai keine Lesungen und keine Kontowechsel in TradingView. tv-lesen,
-# tv-konten-liste und tv-close antworten in dem Fenster puls_beschaeftigt (retry_ok, der Aufrufer wartet wie bei einem laufenden Lauf). Trade-Starts (tv-konto)
-# sind nicht betroffen. Dazu bleibt: bei offenem TradingView-Trade mit Fusion-Hedge (scharfer Eintrag) kein Puls-Chrome-Neustart (Simon 18:31, s. tv-konto/tsx-*). ══
+# bleibt zu Hause, wenn der Trade ≤ 2.000 $ vor TP/Liq steht): 18:30–18:40 Asia/Dubai keine Lesungen und keine Kontowechsel in TradingView. tv-lesen und
+# tv-konten-liste antworten in dem Fenster puls_beschaeftigt (retry_ok, der Aufrufer wartet wie bei einem laufenden Lauf). Trade-Starts (tv-konto) und
+# tv-close sind nie betroffen (Finn: „ein Trade hat die oberste Priorität“, Schließen ist die sichere Richtung). Dazu bleibt: bei offenem TradingView-Trade mit Fusion-Hedge (scharfer Eintrag) kein Puls-Chrome-Neustart (Simon 18:31, s. tv-konto/tsx-*). ══
 LESE_SPERRE_VON = (18, 30)
 LESE_SPERRE_BIS = (18, 40)
 DUBAI_UTC_OFFSET_S = 4 * 3600   # Dubai ohne Sommerzeit
@@ -5651,9 +5692,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
-            _kf = _lese_sperre_antwort(konto, u.path)   # LESE-SPERRE (02.11.2026): 18:30–18:40 Dubai keine Lesung/kein Kontowechsel in TradingView
-            if _kf:
-                return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
                     "msg": "Feld 'konto' (External ID) fehlt oder ist kuerzer als 3 Zeichen"}, ensure_ascii=False))
@@ -6033,7 +6071,11 @@ class Handler(BaseHTTPRequestHandler):
             erg = hedge_solo_zeiten(erg, self.headers.get("X-Prophos-Proxy-Ms"), getattr(self, "_t_ein", None), time.time())
             try:   # SCHARF SCHALTEN / LÖSEN (02.11.2026, s. SCHLIESSEN AUF DEM PC)
                 if aktion == "open" and erg.get("ok") and erg.get("ticket"):
-                    erg["scharf"] = scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"))
+                    try:
+                        _rs = _scharf_stand_lesen() if body.get("scharf") else None
+                    except Exception:
+                        _rs = None
+                    erg["scharf"] = scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"), _rs)
                 elif aktion == "close" and (erg.get("ok") or erg.get("schon_zu")):
                     scharf_loesen(auftrag.get("ticket"), f"Close vom Tab ({auftrag.get('grund') or '-'})")
             except Exception as e:
