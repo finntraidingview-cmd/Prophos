@@ -59,7 +59,7 @@ o.fremd = hedgeReaderEinfachKonto('ANDERES12345678 1 USD', ID); o.exakt = hedgeR
 _ids = ['TDFYSL150000000000']; o.klebt = hedgeReaderEinfachKonto('TDFYSL150000000000159', 'TDFYSL150000000000')
 o.t_leer = tabelleFlach(B0, T()); o.t_nothing = tabelleFlach(B0, T(['Nothing to show yet'])); o.t_make = tabelleFlach(B0, T(['Make your first trade']))
 o.t_laedt = tabelleFlach(B0, T(['Loading…'])); o.t_conn = tabelleFlach(B0, T(['Connecting to broker'])); o.t_fehler = tabelleFlach(B0, T(['Something went wrong'])); o.t_keine = tabelleFlach(B0, null)
-o.t_daten = tabelleFlach(B0, T(['MNQZ6', 'Buy', '3', '28,700.25', '+120.00 USD'])); o.t_zwei = tabelleFlach(B0, T(['', '3', '28,700.25'])); o.t_zeile_gelesen = tabelleFlach({ zeilen: 1 }, T()); o.t_ohne_befund = tabelleFlach(null, T())
+o.t_daten = tabelleFlach(B0, T(['MNQZ6', 'Buy', '3', '28,700.25', '+120.00 USD'])); o.t_zwei = tabelleFlach(B0, T(['', '3', '28,700.25'])); o.t_ziffer = tabelleFlach(B0, T(['28,700.25'])); o.t_zeile_gelesen = tabelleFlach({ zeilen: 1 }, T()); o.t_ohne_befund = tabelleFlach(null, T())
 print(JSON.stringify(o))
 """])
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as t:
@@ -82,7 +82,7 @@ check(not e["kurz_anderes_wort"], "Kontowort seit dem Klick anders: nein")
 check(e["exakt"] and e["klebt"] and not e["fremd"], "exakt und angeklebte Ziffern ja, fremd nein")
 check(e["t_leer"] and e["t_nothing"] and e["t_make"], "leere Tabelle ohne Fehlertext: flach, auch ohne bekannten Leer-Text")
 check(not (e["t_laedt"] or e["t_conn"] or e["t_fehler"] or e["t_keine"]), "Laden, Verbinden, Fehler, keine Tabelle: kein Urteil")
-check(not (e["t_daten"] or e["t_zwei"]), "Tabelle mit Datenzellen ohne data-label: blind, nie flach")
+check(not (e["t_daten"] or e["t_zwei"] or e["t_ziffer"]), "Tabelle mit Datenzellen ohne data-label oder einzelner Ziffer: blind, nie flach")
 check(not (e["t_zeile_gelesen"] or e["t_ohne_befund"]), "Reader las eine Zeile oder kein Befund: nie flach")
 _m = HTML[HTML.index("function hedgeReaderMasterDa("):HTML.index("window._hedgeReaderMasterDa")]
 check("!hedgeReaderEinfachKonto(st.konto, kontoPlan)" in _m and _m.index("hedgeMasterTeilweise") < _m.index("st.leer_beweis === false || !readerKontoPasst"), "Rückkehr-Wache kennt gekürzte Konten; „flach“ nur mit Leer-Text und voll belegtem Konto")

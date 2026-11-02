@@ -1253,7 +1253,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       for (const td of (zellen || [])) if (String(td.textContent || '').trim() && ++n > 1) return false;
     }
     const rest = [...tds].map((td) => String(td.textContent || '')).join(' ').replace(/\s+/g, ' ').trim();
-    return !RX_LEER_NICHT.test(rest);
+    return !RX_LEER_NICHT.test(rest) && !/\d/.test(rest);   // Ziffer = moeglicher Wert einer Zeile, wie leerStrukturPasst (S9)
   }
   let leerBeweisMerk = true;   // 0.10.8: fuer leer_beweis im Payload — die anderen Leser (1-s-Waechter, Master-nie-da, Neuladen) bleiben beim Leer-Text
   function blindGrund(positionen) {
