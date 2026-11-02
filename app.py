@@ -13337,6 +13337,52 @@ def lt_balance_sprung(route, tv, fin):
     return {"balance": bal, "tages": tages, "differenz": round(bal - tages, 2)}
 
 
+def lt_kette_teil(nr, q, z, e1=None):
+    """REIN RECHNEND (testbar): ein Trade des Topstep-Tags für die Abhak-Zeile (Finn 02.11.2026 ~19:15 Dubai: „wenn ich einmal abhaken würde,
+    zusammenfassen, was im ersten und im zweiten passiert ist, jeweils"). q = Plan-Zeile (oder None), z = Radar-Zeile davon (oder None),
+    e1 = genaues Ergebnis von Trade 1 aus kette.e1 von Trade 2 (Rückfall, wenn Trade 1 nicht mehr in der Liste steht).
+    → {nr, richtung 'buy'|'sell'|None, pl, art 'gelesen'|'eingetragen'|'geschaetzt'|None, ende 'tp'|'sl'|'liq'|'hand'|None}.
+    P&L nur aus der genauen Puls-Lesung (ap_kette_t1_fertig), sonst aus dem am Plan eingetragenen Wert, sonst die Demo-Schätzung — als solche markiert."""
+    q, z = q or {}, z or {}
+    teil = {"nr": nr, "richtung": (z.get("richtung") or q.get("richtung") or None), "pl": None, "art": None, "ende": None}
+    if teil["richtung"] not in ("buy", "sell"):
+        teil["richtung"] = None
+    if q:
+        bal, _g = ap_kette_t1_fertig(q)
+        if bal:
+            teil["pl"], teil["art"] = round(float(bal[1]) - float(bal[0]), 2), "gelesen"
+        elif _wd_num(q.get("master_pl")) is not None:
+            # Vorbelegung mit der Schätzung (final.master_pl_schaetzung, Gegencheck S19) ist keine Eintragung → geschätzt
+            _fin = ((q.get("mt5_baseline") or {}).get("final") or {}) if isinstance(q.get("mt5_baseline"), dict) else {}
+            _gs = _wd_num(_fin.get("master_pl_schaetzung"))
+            gesch = _gs is not None and abs(float(_wd_num(q.get("master_pl"))) - _gs) < 0.01
+            teil["pl"], teil["art"] = round(float(_wd_num(q.get("master_pl"))), 2), ("geschaetzt" if gesch else "eingetragen")
+    if teil["pl"] is None and _wd_num(e1) is not None:
+        teil["pl"], teil["art"] = round(float(_wd_num(e1)), 2), "gelesen"     # kette.e1 schreibt ap_kette_tick nur aus der genauen Lesung
+    d = z.get("demo") if isinstance(z.get("demo"), dict) else {}
+    if teil["pl"] is None and _wd_num(d.get("pl_usd")) is not None:
+        teil["pl"], teil["art"] = round(float(_wd_num(d.get("pl_usd"))), 2), "geschaetzt"
+    fin = ((q.get("mt5_baseline") or {}).get("final") or {}) if isinstance(q.get("mt5_baseline"), dict) else {}
+    if d.get("status") == "tp":
+        teil["ende"] = "tp"
+    elif d.get("status") == "liquidiert":
+        teil["ende"] = "sl" if d.get("stop") == "sl" else "liq"
+    elif str(fin.get("grund") or "") in ("hand", "beendet_knopf"):
+        teil["ende"] = "hand"
+    return teil
+
+
+def lt_kette_teile(q, z, vor_q=None, vor_z=None):
+    """REIN RECHNEND (testbar): alle Trades des Topstep-Tags bis zu diesem (Trade 1 [, Trade 2]) für die Radar-Zeile → Liste oder None.
+    Trade 2 holt Trade 1 über kette.vor (vor_q/vor_z, sonst nur kette.e1)."""
+    k = ((q or {}).get("mt5_baseline") or {}).get("kette") if isinstance((q or {}).get("mt5_baseline"), dict) else None
+    if not isinstance(k, dict) or int(k.get("nr") or 0) not in (1, 2):
+        return None
+    if int(k.get("nr")) == 1:
+        return [lt_kette_teil(1, q, z)]
+    return [lt_kette_teil(1, vor_q, vor_z, e1=k.get("e1")), lt_kette_teil(2, q, z)]
+
+
 def lt_planer_quelle(notes):
     """REIN RECHNEND (testbar): Aus welchem Planer kommt der Plan? (Radar-Chip, Finn 30.10.2026 14:1x) Jeder Planer schreibt seinen Namen an den Anfang
     von notes: ap_notiz „Auto-Planer · …", fdp_planen „Funded-Planer …", fcp „Funded-CFD-Planer …", Farmer „Winning-Day-Farmer"; Hedge-Schritte hängen nur
@@ -13888,6 +13934,7 @@ def admin_live_trades():
         except Exception as e:
             _lt_archiv = set()
             print(f"[live-trades] ⚠️ Archiv: {type(e).__name__}: {e}", flush=True)
+        z_je_id = {str(z.get("id")): z for z in trades}
         for z in trades:
             q = je_id.get(str(z.get("id"))) or {}
             z["orbit_v3"], z["konto_typ"] = bool(q.get("orbit_v3")), q.get("konto_typ")
@@ -13900,6 +13947,17 @@ def admin_live_trades():
             z["konto_aktuell"] = {"typ": _ak.get("account_type"), "ziel_erreicht_at": _ak.get("ziel_erreicht_at")} if _ak else None
             z["kette_grund"] = (((q.get("mt5_baseline") or {}).get("kette") or {}).get("t2_grund")
                                 if isinstance(q.get("mt5_baseline"), dict) else None)
+            # Topstep-Tag (Finn 02.11.2026 ~19:15 Dubai: „nur einmal abhaken", je Trade zusammenfassen): Nummer, Fensterende für Trade 2
+            # (ap_kette_lesen_bis) und die Trades des Tages bis hier (lt_kette_teile) — Radar zeigt sie an der einen Abhak-Zeile
+            _kq = ((q.get("mt5_baseline") or {}).get("kette") or {}) if isinstance(q.get("mt5_baseline"), dict) else {}
+            if q.get("route") == "tsv2" and isinstance(_kq, dict) and _kq.get("nr"):
+                z["kette_nr"], z["kette_lesen_bis"] = _kq.get("nr"), _kq.get("lesen_bis")
+                if q.get("status") == "review":
+                    _vid = str(_kq.get("vor") or "")
+                    try:
+                        z["kette_teile"] = lt_kette_teile(q, z, je_id.get(_vid), z_je_id.get(_vid))
+                    except Exception as e:
+                        print(f"[live-trades] ⚠️ Kette-Teile {str(q.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
             if mit_echo and isinstance(z.get("konto"), dict):
                 z["konto"]["archiviert"] = str(q.get("master_account_id") or "") in _lt_archiv
         if mit_echo:
@@ -33375,6 +33433,24 @@ def ap_kette_tagesende(k, bal, mpl, e_tag, blown, jetzt_iso):
             "balance": float(bal[1]), "blown": bool(blown), "at": jetzt_iso}
 
 
+def ap_kette_lesen_bis(k, ended_at, kette, tz, fenster_tz=None):
+    """REIN RECHNEND (testbar): Bis wann darf nach Trade 1 noch ein Trade 2 kommen? → ISO (UTC) oder None.
+    Topstep-Tag (Finn 02.11.2026 ~19:15 Dubai: „ich will nur einmal abhaken"): solange ein Trade 2 möglich ist, ist Trade 1 keine Abhak-Zeile — der
+    Radar hält ihn in „Wartet", Puls liest nach den 8 Versuchen weiter bis zu diesem Zeitpunkt (Ende des Fensters t2_bis am Handelstag des Endes, wie
+    _ap_kette_t1_stand). t2_bis gilt wie beim Anlegen von Trade 2 (ap_kette_tick → ap_start_bis) in zeiten.fenster_tz, falls gesetzt, sonst in tz.
+    Reparatur-Tag oder ein_trade: kein Trade 2 → None. Ohne Kettenregel → None (dann gilt der alte Weg)."""
+    k = k or {}
+    if int(k.get("nr") or 0) != 1 or k.get("reparatur") or k.get("ein_trade") or not kette or not kette.get("t2_bis"):
+        return None
+    ende = _ap_ts(ended_at)
+    if not ende:
+        return None
+    tag = ende.astimezone(tz).date()
+    m = _ap_hhmm(kette["t2_bis"])
+    bis = datetime(tag.year, tag.month, tag.day, m // 60, m % 60, tzinfo=_ap_tz(fenster_tz) if fenster_tz else tz)
+    return bis.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _ap_kette_t1_stand(p, kette, tz, jetzt, sperren):
     """Trade 1, nach dem rechnerisch ein Trade 2 kommt (S2 30.10.2026): → "weiter" (Trade 2 steht, abhaken wie immer), "warten" (noch nicht angelegt, bleibt
     in Überprüfen, der Tick kann ihn auch von dort anlegen) oder "letzter" (Firma gesperrt oder Fenster bis t2_bis vorbei: es kommt keiner mehr). Vorher
@@ -33408,12 +33484,15 @@ def ap_kette_abhaken(jetzt=None):
                                                "ended_at,completed_at,konto_typ", "route": "eq.tsv2", "status": "eq.review",
                                      "mt5_baseline->kette->>nr": "in.(1,2)"}) or []
     fertig = []
-    firmen = sperren = None
+    firmen = sperren = regeln = None
     for p in rows:
         if ((p.get("mt5_baseline") or {}).get("kette") or {}).get("tagesende"):
             continue                                  # wartet schon auf Finns Haken — nicht jede Minute neu schreiben
         bal, grund = ap_kette_t1_fertig(p)
         if grund:
+            if regeln is None:
+                regeln = _ap_kette_regeln_laden()
+            _ap_kette_lesen_bis_schreiben(p, regeln, jetzt)   # Topstep-Tag: ungelesener Trade 1 → Fensterende für Radar und Puls
             continue
         jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
         mpl = round(float(bal[1]) - float(bal[0]), 2)
@@ -33472,11 +33551,9 @@ def ap_kette_abhaken(jetzt=None):
         if p.get("updated_at"):
             filt["updated_at"] = f"eq.{p['updated_at']}"
         if firmen is None:
-            try:
-                firmen = ((sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}).get("firmen") or []
-            except Exception as e:                    # Lesefehler → 1/2 läuft weiter automatisch, die Kette darf nicht stehen bleiben
-                firmen = []
-                print(f"[auto-plan] ⚠️ Topstep-Kette Regeln: {type(e).__name__}: {e}", flush=True)
+            if regeln is None:
+                regeln = _ap_kette_regeln_laden()     # Lesefehler → {}: 1/2 läuft weiter automatisch, die Kette darf nicht stehen bleiben
+            firmen = regeln.get("firmen") or []
         regel = ap_regel_finden(firmen, p.get("master_firm"))
         kette_r = ap_kette_regel(regel) if regel else None
         letzter = bool(upd.get("blown")) or ap_kette_letzter_trade(k, bal, regel, kette_r)
@@ -33490,6 +33567,8 @@ def ap_kette_abhaken(jetzt=None):
                         sb_update("trade_plans", filt, {x: upd[x] for x in ("master_pl", "pl_quelle", "konto_typ", "ended_at") if x in upd})
                     except Exception as e:
                         print(f"[auto-plan] ⚠️ Topstep-Kette P&L {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
+                # Topstep-Tag: erst NACH dem Schreiben mit updated_at-Sperre (das RPC setzt updated_at neu), Radar zeigt „Trade 2 folgt"
+                _ap_kette_lesen_bis_schreiben(p, regeln or {}, jetzt)
                 continue
             letzter = t1_stand == "letzter"
         if letzter:
@@ -33515,6 +33594,38 @@ def ap_kette_abhaken(jetzt=None):
         except Exception as e:
             print(f"[auto-plan] ⚠️ Topstep-Kette abhaken {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
     return fertig
+
+
+def _ap_kette_regeln_laden():
+    """auto_plan_regeln.regeln (firmen, zeiten) für ap_kette_abhaken; Lesefehler → {} (geloggt)."""
+    try:
+        return (sb_select("auto_plan_regeln", {"select": "regeln", "id": "eq.1"}) or [{}])[0].get("regeln") or {}
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Topstep-Kette Regeln: {type(e).__name__}: {e}", flush=True)
+        return {}
+
+
+def _ap_kette_lesen_bis_schreiben(p, regeln, jetzt):
+    """Topstep-Tag (Finn 02.11.2026 ~19:15 Dubai: „ich will nur einmal abhaken"): Fensterende für Trade 2 (ap_kette_lesen_bis) einmal an Trade 1 schreiben
+    (kette.lesen_bis) — Radar (Wartet statt Abhak-Zeile) und Puls (liest über die 8 Versuche hinaus) lesen es. lesen_bis_at merkt, dass gerechnet wurde
+    (auch bei None), damit nicht jede Minute geschrieben wird. Ohne Regel/Ende nichts (nächster Takt). Nur ungelesene bzw. wartende Trade 1 — das RPC
+    setzt updated_at neu, darum nie vor einem Schreiben mit updated_at-Sperre im selben Takt (Gegencheck S19). Fehler nur loggen."""
+    k0 = (p.get("mt5_baseline") or {}).get("kette") or {}
+    if int(k0.get("nr") or 0) != 1 or k0.get("lesen_bis_at") or k0.get("tagesende"):
+        return
+    regel = ap_regel_finden((regeln or {}).get("firmen") or [], p.get("master_firm")) if (regeln or {}).get("firmen") else None
+    kr = ap_kette_regel(regel) if regel else None
+    ende = p.get("ended_at") or ((p.get("mt5_baseline") or {}).get("final") or {}).get("at")
+    if not kr or not ende:
+        return
+    try:
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch_in", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": str(p["id"]), "p_key": "kette", "p_status": None,
+                              "p_patch": {"lesen_bis": ap_kette_lesen_bis(k0, ende, kr, _ap_tz(AP_TZ_TAG), ((regeln or {}).get("zeiten") or {}).get("fenster_tz")),
+                                          "lesen_bis_at": jetzt.isoformat().replace("+00:00", "Z")}})
+        _sb_pruefen(r)
+    except Exception as e:
+        print(f"[auto-plan] ⚠️ Topstep-Kette lesen_bis {str(p['id'])[:8]}: {type(e).__name__}: {e}", flush=True)
 
 
 def _ap_kette_grund(t1, grund):

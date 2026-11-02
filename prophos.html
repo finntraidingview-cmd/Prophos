@@ -30828,7 +30828,7 @@
     if(lb && lb.pruefen) return `Login prüfen: ${lb.n} Lesungen scheiterten am Login/an der Verbindung${lb.code ? ' (' + lb.code + ')' : ''} — „Jetzt lesen" von Hand`
     if(lb) return `Pause bis ${new Date(lb.bis).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — Login-/Verbindungsfehler${lb.code ? ' (' + lb.code + ')' : ''}, kein schneller neuer Login`
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
-    if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
+    if(versuche >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p, jetzt)) return `${versuche} Versuche erfolglos`
     // Position laut Puls noch offen (08.10.2026): zählt nicht als Versuch, läuft aber im selben Takt weiter (Pausen bis 15 min) —
     // höchstens 24 h ab Ende-Erkennung, danach nur noch „Jetzt lesen" von Hand (nie endlos)
     const offenN = Number(fin.puls_offen_n) || 0
@@ -30882,6 +30882,21 @@
     return n === 1 || n === 2 ? n : null
   }
   window._tpKetteNr = tpKetteNr   // Test-Haken
+  // TOPSTEP-TAG (Finn 02.11.2026 ~19:15 Dubai: „ich will nur einmal abhaken"): solange nach Trade 1 noch ein Trade 2 kommen kann (Backend
+  // app.py ap_kette_lesen_bis → mt5_baseline.kette.lesen_bis, Fensterende t2_bis), gibt die Nachlesung nach TV_ENDLESUNG_MAX Versuchen nicht auf,
+  // sondern liest im 15-min-Takt (letzte Stufe von TV_ENDLESUNG_PAUSE_S, gestreut) weiter — Trade 2 entsteht nur aus der genauen Lesung (Finn 08.10.).
+  // Login-Bremse und „aufgegeben" (Konto weg, geblowt) gelten weiter. Danach wie bisher: Haken mit Schätzung. -> bool
+  // Obergrenze (Gegencheck S19): höchstens TV_ENDLESUNG_KETTE_MAX Versuche insgesamt — ein bleibender Lesefehler zieht den Puls-Chrome nicht den ganzen Nachmittag
+  // aus dem Konto; danach wie bisher Haken mit Schätzung
+  const TV_ENDLESUNG_KETTE_MAX = 30
+  function tpKetteLesenWeiter(p, jetzt){
+    const k = p && p.mt5Baseline && p.mt5Baseline.kette, fin = (p && p.mt5Baseline && p.mt5Baseline.final) || {}
+    if(!k || Number(k.nr) !== 1 || k.tagesende) return false
+    if((Number(fin.puls_versuche) || 0) >= TV_ENDLESUNG_KETTE_MAX) return false
+    const bis = Date.parse(k.lesen_bis || '') || 0
+    return !!bis && (jetzt || Date.now()) < bis
+  }
+  window._tpKetteLesenWeiter = tpKetteLesenWeiter   // Test-Haken
   // Topstep-Kette: was mit Trade 2 ist (Prüfer Slave 2, 08.10.2026: „fehlt tv.balance_start, wartet T2 still für immer — bitte zeigen").
   // Das Backend (ap_kette_tick) schreibt den Grund bzw. „Trade 2 angelegt …" an Trade 1 (mt5_baseline.kette.t2_grund); hier nur Anzeige.
   function tpKetteChip(p){
@@ -31314,7 +31329,7 @@
           if(zurueck) return { ok: false, offen: true, wieder_offen: true, msg: `Position laut Puls noch offen — Ende über ${zurueck} verworfen, Plan wieder unter „Läuft“` }
           return { ok: false, offen: true, msg: `Position laut Puls noch offen (${patch.puls_offen_n}×) — kein Versuch verbraucht, nächste Lesung im Takt${exitTxt}` }
         }
-        if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
+        if(!force && versuch >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p0, Date.now()) && typeof atToast === 'function') atToast(`⚠ ${name}: ${p0.route === 'tsv2' ? 'Balance' : "Today's P&L"} nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         // Login-Bremse: beim zweiten Login-/Verbindungsfehler einmal deutlich sagen, dass Puls jetzt nicht mehr von selbst liest
         if(patch.puls_login_fehler === TV_ENDLESUNG_LOGIN_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Puls kam ${TV_ENDLESUNG_LOGIN_MAX}× nicht durch den Login/die Verbindung (${patch.puls_login_code}) — Login am PC prüfen, dann „Jetzt lesen"`, 'end')
         try{ renderTradePlans() }catch(_){}
@@ -37561,7 +37576,33 @@
    * fertig seit .820), nur mit Start-Balance (ohne sie gibt es keinen P&L aus der Balance — wie tvV2NachleseOffen), noch keine
    * End-Balance / kein Today's P&L / keine Puls-Quelle, nicht aufgegeben, weniger als TV_ENDLESUNG_MAX Versuche. Gelesen oder
    * aufgegeben → Beendet. Nur Anzeige, an der Nachlesung selbst ändert sich nichts. -> {ab, versuche} | null */
+  /* TOPSTEP-TAG (Finn 02.11.2026 ~19:15 Dubai: „der zweite Trade: wenn ich einmal abhaken würde, zusammenfassen, was im ersten und im zweiten
+   * passiert ist, jeweils. Aber ich will nur einmal abhaken."): Trade 1 der Kette, nach dem noch ein Trade 2 kommen kann (Fensterende kette_lesen_bis
+   * aus app.py ap_kette_lesen_bis), ist nie eine Abhak-Zeile — er steht in „Wartet", ungelesen mit „Jetzt lesen" (Puls liest über die 8 Versuche
+   * hinaus, tpKetteLesenWeiter), gelesen als „Trade 2 folgt". Der eine Haken kommt am letzten Trade des Tages (Tagesergebnis, wdlKetteTagChip).
+   * Kein Trade 2 mehr möglich (Fenster vorbei, Reparatur-Tag, geblowt, Konto weg, Tagesende geschrieben) → wie bisher. -> bool */
+  function wdlKetteT1Offen(t, jetzt){
+    if(!t || t.route !== 'tsv2' || t.status !== 'review' || Number(t.kette_nr) !== 1 || t.kette_tag || t.blown === true) return false
+    const bis = Date.parse(t.kette_lesen_bis || '') || 0
+    if(!bis || (jetzt || Date.now()) >= bis) return false
+    // ohne Start-Balance kommt nie ein Trade 2 (ap_kette_t1_fertig); „von Hand abhaken" (unplausibel, Balance-Sprung) braucht Finn sofort (Gegencheck S19)
+    if(t.balance_start == null || t.balance_start === '' || !isFinite(Number(t.balance_start))) return false
+    if(/unplausibel|Balance-Sprung|von Hand|ohne Start-Balance/i.test(String(t.kette_grund || ''))) return false
+    const e = t.endlesung || {}
+    if(e.konto_geblowt || e.konto_weg || e.konto_weg_vermutet || e.puls_aufgegeben) return false
+    if((Number(e.puls_versuche) || 0) >= TV_ENDLESUNG_KETTE_MAX) return false   // Puls liest nicht mehr (tpKetteLesenWeiter) → Haken mit Schätzung
+    return !wdlTpUndWeg(t)
+  }
+  window._wdlKetteT1Offen = wdlKetteT1Offen   // Test-Haken
   function wdlWartet(t){
+    const w = wdlWartetLesung(t)
+    if(w) return w
+    // Topstep-Tag: Trade 1 GENAU gelesen (wie ap_kette_t1_fertig: Puls, keine Folgetrade-Balance), Trade 2 wird noch angelegt bzw. kann noch kommen → wartet ohne Haken
+    const e = (t && t.endlesung) || {}
+    const gelesen = e.balance_end != null && e.balance_end !== '' && isFinite(Number(e.balance_end)) && e.quelle === 'puls' && e.balance_quelle !== 'folgetrade'
+    return gelesen && wdlKetteT1Offen(t, Date.now()) ? { ab: null, versuche: 0, letzte: 0, login: null, bis: null, loginN: 0, loginCode: '', kette: 't2' } : null
+  }
+  function wdlWartetLesung(t){
     if(wdlIstPolar(t)) return null   // Polar (20.10.2026): keine Puls-Nachlesung — die Abrechnung des Laufs schreibt beide P&L, Hand-Polar hakt Finn ab
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v), e = (t && t.endlesung) || {}
     if(!t || t.status !== 'review' || n(t.balance_start) == null || n(t.balance_end) != null) return null
@@ -37571,8 +37612,9 @@
     const versuche = Number(e.puls_versuche) || (e.puls_at ? 1 : 0)
     // Login-Bremse (30.09.2026): nach zwei Login-/Verbindungsfehlern bleibt der Trade in „Wartet" („Login prüfen" + „Jetzt lesen")
     const lb = tvV2LoginBremse(e, Date.now())
-    if(versuche >= TV_ENDLESUNG_MAX && !(lb && lb.pruefen)) return null
-    return { ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche, letzte: Date.parse(e.puls_at || '') || 0, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
+    const kette = wdlKetteT1Offen(t, Date.now())   // Topstep-Tag: Trade 1 liest bis zum Fensterende weiter (tpKetteLesenWeiter)
+    if(versuche >= TV_ENDLESUNG_MAX && !(lb && lb.pruefen) && !kette) return null
+    return { kette: kette ? 'lesen' : null, ab: tvV2NachleseAb(t.id, e.at || t.ended_at), versuche, letzte: Date.parse(e.puls_at || '') || 0, login: lb ? (lb.pruefen ? 'pruefen' : 'pause') : null, bis: lb ? lb.bis : null, loginN: lb ? lb.n : 0, loginCode: lb ? lb.code : '' }
   }
   /* LESUNG VERLOREN (08.10.2026, Finn-Screenshot Radar: Mike · Tradeify …3962 stand 20 h auf „wird gelesen · seit 20 h"): die Zeile
    * zählte stumpf ab der Nachlese-Zeit hoch, obwohl Puls nie gelesen hatte (puls_versuche leer, beide Endlesungs-Signale seit 06./07.10.
@@ -37817,17 +37859,39 @@
   // („💀 geblowt" / „⏸ Tageslimit" schlägt SL/Liq der Demo) und Konto-Zelle
   // TAGESERGEBNIS TOPSTEP (Finn 30.10.2026 13:41: „dass ich das Endresultat vom Tag sehe und das auch noch abhaken muss"): der letzte Trade des
   // Tages bleibt in Überprüfen, die Karte zeigt Trade 1 + Trade 2 = Summe plus Balance (app.py ap_kette_tagesende, Feld kette_tag)
+  // JE TRADE (Finn 02.11.2026 ~19:15 Dubai: „wenn ich einmal abhaken würde, zusammenfassen, was im ersten und im zweiten passiert ist, jeweils. Aber ich will
+  // nur einmal abhaken."): darunter je Trade eine Zeile Richtung · Ende (TP/SL/Liq/Hand) · P&L aus app.py lt_kette_teile (Feld kette_teile). Geschätzte Werte
+  // (keine Puls-Lesung, nur Demo) tragen ≈. Fehlt das Tagesergebnis (letzter Trade ungelesen), rechnet der Chip die Summe aus den Teilen — dann immer mit ≈,
+  // solange ein Teil nur geschätzt ist. Trade 1, nach dem noch ein Trade 2 kommen kann, zeigt keinen Chip (er wartet, wdlKetteT1Offen). Nur Anzeige.
+  function wdlKetteTeilZeile(x, sg){
+    if(!x || typeof x !== 'object') return ''
+    const ri = x.richtung === 'buy' ? 'Long' : x.richtung === 'sell' ? 'Short' : ''
+    const en = { tp: 'TP', sl: 'SL', liq: 'Liq', hand: 'Hand' }[x.ende] || ''
+    const pl = (x.pl == null || !isFinite(Number(x.pl))) ? '–' : (x.art === 'geschaetzt' ? '≈ ' : '') + sg(Number(x.pl))
+    const tip = (x.art === 'geschaetzt' ? 'P&L geschätzt aus dem Kurs — keine Balance-Lesung' : x.art === 'eingetragen' ? 'P&L am Plan eingetragen' : x.art === 'gelesen' ? 'P&L aus der Balance-Lesung' : '')
+      + (en ? ` · Ende ${en} laut Kurs-Verlauf (Minutenkerzen), nicht gelesen` : '')
+    return `<br><span title="${escapeHtml(tip)}">T${Number(x.nr) || '?'}${ri ? ' ' + ri : ''}${en ? ' · ' + en : ''} · ${pl}</span>`
+  }
   function wdlKetteTagChip(t){
     const k = t && t.kette_tag
-    if(!k || typeof k !== 'object') return ''
     const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
-    const tag = n(k.tag_pl), bal = n(k.balance), t1 = n(k.t1_pl), t2 = n(k.t2_pl)
-    if(tag == null) return ''
+    const teile = (t && Array.isArray(t.kette_teile)) ? t.kette_teile.filter(x => x && typeof x === 'object') : []
     const de = v => Math.round(Math.abs(v)).toLocaleString('de-DE')
     const sg = v => `${v < 0 ? '−' : '+'}${de(v)} $`
-    const summe = `<b style="color:${tag < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'}">${sg(tag)}</b>`
+    const farbe = v => v < 0 ? 'var(--danger-ink, #b91c1c)' : 'var(--good-ink, #15803d)'
+    const jeTrade = teile.map(x => wdlKetteTeilZeile(x, sg)).join('')
+    if(!k || typeof k !== 'object'){
+      // Ohne Tagesergebnis (letzter Trade ohne Lesung, oder Trade 1 nach dem Fenster): Summe aus den Teilen, nur in Überprüfen und nie für einen wartenden Trade 1
+      if(!teile.length || !t || t.status !== 'review' || wdlKetteT1Offen(t, Date.now()) || teile.some(x => n(x.pl) == null)) return ''
+      const summe = teile.reduce((a, x) => a + Number(x.pl), 0), gesch = teile.some(x => x.art === 'geschaetzt')
+      const kopf = teile.length > 1 ? `${teile.map((x, i) => (i ? (Number(x.pl) < 0 ? ' − ' : ' + ') + de(Number(x.pl)) + ' $' : sg(Number(x.pl)))).join('')} = ` : '(1 Trade) '
+      return `<span class="wdl-kette-tag" title="Tagesergebnis aus den Trades des Tages${gesch ? ' — ≈: mindestens ein Trade nur geschätzt, beim Abhaken prüfen' : ''}">Tag ${kopf}<b style="color:${farbe(summe)}">${gesch ? '≈ ' : ''}${sg(summe)}</b>${jeTrade}</span>`
+    }
+    const tag = n(k.tag_pl), bal = n(k.balance), t1 = n(k.t1_pl), t2 = n(k.t2_pl)
+    if(tag == null) return ''
+    const summe = `<b style="color:${farbe(tag)}">${sg(tag)}</b>`
     const weg = (t1 != null && t2 != null) ? `${sg(t1)} ${t2 < 0 ? '−' : '+'} ${de(t2)} $ = ${summe}` : `(1 Trade) ${summe}`
-    return `<span class="wdl-kette-tag" title="Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart">Tag ${weg}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
+    return `<span class="wdl-kette-tag" title="Tagesergebnis des Kontos: End-Balance minus Balance zum Tagesstart">Tag ${weg}${jeTrade}${bal != null ? `<br>Balance ${de(bal)} $` : ''}</span>`
   }
   function wdlBlowErg(t){
     // Plan als geblowt abgehakt (09.10.2026, auch automatisch: echte Balance ≤ Boden, ap_blow_auto_tick) — gilt auch für Echo ohne Liq
@@ -38824,7 +38888,9 @@
         // Wartet: zu, P&L aus der Balance kommt noch — Stand der Nachlesung statt Ergebnis, P&L „–" (Demo-Schätzung nur im Tooltip)
         art = 'wart'
         // Vorsatz („ab 07:33 · " / „wird gelesen · ") in wdl-z-ab: am Handy ausgeblendet, dort bleibt „in 58 min" neben dem Knopf
-        const txt = wt.login === 'pruefen' ? `<span class="wdl-z-ab">Wartet · </span>Login prüfen`
+        const ketteBis = wt.kette ? zeit(Date.parse(t.kette_lesen_bis || '') || null) : ''
+        const txt = wt.kette === 't2' ? `<span class="wdl-z-ab">Topstep-Tag · </span>Trade 2 folgt`
+          : wt.login === 'pruefen' ? `<span class="wdl-z-ab">Wartet · </span>Login prüfen`
           : wt.login === 'pause' ? `<span class="wdl-z-ab">Login-Fehler · </span>ab ${zeit(wt.bis)}`
           : wt.ab && jetzt < wt.ab ? `<span class="wdl-z-ab">ab ${zeit(wt.ab)} · </span>in ${minTxt(wt.ab - jetzt)}`
           : wdlLesungVerloren(wt, jetzt) ? `<span class="wdl-z-ab">Lesung verloren · </span>seit ${minTxt(wdlLesungVerloren(wt, jetzt))}`   // 08.10.2026: kein Leseversuch seit 20 min — PC-Tab/Puls antwortet nicht
@@ -38838,14 +38904,18 @@
         // mehr, die Zeile hing in „Wartet" ohne Ausweg. Jetzt steht neben „Jetzt lesen" der Abhaken-Knopf (derselbe Weg wie in Überprüfen,
         // mklWdErledigtOeffnen → Erledigt-Popup mit P&L von Hand), sobald das Konto bestanden ist, Puls am Login scheitert (Login prüfen /
         // Login-Fehler) oder die Lesung verloren ist. Solange Puls normal liest, bleibt die Zeile wie bisher.
-        const abhakenZeigen = !!(wdlBestandenChip(t) || wt.login || wdlLesungVerloren(wt, jetzt)), abSperre = wdlAbhakenSperre(t)
+        // Topstep-Tag (Finn 02.11.2026): Trade 1, nach dem noch ein Trade 2 kommen kann, bekommt keinen Haken — der eine Haken sitzt am Tagesergebnis
+        const abhakenZeigen = !!(wdlBestandenChip(t) || (!wt.kette && (wt.login || wdlLesungVerloren(wt, jetzt)))), abSperre = wdlAbhakenSperre(t)
         const abKnopf = abhakenZeigen ? `<button type="button" class="btn btn-ghost el-knopf" data-wdl-abhaken="${escapeHtml(pid)}"${abSperre ? ' disabled' : ''} title="${escapeHtml(abSperre || (wdlBestandenChip(t) ? 'Konto bestanden — bei Tradeify nicht mehr im Dropdown, Puls kann es nicht lesen: ohne Lesung abhaken, P&L von Hand' : 'Ohne Lesung abhaken — P&L von Hand eintragen'))}">Jetzt abhaken</button>` : ''
-        miZ = zelle('mi wdl-z-akt', `${(wdlBestandenChip(t) || wdlFehltChip(t)) ? `<span class="wdl-erg">${wdlBestandenChip(t) || wdlFehltChip(t)}</span>` : ''}<span>${txt}</span><button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>${abKnopf}`,
-          { tip: wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
+        miZ = zelle('mi wdl-z-akt', `${(wdlBestandenChip(t) || wdlFehltChip(t)) ? `<span class="wdl-erg">${wdlBestandenChip(t) || wdlFehltChip(t)}</span>` : ''}<span>${txt}</span>${wt.kette === 't2' ? '' : `<button type="button" class="btn btn-ghost el-knopf" data-wdl-lesen="${escapeHtml(pid)}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Balance jetzt nachlesen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>`}${abKnopf}`,
+          { tip: wt.kette === 't2' ? `Topstep-Tag: Trade 1 ist gelesen, Trade 2 kommt noch (bis ${ketteBis})${t.kette_grund ? ' — ' + t.kette_grund : ''}. Abgehakt wird einmal am Tagesergebnis des letzten Trades`
+              : wt.kette ? `Topstep-Tag: Trade 2 entsteht nur aus der genauen Balance von Trade 1 — Puls liest bis ${ketteBis} weiter (${wt.versuche} Versuche bisher). Kein eigener Haken: abgehakt wird einmal am Tagesergebnis; kommt bis ${ketteBis} keine Lesung, steht Trade 1 danach mit Schätzung zum Abhaken da`
+              : wt.login === 'pruefen' ? `Puls kam ${wt.loginN}× nicht durch den Login/die Verbindung${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} und liest nicht mehr von selbst — Login am PC prüfen, dann „Jetzt lesen"`
               : wt.login === 'pause' ? `Login-/Verbindungsfehler${wt.loginCode ? ' (' + wt.loginCode + ')' : ''} — nächster automatischer Versuch frühestens ${zeit(wt.bis)} (kein schneller neuer Login)`
               : wdlLesungVerloren(wt, jetzt) ? `Seit ${minTxt(wdlLesungVerloren(wt, jetzt))} kein Leseversuch (${wt.letzte ? 'letzter ' + zeit(wt.letzte) : 'noch keiner'}) — der PC-Tab dieser ID (Puls) antwortet nicht. „Jetzt lesen" stößt neu an; hilft das nicht, Prophos am PC der ID öffnen`
               : wt.versuche ? `${wt.versuche}. Leseversuch` : 'Puls liest die Balance 1–120 min nach dem Ende' })
-        plZ = zelle('pl', '–' + slaveZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
+        plZ = (wt.kette === 't2' && num(t.pl_balance) != null) ? zelle('pl', sig(t.pl_balance, '$', 0) + slaveZ(t), { tip: 'Trade 1 aus der Balance-Lesung — gebucht wird mit dem Tagesergebnis' })   // Topstep-Tag: Trade 1 ist gelesen
+          : zelle('pl', '–' + slaveZ(t), { tip: num(d.pl_usd) != null ? `Demo ${sig(d.pl_usd, '$', 0)} · exakt nach der Nachlesung` : 'exakt nach der Nachlesung' })
         zeitZ = zelle('zeit', zeit(t.ended_at || t.completed_at))
       } else if(t.status === 'review' && wdlManuell(t)){
         // MANUELLE ARBEIT (08.10.2026): wie Überprüfen (Konto, P&L, Zu), in der Mitte Notiz (Klick = bearbeiten) · „seit TT.MM." ·
@@ -54406,7 +54476,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1994'
+  const OS_TAB_BUILD = '2026-09-22.1995'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -58576,7 +58646,7 @@
       const ende = Date.parse(fin.at || p.endedAt || '') || 0
       if(!ende) continue
       const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
-      if(vers >= TV_ENDLESUNG_MAX) continue
+      if(vers >= TV_ENDLESUNG_MAX && !tpKetteLesenWeiter(p, jetzt)) continue   // Topstep-Tag: Trade 1 liest bis zum Fensterende weiter
       const letzte = Date.parse(fin.puls_at || '') || 0
       // Login-Bremse (30.09.2026): „Login prüfen" kündigt nichts mehr an, die 30-min-Pause verschiebt den Termin
       const lb = tvV2LoginBremse(fin, jetzt)
@@ -58677,7 +58747,7 @@
     if(isFinite(m)) info.push('P&L bisher ' + pulsDollar(m) + (typeof fin.master_pl_schaetzung === 'number' && Math.abs(m - fin.master_pl_schaetzung) < 0.005 ? ' (geschätzt)' : ''))
     if(fin.grund === 'demo_unklar') info.push('Demo-Ende ohne bewiesenen Einstieg — kein P&L, bis die Balance gelesen ist')   // 08.10.2026
     const vers = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
-    if(vers) info.push(`Versuch ${vers + 1}/${TV_ENDLESUNG_MAX}`)
+    if(vers) info.push(vers >= TV_ENDLESUNG_MAX ? `Versuch ${vers + 1} · Topstep-Tag liest bis zum Fensterende` : `Versuch ${vers + 1}/${TV_ENDLESUNG_MAX}`)
     if(Number(fin.puls_offen_n) > 0) info.push(`Position laut Puls noch offen (${Number(fin.puls_offen_n)}×) — kein Versuch verbraucht, Balance wird gelesen, sobald sie zu ist`)   // 08.10.2026
     if(Number(fin.puls_heim_n) > 0) info.push(`Puls blieb ${Number(fin.puls_heim_n)}× im Konto eines Big Trades/Winning Days nah am TP/an der Liq — kein Versuch verbraucht`)   // 22.10.2026
     info.push('entfällt mit „Erledigt"')

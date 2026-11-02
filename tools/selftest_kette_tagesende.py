@@ -17,6 +17,7 @@ import selftest_auto_alle_ids as al  # noqa: E402
 import selftest_kette_mll_planer as mp  # noqa: E402
 
 FEHLER = []
+LESEN_BIS = []
 U1 = "00000000-0000-0000-0000-000000000001"
 
 
@@ -61,7 +62,10 @@ def abhaken(rows, regeln_fehler=False, t2_da=True, jetzt=None, gesperrt=False, t
     a["ap_firma_gesperrt"] = lambda k, s: gesperrt
     weg = a["ap_kette_abhaken"](jetzt or datetime(2026, 10, 30, 10, 0, tzinfo=timezone.utc))
     u = {f["id"][3:]: x for f, x in upds}
-    r = {x["p_plan"]: x for x in rpcs}
+    # Topstep-Tag (02.11.2026): das einmalige kette.lesen_bis an Trade 1 (ap_kette_lesen_bis) zählt hier nicht mit — es steht in LESEN_BIS
+    # (tools/selftest_topstep_tag_ein_haken.py prüft es), r bleibt das Tagesergebnis/der Grund wie bisher
+    LESEN_BIS[:] = [x for x in rpcs if "lesen_bis" in (x.get("p_patch") or {})]
+    r = {x["p_plan"]: x for x in rpcs if "lesen_bis" not in (x.get("p_patch") or {})}
     return weg, u, r
 
 
