@@ -36862,6 +36862,7 @@ FDP_TAKT_S = 300                          # alle 5 min Konten ohne Plan nachplan
 FDP_NQ_PPL = 20.0                         # $ je NQ-Punkt und Kontrakt
 FDP_SLAVE_PPL = GP_SLAVE_PPL              # € je NAS100-Punkt und Lot bei Fusion (wie tpWdSlavePpl)
 FDP_BREAKEVEN_TOL_USD = 500.0             # bis so weit unter dem Start gilt das Konto als frisch (Finn 01.11.2026: „breakeven plus/minus 500 $“), kein Break-even-Trade
+FDP_NACHRECHNEN_NUR_HT = False            # Finns Entscheid offen: True = alte Vorschläge nur bei HT neu rechnen, Emins Gruppe bleibt, wie sie ist
 FDP_SL_MIN_USD = 100                      # darunter kein Trade (Abstand zur Liquidation zu klein)
 # von/bis/tz nur als Rückfall — gilt ist das Fenster des Challenge-Planers (fdp_fenster)
 # abstand_id_min 90 (Master 27.10.2026): mit 0 lägen zwei Funded derselben ID evtl. 16 min auseinander — der zweite würde von der Big-Trade-
@@ -37024,11 +37025,15 @@ def fdp_zyklus(groesse, payouts, plaene):
 
 
 def fdp_vorschlag_neu(plan, r):
-    """REIN RECHNEND (testbar): Felder, mit denen ein alter Break-even-Vorschlag nach der ±500-$-Regel neu gerechnet wird, sonst None. Nur unbestätigt, ohne Startzeit, nie gestartet, nicht von Hand geändert; bestätigte Pläne fasst
-    das nie an. r = fdp_konto_rechnen mit den Kontrakten des Plans."""
+    """REIN RECHNEND (testbar): Felder, mit denen ein alter Break-even-Vorschlag nach der ±500-$-Regel neu gerechnet wird, sonst None. Nur unbestätigt, ohne Startzeit, nie gestartet; bestätigte Pläne fasst das nie an. r = fdp_konto_rechnen mit den Kontrakten des Plans.
+    Stopp S9 02.11.2026: hand_werte_at reicht nicht, das Popup setzt es nicht. Darum muss der TP noch genau der Break-even dieser Balance sein, sonst hat jemand ihn geändert oder die Balance ist weiter. Würde r weniger Kontrakte
+    nehmen (Minis der Stufe), bleibt der Plan auch: master_contracts wird hier nicht geschrieben, die Lots wären zu groß."""
     p, fp = plan or {}, (plan or {}).get("funded_plan")
     if (p.get("status") != "planned" or p.get("auto_bestaetigt_at") or p.get("start_um") or p.get("start_um_gestartet_at") or p.get("started_at") or p.get("hand_werte_at")
             or not isinstance(fp, dict) or fp.get("tp_art") != "break_even" or (r or {}).get("aktion") != "planen" or r.get("tp_art") != "normal"):
+        return None
+    tp, start, bal, kt = _wd_num(p.get("master_tp")), _wd_num(fp.get("start")), _wd_num(r.get("balance")), _wd_num(p.get("master_contracts"))
+    if tp is None or start is None or bal is None or abs(tp - (start - bal)) >= 0.01 or kt is None or abs(kt - float(r.get("kontrakte") or 0)) > 1e-6:
         return None
     return {"master_tp": r["tp"], "master_sl": r["sl"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"], "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"]}
 
@@ -37298,7 +37303,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
         if lauf:
             # ±500 $ (Finn 01.11.2026): alte Break-even-Vorschläge neu rechnen, Bestätigen bleibt von Hand. Trockenlauf schreibt nichts
-            if not trocken and lauf[0].get("status") == "planned" and (lauf[0].get("funded_plan") or {}).get("tp_art") == "break_even" and zeile["balance"] is not None \
+            if not trocken and (not FDP_NACHRECHNEN_NUR_HT or str(a.get("user_id")) in ht_uids) and lauf[0].get("status") == "planned" and (lauf[0].get("funded_plan") or {}).get("tp_art") == "break_even" and zeile["balance"] is not None \
                     and ap_balance_live(a.get("tv_balance_at"), max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None):
                 try:
                     r_neu, _zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg, int(_wd_num(lauf[0].get("master_contracts")) or 0) or None)

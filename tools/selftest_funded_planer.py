@@ -74,11 +74,18 @@ def szenario(ns):
     check(marc["tp"] == 6000 and marc["tp_art"] == "normal" and marc["kontrakte"] == 2 and marc["hedge_eur"] > 400, "Marc 99.988 $: TP 6.000 $, Hedge neu")
     check(marco["tp"] == 6000 and marco["tp_art"] == "normal" and marco["kontrakte"] == 2, "Marco 99.915 $: TP 6.000 $")
     check(mike["tp_art"] == "break_even" and abs(mike["tp"] - 1766.2) < 0.01, "Mike 98.234 $: bleibt Break-even, TP 1.766,20 $")
-    alt = {"status": "planned", "funded_plan": {"tp_art": "break_even"}}
+    alt = {"status": "planned", "master_tp": 12.40, "master_contracts": 2, "funded_plan": {"tp_art": "break_even", "start": 100000}}
     check(NEU(alt, marc) is not None and NEU(alt, marc)["master_tp"] == 6000, "alter Break-even-Vorschlag wird neu gerechnet")
     for feld, text in (("auto_bestaetigt_at", "bestätigt"), ("start_um", "mit Startzeit"), ("start_um_gestartet_at", "geclaimt"), ("started_at", "gestartet"), ("hand_werte_at", "von Hand geändert")):
         check(NEU(dict(alt, **{feld: "x"}), marc) is None, f"{text}: nie anfassen")
-    check(NEU(alt, mike) is None and NEU({"status": "planned", "funded_plan": {"tp_art": "normal"}}, marc) is None and NEU(dict(alt, status="open"), marc) is None, "weiter Break-even, schon normal oder läuft: nichts")
+    check(NEU(alt, mike) is None and NEU(dict(alt, funded_plan={"tp_art": "normal", "start": 100000}), marc) is None and NEU(dict(alt, status="open"), marc) is None, "weiter Break-even, schon normal oder läuft: nichts")
+    check(NEU(dict(alt, master_tp=85.50), marco) is not None and NEU(dict(alt, master_tp=85.50), marco)["master_tp"] == 6000, "Marco 85,50 $ ist genau sein Break-even: neu")
+    check(NEU(dict(alt, master_tp=500), marc) is None, "TP von Hand im Popup geändert (ohne hand_werte_at): bleibt")
+    check(NEU(alt, dict(marc, balance=99950)) is None, "Balance inzwischen anders: bleibt, der TP ist nicht mehr ihr Break-even")
+    check(NEU(dict(alt, master_contracts=3), marc) is None, "Kontrakte wären anders: bleibt, sonst stimmten die Lots nicht")
+    minis1 = R(REGEL, j100, [{"minis": 1, "ab_balance": 100000, "daily_loss_usd": 1750}], 99987.6, None, 245.83, 100000, 100000, kt_fest=2)
+    check(minis1["kontrakte"] == 1 and NEU(alt, minis1) is None, "weniger Minis in der Stufe: kt_fest sinkt auf 1, Plan bleibt")
+    check("not FDP_NACHRECHNEN_NUR_HT or str(a.get(\"user_id\")) in ht_uids" in SRC and "FDP_NACHRECHNEN_NUR_HT = False" in SRC, "Schalter für Emins Gruppe vorbereitet, steht auf alle Gruppen")
     print("150k (Kosten 550 €)")
     r = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000)
     ok, txt = t(r, 7500, 2500, 344, 1031)
