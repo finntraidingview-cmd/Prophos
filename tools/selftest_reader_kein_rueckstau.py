@@ -48,6 +48,16 @@ out.badge = postMs(P)
 antworte(); antworte()
 postEinzeln({ url: P, data: 'haengt' }, fake); uhr = 20000; postEinzeln({ url: P, data: 'danach' }, fake)
 out.haengt = { offen: offen.length, letzter: gesendet[gesendet.length - 1].data }
+// S9: nach dem Ausweg kommt die späte Antwort des alten Laufs — sie gibt den neuen nicht frei; ein älterer gemerkter Stand läuft nie hinterher
+uhr = 20010; postEinzeln({ url: P, data: 'gemerkt' }, fake)
+offen.shift().onload({ responseText: '{}' })
+out.spaet = { busy: _postLauf[P].busy, gesendet_nach: gesendet.length }
+uhr = 20100; antworte()
+out.nach_spaet = { letzter: gesendet[gesendet.length - 1].data, offen: offen.length }
+antworte()
+postEinzeln({ url: P, data: 'abbruch' }, fake); uhr = 20200; antworte('onabort'); out.abbruch = _postLauf[P].busy
+uhr = 20300; postEinzeln({ url: P, data: 'x1' }, fake); postEinzeln({ url: P, data: 'x_alt' }, fake); uhr = 31000; postEinzeln({ url: P, data: 'x_neu' }, fake)
+out.ausweg_leert = { neu: _postLauf[P].neu, letzter: gesendet[gesendet.length - 1].data }
 print(JSON.stringify(out))
 """
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as t:
@@ -69,5 +79,9 @@ check(o["badge"].endswith(" ms"), "Plakette zeigt die Laufzeit (" + o["badge"].s
 check(US.count("postEinzeln({") == 2 and "    GM_xmlhttpRequest({\n      method: 'POST',\n      url: ENDPOINT," not in US, "/positions und /bedienfeld laufen über postEinzeln")
 check("Puls-Chrome · ${positionen.length} Pos${postMs(ENDPOINT)}" in US, "Puls-Chrome-Plakette mit ms")
 check(o["haengt"] == {"offen": 2, "letzter": "danach"}, "kommt 10 s keine Antwort, geht der nächste Stand trotzdem raus (nie für immer still)")
+check(o["spaet"]["busy"] is True, "späte Antwort des aufgegebenen Laufs gibt den laufenden nicht frei")
+check(o["nach_spaet"]["letzter"] == "gemerkt" and o["nach_spaet"]["offen"] == 1, "danach geht der neueste gemerkte Stand normal raus")
+check(o["abbruch"] is False, "onabort gibt den Weg sofort frei, nicht erst nach 10 s")
+check(o["ausweg_leert"] == {"neu": None, "letzter": "x_neu"}, "10-s-Ausweg verwirft den älteren gemerkten Stand (x_alt), es läuft nur x_neu")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)

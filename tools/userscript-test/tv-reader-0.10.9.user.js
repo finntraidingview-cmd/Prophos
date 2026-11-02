@@ -1094,16 +1094,19 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   const POST_HAENGT_MS = 10000;
   const _postLauf = {};   // url → { busy, neu: opts | null, ms, start }
   function postEinzeln(opts, senden) {
-    const z = _postLauf[opts.url] || (_postLauf[opts.url] = { busy: false, neu: null, ms: null, start: 0 });
+    const z = _postLauf[opts.url] || (_postLauf[opts.url] = { busy: false, neu: null, ms: null, start: 0, nr: 0 });
     if (z.busy && Date.now() - z.start < POST_HAENGT_MS) { z.neu = opts; return false; }   // ohne jede Antwort nach 10 s gilt der Lauf als verloren
+    z.neu = null;   // S9: beim 10-s-Ausweg gilt nur dieser neueste Stand, ein aelterer gemerkter darf nicht hinterher
+    const nr = ++z.nr;
     z.busy = true; z.start = Date.now();
     const fertig = (h) => (r) => {
-      z.ms = Date.now() - z.start; z.busy = false;
       try { if (h) h(r); } catch (_) {}
+      if (nr !== z.nr) return;   // spaete Antwort eines aufgegebenen Laufs: gibt den laufenden nicht frei
+      z.ms = Date.now() - z.start; z.busy = false;
       const n = z.neu; z.neu = null;
       if (n) postEinzeln(n, senden);
     };
-    (senden || GM_xmlhttpRequest)(Object.assign({}, opts, { onload: fertig(opts.onload), onerror: fertig(opts.onerror), ontimeout: fertig(opts.ontimeout) }));
+    (senden || GM_xmlhttpRequest)(Object.assign({}, opts, { onload: fertig(opts.onload), onerror: fertig(opts.onerror), ontimeout: fertig(opts.ontimeout), onabort: fertig(opts.onabort) }));
     return true;
   }
   const postMs = (url) => (_postLauf[url] && _postLauf[url].ms != null) ? ` · ${_postLauf[url].ms} ms` : '';
