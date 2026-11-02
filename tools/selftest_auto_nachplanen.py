@@ -48,7 +48,7 @@ def lade():
             pass        # verweist auf etwas Mehrzeiliges (z. B. AP_KONTO_FELDER) — braucht dieser Test nicht
     exec("\n".join([re.search(rf"^{k} = \([^)]*\)", src, re.M | re.S).group(0)
                       for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE")]
-                   + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter",
+                   + [block(f) for f in ("_ap_ts", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter", "ap_gruppe_lauf_ohne_erledigt",
                                          "ap_nachplan_ziel_frei", "ap_nachplan_neu_bis", "ap_konto_neu_zu_spaet", "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken",
                                          # 09.10.2026 Countdown/Knopf: gemeinsame Strecke + Sperre, reine Helfer
                                          "ap_nachplan_naechster", "ap_nachplan_planungstag", "ap_bal_gelesen", "_ap_nachplan_rechnen",
@@ -182,9 +182,17 @@ def main():
     reg_t["updated_at"] = "2026-10-08 06:05:00+00"                 # Finn ändert die Regeln erneut
     T(jetzt_t + timedelta(minutes=20), zst); zst["nachplan_at"] = 0
     T(jetzt_t + timedelta(minutes=30), zst)
-    check(aufrufe == [["r-1", "r-2", "r-3", "r-8"], ["r-8"], ["r-1", "r-2", "r-3", "r-8"], ["r-8"]],
+    # r-7 „letzter Trade" (HT wie Gruppe, 02.11.2026): ohne Plan in Überprüfen wieder Kandidat, der Grund aus dem Lauf hält das Konto nicht mehr
+    check(aufrufe == [["r-1", "r-2", "r-3", "r-7", "r-8"], ["r-7", "r-8"], ["r-1", "r-2", "r-3", "r-7", "r-8"], ["r-7", "r-8"]],
           f"Tick: Regeländerung → einmal nachrechnen, nächster Takt nur noch r-8, neuer Regel-Stand → wieder einmal ({aufrufe})")
     check(zst.get("nachplan_regeln") == {tag_t: "2026-10-08 06:05:00+00"}, f"Merker im Prozess-Speicher je Tag ({zst.get('nachplan_regeln')})")
+    # r-7 noch in Überprüfen bzw. heute abgehakt: belegt, kein Kandidat
+    for pl_r7, was in (({"status": "review"}, "Überprüfen"), ({"status": "completed", "completed_at": "2026-10-08T05:00:00+00:00"}, "heute abgehakt")):
+        tick_ns["_sb_all"] = lambda t, q, _p=pl_r7: [dict(_p, master_account_id="r-7")]
+        aufrufe.clear(); zst3 = {}
+        T(jetzt_t, zst3)
+        check(aufrufe and "r-7" not in aufrufe[0], f"r-7 {was} → bleibt draußen ({aufrufe})")
+    tick_ns["_sb_all"] = lambda t, q: []
     # wirft ap_planen, wird NICHT gemerkt → der nächste Takt rechnet neu
     zst2, aufrufe2 = {}, []
     def wirft(t, quelle=None, nur_konten=None):
@@ -195,7 +203,7 @@ def main():
         T(jetzt_t, zst2)
     except RuntimeError:
         pass
-    check(zst2.get("nachplan_regeln", {}) == {} and aufrufe2 == [["r-1", "r-2", "r-3", "r-8"]], f"Fehler in ap_planen → nichts gemerkt ({zst2.get('nachplan_regeln')})")
+    check(zst2.get("nachplan_regeln", {}) == {} and aufrufe2 == [["r-1", "r-2", "r-3", "r-7", "r-8"]], f"Fehler in ap_planen → nichts gemerkt ({zst2.get('nachplan_regeln')})")
     for k, v in alt.items():
         if v is None:
             a.pop(k, None)

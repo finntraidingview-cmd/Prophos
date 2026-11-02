@@ -34416,7 +34416,8 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz, gruppe=None):
         letzter = ap_gruppe_lauf_ohne_erledigt(ll)
     else:
         rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", tag=f"eq.{tag}", order="at.desc", limit="1"))
-        letzter = ap_nachplan_letzter(rows)
+        # HT wie Gruppe (Finn 02.11.2026, S18 63aaf660): nach dem Nachtlauf abgehakt, stand das Konto bis zur nächsten Nacht auf „letzter Trade noch nicht erledigt"
+        letzter = ap_gruppe_lauf_ohne_erledigt(ap_nachplan_letzter(rows))
     # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet — aber
     # je Tag und Regel-Stand nur EINMAL (ap_nachplan_regeln_at): danach gelten die Regel-Gründe wieder als fest, bis die Regeln sich erneut
     # ändern oder ein Lauf mit Treffer eine neue auto_plan_lauf-Zeile schreibt (Prozess-Speicher, nach Neustart höchstens einmal mehr)
