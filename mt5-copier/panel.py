@@ -2450,13 +2450,14 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
             _idle = None
         beleg = (_PULS_BELEG.get("text") or None) if puls_beleg_gueltig(_PULS_BELEG.get("at"), jetzt, _idle) else None
         zu, e2, grund = scharf_entscheid(e, st, jetzt, beleg)
-        scharf_spur(e.get("ticket"), "Lage", f"{grund} · Reader-Konto {str(st.get('konto') or '-')[:40]} · Tab {str(st.get('positionen_tab') or '-')[:24]}"
-                    f" · Beleg {beleg or ('-' if not _PULS_BELEG.get('text') else 'ungültig (Eingabe am PC seit dem Beleg)')}", nur_bei_wechsel=True)
         if zu:
             e2.update(status="schliesst", cmd_id=_scharf_close_senden(e2), zu_at=jetzt, grund_zu=grund)
             n += 1
             print(f"[scharf] {grund} → close Ticket {e2['ticket']}", flush=True)
             scharf_spur(e2["ticket"], "CLOSE gesendet", f"{grund} · cmd {e2['cmd_id']}")
+        # Lage-Zeile erst NACH dem Close (S9 02.11.2026): hält Windows die Spur-Datei kurz fest, wartet der Close nicht mit
+        scharf_spur(e.get("ticket"), "Lage", f"{grund} · Reader-Konto {str(st.get('konto') or '-')[:40]} · Tab {str(st.get('positionen_tab') or '-')[:24]}"
+                    f" · Beleg {beleg or ('-' if not _PULS_BELEG.get('text') else 'ungültig (Eingabe am PC seit dem Beleg)')}", nur_bei_wechsel=True)
         if e2 != e:
             liste[i], geaendert = e2, True
     if geaendert:

@@ -272,5 +272,7 @@ n_ges = len(open(ns["SCHARF_SPUR_PFAD"], encoding="utf-8").read().splitlines())
 check(n_ges <= ns["SCHARF_SPUR_MAX"] + ns["SCHARF_SPUR_KUERZEN_JE"], f"Datei bleibt bei ~2.000 Zeilen ({n_ges})")
 w = SRC[SRC.index("def scharf_spur("):SRC.index("def scharf_konto_bezug(")]
 check('open(SCHARF_SPUR_PFAD, "a"' in w and "with SCHARF_SPUR_LOCK:" in w, "anhängen statt neu schreiben, ein Lock für Handler und Wache")
+r = SRC[SRC.index("def _scharf_runde("):SRC.index("def _scharf_wache():")]
+check(r.index("_scharf_close_senden(e2)") < r.index('scharf_spur(e.get("ticket"), "Lage"'), "Lage-Zeile erst nach dem Close-Auftrag (Datei-Sperre bremst den Close nie)")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)
