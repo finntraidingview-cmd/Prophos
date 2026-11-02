@@ -28579,7 +28579,7 @@
           // pnl_zahl zuerst (Cross-Check 24.09.2026): der Bot (tv_positionen_auspacken) liefert pnl als
           // Reader-TEXT („−12,50 USD") und die geparste Zahl in pnl_zahl — Number(Text) wäre NaN, der Chip
           // stünde ewig auf „Rundgang …". Fallback Number(pnl) nur für Stände, die schon eine Zahl tragen.
-          const pnl = (typeof pos.pnl_zahl === 'number' && isFinite(pos.pnl_zahl)) ? pos.pnl_zahl : Number(pos.pnl)
+          const pnl = (typeof pos.pnl_zahl === 'number' && isFinite(pos.pnl_zahl)) ? pos.pnl_zahl : (pos.pnl == null ? null : Number(pos.pnl))   // leer bleibt leer (S9 02.11.2026): Number(null) = 0 wurde sonst als Master-P&L gespeichert
           // Höchstens EIN Write pro Tick und Plan; Guard status=open, damit ein Abschluss von Hand nie
           // zurückgedreht wird. Steht in der DB, damit der Chip auch am Mac/Handy steht.
           // Review-Finding W11 (24.09.2026): nicht jeden Tick schreiben — nur, wenn sich der P&L um mehr als
@@ -28587,7 +28587,7 @@
           // 3 min würde der Chip zwischen zwei Rundgängen kurz grau — darum 2 min als Heartbeat).
           const liveAlt = plan.mt5Baseline && plan.mt5Baseline.live
           const altTs = (liveAlt && liveAlt.at) ? (Date.parse(liveAlt.at) || 0) : 0
-          const altPnl = liveAlt ? Number(liveAlt.pnl) : NaN
+          const altPnl = (liveAlt && liveAlt.pnl != null) ? Number(liveAlt.pnl) : NaN   // null bleibt „kein Wert“, sonst schriebe jeder Tick erneut
           const neuPnl = isFinite(pnl) ? pnl : null
           const gleich = liveAlt && liveAlt.offen === true && ((neuPnl == null && !isFinite(altPnl)) || (neuPnl != null && isFinite(altPnl) && Math.abs(neuPnl - altPnl) <= 0.01))
           if(!manuell && gleich && altTs && (Date.now() - altTs) < 2 * 60 * 1000) continue   // manuell: immer schreiben (Stempel „eben geholt")
@@ -53777,7 +53777,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1979'
+  const OS_TAB_BUILD = '2026-09-22.1980'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
