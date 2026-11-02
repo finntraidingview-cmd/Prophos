@@ -172,10 +172,10 @@ PZ = app.fcp_payouts_zaehlen([{"account_id": "k1", "received_tx_id": "t1"}], [{"
                               [{"id": "t1", "account_id": "k1"}, {"id": "t2", "account_id": "k3"}, {"id": "t3", "account_id": None}])
 check(PZ == {"k1": 1, "k2": 1, "k3": 1}, f"Payouts zählen: Anfrage + verknüpfte Buchung einmal, managed, nur gebucht (Prüfer S2) — {PZ}")
 
-print("2f) Refund-Lots nach Verhältnis (Finn 03.11.2026 ~00:25 Dubai: Formel ohne ×2; vorher ÷ 5 seit 30.10.2026, EzPoker a1ad322f)")
+print("2f) Refund-Lots × 0,1 (Finn 03.11.2026 ~00:50 Dubai: EzPoker 0,13 statt 0,26 Lot; vorher ÷ 5 seit 30.10.2026, EzPoker a1ad322f)")
 
 
-class Folge:           # Würfe der Reihe nach: Ziel, SL, Lots, Normal-Ziel (nur Refund) wie beim echten Plan
+class Folge:           # Würfe der Reihe nach: Ziel, SL, Lots wie beim echten Plan
     def __init__(self, *w):
         self.w = list(w)
     def uniform(self, lo, hi):
@@ -183,29 +183,25 @@ class Folge:           # Würfe der Reihe nach: Ziel, SL, Lots, Normal-Ziel (nur
 
 
 RFL = app.ap_regel_finden(FIRMEN, "FundedNext")
-# EzPoker-Fall: TP 71 $, gezogen 1,33 Lot und Normal-Ziel 1.675 $ → 1,33 × 71 ÷ 1.675 = 0,056 → 0,05 (abgerundet)
-ez = app.fcp_konto_rechnen(j, 100002.11, 100000, 1, False, 10.0, 0.85, Folge(73, 2374, 1.33, 1675), RFL)
-check(ez["lots"] == 0.05, f"EzPoker 1,33 Lot, TP 71, Normal-Ziel 1.675 → {ez['lots']} (abgerundet, kein ×2)")
-check(ez["refund_lots"] == {"normal_lots": 1.33, "normal_ziel": 1675, "tp": 71}, f"Basis sichtbar ({ez.get('refund_lots')})")
+ez = app.fcp_konto_rechnen(j, 100002.11, 100000, 1, False, 10.0, 0.85, Folge(73, 2374, 1.33), RFL)
+check(ez["lots"] == 0.13, f"EzPoker 1,33 Lot → {ez['lots']} (× 0,1, abgerundet)")
 check(ez["tp"] == 71 and ez["sl"] == 2374, f"TP-$ und SL-$ wie vorher ({ez['tp']} / {ez['sl']})")
 check(ez["hedge_eur"] == 5000 and ez["hedge_sl_eur"] == 1187 and ez["hedge_tp_eur"] == -35.5, f"Hedge-€ wie vorher (5.000 auf 10.000 DD, SL +{ez['hedge_sl_eur']}, TP {ez['hedge_tp_eur']})")
 alt = app.gp_hedge(10000, 5000, 1.33, 10.0, 0.85)[0]
 check(ez["multiplier"] == alt["multiplier"], f"multiplier unverändert ({ez['multiplier']}), hängt nur an € ÷ DD")
-check(abs(ez["hedge_lots"] - 0.05 * ez["multiplier"]) < 0.011 and ez["hedge_lots"] < alt["lots"], f"Fusion-Lots folgen den Master-Lots ({alt['lots']} → {ez['hedge_lots']})")
-r1 = app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5, 1500), RFL)
-check(r1["lots"] == 0.1 and abs(r1["tp_pkt"] - 100.0) < 0.06, f"Refund 100 $ bei 1,5 Lot / 1.500 $: 0,10 Lot, 100 Pkt = Normal-Abstand ({r1['lots']}, {r1['tp_pkt']} Pkt)")
-r2 = app.fcp_konto_rechnen(j, 98000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5, 1500), RFL)
-check(r2["tp"] == 2100 and r2["lots"] == 1.5, f"nach −2.000: TP 2.100, Lots höchstens die Normal-Lots ({r2['tp']}, {r2['lots']})")
+check(abs(ez["hedge_lots"] - 0.13 * ez["multiplier"]) < 0.011 and ez["hedge_lots"] < alt["lots"], f"Fusion-Lots folgen den Master-Lots ({alt['lots']} → {ez['hedge_lots']})")
+check(abs(ez["sl_pkt"] - 2374 / (10 * 0.13)) < 0.06, f"SL {ez['sl_pkt']} Pkt (doppelt so weit wie bei 0,26 Lot)")
 nz = app.fcp_konto_rechnen(j, 100000, 100000, 2, False, 10.0, 0.85, Folge(1600, 2000, 1.33), RFL)
 check(nz["lots"] == 1.33 and nz["hedge_eur"] == 1500 and not nz["erster_payout"], "Payout-Fall unverändert (1,33 Lot, Hedge 1.500)")
-check(app.fcp_lots_faktor(1, 0.2) == 0.2 and app.fcp_lots_faktor(1.75, 0.2) == 0.35 and app.fcp_lots_faktor(1.33, 0.2) == 0.26 and app.fcp_lots_faktor(0.01, 0.2) == 0.01, "Rückfall-Faktor: abrunden auf 0,01, Mindest-Lot 0,01")
-V = app.fcp_lots_verhaeltnis
-check(V(1.5, 100, 1500) == 0.1 and V(1.5, 100, 1500, 2.0) == 0.2 and V(1.0, 10, 1850) == 0.01 and V(1.5, 5000, 1500) == 1.5, "Verhältnis: ×1/×2, Mindest-Schritt, höchstens Normal-Lots")
-check(V(30, 300, 5850, 2.0, 1) == 3 and V(30, 20, 5850, 2.0, 1) == 1 and V(None, 100, 1500) is None and V(1.5, 100, 0) is None, "Schritt 1 (FTMO/The5ers), fehlende Werte → None")
-winz = app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5, 1500), dict(RFL, erster_payout={"ziel": [50, 150], "hedge_eur_je_dd": 0.0005}))
+check(app.fcp_lots_faktor(1, 0.1) == 0.1 and app.fcp_lots_faktor(1.75, 0.1) == 0.17 and app.fcp_lots_faktor(1.33, 0.1) == 0.13 and app.fcp_lots_faktor(0.05, 0.1) == 0.01, "abrunden auf 0,01, Mindest-Lot 0,01")
+winz = app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5), dict(RFL, erster_payout={"ziel": [50, 150], "hedge_eur_je_dd": 0.0005}))
 check(winz["aktion"] == "aus" and "Lot" in winz["grund"], f"Hedge unter Min-Lot → aus, kein Plan ({winz.get('grund')})")
+rf2 = dict(RFL, erster_payout={"ziel": [50, 150], "hedge_eur_je_dd": 0.5})
+check(app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5), rf2)["lots"] == 0.15, "Regel in der DB ohne lots_faktor: × 0,1")
 rf3 = dict(RFL, erster_payout={"ziel": [50, 150], "hedge_eur_je_dd": 0.5, "lots_faktor": 1})
-check(app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5, 1500), rf3)["lots"] == 0.1, "lots_faktor in der Regel gilt nicht mehr (Verhältnis gewinnt)")
+check(app.fcp_konto_rechnen(j, 100000, 100000, 1, False, 10.0, 0.85, Folge(100, 2000, 1.5), rf3)["lots"] == 1.5, "lots_faktor aus der Regel gewinnt")
+V = app.fcp_lots_verhaeltnis
+check(V(2.1, 281, 7200, 2.0) == 0.16 and V(30, 20, 5850, 2.0, 1) == 1 and V(None, 100, 1500) is None, "Verhältnis (nur Rest-Trades): ×2, Schritt, fehlende Werte → None")
 
 print("2c) 1-%-Konto über den Namen + SL nie über max_risiko_trade (Vorfall Jacob …7924, 30.10.2026)")
 E = app.fcp_eins_prozent

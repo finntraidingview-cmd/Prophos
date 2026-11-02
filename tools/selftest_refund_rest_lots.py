@@ -6,7 +6,7 @@ lassen." Konstrukt: .claude/master/berichte/2026-11-01_refund-konstrukt.md)
 Aufruf:  python3 tools/selftest_refund_rest_lots.py
 Ohne Netz. Regel-Werte wie auto_plan_regeln / funded_cfd_plan_regeln (Dump 02.11.2026). Geprüft:
   fcp_lots_verhaeltnis  Lots_n × (Ziel_klein ÷ Ziel_n) × Faktor, abgerundet auf den Schritt, mindestens ein Schritt, höchstens Lots_n
-  Refund                FundedNext 100k …7823 (02.11.: TP 96 $, 1,1 Lot gezogen → heute 0,22) → 0,05–0,07 je nach Normal-Ziel (Refund-Teil im Funded-Test 2f)
+  Refund                seit 03.11.2026 ~00:50 wieder Lots × 0,1 (Funded-Test 2f), die Formel unten nur für Rest-Trades
   Rest CFD              ap_klein_normal + ap_klein_trade über ap_konto_rechnen: FundedNext 100k Rest 281 $ (29.10.: heute 1,4 Lots) → 0,16–0,33
   Rest Futures          Lucid 150k Rest 84 $ → 1 MNQ wie bisher (Formel < 1); ab Rest 100 $ plant der Bot einen normalen letzten Trade"""
 import os
@@ -31,7 +31,6 @@ a = rp.lade()
 V, R, KN, KT, KF = a["fcp_lots_verhaeltnis"], a["ap_konto_rechnen"], a["ap_klein_normal"], a["ap_klein_trade"], a["ap_klein_trade_fut"]
 
 # ── Formel ──
-check(V(1.1, 96, 1500) == 0.07 and V(1.1, 96, 1850) == 0.05 and V(1.1, 96, 1675) == 0.06, "Refund …7823: 1,1 Lot × 96 ÷ 1.500/1.675/1.850 → 0,07/0,06/0,05")
 check(V(2.65, 281, 6300, 2.0) == 0.23 and V(2.1, 281, 7200, 2.0) == 0.16 and V(3.2, 281, 5400, 2.0) == 0.33, "Rest 281 FN: ×2 → 0,23 Mitte, 0,16–0,33")
 check(V(2.1, 5, 7200, 2.0) == 0.01, "winziger Rest → mindestens ein Schritt (0,01)")
 check(V(2.1, 9000, 5400, 2.0) == 2.1, "großer Rest → höchstens die Normal-Lots")
