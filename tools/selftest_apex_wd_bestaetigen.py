@@ -13,7 +13,7 @@ def ok(b, t):
 def fn(n):
     i = app.index(f"def {n}("); return app[i:app.index("\n\n\n", i)]
 ns = {"HEDGE_ARTEN": ("apex", "tradeify_final"), "re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta}
-for n in ("hf_basis", "hf_ist_wd", "alarm_wd_bestaetigen", "_alarm_ts"):
+for n in ("hf_basis", "hf_ist_wd", "hf_wd_sichtbar", "alarm_wd_bestaetigen", "_alarm_ts"):
     exec(fn(n), ns)
 b0, b1 = ns["hf_basis"]([]), ns["hf_basis"](["apex"])
 ok("or" not in b0 and b0["mt5_baseline->>hedge_art"] == "in.(apex,tradeify_final)", "Schalter leer: Filter wie vor dem Gate")
@@ -24,6 +24,8 @@ for firma in ("Tradeify", "Topstep", "Lucid", "FTMO Futures"):
     ok(not ns["hf_ist_wd"](dict(w, master_firm=firma), ["apex"]), f"{firma} nie")
 ok(not ns["hf_ist_wd"](dict(w, notes="Hand"), ["apex"]), "Hand-WD nie")
 ok(not ns["hf_ist_wd"](dict(w, art="apex"), ["apex"]), "Hedge-Art bleibt im alten Weg")
+ok(ns["hf_wd_sichtbar"](dict(w, user_id="ex"), ["apex"], {"emin"}), "ADMIN_EXCLUDE ohne Gruppe: steht in der Liste")
+ok(not ns["hf_wd_sichtbar"](dict(w, user_id="emin"), ["apex"], {"emin"}), "Verwalter-Gruppe: nicht in der Liste, wartet auch nicht")
 j = datetime(2026, 11, 2, 6, tzinfo=timezone.utc)
 p = dict(w, id="p", user_id="u", status="planned", start_um=(j - timedelta(minutes=1)).isoformat())
 a = ns["alarm_wd_bestaetigen"]
@@ -35,6 +37,9 @@ for f, marke in (("async function tpOrbitStartenKern", "fern.melde({ ok:false, m
     i = html.index(f); ok(marke in html[i:i + 1400], f"{f}: Hand-Start gesperrt")
 ok("if(tpWdWartetAufBestaetigung(p)) return 'wartet auf deine Bestätigung" in html, "Start-Prädikat kennt das Gate")
 ok("!tpBestaetigenAusgenommen() && tpBestaetigenFirmen()" in html, "Tab kennt die Verwalter-Ausnahme")
+i = html.index("const tpWdWartetAufBestaetigung = p =>"); t = html[i:html.index("  /* Verwalter-Gruppen sind ausgenommen", i)]
+ok("p.winningDay !== true" in t and "start_sperre" not in t, "Tab prüft winning_day, Netz-Marke hält nicht")
+ok("trade_plans_a0_hedge_freigabe" in lies("sql/2026-11-02_apex_wd_bestaetigen_rueckbau.sql"), "Rückbau-Datei da")
 ok("hedge_freigabe_at,mt5_baseline')" in html and "!!p.hedgeFreigabeAt !== !!r.hedge_freigabe_at" in html, "Abgleich lädt die Bestätigung nach")
 # SQL
 ok("wd_bestaetigen_ich_ausgenommen" in sql and "grant execute on function public.wd_bestaetigen_ich_ausgenommen() to authenticated" in sql, "RPC für den Tab angelegt")

@@ -4088,7 +4088,8 @@ def alarm_tick():
         if firmen_wd:
             wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art",
                                                    start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
-            wd_offen = [r for r in wd_offen if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
+            gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())
+            wd_offen = [r for r in wd_offen if hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id"))]   # wie die Liste
             evs += [ev for ev in alarm_wd_bestaetigen(wd_offen, firmen_wd, namen, jetzt) if ev[0] not in _alarm["gemeldet"] and all(ev[0] != e[0] for e in evs)]
     except Exception as e:
         print(f"[alarm] ⚠️ Apex-WD-Bestätigung: {type(e).__name__}: {e}", flush=True)
@@ -27839,6 +27840,12 @@ def alarm_wd_bestaetigen(plaene, firmen, namen, jetzt):
     return out
 
 
+def hf_wd_sichtbar(zeile, firmen, gruppen_ids):
+    """REIN RECHNEND (testbar, Prüfer S12 02.11.2026): Riegel und Tab halten jeden Apex-WD außer Verwalter-Gruppen. Eine ID nur aus ADMIN_EXCLUDE (kein Gruppen-Mitglied) muss
+    darum trotz Ausblendung in der Liste stehen, sonst wäre ihr Plan nicht bestätigbar."""
+    return hf_ist_wd(zeile, firmen) and str(zeile.get("user_id")) not in {str(u) for u in gruppen_ids or ()}
+
+
 def hf_ist_wd(zeile, firmen):
     """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) → True."""
     if zeile.get("art") in HEDGE_ARTEN or zeile.get("winning_day") is not True or "Winning-Day-Farmer" not in str(zeile.get("notes") or ""):
@@ -27965,12 +27972,13 @@ def admin_auto_plan_hedge_freigabe():
         firmen = wd_bestaetigen_firmen()      # APEX-WD BESTÄTIGEN (02.11.2026): Farmer-Winning-Days dieser Firmen mit in der Liste
         basis = hf_basis(firmen)
         namen, aus = _ap_namen()
+        gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())   # Prüfer S12: dieselbe Ausnahme wie der Riegel, s. hf_wd_sichtbar
         rows = [r for r in _sb_all("trade_plans", dict(basis, select="id,user_id,master_account_id,master_name,master_firm,start_um,richtung,"
                                                       "master_contracts,master_symbol,master_tp,route,orbit_v3,hedge_eur,auto_bestaetigt_at,"
                                                       "winning_day,notes,slave_risk,multiplier,"
                                                       "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre",
                                                       order="start_um.asc.nullslast"))
-                if str(r.get("user_id")) not in aus]
+                if str(r.get("user_id")) not in aus or hf_wd_sichtbar(r, firmen, gruppen_ids)]
         for r in rows:
             r["wd"] = hf_ist_wd(r, firmen)       # Frontend: WD-Block im Funded-Planer zeigt wd=true, der Challenge-Block nur hedge_art
         if request.method == "GET":

@@ -53652,7 +53652,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1969'
+  const OS_TAB_BUILD = '2026-09-22.1970'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57637,9 +57637,10 @@
    * Kette seiner ID nicht auf) und schiebt seine Zeit nicht: unbestätigt läuft er ab und wird wie jeder nie gestartete Farmer-Plan weggeräumt. DB-Netz am Claim: trade_plans_a0_hedge_freigabe. */
   const tpBestaetigenFirmen = () => { const l = _wdRegeln && _wdRegeln.row && _wdRegeln.row.bestaetigen_firmen
     return (Array.isArray(l) ? l : []).map(k => String(k || '').trim().toLowerCase().replace(/[0-9]+$/, '')).filter(Boolean) }
-  const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || !tpIstFarmerPlan(p)) return false
-    const s = p.mt5Baseline && p.mt5Baseline.start_sperre, firma = String(p.masterFirm || '').toLowerCase()
-    return (!!s && s.art === 'hedge_freigabe' && s.wo === 'wd') || (!tpBestaetigenAusgenommen() && tpBestaetigenFirmen().some(k => firma.includes(k))) }
+  // Nur der Schalter entscheidet, nicht die Netz-Marke start_sperre: abgeschaltet wartet kein Plan mehr (Prüfer S12). winning_day wie DB-Riegel und Liste.
+  const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || p.winningDay !== true || !tpIstFarmerPlan(p)) return false
+    const firma = String(p.masterFirm || '').toLowerCase()
+    return !tpBestaetigenAusgenommen() && tpBestaetigenFirmen().some(k => firma.includes(k)) }
   /* Verwalter-Gruppen sind ausgenommen (Prüfer S12, 02.11.2026): sie stehen nie in Finns Liste, ein Apex-WD der Gruppe wäre sonst nicht bestätigbar. Dieselbe Regel wie der DB-Riegel, RPC
    * wd_bestaetigen_ich_ausgenommen() fragt nur nach der eigenen ID (10 min gemerkt, nur bei gesetzter Firmenliste). Unbekannt = nicht ausgenommen: lieber warten als ohne Bestätigung starten. */
   var _wdBestAus = null
