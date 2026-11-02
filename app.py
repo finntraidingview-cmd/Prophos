@@ -26730,9 +26730,39 @@ def ap_gruppe_tag(tag, jetzt=None):
     return gp_tag_wahl(t, jetzt.astimezone(_ap_tz(AP_TZ_LAUF))).isoformat()
 
 
-def ap_gruppe_planen(gruppe_id, trocken=False, quelle="hand", tag=None, seed=None):
+def ap_gruppe_lauf_ohne_erledigt(letzter):
+    """REIN RECHNEND (GRUPPE NACHPLANEN, 02.11.2026): Lauf ohne die „letzter Trade noch nicht erledigt"-Zeilen — für die Kandidaten, nicht
+    für die Anzeige. Der Grund gilt in AP_NACHPLAN_FEST_GRUENDE als fest, stimmt aber nach dem Abhaken nicht mehr; ohne die Zeile entscheidet
+    der Stand der Pläne: noch in Überprüfen oder heute abgehakt → _ap_plan_am_tag belegt das Konto, sonst wird es nachgeplant."""
+    if not isinstance(letzter, dict) or not isinstance(letzter.get("ausgelassen"), list):
+        return letzter
+    return dict(letzter, ausgelassen=[z for z in letzter["ausgelassen"]
+                                      if not str((z or {}).get("grund") or "").startswith("letzter Trade ")])
+
+
+def ap_gruppe_lauf_mischen(alt, erg, nur_konten):
+    """REIN RECHNEND (GRUPPE NACHPLANEN, 02.11.2026): (Protokoll, geändert?) nach einem Nachplanen. Die Gruppe hat nur EINE Lauf-Zeile: die
+    Zeilen der nicht nachgerechneten Konten bleiben stehen, sonst fielen ihre festen Gründe aus „Braucht dich" und die Konten würden im
+    nächsten Takt neu gerechnet. geändert = neuer Plan oder ein anderer Grund bei einem nachgerechneten Konto; sonst kein Schreiben."""
+    alt = alt if isinstance(alt, dict) else {}
+    nur = {str(k) for k in nur_konten or ()}
+    gleicher_tag = str(alt.get("tag") or "") == str(erg.get("tag") or "")
+    alt_aus = [z for z in alt.get("ausgelassen") or [] if isinstance(z, dict)] if gleicher_tag else []
+    neu_aus = [z for z in erg.get("ausgelassen") or [] if isinstance(z, dict)]
+
+    def _gruende(zeilen):
+        return {str(z.get("konto_id")): str(z.get("grund") or "") for z in zeilen if str(z.get("konto_id")) in nur}
+    geaendert = bool(erg.get("geplant")) or _gruende(alt_aus) != _gruende(neu_aus)
+    merk = dict(erg, geplant=(list(alt.get("geplant") or []) if gleicher_tag else []) + list(erg.get("geplant") or []),
+                ausgelassen=[z for z in alt_aus if str(z.get("konto_id")) not in nur] + neu_aus)
+    return merk, geaendert
+
+
+def ap_gruppe_planen(gruppe_id, trocken=False, quelle="hand", tag=None, seed=None, nur_konten=None):
     """Plant eine Verwalter-Gruppe mit dem HT-Planer (ap_planen gruppe=…). Nicht trocken: Ergebnis in auto_plan_gruppe.letzter_lauf
-    (nacht_tag bleibt erhalten — er ist der Nacht-Claim der Gruppe). → Ergebnis-Dict wie ap_planen."""
+    (nacht_tag bleibt erhalten — er ist der Nacht-Claim der Gruppe). → Ergebnis-Dict wie ap_planen.
+    nur_konten (GRUPPE NACHPLANEN, 02.11.2026): nur diese Konten für genau diesen Tag, bestehende Vorschläge bleiben; Protokoll gemischt
+    (ap_gruppe_lauf_mischen) und nur bei Änderung."""
     gr = next((x for x in ap_planer_gruppen() if x["gruppe_id"] == str(gruppe_id)), None)
     if not gr:
         return {"ok": False, "msg": "Gruppe ohne Planer-Zeile (auto_plan_gruppe) oder ohne Verwalter"}
@@ -26755,15 +26785,18 @@ def ap_gruppe_planen(gruppe_id, trocken=False, quelle="hand", tag=None, seed=Non
             return {"ok": False, "msg": f"Nacht-Claim nicht möglich: {type(e).__name__}"}
         if not claim:
             return {"ok": True, "tag": tag, "msg": "schon geplant (anderer Lauf)", "geplant": [], "ausgelassen": []}
-    else:
+    elif not nur_konten:                               # Nachplanen: der Takt gibt den Tag fertig vor (deutscher Tag, wie HT)
         try:
             tag = ap_gruppe_tag(tag)
         except ValueError:
             return {"ok": False, "msg": "tag = heute | morgen | JJJJ-MM-TT"}
-    erg = ap_planen(tag, trocken=trocken, quelle=quelle, seed=seed, gruppe=gr)
+    erg = ap_planen(tag, trocken=trocken, quelle=quelle, seed=seed, gruppe=gr, nur_konten=nur_konten)
     if not trocken and erg.get("ok"):
         alt = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
-        merk = dict(erg, nacht_tag=tag if quelle == "nacht" else alt.get("nacht_tag"))
+        basis, geaendert = ap_gruppe_lauf_mischen(alt, erg, nur_konten) if nur_konten else (erg, True)
+        if not geaendert:
+            return erg
+        merk = dict(basis, nacht_tag=tag if quelle == "nacht" else alt.get("nacht_tag"))
         try:
             sb_update("auto_plan_gruppe", {"gruppe_id": f"eq.{gr['gruppe_id']}"}, {"letzter_lauf": merk,
                                                                                  "updated_at": datetime.now(timezone.utc).isoformat()})
@@ -33885,10 +33918,12 @@ def ap_lauf_gelesen_markieren(letzter):
     return dict(letzter, ausgelassen=neu)
 
 
-def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
+def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz, gruppe=None):
     """Gemeinsame Strecke von Takt und Knopf: Kandidaten ohne Plan am Tag → ap_planen(tag, quelle nachplanen, nur_konten). Aufrufer hält
-    _ap_nachplan_lock. → (erg | None, kandidaten)"""
-    uids = [str(u) for u in (reg.get("user_ids") or [])]
+    _ap_nachplan_lock. → (erg | None, kandidaten)
+    gruppe (GRUPPE NACHPLANEN, 02.11.2026): Zeile aus ap_planer_gruppen — ihre IDs statt reg.user_ids, ihr letzter Lauf aus auto_plan_gruppe,
+    geplant und protokolliert über ap_gruppe_planen. zustand ist dann der Merker der Gruppe, nicht _ap_info."""
+    uids = sorted(str(u) for u in gruppe["ids"]) if gruppe else [str(u) for u in (reg.get("user_ids") or [])]
     if not uids:
         return None, []
     in_uids = "in.(" + ",".join(uids) + ")"
@@ -33898,8 +33933,12 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
                                      "user_id": in_uids,
                                      "status": "in.(planned,open,review,completed)",   # completed: ein Trade pro Konto und Tag (08.10.2026)
                                      "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
-    rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", tag=f"eq.{tag}", order="at.desc", limit="1"))
-    letzter = ap_nachplan_letzter(rows)
+    if gruppe:
+        ll = gruppe.get("letzter_lauf") if isinstance(gruppe.get("letzter_lauf"), dict) else {}
+        letzter = ap_gruppe_lauf_ohne_erledigt(ll)
+    else:
+        rows = sb_select("auto_plan_lauf", dict(AP_LAUF_NUR_CHALLENGE, select="tag,quelle,at,ergebnis", tag=f"eq.{tag}", order="at.desc", limit="1"))
+        letzter = ap_nachplan_letzter(rows)
     # Regeln nach dem Lauf geändert (updated_at, 08.10.2026) → Regel-Gründe nicht mehr fest, Konten werden sofort neu gerechnet — aber
     # je Tag und Regel-Stand nur EINMAL (ap_nachplan_regeln_at): danach gelten die Regel-Gründe wieder als fest, bis die Regeln sich erneut
     # ändern oder ein Lauf mit Treffer eine neue auto_plan_lauf-Zeile schreibt (Prozess-Speicher, nach Neustart höchstens einmal mehr)
@@ -33917,7 +33956,10 @@ def _ap_nachplan_rechnen(tag, jetzt, zustand, reg, tz):
     if not kand:
         ap_nachplan_regeln_merken(merker, tag, regeln_at)
         return None, kand
-    erg = ap_planen(tag, quelle="nachplanen", nur_konten=kand)
+    erg = (ap_gruppe_planen(gruppe["gruppe_id"], quelle="nachplanen", tag=tag, nur_konten=kand) if gruppe
+           else ap_planen(tag, quelle="nachplanen", nur_konten=kand))
+    if gruppe and not erg.get("ok"):                       # z. B. Nutzerliste nicht lesbar: nichts merken, der nächste Takt rechnet neu, Fehler sichtbar
+        raise RuntimeError(str(erg.get("msg") or "Gruppen-Lauf fehlgeschlagen"))
     ap_nachplan_regeln_merken(merker, tag, regeln_at)      # erst nach fertigem Lauf — wirft ap_planen, rechnet der nächste Takt neu
     # als sortierte LISTE (09.10.2026, Hotfix): ziel_m liegt in _ap_info, und GET /admin/auto-plan gibt dict(_ap_info) als JSON aus — ein set
     # dort machte seit dem ersten freigegebenen Konto (23:37 UTC) jeden GET zu HTTP 500; der Trade-Planer zeigte darauf den alten Lauf aus
@@ -33959,6 +34001,49 @@ def ap_nachplan_tick(jetzt, zustand):
         print(f"[auto-plan] Nachplanen {tag} {d.strftime('%H:%M')} dt: {info['geplant']} geplant für {len(kand)} Konten ohne Plan "
               f"({info['ausgelassen']} ausgelassen)", flush=True)
     return erg
+
+
+# ══ GRUPPE NACHPLANEN (02.11.2026, Finn, Foto Login Emin: „Braucht dich · 11", alle „letzter Trade noch nicht erledigt", daneben „Nachplanen in
+# 3:31"). Seit GRUPPE WIE HT (30.10.2026) lief für Gruppen nur der Nachtlauf, der Nachplan-Takt nahm nur auto_plan_regeln.user_ids — der Zähler
+# im Trade-Planer gehörte also zu HT. Die 12 Konten wurden 21:42–21:57 UTC abgehakt, 11–26 min nach dem Nachtlauf, und bekamen deshalb bis zum
+# nächsten Nachtlauf keinen Plan. Jetzt derselbe Takt je aktiver Gruppe, im selben Rhythmus wie HT (auch beim Wecker). Nur Vorschläge: kein
+# _ap_auto_best-Anstoß, und ap_planen bestätigt für Gruppen nie. Merker außerhalb von _ap_info — das geht per GET an jeden PC-Tab hinaus.
+_ap_gruppen_nachplan = {"takt": None, "fehler": "", "je": {}}
+
+
+def ap_gruppen_nachplan_tick(jetzt, zustand):
+    """Ein Takt (aus ap_loop direkt nach ap_nachplan_tick): läuft, sobald der HT-Takt neu gelaufen ist (zustand['nachplan_at']). Gleiche
+    Schalter und gleiches Fenster wie HT, dazu auto_plan_gruppe.aktiv. Ein Fehler in einer Gruppe hält die andere nicht auf."""
+    takt = zustand.get("nachplan_at")
+    if not takt or takt == _ap_gruppen_nachplan["takt"]:
+        return None
+    _ap_gruppen_nachplan["takt"] = takt
+    reg = (sb_select("auto_plan_regeln", {"select": "aktiv,zeiten,updated_at", "id": "eq.1"}) or [{}])[0]
+    tz = _ap_tz(AP_TZ_TAG)
+    d = jetzt.astimezone(tz)
+    if not reg.get("aktiv") or not ap_nachplan_fenster(d, reg.get("zeiten")):
+        return None
+    if not _ap_nachplan_lock.acquire(blocking=False):
+        return None                       # Knopf „Jetzt neu berechnen“ rechnet gerade → nächster Takt
+    out = {}
+    try:
+        for gr in ap_planer_gruppen(nur_aktiv=True):
+            gid = gr["gruppe_id"]
+            ll = gr.get("letzter_lauf") if isinstance(gr.get("letzter_lauf"), dict) else {}
+            if str(ll.get("tag") or "") > d.strftime("%Y-%m-%d"):
+                continue                  # Knopf „morgen“ hat schon den nächsten Tag geplant: sein Protokoll nicht mit heute überschreiben
+            try:
+                erg, kand = _ap_nachplan_rechnen(d.strftime("%Y-%m-%d"), jetzt, _ap_gruppen_nachplan["je"].setdefault(gid, {}), reg, tz, gruppe=gr)
+                out[gid] = len((erg or {}).get("geplant") or [])
+                _ap_gruppen_nachplan["fehler"] = ""
+                if out[gid]:
+                    print(f"[gruppen-plan] Nachplanen {str(gid)[:8]} {d.strftime('%H:%M')} dt: {out[gid]} geplant für {len(kand)} Konten ohne Plan", flush=True)
+            except Exception as e:
+                _ap_gruppen_nachplan["fehler"] = f"{type(e).__name__}: {e}"
+                print(f"[gruppen-plan] ⚠️ Nachplanen {str(gid)[:8]}: {_ap_gruppen_nachplan['fehler']}", flush=True)
+    finally:
+        _ap_nachplan_lock.release()
+    return out
 
 
 # ══ BALANCE VON SELBST NACHLESEN (13.10.2026, Finn am Accounts-Tab: „Wenn in Zukunft irgendwo keine Balance aktualisiert wurde und dadurch
@@ -35489,6 +35574,11 @@ def ap_loop():
         except Exception as e:
             _ap_gruppen_nacht["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ {e}", flush=True)
+        try:
+            ap_gruppen_nachplan_tick(datetime.now(timezone.utc), _ap_info)   # GRUPPE NACHPLANEN (02.11.2026): derselbe Takt wie HT, je Gruppe
+        except Exception as e:
+            _ap_gruppen_nachplan["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[gruppen-plan] ⚠️ Nachplanen: {e}", flush=True)
         try:
             fdp_tick()                        # FUNDED-PLANER (27.10.2026) — eigener try, nur bei funded_plan_regeln.aktiv
         except Exception as e:

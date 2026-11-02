@@ -4,6 +4,7 @@ Hermann Technologies … er bestätigt sie einzeln" + „Emin hat eine eigene Wa
 - reine Helfer: ap_gruppe_ausgeblendet, ap_planer_gruppen (gestellte Gruppen-Daten), ap_gruppe_von_uid, ap_gruppe_tag
 - ap_gruppe_planen: Protokoll in auto_plan_gruppe, nacht_tag als Claim (Hand-Lauf behält ihn), trocken schreibt nichts
 - ap_gruppen_nacht_tick: je aktiver Gruppe genau einmal je Tag, schon geplante Gruppe übersprungen
+- GRUPPE NACHPLANEN (02.11.2026): ap_gruppen_nachplan_tick, Mischen des Protokolls, Abgehakt nach dem Nachtlauf → Vorschlag, nie bestätigt
 - Quelltext-Verträge: ap_planen (IDs = Gruppe, kein HT-Claim/-Protokoll, Stand nur Gruppe, nie auto-bestätigt), Umsteller ohne
   Gruppen-Ausschluss, gp_tick nicht mehr in ap_loop, eigene Waage je Gruppe, Delta/Waage-Start mit Gruppen-Stand
 Aufruf: python3 tools/selftest_gruppe_wie_ht.py"""
@@ -83,7 +84,7 @@ def ap_planen(tag=None, trocken=False, quelle="hand", seed=None, gruppe=None, **
 
 
 ns.update(sb_select=sb_select, sb_update=sb_update, ap_planen=ap_planen)
-for n in ("gp_tag_wahl", "ap_gruppe_ausgeblendet", "ap_planer_gruppen", "ap_gruppe_tag", "ap_gruppe_planen"):
+for n in ("gp_tag_wahl", "ap_gruppe_ausgeblendet", "ap_planer_gruppen", "ap_gruppe_tag", "ap_gruppe_lauf_ohne_erledigt", "ap_gruppe_lauf_mischen", "ap_gruppe_planen"):
     exec(block(n), ns)
 exec(re.search(r"^_ap_gruppen_cache = .*$", SRC, re.M).group(0), ns)
 exec(fn_text("ap_gruppe_von_uid"), ns)
@@ -179,6 +180,130 @@ ok("gr_lauf = None\n" in fn_text("admin_auto_plan") or "gr_lauf = None" in fn_te
    "GET /admin/auto-plan: Gruppen-Lesefehler → HT-Lauf, kein HTTP 500")
 ok("ap_gruppe_planen(gid" in fn_text("admin_gruppen_plan"), "Gruppen-Knöpfe rechnen mit dem HT-Planer")
 ok("ap_gruppe_von_uid(uid)" in fn_text("admin_auto_plan"), "GET /admin/auto-plan: Verwalter sieht den Lauf seiner Gruppe")
+
+
+print("GRUPPE NACHPLANEN (02.11.2026)")
+for k in ("AP_NACHPLAN_FEST_GRUENDE", "AP_NACHPLAN_REGEL_GRUENDE"):
+    exec(re.search(rf"^{k} = \([^)]*\)", SRC, re.M | re.S).group(0), ns)
+for pat in (r"^AP_TYPEN = .*$", r"^AP_NACHPLAN_VORLAUF_MIN = .*$", r"^AP_NACHPLAN_REST_RE = .*$", r"^AP_REST_MIN_CFD = .*$", r"^AP_NEU_BIS_STANDARD = .*$",
+            r"^AP_TZ_TAG = .*$", r"^_ap_nachplan_lock = .*$", r"^_ap_gruppen_nachplan = .*$"):
+    exec(re.search(pat, SRC, re.M).group(0), ns)
+for n in ("_ap_ts", "_ap_hhmm", "ap_start_bis", "ap_nachplan_fenster", "_ap_plan_am_tag", "ap_nachplan_letzter", "ap_nachplan_ziel_frei", "ap_konto_neu_zu_spaet",
+          "ap_nachplan_kandidaten", "ap_nachplan_regeln_at", "ap_nachplan_regeln_merken", "_ap_nachplan_rechnen", "ap_gruppen_nachplan_tick"):
+    exec(block(n), ns)
+
+Z_TAG = "2026-11-02"
+# Nachtlauf 21:31 UTC: k-erl wurde danach abgehakt, k-rev steht noch in Überprüfen, k-heute wird heute abgehakt, k-ziel hat einen festen Grund
+NACHT = {"tag": Z_TAG, "at": "2026-11-01T21:31:01+00:00", "quelle": "nacht", "nacht_tag": Z_TAG, "geplant": [{"konto_id": "k-alt"}],
+         "ausgelassen": [{"konto_id": k, "grund": "letzter Trade noch nicht erledigt (Überprüfen)"} for k in ("k-erl", "k-rev", "k-heute")]
+         + [{"konto_id": "k-ziel", "grund": "Ziel erreicht (Ziel-Wache) — Phase umstellen, der Bot plant hier nie"}]}
+Z_KONTEN = [{"id": k, "account_type": "phase1", "user_id": "u-emin"} for k in ("k-erl", "k-rev", "k-heute", "k-ziel", "k-alt")]
+Z_PLAENE = [{"master_account_id": "k-erl", "status": "completed", "started_at": "2026-10-30T05:00:00+00:00", "completed_at": "2026-11-01T21:42:00+00:00"},
+            {"master_account_id": "k-rev", "status": "review", "started_at": "2026-10-30T05:00:00+00:00"},
+            {"master_account_id": "k-heute", "status": "completed", "started_at": "2026-10-30T05:00:00+00:00", "completed_at": "2026-11-02T05:00:00+00:00"},
+            {"master_account_id": "k-alt", "status": "planned", "planned_for": Z_TAG}]
+Z_AUFRUFE = []
+ANTWORT = {"geplant": [{"konto_id": "k-erl"}], "ausgelassen": []}
+
+
+def z_planen(tag=None, trocken=False, quelle="hand", seed=None, gruppe=None, nur_konten=None, **kw):
+    Z_AUFRUFE.append({"tag": tag, "quelle": quelle, "gruppe": (gruppe or {}).get("gruppe_id"), "nur": list(nur_konten or [])})
+    return {"ok": True, "tag": tag, "quelle": quelle, "at": "2026-11-02T06:00:00+00:00", "geplant": list(ANTWORT["geplant"]), "ausgelassen": list(ANTWORT["ausgelassen"])}
+
+
+HT_AKTIV.update(zeiten={"start_bis": "16:30"}, updated_at="2026-11-01T10:00:00+00:00")
+ns.update(ap_planen=z_planen, _ap_konten_laden=lambda q: [dict(k) for k in Z_KONTEN], _sb_all=lambda t, q: [dict(p) for p in Z_PLAENE], _ap_archiviert=lambda: set())
+ZEILEN[:] = [{"gruppe_id": "g-emin", "aktiv": True, "letzter_lauf": dict(NACHT)}]
+UPDATES.clear()
+TICK = ns["ap_gruppen_nachplan_tick"]
+BEST = {"at": 123.0}
+ns["_ap_auto_best"] = BEST
+j = datetime(2026, 11, 2, 6, 0, tzinfo=timezone.utc)     # Montag 07:00 dt, im Fenster
+zst = {"nachplan_at": 1000.0}
+
+r = TICK(j, zst)
+ok([a["nur"] for a in Z_AUFRUFE] == [["k-erl"]], f"Abgehakt nach dem Nachtlauf → nachgeplant; Überprüfen, heute abgehakt, Ziel, geplant nicht ({Z_AUFRUFE})")
+ok(r == {"g-emin": 1}, "Tick meldet 1 Plan je Gruppe")
+ok(Z_AUFRUFE and Z_AUFRUFE[0]["tag"] == Z_TAG and Z_AUFRUFE[0]["quelle"] == "nachplanen" and Z_AUFRUFE[0]["gruppe"] == "g-emin", "ap_planen: deutscher Tag, Quelle nachplanen, gruppe gesetzt")
+ll = ZEILEN[0]["letzter_lauf"]
+ok(ll["nacht_tag"] == Z_TAG, "Nacht-Claim bleibt: kein zweiter Nachtlauf")
+ok(ll["quelle"] == "nachplanen" and sorted(x["konto_id"] for x in ll["geplant"]) == ["k-alt", "k-erl"], "Protokoll: alte + neue Pläne")
+ok(sorted(x["konto_id"] for x in ll["ausgelassen"]) == ["k-heute", "k-rev", "k-ziel"], "Protokoll: k-erl aus der Ausgelassen-Liste, die übrigen Zeilen bleiben")
+ok(BEST["at"] == 123.0, "kein Anstoß von Auto-Bestätigen")
+
+n = len(Z_AUFRUFE)
+TICK(j, zst)
+ok(len(Z_AUFRUFE) == n, "gleicher HT-Takt → kein zweiter Lauf")
+
+# zweiter Takt: k-erl hat jetzt einen Plan, nichts mehr zu tun
+Z_PLAENE.append({"master_account_id": "k-erl", "status": "planned", "planned_for": Z_TAG})
+UPDATES.clear(); zst["nachplan_at"] = 1300.0
+TICK(j + timedelta(minutes=5), zst)
+ok(len(Z_AUFRUFE) == n and not UPDATES, "kein Kandidat → kein Lauf, kein Schreiben")
+
+# neues Konto ohne Treffer: Grund einmal schreiben, gleicher Grund danach nicht mehr
+Z_KONTEN.append({"id": "k-neu", "account_type": "phase1", "user_id": "u-emin"})
+ANTWORT.update(geplant=[], ausgelassen=[{"konto_id": "k-neu", "grund": "keine Balance bekannt"}])
+UPDATES.clear(); zst["nachplan_at"] = 1600.0
+TICK(j + timedelta(minutes=10), zst)
+ok(len(UPDATES) == 1 and any(x["konto_id"] == "k-neu" for x in ZEILEN[0]["letzter_lauf"]["ausgelassen"]), "neuer Grund ohne Plan → einmal protokolliert")
+UPDATES.clear(); zst["nachplan_at"] = 1900.0
+TICK(j + timedelta(minutes=15), zst)
+ok(not UPDATES, "gleicher Grund → kein Schreiben alle 5 min")
+
+# Schalter und Fenster
+n = len(Z_AUFRUFE)
+zst["nachplan_at"] = 2200.0; ZEILEN[0]["aktiv"] = False
+TICK(j, zst)
+ok(len(Z_AUFRUFE) == n, "auto_plan_gruppe.aktiv aus → nichts")
+ZEILEN[0]["aktiv"] = True; zst["nachplan_at"] = 2500.0; HT_AKTIV["aktiv"] = False
+TICK(j, zst)
+ok(len(Z_AUFRUFE) == n, "auto_plan_regeln.aktiv aus → nichts")
+HT_AKTIV["aktiv"] = True; zst["nachplan_at"] = 2800.0
+TICK(datetime(2026, 11, 2, 19, 0, tzinfo=timezone.utc), zst)
+ok(len(Z_AUFRUFE) == n, "außerhalb des Fensters → nichts")
+TICK(j, {})
+ok(len(Z_AUFRUFE) == n, "noch kein HT-Takt → nichts")
+
+# Fehler in ap_planen: Lock wieder frei, Fehler sichtbar
+def z_wirft(*a, **k):
+    raise RuntimeError("DB weg")
+ns["ap_planen"] = z_wirft
+zst["nachplan_at"] = 3100.0
+TICK(j, zst)
+ok("DB weg" in ns["_ap_gruppen_nachplan"]["fehler"] and not ns["_ap_nachplan_lock"].locked(), "Fehler steht im Merker, Sperre wieder frei")
+ns["ap_planen"] = z_planen
+
+# Lauf meldet ok False: Fehler sichtbar, Merker bleibt frei
+ns["ap_planen"] = lambda *a, **k: {"ok": False, "msg": "Nutzerliste nicht lesbar"}
+zst["nachplan_at"] = 3400.0
+TICK(j, zst)
+ok("Nutzerliste" in ns["_ap_gruppen_nachplan"]["fehler"], "ok False → Fehler sichtbar, nichts gemerkt")
+ns["ap_planen"] = z_planen
+
+# Knopf „morgen“ hat den nächsten Tag geplant: Takt lässt das Protokoll stehen
+n = len(Z_AUFRUFE)
+_ll_alt = ZEILEN[0]["letzter_lauf"]
+ZEILEN[0]["letzter_lauf"] = dict(_ll_alt, tag="2026-11-03")
+zst["nachplan_at"] = 3700.0
+TICK(j, zst)
+ok(len(Z_AUFRUFE) == n and ZEILEN[0]["letzter_lauf"]["tag"] == "2026-11-03", "Lauf für morgen liegt vor → Takt rechnet nicht, Protokoll bleibt")
+ZEILEN[0]["letzter_lauf"] = _ll_alt
+
+# Mischen
+M = ns["ap_gruppe_lauf_mischen"]
+m, g = M({"tag": "2026-11-01", "geplant": [{"konto_id": "a"}], "ausgelassen": [{"konto_id": "b", "grund": "x"}]}, {"tag": Z_TAG, "geplant": [], "ausgelassen": []}, ["c"])
+ok(m["geplant"] == [] and m["ausgelassen"] == [] and g is False, "anderer Tag: alte Zeilen fallen weg")
+ok(ns["ap_gruppe_lauf_ohne_erledigt"]({"ausgelassen": [{"grund": "letzter Trade noch nicht erledigt (Überprüfen)"}, {"grund": "Ziel erreicht"}]})["ausgelassen"] == [{"grund": "Ziel erreicht"}],
+   "ohne_erledigt nimmt nur die „letzter Trade“-Zeilen")
+
+# Verträge: HT unverändert, Takt in der Schleife
+_hl = fn_text("ap_loop")
+ok(_hl.index("ap_nachplan_tick(") < _hl.index("ap_gruppen_nachplan_tick("), "ap_loop: Gruppen-Takt direkt nach dem HT-Takt")
+_rr = fn_text("_ap_nachplan_rechnen")
+ok('else ap_planen(tag, quelle="nachplanen", nur_konten=kand)' in _rr and 'sb_select("auto_plan_lauf"' in _rr, "HT-Weg: ap_planen und auto_plan_lauf wie bisher")
+ok('uids = [str(u) for u in (reg.get("user_ids") or [])]' in fn_text("ap_nachplan_tick"), "ap_nachplan_tick: weiter nur HT-IDs")
+ok("_ap_auto_best" not in fn_text("ap_gruppen_nachplan_tick"), "Gruppen-Takt fasst Auto-Bestätigen nicht an")
 
 print("\nALLES OK" if not FEHLER else f"\n{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)
