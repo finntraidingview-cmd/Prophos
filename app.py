@@ -15007,7 +15007,8 @@ def wd_sicht():
 def admin_wd_plaene():
     if request.method == "OPTIONS":
         return "", 200
-    if request.method in ("POST", "DELETE") or (request.method == "PATCH" and str((request.get_json(silent=True) or {}).get("aktion") or "") not in PLANER_WD_AUTOMATIK):
+    # WD-ZEILE VON HAND (Finn 02.11.2026 19:20): „jede Admin-ID darf seine Slaves-IDs da editieren“ — eigene Rechte-Prüfung (wd_hand_darf), nicht das Planer-Gate
+    if request.method in ("POST", "DELETE") or (request.method == "PATCH" and str((request.get_json(silent=True) or {}).get("aktion") or "") not in PLANER_WD_AUTOMATIK + WD_HAND_AKTIONEN):
         _gs = _planer_schreib_gate()          # PLANER-RECHTE HT (30.10.2026)
         if _gs is not None:
             return _gs
@@ -15038,7 +15039,7 @@ def admin_wd_plaene():
                         tab, key = "order_signale", str(d.get("signal_id") or "").strip()
                     elif akt in ("farm", "balance", "rest_planer", "rest_planer_weg", "review_notiz"):
                         tab, key = "accounts", str(d.get("account_id") or "").strip()
-                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg", "vormerken", "vormerken_weg"):
+                    elif akt in ("ende", "endlesung", "erledigt", "ansehen", "manuell", "manuell_weg", "vormerken", "vormerken_weg") + WD_HAND_AKTIONEN:
                         tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
                     else:
                         tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
@@ -15126,7 +15127,8 @@ def admin_wd_plaene():
                                   "anz_hedge_eur:hedge_eur,anz_started_at:started_at,anz_vorschau:mt5_baseline->hedge_vorschau,anz_final:mt5_baseline->final,"
                                   # richtung_konflikt (30.10.2026, S7 Richtung je Konto): am Start gedrehte Pläne dreht wdPlaeneNachziehen
                                   # nicht auf die Konto-Richtung zurück
-                                  "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt",
+                                  "slave_name,master_name,updated_at,richtung_konflikt:mt5_baseline->richtung_konflikt,"
+                                  "hand_werte_at,master_firm,anz_frei:hedge_freigabe_at",   # WD-Zeile von Hand (02.11.2026): Sperre fürs Nachziehen + Popup
                         "id": f"in.({chunk})"})
             # Admin-Gruppen (08.10.2026): die Tagesplan-Zeilen sind nutzerübergreifend (RLS offen) — Pläne fremder IDs nicht an einen
             # eingeschränkten Login bzw. nicht in Finns Gruppenfilter
@@ -15444,6 +15446,48 @@ def admin_wd_plaene():
                 if not r.json():
                     return jsonify({"error": "Plan hat sich inzwischen geändert — nichts geschrieben"}), 409
                 return jsonify({"ok": True, "plan_id": pid, "manuell": m})
+            except Exception as e:
+                return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
+        if daten.get("aktion") in WD_HAND_AKTIONEN:
+            # WD-ZEILE VON HAND (Finn 02.11.2026 03:24: „wenn ich hier drauf klicke, den P&L etc. alles verändern“; Konstrukt 2026-11-02_wd_zeile_edit_konstrukt.md):
+            # Werte eines noch nicht gestarteten Farmer-Plans. Die Hedge-Felder rechnet der Tab mit wdFarmHedge (eine Rechnung), hier nur Whitelist + Grenzen.
+            # hand_werte_at sperrt Abgleich/Nachziehen; „hand_zurueck“ hebt die Sperre auf. Apex mit Freigabe: jede Änderung löscht hedge_freigabe_at (sichere Variante, neu bestätigen).
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                rows = sb_select("trade_plans", {"select": "id,user_id,status,notes,route,master_firm,start_um,start_um_gestartet_at,orbit_gesendet_at,started_at,"
+                                                           "hedge_freigabe_at,planned_for,winning_day", "id": f"eq.{pid}", "limit": "1"})
+                p = rows[0] if rows else None
+                if not p or "Winning-Day-Farmer" not in str(p.get("notes") or ""):
+                    return jsonify({"error": "Kein Winning-Day-Plan"}), 404
+                try:
+                    recht = wd_hand_darf(me, p.get("user_id"), sicht_fest if _admin_verwalter() else None, _admin_voll()[1] is None,
+                                         _admin_verwalter_gruppen_ids(admin_gruppen_daten()))
+                except Exception:
+                    return jsonify({"error": "Rechte nicht prüfbar"}), 502
+                if not recht:
+                    return jsonify({"error": "Diese ID darfst du hier nicht bearbeiten (nur eigene, Admins ihre Gruppe)"}), 403
+                if p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at") or p.get("started_at"):
+                    return jsonify({"error": "Plan läuft schon oder ist beendet — nichts geändert"}), 409
+                jetzt = datetime.now(timezone.utc)
+                upd, fehler = wd_hand_upd(daten.get("felder") or {}, p, jetzt, daten.get("aktion") == "hand_zurueck")
+                if fehler:
+                    return jsonify({"error": fehler}), 400
+                filt = {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "orbit_gesendet_at": "is.null", "started_at": "is.null"}
+                z = sb_update("trade_plans", filt, upd)
+                if not z:
+                    return jsonify({"error": "Plan hat sich gerade geändert (gestartet?) — nichts geschrieben"}), 409
+                # Tageszeile mitziehen: k.hand sperrt den Abgleich der Zeile, k.tp/k.kt tragen die Werte (Selbstheilung legt mit ihnen neu an)
+                try:
+                    for row in sb_select("wd_tagesplan", {"select": "id,tag,konten", "user_id": f"eq.{p.get('user_id')}", "tag": f"eq.{p.get('planned_for')}"}) or []:
+                        konten, ge = wd_hand_konten(row.get("konten"), pid, upd, str(me), jetzt.isoformat(), daten.get("aktion") == "hand_zurueck")
+                        if ge:
+                            sb_update("wd_tagesplan", {"id": f"eq.{row['id']}"}, {"konten": konten, "updated_at": jetzt.isoformat()})
+                except Exception as e:
+                    print(f"[wd-hand] ⚠️ Tageszeile {pid[:8]}: {type(e).__name__}: {e}", flush=True)
+                print(f"[wd-hand] Plan {pid[:8]} von {str(me)[:8]}: {sorted(upd)}", flush=True)
+                return jsonify({"ok": True, "plan_id": pid, "plan": z[0], "freigabe_geloescht": "hedge_freigabe_at" in upd})
             except Exception as e:
                 return jsonify({"error": f"nicht gespeichert ({type(e).__name__})"}), 502
         if daten.get("aktion") in ("vormerken", "vormerken_weg"):
@@ -24980,6 +25024,82 @@ def ap_eingriff_admin_reiter(admin, uid, nur_eigene, sicht, im_planer=False):
 # Grenze: eigene Pläne schreibt das Frontend teils direkt per supabase-js (RLS) — das deckt dieser Riegel nicht (Frontend graut aus, S3).
 # ansehen = Puls nur hinnavigieren, ändert nichts (Prüfung S4 zu 1e3a83ae)
 # review_notiz (30.10.2026): Radar-Notiz ändert nichts am Planer; jede ID schreibt ihre eigene, die Besitz-Prüfung der Route gilt weiter
+WD_HAND_AKTIONEN = ("hand", "hand_zurueck")
+WD_HAND_FELDER = {"master_contracts": (1, 20), "master_tp": (1, 100000), "master_risk": (1, 100000), "slave_risk": (0, 20000), "multiplier": (0, 50),
+                  "hedge_faktor": (0, 50), "hedge_eur": (0, 20000)}
+
+
+def wd_hand_darf(me, ziel, verwalter_gruppe, voll_admin, verwalter_ids):
+    """REIN RECHNEND (testbar, Finn 02.11.2026 19:20): eigene Zeile immer; ein Verwalter (Emin) nur seine Gruppe; ein voller Admin (Finn + Pascal, Pascal)
+    nur Hermann Technologies, also nie IDs einer Gruppe mit Verwalter; alle anderen nur eigene."""
+    ziel = str(ziel or "")
+    if ziel and ziel == str(me or ""):
+        return True
+    if verwalter_gruppe is not None:
+        return ziel in {str(x) for x in verwalter_gruppe}
+    return bool(voll_admin) and bool(ziel) and ziel not in {str(x) for x in (verwalter_ids or ())}
+
+
+def wd_hand_upd(felder, plan, jetzt, zurueck=False):
+    """REIN RECHNEND (testbar): Whitelist + Grenzen → (upd, fehler). start_um nur ≥ jetzt + 2 min, wenn geändert; richtung buy/sell; Zahlen in WD_HAND_FELDER;
+    hand_werte_at = jetzt (bei zurueck null). Apex mit Freigabe: hedge_freigabe_at = null."""
+    f = felder if isinstance(felder, dict) else {}
+    upd = {}
+    for k, (lo, hi) in WD_HAND_FELDER.items():
+        if k in f and f[k] is not None:
+            try:
+                v = float(f[k])
+            except (TypeError, ValueError):
+                return None, f"{k} ist keine Zahl"
+            if not (lo <= v <= hi):
+                return None, f"{k} {v} außerhalb {lo}–{hi}"
+            upd[k] = int(v) if k == "master_contracts" else v
+    if "master_contracts" in f and f["master_contracts"] is not None and float(f["master_contracts"]) != int(float(f["master_contracts"])):
+        return None, "Kontrakte nur ganz"
+    if f.get("richtung") is not None:
+        if f["richtung"] not in ("buy", "sell"):
+            return None, "richtung muss buy oder sell sein"
+        upd["richtung"] = f["richtung"]
+    if f.get("start_um"):
+        try:
+            neu = datetime.fromisoformat(str(f["start_um"]).replace("Z", "+00:00"))
+        except ValueError:
+            return None, "Startzeit unlesbar"
+        alt = str((plan or {}).get("start_um") or "")
+        try:
+            gleich = alt and abs((datetime.fromisoformat(alt.replace("Z", "+00:00")) - neu).total_seconds()) < 1
+        except ValueError:
+            gleich = False
+        if not gleich:
+            if neu < jetzt + timedelta(minutes=2):
+                return None, "Startzeit frühestens in 2 min"
+            upd["start_um"] = neu.astimezone(timezone.utc).isoformat()
+    if not upd and not zurueck:
+        return None, "nichts zu ändern"
+    upd["hand_werte_at"] = None if zurueck else jetzt.isoformat()
+    if (plan or {}).get("hedge_freigabe_at") and "apex" in str((plan or {}).get("master_firm") or "").lower():
+        upd["hedge_freigabe_at"] = None
+    return upd, None
+
+
+def wd_hand_konten(konten, pid, upd, von, at, zurueck=False):
+    """REIN RECHNEND (testbar): Tageszeilen-Konten mit den Hand-Werten → (konten, geändert). k.hand = {at, von, felder} bzw. bei zurueck entfernt."""
+    out, ge = [], False
+    for k in konten or []:
+        if isinstance(k, dict) and str(k.get("plan_id") or "") == str(pid):
+            k = dict(k)
+            for quelle, ziel in (("master_tp", "tp"), ("master_contracts", "kt"), ("slave_risk", "slave"), ("start_um", "start_um"), ("richtung", "w_richtung")):
+                if quelle in upd and upd[quelle] is not None:
+                    k[ziel] = upd[quelle]
+            if zurueck:
+                k.pop("hand", None)
+            else:
+                k["hand"] = {"at": at, "von": von, "felder": sorted(x for x in upd if x not in ("hand_werte_at", "hedge_freigabe_at"))}
+            ge = True
+        out.append(k)
+    return out, ge
+
+
 PLANER_WD_AUTOMATIK = ("ende", "endlesung", "endlesung_stand", "balance", "balance_stand", "tab_neu_laden", "ansehen", "review_notiz")
 # Nachholen verpasster Pläne (POST /admin/auto-plan/plan aktion nachholen) ruft sfTick in JEDEM PC-Tab automatisch — gesperrt fiele der Tab auf
 # start_um per supabase-js zurück, OHNE die Prüfungen von ap_nachhol_minute (Richtungsschutz, Abstände). Deshalb nie gesperrt.

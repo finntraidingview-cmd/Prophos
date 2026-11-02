@@ -2593,6 +2593,11 @@
   #dashboard-view .tpl-kasten dt{color:var(--sub)} #dashboard-view .tpl-kasten dd{margin:0;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums;min-width:0;overflow-wrap:anywhere}
   #dashboard-view .tpl-kasten dd small{color:var(--sub);font-size:11.5px} #dashboard-view .tpl-kasten .gut{color:var(--good)} #dashboard-view .tpl-kasten .rot{color:var(--danger)}
   #dashboard-view .tpl-kasten .tk-akt{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px} #dashboard-view .tpl-kasten .tk-akt .btn{padding:4px 10px;font-size:12px;height:auto}
+  /* WD-Zeile von Hand (02.11.2026): Felder im Kasten */
+  #dashboard-view .wdz-felder{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--sub)}
+  #dashboard-view .wdz-felder input,#dashboard-view .wdz-felder select{width:100%;padding:4px 7px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px}
+  #dashboard-view .wdz-rech{margin-top:8px;font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums}
+  #wd-uebersicht .ap-gr-warten .pz-z[data-plan-id]:not(.pz-z-kopf){cursor:pointer}
   #dashboard-view .tpl-kasten .tk-hin{margin-top:8px;font-size:11.5px;color:var(--sub)} #dashboard-view .tpl-kasten .tk-hin.rot{color:var(--danger)}
   #dashboard-view .tpl-kasten .tk-liste{display:flex;flex-direction:column;margin-top:6px}
   #dashboard-view .tpl-kasten .tk-liste button{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:8px;align-items:center;width:100%;padding:7px 2px;border:0;border-top:1px solid var(--border-soft);background:none;font:inherit;font-size:12.5px;color:var(--ink);text-align:left;cursor:pointer}
@@ -54378,7 +54383,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1992'
+  const OS_TAB_BUILD = '2026-09-22.1993'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -69251,6 +69256,7 @@
           try{ const x = await wdApi('DELETE', { id: k.plan_id }); if(x.geloescht) geloescht++ }catch(e){ console.warn('[wd] löschen', e); continue }
           k.plan_id = null; k.status = null; k.start_um = null; k.tp = null; k.sl = null; ge = true; continue
         }
+        if(p.hand_werte_at || k.hand) continue   // WD-Zeile von Hand (02.11.2026): Zeit, Richtung, TP nicht nachziehen
         const upd = {}, soll = zeiten.get(String(k.id)), kd = wdKontoDaten(k.id)
         const kr = wdKontoRichtung(k, row.richtung)   // BÜNDEL (28.10.2026): Richtung der Gruppe
         // nie zurückdrehen, was der Start-Schutz gedreht hat (30.10.2026) — GET /admin/wd-plaene liefert dafür richtung_konflikt (Alias auf mt5_baseline)
@@ -69448,6 +69454,8 @@
           if(p.fehler){ set(k, 'aktiv', false); set(k, 'hinweis', p.fehler); continue }
           set(k, 'plan_id', String(p.plan.id)); set(k, 'start_um', startIso); set(k, 'tp', p.plan.masterTp); set(k, 'sl', p.plan.masterSl); set(k, 'slave', p.plan.slaveRisk); set(k, 'live', p.z.live); set(k, 'plus', p.z.plus); set(k, 'status', 'planned')
         }else if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
+          // WD-ZEILE VON HAND (02.11.2026): Werte von Hand bleiben stehen — Zeit, Richtung und Hedge zieht der Abgleich nicht nach (Marke am Konto der Zeile bzw. am Plan)
+          if(k.hand || plan.handWerteAt) continue
           const upd = {}, z = zVon.get(String(k.id))
           // RECOVERER-ALTPLAN (02.11.2026): eigener Schritt mit Riegel in der DB — wurde er inzwischen bestätigt oder von Hand geändert, bleibt er. Geklappt: Rest im nächsten Takt.
           const accAlt = z ? (accounts || []).find(a => String(a.id) === String(k.id)) : null
@@ -69505,7 +69513,8 @@
             const m = tpCalcMultiplier(plan.masterFirm, sl.slave.firm, plan.masterRisk, plan.masterContracts, z.slaveRisk); if(m) upd.multiplier = m
           }
           if(Object.keys(upd).length){
-            const { data } = await supabase.from('trade_plans').update(upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+            // .is('hand_werte_at', null): der Cache dieses Tabs kennt eine Hand-Änderung am Mac nicht (Pläne ohne Realtime) — die DB sperrt das Zurückdrehen
+            const { data } = await supabase.from('trade_plans').update(upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).is('hand_werte_at', null).select('*')
             if(data && data[0]){ const ix = tradePlans.indexOf(plan); if(ix >= 0) tradePlans[ix] = rowToPlan(data[0]) }
             set(k, 'start_um', startIso); if(upd.slave_risk != null){ set(k, 'slave', upd.slave_risk); set(k, 'live_hinweis', '') }
           }
@@ -70249,6 +70258,93 @@
       <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr>${kopfZeile}</tr></thead><tbody>${g.l.map(e => art === 'offen' ? (typeof window._ahfZeileHtml === 'function' ? window._ahfZeileHtml(e, { paare: true }) : '') : wdUebersichtZeile(e, art)).join('')}</tbody></table></div>`).join('')
     return `<div class="ap-adm-karte">${kopf}${gruppen}</div>`
   }
+  /* WD-ZEILE VON HAND (Finn 02.11.2026 03:24: „wenn ich hier drauf klicke, den P&L etc. alles verändern“; Konstrukt 2026-11-02_wd_zeile_edit_konstrukt.md; Rechte Finn 19:20:
+   * „jede Admin-ID darf seine Slaves-IDs da editieren“ — Railway prüft das, wd_hand_darf). Klick auf eine Zeile unter „Wartet auf Start“ öffnet den Kasten: Start (Dubai), Richtung,
+   * Kontrakte, TP Master $, Risiko Master $, Fusion € am Risiko. Fusion-Lots und Fusion € am TP rechnet wdFarmHedge (eine Rechnung). Speichern → PATCH aktion 'hand' mit allen Feldern,
+   * hand_werte_at sperrt Abgleich und Nachziehen. „Würfel-Werte“ → 'hand_zurueck'. Apex mit Freigabe: Railway löscht die Freigabe, sie muss neu bestätigt werden. */
+  const WDZ_TZ = 'Asia/Dubai'
+  const wdzPlan = pid => ((_wd.daten && _wd.daten.plaene) || []).find(p => String(p.id) === String(pid)) || null
+  const wdzKonto = pid => { for(const r of (_wd.rows || [])) for(const k of (r.konten || [])) if(k && String(k.plan_id || '') === String(pid)) return k; return null }
+  const wdzUhr = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { timeZone: WDZ_TZ, hour: '2-digit', minute: '2-digit', hour12: false }) }
+  // REIN RECHNEND (Test-Haken): HH:MM Dubai am Tag des alten Starts → ISO; Dubai = UTC+4 ohne Sommerzeit
+  function wdzStartIso(altIso, hhmm){
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim()); if(!m) return null
+    const alt = new Date(altIso || Date.now()); if(isNaN(alt)) return null
+    const dub = new Date(alt.getTime() + 4 * 3600000)
+    const ms = Date.UTC(dub.getUTCFullYear(), dub.getUTCMonth(), dub.getUTCDate(), Number(m[1]) - 4, Number(m[2]))
+    return Number(m[1]) <= 23 && Number(m[2]) <= 59 ? new Date(ms).toISOString() : null
+  }
+  // REIN RECHNEND (Test-Haken): Eingaben → Plan-Felder inkl. Hedge (wdFarmHedge, Punktwert aus der Firma wie beim Anlegen)
+  function wdzFelder(p, e){
+    const pr = { master_firm: p.master_firm, master_symbol: p.master_symbol, master_contracts: Number(e.kt), master_tp: Number(e.tp), master_risk: Number(e.risk) || null }
+    const an = Number(p.anz_hedge_eur) > 0 || Number(p.slave_risk) > 0
+    if(an) wdFarmHedge(pr, Number(e.risk) || 0, Number(e.slave) || 0, true, [])
+    const f = { master_contracts: pr.master_contracts, master_tp: pr.master_tp, master_risk: pr.master_risk }
+    if(an) Object.assign(f, { slave_risk: pr.slave_risk, multiplier: pr.multiplier, hedge_faktor: pr.hedge_faktor, hedge_eur: pr.hedge_eur })
+    if(e.richtung === 'buy' || e.richtung === 'sell') f.richtung = e.richtung
+    if(e.start) f.start_um = e.start
+    const lots = (Number(pr.multiplier) > 0 && pr.master_contracts > 0) ? Math.round(pr.master_contracts * pr.multiplier * 100) / 100 : null
+    return { f, lots, minus: an ? pr.hedge_eur : null, plus: an ? pr.slave_risk : null }
+  }
+  window._wdz = { startIso: wdzStartIso, felder: wdzFelder }
+  function wdzZu(){ const k = document.getElementById('wdz-kasten'); if(k) k.remove() }
+  function wdzWerte(kasten){ const v = n => kasten.querySelector(`[data-wdz="${n}"]`)?.value; return { start: v('start'), richtung: v('richtung'), kt: v('kt'), tp: v('tp'), risk: v('risk'), slave: v('slave') } }
+  function wdzRechnen(kasten, p){
+    const e = wdzWerte(kasten), r = wdzFelder(p, Object.assign({}, e, { start: null })), el = kasten.querySelector('.wdz-rech')
+    const de = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+    if(el) el.textContent = r.lots != null ? `Fusion ${de(r.lots)} Lot · −${de(r.minus)} € am TP · +${de(r.plus)} € am Risiko` : 'ohne Fusion-Hedge'
+  }
+  function wdzOeffnen(pid, anker){
+    wdzZu()
+    const p = wdzPlan(pid); if(!p) return
+    if(p.status !== 'planned' || p.start_um_gestartet_at){ if(typeof atToast === 'function') atToast('Läuft schon — nichts mehr zu ändern', 'end'); return }
+    const k = wdzKonto(pid) || {}, wur = k.wuerfel || {}
+    const esc = v => escapeHtml(String(v == null ? '' : v))
+    const box = document.createElement('div'); box.id = 'wdz-kasten'; box.className = 'tpl-kasten'
+    box.innerHTML = `<div class="tk-kopf">✎ Winning Day ändern<button type="button" class="tk-x" data-wdz-zu title="Schließen">×</button></div>
+      <div class="tk-konto">${esc(p.master_name || '')}<small>${p.hand_werte_at ? '✎ von Hand ' + esc(wdzUhr(p.hand_werte_at)) : 'Werte vom Würfel'}${p.anz_frei && /apex/i.test(String(p.master_firm || '')) ? ' · Apex freigegeben: Speichern hebt die Freigabe auf' : ''}</small></div>
+      <div class="wdz-felder">
+        <span>Start (Dubai)</span><input data-wdz="start" value="${esc(wdzUhr(p.start_um))}" placeholder="HH:MM">
+        <span>Richtung</span><select data-wdz="richtung"><option value="buy"${p.richtung === 'buy' ? ' selected' : ''}>BUY</option><option value="sell"${p.richtung === 'sell' ? ' selected' : ''}>SELL</option></select>
+        <span>Kontrakte</span><input data-wdz="kt" type="number" min="1" step="1" value="${esc(p.master_contracts)}">
+        <span>TP Master $</span><input data-wdz="tp" type="number" min="1" step="1" value="${esc(p.master_tp)}">
+        <span>Risiko Master $</span><input data-wdz="risk" type="number" min="1" step="1" value="${esc(p.master_risk || '')}">
+        <span>Fusion € am Risiko</span><input data-wdz="slave" type="number" min="0" step="1" value="${esc(p.slave_risk || '')}">
+      </div>
+      <div class="wdz-rech"></div>
+      <div class="tk-akt"><button type="button" class="btn btn-primary" data-wdz-speichern>Speichern</button>${p.hand_werte_at && Number(wur.tp) > 0 ? `<button type="button" class="btn btn-ghost" data-wdz-zurueck title="TP ${esc(wur.tp)} $ · ${esc(wur.kt)} Kontrakte vom Würfel, danach zieht der Abgleich Zeit, Richtung und Hedge wieder nach">Würfel-Werte</button>` : ''}</div>
+      <div class="tk-hin">Gilt bis zum Start. Unter 2 min vor dem Start prüft die Marge noch mit den alten Werten.</div>`
+    ;(document.getElementById('dashboard-view') || document.body).appendChild(box)
+    const r = anker && anker.getBoundingClientRect ? anker.getBoundingClientRect() : { left: 40, bottom: 120 }
+    box.style.left = Math.max(16, Math.min(window.innerWidth - 336, r.left)) + 'px'; box.style.top = Math.max(16, Math.min(window.innerHeight - 380, r.bottom + 6)) + 'px'
+    box.addEventListener('input', () => wdzRechnen(box, p)); wdzRechnen(box, p)
+    box.querySelector('[data-wdz-zu]').addEventListener('click', wdzZu)
+    box.querySelector('[data-wdz-speichern]').addEventListener('click', () => wdzSpeichern(box, p, false))
+    box.querySelector('[data-wdz-zurueck]')?.addEventListener('click', () => wdzSpeichern(box, p, true))
+  }
+  async function wdzSpeichern(box, p, zurueck){
+    const e = wdzWerte(box), wur = (wdzKonto(p.id) || {}).wuerfel || {}
+    if(zurueck){ e.tp = wur.tp; e.kt = wur.kt; e.start = '' }
+    const start = e.start && e.start !== wdzUhr(p.start_um) ? wdzStartIso(p.start_um, e.start) : null
+    if(e.start && e.start !== wdzUhr(p.start_um) && !start){ if(typeof atToast === 'function') atToast('Startzeit als HH:MM eingeben', 'end'); return }
+    const r = wdzFelder(p, Object.assign({}, e, { start }))
+    const knopf = box.querySelector('[data-wdz-speichern]'); if(knopf){ knopf.disabled = true; knopf.textContent = 'speichert …' }
+    try{
+      const d = await wdApi('PATCH', { aktion: zurueck ? 'hand_zurueck' : 'hand', plan_id: String(p.id), felder: r.f })
+      wdzZu()
+      if(typeof atToast === 'function') atToast(`✓ ${p.master_name || 'Plan'} ${zurueck ? 'auf Würfel-Werte zurück' : 'geändert'}${d.freigabe_geloescht ? ' · Apex-Freigabe aufgehoben, bitte neu bestätigen' : ''}`, 'ok')
+      try{ await wdNeuLaden() }catch(_){}
+    }catch(err){
+      if(knopf){ knopf.disabled = false; knopf.textContent = 'Speichern' }
+      if(typeof atToast === 'function') atToast('Nicht gespeichert: ' + String((err && err.message) || err), 'end')
+    }
+  }
+  document.addEventListener('click', ev => {
+    const z = ev.target.closest && ev.target.closest('#wd-uebersicht .ap-gr-warten .pz-z[data-plan-id]:not(.pz-z-kopf)')
+    if(z && !ev.target.closest('button, a, input, select')){ wdzOeffnen(z.getAttribute('data-plan-id'), z); return }
+    if(!ev.target.closest('#wdz-kasten')) wdzZu()
+  })
+  document.addEventListener('keydown', ev => { if(ev.key === 'Escape') wdzZu() })
   function wdUebersicht(){
     const box = document.getElementById('wd-uebersicht'); if(!box) return
     if(!_wd.daten || !Array.isArray(_wd.rows)){ box.innerHTML = ''; return }
