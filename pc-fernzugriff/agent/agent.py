@@ -516,9 +516,10 @@ def lauf_pruefen():
 
 
 def eingriff_freigeben(pruefen):
-    """Fenster prüfen, dann Lauf. Dauert die Lauf-Abfrage länger als 200 ms (Prüfer S9), ist die Fensterprüfung alt und läuft einmal neu."""
-    pruefen()
+    """Fenster prüfen, dann Lauf. Dauert beides zusammen länger als 200 ms (Prüfer S9), ist der Fenster-Wert alt und wird einmal neu gelesen. t0 steht vor pruefen(): Kam das Fenster erst
+    jetzt nach vorn, läuft das Netz des Handelsstands in dieser Prüfung, und der Titel stammt von davor."""
     t0 = time.time()
+    pruefen()
     lauf_pruefen()
     if time.time() - t0 > 0.2:
         pruefen()

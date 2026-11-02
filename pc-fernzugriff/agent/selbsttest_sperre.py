@@ -394,6 +394,27 @@ a.lauf_grund = _lg
 # Echtes lauf_grund: Lock und Panel
 b = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
+# Eine langsame Fensterprüfung (Handelsstand übers Netz) zählt mit: Der Fenster-Wert wird neu gelesen
+_lg_b, b.lauf_grund = b.lauf_grund, (lambda: None)
+_rufe = []
+
+
+def _langsam():
+    _rufe.append(1)
+    if len(_rufe) == 1:
+        e0 = _echte_zeit()
+        while _echte_zeit() - e0 < 0.21:
+            pass
+
+
+_echte_zeit = b.time.time
+b.eingriff_freigeben(_langsam)
+pruefe("langsame Fensterprüfung läuft einmal neu", len(_rufe) == 2, _rufe)
+_rufe.clear()
+_rufe.append(1)
+b.eingriff_freigeben(_langsam)
+pruefe("schnelle Fensterprüfung läuft einmal", len(_rufe) == 2, _rufe)
+b.lauf_grund = _lg_b
 # Handelsstand nur, wenn TradingView, Puls-Chrome oder MT5 betroffen sind, und einmal je Aktion
 _hz = []
 b.puls_browser_pid, b.puls_tabs = (lambda: (500, True)), (lambda: TABS)
