@@ -29545,6 +29545,7 @@
   }
   let _hedgeLotsOkBusy = false
   const _hedgeLotsOkNaechst = new Map()   // OK → frühester nächster Versuch. Bricht der Kern vor 'oeffnet' ab, bleibt der Stop stehen und es geht alle 30 s weiter statt bis zum Neuladen nie mehr
+  const _hedgeLotsFlachSeit = new Map()   // Plan → erster „flach“-Blick
   async function hedgeLotsOkTick(){
     if(!MT5_LOCAL || window._tabNebenSofort || _hedgeLotsOkBusy) return
     const pc = hedgePcId(), meinStop = x => !!x && x.status === 'fehler' && Number(x.lots_stop) > 0 && (!x.pc || x.pc === pc)   // am PC des Plans: sonst zöge ein zweiter PC der ID das Open, ohne Master im Blick
@@ -29561,7 +29562,13 @@
         tpLotsStopMelden(f, Number(hx.lots_stop))   // kam Railway beim ersten Mal nicht an, hier nochmal
         if(f.status !== 'open' || !ok || !(Number(ok.lots) + 0.011 >= Number(hx.lots_stop))) continue
         const da = await hedgeLotsMasterDa(f)
+        // ZWEITER BLICK (S9 02.11.2026): „flach“ ist endgültig, stimmt eine Lesung einmal nicht, liefe der Master nackt. Erst wenn der nächste Takt es bestätigt
+        if(da !== false) _hedgeLotsFlachSeit.delete(String(f.id))
         if(da === false){
+          const flachSeit = _hedgeLotsFlachSeit.get(String(f.id))
+          if(!flachSeit){ _hedgeLotsFlachSeit.set(String(f.id), Date.now()); continue }
+          if(Date.now() - flachSeit < 4000) continue
+          _hedgeLotsFlachSeit.delete(String(f.id))
           try{ await hedgeAmPlanSchreiben(f.id, { status: 'uebersprungen', grund_code: 'master_flach', pc, at: new Date().toISOString(), msg: 'Hedge nach Lots-OK nicht geöffnet: das Master-Konto ist schon flach' }) }catch(_){}
           continue
         }
@@ -33739,7 +33746,7 @@
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:var(--warn-ink, #b45309)">unklar</span>`, 'color-mix(in srgb, var(--warn) 12%, transparent)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
       if(h.status === 'wartet') return box(`<span style="font-size:11px;color:var(--warn-ink, #b45309)">wartet…</span>`, 'color-mix(in srgb, var(--warn) 12%, transparent)', `Fusion-Hedge: ${h.msg || 'neuer Versuch gleich'}`)
-      if(h.status === 'uebersprungen' && h.grund_code === 'zu_spaet'){   // 30.10.2026: der Knopf bleibt der Weg von Hand (Bestätigung, Doppel-Open-Riegel im Kern)
+      if(h.status === 'uebersprungen' && (h.grund_code === 'zu_spaet' || h.grund_code === 'master_flach')){   // master_flach (S9 02.11.2026): stimmt die Lesung nicht, bleibt so ein Weg. 30.10.2026: der Knopf bleibt der Weg von Hand (Bestätigung, Doppel-Open-Riegel im Kern)
         const btn = (p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
           ? ` <button type="button" class="btn btn-ghost tc2-btn" data-plan-hedge-oeffnen="${escapeHtml(String(p.id))}" title="Fusion-Gegenposition jetzt öffnen — nur, wenn im Fusion-Terminal noch kein Hand-Hedge liegt" style="color:#0E7A78">Hedge öffnen</button>` : ''
         return box(`<span style="font-size:11px;color:var(--danger-ink, #b91c1c)">Hedge fehlt, von Hand prüfen</span>`, 'color-mix(in srgb, var(--danger) 8%, transparent)', h.msg || 'Hedge fehlt, von Hand prüfen') + btn
@@ -33807,8 +33814,11 @@
     const _spaetHin = (_hs && _hs.grund_code === 'zu_spaet') ? '\n\nDie Order ist älter als 90 s: erst im Fusion-Terminal nachsehen, ob schon ein Hand-Hedge liegt, sonst ist die Position doppelt.' : ''
     // LOTS-DECKEL (02.11.2026): von Hand über dem Deckel nur mit der Lot-Zahl im confirm; ein gültiges OK reicht auch
     const _lots = tpFusionLots(p), _lotsUeber = _lots > HEDGE_LOTS_DECKEL && !tpLotsOkGilt(p, p.mt5Baseline && p.mt5Baseline.lots_ok)
-    const _lotsHin = _lotsUeber ? `\n\nFusion öffnet ${_lots} Lot, erlaubt sind ${HEDGE_LOTS_DECKEL}, und es gibt kein OK. Mit „OK“ öffnest du genau diese Menge.` : ''
-    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?${_spaetHin}${_lotsHin}`)) return
+    const _lotsHin = _lotsUeber ? `\n\nFusion öffnet ${_lots} Lot, erlaubt sind ${HEDGE_LOTS_DECKEL}, und es gibt kein OK. Mit „OK“ öffnest du genau diese Menge.`
+      : _lots > HEDGE_LOTS_DECKEL ? `\n\nFusion öffnet ${_lots} Lot, das OK dafür liegt vor.` : ''
+    let _masterDa = null; try{ _masterDa = await hedgeLotsMasterDa(p) }catch(_){}   // S9 02.11.2026: der Knopf prüft nicht, er sagt es nur
+    const _sichtHin = _masterDa === true ? '' : '\n\nPosition gerade nicht zu sehen, erst im Master-Konto schauen.'
+    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?${_spaetHin}${_sichtHin}${_lotsHin}`)) return
     btn.disabled = true; btn.textContent = 'öffnet…'
     try{ await hedgeSoloOeffnen(p, { klick_at: new Date().toISOString(), manuell: true, lots_bestaetigt: _lotsUeber ? _lots : undefined }) }finally{ try{ renderTradePlans() }catch(_){} }
   }

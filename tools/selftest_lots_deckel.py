@@ -73,9 +73,11 @@ tick = tick[:tick.index("function hedgeLiqStart(")]
 check("seitStart" not in tick and "_hedgeNachgeholt" not in tick and "manuell: true" in tick and "lots_bestaetigt" in tick and "f.status !== 'open'" in tick, "Nach OK: öffnet unabhängig vom 3-min-Nachholen, nur solange der Master läuft")
 check("if(da !== true){" in tick and tick.index("if(da !== true){") < tick.index("hedgeSoloOeffnen(f") and "lots_ok_wartet" in tick, "Nach OK: öffnet nur bei gesichteter Position, sonst Vermerk und weiter prüfen")
 check("x.pc === pc" in tick and "Date.now() + 30000" in tick and tick.index("Date.now() + 30000") < tick.index("hedgeSoloOeffnen(f"), "Nach OK: nur am PC des Stops, ein gescheiterter Versuch kommt nach 30 s wieder")
-check("h.grund_code === 'lots_deckel'" in html, "Handknopf erscheint auch im Stop")
-klick = html[html.index("async function hedgeOeffnenKlick("):][:1400]
+check("h.grund_code === 'lots_deckel'" in html and "h.grund_code === 'master_flach'" in html, "Handknopf erscheint auch im Stop und nach „flach“")
+check("_hedgeLotsFlachSeit.get(" in tick and tick.index("_hedgeLotsFlachSeit.get(") < tick.index("grund_code: 'master_flach'"), "Flach erst nach dem zweiten Blick endgültig")
+klick = html[html.index("async function hedgeOeffnenKlick("):][:2000]
 check("${_lots} Lot" in klick and "lots_bestaetigt: _lotsUeber" in klick, "Handknopf: Lot-Zahl im confirm")
+check("Position gerade nicht zu sehen, erst im Master-Konto schauen" in klick and "das OK dafür liegt vor" in klick, "confirm: Sichtung und Lot-Zahl auch bei gültigem OK")
 check("lots_stops" in app and "D.lotsStops" in html, "Braucht dich: Stops auch für fremde laufende Pläne")
 okr = app[app.index("def admin_auto_plan_lots_ok"):app.index('@app.route("/alarm/lots-deckel"')]
 check("laufend and stop is None" in okr and '"p_status": p.get("status")' in okr, "OK-Route: auch für laufende Pläne mit Stop, sonst 409")
