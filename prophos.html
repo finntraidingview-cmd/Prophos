@@ -54254,7 +54254,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1986'
+  const OS_TAB_BUILD = '2026-09-22.1987'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54531,7 +54531,8 @@
     if(KW_ENDE_SL.has(g)) return 'sl'
     if(KW_ENDE_HAND.has(g) || /^(close|hand)$/.test(String(f.ende_quelle || ''))) return 'hand'
     if(hg === 'level_tp' || hg === 'tp_feed') return 'tp'
-    if(hg === 'level_sl' || hg === 'sl_feed') return h.sl_art === 'liquidation' ? 'liq' : 'sl'   // WD/Apex: das SL-Level des Hedges ist das Liq-Level
+    // WD/Apex: das SL-Level des Hedges ist das Liq-Level — außer beim Daily-Loss-Level (Soft-Breach, Konto lebt; Stopp S9 02.11.2026), das geht in den SL-Zweig
+    if(hg === 'level_sl' || hg === 'sl_feed') return h.sl_art === 'liquidation' && h.liq_art !== 'daily_loss' ? 'liq' : 'sl'
     if(hg === 'hand') return 'hand'
     const pl = n(p.masterPl) ?? n(f.master_pl_schaetzung), tp = n(p.masterTp), sl = n(p.masterSl)
     if(pl == null) return null
