@@ -1623,6 +1623,24 @@ MASTER_ORDER_GUARD = threading.Lock()
 # Browser und Maus — davon gibt es genau eines. Zwei parallele Laeufe wuerden
 # sich die Klicks gegenseitig wegziehen, mitten im Order-Ticket.
 TV_ORDER_LOCK = threading.Lock()
+def hedge_solo_zeiten(erg, proxy_ms, t_ein, t_aus):
+    """REIN RECHNEND (HEDGE-ZU-7S, 02.11.2026, Plan e67ec7b9: Close hing 7,17 s zwischen Tab und Panel): erg mit Stempeln in zeiten_ms —
+    proxy_ein (Eingang app.py /copier), panel_ein (Eingang do_POST), panel_aus (Quittung geht raus), alle in ms. Nur Messung: Fehlt ein Wert
+    oder ist er unlesbar, bleibt das Feld weg; erg sonst unverändert."""
+    if not isinstance(erg, dict):
+        return erg
+    z = dict(erg.get("zeiten_ms")) if isinstance(erg.get("zeiten_ms"), dict) else {}
+    try:
+        z["proxy_ein"] = int(str(proxy_ms))
+    except (TypeError, ValueError):
+        pass
+    if t_ein:
+        z["panel_ein"] = round(t_ein * 1000)
+    if t_aus:
+        z["panel_aus"] = round(t_aus * 1000)
+    return dict(erg, zeiten_ms=z)
+
+
 # Solo-Hedge-Auftragsdatei (24.09.2026): zwei gleichzeitige /api/hedge-solo duerfen sich
 # die Liste nicht gegenseitig ueberschreiben (Auto-Close schliesst mehrere Plaene in einem Tick).
 HEDGE_SOLO_LOCK = threading.Lock()
@@ -4538,6 +4556,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        self._t_ein = time.time()    # HEDGE-ZU-7S (02.11.2026): Eingang im Panel, nur Messung (hedge_solo_zeiten)
         # UPDATE-SCHUTZ (29.10.2026): jeden POST außer tsx-stand zählen; kurz vor dem Neustart (zu) sofort 503 „nichts gesendet"
         if urlparse(self.path).path == "/api/tsx-stand":
             return self._do_post_innen()
@@ -5646,6 +5665,7 @@ class Handler(BaseHTTPRequestHandler):
                                  else "spaeter erneut schliessen.")}
             print(f"[panel] hedge-solo {aktion} {auftrag['cmd_id']} -> {'OK' if erg.get('ok') else 'FEHLER'} "
                   f"[{erg.get('code') or ''}] {str(erg.get('msg') or '')[:160]}", flush=True)
+            erg = hedge_solo_zeiten(erg, self.headers.get("X-Prophos-Proxy-Ms"), getattr(self, "_t_ein", None), time.time())
             return self._send(200, json.dumps(erg, ensure_ascii=False))
 
         if u.path == "/api/start-hedge-terminal":

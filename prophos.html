@@ -29863,6 +29863,8 @@
         .catch(e => ({ ok: false, code: 'verbindung', msg: String(e && e.message || e) }))
       const schliesstP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: closeAt, close_tab: HEDGE_TAB_ID }, zusatz || {})).catch(() => null)
       let res = await closeP
+      // HEDGE-ZU-7S (02.11.2026, Plan e67ec7b9: 7,17 s zwischen Tab und Panel): nur Messung, zeigt das hängende Glied (Tab → app.py → Panel → Copier → zurück)
+      const closeZeiten = Object.assign({ tab_auftrag: Date.parse(closeAt), tab_antwort: Date.now() }, (res && res.zeiten_ms) || {})   // auch bei Zeitlimit/Abriss (ohne Panel-Stempel): gerade der Hänger soll sichtbar sein
       try{ await schliesstP }catch(_){}   // 'schliesst' muss VOR 'geschlossen' in der DB stehen (sonst fiele der Status zurück)
       if(res && res.ok && res.schon_zu){
         // anderer Tab war schneller: dessen Grund/P&L bleiben stehen
@@ -29878,14 +29880,14 @@
         // der Copier weiß aus der Deal-Historie, welches Level gefüllt hat. 'close'/'unbekannt' sagen nichts Neues.
         const grundEnd = (res.grund && res.grund !== 'close' && res.grund !== 'unbekannt') ? res.grund : grund
         // grund_tab (30.10.2026, s. hedgeHandSchneller): eigener Erkennungs-Grund des Tabs, auch wenn der Copier ihn mit „hand" überschreibt
-        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, grund_tab: grund || null, close_fehler: null, close_versuche: 0, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
+        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, grund_tab: grund || null, close_fehler: null, close_versuche: 0, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), close_zeiten: closeZeiten, msg: res.msg || '' }, extra)
         if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
         return { ok: true, pl }
       }
       const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
       const verbindung = !res || ['verbindung', 'copier_alt', 'copier_stumm'].includes(String(res.code || '')) || /nicht erreichbar|ConnectionError|Failed to fetch|NetworkError|timeout|abort/i.test(msg)
       await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1,
-        close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt' })
+        close_fehler_art: verbindung ? 'verbindung' : 'abgelehnt', close_zeiten: closeZeiten })
       // bei Verbindungsfehlern nicht jede Sekunde einen Hinweis — nur beim ersten Versuch
       if(typeof atToast === 'function' && !(verbindung && (Number(h.close_versuche) || 0) > 0)) atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg + (verbindung ? ' — neuer Versuch jede Sekunde' : ''), 'end')
       return { ok: false, msg }

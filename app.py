@@ -579,6 +579,9 @@ def _copier_proxy_lauf(path):
     h = {"Content-Type": "application/json"}
     origin = request.headers.get("Origin")
     if origin: h["Origin"] = origin
+    # HEDGE-ZU-7S (02.11.2026, Plan e67ec7b9: Close 7,17 s zwischen Tab und Panel, Glied unbekannt): nur Messung, das Panel gibt den Stempel zurück
+    if path == "hedge-solo":
+        h["X-Prophos-Proxy-Ms"] = str(round(time.time() * 1000))
     try:
         # master-order braucht mehr Luft als der Rest (Review-Blocker 15.08.2026):
         # ein zu frueher Proxy-Abbruch haette dem Frontend 'keine Order' gemeldet,
