@@ -27,7 +27,7 @@ def check(bed, text):
 ns = {"re": re}
 i = app.index("LOTS_DECKEL = 16.0")
 exec(app[i:app.index('@app.route("/admin/auto-plan/lots-ok"')], ns)
-L, G, D, A, SO, OF = ns["plan_fusion_lots"], ns["lots_ok_gilt"], ns["lots_deckel_lots"], ns["alarm_lots_deckel"], ns["lots_deckel_soll"], ns["alarm_lots_offen"]
+L, G, D, A, SO, OF = ns["plan_fusion_lots"], ns["lots_ok_gilt"], ns["lots_deckel_lots"], ns["alarm_lots_deckel"], ns["lots_deckel_soll"], ns["alarm_lots_stop"]
 P = {"id": "p1", "user_id": "u1", "status": "planned", "route": "tvv2", "hedge_eur": 400, "master_contracts": 10, "multiplier": 3.2, "slave_risk": 450, "master_risk": 1500, "master_symbol": "MNQZ6",
      "master_firm": "Apex", "master_name": "Marc"}
 W = ns["lots_ok_wert"]
@@ -53,7 +53,12 @@ check(SO(dict(P, master_contracts=2, multiplier=None, lots_sperre=dict(W(dict(P,
 ev = A([P, dict(P, id="p2", master_contracts=1), dict(P, id="p3", start_um_gestartet_at="x")], {"u1": "Marc"})
 check(len(ev) == 1 and ev[0][1] == 2 and ev[0][2] == "lots_deckel" and "32" in ev[0][3] and "OK" in ev[0][4], "Alarm einmal für den gesperrten Plan, keiner für kleine oder geclaimte")
 o = OF(dict(P, status="open"), 21.2, {"u1": "Marc"})
-check(o[1] == 1 and o[2] == "lots_offen" and "21,20" in o[3] and o[0].endswith("|21.2"), "Order steht schon: 🔴, einmal je Plan und Lot-Zahl")
+check(o[1] == 1 and o[2] == "lots_stop" and "21,20" in o[3] and "OK" in o[4] and o[0].endswith("|21.2"), "Stop im Kern: 🔴 sofort, einmal je Plan und Lot-Zahl")
+ST = ns["lots_stop_wert"]
+T = {"status": "open", "h_st": "fehler", "h_stop": "21.2"}
+check(ST(T) == 21.2 and ST(dict(T, status="planned")) == 21.2, "Stop gilt für laufende und geplante Pläne")
+check(ST(dict(T, status="review")) is None and ST(dict(T, h_st="offen")) is None and ST(dict(T, h_stop=None)) is None, "Master zu oder Hedge offen: kein Stop mehr")
+check(ST(dict(T, lots_ok={"lots": 21.2})) is None and ST(dict(T, lots_ok={"lots": 20})) == 21.2, "OK über die Menge beendet den Stop, kleineres OK nicht")
 
 # Einbau: vor dem Puls-Auftrag, an allen Start-Wegen, DB-Netz
 su = html[html.index("function suStartetNichtWeil("):]
@@ -62,14 +67,21 @@ best = html[html.index("async function tpWdBestaetigungFehlt("):][:200]
 check("tpLotsDeckelFrisch(plan)" in best and html.count("await tpWdBestaetigungFehlt(plan)") >= 2, "Tab: Hand-, Fern- und Neu-Start über dieselbe Sperre, Stand frisch aus der DB")
 kern = html[html.index("async function hedgeSoloOeffnenKern("):]
 kern = kern[:kern.index("notfallOpen")]
-check("const lotsSoll = hedgeLotsSoll(plan, kt, ppl)" in kern and "tpLotsOffenMelden(plan, lotsSoll)" in kern and "tpLotsDeckelFrisch" not in kern, "Hedge: sperrt nie, eine Lots-Rechnung, über dem Deckel 🔴")
+check("await tpLotsHedgeStop(plan" in kern and kern.index("await tpLotsHedgeStop(plan") < kern.index("plan.multiplier = Math.round") < kern.index("status: 'oeffnet'"), "Hedge: Stop in jedem Status, vor Frisch-Korrektur und 'oeffnet'-Merker")
+tick = html[html.index("async function hedgeLotsOkTick("):][:2600]
+check("seitStart" not in tick and "_hedgeNachgeholt" not in tick and "manuell: true" in tick and "lots_bestaetigt" in tick and "f.status !== 'open'" in tick, "Nach OK: öffnet unabhängig vom 3-min-Nachholen, nur solange der Master läuft")
+klick = html[html.index("async function hedgeOeffnenKlick("):][:1400]
+check("${_lots} Lot" in klick and "lots_bestaetigt: _lotsUeber" in klick, "Handknopf: Lot-Zahl im confirm")
+check("lots_stops" in app and "D.lotsStops" in html, "Braucht dich: Stops auch für fremde laufende Pläne")
+okr = app[app.index("def admin_auto_plan_lots_ok"):app.index('@app.route("/alarm/lots-deckel"')]
+check("laufend and stop is None" in okr and '"p_status": p.get("status")' in okr, "OK-Route: auch für laufende Pläne mit Stop, sonst 409")
 for name in ("async function tpPreflightAndStart(", "async function tpPreflightMt5("):
     kopf = html[html.index(name):][:600]
     check("await tpLotsDeckelFrisch(plan)" in kopf and "_pfRemoteMelde(plan.id" in kopf, name[15:-1] + ": Sperre am Kopf, Fern bekommt Antwort")
 fr = html[html.index("async function tpLotsDeckelFrisch("):][:900]
 check(".select('*')" in fr and "plan.status !== 'planned'" in fr and "start_um_gestartet_at: null" in fr, "Frisch: liest immer die DB, nur vor dem Start, gibt einen Claim zurück")
 check("tpWdWartetAufBestaetigung(x) || tpLotsDeckelFehlt(x)" in html, "Kette: offenes OK hält die ID nicht an")
-check("D.lotsRaus" in html and "Dl.lotsRaus" in html and "lots: t.lots, sicht: 'admin'" in html, "Braucht dich: Knopf auch für Winning Days und Funded, Verwalter gilt")
+check("D.lotsRaus" in html and "Dl.lotsRaus" in html and "stop: !!t.stop, sicht: 'admin'" in html, "Braucht dich: Knopf auch für Winning Days und Funded, Verwalter gilt")
 check("before update of start_um_gestartet_at" in sql and "lots <= 16" in sql and "ok->>'lots'" in sql and "round(" in sql and "'dup'" in sql and "coalesce(new.start_claim_art, 'start') <> 'start'" in sql, "SQL: Netz am Claim, 16 geht, Verbrauchs-Claims gehen durch")
 check("[data-tpl-lotsok]" in html and "/lots-ok" in html, "Knopf OK in Braucht dich, im Nur-Lesen-Riegel eingetragen")
 route = app[app.index("def admin_auto_plan_lots_ok"):app.index('@app.route("/alarm/lots-deckel"')]

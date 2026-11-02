@@ -29453,7 +29453,7 @@
     return frisch ? frisch.lots : (Number(plan && plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
   }
   /* LOTS-DECKEL (Finn 02.11.2026: „mehr als 16 Lots geplant … startet der Trade nicht … einmal auf OK drücken“, Vorfall Marc 32 statt 3,2 Lot; ausdrücklich gewünschte Ausnahme von der Regel gegen
-   * Prüf-Features). Genau 16 geht. Gesperrt wird nur VOR der Order: steht die Order schon, öffnet der Hedge immer und es kommt ein 🔴 (S9 02.11.2026: sonst läuft der Master nackt, ohne Ausweg).
+   * Prüf-Features). Genau 16 geht. Gesperrt wird vor der Order UND im Hedge-Kern (Finn 02.11.2026: „Wenn einfach eine Order reinkommt, wo Fusion 16 Lots öffnen soll, erstmal Stop fragen“): auch bei stehender Order öffnet Fusion über 16 Lot nie von selbst, es kommt sofort ein 🔴, und nach dem OK öffnet der Hedge (hedgeLotsOkTick).
    * Das OK in mt5_baseline.lots_ok hält die freigegebene Lot-Zahl fest, nicht den Multiplikator: den überschreibt die Frisch-Korrektur im Kern. Andere Lots = OK weg. Gegenstück in app.py (lots_deckel_soll, lots_ok_gilt).
    * Zählt das Größere aus Kontrakte × Multiplikator und der Rechnung beim Open: mit dem ersten rechnen Railway und das DB-Netz, mit dem zweiten der Copier. So zeigt auch der eigene Tab den Knopf, wenn das Netz sperren würde. */
   const HEDGE_LOTS_DECKEL = 16
@@ -29496,12 +29496,59 @@
     if(!ok) _tpLotsGemeldet.set(key, Date.now() + 60000)   // Railway weg: nicht je Sekunde neu
   }
   const tpLotsDeckelMelden = plan => { const lots = tpFusionLots(plan); return _tpLotsPost(`${plan.id}|${lots}`, { plan_id: String(plan.id), lots }) }
-  // Order steht schon, Hedge öffnet trotzdem (nie nackt). Wird nicht abgewartet, das Open bleibt instant. Ohne OK über genau diese Menge: 🔴 an die Master-IDs
-  async function tpLotsOffenMelden(plan, lots){
+  /* STOP IM KERN: deckt das OK die Lots, die der Kern gleich öffnet? Genau gleich, oder weniger aus denselben Plan-Werten: das OK nennt das Größere aus gespeichert und Open-Rechnung, geöffnet wird die Open-Rechnung.
+   * Nur eine echte Änderung (mehr Lots, andere Kontrakte, anderes Risiko oder Symbol) verwirft das OK; die Frisch-Korrektur am Multiplikator allein nicht. */
+  const tpLotsOkDeckt = (plan, ok, lots) => {
+    if(!ok || typeof ok !== 'object' || !(Number(ok.lots) > 0)) return false
+    if(Math.abs(Number(ok.lots) - lots) <= 0.011) return true
+    const gleich = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= 1e-6
+    return lots < Number(ok.lots) && gleich(ok.kt, plan.masterContracts) && gleich(ok.sr, plan.slaveRisk) && gleich(ok.mr, plan.masterRisk) && (!ok.sym || String(ok.sym) === String(plan.masterSymbol || ''))
+  }
+  const tpLotsStopMelden = (plan, lots) => _tpLotsPost(`stop|${plan.id}|${lots}`, { plan_id: String(plan.id), lots, stop: true })
+  // → true = Hedge bleibt zu. Status und lots_stop vor dem 🔴 schreiben, „Braucht dich“ und hedgeLotsOkTick lesen sie von dort
+  async function tpLotsHedgeStop(plan, lots, r){
+    if(r && Number(r.lots_bestaetigt) + 0.011 >= lots) return false   // OK schon gelesen (hedgeLotsOkTick) oder Lot-Zahl im confirm des Handknopfs bestätigt
     let ok = plan.mt5Baseline && plan.mt5Baseline.lots_ok
     try{ const { data, error } = await supabase.from('trade_plans').select('lots_ok:mt5_baseline->lots_ok').eq('id', plan.id).maybeSingle(); if(!error && data) ok = data.lots_ok }catch(_){}
-    if(ok && Number(ok.lots) + 0.011 >= lots) return
-    return _tpLotsPost(`offen|${plan.id}|${lots}`, { plan_id: String(plan.id), lots, offen: true })
+    if(tpLotsOkDeckt(plan, ok, lots)) return false
+    const msg = `${lots} Lot über dem Deckel von ${HEDGE_LOTS_DECKEL} — Stop, erst in „Braucht dich“ OK drücken, dann öffnet der Hedge`
+    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'fehler', grund_code: 'lots_deckel', lots_stop: lots, msg, eur: plan.hedgeEur, pc: hedgePcId(), at: new Date().toISOString() }) }catch(_){}
+    if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + msg, 'end')
+    tpLotsStopMelden(plan, lots)
+    return true
+  }
+  /* NACH DEM OK ÖFFNEN: das OK kommt oft vom Mac, Pläne kommen ohne Realtime, also fragt der PC-Tab alle 5 s, aber nur solange hier ein Stop steht. Unabhängig vom 3-min-Nachholen und _hedgeNachgeholt. manuell umgeht die
+   * 90-s-Grenze: das OK ist die ausdrückliche Entscheidung. Nur solange der Master läuft. Je OK ein Versuch; scheitert das Open, gilt danach das übliche 🔴 „Master läuft ohne Hedge“. */
+  let _hedgeLotsOkBusy = false
+  const _hedgeLotsOkVersucht = new Set()
+  async function hedgeLotsOkTick(){
+    if(!MT5_LOCAL || window._tabNebenSofort || _hedgeLotsOkBusy) return
+    const ids = (tradePlans || []).filter(p => p && (p.status === 'open' || p.status === 'planned') && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.status === 'fehler' && Number(p.mt5Baseline.hedge.lots_stop) > 0).map(p => p.id)
+    if(!ids.length) return
+    _hedgeLotsOkBusy = true
+    try{
+      const { data, error } = await supabase.from('trade_plans').select('*').in('id', ids)
+      if(error) return
+      for(const row of (data || [])){
+        const f = rowToPlan(row), i = tradePlans.findIndex(x => String(x.id) === String(f.id)); if(i >= 0) tradePlans[i] = f
+        const b = f.mt5Baseline || {}, hx = b.hedge, ok = b.lots_ok
+        if(!hx || hx.status !== 'fehler' || !(Number(hx.lots_stop) > 0)) continue
+        tpLotsStopMelden(f, Number(hx.lots_stop))   // kam Railway beim ersten Mal nicht an, hier nochmal
+        if(f.status !== 'open' || !ok || !(Number(ok.lots) + 0.011 >= Number(hx.lots_stop))) continue
+        const key = `${f.id}|${ok.at || ok.lots}`
+        if(_hedgeLotsOkVersucht.has(key)) continue
+        if(hedgeReaderMasterDa(f) === false){
+          _hedgeLotsOkVersucht.add(key)
+          try{ await hedgeAmPlanSchreiben(f.id, { status: 'uebersprungen', grund_code: 'master_flach', pc: hedgePcId(), at: new Date().toISOString(), msg: 'Hedge nach Lots-OK nicht geöffnet: der Reader zeigt das Master-Konto schon flach' }) }catch(_){}
+          continue
+        }
+        if(!(await hedgeSperre(f.id, 'lots_ok', 20))) continue
+        _hedgeLotsOkVersucht.add(key)
+        const tv = b.tv || {}, ein = Number(tv.einstieg_nq)
+        await hedgeSoloOeffnen(f, { klick_at: new Date().toISOString(), manuell: true, nachgeholt: true, lots_bestaetigt: Number(ok.lots), einstieg: ein > 1000 ? String(ein) : null, tv_symbol: tv.einstieg_symbol || null })
+      }
+    }catch(e){ console.warn('[hedge] Lots-OK', e) }
+    finally{ _hedgeLotsOkBusy = false }
   }
 
   function hedgeLiqStart(plan){
@@ -29707,6 +29754,8 @@
     // Zweites Level (24.09.2026 spät, Finns Zielbild „beide Schließ-Level liegen in MetaTrader"): die Master-SL-Distanz
     // in Punkten wird zum Fusion-TP. Ohne Master-SL kein zweites Level (0) — der Hedge endet dann mit dem Master.
     let slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
+    // LOTS-DECKEL (Finn 02.11.2026): für jeden Status, auch bei stehender Order. Vor der Frisch-Korrektur (sie überschriebe den Multiplikator) und vor dem 'oeffnet'-Merker
+    if(hedgeLotsSoll(plan, kt, ppl) > HEDGE_LOTS_DECKEL && await tpLotsHedgeStop(plan, hedgeLotsSoll(plan, kt, ppl), r)) return null
     // Lots frisch aus master_risk/slave_risk (08.10.2026, hedgeMultAusRisiko) — ein von einem alten Tab falsch gespeicherter multiplier wird
     // hier korrigiert (Plan + Auftrag); nur ohne Risiko-Werte gilt der gespeicherte multiplier
     const frisch = hedgeMultAusRisiko(plan, kt, ppl)
@@ -29775,14 +29824,12 @@
     // Supabase-Rundreise weniger vor dem Copier); vor jedem weiteren Hedge-Eintrag wird er abgewartet, damit nichts zurückfällt.
     _hedgeWegGestempelt.delete(String(plan.id))   // neuer Hedge = neues Master-Ende (29.10.2026): alten Stempel aus einem falschen Reader-Ende nie weiterrechnen
     // grund, grund_tab, close_at (30.10.2026): Reste eines früheren Close dürfen den neuen Hedge nicht beschriften (hedgeZuAusRing liest sie)
-    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', grund: null, grund_tab: null, close_at: null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
+    const oeffnetP = hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', grund: null, grund_tab: null, close_at: null, lots_stop: null, lots_bestaetigt: (r && r.lots_bestaetigt) || null, klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, HEDGE_WEG_LEER, herkunft, liqFelder)).catch(() => null)
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
     // notfall_faktor (Backend .512): SL am Hedge = fill ± tp_punkte × 1,10; geschlossen wird über den Feed-Wächter bei TP + 8 Ticks.
     const lotsSoll = hedgeLotsSoll(plan, kt, ppl)   // Risiko vor multiplier (08.10.2026)
-    // LOTS-DECKEL (02.11.2026): hier nie sperren, jeder Aufrufer hat schon eine Order (Puls-Ergebnis, Nachholen, Rückkehr, Knopf); gesperrt wird vor dem Puls-Auftrag
-    if(lotsSoll > HEDGE_LOTS_DECKEL) tpLotsOffenMelden(plan, lotsSoll).catch(() => {})
     // VORLÄUFIGE LEVEL (01.10.2026, Finn: „Fusion insta öffnen, am Anfang Notfall auf 120 % oder so, und sobald Show more da ist, werden
     // TP und SL auf Fusion korrekt angepasst"): Ist der TP beim Open noch nicht echt (früher Hedge beim Klick, kein TP-Limit/Fill), setzt
     // der Copier beide Level bewusst weiter weg — Notfall-SL mindestens 120 % (+10 % über dem normalen), Level am Master-SL 20 % der
@@ -33546,6 +33593,7 @@
     }catch(e){ console.warn('[hedgeWache]', e) }
     finally{ _hedgeWacheBusy = false }
   }
+  setInterval(hedgeLotsOkTick, 5000)   // LOTS-DECKEL (02.11.2026): kehrt ohne Stop sofort um, ohne eine Abfrage
   setInterval(hedgeWacheTick, 1000)   // 1 s (25.09.2026): der Feed-Entscheid soll den Tick nicht verpassen; ohne Hedge kehrt der Tick sofort um
   // Live-P&L der Solo-Position: am PC aus dem Panel (mtcInstances → status.hedge_solo), am Mac aus mt5_live
   // (window._mt5CloudRows, 5-s-Push der PCs, frisch ≤ 25 s). null = kein frischer Beweis.
@@ -33729,9 +33777,12 @@
     if(!p || p.status !== 'open') return
     const _hs = p.mt5Baseline && p.mt5Baseline.hedge
     const _spaetHin = (_hs && _hs.grund_code === 'zu_spaet') ? '\n\nDie Order ist älter als 90 s: erst im Fusion-Terminal nachsehen, ob schon ein Hand-Hedge liegt, sonst ist die Position doppelt.' : ''
-    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?${_spaetHin}`)) return
+    // LOTS-DECKEL (02.11.2026): von Hand über dem Deckel nur mit der Lot-Zahl im confirm; ein gültiges OK reicht auch
+    const _lots = tpFusionLots(p), _lotsUeber = _lots > HEDGE_LOTS_DECKEL && !tpLotsOkGilt(p, p.mt5Baseline && p.mt5Baseline.lots_ok)
+    const _lotsHin = _lotsUeber ? `\n\nFusion öffnet ${_lots} Lot, erlaubt sind ${HEDGE_LOTS_DECKEL}, und es gibt kein OK. Mit „OK“ öffnest du genau diese Menge.` : ''
+    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?${_spaetHin}${_lotsHin}`)) return
     btn.disabled = true; btn.textContent = 'öffnet…'
-    try{ await hedgeSoloOeffnen(p, { klick_at: new Date().toISOString(), manuell: true }) }finally{ try{ renderTradePlans() }catch(_){} }
+    try{ await hedgeSoloOeffnen(p, { klick_at: new Date().toISOString(), manuell: true, lots_bestaetigt: _lotsUeber ? _lots : undefined }) }finally{ try{ renderTradePlans() }catch(_){} }
   }
   window.hedgeOeffnenKlick = hedgeOeffnenKlick
   /* ========== ENDE FUSION-GEGENHEDGE ========== */
@@ -61257,7 +61308,7 @@
     const ohneGeplante = l => !l || !Array.isArray(l.ausgelassen) || !echt.length ? l
       : { ...l, ausgelassen: l.ausgelassen.filter(x => !(x && geplantX(x) && !/geplanten\/laufenden Plan|heute schon gehandelt|noch nicht erledigt/.test(String(x.grund || '')))) }
     const rohF = roh && String(roh.tag || '') === tag ? ohneGeplante(roh) : roh
-    return { tag, heute, v, roh: rohF, lauf: lauf ? (lauf === roh ? rohF : ohneGeplante(lauf)) : lauf, delta, jetzt, laufzeit, trades, lotsRaus, L, S }
+    return { tag, heute, v, roh: rohF, lauf: lauf ? (lauf === roh ? rohF : ohneGeplante(lauf)) : lauf, delta, jetzt, laufzeit, trades, lotsRaus, lotsStops: tplLotsStops(delta), L, S }
   }
 
   /* Netto-/Brutto-Einsatz als Treppe über den Tag (Minuten dt) */
@@ -62177,6 +62228,18 @@
       return !!(p && typeof planWartetAufPuls === 'function' && planWartetAufPuls(p))
     }catch(_){ return false }
   }
+  /* LOTS-DECKEL (Finn 02.11.2026): Order läuft, Hedge steht auf Stop. Eigene Pläne aus dem Tab, fremde aus delta.lots_stops, denn offen[] kennt Winning Days und Funded nicht */
+  function tplLotsStops(delta){
+    const je = new Map()
+    for(const x of (delta && delta.lots_stops) || []) je.set(String(x.plan_id), Object.assign({}, x, { plan_id: String(x.plan_id), key: 'lotsstop:' + x.plan_id, stop: true }))
+    for(const p of tradePlans || []){
+      const b = p && p.mt5Baseline, hx = b && b.hedge, s = hx && Number(hx.lots_stop)
+      if(!(s > 0)) continue
+      if((p.status !== 'open' && p.status !== 'planned') || hx.status !== 'fehler' || (b.lots_ok && Number(b.lots_ok.lots) + 0.011 >= s)){ je.delete(String(p.id)); continue }
+      je.set(String(p.id), { plan_id: String(p.id), key: 'lotsstop:' + p.id, stop: true, lots: s, user_id: currentUserId, user: (je.get(String(p.id)) || {}).user || (_ap.ich && _ap.ich.name) || '', firma: p.masterFirm, konto: p.masterName })
+    }
+    return [...je.values()]
+  }
   function tplBraucht(D, ids){   // ids = Set der sichtbaren IDs, null = alle
     const je = new Map(), jetzt = Date.now(), ich = (_ap.ich && _ap.ich.name) || ''
     // Konten in „Manuelle Arbeit" (Radar) → keine Zeile, egal welcher Fall (08.10.2026, s. tplManuellKonten) — geprüft je Quelle unten
@@ -62400,6 +62463,10 @@
           tun: `Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} neu laden (Strg+F5) — er holt den Start als „zu spät" regelkonform nach; sonst ↻ Erneut versuchen.`, neu: true }
       }
       return null
+    }
+    if(D.tag === D.heute) for(const t of (D.lotsStops || [])){
+      add(t.user_id, t.user, { art: 'start_nein', firma: t.firma, konto: t.konto, key: t.key, neu: null, lotsOk: t.key,
+        text: `Order läuft, Fusion-Hedge gestoppt — ${String(t.lots).replace('.', ',')} Lot geplant, erlaubt sind 16`, tun: 'Lots ansehen. OK drücken, dann öffnet der Hedge am PC der ID. Sonst den Master schließen, bis dahin läuft er ohne Hedge.' })
     }
     for(const t of (D.lotsRaus || [])){   // LOTS-DECKEL (02.11.2026): sonst hieße es „OK in Braucht dich“, und dort stünde nichts
       if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue
@@ -63841,13 +63908,13 @@
     const ex = e.target.closest('[data-tpl-ext]')   // Braucht dich: ✎ External ID eintragen (08.10.2026) — eigenes Konto-Formular, wie „Bearbeiten" in Accounts
     if(ex){ const acc = (accounts || []).find(q => String(q.id) === ex.dataset.tplExt); if(acc && typeof openAccountModal === 'function') openAccountModal(null, acc); return }
     const lo = e.target.closest('[data-tpl-lotsok]')   // LOTS-DECKEL (02.11.2026): OK gibt genau diesen Plan frei, wer und wann speichert Railway
-    if(lo){ const Dl = tplDaten(), t = Dl.trades.concat(Dl.lotsRaus || []).find(x => x.key === lo.dataset.tplLotsok); if(!t) return
+    if(lo){ const Dl = tplDaten(), t = Dl.trades.concat(Dl.lotsRaus || [], Dl.lotsStops || []).find(x => x.key === lo.dataset.tplLotsok); if(!t) return
       lo.disabled = true; lo.textContent = 'speichert …'
       ;(async () => {
-        try{ await apdApi('POST', '/lots-ok', { plan_id: t.plan_id, kt: t.lotsKt, mult: t.lotsMult, lots: t.lots, sicht: 'admin' })
+        try{ await apdApi('POST', '/lots-ok', { plan_id: t.plan_id, kt: t.lotsKt, mult: t.lotsMult, lots: t.lots, stop: !!t.stop, sicht: 'admin' })
           const pl = (tradePlans || []).find(x => String(x.id) === String(t.plan_id))
           if(pl){ const { data } = await supabase.from('trade_plans').select('*').eq('id', pl.id).maybeSingle(); const ix = tradePlans.indexOf(pl); if(data && ix >= 0) tradePlans[ix] = rowToPlan(data) }
-          if(typeof atToast === 'function') atToast(`OK gespeichert: ${t.konto || 'Plan'} darf mit ${t.lots} Lot starten.`, 'start')
+          if(typeof atToast === 'function') atToast(t.stop ? `OK gespeichert: ${t.konto || 'Plan'}, der Hedge öffnet gleich mit ${t.lots} Lot.` : `OK gespeichert: ${t.konto || 'Plan'} darf mit ${t.lots} Lot starten.`, 'start')
           await apdLaden(true)
         }catch(err){ lo.disabled = false; lo.textContent = 'OK'; if(typeof atToast === 'function') atToast('OK nicht gespeichert: ' + ((err && err.message) || err), 'end') }
       })()

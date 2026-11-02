@@ -28271,7 +28271,7 @@ def wd_ist_recoverer_plan(p):
 
 # LOTS-DECKEL (Finn 02.11.2026: „Wenn beim PreCheck mal irgendwas durchgeht und auf dem Fusion-Account mehr als 16 Lots geplant sind, startet der Trade nicht. Stattdessen kriegt man erst
 # mal eine Meldung und muss dann einmal auf OK drücken."; Vorfall Marc 32 statt 3,2 Lot, ausdrücklich gewünschte Ausnahme von der Regel gegen Prüf-Features). Genau 16 geht.
-# Gesperrt wird im PC-Tab vor dem Puls-Auftrag (tpLotsDeckelFrisch), DB-Netz am Claim: sql/2026-11-02_lots_deckel.sql. Steht die Order schon, öffnet der Hedge trotzdem und es kommt ein 🔴. Das OK steht in mt5_baseline.lots_ok und gilt nur für genau diese Lot-Zahl.
+# Gesperrt wird im PC-Tab vor dem Puls-Auftrag (tpLotsDeckelFrisch), DB-Netz am Claim: sql/2026-11-02_lots_deckel.sql. Auch bei stehender Order öffnet Fusion darüber nie von selbst (Finn: „erstmal Stop fragen“): 🔴 sofort, OK auch für laufende Pläne, danach öffnet der Tab. Das OK steht in mt5_baseline.lots_ok und gilt nur für genau diese Lot-Zahl.
 LOTS_DECKEL = 16.0
 LOTS_OK_FELDER = (("kt", "master_contracts"), ("mult", "multiplier"), ("sr", "slave_risk"), ("mr", "master_risk"), ("sym", "master_symbol"))
 
@@ -28361,12 +28361,38 @@ def alarm_lots_deckel(plaene, namen):
     return out
 
 
-def alarm_lots_offen(p, lots, namen):
-    """REIN RECHNEND (testbar): 🔴 Order stand schon, der Hedge öffnet trotzdem über dem Deckel und ohne OK. Einmal je Plan und Lot-Zahl."""
+def lots_stop_wert(p):
+    """REIN RECHNEND (testbar): Lots, bei denen der Hedge-Kern gestoppt hat und noch kein OK sie deckt, sonst None. Felder h_st, h_stop aus mt5_baseline.hedge."""
+    p = p or {}
+    try:
+        stop = float(p.get("h_stop") or 0)
+        ok = p.get("lots_ok")
+        lots = float(ok.get("lots") or 0) if isinstance(ok, dict) else 0.0
+    except (TypeError, ValueError):
+        return None
+    return stop if stop > 0 and p.get("h_st") == "fehler" and p.get("status") in ("planned", "open") and lots + 0.011 < stop else None
+
+
+def alarm_lots_stop(p, lots, namen):
+    """REIN RECHNEND (testbar): 🔴 sofort: Fusion soll über dem Deckel öffnen, das OK fehlt, der Hedge bleibt zu. Einmal je Plan und Lot-Zahl."""
     pid, uid = str(p.get("id")), str(p.get("user_id"))
     konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip()
-    return (f"{pid}|lots_offen|{lots}", 1, "lots_offen", f"Fusion {lots:.2f} Lot offen ohne OK".replace(".", ","),
-            f"{namen.get(uid, uid[:8])} · {konto}: Die Order lief schon, darum wurde der Hedge mit {lots:.2f} Lot geöffnet (erlaubt sind {LOTS_DECKEL:.0f}). Bitte Lots in Fusion ansehen.".replace(".00", ""), uid, pid)
+    return (f"{pid}|lots_stop|{lots}", 1, "lots_stop", f"Fusion {lots:.2f} Lot gestoppt, OK fehlt".replace(".", ","),
+            f"{namen.get(uid, uid[:8])} · {konto}: Fusion soll {lots:.2f} Lot öffnen, erlaubt sind {LOTS_DECKEL:.0f}. Der Hedge bleibt zu, bis du in „Braucht dich“ OK drückst. Läuft die Order schon, läuft der Master so lange ohne Hedge.".replace(".00", ""), uid, pid)
+
+
+def ap_lots_stops(sicht, ausgeblendet=()):
+    """Stops für „Braucht dich“: eigene Abfrage, denn offen[] kennt nur Challenge-Konten. sicht wie ap_delta_antwort: None alle, str eine ID, frozenset eine Gruppe."""
+    rows = _sb_all("trade_plans", {"select": "id,user_id,status,master_firm,master_name,lots_ok:mt5_baseline->lots_ok,h_st:mt5_baseline->hedge->>status,h_stop:mt5_baseline->hedge->>lots_stop",
+                                   "status": "in.(planned,open)", "mt5_baseline->hedge->>lots_stop": "not.is.null"}) or []
+    namen, _aus = _ap_namen()
+    out = []
+    for p in rows:
+        uid, lots = str(p.get("user_id")), lots_stop_wert(p)
+        if lots is None or (isinstance(sicht, str) and uid != sicht) or (isinstance(sicht, frozenset) and uid not in sicht) or (sicht is None and uid in ausgeblendet):
+            continue
+        out.append({"plan_id": str(p.get("id")), "user_id": uid, "user": namen.get(uid, uid[:8]), "firma": p.get("master_firm"), "konto": p.get("master_name"), "lots": lots})
+    return out
 
 
 @app.route("/admin/auto-plan/lots-ok", methods=["POST", "OPTIONS"])
@@ -28387,8 +28413,10 @@ def admin_auto_plan_lots_ok():
         return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
     try:
         p = (sb_select("trade_plans", {"select": "id,user_id,status,route,start_um,start_um_gestartet_at,orbit_gesendet_at,auto_plan,auto_bestaetigt_at,hedge_eur,slave_firm,master_contracts,multiplier,"
-                                                 "slave_risk,master_risk,master_symbol,lots_sperre:mt5_baseline->lots_sperre", "id": f"eq.{pid}"}) or [None])[0]
-        if not p or p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at"):
+                                                 "slave_risk,master_risk,master_symbol,lots_sperre:mt5_baseline->lots_sperre,lots_ok:mt5_baseline->lots_ok,h_st:mt5_baseline->hedge->>status,h_stop:mt5_baseline->hedge->>lots_stop", "id": f"eq.{pid}"}) or [None])[0]
+        stop = lots_stop_wert(p)   # Hedge-Kern hat gestoppt: auch ein laufender Plan bekommt sein OK, danach öffnet der Tab (hedgeLotsOkTick)
+        laufend = bool(p) and (p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at"))
+        if not p or (laufend and stop is None):
             return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gestartet"}), 409
         if err:                                  # Verwalter: nur seine Gruppe
             gruppe = getattr(g, "admin_sicht", None)
@@ -28399,21 +28427,23 @@ def admin_auto_plan_lots_ok():
             lots = round(float(d.get("lots")), 2)
         except (TypeError, ValueError):
             gleich, lots = False, 0.0
-        soll = lots_deckel_soll(p)
+        soll = stop if stop is not None else lots_deckel_soll(p)
+        if stop is not None:   # die Frisch-Korrektur darf den Multiplikator gerade geändert haben, es zählt die gestoppte Lot-Zahl
+            gleich = True
         if not gleich or not plan_hat_fusion(p) or not (lots > LOTS_DECKEL) or (soll is not None and lots < soll - 0.011):   # angezeigt war weniger als jetzt geplant: nicht freigeben, was keiner gesehen hat
             return jsonify({"ok": False, "msg": "Plan wurde inzwischen geändert — neu laden und nochmal ansehen"}), 409
         von = str(uid or request.environ.get("prophos.admin_uid") or "")[:80]
         jetzt = datetime.now(timezone.utc)
         ok = dict(lots_ok_wert(p), lots=lots, von=von, at=jetzt.isoformat())
         patch = {"lots_ok": ok}
-        if soll is None or lots > soll + 0.011:   # der Tab sah mehr als Railway: festhalten, sonst wäre das OK hier gleich wieder ungültig
+        if stop is None and (soll is None or lots > soll + 0.011):   # der Tab sah mehr als Railway: festhalten, sonst wäre das OK hier gleich wieder ungültig
             patch["lots_sperre"] = dict(lots_ok_wert(p), lots=lots, at=jetzt.isoformat())
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
-                        json={"p_plan": pid, "p_patch": patch, "p_status": "planned"})
+                        json={"p_plan": pid, "p_patch": patch, "p_status": p.get("status")})
         _sb_pruefen(r)
         if not r.json():
             return jsonify({"ok": False, "msg": "Plan hat sich inzwischen geändert — nichts geschrieben"}), 409
-        st, _grund = hedge_freigabe_start(p.get("start_um"), jetzt, plan=p)
+        st, _grund = (None, None) if laufend else hedge_freigabe_start(p.get("start_um"), jetzt, plan=p)
         if st:
             sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "start_um": f"lte.{jetzt.isoformat()}"}, {"start_um": st})
         print(f"[lots-deckel] Plan {pid[:8]} freigegeben von {von[:8]} ({lots} Lot)", flush=True)
@@ -28444,8 +28474,8 @@ def alarm_lots_deckel_route():
         if not p or str(p.get("user_id")) != str(uid):
             return jsonify({"ok": False, "error": "nicht dein Plan"}), 403
         namen, aus = _ap_namen()
-        if d.get("offen"):   # Order steht schon, der Hedge öffnet trotzdem: kein Merker am Plan, nur 🔴
-            ev = alarm_lots_offen(p, lots, namen)
+        if d.get("stop"):   # Hedge-Kern hat gestoppt, Marke hat der Tab schon in mt5_baseline.hedge geschrieben: nur noch 🔴
+            ev = alarm_lots_stop(p, lots, namen)
             if str(uid) not in aus and not _alarm_fremd_verwaltet(uid) and _tm_melde_frei(ev[0]):
                 alarm_senden(ev[1], ev[2], ev[3], ev[4], uid=ev[5], plan_id=ev[6], schluessel=ev[0])
             return jsonify({"ok": True})
@@ -33236,6 +33266,10 @@ def admin_auto_plan_delta():
         if sicht_d is not None and ((not admin and nur) or not isinstance(sicht_d, str)):
             stand = ap_stand_sicht(stand, sicht_d)
         antwort = ap_delta_antwort(stand, sicht_d, pc_lebt=_ap_pc_lebt_gecacht())
+        try:   # LOTS-DECKEL (02.11.2026): eigener try, fällt es aus, bleibt das übrige Delta unberührt
+            antwort["lots_stops"] = ap_lots_stops(sicht_d, _ap_namen()[1])
+        except Exception as e:
+            print(f"[lots-deckel] ⚠️ Stops: {type(e).__name__}: {e}", flush=True)
         # ZWEI WAAGEN (17.10.2026): Futures/CFD je laufend + Start ≤ 2 min — PC-Tab (Start-Prüfung) und Planer-Kopf lesen es
         try:
             antwort["klassen"] = {k: {f: v.get(f) for f in ("long_eur", "short_eur", "n_long", "n_short", "delta_eur", "passt", "grund", "leicht")}
