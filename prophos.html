@@ -38391,7 +38391,8 @@
      * sonst hedge.pl) − geplanter Fusion-P&L. OHNE PUNKTE (Finn 02.11.2026: „Tradeify auf 250 $ soll genau 100 € machen. Wenn wir am Ende 500 $ machen, sollten wir genau 200 € verlieren. Ganz simpel, nichts mit Punkten."):
      * Satz = hedge.eur ÷ master_tp (€ je $ am Plan), Plan = −Satz × echter master_pl, für TP- und SL-Seite gleich. …0431: 111,06 ÷ 278 × 271,80 = −108,58, echt −118,53 → −9,95 €. Keine Zahl ohne master_pl oder master_tp
      * und bei Schluss von Hand/Hand schneller/„Master nie da"/master_ende. − = schlechter = Overshoot, + = besser = Undershoot. */
-    const ist = n(t.slave_pl) ?? n(h.pl), mTp = n(t.master_tp), mPl = n(t.master_pl)
+    const ist = n(t.slave_pl) ?? n(h.pl), mTp = n(t.master_tp)
+    const mPl = n(t.master_pl && typeof t.master_pl === 'object' ? t.master_pl.wert : t.master_pl)   // /admin/live-trades liefert {wert, at, quelle} (Stopp S9 02.11.2026)
     const satz = (eur && mTp > 0) ? Math.abs(eur) / mTp : null
     const mitPlan = !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende'
     const planEur = (mitPlan && satz != null && mPl != null) ? Math.round(-satz * mPl * 100) / 100 : null
@@ -54182,7 +54183,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1982'
+  const OS_TAB_BUILD = '2026-09-22.1983'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

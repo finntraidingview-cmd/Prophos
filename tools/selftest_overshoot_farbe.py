@@ -59,6 +59,9 @@ faelle = {
     "ohne_master_tp": (T(-100, None, 250, grund="level_tp", eur=100, pl=-100), None),
     "ohne_eur": (T(-100, 250, 250, grund="level_tp", eur=None, pl=-100), None),
     "ohne_slave_pl": (T(None, 250, 250, grund="level_tp", eur=100, pl=-101.5), -1.50),
+    # so liefert /admin/live-trades master_pl: Objekt {wert, at, quelle}
+    "objekt_0431": (T(-118.53, 278, {"wert": 271.80, "at": "2026-11-02T07:45:27Z", "quelle": "plan"}, grund="master_ende_reader", eur=111.06, pl=-118.53), -9.95),
+    "objekt_ohne_wert": (T(-118.53, 278, {"wert": None, "at": None, "quelle": "rundgang"}, grund="master_ende_reader", eur=111.06, pl=-118.53), None),
 }
 lauf = "const out = {}\n" + "".join(f"{{ const s = swAuswertung({json.dumps(v[0])}); out[{json.dumps(k)}] = {{ s, html: zeileOver(s) }} }}\n" for k, v in faelle.items()) + "print(JSON.stringify(out))\n"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
