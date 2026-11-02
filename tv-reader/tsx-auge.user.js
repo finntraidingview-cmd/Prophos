@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Prophos TopstepX-Auge
 // @namespace    prophos
-// @version      0.3.2
+// @version      0.3.3
 // @description  Liest im TopstepX-Tab des Puls-Chrome Konto, offene Positionen und den Flach-Beweis (dieselbe Lesung wie der Puls-Bot: augen_tsx.js) und meldet sie alle 0,1 s und bei jeder Änderung an das lokale Panel (127.0.0.1:8770). Prophos schließt damit den Fusion-Hedge eines Topstep-Trades, sobald die Position in TopstepX zu ist. Nur lesen — klickt nie.
 // @match        https://topstepx.com/*
 // @match        https://*.topstepx.com/*
-// @require      https://prophos.pages.dev/mt5-copier/augen_tsx.js?v=tsx-0.6.3
+// @require      https://prophos.pages.dev/mt5-copier/augen_tsx.js?v=tsx-0.7.1
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -68,7 +68,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   // 0.3.0 DOPPELLAUF-RIEGEL: nie zwei Kerne in einer Seite (eingebaute UND nachgeladene Fassung) — lieber blind als doppelt
   if (unsafeWindow.__prophosTsxKernAn) return;
   unsafeWindow.__prophosTsxKernAn = true;
-  var SCRIPT = '0.3.2';
+  var SCRIPT = '0.3.3';   // 0.3.3 (02.11.2026): augen_tsx 0.7.1 für TopstepX 2.4.32; kam über @require nie an, der Lader ist per eval gesperrt
   var PANEL = 'http://127.0.0.1:8770/api/tsx-stand';
   var TAKT_MS = 100;                               // 0.2.0: 250 → 100 ms (Finn 29.10.2026)
   var MO_ABSTAND_MS = 100;                         // MutationObserver: höchstens alle 100 ms eine Meldung
@@ -106,7 +106,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
   // Aber nur, solange die ununterbrochen flache Zeit < 5 s ist (Prüfer S2): sonst schlösse das Auge bei dauerhaft langsamem Takt nie mehr; nach 5 s flach zählt jede Messung (alte 5-s-Regel)
   var flachFolge = 0, flachSeit = null, flachKonto = null, flachLetzt = 0, flachSerieAb = 0, FOLGE_LUECKE_MS = 500, FOLGE_RUHE_MS = 5000;
   function folgeZaehlen(s, aus) {
-    var k = (s && s.konto && s.konto.kontonr) || null, ts = (s && s.ts) || Date.now(), jetzt = Date.now();
+    // 0.3.3: TopstepX 2.4.32 zeigt keine volle Kennung, ohne Konto zählte die Folge nie hoch und das Auge schloss nie; dann gilt der Kopf-Text als Kennung der Serie
+    var k = (s && s.konto && (s.konto.kontonr || s.konto.aktiv)) || null, ts = (s && s.ts) || Date.now(), jetzt = Date.now();
     if (s && s.flach === true && k && !aus && (flachFolge === 0 || k === flachKonto)) {
       if (!flachSerieAb) flachSerieAb = jetzt;
       if (flachFolge > 0 && jetzt - flachLetzt > FOLGE_LUECKE_MS && jetzt - flachSerieAb < FOLGE_RUHE_MS) flachFolge = 0;
@@ -121,7 +122,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
     var br = s.toasts && s.toasts.bracket ? s.toasts.bracket : null;
     return {
       v: s.v || null, ts: s.ts || Date.now(), url: String(location.href).slice(0, 120), sichtbar: s.sichtbar || document.visibilityState,
-      konto: { aktiv: k.aktiv ? String(k.aktiv).slice(0, 80) : null, kontonr: k.kontonr || null, abgekuerzt: k.abgekuerzt == null ? null : !!k.abgekuerzt,
+      konto: { aktiv: k.aktiv ? String(k.aktiv).slice(0, 80) : null, kontonr: k.kontonr || null, endung: k.endung || null, abgekuerzt: k.abgekuerzt == null ? null : !!k.abgekuerzt,
                liste_offen: !!k.liste_offen },
       positionen: (s.positionen || []).slice(0, 10).map(function (p) {
         return { symbol: p.symbol || null, seite: p.seite || null, menge: typeof p.menge === 'number' ? p.menge : null,
@@ -240,7 +241,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, unsafeWindow, 
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.3.2';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.3.3';                  // = SCRIPT im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8770/userscript/tsx-kern.json';
   const MERK = 'prophos_tsx_kern_v1';         // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

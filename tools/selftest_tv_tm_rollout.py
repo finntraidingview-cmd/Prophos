@@ -47,6 +47,8 @@ print(JSON.stringify({
   version_unbekannt: n({ art: 'tv', lader: { v: 1, eval: false } }),
   lader_alt: n({ art: 'tv', lader: { v: 0, eval: true, laeuft: SOLL } }),
   tsx_gesperrt: n({ art: 'tsx', lader: { v: 1, eval: false, laeuft: '0.1.0' } }),
+  tsx_aktuell: n({ art: 'tsx', lader: { v: 1, eval: false, laeuft: TVTM_TSX_VERSION_SOLL } }),
+  tsx_eval_frei: n({ art: 'tsx', lader: { v: 1, eval: true, laeuft: '0.1.0' } }),
   ohne_lader_alt: n({ art: 'tv', version: '0.9.9' }),
   ohne_lader_neu: n({ art: 'tv', version: '0.10.5' }),
   alt_quelle: tvTmQuelleAlt({ art: 'tv' }, { soll: '0.10.0', code: 'schon_aktuell', ok: true }),
@@ -69,9 +71,13 @@ check(e["gesperrt_aktuell"] and e["gesperrt_neuer"], "eval gesperrt, aktuelle od
 check(e["eval_ok_alt"] and e["eval_unbekannt"], "eval frei oder unbekannt: der Lader bleibt zuständig")
 check(e["version_unbekannt"], "Version unbekannt: nichts anfassen")
 check(e["lader_alt"] == "", "alter Lader: wie bisher nötig")
-check(e["tsx_gesperrt"], "TopstepX unverändert")
+check(e["tsx_gesperrt"] == "" and e["tsx_aktuell"] and e["tsx_eval_frei"], "TopstepX: gleiche Regel mit eigenem Soll")
+_a = open(os.path.join(WURZEL, "tv-reader", "tsx-auge.user.js"), encoding="utf-8").read()
+check(re.search(r"var SCRIPT = '([\d.]+)'", _a).group(1) == re.search(r"TVTM_TSX_VERSION_SOLL = '([\d.]+)'", HTML).group(1) == re.search(r"// @version +([\d.]+)", _a).group(1), "Auge: Soll = SCRIPT = @version")
+_v = re.search(r"var VERSION = '(tsx-[\d.]+)'", open(os.path.join(WURZEL, "mt5-copier", "augen_tsx.js"), encoding="utf-8").read()).group(1)
+check("augen_tsx.js?v=" + _v in _a, "Auge: @require = VERSION in augen_tsx.js")
 check(e["ohne_lader_alt"] == "" and e["ohne_lader_neu"], "ohne Lader wie bisher")
-check(e["key"] == "prophos_tvtm_l1_v" + SOLL and e["key_tsx"] == "prophos_tvtm_tsx_l1", "Sperre je Fassung, TopstepX wie bisher")
+check(e["key"] == "prophos_tvtm_l1_v" + SOLL and e["key_tsx"].startswith("prophos_tvtm_tsx_l1_v"), "Sperre je Fassung, TopstepX wie bisher")
 check(e["alt_quelle"] and not e["gleich_quelle"] and not e["ohne_soll"] and not e["tsx_quelle"], "Reader liefert ältere Fassung: Versuch nicht verbraucht")
 _i = HTML.index("async function tvTmTick(")
 _b = HTML[_i:HTML.index("async function tvNeuladenLauf(", _i)]

@@ -38,7 +38,7 @@ function tvSymbolWurzel(s){ return /^MNQ/.test(String(s)) ? 'MNQ' : /^NQ/.test(S
 const hedgeMasterWegStempeln = (p, q) => { spur.stempel.push(q) }, hedgeMasterWegAusfuehren = async () => { spur.zu++ }
 """
 code = "\n".join([UMGEBUNG, zeile("  const TSX_FLACH_FOLGE ="), zeile("  const TSX_MESSUNG_MAX_MS"), zeile("  function tsxMessungJung("), fn("  function tsxFlachSchnell("), fn("  function hedgeMasterTeilweise("),
-                  fn("  function hedgeMasterWegEntscheid("), fn("  async function hedgeTsxSchnellTick(")])
+                  fn("  function tsxKontoEndung("), fn("  function tsxKontoPasst("), "const kontoExtIds = () => []", fn("  function hedgeMasterWegEntscheid("), fn("  async function hedgeTsxSchnellTick(")])
 lauf = r"""
 const K = 'EXPRESS-V2-1', POS = [{ symbol: 'NQZ6', wurzel: 'NQ', richtung: 'buy', menge_zahl: 2 }]
 const neu = () => { _tsxSchnellKonto.clear(); _tsxSchnellLeer.clear(); _tsxGesehenAt.clear(); _hedgeMasterGesehen.clear(); spur.blind = 0; spur.stempel = []; spur.zu = 0

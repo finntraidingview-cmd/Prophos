@@ -27613,10 +27613,11 @@
   const TVTM_LADER_SOLL = 1, TVTM_TSX_LADER_SOLL = 1
   // GESPERRTES EVAL (Finn 02.11.2026): TradingViews CSP verbietet eval, der Lader tauscht dort den Kern nie (lader.eval false, quelle eingebaut). Dann kommt jede Fassung über diesen Weg:
   // TVTM_VERSION_SOLL = VERSION im Userscript (Selbsttest prüft es), ein Versuch je PC und Fassung, nur in Ruhe (tvnRuhe). Scheitert er, meldet Railway ⚪; die nächste Fassung versucht es neu.
-  const TVTM_VERSION_SOLL = '0.10.7'
+  const TVTM_VERSION_SOLL = '0.10.7', TVTM_TSX_VERSION_SOLL = '0.3.3'   // TSX = SCRIPT im Auge (02.11.2026: 2.4.32-Fassung kommt sonst nie an)
   const tvTmSoll = art => art === 'tsx' ? TVTM_TSX_LADER_SOLL : TVTM_LADER_SOLL
-  const tvTmKey = art => art === 'tsx' ? 'prophos_tvtm_tsx_l' + TVTM_TSX_LADER_SOLL : 'prophos_tvtm_l' + TVTM_LADER_SOLL + '_v' + TVTM_VERSION_SOLL
-  const tvTmZiel = art => art === 'tsx' ? `Lader ${TVTM_TSX_LADER_SOLL}` : TVTM_VERSION_SOLL
+  const tvTmVersionSoll = art => art === 'tsx' ? TVTM_TSX_VERSION_SOLL : TVTM_VERSION_SOLL
+  const tvTmKey = art => (art === 'tsx' ? 'prophos_tvtm_tsx_l' : 'prophos_tvtm_l') + tvTmSoll(art) + '_v' + tvTmVersionSoll(art)
+  const tvTmZiel = art => tvTmVersionSoll(art)
   const TVTM_NICHTS_ANGEFASST = ['puls_beschaeftigt', 'kein_tab', 'handlauf', 'soll_fehlt', 'tab_neu', 'nicht_gesendet', 'verbindung']
   // REIN RECHNEND: hat die .user.js des lokalen Readers noch nicht die Soll-Fassung? Nur TV; unbekannt = nein.
   function tvTmQuelleAlt(b, r){ return !!(b && b.art === 'tv' && r && r.soll && tvnNeuer(TVTM_VERSION_SOLL, r.soll)) }
@@ -27626,7 +27627,7 @@
     if(l){
       if(Number(l.v || 0) < tvTmSoll(b.art)) return ''
       const lauf = String(l.laeuft || b.version || '')
-      return (b.art === 'tv' && l.eval === false && lauf && tvnNeuer(TVTM_VERSION_SOLL, lauf)) ? '' : 'Lader aktuell'
+      return (l.eval === false && lauf && tvnNeuer(tvTmVersionSoll(b.art), lauf)) ? '' : 'Lader aktuell'
     }
     return (b.version && tvnNeuer(a.erster, b.version)) ? '' : a.name + '-Version unbekannt oder ≥ ' + a.erster
   }
@@ -32854,6 +32855,23 @@
   }
   window._tsxBlindUrteil = tsxBlindUrteil
   window._tsxReloginAnstossen = (plan, art) => tsxReloginAnstossen(plan, art)   // Test-Haken
+  /* TOPSTEPX 2.4.32 (Finn 02.11.2026): der Kopf zeigt nur noch „150K DLL Express (...9147)“, kontonr bleibt null. Die Forderung „volle Kennung“ machte das Auge blind, Fusion schloss nur noch über Radar und Notfall-Level.
+   * Jetzt: volle Kennung wie bisher, oder Endung aus dem Kopf (konto.endung, sonst Text), wenn sie zum Plan-Konto passt und genau ein Konto dieser ID so endet. REIN RECHNEND. */
+  function tsxKontoEndung(k){
+    const e = String((k && k.endung) || '')
+    if(/^\d{4}$/.test(e)) return e
+    const m = String((k && k.aktiv) || '').match(/\(\s*(?:\.{3}|…)\s*(\d{4})\s*\)/)
+    return m ? m[1] : ''
+  }
+  function tsxKontoPasst(k, ext, extIds){
+    if(!k || k.liste_offen || !ext) return false
+    if(k.kontonr) return k.abgekuerzt === false && tsxKontoGleich(k.kontonr, ext)
+    const e = tsxKontoEndung(k), n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(), id = n(ext)
+    if(!e || !id.endsWith(e)) return false
+    const treffer = new Set((extIds || []).map(n).filter(x => x.endsWith(e)))
+    return treffer.size === 1 && treffer.has(id)
+  }
+  window._tsxKontoPasst = tsxKontoPasst   // Test-Haken
   const tsxKontoGleich = (kontonr, ext) => { const n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); return !!n(kontonr) && n(kontonr) === n(ext) }
   // REIN RECHNEND (window._tsxStandListe): Positionen des Userscripts → Liste im Format des Orbit-Readers (wurzel, menge_zahl, richtung)
   function tsxStandListe(st){
@@ -32951,7 +32969,7 @@
       const r = await window.mtcApi('tsx-stand', { timeoutMs: 800 })
       _tsxLage = r && typeof r === 'object' && !r._httpFail ? r : _tsxLage
       const f = !!(r && r.ok === true && typeof r.alter_s === 'number' && r.alter_s <= 1.0 && r.stand && r.stand.ausgeloggt !== true
-        && r.stand.konto && r.stand.konto.kontonr)
+        && r.stand.konto && (r.stand.konto.kontonr || tsxKontoEndung(r.stand.konto)))
       if(f) tsxAugeGesehenMerken()
       return f
     }catch(_){ return false }
@@ -33020,14 +33038,14 @@
       _tsxStandFehler = 0
       if(hedgePulsUnterwegs()){ verwerfen(); tsxBlindZurueck(); return }   // während des Holens losgelaufen
       if(st.ausgeloggt === true){ verwerfen(); tsxBlindZurueck(); tsxReloginAnstossen(meine[0], 'ausgeloggt'); return }   // ausgeloggt: nie schließen, Rück-Login (29.10.2026)
-      if(!(st.konto && st.konto.kontonr)){ verwerfen(); blindTick('kein Konto im Auge'); return }   // frisch, aber ohne Konto = blind
+      if(!(st.konto && (st.konto.kontonr || tsxKontoEndung(st.konto)))){ verwerfen(); blindTick('kein Konto im Auge'); return }   // frisch, aber ohne Konto = blind
       tsxBlindZurueck(); tsxAugeGesehenMerken()
       const k = st.konto || {}, liste = tsxStandListe(st), jetzt = Date.now()
       for(const p of meine){
         const pid = String(p.id), h = p.mt5Baseline.hedge
         const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
         const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
-        if(!kontoPlan || k.abgekuerzt !== false || k.liste_offen || !tsxKontoGleich(k.kontonr, kontoPlan)){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
+        if(!kontoPlan || !tsxKontoPasst(k, kontoPlan, kontoExtIds())){ _tsxSchnellKonto.delete(pid); _tsxSchnellLeer.delete(pid); continue }
         if(!_tsxSchnellKonto.has(pid)) _tsxSchnellKonto.set(pid, jetzt)
         const wz = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(h.symbol_nq || p.masterSymbol || '')) === 'MNQ' ? 'MNQ' : 'NQ'
         const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
