@@ -68066,6 +68066,31 @@
     pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
     return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
   }
+  /* RECOVERER-ALTPLAN (02.11.2026, Finn 05:34, Mike 150k PAAPEX…0001, Plan a5e60a7f von 20:11 UTC, vor dem Einspielen der Regel 01:13 UTC): der unbestätigte
+   * Plan trug 376 $ / 175 €, Popup und Regel sagten 1.499 $ / 450 €. REIN RECHNEND: noch nicht freigegebener Farmer-Plan mit Hedge, keine Hand-Werte, keine
+   * TP-Vorgabe am Konto, Regel aktiv → die Felder für die Regelwerte, sonst null. master_risk bewusst leer in die Rechnung: wdFarmHedgeKern nähme sonst den alten
+   * Plan-Wert (376) als Risiko und der Regel-Hedge würde um den Faktor TP/376 zu groß. Die Bestätigungspflicht bleibt, hedge_freigabe_at wird nie gesetzt.
+   * HAND-WERTE (Gegenprüfung 02.11.2026): „Plan bearbeiten“ und das Plan-Popup setzen hand_werte_at nicht und lassen k.wuerfel stehen. Darum zählt nur ein Plan, der
+   * noch genau dem gewürfelten Eintrag entspricht (k: quelle wuerfel, TP, Kontrakte, Hedge-Basis). Danach steht quelle auf recoverer: der Schritt greift je Plan nur einmal. */
+  function wdRecovererAltplanUpd(plan, acc, zy, z, hedgeAn, ddListe, k){
+    if(!plan || !acc || !zy || !z || z.basis !== 'recoverer' || !(z.slaveEur > 0) || !hedgeAn) return null
+    const w = k && k.wuerfel
+    if(!w || w.quelle !== 'wuerfel' || Math.abs(Number(w.tp) - Number(plan.masterTp)) > 0.5 || Number(w.kt) !== Number(plan.masterContracts)) return null
+    if(!(Math.abs(Number(k.slave) - Number(plan.slaveRisk)) <= 0.5)) return null
+    if(!(hedgePplFuer(plan.masterSymbol) > 0)) return null   // ohne Symbol rechnete wdFarmHedge mit der Tab-Pille (Vorfall Marc 32 statt 3,2 Lot, .1712)
+    if(plan.status !== 'planned' || plan.startUmGestartetAt || plan.orbitGesendetAt || plan.winningDay !== true) return null
+    if(plan.hedgeFreigabeAt || plan.autoBestaetigtAt || plan.handWerteAt || Number(acc.wdTp) > 0) return null
+    if((plan.route !== 'tvv2' && plan.route !== 'tsv2') || !(Number(plan.hedgeEur) > 0)) return null
+    const tp = Number(zy.ziel), kt = Number(zy.kt) >= 1 ? Number(zy.kt) : Number(plan.masterContracts)
+    if(!(tp > 0) || !(kt >= 1)) return null
+    const h = { master_firm: plan.masterFirm, master_symbol: plan.masterSymbol, master_contracts: kt, master_tp: tp, master_risk: null }
+    wdFarmHedge(h, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, true, ddListe)
+    if(!(h.hedge_eur > 0) || !(h.multiplier > 0)) return null
+    if(Math.abs((Number(plan.masterTp) || 0) - tp) <= 0.5 && Math.abs(Number(plan.hedgeEur) - h.hedge_eur) <= 1 && Number(plan.masterContracts) === kt) return null
+    const upd = { master_tp: tp, master_contracts: kt, master_risk: h.master_risk, multiplier: h.multiplier, hedge_faktor: h.hedge_faktor, hedge_eur: h.hedge_eur, slave_risk: h.slave_risk }
+    return { upd, tp, kt, vor: { lots: Math.round(kt * h.multiplier * 100) / 100, mult: h.hedge_faktor, eur: h.hedge_eur, staffel: z.slaveEur, hinweis: '' } }
+  }
+  window._wdRecovererAltplanUpd = wdRecovererAltplanUpd   // Test-Haken
   async function wdVorplanRegelnSpeichern(v){
     if(await wdNurGruppe()) return   // wd_farmer_regeln ist HT-weit (Prüfer M1, 08.10.2026)
     const { data: { user } } = await supabase.auth.getUser()
@@ -68693,6 +68718,24 @@
           set(k, 'plan_id', String(p.plan.id)); set(k, 'start_um', startIso); set(k, 'tp', p.plan.masterTp); set(k, 'sl', p.plan.masterSl); set(k, 'slave', p.plan.slaveRisk); set(k, 'live', p.z.live); set(k, 'plus', p.z.plus); set(k, 'status', 'planned')
         }else if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
           const upd = {}, z = zVon.get(String(k.id))
+          // RECOVERER-ALTPLAN (02.11.2026): eigener Schritt mit Riegel in der DB — wurde er inzwischen bestätigt oder von Hand geändert, bleibt er. Geklappt: Rest im nächsten Takt.
+          const accAlt = z ? (accounts || []).find(a => String(a.id) === String(k.id)) : null
+          const alt = accAlt ? wdRecovererAltplanUpd(plan, accAlt, wdZyklusVon(k.id), z, !!vp.hedge_an, [accAlt.maxDrawdown, accAlt.maxDailyDrawdown, accAlt.maxLossPerTrade, z.masterRisk], k) : null
+          // TP-Vorgabe frisch aus der DB: accounts hat kein Realtime, der Cache kann eine neue Hand-Vorgabe noch nicht kennen. Lesefehler = nichts schreiben
+          let altFrei = false
+          if(alt){ try{ const { data: frA, error: frE } = await supabase.from('accounts').select('wd_tp').eq('id', k.id).maybeSingle(); altFrei = !frE && !!frA && !(Number(frA.wd_tp) > 0) }catch(_){} }
+          if(alt && altFrei){
+            const { data: dAlt, error: eAlt } = await supabase.from('trade_plans').update(alt.upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null)
+              .is('orbit_gesendet_at', null).is('started_at', null).is('hedge_freigabe_at', null).is('auto_bestaetigt_at', null).is('hand_werte_at', null).select('*')
+            if(eAlt) console.warn('[wd] Recoverer-Altplan', eAlt.message)
+            if(dAlt && dAlt[0]){
+              const ixA = tradePlans.indexOf(plan); if(ixA >= 0) tradePlans[ixA] = rowToPlan(dAlt[0])
+              k.wuerfel = { tp: alt.tp, kt: alt.kt, quelle: 'recoverer', at: new Date().toISOString() }; k.vor = alt.vor; geaendert = true
+              set(k, 'tp', alt.tp); set(k, 'kt', alt.kt); set(k, 'slave', alt.upd.slave_risk)
+              console.log(`[wd] Recoverer: Plan ${String(plan.id).slice(0, 8)} auf ${alt.tp} $ / ${alt.vor.eur} € gebracht`)
+              continue
+            }
+          }
           // nie zurückdrehen, was der Richtungsschutz am Start gedreht hat (30.10.2026, mt5_baseline.richtung_konflikt.status 'gedreht')
           const gedreht = plan.mt5Baseline && plan.mt5Baseline.richtung_konflikt && plan.mt5Baseline.richtung_konflikt.status === 'gedreht'
           if(!gedreht && plan.richtung !== wdKontoRichtung(k, row.richtung)){   // Richtung der Gruppe (28.10.2026)

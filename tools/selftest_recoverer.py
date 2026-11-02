@@ -169,6 +169,58 @@ def main():
     ns["sb_select"] = ohne_spalte
     check(ns["_wd_zyklus_regelzeile"]() == (None, VORPLAN), "Regelzeile: Spalte fehlt → (None, vorplan), kein Fehler")
 
+    # ── Recoverer-Altplan (prophos.html wdRecovererAltplanUpd + echte wdFarmHedgeKern, Mike a5e60a7f) ──
+    import shutil
+    import subprocess
+    import tempfile
+    html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
+    i_a = html.index("  function wdRecovererAltplanUpd(")
+    code = html[html.index("  function wdFarmHedgeKern("):html.index("  async function wdVorplanRegelnSpeichern(")]
+    check("function wdRecovererAltplanUpd" in code and i_a > 0, "Altplan: Funktion liegt zwischen wdFarmHedgeKern und wdVorplanRegelnSpeichern")
+    q_ab = html[html.index("  async function wdAbgleich("):]
+    q_ab = q_ab[:q_ab.index("(3) Zustand spiegeln")]
+    check(".is('orbit_gesendet_at', null).is('started_at', null).is('hedge_freigabe_at', null).is('auto_bestaetigt_at', null).is('hand_werte_at', null)" in q_ab and "select('wd_tp')" in q_ab and "wdRecovererAltplanUpd(plan" in q_ab,
+          "Altplan: Schreiben mit Riegel in der DB, wurde er bestätigt oder von Hand geändert, bleibt er")
+    if shutil.which("osascript"):
+        test = """function run(){
+var window = {}; var _tpNqMode = 'mnq', TP_WD_SLAVE_FIRM = 'Fusion';
+function hedgePplFuer(s){ return /^MNQ/.test(s || '') ? 2 : /^NQ/.test(s || '') ? 20 : 0 } function tpMasterPpl(){ return 2 } function tpWdSlavePpl(){ return 0.85 }
+function tpCalcMultiplier(f, s, risk, kt, eur){ return Math.round(eur / (risk / (2 * kt) * kt * 0.85) * 10000) / 10000 }
+function wdFarmHedge(pr, riskMaster, slaveEur, an, ddListe){ return wdFarmHedgeKern(pr, riskMaster, slaveEur, an, ddListe) }
+""" + code + """
+var plan = { status: 'planned', winningDay: true, route: 'tvv2', hedgeEur: 170.99, slaveRisk: 175, masterTp: 376, masterContracts: 3, masterRisk: 376, masterFirm: 'Apex', masterSymbol: 'MNQZ6' };
+var K = { slave: 175, wuerfel: { tp: 376, kt: 3, quelle: 'wuerfel' } };
+var acc = { wdTp: null, wdSl: null, maxRisikoTrade: 0 }, zy = { ziel: 1499, hedge_eur: 449.93, kt: null }, z = { basis: 'recoverer', slaveEur: 449.93 };
+function mit(o, p){ var r = {}, k; for(k in o) r[k] = o[k]; for(k in p) r[k] = p[k]; return r }
+var U0 = wdRecovererAltplanUpd, U = function(p, c, y, zz, an, dd, kk){ return U0(p, c, y, zz, an, dd, kk === undefined ? K : kk) }, a = U(plan, acc, zy, z, true, []);
+return JSON.stringify({ a: a,
+  freigabe: U(mit(plan, {hedgeFreigabeAt: 'x'}), acc, zy, z, true, []), auto: U(mit(plan, {autoBestaetigtAt: 'x'}), acc, zy, z, true, []),
+  hand: U(mit(plan, {handWerteAt: 'x'}), acc, zy, z, true, []), vorgabe: U(plan, mit(acc, {wdTp: 500}), zy, z, true, []),
+  gestartet: U(mit(plan, {startUmGestartetAt: 'x'}), acc, zy, z, true, []), keinwd: U(mit(plan, {winningDay: false}), acc, zy, z, true, []),
+  ohneregel: U(plan, acc, null, z, true, []), staffel: U(plan, acc, zy, mit(z, {basis: 'staffel'}), true, []), ohnehedge: U(mit(plan, {hedgeEur: null}), acc, zy, z, true, []),
+  ohnesymbol: U(mit(plan, {masterSymbol: ''}), acc, zy, z, true, []), handtp: U(mit(plan, {masterTp: 800}), acc, zy, z, true, []), handkt: U(mit(plan, {masterContracts: 4}), acc, zy, z, true, []),
+  handhedge: U(mit(plan, {slaveRisk: 150}), acc, zy, z, true, []), schonrec: U(plan, acc, zy, z, true, [], {slave: 175, wuerfel: {tp: 376, kt: 3, quelle: 'recoverer'}}),
+  ohnewuerfel: U(plan, acc, zy, z, true, [], {slave: 175}), keink: U(plan, acc, zy, z, true, [], null), kt: U(plan, acc, mit(zy, {kt: 4}), z, true, []) });
+}"""
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+            f.write(test)
+        try:
+            aus = subprocess.run(["osascript", "-l", "JavaScript", f.name], capture_output=True, text=True, timeout=30)
+        finally:
+            os.unlink(f.name)
+        check(aus.returncode == 0, "Altplan: Rechnung läuft (" + aus.stderr[:120] + ")")
+        if aus.returncode == 0:
+            import json
+            r = json.loads(aus.stdout)
+            a = r["a"]
+            check(a and a["tp"] == 1499 and a["upd"]["master_tp"] == 1499 and abs(a["upd"]["hedge_eur"] - 450.20) < 0.5 and a["upd"]["multiplier"] == 0.7062 and a["vor"]["lots"] == 2.12 and a["upd"]["slave_risk"] == 449.93 and a["upd"]["master_risk"] == 1499,
+                  f"Altplan: Mike → 1.499 $ / ~450 €, altes Risiko 376 nicht übernommen ({a and a['upd']})")
+            check(a and a["kt"] == 3 and a["upd"]["master_contracts"] == 3 and a["vor"]["eur"] == a["upd"]["hedge_eur"], "Altplan: Kontrakte bleiben, Vorschau passt zum Plan")
+            check("hedge_freigabe_at" not in a["upd"] and "start_um" not in a["upd"] and "richtung" not in a["upd"], "Altplan: keine Freigabe, Start und Richtung unberührt")
+            for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handhedge", "schonrec", "ohnewuerfel", "keink"):
+                check(r[fall] is None, f"Altplan: {fall} → nichts ändern")
+            check(r["kt"]["upd"]["master_contracts"] == 4, "Altplan: Kontrakte aus der Regel, wenn sie welche vorgibt")
+
     print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
     return 1 if fehler else 0
 
