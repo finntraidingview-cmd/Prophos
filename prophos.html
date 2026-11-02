@@ -53760,7 +53760,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1972'
+  const OS_TAB_BUILD = '2026-09-22.1973'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -57763,7 +57763,16 @@
    * vorbei. Pläne kommen ohne Realtime: steht der Plan hier noch als wartend, einmal frisch lesen, sonst bliebe er nach Finns „Bestätigen" bis zum nächsten Abgleich (≤ 2 min) gesperrt. Nicht lesbar = gesperrt. */
   const TP_WD_WARTET_TEXT = 'Apex-Winning-Day — erst unter Funded-Planer → Winning Days bestätigen, dann startet er zur Startzeit.'
   async function tpWdBestaetigungFehlt(plan){
-    if(!tpWdWartetAufBestaetigung(plan)) return false
+    /* REGELN NOCH NICHT DA (Prüfer S12, 02.11.2026): in den ersten Sekunden nach dem Laden ist die Firmenliste leer, ein Hand-Klick käme durch, das Netz greift hier nicht. Darum einmal laden (höchstens
+     * 5 s, ein Klick darf nicht hängen). Bleibt der Schalter unbekannt: nur Apex sperren, denn das ist die eine Firma, die Finn bestätigen will; ein neuer Klick versucht es wieder. Tradeify, Topstep & Co.
+     * dürfen nie an einem Lese-Fehler hängen („bei Tradeify nichts"). Prädikat und DB-Netz bleiben unverändert. */
+    let unbekannt = false
+    if(!_wdRegeln && plan && plan.status === 'planned' && !plan.startUmGestartetAt && !plan.hedgeFreigabeAt && plan.winningDay === true && tpIstFarmerPlan(plan)){
+      const frist = () => new Promise((_, nein) => setTimeout(() => nein(new Error('Frist')), 5000))
+      try{ await Promise.race([wdRegelnGeteilt(60000).then(() => tpBestaetigenAusnahmeHolen()), frist()]) }catch(_){}
+      unbekannt = !_wdRegeln && String(plan.masterFirm || '').toLowerCase().includes('apex')
+    }
+    if(!unbekannt && !tpWdWartetAufBestaetigung(plan)) return false
     try{ const { data, error } = await supabase.from('trade_plans').select('hedge_freigabe_at').eq('id', plan.id).maybeSingle()
       if(!error && data && data.hedge_freigabe_at){ plan.hedgeFreigabeAt = data.hedge_freigabe_at; return false } }catch(_){}
     return true
