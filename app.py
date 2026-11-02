@@ -20173,7 +20173,8 @@ def code_tab_stand(pc):
                                                          "hedge_status:mt5_baseline->hedge->>status,hedge_pc:mt5_baseline->hedge->>pc",
                                                "user_id": "in.(" + ",".join(uids) + ")", "status": "in.(planned,open)",
                                                # nur bis jetzt + 10 min, jüngste zuerst (Hinweis S2: sonst Folgetage im Limit, ein frischer Claim fehlt)
-                                               "or": f"(start_um.is.null,start_um.lte.{(jetzt + timedelta(minutes=10)).isoformat()})",
+                                               # status.eq.open (S9 02.11.2026): Ein offener Plan, der mehr als 10 min vor start_um begann, fehlte sonst (Lotse-Zahl, echo_logins)
+                                               "or": f"(start_um.is.null,start_um.lte.{(jetzt + timedelta(minutes=10)).isoformat()},status.eq.open)",
                                                "order": "start_um.desc.nullslast", "limit": "300"}) or []
         riegel = tab_stand_riegel(sig, plaene, pc, jetzt)
         # EA-SELBSTHEILUNG IM PANEL (30.10.2026, Befund ECHO-AUSSETZER: Jacob …2655 Lese-EA eingefroren, offener Echo-Plan, Snapshot ohne
@@ -20189,7 +20190,8 @@ def code_tab_stand(pc):
                                  "master_login": "in.(" + ",".join(echo_logins) + ")"}) or []).items() if str(z.get("pc_name") or "") == pc)
     except Exception as e:
         return jsonify({"ok": False, "msg": f"Stand nicht lesbar: {type(e).__name__}"}), 503
-    _panel_herz[pc] = time.time()   # Herzschlag des Panels (PANEL-HERZSCHLAG, 30.10.2026)
+    if request.headers.get("User-Agent") != "prophos-agent":   # der Lotse-Agent fragt je Eingabe: Das darf kein totes Panel als „an“ ausgeben (S9 02.11.2026)
+        _panel_herz[pc] = time.time()   # Herzschlag des Panels (PANEL-HERZSCHLAG, 30.10.2026)
     spur = (request.args.get("panel") or "").strip()[:200]
     if spur and _tab_stand_spur.get(pc) != spur:
         _tab_stand_spur[pc] = spur

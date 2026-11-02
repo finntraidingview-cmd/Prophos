@@ -82,6 +82,8 @@ OKR = {"positionen_ok": True, "positionen": [], "positionen_alter_s": 1.2}
 pruefe("Reader leer und frisch", a.reader_auswerten(OKR) is None)
 for name, d in (("Position", dict(OKR, positionen=[{"symbol": "NQ"}])), ("blind", dict(OKR, positionen_ok=False)), ("alt", dict(OKR, positionen_alter_s=99)), ("ohne Alter", dict(OKR, positionen_alter_s=None)), ("ohne Liste", {"positionen_ok": True}), ("Unsinn", "x")):
     pruefe("Reader sperrt: " + name, a.reader_auswerten(d) is not None)
+pruefe("Reader: leer_beweis true", a.reader_auswerten(dict(OKR, leer_beweis=True)) is None)
+pruefe("Reader: leer_beweis false = unklar", "unklar" in (a.reader_auswerten(dict(OKR, leer_beweis=False)) or ""))
 pruefe("Plan frei", a.plan_auswerten({"ok": True, "riegel_tv": "", "plaene_offen_tv": 0}) is None)
 for name, d in (("offen", {"ok": True, "riegel_tv": "", "plaene_offen_tv": 2}), ("Start nah", {"ok": True, "riegel_tv": "Start in ≤ 5 min", "plaene_offen_tv": 0}), ("Feld fehlt", {"ok": True, "riegel_tv": ""}), ("Riegel fehlt", {"ok": True, "plaene_offen_tv": 0}),
                 ("IDs unbekannt", {"ok": True, "riegel_tv": "", "plaene_offen_tv": None}), ("altes Railway", {"ok": True, "riegel": "", "plaene_offen": 0}), ("Fehler", {"ok": False})):
@@ -392,6 +394,18 @@ a.lauf_grund = _lg
 # Echtes lauf_grund: Lock und Panel
 b = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
+# Handelsstand nur, wenn TradingView, Puls-Chrome oder MT5 betroffen sind, und einmal je Aktion
+_hz = []
+b.puls_browser_pid, b.puls_tabs = (lambda: (500, True)), (lambda: TABS)
+b.handel_stand = lambda: _hz.append(1) or LEER
+_pp = b.puls_stand()
+pruefe("Explorer liest keinen Handelsstand", b.freigabe("Ordner", "CabinetWClass", "explorer.exe", 7, 9, {}, _pp[0], _pp[1], _pp[2], _pp[3])[0] == "frei" and not _hz)
+pruefe("Konsole und Prophos lesen keinen Handelsstand", b.freigabe("Windows PowerShell", "ConsoleWindowClass", "powershell.exe", 7, 9, {}, _pp[0], _pp[1], _pp[2], _pp[3])[0] == "konsole" and b.freigabe("Prophos - Google Chrome", KL, CHROME, 7, 9, {}, _pp[0], _pp[1], _pp[2], _pp[3])[0] == "browser" and not _hz)
+pruefe("TradingView liest ihn", b.freigabe(TVT, KL, CHROME, 500, 9, {}, _pp[0], _pp[1], _pp[2], _pp[3])[0] == "puls_chrome" and len(_hz) == 1)
+pruefe("MT5 liest ihn nicht nochmal", b.freigabe(MT5T, MT5K, "terminal64.exe", 7, 9, {}, _pp[0], _pp[1], _pp[2], _pp[3])[0] == "mt5" and len(_hz) == 1)
+b.handel_stand = lambda: {"tv": "TradingView: 1 Position", "plan": None}
+_pp = b.puls_stand()
+pruefe("Handelsstand beim Nachlesen sperrt", b.freigabe(TVT, KL, CHROME, 500, 9, {}, _pp[0], _pp[1], _pp[2], _pp[3])[0] is None)
 with tempfile.NamedTemporaryFile(delete=False) as f:
     b.PULS_LOCK = f.name
 pruefe("frischer Lock sperrt", "Handlauf" in (b.lauf_grund() or ""))

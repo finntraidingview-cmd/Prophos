@@ -291,7 +291,10 @@ def reader_auswerten(d):
     alter = d.get("positionen_alter_s")
     if not isinstance(alter, (int, float)) or alter > READER_FRISCH_S:
         return "TradingView-Stand unklar (Reader-Stand alt)"
-    return "TradingView: %d Position(en) offen" % len(d["positionen"]) if d["positionen"] else None
+    if d["positionen"]:
+        return "TradingView: %d Position(en) offen" % len(d["positionen"])
+    # Userscript ab 0.10.8 (S9 02.11.2026): false heißt „Liste leer, aber nicht bewiesen“. Fehlt das Feld (ältere Fassung), zählt das bisherige positionen_ok.
+    return "TradingView-Stand unklar (leere Liste ohne Beweis)" if d.get("leer_beweis") is False else None
 
 
 def plan_auswerten(d):
@@ -308,9 +311,10 @@ def freigabe(titel, klasse, exe, pid=None, hwnd=None, merk=None, puls_pid=None, 
     Finn 02.11.2026: hart gesperrt ist TopstepX; TradingView, Puls-Chrome und MT5 nur ohne TradingView-Position und offenen Plan einer TradingView-/Topstep-Route. handel = {"tv": Grund|None,
     "plan": Grund|None}; fehlt es, ist der Stand unklar, also gesperrt. Dazu die Betriebs-Konsolen, keine Handelssperre: Ein Klick hält dort das Programm an."""
     def handel_grund():
-        if not isinstance(handel, dict) or "tv" not in handel or "plan" not in handel:
+        h = handel() if callable(handel) else handel
+        if not isinstance(h, dict) or "tv" not in h or "plan" not in h:
             return "Handelsstand unklar"
-        return handel["tv"] or handel["plan"]
+        return h["tv"] or h["plan"]
     t, k, e = str(titel or ""), str(klasse or ""), str(exe or "").lower()
     if ist_topstepx_titel(t):
         return None, "TopstepX: %s" % t[:60]
@@ -402,9 +406,16 @@ def handel_stand():
 
 
 def puls_stand():
-    """(pid, sicher, tabs, handel). Prozess hinter Port 9333, Tabs des Puls-Chrome, Handelsstand. Alles vor dem Lesen der Fenster: Es kostet Netz."""
+    """(pid, sicher, tabs, handel). Prozess hinter Port 9333 und Tabs des Puls-Chrome vor dem Lesen der Fenster. handel wird erst gelesen, wenn TradingView, Puls-Chrome oder MT5 betroffen
+    sind, und gilt dann für diese Aktion: Für den Explorer wäre es bis zu 7 s Netz umsonst. Der erste Blick auf das Fenster liegt dann vor dem Netz, darum prüft jede Eingabe unmittelbar vor dem Senden neu."""
     pid, sicher = puls_browser_pid()
-    return pid, sicher, puls_tabs(), handel_stand()
+    merk = []
+
+    def handel():
+        if not merk:
+            merk.append(handel_stand())
+        return merk[0]
+    return pid, sicher, puls_tabs(), handel
 
 
 def fenster_info(hwnd):
