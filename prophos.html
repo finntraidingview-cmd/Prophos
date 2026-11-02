@@ -27570,7 +27570,7 @@
    * aktualisiert wird — es dauert ewig"). Der Lader im Puls-Chrome (Userscript ≥ 0.10.0) meldet im Reader-Stand lader {laeuft, bereit}: liegt
    * eine NEUERE Fassung bereit, läuft sie erst nach dem nächsten Laden des TradingView-Tabs. Dieser Block lässt den Tab dann neu laden
    * (Panel /api/tv-neuladen → order_bot tvneuladen: nur Page.reload, kein Klick, kein Konto, keine Order) — NUR wenn nichts läuft
-   * (tvNeuladenFrei, fail-closed: kein offener Plan dieser ID, kein Start in 45 min auch unbestätigt/geclaimt, Puls/Polar/Polar-Startsperre/
+   * (tvNeuladenFrei, fail-closed: kein offener TV-/TSX-Plan dieser ID, kein Start in 5 min auch unbestätigt/geclaimt, Puls/Polar/Polar-Startsperre/
    * Signal/Fern-Lauf/Heimweg/Endlesung/Big Trade frei) und höchstens 1× je 30 min (localStorage, auch über Neuladen des Prophos-Tabs).
    * Ein Neuladen mitten in einem Trade wäre der schlimmste Fall. Während des Neuladens: hedgePulsUnterwegs → Reader blind, bwGrund → wartet. ══ */
   const TVN_TAKT_MIN_MS = 60000, TVN_TAKT_MAX_MS = 120000, TVN_ABSTAND_MS = 30 * 60000, TVN_START_ABSTAND_MS = 5 * 60000, TVN_KEY = 'prophos_tvneu_at'
@@ -27580,7 +27580,7 @@
   let _tvnLetzter = null
   const tvnNeuer = (a, b) => { const x = String(a || '').split('.').map(Number), y = String(b || '').split('.').map(Number)
     for(let i = 0; i < Math.max(x.length, y.length); i++){ const d = (x[i] || 0) - (y[i] || 0); if(d) return d > 0 } return false }
-  // REIN RECHNEND: offener Plan, oder ein geplanter Start in < 45 min (auch unbestätigte Auto-Pläne; bis 65 min überfällig = noch im
+  // REIN RECHNEND: offener Plan außer mt5/mt5v2, oder ein geplanter Start in < 5 min (auch unbestätigte Auto-Pläne; bis 65 min überfällig = noch im
   // Startfenster, geclaimt ohne startedAt = gerade im Start) → Grund, sonst ''. Test-Haken window._tvNeuladen.planSperre.
   // ROLLOUT SCHNELLER (Finn 02.11.2026: „MT5 Trades sind ja nicht unser Problem"): offene mt5/mt5v2 sperren nicht, sie klicken im MT5-Fenster, nicht im Chrome. Starts < 5 min statt 45 min (Eingriff ≤ 150 s).
   // alleRouten (Tampermonkey: echte Maus, holt Chrome nach vorn, eine MT5-Order daneben kämpfte um den Vordergrund) zählt auch MT5-Starts; das Neuladen (nur Page.reload) nicht.
@@ -27610,7 +27610,7 @@
   /* BLIND ≠ OFFEN (29.10.2026, Befund Slave 4: auf 10 von 12 HT-PCs meldet der Puls-Chrome-Reader positionen_ok false — Schritt D und das
    * Neuladen warteten dort für immer auf „Position offen oder Reader blind", der Lader-Rollout stand). blind = der Reader beweist nichts
    * (positionen_ok nicht true); dann gilt NICHT posGrund, sondern vor jedem Eingriff die Ersatz-Freigabe aus der DB (tvnDbFrei, Railway
-   * /alarm/userscript-frei: kein offener Plan, kein Hedge, kein Start < 45 min, keine Fremd-Position, keine MT5-Position dieses PCs). Sieht
+   * /alarm/userscript-frei: kein offener TV-/TSX-Plan, kein Hedge dazu, kein Start < 5 min, keine Fremd-Position außerhalb von MT5). Sieht
    * der Reader, zählt wie bisher die Liste: eine Position = nie eingreifen. */
   function tvnBlickTv(){
     const st = tvnPulsStand(); if(!st) return null
@@ -27696,7 +27696,7 @@
     const bw = (typeof window._bwGrund === 'function') ? window._bwGrund(0) : 'Zustand nicht lesbar'; if(bw) return bw
     return ''
   }
-  // Ersatz-Freigabe bei blindem Reader (29.10.2026): Railway prüft Pläne/Hedges/Starts/Fremd-Positionen der ID und MT5-Positionen des PCs.
+  // Ersatz-Freigabe bei blindem Reader (29.10.2026): Railway prüft Pläne/Hedges/Starts/Fremd-Positionen der ID (MT5 sperrt seit 02.11.2026 nicht mehr).
   // → '' (frei) oder Grund; jeder Fehler = nicht frei (fail-closed)
   async function tvnDbFrei(alleRouten){
     try{

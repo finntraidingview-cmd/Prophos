@@ -4591,12 +4591,12 @@ _TM_LINK = "http://127.0.0.1:8790/userscript/tv-reader.user.js"
 # ══ SCHRITT D BEI BLINDEM READER (29.10.2026, Master/Finn: Lader-Rollout stand still — auf 10 von 12 HT-PCs ist der Puls-Chrome-Reader blind
 # (positionen_ok false), die Freigabe des PC-Tabs verlangt aber eine sehende, leere Positionsliste → Tampermonkey-Update und TV-Neuladen liefen
 # nirgends). Ersatz-Beweis aus der DB, wenn der Reader nichts beweisen kann: für diese ID kein Plan open, kein review-Plan mit lebendem Hedge,
-# kein Start < 45 min (auch unbestätigt; bis 65 min überfällig = noch im Startfenster), keine offene Fremd-Position (fremd_positionen, Hand-Trade
-# ohne Plan — der Tab kann die Tabelle per RLS nicht lesen) und auf diesem PC keine MT5-Position laut Lese-EA (mt5_live.master_positions ≤ 2 min).
+# kein Start < 5 min (auch unbestätigt; bis 65 min überfällig = noch im Startfenster), keine offene Fremd-Position außerhalb von MT5 (fremd_positionen,
+# Hand-Trade ohne Plan — der Tab kann die Tabelle per RLS nicht lesen). Seit 02.11.2026 sperren offene mt5/mt5v2-Pläne, MT5-Positionen und MT5-Fremd-Positionen nicht mehr.
 # Wie tab_stand_riegel für ALLE IDs dieses PCs (mt5_live) plus laufende Signale des PCs (order_signale status laeuft, pc). Nur lesen.
 # GRENZE (Prüfung 29.10.2026, vom Master bewusst angenommen): Hand-Trades in TradingView ohne Plan sieht bei blindem Reader NIEMAND —
-# fremd_positionen entsteht für TV nur aus dem sehenden Reader (echoplus_live). Geschützt bleiben Plan-Trades, Hedges, Starts, Signale und
-# MT5-Hand-Trades. Neuladen/Tampermonkey schließen keine Position und klicken nicht im Chart (Tampermonkey öffnet eine eigene Seite). ══
+# fremd_positionen entsteht für TV nur aus dem sehenden Reader (echoplus_live). Geschützt bleiben TV-/TSX-Plan-Trades, ihre Hedges, Starts und Signale.
+# Neuladen/Tampermonkey schließen keine Position und klicken nicht im Chart (Tampermonkey öffnet eine eigene Seite). ══
 TM_BLIND_START_S = 5 * 60   # Finn 02.11.2026: vorher 45 min, der Eingriff dauert ≤ 150 s
 TM_BLIND_UEBERFAELLIG_S = 65 * 60
 TM_BLIND_HEDGE_LEBT = ("offen", "schliesst", "oeffnet", "unklar", "fehler")   # unklar/fehler: Hedge-Lage nicht bewiesen → sperrt (S2 29.10.2026, fail-closed)
@@ -4662,7 +4662,9 @@ def alarm_userscript_frei():
         plaene = [dict(p, hedge_status=((p.get("hedge") or {}) if isinstance(p.get("hedge"), dict) else {}).get("status"))
                   for p in _sb_all("trade_plans", {"select": "status,route,start_um,start_um_gestartet_at,started_at,hedge:mt5_baseline->hedge",
                                                    "user_id": uin, "status": "in.(open,review,planned)"})]
-        fremd = sb_select("fremd_positionen", {"select": "weg_at,quelle", "user_id": uin, "weg_at": "is.null", "limit": "5"}) or []
+        # MT5-Zeilen schon in der Abfrage weg (Betrieb 1 02.11.2026): Sonst füllen 5 offene MT5-Zeilen das Limit, eine tv/tsx-Zeile fällt raus und der blinde Reader meldet „frei“.
+        # Mit quelle.is.null, denn neq.mt5 allein ließe leere Zeilen weg, die tm_blind_frei_rechnen als sperrend zählt
+        fremd = sb_select("fremd_positionen", {"select": "weg_at,quelle", "user_id": uin, "weg_at": "is.null", "or": "(quelle.is.null,quelle.neq.mt5)", "limit": "5"}) or []
         signale = sb_select("order_signale", {"select": "id", "status": "eq.laeuft", "pc": f"eq.{pc}", "limit": "5"}) or []
     except Exception as e:
         return jsonify({"ok": True, "frei": False, "grund": f"DB nicht lesbar ({type(e).__name__})"})
