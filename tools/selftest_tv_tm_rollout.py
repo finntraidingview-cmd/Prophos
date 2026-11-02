@@ -34,7 +34,7 @@ def fn(name):
 SOLL = re.search(r"const TVTM_VERSION_SOLL = '([\d.]+)'", HTML).group(1)
 A = HTML[HTML.index("  const TVTM_LADER_SOLL = "):HTML.index("  const TVTM_NICHTS_ANGEFASST")]
 N = re.search(r"  const tvnNeuer = .*?\n.*?\n", HTML).group(0)
-JS = "\n".join([N, A, "const TVN_ART = { tv: { name: 'TV', erster: '0.10.0' }, tsx: { name: 'Auge', erster: '0.3.0' } }", fn("tvTmNoetig"), r"""
+JS = "\n".join([N, A, "const TVN_ART = { tv: { name: 'TV', erster: '0.10.0' }, tsx: { name: 'Auge', erster: '0.3.0' } }", fn("tvTmNoetig"), fn("tvTmQuelleAlt"), r"""
 const SOLL = TVTM_VERSION_SOLL, ALT = '0.10.5'
 const n = b => tvTmNoetig(b)
 print(JSON.stringify({
@@ -49,6 +49,10 @@ print(JSON.stringify({
   tsx_gesperrt: n({ art: 'tsx', lader: { v: 1, eval: false, laeuft: '0.1.0' } }),
   ohne_lader_alt: n({ art: 'tv', version: '0.9.9' }),
   ohne_lader_neu: n({ art: 'tv', version: '0.10.5' }),
+  alt_quelle: tvTmQuelleAlt({ art: 'tv' }, { soll: '0.10.0', code: 'schon_aktuell', ok: true }),
+  gleich_quelle: tvTmQuelleAlt({ art: 'tv' }, { soll: SOLL }),
+  ohne_soll: tvTmQuelleAlt({ art: 'tv' }, { code: 'tm_seite_fehlt' }),
+  tsx_quelle: tvTmQuelleAlt({ art: 'tsx' }, { soll: '0.0.1' }),
   key: tvTmKey('tv'), key_tsx: tvTmKey('tsx'), ziel: tvTmZiel('tv'), soll: SOLL,
 }))
 """])
@@ -68,6 +72,11 @@ check(e["lader_alt"] == "", "alter Lader: wie bisher nötig")
 check(e["tsx_gesperrt"], "TopstepX unverändert")
 check(e["ohne_lader_alt"] == "" and e["ohne_lader_neu"], "ohne Lader wie bisher")
 check(e["key"] == "prophos_tvtm_l1_v" + SOLL and e["key_tsx"] == "prophos_tvtm_tsx_l1", "Sperre je Fassung, TopstepX wie bisher")
+check(e["alt_quelle"] and not e["gleich_quelle"] and not e["ohne_soll"] and not e["tsx_quelle"], "Reader liefert ältere Fassung: Versuch nicht verbraucht")
+_i = HTML.index("async function tvTmTick(")
+_b = HTML[_i:HTML.index("async function tvNeuladenLauf(", _i)]
+check(_b.index("tvTmQuelleAlt(b, r)") < _b.index("/alarm/userscript-update"), "vor der Meldung an Railway")
+check("danach geht es von selbst" not in open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read(), "tm_fehl verspricht das nicht mehr")
 check(e["ziel"] == SOLL, "Meldung nennt die Fassung")
 check("Ab jetzt kommen Updates" not in open(os.path.join(WURZEL, "app.py"), encoding="utf-8").read(), "tm_ok verspricht den Lader nicht mehr")
 print("\nROLLOUT: alles grün" if not FEHLER else f"\n{len(FEHLER)} FEHLER")

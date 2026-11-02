@@ -4565,7 +4565,7 @@ def alarm_userscript_update():
     else:
         alarm_senden(3, "userscript_tm_fehl", f"Tampermonkey-Update von Hand: {wer}",
                      f"{wer}: Puls konnte das {was} nicht aktualisieren ({code or '?'}: {msg or 'keine Antwort'}). Bitte einmal am PC im "
-                     f"Puls-Chrome {link} öffnen und „Aktualisieren\" drücken — danach geht es von selbst.",
+                     f"Puls-Chrome {link} öffnen und „Aktualisieren\" drücken.",
                      uid=uid, daten=daten, schluessel=key)
     return jsonify({"ok": True})
 

@@ -27618,6 +27618,8 @@
   const tvTmKey = art => art === 'tsx' ? 'prophos_tvtm_tsx_l' + TVTM_TSX_LADER_SOLL : 'prophos_tvtm_l' + TVTM_LADER_SOLL + '_v' + TVTM_VERSION_SOLL
   const tvTmZiel = art => art === 'tsx' ? `Lader ${TVTM_TSX_LADER_SOLL}` : TVTM_VERSION_SOLL
   const TVTM_NICHTS_ANGEFASST = ['puls_beschaeftigt', 'kein_tab', 'handlauf', 'soll_fehlt', 'tab_neu', 'nicht_gesendet', 'verbindung']
+  // REIN RECHNEND: hat die .user.js des lokalen Readers noch nicht die Soll-Fassung? Nur TV; unbekannt = nein.
+  function tvTmQuelleAlt(b, r){ return !!(b && b.art === 'tv' && r && r.soll && tvnNeuer(TVTM_VERSION_SOLL, r.soll)) }
   function tvTmNoetig(b){
     if(!b) return 'kein frischer Stand'
     const l = b.lader, a = TVN_ART[b.art]
@@ -27717,6 +27719,11 @@
     _tvnLetzter = { at: new Date().toISOString(), art: 'tampermonkey-' + b.art, von: von || null, auf: (r && r.soll) || null, ok: !!(r && r.ok), code: (r && r.code) || '',
       msg: String((r && r.msg) || '').slice(0, 200), trail: String((r && r.trail) || '').slice(-600) }
     console.info(`[tv-neuladen] Tampermonkey ${a.name} ${von || '?'} → ${(r && r.soll) || '?'}: ${r && r.ok ? 'aktualisiert' : 'FEHLER ' + ((r && r.code) || '?')}`, (r && r.msg) || '', (r && r.trail) || '')
+    // Reader lieferte noch eine ältere Fassung als das Soll (S9 02.11.2026): „schon aktuell" sagt dann nichts — Versuch nicht verbraucht, keine Meldung, später erneut
+    if(tvTmQuelleAlt(b, r)){
+      try{ if(localStorage.getItem(key) === marke) localStorage.removeItem(key) }catch(_){}
+      return
+    }
     // nichts angefasst (belegt, Panel/Puls-Chrome kurz weg, Reader-Schluckauf, K3-Handlauf, kein Tab) → Versuch nicht verbraucht, später erneut
     // (frühestens nach dem 30-min-Abstand); alles andere geht an Railway (gescheitert = einmal von Hand). Prüfer 29.10.2026
     if(r && TVTM_NICHTS_ANGEFASST.includes(r.code)){
