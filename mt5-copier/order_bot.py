@@ -14282,6 +14282,11 @@ def tsx_konto_endung(text):
     return ("", m.group(2).upper()) if m else ("", "")
 
 
+def tsx_karte_klickrect(r):
+    """REIN RECHNEND (testbar, 2.4.32): Klickbereich einer Konto-Karte [x, y, b, h] → untere Hälfte (ACCT/BAL-Zeile, ohne Stift ✎)."""
+    return [r[0], r[1] + r[3] * 0.55, r[2], r[3] * 0.4]
+
+
 def tsx_endung_passt(endung, ext_id):
     """REIN RECHNEND (testbar): Endung (≥ 3 Zeichen) = Ende der External ID?"""
     e, z = _nur_alnum(endung), _nur_alnum(ext_id)
@@ -19171,8 +19176,11 @@ def _tsx_konto_sichern(s, ext, st, trail):
             pruef = {"rect": r, "text": str(x.get("id") or x.get("endung") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
             if x.get("format") == "neu":
                 pruef["karte"] = r                           # 2.4.32 (Ina 04:09 Dubai, .1964): Karte ist kein Button — Ziel = Vorfahre mit dem Karten-Rechteck
+            # 2.4.32 (S9 02.11.2026): der gestreute Klickpunkt traf in 0,8–7 % den Stift ✎ der Namenszeile (Umbenennen statt Kontowechsel) —
+            # darum nur aus der ACCT/BAL-Zeile (untere Kartenhälfte); bewiesen wird weiter gegen die ganze Karte (pruef.rect/karte = r)
+            r_klick = tsx_karte_klickrect(r) if x.get("format") == "neu" else r
             _tsx_pause()                                  # die offene Liste steht 1–2 s da, dann erst die Zeile (Finn 01.10.2026)
-            if not s.klick(r, f"Konto {ext}", pruef=pruef):
+            if not s.klick(r_klick, f"Konto {ext}", pruef=pruef):
                 _cdp_esc(s, st, trail, "Konto-Zeile nicht gedrückt")
                 return _raus("konto_nicht_erreicht", f"Konto-Zeile {ext} nicht gedrückt (Klick ohne Beweis) — Liste mit Esc zu, nichts gewechselt.",
                              st, konto_zeilen=_zeilen(ko))
@@ -20977,7 +20985,7 @@ def win_ziel_pruef_js(x, y, pruef):
             # pruef.karte (02.11.2026, TopstepX 2.4.32, Ina 04:09–04:11 Dubai „am Zielpunkt liegt nicht das Ziel"): die Konto-Karte ist kein Button —
             # closest() fand das ganze Menü (tabindex) und das ist > 4× die Karte. Mit karte = Karten-Rechteck gilt der Vorfahre des Punkt-Elements
             # mit GENAU diesem Rechteck (±4 px) als Ziel; Text (Endung) wird dann im Kartentext geprüft, Tabu-Wörter ebenso.
-            "if(p.karte){var q=e,best=null;while(q&&q!==document.body){var rq=q.getBoundingClientRect();if(Math.abs(rq.left-p.karte[0])<=4&&Math.abs(rq.top-p.karte[1])<=4&&Math.abs(rq.width-p.karte[2])<=4&&Math.abs(rq.height-p.karte[3])<=4){best=q;break;}q=q.parentElement;}if(best){k=best;r=k.getBoundingClientRect();}}"
+            "var karte_knopf=false;if(p.karte){var q=e,best=null;while(q&&q!==document.body){var rq=q.getBoundingClientRect();if(Math.abs(rq.left-p.karte[0])<=4&&Math.abs(rq.top-p.karte[1])<=4&&Math.abs(rq.width-p.karte[2])<=4&&Math.abs(rq.height-p.karte[3])<=4){best=q;break;}q=q.parentElement;}if(best){k=best;r=k.getBoundingClientRect();var kn=e.closest('button,[role=\"button\"],a[href],input,textarea,svg');if(kn&&kn!==best&&best.contains(kn))karte_knopf=true;}}"
             "var mx=c[0]+c[2]/2,my=c[1]+c[3]/2,drin=mx>=r.left-3&&mx<=r.right+3&&my>=r.top-3&&my<=r.bottom+3,klein=r.width*r.height<=Math.max(4*c[2]*c[3],2500);"
             "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
             "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
@@ -20988,7 +20996,7 @@ def win_ziel_pruef_js(x, y, pruef):
             "&&Math.abs(zr.height-p.zelle[3])<=3&&px>=zr.left+3&&px<=zr.right-3&&py>=zr.top+3&&py<=zr.bottom-3);"
             "var h=win_hover_eltern(e);"
             "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"   # s. win_ziel_js (08.10.2026)
-            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok&&zelle_ok),was:(p.zelle&&!zelle_ok?'nicht die Zelle: ':'')+(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,zelle:zelle_ok,unter:h.unter,maus:m};})("
+            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok&&zelle_ok&&!karte_knopf),was:(karte_knopf?'Knopf in der Karte: ':'')+(p.zelle&&!zelle_ok?'nicht die Zelle: ':'')+(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,zelle:zelle_ok,unter:h.unter,maus:m};})("
             + json.dumps(pruef, ensure_ascii=False) + ")").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS)
 
 

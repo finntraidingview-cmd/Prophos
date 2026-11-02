@@ -7811,6 +7811,14 @@ def test_tsx_k2():
     chk(x is None and n == 0 and "nicht in der Liste" in g, f"2.4.32: Endung fehlt → nicht in der Liste ({g})")
     chk(ob.tsx_verletzungen_aus_liste([karte(2, "150KTC", "0003", True)]) == {"150KTC...0003": {"art": "ineligible", "text": "Ineligible"}},
         "2.4.32: Ineligible-Abschnitt → Verletzung unter der Kurzform")
+    # S9 02.11.2026: Klickpunkt nie in der Namenszeile (Stift ✎), Beweis gegen die ganze Karte; Knopf/Symbol in der Karte wird abgelehnt
+    import random as _rnd
+    _kk = [10, 100, 400, 72]
+    _kr = ob.tsx_karte_klickrect(_kk)
+    _pkte = [ob.cdp_klickpunkt(_kr, rnd=_rnd.Random(i)) for i in range(400)]
+    chk(all(_kk[1] + _kk[3] * 0.55 - 1 <= p_[1] <= _kk[1] + _kk[3] * 0.95 + 1 for p_ in _pkte), "2.4.32: Klickpunkt der Karte immer in der ACCT/BAL-Zeile")
+    _js = ob.win_ziel_pruef_js(1, 2, {"rect": _kk, "text": "9147", "karte": _kk})
+    chk("karte_knopf=true" in _js and "&&!karte_knopf" in _js, "2.4.32: Ziel-Beweis lehnt Knopf/Symbol in der Karte ab")
     ob._TSX_ENDUNG_BEWIESEN.clear()
     W = ob.tsx_k2_eintrag
     liste = [zeile(0, E1), zeile(1, E2), zeile(2, C3), zeile(3, C4)]
