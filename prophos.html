@@ -38387,15 +38387,14 @@
     if(!seite && zu != null){
       seite = (fusionSl != null && fusionTp != null) ? (Math.abs(zu - fusionTp) < Math.abs(zu - fusionSl) ? 'sl' : 'tp') : fusionSl != null ? 'tp' : fusionTp != null ? 'sl' : null
     }
-    /* OVERSHOOT GEGEN PLAN (Finn 30.10.2026 13:5x: „Was hätte ich verlieren oder machen sollen? Was habe ich verloren oder gemacht? Davon die Differenz"): ersetzt
-     * den Abstand zum Fusion-Level. diffEur = echter Fusion-P&L (slave_pl = Summe aller Versuche, sonst hedge.pl) − geplanter Fusion-P&L. Plan Master-TP: −hedge.eur.
-     * Plan Master-SL/Liq: gespeicherter Blow-Wert der Vorschau (t.hedge_plan_sl_eur, Tradeify-Final/Apex: 1650a0e3 675 €), sonst dieselbe Rechnung wie hedge.eur auf
-     * die SL-Punkte = eur ÷ punkte × sl_punkte (trifft funded_plan.hedge_sl_eur: b74d6b68 483,4/483,39 · 52b79294 204,16/204,17, und e5fec901 slave_risk 960). Keine Zahl
-     * ohne Plan oder bei Schluss von Hand/Hand schneller/„Master nie da"/master_ende (irgendwo dazwischen, kein Ausgang). − = schlechter = Overshoot, + = besser = Undershoot. */
-    const punkte = n(h.punkte), slPkt = n(h.sl_punkte), ist = n(t.slave_pl) ?? n(h.pl)
-    const planSl = n(t.hedge_plan_sl_eur) ?? ((eur && punkte > 0 && slPkt > 0) ? Math.abs(eur) / punkte * slPkt : null)
+    /* OVERSHOOT GEGEN PLAN (Finn 30.10.2026 13:5x: „Was hätte ich verlieren oder machen sollen? Was habe ich verloren oder gemacht? Davon die Differenz"). diffEur = echter Fusion-P&L (slave_pl = Summe aller Versuche,
+     * sonst hedge.pl) − geplanter Fusion-P&L. OHNE PUNKTE (Finn 02.11.2026: „Tradeify auf 250 $ soll genau 100 € machen. Wenn wir am Ende 500 $ machen, sollten wir genau 200 € verlieren. Ganz simpel, nichts mit Punkten."):
+     * Satz = hedge.eur ÷ master_tp (€ je $ am Plan), Plan = −Satz × echter master_pl, für TP- und SL-Seite gleich. …0431: 111,06 ÷ 278 × 271,80 = −108,58, echt −118,53 → −9,95 €. Keine Zahl ohne master_pl oder master_tp
+     * und bei Schluss von Hand/Hand schneller/„Master nie da"/master_ende. − = schlechter = Overshoot, + = besser = Undershoot. */
+    const ist = n(t.slave_pl) ?? n(h.pl), mTp = n(t.master_tp), mPl = n(t.master_pl)
+    const satz = (eur && mTp > 0) ? Math.abs(eur) / mTp : null
     const mitPlan = !hs && weg !== 'hand' && weg !== 'sonst' && g !== 'master_ende'
-    const planEur = !mitPlan ? null : seite === 'tp' ? (eur ? -Math.abs(eur) : null) : seite === 'sl' ? planSl : null
+    const planEur = (mitPlan && satz != null && mPl != null) ? Math.round(-satz * mPl * 100) / 100 : null
     const diffEur = (planEur != null && ist != null) ? Math.round((ist - planEur) * 100) / 100 : null
     const ms = (a, b) => { const x = Date.parse(a || ''), y = Date.parse(b || ''); return (isNaN(x) || isNaN(y)) ? null : Math.max(0, y - x) }
     const mFill = h.master_exit && typeof h.master_exit === 'object' && !isNaN(Date.parse(h.master_exit.at || '')) ? h.master_exit.at : null
