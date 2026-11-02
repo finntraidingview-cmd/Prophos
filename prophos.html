@@ -69812,7 +69812,7 @@
         if(!p){ if(wdAktiv(k) && k.hinweis) out.braucht.push({ ...e, grund: String(k.hinweis) }); continue }
         const st = String(p.status || ''), su = Date.parse(p.start_um || '') || null
         if(st === 'open') out.laeuft.push(e)
-        else if(st === 'review') out.braucht.push({ ...e, grund: wdEndlesungDa(p) ? 'zu Ende — abhaken' : 'zu Ende — wartet auf Nachlesung' })
+        else if(st === 'review') out.braucht.push({ ...e, grund: wdEndlesungDa(p) ? '' : 'zu Ende — wartet auf Nachlesung' })   // „zu Ende — abhaken“ weg (Finn 02.11.2026), war reine Anzeige; andere Gründe bleiben
         else if(st === 'planned' && !p.start_um_gestartet_at && su && su < jetzt - WD_UE_UEBERFAELLIG_MS) out.braucht.push({ ...e, grund: `Start ${wdHhmm(p.start_um)} überfällig — nicht gestartet` })
         else if(st === 'planned') out.warten.push(e)
       }
@@ -82066,7 +82066,7 @@
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok" data-ap-ok="${escapeHtml(id)}"${nichtLive || unterwegs ? ' disabled' : ''} title="${nichtLive ? 'Balance nicht live — erst „↻ Balance lesen" (Braucht dich), dann bestätigen' : 'Bestätigen — startet zur Startzeit'}">${unterwegs ? '…' : 'Bestätigen'}</button>${fehlHtml}</span>`
       } else if(art === 'warten'){
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
-      } else if(art === 'braucht') akt = `<span class="pz-zustand"><small class="wd-ue-grund" title="${escapeHtml(String(grund || ''))}">${escapeHtml(String(grund || ''))}</small></span>`
+      } else if(art === 'braucht') akt = !grund ? '' : `<span class="pz-zustand"><small class="wd-ue-grund" title="${escapeHtml(String(grund || ''))}">${escapeHtml(String(grund || ''))}</small></span>`
       else if(lauf){ const w = lauf.get(id) || {}, fw = w.gehedgt ? w.fusion : w.hypo
         akt = `<span class="pz-zustand"><span class="wd-ue-pl" data-lz-plan="${escapeHtml(id)}" title="Live: Master $${w.gehedgt ? ' · darunter Fusion €' : ' · darunter hypothetisch €'}"><span data-lz-usd style="color:${lzFarbe(w.pl)}">${lzUsd(w.pl)}</span><small data-lz-eur style="color:${lzFarbe(fw)}">${lzEur(fw)}</small></span><span class="ap-gr-live">● läuft</span></span>` }
       else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
