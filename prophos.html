@@ -53760,7 +53760,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1973'
+  const OS_TAB_BUILD = '2026-09-22.1974'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -54274,7 +54274,8 @@
       if(fern) fern.melde({ ok:false, msg: t }); else toast(t, 'end')
       return
     }
-    if(plan && await tpWdBestaetigungFehlt(plan)){ if(fern) fern.melde({ ok:false, msg: TP_WD_WARTET_TEXT }); else toast(TP_WD_WARTET_TEXT, 'end'); return }   // APEX-WD BESTÄTIGEN (02.11.2026)
+    const _wdFehlt = plan ? await tpWdBestaetigungFehlt(plan) : ''
+    if(_wdFehlt){ if(fern) fern.melde({ ok:false, msg: _wdFehlt }); else toast(_wdFehlt, 'end'); return }   // APEX-WD BESTÄTIGEN (02.11.2026)
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
       if(fern) fern.melde({ ok:false, msg: _tpOrbitLaeuft ? 'Am PC läuft schon ein Orbit-Start — nichts gesendet.' : 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' })
       return
@@ -55059,7 +55060,7 @@
     if(!plan || plan.status !== 'planned') return
     // Funded-Vorschlag (27.10.2026, H1): von Hand nie an „Bestätigen" vorbei — bestätigt wird nur unter Admin → Funded-Planer
     if(plan.fundedVorschlag){ if(typeof atToast === 'function') atToast('Funded-Vorschlag — erst unter Admin → Funded-Planer bestätigen, dann startet er zur Startzeit.', 'end'); return }
-    if(await tpWdBestaetigungFehlt(plan)){ if(typeof atToast === 'function') atToast(TP_WD_WARTET_TEXT, 'end'); return }   // APEX-WD BESTÄTIGEN (02.11.2026)
+    { const _wdFehlt = await tpWdBestaetigungFehlt(plan); if(_wdFehlt){ if(typeof atToast === 'function') atToast(_wdFehlt, 'end'); return } }   // APEX-WD BESTÄTIGEN (02.11.2026)
     { const _pl = polarLaeuft(); if(_pl){ if(typeof atToast === 'function') atToast('🧭 ' + polarRiegelText(_pl) + ' — kein Start, bis der Polar-Trade zu ist.', 'end'); return } }   // POLAR-VORRANG (20.10.2026)
     // ZIEL ERREICHT (07.10.2026) / MANUELLE ARBEIT (08.10.2026): auch von Hand kein Start — „Trotzdem starten" nur beim Karten-Klick
     // (opts.karte, 26.10.2026); Startzeit (tpStartUmTick), Neu starten und Radar rufen ohne karte und bleiben wie bisher
@@ -57772,10 +57773,29 @@
       try{ await Promise.race([wdRegelnGeteilt(60000).then(() => tpBestaetigenAusnahmeHolen()), frist()]) }catch(_){}
       unbekannt = !_wdRegeln && String(plan.masterFirm || '').toLowerCase().includes('apex')
     }
-    if(!unbekannt && !tpWdWartetAufBestaetigung(plan)) return false
+    if(!unbekannt && !tpWdWartetAufBestaetigung(plan)) return ''
     try{ const { data, error } = await supabase.from('trade_plans').select('hedge_freigabe_at').eq('id', plan.id).maybeSingle()
-      if(!error && data && data.hedge_freigabe_at){ plan.hedgeFreigabeAt = data.hedge_freigabe_at; return false } }catch(_){}
-    return true
+      if(!error && data && data.hedge_freigabe_at){ plan.hedgeFreigabeAt = data.hedge_freigabe_at; return '' } }catch(_){}
+    if(!unbekannt) return TP_WD_WARTET_TEXT
+    tpWdRegelnAlarm(plan)
+    return TP_WD_REGELN_TEXT
+  }
+  /* EIGENER TEXT + ⚪ (Betrieb 1, 02.11.2026): Regeln nicht lesbar ist kein „erst bestätigen" — Finn bestätigte sonst und bekäme denselben Text. Je Tab und Berlin-Tag einmal an Railway (/alarm/wd-regeln,
+   * dort zusätzlich je ID × Tag entprellt). Scheitert die Meldung, versucht es der nächste Klick wieder. Wirft nie. */
+  const TP_WD_REGELN_TEXT = 'Apex-Winning-Day nicht gestartet: Regeln nicht lesbar → Seite neu laden und nochmal starten.'
+  let _tpWdRegelnGemeldet = ''
+  async function tpWdRegelnAlarm(plan){
+    const tag = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
+    if(_tpWdRegelnGemeldet === tag) return
+    _tpWdRegelnGemeldet = tag
+    try{
+      const { data: { session } } = await supabase.auth.getSession(), tok = session?.access_token
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 12000)
+      let ok = false
+      try{ if(tok){ const r = await fetch(`${WATCHER_HOME}/alarm/wd-regeln`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, signal: ctrl.signal, body: JSON.stringify({ plan_id: String(plan.id) }) }); ok = r.ok } }
+      finally{ clearTimeout(tm) }
+      if(!ok) _tpWdRegelnGemeldet = ''
+    }catch(e){ _tpWdRegelnGemeldet = ''; console.warn('[wd-regeln] Alarm', (e && e.message) || e) }
   }
 
   /* NÄCHSTER PULS-EINSATZ (29.09.2026, Finn: „oben rechts unter Jacob: Nächster Puls-Impuls um die Uhrzeit, in so und so viel

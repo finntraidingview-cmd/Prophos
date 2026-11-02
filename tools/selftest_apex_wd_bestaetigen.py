@@ -33,7 +33,7 @@ ok(len(a([p], ["apex"], {"u": "M"}, j)) == 1, "⚪ ab Startzeit")
 ok(a([dict(p, start_um=(j + timedelta(minutes=5)).isoformat())], ["apex"], {}, j) == [], "kein ⚪ vor der Startzeit")
 ok(a([dict(p, hedge_freigabe_at="x")], ["apex"], {}, j) == [], "kein ⚪ nach Bestätigung")
 # Text-Riegel: Startwege im Tab
-for f, marke in (("async function tpOrbitStartenKern", "fern.melde({ ok:false, msg: TP_WD_WARTET_TEXT })"), ("async function tpJetztStarten", "atToast(TP_WD_WARTET_TEXT")):
+for f, marke in (("async function tpOrbitStartenKern", "fern.melde({ ok:false, msg: _wdFehlt })"), ("async function tpJetztStarten", "atToast(_wdFehlt")):
     i = html.index(f); ok(marke in html[i:i + 1400], f"{f}: Hand-Start gesperrt")
 ok("if(tpWdWartetAufBestaetigung(p)) return 'wartet auf deine Bestätigung" in html, "Start-Prädikat kennt das Gate")
 ok("!tpBestaetigenAusgenommen() && tpBestaetigenFirmen()" in html, "Tab kennt die Verwalter-Ausnahme")

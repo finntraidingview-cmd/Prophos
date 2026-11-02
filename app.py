@@ -14326,6 +14326,35 @@ def _wd_zyklus_anhaengen(konten):
         return False
 
 
+@app.route("/alarm/wd-regeln", methods=["POST", "OPTIONS"])
+def alarm_wd_regeln():
+    """APEX-WD BESTÄTIGEN (Betrieb 1, 02.11.2026): ein Tab konnte wd_farmer_regeln nicht lesen und hat einen Apex-WD beim Hand- oder Fern-Start gesperrt. Einmal ⚪ an die Master-IDs,
+    je ID × Berlin-Tag, egal wie viele Tabs melden. Name aus dem Plan, vom Tab nur die Plan-ID; nur der eigene Plan. Nur HT-IDs, wie alarm_tick."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    pid = str((request.get_json(silent=True) or {}).get("plan_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+        return jsonify({"ok": False, "error": "plan_id fehlt"}), 400
+    try:
+        p = (sb_select("trade_plans", {"select": "id,user_id,master_name,master_firm", "id": f"eq.{pid}"}) or [None])[0]
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    if not p or str(p.get("user_id")) != str(uid):
+        return jsonify({"ok": False, "error": "nicht dein Plan"}), 403
+    namen, aus = _ap_namen()
+    if str(uid) in aus or _alarm_fremd_verwaltet(uid):
+        return jsonify({"ok": True})
+    key = f"wd_regeln|{uid}|{_berlin_heute()}"
+    if _tm_melde_frei(key):
+        alarm_senden(3, "wd_regeln", "Apex-WD: Regeln nicht lesbar",
+                     f"{namen.get(str(uid), str(uid)[:8])} · {p.get('master_firm') or ''} {p.get('master_name') or ''}: Start gesperrt, der Tab konnte die Farmer-Regeln nicht lesen. "
+                     f"Seite am PC neu laden.", uid=uid, plan_id=pid, schluessel=key)
+    return jsonify({"ok": True})
+
+
 @app.route("/alarm/recoverer", methods=["POST", "OPTIONS"])
 def alarm_recoverer():
     """RECOVERER (Eingang 02.11.2026): ein Tab legt für ein Konto mit Recoverer-Zeile keinen Plan an, weil Stand oder Regel nicht passen — bisher fehlte der Winning Day
