@@ -28668,6 +28668,31 @@ def hf_wd_sichtbar(zeile, firmen, gruppen_ids):
     return hf_ist_wd(zeile, firmen) and str(zeile.get("user_id")) not in {str(u) for u in gruppen_ids or ()}
 
 
+def hf_wd_master_verlust(regeln, acc, plan, kw_firmen=None, fruehere=None):
+    """REIN RECHNEND (testbar, Finn 02.11.2026: „wenn der Master in Stop Loss geht, quasi sein Daily Ding hittet“): WD-Pläne haben keinen SL, darum Master-Verlust = Abstand zur Liq wie im Radar (liq_regel_felder), dazu
+    Größe + 100 wie der WD-Hedge (hedgeLiqLevel). → {usd, art: daily_loss | liq, tagesstart, tagesstart_quelle, text} oder {grund}. Die engere Grenze gilt: fällt die Liq früher als der Daily Loss, dann die. Verlust ab der
+    Balance jetzt bis zur Liq; das Daily Loss zählt ab Tagesstart (fruehere = _wd_fruehere_trades, liq_tagesstart)."""
+    a = acc or {}
+    bal = _wd_num(a.get("tv_balance"))
+    if not bal or bal <= 0:
+        return {"grund": "keine Balance am Konto"}
+    # TAGESSTART statt Balance jetzt (S9-Hinweis zu 9a97ee8e, 02.11.2026): lief heute schon ein Trade auf dem Konto, misst das Daily Loss
+    # ab dessen Start-Balance (liq_tagesstart wie im Radar), Bezugszeit ist die geplante Startzeit; sonst ist die Balance jetzt der Tagesstart
+    ts, ts_quelle = liq_tagesstart(dict(plan or {}, started_at=(plan or {}).get("started_at") or (plan or {}).get("start_um")), bal, fruehere)
+    f = liq_regel_felder(regeln, a, plan, bal, ts if ts is not None else bal, None, None, None, None, kw_firmen=kw_firmen)
+    regel, gr = f.get("liq_regel_nur_balance"), _wd_konto_groesse(a)
+    boden = max([v for v in (f.get("liq_boden_balance"), gr + 100 if gr else None) if v is not None], default=None)
+    liq = max([v for v in (regel, boden) if v is not None], default=None)
+    if liq is None:
+        return {"grund": f.get("liq_regel_text") or "keine Liq-Regel für dieses Konto"}
+    usd = round(bal - liq, 2)
+    if usd <= 0:
+        return {"grund": f"Balance {bal:.2f} $ liegt nicht über der Liq {liq:.2f} $"}
+    tages = regel is not None and liq == regel and f.get("liq_regel_soft")
+    return {"usd": usd, "art": "daily_loss" if tages else "liq", "tagesstart": ts, "tagesstart_quelle": ts_quelle,
+            "text": f.get("liq_regel_text") if tages else f"Liq bei {liq:.2f} $, vor dem Daily Loss"}
+
+
 def hf_ist_wd(zeile, firmen):
     """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) → True."""
     if zeile.get("art") in HEDGE_ARTEN or zeile.get("winning_day") is not True or "Winning-Day-Farmer" not in str(zeile.get("notes") or ""):
@@ -28797,13 +28822,23 @@ def admin_auto_plan_hedge_freigabe():
         gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())   # Prüfer S12: dieselbe Ausnahme wie der Riegel, s. hf_wd_sichtbar
         rows = [r for r in _sb_all("trade_plans", dict(basis, select="id,user_id,master_account_id,master_name,master_firm,start_um,richtung,"
                                                       "master_contracts,master_symbol,master_tp,route,orbit_v3,hedge_eur,auto_bestaetigt_at,"
-                                                      "winning_day,notes,slave_risk,multiplier,"
+                                                      "winning_day,notes,slave_risk,master_risk,multiplier,"
                                                       "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre",
                                                       order="start_um.asc.nullslast"))
                 if str(r.get("user_id")) not in aus or hf_wd_sichtbar(r, firmen, gruppen_ids)]
         for r in rows:
             r["wd"] = hf_ist_wd(r, firmen)       # Frontend: WD-Block im Funded-Planer zeigt wd=true, der Challenge-Block nur hedge_art
         if request.method == "GET":
+            try:   # eigener try: fällt die Rechnung aus, bleibt die Liste bestätigbar, die Spalte zeigt „–"
+                kids = sorted({str(r.get("master_account_id")) for r in rows if r.get("wd") and r.get("master_account_id")})
+                if kids:
+                    konten = {str(k.get("id")): k for k in _sb_all("accounts", {"select": "id,firm,name,external_id,account_type,starting_balance,max_drawdown,tv_balance", "id": "in.(" + ",".join(kids) + ")"})}
+                    regeln, kw, fruehere = _liq_regeln_laden(), _liq_kw_laden(), _wd_fruehere_trades(kids)
+                    for r in rows:
+                        if r.get("wd"):
+                            r["master_verlust"] = hf_wd_master_verlust(regeln, konten.get(str(r.get("master_account_id"))), r, kw, fruehere)
+            except Exception as e:
+                print(f"[hedge-freigabe] ⚠️ Master-Verlust: {type(e).__name__}: {e}", flush=True)
             return jsonify({"ok": True, "zeilen": [dict(r, user=namen.get(str(r.get("user_id")), "")) for r in rows], "wd_firmen": firmen})
         body = request.get_json(silent=True) or {}
         frei = {str(r["id"]) for r in rows}

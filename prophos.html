@@ -54378,7 +54378,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1991'
+  const OS_TAB_BUILD = '2026-09-22.1992'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -61341,7 +61341,18 @@
       + ` / TP <span style="color:var(--danger-ink)">${ahfEur(vs.pass_eur)}</span>${mult != null && isFinite(mult) ? ` · <small>×${zahl(mult, mult < 0.1 ? 3 : 2)}</small>` : ''}</span>`
   }
   window._ahfHedgeKurz = ahfHedgeKurz
-  function ahfZeileHtml(z){
+  /* ZU BESTÄTIGEN, ZWEI PAARE (Finn 02.11.2026 mit Bild: „+450 € / −450 €“ ist zweimal dasselbe): „Wie viel Geld mache ich, wenn der Master in Take Profit geht, wie viel verliert der Slave, und wenn der Master … sein Daily Ding
+   * hittet“. Fusion-€ = Lots (hedgeLotsSoll, keine zweite Formel) × €/Pkt × Punkte, Punkte = Master-$ ÷ ($/Pkt aus dem Plan-Symbol × Kontrakte). Master-Verlust rechnet Railway (hf_wd_master_verlust). → rein rechnend */
+  function ahfWdPaare(z){
+    const kt = Number(z.master_contracts) || 0, ppl = hedgePplFuer(z.master_symbol || ''), tpUsd = Number(z.master_tp) || 0, mv = z.master_verlust || {}, dlUsd = Number(mv.usd) || 0
+    const lots = hedgeLotsSoll({ masterAccountId: z.master_account_id, masterContracts: kt, multiplier: z.multiplier, slaveRisk: z.slave_risk, masterRisk: z.master_risk, masterTp: tpUsd, kontoTyp: 'winning_days', orbitV3: !!z.orbit_v3 }, kt, ppl)
+    // OBERE KANTE (S9-Hinweis zu 9a97ee8e, 02.11.2026, Mike ~1.170 statt 1.200 €): am Daily Loss schließt die Fusion HEDGE_DLL_VOR_PKT vorher (hedgeLiqLevel),
+    // liegt das Daily Loss näher als der Puffer, am DLL-Punkt selbst; an der Liq ohne Puffer. Wert bleibt „ca.“ (Slippage, Balance bis zum Start)
+    const eur = (usd, vor) => { if(!(lots > 0 && kt > 0 && ppl > 0 && usd > 0)) return null; const pkt = usd / (ppl * kt); return lots * tpWdSlavePpl() * (vor && pkt - vor > 0 ? pkt - vor : pkt) }
+    return { lots, tpUsd: tpUsd || null, tpEur: eur(tpUsd), dlUsd: dlUsd || null, dlEur: eur(dlUsd, mv.art === 'daily_loss' ? HEDGE_DLL_VOR_PKT : 0), dlArt: mv.art || null, dlText: mv.text || mv.grund || '' }
+  }
+  window._ahfWdPaare = ahfWdPaare   // Prüf-Haken
+  function ahfZeileHtml(z, opt){
     const id = String(z.id), art = AHF_ART[z.art] || (z.wd ? AHF_ART.apex_wd : [z.art || '?', '']), vs = (z.vs && typeof z.vs === 'object') ? { ...z.vs } : {}
     const ri = z.richtung === 'buy' ? '<b style="color:var(--good-ink)">BUY</b>' : z.richtung === 'sell' ? '<b style="color:var(--danger-ink)">SELL</b>' : '–'
     // Namen beider Wege (S1 Apex: tp_eur statt pass_eur, Hinweis als {fehler, code}; S4 Tradeify: pass_eur, grund) — Pass/TP immer als −€
@@ -61355,13 +61366,23 @@
       : hinweis ? `<small style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</small>` : '–'
     const bp = vs.blow_eur != null || passTp != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>` : '–'
     const unterwegs = _ahf.busy.has(id)
+    let paare = null
+    if(opt && opt.paare){
+      // Apex mit hedge_art hat echte Vorschau-Werte vom Server, dort bleibt der Blow der Blow; der Farmer-WD hat keine, also Rechnung
+      const w = z.wd ? ahfWdPaare(z) : null, dlLiq = w && w.dlArt === 'liq'
+      const ca = 'Fusion-€ ca. (Lots × €/Pkt × Punkte, ohne Slippage)'
+      paare = [pzPaarZelle({ wo: 'tp', mWert: Number(z.master_tp) || null, fWert: w ? w.tpEur : passTp, mName: 'TP', fName: 'SL', tip: w ? ca : '' }),
+        pzPaarZelle(w ? { wo: 'sl', mWert: w.dlUsd, fWert: w.dlEur, mName: dlLiq ? 'Liquidation' : 'Daily Loss', fName: 'TP',
+          tip: [w.dlText, w.dlEur != null ? ca + (dlLiq ? '' : ', Fusion schließt ' + HEDGE_DLL_VOR_PKT + ' Pkt vor dem Daily Loss') : ''].filter(Boolean).join(' · ') }
+          : { wo: 'sl', mText: 'Blow', fWert: vs.blow_eur, mName: 'Blow', fName: 'TP' })]
+    }
     return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
       <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
       <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}${window._planRecovererChipHtml?.(z) || ''}</td><td>${ri}</td>
       <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
-      <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
+      ${opt && opt.paare ? '' : `<td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>`}
       <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
-      <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>
+      ${paare ? `<td class="zahl">${paare[0]}</td><td class="zahl">${paare[1]}</td>` : `<td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>`}
       <td class="zahl ahf-knopf"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="${z.wd ? 'Bestätigen — der Winning Day startet dann zur Startzeit' : 'Freigeben — der Plan startet dann zur Startzeit mit Hedge'}">${unterwegs ? '…' : (z.wd ? 'Bestätigen' : '✓')}</button></td></tr>`
   }
   function ahfRender(){
@@ -61412,7 +61433,7 @@
   window._ahfFehler = () => _ahf.fehler || ''
   let _ahfWdVersuch = 0   // eigener Takt: auch ein gescheiterter Abruf (at bleibt alt) lädt höchstens alle 60 s neu — sonst Schleife über _wdUebersichtNeu
   window._ahfWdLaden = () => { if(_ahf.laeuft || Date.now() - _ahfWdVersuch < 60000) return; _ahfWdVersuch = Date.now(); if(!_ahf.d || Date.now() - _ahf.at > 60000) ahfLaden() }
-  window._ahfZeileHtml = z => ahfZeileHtml(z)
+  window._ahfZeileHtml = (z, opt) => ahfZeileHtml(z, opt)
   window._ahfFreigebenIds = ids => ahfFreigeben(ids, false)
   window._ahfZeichnen = () => ahfRender()   // PLANER-GLIEDERUNG: Wechsel CFD ↔ Futures zeichnet ohne Abruf neu
   window._ahfStub = d => { _ahf.d = d; _ahf.fehler = ''; const r = document.getElementById('ahf-root'); if(r) r.dataset.an = '1'; ahfRender() }   // Stub ohne Login
@@ -70221,11 +70242,11 @@
     if(!liste.length) return `<div class="ap-adm-karte">${kopf}<div class="wd-ue-leer">${leer}</div></div>`
     const je = new Map()
     for(const e of liste){ const uid = String(art === 'offen' ? e.user_id : e.x.user_id); if(!je.has(uid)) je.set(uid, { uid, name: art === 'offen' ? (e.user || uid.slice(0, 8)) : (e.x.name || uid.slice(0, 8)), l: [] }); je.get(uid).l.push(e) }
-    const kopfZeile = art === 'offen' ? '<th class="zahl">Start</th><th>Konto</th><th>Weg</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th><th class="zahl">Hedge</th><th class="zahl">Blow / Pass/TP</th><th></th>'
+    const kopfZeile = art === 'offen' ? '<th class="zahl">Start</th><th>Konto</th><th>Weg</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">Hedge</th><th class="zahl">TP Master ↔ Fusion SL</th><th class="zahl">Daily Loss Master ↔ Fusion TP</th><th></th>'
       : `<th class="zahl">${art === 'laeuft' ? 'Seit' : 'Start'}</th><th>Konto</th><th>Richtung</th><th class="zahl">Kontrakte</th><th class="zahl">TP</th>${art === 'braucht' ? '<th>Was</th>' : ''}`
     const farbe = uid => (typeof window.idFarbe === 'function') ? window.idFarbe(uid) : 'var(--sub)'
     const gruppen = [...je.values()].map(g => `<div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${farbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.l.length} Trade${g.l.length === 1 ? '' : 's'}</span></div>
-      <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr>${kopfZeile}</tr></thead><tbody>${g.l.map(e => art === 'offen' ? (typeof window._ahfZeileHtml === 'function' ? window._ahfZeileHtml(e) : '') : wdUebersichtZeile(e, art)).join('')}</tbody></table></div>`).join('')
+      <div class="ap-adm-scroll"><table class="wd-tab"><thead><tr>${kopfZeile}</tr></thead><tbody>${g.l.map(e => art === 'offen' ? (typeof window._ahfZeileHtml === 'function' ? window._ahfZeileHtml(e, { paare: true }) : '') : wdUebersichtZeile(e, art)).join('')}</tbody></table></div>`).join('')
     return `<div class="ap-adm-karte">${kopf}${gruppen}</div>`
   }
   function wdUebersicht(){
