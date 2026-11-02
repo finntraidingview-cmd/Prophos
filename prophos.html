@@ -27815,19 +27815,22 @@
   // REIN RECHNEND: hat das Auge „flach" bewiesen? Auge ≥ 0.3.1 mit Folge-Beweis; ohne die Felder (älteres Auge) nie
   const tsxLiveFlach = st => st.flach === true && Number(st.flach_folge) >= 3 && Number(st.ts) - Number(st.flach_seit) >= 200
   // REIN RECHNEND (window._tsxLive.zeile): Antwort von GET /api/tsx-stand + PC → Zeile für tsx_live oder null (kein frischer Stand)
-  function tsxLiveZeile(r, pc, jetzt){
+  function tsxLiveZeile(r, pc, jetzt, extIds){
     if(!pc || !(r && r.ok && typeof r.alter_s === 'number' && r.alter_s <= 10 && r.stand && typeof r.stand === 'object')) return null
     const st = r.stand, k = st.konto || {}
     const pos = (Array.isArray(st.positionen) ? st.positionen : []).filter(x => x && typeof x === 'object').slice(0, 10).map(x => ({
       symbol: x.symbol ? String(x.symbol).replace(/^\/+/, '').toUpperCase().slice(0, 16) : null, seite: x.seite === 'buy' || x.seite === 'sell' ? x.seite : null,
       menge: typeof x.menge === 'number' && isFinite(x.menge) ? x.menge : null, avg: typeof x.avg === 'number' && isFinite(x.avg) ? x.avg : null,
       quelle: x.quelle === 'tabelle' || x.quelle === 'order_karte' ? x.quelle : null }))
-    const konto = k.kontonr ? String(k.kontonr).slice(0, 64) : null
+    // TopstepX 2.4.32 (02.11.2026): Kopf nur mit Endung → die eindeutige External ID dieser ID melden, Railway liest nur volle Kennungen (abgekuerzt false). Sonst sah der Richtungsschutz keine Hand-Position.
+    const ausEndung = k.kontonr ? '' : tsxKontoAusEndung(k, extIds)
+    const konto = k.kontonr ? String(k.kontonr).slice(0, 64) : (ausEndung ? ausEndung.slice(0, 64) : null)
+    const abg = ausEndung ? false : k.abgekuerzt
     const flach = tsxLiveFlach(st)
-    const ok = !st.ausgeloggt && !!konto && k.abgekuerzt === false && !k.liste_offen
+    const ok = !st.ausgeloggt && !!konto && abg === false && !k.liste_offen
       && (flach ? pos.length === 0 : (st.flach !== true && pos.length > 0 && pos.every(x => x.symbol && x.seite)))
     const vollstaendig = ok && (flach || pos.every(x => x.quelle === 'tabelle'))
-    return { id: pc, pc_name: pc, konto, abgekuerzt: k.abgekuerzt === false ? false : k.abgekuerzt === true ? true : null, positionen: pos,
+    return { id: pc, pc_name: pc, konto, abgekuerzt: abg === false ? false : abg === true ? true : null, positionen: pos,
              positionen_ok: ok, vollstaendig, flach: st.flach === true ? true : st.flach === false ? false : null, ausgeloggt: !!st.ausgeloggt,
              script: String(r.script || '').slice(0, 24) || null, stand_ts: new Date(jetzt - r.alter_s * 1000).toISOString(),
              updated_at: new Date(jetzt).toISOString() }
@@ -27839,7 +27842,7 @@
       let r = null; try{ r = await window.mtcApi('tsx-stand', { timeoutMs: 1500 }) }catch(_){ r = null }
       const pc = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
       const jetzt = Date.now()
-      const z = tsxLiveZeile(r, pc, jetzt); if(!z) return
+      const z = tsxLiveZeile(r, pc, jetzt, kontoExtIds()); if(!z) return
       // Puls unterwegs (Rundgang, Endlesung, Rück-Login, Start …) → keine Aussage; danach erst nach TSX_LIVE_RUHE_MS Ruhe und zwei gleichen Lesungen
       let unterwegs = ''; try{ unterwegs = (typeof hedgePulsUnterwegs === 'function') ? hedgePulsUnterwegs() : '' }catch(_){ unterwegs = 'unbekannt' }
       if(unterwegs){ _tsxLive.pulsAt = jetzt; _tsxLive.kand = null }
@@ -31183,8 +31186,7 @@
     const st = r.stand, k = st.konto || {}, kp = st.kopf || {}
     if(st.ausgeloggt) return weg('TopstepX ausgeloggt')
     // Konto wie im TopstepX-Hedge-Wächter: volle Kennung (abgekuerzt === false), Liste zu, gleich ohne Trennzeichen; Puls nicht unterwegs
-    const kNorm = v => String(v || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
-    if(k.abgekuerzt !== false || k.liste_offen || !kNorm(k.kontonr) || kNorm(k.kontonr) !== kNorm(ext)) return weg('Auge steht nicht im Konto des Plans (exakt)')
+    if(!tsxKontoPasst(k, ext, kontoExtIds())) return weg('Auge steht nicht im Konto des Plans (exakt oder eindeutige Endung)')
     let unterwegs = ''; try{ unterwegs = (typeof hedgePulsUnterwegs === 'function') ? hedgePulsUnterwegs() : '' }catch(_){ unterwegs = 'Zustand nicht lesbar' }
     if(unterwegs) return weg('Puls ist unterwegs: ' + unterwegs)
     if(st.flach !== true || !Array.isArray(st.positionen) || st.positionen.length) return weg('kein Flach-Beweis des Auges')
@@ -31199,7 +31201,7 @@
     // zwei Lesungen ≥ 2 s nach dem Flach mit demselben RP&L → Werte stehen; jetzt die Plausibilität
     const delta = Math.round((rpl - rplStart) * 100) / 100
     const rel = kp.balance_relativ === true ? true : kp.balance_relativ === false ? false : null
-    const werte = { rpl, rpl_start: rplStart, master_pl: delta, balance: bal, balance_relativ: rel, konto: String(k.kontonr), flach_seit: new Date(flachSeit).toISOString(),
+    const werte = { rpl, rpl_start: rplStart, master_pl: delta, balance: bal, balance_relativ: rel, konto: String(k.kontonr || ext), flach_seit: new Date(flachSeit).toISOString(),
                     lesungen: [{ t: new Date(l.t).toISOString(), rpl: l.rpl }, { t: new Date(jetzt).toISOString(), rpl }] }
     const sz = num(fin.master_pl_schaetzung)
     const gruende = []
@@ -32863,13 +32865,17 @@
     const m = String((k && k.aktiv) || '').match(/\(\s*(?:\.{3}|…)\s*(\d{4})\s*\)/)
     return m ? m[1] : ''
   }
+  // Die eine Regel (auch tsx_live und Endlesung über das Auge): Konto dieser ID, auf das die Kopf-Endung eindeutig zeigt → External ID, sonst ''. Zwei Treffer oder keiner = ''.
+  function tsxKontoAusEndung(k, extIds){
+    const e = tsxKontoEndung(k); if(!e) return ''
+    const n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(), je = new Map()
+    for(const x of extIds || []){ const v = n(x); if(v.endsWith(e) && !je.has(v)) je.set(v, String(x).trim()) }
+    return je.size === 1 ? [...je.values()][0] : ''
+  }
   function tsxKontoPasst(k, ext, extIds){
     if(!k || k.liste_offen || !ext) return false
     if(k.kontonr) return k.abgekuerzt === false && tsxKontoGleich(k.kontonr, ext)
-    const e = tsxKontoEndung(k), n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(), id = n(ext)
-    if(!e || !id.endsWith(e)) return false
-    const treffer = new Set((extIds || []).map(n).filter(x => x.endsWith(e)))
-    return treffer.size === 1 && treffer.has(id)
+    return tsxKontoGleich(tsxKontoAusEndung(k, extIds), ext)
   }
   window._tsxKontoPasst = tsxKontoPasst   // Test-Haken
   const tsxKontoGleich = (kontonr, ext) => { const n = s => String(s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); return !!n(kontonr) && n(kontonr) === n(ext) }

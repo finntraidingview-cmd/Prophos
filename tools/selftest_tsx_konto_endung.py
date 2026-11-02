@@ -30,8 +30,9 @@ def fn(name):
 
 
 G = [z for z in HTML.split("\n") if "const tsxKontoGleich = " in z][0]
-JS = "\n".join([G, fn("tsxKontoEndung"), fn("tsxKontoPasst"), r"""
+JS = "\n".join([G, fn("tsxKontoEndung"), fn("tsxKontoAusEndung"), fn("tsxKontoPasst"), "const tsxLiveFlach = st => st.flach === true && Number(st.flach_folge) >= 3 && Number(st.ts) - Number(st.flach_seit) >= 200", fn("tsxLiveZeile"), r"""
 const ID = 'EXPRESS-V2-000000-00009147', ANDERS = 'EXPRESS-V2-000000-00006025', GLEICH = 'EXPRESS-V2-000001-11119147'
+const L = (konto, ids, positionen) => tsxLiveZeile({ ok: true, alter_s: 0.5, script: '0.3.3', stand: { konto, positionen, flach: false } }, 'pc-x', 1000000, ids)
 const K = '150K DLL Express (...9147)', P = (k, ext, ids) => tsxKontoPasst(k, ext || ID, ids || [ID, ANDERS])
 print(JSON.stringify({
   marco: P({ aktiv: K, kontonr: null, abgekuerzt: true }),
@@ -46,6 +47,10 @@ print(JSON.stringify({
   voll: P({ kontonr: ID, abgekuerzt: false }),
   voll_kurz: P({ kontonr: ID, abgekuerzt: true }),
   voll_fremd: P({ kontonr: ANDERS, abgekuerzt: false }),
+  live: L({ aktiv: K, kontonr: null, abgekuerzt: true }, [ID, ANDERS], [{ symbol: 'MNQZ6', seite: 'buy', menge: 1, avg: 1, quelle: 'tabelle' }]),
+  live_zwei: L({ aktiv: K, kontonr: null, abgekuerzt: true }, [ID, GLEICH], [{ symbol: 'MNQZ6', seite: 'buy', menge: 1, avg: 1, quelle: 'tabelle' }]),
+  live_ohne_liste: L({ aktiv: K, kontonr: null, abgekuerzt: true }, undefined, [{ symbol: 'MNQZ6', seite: 'buy', menge: 1, avg: 1, quelle: 'tabelle' }]),
+  live_voll: L({ kontonr: ID, abgekuerzt: false }, [], [{ symbol: 'MNQZ6', seite: 'buy', menge: 1, avg: 1, quelle: 'tabelle' }]),
 }))
 """])
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as t:
@@ -61,6 +66,12 @@ check(not e["fremd"], "andere Endung: nein")
 check(not e["zwei"] and not e["nicht_in_liste"], "zwei Konten mit der Endung oder Plan-Konto nicht in der Liste: nein")
 check(not e["liste_offen"] and not e["ohne_endung"] and not e["drei_ziffern"], "Liste offen oder keine vierstellige Endung: nein")
 check(e["voll"] and not e["voll_kurz"] and not e["voll_fremd"], "volle Kennung wie bisher")
+check(e["live"]["konto"] == "EXPRESS-V2-000000-00009147" and e["live"]["abgekuerzt"] is False and e["live"]["positionen_ok"] is True, "tsx_live: eindeutige Endung → volle ID, Railway wertet sie")
+check(e["live_zwei"]["konto"] is None and e["live_zwei"]["positionen_ok"] is False and e["live_ohne_liste"]["konto"] is None, "tsx_live: zwei Treffer oder keine Kontenliste → keine Aussage")
+check(e["live_voll"]["konto"] == "EXPRESS-V2-000000-00009147" and e["live_voll"]["positionen_ok"] is True, "tsx_live: volle Kennung wie bisher")
+_u = HTML[HTML.index("function tsxAugeEndeUrteil("):HTML.index("function tsxAugeEndeUrteil(") + 6000]
+check("!tsxKontoPasst(k, ext, kontoExtIds())" in _u and "String(k.kontonr || ext)" in _u, "Endlesung über das Auge nimmt dieselbe Regel")
+check("tsxLiveZeile(r, pc, jetzt, kontoExtIds())" in HTML, "tsx_live bekommt die Konten der ID")
 i = HTML.index("async function hedgeTsxSchnellTick(")
 t = HTML[i:HTML.index("setInterval(hedgeTsxSchnellTick", i)]
 check("!tsxKontoPasst(k, kontoPlan, kontoExtIds())" in t and "st.konto.kontonr || tsxKontoEndung(st.konto)" in t, "Wächter nutzt die Regel, kein „blind“ allein wegen fehlender kontonr")

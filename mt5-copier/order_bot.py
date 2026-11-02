@@ -20369,7 +20369,13 @@ def tsx_auge_frisch_urteil(a, ext=None):
     ko = st.get("konto") if isinstance(st.get("konto"), dict) else {}
     nr = str(ko.get("kontonr") or "").strip()
     if not nr:
-        return False, "Auge meldet kein Konto"
+        # 2.4.32 (02.11.2026): Kopf nur mit Endung — passt sie zum Ziel, ist das Auge gesund und der TopstepX-Tab wird nicht neu geladen. Keine Hedge-Entscheidung, darum reicht die Endung ohne Listen-Prüfung
+        endung = str(ko.get("endung") or "") or tsx_konto_endung(ko.get("aktiv"))[1]
+        if not endung:
+            return False, "Auge meldet kein Konto"
+        if ext and not tsx_endung_passt(endung, ext):
+            return False, f"Auge steht im Konto …{endung[-4:]}, nicht im Ziel-Konto"
+        return True, f"Auge frisch ({float(al):.2f} s, Konto …{endung[-4:]})"
     if ext and _nur_alnum(nr) != _nur_alnum(str(ext)):
         return False, f"Auge steht im Konto {nr[:40]}, nicht im Ziel-Konto"
     return True, f"Auge frisch ({float(al):.2f} s, Konto {nr[:40]})"

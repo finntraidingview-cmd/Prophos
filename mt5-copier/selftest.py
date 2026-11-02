@@ -2845,6 +2845,9 @@ def test_tsx_auge_reparatur():
         if not bed:
             print("✗ TopstepX-Auge-Reparatur: " + name); ok = False
     U = ob.tsx_auge_frisch_urteil
+    _e = {"ok": True, "alter_s": 0.5, "stand": {"konto": {"aktiv": "150K DLL Express (...9147)", "kontonr": None, "abgekuerzt": True}}}
+    chk(U(_e, "EXPRESS-V2-000000-00009147")[0] is True and U(_e)[0] is True, "Auge 2.4.32: Kopf nur mit Endung, passt zum Ziel → gesund, kein Neuladen")
+    chk(U(_e, "EXPRESS-V2-000000-00006025")[0] is False, "Auge 2.4.32: andere Endung → nicht im Ziel-Konto")
     K = {"konto": {"kontonr": "S1OCT2900001"}}
     chk(U({"ok": True, "alter_s": 0.2, "stand": K})[0] is True and U({"ok": True, "alter_s": 0.2, "stand": K}, "s1-oct29-00001")[0] is True,
         "frisch ≤ 1 s mit Konto (Ziel normalisiert)")
