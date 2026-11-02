@@ -2158,6 +2158,32 @@ SCHARF_CLOSE_WIEDER_S = 2.0
 SCHARF_KONTO_KURZ_MIN = 12
 SCHARF_MIN_VERSION = (0, 10, 8)
 READER_STAND_URL = "http://127.0.0.1:8790/"
+# SPUR AUF PLATTE (Eingang 02.11.2026, Test Chris a6f5c630: die Panel-Konsole ist fernab nicht lesbar): jede Entscheidung der Schließ-Wache als Zeile in
+# scharf_spur.log (Datum Dubai-Zeit, Ticket, Ereignis, Grund) — Setzen, Lösen, Close, und jeder Wechsel des Entscheidungs-Grunds je Ticket (kein Takt-Spam).
+# Höchstens SCHARF_SPUR_MAX Zeilen, ältere fallen vorne weg.
+SCHARF_SPUR_PFAD = os.path.join(HERE, "scharf_spur.log")
+SCHARF_SPUR_MAX = 2000
+_SCHARF_SPUR_LETZT = {}   # ticket → letzter geschriebener Grund
+
+
+def scharf_spur(ticket, ereignis, grund="", nur_bei_wechsel=False):
+    """Eine Zeile in scharf_spur.log; nur_bei_wechsel: nur, wenn sich der Grund für dieses Ticket geändert hat. Wirft nie."""
+    try:
+        if nur_bei_wechsel:
+            if _SCHARF_SPUR_LETZT.get(ticket) == grund:
+                return
+            _SCHARF_SPUR_LETZT[ticket] = grund
+        zeit = datetime.utcfromtimestamp(time.time() + 4 * 3600).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        zeile = f"{zeit} Dubai · Ticket {ticket} · {ereignis}" + (f" · {grund}" if grund else "")
+        alt = []
+        if os.path.exists(SCHARF_SPUR_PFAD):
+            with open(SCHARF_SPUR_PFAD, "r", encoding="utf-8", errors="replace") as f:
+                alt = f.read().splitlines()[-(SCHARF_SPUR_MAX - 1):]
+        with open(SCHARF_SPUR_PFAD + ".tmp", "w", encoding="utf-8") as f:
+            f.write("\n".join(alt + [zeile]) + "\n")
+        os.replace(SCHARF_SPUR_PFAD + ".tmp", SCHARF_SPUR_PFAD)
+    except Exception:
+        pass
 
 
 def scharf_konto_bezug(text, ext):
@@ -2187,6 +2213,8 @@ def puls_beleg_merken(res):
     """Nach jedem TradingView-Lauf von Puls: Beleg = volle Kennung des bewiesen gewählten Kontos, sonst leer (der Lauf kann gewechselt haben)."""
     k = str((res or {}).get("konto_aktiv") or "").strip() if isinstance(res, dict) and res.get("ok") else ""
     _PULS_BELEG.update(text=k if (k and "…" not in k and len(re.sub(r"[^A-Za-z0-9]", "", k)) >= 10) else "", at=time.time())
+    if scharf_laden():
+        scharf_spur("-", "Puls-Beleg", _PULS_BELEG["text"] or "leer (Konto des Laufs nicht bewiesen)")
 
 
 def scharf_konto_sicher(text, ext, nachbarn, beleg=None):
@@ -2289,10 +2317,12 @@ def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
         return False
     if not scharf_puls_reader_ok(reader_stand):
         print(f"[scharf] nicht gemerkt (Ticket {ticket}): kein Puls-Chrome-Reader ≥ 0.10.8", flush=True)
+        scharf_spur(ticket, "NICHT gemerkt", "kein Puls-Chrome-Reader ≥ 0.10.8")
         return False
     ext = str(sch.get("ext_id") or "").strip()[:60]
     wurzel = str(sch.get("wurzel") or "").strip().upper()
     if len(re.sub(r"[^A-Za-z0-9]", "", ext)) < 5 or wurzel not in ("NQ", "MNQ") or not int(ticket or 0) > 0:
+        scharf_spur(ticket, "NICHT gemerkt", f"Daten unvollständig (Konto {ext or '?'}, Wurzel {wurzel or '?'})")
         return False
     nb = sch.get("nachbarn")
     e = {"plan_id": str(plan_id or "")[:64], "ticket": int(ticket), "ext_id": ext, "wurzel": wurzel,
@@ -2303,6 +2333,7 @@ def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
         liste.append(e)
         scharf_speichern(liste)
     print(f"[scharf] gemerkt: Plan {e['plan_id'][:8]} Ticket {ticket} Konto {ext} {wurzel}", flush=True)
+    scharf_spur(ticket, "gemerkt", f"Plan {e['plan_id'][:8]} · Konto {ext} · {wurzel} · {len(e['nachbarn'])} Konten der ID")
     return True
 
 
@@ -2313,6 +2344,7 @@ def scharf_loesen(ticket, grund):
         if len(neu) != len(liste):
             scharf_speichern(neu)
             print(f"[scharf] gelöst: Ticket {ticket} ({grund})", flush=True)
+            scharf_spur(ticket, "gelöst", grund)
 
 
 def scharf_konto_fest():
@@ -2379,6 +2411,7 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
             if isinstance(q, dict) and q.get("ok"):
                 print(f"[scharf] Fusion zu: Ticket {e['ticket']} ({'schon zu' if q.get('schon_zu') else 'geschlossen'}), "
                       f"{jetzt - float(e.get('zu_at') or jetzt):.2f} s nach dem Auftrag", flush=True)
+                scharf_spur(e["ticket"], "Fusion zu", f"{'schon zu' if q.get('schon_zu') else 'geschlossen'} · {jetzt - float(e.get('zu_at') or jetzt):.2f} s nach dem Auftrag")
                 scharf_loesen(e.get("ticket"), "Panel-Close ok")
             elif jetzt - float(e.get("zu_at") or 0) >= SCHARF_CLOSE_WIEDER_S:   # keine Quittung → erneut (Copier antwortet schon_zu, wenn zu)
                 e = dict(e, cmd_id=_scharf_close_senden(e), zu_at=jetzt)
@@ -2387,10 +2420,13 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
         if st is None:
             continue
         zu, e2, grund = scharf_entscheid(e, st, jetzt, _PULS_BELEG.get("text") or None)
+        scharf_spur(e.get("ticket"), "Lage", f"{grund} · Reader-Konto {str(st.get('konto') or '-')[:40]} · Tab {str(st.get('positionen_tab') or '-')[:24]}"
+                    f" · Beleg {_PULS_BELEG.get('text') or '-'}", nur_bei_wechsel=True)
         if zu:
             e2.update(status="schliesst", cmd_id=_scharf_close_senden(e2), zu_at=jetzt, grund_zu=grund)
             n += 1
             print(f"[scharf] {grund} → close Ticket {e2['ticket']}", flush=True)
+            scharf_spur(e2["ticket"], "CLOSE gesendet", f"{grund} · cmd {e2['cmd_id']}")
         if e2 != e:
             liste[i], geaendert = e2, True
     if geaendert:

@@ -28,7 +28,7 @@ def check(ok, name):
 
 tmp = tempfile.mkdtemp()
 uhr = [10000.0]
-ns = {"os": os, "re": re, "json": json, "random": random, "threading": threading, "HERE": tmp, "time": types.SimpleNamespace(time=lambda: uhr[0], sleep=lambda s: None),
+ns = {"os": os, "re": re, "json": json, "random": random, "threading": threading, "HERE": tmp, "datetime": __import__("datetime").datetime, "time": types.SimpleNamespace(time=lambda: uhr[0], sleep=lambda s: None),
       "HEDGE_SOLO_LOCK": threading.Lock(), "print": lambda *a, **k: None}
 for n in ast.parse(SRC).body:
     if isinstance(n, ast.FunctionDef) and n.name == "read_json":
@@ -242,5 +242,10 @@ check("scharf: scharfOpen" in HTML and "plan.route !== 'tvv2'" in HTML, "Tab sch
 check('scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"), _rs)' in SRC and 'scharf_loesen(auftrag.get("ticket")' in SRC,
       "Panel: scharf nach der Open-Quittung, gelöst beim Close vom Tab")
 check("threading.Thread(target=_scharf_wache, daemon=True).start()" in SRC, "Schließ-Wache startet mit dem Panel")
+sp = open(os.path.join(tmp, "scharf_spur.log"), encoding="utf-8").read()
+check("gemerkt" in sp and "CLOSE gesendet" in sp and "Fusion zu" in sp and "gelöst" in sp and "Lage · Konto nicht sicher" in sp and "Puls-Beleg" in sp,
+      "Spur auf Platte (scharf_spur.log): gemerkt, Lage-Wechsel, Puls-Beleg, CLOSE gesendet, Fusion zu, gelöst")
+n_zeilen = len(sp.splitlines())
+check(0 < n_zeilen < 600, f"Spur nur bei Wechseln, kein Takt-Spam ({n_zeilen} Zeilen für den ganzen Test)")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)
