@@ -14206,7 +14206,7 @@
         </div>
         <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 16px;line-height:1.55">
           Wird benutzt um Firms mit USD-Quotes auf EUR-Accounts (z.B. Fusion Markets) korrekt zu berechnen.
-          Aktuellen Kurs auf <a href="https://www.google.com/search?q=usd+eur" target="_blank" rel="noopener" style="color:var(--accent)">Google</a> nachschauen und hier eintragen.
+          Der EZB-Kurs kommt täglich live; eine Eingabe von Hand gilt bis zum nächsten Live-Kurs.
         </p>
         <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
           <div class="field" style="flex:0 0 200px">
@@ -14220,6 +14220,7 @@
             <button class="btn btn-primary" id="fxUsdEurSaveBtn" type="button">Speichern</button>
           </div>
         </div>
+        <div id="fxUsdEurQuelle" style="margin-top:8px;font-size:11.5px;color:var(--sub)"></div>
         <div id="fxUsdEurStatus" style="margin-top:8px;font-size:11.5px;height:14px"></div>
       </div>
 
@@ -54581,7 +54582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2005'
+  const OS_TAB_BUILD = '2026-09-22.2006'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77817,6 +77818,14 @@
     const ex = document.getElementById('fxUsdEurExample')
     if(!inp) return
     inp.value = window._fxUsdEur
+    // Quelle mit Datum (03.11.2026, USD→EUR LIVE): Live-Kurs von Railway, Hand-Eingabe oder Standard
+    const q = document.getElementById('fxUsdEurQuelle'), fi = window._fxInfo
+    if(q){
+      const tag = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : '' }
+      q.textContent = !fi ? 'Kein Kurs gespeichert — Standard ' + fxFmt(FX_DEFAULT) + ' bis zum ersten Live-Kurs'
+        : fi.quelle === 'live' ? `Live: EZB-Kurs vom ${tag(fi.datum)} (holt Railway täglich)`
+        : `Von Hand eingetragen${fi.at ? ' am ' + tag(fi.at) : ''} — gilt bis zum nächsten Live-Kurs`
+    }
     if(ex){
       const fx = window._fxUsdEur
       ex.innerHTML = `Beispiel: bei Kurs ${fxFmt(fx)} → $100 = €${fxFmt(100*fx, 2)}`
@@ -77838,6 +77847,7 @@
       }
       if(data?.value && typeof data.value.rate === 'number' && isFinite(data.value.rate) && data.value.rate > 0){
         window._fxUsdEur = data.value.rate
+        window._fxInfo = data.value
         applyFxToPresets()
         if(typeof calcRecompute === 'function'){ try{ calcRecompute() }catch(_){} }
       }
@@ -77854,7 +77864,7 @@
         .upsert({
           user_id: currentUserId,
           key: 'fx_usd_eur',
-          value: { rate: window._fxUsdEur }
+          value: (window._fxInfo = { rate: window._fxUsdEur, quelle: 'hand', at: new Date().toISOString() })   // 03.11.2026: gilt bis zum nächsten Live-Kurs
         }, { onConflict: 'user_id,key' })
       if(error){
         console.warn('[fx] save:', error.message)
@@ -77937,16 +77947,21 @@
     }
   })
 
-  // Settings-View öffnen → FX-Felder neu rendern
+  // Settings-View öffnen → Kurs frisch laden und FX-Felder neu rendern (03.11.2026: der Live-Kurs wechselt täglich)
   document.querySelectorAll('[data-view="settings"]').forEach(btn => {
-    btn.addEventListener('click', () => setTimeout(renderFxSettings, 50))
+    btn.addEventListener('click', () => setTimeout(() => { renderFxSettings(); loadFxRate().then(renderFxSettings).catch(_ => {}) }, 50))
   })
 
-  // Initial load
-  setTimeout(() => {
-    if(currentUserId) loadFxRate().then(renderFxSettings).catch(_ => {})
-    else renderFxSettings()
-  }, 750)
+  // Initial load — 03.11.2026 (Payout Jacob mit 0,85 gerechnet): ohne Login nach 750 ms wurde der Kurs nie geladen; jetzt bis zum
+  // Login nachfragen und danach alle 3 h frisch (Railway schreibt den EZB-Kurs täglich)
+  let fxLadeVersuche = 0
+  const fxErstLaden = () => {
+    if(currentUserId){ loadFxRate().then(renderFxSettings).catch(_ => {}); return }
+    renderFxSettings()
+    if(++fxLadeVersuche < 120) setTimeout(fxErstLaden, 2000)
+  }
+  setTimeout(fxErstLaden, 750)
+  setInterval(() => { if(currentUserId) loadFxRate().catch(_ => {}) }, 3 * 3600 * 1000)
 
 
   /* ========================================================================

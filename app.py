@@ -6459,15 +6459,7 @@ def _admin_basis():
                     if not ai["successor"] and info.get("successorId"):
                         ai["successor"] = str(info["successorId"])
 
-    fx = 0.85
-    for r in fx_rows:
-        try:
-            val = r.get("value")
-            if isinstance(val, str): val = json.loads(val)
-            f = float(val if not isinstance(val, dict) else val.get("rate"))
-            if 0.5 < f < 1.5: fx = f; break
-        except Exception:
-            pass
+    fx = fx_aus_zeilen(fx_rows)   # 03.11.2026: jüngster Live-Kurs gewinnt (USD→EUR LIVE), sonst erster Eintrag, sonst 0,85
 
     by_id = {str(a["id"]): a for a in accounts}
     live_ids = {str(a["id"]) for a in accounts if (a.get("account_type") or "") == "live"}
@@ -12077,15 +12069,7 @@ def _wd_personen(radar=False):
 
 
 def _wd_fx():
-    for r in _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}):
-        try:
-            val = r.get("value")
-            if isinstance(val, str): val = json.loads(val)
-            f = float(val if not isinstance(val, dict) else val.get("rate"))
-            if 0.5 < f < 1.5: return f
-        except Exception:
-            pass
-    return 0.85
+    return fx_aus_zeilen(_sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}))   # 03.11.2026 wie Admin (USD→EUR LIVE)
 
 
 def _wd_num(v):
@@ -39577,17 +39561,7 @@ def _lq_abrufen(warten=True):
 
 
 def _lq_fx():
-    fx = 0.85                                                      # wie _admin_basis
-    for r in _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}):
-        try:
-            v = r.get("value")
-            v = json.loads(v) if isinstance(v, str) else v
-            f = float(v if not isinstance(v, dict) else v.get("rate"))
-            if 0.5 < f < 1.5:
-                return f
-        except (TypeError, ValueError):
-            continue
-    return fx
+    return fx_aus_zeilen(_sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}))   # wie _admin_basis (03.11.2026 USD→EUR LIVE)
 
 
 def lq_kunde_flags(nutzer, zeilen, admin_mails):
@@ -39935,6 +39909,108 @@ def admin_kunden_zahlungen_aktiv():
     except Exception as e:
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
     return _wb_antwort()
+
+
+# ══ USD→EUR LIVE (03.11.2026, Finn ~02:40 Dubai „Ja, live holen“). Anlass: Payout-Anfrage Jacob Tradeify 150k rechnete 4.050 $ mit dem
+# Standard 0,85 = 3.442,50 € statt ≈ 3.619 € (EZB 0,8935) — fx_usd_eur stand bei den meisten IDs gar nicht in user_settings.
+# Railway holt 1× beim Start und danach alle FX_TAKT_S den EZB-Referenzkurs (frankfurter.dev, ohne Schlüssel), prüft ihn auf 0,7–1,1 und
+# schreibt ihn für ALLE IDs in user_settings fx_usd_eur = {rate, quelle: "live", datum}. Geschrieben wird nur ein NEUER EZB-Tag: eine
+# Hand-Eingabe in den Einstellungen gilt so bis zum nächsten Live-Kurs. Abruf schlägt fehl / unplausibel → nichts schreiben, alter Wert
+# bleibt, nie 0,85 erzwingen. Admin (Übersicht, Kapital), WD und Liquide lesen über fx_aus_zeilen denselben Wert.
+FX_KEY = "fx_usd_eur"
+FX_STANDARD = 0.85                     # nur noch, wenn gar kein Kurs gespeichert ist
+FX_LIVE_URL = "https://api.frankfurter.dev/v1/latest?from=USD&to=EUR"   # frankfurter.app leitet dorthin um
+FX_MIN, FX_MAX = 0.7, 1.1
+FX_TAKT_S = 3 * 3600                   # EZB veröffentlicht werktags ~16:00 MEZ; 3 h reichen für „täglich“
+_fx_info = {"started": False, "datum": None, "rate": None, "fehler": ""}
+
+
+def _fx_wert(v):
+    """value einer fx_usd_eur-Zeile → dict {rate, quelle, datum} oder None (Zahl oder JSON-Text wie früher erlaubt)."""
+    try:
+        if isinstance(v, str):
+            v = json.loads(v)
+        d = dict(v) if isinstance(v, dict) else {"rate": v}
+        f = float(d.get("rate"))
+    except (TypeError, ValueError):
+        return None
+    if not (0.5 < f < 1.5):
+        return None
+    return {"rate": f, "quelle": str(d.get("quelle") or ""), "datum": str(d.get("datum") or "")[:10]}
+
+
+def fx_aus_zeilen(zeilen):
+    """REIN RECHNEND: fx_usd_eur-Zeilen (user_settings value) → Kurs. Der jüngste Live-Kurs gewinnt, sonst der erste gültige Eintrag,
+    sonst FX_STANDARD."""
+    werte = [w for w in (_fx_wert((z or {}).get("value")) for z in (zeilen or [])) if w]
+    live = [w for w in werte if w["quelle"] == "live" and w["datum"]]
+    if live:
+        return max(live, key=lambda w: w["datum"])["rate"]
+    return werte[0]["rate"] if werte else FX_STANDARD
+
+
+def fx_live_pruefen(antwort):
+    """REIN RECHNEND: frankfurter-Antwort → (rate, datum) oder None (unplausibel/kaputt)."""
+    try:
+        f = float(((antwort or {}).get("rates") or {}).get("EUR"))
+        datum = str(antwort.get("date") or "")[:10]
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not (FX_MIN <= f <= FX_MAX) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", datum):
+        return None
+    return round(f, 5), datum
+
+
+def _fx_live_takt():
+    """Ein Abruf: EZB-Kurs holen; ist der EZB-Tag neu (gegen den jüngsten gespeicherten Live-Tag), für alle IDs schreiben. → Text."""
+    r = requests.get(FX_LIVE_URL, timeout=10)
+    r.raise_for_status()
+    kurs = fx_live_pruefen(r.json())
+    if not kurs:
+        raise ValueError(f"unplausibel: {r.text[:120]}")
+    rate, datum = kurs
+    if _fx_info["datum"] is None:              # nach dem Start: jüngsten gespeicherten Live-Tag merken (sonst überschreibt jeder Deploy die Hand)
+        alt = [w for w in (_fx_wert(z.get("value")) for z in _sb_all("user_settings", {"select": "value", "key": f"eq.{FX_KEY}"})) if w]
+        _fx_info["datum"] = max([w["datum"] for w in alt if w["quelle"] == "live" and w["datum"]] or [""])
+    if datum <= (_fx_info["datum"] or ""):
+        return f"EZB {datum} {rate} schon gespeichert"
+    ra = _auth_liste_anfrage()
+    if ra.status_code != 200:
+        raise ValueError(f"Nutzerliste HTTP {ra.status_code}")
+    uids = [str(u.get("id")) for u in ((ra.json() or {}).get("users") or []) if u.get("id")]
+    if not uids:
+        raise ValueError("keine Nutzer gelesen")
+    jetzt = datetime.now(timezone.utc).isoformat()
+    _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/user_settings", params={"on_conflict": "user_id,key"},
+                json=[{"user_id": u, "key": FX_KEY, "value": {"rate": rate, "quelle": "live", "datum": datum, "at": jetzt}, "updated_at": jetzt}
+                      for u in uids],
+                headers=_sb_headers("resolution=merge-duplicates,return=minimal"), timeout=15).raise_for_status()
+    _fx_info.update(datum=datum, rate=rate)
+    return f"EZB {datum} {rate} für {len(uids)} IDs gespeichert"
+
+
+def fx_live_loop():
+    _schleife_schlafen(20)
+    while True:
+        try:
+            print(f"[fx] {_fx_live_takt()}", flush=True)
+            _fx_info["fehler"] = ""
+        except Exception as e:                 # alter Wert bleibt stehen
+            _fx_info["fehler"] = f"{type(e).__name__}: {e}"
+            print(f"[fx] ⚠️ Live-Kurs nicht geholt, alter Wert bleibt: {_fx_info['fehler']}", flush=True)
+        _schleife_schlafen(FX_TAKT_S)
+
+
+def start_fx_live():
+    if _fx_info["started"] or not SUPABASE_SERVICE_KEY:
+        return
+    if not (os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "").strip():
+        return          # nur Railway schreibt den Kurs (PC-/Mac-Backends lesen ihn)
+    _fx_info["started"] = True
+    threading.Thread(target=fx_live_loop, daemon=True).start()
+
+
+start_fx_live()
 
 
 def lq_loop():
