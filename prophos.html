@@ -52010,21 +52010,32 @@
                 // Start-Fehler, der Claim blieb still stehen). Wie der Echo-V2-Weg: solange retry_ok wahr ist (Bot-Vertrag: beweisbar nichts
                 // gesendet), gestreut alle 5–7 s erneut — bei terminal_heilt bis 180 s, sonst 90 s; nur, solange dieses Popup für diesen Plan
                 // offen ist. Die Order-Sperre des Panels verhindert parallele Aufträge; nach ok/unklar wird nie wiederholt.
+                // LAUFZEICHEN WÄHREND DES WARTENS (02.11.2026, Routine „Puls-Fehler", Muster „m5order: popup geschlossen — nichts platziert.",
+                // 6 Fälle in 7 Tagen auf 2 PCs, 3 davon So/Mo 23:33–00:10 UTC auf einem PC, 6–44 s nach dem Claim; alle Pläne liefen beim
+                // Nachholen): in dieser Warteschleife steht pf-final sichtbar („🤖 Bot platziert … HÄNDE WEG"), ohne Force/Retry —
+                // orderSignalTick (alle 5 s) hielt das für ein FERTIGES Popup und rief _pfClose(), der nächste Durchlauf brach mit „Popup
+                // geschlossen" ab. Der Echo-V2-Weg hat dafür seit 08.10.2026 _pfV2Laeuft (tpV2Nacheinander); der Echo-Weg (Route mt5)
+                // setzte es nie. Jetzt gilt es auch hier, nur für die Dauer der Schleife — orderSignalTick lässt das Popup in Ruhe, sfTick
+                // plant nicht parallel, der Build-Wächter lädt nicht mitten im Warten neu („Start läuft"). Claim, Guard, Deckel, Riegel gleich.
                 const t0 = Date.now()
                 let r = null
-                for(;;){
-                  pfLebt(plan.id, 340000)   // master-order darf bis 320 s brauchen (s. pfLebt)
-                  r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
-                                           volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
-                  if(!mt5OrderWiederholen(r, Date.now() - t0)) break
-                  if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
-                    r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
+                const laufVorher = _pfV2Laeuft
+                _pfV2Laeuft = String(plan.id)
+                try{
+                  for(;;){
+                    pfLebt(plan.id, 340000)   // master-order darf bis 320 s brauchen (s. pfLebt)
+                    r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
+                      headers:{'Content-Type':'application/json'},
+                      body: JSON.stringify({ plan_id: String(plan.id), symbol: po.symbol, richtung: po.richtung,   // plan_id: Panel-Riegel Gegenrichtung (30.10.2026)
+                                             volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
+                    if(!mt5OrderWiederholen(r, Date.now() - t0)) break
+                    if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
+                      r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break
+                    }
+                    _pfSet('m5term', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in ~6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
+                    await new Promise(res => setTimeout(res, 5000 + Math.random() * 2000))   // gestreut (Jitter-Regel)
                   }
-                  _pfSet('m5term', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in ~6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
-                  await new Promise(res => setTimeout(res, 5000 + Math.random() * 2000))   // gestreut (Jitter-Regel)
-                }
+                }finally{ if(_pfV2Laeuft === String(plan.id)) _pfV2Laeuft = laufVorher }
                 // Position lesend bestätigt → Plan SOFORT auf „Läuft", ohne aufs
                 // Check-Ende zu warten (18.08.2026, Finns Punkt). Gilt auch, wenn
                 // nur SL/TP scheiterte: price+ticket heißt, die Position ist offen.
@@ -53763,7 +53774,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1976'
+  const OS_TAB_BUILD = '2026-09-22.1977'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

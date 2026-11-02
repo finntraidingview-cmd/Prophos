@@ -27861,6 +27861,30 @@ def _cdp_anmelden(s, ort, benutzer, opts, trail, vorher=None, sitz=None):
                         trail.append(f"[Login] Rückfall Enter abgesagt: {txt3}")
             except Exception as e_:
                 trail.append(f"[Login] Rückfall Enter nicht möglich ({type(e_).__name__})")
+    # BLICK AM ENDE DER 40 s (02.11.2026, Routine „Puls-Fehler", Muster „konto: tradovate-login '…' nicht geschafft (verbunden): nach dem
+    # login zeigt tradingview kein konto (40 s)": 6 Läufe auf 4 PCs So 20:28–Mo 01:00 UTC, jeder Login gelang beim nächsten Lauf mit
+    # demselben Username; Fehlerfotos liegen, aber die Spur endete bei „Anmelden geklickt" bzw. „Enter im Passwortfeld" — WAS die 40 s über
+    # zu sehen war, stand nirgends, die Ursache blieb offen). Jetzt EINMAL nur lesen, nie klicken: Tradovate-Seite (Adresse, Formular noch
+    # da?, Fehlertext, Knöpfe), TradingView-Seite (Dialoge, Broker-Leiste, Konto) und die offenen Tabs. Wartezeit und Riegel unverändert.
+    try:
+        bo = ort.blick() or {}
+        lb_e = bo.get("login") if isinstance(bo.get("login"), dict) else {}
+        tv = (_K3Ort("TradingView-Seite", s.ws, s, "").blick() or {}) if ort.eigen else bo
+        liste = _cdp_http("/json/list", timeout=1.5) or []
+        gesehen = {
+            "tradovate": ({"url": str(bo.get("url") or "")[:70], "formular": bool(lb_e),
+                           "fehler": str(bo.get("fehler_text") or "")[:80],
+                           "knoepfe": [k3_label(k) for k in (lb_e.get("knoepfe") or [])][:6]}
+                          if ort.eigen else "Formular in der TradingView-Seite"),
+            "tradingview": {"dialoge": [{"titel": str(d_.get("titel") or "")[:40], "text": str(d_.get("text") or "")[:80]}
+                                        for d_ in (tv.get("dialoge") or []) if isinstance(d_, dict)][:3],
+                            "leiste": str(tv.get("leiste") or "")[:40], "url": str(tv.get("url") or "")[:70],
+                            "konto": str(cdp_konto_verbunden(s.stand(opts)) or "")[:40]},
+            "tabs": [str(t.get("url"))[:50] for t in liste if isinstance(t, dict) and t.get("type") == "page"][:6],
+        }
+        trail.append("[Login] nach 40 s gesehen: " + json.dumps(gesehen, ensure_ascii=False)[:700])
+    except Exception as e_:
+        trail.append(f"[Login] Blick nach 40 s nicht möglich ({type(e_).__name__}: {str(e_)[:60]})")
     return "verbunden", "Nach dem Login zeigt TradingView kein Konto (40 s) — Puls-Chrome ansehen."
 
 
