@@ -28556,8 +28556,15 @@ def _puls_lauf_abfangen(fn, *args, **kw):
         return roh, {}
 
 
+def kein_neustart_grund(cmd):
+    """REIN RECHNEND (testbar) — KONTO FEST (Finn 02.11.2026, Simon 18:31: der Neustart im TopstepX-Lauf schloss den Prophos-Tab während eines Big Trades mit
+    offenem Fusion-Hedge): setzt das Panel kein_neustart (scharfer TradingView-Trade auf diesem PC), startet der Lauf das Puls-Chrome nie neu. → Grund | None"""
+    return ("kein Neustart: offener TradingView-Trade mit Fusion-Hedge auf diesem PC (Konto fest, Panel)"
+            if isinstance(cmd, dict) and cmd.get("kein_neustart") is True else None)
+
+
 def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=None, t0=None, ausgeben=None, diagnose=None,
-                       neustart_sanft=None):
+                       neustart_sanft=None, verboten=None):
     """Kern des Neustart-Wrappers (testbar mit Attrappen). erster() und zweiter(frist_s) → (roh, res); lesung(spur) → dict für
     neustart_beleg_leer oder None (Weg ohne Order-Lesung, Topstep). Gibt GENAU EINE Antwort aus — die des letzten Versuchs; ein
     unveränderter erster Versuch geht so raus, wie er war. Genau ein Neustart, nie zwei. -> res des ausgegebenen Versuchs
@@ -28571,6 +28578,8 @@ def _puls_mit_neustart(weg, erster, zweiter, lesung, url, neustart=None, jetzt=N
     budget = PULS_NEUSTART_BUDGET_S.get(weg, 0.0)
     roh1, r1 = erster()
     art, grund, rest = neustart_entscheid(r1, weg, jetzt() - t0, lesung_moeglich=lesung is not None)
+    if verboten and art != "nein":                       # KONTO FEST (02.11.2026): der erste Versuch bleibt die Antwort
+        art, grund = "nein", str(verboten)
     if art == "nein":
         if isinstance(r1, dict) and r1 and not r1.get("ok"):
             r1["trail"] = str(r1.get("trail") or "") + f" | chrome_neustart: nein — {grund}"
@@ -28727,7 +28736,8 @@ def modus_tvkette_cdp_mit_neustart(cmd):
     return _puls_mit_neustart("tvv2", lambda: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tvkette_cdp, cmd),
                               lambda spur: _neustart_lesung_tvv2(cmd, ext, opts, root, spur), AUGEN_TV_URL,
-                              neustart_sanft=lambda spur: _puls_verbindung_neu_anhaengen(spur, AUGEN_TV_URL))   # Abriss 10053 (08.10.2026)
+                              neustart_sanft=lambda spur: _puls_verbindung_neu_anhaengen(spur, AUGEN_TV_URL),   # Abriss 10053 (08.10.2026)
+                              verboten=kein_neustart_grund(c))
 
 
 def _tsx_order_cdp_mit_neustart(befehl, cmd):
@@ -28736,7 +28746,7 @@ def _tsx_order_cdp_mit_neustart(befehl, cmd):
     lese_cmd = {"konto": befehl["ext"], "firma": (cmd or {}).get("firma")}
     return _puls_mit_neustart("tsv2", lambda: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd),
                               lambda frist: _puls_lauf_abfangen(modus_tsxlesen_cdp, lese_cmd, order=befehl, order_cmd=cmd, frist_s=frist),
-                              None, TSX_URL)
+                              None, TSX_URL, verboten=kein_neustart_grund(cmd))
 
 
 def loginok_lage(prozesse, pfad):

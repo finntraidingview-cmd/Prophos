@@ -2133,6 +2133,268 @@ def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
             TV_ORDER_LOCK.release()
 
 
+
+# ══ SCHLIESSEN AUF DEM PC (Finn 02.11.2026 ~19:10 „Zurück zu den Basics“, /goal: Master-Exit → Fusion zu ≤ 1 s auf allen PCs, egal ob der Prophos-Tab lädt,
+# fehlt oder gedrosselt ist; „Puls weiß, in welches Konto er klickt; sobald die Position weg ist, ist Fusion zu“). Vorfall Simon 88b28130: der Puls-Chrome-
+# Neustart im TopstepX-Lauf schloss den Prophos-Tab (18:31), der neue Tab kannte die Position nicht → 30-s-Rückfall → 34,5 s.
+# SCHARF SCHALTEN: öffnet der Tab einen Fusion-Hedge für einen TradingView-Trade (/api/hedge-solo open mit Feld scharf {ext_id, wurzel, nachbarn}), merkt das
+# Panel nach der Quittung {plan_id, ticket, ext_id, wurzel, nachbarn} in hedge_scharf.json (überlebt Tab- und Panel-Neustart).
+# SCHLIESS-WACHE (Thread, 0,1 s): liest den Reader-Stand (127.0.0.1:8790, dieselbe Quelle wie der Tab). Im scharfen Konto (voller Text = External ID, oder
+# gekürzt/angeklebt und unter den Konten der ID eindeutig — sonst nie) Position der Wurzel gesehen → danach zwei frische flache Lesungen im selben Konto über
+# ≥ 0,3 s → close-Auftrag an den Copier (hedge_solo_auftrag.json, wie /api/hedge-solo). Fail-safe: Konto nicht sicher, Stand blind/alt, Userscript < 0.10.8
+# oder Position nie gesehen → nichts, der bestehende Weg im Tab greift. Der Tab bucht weiter und darf selbst schließen (doppelt: Copier antwortet schon_zu).
+# Gelöst wird ein Eintrag beim Close des Tabs (/api/hedge-solo close mit dem Ticket), nach dem eigenen Close (ok/schon_zu) oder nach 12 h.
+# Ort Panel statt reader-server: das Panel läuft dauerhaft, schreibt ohnehin die Copier-Aufträge und hält die Puls-Locks (Konto fest, unten). ══
+SCHARF_PFAD = os.path.join(HERE, "hedge_scharf.json")
+SCHARF_LOCK = threading.Lock()
+SCHARF_TAKT_S = 0.1
+SCHARF_FLACH_S = 0.3
+SCHARF_FLACH_LESUNGEN = 2
+SCHARF_OFFEN_MIN_S = 3.0
+SCHARF_STAND_MAX_S = 1.0
+SCHARF_MAX_S = 12 * 3600
+SCHARF_CLOSE_WIEDER_S = 2.0
+SCHARF_KONTO_KURZ_MIN = 12
+SCHARF_MIN_VERSION = (0, 10, 8)
+READER_STAND_URL = "http://127.0.0.1:8790/"
+
+
+def scharf_konto_bezug(text, ext):
+    """REIN RECHNEND (testbar, wie kontoTextBezug im Tab): 'ja' | 'kurz' | 'klebt' | ''."""
+    eid = str(ext or "").strip().upper()
+    t = str(text or "").strip().upper()
+    if not eid or not t:
+        return ""
+    if t == eid or eid in re.split(r"[^A-Z0-9]+", t):
+        return "ja"
+    w = (re.split(r"[^A-Z0-9]+", t) or [""])[0]
+    if len(w) >= SCHARF_KONTO_KURZ_MIN and len(w) < len(eid) and eid.startswith(w):
+        return "kurz"
+    if len(w) > len(eid) and w.startswith(eid) and re.fullmatch(r"\d{1,3}", w[len(eid):]):
+        return "klebt"
+    return ""
+
+
+def scharf_konto_sicher(text, ext, nachbarn):
+    """REIN RECHNEND (testbar): steht der Reader sicher im scharfen Konto? Voller Text immer; gekürzt/angeklebt nur, wenn kein anderes Konto der ID
+    (nachbarn = External IDs) im selben Bezug steht (Apex-Falle: alle beginnen gleich → nie sicher, dann schließt nur der Tab)."""
+    b = scharf_konto_bezug(text, ext)
+    if b == "ja":
+        return True
+    if not b:
+        return False
+    eid = str(ext or "").strip().upper()
+    return not any(scharf_konto_bezug(text, n) for n in (nachbarn or ()) if str(n or "").strip().upper() not in ("", eid))
+
+
+def _scharf_version_ok(st):
+    v = str((st or {}).get("script_version") or (st or {}).get("version") or "")
+    try:
+        return tuple(int(x) for x in v.split(".")[:3]) >= SCHARF_MIN_VERSION
+    except ValueError:
+        return False
+
+
+def _scharf_wurzel_da(st, wurzel):
+    w = str(wurzel or "").upper()
+    for x in (st or {}).get("positionen") or ():
+        if not isinstance(x, dict):
+            continue
+        xw = str(x.get("wurzel") or "").upper()
+        if not xw:
+            sym = str(x.get("symbol") or "").upper()
+            xw = "MNQ" if sym.startswith("MNQ") else "NQ" if sym.startswith("NQ") else ""
+        if xw == w:
+            return True
+    return False
+
+
+def scharf_entscheid(e, st, jetzt):
+    """REIN RECHNEND (testbar): ein scharfer Eintrag + Reader-Stand → (zu: bool, e_neu, grund). e: {at, ext_id, wurzel, nachbarn, gesehen,
+    flach_seit, flach_ts[]}. Jede unsichere Lesung setzt die Flach-Strecke zurück, ein Kontowechsel auch „gesehen“ (muss im Konto neu gesehen werden)."""
+    e = dict(e)
+    st = st if isinstance(st, dict) else {}
+    konto_ok = scharf_konto_sicher(st.get("konto"), e.get("ext_id"), e.get("nachbarn"))
+    alter = st.get("alter_s")
+    frisch = (st.get("an") is not False and st.get("positionen_ok") is True and not st.get("blind") and isinstance(alter, (int, float))
+              and alter <= SCHARF_STAND_MAX_S and isinstance(st.get("positionen"), list) and _scharf_version_ok(st))
+    if not konto_ok:
+        e.update(gesehen=False, flach_seit=None, flach_ts=[])
+        return False, e, "Konto nicht sicher"
+    if not frisch:
+        e.update(flach_seit=None, flach_ts=[])
+        return False, e, "Stand nicht frisch"
+    if _scharf_wurzel_da(st, e.get("wurzel")):
+        e.update(gesehen=True, flach_seit=None, flach_ts=[])
+        return False, e, "Position da"
+    if not e.get("gesehen"):
+        return False, e, "Position im Konto nie gesehen"
+    ts = st.get("positionen_ts") or st.get("ts")
+    lesungen = list(e.get("flach_ts") or [])
+    if ts not in lesungen:
+        lesungen.append(ts)
+    e.update(flach_seit=e.get("flach_seit") or jetzt, flach_ts=lesungen[-5:])
+    if jetzt - float(e.get("at") or 0) < SCHARF_OFFEN_MIN_S:
+        return False, e, "Hedge jünger als 3 s"
+    if len(lesungen) >= SCHARF_FLACH_LESUNGEN and jetzt - e["flach_seit"] >= SCHARF_FLACH_S:
+        return True, e, f"Master weg im Konto {e.get('ext_id')} ({len(lesungen)} flache Lesungen über {jetzt - e['flach_seit']:.2f} s)"
+    return False, e, "flach, noch nicht bestätigt"
+
+
+def scharf_laden():
+    l = read_json(SCHARF_PFAD, []) or []
+    return [x for x in l if isinstance(x, dict) and x.get("ticket")] if isinstance(l, list) else []
+
+
+def scharf_speichern(liste):
+    tmp = SCHARF_PFAD + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(liste, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, SCHARF_PFAD)
+
+
+def scharf_setzen(sch, plan_id, ticket):
+    """Nach der Open-Quittung: Eintrag anlegen (gleiches Ticket ersetzt). sch = body.scharf vom Tab. → True, wenn gemerkt."""
+    if not isinstance(sch, dict):
+        return False
+    ext = str(sch.get("ext_id") or "").strip()[:60]
+    wurzel = str(sch.get("wurzel") or "").strip().upper()
+    if len(re.sub(r"[^A-Za-z0-9]", "", ext)) < 5 or wurzel not in ("NQ", "MNQ") or not int(ticket or 0) > 0:
+        return False
+    nb = sch.get("nachbarn")
+    e = {"plan_id": str(plan_id or "")[:64], "ticket": int(ticket), "ext_id": ext, "wurzel": wurzel,
+         "nachbarn": [str(x).strip()[:60] for x in nb][:80] if isinstance(nb, list) else [], "at": time.time(),
+         "gesehen": False, "flach_seit": None, "flach_ts": [], "status": "offen"}
+    with SCHARF_LOCK:
+        liste = [x for x in scharf_laden() if int(x.get("ticket") or 0) != int(ticket)]
+        liste.append(e)
+        scharf_speichern(liste)
+    print(f"[scharf] gemerkt: Plan {e['plan_id'][:8]} Ticket {ticket} Konto {ext} {wurzel}", flush=True)
+    return True
+
+
+def scharf_loesen(ticket, grund):
+    with SCHARF_LOCK:
+        liste = scharf_laden()
+        neu = [x for x in liste if int(x.get("ticket") or 0) != int(ticket or 0)]
+        if len(neu) != len(liste):
+            scharf_speichern(neu)
+            print(f"[scharf] gelöst: Ticket {ticket} ({grund})", flush=True)
+
+
+def scharf_konto_fest():
+    """Offene scharfe Einträge → [ext_id] (für KONTO FEST)."""
+    jetzt = time.time()
+    return [str(x.get("ext_id")) for x in scharf_laden() if jetzt - float(x.get("at") or 0) < SCHARF_MAX_S]
+
+
+def _scharf_close_senden(e):
+    auftrag = {"cmd_id": f"{int(time.time())}-{random.randrange(10**6):06d}", "at": time.time(), "aktion": "close",
+               "ticket": int(e["ticket"]), "grund": "master_ende_panel"}
+    pfad = os.path.join(HERE, "hedge_solo_auftrag.json")
+    with HEDGE_SOLO_LOCK:
+        liste = read_json(pfad, []) or []
+        liste = [a for a in liste if isinstance(a, dict) and (time.time() - float(a.get("at") or 0)) < 300] if isinstance(liste, list) else []
+        liste.append(auftrag)
+        tmp = pfad + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(liste, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, pfad)
+    return auftrag["cmd_id"]
+
+
+def _scharf_stand_lesen():
+    import urllib.request
+    with urllib.request.urlopen(READER_STAND_URL, timeout=0.5) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def _scharf_runde(st, jetzt):
+    """Eine Runde der Schließ-Wache (testbar mit Attrappen): Einträge laden, je Eintrag entscheiden, Close senden bzw. Quittung prüfen, zurückschreiben.
+    st = Reader-Stand oder None (nicht lesbar). → Anzahl gesendeter Close-Aufträge."""
+    liste = scharf_laden()
+    if not liste:
+        return 0
+    erg_alle = read_json(os.path.join(HERE, "hedge_solo_ergebnis.json"), {}) or {}
+    geaendert, n = False, 0
+    for i, e in enumerate(list(liste)):
+        if jetzt - float(e.get("at") or 0) >= SCHARF_MAX_S:
+            scharf_loesen(e.get("ticket"), "12 h abgelaufen")
+            continue
+        if e.get("status") == "schliesst":
+            q = erg_alle.get(e.get("cmd_id")) if isinstance(erg_alle, dict) else None
+            if isinstance(q, dict) and q.get("ok"):
+                print(f"[scharf] Fusion zu: Ticket {e['ticket']} ({'schon zu' if q.get('schon_zu') else 'geschlossen'}), "
+                      f"{jetzt - float(e.get('zu_at') or jetzt):.2f} s nach dem Auftrag", flush=True)
+                scharf_loesen(e.get("ticket"), "Panel-Close ok")
+            elif jetzt - float(e.get("zu_at") or 0) >= SCHARF_CLOSE_WIEDER_S:   # keine Quittung → erneut (Copier antwortet schon_zu, wenn zu)
+                e = dict(e, cmd_id=_scharf_close_senden(e), zu_at=jetzt)
+                liste[i], geaendert, n = e, True, n + 1
+            continue
+        if st is None:
+            continue
+        zu, e2, grund = scharf_entscheid(e, st, jetzt)
+        if zu:
+            e2.update(status="schliesst", cmd_id=_scharf_close_senden(e2), zu_at=jetzt, grund_zu=grund)
+            n += 1
+            print(f"[scharf] {grund} → close Ticket {e2['ticket']}", flush=True)
+        if e2 != e:
+            liste[i], geaendert = e2, True
+    if geaendert:
+        with SCHARF_LOCK:
+            frisch = {int(x.get("ticket") or 0): x for x in scharf_laden()}
+            for e in liste:
+                t = int(e.get("ticket") or 0)
+                if t in frisch:                       # inzwischen gelöste Einträge nicht zurückschreiben
+                    frisch[t] = e
+            scharf_speichern(list(frisch.values()))
+    return n
+
+
+def _scharf_wache():
+    """Thread: die Schließ-Wache (s. Block-Kopf). Wirft nie. Ohne scharfen Eintrag nur 1× je Sekunde ein Blick in die Datei."""
+    while True:
+        try:
+            if not scharf_laden():
+                time.sleep(1.0)
+                continue
+            try:
+                st = _scharf_stand_lesen()
+            except Exception:
+                st = None
+            _scharf_runde(st, time.time())
+        except Exception as ex:
+            print(f"[scharf] Fehler: {type(ex).__name__}: {ex}", flush=True)
+            time.sleep(1.0)
+        time.sleep(SCHARF_TAKT_S)
+
+
+# ══ KONTO FEST (Teil A, Finn 02.11.2026 /goal, Simon 17:45–17:47: Balance-/Endlesungen und der Topstep-Lauf wechselten bei offenem Trade das Konto bzw.
+# starteten das Puls-Chrome neu): Solange ein scharfer Eintrag lebt, wählt Puls im Puls-Chrome kein anderes TradingView-Konto — tv-lesen, tv-konten-liste und
+# tv-close für ein anderes Konto antworten puls_beschaeftigt (retry_ok, der Aufrufer wartet wie bei einem laufenden Lauf); das Trade-Konto selbst bleibt frei.
+# Kein Puls-Chrome-Neustart solange (tsx-*, tv-konto bekommen kein_neustart). Ein NEUER TradingView-Start auf demselben PC (tv-konto anderes Konto) wird NICHT
+# gesperrt (Finn entscheidet), nur im Log genannt. ══
+def konto_fest_sperre(konto):
+    """REIN-ish: (gesperrt: bool, msg). konto = External ID des Laufs."""
+    fest = scharf_konto_fest()
+    if not fest:
+        return False, ""
+    k = str(konto or "").strip().upper()
+    if k and any(k == str(f).strip().upper() for f in fest):
+        return False, ""
+    return True, (f"Konto fest: offener TradingView-Trade mit Fusion-Hedge im Konto {', '.join(fest)} — Puls wechselt bis zum Ende kein Konto "
+                  f"(Lauf für {konto or '?'} wartet)")
+
+
+def _konto_fest_antwort(konto, pfad):
+    gesperrt, msg = konto_fest_sperre(konto)
+    if gesperrt:
+        print(f"[konto-fest] {pfad} @{konto}: wartet", flush=True)
+        return json.dumps({"ok": False, "code": "puls_beschaeftigt", "konto_fest": True, "retry_ok": True, "gesendet": False, "msg": msg},
+                          ensure_ascii=False)
+    return None
+
+
 _TAB_PULS_OEFFNEN_CODE = (
     "import sys, json, order_bot\n"
     "t = []\n"
@@ -4998,6 +5260,11 @@ class Handler(BaseHTTPRequestHandler):
             # Schritt 4b (22.09.2026): NUR mit dieser Marke klickt der Bot den Kauf-Knopf.
             # Ein altes Panel kennt sie nicht — dann reist sie ueber die Bruecke (@scharf=1).
             cmd["scharf"] = body.get("scharf") is True
+            _fest = scharf_konto_fest()   # KONTO FEST (02.11.2026): kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge; ein Start in ein anderes Konto nur gemeldet
+            if _fest:
+                cmd["kein_neustart"] = True
+                if cmd["ext_id"] and cmd["ext_id"].upper() not in [str(x).upper() for x in _fest]:
+                    print(f"[konto-fest] tv-konto @{cmd['ext_id']} bei offenem Trade in {', '.join(_fest)} — nicht gesperrt (Finn entscheidet)", flush=True)
             # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
             # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
@@ -5065,6 +5332,8 @@ class Handler(BaseHTTPRequestHandler):
             felder = ("ext_id", "firma", "symbol", "richtung", "volumen", "tp_usd", "sl_usd", "plan_id")
             cmd = {k: body.get(k) for k in felder}
             cmd["scharf"] = body.get("scharf") is True
+            if scharf_konto_fest():   # KONTO FEST (02.11.2026): bei offenem TV-Trade mit Hedge nie das Puls-Chrome neu starten (Simon 18:31)
+                cmd["kein_neustart"] = True
             # HARTE LINIE (13.10.2026, Anlass Mike: Topstep-Short laeuft, zwei Longs geplant): vor dem scharfen Klick fragt das Panel
             # Railway/DB selbst (richtung_frei) — unabhaengig vom Waechter im Tab. Nicht frei / nicht pruefbar -> nichts gesendet.
             if cmd["scharf"]:
@@ -5126,6 +5395,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
                     "msg": "Feld 'konto' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))
             cmd = {"konto": konto, "firma": str(body.get("firma") or "").strip()[:60]}
+            if scharf_konto_fest():   # KONTO FEST (02.11.2026): kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge
+                cmd["kein_neustart"] = True
             if modus == "tsxlesen" and body.get("auge_reparieren") is True:
                 cmd["auge_reparieren"] = True   # 29.10.2026: Heimweg „TopstepX-Auge blind" — Bot lädt neu / öffnet den Tab neu (order_bot._tsx_auge_reparieren)
             if not TV_ORDER_LOCK.acquire(blocking=False):
@@ -5178,6 +5449,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
+            _kf = _konto_fest_antwort(konto, u.path)   # KONTO FEST (02.11.2026): offener TV-Trade mit Hedge → anderes Konto wartet
+            if _kf:
+                return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
                     "msg": "Feld 'konto' (External ID) fehlt oder ist kuerzer als 3 Zeichen"}, ensure_ascii=False))
@@ -5266,6 +5540,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or "").strip()[:60]
+            _kf = _konto_fest_antwort(konto, u.path)   # KONTO FEST (02.11.2026): offener TV-Trade mit Hedge → anderes Konto wartet
+            if _kf:
+                return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "Feld 'konto' fehlt"}, ensure_ascii=False))
             bc = base_config()
@@ -5375,6 +5652,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
             konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
+            _kf = _konto_fest_antwort(konto, u.path)   # KONTO FEST (02.11.2026): offener TV-Trade mit Hedge → anderes Konto wartet
+            if _kf:
+                return self._send(409, _kf)
             if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
                     "msg": "Feld 'konto' (External ID) fehlt oder ist kuerzer als 3 Zeichen"}, ensure_ascii=False))
@@ -5752,6 +6032,13 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[panel] hedge-solo {aktion} {auftrag['cmd_id']} -> {'OK' if erg.get('ok') else 'FEHLER'} "
                   f"[{erg.get('code') or ''}] {str(erg.get('msg') or '')[:160]}", flush=True)
             erg = hedge_solo_zeiten(erg, self.headers.get("X-Prophos-Proxy-Ms"), getattr(self, "_t_ein", None), time.time())
+            try:   # SCHARF SCHALTEN / LÖSEN (02.11.2026, s. SCHLIESSEN AUF DEM PC)
+                if aktion == "open" and erg.get("ok") and erg.get("ticket"):
+                    erg["scharf"] = scharf_setzen(body.get("scharf"), auftrag.get("plan_id"), erg.get("ticket"))
+                elif aktion == "close" and (erg.get("ok") or erg.get("schon_zu")):
+                    scharf_loesen(auftrag.get("ticket"), f"Close vom Tab ({auftrag.get('grund') or '-'})")
+            except Exception as e:
+                print(f"[scharf] {aktion}: {type(e).__name__}: {e}", flush=True)
             return self._send(200, json.dumps(erg, ensure_ascii=False))
 
         if u.path == "/api/start-hedge-terminal":
@@ -6604,6 +6891,7 @@ def main():
     threading.Thread(target=_mt5_update_waechter, daemon=True).start()
     # Tab selbst neu laden (16.10.2026) — Details bei _tab_neulade_waechter
     threading.Thread(target=_tab_neulade_waechter, daemon=True).start()
+    threading.Thread(target=_scharf_wache, daemon=True).start()   # Schließ-Wache (02.11.2026, s. SCHLIESSEN AUF DEM PC)
     threading.Thread(target=_ea_frost_waechter, daemon=True).start()   # F2 (30.10.2026): EA-Selbstheilung ohne Knopf
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im

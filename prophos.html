@@ -29917,7 +29917,20 @@
     const levelVorlaeufig = !echterTp
     const notfallOpen = hedgeNotfallFaktorFuer(punkte)   // .1497: kein Klick-Zuschlag mehr (war +10 %, mind. 120 %) — Finn: ab dem Öffnen 105 %
     const pufferOpen = (levelVorlaeufig && slPunkte > 0) ? Math.max(hedgePuffer(), Math.round(slPunkte * 0.2 * 100) / 100) : hedgePuffer()
-    const openBody = JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: pufferOpen, notfall_faktor: notfallOpen, symbol: 'NAS100', plan_id: String(plan.id) })
+    // SCHARF SCHALTEN (02.11.2026, Finn „Zurück zu den Basics“, Vorfall Simon 88b28130): bei TradingView-Trades (tvv2) gibt der Tab dem Panel Konto, Wurzel und
+    // die Konten der ID mit — das Panel merkt sie auf Platte und schließt den Hedge selbst, sobald die Position im Konto weg ist, auch ohne diesen Tab
+    const scharfOpen = (() => {
+      if(plan.route !== 'tvv2') return null
+      try{
+        const acc = (accounts || []).find(a => a && String(a.id) === String(plan.masterAccountId))
+        const ext = acc ? String(acc.externalId || '').trim() : ''
+        if(!ext) return null
+        const sym = (plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || plan.masterSymbol || ''
+        const wurzel = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
+        return { ext_id: ext, wurzel, nachbarn: (accounts || []).filter(a => a && !a._fremd).map(a => a.externalId).filter(Boolean) }
+      }catch(_){ return null }
+    })()
+    const openBody = JSON.stringify(Object.assign({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: pufferOpen, notfall_faktor: notfallOpen, symbol: 'NAS100', plan_id: String(plan.id) }, scharfOpen ? { scharf: scharfOpen } : {}))
     // WIEDERHOLUNG (25.09.2026): bei sicher nicht gesendeten Fehlern (HEDGE_SICHER) bis 90 s nach dem ersten Versuch alle 10–15 s
     // (Streuung) erneut — Status solange 'wartet'. Vor jedem neuen Versuch: steht schon eine Position mit der Kennung dieses Plans
     // in hedge_solo, wird sie übernommen statt ein zweites Mal geöffnet. Nie wiederholt: abgelehnt (retry_ok false), copier_stumm.
