@@ -99,6 +99,9 @@ Nach Rückbau und erneutem `setup-pc.ps1` hat der PC einen neuen Host-Key. Der M
 
 **Darf nicht:**
 - **Keine Orders.** Nie klicken, tippen oder etwas senden, das eine Order öffnet, ändert oder schließt. Auch nicht „nur zum Test“.
+- **Klickverbot (Finn 02.11.2026).** Auf TopstepX, TradingView, Prop-Firm-Seiten, MT5 und im Puls-Chrome wird nichts geklickt und nichts getippt, dort gibt es nur Fotos. Maus und Tastatur gehen nur in Einstellungen, Explorer, CMD/PowerShell und Prophos. Der Agent sperrt das hart, eine Ausnahme per Auftrag gibt es nicht mehr. Details: `agent/README.md`.
+- **Puls darf klicken, der Lotse gibt ihm nur Aufgaben (Finn 02.11.2026).** Panel-Aufrufe wie `/api/tsx-lesen` sind erlaubt. Scharfe Orders (`scharf:true`) löst der Lotse nie aus.
+- **Was der Agent nicht sperren kann, ist hier nur Regel:** SSH-Befehle mit Admin-Rechten, das Verbot scharfer Panel-Aufrufe und Knöpfe in Prophos, die Trades starten.
 - **Keine Passwörter, keine Zugangsdaten.** Nicht lesen, nicht abtippen, nicht eingeben. Weder MT5, Chrome-Profile, TradingView noch Prop-Firm-Logins. Auth-Keys und private Schlüssel nie anzeigen.
 - **Keine Käufe.** Keine Challenges, Resets, Abos oder Lizenzen.
 - **Bei offenem Trade nichts neu starten.** Kein Neustart von PC, Chrome, MT5, Copier, Panel oder Puls, solange auf dem PC ein Trade läuft, ohne Finns ausdrückliches Wort im Chat. Erst nachsehen (Radar/DB), dann fragen.
