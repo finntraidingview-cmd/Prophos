@@ -14267,7 +14267,7 @@ TSX_RX_OHNE_ID = re.compile(r"^\s*((?:\$\s*\d+(?:[.,]\d+)?\s*K\b|\d+(?:[.,]\d+)?
 # (_TSX_ENDUNG_BEWIESEN, je Lauf gemerkt) — sonst nur „vielleicht", nie „ja". UNSICHER ohne DOM: ob die volle Kennung irgendwo im DOM
 # steht (augen_tsx.js kennungAusAttributen), ob die Karten role=option tragen, wie „Hide" wirkt.
 TSX_RX_AUSLOESER_NEU = re.compile(r"^(.*?\d+(?:[.,]\d+)?\s*K\b[^(|]*?)\s*\(\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\s*\)", re.I)
-TSX_RX_KARTE_ACCT = re.compile(r"ACCT\s*:\s*([A-Z0-9-]*?)\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\b", re.I)
+TSX_RX_KARTE_ACCT = re.compile(r"(?:ACCT\s*:\s*)?([A-Z0-9][A-Z0-9-]{1,11}?)\s*(?:…|\.{3})\s*(\d{4})(?!\d)", re.I)   # Endung = 4 ZIFFERN, auch „…1849BAL:" ohne Leerzeichen (Live 02.11.)
 _TSX_ENDUNG_BEWIESEN = {}          # External ID (alnum) → True, wenn die Liste DIESES Kontowechsels genau EINE Karte mit der Endung zeigte (_tsx_konto_sichern leert es am Anfang)
 
 
@@ -19159,6 +19159,8 @@ def _tsx_konto_sichern(s, ext, st, trail):
                              st, konto_zeilen=_zeilen(ko))
             x, n, grund = tsx_k2_eintrag(ko.get("liste"), ext)
             if not x:
+                if not ko.get("liste") and ko.get("roh"):          # 02.11.2026 (Ina 03:57: 0 Karten): DOM-Beleg in die Spur
+                    trail.append("K2 Rohliste: " + json.dumps(ko.get("roh"), ensure_ascii=False)[:900])
                 _cdp_esc(s, st, trail, "Konto-Liste schließen")
                 return _raus("konto_nicht_erreicht", f"Konto {ext} in der TopstepX-Liste: {grund} ({n}×) — nichts gewählt, Esc.", st,
                              konto_zeilen=_zeilen(ko), konto_treffer=n)
@@ -19185,6 +19187,8 @@ def _tsx_konto_sichern(s, ext, st, trail):
             return _raus("konto_nicht_erreicht", (f"Konto-Zeile {ext} gedrückt, Liste zu, aber im Auslöser steht '{aktiv[:40] or '-'}' — "
                                                   "nicht gewechselt, nichts gelesen."), st)
         if geklickt:
+            if ko.get("roh"):                                    # 02.11.2026: DOM-Beleg in die Spur
+                trail.append("K2 Rohliste: " + json.dumps(ko.get("roh"), ensure_ascii=False)[:900])
             return _raus("konto_nicht_erreicht", (f"Konto-Auslöser geklickt, Liste nicht erkannt (aktiv '{aktiv[:40] or '-'}') — nichts gewählt."),
                          st, popups=st.get("popups"))
         r = cdp_rect(ko.get("rect"))

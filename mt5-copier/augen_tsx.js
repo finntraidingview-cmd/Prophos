@@ -36,7 +36,7 @@
  */
 var PROPHOS_AUGEN_TSX = (function () {
   'use strict';
-  var VERSION = 'tsx-0.7.0';   // 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
+  var VERSION = 'tsx-0.7.1';   // 0.7.1 (02.11.2026, Live-Fehllauf Ina 03:57): Karten auch unter der Kopfleiste und über „…NNNN“, Rohliste bei 0 Karten · 0.7.0 (02.11.2026): TopstepX 2.4.32 — Kopf „150K DLL Express (...9147)“, Konto-Karten „ACCT: EXPRES...9147“, „Ineligible Accounts“ als Abschnitt
 
   // ── Grundwerkzeuge (wie augen.js) ──────────────────────────────────────────
   function sichtbar(el) {
@@ -355,7 +355,7 @@ var PROPHOS_AUGEN_TSX = (function () {
   // Die alte Form (Label | KENNUNG) bleibt zuerst; die neue liefert kontonr null, abgekuerzt true und dazu endung/label/format, der Bot
   // beweist das Konto dann über die Endung + Eindeutigkeit in der Liste (order_bot.py tsx_konto_urteil/tsx_k2_eintrag).
   var RX_AUSLOESER_NEU = /^(.*?\d+(?:[.,]\d+)?\s*K\b[^(|]*?)\s*\(\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\s*\)/i;
-  var RX_KARTE_ACCT = /ACCT\s*:\s*([A-Z0-9-]*?)\s*(?:…|\.{3})\s*([A-Z0-9]{3,8})\b/i;                 // „ACCT: EXPRES...9147"
+  var RX_KARTE_ACCT = /(?:ACCT\s*:\s*)?([A-Z0-9][A-Z0-9-]{1,11}?)\s*(?:…|\.{3})\s*(\d{4})(?!\d)/i;   // „ACCT: EXPRES...9147" / „150KTC…1849BAL:" — Endung = 4 ZIFFERN, auch ohne Leerzeichen vor „BAL" (Live 02.11.)
   var RX_KARTE_ACCT_VOLL = /ACCT\s*:\s*([A-Z0-9][A-Z0-9-]{5,}(?:-\d{6}-\d{8})?)(?![.…A-Z0-9-])/i;      // falls die volle Kennung doch da steht
   var RX_KARTE_BAL = /BAL\s*:\s*([-−(]?\s*\$?\s*[-−]?[\d,]+(?:\.\d+)?\)?)/i;
   var RX_KARTE_LABEL = /(\$?\s*\d+(?:[.,]\d+)?\s*K\b[^|$(]*?)\s*(?=ACCT\s*:|BAL\s*:|$)/i;
@@ -576,17 +576,21 @@ var PROPHOS_AUGEN_TSX = (function () {
   // DAVOR in DOM-Reihenfolge („Express Funded Accounts (4)" / „Ineligible Accounts (2)") → ineligible + hinweis wie der alte Klammertext.
   // id = volle Kennung nur, wenn sie wirklich da steht (Text „ACCT: <voll>" oder ein Attribut), sonst null; dazu immer endung + id_kurz.
   var SEL_OVERLAY = '[role="presentation"],[role="listbox"],[role="menu"],[role="dialog"],.MuiPopover-root,.MuiMenu-root,.MuiPopper-root,.MuiModal-root,.MuiDrawer-root';
-  var SEL_NIE = '[role="grid"],[role="tabpanel"],[role="tab"],.dock-layout,.dock-panel,.dock-content,[data-testid="navbar-container"]';
+  // Live-Fehllauf 02.11.2026 03:57 Dubai (Ina, .1962): 0 Karten gefunden — Verdacht: das neue Menü hängt UNTER der Kopfleiste
+  // (navbar-container) statt als Portal am Ende von body; darum zählt die Kopfleiste nicht mehr als Sperrbereich. Dock/Tabellen bleiben.
+  var SEL_NIE = '[role="grid"],[role="tabpanel"],[role="tab"],.dock-layout,.dock-panel,.dock-content';
+  var RX_KARTE_BLATT = /ACCT\s*:|(?:…|\.{3})\s*\d{4}(?!\d)/i;
   function kontoListeNeu(ausloeser) {
     // Prüfer 02.11.2026: läuft bei JEDER Lesung (bei zuer Liste ist der alte Weg leer) — darum nur Karten, die in einem Overlay liegen
     // ODER unterhalb des Auslösers stehen, und nie aus Dock-Reitern/Tabellen (ein „ACCT:" im Accounts-Reiter hieße sonst „Liste offen")
     var karten = [], gesehen = [];
     var ar = ausloeser ? ausloeser.getBoundingClientRect() : null;
-    alle('span,div,p,td,li,b,strong').forEach(function (b) {
-      if (b.children.length || !/ACCT\s*:/i.test(b.textContent || '') || !sichtbar(b)) return;
+    alle('span,div,p,td,li,b,strong,a,button').forEach(function (b) {
+      if (b.children.length || !RX_KARTE_BLATT.test(b.textContent || '') || !sichtbar(b)) return;
       if (b.closest(SEL_NIE)) return;
       var imOverlay = !!b.closest(SEL_OVERLAY), br = b.getBoundingClientRect();
-      if (!imOverlay && !(ar && br.top >= ar.bottom - 2 && br.top - ar.bottom < 700)) return;
+      if (ar && br.top < ar.bottom - 2 && br.bottom <= ar.bottom + 2) return;                   // der Kopf selbst („(...6025)") ist keine Karte
+      if (!imOverlay && !(ar ? (br.top >= ar.bottom - 2 && br.top - ar.bottom < 700) : br.top > 40)) return;
       var e = b, tiefe = 0, karte = null;
       while (e && tiefe < 7) {
         var t = txt(e), r = e.getBoundingClientRect();
@@ -631,6 +635,34 @@ var PROPHOS_AUGEN_TSX = (function () {
     return out;
   }
 
+  // ROHLISTE (02.11.2026, Live-Fehllauf Ina: 0 Karten): bis zu 24 sichtbare Blatt-Knoten mit „ACCT", „Combine/Express/Funded/Ineligible",
+  // „…"/„..." oder „K " + für die ersten drei die Vorfahren-Kette (tag/testid/role/klasse) — damit die Spur den DOM-Beleg selbst liefert
+  function rohliste(ausloeser) {
+    var out = [], n = 0;
+    try {
+      var ar = ausloeser ? ausloeser.getBoundingClientRect() : null;
+      alle('span,div,p,td,li,b,strong,a,button,h1,h2,h3,h4,h5,h6,label').some(function (b) {
+        if (b.children.length || !sichtbar(b)) return false;
+        var s = txt(b);
+        if (!s || s.length > 80 || !/ACCT|Combine|Express|Funded|Ineligible|Accounts|…|\.{3}|\d+\s*K\b/i.test(s)) return false;
+        if (ar && b === ausloeser) return false;
+        var o = { tag: b.tagName.toLowerCase(), text: s.slice(0, 60), rect: rect(b) };
+        var ti = testid(b); if (ti) o.tid = ti.slice(0, 40);
+        var ro = attr(b, 'role'); if (ro) o.role = ro;
+        if (n < 3) {
+          var kette = [], e = b.parentElement, tiefe = 0;
+          while (e && tiefe < 6) { kette.push(e.tagName.toLowerCase() + (testid(e) ? '[' + testid(e).slice(0, 30) + ']' : '') + (attr(e, 'role') ? '{' + attr(e, 'role') + '}' : '') + '.' + klasse(e).slice(0, 24) + '#' + Math.round(e.getBoundingClientRect().height)); e = e.parentElement; tiefe++; }
+          o.kette = kette;
+        }
+        out.push(o); n++;
+        return n >= 24;
+      });
+      var ov = alle(SEL_OVERLAY).filter(sichtbar).slice(0, 3).map(function (e) { return e.tagName.toLowerCase() + '.' + klasse(e).slice(0, 30) + '#' + Math.round(e.getBoundingClientRect().height) + ':' + txt(e).slice(0, 80); });
+      if (ov.length) out.push({ overlays: ov });
+    } catch (e_) { out.push({ fehler: String(e_).slice(0, 80) }); }
+    return out;
+  }
+
   // -> {aktiv, kontonr, abgekuerzt, rect, zu, liste_offen, liste}; rect/zu = Auslöser (Klickziel für K2, zu.verdeckt bei offener Liste)
   function kontoLesen() {
     var k = KONTO_LEER();
@@ -641,6 +673,7 @@ var PROPHOS_AUGEN_TSX = (function () {
       if (!k.kontonr && k.endung) { var voll = kennungAusAttributen(el, k.endung); if (voll) { k.kontonr = voll; k.abgekuerzt = false; } }
     }
     k.liste = kontoListe(el);
+    if (!k.liste.length) k.roh = rohliste(el);           // 02.11.2026: Beleg für den nächsten Fehllauf — welche Knoten das Auge sah
     if (k.liste.length && k.liste[0].format === 'neu') {
       k.abschnitte = []; k.liste.forEach(function (o) { if (o.abschnitt && k.abschnitte.indexOf(o.abschnitt) < 0) k.abschnitte.push(o.abschnitt); });
     }
