@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.6
+// @version      0.10.7
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre ueberlebt Neuladen). Teil-Fill zaehlt nicht.
 //   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
 //   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
 //                      localStorage prophos_puls_chrome = '1' der Puls-Augen (augen.js ≥ 0.8.8, nur per CDP im Puls-Chrome) schaltet ihn ein,
@@ -191,7 +192,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.6';
+  const VERSION    = '0.10.7';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   // 0.10.4 (30.10.2026, Simon pc-pmqd8g): der Schalter fehlte nach einer Tampermonkey-Neuinstallation (Abzeichen „● Reader · 1 Pos" statt
@@ -1762,14 +1763,16 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
    * Klick. NEU ist eine Meldung nur, wenn ihre Anzahl gegenueber dem vorigen Takt WAECHST (fillsNeu) — was beim Start schon dastand und
    * alte Protokoll-Zeilen bleiben so fuer immer alt. Doppelt (Toast + Protokoll-Kopie, React baut neu) zaehlt eine Meldung mit gleicher
    * Seite/Menge/Preis/Symbol binnen FILL_DOPPELT_MS einmal — mit der FRUEHESTEN Zeit. */
-  const FILL_MAX = 10, FILL_HALT_MS = 15 * 60000, FILL_DOPPELT_MS = 10 * 60000;   // 10 min: ein spaeter wieder aufgeklappter Toast ist kein neuer Fill
+  const FILL_MAX = 10, FILL_HALT_MS = 8 * 3600000, FILL_DOPPELT_MS = 8 * 3600000;   // 0.10.6: 8 h statt 10 min — die Meldung loest jetzt den Fusion-Schluss aus, eine wieder aufgetauchte behaelt ihre alte Zeit und gilt nie als frisch (zaehlt ein echter gleicher Fill nicht, greift der Flach-Weg)
   const RX_F_TITEL = /\border\b|auftrag|position opened|marktorder|limitorder|stop-?order/i;
   const RX_F_FILL = /executed|filled|ausgef(ü|ue)hrt|gef(ü|ue)llt/i;
-  const RX_F_NICHT = /cancel+ed|storniert|abgebrochen|reject|abgelehnt|modified|ge(ä|ae)ndert/i;
+  const RX_F_NICHT = /cancel+ed|storniert|abgebrochen|reject|abgelehnt|modified|ge(ä|ae)ndert|partial|teilweise/i;   // 0.10.6: Teil-Fill ist kein Exit-Beweis
   const RX_F_EN = /\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*(\d[\d.,]*)/i;
   const RX_F_DE = /(?:(?:^|\s)(\d+)\s+)?\b(?:zu|bei|@)\s*(\d[\d.,]*)\s+(verkaufen|kaufen|verkauf|kauf)\b/i;
   const RX_F_SYMBOL = /\b((?:MNQ|NQ|MES|ES|MYM|YM|M2K|RTY)[FGHJKMNQUVXZ]\d{1,2})\b|\b((?:MNQ|NQ|MES|ES)1!)/;
-  const fillMerk = { fills: [], vorher: null, fehler: 0, naechst: 0 };
+  const FILL_START_MS = 15000, FILL_SPERRE_KEY = 'prophos_fill_sperre';
+  const fillMerk = { fills: [], vorher: null, fehler: 0, naechst: 0, sperre: {} };
+  try { fillMerk.sperre = JSON.parse(sessionStorage.getItem(FILL_SPERRE_KEY) || '{}') || {}; } catch (_) {}   // ueberlebt das Neuladen des Tabs
   function fillZahl(t) {
     t = String(t || '').replace(/\s/g, '');
     if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, '');            // 30,801.00
@@ -1796,8 +1799,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       }
       if (m) { seite = /^(buy|kauf)/i.test(m[1]) ? 'buy' : 'sell'; menge = fillZahl(m[2]); preis = fillZahl(m[3]); }
       else { const d = t.match(RX_F_DE); if (d) { seite = /^verkauf/i.test(d[3]) ? 'sell' : 'buy'; menge = d[1] ? fillZahl(d[1]) : null; preis = fillZahl(d[2]); } }
-      if (fill && preis != null && preis > 0 && seite)
+      if (fill && preis != null && preis > 0 && seite) {
         out.push({ art: art, seite: seite, menge: menge, preis: preis, symbol: symbol, text: roh.replace(/\s+/g, ' ').trim().slice(0, 80) });
+        fill = false;   // 0.10.7: eine Meldung = ein Fill; weiterer Koerpertext („Sell 2 at <TP-Preis>“) bis zum naechsten Titel ist keiner
+      }
     }
     return out;
   }
@@ -1812,6 +1817,16 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     });
     return { neu: neu, zaehl: zaehl };
   }
+  // 0.10.7: Sperre je Meldung (Seite/Menge/Preis/Symbol → zuletzt gesehen). Alles, was gelesen wird, kommt hinein; neu ist nur, was seit FILL_DOPPELT_MS nicht mehr da war und nicht in den
+  // ersten FILL_START_MS nach Script-Start auftaucht. Die Meldung schliesst Fusion: S9 stellte nach, dass eine wieder auftauchende Zeile bisher jetzt-Zeit bekam (beim Start nur in „vorher“).
+  // REIN (Selbsttest): → {neu, sperre}. Unbekannt = gesperrt nur bei Start.
+  function fillsSperren(neu, alle, sperre, jetzt, seitStart) {
+    const s = {};
+    for (const k in sperre || {}) if (jetzt - sperre[k] <= FILL_DOPPELT_MS) s[k] = sperre[k];
+    const raus = seitStart < FILL_START_MS ? [] : (neu || []).filter((f) => !(fillSig(f) in s));
+    (alle || []).forEach((f) => { s[fillSig(f)] = jetzt; });
+    return { neu: raus, sperre: s };
+  }
   // REIN (Selbsttest): neue Meldungen in die Liste — gleiche binnen FILL_DOPPELT_MS nur einmal (frueheste Zeit bleibt), Alte raus
   function fillsMerken(liste, neu, jetzt, konto) {
     const out = (liste || []).filter(f => jetzt - f.at <= FILL_HALT_MS);
@@ -1822,10 +1837,10 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     return out.slice(-FILL_MAX);
   }
   function fillsLesen() {
-    // gestreut alle 250–500 ms statt in jedem 50-ms-Takt (Prüfer S2 30.10.2026: Last im Puls-Chrome) — reicht für die Sekunden-Statistik
+    // gestreut statt in jedem 50-ms-Takt (Prüfer S2 30.10.2026: Last im Puls-Chrome)
     const jetztL = Date.now();
     if (jetztL < fillMerk.naechst) return fillMerk.fills.slice(-FILL_MAX);
-    fillMerk.naechst = jetztL + 250 + Math.random() * 250;
+    fillMerk.naechst = jetztL + (PULS_CHROME ? 80 + Math.random() * 40 : 250 + Math.random() * 250);   // 0.10.6: im Puls-Chrome loest die Meldung den Fusion-Schluss aus
     try {
       const quellen = Array.prototype.slice.call(document.querySelectorAll('[data-name^="toast-group-"],[class*="toastGroup-"],[class*="toastListInner-"],[role="log"]'));
       const alle_ = [];
@@ -1844,7 +1859,11 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       });
       const n = fillsNeu(fillMerk.vorher, alle_);
       fillMerk.vorher = n.zaehl;
-      if (n.neu.length) fillMerk.fills = fillsMerken(fillMerk.fills, n.neu, Date.now(), kontoMerk.text);
+      const g = fillsSperren(n.neu, alle_, fillMerk.sperre, Date.now(), Date.now() - SCRIPT_START_MS);
+      const merkNeu = Object.keys(g.sperre).length !== Object.keys(fillMerk.sperre).length;
+      fillMerk.sperre = g.sperre;
+      if (merkNeu) { try { sessionStorage.setItem(FILL_SPERRE_KEY, JSON.stringify(g.sperre)); } catch (_) {} }
+      if (g.neu.length) fillMerk.fills = fillsMerken(fillMerk.fills, g.neu, Date.now(), kontoMerk.text);
     } catch (_) { fillMerk.fehler++; }
     return fillMerk.fills.slice(-FILL_MAX);
   }
@@ -1969,7 +1988,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.6';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.7';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

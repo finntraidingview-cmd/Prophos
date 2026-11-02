@@ -27613,7 +27613,7 @@
   const TVTM_LADER_SOLL = 1, TVTM_TSX_LADER_SOLL = 1
   // GESPERRTES EVAL (Finn 02.11.2026): TradingViews CSP verbietet eval, der Lader tauscht dort den Kern nie (lader.eval false, quelle eingebaut). Dann kommt jede Fassung über diesen Weg:
   // TVTM_VERSION_SOLL = VERSION im Userscript (Selbsttest prüft es), ein Versuch je PC und Fassung, nur in Ruhe (tvnRuhe). Scheitert er, meldet Railway ⚪; die nächste Fassung versucht es neu.
-  const TVTM_VERSION_SOLL = '0.10.6'
+  const TVTM_VERSION_SOLL = '0.10.7'
   const tvTmSoll = art => art === 'tsx' ? TVTM_TSX_LADER_SOLL : TVTM_LADER_SOLL
   const tvTmKey = art => art === 'tsx' ? 'prophos_tvtm_tsx_l' + TVTM_TSX_LADER_SOLL : 'prophos_tvtm_l' + TVTM_LADER_SOLL + '_v' + TVTM_VERSION_SOLL
   const tvTmZiel = art => art === 'tsx' ? `Lader ${TVTM_TSX_LADER_SOLL}` : TVTM_VERSION_SOLL
@@ -30004,8 +30004,11 @@
    * stünde eine echte Master-Position ohne Plan und Hedge da — offen bleibend fasst sie wenigstens Auto-Close abends an. Entscheidet Finn. */
   const HEDGE_REVIEW_SPAET = { master_ende_reader: 'reader' }
   const HEDGE_REVIEW_SPAET_MS = 60000
+  // HEDGE-SCHNELLER (02.11.2026): Toast-Schluss ohne bewiesen flache Tabelle (Wache offen/unklar, Tab neu geladen) beendet den Plan hier nie — nur hedgeHandFlachPruefen mit Beweis. REIN RECHNEND.
+  function hedgeToastOhneFlach(h){ return !!(h && h.toast_beweis_at) && !(h.toast_wache && h.toast_wache.urteil === 'flach') }
+  window._hedgeToastOhneFlach = hedgeToastOhneFlach   // Test-Haken
   function hedgeReviewSpaetFaellig(h, jetzt){
-    if(!h || h.status !== 'geschlossen' || !HEDGE_REVIEW_SPAET[h.grund]) return false
+    if(!h || h.status !== 'geschlossen' || !HEDGE_REVIEW_SPAET[h.grund] || hedgeToastOhneFlach(h)) return false
     const zu = Date.parse(h.closed_at || '') || 0
     return zu > 0 && (Number(jetzt) || Date.now()) - zu >= HEDGE_REVIEW_SPAET_MS
   }
@@ -30062,7 +30065,7 @@
   function hedgeHandFlachFaellig(p, jetzt){
     const h = p && p.mt5Baseline && p.mt5Baseline.hedge
     if(!h || h.status !== 'geschlossen' || !p || p.status !== 'open' || p.route !== 'tvv2') return false
-    if(HEDGE_REVIEW_GRUENDE[h.grund] || HEDGE_REVIEW_SPAET[h.grund] || h.grund === 'master_nie_da') return false   // eigene Wege
+    if(HEDGE_REVIEW_GRUENDE[h.grund] || (HEDGE_REVIEW_SPAET[h.grund] && !hedgeToastOhneFlach(h)) || h.grund === 'master_nie_da') return false   // eigene Wege
     if(p.mt5Baseline.final || (p.mt5Baseline.hand_flach && p.mt5Baseline.hand_flach.status === 'master_da')) return false
     const zu = Date.parse(h.closed_at || '') || 0, st = Date.parse(p.startedAt || '') || 0
     if(!st || zu < st) return false   // Hedge aus einem früheren Lauf (wiederverwendeter Plan) zählt nie (Gegenprüfung 30.10.2026)
@@ -32497,6 +32500,102 @@
     try{ console.info('[hedgeSchnell] kein Reader-Ende, Fusion bleibt offen —', grund, werte || '') }catch(_){}
     try{ hedgeAmPlanSchreiben(p.id, { reader_wartet: Object.assign({ grund, at: new Date(jetzt).toISOString() }, werte || {}) }).catch(() => {}) }catch(_){}
   }
+  /* HEDGE-SCHNELLER (02.11.2026, Finn: „Sobald die Order weg ist, zack direkt auf Fusion durch", Plan 64feb94d: Fill-Meldung → Fusion zu 2,37 s, davon
+   * 1 s Warteregel „flach"). Eine bewiesene Exit-Fill-Meldung schließt Fusion sofort, der Flach-Weg bleibt Rückfall. Nur bei: Konto exakt oder
+   * eindeutig mit angeklebten Balance-Ziffern (TDFYSL…, nie gekürzt), Gegenrichtung, GENAU die volle Plan-Menge (Tabelle zeigt nicht mehr), Symbol mit
+   * passender Wurzel, nach Plan-Start und Hedge-Open und höchstens HEDGE_TOAST_FRISCH_MS alt (alte Meldungen, Neustart, ein Wiedereinstieg zählen nie). REIN RECHNEND. */
+  const HEDGE_TOAST_FRISCH_MS = 3000, HEDGE_TOAST_KURS_PKT = 10, HEDGE_TOAST_MIN_VERSION = '0.10.7'
+  // REIN RECHNEND (S9 02.11.2026): läuft im Positions-Tab bewiesen eine Fassung mit den Meldungs-Fixes? tab.version = VERSION des laufenden Kerns aus dessen eigenem POST (reader-server _tab_merken), je Tab;
+  // nicht script_version (jüngster Puls-Tab, kann ein anderer sein), nicht lader.laeuft (Angabe des Laders). Unbekannt oder älter → Flach-Weg.
+  function hedgeToastVersionOk(st){
+    const tab = st && Array.isArray(st.tabs) ? st.tabs.find(t => t && t.tab_id === st.positionen_tab) : null
+    const v = String((tab && tab.version) || '')
+    if(!/^\d+\.\d+\.\d+$/.test(v)) return false
+    const x = v.split('.').map(Number), y = HEDGE_TOAST_MIN_VERSION.split('.').map(Number)
+    for(let i = 0; i < 3; i++){ if(x[i] !== y[i]) return x[i] > y[i] }
+    return true
+  }
+  window._hedgeToastVersionOk = hedgeToastVersionOk   // Test-Haken
+  // REIN RECHNEND (S9 02.11.2026): f.konto ist der Umschalter beim Lesen, die Meldung trägt kein Konto. Ein anderer offener Plan desselben PCs/derselben ID mit gleicher Wurzel, Richtung und Menge
+  // könnte gemeint sein → Flach-Weg. Auch derselbe Master-Account.
+  function hedgeToastNachbar(plaene, p, wurzel, pc){
+    const wz = v => (tvSymbolWurzel(String(v || '')) === 'MNQ' ? 'MNQ' : 'NQ')
+    return (plaene || []).some(q => {
+      if(!q || String(q.id) === String(p.id) || q.status !== 'open') return false
+      if(String(q.masterAccountId) === String(p.masterAccountId)) return true
+      const hq = (q.mt5Baseline && q.mt5Baseline.hedge) || {}
+      if(!(hq.pc === pc || (q.userId && q.userId === p.userId))) return false
+      return wz(hq.symbol_nq || q.masterSymbol) === wurzel && q.richtung === p.richtung && Number(q.masterContracts) === Number(p.masterContracts)
+    })
+  }
+  window._hedgeToastNachbar = hedgeToastNachbar   // Test-Haken
+  /* SCHALTER (Finn 02.11.2026): Spalte wd_farmer_regeln.hedge_toast_schluss, false → reiner Flach-Weg (sql/2026-11-02_hedge_toast_schluss.sql). Eigene Spalte, weil „Hedge-Tabelle
+   * speichern" vorplan ganz überschreibt und ein Aus still zurückgesetzt hätte. Alle 10 s frisch, solange dieser PC einen offenen Hedge hat; nur true gilt, nicht lesbar oder älter als 60 s → Flach-Weg. */
+  const _hedgeToastSchalter = { an: false, at: 0, laeuft: false, gelesen: 0 }
+  function hedgeToastSchalterHolen(){
+    if(_hedgeToastSchalter.laeuft || Date.now() - _hedgeToastSchalter.at < 10000) return
+    _hedgeToastSchalter.laeuft = true; _hedgeToastSchalter.at = Date.now()
+    Promise.resolve(supabase.from('wd_farmer_regeln').select('hedge_toast_schluss').eq('id', 1).maybeSingle())
+      .then(({ data, error }) => { if(error || !data) throw (error || new Error('keine Regel-Zeile')); _hedgeToastSchalter.an = data.hedge_toast_schluss === true; _hedgeToastSchalter.gelesen = Date.now() })
+      .catch(e => { _hedgeToastSchalter.an = false; console.warn('[hedgeSchnell] Schalter nicht lesbar, Flach-Weg', (e && e.message) || e) })
+      .finally(() => { _hedgeToastSchalter.laeuft = false })
+  }
+  function hedgeToastAn(){ return _hedgeToastSchalter.an === true && Date.now() - _hedgeToastSchalter.gelesen <= 60000 }
+  function hedgeToastBeweis(fills, o){
+    if(!o || !(Number(o.menge) > 0) || !o.seite || !o.wurzel || !o.ext || !(o.startMs > 0) || !(o.openMs > 0)) return null
+    if(typeof o.offen === 'number' && o.offen > Number(o.menge)) return null
+    const passt = (fills || []).filter(f => {
+      if(!f || typeof f.at !== 'number' || f.at <= o.startMs + 1000 || f.at <= o.openMs || f.at <= (o.pulsMs || 0) + 1000 || o.jetzt - f.at > HEDGE_TOAST_FRISCH_MS || f.at > o.jetzt + 1000) return false
+      if(f.seite !== o.seite || Number(f.menge) !== Number(o.menge) || !(Number(f.preis) > 0)) return false
+      if(!f.symbol || tvSymbolWurzel(String(f.symbol)) !== o.wurzel) return false
+      if(!(Number(o.kurs) > 0) || Math.abs(Number(f.preis) - Number(o.kurs)) > HEDGE_TOAST_KURS_PKT) return false   // alte Meldung oder Körpertext: Preis weit weg vom Kurs (S9 02.11.2026)
+      const b = kontoTextBezug(f.konto, o.ext)
+      return b === 'ja' || (b === 'klebt' && kontoTextEindeutig(f.konto, o.ext, o.extIds))
+    })
+    return passt.sort((a, b) => b.at - a.at)[0] || null
+  }
+  window._hedgeToastBeweis = hedgeToastBeweis   // Test-Haken
+  // REIN RECHNEND: was zeigt der Reader NACH dem Toast-Schluss? 'offen' (Position im Plan-Symbol und -Konto) | 'flach' (mit Beweis) | 'unklar' (kein Urteil)
+  function hedgeToastLesung(st, kontoPlan, wurzel, richtung){
+    if(!st || st.an === false || st.positionen_ok !== true || !Array.isArray(st.positionen) || !/^puls-/.test(String(st.positionen_tab || ''))) return 'unklar'
+    if(!(typeof st.positionen_alter_s === 'number' && st.positionen_alter_s <= 1.0) || !readerKontoPasst(st.konto, kontoPlan, st)) return 'unklar'
+    if(st.positionen.some(x => x && x.pnl_unklar)) return 'unklar'
+    return hedgeMasterTeilweise(st.positionen, wurzel, richtung, 1e9) != null ? 'offen' : 'flach'
+  }
+  window._hedgeToastLesung = hedgeToastLesung   // Test-Haken
+  /* WACHE NACH DEM TOAST-SCHLUSS: Das Plan-Ende läuft erst, wenn die Tabelle ≥ 1 s durchgehend flach ist, im Plan-Konto (wie der Flach-Weg). Zeigt sie nach HEDGE_TOAST_WACHE_MS weiter
+   * eine Position, war der Toast falsch oder es kam ein neuer Trade: toast_wache „offen" → sofort 🔴 von Railway, Plan bleibt offen, kein Neu-Öffnen. „unklar" (Puls unterwegs, Konto
+   * gewechselt, Tab neu geladen): nichts beenden, hedgeToastOhneFlach schickt den Plan auf den Beweis-Weg hedgeHandFlachPruefen. Erst nach dem Ende über „flach" gilt die alte
+   * hedgeRueckkehrWache (Master taucht ≤ 180 s später wieder auf → Plan offen, Hedge neu), wie bei jedem Reader-Ende. */
+  const HEDGE_TOAST_WACHE_MS = 8000
+  const _hedgeToastGeloest = new Set(), _hedgeToastMenge = new Map()
+  async function hedgeToastWache(kontoPlan, wurzel, richtung){
+    const ab = Date.now()
+    let flachSeit = 0, letzte = 'unklar'
+    while(Date.now() - ab < HEDGE_TOAST_WACHE_MS){
+      try{ if(typeof window._epLokalHolen === 'function') await window._epLokalHolen() }catch(_){}
+      letzte = hedgeTvUnterwegs() ? 'unklar' : hedgeToastLesung((epLokal && epLokal.stand) || null, kontoPlan, wurzel, richtung)
+      if(letzte !== 'flach') flachSeit = 0
+      else if(!flachSeit) flachSeit = Date.now()
+      else if(Date.now() - flachSeit >= 1000) return 'flach'
+      await new Promise(ok => setTimeout(ok, 250))
+    }
+    return letzte === 'offen' ? 'offen' : 'unklar'
+  }
+  async function hedgeToastSchluss(p, kontoPlan, wurzel, richtung, f){
+    const pid = String(p.id)
+    hedgeMasterWegStempeln(p, 'fill', f.at)   // 'fill' = Exit-Fill-Meldung, Radar und Grund kennen das (hedgeGrundEcht)
+    const rs = await hedgeSoloSchliessen(p, 'master_ende_reader', null, { toast_beweis_at: new Date(f.at).toISOString() })
+    if(!(rs && rs.ok)){                            // Close nicht durch: Hedge bleibt offen, der Flach-Weg und die 1-s-Wache übernehmen. Stempel zurück, sonst stimmt master_weg_quelle nicht und hedgeToastOhneFlach sperrt später
+      _hedgeWegGestempelt.delete(pid)
+      try{ await hedgeAmPlanSchreiben(p.id, Object.assign({}, HEDGE_WEG_LEER, { toast_beweis_at: null })) }catch(_){}
+      return
+    }
+    const urteil = await hedgeToastWache(kontoPlan, wurzel, richtung)
+    try{ await hedgeAmPlanSchreiben(p.id, { toast_wache: { urteil, at: new Date().toISOString(), fill_at: new Date(f.at).toISOString(), menge: Number(f.menge), preis: Number(f.preis) } }) }catch(_){}
+    if(urteil === 'flach'){ await hedgeMasterWegAusfuehren(tradePlans.find(x => String(x.id) === pid) || p, kontoPlan, null, null); return }   // frische Zeile: Hedge steht dort auf 'geschlossen', kein zweiter Close
+    if(urteil === 'offen' && typeof atToast === 'function') atToast(`🔴 Fusion ist zu, die Tabelle zeigt nach ${HEDGE_TOAST_WACHE_MS / 1000} s noch eine Position (${p.masterName || pid.slice(0, 8)}) — in TradingView prüfen`, 'end')
+  }
   async function hedgeReaderSchnellTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
     if(_hedgeSchnellBusy || !(MT5_LOCAL && typeof window.mtcApi === 'function')) return
@@ -32537,7 +32636,26 @@
           continue
         }
         if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
-        if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){
+        // HEDGE-SCHNELLER (02.11.2026): bewiesene Exit-Fill-Meldung → Fusion sofort zu, ohne await (hält andere Pläne dieses PCs nicht auf). Dieselben Konto-Riegel wie der Flach-Weg:
+        // Reader steht jetzt im Plan-Konto (nie nur gekürzt), Konto ≥ 2 s stabil, Position in diesem Konto-Zeitraum gesehen, kein zweiter offener Plan im Konto, Fill nicht aus einem Puls-Lauf
+        const mengeJetzt = hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9)
+        if(mengeJetzt != null) _hedgeToastMenge.set(pid, Math.max(_hedgeToastMenge.get(pid) || 0, mengeJetzt))   // größte gesehene Menge: Zukauf, dann Teilverkauf ist nie „voll"
+        hedgeToastSchalterHolen()
+        const kontoMs = jetzt - _hedgeSchnellKonto.get(pid)
+        if(hedgeToastAn() && richtung && p.status === 'open' && readerKontoPasst(st.konto, kontoPlan, st) && kontoMs >= 2000
+           && (kontoMs >= 90000 || (_hedgeSchnellGesehenAt.get(pid) || 0) >= _hedgeSchnellKonto.get(pid))
+           && _hedgeMasterGesehen.has(pid) && !_hedgeToastGeloest.has(pid) && !_hedgeWegLaeuft.has(pid)
+           && hedgeToastVersionOk(st) && !hedgeToastNachbar(tp, p, wz, pc)){
+          const tf = hedgeToastBeweis(st.fills, { kurs: hedgeKursDerWurzel(wz) || hedgeKursDerWurzel(wz === 'MNQ' ? 'NQ' : 'MNQ'), ext: kontoPlan, extIds: kontoExtIds(), seite: richtung === 'buy' ? 'sell' : 'buy', menge: Number(p.masterContracts), wurzel: wz,
+            startMs: Date.parse(p.startedAt || h.opened_at || h.at || '') || 0, openMs: Date.parse(h.opened_at || h.at || '') || 0, pulsMs: _pulsAktivAt, jetzt: Date.now(), offen: _hedgeToastMenge.get(pid) })
+          if(tf){
+            _hedgeToastGeloest.add(pid); _hedgeSchnellLeer.delete(pid)
+            console.info('[hedgeSchnell] Exit-Fill bewiesen — Fusion wird geschlossen', p.masterName || pid, tf.text || '')
+            hedgeToastSchluss(p, kontoPlan, wz, richtung, tf).catch(e => console.warn('[hedgeSchnell] Toast-Schluss', (e && e.message) || e))
+            continue
+          }
+        }
+        if(mengeJetzt != null){
           _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid); kurzFensterNeu(pid, wz)
           // READER-BLIND-PNL (02.11.2026): P&L der Zeile leer, Position lesbar — höchstens alle 60 s die Spalten am Hedge, damit die Ursache belegt wird
           const ohnePnl = st.positionen.find(x => x && x.pnl_unklar && x.pnl_beleg)

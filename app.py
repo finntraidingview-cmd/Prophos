@@ -3952,6 +3952,12 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
             elif hst in HEDGE_LEBT and h.get("close_fehler"):
                 out.append((f"{pid}|close_fehler", 1, "hedge_close_fehler", "Hedge-Close scheitert",
                             f"{wer} · {konto}: {lots} — {str(h.get('close_fehler'))[:120]}", uid, pid))
+        # HEDGE-SCHNELLER (02.11.2026, hedgeToastSchluss im PC-Tab): Exit-Fill-Meldung schloss Fusion, die Tabelle zeigt nach 8 s weiter eine Position → 🔴 einmal je Plan
+        tw = h.get("toast_wache") if isinstance(h.get("toast_wache"), dict) else {}
+        if tw.get("urteil") == "offen" and str(tw.get("at") or "") > seit_iso:
+            out.append((f"{pid}|toast_offen", 1, "hedge_toast_offen", "Hedge zu, Master offen",
+                        f"{wer} · {konto}: Fill-Meldung {tw.get('menge')} @ {tw.get('preis')} hat Fusion geschlossen, die Tabelle zeigt nach 8 s noch eine "
+                        f"Position — in TradingView prüfen, sonst Hedge auf der Karte von Hand öffnen.", uid, pid))
         # HEDGE ZU SPÄT (30.10.2026, hedgeSpaetVermerken im PC-Tab): Order älter als 90 s, der Tab öffnet nicht mehr von selbst → 🔴 einmal je Plan;
         # läuft der Master weiter, erinnert ohne_hedge oben im Takt
         if hst == "uebersprungen" and h.get("grund_code") == "zu_spaet" and str(h.get("at") or "") > seit_iso:
