@@ -56,6 +56,9 @@ begin
   if ss->>'art' = 'echo_hedge' and (ss->>'at')::timestamptz > now() - interval '1 minute' then
     return null;                                  -- Mehrfach-Claim: schon eben gehalten, nicht neu schieben
   end if;
+  if ss->>'art' = 'echo_hedge' and ss->>'status' = 'aufgegeben' then
+    return null;                                  -- aufgegeben bleibt aufgegeben (Stopp S17): sonst entschiede der Würfel beim nächsten Claim neu, obwohl ⚪ „neu planen“ schon raus ist
+  end if;
   erst := coalesce(ss->>'art', '') <> 'echo_hedge';
   erst_at := case when erst then now() else coalesce((ss->>'erst_at')::timestamptz, now()) end;
   txt := 'Echo-Hedge nicht rechenbar: ' || left(coalesce(eh->>'grund', '?'), 160);
