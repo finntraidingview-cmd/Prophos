@@ -27,7 +27,7 @@ def block(name):
 
 ns = {"re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta}
 konst = [re.search(rf"^{k} = .*$", SRC, re.M).group(0) for k in ("AP_NACHT_STANDARD", "AP_TZ_TAG")]
-exec("\n".join(konst) + "\n" + "\n\n".join(block(n) for n in ("_ap_tz", "_cme_handelstag", "ap_nacht_param", "ap_nacht_lauf_um", "ap_nacht_ziel", "fd_plan_tag")), ns)
+exec("\n".join(konst) + "\n" + "\n\n".join(block(n) for n in ("_ap_tz", "_cme_handelstag", "ap_nacht_param", "ap_nacht_lauf_um", "ap_nacht_ziel", "fd_plan_tag", "fd_fenster_basis")), ns)
 T, CME = ns["fd_plan_tag"], ns["_cme_handelstag"]
 u = lambda s: datetime.fromisoformat(s).replace(tzinfo=timezone.utc)   # noqa: E731
 
@@ -43,6 +43,24 @@ check(T(u("2026-11-08T21:30:00"), CME("2026-11-08T21:45:00Z"), {}) == "2026-11-0
 check(T(u("2026-11-02T22:11:00"), fenster, {"nachtlauf": {"uhr": "03:00", "tz": "Asia/Dubai"}}) == "2026-11-02", "Nachtlauf-Uhr aus den Regeln (03:00 Dubai): vorher noch 02.11.")
 check(T(u("2026-11-02T22:11:00"), "2026-11-04", {}) == "2026-11-04", "nie hinter den CME-Tag zurück (max)")
 check(T(u("2026-11-02T22:11:00"), fenster, "kaputt") == "2026-11-03", "kaputte zeiten → Standard-Nachtlauf")
+
+# Funded-CFD-Lauf 1124 (02:26 Dubai, Fenster in Dubai-Zeit): Tag 03.11., Slots ab 03:00 Dubai erlaubt (im_tag), Fenster nicht verschoben
+FB = ns["fd_fenster_basis"]
+dub, ber = ns["_ap_tz"]("Asia/Dubai"), ns["_ap_tz"]("Europe/Berlin")
+jetzt = u("2026-11-02T22:26:00")
+mn = jetzt.astimezone(dub).replace(hour=0, minute=0, second=0, microsecond=0)
+tag = T(jetzt, CME((mn + timedelta(minutes=161)).astimezone(timezone.utc).isoformat()), {})
+m2, ab2 = FB(mn, 161.0, 120, tag, dub)
+check(tag == "2026-11-03" and m2 == mn and ab2 == 161.0, "Lauf 1124 (Dubai-Fenster): Tag 03.11., Fenster ab jetzt wie bisher")
+slot = CME((m2 + timedelta(minutes=600)).astimezone(timezone.utc).isoformat())
+check(slot == "2026-11-03" and CME((m2 + timedelta(minutes=170)).astimezone(timezone.utc).isoformat()) == "2026-11-02",
+      "Slot 10:00 Dubai zählt zum 03.11. (vorher alle verworfen → „kein freier Slot“), 02:50 Dubai bleibt gesperrt (CME-Grenze)")
+# Fenster in deutscher Zeit: Nachtlauf 23:00 dt plant den 03.11., lokal ist noch der 02.11. → Fenster ab 03.11. 00:00 dt + von
+mb = jetzt.astimezone(ber).replace(hour=0, minute=0, second=0, microsecond=0)
+m3, ab3 = FB(mb, 1420.0, 60, "2026-11-03", ber)
+check(m3.date().isoformat() == "2026-11-03" and ab3 == 60.0, f"Fenster in dt: Basis 03.11. 00:00, ab Fensterbeginn ({m3}, {ab3})")
+check(FB(mb, 1420.0, 60, "kaputt", ber) == (mb, 1420.0), "ungültiger Tag → unverändert")
+check(SRC.count("= fd_fenster_basis(mitternacht, ab_min, von_min,") == 2, "beide Planer verschieben das Fenster")
 
 # beide Planer nutzen ihn, die Startzeit-Grenze (im_tag) bleibt am CME-Tag
 check("cme_heute = fd_plan_tag(jetzt, _cme_handelstag(" in SRC and "plan_tag = fd_plan_tag(jetzt, _cme_handelstag(" in SRC, "fdp_planen und fcp_planen rufen fd_plan_tag")

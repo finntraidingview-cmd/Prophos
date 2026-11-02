@@ -37454,6 +37454,19 @@ def fd_plan_tag(jetzt, cme_fenster, ap_zeiten):
     return max(tage) if tage else cme_fenster
 
 
+def fd_fenster_basis(mitternacht, ab_min, von_min, plan_tag, tz):
+    """REIN RECHNEND (testbar): Fenster-Basis zum Planungstag (Eingang 03.11.2026, Funded-CFD-Lauf 1124 um 02:26 Dubai: „kein freier Slot mehr im Fenster heute",
+    das Fenster vom 02.11. war vorbei). Liegt der Planungstag (fd_plan_tag) in der Zone des Fensters noch in der Zukunft — z. B. Fenster in deutscher Zeit, Nachtlauf
+    um 23:00 dt —, rechnen Startzeiten ab Mitternacht DIESES Tages und ab dem Fensterbeginn; sonst bleibt alles, wie es ist (Dubai: dort ist es schon der Tag)."""
+    try:
+        t = datetime.strptime(str(plan_tag)[:10], "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return mitternacht, ab_min
+    if mitternacht.date() < t.date():
+        return datetime(t.year, t.month, t.day, tzinfo=tz), float(von_min)
+    return mitternacht, ab_min
+
+
 def fdp_je_groesse(regel, groesse):
     """Werte je Kontogröße aus der Firmen-Regel (ziel_gewinn, max_trade, kosten_eur, dd) oder None."""
     if not regel or not groesse:
@@ -37815,6 +37828,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
     ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
     cme_heute = fd_plan_tag(jetzt, _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat()), ap_zeiten)   # 03.11.2026, s. fd_plan_tag
+    mitternacht, ab_min = fd_fenster_basis(mitternacht, ab_min, von_min, cme_heute, tz)
     max_je_id = int(_wd_num(zeiten.get("max_je_id_tag")) or 2)
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 90)
@@ -38715,6 +38729,7 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
     jetzt_min = (lokal - mitternacht).total_seconds() / 60.0
     ab_min = max(float(von_min), jetzt_min + float(_wd_num(zeiten.get("vorlauf_min")) or 15))
     plan_tag = fd_plan_tag(jetzt, _cme_handelstag((mitternacht + timedelta(minutes=ab_min)).astimezone(timezone.utc).isoformat()), ap_zeiten)   # 03.11.2026, s. fd_plan_tag
+    mitternacht, ab_min = fd_fenster_basis(mitternacht, ab_min, von_min, plan_tag, tz)
     f_abst = float(_wd_num(zeiten.get("firma_abstand_min")) or 15)
     id_abst = float(_wd_num(zeiten.get("abstand_id_min")) if zeiten.get("abstand_id_min") is not None else 10)
     hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"   # noqa: E731
