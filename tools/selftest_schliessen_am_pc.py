@@ -274,5 +274,36 @@ w = SRC[SRC.index("def scharf_spur("):SRC.index("def scharf_konto_bezug(")]
 check('open(SCHARF_SPUR_PFAD, "a"' in w and "with SCHARF_SPUR_LOCK:" in w, "anhängen statt neu schreiben, ein Lock für Handler und Wache")
 r = SRC[SRC.index("def _scharf_runde("):SRC.index("def _scharf_wache():")]
 check(r.index("_scharf_close_senden(e2)") < r.index('scharf_spur(e.get("ticket"), "Lage"'), "Lage-Zeile erst nach dem Close-Auftrag (Datei-Sperre bremst den Close nie)")
+# NACHSCHÄRFEN (Eingang 02.11.2026): Exit-Fill → schon bei der ersten flachen Lesung; Takt 0,05 s. Zeiten wie die Spuren (Exit = 0):
+# Jacob 98c946a0 erste flache Lesung +0,35 s (Mike e8f2c337, Jacob e6fadf3b ähnlich)
+def spur(fill, erste_flach=0.35, takt=0.05, **fk):
+    if os.path.exists(ns["SCHARF_PFAD"]):
+        os.remove(ns["SCHARF_PFAD"])
+    ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ", "nachbarn": [ID], "richtung": "buy", "menge": 1}, "98c946a0", 990, READER)
+    uhr[0] += 5
+    lauf([lambda: stand(pos=POS)] * 3, takt)
+    exit_t = uhr[0]
+    while uhr[0] < exit_t + erste_flach:
+        ns["_scharf_runde"](stand(pos=POS), uhr[0]); uhr[0] += takt
+    f = dict({"tab_id": "puls-mvz4o89y50p23m", "seite": "sell", "menge": 1, "preis": 28774.5, "at": (exit_t + 0.10) * 1000, "symbol": "MNQZ6",
+              "konto": ID, "art": "market"}, **fk) if fill else None
+    t = lauf([lambda: dict(stand(), fills=[f] if f else [])] * 40, takt)
+    return None if t is None else t - exit_t
+d_fill, d_ohne = spur(True), spur(False)
+check(d_fill is not None and d_fill <= 0.45, f"mit Exit-Fill: CLOSE {d_fill:.2f} s nach dem Exit (Ziel ≤ 0,45 s)" if d_fill is not None else "mit Exit-Fill")
+check(d_ohne is not None and d_ohne <= 0.75, f"ohne Fill: 2 flache Lesungen über 0,3 s → CLOSE {d_ohne:.2f} s nach dem Exit" if d_ohne is not None else "ohne Fill")
+check(ns["SCHARF_TAKT_S"] == 0.05 and ns["SCHARF_FLACH_LESUNGEN"] == 2 and ns["SCHARF_FLACH_S"] == 0.3, "Takt 0,05 s, Grundregel 2 Lesungen über 0,3 s")
+for name, fk in (("Gleichrichtung", {"seite": "buy"}), ("Teilmenge", {"menge": 2}), ("alt (5 s)", {"at": (uhr[0] - 100) * 1000}),
+                 ("normales Chrome", {"tab_id": "t1abc"}), ("anderes Konto", {"konto": "FTDFYSLX150811169999"}), ("andere Wurzel", {"symbol": "NQZ6"})):
+    d = spur(True, **fk)
+    check(d is not None and d > 0.6, f"Fill passt nicht ({name}) → keine Abkürzung, Grundregel ({d:.2f} s)" if d is not None else f"Fill {name}")
+if os.path.exists(ns["SCHARF_PFAD"]):
+    os.remove(ns["SCHARF_PFAD"])
+ns["scharf_setzen"]({"ext_id": ID, "wurzel": "MNQ", "nachbarn": [ID]}, "alt", 991, READER)
+e_alt = ns["scharf_laden"]()[0]
+check(ns["scharf_exit_fill"](e_alt, {"fills": [{"tab_id": "puls-x", "seite": "sell", "menge": 1, "at": uhr[0] * 1000, "konto": ID}]}, uhr[0]) is None,
+      "Eintrag ohne richtung/menge (alter Tab) → nie Abkürzung")
+check("richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null, menge: Number(plan.masterContracts) || null" in HTML,
+      "Tab schickt richtung und menge mit scharf")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)

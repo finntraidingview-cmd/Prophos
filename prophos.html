@@ -29817,7 +29817,9 @@
       if(!ext) return null
       const sym = (plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || plan.masterSymbol || ''
       const wurzel = ((typeof tvSymbolWurzel === 'function') && tvSymbolWurzel(sym)) || 'NQ'
-      return { ext_id: ext, wurzel, nachbarn: (accounts || []).filter(a => a && !a._fremd).map(a => a.externalId).filter(Boolean) }
+      // richtung + menge (Eingang 02.11.2026): damit erkennt das Panel den Exit-Fill der Gegenseite (Toast) und schließt schon bei der ersten flachen Lesung
+      return { ext_id: ext, wurzel, nachbarn: (accounts || []).filter(a => a && !a._fremd).map(a => a.externalId).filter(Boolean),
+               richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null, menge: Number(plan.masterContracts) || null }
     }catch(_){ return null }
   }
   // SCHARF NACHHOLEN (02.11.2026, Eingang nach Chris a6f5c630): ein offener TV-Hedge dieses PCs, den das Panel nicht kennt (Open auf altem Build, Panel neu …),
@@ -54546,7 +54548,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1999'
+  const OS_TAB_BUILD = '2026-09-22.2000'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

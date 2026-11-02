@@ -2147,7 +2147,8 @@ def _tab_oeffnen(url=TAB_URL, lock_gehalten=False):
 # Ort Panel statt reader-server: das Panel läuft dauerhaft, schreibt ohnehin die Copier-Aufträge und hält die Puls-Locks. ══
 SCHARF_PFAD = os.path.join(HERE, "hedge_scharf.json")
 SCHARF_LOCK = threading.Lock()
-SCHARF_TAKT_S = 0.1
+SCHARF_TAKT_S = 0.05   # Eingang 02.11.2026 (Jacob 98c946a0 ≈ 1,0 s): 0,1 → 0,05 s, spart bis 0,05 s bis zur ersten flachen Lesung
+SCHARF_FILL_FRISCH_S = 3.0   # Exit-Fill zählt, wenn er höchstens so alt ist
 SCHARF_FLACH_S = 0.3
 SCHARF_FLACH_LESUNGEN = 2
 SCHARF_OFFEN_MIN_S = 3.0
@@ -2271,6 +2272,37 @@ def _scharf_wurzel_da(st, wurzel):
     return False
 
 
+def scharf_exit_fill(e, st, jetzt, beleg=None):
+    """REIN RECHNEND (testbar, Eingang 02.11.2026 „Nachschärfen“): ein Exit-Fill im Reader-Stand (fills, Userscript ≥ 0.10.2 im Puls-Chrome) für diesen
+    Eintrag? Gegenseite der Plan-Richtung, volle Plan-Menge, Wurzel passt (wenn die Meldung ein Symbol trägt), Konto des Fills sicher wie das Reader-Konto
+    (scharf_konto_sicher mit Beleg), frisch (≤ SCHARF_FILL_FRISCH_S) und nach dem Open. Ohne richtung/menge am Eintrag (alter Tab) → nie. → Fill | None"""
+    r, menge = str(e.get("richtung") or ""), e.get("menge")
+    if r not in ("buy", "sell") or not isinstance(menge, (int, float)) or menge <= 0:
+        return None
+    gegen = "sell" if r == "buy" else "buy"
+    for f in reversed((st or {}).get("fills") or []):
+        if not isinstance(f, dict) or f.get("seite") != gegen:
+            continue
+        try:
+            at_s = float(f.get("at")) / 1000.0
+            mf = float(f.get("menge"))
+        except (TypeError, ValueError):
+            continue
+        if abs(mf - float(menge)) > 1e-9 or not (jetzt - SCHARF_FILL_FRISCH_S <= at_s <= jetzt + 1.0) or at_s <= float(e.get("at") or 0):
+            continue
+        sym = str(f.get("symbol") or "").upper()
+        if sym:
+            fw = "MNQ" if sym.startswith("MNQ") else "NQ" if sym.startswith("NQ") else ""
+            if fw != str(e.get("wurzel") or "").upper():
+                continue
+        if not str(f.get("tab_id") or "").startswith("puls-"):
+            continue
+        if not scharf_konto_sicher(f.get("konto"), e.get("ext_id"), e.get("nachbarn"), beleg):
+            continue
+        return f
+    return None
+
+
 def scharf_entscheid(e, st, jetzt, beleg=None):
     """REIN RECHNEND (testbar): ein scharfer Eintrag + Reader-Stand → (zu: bool, e_neu, grund). e: {at, ext_id, wurzel, nachbarn, gesehen,
     flach_seit, flach_ts[]}. Jede unsichere Lesung setzt die Flach-Strecke zurück, ein Kontowechsel auch „gesehen“ (muss im Konto neu gesehen werden)."""
@@ -2303,6 +2335,11 @@ def scharf_entscheid(e, st, jetzt, beleg=None):
     e.update(flach_seit=e.get("flach_seit") or jetzt, flach_ts=lesungen[-5:])
     if jetzt - float(e.get("at") or 0) < SCHARF_OFFEN_MIN_S:
         return False, e, "Hedge jünger als 3 s"
+    # EXIT-FILL (Eingang 02.11.2026): passender Toast der Gegenseite im sicheren Konto → schon bei der ERSTEN flachen Lesung (spart 0,3–0,35 s)
+    fill = scharf_exit_fill(e, st, jetzt, beleg)
+    if fill:
+        return True, e, (f"Master weg im Konto {e.get('ext_id')} (erste flache Lesung + Exit-Fill {fill.get('seite')} {fill.get('menge')} @ {fill.get('preis')}, "
+                         f"{jetzt - float(fill.get('at')) / 1000.0:.2f} s alt)")
     if len(lesungen) >= SCHARF_FLACH_LESUNGEN and jetzt - e["flach_seit"] >= SCHARF_FLACH_S:
         return True, e, f"Master weg im Konto {e.get('ext_id')} ({len(lesungen)} flache Lesungen über {jetzt - e['flach_seit']:.2f} s)"
     return False, e, "flach, noch nicht bestätigt"
@@ -2342,7 +2379,13 @@ def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
         scharf_spur(ticket, "NICHT gemerkt", f"Daten unvollständig (Konto {ext or '?'}, Wurzel {wurzel or '?'})")
         return False
     nb = sch.get("nachbarn")
+    r = str(sch.get("richtung") or "").strip().lower()
+    try:
+        menge = float(sch.get("menge")) if sch.get("menge") is not None else None
+    except (TypeError, ValueError):
+        menge = None
     e = {"plan_id": str(plan_id or "")[:64], "ticket": int(ticket), "ext_id": ext, "wurzel": wurzel,
+         "richtung": r if r in ("buy", "sell") else None, "menge": menge if (menge and menge > 0) else None,
          "nachbarn": [str(x).strip()[:60] for x in nb][:80] if isinstance(nb, list) else [], "at": time.time(),
          "gesehen": False, "flach_seit": None, "flach_ts": [], "status": "offen"}
     with SCHARF_LOCK:
