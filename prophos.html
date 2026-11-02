@@ -67169,10 +67169,18 @@
         const { data: { session } } = await supabase.auth.getSession(), tok = session?.access_token
         if(!tok) return false
         const q = o.admin ? '?ansicht=admin' : `?ids=${encodeURIComponent((o.ids || []).join(','))}`
-        const r = await fetch(`${WATCHER_HOME}/wd-zyklus${q}`, { headers: { 'sb-token': tok }, cache: 'no-store' })
-        if(r.status === 404){ st.geladen = true; st.at[art] = Date.now(); return false }
-        if(!r.ok) return false
-        const d = await r.json().catch(() => null), neu = (d && d.zyklus) || {}
+        // 12 s wie ladeRail (Prüfer S16, 02.11.2026): wdTick wartet unter _wd.laeuft hierauf, ein hängendes Railway legte sonst Farmer, Rückfall und Nachziehen am PC-Tab still
+        // Timer bis nach dem Body: auch eine hängende Antwort bricht ab. Unlesbare Antwort = Fehler, nicht „keine Regel" (Stand bleibt)
+        const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 12000)
+        let r, d = null
+        try{
+          r = await fetch(`${WATCHER_HOME}/wd-zyklus${q}`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+          if(r.status === 404){ st.geladen = true; st.at[art] = Date.now(); return false }
+          if(!r.ok) return false
+          d = await r.json()
+        }finally{ clearTimeout(tm) }
+        if(!d || !d.ok) return false
+        const neu = d.zyklus || {}
         const vorher = JSON.stringify(st.map)
         for(const id of (o.admin ? Object.keys(st.map) : o.ids)) if(!neu[id]) delete st.map[id]
         Object.assign(st.map, neu)
