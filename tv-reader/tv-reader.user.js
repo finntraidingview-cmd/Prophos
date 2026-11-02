@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.8
+// @version      0.10.7
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,7 +28,6 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
-//   0.10.8 02.11.2026  SCHLUSS EINFACH (Finn: „direkt schliessen, Kontoerkennung, indem man auf den Puls draufklickt“): flach = Reiter Positions aktiv, Tabelle da, keine Zeile, kein Laden-/Fehlertext. Kein Leer-Text mehr noetig; leer_beweis sagt den strengeren Lesern, ob er da war.
 //   0.10.7 02.11.2026  HEDGE-SCHNELLER (Finn: „zack direkt auf Fusion durch“): Order-Meldungen im Puls-Chrome alle ~0,1 s, sie loesen dort den Fusion-Schluss aus. Eine Meldung gibt genau einen Fill. Was beim Start im DOM steht, und jede schon gesehene Meldung, gilt 8 h nie als neu (Sperre im GM-Speicher, ueberlebt Neuladen und neuen Tab). Teil-Fill zaehlt nicht. Zeile ohne P&L ist nur bei aktivem Reiter Positions nicht blind.
 //   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
 //   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
@@ -193,7 +192,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.8';
+  const VERSION    = '0.10.7';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   // 0.10.4 (30.10.2026, Simon pc-pmqd8g): der Schalter fehlte nach einer Tampermonkey-Neuinstallation (Abzeichen „● Reader · 1 Pos" statt
@@ -1241,23 +1240,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   }
   // REIN RECHNEND (Selbsttest, 0.10.7): wie viele Zeilen ohne P&L machen die Lesung blind?
   function unklarBlind(befund, reiterPositions) { return reiterPositions ? (befund.unklar_fest || 0) : (befund.unklar || 0); }
-  // REIN (Selbsttest, 0.10.8): flach nur, wenn der Reader keine Zeile gelesen hat, die Tabelle da ist, keine Datenzeile in ihr steht (Zeile mit mehr als einer gefuellten Zelle, wie leerStrukturPasst)
-  // und nichts nach Laden/Verbinden/Fehler klingt. Stopp S9: aendert TradingView die Tabelle (kein data-label, Filter verwirft die Zeile), waere sonst jede offene Position „weg“.
-  function tabelleFlach(befund, tabelle) {
-    if (!befund || befund.zeilen !== 0 || !tabelle) return false;
-    let tds, zeilen; try { tds = tabelle.querySelectorAll('td'); zeilen = tabelle.querySelectorAll('tr'); } catch (_) { return false; }
-    if (!tds || !zeilen) return false;
-    for (const tr of zeilen) {
-      let zellen; try { zellen = tr.querySelectorAll('td'); } catch (_) { return false; }
-      let n = 0;
-      for (const td of (zellen || [])) if (String(td.textContent || '').trim() && ++n > 1) return false;
-    }
-    const rest = [...tds].map((td) => String(td.textContent || '')).join(' ').replace(/\s+/g, ' ').trim();
-    return !RX_LEER_NICHT.test(rest) && !/\d/.test(rest);   // Ziffer = moeglicher Wert einer Zeile, wie leerStrukturPasst (S9)
-  }
-  let leerBeweisMerk = true;   // 0.10.8: fuer leer_beweis im Payload — die anderen Leser (1-s-Waechter, Master-nie-da, Neuladen) bleiben beim Leer-Text
   function blindGrund(positionen) {
-    leerBeweisMerk = true;
     if (PULS_CHROME) {   // 0.9.3: strenger — ohne Konto kein Urteil, flach nur mit Beweis (auch verdeckt)
       // 0.10.4: jede Lesung OHNE Leer-Beweis-Versuch (kein Konto, unklar, Position da) verwirft die erste Struktur-Lesung — die zweite
       // muss unmittelbar auf eine leere folgen, nie ueber eine Position oder einen Kontowechsel hinweg
@@ -1278,9 +1261,6 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       // den Blind-Heimweg weg, wenn Puls belegt im Plan-Konto steht; sonst blockierte der Heimweg 1–4 min den Hedge-Schluss, Simon 30.10.)
       let reiterAn = false;
       try { const r = document.getElementById('positions'); reiterAn = !!(r && r.getAttribute('aria-selected') === 'true'); } catch (_) {}
-      let tabelleOk = false;
-      try { tabelleOk = reiterAn && tabelleFlach(leseBefund, document.querySelector(SEL_POS_TABELLE)); } catch (_) {}
-      if (tabelleOk) { leerBeweisMerk = false; return null; }   // 0.10.8: Reiter + leere Tabelle reichen
       // das AKTUELLE Konto steht beim Leer-Text-Grund dabei: der reader-server friert bei blind den Stand ein (konto = letztes sehendes
       // Konto) — ohne diese Angabe saehe die Heim-Wache einen Handwechsel in ein fremdes Konto nicht (Pruefung 30.10.2026)
       return reiterAn ? 'kein Leer-Beweis: Leer-Text nicht erkannt | Konto: ' + String(kontoMerk.text || '').slice(0, 64)
@@ -1918,7 +1898,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     // Konto; der reader-server nimmt von ihm nur Kurse/Kerzen (ein fehlendes Feld ist nie 'flach')
     const posFelder = rolle === 'broker' ? {
       positionen,
-      blind: !!blind, blind_grund: blind || '', leer_beweis: leerBeweisMerk,
+      blind: !!blind, blind_grund: blind || '',
       // 0.8.3: Beweis-Felder fuer den Master-zu-Waechter — positionen_ts nur bei VOLLSTAENDIGER
       // Lesung (nicht blind), positionen_ok = diese Liste ist eine Aussage; konto aus dem Umschalter
       positionen_ts: blind ? null : Date.now(),
@@ -2014,7 +1994,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.8';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.7';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

@@ -10,7 +10,8 @@ import tempfile
 W = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JSC = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
 HTML = open(os.path.join(W, "prophos.html"), encoding="utf-8").read()
-US = open(os.path.join(W, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()
+US = open(os.path.join(W, "tools", "userscript-test", "tv-reader-0.10.8.user.js"), encoding="utf-8").read()   # bis zum Rollout nur Testgerät
+MAIN = open(os.path.join(W, "tv-reader", "tv-reader.user.js"), encoding="utf-8").read()
 FEHLER = []
 
 
@@ -32,9 +33,9 @@ def fn(src, name):
 
 
 RX_NICHT = [z for z in US.split("\n") if z.strip().startswith("const RX_LEER_NICHT")][0]
-JS = "\n".join(["const KONTO_KURZ_MIN = 12, HEDGE_EINFACH_LEER_MS = 300, HEDGE_EINFACH_LESUNGEN = 2", RX_NICHT, "let _kontoBeleg = { ext: '', at: 0 }, _beleg = false, _ids = []",
+JS = "\n".join(["const KONTO_KURZ_MIN = 12, HEDGE_EINFACH_LEER_MS = 300, HEDGE_EINFACH_LESUNGEN = 2, HEDGE_TOAST_MIN_VERSION = '0.10.7', HEDGE_EINFACH_MIN_VERSION = '0.10.8'", "const hedgeReaderEinfachAn = st => hedgeToastVersionOk(st, HEDGE_EINFACH_MIN_VERSION)", RX_NICHT, "let _kontoBeleg = { ext: '', at: 0 }, _beleg = false, _ids = []",
                 "const kontoExtIds = () => _ids, kontoBelegGilt = () => _beleg"]
-               + [fn(HTML, n) for n in ("hedgeKontoPasst", "kontoTextBezug", "kontoTextEindeutig", "tvSymbolWurzel", "hedgeReaderEinfachKonto", "hedgeReaderEinfachEntscheid")]
+               + [fn(HTML, n) for n in ("hedgeToastVersionOk", "hedgeKontoPasst", "kontoTextBezug", "kontoTextEindeutig", "tvSymbolWurzel", "hedgeReaderEinfachKonto", "hedgeReaderEinfachEntscheid")]
                + [fn(US, "tabelleFlach"), r"""
 const B = x => Object.assign({ unterwegs: '', kontoOk: true, liste: [], wurzel: 'MNQ', sekundenSeitOpen: 60, gesehenImZeitraum: true, leerSeitMs: 400, lesungen: 3 }, x || {})
 const E = x => hedgeReaderEinfachEntscheid(B(x))
@@ -60,6 +61,9 @@ _ids = ['TDFYSL150000000000']; o.klebt = hedgeReaderEinfachKonto('TDFYSL15000000
 o.t_leer = tabelleFlach(B0, T()); o.t_nothing = tabelleFlach(B0, T(['Nothing to show yet'])); o.t_make = tabelleFlach(B0, T(['Make your first trade']))
 o.t_laedt = tabelleFlach(B0, T(['Loading…'])); o.t_conn = tabelleFlach(B0, T(['Connecting to broker'])); o.t_fehler = tabelleFlach(B0, T(['Something went wrong'])); o.t_keine = tabelleFlach(B0, null)
 o.t_daten = tabelleFlach(B0, T(['MNQZ6', 'Buy', '3', '28,700.25', '+120.00 USD'])); o.t_zwei = tabelleFlach(B0, T(['', '3', '28,700.25'])); o.t_ziffer = tabelleFlach(B0, T(['28,700.25'])); o.t_zeile_gelesen = tabelleFlach({ zeilen: 1 }, T()); o.t_ohne_befund = tabelleFlach(null, T())
+const V = v => ({ positionen_tab: 'p', tabs: [{ tab_id: 'p', version: v }] })
+o.v8 = hedgeReaderEinfachAn(V('0.10.8')); o.v9 = hedgeReaderEinfachAn(V('0.11.0')); o.v7 = hedgeReaderEinfachAn(V('0.10.7')); o.v_leer = hedgeReaderEinfachAn(V('')); o.v_fremd = hedgeReaderEinfachAn({ positionen_tab: 'p', script_version: '0.10.8', tabs: [{ tab_id: 'x', version: '0.10.8' }, { tab_id: 'p', version: '0.10.7' }] }); o.v_ohne = hedgeReaderEinfachAn({})
+o.toast7 = hedgeToastVersionOk(V('0.10.7')); o.toast6 = hedgeToastVersionOk(V('0.10.6'))
 print(JSON.stringify(o))
 """])
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as t:
@@ -85,10 +89,17 @@ check(not (e["t_laedt"] or e["t_conn"] or e["t_fehler"] or e["t_keine"]), "Laden
 check(not (e["t_daten"] or e["t_zwei"] or e["t_ziffer"]), "Tabelle mit Datenzellen ohne data-label oder einzelner Ziffer: blind, nie flach")
 check(not (e["t_zeile_gelesen"] or e["t_ohne_befund"]), "Reader las eine Zeile oder kein Befund: nie flach")
 _m = HTML[HTML.index("function hedgeReaderMasterDa("):HTML.index("window._hedgeReaderMasterDa")]
-check("!hedgeReaderEinfachKonto(st.konto, kontoPlan)" in _m and _m.index("hedgeMasterTeilweise") < _m.index("st.leer_beweis === false || !readerKontoPasst"), "Rückkehr-Wache kennt gekürzte Konten; „flach“ nur mit Leer-Text und voll belegtem Konto")
+check("hedgeReaderEinfachAn(st) ? hedgeReaderEinfachKonto(st.konto, kontoPlan) : readerKontoPasst(st.konto, kontoPlan, st)" in _m and _m.index("hedgeMasterTeilweise") < _m.index("st.leer_beweis === false || !readerKontoPasst"), "Rückkehr-Wache kennt gekürzte Konten; „flach“ nur mit Leer-Text und voll belegtem Konto")
 i = HTML.index("async function hedgeReaderSchnellTick(")
 t = HTML[i:HTML.index("setInterval(hedgeReaderSchnellTick, 50)", i)]
-check("hedgeMasterWegEntscheid(" not in t and "kurzEndeSperrt(" not in t and "!hedgeReaderEinfachKonto(st.konto, kontoPlan)" in t, "Tick nutzt die einfache Regel, Balance entscheidet nicht")
+check(e["v8"] and e["v9"] and not any(e[k] for k in ("v7", "v_leer", "v_fremd", "v_ohne")), "neue Regel nur, wenn der Positions-Tab 0.10.8 meldet; älter, unbekannt, anderer Tab: alte Regel")
+check(e["toast7"] and not e["toast6"], "Toast-Sperre bleibt bei 0.10.7")
+check("const einfach = hedgeReaderEinfachAn(st)" in t and "einfach ? hedgeReaderEinfachKonto(st.konto, kontoPlan) : (readerKontoPasst(st.konto, kontoPlan, st) || kurzEndeKontoPasst(st.konto, kontoPlan, st))" in t, "Tick wählt die Konto-Regel nach Version")
+_alt = t[t.index("if(!einfach){"):t.index("if(st.positionen.some(x => x && (x.wurzel || tvSymbolWurzel(x.symbol || '')) === wz))")]
+check("hedgeMasterWegEntscheid({" in _alt and "if(kurzEndeSperrt(kurz)){ kurzEndeMelden(p, kurz); continue }" in _alt and "if(st.positionen.some(x => x && x.pnl_unklar)) continue" in _alt and "continue\n        }" in _alt, "alte Regel unverändert im eigenen Zweig")
+_neu = t[t.index("if(st.positionen.some(x => x && (x.wurzel || tvSymbolWurzel(x.symbol || '')) === wz))"):]
+check("kurzEndeSperrt(" not in _neu and "hedgeReaderEinfachEntscheid({" in _neu, "neue Regel: Balance entscheidet nicht")
+check("const TVTM_VERSION_SOLL = '0.10.7'" in HTML and "const VERSION    = '0.10.7'" in MAIN and "leer_beweis" not in MAIN and "const VERSION    = '0.10.8'" in US, "main bleibt 0.10.7, Rollout-Soll 0.10.7, 0.10.8 nur im Testordner")
 check("if(hedgeTvUnterwegs()){ verwerfen(); return }" in t, "Puls unterwegs setzt Konto-Zeitraum zurück")
 check("jetzt - _hedgeSchnellKonto.get(pid) >= 5000) _hedgeSchnellGesehenAt.set" in t, "Sichtung zählt ab 5 s im Konto")
 i = HTML.index("async function hedgeTsxSchnellTick(")

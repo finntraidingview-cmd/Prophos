@@ -164,7 +164,7 @@ check(e["lesung_offen"] == "offen", "Wache: Position da → offen")
 check(all(e[k] == "unklar" for k in ("lesung_blind", "lesung_alt", "lesung_fremd", "lesung_feedtab")), "Wache: blind, alt, fremdes Konto, Feed-Tab → unklar")
 
 check("hedgeToastSchluss(p, kontoPlan, wz, richtung, tf).catch(" in tick and "await hedgeToastSchluss" not in tick, "Takt wartet nicht auf den Schluss")
-check(tick.index("!hedgeReaderEinfachKonto(st.konto, kontoPlan)") < tick.index("hedgeToastBeweis(st.fills") < tick.index("hedgeReaderEinfachEntscheid({"), "Konto-Riegel zuerst, dann Toast, Flach-Weg dahinter")
+check(tick.index("const einfach = hedgeReaderEinfachAn(st)") < tick.index("hedgeToastBeweis(st.fills") < tick.index("hedgeReaderEinfachEntscheid({"), "Konto-Riegel zuerst, dann Toast, Flach-Weg dahinter")
 check("hedgeToastAn() && richtung && p.status === 'open' && readerKontoPasst(st.konto, kontoPlan, st) && kontoMs >= 2000" in tick, "Toast nur im Plan-Konto, nie gekürzt, Konto ≥ 2 s stabil")
 check("pulsMs: _pulsAktivAt" in tick and "offen: _hedgeToastMenge.get(pid)" in tick, "Puls-Zeit und größte gesehene Menge gehen in den Beweis")
 check("!HEDGE_REVIEW_SPAET[h.grund] || hedgeToastOhneFlach(h)" in HTML and "(HEDGE_REVIEW_SPAET[h.grund] && !hedgeToastOhneFlach(h))" in HTML, "60-s-Nachzügler sperrt, Beweis-Weg übernimmt")
