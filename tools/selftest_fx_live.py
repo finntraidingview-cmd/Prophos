@@ -123,5 +123,7 @@ check("quelle: 'hand'" in HTML and "window._fxInfo = data.value" in HTML and 'id
       "Frontend: Quelle mit Datum, Hand-Eingabe als quelle 'hand'")
 check("fxErstLaden" in HTML and "setInterval(() => { if(currentUserId) loadFxRate()" in HTML, "Frontend lädt den Kurs bis zum Login nach und alle 3 h frisch")
 
+check("fxAdmin() === true ? 'gilt bis zum nächsten Live-Kurs'" in HTML and "'wirkt nur in diesem Tab, Railway rechnet mit dem Live-Kurs'" in HTML
+      and "apLetztenHolen().then(renderFxSettings" in HTML, "Settings-Text: Admin „gilt bis zum nächsten Live-Kurs“, sonst „wirkt nur in diesem Tab“")
 print("ROT:" if FEHLER else "alles grün", FEHLER if FEHLER else "")
 sys.exit(1 if FEHLER else 0)

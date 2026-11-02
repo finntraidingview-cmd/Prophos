@@ -54582,7 +54582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2006'
+  const OS_TAB_BUILD = '2026-09-22.2007'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -77813,6 +77813,9 @@
     return Number(n).toFixed(digits).replace('.', ',')
   }
 
+  // Admin-ID (ADMIN_EMAILS) laut Backend (_ap.admin aus /admin/auto-plan, je Login) → true/false, null = noch unbekannt
+  const fxAdmin = () => (typeof _ap !== 'undefined' && _ap.geladenFuer === currentUserId && _ap.admin != null) ? _ap.admin : null
+
   function renderFxSettings(){
     const inp = document.getElementById('fxUsdEurInput')
     const ex = document.getElementById('fxUsdEurExample')
@@ -77824,7 +77827,13 @@
       const tag = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${m[3]}.${m[2]}.${m[1]}` : '' }
       q.textContent = !fi ? 'Kein Kurs gespeichert — Standard ' + fxFmt(FX_DEFAULT) + ' bis zum ersten Live-Kurs'
         : fi.quelle === 'live' ? `Live: EZB-Kurs vom ${tag(fi.datum)} (holt Railway täglich)`
-        : `Von Hand eingetragen${fi.at ? ' am ' + tag(fi.at) : ''} — gilt bis zum nächsten Live-Kurs`
+        : `Von Hand eingetragen${fi.at ? ' am ' + tag(fi.at) : ''} — ` + (fxAdmin() === true ? 'gilt bis zum nächsten Live-Kurs'
+          : 'wirkt nur in diesem Tab, Railway rechnet mit dem Live-Kurs')   // unbekannt = ehrlich wie Nicht-Admin
+      // Eingang 03.11.2026 (S9 zu 7be52976): Railway wertet Hand nur von Admin-IDs — Admin-Stand unbekannt → einmal holen, dann neu zeichnen
+      if(fi && fi.quelle !== 'live' && fxAdmin() === null && typeof apLetztenHolen === 'function' && !renderFxSettings._adminGeholt){
+        renderFxSettings._adminGeholt = true
+        apLetztenHolen().then(renderFxSettings, () => {})
+      }
     }
     if(ex){
       const fx = window._fxUsdEur
