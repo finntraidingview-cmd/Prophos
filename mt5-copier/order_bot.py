@@ -20972,6 +20972,18 @@ def maus_stups_befund(v, p, toleranz=3.0):
     return False, ""
 
 
+def win_beweis_spur(v):
+    """REIN RECHNEND (testbar): Einzelwerte des Ziel-Beweises für die Spur, nur bei abgelehntem Druck (02.11.2026, S9: „am Zielpunkt liegt nicht
+    das Ziel" sagte bisher nicht, WELCHE Bedingung scheiterte; Ina 04:09 Dubai). Nur Anzeige, ändert nichts an passt. '' ohne Werte."""
+    b = v.get("beweis") if isinstance(v, dict) else None
+    if not isinstance(b, dict):
+        return ""
+    z = lambda a: "ja" if a else "NEIN"                      # noqa: E731
+    return (f" [drin {z(b.get('drin'))}, klein {z(b.get('klein'))}, Text {z(b.get('text_ok'))} ('{str(b.get('t') or '')[:40]}'), "
+            f"Tabu {'JA' if b.get('tabu') else 'nein'}, Knopf {'JA' if b.get('karte_knopf') else 'nein'}, "
+            f"Ziel {b.get('ziel')}, k {b.get('k_tag')} {b.get('k')}]")
+
+
 def win_ziel_pruef_js(x, y, pruef):
     """Ziel-Beweis beim Druck (K0-Prüfer 30.09.2026: der Hover-Beweis bestätigt JEDES oberste Element — bei ID A liegt „SELL -1 @
     MARKET" 31 px unter dem Bracket-Zahnrad). Am Punkt: :hover UND das klickbare Element dort ist der Kandidat — seine Mitte liegt darin,
@@ -20996,7 +21008,7 @@ def win_ziel_pruef_js(x, y, pruef):
             "&&Math.abs(zr.height-p.zelle[3])<=3&&px>=zr.left+3&&px<=zr.right-3&&py>=zr.top+3&&py<=zr.bottom-3);"
             "var h=win_hover_eltern(e);"
             "var m=(globalThis.prophosAugen&&globalThis.prophosAugen.maus)?globalThis.prophosAugen.maus():null;"   # s. win_ziel_js (08.10.2026)
-            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok&&zelle_ok&&!karte_knopf),was:(karte_knopf?'Knopf in der Karte: ':'')+(p.zelle&&!zelle_ok?'nicht die Zelle: ':'')+(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,zelle:zelle_ok,unter:h.unter,maus:m};})("
+            "return {hover:h.hover,eltern:h.eltern,passt:!!(drin&&klein&&text_ok&&!tabu&&wort_ok&&zelle_ok&&!karte_knopf),was:(karte_knopf?'Knopf in der Karte: ':'')+(p.zelle&&!zelle_ok?'nicht die Zelle: ':'')+(kt||ka||k.tagName.toLowerCase()).slice(0,40),tabu:tabu,wort:wort_ok,zelle:zelle_ok,unter:h.unter,maus:m,beweis:{drin:drin,klein:klein,text_ok:text_ok,tabu:tabu,karte_knopf:karte_knopf,ziel:c,k:[Math.round(r.left),Math.round(r.top),Math.round(r.width),Math.round(r.height)],k_tag:k.tagName.toLowerCase(),t:t}};})("
             + json.dumps(pruef, ensure_ascii=False) + ")").replace("win_hover_eltern(e)", WIN_HOVER_ELTERN_JS)
 
 
@@ -21592,7 +21604,7 @@ class _AugenSitzung:
         if pruef:
             v = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
             if not (isinstance(v, dict) and v.get("passt")):
-                self.trail.append(f"{name}: am Zielpunkt liegt nicht das Ziel ('{(v or {}).get('was') if isinstance(v, dict) else '-'}') — kein Druck")
+                self.trail.append(f"{name}: am Zielpunkt liegt nicht das Ziel ('{(v or {}).get('was') if isinstance(v, dict) else '-'}'){win_beweis_spur(v)} — kein Druck")
                 return False
         self._druck_versucht = True                   # ab hier KANN gedrückt sein (K4: Ausnahme davor = nichts gesendet)
         self.ws.rufe("Input.dispatchMouseEvent", {"type": "mousePressed", "x": p[0], "y": p[1], "button": "left",
@@ -21979,7 +21991,7 @@ class _AugenSitzung:
                 v = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
                 if isinstance(v, dict) and v.get("hover") and not v.get("passt"):
                     self.trail.append(f"{name}: am Zielpunkt @{punkt[0]},{punkt[1]} liegt nicht das Ziel ('{v.get('was')}'"
-                                      + (", Order-/Close-Wort" if v.get("tabu") else "") + ") — kein Druck")
+                                      + (", Order-/Close-Wort" if v.get("tabu") else "") + ")" + win_beweis_spur(v) + " — kein Druck")
                     return False
                 if isinstance(v, dict) and v.get("hover"):
                     hover = True
@@ -22048,7 +22060,7 @@ class _AugenSitzung:
             v2 = self.lese_js(win_ziel_pruef_js(p[0], p[1], pruef))
             if not (isinstance(v2, dict) and v2.get("hover") and v2.get("passt")):
                 self.trail.append(f"{name}: nach der Hover-Pause liegt am Zielpunkt nicht mehr das Ziel "
-                                  f"('{v2.get('was') if isinstance(v2, dict) else '-'}') — kein Druck")
+                                  f"('{v2.get('was') if isinstance(v2, dict) else '-'}'){win_beweis_spur(v2)} — kein Druck")
                 return False
         if _win_vordergrund() != int(hwnd):
             self.trail.append(f"{name}: Puls-Chrome nicht mehr vorn — kein Druck")
