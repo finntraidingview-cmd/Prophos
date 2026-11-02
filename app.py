@@ -24712,20 +24712,26 @@ def _ap_probelauf(tr_info, plan_roh, minuten, zinfo, richtung, zeiten, namen, st
 AP_AUS_PLAN_INFO = re.compile(r"geplanten/laufenden Plan|heute schon gehandelt|noch nicht erledigt")
 
 
-def ap_aus_ohne_plan(erg, plaene, tz):
+def ap_aus_ohne_plan(erg, plaene, tz, review=None):
     """REIN RECHNEND (testbar): Lauf-Ergebnis ohne ausgelassen[]-Zeilen von Konten, die für den Tag des Laufs inzwischen einen Plan haben
     (planned/open/review/completed am Tag, _ap_plan_am_tag). Anlass (Finn 09.10.2026, Screenshot „Braucht dich"): Chris/Moritz/Ina standen
     nach dem Nachtlauf mit „nur noch 36/56/62 $ bis zum Ziel — von Hand prüfen" drin, obwohl das Nachplanen um 23:37 UTC ihre Klein-Trades
-    angelegt und Finn sie bestätigt hatte. Zeilen, die den Plan selbst beschreiben (AP_AUS_PLAN_INFO), bleiben. erg ohne tag → unverändert."""
+    angelegt und Finn sie bestätigt hatte. Zeilen, die den Plan selbst beschreiben (AP_AUS_PLAN_INFO), bleiben. erg ohne tag → unverändert.
+    ÜBERPRÜFEN ERLEDIGT (Finn 03.11.2026 ~02:40 Dubai „fix das mal bitte", Nachtlauf 1105 tag 2026-11-03: 6 Konten von Julian/Emin
+    „letzter Trade noch nicht erledigt (Überprüfen)", ihre Echo-Pläne um 21:51 UTC abgehakt, „Braucht dich" zeigte sie bis zum Nachplanen
+    ~1,5 h weiter): review = Konto-IDs, die JETZT einen Plan in Überprüfen haben (None = unbekannt → Zeile bleibt). Eine Zeile mit diesem
+    Grund ohne Konto in review fällt weg. Nur Anzeige: das Nachplanen rechnet seine Kandidaten getrennt (ap_gruppe_lauf_ohne_erledigt)."""
     if not isinstance(erg, dict) or not isinstance(erg.get("ausgelassen"), list) or not erg.get("tag"):
         return erg
     tag = str(erg.get("tag"))
     belegt = {str(p.get("master_account_id")) for p in plaene or () if p.get("master_account_id") and _ap_plan_am_tag(p, tag, tz)}
-    if not belegt:
+    erledigt = (lambda x: review is not None and str(x.get("grund") or "").startswith("letzter Trade noch nicht erledigt")
+                and str(x.get("konto_id") or "") and str(x.get("konto_id")) not in review)
+    if not belegt and not any(isinstance(x, dict) and erledigt(x) for x in erg["ausgelassen"]):
         return erg
     out = dict(erg)
-    out["ausgelassen"] = [x for x in erg["ausgelassen"] if not (isinstance(x, dict) and str(x.get("konto_id") or "") in belegt
-                                                               and not AP_AUS_PLAN_INFO.search(str(x.get("grund") or "")))]
+    out["ausgelassen"] = [x for x in erg["ausgelassen"] if not (isinstance(x, dict) and (erledigt(x) or (str(x.get("konto_id") or "") in belegt
+                                                               and not AP_AUS_PLAN_INFO.search(str(x.get("grund") or "")))))]
     return out
 
 
@@ -24742,7 +24748,20 @@ def ap_aus_ohne_plan_laden(erg):
                                                         "kette_te:mt5_baseline->kette->tagesende",
                                               "master_account_id": "in.(" + ",".join(kids[j:j + 150]) + ")",
                                               "status": "in.(planned,open,review,completed)", "created_at": f"gte.{ab}"})
-        return ap_aus_ohne_plan(erg, plaene, _ap_tz(AP_TZ_TAG))
+        # Überprüfen jetzt (03.11.2026): ohne Zeitgrenze, der blockierende Plan kann älter als 3 Tage sein (Planer liest 30 Tage); nur für Zeilen mit dem Grund
+        review = None
+        kids_r = sorted({str(x.get("konto_id")) for x in erg.get("ausgelassen") or [] if isinstance(x, dict) and x.get("konto_id")
+                         and str(x.get("grund") or "").startswith("letzter Trade noch nicht erledigt")})
+        if kids_r:
+            try:
+                review = set()
+                for j in range(0, len(kids_r), 150):
+                    review |= {str(p.get("master_account_id")) for p in _sb_all("trade_plans", {"select": "master_account_id", "status": "eq.review",
+                                                                                               "master_account_id": "in.(" + ",".join(kids_r[j:j + 150]) + ")"}) or ()}
+            except Exception as e:
+                review = None                                  # unbekannt → Zeilen bleiben wie bisher
+                print(f"[auto-plan] ⚠️ Überprüfen-Stand: {type(e).__name__}: {e}", flush=True)
+        return ap_aus_ohne_plan(erg, plaene, _ap_tz(AP_TZ_TAG), review)
     except Exception as e:
         print(f"[auto-plan] ⚠️ ausgelassen ohne Plan: {type(e).__name__}: {e}", flush=True)
         return erg

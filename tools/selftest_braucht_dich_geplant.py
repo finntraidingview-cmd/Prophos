@@ -92,6 +92,28 @@ def main():
     a["_sb_all"] = kaputt
     check(L(erg) is erg, "DB-Fehler → Ergebnis unverändert (Braucht dich wie bisher)")
 
+    # ÜBERPRÜFEN ERLEDIGT (Finn 03.11.2026 ~02:40, Nachtlauf 1105: 6 Konten „letzter Trade noch nicht erledigt", Pläne 21:51 UTC abgehakt)
+    G = "letzter Trade noch nicht erledigt (Überprüfen)"
+    e3 = {"tag": tag, "geplant": [], "ausgelassen": [{"konto_id": "r-1", "grund": G}, {"konto_id": "r-2", "grund": G}, {"konto_id": "", "grund": G},
+                                                   {"konto_id": "r-4", "grund": "keine Balance bekannt"}]}
+    o3 = F(e3, [], tz, {"r-2"})
+    check([x["konto_id"] for x in o3["ausgelassen"]] == ["r-2", "", "r-4"], "Überprüfen abgehakt → Zeile weg; noch in Überprüfen, ohne konto_id und andere Gründe bleiben")
+    check(F(e3, [], tz, None) is e3 and F(e3, [], tz) is e3, "Überprüfen-Stand unbekannt → unverändert")
+    o4 = F(e3, [{"master_account_id": "r-1", "status": "completed", "ended_at": "2026-10-09T08:00:00+00:00"}], tz, set())
+    check([x["konto_id"] for x in o4["ausgelassen"]] == ["", "r-4"], "heute abgehakt (belegt) + nicht mehr in Überprüfen → weg")
+    gefragt.clear()
+    a["_sb_all"] = lambda t, pr: (gefragt.append(pr), [{"master_account_id": "r-2"}] if pr.get("status") == "eq.review" else [])[1]
+    o5 = L(e3)
+    rq = [pr for pr in gefragt if pr.get("status") == "eq.review"]
+    check([x["konto_id"] for x in o5["ausgelassen"]] == ["r-2", "", "r-4"] and len(rq) == 1 and "created_at" not in rq[0]
+          and rq[0]["master_account_id"] == "in.(r-1,r-2)", f"Laden: Überprüfen-Abfrage ohne Zeitgrenze nur für Konten mit dem Grund ({rq})")
+    def nur_review_kaputt(t, pr):
+        if pr.get("status") == "eq.review":
+            raise RuntimeError("weg")
+        return []
+    a["_sb_all"] = nur_review_kaputt
+    check([x["konto_id"] for x in L(e3)["ausgelassen"]] == ["r-1", "r-2", "", "r-4"], "Überprüfen-Abfrage scheitert → Zeilen bleiben")
+
     print(f"\n{'ALLES OK' if not FEHLER else f'{len(FEHLER)} FEHLER'}")
     return 1 if FEHLER else 0
 
