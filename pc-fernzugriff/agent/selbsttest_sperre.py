@@ -30,7 +30,7 @@ TAB_PRO = {"type": "page", "title": "Prophos", "url": "http://localhost:5000/", 
 TAB_ANMELD = {"type": "page", "title": "Sign in", "url": "https://topstepx.com/login", "webSocketDebuggerUrl": "ws://127.0.0.1:9333/devtools/page/GH-4"}
 TABS = [TAB_TSX, TAB_TV, TAB_PRO, TAB_ANMELD]
 
-LEER = {"tv": None, "mt5": None, "plan": None}
+LEER = {"tv": None, "plan": None}
 _frei0 = a.freigabe
 a.freigabe = lambda *x, **y: _frei0(*x, **dict({"handel": LEER} if len(x) < 10 else {}, **y))   # Handelsstand frei, außer der Test setzt ihn
 
@@ -72,26 +72,30 @@ MT5T = "14348534 - FundedNext-Server 2 - Hedge - FundedNext Ltd"
 for name, ha in (("TradingView-Position", dict(LEER, tv="TradingView: 1 Position(en) offen")), ("Plan offen", dict(LEER, plan="1 offene(r) Plan")), ("Stand fehlt", None), ("Teil fehlt", {"plan": None})):
     pruefe("Puls-Chrome gesperrt: " + name, _frei0(TVT, KL, CHROME, 500, 9, {"pid": 500}, None, True, TABS, ha)[0] is None)
     pruefe("TradingView in anderem Chrome gesperrt: " + name, _frei0(TVT, KL, CHROME, 700, 9, {}, None, True, None, ha)[0] is None)
-for name, ha in (("MT5-Position", dict(LEER, mt5="MT5: Position")), ("Plan offen", dict(LEER, plan="1 Plan")), ("Stand fehlt", None)):
+for name, ha in (("TradingView-Position", dict(LEER, tv="TradingView: 1 Position(en) offen")), ("Plan offen", dict(LEER, plan="1 Plan")), ("Stand fehlt", None)):
     pruefe("MT5 gesperrt: " + name, _frei0(MT5T, MT5K, "terminal64.exe", 700, 9, {}, None, True, None, ha)[0] is None)
     pruefe("MT5-Dialog gesperrt: " + name, _frei0("Anmeldung", "#32770", "terminal64.exe", 700, 9, {}, None, True, None, ha)[0] is None)
-pruefe("MT5-Position sperrt TradingView nicht", _frei0(TVT, KL, CHROME, 500, 9, {"pid": 500}, None, True, TABS, dict(LEER, mt5="MT5: Position"))[0] == "puls_chrome")
 pruefe("Prophos in anderem Chrome bleibt frei bei Position", _frei0("Prophos - Google Chrome", KL, CHROME, 700, 9, {}, None, True, None, dict(LEER, tv="x", plan="y"))[0] == "browser")
-pruefe("Explorer bleibt frei bei Position", _frei0("Ordner", "CabinetWClass", "explorer.exe", 700, 9, {}, None, True, None, dict(LEER, tv="x", mt5="y", plan="z"))[0] == "frei")
+pruefe("Explorer bleibt frei bei Position", _frei0("Ordner", "CabinetWClass", "explorer.exe", 700, 9, {}, None, True, None, dict(LEER, tv="x", plan="z"))[0] == "frei")
+pruefe("PowerShell bleibt frei bei Position", _frei0("Windows PowerShell", "ConsoleWindowClass", "powershell.exe", 700, 9, {}, None, True, None, dict(LEER, tv="x", plan="z"))[0] == "konsole")
 OKR = {"positionen_ok": True, "positionen": [], "positionen_alter_s": 1.2}
 pruefe("Reader leer und frisch", a.reader_auswerten(OKR) is None)
 for name, d in (("Position", dict(OKR, positionen=[{"symbol": "NQ"}])), ("blind", dict(OKR, positionen_ok=False)), ("alt", dict(OKR, positionen_alter_s=99)), ("ohne Alter", dict(OKR, positionen_alter_s=None)), ("ohne Liste", {"positionen_ok": True}), ("Unsinn", "x")):
     pruefe("Reader sperrt: " + name, a.reader_auswerten(d) is not None)
-I = {"name": "A", "age": 3, "status": {"running": True, "master_positions": [], "hedges": {}}}
-pruefe("MT5 leer und frisch", a.mt5_auswerten({"instances": [I]}) is None)
-pruefe("MT5 Lese-EA frisch", a.mt5_auswerten({"instances": [{"name": "B", "age": 900, "status": {"lesen": True, "master_positions": [], "hedges": {}}}]}) is None)
-for name, d in (("Position", [dict(I, status=dict(I["status"], master_positions=[{"s": 1}]))]), ("Hedge", [dict(I, status=dict(I["status"], hedges={"1": [1]}))]), ("alt", [dict(I, age=900)]), ("Warnung", [dict(I, status=dict(I["status"], note="x"))]),
-                ("keine Instanz", []), ("ohne Status", [{"name": "A"}]), ("zweite offen", [I, dict(I, status=dict(I["status"], master_positions=[1]))])):
-    pruefe("MT5 sperrt: " + name, a.mt5_auswerten({"instances": d}) is not None)
-pruefe("MT5 sperrt: Unsinn", a.mt5_auswerten("x") is not None)
-pruefe("Plan frei", a.plan_auswerten({"ok": True, "riegel": "", "plaene_offen": 0}) is None)
-for name, d in (("offen", {"ok": True, "riegel": "", "plaene_offen": 2}), ("Start nah", {"ok": True, "riegel": "Start in ≤ 5 min", "plaene_offen": 0}), ("Feld fehlt", {"ok": True, "riegel": ""}), ("IDs unbekannt", {"ok": True, "riegel": "", "plaene_offen": None}), ("Fehler", {"ok": False})):
+pruefe("Plan frei", a.plan_auswerten({"ok": True, "riegel_tv": "", "plaene_offen_tv": 0}) is None)
+for name, d in (("offen", {"ok": True, "riegel_tv": "", "plaene_offen_tv": 2}), ("Start nah", {"ok": True, "riegel_tv": "Start in ≤ 5 min", "plaene_offen_tv": 0}), ("Feld fehlt", {"ok": True, "riegel_tv": ""}), ("Riegel fehlt", {"ok": True, "plaene_offen_tv": 0}),
+                ("IDs unbekannt", {"ok": True, "riegel_tv": "", "plaene_offen_tv": None}), ("altes Railway", {"ok": True, "riegel": "", "plaene_offen": 0}), ("Fehler", {"ok": False})):
     pruefe("Plan sperrt: " + name, a.plan_auswerten(d) is not None)
+# Server-Seite: Funktion aus app.py lösen, ohne das ganze Backend zu laden
+_q = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "app.py"), encoding="utf-8").read()
+_i = _q.index("def lotse_plan_stand(")
+_ns = {"LT_ECHO_ROUTEN": ("mt5v2", "mt5"), "tab_stand_riegel": lambda sig, pl, pc, j: "Start" if any(x.get("status") == "planned" for x in pl) else ""}
+exec(_q[_i:_q.index('@app.route("/code/tab-stand/', _i)], _ns)
+_st = _ns["lotse_plan_stand"]
+pruefe("Server: Echo-Pläne zählen nicht", _st([], [{"status": "open", "route": "mt5v2"}, {"status": "open", "route": "mt5"}, {"status": "planned", "route": "mt5"}], ["u"], "pc", 0) == {"plaene_offen_tv": 0, "riegel_tv": ""})
+pruefe("Server: tvv2, tsv2, Orbit ohne Route zählen", _st([], [{"status": "open", "route": "tvv2"}, {"status": "open", "route": "tsv2"}, {"status": "open", "route": None}], ["u"], "pc", 0)["plaene_offen_tv"] == 3)
+pruefe("Server: geplanter TV-Start zählt im Riegel", _st([], [{"status": "planned", "route": "tvv2"}], ["u"], "pc", 0)["riegel_tv"] == "Start")
+pruefe("Server: IDs unbekannt = None", _st([], [], [], "pc", 0)["plaene_offen_tv"] is None)
 _jh = a._json_holen
 
 
@@ -101,7 +105,7 @@ def jh_kaputt(url, kopf=None, timeout=2.0):
 
 a._json_holen = jh_kaputt
 HS = a.handel_stand()
-pruefe("Reader, Panel, Railway weg: alles unklar", all(HS[x] for x in ("tv", "mt5", "plan")), HS)
+pruefe("Reader und Railway weg: alles unklar", HS["tv"] and HS["plan"], HS)
 a._json_holen = _jh
 
 # ── Tasten, start, Punkte, Felder ──
@@ -182,14 +186,14 @@ for hw, wort in ((PTSX, "NQZ26"), (PANM, "Sign in"), (NTSX, "TopstepX"), (BOT, "
     pruefe("schliessen %s verweigert" % wort, lauf([{"aktion": "schliessen", "fenster": wort}], vorne=EXPL)["ok"] is False and not WELT.wm)
 
 # Riegel Handel im Ablauf: kein Ereignis bei TradingView und MT5, Explorer bleibt
-for wort, ha in (("TradingView-Position", dict(LEER, tv="TradingView: 1 Position")), ("offener Plan", dict(LEER, plan="1 Plan")), ("Stand unklar", {"tv": "unklar", "mt5": "unklar", "plan": "unklar"})):
+for wort, ha in (("TradingView-Position", dict(LEER, tv="TradingView: 1 Position")), ("offener Plan", dict(LEER, plan="1 Plan")), ("Stand unklar", {"tv": "unklar", "plan": "unklar"})):
     WELT.handel = ha
     for name, ak in MAUSARTEN + [("text", {"aktion": "tasten", "fenster": "NQ1!", "text": "x"}), ("kombi", {"aktion": "tasten", "fenster": "NQ1!", "kombi": "enter"})]:
         pruefe("%s: %s in TradingView kein Ereignis" % (wort, name), lauf([ak], vorne=PTV)["ok"] is False and not WELT.gesendet and not WELT.bewegt)
     pruefe("%s: Explorer vorn, TradingView unter dem Zeiger kein Klick" % wort, lauf([KLICK], vorne=EXPL, unter=PTV)["ok"] is False and not WELT.gesendet)
     pruefe("%s: Klick im Explorer geht" % wort, lauf([KLICK])["ok"])
-WELT.handel = dict(LEER, mt5="MT5: Position")
-pruefe("MT5-Position: Klick in MT5 gesperrt", lauf([KLICK], vorne=MT5)["ok"] is False and not WELT.gesendet)
+WELT.handel = dict(LEER, tv="TradingView: 1 Position")
+pruefe("TradingView-Position: Klick in MT5 gesperrt", lauf([KLICK], vorne=MT5)["ok"] is False and not WELT.gesendet)
 WELT.handel = LEER
 pruefe("MT5 nie schliessen, auch ohne Position", lauf([{"aktion": "schliessen", "fenster": "14348534"}], vorne=EXPL)["ok"] is False and not WELT.wm)
 pruefe("alt+f4 in MT5 gesperrt", lauf([{"aktion": "tasten", "fenster": "14348534", "kombi": "alt+f4"}], vorne=MT5)["ok"] is False and not WELT.gesendet)
@@ -276,8 +280,57 @@ def senden_dann_lauf(ev):
 a._senden = senden_dann_lauf
 e = lauf([{"aktion": "tasten", "fenster": "Explorer", "text": "x" * 60}])
 pruefe("Lauf beginnt mitten im Text: nur ein Paket", e["ok"] is False and len(WELT.gesendet) == 1, e)
+_f = e["aktionen"][0].get("fehler", "")
+pruefe("Lauf mitten im Text: Meldung nennt Zeichenzahl, nicht „nichts gesendet“", "nach 20 Zeichen" in _f and "Feld prüfen" in _f and "nichts gesendet" not in _f.split("(")[0], _f)
 a._senden = _s2
+WELT.lauf = "Panel belegt"
 WELT.lauf = None
+
+# Puls startet: kein Zeiger, kein Vordergrund, kein WM_CLOSE (Lauf-Prüfung direkt vor dem Eingriff)
+_lg = a.lauf_grund
+_zaehl = {"n": 0}
+
+
+def lauf_ab_zweitem():
+    _zaehl["n"] += 1
+    return "Panel belegt" if _zaehl["n"] >= 2 else None
+
+
+a.lauf_grund = lauf_ab_zweitem
+e = lauf([{"aktion": "maus", "x": 300, "y": 400}])
+pruefe("Lauf vor maus: Zeiger bleibt", e["ok"] is False and not WELT.bewegt, e)
+_zaehl["n"] = 0
+e = lauf([KLICK])
+pruefe("Lauf vor dem Klick-Bewegen: Zeiger bleibt", e["ok"] is False and not WELT.bewegt and not WELT.gesendet, e)
+_zaehl["n"] = 0
+e = lauf([{"aktion": "schliessen", "fenster": "Explorer"}])
+pruefe("Lauf vor schliessen: kein WM_CLOSE", e["ok"] is False and not WELT.wm, e)
+a.lauf_grund = _lg
+
+# Lauf-Abfrage dauert länger als 200 ms: Fenster nochmal prüfen
+import time as _t
+
+
+def langsam_und_wechsel():
+    e0 = _t.time()
+    while _t.time() - e0 < 0.21:
+        pass
+    WELT.vorne = PTSX
+    return None
+
+
+_zaehl2 = {"n": 0}
+
+
+def langsam_beim_senden():
+    _zaehl2["n"] += 1
+    return langsam_und_wechsel() if _zaehl2["n"] == 3 else None
+
+
+a.lauf_grund = langsam_beim_senden
+e = lauf([KLICK], vorne=PTV)
+pruefe("Lauf-Abfrage langsam, TopstepX inzwischen vorn: kein Klick", e["ok"] is False and not WELT.gesendet, e)
+a.lauf_grund = _lg
 pruefe("Kombi ohne Lauf geht", lauf([{"aktion": "tasten", "fenster": "NQ1!", "kombi": "enter"}], vorne=PTV)["ok"] and WELT.gesendet)
 
 # Kurs läuft weiter: Tabliste alt, einmal frisch lesen. Das lockert nichts.
@@ -331,6 +384,10 @@ a.u32 = lambda: SimpleNamespace(SetForegroundWindow=_setzen, ShowWindow=lambda h
 pruefe("vorholen TradingView", lauf([{"aktion": "vorholen", "fenster": "NQ1!"}])["ok"] and VORN == [PTV])
 VORN.clear()
 pruefe("vorholen TopstepX gesperrt", lauf([{"aktion": "vorholen", "fenster": "NQZ26"}])["ok"] is False and not VORN)
+_zaehl["n"] = 0
+a.lauf_grund = lauf_ab_zweitem
+pruefe("Lauf vor vorholen: Vordergrund bleibt", lauf([{"aktion": "vorholen", "fenster": "NQ1!"}])["ok"] is False and not VORN)
+a.lauf_grund = _lg
 
 # Echtes lauf_grund: Lock und Panel
 b = importlib.util.module_from_spec(spec)

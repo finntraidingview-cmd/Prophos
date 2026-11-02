@@ -99,7 +99,7 @@ Nach Rückbau und erneutem `setup-pc.ps1` hat der PC einen neuen Host-Key. Der M
 
 **Darf nicht:**
 - **Keine Orders.** Nie klicken, tippen oder etwas senden, das eine Order öffnet, ändert oder schließt. Auch nicht „nur zum Test“.
-- **In TopstepX wird nichts geklickt (Finn 02.11.2026 05:55).** Dort nur Fotos und zugucken, der Agent sperrt das hart. In TradingView und MT5 darf Claude nur klicken, wenn weder Position noch offener Plan da ist; ein unklarer Stand sperrt, MT5 wird nie geschlossen. Andere Fenster gehen, solange Puls nicht läuft. Eine Ausnahme per Auftrag gibt es nicht. Details: `agent/README.md`.
+- **In TopstepX wird nichts geklickt (Finn 02.11.2026 05:55).** Dort nur Fotos und zugucken, der Agent sperrt das hart. Bei offenem TradingView-/Topstep-Trade oder offenem Plan dieser Routen bedient Claude weder Puls-Chrome noch MT5, ein unklarer Stand sperrt. Offene MT5-Trades und Echo-Pläne sperren nichts. MT5 wird nie geschlossen. Andere Fenster gehen, solange Puls nicht läuft, `pc.sh` und Hintergrund-Befehle immer. Eine Ausnahme per Auftrag gibt es nicht. Details: `agent/README.md`.
 - **Der Lotse setzt, ändert und schließt keine Orders oder Positionen.** Das ist Regel, der Agent erkennt keinen Order-Knopf. In TradingView kann schon ein Klick eine Order auslösen, darum vorher ein Foto ansehen.
 - **Puls darf klicken, der Lotse gibt ihm nur Aufgaben (Finn 02.11.2026).** Panel-Aufrufe wie `/api/tsx-lesen` sind erlaubt. Scharfe Orders (`scharf:true`) löst der Lotse nie aus.
 - **Was der Agent nicht sperren kann, ist hier nur Regel:** SSH-Befehle mit Admin-Rechten, das Verbot scharfer Panel-Aufrufe und Knöpfe in TradingView, MT5 und Prophos, die Trades auslösen.

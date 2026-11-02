@@ -60,17 +60,17 @@ Ergebnis (eine Zeile JSON), dann `BILD /Users/…/quarantaene/pc-7ftp5l/20261102
 
 Das ersetzt die Erlaubt-Liste von 04:42.
 
-**Eingang 02.11.2026 dazu:** In TradingView und MT5 nur, wenn weder Position noch offener Plan da ist. Unklarer Stand = gesperrt. MT5 wird nie geschlossen.
+**Bei offenem Trade nur zusehen (Finn 02.11.2026):** „Wenn MT5 Trade läuft, aber Trading View nicht, kannst du ganz normal in Trading View … wenn kein Top Step oder kein Trading View Tab läuft, ganz normal alles machen.“ Offene MT5-Trades und Echo-Pläne sperren also nichts. MT5 wird nie geschlossen. `pc.sh` und Hintergrund-Befehle laufen nicht durch diesen Agenten und bleiben immer frei.
 
 **Regel, die der Agent nicht prüfen kann: Der Lotse setzt, ändert und schließt keine Orders oder Positionen.** Ein Order-Knopf in TradingView oder MT5 ist für den Agenten nur ein Punkt im Fenster, und in TradingView kann schon ein Klick eine Order auslösen. Darum dort nur klicken, wenn klar ist, was unter dem Punkt liegt, und vorher ein Foto ansehen.
 
 **Hart gesperrt** für `klick`, `maus`, `scroll`, `tasten`, `schliessen`, `vorholen`, geprüft am Vordergrund UND am Fenster unter dem Zielpunkt:
 - **TopstepX:** Titel mit „topstep“ oder Kurs-Titel wie „NQZ26 $28,677.00 ▲ +0.50%“.
 - **Puls-Chrome mit TopstepX vorn:** Der Fenstertitel wird in der CDP-Liste (Port 9333) gesucht, die Adresse des Tabs entscheidet. Passt kein Tab, wird die Liste einmal frisch gelesen, weil der Kurs im Titel läuft. Passt danach keiner oder ist CDP nicht lesbar: gesperrt.
-- **TradingView, jeder Tab im Puls-Chrome und MT5 mit Dialogen, solange etwas offen ist:** Position laut Reader (`/positions`: sehend, höchstens 15 s alt, leer) bzw. MT5-Position oder Hedge laut Panel (`/api/instances`: frischer Copier- oder Lese-EA-Stand, Terminal ohne Instanz gilt als unklar), dazu offene Pläne der IDs dieses PCs und `riegel` aus Railway (`/code/tab-stand`, braucht `code_token.txt`). Fällt eine Quelle aus, ist es gesperrt. Explorer, Konsole und Prophos im normalen Chrome bleiben davon frei.
+- **TradingView, jeder Tab im Puls-Chrome und MT5 mit Dialogen, solange ein TradingView-/Topstep-Trade offen ist:** Position laut Reader (`/positions`: sehend, höchstens 15 s alt, leer) oder Plan im Status `open` bzw. kurz vor dem Start auf einer Route außer `mt5`/`mt5v2` (Railway `/code/tab-stand`, Felder `plaene_offen_tv`, `riegel_tv`, braucht `code_token.txt`). Ein Plan nennt keinen PC, darum zählen die IDs dieses PCs. Fällt eine Quelle aus, ist es gesperrt. Explorer, Konsole und Prophos im normalen Chrome bleiben davon frei.
 - **Tab-Leiste und Adressleiste des Puls-Chrome:** Dort kann ein hinterer TopstepX-Tab liegen, auch sein ×.
 - **Betriebs-Konsolen** (Titel mit copier, panel, prophos, reader, puls, polar, order_bot, mt5-update): keine Handelssperre, ein Klick hält dort per QuickEdit das Programm an.
-- **Während eines Laufs** (`puls_handlauf.lock` jünger als 15 min oder `/api/beschaeftigt` belegt) gehen überall nur `foto`, `tabs`, `fenster`, `warte`. Geprüft wird vor der Aktion und nochmal direkt vor jedem Senden, beim Tippen je Paket. Das Panel meldet auch kurze Aufrufe als belegt, dann bricht eine Eingabe mit „Riegel“ ab und wird einfach wiederholt. Antwortet das Panel nicht, gilt das als Lauf. Lehnt der Port ab, läuft das Panel nicht, also auch kein Lauf.
+- **Während eines Laufs** (`puls_handlauf.lock` jünger als 15 min oder `/api/beschaeftigt` belegt) gehen überall nur `foto`, `tabs`, `fenster`, `warte`. Geprüft wird vor der Aktion und nochmal direkt vor jedem Eingriff: vor Zeiger, Vordergrund, WM_CLOSE und jedem Senden, beim Tippen je Paket. Das Panel meldet auch kurze Aufrufe als belegt. Bei Klick, Kombi und dem ersten Text-Paket heißt das „nichts gesendet“, dann darf es wiederholt werden. Meldet `tasten` dagegen „Riegel nach N Zeichen“, steht der getippte Teil schon im Feld, und ein Zeilenumbruch davor ist als Enter raus: **Nicht blind wiederholen, erst Foto ansehen.** Antwortet das Panel nicht, gilt das als Lauf. Lehnt der Port ab, läuft das Panel nicht, also auch kein Lauf.
 
 **Bleibt außerdem:**
 - `tasten` tippt nur, wenn das Vordergrundfenster den Titel aus `fenster` trägt. Beim Tippen wird vor jedem Paket neu geprüft.
@@ -83,10 +83,10 @@ Das ersetzt die Erlaubt-Liste von 04:42.
 
 ### Was die Sperre NICHT abdeckt
 - **Order-Knöpfe** in TradingView, MT5 und Prophos (siehe Regel oben). Der Riegel senkt das Risiko auf flache PCs, ein Klick kann trotzdem eine neue Order setzen.
-- **Reader sieht nur das gewählte Konto:** Position auf einem anderen Konto meldet er nicht. Offene Pläne fangen das ab, eine Hand-Position ohne Plan nicht.
+- **Reader sieht nur das gewählte Konto:** Position auf einem anderen Konto meldet er nicht. Offene Pläne fangen das ab, eine Hand-Position ohne Plan nicht. Eine TopstepX-Position ohne Plan sieht der Riegel ebenfalls nicht; TopstepX selbst bleibt trotzdem immer gesperrt.
 - **SSH-Befehle mit Admin-Rechten** (`pc.sh`): Sie können alles, auch den Agenten beenden oder diese Datei ändern.
 - **Panel-Aufrufe:** Finn 02.11.2026: „Der Lotse darf nicht selber aktiv klicken, aber der Puls-Bot darf. Der Lotse darf dem Puls-Bot Aufgaben geben.“ `/api/tsx-lesen` und `/api/tsx-konto` sind erlaubt und klicken über Puls. **Scharfe Orders (`scharf:true`) löst der Lotse nie aus.** Auch das ist nur Regel.
-- **TopstepX in einem anderen Chrome oder in einem nicht erkannten Puls-Chrome:** Ohne CDP ist nur der Titel des aktiven Tabs sichtbar. Ein Tab, dessen Titel nichts von TopstepX verrät, wäre dort nicht erkannt. Das betrifft ein Puls-Chrome, wenn nichts auf Port 9333 lauscht und `puls_fenster.json` alt ist.
+- **TopstepX in einem anderen Chrome oder in einem nicht erkannten Puls-Chrome:** Ohne CDP ist nur der Titel des aktiven Tabs sichtbar. Ein Tab, dessen Titel nichts von TopstepX verrät, wäre dort nicht erkannt. Das betrifft ein Puls-Chrome, wenn nichts auf Port 9333 lauscht und `puls_fenster.json` alt ist. Prüfer S9 hält das für tragbar.
 - **Zeitfenster:** Zwischen letzter Prüfung und Windows-Eingabe liegen wenige Millisekunden. Kommt genau dann TopstepX nach vorn, trifft die Eingabe dieses.
 
 ## Prüfen

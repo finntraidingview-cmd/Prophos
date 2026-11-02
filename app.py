@@ -20138,6 +20138,14 @@ def pc_tab_auftrag_quittung():
     return jsonify({"ok": True})
 
 
+def lotse_plan_stand(signale_laeuft, plaene, uids, pc, jetzt):
+    """REIN RECHNEND (testbar): Felder für den Lotse-Agenten (Finn 02.11.2026: „MT5 Trades sind ja nicht unser Problem“). Es zählen alle Routen außer Echo (LT_ECHO_ROUTEN), also auch
+    eine leere Route (Orbit) und jede unbekannte: Im Zweifel sperrt das mehr. Ein Plan nennt keinen PC, darum die IDs dieses PCs. plaene_offen_tv None = IDs unbekannt, gilt beim Agenten als unklar."""
+    tv = [x for x in plaene or () if str(x.get("route") or "") not in LT_ECHO_ROUTEN]
+    return {"plaene_offen_tv": (sum(1 for x in tv if str(x.get("status")) == "open") if uids else None),
+            "riegel_tv": tab_stand_riegel(signale_laeuft, tv, pc, jetzt)}
+
+
 @app.route("/code/tab-stand/<pc>", methods=["GET"])
 def code_tab_stand(pc):
     """GET (X-Code-Token wie /code/stand) → {ok, origin, tab_build, tab_gleich, tab_bw, tab_at, riegel}. Nur Lesen."""
@@ -20188,8 +20196,7 @@ def code_tab_stand(pc):
         print(f"[tab-stand] {pc}: {spur}", flush=True)
     return jsonify({"ok": True, "origin": origin, "tab_build": r0.get("tab_build"), "tab_gleich": r0.get("tab_gleich"),
                     "tab_bw": r0.get("tab_bw"), "tab_at": r0.get("updated_at"), "riegel": riegel, "echo_logins": echo_logins,
-                    # Lotse (Eingang 02.11.2026): TradingView und MT5 nur ohne offenen Plan. None = IDs dieses PCs unbekannt, gilt beim Agenten als unklar, also gesperrt.
-                    "plaene_offen": (sum(1 for x in plaene if str(x.get("status")) == "open") if uids else None),
+                    **lotse_plan_stand(sig, plaene, uids, pc, jetzt),
                     "auftrag": tab_auftrag_offen(_tab_auftrag.get(pc), time.time())})
 
 
