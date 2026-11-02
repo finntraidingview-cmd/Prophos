@@ -12334,6 +12334,9 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
         # konto_id = master_account_id (08.10.2026, Prüfer zu „Manuelle Arbeit" aus „Braucht dich"): viele IDs haben mehrere
         # gleichnamige Konten — der Trade-Planer blendet deshalb über die Konto-ID aus, nicht über den Namen
         "konto_id": str(p.get("master_account_id") or "") or None,
+        # „TRADE PLANEN“ AUS REST VON HAND (02.11.2026, Radar: Vorgänger eines Rest-Trades still abhaken nur nach Finns Klick — rest_hedge schreibt allein dieses Popup;
+        # nie bei Auto-Planer/Farmer, Testphase „nichts auto-abhaken“). rest_hedge/auto_plan nur in /admin/live-trades geladen, sonst False/None
+        "rest_hedge": p.get("rest_hedge") is True, "auto_plan": p.get("auto_plan"), "created_at": p.get("created_at"),
         # farbe_key: derselbe Schluessel, mit dem die Flotte Personen faerbt (merken(w.uid) → mt5FleetFarbe(uid)) —
         # die user_id; das Frontend hasht wie gehabt
         "farbe_key": uid,
@@ -13794,7 +13797,7 @@ def admin_live_trades():
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_risk,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3,blown,"
-                  "slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier")   # Polar-Seite (20.10.2026)
+                  "slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier,auto_plan,rest_hedge")   # Polar-Seite (20.10.2026); auto_plan/rest_hedge → hand_plan (02.11.2026)
         # B16: Topstep V2 wie Orbit V2. Seit 01.10.2026 abends (Finn: „ein Tab je Modell im Radar") mit ?echo=1 auch das klassische
         # Echo mit Fusion-Hedge (route mt5) — gleiche Felder wie Echo V2 aus mt5_live, dazu der Fusion-P&L (slave_pl_live).
         # Polar (20.10.2026, Finn: „auch unter Radar hinzufügen"): mit ?echo=1 (Radar/Planer) auch route polar — eine Zeile je Lauf

@@ -36365,7 +36365,7 @@
     // doch etwas anderes (Status, fehlender P&L, Winning-Day-Vorschlag), öffnet sich das Popup wie immer
     if(opts && opts.einKlick){
       const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
-      if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ _mwdErlEinKlick = true; mklWdErledigtSpeichern(); return }
+      if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
     }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
@@ -36440,9 +36440,11 @@
   plFeldVerdrahten('mwd-erl-fusion', 'mwd-erl-fusion-pm', 'mwd-erl-fusion-hinweis')
   function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null }
   let _mwdErlEinKlick = false   // nur_review: Ein Klick darf nichts überschreiben, was schon abgehakt ist (S2 30.10.2026)
+  let _mwdErlStill = false   // stiller Ein Klick ohne Klick (Takt, 02.11.2026 S9): 409 „nicht mehr in Überprüfen“ = schon abgehakt (zweiter Tab) → kein Fehler-Toast
   async function mklWdErledigtSpeichern(){
     const pid = _mwdErlId; if(!pid) return
     const einKlick = _mwdErlEinKlick; _mwdErlEinKlick = false
+    const still = einKlick && _mwdErlStill; _mwdErlStill = false
     const msg = document.getElementById('mwdErledigtMsg'), btn = document.getElementById('mwdErledigtSave')
     const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
     const zahl = id => plZahl(document.getElementById(id)?.value)
@@ -36474,7 +36476,7 @@
                                // Hand-Betrag (08.10.2026): ohne Vorbelegung oder davon abweichend → pl_quelle 'hand' am Plan
                                ...((plHand) ? { pl_quelle: 'hand' } : {}) }) })
       const d = await r.json().catch(() => ({}))
-      if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
+      if(!r.ok || d.ok === false) throw Object.assign(new Error(d.error || ('HTTP ' + r.status)), { status: r.status })
       const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
       // Antwort (Backend .541): {ok, plan_id, status:'completed', buchung:{amount, …}|null, buchung_fehler?} — ist der Plan zu, die
       // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
@@ -36526,6 +36528,7 @@
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
       mklWdRender(); mklChartZeichnen()
     }catch(e){
+      if(still && e && e.status === 409){ try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){} return }   // schon abgehakt (anderer Tab) — still, nichts zu tun
       if(typeof atToast === 'function') atToast('Abhaken nicht gespeichert: ' + (e && e.message || e) + ' — bitte noch einmal', 'end')
       wdlLokalVergessen(pid)   // nicht gebucht → die Zeile kommt mit dem nächsten Stand zurück nach „Überprüfen" (08.10.2026)
       try{ if(typeof wdlLaden === 'function') wdlLaden(true) }catch(_){}
@@ -36974,7 +36977,7 @@
       const d = await r.json().catch(() => ({}))
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       wdl.daten = d; wdl.fehler = ''
-      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} }, 0)   // vorgemerkte Pläne mit frischer Lesung abhaken (02.11.2026)
+      setTimeout(() => { try{ wdlVorgemerktTick() }catch(_){} try{ wdlRestVorgaengerTick() }catch(_){} }, 0)   // vorgemerkte Pläne mit frischer Lesung abhaken; Vorgänger eines Rest-Trades (02.11.2026)
       wdlLokalAnwenden()   // eben abgehakte/verschobene Zeilen nie mit einem älteren Backend-Stand zurückholen (08.10.2026)
       try{ await wdlPolarLaden() }catch(_){}   // Polar (20.10.2026): Stand je laufendem Polar-Plan (/polar/stand), 404 = Hand-Polar
     }catch(e){ wdl.fehler = String((e && e.message) || e) }
@@ -38423,10 +38426,10 @@
     }catch(e){ if(typeof atToast === 'function') atToast('Vormerkung nicht überall entfernt: ' + String((e && e.message) || e), 'end') }
   }
   window._wdlVorgemerktVersteckt = wdlVorgemerktVersteckt   // Test-Haken
-  async function wdlVormerken(pid, t, grund){
+  async function wdlVormerken(pid, t, grund, still){
     const vm = { at: new Date().toISOString(), grund }
     t.vorgemerkt = vm; wdlLokalMerken(pid, { vorgemerkt: vm }); wdlRender()
-    if(typeof atToast === 'function') atToast('Vorgemerkt — wird abgehakt, sobald die Lesung da ist (nichts geschätzt gebucht)', 'ok')
+    if(!still && typeof atToast === 'function') atToast('Vorgemerkt — wird abgehakt, sobald die Lesung da ist (nichts geschätzt gebucht)', 'ok')
     try{
       const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
       const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene?${WDL_SICHT}`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
@@ -38441,6 +38444,55 @@
   // Abhaken, sobald die Lesung da ist: nur über den Ein-Klick-Weg mit nurStill (öffnet nie ein Popup von selbst), einer zur Zeit, je Plan höchstens alle 60 s,
   // nie während Finn selbst ein Abhak-Popup offen hat. Läuft, solange irgendwo ein Radar offen ist (wdlLaden-Takt)
   const _wdlVmVersuch = new Map()
+  /* EIN KONTO NUR EINMAL IM RADAR (Finn 02.11.2026 ~19:45, Jacob Apex 100k …0016: f5f27ede abgehakt, Rest-Trade e6fadf3b lief — das Konto stand unter
+   * Bestanden → „Rest von Hand“ UND unter „Läuft“): ein Konto mit aktivem Plan (open/planned, ohne Mini-Trades „Tage sammeln“) steht nur dort, wo dieser Plan steht.
+   * Die Bestanden-Abschnitte „Rest von Hand“ und „Review“ lassen es weg; Tage sammeln bleibt (Finn 13.10.2026: „sollen nicht verschwinden“), echte Fehler in Erledigt bleiben. */
+  const wdlAktiveKonten = () => {
+    const s = new Set()
+    for(const x of ((wdl.daten && wdl.daten.trades) || [])) if(x && x.konto_id && !x.tage_mini && (x.status === 'open' || x.status === 'planned')) s.add(String(x.konto_id))
+    return s
+  }
+  /* VORIGEN TRADE ABHAKEN, SOBALD DER REST-TRADE DA IST (Finn 02.11.2026 ~19:45: „Trade planen“ unter „Rest von Hand“ → Rest-Trade angelegt/gestartet → der vorige Trade
+   * des Kontos wird automatisch abgehakt und verbucht, idempotent): nur Konten im Rest-von-Hand-Fall (wdlFehltChip), deren jüngster beendeter Trade noch in Überprüfen
+   * steht und die einen anderen offenen/geplanten Plan haben. Ohne Aktion (wdlEinKlickGrund '') → stiller Ein Klick wie beim Vormerken (nur_review: steht er nicht mehr
+   * in Überprüfen, 409, nichts doppelt); fehlt nur die Lesung → vormerken wie heute; sonst (Blow, Ziel, unplausibel …) bleibt er mit Popup in Erledigt. */
+  // Prüf-Agent 02.11.2026: nur mit Schreibrecht (window._planerSchreiben, 5 min gemerkt) und höchstens 3 Versuche je Plan und Sitzung — sonst schriebe ein Login ohne Recht
+  // im 60-s-Takt gegen ein 403 (Toast-Wechsel, Zeile springt)
+  const _wdlRestVersuch = new Map(), _wdlRestN = new Map()
+  let _wdlRestRecht = { at: 0, ok: false }
+  function wdlRestVorgaengerTick(){
+    if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
+    if(Date.now() - _wdlRestRecht.at > 300000){
+      _wdlRestRecht.at = Date.now()
+      Promise.resolve().then(() => typeof window._planerSchreiben === 'function' ? window._planerSchreiben() : false).then(ok => { _wdlRestRecht.ok = ok === true }, () => { _wdlRestRecht.ok = false })
+    }
+    if(!_wdlRestRecht.ok) return
+    // NUR NACH FINNS KLICK „TRADE PLANEN“ (Finn/Eingang + S9 02.11.2026): der neue Plan trägt rest_hedge (schreibt allein das Popup aus „Rest von Hand“ → „Trade planen“,
+    // tpRestHedgeErlaubt; auto_plan false), gehört derselben ID wie der Vorgänger und ist NACH dessen Ende angelegt (created_at). Auto-Planer/Farmer/sonstige Hand-Pläne
+    // nie — Testphase „nichts auto-abhaken“; die Anzeige entdoppelt trotzdem für alle (wdlAktiveKonten)
+    const alle = (wdl.daten && wdl.daten.trades) || [], neu = new Map()   // konto_id → [{ uid, at }]
+    for(const x of alle){
+      if(!x || !x.konto_id || x.tage_mini || x.rest_hedge !== true || x.auto_plan === true || !(x.status === 'open' || x.status === 'planned')) continue
+      const k = String(x.konto_id); if(!neu.has(k)) neu.set(k, []); neu.get(k).push({ uid: wdlUid(x), at: Date.parse(x.created_at || '') || 0 })
+    }
+    if(!neu.size) return
+    const juengst = new Map()
+    for(const t of alle){
+      if(!t || t.tage_mini || !(t.status === 'review' || t.status === 'completed') || !t.konto_id) continue
+      const k = String(t.konto_id), e = Date.parse(t.ended_at || t.completed_at || '') || 0, alt = juengst.get(k)
+      if(!alt || e > alt.e) juengst.set(k, { t, e })
+    }
+    for(const [k, { t }] of juengst){
+      const ende = Date.parse(t.ended_at || '') || 0
+      if(t.status !== 'review' || !ende || !(neu.get(k) || []).some(n => n.uid === wdlUid(t) && n.at > ende) || !wdlFehltChip(t)) continue
+      const pid = wdlTid(t); if(Date.now() - (_wdlRestVersuch.get(pid) || 0) < 60000 || (_wdlRestN.get(pid) || 0) >= 3) continue
+      const grund = wdlEinKlickGrund(t)
+      const versuch = () => { _wdlRestVersuch.set(pid, Date.now()); _wdlRestN.set(pid, (_wdlRestN.get(pid) || 0) + 1) }
+      if(!grund){ versuch(); try{ mklWdErledigtOeffnen(pid, t, { sicht: true, einKlick: true, nurStill: true }) }catch(e){ console.warn('[radar] Rest: Vorgänger abhaken', e) }; return }
+      if(!wdlVorgemerkt(t) && wdlVormerkbar(t, grund)){ versuch(); wdlVormerken(pid, t, grund, true); return }   // still (S9 02.11.2026), der Takt hat niemand geklickt
+    }
+  }
+  window._wdlRestVorgaengerTick = wdlRestVorgaengerTick   // Test-Haken
   function wdlVorgemerktTick(){
     if(document.getElementById('mwdErledigtModal')?.classList.contains('open')) return
     const t = ((wdl.daten && wdl.daten.trades) || []).find(x => wdlVorgemerkt(x) && !wdlEinKlickGrund(x) && Date.now() - (_wdlVmVersuch.get(wdlTid(x)) || 0) > 60000)
@@ -39120,7 +39172,8 @@
       const offen = new Set(((wdl.daten && wdl.daten.trades) || []).filter(t => t.status === 'review' && !t.tage_mini && !!wdlBestandenChip(t)).map(t => wdlUid(t) + '|' + String((t.konto || {}).kontonr_ende || '').replace(/[^A-Za-z0-9]/g, '').slice(-4)))
       // Tage sammeln bleibt IMMER stehen (13.10.2026, Finn: „die Accounts sollen nicht für ein paar Stunden verschwinden, weil ich den Mini-Trade
       // abgehakt habe") — „nicht doppelt" gilt nur noch für Review
-      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => x.fehlt || !x.e4 || !offen.has(x.uid + '|' + x.e4))
+      const aktiv = wdlAktiveKonten()   // EIN KONTO NUR EINMAL (02.11.2026): Review ohne Konten mit laufendem/wartendem Plan; Tage sammeln (fehlt) bleibt
+      return [...eigen, ...fremd].filter(x => !wdl.person || x.uid === wdl.person).filter(x => x.fehlt || !x.e4 || !offen.has(x.uid + '|' + x.e4)).filter(x => x.fehlt || !x.kid || !aktiv.has(String(x.kid)))
         // SORTIERUNG NACH ZEIT (Finn 21.10.2026: „die neuesten ganz oben, die, die am längsten rumliegen, ganz unten") — vorher Firma/Datum aufsteigend
         .map(x => Object.assign(x, { ts: bstZeitVon(x.seit, bstLetzterTrade(x.uid, x.kid, x.e4)).ts }))
         .sort(bstTsSort)
@@ -39182,9 +39235,10 @@
         const ende = Date.parse(t.ended_at || t.completed_at || '') || 0
         const alt = je.get(key); if(!alt || ende > alt.ende) je.set(key, { t, ende })
       }
-      const out = []
+      const out = [], aktiv = wdlAktiveKonten()   // EIN KONTO NUR EINMAL (02.11.2026): läuft/wartet ein Plan am Konto, steht es dort, nicht hier
       for(const { t } of je.values()){
         if(!allePersonen && wdl.person && wdlUid(t) !== wdl.person) continue
+        if(t.konto_id && aktiv.has(String(t.konto_id))) continue
         const chip = wdlFehltChip(t); if(!chip) continue
         if(wdlRestPlaner(t).at) continue   // Rest zurück im Planer (20.10.2026): der Bot holt den Rest — raus aus der Station, Chip grau in der Zeile
         const kid = String(t.konto_id || ''), uid = wdlUid(t), eigen = uid === ich
@@ -54491,7 +54545,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1996'
+  const OS_TAB_BUILD = '2026-09-22.1997'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
