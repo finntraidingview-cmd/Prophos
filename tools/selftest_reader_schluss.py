@@ -101,7 +101,7 @@ _neu = t[t.index("if(st.positionen.some(x => x && (x.wurzel || tvSymbolWurzel(x.
 check("kurzEndeSperrt(" not in _neu and "hedgeReaderEinfachEntscheid({" in _neu, "neue Regel: Balance entscheidet nicht")
 check("const TVTM_VERSION_SOLL = '0.10.9'" in HTML and "const VERSION    = '0.10.9'" in MAIN and "const EINGEBAUT = '0.10.9'" in MAIN and "leer_beweis" in MAIN, "Rollout: Flotten-Datei 0.10.9, Soll 0.10.9")
 check("if(hedgeTvUnterwegs()){ verwerfen(); return }" in t, "Puls unterwegs setzt Konto-Zeitraum zurück")
-check("jetzt - _hedgeSchnellKonto.get(pid) >= 5000) _hedgeSchnellGesehenAt.set" in t, "Sichtung zählt ab 5 s im Konto")
+check("jetzt - _hedgeSchnellKonto.get(pid) >= 5000){ _hedgeSchnellGesehenAt.set(pid, jetzt)" in t, "Sichtung zählt ab 5 s im Konto")   # seit 87f62cca mit Block: dieselbe Regel, dazu hedgeSichtMerken
 i = HTML.index("async function hedgeTsxSchnellTick(")
 check("hedgeMasterWegEntscheid({" in HTML[i:i + 12000], "TopstepX unverändert")
 check("st.leer_beweis === false ? false : st.positionen_ok" in HTML and "st.positionen_ok === false || st.leer_beweis === false" in HTML and "st.positionen_ok !== true || st.leer_beweis === false" in HTML, "1-s-Wächter, Master-nie-da, Neuladen bleiben beim Leer-Text")
