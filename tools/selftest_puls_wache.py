@@ -21,7 +21,7 @@ def check(ok, name):
 
 
 uhr = [1000.0]
-welt = {"liste": [], "frei": True, "oeffnen": [], "antwort": (True, "Puls-Chrome (Port 9333), eigenes Fenster"), "fehler": False}
+welt = {"idle": 300.0, "liste": [], "frei": True, "oeffnen": [], "antwort": (True, "Puls-Chrome (Port 9333), eigenes Fenster"), "fehler": False}
 
 
 def cdp_get(p):
@@ -35,9 +35,9 @@ ns = {"re": re, "os": os, "HERE": os.path.join(W, "mt5-copier"), "TAB_URL": "htt
       "time": types.SimpleNamespace(time=lambda: uhr[0]), "datetime": __import__("datetime").datetime,
       "_PROPHOS_URL_RE": re.compile(r"^http://(localhost|127\.0\.0\.1):5000(/|$)"), "_cdp_get": cdp_get,
       "_browser_und_mt5_frei": lambda tv_eigen=False: welt["frei"], "_tab_oeffnen": lambda url: (welt["oeffnen"].append((uhr[0], url)), welt["antwort"])[1],
-      "_tab_stand_holen": lambda pc, spur: None, "print": lambda *a, **k: None}
+      "_tab_stand_holen": lambda pc, spur: None, "print": lambda *a, **k: None, "_win_leerlauf_s": lambda: welt["idle"]}
 for n in ast.parse(SRC).body:
-    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("PULS_WACHE_FEHLT_S", "PULS_WACHE_ABSTAND_S", "_PULS_WACHE", "TAB_URL_V_RE") for t in n.targets):
+    if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("PULS_WACHE_FEHLT_S", "PULS_WACHE_ABSTAND_S", "PULS_WACHE_IDLE_S", "_PULS_WACHE", "TAB_URL_V_RE") for t in n.targets):
         exec(ast.get_source_segment(SRC, n), ns)
     if isinstance(n, ast.FunctionDef) and n.name in ("puls_wache_entscheiden", "_puls_wache_url", "_puls_wache_schritt"):
         exec(ast.get_source_segment(SRC, n), ns)
@@ -88,6 +88,19 @@ n_versuche = len(welt["oeffnen"])
 welt["antwort"] = (True, "ok")
 runden(70)
 check(n_versuche >= 1 and len(welt["oeffnen"]) == n_versuche + 1, "Backend im Neustart → nächster Versuch gleich in der nächsten Runde, nicht erst nach 5 min")
+# S9: tippt jemand (Eingabe vor < 25 s) → wartet, offener Trade sperrt nicht
+welt["oeffnen"].clear(); uhr[0] += 400; welt["liste"] = [TV]; welt["idle"] = 5.0
+runden(300)
+check(welt["oeffnen"] == [], "Eingabe am PC vor 5 s → kein Öffnen (Fokus)")
+welt["idle"] = 30.0
+runden(70)
+check(len(welt["oeffnen"]) == 1, "30 s ohne Eingabe → geöffnet (nicht erst nach 120 s)")
+# S9: Login-Adresse — der letzte Tab lief unter 127.0.0.1 → dieselbe Adresse
+ns["_TAB_OEFFNEN"]["url"] = "http://127.0.0.1:5000/"
+check(ns["_puls_wache_url"]() == "http://127.0.0.1:5000/?v=2026-09-22.1989" and ns["TAB_URL_V_RE"].fullmatch(ns["_puls_wache_url"]()),
+      f"letzter Tab auf 127.0.0.1 → die Wache öffnet 127.0.0.1 (eigener Login) ({ns['_puls_wache_url']()})")
+ns["_TAB_OEFFNEN"]["url"] = ""
+check(ns["_puls_wache_url"]().startswith("http://localhost:5000/?v="), "ohne gemerkte Adresse → localhost:5000")
 # Einbau
 check("_puls_wache_schritt(pc)" in SRC and SRC.index("_puls_wache_schritt(pc)") < SRC.index("STUFEN-HEILUNG (30.10.2026)"), "im Tab-Wächter vor der Stufen-Heilung")
 w = SRC[SRC.index("def _puls_wache_schritt("):SRC.index("def tab_neuladen_entscheiden(")]

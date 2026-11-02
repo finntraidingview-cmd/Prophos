@@ -1832,11 +1832,13 @@ def _build_nr(v):
 # Puls-Chrome nicht, startet es diese Wache nicht. ══
 PULS_WACHE_FEHLT_S = 60
 PULS_WACHE_ABSTAND_S = 5 * 60
+PULS_WACHE_IDLE_S = 25   # S9 02.11.2026: ob ein neues Fenster im Hintergrund den Fokus nimmt, ist unbelegt — nie, während jemand tippt (kurz, nicht 120 s)
 _PULS_WACHE = {"fehlt_seit": None, "letzter": 0.0, "grund": ""}
 
 
-def puls_wache_entscheiden(jetzt, erreichbar, n_prophos, fehlt_seit, letzter, lock_frei):
-    """REIN RECHNEND (testbar): (öffnen, grund, fehlt_seit_neu). erreichbar = CDP-Liste des Puls-Chrome lesbar, n_prophos = Seiten auf :5000."""
+def puls_wache_entscheiden(jetzt, erreichbar, n_prophos, fehlt_seit, letzter, lock_frei, idle_s=None):
+    """REIN RECHNEND (testbar): (öffnen, grund, fehlt_seit_neu). erreichbar = CDP-Liste des Puls-Chrome lesbar, n_prophos = Seiten auf :5000,
+    idle_s = Sekunden ohne Eingabe am PC (None = unbekannt)."""
     if not erreichbar or n_prophos > 0:
         return False, "", None
     fehlt_seit = fehlt_seit or jetzt
@@ -1847,11 +1849,16 @@ def puls_wache_entscheiden(jetzt, erreichbar, n_prophos, fehlt_seit, letzter, lo
         return False, f"{warum} — zuletzt vor {int(jetzt - letzter)} s geöffnet (höchstens 1 je {PULS_WACHE_ABSTAND_S // 60} min)", fehlt_seit
     if not lock_frei:
         return False, f"{warum} — wartet: Puls/Polar/MT5-Order läuft, öffnet danach", fehlt_seit
+    if idle_s is not None and idle_s < PULS_WACHE_IDLE_S:
+        return False, f"{warum} — wartet: am PC wird gerade eingegeben (vor {int(idle_s)} s), öffnet nach {PULS_WACHE_IDLE_S} s Ruhe", fehlt_seit
     return True, warum, fehlt_seit
 
 
 def _puls_wache_url():
-    """localhost:5000 mit ?v=<Build> wie die Neulade-Wege des Tabs (frischer Tab-Stand von Railway, sonst OS_TAB_BUILD der lokalen prophos.html)."""
+    """Adresse des letzten Tabs (localhost ≠ 127.0.0.1 = getrennte Logins, S9 02.11.2026 — sonst öffnete die Wache einen nicht angemeldeten Tab) mit
+    ?v=<Build> wie die Neulade-Wege des Tabs (frischer Tab-Stand von Railway, sonst OS_TAB_BUILD der lokalen prophos.html)."""
+    m = re.match(r"^(http://(?:localhost|127\.0\.0\.1):\d{2,5})/", str(_TAB_OEFFNEN.get("url") or ""))
+    basis = (m.group(1) + "/") if m else TAB_URL
     b = str(((TAB_NL.get("stand") or {}) if time.time() - float(TAB_NL.get("stand_at") or 0) < 600 else {}).get("origin") or "")
     if not re.fullmatch(r"[0-9A-Za-z._-]{1,40}", b):
         try:
@@ -1860,7 +1867,7 @@ def _puls_wache_url():
             b = m.group(1) if m else ""
         except OSError:
             b = ""
-    return TAB_URL + (f"?v={b}" if b else f"?v={int(time.time())}")
+    return basis + (f"?v={b}" if b else f"?v={int(time.time())}")
 
 
 def _puls_wache_schritt(pc):
@@ -1874,7 +1881,7 @@ def _puls_wache_schritt(pc):
         n = sum(1 for t in (liste or []) if isinstance(t, dict) and t.get("type") == "page" and _PROPHOS_URL_RE.match(str(t.get("url") or "")))
         jetzt = time.time()
         auf, grund, _PULS_WACHE["fehlt_seit"] = puls_wache_entscheiden(jetzt, erreichbar, n, _PULS_WACHE["fehlt_seit"], _PULS_WACHE["letzter"],
-                                                                      _browser_und_mt5_frei())
+                                                                      _browser_und_mt5_frei(), _win_leerlauf_s())
         if auf:
             ok, msg = _tab_oeffnen(_puls_wache_url())
             if ok or "lokales Backend" not in str(msg):    # Backend gerade im Neustart → nächste Runde neu, sonst zählt der Versuch
