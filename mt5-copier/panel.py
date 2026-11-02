@@ -2431,6 +2431,10 @@ def lese_sperre_markt(jetzt_ts):
 
 def _lese_sperre_antwort(konto, pfad):
     gesperrt, msg = lese_sperre_markt(time.time())
+    # Heimweg frei (S9 02.11.2026): ins Konto eines offenen TV-Trades mit Hedge darf Puls auch 18:30–18:40 (bigTradeHeimPlanen → tvV2Lesen) — sonst bliebe er
+    # im Opening bis 10 min im falschen Konto, der Reader sähe den Trade nicht und die Schließ-Wache könnte nicht schließen
+    if gesperrt and str(konto or "").strip().upper() in [str(x).strip().upper() for x in scharf_konto_fest()]:
+        gesperrt = False
     if gesperrt:
         print(f"[lese-sperre] {pfad} @{konto}: wartet (Market Opening)", flush=True)
         return json.dumps({"ok": False, "code": "puls_beschaeftigt", "lese_sperre": True, "retry_ok": True, "gesendet": False, "msg": msg},
