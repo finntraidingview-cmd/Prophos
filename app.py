@@ -38050,7 +38050,10 @@ def _fcp_regeln_laden():
 def _fcp_gruppe_je_uid(uids):
     """{user_id: gruppen_id} aus id_gruppe_mitglied (Firmen-Abstand je Gruppe wie der DB-Trigger). Lesefehler → leer (dann eine Gruppe)."""
     try:     # kleinste gruppe_id je ID — genau wie prophos_gruppe_von im DB-Trigger (fd_gruppen_schluessel)
-        daten = {"mitglieder": _sb_all("id_gruppe_mitglied", {"select": "user_id,gruppe_id", "user_id": "in.(" + ",".join(uids) + ")"}) or []}
+        # 02.11.2026 (Betrieb 1 beim Fix mt5_links): id_gruppe_mitglied hat keine Spalte id — _sb_all sortierte nach id.asc → HTTP 400, das except unten schluckte es,
+        # seit 1aa73f07 (30.10.) rechnete der Funded-CFD-Planer den Firmen-Abstand über alle IDs als eine Gruppe. user_id ist Primärschlüssel (sql/2026-10-08_admin_gruppen.sql)
+        daten = {"mitglieder": _sb_all("id_gruppe_mitglied", {"select": "user_id,gruppe_id", "user_id": "in.(" + ",".join(uids) + ")",
+                                                              "order": "user_id.asc,gruppe_id.asc"}) or []}
         return {str(u): fd_gruppen_schluessel(u, daten) for u in uids}
     except Exception as e:
         print(f"[funded-cfd] ⚠️ Gruppen: {type(e).__name__}: {e}", flush=True)
