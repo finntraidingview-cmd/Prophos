@@ -3974,6 +3974,10 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
                 out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Hedge-Trade wartet auf Bestätigung",
                             f"{wer} · {konto}: wartet auf deine Bestätigung im Challenge-Planer (Admin → Challenge-Planer → „Zu bestätigen“ "
                             f"bzw. „Hedge-Freigabe offen“) — startet erst danach.", uid, pid))
+        # ECHO OHNE HEDGE ABGELAUFEN (02.11.2026, trade_plans_a1_echo_hedge): nach 8 h gibt der Riegel auf, der Plan startet nicht mehr → ⚪ einmal je Plan
+        if st == "planned" and ss.get("art") == "echo_hedge" and ss.get("status") == "aufgegeben" and str(ss.get("at") or "") > seit_iso:
+            out.append((f"{pid}|echo_hedge_ablauf", 3, "echo_hedge_ablauf", "Echo-Trade abgelaufen",
+                        f"{wer} · {konto}: nach 8 h nicht gestartet, {str(ss.get('text') or 'Echo-Hedge nicht rechenbar')[:160]} — Plan läuft ab, neu planen.", uid, pid))
         # APEX OHNE HEDGE GEHALTEN (30.10.2026, trade_plans_a1_apex_hedge): ⚪ einmal je Plan — nur, wenn ah_tick den Grund nicht schon selbst
         # gemeldet hat (_ah_ohne, apex_hedge.gemeldet), z. B. weil Railway den Plan noch nicht gesehen hat
         ahm = p.get("ahm") if isinstance(p.get("ahm"), dict) else {}
@@ -27442,9 +27446,9 @@ def _eh_guard(p, route="mt5v2"):
 
 
 # ECHO OHNE HEDGE HÄLT (Finn über Eingang 02.11.2026): Diese Gründe sind vorübergehend, der Hedge ist vorgesehen und kommt, sobald er rechenbar ist; der Claim-Riegel trade_plans_a1_echo_hedge
-# hält den Start (sql/2026-11-02_echo_ohne_hedge_riegel.sql). Bewusst NICHT: mini (Tage sammeln, gewollt), kein_konto (ID ohne Fusion, kommt nie von selbst), groesse (u. a. Hedge unter
-# 0,01 Lot, laut sql/2026-10-29_echo_hedge_an.sql gewollter Rückfall). Liste gleich halten mit der SQL-Datei.
-EH_HALT_CODES = ("balance", "lesung", "marge", "grenze")
+# hält den Start (sql/2026-11-02_echo_ohne_hedge_riegel.sql). Bewusst NICHT: marge, grenze (Rückfall wie bisher, Finns Regel 29.10.), mini (Tage sammeln, gewollt), kein_konto (ID ohne Fusion).
+# Entscheid Eingang 02.11.2026. groesse hält mit, auch „Hedge unter 0,01 Lot". Liste gleich halten mit der SQL-Datei.
+EH_HALT_CODES = ("balance", "lesung", "groesse")
 
 
 def eh_ohne_text(code, grund):
@@ -34733,7 +34737,10 @@ def ap_bal_auto_db_stand(rows, tag_start_s):
         if not t:
             continue
         s = out.setdefault(kid, {"versuche": [], "ohne_username": False, "ohne_username_at": None})
-        if t.timestamp() >= tag_start_s and str((r.get("params") or {}).get("von") or "") == "auto_planer":
+        # Gruppen-Takt bei offenem Trade (02.11.2026): Terminal war zu, nichts geöffnet — zählt nicht als Versuch, sonst wäre der Tagesdeckel weg, bevor der Trade zu ist
+        erg = r.get("ergebnis") if isinstance(r.get("ergebnis"), dict) else {}
+        nur_probe = (r.get("params") or {}).get("nur_snapshot") is True and erg.get("code") == "nicht_offen"
+        if t.timestamp() >= tag_start_s and str((r.get("params") or {}).get("von") or "") == "auto_planer" and not nur_probe:
             s["versuche"].append(t.timestamp())
         if str(r.get("status") or "") in ("fertig", "fehler") and (kid not in neu or t > neu[kid][0]):
             msg = str((r.get("ergebnis") or {}).get("msg") or "") if isinstance(r.get("ergebnis"), dict) else ""
@@ -34903,10 +34910,13 @@ def _ap_bal_auto_senden(kand, accs, d, tag, merk, uids_offen=None, wer=""):
             if fehler:
                 ueber.append(dict(zeile, warum=str(fehler[1])[:160]))
                 continue
-            # Nur Gruppen-Weg (Eingang 02.11.2026): Puls-Lesung wartet bei offenem Trade der ID, sie wechselt das Konto im Puls-Chrome; mt5_balance lässt Puls unberührt und läuft weiter
-            if sig["params"]["aktion"] != "mt5_balance" and str(a.get("user_id") or "") in (uids_offen or ()):
-                ueber.append(dict(zeile, warum="offener Trade dieser ID — Puls-Lesung wartet"))
-                continue
+            # Nur Gruppen-Weg (Eingang 02.11.2026): bei offenem Trade der ID wartet die Puls-Lesung, sie wechselt das Konto im Puls-Chrome; mt5_balance liest nur ein schon laufendes
+            # Terminal (nur_snapshot → Tab mt5KontoBalanceJetzt nurSnapshot), öffnet also kein neues Fenster
+            if str(a.get("user_id") or "") in (uids_offen or ()):
+                if sig["params"]["aktion"] != "mt5_balance":
+                    ueber.append(dict(zeile, warum="offener Trade dieser ID — Puls-Lesung wartet"))
+                    continue
+                sig["params"]["nur_snapshot"] = True
             if sig["params"]["aktion"] == "mt5_balance":
                 ort = _mt5_ort_fehler(sig["user_id"], sig["params"]["login"])
                 if ort:

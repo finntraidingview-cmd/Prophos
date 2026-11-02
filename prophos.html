@@ -56531,7 +56531,7 @@
           if(!clM || !clM.length){ _osStand = 'claim-verloren'; continue }
           osClaimMerken(sig)
           _osStand = 'claim-mt5-balance: ' + String(sig.id).slice(0, 8)
-          mt5KontoBalanceJetzt(pm.account_id, lg)
+          mt5KontoBalanceJetzt(pm.account_id, lg, pm.nur_snapshot === true ? { nurSnapshot: true } : undefined)   // Gruppen-Takt bei offenem Trade: kein neues Terminalfenster (02.11.2026)
             .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(), ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
             .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: String((e && e.message) || e) } }).eq('id', sig.id))
           continue
