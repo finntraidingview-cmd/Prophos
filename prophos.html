@@ -29453,46 +29453,55 @@
     return frisch ? frisch.lots : (Number(plan && plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
   }
   /* LOTS-DECKEL (Finn 02.11.2026: „mehr als 16 Lots geplant … startet der Trade nicht … einmal auf OK drücken“, Vorfall Marc 32 statt 3,2 Lot; ausdrücklich gewünschte Ausnahme von der Regel gegen
-   * Prüf-Features). Genau 16 geht. Das OK in mt5_baseline.lots_ok hält die Werte fest, aus denen die Lots entstehen; ändert sich einer, gilt es nicht mehr. Gegenstück in app.py (plan_fusion_lots, lots_ok_gilt). */
+   * Prüf-Features). Genau 16 geht. Gesperrt wird nur VOR der Order: steht die Order schon, öffnet der Hedge immer und es kommt ein 🔴 (S9 02.11.2026: sonst läuft der Master nackt, ohne Ausweg).
+   * Das OK in mt5_baseline.lots_ok hält die freigegebene Lot-Zahl fest, nicht den Multiplikator: den überschreibt die Frisch-Korrektur im Kern. Andere Lots = OK weg. Gegenstück in app.py (lots_deckel_soll, lots_ok_gilt).
+   * Zählt das Größere aus Kontrakte × Multiplikator und der Rechnung beim Open: mit dem ersten rechnen Railway und das DB-Netz, mit dem zweiten der Copier. So zeigt auch der eigene Tab den Knopf, wenn das Netz sperren würde. */
   const HEDGE_LOTS_DECKEL = 16
   function tpFusionLots(plan){
     if(!plan) return null
     const kt = Number(plan.masterContracts) || 0, route = plan.route
-    if(route === 'mt5') return (/fusion/i.test(String(plan.slaveFirm || '')) && Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : null
+    const gespeichert = (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : null
+    if(route === 'mt5' || route === 'tvplus' || route === 'dup') return /fusion/i.test(String(plan.slaveFirm || '')) ? gespeichert : null
     if((route !== 'tvv2' && route !== 'tsv2') || !(Number(plan.hedgeEur) > 0)) return null
     let symbol = plan.masterSymbol
     try{ symbol = (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : symbol) || symbol }catch(_){}
-    const l = hedgeLotsSoll(plan, kt, hedgePplFuer(symbol))
-    return l != null ? l : null
+    return Math.max(hedgeLotsSoll(plan, kt, hedgePplFuer(symbol)) || 0, gespeichert || 0) || null
   }
-  function tpLotsOkGilt(plan, ok){
-    if(!ok || typeof ok !== 'object') return false
-    // leer und 0 gelten gleich: rowToPlan liest ein fehlendes Feld teils als 0. Symbol nur, wenn der Plan eines trägt (rowToPlan füllt ein leeres mit dem Firmen-Standard)
-    const gleich = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) <= 1e-6
-    return gleich(ok.kt, plan.masterContracts) && gleich(ok.mult, plan.multiplier) && gleich(ok.sr, plan.slaveRisk) && gleich(ok.mr, plan.masterRisk) && (!ok.sym || String(ok.sym) === String(plan.masterSymbol || ''))
-  }
+  const tpLotsOkGilt = (plan, ok) => !!ok && typeof ok === 'object' && Number(ok.lots) > 0 && Math.abs(Number(ok.lots) - (tpFusionLots(plan) || 0)) <= 0.011
   const tpLotsDeckelFehlt = plan => { const l = tpFusionLots(plan); return l != null && l > HEDGE_LOTS_DECKEL && !tpLotsOkGilt(plan, plan.mt5Baseline && plan.mt5Baseline.lots_ok) }
   const tpLotsDeckelText = plan => `Fusion ${tpFusionLots(plan)} Lot über dem Deckel von ${HEDGE_LOTS_DECKEL} — erst in „Braucht dich“ OK drücken`
   window._tpLotsDeckelFehlt = tpLotsDeckelFehlt; window._tpFusionLots = tpFusionLots   // Prüf-Haken
-  // Vor Hand-Start und Hedge: Stand aus der DB, Pläne kommen ohne Realtime. Nicht lesbar = gesperrt. Meldet einmal je Plan und Lot-Zahl an Railway. → true = gesperrt
-  const _tpLotsGemeldet = new Set()
+  /* Vor jedem Start, solange nichts gesendet ist. Immer frisch aus der DB: Pläne kommen ohne Realtime, Railway kann Hedge und Multiplikator gerade geschrieben haben, und ein OK kann gerade gekommen sein. DB nicht
+   * lesbar = der Stand im Tab entscheidet. Stand ein Claim (Cache sah noch nichts), geht er zurück, sonst gäbe es weder OK noch Zeile. Meldet einmal je Plan und Lot-Zahl an Railway. → true = gesperrt */
+  const _tpLotsGemeldet = new Map()   // Schlüssel → frühestens wieder melden (ms)
   async function tpLotsDeckelFrisch(plan){
+    if(!plan || plan.status !== 'planned' || plan.startedAt || plan.orbitGesendetAt || !['mt5', 'tvplus', 'dup', 'tvv2', 'tsv2'].includes(plan.route)) return false
+    try{ const { data, error } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle()
+      if(!error && data) Object.assign(plan, rowToPlan(data)) }catch(_){}
     if(!tpLotsDeckelFehlt(plan)) return false
-    try{ const { data, error } = await supabase.from('trade_plans').select('lots_ok:mt5_baseline->lots_ok,master_contracts,multiplier').eq('id', plan.id).maybeSingle()
-      if(!error && data && Number(data.master_contracts) === Number(plan.masterContracts) && Number(data.multiplier) === Number(plan.multiplier) && tpLotsOkGilt(plan, data.lots_ok)){
-        plan.mt5Baseline = Object.assign({}, plan.mt5Baseline, { lots_ok: data.lots_ok }); return false } }catch(_){}
+    if(plan.startUmGestartetAt){
+      try{ await supabase.from('trade_plans').update({ start_um_gestartet_at: null }).eq('id', plan.id).eq('status', 'planned').is('orbit_gesendet_at', null); plan.startUmGestartetAt = null }catch(_){}
+    }
     tpLotsDeckelMelden(plan)
     return true
   }
-  async function tpLotsDeckelMelden(plan){
-    const lots = tpFusionLots(plan), key = `${plan.id}|${lots}`
-    if(_tpLotsGemeldet.has(key)) return
-    _tpLotsGemeldet.add(key)
+  async function _tpLotsPost(key, body){
+    if((_tpLotsGemeldet.get(key) || 0) > Date.now()) return
+    _tpLotsGemeldet.set(key, Infinity)
+    let ok = false
     try{
       const { data: { session } } = await supabase.auth.getSession(), tok = session?.access_token; if(!tok) return
-      const r = await fetch(`${WATCHER_HOME}/alarm/lots-deckel`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_id: String(plan.id), lots }) })
-      if(!r.ok) _tpLotsGemeldet.delete(key)
-    }catch(_){ _tpLotsGemeldet.delete(key) }
+      ok = (await fetch(`${WATCHER_HOME}/alarm/lots-deckel`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).ok
+    }catch(_){}
+    if(!ok) _tpLotsGemeldet.set(key, Date.now() + 60000)   // Railway weg: nicht je Sekunde neu
+  }
+  const tpLotsDeckelMelden = plan => { const lots = tpFusionLots(plan); return _tpLotsPost(`${plan.id}|${lots}`, { plan_id: String(plan.id), lots }) }
+  // Order steht schon, Hedge öffnet trotzdem (nie nackt). Wird nicht abgewartet, das Open bleibt instant. Ohne OK über genau diese Menge: 🔴 an die Master-IDs
+  async function tpLotsOffenMelden(plan, lots){
+    let ok = plan.mt5Baseline && plan.mt5Baseline.lots_ok
+    try{ const { data, error } = await supabase.from('trade_plans').select('lots_ok:mt5_baseline->lots_ok').eq('id', plan.id).maybeSingle(); if(!error && data) ok = data.lots_ok }catch(_){}
+    if(ok && Number(ok.lots) + 0.011 >= lots) return
+    return _tpLotsPost(`offen|${plan.id}|${lots}`, { plan_id: String(plan.id), lots, offen: true })
   }
 
   function hedgeLiqStart(plan){
@@ -29772,13 +29781,8 @@
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
     // notfall_faktor (Backend .512): SL am Hedge = fill ± tp_punkte × 1,10; geschlossen wird über den Feed-Wächter bei TP + 8 Ticks.
     const lotsSoll = hedgeLotsSoll(plan, kt, ppl)   // Risiko vor multiplier (08.10.2026)
-    // LOTS-DECKEL (02.11.2026): letzte Linie, falls ein Weg an der Start-Sperre vorbeikam. Erst frisch lesen, ein OK kann gerade erst gekommen sein. Kein Hedge über dem Deckel ohne OK, Meldung wie jeder Hedge-Fehler
-    if(lotsSoll > HEDGE_LOTS_DECKEL && await tpLotsDeckelFrisch(plan)){
-      const msg = `${lotsSoll} Lot über dem Deckel von ${HEDGE_LOTS_DECKEL} — erst in „Braucht dich“ OK drücken`
-      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'fehler', msg, eur: plan.hedgeEur, at }) }catch(_){}
-      if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + msg, 'end')
-      return null
-    }
+    // LOTS-DECKEL (02.11.2026): hier nie sperren, jeder Aufrufer hat schon eine Order (Puls-Ergebnis, Nachholen, Rückkehr, Knopf); gesperrt wird vor dem Puls-Auftrag
+    if(lotsSoll > HEDGE_LOTS_DECKEL) tpLotsOffenMelden(plan, lotsSoll).catch(() => {})
     // VORLÄUFIGE LEVEL (01.10.2026, Finn: „Fusion insta öffnen, am Anfang Notfall auf 120 % oder so, und sobald Show more da ist, werden
     // TP und SL auf Fusion korrekt angepasst"): Ist der TP beim Open noch nicht echt (früher Hedge beim Klick, kein TP-Limit/Fill), setzt
     // der Copier beide Level bewusst weiter weg — Notfall-SL mindestens 120 % (+10 % über dem normalen), Level am Master-SL 20 % der
@@ -51147,6 +51151,10 @@
   async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
+    // LOTS-DECKEL (S9 02.11.2026): „Speichern & Starten“, Karte und Echo-Fern kommen hierher, bei Orbit vor dem Duplikum-Check
+    if(await tpLotsDeckelFrisch(plan)){ const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t })
+      if(opts && typeof opts.fehl === 'function') opts.fehl(t); else if(typeof atToast === 'function') atToast(t, 'end')
+      return }
     // Ziel erreicht / Manuelle Arbeit: auch der Duplikum-Start nicht (08.10.2026). Trotzdem starten (26.10.2026): Freigabe zählt beim
     // Karten-/Plan-Start (karte) und in der Auto-Start-Schlange (still) — dorthin kommt ein Plan mit Freigabe nur über „Starten" auf der Karte
     { const sp = await planKontoSperre(plan, { hand: !!(opts && (opts.karte || opts.still)) })
@@ -51818,6 +51826,11 @@
   }
   window._echoFenster = { ok: echoFensterOk, grund: echoFensterGrund, urteil: echoScharfUrteil, schreiben: echoFensterSchreiben, MAX_MS: ECHO_SCHARF_MAX_MS }   // Test-Haken
   async function tpPreflightMt5(plan){
+    // LOTS-DECKEL (S9 02.11.2026): Fern-Signal und Hand-Weg springen direkt hierher. Vor allem anderen, es läuft noch kein Copier
+    if(await tpLotsDeckelFrisch(plan)){ const t = tpLotsDeckelText(plan); _pfRemoteMelde(plan.id, { ok:false, msg: t }); _rkTickStart.delete(String(plan.id))
+      if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) _tpPendingOrder = null
+      if(typeof atToast === 'function') atToast(t, 'end')
+      return }
     _pfMt5StopTimer()
     // Verdrängt dieser Check einen noch offenen Remote-Lauf eines ANDEREN
     // Plans? Ehrlich ans Handy melden statt still verhungern lassen — und
@@ -59535,7 +59548,7 @@
   function suKetteFrei(p, plaene, now){
     const tag = suKettenTag(p)
     // APEX-WD BESTÄTIGEN (02.11.2026): ein Apex-WD, der auf Finns „Bestätigen" wartet, hält die Kette seiner ID nicht auf — Finn: „bei Tradeify nichts, bei Topstep nichts"
-    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag && (String(x.id) === String(p.id) || !tpWdWartetAufBestaetigung(x)))
+    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag && (String(x.id) === String(p.id) || !(tpWdWartetAufBestaetigung(x) || tpLotsDeckelFehlt(x))))
       .sort((a, b) => (new Date(a.startUm) - new Date(b.startUm)) || String(a.id).localeCompare(String(b.id)))
     const i = kette.findIndex(x => String(x.id) === String(p.id))
     if(i <= 0) return new Date(p.startUm).getTime() <= now                     // Kopf (oder nicht in der Kette): zur eigenen Startzeit
@@ -61221,6 +61234,7 @@
     // WD-KARTEN WIE RADAR (30.10.2026): nur für den WD-Reiter (window._apWdBloecke setzt _tpl.nurWd für einen Aufruf) genau umgekehrt — nur Winning Days
     const raus = trades.filter(t => _tpl.nurWd ? !t.wd : (!TPL_TYPEN.includes(String(t.typ || '')) || t.wd))
     for(const t of raus){ const i = trades.indexOf(t); if(i >= 0) trades.splice(i, 1) }
+    const lotsRaus = raus.filter(t => t.lots > 16)   // LOTS-DECKEL (02.11.2026): Winning Days und Funded fehlen auf der Seite, ihr OK-Knopf steht trotzdem in „Braucht dich“
     let L = 0, S = 0
     for(const t of trades){
       t.bis = t.status === 'beendet' ? (t.ende != null && t.ende > t.start ? t.ende : t.start + laufzeit)
@@ -61243,7 +61257,7 @@
     const ohneGeplante = l => !l || !Array.isArray(l.ausgelassen) || !echt.length ? l
       : { ...l, ausgelassen: l.ausgelassen.filter(x => !(x && geplantX(x) && !/geplanten\/laufenden Plan|heute schon gehandelt|noch nicht erledigt/.test(String(x.grund || '')))) }
     const rohF = roh && String(roh.tag || '') === tag ? ohneGeplante(roh) : roh
-    return { tag, heute, v, roh: rohF, lauf: lauf ? (lauf === roh ? rohF : ohneGeplante(lauf)) : lauf, delta, jetzt, laufzeit, trades, L, S }
+    return { tag, heute, v, roh: rohF, lauf: lauf ? (lauf === roh ? rohF : ohneGeplante(lauf)) : lauf, delta, jetzt, laufzeit, trades, lotsRaus, L, S }
   }
 
   /* Netto-/Brutto-Einsatz als Treppe über den Tag (Minuten dt) */
@@ -62386,6 +62400,11 @@
           tun: `Prophos-Tab am PC${t.eigen ? '' : ' von ' + (t.user || 'der ID')} neu laden (Strg+F5) — er holt den Start als „zu spät" regelkonform nach; sonst ↻ Erneut versuchen.`, neu: true }
       }
       return null
+    }
+    for(const t of (D.lotsRaus || [])){   // LOTS-DECKEL (02.11.2026): sonst hieße es „OK in Braucht dich“, und dort stünde nichts
+      if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue
+      const p = t.eigen ? (tradePlans || []).find(x => String(x.id) === t.plan_id) : null, kn = tplKannNicht(t, null, p ? !!p.startUmGestartetAt : !!t.geclaimt, false)
+      if(kn && kn.lotsOk) add(t.user_id, t.user, { art: 'start_nein', firma: t.firma, konto: t.konto, typ: t.typ, ende4: t.ende4, key: t.key, neu: null, lotsOk: t.key, text: kn.text, tun: kn.tun })
     }
     for(const t of D.trades){
       if(tplManRaus(man, t.user_id, t.konto_id, t.konto)) continue   // Konto in Manueller Arbeit (08.10.2026)
@@ -63822,10 +63841,10 @@
     const ex = e.target.closest('[data-tpl-ext]')   // Braucht dich: ✎ External ID eintragen (08.10.2026) — eigenes Konto-Formular, wie „Bearbeiten" in Accounts
     if(ex){ const acc = (accounts || []).find(q => String(q.id) === ex.dataset.tplExt); if(acc && typeof openAccountModal === 'function') openAccountModal(null, acc); return }
     const lo = e.target.closest('[data-tpl-lotsok]')   // LOTS-DECKEL (02.11.2026): OK gibt genau diesen Plan frei, wer und wann speichert Railway
-    if(lo){ const t = tplDaten().trades.find(x => x.key === lo.dataset.tplLotsok); if(!t) return
+    if(lo){ const Dl = tplDaten(), t = Dl.trades.concat(Dl.lotsRaus || []).find(x => x.key === lo.dataset.tplLotsok); if(!t) return
       lo.disabled = true; lo.textContent = 'speichert …'
       ;(async () => {
-        try{ await apdApi('POST', '/lots-ok', { plan_id: t.plan_id, kt: t.lotsKt, mult: t.lotsMult, lots: t.lots })
+        try{ await apdApi('POST', '/lots-ok', { plan_id: t.plan_id, kt: t.lotsKt, mult: t.lotsMult, lots: t.lots, sicht: 'admin' })
           const pl = (tradePlans || []).find(x => String(x.id) === String(t.plan_id))
           if(pl){ const { data } = await supabase.from('trade_plans').select('*').eq('id', pl.id).maybeSingle(); const ix = tradePlans.indexOf(pl); if(data && ix >= 0) tradePlans[ix] = rowToPlan(data) }
           if(typeof atToast === 'function') atToast(`OK gespeichert: ${t.konto || 'Plan'} darf mit ${t.lots} Lot starten.`, 'start')
