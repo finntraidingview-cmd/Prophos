@@ -28,6 +28,9 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.9 02.11.2026  KEIN RUECKSTAU (Lotse Simon: /positions.ts lief der Uhr 101 → 323 s hinterher, 1:1 wachsend): je Endpunkt hoechstens EIN offener POST (postEinzeln),
+//                      ein Tick waehrend des Laufs merkt nur den neuesten Stand und schickt ihn sofort nach der Antwort — nie eine Warteschlange. Plakette
+//                      zeigt die Laufzeit des letzten POST in ms.
 //   0.10.9 02.11.2026  NUR DIE POSITIONS-TABELLE (Finn-Test Simon 69900aaa: Master zu 15:29:31, Schluss erst 15:30:07; Lotse-Spur): Im Puls-Chrome liest lesePositionen nur Zeilen
 //                      aus SEL_POS_TABELLE bei aktivem Reiter Positions. Vorher zaehlten alle td[data-label] im Dokument, auch die Orders-Tabelle: ihre Zeilen fielen
 //                      zwar als Order raus, hielten aber leseBefund.zeilen > 0, die leere Tabelle galt nie als flach, der Tab meldete blind, der Stand fror ein.
@@ -1085,6 +1088,26 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // den Stand ein und antwortet an:false; Wiedereinschalten greift so sofort.
   let tickNr = 0;
 
+  /* KEIN RUECKSTAU (0.10.9, Lotse Simon 02.11.2026): Im Puls-Chrome tickt das Script alle 50 ms und schickte je Tick einen POST. Antwortet der Weg langsamer, stauten sich
+   * die Anfragen in Tampermonkey, der Reader bekam Minuten alte Staende. Jetzt je Endpunkt hoechstens EIN offener POST; was waehrenddessen kommt, ersetzt nur den
+   * gemerkten neuesten Stand und geht sofort nach der Antwort (onload/onerror/ontimeout) raus. REIN bis auf den uebergebenen Sender (Selbsttest mit langsamem Fake). */
+  const POST_HAENGT_MS = 10000;
+  const _postLauf = {};   // url → { busy, neu: opts | null, ms, start }
+  function postEinzeln(opts, senden) {
+    const z = _postLauf[opts.url] || (_postLauf[opts.url] = { busy: false, neu: null, ms: null, start: 0 });
+    if (z.busy && Date.now() - z.start < POST_HAENGT_MS) { z.neu = opts; return false; }   // ohne jede Antwort nach 10 s gilt der Lauf als verloren
+    z.busy = true; z.start = Date.now();
+    const fertig = (h) => (r) => {
+      z.ms = Date.now() - z.start; z.busy = false;
+      try { if (h) h(r); } catch (_) {}
+      const n = z.neu; z.neu = null;
+      if (n) postEinzeln(n, senden);
+    };
+    (senden || GM_xmlhttpRequest)(Object.assign({}, opts, { onload: fertig(opts.onload), onerror: fertig(opts.onerror), ontimeout: fertig(opts.ontimeout) }));
+    return true;
+  }
+  const postMs = (url) => (_postLauf[url] && _postLauf[url].ms != null) ? ` · ${_postLauf[url].ms} ms` : '';
+
   function sendeBedienfeld() {
     let bf;
     try {
@@ -1096,7 +1119,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     }
     // 0.8.5: Herkunft fuers reader-server-Routing (Puls klickt im Tab mit Fokus)
     try { bf.tab_id = TAB_ID; bf.rolle = tabRolle(Date.now()); bf.fokus = document.hasFocus(); bf.version = bf.version || VERSION; } catch (_) {}
-    GM_xmlhttpRequest({
+    postEinzeln({
       method: 'POST', url: BEDIENFELD,
       headers: { 'Content-Type': 'application/json' },
       data: JSON.stringify(bf), timeout: 2500,
@@ -1969,7 +1992,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
     if (!PULS_CHROME) { try { pxKerzenSenden(); } catch (_) { feed.fehler++; } }   // 0.8.0: wartende Bars gebuendelt an /kerzen
 
-    GM_xmlhttpRequest({
+    postEinzeln({
       method: 'POST',
       url: ENDPOINT,
       headers: { 'Content-Type': 'application/json' },
@@ -1981,9 +2004,9 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
         else if (feedLogin)  setBadge(`⚠ Feed-Tab: Broker-Konto angemeldet (${feedLogin}) — hier nie handeln, bitte abmelden`, 'warn');   // 0.8.8
         else if (rolle !== 'broker') setBadge(PULS_CHROME ? `● Orbit V3 · Puls-Chrome · kein Konto angemeldet` : `● Feed-Tab ohne Konto — nur Kurse`, PULS_CHROME ? 'warn' : 'ok');   // 0.8.7: keine Warnung ohne Konto
-        else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
+        else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen${postMs(ENDPOINT)}`, 'warn');
         // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen
-        else if (PULS_CHROME) setBadge(`● Orbit V3 · Puls-Chrome · ${positionen.length} Pos`, 'ok');
+        else if (PULS_CHROME) setBadge(`● Orbit V3 · Puls-Chrome · ${positionen.length} Pos${postMs(ENDPOINT)}`, 'ok');
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
       onerror:   () => setBadge(`● Reader · ${positionen.length} Pos · Copier OFFLINE`, 'warn'),
