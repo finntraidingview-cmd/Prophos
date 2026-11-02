@@ -4171,6 +4171,10 @@
   #wd-uebersicht .wd-ue-grund{color:var(--sub);font-size:12px;white-space:normal;text-align:right}
   /* WD-ANSICHT (30.10.2026): TP/SL tragen „+71 $ ↔ −36 €“ (pzPaarZelle) → wie im Funded CFD beide Spalten breiter */
   @media (min-width:1361px){ #adm-pane-wd #wd-uebersicht .pz-tab.pz-radar{grid-template-columns:60px minmax(120px,1fr) 96px minmax(110px,1fr) 70px 124px 124px 170px;column-gap:12px} #adm-pane-wd #wd-uebersicht .pz-radar .pz-z > .pz-art{display:flex} }
+  /* Braucht dich + Wartet auf Start ohne letzte Spalte (Finn 02.11.2026): die übrigen Spalten nutzen die volle Breite, TP/SL so breit, dass „TP Master ↔ Fusion SL“ einzeilig bleibt */
+  @media (min-width:1361px){ #adm-pane-wd #wd-uebersicht .pz-tab.pz-radar.pz-ohne-akt{grid-template-columns:64px minmax(150px,1.5fr) 96px minmax(130px,1.2fr) 80px minmax(max-content,1fr) minmax(max-content,1fr)} }
+  #wd-uebersicht .pz-ohne-akt .pz-z-kopf .pz-tp,#wd-uebersicht .pz-ohne-akt .pz-z-kopf .pz-sl{white-space:nowrap}
+  #wd-uebersicht .pz-konto2 .pz-k3{display:block;margin:1px 0 0;padding:0;font-size:11px;line-height:1.3;color:var(--warn-ink,#b45309);white-space:normal}
   /* schmaler (Fenster halb, Handy): keine abgeschnittene Spalte — TP und SL rutschen in eine zweite Zeile und tragen ihren Namen selbst */
   @media (max-width:1360px){ #adm-pane-wd #wd-uebersicht .pz-tab.pz-radar{display:block}
     #adm-pane-wd #wd-uebersicht .pz-radar .pz-z.pz-z-kopf{display:none}
@@ -49330,13 +49334,13 @@
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
-        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}${window._planRecovererChipHtml?.(p) || ''}</span><small class="pz-k2">${k2}</small></span>
+        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}${window._planRecovererChipHtml?.(p) || ''}</span><small class="pz-k2">${k2}</small>${o.unterKonto || ''}</span>
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
         ${fuZelle || artZelle}
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${paarL ? ' mit-pz' : ''}${pzwZ('tp')}>${paarL ? pzPaarZelle(paarL[0]) : p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${paarL ? ' mit-pz' : ''}${pzwZ('sl')}>${paarL ? pzPaarZelle(paarL[1]) : p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
-        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
+        ${o.ohneAkt ? '' : `<span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>`}
       </div>`
     }
     return `
@@ -49350,7 +49354,7 @@
         <span class="pz-gr${pzwZ('gr')}>${gr}</span>
         <span class="pz-tp${p.masterTp > 0 ? '' : ' is-leer'}${pzwZ('tp')}>${p.masterTp > 0 ? geldZ(p.masterTp) + ' $' : '–'}</span>
         <span class="pz-sl${p.masterSl > 0 ? '' : ' is-leer'}${pzwZ('sl')}>${p.masterSl > 0 ? geldZ(p.masterSl) + ' $' : '–'}</span>
-        <span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>
+        ${o.ohneAkt ? '' : `<span class="pz-akt">${o.chips || ''}${o.akt || ''}</span>`}
       </div>`
   }
   /* Firmen-Blöcke der Spalte Geplant (05.10.2026): die Liste ist schon nach Firma + Startzeit sortiert. Kopf je Firma EINE Zeile:
@@ -49400,8 +49404,8 @@
           ${nichtLive ? `${sep} <span class="pz-warn">⚠ ${nichtLive} Balance${nichtLive === 1 ? '' : 's'} nicht live</span>` : ''}
           ${zeilen.length && !opt.ohneHinweis ? `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(g.firma === '–' ? '' : g.firma)}" style="display:none;background:color-mix(in srgb, var(--warn) 14%, transparent);color:var(--warn-ink, #b45309)"></span>` : ''}
         </div>`
-        + (zeilen.length && opt.stil === 'radar' ? `<div class="pz-tab pz-radar">
-          <div class="pz-z pz-z-kopf"><span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">${opt.kopfFusion ? 'Fusion' : 'Schritt'}</span><span class="pz-tp">${opt.kopfFusion ? 'TP Master ↔ Fusion SL' : 'TP'}</span><span class="pz-sl">${opt.kopfFusion ? 'SL Master ↔ Fusion TP' : 'SL'}</span><span></span></div>`
+        + (zeilen.length && opt.stil === 'radar' ? `<div class="pz-tab pz-radar${opt.ohneAkt ? ' pz-ohne-akt' : ''}">
+          <div class="pz-z pz-z-kopf"><span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">${opt.kopfFusion ? 'Fusion' : 'Schritt'}</span><span class="pz-tp">${opt.kopfFusion ? 'TP Master ↔ Fusion SL' : 'TP'}</span><span class="pz-sl">${opt.kopfFusion ? 'SL Master ↔ Fusion TP' : 'SL'}</span>${opt.ohneAkt ? '' : '<span></span>'}</div>`
           + zeilen.map(p => opt.zeile(p)).join('') + `</div>`
         : zeilen.length ? `<div class="pz-tab${opt.mitId ? ' pz-mit-id' : ''}">
           <div class="pz-z pz-z-kopf">${opt.mitId ? '<span>ID</span>' : ''}<span>Start</span><span>Konto</span><span class="pz-ri">Richtung</span><span>Balance → Ziel</span><span class="pz-art">Schritt</span><span class="pz-gr">Größe</span><span class="pz-tp">TP</span><span class="pz-sl">SL</span><span></span></div>`
@@ -82152,7 +82156,7 @@
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok" data-ap-ok="${escapeHtml(id)}"${nichtLive || unterwegs ? ' disabled' : ''} title="${nichtLive ? 'Balance nicht live — erst „↻ Balance lesen" (Braucht dich), dann bestätigen' : 'Bestätigen — startet zur Startzeit'}">${unterwegs ? '…' : 'Bestätigen'}</button>${fehlHtml}</span>`
       } else if(art === 'warten'){
         akt = `<span class="pz-zustand"><button type="button" class="btn btn-ghost tc2-btn pz-ok is-ok" data-ap-zur="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Bestätigt — startet zur Startzeit. Klick schickt den Plan zurück nach „Zu bestätigen“">${unterwegs ? '…' : '↩ zurück'}</button>${fehlHtml}</span>`
-      } else if(art === 'braucht') akt = !grund ? '' : `<span class="pz-zustand"><small class="wd-ue-grund" title="${escapeHtml(String(grund || ''))}">${escapeHtml(String(grund || ''))}</small></span>`
+      } else if(art === 'braucht') akt = ''
       else if(lauf){ const w = lauf.get(id) || {}, fw = w.gehedgt ? w.fusion : w.hypo
         akt = `<span class="pz-zustand"><span class="wd-ue-pl" data-lz-plan="${escapeHtml(id)}" title="Live: Master $${w.gehedgt ? ' · darunter Fusion €' : ' · darunter hypothetisch €'}"><span data-lz-usd style="color:${lzFarbe(w.pl)}">${lzUsd(w.pl)}</span><small data-lz-eur style="color:${lzFarbe(fw)}">${lzEur(fw)}</small></span><span class="ap-gr-live">● läuft</span></span>` }
       else akt = '<span class="pz-zustand"><span class="ap-gr-live">● läuft</span></span>'
@@ -82165,14 +82169,17 @@
           title="${escapeHtml(riG ? riG + ' — Klick prüft erneut' : `anklicken: nur diesen Plan auf ${ziel} drehen (Richtungsschutz ID × Firma wird vorher geprüft)`)}"><em class="${p.richtung === 'buy' ? 'is-buy' : 'is-sell'}">${riL ? '…' : (riG ? '⛔ ' : '') + (p.richtung === 'buy' ? 'BUY' : 'SELL')}</em></button>`
       }
       const hChip = geplant && typeof window._ahfHedgeKurz === 'function' ? window._ahfHedgeKurz(z, art) : ''   // EIN BESTÄTIGEN (30.10.2026)
-      return planZeileHtml(p, konto, { refund: z.refund != null ? !!z.refund : undefined, name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: hChip, akt, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: geplant && !karten ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
+      // OHNE LETZTE SPALTE (Finn 02.11.2026, mit Bild: „viel zu viel Platz“): WD-Karten Braucht dich und Wartet auf Start haben dort nichts zu klicken. „überfällig“ und Konto-Hinweise stehen unter dem Konto
+      const ohneAkt = karten && (art === 'braucht' || art === 'warten')
+      const unterKonto = !ohneAkt ? '' : (art === 'braucht' && grund ? `<small class="pz-k3" title="${escapeHtml(String(grund))}">${escapeHtml(String(grund))}</small>` : '') + (hChip ? `<small class="pz-k3">${hChip}</small>` : '')
+      return planZeileHtml(p, konto, { refund: z.refund != null ? !!z.refund : undefined, name: p.masterName, ext: (konto && konto.externalId) || z.ende4 || '', extTitle: '', chips: ohneAkt ? '' : hChip, akt, ohneAkt, unterKonto, zeit, bal, notiz, uid: z.user_id, riHtml, boden: z.boden ?? t.boden, pl: art === 'laeuft' ? pl : undefined, werte: geplant && !karten ? { ppp: null } : null, stil: 'radar', fusion: z.fusion || null })
     }
     for(const p of plaene){ const { z } = jeZ.get(String(p.id)), k = String(z.user_id || '')
       if(!je.has(k)) je.set(k, { uid: k, name: z.user || k.slice(0, 8), plaene: [], live: 0 }); je.get(k).plaene.push(p); if(z.balance_live !== false) je.get(k).live++ }
     const wort = { offen: 'offen', warten: 'wartet', laeuft: 'läuft', braucht: 'braucht dich' }[art]
     const gruppen = [...je.values()].sort((a, b) => String(a.name).localeCompare(String(b.name), 'de')).map(g => `<div class="ap-id-karte" style="--id:${idFarbe(g.uid)}"><div class="ap-adm-grp"><span class="ap-adm-id"><i style="background:${idFarbe(g.uid)}"></i>${escapeHtml(g.name)}</span><span class="n">${g.plaene.length} ${wort}${art === 'offen' && g.live < g.plaene.length ? ` · ${g.plaene.length - g.live} Balance nicht live` : ''}</span>
           ${art === 'offen' && g.live ? `<button type="button" class="btn btn-ghost btn-xs" data-ap-ok-id="${escapeHtml(g.uid)}" title="alle offenen Vorschläge dieser ID mit liver Balance bestätigen">✓ alle ${g.live}</button>` : ''}</div>`
-        + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true, stil: 'radar', kopfFusion: karten }) + '</div>').join('')   // Radar-Optik der Zeilen (08.10.2026)
+        + planFirmenBloecke(g.plaene, { zeile, ohneHinweis: true, stil: 'radar', kopfFusion: karten, ohneAkt: karten && (art === 'braucht' || art === 'warten') }) + '</div>').join('')   // Radar-Optik der Zeilen (08.10.2026)
     return `<div class="ap-adm-karte ap-geplant ap-gr-${art}${lauf ? ' lz-tab' : ''}">${kopf}${gruppen}</div>`
   }
   function apIdsOffenHtml(){
