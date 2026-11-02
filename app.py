@@ -36861,6 +36861,7 @@ def ap_loop():
 FDP_TAKT_S = 300                          # alle 5 min Konten ohne Plan nachplanen (wie ap_nachplan_tick)
 FDP_NQ_PPL = 20.0                         # $ je NQ-Punkt und Kontrakt
 FDP_SLAVE_PPL = GP_SLAVE_PPL              # € je NAS100-Punkt und Lot bei Fusion (wie tpWdSlavePpl)
+FDP_BREAKEVEN_TOL_USD = 500.0             # bis so weit unter dem Start gilt das Konto als frisch (Finn 01.11.2026: „breakeven plus/minus 500 $“), kein Break-even-Trade
 FDP_SL_MIN_USD = 100                      # darunter kein Trade (Abstand zur Liquidation zu klein)
 # von/bis/tz nur als Rückfall — gilt ist das Fenster des Challenge-Planers (fdp_fenster)
 # abstand_id_min 90 (Master 27.10.2026): mit 0 lägen zwei Funded derselben ID evtl. 16 min auseinander — der zweite würde von der Big-Trade-
@@ -36936,9 +36937,9 @@ def fdp_stufe(stufen, balance):
 
 
 def fdp_tp(balance, start, ziel, max_trade):
-    """REIN RECHNEND (testbar): (tp | None, art). Unter dem Start zurück auf Break-even ('break_even'), sonst min(max_trade, Ziel −
-    Balance) ('normal'); Ziel erreicht → (None, 'ziel')."""
-    if balance < start - 0.005:
+    """REIN RECHNEND (testbar): (tp | None, art). Mehr als FDP_BREAKEVEN_TOL_USD unter dem Start zurück auf Break-even ('break_even'), sonst
+    min(max_trade, Ziel − Balance) ('normal'); Ziel erreicht → (None, 'ziel'). Anlass: Marc 99.988 $ hätte sonst TP 12,40 $ und Hedge 1,02 €."""
+    if balance < start - FDP_BREAKEVEN_TOL_USD:
         return round(start - balance, 2), "break_even"
     rest = ziel - balance
     if rest <= 0.005:
@@ -37022,11 +37023,21 @@ def fdp_zyklus(groesse, payouts, plaene):
     return {"nr": len(ps) + 1, "ab": ab, "start": _wd_num(nach[0].get("bal_start")) if nach else None}
 
 
-def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None):
+def fdp_vorschlag_neu(plan, r):
+    """REIN RECHNEND (testbar): Felder, mit denen ein alter Break-even-Vorschlag nach der ±500-$-Regel neu gerechnet wird, sonst None. Nur unbestätigt, ohne Startzeit, nie gestartet, nicht von Hand geändert; bestätigte Pläne fasst
+    das nie an. r = fdp_konto_rechnen mit den Kontrakten des Plans."""
+    p, fp = plan or {}, (plan or {}).get("funded_plan")
+    if (p.get("status") != "planned" or p.get("auto_bestaetigt_at") or p.get("start_um") or p.get("start_um_gestartet_at") or p.get("started_at") or p.get("hand_werte_at")
+            or not isinstance(fp, dict) or fp.get("tp_art") != "break_even" or (r or {}).get("aktion") != "planen" or r.get("tp_art") != "normal"):
+        return None
+    return {"master_tp": r["tp"], "master_sl": r["sl"], "master_risk": r["master_risk"], "slave_risk": r["slave_risk"], "multiplier": r["multiplier"], "hedge_faktor": r["hedge_faktor"], "hedge_eur": r["hedge_eur"]}
+
+
+def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groesse=None, rnd=None, tage=None, kt_fest=None):
     """REIN RECHNEND (testbar): nächster Trade eines Funded-Kontos → {aktion: planen|ziel|aus, grund, …}. regel = Firmen-Regel aus
     funded_plan_regeln, jg = fdp_je_groesse, stufen = liq_regeln-Stufen der Größe, peak = höchste belegte Balance (liq_peak),
     offen = fdp_offen, start = Zyklus-Start (None = Kontogröße), rnd = Würfel für die Kontrakte (None = wahrscheinlichster Wert),
-    tage = fdp_tage (nur Anzeige „größter Tag x %")."""
+    tage = fdp_tage (nur Anzeige „größter Tag x %"), kt_fest = Kontrakte eines schon gewürfelten Vorschlags."""
     g = float(groesse or 0)
     if not jg or not g:
         return {"aktion": "aus", "grund": "keine Werte für diese Kontogröße im Funded-Planer"}
@@ -37056,7 +37067,7 @@ def fdp_konto_rechnen(regel, jg, stufen, balance, peak, offen, start=None, groes
     sl = fdp_sl(dll, balance, liq)
     if not sl or sl < FDP_SL_MIN_USD:
         return dict(basis, aktion="aus", grund=f"Abstand zur Liquidation zu klein ({_liq_de(balance - liq)} $)")
-    kt = fdp_kontrakte(jg.get("kontrakte"), minis, rnd)
+    kt = min(int(minis or kt_fest), int(kt_fest)) if kt_fest else fdp_kontrakte(jg.get("kontrakte"), minis, rnd)
     h = fdp_hedge(offen, balance, liq, tp, sl, kt)
     if not h:
         return dict(basis, aktion="aus", grund=f"Hedge nicht rechenbar (offene Kosten {_liq_de(offen)} €)")
@@ -37230,7 +37241,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         teil = ",".join(ids[i:i + 80])
         plaene += _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,started_at,ended_at,completed_at,start_um,master_pl,"
                                                     "slave_pl,orbit_v3,hedge_eur,route,winning_day,created_at,bal_start:mt5_baseline->tv->balance_start,"
-                                                    "richtung,master_contracts,master_tp,master_sl,auto_plan,auto_bestaetigt_at,funded_plan:mt5_baseline->funded_plan,"
+                                                    "richtung,master_contracts,master_tp,master_sl,auto_plan,auto_bestaetigt_at,start_um_gestartet_at,hand_werte_at,funded_plan:mt5_baseline->funded_plan,"
                                                     "fp_start:mt5_baseline->funded_plan->>start_um",
                                           "master_account_id": f"in.({teil})",
                                           "created_at": "gte." + (jetzt - timedelta(days=180)).isoformat()})
@@ -37260,6 +37271,17 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
                 schon[str(a.get("user_id"))] = schon.get(str(a.get("user_id")), 0) + 1
     rnd = random.Random(seed if seed is not None else f"fp-{cme_heute}-{int(jetzt.timestamp() // FDP_TAKT_S)}")
     kand, rech = [], {}
+
+    def konto_rechnen(a, pl, balance, g, regel, jg, kt_fest=None):
+        zy = fdp_zyklus(g, payouts.get(str(a["id"])), pl)
+        start, ab = (zy["start"] if zy["start"] is not None else balance), zy["ab"]
+        hedge_pls = [_wd_num(p.get("slave_pl")) for p in pl if p.get("status") == "completed" and (p.get("orbit_v3") or (_wd_num(p.get("hedge_eur")) or 0) > 0)
+                     and (not ab or str(p.get("started_at") or "") > str(ab))]
+        peak = liq_peak({}, a, balance, verlauf)
+        lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
+        stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
+        return fdp_konto_rechnen(regel, jg, stufen, balance, peak, fdp_offen(jg.get("kosten_eur"), hedge_pls), start, g, rnd, fdp_tage(pl, ab), kt_fest=kt_fest), zy
+
     for a in konten:
         aid, pl = str(a["id"]), je_plan.get(str(a["id"]), [])
         zeile = {"konto_id": aid, "user_id": str(a.get("user_id")), "konto": a.get("name"), "firma": a.get("firm"),
@@ -37275,6 +37297,21 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
             erg["ausgelassen"].append(dict(zeile, grund=f"keine Werte für {int(g / 1000) if g else '?'}k im Funded-Planer")); continue
         lauf = [p for p in pl if p.get("status") in ("planned", "open", "review")]
         if lauf:
+            # ±500 $ (Finn 01.11.2026): alte Break-even-Vorschläge neu rechnen, Bestätigen bleibt von Hand. Trockenlauf schreibt nichts
+            if not trocken and lauf[0].get("status") == "planned" and (lauf[0].get("funded_plan") or {}).get("tp_art") == "break_even" and zeile["balance"] is not None \
+                    and ap_balance_live(a.get("tv_balance_at"), max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None):
+                try:
+                    r_neu, _zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg, int(_wd_num(lauf[0].get("master_contracts")) or 0) or None)
+                    felder = fdp_vorschlag_neu(lauf[0], r_neu)
+                    if felder:
+                        fp_neu = dict(lauf[0]["funded_plan"], **{k: r_neu.get(k) for k in ("liq", "stufe", "dll", "minis", "offen_eur", "verhaeltnis", "tp_art", "hedge_sl_eur", "hedge_tp_eur")})
+                        # Filter wie fdp_vorschlag_neu: hat Finn gerade bestätigt, trifft das keine Zeile
+                        if sb_update("trade_plans", {"id": f"eq.{lauf[0]['id']}", "status": "eq.planned", "auto_bestaetigt_at": "is.null", "start_um": "is.null", "start_um_gestartet_at": "is.null", "hand_werte_at": "is.null"}, felder):
+                            _sb_pruefen(_sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                                                    json={"p_plan": str(lauf[0]["id"]), "p_patch": {"funded_plan": fp_neu}, "p_status": "planned"}))
+                            print(f"[funded-plan] Vorschlag {str(lauf[0]['id'])[:8]} nach ±500 $ neu: TP {lauf[0].get('master_tp')} → {felder['master_tp']} $, Hedge → {felder['hedge_eur']} €", flush=True)
+                except Exception as e:
+                    print(f"[funded-plan] ⚠️ Vorschlag neu rechnen {str(lauf[0].get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
             erg["ausgelassen"].append(dict(zeile, grund={"planned": "schon geplant", "open": "läuft gerade", "review": "wartet auf Nachlesung"}
                                            .get(lauf[0].get("status"), "Plan offen"), plan_id=lauf[0].get("id"))); continue
         if any(p.get("started_at") and _cme_handelstag(p["started_at"]) == cme_heute for p in pl):
@@ -37282,16 +37319,7 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         letzt = max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None
         if zeile["balance"] is None or not ap_balance_live(a.get("tv_balance_at"), letzt):
             erg["ausgelassen"].append(dict(zeile, grund="Balance nicht live — ↻ Balance lesen")); continue
-        zy = fdp_zyklus(g, payouts.get(aid), pl)
-        start = zy["start"] if zy["start"] is not None else zeile["balance"]
-        ab = zy["ab"]
-        hedge_pls = [_wd_num(p.get("slave_pl")) for p in pl if p.get("status") == "completed" and (p.get("orbit_v3") or (_wd_num(p.get("hedge_eur")) or 0) > 0)
-                     and (not ab or str(p.get("started_at") or "") > str(ab))]
-        offen = fdp_offen(jg.get("kosten_eur"), hedge_pls)
-        peak = liq_peak({}, a, zeile["balance"], verlauf)
-        lr, _w = liq_regel_waehlen(lregeln, a.get("firm"), "funded", g)
-        stufen = (lr or {}).get("stufen") if (lr or {}).get("art") == "stufen" else None
-        r = fdp_konto_rechnen(regel, jg, stufen, zeile["balance"], peak, offen, start, g, rnd, fdp_tage(pl, ab))
+        r, zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg)
         r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=(regel.get("namen") or [""])[0])
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)

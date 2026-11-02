@@ -63,6 +63,22 @@ def szenario(ns):
         ok = r["aktion"] == "planen" and r["tp"] == tp and r["sl"] == sl and abs(r["hedge_sl_eur"] - hsl) <= 1 and abs(r["hedge_tp_eur"] - htp) <= 1
         return ok, f"TP {r.get('tp')} / SL {r.get('sl')}, Hedge +{r.get('hedge_sl_eur')} / −{r.get('hedge_tp_eur')}"
 
+    print("±500 $ um den Start (Finn 01.11.2026)")
+    TP, NEU = ns["fdp_tp"], ns["fdp_vorschlag_neu"]
+    check(TP(99500, 100000, 112000, 6000) == (6000.0, "normal") and TP(99499.99, 100000, 112000, 6000) == (500.01, "break_even"), "genau 500 $ unter Start normal, ein Cent mehr Break-even")
+    check(TP(100400, 100000, 112000, 6000)[1] == "normal" and TP(111900, 100000, 112000, 6000) == (100.0, "normal"), "darüber normal, höchstens bis zum Ziel")
+    marc = R(REGEL, j100, ST100, 99987.6, None, 245.83, 100000, 100000, kt_fest=2)
+    marco = R(REGEL, j100, ST100, 99914.5, None, 391.02, 100000, 100000, kt_fest=2)
+    mike = R(REGEL, j100, ST100, 98233.8, None, 136.24, 100000, 100000, kt_fest=2)
+    print(f"    Marc:  TP {marc.get('tp')} SL {marc.get('sl')} {marc.get('lots')} Lot Hedge {marc.get('hedge_eur')} €; Marco: TP {marco.get('tp')} SL {marco.get('sl')} {marco.get('lots')} Lot Hedge {marco.get('hedge_eur')} €")
+    check(marc["tp"] == 6000 and marc["tp_art"] == "normal" and marc["kontrakte"] == 2 and marc["hedge_eur"] > 400, "Marc 99.988 $: TP 6.000 $, Hedge neu")
+    check(marco["tp"] == 6000 and marco["tp_art"] == "normal" and marco["kontrakte"] == 2, "Marco 99.915 $: TP 6.000 $")
+    check(mike["tp_art"] == "break_even" and abs(mike["tp"] - 1766.2) < 0.01, "Mike 98.234 $: bleibt Break-even, TP 1.766,20 $")
+    alt = {"status": "planned", "funded_plan": {"tp_art": "break_even"}}
+    check(NEU(alt, marc) is not None and NEU(alt, marc)["master_tp"] == 6000, "alter Break-even-Vorschlag wird neu gerechnet")
+    for feld, text in (("auto_bestaetigt_at", "bestätigt"), ("start_um", "mit Startzeit"), ("start_um_gestartet_at", "geclaimt"), ("started_at", "gestartet"), ("hand_werte_at", "von Hand geändert")):
+        check(NEU(dict(alt, **{feld: "x"}), marc) is None, f"{text}: nie anfassen")
+    check(NEU(alt, mike) is None and NEU({"status": "planned", "funded_plan": {"tp_art": "normal"}}, marc) is None and NEU(dict(alt, status="open"), marc) is None, "weiter Break-even, schon normal oder läuft: nichts")
     print("150k (Kosten 550 €)")
     r = R(REGEL, j150, ST150, 150000, None, 550, 150000, 150000)
     ok, txt = t(r, 7500, 2500, 344, 1031)
