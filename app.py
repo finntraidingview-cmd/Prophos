@@ -34342,6 +34342,13 @@ def ap_bal_auto_tick(jetzt, reg=None):
                         nicht={str(a.get("id")): w for a in konten_neu for w in [ap_bal_auto_warum_nicht(a, archiv)] if w and str(a.get("id")) not in kand})
     if not kand:
         return None
+    return _ap_bal_auto_senden(kand, accs, d, tag, _ap_bal_auto)
+
+
+def _ap_bal_auto_senden(kand, accs, d, tag, merk, uids_offen=None, wer=""):
+    """Gemeinsamer Sende-Teil des Balance-Takts (ausgelagert 02.11.2026, sonst unverändert): je Kandidat Bremsen prüfen, Auftrag in order_signale.
+    merk = Speicher des Aufrufers (versuche, gesendet, uebersprungen): HT _ap_bal_auto, Gruppen _ap_bal_auto_gr, damit GET /admin/auto-plan
+    info.balance_auto weiter nur HT zeigt. uids_offen = IDs mit offenem Trade (nur Gruppen-Weg). → gesendet"""
     lebt = _ap_pc_lebt()
     jetzt_s = time.time()
     # Bremse aus der DB statt nur aus dem Speicher (16.10.2026): ein Railway-Neustart darf den Tageszähler nicht leeren.
@@ -34372,12 +34379,15 @@ def ap_bal_auto_tick(jetzt, reg=None):
     for kid, grund in kand.items():
         a = accs[kid]
         zeile = {"konto_id": kid, "konto": a.get("name"), "user_id": str(a.get("user_id") or ""), "grund": grund}
+        if str(a.get("user_id") or "") in (uids_offen or ()):   # nur Gruppen-Weg: keine Lesung, solange diese ID einen Trade offen hat (Eingang 02.11.2026)
+            ueber.append(dict(zeile, warum="offener Trade dieser ID — Lesung wartet"))
+            continue
         st_db = (db_stand or {}).get(kid) or {}
         gesperrt, warum_u = ap_bal_auto_username_sperre(st_db, _ap_tv_username_da(tvu, a), jetzt_s)
         if gesperrt:
             ueber.append(dict(zeile, warum=f"{a.get('firm') or 'Firma'}: {warum_u}"))
             continue
-        versuche = st_db.get("versuche") if db_stand is not None else _ap_bal_auto["versuche"].get(kid)
+        versuche = st_db.get("versuche") if db_stand is not None else merk["versuche"].get(kid)
         ok, warum = ap_bal_auto_darf(versuche, jetzt_s)
         if not ok:
             ueber.append(dict(zeile, warum=warum))
@@ -34412,18 +34422,69 @@ def ap_bal_auto_tick(jetzt, reg=None):
                     continue
             sig["params"]["von"] = "auto_planer"
             neu = sb_insert("order_signale", sig)
-            _ap_bal_auto["versuche"].setdefault(kid, []).append(jetzt_s)
+            merk["versuche"].setdefault(kid, []).append(jetzt_s)
             gesendet.append(dict(zeile, art=sig["params"]["aktion"], signal_id=str((neu or {}).get("id") or ""),
                                  at=datetime.now(timezone.utc).isoformat(), nr=len(versuche or ()) + 1))
         except Exception as e:
             ueber.append(dict(zeile, warum=f"{type(e).__name__}: {e}"[:160]))
-    _ap_bal_auto["gesendet"] = (gesendet + _ap_bal_auto.get("gesendet", []))[:60]
-    _ap_bal_auto["uebersprungen"] = ueber
+    merk["gesendet"] = (gesendet + merk.get("gesendet", []))[:60]
+    merk["uebersprungen"] = ueber
     if gesendet:
-        print(f"[balance-auto] {tag} {d.strftime('%H:%M')} dt: {len(gesendet)} Balance-Auftrag/-Aufträge von selbst — "
+        print(f"[balance-auto{wer}] {tag} {d.strftime('%H:%M')} dt: {len(gesendet)} Balance-Auftrag/-Aufträge von selbst — "
               + ", ".join(f"{g['konto']} ({g['art']}, {g['nr']}/{AP_BAL_AUTO_MAX_TAG})" for g in gesendet)
               + (f" · {len(ueber)} übersprungen" if ueber else ""), flush=True)
     return gesendet
+
+
+# GRUPPE-BALANCE (Eingang 02.11.2026, Befund Betrieb 1): der Takt las nur HT-IDs. Emins Gruppe plant seit „Gruppe wie HT" mit, frische Konten blieben ungelesen,
+# eh_tick fand keinen Kontowert — Beispiel Julian FTMO 100k: „Balance des Kontos nicht lesbar", und ein bestätigter Echo-Plan startet dann OHNE Hedge (_eh_ohne hält
+# nichts zurück). Jetzt dieselben Quellen und Bremsen je aktiver Verwalter-Gruppe, gleiche Schalter wie ap_gruppen_nachplan_tick. Nur das Lesen ist erweitert: eigener
+# Speicher (nie in info.balance_auto, Sicht HT unverändert), Aufträge wie „↻ Balance lesen" je Konto an die eigene ID. Strenger als HT: keine Lesung bei offenem Trade der ID.
+_ap_bal_auto_gr = {"at": 0.0, "tag": "", "versuche": {}, "gesendet": [], "uebersprungen": []}
+
+
+def ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, letzt, echo_bal, dup_bal, archiv=None):
+    """REIN RECHNEND (testbar): {konto_id: grund} je Gruppe aus den Quellen (A) Lauf der Gruppe (letzter_lauf), (B) geplante Pläne, (C) nie gelesen, (D) ohne Wert.
+    konten = {konto_id: accounts-Zeile} der Gruppen-IDs; Konten fremder IDs zählen nie, auch wenn ein Lauf sie nennt."""
+    out = {}
+    for gr in gruppen or ():
+        ids = {str(u) for u in gr.get("ids") or ()}
+        accs = {k: a for k, a in (konten or {}).items() if str(a.get("user_id")) in ids}
+        pl = [p for p in plaene or () if str(p.get("master_account_id")) in accs]
+        out.update({k: g for k, g in ap_bal_auto_kandidaten(gr.get("letzter_lauf"), tag, pl, accs, letzt, echo_bal, dup_bal, archiv).items() if k not in out})
+        liste = list(accs.values())
+        out.update(ap_bal_auto_nie_gelesen(liste, set(out), echo_bal, dup_bal, archiv))
+        out.update(ap_bal_auto_ohne_wert(liste, set(out), echo_bal, dup_bal, archiv))
+    return out
+
+
+def ap_bal_auto_gruppen_tick(jetzt, reg=None):
+    """Ein Takt (aus ap_loop direkt nach ap_bal_auto_tick): alle AP_BAL_AUTO_TAKT_S, nur wenn auto_plan_regeln.aktiv, je Gruppe auto_plan_gruppe.aktiv."""
+    if time.time() - (_ap_bal_auto_gr.get("at") or 0) < AP_BAL_AUTO_TAKT_S:
+        return None
+    _ap_bal_auto_gr["at"] = time.time()
+    reg = reg or (sb_select("auto_plan_regeln", {"select": "aktiv", "id": "eq.1"}) or [{}])[0]
+    if not reg.get("aktiv"):
+        return None
+    gruppen = ap_planer_gruppen(nur_aktiv=True)
+    uids = sorted({str(u) for gr in gruppen for u in gr["ids"]})
+    if not uids:
+        return None
+    d = jetzt.astimezone(_ap_tz(AP_TZ_TAG))
+    tag = d.strftime("%Y-%m-%d")
+    if _ap_bal_auto_gr.get("tag") != tag:
+        _ap_bal_auto_gr.update(tag=tag, versuche={}, gesendet=[], uebersprungen=[])
+    in_uids = "in.(" + ",".join(uids) + ")"
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,ended_at,completed_at", "user_id": in_uids,
+                                     "status": "in.(open,planned,review,completed)", "created_at": "gte." + (jetzt - timedelta(days=30)).isoformat()})
+    uids_offen = {str(p.get("user_id")) for p in plaene if p.get("status") == "open"}
+    plaene = [p for p in plaene if p.get("status") != "open"]
+    konten = {str(a.get("id")): a for a in _ap_konten_laden({"user_id": in_uids, "account_type": "in.(" + ",".join(AP_TYPEN) + ")"})}
+    echo_bal, dup_bal = _ap_balance_karten()
+    kand = ap_bal_auto_gruppen_kandidaten(gruppen, tag, plaene, konten, ap_letzt_je_konto(plaene), echo_bal, dup_bal, _ap_archiviert())
+    if not kand:
+        return None
+    return _ap_bal_auto_senden(kand, konten, d, tag, _ap_bal_auto_gr, uids_offen=uids_offen, wer=" Gruppe")
 
 
 # ══ VON SELBST BESTÄTIGEN (15.10.2026, Finn am Screenshot „Zu bestätigen · 0 / Braucht dich 10": „Dann muss der Bot den Trade zu
@@ -35643,6 +35704,10 @@ def ap_loop():
         except Exception as e:
             _ap_bal_auto["fehler"] = f"{type(e).__name__}: {e}"
             print(f"[balance-auto] ⚠️ {type(e).__name__}: {e}", flush=True)
+        try:
+            ap_bal_auto_gruppen_tick(datetime.now(timezone.utc))   # GRUPPE-BALANCE (02.11.2026): dasselbe für aktive Verwalter-Gruppen
+        except Exception as e:
+            print(f"[balance-auto Gruppe] ⚠️ {type(e).__name__}: {e}", flush=True)
         try:
             ap_fenster_wache_tick(datetime.now(timezone.utc))   # Pläne hinter dem Klassen-Ende vorziehen (16.10.2026)
             _ap_fenster_wache["fehler"] = ""
