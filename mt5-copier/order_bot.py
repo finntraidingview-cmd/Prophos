@@ -19169,6 +19169,8 @@ def _tsx_konto_sichern(s, ext, st, trail):
             # ist der Ziel-Beweis bei Karten ohne volle Kennung NUR die Endung („9147"): sie steht in jedem Fall im Kartentext und ist in
             # der Liste eindeutig (sonst hätte tsx_k2_eintrag die Karte nicht gewählt)
             pruef = {"rect": r, "text": str(x.get("id") or x.get("endung") or ext)[:60], "aria": "", "tabu": TSX_K0_TABU.pattern}
+            if x.get("format") == "neu":
+                pruef["karte"] = r                           # 2.4.32 (Ina 04:09 Dubai, .1964): Karte ist kein Button — Ziel = Vorfahre mit dem Karten-Rechteck
             _tsx_pause()                                  # die offene Liste steht 1–2 s da, dann erst die Zeile (Finn 01.10.2026)
             if not s.klick(r, f"Konto {ext}", pruef=pruef):
                 _cdp_esc(s, st, trail, "Konto-Zeile nicht gedrückt")
@@ -20972,6 +20974,10 @@ def win_ziel_pruef_js(x, y, pruef):
             "function T(n){return String((n&&n.textContent)||'').replace(/\\s+/g,' ').trim().toLowerCase();}"
             "function A(n){return String(n.getAttribute('aria-label')||n.getAttribute('title')||'').toLowerCase();}"
             "var k=e.closest('input,textarea,button,[role=\"button\"],[role=\"combobox\"],[aria-haspopup],a[href],[tabindex]')||e,r=k.getBoundingClientRect(),c=p.rect;"
+            # pruef.karte (02.11.2026, TopstepX 2.4.32, Ina 04:09–04:11 Dubai „am Zielpunkt liegt nicht das Ziel"): die Konto-Karte ist kein Button —
+            # closest() fand das ganze Menü (tabindex) und das ist > 4× die Karte. Mit karte = Karten-Rechteck gilt der Vorfahre des Punkt-Elements
+            # mit GENAU diesem Rechteck (±4 px) als Ziel; Text (Endung) wird dann im Kartentext geprüft, Tabu-Wörter ebenso.
+            "if(p.karte){var q=e,best=null;while(q&&q!==document.body){var rq=q.getBoundingClientRect();if(Math.abs(rq.left-p.karte[0])<=4&&Math.abs(rq.top-p.karte[1])<=4&&Math.abs(rq.width-p.karte[2])<=4&&Math.abs(rq.height-p.karte[3])<=4){best=q;break;}q=q.parentElement;}if(best){k=best;r=k.getBoundingClientRect();}}"
             "var mx=c[0]+c[2]/2,my=c[1]+c[3]/2,drin=mx>=r.left-3&&mx<=r.right+3&&my>=r.top-3&&my<=r.bottom+3,klein=r.width*r.height<=Math.max(4*c[2]*c[3],2500);"
             "var t=(p.text||'').toLowerCase(),a=(p.aria||'').toLowerCase(),kt=T(k),ka=A(k);"
             "var text_ok=(!t&&!a)||(t&&(kt.indexOf(t)>=0||T(e).indexOf(t)>=0))||(a&&(ka.indexOf(a)>=0||A(e).indexOf(a)>=0));"
