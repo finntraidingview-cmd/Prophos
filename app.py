@@ -38153,7 +38153,7 @@ FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd
 # REFUND-LOTS ÷ 5 (Finn 30.10.2026 14:49: „Refund-Trades: Lot-Anzahl runter, durch 5." — ersetzt ÷ 2 von 14:2x, Anlass EzPoker a1ad322f): im Refund-Zyklus
 # Lots × lots_faktor, abgerundet auf FCP_LOT_SCHRITT, mindestens ein Schritt. TP-$ und SL-$ bleiben (Punkte × 5, z. B. 0,26 Lot: SL 2.374 $ = 913 Pkt). Hedge: der
 # multiplier hängt nur an hedge_eur ÷ dd, die Fusion-Lots folgen den Master-Lots — € je $ Master, also auch Hedge-€ am TP/SL, bleiben gleich.
-FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.1    # ÷ 10 seit 03.11.2026 ~00:50 Dubai (Finn: EzPoker 0,13 statt 0,26 Lot); vorher 0,2 (÷ 5, 30.10.2026)
+FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.1    # nur noch Rückfall ohne Normal-Ziel (seit 03.11.2026 ~01:00 Verhältnis × 2, fcp_lots_verhaeltnis); 0,1 = .2002, vorher 0,2
 FCP_LOT_SCHRITT = 0.01
 FCP_ERSTER_PAYOUT_TP_MIN_USD = 25    # Rest bis zum kleinen Ziel winzig → wenigstens 25 $ (≈ 1,5–2,5 Pkt bei 1–1,75 Lot)
 FCP_TP_DECKEL_PLUS_STANDARD = 1000
@@ -38257,8 +38257,8 @@ def fcp_lots_faktor(lots, faktor, schritt=FCP_LOT_SCHRITT):
 def fcp_lots_verhaeltnis(lots_n, ziel_klein, ziel_n, faktor=1.0, schritt=FCP_LOT_SCHRITT):
     """REIN RECHNEND (testbar): Lots eines kleinen Trades im Verhältnis zum Normal-Trade (Finn 01.11.2026, Konstrukt berichte/2026-11-01_refund-konstrukt.md):
     Lots_n × (Ziel_klein ÷ Ziel_n) × faktor, ABgerundet auf den Schritt, mindestens ein Schritt, höchstens Lots_n (abgerundet). Basis ist das je Trade
-    gezogene Paar (Lots_n, Ziel_n), nicht die Mitte der Range. Rest-Trade faktor 2 (ap_klein_trade, ap_klein_trade_fut; Finn 03.11.2026 ~00:25 Dubai:
-    „Bei den Rest-Trades die Formel ×2 gleich lassen"). Der Refund nutzt sie seit 03.11.2026 ~00:50 nicht mehr (Lots × 0,1). Fehlt etwas → None (alter Weg)."""
+    gezogene Paar (Lots_n, Ziel_n), nicht die Mitte der Range. Faktor 2 bei Rest-Trades (ap_klein_trade, ap_klein_trade_fut; Finn 03.11.2026 ~00:25 Dubai:
+    „Bei den Rest-Trades die Formel ×2 gleich lassen") und seit 03.11.2026 ~01:00 auch beim Refund (fcp_konto_rechnen). Fehlt etwas → None (alter Weg)."""
     ln, zk, zn, s = _wd_num(lots_n), _wd_num(ziel_klein), _wd_num(ziel_n), float(schritt or 1)
     if not ln or ln <= 0 or not zk or zk <= 0 or not zn or zn <= 0:
         return None
@@ -38289,6 +38289,7 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     if balance is None:
         return {"aktion": "aus", "grund": "keine Balance"}
     ep = fcp_erster_payout(regel) if erster_zyklus else None
+    jg_normal = jg                           # Normal-Ziel für die Refund-Lots (fcp_lots_verhaeltnis), bevor ep das Ziel ersetzt
     if ep and _wd_num(jg.get("dd")):
         # ERSTER PAYOUT = REFUND: kleines Ziel + Hedge je $ DD statt der normalen Werte (SL/Lots bleiben)
         je = _wd_num(ep.get("hedge_eur_je_dd"))
@@ -38338,10 +38339,19 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         basis["sl_gedeckelt"] = True
     lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
     if ep and lots:
-        # REFUND-LOTS × 0,1 (Finn 03.11.2026 ~00:50 Dubai, über den Eingang: EzPoker-Refund 0,13 statt 0,26 Lot — die Hälfte von ÷ 5; die Verhältnis-Formel
-        # aus 053eb832 gilt nur noch für Rest-Trades). SL-$ bleibt, in Punkten doppelt so weit wie bei 0,2
-        fk = _wd_num(ep.get("lots_faktor"))
-        lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else FCP_ERSTER_PAYOUT_LOTS_FAKTOR)
+        # REFUND-LOTS NACH VERHÄLTNIS × 2 (Finn 03.11.2026 ~01:00 Dubai über den Eingang: „die Werte gefallen mir sehr gut" — ersetzt × 0,1 aus .2002):
+        # Lots = gezogene Normal-Lots × (Refund-TP ÷ gezogenes Normal-Ziel der Funded-Regel) × 2, abgerundet auf 0,01, mindestens 0,01, höchstens die
+        # Normal-Lots — halber Punktabstand des Normal-Trades. FundedNext Mitte 1,375 Lot / 1.675 $: TP 50 → 0,08, 71 → 0,11, 100 → 0,16, 150 → 0,24,
+        # 1.130 → 1,37 (gedeckelt). SL-$ und Hedge-€ bleiben, die Fusion-Lots folgen den Master-Lots. Ohne Normal-Ziel der alte Faktor (Rückfall)
+        lots_n = lots
+        ziel_n = fcp_wuerfel(jg_normal.get("ziel"), rnd) if fcp_bereich(jg_normal.get("ziel")) else None
+        lv = fcp_lots_verhaeltnis(lots_n, tp, ziel_n, 2.0)
+        if lv:
+            lots = lv
+            basis["refund_lots"] = {"normal_lots": lots_n, "normal_ziel": ziel_n, "tp": tp}
+        else:
+            fk = _wd_num(ep.get("lots_faktor"))
+            lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else FCP_ERSTER_PAYOUT_LOTS_FAKTOR)
     if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
         return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
     if not mppl:
@@ -38589,7 +38599,8 @@ def fcp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         hid = hedge_ids[uid]
         notiz = (f"Funded-CFD-Planer{'' if auto_k else ' · Vorschlag'} · Gewinn {_liq_de(r['gewinn'])} $ → Ziel {_liq_de(r['ziel'])} $"
                  f" · TP {r['tp_art']} · Hedge {_liq_de(r['hedge_eur'])} € auf {_liq_de(r['dd'])} $ DD"
-                 + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else ""))
+                 + (" · 1-%-Risk-Limit" if r.get("eins_prozent") else "") + (" · Richtung wie laufender Trade derselben Firma" if geschuetzt else "")
+                 + (f" · ≈ {round(float(r['tp_pkt']))} Pkt (Refund: halber Normal-Abstand)" if r.get("refund_lots") and r.get("tp_pkt") else ""))   # 03.11.2026
         zeilen.append({
             "user_id": a["user_id"], "master_account_id": a["id"], "master_name": a.get("name"), "master_firm": a.get("firm"),
             "slave_account_id": hid, "slave_name": hedge_acc[hid].get("name"), "slave_firm": hedge_acc[hid].get("firm"),
