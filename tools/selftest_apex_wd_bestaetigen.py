@@ -13,7 +13,7 @@ def ok(b, t):
 def fn(n):
     i = app.index(f"def {n}("); return app[i:app.index("\n\n\n", i)]
 ns = {"HEDGE_ARTEN": ("apex", "tradeify_final"), "re": re, "datetime": datetime, "timezone": timezone, "timedelta": timedelta}
-for n in ("hf_basis", "hf_ist_wd", "hf_wd_sichtbar", "alarm_wd_bestaetigen", "_alarm_ts"):
+for n in ("hf_basis", "hf_ist_wd", "hf_wd_sichtbar", "wd_ist_recoverer_plan", "alarm_wd_bestaetigen", "_alarm_ts"):
     exec(fn(n), ns)
 b0, b1 = ns["hf_basis"]([]), ns["hf_basis"](["apex"])
 ok("or" not in b0 and b0["mt5_baseline->>hedge_art"] == "in.(apex,tradeify_final)", "Schalter leer: Filter wie vor dem Gate")

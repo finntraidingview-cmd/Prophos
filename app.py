@@ -3976,7 +3976,7 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
         # HEDGE-TRADE OHNE FREIGABE (29.10.2026, trade_plans_a0_hedge_freigabe): ⚪ einmal je Plan
         if st == "planned" and ss.get("art") == "hedge_freigabe" and str(ss.get("at") or "") > seit_iso:
             if ss.get("wo") == "wd":   # APEX-WD BESTÄTIGEN (02.11.2026): Farmer-Winning-Day wartet im Funded-Planer → Winning Days
-                out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Apex-WD wartet auf Bestätigung",
+                out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", ("Recoverer" if wd_ist_recoverer_plan(dict(p, winning_day=True)) else "Apex-WD") + " wartet auf Bestätigung",
                             f"{wer} · {konto}: wartet auf deine Bestätigung (Admin → Funded-Planer → Winning Days → „Zu bestätigen“) — "
                             f"startet erst danach.", uid, pid))
             else:
@@ -4087,7 +4087,7 @@ def alarm_tick():
     _alarm["at"] = time.time()
     jetzt = datetime.now(timezone.utc)
     seit = max(datetime.fromtimestamp(_alarm["start"], timezone.utc), jetzt - timedelta(minutes=20)).isoformat()
-    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,master_account_id,richtung,master_contracts,master_tp,started_at,updated_at,"
+    sel = ("id,user_id,status,route,orbit_v3,hedge_eur,master_name,master_firm,master_symbol,master_symbol_root,master_account_id,richtung,master_contracts,master_tp,started_at,updated_at,"
            "hedge:mt5_baseline->hedge,final_at:mt5_baseline->final->>at,puls_offen_n:mt5_baseline->final->>puls_offen_n,sf:mt5_baseline->start_fehler,ss:mt5_baseline->start_sperre,"
            "tv_bf:mt5_baseline->tv->brackets_fehlen,tv_w:mt5_baseline->tv->>warnung,tv_ok:mt5_baseline->tv->>brackets_ok_at,"
            "tv_ein:mt5_baseline->tv->>einstieg_nq,fv:mt5_baseline->final_verworfen,tv_bd:mt5_baseline->tv->>bracket_dialog,"
@@ -4100,7 +4100,7 @@ def alarm_tick():
     try:                                       # APEX-WD BESTÄTIGEN (02.11.2026): eigene Abfrage — Farmer-Pläne von nachts fallen aus „updated_at ≤ 3 h" heraus
         firmen_wd = wd_bestaetigen_firmen()
         if firmen_wd:
-            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art",
+            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,master_symbol,master_symbol_root,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art",
                                                    start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
             gruppen_ids = _admin_verwalter_gruppen_ids(admin_gruppen_daten())
             wd_offen = [r for r in wd_offen if hf_wd_sichtbar(r, firmen_wd, gruppen_ids) and not _alarm_fremd_verwaltet(r.get("user_id"))]   # wie die Liste
@@ -5559,7 +5559,7 @@ def _wt_push_trade(uid, plan, art):
         sym  = (plan.get('master_symbol') or '').strip()
         if art == "start":
             titel = "Trade läuft"
-            text  = paar + (f" · {sym}" if sym else "")
+            text  = paar + (f" · {sym}" if sym else "") + (" · Recoverer" if wd_ist_recoverer_plan(plan) else "")
         else:
             mp, sp = plan.get("master_pl"), plan.get("slave_pl")
             teile = [paar]
@@ -14089,6 +14089,7 @@ def _berlin_heute():
 # Payout-Kachel, PC-Tab). Fehlt das Feld (Regel aus, andere Firma, altes Backend), läuft alles wie heute. Keine Regel-Prüfung, keine Sperre.
 WD_ZYKLUS_VORGABE = {"stuetz": [{"v": 2000, "ziel": 750, "satz": 400}, {"v": 4000, "ziel": 1500, "satz": 300}],
                      "firmen": ["apex", "apex100"], "ab_zyklus": 2, "bis": "2x_bester", "satz_normal": None, "kt": None, "aktiv": True}
+WD_ZYKLUS_KT, WD_ZYKLUS_INSTR = 1, "nq"                              # Recoverer fährt immer 1 NQ
 WD_ZYKLUS_FU = {"apex": (370, 390), "apex100": (320, 340)}          # wie TP_VP_VORGABE.fu im Frontend
 WD_ZYKLUS_STAFFEL_VON = (0, 2000, 4000, 6000, 8000)                 # altes 5-Zahlen-Format der Staffel
 WD_ZYKLUS_STAFFEL_STD = (50, 60, 70, 80, 90)
@@ -14284,6 +14285,9 @@ def wd_zyklus_konto(konto, regel, vorplan, plaene, payouts):
     out.update({"user_id": (konto or {}).get("user_id"), "aktiv": aktiv, "grund": grund, "grund_code": code, "erfuellt": erfuellt, "schalter": schalter, "firma_key": key,
                 "ziel": w["ziel"] if w else None, "satz": w["satz_genau"] if w else None, "hedge_eur": w["hedge_eur"] if w else None,
                 "kt": (_wd_num(r.get("kt")) if (w and r) else None),
+                # 1 NQ (Finn 02.11.2026: „bei den Recovery Trades einfach immer mit einem NQ arbeiten“); nur mit eigenen Regelwerten, TP und Hedge-Euro bleiben. Eigene Felder statt
+                # „kt“: ein Tab mit altem Stand liest kt und kennt instr nicht, er hätte aus kt 1 einen Trade mit 1 MNQ gemacht (Gegenprüfung 02.11.2026)
+                "instr": (WD_ZYKLUS_INSTR if (w and r) else None), "instr_kt": (WD_ZYKLUS_KT if (w and r) else None),
                 "ziel_normal": norm["ziel_normal"], "satz_normal": norm["satz_normal"], "staffel_eur": norm["staffel_eur"], "plus": norm["plus"],
                 "rest_bis_erfuellt": rest, "tage_geschaetzt": n_tage})
     return out
@@ -28249,6 +28253,13 @@ def hf_basis(firmen):
     return basis
 
 
+def wd_ist_recoverer_plan(p):
+    """REIN RECHNEND (testbar): Apex-Winning-Day auf NQ = Recoverer (Finn 02.11.2026). Normale Apex-WDs fahren MNQ (wd_farmer_regeln.vorplan.instr). Gegenstück: planIstRecoverer im Frontend."""
+    p = p or {}
+    wurzel = str(p.get("master_symbol_root") or p.get("master_symbol") or "").upper()
+    return p.get("winning_day") is True and "apex" in str(p.get("master_firm") or "").lower() and bool(re.match(r"^NQ", wurzel))
+
+
 def alarm_wd_bestaetigen(plaene, firmen, namen, jetzt):
     """REIN RECHNEND (testbar): ⚪ einmal je Plan — Apex-WD, dessen Startzeit erreicht ist und der noch unbestätigt steht. Der Tab versucht ihn nicht, darum
     kommt kein Claim und keine DB-Marke; Schlüssel wie der Claim-Riegel, damit es auch mit einem alten Tab bei einer Meldung bleibt."""
@@ -28261,7 +28272,7 @@ def alarm_wd_bestaetigen(plaene, firmen, namen, jetzt):
             continue
         pid, uid = str(p.get("id")), str(p.get("user_id"))
         konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip()
-        out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Apex-WD wartet auf Bestätigung",
+        out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", ("Recoverer" if wd_ist_recoverer_plan(p) else "Apex-WD") + " wartet auf Bestätigung",
                     f"{namen.get(uid, uid[:8])} · {konto}: wartet auf deine Bestätigung (Admin → Funded-Planer → Winning Days → „Zu bestätigen“) — "
                     f"startet erst danach, ohne Bestätigung läuft er ab.", uid, pid))
     return out

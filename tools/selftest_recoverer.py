@@ -175,25 +175,30 @@ def main():
     import tempfile
     html = open(os.path.join(os.path.dirname(HIER), "prophos.html"), encoding="utf-8").read()
     i_a = html.index("  function wdRecovererAltplanUpd(")
-    code = html[html.index("  function wdFarmHedgeKern("):html.index("  async function wdVorplanRegelnSpeichern(")]
+    code = html[html.index("  function wdFarmHedge(pr,"):html.index("  async function wdVorplanRegelnSpeichern(")]
+    def _fn(name):   # echte Funktion aus prophos.html, bis zur schließenden Klammer auf Einrückung 2
+        i = html.index("function " + name + "(")
+        return html[i:html.index("\n  }\n", i) + 5]
+    code_ppl = _fn("tpNqIsProjectx") + "\n" + _fn("tpNqGetMasterPpl") + "\n" + _fn("tpMasterPpl") + "\n" + _fn("tpMultiplierAusRisiko")
     check("function wdRecovererAltplanUpd" in code and i_a > 0, "Altplan: Funktion liegt zwischen wdFarmHedgeKern und wdVorplanRegelnSpeichern")
     q_ab = html[html.index("  async function wdAbgleich("):]
     q_ab = q_ab[:q_ab.index("(3) Zustand spiegeln")]
-    check(".eq('master_tp', plan.masterTp).eq('master_contracts', plan.masterContracts).eq('slave_risk', plan.slaveRisk).eq('hedge_eur', plan.hedgeEur)" in q_ab and "select('*').eq('id', plan.id).maybeSingle()" in q_ab,
+    check(".eq('master_tp', plan.masterTp).eq('master_symbol', plan.masterSymbol).eq('master_contracts', plan.masterContracts).eq('slave_risk', plan.slaveRisk).eq('hedge_eur', plan.hedgeEur)" in q_ab and "select('*').eq('id', plan.id).maybeSingle()" in q_ab,
           "Altplan: alte Werte im Riegel, bei 0 Zeilen frisch lesen statt vergeblich weiterschreiben")
     check(".is('orbit_gesendet_at', null).is('started_at', null).is('hedge_freigabe_at', null).is('auto_bestaetigt_at', null).is('hand_werte_at', null)" in q_ab and "select('wd_tp')" in q_ab and "wdRecovererAltplanUpd(plan" in q_ab,
           "Altplan: Schreiben mit Riegel in der DB, wurde er bestätigt oder von Hand geändert, bleibt er")
     if shutil.which("osascript"):
         test = """function run(){
 var window = {}; var _tpNqMode = 'mnq', TP_WD_SLAVE_FIRM = 'Fusion';
-function hedgePplFuer(s){ return /^MNQ/.test(s || '') ? 2 : /^NQ/.test(s || '') ? 20 : 0 } function tpMasterPpl(){ return 2 } function tpWdSlavePpl(){ return 0.85 }
-function tpCalcMultiplier(f, s, risk, kt, eur){ return Math.round(eur / (risk / (2 * kt) * kt * 0.85) * 10000) / 10000 }
-function wdFarmHedge(pr, riskMaster, slaveEur, an, ddListe){ return wdFarmHedgeKern(pr, riskMaster, slaveEur, an, ddListe) }
-""" + code + """
+var FIRM_PRESETS = { projectx: { ppl: 2 } }; function firmToPreset(){ return 'projectx' }
+function hedgePplFuer(s){ return /^MNQ/.test(s || '') ? 2 : /^NQ/.test(s || '') ? 20 : 0 } function tpWdSlavePpl(){ return 0.85 }
+function tpCalcMultiplier(f, s, risk, kt, eur){ return tpMultiplierAusRisiko(risk, kt, eur, tpMasterPpl(f), 0.85) }
+""" + code_ppl + code + """
 var plan = { status: 'planned', winningDay: true, route: 'tvv2', hedgeEur: 170.99, multiplier: 1.0695, slaveRisk: 175, masterTp: 376, masterContracts: 3, masterRisk: 376, masterFirm: 'Apex', masterSymbol: 'MNQZ6' };
 var K = { slave: 175, wuerfel: { tp: 376, kt: 3, quelle: 'wuerfel' } };
 var acc = { wdTp: null, wdSl: null, maxRisikoTrade: 0 }, zy = { ziel: 1499, hedge_eur: 449.93, kt: null }, z = { basis: 'recoverer', slaveEur: 449.93 };
 function mit(o, p){ var r = {}, k; for(k in o) r[k] = o[k]; for(k in p) r[k] = p[k]; return r }
+var ZN = mit(zy, {instr: 'nq', instr_kt: 1}), P2 = mit(plan, {masterTp: 1499, masterRisk: 1499, slaveRisk: 449.93, hedgeEur: 450.2, multiplier: 0.7062}), K2 = {slave: 449.93, wuerfel: {tp: 1499, kt: 3, quelle: 'recoverer'}};
 var U0 = wdRecovererAltplanUpd, U = function(p, c, y, zz, an, dd, kk){ return U0(p, c, y, zz, an, dd, kk === undefined ? K : kk) }, a = U(plan, acc, zy, z, true, []);
 return JSON.stringify({ a: a,
   freigabe: U(mit(plan, {hedgeFreigabeAt: 'x'}), acc, zy, z, true, []), auto: U(mit(plan, {autoBestaetigtAt: 'x'}), acc, zy, z, true, []),
@@ -202,7 +207,10 @@ return JSON.stringify({ a: a,
   ohneregel: U(plan, acc, null, z, true, []), staffel: U(plan, acc, zy, mit(z, {basis: 'staffel'}), true, []), ohnehedge: U(mit(plan, {hedgeEur: null}), acc, zy, z, true, []),
   ohnesymbol: U(mit(plan, {masterSymbol: ''}), acc, zy, z, true, []), handtp: U(mit(plan, {masterTp: 800}), acc, zy, z, true, []), handkt: U(mit(plan, {masterContracts: 4}), acc, zy, z, true, []),
   handslave: U(mit(plan, {slaveRisk: 150}), acc, zy, z, true, []), handhedge: U(mit(plan, {hedgeEur: 300}), acc, zy, z, true, []), ohnemult: U(mit(plan, {multiplier: null}), acc, zy, z, true, []), schonrec: U(plan, acc, zy, z, true, [], {slave: 175, wuerfel: {tp: 376, kt: 3, quelle: 'recoverer'}}),
-  ohnewuerfel: U(plan, acc, zy, z, true, [], {slave: 175}), keink: U(plan, acc, zy, z, true, [], null), kt: U(plan, acc, mit(zy, {kt: 4}), z, true, []) });
+  ohnewuerfel: U(plan, acc, zy, z, true, [], {slave: 175}),
+  nq: U(plan, acc, ZN, z, true, []), nq2: U(P2, acc, ZN, z, true, [], K2), nqdone: U(mit(P2, {masterSymbol: 'NQZ6', masterContracts: 1, multiplier: 7.0624, hedgeEur: 449.8}), acc, ZN, z, true, [], {slave: 449.93, wuerfel: {tp: 1499, kt: 1, quelle: 'recoverer', instr: 'nq'}}),
+  nqhand: U(mit(P2, {masterSymbol: 'MNQZ6'}), acc, ZN, z, true, [], {slave: 449.93, wuerfel: {tp: 1499, kt: 1, quelle: 'recoverer', instr: 'nq'}}),
+  solo: (function(){ var pkt = 1499 / (20 * 1), lots = 449.93 / (0.85 * pkt); return { punkte: Math.round(pkt * 100) / 100, lots: Math.round(lots * 100) / 100 } })(), keink: U(plan, acc, zy, z, true, [], null), kt: U(plan, acc, mit(zy, {kt: 4}), z, true, []) });
 }"""
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
             f.write(test)
@@ -215,13 +223,48 @@ return JSON.stringify({ a: a,
             import json
             r = json.loads(aus.stdout)
             a = r["a"]
-            check(a and a["tp"] == 1499 and a["upd"]["master_tp"] == 1499 and abs(a["upd"]["hedge_eur"] - 450.20) < 0.5 and a["upd"]["multiplier"] == 0.7062 and a["vor"]["lots"] == 2.12 and a["upd"]["slave_risk"] == 449.93 and a["upd"]["master_risk"] == 1499,
+            check(a and a["tp"] == 1499 and a["upd"]["master_tp"] == 1499 and abs(a["upd"]["hedge_eur"] - 450.20) < 0.5 and abs(a["upd"]["multiplier"] - 0.7062) < 0.0001 and a["vor"]["lots"] == 2.12 and a["upd"]["slave_risk"] == 449.93 and a["upd"]["master_risk"] == 1499,
                   f"Altplan: Mike → 1.499 $ / ~450 €, altes Risiko 376 nicht übernommen ({a and a['upd']})")
             check(a and a["kt"] == 3 and a["upd"]["master_contracts"] == 3 and a["vor"]["eur"] == a["upd"]["hedge_eur"], "Altplan: Kontrakte bleiben, Vorschau passt zum Plan")
             check("hedge_freigabe_at" not in a["upd"] and "start_um" not in a["upd"] and "richtung" not in a["upd"], "Altplan: keine Freigabe, Start und Richtung unberührt")
             for fall in ("freigabe", "auto", "hand", "vorgabe", "gestartet", "keinwd", "ohneregel", "staffel", "ohnehedge", "ohnesymbol", "handtp", "handkt", "handslave", "handhedge", "ohnemult", "schonrec", "ohnewuerfel", "keink"):
                 check(r[fall] is None, f"Altplan: {fall} → nichts ändern")
             check(r["kt"]["upd"]["master_contracts"] == 4, "Altplan: Kontrakte aus der Regel, wenn sie welche vorgibt")
+            n2 = r["nq2"]
+            check(n2 and n2["upd"]["master_symbol"] == "NQZ6" and n2["upd"]["master_contracts"] == 1 and n2["upd"]["master_tp"] == 1499 and n2["instr"] == "nq",
+                  f"1 NQ: Mike schon auf 1.499 $ / 3 MNQ wird einmal umgestellt ({n2 and n2['upd']})")
+            check(n2 and n2["vor"]["lots"] == 7.06 and abs(n2["upd"]["multiplier"] - 7.0624) < 0.001 and abs(n2["upd"]["hedge_eur"] - 450.2) < 1, f"1 NQ: ~7,06 Lot (Finn: 3 MNQ = 2,12 → 1 NQ ≈ 7,07), Hedge-Euro bleibt ({n2 and n2['vor']})")
+            check(r["nq"] and r["nq"]["upd"]["master_symbol"] == "NQZ6" and r["nq"]["upd"]["master_contracts"] == 1, "1 NQ: Würfel-Altplan (376 $ / 3 MNQ) direkt auf 1 NQ")
+            check(r["nqdone"] is None and r["nqhand"] is None, "1 NQ: nach der Umstellung Ruhe, Hand-Rückstellung auf MNQ bleibt")
+            check(r["solo"] == {"punkte": 74.95, "lots": 7.06}, f"1 NQ: Start-Rechnung (hedgeSoloOeffnenKern/hedgeMultAusRisiko) trifft dieselben Lots ({r['solo']})")
+    # Regel liefert 1 NQ nur mit eigenen Werten; Notfall, Marge und Alarm bei 7 Lot, echte Funktionen aus copier.py / app.py
+    zk = ns["wd_zyklus_konto"](dict(MIKE), REGEL, VORPLAN, [plan("2026-10-27", 374.88), plan("2026-10-30", -3998.16)], PAY)
+    check(zk["aktiv"] and zk["kt"] is None and zk["instr_kt"] == 1 and zk["instr"] == "nq" and zk["ziel"] > 0, f"Regel: 1 NQ in eigenen Feldern, kt bleibt leer für alte Tabs ({zk.get('kt')}, {zk.get('instr')})")
+    z0 = ns["wd_zyklus_konto"](dict(MIKE), REGEL, VORPLAN, [], [])
+    check(z0["kt"] is None and z0["instr"] is None and z0["instr_kt"] is None, "Regel: ohne Recoverer kein NQ, normale Apex-WDs bleiben MNQ")
+    src_c = open(os.path.join(os.path.dirname(HIER), "mt5-copier", "copier.py"), encoding="utf-8").read()
+    i_n = src_c.index("def solo_notfall_sl(")
+    nc = {}
+    exec(src_c[i_n:src_c.find("\n\n\n", i_n)], nc)
+    sl = nc["solo_notfall_sl"](28000.0, "sell", 74.95, faktor=1.05, point=0.01, digits=2)
+    check(abs(sl - 28078.70) < 0.01, f"Notfall: 105 % von 74,95 Pkt = 78,70 Pkt hinter dem Fill ({sl})")
+    src_a = open(APP, encoding="utf-8").read()
+    ns["EH_MARGE_RESERVE"] = 0.20
+    for name in ("def eh_marge(", "def wd_ist_recoverer_plan("):
+        i_m = src_a.index(name)
+        exec(src_a[i_m:src_a.find("\n\n\n", i_m)], ns)
+    les = {"frei": 10000.0, "je_lot": 500.0, "offen": {"buy": 0.0, "sell": 0.0}}
+    check(ns["eh_marge"](les, 7.06, "sell", 0, 60.0, 0.20)[0] is True, "Marge: 7,06 Lot bei 500 €/Lot passen in 10.000 € frei (3.530 € + 20 % Reserve)")
+    check(ns["eh_marge"](dict(les, frei=4000.0), 7.06, "sell", 0, 60.0, 0.20)[0] is False, "Marge: bei 4.000 € frei gesperrt, nicht still kleiner")
+    R = ns["wd_ist_recoverer_plan"]
+    check(R({"winning_day": True, "master_firm": "Apex Trader", "master_symbol": "NQZ6"}) and not R({"winning_day": True, "master_firm": "Apex Trader", "master_symbol": "MNQZ6"})
+          and not R({"winning_day": True, "master_firm": "Topstep", "master_symbol": "NQZ6"}) and not R({"winning_day": False, "master_firm": "Apex", "master_symbol": "NQZ6"}),
+          "Markierung: nur Apex-WD auf NQ ist Recoverer")
+    q_h = html
+    q_an = q_h[q_h.index("  async function wdPlanAnlegen("):q_h.index("  async function wdAbgleich(")]
+    check("const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null)" in q_an, "1 NQ: Selbstheilung nimmt Symbol und Menge zusammen aus der Tageszeile, nie 3 NQ")
+    check("recoverer: !!window._planIstRecoverer?.(" in q_h and "if(p && typeof p.recoverer === 'boolean') return p.recoverer" in q_h, "Markierung: Läuft/Wartet-Karten prüfen das echte Symbol, nicht den NQ-Rückfall")
+    check(q_h.count("window._planRecovererChipHtml?.(") >= 5 and "_planRecovererChipHtml = planRecovererChipHtml" in q_h, "Markierung: Chip in Zu bestätigen, Winning-Days-Übersicht und beiden Plan-Zeilen")
 
     print("\nALLES GRÜN" if not fehler else f"\n{len(fehler)} FEHLER")
     return 1 if fehler else 0

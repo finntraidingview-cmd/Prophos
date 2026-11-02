@@ -34800,7 +34800,7 @@
       // Würfel aus der Zeile (.1487): steht in wd_tagesplan, braucht keine Farmer-Sicht
       const k = t.konto || {}, w = (k.wuerfel && num(k.wuerfel.tp) > 0 && num(k.wuerfel.kt) >= 1) ? k.wuerfel : null, vor = k.vor || null
       if(w){
-        out.ktTxt = `${f0(w.kt)} × ${rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : w.quelle === 'recoverer' ? 'Recoverer' : 'gewürfelt'
+        out.ktTxt = `${f0(w.kt)} × ${w.instr === 'nq' ? 'NQ' : rootVp}`; out.tpTxt = f0(w.tp) + ' $'; out.quelle = w.quelle === 'vorgabe' ? 'TP-Vorgabe' : w.quelle === 'recoverer' ? 'Recoverer' : 'gewürfelt'
         if(!out.hedgeAn) out.lotsSub = 'Gegenhedge aus'
         else if(vor && num(vor.lots) > 0){ out.lotsTxt = f2(vor.lots) + ' Lot'; out.lotsSub = `×${num(vor.mult) != null ? f3(vor.mult) : '–'}${num(vor.eur) != null ? ` · −${f0(vor.eur)} € am TP` : ''}` }
         else if(vor && num(vor.staffel) > 0){ out.lotsTxt = f0(vor.staffel) + ' €'; out.lotsSub = 'Staffel · Lots rechnet der Copier' }
@@ -43174,6 +43174,16 @@
     return ` <span class="type-badge type-challenge acc-rec-chip${aus ? ' acc-rec-aus' : ''}" data-acc-rec="${escapeHtml(String(a.id))}" data-rec-name="${escapeHtml(String(a.name || ''))}" data-stop-row-click="1" title="${escapeHtml(z.grund || 'Recoverer')} · klicken für Details">Recoverer</span>`
   }
   window._accRecovererChipHtml = accRecovererChipHtml   // Test-Haken
+  /* RECOVERER AM PLAN (Finn 02.11.2026: „die Recovery Trades … immer markieren“): Apex-Winning-Day auf NQ = Recoverer, normale Apex-WDs fahren MNQ. Gegenstück wd_ist_recoverer_plan
+   * (app.py). Liest Plan-Felder in beiden Schreibweisen (Plan im Tab, Zeile vom Server). Hand-Umstellung eines Apex-WD auf NQ zeigt den Chip ebenfalls. */
+  function planIstRecoverer(p){
+    if(p && typeof p.recoverer === 'boolean') return p.recoverer
+    if(!p || !(p.winningDay === true || p.winning_day === true || p.wd === true)) return false
+    return /apex/i.test(String(p.masterFirm || p.master_firm || '')) && /^NQ/i.test(String(p.masterSymbol || p.master_symbol || p.master_symbol_root || p.symbol_root || ''))
+  }
+  const planRecovererChipHtml = p => planIstRecoverer(p) ? ' <span class="type-badge type-challenge" title="Recoverer: Apex-Winning-Day nach Verlusttag, 1 NQ">Recoverer</span>' : ''
+  window._planRecovererChipHtml = planRecovererChipHtml
+  window._planIstRecoverer = planIstRecoverer
   // Popup zum Chip: eigene Verdrahtung, kein Sammel-Handler. Schalter über wd_konto_recoverer_setzen, die DB prüft das Recht.
   let _recKonto = null
   function recovererZeichnen(){
@@ -49187,7 +49197,7 @@
       return `
       <div class="pz-z pz-radar-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
-        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}</span><small class="pz-k2">${k2}</small></span>
+        <span class="pz-konto pz-konto2" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}"><span class="pz-k1"><b>${firmaR}</b>${typChip}${window._planRecovererChipHtml?.(p) || ''}</span><small class="pz-k2">${k2}</small></span>
         <span class="pz-ri">${em}<span class="pz-gr${pzwZ('gr')}>${grR}</span></span>
         <span class="pz-bal">${balHtml}</span>
         ${fuZelle || artZelle}
@@ -49200,7 +49210,7 @@
       <div class="pz-z${p.autoPlan ? '' : ' pz-z-hand'}" data-plan-id="${p.id}">${o.wer ? `
         <span class="pz-wer">${o.wer}</span>` : ''}
         <span class="pz-zeit${pzwZ('start')}>${zeit}</span>
-        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}</span>
+        <span class="pz-konto" title="${escapeHtml(kontoTitel)}" data-ak-konto="${escapeHtml(String(p.id || ''))}">${kontoKurz}${typChip}${window._planRecovererChipHtml?.(p) || ''}</span>
         <span class="pz-ri ${p.richtung === 'buy' ? 'is-buy' : p.richtung === 'sell' ? 'is-sell' : ''}">${p.richtung === 'buy' ? '▲ Long' : p.richtung === 'sell' ? '▼ Short' : '–'}</span>
         <span class="pz-bal">${balHtml}</span>
         ${artZelle}
@@ -50050,6 +50060,7 @@
       // Instrument, Richtung, TP/SL in $ direkt auf der Karte (23.09.2026, Finn: „wenn so ein Trade geplant ist, immer
       // kurz den Take-Profit in Dollar, den Stop-Loss und die Kontrakte sehen, und ob es MNQ oder NQ ist")
       + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}</b>` : '')
+      + (window._planRecovererChipHtml?.(p) || '')
       + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : 'var(--good-ink, #15803d)'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
       + (p.masterTp > 0 ? ` · TP <b style="color:var(--good-ink, #15803d)">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
       + (((typeof tpIstWdPlan === 'function') && tpIstWdPlan(p)) ? ''   // Winning Days: nie ein SL (25.09.2026)
@@ -60915,7 +60926,7 @@
     const unterwegs = _ahf.busy.has(id)
     return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
       <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
-      <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}</td><td>${ri}</td>
+      <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}${window._planRecovererChipHtml?.(z) || ''}</td><td>${ri}</td>
       <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
       <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
       <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
@@ -68197,17 +68208,17 @@
     // hielte den Rückfall-Plan zurück (Gegenprüfung 02.11.2026)
     if(!window._wdZyklus?.geladen && (k.wuerfel || {}).quelle === 'recoverer') return false
     // RECOVERER (02.11.2026): Regel-Ziel statt Würfel, Hand-Vorgabe schlägt die Regel. Endet die Regel, liegt der alte Wert außerhalb der Spanne → neu gewürfelt
-    const zy = wdZyklusVon(kd.id), ktFest = (zy && Number(zy.kt) >= 1) ? Number(zy.kt) : null
+    const zy = wdZyklusVon(kd.id), ktFest = wdRecovererKt(zy), instrFest = (zy && zy.instr === 'nq') ? 'nq' : null   // 1 NQ (Finn 02.11.2026)
     const tp = tpVor != null ? tpVor : zy ? Number(zy.ziel) : (w && w.tp >= sp[0] && w.tp <= sp[1]) ? w.tp : Math.round(sp[0] + Math.random() * (sp[1] - sp[0]))
     const kt = ktFest != null ? ktFest : (w && w.kt >= ka && w.kt <= kb) ? w.kt : wdKontrakteFuer(kd.firm, vp, kd)
     const quelle = tpVor != null ? 'vorgabe' : zy ? 'recoverer' : 'wuerfel'
-    if(!w || w.tp !== tp || w.kt !== kt || (k.wuerfel || {}).quelle !== quelle){ k.wuerfel = { tp, kt, quelle, at: new Date().toISOString() }; ge = true }
+    if(!w || w.tp !== tp || w.kt !== kt || (k.wuerfel || {}).quelle !== quelle || ((k.wuerfel || {}).instr || null) !== instrFest){ k.wuerfel = { tp, kt, quelle, at: new Date().toISOString(), ...(instrFest ? { instr: instrFest } : {}) }; ge = true }
     let vor = null
     if(z && !z.fehler){
       const h = { master_firm: kd.firm, master_contracts: kt, master_tp: tp, master_risk: null }
       // .1493 (Vorfall Aurel 13.10.2026, „23,19 Lot ×7,729"): tpMasterPpl liest den Instrument-Modus aus _tpNqMode (Pillen MNQ/NQ,
       // localStorage) — stand der PC-Tab auf NQ, rechnete der Würfel mit 20 $/Pkt statt 2. Wie wdPlanAnlegen: Modus aus den Farmer-Regeln.
-      const modusAlt = _tpNqMode; _tpNqMode = vp.instr === 'nq' ? 'nq' : 'mnq'
+      const modusAlt = _tpNqMode; _tpNqMode = (instrFest === 'nq' || vp.instr === 'nq') ? 'nq' : 'mnq'
       let hin = ''
       try{ hin = wdFarmHedge(h, Number(kd.sl_vorgabe) || Number(kd.max_risiko_trade) || 0, z.slaveEur, !!vp.hedge_an, [kd.max_drawdown, kd.max_daily_drawdown, kd.max_loss_per_trade, z.masterRisk]) }
       finally{ _tpNqMode = modusAlt }
@@ -68276,6 +68287,10 @@
     pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
     return 'ohne Take Profit kein Multiplikator — Hedge nur über den Staffel-Betrag'
   }
+  // Recoverer fährt 1 NQ (Finn 02.11.2026), der Frontmonat bleibt: „MNQZ6“ → „NQZ6“. Normale Pläne unverändert.
+  // Menge: instr_kt gehört zu instr (1 NQ), kt ist die ältere Vorgabe der Regel (sonst Firmen-Spanne)
+  function wdRecovererKt(zy){ return !zy ? null : (zy.instr === 'nq' && Number(zy.instr_kt) >= 1) ? Number(zy.instr_kt) : Number(zy.kt) >= 1 ? Number(zy.kt) : null }
+  const wdRecovererSymbol = (symbol, instr) => instr === 'nq' ? String(symbol || '').replace(/^M?NQ/i, 'NQ') : symbol
   /* RECOVERER-ALTPLAN (02.11.2026, Finn 05:34, Mike 150k PAAPEX…0001, Plan a5e60a7f von 20:11 UTC, vor dem Einspielen der Regel 01:13 UTC): der unbestätigte
    * Plan trug 376 $ / 175 €, Popup und Regel sagten 1.499 $ / 450 €. REIN RECHNEND: noch nicht freigegebener Farmer-Plan mit Hedge, keine Hand-Werte, keine
    * TP-Vorgabe am Konto, Regel aktiv → die Felder für die Regelwerte, sonst null. master_risk bewusst leer in die Rechnung: wdFarmHedgeKern nähme sonst den alten
@@ -68284,8 +68299,10 @@
    * noch genau dem gewürfelten Eintrag entspricht (k: quelle wuerfel, TP, Kontrakte, Hedge-Basis). Danach steht quelle auf recoverer: der Schritt greift je Plan nur einmal. */
   function wdRecovererAltplanUpd(plan, acc, zy, z, hedgeAn, ddListe, k){
     if(!plan || !acc || !zy || !z || z.basis !== 'recoverer' || !(z.slaveEur > 0) || !hedgeAn) return null
-    const w = k && k.wuerfel
-    if(!w || w.quelle !== 'wuerfel' || Math.abs(Number(w.tp) - Number(plan.masterTp)) > 0.5 || Number(w.kt) !== Number(plan.masterContracts)) return null
+    const w = k && k.wuerfel, instr = zy.instr === 'nq' ? 'nq' : null
+    // 1 NQ (Finn 02.11.2026): ein schon umgestellter Recoverer (quelle recoverer) ohne instr geht einmal mit; danach steht instr im Eintrag, eine Hand-Änderung bleibt
+    const stufe = w && (w.quelle === 'wuerfel' || (w.quelle === 'recoverer' && instr && !w.instr))
+    if(!w || !stufe || Math.abs(Number(w.tp) - Number(plan.masterTp)) > 0.5 || Number(w.kt) !== Number(plan.masterContracts)) return null
     if(!(Math.abs(Number(k.slave) - Number(plan.slaveRisk)) <= 0.5)) return null
     const pplAlt = hedgePplFuer(plan.masterSymbol)
     if(!(pplAlt > 0)) return null   // ohne Symbol rechnete wdFarmHedge mit der Tab-Pille (Vorfall Marc 32 statt 3,2 Lot, .1712)
@@ -68295,14 +68312,15 @@
     if(plan.status !== 'planned' || plan.startUmGestartetAt || plan.orbitGesendetAt || plan.winningDay !== true) return null
     if(plan.hedgeFreigabeAt || plan.autoBestaetigtAt || plan.handWerteAt || Number(acc.wdTp) > 0) return null
     if((plan.route !== 'tvv2' && plan.route !== 'tsv2') || !(Number(plan.hedgeEur) > 0)) return null
-    const tp = Number(zy.ziel), kt = Number(zy.kt) >= 1 ? Number(zy.kt) : Number(plan.masterContracts)
+    const tp = Number(zy.ziel), kt = wdRecovererKt(zy) || Number(plan.masterContracts)
     if(!(tp > 0) || !(kt >= 1)) return null
-    const h = { master_firm: plan.masterFirm, master_symbol: plan.masterSymbol, master_contracts: kt, master_tp: tp, master_risk: null }
+    const symbol = wdRecovererSymbol(plan.masterSymbol, instr)
+    const h = { master_firm: plan.masterFirm, master_symbol: symbol, master_contracts: kt, master_tp: tp, master_risk: null }
     wdFarmHedge(h, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, true, ddListe)
     if(!(h.hedge_eur > 0) || !(h.multiplier > 0)) return null
-    if(Math.abs((Number(plan.masterTp) || 0) - tp) <= 0.5 && Math.abs(Number(plan.hedgeEur) - h.hedge_eur) <= 1 && Number(plan.masterContracts) === kt) return null
-    const upd = { master_tp: tp, master_contracts: kt, master_risk: h.master_risk, multiplier: h.multiplier, hedge_faktor: h.hedge_faktor, hedge_eur: h.hedge_eur, slave_risk: h.slave_risk }
-    return { upd, tp, kt, vor: { lots: Math.round(kt * h.multiplier * 100) / 100, mult: h.hedge_faktor, eur: h.hedge_eur, staffel: z.slaveEur, hinweis: '' } }
+    if(Math.abs((Number(plan.masterTp) || 0) - tp) <= 0.5 && Math.abs(Number(plan.hedgeEur) - h.hedge_eur) <= 1 && Number(plan.masterContracts) === kt && symbol === plan.masterSymbol) return null
+    const upd = { master_tp: tp, master_symbol: symbol, master_contracts: kt, master_risk: h.master_risk, multiplier: h.multiplier, hedge_faktor: h.hedge_faktor, hedge_eur: h.hedge_eur, slave_risk: h.slave_risk }
+    return { upd, tp, kt, instr, vor: { lots: Math.round(kt * h.multiplier * 100) / 100, mult: h.hedge_faktor, eur: h.hedge_eur, staffel: z.slaveEur, hinweis: '' } }
   }
   window._wdRecovererAltplanUpd = wdRecovererAltplanUpd   // Test-Haken
   async function wdVorplanRegelnSpeichern(v){
@@ -68685,7 +68703,7 @@
         // .1487: Würfel aus der Zeile (oder jetzt würfeln und merken) — der Plan trägt genau die Werte, die „Plan heute Nacht“ zeigt
         if(wdKontoWuerfel(k, kd, vp, z)) ge = true
         if(k.wuerfel && Number(k.wuerfel.tp) > 0) z.tp = Number(k.wuerfel.tp)
-        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), symbol, wdKontoRichtung(k, row.richtung), tag)
+        const pr = tpVorplanPlanRow(accLike, slave, z, (k.wuerfel && Number(k.wuerfel.kt) >= 1) ? Number(k.wuerfel.kt) : wdKontrakteFuer(kd.firm, vp, kd), wdRecovererSymbol(symbol, (k.wuerfel || {}).instr), wdKontoRichtung(k, row.richtung), tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
@@ -68792,8 +68810,10 @@
     _tpNqMode = vp.instr
     try{ localStorage.setItem(TP_NQ_MODE_LS, vp.instr) }catch(_){}
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
-    const symbol = (vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
-    const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp, acc), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
+    // 1 NQ (Finn 02.11.2026): mit extra (Rückfall, Selbstheilung) gehören Symbol und Menge zusammen zur Tageszeile, sonst entstünden 3 NQ; der Altplan-Weg stellt danach um. Ohne extra die Regel
+    const zyA = extra ? null : wdZyklusVon(acc.id), instrA = extra ? (extra.instr || null) : (zyA && zyA.instr === 'nq' ? 'nq' : null)
+    const symbol = wdRecovererSymbol((vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : ''), instrA)
+    const row = tpVorplanPlanRow(acc, slave, z, wdRecovererKt(zyA) || wdKontrakteFuer(acc.firm, vp, acc), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
     wdFarmHedge(row, Number(acc.wdSl) || Number(acc.maxRisikoTrade) || 0, z.slaveEur, vp.hedge_an, [acc.maxDrawdown, acc.maxDailyDrawdown, acc.maxLossPerTrade, z.masterRisk])   // wie der Mac: Popup-Rechnung (26.09.2026)
@@ -68925,7 +68945,7 @@
           const acc = (accounts || []).find(a => String(a.id) === String(k.id)); if(!acc) continue
           if(wdZyklusUngeklaert(k)){ wdRecovererAlarm(k.id, 'stand', 120000); continue }   // RECOVERER: nie TP 1.499 $ mit Staffel-Hedge (S16, 02.11.2026); 2 min Geduld am PC-Tab
           // .1487: genau der gewürfelte TP + die gewürfelten Kontrakte aus der Zeile — das, was „Plan heute Nacht“ schon zeigt
-          const wf = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { master_tp: Number(k.wuerfel.tp), master_contracts: Number(k.wuerfel.kt) } : undefined
+          const wf = (k.wuerfel && Number(k.wuerfel.tp) > 0 && Number(k.wuerfel.kt) >= 1) ? { master_tp: Number(k.wuerfel.tp), master_contracts: Number(k.wuerfel.kt), instr: k.wuerfel.instr || null } : undefined
           const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, startIso, row.tag, wf)
           if(p.warten) continue   // Claim verloren: der andere Tab legt an (25.09.2026)
           if(p.fehler){ set(k, 'aktiv', false); set(k, 'hinweis', p.fehler); continue }
@@ -68941,12 +68961,12 @@
           if(alt && altFrei){
             // Alte Werte im Riegel (S9 02.11.2026): Pläne haben hier kein Realtime, eine Hand-Änderung am Mac sähe der Tab nicht. 0 Zeilen → frisch lesen, sonst schriebe er bis zum Start vergeblich
             const { data: dAlt, error: eAlt } = await supabase.from('trade_plans').update(alt.upd).eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null)
-              .eq('master_tp', plan.masterTp).eq('master_contracts', plan.masterContracts).eq('slave_risk', plan.slaveRisk).eq('hedge_eur', plan.hedgeEur)
+              .eq('master_tp', plan.masterTp).eq('master_symbol', plan.masterSymbol).eq('master_contracts', plan.masterContracts).eq('slave_risk', plan.slaveRisk).eq('hedge_eur', plan.hedgeEur)
               .is('orbit_gesendet_at', null).is('started_at', null).is('hedge_freigabe_at', null).is('auto_bestaetigt_at', null).is('hand_werte_at', null).select('*')
             if(eAlt) console.warn('[wd] Recoverer-Altplan', eAlt.message)
             if(dAlt && dAlt[0]){
               const ixA = tradePlans.indexOf(plan); if(ixA >= 0) tradePlans[ixA] = rowToPlan(dAlt[0])
-              k.wuerfel = { tp: alt.tp, kt: alt.kt, quelle: 'recoverer', at: new Date().toISOString() }; k.vor = alt.vor; geaendert = true
+              k.wuerfel = { tp: alt.tp, kt: alt.kt, quelle: 'recoverer', at: new Date().toISOString(), ...(alt.instr ? { instr: alt.instr } : {}) }; k.vor = alt.vor; geaendert = true
               set(k, 'tp', alt.tp); set(k, 'kt', alt.kt); set(k, 'slave', alt.upd.slave_risk)
               console.log(`[wd] Recoverer: Plan ${String(plan.id).slice(0, 8)} auf ${alt.tp} $ / ${alt.vor.eur} € gebracht`)
               continue
@@ -69018,7 +69038,7 @@
               const passtH = handH || (!zyH && !recK) || (zyH && recK && Math.abs((Number(k.tp) || 0) - Number(zyH.ziel)) <= 0.5)
               if(acc && !passtH){ console.warn('[wd] Selbstheilung ausgelassen: Recoverer passt nicht zum Plan', k.plan_id); wdRecovererAlarm(k.id, wdZyklusUngeklaert(k) ? 'stand' : 'passt_nicht', 0) }
               else if(acc){
-                const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt })
+                const p = await wdPlanAnlegen(acc, wdKontoRichtung(k, row.richtung), vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt, instr: (k.wuerfel && k.wuerfel.instr) || null })
                 if(p && p.plan){ plan = p.plan; if(String(p.plan.id) !== String(k.plan_id)) set(k, 'plan_id', String(p.plan.id)); set(k, 'hinweis', ''); console.warn('[wd] Plan neu angelegt (Selbstheilung)', k.plan_id) }
               }
             }
@@ -69713,7 +69733,7 @@
     const tp = (p && Number(p.master_tp) > 0) ? Number(p.master_tp) : Number(k.tp) > 0 ? Number(k.tp) : null
     const wann = art === 'laeuft' ? (p && p.started_at ? 'seit ' + wdHhmm(p.started_at) : '–') : wdHhmm((p && p.start_um) || k.start_um) || '–'
     const konto = `${escapeHtml(String(k.firm || ''))} · ${escapeHtml(String(k.name || (p && p.master_name) || '').slice(0, 34))}`
-    return `<tr><td class="zahl">${escapeHtml(wann)}</td><td title="${escapeHtml(String((p && p.master_name) || k.name || ''))}">${konto}${wdKontoDrehHtml(x, k)}</td><td>${pfeil}</td>
+    return `<tr><td class="zahl">${escapeHtml(wann)}</td><td title="${escapeHtml(String((p && p.master_name) || k.name || ''))}">${konto}${wdKontoDrehHtml(x, k)}${(p ? window._planRecovererChipHtml?.({ ...p, winning_day: true, master_firm: k.firm }) : '') || ''}</td><td>${pfeil}</td>
       <td class="zahl">${escapeHtml(String(kt))}</td><td class="zahl">${tp != null ? Math.round(tp).toLocaleString('de-DE') + ' $' : '–'}</td>
       ${art === 'braucht' ? `<td class="wd-ue-grund">${escapeHtml(e.grund || '')}</td>` : ''}</tr>`
   }
@@ -81910,7 +81930,8 @@
         masterAccountId: t.konto_id || null, richtung: geplant ? apIdsRiLokal(z) : z.richtung, startUm: z.start_um || null, startUmGestartetAt: geplant ? null : (z.start_um || 'ja'),
         masterTp: Number(z.tp) || 0, masterSl: Number(z.sl) || 0, masterContracts: z.menge,
         masterSymbol: pzwIstLot({ route: z.route || t.route || null, masterFirm: z.firma }) ? '' : (z.symbol || 'NQ'),   // 20.10.2026: mt5 (Echo mit Hedge) ist Lot, nicht NQ
-        autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null }
+        autoPlan: true, autoBestaetigtAt: art === 'offen' ? null : 'ja', kontoTyp: z.typ || null,
+        recoverer: !!window._planIstRecoverer?.({ wd: z.winning_day === true || /winning/i.test(String(z.typ || '') + ' ' + String(z.konto || '')), master_firm: z.firma, master_symbol: z.symbol || z.symbol_root || '' }) }   // z.symbol ohne den NQ-Rückfall der Zeile darüber
       jeZ.set(p.id, { z, t, pl: e.pl, grund: e.grund }); return p })
       .sort((a, b) => String(a.masterFirm).toLowerCase().localeCompare(String(b.masterFirm).toLowerCase()) || String(a.startUm || '').localeCompare(String(b.startUm || '')))
     const zeile = p => {
