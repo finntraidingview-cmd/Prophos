@@ -4107,6 +4107,15 @@ def alarm_tick():
             evs += [ev for ev in alarm_wd_bestaetigen(wd_offen, firmen_wd, namen, jetzt) if ev[0] not in _alarm["gemeldet"] and all(ev[0] != e[0] for e in evs)]
     except Exception as e:
         print(f"[alarm] ⚠️ Apex-WD-Bestätigung: {type(e).__name__}: {e}", flush=True)
+    try:   # LOTS-DECKEL (02.11.2026): ab 60 min vor dem Start, damit das OK rechtzeitig kommt
+        ld = _sb_all("trade_plans", {"select": "id,user_id,status,route,master_firm,master_name,hedge_eur,slave_firm,master_contracts,multiplier,slave_risk,master_risk,master_symbol,start_um,start_um_gestartet_at,"
+                                               "lots_ok:mt5_baseline->lots_ok,lots_sperre:mt5_baseline->lots_sperre",
+                                     "status": "eq.planned", "start_um_gestartet_at": "is.null", "multiplier": "gt.0",
+                                     "and": f"(start_um.gte.{(jetzt - timedelta(hours=2)).isoformat()},start_um.lte.{(jetzt + timedelta(minutes=60)).isoformat()})"}) or []
+        ld = [r for r in ld if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
+        evs += [ev for ev in alarm_lots_deckel(ld, namen) if ev[0] not in _alarm["gemeldet"]]
+    except Exception as e:
+        print(f"[alarm] ⚠️ Lots-Deckel: {type(e).__name__}: {e}", flush=True)
     schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()   # nach einem Neustart: in 24 h Gemeldetes nicht noch einmal
     for ev in evs:
         key, prio, art, titel, text, uid, pid = ev[:7]
@@ -28260,6 +28269,158 @@ def wd_ist_recoverer_plan(p):
     return p.get("winning_day") is True and "apex" in str(p.get("master_firm") or "").lower() and bool(re.match(r"^NQ", wurzel))
 
 
+# LOTS-DECKEL (Finn 02.11.2026: „Wenn beim PreCheck mal irgendwas durchgeht und auf dem Fusion-Account mehr als 16 Lots geplant sind, startet der Trade nicht. Stattdessen kriegt man erst
+# mal eine Meldung und muss dann einmal auf OK drücken."; Vorfall Marc 32 statt 3,2 Lot, ausdrücklich gewünschte Ausnahme von der Regel gegen Prüf-Features). Genau 16 geht.
+# Gesperrt wird im PC-Tab vor dem Puls-Auftrag (tpLotsDeckelFehlt), DB-Netz am Claim: sql/2026-11-02_lots_deckel.sql. Das OK steht in mt5_baseline.lots_ok und gilt nur für genau diese Werte.
+LOTS_DECKEL = 16.0
+LOTS_OK_FELDER = (("kt", "master_contracts"), ("mult", "multiplier"), ("sr", "slave_risk"), ("mr", "master_risk"), ("sym", "master_symbol"))
+
+
+def plan_fusion_lots(p):
+    """REIN RECHNEND (testbar): geplante Fusion-Lots eines Plans = Kontrakte × Multiplikator, None ohne Fusion-Hedge. Der Tab rechnet beim Open über hedgeLotsSoll (Risiko vor multiplier) und meldet
+    Abweichungen als lots_sperre."""
+    p = p or {}
+    try:
+        kt, mult = float(p.get("master_contracts") or 0), float(p.get("multiplier") or 0)
+        hedge = float(p.get("hedge_eur") or 0) > 0
+    except (TypeError, ValueError):
+        return None
+    route = str(p.get("route") or "")
+    if not (kt > 0 and mult > 0) or not ((route in ("tvv2", "tsv2") and hedge) or (route == "mt5" and "fusion" in str(p.get("slave_firm") or "").lower())):
+        return None
+    return round(kt * mult, 2)
+
+
+def lots_ok_wert(p):
+    """REIN RECHNEND (testbar): das, was ein OK festhält: die Plan-Werte, aus denen die Lots entstehen."""
+    p = p or {}
+    return {k: (str(p.get(f) or "") if k == "sym" else (float(p.get(f)) if p.get(f) is not None else None)) for k, f in LOTS_OK_FELDER}
+
+
+def lots_ok_gilt(p, ok):
+    """REIN RECHNEND (testbar): gilt das OK noch? Ändert sich einer der Werte, ist es weg."""
+    if not isinstance(ok, dict):
+        return False
+    soll = lots_ok_wert(p)
+    for k, v in soll.items():
+        o = ok.get(k)
+        if k == "sym":
+            if o and str(o) != v:
+                return False
+        elif abs(float(o or 0) - float(v or 0)) > 1e-6:   # leer und 0 gelten gleich, wie im Tab
+            return False
+    return True
+
+
+def lots_deckel_lots(p):
+    """REIN RECHNEND (testbar): Lots, wenn dieser Plan über dem Deckel steht und kein gültiges OK hat, sonst None. lots_sperre = vom Tab gemeldeter Wert aus derselben Rechnung wie beim Open."""
+    p = p or {}
+    a = plan_fusion_lots(p)
+    sp = p.get("lots_sperre") if isinstance(p.get("lots_sperre"), dict) else None
+    try:
+        b = float(sp.get("lots")) if sp and sp.get("lots") is not None else None
+    except (TypeError, ValueError):
+        b = None
+    lots = max([x for x in (a, b) if x is not None], default=None)
+    return lots if lots is not None and lots > LOTS_DECKEL and not lots_ok_gilt(p, p.get("lots_ok")) else None
+
+
+def alarm_lots_deckel(plaene, namen):
+    """REIN RECHNEND (testbar): 🟠 einmal je Plan und Lot-Zahl an die Master-IDs."""
+    out = []
+    for p in plaene or ():
+        lots = lots_deckel_lots(p)
+        if lots is None or p.get("status") != "planned" or p.get("start_um_gestartet_at"):
+            continue
+        pid, uid = str(p.get("id")), str(p.get("user_id"))
+        konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip()
+        out.append((f"{pid}|lots_deckel|{lots}", 2, "lots_deckel", f"Fusion {lots:.2f} Lot: Trade startet nicht".replace(".", ","),
+                    f"{namen.get(uid, uid[:8])} · {konto}: {lots:.2f} Lot geplant, erlaubt sind {LOTS_DECKEL:.0f}. Weder Order noch Hedge starten, bis du in „Braucht dich“ OK drückst.".replace(".00", ""), uid, pid))
+    return out
+
+
+@app.route("/admin/auto-plan/lots-ok", methods=["POST", "OPTIONS"])
+def admin_auto_plan_lots_ok():
+    """LOTS-DECKEL: OK für GENAU diesen Plan und seine aktuellen Werte. Schickt der Klick andere Kontrakte/Multiplikator als die DB, wurde der Plan inzwischen geändert (409). Gate wie Hedge-Freigabe,
+    Verwalter für seine Gruppe. Überfälliger Start rückt wie bei der Freigabe in 3–6 min nach (hedge_freigabe_start)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _gs = _planer_schreib_gate()
+    if _gs is not None:
+        return _gs
+    uid, err = _admin_voll()
+    if err and (err[1] != 403 or not _admin_verwalter()):
+        return (jsonify({"ok": False, "msg": "Nur für Admins"}), 403) if err[1] == 403 else err
+    d = request.get_json(silent=True) or {}
+    pid = str(d.get("plan_id") or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid):
+        return jsonify({"ok": False, "msg": "plan_id fehlt"}), 400
+    try:
+        p = (sb_select("trade_plans", {"select": "id,user_id,status,route,start_um,start_um_gestartet_at,orbit_gesendet_at,auto_plan,auto_bestaetigt_at,hedge_eur,slave_firm,master_contracts,multiplier,"
+                                                 "slave_risk,master_risk,master_symbol", "id": f"eq.{pid}"}) or [None])[0]
+        if not p or p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at"):
+            return jsonify({"ok": False, "msg": "Plan ist nicht mehr geplant oder schon gestartet"}), 409
+        if err:                                  # Verwalter: nur seine Gruppe
+            gruppe = getattr(g, "admin_sicht", None)
+            if gruppe is None or str(p.get("user_id")) not in {str(x) for x in gruppe}:
+                return jsonify({"ok": False, "msg": "Nur Pläne deiner Gruppe"}), 403
+        try:
+            gleich = abs(float(d.get("kt")) - float(p.get("master_contracts") or 0)) < 1e-6 and abs(float(d.get("mult")) - float(p.get("multiplier") or 0)) < 1e-6
+        except (TypeError, ValueError):
+            gleich = False
+        if not gleich:
+            return jsonify({"ok": False, "msg": "Plan wurde inzwischen geändert — neu laden und nochmal ansehen"}), 409
+        von = str(uid or request.environ.get("prophos.admin_uid") or "")[:80]
+        jetzt = datetime.now(timezone.utc)
+        ok = dict(lots_ok_wert(p), lots=d.get("lots"), von=von, at=jetzt.isoformat())
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": pid, "p_patch": {"lots_ok": ok}, "p_status": "planned"})
+        _sb_pruefen(r)
+        if not r.json():
+            return jsonify({"ok": False, "msg": "Plan hat sich inzwischen geändert — nichts geschrieben"}), 409
+        st, _grund = hedge_freigabe_start(p.get("start_um"), jetzt, plan=p)
+        if st:
+            sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null", "start_um": f"lte.{jetzt.isoformat()}"}, {"start_um": st})
+        print(f"[lots-deckel] Plan {pid[:8]} freigegeben von {von[:8]} ({d.get('lots')} Lot)", flush=True)
+        return jsonify({"ok": True, "lots_ok": ok, "start": st})
+    except Exception as e:
+        print(f"[lots-deckel] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "msg": f"{type(e).__name__}: {e}"}), 500
+
+
+@app.route("/alarm/lots-deckel", methods=["POST", "OPTIONS"])
+def alarm_lots_deckel_route():
+    """LOTS-DECKEL: der PC-Tab rechnet mit derselben Formel wie beim Open und kann mehr sehen als Kontrakte × Multiplikator. Er merkt den Wert am eigenen Plan (Braucht dich auch für fremde Sichten) und meldet einmal."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    pid = str(d.get("plan_id") or "").strip()
+    try:
+        lots = round(float(d.get("lots")), 2)
+    except (TypeError, ValueError):
+        lots = None
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", pid) or lots is None or not (lots > LOTS_DECKEL) or lots > 100000:
+        return jsonify({"ok": False, "error": "plan_id/lots fehlt"}), 400
+    try:
+        p = (sb_select("trade_plans", {"select": "id,user_id,status,start_um_gestartet_at,master_name,master_firm", "id": f"eq.{pid}"}) or [None])[0]
+        if not p or str(p.get("user_id")) != str(uid):
+            return jsonify({"ok": False, "error": "nicht dein Plan"}), 403
+        r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/rpc/mt5_baseline_patch", headers=_sb_headers(), timeout=(5, 15),
+                        json={"p_plan": pid, "p_patch": {"lots_sperre": {"lots": lots, "at": datetime.now(timezone.utc).isoformat()}}, "p_status": "planned"})
+        _sb_pruefen(r)
+        namen, aus = _ap_namen()
+        key = f"{pid}|lots_deckel|{lots}"
+        if str(uid) not in aus and not _alarm_fremd_verwaltet(uid) and _tm_melde_frei(key):
+            for ev in alarm_lots_deckel([dict(p, lots_sperre={"lots": lots})], namen):
+                alarm_senden(ev[1], ev[2], ev[3], ev[4], uid=ev[5], plan_id=ev[6], schluessel=ev[0])
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return jsonify({"ok": True})
+
+
 def alarm_wd_bestaetigen(plaene, firmen, namen, jetzt):
     """REIN RECHNEND (testbar): ⚪ einmal je Plan — Apex-WD, dessen Startzeit erreicht ist und der noch unbestätigt steht. Der Tab versucht ihn nicht, darum
     kommt kein Claim und keine DB-Marke; Schlüssel wie der Claim-Riegel, damit es auch mit einem alten Tab bei einer Meldung bleibt."""
@@ -31170,6 +31331,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
     geplant_alle = [p for p in _ap_plaene_mit_hand({"select": AP_STAND_FELDER + ",hedge:mt5_baseline->hedge->>status,"
                                                                  "rk:mt5_baseline->richtung_konflikt,sf:mt5_baseline->start_fehler,"
                                                                  "pp:mt5_baseline->puls_pause,"   # Puls-Pause (Braucht dich, 20.10.2026)
+                                                                 "multiplier,slave_firm,slave_risk,master_risk,lots_ok:mt5_baseline->lots_ok,lots_sperre:mt5_baseline->lots_sperre,"   # Lots-Deckel (02.11.2026)
                                                                  "kt:mt5_baseline->kette,rh:mt5_baseline->richtung_hand,"
                                                                  "tm:mt5_baseline->tage_mini",   # Tage-Mini bleibt Echo V2 (ap_eh_wird_hedgen, 30.10.2026)
                                                        "status": "eq.planned", "order": "id.asc",
@@ -31361,6 +31523,7 @@ def _ap_stand_laden(reg, jetzt=None, tag=None, ersetzt=None, extra_konten=(), ec
                  # die Marke mt5_baseline.puls_pause entschärft den Plan (Bestätigen gesperrt, Puls startet ihn nicht) — stand bisher nur in der
                  # DB; Aurel abca772f 19.10. hing damit unsichtbar. Hier als Text (Pausen-Name), die Planer-Seite zeigt ihn in „Braucht dich"
                  puls_pause=(str(p.get("pp")).strip()[:80] or None) if p.get("pp") not in (None, "", False) else None,
+                 lots_deckel=lots_deckel_lots(p), lots_kt=p.get("master_contracts"), lots_mult=p.get("multiplier"),   # LOTS-DECKEL (02.11.2026): Braucht dich auch für fremde IDs
                  # TOPSTEP-KETTE (09.10.2026): Block mt5_baseline.kette (nr, tag_typ, tagesziel, verlust_grenze, t2_grund …) — die Planer-
                  # Seite beschriftet damit „Trade 1 · Reparatur-Tag" auch für fremde IDs (nur Anzeige)
                  kette=p.get("kt") if isinstance(p.get("kt"), dict) else None,
@@ -32037,6 +32200,7 @@ def ap_delta_antwort(stand, sicht_uid=None, pc_lebt=None):
                                       # 08.10.2026: liest tplDaten (Braucht dich: Start-Fehler/geclaimt fremder Pläne, Konto-Zuordnung)
                                       "konto_id", "start_fehler", "geclaimt",
                                       "puls_pause",   # 20.10.2026: Braucht dich „kann nicht starten — Puls-Pause" auch für fremde IDs
+                                      "lots_deckel", "lots_kt", "lots_mult",   # 02.11.2026: Lots-Deckel, Braucht dich mit OK
                                       "notes", "balance")}
                for z in sorted(stand["geplant"], key=lambda z: (z.get("start_min") or 0, z["plan_id"]))]
     if pc_lebt is not None:
