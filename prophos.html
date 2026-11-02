@@ -38122,41 +38122,38 @@
     if(!t || t.status !== 'review' || wdlManuell(t)) return
     _wdlManNotiz = { pid, neu: true }; wdlRender()
   }
-  /* EIN KLICK BEIM ABHAKEN (Finn 30.10.2026 18:0x: „Trades, bei denen nichts passiert … immer ein Klick zu viel"): → '' = unauffällig, sonst der Grund für das Popup. Eigene Pläne
-   * laufen über den Trades-Dialog mit eigenem Speichern, sie bleiben beim Popup. Echte Lesung = Balance nachher − vorher (pl_balance); master_pl allein kann Schätzung sein (Fall b4712b0c). */
+  /* EIN KLICK BEIM ABHAKEN (Finn 30.10.2026 18:0x: „Trades, bei denen nichts passiert … immer ein Klick zu viel"): → '' = direkt weg, sonst der Grund für das Popup.
+   * NUR NOCH BEI EINER AKTION (Finn 02.11.2026: „Mach, dass dieses Popup nur kommt, wenn irgendeine Aktion erledigt ist: Account kommt zu Waiting before payout, Account wurde geblowt,
+   * Account wurde abgehakt … Bei allen Accounts, wo nichts passiert ist, muss es nicht kommen"): Popup bei Blow/Konto weg, Ziel erreicht/Phasenwechsel, Funded → Winning Days bzw.
+   * Funded-CFD-Ziel (Waiting for Payout). Dazu die technischen Fälle (nicht in Überprüfen, Polar, eigener Plan mit eigenem Dialog, gesperrt, manuell, Hedge offen).
+   * BLEIBT AUCH (belegt 02.11.2026): ohne echte Lesung, wartet auf Lesung, Hedge-P&L fehlt, unplausibel/Balance-Sprung. Der Ein Klick bucht die Vorbelegung (Schätzung, wenn keine Lesung
+   * da ist) und setzt den Plan auf erledigt; danach liest Puls nicht mehr nach (tvV2EndlesungGrund: „erledigt — der P&L am Plan gilt"), der Wert wäre für immer falsch. */
   function wdlEinKlickGrund(t){
     if(!t || t.status !== 'review') return 'nicht in Überprüfen'
     if(wdlIstPolar(t)) return 'Polar'
     if(mklWdEigenerPlan(wdlTid(t))) return 'eigener Plan'
     if(wdlAbhakenSperre(t)) return 'gesperrt'
     if(wdlManuell(t)) return 'manuell'
+    // (a) geblowt / Konto weg — Blow-Beweis wie ap_normal_auto_pruefen (S2 30.10.2026)
     if(wdlGeblowtUrteil(t) || wdlKontoWeg(t) || wdlKontoWegErg(t)) return 'geblowt oder Konto weg'
     const e = t.endlesung || {}, zahl = v => v != null && v !== '' && isFinite(Number(v))
-    // Blow-Beweis wie ap_normal_auto_pruefen (S2 30.10.2026), final-Gründe aus AP_NORMAL_HAND_GRUENDE ohne die Hand-Schließungen: selbst geschlossen ist für Finn unauffällig
     if(e.konto_geblowt || e.konto_weg || e.konto_weg_vermutet || /^konto_(nicht_erreicht|weg|geblowt)/.test(String(e.puls_fehler || ''))
        || ['tsx_geblowt', 'demo_liq', 'demo_beide', 'demo_unklar', 'demo_konto_weg', 'demo_konto_unklar', 'konto_weg'].includes(String(e.grund || ''))) return 'Blow-Beweis oder unklares Ende'
-    if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlFehltChip(t) || wdlZielMarkiert(t)) return 'Ziel erreicht oder nah'
+    // (b) Ziel erreicht / bestanden / Phasenwechsel
+    if(wdlTpUndWeg(t) || wdlBestandenChip(t) || wdlZielMarkiert(t)) return 'Ziel erreicht'
     const ka = t.konto_aktuell, typ = String(t.konto_typ || (ka && ka.typ) || '')
-    if(!ka) return 'Konto-Stand unbekannt'
-    if(ka.ziel_erreicht_at) return 'Ziel erreicht'
-    if(t.konto_typ && ka.typ && String(t.konto_typ) !== String(ka.typ)) return 'Konto in anderer Phase'
+    if(ka && ka.ziel_erreicht_at) return 'Ziel erreicht'
+    if(ka && t.konto_typ && ka.typ && String(t.konto_typ) !== String(ka.typ)) return 'Konto in anderer Phase'
+    // (c) Funded Futures → Winning Days anbieten, Funded CFD am Ziel → Waiting for Payout
     if(typ === 'funded') return 'Funded Futures: Winning Days anbieten'
     if(wdlFcfdZielErreicht(t)) return 'Funded-CFD-Ziel erreicht'
-    if(['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0 && (wdlBlowStand(t) || {}).liq != null)) return 'Ziel oder Boden unbekannt'
-    if(/unplausibel|Balance-Sprung/i.test(String(t.kette_grund || ''))) return 'Ergebnis unplausibel'
-    if(t.tage_mini) return 'Tage-Mini'
-    if(t.balance_sprung) return 'Balance-Sprung'
+    if(t.hedge && t.hedge.status !== 'geschlossen') return 'Hedge offen'
+    // Schutz der Buchung (s. oben): nie eine Schätzung oder einen zweifelhaften Wert endgültig machen
     if(wdlWartet(t)) return 'wartet auf Lesung'
     if(!zahl(t.pl_balance) || !(Number(t.balance_end) > 0) || wdlPlGesch(t) || e.balance_quelle === 'folgetrade' || e.puls_aufgegeben) return 'keine echte Lesung'   // Balance 0 ergäbe P&L = −Start
-    const dm = t.demo || {}
-    if(dm.status === 'beide_in_minute') return 'TP/Liq unklar'
-    if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t)) return 'Demo an der Liq, Lesung ohne Blow'
-    if(t.hedge && t.hedge.status !== 'geschlossen') return 'Hedge offen'
+    if(/unplausibel|Balance-Sprung/i.test(String(t.kette_grund || '')) || t.balance_sprung) return 'Ergebnis unplausibel'
     const fusionAmPlan = t.route === 'mt5' || t.route === 'tvplus'
     if((t.hedge || Number(t.hedge_eur) > 0 || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
-    // Falscher P&L: Grenze wie ap_normal_tpsl_ende, TP bzw. SL + 15 %, mindestens 50 $ Luft. Ohne Bezugswert kein Ein Klick
-    const pl = Number(t.pl_balance), bezug = Math.abs(Number(pl > 0 ? t.master_tp : t.master_sl)) || 0
-    if(pl === 0 || !bezug || Math.abs(pl) > bezug + Math.max(50, bezug * 0.15)) return 'P&L passt nicht zu TP/SL'   // genau 0: kein Ergebnis, Finn soll es sehen (S2)
     return ''
   }
   window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken
