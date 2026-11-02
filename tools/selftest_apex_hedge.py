@@ -114,7 +114,10 @@ soll("Tick: winning_day false, hedge_eur = Kontowert, master_risk = Polster, Mar
 soll("Tick: Boden = Balance − Polster", "round(float(bal) - polster, 2)" in t)
 soll("Tick: Werte von vorher gemerkt (Rückweg)", '"vorher": {k: p.get(k) for k in ("master_risk", "slave_risk", "multiplier", "hedge_faktor")}' in t)
 soll("Tick: gemeinsame Vorgemerkt-Zählung + Marge", "hedge_vorgemerkt(von, jetzt)" in t and "eh_marge(" in t)
-soll("Echo-Hedge nutzt dieselbe Vorgemerkt-Zählung", "vorgemerkt = hedge_vorgemerkt(von, jetzt)" in block("eh_tick"))
+# 02.11.2026 (S16, S9-Befund): seit 4b71c5cf (30.10.) ist eh_tick nur der Takt-Wrapper unter _eh_lock, der Lauf steckt in _eh_tick_lauf —
+# die Zählung ist nicht weg, nur umgezogen (app.py _eh_tick_lauf: „vorgemerkt = hedge_vorgemerkt(von, jetzt)“).
+soll("Echo-Hedge nutzt dieselbe Vorgemerkt-Zählung", "vorgemerkt = hedge_vorgemerkt(von, jetzt)" in block("_eh_tick_lauf")
+     and "return _eh_tick_lauf(" in block("eh_tick"))
 hv = block("hedge_vorgemerkt")
 soll("Vorgemerkt zählt Echo (mt5), finalen Tradeify und Apex (tvv2)", '("echo_hedge", "mt5"), ("tradeify_hedge", "tvv2"), ("apex_hedge", "tvv2")' in hv)
 soll("finaler Tradeify nutzt dieselbe Vorgemerkt-Zählung", "vorgemerkt = hedge_vorgemerkt(von, jetzt)" in block("tfh_tick"))
@@ -136,9 +139,10 @@ soll("Tab: Liq am Challenge-Boden statt Größe + 100", "if(ahLiq > 0){ liq = ah
 soll("Liq am Boden auch im Backend (_lt_liq_balance)", "Apex mit Hedge: Challenge-Boden" in block("_lt_liq_balance"))
 soll("Zählstellen: wd-heute, Overview, konto_typ, Good Day nehmen Apex aus",
      "or plan_ist_apex_hedge(p):" in APP and "ah_status:mt5_baseline->apex_hedge->>status" in APP
-     and 'and not plan_ist_apex_hedge(plan) else None' in APP and "if f_kk is None or plan_ist_apex_hedge(plan):" in APP)
+     and 'and not plan_ist_apex_hedge(plan) else None' in APP and "if f_kk is None or (plan_ist_apex_hedge(plan) and not wd_hand):" in APP)   # seit 0c5022dc (30.10.): Hand-Haken darf den Apex-Hedge zählen
 soll("Live-Zeile trägt apex_hedge", 'z["apex_hedge"] = plan_ist_apex_hedge(q)' in APP)
-soll("SQL: Big-Trade-Riegel sieht Apex als WD (3 Aufrufer)", SQL.count("public.prophos_wd_wie(") == 4 and "function public.prophos_wd_wie(" in SQL)
+# 02.11.2026: 4 Aufrufer statt 3 — der vierte kam mit Zwei-Orbit (strengerer Riegel), dazu die Definition selbst = 5 Treffer.
+soll("SQL: Big-Trade-Riegel sieht Apex als WD (4 Aufrufer)", SQL.count("public.prophos_wd_wie(") == 5 and "function public.prophos_wd_wie(" in SQL)
 soll("Tab: konto_typ/Sticker/Tagesplan über tpWdZaehlt", HTML.count("tpWdZaehlt(") >= 3 and "if(tpWdZaehlt(p))        return 'wd'" in HTML)
 soll("Tab: Radar-Label Apex-Hedge mit Fusion-Spalte", "if(t.apex_hedge === true) return 'Apex-Hedge'" in HTML
      and HTML.count("'Winning Day', 'Apex-Hedge'") >= 3)
