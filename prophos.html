@@ -3901,6 +3901,8 @@
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-zs .tpl-karte{border:0;box-shadow:none;background:transparent;padding:0;margin:0}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-karte,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .tpl-bd,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-hb-klapp{background:var(--g-karte);border:1px solid var(--g-rand);border-radius:16px;box-shadow:var(--g-schatten);padding:16px 18px;margin-bottom:18px}
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-kopf b{font-size:18px;font-weight:600}
+  /* APEX-WD BESTÄTIGEN (02.11.2026, Finn bestätigt oft am Handy): bei 375 px lag der Knopf bei x = 564 hinter der waagrecht scrollenden Tabelle — Knopf-Spalte rechts festpinnen, Tippfläche 44 px */
+  @media (max-width:820px){ .ap-adm-scroll .ahf-knopf{position:sticky;right:0;z-index:1;background:var(--surface,#fff);box-shadow:-8px 0 8px -8px rgba(0,0,0,.18)} .ap-adm-scroll .ahf-knopf .ap-adm-ok{min-height:var(--m-row,44px)} .ap-adm-kopf:has([data-wd-ue-alle]){flex-wrap:wrap} .ap-adm-kopf [data-wd-ue-alle]{min-height:var(--m-row,44px)} }
   :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .ap-adm-ok{background:var(--g-knopf);color:var(--g-knopf-text);border:0;border-radius:10px;padding:7px 14px;font-weight:600}
   @media (max-width:980px){ :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-kpi,:is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-kpi.gross{grid-column:span 1}
     :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-kpi.gross{grid-column:span 2} :is(#ap-ids-root.ap-guestly,#apg-fcfd,#adm-pane-wd.ap-guestly) .apg-charts{grid-template-columns:1fr} }
@@ -47742,6 +47744,7 @@
       orbitGesendetAt: row.orbit_gesendet_at || null,
       startUm: row.start_um || null,                          // geplante Startzeit (sql/2026-09-22_trade_plans_start_um.sql)
       startUmGestartetAt: row.start_um_gestartet_at || null,
+      hedgeFreigabeAt: row.hedge_freigabe_at || null,         // Bestätigung Hedge-Trade / Apex-WD (sql/2026-11-02_apex_wd_bestaetigen.sql)
       masterRealized:  row.master_realized  != null ? Number(row.master_realized)  : null,
       slaveRealized:   row.slave_realized   != null ? Number(row.slave_realized)   : null,
       priority:    row.priority || 'medium',
@@ -48761,7 +48764,7 @@
       // Polar (21.10.2026): jede start_sperre-Art, mit Countdown bis zum neuen Versuch (polarStartVerschoben)
       let _pv = null; try{ _pv = p.route === 'polar' ? polarStartVerschoben(p) : null }catch(_){ _pv = null }
       const klein = _pv ? `<small class="is-verpasst" title="${escapeHtml('Start verschoben — ' + _pv.text + (_pv.versuche > 1 ? ' · Versuch ' + _pv.versuche : ''))}">⏸ ${_pv.bisMs ? `<span data-pol-bis="${_pv.bisMs}">${polarRestText(_pv.bisMs)}</span>` : 'verschoben'}</small>`
-        : _ss ? `<small class="is-verpasst" title="${escapeHtml(_ss.voll)}">⛔ Richtungsschutz</small>` : z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
+        : _ss ? `<small class="is-verpasst" title="${escapeHtml(_ss.voll)}">${_ss.marke || '⛔ Richtungsschutz'}</small>` : z.verpasst ? `<small class="is-verpasst">verpasst</small>` : z.tag ? `<small>${z.tag}</small>` : ''
       zeit = `<button class="pz-zeit-k" data-plan-start-um-edit="${p.id}" title="${escapeHtml(z.voll)}${z.verpasst ? ' — verpasst, nicht gestartet' : ''} · ${p.autoPlan && !p.autoBestaetigtAt ? 'Startet erst nach Bestätigung. ' : 'Der PC-Tab startet zu dieser Zeit von selbst. '}Klick: Uhrzeit ändern">${z.uhr}${klein}</button><button class="pz-zeit-x" data-plan-start-um-x="${p.id}" title="Startzeit entfernen">✕</button>`
     } else if(p.startUm){
       const z = zeitTeile(p.startUmGestartetAt)
@@ -57626,6 +57629,14 @@
     try{ return await _suScharfHolt }finally{ _suScharfHolt = null }
   }
   const tpIstFarmerPlan = p => /Winning-Day-Farmer/.test(String((p && p.notes) || ''))
+  /* APEX-WD BESTÄTIGEN (Finn 02.11.2026 04:30: „alle Apex-Trades kurz einzeln bestätigen … bei Tradeify nichts, bei Topstep nichts, nur Apex"): Farmer-Plan einer Firma aus
+   * wd_farmer_regeln.bestaetigen_firmen ohne hedge_freigabe_at. Der Tab versucht ihn gar nicht erst (suStartetNichtWeil: kein Countdown, keine Vorprüfung, kein Claim, hält die
+   * Kette seiner ID nicht auf) und schiebt seine Zeit nicht: unbestätigt läuft er ab und wird wie jeder nie gestartete Farmer-Plan weggeräumt. DB-Netz am Claim: trade_plans_a0_hedge_freigabe. */
+  const tpBestaetigenFirmen = () => { const l = _wdRegeln && _wdRegeln.row && _wdRegeln.row.bestaetigen_firmen
+    return (Array.isArray(l) ? l : []).map(k => String(k || '').trim().toLowerCase().replace(/[0-9]+$/, '')).filter(Boolean) }
+  const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || !tpIstFarmerPlan(p)) return false
+    const s = p.mt5Baseline && p.mt5Baseline.start_sperre, firma = String(p.masterFirm || '').toLowerCase()
+    return (!!s && s.art === 'hedge_freigabe' && s.wo === 'wd') || tpBestaetigenFirmen().some(k => firma.includes(k)) }
 
   /* NÄCHSTER PULS-EINSATZ (29.09.2026, Finn: „oben rechts unter Jacob: Nächster Puls-Impuls um die Uhrzeit, in so und so viel
    * Minuten — das gibt Puls den Spielraum, den er braucht"). Pille #tb-puls in der Kopfzeile, je ID aus den eigenen Plänen:
@@ -58203,6 +58214,9 @@
    * start_sperre_meldung.sql) legt ihren Grund an den Plan: mt5_baseline.start_sperre {art, text, at, naechster, versuche}. Gilt, solange
    * der Plan geplant und ungestartet ist und der letzte Versuch höchstens 30 min her ist. → { kurz, voll, versuche, naechster } | null */
   function tpStartSperre(p){
+    // APEX-WD BESTÄTIGEN (02.11.2026): wartet auf Finns „Bestätigen" — keine Sperre der DB, der Tab versucht den Start gar nicht
+    if(tpWdWartetAufBestaetigung(p)) return { kurz: '⏳ Wartet auf Bestätigung · Funded-Planer → Winning Days', marke: '⏳ Bestätigung offen',
+      voll: 'Wartet auf deine Bestätigung im Funded-Planer → Winning Days. Ohne Bestätigung startet der Trade nicht und läuft ab; bestätigt startet er zur Startzeit (schon vorbei: in 3–6 min, am selben Handelstag).', versuche: 1, at: null }
     const s = p && p.status === 'planned' && !p.startUmGestartetAt && p.mt5Baseline && p.mt5Baseline.start_sperre
     if(!s || !['richtung', 'ein_finaler', 'waage_deckel', 'apex_hedge'].includes(s.art) || !(Date.now() - (Date.parse(s.at) || 0) < 30 * 60000)) return null
     const um = s.naechster ? tpStartUmText(s.naechster) : ''
@@ -58843,10 +58857,11 @@
       if(Date.now() - _sfAbgleichAt >= SF_ABGLEICH_MS){
         _sfAbgleichAt = Date.now()
         const ab = Date.now() - 24 * 3600000
-        const { data, error } = await supabase.from('trade_plans').select('id,start_um,start_um_gestartet_at,mt5_baseline')
+        const { data, error } = await supabase.from('trade_plans').select('id,start_um,start_um_gestartet_at,hedge_freigabe_at,mt5_baseline')
           .eq('user_id', uid).eq('status', 'planned').gte('start_um', new Date(ab).toISOString())
         const anders = (data || []).some(r => { const p = (tradePlans || []).find(x => String(x.id) === String(r.id))
           return !p || Date.parse(p.startUm || 0) !== Date.parse(r.start_um || 0) || !!p.startUmGestartetAt !== !!r.start_um_gestartet_at
+            || !!p.hedgeFreigabeAt !== !!r.hedge_freigabe_at   // APEX-WD BESTÄTIGEN (02.11.2026): ohne das startete der Tab nach Finns „Bestätigen" nie (Pläne kommen ohne Realtime)
             || JSON.stringify(sfFlag(p)) !== JSON.stringify((r.mt5_baseline && r.mt5_baseline.start_fehler) || null) })
         // GEISTER-PLAN (18.10.2026, Health-Check: 16.10. 08:15–12:30 UTC ein PC-Tab 1×/min POST /plan {aktion:'nachholen'} → 404
         // „Plan nicht gefunden", ~250×): der Abgleich sah nur DB-Zeilen, die lokal fehlen — nie lokal geplante Pläne, die es in der
@@ -59005,6 +59020,7 @@
     if(p.route === 'tsv2' && !tpKetteNr(p) && !tpIstFarmerPlan(p) && !tpIstWdPlan(p)) return 'Topstep V2 — startet nur von Hand'
     if(p.route === 'tsv2' && tsPulsModus() !== 'scharf') return (tpKetteNr(p) ? 'Topstep-Kette' : 'Topstep-Winning-Day') + ' — Puls für Topstep nicht scharf'
     if(suUnbestaetigt(p)) return 'startet erst nach Bestätigung'
+    if(tpWdWartetAufBestaetigung(p)) return 'wartet auf deine Bestätigung im Funded-Planer → Winning Days'   // APEX-WD BESTÄTIGEN (02.11.2026)
     if(planKontoDeaktiviert(p)) return 'Konto deaktiviert'   // 30.10.2026; DB-Netz am Claim: trade_plans_a00_konto_deaktiviert
     if(rkAufgegeben(p)) return 'Richtungskonflikt — startet nur von Hand oder mit neuer Uhrzeit'
     { const ns = newsStartSperre(p); if(ns) return ns.text }   // NEWS-REGEL FUNDED CFD (30.10.2026): Plan wartet, startet nach dem Block
@@ -59036,7 +59052,8 @@
   // Winning-Day-Kette: ist der Farmer-Plan p jetzt dran? (rein, ohne DB — Test-Haken window._su.ketteFrei)
   function suKetteFrei(p, plaene, now){
     const tag = suKettenTag(p)
-    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag)
+    // APEX-WD BESTÄTIGEN (02.11.2026): ein Apex-WD, der auf Finns „Bestätigen" wartet, hält die Kette seiner ID nicht auf — Finn: „bei Tradeify nichts, bei Topstep nichts"
+    const kette = (plaene || []).filter(x => x && tpIstFarmerPlan(x) && x.startUm && suKettenTag(x) === tag && (String(x.id) === String(p.id) || !tpWdWartetAufBestaetigung(x)))
       .sort((a, b) => (new Date(a.startUm) - new Date(b.startUm)) || String(a.id).localeCompare(String(b.id)))
     const i = kette.findIndex(x => String(x.id) === String(p.id))
     if(i <= 0) return new Date(p.startUm).getTime() <= now                     // Kopf (oder nicht in der Kette): zur eigenen Startzeit
@@ -60441,7 +60458,10 @@
    * derselbe eine Knopf gibt frei. Unbestätigte Hedge-Pläne zeigt er nicht mehr (die stehen in „Zu bestätigen"). ══ */
   const _ahf = { d: null, laeuft: false, at: 0, busy: new Set(), fehler: '' }
   const AHF_ART = { tradeify_final: ['Tradeify final', 'Finaler Tradeify-Trade: startet als Orbit mit Fusion-Gegenhedge (Blow deckt den Kontowert)'],
-                    apex: ['Apex WD', 'Apex Winning Day mit Fusion-Hedge'] }
+                    apex: ['Apex WD', 'Apex Winning Day mit Fusion-Hedge'],
+                    // APEX-WD BESTÄTIGEN (Finn 02.11.2026 04:30: „alle Apex-Trades kurz einzeln bestätigen … nur Apex"): Farmer-Winning-Day einer Firma aus
+                    // wd_farmer_regeln.bestaetigen_firmen — GET /hedge-freigabe liefert ihn mit wd:true, ✓ setzt hedge_freigabe_at, der Claim-Riegel hält bis dahin
+                    apex_wd: ['Apex WD', 'Apex Winning Day des Farmers — startet erst nach deinem ✓ (Schalter wd_farmer_regeln.bestaetigen_firmen)'] }
   async function ahfLaden(){
     if(_ahf.laeuft) return
     _ahf.laeuft = true
@@ -60456,7 +60476,7 @@
   const ahfEur = v => { const n = Number(v); return isFinite(n) && v != null ? (n < 0 ? '−' : '+') + Math.round(Math.abs(n)).toLocaleString('de-DE') + ' €' : '–' }
   // + Kontoart (PLANER-GLIEDERUNG 30.10.2026): im Challenge Planer · CFD/Futures nur Hedge-Trades dieser Art — Liste, Zähler und alle drei
   // Knöpfe (✓ einzeln, ✓ alle n je ID, ✓ Alle n) lesen von hier, freigegeben werden also nur die gezeigten
-  const ahfAltlast = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.auto_bestaetigt_at && (typeof window._apArtPasst !== 'function' || window._apArtPasst({ firma: z.master_firm, route: z.route })))
+  const ahfAltlast = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => !z.wd && z.auto_bestaetigt_at && (typeof window._apArtPasst !== 'function' || window._apArtPasst({ firma: z.master_firm, route: z.route })))   // wd: nur im Funded-Planer → Winning Days
   /* Hedge-Spalten in derselben Zeile von „Zu bestätigen" / „Wartet auf Start" (EIN BESTÄTIGEN, 30.10.2026): z aus /admin/auto-plan/ids
    * {hedge_art, hedge_vorschau, hedge_frei}. Lots · Blow € / Pass € — oder der Grund, warum kein Hedge rechenbar ist. Normale Pläne: ''. */
   function ahfHedgeKurz(z, art){
@@ -60492,23 +60512,27 @@
   }
   window._ahfHedgeKurz = ahfHedgeKurz
   function ahfZeileHtml(z){
-    const id = String(z.id), art = AHF_ART[z.art] || [z.art || '?', ''], vs = (z.vs && typeof z.vs === 'object') ? z.vs : {}
+    const id = String(z.id), art = AHF_ART[z.art] || (z.wd ? AHF_ART.apex_wd : [z.art || '?', '']), vs = (z.vs && typeof z.vs === 'object') ? { ...z.vs } : {}
     const ri = z.richtung === 'buy' ? '<b style="color:var(--good-ink)">BUY</b>' : z.richtung === 'sell' ? '<b style="color:var(--danger-ink)">SELL</b>' : '–'
     // Namen beider Wege (S1 Apex: tp_eur statt pass_eur, Hinweis als {fehler, code}; S4 Tradeify: pass_eur, grund) — Pass/TP immer als −€
     const hinweis = vs.grund || vs.fehler ? String(vs.grund || vs.fehler) + (vs.code ? ` (${vs.code})` : '') : ''
+    // APEX-WD BESTÄTIGEN (02.11.2026): Farmer-Pläne haben keine hedge_vorschau — Lots/Blow/TP stehen am Plan (Lots = Kontrakte × multiplier, Blow = slave_risk, TP = −hedge_eur)
+    if(z.wd && vs.lots == null && Number(z.multiplier) > 0 && Number(z.master_contracts) > 0){ vs.lots = Math.round(Number(z.master_contracts) * Number(z.multiplier) * 100) / 100
+      if(Number(z.slave_risk) > 0) vs.blow_eur = Number(z.slave_risk)
+      if(Number(z.hedge_eur) > 0) vs.pass_eur = -Number(z.hedge_eur) }
     const passTp = vs.pass_eur != null ? Number(vs.pass_eur) : vs.tp_eur != null ? -Math.abs(Number(vs.tp_eur)) : null
     const hedge = vs.lots != null ? `${Number(vs.lots).toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lot` : Number(z.hedge_eur) > 0 ? ahfEur(z.hedge_eur).replace('+', '')
       : hinweis ? `<small style="color:var(--warn-ink, #b45309)">⚠ ${escapeHtml(hinweis.slice(0, 48))}</small>` : '–'
     const bp = vs.blow_eur != null || passTp != null ? `<span style="color:var(--good-ink)">${ahfEur(vs.blow_eur)}</span> / <span style="color:var(--danger-ink)">${ahfEur(passTp)}</span>` : '–'
     const unterwegs = _ahf.busy.has(id)
-    return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
+    return `<tr><td class="zahl" title="Start Dubai${z.auto_bestaetigt_at || z.wd ? '' : ' — Vorschlag noch nicht bestätigt'}">${escapeHtml(ahfWann(z.start_um))}</td>
       <td title="${escapeHtml(String(z.master_name || ''))}">${escapeHtml(String(z.master_firm || ''))} · ${escapeHtml(String(z.master_name || '').slice(0, 34))}</td>
       <td title="${escapeHtml(art[1])}">${escapeHtml(art[0])}</td><td>${ri}</td>
       <td class="zahl">${z.master_contracts != null ? Number(z.master_contracts).toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}${z.master_symbol ? ' ' + escapeHtml(String(z.master_symbol).replace(/[A-Z]\d+$/, '')) : ''}</td>
       <td class="zahl">${Number(z.master_tp) > 0 ? Math.round(Number(z.master_tp)).toLocaleString('de-DE') + ' $' : '–'}</td>
       <td class="zahl" title="${escapeHtml(hinweis ? 'Hedge nicht rechenbar: ' + hinweis : vs.q ? 'q ' + vs.q + ' €/$ (Kontowert ÷ Polster ÷ 0,89)' : '')}">${hedge}</td>
       <td class="zahl" title="Hedge-Ergebnis: Blow (Konto geblowt) / Pass bzw. TP (Master-TP erreicht)">${bp}</td>
-      <td class="zahl"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="Freigeben — der Plan startet dann zur Startzeit mit Hedge">${unterwegs ? '…' : '✓'}</button></td></tr>`
+      <td class="zahl ahf-knopf"><button type="button" class="ap-adm-ok" data-ahf-ok="${escapeHtml(id)}"${unterwegs ? ' disabled' : ''} title="${z.wd ? 'Bestätigen — der Winning Day startet dann zur Startzeit' : 'Freigeben — der Plan startet dann zur Startzeit mit Hedge'}">${unterwegs ? '…' : (z.wd ? 'Bestätigen' : '✓')}</button></td></tr>`
   }
   function ahfRender(){
     const root = document.getElementById('ahf-root'); if(!root) return
@@ -60536,7 +60560,9 @@
     ahfRender()
     try{
       const d = await apdApi('POST', '/hedge-freigabe', { ids })   // immer die gezeigten IDs (alle:true gäbe auch unbestätigte frei)
-      if(typeof atToast === 'function') atToast(`✓ ${d.freigegeben || 0} Hedge-Trade${(d.freigegeben || 0) === 1 ? '' : 's'} freigegeben`, 'start')
+      const wd = ((_ahf.d && _ahf.d.zeilen) || []).some(z => z.wd && ids.map(String).includes(String(z.id))), n = d.freigegeben || 0, stehen = Object.values(d.nicht_neu_gestartet || {})
+      if(typeof atToast === 'function') atToast(wd ? `✓ ${n} Winning Day${n === 1 ? '' : 's'} bestätigt — startet zur Startzeit` : `✓ ${n} Hedge-Trade${n === 1 ? '' : 's'} freigegeben`, 'start')
+      if(stehen.length && typeof atToast === 'function') atToast(`⚠ ${stehen.length} nicht neu gestartet: ${String(stehen[0]).slice(0, 90)}`, 'end')   // APEX-WD BESTÄTIGEN: zu alt, anderer Handelstag
     }catch(e){ _ahf.fehler = 'Freigabe fehlgeschlagen: ' + ((e && e.message) || e) }
     finally{ for(const id of ids) _ahf.busy.delete(String(id)); await ahfLaden() }
   }
@@ -60551,7 +60577,9 @@
   window._ahfOeffnen = an => { const r = document.getElementById('ahf-root'); if(!r) return; if(an){ r.dataset.an = '1'; ahfRender(); ahfLaden() } else { delete r.dataset.an; r.hidden = true } }
   window._ahfNeu = () => { const r = document.getElementById('ahf-root'); if(r && r.dataset.an) ahfLaden() }   // nach ✓ in „Zu bestätigen"
   // WD-ÜBERSICHT (30.10.2026, Funded Planer → Winning Days „Zu bestätigen"): Apex-WD-Pläne ohne Hedge-Freigabe, dieselbe Zeile + derselbe ✓
-  window._ahfWdZeilen = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.art === 'apex' && /winning days/i.test(String(z.master_name || '')))
+  window._ahfWdZeilen = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.wd === true || (z.art === 'apex' && /winning days/i.test(String(z.master_name || ''))))   // APEX-WD BESTÄTIGEN (02.11.2026): wd:true aus GET /hedge-freigabe
+  window._ahfWdFirmen = () => (_ahf.d && Array.isArray(_ahf.d.wd_firmen)) ? _ahf.d.wd_firmen : tpBestaetigenFirmen()   // Nicht-Admin (GET 403): aus den Farmer-Regeln
+  window._ahfFehler = () => _ahf.fehler || ''
   let _ahfWdVersuch = 0   // eigener Takt: auch ein gescheiterter Abruf (at bleibt alt) lädt höchstens alle 60 s neu — sonst Schleife über _wdUebersichtNeu
   window._ahfWdLaden = () => { if(_ahf.laeuft || Date.now() - _ahfWdVersuch < 60000) return; _ahfWdVersuch = Date.now(); if(!_ahf.d || Date.now() - _ahf.at > 60000) ahfLaden() }
   window._ahfZeileHtml = z => ahfZeileHtml(z)
@@ -69135,7 +69163,8 @@
       ${art === 'braucht' ? `<td class="wd-ue-grund">${escapeHtml(e.grund || '')}</td>` : ''}</tr>`
   }
   function wdUebersichtBlock(art, titel, unter, liste, extraKopf){
-    const leer = { offen: 'Nichts zu bestätigen — Winning Days starten ohne ✓.', laeuft: 'Nichts läuft.', braucht: 'Alles in Ordnung.', warten: 'Nichts geplant.' }[art]
+    const wdFirmen = (typeof window._ahfWdFirmen === 'function') ? window._ahfWdFirmen() : []   // APEX-WD BESTÄTIGEN (02.11.2026): Gate-Firmen aus wd_farmer_regeln
+    const leer = { offen: wdFirmen.length ? `Nichts zu bestätigen — ${escapeHtml(wdFirmen.map(f => f[0].toUpperCase() + f.slice(1)).join(', '))}-Winning-Days starten erst nach „Bestätigen", alle anderen Firmen ohne.` : 'Nichts zu bestätigen — Winning Days starten ohne ✓.', laeuft: 'Nichts läuft.', braucht: 'Alles in Ordnung.', warten: 'Nichts geplant.' }[art]
     const kopf = `<div class="ap-adm-kopf"><b>${escapeHtml(titel)} · ${liste.length}</b><span>${escapeHtml(unter)}</span>${extraKopf || ''}</div>`
     if(!liste.length) return `<div class="ap-adm-karte">${kopf}<div class="wd-ue-leer">${leer}</div></div>`
     const je = new Map()
@@ -69152,8 +69181,13 @@
     if(!_wd.daten || !Array.isArray(_wd.rows)){ box.innerHTML = ''; return }
     try{ window._ahfWdLaden?.() }catch(_){}
     const d = wdUebersichtDaten(_wd.rows)
+    const fehlerAhf = (typeof window._ahfFehler === 'function' && window._ahfFehler()) ? `<div class="kis-s" style="color:var(--danger-ink);margin:0 2px 10px">⚠ ${escapeHtml(window._ahfFehler().slice(0, 160))}</div>` : ''   // sonst bliebe ein gescheitertes „Bestätigen" hier stumm
     const offen = (typeof window._ahfWdZeilen === 'function' ? window._ahfWdZeilen() : []).filter(z => wdSichtOk(z.user_id))
-    const alleKnopf = offen.length > 1 ? `<button type="button" class="ap-adm-ok" data-wd-ue-alle="1">✓ Alle ${offen.length} freigeben</button>` : ''
+    // APEX-WD BESTÄTIGEN (02.11.2026): was oben in „Zu bestätigen" steht, nicht zugleich unter „Wartet auf Start" bzw. „überfällig" zeigen
+    const offenIds = new Set(offen.map(z => String(z.id)))
+    d.warten = d.warten.filter(e => !(e.p && offenIds.has(String(e.p.id))))
+    d.braucht = d.braucht.filter(e => !(e.p && offenIds.has(String(e.p.id))))
+    const alleKnopf = offen.length > 1 ? `<button type="button" class="ap-adm-ok" data-wd-ue-alle="1">✓ Alle ${offen.length} bestätigen</button>` : ''
     // WD-ANSICHT (Finn 30.10.2026 15:0x, Screenshot .1941: „Läuft und Braucht dich so hässlich … TP/SL Master, TP/SL Fusion wie unter Funded CFD"): alle drei Blöcke
     // sind jetzt dieselben Karten wie Wartet auf Start (window._apWdBloecke → apIdsBlockHtml). Die schlichte Tabelle bleibt nur, wenn der Aufbau wirft oder der Block leer ist.
     try{ window._tplSicherstellen?.() }catch(_){}
@@ -69164,12 +69198,12 @@
     const laeuftHtml = pb && d.laeuft.length ? pb.laeuft : wdUebersichtBlock('laeuft', 'Läuft', 'live', d.laeuft)
     const wartenHtml = pb && d.warten.length ? pb.warten : wdUebersichtBlock('warten', 'Wartet auf Start', 'geplant · Zeiten Dubai', d.warten)
     const brauchtHtml = pb && d.braucht.length ? pb.braucht : wdUebersichtBlock('braucht', 'Braucht dich', 'Abhaken, Nachlesung, überfällig, Hinweis am Konto', d.braucht)
-    box.innerHTML = wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD mit Hedge — startet erst nach ✓ · Zeiten Dubai', offen, alleKnopf)
+    box.innerHTML = fehlerAhf + wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD — startet erst nach deinem „Bestätigen" · Zeiten Dubai', offen, alleKnopf)
       + laeuftHtml
       + brauchtHtml
       + wartenHtml
     const b = box.querySelector('[data-wd-ue-alle]')
-    if(b) b.addEventListener('click', () => { if(confirm(`Alle ${offen.length} Apex-WD-Hedge-Trades freigeben? Sie starten dann zur Startzeit mit Hedge.`)){ b.disabled = true; window._ahfFreigebenIds?.(offen.map(z => String(z.id))) } })
+    if(b) b.addEventListener('click', () => { if(confirm(`Alle ${offen.length} Apex-Winning-Days bestätigen? Sie starten dann zur Startzeit.`)){ b.disabled = true; window._ahfFreigebenIds?.(offen.map(z => String(z.id))) } })
   }
   window._wdStub = (rows, daten) => { _wd.rows = rows || []; _wd.daten = daten || { plaene: [] }; wdAblauf(_wd.rows, []) }   // Stub ohne Login (Test-Haken, 30.10.2026)
   window._wdUebersichtNeu = () => { try{ if(document.getElementById('wd-uebersicht')) wdUebersicht() }catch(e){ console.warn('[wd] Übersicht', e) } }

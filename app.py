@@ -3966,9 +3966,14 @@ def alarm_ereignisse(plaene, namen, jetzt, seit_iso):
         ss = p.get("ss") if isinstance(p.get("ss"), dict) else {}
         # HEDGE-TRADE OHNE FREIGABE (29.10.2026, trade_plans_a0_hedge_freigabe): ⚪ einmal je Plan
         if st == "planned" and ss.get("art") == "hedge_freigabe" and str(ss.get("at") or "") > seit_iso:
-            out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Hedge-Trade wartet auf Bestätigung",
-                        f"{wer} · {konto}: wartet auf deine Bestätigung im Challenge-Planer (Admin → Challenge-Planer → „Zu bestätigen“ "
-                        f"bzw. „Hedge-Freigabe offen“) — startet erst danach.", uid, pid))
+            if ss.get("wo") == "wd":   # APEX-WD BESTÄTIGEN (02.11.2026): Farmer-Winning-Day wartet im Funded-Planer → Winning Days
+                out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Apex-WD wartet auf Bestätigung",
+                            f"{wer} · {konto}: wartet auf deine Bestätigung (Admin → Funded-Planer → Winning Days → „Zu bestätigen“) — "
+                            f"startet erst danach.", uid, pid))
+            else:
+                out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Hedge-Trade wartet auf Bestätigung",
+                            f"{wer} · {konto}: wartet auf deine Bestätigung im Challenge-Planer (Admin → Challenge-Planer → „Zu bestätigen“ "
+                            f"bzw. „Hedge-Freigabe offen“) — startet erst danach.", uid, pid))
         # APEX OHNE HEDGE GEHALTEN (30.10.2026, trade_plans_a1_apex_hedge): ⚪ einmal je Plan — nur, wenn ah_tick den Grund nicht schon selbst
         # gemeldet hat (_ah_ohne, apex_hedge.gemeldet), z. B. weil Railway den Plan noch nicht gesehen hat
         ahm = p.get("ahm") if isinstance(p.get("ahm"), dict) else {}
@@ -4078,6 +4083,15 @@ def alarm_tick():
     namen, aus = _ap_namen()
     rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
     evs = [ev for ev in alarm_ereignisse(rows, namen, jetzt, seit) if ev[0] not in _alarm["gemeldet"]]
+    try:                                       # APEX-WD BESTÄTIGEN (02.11.2026): eigene Abfrage — Farmer-Pläne von nachts fallen aus „updated_at ≤ 3 h" heraus
+        firmen_wd = wd_bestaetigen_firmen()
+        if firmen_wd:
+            wd_offen = _sb_all("trade_plans", dict(hf_basis(firmen_wd), select="id,user_id,status,master_firm,master_name,start_um,start_um_gestartet_at,hedge_freigabe_at,winning_day,notes,art:mt5_baseline->>hedge_art",
+                                                   start_um=f"gte.{(jetzt - timedelta(minutes=20)).isoformat()}")) or []
+            wd_offen = [r for r in wd_offen if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
+            evs += [ev for ev in alarm_wd_bestaetigen(wd_offen, firmen_wd, namen, jetzt) if ev[0] not in _alarm["gemeldet"] and all(ev[0] != e[0] for e in evs)]
+    except Exception as e:
+        print(f"[alarm] ⚠️ Apex-WD-Bestätigung: {type(e).__name__}: {e}", flush=True)
     schon = alarm_im_log([ev[0] for ev in evs], 86400) if evs else set()   # nach einem Neustart: in 24 h Gemeldetes nicht noch einmal
     for ev in evs:
         key, prio, art, titel, text, uid, pid = ev[:7]
@@ -27773,6 +27787,66 @@ def tfh_tick(jetzt=None, force=False):
 HEDGE_ARTEN = ("apex", "tradeify_final")
 
 
+# APEX-WD BESTÄTIGEN (Finn 02.11.2026 04:30: „im Funded-Planer unter Winning Days alle Apex-Trades kurz einzeln bestätigen müssen — bei Tradeify
+# nichts, bei Topstep nichts, nur Apex"): Farmer-Winning-Days (winning_day true) der Firmen aus wd_farmer_regeln.bestaetigen_firmen
+# (Schlüssel wie vorplan.regeln.fu: 'apex' = 150k, 'apex100' = 100k) laufen über DENSELBEN Freigabe-Weg wie die Hedge-Trades: Claim-Riegel
+# trade_plans_a0_hedge_freigabe hält sie (sql/2026-11-02_apex_wd_bestaetigen.sql), GET listet sie mit wd=true, POST setzt hedge_freigabe_at.
+# Leere Liste = kein Gate (Finn: „später können wir das Bestätigen wieder ausmachen"). Nur Apex — Tradeify/Topstep/Lucid nie in der Liste.
+def wd_bestaetigen_firmen():
+    """Firmen-Schlüssel aus wd_farmer_regeln.bestaetigen_firmen → Liste lower-case ohne Ziffern am Ende ('apex100' → 'apex'), ohne Doppelte."""
+    try:
+        roh = (sb_select("wd_farmer_regeln", {"select": "bestaetigen_firmen", "id": "eq.1"}) or [{}])[0].get("bestaetigen_firmen")
+    except Exception as e:
+        if "bestaetigen_firmen" in str(e):      # Spalte noch nicht eingespielt → kein Gate
+            return []
+        raise
+    out = []
+    for k in (roh if isinstance(roh, list) else []):
+        key = re.sub(r"[0-9]+$", "", str(k or "").strip().lower())
+        if key and key not in out:
+            out.append(key)
+    return out
+
+
+def hf_basis(firmen):
+    """REIN RECHNEND (testbar): PostgREST-Filter der offenen Freigaben — planned, ungeclaimt, ohne Freigabe, und (hedge_art in HEDGE_ARTEN ODER
+    Farmer-Winning-Day einer Firma aus `firmen`). Ohne Firmen wie bisher nur hedge_art."""
+    basis = {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null"}
+    arten = "mt5_baseline->>hedge_art.in.(" + ",".join(HEDGE_ARTEN) + ")"
+    if not firmen:
+        basis["mt5_baseline->>hedge_art"] = "in.(" + ",".join(HEDGE_ARTEN) + ")"
+        return basis
+    wd = ",".join(f"and(winning_day.is.true,notes.ilike.*Winning-Day-Farmer*,master_firm.ilike.*{f}*)" for f in firmen)
+    basis["or"] = f"({arten},{wd})"
+    return basis
+
+
+def alarm_wd_bestaetigen(plaene, firmen, namen, jetzt):
+    """REIN RECHNEND (testbar): ⚪ einmal je Plan — Apex-WD, dessen Startzeit erreicht ist und der noch unbestätigt steht. Der Tab versucht ihn nicht, darum
+    kommt kein Claim und keine DB-Marke; Schlüssel wie der Claim-Riegel, damit es auch mit einem alten Tab bei einer Meldung bleibt."""
+    out = []
+    for p in plaene or ():
+        if not hf_ist_wd(p, firmen) or p.get("hedge_freigabe_at") or p.get("status") != "planned" or p.get("start_um_gestartet_at"):
+            continue
+        t = _alarm_ts(p.get("start_um"))
+        if not t or t > jetzt:
+            continue
+        pid, uid = str(p.get("id")), str(p.get("user_id"))
+        konto = f"{p.get('master_firm') or ''} {p.get('master_name') or ''}".strip()
+        out.append((f"{pid}|hedge_freigabe", 3, "hedge_freigabe", "Apex-WD wartet auf Bestätigung",
+                    f"{namen.get(uid, uid[:8])} · {konto}: wartet auf deine Bestätigung (Admin → Funded-Planer → Winning Days → „Zu bestätigen“) — "
+                    f"startet erst danach, ohne Bestätigung läuft er ab.", uid, pid))
+    return out
+
+
+def hf_ist_wd(zeile, firmen):
+    """REIN RECHNEND (testbar): Zeile ist ein Apex-WD-Kandidat (winning_day true, Firma passt, kein hedge_art) → True."""
+    if zeile.get("art") in HEDGE_ARTEN or zeile.get("winning_day") is not True or "Winning-Day-Farmer" not in str(zeile.get("notes") or ""):
+        return False
+    firm = str(zeile.get("master_firm") or "").lower()
+    return any(f in firm for f in firmen)
+
+
 def ap_ids_hedge_felder(p):
     """REIN (EIN BESTÄTIGEN JE TRADE, Finn 30.10.2026): Hedge-Felder einer Zeile von /admin/auto-plan/ids — hedge_art nur 'apex' |
     'tradeify_final' (sonst null), hedge_vorschau nur als Objekt, hedge_frei = Freigabe schon gesetzt. Gelesen aus den Aliassen hart/hvs."""
@@ -27887,17 +27961,20 @@ def admin_auto_plan_hedge_freigabe():
     uid, err = _admin_voll()   # ADMIN_EMAILS oder voller Admin-Reiter-Login (30.10.2026, „Finn + Pascal")
     if err:
         return (jsonify({"ok": False, "msg": "Nur für Admins"}), 403) if err[1] == 403 else err
-    basis = {"status": "eq.planned", "start_um_gestartet_at": "is.null", "hedge_freigabe_at": "is.null",
-             "mt5_baseline->>hedge_art": "in.(" + ",".join(HEDGE_ARTEN) + ")"}
     try:
+        firmen = wd_bestaetigen_firmen()      # APEX-WD BESTÄTIGEN (02.11.2026): Farmer-Winning-Days dieser Firmen mit in der Liste
+        basis = hf_basis(firmen)
         namen, aus = _ap_namen()
         rows = [r for r in _sb_all("trade_plans", dict(basis, select="id,user_id,master_account_id,master_name,master_firm,start_um,richtung,"
                                                       "master_contracts,master_symbol,master_tp,route,orbit_v3,hedge_eur,auto_bestaetigt_at,"
+                                                      "winning_day,notes,slave_risk,multiplier,"
                                                       "art:mt5_baseline->>hedge_art,vs:mt5_baseline->hedge_vorschau,ss:mt5_baseline->start_sperre",
                                                       order="start_um.asc.nullslast"))
                 if str(r.get("user_id")) not in aus]
+        for r in rows:
+            r["wd"] = hf_ist_wd(r, firmen)       # Frontend: WD-Block im Funded-Planer zeigt wd=true, der Challenge-Block nur hedge_art
         if request.method == "GET":
-            return jsonify({"ok": True, "zeilen": [dict(r, user=namen.get(str(r.get("user_id")), "")) for r in rows]})
+            return jsonify({"ok": True, "zeilen": [dict(r, user=namen.get(str(r.get("user_id")), "")) for r in rows], "wd_firmen": firmen})
         body = request.get_json(silent=True) or {}
         frei = {str(r["id"]) for r in rows}
         if body.get("alle") is True:
