@@ -38165,7 +38165,11 @@
     if(['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0 && (wdlBlowStand(t) || {}).liq != null)) return 'Ziel oder Boden unbekannt'
     const dm = t.demo || {}
     if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t)) return 'Demo an der Liq, Lesung ohne Blow'
-    const pl = Number(t.pl_balance), bezug = Math.abs(Number(pl > 0 ? t.master_tp : t.master_sl)) || 0
+    // VERLUST OHNE SL (Finn 02.11.2026, Foto; 57 von 92 Futures-Plänen der letzten 3 Tage ohne master_sl, Fall Marco Apex …0011, Plan 07d2a045, −1.616,20 $): Bezug ist
+    // dann master_risk (Apex: Tageslimit, sonst das geplante Risiko), sonst der Abstand Start → Liquidation. Fehlt alles, bleibt das Popup
+    const pl = Number(t.pl_balance), stand = wdlBlowStand(t) || {}
+    const liqAbstand = Number(t.balance_start) > 0 && Number(stand.liq) > 0 && Number(t.balance_start) > Number(stand.liq) ? Number(t.balance_start) - Number(stand.liq) : 0
+    const bezug = pl > 0 ? (Math.abs(Number(t.master_tp)) || 0) : (Math.abs(Number(t.master_sl)) || Math.abs(Number(t.master_risk)) || liqAbstand || 0)
     if(pl === 0 || !bezug || Math.abs(pl) > bezug + Math.max(50, bezug * 0.15)) return 'P&L passt nicht zu TP/SL'   // genau 0: kein Ergebnis, Finn soll es sehen (S2)
     return ''
   }
@@ -54254,7 +54258,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1987'
+  const OS_TAB_BUILD = '2026-09-22.1988'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

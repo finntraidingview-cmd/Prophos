@@ -57,6 +57,11 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("Tage-Mini", {"tage_mini": {"ist": 2}}, True), ("Demo an der Liq ohne Blow", {"demo": {"status": "liquidiert", "stop": "liq"}}, False), ("Demo an der Liq, Tageslimit", {"demo": {"status": "liquidiert", "stop": "liq"}, "_tag": True}, True), ("TP/Liq in derselben Minute", {"demo": {"status": "beide_in_minute"}}, True),
           ("Balance-Sprung", {"balance_sprung": True}, False), ("wartet auf Lesung", {"_wart": True}, False), ("geschätzter P&L", {"_gesch": True}, False), ("Folgetrade-Balance", {"endlesung": {"balance_quelle": "folgetrade"}}, False),
           ("Hedge-P&L fehlt", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen"}}, False), ("Hedge-P&L da", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen", "pl": -120}}, True), ("Lesung im falschen Konto (+40k)", {"pl_balance": 40000}, False),
+          # Verlust ohne master_sl (Finn 02.11.2026, Marco Apex …0011, Plan 07d2a045): Bezug master_risk bzw. Abstand Start → Liq
+          ("Marco: Verlust ohne SL, Tageslimit als Bezug", {"master_sl": None, "master_risk": 1500, "pl_balance": -1616.20}, True),
+          ("Verlust ohne SL deutlich über dem Risiko", {"master_sl": None, "master_risk": 1500, "pl_balance": -4000}, False),
+          ("Verlust ohne SL und Risiko, Abstand Start → Liq", {"master_sl": None, "pl_balance": -2900, "balance_start": 103000}, True),
+          ("Verlust ohne SL, Risiko und Start", {"master_sl": None, "pl_balance": -700}, False),
           ("Funded-CFD-Ziel", {"_fz": True}, False), ("Konto weg", {"_weg": True}, False), ("geblowt", {"_blow": True}, False), ("bestanden-Chip", {"_best": True}, False), ("Polar", {"_polar": True}, False), ("manuell", {"_man": True}, False)]
 js = STUBS + fn + "\nconst F = " + json.dumps([dict(BASIS, **f[1]) for f in FAELLE], ensure_ascii=False) + "; print(JSON.stringify(F.map(wdlEinKlickGrund)));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
@@ -117,6 +122,7 @@ check(v.get("sichtbar") is True and v.get("nachLesung") == [["v1", True, True]] 
 check(v.get("blowSichtbar") is True and v.get("zweimal") == 1, "nach der Lesung Blow: zurück in „Erledigt“, kein stilles Abhaken (Popup beim Klick)")
 check(v.get("falschSichtbar") is True and v.get("zweimal") == 1, "Lesung im falschen Konto (+40k): kein stilles Abhaken, zurück in „Erledigt“ mit Popup")
 
+check('"master_symbol_root,master_tp,master_sl,master_risk,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at' in src and '"master_risk": _wd_num(p.get("master_risk"))' in src, "live-trades liest und liefert master_risk")
 check('daten.get("nur_review") is True and plan and plan.get("status") != "review"' in src and "einKlick ? { nur_review: true }" in html, "nur_review: Ein Klick bekommt 409, wenn der Trade nicht mehr in Überprüfen steht")
 print(f"\n{'selftest_abhaken_ein_klick: alle Prüfungen grün' if not FEHLER else f'✗ {len(FEHLER)} Fehler'}")
 sys.exit(1 if FEHLER else 0)

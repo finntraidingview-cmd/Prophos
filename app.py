@@ -12345,7 +12345,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
                   "topstep_express": ist_topstep_express(acc, plan_balance_relativ(p))},
         "route": p.get("route"), "richtung": richtung or None, "kt": kt, "kontrakte": kt, "symbol_root": root or None,
         "punktwert": ppl,   # B35/F28: $ je Punkt und Kontrakt (NQ 20, MNQ 2) — Live-P&L im Radar = (Kurs − Einstieg) · punktwert · kt
-        "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
+        "master_tp": tp_usd, "master_sl": sl_usd, "master_risk": _wd_num(p.get("master_risk")), "status": p.get("status"),   # master_risk: Bezug fürs Abhaken ohne SL (02.11.2026)
         "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at"),
         "einstieg_nq": einstieg, "einstieg_quelle": einstieg_quelle,
         # Level = genau das, woran der Wächter schließt (Koordination 25.09.2026, nach .582 „Einstieg aus dem Puls-Fill nachtragen"):
@@ -12639,7 +12639,7 @@ def admin_wd_heute():
         disp, excluded = _wd_personen()
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 3 * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,"
-                  "master_symbol,master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,orbit_v3,"
+                  "master_symbol,master_symbol_root,master_tp,master_sl,master_risk,master_pl,hedge_eur,hedge_faktor,start_um,orbit_v3,"
                   "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,"
                   "slave_pl,pl_quelle")
         # PostgREST: verschachteltes Oder heisst or(...) OHNE Punkt — "or.(...)" gab 400 Bad Request
@@ -13746,7 +13746,7 @@ def admin_live_trades():
             excluded = set(disp) - set(lese)
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
-                  "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
+                  "master_symbol_root,master_tp,master_sl,master_risk,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,orbit_v3,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ,orbit_v3,blown,"
                   "slave_account_id,slave_name,slave_firm,polar_slave_user_id,multiplier")   # Polar-Seite (20.10.2026)
         # B16: Topstep V2 wie Orbit V2. Seit 01.10.2026 abends (Finn: „ein Tab je Modell im Radar") mit ?echo=1 auch das klassische
