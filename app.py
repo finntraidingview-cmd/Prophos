@@ -22163,8 +22163,9 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
             if cfd and not ppl:
                 return None, (f"nur noch {rest:.0f} $ bis zum Ziel — kein Punktwert (Firmen-Einstellung $/Pkt je Lot) für den Klein-Trade: "
                               "Punktwert der Firma eintragen, sonst von Hand")
-            klein = (ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer")) if cfd
-                     else ap_klein_trade_fut(rest, regel, ph))
+            normal = ap_klein_normal(ph, u, f) if "ap_klein_normal" in globals() else None   # Rest-Lots nach Verhältnis zum gezogenen Normal-Trade (Finn 03.11.2026); Selbsttest-Lader ohne den Helfer: alter Weg
+            klein = (ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"), normal=normal) if cfd
+                     else ap_klein_trade_fut(rest, regel, ph, normal=normal))
             klein["stufe"] += " · Rest zurück im Planer"
         elif cfd:
             return None, (f"Rest {f'{rest:.2f}'.replace('.', ',')} $ bis Ziel — von Hand (unter {AP_REST_MIN_CFD} $ plant der Bot keinen Klein-Trade: erst im Konto "
@@ -22197,7 +22198,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
         puffer = round(AP_PUFFER_PKT * float(menge) * float(ppl) / 3)
         lo = float((ph.get("menge") or [0])[0]) * f
         if lo and rest < AP_KLEIN_PKT * lo * float(ppl) and not gt_trade:
-            klein = ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"))
+            klein = ap_klein_trade(rest, ppl, ph.get("menge_schritt"), u["puffer"], ph.get("klein_puffer"), normal=ap_klein_normal(ph, u, f) if "ap_klein_normal" in globals() else None)
     if gt_trade:
         tp, puffer = _ap_spanne(gt["tp"], u["tp"]), 0
         stufe = (f"Gewinntag {tage[0]}/{tage[1]} sammeln · TP {tp:,.0f} $".replace(",", ".")
@@ -22259,7 +22260,7 @@ def ap_konto_rechnen(regel, phase, balance, u, peak=None, ppl=None, tage=None, m
     return out, None
 
 
-def ap_klein_trade_fut(rest, regel, ph):
+def ap_klein_trade_fut(rest, regel, ph, normal=None):
     """REIN RECHNEND (testbar): Futures-Klein-Trade kurz vor dem Ziel, NUR mit accounts.rest_planer_at (Finn 20.10.2026 22:55 Dubai: „bei
     300 $ Rest schiebe ich die einfach zurück in den Planer") → {menge, puffer, tp, tp_punkte, symbol, stufe}. EIN Kontrakt, MNQ bevorzugt
     (2 $/Pkt, wie der Tage-Mini — alle Futures-Firmen der Flotte haben MNQ; regel.klein_symbol überschreibt), TP = Rest + Puffer
@@ -22268,7 +22269,17 @@ def ap_klein_trade_fut(rest, regel, ph):
     sym = str(regel.get("klein_symbol") or AP_MINI_FUTURES_SYMBOL).upper()
     ppl = float(AP_PUNKTWERT_FUT.get(sym) or AP_PUNKTWERT_FUT["NQ"])
     menge = 1
-    puffer = int(max(AP_PUFFER_JE_KT_FUT, AP_GEBUEHR_JE_KT_FUT) * menge)
+    # LOTS NACH VERHÄLTNIS (Finn 03.11.2026 ~00:25 Dubai, Rest-Trades ×2): Normal-Kontrakte der Phase (normal = (Menge, TP $) im Regel-Symbol, meist NQ)
+    # in Klein-Symbol-Kontrakte umgerechnet (NQ 20 $/Pkt = 10 MNQ), × (Rest ÷ Normal-TP) × 2, abgerundet, mindestens 1, höchstens die Normal-Menge.
+    # Rest 300 $ bei 2,5 NQ / TP 2.000 $ → 7 MNQ (≈ 22 Pkt) statt 1 MNQ (≈ 160 Pkt). SL in $ bleibt (Aufrufer)
+    sym_n = str(regel.get("symbol") or "NQ").upper()
+    ppl_n = float(AP_PUNKTWERT_FUT.get(sym_n) or AP_PUNKTWERT_FUT["NQ"])
+    if normal and globals().get("fcp_lots_verhaeltnis") and _wd_num(normal[0]):
+        lv = fcp_lots_verhaeltnis(float(normal[0]) * ppl_n / ppl, rest, normal[1], 2.0, 1)
+        if lv:
+            menge = int(lv)
+    # Puffer je Kontrakt wie bisher, in NQ-Kontrakten gerechnet (1 MNQ = 0,1 NQ), mindestens der alte Wert für einen Kontrakt
+    puffer = int(max(AP_PUFFER_JE_KT_FUT, AP_GEBUEHR_JE_KT_FUT) * max(1.0, menge * ppl / AP_PUNKTWERT_FUT["NQ"]))
     tp = round(float(rest) + puffer)
     tp_pkt = round(tp / (menge * ppl), 1)
     stufe = f"Klein-Trade · Rest {float(rest):.0f} $ · {menge} {sym} · TP {tp} $ (Rest + Puffer {puffer} $, ≈ {tp_pkt:g} Pkt)"
@@ -22288,16 +22299,36 @@ def _ap_de(x, stellen=2):
     return str(int(x)) if x == int(x) else f"{x:.{stellen}f}".rstrip("0").replace(".", ",")
 
 
-def ap_klein_trade(rest, ppl, schritt, u_puffer, klein_puffer=None):
+def ap_klein_normal(ph, u, f=1.0):
+    """REIN RECHNEND (testbar): (Lots, TP $) des Normal-Trades dieser Phase mit denselben Zufallszahlen u wie der normale Trade (Basis „je Trade gezogenes
+    Paar", Finn 03.11.2026) — Lots wie in ap_konto_rechnen (Spanne × f, Gewichte, gerundet auf menge_schritt), TP aus der tp-Spanne × f. Fehlt etwas → None."""
+    try:
+        menge = _ap_runden(_ap_spanne(ph.get("menge"), u["menge"], f, gewichte=ph.get("menge_gewichte")), ph.get("menge_schritt") or 1)
+        tp = _ap_spanne(ph.get("tp"), u["tp"], f)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not menge or not tp or float(menge) <= 0 or float(tp) <= 0:
+        return None
+    return (float(menge), float(tp))
+
+
+def ap_klein_trade(rest, ppl, schritt, u_puffer, klein_puffer=None, normal=None):
     """REIN RECHNEND: Klein-Trade kurz vor dem Ziel (CFD, Finn 09.10.2026) → {menge, puffer, tp, tp_punkte, stufe}.
     Lots = Rest ÷ (AP_KLEIN_PKT × ppl), ABGERUNDET auf den Schritt (0,01 bei Lot-Firmen, sonst menge_schritt), mindestens ein Schritt;
     TP = Rest + Puffer: max(AP_KLEIN_PUFFER_MIN, 1,5 Pkt × Lots × ppl) seit .1772 (27.10.2026), klein_puffer der Phase übersteuert. Mindest-Lot zu groß → TP-Punkte > 60, trotzdem geplant (Finn:
-    „der Bot soll es selbst machen"), der Hinweis steht in der Stufe."""
+    „der Bot soll es selbst machen"), der Hinweis steht in der Stufe.
+    normal = (Lots, TP $) des je Trade gezogenen Normal-Trades der Phase (ap_klein_normal): seit 03.11.2026 Lots = Normal-Lots × (Rest ÷ Normal-TP) × 2
+    (Finn 03.11.2026 ~00:25 Dubai: „Bei den Rest-Trades die Formel ×2 gleich lassen"), abgerundet auf den Schritt, mindestens ein Schritt, höchstens die
+    Normal-Lots — halber Punktabstand des Normal-Trades. Ohne normal der alte Weg (Rest in AP_KLEIN_PKT Punkten)."""
     s = float(schritt or 1)
     ks = AP_KLEIN_SCHRITT if s < 1 else s
-    n = int(float(rest) / (AP_KLEIN_PKT * float(ppl)) / ks + 1e-9)
-    menge = round(max(1, n) * ks, 4)
-    menge = int(menge) if ks >= 1 else menge
+    lv = fcp_lots_verhaeltnis(normal[0], rest, normal[1], 2.0, ks) if (normal and globals().get("fcp_lots_verhaeltnis")) else None
+    if lv:
+        menge = lv
+    else:
+        n = int(float(rest) / (AP_KLEIN_PKT * float(ppl)) / ks + 1e-9)
+        menge = round(max(1, n) * ks, 4)
+        menge = int(menge) if ks >= 1 else menge
     if klein_puffer:
         puffer = round(_ap_spanne(klein_puffer, u_puffer))   # Übersteuerung je Phase (unverändert)
     else:
@@ -22307,7 +22338,9 @@ def ap_klein_trade(rest, ppl, schritt, u_puffer, klein_puffer=None):
     tp = round(float(rest) + puffer)
     tp_pkt = round(tp / (float(menge) * float(ppl)), 1)
     stufe = f"Klein-Trade · Rest {float(rest):.0f} $ · {_ap_de(menge)} Lots · TP {tp} $ (Rest + Puffer {puffer} $)"
-    if tp_pkt > AP_KLEIN_TP_PKT_HINWEIS:
+    if lv:
+        stufe += f" · ≈ {_ap_de(tp_pkt, 0)} Pkt (Lots im Verhältnis zum Normal-Trade)"   # 03.11.2026: weiter Abstand ist gewollt, kein „Lot-Schritt grob"
+    elif tp_pkt > AP_KLEIN_TP_PKT_HINWEIS:
         stufe += f" · TP {_ap_de(tp_pkt, 1)} Pkt weit (Lot-Schritt grob)"
     return {"menge": menge, "puffer": puffer, "tp": tp, "tp_punkte": tp_pkt, "stufe": stufe}
 
@@ -38120,7 +38153,7 @@ FCP_ERSTER_PAYOUT_STANDARD = {"fundednext": {"ziel": [50, 150], "hedge_eur_je_dd
 # REFUND-LOTS ÷ 5 (Finn 30.10.2026 14:49: „Refund-Trades: Lot-Anzahl runter, durch 5." — ersetzt ÷ 2 von 14:2x, Anlass EzPoker a1ad322f): im Refund-Zyklus
 # Lots × lots_faktor, abgerundet auf FCP_LOT_SCHRITT, mindestens ein Schritt. TP-$ und SL-$ bleiben (Punkte × 5, z. B. 0,26 Lot: SL 2.374 $ = 913 Pkt). Hedge: der
 # multiplier hängt nur an hedge_eur ÷ dd, die Fusion-Lots folgen den Master-Lots — € je $ Master, also auch Hedge-€ am TP/SL, bleiben gleich.
-FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.2
+FCP_ERSTER_PAYOUT_LOTS_FAKTOR = 0.2    # nur noch Rückfall, wenn das Normal-Ziel fehlt (seit 03.11.2026 Verhältnis, s. fcp_lots_verhaeltnis)
 FCP_LOT_SCHRITT = 0.01
 FCP_ERSTER_PAYOUT_TP_MIN_USD = 25    # Rest bis zum kleinen Ziel winzig → wenigstens 25 $ (≈ 1,5–2,5 Pkt bei 1–1,75 Lot)
 FCP_TP_DECKEL_PLUS_STANDARD = 1000
@@ -38221,6 +38254,20 @@ def fcp_lots_faktor(lots, faktor, schritt=FCP_LOT_SCHRITT):
     return round(max(n, 1) * schritt, 2)
 
 
+def fcp_lots_verhaeltnis(lots_n, ziel_klein, ziel_n, faktor=1.0, schritt=FCP_LOT_SCHRITT):
+    """REIN RECHNEND (testbar): Lots eines kleinen Trades im Verhältnis zum Normal-Trade (Finn 01.11.2026, Konstrukt berichte/2026-11-01_refund-konstrukt.md):
+    Lots_n × (Ziel_klein ÷ Ziel_n) × faktor, ABgerundet auf den Schritt, mindestens ein Schritt, höchstens Lots_n (abgerundet). Basis ist das je Trade
+    gezogene Paar (Lots_n, Ziel_n), nicht die Mitte der Range. Refund faktor 1 (Finn 03.11.2026 ~00:25 Dubai: „für den Refund die Formel gleich lassen,
+    nur das ×2 am Ende weglassen"), Rest-Trade faktor 2 (ap_klein_trade). Fehlt etwas → None (Aufrufer nimmt den alten Weg)."""
+    ln, zk, zn, s = _wd_num(lots_n), _wd_num(ziel_klein), _wd_num(ziel_n), float(schritt or 1)
+    if not ln or ln <= 0 or not zk or zk <= 0 or not zn or zn <= 0:
+        return None
+    n = int(ln * zk / zn * float(faktor) / s + 1e-9)
+    n_max = max(int(ln / s + 1e-9), 1)
+    m = max(1, min(n, n_max)) * s
+    return int(round(m)) if s >= 1 else round(m, 4)
+
+
 def fcp_tp_modus(regel):
     """Modus der Firma: regel.tp_modus, sonst Standard je Firmen-Schlüssel (The5ers consistency50), sonst None (Deckel-Logik)."""
     return (regel or {}).get("tp_modus") or FCP_TP_MODUS_STANDARD.get((((regel or {}).get("namen") or [""])[0]))
@@ -38242,6 +38289,7 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
     if balance is None:
         return {"aktion": "aus", "grund": "keine Balance"}
     ep = fcp_erster_payout(regel) if erster_zyklus else None
+    jg_normal = jg                           # Normal-Ziel für die Refund-Lots (fcp_lots_verhaeltnis), bevor ep das Ziel ersetzt
     if ep and _wd_num(jg.get("dd")):
         # ERSTER PAYOUT = REFUND: kleines Ziel + Hedge je $ DD statt der normalen Werte (SL/Lots bleiben)
         je = _wd_num(ep.get("hedge_eur_je_dd"))
@@ -38291,8 +38339,18 @@ def fcp_konto_rechnen(jg, balance, groesse, zyklus, eins_prozent, mppl, sppl, rn
         basis["sl_gedeckelt"] = True
     lots = fcp_wuerfel(jg.get("lots"), rnd, 2)
     if ep and lots:
-        fk = _wd_num(ep.get("lots_faktor"))
-        lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else FCP_ERSTER_PAYOUT_LOTS_FAKTOR)
+        # REFUND-LOTS NACH VERHÄLTNIS (Finn 03.11.2026 ~00:25 Dubai: „Beim Refund-Trade war ich bisher sehr zufrieden … die Formel gleich lassen, nur das ×2 am Ende
+        # weglassen"): Lots = gezogene Normal-Lots × (TP dieses Trades ÷ gezogenes Normal-Ziel der Funded-Regel), ersetzt lots_faktor 0,2. Ziel_klein ist der echte
+        # TP (Rest bis zum Refund-Ziel, nach einem Verlust größer) — so bleibt der Punktabstand gleich. Ohne Normal-Ziel der alte Faktor
+        lots_n = lots
+        ziel_n = fcp_wuerfel(jg_normal.get("ziel"), rnd) if fcp_bereich(jg_normal.get("ziel")) else None
+        lv = fcp_lots_verhaeltnis(lots_n, tp, ziel_n)
+        if lv:
+            lots = lv
+            basis["refund_lots"] = {"normal_lots": lots_n, "normal_ziel": ziel_n, "tp": tp}
+        else:
+            fk = _wd_num(ep.get("lots_faktor"))
+            lots = fcp_lots_faktor(lots, fk if fk and fk > 0 else FCP_ERSTER_PAYOUT_LOTS_FAKTOR)
     if not tp or tp <= 0 or not sl or sl <= 0 or not lots or lots <= 0:
         return dict(basis, aktion="aus", grund="TP/SL/Lots nicht rechenbar (Regel prüfen)")
     if not mppl:
