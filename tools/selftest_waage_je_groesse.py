@@ -74,9 +74,18 @@ check("(^|[^0-9])(\\d{2,3})\\s*k(\\M|tc)" in SQL and "account_size" in SQL and "
 lage = SQL.split("create or replace function public.prophos_waage_deckel_lage")[1].split("$function$;")[0]
 check("public.prophos_waage_groesse(a.name, a.account_size) = gr" in lage, "DB-Lage zählt nur Pläne derselben Größe")
 check("'sperrt', gr = 'unbekannt' or seite - andere > max_abstand" in lage, "DB: unbekannte Größe sperrt immer, sonst Abstand > 2")
-check("p.start_um_gestartet_at > now() - interval '15 minutes'" in lage and "'offen', 'oeffnet', 'schliesst'" in lage, "DB: Zählmenge wie bisher (open + Claim ≤ 15 min, ohne Hedge)")
+check("p.start_um_gestartet_at > now() - interval '15 minutes'" in lage and "p.status = 'open'" in lage, "DB: open und frische Claims (≤ 15 min) zählen wie bisher")
+check("(p.started_at is not null and p.ended_at is null and p.started_at > now() - interval '3 days')" in lage,
+      "DB robust: gestartet und nicht beendet zählt, egal welcher Status (nur Starts der letzten 3 Tage, alte completed ohne ended_at nie)")
+check("and not (coalesce(p.hedge_eur, 0) > 0 and coalesce(p.mt5_baseline->'hedge'->>'status', '') in ('offen', 'oeffnet', 'schliesst'))" in lage
+      and "and coalesce(p.mt5_baseline->'hedge'->>'status', '') not in" not in lage, "DB: Hedge-Ausnahme nur für echte Hedge-Pläne (hedge_eur > 0)")
+# Die drei Durchrutscher vom 02.11. (Dubai) — nachgerechnet per Lese-SELECT mit genau dieser Zählung und Größe zum Claim-Zeitpunkt:
+# 00001e43 15:04:18 150k 4 Long : 8 Short, 7883ce9e 15:11:02 150k 4 : 9, f9e0c9ee 15:44:54 150k 5 : 10 — jeder Short gesperrt
+for name, nl, ns in (("00001e43", 4, 8), ("7883ce9e", 4, 9), ("f9e0c9ee", 5, 10)):
+    check(D("futures", {"je_groesse": {"150k": {"n_long": nl, "n_short": ns}}}, "sell", 2, "150k")[0], f"{name}: 150k {nl} : {ns} → Short gesperrt")
 trg = SQL.split("create or replace function public.trade_plans_waage_deckel()")[1]
-check("jsonb_build_object('waage_lage', lage" in trg and "- 'waage_deckel'" in trg, "DB-Trigger: Spur waage_lage beim Durchlassen")
+check(trg.count("jsonb_build_object('waage_lage', spur)") == 3 and "'ids', lage->'ids'" in trg and "'groesse', lage->'groesse'" in trg,
+      "DB-Trigger: Spur waage_lage {groesse, n_long, n_short, ids, at} beim Durchlassen und in beiden Sperr-Zweigen")
 check(trg.count("return null;") == 2 and "coalesce(new.start_claim_art, '') = 'verbrauch'" in trg and "new.hand_werte_at is not null" in trg,
       "DB-Trigger: Sperren, Verbrauch und Hand-Werte wie bisher")
 check("Deckel je Kontogröße (Abstand höchstens 2)" in HTML, "Anzeige „Waage jetzt“ nennt die Größen im Hinweis")

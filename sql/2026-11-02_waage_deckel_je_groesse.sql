@@ -6,7 +6,11 @@
 -- Größe (prophos_waage_groesse): „150k“ aus dem Kontonamen zuerst (auch Topstep „150KTC-…“), sonst accounts.account_size, sonst „unbekannt“ — dieselbe Regel
 -- wie app.py ap_waage_groesse. starting_balance bewusst nicht (08.10.2026: ein 100k-Konto trug 150000).
 -- SPUR (Befund S18 02.11.2026: 00001e43, 7883ce9e, f9e0c9ee rutschten 15:04–15:44 Dubai durch, obwohl die Nachrechnung 5 : 8, 5 : 9 und 6 : 10 ergibt; die
--- Ursache ist ohne Historie nicht beweisbar): Lässt der Trigger einen Start durch, steht die gezählte Lage samt Plan-Kennungen in mt5_baseline.waage_lage.
+-- Ursache ist ohne Historie nicht beweisbar): Bei jedem Durchlassen und jeder Sperre steht mt5_baseline.waage_lage {groesse, n_long, n_short, ids, at}.
+-- ROBUSTE ZÄHLUNG (Eingang 02.11.2026): laufend = gestartet und nicht beendet (started_at gesetzt, ended_at leer), egal welcher Status — dazu wie bisher status
+-- open und frische Claims (≤ 15 min, noch nicht gestartet). Nur Starts der letzten 3 Tage: zwölf alte Pläne vom 22.09. tragen completed ohne ended_at (die Spalte
+-- kam erst am 22.09.) und zählten sonst für immer. Die Hedge-Ausnahme gilt nur für echte Hedge-Pläne (hedge_eur > 0 und Fusion-Hedge offen/öffnet/schließt); ein
+-- Plan mit leerem Hedge-Feld zählt immer.
 -- Idempotent, nur Funktionen, kein Datenumbau.
 
 create or replace function public.prophos_waage_groesse(p_name text, p_size numeric)
@@ -62,24 +66,25 @@ begin
      and public.prophos_waage_groesse(a.name, a.account_size) = gr
      and p.slave_account_id is null
      and lower(coalesce(p.route, '')) <> 'mt5'
-     and coalesce(p.mt5_baseline->'hedge'->>'status', '') not in ('offen', 'oeffnet', 'schliesst')
+     and not (coalesce(p.hedge_eur, 0) > 0 and coalesce(p.mt5_baseline->'hedge'->>'status', '') in ('offen', 'oeffnet', 'schliesst'))
      and public.prophos_waage_futures(p.route, coalesce(a.firm, p.master_firm))
      and not exists (select 1 from unnest(ohne) o
                       where strpos(lower(coalesce(public.prophos_firma_key(coalesce(a.firm, p.master_firm)), '') || '|'
                                          || coalesce(a.firm, p.master_firm, '')), o) > 0)
      and not public.prophos_waage_ausgeblendet(p.user_id)
      and (p.status = 'open'
+          or (p.started_at is not null and p.ended_at is null and p.started_at > now() - interval '3 days')
           or (p.status = 'planned' and p.started_at is null and coalesce(p.hedge_eur, 0) <= 0
               and p.start_um_gestartet_at > now() - interval '15 minutes'));
   if r = 'buy' then nl := nl + 1; seite := nl; andere := ns; else ns := ns + 1; seite := ns; andere := nl; end if;
   return jsonb_build_object('zaehlt', true, 'groesse', gr,
-    'sperrt', gr = 'unbekannt' or seite - andere > max_abstand, 'n_long', nl, 'n_short', ns, 'max_abstand', max_abstand, 'gezaehlt', ids,
+    'sperrt', gr = 'unbekannt' or seite - andere > max_abstand, 'n_long', nl, 'n_short', ns, 'max_abstand', max_abstand, 'ids', ids,
     'grund', case when gr = 'unbekannt'
                   then 'Futures: Kontogröße unbekannt (Name ohne „…k“, account_size leer) — eigene Waage, startet nie automatisch'
                   else 'Futures ' || gr || ' würde ' || nl || ' Long : ' || ns || ' Short (Abstand höchstens ' || trim(to_char(max_abstand, 'FM990.##'), '.') || ')' end);
 end $function$;
 
--- Trigger: unverändert bis auf die Spur im Durchlass-Zweig (vorher nur „waage_deckel“ entfernen)
+-- Trigger: unverändert bis auf die Spur waage_lage im Durchlass- und in beiden Sperr-Zweigen
 create or replace function public.trade_plans_waage_deckel()
 returns trigger language plpgsql security definer set search_path to 'public' as $function$
 declare
@@ -95,6 +100,7 @@ declare
   rest numeric;
   ziel timestamptz;
   txt text;
+  spur jsonb;
 begin
   if new.status is distinct from 'planned' or new.auto_plan is not true or new.hand_werte_at is not null
      or coalesce(new.richtung, '') not in ('buy', 'sell') then
@@ -124,10 +130,11 @@ begin
   end if;
   perform pg_advisory_xact_lock(hashtext('prophos_waage_deckel'));
   lage := public.prophos_waage_deckel_lage(new.id, new.richtung);
+  spur := jsonb_build_object('groesse', lage->'groesse', 'n_long', lage->'n_long', 'n_short', lage->'n_short', 'ids', lage->'ids', 'at', now(),
+                             'richtung', new.richtung, 'sperrt', coalesce((lage->>'sperrt')::boolean, false));
   if not coalesce((lage->>'sperrt')::boolean, false) then
     -- SPUR (02.11.2026): was der Riegel beim Durchlassen gezählt hat
-    new.mt5_baseline := (coalesce(new.mt5_baseline, '{}'::jsonb) - 'waage_deckel')
-                        || jsonb_build_object('waage_lage', lage || jsonb_build_object('at', now(), 'richtung', new.richtung));
+    new.mt5_baseline := (coalesce(new.mt5_baseline, '{}'::jsonb) - 'waage_deckel') || jsonb_build_object('waage_lage', spur);
     return new;
   end if;
   if coalesce(wd->>'status', '') = 'wartet' and (wd->>'erst') is not null and (wd->>'erst')::timestamptz > now() - interval '24 hours'
@@ -146,6 +153,7 @@ begin
     update public.trade_plans set
            mt5_baseline = coalesce(mt5_baseline, '{}'::jsonb)
              || jsonb_build_object('waage_deckel', jsonb_build_object('status', 'aufgegeben', 'erst', erst, 'versuche', n, 'at', now(), 'text', txt))
+             || jsonb_build_object('waage_lage', spur)
              || jsonb_build_object('start_sperre', jsonb_build_object('art', 'waage_deckel', 'status', 'aufgegeben', 'text', txt, 'at', now(), 'versuche', n))
              || jsonb_build_object('richtung_konflikt', jsonb_build_object('quelle', 'start', 'status', 'aufgegeben', 'um', now(), 'erst_start', erst,
                   'versuche', n, 'gegen', null, 'saldo', true, 'text', '[Waage-Deckel] ' || txt, 'start', old.start_um, 'pc', null))
@@ -161,6 +169,7 @@ begin
          mt5_baseline = coalesce(mt5_baseline, '{}'::jsonb)
            || jsonb_build_object('waage_deckel', jsonb_build_object('status', 'wartet', 'erst', erst, 'versuche', n, 'at', now(), 'naechster', ziel,
                 'ende', ende, 'text', txt))
+           || jsonb_build_object('waage_lage', spur)
            || jsonb_build_object('start_sperre', jsonb_build_object('art', 'waage_deckel', 'status', 'wartet', 'text', txt, 'at', now(), 'naechster', ziel,
                 'versuche', n))
    where id = new.id;
