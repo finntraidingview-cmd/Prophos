@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.10.5
+// @version      0.10.6
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -28,6 +28,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.10.6 02.11.2026  READER-BLIND-PNL (Aurel, Plan 7bbb63d4, wie Marco 30.10.): Zeile mit lesbarem Symbol, Seite und Menge, aber leerem P&L macht den Puls-Chrome nicht mehr blind. Sie ist eine offene Position, kein Flach-Beweis haengt am P&L; pnl_beleg nennt die Spalten der Zeile.
 //   0.10.5 30.10.2026  PULS-CHROME-MODUS auch ohne Tampermonkey-Schalter (Simon: Abzeichen „● Reader · 1 Pos" im Puls-Chrome): Marke
 //                      localStorage prophos_puls_chrome = '1' der Puls-Augen (augen.js ≥ 0.8.8, nur per CDP im Puls-Chrome) schaltet ihn ein,
 //                      ausser der Schalter steht ausdruecklich auf aus (pulsChromeModus). Neue Leer-Phrase „(Your trading) activity will appear
@@ -190,7 +191,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
   // 0.9.9 (07.10.2026): nur @updateURL/@downloadURL — Repo privat, Update kommt über den lokalen Reader (127.0.0.1:8790/userscript/…)
   // 0.9.10 (27.10.2026): gekuerzte Kennung ohne Ziffern im Umschalter zaehlt als Konto (s. RX_KONTO_KURZ)
-  const VERSION    = '0.10.5';
+  const VERSION    = '0.10.6';
   const SCRIPT_START_MS = Date.now();   // 0.9.7: Bezug für die Lade-Schonfrist im Puls-Chrome
   // 0.9.0: Puls-Chrome-Modus (Orbit V3) — je Chrome-Profil gespeichert, siehe CHANGELOG
   // 0.10.4 (30.10.2026, Simon pc-pmqd8g): der Schalter fehlte nach einer Tampermonkey-Neuinstallation (Abzeichen „● Reader · 1 Pos" statt
@@ -235,7 +236,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   // Was der letzte Lesevorgang WIRKLICH vorgefunden hat (0.4.0) — Grundlage
   // fuer die Blind-Entscheidung in tick(). zeilen/zellen/tabelle statt eines
   // blossen "0 Positionen".
-  let leseBefund = { zeilen: 0, zellen: 0, tabelle: false, unklar: 0, pnl_spalte: true };
+  let leseBefund = { zeilen: 0, zellen: 0, tabelle: false, unklar: 0, unklar_fest: 0, pnl_spalte: true };
 
   /* Spaltentitel sind NICHT stabil (Fund 31.08.2026 an Finns PC): die Tabelle
    * hiess auf Deutsch mal "Menge / Durchschn. Ausfuehrungspreis /
@@ -331,7 +332,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       for (const k in r) if (r[k]) zellen++;
     }
     const aus = positionenAusZeilen([...rows.values()], labels, Date.now());
-    leseBefund = { zeilen: rows.size, zellen: zellen, tabelle: tabelleDa(), unklar: aus.unklar, pnl_spalte: aus.pnlSpalte };
+    leseBefund = { zeilen: rows.size, zellen: zellen, tabelle: tabelleDa(), unklar: aus.unklar, unklar_fest: aus.unklarFest, pnl_spalte: aus.pnlSpalte };
     return aus.positionen;
   }
 
@@ -343,7 +344,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
   const ORDER_MERKMALE = ['Status', 'Order-ID', 'Order ID', 'Auftrags-ID', 'Auftragsnummer', 'Order Id'];
   function positionenAusZeilen(zeilen, labels, jetzt) {
     const pnlSpalte = SPALTEN.pnl.some((l) => labels && labels.has(l));
-    let unklar = 0;
+    let unklar = 0, unklarFest = 0;   // unklarFest (0.10.6): auch Symbol, Seite oder Menge nicht lesbar
     const positionen = (zeilen || [])
       .map((r) => {
         const symbol = feld(r, SPALTEN.symbol), seite = feld(r, SPALTEN.seite);
@@ -361,6 +362,8 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
           avg_fill:   zahlAusText(einstieg),
           ts:         jetzt,
           _order:     ORDER_MERKMALE.some((k) => r[k] !== undefined && String(r[k]).trim() !== ''),
+          _spalten:   Object.keys(r).filter((k) => String(r[k] || '').trim() !== '').join('|').slice(0, 160),
+          _alle:      Object.keys(r).join('|').slice(0, 160),
         };
       })
       .filter((p) => {
@@ -368,11 +371,13 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
         if (p.pnl !== null) return true;                 // wie bisher: Symbol + G&V = Position
         if (p._order || !p.menge) return false;          // Order-Verlauf oder Zeile ohne Menge: wie bisher raus
         unklar++;
-        p.pnl_unklar = true;                             // behalten, aber als Beweis unbrauchbar → blind
+        p.pnl_unklar = true;                             // behalten: offene Position ohne P&L, nie ein Flach-Beweis
+        p.pnl_beleg = { gefuellt: p._spalten, alle: p._alle };   // 0.10.6: Ursache belegen (leere Zelle oder Zeile ohne die Spalte)
+        if (!(p.wurzel && p.richtung && p.menge_zahl > 0)) unklarFest++;
         return true;
       })
-      .map((p) => { delete p._order; return p; });
-    return { positionen, unklar, pnlSpalte };
+      .map((p) => { delete p._order; delete p._spalten; delete p._alle; return p; });
+    return { positionen, unklar, unklarFest, pnlSpalte };
   }
 
   // 'Buy'/'Kauf'/'Long' -> 'buy', 'Sell'/'Verkauf'/'Short' -> 'sell', sonst null
@@ -1237,7 +1242,9 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
       // 0.10.4: jede Lesung OHNE Leer-Beweis-Versuch (kein Konto, unklar, Position da) verwirft die erste Struktur-Lesung — die zweite
       // muss unmittelbar auf eine leere folgen, nie ueber eine Position oder einen Kontowechsel hinweg
       if (!kontoAngemeldet(Date.now())) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'kein Konto angemeldet'; }
-      if (leseBefund.unklar) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'pnl unlesbar in ' + leseBefund.unklar + ' Zeile(n)'; }
+      // 0.10.6: blind nur, wenn die Zeile selbst nicht lesbar ist — Symbol, Seite und Menge da = offene Position (Zweig unten). Der reader-server friert bei blind den Stand ein: die
+      // Position galt nie als gesehen, das Ende wurde nicht erkannt, Fusion schloss erst am Level (Aurel 02.11.2026).
+      if (leseBefund.unklar_fest) { strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false }; return 'pnl unlesbar in ' + leseBefund.unklar_fest + ' Zeile(n)'; }
       if (positionen.length) {
         strukturMerk = { key: '', seit: 0 }; leerMerk = { ms: 0, wert: false };
         return null;
@@ -1962,7 +1969,7 @@ function prophosKern(GM_xmlhttpRequest, GM_getValue, GM_setValue, GM_registerMen
 (function prophosLader() {
   'use strict';
   const LADER_V = 1;
-  const EINGEBAUT = '0.10.5';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
+  const EINGEBAUT = '0.10.6';                 // = VERSION im Kern (Selbsttest prueft die Gleichheit)
   const KERN_URL = 'http://127.0.0.1:8790/userscript/kern.json';
   const MERK = 'prophos_kern_v1';             // GM-Speicher: {version, sha, code, at}
   const info = { v: LADER_V, eval: null, laeuft: EINGEBAUT, quelle: 'eingebaut', bereit: null, fehler: '' };

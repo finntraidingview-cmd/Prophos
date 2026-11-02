@@ -32524,6 +32524,9 @@
         if(!_hedgeSchnellKonto.has(pid)) _hedgeSchnellKonto.set(pid, jetzt)
         if(hedgeMasterTeilweise(st.positionen, wz, richtung, 1e9) != null){
           _hedgeMasterGesehen.add(pid); _hedgeSchnellLeer.delete(pid); kurzFensterNeu(pid, wz)
+          // READER-BLIND-PNL (02.11.2026): P&L der Zeile leer, Position lesbar — höchstens alle 60 s die Spalten am Hedge, damit die Ursache belegt wird
+          const ohnePnl = st.positionen.find(x => x && x.pnl_unklar && x.pnl_beleg)
+          if(ohnePnl) hedgeReaderWartetMelden(p, 'P&L nicht lesbar, Position lesbar', { pnl_beleg: ohnePnl.pnl_beleg })
           // erst ab 5 s im Konto zählt die Sichtung für gesehenImZeitraum — mitten im Wechsel kann die Tabelle noch die des Vorgängers sein (e6914376, Prüfer 28.10.2026)
           if(jetzt - _hedgeSchnellKonto.get(pid) >= 5000) _hedgeSchnellGesehenAt.set(pid, jetzt)
           // FILL SOFORT (01.10.2026): der Hedge öffnete beim Senden-Klick mit dem Kurs zum Klick — der echte Avg Fill steht ~0,1–0,3 s nach
@@ -53774,7 +53777,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.1978'
+  const OS_TAB_BUILD = '2026-09-22.1979'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
