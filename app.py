@@ -37546,7 +37546,7 @@ def fdp_vorschlag_neu(plan, r):
 
 # FTMO FUTURES FUNDED (Finn 03.11.2026 ~02:30 Dubai über den Eingang): eigener Modus der Firmen-Regel (tp_modus „rest“, Werte je Größe in funded_plan_regeln,
 # sql/2026-11-03_funded_ftmo_futures.sql). Ziel = Start + ziel_gewinn [4.750, 5.000] je Konto fest gewürfelt (fdp_ziel_gewinn), 1 NQ, SL [750, 850] je Trade
-# gewürfelt — höchstens Daily Loss (daily_usd 1.000) − FDP_TAGES_PUFFER und höchstens der Abstand zur Liquidation —, TP immer der Rest bis zum Ziel (kein Deckel,
+# gewürfelt — höchstens Daily Loss (daily_usd 1.000) − FDP_TAGES_PUFFER und höchstens Abstand zur Liquidation − FDP_TAGES_PUFFER —, TP immer der Rest bis zum Ziel (kein Deckel,
 # kein Break-even: nach einem Verlusttag wächst der TP um den Verlust; der Max DD 3.000 $ beendet das Konto nach ~3 Verlusttagen), Hedge hedge_eur € je dd $
 # (450 € auf 3.000 $ = 0,15 € je $ Abstand zur Liquidation). Boden wie die FTMO-Futures-Challenge: nachziehend, Lock beim Start (lock_usd 0).
 FDP_TAGES_PUFFER = 100                    # $ zwischen SL und Daily Loss (Schlupf am Fill, wie AP_TAGES_PUFFER)
@@ -37564,7 +37564,7 @@ def fdp_ziel_gewinn(jg, konto_id=None):
 
 
 def fdp_sl_rest(jg, balance, liq, rnd=None):
-    """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq,
+    """REIN RECHNEND (testbar): SL im Modus „rest“ (FTMO Futures) → $ | None: gewürfelt aus jg.sl, höchstens daily_usd − FDP_TAGES_PUFFER, höchstens Balance − Liq − FDP_TAGES_PUFFER,
     ganze Dollar abgerundet. Ohne rnd die Mitte."""
     b = jg.get("sl") if isinstance(jg.get("sl"), (list, tuple)) and len(jg.get("sl")) == 2 else None
     if not b or liq is None:
@@ -37574,7 +37574,7 @@ def fdp_sl_rest(jg, balance, liq, rnd=None):
     d = _wd_num(jg.get("daily_usd"))
     if d:
         sl = min(sl, d - FDP_TAGES_PUFFER)
-    sl = min(sl, balance - liq)
+    sl = min(sl, balance - liq - FDP_TAGES_PUFFER)   # S9-Stopp zu b8e6dc2b: nie genau an die Liquidation, Schlupf am Fill würde das Konto blasen
     return float(int(sl)) if sl > 0 else None
 
 
@@ -37882,7 +37882,12 @@ def fdp_planen(trocken=True, jetzt=None, seed=None, nur_ids=None):
         letzt = max([str(p.get("ended_at") or p.get("completed_at") or "") for p in pl if p.get("status") == "completed"] or [""]) or None
         if zeile["balance"] is None or not ap_balance_live(a.get("tv_balance_at"), letzt):
             erg["ausgelassen"].append(dict(zeile, grund="Balance nicht live — ↻ Balance lesen")); continue
-        r, zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg)
+        try:
+            r, zy = konto_rechnen(a, pl, zeile["balance"], g, regel, jg)
+        except Exception as e:
+            # S9-Stopp zu b8e6dc2b (03.11.2026): ein Konto mit kaputter Regel (z. B. neue Felder vor dem Code) bricht nie mehr den ganzen Lauf ab
+            print(f"[funded-plan] ⚠️ Konto {a.get('name')} nicht rechenbar: {type(e).__name__}: {e}", flush=True)
+            erg["ausgelassen"].append(dict(zeile, grund=f"nicht rechenbar ({type(e).__name__}) — Regel prüfen")); continue
         r.update(zeile, zyklus=zy["nr"], groesse=g, firma_key=(regel.get("namen") or [""])[0])
         if r["aktion"] == "ziel":
             erg["ziel"].append(r)

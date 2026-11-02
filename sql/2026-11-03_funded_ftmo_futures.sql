@@ -1,6 +1,8 @@
+-- REIHENFOLGE (S9-Stopp zu b8e6dc2b): ERST den Code pushen, DANN diese Datei einspielen — der alte Code kennt ziel_gewinn als Spanne nicht
+-- (TypeError) und hielte den ganzen Funded-Planer inkl. Apex an.
 -- FTMO FUTURES 50k IM FUNDED-PLANER (Finn 03.11.2026 ~02:30 Dubai über den Eingang; Code app.py fdp_konto_rechnen Modus tp_modus = 'rest').
 -- Regeln: Ziel = Start + 4.750–5.000 $ (je Konto fest gewürfelt, fdp_ziel_gewinn), 1 Trade pro Tag, immer 1 NQ, SL 750–850 $ je Trade gewürfelt (höchstens
--- Daily Loss 1.000 − 100 Puffer und höchstens der Abstand zur Liquidation), TP immer der Rest bis zum Ziel — kein Deckel, kein Break-even (Verlusttag →
+-- Daily Loss 1.000 − 100 Puffer und höchstens Abstand zur Liquidation − 100), TP immer der Rest bis zum Ziel — kein Deckel, kein Break-even (Verlusttag →
 -- nächster TP um den Verlust größer), Hedge 450 € auf 3.000 $ Max DD (0,15 € je $ Abstand zur Liquidation, Fusion wie bei Apex), Boden wie die
 -- FTMO-Futures-Challenge (auto_plan_regeln ftmofutures: nachziehend, dd 3.000, lock_bei_start → lock_usd 0), daily_usd 1.000 wie dort.
 -- Bestätigen von Hand wie bei Apex (funded_plan_regeln.auto_bestaetigen bleibt, wie es ist). Ziel erreicht → Winning Days wie bei Apex.

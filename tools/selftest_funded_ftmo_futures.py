@@ -79,9 +79,9 @@ check(v2["tp"] == zg + 1600 and v2["sl"] == 800 and v2["offen_eur"] == 210, f"na
 beispiele.append(("nach 2 Verlusttagen (−1.600)", v2))
 # nach drei Verlusttagen: Abstand 600 → SL 600 (= Liquidation)
 v3 = R(REGEL, jg, None, 47600, 50000, 0, 50000, 50000, None, konto_id=KID)
-check(v3["sl"] == 600 and v3["tp"] == zg + 2400, "nach 3 Verlusttagen: SL auf den Abstand zur Liq (600), TP + 2.400")
+check(v3["sl"] == 500 and v3["tp"] == zg + 2400, "nach 3 Verlusttagen: SL Abstand zur Liq − 100 (500), TP + 2.400")
 beispiele.append(("nach 3 Verlusttagen (−2.400)", v3))
-v4 = R(REGEL, jg, None, 47050, 50000, 0, 50000, 50000, None, konto_id=KID)
+v4 = R(REGEL, jg, None, 47150, 50000, 0, 50000, 50000, None, konto_id=KID)
 check(v4["aktion"] == "aus" and "zu klein" in v4["grund"], f"Abstand < 100 $: kein Trade ({v4['grund']})")
 check(R(REGEL, jg, None, 46900, 50000, 0, 50000, 50000, None, konto_id=KID)["aktion"] == "aus", "unter der Liq: aus (geblowt?)")
 
@@ -102,6 +102,7 @@ check(g3["liq"] == 50000, f"Boden fest beim Start (lock 0) ab Peak 53.000 (Liq {
 check(R(REGEL, jg, None, 50000 + zg + 3100, 50000 + zg + 3100, 0, 50000, 50000, None, konto_id=KID)["aktion"] == "aus", "Balance weit über Ziel → unplausibel")
 
 # Notiz + Firma
+check("erst den code pushen, dann diese datei einspielen" in SQL.lower() and 'nicht rechenbar ({type(e).__name__})' in SRC, "SQL-Reihenfolge im Kopf, try je Konto in fdp_planen")
 check('"tp_art") != "rest"' in SRC and "TP = Rest bis Ziel" in SRC, "Vorschlags-Notiz für FTMO ohne Stufe")
 check(ns["ap_regel_finden"]([REGEL, {"namen": ["ftmo"], "an": True}], "FTMO Futures") is REGEL, "Firma „FTMO Futures“ → Schlüssel ftmofutures, nicht FTMO CFD")
 
