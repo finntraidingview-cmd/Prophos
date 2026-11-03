@@ -58655,6 +58655,7 @@
   const tpBestaetigenFirmen = () => { const l = _wdRegeln && _wdRegeln.row && _wdRegeln.row.bestaetigen_firmen
     return (Array.isArray(l) ? l : []).map(k => String(k || '').trim().toLowerCase().replace(/[0-9]+$/, '')).filter(Boolean) }
   // Nur der Schalter entscheidet, nicht die Netz-Marke start_sperre: abgeschaltet wartet kein Plan mehr (Prüfer S12). winning_day wie DB-Riegel und Liste.
+  window._tpWdWartetAufBestaetigung = p => tpWdWartetAufBestaetigung(p)   // WD-Block im Login ohne Bestätigungsrecht (03.11.2026)
   const tpWdWartetAufBestaetigung = p => { if(!p || p.status !== 'planned' || p.startUmGestartetAt || p.hedgeFreigabeAt || p.winningDay !== true || !tpIstFarmerPlan(p)) return false
     const firma = String(p.masterFirm || '').toLowerCase()
     // TRADEIFY-AUSGLEICH (Finn 03.11.2026 „yes“): jeder Ausgleichs-Trade (mt5_baseline.wd_ausgleich) wird einzeln bestätigt wie der Apex-WD; normale Tradeify-WD nicht
@@ -61544,8 +61545,8 @@
     if(_ahf.laeuft) return
     _ahf.laeuft = true
     // ?ansicht=admin (03.11.2026): ein Verwalter bekommt so die Tradeify-Ausgleichs-Trades seiner Gruppe; für Finn ändert sich nichts
-    try{ _ahf.d = await apdApi('GET', '/hedge-freigabe?ansicht=admin'); _ahf.fehler = ''; _ahf.at = Date.now() }
-    catch(e){ _ahf.fehler = (e && e.status === 403) ? '' : ((e && e.message) || String(e)); if(e && (e.status === 403 || e.status === 404)) _ahf.d = { zeilen: [] } }
+    try{ _ahf.d = await apdApi('GET', '/hedge-freigabe?ansicht=admin'); _ahf.fehler = ''; _ahf.at = Date.now(); _ahf.verboten = false }
+    catch(e){ _ahf.fehler = (e && e.status === 403) ? '' : ((e && e.message) || String(e)); if(e && (e.status === 403 || e.status === 404)) _ahf.d = { zeilen: [] }; _ahf.verboten = !!(e && e.status === 403) }
     finally{ _ahf.laeuft = false; ahfRender(); try{ window._wdUebersichtNeu?.() }catch(_){} }
   }
   // Start in Dubai: heute nur die Uhrzeit, sonst Datum + Uhrzeit (wie „Zu bestätigen")
@@ -61680,6 +61681,7 @@
   window._ahfWdZeilen = () => ((_ahf.d && _ahf.d.zeilen) || []).filter(z => z.wd === true || (z.art === 'apex' && /winning days/i.test(String(z.master_name || ''))))   // APEX-WD BESTÄTIGEN (02.11.2026): wd:true aus GET /hedge-freigabe
   window._ahfWdFirmen = () => (_ahf.d && Array.isArray(_ahf.d.wd_firmen)) ? _ahf.d.wd_firmen : tpBestaetigenFirmen()   // Nicht-Admin (GET 403): aus den Farmer-Regeln
   window._ahfFehler = () => _ahf.fehler || ''
+  window._ahfVerboten = () => !!_ahf.verboten   // Login ohne Bestätigungsrecht (GET 403) — der WD-Block sagt dann, was wartet (03.11.2026)
   let _ahfWdVersuch = 0   // eigener Takt: auch ein gescheiterter Abruf (at bleibt alt) lädt höchstens alle 60 s neu — sonst Schleife über _wdUebersichtNeu
   window._ahfWdLaden = () => { if(_ahf.laeuft || Date.now() - _ahfWdVersuch < 60000) return; _ahfWdVersuch = Date.now(); if(!_ahf.d || Date.now() - _ahf.at > 60000) ahfLaden() }
   window._ahfZeileHtml = (z, opt) => ahfZeileHtml(z, opt)
@@ -70646,7 +70648,17 @@
     const laeuftHtml = pb && d.laeuft.length ? pb.laeuft : wdUebersichtBlock('laeuft', 'Läuft', 'live', d.laeuft)
     const wartenHtml = pb && d.warten.length ? pb.warten : wdUebersichtBlock('warten', 'Wartet auf Start', 'geplant · Zeiten Dubai', d.warten)
     const brauchtHtml = pb && d.braucht.length ? pb.braucht : wdUebersichtBlock('braucht', 'Braucht dich', 'Abhaken, Nachlesung, überfällig, Hinweis am Konto', d.braucht)
-    box.innerHTML = fehlerAhf + wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD — startet erst nach deinem „Bestätigen" · Zeiten Dubai', offen, alleKnopf)
+    // NIE STILL 0 (Finn 03.11.2026 05:49, Jacobs Ausgleich 1f30fe17 im Login „Jacob“ unsichtbar): ohne Bestätigungsrecht (GET 403) die eigenen wartenden Trades nennen
+    let ohneRecht = ''
+    try{
+      if(window._ahfVerboten?.()){
+        const w = (tradePlans || []).filter(p => window._tpWdWartetAufBestaetigung?.(p))
+        if(w.length) ohneRecht = `<div class="kis-s" style="color:var(--warn-ink, #b45309);margin:0 2px 10px">⏳ ${w.length} Trade${w.length === 1 ? '' : 's'} warte${w.length === 1 ? 't' : 'n'} auf Bestätigung (`
+          + w.map(p => `${escapeHtml(String(p.masterName || '').replace(/\s*→.*$/, ''))} · TP ${Math.round(Number(p.masterTp) || 0).toLocaleString('de-DE')} $`).join(', ')
+          + `) — bestätigen nur im Login „Finn + Pascal“ bzw. beim Verwalter der Gruppe</div>`
+      }
+    }catch(_){}
+    box.innerHTML = fehlerAhf + ohneRecht + wdUebersichtBlock('offen', 'Zu bestätigen', 'Apex-WD und Tradeify-Ausgleich — startet erst nach deinem „Bestätigen" · Zeiten Dubai', offen, alleKnopf)
       + laeuftHtml
       + brauchtHtml
       + wartenHtml
