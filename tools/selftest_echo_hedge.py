@@ -108,9 +108,21 @@ class DB:
                 if q.get("or") == "(start_claim_art.is.null,start_claim_art.eq.start)":
                     if p.get("start_claim_art") not in (None, "start"):
                         continue
-                elif "or" in q:        # vorgemerkt: (planned, nicht geclaimt, Start ≥ von) | eben geclaimt | eben offen
-                    von, frisch = re.search(r"start_um\.gte\.([^)]+)\)", q["or"]).group(1), re.search(r"start_um_gestartet_at\.gte\.([^,]+),", q["or"]).group(1)
-                    if not ((p["status"] == "planned" and not p.get("start_um_gestartet_at") and p["start_um"] >= von)
+                elif q.get("or", "").startswith("(start_um.is.null,and("):   # eh_fenster_oder (E1 03.11.2026): ohne Startzeit ODER im Fenster
+                    von, bis = re.findall(r"start_um\.(?:gte|lte)\.([^,)]+)", q["or"])
+                    if p.get("start_um") is not None and not (von <= p["start_um"] <= bis):
+                        continue
+                elif q.get("or", "").startswith("(start_um.is.null,start_um.gte."):   # ehv_tick: ohne Startzeit ODER ab jetzt − 12 h
+                    von = re.search(r"start_um\.gte\.([^)]+)\)", q["or"]).group(1)
+                    if p.get("start_um") is not None and not p["start_um"] >= von:
+                        continue
+                elif "or" in q:        # vorgemerkt: (planned, nicht geclaimt, Start ≥ von [Echo: oder ohne Startzeit, in 12 h bestätigt]) | eben geclaimt | eben offen
+                    von = re.search(r"start_um\.gte\.([^,)]+)", q["or"]).group(1)
+                    frisch = re.search(r"start_um_gestartet_at\.gte\.([^,]+),", q["or"]).group(1)
+                    halb = re.search(r"auto_bestaetigt_at\.gte\.([^)]+)\)", q["or"])
+                    su = p.get("start_um")
+                    if not ((p["status"] == "planned" and not p.get("start_um_gestartet_at")
+                             and ((su is not None and su >= von) or (su is None and halb and (p.get("auto_bestaetigt_at") or "") >= halb.group(1))))
                             or (p.get("start_um_gestartet_at") or "") >= frisch or (p.get("started_at") or "") >= frisch):
                         continue
                 eh = (p.get("mt5_baseline") or {}).get("echo_hedge") or {}
@@ -126,7 +138,7 @@ class DB:
                     continue
                 if "and" in q:
                     von, bis = re.findall(r"start_um\.(?:gte|lte)\.([^,)]+)", q["and"])
-                    if not (von <= p["start_um"] <= bis):
+                    if p.get("start_um") is None or not (von <= p["start_um"] <= bis):
                         continue
                 out.append(dict(p, echo_hedge=eh) if q.get("select", "").startswith("mt5_baseline->") else dict(p))
             return out
@@ -162,7 +174,9 @@ def takt():
               plan("P5", "A3", "UE", 10), plan("P6", "A4", "U2", 12), plan("P7", "A1", "U1", 11, start_um_gestartet_at=iso(-60)),
               plan("P8", "A1", "U1", 12, hand_werte_at="x"), plan("P9", "A1", "U1", 13, mt5_baseline={"tage_mini": {"tag": "x"}}),
               plan("P12", "A1", "U1", -45), plan("P13", "A1", "U1", 14, auto_bestaetigt_at=None),
-              plan("P14", "A1", "U1", -120, route="mt5", mt5_baseline={"echo_hedge": {"status": "mit", "lots": 50, "login": "488579"}})]
+              plan("P14", "A1", "U1", -120, route="mt5", mt5_baseline={"echo_hedge": {"status": "mit", "lots": 50, "login": "488579"}}),
+              # E1 (03.11.2026, Julian FTMO): bestätigt, Startzeit geleert → wartet auf Handstart, wird sofort umgestellt
+              dict(plan("P15", "A1", "U1", 0, auto_bestaetigt_at=iso(-5)), start_um=None)]
     regeln = {"echo_hedge": {"an": True}, "firmen": [{"namen": ["ftmo"], "route": "mt5v2"}, {"namen": ["tradeify"], "route": "tvv2"}]}
     db = DB(plaene, regeln)
     les = {"488579": {"frei": 15900.0, "je_lot": 265.0, "offen": {"buy": 8.61, "sell": 2.1}, "w": "EUR", "at": jetzt.timestamp() - 30}}
@@ -209,7 +223,10 @@ def takt():
     ok(p9["route"] == "mt5v2" and p9["mt5_baseline"]["echo_hedge"]["grund"].startswith("Tage sammeln") and p9["mt5_baseline"]["tage_mini"],
        "Tage-Mini bleibt Echo V2, tage_mini bleibt erhalten")
     ok(not db.alarme, "P6 startet erst in 12 min → noch keine ⚪-Meldung (es kann noch klappen)")
-    ok(erg.get("umgestellt") == 3, f"Ergebnis {erg} (P1, P2, P8; P14 von vor 2 h zählt nicht als vorgemerkt)")
+    p15 = next(p for p in plaene if p["id"] == "P15")
+    ok("P15" in um and p15["route"] == "mt5" and p15["slave_account_id"] == "H1" and p15["mt5_baseline"]["echo_hedge"]["status"] == "mit",
+       "E1: bestätigt ohne Startzeit (Handstart) → sofort Echo mit Hedge")
+    ok(erg.get("umgestellt") == 4, f"Ergebnis {erg} (P1, P2, P8, P15; P14 von vor 2 h zählt nicht als vorgemerkt)")
     n = len(db.updates)
     ns["eh_tick"](jetzt=jetzt, force=True)
     ok(len(db.updates) == n, "zweiter Takt: gleicher Grund-Code → kein neues Update")
@@ -225,7 +242,7 @@ def takt():
     ns["eh_tick"](jetzt=jetzt, force=True)
     p10 = next(p for p in plaene if p["id"] == "P10")
     ok(p10["route"] == "mt5v2" and "60 Lot" in p10["mt5_baseline"]["echo_hedge"]["grund"] and p10["mt5_baseline"]["echo_hedge"]["code"] == "grenze",
-       f"57,9 offen + 3,54 vorgemerkt (P1, P2, P8) + 1,18 > 60 → ohne Hedge ({p10['mt5_baseline']['echo_hedge']['grund']})")
+       f"57,9 offen + 4,72 vorgemerkt (P1, P2, P8, P15 ohne Startzeit) + 1,18 > 60 → ohne Hedge ({p10['mt5_baseline']['echo_hedge']['grund']})")
     print("Fusion-Lesung alt")
     les["488579"].update(offen={"buy": 1.0, "sell": 1.0}, at=jetzt.timestamp() - 600)
     plaene.append(plan("P11", "A1", "U1", 16))
