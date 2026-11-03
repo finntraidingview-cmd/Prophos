@@ -30,7 +30,7 @@ check("if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opt
       "A1: eigener Plan bucht beim Ein-Klick über den Radar-Weg, sonst (und nie beim stillen Takt) Trades-Dialog wie bisher")
 check(oe.index("opts.einKlick") < oe.index("getElementById('mwdErledigtModal')?.classList.add('open')"), "Prüfung läuft vor dem Öffnen")
 check("const ein = !!t && !grund; if(ein)" in html and "Date.now() - _wdlEinKlickAt < 600" in html, "Klick fragt die Prüfung, Doppelklick bucht die nächste Zeile nicht mit")
-check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "beide_in_minute" not in fn and "return 'P&L passt nicht" not in fn and "return 'Ziel oder Boden unbekannt'" not in fn and "return 'eigener Plan'" not in fn and "'Gewinn, Ziel unbekannt'" in fn and "Ergebnis unplausibel (falsches Konto?)" in fn and "dm.status === 'liquidiert'" in fn,
+check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "beide_in_minute" not in fn and "return 'P&L passt nicht" not in fn and "return 'Ziel oder Boden unbekannt'" not in fn and "return 'eigener Plan'" not in fn and "'Gewinn, Ziel unbekannt'" in fn and "Ergebnis unplausibel (falsches Konto?)" in fn and "'Verlust, Boden unbekannt'" in fn and "dm.status === 'liquidiert'" in fn,
       "Balance 0 → Popup; A1: kein Popup mehr für TP/SL-Abweichung und fehlenden Boden, Schutz der Buchung bleibt (Ziel bei Gewinn, falsches Konto, 0)")
 check("const sicht = _mwdErlSicht, ohneHedge" in html, "Werte für Anfrage und Toast vor dem await festgehalten")
 check("if(mklWdEigenerPlan(pid) && typeof loadTradePlansFromSupabase === 'function'){ try{ await loadTradePlansFromSupabase() }catch(_){} }" in html, "A1: eigener Plan lädt nach dem Buchen die Planliste nach")
@@ -54,9 +54,13 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("SL getroffen", {"pl_balance": -700}, True), ("15 % + über TP in der Grenze", {"pl_balance": 800}, True),
           ("konto_geblowt", {"endlesung": {"konto_geblowt": {"x": 1}}}, False), ("grund tsx_geblowt", {"endlesung": {"grund": "tsx_geblowt"}}, False),
           ("puls_fehler konto_weg", {"endlesung": {"puls_fehler": "konto_weg: fehlt"}}, False), ("puls_fehler konto_nicht_erreicht", {"endlesung": {"puls_fehler": "konto_nicht_erreicht"}}, False),
-          ("ohne ziel_usd, Gewinn", {"ziel_usd": None}, False), ("ohne ziel_usd, Verlust (A1)", {"ziel_usd": None, "pl_balance": -700}, True), ("ohne Liq/Boden (A1)", {"_ohneLiq": True}, True), ("wdlZielMarkiert", {"_ziel": True}, False),
+          ("ohne ziel_usd, Gewinn", {"ziel_usd": None}, False), ("ohne ziel_usd, Verlust (A1)", {"ziel_usd": None, "pl_balance": -700}, True), ("ohne Liq/Boden, Gewinn (A1)", {"_ohneLiq": True}, True),
+          # Stopp S2 zu 091b176c: Verlust ohne Boden bei Challenge/Phase/Funded → Popup (Blow verliert genau sein SL)
+          ("Verlust genau SL ohne Boden, Phase 1", {"_ohneLiq": True, "pl_balance": -700}, False),
+          ("Verlust ohne Boden, Funded CFD", {"_ohneLiq": True, "konto_typ": "funded_cfd", "konto_aktuell": {"typ": "funded_cfd"}, "route": "mt5", "slave_pl": 10, "pl_balance": -700}, False),
+          ("Verlust ohne Boden, Winning-Days-Konto", {"_ohneLiq": True, "konto_typ": "winning_days", "konto_aktuell": {"typ": "winning_days"}, "pl_balance": -700}, True), ("wdlZielMarkiert", {"_ziel": True}, False),
           ("ziel_erreicht_at am Konto", {"konto_aktuell": {"typ": "phase1", "ziel_erreicht_at": "2026-10-30T10:00:00Z"}}, False),
-          ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt, Gewinn", {"konto_aktuell": None}, False), ("Konto-Stand fehlt, Verlust (A1)", {"konto_aktuell": None, "pl_balance": -700}, True),
+          ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt, Gewinn", {"konto_aktuell": None}, False), ("Konto-Stand fehlt, Verlust", {"konto_aktuell": None, "pl_balance": -700}, False),
           ("P&L über das Doppelte jeder Bezugsgröße", {"pl_balance": 5000}, False), ("Verlust über das Doppelte jeder Bezugsgröße", {"pl_balance": -5000}, False), ("ohne TP/SL am Plan (A1)", {"master_tp": None, "master_sl": None}, True),
           # A1 (Finn 03.11.2026, Foto: Marc Echo The5%ers 200k …0436, BUY 51 Lot, −5.856,33 $): Verlust etwas über dem SL (Slippage) → kein Popup mehr
           ("Marc: Echo-Verlust 17 % über dem SL (A1)", {"route": "mt5", "slave_pl": 72.52, "master_tp": 5000, "master_sl": 5000, "pl_balance": -5856.33, "balance_end": 194143.67, "balance_start": 200000}, True),
@@ -64,8 +68,8 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("Balance unter der Liq ohne Blow-Beweis", {"pl_balance": -700, "balance_end": 89000}, False),
           # Gegenprüfung A1: Gewinn nur am TP gemessen, Verlust ohne Boden enger
           ("Winning Day TP 300, +9.000 $ (falsches Konto)", {"konto_typ": "winning_days", "konto_aktuell": {"typ": "winning_days"}, "master_tp": 300, "pl_balance": 9000, "balance_start": 104500}, False),
-          ("Verlust 1,7× SL ohne bekannten Boden", {"_ohneLiq": True, "master_sl": 1500, "pl_balance": -2600}, False),
-          ("Verlust 1,4× SL ohne bekannten Boden", {"_ohneLiq": True, "master_sl": 1500, "pl_balance": -2100}, True), ("P&L genau 0", {"pl_balance": 0}, False), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, False),
+          ("Verlust 1,7× SL ohne bekannten Boden (Winning Days)", {"_ohneLiq": True, "konto_typ": "winning_days", "konto_aktuell": {"typ": "winning_days"}, "master_sl": 1500, "pl_balance": -2600}, False),
+          ("Verlust 1,4× SL ohne bekannten Boden (Winning Days)", {"_ohneLiq": True, "konto_typ": "winning_days", "konto_aktuell": {"typ": "winning_days"}, "master_sl": 1500, "pl_balance": -2100}, True), ("P&L genau 0", {"pl_balance": 0}, False), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, False),
           ("t2_grund unplausibel", {"kette_grund": "Ergebnis unplausibel (−148.000 $)"}, False), ("Funded Futures", {"konto_typ": "funded", "konto_aktuell": {"typ": "funded"}}, False),
           ("Funded CFD unauffällig", {"konto_typ": "funded_cfd", "konto_aktuell": {"typ": "funded_cfd"}, "ziel_usd": None, "route": "mt5", "slave_pl": 0}, True),
           ("Balance 0", {"balance_end": 0, "pl_balance": -100000}, False), ("Hedge offen", {"hedge": {"status": "offen"}}, False), ("Lesung fehlt", {"pl_balance": None}, False),

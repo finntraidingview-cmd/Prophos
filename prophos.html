@@ -38634,6 +38634,9 @@
     const pl = Number(t.pl_balance), stand = wdlBlowStand(t) || {}
     if(pl === 0) return 'kein Ergebnis (P&L genau 0)'   // S2: kein Ergebnis, Finn soll es sehen
     if(pl > 0 && (!ka || (['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0)))) return 'Gewinn, Ziel unbekannt'
+    // STOPP S2 zu 091b176c (03.11.2026): spiegelbildlich — ein Blow-Trade verliert genau sein SL; ohne Boden (stand.liq, enthält boden_usd) ist ein Blow bei Challenge/Phase/
+    // Funded nicht auszuschließen, der Kontostatus-Wechsel ginge verloren (live 39 aktive Phase-1-Konten ohne max_drawdown/starting_balance). Fällt weg, sobald der Boden da ist
+    if(pl < 0 && (!ka || (['challenge', 'phase1', 'phase2', 'funded', 'funded_cfd'].includes(typ) && !(Number(stand.liq) > 0)))) return 'Verlust, Boden unbekannt'
     if(pl < 0 && Number(stand.liq) > 0 && Number(t.balance_end) > 0 && Number(t.balance_end) <= Number(stand.liq)) return 'Balance an der Liq'   // Blow ohne Beweis oben
     const dm = t.demo || {}
     if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t) && !wdlLesungAmTp(t)) return 'Demo an der Liq, Lesung ohne Blow'   // Lesung am TP: s. wdlLesungAmTp
