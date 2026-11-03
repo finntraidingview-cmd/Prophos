@@ -4,8 +4,8 @@
 -- Code dazu (app.py, gleicher Commit): ap_planen legt CFD-Challenges gleich als Echo an (route mt5, Slave = Fusion der ID, Multiplikator B2, echo_hedge
 -- {status geplant}); eh_tick rechnet vor dem Start nur noch nach (status mit bzw. ohne + Grund), stellt nie zurück auf Echo V2 (eh_zurueck = 0).
 -- TEIL 1 — Claim-Riegel trade_plans_a1_echo_hedge = E2-Fassung (sql/2026-11-03_echo_riegel_mini_frei.sql) PLUS: Echo mit Slave, aber echo_hedge 'ohne'
---   (eh_tick konnte vor dem Start Lots/Marge/Lesung nicht stellen), wird gehalten wie Echo V2. Heute schreibt eh_tick 'ohne' nur an Echo V2 → vor dem
---   Code-Push ohne Wirkung, also gefahrlos zuerst einspielbar.
+--   (eh_tick konnte vor dem Start Lots/Marge/Lesung nicht stellen) ODER 'geplant' (noch nicht frisch geprüft, fail-closed), wird gehalten wie Echo V2.
+--   Heute trägt kein Echo-Plan 'ohne'/'geplant' (beides schreibt erst der neue Code bzw. Teil 2) → gefahrlos vor dem Code-Push einspielbar.
 -- TEIL 2 — offene Echo-V2-Pläne auf CFD-Challenges, die noch starten sollen (nicht Mini, nie geclaimt, nie gestartet/an Orbit, Startzeit in der Zukunft
 --   oder leer) → Echo mit Hedge aus der Hedge-Vorschau (ehv_tick = dieselbe B2-Rechnung wie eh_tick): multiplier = hedge_vorschau.multiplier, slave_risk =
 --   hedge_vorschau.blow_eur, Slave = eigenes Fusion-Konto aus user_settings.echo_hedge_account; echo_hedge {status geplant, quelle sql_e3} → eh_tick rechnet
@@ -40,9 +40,11 @@ begin
   if coalesce(gefunden, false) and kt <> '' and kt not in ('challenge', 'phase1', 'phase2') then   -- leere Kontoart = nicht lesbar (Prüfung 03.11.2026)
     return new;                                   -- Funded CFD u. a.: eigene Regeln (trade_plans_kontoart_weg)
   end if;
-  -- E3: Echo aus dem Planer, dessen Hedge eh_tick vor dem Start nicht stellen konnte (echo_hedge 'ohne'), hält wie Echo V2
+  -- E3: Echo aus dem Planer hält, bis eh_tick den Hedge vor dem Start frisch gerechnet hat (echo_hedge 'mit'): 'ohne' = nicht stellbar, 'geplant' = noch
+  -- nicht geprüft (Master-Entscheid fail-closed 03.11.2026: fällt Railway aus, startet kein Echo mit ungeprüftem Hedge; im Normalbetrieb stellt eh_tick
+  -- ≥ 20 min vorher um, keine Verzögerung). Echo ohne echo_hedge-Marke (Hand-Pläne, Gruppen-Planer gp_planen) läuft wie bisher.
   if new.route = 'mt5' and new.slave_account_id is not null and coalesce(new.multiplier, 0) > 0
-     and coalesce(new.mt5_baseline->'echo_hedge'->>'status', '') <> 'ohne' then
+     and coalesce(new.mt5_baseline->'echo_hedge'->>'status', '') not in ('ohne', 'geplant') then
     return new;                                   -- Echo mit Fusion-Slave: gehedgt
   end if;
   -- MINI „TAGE SAMMELN" (E2, Finn 03.11.2026 ~18:45: „Die Mini-Trades ‚Tage sammeln' haben perfekt funktioniert, gar nichts ändern, eins zu eins
@@ -70,6 +72,7 @@ begin
   txt := case
     when not coalesce(gefunden, false) or kt = '' then 'Kontoart des Masters nicht lesbar — CFD-Challenge vermutet, nie ohne Hedge'
     when eh->>'status' = 'ohne' then 'Echo-Hedge nicht stellbar: ' || left(coalesce(eh->>'grund', eh->>'code', '?'), 160)
+    when eh->>'status' = 'geplant' then 'Echo-Hedge vor dem Start noch nicht frisch geprüft (Railway eh_tick) — startet erst danach'
     when new.route = 'mt5' then 'Echo ohne Fusion-Slave/Multiplikator — CFD-Challenges nur mit Hedge'
     else 'Echo V2 (ohne Hedge) — CFD-Challenges laufen immer mit Fusion-Hedge, Umstellung steht noch aus' end;
   ziel := greatest(coalesce(old.start_um, now()), now()) + interval '15 minutes' + make_interval(secs => floor(random() * 900));

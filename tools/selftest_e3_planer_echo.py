@@ -139,13 +139,15 @@ def riegel():
     print("Claim-Riegel (sql/2026-11-03_cfd_v2_auf_echo.sql)")
     sql = open(os.path.join(os.path.dirname(HIER), "sql", "2026-11-03_cfd_v2_auf_echo.sql"), encoding="utf-8").read()
     body = sql.split("$$")[1]
-    ok("and coalesce(new.mt5_baseline->'echo_hedge'->>'status', '') <> 'ohne' then" in body, "Echo mit Slave, aber echo_hedge ohne → gehalten")
+    ok("and coalesce(new.mt5_baseline->'echo_hedge'->>'status', '') not in ('ohne', 'geplant') then" in body,
+       "Echo mit Slave, aber echo_hedge ohne ODER geplant (noch nicht frisch geprüft, fail-closed) → gehalten; mit / ohne Marke → läuft")
     ok(body.index("Tage sammeln%") < body.index("ss := new.mt5_baseline->'start_sperre'"), "Mini-Ausnahme (E2) unverändert vor der Halte-Logik")
     e2 = open(os.path.join(os.path.dirname(HIER), "sql", "2026-11-03_echo_riegel_mini_frei.sql"), encoding="utf-8").read().split("$$")[1]
     norm = lambda t: re.sub(r"\s+", " ", re.sub(r"--[^\n]*", "", t)).strip()   # noqa: E731
-    rest = norm(body).replace("and coalesce(new.mt5_baseline->'echo_hedge'->>'status', '') <> 'ohne' ", "").replace("nicht stellbar:", "nicht umgestellt:")
+    rest = norm(body).replace("and coalesce(new.mt5_baseline->'echo_hedge'->>'status', '') not in ('ohne', 'geplant') ", "").replace("nicht stellbar:", "nicht umgestellt:")
+    rest = rest.replace(" when eh->>'status' = 'geplant' then 'Echo-Hedge vor dem Start noch nicht frisch geprüft (Railway eh_tick) — startet erst danach'", "")
     ok(sorted(re.split(r" when | else ", rest)) == sorted(re.split(r" when | else ", norm(e2))),
-       "sonst = E2-Funktion (eine Bedingung mehr, when-Zeile „ohne“ vor „mt5“ und „nicht stellbar“ statt „nicht umgestellt“)")
+       "sonst = E2-Funktion (eine Bedingung mehr, Text „geplant“ neu, when-Zeile „ohne“ vor „mt5“, „nicht stellbar“ statt „nicht umgestellt“)")
     t2 = sql.split("$$")[2]
     ok("p.route = 'mt5v2'" in t2 and "? 'tage_mini'" in t2 and "h.user_id = p.user_id" in t2 and "and p.start_um_gestartet_at is null" in t2
        and "verbrauch'" not in t2.split("where")[1] and "(p.start_um is null or p.start_um >= now())" in t2 and "'start_fehler'" not in t2,

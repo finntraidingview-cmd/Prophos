@@ -27726,8 +27726,12 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
     try:
         _e3 = ap_echo_hedge_anlegen(zeilen, _konten_e3, reg.get("regeln") or {})
     except Exception as e:
-        _e3 = {"echo": 0, "weg": [(z, f"Echo-Hedge nicht rechenbar ({type(e).__name__}: {str(e)[:80]})") for z in zeilen
-                                  if ap_echo_kandidat(z, _konten_e3)]}
+        _g3 = f"Echo-Hedge nicht rechenbar ({type(e).__name__}: {str(e)[:80]})"
+        try:
+            _weg3 = [z for z in zeilen if ap_echo_kandidat(z, _konten_e3)]
+        except Exception:   # Prüfung E3: der Rückfall wirft nie selbst — dann jede Echo-V2-Zeile außer Minis nicht anlegen
+            _weg3 = [z for z in zeilen if str(z.get("route") or "") == "mt5v2" and not ((z.get("mt5_baseline") or {}).get("tage_mini"))]
+        _e3 = {"echo": 0, "weg": [(z, _g3) for z in _weg3]}
         print(f"[auto-plan] ⚠️ Echo-Hedge beim Planen: {type(e).__name__}: {e} — {len(_e3['weg'])} CFD-Challenge(s) nicht angelegt", flush=True)
     if _e3["weg"]:
         _weg_ids = {id(z) for z, _g in _e3["weg"]}

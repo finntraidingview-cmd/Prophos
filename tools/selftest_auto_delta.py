@@ -65,6 +65,11 @@ def lade():
     ns["eh_stand"] = lambda regeln=None: {"an": False}
     ns["ah_stand"] = lambda regeln=None: {"an": False}   # Apex-Hedge-Schalter (30.10.2026), wie eh_stand
     ns["tfh_stand"] = lambda regeln=None: {"an": False}   # Tradeify-Final-Hedge-Schalter (30.10.2026), wie eh_stand
+    # E3 (03.11.2026, CFD-Planer nur Echo mit Hedge): eigener Test tools/selftest_e3_planer_echo.py — hier neutral (ändert keine Zeile, legt alles an),
+    # damit diese Tests weiter Verteilung/Richtung/Ketten prüfen und nicht an fehlenden Hedge-Konten der Fixture scheitern
+    ns["ap_echo_hedge_anlegen"] = lambda zeilen, konten, regeln: {"echo": 0, "weg": []}
+    ns["ap_echo_kandidat"] = lambda z, konten: False
+    ns["ap_echo_ohne_melden"] = lambda *a, **k: None
 
     def block(name):
         i = src.index(f"\ndef {name}(") + 1
