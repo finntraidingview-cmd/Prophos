@@ -52323,8 +52323,18 @@
    * Challenge-/Phase-1-/Phase-2-Konto über Echo V2, ohne Ausnahme (auch Mini, Hand-Plan, Schalter aus). Kontoart vom Konto, sonst vom Plan
    * (konto_typ); nicht lesbar → gesperrt (fail-closed). Funded CFD u. a. bleiben frei. Rein rechnend. → Sperrtext | null */
   const ECHO_V2_GESPERRT_TYPEN = ['challenge', 'phase1', 'phase2']
+  /* MINI „TAGE SAMMELN" BLEIBT ECHO V2 (E2, Finn 03.11.2026 ~18:45: „Die Mini-Trades ‚Tage sammeln' haben perfekt funktioniert, gar nichts ändern, eins zu
+   * eins lassen."): genau der Mini des Auto-Planers (ap_tage_mini) — Auto-Plan, mt5_baseline.tage_mini mit sofort_zu, Notiz „Auto-Planer · Tage sammeln …",
+   * höchstens 1 Lot, SL und TP je über 0 und höchstens 50 $. Dieselben Bedingungen wie der Claim-Riegel (sql/2026-11-03_echo_riegel_mini_frei.sql). Rein rechnend. */
+  function echoV2IstMini(plan){
+    const tm = plan && plan.mt5Baseline && plan.mt5Baseline.tage_mini
+    const lots = Number(plan && plan.masterContracts), sl = Number(plan && (plan.masterSl ?? plan.masterRisk)), tp = Number(plan && plan.masterTp)
+    return !!(plan && plan.autoPlan === true && plan.route === 'mt5v2' && tm && typeof tm === 'object' && tm.sofort_zu === true
+      && /^Auto-Planer · Tage sammeln/.test(String(plan.notes || '')) && lots > 0 && lots <= 1 && sl > 0 && sl <= 50 && tp > 0 && tp <= 50)
+  }
   function echoV2Gesperrt(plan, acc){
     if(!plan || plan.route !== 'mt5v2') return null
+    if(echoV2IstMini(plan)) return null   // E2: Mini „Tage sammeln" wie vor E1
     const typ = String((acc && acc.type) || plan.kontoTyp || '').toLowerCase()
     if(typ && !ECHO_V2_GESPERRT_TYPEN.includes(typ)) return null
     return typ ? 'CFD-Challenges laufen immer mit Hedge — Echo V2 (ohne Fusion-Hedge) startet für Challenge/Phase 1/Phase 2 nie'
@@ -54888,7 +54898,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2019'
+  const OS_TAB_BUILD = '2026-09-22.2020'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

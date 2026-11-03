@@ -42,6 +42,17 @@ ok("new.slave_account_id is not null and coalesce(new.multiplier, 0) > 0" in sql
 ok("coalesce(gefunden, false) and kt <> '' and kt not in" in sql and "or kt = ''" in sql, "Riegel: Konto oder Kontoart nicht lesbar → halten (fail-closed)")
 ok("coalesce(new.start_claim_art, 'start') <> 'start'" in sql, "Verbrauchs-Claims laufen durch")
 
+# E2: Mini „Tage sammeln" im Riegel wieder frei — eng, vor der start_sperre-Prüfung, Rest der E1-Funktion unverändert
+mini = open(os.path.join(H, "sql", "2026-11-03_echo_riegel_mini_frei.sql"), encoding="utf-8").read()
+mb = mini.split("$$")[1]
+ok(all(x in mb for x in ("jsonb_typeof(new.mt5_baseline->'tage_mini') = 'object'", "->>'sofort_zu' = 'true'", "like 'Auto-Planer · Tage sammeln%'",
+                          "new.master_contracts <= 1", "coalesce(new.master_sl, new.master_risk) <= 50", "new.master_tp <= 50", "coalesce(new.auto_plan, false)")),
+   "E2-Riegel: Mini eng erkannt (Marke, sofort_zu, Notiz, ≤ 1 Lot, SL/TP ≤ 50 $, Auto-Plan)")
+ok(mb.index("Tage sammeln%") < mb.index("ss := new.mt5_baseline->'start_sperre'"), "E2-Riegel: Mini-Ausnahme vor der Halte-Logik")
+e1b = sql.split("$$")[1]
+ohne_mini = re.sub(r"  -- MINI „TAGE SAMMELN\" \(E2.*?\n    return new;\n  end if;\n", "", mb, count=1, flags=re.S)
+ok(ohne_mini != mb and ohne_mini == e1b, "E2-Riegel: ohne den Mini-Block genau die E1-Funktion")
+
 # PC-Tab
 m = re.search(r"  const ECHO_V2_GESPERRT_TYPEN = .*?\n  window\._echoV2Gesperrt", html, re.S)
 ok(bool(m), "echoV2Gesperrt im PC-Tab")
@@ -50,6 +61,8 @@ ok("_tpRoute === 'mt5v2' && ['challenge', 'phase1', 'phase2'].includes(kt)" in h
 jsc = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
 if m and os.path.exists(jsc):
     js = m.group(0).replace("\n  window._echoV2Gesperrt", "\n") + r"""
+const MINI = o => Object.assign({route:'mt5v2', autoPlan:true, masterContracts:0.01, masterSl:3.4, masterTp:2.6,
+  notes:'Auto-Planer · Tage sammeln 3/5 · Mini-Trade 0,01 Lot · TP 26', mt5Baseline:{tage_mini:{sofort_zu:true, ist:3, soll:5}}}, o)
 const F = [
  ['Julian FTMO phase1 Auto', {route:'mt5v2', autoPlan:true}, {type:'phase1'}, true],
  ['Emin Tradeify CFD phase1', {route:'mt5v2'}, {type:'phase1'}, true],
@@ -59,6 +72,15 @@ const F = [
  ['Konto + Typ fehlen (fail-closed)', {route:'mt5v2'}, null, true],
  ['funded_cfd Echo V2', {route:'mt5v2'}, {type:'funded_cfd'}, false],
  ['phase1 Echo mt5', {route:'mt5'}, {type:'phase1'}, false],
+ // E2 (03.11.2026): Mini „Tage sammeln" bleibt Echo V2
+ ['E2 Mini FundedNext 0,01', MINI({}), {type:'phase2'}, false],
+ ['E2 Mini FTMO 1 Lot 27 $', MINI({masterContracts:1, masterSl:27, masterTp:21}), {type:'phase1'}, false],
+ ['E2 Mini SL 500 $ → hart', MINI({masterSl:500}), {type:'phase1'}, true],
+ ['E2 Mini 2 Lot → hart', MINI({masterContracts:2}), {type:'phase1'}, true],
+ ['E2 Mini ohne TP → hart', MINI({masterTp:null}), {type:'phase1'}, true],
+ ['E2 Mini ohne sofort_zu → hart', MINI({mt5Baseline:{tage_mini:{sofort_zu:false}}}), {type:'phase1'}, true],
+ ['E2 Notiz Etappe → hart', MINI({notes:'Auto-Planer · Etappe · Rest 8.000 $'}), {type:'phase1'}, true],
+ ['E2 Hand-Plan mit Mini-Feldern → hart', MINI({autoPlan:false}), {type:'phase1'}, true],
 ]
 let n = 0
 for(const [t, p, a, soll] of F){ const ist = !!echoV2Gesperrt(p, a); print((ist === soll ? 'OK   ' : 'FEHL ') + 'JS: ' + t); if(ist === soll) n++ }
@@ -68,6 +90,6 @@ print('JSERG ' + (n === F.length ? 'ok' : 'rot'))
         f.write(js)
     out = subprocess.run([jsc, f.name], capture_output=True, text=True).stdout
     print(out.replace("JSERG ok\n", "").replace("JSERG rot\n", ""), end="")
-    ok("JSERG ok" in out, "echoV2Gesperrt: 8 Fälle")
+    ok("JSERG ok" in out, "echoV2Gesperrt: 16 Fälle (inkl. E2 Mini)")
 print("alle OK" if not fehler else f"{fehler} FEHLER")
 sys.exit(1 if fehler else 0)
