@@ -54944,7 +54944,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2023'
+  const OS_TAB_BUILD = '2026-09-22.2024'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72827,11 +72827,12 @@
   /* ERSTER PAYOUT-TERMIN BEIM ANLEGEN (P1, Finn 03.11.2026 ~22:55 Dubai: „FundedNext erster Zyklus 21 Tage, alles andere 14 Tage“, schon beim Anlegen sichtbar):
    * REIN — Firma, Typ, Anlegetag (JJJJ-MM-TT, Berlin wie _deTodayStr) → Datum oder ''. Gilt für Funded CFD, Funded Futures und Winning Days; Phasen/Live haben keinen
    * Payout. Für die Wege ohne Formular (Bulk, Admin über Railway, Kauf-Mail) setzt der Trigger accounts_payout_termin_neu (sql/2026-11-03_payout_termin_beim_anlegen.sql)
-   * dieselbe Regel, aber nur für Funded CFD. 21 Tage nur FundedNext (CFD); „FundedNext Futures“ bekommt 14, bis Finn anders entscheidet. */
+   * dieselbe Regel, aber nur für Funded CFD. 21 Tage bei FundedNext — CFD und seit P2 auch FundedNext Futures (Finn 04.11.2026 ~00:20 Dubai: „1. 21 Tage, danach alles 14“);
+   * die 14 nach jeder Anfrage rechnet finNextPayoutVorschlag. */
   function payoutErsterTermin(firm, typ, tag){
     if(!['funded', 'funded_cfd', 'winning_days'].includes(String(typ || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(tag || ''))) return ''
     const f = String(firm || '').toLowerCase().replace(/\s/g, '')
-    const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + (/fundednext/.test(f) && !/futures/.test(f) ? 21 : 14))
+    const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + (/fundednext/.test(f) ? 21 : 14))
     return d.toISOString().slice(0, 10)
   }
   // Feld vorbelegen, solange es leer ist oder noch den letzten Vorschlag trägt — ein von Hand eingetragenes Datum bleibt (dataset.vorschlag)

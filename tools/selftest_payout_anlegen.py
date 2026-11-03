@@ -23,7 +23,7 @@ def check(ok, name):
 fn = HTML[HTML.index("  function payoutErsterTermin("):HTML.index("  window._payoutErsterTermin")]
 FAELLE = [("FundedNext", "funded_cfd", "2026-11-03", "2026-11-24"), ("Funded Next", "funded_cfd", "2026-11-03", "2026-11-24"),
           ("FTMO", "funded_cfd", "2026-11-03", "2026-11-17"), ("Apex", "funded", "2026-11-03", "2026-11-17"),
-          ("Tradeify", "winning_days", "2026-12-25", "2027-01-08"), ("FundedNext Futures", "funded", "2026-11-03", "2026-11-17"), ("FundedNext", "phase2", "2026-11-03", ""),
+          ("Tradeify", "winning_days", "2026-12-25", "2027-01-08"), ("FundedNext Futures", "funded", "2026-11-03", "2026-11-24"), ("FundedNext", "phase2", "2026-11-03", ""),
           ("FundedNext", "live", "2026-11-03", ""), ("FTMO", "funded_cfd", "", "")]
 js = fn + "\nconst _deTodayStr = () => '2026-11-03';\nprint(JSON.stringify(" + json.dumps(FAELLE) + ".map(f => payoutErsterTermin(f[0], f[1], f[2]))));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
@@ -62,5 +62,10 @@ check(SQL.count("at time zone 'Europe/Berlin')::date + 21") >= 2 and "p.slave_ac
 up = SQL[SQL.index("update public.accounts a"):]
 check("g.gruppe like 'Hermann Technologies%'" in up, "SQL: Update nur Gruppe Hermann Technologies")
 check("14367785" in SQL and "14367823" in SQL, "SQL: Kontrolle Aurel 100k / Marc 100k")
+SQL2 = open(os.path.join(W, "sql", "2026-11-04_fundednext_futures_payout_datum.sql"), encoding="utf-8").read()
+up2 = SQL2[SQL2.index("update public.accounts a"):]
+check("like '%fundednext%'" in up2 and "like '%futures%'" in up2 and "a.account_type in ('funded', 'winning_days')" in up2 and "a.payout_ready_at is null" in up2
+      and "g.gruppe like 'Hermann Technologies%'" in up2, "P2-SQL: nur FundedNext Futures Funded/Winning Days, Feld leer, nur HT")
+check(up2.count("not exists") == 3 and "at time zone 'Europe/Berlin')::date + 21" in up2 and "a.created_at)" in up2, "P2-SQL: ohne Payout (3 Quellen), erster Trade (Berlin) + 21, sonst Anlegetag + 21")
 print("ALLES GRÜN" if not FEHLER else f"{len(FEHLER)} FEHLER")
 sys.exit(1 if FEHLER else 0)
