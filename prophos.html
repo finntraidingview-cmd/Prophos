@@ -27273,19 +27273,32 @@
     // Notfall-Schließungen 16.–22.10. hatten einen zweiten WD auf derselben ID). Jetzt der WD mit dem kleinsten $-Rest bis TP ODER Liq
     // (wdHeimWahl). Big Trades (Prio 1) unverändert der jüngste. WD-Erkennung wie das Backend (puls_heim_wd_trades): winning_day,
     // tpIstWdPlan oder konto_typ winning_days — ein WD mit Hedge ohne winning_day-Flag galt hier sonst als Big Trade.
-    const offen = (tradePlans || []).filter(p => p.status === 'open' && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p)
+    // GERADE GEKLICKT ZÄHLT MIT (03.11.2026, Prüf-Agent zu Z3): der Heimweg direkt nach dem Order-Beweis läuft, solange der neue Plan noch
+    // „planned" ist — ohne ihn ginge Puls z. B. nach einem neuen Big Trade ins Konto eines laufenden Winning Days (Prio 2) statt zu bleiben.
+    // Ohne Kurs zählt er als der jüngste (wie nach „Läuft"), damit es kein Hin und Her gibt.
+    const offen = (tradePlans || []).filter(p => (p.status === 'open' || bthGeklickt(p)) && (p.route === 'tvv2' || p.route === 'tsv2') && tvV2Konto(p)
       && (!fenster || bthFenster(p.route) === fenster))
-    const juengster = l => l.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] || null
+    const seit = p => String(p.startedAt || (bthGeklickt(p) ? '9999' : ''))
+    const juengster = l => l.sort((a, b) => seit(b).localeCompare(seit(a)))[0] || null
     // PRIO-STUFE APEX-CHALLENGE (Finn 02.11.2026 04:05: „gleiche Logik wie Winning Days, nur eine Priorität höher: unter Big Trades, unter
     // Orbit-Trades, über Winning Days"): Big Trade → Apex-Challenge → Winning Day. Unter mehreren Apex wie bei den WDs der nächste am TP/an der Liq.
     const istApex = p => typeof tpIstApexHedge === 'function' && tpIstApexHedge(p)
     const istWd = p => !istApex(p) && (p.winningDay === true || p.kontoTyp === 'winning_days' || (typeof tpIstWdPlan === 'function' && tpIstWdPlan(p)))
-    const big = juengster(offen.filter(p => !istApex(p) && !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true)))
+    // MEHRERE BIG TRADES IM FENSTER (03.11.2026, Finn ~17:35 Dubai: „Wichtig ist, dass der Puls immer in den Account reingeht, wo wir
+    // näher am Take Profit/Stop Loss sind"): bisher der jüngste — nach dem Start eines zweiten Orbit stand der Puls-Chrome im neuen Konto,
+    // der ältere (meist der nähere) lief ohne Userscript/Reader bis zum Ende (Prüfung Z2). Jetzt wie bei den WDs der mit dem kleinsten
+    // $-Rest bis TP oder Liq, gleiche Hysterese (30 $ / 60 s), eigener Merker je Fenster. Kein Kurs/Level → der jüngste wie bisher.
+    // Ohne Fenster (Aufrufer fragen nur „läuft einer?") ebenfalls der jüngste, ohne den Merker anzufassen.
+    const bigs = offen.filter(p => !istApex(p) && !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true))
+    const big = (fenster && bigs.length > 1) ? heimNaechster(bigs, juengster, _bthBigWahl[fenster] || (_bthBigWahl[fenster] = { id: '', at: 0 }), { wort: () => 'Big Trade', wache: fenster === 'tv' })
+      : juengster(bigs)
     return big || wdHeimWahl(offen.filter(istApex), juengster) || wdHeimWahl(offen.filter(istWd), juengster)
   }
   // $-Rest eines Winning Days bis TP oder Liq (der kleinere), aus dem Live-Kurs der Plan-Wurzel → Zahl oder null (kein Kurs/Level)
+  // (seit 03.11.2026 auch für Big Trades: hedge.sl_level_nq ist dort ebenso die engste Liq-Grenze, s. hedgeLiqFelder)
   const BTH_WD_WECHSEL_USD = 30, BTH_WD_HALTEN_MS = 60000   // Umschalten nur bei klar näherem WD und nicht öfter als einmal je Minute
-  let _bthWdWahl = { id: '', at: 0 }
+  const _bthWdWahl = { id: '', at: 0 }
+  const _bthBigWahl = {}   // Fenster ('tv' | 'tsx') → { id, at } der zuletzt gewählten Big-Trade-Heimat (03.11.2026)
   function wdHeimAbstand(p){
     try{
       const h = p && p.mt5Baseline && p.mt5Baseline.hedge; if(!h) return null
@@ -27301,35 +27314,99 @@
   function wdHeimWahl(wdsAlle, juengster){
     // Topstep-WDs (tsv2) nur, wenn kein TradingView-WD läuft: der Reader/die Heim-Wache kennt nur TradingView (Prüfer 22.10.2026)
     const tv = wdsAlle.filter(p => p.route === 'tvv2'), wds = tv.length ? tv : wdsAlle
-    if(wds.length <= 1) return wds[0] || null
-    const mit = wds.map(p => ({ p, a: wdHeimAbstand(p) })), bekannt = mit.filter(x => x.a != null).sort((x, y) => x.a - y.a)
-    if(!bekannt.length) return juengster(wds)   // kein Kurs → wie bisher der jüngste
-    const best = bekannt[0], akt = mit.find(x => String(x.p.id) === _bthWdWahl.id), jetzt = Date.now()
+    return heimNaechster(wds, juengster, _bthWdWahl, { wort: p => typeof tpIstApexHedge === 'function' && tpIstApexHedge(p) ? 'Apex-Challenge' : 'Winning Day', wache: true })
+  }
+  // Der Plan mit dem kleinsten $-Rest bis TP oder Liq (aus wdHeimWahl herausgelöst 03.11.2026, gilt jetzt auch für Big Trades).
+  // stand = Merker { id, at } der letzten Wahl (wird hier fortgeschrieben). o = { wort(p) fürs Protokoll, wache: Prio-Wechsel stößt die
+  // TradingView-Heim-Wache an, abstand(p): Test-Haken, sonst wdHeimAbstand }. Kein Abstand bekannt → der jüngste (juengster).
+  function heimNaechster(liste, juengster, stand, o){
+    o = o || {}
+    if(liste.length <= 1) return liste[0] || null
+    const abstand = o.abstand || wdHeimAbstand
+    const mit = liste.map(p => ({ p, a: abstand(p) })), bekannt = mit.filter(x => x.a != null).sort((x, y) => x.a - y.a)
+    const akt = mit.find(x => String(x.p.id) === stand.id)
+    // kein Kurs → der bisher gewählte, solange er offen ist (kurze Kurs-Lücke kippt das Ziel nicht, Prüf-Agent 03.11.2026); sonst der jüngste
+    if(!bekannt.length) return akt ? akt.p : juengster(liste)
+    const best = bekannt[0], jetzt = (o.jetzt || Date.now)()
     // Hysterese: der bisherige bleibt, solange der andere nicht ≥ 30 $ näher ist bzw. die letzte Wahl < 60 s her ist (kein Hin und Her —
     // jeder Wechsel ist ein Login im Puls-Chrome und macht den Reader für die Konto-Ruhe blind)
-    if(akt && akt.a != null && String(best.p.id) !== _bthWdWahl.id && (best.a > akt.a - BTH_WD_WECHSEL_USD || jetzt - _bthWdWahl.at < BTH_WD_HALTEN_MS)) return akt.p
-    if(String(best.p.id) !== _bthWdWahl.id){
-      _bthWdWahl = { id: String(best.p.id), at: jetzt }
-      try{ _hwPulsWegAt = jetzt }catch(_){}   // Heim-Wache: der Prio-Wechsel zählt wie eine Puls-Aktion → Umzug nach 3 s, nicht erst nach 90 s
-      console.info(`[big-trade] Heimkonto = ${typeof tpIstApexHedge === 'function' && tpIstApexHedge(best.p) ? 'Apex-Challenge' : 'Winning Day'} „${best.p.masterName || best.p.id}" (${Math.round(best.a)} $ bis TP/Liq, ${wds.length} offen)`)
+    if(akt && akt.a != null && String(best.p.id) !== stand.id && (best.a > akt.a - BTH_WD_WECHSEL_USD || jetzt - stand.at < BTH_WD_HALTEN_MS)) return akt.p
+    if(String(best.p.id) !== stand.id){
+      stand.id = String(best.p.id); stand.at = jetzt
+      if(o.wache){ try{ _hwPulsWegAt = jetzt }catch(_){} }   // Heim-Wache: der Prio-Wechsel zählt wie eine Puls-Aktion → Umzug nach 3 s, nicht erst nach 90 s
+      console.info(`[big-trade] Heimkonto = ${o.wort ? o.wort(best.p) : 'Plan'} „${best.p.masterName || best.p.id}" (${Math.round(best.a)} $ bis TP/Liq, ${liste.length} offen)`)
     }
     return best.p
   }
+  window._bthHeimNaechster = heimNaechster   // Test-Haken (tools/selftest_heim_wahl.js)
+  // → true, wenn ein Heimweg geplant ist
   function bigTradeHeimPlanen(konto, grund, sofort, fenster){
-    if(typeof window.mtcApi !== 'function' || _bthSelbst) return
-    const bt = bigTradePlan(fenster || 'tv'); if(!bt) return
-    if(konto && String(konto).trim() === tvV2Konto(bt)) return   // war schon das Big-Trade-Konto: nichts zu tun
+    // derselbe Order-Anstoß aus dem finally von tpOrbitStartenKern: schon direkt nach dem Klick geplant bzw. gelaufen → nicht doppelt
+    // (sonst eine zweite tv-lesen-Runde ins schon stehende Konto); Merker damit verbraucht (03.11.2026, s. bigTradeHeimNachOrder). Steht vor
+    // dem _bthSelbst-Ausstieg: finallyDa muss auch gesetzt werden, wenn der frühe Heimweg gerade läuft. Ist er GESCHEITERT, plant das finally
+    // wie bisher neu (kein Wiederholer bei vollem Zähler/Auge-Reparatur). Sein Konto-Beleg wird erst jetzt gestempelt (Order-Flags weg).
+    const no = _bthNachOrder
+    // Alter nur, solange der frühe Heimweg nicht durch ist: ein fertiger zählt auch nach > 120 s (Hedge-Wiederholung ~90 s + DB, Prüf-Agent)
+    if(no && /^Order /.test(String(grund || '')) && no.ext && no.ext === String(konto || '').trim() && no.fenster === (fenster || 'tv')
+      && (no.fertig || Date.now() - no.at < BTH_NACH_ORDER_MS)){
+      if(!no.fertig){ no.finallyDa = true; return false }
+      _bthNachOrder = null
+      if(no.ok){ if(no.beleg){ try{ kontoBelegMerken(no.beleg.konto, no.beleg.voll) }catch(_){} } return false }
+    }
+    if(typeof window.mtcApi !== 'function' || _bthSelbst) return false
+    const bt = bigTradePlan(fenster || 'tv'); if(!bt) return false
+    if(konto && String(konto).trim() === tvV2Konto(bt)) return false   // war schon das Big-Trade-Konto: nichts zu tun
     if(fenster === 'tsx'){   // TopstepX-Tab (27.10.2026): eigener Timer, die Heim-Wache/Statistik unten bleiben TradingView
       if(_bthTsxTimer) clearTimeout(_bthTsxTimer)
       if(TSX_HEIM_REPARATUR_RE.test(String(grund || ''))) _bthTsxReparatur = true
       _bthTsxTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto', 'tsx'), sofort ? bthSofortMs() : bthRuheMs())
-      return
+      return true
     }
     if(_bthTimer) clearTimeout(_bthTimer)
     if(!_bthAnstoss) _bthAnstoss = Date.now()   // Heimweg-Dauer ab der ERSTEN fremden Aktion (22.10.2026)
     _hwPulsWegAt = Date.now()   // Heim-Wache: Puls selbst war woanders → 3-s-Schwelle (22.10.2026)
     _bthTimer = setTimeout(() => bigTradeHeim(grund || 'fremdes Konto'), sofort ? bthSofortMs() : bthRuheMs())   // 19.10.2026: sofort nach Order; 28.10.2026 gestreut
+    return true
   }
+  /* HEIMWEG DIREKT NACH DEM ORDER-BEWEIS (03.11.2026, Finn ~17:35 Dubai: „Sobald die Order auf dem ersten durch ist, wird direkt auf den
+   * zweiten Account überschaltet wegen der Priorität, damit das Userscript die ganze Zeit lesen kann … das hat Priorität, kann nicht um
+   * eine Impuls-Order verzögert werden"). Bisher plante tpOrbitStartenKern den Heimweg erst im finally — nach Fusion-Hedge, „Läuft" und
+   * Level-Patch —, und bigTradeHeim wartete, solange _tpOrbitLaeuft stand; startete in der Lücke eine weitere Order, ging sie vor.
+   *  (1) bigTradeHeimNachOrder(ext, fenster, planId): gleich nach dem bewiesenen Klick, wenn Puls in diesem Lauf nichts mehr tut (Start-Werte
+   *      aus der Order-Antwort, kein zweiter Chrome-Lauf). Der Heimweg läuft neben Hedge/DB, nicht dahinter. Der neue Plan ist da noch
+   *      „planned" — er zählt in bigTradePlan trotzdem mit (bthGeklickt), Puls geht ins Prio-Konto oder bleibt, wenn er es selbst ist.
+   *      Vorrang vor _tpOrbitLaeuft nur, solange DIESE Order läuft (bis zu ihrem finally, finallyDa) — nie mitten in eine andere.
+   *  (2) Der Anstoß aus dem finally derselben Order (gleiche External ID) wird nicht doppelt geplant (bigTradeHeimPlanen); dort wird auch
+   *      der Konto-Beleg des Heimwegs gestempelt (vorher machte das 250-ms-Intervall ihn ungültig, solange die Order noch lief).
+   *  (3) bigTradeHeimAbwarten: eine neue Puls-Order wartet am Anfang von tpOrbitStartenKern, bis dieser Heimweg gelaufen ist (höchstens
+   *      BTH_NACH_ORDER_WARTE_MS; ein Wiederholer nach einem Fehlschlag hält keine Order mehr auf, ein Rundgang auch nicht). */
+  const BTH_NACH_ORDER_MS = 120000, BTH_NACH_ORDER_WARTE_MS = 45000
+  let _bthNachOrder = null   // { ext, fenster, at, begonnen, fertig, ok, beleg, finallyDa }
+  const _bthGeklickt = { id: '', at: 0 }   // Plan, dessen Order gerade bewiesen ist (noch „planned")
+  function bthGeklickt(p){ return !!p && p.status === 'planned' && !!_bthGeklickt.id && String(p.id) === _bthGeklickt.id && Date.now() - _bthGeklickt.at < BTH_NACH_ORDER_MS }
+  function bigTradeHeimNachOrder(konto, fenster, planId){
+    const f = fenster || 'tv', ext = String(konto || '').trim()
+    _bthNachOrder = null
+    _bthGeklickt.id = String(planId || ''); _bthGeklickt.at = Date.now()
+    if(!ext || !bigTradeHeimPlanen(ext, 'Order ' + ext.slice(-4), true, f)) return false
+    _bthNachOrder = { ext, fenster: f, at: Date.now(), begonnen: false, fertig: false, ok: false, beleg: null, finallyDa: false }
+    return true
+  }
+  async function bigTradeHeimAbwarten(maxMs){
+    const t0 = Date.now(), lim = maxMs || BTH_NACH_ORDER_WARTE_MS
+    for(;;){
+      const no = _bthNachOrder
+      if(!no || no.fertig || Date.now() - no.at > BTH_NACH_ORDER_MS) break
+      if(!_bthLaeuft && !(no.fenster === 'tsx' ? _bthTsxTimer : _bthTimer)) break   // kein Heimweg dieses Fensters mehr geplant → nichts, worauf zu warten wäre
+      if(!_bthLaeuft && typeof tvV2Poll !== 'undefined' && tvV2Poll.busy) break   // Rundgang hält Puls ohnehin — die Order wartet dort selbst (puls_beschaeftigt)
+      if(Date.now() - t0 >= lim){ console.warn(`[big-trade] Heimweg nach Order ${no.ext.slice(-4)} nach ${Math.round(lim / 1000)} s noch nicht durch — Order startet trotzdem`); break }
+      await new Promise(res => setTimeout(res, 300 + Math.random() * 400))
+    }
+    // die vorige Order ist ganz durch (kein Lauf mehr) → Merker weg: ihr Heimweg wartet ab jetzt wieder hinter laufenden Orders (bigTradeHeim)
+    // und der finally-Anstoß einer späteren Order auf demselben Konto wird nie verschluckt. Läuft sie noch, gehört der Merker weiter ihr.
+    if(!_tpOrbitLaeuft) _bthNachOrder = null
+  }
+  window._bthNachOrder = { nachOrder: bigTradeHeimNachOrder, abwarten: bigTradeHeimAbwarten, stand: () => _bthNachOrder }   // Test-Haken
   /* HEIMWEG AN RAILWAY (22.10.2026, Finn: „wie lange hat es gedauert?" + Handy-Alarm, „wenn Puls nach dem Orbit-Trade nicht erfolgreich
    * zurückkehrt"). Bisher stand der Heimweg nur in der Konsole des PC-Tabs — nichts davon war hinterher auswertbar. Jetzt jeder Heimweg
    * nach alarm_log (Dauer ab der ersten fremden Aktion + Dauer der Lesung); gescheitert → 🔴 an die Master-IDs. Wirft nie. */
@@ -27350,10 +27427,13 @@
     const spaeterNochmal = () => { const t = setTimeout(() => bigTradeHeim(grund, fenster), BTH_WARTE_MIN_MS + Math.random() * (BTH_WARTE_MAX_MS - BTH_WARTE_MIN_MS)); if(tsx) _bthTsxTimer = t; else _bthTimer = t }
     // läuft gerade der Heimweg des ANDEREN Fensters (27.10.2026): nicht verwerfen, kurz danach nachholen (Puls kann nur eins zur Zeit)
     if(_bthLaeuft){ spaeterNochmal(); return }
-    const bt = bigTradePlan(fenster || 'tv'); if(!bt){ if(!tsx) _bthAnstoss = null; return }
+    const bt = bigTradePlan(fenster || 'tv'); if(!bt){ if(!tsx) _bthAnstoss = null; if(_bthNachOrder && _bthNachOrder.fenster === (fenster || 'tv')) _bthNachOrder.fertig = true; return }
     // 22.10.2026 (Finn: „sobald die Order bestätigt ist, direkt zurück — nicht 1–2 Minuten“): belegt → alle 2–4 s (gestreut) statt fest 10 s nachsehen
-    if(_tpOrbitLaeuft || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ spaeterNochmal(); return }
+    // 03.11.2026: der Heimweg direkt nach dem Order-Beweis (bigTradeHeimNachOrder) wartet nicht auf das Ende derselben Order — Puls ist dort fertig
+    const nachOrder = _bthNachOrder && !_bthNachOrder.fertig && !_bthNachOrder.finallyDa && _bthNachOrder.fenster === (fenster || 'tv') && Date.now() - _bthNachOrder.at < BTH_NACH_ORDER_MS ? _bthNachOrder : null
+    if((_tpOrbitLaeuft && !nachOrder) || (typeof tvV2Poll !== 'undefined' && tvV2Poll.busy)){ spaeterNochmal(); return }
     const konto = tvV2Konto(bt)
+    if(nachOrder) nachOrder.begonnen = true
     _bthLaeuft = true; _bthSelbst = true
     const t0 = Date.now(), anstoss = _bthAnstoss || t0
     _bthAnstoss = null
@@ -27389,9 +27469,12 @@
       if(heimMeldenJetzt(false, false, bt.id, String((e && e.message) || e))) bigTradeHeimMelden(bt, false, grund, Date.now() - anstoss, Date.now() - t0, String((e && e.message) || e))
     }
     finally{
+      const hwOk = _hwOkAt >= t0 && _hwOkPlan === String(bt.id)
+      if(nachOrder){ nachOrder.fertig = true; nachOrder.ok = hwOk }   // auch gescheitert: eine wartende Order hält er nicht länger auf, der Wiederholer bzw. das finally der Order übernimmt
       _bthLaeuft = false; _bthSelbst = false; _hwNaechsterHeimweg = Date.now() + hwPause()
-      // Beleg „Puls steht in konto" erst NACH dem Lauf (Puls-Flags weg), gilt bis zur nächsten Puls-Aktion (27.10.2026, s. kontoBelegGilt)
-      if(_hwOkAt >= t0 && _hwOkPlan === String(bt.id)){ try{ kontoBelegMerken(konto, _hwOkVoll) }catch(_){} }
+      // Beleg „Puls steht in konto" erst NACH dem Lauf (Puls-Flags weg), gilt bis zur nächsten Puls-Aktion (27.10.2026, s. kontoBelegGilt).
+      // Läuft die Order dieses frühen Heimwegs noch, stempelt ihn ihr finally (bigTradeHeimPlanen) — jetzt wäre er sofort wieder ungültig
+      if(hwOk){ if(nachOrder && !nachOrder.finallyDa && _tpOrbitLaeuft) nachOrder.beleg = { konto, voll: _hwOkVoll }; else { try{ kontoBelegMerken(konto, _hwOkVoll) }catch(_){} } }
     }
   }
   /* HEIM-WACHE (Finn 22.10.2026, Aurel pc-pw1put: nach der Orbit-V2-Order 17:40 Dubai auf Tradeify …7608 stand der Puls-Chrome noch ~30 min
@@ -55175,6 +55258,7 @@
   window._tpOrbitStarten = (id, fern) => tpOrbitStarten(id, fern)   // Test-Haken (Stub)
   async function tpOrbitStartenKern(planId, fern, opts){
     await mt5BalOeffnenAbwarten(60000)   // öffnet eine Balance-Lesung gerade ein MT5-Terminal, nicht mitten hinein klicken (08.10.2026)
+    await bigTradeHeimAbwarten()   // Heimweg nach der vorigen Order geht vor (03.11.2026, Finn: „kann nicht um eine Impuls-Order verzögert werden")
     let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
     // Funded-Vorschlag (27.10.2026, H1): weder Karte noch Fern-Start an „Bestätigen" vorbei
@@ -55722,6 +55806,10 @@
         // Warnung trotz ok (B37, 30.09.2026: z. B. SL-Bracket abgelehnt, Position steht) — Plan läuft wie gehabt, die Warnung bleibt
         // im Popup stehen (kein Auto-Schließen) und steht über mt5_baseline.tv.warnung auf der Karte
         const warn = (plan.route === 'tsv2' && r.warnung) ? String(r.warnung).slice(0, 300) : ''
+        // HEIMWEG SOFORT (03.11.2026, s. bigTradeHeimNachOrder): Start-Werte kommen aus der Order-Antwort → Puls ist fertig, der Rück-Login
+        // ins Prio-Konto läuft neben Hedge und „Läuft"; ohne balance_start liest v2AufOpen per Puls nach → Heimweg wie bisher im finally
+        // Geht Puls jetzt heim, gilt der Konto-Beleg der Order nicht mehr — sonst stempelte das finally ihn NACH dem Heimweg (Puls stünde laut Beleg im Order-Konto)
+        if(pv2 && typeof r.balance_start === 'number' && isFinite(r.balance_start)){ try{ if(bigTradeHeimNachOrder(extId, bthFenster(plan.route), plan.id)) _belegExt = '' }catch(_){} }
         if(pv2) await v2AufOpen()
         else await tvPlanGesendet(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
