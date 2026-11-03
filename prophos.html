@@ -52345,7 +52345,10 @@
       const eh = ((frisch || plan).mt5Baseline || {}).echo_hedge
       let weiter = ''
       if(frisch && frisch.route !== 'mt5v2'){
-        weiter = ` Railway hat ihn eben auf ${frisch.route === 'mt5' ? 'Echo mit Fusion-Hedge' : frisch.route} umgestellt — jetzt erneut starten.`
+        // Startzeit schon gesetzt (z. B. vom vorigen Klick „jetzt + 1 min") → nicht zusätzlich von Hand starten, sonst fielen Hand- und Zeit-Start zusammen (Prüfung 03.11.2026)
+        const su = Date.parse(frisch.startUm || '')
+        weiter = ` Railway hat ihn eben auf ${frisch.route === 'mt5' ? 'Echo mit Fusion-Hedge' : frisch.route} umgestellt — `
+          + (su && su > Date.now() - 30 * 60000 && !frisch.startUmGestartetAt ? `er startet zur Startzeit ${new Date(su).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} von selbst, nicht von Hand starten.` : 'jetzt erneut starten.')
       } else if(eh && eh.status === 'ohne'){
         // Railway kann den Hedge nicht stellen (Mini, kein Fusion-Konto, Marge …) — keine neue Startzeit, sonst nur Schleifen; der Claim-Riegel hält ihn ohnehin
         weiter = ` Railway kann den Hedge nicht stellen: ${String(eh.grund || eh.code || '?').slice(0, 140)} — startet nicht.`

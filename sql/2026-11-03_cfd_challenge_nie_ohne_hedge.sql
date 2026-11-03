@@ -34,7 +34,7 @@ begin
     return new;
   end if;
   select lower(coalesce(a.account_type, '')), true into kt, gefunden from public.accounts a where a.id = new.master_account_id;
-  if coalesce(gefunden, false) and kt not in ('challenge', 'phase1', 'phase2') then
+  if coalesce(gefunden, false) and kt <> '' and kt not in ('challenge', 'phase1', 'phase2') then   -- leere Kontoart = nicht lesbar (Prüfung 03.11.2026)
     return new;                                   -- Funded CFD u. a.: eigene Regeln (trade_plans_kontoart_weg)
   end if;
   if new.route = 'mt5' and new.slave_account_id is not null and coalesce(new.multiplier, 0) > 0 then
@@ -51,7 +51,7 @@ begin
   erst := coalesce(ss->>'art', '') <> 'echo_hedge';
   erst_at := case when erst then now() else coalesce((ss->>'erst_at')::timestamptz, now()) end;
   txt := case
-    when not coalesce(gefunden, false) then 'Kontoart des Masters nicht lesbar — CFD-Challenge vermutet, nie ohne Hedge'
+    when not coalesce(gefunden, false) or kt = '' then 'Kontoart des Masters nicht lesbar — CFD-Challenge vermutet, nie ohne Hedge'
     when new.route = 'mt5' then 'Echo ohne Fusion-Slave/Multiplikator — CFD-Challenges nur mit Hedge'
     when eh->>'status' = 'ohne' then 'Echo-Hedge nicht umgestellt: ' || left(coalesce(eh->>'grund', eh->>'code', '?'), 160)
     else 'Echo V2 (ohne Hedge) — CFD-Challenges laufen immer mit Fusion-Hedge, Umstellung steht noch aus' end;
