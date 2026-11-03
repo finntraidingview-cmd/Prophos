@@ -42,6 +42,50 @@ except Exception:
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PANEL_PORT", "8770"))
 
+
+# ══ LAUFENDER CODE (Betrieb 1 03.11.2026 nach .2012: pc-l5o8bv lief seit 06:53 dt mit altem Panel, mt5_live meldete copier_version .2012 — der
+# Neustart-Check verglich den neuen Stand mit der DATEI auf der Platte; war die schon erneuert (Download einer zweiten .bat-Schleife, panel_frisch.py
+# eines zweiten Panels, Datei von Hand/per Lotse kopiert), galt der Code als „unverändert“ und nur die VERSION wurde nachgezogen → nie neu gestartet).
+# Jetzt: Abbild des Quelltexts BEIM LADEN im Speicher; der Neustart-Check vergleicht damit, und der Herzschlag meldet es (panel_lauf). ══
+def _code_glatt(b):
+    return (b or b"").replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
+
+
+def _datei_bytes(pfad):
+    try:
+        with open(pfad, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+_GELADEN = {"panel": _datei_bytes(os.path.abspath(__file__)),
+            "provision": _datei_bytes(os.path.abspath(getattr(provision, "__file__", "") or os.path.join(HERE, "provision.py"))),
+            "datei": os.path.basename(os.path.abspath(__file__)), "start": time.time(), "pid": os.getpid(), "version": None}
+try:
+    with open(os.path.join(HERE, "VERSION"), "r", encoding="utf-8") as _vf:
+        _GELADEN["version"] = _vf.read().strip() or None
+except OSError:
+    pass
+
+
+def panel_code_weicht_ab(neu, name="panel"):
+    """REIN RECHNEND (testbar): weicht der Quelltext `neu` vom BEIM LADEN gemerkten Abbild ab? Kein Abbild → True (lieber neu starten)."""
+    alt = _GELADEN.get(name)
+    if alt is None or neu is None:
+        return True
+    return _code_glatt(neu) != _code_glatt(alt)
+
+
+def panel_lauf_info():
+    """Was dieser Panel-Prozess WIRKLICH fährt (für mt5_live.status.panel_lauf über den Prophos-Tab): Version, deren Code nachweislich läuft (Start bzw.
+    nachgezogen nach Vergleich mit dem Abbild), Startzeit, PID, Datei (panel.py / panel_frisch.py), sha12 des geladenen Quelltexts."""
+    import hashlib
+    b = _GELADEN.get("panel")
+    return {"version": _GELADEN.get("version"), "start_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_GELADEN["start"])),
+            "pid": _GELADEN.get("pid"), "datei": _GELADEN.get("datei"),
+            "sha12": hashlib.sha256(_code_glatt(b)).hexdigest()[:12] if b else None}
+
 # Nur diese Felder darf das Panel schreiben. Terminal-Pfade, magic und die erwarteten
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
 # max_lots_per_hedge abgeschafft (15.08.2026, Finn: "komplett weg") — Alt-Clients,
@@ -653,6 +697,8 @@ def snapshot():
     clog = read_json(os.path.join(HERE, "copier-log.json"), {}) or {}
     return {"instances": data, "conflicts": conflicts, "job": job,
             "plans": advance_plans(data), "version": _local_version(),
+            # LAUFENDER CODE (03.11.2026): „version“ ist nur die Datei — panel_lauf sagt, was dieser Prozess fährt (Start, PID, sha12)
+            "panel_lauf": panel_lauf_info(),
             # Stand des Bots (kann dem Panel voraus sein — er wird ohne Neustart getauscht)
             "bot_version": BOT_STAND.get("version"),
             "copier_log": clog.get("lines") or [],
@@ -6930,17 +6976,13 @@ def _panel_code_geaendert(sha):
     (kein sha, kein Netz): dann gilt der alte Weg, Neustart."""
     if not sha:
         return True
-    glatt = lambda b: b.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
-    laufend = {"panel.py": os.path.abspath(__file__),
-               "provision.py": os.path.abspath(getattr(provision, "__file__", os.path.join(HERE, "provision.py")))}
-    for name, pfad in laufend.items():
+    # gegen das Abbild BEIM LADEN (03.11.2026, pc-l5o8bv), nicht gegen die Datei — die kann schon erneuert sein, während der alte Code läuft
+    for name in ("panel", "provision"):
         try:
-            neu = repo_datei("mt5-copier/" + name, sha, 10)
-            with open(pfad, "rb") as f:
-                alt = f.read()
+            neu = repo_datei(f"mt5-copier/{name}.py", sha, 10)
         except Exception:
             return True
-        if glatt(neu) != glatt(alt):
+        if panel_code_weicht_ab(neu, name):
             return True
     return False
 
@@ -7044,6 +7086,7 @@ def _version_watcher(my_version):
                 _version_uebernehmen(remote)
                 print(f"[panel] Update {my_version} → {remote}: Panel-Code unveraendert — kein Neustart.", flush=True)
                 my_version = remote
+                _GELADEN["version"] = remote   # der laufende Code ist nachweislich der dieser Version (Abbild verglichen)
                 upd.update(auf=None, seit=None, gemeldet="")
                 continue
             # UPDATE-SCHUTZ (29.10.2026, Befund Deploy-Welle): zwischen der Sperrprüfung oben und hier lagen bis zu 20 s (zwei Abrufe in
@@ -7111,10 +7154,51 @@ def _selbst_auffrischen():
         print(f"[panel] Selbst-Auffrischen uebersprungen ({type(e).__name__}) — normaler Start.", flush=True)
 
 
+# ══ NUR EIN PANEL JE PC (Betrieb 1 03.11.2026: pc-usq1i6 hatte ZWEI panel.py-Prozesse, beide 13:19 dt — zwei start-panel.bat-Schleifen). Unter Windows
+# setzt ThreadingHTTPServer SO_REUSEADDR (allow_reuse_address) — das erlaubt dort einen ZWEITEN Bind auf 127.0.0.1:8770; „Port belegt“ griff nie. Beide
+# Prozesse fuhren alle Wachen (Schließ-Wache, Version-Watcher, Puls-Locks nur je Prozess). Jetzt: benannter Mutex vor allen Threads, dazu exklusiver Bind. ══
+_EINZEL_MUTEX = []   # Handle festhalten (sonst gibt Windows den Mutex beim Aufräumen frei)
+
+
+def panel_einzel_instanz():
+    """→ True (dieses Panel ist das einzige / kein Windows), False (es läuft schon eins). Benannter Mutex je Port, gilt bis zum Prozessende."""
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.CreateMutexW(None, False, f"Local\\ProphosPanel{PORT}")
+        if not h:
+            return True                      # Mutex nicht anlegbar → wie bisher starten (der exklusive Bind fängt den Rest)
+        if k32.GetLastError() == 183:        # ERROR_ALREADY_EXISTS
+            k32.CloseHandle(h)
+            return False
+        _EINZEL_MUTEX.append(h)
+        return True
+    except Exception:
+        return True
+
+
+class _PanelServer(ThreadingHTTPServer):
+    """Exklusiver Bind (03.11.2026): unter Windows kein SO_REUSEADDR (ließ den zweiten Bind zu), sondern SO_EXCLUSIVEADDRUSE."""
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(__import__("socket"), "SO_EXCLUSIVEADDRUSE"):
+            import socket as _so
+            self.socket.setsockopt(_so.SOL_SOCKET, _so.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
     if quickedit_aus():
         print("QuickEdit aus (Klick ins Fenster hält das Panel nicht mehr an)", flush=True)
     _selbst_auffrischen()
+    # nach dem Auffrischen: läuft der frische Stand per runpy in DIESEM Prozess, legt erst dessen main() den Mutex an (sonst sähe es sich selbst)
+    if not panel_einzel_instanz():
+        print(f"[panel] Es läuft schon ein Panel auf Port {PORT} — dieses Fenster beendet sich (nächster Versuch der .bat in ~70 s).", flush=True)
+        time.sleep(60)   # die .bat-Schleife startet nach 10 s neu: so nur ~1 Versuch je 70 s statt Download-Schleife alle 10 s
+        sys.exit(f"Panel läuft schon (Port {PORT})")
     print("=" * 66)
     print(" Echo-Panel (Prophos)")
     print(f" Ordner: {HERE}")
@@ -7200,7 +7284,7 @@ def main():
                 pass
     print("=" * 66)
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        _PanelServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\nPanel beendet.")
     except OSError as e:
