@@ -12647,7 +12647,6 @@
                 <span id="wd-risk-fehlt" style="font-size:12px;color:var(--danger)"></span>
               </div>
             </div>
-            <div id="wd-rec-zeile" style="font-size:12px;color:var(--sub);margin:0 0 6px"></div>
             <div id="wd-ablauf"></div>
             <div id="wd-uebersicht"></div>
             <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
@@ -54624,7 +54623,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2009'
+  const OS_TAB_BUILD = '2026-09-22.2010'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -71430,20 +71429,8 @@
     })
     p.addEventListener('keydown', ev => { if(ev.target.closest('button')) return; const ka = ev.target.closest('[data-wd-nd-id]'); if(ka && (ev.key === 'Enter' || ev.key === ' ')){ ev.preventDefault(); wdUebOeffnen(ka.dataset.wdNdId) } })
   })()
-  // RECOVERER (02.11.2026): je Konto mit laufender Regel eine Zeile im Farmer-Kopf, nur in der Admin-Sicht — reine Anzeige
-  function wdRecovererZeile(){
-    const box = document.getElementById('wd-rec-zeile'); if(!box) return
-    const de = v => Math.round(Math.abs(Number(v) || 0)).toLocaleString('de-DE')
-    const z = ((_wd.daten && _wd.daten.konten) || []).filter(k => wdSichtOk(k.user_id)).map(k => [k, window._wdZyklusRoh(k.id)]).filter(([, y]) => y && (y.aktiv || (y.art === 'tradeify' && y.gesperrt)))
-    const wer = k => `${escapeHtml(String(k.person || ''))} ${escapeHtml(String(k.name || '').replace(/\s*→.*$/, ''))}`
-    // TRADEIFY ZYKLUS IM PLUS (03.11.2026): „Zyklus −X $ · Payout erst ab +1 $“, beim Ausgleichs-Trade mit TP und Hedge
-    box.innerHTML = z.map(([k, y]) => y.art === 'tradeify'
-      ? `<div>Recovery · ${wer(k)} · Zyklus ${zyklusTxt(y.gewinn)} $ · Payout erst ab +1 $${y.aktiv ? ` · Ausgleichs-Trade TP ${de(y.ziel)} $ / Hedge ${de(y.hedge_eur)} €` : ` · normale WD bis ${Number(y.ziel_tage) - 1}/${y.ziel_tage}`}</div>`
-      : `<div>Recoverer · ${wer(k)} · Zyklus ${y.nr}`
-      + (Number(y.verlust) > 0 ? ` · −${de(y.verlust)} $` : ' · Normalwerte') + (Number(y.tage_geschaetzt) > 0 ? ` · noch ${y.tage_geschaetzt} Tage` : '') + '</div>').join('')
-  }
+  // RECOVERER-/RECOVERY-TEXTLISTE im Farmer-Kopf entfernt (Finn 03.11.2026: „kanns du das weglassen mies häslich“) — Chips „Recoverer“/„Recovery“ mit Popup bleiben
   function wdRender(){
-    try{ wdRecovererZeile() }catch(e){ console.warn('[wd] Recoverer', e) }
     const rows = wdSichtRows(_wd.rows)   // .1773: Zähler-Zeile und Hinweise nur über die Admin-Sicht
     const erwartet = (e => e && e.filter(x => wdSichtOk(x.user_id)))(wdErwartet()), fehlend = wdFehlend()
     wdStatus()
