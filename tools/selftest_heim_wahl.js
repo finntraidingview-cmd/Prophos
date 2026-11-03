@@ -17,11 +17,15 @@ function fn(name){
 }
 const konst = SRC.match(/\n  const BTH_WD_WECHSEL_USD = \d+, BTH_WD_HALTEN_MS = \d+/)
 if(!konst) throw new Error('BTH_WD_WECHSEL_USD/BTH_WD_HALTEN_MS nicht gefunden')
+const konstBig = SRC.match(/\n  const BTH_WECHSEL_PKT = \d+, BTH_HALTE_MS = [\d *]+/)
+if(!konstBig) throw new Error('BTH_WECHSEL_PKT/BTH_HALTE_MS nicht gefunden')
 
-// Umgebung: _hwPulsWegAt (Heim-Wache-Anstoß), wdHeimAbstand wird im Test immer über o.abstand ersetzt
-const bau = new Function(konst[0] + '\nlet _hwPulsWegAt = 0\nconst wdHeimAbstand = () => null\nconst console = { info(){} }\n' + fn('heimNaechster')
-  + '\nreturn { heimNaechster, wegAt: () => _hwPulsWegAt }')
-const { heimNaechster, wegAt } = bau()
+// Umgebung: _hwPulsWegAt (Heim-Wache-Anstoß), Kurs fest 20950 (NQ und MNQ), Symbol-Wurzel am Präfix
+const bau = new Function(konst[0] + konstBig[0] + '\nlet _hwPulsWegAt = 0\nconst console = { info(){} }\n'
+  + 'const tvSymbolWurzel = s => (/^MNQ/.test(String(s)) ? "MNQ" : "NQ")\nconst hedgeKursDerWurzel = () => 20950\n'
+  + fn('wdHeimAbstand') + '\n' + fn('heimNaechster')
+  + '\nreturn { heimNaechster, wdHeimAbstand, wegAt: () => _hwPulsWegAt, PKT: BTH_WECHSEL_PKT, HALTE: BTH_HALTE_MS }')
+const { heimNaechster, wdHeimAbstand, wegAt, PKT, HALTE } = bau()
 
 const fehler = []
 let n = 0
@@ -86,5 +90,38 @@ ok(wegAt() === vorher && st.id === 'a', '10: TopstepX wählt, ohne die TradingVi
 st = { id: 'b', at: uhr - 120000 }
 ok(heimNaechster([A, B], juengster, st, o({ a: 500, b: 500 })) === B, '11: Gleichstand → bisheriger bleibt')
 
+// ── BIG TRADES IN PUNKTEN (S2-Stopp 03.11.2026) ──
+// 12) wdHeimAbstand: $ wie bisher, mit punkte = true die NQ-Punkte (3 NQ: 50 Pkt = 3.000 $)
+const P3 = { id: 'p3', masterContracts: 3, masterSymbol: 'NQ1!', mt5Baseline: { hedge: { tp_level_nq: 21000, sl_level_nq: 20800 } } }
+ok(wdHeimAbstand(P3) === 3000, '12: $-Rest 3 NQ × 50 Pkt × 20 = 3.000 $')
+ok(wdHeimAbstand(P3, true) === 50, '12: Rest in Punkten = 50')
+ok(PKT === 15 && HALTE === 180000, '12: Vorgabe 15 Pkt / 3 min')
+const big = (rest, extra) => o(rest, Object.assign({ wechsel: PKT, halten: HALTE, einheit: 'Pkt' }, extra || {}))
+
+// 13) 3 NQ, Reste kreuzen sich alle 60 s um ±5 Pkt (= ±300 $, früher Wechsel jede Minute) → nie ein Wechsel, 20 min lang
+st = { id: 'a', at: uhr }
+let wechsel = 0
+for(let i = 1; i <= 20; i++){
+  uhr += 60000
+  const r = i % 2 ? { a: 40, b: 35 } : { a: 35, b: 40 }
+  if(heimNaechster([A, B], juengster, st, big(r)) !== A) wechsel++
+}
+ok(wechsel === 0 && st.id === 'a', '13: kreuzende Reste (±5 Pkt) → kein Pendeln (' + wechsel + ' Wechsel)')
+
+// 14) deutlicher Abstand (B 20 Pkt näher): vor Ablauf der Haltezeit A, danach B
+st = { id: 'a', at: uhr - 60000 }
+ok(heimNaechster([A, B], juengster, st, big({ a: 60, b: 40 })) === A, '14: 20 Pkt näher, Wahl 1 min alt → A bleibt')
+st = { id: 'a', at: uhr - 181000 }
+ok(heimNaechster([A, B], juengster, st, big({ a: 60, b: 40 })) === B, '14: 20 Pkt näher, Wahl > 3 min alt → B')
+// 14b) 14 Pkt näher, Haltezeit vorbei → A bleibt (unter BTH_WECHSEL_PKT)
+st = { id: 'a', at: uhr - 600000 }
+ok(heimNaechster([A, B], juengster, st, big({ a: 54, b: 40 })) === A, '14b: nur 14 Pkt näher → A bleibt')
+
+// 15) nach der Order von B (Merker zurückgesetzt wie bigTradeHeimNachOrder) → sofort der nähere, keine Haltezeit
+st = { id: '', at: 0 }
+ok(heimNaechster([A, B], juengster, st, big({ a: 30, b: 33 })) === A && st.at === uhr, '15: nach Order sofort Prio-Wahl ohne Haltezeit')
+ok(SRC.includes("_bthBigWahl[f] = { id: '', at: 0 }"), '15: bigTradeHeimNachOrder setzt den Big-Trade-Merker zurück')
+ok(SRC.includes('abstand: p => wdHeimAbstand(p, true), wechsel: BTH_WECHSEL_PKT, halten: BTH_HALTE_MS'), '16: bigTradePlan rechnet Big Trades in Punkten mit BTH_WECHSEL_PKT/BTH_HALTE_MS')
+
 if(fehler.length){ aus('FEHLER selftest_heim_wahl (' + fehler.length + ' von ' + n + '):\n  ' + fehler.join('\n  ')); if(istNode) process.exit(1); else throw new Error('rot') }
-aus('OK selftest_heim_wahl: ' + n + ' Prüfungen — näherer gewinnt, Hysterese 30 $ / 60 s, ohne Kurs die bisherige Wahl bzw. der jüngste, geschlossener zählt nicht, Wache nur TradingView')
+aus('OK selftest_heim_wahl: ' + n + ' Prüfungen — näherer gewinnt, Hysterese WD 30 $ / 60 s, Big Trades 15 Pkt / 3 min ohne Pendeln, ohne Kurs die bisherige Wahl bzw. der jüngste, geschlossener zählt nicht, Wache nur TradingView')

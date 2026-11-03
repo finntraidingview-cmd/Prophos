@@ -27287,19 +27287,27 @@
     // MEHRERE BIG TRADES IM FENSTER (03.11.2026, Finn ~17:35 Dubai: „Wichtig ist, dass der Puls immer in den Account reingeht, wo wir
     // näher am Take Profit/Stop Loss sind"): bisher der jüngste — nach dem Start eines zweiten Orbit stand der Puls-Chrome im neuen Konto,
     // der ältere (meist der nähere) lief ohne Userscript/Reader bis zum Ende (Prüfung Z2). Jetzt wie bei den WDs der mit dem kleinsten
-    // $-Rest bis TP oder Liq, gleiche Hysterese (30 $ / 60 s), eigener Merker je Fenster. Kein Kurs/Level → der jüngste wie bisher.
+    // Rest bis TP oder Liq, eigener Merker je Fenster. Kein Kurs/Level → die bisherige Wahl bzw. der jüngste.
+    // Hysterese in PUNKTEN, nicht in $ (S2-Stopp zu 7542f4af: 30 $ sind bei 3 NQ nur 0,5 Pkt — zwei sich kreuzende Big Trades hätten Puls
+    // alle 60 s das TV-Konto wechseln lassen, jeder Wechsel setzt die Reader-Ruhe der Panel-Schließ-Wache zurück): BTH_WECHSEL_PKT / BTH_HALTE_MS.
     // Ohne Fenster (Aufrufer fragen nur „läuft einer?") ebenfalls der jüngste, ohne den Merker anzufassen.
     const bigs = offen.filter(p => !istApex(p) && !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true))
-    const big = (fenster && bigs.length > 1) ? heimNaechster(bigs, juengster, _bthBigWahl[fenster] || (_bthBigWahl[fenster] = { id: '', at: 0 }), { wort: () => 'Big Trade', wache: fenster === 'tv' })
+    const big = (fenster && bigs.length > 1) ? heimNaechster(bigs, juengster, _bthBigWahl[fenster] || (_bthBigWahl[fenster] = { id: '', at: 0 }),
+      { wort: () => 'Big Trade', wache: fenster === 'tv', abstand: p => wdHeimAbstand(p, true), wechsel: BTH_WECHSEL_PKT, halten: BTH_HALTE_MS, einheit: 'Pkt' })
       : juengster(bigs)
     return big || wdHeimWahl(offen.filter(istApex), juengster) || wdHeimWahl(offen.filter(istWd), juengster)
   }
   // $-Rest eines Winning Days bis TP oder Liq (der kleinere), aus dem Live-Kurs der Plan-Wurzel → Zahl oder null (kein Kurs/Level)
   // (seit 03.11.2026 auch für Big Trades: hedge.sl_level_nq ist dort ebenso die engste Liq-Grenze, s. hedgeLiqFelder)
   const BTH_WD_WECHSEL_USD = 30, BTH_WD_HALTEN_MS = 60000   // Umschalten nur bei klar näherem WD und nicht öfter als einmal je Minute
+  // BIG TRADES (03.11.2026, S2-Stopp): Puls zieht ins andere Big-Trade-Konto erst um, wenn es mindestens BTH_WECHSEL_PKT NQ-Punkte näher an
+  // TP/Liq ist UND die letzte Wahl mindestens BTH_HALTE_MS steht. Finn kann beide Werte hier ändern. Direkt nach einer Order gilt keine
+  // Haltezeit (bigTradeHeimNachOrder: Puls verlässt das Order-Konto ohnehin).
+  const BTH_WECHSEL_PKT = 15, BTH_HALTE_MS = 3 * 60000
   const _bthWdWahl = { id: '', at: 0 }
   const _bthBigWahl = {}   // Fenster ('tv' | 'tsx') → { id, at } der zuletzt gewählten Big-Trade-Heimat (03.11.2026)
-  function wdHeimAbstand(p){
+  // punkte = true (Big Trades, 03.11.2026): Rest in NQ-Punkten statt in $ (Kontrakte und $/Punkt bleiben außen vor)
+  function wdHeimAbstand(p, punkte){
     try{
       const h = p && p.mt5Baseline && p.mt5Baseline.hedge; if(!h) return null
       const sym = (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || p.masterSymbol || ''
@@ -27307,7 +27315,7 @@
       const kurs = (typeof hedgeKursDerWurzel === 'function') ? (hedgeKursDerWurzel(w) || hedgeKursDerWurzel(w === 'MNQ' ? 'NQ' : 'MNQ')) : null
       if(!(kurs > 0)) return null
       const ppl = w === 'MNQ' ? 2 : 20, kt = Number(p.masterContracts) || 1
-      const reste = [Number(h.tp_level_nq), Number(h.sl_level_nq)].filter(x => x > 1000).map(x => Math.abs(x - kurs) * ppl * kt)
+      const reste = [Number(h.tp_level_nq), Number(h.sl_level_nq)].filter(x => x > 1000).map(x => Math.abs(x - kurs) * (punkte ? 1 : ppl * kt))
       return reste.length ? Math.min(...reste) : null
     }catch(_){ return null }
   }
@@ -27318,7 +27326,8 @@
   }
   // Der Plan mit dem kleinsten $-Rest bis TP oder Liq (aus wdHeimWahl herausgelöst 03.11.2026, gilt jetzt auch für Big Trades).
   // stand = Merker { id, at } der letzten Wahl (wird hier fortgeschrieben). o = { wort(p) fürs Protokoll, wache: Prio-Wechsel stößt die
-  // TradingView-Heim-Wache an, abstand(p): Test-Haken, sonst wdHeimAbstand }. Kein Abstand bekannt → der jüngste (juengster).
+  // TradingView-Heim-Wache an, abstand(p): sonst wdHeimAbstand in $, wechsel/halten: Hysterese (Standard 30 $ / 60 s wie die WDs),
+  // einheit fürs Protokoll }. Kein Abstand bekannt → die bisherige Wahl bzw. der jüngste (juengster).
   function heimNaechster(liste, juengster, stand, o){
     o = o || {}
     if(liste.length <= 1) return liste[0] || null
@@ -27328,13 +27337,14 @@
     // kein Kurs → der bisher gewählte, solange er offen ist (kurze Kurs-Lücke kippt das Ziel nicht, Prüf-Agent 03.11.2026); sonst der jüngste
     if(!bekannt.length) return akt ? akt.p : juengster(liste)
     const best = bekannt[0], jetzt = (o.jetzt || Date.now)()
-    // Hysterese: der bisherige bleibt, solange der andere nicht ≥ 30 $ näher ist bzw. die letzte Wahl < 60 s her ist (kein Hin und Her —
-    // jeder Wechsel ist ein Login im Puls-Chrome und macht den Reader für die Konto-Ruhe blind)
-    if(akt && akt.a != null && String(best.p.id) !== stand.id && (best.a > akt.a - BTH_WD_WECHSEL_USD || jetzt - stand.at < BTH_WD_HALTEN_MS)) return akt.p
+    // Hysterese: der bisherige bleibt, solange der andere nicht um „wechsel" näher ist bzw. die letzte Wahl jünger als „halten" ist (kein Hin
+    // und Her — jeder Wechsel ist ein Login im Puls-Chrome und macht den Reader für die Konto-Ruhe blind)
+    const wechsel = o.wechsel != null ? o.wechsel : BTH_WD_WECHSEL_USD, halten = o.halten != null ? o.halten : BTH_WD_HALTEN_MS
+    if(akt && akt.a != null && String(best.p.id) !== stand.id && (best.a > akt.a - wechsel || jetzt - stand.at < halten)) return akt.p
     if(String(best.p.id) !== stand.id){
       stand.id = String(best.p.id); stand.at = jetzt
       if(o.wache){ try{ _hwPulsWegAt = jetzt }catch(_){} }   // Heim-Wache: der Prio-Wechsel zählt wie eine Puls-Aktion → Umzug nach 3 s, nicht erst nach 90 s
-      console.info(`[big-trade] Heimkonto = ${o.wort ? o.wort(best.p) : 'Plan'} „${best.p.masterName || best.p.id}" (${Math.round(best.a)} $ bis TP/Liq, ${liste.length} offen)`)
+      console.info(`[big-trade] Heimkonto = ${o.wort ? o.wort(best.p) : 'Plan'} „${best.p.masterName || best.p.id}" (${Math.round(best.a)} ${o.einheit || '$'} bis TP/Liq, ${liste.length} offen)`)
     }
     return best.p
   }
@@ -27388,6 +27398,7 @@
     const f = fenster || 'tv', ext = String(konto || '').trim()
     _bthNachOrder = null
     _bthGeklickt.id = String(planId || ''); _bthGeklickt.at = Date.now()
+    _bthBigWahl[f] = { id: '', at: 0 }   // Prio-Wahl nach der Order sofort, ohne Haltezeit (S2 03.11.2026) — Puls verlässt das Order-Konto ohnehin
     if(!ext || !bigTradeHeimPlanen(ext, 'Order ' + ext.slice(-4), true, f)) return false
     _bthNachOrder = { ext, fenster: f, at: Date.now(), begonnen: false, fertig: false, ok: false, beleg: null, finallyDa: false }
     return true
