@@ -336,6 +336,36 @@ def main():
     check(F(RL, aev, ip, 149981.46, 149981.46, 31568.5, "buy", 20, 3, peak=150000.0, kw_firmen=[]) == alt,
           "Kernwerte fehlen → Konto-Boden wie bisher")
 
+    # END-OF-DAY (03.11.2026, Finn zu Tradeify 150k Funded, Plan 004d8432, Kennungen erfunden): zweiter Trade des Tages, SELL 3 NQ @ 28.389,25,
+    # Start-Balance 155.667,78 nach +5.667,78 $ am Morgen → Liq = Tagesstart 150.000 − 4.500 = 145.500 (≈ 169,46 Pkt), nicht Start − 4.500 (75 Pkt)
+    REOD = [dict(r, maxdd_art="eod_trailing") for r in REGELN if r.get("firma") == "Tradeify"]
+    teod = {"id": "te", "firm": "Tradeify", "account_type": "funded", "starting_balance": 150000, "max_drawdown": "4500", "name": "150k FTDFYSLX150000000000 → Funded"}
+    peod = {"id": "p2", "master_account_id": "te", "started_at": "2026-11-03T13:33:29+00:00",
+            "mt5_baseline": {"tv": {"balance_start": 155667.78, "today_pnl_start": 5667.78}}}
+    fr_eod = [{"id": "p1", "master_account_id": "te", "started_at": "2026-11-03T10:11:00+00:00", "bal_start": 150000.0}]
+    ts_e, q_e = T(peod, 155667.78, fr_eod)
+    check(ts_e == 150000.0 and "erster Trade" in q_e, f"EOD: Tagesstart aus dem ersten Trade des Tages → {ts_e} ({q_e})")
+    ts_p, q_p = T(peod, 155667.78, [])
+    check(ts_p == 150000.0 and "Today's P&L" in q_p, f"EOD: ohne früheren Trade Tagesstart = Start − Today's P&L → {ts_p} ({q_p})")
+    ze = F(REOD, teod, peod, 155667.78, ts_e, 28389.25, "sell", 20, 3, peak=150000.0)
+    check(ze["liq_regel_balance"] == 145500.0 and abs(ze["liq_regel_level_nq"] - 28558.71) < 0.3 and "End-of-Day" in ze["liq_regel_text"],
+          f"EOD: Liq 145.500 / ≈ 28.558,71 (169 Pkt über dem Einstieg) → {ze['liq_regel_balance']} / {ze['liq_regel_level_nq']} ({ze['liq_regel_text']})")
+    lvl_e, pl_e = a["lt_demo_liq"](None, None, ze, 155667.78, 28389.25, "sell", 20, 3)
+    check(lvl_e == ze["liq_regel_level_nq"] and pl_e == -10167.78, f"EOD: Demo-Liq am selben Level, P&L −10.167,78 → {lvl_e} / {pl_e}")
+    # erster Trade des Tages (Today's P&L 0): wie bisher Start − 4.500
+    p0 = dict(peod, mt5_baseline={"tv": {"balance_start": 150000.0, "today_pnl_start": 0}})
+    ts0, _ = T(p0, 150000.0, [])
+    z0 = F(REOD, teod, p0, 150000.0, ts0, 28389.25, "sell", 20, 3, peak=150000.0)
+    check(z0["liq_regel_balance"] == 145500.0 and z0["liq_regel_level_nq"] == 28464.25, f"EOD: erster Trade → 75 Pkt wie bisher → {z0['liq_regel_level_nq']}")
+    # Verlust am Morgen (−2.000): Tagesstart 150.000 bleibt → Liq näher (2.500 $ = 41,67 Pkt), nie weiter als Start − 4.500
+    pv = dict(peod, mt5_baseline={"tv": {"balance_start": 148000.0, "today_pnl_start": -2000.0}})
+    tsv, _ = T(pv, 148000.0, [])
+    zv = F(REOD, teod, pv, 148000.0, tsv, 28389.25, "sell", 20, 3, peak=150000.0)
+    check(zv["liq_regel_balance"] == 145500.0 and zv["liq_regel_level_nq"] == 28430.92, f"EOD: nach −2.000 Liq 41,67 Pkt → {zv['liq_regel_level_nq']}")
+    # ohne maxdd_art (alte Zeilen) unverändert ab Start-Balance
+    zalt = F(REGELN, teod, peod, 155667.78, ts_e, 28389.25, "sell", 20, 3, peak=150000.0)
+    check(zalt["liq_regel_balance"] == 151167.78, f"ohne eod_trailing wie bisher ab Start-Balance → {zalt['liq_regel_balance']}")
+
     print("\nALLES OK" if ok else "\nFEHLER")
     sys.exit(0 if ok else 1)
 

@@ -12924,6 +12924,7 @@ def _liq_de(v, d=0):
 def liq_aus_regel(regel, groesse, balance_start, tagesstart):
     """REIN RECHNEND (testbar): Liquidations-Balance nach einer liq_regeln-Zeile → (balance | None, text).
     fest           Start-Balance − Betrag           trailing_lock  min(Start-Balance − Betrag, Größe + Lock)
+                   (maxdd_art 'eod_trailing': Tagesstart − Betrag, s. u.)
     tagesstart     Tagesstart − Betrag              stufen         Tagesstart − Daily Loss der Stufe (Stufe nach Tagesstart)
     boden          Größe (der Zeile, sonst des Kontos) + Lock
     Tagesstart fehlt → Start-Balance (dann ist dieser Trade der erste des Handelstags). Ohne nötige Werte → (None, Grund)."""
@@ -12934,6 +12935,12 @@ def liq_aus_regel(regel, groesse, balance_start, tagesstart):
     gr = _wd_num(regel.get("groesse")) or _wd_num(groesse)
     ts = tagesstart if tagesstart is not None else balance_start
     if art == "fest" and b:
+        # END-OF-DAY-DRAWDOWN (03.11.2026, Finn zu Marc Tradeify 150k Funded …5998, Plan 004d8432: „Tradeify ist End-of-Day-Drawdown. Der
+        # erste Trade heute hat +5.667,78 $ gemacht. Liq ist 4.500 + das Plus von heute"): bei EOD-Firmen zählt der Betrag ab der Balance zu
+        # Beginn des Handelstags, nicht ab dem Trade-Start — das Radar zeigte die Liq 75 statt ~169 Pkt über dem Einstieg (SELL 3 NQ).
+        # Ohne Tagesstart wie bisher ab Start-Balance (dann ist dieser Trade der erste des Tages).
+        if regel.get("maxdd_art") == "eod_trailing" and tagesstart is not None:
+            return round(tagesstart - b, 2), f"fest {_liq_de(b)} $ ab Tagesstart {_liq_de(tagesstart, 2)} $ (End-of-Day)"
         if balance_start is None:
             return None, f"fest {_liq_de(b)} $ — keine Start-Balance"
         return round(balance_start - b, 2), f"fest {_liq_de(b)} $ ab Start-Balance"
@@ -12974,6 +12981,12 @@ def liq_tagesstart(p, start_bal, fruehere):
     if tag and kand:
         f = min(kand, key=lambda x: str(x["started_at"]))
         return _wd_num(f["bal_start"]), "erster Trade des Handelstags"
+    # TODAY'S P&L BEIM START (03.11.2026, EOD-Liq): kein früherer Prophos-Trade heute, aber TradingView meldete beim Start schon einen
+    # Tages-P&L (z. B. Hand-Trade oder ein Plan ohne Start-Balance) → Tagesstart = Start-Balance − Today's P&L
+    tv = ((p.get("mt5_baseline") or {}).get("tv") or {}) if isinstance(p.get("mt5_baseline"), dict) else {}
+    tp = _wd_num(tv.get("today_pnl_start")) if isinstance(tv, dict) else None
+    if start_bal is not None and tp is not None and tp != 0 and abs(tp) < start_bal:
+        return round(start_bal - tp, 2), "Start-Balance − Today's P&L beim Start"
     return start_bal, "Start-Balance dieses Trades"
 
 
