@@ -22575,9 +22575,16 @@ def ap_notiz(stufe, rest_txt, bal, bal_quelle):
 
 
 def _ap_de(x, stellen=2):
-    """Zahl deutsch: 0.18 → „0,18“, 2.0 → „2“ (Lots in Notizen)."""
-    x = float(x)
-    return str(int(x)) if x == int(x) else f"{x:.{stellen}f}".rstrip("0").replace(".", ",")
+    """Zahl deutsch: 0.18 → „0,18“, 2.0 → „2“ (Lots in Notizen), 15000 → „15.000“, -4412.22 → „-4.412,22“.
+    03.11.2026 (Befund S4: 1200,4 mit stellen=0 → „12 $ vor dem TP“): rstrip("0") lief auch ohne Nachkommastellen über die Ganzzahl —
+    jetzt nur im Nachkommateil, dazu Tausenderpunkt. Nachkomma-Nullen fallen weiter weg (2,50 → „2,5“)."""
+    x = round(float(x), stellen)
+    if x == 0:
+        x = 0.0                                      # kein „-0“
+    s = f"{x:,.{stellen}f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def ap_klein_normal(ph, u, f=1.0):
