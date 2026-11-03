@@ -33681,9 +33681,21 @@
     if(!plus || !(lvl > 1000) || !(ein > 1000)) return null
     const pkt = Math.round(plus * (ein - lvl) * 100) / 100   // Liq liegt gegen die Trade-Richtung: BUY darunter, SELL darüber
     if(!(pkt >= 10 && pkt <= 2000)) return null
-    const bal = Number(t.liq_regel_balance)
-    return { sl_level_nq: Math.round(lvl * 100) / 100, sl_art: 'liquidation', sl_punkte: pkt, liq_balance: bal > 0 ? bal : null,
-      liq_quelle: 'radar_liq_regel', sl_level_quelle: 'radar_liq_regel', liq_regel_text: String(t.liq_regel_text || '').slice(0, 160) || null }
+    // NUR MIT ECHTER BALANCE (Fremd-Review 03.11.2026): das Level wird EINMAL übernommen und nie mehr nachgezogen — ohne Start-Balance rechnet
+    // das Backend „fest" als Betrag ab Einstieg (der Tagesgewinn fehlt, Marc: 75 statt 169 Pkt) → der Hedge schlösse zu früh. Darum: Start-
+    // und Liq-Balance müssen da sein und der $-Abstand des Levels muss zu ihnen passen (Punkte × $/Pkt × Kontrakte ≈ Start − Liq-Balance).
+    // Alter Backend-Stand ohne End-of-Day-Liq (Text „ab Start-Balance", vor 87775683/4471dd1e) → nie übernehmen.
+    const bs = Number(t.balance_start), bal = Number(t.liq_regel_balance)
+    if(!(bs > 0) || !(bal > 0) || !(bs > bal)) return null
+    if(/ab Start-Balance/.test(String(t.liq_regel_text || ''))) return null
+    const ppl = /^MNQ/i.test(String(t.symbol_root || '')) ? 2 : 20, kt = Number(t.kt) > 0 ? Number(t.kt) : Number(p.masterContracts) || 0
+    if(!(kt > 0)) return null
+    const usd = pkt * ppl * kt, soll = bs - bal
+    if(Math.abs(usd - soll) > Math.max(30, soll * 0.02)) return null
+    // weiches Tageslimit (Apex Daily Loss u. a., liq_regel_soft): Positionen zu, Konto lebt → kein „geblowt" im Konto-weg-Urteil (KW_ENDE)
+    return Object.assign({ sl_level_nq: Math.round(lvl * 100) / 100, sl_art: 'liquidation', sl_punkte: pkt, liq_balance: bal, liq_balance_start: bs,
+      liq_quelle: 'radar_liq_regel', sl_level_quelle: 'radar_liq_regel', liq_regel_text: String(t.liq_regel_text || '').slice(0, 160) || null },
+      t.liq_regel_soft === true ? { liq_art: 'daily_loss' } : {})
   }
   window._hedgeLiqAusRadarWert = hedgeLiqAusRadarWert
   async function hedgeLiqAusRadar(p, h){
@@ -33698,8 +33710,11 @@
     const d = r.ok ? await r.json().catch(() => null) : null
     if(!d || d.stand_alt) return
     const t = ((d.trades) || []).find(x => String(x.id || x.plan_id || '') === pid); if(!t) return
-    const frischH = (p.mt5Baseline && p.mt5Baseline.hedge) || h
-    const patch = hedgeLiqAusRadarWert(p, frischH, t)
+    // frisch aus dem Cache (baselineLokal ersetzt den Eintrag): während des Abrufs geschlossen bzw. schon ein Level → nichts schreiben
+    const pf = (tradePlans || []).find(x => String(x.id) === pid) || p
+    const frischH = (pf.mt5Baseline && pf.mt5Baseline.hedge) || null
+    if(!frischH || pf.status !== 'open') return
+    const patch = hedgeLiqAusRadarWert(pf, frischH, t)
     if(!patch){ console.info(`[hedge] Liq aus dem Radar für „${p.masterName || pid}": kein plausibles Level (${t.liq_regel_level_nq ?? '—'})`); return }
     await hedgeAmPlanSchreiben(p.id, patch)
     console.info(`[hedge] Liq aus dem Radar für „${p.masterName || pid}": ${patch.sl_level_nq} (${patch.sl_punkte} Pkt, ${patch.liq_regel_text || ''}) — Radar-Schluss + Airbag folgen`)
@@ -54859,7 +54874,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2018'
+  const OS_TAB_BUILD = '2026-09-22.2019'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

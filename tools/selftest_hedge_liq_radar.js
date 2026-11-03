@@ -18,13 +18,14 @@ const ok = (b, t) => { n++; if(!b) fehler.push(t) }
 
 const plan = { id: 'p1', richtung: 'sell', masterSl: null, masterName: 'Tradeify 150k …0001' }
 const hedge = { status: 'offen', einstieg_nq: 28389.25, sl_level_nq: null, liq_radar: true }
-const zeile = { id: 'p1', liq_regel_level_nq: 28558.71, liq_regel_balance: 145500, liq_regel_text: 'fest 4.500 $ ab Tagesstart 150.000,00 $ (End-of-Day)', einstieg_nq: 28389.25 }
+const zeile = { id: 'p1', liq_regel_level_nq: 28558.71, liq_regel_balance: 145500, balance_start: 155667.78, kt: 3, symbol_root: 'NQ',
+  liq_regel_text: 'fest 4.500 $ ab Tagesstart 150.000,00 $ (End-of-Day)', einstieg_nq: 28389.25 }
 
 // 1) Marc-Fall: Level 28.558,71, 169,46 Pkt, Liquidation
 const r1 = W(plan, hedge, zeile)
 ok(r1 && r1.sl_level_nq === 28558.71 && r1.sl_punkte === 169.46 && r1.sl_art === 'liquidation' && r1.liq_balance === 145500, '1: SELL ohne SL → Liq aus dem Radar ' + JSON.stringify(r1))
 // 2) BUY: Liq unter dem Einstieg
-const r2 = W(Object.assign({}, plan, { richtung: 'buy' }), hedge, Object.assign({}, zeile, { liq_regel_level_nq: 28314.25 }))
+const r2 = W(Object.assign({}, plan, { richtung: 'buy' }), hedge, Object.assign({}, zeile, { liq_regel_level_nq: 28314.25, balance_start: 150000 }))
 ok(r2 && r2.sl_punkte === 75, '2: BUY 75 Pkt darunter → ' + JSON.stringify(r2))
 // 3) falsche Seite → nichts
 ok(W(Object.assign({}, plan, { richtung: 'buy' }), hedge, zeile) === null, '3: BUY mit Level über dem Einstieg → null')
@@ -37,6 +38,11 @@ ok(W(plan, Object.assign({}, hedge, { status: 'geschlossen' }), zeile) === null,
 // 7) unplausibel: < 10 Pkt bzw. > 2.000 Pkt, kein Level
 ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_level_nq: 28395 })) === null, '7: 5,75 Pkt → null')
 ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_level_nq: 30500 })) === null, '7: 2.110 Pkt → null')
+// 7b) Schutz gegen zu nahe Liq (Fremd-Review): ohne Start-Balance, alter Backend-Text, $-Abstand passt nicht zur Balance
+ok(W(plan, hedge, Object.assign({}, zeile, { balance_start: null })) === null, '7b: ohne Start-Balance → null')
+ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_level_nq: 28464.25, liq_regel_balance: 151167.78, liq_regel_text: 'fest 4.500 $ ab Start-Balance' })) === null, '7b: alter Backend-Stand (ab Start-Balance) → null')
+ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_level_nq: 28464.25 })) === null, '7b: Level 75 Pkt, Balance sagt 169 Pkt → null')
+ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_soft: true })).liq_art === 'daily_loss', '7c: weiches Tageslimit → liq_art daily_loss')
 ok(W(plan, hedge, Object.assign({}, zeile, { liq_regel_level_nq: null })) === null, '7: ohne Level → null')
 // 8) Einstieg nur in der Radar-Zeile → reicht
 const r8 = W(plan, Object.assign({}, hedge, { einstieg_nq: null }), zeile)
