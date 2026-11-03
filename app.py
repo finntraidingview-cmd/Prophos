@@ -36965,18 +36965,42 @@ def ap_bal_auto_gruppen_tick(jetzt, reg=None):
 # Plan wartet, der Balance-Takt liest, der nächste Takt bestätigt. Richtung am Start (ap_richtungsschutz) dreht nur Unbestätigte — ein
 # bot-bestätigter Plan bekommt wie ein hand-bestätigter nur das Konflikt-Flag; die Saldo-/Zeit-Riegel am Start bleiben unverändert. ══
 AP_AUTO_BEST_TAKT_S = 120
-_ap_auto_best = {"at": 0.0, "tag": "", "aktiv": False, "bestaetigt": [], "gewartet": [], "fehler": ""}
+_ap_auto_best = {"at": 0.0, "tag": "", "aktiv": False, "umfang": None, "bestaetigt": [], "gewartet": [], "fehler": ""}
+
+
+# NUR CFD-CHALLENGES (A1, Finn 04.11.2026 ~00:20: „Ja für CFD-Challenge" — Futures-Challenges bleiben von Hand bestätigt): regeln.auto_bestaetigen
+# true = alle Auto-Pläne wie bisher, "cfd" (oder ["cfd"]) = nur Pläne auf CFD-Challenges (Kontoart challenge/phase1/phase2, Weg Echo/Echo V2 =
+# AP_CFD_ROUTEN, Minis „Tage sammeln" eingeschlossen); Futures (Orbit V2, Topstep V2, Apex, Tradeify, Lucid …) bleiben unbestätigt. Alles andere = aus.
+# Emins Gruppe: nie (sie steht nicht in auto_plan_regeln.user_ids, ap_planen setzt für Gruppen nie bestätigt — Finn 30.10.2026 „er bestätigt sie einzeln").
+AP_AUTO_BEST_CFD_TYPEN = ("challenge", "phase1", "phase2")
+
+
+def ap_auto_best_umfang(regeln):
+    """REIN RECHNEND (testbar): Schalter auto_plan_regeln.regeln.auto_bestaetigen → "alle" (echtes true) | "cfd" ("cfd" bzw. ["cfd"]) | None (aus)."""
+    v = regeln.get("auto_bestaetigen") if isinstance(regeln, dict) else None
+    if v is True:
+        return "alle"
+    if v == "cfd" or (isinstance(v, list) and v == ["cfd"]):
+        return "cfd"
+    return None
 
 
 def ap_auto_best_aktiv(regeln):
-    """REIN RECHNEND (testbar): Schalter auto_plan_regeln.regeln.auto_bestaetigen — nur ein echtes true schaltet ein."""
-    return isinstance(regeln, dict) and regeln.get("auto_bestaetigen") is True
+    """REIN RECHNEND (testbar): ist das Von-selbst-Bestätigen an (alle oder nur CFD)?"""
+    return ap_auto_best_umfang(regeln) is not None
 
 
-def ap_auto_best_kandidaten(plaene, accs, letzt, echo_bal, dup_bal, archiv=None):
+def ap_auto_best_cfd(p, a):
+    """REIN RECHNEND (testbar, A1): Plan auf einer CFD-Challenge? Weg Echo/Echo V2 (AP_CFD_ROUTEN) und Kontoart challenge/phase1/phase2.
+    Ohne Konto oder Weg: nein (dann bleibt der Plan von Hand)."""
+    return str((p or {}).get("route") or "") in AP_CFD_ROUTEN and str((a or {}).get("account_type") or "") in AP_AUTO_BEST_CFD_TYPEN
+
+
+def ap_auto_best_kandidaten(plaene, accs, letzt, echo_bal, dup_bal, archiv=None, umfang="alle"):
     """REIN RECHNEND (testbar): → (bestaetigen [plan_id …], gewartet [{plan_id, konto, warum}]). plaene = planned + auto_plan +
     unbestätigt (so geladen); hier fallen weg: schon gestartet/geclaimt, Puls-Pause (mt5_baseline.puls_pause), Konto weg/archiviert/
-    Haken aus, Balance nicht live (ap_balance_live gegen das Ende des letzten Trades, dieselbe Regel wie ap_bal_guard)."""
+    Haken aus, Balance nicht live (ap_balance_live gegen das Ende des letzten Trades, dieselbe Regel wie ap_bal_guard). umfang "cfd" (A1):
+    Pläne außerhalb der CFD-Challenges fallen still weg (bleiben „Zu bestätigen" von Hand), sie warten nicht."""
     archiv = archiv or set()
     ok, warten = [], []
     for p in plaene or []:
@@ -36988,6 +37012,8 @@ def ap_auto_best_kandidaten(plaene, accs, letzt, echo_bal, dup_bal, archiv=None)
             continue
         if p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"):
             continue                                       # schon unterwegs — nichts mehr zu bestätigen
+        if umfang == "cfd" and not ap_auto_best_cfd(p, a):
+            continue                                       # A1: Futures-Challenges u. a. bestätigt weiter nur ein Mensch
         if p.get("puls_pause"):
             warten.append(dict(zeile, warum="Puls-Pause am Plan — nur per SQL wieder scharf")); continue
         if not a or kid in archiv:
@@ -37048,15 +37074,16 @@ def ap_auto_best_tick(jetzt, reg=None):
     _ap_auto_best["at"] = time.time()
     reg = reg or (sb_select("auto_plan_regeln", {"select": "aktiv,user_ids,regeln", "id": "eq.1"}) or [{}])[0]
     uids = [str(u) for u in (reg.get("user_ids") or [])]
-    aktiv = ap_auto_best_aktiv(reg.get("regeln"))
-    _ap_auto_best["aktiv"] = aktiv
+    umfang = ap_auto_best_umfang(reg.get("regeln"))
+    aktiv = umfang is not None
+    _ap_auto_best["aktiv"], _ap_auto_best["umfang"] = aktiv, umfang
     tag = jetzt.astimezone(_ap_tz(AP_TZ_TAG)).strftime("%Y-%m-%d")
     if _ap_auto_best.get("tag") != tag:
         _ap_auto_best.update(tag=tag, bestaetigt=[], gewartet=[])
     if not aktiv or not reg.get("aktiv") or not uids:
         return None
     in_uids = "in.(" + ",".join(uids) + ")"
-    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,status,auto_plan,auto_bestaetigt_at,notes,"
+    plaene = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,master_name,status,auto_plan,auto_bestaetigt_at,notes,route,"
                                                "start_um_gestartet_at,started_at,orbit_gesendet_at,puls_pause:mt5_baseline->puls_pause,"
                                                "kette:mt5_baseline->kette,tage_mini:mt5_baseline->tage_mini",
                                      "user_id": in_uids, "status": "eq.planned", "auto_plan": "eq.true", "auto_bestaetigt_at": "is.null",
@@ -37075,7 +37102,7 @@ def ap_auto_best_tick(jetzt, reg=None):
                                                                 "status": "in.(review,completed)",
                                                                 "master_account_id": "in.(" + ",".join(kids[i:i + 150]) + ")"})))
     echo_bal, dup_bal = _ap_balance_karten()
-    ok, warten = ap_auto_best_kandidaten(plaene, accs, letzt, echo_bal, dup_bal, _ap_archiviert())
+    ok, warten = ap_auto_best_kandidaten(plaene, accs, letzt, echo_bal, dup_bal, _ap_archiviert(), umfang=umfang)
     _ap_auto_best["gewartet"] = warten
     if not ok:
         return []
@@ -40336,6 +40363,7 @@ def admin_auto_plan():
                                                      default=str))
         # Von selbst bestätigen (15.10.2026): Schalter-Stand, heute Bestätigte, Wartende mit Grund — „Zu bestätigen" sagt „der Bot bestätigt"
         info["auto_bestaetigen"] = json.loads(json.dumps({"aktiv": bool(_ap_auto_best.get("aktiv")), "tag": _ap_auto_best.get("tag"),   # Stand des Takts (reg hier ohne regeln)
+                                                          "umfang": _ap_auto_best.get("umfang"),   # A1 04.11.2026: "alle" | "cfd" (nur CFD-Challenges) | None
                                                           "at": _ap_auto_best.get("at"), "takt_s": AP_AUTO_BEST_TAKT_S, "fehler": _ap_auto_best.get("fehler"),
                                                           "bestaetigt": _ap_auto_best.get("bestaetigt"), "gewartet": _ap_auto_best.get("gewartet")},
                                                          default=str))
