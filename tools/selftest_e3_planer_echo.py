@@ -65,23 +65,31 @@ def planer():
     ok(f(z, a) == (None, None) and z["route"] == "tvv2", "Futures (Orbit V2) unberührt")
     z, a = zeile("FTMO")
     art, grund = f(z, a, h={})
-    ok(art == "v2" and "kein Echo-Hedge-Konto" in grund and z["route"] == "mt5v2" and "slave_account_id" not in z,
-       "ID ohne Fusion-Konto: bleibt Echo V2 (Trigger kontoart_weg ließe Echo ohne Slave nicht zu), Riegel hält")
+    ok(art == "v2" and "kein Echo-Hedge-Konto" in grund and "slave_account_id" not in z,
+       "ID ohne Fusion-Konto: nicht stellbar mit Grund (Aufrufer legt nicht an)")
     z, a = zeile("FTMO", master_contracts=0.05)
     art, grund = f(z, a)
-    ok(art == "v2" and "unter 0,01 Lot" in grund and z["route"] == "mt5v2", "Hedge unter 0,01 Lot: bleibt Echo V2 mit Grund")
+    ok(art == "v2" and "unter 0,01 Lot" in grund, "Hedge unter 0,01 Lot: nicht stellbar mit Grund")
 
     print("ap_echo_hedge_anlegen (Schalter, Fehler je Zeile)")
     ns2 = eh.lade(dict(STUBS, _sb_all=lambda t, q: [], gp_hedge_settings_eigen=lambda rows: rows, ap_ppl_karte=lambda rows, norm=None: ({}, {}),
                        _ap_kauf_echt=lambda ids: {}, GP_HEDGE_KEY="echo_hedge_account"))
     z, a = zeile("FTMO")
     r = ns2["ap_echo_hedge_anlegen"]([z], {"A-FTMO": (a, 100000.0)}, {"echo_hedge": {"an": False}, "firmen": FIRMEN})
-    ok(r["echo"] == 0 and z["route"] == "mt5v2", "Schalter aus: nichts (Trigger kontoart_weg verlangt ihn), Echo V2 + Riegel wie bisher")
+    ok(r["echo"] == 0 and len(r["weg"]) == 1 and "Schalter aus" in r["weg"][0][1], "Schalter aus: nicht anlegen (kein Echo-V2-Ersatz), Grund")
     r = ns2["ap_echo_hedge_anlegen"]([z], {"A-FTMO": (a, 100000.0)}, {"echo_hedge": {"an": True}, "firmen": FIRMEN})
-    ok(r["v2"] == 1 and "kein Echo-Hedge-Konto" in r["gruende"][0], "ohne Hedge-Einstellung: bleibt Echo V2, Grund im Log")
+    ok(len(r["weg"]) == 1 and "kein Echo-Hedge-Konto" in r["weg"][0][1], "ohne Hedge-Einstellung: nicht anlegen, Grund")
+    zm, am = zeile("FundedNext", master_contracts=0.01, mt5_baseline={"tage_mini": {"sofort_zu": True}})
+    r = ns2["ap_echo_hedge_anlegen"]([zm], {"A-FundedNext": (am, 100000.0)}, {"echo_hedge": {"an": False}, "firmen": FIRMEN})
+    ok(r == {"echo": 0, "weg": []} and zm["route"] == "mt5v2", "Mini auch bei Schalter aus: angelegt wie immer (Echo V2)")
     src = open(eh.APP, encoding="utf-8").read()
-    ok("_e3 = ap_echo_hedge_anlegen(zeilen," in src and src.index("_e3 = ap_echo_hedge_anlegen(zeilen,") < src.index(
-        'r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,'), "ap_planen ruft es direkt vor dem Anlegen auf (HT und Gruppen)")
+    i_e3, i_fp = src.index("_e3 = ap_echo_hedge_anlegen(zeilen, _konten_e3,"), src.index("    fp = hashlib.sha1(json.dumps([[g[\"konto_id\"]")
+    ok(i_e3 < i_fp < src.index('r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,'),
+       "ap_planen: vor Fingerabdruck und Anlegen (Probelauf = Anlegen, HT und Gruppen)")
+    blk = src[i_e3:i_fp]
+    ok("zeilen = [z for z in zeilen if id(z) not in _weg_ids]" in blk and "geplant = [g for g in geplant" in blk and "ausgelassen.append(" in blk
+       and "if not trocken:" in blk and "ap_echo_ohne_melden(" in blk, "nicht stellbar: nicht angelegt, aus geplant raus, ausgelassen mit Grund, ⚪ nur echt")
+    ok("Echo V2" not in blk.split("except Exception as e:")[1].split("if _e3")[0], "Rechenfehler: auch dann kein Echo-V2-Ersatz")
 
 
 def nachrechnen():

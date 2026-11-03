@@ -27718,6 +27718,31 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                             einsatz_eur=round(float((d.get("g") or {}).get("verlust_eur") or 0)) * (1 if richtung[key] == "buy" else -1),
                             tp_punkte=d.get("tp_punkte"), sl_punkte=d.get("sl_punkte"), bestaetigt=bool(param["auto_start"]) and not gruppe,
                             **ap_boden_sicher(None, a, k["bal"], peaks, regel=k["regel"])))   # Boden für den Balance-Balken (08.10.2026)
+    # E3 (Finn 03.11.2026 ~23:10 Dubai: „Es ist kein einziger Trade des CFD-Planers, ganz egal was. CFD-Planer only Echo, fertig." — HT und Emin;
+    # Master: „KEIN V2-Fallback … gar nicht anlegen"): CFD-Challenges gleich als Echo mit Fusion-Hedge. Ist der Hedge beim Planen nicht stellbar (kein
+    # Fusion-Konto, kein Kontowert, < 0,01 Lot, Schalter aus, Rechenfehler), wird das Konto NICHT geplant: ausgelassen mit Grund + ⚪ einmal je Konto und Tag.
+    # Minis „Tage sammeln" bleiben Echo V2 (E2). Vor dem Fingerabdruck, damit Probelauf und Anlegen dasselbe zeigen.
+    _konten_e3 = {str(k["a"]["id"]): (k["a"], k["bal"]) for _key, k, _w, _v in plan_roh}
+    try:
+        _e3 = ap_echo_hedge_anlegen(zeilen, _konten_e3, reg.get("regeln") or {})
+    except Exception as e:
+        _e3 = {"echo": 0, "weg": [(z, f"Echo-Hedge nicht rechenbar ({type(e).__name__}: {str(e)[:80]})") for z in zeilen
+                                  if ap_echo_kandidat(z, _konten_e3)]}
+        print(f"[auto-plan] ⚠️ Echo-Hedge beim Planen: {type(e).__name__}: {e} — {len(_e3['weg'])} CFD-Challenge(s) nicht angelegt", flush=True)
+    if _e3["weg"]:
+        _weg_ids = {id(z) for z, _g in _e3["weg"]}
+        _weg_konten = {}
+        for z, g in _e3["weg"]:
+            _weg_konten[str(z.get("master_account_id"))] = g
+        zeilen = [z for z in zeilen if id(z) not in _weg_ids]
+        _zeile_je_konto = {str(k["a"]["id"]): k["zeile"] for _key, k, _w, _v in plan_roh}
+        geplant = [g for g in geplant if str(g.get("konto_id")) not in _weg_konten]
+        for aid, g in _weg_konten.items():
+            ausgelassen.append(dict(_zeile_je_konto.get(aid) or {"konto_id": aid}, grund=f"kein Echo-Hedge stellbar — {g} (CFD-Challenges nur mit Hedge)"))
+            if not trocken:
+                ap_echo_ohne_melden(_zeile_je_konto.get(aid) or {"konto_id": aid}, g, tag)
+    if _e3["echo"] or _e3["weg"]:
+        print(f"[auto-plan] {tag} Echo mit Hedge: {_e3['echo']} geplant, {len(_e3['weg'])} nicht geplant (kein Hedge stellbar)", flush=True)
     geplant.sort(key=lambda g: (g["start"], g["konto_id"]))
     fp = hashlib.sha1(json.dumps([[g["konto_id"], g["start"], g["richtung"], g["tp"], g["sl"], g["menge"]] for g in geplant],
                                  sort_keys=True).encode()).hexdigest()[:12]
@@ -27736,14 +27761,6 @@ def ap_planen(tag=None, trocken=False, quelle="hand", nur_uid=None, seed=None, s
                 raise
             _sb_anfrage("DELETE", f"{SUPABASE_URL}/rest/v1/trade_plans", headers=_sb_headers(), params=weg).raise_for_status()
     if zeilen and not trocken:
-        # E3 (Finn 03.11.2026 ~23:10 Dubai: „CFD-Planer only Echo, fertig." — HT und Emin): CFD-Challenges gleich als Echo mit Fusion-Hedge anlegen.
-        # Fehler hier → die Pläne bleiben Echo V2 wie bisher (eh_tick stellt sie im Fenster um, der Riegel hält sie bis dahin) — nie ohne Hedge, nie kein Plan.
-        try:
-            _e3 = ap_echo_hedge_anlegen(zeilen, {str(k["a"]["id"]): (k["a"], k["bal"]) for _key, k, _w, _v in plan_roh}, reg.get("regeln") or {})
-            if _e3["echo"] or _e3["v2"]:
-                print(f"[auto-plan] {tag} Echo mit Hedge: {_e3['echo']} angelegt, {_e3['v2']} bleiben Echo V2 ({'; '.join(_e3['gruende'][:5])})", flush=True)
-        except Exception as e:
-            print(f"[auto-plan] ⚠️ Echo-Hedge beim Anlegen: {type(e).__name__}: {e} — Pläne bleiben Echo V2 (eh_tick/Riegel)", flush=True)
         r = _sb_anfrage("POST", f"{SUPABASE_URL}/rest/v1/trade_plans", json=zeilen,
                         headers=_sb_headers("return=minimal"), timeout=(5, 30))
         if r.status_code == 400 and "tages_grenze_usd" in (r.text or ""):
@@ -28838,9 +28855,9 @@ def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par,
     """REIN RECHNEND (testbar, E3 03.11.2026): eine Planer-Zeile → Echo mit Fusion-Hedge (route mt5, slave_*, multiplier, slave_risk,
     mt5_baseline.echo_hedge {status geplant, quelle planer, lots, q …}, hedge_vorschau, Notiz) — dieselbe B2-Rechnung wie eh_tick (eh_hedge mit
     Kontowert-Satz, netto_faktor, min_lot), nur ohne Marge/Fusion-Lesung (die rechnet eh_tick vor dem Start frisch nach). Nur CFD-Challenges
-    (EH_TYPEN) einer Firma auf Echo V2, nie ein Mini „Tage sammeln" (E2). Geht der Hedge nicht (kein Fusion-Konto, kein Kontowert …), bleibt die
-    Zeile Echo V2 — Echo ohne Slave lehnt der DB-Trigger trade_plans_kontoart_weg ab und bräche den ganzen Insert; der Claim-Riegel hält sie.
-    Ändert z in place. → ('echo', None) | ('v2', grund) | (None, None) = nicht betroffen."""
+    (EH_TYPEN) einer Firma auf Echo V2, nie ein Mini „Tage sammeln" (E2). Geht der Hedge nicht (kein Fusion-Konto, kein Kontowert …), bleibt z
+    unverändert und der Aufrufer legt die Zeile NICHT an (Master E3: kein Echo-V2-Ersatz; Echo ohne Slave lehnte trade_plans_kontoart_weg ohnehin ab).
+    Ändert z in place. → ('echo', None) | ('v2', grund) = nicht stellbar | (None, None) = nicht betroffen."""
     if str(z.get("route") or "") != "mt5v2" or not a or (a.get("account_type") or "") not in EH_TYPEN:
         return None, None
     base = dict(z.get("mt5_baseline") or {})
@@ -28872,16 +28889,38 @@ def ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, ctx_ppl, kauf, firmen, par,
     return "echo", None
 
 
+def ap_echo_kandidat(z, konten):
+    """REIN RECHNEND (E3): ist die Planer-Zeile eine CFD-Challenge auf Echo V2, die als Echo mit Hedge angelegt werden muss (nie ein Mini)?"""
+    return (str(z.get("route") or "") == "mt5v2" and not ((z.get("mt5_baseline") or {}).get("tage_mini"))
+            and ((konten.get(str(z.get("master_account_id"))) or (None, None))[0] or {}).get("account_type") in EH_TYPEN)
+
+
+def ap_echo_ohne_melden(zeile, grund, tag):
+    """⚪ einmal je Konto und Tag (alarm_log.schluessel): CFD-Challenge nicht geplant, weil kein Echo-Hedge stellbar (E3). Wirft nie."""
+    key = f"ap-echo-ohne-{zeile.get('konto_id')}-{tag}"
+    try:
+        if sb_select("alarm_log", {"select": "id", "schluessel": f"eq.{key}", "limit": "1"}):
+            return
+    except Exception:
+        pass
+    alarm_senden(3, "planer_echo_ohne", "CFD-Challenge nicht geplant",
+                 f"{zeile.get('user') or '—'} · {zeile.get('konto') or '—'}: kein Echo-Hedge stellbar — {grund}. CFD-Challenges laufen nur mit Hedge.",
+                 uid=zeile.get("user_id"), schluessel=key)
+
+
 def ap_echo_hedge_anlegen(zeilen, konten, regeln):
     """E3: alle Planer-Zeilen vor dem Insert durch ap_echo_hedge_zeile — konten = {account_id: (konto, balance)}. Lädt Hedge-Konten
     (user_settings echo_hedge_account, nur eigene — gp_hedge_settings_eigen), Fusion-Konten, firm_specs und Kaufpreise wie eh_tick.
-    Schalter echo_hedge aus → nichts (Echo auf Challenges lässt der DB-Trigger dann nicht zu). → {echo, v2, gruende}"""
-    out = {"echo": 0, "v2": 0, "gruende": []}
+    Kein Echo V2 als Ersatz (Master E3): geht der Hedge nicht oder ist der Schalter echo_hedge aus (dann lässt der DB-Trigger kontoart_weg Echo auf
+    Challenges nicht zu), steht die Zeile in weg — der Aufrufer legt sie nicht an. → {echo, weg: [(zeile, grund), …]}"""
+    out = {"echo": 0, "weg": []}
     par = eh_param(regeln)
     firmen = (regeln or {}).get("firmen") or []
-    kand = [z for z in zeilen if str(z.get("route") or "") == "mt5v2" and not ((z.get("mt5_baseline") or {}).get("tage_mini"))
-            and ((konten.get(str(z.get("master_account_id"))) or (None, None))[0] or {}).get("account_type") in EH_TYPEN]
-    if not kand or not par["an"]:
+    kand = [z for z in zeilen if ap_echo_kandidat(z, konten)]
+    if not kand:
+        return out
+    if not par["an"]:
+        out["weg"] = [(z, "Echo-Hedge-Schalter aus (Admin → Trade-Planer)") for z in kand]
         return out
     in_uids = "in.(" + ",".join(sorted({str(z["user_id"]) for z in kand})) + ")"
     hedge = {}
@@ -28899,13 +28938,12 @@ def ap_echo_hedge_anlegen(zeilen, konten, regeln):
         a, bal = konten.get(str(z.get("master_account_id"))) or (None, None)
         try:
             art, grund = ap_echo_hedge_zeile(z, a, bal, hedge, hedge_acc, {"ppl": ppl, "ppl_firma": ppl_firma}, kauf, firmen, par, jetzt_iso)
-        except Exception as e:      # eine kaputte Zeile bleibt Echo V2, die anderen werden trotzdem Echo
-            art, grund = "v2", f"{type(e).__name__}: {str(e)[:80]}"
+        except Exception as e:      # eine kaputte Zeile wird nicht angelegt, die anderen trotzdem Echo
+            art, grund = "v2", f"Echo-Hedge nicht rechenbar ({type(e).__name__}: {str(e)[:80]})"
         if art == "echo":
             out["echo"] += 1
         elif art == "v2":
-            out["v2"] += 1
-            out["gruende"].append(f"{z.get('master_name') or '—'}: {grund}")
+            out["weg"].append((z, grund))
     return out
 
 
