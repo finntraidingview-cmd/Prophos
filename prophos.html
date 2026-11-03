@@ -27292,9 +27292,13 @@
     // alle 60 s das TV-Konto wechseln lassen, jeder Wechsel setzt die Reader-Ruhe der Panel-Schließ-Wache zurück): BTH_WECHSEL_PKT / BTH_HALTE_MS.
     // Ohne Fenster (Aufrufer fragen nur „läuft einer?") ebenfalls der jüngste, ohne den Merker anzufassen.
     const bigs = offen.filter(p => !istApex(p) && !istWd(p) && (Number(p.hedgeEur) > 0 || p.orbitV3 === true))
-    const big = (fenster && bigs.length > 1) ? heimNaechster(bigs, juengster, _bthBigWahl[fenster] || (_bthBigWahl[fenster] = { id: '', at: 0 }),
-      { wort: () => 'Big Trade', wache: fenster === 'tv', abstand: p => wdHeimAbstand(p, true), wechsel: BTH_WECHSEL_PKT, halten: BTH_HALTE_MS, einheit: 'Pkt' })
-      : juengster(bigs)
+    let big = null
+    if(fenster && bigs.length > 1){
+      const stand = bthBigStand(fenster, bigs), vor = stand.id + '|' + stand.at
+      big = heimNaechster(bigs, juengster, stand,
+        { wort: () => 'Big Trade', wache: fenster === 'tv', abstand: p => wdHeimAbstand(p, true), wechsel: BTH_WECHSEL_PKT, halten: BTH_HALTE_MS, einheit: 'Pkt' })
+      if(stand.id + '|' + stand.at !== vor) bthBigMerken()
+    }else big = juengster(bigs)
     return big || wdHeimWahl(offen.filter(istApex), juengster) || wdHeimWahl(offen.filter(istWd), juengster)
   }
   // $-Rest eines Winning Days bis TP oder Liq (der kleinere), aus dem Live-Kurs der Plan-Wurzel → Zahl oder null (kein Kurs/Level)
@@ -27305,7 +27309,51 @@
   // Haltezeit (bigTradeHeimNachOrder: Puls verlässt das Order-Konto ohnehin).
   const BTH_WECHSEL_PKT = 15, BTH_HALTE_MS = 3 * 60000
   const _bthWdWahl = { id: '', at: 0 }
-  const _bthBigWahl = {}   // Fenster ('tv' | 'tsx') → { id, at } der zuletzt gewählten Big-Trade-Heimat (03.11.2026)
+  const _bthBigWahl = {}   // Fenster ('tv' | 'tsx') → { id, at, frei? } der zuletzt gewählten Big-Trade-Heimat (03.11.2026)
+  /* MERKER ÜBERLEBT DAS NEULADEN (S2-Stopp zu f0312ad6, 03.11.2026): _bthBigWahl lebte nur im Speicher — nach jedem Bump (alle PCs laden neu)
+   * war er leer, heimNaechster nahm sofort den nächsten Big Trade ohne 15-Pkt-/3-min-Prüfung und die Heim-Wache zog Puls nach 3 s um.
+   *  (1) sessionStorage je Fenster (überlebt location.reload, ein neuer Tab beginnt leer), try/catch.
+   *  (2) Ist der Merker trotzdem leer, gilt der Big Trade, in dessen Konto der Puls-Chrome laut Konto-Beleg bzw. Reader gerade steht (genau
+   *      einer), mit at = jetzt — danach die normale Hysterese. Nur TradingView (Reader/Beleg kennen kein TopstepX-Konto).
+   * Ausnahme: nach einer Order (bigTradeHeimNachOrder, frei: true) bewusst leer — Puls verlässt das Order-Konto ohnehin, Prio-Wahl sofort. */
+  const BTH_BIG_WAHL_SS = 'prophos_bth_big_wahl'
+  function bthBigStand(fenster, bigs, o){
+    o = o || {}
+    let s = _bthBigWahl[fenster]
+    if(!s){
+      s = { id: '', at: 0 }
+      try{ const alt = JSON.parse((o.ss || sessionStorage).getItem(BTH_BIG_WAHL_SS) || '{}')[fenster]
+        if(alt && alt.id && Number(alt.at) > 0) s = { id: String(alt.id), at: Number(alt.at) } }catch(_){}
+      _bthBigWahl[fenster] = s
+    }
+    // leer oder der gemerkte Big Trade läuft nicht mehr (alter Eintrag aus dem sessionStorage) → aus dem Puls-Chrome belegen
+    if(!s.frei && (!s.id || !bigs.some(p => String(p.id) === s.id))){
+      const imKonto = o.imKonto || (p => bthPulsStehtIn(p, fenster))
+      const da = bigs.filter(p => { try{ return !!imKonto(p) }catch(_){ return false } })
+      if(da.length === 1){
+        s.id = String(da[0].id); s.at = (o.jetzt || Date.now)()
+        console.info(`[big-trade] Heimkonto-Merker aus dem Puls-Chrome belegt: „${da[0].masterName || da[0].id}" (Hysterese ab jetzt)`)
+        bthBigMerken(o)
+      }
+    }
+    return s
+  }
+  function bthBigMerken(o){
+    try{
+      const w = {}
+      for(const f of Object.keys(_bthBigWahl)){ const x = _bthBigWahl[f]; if(x && x.id) w[f] = { id: x.id, at: x.at } }
+      ((o && o.ss) || sessionStorage).setItem(BTH_BIG_WAHL_SS, JSON.stringify(w))
+    }catch(_){}
+  }
+  // Steht der Puls-Chrome gerade im Konto dieses Plans? Konto-Beleg (Puls seitdem untätig) oder frischer Reader-Stand aus dem Puls-Tab
+  function bthPulsStehtIn(p, fenster){
+    if(fenster !== 'tv') return false
+    const konto = tvV2Konto(p); if(!konto) return false
+    if(typeof kontoBelegGilt === 'function' && kontoBelegGilt(konto)) return true
+    const st = window._epLokal && window._epLokal.stand
+    return !!(st && st.an !== false && /^puls-/.test(String(st.positionen_tab || '')) && st.konto && typeof st.positionen_alter_s === 'number'
+      && st.positionen_alter_s <= 30 && typeof heimKontoPasst === 'function' && heimKontoPasst(st.konto, konto))
+  }
   // punkte = true (Big Trades, 03.11.2026): Rest in NQ-Punkten statt in $ (Kontrakte und $/Punkt bleiben außen vor)
   function wdHeimAbstand(p, punkte){
     try{
@@ -27398,7 +27446,7 @@
     const f = fenster || 'tv', ext = String(konto || '').trim()
     _bthNachOrder = null
     _bthGeklickt.id = String(planId || ''); _bthGeklickt.at = Date.now()
-    _bthBigWahl[f] = { id: '', at: 0 }   // Prio-Wahl nach der Order sofort, ohne Haltezeit (S2 03.11.2026) — Puls verlässt das Order-Konto ohnehin
+    _bthBigWahl[f] = { id: '', at: 0, frei: true }   // Prio-Wahl nach der Order sofort, ohne Haltezeit und ohne Belegen aus dem Puls-Chrome (S2 03.11.2026) — Puls verlässt das Order-Konto ohnehin
     if(!ext || !bigTradeHeimPlanen(ext, 'Order ' + ext.slice(-4), true, f)) return false
     _bthNachOrder = { ext, fenster: f, at: Date.now(), begonnen: false, fertig: false, ok: false, beleg: null, finallyDa: false }
     return true
