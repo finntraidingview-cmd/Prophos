@@ -4125,7 +4125,12 @@ def alarm_tick():
             continue
         uid = uid or next((str(r.get("user_id")) for r in rows if str(r.get("id")) == pid), None)
         alarm_senden(prio, art, titel, text, uid=uid, plan_id=pid, schluessel=key, tag=f"alarm-{art}-{pid[:8]}", url=ev[7] if len(ev) > 7 else None)
-    _alarm["gemeldet"] = {k: t for k, t in _alarm["gemeldet"].items() if time.time() - t < 86400}
+    with _ZWEIT_LOCK:   # Z6: auch Request-Threads (_zweit_senden) schreiben hier
+        _alarm["gemeldet"] = {k: t for k, t in list(_alarm["gemeldet"].items()) if time.time() - t < 86400}
+    try:
+        zweit_alarm_tick(aus, jetzt)   # Z6 (03.11.2026): Zwei Orbit aufs Handy
+    except Exception as e:
+        print(f"[alarm] ⚠️ Zwei Orbit: {type(e).__name__}: {e}", flush=True)
     try:
         echo_frost_tick(rows, namen, jetzt.timestamp())
     except Exception as e:
@@ -4494,6 +4499,21 @@ def alarm_heimweg():
     if d.get("ok") is True:
         text = f"{wer} · {konto}: Puls zurück nach {anlass or 'fremdem Konto'}" + (f" in {dauer / 1000:.1f} s" if dauer is not None else "")
         alarm_senden(3, "heimweg_ok", "Puls zurück im Big-Trade-Konto", text, uid=uid, plan_id=pid, daten=daten)
+        # Z6 (03.11.2026): Heimweg war ein Prio-Wechsel zwischen zwei laufenden Big Trades (Tab: bigTradePlan → heimNaechster) → 🟠 einmal je Wechsel.
+        # Beide Pläne müssen dem Aufrufer gehören und offen sein; Namen aus der DB, vom Tab nur IDs und Abstände.
+        pr = d.get("prio") if isinstance(d.get("prio"), dict) else None
+        if pr and str(pr.get("nach") or "") == pid and re.fullmatch(r"[0-9a-fA-F-]{36}", str(pr.get("von") or "")) and str(pr.get("von")) != pid:
+            try:
+                zwei = sb_select("trade_plans", {"select": "id,user_id,status,master_name,master_firm", "id": f"in.({pid},{pr['von']})"}) or []
+                von = next((x for x in zwei if str(x.get("id")) == str(pr["von"])), None)
+                nach = next((x for x in zwei if str(x.get("id")) == pid), None)
+                if von and nach and str(von.get("user_id")) == uid and von.get("status") == "open" and uid not in _aus and not _alarm_fremd_verwaltet(uid):
+                    at = int(pr.get("at")) if str(pr.get("at") or "").isdigit() else 0
+                    if abs(at - time.time() * 1000) > ZWEIT_PRIO_AT_S * 1000:
+                        at = int(time.time() * 1000)
+                    _zweit_senden(zweit_prio_ereignis(uid, von, nach, pr.get("a_von"), pr.get("a_nach"), namen, at))
+            except Exception as e:
+                print(f"[alarm] ⚠️ Prio-Wechsel {pid[:8]}: {type(e).__name__}: {e}", flush=True)
     else:
         daten["msg"] = str(d.get("msg") or "")[:160]
         text = (f"{wer} · {konto}: nach {anlass or 'fremdem Konto'} nicht zurück ({daten['msg'] or 'keine Antwort'}) — das Userscript sieht "
@@ -18896,11 +18916,209 @@ def puls_heim_zweit_pruefen(plan):
             erst = next((a.get("info") for a in liste if a.get("info")), None)
             if erst:
                 u["big_trade"] = erst
+        elif liste:   # Z6 (03.11.2026): weiterer Big Trade frei → Abstand der laufenden beim Start merken (Handy-Meldung „Zweiter Big Trade gestartet“)
+            u["zweit_andere"] = [dict(a.get("info") or {}, konto=(a.get("info") or {}).get("konto") or a.get("name"), art=a.get("art")) for a in liste]
         return dict(u, max_je_id=mx, zweit_usd=zu)
     except Exception as e:
         print(f"[puls-heim] ⚠️ Zweit-Prüfung {str(p.get('id'))[:8]}: {type(e).__name__}: {str(e)[:160]}", flush=True)
         return {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "max_je_id": mx, "zweit_usd": zu,
                 "grund": f"Zweit-Prüfung gerade nicht möglich ({type(e).__name__}) — Start wartet"}
+
+
+# ══ ZWEI ORBIT AUFS HANDY (03.11.2026, Auftrag Z6; Finn will „Zwei Orbit“ auf 2 stellen, „von Anfang an eine Handy-Nachricht über Prophos, sobald so ein
+# Szenario passiert, damit er es sich ansehen kann“). Drei 🟠-Meldungen an die Master-IDs (alarm_senden, alarm_log, Entprellung über schluessel):
+#  (1) „Zweiter Big Trade gestartet“ — eine ID hat im selben Fenster ≥ 2 Big Trades offen (alarm_tick, je jüngstem Plan einmal). Abstand der laufenden zu TP/Liq
+#      beim Start: der Klick-Riegel (/richtung/frei, frei mit zweit_andere) merkt ihn je Plan im Speicher; nach einem Railway-Neustart der Wert von jetzt.
+#  (2) „Zweiter Big Trade wartet“ — einmal je Plan: Klick-Riegel sperrt mit zweit_wartet/firma_laeuft/markt_oeffnung (sofort, Thread) oder die DB setzt
+#      start_sperre art zweit/firma/markt (alarm_tick).
+#  (3) „Puls hat das Konto gewechselt (Priorität)“ — der PC-Tab hängt an /alarm/heimweg das Feld prio {von, nach, a_von, a_nach} (bigTradePlan → heimNaechster);
+#      einmal je Wechsel (alarm_heimweg).
+# Big Trade = puls_heim_ist_big (prophos_big_trade: Apex-Challenge und Winning Day zählen nicht). ══
+ZWEIT_FENSTER_NAME = {"tv": "TradingView", "tsx": "TopstepX"}
+ZWEIT_MERK_S = 2 * 3600
+ZWEIT_PULS_KONTO_MAX_S = 120
+ZWEIT_LOG_S = 3 * 86400          # Entprellung im alarm_log länger als der 24-h-Speicher (ein Paar > 24 h offen meldet nicht neu)
+ZWEIT_PRIO_AT_S = 900            # at vom Tab nur ± 15 min um die Serverzeit, sonst Serverzeit (Schlüssel je Minute)
+_ZWEIT_START_MERK = {}   # plan_id → {at, andere: [{plan, konto, art, rest_tp_usd, rest_liq_usd}]}
+_ZWEIT_LOCK = threading.Lock()
+
+
+def zweit_konto_name(p):
+    """REIN RECHNEND (testbar): „Tradeify …4758“ — Firma + letzte 4 der Kennung aus master_name („150k FTDFYSLX150742744758 → Funded“)."""
+    p = p or {}
+    m = re.search(r"[A-Z]{2,}[A-Z0-9_-]*\d{4,}", str(p.get("master_name") or "").upper())
+    firma = str(p.get("master_firm") or "").strip()
+    return f"{firma} …{m.group(0)[-4:]}".strip() if m else (str(p.get("master_name") or "").strip() or firma or "?")
+
+
+def zweit_art(p):
+    """REIN RECHNEND (testbar): „BUY 3 NQ“ aus richtung, master_contracts, master_symbol_root."""
+    p = p or {}
+    kt = _wd_num(p.get("master_contracts"))
+    return f"{str(p.get('richtung') or '').upper()} {int(kt) if kt and float(kt).is_integer() else (kt or '?')} {p.get('master_symbol_root') or 'NQ'}".strip()
+
+
+def _zweit_usd(x):
+    v = _wd_num(x)
+    return None if v is None else format(int(round(float(v))), ",").replace(",", ".") + " $"
+
+
+def _zweit_hhmm(iso):
+    from zoneinfo import ZoneInfo
+    t = _alarm_ts(iso)
+    return t.astimezone(ZoneInfo("Asia/Dubai")).strftime("%H:%M") if t else "?"
+
+
+def zweit_gruppen(plaene):
+    """REIN RECHNEND (testbar): offene Big Trades je (user_id, Fenster) mit mindestens zwei → [(uid, fenster, [plan…] nach started_at aufsteigend)]."""
+    je = {}
+    for p in plaene or ():
+        if str(p.get("status") or "") != "open" or not puls_heim_ist_big(p):
+            continue
+        f = puls_heim_fenster(p.get("route"))
+        if f in ("tv", "tsx"):
+            je.setdefault((str(p.get("user_id")), f), []).append(p)
+    return [(u, f, sorted(l, key=lambda x: str(x.get("started_at") or ""))) for (u, f), l in sorted(je.items()) if len(l) >= 2]
+
+
+def zweit_puls_wo(konto_text, plaene):
+    """REIN RECHNEND (testbar): in welchem dieser Konten steht der Puls-Chrome? Reader-Kontotext (Balance klebt evtl. an der Kennung) → Kontoname | Rohtext | None."""
+    k = (re.split(r"[^A-Z0-9]+", str(konto_text or "").strip().upper()) or [""])[0]
+    if not k:
+        return None
+    for p in plaene or ():
+        m = re.search(r"[A-Z]{2,}[A-Z0-9_-]*\d{4,}", str(p.get("master_name") or "").upper())
+        if m and (k == m.group(0) or (k.startswith(m.group(0)) and re.fullmatch(r"\d{1,3}", k[len(m.group(0)):]))):
+            return zweit_konto_name(p)
+    return k
+
+
+def zweit_gestartet_ereignis(uid, fenster, gruppe, namen, merk, jetzt_naehe, puls_wo):
+    """REIN RECHNEND (testbar): Meldung (1) für eine Gruppe aus zweit_gruppen → (schluessel, prio, art, titel, text, uid, plan_id, daten). B = der jüngste.
+    merk = _ZWEIT_START_MERK-Eintrag von B oder None; jetzt_naehe = {plan_id: {rest_tp_usd, rest_liq_usd}} als Rückfall (Wert von jetzt)."""
+    b, andere = gruppe[-1], gruppe[:-1]
+    wer = namen.get(str(uid), str(uid)[:8])
+    beim = {str(x.get("plan") or ""): x for x in ((merk or {}).get("andere") or []) if x.get("plan")}
+    teile, daten_a = [], []
+    for a in andere:
+        name = zweit_konto_name(a)
+        x = beim.get(str(a.get("id")))
+        quelle = "beim Start von B" if x else "jetzt"
+        x = x or (jetzt_naehe or {}).get(str(a.get("id"))) or {}
+        tp, liq = _zweit_usd(x.get("rest_tp_usd")), _zweit_usd(x.get("rest_liq_usd"))
+        abst = f"{tp or '?'} vor TP / {liq or '?'} vor Liq ({quelle})" if (tp or liq) else "Abstand nicht lesbar"
+        teile.append(f"A: {name} {zweit_art(a)} (seit {_zweit_hhmm(a.get('started_at'))}) — {abst}")
+        daten_a.append({"plan": str(a.get("id")), "konto": name, "rest_tp_usd": x.get("rest_tp_usd"), "rest_liq_usd": x.get("rest_liq_usd"), "quelle": quelle})
+    text = (f"{wer} · {ZWEIT_FENSTER_NAME.get(fenster, fenster)}: {len(gruppe)} Big Trades laufen. " + " · ".join(teile)
+            + f" · B: {zweit_konto_name(b)} {zweit_art(b)} (gestartet {_zweit_hhmm(b.get('started_at'))}) · Puls steht in {puls_wo or 'unbekannt (Reader-Konto nicht frisch)'}")
+    return (f"{b.get('id')}|zweit_gestartet", 2, "zweit_gestartet", "Zweiter Big Trade gestartet", text, str(uid), str(b.get("id")),
+            {"fenster": fenster, "andere": daten_a, "puls": puls_wo})
+
+
+ZWEIT_WARTET_ARTEN = {"zweit": PULS_HEIM_CODE_ZWEIT, "firma": PULS_HEIM_CODE_FIRMA, "markt": PULS_HEIM_CODE_MARKT}
+ZWEIT_WARTET_WORT = {PULS_HEIM_CODE_ZWEIT: "zu nah / schon voll", PULS_HEIM_CODE_FIRMA: "gleiche Firma", PULS_HEIM_CODE_MARKT: "Markteröffnung"}
+
+
+def zweit_wartet_ereignis(p, code, grund, namen):
+    """REIN RECHNEND (testbar): Meldung (2), einmal je Plan → (schluessel, prio, art, titel, text, uid, plan_id, daten)."""
+    uid = str((p or {}).get("user_id"))
+    wer = namen.get(uid, uid[:8])
+    text = f"{wer} · {zweit_konto_name(p)} {zweit_art(p)}: wartet — {ZWEIT_WARTET_WORT.get(code, code)}: {str(grund or '').strip() or '?'}"
+    return (f"{p.get('id')}|zweit_wartet", 2, "zweit_wartet", "Zweiter Big Trade wartet", text[:400], uid, str(p.get("id")), {"code": code})
+
+
+def zweit_prio_ereignis(uid, von, nach, a_von, a_nach, namen, at_ms):
+    """REIN RECHNEND (testbar): Meldung (3), einmal je Wechsel (Schlüssel mit von, nach und Minute des Wechsels)."""
+    wer = namen.get(str(uid), str(uid)[:8])
+    pkt = lambda v: f"{_wd_num(v):.0f} Pkt" if _wd_num(v) is not None else "? Pkt"   # noqa: E731
+    text = (f"{wer}: Puls von {zweit_konto_name(von)} ({pkt(a_von)} bis TP/Liq) ins Konto {zweit_konto_name(nach)} ({pkt(a_nach)}) — näher an TP/Liq, "
+            f"Userscript liest jetzt dort")
+    minute = int((at_ms or 0) // 60000)
+    return (f"{nach.get('id')}|prio_wechsel|{str(von.get('id'))[:8]}|{minute}", 2, "prio_wechsel", "Puls hat das Konto gewechselt (Priorität)", text,
+            str(uid), str(nach.get("id")), {"von": str(von.get("id")), "a_von": _wd_num(a_von), "a_nach": _wd_num(a_nach)})
+
+
+def zweit_start_merken(pid, andere):
+    """Klick-Riegel /richtung/frei frei mit weiteren laufenden Big Trades: deren Abstand je Plan merken (Speicher, 2 h)."""
+    with _ZWEIT_LOCK:
+        jetzt = time.time()
+        for k in [k for k, v in _ZWEIT_START_MERK.items() if jetzt - v.get("at", 0) > ZWEIT_MERK_S]:
+            _ZWEIT_START_MERK.pop(k, None)
+        _ZWEIT_START_MERK[str(pid)] = {"at": jetzt, "andere": [{k: x.get(k) for k in ("plan", "konto", "art", "rest_tp_usd", "rest_liq_usd")} for x in andere or ()]}
+
+
+def _zweit_senden(ev):
+    """Ereignis einmal senden: Speicher-Merker (_alarm['gemeldet']) + alarm_log der letzten 24 h. Wirft nie."""
+    key = ev[0]
+    with _ZWEIT_LOCK:
+        if key in _alarm["gemeldet"]:
+            return False
+        _alarm["gemeldet"][key] = time.time()
+    schon = alarm_im_log([key], ZWEIT_LOG_S)
+    if schon and key in schon:
+        return False
+    alarm_senden(ev[1], ev[2], ev[3], ev[4], uid=ev[5], plan_id=ev[6], schluessel=key, tag=f"alarm-{ev[2]}-{ev[6][:8]}", daten=ev[7])
+    return True
+
+
+def zweit_wartet_melden(plan_id, code, grund):
+    """Klick-Riegel sperrt einen weiteren Big Trade → Meldung (2) im Hintergrund (der Riegel antwortet ohne Wartezeit). Nur HT-IDs."""
+    def lauf():
+        try:
+            if not _alarm_empfaenger() or f"{plan_id}|zweit_wartet" in _alarm["gemeldet"]:
+                return
+            p = (sb_select("trade_plans", {"select": "id,user_id,master_name,master_firm,richtung,master_contracts,master_symbol_root", "id": f"eq.{plan_id}"}) or [None])[0]
+            namen, aus = _ap_namen()
+            if p and str(p.get("user_id")) not in aus and not _alarm_fremd_verwaltet(p.get("user_id")):
+                _zweit_senden(zweit_wartet_ereignis(p, code, grund, namen))
+        except Exception as e:
+            print(f"[alarm] ⚠️ Zweit wartet {str(plan_id)[:8]}: {type(e).__name__}: {e}", flush=True)
+    threading.Thread(target=lauf, daemon=True).start()
+
+
+def zweit_alarm_tick(aus, jetzt):
+    """alarm_tick (1×/min): Meldungen (1) und (2) aus den offenen/geplanten Big Trades der HT-IDs."""
+    rows = _sb_all("trade_plans", {"select": PULS_HEIM_FELDER + ",ah_status:mt5_baseline->apex_hedge->>status", "status": "eq.open", "route": "in.(tvv2,tsv2,polar)"}) or []
+    rows = [r for r in rows if str(r.get("user_id")) not in aus and not _alarm_fremd_verwaltet(r.get("user_id"))]
+    namen, _a = _ap_namen()
+    for uid, fenster, gruppe in zweit_gruppen(rows):
+        b = gruppe[-1]
+        key = f"{b.get('id')}|zweit_gestartet"
+        if key in _alarm["gemeldet"]:
+            continue
+        with _ZWEIT_LOCK:
+            merk = _ZWEIT_START_MERK.get(str(b.get("id")))
+        jetzt_naehe = {}
+        if not merk:
+            try:
+                jetzt_naehe = {str(x[0].get("id")): x[2] for x in _puls_heim_naehe(gruppe[:-1], lambda _a2, _p: (PULS_HEIM_ZWEIT_USD, PULS_HEIM_ZWEIT_USD))}
+            except Exception as e:
+                print(f"[alarm] ⚠️ Zweit-Abstand {str(b.get('id'))[:8]}: {type(e).__name__}: {e}", flush=True)
+        puls = None
+        pc = ((b.get("mt5_baseline") or {}).get("hedge") or {}).get("pc") if isinstance(b.get("mt5_baseline"), dict) else None
+        if fenster == "tsx":
+            puls = "TopstepX (eigenes Fenster, kein Reader-Konto)"
+        elif pc:
+            try:
+                ep = (sb_select("echoplus_live", {"select": "konto,updated_at", "pc_name": f"eq.{pc}", "limit": "1"}) or [None])[0]
+                t = _alarm_ts((ep or {}).get("updated_at"))
+                if ep and t and (jetzt - t).total_seconds() <= ZWEIT_PULS_KONTO_MAX_S:
+                    puls = zweit_puls_wo(ep.get("konto"), gruppe)
+            except Exception as e:
+                print(f"[alarm] ⚠️ Puls-Konto {pc}: {type(e).__name__}: {e}", flush=True)
+        _zweit_senden(zweit_gestartet_ereignis(uid, fenster, gruppe, namen, merk, jetzt_naehe, puls))
+    # (2) aus der DB-Sperre (prophos_big_trade_halten / Claim-Trigger); „voll“ (art zweit) nur, wenn der Schalter auf ≥ 2 steht
+    mx = puls_heim_zweit_regel(_puls_heim_regel())[0]
+    geplant = _sb_all("trade_plans", {"select": "id,user_id,status,master_name,master_firm,richtung,master_contracts,master_symbol_root,ss:mt5_baseline->start_sperre",
+                                      "status": "eq.planned", "route": "in.(tvv2,tsv2,polar)", "mt5_baseline->start_sperre->>art": "in.(zweit,firma,markt)",
+                                      "updated_at": f"gte.{(jetzt - timedelta(hours=3)).isoformat()}"}) or []
+    for p in geplant:
+        if str(p.get("user_id")) in aus or _alarm_fremd_verwaltet(p.get("user_id")) or f"{p.get('id')}|zweit_wartet" in _alarm["gemeldet"]:
+            continue
+        ss = p.get("ss") if isinstance(p.get("ss"), dict) else {}
+        code = ZWEIT_WARTET_ARTEN.get(str(ss.get("art") or ""))
+        if code and (code != PULS_HEIM_CODE_ZWEIT or mx >= 2):
+            _zweit_senden(zweit_wartet_ereignis(p, code, ss.get("text"), namen))
 
 
 def puls_heim_pruefen(pc, ausser=None, route=None):
@@ -19147,6 +19365,8 @@ def richtung_frei():
         if heim.get("frei"):
             heim = (puls_heim_zweit_pruefen(plan) if plan else {"frei": True}) if plan is not False else \
                 {"frei": False, "code": PULS_HEIM_CODE_UNKLAR, "grund": "Plan nicht lesbar — Zweit-Prüfung nicht möglich, nichts gesendet"}
+        if heim.get("frei") and heim.get("zweit_andere"):
+            zweit_start_merken(pid, heim["zweit_andere"])   # Z6: Abstand der laufenden beim Start (Handy-Meldung „Zweiter Big Trade gestartet“)
         if not heim.get("frei"):
             # zweit_wartet geht als big_trade_nah raus (Panel + PC-Tab kennen nur die Heim-Codes: Plan bleibt Geplant, kein Start-Fehler-Rot);
             # die Unterscheidung holt der Sofort-Start-Wächter des Tabs über GET /admin/zweit-frei (S7), zweit: true für neuere Panels
@@ -19155,6 +19375,8 @@ def richtung_frei():
             code = PULS_HEIM_CODE_NAH if zw else heim.get("code")
             antwort.update(frei=False, code=code, grund=heim.get("grund"), big_trade=heim.get("big_trade"),
                            zweit=zw, zweit_code=heim.get("code") if zw else None, bis=heim.get("bis"))
+            if zw and (heim.get("code") != PULS_HEIM_CODE_ZWEIT or int(heim.get("max_je_id") or 1) >= 2):
+                zweit_wartet_melden(pid, heim.get("code"), heim.get("grund"))   # Z6: einmal je Plan aufs Handy (Hintergrund); „voll“ bei Schalter 1 = heute, kein Alarm
             print(f"[puls-heim] ⛔ PC {wer[1]} Plan {pid[:8]}: {heim.get('grund')}", flush=True)
     out = jsonify(antwort)
     out.headers["Cache-Control"] = "no-store"

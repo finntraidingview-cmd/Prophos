@@ -27295,9 +27295,10 @@
     let big = null
     if(fenster && bigs.length > 1){
       const stand = bthBigStand(fenster, bigs), vor = stand.id + '|' + stand.at
+      const vorId = stand.id || stand.vor || ''   // nach einer Order: die Heimat VOR der Order (S6-Gegenprüfung Z6: nie das Order-Konto, sonst Fehlalarm bei jedem Start von B)
       big = heimNaechster(bigs, juengster, stand,
         { wort: () => 'Big Trade', wache: fenster === 'tv', abstand: p => wdHeimAbstand(p, true), wechsel: BTH_WECHSEL_PKT, halten: BTH_HALTE_MS, einheit: 'Pkt' })
-      if(stand.id + '|' + stand.at !== vor) bthBigMerken()
+      if(stand.id + '|' + stand.at !== vor){ bthBigMerken(); bthPrioMerken(fenster, vorId, big, bigs) }
     }else big = juengster(bigs)
     return big || wdHeimWahl(offen.filter(istApex), juengster) || wdHeimWahl(offen.filter(istWd), juengster)
   }
@@ -27317,6 +27318,21 @@
    *      einer), mit at = jetzt — danach die normale Hysterese. Nur TradingView (Reader/Beleg kennen kein TopstepX-Konto).
    * Ausnahme: nach einer Order (bigTradeHeimNachOrder, frei: true) bewusst leer — Puls verlässt das Order-Konto ohnehin, Prio-Wahl sofort. */
   const BTH_BIG_WAHL_SS = 'prophos_bth_big_wahl'
+  /* PRIO-WECHSEL AUFS HANDY (03.11.2026, Auftrag Z6, Finn: „von Anfang an eine Handy-Nachricht, sobald so ein Szenario passiert“): wechselt die
+   * Big-Trade-Heimat eines Fensters von einem laufenden Big Trade zum anderen, merkt sich der Tab {von, nach, a_von, a_nach (NQ-Punkte bis TP/Liq), at}.
+   * Der nächste erfolgreiche Heimweg in das neue Konto schickt das als prio an /alarm/heimweg (bigTradeHeimMelden) → 🟠 „Puls hat das Konto gewechselt
+   * (Priorität)“, einmal je Wechsel. Kein Wechsel = Puls stand schon dort (kein Heimweg) → keine Meldung. */
+  const BTH_PRIO_MAX_MS = 10 * 60000
+  const _bthPrio = {}   // Fenster → { von, nach, a_von, a_nach, at }
+  function bthPrioMerken(fenster, vonId, nach, bigs){
+    try{
+      if(!fenster || !vonId || !nach || String(nach.id) === String(vonId)) return
+      const von = (bigs || []).find(p => String(p.id) === String(vonId))
+      if(!von) return
+      const a = p => { const x = wdHeimAbstand(p, true); return (typeof x === 'number' && isFinite(x)) ? Math.round(x * 10) / 10 : null }
+      _bthPrio[fenster] = { von: String(von.id), nach: String(nach.id), a_von: a(von), a_nach: a(nach), at: Date.now() }
+    }catch(_){}
+  }
   function bthBigStand(fenster, bigs, o){
     o = o || {}
     let s = _bthBigWahl[fenster]
@@ -27446,7 +27462,7 @@
     const f = fenster || 'tv', ext = String(konto || '').trim()
     _bthNachOrder = null
     _bthGeklickt.id = String(planId || ''); _bthGeklickt.at = Date.now()
-    _bthBigWahl[f] = { id: '', at: 0, frei: true }   // Prio-Wahl nach der Order sofort, ohne Haltezeit und ohne Belegen aus dem Puls-Chrome (S2 03.11.2026) — Puls verlässt das Order-Konto ohnehin
+    _bthBigWahl[f] = { id: '', at: 0, frei: true, vor: (_bthBigWahl[f] && _bthBigWahl[f].id) || '' }   // Prio-Wahl nach der Order sofort, ohne Haltezeit und ohne Belegen aus dem Puls-Chrome (S2 03.11.2026) — Puls verlässt das Order-Konto ohnehin
     if(!ext || !bigTradeHeimPlanen(ext, 'Order ' + ext.slice(-4), true, f)) return false
     _bthNachOrder = { ext, fenster: f, at: Date.now(), begonnen: false, fertig: false, ok: false, beleg: null, finallyDa: false }
     return true
@@ -27476,8 +27492,12 @@
       // Wache-Grund nur beim ersten Alarm eines Heim-Wache-Heimwegs, danach weg (30.10.2026, s. hwWacheInfo)
       const wache = /Heim-Wache/.test(String(grund || '')) ? _hwWacheInfo : null
       if(wache) _hwWacheInfo = null
+      // Z6: Prio-Wechsel in genau dieses Konto, frisch → einmal mitschicken
+      const f = bthFenster(bt.route), pw = _bthPrio[f]
+      const prio = (ok && pw && pw.nach === String(bt.id) && Date.now() - pw.at < BTH_PRIO_MAX_MS) ? pw : null
+      if(prio) delete _bthPrio[f]
       await fetch(`${WATCHER_HOME}/alarm/heimweg`, { method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
-        body: JSON.stringify(Object.assign({ plan_id: bt.id, ok, grund, dauer_ms: dauerMs, lesung_ms: lesungMs, msg: msg || '', pc: hedgePcId() || '' }, wache ? { wache } : {})) })
+        body: JSON.stringify(Object.assign({ plan_id: bt.id, ok, grund, dauer_ms: dauerMs, lesung_ms: lesungMs, msg: msg || '', pc: hedgePcId() || '' }, wache ? { wache } : {}, prio ? { prio } : {})) })
     }catch(e){ console.warn('[big-trade] Heimweg melden', (e && e.message) || e) }
   }
   async function bigTradeHeim(grund, fenster){
