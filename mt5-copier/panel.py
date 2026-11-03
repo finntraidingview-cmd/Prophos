@@ -2155,6 +2155,14 @@ SCHARF_FLACH_LESUNGEN = 2
 SCHARF_OFFEN_MIN_S = 3.0
 SCHARF_STAND_MAX_S = 1.0
 SCHARF_MAX_S = 3 * 3600   # S9: 2–4 h statt 12 h — ein liegengebliebener Eintrag hält sonst „kein Neustart“ den halben Tag
+# BIG TRADES ÜBER 3 H (Eingang 03.11.2026, Belege Finn + Pascal b167a248 Tradeify …3495 pc-2zc2we 5,5 h, Ina 8e1a558f …8820 pc-xc5c52 4,2 h, dazu 1f30fe17/
+# 18253d21/4a2532e2/726c6895 3,6–4,5 h: alle schloss der Tab nach seiner 1-s-Regel, 2–3 s ab Toast, 726c6895 32 s; alle Hedges unter 3 h schloss das Panel, 0,84–0,87 s):
+# nach SCHARF_MAX_S fiel der Eintrag als „abgelaufen“ weg, obwohl der Hedge offen war. Jetzt gilt SCHARF_MAX_S nur, solange der Copier das Ticket nicht frisch als
+# offen meldet; mit Copier-Beleg (≤ SCHARF_COPIER_BELEG_S alt) bleibt der Eintrag bis SCHARF_MAX_HART_S (eine Futures-Session). Liegengebliebene Einträge räumt
+# weiter „im Copier nicht mehr offen“ ab; ohne Copier-Beleg (Copier aus) bleibt es bei 3 h — „kein Neustart“ hängt so nie länger an einem toten Eintrag.
+SCHARF_MAX_HART_S = 23 * 3600
+SCHARF_COPIER_BELEG_S = 120.0
+SCHARF_COPIER_BELEG_NEU_S = 60.0   # Beleg höchstens 1×/min in die Datei schreiben (kein Schreiben je Takt)
 SCHARF_COPIER_KARENZ_S = 30   # so lange nach dem Open zählt ein fehlendes Ticket in der Copier-Liste noch nicht (Status-Takt)
 SCHARF_CLOSE_WIEDER_S = 2.0
 SCHARF_KONTO_KURZ_MIN = 12
@@ -2408,10 +2416,23 @@ def scharf_loesen(ticket, grund):
             scharf_spur(ticket, "gelöst", grund)
 
 
+def scharf_lebt(e, jetzt):
+    """REIN RECHNEND (testbar, 03.11.2026 Big Trades > 3 h): gilt der Eintrag noch? Unter SCHARF_MAX_S immer; danach nur mit frischem Copier-Beleg
+    (copier_offen_at ≤ SCHARF_COPIER_BELEG_S alt) und unter SCHARF_MAX_HART_S."""
+    alter = jetzt - float(e.get("at") or 0)
+    if alter < SCHARF_MAX_S:
+        return True
+    try:
+        beleg = float(e.get("copier_offen_at") or 0)
+    except (TypeError, ValueError):
+        beleg = 0.0
+    return alter < SCHARF_MAX_HART_S and beleg > 0 and jetzt - beleg <= SCHARF_COPIER_BELEG_S
+
+
 def scharf_konto_fest():
     """Offene scharfe Einträge → [ext_id] (für „kein Puls-Chrome-Neustart bei offenem TV-Trade mit Hedge“)."""
     jetzt = time.time()
-    return [str(x.get("ext_id")) for x in scharf_laden() if jetzt - float(x.get("at") or 0) < SCHARF_MAX_S]
+    return [str(x.get("ext_id")) for x in scharf_laden() if scharf_lebt(x, jetzt)]
 
 
 def _scharf_close_senden(e):
@@ -2468,8 +2489,12 @@ def _scharf_runde(st, jetzt, offene_tickets=None):
     erg_alle = read_json(os.path.join(HERE, "hedge_solo_ergebnis.json"), {}) or {}
     geaendert, n = False, 0
     for i, e in enumerate(list(liste)):
-        if jetzt - float(e.get("at") or 0) >= SCHARF_MAX_S:
-            scharf_loesen(e.get("ticket"), "abgelaufen")
+        # Copier meldet das Ticket offen → Beleg merken (höchstens 1×/min geschrieben), damit ein Big Trade über 3 h scharf bleibt (03.11.2026)
+        if offene_tickets is not None and int(e.get("ticket") or 0) in offene_tickets and jetzt - float(e.get("copier_offen_at") or 0) >= SCHARF_COPIER_BELEG_NEU_S:
+            e = dict(e, copier_offen_at=jetzt)
+            liste[i], geaendert = e, True
+        if not scharf_lebt(e, jetzt):
+            scharf_loesen(e.get("ticket"), "abgelaufen" + (" (kein frischer Copier-Beleg)" if jetzt - float(e.get("at") or 0) < SCHARF_MAX_HART_S else ""))
             continue
         # S9: anders zugegangen (Level im Terminal, Hand in MT5, Tab bucht über die Copier-Liste) → Ticket nicht mehr offen → lösen
         if offene_tickets is not None and int(e.get("ticket") or 0) not in offene_tickets and jetzt - float(e.get("at") or 0) >= SCHARF_COPIER_KARENZ_S:

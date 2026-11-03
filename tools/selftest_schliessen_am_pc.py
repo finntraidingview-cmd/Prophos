@@ -201,6 +201,32 @@ check(len(ns["scharf_laden"]()) == 1, "Copier-Liste nicht prüfbar → nichts l�
 uhr[0] += 3 * 3600
 ns["_scharf_runde"](None, uhr[0], None)
 check(ns["scharf_laden"]() == [] and ns["SCHARF_MAX_S"] == 3 * 3600, "Verfall nach 3 h (statt 12 h)")
+# BIG TRADES ÜBER 3 H (Eingang 03.11.2026, b167a248 5,5 h / 8e1a558f 4,2 h: Eintrag lief nach 3 h ab, der Tab schloss 2–3 s nach dem Toast)
+frisch_scharf(710)
+for _ in range(4 * 60):                       # 4 h, der Copier meldet das Ticket jede Minute offen
+    uhr[0] += 60
+    ns["_scharf_runde"](None, uhr[0], {710})
+e710 = (ns["scharf_laden"]() or [{}])[0]
+check(e710.get("ticket") == 710 and ns["scharf_konto_fest"]() == [ID], "Big Trade 4 h, Copier meldet das Ticket offen → Eintrag bleibt scharf, „kein Neustart“ hält")
+uhr[0] += 2
+ns["_scharf_runde"](None, uhr[0], {710})
+check(abs(float(ns["scharf_laden"]()[0].get("copier_offen_at") or 0) - (uhr[0] - 2)) < 1e-6, "Copier-Beleg höchstens 1×/min geschrieben")
+lauf([lambda: stand(pos=POS)] * 2)
+check(lauf([lambda: stand()] * 10) is not None, "nach 4 h: Master weg → Panel schließt (nicht mehr der Tab nach 1 s)")
+frisch_scharf(711)
+t711 = uhr[0]
+for _ in range(4 * 60):
+    uhr[0] += 60
+    ns["_scharf_runde"](None, uhr[0], {711} if uhr[0] - t711 < 3.5 * 3600 else None)
+check(ns["scharf_laden"]() == [], "Copier-Beleg nach 3 h älter als 2 min (Copier aus) → abgelaufen wie bisher")
+frisch_scharf(712)
+for _ in range(24):
+    uhr[0] += 3600
+    ns["_scharf_runde"](None, uhr[0], {712})
+check(ns["scharf_laden"]() == [], "harte Grenze 23 h auch mit Copier-Beleg")
+L = ns["scharf_lebt"]
+check(L({"at": 0}, 3 * 3600 - 1) and not L({"at": 0}, 3 * 3600) and L({"at": 0, "copier_offen_at": 5 * 3600 - 100}, 5 * 3600)
+      and not L({"at": 0, "copier_offen_at": 5 * 3600 - 130}, 5 * 3600) and not L({"at": 0, "copier_offen_at": 23 * 3600}, 23 * 3600), "scharf_lebt: Grenzen 3 h / 2 min / 23 h")
 # S9: scharf nur mit Puls-Reader ≥ 0.10.8
 if os.path.exists(ns["SCHARF_PFAD"]):
     os.remove(ns["SCHARF_PFAD"])
