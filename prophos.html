@@ -36493,7 +36493,9 @@
     const hPl = (pw.hedge && _fz(pw.hedge.pl) != null) ? ((pw.hedge.status === 'geschlossen' && _fz(pw.slave_pl) != null) ? _fz(pw.slave_pl) : _fz(pw.hedge.pl))
       : _mwdErlFusionAmPlan ? (_fz(pw.slave_pl_live) ?? _fz(pw.slave_pl) ?? (_mwdErlPolar && pw.polar ? _fz(pw.polar.slave_pl) : null)) : null
     const eigen = mklWdEigenerPlan(pid)
-    if(eigen && typeof openTradeCompleteModal === 'function'){ mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined); return }
+    // Ein Klick auf einem eigenen Plan (A1 03.11.2026): erst die Vorbelegung des Radar-Dialogs prüfen, gebucht wird über Railway wie bei fremden Plänen; passt sie nicht, Trades-Dialog wie bisher
+    const tcOeffnen = () => { mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined) }
+    if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }
     _mwdErlId = String(pid)
     const k = pw.konto || {}
     const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = 'Trade erledigt'
@@ -36600,6 +36602,7 @@
       const mV = plZahl(m && m.value), fV = _mwdErlOhneHedge ? 0 : plZahl(f && f.value)
       if((document.querySelector('input[name="mwd-erl-status"]:checked')?.value || 'none') === 'none' && mV != null && isFinite(mV) && fV != null && isFinite(fV) && !wdhCb?.checked){ _mwdErlEinKlick = true; _mwdErlStill = !!opts.nurStill; mklWdErledigtSpeichern(); return }
       if(opts.nurStill){ _mwdErlId = null; return }   // vorgemerkt (02.11.2026): ohne Klick nie ein Popup aufmachen — die Zeile kommt in „Erledigt" zurück
+      if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }   // eigener Plan: Popup = Trades-Dialog wie bisher (A1)
     }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
@@ -36759,6 +36762,8 @@
         }
       }catch(e){ console.warn('[abhaken] Nachfolger öffnen', e) }
       try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
+      // eigener Plan über den Railway-Weg (A1 03.11.2026): die lokale Planliste nachladen — sonst stünde er im Trades-Reiter weiter in „Überprüfen“ (Gegenprüfung)
+      if(mklWdEigenerPlan(pid) && typeof loadTradePlansFromSupabase === 'function'){ try{ await loadTradePlansFromSupabase() }catch(_){} }
       mklWdRender(); mklChartZeichnen()
     }catch(e){
       // still nur bei „nicht mehr in Überprüfen“ (schon abgehakt, anderer Tab); jeder andere 409 (z. B. „gleichzeitig geändert“, Betrieb 1 02.11.2026) ruft die Zeile zurück
@@ -38592,7 +38597,8 @@
   function wdlEinKlickGrund(t){
     if(!t || t.status !== 'review') return 'nicht in Überprüfen'
     if(wdlIstPolar(t)) return 'Polar'
-    if(mklWdEigenerPlan(wdlTid(t))) return 'eigener Plan'
+    // EIGENE PLÄNE (A1 03.11.2026): kein eigener Grund mehr — der Ein-Klick bucht sie über denselben Railway-Weg wie fremde (den nimmt auch der PC-Tab für eigene
+    // Trades); das Popup der eigenen ID (Trades-Dialog) kommt nur noch, wenn ein Grund unten greift
     if(wdlAbhakenSperre(t)) return 'gesperrt'
     if(wdlManuell(t)) return 'manuell'
     // (a) geblowt / Konto weg — Blow-Beweis wie ap_normal_auto_pruefen (S2 30.10.2026)
@@ -38618,18 +38624,23 @@
     if(/unplausibel|Balance-Sprung/i.test(String(t.kette_grund || '')) || t.balance_sprung) return 'Ergebnis unplausibel'
     const fusionAmPlan = t.route === 'mt5' || t.route === 'tvplus'
     if((t.hedge || Number(t.hedge_eur) > 0 || fusionAmPlan) && !zahl(t.hedge ? (t.hedge.pl ?? t.slave_pl) : t.slave_pl)) return 'Hedge-P&L fehlt'
-    // Stopp S9 zu fd3deabd: diese Prüfungen schützen die Buchung. Eine echte Lesung im falschen Konto (gekürzte Kennung, Puls im Nachbarkonto) rechnet +40k/−20k, eine
-    // bestandene Challenge ohne bekanntes Ziel bräuchte den Phasenwechsel. Popup bleibt, bei passendem P&L weiter keins
-    if(!ka) return 'Konto-Stand unbekannt'
-    if(['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0 && (wdlBlowStand(t) || {}).liq != null)) return 'Ziel oder Boden unbekannt'
+    /* NEUE REGEL (A1, Finn 03.11.2026 ~18:20 Dubai, zum 5.–6. Mal: „Bei Trades, die nicht geblowt sind und nicht bestanden haben, will ich das Popup nicht jedes Mal sehen …
+     * Ändere das, dass es gar nicht mehr kommt“): weder geblowt noch bestanden = Abhaken bucht direkt mit der Vorbelegung (Master = Balance nachher − vorher, Fusion aus
+     * MetaTrader). Popup nur noch bei erkanntem Status-Wechsel (Blow/Ziel, oben) oder fehlendem Wert. Bisher kam es zusätzlich bei „Konto-Stand unbekannt“, „Ziel oder
+     * Boden unbekannt“ (Konten ohne ziel_usd/Liq-Regel — dort IMMER), „P&L passt nicht zu TP/SL“ (> 15 % jenseits, Echo-Slippage, Verlust ohne SL) und bei eigenen Plänen.
+     * Was bleibt (Stopp S9 zu fd3deabd, Buchung schützen): (1) Gewinn bei Challenge/Phase ohne bekanntes Ziel bzw. ohne Konto-Stand — bestanden lässt sich nicht
+     * ausschließen; (2) Lesung offensichtlich im falschen Konto (Fall +40k/−20k): Gewinn über dem Doppelten des TP (mind. 1.000 $), Verlust über dem Doppelten von
+     * SL/Risiko/Abstand zur Liq — ohne bekannten Boden schon ab dem 1,5-Fachen, weil dort kein Blow erkannt werden kann (Gegenprüfung A1); (3) genau 0 = kein Ergebnis. */
+    const pl = Number(t.pl_balance), stand = wdlBlowStand(t) || {}
+    if(pl === 0) return 'kein Ergebnis (P&L genau 0)'   // S2: kein Ergebnis, Finn soll es sehen
+    if(pl > 0 && (!ka || (['challenge', 'phase1', 'phase2'].includes(typ) && !(WDL_UEBERGANG[typ] && Number(t.ziel_usd) > 0)))) return 'Gewinn, Ziel unbekannt'
+    if(pl < 0 && Number(stand.liq) > 0 && Number(t.balance_end) > 0 && Number(t.balance_end) <= Number(stand.liq)) return 'Balance an der Liq'   // Blow ohne Beweis oben
     const dm = t.demo || {}
     if(dm.status === 'liquidiert' && dm.stop !== 'sl' && !wdlLiqIstTag(t) && !wdlLesungAmTp(t)) return 'Demo an der Liq, Lesung ohne Blow'   // Lesung am TP: s. wdlLesungAmTp
-    // VERLUST OHNE SL (Finn 02.11.2026, Foto; 57 von 92 Futures-Plänen der letzten 3 Tage ohne master_sl, Fall Marco Apex …0011, Plan 07d2a045, −1.616,20 $): Bezug ist
-    // dann master_risk (Apex: Tageslimit, sonst das geplante Risiko), sonst der Abstand Start → Liquidation. Fehlt alles, bleibt das Popup
-    const pl = Number(t.pl_balance), stand = wdlBlowStand(t) || {}
     const liqAbstand = Number(t.balance_start) > 0 && Number(stand.liq) > 0 && Number(t.balance_start) > Number(stand.liq) ? Number(t.balance_start) - Number(stand.liq) : 0
-    const bezug = pl > 0 ? (Math.abs(Number(t.master_tp)) || 0) : (Math.abs(Number(t.master_sl)) || Math.abs(Number(t.master_risk)) || liqAbstand || 0)
-    if(pl === 0 || !bezug || Math.abs(pl) > bezug + Math.max(50, bezug * 0.15)) return 'P&L passt nicht zu TP/SL'   // genau 0: kein Ergebnis, Finn soll es sehen (S2)
+    const grenze = pl > 0 ? 2 * Math.max(Math.abs(Number(t.master_tp)) || 0, 1000)   // Gewinn: nur der TP (Winning Day TP 300 + 4.500 $ bis zur Liq ließe sonst +9.000 $ durch)
+      : (Number(stand.liq) > 0 ? 2 : 1.5) * Math.max(Math.abs(Number(t.master_sl)) || 0, Math.abs(Number(t.master_risk)) || 0, liqAbstand, 1000)
+    if(Math.abs(pl) > grenze) return 'Ergebnis unplausibel (falsches Konto?)'
     return ''
   }
   window._wdlEinKlickGrund = wdlEinKlickGrund   // Test-Haken

@@ -18,15 +18,22 @@ def check(ok, name):
 fn = html[html.index("function wdlLesungAmTp("):html.index("window._wdlLesungAmTp")] + html[html.index("function wdlEinKlickGrund("):html.index("window._wdlEinKlickGrund")]
 for marker, name in (("wdlGeblowtUrteil(t)", "geblowt → Popup"), ("wdlBestandenChip(t)", "bestanden → Popup"), ("wdlFcfdZielErreicht(t)", "Funded-CFD-Ziel → Popup"),
                      ("zahl(t.pl_balance)", "ohne echte Lesung → Popup"), ("wdlManuell(t)", "manuell → Popup"),
-                     ("t.hedge.status !== 'geschlossen'", "Hedge offen → Popup"), ("Hedge-P&L fehlt", "Hedge-P&L fehlt → Popup"), ("mklWdEigenerPlan(", "eigener Plan → Popup")):
+                     ("t.hedge.status !== 'geschlossen'", "Hedge offen → Popup"), ("Hedge-P&L fehlt", "Hedge-P&L fehlt → Popup")):
     check(marker in fn, name)
+check("mklWdEigenerPlan(" not in fn, "A1 03.11.2026: eigener Plan ist kein Popup-Grund mehr")
 check("kette_tag" not in fn, "Topstep-Tagesergebnis allein erzwingt kein Popup")
 oe = html[html.index("function mklWdErledigtOeffnen("):html.index("function mwdErlStatusUI(")]
 check("opts.einKlick" in oe and "mklWdErledigtSpeichern(); return" in oe and "!wdhCb?.checked" in oe, "Ein Klick speichert über den Popup-Weg, Winning-Day-Vorschlag öffnet das Popup")
+check("if(eigen && typeof openTradeCompleteModal === 'function' && !(opts && opts.einKlick)){ tcOeffnen(); return }" in oe
+      and "if(eigen && typeof openTradeCompleteModal === 'function'){ _mwdErlId = null; tcOeffnen(); return }" in oe
+      and oe.index("if(opts.nurStill){ _mwdErlId = null; return }") < oe.index("_mwdErlId = null; tcOeffnen(); return }"),
+      "A1: eigener Plan bucht beim Ein-Klick über den Radar-Weg, sonst (und nie beim stillen Takt) Trades-Dialog wie bisher")
 check(oe.index("opts.einKlick") < oe.index("getElementById('mwdErledigtModal')?.classList.add('open')"), "Prüfung läuft vor dem Öffnen")
 check("const ein = !!t && !grund; if(ein)" in html and "Date.now() - _wdlEinKlickAt < 600" in html, "Klick fragt die Prüfung, Doppelklick bucht die nächste Zeile nicht mit")
-check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "beide_in_minute" not in fn and "P&L passt nicht" in fn and "Ziel oder Boden unbekannt" in fn and "dm.status === 'liquidiert'" in fn, "Balance 0 → Popup; Tage-Mini und TP/Liq unklar nicht mehr, Schutz der Buchung bleibt (S9 02.11.2026)")
+check("Number(t.balance_end) > 0" in fn and "t.tage_mini" not in fn and "beide_in_minute" not in fn and "return 'P&L passt nicht" not in fn and "return 'Ziel oder Boden unbekannt'" not in fn and "return 'eigener Plan'" not in fn and "'Gewinn, Ziel unbekannt'" in fn and "Ergebnis unplausibel (falsches Konto?)" in fn and "dm.status === 'liquidiert'" in fn,
+      "Balance 0 → Popup; A1: kein Popup mehr für TP/SL-Abweichung und fehlenden Boden, Schutz der Buchung bleibt (Ziel bei Gewinn, falsches Konto, 0)")
 check("const sicht = _mwdErlSicht, ohneHedge" in html, "Werte für Anfrage und Toast vor dem await festgehalten")
+check("if(mklWdEigenerPlan(pid) && typeof loadTradePlansFromSupabase === 'function'){ try{ await loadTradePlansFromSupabase() }catch(_){} }" in html, "A1: eigener Plan lädt nach dem Buchen die Planliste nach")
 sp = html[html.index("async function mklWdErledigtSpeichern("):html.index("document.getElementById('mwdErledigtClose')")]
 check("wdlLokalVergessen(pid)" in sp and "Abhaken nicht gespeichert" in sp, "Fehler: Toast und Zeile zurück")
 # ── Echter Lauf von wdlEinKlickGrund in JavaScriptCore (ohne Node), Helfer per Merker am Trade ──
@@ -47,10 +54,18 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("SL getroffen", {"pl_balance": -700}, True), ("15 % + über TP in der Grenze", {"pl_balance": 800}, True),
           ("konto_geblowt", {"endlesung": {"konto_geblowt": {"x": 1}}}, False), ("grund tsx_geblowt", {"endlesung": {"grund": "tsx_geblowt"}}, False),
           ("puls_fehler konto_weg", {"endlesung": {"puls_fehler": "konto_weg: fehlt"}}, False), ("puls_fehler konto_nicht_erreicht", {"endlesung": {"puls_fehler": "konto_nicht_erreicht"}}, False),
-          ("ohne ziel_usd", {"ziel_usd": None}, False), ("ohne Liq/Boden", {"_ohneLiq": True}, False), ("wdlZielMarkiert", {"_ziel": True}, False),
+          ("ohne ziel_usd, Gewinn", {"ziel_usd": None}, False), ("ohne ziel_usd, Verlust (A1)", {"ziel_usd": None, "pl_balance": -700}, True), ("ohne Liq/Boden (A1)", {"_ohneLiq": True}, True), ("wdlZielMarkiert", {"_ziel": True}, False),
           ("ziel_erreicht_at am Konto", {"konto_aktuell": {"typ": "phase1", "ziel_erreicht_at": "2026-10-30T10:00:00Z"}}, False),
-          ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt", {"konto_aktuell": None}, False),
-          ("P&L weit über TP", {"pl_balance": 5000}, False), ("Verlust weit über SL", {"pl_balance": -5000}, False), ("ohne TP/SL am Plan", {"master_tp": None, "master_sl": None}, False), ("P&L genau 0", {"pl_balance": 0}, False), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, False),
+          ("Konto in anderer Phase", {"konto_aktuell": {"typ": "phase2"}}, False), ("Konto-Stand fehlt, Gewinn", {"konto_aktuell": None}, False), ("Konto-Stand fehlt, Verlust (A1)", {"konto_aktuell": None, "pl_balance": -700}, True),
+          ("P&L über das Doppelte jeder Bezugsgröße", {"pl_balance": 5000}, False), ("Verlust über das Doppelte jeder Bezugsgröße", {"pl_balance": -5000}, False), ("ohne TP/SL am Plan (A1)", {"master_tp": None, "master_sl": None}, True),
+          # A1 (Finn 03.11.2026, Foto: Marc Echo The5%ers 200k …0436, BUY 51 Lot, −5.856,33 $): Verlust etwas über dem SL (Slippage) → kein Popup mehr
+          ("Marc: Echo-Verlust 17 % über dem SL (A1)", {"route": "mt5", "slave_pl": 72.52, "master_tp": 5000, "master_sl": 5000, "pl_balance": -5856.33, "balance_end": 194143.67, "balance_start": 200000}, True),
+          ("Gewinn 20 % über dem TP (A1)", {"pl_balance": 840}, True),
+          ("Balance unter der Liq ohne Blow-Beweis", {"pl_balance": -700, "balance_end": 89000}, False),
+          # Gegenprüfung A1: Gewinn nur am TP gemessen, Verlust ohne Boden enger
+          ("Winning Day TP 300, +9.000 $ (falsches Konto)", {"konto_typ": "winning_days", "konto_aktuell": {"typ": "winning_days"}, "master_tp": 300, "pl_balance": 9000, "balance_start": 104500}, False),
+          ("Verlust 1,7× SL ohne bekannten Boden", {"_ohneLiq": True, "master_sl": 1500, "pl_balance": -2600}, False),
+          ("Verlust 1,4× SL ohne bekannten Boden", {"_ohneLiq": True, "master_sl": 1500, "pl_balance": -2100}, True), ("P&L genau 0", {"pl_balance": 0}, False), ("P&L genau 0 ohne TP/SL", {"pl_balance": 0, "master_tp": None, "master_sl": None}, False),
           ("t2_grund unplausibel", {"kette_grund": "Ergebnis unplausibel (−148.000 $)"}, False), ("Funded Futures", {"konto_typ": "funded", "konto_aktuell": {"typ": "funded"}}, False),
           ("Funded CFD unauffällig", {"konto_typ": "funded_cfd", "konto_aktuell": {"typ": "funded_cfd"}, "ziel_usd": None, "route": "mt5", "slave_pl": 0}, True),
           ("Balance 0", {"balance_end": 0, "pl_balance": -100000}, False), ("Hedge offen", {"hedge": {"status": "offen"}}, False), ("Lesung fehlt", {"pl_balance": None}, False),
@@ -60,9 +75,9 @@ FAELLE = [("unauffällig", {}, True), ("Hand geschlossen unter TP", {"pl_balance
           ("Hedge-P&L fehlt", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen"}}, False), ("Hedge-P&L da", {"route": "tvv2", "hedge_eur": 400, "hedge": {"status": "geschlossen", "pl": -120}}, True), ("Lesung im falschen Konto (+40k)", {"pl_balance": 40000}, False),
           # Verlust ohne master_sl (Finn 02.11.2026, Marco Apex …0011, Plan 07d2a045): Bezug master_risk bzw. Abstand Start → Liq
           ("Marco: Verlust ohne SL, Tageslimit als Bezug", {"master_sl": None, "master_risk": 1500, "pl_balance": -1616.20}, True),
-          ("Verlust ohne SL deutlich über dem Risiko", {"master_sl": None, "master_risk": 1500, "pl_balance": -4000}, False),
+          ("Verlust ohne SL über dem Doppelten des Risikos", {"master_sl": None, "master_risk": 1500, "pl_balance": -4000}, False),
           ("Verlust ohne SL und Risiko, Abstand Start → Liq", {"master_sl": None, "pl_balance": -2900, "balance_start": 103000}, True),
-          ("Verlust ohne SL, Risiko und Start", {"master_sl": None, "pl_balance": -700}, False),
+          ("Verlust ohne SL, Risiko und Start (A1)", {"master_sl": None, "pl_balance": -700}, True),
           ("Funded-CFD-Ziel", {"_fz": True}, False), ("Konto weg", {"_weg": True}, False), ("geblowt", {"_blow": True}, False), ("bestanden-Chip", {"_best": True}, False), ("Polar", {"_polar": True}, False), ("manuell", {"_man": True}, False)]
 js = STUBS + fn + "\nconst F = " + json.dumps([dict(BASIS, **f[1]) for f in FAELLE], ensure_ascii=False) + "; print(JSON.stringify(F.map(wdlEinKlickGrund)));"
 with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as d:
