@@ -15347,6 +15347,220 @@ def wd_cme_tag_start(tag):
     return datetime(d.year, d.month, d.day, 17, 0, tzinfo=ZoneInfo("America/Chicago")).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+# ══ PAYOUT OFFEN = RAUS AUS DEM WD-FARMER, ABGEHAKT = WIEDER REIN (Finn 03.11.2026 ~18:15 Dubai: „Ein Account, der eine offene Payout-Anfrage hat, wird
+# nicht Winning-Day-gefarmt, solange der Payout unter Review ist. Kein Trade wird geschadet. Sobald das Geld ankam, sobald ich den Payout abhake, soll der
+# Account, wenn es am gleichen Tag ist, wieder an dem Tag reingemacht werden.") Anlass: 103c974d/208e7af9 standen nach dem Abhaken mit eingefrorenem
+# „Ziel schon voll" bzw. ohne Startzeit in der Tageszeile. Ein Abgleich über den ZUSTAND (offene Anfrage ja/nein), nicht über Klick-Ereignisse — so greift
+# er für jeden Weg (Admin → Payouts, Finanzen im Login der ID, Abhaken von Hand): Railway-Takt (ap_loop) + sofort nach /admin/payout-anfragen|-erhalten.
+# Raus: Konto in allen Zeilen ab heute (Dubai) aktiv false + Hinweis; ein geplanter, nie geclaimter Plan des Kontos wird gelöscht (laufende bleiben).
+# Rein: nur Railway hebt den Hinweis auf — heute mit eigener Startzeit (nach_start, jetzt + 10–20 min), solange das Fenster (wd_farmer_regeln.bis_hhmm)
+# offen ist und heute auf dem Konto nichts gestartet/geplant ist; sonst „ab morgen". Die PC-Tabs setzen den Hinweis selbst nur (wdAbgleich), nie zurück. ══
+WD_HINWEIS_PAYOUT = "Payout angefragt – wartet auf Auszahlung"
+WD_HINWEIS_PAYOUT_MORGEN = "Payout erhalten – ab morgen wieder drin"
+WD_HINWEIS_FARM = "nicht im Farm (Haken aus)"                                    # = prophos.html WD_HINWEIS_FARM/_EXT/_ARCHIV
+WD_HINWEIS_EXT = "ohne External ID — der Bot kann das Konto nicht wählen"
+WD_HINWEIS_ARCHIV = "archiviert (Konto-Archiv) — fährt nicht mit"
+WD_PAYOUT_TAKT_S = 60
+WD_PAYOUT_NACH_MIN = (10, 20)          # Startzeit nach dem Abhaken: jetzt + 10–20 min (gestreut, Jitter-Regel)
+_wd_payout = {"at": 0.0, "fehler": "", "letzt": None}
+_wd_payout_lock = threading.Lock()
+
+
+def wd_payout_abgleich(rows, offen, plaene, jetzt, regeln, rnd=None, geprueft=()):
+    """REIN RECHNEND (testbar): Tageszeilen (wd_tagesplan, tag ≥ heute) gegen offene Payout-Anfragen abgleichen.
+    rows = [{tag, user_id, status, start_um, richtung, reihenfolge, updated_at, konten[]}], offen = Konto-IDs mit offener Anfrage (pending_payouts
+    status pending), plaene = trade_plans der Konten (id, master_account_id, status, start_um_gestartet_at, started_at, orbit_gesendet_at, created_at),
+    jetzt = datetime (UTC), regeln = wd_farmer_regeln (tz, start_hhmm, bis_hhmm), geprueft = Plan-IDs, die per ID gelesen wurden (fehlt einer davon in
+    plaene, gibt es ihn nicht mehr). → updates = [{user_id, tag, updated_at, felder, loeschen}]; loeschen = Plan-IDs dieser Zeile (geplant, nie geclaimt,
+    nie gesendet), die mit dem Raus zurückgezogen werden — erst NACH dem Schreiben der Zeile löschen, sonst legte die Selbstheilung eines PC-Tabs (Plan
+    fehlt, Konto aktiv) denselben Plan neu an."""
+    from zoneinfo import ZoneInfo
+    import random as _random
+    rnd = rnd or _random.random
+    regeln = regeln or {}
+    tz = ZoneInfo(str(regeln.get("tz") or "Asia/Dubai"))
+    heute = jetzt.astimezone(tz).strftime("%Y-%m-%d")
+    offen = {str(x) for x in (offen or ())}
+    geprueft = {str(x) for x in (geprueft or ())}
+    pl_by_id = {str(p.get("id")): p for p in plaene or ()}
+
+    def ts(x):
+        try:
+            return datetime.fromisoformat(str(x).replace("Z", "+00:00")) if x else None
+        except ValueError:
+            return None
+
+    def wand(tag, hhmm, std):
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(hhmm or std))
+        h, mi = (int(m.group(1)), int(m.group(2))) if m else (int(std[:2]), int(std[3:]))
+        y, mo, d = (int(t) for t in tag.split("-"))
+        return datetime(y, mo, d, h, mi, tzinfo=tz).astimezone(timezone.utc)
+
+    def unberuehrbar(p):   # Plan läuft, ist gesendet/geclaimt oder schon zu Ende → nie anfassen („kein Trade wird geschadet")
+        return bool(p) and (p.get("status") != "planned" or p.get("start_um_gestartet_at") or p.get("started_at") or p.get("orbit_gesendet_at"))
+
+    def grund(k):          # Gegenprüfung W1 (03.11.2026): beim Wieder-Rein gelten Haken, External ID und Archiv weiter — Texte wie prophos.html WD_HINWEIS_*
+        if k.get("archiviert"):
+            return WD_HINWEIS_ARCHIV
+        if k.get("farm") is False:
+            return WD_HINWEIS_FARM
+        if not str(k.get("ext") or "").strip():
+            return WD_HINWEIS_EXT
+        return ""
+
+    cme_ab = ts(wd_cme_tag_start(heute))
+    lo, hi = wand(heute, regeln.get("start_hhmm"), "05:00"), wand(heute, regeln.get("bis_hhmm"), "18:00")
+    max_rf = {}
+    for x in rows or ():
+        try:
+            max_rf[str(x.get("tag"))] = max(max_rf.get(str(x.get("tag")), 0), int(x.get("reihenfolge") or 0))
+        except (TypeError, ValueError):
+            pass
+    updates = []
+    for x in rows or ():
+        tag = str(x.get("tag") or "")
+        if tag < heute:
+            continue
+        konten = [dict(k) for k in (x.get("konten") or []) if isinstance(k, dict)]
+        felder, ge, loeschen = {}, False, []
+        # 80 s Abstand je ID (wdKontoZeiten, Vorfall Jacob 05.10.2026): eigene Startzeiten dieser Zeile, die schon stehen
+        belegt = [t for t in (ts(k.get("nach_start")) for k in konten if k.get("aktiv") is not False) if t]
+        for k in konten:
+            aid = str(k.get("id") or "")
+            pid = str(k.get("plan_id") or "")
+            plan = pl_by_id.get(pid) if pid else None
+            if aid in offen:
+                if unberuehrbar(plan) or (pid and not plan and pid not in geprueft):
+                    continue                       # läuft/fertig — oder Plan nicht gelesen: lieber nicht anfassen
+                if plan:
+                    loeschen.append(pid)
+                if pid:                            # geplant (wird zurückgezogen) oder gibt es nicht mehr
+                    k["plan_id"] = None
+                    k["status"] = None
+                    k["start_um"] = None
+                    ge = True
+                if k.get("aktiv") is not False or k.get("hinweis") != WD_HINWEIS_PAYOUT or k.get("nach_start"):
+                    k.update(aktiv=False, hinweis=WD_HINWEIS_PAYOUT)
+                    k.pop("nach_start", None)
+                    ge = True
+                continue
+            if k.get("hinweis") not in (WD_HINWEIS_PAYOUT, WD_HINWEIS_PAYOUT_MORGEN):
+                continue
+            g = grund(k)
+            if tag > heute or g:
+                k.update(aktiv=not g, hinweis=g)   # Folgetag: wieder drin, die Zeile wird normal gewürfelt; Haken aus o. ä. → mit seinem Grund draußen
+                if not g and str(x.get("status") or "") == "leer":
+                    felder["status"] = "geplant"   # „leer" würfelt der Tageslauf nie
+                ge = True
+                continue
+            if k.get("hinweis") == WD_HINWEIS_PAYOUT_MORGEN:
+                continue                           # heute schon entschieden: ab morgen
+            eigene = [p for p in plaene or () if str(p.get("master_account_id")) == aid]
+            heute_dran = any((ts(p.get("started_at")) and cme_ab and ts(p.get("started_at")) >= cme_ab)
+                             or p.get("status") == "open"
+                             or (p.get("status") == "planned" and not p.get("started_at") and ts(p.get("created_at")) and cme_ab
+                                 and ts(p.get("created_at")) >= cme_ab)
+                             for p in eigene)
+            block = ts(x.get("start_um"))
+            if not heute_dran and not block and jetzt < lo:
+                k.update(aktiv=True, hinweis="")   # vor dem Fenster, Zeile noch nicht gewürfelt: der Tageslauf würfelt sie normal (Würfel, Bündel, Richtung)
+                if str(x.get("status") or "") == "leer":
+                    felder["status"] = "geplant"
+                ge = True
+                continue
+            ziel = max(jetzt + timedelta(minutes=WD_PAYOUT_NACH_MIN[0] + rnd() * (WD_PAYOUT_NACH_MIN[1] - WD_PAYOUT_NACH_MIN[0])), lo)
+            for t in sorted(belegt):
+                if abs((ziel - t).total_seconds()) < WD_KONTO_ABSTAND_S:
+                    ziel = t + timedelta(seconds=WD_KONTO_ABSTAND_S)
+            ziel = ziel.replace(microsecond=0)
+            if heute_dran or ziel > hi - timedelta(minutes=1):
+                k.update(aktiv=False, hinweis=WD_HINWEIS_PAYOUT_MORGEN)
+                ge = True
+                continue
+            k.update(aktiv=True, hinweis="")
+            if block and block > jetzt + timedelta(minutes=1):
+                k.pop("nach_start", None)          # Block liegt noch vor uns → das Konto fährt mit seinem Block
+            else:
+                k["nach_start"] = ziel.isoformat().replace("+00:00", "Z")
+                belegt.append(ziel)
+                if not block:
+                    felder["start_um"] = k["nach_start"]
+                    if not x.get("richtung"):
+                        felder["richtung"] = "buy" if rnd() < 0.5 else "sell"
+                    max_rf[tag] = max_rf.get(tag, 0) + 1
+                    felder["reihenfolge"] = max_rf[tag]
+            if str(x.get("status") or "") in ("fertig", "verpasst", "leer"):
+                felder["status"] = "geplant"
+            ge = True
+        if ge:
+            if "status" not in felder and str(x.get("status") or "") == "geplant" and not any(k.get("aktiv") is not False for k in konten):
+                felder["status"] = "leer"
+            felder["konten"] = konten
+            updates.append({"user_id": str(x.get("user_id")), "tag": tag, "updated_at": x.get("updated_at"), "felder": felder, "loeschen": loeschen})
+    return updates
+
+
+def wd_payout_tick(sofort=False):
+    """Railway: alle WD_PAYOUT_TAKT_S (oder sofort nach einer Payout-Route) wd_payout_abgleich anwenden. Plan-Löschen nur mit Guard (planned, nie
+    geclaimt, nie gesendet); Zeilen nur auf den gelesenen Stand (updated_at) — dazwischen geändert → nächster Takt. Fehler → Log, nie werfen."""
+    if not sofort and time.time() - _wd_payout["at"] < WD_PAYOUT_TAKT_S:
+        return None
+    if not _wd_payout_lock.acquire(blocking=False):
+        return None
+    try:
+        _wd_payout["at"] = time.time()
+        jetzt = datetime.now(timezone.utc)
+        regeln = (sb_select("wd_farmer_regeln", {"select": "tz,start_hhmm,bis_hhmm", "id": "eq.1"}) or [{}])[0]
+        from zoneinfo import ZoneInfo
+        heute = jetzt.astimezone(ZoneInfo(str(regeln.get("tz") or "Asia/Dubai"))).strftime("%Y-%m-%d")
+        rows = sb_select("wd_tagesplan", {"select": "tag,user_id,status,start_um,richtung,reihenfolge,updated_at,konten", "tag": f"gte.{heute}"}) or []
+        offen = {str(p.get("account_id")) for p in (_sb_all("pending_payouts", {"select": "account_id", "status": "eq.pending"}) or []) if p.get("account_id")}
+        ids = sorted({str(k.get("id")) for x in rows for k in (x.get("konten") or []) if isinstance(k, dict)
+                      and (str(k.get("id")) in offen or k.get("hinweis") in (WD_HINWEIS_PAYOUT, WD_HINWEIS_PAYOUT_MORGEN))})
+        if not ids:
+            return {"updates": 0, "geloescht": 0}
+        seit = (jetzt - timedelta(days=3)).isoformat()
+        plaene = []
+        for i in range(0, len(ids), 80):
+            plaene += sb_select("trade_plans", {"select": "id,master_account_id,status,start_um_gestartet_at,started_at,orbit_gesendet_at,created_at",
+                                                "master_account_id": "in.(" + ",".join(ids[i:i + 80]) + ")", "created_at": f"gte.{seit}"}) or []
+        pids = sorted({str(k.get("plan_id")) for x in rows for k in (x.get("konten") or []) if isinstance(k, dict) and k.get("plan_id")
+                       and str(k.get("id")) in offen})
+        da = {str(p.get("id")) for p in plaene}
+        for i in range(0, len(pids), 80):   # ältere Pläne per ID — fehlt einer dann, gibt es ihn nicht mehr (Gegenprüfung W1)
+            plaene += [p for p in (sb_select("trade_plans", {"select": "id,master_account_id,status,start_um_gestartet_at,started_at,orbit_gesendet_at,created_at",
+                                                              "id": "in.(" + ",".join(pids[i:i + 80]) + ")"}) or []) if str(p.get("id")) not in da]
+        updates = wd_payout_abgleich(rows, offen, plaene, jetzt, regeln, geprueft=pids)
+        n = weg = 0
+        for u in updates:
+            filt = {"tag": f"eq.{u['tag']}", "user_id": f"eq.{u['user_id']}"}
+            if u.get("updated_at"):
+                filt["updated_at"] = f"eq.{u['updated_at']}"
+            try:
+                if not sb_update("wd_tagesplan", filt, dict(u["felder"], updated_at=jetzt.isoformat())):
+                    continue                       # Zeile dazwischen geändert → nächster Takt, auch kein Löschen
+                n += 1
+            except Exception as e:
+                print(f"[wd-payout] ⚠️ Zeile {u['tag']} {u['user_id'][:8]}: {type(e).__name__}: {e}", flush=True)
+                continue
+            for pid in u.get("loeschen") or ():
+                try:
+                    weg += len(sb_delete("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null",
+                                                         "started_at": "is.null", "orbit_gesendet_at": "is.null"}) or [])
+                except Exception as e:
+                    print(f"[wd-payout] ⚠️ Plan {pid[:8]} nicht gelöscht: {type(e).__name__}: {e}", flush=True)
+        if n or weg:
+            print(f"[wd-payout] {n} Tageszeile(n) nachgezogen, {weg} geplante(r) WD-Plan/Pläne zurückgezogen (offene Anfragen: {len(offen)})", flush=True)
+        _wd_payout.update(fehler="", letzt={"at": jetzt.isoformat(), "updates": n, "geloescht": weg})
+        return {"updates": n, "geloescht": weg}
+    except Exception as e:
+        _wd_payout["fehler"] = f"{type(e).__name__}: {e}"
+        print(f"[wd-payout] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return None
+    finally:
+        _wd_payout_lock.release()
+
+
 def wd_sicht_fuer(uid, daten):
     """REIN RECHNEND (testbar): Sicht eines Logins → {art: 'gruppe', ids: […]} (Verwalter-Gruppe inkl. Verwalter) | {art: 'ht', ausser: […]}."""
     daten = daten or {}
@@ -15483,6 +15697,19 @@ def admin_wd_plaene():
                                 k["heute_gestartet"] = p.get("started_at")
                 except Exception as e:
                     print(f"[wd] ⚠️ heute gestartet: {type(e).__name__}: {e}", flush=True)   # RECOVERER (02.11.2026): Feld `zyklus` je Apex-WD-Konto — Farmer nimmt Ziel + Hedge daraus
+            # PAYOUT OFFEN (03.11.2026, s. wd_payout_abgleich): Konto mit offener Anfrage fährt nicht — der Mac (wdErwartet) trägt es inaktiv ein
+            if konten:
+                try:
+                    ids = [k["id"] for k in konten]
+                    po_offen = set()
+                    for i in range(0, len(ids), 80):
+                        po_offen |= {str(p.get("account_id")) for p in sb_select("pending_payouts", {"select": "account_id", "status": "eq.pending",
+                                                                                                   "account_id": "in.(" + ",".join(ids[i:i + 80]) + ")"}) or []}
+                    for k in konten:
+                        if k["id"] in po_offen:
+                            k["payout_offen"] = True
+                except Exception as e:
+                    print(f"[wd] ⚠️ Payout offen: {type(e).__name__}: {e}", flush=True)
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
             # laufen über route=mt5 und haben einen anderen Slave — die zählen hier nicht)
             slaves = {}
@@ -16398,6 +16625,7 @@ def admin_payout_erhalten():
         except Exception as e:
             termin_fehler = f"{type(e).__name__}: {e}"
             print(f"[payout-erhalten] ⚠️ accounts {aid} ({', '.join(k_upd)}): {termin_fehler}", flush=True)
+    threading.Thread(target=wd_payout_tick, kwargs={"sofort": True}, daemon=True).start()   # Payout abgehakt → WD-Konto heute wieder rein (03.11.2026)
     return jsonify({"ok": True, "tx": tx, "pending": upd[0] if upd else None, "account": konto,
                     "termin_fehler": termin_fehler, "erhalten_am": erhalten_am, "naechster_payout": naechster,
                     "waiting_geleert": waiting_geleert})
@@ -16546,6 +16774,8 @@ def admin_payout_anfragen():
             konto_fehler = f"{type(e).__name__}: {e}"
             print(f"[payout-anfragen] ⚠️ accounts {aid} ({', '.join(felder)}): {konto_fehler}", flush=True)
     typ, firm = str(konto.get("account_type") or ""), str(konto.get("firm") or "")
+    if typ == "winning_days":
+        threading.Thread(target=wd_payout_tick, kwargs={"sofort": True}, daemon=True).start()   # Konto sofort aus dem WD-Farmer (03.11.2026)
     balance_lesen = typ == "funded_cfd" or _ist_tradeify_cfd(firm) or not any(k in firm.lower() for k in WD_BALANCE_FUTURES)   # wie finKontoIstCfd: nur CFD
     return jsonify({"ok": True, "pending": zeile, "account": konto_neu, "zaehler_neu": "goal_done_offset" in felder,
                     "konto_fehler": konto_fehler, "balance_lesen": balance_lesen})
@@ -30977,9 +31207,14 @@ def ap_wd_block_starts(rows, mitternacht, firmen, bekannt=()):
             if not isinstance(k, dict) or k.get("aktiv") is False:
                 continue
             v, richtung = wd_konto_gruppe(k, r.get("richtung"))
-            i = idx.get(v, 0)
-            idx[v] = i + 1
-            t = t0 + timedelta(minutes=v, seconds=WD_KONTO_ABSTAND_S * i)
+            try:     # PAYOUT ABGEHAKT (03.11.2026): eigene Startzeit nach_start (wd_payout_abgleich) wie wdKontoZeiten — zählt nicht im Block
+                t = datetime.fromisoformat(str(k["nach_start"]).replace("Z", "+00:00")) if k.get("nach_start") else None
+            except (TypeError, ValueError):
+                t = None
+            if t is None:
+                i = idx.get(v, 0)
+                idx[v] = i + 1
+                t = t0 + timedelta(minutes=v, seconds=WD_KONTO_ABSTAND_S * i)
             if k.get("plan_id") and str(k["plan_id"]) in bekannt:
                 continue
             m = (t - mitternacht).total_seconds() / 60.0
@@ -37527,6 +37762,7 @@ def ap_loop():
         except Exception as e:
             _gp_info["fehler"] = f"Auftrag: {type(e).__name__}: {e}"
             print(f"[gruppen-plan] ⚠️ Auftrag: {e}", flush=True)
+        wd_payout_tick()                      # PAYOUT OFFEN = RAUS / ABGEHAKT = REIN (03.11.2026) — fängt selbst ab, wirft nie
         try:
             pc_aus_tick()                     # PC aus + Trades warten → Handy (19.10.2026)
             _pc_aus["fehler"] = ""

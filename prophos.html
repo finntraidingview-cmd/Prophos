@@ -69615,6 +69615,14 @@
    * CME-Handelstag des Lauf-Tags (Vortag 17:00 Chicago, wie app.py wd_cme_tag_start) schon ein Plan gestartet ist, kommt heute nicht dazu — aktiv false mit
    * Hinweis, am nächsten Handelstag wieder normal. Quelle: Mac app.py heute_gestartet, PC-Tab die eigenen tradePlans. „Heute wieder rein" von Hand bleibt. */
   const WD_HINWEIS_HEUTE = 'heute schon getradet — ab dem nächsten Handelstag'
+  /* PAYOUT OFFEN = RAUS, ABGEHAKT = WIEDER REIN (Finn 03.11.2026 ~18:15 Dubai: „Ein Account, der eine offene Payout-Anfrage hat, wird nicht Winning-Day-gefarmt,
+   * solange der Payout unter Review ist … Sobald ich den Payout abhake, soll der Account, wenn es am gleichen Tag ist, wieder an dem Tag reingemacht werden.")
+   * Railway gleicht die Tageszeilen ab (app.py wd_payout_abgleich, Texte dort gleich): raus mit WD_HINWEIS_PAYOUT, rein heute mit eigener Startzeit k.nach_start
+   * (wdKontoZeiten) oder WD_HINWEIS_PAYOUT_MORGEN. Die Tabs setzen den Hinweis bei offener Anfrage selbst (frisch gelesen, wdKontenFrisch), heben ihn nie auf. */
+  const WD_HINWEIS_PAYOUT = 'Payout angefragt – wartet auf Auszahlung'
+  const WD_HINWEIS_PAYOUT_MORGEN = 'Payout erhalten – ab morgen wieder drin'
+  const wdPayoutHinweis = h => h === WD_HINWEIS_PAYOUT || h === WD_HINWEIS_PAYOUT_MORGEN
+  const wdPayoutOffen = id => !!(_wd.payoutOffen && _wd.payoutOffen.has(String(id)))
   const wdCmeTagStart = tag => { try{ return wdZeitpunkt(wdTagPlus(tag, -1), '17:00', 'America/Chicago').getTime() }catch(_){ return 0 } }
   function wdHeuteGestartet(accId, tag){
     if(!tag) return false
@@ -69630,9 +69638,10 @@
     const add = (uid, person, k) => { const e = proId.get(uid) || { user_id: uid, name: person || uid.slice(0, 8), konten: [] }; e.konten.push(k); proId.set(uid, e) }
     const konto = (r, firm, farm) => {
       const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm, r), arch = !!r.archiviert, heute = !!r.heute_gestartet   // heute schon getradet (03.11.2026)
-      return { id: String(r.id), name: r.name || '', firm, ext, farm: farm && !arch, aktiv: !!(farm && !arch && ext && !heute), tpVon: sp[0], tpBis: sp[1], archiviert: arch,
-               ...(heute ? { heute: true } : {}),
-               hinweis: arch ? WD_HINWEIS_ARCHIV : !farm ? WD_HINWEIS_FARM : !ext ? WD_HINWEIS_EXT : heute ? WD_HINWEIS_HEUTE : '' }
+      const po = !!r.payout_offen   // PAYOUT OFFEN (03.11.2026, app.py): fährt nicht, bis der Payout abgehakt ist
+      return { id: String(r.id), name: r.name || '', firm, ext, farm: farm && !arch, aktiv: !!(farm && !arch && ext && !heute && !po), tpVon: sp[0], tpBis: sp[1], archiviert: arch,
+               ...(heute ? { heute: true } : {}), ...(po ? { payout: true } : {}),
+               hinweis: arch ? WD_HINWEIS_ARCHIV : !farm ? WD_HINWEIS_FARM : !ext ? WD_HINWEIS_EXT : po ? WD_HINWEIS_PAYOUT : heute ? WD_HINWEIS_HEUTE : '' }
     }
     const d = _wd.daten, aus = wdIdsAus()
     if(d && Array.isArray(d.konten)){
@@ -69682,6 +69691,8 @@
         const v = konten.find(q => String(q.id) === k.id)
         if(!v){ wuerfeln(k); konten.push(k); ge = true; continue }
         if(v.plan_id) continue
+        if(k.payout){ if(v.aktiv !== false || v.hinweis !== WD_HINWEIS_PAYOUT){ v.aktiv = false; v.hinweis = WD_HINWEIS_PAYOUT; ge = true } continue }   // PAYOUT OFFEN (03.11.2026)
+        if(wdPayoutHinweis(v.hinweis)) continue   // wieder rein nur über Railway (wd_payout_abgleich, mit Startzeit) — hier nie zurückdrehen
         if(v.farm !== k.farm || (v.ext || '') !== k.ext || !!v.archiviert !== !!k.archiviert){
           // heute schon getradet (03.11.2026): der Haken springt per Trigger an, das Konto fährt trotzdem erst am nächsten Handelstag
           v.farm = k.farm; v.ext = k.ext; v.archiviert = k.archiviert; v.aktiv = !!(k.farm && k.ext && !k.heute); v.hinweis = k.hinweis; if(k.heute) v.heute = true; ge = true
@@ -69716,6 +69727,7 @@
       const basis = { id: String(k.acc.id), name: k.acc.name, firm: k.acc.firm, ext: String(k.acc.externalId || '').trim(), farm }
       const sp = wdTpSpanne(k.acc.firm, k.acc)
       if(!farm){ konten.push({ ...basis, aktiv: false, tpVon: sp[0], tpBis: sp[1], hinweis: WD_HINWEIS_FARM }); continue }
+      if(wdPayoutOffen(k.acc.id)){ konten.push({ ...basis, aktiv: false, tpVon: sp[0], tpBis: sp[1], hinweis: WD_HINWEIS_PAYOUT }); continue }   // PAYOUT OFFEN (03.11.2026)
       if(sl.fehler){ konten.push({ ...basis, aktiv: !!basis.ext, tpVon: sp[0], tpBis: sp[1], hinweis: basis.ext ? '' : WD_HINWEIS_EXT }); continue }
       if(k.belegt){ konten.push({ ...basis, aktiv: false, hinweis: 'hat schon einen geplanten/laufenden Plan' }); continue }
       if(wdHeuteGestartet(k.acc.id, tag)){ konten.push({ ...basis, aktiv: false, heute: true, hinweis: WD_HINWEIS_HEUTE }); continue }   // 03.11.2026
@@ -69828,6 +69840,8 @@
       // Alte, schon gewürfelte k.abstand_min bleiben am Konto stehen, wirken aber nicht.
       // BÜNDEL (28.10.2026): je Gruppe eigener Start (Blockstart + k.g_versatz_min), 80 s je Konto innerhalb der Gruppe
       void aMin; void aMax
+      // PAYOUT ABGEHAKT (03.11.2026, app.py wd_payout_abgleich): eigene Startzeit, wenn der Block des Tages schon vorbei war — nie an den Block zurückziehen
+      if(k.nach_start && isFinite(Date.parse(k.nach_start))){ out.set(String(k.id), new Date(Date.parse(k.nach_start)).toISOString()); continue }
       const v = wdKontoVersatzMin(k), i = idx.get(v) || 0; idx.set(v, i + 1)
       out.set(String(k.id), new Date(t + v * 60000 + i * WD_KONTO_ABSTAND_MS).toISOString())
     }
@@ -70079,6 +70093,9 @@
       for(const k of konten){
         const plan = planVon(k)
         if(k.plan_id && !(plan && plan.status === 'planned' && !plan.startUmGestartetAt)) continue
+        // PAYOUT OFFEN (03.11.2026): raus, auch mit geplantem, nie geclaimtem Plan — (2) zieht ihn zurück (inaktiv → löschen); laufende Pläne kommen hier nicht an
+        if(wdPayoutOffen(k.id)){ set(k, 'aktiv', false); set(k, 'hinweis', WD_HINWEIS_PAYOUT); continue }
+        if(wdPayoutHinweis(k.hinweis)) continue   // wieder rein nur über Railway (wd_payout_abgleich) — sonst käme das Konto ohne Startzeit zurück
         if(k.naechster_lauf && !k.plan_id) continue   // wartet auf den nächsten Tageslauf (21.10.2026) — nicht wieder aktiv schalten
         const acc = (accounts || []).find(a => String(a.id) === String(k.id))
         if(!acc){ if(!k.plan_id){ set(k, 'aktiv', false); set(k, 'hinweis', 'Konto nicht in diesem Profil') } continue }
@@ -70210,7 +70227,7 @@
        * der Tagesplan verweist auf einen Plan, den es nicht mehr gibt (frisch per ID geprüft), Konto aktiv, Zeile nicht fertig, Start
        * höchstens 60 min vorbei → derselbe Plan mit DERSELBEN ID neu (Werte aus dem Konto-Eintrag: TP, Kontrakte, Start; Richtung der
        * Zeile; V2, winning_day). Claim wd_heil:<id> — nur ein Tab legt an. */
-      if(!plan && offenFuer && k.plan_id){
+      if(!plan && offenFuer && k.plan_id && !wdPayoutOffen(k.id)){   // PAYOUT OFFEN (03.11.2026): ein zurückgezogener Plan wird nie „geheilt“
         const startMs = Date.parse(k.start_um || row.start_um || '') || 0
         if(startMs && Date.now() - startMs <= 60 * 60000){
           try{
@@ -70243,6 +70260,8 @@
       else fertig++
     }
     const mitPlan = konten.filter(k => wdAktiv(k) && k.plan_id).length
+    // PAYOUT ABGEHAKT (03.11.2026): ein Konto mit eigener Startzeit wartet noch auf seinen Plan (90 s Ruhe in (2)) — die Zeile ist dann nicht „fertig"
+    offen += konten.filter(k => wdAktiv(k) && !k.plan_id && k.nach_start && Date.parse(k.nach_start) > Date.now() - 60 * 60000).length
     let status = row.status
     if(!konten.some(wdAktiv)) status = 'leer'
     else if(row.start_um && mitPlan) status = (offen === 0 && laeuft === 0) ? (verpasst === mitPlan ? 'verpasst' : 'fertig') : (laeuft || fertig || verpasst) ? 'laeuft' : 'geplant'
@@ -70253,6 +70272,25 @@
       await supabase.from('wd_tagesplan').update(upd).eq('tag', row.tag).eq('user_id', row.user_id)
     }
   }
+  /* FRISCH AUS DEM KONTO (03.11.2026, Befund W1: „Ziel schon voll" bei 0/5 — der Tab rechnete mit dem Konto-Stand vom Laden, accounts hat kein Realtime,
+   * die Payout-Anfrage hatte den Zähler längst zurückgesetzt): höchstens jede Minute die Ziel-Felder der eigenen WD-Konten und die offenen Payout-Anfragen
+   * lesen und in den Cache ziehen. Fehler → alter Stand bleibt (Railway wd_payout_abgleich nimmt das Konto trotzdem raus). */
+  const WD_ZIEL_FELDER = ['goalKind', 'goalTarget', 'goalMinProfit', 'goalDoneOffset', 'goalSince', 'goalManual', 'goalManualLast', 'goalWdKorrektur', 'goalWdSeit', 'goalWdHandTage']
+  async function wdKontenFrisch(uid){
+    if(Date.now() - (_wd.frischAt || 0) < 60000) return
+    _wd.frischAt = Date.now()
+    try{
+      const [po, ak] = await Promise.all([
+        supabase.from('pending_payouts').select('account_id').eq('user_id', uid).eq('status', 'pending'),
+        supabase.from('accounts').select('*').eq('user_id', uid).eq('account_type', 'winning_days')])
+      if(!po.error) _wd.payoutOffen = new Set((po.data || []).map(x => String(x.account_id)))
+      if(!ak.error) for(const r of (ak.data || [])){
+        const a = (accounts || []).find(q => String(q.id) === String(r.id)); if(!a) continue
+        const f = rowToAccount(r); for(const key of WD_ZIEL_FELDER) a[key] = f[key]
+      }
+    }catch(e){ console.warn('[wd] Konten frisch', (e && e.message) || e) }
+  }
+  window._wdKontenFrisch = wdKontenFrisch   // Test-Haken
   // Der Tick (nur PC-Tab): eintragen, Automatik-Würfeln, fremd angelegte Pläne nachladen, eigene Zeilen abgleichen
   async function wdTick(){
     if(window._tabNebenSofort) return   // HAUPT-TAB (30.10.2026): ein zweiter Tab beginnt nichts Neues
@@ -70264,6 +70302,7 @@
       if(!_wd.geladen || Date.now() - _wd.letzteLadung > 5 * 60000){ if(!(await wdLaden())) return }
       const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD); if(!j) return
       await wdZyklusEigene()   // RECOVERER (02.11.2026): vor Würfel und Nachziehen, alle 5 min
+      await wdKontenFrisch(uid)   // Ziel-Stand + offene Payouts frisch (03.11.2026), vor Eintragen und Abgleich
       if(wdIdsAus().has(String(uid))) return   // diese ID wird nie gefahren (ids_aus)
       // Eintragen IMMER (23.09.2026, Finn: „ich will von allen IDs alle Konten sehen"): jeder offene PC-Tab
       // meldet seine Fundeds für den nächsten Lauf-Tag — eine Zeile ohne Zeiten tut nichts, bis gewürfelt ist.

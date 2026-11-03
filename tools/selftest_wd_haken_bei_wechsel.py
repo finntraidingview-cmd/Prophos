@@ -62,7 +62,7 @@ check(r is not None and '"started_at": f"gte.{ab}"' in r.group(0) and 'k["heute_
 check("...(ziel === 'winning_days' && acc.type !== 'winning_days' ? { wd_farm: true } : {})" in html, "Knöpfe am Konto (accWdUmstellen): Haken beim Wechsel")
 check("acc.type === 'winning_days' && String((accounts.find(x => String(x.id) === String(_editingAccountId)) || {}).type || '') !== 'winning_days'" in html, "Bearbeiten: Haken nur beim Wechsel")
 check("wd_farm: !!a.wdFarm || a.type === 'winning_days'" in html and "wd_farm: typRow === 'winning_days'" in html, "Anlage (Modal, Bulk/Nachfolger): als Winning Days → Haken")
-check("aktiv: !!(farm && !arch && ext && !heute)" in html, "wdErwartet: heute schon getradet → nicht aktiv")
+check("aktiv: !!(farm && !arch && ext && !heute" in html, "wdErwartet: heute schon getradet → nicht aktiv")   # seit 03.11.2026 dahinter noch „&& !po“ (Payout offen)
 check("v.aktiv = !!(k.farm && k.ext && !k.heute)" in html and "v.heute = true; v.aktiv = false; v.hinweis = WD_HINWEIS_HEUTE" in html, "Abgleich bestehender Zeilen: Haken an, aber heute nicht aktiv")
 check("if(wdHeuteGestartet(k.acc.id, tag))" in html and "wdKandidaten(tag)" in html, "PC-Tab (wdKandidaten): eigene Pläne, heute schon gestartet → nicht aktiv")
 check("if(heute.has(k.id)) k.heute_gestartet = heute.get(k.id)" in html, "RPC-Konten übernehmen heute_gestartet von Railway")
