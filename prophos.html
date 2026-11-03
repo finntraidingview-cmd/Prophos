@@ -10471,6 +10471,13 @@
               <label>External ID (neue Nummer, Pflicht)</label>
               <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
             </div>
+            <!-- Payout anfragbar ab (P1, Finn 03.11.2026 ~22:55 Dubai): nur Funded CFD / Funded Futures / Winning Days, vorbelegt mit Anlegetag + 14 Tagen
+                 (FundedNext erster Zyklus + 21, payoutErsterTermin) — von Hand geändert bleibt es so. -->
+            <div class="field" style="grid-column:span 2" id="suc-payout-row" hidden>
+              <label>Payout anfragbar ab</label>
+              <input class="input mono" id="suc-payout-ready" type="date" autocomplete="off">
+              <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt: heute + 14 Tage, FundedNext erster Zyklus + 21. Von Hand geändert bleibt es so.</div>
+            </div>
           </div>
 
           <!-- Zugangsdaten des NEUEN Broker-Kontos (07.09.2026, Finns Wunsch: „bei den
@@ -14714,7 +14721,7 @@
           <div class="field" style="grid-column:1/-1">
             <label>Payout anfragbar ab</label>
             <input class="input mono" id="ac-payout-ready" type="date" autocomplete="off">
-            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Leer lassen: bei einem neuen Funded-CFD-Konto setzt Prophos Anlegetag + 14 Tage (FundedNext + 21). Beim Payout-Anfragen schlägt Prophos Anfrage-Datum + 14 Tage vor.</div>
+            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Beim Anlegen eines Funded-Kontos vorbelegt: Anlegetag + 14 Tage (FundedNext erster Zyklus + 21), von Hand geändert bleibt es so. Beim Payout-Anfragen schlägt Prophos Anfrage-Datum + 14 Tage vor.</div>
           </div>
           <!-- Waiting for Payout (29.09.2026, Finn: „der Account ist schon im Plus, wir warten nur auf den Payout") — nur bei
                Funded CFD sichtbar (toggleAcBloecke), Spalte waiting_payout_since; beim Payout-Anfragen leert wartetPayoutClear(). -->
@@ -18683,7 +18690,9 @@
       // ihn ein. Leer gelassen bleibt der Termin am Konto, wie er ist (der Server schreibt nur, wenn ein Datum mitkommt).
       const konto = t.account_id ? (admData?.accounts || []).find(r => String(r.id) === String(t.account_id)) : null
       $('adm-receive-next').value = konto && konto.payout_at ? String(konto.payout_at).slice(0, 10) : ''
-      if(_admReceiveO.naechsterTage && t.account_id){ $('adm-receive-next').value = admReceivePlus($('adm-receive-am').value, _admReceiveO.naechsterTage); $('adm-receive-next').dataset.auto = '1' }
+      // P1 (03.11.2026): steht am Konto schon ein Termin (die Anfrage setzt Anfrage-Datum + 14), gilt der — Erhalten + N nur, wenn das Konto keinen hat
+      if(t.account_id && !$('adm-receive-next').value && /^\d{4}-\d{2}-\d{2}/.test(String(t.requested_at || ''))){ $('adm-receive-next').value = admReceivePlus(String(t.requested_at).slice(0, 10), 14); delete $('adm-receive-next').dataset.auto }   // ohne Termin am Konto: Anfrage-Datum + 14 (P1)
+      else if(_admReceiveO.naechsterTage && t.account_id && !$('adm-receive-next').value){ $('adm-receive-next').value = admReceivePlus($('adm-receive-am').value, _admReceiveO.naechsterTage); $('adm-receive-next').dataset.auto = '1' }
       else delete $('adm-receive-next').dataset.auto
       $('adm-receive-next').disabled = !t.account_id
       const msg = $('admReceiveMsg'); msg.textContent = ''; msg.className = 'modal-msg'
@@ -18827,7 +18836,9 @@
       if(!neu && el.value !== (el.dataset.vorschlag || '')) return
       const acc = r ? { type: r.type, firm: r.account_firm, payoutReadyAt: r.ready_at || null } : null
       let v = ''
-      try{ v = acc && typeof window._finKontoIstCfd === 'function' && window._finKontoIstCfd(acc) && typeof window._finNextPayoutVorschlag === 'function' ? window._finNextPayoutVorschlag(acc, ab) : '' }catch(_){ v = '' }
+      // P1 (Finn 03.11.2026 ~22:55 Dubai): Anfrage-Datum + 14 bei allen Funded-Konten, auch Funded Futures/Winning Days (vorher nur CFD, Futures blieb leer)
+      const fundedArt = acc && ['funded', 'winning_days'].includes(acc.type)
+      try{ v = acc && typeof window._finKontoIstCfd === 'function' && (window._finKontoIstCfd(acc) || fundedArt) && typeof window._finNextPayoutVorschlag === 'function' ? window._finNextPayoutVorschlag(acc, ab) : '' }catch(_){ v = '' }
       el.value = v; el.dataset.vorschlag = v
     }
     $('adm-anfrage-am')?.addEventListener('change', () => admAnfrageNextVorschlag(false))
@@ -42742,6 +42753,14 @@
   }
   document.getElementById('suc-extid')?.addEventListener('input', sucNameVorschlag)
   document.getElementById('suc-type')?.addEventListener('change', sucNameVorschlag)
+  // P1 (03.11.2026): „Payout anfragbar ab“ im Nachfolger-Assistenten (Review → Account hinzufügen) — nur Funded-Typen, vorbelegt nach payoutErsterTermin
+  function sucPayoutVorschlag(){
+    const typ = document.getElementById('suc-type')?.value || '', row = document.getElementById('suc-payout-row'), el = document.getElementById('suc-payout-ready')
+    if(row) row.hidden = !['funded', 'funded_cfd', 'winning_days'].includes(typ)
+    payoutVorschlagFeld(el, document.getElementById('suc-firm')?.value || '', typ)
+  }
+  document.getElementById('suc-type')?.addEventListener('change', sucPayoutVorschlag)
+  document.getElementById('suc-firm')?.addEventListener('input', sucPayoutVorschlag)
   document.getElementById('suc-name')?.addEventListener('input', () => { _sucNameHand = true })
   /* MAX DRAWDOWN OHNE WERT AM VORGÄNGER (Finn 30.10.2026 14:5x: „Max Drawdown ist bei CFDs von Phase 1 zu Phase 2 immer genau das Gleiche, auch wenn es noch nicht
    * hinterlegt ist"; Reihenfolge Master): nur CFD-Firmen, nur wenn der Vorgänger leer ist. Erst die Schablone Firma × Größe × Zieltyp; für Phase 2 (nicht Funded) auch die der
@@ -42849,6 +42868,8 @@
     else sucType.value = 'phase1'
     if(zielTyp && [...sucType.options].some(o => o.value === zielTyp)) sucType.value = zielTyp
     sucNameVorschlag()
+    { const pr = document.getElementById('suc-payout-ready'); if(pr){ pr.value = ''; pr.dataset.vorschlag = '' } }
+    sucPayoutVorschlag()
     // Übergang Funded ⇄ Winning Days (25.09.2026, Finns vierte Kontoart): kein neues Konto, dieselbe Zeile wechselt die Art
     sucWdBlockRender(acc)
     sucDdNachtragen(acc, sucType.value)
@@ -43042,6 +43063,9 @@
         externalId,
         ...(mtSuc ? { goalKind: mtSuc.kind, goalTarget: mtSuc.target, goalMinProfit: mtSuc.minProfit, goalDoneOffset: 0, goalSince: null, goalManual: false } : {})
       }
+      // P1 (03.11.2026): „Payout anfragbar ab“ — nur wenn das Feld sichtbar ist (Funded-Typen); leer = Trigger/kein Termin wie bisher
+      { const pr = document.getElementById('suc-payout-ready'), prRow = document.getElementById('suc-payout-row')
+        if(pr && prRow && !prRow.hidden && /^\d{4}-\d{2}-\d{2}$/.test(pr.value)) newAcc.payoutReadyAt = pr.value }
       // Zugangsdaten aus dem Paste-Block (07.09.2026) — optional; accountToRow
       // trägt sie in die cred_*-Spalten. Mit Login+Server erscheint der neue
       // Account sofort im Echo-„Account hinzufügen"-Prefill (mtcPrefillCandidates).
@@ -44982,7 +45006,7 @@
       if(accEls.goalDone)   accEls.goalDone.value   = ''
       if(accEls.wdCount)  accEls.wdCount.value  = ''
       if(accEls.wdTarget) accEls.wdTarget.value = ''
-      if(accEls.payoutReady) accEls.payoutReady.value = ''
+      if(accEls.payoutReady){ accEls.payoutReady.value = ''; accEls.payoutReady.dataset.vorschlag = '' }   // P1: toggleAcBloecke belegt nach Firma/Typ vor
       if(accEls.wartetPayout) accEls.wartetPayout.checked = false
       accConsSetzen(accEls.cons, accEls.consFrei, null)
     }
@@ -45095,7 +45119,9 @@
         if(accEls.goalTarget && accEls.goalTarget.value === String(mt.target)) _acZielAusRegel = { kind: mt.kind, target: mt.target } }
     }
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures && !istCfd)
-    if(accEls.payoutSec) accEls.payoutSec.hidden = !((istFunded && !istFutures) || istCfd)
+    // P1 (03.11.2026): Payout-Termin auch bei Funded Futures (Finn: „alles andere 14 Tage“); beim Anlegen vorbelegt, beim Bearbeiten nie angefasst
+    if(accEls.payoutSec) accEls.payoutSec.hidden = !(istFunded || istCfd)
+    if(!_editingAccountId) payoutVorschlagFeld(accEls.payoutReady, firm, typ)
     if(accEls.wartetPayoutRow) accEls.wartetPayoutRow.hidden = !istCfd
     // Consistency (07.10.2026): nur Futures-Firma + Challenge/Phase
     if(accEls.consRow) accEls.consRow.hidden = !accConsSichtbar(firm, typ)
@@ -54918,7 +54944,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.2021'
+  const OS_TAB_BUILD = '2026-09-22.2022'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -72797,6 +72823,23 @@
   try { localStorage.removeItem('prophos_traded_today') } catch(_){}
   /* DE-Datum (YYYY-MM-DD, Europe/Berlin) — Tages-Anker für Tages-P&L und Merker unten */
   function _deTodayStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }
+  /* ERSTER PAYOUT-TERMIN BEIM ANLEGEN (P1, Finn 03.11.2026 ~22:55 Dubai: „FundedNext erster Zyklus 21 Tage, alles andere 14 Tage“, schon beim Anlegen sichtbar):
+   * REIN — Firma, Typ, Anlegetag (JJJJ-MM-TT, Berlin wie _deTodayStr) → Datum oder ''. Gilt für Funded CFD, Funded Futures und Winning Days; Phasen/Live haben keinen
+   * Payout. Für die Wege ohne Formular (Bulk, Admin über Railway, Kauf-Mail) setzt der Trigger accounts_payout_termin_neu (sql/2026-11-03_payout_termin_beim_anlegen.sql)
+   * dieselbe Regel, aber nur für Funded CFD. 21 Tage nur FundedNext (CFD); „FundedNext Futures“ bekommt 14, bis Finn anders entscheidet. */
+  function payoutErsterTermin(firm, typ, tag){
+    if(!['funded', 'funded_cfd', 'winning_days'].includes(String(typ || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(tag || ''))) return ''
+    const f = String(firm || '').toLowerCase().replace(/\s/g, '')
+    const d = new Date(tag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + (/fundednext/.test(f) && !/futures/.test(f) ? 21 : 14))
+    return d.toISOString().slice(0, 10)
+  }
+  // Feld vorbelegen, solange es leer ist oder noch den letzten Vorschlag trägt — ein von Hand eingetragenes Datum bleibt (dataset.vorschlag)
+  function payoutVorschlagFeld(el, firm, typ){
+    if(!el || (el.value && el.value !== (el.dataset.vorschlag || ''))) return
+    const v = payoutErsterTermin(firm, typ, _deTodayStr())
+    el.value = v; el.dataset.vorschlag = v
+  }
+  window._payoutErsterTermin = payoutErsterTermin   // Test-Haken
 
   /* ── Tages-P&L pro Account (08.09.2026, Finns Wunsch: im Trade-planen-Dropdown
    * neben der Live-Balance sehen, was der Account HEUTE schon gemacht hat) ──
@@ -75786,7 +75829,9 @@
     const am = acc && acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0, 10) : ''
     const d = new Date(heute + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 14)
     const plus14 = d.toISOString().slice(0, 10)
-    if(finKontoIstCfd(acc)) return (/^\d{4}-\d{2}-\d{2}$/.test(am) && am > plus14) ? am : plus14
+    // P1 (03.11.2026, Gegenprüfung): Funded Futures/Winning Days wie CFD — seit sie beim Anlegen + 14 bekommen, hätte „Datum am Konto in der Zukunft“ den
+    // Anlege-Termin als nächsten Termin vorgeschlagen (angelegt 03.11. → 17.11., Anfrage 10.11. → 17.11. statt 24.11.)
+    if(finKontoIstCfd(acc) || (acc && ['funded', 'winning_days'].includes(acc.type))) return (/^\d{4}-\d{2}-\d{2}$/.test(am) && am > plus14) ? am : plus14
     if(/^\d{4}-\d{2}-\d{2}$/.test(am) && am > heute) return am
     return plus14
   }

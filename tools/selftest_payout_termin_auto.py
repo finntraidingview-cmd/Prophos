@@ -41,6 +41,7 @@ const r = {
   spaeter: finNextPayoutVorschlag(Object.assign({}, cfd, { payoutReadyAt: '2026-12-01' }), '2026-11-01'),
   frueher: finNextPayoutVorschlag(Object.assign({}, cfd, { payoutReadyAt: '2026-11-10' }), '2026-11-01'),
   fut: finNextPayoutVorschlag({ type: 'funded', firm: 'Apex Trader', payoutReadyAt: null }, '2026-11-01'),
+  futAnlege: finNextPayoutVorschlag({ type: 'funded', firm: 'Apex Trader', payoutReadyAt: '2026-11-17' }, '2026-11-10'),
   istCfd: [finKontoIstCfd({ type: 'winning_days', firm: 'Tradeify' }), finKontoIstCfd({ type: 'funded_cfd', firm: 'X' })]
 }
 print(JSON.stringify(r))"""
@@ -54,12 +55,13 @@ except Exception:
     print(rr.stdout[-400:], rr.stderr[-400:]); e = {}
 check(e.get("ab") == "2026-11-15" and e.get("heute") == "2026-11-17", "Anfrage-Datum + 14 (auch FundedNext, zweiter Zyklus); ohne Datum heute + 14")
 check(e.get("spaeter") == "2026-12-01" and e.get("frueher") == "2026-11-15", "späteres Datum am Konto bleibt, früheres gehört zum alten Zyklus")
-check(e.get("fut") == "2026-11-15" and e.get("istCfd") == [False, True], "Futures im Finanzen-Fenster wie bisher; CFD-Erkennung")
+check(e.get("fut") == "2026-11-15" and e.get("istCfd") == [False, True], "Futures im Finanzen-Fenster Anfrage + 14; CFD-Erkennung")
+check(e.get("futAnlege") == "2026-11-24", "P1: Funded Futures mit Anlege-Termin 17.11., Anfrage 10.11. → 24.11. (nicht der alte Termin)")
 
 # Einbau
 check("nextEl.dataset.ab !== abTag && nextEl.value === (nextEl.dataset.vorschlag || '')" in html and "addEventListener('change', () => { updateFinWiederholen(); updateFinPayoutFields() })" in html,
       "Finanzen: Datum oben geändert → Vorschlag zieht mit, solange das Feld unberührt ist")
-check("admAnfrageNextVorschlag(true)" in html and "window._finKontoIstCfd(acc) && typeof window._finNextPayoutVorschlag" in html and "if(!neu && el.value !== (el.dataset.vorschlag || '')) return" in html,
-      "Admin → Payouts „Anfragen“: CFD vorbelegt, Futures leer, Hand-Datum bleibt beim Datumswechsel")
+check("admAnfrageNextVorschlag(true)" in html and "(window._finKontoIstCfd(acc) || fundedArt) && typeof window._finNextPayoutVorschlag" in html and "if(!neu && el.value !== (el.dataset.vorschlag || '')) return" in html,
+      "Admin → Payouts „Anfragen“: CFD und seit P1 (03.11.2026) auch Funded Futures/Winning Days vorbelegt, Hand-Datum bleibt beim Datumswechsel")
 print("ALLES GRÜN" if not fehler else f"{len(fehler)} FEHLER")
 sys.exit(1 if fehler else 0)
