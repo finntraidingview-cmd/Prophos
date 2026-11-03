@@ -2269,6 +2269,7 @@ SCHARF_COPIER_BELEG_NEU_S = 60.0   # Beleg höchstens 1×/min in die Datei schre
 SCHARF_COPIER_KARENZ_S = 30   # so lange nach dem Open zählt ein fehlendes Ticket in der Copier-Liste noch nicht (Status-Takt)
 SCHARF_CLOSE_WIEDER_S = 2.0
 SCHARF_KONTO_KURZ_MIN = 12
+SCHARF_NACHBARN_MAX = 500
 SCHARF_MIN_VERSION = (0, 10, 8)
 READER_STAND_URL = "http://127.0.0.1:8790/"
 # SPUR AUF PLATTE (Eingang 02.11.2026, Test Chris a6f5c630: die Panel-Konsole ist fernab nicht lesbar): jede Entscheidung der Schließ-Wache als Zeile in
@@ -2347,9 +2348,32 @@ def puls_beleg_gueltig(beleg_at, jetzt, idle_s):
     return float(idle_s) >= float(jetzt) - float(beleg_at)
 
 
-def scharf_konto_kern(text):
-    """REIN RECHNEND (S9 zu 9e4f53e8, 03.11.2026): Kennung des Reader-Kontotexts ohne Balance/Zusatz — erstes Wort aus A–Z/0–9, groß."""
-    return (re.split(r"[^A-Z0-9]+", str(text or "").strip().upper()) or [""])[0]
+def scharf_konto_kern(text, ext=None):
+    """REIN RECHNEND (S9 zu 9e4f53e8, 03.11.2026): Kennung des Reader-Kontotexts ohne Balance/Zusatz — erstes Wort aus A–Z/0–9, groß.
+    KLEBENDE BALANCE (03.11.2026, Lotse L1: Finn+Pascal 43c68171 Tradeify …1362, Reader „FTDFYSLX150889401362162“ → „…166“ binnen 40 s, Panel meldete
+    „Reader-Konto gewechselt“, der Tab schloss nach 3,2 s): das Userscript (kontoNummerAmSchalter) nimmt alle Leerzeichen raus, „…1362 162,431.20 USD“
+    wird „…1362162“ — die erste Tausendergruppe der Balance klebt an der Kennung. Klebt sie an ext (scharf_konto_bezug „klebt“, 1–3 Ziffern), ist der
+    Kern ext selbst; ein echter Kontowechsel bleibt ein anderer Kern."""
+    k = (re.split(r"[^A-Z0-9]+", str(text or "").strip().upper()) or [""])[0]
+    eid = str(ext or "").strip().upper()
+    return eid if (eid and scharf_konto_bezug(k, eid) == "klebt") else k
+
+
+def scharf_fill_konto_ok(text, ext, nachbarn, gekappt=False):
+    """REIN RECHNEND (testbar, 03.11.2026, Lotse L1: alle 5 Big Trades 17:26–17:30 Dubai, Fill „FTDFYSLX150306272833161“ gegen ext „FTDFYSLX150306272833“
+    → „klebt“, seit .2013 verworfen, geschlossen hat jedes Mal der Tab): zählt das Konto eines Exit-Fills für GENAU dieses Konto? Voller Text („ja“) oder
+    angeklebte Balance („klebt“: ext + 1–3 Ziffern, s. scharf_konto_kern) — und kein anderes Konto der ID (nachbarn) passt auf denselben Text, weder voll
+    noch angeklebt noch gekürzt (z. B. kürzeres Nachbarkonto + Balance-Ziffern = derselbe Text). „klebt“ nur mit bekannten Nachbarn. Gekürzt oder per
+    Puls-Beleg nie (S9 zu 9e4f53e8: fill.konto ist das vorgewählte Konto, im Marc-Fenster sähe sonst eine Gegen-Order des Nachbarn wie der Exit aus).
+    Nachbarn ohne Trennzeichen verglichen (TradingView zeigt die Kennung ohne „-“/Leerzeichen); gekappte Nachbarliste → „klebt“ nie."""
+    b = scharf_konto_bezug(text, ext)
+    if b not in ("ja", "klebt"):
+        return False
+    eid = str(ext or "").strip().upper()
+    andere = [k for k in (re.sub(r"[^A-Z0-9]", "", str(n or "").upper()) for n in (nachbarn or ())) if k not in ("", eid)]
+    if b == "klebt" and (not andere or gekappt):
+        return False
+    return not any(scharf_konto_bezug(text, n) for n in andere)
 
 
 def scharf_konto_sicher(text, ext, nachbarn, beleg=None):
@@ -2391,8 +2415,8 @@ def _scharf_wurzel_da(st, wurzel):
 
 def scharf_exit_fill(e, st, jetzt, beleg=None):
     """REIN RECHNEND (testbar, Eingang 02.11.2026 „Nachschärfen“): ein Exit-Fill im Reader-Stand (fills, Userscript ≥ 0.10.2 im Puls-Chrome) für diesen
-    Eintrag? Gegenseite der Plan-Richtung, volle Plan-Menge, Wurzel passt (wenn die Meldung ein Symbol trägt), Konto des Fills sicher wie das Reader-Konto
-    (scharf_konto_sicher mit Beleg), frisch (≤ SCHARF_FILL_FRISCH_S) und nach dem Open. Ohne richtung/menge am Eintrag (alter Tab) → nie. → Fill | None"""
+    Eintrag? Gegenseite der Plan-Richtung, volle Plan-Menge, Wurzel passt (wenn die Meldung ein Symbol trägt), Konto des Fills genau das des Plans
+    (scharf_fill_konto_ok: voll oder angeklebte Balance, eindeutig unter den Konten der ID, nie per Beleg), frisch (≤ SCHARF_FILL_FRISCH_S) und nach dem Open. Ohne richtung/menge am Eintrag (alter Tab) → nie. → Fill | None"""
     r, menge = str(e.get("richtung") or ""), e.get("menge")
     if r not in ("buy", "sell") or not isinstance(menge, (int, float)) or menge <= 0:
         return None
@@ -2415,8 +2439,9 @@ def scharf_exit_fill(e, st, jetzt, beleg=None):
         if not str(f.get("tab_id") or "").startswith("puls-"):
             continue
         # S9 zu 9e4f53e8 (03.11.2026): fill.konto ist das vorgewählte Konto (kontoMerk), nicht das aus der Meldung — nur der VOLLE Kontotext zählt,
-        # gekürzt oder per Puls-Beleg nie (sonst sähe im Marc-Fenster eine volle Gegen-Order eines Nachbarkontos wie der Exit aus)
-        if scharf_konto_bezug(f.get("konto"), e.get("ext_id")) != "ja":
+        # gekürzt oder per Puls-Beleg nie (sonst sähe im Marc-Fenster eine volle Gegen-Order eines Nachbarkontos wie der Exit aus). Seit Lotse L1 (03.11.2026)
+        # zählt auch die angeklebte Balance, aber nur eindeutig unter den Konten der ID (scharf_fill_konto_ok)
+        if not scharf_fill_konto_ok(f.get("konto"), e.get("ext_id"), e.get("nachbarn"), e.get("nachbarn_gekappt") is True):
             continue
         return f
     return None
@@ -2440,7 +2465,7 @@ def scharf_entscheid(e, st, jetzt, beleg=None):
         e.update(flach_seit=None, flach_ts=[])
         return False, e, "Stand nicht frisch"
     if _scharf_wurzel_da(st, e.get("wurzel")):
-        e.update(gesehen=True, flach_seit=None, flach_ts=[], konto_gesehen=scharf_konto_kern(st.get("konto")))
+        e.update(gesehen=True, flach_seit=None, flach_ts=[], konto_gesehen=scharf_konto_kern(st.get("konto"), e.get("ext_id")))
         return False, e, "Position da"
     if not e.get("gesehen"):
         return False, e, "Position im Konto nie gesehen"
@@ -2449,7 +2474,7 @@ def scharf_entscheid(e, st, jetzt, beleg=None):
         e.update(flach_seit=None, flach_ts=[])
         return False, e, "flach ohne Leer-Beweis"
     # S9 zu 9e4f53e8: Reader-Konto seit der letzten „Position da“-Lesung unverändert (Kennung ohne Balance); ein Wechsel dazwischen → nie
-    if e.get("konto_gesehen") is not None and scharf_konto_kern(st.get("konto")) != e.get("konto_gesehen"):
+    if e.get("konto_gesehen") is not None and scharf_konto_kern(st.get("konto"), e.get("ext_id")) != e.get("konto_gesehen"):
         e.update(gesehen=False, flach_seit=None, flach_ts=[])
         return False, e, "Reader-Konto seit „Position da“ gewechselt"
     ts = st.get("positionen_ts") or st.get("ts")
@@ -2515,7 +2540,10 @@ def scharf_setzen(sch, plan_id, ticket, reader_stand=None):
         menge = None
     e = {"plan_id": str(plan_id or "")[:64], "ticket": int(ticket), "ext_id": ext, "wurzel": wurzel,
          "richtung": r if r in ("buy", "sell") else None, "menge": menge if (menge and menge > 0) else None,
-         "nachbarn": [str(x).strip()[:60] for x in nb][:80] if isinstance(nb, list) else [], "at": time.time(),
+         # S6-Gegenprüfung X1 (03.11.2026): vorher [:80] — Pascal/Finn+Pascal standen genau auf „80 Konten der ID“ (gekappt, Tradeify-Resets wachsen);
+         # für die angeklebte Balance muss die Liste vollständig sein → höher kappen und Kappung merken (dann zählt nur der volle Text)
+         "nachbarn": [str(x).strip()[:60] for x in nb][:SCHARF_NACHBARN_MAX] if isinstance(nb, list) else [],
+         "nachbarn_gekappt": isinstance(nb, list) and len(nb) > SCHARF_NACHBARN_MAX, "at": time.time(),
          "gesehen": False, "flach_seit": None, "flach_ts": [], "status": "offen"}
     with SCHARF_LOCK:
         liste = [x for x in scharf_laden() if int(x.get("ticket") or 0) != int(ticket)]
